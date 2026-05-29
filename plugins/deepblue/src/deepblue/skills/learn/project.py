@@ -1,4 +1,4 @@
-"""s-learn runtime project helpers."""
+"""learn runtime project helpers."""
 
 from __future__ import annotations
 

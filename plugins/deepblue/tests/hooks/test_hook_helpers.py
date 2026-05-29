@@ -40,7 +40,7 @@ def test_doc_file_warning_flags_ad_hoc_documents() -> None:
     assert doc_file_warning.is_suspicious_doc_path("notes/TODO.md")
     assert doc_file_warning.is_suspicious_doc_path("scratch/WIP.txt")
     assert not doc_file_warning.is_suspicious_doc_path("docs/TODO.md")
-    assert not doc_file_warning.is_suspicious_doc_path("commands/c-plan.md")
+    assert not doc_file_warning.is_suspicious_doc_path("commands/plan.md")
 
 
 def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch) -> None:

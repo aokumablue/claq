@@ -1005,21 +1005,21 @@ class TestInteractionAndRunQueries:
         run1 = MemItemRun(
             session_id="sess-1",
             project="proj-a",
-            skill_name="s-learn",
+            skill_name="learn",
             created_at_epoch=1,
             item_type="skill",
         )
         run2 = MemItemRun(
             session_id="sess-1",
             project="proj-a",
-            skill_name="c-dashboard",
+            skill_name="dashboard",
             created_at_epoch=2,
             item_type="command",
         )
         run3 = MemItemRun(
             session_id="sess-2",
             project="proj-b",
-            skill_name="a-review",
+            skill_name="reviewer",
             created_at_epoch=3,
             item_type="agent",
         )
@@ -1028,14 +1028,14 @@ class TestInteractionAndRunQueries:
         db.store_mem_item_run(run2)
         db.store_mem_item_run(run3)
 
-        by_skill = db.get_skill_run_stats(skill_name="s-learn")
+        by_skill = db.get_skill_run_stats(skill_name="learn")
         by_project = db.get_skill_run_stats(project="proj-a")
         all_runs = db.get_skill_run_stats()
 
-        assert [run.skill_name for run in by_skill] == ["s-learn"]
-        assert [run.skill_name for run in by_project] == ["c-dashboard", "s-learn"]
-        assert [run.skill_name for run in all_runs] == ["a-review", "c-dashboard", "s-learn"]
-        assert [run.skill_name for run in db.get_all_mem_item_runs()] == ["s-learn", "c-dashboard", "a-review"]
+        assert [run.skill_name for run in by_skill] == ["learn"]
+        assert [run.skill_name for run in by_project] == ["dashboard", "learn"]
+        assert [run.skill_name for run in all_runs] == ["reviewer", "dashboard", "learn"]
+        assert [run.skill_name for run in db.get_all_mem_item_runs()] == ["learn", "dashboard", "reviewer"]
 
     @pytest.mark.parametrize(
         "input_val, expected",

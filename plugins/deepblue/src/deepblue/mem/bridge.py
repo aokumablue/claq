@@ -1,6 +1,6 @@
-"""mem チャンク → s-learn observations.jsonl ブリッジ
+"""mem チャンク → learn observations.jsonl ブリッジ
 
-セッション終了時に mem の新規チャンクを s-learn の observations.jsonl 形式に変換し、
+セッション終了時に mem の新規チャンクを learn の observations.jsonl 形式に変換し、
 インスティンクト分析の精度を高める。
 """
 
@@ -18,7 +18,7 @@ from deepblue.mem.logger import get as _get_logger
 
 log = _get_logger("BRIDGE")
 
-# s-learn の観測ディレクトリ
+# learn の観測ディレクトリ
 _DEEPBLUE_DIR = get_deepblue_dir()
 
 
@@ -30,7 +30,7 @@ def _project_base_dir() -> Path:
 def _get_project_id(project_name: str, cwd: str | None = None) -> str:
     """プロジェクト名/cwdから決定論的なプロジェクトIDを取得する。
 
-    s-learn の共有 project detection と同じ方式（git remote URL のハッシュ）を使用する。
+    learn の共有 project detection と同じ方式（git remote URL のハッシュ）を使用する。
     git が利用できない場合は project_name をそのまま返す。
     """
     check_dir = cwd or os.getcwd()
@@ -68,7 +68,7 @@ def _get_project_observations_path(project_id: str, project_name: str) -> Path:
 
 
 def chunk_to_observation(chunk: MemoryChunk) -> dict:
-    """MemoryChunk を s-learn observations.jsonl エントリに変換する。"""
+    """MemoryChunk を learn observations.jsonl エントリに変換する。"""
     # tool_complete イベントとして記録
     tool_name = chunk.tool_names[0] if chunk.tool_names else "unknown"
 
@@ -86,11 +86,11 @@ def chunk_to_observation(chunk: MemoryChunk) -> dict:
         "session": chunk.session_id,
         "project_id": chunk.project,
         "project_name": chunk.project,
-        # mem 由来であることを示すフラグ（s-learn 側で使える情報）
+        # mem 由来であることを示すフラグ（learn 側で使える情報）
         "source": "mem",
         "input": (f"prompt: {chunk.user_prompt[:500]}" if chunk.user_prompt else None),
         "output": "; ".join(output_parts) if output_parts else chunk.content[:500] or None,
-        # 構造化メタデータ（s-learn 拡張フィールド）
+        # 構造化メタデータ（learn 拡張フィールド）
         "tool_names": chunk.tool_names,
         "files_modified": chunk.files_modified,
         "files_read": chunk.files_read,
@@ -102,7 +102,7 @@ def sync_session_to_observations(
     session_id: str,
     cwd: str | None = None,
 ) -> int:
-    """セッション内の新規チャンクを s-learn observations.jsonl に書き出す。
+    """セッション内の新規チャンクを learn observations.jsonl に書き出す。
 
     返り値:
       書き出したチャンク数

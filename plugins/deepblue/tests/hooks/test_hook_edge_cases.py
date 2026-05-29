@@ -353,6 +353,7 @@ def test_session_start_run_skips_template_session_and_prompts_for_pm(
         lambda cwd: SimpleNamespace(languages=[], frameworks=[], primary_language=None),
     )
     monkeypatch.setattr(session_start, "log", logs.append)
+    monkeypatch.setattr(session_start, "_SLIM_SKILL_PATH", tmp_path / "nonexistent-slim.md")
 
     payload = json.loads(session_start.run(""))
 

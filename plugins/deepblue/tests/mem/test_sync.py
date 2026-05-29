@@ -413,7 +413,7 @@ class TestSyncToPostgresDetailed:
                 id="run-1",
                 session_id="sess-1",
                 project="proj",
-                skill_name="s-tdd",
+                skill_name="tdd",
                 created_at_epoch=1700000011,
                 origin_user="sqlite-user",
                 skill_trigger="trigger",

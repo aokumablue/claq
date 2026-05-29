@@ -34,7 +34,7 @@ from deepblue.lib.slim_text import compact_line
 from deepblue.lib.subprocess_utils import check_output_text
 from deepblue.mem.settings import Settings
 
-_SLIM_SKILL_PATH = Path(__file__).parents[4] / "skills" / "s-slim" / "SKILL.md"
+_SLIM_SKILL_PATH = Path(__file__).parents[3] / "skills" / "slim" / "SKILL.md"
 
 _SUMMARY_START = "<!-- deepblue:SUMMARY:START -->"
 _SUMMARY_END = "<!-- deepblue:SUMMARY:END -->"

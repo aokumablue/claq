@@ -179,9 +179,9 @@ def handle_session_end(
 
             try:
                 synced = sync_session_to_observations(db, session_id)
-                log.info("s-learn 同期: session=%s synced=%d", session_id, synced)
+                log.info("learn 同期: session=%s synced=%d", session_id, synced)
             except Exception as e:
-                log.warning("s-learn 同期失敗: %s", e)
+                log.warning("learn 同期失敗: %s", e)
 
             if settings.auto_compact_enabled:
                 interval_sec = settings.auto_compact_interval_days * 86400

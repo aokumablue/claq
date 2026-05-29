@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Observation hook runtime for s-learn."""
+"""Observation hook runtime for learn."""
 
 from __future__ import annotations
 

@@ -1,1 +1,1 @@
-"""s-learn skill package."""
+"""learn skill package."""

@@ -1,4 +1,4 @@
-"""s-learn の CLI を検証するテスト。
+"""learn の CLI を検証するテスト。
 
 対象:
   - parse_instinct_file() — 内容保持と境界ケース

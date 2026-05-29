@@ -16,7 +16,7 @@ from deepblue.lib.core_utils import count_in_file, ensure_dir, get_learned_skill
 
 
 def _default_config_path() -> Path:
-    """セッション学習スキル（s-learn）の config.json パスを返す。
+    """セッション学習スキル（learn）の config.json パスを返す。
 
     Returns:
         デフォルトの設定ファイルパス。
@@ -25,7 +25,7 @@ def _default_config_path() -> Path:
         例外は発生しません。
     """
     script_dir = Path(__file__).resolve().parent
-    return script_dir.parents[3] / "skills" / "s-learn" / "config.json"
+    return script_dir.parents[2] / "skills" / "learn" / "config.json"
 
 
 def main() -> int:
@@ -64,7 +64,7 @@ def main() -> int:
                         custom_path = str(Path.home()) + custom_path[1:]
                     learned_skills_path = Path(custom_path)
             except json.JSONDecodeError as err:
-                log(f"[s-learn] Failed to parse config: {err}, using defaults")
+                log(f"[learn] Failed to parse config: {err}, using defaults")
 
         ensure_dir(learned_skills_path)
 
@@ -74,13 +74,13 @@ def main() -> int:
         message_count = count_in_file(transcript_path, r'"type"\s*:\s*"user"')
 
         if message_count < min_session_length:
-            log(f"[s-learn] Session too short ({message_count} messages), skipping")
+            log(f"[learn] Session too short ({message_count} messages), skipping")
             return 0
 
-        log(f"[s-learn] Session has {message_count} messages - evaluate for extractable patterns")
-        log(f"[s-learn] Save learned skills to: {learned_skills_path}")
+        log(f"[learn] Session has {message_count} messages - evaluate for extractable patterns")
+        log(f"[learn] Save learned skills to: {learned_skills_path}")
     except Exception as err:  # noqa: BLE001 - hook must remain non-blocking
-        log(f"[s-learn] Error: {err}")
+        log(f"[learn] Error: {err}")
 
     return 0
 

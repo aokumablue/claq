@@ -139,7 +139,7 @@ def test_session_end_inner_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 
     cli._handle_session_end(settings, {"session_id": "s1"})
     assert any("FTS5 最適化失敗" in warning for warning in warnings)
-    assert any("s-learn 同期失敗" in warning for warning in warnings)
+    assert any("learn 同期失敗" in warning for warning in warnings)
 
 
 def test_search_structured_query_and_compact_dry_run(

@@ -80,18 +80,18 @@ class TestClaudeHomeAdapter:
         """scaffold operation を正しく作成すること。"""
         op = claude_home_adapter.create_scaffold_operation(
             "tdd-module",
-            "commands/c-tdd.md",
+            "commands/tdd.md",
             repo_root=str(tmp_path / "source"),
             home_dir=str(tmp_path / "home"),
         )
         assert op.module_id == "tdd-module"
-        assert op.source_relative_path == "commands/c-tdd.md"
-        assert op.destination_path == str(tmp_path / "home" / ".claude" / "commands/c-tdd.md")
+        assert op.source_relative_path == "commands/tdd.md"
+        assert op.destination_path == str(tmp_path / "home" / ".claude" / "commands/tdd.md")
 
     def test_plan_operations(self, tmp_path):
         """モジュール向け operation を計画すること。"""
         modules = [
-            {"id": "core", "paths": ["agents/a-plan.md", "skills/s-tdd.md"]},
+            {"id": "core", "paths": ["agents/planner.md", "skills/tdd.md"]},
         ]
         ops = claude_home_adapter.plan_operations(
             modules=modules,
@@ -99,7 +99,7 @@ class TestClaudeHomeAdapter:
         )
         assert len(ops) == 2
         assert ops[0].module_id == "core"
-        assert ops[0].source_relative_path == "agents/a-plan.md"
+        assert ops[0].source_relative_path == "agents/planner.md"
 
     def test_validate_success(self, tmp_path):
         """home_dir を指定した場合に正常に検証できること。"""

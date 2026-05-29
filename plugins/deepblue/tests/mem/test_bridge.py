@@ -1,4 +1,4 @@
-"""bridge.py のテスト — mem チャンク → s-learn observations.jsonl 変換"""
+"""bridge.py のテスト — mem チャンク → learn observations.jsonl 変換"""
 
 import json
 from pathlib import Path

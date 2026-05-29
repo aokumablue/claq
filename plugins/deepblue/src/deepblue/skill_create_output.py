@@ -216,9 +216,9 @@ def render_next_steps() -> str:
     """次のステップを案内するメッセージを表示する。"""
     content = (
         f"\n{yellow('1.')} Review the generated SKILL.md\n"
-        f"{yellow('2.')} Import instincts: {cyan('/c-instinct-import <path>')}\n"
-        f"{yellow('3.')} View learned patterns: {cyan('/c-instinct-status')}\n"
-        f"{yellow('4.')} Evolve into skills: {cyan('/c-instinct evolve')}\n"
+        f"{yellow('2.')} Import instincts: {cyan('/instinct-import <path>')}\n"
+        f"{yellow('3.')} View learned patterns: {cyan('/instinct-status')}\n"
+        f"{yellow('4.')} Evolve into skills: {cyan('/instinct evolve')}\n"
     )
     return box("Next Steps", content) + "\n"
 

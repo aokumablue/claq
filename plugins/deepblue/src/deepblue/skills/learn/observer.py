@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Background observer runtime for s-learn."""
+"""Background observer runtime for learn."""
 
 from __future__ import annotations
 

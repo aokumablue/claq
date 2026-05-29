@@ -24,12 +24,12 @@
 - 明示的に言及されたファイル・ディレクトリのみ変更する
 - レビュー時は読み取り専用（REVIEW ONLY — NO EDITS）
 - 曖昧な数値・フォーマット（例：「3桁」→ 33桁と解釈しない）は実行前に解釈を確認する
-- 変更対象ファイルが 5 件以上のリファクタリングは `/c-plan` で変更ファイル一覧を確定してから着手する
+- 変更対象ファイルが 5 件以上のリファクタリングは `/plan` で変更ファイル一覧を確定してから着手する
 
 ## 永続メモリ
 
 - `SessionStart`: `deepblue.mem.cli context` が `<mem-context>` を注入
 - `PreToolUse` / `PostToolUse`: ツール操作を記録
-- `SessionEnd`: 埋め込み生成と s-learn ブリッジ
+- `SessionEnd`: 埋め込み生成と learn ブリッジ
 - DB: `~/.deepblue/mem.db`
 - 実装起点: `plugins/deepblue/src/deepblue/mem/{cli,search,context,bridge}.py`

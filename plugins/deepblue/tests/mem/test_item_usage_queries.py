@@ -37,13 +37,13 @@ def db_with_records(db_conn):
     """サンプルアイテム実行記録を挿入した接続を返す。"""
     now = int(time.time())
     records = [
-        ("s-learn", "skill", "success", now - 100),
-        ("s-learn", "skill", "success", now - 200),
-        ("s-learn", "skill", "failure", now - 300),
-        ("s-tdd", "skill", "success", now - 150),
-        ("c-dashboard", "command", "success", now - 50),
-        ("c-dashboard", "command", "unknown", now - 400),
-        ("a-review", "agent", "success", now - 80),
+        ("learn", "skill", "success", now - 100),
+        ("learn", "skill", "success", now - 200),
+        ("learn", "skill", "failure", now - 300),
+        ("tdd", "skill", "success", now - 150),
+        ("dashboard", "command", "success", now - 50),
+        ("dashboard", "command", "unknown", now - 400),
+        ("reviewer", "agent", "success", now - 80),
     ]
     for skill_name, item_type, outcome, epoch in records:
         db_conn.execute(
@@ -64,7 +64,7 @@ def db_with_records(db_conn):
 class TestItemUsageRanking:
     def test_returns_all_records(self, db_with_records: sqlite3.Connection) -> None:
         result = item_usage_ranking(db_with_records, _SQLITE_PLACEHOLDER, days=365)
-        assert len(result) == 4  # s-learn, s-tdd, c-dashboard, a-review
+        assert len(result) == 4  # learn, tdd, dashboard, reviewer
 
     def test_sorted_by_uses_desc(self, db_with_records: sqlite3.Connection) -> None:
         result = item_usage_ranking(db_with_records, _SQLITE_PLACEHOLDER, days=365)
@@ -74,13 +74,13 @@ class TestItemUsageRanking:
     def test_correct_item_type(self, db_with_records: sqlite3.Connection) -> None:
         result = item_usage_ranking(db_with_records, _SQLITE_PLACEHOLDER, days=365)
         type_map = {r["item_name"]: r["item_type"] for r in result}
-        assert type_map["s-learn"] == "skill"
-        assert type_map["c-dashboard"] == "command"
-        assert type_map["a-review"] == "agent"
+        assert type_map["learn"] == "skill"
+        assert type_map["dashboard"] == "command"
+        assert type_map["reviewer"] == "agent"
 
     def s_learn_uses_count(self, db_with_records: sqlite3.Connection) -> None:
         result = item_usage_ranking(db_with_records, _SQLITE_PLACEHOLDER, days=365)
-        skill = next(r for r in result if r["item_name"] == "s-learn")
+        skill = next(r for r in result if r["item_name"] == "learn")
         assert skill["uses"] == 3
 
     def test_excludes_old_records(self, db_conn: sqlite3.Connection) -> None:
@@ -220,7 +220,7 @@ class TestItemTypeColumn:
         run = MemItemRun(
             session_id="sess-1",
             project="proj",
-            skill_name="c-dashboard",
+            skill_name="dashboard",
             created_at_epoch=int(time.time()),
             item_type="command",
         )
@@ -240,15 +240,15 @@ class TestMakeRankingData:
     """make_ranking_data のユニットテスト。"""
 
     RANKING = [
-        {"item_name": "s-learn", "item_type": "skill", "uses": 5, "last_used_epoch": None},
-        {"item_name": "s-tdd", "item_type": "skill", "uses": 2, "last_used_epoch": None},
+        {"item_name": "learn", "item_type": "skill", "uses": 5, "last_used_epoch": None},
+        {"item_name": "tdd", "item_type": "skill", "uses": 2, "last_used_epoch": None},
         {"item_name": "c-dash", "item_type": "command", "uses": 3, "last_used_epoch": None},
-        {"item_name": "a-review", "item_type": "agent", "uses": 1, "last_used_epoch": None},
+        {"item_name": "reviewer", "item_type": "agent", "uses": 1, "last_used_epoch": None},
     ]
 
     def test_skill_labels_and_counts(self) -> None:
         labels, counts = make_ranking_data(self.RANKING, "skill")
-        assert labels == ["s-learn", "s-tdd"]
+        assert labels == ["learn", "tdd"]
         assert counts == [5, 2]
 
     def test_command_labels_and_counts(self) -> None:
@@ -258,7 +258,7 @@ class TestMakeRankingData:
 
     def test_empty_type(self) -> None:
         labels, counts = make_ranking_data(self.RANKING, "agent")
-        assert labels == ["a-review"]
+        assert labels == ["reviewer"]
         assert counts == [1]
 
     def test_no_match_returns_empty(self) -> None:
@@ -270,27 +270,27 @@ class TestMakeRankingData:
 class TestAlignTeamCounts:
     """align_team_counts のユニットテスト。"""
 
-    PERSONAL_LABELS = ["s-learn", "s-tdd", "s-new"]
+    PERSONAL_LABELS = ["learn", "tdd", "new"]
     TEAM_RANKING = [
-        {"item_name": "s-learn", "item_type": "skill", "uses": 10, "last_used_epoch": None},
-        {"item_name": "s-other", "item_type": "skill", "uses": 7, "last_used_epoch": None},
+        {"item_name": "learn", "item_type": "skill", "uses": 10, "last_used_epoch": None},
+        {"item_name": "other", "item_type": "skill", "uses": 7, "last_used_epoch": None},
     ]
 
     def test_aligns_to_personal_order(self) -> None:
         result = align_team_counts(self.PERSONAL_LABELS, self.TEAM_RANKING, "skill")
-        # s-learn=10, s-tdd=未使用=0, s-new=未使用=0
+        # learn=10, tdd=未使用=0, new=未使用=0
         assert result == [10, 0, 0]
 
     def test_missing_items_get_zero(self) -> None:
-        result = align_team_counts(["s-tdd"], self.TEAM_RANKING, "skill")
+        result = align_team_counts(["tdd"], self.TEAM_RANKING, "skill")
         assert result == [0]
 
     def test_filters_by_item_type(self) -> None:
         team_mixed = [
-            {"item_name": "s-learn", "item_type": "skill", "uses": 10, "last_used_epoch": None},
-            {"item_name": "s-learn", "item_type": "command", "uses": 99, "last_used_epoch": None},
+            {"item_name": "learn", "item_type": "skill", "uses": 10, "last_used_epoch": None},
+            {"item_name": "learn", "item_type": "command", "uses": 99, "last_used_epoch": None},
         ]
-        result = align_team_counts(["s-learn"], team_mixed, "skill")
+        result = align_team_counts(["learn"], team_mixed, "skill")
         assert result == [10]  # command 側の 99 は無視される
 
     def test_empty_personal_labels(self) -> None:

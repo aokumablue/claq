@@ -119,20 +119,20 @@ def test_validate_commands_covers_warnings_and_success(tmp_path: Path, capsys: p
     skills_dir = root / "skills"
     commands_dir.mkdir()
     agents_dir.mkdir()
-    (skills_dir / "s-clean").mkdir(parents=True)
+    (skills_dir / "clean").mkdir(parents=True)
 
-    (commands_dir / "c-clean.md").write_text("Clean command.\n", encoding="utf-8")
-    (agents_dir / "a-clean.md").write_text("Agent.\n", encoding="utf-8")
-    (agents_dir / "a-review.md").write_text("Agent.\n", encoding="utf-8")
+    (commands_dir / "clean.md").write_text("Clean command.\n", encoding="utf-8")
+    (agents_dir / "clean.md").write_text("Agent.\n", encoding="utf-8")
+    (agents_dir / "reviewer.md").write_text("Agent.\n", encoding="utf-8")
     (commands_dir / "build.md").write_text(
-        "Use `/c-clean` and agents/a-clean.md.\n"
-        "a-clean -> a-review\n"
-        "creates: `/c-missing`\n"
-        "skills/s-clean/docs\n"
-        "skills/s-missing/docs\n"
+        "Use `/clean` and agents/clean.md.\n"
+        "clean -> reviewer\n"
+        "creates: `/missing`\n"
+        "skills/clean/docs\n"
+        "skills/missing/docs\n"
         "```bash\n"
-        "/c-missing-inside-code\n"
-        "agents/a-missing.md\n"
+        "/missing-inside-code\n"
+        "agents/missing.md\n"
         "```\n",
         encoding="utf-8",
     )
@@ -161,7 +161,7 @@ def test_validate_commands_reports_errors_and_io_failures(tmp_path: Path, monkey
     empty_file.write_text("", encoding="utf-8")
     broken_file = commands_dir / "broken.md"
     broken_file.write_text("Broken command.\n", encoding="utf-8")
-    (agents_dir / "a-existing.md").write_text("Agent.\n", encoding="utf-8")
+    (agents_dir / "existing.md").write_text("Agent.\n", encoding="utf-8")
 
     original_read_text = Path.read_text
 
@@ -172,8 +172,8 @@ def test_validate_commands_reports_errors_and_io_failures(tmp_path: Path, monkey
 
     monkeypatch.setattr(Path, "read_text", fake_read_text)
     (commands_dir / "bad.md").write_text(
-        "Use `/c-missing` and agents/a-missing.md.\n"
-        "c-existing -> a-missing\n",
+        "Use `/missing` and agents/missing.md.\n"
+        "existing -> missing\n",
         encoding="utf-8",
     )
 
@@ -181,9 +181,9 @@ def test_validate_commands_reports_errors_and_io_failures(tmp_path: Path, monkey
     stderr = capsys.readouterr().err
     assert "コマンドファイルが空です" in stderr
     assert "ファイルの読み取りに失敗しました" in stderr
-    assert "存在しないコマンド /c-missing" in stderr
-    assert "存在しないエージェント agents/a-missing.md" in stderr
-    assert "存在しないエージェント \"a-missing\"" in stderr
+    assert "存在しないコマンド /missing" in stderr
+    assert "存在しないエージェント agents/missing.md" in stderr
+    assert "存在しないエージェント \"missing\"" in stderr
 
 
 def test_validate_rules_reports_empty_and_read_errors(
@@ -281,11 +281,11 @@ def test_validator_main_entrypoints(
 
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "a-alpha.md").write_text("---\nmodel: sonnet\ntools: bash\n---\n", encoding="utf-8")
+    (agents_dir / "alpha.md").write_text("---\nmodel: sonnet\ntools: bash\n---\n", encoding="utf-8")
 
     commands_dir = tmp_path / "commands"
     commands_dir.mkdir()
-    (commands_dir / "c-alpha.md").write_text("Use `/c-alpha`.\n", encoding="utf-8")
+    (commands_dir / "alpha.md").write_text("Use `/alpha`.\n", encoding="utf-8")
 
     rules_dir = tmp_path / "rules"
     rules_dir.mkdir()
@@ -385,7 +385,7 @@ def test_validate_commands_resolves_relative_dirs_via_root_dir(
     commands_dir.mkdir()
     agents_dir.mkdir()
     skills_dir.mkdir()
-    (commands_dir / "c-test.md").write_text("Test command.\n", encoding="utf-8")
+    (commands_dir / "test.md").write_text("Test command.\n", encoding="utf-8")
 
     assert validate_commands.validate_commands(tmp_path, "commands", "agents", "skills") == 0
     assert "1 個のコマンドファイルを検証しました" in capsys.readouterr().out

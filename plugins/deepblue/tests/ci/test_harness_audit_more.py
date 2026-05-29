@@ -61,8 +61,8 @@ def test_safe_helpers_and_counting(tmp_path: Path) -> None:
 
     (tmp_path / ".opencode" / "commands").mkdir(parents=True)
     (tmp_path / "commands").mkdir()
-    (tmp_path / "commands" / "c-harness-audit.md").write_text("same\n", encoding="utf-8")
-    (tmp_path / ".opencode" / "commands" / "c-harness-audit.md").write_text("same\n", encoding="utf-8")
+    (tmp_path / "commands" / "harness.md").write_text("same\n", encoding="utf-8")
+    (tmp_path / ".opencode" / "commands" / "harness.md").write_text("same\n", encoding="utf-8")
     assert harness_audit._command_parity_matches(tmp_path)
 
     (tmp_path / ".gitlab-ci.yml").write_text("dependency_scanning:\n  stage: test\n", encoding="utf-8")

@@ -89,20 +89,20 @@ def validate_commands(
         for line in content_no_code_blocks.splitlines():
             if re.search(r"creates:|would create:", line, re.I):
                 continue
-            for match in re.finditer(r"`/(c-[a-z0-9]+(?:-[a-z0-9]+)*)`", line):
+            for match in re.finditer(r"`/([a-z0-9]+(?:-[a-z0-9]+)*)`", line):
                 ref_name = match.group(1)
                 if ref_name not in valid_commands:
                     emit_error(f"{file_path.name} - 存在しないコマンド /{ref_name} を参照しています")
                     has_errors = True
 
-        for match in re.finditer(r"agents/(a-[a-z0-9]+(?:-[a-z0-9]+)*)\.md", content_no_code_blocks):
+        for match in re.finditer(r"agents/([a-z0-9]+(?:-[a-z0-9]+)*)\.md", content_no_code_blocks):
             ref_name = match.group(1)
             if ref_name not in valid_agents:
                 emit_error(f"{file_path.name} - 存在しないエージェント agents/{ref_name}.md を参照しています")
                 has_errors = True
 
         reserved_skill_roots = {"learned", "imported"}
-        for match in re.finditer(r"skills/(s-[a-z0-9]+(?:-[a-z0-9]+)*)/", content_no_code_blocks):
+        for match in re.finditer(r"skills/([a-z0-9]+(?:-[a-z0-9]+)*)/", content_no_code_blocks):
             ref_name = match.group(1)
             if ref_name in reserved_skill_roots or ref_name in valid_skills:
                 continue
@@ -112,7 +112,7 @@ def validate_commands(
             warn_count += 1
 
         for match in re.finditer(
-            r"^((?:(?:c|a)-[a-z0-9]+(?:-[a-z0-9]+)*)(?:\s*->\s*(?:c|a)-[a-z0-9]+(?:-[a-z0-9]+)*)+)$",
+            r"^((?:[a-z0-9]+(?:-[a-z0-9]+)*)(?:\s*->\s*[a-z0-9]+(?:-[a-z0-9]+)*)+)$",
             content_no_code_blocks,
             re.M,
         ):

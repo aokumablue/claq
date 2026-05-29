@@ -292,12 +292,12 @@ def test_suggest_skill_improvements_includes_tool_and_file_patterns():
 
 def test_infer_skill_name_variants():
     cases = [
-        (["bash", "write", "read"], "s-file-workflow"),
-        (["bash"], "s-shell-automation"),
-        (["read", "grep", "glob"], "s-code-search"),
-        (["edit", "write"], "s-code-edit"),
-        (["bash", "edit"], "s-build-run"),
-        (["custom_tool"], "s-custom-tool"),
+        (["bash", "write", "read"], "file-workflow"),
+        (["bash"], "shell-automation"),
+        (["read", "grep", "glob"], "code-search"),
+        (["edit", "write"], "code-edit"),
+        (["bash", "edit"], "build-run"),
+        (["custom_tool"], "custom-tool"),
     ]
 
     for tools, expected in cases:
@@ -348,14 +348,14 @@ def test_generate_proposal_builds_candidates_and_actions():
         "gap_candidates": 10,
     }
     assert [candidate["suggested_name"] for candidate in proposal["skill_candidates"]] == [
-        "s-file-workflow",
-        "s-code-search",
-        "s-custom-tool",
+        "file-workflow",
+        "code-search",
+        "custom-tool",
     ]
     assert proposal["skill_candidates"][0]["priority"] == "high"
     assert proposal["skill_candidates"][0]["evidence"]["users"] == [f"user-{idx}" for idx in range(5)]
     assert proposal["skill_candidates"][0]["evidence"]["projects"] == [f"repo-{idx}" for idx in range(5)]
-    assert "s-file-workflow" in proposal["skill_candidates"][0]["skillmaster_prompt"]
+    assert "file-workflow" in proposal["skill_candidates"][0]["skillmaster_prompt"]
     assert proposal["skill_candidates"][0]["skillmaster_prompt"].endswith("SKILL.md に定義してください。")
     assert proposal["gap_candidates"][0]["sample_prompt"] == "first long gap prompt for packaging workflows"
     assert len(proposal["gap_candidates"]) == 10
@@ -365,5 +365,5 @@ def test_generate_proposal_builds_candidates_and_actions():
         "fill_gap",
         "fill_gap",
     ]
-    assert proposal["action_items"][0]["target"] == "s-file-workflow"
+    assert proposal["action_items"][0]["target"] == "file-workflow"
     assert proposal["action_items"][2]["target"].startswith("first long gap prompt")

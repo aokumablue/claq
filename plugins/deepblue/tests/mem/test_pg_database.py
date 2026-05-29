@@ -200,7 +200,7 @@ def _make_skill_run() -> MemItemRun:
         id="run-1",
         session_id="sess-1",
         project="proj",
-        skill_name="s-tdd",
+        skill_name="tdd",
         created_at_epoch=1700000000,
         origin_user="user",
         outcome="success",
@@ -456,7 +456,7 @@ def test_upsert_mem_item_runs_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "files_modified_count" in sql
     assert params is not None
     assert "user" in params
-    assert "s-tdd" in params
+    assert "tdd" in params
     assert "success" in params
 
 

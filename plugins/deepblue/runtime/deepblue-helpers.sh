@@ -60,7 +60,7 @@ deepblue_run_bg() {
   printf '%s\n' "$!"
 }
 
-# Collect the repeated inputs used by /c-skillgen.
+# Collect the repeated inputs used by /skill-gen.
 collect_skill_create_inputs() {
   local commits="${1:-200}"
 

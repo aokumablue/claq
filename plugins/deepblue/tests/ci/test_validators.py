@@ -32,7 +32,7 @@ def test_validate_commands_flags_invalid_references(tmp_path: Path) -> None:
     commands_dir.mkdir()
     agents_dir.mkdir()
     skills_dir.mkdir()
-    (commands_dir / "build.md").write_text("Use `/c-missing-command` and agents/a-missing.md\n", encoding="utf-8")
+    (commands_dir / "build.md").write_text("Use `/missing-command` and agents/missing.md\n", encoding="utf-8")
 
     assert validate_commands.validate_commands(root, commands_dir, agents_dir, skills_dir) == 1
 

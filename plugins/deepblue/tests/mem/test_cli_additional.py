@@ -541,7 +541,7 @@ def test_handle_dashboard_html_and_disabled_pg(monkeypatch: pytest.MonkeyPatch, 
             "summary": {"total_patterns": 2, "total_gaps": 1, "skill_candidates": 1, "gap_candidates": 1},
             "skill_candidates": [
                 {
-                    "suggested_name": "s-file-workflow",
+                    "suggested_name": "file-workflow",
                     "priority": "high",
                     "priority_score": 42,
                     "evidence": {"occurrence_count": 3, "user_count": 2, "project_count": 1},
@@ -556,9 +556,9 @@ def test_handle_dashboard_html_and_disabled_pg(monkeypatch: pytest.MonkeyPatch, 
                 }
             ],
             "action_items": [
-                {"priority": "high", "action": "create_skill", "target": "s-file-workflow"}
+                {"priority": "high", "action": "create_skill", "target": "file-workflow"}
             ],
-            "chart_labels": ["s-file-workflow"],
+            "chart_labels": ["file-workflow"],
             "chart_scores": [42],
         },
     )

@@ -137,7 +137,7 @@ def _build_action_items(
                     "target": c["suggested_name"],
                     "description": f"ツール組み合わせ {c['tools']} を自動化するスキルを作成する（{c['evidence']['occurrence_count']}回使用）",
                     "priority": c["priority"],
-                    "command": f"/s-skillmake でスキル '{c['suggested_name']}' を作成してください",
+                    "command": f"/skill-make でスキル '{c['suggested_name']}' を作成してください",
                 }
             )
 
@@ -149,7 +149,7 @@ def _build_action_items(
                     "target": g["sample_prompt"][:30],
                     "description": g["suggestion"],
                     "priority": g["priority"],
-                    "command": f"/s-skillmake で以下の操作パターンをスキル化してください: {g['sample_prompt'][:60]}",
+                    "command": f"/skill-make で以下の操作パターンをスキル化してください: {g['sample_prompt'][:60]}",
                 }
             )
 
@@ -169,19 +169,19 @@ def _infer_skill_name(tools: list[str]) -> str:
     tool_set = {t.lower() for t in tools}
 
     if {"bash", "write", "edit"} & tool_set and "read" in tool_set:
-        return "s-file-workflow"
+        return "file-workflow"
     if "bash" in tool_set and len(tool_set) == 1:
-        return "s-shell-automation"
+        return "shell-automation"
     if {"read", "grep", "glob"} & tool_set and not ({"edit", "write", "bash"} & tool_set):
-        return "s-code-search"
+        return "code-search"
     if {"edit", "write"} & tool_set and "bash" not in tool_set:
-        return "s-code-edit"
+        return "code-edit"
     if "bash" in tool_set and {"edit", "write"} & tool_set:
-        return "s-build-run"
+        return "build-run"
 
     # フォールバック: ツール名を結合
     primary = tools[0].lower().replace("_", "-") if tools else "workflow"
-    return f"s-{primary}"
+    return primary
 
 
 def _classify_priority(score: int) -> str:
@@ -205,7 +205,7 @@ def _build_skillmaster_prompt(
     tools: list[str],
     count: int,
 ) -> str:
-    """s-skillmake に渡すプロンプトを生成する。
+    """skill-make に渡すプロンプトを生成する。
 
     Args:
       skill_name: スキル名

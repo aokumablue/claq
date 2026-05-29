@@ -8,16 +8,16 @@
 
 | コマンド | 用途 | 一言説明 |
 |---|---|---|
-| `/c-plan` | 実装前計画 | 要件言い換え→リスク評価→段階的計画。コード前にユーザー確認 |
-| `/c-featdev` | 新機能開発 | 発見→探索→質問→設計→実装→レビュー の7段階一気通貫 |
-| `/c-bugfix` | バグ修正 | 再現→原因分析→最小修正→回帰防止→レビュー の一気通貫 |
-| `/c-refactor` | リファクタリング | プロンプトから自動推論（単純化/デッドコード掃除）。`--mode=simplify` / `--mode=clean` で明示指定も可 |
-| `/c-review` | コードレビュー | セキュリティ・品質・保守性を差分またはパス指定でレビュー |
-| `/c-harness` | 品質管理 | プロンプトから自動推論（棚卸し/遵守率）。`--scope=stocktake` / `--scope=comply` で明示指定も可 |
-| `/c-skillgen` | スキル作成 | リポジトリ固有入力収集→SKILL.md 生成→チューニング委譲 |
-| `/c-instinct` | インスティンクト管理 | プロンプトから自動推論（export/import/promote/prune/evolve）。明示サブコマンド指定も可 |
-| `/c-dashboard` | 利用率可視化 | 個人(SQLite)とチーム(PostgreSQL)の使用率比較 HTML ダッシュボード |
-| `/c-testmod` | テストコード自動生成 | デシジョンテーブル設計→承認→実装。言語非依存。差分 or 指定パス対応 |
+| `/plan` | 実装前計画 | 要件言い換え→リスク評価→段階的計画。コード前にユーザー確認 |
+| `/feat-dev` | 新機能開発 | 発見→探索→質問→設計→実装→レビュー の7段階一気通貫 |
+| `/bugfix` | バグ修正 | 再現→原因分析→最小修正→回帰防止→レビュー の一気通貫 |
+| `/refactor` | リファクタリング | プロンプトから自動推論（単純化/デッドコード掃除）。`--mode=simplify` / `--mode=clean` で明示指定も可 |
+| `/review` | コードレビュー | セキュリティ・品質・保守性を差分またはパス指定でレビュー |
+| `/harness` | 品質管理 | プロンプトから自動推論（棚卸し/遵守率）。`--scope=stocktake` / `--scope=comply` で明示指定も可 |
+| `/skill-gen` | スキル作成 | リポジトリ固有入力収集→SKILL.md 生成→チューニング委譲 |
+| `/instinct` | インスティンクト管理 | プロンプトから自動推論（export/import/promote/prune/evolve）。明示サブコマンド指定も可 |
+| `/dashboard` | 利用率可視化 | 個人(SQLite)とチーム(PostgreSQL)の使用率比較 HTML ダッシュボード |
+| `/test-gen` | テストコード自動生成 | デシジョンテーブル設計→承認→実装。言語非依存。差分 or 指定パス対応 |
 
 ---
 
@@ -36,24 +36,24 @@ flowchart LR
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
   classDef auto   fill:#ea580c,stroke:#c2410c,color:#fff,rx:4
 
-  U(["👤 新機能依頼"]) --> CP["/c-plan"]:::cmd
-  CP --> CF["/c-featdev"]:::cmd
+  U(["👤 新機能依頼"]) --> CP["/plan"]:::cmd
+  CP --> CF["/feat-dev"]:::cmd
 
-  subgraph featdev["⚙️ c-featdev 内部"]
+  subgraph featdev["⚙️ feat-dev 内部"]
     direction TB
-    AE["🔍 a-explore"]:::agent --> AA["🏗️ a-arch"]:::agent
-    AA --> AT["🧪 a-tdd"]:::agent
-    AT --> AR["✅ a-review"]:::agent
-    SS["s-search"]:::skill -.-> AE
-    SG["s-grillme"]:::skill -.-> AA
-    SA["s-adr"]:::skill -.-> AA
+    AE["🔍 explorer"]:::agent --> AA["🏗️ architect"]:::agent
+    AA --> AT["🧪 tdd-writer"]:::agent
+    AT --> AR["✅ reviewer"]:::agent
+    SS["search"]:::skill -.-> AE
+    SG["grillme"]:::skill -.-> AA
+    SA["adr"]:::skill -.-> AA
   end
 
   CF --> featdev
-  featdev --> CR["/c-review"]:::cmd
-  CR --> AS["a-secure"]:::agent
-  AS --> SC["s-secure"]:::skill
-  CR --> CH["/c-harness\n--scope=comply"]:::cmd
+  featdev --> CR["/review"]:::cmd
+  CR --> AS["security-auditor"]:::agent
+  AS --> SC["secure"]:::skill
+  CR --> CH["/harness\n--scope=comply"]:::cmd
 ```
 
 **トリガー**: 新機能実装・機能拡張
@@ -69,16 +69,16 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  U(["🐛 バグ報告"]) --> CB["/c-bugfix"]:::cmd
+  U(["🐛 バグ報告"]) --> CB["/bugfix"]:::cmd
 
-  subgraph bugfix["⚙️ c-bugfix 内部"]
+  subgraph bugfix["⚙️ bugfix 内部"]
     direction TB
-    ST["s-tdd"]:::skill --> AT["🧪 a-tdd"]:::agent
+    ST["tdd"]:::skill --> AT["🧪 tdd-writer"]:::agent
   end
 
   CB --> bugfix
-  bugfix --> CR["/c-review"]:::cmd
-  CR --> AR["✅ a-review"]:::agent
+  bugfix --> CR["/review"]:::cmd
+  CR --> AR["✅ reviewer"]:::agent
 ```
 
 **トリガー**: バグ修正・不具合対応
@@ -94,18 +94,18 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  U(["🔧 リファクタ依頼"]) --> CP["/c-plan"]:::cmd
-  CP --> CREF["/c-refactor"]:::cmd
+  U(["🔧 リファクタ依頼"]) --> CP["/plan"]:::cmd
+  CP --> CREF["/refactor"]:::cmd
 
-  subgraph refactor["⚙️ c-refactor 内部（全ステップ）"]
+  subgraph refactor["⚙️ refactor 内部（全ステップ）"]
     direction LR
-    SP["s-refprep"]:::skill --> RB["s-refrb"]:::skill
-    RB --> RO["🎯 a-reforch"]:::agent
-    RO --> AC["🧹 a-clean"]:::agent
-    AC --> ASI["✨ a-simplify"]:::agent
-    ASI --> AP["⚡ a-perf"]:::agent
-    AP --> AR["✅ a-review"]:::agent
-    AP --> AS["🛡️ a-secure"]:::agent
+    SP["refactor-prep"]:::skill --> RB["refactor-rollback"]:::skill
+    RB --> RO["🎯 refactor-orchestrator"]:::agent
+    RO --> AC["🧹 dead-code-cleaner"]:::agent
+    AC --> ASI["✨ simplifier"]:::agent
+    ASI --> AP["⚡ perf-optimizer"]:::agent
+    AP --> AR["✅ reviewer"]:::agent
+    AP --> AS["🛡️ security-auditor"]:::agent
   end
 
   CREF --> refactor
@@ -123,11 +123,11 @@ flowchart LR
   classDef cmd    fill:#2563eb,stroke:#1e40af,color:#fff,rx:6
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
 
-  U(["✨ 単純化依頼"]) --> CREF["/c-refactor\n--mode=simplify"]:::cmd
-  CREF --> AS1["✨ a-simplify"]:::agent
-  CREF --> AS2["✨ a-simplify"]:::agent
-  CREF --> AS3["✨ a-simplify"]:::agent
-  AS1 & AS2 & AS3 --> CR["/c-review"]:::cmd
+  U(["✨ 単純化依頼"]) --> CREF["/refactor\n--mode=simplify"]:::cmd
+  CREF --> AS1["✨ simplifier"]:::agent
+  CREF --> AS2["✨ simplifier"]:::agent
+  CREF --> AS3["✨ simplifier"]:::agent
+  AS1 & AS2 & AS3 --> CR["/review"]:::cmd
 ```
 
 **トリガー**: 可読性・保守性向上のみ、機能変更なし
@@ -142,8 +142,8 @@ flowchart LR
   classDef cmd    fill:#2563eb,stroke:#1e40af,color:#fff,rx:6
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
 
-  U(["🗑️ クリーンアップ"]) --> CREF["/c-refactor\n--mode=clean"]:::cmd
-  CREF --> AC["🧹 a-clean"]:::agent
+  U(["🗑️ クリーンアップ"]) --> CREF["/refactor\n--mode=clean"]:::cmd
+  CREF --> AC["🧹 dead-code-cleaner"]:::agent
   AC --> TEST(["✅ テスト検証\nファイル単位"])
 ```
 
@@ -160,18 +160,18 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  U(["🛠️ スキル作成依頼"]) --> CSG["/c-skillgen"]:::cmd
+  U(["🛠️ スキル作成依頼"]) --> CSG["/skill-gen"]:::cmd
 
-  subgraph skillgen["⚙️ c-skillgen 内部"]
+  subgraph skillgen["⚙️ skill-gen 内部"]
     direction TB
-    SM["s-skillmake"]:::skill --> ST["s-skilltune"]:::skill
-    ST --> AG["📊 a-grader"]:::agent
-    AG --> AC["⚖️ a-comparator"]:::agent
-    AC --> AA["📈 a-analyzer"]:::agent
+    SM["skill-make"]:::skill --> ST["skill-tune"]:::skill
+    ST --> AG["📊 grader"]:::agent
+    AG --> AC["⚖️ comparator"]:::agent
+    AC --> AA["📈 bench-analyzer"]:::agent
   end
 
   CSG --> skillgen
-  skillgen --> CH["/c-harness\n--scope=stocktake"]:::cmd
+  skillgen --> CH["/harness\n--scope=stocktake"]:::cmd
 ```
 
 **トリガー**: 新スキル作成・既存スキル改善
@@ -186,11 +186,11 @@ flowchart LR
   classDef cmd    fill:#2563eb,stroke:#1e40af,color:#fff,rx:6
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
 
-  U(["📊 定期メンテ"]) --> CD["/c-dashboard"]:::cmd
-  CD --> CH1["/c-harness\n--scope=harness"]:::cmd
-  CH1 --> AH["⚙️ a-harness"]:::agent
-  AH --> CH2["/c-harness\n--scope=stocktake"]:::cmd
-  CH2 --> CH3["/c-harness\n--scope=comply"]:::cmd
+  U(["📊 定期メンテ"]) --> CD["/dashboard"]:::cmd
+  CD --> CH1["/harness\n--scope=harness"]:::cmd
+  CH1 --> AH["⚙️ harness-tuner"]:::agent
+  AH --> CH2["/harness\n--scope=stocktake"]:::cmd
+  CH2 --> CH3["/harness\n--scope=comply"]:::cmd
 ```
 
 **トリガー**: 週次・月次の品質チェック
@@ -207,18 +207,19 @@ flowchart TD
   classDef auto   fill:#ea580c,stroke:#c2410c,color:#fff,rx:4
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  SS(["🌅 SessionStart"]) --> SL["s-slim\n文脈圧縮注入"]:::skill
+  SS(["🌅 SessionStart"]) --> SL["slim\n文脈圧縮注入"]:::skill
   SS --> MC(["📥 mem-context\n自動注入"]):::auto
 
   subgraph session["💻 セッション中"]
     direction LR
-    SAD["s-adr\nアーキ決定記録"]:::skill
-    SGU["s-guard\n破壊的操作防止"]:::skill
-    AO["👁️ a-observer\n5分毎観測"]:::agent
+    SAD["adr\nアーキ決定記録"]:::skill
+    SGU["guard\n破壊的操作防止"]:::skill
+    AO["👁️ session-observer
+5分毎観測"]:::agent
   end
 
-  SE(["🌙 SessionEnd"]) --> SLE["s-learn\n観測→インスティンクト"]:::skill
-  SLE --> CI["/c-instinct\n昇格・管理"]:::cmd
+  SE(["🌙 SessionEnd"]) --> SLE["learn\n観測→インスティンクト"]:::skill
+  SLE --> CI["/instinct\n昇格・管理"]:::cmd
 ```
 
 **トリガー**: 自動（ユーザー操作不要）
@@ -234,22 +235,24 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  U(["🔐 認証/決済/秘匿情報\n実装依頼"]) --> CP["/c-plan"]:::cmd
-  CP --> CF["/c-featdev"]:::cmd
-  CF --> CR["/c-review"]:::cmd
+  U(["🔐 認証/決済/秘匿情報\n実装依頼"]) --> CP["/plan"]:::cmd
+  CP --> CF["/feat-dev"]:::cmd
+  CF --> CR["/review"]:::cmd
 
-  subgraph review["⚙️ c-review 内部"]
+  subgraph review["⚙️ review 内部"]
     direction TB
-    AR["✅ a-review\n品質・設計"]:::agent
-    AS["🛡️ a-secure\nOWASP Top10"]:::agent
-    AS --> SS["s-secure\nRLS/CSRF/Upload"]:::skill
+    AR["✅ reviewer
+品質・設計"]:::agent
+    AS["🛡️ security-auditor
+OWASP Top10"]:::agent
+    AS --> SS["secure\nRLS/CSRF/Upload"]:::skill
   end
 
   CR --> review
 ```
 
 **トリガー**: 認証・決済・シークレット・APIエンドポイント実装
-**期待効果**: OWASP検出(a-secure) + 設計チェックリスト(s-secure)の二段構え
+**期待効果**: OWASP検出(security-auditor) + 設計チェックリスト(secure)の二段構え
 
 ---
 
@@ -261,7 +264,7 @@ flowchart LR
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
   U(["👤 git commit / merge\n/ rebase / push"]) --> HK(["🔗 Bash PreToolUse\nフック発火"]):::auto
-  HK --> SF["s-gitflow\nブランチ戦略/コミット規約\nマージvsリベース判断"]:::skill
+  HK --> SF["gitflow\nブランチ戦略/コミット規約\nマージvsリベース判断"]:::skill
   SF --> ADV(["💡 アドバイス/警告\n注入"]):::auto
   ADV --> GO(["✅ git 操作実行"])
 ```
@@ -271,14 +274,14 @@ flowchart LR
 
 ---
 
-### WF-11: c-testmod — テストコード自動生成
+### WF-11: test-gen — テストコード自動生成
 
 ```mermaid
 flowchart TD
   classDef cmd    fill:#2563eb,stroke:#1e40af,color:#fff,rx:6
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  A(["/c-testmod [path]"]) --> B["s-grillme\n（設計方針確定）"]:::skill
+  A(["/test-gen [path]"]) --> B["grillme\n（設計方針確定）"]:::skill
   B --> C["スコープ確定\ngit diff HEAD / 引数パス"]
   C --> D["プロジェクト検出\nget_test_command()"]
   D --> E["ベースライン取得\nカバレッジ測定"]

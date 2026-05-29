@@ -18,21 +18,21 @@
     "plugin"
   ],
   "agents": [
-    "./agents/a-analyzer.md",
-    "./agents/a-arch.md",
-    "./agents/a-clean.md",
-    "./agents/a-comparator.md",
-    "./agents/a-explore.md",
-    "./agents/a-grader.md",
-    "./agents/a-harness.md",
-    "./agents/a-observer.md",
-    "./agents/a-perf.md",
-    "./agents/a-plan.md",
-    "./agents/a-reforch.md",
-    "./agents/a-review.md",
-    "./agents/a-secure.md",
-    "./agents/a-simplify.md",
-    "./agents/a-tdd.md"
+    "./agents/bench-analyzer.md",
+    "./agents/architect.md",
+    "./agents/dead-code-cleaner.md",
+    "./agents/comparator.md",
+    "./agents/explorer.md",
+    "./agents/grader.md",
+    "./agents/harness-tuner.md",
+    "./agents/session-observer.md",
+    "./agents/perf-optimizer.md",
+    "./agents/planner.md",
+    "./agents/refactor-orchestrator.md",
+    "./agents/reviewer.md",
+    "./agents/security-auditor.md",
+    "./agents/simplifier.md",
+    "./agents/tdd-writer.md"
   ],
   "skills": [
     "./skills/"

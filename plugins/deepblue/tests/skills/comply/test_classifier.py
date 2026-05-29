@@ -41,7 +41,7 @@ def _make_spec() -> ComplianceSpec:
     return ComplianceSpec(
         id="tdd-workflow",
         name="TDD Workflow",
-        source_rule="s-tdd",
+        source_rule="tdd",
         version="1.0",
         steps=(step,),
         threshold_promote_to_hook=0.6,
