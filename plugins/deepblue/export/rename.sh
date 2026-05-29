@@ -32,8 +32,8 @@ AUTHOR_NAME="$(jq -r '.author_name' "${CONFIG_FILE}")"
 AUTHOR_URL="$(jq -r '.author_url' "${CONFIG_FILE}")"
 REPO_URL="$(jq -r '.repo_url' "${CONFIG_FILE}")"
 
-# 除外パス（プラグインルートからの相対パス）
-mapfile -t EXCLUDE_PATHS < <(jq -r '.exclude // [] | .[]' "${CONFIG_FILE}")
+# コピー除外パス（プラグインルートからの相対パス）
+mapfile -t SKIP_COPY_PATHS < <(jq -r '.skip_copy // [] | .[]' "${CONFIG_FILE}")
 
 # 出力先デフォルト
 if [[ -z "${OUT_DIR}" ]]; then
@@ -74,9 +74,9 @@ if [[ "${DRY_RUN}" == true ]]; then
   echo "    \"aokumablue\"         → \"${AUTHOR_NAME}\""
   echo "    deepblue (残余)       → ${PLUGIN_NAME}"
   echo ""
-  if [[ ${#EXCLUDE_PATHS[@]} -gt 0 ]]; then
-    echo "  置換対象外ファイル:"
-    for p in "${EXCLUDE_PATHS[@]}"; do
+  if [[ ${#SKIP_COPY_PATHS[@]} -gt 0 ]]; then
+    echo "  コピー除外（出力先に含めない）:"
+    for p in "${SKIP_COPY_PATHS[@]}"; do
       echo "    ${p}"
     done
     echo ""
@@ -98,10 +98,24 @@ fi
 
 echo ""
 echo "Step 1: ソースをコピー中..."
+mkdir -p "$(dirname "${OUT_DIR}")"
 cp -r "${SRC_DIR}" "${OUT_DIR}"
 
 # export/ ディレクトリは出力先に不要なので削除
 rm -rf "${OUT_DIR}/export"
+
+# skip_copy パスをコピー先から削除
+if [[ ${#SKIP_COPY_PATHS[@]} -gt 0 ]]; then
+  echo "  コピー除外: ${#SKIP_COPY_PATHS[@]} 件"
+  for _rel in "${SKIP_COPY_PATHS[@]}"; do
+    _rel_stripped="${_rel%/}"
+    _target="${OUT_DIR}/${_rel_stripped}"
+    if [[ -e "${_target}" ]]; then
+      rm -rf "${_target}"
+      echo "    削除: ${_rel}"
+    fi
+  done
+fi
 
 echo "Step 2: ディレクトリ・ファイルをリネーム中..."
 
@@ -136,33 +150,12 @@ else
   SED_INPLACE=(-i '')
 fi
 
-# 対象ファイルを収集（export/ は除外済み）
-mapfile -d '' _ALL_FILES < <(find "${OUT_DIR}" -type f \( \
+# 対象ファイルを収集（コピー済みファイル全件）
+mapfile -d '' TARGET_FILES < <(find "${OUT_DIR}" -type f \( \
   -name "*.py" -o -name "*.sh" -o -name "*.md" \
   -o -name "*.toml" -o -name "*.json" -o -name "*.txt" \
   -o -name "*.html" -o -name "*.in" \
 \) -print0)
-
-# 除外パスを絶対パスに変換してセット化
-declare -A _EXCLUDE_SET
-for _rel in "${EXCLUDE_PATHS[@]}"; do
-  _EXCLUDE_SET["${OUT_DIR}/${_rel}"]=1
-done
-
-# 除外ファイルを除いた配列を構築
-TARGET_FILES=()
-for _f in "${_ALL_FILES[@]}"; do
-  if [[ -z "${_EXCLUDE_SET[${_f}]+x}" ]]; then
-    TARGET_FILES+=("${_f}")
-  fi
-done
-
-if [[ ${#EXCLUDE_PATHS[@]} -gt 0 ]]; then
-  echo "  除外ファイル: ${#EXCLUDE_PATHS[@]} 件"
-  for _rel in "${EXCLUDE_PATHS[@]}"; do
-    echo "    ${_rel}"
-  done
-fi
 
 echo "  URL・作者情報..."
 sed "${SED_INPLACE[@]}" \

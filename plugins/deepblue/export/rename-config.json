@@ -1,9 +1,12 @@
 {
-  "plugin_name": "myplugin",
-  "author_name": "myname",
-  "author_url": "https://github.com/myname",
-  "repo_url": "https://github.com/myname/myplugin",
-  "exclude": [
-    "README.md"
+  "plugin_name": "hogeplugin",
+  "author_name": "hogename",
+  "author_url": "https://github.com/hogename",
+  "repo_url": "https://github.com/hogename/hogeplugin",
+  "skip_copy": [
+    "README.md",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    "tests/"
   ]
 }
