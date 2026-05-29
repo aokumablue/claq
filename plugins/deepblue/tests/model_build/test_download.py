@@ -193,6 +193,19 @@ class TestValidateUrl:
         """extra_allowed_hosts に含まれるホストは通過する。"""
         download_mod._validate_url("https://internal.corp/model.tar.gz", frozenset({"internal.corp"}))
 
+    def test_accepts_ip_in_extra_allowed_hosts(self) -> None:
+        """extra_allowed_hosts に列挙した IP アドレスは通過する。"""
+        download_mod._validate_url("https://192.168.1.100/model.tar.gz", frozenset({"192.168.1.100"}))
+
+    def test_accepts_ip_with_allow_http(self) -> None:
+        """extra_allowed_hosts に列挙した IP アドレスは allow_http=True でも通過する。"""
+        download_mod._validate_url("http://10.0.0.1/model.tar.gz", frozenset({"10.0.0.1"}), allow_http=True)
+
+    def test_rejects_ip_not_in_extra_allowed_hosts(self) -> None:
+        """extra_allowed_hosts に含まれない IP アドレスは拒否される。"""
+        with pytest.raises(ValueError, match="IP address"):
+            download_mod._validate_url("https://192.168.1.1/file.zip", frozenset({"192.168.1.100"}))
+
     def test_accepts_http_when_allow_http_true(self) -> None:
         """allow_http=True のとき HTTP URL は通過する。"""
         download_mod._validate_url("http://github.com/file.zip", allow_http=True)

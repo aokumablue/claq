@@ -64,7 +64,7 @@ def _validate_url(url: str, extra_allowed_hosts: frozenset[str] = frozenset(), *
         is_ip = True
     except ValueError:
         pass
-    if is_ip:
+    if is_ip and host not in extra_allowed_hosts:
         raise ValueError(f"IP address URLs are not allowed: {host!r}")
 
     if host not in _ALLOWED_HOSTS | extra_allowed_hosts:
