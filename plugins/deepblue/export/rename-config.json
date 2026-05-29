@@ -1,12 +1,8 @@
 {
   "plugin_name": "myplugin",
-  "plugin_name_upper": "MYPLUGIN",
   "author_name": "myname",
   "author_url": "https://github.com/myname",
   "repo_url": "https://github.com/myname/myplugin",
-  "repo_url_git": "https://github.com/myname/myplugin.git",
-  "repo_url_issues": "https://github.com/myname/myplugin/issues",
-  "repo_url_readme": "https://github.com/myname/myplugin#readme",
   "exclude": [
     "README.md"
   ]

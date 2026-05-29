@@ -27,13 +27,10 @@ fi
 
 # 設定読み込み
 PLUGIN_NAME="$(jq -r '.plugin_name' "${CONFIG_FILE}")"
-PLUGIN_NAME_UPPER="$(jq -r '.plugin_name_upper' "${CONFIG_FILE}")"
+PLUGIN_NAME_UPPER="${PLUGIN_NAME^^}"
 AUTHOR_NAME="$(jq -r '.author_name' "${CONFIG_FILE}")"
 AUTHOR_URL="$(jq -r '.author_url' "${CONFIG_FILE}")"
 REPO_URL="$(jq -r '.repo_url' "${CONFIG_FILE}")"
-REPO_URL_GIT="$(jq -r '.repo_url_git' "${CONFIG_FILE}")"
-REPO_URL_ISSUES="$(jq -r '.repo_url_issues' "${CONFIG_FILE}")"
-REPO_URL_README="$(jq -r '.repo_url_readme' "${CONFIG_FILE}")"
 
 # 除外パス（プラグインルートからの相対パス）
 mapfile -t EXCLUDE_PATHS < <(jq -r '.exclude // [] | .[]' "${CONFIG_FILE}")
@@ -72,9 +69,6 @@ if [[ "${DRY_RUN}" == true ]]; then
   echo "    deepblue_mem_search    → ${PLUGIN_NAME}_mem_search"
   echo "    src/deepblue           → src/${PLUGIN_NAME}"
   echo "    \"deepblue\"           → \"${PLUGIN_NAME}\""
-  echo "    https://github.com/aokumablue/deepblue#readme → ${REPO_URL_README}"
-  echo "    https://github.com/aokumablue/deepblue.git    → ${REPO_URL_GIT}"
-  echo "    https://github.com/aokumablue/deepblue/issues → ${REPO_URL_ISSUES}"
   echo "    https://github.com/aokumablue/deepblue        → ${REPO_URL}"
   echo "    https://github.com/aokumablue               → ${AUTHOR_URL}"
   echo "    \"aokumablue\"         → \"${AUTHOR_NAME}\""
@@ -170,12 +164,8 @@ if [[ ${#EXCLUDE_PATHS[@]} -gt 0 ]]; then
   done
 fi
 
-# URL は長い方から先に置換（部分マッチ上書き防止）
 echo "  URL・作者情報..."
 sed "${SED_INPLACE[@]}" \
-  -e "s|https://github\.com/aokumablue/deepblue#readme|${REPO_URL_README}|g" \
-  -e "s|https://github\.com/aokumablue/deepblue\.git|${REPO_URL_GIT}|g" \
-  -e "s|https://github\.com/aokumablue/deepblue/issues|${REPO_URL_ISSUES}|g" \
   -e "s|https://github\.com/aokumablue/deepblue/releases/[^\"']*|${REPO_URL}/releases/download/v0.1.0/model.tar.gz|g" \
   -e "s|https://github\.com/aokumablue/deepblue|${REPO_URL}|g" \
   -e "s|https://github\.com/aokumablue|${AUTHOR_URL}|g" \
