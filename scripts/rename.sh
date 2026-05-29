@@ -87,6 +87,11 @@ fi
 echo ""
 echo "Step 1: ディレクトリ・ファイルをリネーム中..."
 
+if [[ -d "${REPO_DIR}/plugins/${PLUGIN_NAME}" ]]; then
+  echo "Error: plugins/${PLUGIN_NAME} は既に存在します。削除してから再実行してください。" >&2
+  exit 1
+fi
+
 if [[ -d "${REPO_DIR}/plugins/${FROM_PLUGIN_NAME}" ]]; then
   # ファイルをリネーム（basename のみ置換、親ディレクトリは変えない）
   while IFS= read -r -d '' f; do
