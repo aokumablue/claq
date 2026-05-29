@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
-from devgear.hooks import quality_gate_presets
-from devgear.hooks.quality_gate_presets import QUALITY_GATE_PRESETS, resolve_quality_gate_config
-from devgear.lib.project_detect import ProjectInfo
+from deepblue.hooks import quality_gate_presets
+from deepblue.hooks.quality_gate_presets import QUALITY_GATE_PRESETS, resolve_quality_gate_config
+from deepblue.lib.project_detect import ProjectInfo
 
 
 @pytest.mark.parametrize(

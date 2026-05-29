@@ -5,9 +5,9 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 
-from devgear.mem.database import Database, MemoryChunk
-from devgear.mem.search import adaptive_decay
-from devgear.mem.settings import Settings
+from deepblue.mem.database import Database, MemoryChunk
+from deepblue.mem.search import adaptive_decay
+from deepblue.mem.settings import Settings
 
 
 def importance_score(chunk: MemoryChunk) -> float:

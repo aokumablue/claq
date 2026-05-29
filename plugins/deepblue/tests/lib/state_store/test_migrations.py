@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pytest
 
-from devgear.lib.state_store.migrations import (
+from deepblue.lib.state_store.migrations import (
     MIGRATIONS,
     apply_migrations,
     ensure_migration_table,

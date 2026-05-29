@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
-from devgear.lib.subprocess_utils import check_output_text, run_text
+from deepblue.lib.subprocess_utils import check_output_text, run_text
 
 
 def test_run_text_enforces_text_encoding_and_env(monkeypatch) -> None:

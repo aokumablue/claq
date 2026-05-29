@@ -110,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
-        print("Usage: python3 src/devgear/launcher.py <module-or-script> [args...]", file=sys.stderr)
+        print("Usage: python3 src/deepblue/launcher.py <module-or-script> [args...]", file=sys.stderr)
         return 1
 
     target, target_args = args[0], args[1:]

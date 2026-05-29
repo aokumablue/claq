@@ -7,15 +7,15 @@ import sys
 import time
 from typing import TYPE_CHECKING, Any
 
-from devgear.lib.core_utils import get_git_user_name
-from devgear.mem.cli_search_handlers import merge_search_results_rrf, render_adaptive_context
+from deepblue.lib.core_utils import get_git_user_name
+from deepblue.mem.cli_search_handlers import merge_search_results_rrf, render_adaptive_context
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
 
-    from devgear.mem.database import Database
-    from devgear.mem.settings import Settings
+    from deepblue.mem.database import Database
+    from deepblue.mem.settings import Settings
 
     OpenDbFn = Callable[[Settings], AbstractContextManager[Database]]
     GetProjectFn = Callable[[dict[str, Any]], str]
@@ -31,7 +31,7 @@ def handle_context(
     log: Any,
 ) -> str:
     """SessionStart: コンテキスト注入"""
-    from devgear.mem.context import build_context
+    from deepblue.mem.context import build_context
 
     project = get_project(stdin_data)
     ctx = ""
@@ -52,8 +52,8 @@ def handle_session_init(
     log: Any,
 ) -> None:
     """UserPromptSubmit: セッション初期化 + 適応的検索注入"""
-    from devgear.mem.database import Session
-    from devgear.mem.search import SearchService, should_inject_memory
+    from deepblue.mem.database import Session
+    from deepblue.mem.search import SearchService, should_inject_memory
 
     session_id = str(stdin_data.get("session_id", "") or "")
     project = get_project(stdin_data)
@@ -116,7 +116,7 @@ def handle_observe(
     log: Any,
 ) -> None:
     """PostToolUse: ツール使用をチャンクとして保存"""
-    from devgear.mem.chunker import build_chunk_from_tool_use
+    from deepblue.mem.chunker import build_chunk_from_tool_use
 
     session_id = str(stdin_data.get("session_id", "") or "")
     project = get_project(stdin_data)
@@ -153,8 +153,8 @@ def handle_session_end(
     time_module: Any = time,
 ) -> None:
     """SessionEnd: 埋め込み一括生成 + FTS5 最適化"""
-    from devgear.mem.bridge import sync_session_to_observations
-    from devgear.mem.compaction import detect_low_quality, find_near_duplicates, optimize_db
+    from deepblue.mem.bridge import sync_session_to_observations
+    from deepblue.mem.compaction import detect_low_quality, find_near_duplicates, optimize_db
 
     session_id = str(stdin_data.get("session_id", "") or "")
 
@@ -164,7 +164,7 @@ def handle_session_end(
             if not chunks:
                 return
 
-            from devgear.mem.redaction import redact
+            from deepblue.mem.redaction import redact
             texts = [redact(c.content) for c in chunks]
             embeddings = embed_fn(texts)
             chunk_ids = [c.id for c in chunks if c.id is not None]
@@ -218,7 +218,7 @@ def handle_compact(
     log: Any,
 ) -> None:
     """メモリ圧縮コマンド（既定で実行）"""
-    from devgear.mem.compaction import detect_low_quality, find_near_duplicates, optimize_db
+    from deepblue.mem.compaction import detect_low_quality, find_near_duplicates, optimize_db
 
     try:
         with open_db(settings) as db:

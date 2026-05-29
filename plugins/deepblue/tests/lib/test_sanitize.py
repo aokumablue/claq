@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from devgear.lib.sanitize import sanitize_log_value
+from deepblue.lib.sanitize import sanitize_log_value
 
 
 @pytest.mark.parametrize(

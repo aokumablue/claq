@@ -29,8 +29,8 @@ def handle_team_context(
     git_user = get_git_user_name()
 
     try:
-        from devgear.mem.pg_database import PgDatabase
-        from devgear.mem.team_context import build_team_context
+        from deepblue.mem.pg_database import PgDatabase
+        from deepblue.mem.team_context import build_team_context
     except Exception as e:
         log.warning("team-context モジュール読み込み失敗: %s", e)
         return ""
@@ -66,7 +66,7 @@ def handle_team_session_init(
     log,
 ) -> None:
     """UserPromptSubmit: 過去参照プロンプト検出時にチーム横断ベクトル検索を実行する。"""
-    from devgear.mem.search import should_inject_memory
+    from deepblue.mem.search import should_inject_memory
 
     sync_cfg = settings.sync
     if not settings.team.enabled or not sync_cfg.enabled or not sync_cfg.postgres_url:
@@ -84,8 +84,8 @@ def handle_team_session_init(
     query = f"{project} {prompt}".strip() if project else prompt
 
     try:
-        from devgear.mem.pg_database import PgDatabase
-        from devgear.mem.team_context import build_team_context
+        from deepblue.mem.pg_database import PgDatabase
+        from deepblue.mem.team_context import build_team_context
     except Exception as e:
         log.warning("team-session-init モジュール読み込み失敗: %s", e)
         return

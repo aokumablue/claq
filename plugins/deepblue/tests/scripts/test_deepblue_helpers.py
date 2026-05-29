@@ -1,4 +1,4 @@
-"""devgear-helpers.sh のテスト。"""
+"""deepblue-helpers.sh のテスト。"""
 
 from __future__ import annotations
 
@@ -18,17 +18,17 @@ def _run_bash(script: str, *, env: dict[str, str] | None = None) -> subprocess.C
     )
 
 
-def test_devgear_mem_search_builds_repo_scoped_payload() -> None:
+def test_deepblue_mem_search_builds_repo_scoped_payload() -> None:
     repo_root = Path(__file__).resolve().parents[4]
-    helper = repo_root / "plugins" / "devgear" / "runtime" / "devgear-helpers.sh"
+    helper = repo_root / "plugins" / "deepblue" / "runtime" / "deepblue-helpers.sh"
     script = f'''
 set -euo pipefail
 cd "{repo_root}"
 source "{helper}"
-devgear_mem_json() {{
+deepblue_mem_json() {{
   printf '%s\n%s\n' "$1" "$2"
 }}
-devgear_mem_search "hello world" 7
+deepblue_mem_search "hello world" 7
 '''
 
     result = _run_bash(script)
@@ -42,9 +42,9 @@ devgear_mem_search "hello world" 7
     }
 
 
-def test_devgear_run_bg_returns_pid(tmp_path: Path) -> None:
+def test_deepblue_run_bg_returns_pid(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[4]
-    helper = repo_root / "plugins" / "devgear" / "runtime" / "devgear-helpers.sh"
+    helper = repo_root / "plugins" / "deepblue" / "runtime" / "deepblue-helpers.sh"
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     python3 = fake_bin / "python3"
@@ -55,7 +55,7 @@ def test_devgear_run_bg_returns_pid(tmp_path: Path) -> None:
     script = f'''
 set -euo pipefail
 source "{helper}"
-pid="$(devgear_run_bg demo.command --flag)"
+pid="$(deepblue_run_bg demo.command --flag)"
 case "$pid" in
   (*[!0-9]*|"") exit 1 ;;
 esac
@@ -67,13 +67,13 @@ wait "$pid" 2>/dev/null || true
     _run_bash(script, env=env)
 
 
-def test_devgear_plugin_root_prefers_claude_plugin_root_env(tmp_path: Path) -> None:
+def test_deepblue_plugin_root_prefers_claude_plugin_root_env(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[4]
-    helper = repo_root / "plugins" / "devgear" / "runtime" / "devgear-helpers.sh"
+    helper = repo_root / "plugins" / "deepblue" / "runtime" / "deepblue-helpers.sh"
     script = f'''
 set -euo pipefail
 source "{helper}"
-printf '%s\n' "$(devgear_plugin_root)"
+printf '%s\n' "$(deepblue_plugin_root)"
 '''
 
     env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(tmp_path / "copilot")}
@@ -82,32 +82,32 @@ printf '%s\n' "$(devgear_plugin_root)"
     assert result.stdout.strip() == str(tmp_path / "copilot")
 
 
-def test_devgear_plugin_root_uses_file_location_fallback_with_env(tmp_path: Path) -> None:
+def test_deepblue_plugin_root_uses_file_location_fallback_with_env(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[4]
-    helper = repo_root / "plugins" / "devgear" / "runtime" / "devgear-helpers.sh"
+    helper = repo_root / "plugins" / "deepblue" / "runtime" / "deepblue-helpers.sh"
     script = f'''
 set -euo pipefail
 source "{helper}"
-printf '%s\n' "$(devgear_plugin_root)"
+printf '%s\n' "$(deepblue_plugin_root)"
 '''
 
     env = dict(os.environ)
     env.pop("CLAUDE_PLUGIN_ROOT", None)
     result = _run_bash(script, env=env)
 
-    assert result.stdout.strip() == str(repo_root / "plugins" / "devgear")
+    assert result.stdout.strip() == str(repo_root / "plugins" / "deepblue")
 
 
-def test_devgear_plugin_root_uses_file_location_fallback_without_env(tmp_path: Path) -> None:
+def test_deepblue_plugin_root_uses_file_location_fallback_without_env(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[4]
-    helper = repo_root / "plugins" / "devgear" / "runtime" / "devgear-helpers.sh"
+    helper = repo_root / "plugins" / "deepblue" / "runtime" / "deepblue-helpers.sh"
     script = f'''
 set -euo pipefail
 unset CLAUDE_PLUGIN_ROOT
 source "{helper}"
-printf '%s\n' "$(devgear_plugin_root)"
+printf '%s\n' "$(deepblue_plugin_root)"
 '''
 
     result = _run_bash(script)
 
-    assert result.stdout.strip() == str(repo_root / "plugins" / "devgear")
+    assert result.stdout.strip() == str(repo_root / "plugins" / "deepblue")

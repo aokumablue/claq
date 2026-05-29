@@ -14,7 +14,7 @@ command: /c-dashboard
 
 ## 前提条件
 
-- ローカルSQLite（`~/.devgear/mem.db`）初期化済み
+- ローカルSQLite（`~/.deepblue/mem.db`）初期化済み
 - チーム比較: `settings.json` で `mem.sync.enabled: true` かつ `postgres_url` 設定済み
 
 ## 使い方
@@ -29,8 +29,8 @@ command: /c-dashboard
 ## 実装
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/devgear-helpers.sh"
-devgear_mem_json dashboard '{"days": 30, "output": "./devgear-dashboard.html", "format": "html"}'
+source "${CLAUDE_PLUGIN_ROOT}/runtime/deepblue-helpers.sh"
+deepblue_mem_json dashboard '{"days": 30, "output": "./deepblue-dashboard.html", "format": "html"}'
 ```
 
 ## ダッシュボード内容
@@ -54,5 +54,5 @@ devgear_mem_json dashboard '{"days": 30, "output": "./devgear-dashboard.html", "
 ## 引数
 
 - `--days <n>` — 集計期間（デフォルト: 30）
-- `--output <path>` — 出力先（デフォルト: /tmp/devgear-dashboard.html）
+- `--output <path>` — 出力先（デフォルト: /tmp/deepblue-dashboard.html）
 - `--format <html|json>` — 出力形式（デフォルト: html）

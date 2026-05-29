@@ -10,21 +10,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from devgear.hooks import session_install
+from deepblue.hooks import session_install
 
 
 class TestGetPluginVersion:
     def test_reads_version_from_plugin_json(self, tmp_path: Path) -> None:
         plugin_json = tmp_path / ".claude-plugin" / "plugin.json"
         plugin_json.parent.mkdir()
-        plugin_json.write_text(json.dumps({"version": "1.2.3", "name": "devgear"}))
+        plugin_json.write_text(json.dumps({"version": "1.2.3", "name": "deepblue"}))
 
         assert session_install._get_plugin_version(tmp_path) == "1.2.3"
 
     def test_returns_none_when_version_missing_from_json(self, tmp_path: Path) -> None:
         plugin_json = tmp_path / ".claude-plugin" / "plugin.json"
         plugin_json.parent.mkdir()
-        plugin_json.write_text(json.dumps({"name": "devgear"}))
+        plugin_json.write_text(json.dumps({"name": "deepblue"}))
 
         assert session_install._get_plugin_version(tmp_path) is None
 
@@ -199,7 +199,7 @@ class TestRun:
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
         monkeypatch.setattr(session_install, "_PLUGIN_ROOT", plugin_root)
         monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setattr(session_install, "_DEVGEAR_DIR", tmp_path)
+        monkeypatch.setattr(session_install, "_DEEPBLUE_DIR", tmp_path)
 
         fake_result = MagicMock(spec=subprocess.CompletedProcess)
         fake_result.stdout = ""
@@ -227,7 +227,7 @@ class TestRun:
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
         monkeypatch.setattr(session_install, "_PLUGIN_ROOT", plugin_root)
         monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setattr(session_install, "_DEVGEAR_DIR", tmp_path)
+        monkeypatch.setattr(session_install, "_DEEPBLUE_DIR", tmp_path)
 
         fake_result = MagicMock(spec=subprocess.CompletedProcess)
         fake_result.stdout = ""
@@ -241,7 +241,7 @@ class TestRun:
         mock_run.assert_called_once()
 
     def test_run_install_passes_onnx_async_env(self, tmp_path: Path) -> None:
-        """_run_install が DEVGEAR_INSTALL_ONNX_ASYNC=1 で run_text を呼ぶこと。"""
+        """_run_install が DEEPBLUE_INSTALL_ONNX_ASYNC=1 で run_text を呼ぶこと。"""
         install_sh = tmp_path / "install.sh"
         install_sh.write_text("#!/usr/bin/env bash\n")
         install_sh.chmod(0o755)
@@ -256,7 +256,7 @@ class TestRun:
         with patch.object(session_install, "run_text", side_effect=fake_run_text):
             session_install._run_install(install_sh)
 
-        assert captured_extra_env.get("DEVGEAR_INSTALL_ONNX_ASYNC") == "1"
+        assert captured_extra_env.get("DEEPBLUE_INSTALL_ONNX_ASYNC") == "1"
 
     def test_warns_onnx_building_when_model_missing(
         self,
@@ -274,7 +274,7 @@ class TestRun:
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
         monkeypatch.setattr(session_install, "_PLUGIN_ROOT", plugin_root)
         monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setattr(session_install, "_DEVGEAR_DIR", tmp_path)
+        monkeypatch.setattr(session_install, "_DEEPBLUE_DIR", tmp_path)
         # model.onnx が存在しない状態をシミュレート
         model_onnx = tmp_path / "models" / "model.onnx"
         monkeypatch.setattr(session_install.Path, "home", lambda: tmp_path)
@@ -307,9 +307,9 @@ class TestRun:
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
         monkeypatch.setattr(session_install, "_PLUGIN_ROOT", plugin_root)
         monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setattr(session_install, "_DEVGEAR_DIR", tmp_path)
+        monkeypatch.setattr(session_install, "_DEEPBLUE_DIR", tmp_path)
         # model.onnx が存在する状態をシミュレート
-        model_dir = tmp_path / ".devgear" / "models"
+        model_dir = tmp_path / ".deepblue" / "models"
         model_dir.mkdir(parents=True)
         (model_dir / "model.onnx").write_bytes(b"")
         monkeypatch.setattr(session_install.Path, "home", lambda: tmp_path)
@@ -341,7 +341,7 @@ class TestRun:
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
         monkeypatch.setattr(session_install, "_PLUGIN_ROOT", plugin_root)
         monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setattr(session_install, "_DEVGEAR_DIR", tmp_path)
+        monkeypatch.setattr(session_install, "_DEEPBLUE_DIR", tmp_path)
 
         fake_result = MagicMock(spec=subprocess.CompletedProcess)
         fake_result.stdout = "install stdout line"
@@ -369,7 +369,7 @@ class TestRun:
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
         monkeypatch.setattr(session_install, "_PLUGIN_ROOT", plugin_root)
         monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setattr(session_install, "_DEVGEAR_DIR", tmp_path)
+        monkeypatch.setattr(session_install, "_DEEPBLUE_DIR", tmp_path)
 
         with patch.object(session_install, "_run_install") as mock_run:
             result = session_install.run("")
@@ -394,7 +394,7 @@ class TestRun:
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
         monkeypatch.setattr(session_install, "_PLUGIN_ROOT", plugin_root)
         monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setattr(session_install, "_DEVGEAR_DIR", tmp_path)
+        monkeypatch.setattr(session_install, "_DEEPBLUE_DIR", tmp_path)
         monkeypatch.setattr(session_install.Path, "home", lambda: tmp_path)
 
         fake_result = MagicMock(spec=subprocess.CompletedProcess)
@@ -445,7 +445,7 @@ class TestRun:
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
         monkeypatch.setattr(session_install, "_PLUGIN_ROOT", plugin_root)
         monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setattr(session_install, "_DEVGEAR_DIR", tmp_path)
+        monkeypatch.setattr(session_install, "_DEEPBLUE_DIR", tmp_path)
         monkeypatch.setattr(session_install, "_get_installed_version", fake_get_installed)
 
         with patch.object(session_install, "_run_install") as mock_run:
@@ -623,6 +623,6 @@ class TestMain:
         monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
 
         with pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("devgear.hooks.session_install", run_name="__main__")
+            runpy.run_module("deepblue.hooks.session_install", run_name="__main__")
 
         assert exc_info.value.code == 0

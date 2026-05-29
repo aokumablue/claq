@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.skills.utils import parse_skill_md
+from deepblue.skills.utils import parse_skill_md
 
 
 def _write_skill(tmp_path: Path, content: str) -> Path:

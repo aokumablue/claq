@@ -8,8 +8,8 @@
 
 from __future__ import annotations
 
-from devgear.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
-from devgear.lib.git_hosting import (
+from deepblue.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
+from deepblue.lib.git_hosting import (
     build_git_hosting_item_url,
     detect_git_hosting_service,
     extract_git_hosting_item_details,

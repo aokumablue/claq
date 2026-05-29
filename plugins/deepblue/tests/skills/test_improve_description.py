@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from devgear.skills import improve_description as imp
+from deepblue.skills import improve_description as imp
 
 
 def test_call_claude_builds_command_and_strips_env(monkeypatch: pytest.MonkeyPatch) -> None:

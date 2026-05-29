@@ -1,4 +1,4 @@
-"""devgear.ci.catalog_check のテスト。"""
+"""deepblue.ci.catalog_check のテスト。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.ci import catalog_check
+from deepblue.ci import catalog_check
 
 
 def write_text(path: Path, text: str) -> None:
@@ -102,7 +102,7 @@ def test_evaluate_and_render_expectations(capsys: pytest.CaptureFixture[str]) ->
 
     catalog_check.render_markdown({"catalog": catalog, "checks": results})
     markdown = capsys.readouterr().out
-    assert "# devgear カタログ検証" in markdown
+    assert "# deepblue カタログ検証" in markdown
     assert "## 不一致" in markdown
 
     capsys.readouterr()
@@ -180,6 +180,6 @@ def test_catalog_check_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch, tm
     )
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.ci.catalog_check", run_name="__main__")
+        runpy.run_module("deepblue.ci.catalog_check", run_name="__main__")
 
     assert excinfo.value.code == 0

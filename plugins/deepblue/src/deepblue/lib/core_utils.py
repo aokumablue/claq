@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from deepblue.lib.constants import BASE_DIR_NAME
+
 # プラットフォーム検出
 IS_WINDOWS = platform.system() == "Windows"
 IS_MACOS = platform.system() == "Darwin"
@@ -53,7 +55,7 @@ WINDOWS_RESERVED_SESSION_IDS = frozenset(
 
 def get_home_dir() -> Path:
     """ユーザーのホームディレクトリを取得する（クロスプラットフォーム）。"""
-    for env_name in ("DEVGEAR_HOME", "HOME", "USERPROFILE"):
+    for env_name in ("DEEPBLUE_HOME", "HOME", "USERPROFILE"):
         raw = os.environ.get(env_name)
         if raw:
             return Path(raw).expanduser()
@@ -69,24 +71,24 @@ def get_claude_dir() -> Path:
     return get_home_dir() / ".claude"
 
 
-def get_devgear_dir() -> Path:
-    """devgear の保存ディレクトリを取得する。"""
-    return get_home_dir() / ".devgear"
+def get_deepblue_dir() -> Path:
+    """deepblue の保存ディレクトリを取得する。"""
+    return get_home_dir() / BASE_DIR_NAME
 
 
 def get_projects_dir() -> Path:
     """プロジェクト保存ディレクトリを取得する。"""
-    return get_devgear_dir() / "projects"
+    return get_deepblue_dir() / "projects"
 
 
 def get_registry_file() -> Path:
     """プロジェクトレジストリファイルを取得する。"""
-    return get_devgear_dir() / "projects.json"
+    return get_deepblue_dir() / "projects.json"
 
 
 def get_sessions_dir() -> Path:
     """セッションディレクトリを取得する。"""
-    return get_devgear_dir() / SESSION_DATA_DIR_NAME
+    return get_deepblue_dir() / SESSION_DATA_DIR_NAME
 
 
 def get_session_search_dirs() -> list[Path]:

@@ -1,5 +1,5 @@
 """
-devgear ソースルートの場所を解決します。
+deepblue ソースルートの場所を解決します。
 環境変数、標準インストール先、プラグインキャッシュを順に探索します。
 テスト用の上書き引数も受け付けます。
 """
@@ -9,14 +9,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from deepblue.lib.constants import PLUGIN_NAME
 
-def resolve_devgear_root(
+
+def resolve_deepblue_root(
     *,
     home_dir: str | Path | None = None,
     env_root: str | None = None,
     probe: str | None = None,
 ) -> Path:
-    """devgear ソースルートディレクトリを解決する。
+    """deepblue ソースルートディレクトリを解決する。
 
     Args:
         home_dir: ホームディレクトリ
@@ -41,7 +43,7 @@ def resolve_devgear_root(
     home = Path(home_dir) if home_dir else Path.home()
     claude_dir = home / ".claude"
 
-    probe_paths = [probe] if probe else ["src/devgear/lib/core_utils.py"]
+    probe_paths = [probe] if probe else ["src/deepblue/lib/core_utils.py"]
 
     def _contains_probe(root: Path) -> bool:
         """候補ルートに探査対象ファイルが存在するか確認する。
@@ -64,7 +66,7 @@ def resolve_devgear_root(
     # プラグインキャッシュ — マーケットプレイスのプラグインを
     # ~/.claude/plugins/cache/<plugin-name>/<org>/<version>/ に配置
     try:
-        cache_base = claude_dir / "plugins" / "cache" / "devgear"
+        cache_base = claude_dir / "plugins" / "cache" / PLUGIN_NAME
         if cache_base.exists():
             for org_entry in cache_base.iterdir():
                 if not org_entry.is_dir():
@@ -84,4 +86,4 @@ def resolve_devgear_root(
     return claude_dir
 
 
-__all__ = ["resolve_devgear_root"]
+__all__ = ["resolve_deepblue_root"]

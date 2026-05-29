@@ -1,4 +1,4 @@
-"""devgear.ci.validate_install_manifests の追加テスト。"""
+"""deepblue.ci.validate_install_manifests の追加テスト。"""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from devgear.ci.validate_install_manifests import validate_install_manifests
+from deepblue.ci.validate_install_manifests import validate_install_manifests
 
-validate_install_manifests_module = importlib.import_module("devgear.ci.validate_install_manifests")
+validate_install_manifests_module = importlib.import_module("deepblue.ci.validate_install_manifests")
 
 
 def write_json(path: Path, value: object) -> None:
@@ -342,6 +342,6 @@ def test_validate_install_manifests_covers_object_and_entrypoint_branches(
     )
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.ci.validate_install_manifests", run_name="__main__")
+        runpy.run_module("deepblue.ci.validate_install_manifests", run_name="__main__")
 
     assert excinfo.value.code == 1

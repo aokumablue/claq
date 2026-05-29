@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.lib.git_hosting import (
+from deepblue.lib.git_hosting import (
     build_git_hosting_item_url,
     detect_git_hosting_service,
     extract_git_hosting_item_details,
@@ -145,5 +145,5 @@ class TestNormalizeGitHostingServiceEdgeCases:
         assert result is None
 
     def test_extract_returns_none_when_normalization_returns_unknown(self, monkeypatch) -> None:
-        monkeypatch.setattr("devgear.lib.git_hosting.normalize_git_hosting_service", lambda value, default="github": "bitbucket")
+        monkeypatch.setattr("deepblue.lib.git_hosting.normalize_git_hosting_service", lambda value, default="github": "bitbucket")
         assert extract_git_hosting_item_details("github", "https://github.com/owner/repo/pull/1") is None

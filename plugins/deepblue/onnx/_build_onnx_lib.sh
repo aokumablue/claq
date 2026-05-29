@@ -6,7 +6,7 @@ _BUILD_ONNX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # build_onnx_if_missing <model_target_dir> <quant> [revision]
 #   model_target_dir に model.onnx が存在しない場合のみビルドする（冪等）。
-#   ~/.devgear/.venv-modelbuild をビルド用 venv として使用する。
+#   ~/.deepblue/.venv-modelbuild をビルド用 venv として使用する。
 #
 # build_onnx_always <model_target_dir> <quant> [revision]
 #   冪等チェックなしで必ずビルドする。
@@ -15,11 +15,11 @@ build_onnx_impl() {
   local quant="$2"
   local revision="${3:-}"
 
-  local build_venv="${HOME}/.devgear/.venv-modelbuild"
+  local build_venv="${HOME}/.deepblue/.venv-modelbuild"
   local build_python="${build_venv}/bin/python3"
   local build_reqs="${_BUILD_ONNX_LIB_DIR}/requirements-build.txt"
   local src_dir="${_BUILD_ONNX_LIB_DIR}/../src"
-  local log_dir="${HOME}/.devgear/logs"
+  local log_dir="${HOME}/.deepblue/logs"
   local build_log="${log_dir}/modelbuild.log"
 
   mkdir -p "${log_dir}" "${model_target}"
@@ -37,7 +37,7 @@ build_onnx_impl() {
   fi
 
   # ハッシュロックで PyPI レジストリ側改ざんを検知する（LS-1）
-  # 再生成: pip-compile --allow-unsafe --generate-hashes --output-file=plugins/devgear/onnx/requirements-build.txt plugins/devgear/onnx/requirements-build.in
+  # 再生成: pip-compile --allow-unsafe --generate-hashes --output-file=plugins/deepblue/onnx/requirements-build.txt plugins/deepblue/onnx/requirements-build.in
   # run_quietly が利用可能なら使用し、なければ直接実行する（build_onnx_model.sh から直接呼ばれる場合）
   if declare -f run_quietly >/dev/null 2>&1; then
     run_quietly "${build_python}" -m pip install --quiet --disable-pip-version-check --upgrade pip

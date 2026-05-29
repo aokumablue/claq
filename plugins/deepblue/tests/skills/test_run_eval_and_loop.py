@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from devgear.skills import run_eval, run_loop
+from deepblue.skills import run_eval, run_loop
 
 
 class _FakeStdout:
@@ -394,7 +394,7 @@ def test_run_eval_main_block_invokes_main(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(sys, "argv", ["run_eval.py", "--help"])
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.skills.run_eval", run_name="__main__")
+        runpy.run_module("deepblue.skills.run_eval", run_name="__main__")
 
     assert excinfo.value.code == 0
 
@@ -959,6 +959,6 @@ def test_run_loop_main_entrypoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     """__main__ entrypoint を通す。"""
     monkeypatch.setattr(sys, "argv", ["run_loop.py", "--help"])
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.skills.run_loop", run_name="__main__")
+        runpy.run_module("deepblue.skills.run_loop", run_name="__main__")
 
     assert excinfo.value.code == 0

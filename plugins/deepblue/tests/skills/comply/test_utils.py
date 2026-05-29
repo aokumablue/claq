@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from devgear.skills.comply.utils import extract_yaml
+from deepblue.skills.comply.utils import extract_yaml
 
 
 class TestExtractYaml:

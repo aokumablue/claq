@@ -25,8 +25,8 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from devgear.lib.core_utils import (
-    get_devgear_dir,
+from deepblue.lib.core_utils import (
+    get_deepblue_dir,
     get_projects_dir,
     get_registry_file,
 )
@@ -42,16 +42,16 @@ except ImportError:
 # 設定
 # ─────────────────────────────────────────────
 
-DEVGEAR_DIR = get_devgear_dir()
+DEEPBLUE_DIR = get_deepblue_dir()
 PROJECTS_DIR = get_projects_dir()
 REGISTRY_FILE = get_registry_file()
 
 # グローバル（プロジェクト非依存）パス
-GLOBAL_INSTINCTS_DIR = DEVGEAR_DIR / "instincts"
+GLOBAL_INSTINCTS_DIR = DEEPBLUE_DIR / "instincts"
 GLOBAL_PERSONAL_DIR = GLOBAL_INSTINCTS_DIR / "personal"
 GLOBAL_INHERITED_DIR = GLOBAL_INSTINCTS_DIR / "inherited"
-GLOBAL_EVOLVED_DIR = DEVGEAR_DIR / "evolved"
-GLOBAL_OBSERVATIONS_FILE = DEVGEAR_DIR / "observations.jsonl"
+GLOBAL_EVOLVED_DIR = DEEPBLUE_DIR / "evolved"
+GLOBAL_OBSERVATIONS_FILE = DEEPBLUE_DIR / "observations.jsonl"
 
 # 自動昇格のしきい値
 PROMOTE_CONFIDENCE_THRESHOLD = 0.8
@@ -1024,7 +1024,7 @@ def _show_promotion_candidates(project: dict) -> None:
             print(f"  * {cand['id']} (avg: {cand['avg_confidence']:.0%})")
             print(f"    Found in: {proj_names}")
             print()
-        print("  Run `python3 -m devgear.skills.learn.cli promote` to promote these to global scope.\n")
+        print("  Run `python3 -m deepblue.skills.learn.cli promote` to promote these to global scope.\n")
 
 
 def cmd_promote(args) -> int:

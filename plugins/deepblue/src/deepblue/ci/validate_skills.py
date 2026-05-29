@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from devgear.ci.ci_common import REPO_ROOT, emit_error
+from deepblue.ci.ci_common import REPO_ROOT, emit_error
 
 DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
 

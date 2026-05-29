@@ -13,9 +13,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from devgear.hooks.hook_common import parse_json_object, read_raw_stdin
-from devgear.lib.core_utils import IS_LINUX, IS_MACOS, log
-from devgear.lib.slim_text import compact_line, first_meaningful_line
+from deepblue.hooks.hook_common import parse_json_object, read_raw_stdin
+from deepblue.lib.core_utils import IS_LINUX, IS_MACOS, log
+from deepblue.lib.slim_text import compact_line, first_meaningful_line
 
 TITLE = "通知"
 MAX_BODY_LENGTH = 100

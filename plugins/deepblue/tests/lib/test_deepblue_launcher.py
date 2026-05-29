@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import devgear.launcher as launcher
+import deepblue.launcher as launcher
 
 
 class FakeStdin:
@@ -92,17 +92,17 @@ def test_resolve_command_prefers_repo_venv_python(monkeypatch, tmp_path: Path) -
     venv_python = _create_repo_venv(tmp_path)
     monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
 
-    cmd = launcher.resolve_command("devgear.hooks.doc_file_warning", ["arg1"])
+    cmd = launcher.resolve_command("deepblue.hooks.doc_file_warning", ["arg1"])
 
-    assert cmd == [str(venv_python), "-m", "devgear.hooks.doc_file_warning", "arg1"]
+    assert cmd == [str(venv_python), "-m", "deepblue.hooks.doc_file_warning", "arg1"]
 
 
 def test_resolve_command_falls_back_to_system_python_without_repo_venv(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
 
-    cmd = launcher.resolve_command("devgear.hooks.doc_file_warning", [])
+    cmd = launcher.resolve_command("deepblue.hooks.doc_file_warning", [])
 
-    assert cmd == [sys.executable, "-m", "devgear.hooks.doc_file_warning"]
+    assert cmd == [sys.executable, "-m", "deepblue.hooks.doc_file_warning"]
 
 
 def test_resolve_command_runs_python_script_with_repo_venv(monkeypatch, tmp_path: Path) -> None:
@@ -209,6 +209,6 @@ def test_main_handles_oserror_and_entrypoint(monkeypatch: pytest.MonkeyPatch, ca
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.launcher", run_name="__main__")
+        runpy.run_module("deepblue.launcher", run_name="__main__")
 
     assert excinfo.value.code == 1

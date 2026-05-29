@@ -16,9 +16,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from devgear.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
-from devgear.hooks.quality_gate_presets import resolve_quality_gate_config
-from devgear.lib.core_utils import log
+from deepblue.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
+from deepblue.hooks.quality_gate_presets import resolve_quality_gate_config
+from deepblue.lib.core_utils import log
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 

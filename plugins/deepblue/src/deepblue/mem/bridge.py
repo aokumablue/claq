@@ -12,19 +12,19 @@ import subprocess
 from datetime import UTC
 from pathlib import Path
 
-from devgear.lib.core_utils import get_devgear_dir
-from devgear.mem.database import Database, MemoryChunk
-from devgear.mem.logger import get as _get_logger
+from deepblue.lib.core_utils import get_deepblue_dir
+from deepblue.mem.database import Database, MemoryChunk
+from deepblue.mem.logger import get as _get_logger
 
 log = _get_logger("BRIDGE")
 
 # s-learn の観測ディレクトリ
-_DEVGEAR_DIR = get_devgear_dir()
+_DEEPBLUE_DIR = get_deepblue_dir()
 
 
 def _project_base_dir() -> Path:
     """project 保存先を返す。"""
-    return _DEVGEAR_DIR / "projects"
+    return _DEEPBLUE_DIR / "projects"
 
 
 def _get_project_id(project_name: str, cwd: str | None = None) -> str:

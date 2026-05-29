@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-import devgear.codemaps.generate_codemaps as generate
+import deepblue.codemaps.generate_codemaps as generate
 
 
 def test_walk_dir():

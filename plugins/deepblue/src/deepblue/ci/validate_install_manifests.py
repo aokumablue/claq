@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from devgear.ci.ci_common import REPO_ROOT, emit_error, is_non_empty_string, read_json, resolve_repo_path
+from deepblue.ci.ci_common import REPO_ROOT, emit_error, is_non_empty_string, read_json, resolve_repo_path
 
 COMPONENT_FAMILY_PREFIXES = {
     "baseline": "baseline:",

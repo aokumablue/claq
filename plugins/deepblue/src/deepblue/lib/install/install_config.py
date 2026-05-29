@@ -1,5 +1,5 @@
 """
-devgear-install.json の読み込みと検証を行います。
+deepblue-install.json の読み込みと検証を行います。
 Pydantic スキーマで設定内容を確かめ、重複を取り除いた正規化済み設定を返します。
 設定ファイルの既定パス探索も担当します。
 """
@@ -13,11 +13,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-DEFAULT_INSTALL_CONFIG = "devgear-install.json"
+DEFAULT_INSTALL_CONFIG = "deepblue-install.json"
 
 
 class InstallConfigSchema(BaseModel):
-    """devgear-install.json 設定ファイルのスキーマ。"""
+    """deepblue-install.json 設定ファイルのスキーマ。"""
 
     version: int = Field(..., ge=1)
     target: str | None = None

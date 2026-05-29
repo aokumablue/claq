@@ -2,7 +2,7 @@
 
 import pytest
 
-from devgear.mem.redaction import redact
+from deepblue.mem.redaction import redact
 
 _PLACEHOLDER = "[REDACTED]"
 

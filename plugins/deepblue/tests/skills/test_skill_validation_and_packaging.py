@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from devgear.skills import package_skill as pkg
-from devgear.skills import quick_validate as qv
+from deepblue.skills import package_skill as pkg
+from deepblue.skills import quick_validate as qv
 
 
 def _write_skill_md(skill_dir: Path, content: str) -> None:
@@ -238,6 +238,6 @@ def test_package_skill_module_entrypoint(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(sys, "argv", ["package_skill.py", str(skill_dir)])
 
     with pytest.raises(SystemExit) as exc_info:
-        runpy.run_module("devgear.skills.package_skill", run_name="__main__")
+        runpy.run_module("deepblue.skills.package_skill", run_name="__main__")
 
     assert exc_info.value.code in (0, None)

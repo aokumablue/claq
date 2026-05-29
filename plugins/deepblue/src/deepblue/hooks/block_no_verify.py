@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from devgear.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
+from deepblue.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
 
 NO_VERIFY_RE = re.compile(r"\bgit\s+(commit|push)\b.*?(--no-verify|-n)\b", re.IGNORECASE)
 

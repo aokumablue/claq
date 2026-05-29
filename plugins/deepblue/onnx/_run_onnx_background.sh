@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # _run_onnx_background.sh — ONNX ビルドを排他制御付きでバックグラウンド実行する。
-# install.sh から DEVGEAR_INSTALL_ONNX_ASYNC=1 のとき nohup setsid で起動される。
+# install.sh から DEEPBLUE_INSTALL_ONNX_ASYNC=1 のとき nohup setsid で起動される。
 # 直接実行しない（install.sh から使用）。
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOCK_FILE="${HOME}/.devgear/onnx_build.lock"
-LOG_DIR="${HOME}/.devgear/logs"
+LOCK_FILE="${HOME}/.deepblue/onnx_build.lock"
+LOG_DIR="${HOME}/.deepblue/logs"
 LOG_FILE="${LOG_DIR}/modelbuild.log"
-MODEL_TARGET="${HOME}/.devgear/models"
+MODEL_TARGET="${HOME}/.deepblue/models"
 
-# ~/.devgear とログディレクトリを事前確認（env -i で HOME が汚染されていないか検証）
-mkdir -p "${HOME}/.devgear" "${LOG_DIR}"
-chmod 0700 "${HOME}/.devgear"
+# ~/.deepblue とログディレクトリを事前確認（env -i で HOME が汚染されていないか検証）
+mkdir -p "${HOME}/.deepblue" "${LOG_DIR}"
+chmod 0700 "${HOME}/.deepblue"
 # ログファイルが 10MB 超なら truncate（無制限肥大化の防止）
 
 if [[ -f "${LOG_FILE}" ]] && \

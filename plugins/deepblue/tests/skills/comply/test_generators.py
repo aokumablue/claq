@@ -8,11 +8,11 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from devgear.skills.comply import scenario_generator as sg
-from devgear.skills.comply import spec_generator as sp
-from devgear.skills.comply.parser import ComplianceSpec, Detector, Step
+from deepblue.skills.comply import scenario_generator as sg
+from deepblue.skills.comply import spec_generator as sp
+from deepblue.skills.comply.parser import ComplianceSpec, Detector, Step
 
-FIXTURES = Path(__file__).resolve().parents[3] / "src" / "devgear" / "skills" / "comply" / "fixtures"
+FIXTURES = Path(__file__).resolve().parents[3] / "src" / "deepblue" / "skills" / "comply" / "fixtures"
 
 
 def _make_spec() -> ComplianceSpec:

@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
 # install.sh
-# devgear の Python 依存を ~/.devgear/.venv に導入し、初回の ~/.devgear/settings.json を作成する。
+# deepblue の Python 依存を ~/.deepblue/.venv に導入し、初回の ~/.deepblue/settings.json を作成する。
 # Claude / Copilot どちらか片方で実行すれば両方から共有できる。
 # Ubuntu と macOS に対応。
 # 使い方:
 #   bash install.sh
 #   bash install.sh --repo-root /path/to/repo
-#   DEVGEAR_INSTALL_SKIP_PYTHON=1 bash install.sh
-#   DEVGEAR_INSTALL_ASSUME_YES=1 bash install.sh  # sudo パッケージインストールを自動許可
+#   DEEPBLUE_INSTALL_SKIP_PYTHON=1 bash install.sh
+#   DEEPBLUE_INSTALL_ASSUME_YES=1 bash install.sh  # sudo パッケージインストールを自動許可
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
-SKIP_PYTHON="${DEVGEAR_INSTALL_SKIP_PYTHON:-0}"
-# sudo インストールの明示オプトイン（DEVGEAR_INSTALL_ASSUME_YES=1 または --assume-yes）
-ASSUME_YES="${DEVGEAR_INSTALL_ASSUME_YES:-0}"
+SKIP_PYTHON="${DEEPBLUE_INSTALL_SKIP_PYTHON:-0}"
+# sudo インストールの明示オプトイン（DEEPBLUE_INSTALL_ASSUME_YES=1 または --assume-yes）
+ASSUME_YES="${DEEPBLUE_INSTALL_ASSUME_YES:-0}"
 
 usage() {
   cat <<'EOF'
-Usage: bash plugins/devgear/install.sh [options]
+Usage: bash plugins/deepblue/install.sh [options]
 
 Options:
   --repo-root PATH   Repository root (default: script directory)
@@ -28,8 +28,8 @@ Options:
   --help             Show this help
 
 Environment:
-  DEVGEAR_INSTALL_SKIP_PYTHON=1  Skip Python package installation and venv setup
-  DEVGEAR_INSTALL_ASSUME_YES=1   Allow sudo package installation without confirmation
+  DEEPBLUE_INSTALL_SKIP_PYTHON=1  Skip Python package installation and venv setup
+  DEEPBLUE_INSTALL_ASSUME_YES=1   Allow sudo package installation without confirmation
 EOF
 }
 
@@ -73,12 +73,12 @@ ensure_venv_module() {
     return
   fi
 
-  echo "[devgear] python3-venv not found. Attempting to install..."
+  echo "[deepblue] python3-venv not found. Attempting to install..."
 
   # sudo インストールに明示的な許可が必要
   if [[ "${ASSUME_YES}" != "1" ]]; then
-    echo "[devgear] Will install python3-venv using sudo." >&2
-    echo "[devgear] To allow, set DEVGEAR_INSTALL_ASSUME_YES=1 or specify --assume-yes." >&2
+    echo "[deepblue] Will install python3-venv using sudo." >&2
+    echo "[deepblue] To allow, set DEEPBLUE_INSTALL_ASSUME_YES=1 or specify --assume-yes." >&2
     exit 1
   fi
 
@@ -86,19 +86,19 @@ ensure_venv_module() {
   py_ver="$("${PYTHON3}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 
   if command -v apt-get >/dev/null 2>&1; then
-    echo "[devgear] Running: sudo apt-get install python${py_ver}-venv"
+    echo "[deepblue] Running: sudo apt-get install python${py_ver}-venv"
     sudo apt-get update -qq
     sudo apt-get install -y "python${py_ver}-venv" \
       || sudo apt-get install -y python3-venv
   elif command -v dnf >/dev/null 2>&1; then
-    echo "[devgear] Running: sudo dnf install python${py_ver}-devel python3-virtualenv"
+    echo "[deepblue] Running: sudo dnf install python${py_ver}-devel python3-virtualenv"
     sudo dnf install -y "python${py_ver}-devel" python3-virtualenv \
       || sudo dnf install -y python3-virtualenv
   elif command -v yum >/dev/null 2>&1; then
-    echo "[devgear] Running: sudo yum install python3-virtualenv"
+    echo "[deepblue] Running: sudo yum install python3-virtualenv"
     sudo yum install -y python3-virtualenv
   elif command -v brew >/dev/null 2>&1; then
-    echo "[devgear] Running: brew install python@${py_ver}"
+    echo "[deepblue] Running: brew install python@${py_ver}"
     brew install "python@${py_ver}" || brew install python3
   else
     echo "Error: python3-venv not found and automatic installation failed." >&2
@@ -110,14 +110,14 @@ ensure_venv_module() {
     echo "Error: python3-venv installation completed but venv module is still not available." >&2
     exit 1
   fi
-  echo "[devgear] python3-venv installation complete"
+  echo "[deepblue] python3-venv installation complete"
 }
 
 # 既存 venv の stale symlink を削除する
 check_and_reset_venv() {
   # 壊れたシンボリックリンク（自己参照含む）は即削除
   if [[ -L "${VENV_DIR}" ]]; then
-    echo "[devgear] Removing stale .venv symlink at ${VENV_DIR}"
+    echo "[deepblue] Removing stale .venv symlink at ${VENV_DIR}"
     rm -f -- "${VENV_DIR}"
   fi
 }
@@ -129,7 +129,7 @@ ensure_virtualenv() {
 
   ensure_venv_module
 
-  echo "[devgear] Creating Python virtual environment at ${VENV_DIR}"
+  echo "[deepblue] Creating Python virtual environment at ${VENV_DIR}"
   "${PYTHON3}" -m venv "${VENV_DIR}"
   if [[ ! -x "${VENV_PYTHON}" ]]; then
     echo "Error: failed to create virtual environment at ${VENV_DIR}." >&2
@@ -145,7 +145,7 @@ ensure_settings_json() {
 
   if [[ -e "${SETTINGS_PATH}" ]]; then
     if [[ -f "${SETTINGS_PATH}" ]]; then
-      echo "[devgear] Existing settings file found at ${SETTINGS_PATH}"
+      echo "[deepblue] Existing settings file found at ${SETTINGS_PATH}"
       return
     fi
     echo "Error: ${SETTINGS_PATH} exists and is not a regular file." >&2
@@ -159,33 +159,33 @@ ensure_settings_json() {
 
   mkdir -p "${SETTINGS_DIR}"
 
-  # 信頼鍵ストアを初期化する（DEVGEAR_TRUSTED_KEY_FILE が設定されている場合のみ import）
+  # 信頼鍵ストアを初期化する（DEEPBLUE_TRUSTED_KEY_FILE が設定されている場合のみ import）
   local trust_dir="${SETTINGS_DIR}/trust"
   mkdir -p "${trust_dir}"
   chmod 0700 "${trust_dir}"
-  if [[ -n "${DEVGEAR_TRUSTED_KEY_FILE:-}" && -f "${DEVGEAR_TRUSTED_KEY_FILE}" ]]; then
+  if [[ -n "${DEEPBLUE_TRUSTED_KEY_FILE:-}" && -f "${DEEPBLUE_TRUSTED_KEY_FILE}" ]]; then
     # symlink 経由攻撃と HOME 外参照を防ぐ
-    if [[ -L "${DEVGEAR_TRUSTED_KEY_FILE}" ]]; then
-      echo "Error: DEVGEAR_TRUSTED_KEY_FILE must not be a symlink" >&2
+    if [[ -L "${DEEPBLUE_TRUSTED_KEY_FILE}" ]]; then
+      echo "Error: DEEPBLUE_TRUSTED_KEY_FILE must not be a symlink" >&2
       exit 1
     fi
     local key_dir
-    key_dir="$(cd "$(dirname "${DEVGEAR_TRUSTED_KEY_FILE}")" 2>/dev/null && pwd)" || {
-      echo "Error: invalid DEVGEAR_TRUSTED_KEY_FILE (cannot resolve directory)" >&2
+    key_dir="$(cd "$(dirname "${DEEPBLUE_TRUSTED_KEY_FILE}")" 2>/dev/null && pwd)" || {
+      echo "Error: invalid DEEPBLUE_TRUSTED_KEY_FILE (cannot resolve directory)" >&2
       exit 1
     }
-    local resolved_key="${key_dir}/$(basename "${DEVGEAR_TRUSTED_KEY_FILE}")"
+    local resolved_key="${key_dir}/$(basename "${DEEPBLUE_TRUSTED_KEY_FILE}")"
     if [[ "${resolved_key}" != "${HOME}/"* ]]; then
-      echo "Error: DEVGEAR_TRUSTED_KEY_FILE must reside under HOME" >&2
+      echo "Error: DEEPBLUE_TRUSTED_KEY_FILE must reside under HOME" >&2
       exit 1
     fi
     local gnupg_dir="${trust_dir}/gnupg"
     mkdir -p "${gnupg_dir}"
     chmod 0700 "${gnupg_dir}"
-    cp -- "${DEVGEAR_TRUSTED_KEY_FILE}" "${trust_dir}/maintainer.asc"
+    cp -- "${DEEPBLUE_TRUSTED_KEY_FILE}" "${trust_dir}/maintainer.asc"
     chmod 0600 "${trust_dir}/maintainer.asc"
     GNUPGHOME="${gnupg_dir}" gpg --import "${trust_dir}/maintainer.asc" 2>/dev/null || true
-    echo "[devgear] Trust key imported: ${trust_dir}/gnupg"
+    echo "[deepblue] Trust key imported: ${trust_dir}/gnupg"
   fi
 
   "${PYTHON3}" - "${SETTINGS_TEMPLATE_PATH}" "${SETTINGS_PATH}" <<'PY'
@@ -200,7 +200,7 @@ data = json.loads(template_path.read_text(encoding="utf-8"))
 settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 settings_path.chmod(0o600)
 PY
-  echo "[devgear] Wrote full default settings file: ${SETTINGS_PATH}"
+  echo "[deepblue] Wrote full default settings file: ${SETTINGS_PATH}"
 }
 
 install_user_python() {
@@ -209,11 +209,11 @@ install_user_python() {
   if [[ -L "${_LEGACY_VENV}" ]]; then
     if [[ "$(readlink "${_LEGACY_VENV}")" != "${VENV_DIR}" ]]; then
       # VENV_DIR 以外を指す stale symlink のみ削除
-      echo "[devgear] Removing stale symlink at ${_LEGACY_VENV}"
+      echo "[deepblue] Removing stale symlink at ${_LEGACY_VENV}"
       rm -f -- "${_LEGACY_VENV}"
     fi
   elif [[ -d "${_LEGACY_VENV}/bin" && -f "${_LEGACY_VENV}/pyvenv.cfg" ]]; then
-    echo "[devgear] Removing legacy venv at ${_LEGACY_VENV} (migrated to ${VENV_DIR})"
+    echo "[deepblue] Removing legacy venv at ${_LEGACY_VENV} (migrated to ${VENV_DIR})"
     rm -rf -- "${_LEGACY_VENV}"
   fi
 
@@ -221,15 +221,15 @@ install_user_python() {
   ensure_virtualenv
 
   if ! "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
-    echo "[devgear] Bootstrapping pip via ensurepip"
+    echo "[deepblue] Bootstrapping pip via ensurepip"
     run_quietly "${VENV_PYTHON}" -m ensurepip --upgrade
   fi
 
-  echo "[devgear] Installing Python package dependencies into ${VENV_DIR}"
+  echo "[deepblue] Installing Python package dependencies into ${VENV_DIR}"
   pip_install_quiet --upgrade pip wheel
 
   # ハッシュロックで PyPI レジストリ側改ざんを検知する（LS-1）。
-  # 再生成: pip-compile --generate-hashes plugins/devgear/requirements.in -o plugins/devgear/requirements.txt
+  # 再生成: pip-compile --generate-hashes plugins/deepblue/requirements.in -o plugins/deepblue/requirements.txt
   run_quietly "${VENV_PYTHON}" -m pip install --no-input --quiet --disable-pip-version-check \
     --require-hashes -r "${SCRIPT_DIR}/requirements.txt"
 
@@ -238,15 +238,15 @@ install_user_python() {
   pip_install_quiet --no-deps -e "${REPO_ROOT}"
 
   # ONNX モデルは既存ファイルを最優先で使い、未生成なら外部配布 → 現行ビルドの順で解決する。
-  local model_target="${HOME}/.devgear/models"
+  local model_target="${HOME}/.deepblue/models"
   local model_onnx="${model_target}/model.onnx"
   local onnx_config="${SCRIPT_DIR}/onnx/onnx.json"
   local src_dir="${SCRIPT_DIR}/src"
 
   if [[ -f "${model_onnx}" ]]; then
-    echo "[devgear] ONNX model already present (skipping): ${model_onnx}"
+    echo "[deepblue] ONNX model already present (skipping): ${model_onnx}"
   elif PYTHONPATH="${src_dir}" "${PYTHON3}" -m model_build download --config "${onnx_config}" --out "${model_target}"; then
-    echo "[devgear] ONNX model downloaded: ${model_onnx}"
+    echo "[deepblue] ONNX model downloaded: ${model_onnx}"
   else
     local download_status=$?
     if [[ "${download_status}" != "3" ]]; then
@@ -254,12 +254,12 @@ install_user_python() {
     fi
 
     # config が disabled / 未設定なら、現行の生成処理へフォールバックする。
-    if [[ "${DEVGEAR_INSTALL_ONNX_ASYNC:-0}" == "1" ]]; then
+    if [[ "${DEEPBLUE_INSTALL_ONNX_ASYNC:-0}" == "1" ]]; then
       local bg_script="${SCRIPT_DIR}/onnx/_run_onnx_background.sh"
       if [[ ! -f "${bg_script}" ]]; then
-        echo "[devgear] Warning: ONNX background script not found: ${bg_script}" >&2
+        echo "[deepblue] Warning: ONNX background script not found: ${bg_script}" >&2
       else
-        echo "[devgear] Launching ONNX build in background. Log: ${HOME}/.devgear/logs/modelbuild.log"
+        echo "[deepblue] Launching ONNX build in background. Log: ${HOME}/.deepblue/logs/modelbuild.log"
         # env -i で最小限の環境のみ渡し、PYTHONPATH/LD_PRELOAD 等の汚染を防ぐ
         env -i HOME="${HOME}" PATH="${PATH}" LANG="${LANG:-C}" \
           nohup setsid bash "${bg_script}" </dev/null >/dev/null 2>&1 &
@@ -275,38 +275,38 @@ install_user_python() {
 
   # 既存 settings.json のセキュリティ移行（パスワード分離・sslmode 強制）
   if [[ -f "${SETTINGS_PATH}" ]]; then
-    echo "[devgear] Migrating existing settings.json to hardened format"
-    "${VENV_PYTHON}" -m devgear.mem migrate-settings || echo "[devgear] Note: settings migration skipped."
+    echo "[deepblue] Migrating existing settings.json to hardened format"
+    "${VENV_PYTHON}" -m deepblue.mem migrate-settings || echo "[deepblue] Note: settings migration skipped."
   fi
 }
 
 # キャッシュディレクトリ内の .venv を VENV_DIR へのシンボリックリンクに差し替える共通処理。
-# venv 実体は ~/.devgear/.venv に一元化したため、キャッシュ内の旧実体 venv もレガシーとして削除する。
+# venv 実体は ~/.deepblue/.venv に一元化したため、キャッシュ内の旧実体 venv もレガシーとして削除する。
 _replace_with_symlink() {
   local target_venv="$1"
   local quiet="${2:-0}"
   # 既に正しいリンクが張られている場合はスキップ
   if [[ -L "${target_venv}" && "$(readlink "${target_venv}")" == "${VENV_DIR}" ]]; then
-    [[ "${quiet}" != "1" ]] && echo "[devgear] .venv already linked (skipping): ${target_venv} -> ${VENV_DIR}"
+    [[ "${quiet}" != "1" ]] && echo "[deepblue] .venv already linked (skipping): ${target_venv} -> ${VENV_DIR}"
     return 0
   fi
   # キャッシュ内の旧実体 venv は削除して symlink に置換する
   if [[ -d "${target_venv}" && -f "${target_venv}/pyvenv.cfg" ]]; then
-    echo "[devgear] Removing legacy venv at ${target_venv} (replacing with symlink)"
+    echo "[deepblue] Removing legacy venv at ${target_venv} (replacing with symlink)"
     rm -rf -- "${target_venv}"
   elif [[ -L "${target_venv}" ]]; then
     rm -f -- "${target_venv}"
   elif [[ -e "${target_venv}" ]]; then
-    echo "[devgear] Warning: ${target_venv} is unexpected file type, skipping" >&2
+    echo "[deepblue] Warning: ${target_venv} is unexpected file type, skipping" >&2
     return 0
   fi
-  echo "[devgear] Symlinking .venv: ${target_venv} -> ${VENV_DIR}"
+  echo "[deepblue] Symlinking .venv: ${target_venv} -> ${VENV_DIR}"
   ln -sfn -- "${VENV_DIR}" "${target_venv}"
 }
 
 # Claude Code キャッシュに .venv シンボリックリンクを張る
 update_claude_cache_symlinks() {
-  [[ -d "${HOME}/.claude/plugins/cache/devgear" ]] || return 0
+  [[ -d "${HOME}/.claude/plugins/cache/deepblue" ]] || return 0
 
   # 現バージョンを取得（plugin.json が読めない場合は空文字 → 全バージョン静音なし）
   local current_ver=""
@@ -318,7 +318,7 @@ PY
 )"
   fi
 
-  for org_dir in "${HOME}/.claude/plugins/cache/devgear"/*; do
+  for org_dir in "${HOME}/.claude/plugins/cache/deepblue"/*; do
     [[ -L "${org_dir}" ]] && continue
     [[ -d "${org_dir}" ]] || continue
     for ver_dir in "${org_dir}"/*; do
@@ -334,7 +334,7 @@ PY
 
 # Copilot キャッシュに .venv シンボリックリンクを張る
 update_copilot_cache_symlink() {
-  local copilot_plugin_dir="${HOME}/.copilot/installed-plugins/devgear/devgear"
+  local copilot_plugin_dir="${HOME}/.copilot/installed-plugins/deepblue/deepblue"
   [[ -d "${copilot_plugin_dir}" ]] || return 0
 
   _replace_with_symlink "${copilot_plugin_dir}/.venv"
@@ -370,7 +370,7 @@ done
 # ---- 変数確定（引数パース後に設定） ----
 
 : "${HOME:?Error: HOME must be set.}"
-SETTINGS_DIR="${HOME}/.devgear"
+SETTINGS_DIR="${HOME}/.deepblue"
 VENV_DIR="${SETTINGS_DIR}/.venv"
 VENV_PYTHON="${VENV_DIR}/bin/python3"
 # 旧パスに実体 venv が残っていれば削除する（SETTINGS_DIR/.venv に移行済み）
@@ -385,7 +385,7 @@ if ! PYTHON3="$(find_python3)"; then
   echo "       Install python3.12 (e.g. brew install python@3.12) and retry." >&2
   exit 1
 fi
-echo "[devgear] Using ${PYTHON3} ($("${PYTHON3}" --version))"
+echo "[deepblue] Using ${PYTHON3} ($("${PYTHON3}" --version))"
 
 if ! command -v git >/dev/null 2>&1; then
   echo "Error: git is required." >&2
@@ -404,13 +404,13 @@ update_claude_cache_symlinks
 update_copilot_cache_symlink
 
 if ! command -v psql >/dev/null 2>&1; then
-  echo "[devgear] Note: PostgreSQL client (psql) is required for mem sync features."
+  echo "[deepblue] Note: PostgreSQL client (psql) is required for mem sync features."
 fi
 
-# ~/.devgear/mem.db スキーマを初期化する（べき等: 既存DBは変更しない）
+# ~/.deepblue/mem.db スキーマを初期化する（べき等: 既存DBは変更しない）
 if [[ "${SKIP_PYTHON}" != "1" ]]; then
-  echo "[devgear] Initializing mem database at ${SETTINGS_DIR}/mem.db"
-  "${VENV_PYTHON}" -m devgear.mem setup
+  echo "[deepblue] Initializing mem database at ${SETTINGS_DIR}/mem.db"
+  "${VENV_PYTHON}" -m deepblue.mem setup
 fi
 
 # インストール済みバージョンを記録する（SKIP_PYTHON=1 のときは Python 未インストールなので記録しない）
@@ -428,7 +428,7 @@ PY
   printf '%s\n' "${PLUGIN_VERSION}" > "${_ver_tmp}"
   chmod 0600 "${_ver_tmp}"
   mv -f "${_ver_tmp}" "${SETTINGS_DIR}/plugin_installed_version"
-  echo "[devgear] Recorded installed version: ${PLUGIN_VERSION}"
+  echo "[deepblue] Recorded installed version: ${PLUGIN_VERSION}"
 fi
 
-echo "[devgear] OK"
+echo "[deepblue] OK"

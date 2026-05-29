@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.hooks import (
+from deepblue.hooks import (
     block_no_verify,
     cost_tracker,
     evaluate_session,
@@ -143,7 +143,7 @@ class TestCostTracker:
         monkeypatch.setattr(cost_tracker, "write_stdout", stdout.append)
         monkeypatch.setattr(cost_tracker, "append_file", lambda path, content: appended.append((Path(path), content)))
         monkeypatch.setattr(cost_tracker, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(cost_tracker, "get_devgear_dir", lambda: tmp_path)
+        monkeypatch.setattr(cost_tracker, "get_deepblue_dir", lambda: tmp_path)
         monkeypatch.setenv("CLAUDE_SESSION_ID", "session-123")
 
         assert cost_tracker.main() == 0
@@ -158,12 +158,12 @@ class TestCostTracker:
         assert row["estimated_cost_usd"] == cost_tracker.estimate_cost("haiku", 12, 34)
 
     def test_main_entrypoint_passthroughs_raw_input(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("devgear.hooks.hook_common.read_raw_stdin", lambda: "{}")
-        monkeypatch.setattr("devgear.hooks.hook_common.parse_json_object", lambda raw: None)
+        monkeypatch.setattr("deepblue.hooks.hook_common.read_raw_stdin", lambda: "{}")
+        monkeypatch.setattr("deepblue.hooks.hook_common.parse_json_object", lambda raw: None)
         outputs: list[str] = []
-        monkeypatch.setattr("devgear.hooks.hook_common.write_stdout", outputs.append)
+        monkeypatch.setattr("deepblue.hooks.hook_common.write_stdout", outputs.append)
 
-        assert _run_entrypoint("devgear.hooks.cost_tracker") == 0
+        assert _run_entrypoint("deepblue.hooks.cost_tracker") == 0
         assert outputs == ["{}"]
 
 
@@ -254,13 +254,13 @@ class TestEvaluateSession:
         assert any("Error: boom" in message for message in logs)
 
     def test_main_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr("devgear.hooks.hook_common.read_raw_stdin", lambda: "{}")
-        monkeypatch.setattr("devgear.lib.core_utils.read_file", lambda path: None)
-        monkeypatch.setattr("devgear.lib.core_utils.get_learned_skills_dir", lambda: tmp_path / "learned")
-        monkeypatch.setattr("devgear.lib.core_utils.ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr("devgear.lib.core_utils.log", lambda message: None)
+        monkeypatch.setattr("deepblue.hooks.hook_common.read_raw_stdin", lambda: "{}")
+        monkeypatch.setattr("deepblue.lib.core_utils.read_file", lambda path: None)
+        monkeypatch.setattr("deepblue.lib.core_utils.get_learned_skills_dir", lambda: tmp_path / "learned")
+        monkeypatch.setattr("deepblue.lib.core_utils.ensure_dir", lambda path: Path(path))
+        monkeypatch.setattr("deepblue.lib.core_utils.log", lambda message: None)
 
-        assert _run_entrypoint("devgear.hooks.evaluate_session") == 0
+        assert _run_entrypoint("deepblue.hooks.evaluate_session") == 0
 
     def test_main_reports_long_sessions(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         config_path = tmp_path / "config.json"
@@ -684,18 +684,18 @@ class TestSessionEndMain:
         assert recorded[0][0] == summary
 
     def test_main_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr("devgear.hooks.hook_common.read_raw_stdin", lambda: "{}")
-        monkeypatch.setattr("devgear.lib.core_utils.get_sessions_dir", lambda: tmp_path / "sessions")
-        monkeypatch.setattr("devgear.lib.core_utils.get_date_string", lambda: "2026-01-01")
-        monkeypatch.setattr("devgear.lib.core_utils.get_session_id_short", lambda: "abc123")
-        monkeypatch.setattr("devgear.lib.core_utils.get_project_name", lambda: "repo")
-        monkeypatch.setattr("devgear.lib.core_utils.run_command", lambda cmd: {"success": True, "output": "main"})
-        monkeypatch.setattr("devgear.lib.core_utils.get_time_string", lambda: "10:00")
-        monkeypatch.setattr("devgear.lib.core_utils.ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr("devgear.lib.core_utils.write_file", lambda path, content: None)
-        monkeypatch.setattr("devgear.lib.core_utils.log", lambda message: None)
+        monkeypatch.setattr("deepblue.hooks.hook_common.read_raw_stdin", lambda: "{}")
+        monkeypatch.setattr("deepblue.lib.core_utils.get_sessions_dir", lambda: tmp_path / "sessions")
+        monkeypatch.setattr("deepblue.lib.core_utils.get_date_string", lambda: "2026-01-01")
+        monkeypatch.setattr("deepblue.lib.core_utils.get_session_id_short", lambda: "abc123")
+        monkeypatch.setattr("deepblue.lib.core_utils.get_project_name", lambda: "repo")
+        monkeypatch.setattr("deepblue.lib.core_utils.run_command", lambda cmd: {"success": True, "output": "main"})
+        monkeypatch.setattr("deepblue.lib.core_utils.get_time_string", lambda: "10:00")
+        monkeypatch.setattr("deepblue.lib.core_utils.ensure_dir", lambda path: Path(path))
+        monkeypatch.setattr("deepblue.lib.core_utils.write_file", lambda path, content: None)
+        monkeypatch.setattr("deepblue.lib.core_utils.log", lambda message: None)
 
-        assert _run_entrypoint("devgear.hooks.session_end") == 0
+        assert _run_entrypoint("deepblue.hooks.session_end") == 0
 
 
 class TestPreCompact:
@@ -733,46 +733,46 @@ class TestPreCompact:
         assert any("Error: boom" in message for message in logs)
 
     def test_main_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr("devgear.lib.core_utils.get_sessions_dir", lambda: tmp_path)
-        monkeypatch.setattr("devgear.lib.core_utils.ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr("devgear.lib.core_utils.append_file", lambda path, content: None)
-        monkeypatch.setattr("devgear.lib.core_utils.find_files", lambda directory, pattern: [])
-        monkeypatch.setattr("devgear.lib.core_utils.get_datetime_string", lambda: "2026-01-01 00:00:00")
-        monkeypatch.setattr("devgear.lib.core_utils.get_time_string", lambda: "10:00")
-        monkeypatch.setattr("devgear.lib.core_utils.log", lambda message: None)
+        monkeypatch.setattr("deepblue.lib.core_utils.get_sessions_dir", lambda: tmp_path)
+        monkeypatch.setattr("deepblue.lib.core_utils.ensure_dir", lambda path: Path(path))
+        monkeypatch.setattr("deepblue.lib.core_utils.append_file", lambda path, content: None)
+        monkeypatch.setattr("deepblue.lib.core_utils.find_files", lambda directory, pattern: [])
+        monkeypatch.setattr("deepblue.lib.core_utils.get_datetime_string", lambda: "2026-01-01 00:00:00")
+        monkeypatch.setattr("deepblue.lib.core_utils.get_time_string", lambda: "10:00")
+        monkeypatch.setattr("deepblue.lib.core_utils.log", lambda message: None)
 
-        assert _run_entrypoint("devgear.hooks.pre_compact") == 0
+        assert _run_entrypoint("deepblue.hooks.pre_compact") == 0
 
 
 class TestSimpleHookEntrypoints:
     def test_block_no_verify_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "devgear.hooks.hook_common.read_raw_stdin",
+            "deepblue.hooks.hook_common.read_raw_stdin",
             lambda: json.dumps({"tool_input": {"command": "git status"}}),
         )
 
-        assert _run_entrypoint("devgear.hooks.block_no_verify") == 0
+        assert _run_entrypoint("deepblue.hooks.block_no_verify") == 0
 
     def test_git_push_reminder_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "devgear.hooks.hook_common.read_raw_stdin",
+            "deepblue.hooks.hook_common.read_raw_stdin",
             lambda: json.dumps({"tool_input": {"command": "git commit -m 'test'"}}),
         )
 
-        assert _run_entrypoint("devgear.hooks.pre_bash_git_push_reminder") == 0
+        assert _run_entrypoint("deepblue.hooks.pre_bash_git_push_reminder") == 0
 
     def test_build_complete_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "devgear.hooks.hook_common.read_raw_stdin",
+            "deepblue.hooks.hook_common.read_raw_stdin",
             lambda: json.dumps({"tool_input": {"command": "npm test"}}),
         )
 
-        assert _run_entrypoint("devgear.hooks.post_bash_build_complete") == 0
+        assert _run_entrypoint("deepblue.hooks.post_bash_build_complete") == 0
 
     def test_session_end_marker_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("devgear.hooks.hook_common.read_raw_stdin", lambda: '{"session":"end"}')
+        monkeypatch.setattr("deepblue.hooks.hook_common.read_raw_stdin", lambda: '{"session":"end"}')
 
-        assert _run_entrypoint("devgear.hooks.session_end_marker") == 0
+        assert _run_entrypoint("deepblue.hooks.session_end_marker") == 0
 
 
 class TestSessionStartRubyLog:
@@ -780,8 +780,8 @@ class TestSessionStartRubyLog:
 
     def test_ruby_project_emits_bundler_log(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Gemfile のみのプロジェクトで Ruby detected ログが出ること。"""
-        from devgear.hooks import session_start
-        from devgear.lib.package_manager import PackageManagerResult
+        from deepblue.hooks import session_start
+        from deepblue.lib.package_manager import PackageManagerResult
 
         (tmp_path / "Gemfile").write_text('source "https://rubygems.org"\ngem "sinatra"\n', encoding="utf-8")
 
@@ -809,8 +809,8 @@ class TestCheckpointInjection:
         tmp_path: Path,
     ) -> None:
         """session_start.run() の共通モックを設定する。"""
-        from devgear.hooks import session_start
-        from devgear.lib.package_manager import PackageManagerResult
+        from deepblue.hooks import session_start
+        from deepblue.lib.package_manager import PackageManagerResult
 
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(session_start, "log", lambda _: None)
@@ -822,7 +822,7 @@ class TestCheckpointInjection:
 
     def test_active_checkpoint_is_injected(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """completed: false のチェックポイントが additionalContext に注入されること。"""
-        from devgear.hooks import session_start
+        from deepblue.hooks import session_start
 
         sessions_dir = tmp_path / "session-data"
         sessions_dir.mkdir()
@@ -848,7 +848,7 @@ class TestCheckpointInjection:
 
     def test_completed_checkpoint_is_not_injected(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """completed: true のチェックポイントは注入されないこと。"""
-        from devgear.hooks import session_start
+        from deepblue.hooks import session_start
 
         sessions_dir = tmp_path / "session-data"
         sessions_dir.mkdir()
@@ -889,7 +889,7 @@ class TestAutoCheckpointSave:
         """メッセージ数が閾値以上のとき新規チェックポイントが作成されること。"""
         sessions_dir = tmp_path / "session-data"
         sessions_dir.mkdir()
-        metadata = {"project": "devgear", "branch": "develop", "worktree": str(tmp_path)}
+        metadata = {"project": "deepblue", "branch": "develop", "worktree": str(tmp_path)}
         summary = self._make_summary(35)
 
         session_end._auto_save_checkpoint(summary, metadata, sessions_dir)
@@ -905,12 +905,12 @@ class TestAutoCheckpointSave:
         sessions_dir = tmp_path / "session-data"
         sessions_dir.mkdir()
         today = session_end.get_date_string()
-        existing = sessions_dir / f"checkpoint-{today}-devgear.md"
+        existing = sessions_dir / f"checkpoint-{today}-deepblue.md"
         existing.write_text(
-            "---\ntask: devgear\ncompleted: false\n---\n\n## 変更済みファイル\n- old.py\n\n## 再開コンテキスト\nold\n",
+            "---\ntask: deepblue\ncompleted: false\n---\n\n## 変更済みファイル\n- old.py\n\n## 再開コンテキスト\nold\n",
             encoding="utf-8",
         )
-        metadata = {"project": "devgear", "branch": "main", "worktree": str(tmp_path)}
+        metadata = {"project": "deepblue", "branch": "main", "worktree": str(tmp_path)}
         summary = self._make_summary(40)
         summary["filesModified"] = ["new.py"]
 
@@ -925,12 +925,12 @@ class TestAutoCheckpointSave:
         sessions_dir = tmp_path / "session-data"
         sessions_dir.mkdir()
         today = session_end.get_date_string()
-        existing = sessions_dir / f"checkpoint-{today}-devgear.md"
+        existing = sessions_dir / f"checkpoint-{today}-deepblue.md"
         existing.write_text(
-            "---\ntask: devgear\ncompleted: true\n---\n\n## 変更済みファイル\n- old.py\n",
+            "---\ntask: deepblue\ncompleted: true\n---\n\n## 変更済みファイル\n- old.py\n",
             encoding="utf-8",
         )
-        metadata = {"project": "devgear", "branch": "main", "worktree": str(tmp_path)}
+        metadata = {"project": "deepblue", "branch": "main", "worktree": str(tmp_path)}
         summary = self._make_summary(40)
 
         session_end._auto_save_checkpoint(summary, metadata, sessions_dir)
@@ -966,15 +966,15 @@ class TestAutoCheckpointSave:
 class TestFilterSessionSummary:
     """_filter_session_summary のユニットテスト。"""
 
-    _START = "<!-- devgear:SUMMARY:START -->"
-    _END = "<!-- devgear:SUMMARY:END -->"
+    _START = "<!-- deepblue:SUMMARY:START -->"
+    _END = "<!-- deepblue:SUMMARY:END -->"
 
     def _wrap(self, body: str) -> str:
         return f"# Session: 2026-05-09\n---\n{self._START}\n{body}\n{self._END}\n### 次回セッションへの引継ぎ\n-\n### 読み込むコンテキスト\n```\n[relevant files]\n```\n"
 
     def test_keeps_tasks_and_files_modified(self) -> None:
         """Tasks と Files Modified のみを保持すること。"""
-        from devgear.hooks.session_start import _filter_session_summary
+        from deepblue.hooks.session_start import _filter_session_summary
 
         body = "### Tasks\n- msg1\n- msg2\n\n### Files Modified\n- foo.py\n\n### 使用したツール\nEdit, Read\n\n### 統計\n- ユーザーメッセージ総数: 5"
         result = _filter_session_summary(self._wrap(body))
@@ -988,7 +988,7 @@ class TestFilterSessionSummary:
 
     def test_no_files_modified_section(self) -> None:
         """Files Modified がない場合は Tasks のみを返すこと。"""
-        from devgear.hooks.session_start import _filter_session_summary
+        from deepblue.hooks.session_start import _filter_session_summary
 
         body = "### Tasks\n- only task\n\n### 使用したツール\nRead"
         result = _filter_session_summary(self._wrap(body))
@@ -999,7 +999,7 @@ class TestFilterSessionSummary:
 
     def test_removes_template_sections(self) -> None:
         """テンプレート部分（引継ぎ・コンテキスト）を除外すること。"""
-        from devgear.hooks.session_start import _filter_session_summary
+        from deepblue.hooks.session_start import _filter_session_summary
 
         body = "### Tasks\n- t1\n\n### Files Modified\n- a.py"
         result = _filter_session_summary(self._wrap(body))
@@ -1010,7 +1010,7 @@ class TestFilterSessionSummary:
 
     def test_truncates_when_exceeds_max_length(self) -> None:
         """2000文字を超える場合は compact_line で切り詰めること。"""
-        from devgear.hooks.session_start import _filter_session_summary
+        from deepblue.hooks.session_start import _filter_session_summary
 
         long_tasks = "\n".join(f"- {'x' * 100}" for _ in range(30))
         body = f"### Tasks\n{long_tasks}\n\n### Files Modified\n- f.py"
@@ -1021,7 +1021,7 @@ class TestFilterSessionSummary:
 
     def test_fallback_when_no_marker(self) -> None:
         """SUMMARY マーカーがない旧形式は compact_line にフォールバックすること。"""
-        from devgear.hooks.session_start import _filter_session_summary
+        from deepblue.hooks.session_start import _filter_session_summary
 
         old_format = "## Session Summary\n- did something\n" * 50
         result = _filter_session_summary(old_format, max_length=2000)
@@ -1030,6 +1030,6 @@ class TestFilterSessionSummary:
 
     def test_empty_content_returns_empty(self) -> None:
         """空文字列を渡すと空文字列を返すこと。"""
-        from devgear.hooks.session_start import _filter_session_summary
+        from deepblue.hooks.session_start import _filter_session_summary
 
         assert _filter_session_summary("") == ""

@@ -11,8 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from devgear.hooks.hook_common import parse_json_object, read_raw_stdin
-from devgear.lib.core_utils import count_in_file, ensure_dir, get_learned_skills_dir, log, read_file
+from deepblue.hooks.hook_common import parse_json_object, read_raw_stdin
+from deepblue.lib.core_utils import count_in_file, ensure_dir, get_learned_skills_dir, log, read_file
 
 
 def _default_config_path() -> Path:

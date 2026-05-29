@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.lib.settings import (
+from deepblue.lib.settings import (
     extract_coverage_hint_lines,
     get_hook_settings,
     get_nested,

@@ -28,11 +28,11 @@ from unittest.mock import patch
 import pytest
 
 # テスト対象モジュールを先にインポート（reload は使わない）
-from devgear.skills.comply import cli
-from devgear.skills.comply.grader import ComplianceResult, StepResult
-from devgear.skills.comply.parser import ComplianceSpec, Detector, Step
-from devgear.skills.comply.runner import ScenarioRun
-from devgear.skills.comply.scenario_generator import Scenario
+from deepblue.skills.comply import cli
+from deepblue.skills.comply.grader import ComplianceResult, StepResult
+from deepblue.skills.comply.parser import ComplianceSpec, Detector, Step
+from deepblue.skills.comply.runner import ScenarioRun
+from deepblue.skills.comply.scenario_generator import Scenario
 
 
 @pytest.fixture()
@@ -113,11 +113,11 @@ class TestCliScenarioErrorHandling:
             spec,
             scenarios,
             patch("sys.argv", ["comply", str(skill_file)]),
-            patch("devgear.skills.comply.cli.generate_spec", return_value=spec),
-            patch("devgear.skills.comply.cli.generate_scenarios", return_value=scenarios),
-            patch("devgear.skills.comply.cli.generate_report", return_value="# Report"),
-            patch("devgear.skills.comply.cli.run_scenario", side_effect=run_side),
-            patch("devgear.skills.comply.cli.grade", side_effect=grade_fn),
+            patch("deepblue.skills.comply.cli.generate_spec", return_value=spec),
+            patch("deepblue.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("deepblue.skills.comply.cli.generate_report", return_value="# Report"),
+            patch("deepblue.skills.comply.cli.run_scenario", side_effect=run_side),
+            patch("deepblue.skills.comply.cli.grade", side_effect=grade_fn),
             patch.object(Path, "mkdir"),
             patch.object(Path, "write_text"),
         )
@@ -139,11 +139,11 @@ class TestCliScenarioErrorHandling:
 
         with (
             patch("sys.argv", ["comply", str(skill_file)]),
-            patch("devgear.skills.comply.cli.generate_spec", return_value=spec),
-            patch("devgear.skills.comply.cli.generate_scenarios", return_value=scenarios),
-            patch("devgear.skills.comply.cli.generate_report", return_value="# Report"),
-            patch("devgear.skills.comply.cli.run_scenario", side_effect=run_side_effect),
-            patch("devgear.skills.comply.cli.grade", return_value=_make_result()) as mock_grade,
+            patch("deepblue.skills.comply.cli.generate_spec", return_value=spec),
+            patch("deepblue.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("deepblue.skills.comply.cli.generate_report", return_value="# Report"),
+            patch("deepblue.skills.comply.cli.run_scenario", side_effect=run_side_effect),
+            patch("deepblue.skills.comply.cli.grade", return_value=_make_result()) as mock_grade,
             patch.object(Path, "mkdir"),
             patch.object(Path, "write_text"),
             patch("logging.Logger.warning", side_effect=_capture_logged_messages(warnings)),
@@ -172,11 +172,11 @@ class TestCliScenarioErrorHandling:
 
         with (
             patch("sys.argv", ["comply", str(skill_file)]),
-            patch("devgear.skills.comply.cli.generate_spec", return_value=spec),
-            patch("devgear.skills.comply.cli.generate_scenarios", return_value=scenarios),
-            patch("devgear.skills.comply.cli.generate_report", return_value="# Report"),
-            patch("devgear.skills.comply.cli.run_scenario", side_effect=run_side_effect),
-            patch("devgear.skills.comply.cli.grade", return_value=_make_result()) as mock_grade,
+            patch("deepblue.skills.comply.cli.generate_spec", return_value=spec),
+            patch("deepblue.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("deepblue.skills.comply.cli.generate_report", return_value="# Report"),
+            patch("deepblue.skills.comply.cli.run_scenario", side_effect=run_side_effect),
+            patch("deepblue.skills.comply.cli.grade", return_value=_make_result()) as mock_grade,
             patch.object(Path, "mkdir"),
             patch.object(Path, "write_text"),
             patch("logging.Logger.warning", side_effect=_capture_logged_messages(warnings)),
@@ -204,11 +204,11 @@ class TestCliScenarioErrorHandling:
 
         with (
             patch("sys.argv", ["comply", str(skill_file)]),
-            patch("devgear.skills.comply.cli.generate_spec", return_value=spec),
-            patch("devgear.skills.comply.cli.generate_scenarios", return_value=scenarios),
-            patch("devgear.skills.comply.cli.generate_report", return_value="# Report"),
-            patch("devgear.skills.comply.cli.run_scenario", return_value=good_run),
-            patch("devgear.skills.comply.cli.grade", side_effect=grade_side_effect),
+            patch("deepblue.skills.comply.cli.generate_spec", return_value=spec),
+            patch("deepblue.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("deepblue.skills.comply.cli.generate_report", return_value="# Report"),
+            patch("deepblue.skills.comply.cli.run_scenario", return_value=good_run),
+            patch("deepblue.skills.comply.cli.grade", side_effect=grade_side_effect),
             patch.object(Path, "mkdir"),
             patch.object(Path, "write_text"),
             patch("logging.Logger.warning", side_effect=_capture_logged_messages(warnings)),
@@ -230,11 +230,11 @@ class TestCliScenarioErrorHandling:
 
         with (
             patch("sys.argv", ["comply", str(skill_file)]),
-            patch("devgear.skills.comply.cli.generate_spec", return_value=spec),
-            patch("devgear.skills.comply.cli.generate_scenarios", return_value=scenarios),
-            patch("devgear.skills.comply.cli.generate_report", return_value="# Report"),
-            patch("devgear.skills.comply.cli.run_scenario", return_value=good_run),
-            patch("devgear.skills.comply.cli.grade", side_effect=grade_side_effect),
+            patch("deepblue.skills.comply.cli.generate_spec", return_value=spec),
+            patch("deepblue.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("deepblue.skills.comply.cli.generate_report", return_value="# Report"),
+            patch("deepblue.skills.comply.cli.run_scenario", return_value=good_run),
+            patch("deepblue.skills.comply.cli.grade", side_effect=grade_side_effect),
             patch.object(Path, "mkdir"),
             patch.object(Path, "write_text"),
         ):
@@ -268,10 +268,10 @@ class TestCliDryRun:
 
         with (
             patch("sys.argv", ["comply", str(skill_file), "--dry-run"]),
-            patch("devgear.skills.comply.cli.generate_spec", return_value=spec),
-            patch("devgear.skills.comply.cli.generate_scenarios", return_value=scenarios),
-            patch("devgear.skills.comply.cli.run_scenario") as mock_run,
-            patch("devgear.skills.comply.cli.grade") as mock_grade,
+            patch("deepblue.skills.comply.cli.generate_spec", return_value=spec),
+            patch("deepblue.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("deepblue.skills.comply.cli.run_scenario") as mock_run,
+            patch("deepblue.skills.comply.cli.grade") as mock_grade,
             patch("logging.Logger.info", side_effect=_capture_logged_messages(logs)),
         ):
             cli.main()
@@ -290,10 +290,10 @@ class TestCliDryRun:
 
         with (
             patch("sys.argv", ["comply", str(skill_file), "--dry-run"]),
-            patch("devgear.skills.comply.cli.generate_spec", return_value=spec),
-            patch("devgear.skills.comply.cli.generate_scenarios", return_value=scenarios),
-            patch("devgear.skills.comply.cli.run_scenario"),
-            patch("devgear.skills.comply.cli.grade"),
+            patch("deepblue.skills.comply.cli.generate_spec", return_value=spec),
+            patch("deepblue.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("deepblue.skills.comply.cli.run_scenario"),
+            patch("deepblue.skills.comply.cli.grade"),
             patch("logging.Logger.info", side_effect=_capture_logged_messages(logs)),
         ):
             cli.main()
@@ -319,11 +319,11 @@ class TestCliNoScenariosExecuted:
 
         with (
             patch("sys.argv", ["comply", str(skill_file)]),
-            patch("devgear.skills.comply.cli.generate_spec", return_value=spec),
-            patch("devgear.skills.comply.cli.generate_scenarios", return_value=scenarios),
-            patch("devgear.skills.comply.cli.generate_report", return_value="# Report"),
-            patch("devgear.skills.comply.cli.run_scenario", side_effect=RuntimeError("fail")),
-            patch("devgear.skills.comply.cli.grade"),
+            patch("deepblue.skills.comply.cli.generate_spec", return_value=spec),
+            patch("deepblue.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("deepblue.skills.comply.cli.generate_report", return_value="# Report"),
+            patch("deepblue.skills.comply.cli.run_scenario", side_effect=RuntimeError("fail")),
+            patch("deepblue.skills.comply.cli.grade"),
             patch.object(Path, "mkdir"),
             patch.object(Path, "write_text"),
             patch("logging.Logger.warning", side_effect=_capture_logged_messages(warnings)),
@@ -361,11 +361,11 @@ class TestCliRecommendationMessage:
 
         with (
             patch("sys.argv", ["comply", str(skill_file)]),
-            patch("devgear.skills.comply.cli.generate_spec", return_value=spec),
-            patch("devgear.skills.comply.cli.generate_scenarios", return_value=scenarios),
-            patch("devgear.skills.comply.cli.generate_report", return_value="# Report"),
-            patch("devgear.skills.comply.cli.run_scenario", return_value=good_run),
-            patch("devgear.skills.comply.cli.grade", return_value=self._make_low_result()),
+            patch("deepblue.skills.comply.cli.generate_spec", return_value=spec),
+            patch("deepblue.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("deepblue.skills.comply.cli.generate_report", return_value="# Report"),
+            patch("deepblue.skills.comply.cli.run_scenario", return_value=good_run),
+            patch("deepblue.skills.comply.cli.grade", return_value=self._make_low_result()),
             patch.object(Path, "mkdir"),
             patch.object(Path, "write_text"),
             patch("logging.Logger.info", side_effect=_capture_logged_messages(infos)),
@@ -383,11 +383,11 @@ class TestCliRecommendationMessage:
 
         with (
             patch("sys.argv", ["comply", str(skill_file)]),
-            patch("devgear.skills.comply.cli.generate_spec", return_value=spec),
-            patch("devgear.skills.comply.cli.generate_scenarios", return_value=scenarios),
-            patch("devgear.skills.comply.cli.generate_report", return_value="# Report"),
-            patch("devgear.skills.comply.cli.run_scenario", return_value=good_run),
-            patch("devgear.skills.comply.cli.grade", return_value=_make_result()),
+            patch("deepblue.skills.comply.cli.generate_spec", return_value=spec),
+            patch("deepblue.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("deepblue.skills.comply.cli.generate_report", return_value="# Report"),
+            patch("deepblue.skills.comply.cli.run_scenario", return_value=good_run),
+            patch("deepblue.skills.comply.cli.grade", return_value=_make_result()),
             patch.object(Path, "mkdir"),
             patch.object(Path, "write_text"),
             patch("logging.Logger.info", side_effect=_capture_logged_messages(infos)),
@@ -409,8 +409,8 @@ class TestCliMainBlock:
 
         with (
             patch("sys.argv", ["comply", str(skill_path), "--dry-run"]),
-            patch("devgear.skills.comply.spec_generator.generate_spec", return_value=spec),
-            patch("devgear.skills.comply.scenario_generator.generate_scenarios", return_value=scenarios),
-            patch("devgear.skills.comply.report.generate_report", return_value="# Report"),
+            patch("deepblue.skills.comply.spec_generator.generate_spec", return_value=spec),
+            patch("deepblue.skills.comply.scenario_generator.generate_scenarios", return_value=scenarios),
+            patch("deepblue.skills.comply.report.generate_report", return_value="# Report"),
         ):
-            runpy.run_module("devgear.skills.comply.cli", run_name="__main__")
+            runpy.run_module("deepblue.skills.comply.cli", run_name="__main__")

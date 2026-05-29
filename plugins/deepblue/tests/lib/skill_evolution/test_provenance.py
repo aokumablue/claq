@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from devgear.lib.skill_evolution import provenance as provenance
+from deepblue.lib.skill_evolution import provenance as provenance
 
 
 def test_package_exports_modules():
     """パッケージが provenance モジュールを公開していること。"""
-    from devgear.lib import skill_evolution
+    from deepblue.lib import skill_evolution
 
     assert skill_evolution.provenance is provenance
     assert callable(skill_evolution.collect_skill_health)

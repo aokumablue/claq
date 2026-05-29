@@ -26,7 +26,7 @@
 | **デスクトップ通知** | `Stop` | タスクサマリーの macOS デスクトップ通知を送信（standard+） |
 | **セッション終了マーカー** | `SessionEnd` | ライフサイクルマーカーとクリーンアップログ |
 
-`SessionStart` の `session_install` は `.venv` symlink の検査・修復に加えて、`~/.devgear/plugin_installed_version` と `plugin.json` の version が異なるときに `install.sh` を自動実行します。ONNX モデルビルド（5〜10 分）はバックグラウンドで走るため、SessionStart 自体はブロックしません。ビルド中は mem 機能が一時的に利用不可となり、stderr に `onnx building...` が出ます。完了後は自動的に復旧します。ビルドログは `~/.devgear/logs/modelbuild.log` を参照してください。
+`SessionStart` の `session_install` は `.venv` symlink の検査・修復に加えて、`~/.deepblue/plugin_installed_version` と `plugin.json` の version が異なるときに `install.sh` を自動実行します。ONNX モデルビルド（5〜10 分）はバックグラウンドで走るため、SessionStart 自体はブロックしません。ビルド中は mem 機能が一時的に利用不可となり、stderr に `onnx building...` が出ます。完了後は自動的に復旧します。ビルドログは `~/.deepblue/logs/modelbuild.log` を参照してください。
 
 ## フックのカスタマイズ
 
@@ -50,18 +50,18 @@
 
 ### ランタイムフック制御（推奨）
 
-フックは常に strict として動作します。`hooks.json` を編集せずに個別フックを止めたい場合は、`DEVGEAR_DISABLED_HOOKS` を使います。
+フックは常に strict として動作します。`hooks.json` を編集せずに個別フックを止めたい場合は、`DEEPBLUE_DISABLED_HOOKS` を使います。
 
 ```bash
 # カンマ区切りでフック ID を指定
-export DEVGEAR_DISABLED_HOOKS="post:edit:typecheck"
+export DEEPBLUE_DISABLED_HOOKS="post:edit:typecheck"
 ```
 
 ### quality-gate のコマンド定義
 
 `settings.json` はこのプラグイン全体の設定ファイルです。`hooks` / `skills` / `commands` に分けて、どの機能の設定かを一目で分かるようにしています。
 
-`hooks.quality-gate` は `post-edit` で `extensions` と `tool_names` を使って対象を絞り、`bash` に配列でコマンドを書きます。`tool_names` は空配列なら絞り込みなしです。同梱サンプルは `.py` 編集時に `ruff check plugins/devgear/src tests` を 1 本実行するだけです。
+`hooks.quality-gate` は `post-edit` で `extensions` と `tool_names` を使って対象を絞り、`bash` に配列でコマンドを書きます。`tool_names` は空配列なら絞り込みなしです。同梱サンプルは `.py` 編集時に `ruff check plugins/deepblue/src tests` を 1 本実行するだけです。
 
 この quality-gate は、プロジェクト側の言語ランタイムに依存せず、検出できた主要言語ごとのプリセットを使います。未対応言語や、対応コマンドが PATH にない場合は安全にスキップされます。
 
@@ -72,7 +72,7 @@ export DEVGEAR_DISABLED_HOOKS="post:edit:typecheck"
       "post-edit": {
         "extensions": [".py"],
         "tool_names": [],
-        "bash": [["ruff", "check", "plugins/devgear/src", "tests"]]
+        "bash": [["ruff", "check", "plugins/deepblue/src", "tests"]]
       }
     }
   }
@@ -81,18 +81,18 @@ export DEVGEAR_DISABLED_HOOKS="post:edit:typecheck"
 
 `commands` セクションも同じ考え方で、`commands.<name>.tools.bash` に argv 配列を書きます。複数の解析コマンドを並べる場合は、`bash` 配列に 1 コマンドずつ追加します。
 
-`DEVGEAR_QUALITY_GATE_CONFIG` で明示的に指した設定だけを追加読み込みします。必要なら `extensions` や `tool_names` で絞り込み、`bash` に配列でコマンドを並べます。
+`DEEPBLUE_QUALITY_GATE_CONFIG` で明示的に指した設定だけを追加読み込みします。必要なら `extensions` や `tool_names` で絞り込み、`bash` に配列でコマンドを並べます。
 
 ### 独自フックの作成
 
-このリポジトリのフック本体は、`devgear.hooks.hook_common` のヘルパーを使う Python モジュールが基本です。`stdin` で受け取った JSON を見て、警告は `stderr`、通常時は元の入力を `stdout` に返します。
+このリポジトリのフック本体は、`deepblue.hooks.hook_common` のヘルパーを使う Python モジュールが基本です。`stdin` で受け取った JSON を見て、警告は `stderr`、通常時は元の入力を `stdout` に返します。
 
 **基本構造:**
 
 ```python
 #!/usr/bin/env python3
 
-from devgear.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
+from deepblue.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
 
 
 def main() -> int:
@@ -163,7 +163,7 @@ print(
 ```json
 {
   "type": "command",
-  "command": "python3 -m devgear.hooks.session_end_marker",
+  "command": "python3 -m deepblue.hooks.session_end_marker",
   "async": true,
   "timeout": 30
 }

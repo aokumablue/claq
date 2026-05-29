@@ -500,7 +500,7 @@ def format_health_report(report: dict[str, Any], options: dict[str, Any] | None 
     if not skills:
         return "\n".join(
             [
-                "devgear skill health",
+                "deepblue skill health",
                 f"Generated: {report.get('generated_at')}",
                 "",
                 "No skill execution records found.",
@@ -509,7 +509,7 @@ def format_health_report(report: dict[str, Any], options: dict[str, Any] | None 
         )
 
     lines = [
-        "devgear skill health",
+        "deepblue skill health",
         f"Generated: {report.get('generated_at')}",
         f"Skills: {summary['total_skills']} total, {summary['healthy_skills']} healthy, {summary['declining_skills']} declining",
         "",

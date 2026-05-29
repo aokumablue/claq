@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.ci import validate_commands, validate_rules
+from deepblue.ci import validate_commands, validate_rules
 
 
 def test_validate_commands_helper_and_rules_helper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

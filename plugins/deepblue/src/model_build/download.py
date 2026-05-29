@@ -112,7 +112,7 @@ def _download_archive(
         ctx.verify_mode = ssl.CERT_NONE
         handlers.append(urllib.request.HTTPSHandler(context=ctx))
     opener = urllib.request.build_opener(*handlers)
-    request = urllib.request.Request(model_url, headers={"User-Agent": "devgear-model-build/1.0"})
+    request = urllib.request.Request(model_url, headers={"User-Agent": "deepblue-model-build/1.0"})
     downloaded = 0
     with opener.open(request, timeout=600) as response, archive_path.open("wb") as out:
         while chunk := response.read(_CHUNK_SIZE):
@@ -220,7 +220,7 @@ def download_model_bundle(config_path: Path, output_dir: Path) -> int:
         raise ValueError(f"sha256 is required when download is enabled in {config_path}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="devgear_onnx_", dir=str(output_dir.parent)) as temp_root:
+    with tempfile.TemporaryDirectory(prefix="deepblue_onnx_", dir=str(output_dir.parent)) as temp_root:
         temp_root_path = Path(temp_root)
         archive_path = temp_root_path / "bundle.archive"
         extracted_dir = temp_root_path / "extracted"

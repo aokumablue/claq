@@ -18,8 +18,8 @@ model: haiku
 ## 入力
 
 **プロジェクト単位**の観測ファイルから読み込む:
-- プロジェクト: `~/.devgear/c-projects/<project-hash>/observations.jsonl`
-- グローバルのフォールバック: `~/.devgear/observations.jsonl`
+- プロジェクト: `~/.deepblue/c-projects/<project-hash>/observations.jsonl`
+- グローバルのフォールバック: `~/.deepblue/observations.jsonl`
 
 ```jsonl
 {"timestamp":"2025-01-22T10:30:00Z","event":"tool_start","session":"abc123","tool":"Edit","input":"...","project_id":"a1b2c3d4e5f6","project_name":"my-react-app"}
@@ -67,8 +67,8 @@ model: haiku
 ## 出力
 
 **プロジェクト単位**のインスティンクトディレクトリに作成または更新:
-- プロジェクト: `~/.devgear/c-projects/<project-hash>/instincts/personal/`
-- グローバル: `~/.devgear/instincts/personal/`（汎用パターン用）
+- プロジェクト: `~/.deepblue/c-projects/<project-hash>/instincts/personal/`
+- グローバル: `~/.deepblue/instincts/personal/`（汎用パターン用）
 
 ### プロジェクト単位のインスティンクト（既定）
 
@@ -153,7 +153,7 @@ scope: global
 2. 各インスタンスの信頼度が**0.8以上**
 3. ドメインがグローバル向けリスト（security/general-best-practices/workflow）に含まれる
 
-昇格は `devgear.skills.learn.cli promote` コマンドまたは `/c-instinct evolve` の分析で行われる。
+昇格は `deepblue.skills.learn.cli promote` コマンドまたは `/c-instinct evolve` の分析で行われる。
 
 ## 重要なガイドライン
 

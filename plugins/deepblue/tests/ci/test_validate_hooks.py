@@ -1,11 +1,11 @@
-"""devgear.ci.validate_hooks のテスト。"""
+"""deepblue.ci.validate_hooks のテスト。"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from devgear.ci.validate_hooks import validate_hooks
+from deepblue.ci.validate_hooks import validate_hooks
 
 
 def write_json(path: Path, value: object) -> None:

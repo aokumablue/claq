@@ -1,10 +1,10 @@
-"""devgear.lib.inspection のテスト。"""
+"""deepblue.lib.inspection のテスト。"""
 
 from __future__ import annotations
 
 import pytest
 
-from devgear.lib import inspection as inspection
+from deepblue.lib import inspection as inspection
 
 
 def make_skill_run(**overrides):

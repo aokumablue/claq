@@ -7,9 +7,9 @@ import re
 import time
 from dataclasses import dataclass, field
 
-from devgear.mem.database import MemoryChunk
-from devgear.mem.redaction import redact
-from devgear.mem.tag_stripping import strip_tags
+from deepblue.mem.database import MemoryChunk
+from deepblue.mem.redaction import redact
+from deepblue.mem.tag_stripping import strip_tags
 
 _FILE_WRITE_TOOLS = {"Write", "Edit", "NotebookEdit"}
 
@@ -92,7 +92,7 @@ class ChunkAccumulator:
         if is_error:
             self._error_count += 1
             if tool_response:
-                from devgear.mem.redaction import redact
+                from deepblue.mem.redaction import redact
 
                 self._last_error = redact(tool_response[:500])
 

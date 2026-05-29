@@ -29,25 +29,25 @@ def prepare_repo(tmp_path: Path) -> Path:
     """最小構成のリポジトリを用意する。"""
     repo_root = tmp_path / "repo"
     (repo_root / "scripts").mkdir(parents=True)
-    (repo_root / "plugins" / "devgear" / ".claude-plugin").mkdir(parents=True)
-    (repo_root / "plugins" / "devgear" / "src" / "devgear" / "mem").mkdir(parents=True)
+    (repo_root / "plugins" / "deepblue" / ".claude-plugin").mkdir(parents=True)
+    (repo_root / "plugins" / "deepblue" / "src" / "deepblue" / "mem").mkdir(parents=True)
     (repo_root / ".claude-plugin").mkdir(parents=True)
 
     shutil.copy2(SOURCE_SCRIPT, repo_root / "scripts" / "version-up.sh")
     (repo_root / "scripts" / "version-up.sh").chmod(0o755)
 
-    shutil.copy2(ROOT / "plugins" / "devgear" / "pyproject.toml", repo_root / "plugins" / "devgear" / "pyproject.toml")
+    shutil.copy2(ROOT / "plugins" / "deepblue" / "pyproject.toml", repo_root / "plugins" / "deepblue" / "pyproject.toml")
     shutil.copy2(
-        ROOT / "plugins" / "devgear" / ".claude-plugin" / "plugin.json",
-        repo_root / "plugins" / "devgear" / ".claude-plugin" / "plugin.json",
+        ROOT / "plugins" / "deepblue" / ".claude-plugin" / "plugin.json",
+        repo_root / "plugins" / "deepblue" / ".claude-plugin" / "plugin.json",
     )
     shutil.copy2(
         ROOT / ".claude-plugin" / "marketplace.json",
         repo_root / ".claude-plugin" / "marketplace.json",
     )
     shutil.copy2(
-        ROOT / "plugins" / "devgear" / "src" / "devgear" / "mem" / "__init__.py",
-        repo_root / "plugins" / "devgear" / "src" / "devgear" / "mem" / "__init__.py",
+        ROOT / "plugins" / "deepblue" / "src" / "deepblue" / "mem" / "__init__.py",
+        repo_root / "plugins" / "deepblue" / "src" / "deepblue" / "mem" / "__init__.py",
     )
 
     return repo_root
@@ -56,16 +56,16 @@ def prepare_repo(tmp_path: Path) -> Path:
 def read_versions(repo_root: Path) -> tuple[str, str, str, str]:
     """4つのバージョン値を読む。"""
     return (
-        tomllib.loads((repo_root / "plugins" / "devgear" / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        tomllib.loads((repo_root / "plugins" / "deepblue" / "pyproject.toml").read_text(encoding="utf-8"))["project"][
             "version"
         ],
-        json.loads((repo_root / "plugins" / "devgear" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))[
+        json.loads((repo_root / "plugins" / "deepblue" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))[
             "version"
         ],
         json.loads((repo_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))["plugins"][0][
             "version"
         ],
-        (repo_root / "plugins" / "devgear" / "src" / "devgear" / "mem" / "__init__.py")
+        (repo_root / "plugins" / "deepblue" / "src" / "deepblue" / "mem" / "__init__.py")
         .read_text(encoding="utf-8")
         .split('__version__ = "', 1)[1]
         .split('"', 1)[0],
@@ -102,7 +102,7 @@ def test_bump_version_rejects_preexisting_version_drift(tmp_path: Path) -> None:
     repo_root = prepare_repo(tmp_path)
     current = read_versions(repo_root)[0]
     next_version = f"{current.rsplit('.', 1)[0]}.{int(current.rsplit('.', 1)[1]) + 1}"
-    plugin_json = repo_root / "plugins" / "devgear" / ".claude-plugin" / "plugin.json"
+    plugin_json = repo_root / "plugins" / "deepblue" / ".claude-plugin" / "plugin.json"
     plugin_json.write_text(plugin_json.read_text(encoding="utf-8").replace(f'"{current}"', '"0.0.99"', 1), encoding="utf-8")
 
     result = run_script(repo_root, ["--version", next_version])

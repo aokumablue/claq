@@ -9,9 +9,9 @@ from __future__ import annotations
 import json
 import sys
 
-from devgear.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
-from devgear.mem.reducer import ReduceConfig, reduce_bash_output
-from devgear.mem.settings import CompactSettings, Settings
+from deepblue.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
+from deepblue.mem.reducer import ReduceConfig, reduce_bash_output
+from deepblue.mem.settings import CompactSettings, Settings
 
 
 def _to_reduce_config(compact: CompactSettings) -> ReduceConfig:

@@ -1,4 +1,4 @@
-"""devgear テスト向けの Pytest 設定と共有フィクスチャ。
+"""deepblue テスト向けの Pytest 設定と共有フィクスチャ。
 
 テストのインポート用に plugin root 配下の src/ が Python パスへ含まれることを保証する。
 """
@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-SRC = ROOT / "plugins" / "devgear" / "src"
+SRC = ROOT / "plugins" / "deepblue" / "src"
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))

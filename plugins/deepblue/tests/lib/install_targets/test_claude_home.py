@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from devgear.lib.install_targets.claude_home import claude_home_adapter
+from deepblue.lib.install_targets.claude_home import claude_home_adapter
 
 
 class TestClaudeHomeAdapter:
@@ -41,7 +41,7 @@ class TestClaudeHomeAdapter:
     def test_get_install_state_path(self, tmp_path):
         """正しい install state パスを取得すること。"""
         result = claude_home_adapter.get_install_state_path(home_dir=str(tmp_path))
-        expected = str(tmp_path / ".claude" / "devgear" / "install-state.json")
+        expected = str(tmp_path / ".claude" / "deepblue" / "install-state.json")
         assert result == expected
 
     def test_native_root_relative_path(self):

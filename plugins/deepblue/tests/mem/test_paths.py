@@ -1,4 +1,4 @@
-"""devgear.mem._paths のユニットテスト。
+"""deepblue.mem._paths のユニットテスト。
 
 仕様は tests/model_build/test_paths.py と共有する。
 両者は配布物として独立しているため、同一仕様のテストをコピーして維持する。
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.mem._paths import safe_join, sha256_file, validate_sha256_format
+from deepblue.mem._paths import safe_join, sha256_file, validate_sha256_format
 
 
 class TestSafeJoin:

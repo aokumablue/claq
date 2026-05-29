@@ -14,10 +14,10 @@ import threading
 import time
 from pathlib import Path
 
-from devgear.lib.core_utils import get_devgear_dir
-from devgear.skills.learn.cli import detect_project
+from deepblue.lib.core_utils import get_deepblue_dir
+from deepblue.skills.learn.cli import detect_project
 
-_CONFIG_DIR = get_devgear_dir()
+_CONFIG_DIR = get_deepblue_dir()
 _PROMPT_PATTERN = re.compile(
     os.environ.get(
         "CLV2_OBSERVER_PROMPT_PATTERN",
@@ -152,7 +152,7 @@ def _write_guard_sentinel(project_dir: Path, project_root: Path) -> None:
     sentinel = _sentinel_path(project_dir, project_root)
     sentinel.parent.mkdir(parents=True, exist_ok=True)
     sentinel.write_text(
-        "observer paused: confirmation or permission prompt detected; rerun `python3 -m devgear.skills.learn.observer start --reset` after reviewing observer.log\n",
+        "observer paused: confirmation or permission prompt detected; rerun `python3 -m deepblue.skills.learn.observer start --reset` after reviewing observer.log\n",
         encoding="utf-8",
     )
 
@@ -193,7 +193,7 @@ def _print_status(project_dir: Path, pid_file: Path, log_file: Path, instincts_d
 def _run_prune() -> None:
     try:
         subprocess.run(
-            [_resolve_python_cmd(), "-m", "devgear.skills.learn.cli", "prune", "--quiet"],
+            [_resolve_python_cmd(), "-m", "deepblue.skills.learn.cli", "prune", "--quiet"],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -257,7 +257,7 @@ def _get_idle_seconds() -> int:
 
 def _guardian_allows(project_dir: Path, project_root: Path, log_file: Path) -> bool:
     interval = int(os.environ.get("OBSERVER_INTERVAL_SECONDS", "300"))
-    last_run_log = Path(os.environ.get("OBSERVER_LAST_RUN_LOG", str(Path.home() / ".devgear" / "observer-last-run.log")))
+    last_run_log = Path(os.environ.get("OBSERVER_LAST_RUN_LOG", str(get_deepblue_dir() / "observer-last-run.log")))
     active_start = int(os.environ.get("OBSERVER_ACTIVE_HOURS_START", "800"))
     active_end = int(os.environ.get("OBSERVER_ACTIVE_HOURS_END", "2300"))
     max_idle = int(os.environ.get("OBSERVER_MAX_IDLE_SECONDS", "1800"))
@@ -347,8 +347,8 @@ def _analyze_observations(
 
     _append_log(log_file, f"Analyzing {obs_count} observations for project {project_name}...")
 
-    if os.environ.get("CLV2_IS_WINDOWS", "false") == "true" and os.environ.get("DEVGEAR_OBSERVER_ALLOW_WINDOWS", "false") != "true":
-        _append_log(log_file, "Skipping claude analysis on Windows due to known non-interactive hang issue (#295). Set DEVGEAR_OBSERVER_ALLOW_WINDOWS=true to override.")
+    if os.environ.get("CLV2_IS_WINDOWS", "false") == "true" and os.environ.get("DEEPBLUE_OBSERVER_ALLOW_WINDOWS", "false") != "true":
+        _append_log(log_file, "Skipping claude analysis on Windows due to known non-interactive hang issue (#295). Set DEEPBLUE_OBSERVER_ALLOW_WINDOWS=true to override.")
         return
 
     if shutil.which("claude") is None:
@@ -361,11 +361,11 @@ def _analyze_observations(
 
     observer_tmp_dir = project_dir / ".observer-tmp"
     observer_tmp_dir.mkdir(parents=True, exist_ok=True)
-    analysis_file = observer_tmp_dir / f"devgear-observer-analysis-{os.getpid()}-{int(time.time())}.jsonl"
+    analysis_file = observer_tmp_dir / f"deepblue-observer-analysis-{os.getpid()}-{int(time.time())}.jsonl"
 
     try:
         lines = observations_file.read_text(encoding="utf-8").splitlines()
-        recent_lines = lines[-int(os.environ.get("DEVGEAR_OBSERVER_MAX_ANALYSIS_LINES", "500")) :]
+        recent_lines = lines[-int(os.environ.get("DEEPBLUE_OBSERVER_MAX_ANALYSIS_LINES", "500")) :]
         analysis_file.write_text("\n".join(recent_lines) + ("\n" if recent_lines else ""), encoding="utf-8")
     except OSError:
         return
@@ -407,13 +407,13 @@ def _analyze_observations(
         "- Examples of project patterns: use React functional components, follow Django REST framework conventions\n"
     )
 
-    timeout_seconds = int(os.environ.get("DEVGEAR_OBSERVER_TIMEOUT_SECONDS", "120"))
-    max_turns = int(os.environ.get("DEVGEAR_OBSERVER_MAX_TURNS", "10"))
+    timeout_seconds = int(os.environ.get("DEEPBLUE_OBSERVER_TIMEOUT_SECONDS", "120"))
+    max_turns = int(os.environ.get("DEEPBLUE_OBSERVER_MAX_TURNS", "10"))
     if max_turns < 4:
         max_turns = 10
 
     env = os.environ.copy()
-    env["DEVGEAR_SKIP_OBSERVE"] = "1"
+    env["DEEPBLUE_SKIP_OBSERVE"] = "1"
     try:
         result = subprocess.run(
             [
@@ -592,7 +592,7 @@ def _start_observer(project: dict, reset: bool) -> int:
                 proc_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             else:
                 proc_kwargs["start_new_session"] = True
-            subprocess.Popen([_resolve_python_cmd(), "-m", "devgear.skills.learn.observer", "loop"], **proc_kwargs)
+            subprocess.Popen([_resolve_python_cmd(), "-m", "deepblue.skills.learn.observer", "loop"], **proc_kwargs)
     except OSError as error:
         print(f"Failed to start observer: {error}")
         return 1

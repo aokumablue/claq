@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from devgear.hooks.hook_common import read_raw_stdin
+from deepblue.hooks.hook_common import read_raw_stdin
 
 
 def main() -> int:

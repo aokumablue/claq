@@ -28,7 +28,7 @@ context: fork
   "tests": {
     "baseline": ["python3 -m pytest -q"],
     "group": ["python3 -m pytest -q tests/test_a.py"],
-    "final": ["python3 -m pytest -q", "ruff check plugins/devgear/src plugins/devgear/tests"]
+    "final": ["python3 -m pytest -q", "ruff check plugins/deepblue/src plugins/deepblue/tests"]
   }
 }
 ```

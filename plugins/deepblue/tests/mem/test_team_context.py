@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from devgear.mem.settings import TeamSettings
-from devgear.mem.team_context import build_team_context
+from deepblue.mem.settings import TeamSettings
+from deepblue.mem.team_context import build_team_context
 
 
 @dataclass
@@ -156,7 +156,7 @@ def test_build_team_context_hybrid_requires_embedding_model() -> None:
 def test_build_team_context_hybrid_uses_team_search(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from devgear.mem import team_context as module
+    from deepblue.mem import team_context as module
 
     captured = {}
 
@@ -166,7 +166,7 @@ def test_build_team_context_hybrid_uses_team_search(
         return [0.1, 0.2]
 
     # 遅延 import 先をパッチ（team_context.py 内の from ... import を上書き）
-    monkeypatch.setattr("devgear.mem.embedding.embed_query", _fake_embed)
+    monkeypatch.setattr("deepblue.mem.embedding.embed_query", _fake_embed)
 
     pg = _make_pg([("c-1", 0.8)], {"c-1": _chunk(content="team-knowledge")})
     out = module.build_team_context(
@@ -257,7 +257,7 @@ def test_build_team_context_search_exception_returns_blank(
 
 
 def test_format_timestamp_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
-    from devgear.mem import team_context as module
+    from deepblue.mem import team_context as module
 
     class _BadDatetime:
         @staticmethod

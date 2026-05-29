@@ -15,8 +15,8 @@ command: /c-instinct
 ## 実装
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/devgear-helpers.sh"
-devgear_run devgear.skills.learn.cli <subcommand>
+source "${CLAUDE_PLUGIN_ROOT}/runtime/deepblue-helpers.sh"
+deepblue_run deepblue.skills.learn.cli <subcommand>
 ```
 
 ## サブコマンド

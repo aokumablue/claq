@@ -1,4 +1,4 @@
-"""devgear.mem.pg_database の追加テスト。"""
+"""deepblue.mem.pg_database の追加テスト。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from devgear.mem.database import (
+from deepblue.mem.database import (
     Adr,
     EventLog,
     Instinct,
@@ -18,7 +18,7 @@ from devgear.mem.database import (
     ProjectProfile,
     Session,
 )
-from devgear.mem.pg_database import PgDatabase, _ensure_ssl, _to_json
+from deepblue.mem.pg_database import PgDatabase, _ensure_ssl, _to_json
 
 
 class FakeCursor:

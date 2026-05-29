@@ -2,15 +2,15 @@
 # PostgreSQL セットアップの統合入口。
 # apply: 既存 PostgreSQL に pg_setup.sql を流し込む。
 # docker17: PostgreSQL 17 + pgvector を Docker で起動して初期化する。
-# どちらのモードも ~/.devgear/settings.json は更新しない。
+# どちらのモードも ~/.deepblue/settings.json は更新しない。
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_SQL_FILE="${SCRIPT_DIR}/pg_setup.sql"
-POSTGRES_USER="devgear"
-POSTGRES_DB="devgear_mem"
-CONTAINER_NAME="devgear-postgres17"
+POSTGRES_USER="deepblue"
+POSTGRES_DB="deepblue_mem"
+CONTAINER_NAME="deepblue-postgres17"
 DOCKERFILE_NAME="Dockerfile.postgres17-pgvector"
 COMPOSE_FILE_NAME="compose.yaml"
 ENV_FILE_NAME=".env"
@@ -163,15 +163,15 @@ reset_database() {
   log "Force mode: recreating database ${POSTGRES_DB}"
 
   docker exec -i "${CONTAINER_NAME}" psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d postgres <<'SQL'
-DROP DATABASE IF EXISTS devgear_mem WITH (FORCE);
-CREATE DATABASE devgear_mem;
+DROP DATABASE IF EXISTS deepblue_mem WITH (FORCE);
+CREATE DATABASE deepblue_mem;
 SQL
 }
 
 print_sync_settings_example() {
   local origin_user="$1"
 
-  echo "1. Edit the mem.sync section in ~/.devgear/settings.json:"
+  echo "1. Edit the mem.sync section in ~/.deepblue/settings.json:"
   echo '   {'
   echo '     "mem": {'
   echo '       "sync": {'
@@ -241,7 +241,7 @@ run_apply_mode() {
   log "Setup completed successfully!"
   log "Next steps:"
   print_sync_settings_example "<your_username>"
-  log "Run: python3 -m devgear.mem sync"
+  log "Run: python3 -m deepblue.mem sync"
 }
 
 run_docker_mode() {
@@ -363,23 +363,23 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.postgres17-pgvector
-    container_name: devgear-postgres17
+    container_name: deepblue-postgres17
     command:
       - postgres
       - -c
       - default_toast_compression=lz4
     restart: unless-stopped
     environment:
-      POSTGRES_USER: devgear
+      POSTGRES_USER: deepblue
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: devgear_mem
+      POSTGRES_DB: deepblue_mem
     ports:
       - "5432:5432"
     volumes:
-      - devgear-postgres17-data:/var/lib/postgresql/data
+      - deepblue-postgres17-data:/var/lib/postgresql/data
 
 volumes:
-  devgear-postgres17-data:
+  deepblue-postgres17-data:
 EOF
 
   if [[ "${FORCE}" == "1" ]]; then
@@ -409,7 +409,7 @@ EOF
   log "Connection URL: postgresql://${POSTGRES_USER}:***@${SERVER_HOST}:5432/${POSTGRES_DB}"
   log "Next steps:"
   print_sync_settings_example "${ORIGIN_USER}"
-  log "Run: python3 -m devgear.mem sync"
+  log "Run: python3 -m deepblue.mem sync"
 }
 
 main() {

@@ -6,7 +6,7 @@ import argparse
 import re
 from pathlib import Path
 
-from devgear.ci.ci_common import REPO_ROOT, emit_error
+from deepblue.ci.ci_common import REPO_ROOT, emit_error
 
 DEFAULT_ROOT_DIR = REPO_ROOT
 DEFAULT_COMMANDS_DIR = REPO_ROOT / "commands"

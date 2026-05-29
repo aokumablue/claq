@@ -10,21 +10,21 @@ from pathlib import Path
 
 import yaml
 
-from devgear.lib.core_utils import get_devgear_dir
-from devgear.mem.database import Adr, Database, EventLog, Instinct, generate_uuid
-from devgear.mem.logger import get as _get_logger
+from deepblue.lib.core_utils import get_deepblue_dir
+from deepblue.mem.database import Adr, Database, EventLog, Instinct, generate_uuid
+from deepblue.mem.logger import get as _get_logger
 
 log = _get_logger("IMPORT")
 
 # --- パス定義 ---
 
-DEVGEAR_DIR = get_devgear_dir()
-DEVGEAR_STATE_DIR = get_devgear_dir() / "state"
+DEEPBLUE_DIR = get_deepblue_dir()
+DEEPBLUE_STATE_DIR = get_deepblue_dir() / "state"
 
 
 def _project_dirs() -> list[Path]:
     """project 保存先を返す。"""
-    directory = DEVGEAR_DIR / "projects"
+    directory = DEEPBLUE_DIR / "projects"
     return [directory] if directory.exists() else []
 
 
@@ -47,8 +47,8 @@ def import_instincts(db: Database, origin_user: str, project_id: str | None = No
     # グローバルインスティンクト
     if project_id is None:
         global_dirs = [
-            DEVGEAR_DIR / "instincts" / "personal",
-            DEVGEAR_DIR / "instincts" / "inherited",
+            DEEPBLUE_DIR / "instincts" / "personal",
+            DEEPBLUE_DIR / "instincts" / "inherited",
         ]
         for d in global_dirs:
             if d.exists():
@@ -259,7 +259,7 @@ def import_event_logs(db: Database, origin_user: str, project_id: str | None = N
 
     # グローバル observations
     if project_id is None:
-        global_obs = DEVGEAR_DIR / "observations.jsonl"
+        global_obs = DEEPBLUE_DIR / "observations.jsonl"
         if global_obs.exists():
             count += _import_jsonl_events(db, global_obs, "observation", None, origin_user)
 
@@ -280,13 +280,13 @@ def import_event_logs(db: Database, origin_user: str, project_id: str | None = N
 
     # skill-runs.jsonl
     if project_id is None:
-        skill_runs = DEVGEAR_STATE_DIR / "skill-runs.jsonl"
+        skill_runs = DEEPBLUE_STATE_DIR / "skill-runs.jsonl"
         if skill_runs.exists():
             count += _import_jsonl_events(db, skill_runs, "skill-run", None, origin_user)
 
     # costs.jsonl
     if project_id is None:
-        costs_file = DEVGEAR_DIR / "logs" / "costs.jsonl"
+        costs_file = DEEPBLUE_DIR / "logs" / "costs.jsonl"
         if costs_file.exists():
             count += _import_jsonl_events(db, costs_file, "cost", None, origin_user)
 

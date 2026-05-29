@@ -23,8 +23,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from devgear.skills.comply.classifier import _parse_classification, classify_events
-from devgear.skills.comply.parser import ComplianceSpec, Detector, ObservationEvent, Step
+from deepblue.skills.comply.classifier import _parse_classification, classify_events
+from deepblue.skills.comply.parser import ComplianceSpec, Detector, ObservationEvent, Step
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,7 +89,7 @@ class TestParseClassification:
     def test_json_list_returns_empty_dict_with_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="devgear.skills.comply.classifier"):
+        with caplog.at_level(logging.WARNING, logger="deepblue.skills.comply.classifier"):
             result = _parse_classification("[0, 1, 2]")
         assert result == {}
         assert (
@@ -99,7 +99,7 @@ class TestParseClassification:
     def test_invalid_json_returns_empty_dict(self, caplog: pytest.LogCaptureFixture) -> None:
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="devgear.skills.comply.classifier"):
+        with caplog.at_level(logging.WARNING, logger="deepblue.skills.comply.classifier"):
             result = _parse_classification("{invalid json")
         assert result == {}
 
@@ -142,7 +142,7 @@ class TestClassifyEvents:
         assert result == {}
 
     def test_run_cli_success_returns_parsed_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from devgear.skills.comply import classifier as clf_mod
+        from deepblue.skills.comply import classifier as clf_mod
 
         spec = _make_spec()
         trace = [_make_event()]
@@ -157,7 +157,7 @@ class TestClassifyEvents:
         assert result == {"write_test": [0]}
 
     def test_run_cli_failure_raises_runtime_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from devgear.skills.comply import classifier as clf_mod
+        from deepblue.skills.comply import classifier as clf_mod
 
         spec = _make_spec()
         trace = [_make_event()]
@@ -172,7 +172,7 @@ class TestClassifyEvents:
 
     def test_prompt_contains_step_and_tool_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """run_cli に渡す引数にステップ情報とツール呼び出しが含まれるか確認。"""
-        from devgear.skills.comply import classifier as clf_mod
+        from deepblue.skills.comply import classifier as clf_mod
 
         spec = _make_spec()
         trace = [_make_event(tool="Read", input_text="some_file.py")]
@@ -189,7 +189,7 @@ class TestClassifyEvents:
         assert len(captured_args) == 1
 
     def test_custom_model_passed_to_run_cli(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from devgear.skills.comply import classifier as clf_mod
+        from deepblue.skills.comply import classifier as clf_mod
 
         spec = _make_spec()
         trace = [_make_event()]

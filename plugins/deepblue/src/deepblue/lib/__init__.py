@@ -1,7 +1,7 @@
-"""devgear のライブラリモジュール。"""
+"""deepblue のライブラリモジュール。"""
 
-from devgear.lib.agent_compress import compress_to_catalog
-from devgear.lib.core_utils import (
+from deepblue.lib.agent_compress import compress_to_catalog
+from deepblue.lib.core_utils import (
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
@@ -28,7 +28,7 @@ from devgear.lib.core_utils import (
     sanitize_session_id,
     write_file,
 )
-from devgear.lib.git_hosting import (
+from deepblue.lib.git_hosting import (
     GITHUB,
     GITLAB,
     VALID_GIT_HOSTING_SERVICES,
@@ -43,14 +43,14 @@ from devgear.lib.git_hosting import (
     get_git_hosting_service_label,
     normalize_git_hosting_service,
 )
-from devgear.lib.hook_flags import (
+from deepblue.lib.hook_flags import (
     VALID_PROFILES,
     get_hook_profile,
     is_hook_enabled,
     normalize_id,
     parse_profiles,
 )
-from devgear.lib.project_detect import (
+from deepblue.lib.project_detect import (
     FRAMEWORK_RULES,
     LANGUAGE_RULES,
     FrameworkRule,
@@ -62,8 +62,8 @@ from devgear.lib.project_detect import (
     get_build_command,
     get_test_command,
 )
-from devgear.lib.resolve_devgear_root import resolve_devgear_root
-from devgear.lib.shell_split import split_shell_segments
+from deepblue.lib.resolve_deepblue_root import resolve_deepblue_root
+from deepblue.lib.shell_split import split_shell_segments
 
 __all__ = [
     # agent_compress 関連
@@ -99,8 +99,8 @@ __all__ = [
     "detect_project",
     "get_build_command",
     "get_test_command",
-    # resolve_devgear_root 関連
-    "resolve_devgear_root",
+    # resolve_deepblue_root 関連
+    "resolve_deepblue_root",
     # shell_split 関連
     "split_shell_segments",
     # utils 関連

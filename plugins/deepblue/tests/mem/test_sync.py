@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from devgear.mem.database import (
+from deepblue.mem.database import (
     Adr,
     Database,
     EventLog,
@@ -22,7 +22,7 @@ from devgear.mem.database import (
     ProjectProfile,
     Session,
 )
-from devgear.mem.sync import SyncResult, _sync_embeddings, should_sync, sync_check, sync_to_postgres
+from deepblue.mem.sync import SyncResult, _sync_embeddings, should_sync, sync_check, sync_to_postgres
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def mock_settings(tmp_path):
 @pytest.fixture
 def mock_git_user(monkeypatch):
     """sync.py 内の get_git_user_name を固定値に差し替えるフィクスチャ"""
-    monkeypatch.setattr("devgear.mem.sync.get_git_user_name", lambda: "test_user")
+    monkeypatch.setattr("deepblue.mem.sync.get_git_user_name", lambda: "test_user")
     return "test_user"
 
 
@@ -129,8 +129,8 @@ class TestSyncToPostgres:
 
         sqlite_db = FakeSQLiteDb(db)
         pg_db = FakePgDb()
-        monkeypatch.setattr("devgear.mem.sync.Database", lambda path: sqlite_db)
-        monkeypatch.setattr("devgear.mem.sync.PgDatabase", lambda url: pg_db)
+        monkeypatch.setattr("deepblue.mem.sync.Database", lambda path: sqlite_db)
+        monkeypatch.setattr("deepblue.mem.sync.PgDatabase", lambda url: pg_db)
         monkeypatch.setattr(
             mock_settings,
             "save_sync_state",
@@ -174,8 +174,8 @@ class TestSyncLocking:
             def __init__(self, url):  # noqa: ANN001
                 raise AssertionError("PgDatabase should not be opened when lock is held")
 
-        monkeypatch.setattr("devgear.mem.sync.Database", FailingDatabase)
-        monkeypatch.setattr("devgear.mem.sync.PgDatabase", FailingPgDatabase)
+        monkeypatch.setattr("deepblue.mem.sync.Database", FailingDatabase)
+        monkeypatch.setattr("deepblue.mem.sync.PgDatabase", FailingPgDatabase)
 
         with mock_settings.sync_lock_path.open("a+", encoding="utf-8") as lock_file:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -211,8 +211,8 @@ class TestSyncLocking:
 
         sqlite_db = FakeSQLiteDb(db)
         pg_db = FakePgDb()
-        monkeypatch.setattr("devgear.mem.sync.Database", lambda path: sqlite_db)
-        monkeypatch.setattr("devgear.mem.sync.PgDatabase", lambda url: pg_db)
+        monkeypatch.setattr("deepblue.mem.sync.Database", lambda path: sqlite_db)
+        monkeypatch.setattr("deepblue.mem.sync.PgDatabase", lambda url: pg_db)
 
         with mock_settings.sync_lock_path.open("a+", encoding="utf-8") as lock_file:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -254,11 +254,11 @@ class TestSyncLocking:
         mock_settings.reload_sync_state = reload_sync_state
 
         monkeypatch.setattr(
-            "devgear.mem.sync.Database",
+            "deepblue.mem.sync.Database",
             lambda path: (_ for _ in ()).throw(AssertionError("Database should not be opened")),
         )
         monkeypatch.setattr(
-            "devgear.mem.sync.PgDatabase",
+            "deepblue.mem.sync.PgDatabase",
             lambda url: (_ for _ in ()).throw(AssertionError("PgDatabase should not be opened")),
         )
 
@@ -454,8 +454,8 @@ class TestSyncToPostgresDetailed:
 
         sqlite_db = FakeSQLiteDb(db)
         pg_db = FakePgDb()
-        monkeypatch.setattr("devgear.mem.sync.Database", lambda path: sqlite_db)
-        monkeypatch.setattr("devgear.mem.sync.PgDatabase", lambda url: pg_db)
+        monkeypatch.setattr("deepblue.mem.sync.Database", lambda path: sqlite_db)
+        monkeypatch.setattr("deepblue.mem.sync.PgDatabase", lambda url: pg_db)
 
         result = sync_to_postgres(mock_settings, dry_run=True)
 
@@ -545,10 +545,10 @@ class TestSyncToPostgresDetailed:
 
         sqlite_db = FakeSQLiteDb(db)
         pg_db = FakePgDb()
-        monkeypatch.setattr("devgear.mem.sync.Database", lambda path: sqlite_db)
-        monkeypatch.setattr("devgear.mem.sync.PgDatabase", lambda url: pg_db)
-        monkeypatch.setattr("devgear.mem.sync._sync_embeddings", lambda sqlite_db, pg_db, chunks: len(chunks))
-        monkeypatch.setattr("devgear.mem.sync.time.time", lambda: 10_000_000_000)
+        monkeypatch.setattr("deepblue.mem.sync.Database", lambda path: sqlite_db)
+        monkeypatch.setattr("deepblue.mem.sync.PgDatabase", lambda url: pg_db)
+        monkeypatch.setattr("deepblue.mem.sync._sync_embeddings", lambda sqlite_db, pg_db, chunks: len(chunks))
+        monkeypatch.setattr("deepblue.mem.sync.time.time", lambda: 10_000_000_000)
 
         result = sync_to_postgres(mock_settings, dry_run=False)
 
@@ -630,7 +630,7 @@ class TestSyncToPostgresDetailed:
                 self.closed = True
 
         pg_db = FakePgDb()
-        monkeypatch.setattr("devgear.mem.sync.PgDatabase", lambda url: pg_db)
+        monkeypatch.setattr("deepblue.mem.sync.PgDatabase", lambda url: pg_db)
 
         result = sync_to_postgres(mock_settings, dry_run=False)
 
@@ -672,8 +672,8 @@ class TestSyncToPostgresDetailed:
 
         sqlite_db = FakeSQLiteDb(db)
         pg_db = FakePgDb()
-        monkeypatch.setattr("devgear.mem.sync.Database", lambda path: sqlite_db)
-        monkeypatch.setattr("devgear.mem.sync.PgDatabase", lambda url: pg_db)
+        monkeypatch.setattr("deepblue.mem.sync.Database", lambda path: sqlite_db)
+        monkeypatch.setattr("deepblue.mem.sync.PgDatabase", lambda url: pg_db)
 
         result = sync_to_postgres(mock_settings, dry_run=False)
 
@@ -726,8 +726,8 @@ class TestSyncToPostgresDetailed:
 
         sqlite_db = FakeSQLiteDb(db)
         pg_db = FakePgDb()
-        monkeypatch.setattr("devgear.mem.sync.Database", lambda path: sqlite_db)
-        monkeypatch.setattr("devgear.mem.sync.PgDatabase", lambda url: pg_db)
+        monkeypatch.setattr("deepblue.mem.sync.Database", lambda path: sqlite_db)
+        monkeypatch.setattr("deepblue.mem.sync.PgDatabase", lambda url: pg_db)
         monkeypatch.setattr(
             mock_settings,
             "save_sync_state",
@@ -767,8 +767,8 @@ class TestSyncToPostgresDetailed:
 
         sqlite_db = FakeSQLiteDb(db)
         pg_db = FakePgDb()
-        monkeypatch.setattr("devgear.mem.sync.Database", lambda path: sqlite_db)
-        monkeypatch.setattr("devgear.mem.sync.PgDatabase", lambda url: pg_db)
+        monkeypatch.setattr("deepblue.mem.sync.Database", lambda path: sqlite_db)
+        monkeypatch.setattr("deepblue.mem.sync.PgDatabase", lambda url: pg_db)
 
         result = sync_to_postgres(mock_settings, dry_run=False)
 
@@ -778,8 +778,8 @@ class TestSyncToPostgresDetailed:
         assert pg_db.closed is True
 
     def test_sync_check_delegates_when_needed(self, mock_settings, monkeypatch):
-        monkeypatch.setattr("devgear.mem.sync.should_sync", lambda settings: True)
-        monkeypatch.setattr("devgear.mem.sync.sync_to_postgres", lambda settings, dry_run=False: SyncResult(chunks=3))
+        monkeypatch.setattr("deepblue.mem.sync.should_sync", lambda settings: True)
+        monkeypatch.setattr("deepblue.mem.sync.sync_to_postgres", lambda settings, dry_run=False: SyncResult(chunks=3))
 
         result = sync_check(mock_settings)
         assert result.chunks == 3
@@ -853,13 +853,13 @@ class TestSyncHelpers:
 
     def test_count_pending_rows_returns_zero_for_empty_table(self, tmp_path):
         db = Database(tmp_path / "empty-sync.db")
-        from devgear.mem.sync import _count_pending_rows
+        from deepblue.mem.sync import _count_pending_rows
 
         assert _count_pending_rows(db.conn, "memory_chunks") == 0
         db.close()
 
     def test_count_pending_embeddings_handles_empty_and_operational_error(self):
-        from devgear.mem.sync import _count_pending_embeddings
+        from deepblue.mem.sync import _count_pending_embeddings
 
         class EmptyConn:
             def execute(self, sql: str, params=None):  # noqa: ANN001
@@ -883,8 +883,8 @@ class TestSyncLogVisibility:
         import logging
 
         mock_settings.sync.enabled = False
-        # get_logger("SYNC") は "devgear.mem.SYNC" を返す
-        with caplog.at_level(logging.INFO, logger="devgear.mem.SYNC"):
+        # get_logger("SYNC") は "deepblue.mem.SYNC" を返す
+        with caplog.at_level(logging.INFO, logger="deepblue.mem.SYNC"):
             result = sync_check(mock_settings)
         assert result.success is True
         assert any("スキップ" in r.message and r.levelno == logging.INFO for r in caplog.records)
@@ -895,7 +895,7 @@ class TestSyncLogVisibility:
 
         mock_settings.sync.postgres_url = ""
         # should_sync が False を返すため sync_check レベルで "スキップ" info ログが出る
-        with caplog.at_level(logging.INFO, logger="devgear.mem.SYNC"):
+        with caplog.at_level(logging.INFO, logger="deepblue.mem.SYNC"):
             result = sync_check(mock_settings)
         assert result.success is True
         assert any("スキップ" in r.message and r.levelno == logging.INFO for r in caplog.records)
@@ -905,7 +905,7 @@ class TestSyncLogVisibility:
         import logging
 
         mock_settings.sync.postgres_url = ""
-        with caplog.at_level(logging.INFO, logger="devgear.mem.SYNC"):
+        with caplog.at_level(logging.INFO, logger="deepblue.mem.SYNC"):
             result = sync_to_postgres(mock_settings)
         assert result.success is False
         assert any("postgres_url" in r.message and r.levelno == logging.INFO for r in caplog.records)
@@ -931,10 +931,10 @@ class TestSyncLogVisibility:
             def close(self):
                 pass
 
-        monkeypatch.setattr("devgear.mem.sync.PgDatabase", FakePgDb)
-        monkeypatch.setattr("devgear.mem.sync.Database", FakeDatabase)
+        monkeypatch.setattr("deepblue.mem.sync.PgDatabase", FakePgDb)
+        monkeypatch.setattr("deepblue.mem.sync.Database", FakeDatabase)
 
-        with caplog.at_level(logging.ERROR, logger="devgear.mem.SYNC"):
+        with caplog.at_level(logging.ERROR, logger="deepblue.mem.SYNC"):
             result = sync_to_postgres(mock_settings)
         # 処理は継続し例外は出ない
         assert result.success is False
@@ -951,9 +951,9 @@ class TestSyncLogVisibility:
             def __init__(self, path):  # noqa: ANN001
                 raise RuntimeError("DB 接続失敗")
 
-        monkeypatch.setattr("devgear.mem.sync.Database", BoomDatabase)
+        monkeypatch.setattr("deepblue.mem.sync.Database", BoomDatabase)
 
-        with caplog.at_level(logging.ERROR, logger="devgear.mem.SYNC"):
+        with caplog.at_level(logging.ERROR, logger="deepblue.mem.SYNC"):
             result = sync_to_postgres(mock_settings)
         assert result.success is False
         # result.error は _mask_url を通すためパスワード断片を含まない
@@ -966,7 +966,7 @@ class TestSyncLogVisibility:
 
     def test_resolve_sync_lock_path_falls_back_when_path_invalid(self, monkeypatch):
         """sync_lock_path が Path 化できないオブジェクトのとき、HOME 配下にフォールバックする（lines 134-135）。"""
-        from devgear.mem.sync import _resolve_sync_lock_path
+        from deepblue.mem.sync import _resolve_sync_lock_path
 
         class _Bad:
             def __fspath__(self):
@@ -974,11 +974,11 @@ class TestSyncLogVisibility:
 
         settings = SimpleNamespace(sync_lock_path=_Bad())
         result = _resolve_sync_lock_path(settings)
-        assert str(result).endswith(".devgear/sync.lock")
+        assert str(result).endswith(".deepblue/sync.lock")
 
     def test_acquire_sync_lock_reraises_unexpected_oserror(self, tmp_path, monkeypatch):
         """flock が EACCES/EAGAIN 以外で失敗した場合は例外を再発火する（line 150）。"""
-        import devgear.mem.sync as sync_mod
+        import deepblue.mem.sync as sync_mod
 
         settings = SimpleNamespace(sync_lock_path=tmp_path / "sync.lock")
 
@@ -1001,7 +1001,7 @@ class TestSyncLogVisibility:
 
     def test_reload_sync_state_falls_back_to_private_loader(self, monkeypatch):
         """reload_sync_state が無く _load_sync_state が呼ばれる経路（lines 164-166）。"""
-        from devgear.mem.sync import _reload_sync_state
+        from deepblue.mem.sync import _reload_sync_state
 
         called = {"v": False}
 
@@ -1014,13 +1014,13 @@ class TestSyncLogVisibility:
 
     def test_reload_sync_state_noop_when_no_methods(self) -> None:
         """reload_sync_state も _load_sync_state も無いなら何もしない。"""
-        from devgear.mem.sync import _reload_sync_state
+        from deepblue.mem.sync import _reload_sync_state
 
         _reload_sync_state(SimpleNamespace())
 
     def test_mask_url(self, monkeypatch):
         """_mask_url がパスワード部を正しくマスクすることを確認する。"""
-        from devgear.mem.sync import _mask_url
+        from deepblue.mem.sync import _mask_url
 
         assert _mask_url("postgresql://user:secret@host:5432/db") == "postgresql://user:***@host:5432/db"
         assert _mask_url("postgresql://user@host/db") == "postgresql://user@host/db"
@@ -1032,7 +1032,7 @@ class TestSyncLogVisibility:
         assert "user:" in masked_empty
         assert "@host" in masked_empty
         # urlparse が例外を投げる場合は元の URL をそのまま返す
-        import devgear.mem.sync as sync_mod
+        import deepblue.mem.sync as sync_mod
 
         monkeypatch.setattr(sync_mod, "urlparse", lambda url: (_ for _ in ()).throw(ValueError("parse error")))
         assert _mask_url("postgresql://user:secret@host/db") == "postgresql://user:secret@host/db"

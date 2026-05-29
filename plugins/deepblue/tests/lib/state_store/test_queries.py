@@ -6,9 +6,9 @@ import sqlite3
 
 import pytest
 
-from devgear.lib.state_store import queries as q
-from devgear.lib.state_store.migrations import apply_migrations
-from devgear.lib.state_store.queries import (
+from deepblue.lib.state_store import queries as q
+from deepblue.lib.state_store.migrations import apply_migrations
+from deepblue.lib.state_store.queries import (
     Decision,
     QueryApi,
     Session,

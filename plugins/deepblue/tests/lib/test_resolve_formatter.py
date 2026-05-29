@@ -7,7 +7,7 @@ import platform
 
 import pytest
 
-from devgear.lib.resolve_formatter import (
+from deepblue.lib.resolve_formatter import (
     BIOME_CONFIGS,
     FORMATTER_PACKAGES,
     PRETTIER_CONFIGS,
@@ -155,8 +155,8 @@ class TestGetRunnerFromPackageManager:
 
     def test_returns_runner_info(self, tmp_path, monkeypatch):
         """bin と prefix を持つ RunnerInfo を返すこと。"""
-        from devgear.lib import package_manager as package_manager
-        from devgear.lib.package_manager import PACKAGE_MANAGERS, PackageManagerResult
+        from deepblue.lib import package_manager as package_manager
+        from deepblue.lib.package_manager import PACKAGE_MANAGERS, PackageManagerResult
 
         monkeypatch.setattr(
             package_manager,
@@ -171,8 +171,8 @@ class TestGetRunnerFromPackageManager:
 
     def test_handles_exec_cmd_with_args(self, tmp_path, monkeypatch):
         """複数引数を含む exec_cmd を扱えること。"""
-        from devgear.lib import package_manager as package_manager
-        from devgear.lib.package_manager import PACKAGE_MANAGERS, PackageManagerResult
+        from deepblue.lib import package_manager as package_manager
+        from deepblue.lib.package_manager import PACKAGE_MANAGERS, PackageManagerResult
 
         monkeypatch.setattr(
             package_manager,
@@ -211,8 +211,8 @@ class TestResolveFormatterBin:
 
     def test_falls_back_to_package_manager(self, tmp_path, monkeypatch):
         """ローカルバイナリがない場合はパッケージマネージャーへフォールバックすること。"""
-        from devgear.lib import package_manager as package_manager
-        from devgear.lib.package_manager import PACKAGE_MANAGERS, PackageManagerResult
+        from deepblue.lib import package_manager as package_manager
+        from deepblue.lib.package_manager import PACKAGE_MANAGERS, PackageManagerResult
 
         monkeypatch.setattr(
             package_manager,
@@ -228,8 +228,8 @@ class TestResolveFormatterBin:
 
     def test_caches_result(self, tmp_path, monkeypatch):
         """繰り返し参照時に結果をキャッシュすること。"""
-        from devgear.lib import package_manager as package_manager
-        from devgear.lib.package_manager import PACKAGE_MANAGERS, PackageManagerResult
+        from deepblue.lib import package_manager as package_manager
+        from deepblue.lib.package_manager import PACKAGE_MANAGERS, PackageManagerResult
 
         monkeypatch.setattr(
             package_manager,

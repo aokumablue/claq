@@ -14,10 +14,10 @@
 ## 作業ルール
 
 - Python は `python3` を使う
-- 変更後は `.venv` を有効化して `python3 -m pytest -q` と `ruff check plugins/devgear/src` が成功することを確認（警告なし）
-- venv は 2 種類。両方とも `~/.devgear/` 配下に置く
-  - `~/.devgear/.venv` — 本体ランタイム用（`install.sh` が作成）。Claude/Copilot 各キャッシュフォルダには symlink を張る
-  - `~/.devgear/.venv-modelbuild` — ONNX ビルド専用（初回のみ自動作成）。torch pickle RCE リスクと 5GB 配布回避のため本体 venv とは分離する
+- 変更後は `.venv` を有効化して `python3 -m pytest -q` と `ruff check plugins/deepblue/src` が成功することを確認（警告なし）
+- venv は 2 種類。両方とも `~/.deepblue/` 配下に置く
+  - `~/.deepblue/.venv` — 本体ランタイム用（`install.sh` が作成）。Claude/Copilot 各キャッシュフォルダには symlink を張る
+  - `~/.deepblue/.venv-modelbuild` — ONNX ビルド専用（初回のみ自動作成）。torch pickle RCE リスクと 5GB 配布回避のため本体 venv とは分離する
 
 ## スコープ規律
 
@@ -28,8 +28,8 @@
 
 ## 永続メモリ
 
-- `SessionStart`: `devgear.mem.cli context` が `<mem-context>` を注入
+- `SessionStart`: `deepblue.mem.cli context` が `<mem-context>` を注入
 - `PreToolUse` / `PostToolUse`: ツール操作を記録
 - `SessionEnd`: 埋め込み生成と s-learn ブリッジ
-- DB: `~/.devgear/mem.db`
-- 実装起点: `plugins/devgear/src/devgear/mem/{cli,search,context,bridge}.py`
+- DB: `~/.deepblue/mem.db`
+- 実装起点: `plugins/deepblue/src/deepblue/mem/{cli,search,context,bridge}.py`

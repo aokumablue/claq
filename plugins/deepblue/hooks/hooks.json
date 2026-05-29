@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.block_no_verify"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.block_no_verify"
           }
         ],
         "description": "git hook-bypassフラグをブロックして、pre-commit、commit-msg、pre-pushフックがスキップされないように保護します。"
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"pre:bash:commit-quality\" \"devgear.hooks.pre_bash_commit_quality\" \"strict\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"pre:bash:commit-quality\" \"deepblue.hooks.pre_bash_commit_quality\" \"strict\""
           }
         ],
         "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"pre:write:doc-file-warning\" \"devgear.hooks.doc_file_warning\" \"standard,strict\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"pre:write:doc-file-warning\" \"deepblue.hooks.doc_file_warning\" \"standard,strict\""
           }
         ],
         "description": "ドキュメントファイル警告: 標準規格外のドキュメントファイルについて警告します (終了コード 0; 警告のみ)"
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"pre:edit-write:suggest-compact\" \"devgear.hooks.suggest_compact\" \"standard,strict\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"pre:edit-write:suggest-compact\" \"deepblue.hooks.suggest_compact\" \"standard,strict\""
           }
         ],
         "description": "論理的な間隔で手動のコンパクションを提案します"
@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"pre:config-protection\" \"devgear.hooks.config_protection\" \"standard,strict\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"pre:config-protection\" \"deepblue.hooks.config_protection\" \"standard,strict\"",
             "timeout": 5
           }
         ],
@@ -58,7 +58,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"pre:observe\" \"devgear.skills.learn.observe\" \"standard,strict\" pre",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"pre:observe\" \"deepblue.skills.learn.observe\" \"standard,strict\" pre",
             "async": true,
             "timeout": 10
           }
@@ -72,7 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"pre:compact\" \"devgear.hooks.pre_compact\" \"standard,strict\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"pre:compact\" \"deepblue.hooks.pre_compact\" \"standard,strict\""
           }
         ],
         "description": "コンテキストの圧縮前に状態を保存します"
@@ -84,7 +84,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.session_install",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.session_install",
             "timeout": 150
           }
         ],
@@ -95,7 +95,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"session:mem:setup\" \"devgear.mem.cli\" \"minimal,standard,strict\" setup",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"session:mem:setup\" \"deepblue.mem.cli\" \"minimal,standard,strict\" setup",
             "timeout": 120
           }
         ],
@@ -106,7 +106,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"session:start\" \"devgear.hooks.session_start\" \"minimal,standard,strict\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"session:start\" \"deepblue.hooks.session_start\" \"minimal,standard,strict\""
           }
         ],
         "description": "新しいセッションで以前のコンテキストを読み込み、パッケージマネージャを検出する"
@@ -116,7 +116,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"session:mem:record-project-profile\" \"devgear.mem.cli\" \"standard,strict\" record-project-profile",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"session:mem:record-project-profile\" \"deepblue.mem.cli\" \"standard,strict\" record-project-profile",
             "timeout": 15
           }
         ],
@@ -127,7 +127,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"session:mem:context\" \"devgear.mem.cli\" \"strict\" context",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"session:mem:context\" \"deepblue.mem.cli\" \"strict\" context",
             "timeout": 60
           }
         ],
@@ -140,7 +140,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"user:mem:session-init\" \"devgear.mem.cli\" \"standard,strict\" \"session-init\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"user:mem:session-init\" \"deepblue.mem.cli\" \"standard,strict\" \"session-init\"",
             "timeout": 30
           }
         ],
@@ -151,7 +151,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"user:team:session-init\" \"devgear.mem.cli\" \"standard,strict\" \"team-session-init\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"user:team:session-init\" \"deepblue.mem.cli\" \"standard,strict\" \"team-session-init\"",
             "timeout": 30
           }
         ],
@@ -162,7 +162,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"user:mem:record-interaction\" \"devgear.mem.cli\" \"standard,strict\" \"record-interaction\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"user:mem:record-interaction\" \"deepblue.mem.cli\" \"standard,strict\" \"record-interaction\"",
             "timeout": 30
           }
         ],
@@ -173,7 +173,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"user:mem:sync-check\" \"devgear.mem.cli\" \"standard,strict\" \"sync-check\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"user:mem:sync-check\" \"deepblue.mem.cli\" \"standard,strict\" \"sync-check\"",
             "async": true,
             "timeout": 600
           }
@@ -187,7 +187,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.mem.cli observe",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.mem.cli observe",
             "async": true,
             "timeout": 10
           }
@@ -199,7 +199,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.mem.cli record-item-run",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.mem.cli record-item-run",
             "async": true,
             "timeout": 10
           }
@@ -211,7 +211,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"post:bash:compact\" \"devgear.hooks.post_bash_compact\" \"standard,strict\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"post:bash:compact\" \"deepblue.hooks.post_bash_compact\" \"standard,strict\"",
             "timeout": 10
           }
         ],
@@ -222,7 +222,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"post:bash:pr-created\" \"devgear.hooks.post_bash_pr_created\" \"standard,strict\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"post:bash:pr-created\" \"deepblue.hooks.post_bash_pr_created\" \"standard,strict\""
           }
         ],
         "description": "PR URLを記録し、PR作成後にレビュー コマンドを提供します"
@@ -232,7 +232,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"post:quality-gate\" \"devgear.hooks.quality_gate\" \"standard,strict\" \"post-edit\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"post:quality-gate\" \"deepblue.hooks.quality_gate\" \"standard,strict\" \"post-edit\"",
             "async": true,
             "timeout": 30
           }
@@ -246,7 +246,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"stop:session-end\" \"devgear.hooks.session_end\" \"minimal,standard,strict\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"stop:session-end\" \"deepblue.hooks.session_end\" \"minimal,standard,strict\"",
             "async": true,
             "timeout": 10
           }
@@ -258,7 +258,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"stop:evaluate-session\" \"devgear.hooks.evaluate_session\" \"minimal,standard,strict\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"stop:evaluate-session\" \"deepblue.hooks.evaluate_session\" \"minimal,standard,strict\"",
             "async": true,
             "timeout": 10
           }
@@ -272,7 +272,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"session:end:marker\" \"devgear.hooks.session_end_marker\" \"minimal,standard,strict\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"session:end:marker\" \"deepblue.hooks.session_end_marker\" \"minimal,standard,strict\"",
             "async": true,
             "timeout": 10
           }
@@ -284,7 +284,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"session:mem:end\" \"devgear.mem.cli\" \"standard,strict\" \"session-end\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"session:mem:end\" \"deepblue.mem.cli\" \"standard,strict\" \"session-end\"",
             "async": true,
             "timeout": 120
           }
@@ -296,7 +296,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py\" devgear.hooks.run_with_flags \"session:mem:sync-check\" \"devgear.mem.cli\" \"standard,strict\" \"sync-check\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"session:mem:sync-check\" \"deepblue.mem.cli\" \"standard,strict\" \"sync-check\"",
             "async": false,
             "timeout": 600
           }

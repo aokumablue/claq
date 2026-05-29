@@ -42,4 +42,4 @@ Null/Undefined・空配列/文字列・無効型・境界値・エラーパス�
 search: `test {機能ドメイン}` (file_pattern: *test*.py) / `bug fix error {関連キーワード}`
 record: `{"event_type": "tdd", "content": "{テストサマリー: X tests, Y% coverage}"}`
 
-詳細な実装支援が必要な場合は `devgear:a-tdd` を明示起動する。
+詳細な実装支援が必要な場合は `deepblue:a-tdd` を明示起動する。

@@ -236,7 +236,7 @@ def generate_index(areas: dict[str, AreaInfo], _files: list) -> str:
         "## 再生成方法",
         "",
         "```bash",
-        "python3 -m devgear.codemaps.generate_codemaps",
+        "python3 -m deepblue.codemaps.generate_codemaps",
         "```",
         "",
     ]

@@ -1,5 +1,5 @@
-# Build dependencies for plugins/devgear/onnx/build_onnx_model.sh
-# Regenerate: pip-compile --allow-unsafe --generate-hashes --output-file=plugins/devgear/onnx/requirements-build.txt plugins/devgear/onnx/requirements-build.in
+# Build dependencies for plugins/deepblue/onnx/build_onnx_model.sh
+# Regenerate: pip-compile --allow-unsafe --generate-hashes --output-file=plugins/deepblue/onnx/requirements-build.txt plugins/deepblue/onnx/requirements-build.in
 torch>=2.2
 transformers>=4.41,<5.0
 optimum[onnxruntime]>=1.20,<2.0

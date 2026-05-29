@@ -6,7 +6,7 @@ import argparse
 import re
 from pathlib import Path
 
-from devgear.ci.ci_common import REPO_ROOT, emit_error, is_non_empty_string
+from deepblue.ci.ci_common import REPO_ROOT, emit_error, is_non_empty_string
 
 DEFAULT_AGENTS_DIR = REPO_ROOT / "agents"
 REQUIRED_FIELDS = ["model", "tools"]

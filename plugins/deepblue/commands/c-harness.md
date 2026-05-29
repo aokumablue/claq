@@ -29,10 +29,10 @@ record: `{"event_type": "harness-run", "content": "Harness: Score {before} -> {a
 
 ## 実行フロー
 
-1. `devgear_run devgear.ci.harness_audit` でベースラインスコア取得・出力
+1. `deepblue_run deepblue.ci.harness_audit` でベースラインスコア取得・出力
 2. トップ3アクションを特定
 3. 最小限・元に戻せる設定変更を提案・適用・検証
-4. 再度 `devgear_run devgear.ci.harness_audit` で改善スコア報告
+4. 再度 `deepblue_run deepblue.ci.harness_audit` で改善スコア報告
 5. 変更前後の差分を出力
 
 `--audit-only` はステップ1のみで終了。
@@ -40,8 +40,8 @@ record: `{"event_type": "harness-run", "content": "Harness: Score {before} -> {a
 ## 実行エンジン
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/devgear-helpers.sh"
-devgear_run devgear.ci.harness_audit <scope> --format <text|json> [--root <path>]
+source "${CLAUDE_PLUGIN_ROOT}/runtime/deepblue-helpers.sh"
+deepblue_run deepblue.ci.harness_audit <scope> --format <text|json> [--root <path>]
 ```
 
 スコアリングはこのスクリプトのみを根拠とし、手動採点は行わない。

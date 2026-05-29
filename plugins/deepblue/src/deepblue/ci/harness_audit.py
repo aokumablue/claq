@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from devgear.lib.git_hosting import (
+from deepblue.lib.git_hosting import (
     detect_git_hosting_service,
     get_git_hosting_service_label,
     normalize_git_hosting_service,
@@ -34,7 +34,7 @@ REPO_CORE_MARKERS = [
     "skills",
 ]
 HARNESS_MARKERS = [
-    "src/devgear/ci/harness_audit.py",
+    "src/deepblue/ci/harness_audit.py",
 ]
 COMMAND_PARITY_PAIRS = [
     ("commands/c-harness-audit.md", ".opencode/commands/c-harness-audit.md"),
@@ -762,7 +762,7 @@ def show_help(exit_code: int = 0) -> None:
     """ヘルプを表示して終了する。"""
     print(
         """
-Usage: python3 "${CLAUDE_PLUGIN_ROOT}/src/devgear/launcher.py" devgear.ci.harness_audit [scope] [--scope <repo|hooks|skills|commands|agents>] [--format <text|json>]
+Usage: python3 "${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py" deepblue.ci.harness_audit [scope] [--scope <repo|hooks|skills|commands|agents>] [--format <text|json>]
        [--root <path>]
 
 Deterministic harness audit based on explicit file/rule checks.

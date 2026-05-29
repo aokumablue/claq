@@ -13,7 +13,7 @@ class _RedactingFormatter(logging.Formatter):
     """PII / シークレットを全ログメッセージから除去するフォーマッタ。"""
 
     def format(self, record: logging.LogRecord) -> str:
-        from devgear.mem.redaction import redact
+        from deepblue.mem.redaction import redact
 
         return redact(super().format(record))
 
@@ -35,7 +35,7 @@ def setup(log_dir: Path, level: str = "info") -> None:
             return
         _initialized = True
 
-    root = logging.getLogger("devgear.mem")
+    root = logging.getLogger("deepblue.mem")
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
 
     # ファイルハンドラ
@@ -59,10 +59,10 @@ def reset() -> None:
     global _initialized
     with _lock:
         _initialized = False
-    root = logging.getLogger("devgear.mem")
+    root = logging.getLogger("deepblue.mem")
     root.handlers.clear()
 
 
 def get(component: str) -> logging.Logger:
     """コンポーネント名でロガーを取得する。"""
-    return logging.getLogger(f"devgear.mem.{component}")
+    return logging.getLogger(f"deepblue.mem.{component}")

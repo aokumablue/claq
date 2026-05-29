@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from devgear.mem.database import (
+from deepblue.mem.database import (
     Adr,
     EventLog,
     Instinct,
@@ -19,7 +19,7 @@ from devgear.mem.database import (
     ProjectProfile,
     Session,
 )
-from devgear.mem.logger import get as _get_logger
+from deepblue.mem.logger import get as _get_logger
 
 if TYPE_CHECKING:
     import psycopg

@@ -16,7 +16,7 @@ def skill_env(tmp_path):
     skills_root = repo_root / "skills"
     learned_root = home_dir / ".claude" / "skills" / "learned"
     imported_root = home_dir / ".claude" / "skills" / "imported"
-    runs_file = home_dir / ".devgear" / "state" / "skill-runs.jsonl"
+    runs_file = home_dir / ".deepblue" / "state" / "skill-runs.jsonl"
 
     for directory in [skills_root, learned_root, imported_root, runs_file.parent]:
         directory.mkdir(parents=True, exist_ok=True)

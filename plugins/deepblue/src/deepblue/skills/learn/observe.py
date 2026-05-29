@@ -12,10 +12,10 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from devgear.lib.core_utils import get_devgear_dir
-from devgear.skills.learn.project import detect_project
+from deepblue.lib.core_utils import get_deepblue_dir
+from deepblue.skills.learn.project import detect_project
 
-_CONFIG_DIR = get_devgear_dir()
+_CONFIG_DIR = get_deepblue_dir()
 _DEFAULT_SIGNAL_EVERY_N = 20
 _DEFAULT_SKIP_PATHS = ("observer-sessions", ".claude-mem")
 _SECRET_RE = re.compile(
@@ -54,13 +54,13 @@ def _should_skip_automation(stdin_data: dict) -> bool:
     if entrypoint not in {"cli", "sdk-ts"}:
         return True
 
-    if os.environ.get("DEVGEAR_SKIP_OBSERVE", "0") == "1":
+    if os.environ.get("DEEPBLUE_SKIP_OBSERVE", "0") == "1":
         return True
 
     if stdin_data.get("agent_id"):
         return True
 
-    skip_paths = os.environ.get("DEVGEAR_OBSERVE_SKIP_PATHS", ",".join(_DEFAULT_SKIP_PATHS))
+    skip_paths = os.environ.get("DEEPBLUE_OBSERVE_SKIP_PATHS", ",".join(_DEFAULT_SKIP_PATHS))
     cwd = str(stdin_data.get("cwd", "") or "")
     if cwd:
         for pattern in (part.strip() for part in skip_paths.split(",")):
@@ -217,7 +217,7 @@ def _start_observer_if_needed(project: dict) -> None:
         return
 
     env = os.environ.copy()
-    env["DEVGEAR_SKIP_OBSERVE"] = "1"
+    env["DEEPBLUE_SKIP_OBSERVE"] = "1"
     env.setdefault("CLV2_IS_WINDOWS", "false")
     env["PROJECT_DIR"] = str(project["project_dir"])
     env["PROJECT_ROOT"] = str(project["root"])
@@ -227,7 +227,7 @@ def _start_observer_if_needed(project: dict) -> None:
     env["INSTINCTS_DIR"] = str(project["instincts_personal"])
     try:
         subprocess.Popen(
-            [_resolve_python_cmd(), "-m", "devgear.skills.learn.observer", "start"],
+            [_resolve_python_cmd(), "-m", "deepblue.skills.learn.observer", "start"],
             cwd=str(project["root"]),
             env=env,
             stdout=subprocess.DEVNULL,
@@ -271,7 +271,7 @@ def _pid_is_running(pid_file: Path) -> bool:
 
 
 def _signal_observers(project: dict) -> None:
-    signal_every_n = int(os.environ.get("DEVGEAR_OBSERVER_SIGNAL_EVERY_N", str(_DEFAULT_SIGNAL_EVERY_N)))
+    signal_every_n = int(os.environ.get("DEEPBLUE_OBSERVER_SIGNAL_EVERY_N", str(_DEFAULT_SIGNAL_EVERY_N)))
     counter_file = project["project_dir"] / ".observer-signal-counter"
     try:
         counter = int(counter_file.read_text(encoding="utf-8").strip()) if counter_file.exists() else 0

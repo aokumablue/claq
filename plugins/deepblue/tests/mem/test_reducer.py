@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from devgear.mem.reducer import (
+from deepblue.mem.reducer import (
     ReduceConfig,
     dedup_lines,
     group_lint_errors,

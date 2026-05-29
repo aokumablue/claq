@@ -1,4 +1,4 @@
-# devgear
+# deepblue
 
 > AI-first development acceleration plugin for Claude Code.
 
@@ -317,7 +317,7 @@ flowchart TB
   end
 
   subgraph persistence["💾 Persistence"]
-    DB[("~/.devgear/mem.db\nSQLite")]:::store
+    DB[("~/.deepblue/mem.db\nSQLite")]:::store
     PG[("PostgreSQL\nチーム共有")]:::store
   end
 

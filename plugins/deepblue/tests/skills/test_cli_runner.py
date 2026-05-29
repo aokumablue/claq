@@ -37,7 +37,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from devgear.skills import cli_runner
+from deepblue.skills import cli_runner
 
 # ========================
 # detect_cli_binary テスト

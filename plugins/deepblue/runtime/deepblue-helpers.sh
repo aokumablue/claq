@@ -3,7 +3,7 @@
 
 # Resolve the plugin root from CLAUDE_PLUGIN_ROOT first, then this file's
 # location. The helpers are usually sourced from command snippets.
-devgear_plugin_root() {
+deepblue_plugin_root() {
   if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
     printf '%s\n' "$CLAUDE_PLUGIN_ROOT"
     return 0
@@ -14,33 +14,33 @@ devgear_plugin_root() {
   printf '%s\n' "$(cd "${script_dir}/.." && pwd)"
 }
 
-# Run a devgear module or script through the repository launcher.
-devgear_run() {
+# Run a deepblue module or script through the repository launcher.
+deepblue_run() {
   local plugin_root
-  plugin_root="$(devgear_plugin_root)"
-  python3 "${plugin_root}/src/devgear/launcher.py" "$@"
+  plugin_root="$(deepblue_plugin_root)"
+  python3 "${plugin_root}/src/deepblue/launcher.py" "$@"
 }
 
-# Pipe JSON input into devgear.mem subcommands.
-devgear_mem_json() {
-  local command="${1:?Usage: devgear_mem_json <subcommand> [json] }"
+# Pipe JSON input into deepblue.mem subcommands.
+deepblue_mem_json() {
+  local command="${1:?Usage: deepblue_mem_json <subcommand> [json] }"
   shift || true
 
   if [ "$#" -gt 0 ]; then
-    printf '%s' "$1" | devgear_run devgear.mem.cli "$command"
+    printf '%s' "$1" | deepblue_run deepblue.mem.cli "$command"
   else
-    cat | devgear_run devgear.mem.cli "$command"
+    cat | deepblue_run deepblue.mem.cli "$command"
   fi
 }
 
 # Build and execute a repository-scoped mem search payload.
-devgear_mem_search() {
-  local query="${1:?Usage: devgear_mem_search <query> [limit]}"
+deepblue_mem_search() {
+  local query="${1:?Usage: deepblue_mem_search <query> [limit]}"
   local limit="${2:-3}"
   local cwd
   cwd="$(git rev-parse --show-toplevel)"
 
-  devgear_mem_json search "$(
+  deepblue_mem_json search "$(
     python3 - "$cwd" "$query" "$limit" <<'PY'
 import json
 import sys
@@ -51,12 +51,12 @@ PY
   )"
 }
 
-# Run a devgear launcher command in the background and print the PID.
-devgear_run_bg() {
+# Run a deepblue launcher command in the background and print the PID.
+deepblue_run_bg() {
   local plugin_root
-  plugin_root="$(devgear_plugin_root)"
+  plugin_root="$(deepblue_plugin_root)"
 
-  nohup python3 "${plugin_root}/src/devgear/launcher.py" "$@" >/dev/null 2>&1 &
+  nohup python3 "${plugin_root}/src/deepblue/launcher.py" "$@" >/dev/null 2>&1 &
   printf '%s\n' "$!"
 }
 

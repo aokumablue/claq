@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from devgear.lib.project_detect import detect_project
+from deepblue.lib.project_detect import detect_project
 
 QUALITY_GATE_PRESETS: dict[str, dict[str, Any]] = {
     "python": {

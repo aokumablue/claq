@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from devgear.ci.ci_common import REPO_ROOT
+from deepblue.ci.ci_common import REPO_ROOT
 
 DEFAULT_ROOT = REPO_ROOT
 DEFAULT_README_PATH = REPO_ROOT / "README.md"
@@ -342,7 +342,7 @@ def render_markdown(result: dict[str, Any]) -> None:
         例外は発生しません。
     """
     mismatches = [check for check in result["checks"] if not check["ok"]]
-    print("# devgear カタログ検証\n")
+    print("# deepblue カタログ検証\n")
     print("| カテゴリ | 件数 | パターン |")
     print("| --- | ---: | --- |")
     print(f"| エージェント | {result['catalog']['agents']['count']} | `{result['catalog']['agents']['glob']}` |")

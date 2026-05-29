@@ -7,9 +7,9 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-import devgear.mem.search as search_mod
-from devgear.mem import cli as cli_module
-from devgear.mem.settings import Settings, SyncSettings, TeamSettings
+import deepblue.mem.search as search_mod
+from deepblue.mem import cli as cli_module
+from deepblue.mem.settings import Settings, SyncSettings, TeamSettings
 
 
 class _FakePg:
@@ -40,7 +40,7 @@ def test_team_context_skipped_when_sync_disabled(
         called["ok"] = True
         return "<team-context>X</team-context>"
 
-    monkeypatch.setattr("devgear.mem.team_context.build_team_context", _fake_build)
+    monkeypatch.setattr("deepblue.mem.team_context.build_team_context", _fake_build)
     assert cli_module._handle_team_context(_settings(sync_enabled=False), {"cwd": "/p/proj"}) == ""
     assert capsys.readouterr().out == ""
     assert called["ok"] is False
@@ -67,7 +67,7 @@ def test_team_context_silent_on_connection_failure(
 ) -> None:
     monkeypatch.setattr(cli_module, "get_git_user_name", lambda: "me")
     monkeypatch.setattr(
-        "devgear.mem.pg_database.PgDatabase",
+        "deepblue.mem.pg_database.PgDatabase",
         lambda url: _FakePg(connected=False),
     )
     assert cli_module._handle_team_context(_settings(), {"cwd": "/p/proj"}) == ""
@@ -80,7 +80,7 @@ def test_team_context_prints_additional_context(
     pg_instance = _FakePg(connected=True)
     monkeypatch.setattr(cli_module, "get_git_user_name", lambda: "me")
     monkeypatch.setattr(
-        "devgear.mem.pg_database.PgDatabase", lambda url: pg_instance
+        "deepblue.mem.pg_database.PgDatabase", lambda url: pg_instance
     )
 
     captured_kwargs: dict = {}
@@ -96,7 +96,7 @@ def test_team_context_prints_additional_context(
         )
         return "<team-context>hello</team-context>"
 
-    monkeypatch.setattr("devgear.mem.team_context.build_team_context", _fake_build)
+    monkeypatch.setattr("deepblue.mem.team_context.build_team_context", _fake_build)
 
     result = cli_module._handle_team_context(_settings(), {"cwd": "/home/u/x-picflow"})
 
@@ -122,11 +122,11 @@ def test_team_session_init_requires_retrospective_prompt(
 ) -> None:
     called = {"ok": False}
     monkeypatch.setattr(
-        "devgear.mem.pg_database.PgDatabase",
+        "deepblue.mem.pg_database.PgDatabase",
         lambda url: (_ for _ in ()).throw(AssertionError("should not reach PG")),
     )
     monkeypatch.setattr(
-        "devgear.mem.team_context.build_team_context",
+        "deepblue.mem.team_context.build_team_context",
         lambda *a, **kw: called.__setitem__("ok", True) or "",  # noqa: ANN001
     )
 
@@ -144,7 +144,7 @@ def test_team_session_init_fires_on_retrospective_keyword(
     pg_instance = _FakePg(connected=True)
     monkeypatch.setattr(cli_module, "get_git_user_name", lambda: "me")
     monkeypatch.setattr(
-        "devgear.mem.pg_database.PgDatabase", lambda url: pg_instance
+        "deepblue.mem.pg_database.PgDatabase", lambda url: pg_instance
     )
 
     captured: dict = {}
@@ -160,7 +160,7 @@ def test_team_session_init_fires_on_retrospective_keyword(
         )
         return "<team-context>history</team-context>"
 
-    monkeypatch.setattr("devgear.mem.team_context.build_team_context", _fake_build)
+    monkeypatch.setattr("deepblue.mem.team_context.build_team_context", _fake_build)
 
     cli_module._handle_team_session_init(
         _settings(), {"cwd": "/home/u/x-picflow", "prompt": "前回どう直した？"}
@@ -189,7 +189,7 @@ def test_team_session_init_respects_exclude_self_false(
     pg_instance = _FakePg(connected=True)
     monkeypatch.setattr(cli_module, "get_git_user_name", lambda: "me")
     monkeypatch.setattr(
-        "devgear.mem.pg_database.PgDatabase", lambda url: pg_instance
+        "deepblue.mem.pg_database.PgDatabase", lambda url: pg_instance
     )
 
     captured: dict = {}
@@ -198,7 +198,7 @@ def test_team_session_init_respects_exclude_self_false(
         captured["exclude"] = exclude_origin_user
         return "<team-context>x</team-context>"
 
-    monkeypatch.setattr("devgear.mem.team_context.build_team_context", _fake_build)
+    monkeypatch.setattr("deepblue.mem.team_context.build_team_context", _fake_build)
     cli_module._handle_team_session_init(
         s, {"cwd": "/home/u/x-picflow", "prompt": "前回の話"}
     )
@@ -216,10 +216,10 @@ def test_team_context_and_session_init_failure_paths(
     assert cli_module._handle_team_context(settings, {"cwd": "/"}) == ""
     assert capsys.readouterr().out == ""
 
-    fake_pg = ModuleType("devgear.mem.pg_database")
-    fake_team = ModuleType("devgear.mem.team_context")
-    monkeypatch.setitem(sys.modules, "devgear.mem.pg_database", fake_pg)
-    monkeypatch.setitem(sys.modules, "devgear.mem.team_context", fake_team)
+    fake_pg = ModuleType("deepblue.mem.pg_database")
+    fake_team = ModuleType("deepblue.mem.team_context")
+    monkeypatch.setitem(sys.modules, "deepblue.mem.pg_database", fake_pg)
+    monkeypatch.setitem(sys.modules, "deepblue.mem.team_context", fake_team)
 
     assert cli_module._handle_team_context(settings, {"cwd": "/home/u/x-picflow"}) == ""
     assert capsys.readouterr().out == ""
@@ -260,13 +260,13 @@ def test_team_context_build_raises_and_logs_warning(
     pg_instance = _FakePg(connected=True)
     monkeypatch.setattr(cli_module, "get_git_user_name", lambda: "me")
     monkeypatch.setattr(
-        "devgear.mem.pg_database.PgDatabase", lambda url: pg_instance
+        "deepblue.mem.pg_database.PgDatabase", lambda url: pg_instance
     )
 
     def _boom(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
         raise RuntimeError("build boom")
 
-    monkeypatch.setattr("devgear.mem.team_context.build_team_context", _boom)
+    monkeypatch.setattr("deepblue.mem.team_context.build_team_context", _boom)
 
     result = cli_module._handle_team_context(_settings(), {"cwd": "/home/u/x-picflow"})
     assert result == ""
@@ -311,7 +311,7 @@ def test_team_session_init_import_failure(
     real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __import__
 
     def _bad_import(name, *args, **kwargs):
-        if name == "devgear.mem.pg_database":
+        if name == "deepblue.mem.pg_database":
             raise ImportError("simulated import failure")
         return real_import(name, *args, **kwargs)
 
@@ -332,7 +332,7 @@ def test_team_session_init_test_connection_false(
     monkeypatch.setattr(cli_module, "get_git_user_name", lambda: "me")
     pg_instance = _FakePg(connected=False)
     monkeypatch.setattr(
-        "devgear.mem.pg_database.PgDatabase", lambda url: pg_instance
+        "deepblue.mem.pg_database.PgDatabase", lambda url: pg_instance
     )
     assert (
         cli_module._handle_team_session_init(
@@ -351,13 +351,13 @@ def test_team_session_init_build_raises(
     monkeypatch.setattr(cli_module, "get_git_user_name", lambda: "me")
     pg_instance = _FakePg(connected=True)
     monkeypatch.setattr(
-        "devgear.mem.pg_database.PgDatabase", lambda url: pg_instance
+        "deepblue.mem.pg_database.PgDatabase", lambda url: pg_instance
     )
 
     def _boom(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
         raise RuntimeError("build boom")
 
-    monkeypatch.setattr("devgear.mem.team_context.build_team_context", _boom)
+    monkeypatch.setattr("deepblue.mem.team_context.build_team_context", _boom)
     cli_module._handle_team_session_init(
         _settings(), {"cwd": "/home/u/x-picflow", "prompt": "前回の話"}
     )

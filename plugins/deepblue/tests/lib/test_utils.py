@@ -1,4 +1,4 @@
-"""devgear.lib.core_utils モジュールのテスト。"""
+"""deepblue.lib.core_utils モジュールのテスト。"""
 
 import os
 import re
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from devgear.lib.core_utils import (
+from deepblue.lib.core_utils import (
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
@@ -20,7 +20,7 @@ from devgear.lib.core_utils import (
     get_claude_dir,
     get_date_string,
     get_datetime_string,
-    get_devgear_dir,
+    get_deepblue_dir,
     get_git_user_name,
     get_home_dir,
     get_learned_skills_dir,
@@ -61,19 +61,19 @@ class TestDirectoryFunctions:
 
     def test_get_home_dir_prefers_explicit_env(self, monkeypatch, tmp_path):
         """明示的な環境変数があればそれを優先すること。"""
-        monkeypatch.setenv("DEVGEAR_HOME", str(tmp_path))
+        monkeypatch.setenv("DEEPBLUE_HOME", str(tmp_path))
         assert get_home_dir() == tmp_path
 
-    def test_get_home_dir_falls_back_to_home_when_devgear_home_is_unset(self, monkeypatch, tmp_path):
-        """DEVGEAR_HOME がなければ HOME を使うこと。"""
-        monkeypatch.delenv("DEVGEAR_HOME", raising=False)
+    def test_get_home_dir_falls_back_to_home_when_deepblue_home_is_unset(self, monkeypatch, tmp_path):
+        """DEEPBLUE_HOME がなければ HOME を使うこと。"""
+        monkeypatch.delenv("DEEPBLUE_HOME", raising=False)
         monkeypatch.delenv("CLAUDE_HOME", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
         assert get_home_dir() == tmp_path
 
     def test_get_home_dir_falls_back_to_cwd_when_home_is_unavailable(self, monkeypatch, tmp_path):
         """Path.home() が失敗しても cwd にフォールバックすること。"""
-        monkeypatch.delenv("DEVGEAR_HOME", raising=False)
+        monkeypatch.delenv("DEEPBLUE_HOME", raising=False)
         monkeypatch.delenv("CLAUDE_HOME", raising=False)
         monkeypatch.delenv("HOME", raising=False)
         monkeypatch.delenv("USERPROFILE", raising=False)
@@ -87,14 +87,14 @@ class TestDirectoryFunctions:
         claude_dir = get_claude_dir()
         assert claude_dir == get_home_dir() / ".claude"
 
-    def test_get_devgear_dir(self):
-        """ホーム配下の .devgear を返すこと。"""
-        assert get_devgear_dir() == get_home_dir() / ".devgear"
+    def test_get_deepblue_dir(self):
+        """ホーム配下の .deepblue を返すこと。"""
+        assert get_deepblue_dir() == get_home_dir() / ".deepblue"
 
     def test_get_sessions_dir(self):
-        """devgear ディレクトリ配下の session-data を返すこと。"""
+        """deepblue ディレクトリ配下の session-data を返すこと。"""
         sessions = get_sessions_dir()
-        assert sessions == get_devgear_dir() / "session-data"
+        assert sessions == get_deepblue_dir() / "session-data"
 
     def test_get_session_search_dirs_no_duplicates(self):
         """重複のないディレクトリ一覧を返すこと。"""
@@ -429,25 +429,25 @@ class TestGetGitRepoName:
 
     def test_returns_none_when_not_git_repo(self, tmp_path: Path, monkeypatch):
         """git リポジトリでない場合 None を返すこと。"""
-        from devgear.lib.core_utils import get_git_repo_name
+        from deepblue.lib.core_utils import get_git_repo_name
 
         monkeypatch.chdir(tmp_path)
         # git rev-parse 失敗 → None
-        with patch("devgear.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
+        with patch("deepblue.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
             assert get_git_repo_name() is None
 
     def test_project_name_falls_back_to_cwd_name(self, tmp_path: Path, monkeypatch):
         """git リポジトリでない場合、カレントディレクトリ名を返すこと。"""
-        from devgear.lib.core_utils import get_project_name
+        from deepblue.lib.core_utils import get_project_name
 
         monkeypatch.chdir(tmp_path)
-        with patch("devgear.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
+        with patch("deepblue.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
             result = get_project_name()
         assert result == tmp_path.name
 
     def test_get_git_user_name_empty_on_failure(self) -> None:
         """git user.name が取得できない場合は空文字列を返すこと。"""
-        with patch("devgear.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
+        with patch("deepblue.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
             assert get_git_user_name() == ""
 
 
@@ -519,7 +519,7 @@ class TestFindFilesEdgeCases:
         """PermissionError が発生したディレクトリはスキップされること。"""
         from pathlib import Path as _Path
 
-        from devgear.lib.core_utils import find_files as _find_files
+        from deepblue.lib.core_utils import find_files as _find_files
 
         def _raise(self):
             raise PermissionError("denied")
@@ -607,50 +607,50 @@ class TestGetGitModifiedFiles:
 
     def test_returns_empty_when_not_git_repo(self, monkeypatch):
         """git リポジトリでない場合は空リストを返すこと。"""
-        from devgear.lib.core_utils import get_git_modified_files
+        from deepblue.lib.core_utils import get_git_modified_files
 
-        with patch("devgear.lib.core_utils.is_git_repo", return_value=False):
+        with patch("deepblue.lib.core_utils.is_git_repo", return_value=False):
             assert get_git_modified_files() == []
 
     def test_returns_empty_when_git_diff_fails(self, monkeypatch):
         """git diff が失敗した場合は空リストを返すこと。"""
-        from devgear.lib.core_utils import get_git_modified_files
+        from deepblue.lib.core_utils import get_git_modified_files
 
         with (
-            patch("devgear.lib.core_utils.is_git_repo", return_value=True),
-            patch("devgear.lib.core_utils.run_command", return_value={"success": False, "output": ""}),
+            patch("deepblue.lib.core_utils.is_git_repo", return_value=True),
+            patch("deepblue.lib.core_utils.run_command", return_value={"success": False, "output": ""}),
         ):
             assert get_git_modified_files() == []
 
     def test_returns_all_files_without_patterns(self, monkeypatch):
         """パターンなしの場合すべてのファイルを返すこと。"""
-        from devgear.lib.core_utils import get_git_modified_files
+        from deepblue.lib.core_utils import get_git_modified_files
 
         with (
-            patch("devgear.lib.core_utils.is_git_repo", return_value=True),
-            patch("devgear.lib.core_utils.run_command", return_value={"success": True, "output": "a.py\nb.py\nc.py"}),
+            patch("deepblue.lib.core_utils.is_git_repo", return_value=True),
+            patch("deepblue.lib.core_utils.run_command", return_value={"success": True, "output": "a.py\nb.py\nc.py"}),
         ):
             files = get_git_modified_files()
         assert files == ["a.py", "b.py", "c.py"]
 
     def test_filters_by_patterns(self, monkeypatch):
         """patterns が指定された場合にフィルタリングすること。"""
-        from devgear.lib.core_utils import get_git_modified_files
+        from deepblue.lib.core_utils import get_git_modified_files
 
         with (
-            patch("devgear.lib.core_utils.is_git_repo", return_value=True),
-            patch("devgear.lib.core_utils.run_command", return_value={"success": True, "output": "a.py\nb.js\nc.py"}),
+            patch("deepblue.lib.core_utils.is_git_repo", return_value=True),
+            patch("deepblue.lib.core_utils.run_command", return_value={"success": True, "output": "a.py\nb.js\nc.py"}),
         ):
             files = get_git_modified_files(patterns=[r"\.py$"])
         assert files == ["a.py", "c.py"]
 
     def test_invalid_regex_pattern_skipped(self, monkeypatch):
         """不正な正規表現パターンはスキップされること。"""
-        from devgear.lib.core_utils import get_git_modified_files
+        from deepblue.lib.core_utils import get_git_modified_files
 
         with (
-            patch("devgear.lib.core_utils.is_git_repo", return_value=True),
-            patch("devgear.lib.core_utils.run_command", return_value={"success": True, "output": "a.py\nb.py"}),
+            patch("deepblue.lib.core_utils.is_git_repo", return_value=True),
+            patch("deepblue.lib.core_utils.run_command", return_value={"success": True, "output": "a.py\nb.py"}),
         ):
             # 有効パターン + 不正パターン → 不正はスキップ、有効パターンでフィルタ
             files = get_git_modified_files(patterns=[r"\.py$", "[invalid"])
@@ -658,11 +658,11 @@ class TestGetGitModifiedFiles:
 
     def test_empty_pattern_skipped(self, monkeypatch):
         """空文字列パターンはスキップされること。"""
-        from devgear.lib.core_utils import get_git_modified_files
+        from deepblue.lib.core_utils import get_git_modified_files
 
         with (
-            patch("devgear.lib.core_utils.is_git_repo", return_value=True),
-            patch("devgear.lib.core_utils.run_command", return_value={"success": True, "output": "a.py"}),
+            patch("deepblue.lib.core_utils.is_git_repo", return_value=True),
+            patch("deepblue.lib.core_utils.run_command", return_value={"success": True, "output": "a.py"}),
         ):
             files = get_git_modified_files(patterns=["", None, r"\.py$"])  # type: ignore[list-item]
         assert files == ["a.py"]
@@ -768,17 +768,17 @@ class TestIsGitRepo:
 
     def test_is_git_repo_in_git_directory(self):
         """git リポジトリ内では True を返すこと。"""
-        from devgear.lib.core_utils import is_git_repo
+        from deepblue.lib.core_utils import is_git_repo
 
         # 現在のディレクトリは git リポジトリのはず
         assert is_git_repo() is True
 
     def test_is_git_repo_outside_git(self, tmp_path: Path, monkeypatch):
         """git リポジトリ外では False を返すこと。"""
-        from devgear.lib.core_utils import is_git_repo
+        from deepblue.lib.core_utils import is_git_repo
 
         monkeypatch.chdir(tmp_path)
-        with patch("devgear.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
+        with patch("deepblue.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
             assert is_git_repo() is False
 
 
@@ -790,7 +790,7 @@ class TestReplaceInFileException:
         f = tmp_path / "file.txt"
         f.write_text("hello world")
 
-        with patch("devgear.lib.core_utils.write_file", side_effect=PermissionError("denied")):
+        with patch("deepblue.lib.core_utils.write_file", side_effect=PermissionError("denied")):
             result = replace_in_file(f, "hello", "goodbye")
         assert result is False
 
@@ -802,7 +802,7 @@ class TestReadStdinJsonSync:
         """stdin が tty の場合は空辞書を返すこと。"""
         import sys
 
-        from devgear.lib.core_utils import read_stdin_json_sync
+        from deepblue.lib.core_utils import read_stdin_json_sync
 
         monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
         result = read_stdin_json_sync()
@@ -817,7 +817,7 @@ class TestReadStdinJsonAsync:
         import asyncio
         import sys
 
-        from devgear.lib.core_utils import read_stdin_json
+        from deepblue.lib.core_utils import read_stdin_json
 
         monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
         result = asyncio.run(read_stdin_json())
@@ -828,7 +828,7 @@ class TestReadStdinJsonAsync:
         import asyncio
         import sys
 
-        from devgear.lib.core_utils import read_stdin_json
+        from deepblue.lib.core_utils import read_stdin_json
 
         monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
@@ -846,7 +846,7 @@ class TestReadStdinJsonAsync:
         import json
         import sys
 
-        from devgear.lib.core_utils import read_stdin_json
+        from deepblue.lib.core_utils import read_stdin_json
 
         monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
         monkeypatch.setattr(sys.stdin, "read", lambda n: "{invalid")
@@ -864,7 +864,7 @@ class TestReadStdinJsonAsync:
         import io
         import sys
 
-        from devgear.lib.core_utils import read_stdin_json
+        from deepblue.lib.core_utils import read_stdin_json
 
         # stdin を StringIO に差し替えて非 tty として扱う
         fake_stdin = io.StringIO('{"key": "value"}')
@@ -879,7 +879,7 @@ class TestReadStdinJsonAsync:
         import io
         import sys
 
-        from devgear.lib.core_utils import read_stdin_json
+        from deepblue.lib.core_utils import read_stdin_json
 
         fake_stdin = io.StringIO("   ")
         monkeypatch.setattr(sys, "stdin", fake_stdin)
@@ -895,7 +895,7 @@ class TestReadStdinJsonSyncEdgeCases:
         """select.select がタイムアウト（空リスト返却）の場合は空辞書を返すこと。"""
         import sys
 
-        from devgear.lib.core_utils import IS_WINDOWS, read_stdin_json_sync
+        from deepblue.lib.core_utils import IS_WINDOWS, read_stdin_json_sync
 
         if IS_WINDOWS:
             pytest.skip("Windows では select を使わない")
@@ -911,7 +911,7 @@ class TestReadStdinJsonSyncEdgeCases:
         """stdin から不正 JSON を読み込んだ場合は空辞書を返すこと。"""
         import sys
 
-        from devgear.lib.core_utils import IS_WINDOWS, read_stdin_json_sync
+        from deepblue.lib.core_utils import IS_WINDOWS, read_stdin_json_sync
 
         if IS_WINDOWS:
             pytest.skip("Windows では select を使わない")
@@ -928,7 +928,7 @@ class TestReadStdinJsonSyncEdgeCases:
         """stdin から空データを読み込んだ場合は空辞書を返すこと (line 314)。"""
         import sys
 
-        from devgear.lib.core_utils import IS_WINDOWS, read_stdin_json_sync
+        from deepblue.lib.core_utils import IS_WINDOWS, read_stdin_json_sync
 
         if IS_WINDOWS:
             pytest.skip("Windows では select を使わない")
@@ -949,7 +949,7 @@ class TestCommandExistsWindows:
         """IS_WINDOWS=True のとき 'where' コマンドを使うこと。"""
         import subprocess as _subprocess
 
-        import devgear.lib.core_utils as _mod
+        import deepblue.lib.core_utils as _mod
 
         monkeypatch.setattr(_mod, "IS_WINDOWS", True)
         captured_cmd: list = []

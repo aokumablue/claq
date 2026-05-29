@@ -115,7 +115,7 @@ class InstallOperation(BaseModel):
 class InstallState(BaseModel):
     """完全なインストール状態ドキュメント。"""
 
-    schemaVersion: Literal["devgear.install.v1"] = Field(..., alias="schema_version")
+    schemaVersion: Literal["deepblue.install.v1"] = Field(..., alias="schema_version")
     installedAt: str = Field(..., min_length=1, alias="installed_at")
     lastValidatedAt: str | None = Field(default=None, alias="last_validated_at")
     target: InstallTarget
@@ -280,7 +280,7 @@ def create_install_state(
         installed_at = datetime.now().isoformat()
 
     state: dict[str, Any] = {
-        "schemaVersion": "devgear.install.v1",
+        "schemaVersion": "deepblue.install.v1",
         "installedAt": installed_at,
         "target": {
             "id": adapter.get("id"),

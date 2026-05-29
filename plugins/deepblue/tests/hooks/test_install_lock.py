@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.hooks._install_lock import install_lock
+from deepblue.hooks._install_lock import install_lock
 
 
 def test_install_lock_creates_file_and_releases_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

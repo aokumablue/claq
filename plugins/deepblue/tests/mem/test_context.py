@@ -5,15 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from devgear.mem.context import _format_timestamp, _select_within_budget, _truncate, build_context, importance_score
-from devgear.mem.database import Database, MemoryChunk
-from devgear.mem.settings import Settings
+from deepblue.mem.context import _format_timestamp, _select_within_budget, _truncate, build_context, importance_score
+from deepblue.mem.database import Database, MemoryChunk
+from deepblue.mem.settings import Settings
 
 
 @pytest.fixture(autouse=True)
 def _patch_default_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """各テストで Settings の保存先を一時ディレクトリに固定する。"""
-    import devgear.mem.settings as mod
+    import deepblue.mem.settings as mod
 
     monkeypatch.setattr(mod, "_DEFAULT_DATA_DIR", tmp_path)
 

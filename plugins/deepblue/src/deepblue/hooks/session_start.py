@@ -14,8 +14,8 @@ import re
 import subprocess
 from pathlib import Path
 
-from devgear.hooks.hook_common import emit_session_start_output, read_raw_stdin
-from devgear.lib.core_utils import (
+from deepblue.hooks.hook_common import emit_session_start_output, read_raw_stdin
+from deepblue.lib.core_utils import (
     ensure_dir,
     find_files,
     get_git_user_name,
@@ -26,18 +26,18 @@ from devgear.lib.core_utils import (
     read_file,
     strip_ansi,
 )
-from devgear.lib.package_manager import get_package_manager, get_selection_prompt
-from devgear.lib.project_detect import detect_project
-from devgear.lib.sanitize import sanitize_log_value
-from devgear.lib.settings import extract_coverage_hint_lines
-from devgear.lib.slim_text import compact_line
-from devgear.lib.subprocess_utils import check_output_text
-from devgear.mem.settings import Settings
+from deepblue.lib.package_manager import get_package_manager, get_selection_prompt
+from deepblue.lib.project_detect import detect_project
+from deepblue.lib.sanitize import sanitize_log_value
+from deepblue.lib.settings import extract_coverage_hint_lines
+from deepblue.lib.slim_text import compact_line
+from deepblue.lib.subprocess_utils import check_output_text
+from deepblue.mem.settings import Settings
 
 _SLIM_SKILL_PATH = Path(__file__).parents[4] / "skills" / "s-slim" / "SKILL.md"
 
-_SUMMARY_START = "<!-- devgear:SUMMARY:START -->"
-_SUMMARY_END = "<!-- devgear:SUMMARY:END -->"
+_SUMMARY_START = "<!-- deepblue:SUMMARY:START -->"
+_SUMMARY_END = "<!-- deepblue:SUMMARY:END -->"
 _SUMMARY_PATTERN = re.compile(
     re.escape(_SUMMARY_START) + r"\n(.*?)\n" + re.escape(_SUMMARY_END),
     re.DOTALL,
@@ -144,8 +144,8 @@ def _save_project_profile(project_info: object) -> None:
     try:
         import time
 
-        from devgear.mem.database import Database, ProjectProfile
-        from devgear.mem.settings import Settings
+        from deepblue.mem.database import Database, ProjectProfile
+        from deepblue.mem.settings import Settings
 
         settings = Settings.load()
         cwd = Path.cwd()
@@ -198,10 +198,10 @@ def _save_project_profile(project_info: object) -> None:
 def _import_adrs_and_instincts() -> None:
     """SessionStart 時に ADR・instincts を mem DB に取り込む（トークン増加なし）。"""
     try:
-        from devgear.lib.core_utils import get_git_user_name
-        from devgear.mem.database import Database
-        from devgear.mem.importers import import_adrs, import_instincts
-        from devgear.mem.settings import Settings
+        from deepblue.lib.core_utils import get_git_user_name
+        from deepblue.mem.database import Database
+        from deepblue.mem.importers import import_adrs, import_instincts
+        from deepblue.mem.settings import Settings
 
         settings = Settings.load()
         origin_user = get_git_user_name()

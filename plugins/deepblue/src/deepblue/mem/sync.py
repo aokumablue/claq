@@ -14,8 +14,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
-from devgear.lib.core_utils import get_git_user_name
-from devgear.mem.database import (
+from deepblue.lib.constants import BASE_DIR_NAME
+from deepblue.lib.core_utils import get_git_user_name
+from deepblue.mem.database import (
     Database,
     MemoryChunk,
     Session,
@@ -27,9 +28,9 @@ from devgear.mem.database import (
     _row_to_mem_item_run,
     _row_to_project_profile,
 )
-from devgear.mem.logger import get as _get_logger
-from devgear.mem.pg_database import PgDatabase
-from devgear.mem.settings import Settings
+from deepblue.mem.logger import get as _get_logger
+from deepblue.mem.pg_database import PgDatabase
+from deepblue.mem.settings import Settings
 
 log = _get_logger("SYNC")
 
@@ -145,7 +146,7 @@ def _resolve_sync_lock_path(settings: Settings) -> Path:
     try:
         return Path(lock_path)
     except (TypeError, ValueError):
-        return Path.home() / ".devgear" / "sync.lock"
+        return Path.home() / BASE_DIR_NAME / "sync.lock"
 
 
 @contextmanager
@@ -222,7 +223,7 @@ def sync_to_postgres(
             return SyncResult(success=True)
 
         if not sync_cfg.postgres_url:
-            log.info("同期スキップ: postgres_url 未設定 (~/.devgear/settings.json の mem.sync.postgres_url を設定してください)")
+            log.info("同期スキップ: postgres_url 未設定 (~/.deepblue/settings.json の mem.sync.postgres_url を設定してください)")
             return SyncResult(success=False, error="postgres_url が設定されていません")
 
         if not should_sync(settings):

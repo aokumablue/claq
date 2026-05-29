@@ -12,7 +12,7 @@ claude_home_adapter = create_install_target_adapter(
         target="claude",
         kind="home",
         root_segments=[".claude"],
-        install_state_path_segments=["devgear", "install-state.json"],
+        install_state_path_segments=["deepblue", "install-state.json"],
         native_root_relative_path=".claude-plugin",
     )
 )

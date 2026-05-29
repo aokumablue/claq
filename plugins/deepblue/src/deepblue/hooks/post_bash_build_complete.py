@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from devgear.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
+from deepblue.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
 
 
 def main() -> int:

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from devgear.lib.mem_helper import (
+from deepblue.lib.mem_helper import (
     _truncate,
     format_context_for_prompt,
     get_project_stats,
@@ -20,7 +20,7 @@ from devgear.lib.mem_helper import (
 class TestSearchSimilarContext:
     """search_similar_context のテスト"""
 
-    @patch("devgear.lib.mem_helper._run_mem_cli")
+    @patch("deepblue.lib.mem_helper._run_mem_cli")
     def test_basic_search(self, mock_run: MagicMock) -> None:
         """基本的な検索が正しく動作する"""
         mock_run.return_value = {"results": [{"chunk_id": 1, "content": "test content", "user_prompt": "test"}]}
@@ -31,7 +31,7 @@ class TestSearchSimilarContext:
         assert len(results) == 1
         assert results[0]["content"] == "test content"
 
-    @patch("devgear.lib.mem_helper._run_mem_cli")
+    @patch("deepblue.lib.mem_helper._run_mem_cli")
     def test_search_with_filters(self, mock_run: MagicMock) -> None:
         """フィルタ付き検索が search-structured を使用する"""
         mock_run.return_value = {"results": []}
@@ -55,7 +55,7 @@ class TestSearchSimilarContext:
             },
         )
 
-    @patch("devgear.lib.mem_helper._run_mem_cli")
+    @patch("deepblue.lib.mem_helper._run_mem_cli")
     def test_search_returns_empty_on_error(self, mock_run: MagicMock) -> None:
         """エラー時は空リストを返す"""
         mock_run.return_value = {"error": "Database unavailable"}
@@ -68,7 +68,7 @@ class TestSearchSimilarContext:
 class TestRecordEvent:
     """record_event のテスト"""
 
-    @patch("devgear.lib.mem_helper._run_mem_cli")
+    @patch("deepblue.lib.mem_helper._run_mem_cli")
     def test_basic_record(self, mock_run: MagicMock) -> None:
         """基本的な記録が正しく動作する"""
         mock_run.return_value = {"success": True, "chunk_id": 42}
@@ -87,7 +87,7 @@ class TestRecordEvent:
         assert call_args[1]["event_type"] == "review"
         assert call_args[1]["content"] == "Code review completed"
 
-    @patch("devgear.lib.mem_helper._run_mem_cli")
+    @patch("deepblue.lib.mem_helper._run_mem_cli")
     def test_record_with_files(self, mock_run: MagicMock) -> None:
         """ファイル情報付きの記録"""
         mock_run.return_value = {"success": True, "chunk_id": 43}
@@ -109,10 +109,10 @@ class TestRecordEvent:
 class TestGetProjectStats:
     """get_project_stats のテスト"""
 
-    @patch("devgear.lib.mem_helper.time.time", return_value=1704067200)
-    @patch("devgear.lib.mem_helper.Database")
-    @patch("devgear.lib.mem_helper.Settings.load")
-    @patch("devgear.lib.mem_helper.Path.cwd")
+    @patch("deepblue.lib.mem_helper.time.time", return_value=1704067200)
+    @patch("deepblue.lib.mem_helper.Database")
+    @patch("deepblue.lib.mem_helper.Settings.load")
+    @patch("deepblue.lib.mem_helper.Path.cwd")
     def test_basic_stats(
         self,
         mock_cwd: MagicMock,
@@ -151,9 +151,9 @@ class TestGetProjectStats:
         assert result["top_tools"] == {"Edit": 1, "Bash": 1}
         assert result["top_files"] == {"src/app.py": 1}
 
-    @patch("devgear.lib.mem_helper.Database")
-    @patch("devgear.lib.mem_helper.Settings.load")
-    @patch("devgear.lib.mem_helper.Path.cwd")
+    @patch("deepblue.lib.mem_helper.Database")
+    @patch("deepblue.lib.mem_helper.Settings.load")
+    @patch("deepblue.lib.mem_helper.Path.cwd")
     def test_stats_with_project(self, mock_cwd: MagicMock, mock_load: MagicMock, mock_db: MagicMock) -> None:
         """プロジェクト指定での統計取得"""
         mock_cwd.return_value = Path("/workspace/ignored")
@@ -244,9 +244,9 @@ class TestRunMemCliIntegration:
         """無効なコマンドに対してエラーを返す"""
         import os
 
-        from devgear.lib.mem_helper import _run_mem_cli
+        from deepblue.lib.mem_helper import _run_mem_cli
 
-        monkeypatch.setitem(os.environ, "DEVGEAR_DATA_PATH", str(tmp_path))
+        monkeypatch.setitem(os.environ, "DEEPBLUE_DATA_PATH", str(tmp_path))
         result = _run_mem_cli("invalid_command", {})
 
         # エラーが返されるか、空の結果が返される
@@ -256,9 +256,9 @@ class TestRunMemCliIntegration:
         """タイムアウト処理"""
         import os
 
-        from devgear.lib.mem_helper import _run_mem_cli
+        from deepblue.lib.mem_helper import _run_mem_cli
 
-        monkeypatch.setitem(os.environ, "DEVGEAR_DATA_PATH", str(tmp_path))
+        monkeypatch.setitem(os.environ, "DEEPBLUE_DATA_PATH", str(tmp_path))
         # 正常なコマンドはタイムアウトしない
         result = _run_mem_cli("sync-status", {})
         # タイムアウトエラーではないことを確認
@@ -270,7 +270,7 @@ class TestRunMemCliPaths:
 
     def test_success_path(self, monkeypatch) -> None:
         """正常終了時はJSONをパースして返す"""
-        from devgear.lib import mem_helper
+        from deepblue.lib import mem_helper
 
         monkeypatch.setattr(
             mem_helper.subprocess,
@@ -281,7 +281,7 @@ class TestRunMemCliPaths:
 
     def test_timeout_path(self, monkeypatch) -> None:
         """TimeoutExpired 発生時は {"error": "Timeout"} を返す"""
-        from devgear.lib import mem_helper
+        from deepblue.lib import mem_helper
 
         monkeypatch.setattr(
             mem_helper.subprocess,
@@ -292,7 +292,7 @@ class TestRunMemCliPaths:
 
     def test_invalid_json_path(self, monkeypatch) -> None:
         """JSONデコード失敗時は {"error": "Invalid JSON response"} を返す"""
-        from devgear.lib import mem_helper
+        from deepblue.lib import mem_helper
 
         monkeypatch.setattr(
             mem_helper.subprocess,
@@ -303,7 +303,7 @@ class TestRunMemCliPaths:
 
     def test_generic_exception_path(self, monkeypatch) -> None:
         """その他の例外発生時はエラーメッセージを返す"""
-        from devgear.lib import mem_helper
+        from deepblue.lib import mem_helper
 
         monkeypatch.setattr(
             mem_helper.subprocess,

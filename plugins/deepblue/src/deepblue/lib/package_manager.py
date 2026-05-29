@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from devgear.lib.core_utils import command_exists, get_devgear_dir, read_file, write_file
+from deepblue.lib.core_utils import command_exists, get_deepblue_dir, read_file, write_file
 
 
 @dataclass
@@ -115,7 +115,7 @@ def get_config_path() -> Path:
     Raises:
         例外は発生しません。
     """
-    return get_devgear_dir() / "package-manager.json"
+    return get_deepblue_dir() / "package-manager.json"
 
 
 def load_config() -> dict[str, Any] | None:
@@ -254,7 +254,7 @@ def get_package_manager(
     2. プロジェクト固有設定（.claude/package-manager.json）
     3. package.json の packageManager フィールド
     4. ロックファイルの検出
-    5. グローバルなユーザー設定（~/.devgear/package-manager.json）
+    5. グローバルなユーザー設定（~/.deepblue/package-manager.json）
     6. 検出できない場合は name=None、source="none" を返す
 
     Args:
@@ -493,7 +493,7 @@ def get_selection_prompt() -> str:
     message += "Supported package managers: " + ", ".join(PACKAGE_MANAGERS.keys()) + "\n"
     message += "\nTo set your preferred package manager:\n"
     message += "  - Global: Set CLAUDE_PACKAGE_MANAGER environment variable\n"
-    message += '  - Or add to ~/.devgear/package-manager.json: {"packageManager": "pnpm"}\n'
+    message += '  - Or add to ~/.deepblue/package-manager.json: {"packageManager": "pnpm"}\n'
     message += '  - Or add to package.json: {"packageManager": "pnpm@8"}\n'
     message += "  - Or add a lock file to your project (e.g., pnpm-lock.yaml)\n"
 

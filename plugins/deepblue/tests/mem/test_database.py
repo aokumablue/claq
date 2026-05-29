@@ -8,11 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from devgear.mem.database import (
+from deepblue.mem.database import (
     Database,
     _make_prompt_hash,
 )
-from devgear.mem.models import (
+from deepblue.mem.models import (
     Adr,
     EventLog,
     Instinct,
@@ -22,7 +22,7 @@ from devgear.mem.models import (
     ProjectProfile,
     Session,
 )
-from devgear.mem.row_converters import (
+from deepblue.mem.row_converters import (
     _parse_json_dict_list,
     _parse_json_list,
     _row_to_adr,
@@ -440,7 +440,7 @@ class TestSchemaInit:
 
     def test_fts5_init_failure(self, tmp_path: Path) -> None:
         """FTS5 初期化失敗時もデータベースは使用可能"""
-        import devgear.mem.database as db_mod
+        import deepblue.mem.database as db_mod
 
         original_fts5 = db_mod._FTS5_SQL
         db_mod._FTS5_SQL = "CREATE VIRTUAL TABLE nonexistent USING invalid_module();"
@@ -522,13 +522,13 @@ class TestMigration:
         assert row is not None
 
     def test_migration_table_empty_initially(self, db: Database) -> None:
-        """devgear版では _MIGRATIONS が空なので schema_migrations は空"""
+        """deepblue版では _MIGRATIONS が空なので schema_migrations は空"""
         versions = {r[0] for r in db.conn.execute("SELECT version FROM schema_migrations").fetchall()}
-        # devgear版では初期マイグレーションは空（カラムはスキーマ定義に含まれている）
+        # deepblue版では初期マイグレーションは空（カラムはスキーマ定義に含まれている）
         assert isinstance(versions, set)
 
     def test_applies_registered_migrations(self, tmp_path: Path) -> None:
-        import devgear.mem.database as db_mod
+        import deepblue.mem.database as db_mod
 
         original = db_mod._MIGRATIONS
         db_mod._MIGRATIONS = [("v-test", ["CREATE TABLE IF NOT EXISTS migration_marker (id INTEGER);"])]
@@ -1177,7 +1177,7 @@ class TestConcurrentChunkInsert:
         import sqlite3 as _sqlite3
         import unittest.mock as mock
 
-        import devgear.mem.database as db_mod
+        import deepblue.mem.database as db_mod
 
         db4 = Database(tmp_path / "max_retry.db")
         session_id = "max-retry-session"

@@ -171,7 +171,7 @@ def get_runner_from_package_manager(project_root: str | Path) -> RunnerInfo:
     Raises:
         例外は発生しません。
     """
-    from devgear.lib.package_manager import get_package_manager
+    from deepblue.lib.package_manager import get_package_manager
 
     is_win = platform.system() == "Windows"
     pm = get_package_manager(project_dir=str(project_root))

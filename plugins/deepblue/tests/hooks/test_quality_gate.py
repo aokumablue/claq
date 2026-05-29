@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from devgear.hooks import quality_gate as quality_gate
+from deepblue.hooks import quality_gate as quality_gate
 
 
 def _write_step_script(path: Path) -> None:
@@ -512,6 +512,6 @@ def test_quality_gate_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.hooks.quality_gate", run_name="__main__")
+        runpy.run_module("deepblue.hooks.quality_gate", run_name="__main__")
 
     assert excinfo.value.code == 0

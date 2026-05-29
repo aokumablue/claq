@@ -154,7 +154,7 @@ def _run_inference_check(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI エントリポイント。--models-dir または DEVGEAR_MODELS_DIR 環境変数でパス上書き可能。"""
+    """CLI エントリポイント。--models-dir または DEEPBLUE_MODELS_DIR 環境変数でパス上書き可能。"""
     import argparse
     import os
     import sys
@@ -164,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--models-dir",
         type=Path,
-        default=Path(os.environ.get("DEVGEAR_MODELS_DIR", Path.home() / ".devgear" / "models")),
+        default=Path(os.environ.get("DEEPBLUE_MODELS_DIR", Path.home() / ".deepblue" / "models")),
     )
     args = parser.parse_args(argv)
     try:

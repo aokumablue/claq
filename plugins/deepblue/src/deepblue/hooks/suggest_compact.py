@@ -11,8 +11,8 @@ import re
 import tempfile
 from pathlib import Path
 
-from devgear.hooks.hook_common import read_raw_stdin, write_stderr
-from devgear.lib.core_utils import write_file
+from deepblue.hooks.hook_common import read_raw_stdin, write_stderr
+from deepblue.lib.core_utils import write_file
 
 
 def sanitize_session_id(raw: str | None) -> str:

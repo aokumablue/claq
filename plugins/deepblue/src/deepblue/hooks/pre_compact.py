@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from devgear.lib.core_utils import (
+from deepblue.lib.core_utils import (
     append_file,
     ensure_dir,
     find_files,

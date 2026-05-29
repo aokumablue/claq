@@ -63,7 +63,7 @@ project_id: "a1b2c3d4e5f6"
 ## ファイル構成
 
 ```
-~/.devgear/
+~/.deepblue/
 ├── identity.json / projects.json
 ├── instincts/{personal,inherited}/
 ├── evolved/{agents,skills,commands}/

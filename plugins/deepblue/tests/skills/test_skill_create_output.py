@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from devgear import skill_create_output as sco
+from deepblue import skill_create_output as sco
 
 
 def test_formatters_cover_core_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -37,7 +37,7 @@ def test_formatters_cover_core_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize(
     ("command", "stdin_payload", "expected_fragment"),
     [
-        ("header", None, "devgear Skill Creator"),
+        ("header", None, "deepblue Skill Creator"),
         ("analysis-results", {"commits": 1}, "Commits Analyzed"),
         ("patterns", [{"name": "alpha"}], "Key Patterns Discovered"),
         ("instincts", [{"name": "beta"}], "Instincts Generated"),
@@ -77,6 +77,6 @@ def test_color_helpers_and_entrypoint(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(sys, "argv", ["skill_create_output.py"])
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.skill_create_output", run_name="__main__")
+        runpy.run_module("deepblue.skill_create_output", run_name="__main__")
 
     assert excinfo.value.code == 0

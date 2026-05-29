@@ -10,8 +10,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
 
-    from devgear.mem.database import Database
-    from devgear.mem.settings import Settings
+    from deepblue.mem.database import Database
+    from deepblue.mem.settings import Settings
 
     OpenDbFn = Callable[[Settings], AbstractContextManager[Database]]
     GetProjectFn = Callable[[dict[str, Any]], str]
@@ -27,7 +27,7 @@ def handle_record(
     log: Any,
 ) -> None:
     """明示的記録: コマンド/スキル/エージェントからの直接記録"""
-    from devgear.mem.database import MemoryChunk, Session
+    from deepblue.mem.database import MemoryChunk, Session
 
     session_id = str(stdin_data.get("session_id", "") or f"record-{int(time.time())}")
     project = get_project(stdin_data)
@@ -83,7 +83,7 @@ def handle_record_interaction(
     log: Any,
 ) -> None:
     """interaction_logs へのインタラクション記録。"""
-    from devgear.mem.database import InteractionLog, Session
+    from deepblue.mem.database import InteractionLog, Session
 
     session_id = str(stdin_data.get("session_id", "") or "")
     project = get_project(stdin_data)
@@ -136,7 +136,7 @@ def handle_record_project_profile(
     log: Any,
 ) -> str:
     """project_profiles のアップサート。"""
-    from devgear.mem.database import ProjectProfile
+    from deepblue.mem.database import ProjectProfile
 
     project = stdin_data.get("project") or get_project(stdin_data)
     now = int(time.time())
@@ -210,7 +210,7 @@ def handle_record_item_run(
     log: Any,
 ) -> None:
     """スキル・コマンド・エージェントの実行記録を mem_item_runs に保存する。"""
-    from devgear.mem.database import MemItemRun
+    from deepblue.mem.database import MemItemRun
 
     tool_input = stdin_data.get("tool_input", {})
     if isinstance(tool_input, dict) and tool_input.get("skill"):

@@ -74,7 +74,7 @@ Execute this task:
 2. **ベンチマークに集約する**
 
 ```bash
-PYTHONPATH=src python -m devgear.skills.aggregate_benchmark <workspace>/iteration-N --skill-name <name>
+PYTHONPATH=src python -m deepblue.skills.aggregate_benchmark <workspace>/iteration-N --skill-name <name>
 ```
 
 これで `benchmark.json` と `benchmark.md` が作られる。各構成の通過率・時間・トークン数が平均±標準偏差と差分付きでまとまる。手で `benchmark.json` を作る場合は `references/schemas.md` のビューアー用スキーマを参照。`with_skill` を `without_skill` の前に並べる。

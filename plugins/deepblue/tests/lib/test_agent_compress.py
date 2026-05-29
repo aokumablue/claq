@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.lib.agent_compress import (
+from deepblue.lib.agent_compress import (
     build_agent_catalog,
     compress_to_catalog,
     compress_to_summary,

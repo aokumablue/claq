@@ -1,4 +1,4 @@
-"""devgear.ci.check_unicode_safety のテスト。"""
+"""deepblue.ci.check_unicode_safety のテスト。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.ci import check_unicode_safety
+from deepblue.ci import check_unicode_safety
 
 
 def test_unicode_helper_functions() -> None:
@@ -136,6 +136,6 @@ def test_validate_unicode_safety_skips_unreadable_files_and_entrypoint(
     )
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.ci.check_unicode_safety", run_name="__main__")
+        runpy.run_module("deepblue.ci.check_unicode_safety", run_name="__main__")
 
     assert excinfo.value.code == 0

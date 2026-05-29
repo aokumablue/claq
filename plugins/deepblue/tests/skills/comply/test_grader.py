@@ -7,11 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from devgear.skills.comply.grader import ComplianceResult, grade
-from devgear.skills.comply.parser import ComplianceSpec, ObservationEvent, parse_spec, parse_trace
+from deepblue.skills.comply.grader import ComplianceResult, grade
+from deepblue.skills.comply.parser import ComplianceSpec, ObservationEvent, parse_spec, parse_trace
 
 FIXTURES = (
-    Path(__file__).resolve().parents[3] / "src" / "devgear" / "skills" / "comply" / "fixtures"
+    Path(__file__).resolve().parents[3] / "src" / "deepblue" / "skills" / "comply" / "fixtures"
 )
 
 
@@ -55,17 +55,17 @@ def _mock_empty_classification(spec, trace, model="haiku"):
 
 
 class TestGradeCompliant:
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
     def test_returns_compliance_result(self, mock_cls, tdd_spec, compliant_trace) -> None:
         result = grade(tdd_spec, compliant_trace)
         assert isinstance(result, ComplianceResult)
 
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
     def test_full_compliance(self, mock_cls, tdd_spec, compliant_trace) -> None:
         result = grade(tdd_spec, compliant_trace)
         assert result.compliance_rate == 1.0
 
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
     def test_all_required_steps_detected(self, mock_cls, tdd_spec, compliant_trace) -> None:
         result = grade(tdd_spec, compliant_trace)
         required_results = [
@@ -73,18 +73,18 @@ class TestGradeCompliant:
         ]
         assert all(s.detected for s in required_results)
 
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
     def test_optional_step_detected(self, mock_cls, tdd_spec, compliant_trace) -> None:
         result = grade(tdd_spec, compliant_trace)
         refactor = next(s for s in result.steps if s.step_id == "refactor")
         assert refactor.detected is True
 
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
     def test_no_hook_promotion_recommended(self, mock_cls, tdd_spec, compliant_trace) -> None:
         result = grade(tdd_spec, compliant_trace)
         assert result.recommend_hook_promotion is False
 
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
     def test_step_evidence_not_empty(self, mock_cls, tdd_spec, compliant_trace) -> None:
         result = grade(tdd_spec, compliant_trace)
         for step in result.steps:
@@ -93,30 +93,30 @@ class TestGradeCompliant:
 
 
 class TestGradeNoncompliant:
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_noncompliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_noncompliant_classification)
     def test_low_compliance(self, mock_cls, tdd_spec, noncompliant_trace) -> None:
         result = grade(tdd_spec, noncompliant_trace)
         assert result.compliance_rate < 1.0
 
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_noncompliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_noncompliant_classification)
     def test_write_test_fails_ordering(self, mock_cls, tdd_spec, noncompliant_trace) -> None:
         """write_test は before_step=write_impl だが、実装後にテストが書かれている。"""
         result = grade(tdd_spec, noncompliant_trace)
         write_test = next(s for s in result.steps if s.step_id == "write_test")
         assert write_test.detected is False
 
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_noncompliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_noncompliant_classification)
     def test_run_test_red_not_detected(self, mock_cls, tdd_spec, noncompliant_trace) -> None:
         result = grade(tdd_spec, noncompliant_trace)
         run_red = next(s for s in result.steps if s.step_id == "run_test_red")
         assert run_red.detected is False
 
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_noncompliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_noncompliant_classification)
     def test_hook_promotion_recommended(self, mock_cls, tdd_spec, noncompliant_trace) -> None:
         result = grade(tdd_spec, noncompliant_trace)
         assert result.recommend_hook_promotion is True
 
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_noncompliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_noncompliant_classification)
     def test_failure_reasons_present(self, mock_cls, tdd_spec, noncompliant_trace) -> None:
         result = grade(tdd_spec, noncompliant_trace)
         failed_steps = [s for s in result.steps if not s.detected and s.step_id != "refactor"]
@@ -125,18 +125,18 @@ class TestGradeNoncompliant:
 
 
 class TestGradeEdgeCases:
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_empty_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_empty_classification)
     def test_empty_trace(self, mock_cls, tdd_spec) -> None:
         result = grade(tdd_spec, [])
         assert result.compliance_rate == 0.0
         assert result.recommend_hook_promotion is True
 
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
     def test_compliance_rate_is_ratio_of_required_only(self, mock_cls, tdd_spec, compliant_trace) -> None:
         result = grade(tdd_spec, compliant_trace)
         assert result.compliance_rate == 1.0
 
-    @patch("devgear.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
+    @patch("deepblue.skills.comply.grader.classify_events", side_effect=_mock_compliant_classification)
     def test_spec_id_in_result(self, mock_cls, tdd_spec, compliant_trace) -> None:
         result = grade(tdd_spec, compliant_trace)
         assert result.spec_id == "tdd-workflow"
@@ -153,7 +153,7 @@ class TestTemporalOrderAfterStepViolation:
 
     def _make_spec_with_after(self) -> ComplianceSpec:
         """step_b が after_step=step_a を持つ最小仕様を返す。"""
-        from devgear.skills.comply.parser import ComplianceSpec, Detector, Step
+        from deepblue.skills.comply.parser import ComplianceSpec, Detector, Step
 
         step_a = Step(
             id="step_a",
@@ -178,7 +178,7 @@ class TestTemporalOrderAfterStepViolation:
 
     def _make_event(self, ts: str, tool: str = "Bash") -> ObservationEvent:
         """指定タイムスタンプの観測イベントを返す。"""
-        from devgear.skills.comply.parser import ObservationEvent
+        from deepblue.skills.comply.parser import ObservationEvent
 
         return ObservationEvent(
             timestamp=ts,
@@ -189,7 +189,7 @@ class TestTemporalOrderAfterStepViolation:
             output="",
         )
 
-    @patch("devgear.skills.comply.grader.classify_events")
+    @patch("deepblue.skills.comply.grader.classify_events")
     def test_after_step_violation_same_timestamp(self, mock_cls) -> None:
         """event.timestamp == latest_after の場合、after_step 制約違反となり step_b は未検出になる。
 
@@ -210,7 +210,7 @@ class TestTemporalOrderAfterStepViolation:
         assert step_b_result.failure_reason is not None
         assert "step_a" in step_b_result.failure_reason
 
-    @patch("devgear.skills.comply.grader.classify_events")
+    @patch("deepblue.skills.comply.grader.classify_events")
     def test_after_step_violation_earlier_timestamp(self, mock_cls) -> None:
         """event.timestamp < latest_after の場合も after_step 制約違反となる。"""
         spec = self._make_spec_with_after()
@@ -226,7 +226,7 @@ class TestTemporalOrderAfterStepViolation:
         step_b_result = next(s for s in result.steps if s.step_id == "step_b")
         assert step_b_result.detected is False
 
-    @patch("devgear.skills.comply.grader.classify_events")
+    @patch("deepblue.skills.comply.grader.classify_events")
     def test_after_step_satisfied_later_timestamp(self, mock_cls) -> None:
         """event.timestamp > latest_after の場合は after_step 制約を満たし step_b が検出される。"""
         spec = self._make_spec_with_after()

@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from devgear.hooks.hook_common import basename, parse_json_object, read_raw_stdin, write_stderr
+from deepblue.hooks.hook_common import basename, parse_json_object, read_raw_stdin, write_stderr
 
 PROTECTED_FILES = {
     ".eslintrc",

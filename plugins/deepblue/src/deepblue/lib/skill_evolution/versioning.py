@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from devgear.lib.core_utils import append_file, ensure_dir
+from deepblue.lib.core_utils import append_file, ensure_dir
 
 from .provenance import normalize_skill_dir
 from .skill_evolution_compat import merge_options, to_iso_string, utc_now_iso

@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from devgear.lib.install.install_config import (
+from deepblue.lib.install.install_config import (
     DEFAULT_INSTALL_CONFIG,
     InstallConfig,
     InstallConfigSchema,
@@ -269,4 +269,4 @@ class TestDefaultInstallConfig:
     """DEFAULT_INSTALL_CONFIG 定数のテスト。"""
 
     def test_default_filename(self):
-        assert DEFAULT_INSTALL_CONFIG == "devgear-install.json"
+        assert DEFAULT_INSTALL_CONFIG == "deepblue-install.json"

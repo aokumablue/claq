@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from devgear.mem import bridge
-from devgear.mem.database import Database, MemoryChunk
+from deepblue.mem import bridge
+from deepblue.mem.database import Database, MemoryChunk
 
 
 def _make_chunk(session_id: str = "s1", project: str = "proj") -> MemoryChunk:
@@ -48,28 +48,28 @@ def test_get_project_id_covers_hash_and_fallback(monkeypatch: pytest.MonkeyPatch
 
 def test_get_project_observations_path_creates_project_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_get_project_observations_path が project.json を作成すること。"""
-    monkeypatch.setattr(bridge, "_DEVGEAR_DIR", tmp_path / ".devgear")
+    monkeypatch.setattr(bridge, "_DEEPBLUE_DIR", tmp_path / ".deepblue")
 
     obs_path = bridge._get_project_observations_path("proj", "project-name")
     assert obs_path.name == "observations.jsonl"
-    assert obs_path.parent == tmp_path / ".devgear" / "projects" / "proj"
+    assert obs_path.parent == tmp_path / ".deepblue" / "projects" / "proj"
     project_json = obs_path.parent / "project.json"
     assert project_json.exists()
     assert '"project_id": "proj"' in project_json.read_text(encoding="utf-8")
 
 
-def test_get_project_observations_path_uses_devgear_projects_dir(
+def test_get_project_observations_path_uses_deepblue_projects_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """project.json と observations.jsonl は ~/.devgear/projects 配下に作成されること。"""
-    monkeypatch.setattr(bridge, "_DEVGEAR_DIR", tmp_path / ".devgear")
+    """project.json と observations.jsonl は ~/.deepblue/projects 配下に作成されること。"""
+    monkeypatch.setattr(bridge, "_DEEPBLUE_DIR", tmp_path / ".deepblue")
 
     legacy_dir = tmp_path / ".claude" / "c-projects" / "proj"
     legacy_dir.mkdir(parents=True)
 
     obs_path = bridge._get_project_observations_path("proj", "project-name")
-    assert obs_path == tmp_path / ".devgear" / "projects" / "proj" / "observations.jsonl"
-    assert obs_path.parent == tmp_path / ".devgear" / "projects" / "proj"
+    assert obs_path == tmp_path / ".deepblue" / "projects" / "proj" / "observations.jsonl"
+    assert obs_path.parent == tmp_path / ".deepblue" / "projects" / "proj"
     assert (obs_path.parent / "project.json").exists()
     assert not (legacy_dir / "observations.jsonl").exists()
 

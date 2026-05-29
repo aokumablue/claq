@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from devgear.mem.logger import get as _get_logger
-from devgear.mem.models import (
+from deepblue.mem.logger import get as _get_logger
+from deepblue.mem.models import (
     Adr,
     EventLog,
     Instinct,

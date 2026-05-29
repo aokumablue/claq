@@ -1,7 +1,7 @@
 """ONNX Runtime ラッパー — 埋め込み生成。
 
 sentence-transformers / torch / transformers に依存しない。
-モデルは ~/.devgear/models/model.onnx を使用する。
+モデルは ~/.deepblue/models/model.onnx を使用する。
 install.sh が python3 -m model_build build を実行してモデルを生成する。
 """
 
@@ -14,10 +14,11 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from devgear.mem._paths import sha256_file as _sha256_file
-from devgear.mem._paths import validate_sha256_format as _validate_sha256_format
-from devgear.mem.logger import get as _get_logger
-from devgear.mem.settings import _DEFAULT_EMBEDDING_MODEL, _DEFAULT_EMBEDDING_REVISION
+from deepblue.lib.constants import BASE_DIR_NAME
+from deepblue.mem._paths import sha256_file as _sha256_file
+from deepblue.mem._paths import validate_sha256_format as _validate_sha256_format
+from deepblue.mem.logger import get as _get_logger
+from deepblue.mem.settings import _DEFAULT_EMBEDDING_MODEL, _DEFAULT_EMBEDDING_REVISION
 
 log = _get_logger("EMBEDDING")
 
@@ -34,8 +35,8 @@ def _mean_pool_l2(token_embs: Any, attention_mask: Any) -> Any:
     return mean_vecs / norms
 
 
-# 統合済み model.onnx は ~/.devgear/models/ に格納（install.sh が配置）
-_MODELS_DIR = Path.home() / ".devgear" / "models"
+# 統合済み model.onnx は ~/.deepblue/models/ に格納（install.sh が配置）
+_MODELS_DIR = Path.home() / BASE_DIR_NAME / "models"
 
 # セッションはプロセス内でシングルトン（スレッドセーフ）
 _session: Any = None
@@ -55,7 +56,7 @@ def _verify_model_sha(models_dir: Path) -> None:
     """
     manifest_path = models_dir / "manifest.json"
     if not manifest_path.exists():
-        raise FileNotFoundError(f"manifest.json が見つかりません: {manifest_path}\nplugins/devgear/install.sh を実行してモデルをビルドしてください。")
+        raise FileNotFoundError(f"manifest.json が見つかりません: {manifest_path}\nplugins/deepblue/install.sh を実行してモデルをビルドしてください。")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     expected = manifest["merged_sha256"]
     _validate_sha256_format(expected, "merged_sha256")
@@ -117,7 +118,7 @@ def _get_session() -> tuple[Any, Any] | tuple[None, None]:
             if not tok_path.exists():
                 raise FileNotFoundError(
                     f"tokenizer.json が見つかりません: {tok_path}\n"
-                    "plugins/devgear/install.sh を実行してモデルを統合してください。"
+                    "plugins/deepblue/install.sh を実行してモデルを統合してください。"
                 )
 
             import onnxruntime as ort  # type: ignore[import-untyped]

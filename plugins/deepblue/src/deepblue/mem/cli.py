@@ -12,21 +12,21 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from devgear.hooks.hook_common import print_session_start_output
-from devgear.lib.core_utils import get_git_user_name
-from devgear.mem import cli_dashboard_handlers as _dashboard_handlers
-from devgear.mem import cli_record_handlers as _record_handlers
-from devgear.mem import cli_search_handlers as _search_handlers
-from devgear.mem import cli_session_handlers as _session_handlers
-from devgear.mem import cli_sync_handlers as _sync_handlers
-from devgear.mem import cli_team_handlers as _team_handlers
-from devgear.mem.cli_sync_handlers import SyncStatusDict
-from devgear.mem.logger import get as _get_logger
-from devgear.mem.settings import Settings
+from deepblue.hooks.hook_common import print_session_start_output
+from deepblue.lib.core_utils import get_git_user_name
+from deepblue.mem import cli_dashboard_handlers as _dashboard_handlers
+from deepblue.mem import cli_record_handlers as _record_handlers
+from deepblue.mem import cli_search_handlers as _search_handlers
+from deepblue.mem import cli_session_handlers as _session_handlers
+from deepblue.mem import cli_sync_handlers as _sync_handlers
+from deepblue.mem import cli_team_handlers as _team_handlers
+from deepblue.mem.cli_sync_handlers import SyncStatusDict
+from deepblue.mem.logger import get as _get_logger
+from deepblue.mem.settings import Settings
 
 if TYPE_CHECKING:
-    from devgear.mem.database import Database, MemoryChunk
-    from devgear.mem.search import SearchResult
+    from deepblue.mem.database import Database, MemoryChunk
+    from deepblue.mem.search import SearchResult
 
 log = _get_logger("CLI")
 
@@ -40,7 +40,7 @@ _CommandHandler = Callable[[Settings, dict[str, Any]], str | None]
 
 @contextmanager
 def _open_db(settings: Settings):
-    from devgear.mem.database import Database
+    from deepblue.mem.database import Database
 
     db = Database(settings.db_path)
     try:
@@ -69,7 +69,7 @@ def _parse_argv_and_stdin() -> tuple[str, dict[str, Any]]:
 
 def _load_settings_or_raise() -> Settings:
     """Settings と logger を初期化して返す。"""
-    import devgear.mem.logger as _logger_mod
+    import deepblue.mem.logger as _logger_mod
 
     settings = Settings.load()
     _logger_mod.setup(settings.log_dir, settings.log_level)
@@ -95,7 +95,7 @@ def _run_normal_command(command: str, settings: Settings, stdin_data: dict[str, 
 
 def embed(texts: list[str]) -> list[list[float]]:
     """埋め込み生成を遅延ロードで実行する。"""
-    from devgear.mem.embedding import embed as _embed
+    from deepblue.mem.embedding import embed as _embed
 
     return _embed(texts)
 
@@ -171,7 +171,7 @@ def _build_sync_recommendations(status: SyncStatusDict) -> list[str]:
     if not status["postgres_url_set"]:
         recs.append(
             "postgres_url 未設定。"
-            "~/.devgear/settings.json の mem.sync.postgres_url に接続 URL を設定してください"
+            "~/.deepblue/settings.json の mem.sync.postgres_url に接続 URL を設定してください"
         )
     if not status["psycopg_installed"]:
         recs.append("psycopg 未インストール。install.sh を再実行してください")
@@ -381,9 +381,9 @@ def _handle_migrate_settings(settings: Settings) -> None:  # noqa: ARG001
     from datetime import datetime
     from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-    from devgear.mem.cli_sync_handlers import _split_password, _write_pgpass
+    from deepblue.mem.cli_sync_handlers import _split_password, _write_pgpass
 
-    settings_path = Path(os.environ.get("HOME", "~")).expanduser() / ".devgear" / "settings.json"
+    settings_path = Path(os.environ.get("HOME", "~")).expanduser() / ".deepblue" / "settings.json"
     if not settings_path.exists():
         log.info("migrate-settings: settings.json が存在しません。スキップ")
         return
@@ -588,7 +588,7 @@ HELP_TEXT = """\
 CLI Commands for mem
 
 Usage:
-  python -m devgear.mem <command>
+  python -m deepblue.mem <command>
 
 Commands:
   init               Recreate the local mem database from scratch
@@ -611,7 +611,7 @@ Commands:
   record-item-run        Record a skill/command/agent execution to mem_item_runs
   team-context           Inject <team-context> from PostgreSQL (FTS-only, SessionStart)
   team-session-init      Inject <team-context> with hybrid search (UserPromptSubmit)
-  migrate-settings       Migrate existing ~/.devgear/settings.json to hardened format (PG password → ~/.pgpass, sslmode=require)
+  migrate-settings       Migrate existing ~/.deepblue/settings.json to hardened format (PG password → ~/.pgpass, sslmode=require)
 
 search-structured Input (JSON):
   {"query": "...", "project": "...", "tool_name": "Edit", "file_pattern": "*.py", "date_from": "2024-01-01", "date_to": "2024-12-31"}

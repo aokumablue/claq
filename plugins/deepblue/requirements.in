@@ -1,5 +1,5 @@
-# Runtime dependencies for plugins/devgear/install.sh
-# Regenerate: pip-compile --generate-hashes plugins/devgear/requirements.in -o plugins/devgear/requirements.txt
+# Runtime dependencies for plugins/deepblue/install.sh
+# Regenerate: pip-compile --generate-hashes plugins/deepblue/requirements.in -o plugins/deepblue/requirements.txt
 onnxruntime>=1.18
 onnx>=1.16,<2
 tokenizers>=0.20

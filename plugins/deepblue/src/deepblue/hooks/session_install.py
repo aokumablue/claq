@@ -2,9 +2,9 @@
 """
 install.sh の自動実行を管理する SessionStart フック。
 
-~/.devgear/plugin_installed_version のバージョンと plugin.json のバージョンを比較し、
+~/.deepblue/plugin_installed_version のバージョンと plugin.json のバージョンを比較し、
 差異がある場合のみ install.sh を実行して仮想環境を再構築する。
-ONNX モデルビルドは DEVGEAR_INSTALL_ONNX_ASYNC=1 でバックグラウンド非同期実行に切り替わる。
+ONNX モデルビルドは DEEPBLUE_INSTALL_ONNX_ASYNC=1 でバックグラウンド非同期実行に切り替わる。
 """
 
 from __future__ import annotations
@@ -15,15 +15,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-from devgear.hooks._install_lock import install_lock
-from devgear.hooks.hook_common import emit_session_start_output as _emit_session_start_output
-from devgear.lib.sanitize import sanitize_log_value
-from devgear.lib.subprocess_utils import run_text
+from deepblue.hooks._install_lock import install_lock
+from deepblue.hooks.hook_common import emit_session_start_output as _emit_session_start_output
+from deepblue.lib.constants import BASE_DIR_NAME
+from deepblue.lib.sanitize import sanitize_log_value
+from deepblue.lib.subprocess_utils import run_text
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[3]
-_DEVGEAR_DIR = Path.home() / ".devgear"
-_VERSION_FILE = _DEVGEAR_DIR / "plugin_installed_version"
-_VENV_DIR = Path.home() / ".devgear" / ".venv"
+_DEEPBLUE_DIR = Path.home() / BASE_DIR_NAME
+_VERSION_FILE = _DEEPBLUE_DIR / "plugin_installed_version"
+_VENV_DIR = Path.home() / BASE_DIR_NAME / ".venv"
 
 
 def _session_start_output() -> str:
@@ -133,7 +134,7 @@ def _get_plugin_version(plugin_root: Path) -> str | None:
 
 
 def _get_installed_version() -> str | None:
-    """~/.devgear/plugin_installed_version からインストール済みバージョンを読み取る。
+    """~/.deepblue/plugin_installed_version からインストール済みバージョンを読み取る。
 
     Args:
         引数はありません。
@@ -205,8 +206,8 @@ def _run_install(install_sh: Path) -> subprocess.CompletedProcess[str] | None:
         subprocess.CompletedProcess。実行失敗時は None。
     """
     try:
-        # DEVGEAR_INSTALL_ONNX_ASYNC=1 で ONNX ビルドをバックグラウンドに切り出す（タイムアウト回避）
-        return run_text(["bash", str(install_sh)], timeout=120, extra_env={"DEVGEAR_INSTALL_ONNX_ASYNC": "1"})
+        # DEEPBLUE_INSTALL_ONNX_ASYNC=1 で ONNX ビルドをバックグラウンドに切り出す（タイムアウト回避）
+        return run_text(["bash", str(install_sh)], timeout=120, extra_env={"DEEPBLUE_INSTALL_ONNX_ASYNC": "1"})
     except (subprocess.SubprocessError, OSError) as e:
         print(f"[SessionInstall] install.sh の実行に失敗しました: {_sanitize_exception(e)}", file=sys.stderr)
         return None
@@ -275,9 +276,9 @@ def run(_raw_input: str) -> str:
     )
 
     # version 不一致 or 未インストール: install.sh を同期実行（ONNX のみ非同期）
-    _DEVGEAR_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(_DEVGEAR_DIR, 0o700)
-    lock_path = _DEVGEAR_DIR / "install.lock"
+    _DEEPBLUE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(_DEEPBLUE_DIR, 0o700)
+    lock_path = _DEEPBLUE_DIR / "install.lock"
 
     try:
         with install_lock(lock_path):
@@ -305,7 +306,7 @@ def run(_raw_input: str) -> str:
         _repair_venv_symlink(plugin_root)
 
     # バックグラウンドで ONNX が走っている可能性を通知
-    if not (Path.home() / ".devgear" / "models" / "model.onnx").exists():
+    if not (Path.home() / ".deepblue" / "models" / "model.onnx").exists():
         print("[SessionInstall] onnx building...", file=sys.stderr)
 
     return _session_start_output()

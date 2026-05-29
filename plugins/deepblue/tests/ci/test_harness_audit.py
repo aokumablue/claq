@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-import devgear.ci.harness_audit as harness_audit
+import deepblue.ci.harness_audit as harness_audit
 
 
 def test_parse_args_supports_positional_scope_and_flags(monkeypatch, tmp_path: Path) -> None:
@@ -26,9 +26,9 @@ def test_detect_target_mode_recognizes_repo_markers(tmp_path: Path) -> None:
     (tmp_path / "agents").mkdir()
     (tmp_path / "skills").mkdir()
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "devgear").mkdir()
-    (tmp_path / "src" / "devgear" / "ci").mkdir()
-    (tmp_path / "src" / "devgear" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "deepblue").mkdir()
+    (tmp_path / "src" / "deepblue" / "ci").mkdir()
+    (tmp_path / "src" / "deepblue" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
 
     assert harness_audit.detect_target_mode(tmp_path) == "repo"
 
@@ -45,8 +45,8 @@ def test_detect_target_mode_requires_python_harness_marker(tmp_path: Path) -> No
     assert harness_audit.detect_target_mode(tmp_path) == "consumer"
 
     # Python マーカーがあれば repo と判定される
-    (tmp_path / "src" / "devgear" / "ci").mkdir(parents=True)
-    (tmp_path / "src" / "devgear" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "deepblue" / "ci").mkdir(parents=True)
+    (tmp_path / "src" / "deepblue" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
     assert harness_audit.detect_target_mode(tmp_path) == "repo"
 
 
@@ -57,9 +57,9 @@ def test_build_report_defaults_to_repo_mode_with_repo_markers(tmp_path: Path) ->
     (tmp_path / "skills").mkdir()
     (tmp_path / "commands").mkdir()
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "devgear").mkdir()
-    (tmp_path / "src" / "devgear" / "ci").mkdir()
-    (tmp_path / "src" / "devgear" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "deepblue").mkdir()
+    (tmp_path / "src" / "deepblue" / "ci").mkdir()
+    (tmp_path / "src" / "deepblue" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
 
     report = harness_audit.build_report("repo", root_dir=tmp_path)
 

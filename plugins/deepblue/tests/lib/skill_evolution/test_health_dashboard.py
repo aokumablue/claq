@@ -6,11 +6,11 @@ import json
 
 import pytest
 
-from devgear.lib.skill_evolution import dashboard as dashboard
-from devgear.lib.skill_evolution import health as health
-from devgear.lib.skill_evolution import provenance as provenance
-from devgear.lib.skill_evolution import tracker as tracker
-from devgear.lib.skill_evolution import versioning as versioning
+from deepblue.lib.skill_evolution import dashboard as dashboard
+from deepblue.lib.skill_evolution import health as health
+from deepblue.lib.skill_evolution import provenance as provenance
+from deepblue.lib.skill_evolution import tracker as tracker
+from deepblue.lib.skill_evolution import versioning as versioning
 
 
 def _build_skill_data(skill_env, make_skill, append_jsonl, now):
@@ -161,7 +161,7 @@ def test_collect_skill_health_and_format_report(skill_env, make_skill, append_js
     }
 
     human = health.format_health_report(report)
-    assert "devgear skill health" in human
+    assert "deepblue skill health" in human
     assert "alpha" in human
     assert "worsening" in human
 
@@ -260,7 +260,7 @@ def test_filter_records_within_days_and_bucket_by_day_cutoffs(now):
     assert health.filter_records_within_days(records, now_ms, 0) == []
     assert health.filter_records_within_days(records, now_ms, -1) == []
 
-    from devgear.lib.skill_evolution.dashboard import bucket_by_day
+    from deepblue.lib.skill_evolution.dashboard import bucket_by_day
 
     buckets = bucket_by_day(
         [
@@ -326,7 +326,7 @@ def test_dashboard_primitives_and_panels(skill_env, make_skill, append_jsonl, no
     assert any(skill["skill_id"] == "alpha" for skill in version_panel["data"]["skills"])
 
     dashboard_result = dashboard.render_dashboard({**skill_env, "runs_file_path": str(skill_env["runs_file"]), "now": now, "warn_threshold": 0.1})
-    assert "devgear Skill Health Dashboard" in dashboard_result["text"]
+    assert "deepblue Skill Health Dashboard" in dashboard_result["text"]
     assert "Success Rate" in dashboard_result["text"]
     assert dashboard_result["data"]["summary"]["declining_skills"] == 1
 

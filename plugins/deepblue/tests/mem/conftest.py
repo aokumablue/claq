@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from devgear.mem.database import MemoryChunk
+from deepblue.mem.database import MemoryChunk
 
 
 def pytest_collection_modifyitems(items: list) -> None:

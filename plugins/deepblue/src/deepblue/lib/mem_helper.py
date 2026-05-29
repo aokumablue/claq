@@ -10,8 +10,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from devgear.mem.database import Database
-from devgear.mem.settings import Settings
+from deepblue.mem.database import Database
+from deepblue.mem.settings import Settings
 
 
 def search_similar_context(
@@ -175,7 +175,7 @@ def _run_mem_cli(command: str, input_data: dict[str, Any]) -> dict[str, Any]:
     """mem CLI を実行してJSON結果を返す。"""
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "devgear.mem", command],
+            [sys.executable, "-m", "deepblue.mem", command],
             input=json.dumps(input_data),
             capture_output=True,
             text=True,

@@ -13,8 +13,8 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from devgear.hooks import hook_common, session_install, session_start
-from devgear.hooks.hook_common import emit_session_start_output
+from deepblue.hooks import hook_common, session_install, session_start
+from deepblue.hooks.hook_common import emit_session_start_output
 
 
 def _assert_session_start_json(output: str) -> dict:
@@ -31,8 +31,8 @@ def _assert_session_start_json(output: str) -> dict:
 
 def _run_cli_main(argv: list[str], stdin_json: dict, monkeypatch, tmp_path: Path) -> tuple[str, str]:
     """mem.cli.main() を実行して stdout/stderr を返す。"""
-    import devgear.mem.settings as settings_mod
-    from devgear.mem import cli
+    import deepblue.mem.settings as settings_mod
+    from deepblue.mem import cli
 
     monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
     monkeypatch.setattr(sys, "argv", ["python", *argv])
@@ -55,13 +55,13 @@ class TestMemCliSetupContract:
         _assert_session_start_json(stdout)
 
     def test_settings_load_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        import devgear.mem.settings as settings_mod
+        import deepblue.mem.settings as settings_mod
 
         monkeypatch.setattr(settings_mod.Settings, "load", classmethod(lambda cls: (_ for _ in ()).throw(RuntimeError("settings broken"))))
         monkeypatch.setattr(sys, "argv", ["python", "setup"])
         monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
 
-        from devgear.mem import cli
+        from deepblue.mem import cli
 
         buf_out = io.StringIO()
         buf_err = io.StringIO()
@@ -74,7 +74,7 @@ class TestMemCliSetupContract:
 
     def test_db_init_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
         """DB 初期化失敗でも JSON を返す。"""
-        from devgear.mem import cli
+        from deepblue.mem import cli
 
         monkeypatch.setattr(cli, "_initialize_db", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db broken")))
         stdout, _ = _run_cli_main(["setup"], {}, monkeypatch, tmp_path)
@@ -87,7 +87,7 @@ class TestMemCliContextContract:
         _assert_session_start_json(stdout)
 
     def test_build_context_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        import devgear.mem.context as context_mod
+        import deepblue.mem.context as context_mod
 
         monkeypatch.setattr(context_mod, "build_context", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("ctx broken")))
         stdout, _ = _run_cli_main(["context"], {"cwd": str(tmp_path)}, monkeypatch, tmp_path)
@@ -101,7 +101,7 @@ class TestMemCliRecordProjectProfileContract:
         _assert_session_start_json(stdout)
 
     def test_db_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        from devgear.mem import cli
+        from deepblue.mem import cli
 
         def _failing_open_db(*a, **kw):
             raise RuntimeError("db error")
@@ -118,8 +118,8 @@ class TestMemCliTeamContextContract:
         _assert_session_start_json(stdout)
 
     def test_pg_connection_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        import devgear.mem.settings as settings_mod
-        from devgear.mem.settings import Settings
+        import deepblue.mem.settings as settings_mod
+        from deepblue.mem.settings import Settings
 
         pg_settings = MagicMock(spec=Settings)
         pg_settings.team = MagicMock(enabled=True, exclude_self=False)
@@ -127,7 +127,7 @@ class TestMemCliTeamContextContract:
         pg_settings.excluded_projects = []
         monkeypatch.setattr(settings_mod.Settings, "load", classmethod(lambda cls: pg_settings))
 
-        with patch("devgear.mem.pg_database.PgDatabase") as mock_pg_cls:
+        with patch("deepblue.mem.pg_database.PgDatabase") as mock_pg_cls:
             mock_pg = MagicMock()
             mock_pg.test_connection.return_value = False
             mock_pg_cls.return_value = mock_pg
@@ -146,7 +146,7 @@ class TestSessionInstallContract:
 
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(tmp_path))
         monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setattr(session_install, "_DEVGEAR_DIR", tmp_path)
+        monkeypatch.setattr(session_install, "_DEEPBLUE_DIR", tmp_path)
 
         mock_result = MagicMock()
         mock_result.returncode = 1
@@ -219,7 +219,7 @@ class TestRunWithFlagsSessionStartContract:
 
     def test_session_start_hook_ids_in_hook_common(self) -> None:
         """SESSION_START_HOOK_IDS が hook_common の single source of truth から取得されること。"""
-        from devgear.hooks.run_with_flags import SESSION_START_HOOK_IDS as rwf_ids
+        from deepblue.hooks.run_with_flags import SESSION_START_HOOK_IDS as rwf_ids
 
         assert rwf_ids is hook_common.SESSION_START_HOOK_IDS
 
@@ -227,8 +227,8 @@ class TestRunWithFlagsSessionStartContract:
         """SessionStart 系の hook で子プロセスが非 0 を返しても returncode を 0 にする。"""
         import subprocess
 
-        import devgear.lib.hook_flags as flags_mod
-        from devgear.hooks import run_with_flags
+        import deepblue.lib.hook_flags as flags_mod
+        from deepblue.hooks import run_with_flags
 
         monkeypatch.setattr(flags_mod, "is_hook_enabled", lambda *a, **kw: True)
 
@@ -238,7 +238,7 @@ class TestRunWithFlagsSessionStartContract:
         mock_result.returncode = 1
 
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
-        monkeypatch.setattr(sys, "argv", ["rwf", "session:start", "devgear.hooks.session_start", "minimal"])
+        monkeypatch.setattr(sys, "argv", ["rwf", "session:start", "deepblue.hooks.session_start", "minimal"])
         monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
 
         ret = run_with_flags.main()

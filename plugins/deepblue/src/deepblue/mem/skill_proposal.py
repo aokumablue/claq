@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from devgear.mem.logger import get as _get_logger
+from deepblue.mem.logger import get as _get_logger
 
 log = _get_logger("SKILL_PROPOSAL")
 

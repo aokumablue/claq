@@ -44,7 +44,7 @@ record: `{"event_type":"bugfix","content":"Scope:{scope}. Repro:{repro}. Root ca
 1. 再現テストを通す
 2. 回帰テストを追加
 3. 周辺の既存テストを再実行
-4. `devgear:a-review` と `devgear:a-secure` で品質・安全性を確認
+4. `deepblue:a-review` と `deepblue:a-secure` で品質・安全性を確認
 
 ## 記録テンプレート
 

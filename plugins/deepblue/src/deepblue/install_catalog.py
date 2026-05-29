@@ -34,17 +34,17 @@ FAMILY_ALIASES = {
 }
 
 HELP_TEXT = """
-Discover devgear install components and profiles
+Discover deepblue install components and profiles
 
 Usage:
-  python -m devgear.install_catalog profiles [--json]
-  python -m devgear.install_catalog components [--family <family>] [--target <target>] [--json]
-  python -m devgear.install_catalog show <component-id> [--json]
+  python -m deepblue.install_catalog profiles [--json]
+  python -m deepblue.install_catalog components [--family <family>] [--target <target>] [--json]
+  python -m deepblue.install_catalog show <component-id> [--json]
 
 Examples:
-  python -m devgear.install_catalog profiles
-  python -m devgear.install_catalog components --family language
-  python -m devgear.install_catalog show framework:nextjs
+  python -m deepblue.install_catalog profiles
+  python -m deepblue.install_catalog components --family language
+  python -m deepblue.install_catalog show framework:nextjs
 """
 
 

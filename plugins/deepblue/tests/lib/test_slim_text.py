@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from devgear.lib.slim_text import compact_line, first_meaningful_line
+from deepblue.lib.slim_text import compact_line, first_meaningful_line
 
 
 def test_first_meaningful_line_skips_markdown_noise() -> None:

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-from devgear.lib.shell_split import split_shell_segments
+from deepblue.lib.shell_split import split_shell_segments
 
 
 class TestSingleCommand:

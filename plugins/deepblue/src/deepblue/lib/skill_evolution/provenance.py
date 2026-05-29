@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from devgear.lib.core_utils import ensure_dir
+from deepblue.lib.core_utils import ensure_dir
 
 from .skill_evolution_compat import get_option, is_iso_timestamp, merge_options
 

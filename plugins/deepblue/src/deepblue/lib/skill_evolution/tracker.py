@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from devgear.lib.core_utils import append_file, get_devgear_dir
+from deepblue.lib.core_utils import append_file, get_deepblue_dir
 
 from .skill_evolution_compat import get_option, get_value, merge_options, parse_iso_timestamp, utc_now_iso
 
@@ -56,8 +56,8 @@ def get_runs_file_path(options: dict[str, Any] | None = None, /, **kwargs: Any) 
     if runs_file_path is not None:
         return str(Path(str(runs_file_path)).expanduser().resolve())
 
-    # デフォルトは devgear の状態ディレクトリ配下に保存する。
-    return str(get_devgear_dir() / "state" / "skill-runs.jsonl")
+    # デフォルトは deepblue の状態ディレクトリ配下に保存する。
+    return str(get_deepblue_dir() / "state" / "skill-runs.jsonl")
 
 
 def to_nullable_number(value: Any, field_name: str) -> float | None:

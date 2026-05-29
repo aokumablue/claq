@@ -22,7 +22,7 @@
 4. **テストケース間の重複を探す**
    - 複数の実行で同じヘルパースクリプトや同じ多段手順が繰り返されていないかを確認
    - 3つとも `create_docx.py` や `build_chart.py` を作っているなら、そのスクリプトはスキルに同梱した方がよい
-   - 一度書いて `src/devgear/skills/` に置けば毎回の再発明を防げる
+   - 一度書いて `src/deepblue/skills/` に置けば毎回の再発明を防げる
 
 この作業は重要。考える時間がボトルネックではないので、時間をかけて見直す。下書きを作ってから、もう一度眺め直して改善するのがおすすめ。
 
@@ -70,8 +70,8 @@ SKILL.mdの前置きにある `description` は、Claudeがスキルを呼ぶか
 ### 2. 最適化ループを回す
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/devgear-helpers.sh"
-devgear_run devgear.skills.run_loop --eval-set <path-to-trigger-eval.json> --skill-path <path-to-skill> --model <model-id-powering-this-session> --max-iterations 5 --verbose
+source "${CLAUDE_PLUGIN_ROOT}/runtime/deepblue-helpers.sh"
+deepblue_run deepblue.skills.run_loop --eval-set <path-to-trigger-eval.json> --skill-path <path-to-skill> --model <model-id-powering-this-session> --max-iterations 5 --verbose
 ```
 
 現セッションを動かしているmodel IDを使う。evalセットをtrain 60% / holdout test 40%に分け、反復改善。`best_description` はtestスコアで選ぶ。
@@ -85,8 +85,8 @@ JSONの `best_description` を取り出し、SKILL.mdのfrontmatterを更新。
 `present_files` ツールにアクセスできるか確認。使えないなら飛ばす。
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/devgear-helpers.sh"
-devgear_run devgear.skills.package_skill <path/to/skill-folder>
+source "${CLAUDE_PLUGIN_ROOT}/runtime/deepblue-helpers.sh"
+deepblue_run deepblue.skills.package_skill <path/to/skill-folder>
 ```
 
 ## 環境別の注意

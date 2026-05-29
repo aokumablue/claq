@@ -11,9 +11,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from devgear.mem.logger import get as _get_logger
-from devgear.mem.pg_database import PgDatabase
-from devgear.mem.settings import TeamSettings
+from deepblue.mem.logger import get as _get_logger
+from deepblue.mem.pg_database import PgDatabase
+from deepblue.mem.settings import TeamSettings
 
 log = _get_logger("TEAM_CONTEXT")
 
@@ -53,7 +53,7 @@ def build_team_context(
                     exclude_origin_user=exclude_origin_user,
                 )
             else:
-                import devgear.mem.embedding as _emb
+                import deepblue.mem.embedding as _emb
 
                 embedding = _emb.embed_query(query, embedding_model)
                 ranked = pg.team_search(

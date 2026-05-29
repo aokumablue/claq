@@ -12,8 +12,8 @@ import re
 import subprocess
 from pathlib import Path
 
-from devgear.hooks.hook_common import parse_json_object
-from devgear.lib.core_utils import log
+from deepblue.hooks.hook_common import parse_json_object
+from deepblue.lib.core_utils import log
 
 
 def get_staged_files() -> list[str]:
@@ -353,7 +353,7 @@ def main() -> int:
     Raises:
         例外は発生しません。
     """
-    from devgear.hooks.hook_common import read_raw_stdin
+    from deepblue.hooks.hook_common import read_raw_stdin
 
     try:
         raw = read_raw_stdin()

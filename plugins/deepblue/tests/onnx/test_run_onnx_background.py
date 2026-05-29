@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[4]
-ONNX_SCRIPT = ROOT / "plugins" / "devgear" / "onnx" / "_run_onnx_background.sh"
+ONNX_SCRIPT = ROOT / "plugins" / "deepblue" / "onnx" / "_run_onnx_background.sh"
 
 
 def _write_exec(path: Path, content: str) -> None:
@@ -91,7 +91,7 @@ class TestRunOnnxBackground:
             },
         )
 
-        modelbuild_log = tmp_path / ".devgear" / "logs" / "modelbuild.log"
+        modelbuild_log = tmp_path / ".deepblue" / "logs" / "modelbuild.log"
         assert modelbuild_log.exists(), "modelbuild.log が作成されなかった"
 
     def test_flock_prevents_duplicate_run(self, fake_onnx_dir: Path, tmp_path: Path) -> None:
@@ -99,7 +99,7 @@ class TestRunOnnxBackground:
         log_path = tmp_path / "call.log"
         _prepare_fake_lib(fake_onnx_dir, log_path)
 
-        lock_file = tmp_path / ".devgear" / "onnx_build.lock"
+        lock_file = tmp_path / ".deepblue" / "onnx_build.lock"
         lock_file.parent.mkdir(parents=True, exist_ok=True)
 
         # flock を保持したまま 2 度目の起動を試みる
@@ -121,7 +121,7 @@ class TestRunOnnxBackground:
         # ロック中は build_onnx_if_missing が呼ばれない
         assert not log_path.exists() or "build_onnx_if_missing" not in log_path.read_text(encoding="utf-8")
         # "another build is in progress" が modelbuild.log に記録される
-        modelbuild_log = tmp_path / ".devgear" / "logs" / "modelbuild.log"
+        modelbuild_log = tmp_path / ".deepblue" / "logs" / "modelbuild.log"
         assert modelbuild_log.exists()
         assert "another build is in progress" in modelbuild_log.read_text(encoding="utf-8")
 
@@ -130,9 +130,9 @@ class TestRunOnnxBackground:
         log_path = tmp_path / "call.log"
         _prepare_fake_lib(fake_onnx_dir, log_path)
 
-        devgear_dir = tmp_path / ".devgear"
-        devgear_dir.mkdir(parents=True)
-        lock_file = devgear_dir / "onnx_build.lock"
+        deepblue_dir = tmp_path / ".deepblue"
+        deepblue_dir.mkdir(parents=True)
+        lock_file = deepblue_dir / "onnx_build.lock"
         target = tmp_path / "innocent_file.txt"
         target.write_text("target")
         lock_file.symlink_to(target)  # symlink に差し替え
@@ -147,7 +147,7 @@ class TestRunOnnxBackground:
 
         assert result.returncode == 1, "symlink 検出時は exit 1 で終了すること"
         assert not log_path.exists() or "build_onnx_if_missing" not in log_path.read_text(encoding="utf-8")
-        modelbuild_log = tmp_path / ".devgear" / "logs" / "modelbuild.log"
+        modelbuild_log = tmp_path / ".deepblue" / "logs" / "modelbuild.log"
         assert modelbuild_log.read_text(encoding="utf-8").strip().endswith("aborting")
 
     def test_truncates_large_log_file(self, fake_onnx_dir: Path, tmp_path: Path) -> None:
@@ -155,7 +155,7 @@ class TestRunOnnxBackground:
         log_path = tmp_path / "call.log"
         _prepare_fake_lib(fake_onnx_dir, log_path)
 
-        log_dir = tmp_path / ".devgear" / "logs"
+        log_dir = tmp_path / ".deepblue" / "logs"
         log_dir.mkdir(parents=True)
         modelbuild_log = log_dir / "modelbuild.log"
         # 11MB のダミーログを書き込む

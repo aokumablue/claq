@@ -1,4 +1,4 @@
-"""devgear.ci.harness_audit の追加テスト。"""
+"""deepblue.ci.harness_audit の追加テスト。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import devgear.ci.harness_audit as harness_audit
+import deepblue.ci.harness_audit as harness_audit
 
 
 def test_parse_args_and_normalize_scope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -84,8 +84,8 @@ def test_find_plugin_install_and_build_report_variants(tmp_path: Path, monkeypat
     (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
     (root / "agents").mkdir()
     (root / "skills").mkdir()
-    (root / "src" / "devgear" / "ci").mkdir(parents=True)
-    (root / "src" / "devgear" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
+    (root / "src" / "deepblue" / "ci").mkdir(parents=True)
+    (root / "src" / "deepblue" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
     (root / "package.json").write_text(json.dumps({"name": "everything-claude-code", "scripts": {"test": "x"}}), encoding="utf-8")
 
     report = harness_audit.build_report("repo", root_dir=root)
@@ -210,8 +210,8 @@ def test_main_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
     (root / "agents").mkdir()
     (root / "skills").mkdir()
-    (root / "src" / "devgear" / "ci").mkdir(parents=True)
-    (root / "src" / "devgear" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
+    (root / "src" / "deepblue" / "ci").mkdir(parents=True)
+    (root / "src" / "deepblue" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
     (root / "package.json").write_text(
         json.dumps({"name": "everything-claude-code", "scripts": {"test": "x"}}),
         encoding="utf-8",
@@ -224,6 +224,6 @@ def test_main_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     )
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.ci.harness_audit", run_name="__main__")
+        runpy.run_module("deepblue.ci.harness_audit", run_name="__main__")
 
     assert excinfo.value.code == 1

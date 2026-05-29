@@ -7,15 +7,15 @@ import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from devgear.lib.slim_text import compact_line, first_meaningful_line
+from deepblue.lib.slim_text import compact_line, first_meaningful_line
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
 
-    from devgear.mem.database import Database, MemoryChunk
-    from devgear.mem.search import SearchResult
-    from devgear.mem.settings import Settings
+    from deepblue.mem.database import Database, MemoryChunk
+    from deepblue.mem.search import SearchResult
+    from deepblue.mem.settings import Settings
 
     OpenDbFn = Callable[[Settings], AbstractContextManager[Database]]
     GetProjectFn = Callable[[dict[str, Any]], str]
@@ -32,7 +32,7 @@ def handle_search(
     log: Any,
 ) -> None:
     """mem 検索結果を JSON で返す"""
-    from devgear.mem.search import SearchService
+    from deepblue.mem.search import SearchService
 
     query = str(stdin_data.get("query", "") or "")
     if not query.strip():
@@ -62,7 +62,7 @@ def handle_search_structured(
     log: Any,
 ) -> None:
     """構造化検索: tool_name, files, date_range フィルタをサポート"""
-    from devgear.mem.search import SearchService
+    from deepblue.mem.search import SearchService
 
     query = str(stdin_data.get("query", "") or "")
     project = stdin_data.get("project") or get_project(stdin_data)

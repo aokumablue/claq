@@ -1,4 +1,4 @@
-"""devgear.mem.cli のテスト"""
+"""deepblue.mem.cli のテスト"""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from devgear.mem import cli
-from devgear.mem.database import Database, MemoryChunk
-from devgear.mem.search import SearchResult
+from deepblue.mem import cli
+from deepblue.mem.database import Database, MemoryChunk
+from deepblue.mem.search import SearchResult
 
 
 def _run_cli(
@@ -22,7 +22,7 @@ def _run_cli(
     argv: list[str],
     stdin_payload: dict,
 ) -> tuple[str, str]:
-    import devgear.mem.settings as settings_mod
+    import deepblue.mem.settings as settings_mod
 
     monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
     monkeypatch.setattr(sys, "argv", ["python", *argv])
@@ -78,7 +78,7 @@ def test_search_command_returns_results(monkeypatch, tmp_path: Path) -> None:
         files_read=["README.md"],
         files_modified=[],
     )
-    import devgear.mem.search as search_mod
+    import deepblue.mem.search as search_mod
     monkeypatch.setattr(search_mod.SearchService, "search", lambda self, **kwargs: [fake_result])
 
     stdout, stderr = _run_cli(
@@ -123,7 +123,7 @@ def test_session_init_injects_context_from_local_db(monkeypatch, tmp_path: Path)
         files_read=[],
         files_modified=["src/app.py"],
     )
-    import devgear.mem.search as search_mod
+    import deepblue.mem.search as search_mod
     monkeypatch.setattr(search_mod.SearchService, "search", lambda self, **kwargs: [fake_result])
 
     stdout, stderr = _run_cli(
@@ -337,7 +337,7 @@ def test_record_command_requires_content(monkeypatch, tmp_path: Path) -> None:
 def test_mem_main_module_invokes_cli_main(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["python", "--help"])
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.mem.__main__", run_name="__main__")
+        runpy.run_module("deepblue.mem.__main__", run_name="__main__")
 
     assert excinfo.value.code == 0
 
@@ -414,7 +414,7 @@ def _patch_pg_enabled(monkeypatch, settings_mod) -> None:
 
 class TestSessionInitPgIntegration:
     def test_team_search_called_when_pg_enabled(self, monkeypatch, tmp_path: Path) -> None:
-        import devgear.mem.settings as settings_mod
+        import deepblue.mem.settings as settings_mod
 
         repo_dir = tmp_path / "repo"
         repo_dir.mkdir()
@@ -447,7 +447,7 @@ class TestSessionInitPgIntegration:
         )
         team_calls: list[bool] = []
 
-        import devgear.mem.search as search_mod
+        import deepblue.mem.search as search_mod
         monkeypatch.setattr(search_mod.SearchService, "search", lambda self, **kwargs: [fake_local])
         monkeypatch.setattr(search_mod.SearchService, "search_team", lambda self, **kwargs: team_calls.append(True) or [])
         monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
@@ -488,7 +488,7 @@ class TestSessionInitPgIntegration:
         )
         team_calls: list[bool] = []
 
-        import devgear.mem.search as search_mod
+        import deepblue.mem.search as search_mod
         monkeypatch.setattr(search_mod.SearchService, "search", lambda self, **kwargs: [fake_local])
         monkeypatch.setattr(search_mod.SearchService, "search_team", lambda self, **kwargs: team_calls.append(True) or [])
 
@@ -502,7 +502,7 @@ class TestSessionInitPgIntegration:
         assert team_calls == []
 
     def test_falls_back_to_local_on_team_error(self, monkeypatch, tmp_path: Path) -> None:
-        import devgear.mem.settings as settings_mod
+        import deepblue.mem.settings as settings_mod
 
         repo_dir = tmp_path / "repo"
         repo_dir.mkdir()
@@ -536,7 +536,7 @@ class TestSessionInitPgIntegration:
 
         monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
         _patch_pg_enabled(monkeypatch, settings_mod)
-        import devgear.mem.search as search_mod
+        import deepblue.mem.search as search_mod
         monkeypatch.setattr(search_mod.SearchService, "search", lambda self, **kwargs: [fake_local])
         monkeypatch.setattr(search_mod.SearchService, "search_team", lambda self, **kwargs: (_ for _ in ()).throw(RuntimeError("PG down")))
 
@@ -583,7 +583,7 @@ class TestMainExitCode:
 
     def test_command_exception_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """_run_normal_command が例外を送出すると exit_code=1 を返す。"""
-        import devgear.mem.settings as settings_mod
+        import deepblue.mem.settings as settings_mod
         monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
         # "search" は _run_normal_command 経由（_SESSION_START_COMMANDS 外）
         monkeypatch.setattr(sys, "argv", ["python", "search"])
@@ -598,7 +598,7 @@ class TestMainExitCode:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """SESSION_START_COMMANDS 例外でも _SESSION_START_COMMANDS 経路は exit_code=0 を維持する。"""
-        import devgear.mem.settings as settings_mod
+        import deepblue.mem.settings as settings_mod
         monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
         monkeypatch.setattr(sys, "argv", ["python", "session-init"])
         monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))

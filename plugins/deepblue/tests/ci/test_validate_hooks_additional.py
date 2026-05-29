@@ -1,4 +1,4 @@
-"""devgear.ci.validate_hooks の追加テスト。"""
+"""deepblue.ci.validate_hooks の追加テスト。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-validate_hooks = importlib.import_module("devgear.ci.validate_hooks")
+validate_hooks = importlib.import_module("deepblue.ci.validate_hooks")
 
 
 def write_json(path: Path, value: object) -> None:
@@ -161,28 +161,28 @@ def test_validate_hooks_reports_invalid_matcher_and_entrypoint(
     )
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.ci.validate_hooks", run_name="__main__")
+        runpy.run_module("deepblue.ci.validate_hooks", run_name="__main__")
 
     assert excinfo.value.code == 0
 
 
 def test_repo_mem_cli_hooks_split_target_and_args() -> None:
     repo_root = Path(__file__).resolve().parents[4]
-    hooks_file = repo_root / "plugins/devgear/hooks/hooks.json"
+    hooks_file = repo_root / "plugins/deepblue/hooks/hooks.json"
     hooks = json.loads(hooks_file.read_text(encoding="utf-8"))
     commands = [
         hook.get("command", "")
         for event_hooks in hooks["hooks"].values()
         for matcher in event_hooks
         for hook in matcher.get("hooks", [])
-        if hook.get("type") == "command" and "devgear.hooks.run_with_flags" in hook.get("command", "")
+        if hook.get("type") == "command" and "deepblue.hooks.run_with_flags" in hook.get("command", "")
     ]
 
-    mem_cli_commands = [command for command in commands if "\"devgear.mem.cli\"" in command]
+    mem_cli_commands = [command for command in commands if "\"deepblue.mem.cli\"" in command]
     assert mem_cli_commands
     for command in mem_cli_commands:
         parts = shlex.split(command)
-        assert parts[4] == "devgear.mem.cli"
+        assert parts[4] == "deepblue.mem.cli"
         assert " " not in parts[4]
         assert parts[5]
         assert parts[6] in {

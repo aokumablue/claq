@@ -6,7 +6,7 @@ import argparse
 import re
 from pathlib import Path
 
-from devgear.ci.ci_common import REPO_ROOT
+from deepblue.ci.ci_common import REPO_ROOT
 
 TARGETS = [
     "README.md",

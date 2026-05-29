@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import pytest
 
-from devgear.lib.hook_flags import (
+from deepblue.lib.hook_flags import (
     VALID_PROFILES,
     get_hook_profile,
     is_hook_enabled,

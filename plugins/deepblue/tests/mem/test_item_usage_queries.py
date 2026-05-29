@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from devgear.mem.database import Database, MemItemRun
-from devgear.mem.item_usage_queries import (
+from deepblue.mem.database import Database, MemItemRun
+from deepblue.mem.item_usage_queries import (
     _SQLITE_PLACEHOLDER,
     align_team_counts,
     daily_trend,

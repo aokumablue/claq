@@ -12,14 +12,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from devgear.hooks.hook_common import (
+from deepblue.hooks.hook_common import (
     MAX_STDIN_BYTES,
     SESSION_START_HOOK_IDS,
     emit_session_start_output,
     write_stderr,
     write_stdout,
 )
-from devgear.lib.hook_flags import is_hook_enabled
+from deepblue.lib.hook_flags import is_hook_enabled
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 

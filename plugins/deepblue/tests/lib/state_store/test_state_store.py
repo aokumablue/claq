@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from devgear.lib.state_store import (
+from deepblue.lib.state_store import (
     create_state_store,
 )
 

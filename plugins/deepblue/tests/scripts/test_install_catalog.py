@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-import devgear.install_catalog as catalog
+import deepblue.install_catalog as catalog
 
 
 def _write_manifests(tmp_path: Path, include_components: bool = True) -> dict[str, object]:
@@ -283,7 +283,7 @@ def test_normalize_options_and_main_branches(tmp_path: Path, capsys: pytest.Capt
         catalog, "get_install_component", return_value=sample_component
     ):
         assert catalog.main(["--help"]) == 0
-        assert "Discover devgear install components and profiles" in capsys.readouterr().out
+        assert "Discover deepblue install components and profiles" in capsys.readouterr().out
 
         assert catalog.main(["profiles"]) == 0
         assert "Install profiles:" in capsys.readouterr().out
@@ -313,6 +313,6 @@ def test_install_catalog_main_block_invokes_main(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(catalog.sys, "argv", ["install_catalog.py", "--help"])
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.install_catalog", run_name="__main__")
+        runpy.run_module("deepblue.install_catalog", run_name="__main__")
 
     assert excinfo.value.code == 0

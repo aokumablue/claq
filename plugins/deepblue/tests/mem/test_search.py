@@ -8,15 +8,15 @@ from unittest.mock import patch
 
 import pytest
 
-from devgear.mem.database import Database, MemoryChunk
-from devgear.mem.search import SearchService, _reciprocal_rank_fusion, adaptive_decay, should_inject_memory
-from devgear.mem.settings import Settings
+from deepblue.mem.database import Database, MemoryChunk
+from deepblue.mem.search import SearchService, _reciprocal_rank_fusion, adaptive_decay, should_inject_memory
+from deepblue.mem.settings import Settings
 
 
 @pytest.fixture(autouse=True)
 def _patch_default_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """各テストで Settings の保存先を一時ディレクトリに固定する。"""
-    import devgear.mem.settings as mod
+    import deepblue.mem.settings as mod
 
     monkeypatch.setattr(mod, "_DEFAULT_DATA_DIR", tmp_path)
 
@@ -24,7 +24,7 @@ def _patch_default_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 @pytest.fixture(autouse=True)
 def _patch_embed_query(monkeypatch: pytest.MonkeyPatch) -> None:
     """embed_query をモックして HF Hub への通信を防ぐ（local_files_only=True のため必要）。"""
-    monkeypatch.setattr("devgear.mem.embedding.embed_query", lambda query, model: [0.1, 0.2])
+    monkeypatch.setattr("deepblue.mem.embedding.embed_query", lambda query, model: [0.1, 0.2])
 
 
 @pytest.fixture
@@ -162,7 +162,7 @@ class TestSearchService:
         svc = SearchService(object(), settings)  # type: ignore[arg-type]
 
         monkeypatch.setattr(
-            "devgear.mem.embedding.embed_query",
+            "deepblue.mem.embedding.embed_query",
             lambda query, model: [0.1, 0.2],
         )
 
@@ -207,9 +207,9 @@ class TestSearchService:
             def close(self) -> None:
                 self.closed = True
 
-        fake_pg_mod = ModuleType("devgear.mem.pg_database")
+        fake_pg_mod = ModuleType("deepblue.mem.pg_database")
         fake_pg_mod.PgDatabase = FakePg
-        monkeypatch.setitem(sys.modules, "devgear.mem.pg_database", fake_pg_mod)
+        monkeypatch.setitem(sys.modules, "deepblue.mem.pg_database", fake_pg_mod)
 
         settings.sync.enabled = False
         assert svc.search_team("query") == []

@@ -6,8 +6,8 @@ import math
 import struct
 import time
 
-from devgear.mem.database import Database, MemoryChunk
-from devgear.mem.logger import get as _get_logger
+from deepblue.mem.database import Database, MemoryChunk
+from deepblue.mem.logger import get as _get_logger
 
 log = _get_logger("COMPACT")
 

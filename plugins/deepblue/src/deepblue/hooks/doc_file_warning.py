@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from devgear.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
+from deepblue.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
 
 ADHOC_FILENAMES = re.compile(r"^(NOTES|TODO|SCRATCH|TEMP|DRAFT|BRAINSTORM|SPIKE|DEBUG|WIP)\.(md|txt)$")
 STRUCTURED_DIRS = re.compile(

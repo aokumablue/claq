@@ -2,7 +2,7 @@
 
 import pytest
 
-from devgear.mem.tag_stripping import _MAX_TAG_COUNT, strip_tags
+from deepblue.mem.tag_stripping import _MAX_TAG_COUNT, strip_tags
 
 
 class TestStripTags:

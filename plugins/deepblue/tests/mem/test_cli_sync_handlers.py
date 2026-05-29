@@ -31,11 +31,11 @@ class TestHandleSyncCheckVisibility:
 
     def test_logs_info_on_skip(self, mock_settings, monkeypatch):
         """should_sync=False 時に info ログが出ることを確認する。"""
-        # 遅延 import のため devgear.mem.sync 側でパッチする
-        monkeypatch.setattr("devgear.mem.sync.should_sync", lambda _: False)
+        # 遅延 import のため deepblue.mem.sync 側でパッチする
+        monkeypatch.setattr("deepblue.mem.sync.should_sync", lambda _: False)
         log = MagicMock()
 
-        from devgear.mem.cli_sync_handlers import handle_sync_check
+        from deepblue.mem.cli_sync_handlers import handle_sync_check
 
         handle_sync_check(mock_settings, log=log)
 
@@ -43,16 +43,16 @@ class TestHandleSyncCheckVisibility:
 
     def test_logs_error_on_failure(self, mock_settings, monkeypatch, capsys):
         """同期失敗時に error ログと stderr 出力が出ることを確認する。"""
-        from devgear.mem.sync import SyncResult
+        from deepblue.mem.sync import SyncResult
 
-        monkeypatch.setattr("devgear.mem.sync.should_sync", lambda _: True)
+        monkeypatch.setattr("deepblue.mem.sync.should_sync", lambda _: True)
         monkeypatch.setattr(
-            "devgear.mem.sync.sync_to_postgres",
+            "deepblue.mem.sync.sync_to_postgres",
             lambda _: SyncResult(success=False, error="接続エラー"),
         )
         log = MagicMock()
 
-        from devgear.mem.cli_sync_handlers import handle_sync_check
+        from deepblue.mem.cli_sync_handlers import handle_sync_check
 
         handle_sync_check(mock_settings, log=log)
 
@@ -63,16 +63,16 @@ class TestHandleSyncCheckVisibility:
 
     def test_no_error_when_success(self, mock_settings, monkeypatch, capsys):
         """同期成功時に stderr 出力がないことを確認する。"""
-        from devgear.mem.sync import SyncResult
+        from deepblue.mem.sync import SyncResult
 
-        monkeypatch.setattr("devgear.mem.sync.should_sync", lambda _: True)
+        monkeypatch.setattr("deepblue.mem.sync.should_sync", lambda _: True)
         monkeypatch.setattr(
-            "devgear.mem.sync.sync_to_postgres",
+            "deepblue.mem.sync.sync_to_postgres",
             lambda _: SyncResult(success=True, chunks=5),
         )
         log = MagicMock()
 
-        from devgear.mem.cli_sync_handlers import handle_sync_check
+        from deepblue.mem.cli_sync_handlers import handle_sync_check
 
         handle_sync_check(mock_settings, log=log)
 
@@ -108,21 +108,21 @@ class TestHandleSyncStatus:
         mock_settings.sync.enabled = bool(pg_url)
 
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._check_psycopg", lambda: psycopg_ok
+            "deepblue.mem.cli_sync_handlers._check_psycopg", lambda: psycopg_ok
         )
         if pg_url and psycopg_ok:
             conn_result = ("ok", None) if conn_ok else ("failed", "接続テスト失敗")
         else:
             conn_result = ("skipped", None) if not pg_url else ("skipped", "psycopg が未インストールです")
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._test_pg_connection",
+            "deepblue.mem.cli_sync_handlers._test_pg_connection",
             lambda url, installed: conn_result,
         )
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._count_all_pending", lambda _: 7
+            "deepblue.mem.cli_sync_handlers._count_all_pending", lambda _: 7
         )
 
-        from devgear.mem.cli_sync_handlers import handle_sync_status
+        from deepblue.mem.cli_sync_handlers import handle_sync_status
 
         handle_sync_status(mock_settings, {})
 
@@ -145,14 +145,14 @@ class TestHandleSyncStatus:
         mock_settings.sync.postgres_url = "postgresql://user:TESTPASSWORD123@host:5432/db"
         mock_settings.sync.enabled = True
 
-        monkeypatch.setattr("devgear.mem.cli_sync_handlers._check_psycopg", lambda: False)
+        monkeypatch.setattr("deepblue.mem.cli_sync_handlers._check_psycopg", lambda: False)
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._test_pg_connection",
+            "deepblue.mem.cli_sync_handlers._test_pg_connection",
             lambda url, installed: ("skipped", "psycopg が未インストールです"),
         )
-        monkeypatch.setattr("devgear.mem.cli_sync_handlers._count_all_pending", lambda _: 0)
+        monkeypatch.setattr("deepblue.mem.cli_sync_handlers._count_all_pending", lambda _: 0)
 
-        from devgear.mem.cli_sync_handlers import handle_sync_status
+        from deepblue.mem.cli_sync_handlers import handle_sync_status
 
         handle_sync_status(mock_settings, {})
 
@@ -166,14 +166,14 @@ class TestHandleSyncStatus:
         mock_settings.sync.postgres_url = ""
         mock_settings.sync.enabled = False
 
-        monkeypatch.setattr("devgear.mem.cli_sync_handlers._check_psycopg", lambda: True)
+        monkeypatch.setattr("deepblue.mem.cli_sync_handlers._check_psycopg", lambda: True)
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._test_pg_connection",
+            "deepblue.mem.cli_sync_handlers._test_pg_connection",
             lambda url, installed: ("skipped", None),
         )
-        monkeypatch.setattr("devgear.mem.cli_sync_handlers._count_all_pending", lambda _: 0)
+        monkeypatch.setattr("deepblue.mem.cli_sync_handlers._count_all_pending", lambda _: 0)
 
-        from devgear.mem.cli_sync_handlers import handle_sync_status
+        from deepblue.mem.cli_sync_handlers import handle_sync_status
 
         handle_sync_status(mock_settings, {})
 
@@ -190,14 +190,14 @@ class TestBuildSyncStatusDict:
         """lite=True 時に _test_pg_connection が呼ばれず connection=skipped になる。"""
         called = []
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._check_psycopg", lambda: True
+            "deepblue.mem.cli_sync_handlers._check_psycopg", lambda: True
         )
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._test_pg_connection",
+            "deepblue.mem.cli_sync_handlers._test_pg_connection",
             lambda url, installed: called.append(True) or ("ok", None),
         )
 
-        from devgear.mem.cli_sync_handlers import _build_sync_status_dict
+        from deepblue.mem.cli_sync_handlers import _build_sync_status_dict
 
         result = _build_sync_status_dict(mock_settings, lite=True)
 
@@ -208,17 +208,17 @@ class TestBuildSyncStatusDict:
     def test_full_mode_calls_connection(self, mock_settings, monkeypatch):
         """lite=False（デフォルト）時に接続テストが実行される。"""
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._check_psycopg", lambda: True
+            "deepblue.mem.cli_sync_handlers._check_psycopg", lambda: True
         )
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._test_pg_connection",
+            "deepblue.mem.cli_sync_handlers._test_pg_connection",
             lambda url, installed: ("ok", None),
         )
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._count_all_pending", lambda _: 3
+            "deepblue.mem.cli_sync_handlers._count_all_pending", lambda _: 3
         )
 
-        from devgear.mem.cli_sync_handlers import _build_sync_status_dict
+        from deepblue.mem.cli_sync_handlers import _build_sync_status_dict
 
         result = _build_sync_status_dict(mock_settings, lite=False)
 
@@ -251,8 +251,8 @@ class TestBuildSyncRecommendations:
     )
     def test_each_branch(self, scenario, status_override, expected_keyword):
         """各条件で対応する推奨メッセージが1件以上生成されることを確認する。"""
-        from devgear.mem.cli import _build_sync_recommendations
-        from devgear.mem.cli_sync_handlers import SyncStatusDict
+        from deepblue.mem.cli import _build_sync_recommendations
+        from deepblue.mem.cli_sync_handlers import SyncStatusDict
 
         base: SyncStatusDict = {
             "enabled": True,
@@ -271,8 +271,8 @@ class TestBuildSyncRecommendations:
 
     def test_no_recs_when_all_ok(self):
         """全て正常な場合に推奨が空になることを確認する。"""
-        from devgear.mem.cli import _build_sync_recommendations
-        from devgear.mem.cli_sync_handlers import SyncStatusDict
+        from deepblue.mem.cli import _build_sync_recommendations
+        from deepblue.mem.cli_sync_handlers import SyncStatusDict
 
         status: SyncStatusDict = {
             "enabled": True,
@@ -296,11 +296,11 @@ class TestHandleSetup:
         import logging
 
         monkeypatch.setattr(
-            "devgear.mem.cli._initialize_db",
+            "deepblue.mem.cli._initialize_db",
             lambda settings, **kw: (_ for _ in ()).throw(RuntimeError("db error")),
         )
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._build_sync_status_dict",
+            "deepblue.mem.cli_sync_handlers._build_sync_status_dict",
             lambda settings, lite: {
                 "enabled": True, "postgres_url_set": True, "postgres_url_masked": None,
                 "psycopg_installed": True, "connection": "skipped", "connection_error": None,
@@ -308,9 +308,9 @@ class TestHandleSetup:
             },
         )
 
-        from devgear.mem.cli import _handle_setup
+        from deepblue.mem.cli import _handle_setup
 
-        with caplog.at_level(logging.WARNING, logger="devgear.mem.CLI"):
+        with caplog.at_level(logging.WARNING, logger="deepblue.mem.CLI"):
             _handle_setup(mock_settings)
 
         assert any("setup 失敗" in r.message and r.levelno == logging.WARNING for r in caplog.records)
@@ -319,7 +319,7 @@ class TestHandleSetup:
         """_handle_setup が sync 設定を info ログに出すことを確認する。"""
         import logging
 
-        from devgear.mem.cli_sync_handlers import SyncStatusDict
+        from deepblue.mem.cli_sync_handlers import SyncStatusDict
 
         dummy_status: SyncStatusDict = {
             "enabled": True,
@@ -333,15 +333,15 @@ class TestHandleSetup:
             "last_sync_at": None,
         }
         monkeypatch.setattr(
-            "devgear.mem.cli_sync_handlers._build_sync_status_dict",
+            "deepblue.mem.cli_sync_handlers._build_sync_status_dict",
             lambda settings, lite: dummy_status,
         )
         # DB 初期化をスキップして診断ログ部分だけテストする
-        monkeypatch.setattr("devgear.mem.cli._initialize_db", lambda settings, **kw: None)
+        monkeypatch.setattr("deepblue.mem.cli._initialize_db", lambda settings, **kw: None)
 
-        from devgear.mem.cli import _handle_setup
+        from deepblue.mem.cli import _handle_setup
 
-        with caplog.at_level(logging.INFO, logger="devgear.mem.CLI"):
+        with caplog.at_level(logging.INFO, logger="deepblue.mem.CLI"):
             _handle_setup(mock_settings)
 
         assert any("sync 設定" in r.message for r in caplog.records)
@@ -360,7 +360,7 @@ class TestInternalHelpers:
         fake_psycopg = types.ModuleType("psycopg")
         monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
 
-        from devgear.mem.cli_sync_handlers import _check_psycopg
+        from deepblue.mem.cli_sync_handlers import _check_psycopg
 
         assert _check_psycopg() is True
 
@@ -379,12 +379,12 @@ class TestInternalHelpers:
 
         monkeypatch.setattr(builtins, "__import__", mock_import)
 
-        from devgear.mem.cli_sync_handlers import _check_psycopg
+        from deepblue.mem.cli_sync_handlers import _check_psycopg
         assert _check_psycopg() is False
 
     def test_test_pg_connection_skipped_when_no_url(self):
         """postgres_url が空の場合 skipped を返す。"""
-        from devgear.mem.cli_sync_handlers import _test_pg_connection
+        from deepblue.mem.cli_sync_handlers import _test_pg_connection
 
         status, error = _test_pg_connection("", True)
         assert status == "skipped"
@@ -392,7 +392,7 @@ class TestInternalHelpers:
 
     def test_test_pg_connection_skipped_when_psycopg_missing(self):
         """psycopg 未インストールの場合 skipped を返す。"""
-        from devgear.mem.cli_sync_handlers import _test_pg_connection
+        from deepblue.mem.cli_sync_handlers import _test_pg_connection
 
         status, error = _test_pg_connection("postgresql://host/db", False)
         assert status == "skipped"
@@ -410,9 +410,9 @@ class TestInternalHelpers:
             def close(self) -> None:
                 pass
 
-        monkeypatch.setattr("devgear.mem.pg_database.PgDatabase", FalsePgDb)
+        monkeypatch.setattr("deepblue.mem.pg_database.PgDatabase", FalsePgDb)
 
-        from devgear.mem.cli_sync_handlers import _test_pg_connection
+        from deepblue.mem.cli_sync_handlers import _test_pg_connection
 
         status, error = _test_pg_connection("postgresql://host/db", True)
         assert status == "failed"
@@ -430,9 +430,9 @@ class TestInternalHelpers:
             def close(self):
                 pass
 
-        monkeypatch.setattr("devgear.mem.pg_database.PgDatabase", BoomPgDb)
+        monkeypatch.setattr("deepblue.mem.pg_database.PgDatabase", BoomPgDb)
 
-        from devgear.mem.cli_sync_handlers import _test_pg_connection
+        from deepblue.mem.cli_sync_handlers import _test_pg_connection
 
         status, error = _test_pg_connection("postgresql://host/db", True)
         assert status == "failed"
@@ -446,9 +446,9 @@ class TestInternalHelpers:
             def __init__(self, path):  # noqa: ANN001
                 raise RuntimeError("no db")
 
-        monkeypatch.setattr("devgear.mem.database.Database", BoomDatabase)
+        monkeypatch.setattr("deepblue.mem.database.Database", BoomDatabase)
 
-        from devgear.mem.cli_sync_handlers import _count_all_pending
+        from deepblue.mem.cli_sync_handlers import _count_all_pending
 
         assert _count_all_pending(mock_settings) == 0
 
@@ -458,7 +458,7 @@ class TestInternalHelpers:
 
         conn = sqlite3.connect(":memory:")
         monkeypatch.setattr(
-            "devgear.mem.sync._count_pending_rows",
+            "deepblue.mem.sync._count_pending_rows",
             lambda conn, table: 3,
         )
 
@@ -469,10 +469,10 @@ class TestInternalHelpers:
             def close(self) -> None:
                 conn.close()
 
-        monkeypatch.setattr("devgear.mem.database.Database", FakeDatabase)
+        monkeypatch.setattr("deepblue.mem.database.Database", FakeDatabase)
 
-        from devgear.mem.cli_sync_handlers import _count_all_pending
-        from devgear.mem.sync import _SYNC_TABLES
+        from deepblue.mem.cli_sync_handlers import _count_all_pending
+        from deepblue.mem.sync import _SYNC_TABLES
 
         result = _count_all_pending(mock_settings)
         assert result == 3 * len(_SYNC_TABLES)
@@ -482,7 +482,7 @@ class TestSplitPassword:
     """_split_password のテーブル駆動テスト。"""
 
     def test_url_with_password_splits(self) -> None:
-        from devgear.mem.cli_sync_handlers import _split_password
+        from deepblue.mem.cli_sync_handlers import _split_password
 
         url, pw = _split_password("postgresql://user:secret@host/db")
         assert pw == "secret"
@@ -491,7 +491,7 @@ class TestSplitPassword:
         assert "host" in url
 
     def test_url_without_password_unchanged(self) -> None:
-        from devgear.mem.cli_sync_handlers import _split_password
+        from deepblue.mem.cli_sync_handlers import _split_password
 
         original = "postgresql://user@host/db"
         url, pw = _split_password(original)
@@ -499,7 +499,7 @@ class TestSplitPassword:
         assert url == original
 
     def test_url_preserves_port(self) -> None:
-        from devgear.mem.cli_sync_handlers import _split_password
+        from deepblue.mem.cli_sync_handlers import _split_password
 
         url, pw = _split_password("postgresql://user:pass@host:5433/mydb")
         assert pw == "pass"
@@ -507,7 +507,7 @@ class TestSplitPassword:
         assert "pass" not in url
 
     def test_empty_url_returns_unchanged(self) -> None:
-        from devgear.mem.cli_sync_handlers import _split_password
+        from deepblue.mem.cli_sync_handlers import _split_password
 
         url, pw = _split_password("")
         assert pw is None
@@ -518,7 +518,7 @@ class TestWritePgpass:
     """_write_pgpass のテスト。"""
 
     def test_creates_pgpass_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from devgear.mem.cli_sync_handlers import _write_pgpass
+        from deepblue.mem.cli_sync_handlers import _write_pgpass
 
         monkeypatch.setenv("HOME", str(tmp_path))
         _write_pgpass("myhost", 5432, "mydb", "myuser", "mypassword")
@@ -528,7 +528,7 @@ class TestWritePgpass:
         assert "myhost:5432:mydb:myuser:mypassword" in content
 
     def test_pgpass_chmod_0600(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from devgear.mem.cli_sync_handlers import _write_pgpass
+        from deepblue.mem.cli_sync_handlers import _write_pgpass
 
         monkeypatch.setenv("HOME", str(tmp_path))
         _write_pgpass("host", 5432, "db", "user", "pass")
@@ -536,7 +536,7 @@ class TestWritePgpass:
         assert pgpass_path.stat().st_mode & 0o777 == 0o600
 
     def test_no_duplicate_entry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from devgear.mem.cli_sync_handlers import _write_pgpass
+        from deepblue.mem.cli_sync_handlers import _write_pgpass
 
         monkeypatch.setenv("HOME", str(tmp_path))
         _write_pgpass("h", 5432, "d", "u", "p")

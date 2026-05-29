@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.ci import ci_common
+from deepblue.ci import ci_common
 
 
 def test_read_json_and_basic_predicates(tmp_path: Path) -> None:

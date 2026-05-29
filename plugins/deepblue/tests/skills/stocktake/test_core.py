@@ -1,4 +1,4 @@
-"""devgear.skills.stocktake.core のテスト。"""
+"""deepblue.skills.stocktake.core のテスト。"""
 
 import json
 from datetime import UTC, datetime, timedelta
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.skills.stocktake import core
+from deepblue.skills.stocktake import core
 
 # ─────────────────────────────────────────────
 # parse_frontmatter

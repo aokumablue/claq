@@ -1,4 +1,4 @@
-"""devgear.mem.cli の追加テスト。"""
+"""deepblue.mem.cli の追加テスト。"""
 
 from __future__ import annotations
 
@@ -12,15 +12,15 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-import devgear.mem.dashboard_queries as dashboard_queries_mod
-import devgear.mem.importers as importers_mod
-import devgear.mem.item_usage_queries as item_usage_queries_mod
-import devgear.mem.pg_database as pg_database_mod
-import devgear.mem.sync as sync_mod
-from devgear.mem import cli
-from devgear.mem.database import MemoryChunk
-from devgear.mem.search import SearchResult
-from devgear.mem.sync import SyncResult
+import deepblue.mem.dashboard_queries as dashboard_queries_mod
+import deepblue.mem.importers as importers_mod
+import deepblue.mem.item_usage_queries as item_usage_queries_mod
+import deepblue.mem.pg_database as pg_database_mod
+import deepblue.mem.sync as sync_mod
+from deepblue.mem import cli
+from deepblue.mem.database import MemoryChunk
+from deepblue.mem.search import SearchResult
+from deepblue.mem.sync import SyncResult
 from tests.mem.conftest import FakeDB, make_settings, open_fake_db
 
 
@@ -173,8 +173,8 @@ def test_handle_session_end_and_compact(monkeypatch: pytest.MonkeyPatch, tmp_pat
         created_at_epoch=1704067200,
     )
     db = FakeDB([chunk])
-    import devgear.mem.bridge as bridge_mod
-    import devgear.mem.compaction as compaction_mod
+    import deepblue.mem.bridge as bridge_mod
+    import deepblue.mem.compaction as compaction_mod
 
     monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(db))
     monkeypatch.setattr(cli, "embed", lambda texts: [[0.1, 0.2]])
@@ -202,7 +202,7 @@ def test_handle_setup_and_observe_branches(monkeypatch: pytest.MonkeyPatch, tmp_
     assert cli._handle_setup(settings) == ""
     assert settings.data_path.exists()
 
-    import devgear.mem.chunker as chunker_mod
+    import deepblue.mem.chunker as chunker_mod
 
     monkeypatch.setattr(chunker_mod, "build_chunk_from_tool_use", lambda **kwargs: MemoryChunk(
         session_id=kwargs["session_id"],
@@ -315,7 +315,7 @@ def test_handle_context_and_search_error_paths(monkeypatch: pytest.MonkeyPatch, 
 
 
 def test_main_settings_failure_and_invalid_stdin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    import devgear.mem.logger as logger_mod
+    import deepblue.mem.logger as logger_mod
 
     settings = make_settings(tmp_path)
 
@@ -347,7 +347,7 @@ def test_main_session_start_commands_always_emit_wrapper(
     capsys: pytest.CaptureFixture[str],
     command: str,
 ) -> None:
-    import devgear.mem.logger as logger_mod
+    import deepblue.mem.logger as logger_mod
 
     settings = make_settings(tmp_path)
     errors: list[str] = []
@@ -398,7 +398,7 @@ def test_main_preserves_normal_command_exit_code(
 
 
 def test_main_wraps_handler_exceptions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import devgear.mem.logger as logger_mod
+    import deepblue.mem.logger as logger_mod
 
     settings = make_settings(tmp_path)
     errors: list[str] = []
@@ -420,7 +420,7 @@ def test_main_error_path_logging_contract_for_normal_command(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    import devgear.mem.logger as logger_mod
+    import deepblue.mem.logger as logger_mod
 
     settings = make_settings(tmp_path)
     errors: list[str] = []
@@ -462,8 +462,8 @@ def test_handle_session_end_auto_compact_error(monkeypatch: pytest.MonkeyPatch, 
         created_at_epoch=1704067200,
     )
     db = FakeDB([chunk])
-    import devgear.mem.bridge as bridge_mod
-    import devgear.mem.compaction as compaction_mod
+    import deepblue.mem.bridge as bridge_mod
+    import deepblue.mem.compaction as compaction_mod
 
     monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(db))
     monkeypatch.setattr(cli, "embed", lambda texts: [[0.1, 0.2]])
@@ -737,13 +737,13 @@ def test_handle_dashboard_json_and_main_entrypoints(monkeypatch: pytest.MonkeyPa
     assert cli.main() == 0
 
     monkeypatch.setattr(cli.Settings, "load", lambda: settings)
-    monkeypatch.setattr("devgear.mem.logger.setup", lambda *args, **kwargs: None)
+    monkeypatch.setattr("deepblue.mem.logger.setup", lambda *args, **kwargs: None)
     monkeypatch.setattr(sys, "argv", ["python", "not-a-command"])
     assert cli.main() == 2
 
 
 def test_collect_project_overview_skips_invalid_registry_entries(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import devgear.skills.learn.cli as learn_cli
+    import deepblue.skills.learn.cli as learn_cli
 
     project_dir = tmp_path / "proj"
     project_dir.mkdir()
@@ -760,7 +760,7 @@ def test_collect_project_overview_skips_invalid_registry_entries(monkeypatch: py
 
 
 def test_main_routes_all_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import devgear.mem.logger as logger_mod
+    import deepblue.mem.logger as logger_mod
 
     settings = make_settings(tmp_path)
     monkeypatch.setattr(cli.Settings, "load", lambda: settings)
@@ -792,7 +792,7 @@ def test_main_routes_all_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
 
 def test_setup_command_imports_without_torch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    import devgear.mem.logger as logger_mod
+    import deepblue.mem.logger as logger_mod
 
     original_import = builtins.__import__
 
@@ -803,11 +803,11 @@ def test_setup_command_imports_without_torch(monkeypatch: pytest.MonkeyPatch, tm
         fromlist: tuple[str, ...] = (),
         level: int = 0,
     ) -> object:
-        if name == "devgear.mem.embedding":
-            raise AssertionError("devgear.mem.embedding should not be imported during setup")
+        if name == "deepblue.mem.embedding":
+            raise AssertionError("deepblue.mem.embedding should not be imported during setup")
         return original_import(name, globals, locals, fromlist, level)
 
-    monkeypatch.delitem(sys.modules, "devgear.mem.embedding", raising=False)
+    monkeypatch.delitem(sys.modules, "deepblue.mem.embedding", raising=False)
     monkeypatch.setattr(builtins, "__import__", guarded_import)
     reloaded_cli = importlib.reload(cli)
 
@@ -819,13 +819,13 @@ def test_setup_command_imports_without_torch(monkeypatch: pytest.MonkeyPatch, tm
 
     assert reloaded_cli.main() == 0
 
-    assert "devgear.mem.embedding" not in sys.modules
+    assert "deepblue.mem.embedding" not in sys.modules
     payload = json.loads(capsys.readouterr().out)
     assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 
 
 def test_main_help_and_unknown_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    import devgear.mem.logger as logger_mod
+    import deepblue.mem.logger as logger_mod
 
     monkeypatch.setattr(sys, "argv", ["python", "--help"])
     assert cli.main() == 0
@@ -843,14 +843,14 @@ def test_cli_entrypoint_module(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(sys, "argv", ["python", "--help"])
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.mem.cli", run_name="__main__")
+        runpy.run_module("deepblue.mem.cli", run_name="__main__")
 
     assert excinfo.value.code == 0
 
 
 def test_embed_delegates_to_embedding_module(monkeypatch: pytest.MonkeyPatch) -> None:
-    """cli.embed は devgear.mem.embedding.embed に委譲する。"""
-    import devgear.mem.embedding as embedding_mod
+    """cli.embed は deepblue.mem.embedding.embed に委譲する。"""
+    import deepblue.mem.embedding as embedding_mod
 
     received: dict[str, object] = {}
 
@@ -947,9 +947,9 @@ def test_migrate_settings_json_decode_failure(
 ) -> None:
     """settings.json が壊れていれば migrate-settings はログだけ出して return する。"""
     monkeypatch.setenv("HOME", str(tmp_path))
-    devgear_dir = tmp_path / ".devgear"
-    devgear_dir.mkdir()
-    (devgear_dir / "settings.json").write_text("{not-json", encoding="utf-8")
+    deepblue_dir = tmp_path / ".deepblue"
+    deepblue_dir.mkdir()
+    (deepblue_dir / "settings.json").write_text("{not-json", encoding="utf-8")
 
     warnings: list[str] = []
     monkeypatch.setattr(cli.log, "warning", lambda msg, *args: warnings.append(msg % args if args else msg))
@@ -963,7 +963,7 @@ def test_migrate_settings_json_decode_failure(
 
 def test_count_lines_returns_zero_on_oserror(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """count_lines は OSError 発生時に 0 を返す。"""
-    from devgear.mem import cli_dashboard_handlers as cdh
+    from deepblue.mem import cli_dashboard_handlers as cdh
 
     target = tmp_path / "a.jsonl"
     target.write_text("line\n")
@@ -977,7 +977,7 @@ def test_count_lines_returns_zero_on_oserror(monkeypatch: pytest.MonkeyPatch, tm
 
 def test_count_lines_returns_zero_when_missing(tmp_path: Path) -> None:
     """count_lines は存在しないパスに対して 0 を返す。"""
-    from devgear.mem import cli_dashboard_handlers as cdh
+    from deepblue.mem import cli_dashboard_handlers as cdh
 
     assert cdh.count_lines(tmp_path / "nope.jsonl") == 0
 
@@ -986,7 +986,7 @@ def test_collect_skill_health_overview_handles_collect_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """collect_skill_health が例外を出してもダッシュボードは止まらず空 report で続行する。"""
-    from devgear.mem import cli_dashboard_handlers as cdh
+    from deepblue.mem import cli_dashboard_handlers as cdh
 
     def _boom(_options):
         raise RuntimeError("health boom")
@@ -1005,7 +1005,7 @@ def test_collect_skill_health_overview_handles_collect_failure(
 
 def test_collect_skill_growth_overview_disabled_returns_empty(tmp_path: Path) -> None:
     """sync 無効時は早期 return で空辞書を返す。"""
-    from devgear.mem import cli_dashboard_handlers as cdh
+    from deepblue.mem import cli_dashboard_handlers as cdh
 
     settings = make_settings(tmp_path)
     settings.sync.enabled = False
@@ -1019,7 +1019,7 @@ def test_collect_skill_growth_overview_pg_not_connectable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """sync 有効でも test_connection が False なら空辞書を返す。"""
-    from devgear.mem import cli_dashboard_handlers as cdh
+    from deepblue.mem import cli_dashboard_handlers as cdh
 
     settings = make_settings(tmp_path)
     settings.sync.enabled = True
@@ -1035,7 +1035,7 @@ def test_collect_skill_growth_overview_pg_not_connectable(
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr("devgear.mem.pg_database.PgDatabase", _PG)
+    monkeypatch.setattr("deepblue.mem.pg_database.PgDatabase", _PG)
     fake_log = SimpleNamespace(warning=lambda *a, **kw: None)
     result = cdh.collect_skill_growth_overview(settings, 30, log=fake_log)
     assert result["skill_candidates"] == []
@@ -1045,7 +1045,7 @@ def test_collect_skill_growth_overview_success(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """成功パスで proposal が返され、ランキングが構築される。"""
-    from devgear.mem import cli_dashboard_handlers as cdh
+    from deepblue.mem import cli_dashboard_handlers as cdh
 
     settings = make_settings(tmp_path)
     settings.sync.enabled = True
@@ -1063,10 +1063,10 @@ def test_collect_skill_growth_overview_success(
         def close(self) -> None:
             closed["value"] = True
 
-    monkeypatch.setattr("devgear.mem.pg_database.PgDatabase", _PG)
+    monkeypatch.setattr("deepblue.mem.pg_database.PgDatabase", _PG)
 
-    import devgear.mem.skill_analyzer as analyzer_mod
-    import devgear.mem.skill_proposal as proposal_mod
+    import deepblue.mem.skill_analyzer as analyzer_mod
+    import deepblue.mem.skill_proposal as proposal_mod
 
     monkeypatch.setattr(analyzer_mod, "detect_repeated_patterns", lambda *a, **kw: ["p"])
     monkeypatch.setattr(analyzer_mod, "detect_skill_gaps", lambda *a, **kw: ["g"])
@@ -1091,7 +1091,7 @@ def test_collect_skill_growth_overview_inner_exception(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """skill_analyzer 経由で例外が起きてもログを出して空 dict を返す。"""
-    from devgear.mem import cli_dashboard_handlers as cdh
+    from deepblue.mem import cli_dashboard_handlers as cdh
 
     settings = make_settings(tmp_path)
     settings.sync.enabled = True
@@ -1107,8 +1107,8 @@ def test_collect_skill_growth_overview_inner_exception(
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr("devgear.mem.pg_database.PgDatabase", _PG)
-    import devgear.mem.skill_analyzer as analyzer_mod
+    monkeypatch.setattr("deepblue.mem.pg_database.PgDatabase", _PG)
+    import deepblue.mem.skill_analyzer as analyzer_mod
 
     def _boom(*_args, **_kwargs):
         raise RuntimeError("analyzer boom")
@@ -1125,7 +1125,7 @@ def test_collect_skill_growth_overview_inner_exception(
 
 def test_resolve_safe_dashboard_output_path_invalid_value(tmp_path: Path) -> None:
     """非 str / 空白 / 解決不能パスはすべて None。"""
-    from devgear.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
+    from deepblue.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
 
     settings = make_settings(tmp_path)
     assert _resolve_safe_dashboard_output_path(settings, None) is None
@@ -1135,7 +1135,7 @@ def test_resolve_safe_dashboard_output_path_invalid_value(tmp_path: Path) -> Non
 
 def test_resolve_safe_dashboard_output_path_relative(tmp_path: Path) -> None:
     """相対パスは settings.data_path 配下に展開される。"""
-    from devgear.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
+    from deepblue.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
 
     settings = make_settings(tmp_path)
     resolved = _resolve_safe_dashboard_output_path(settings, "out/inner.html")
@@ -1145,7 +1145,7 @@ def test_resolve_safe_dashboard_output_path_relative(tmp_path: Path) -> None:
 
 def test_resolve_safe_dashboard_output_path_outside_root(tmp_path: Path) -> None:
     """data_path 外のパスは拒否される。"""
-    from devgear.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
+    from deepblue.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
 
     settings = make_settings(tmp_path)
     outside = str(tmp_path.parent / "outside.html")
@@ -1154,7 +1154,7 @@ def test_resolve_safe_dashboard_output_path_outside_root(tmp_path: Path) -> None
 
 def test_slim_prompt_returns_empty_when_no_meaningful_content() -> None:
     """first_meaningful_line も in_code_block も拾えない場合は空文字を返す（line 267）。"""
-    from devgear.mem.cli_search_handlers import slim_prompt
+    from deepblue.mem.cli_search_handlers import slim_prompt
 
     # 空白のみ＋未閉鎖コードブロック相当：すべての行が空 or ```で in_code_block の切り替えのみ
     assert slim_prompt("```\n```\n", max_len=80) == ""
@@ -1162,14 +1162,14 @@ def test_slim_prompt_returns_empty_when_no_meaningful_content() -> None:
 
 def test_slim_context_content_returns_empty_for_empty_text() -> None:
     """text が空なら空文字を返す（line 273）。"""
-    from devgear.mem.cli_search_handlers import slim_context_content
+    from deepblue.mem.cli_search_handlers import slim_context_content
 
     assert slim_context_content("") == ""
 
 
 def test_slim_context_content_skips_blank_lines() -> None:
     """空行はスキップされる（line 283）。"""
-    from devgear.mem.cli_search_handlers import slim_context_content
+    from deepblue.mem.cli_search_handlers import slim_context_content
 
     result = slim_context_content("\n\nhello world\n\n", max_prose_lines=2)
     assert "hello world" in result
@@ -1181,7 +1181,7 @@ def test_resolve_safe_dashboard_output_path_resolve_oserror(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Path.resolve が OSError を出した場合は None を返す。"""
-    from devgear.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
+    from deepblue.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
 
     settings = make_settings(tmp_path)
 

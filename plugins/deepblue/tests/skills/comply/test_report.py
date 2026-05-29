@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from devgear.skills.comply.grader import ComplianceResult, StepResult
-from devgear.skills.comply.parser import ComplianceSpec, Detector, ObservationEvent, Step
-from devgear.skills.comply.report import _overall_compliance, _step_compliance_rate, _steps_to_promote, generate_report
-from devgear.skills.comply.scenario_generator import Scenario
+from deepblue.skills.comply.grader import ComplianceResult, StepResult
+from deepblue.skills.comply.parser import ComplianceSpec, Detector, ObservationEvent, Step
+from deepblue.skills.comply.report import _overall_compliance, _step_compliance_rate, _steps_to_promote, generate_report
+from deepblue.skills.comply.scenario_generator import Scenario
 
 
 def _make_spec(*, threshold: float = 0.75, required: bool = True) -> ComplianceSpec:

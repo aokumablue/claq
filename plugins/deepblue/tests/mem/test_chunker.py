@@ -2,7 +2,7 @@
 
 import pytest
 
-from devgear.mem.chunker import (
+from deepblue.mem.chunker import (
     ChunkAccumulator,
     _extract_file_paths,
     _parse_tool_input,

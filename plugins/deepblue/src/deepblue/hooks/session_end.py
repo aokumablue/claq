@@ -13,8 +13,8 @@ import json
 import re
 from pathlib import Path
 
-from devgear.hooks.hook_common import parse_json_object, read_raw_stdin
-from devgear.lib.core_utils import (
+from deepblue.hooks.hook_common import parse_json_object, read_raw_stdin
+from deepblue.lib.core_utils import (
     ensure_dir,
     get_date_string,
     get_project_name,
@@ -27,10 +27,10 @@ from devgear.lib.core_utils import (
     strip_ansi,
     write_file,
 )
-from devgear.lib.slim_text import compact_line
+from deepblue.lib.slim_text import compact_line
 
-SUMMARY_START_MARKER = "<!-- devgear:SUMMARY:START -->"
-SUMMARY_END_MARKER = "<!-- devgear:SUMMARY:END -->"
+SUMMARY_START_MARKER = "<!-- deepblue:SUMMARY:START -->"
+SUMMARY_END_MARKER = "<!-- deepblue:SUMMARY:END -->"
 SESSION_SEPARATOR = "\n---\n"
 
 
@@ -208,9 +208,9 @@ def _record_stop_event(summary: dict | None, metadata: dict) -> None:
     try:
         import time
 
-        from devgear.lib.core_utils import get_git_user_name
-        from devgear.mem.database import Database, EventLog
-        from devgear.mem.settings import Settings
+        from deepblue.lib.core_utils import get_git_user_name
+        from deepblue.mem.database import Database, EventLog
+        from deepblue.mem.settings import Settings
 
         settings = Settings.load()
         content = json.dumps(

@@ -1,4 +1,4 @@
-"""devgear.skills.stocktake.cli のテスト。"""
+"""deepblue.skills.stocktake.cli のテスト。"""
 
 import json
 import runpy
@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from devgear.skills.stocktake import cli as _mod
+from deepblue.skills.stocktake import cli as _mod
 
 # ─────────────────────────────────────────────
 # ヘルパー
@@ -103,13 +103,13 @@ def test_cmd_diff_no_changes_outputs_empty_array(tmp_path: Path, monkeypatch: py
     monkeypatch.setenv("SKILL_STOCKTAKE_PROJECT_DIR", str(tmp_path / "no-project"))
 
     # classify_changed の home を tmp_path / "global" にするために monkeypatch
-    import devgear.skills.stocktake.core as core_mod
+    import deepblue.skills.stocktake.core as core_mod
     original_classify = core_mod.classify_changed
 
     def _patched_classify(known_paths, evaluated_at, skill_files, home=None):
         return original_classify(known_paths, evaluated_at, skill_files, home=global_dir)
 
-    monkeypatch.setattr("devgear.skills.stocktake.cli.core.classify_changed", _patched_classify)
+    monkeypatch.setattr("deepblue.skills.stocktake.cli.core.classify_changed", _patched_classify)
 
     # stable/SKILL.md の known_path は global_dir を home とした ~/... 表現
     stable_path = "~/stable/SKILL.md"
@@ -169,7 +169,7 @@ def test_cmd_save_creates_results_file(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setattr("sys.stdin", __import__("io").StringIO(json.dumps(payload)))
 
     fixed_now = datetime(2026, 4, 26, 12, 0, 0, tzinfo=UTC)
-    with patch("devgear.skills.stocktake.cli.datetime") as mock_dt:
+    with patch("deepblue.skills.stocktake.cli.datetime") as mock_dt:
         mock_dt.now.return_value = fixed_now
         mock_dt.strptime.side_effect = datetime.strptime
         mock_dt.fromtimestamp.side_effect = datetime.fromtimestamp
@@ -208,5 +208,5 @@ def test_cmd_save_merges_into_existing(tmp_path: Path, monkeypatch: pytest.Monke
 def test_entrypoint_exits_nonzero_on_no_args(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["cli.py"])
     with pytest.raises(SystemExit) as exc:
-        runpy.run_module("devgear.skills.stocktake.cli", run_name="__main__")
+        runpy.run_module("deepblue.skills.stocktake.cli", run_name="__main__")
     assert exc.value.code != 0

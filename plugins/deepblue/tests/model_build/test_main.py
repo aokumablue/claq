@@ -128,7 +128,7 @@ class TestVerifyModuleMain:
         from pathlib import Path as _Path
         from unittest.mock import MagicMock
 
-        expected_dir = _Path.home() / ".devgear" / "models"
+        expected_dir = _Path.home() / ".deepblue" / "models"
 
         # model_build.verify をリロードして __name__ を __main__ に偽装する
         import model_build.verify as verify_mod
@@ -139,7 +139,7 @@ class TestVerifyModuleMain:
         # __main__ ブロックを直接実行
         exec(  # noqa: S102
             compile(
-                f"verify(Path.home() / '.devgear' / 'models')",
+                f"verify(Path.home() / '.deepblue' / 'models')",
                 "<test>",
                 "exec",
             ),

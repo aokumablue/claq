@@ -36,8 +36,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from devgear.skills.comply.parser import ObservationEvent
-from devgear.skills.comply.runner import (
+from deepblue.skills.comply.parser import ObservationEvent
+from deepblue.skills.comply.runner import (
     SANDBOX_BASE,
     ScenarioRun,
     _parse_stream_json,
@@ -45,7 +45,7 @@ from devgear.skills.comply.runner import (
     _setup_sandbox,
     run_scenario,
 )
-from devgear.skills.comply.scenario_generator import Scenario
+from deepblue.skills.comply.scenario_generator import Scenario
 
 
 def _make_scenario(
@@ -390,8 +390,8 @@ class TestRunScenario:
         mock_result = MagicMock(returncode=0, stdout=stdout, stderr="")
 
         with (
-            patch("devgear.skills.comply.runner._safe_sandbox_dir", return_value=tmp_path / "sandbox"),
-            patch("devgear.skills.comply.runner._setup_sandbox"),
+            patch("deepblue.skills.comply.runner._safe_sandbox_dir", return_value=tmp_path / "sandbox"),
+            patch("deepblue.skills.comply.runner._setup_sandbox"),
             patch("subprocess.run", return_value=mock_result),
         ):
             run = run_scenario(scenario, model="haiku")
@@ -406,8 +406,8 @@ class TestRunScenario:
         mock_result = MagicMock(returncode=1, stdout="", stderr="error message")
 
         with (
-            patch("devgear.skills.comply.runner._safe_sandbox_dir", return_value=tmp_path / "sandbox"),
-            patch("devgear.skills.comply.runner._setup_sandbox"),
+            patch("deepblue.skills.comply.runner._safe_sandbox_dir", return_value=tmp_path / "sandbox"),
+            patch("deepblue.skills.comply.runner._setup_sandbox"),
             patch("subprocess.run", return_value=mock_result),
         ):
             with pytest.raises(RuntimeError, match="llm-cli failed"):
@@ -420,8 +420,8 @@ class TestRunScenario:
 
         for model in ("haiku", "sonnet", "opus"):
             with (
-                patch("devgear.skills.comply.runner._safe_sandbox_dir", return_value=tmp_path / "sandbox"),
-                patch("devgear.skills.comply.runner._setup_sandbox"),
+                patch("deepblue.skills.comply.runner._safe_sandbox_dir", return_value=tmp_path / "sandbox"),
+                patch("deepblue.skills.comply.runner._setup_sandbox"),
                 patch("subprocess.run", return_value=mock_result),
             ):
                 run = run_scenario(scenario, model=model)
@@ -441,8 +441,8 @@ class TestRunScenario:
         mock_result = MagicMock(returncode=0, stdout=stdout, stderr="")
 
         with (
-            patch("devgear.skills.comply.runner._safe_sandbox_dir", return_value=tmp_path / "sandbox"),
-            patch("devgear.skills.comply.runner._setup_sandbox"),
+            patch("deepblue.skills.comply.runner._safe_sandbox_dir", return_value=tmp_path / "sandbox"),
+            patch("deepblue.skills.comply.runner._setup_sandbox"),
             patch("subprocess.run", return_value=mock_result),
         ):
             run = run_scenario(scenario, model="haiku")

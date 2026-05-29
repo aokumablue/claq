@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.skills.comply.parser import (
+from deepblue.skills.comply.parser import (
     ComplianceSpec,
     Detector,
     ObservationEvent,
@@ -14,7 +14,7 @@ from devgear.skills.comply.parser import (
 )
 
 FIXTURES = (
-    Path(__file__).resolve().parents[3] / "src" / "devgear" / "skills" / "comply" / "fixtures"
+    Path(__file__).resolve().parents[3] / "src" / "deepblue" / "skills" / "comply" / "fixtures"
 )
 
 

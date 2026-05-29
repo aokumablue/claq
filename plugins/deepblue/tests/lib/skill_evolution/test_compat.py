@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from devgear.lib.skill_evolution import skill_evolution_compat as compat
+from deepblue.lib.skill_evolution import skill_evolution_compat as compat
 
 
 def test_merge_options_prefers_kwargs_and_does_not_mutate_input() -> None:

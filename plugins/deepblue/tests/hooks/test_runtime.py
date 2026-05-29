@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from devgear.hooks.doc_file_warning import is_suspicious_doc_path
-from devgear.hooks.run_with_flags import resolve_target_command
+from deepblue.hooks.doc_file_warning import is_suspicious_doc_path
+from deepblue.hooks.run_with_flags import resolve_target_command
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-LAUNCHER = REPO_ROOT / "plugins" / "devgear" / "src" / "devgear" / "launcher.py"
+LAUNCHER = REPO_ROOT / "plugins" / "deepblue" / "src" / "deepblue" / "launcher.py"
 
 
 def run_launcher(
@@ -40,7 +40,7 @@ def run_launcher(
 
 def test_launcher_runs_python_hook_and_preserves_payload() -> None:
     payload = json.dumps({"tool_input": {"file_path": "notes/TODO.md"}})
-    result = run_launcher("devgear.hooks.doc_file_warning", input_text=payload)
+    result = run_launcher("deepblue.hooks.doc_file_warning", input_text=payload)
 
     assert result.returncode == 0
     assert result.stdout == ""
@@ -50,9 +50,9 @@ def test_launcher_runs_python_hook_and_preserves_payload() -> None:
 def test_run_with_flags_skips_disabled_hook() -> None:
     payload = json.dumps({"tool_input": {"command": "git commit --no-verify"}})
     result = run_launcher(
-        "devgear.hooks.run_with_flags",
+        "deepblue.hooks.run_with_flags",
         "test-hook",
-        "devgear.hooks.block_no_verify",
+        "deepblue.hooks.block_no_verify",
         "standard",
         input_text=payload,
     )
@@ -65,9 +65,9 @@ def test_run_with_flags_skips_disabled_hook() -> None:
 def test_run_with_flags_skips_disabled_hook_without_truncating_large_stdin() -> None:
     payload = "a" * (1024 * 1024 + 128)
     result = run_launcher(
-        "devgear.hooks.run_with_flags",
+        "deepblue.hooks.run_with_flags",
         "test-hook",
-        "devgear.hooks.block_no_verify",
+        "deepblue.hooks.block_no_verify",
         "standard",
         input_text=payload,
     )
@@ -80,9 +80,9 @@ def test_run_with_flags_skips_disabled_hook_without_truncating_large_stdin() -> 
 def test_run_with_flags_propagates_blocked_hook() -> None:
     payload = json.dumps({"tool_input": {"command": "git commit --no-verify"}})
     result = run_launcher(
-        "devgear.hooks.run_with_flags",
+        "deepblue.hooks.run_with_flags",
         "test-hook",
-        "devgear.hooks.block_no_verify",
+        "deepblue.hooks.block_no_verify",
         "strict",
         input_text=payload,
     )
@@ -95,12 +95,12 @@ def test_run_with_flags_propagates_blocked_hook() -> None:
 @pytest.mark.parametrize(
     ("args", "input_text"),
     [
-        (("devgear.hooks.run_with_flags", "session:mem:setup", "devgear.mem.cli", "minimal,standard,strict", "setup"), "{}"),
+        (("deepblue.hooks.run_with_flags", "session:mem:setup", "deepblue.mem.cli", "minimal,standard,strict", "setup"), "{}"),
         (
             (
-                "devgear.hooks.run_with_flags",
+                "deepblue.hooks.run_with_flags",
                 "session:mem:context",
-                "devgear.mem.cli",
+                "deepblue.mem.cli",
                 "strict",
                 "context",
             ),
@@ -108,9 +108,9 @@ def test_run_with_flags_propagates_blocked_hook() -> None:
         ),
         (
             (
-                "devgear.hooks.run_with_flags",
+                "deepblue.hooks.run_with_flags",
                 "session:mem:record-project-profile",
-                "devgear.mem.cli",
+                "deepblue.mem.cli",
                 "standard,strict",
                 "record-project-profile",
             ),
@@ -137,9 +137,9 @@ def test_session_start_mem_hooks_use_separate_target_args(
     [
         (
             (
-                "devgear.hooks.run_with_flags",
+                "deepblue.hooks.run_with_flags",
                 "user:mem:session-init",
-                "devgear.mem.cli",
+                "deepblue.mem.cli",
                 "standard,strict",
                 "session-init",
             ),
@@ -147,9 +147,9 @@ def test_session_start_mem_hooks_use_separate_target_args(
         ),
         (
             (
-                "devgear.hooks.run_with_flags",
+                "deepblue.hooks.run_with_flags",
                 "user:team:session-init",
-                "devgear.mem.cli",
+                "deepblue.mem.cli",
                 "standard,strict",
                 "team-session-init",
             ),
@@ -157,9 +157,9 @@ def test_session_start_mem_hooks_use_separate_target_args(
         ),
         (
             (
-                "devgear.hooks.run_with_flags",
+                "deepblue.hooks.run_with_flags",
                 "user:mem:record-interaction",
-                "devgear.mem.cli",
+                "deepblue.mem.cli",
                 "standard,strict",
                 "record-interaction",
             ),
@@ -167,9 +167,9 @@ def test_session_start_mem_hooks_use_separate_target_args(
         ),
         (
             (
-                "devgear.hooks.run_with_flags",
+                "deepblue.hooks.run_with_flags",
                 "user:mem:sync-check",
-                "devgear.mem.cli",
+                "deepblue.mem.cli",
                 "standard,strict",
                 "sync-check",
             ),
@@ -177,9 +177,9 @@ def test_session_start_mem_hooks_use_separate_target_args(
         ),
         (
             (
-                "devgear.hooks.run_with_flags",
+                "deepblue.hooks.run_with_flags",
                 "session:mem:end",
-                "devgear.mem.cli",
+                "deepblue.mem.cli",
                 "standard,strict",
                 "session-end",
             ),
@@ -187,9 +187,9 @@ def test_session_start_mem_hooks_use_separate_target_args(
         ),
         (
             (
-                "devgear.hooks.run_with_flags",
+                "deepblue.hooks.run_with_flags",
                 "session:mem:sync-check",
-                "devgear.mem.cli",
+                "deepblue.mem.cli",
                 "standard,strict",
                 "sync-check",
             ),
@@ -209,14 +209,14 @@ def test_mem_cli_hooks_use_separate_target_args(
 
 def test_resolve_target_command_module_name() -> None:
     """モジュール名からコマンドを解決します。"""
-    cmd = resolve_target_command("devgear.hooks.doc_file_warning", ["arg1", "arg2"])
-    assert cmd == [sys.executable, "-m", "devgear.hooks.doc_file_warning", "arg1", "arg2"]
+    cmd = resolve_target_command("deepblue.hooks.doc_file_warning", ["arg1", "arg2"])
+    assert cmd == [sys.executable, "-m", "deepblue.hooks.doc_file_warning", "arg1", "arg2"]
 
 
 def test_resolve_target_command_module_name_no_args() -> None:
     """引数なしでモジュール名からコマンドを解決します。"""
-    cmd = resolve_target_command("devgear.hooks.doc_file_warning")
-    assert cmd == [sys.executable, "-m", "devgear.hooks.doc_file_warning"]
+    cmd = resolve_target_command("deepblue.hooks.doc_file_warning")
+    assert cmd == [sys.executable, "-m", "deepblue.hooks.doc_file_warning"]
 
 
 def test_resolve_target_command_absolute_python_script(tmp_path: Path) -> None:
@@ -291,7 +291,7 @@ def test_run_with_flags_forwards_extra_args(tmp_path: Path) -> None:
     )
 
     result = run_launcher(
-        "devgear.hooks.run_with_flags",
+        "deepblue.hooks.run_with_flags",
         "test-hook",
         str(script),
         "strict",

@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from devgear.lib.project_detect import (
+from deepblue.lib.project_detect import (
     FRAMEWORK_RULES,
     LANGUAGE_RULES,
     ProjectInfo,

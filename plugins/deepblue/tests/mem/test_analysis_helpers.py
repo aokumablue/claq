@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import date
 
-from devgear.mem import dashboard_queries as dq
-from devgear.mem import skill_analyzer as sa
-from devgear.mem import skill_proposal as sp
+from deepblue.mem import dashboard_queries as dq
+from deepblue.mem import skill_analyzer as sa
+from deepblue.mem import skill_proposal as sp
 
 
 class FakeCursor:

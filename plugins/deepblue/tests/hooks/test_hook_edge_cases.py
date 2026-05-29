@@ -16,10 +16,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from devgear.hooks import insights_security_monitor as insights_security_monitor
-from devgear.hooks import pre_bash_commit_quality as pre_bash_commit_quality
-from devgear.hooks import run_with_flags as run_with_flags
-from devgear.hooks import session_start as session_start
+from deepblue.hooks import insights_security_monitor as insights_security_monitor
+from deepblue.hooks import pre_bash_commit_quality as pre_bash_commit_quality
+from deepblue.hooks import run_with_flags as run_with_flags
+from deepblue.hooks import session_start as session_start
 
 
 def test_run_with_flags_reports_error_when_not_enough_args(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,8 +66,8 @@ def test_run_with_flags_builds_env_and_emits_no_stdout_on_empty_child_output(
     assert captured["command"] == [sys.executable, "-m", "target", "alpha"]
     env = captured["env"]
     assert isinstance(env, dict)
-    assert "DEVGEAR_HOOK_INPUT_TRUNCATED" not in env
-    assert "DEVGEAR_HOOK_INPUT_MAX_BYTES" not in env
+    assert "DEEPBLUE_HOOK_INPUT_TRUNCATED" not in env
+    assert "DEEPBLUE_HOOK_INPUT_MAX_BYTES" not in env
     assert env["PYTHONPATH"].startswith(str(run_with_flags.REPO_ROOT / "src"))
 
 
@@ -470,7 +470,7 @@ def test_pre_bash_commit_quality_finds_parser_and_reading_errors(monkeypatch: py
 def test_pre_bash_commit_quality_run_wrapper_and_main_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert pre_bash_commit_quality.run("payload") == pre_bash_commit_quality.evaluate("payload")
 
-    monkeypatch.setattr("devgear.hooks.hook_common.read_raw_stdin", lambda: "payload")
+    monkeypatch.setattr("deepblue.hooks.hook_common.read_raw_stdin", lambda: "payload")
     monkeypatch.setattr(pre_bash_commit_quality, "evaluate", lambda raw: {"output": raw, "exitCode": 2})
     stdout = io.StringIO()
     with redirect_stdout(stdout):
@@ -584,7 +584,7 @@ def test_pre_bash_commit_quality_evaluate_logs_and_recovers_from_parser_errors(m
 
 def test_pre_bash_commit_quality_main_handles_reader_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "devgear.hooks.hook_common.read_raw_stdin",
+        "deepblue.hooks.hook_common.read_raw_stdin",
         lambda: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
@@ -772,8 +772,8 @@ def test_run_with_flags_build_env_and_resolve_command_branches(
 
     env = run_with_flags.build_env()
     assert env["PYTHONPATH"] == f"{tmp_path / 'src'}{os.pathsep}base-path"
-    assert "DEVGEAR_HOOK_INPUT_TRUNCATED" not in env
-    assert "DEVGEAR_HOOK_INPUT_MAX_BYTES" not in env
+    assert "DEEPBLUE_HOOK_INPUT_TRUNCATED" not in env
+    assert "DEEPBLUE_HOOK_INPUT_MAX_BYTES" not in env
 
     shell_script = tmp_path / "tool.sh"
     shell_script.write_text("#!/bin/sh\necho ok", encoding="utf-8")
@@ -816,7 +816,7 @@ def test_run_with_flags_entrypoint_exits_one_when_no_args(monkeypatch: pytest.Mo
     monkeypatch.setattr(run_with_flags.sys, "argv", ["run_with_flags.py"])
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.hooks.run_with_flags", run_name="__main__")
+        runpy.run_module("deepblue.hooks.run_with_flags", run_name="__main__")
 
     # 引数不足時は exit 1 で終了する（stdin の読み取りは不要）
     assert excinfo.value.code == 1
@@ -853,7 +853,7 @@ def test_pre_bash_commit_quality_entrypoint_exits_zero(monkeypatch: pytest.Monke
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.hooks.pre_bash_commit_quality", run_name="__main__")
+        runpy.run_module("deepblue.hooks.pre_bash_commit_quality", run_name="__main__")
 
     assert excinfo.value.code == 0
 
@@ -887,6 +887,6 @@ def test_insights_security_monitor_import_reload_and_entrypoint(
     monkeypatch.setattr(sys, "argv", ["insights_security_monitor.py"])
 
     with pytest.raises(SystemExit) as entry_excinfo:
-        runpy.run_module("devgear.hooks.insights_security_monitor", run_name="__main__")
+        runpy.run_module("deepblue.hooks.insights_security_monitor", run_name="__main__")
 
     assert entry_excinfo.value.code == 0

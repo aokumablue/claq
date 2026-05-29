@@ -8,7 +8,7 @@ from contextlib import redirect_stdout
 
 import pytest
 
-from devgear.hooks.hook_common import (
+from deepblue.hooks.hook_common import (
     SESSION_START_HOOK_IDS,
     emit_session_start_output,
     print_session_start_output,

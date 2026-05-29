@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 from urllib.parse import urlparse, urlunparse
 
-from devgear.mem.logger import get as _get_logger
+from deepblue.mem.logger import get as _get_logger
 
 log = _get_logger("SYNC_HANDLERS")
 
@@ -30,7 +30,7 @@ class SyncStatusDict(TypedDict):
 
 def handle_sync(settings, stdin_data: dict[str, Any]) -> None:
     """PostgreSQL への同期を実行する。"""
-    from devgear.mem.sync import sync_to_postgres
+    from deepblue.mem.sync import sync_to_postgres
 
     dry_run = stdin_data.get("dry_run", False)
     result = sync_to_postgres(settings, dry_run=dry_run)
@@ -51,7 +51,7 @@ def handle_sync(settings, stdin_data: dict[str, Any]) -> None:
 
 def handle_sync_check(settings, *, log: Any) -> None:
     """同期間隔をチェックし、必要なら同期を実行する。"""
-    from devgear.mem.sync import should_sync, sync_to_postgres
+    from deepblue.mem.sync import should_sync, sync_to_postgres
 
     if not should_sync(settings):
         log.info("sync-check: スキップ")
@@ -62,7 +62,7 @@ def handle_sync_check(settings, *, log: Any) -> None:
 
     if not result.success:
         log.error("sync-check: 同期失敗 - %s", result.error)
-        # async:true のフックでも ~/.devgear/logs/ 経由で原因が確認できるよう stderr にも出す
+        # async:true のフックでも ~/.deepblue/logs/ 経由で原因が確認できるよう stderr にも出す
         print(f"[sync-check] 同期失敗: {result.error}", file=sys.stderr)
 
 
@@ -80,7 +80,7 @@ def _build_sync_status_dict(settings, *, lite: bool = False) -> SyncStatusDict:
 
     lite=True の場合は接続テストを省略し connection="skipped" を返す（セッション開始時の軽量診断用）。
     """
-    from devgear.mem.sync import _mask_url
+    from deepblue.mem.sync import _mask_url
 
     sync_cfg = settings.sync
     postgres_url_set = bool(sync_cfg.postgres_url)
@@ -125,7 +125,7 @@ def _test_pg_connection(postgres_url: str, psycopg_installed: bool) -> tuple[str
     if not psycopg_installed:
         return "skipped", "psycopg が未インストールです"
 
-    from devgear.mem.pg_database import PgDatabase
+    from deepblue.mem.pg_database import PgDatabase
 
     pg_db = PgDatabase(postgres_url, use_pool=False)
     try:
@@ -172,8 +172,8 @@ def _write_pgpass(host: str, port: int | str, db: str, user: str, password: str)
 
 def _count_all_pending(settings) -> int:
     """全テーブルの未同期行数合計を返す。"""
-    from devgear.mem.database import Database
-    from devgear.mem.sync import _SYNC_TABLES, _count_pending_rows
+    from deepblue.mem.database import Database
+    from deepblue.mem.sync import _SYNC_TABLES, _count_pending_rows
 
     try:
         db = Database(settings.db_path)

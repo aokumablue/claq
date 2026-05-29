@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.mem.settings import (
+from deepblue.mem.settings import (
     _DEFAULT_EMBEDDING_MODEL,
     Settings,
     _strip_password_to_pgpass,
@@ -18,8 +18,8 @@ from devgear.mem.settings import (
 
 @pytest.fixture(autouse=True)
 def _patch_default_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """各テストで ~/.devgear の代わりに一時ディレクトリを使う。"""
-    import devgear.mem.settings as mod
+    """各テストで ~/.deepblue の代わりに一時ディレクトリを使う。"""
+    import deepblue.mem.settings as mod
 
     monkeypatch.setattr(mod, "_DEFAULT_DATA_DIR", tmp_path)
 
@@ -185,7 +185,7 @@ class TestSettingsLoad:
 
     def test_load_default_creates_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """デフォルトパスで存在しない場合、ファイルを作成する"""
-        import devgear.mem.settings as mod
+        import deepblue.mem.settings as mod
 
         monkeypatch.setattr(mod, "_DEFAULT_DATA_DIR", tmp_path)
         Settings.load()
@@ -220,7 +220,7 @@ class TestSettingsLoad:
 
     def test_load_default_reads_sync_state(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """デフォルトパスで sync_state.json があれば自動で読み込む。"""
-        import devgear.mem.settings as mod
+        import deepblue.mem.settings as mod
 
         monkeypatch.setattr(mod, "_DEFAULT_DATA_DIR", tmp_path)
         (tmp_path / "sync_state.json").write_text(json.dumps({"last_compacted_at": 77.0}))
@@ -232,7 +232,7 @@ class TestSettingsLoad:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """settings.json が既存でも、デフォルトパス経由で sync_state.json を読む。"""
-        import devgear.mem.settings as mod
+        import deepblue.mem.settings as mod
 
         monkeypatch.setattr(mod, "_DEFAULT_DATA_DIR", tmp_path)
         (tmp_path / "settings.json").write_text(

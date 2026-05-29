@@ -9,8 +9,8 @@ import struct
 import time
 from pathlib import Path
 
-from devgear.mem.logger import get as _get_logger
-from devgear.mem.models import (
+from deepblue.mem.logger import get as _get_logger
+from deepblue.mem.models import (
     Adr,
     EventLog,
     Instinct,
@@ -21,7 +21,7 @@ from devgear.mem.models import (
     Session,
     generate_uuid,
 )
-from devgear.mem.row_converters import (
+from deepblue.mem.row_converters import (
     _row_to_adr,
     _row_to_chunk,
     _row_to_event_log,
@@ -30,7 +30,7 @@ from devgear.mem.row_converters import (
     _row_to_mem_item_run,
     _row_to_project_profile,
 )
-from devgear.mem.schema import _FTS5_SQL, _MIGRATIONS, _SCHEMA_SQL, _VEC_SQL
+from deepblue.mem.schema import _FTS5_SQL, _MIGRATIONS, _SCHEMA_SQL, _VEC_SQL
 
 log = _get_logger("DB")
 

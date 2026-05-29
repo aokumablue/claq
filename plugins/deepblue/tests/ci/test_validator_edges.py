@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.ci import (
+from deepblue.ci import (
     validate_agents,
     validate_commands,
     validate_hooks,
@@ -320,10 +320,10 @@ def test_validator_main_entrypoints(
     assert "検証済み: 配布対象" in stdout
 
     entrypoints = [
-        ("devgear.ci.validate_skills", ["--skills-dir", str(skills_dir)]),
-        ("devgear.ci.validate_agents", ["--agents-dir", str(agents_dir)]),
+        ("deepblue.ci.validate_skills", ["--skills-dir", str(skills_dir)]),
+        ("deepblue.ci.validate_agents", ["--agents-dir", str(agents_dir)]),
         (
-            "devgear.ci.validate_commands",
+            "deepblue.ci.validate_commands",
             [
                 "--root-dir",
                 str(tmp_path),
@@ -335,8 +335,8 @@ def test_validator_main_entrypoints(
                 str(skills_dir),
             ],
         ),
-        ("devgear.ci.validate_rules", ["--rules-dir", str(rules_dir)]),
-        ("devgear.ci.validate_no_personal_paths", ["--root", str(docs_root)]),
+        ("deepblue.ci.validate_rules", ["--rules-dir", str(rules_dir)]),
+        ("deepblue.ci.validate_no_personal_paths", ["--root", str(docs_root)]),
     ]
 
     for module_name, argv in entrypoints:

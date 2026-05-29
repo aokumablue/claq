@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any, Literal
 
-from devgear.mem.logger import get as _get_logger
+from deepblue.mem.logger import get as _get_logger
 
 log = _get_logger("ITEM_USAGE")
 

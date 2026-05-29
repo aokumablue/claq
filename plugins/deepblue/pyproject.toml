@@ -1,5 +1,5 @@
 [project]
-name = "devgear"
+name = "deepblue"
 version = "0.1.0"
 description = "開発に必要な汎用プラグイン集です。エージェント、スキル、フック、コマンドをまとめて導入し、計画・実装・検証・レビューの流れを揃えます。"
 license = { text = "Apache-2.0" }
@@ -41,16 +41,16 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/aokumablue/devgear#readme"
-Repository = "https://github.com/aokumablue/devgear.git"
-Issues = "https://github.com/aokumablue/devgear/issues"
+Homepage = "https://github.com/aokumablue/deepblue#readme"
+Repository = "https://github.com/aokumablue/deepblue.git"
+Issues = "https://github.com/aokumablue/deepblue/issues"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/devgear"]
+packages = ["src/deepblue"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -67,7 +67,7 @@ select = ["E", "F", "W", "I", "B", "C4", "UP"]
 ignore = ["E501"]
 
 [tool.coverage.run]
-source = ["src/devgear", "src/model_build"]
+source = ["src/deepblue", "src/model_build"]
 branch = true
 
 

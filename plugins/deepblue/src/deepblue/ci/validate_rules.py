@@ -6,7 +6,7 @@ import argparse
 import stat
 from pathlib import Path
 
-from devgear.ci.ci_common import REPO_ROOT, emit_error
+from deepblue.ci.ci_common import REPO_ROOT, emit_error
 
 DEFAULT_RULES_DIR = REPO_ROOT / "rules"
 

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from devgear.lib.package_manager import (
+from deepblue.lib.package_manager import (
     DETECTION_PRIORITY,
     PACKAGE_MANAGERS,
     PackageManagerConfig,
@@ -283,7 +283,7 @@ class TestSetPreferredPackageManager:
     """set_preferred_package_manager 関数のテスト。"""
 
     def test_sets_valid_pm(self, tmp_path):
-        with patch("devgear.lib.package_manager.get_config_path", return_value=tmp_path / "config.json"):
+        with patch("deepblue.lib.package_manager.get_config_path", return_value=tmp_path / "config.json"):
             result = set_preferred_package_manager("pnpm")
             assert result["packageManager"] == "pnpm"
             assert "setAt" in result
@@ -366,7 +366,7 @@ def test_config_loading_and_detection_edge_paths(tmp_path, monkeypatch):
     config_path.parent.mkdir(parents=True)
     config_path.write_text("not json", encoding="utf-8")
 
-    with patch("devgear.lib.package_manager.get_config_path", return_value=config_path):
+    with patch("deepblue.lib.package_manager.get_config_path", return_value=config_path):
         assert load_config() is None
 
     monkeypatch.chdir(tmp_path)
@@ -378,16 +378,16 @@ def test_config_loading_and_detection_edge_paths(tmp_path, monkeypatch):
         assert result.name == "pnpm"
         assert result.source == "package.json"
 
-    with patch("devgear.lib.package_manager.detect_from_package_json", return_value=None), patch(
-        "devgear.lib.package_manager.detect_from_lock_file", return_value=None
-    ), patch("devgear.lib.package_manager.load_config", return_value={"packageManager": "bun"}):
+    with patch("deepblue.lib.package_manager.detect_from_package_json", return_value=None), patch(
+        "deepblue.lib.package_manager.detect_from_lock_file", return_value=None
+    ), patch("deepblue.lib.package_manager.load_config", return_value={"packageManager": "bun"}):
         result = get_package_manager(project_dir=tmp_path)
         assert result.name == "bun"
         assert result.source == "global-config"
 
 
 def test_package_manager_helpers_cover_remaining_branches(tmp_path, monkeypatch):
-    with patch("devgear.lib.package_manager.command_exists", side_effect=lambda name: name in {"pnpm", "yarn"}):
+    with patch("deepblue.lib.package_manager.command_exists", side_effect=lambda name: name in {"pnpm", "yarn"}):
         assert get_available_package_managers() == ["pnpm", "yarn"]
 
     monkeypatch.chdir(tmp_path)

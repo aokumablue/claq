@@ -1,6 +1,6 @@
 """パス検証ユーティリティ — model_build パッケージ内で使用。
 
-仕様は plugins/devgear/src/devgear/mem/_paths.py と共有する。
+仕様は plugins/deepblue/src/deepblue/mem/_paths.py と共有する。
 両者は配布物として独立しているため import 関係を持たせず、同一仕様のコピーを維持する。
 """
 

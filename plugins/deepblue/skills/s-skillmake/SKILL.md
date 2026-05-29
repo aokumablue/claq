@@ -34,7 +34,7 @@ context: fork
 skill-name/
 ├── SKILL.md (必須) — YAML frontmatter + Markdown 指示文
 └── Bundled Resources (任意)
-    ├── src/devgear/skills/ — 決定的・反復処理用 Python モジュール
+    ├── src/deepblue/skills/ — 決定的・反復処理用 Python モジュール
     ├── references/ — 必要に応じて読む文書
     └── assets/ — テンプレートや画像
 ```
@@ -77,7 +77,7 @@ skill-name/
 - `references/eval-workflow.md` — eval 実行・採点・viewer
 - `references/improvement-guide.md` — 改善ループ・盲検比較・説明文最適化
 - `references/schemas.md` — JSON 構造定義
-- `devgear:a-grader` / `devgear:a-comparator` / `devgear:a-analyzer`
+- `deepblue:a-grader` / `deepblue:a-comparator` / `deepblue:a-analyzer`
 
 ## 永続メモリ
 

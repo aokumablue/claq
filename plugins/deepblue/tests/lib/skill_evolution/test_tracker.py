@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from devgear.lib.skill_evolution import tracker as tracker
+from deepblue.lib.skill_evolution import tracker as tracker
 
 
 def test_normalize_execution_record_accepts_snake_case(now):
@@ -251,12 +251,12 @@ def test_read_jsonl_skips_malformed_rows(skill_env):
     assert records[0]["skill_id"] == "alpha"
 
 
-def test_get_runs_file_path_defaults_to_devgear(monkeypatch, tmp_path):
-    """既定の runs ファイルパスが ~/.devgear/state/ 配下になること。"""
-    monkeypatch.setattr(tracker, "get_devgear_dir", lambda: tmp_path / ".devgear")
+def test_get_runs_file_path_defaults_to_deepblue(monkeypatch, tmp_path):
+    """既定の runs ファイルパスが ~/.deepblue/state/ 配下になること。"""
+    monkeypatch.setattr(tracker, "get_deepblue_dir", lambda: tmp_path / ".deepblue")
     path = tracker.get_runs_file_path()
     assert path.endswith("skill-runs.jsonl")
-    assert str(tmp_path / ".devgear") in path
+    assert str(tmp_path / ".deepblue") in path
 
 
 def test_read_skill_execution_records_supports_state_store_read_methods(skill_env):

@@ -1,10 +1,10 @@
-# devgear
+# deepblue
 
 Claude Code 向けの汎用プラグイン集です。エージェント、スキル、コマンド、フック、永続メモリをひとまとめに導入し、計画・実装・検証・レビューの流れを揃えます。
 
 ## これは何か
 
-devgear は、Claude Code の作業を「最初の計画からレビューまで」通して支えるプラグインです。  
+deepblue は、Claude Code の作業を「最初の計画からレビューまで」通して支えるプラグインです。  
 ユーザープロジェクトの言語ランタイムに依存せず、必要なときだけ個別のツールやコマンドを使います。
 
 ---
@@ -26,22 +26,22 @@ devgear は、Claude Code の作業を「最初の計画からレビューまで
 ### プラグインマーケットプレイス
 
 ```bash
-claude plugin marketplace add aokumablue/devgear
-claude plugin install devgear@devgear
+claude plugin marketplace add aokumablue/deepblue
+claude plugin install deepblue@deepblue
 ```
 
 ---
 
 ## 設定
 
-チーム同期を使う場合だけ、`~/.devgear/settings.json` を以下のように設定します。
+チーム同期を使う場合だけ、`~/.deepblue/settings.json` を以下のように設定します。
 
 ```json
 {
   "mem": {
     "sync": {
       "enabled": true,
-      "postgres_url": "postgresql://devgear:PASSWORD@localhost:5432/devgear_mem"
+      "postgres_url": "postgresql://deepblue:PASSWORD@localhost:5432/deepblue_mem"
     }
   }
 }

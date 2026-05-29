@@ -13,8 +13,8 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from devgear.skills.stocktake import core
-from devgear.skills.stocktake import io as sio
+from deepblue.skills.stocktake import core
+from deepblue.skills.stocktake import io as sio
 
 
 def _resolve_dirs(project_dir_arg: str | None) -> tuple[Path, Path, Path]:
@@ -145,7 +145,7 @@ def _cmd_save(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     """CLI エントリポイント。"""
     parser = argparse.ArgumentParser(
-        prog="devgear.skills.stocktake.cli",
+        prog="deepblue.skills.stocktake.cli",
         description="スキル棚卸しツール",
     )
     subparsers = parser.add_subparsers(dest="command")

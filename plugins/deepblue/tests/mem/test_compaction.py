@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.mem.compaction import (
+from deepblue.mem.compaction import (
     detect_low_quality,
     find_near_duplicates,
     memory_health_report,
@@ -13,7 +13,7 @@ from devgear.mem.compaction import (
     optimize_db,
     prune_candidates,
 )
-from devgear.mem.database import Database, MemoryChunk
+from deepblue.mem.database import Database, MemoryChunk
 
 
 @pytest.fixture

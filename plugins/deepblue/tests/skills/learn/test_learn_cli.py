@@ -26,7 +26,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from devgear.skills.learn import cli as _mod
+from deepblue.skills.learn import cli as _mod
 
 parse_instinct_file = _mod.parse_instinct_file
 _validate_file_path = _mod._validate_file_path
@@ -81,11 +81,11 @@ Validate all user input.
 @pytest.fixture
 def project_tree(tmp_path):
     """テスト用に実運用に近いプロジェクトディレクトリ構造を作成する。"""
-    devgear_dir = tmp_path / ".devgear"
-    projects_dir = devgear_dir / "projects"
-    global_personal = devgear_dir / "instincts" / "personal"
-    global_inherited = devgear_dir / "instincts" / "inherited"
-    global_evolved = devgear_dir / "evolved"
+    deepblue_dir = tmp_path / ".deepblue"
+    projects_dir = deepblue_dir / "projects"
+    global_personal = deepblue_dir / "instincts" / "personal"
+    global_inherited = deepblue_dir / "instincts" / "inherited"
+    global_evolved = deepblue_dir / "evolved"
 
     for d in [
         global_personal,
@@ -99,12 +99,12 @@ def project_tree(tmp_path):
 
     return {
         "root": tmp_path,
-        "devgear": devgear_dir,
+        "deepblue": deepblue_dir,
         "projects_dir": projects_dir,
         "global_personal": global_personal,
         "global_inherited": global_inherited,
         "global_evolved": global_evolved,
-        "registry_file": devgear_dir / "projects.json",
+        "registry_file": deepblue_dir / "projects.json",
     }
 
 
@@ -116,25 +116,25 @@ def global_project(patch_globals):
         "id": "global",
         "name": "global",
         "root": "",
-        "project_dir": tree["devgear"],
+        "project_dir": tree["deepblue"],
         "instincts_personal": tree["global_personal"],
         "instincts_inherited": tree["global_inherited"],
         "evolved_dir": tree["global_evolved"],
-        "observations_file": tree["devgear"] / "observations.jsonl",
+        "observations_file": tree["deepblue"] / "observations.jsonl",
     }
 
 
 @pytest.fixture
 def patch_globals(project_tree, monkeypatch):
     """モジュールレベルのグローバル変数を tmp_path 基準のディレクトリに差し替える。"""
-    monkeypatch.setattr(_mod, "DEVGEAR_DIR", project_tree["devgear"])
+    monkeypatch.setattr(_mod, "DEEPBLUE_DIR", project_tree["deepblue"])
     monkeypatch.setattr(_mod, "PROJECTS_DIR", project_tree["projects_dir"])
     monkeypatch.setattr(_mod, "REGISTRY_FILE", project_tree["registry_file"])
-    monkeypatch.setattr(_mod, "GLOBAL_INSTINCTS_DIR", project_tree["devgear"] / "instincts")
+    monkeypatch.setattr(_mod, "GLOBAL_INSTINCTS_DIR", project_tree["deepblue"] / "instincts")
     monkeypatch.setattr(_mod, "GLOBAL_PERSONAL_DIR", project_tree["global_personal"])
     monkeypatch.setattr(_mod, "GLOBAL_INHERITED_DIR", project_tree["global_inherited"])
     monkeypatch.setattr(_mod, "GLOBAL_EVOLVED_DIR", project_tree["global_evolved"])
-    monkeypatch.setattr(_mod, "GLOBAL_OBSERVATIONS_FILE", project_tree["devgear"] / "observations.jsonl")
+    monkeypatch.setattr(_mod, "GLOBAL_OBSERVATIONS_FILE", project_tree["deepblue"] / "observations.jsonl")
     return project_tree
 
 
@@ -1467,7 +1467,7 @@ New body.
 
 def test_cmd_prune_dry_run_and_delete(patch_globals, monkeypatch, capsys):
     tree = patch_globals
-    monkeypatch.setattr(_mod, "GLOBAL_INSTINCTS_DIR", tree["devgear"] / "instincts")
+    monkeypatch.setattr(_mod, "GLOBAL_INSTINCTS_DIR", tree["deepblue"] / "instincts")
     project = _make_project(tree)
     pending_global = _mod.GLOBAL_INSTINCTS_DIR / "pending"
     pending_project = project["project_dir"] / "instincts" / "pending"
@@ -1555,14 +1555,14 @@ def test_import_handles_missing_fcntl_and_ensure_global_dirs(patch_globals, monk
     assert _mod._HAS_FCNTL is True
 
     _mod._ensure_global_dirs()
-    monkeypatch.setattr(_mod, "DEVGEAR_DIR", patch_globals["devgear"])
-    monkeypatch.setattr(_mod, "GLOBAL_INSTINCTS_DIR", patch_globals["devgear"] / "instincts")
+    monkeypatch.setattr(_mod, "DEEPBLUE_DIR", patch_globals["deepblue"])
+    monkeypatch.setattr(_mod, "GLOBAL_INSTINCTS_DIR", patch_globals["deepblue"] / "instincts")
     monkeypatch.setattr(_mod, "PROJECTS_DIR", patch_globals["projects_dir"])
     monkeypatch.setattr(_mod, "REGISTRY_FILE", patch_globals["registry_file"])
     monkeypatch.setattr(_mod, "GLOBAL_PERSONAL_DIR", patch_globals["global_personal"])
     monkeypatch.setattr(_mod, "GLOBAL_INHERITED_DIR", patch_globals["global_inherited"])
     monkeypatch.setattr(_mod, "GLOBAL_EVOLVED_DIR", patch_globals["global_evolved"])
-    monkeypatch.setattr(_mod, "GLOBAL_OBSERVATIONS_FILE", patch_globals["devgear"] / "observations.jsonl")
+    monkeypatch.setattr(_mod, "GLOBAL_OBSERVATIONS_FILE", patch_globals["deepblue"] / "observations.jsonl")
 
 
 def test_validate_instinct_id_rejects_additional_invalid_forms() -> None:
@@ -1979,6 +1979,6 @@ def test_main_module_entrypoint_uses_sys_exit(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["learn-cli.py"])
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.skills.learn.cli", run_name="__main__")
+        runpy.run_module("deepblue.skills.learn.cli", run_name="__main__")
 
     assert excinfo.value.code == 1

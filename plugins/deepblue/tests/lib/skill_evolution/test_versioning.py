@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.lib.skill_evolution import versioning as versioning
+from deepblue.lib.skill_evolution import versioning as versioning
 
 
 def test_ensure_skill_versioning_creates_directories(skill_env, make_skill):

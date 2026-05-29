@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from devgear.lib.install.install_state import (
+from deepblue.lib.install.install_state import (
     InstallOperation,
     InstallRequest,
     InstallSource,
@@ -25,7 +25,7 @@ from devgear.lib.install.install_state import (
 def make_valid_state() -> dict:
     """最小限の有効な install state を作成する。"""
     return {
-        "schemaVersion": "devgear.install.v1",
+        "schemaVersion": "deepblue.install.v1",
         "installedAt": "2024-01-01T00:00:00Z",
         "target": {
             "id": "test-id",
@@ -182,7 +182,7 @@ class TestInstallResolutionModel:
 
     def test_rejects_empty_string_in_selected_modules(self):
         with pytest.raises(ValidationError):
-            from devgear.lib.install.install_state import InstallResolution
+            from deepblue.lib.install.install_state import InstallResolution
 
             InstallResolution(selected_modules=["valid", ""])
 
@@ -223,7 +223,7 @@ class TestInstallStateModel:
     def test_valid_state(self):
         state_dict = make_valid_state()
         state = InstallState.model_validate(state_dict)
-        assert state.schemaVersion == "devgear.install.v1"
+        assert state.schemaVersion == "deepblue.install.v1"
         assert state.target.id == "test-id"
 
     def test_rejects_wrong_schema_version(self):
@@ -324,7 +324,7 @@ class TestCreateInstallState:
                 "manifestVersion": 1,
             },
         )
-        assert state["schemaVersion"] == "devgear.install.v1"
+        assert state["schemaVersion"] == "deepblue.install.v1"
         assert state["target"]["id"] == "test-adapter"
         assert state["request"]["profile"] == "standard"
 
@@ -404,7 +404,7 @@ class TestReadInstallState:
         state_file.write_text(json.dumps(make_valid_state()))
 
         result = read_install_state(state_file)
-        assert result["schemaVersion"] == "devgear.install.v1"
+        assert result["schemaVersion"] == "deepblue.install.v1"
 
     def test_raises_for_invalid_json(self, tmp_path):
         state_file = tmp_path / "state.json"
@@ -429,7 +429,7 @@ class TestReadInstallState:
 
     def test_raises_for_invalid_labelled_state(self, tmp_path):
         state_file = tmp_path / "state.json"
-        state_file.write_text(json.dumps({"schemaVersion": "devgear.install.v1"}), encoding="utf-8")
+        state_file.write_text(json.dumps({"schemaVersion": "deepblue.install.v1"}), encoding="utf-8")
 
         with pytest.raises(ValueError) as exc_info:
             read_install_state(state_file)

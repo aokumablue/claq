@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from devgear.mem.bridge import _epoch_to_iso, chunk_to_observation, sync_session_to_observations
-from devgear.mem.database import Database, MemoryChunk
+from deepblue.mem.bridge import _epoch_to_iso, chunk_to_observation, sync_session_to_observations
+from deepblue.mem.database import Database, MemoryChunk
 
 
 def _make_chunk(
@@ -52,7 +52,7 @@ class TestChunkToObservation:
 
     def test_empty_tool_names(self) -> None:
         # tool_names=[] の場合はデフォルトリストを使わず直接 MemoryChunk を作成
-        from devgear.mem.database import MemoryChunk
+        from deepblue.mem.database import MemoryChunk
 
         chunk = MemoryChunk(
             session_id="s1",
@@ -117,7 +117,7 @@ class TestSyncSessionToObservations:
         db = Database(tmp_path / "test.db")
 
         # 既知のパスに書き出すよう monkeypatch
-        obs_dir = tmp_path / ".devgear" / "projects" / "proj"
+        obs_dir = tmp_path / ".deepblue" / "projects" / "proj"
         obs_dir.mkdir(parents=True)
         obs_file = obs_dir / "observations.jsonl"
 
@@ -127,8 +127,8 @@ class TestSyncSessionToObservations:
         def fake_get_path(project_id, project_name):
             return obs_file
 
-        monkeypatch.setattr("devgear.mem.bridge._get_project_id", fake_get_project_id)
-        monkeypatch.setattr("devgear.mem.bridge._get_project_observations_path", fake_get_path)
+        monkeypatch.setattr("deepblue.mem.bridge._get_project_id", fake_get_project_id)
+        monkeypatch.setattr("deepblue.mem.bridge._get_project_observations_path", fake_get_path)
 
         # チャンクを保存
         db.store_chunk(_make_chunk(session_id="s1", project="proj", chunk_index=0))

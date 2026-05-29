@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.lib import project_detect as pd
+from deepblue.lib import project_detect as pd
 
 
 def test_limited_file_scan_skips_ignored_entries_and_respects_depth(tmp_path: Path) -> None:

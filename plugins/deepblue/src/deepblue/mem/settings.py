@@ -1,11 +1,11 @@
-"""設定管理 — ~/.devgear/settings.json を読み書きする（全プラグイン共通）
+"""設定管理 — ~/.deepblue/settings.json を読み書きする（全プラグイン共通）
 
 設定のうち ``sync.enabled`` と ``sync.postgres_url`` のみ settings.json に永続化する。
 他の閾値類（log_level, chunk_max_length, embedding_model 等）はハードコードされた
 デフォルト値を使用し、ユーザは設定できない。
 
 ランタイム状態（``last_synced_at`` / ``last_sync_attempt_at`` / ``last_sync_success``
-および ``last_compacted_at``）は別ファイル ``~/.devgear/sync_state.json`` で管理する。
+および ``last_compacted_at``）は別ファイル ``~/.deepblue/sync_state.json`` で管理する。
 """
 
 from __future__ import annotations
@@ -16,7 +16,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse, urlunparse
 
-_DEFAULT_DATA_DIR = Path(os.environ["DEVGEAR_DATA_PATH"]) if "DEVGEAR_DATA_PATH" in os.environ else Path.home() / ".devgear"
+from deepblue.lib.constants import BASE_DIR_NAME
+
+_DEFAULT_DATA_DIR = Path(os.environ["DEEPBLUE_DATA_PATH"]) if "DEEPBLUE_DATA_PATH" in os.environ else Path.home() / BASE_DIR_NAME
 _DEFAULT_EMBEDDING_MODEL = "cl-nagoya/ruri-v3-310m"
 # HF Hub commit SHA をピン留めし、サプライチェーン攻撃（名前空間再利用・改竄プッシュ）を防ぐ
 _DEFAULT_EMBEDDING_REVISION = "18b60fb8c2b9df296fb4212bb7d23ef94e579cd3"
@@ -159,7 +161,7 @@ class Settings:
 
     @property
     def data_path(self) -> Path:
-        """データディレクトリ（~/.devgear）を返す。"""
+        """データディレクトリ（~/.deepblue）を返す。"""
         return _DEFAULT_DATA_DIR
 
     @property

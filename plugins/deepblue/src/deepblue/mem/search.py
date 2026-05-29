@@ -7,9 +7,9 @@ import re
 import time
 from typing import NamedTuple
 
-from devgear.mem.database import Database
-from devgear.mem.logger import get as _get_logger
-from devgear.mem.settings import Settings
+from deepblue.mem.database import Database
+from deepblue.mem.logger import get as _get_logger
+from deepblue.mem.settings import Settings
 
 log = _get_logger("SEARCH")
 
@@ -54,7 +54,7 @@ class SearchService:
         keyword_results = self.db.fts_search(query, limit=fetch_limit)
 
         # 2. sqlite-vec ベクトル検索
-        import devgear.mem.embedding as _emb
+        import deepblue.mem.embedding as _emb
 
         query_embedding = _emb.embed_query(query, self.settings.embedding_model)
         # model.onnx 未完了時は embed_query が [] を返すためベクトル検索をスキップ
@@ -125,8 +125,8 @@ class SearchService:
         ``exclude_origin_user`` を指定すると、PG 側で該当ユーザの行を除外して返す。
         PG 同期が無効・接続失敗・結果ゼロのいずれでも空リストを返す。
         """
-        import devgear.mem.embedding as _emb
-        from devgear.mem.pg_database import PgDatabase
+        import deepblue.mem.embedding as _emb
+        from deepblue.mem.pg_database import PgDatabase
 
         sync_cfg = self.settings.sync
         if not sync_cfg.enabled or not sync_cfg.postgres_url:

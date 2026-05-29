@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from devgear.hooks import post_bash_compact as hook
-from devgear.mem.reducer import ReduceConfig
-from devgear.mem.settings import CompactSettings
+from deepblue.hooks import post_bash_compact as hook
+from deepblue.mem.reducer import ReduceConfig
+from deepblue.mem.settings import CompactSettings
 
 
 def _make_payload(
@@ -108,7 +108,7 @@ class TestEvaluate:
 
     def test_settings_load_called_when_config_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """config=None 時に Settings.load() が呼ばれ、CompactSettings が ReduceConfig に変換される。"""
-        from devgear.mem import settings as settings_mod
+        from deepblue.mem import settings as settings_mod
 
         fake_compact = CompactSettings(enabled=True, max_output_len=10000)
 
@@ -126,7 +126,7 @@ class TestEvaluate:
 
     def test_settings_load_error_fallback_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Settings.load() が例外を投げた場合、デフォルト ReduceConfig にフォールバックする。"""
-        from devgear.mem import settings as settings_mod
+        from deepblue.mem import settings as settings_mod
 
         def _raise(*_args, **_kwargs):
             raise OSError("settings file corrupted")
@@ -202,8 +202,8 @@ class TestMainAsScript:
         from pathlib import Path
 
         repo_root = Path(__file__).parents[4]
-        src_path = repo_root / "plugins/devgear/src"
-        script = src_path / "devgear/hooks/post_bash_compact.py"
+        src_path = repo_root / "plugins/deepblue/src"
+        script = src_path / "deepblue/hooks/post_bash_compact.py"
         payload = _make_payload(tool_response="short")
         env = {**os.environ, "PYTHONPATH": str(src_path)}
         result = subprocess.run(

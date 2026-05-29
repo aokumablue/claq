@@ -2,13 +2,13 @@
 # build_onnx_model.sh — ruri-v3 ONNX ビルド・量子化・分割を 1 発で実行するメンテナ向けスクリプト。
 #
 # 使い方:
-#   ./plugins/devgear/onnx/build_onnx_model.sh                        # FP16 デフォルト（推奨）
-#   ./plugins/devgear/onnx/build_onnx_model.sh --quant fp32           # FP32（品質劣化ゼロ、約 1.2 GB）
-#   ./plugins/devgear/onnx/build_onnx_model.sh --quant int8           # INT8（動的量子化、約 300 MB）
-#   ./plugins/devgear/onnx/build_onnx_model.sh --quant fp16 --revision <SHA>
+#   ./plugins/deepblue/onnx/build_onnx_model.sh                        # FP16 デフォルト（推奨）
+#   ./plugins/deepblue/onnx/build_onnx_model.sh --quant fp32           # FP32（品質劣化ゼロ、約 1.2 GB）
+#   ./plugins/deepblue/onnx/build_onnx_model.sh --quant int8           # INT8（動的量子化、約 300 MB）
+#   ./plugins/deepblue/onnx/build_onnx_model.sh --quant fp16 --revision <SHA>
 #
-# 出力先: ~/.devgear/models/（install.sh と共有）
-# 使用する venv: ~/.devgear/.venv-modelbuild（初回のみ自動作成）
+# 出力先: ~/.deepblue/models/（install.sh と共有）
+# 使用する venv: ~/.deepblue/.venv-modelbuild（初回のみ自動作成）
 #
 # 量子化方式:
 #   FP16: onnxruntime.transformers.optimizer を使用（CPU 対応）。約 600 MB。
@@ -21,11 +21,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 QUANT="fp16"
 REVISION=""
-OUT_DIR="${HOME}/.devgear/models"
+OUT_DIR="${HOME}/.deepblue/models"
 
 usage() {
   cat <<'EOF'
-Usage: ./plugins/devgear/onnx/build_onnx_model.sh [options]
+Usage: ./plugins/deepblue/onnx/build_onnx_model.sh [options]
 
 Options:
   --quant fp16|fp32|int8   量子化レベル (default: fp16)
@@ -33,7 +33,7 @@ Options:
                             fp32: 量子化なし（約 1.2 GB）
                             int8: 動的量子化（約 300 MB）
   --revision SHA           HF Hub commit SHA (default: build_config.json の hf_revision)
-  --out DIR                出力先ディレクトリ (default: ~/.devgear/models)
+  --out DIR                出力先ディレクトリ (default: ~/.deepblue/models)
   --help                   このヘルプを表示
 EOF
 }

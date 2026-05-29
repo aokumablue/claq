@@ -12,8 +12,8 @@ import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
-import devgear.install_catalog as catalog
-import devgear.skill_create_output as skill_create_output
+import deepblue.install_catalog as catalog
+import deepblue.skill_create_output as skill_create_output
 
 
 def test_catalog_profiles_reads_temp_manifests(tmp_path: Path) -> None:
@@ -38,17 +38,16 @@ def test_catalog_help_prints_usage() -> None:
     with redirect_stdout(stdout):
         assert catalog.main(["--help"]) == 0
 
-    assert "Discover devgear install components and profiles" in stdout.getvalue()
+    assert "Discover deepblue install components and profiles" in stdout.getvalue()
 
 
 def test_skill_create_output_renders_header() -> None:
     stdout = io.StringIO()
     with redirect_stdout(stdout):
-        assert skill_create_output.main(["header", "devgear"]) == 0
+        assert skill_create_output.main(["header", "deepblue"]) == 0
 
     rendered = stdout.getvalue()
-    assert "devgear Skill Creator" in rendered
-    assert "devgear" in rendered
+    assert "deepblue Skill Creator" in rendered
 
 
 def test_skill_create_output_renders_gitlab_footer() -> None:

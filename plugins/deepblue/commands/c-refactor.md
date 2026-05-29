@@ -23,7 +23,7 @@ record: `{"event_type": "refactor", "content": "Scope: {scope}. Clean: {cleaned}
 
 - `s-refprep`（必須）: 対象分割・依存可視化・テストセット確定
 - `s-refrb`（必須）: ファイル単位リバート計画（Rollback Blueprint）生成
-- `devgear:a-reforch`（必須）: clean/simplify/perf/review の実行順・並列制御
+- `deepblue:a-reforch`（必須）: clean/simplify/perf/review の実行順・並列制御
 
 `deps.from` / `deps.to` は `groups` 配列のインデックスを指す。
 
@@ -38,23 +38,23 @@ record: `{"event_type": "refactor", "content": "Scope: {scope}. Clean: {cleaned}
 2. 既存失敗を記録し新規失敗判定に使用
 3. 基準取得不能なら実装を止め、原因解消後に再開
 
-## ステップ3: clean（`a-reforch` → `devgear:a-clean`）
+## ステップ3: clean（`a-reforch` → `deepblue:a-clean`）
 
 デッドコード削除。各ファイル適用ごとにテスト実行→失敗時は `git checkout -- <file>` で単ファイルリバートして継続。
 
-## ステップ4: simplify（並列, `a-reforch` → `devgear:a-simplify`）
+## ステップ4: simplify（並列, `a-reforch` → `deepblue:a-simplify`）
 
 グループ化して**同時起動**。可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
 
-## ステップ5: perf（`a-reforch` → `devgear:a-perf`）
+## ステップ5: perf（`a-reforch` → `deepblue:a-perf`）
 
 simplify 全グループ完了後に開始。不要計算・重複I/O・N+1・過剰メモリアロケーションを優先改善。変更ごとにテスト→失敗時はリバート。
 
-## ステップ6: review + secure（並列, `devgear:a-reforch` から委譲）
+## ステップ6: review + secure（並列, `deepblue:a-reforch` から委譲）
 
 以下を**同時起動**し結果を統合:
-- `devgear:a-review`: 品質・設計・保守性
-- `devgear:a-secure`: セキュリティ・脆弱性
+- `deepblue:a-review`: 品質・設計・保守性
+- `deepblue:a-secure`: セキュリティ・脆弱性
 
 ## ステップ7: final gate
 
@@ -78,7 +78,7 @@ Issues:     CRITICAL {c} / HIGH {h} / MEDIUM {m} / LOW {l}
 Final Gate: PASS / BLOCKED
 ```
 
-Issues は `devgear:a-review` と `devgear:a-secure` の統合件数。
+Issues は `deepblue:a-review` と `deepblue:a-secure` の統合件数。
 
 ## ルール
 
@@ -87,7 +87,7 @@ Issues は `devgear:a-review` と `devgear:a-secure` の統合件数。
 - CRITICAL/HIGH が残る状態では承認・コミットしない
 - 機能変更禁止（WHAT不変）。挙動変更の疑義がある変更は要確認として報告
 - 安全性に疑義がある変更はスキップし最終要約に記載
-- サブエージェント委譲必須（`devgear:a-reforch` 統括 → `devgear:a-clean` / `devgear:a-simplify` / `devgear:a-perf` / `devgear:a-review` / `devgear:a-secure`）
+- サブエージェント委譲必須（`deepblue:a-reforch` 統括 → `deepblue:a-clean` / `deepblue:a-simplify` / `deepblue:a-perf` / `deepblue:a-review` / `deepblue:a-secure`）
 
 ## 引数
 

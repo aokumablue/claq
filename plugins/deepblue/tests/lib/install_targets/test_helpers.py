@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from devgear.lib.install_targets.install_target_helpers import (
+from deepblue.lib.install_targets.install_target_helpers import (
     InstallTargetConfig,
     ManagedOperation,
     ValidationIssue,
@@ -85,7 +85,7 @@ class TestResolveBaseRoot:
 
     def test_home_validation_branch_can_be_forced(self, monkeypatch):
         """home の検証分岐を強制できること。"""
-        from devgear.lib.install_targets import install_target_helpers as helpers
+        from deepblue.lib.install_targets import install_target_helpers as helpers
 
         monkeypatch.setattr(helpers.os.path, "expanduser", lambda value: "")
         adapter = create_install_target_adapter(

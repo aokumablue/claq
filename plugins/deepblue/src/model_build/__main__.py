@@ -16,7 +16,7 @@ from pathlib import Path
 from model_build.quantize import DEFAULT_QUANT, QUANT_CHOICES
 
 _BUILD_CONFIG_PATH = Path(__file__).resolve().parent / "build_config.json"
-_DEFAULT_OUT = Path.home() / ".devgear" / "models"
+_DEFAULT_OUT = Path.home() / ".deepblue" / "models"
 
 
 def _load_build_config() -> dict:
@@ -45,7 +45,7 @@ def _cmd_build(args: argparse.Namespace) -> None:
     output_dir: Path = args.out
     quant: str = args.quant
 
-    with tempfile.TemporaryDirectory(prefix="devgear_build_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="deepblue_build_") as tmp:
         tmp_path = Path(tmp)
 
         # Step 1: ONNX エクスポート（常に FP32 で取得し、後段で量子化）
@@ -149,7 +149,7 @@ def main() -> None:
     """CLI エントリポイント。"""
     parser = argparse.ArgumentParser(
         prog="python3 -m model_build",
-        description="devgear メンテナ向け ONNX ビルドツール",
+        description="deepblue メンテナ向け ONNX ビルドツール",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

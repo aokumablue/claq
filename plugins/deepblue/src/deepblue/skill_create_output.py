@@ -8,7 +8,7 @@ import re
 import sys
 from typing import Any
 
-from devgear.lib.git_hosting import (
+from deepblue.lib.git_hosting import (
     detect_git_hosting_service,
     get_git_hosting_review_command,
     get_git_hosting_service_label,
@@ -134,7 +134,7 @@ def render_header(repo_name: Any) -> str:
     """スキル作成ツールのヘッダーを生成する。"""
     subtitle = f"Extracting patterns from {cyan(repo_name)}"
     subtitle_padding = max(0, 59 - len(strip_ansi(subtitle)))
-    title_inner = bold("  devgear Skill Creator".ljust(64))
+    title_inner = bold("  deepblue Skill Creator".ljust(64))
     return "\n".join(
         [
             "",
@@ -236,7 +236,7 @@ def render_footer(service: str | None = None) -> str:
     return "\n".join(
         [
             gray("─" * 60),
-            dim("  Powered by devgear • devgear.tools"),
+            dim("  Powered by deepblue • deepblue.tools"),
             dim(footer_line),
             "",
         ]
@@ -267,7 +267,7 @@ HELP_TEXT = """\
 Skill Creator Output Formatter
 
 Usage:
-  python -m devgear.skill_create_output [command]
+  python -m deepblue.skill_create_output [command]
 
 Commands:
   header            Render the header block

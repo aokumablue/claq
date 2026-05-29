@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from devgear.hooks import desktop_notify as hook
+from deepblue.hooks import desktop_notify as hook
 
 
 class TestExtractSummary:
@@ -218,11 +218,11 @@ class TestRun:
         assert hook.main() == 0
 
     def test_main_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("devgear.hooks.hook_common.read_raw_stdin", lambda: json.dumps({"last_assistant_message": "hello"}))
-        monkeypatch.setattr("devgear.lib.core_utils.IS_MACOS", False)
-        monkeypatch.setattr("devgear.lib.core_utils.IS_LINUX", False)
+        monkeypatch.setattr("deepblue.hooks.hook_common.read_raw_stdin", lambda: json.dumps({"last_assistant_message": "hello"}))
+        monkeypatch.setattr("deepblue.lib.core_utils.IS_MACOS", False)
+        monkeypatch.setattr("deepblue.lib.core_utils.IS_LINUX", False)
 
         with pytest.raises(SystemExit) as excinfo:
-            runpy.run_module("devgear.hooks.desktop_notify", run_name="__main__")
+            runpy.run_module("deepblue.hooks.desktop_notify", run_name="__main__")
 
         assert excinfo.value.code == 0

@@ -1,5 +1,5 @@
 {
-  "name": "devgear",
+  "name": "deepblue",
   "owner": {
     "name": "aokumablue"
   },
@@ -8,12 +8,12 @@
   },
   "plugins": [
     {
-      "name": "devgear",
-      "source": "./plugins/devgear",
+      "name": "deepblue",
+      "source": "./plugins/deepblue",
       "description": "開発に必要な汎用プラグイン集です。エージェント、スキル、フック、コマンドをまとめて導入し、計画・実装・検証・レビューの流れを揃えます。",
       "version": "0.1.0",
-      "homepage": "https://github.com/aokumablue/devgear",
-      "repository": "https://github.com/aokumablue/devgear",
+      "homepage": "https://github.com/aokumablue/deepblue",
+      "repository": "https://github.com/aokumablue/deepblue",
       "license": "Apache-2.0",
       "keywords": [
         "agents",

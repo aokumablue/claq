@@ -706,7 +706,7 @@ def render_dashboard(options: dict[str, Any] | None = None, /, **kwargs: Any) ->
     text_parts = [
         "\n".join(
             [
-                "devgear Skill Health Dashboard",
+                "deepblue Skill Health Dashboard",
                 f"Generated: {now}",
                 f"Skills: {summary['total_skills']} total, {summary['healthy_skills']} healthy, {summary['declining_skills']} declining",
                 "",

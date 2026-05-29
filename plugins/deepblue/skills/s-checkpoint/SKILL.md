@@ -15,7 +15,7 @@ context: fork
 
 ## 保存先
 
-`~/.devgear/session-data/checkpoint-<YYYY-MM-DD>-<slug>.md`
+`~/.deepblue/session-data/checkpoint-<YYYY-MM-DD>-<slug>.md`
 
 ## フォーマット
 
@@ -61,6 +61,6 @@ completed: false
 
 ### 再開
 「前のチェックポイントから再開して」と言われたら:
-1. `~/.devgear/session-data/checkpoint-*.md` で `completed: false` を検索
+1. `~/.deepblue/session-data/checkpoint-*.md` で `completed: false` を検索
 2. 最新を読み込み「進行中」ステップから再開
 

@@ -7,7 +7,7 @@ import runpy
 
 import pytest
 
-from devgear.hooks import post_bash_pr_created as pr_created
+from deepblue.hooks import post_bash_pr_created as pr_created
 
 
 @pytest.mark.parametrize(
@@ -53,13 +53,13 @@ def test_evaluate_reports_host_specific_commands(
 
 
 def test_main_entrypoint_exits_zero_and_writes_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("devgear.hooks.hook_common.read_raw_stdin", lambda: "{}")
+    monkeypatch.setattr("deepblue.hooks.hook_common.read_raw_stdin", lambda: "{}")
     outputs: list[str] = []
-    monkeypatch.setattr("devgear.hooks.hook_common.write_stdout", outputs.append)
-    monkeypatch.setattr("devgear.hooks.hook_common.write_stderr", lambda message: outputs.append(message))
+    monkeypatch.setattr("deepblue.hooks.hook_common.write_stdout", outputs.append)
+    monkeypatch.setattr("deepblue.hooks.hook_common.write_stderr", lambda message: outputs.append(message))
 
     with pytest.raises(SystemExit) as exc:
-        runpy.run_module("devgear.hooks.post_bash_pr_created", run_name="__main__")
+        runpy.run_module("deepblue.hooks.post_bash_pr_created", run_name="__main__")
 
     assert exc.value.code == 0
     assert outputs == ["{}"]

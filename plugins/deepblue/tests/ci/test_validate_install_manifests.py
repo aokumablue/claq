@@ -1,11 +1,11 @@
-"""devgear.ci.validate_install_manifests のテスト。"""
+"""deepblue.ci.validate_install_manifests のテスト。"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from devgear.ci.validate_install_manifests import validate_install_manifests
+from deepblue.ci.validate_install_manifests import validate_install_manifests
 
 
 def write_json(path: Path, value: object) -> None:

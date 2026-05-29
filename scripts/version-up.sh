@@ -81,10 +81,10 @@ repo_root = Path(sys.argv[1])
 target_version = sys.argv[2]
 
 paths = {
-    "pyproject": repo_root / "plugins" / "devgear" / "pyproject.toml",
-    "plugin_json": repo_root / "plugins" / "devgear" / ".claude-plugin" / "plugin.json",
+    "pyproject": repo_root / "plugins" / "deepblue" / "pyproject.toml",
+    "plugin_json": repo_root / "plugins" / "deepblue" / ".claude-plugin" / "plugin.json",
     "marketplace": repo_root / ".claude-plugin" / "marketplace.json",
-    "version_py": repo_root / "plugins" / "devgear" / "src" / "devgear" / "mem" / "__init__.py",
+    "version_py": repo_root / "plugins" / "deepblue" / "src" / "deepblue" / "mem" / "__init__.py",
 }
 
 for path in paths.values():

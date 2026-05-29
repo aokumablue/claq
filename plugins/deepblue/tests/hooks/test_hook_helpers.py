@@ -18,22 +18,22 @@ from types import SimpleNamespace
 
 import pytest
 
-from devgear.hooks import (
+from deepblue.hooks import (
     config_protection as config_protection,
 )
-from devgear.hooks import (
+from deepblue.hooks import (
     doc_file_warning as doc_file_warning,
 )
-from devgear.hooks import (
+from deepblue.hooks import (
     session_end as session_end,
 )
-from devgear.hooks import (
+from deepblue.hooks import (
     session_start as session_start,
 )
-from devgear.hooks import (
+from deepblue.hooks import (
     suggest_compact as suggest_compact,
 )
-from devgear.hooks.hook_common import is_truthy
+from deepblue.hooks.hook_common import is_truthy
 
 
 def test_doc_file_warning_flags_ad_hoc_documents() -> None:
@@ -188,7 +188,7 @@ def test_doc_file_warning_non_document_and_entrypoint(monkeypatch: pytest.Monkey
     monkeypatch.setattr(sys, "argv", ["doc_file_warning.py"])
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.hooks.doc_file_warning", run_name="__main__")
+        runpy.run_module("deepblue.hooks.doc_file_warning", run_name="__main__")
 
     assert excinfo.value.code == 0
 
@@ -199,7 +199,7 @@ def test_config_protection_entrypoint_passthrough(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(sys, "argv", ["config_protection.py"])
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.hooks.config_protection", run_name="__main__")
+        runpy.run_module("deepblue.hooks.config_protection", run_name="__main__")
 
     assert excinfo.value.code == 0
 
@@ -302,7 +302,7 @@ def test_session_start_sanitizes_git_logs(monkeypatch: pytest.MonkeyPatch, tmp_p
             ("git", "status", "--porcelain"): " M file.py\n",
         }[tuple(cmd)],
     )
-    monkeypatch.setattr("devgear.mem.database.Database", FakeDatabase)
+    monkeypatch.setattr("deepblue.mem.database.Database", FakeDatabase)
     monkeypatch.setattr(
         session_start.Settings,
         "load",
@@ -335,7 +335,7 @@ def test_session_start_main_success_and_entrypoint(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(sys, "argv", ["session_start.py"])
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.hooks.session_start", run_name="__main__")
+        runpy.run_module("deepblue.hooks.session_start", run_name="__main__")
 
     assert excinfo.value.code == 0
 
@@ -361,7 +361,7 @@ def test_suggest_compact_invalid_counter_and_checkpoint_entrypoint(
     assert "27 tool calls" in stderr.getvalue()
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("devgear.hooks.suggest_compact", run_name="__main__")
+        runpy.run_module("deepblue.hooks.suggest_compact", run_name="__main__")
 
     assert excinfo.value.code == 0
 
@@ -372,21 +372,21 @@ class TestImportAdrsAndInstincts:
         logs: list[str] = []
         fake_db = SimpleNamespace(close=lambda: None)
 
-        import devgear.hooks.session_start as ss_mod
-        import devgear.mem.importers as importers_mod
-        import devgear.mem.settings as settings_mod
+        import deepblue.hooks.session_start as ss_mod
+        import deepblue.mem.importers as importers_mod
+        import deepblue.mem.settings as settings_mod
 
         monkeypatch.setattr(ss_mod, "log", logs.append)
         monkeypatch.setattr(
             settings_mod.Settings, "load", lambda: SimpleNamespace(db_path=tmp_path / "mem.db")
         )
         monkeypatch.setattr(
-            "devgear.hooks.session_start.get_git_user_name", lambda: "user", raising=False
+            "deepblue.hooks.session_start.get_git_user_name", lambda: "user", raising=False
         )
         monkeypatch.setattr(importers_mod, "import_instincts", lambda db, user: 3)
         monkeypatch.setattr(importers_mod, "import_adrs", lambda db, user, repo_root: 2)
 
-        import devgear.mem.database as db_mod
+        import deepblue.mem.database as db_mod
 
         monkeypatch.setattr(db_mod, "Database", lambda path: fake_db)
 
@@ -398,8 +398,8 @@ class TestImportAdrsAndInstincts:
         """_import_adrs_and_instincts の異常系: 例外が log に記録される。"""
         logs: list[str] = []
 
-        import devgear.hooks.session_start as ss_mod
-        import devgear.mem.settings as settings_mod
+        import deepblue.hooks.session_start as ss_mod
+        import deepblue.mem.settings as settings_mod
 
         monkeypatch.setattr(ss_mod, "log", logs.append)
         monkeypatch.setattr(
@@ -414,7 +414,7 @@ class TestImportAdrsAndInstincts:
         """session_start.run() が _import_adrs_and_instincts を呼ぶことを確認。"""
         called: list[bool] = []
 
-        import devgear.hooks.session_start as ss_mod
+        import deepblue.hooks.session_start as ss_mod
 
         monkeypatch.setattr(ss_mod, "ensure_dir", lambda path: None)
         monkeypatch.setattr(ss_mod, "get_learned_skills_dir", lambda: tmp_path / "learned")
@@ -448,16 +448,16 @@ class TestRecordStopEvent:
         stored: list[object] = []
         fake_db = SimpleNamespace(store_event_log=stored.append, close=lambda: None)
 
-        import devgear.hooks.session_end as se_mod
-        import devgear.mem.database as db_mod
-        import devgear.mem.settings as settings_mod
+        import deepblue.hooks.session_end as se_mod
+        import deepblue.mem.database as db_mod
+        import deepblue.mem.settings as settings_mod
 
         monkeypatch.setattr(se_mod, "log", logs.append)
         monkeypatch.setattr(
             settings_mod.Settings, "load", lambda: SimpleNamespace(db_path=tmp_path / "mem.db")
         )
         monkeypatch.setattr(
-            "devgear.hooks.session_end.get_git_user_name", lambda: "user", raising=False
+            "deepblue.hooks.session_end.get_git_user_name", lambda: "user", raising=False
         )
         monkeypatch.setattr(db_mod, "Database", lambda path: fake_db)
 
@@ -478,16 +478,16 @@ class TestRecordStopEvent:
         stored: list[object] = []
         fake_db = SimpleNamespace(store_event_log=stored.append, close=lambda: None)
 
-        import devgear.hooks.session_end as se_mod
-        import devgear.mem.database as db_mod
-        import devgear.mem.settings as settings_mod
+        import deepblue.hooks.session_end as se_mod
+        import deepblue.mem.database as db_mod
+        import deepblue.mem.settings as settings_mod
 
         monkeypatch.setattr(se_mod, "log", lambda msg: None)
         monkeypatch.setattr(
             settings_mod.Settings, "load", lambda: SimpleNamespace(db_path=tmp_path / "mem.db")
         )
         monkeypatch.setattr(
-            "devgear.hooks.session_end.get_git_user_name", lambda: "user", raising=False
+            "deepblue.hooks.session_end.get_git_user_name", lambda: "user", raising=False
         )
         monkeypatch.setattr(db_mod, "Database", lambda path: fake_db)
 
@@ -502,8 +502,8 @@ class TestRecordStopEvent:
         """_record_stop_event の異常系: 例外が log に記録される。"""
         logs: list[str] = []
 
-        import devgear.hooks.session_end as se_mod
-        import devgear.mem.settings as settings_mod
+        import deepblue.hooks.session_end as se_mod
+        import deepblue.mem.settings as settings_mod
 
         monkeypatch.setattr(se_mod, "log", logs.append)
         monkeypatch.setattr(
@@ -518,7 +518,7 @@ class TestRecordStopEvent:
         """session_end.run() が _record_stop_event を呼ぶことを確認。"""
         called: list[tuple] = []
 
-        import devgear.hooks.session_end as se_mod
+        import deepblue.hooks.session_end as se_mod
 
         monkeypatch.setattr(se_mod, "get_sessions_dir", lambda: tmp_path / "sessions")
         monkeypatch.setattr(se_mod, "get_date_string", lambda: "2024-01-01")

@@ -8,14 +8,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from devgear.lib.skill_evolution import collect_skill_health, summarize_health_report
+from deepblue.lib.skill_evolution import collect_skill_health, summarize_health_report
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
 
-    from devgear.mem.database import Database
-    from devgear.mem.settings import Settings
+    from deepblue.mem.database import Database
+    from deepblue.mem.settings import Settings
 
     OpenDbFn = Callable[[Settings], AbstractContextManager[Database]]
     GitUserFn = Callable[[], str]
@@ -35,7 +35,7 @@ def count_lines(path: Path) -> int:
 
 def collect_project_overview(*, count_lines_fn: CountLinesFn, log: Any) -> dict:
     """既知プロジェクトと instinct の集計を返す。"""
-    from devgear.skills.learn.cli import (
+    from deepblue.skills.learn.cli import (
         GLOBAL_INHERITED_DIR,
         GLOBAL_PERSONAL_DIR,
         _load_instincts_from_dir,
@@ -139,8 +139,8 @@ def collect_skill_growth_overview(settings: Settings, days: int, *, log: Any) ->
         return empty
 
     try:
-        from devgear.mem import skill_analyzer, skill_proposal
-        from devgear.mem.pg_database import PgDatabase
+        from deepblue.mem import skill_analyzer, skill_proposal
+        from deepblue.mem.pg_database import PgDatabase
 
         pg = PgDatabase(sync_cfg.postgres_url)
         if not pg.test_connection():
@@ -178,7 +178,7 @@ def handle_import(
     get_git_user_name: GitUserFn,
 ) -> None:
     """外部データを mem に取り込む。"""
-    from devgear.mem.importers import import_adrs, import_event_logs, import_instincts
+    from deepblue.mem.importers import import_adrs, import_event_logs, import_instincts
 
     origin_user = get_git_user_name()
     types = stdin_data.get("types", ["instincts", "adrs", "events"])
@@ -230,15 +230,15 @@ def handle_dashboard(
     collect_skill_growth_overview_fn: Callable[[Settings, int], dict[str, object]],
 ) -> None:
     """静的 HTML ダッシュボードを生成する。"""
-    from devgear.mem import dashboard_queries as dq
-    from devgear.mem import item_usage_queries as iq
-    from devgear.mem.item_usage_queries import _PG_PLACEHOLDER, _SQLITE_PLACEHOLDER
+    from deepblue.mem import dashboard_queries as dq
+    from deepblue.mem import item_usage_queries as iq
+    from deepblue.mem.item_usage_queries import _PG_PLACEHOLDER, _SQLITE_PLACEHOLDER
 
     def _jdumps(obj: object) -> str:
         return re.sub(r"</", r"<\\/", json.dumps(obj, ensure_ascii=False))
 
     days = stdin_data.get("days", 30)
-    output_default = str(Path(settings.data_path) / "devgear-dashboard.html")
+    output_default = str(Path(settings.data_path) / "deepblue-dashboard.html")
     output_path = _resolve_safe_dashboard_output_path(settings, stdin_data.get("output", output_default))
     if output_path is None:
         print(json.dumps({"success": False, "error": "output path is not allowed"}))
@@ -274,7 +274,7 @@ def handle_dashboard(
     sync_cfg = settings.sync
     if sync_cfg.enabled and sync_cfg.postgres_url:
         try:
-            from devgear.mem.pg_database import PgDatabase
+            from deepblue.mem.pg_database import PgDatabase
 
             pg = PgDatabase(sync_cfg.postgres_url)
             if pg.test_connection():

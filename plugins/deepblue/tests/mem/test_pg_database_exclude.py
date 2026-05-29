@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from devgear.mem.pg_database import PgDatabase
+from deepblue.mem.pg_database import PgDatabase
 from tests.mem.test_pg_database import FakeConn, FakeCursor
 
 

@@ -9,13 +9,13 @@ import json
 
 import pytest
 
-from devgear.mem.settings import Settings, SlimSettings
+from deepblue.mem.settings import Settings, SlimSettings
 
 
 @pytest.fixture(autouse=True)
 def _patch_default_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """各テストで Settings の保存先を一時ディレクトリに固定する。"""
-    import devgear.mem.settings as mod
+    import deepblue.mem.settings as mod
 
     monkeypatch.setattr(mod, "_DEFAULT_DATA_DIR", tmp_path)
 

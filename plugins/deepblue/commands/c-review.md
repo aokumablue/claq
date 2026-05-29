@@ -34,8 +34,8 @@ record: 必要時のみ、最終レビュー結果を1回だけ記録（繰り�
 
 以下の2エージェントを**同時起動**し、両結果が揃ってからレポートを統合:
 
-- **`devgear:a-review`**: 品質・設計・保守性。50行超fn/800行超ファイル/4階層超ネスト/エラーハンドリング不足/テスト不足/console.log/TODO-FIXME/a11y確認
-- **`devgear:a-secure`**: セキュリティ・脆弱性。ハードコード認証情報/SQLi/XSS/入力検証不足/パストラバーサル確認
+- **`deepblue:a-review`**: 品質・設計・保守性。50行超fn/800行超ファイル/4階層超ネスト/エラーハンドリング不足/テスト不足/console.log/TODO-FIXME/a11y確認
+- **`deepblue:a-secure`**: セキュリティ・脆弱性。ハードコード認証情報/SQLi/XSS/入力検証不足/パストラバーサル確認
 
 ## レポート内容
 
@@ -62,19 +62,19 @@ record: 必要時のみ、最終レビュー結果を1回だけ記録（繰り�
 2. `s-grillme` で原因絞り込み → 最小修正方針
 3. 根本原因を直接修正（正常系を壊さない）
 4. 再現テスト PASS + 回帰テスト追加 + 既存テスト再実行
-5. 修正範囲のみ `devgear:a-review` / `devgear:a-secure` 再評価
+5. 修正範囲のみ `deepblue:a-review` / `deepblue:a-secure` 再評価
 
 ### リファクタ対応
 
 1. 対象を指摘ファイルに限定（隣接拡散禁止）
-2. clean → simplify → perf の順で `devgear:a-clean` / `a-simplify` / `a-perf` を使用。各フェーズでテスト→失敗時 `git checkout -- <file>`
-3. `devgear:a-review` / `devgear:a-secure` 並列再評価
+2. clean → simplify → perf の順で `deepblue:a-clean` / `a-simplify` / `a-perf` を使用。各フェーズでテスト→失敗時 `git checkout -- <file>`
+3. `deepblue:a-review` / `deepblue:a-secure` 並列再評価
 4. final gate: テスト・linter 再実行、CRITICAL/HIGH 残存ならブロック
 
 ### 対象外対応
 
 1. 仕様変更・設計変更の本質を抽出して要件を言い換え
-2. `devgear:a-plan` / `devgear:a-arch`（評価モード）並列起動
+2. `deepblue:a-plan` / `deepblue:a-arch`（評価モード）並列起動
 3. リスク・ブロッカー評価・複雑度（High/Medium/Low）見積もり
 4. 変更ファイル一覧・非変更ファイル一覧・テストコマンドを含む計画提示
 5. ユーザー承認まで実装着手禁止（承認後は `c-bugfix` / `c-refactor` へ切り分け）

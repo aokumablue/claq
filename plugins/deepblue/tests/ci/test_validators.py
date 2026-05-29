@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import devgear.ci.check_unicode_safety as check_unicode_safety
-import devgear.ci.validate_agents as validate_agents
-import devgear.ci.validate_commands as validate_commands
-import devgear.ci.validate_no_personal_paths as validate_no_personal_paths
-import devgear.ci.validate_rules as validate_rules
-import devgear.ci.validate_skills as validate_skills
+import deepblue.ci.check_unicode_safety as check_unicode_safety
+import deepblue.ci.validate_agents as validate_agents
+import deepblue.ci.validate_commands as validate_commands
+import deepblue.ci.validate_no_personal_paths as validate_no_personal_paths
+import deepblue.ci.validate_rules as validate_rules
+import deepblue.ci.validate_skills as validate_skills
 
 
 def test_validate_agents_accepts_valid_agent(tmp_path: Path) -> None:

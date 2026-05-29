@@ -26,9 +26,9 @@ command: /c-skillgen
 ### ステップ1: 入力候補収集
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/devgear-helpers.sh"
+source "${CLAUDE_PLUGIN_ROOT}/runtime/deepblue-helpers.sh"
 collect_skill_create_inputs "${COMMITS:-200}"
-devgear_mem_search "<search query>" 3
+deepblue_mem_search "<search query>" 3
 ```
 
 ### ステップ2: パターン検出

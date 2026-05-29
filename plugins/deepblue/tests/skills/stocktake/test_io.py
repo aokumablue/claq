@@ -1,4 +1,4 @@
-"""devgear.skills.stocktake.io のテスト。"""
+"""deepblue.skills.stocktake.io のテスト。"""
 
 import json
 from datetime import UTC, datetime
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.skills.stocktake import io as sio
+from deepblue.skills.stocktake import io as sio
 
 # ─────────────────────────────────────────────
 # walk_skills
@@ -90,7 +90,7 @@ def test_atomic_write_cleans_up_temp_on_error(tmp_path: Path, monkeypatch: pytes
     def _bad_replace(_src: str, _dst: str) -> None:
         raise OSError("simulated failure")
 
-    monkeypatch.setattr("devgear.skills.stocktake.io.os.replace", _bad_replace)
+    monkeypatch.setattr("deepblue.skills.stocktake.io.os.replace", _bad_replace)
 
     with pytest.raises(OSError, match="simulated"):
         sio.atomic_write(results, {"key": "value"})
@@ -111,8 +111,8 @@ def test_atomic_write_unlink_error_is_suppressed(tmp_path: Path, monkeypatch: py
         call_log.append("unlink_called")
         raise OSError("already gone")
 
-    monkeypatch.setattr("devgear.skills.stocktake.io.os.replace", _bad_replace)
-    monkeypatch.setattr("devgear.skills.stocktake.io.os.unlink", _bad_unlink)
+    monkeypatch.setattr("deepblue.skills.stocktake.io.os.replace", _bad_replace)
+    monkeypatch.setattr("deepblue.skills.stocktake.io.os.unlink", _bad_unlink)
 
     # OSError("replace failed") が再送出され、unlink の OSError は無視される
     with pytest.raises(OSError, match="replace failed"):

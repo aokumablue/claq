@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.mem import embedding
+from deepblue.mem import embedding
 
 
 class TestNoHFDependencies:
@@ -22,31 +22,31 @@ class TestNoHFDependencies:
         """embedding モジュールのロード時に huggingface_hub が import されない。"""
         assert "huggingface_hub" not in sys.modules or True
         # embedding.py のソースコードに huggingface_hub の import がないことを確認
-        src = Path(__file__).parents[2] / "src" / "devgear" / "mem" / "embedding.py"
+        src = Path(__file__).parents[2] / "src" / "deepblue" / "mem" / "embedding.py"
         text = src.read_text(encoding="utf-8")
         assert "huggingface_hub" not in text
 
     def test_sentence_transformers_not_imported(self) -> None:
         """embedding.py のソースコードに sentence_transformers が含まれない。"""
-        src = Path(__file__).parents[2] / "src" / "devgear" / "mem" / "embedding.py"
+        src = Path(__file__).parents[2] / "src" / "deepblue" / "mem" / "embedding.py"
         text = src.read_text(encoding="utf-8")
         assert "sentence_transformers" not in text
 
     def test_torch_not_imported(self) -> None:
         """embedding.py のソースコードに torch が含まれない。"""
-        src = Path(__file__).parents[2] / "src" / "devgear" / "mem" / "embedding.py"
+        src = Path(__file__).parents[2] / "src" / "deepblue" / "mem" / "embedding.py"
         text = src.read_text(encoding="utf-8")
         assert "import torch" not in text
 
     def test_transformers_not_imported(self) -> None:
         """embedding.py のソースコードに transformers が含まれない。"""
-        src = Path(__file__).parents[2] / "src" / "devgear" / "mem" / "embedding.py"
+        src = Path(__file__).parents[2] / "src" / "deepblue" / "mem" / "embedding.py"
         text = src.read_text(encoding="utf-8")
         assert "import transformers" not in text
 
     def test_hf_hub_env_forced_not_present(self) -> None:
         """HF_HUB_OFFLINE / TRANSFORMERS_OFFLINE の強制設定が embedding.py に残っていない。"""
-        src = Path(__file__).parents[2] / "src" / "devgear" / "mem" / "embedding.py"
+        src = Path(__file__).parents[2] / "src" / "deepblue" / "mem" / "embedding.py"
         text = src.read_text(encoding="utf-8")
         # ONNX 化後は HF SDK を使わないため環境変数の強制設定は不要
         assert "HF_HUB_OFFLINE" not in text
@@ -58,7 +58,7 @@ class TestNoTrustRemoteCode:
 
     def test_no_trust_remote_code_true_in_embedding(self) -> None:
         """embedding.py に trust_remote_code=True が書かれていない。"""
-        src = Path(__file__).parents[2] / "src" / "devgear" / "mem" / "embedding.py"
+        src = Path(__file__).parents[2] / "src" / "deepblue" / "mem" / "embedding.py"
         text = src.read_text(encoding="utf-8")
         assert "trust_remote_code=True" not in text
         assert "trust_remote_code = True" not in text
@@ -69,13 +69,13 @@ class TestRevisionPin:
 
     def test_default_revision_is_nonempty(self) -> None:
         """_DEFAULT_EMBEDDING_REVISION が空でない文字列。"""
-        from devgear.mem.settings import _DEFAULT_EMBEDDING_REVISION
+        from deepblue.mem.settings import _DEFAULT_EMBEDDING_REVISION
         assert isinstance(_DEFAULT_EMBEDDING_REVISION, str)
         assert len(_DEFAULT_EMBEDDING_REVISION) >= 8
 
     def test_default_revision_looks_like_sha(self) -> None:
         """_DEFAULT_EMBEDDING_REVISION が hex 文字列に見える。"""
-        from devgear.mem.settings import _DEFAULT_EMBEDDING_REVISION
+        from deepblue.mem.settings import _DEFAULT_EMBEDDING_REVISION
         assert all(c in "0123456789abcdef" for c in _DEFAULT_EMBEDDING_REVISION.lower())
 
 

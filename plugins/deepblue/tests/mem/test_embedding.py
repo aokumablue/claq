@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from devgear.mem import embedding
+from deepblue.mem import embedding
 
 # ---- ONNX / tokenizers のモック構築ヘルパ ----
 
