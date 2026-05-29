@@ -73,7 +73,7 @@ if [[ "${DRY_RUN}" == true ]]; then
   echo "    \"aokumablue\"         → \"${AUTHOR_NAME}\""
   echo "    deepblue (残余)        → ${PLUGIN_NAME}"
   echo ""
-  echo "  除外: ${SCRIPT_DIR}/ は置換対象外（スクリプト自身を保護）"
+  echo "  除外: scripts/rename.sh と scripts/rename-config.json は置換対象外"
   echo ""
   echo "[dry-run] 実際の変換は --dry-run なしで実行してください"
   exit 0
@@ -142,7 +142,8 @@ mapfile -d '' TARGET_FILES < <(find "${REPO_DIR}" -type f \( \
   -o -name "*.html" -o -name "*.in" \
 \) \
   ! -path "${REPO_DIR}/.git/*" \
-  ! -path "${SCRIPT_DIR}/*" \
+  ! -path "${SCRIPT_DIR}/rename.sh" \
+  ! -path "${SCRIPT_DIR}/rename-config.json" \
   -print0)
 
 if [[ ${#TARGET_FILES[@]} -eq 0 ]]; then
@@ -199,7 +200,7 @@ RESIDUAL=$(grep -r "deepblue\|DEEPBLUE\|aokumablue" "${REPO_DIR}" \
   --include="*.py" --include="*.sh" --include="*.toml" --include="*.json" \
   --exclude-dir=".git" \
   -l 2>/dev/null \
-  | grep -v "^${SCRIPT_DIR}/" || true)
+  | grep -v -e "^${SCRIPT_DIR}/rename\.sh$" -e "^${SCRIPT_DIR}/rename-config\.json$" || true)
 
 if [[ -n "${RESIDUAL}" ]]; then
   echo "  [Warning] 以下のファイルに置換漏れの可能性があります:"
