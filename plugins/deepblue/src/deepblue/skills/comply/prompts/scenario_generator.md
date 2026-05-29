@@ -15,7 +15,7 @@ scenarios:
     prompt: |
       <the task prompt to pass to claude -p. Must be a concrete coding task.>
     setup_commands:
-      - "mkdir -p /tmp/s-comply-sandbox/{id}/src /tmp/s-comply-sandbox/{id}/tests"
+      - "mkdir -p /tmp/comply-sandbox/{id}/src /tmp/comply-sandbox/{id}/tests"
       - <other setup commands>
 
   - id: <kebab-case>

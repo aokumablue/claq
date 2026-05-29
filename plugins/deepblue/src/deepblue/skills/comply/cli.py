@@ -1,4 +1,4 @@
-"""s-comply のCLIエントリーポイント。"""
+"""comply のCLIエントリーポイント。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     parser = argparse.ArgumentParser(
-        description="s-comply: Measure skill compliance rates",
+        description="comply: Measure skill compliance rates",
     )
     parser.add_argument(
         "skill",

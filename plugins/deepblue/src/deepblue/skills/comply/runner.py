@@ -19,7 +19,7 @@ from ..cli_runner import build_output_format_args, build_tools_args, detect_cli_
 from .parser import ObservationEvent
 from .scenario_generator import Scenario
 
-SANDBOX_BASE = Path(tempfile.gettempdir()) / "s-comply-sandbox"
+SANDBOX_BASE = Path(tempfile.gettempdir()) / "comply-sandbox"
 ALLOWED_MODELS = frozenset({"haiku", "sonnet", "opus"})
 _ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 

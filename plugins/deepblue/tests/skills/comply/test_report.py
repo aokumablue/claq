@@ -107,7 +107,7 @@ def test_generate_report_includes_promotions_and_timeline(tmp_path: Path) -> Non
         ],
     )
 
-    assert "# s-comply Report: skill.md" in report
+    assert "# comply Report: skill.md" in report
     assert "Generated:" in report
     assert "| Overall Compliance | 50% |" in report
     assert "| Recommendation | **Promote write_test to hooks** |" in report

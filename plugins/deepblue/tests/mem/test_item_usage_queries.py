@@ -242,7 +242,7 @@ class TestMakeRankingData:
     RANKING = [
         {"item_name": "learn", "item_type": "skill", "uses": 5, "last_used_epoch": None},
         {"item_name": "tdd", "item_type": "skill", "uses": 2, "last_used_epoch": None},
-        {"item_name": "c-dash", "item_type": "command", "uses": 3, "last_used_epoch": None},
+        {"item_name": "dashboard", "item_type": "command", "uses": 3, "last_used_epoch": None},
         {"item_name": "reviewer", "item_type": "agent", "uses": 1, "last_used_epoch": None},
     ]
 
@@ -253,7 +253,7 @@ class TestMakeRankingData:
 
     def test_command_labels_and_counts(self) -> None:
         labels, counts = make_ranking_data(self.RANKING, "command")
-        assert labels == ["c-dash"]
+        assert labels == ["dashboard"]
         assert counts == [3]
 
     def test_empty_type(self) -> None:

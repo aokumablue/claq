@@ -1,1 +1,1 @@
-"""s-comply skill package."""
+"""comply skill package."""

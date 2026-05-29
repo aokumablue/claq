@@ -1,4 +1,4 @@
-"""s-comply スクリプトで共有するユーティリティ。"""
+"""comply スクリプトで共有するユーティリティ。"""
 
 from __future__ import annotations
 

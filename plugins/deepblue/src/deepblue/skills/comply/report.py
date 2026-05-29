@@ -29,7 +29,7 @@ def generate_report(
     threshold = spec.threshold_promote_to_hook
 
     lines: list[str] = []
-    lines.append(f"# s-comply Report: {skill_path.name}")
+    lines.append(f"# comply Report: {skill_path.name}")
     lines.append(f"Generated: {now}")
     lines.append("")
 
