@@ -300,6 +300,15 @@ def run(raw_input: str) -> str:
         input_data = parse_json_object(raw_input)
         transcript_path = input_data.get("transcript_path") if input_data else None
 
+        # /goal などの Stop フック駆動ループでは、各反復のたびに Stop イベントが
+        # 再発火する。stop_hook_active=True は、エージェントがユーザーへ制御を返さず
+        # 別の Stop フックがセッションを継続させている状態を示す（＝本当の停止ではない）。
+        # この間に session_stop イベントを記録すると、ループ反復が本来の停止として
+        # 二重計上され event_logs / ダッシュボード / チーム同期を汚染する。
+        # セッション継続用ファイルとチェックポイントはループ中も更新する価値があるため
+        # 維持し、非冪等な session_stop 記録のみをスキップする。
+        stop_hook_active = bool(input_data.get("stop_hook_active")) if input_data else False
+
         sessions_dir = get_sessions_dir()
         today = get_date_string()
         short_id = get_session_id_short()
@@ -359,7 +368,10 @@ def run(raw_input: str) -> str:
             write_file(session_file, template)
             log(f"[SessionEnd] Created session file: {session_file}")
 
-        _record_stop_event(summary, session_metadata)
+        if not stop_hook_active:
+            _record_stop_event(summary, session_metadata)
+        else:
+            log("[SessionEnd] stop_hook_active=True (loop continuation): skip session_stop event")
 
         # メッセージ数が閾値を超えた場合はチェックポイントを自動保存
         if summary and summary.get("totalMessages", 0) >= _CHECKPOINT_THRESHOLD:

@@ -620,6 +620,69 @@ class TestSessionEndMain:
         assert session_end.run("{}") == "{}"
         assert any("Error: boom" in message for message in logs)
 
+    def test_run_skips_stop_event_during_loop_continuation(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """stop_hook_active=True（/goal などのループ継続）では session_stop を記録しない。"""
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+        transcript_path = tmp_path / "transcript.jsonl"
+        transcript_path.write_text("{}", encoding="utf-8")
+        summary = {"userMessages": ["work"], "filesModified": [], "toolsUsed": [], "totalMessages": 1}
+        writes: list[tuple[Path, str]] = []
+        recorded: list[tuple] = []
+        logs: list[str] = []
+
+        monkeypatch.setattr(session_end, "get_sessions_dir", lambda: sessions_dir)
+        monkeypatch.setattr(session_end, "get_date_string", lambda: "2026-01-01")
+        monkeypatch.setattr(session_end, "get_session_id_short", lambda: "abc123")
+        monkeypatch.setattr(
+            session_end, "get_session_metadata", lambda: {"project": "repo", "branch": "main", "worktree": "/repo"}
+        )
+        monkeypatch.setattr(session_end, "get_time_string", lambda: "10:00")
+        monkeypatch.setattr(session_end, "ensure_dir", lambda path: Path(path))
+        monkeypatch.setattr(session_end, "extract_session_summary", lambda path: summary)
+        monkeypatch.setattr(session_end, "write_file", lambda path, content: writes.append((Path(path), content)))
+        monkeypatch.setattr(session_end, "_record_stop_event", lambda *args: recorded.append(args))
+        monkeypatch.setattr(session_end, "log", logs.append)
+
+        raw = json.dumps({"transcript_path": str(transcript_path), "stop_hook_active": True})
+        assert session_end.run(raw) == raw
+        # ループ継続中は session_stop を記録しない
+        assert recorded == []
+        # 継続用セッションファイルは引き続き更新される
+        assert writes and writes[0][0] == sessions_dir / "2026-01-01-abc123-session.tmp"
+        assert any("loop continuation" in message for message in logs)
+
+    def test_run_records_stop_event_on_genuine_stop(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """stop_hook_active が無い通常停止では session_stop を記録する。"""
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+        transcript_path = tmp_path / "transcript.jsonl"
+        transcript_path.write_text("{}", encoding="utf-8")
+        summary = {"userMessages": ["work"], "filesModified": [], "toolsUsed": [], "totalMessages": 1}
+        recorded: list[tuple] = []
+
+        monkeypatch.setattr(session_end, "get_sessions_dir", lambda: sessions_dir)
+        monkeypatch.setattr(session_end, "get_date_string", lambda: "2026-01-01")
+        monkeypatch.setattr(session_end, "get_session_id_short", lambda: "abc123")
+        monkeypatch.setattr(
+            session_end, "get_session_metadata", lambda: {"project": "repo", "branch": "main", "worktree": "/repo"}
+        )
+        monkeypatch.setattr(session_end, "get_time_string", lambda: "10:00")
+        monkeypatch.setattr(session_end, "ensure_dir", lambda path: Path(path))
+        monkeypatch.setattr(session_end, "extract_session_summary", lambda path: summary)
+        monkeypatch.setattr(session_end, "write_file", lambda path, content: None)
+        monkeypatch.setattr(session_end, "_record_stop_event", lambda *args: recorded.append(args))
+        monkeypatch.setattr(session_end, "log", lambda message: None)
+
+        raw = json.dumps({"transcript_path": str(transcript_path)})
+        assert session_end.run(raw) == raw
+        assert len(recorded) == 1
+        assert recorded[0][0] == summary
+
     def test_main_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr("devgear.hooks.hook_common.read_raw_stdin", lambda: "{}")
         monkeypatch.setattr("devgear.lib.core_utils.get_sessions_dir", lambda: tmp_path / "sessions")

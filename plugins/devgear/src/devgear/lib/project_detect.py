@@ -701,6 +701,29 @@ def _check_gemfile_deps(root: Path, deps: list[str]) -> bool:
     return any(dep in content for dep in deps)
 
 
+def _is_rails_app(root: Path) -> bool:
+    """Rails アプリかどうかを判定する。
+
+    Rails も Minitest を ``test/test_helper.rb`` で使うため、素の Minitest
+    プロジェクトと区別する目的で Rails 固有マーカーの有無を確認する。
+    detect_frameworks の rails ルール（Gemfile の rails / config/routes.rb /
+    app/controllers/application_controller.rb）と同じシグナルを用いる。
+
+    Args:
+        root: プロジェクトルートのパス。
+
+    Returns:
+        bool: Rails マーカーが見つかれば True、そうでなければ False。
+
+    Raises:
+        例外は発生しません。
+    """
+    has_rails_gem = _check_gemfile_deps(root, ["rails"])
+    has_routes = (root / "config" / "routes.rb").exists()
+    has_app_controller = (root / "app" / "controllers" / "application_controller.rb").exists()
+    return has_rails_gem or has_routes or has_app_controller
+
+
 def _check_composer_json_deps(root: Path, deps: list[str]) -> bool:
     """composer.json に依存関係が含まれるか確認する。
 
@@ -991,11 +1014,15 @@ def get_test_command(project_root: str | Path) -> str | None:
         if "pytest" in content:
             return "pytest"
 
-    # Ruby — RSpec を優先し、Minitest は .rspec がない場合のみ
+    # Ruby — RSpec を優先し、test/ は Rails と素の Minitest を区別する
     if (root / ".rspec").exists() or (root / "spec").is_dir():
         return "rspec"
     if (root / "test" / "test_helper.rb").exists():
-        return "rails test"
+        # Rails も Minitest を test/test_helper.rb で使うが実行は `rails test`。
+        # Rails マーカーが無ければ素の Minitest プロジェクトとみなし `rake test`。
+        if _is_rails_app(root):
+            return "rails test"
+        return "rake test"
     if (root / "Rakefile").exists():
         return "rake test"
 

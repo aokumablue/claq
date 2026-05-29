@@ -205,6 +205,16 @@ class TestMinitestDetection:
 
         assert pd.get_test_command(tmp_path) == "rake test"
 
+    def test_get_test_command_rails_with_test_helper_returns_rails_test(self, tmp_path: Path) -> None:
+        """Rails プロジェクト（test/test_helper.rb + Rails マーカー）は rails test を返すこと。"""
+        (tmp_path / "Gemfile").write_text("gem 'rails'\n", encoding="utf-8")
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "routes.rb").write_text("Rails.application.routes.draw do\nend\n", encoding="utf-8")
+        (tmp_path / "test").mkdir()
+        (tmp_path / "test" / "test_helper.rb").write_text("require 'rails/test_help'\n", encoding="utf-8")
+
+        assert pd.get_test_command(tmp_path) == "rails test"
+
     def test_rspec_takes_priority_over_minitest(self, tmp_path: Path) -> None:
         """.rspec が存在する場合は rspec が優先されること。"""
         (tmp_path / ".rspec").write_text("--format progress\n", encoding="utf-8")
