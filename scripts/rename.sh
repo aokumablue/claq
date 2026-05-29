@@ -71,6 +71,7 @@ if [[ "${DRY_RUN}" == true ]]; then
   echo "    https://github.com/aokumablue/deepblue → ${REPO_URL}"
   echo "    https://github.com/aokumablue         → ${AUTHOR_URL}"
   echo "    \"aokumablue\"         → \"${AUTHOR_NAME}\""
+  echo "    aokumablue             → ${AUTHOR_NAME}"
   echo "    deepblue (残余)        → ${PLUGIN_NAME}"
   echo ""
   echo "  除外: scripts/rename.sh と scripts/rename-config.json は置換対象外"
@@ -155,6 +156,7 @@ else
     -e "s|https://github\.com/aokumablue/deepblue|${REPO_URL}|g" \
     -e "s|https://github\.com/aokumablue|${AUTHOR_URL}|g" \
     -e "s|\"aokumablue\"|\"${AUTHOR_NAME}\"|g" \
+    -e "s|aokumablue|${AUTHOR_NAME}|g" \
     "${TARGET_FILES[@]}"
 
   echo "  環境変数・パス..."
