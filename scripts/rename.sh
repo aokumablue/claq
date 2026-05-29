@@ -88,19 +88,23 @@ echo ""
 echo "Step 1: ディレクトリ・ファイルをリネーム中..."
 
 if [[ -d "${REPO_DIR}/plugins/${FROM_PLUGIN_NAME}" ]]; then
-  # ファイルを先にリネーム（ディレクトリリネーム前）
+  # ファイルをリネーム（basename のみ置換、親ディレクトリは変えない）
   while IFS= read -r -d '' f; do
-    new="${f//${FROM_PLUGIN_NAME}/${PLUGIN_NAME}}"
-    mv "$f" "$new"
-    echo "  ${f#${REPO_DIR}/} → ${new#${REPO_DIR}/}"
+    dir="$(dirname "$f")"
+    base="$(basename "$f")"
+    new_base="${base//${FROM_PLUGIN_NAME}/${PLUGIN_NAME}}"
+    mv "$f" "${dir}/${new_base}"
+    echo "  ${f#${REPO_DIR}/} → ${dir#${REPO_DIR}/}/${new_base}"
   done < <(find "${REPO_DIR}/plugins/${FROM_PLUGIN_NAME}" -type f \
     -name "*${FROM_PLUGIN_NAME}*" -print0 | sort -rz)
 
-  # サブディレクトリをリネーム（深い順）
+  # サブディレクトリをリネーム（basename のみ置換、深い順）
   while IFS= read -r -d '' d; do
-    new="${d//${FROM_PLUGIN_NAME}/${PLUGIN_NAME}}"
-    mv "$d" "$new"
-    echo "  ${d#${REPO_DIR}/} → ${new#${REPO_DIR}/}"
+    parent="$(dirname "$d")"
+    base="$(basename "$d")"
+    new_base="${base//${FROM_PLUGIN_NAME}/${PLUGIN_NAME}}"
+    mv "$d" "${parent}/${new_base}"
+    echo "  ${d#${REPO_DIR}/} → ${parent#${REPO_DIR}/}/${new_base}"
   done < <(find "${REPO_DIR}/plugins/${FROM_PLUGIN_NAME}" -mindepth 1 -type d \
     -name "*${FROM_PLUGIN_NAME}*" -print0 | sort -rz)
 
