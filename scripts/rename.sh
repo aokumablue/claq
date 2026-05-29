@@ -21,14 +21,20 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
+FROM_PLUGIN_NAME="$(jq -r '.from_plugin_name' "${CONFIG_FILE}")"
+FROM_AUTHOR_NAME="$(jq -r '.from_author_name' "${CONFIG_FILE}")"
+FROM_PLUGIN_NAME_UPPER="${FROM_PLUGIN_NAME^^}"
+FROM_AUTHOR_URL="https://github.com/${FROM_AUTHOR_NAME}"
+FROM_REPO_URL="https://github.com/${FROM_AUTHOR_NAME}/${FROM_PLUGIN_NAME}"
+
 PLUGIN_NAME="$(jq -r '.plugin_name' "${CONFIG_FILE}")"
 PLUGIN_NAME_UPPER="${PLUGIN_NAME^^}"
 AUTHOR_NAME="$(jq -r '.author_name' "${CONFIG_FILE}")"
-AUTHOR_URL="$(jq -r '.author_url' "${CONFIG_FILE}")"
-REPO_URL="$(jq -r '.repo_url' "${CONFIG_FILE}")"
+AUTHOR_URL="https://github.com/${AUTHOR_NAME}"
+REPO_URL="https://github.com/${AUTHOR_NAME}/${PLUGIN_NAME}"
 
 echo "=================================================="
-echo "  deepblue → ${PLUGIN_NAME}"
+echo "  ${FROM_PLUGIN_NAME} → ${PLUGIN_NAME}"
 echo "  対象: ${REPO_DIR}（直接置換）"
 echo "  dry-run: ${DRY_RUN}"
 echo "=================================================="
@@ -37,42 +43,28 @@ if [[ "${DRY_RUN}" == true ]]; then
   echo ""
   echo "[dry-run] 以下の変換を行います:"
   echo ""
-  echo "  ディレクトリ名（内側から順に）:"
-  echo "    plugins/deepblue/src/deepblue/ → plugins/deepblue/src/${PLUGIN_NAME}/"
-  echo "    plugins/deepblue/              → plugins/${PLUGIN_NAME}/"
-  echo ""
-  echo "  ファイル名:"
-  echo "    plugins/deepblue/runtime/deepblue-helpers.sh"
-  echo "      → plugins/deepblue/runtime/${PLUGIN_NAME}-helpers.sh"
-  echo "    plugins/deepblue/tests/lib/test_resolve_deepblue_root.py"
-  echo "      → .../test_resolve_${PLUGIN_NAME}_root.py"
-  echo "    plugins/deepblue/tests/lib/test_deepblue_settings.py"
-  echo "      → .../test_${PLUGIN_NAME}_settings.py"
-  echo "    plugins/deepblue/tests/lib/test_deepblue_launcher.py"
-  echo "      → .../test_${PLUGIN_NAME}_launcher.py"
-  echo "    plugins/deepblue/tests/scripts/test_deepblue_helpers.py"
-  echo "      → .../test_${PLUGIN_NAME}_helpers.py"
+  echo "  ディレクトリ・ファイル名（*${FROM_PLUGIN_NAME}* を動的検索）:"
+  echo "    plugins/${FROM_PLUGIN_NAME}/**/*${FROM_PLUGIN_NAME}* → plugins/${PLUGIN_NAME}/...${PLUGIN_NAME}..."
+  echo "    plugins/${FROM_PLUGIN_NAME}/              → plugins/${PLUGIN_NAME}/"
   echo ""
   echo "  テキスト置換（対象: .py .sh .md .toml .json .txt .html .in）:"
-  echo "    DEEPBLUE_              → ${PLUGIN_NAME_UPPER}_"
-  echo "    ~/.deepblue            → ~/.${PLUGIN_NAME}"
-  echo "    \${HOME}/.deepblue     → \${HOME}/.${PLUGIN_NAME}"
-  echo "    Path.home()/\".deepblue\" → Path.home()/\".${PLUGIN_NAME}\""
-  echo "    from deepblue          → from ${PLUGIN_NAME}"
-  echo "    import deepblue        → import ${PLUGIN_NAME}"
-  echo "    deepblue.              → ${PLUGIN_NAME}."
-  echo "    -m deepblue.           → -m ${PLUGIN_NAME}."
-  echo "    deepblue_plugin_root   → ${PLUGIN_NAME}_plugin_root"
-  echo "    deepblue_run           → ${PLUGIN_NAME}_run"
-  echo "    deepblue_mem_json      → ${PLUGIN_NAME}_mem_json"
-  echo "    deepblue_mem_search    → ${PLUGIN_NAME}_mem_search"
-  echo "    src/deepblue           → src/${PLUGIN_NAME}"
-  echo "    \"deepblue\"           → \"${PLUGIN_NAME}\""
-  echo "    https://github.com/aokumablue/deepblue → ${REPO_URL}"
-  echo "    https://github.com/aokumablue         → ${AUTHOR_URL}"
-  echo "    \"aokumablue\"         → \"${AUTHOR_NAME}\""
-  echo "    aokumablue             → ${AUTHOR_NAME}"
-  echo "    deepblue (残余)        → ${PLUGIN_NAME}"
+  echo "    ${FROM_PLUGIN_NAME_UPPER}_              → ${PLUGIN_NAME_UPPER}_"
+  echo "    ~/.${FROM_PLUGIN_NAME}            → ~/.${PLUGIN_NAME}"
+  echo "    \${HOME}/.${FROM_PLUGIN_NAME}     → \${HOME}/.${PLUGIN_NAME}"
+  echo "    Path.home()/\".${FROM_PLUGIN_NAME}\" → Path.home()/\".${PLUGIN_NAME}\""
+  echo "    from ${FROM_PLUGIN_NAME}          → from ${PLUGIN_NAME}"
+  echo "    import ${FROM_PLUGIN_NAME}        → import ${PLUGIN_NAME}"
+  echo "    ${FROM_PLUGIN_NAME}.              → ${PLUGIN_NAME}."
+  echo "    -m ${FROM_PLUGIN_NAME}.           → -m ${PLUGIN_NAME}."
+  echo "    src/${FROM_PLUGIN_NAME}           → src/${PLUGIN_NAME}"
+  echo "    \"${FROM_PLUGIN_NAME}\"           → \"${PLUGIN_NAME}\""
+  echo "    ${FROM_REPO_URL}/releases/...     → ${REPO_URL}/releases/..."
+  echo "    ${FROM_REPO_URL}                  → ${REPO_URL}"
+  echo "    ${FROM_AUTHOR_URL}                → ${AUTHOR_URL}"
+  echo "    \"${FROM_AUTHOR_NAME}\"           → \"${AUTHOR_NAME}\""
+  echo "    ${FROM_AUTHOR_NAME}               → ${AUTHOR_NAME}"
+  echo "    ${FROM_PLUGIN_NAME} (残余)        → ${PLUGIN_NAME}"
+  echo "    ${FROM_PLUGIN_NAME_UPPER} (残余)  → ${PLUGIN_NAME_UPPER}"
   echo ""
   echo "  除外: scripts/rename.sh と scripts/rename-config.json は置換対象外"
   echo ""
@@ -95,37 +87,28 @@ fi
 echo ""
 echo "Step 1: ディレクトリ・ファイルをリネーム中..."
 
-# 内側から順にリネーム
-if [[ -d "${REPO_DIR}/plugins/deepblue/src/deepblue" ]]; then
-  mv "${REPO_DIR}/plugins/deepblue/src/deepblue" \
-     "${REPO_DIR}/plugins/deepblue/src/${PLUGIN_NAME}"
-  echo "  plugins/deepblue/src/deepblue → plugins/deepblue/src/${PLUGIN_NAME}"
-fi
+if [[ -d "${REPO_DIR}/plugins/${FROM_PLUGIN_NAME}" ]]; then
+  # ファイルを先にリネーム（ディレクトリリネーム前）
+  while IFS= read -r -d '' f; do
+    new="${f//${FROM_PLUGIN_NAME}/${PLUGIN_NAME}}"
+    mv "$f" "$new"
+    echo "  ${f#${REPO_DIR}/} → ${new#${REPO_DIR}/}"
+  done < <(find "${REPO_DIR}/plugins/${FROM_PLUGIN_NAME}" -type f \
+    -name "*${FROM_PLUGIN_NAME}*" -print0 | sort -rz)
 
-if [[ -f "${REPO_DIR}/plugins/deepblue/runtime/deepblue-helpers.sh" ]]; then
-  mv "${REPO_DIR}/plugins/deepblue/runtime/deepblue-helpers.sh" \
-     "${REPO_DIR}/plugins/deepblue/runtime/${PLUGIN_NAME}-helpers.sh"
-  echo "  runtime/deepblue-helpers.sh → runtime/${PLUGIN_NAME}-helpers.sh"
-fi
+  # サブディレクトリをリネーム（深い順）
+  while IFS= read -r -d '' d; do
+    new="${d//${FROM_PLUGIN_NAME}/${PLUGIN_NAME}}"
+    mv "$d" "$new"
+    echo "  ${d#${REPO_DIR}/} → ${new#${REPO_DIR}/}"
+  done < <(find "${REPO_DIR}/plugins/${FROM_PLUGIN_NAME}" -mindepth 1 -type d \
+    -name "*${FROM_PLUGIN_NAME}*" -print0 | sort -rz)
 
-for _old_new in \
-  "plugins/deepblue/tests/lib/test_resolve_deepblue_root.py:plugins/deepblue/tests/lib/test_resolve_${PLUGIN_NAME}_root.py" \
-  "plugins/deepblue/tests/lib/test_deepblue_settings.py:plugins/deepblue/tests/lib/test_${PLUGIN_NAME}_settings.py" \
-  "plugins/deepblue/tests/lib/test_deepblue_launcher.py:plugins/deepblue/tests/lib/test_${PLUGIN_NAME}_launcher.py" \
-  "plugins/deepblue/tests/scripts/test_deepblue_helpers.py:plugins/deepblue/tests/scripts/test_${PLUGIN_NAME}_helpers.py"
-do
-  _old="${REPO_DIR}/${_old_new%%:*}"
-  _new="${REPO_DIR}/${_old_new##*:}"
-  if [[ -f "${_old}" ]]; then
-    mv "${_old}" "${_new}"
-    echo "  ${_old_new%%:*} → ${_old_new##*:}"
-  fi
-done
-
-# 外側をリネーム（最後）
-if [[ -d "${REPO_DIR}/plugins/deepblue" ]]; then
-  mv "${REPO_DIR}/plugins/deepblue" "${REPO_DIR}/plugins/${PLUGIN_NAME}"
-  echo "  plugins/deepblue → plugins/${PLUGIN_NAME}"
+  # トップレベルのプラグインディレクトリをリネーム
+  mv "${REPO_DIR}/plugins/${FROM_PLUGIN_NAME}" "${REPO_DIR}/plugins/${PLUGIN_NAME}"
+  echo "  plugins/${FROM_PLUGIN_NAME} → plugins/${PLUGIN_NAME}"
+else
+  echo "  plugins/${FROM_PLUGIN_NAME} が見つかりません。スキップ"
 fi
 
 echo "Step 2: テキスト一括置換中..."
@@ -152,54 +135,49 @@ if [[ ${#TARGET_FILES[@]} -eq 0 ]]; then
 else
   echo "  URL・作者情報..."
   sed "${SED_INPLACE[@]}" \
-    -e "s|https://github\.com/aokumablue/deepblue/releases/[^\"']*|${REPO_URL}/releases/download/v0.1.0/model.tar.gz|g" \
-    -e "s|https://github\.com/aokumablue/deepblue|${REPO_URL}|g" \
-    -e "s|https://github\.com/aokumablue|${AUTHOR_URL}|g" \
-    -e "s|\"aokumablue\"|\"${AUTHOR_NAME}\"|g" \
-    -e "s|aokumablue|${AUTHOR_NAME}|g" \
+    -e "s|${FROM_REPO_URL}/releases/[^\"']*|${REPO_URL}/releases/download/v0.1.0/model.tar.gz|g" \
+    -e "s|${FROM_REPO_URL}|${REPO_URL}|g" \
+    -e "s|${FROM_AUTHOR_URL}|${AUTHOR_URL}|g" \
+    -e "s|\"${FROM_AUTHOR_NAME}\"|\"${AUTHOR_NAME}\"|g" \
+    -e "s|${FROM_AUTHOR_NAME}|${AUTHOR_NAME}|g" \
     "${TARGET_FILES[@]}"
 
   echo "  環境変数・パス..."
   sed "${SED_INPLACE[@]}" \
-    -e "s|DEEPBLUE_|${PLUGIN_NAME_UPPER}_|g" \
-    -e "s|~/\.deepblue|~/.${PLUGIN_NAME}|g" \
-    -e "s|\${HOME}/\.deepblue|\${HOME}/.${PLUGIN_NAME}|g" \
-    -e "s|Path\.home() / \"\.deepblue\"|Path.home() / \".${PLUGIN_NAME}\"|g" \
+    -e "s|${FROM_PLUGIN_NAME_UPPER}_|${PLUGIN_NAME_UPPER}_|g" \
+    -e "s|~/\.${FROM_PLUGIN_NAME}|~/.${PLUGIN_NAME}|g" \
+    -e "s|\${HOME}/\.${FROM_PLUGIN_NAME}|\${HOME}/.${PLUGIN_NAME}|g" \
+    -e "s|Path\.home() / \"\.${FROM_PLUGIN_NAME}\"|Path.home() / \".${PLUGIN_NAME}\"|g" \
     "${TARGET_FILES[@]}"
 
   echo "  Python インポート・モジュール..."
   sed "${SED_INPLACE[@]}" \
-    -e "s|from deepblue|from ${PLUGIN_NAME}|g" \
-    -e "s|import deepblue\b|import ${PLUGIN_NAME}|g" \
-    -e "s|deepblue\.|${PLUGIN_NAME}.|g" \
-    -e "s|-m deepblue\.|-m ${PLUGIN_NAME}.|g" \
-    "${TARGET_FILES[@]}"
-
-  echo "  ヘルパー関数名..."
-  sed "${SED_INPLACE[@]}" \
-    -e "s|deepblue_plugin_root|${PLUGIN_NAME}_plugin_root|g" \
-    -e "s|deepblue_run\b|${PLUGIN_NAME}_run|g" \
-    -e "s|deepblue_mem_json|${PLUGIN_NAME}_mem_json|g" \
-    -e "s|deepblue_mem_search|${PLUGIN_NAME}_mem_search|g" \
+    -e "s|from ${FROM_PLUGIN_NAME}|from ${PLUGIN_NAME}|g" \
+    -e "s|import ${FROM_PLUGIN_NAME}\b|import ${PLUGIN_NAME}|g" \
+    -e "s|${FROM_PLUGIN_NAME}\.|${PLUGIN_NAME}.|g" \
+    -e "s|-m ${FROM_PLUGIN_NAME}\.|-m ${PLUGIN_NAME}.|g" \
     "${TARGET_FILES[@]}"
 
   echo "  パッケージ・ディレクトリ参照..."
   sed "${SED_INPLACE[@]}" \
-    -e "s|src/deepblue|src/${PLUGIN_NAME}|g" \
-    -e "s|\"deepblue\"|\"${PLUGIN_NAME}\"|g" \
+    -e "s|src/${FROM_PLUGIN_NAME}|src/${PLUGIN_NAME}|g" \
+    -e "s|\"${FROM_PLUGIN_NAME}\"|\"${PLUGIN_NAME}\"|g" \
     "${TARGET_FILES[@]}"
 
-  echo "  残余 deepblue..."
+  echo "  残余..."
   sed "${SED_INPLACE[@]}" \
-    -e "s|deepblue|${PLUGIN_NAME}|g" \
-    -e "s|DEEPBLUE|${PLUGIN_NAME_UPPER}|g" \
+    -e "s|${FROM_PLUGIN_NAME}|${PLUGIN_NAME}|g" \
+    -e "s|${FROM_PLUGIN_NAME_UPPER}|${PLUGIN_NAME_UPPER}|g" \
     "${TARGET_FILES[@]}"
 fi
 
 echo ""
 echo "Step 3: 残留チェック..."
-RESIDUAL=$(grep -r "deepblue\|DEEPBLUE\|aokumablue" "${REPO_DIR}" \
-  --include="*.py" --include="*.sh" --include="*.toml" --include="*.json" \
+RESIDUAL=$(grep -r "${FROM_PLUGIN_NAME}\|${FROM_PLUGIN_NAME_UPPER}\|${FROM_AUTHOR_NAME}" \
+  "${REPO_DIR}" \
+  --include="*.py" --include="*.sh" --include="*.md" \
+  --include="*.toml" --include="*.json" --include="*.txt" \
+  --include="*.html" --include="*.in" \
   --exclude-dir=".git" \
   -l 2>/dev/null \
   | grep -v -e "^${SCRIPT_DIR}/rename\.sh$" -e "^${SCRIPT_DIR}/rename-config\.json$" || true)
@@ -208,7 +186,7 @@ if [[ -n "${RESIDUAL}" ]]; then
   echo "  [Warning] 以下のファイルに置換漏れの可能性があります:"
   echo "${RESIDUAL}" | while read -r f; do
     echo "    ${f}"
-    grep -n "deepblue\|DEEPBLUE\|aokumablue" "${f}" | head -5 | \
+    grep -n "${FROM_PLUGIN_NAME}\|${FROM_PLUGIN_NAME_UPPER}\|${FROM_AUTHOR_NAME}" "${f}" | head -5 | \
       sed 's/^/      /'
   done
 else

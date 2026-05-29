@@ -1,6 +1,6 @@
 {
+  "from_plugin_name": "deepblue",
+  "from_author_name": "aokumablue",
   "plugin_name": "hogeplugin",
-  "author_name": "hogename",
-  "author_url": "https://github.com/hogename",
-  "repo_url": "https://github.com/hogename/hogeplugin"
+  "author_name": "hogename"
 }
