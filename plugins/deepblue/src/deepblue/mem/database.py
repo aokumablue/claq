@@ -44,7 +44,10 @@ def _make_prompt_hash(prompt: str) -> str:
 
 
 class Database:
+    """SQLite による永続メモリストア（FTS5 trigram + sqlite-vec）。"""
+
     def __init__(self, db_path: str | Path) -> None:
+        """DB へ接続し、スキーマ初期化・マイグレーション・最適化 PRAGMA を適用する。"""
         path = Path(db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         _existed = path.exists()
@@ -60,6 +63,7 @@ class Database:
         self.conn.execute("PRAGMA cache_size = -64000")
 
     def _init_schema(self) -> None:
+        """基本スキーマ・FTS5・sqlite-vec（任意）を作成する。"""
         cur = self.conn.cursor()
         cur.executescript(_SCHEMA_SQL)
 
@@ -81,13 +85,7 @@ class Database:
         self.conn.commit()
 
     def _migrate(self) -> None:
-        """マイグレーション管理テーブルを使い、未適用のみ実行する"""
-        self.conn.execute("""
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version TEXT PRIMARY KEY,
-        applied_at_epoch INTEGER NOT NULL
-      )
-    """)
+        """マイグレーション管理テーブル（schema_migrations は _SCHEMA_SQL で作成済み）を使い、未適用のみ実行する。"""
         applied = {r[0] for r in self.conn.execute("SELECT version FROM schema_migrations").fetchall()}
         for version, sqls in _MIGRATIONS:
             if version not in applied:
@@ -100,6 +98,7 @@ class Database:
         self.conn.commit()
 
     def close(self) -> None:
+        """DB 接続を閉じる。"""
         self.conn.close()
 
     # --- セッション ---
@@ -153,8 +152,7 @@ class Database:
         if not chunk.id:
             chunk.id = generate_uuid()
 
-        import sys
-        max_retries = sys.modules[__name__]._STORE_CHUNK_MAX_RETRIES
+        max_retries = _STORE_CHUNK_MAX_RETRIES
         for attempt in range(max_retries):
             try:
                 cur = self.conn.execute(
@@ -218,6 +216,7 @@ class Database:
         raise AssertionError("unreachable")  # pragma: no cover
 
     def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:
+        """セッションのチャンクを chunk_index 順に取得する。"""
         rows = self.conn.execute(
             "SELECT * FROM memory_chunks WHERE session_id = ? ORDER BY chunk_index",
             (session_id,),
@@ -225,6 +224,7 @@ class Database:
         return [_row_to_chunk(r) for r in rows]
 
     def get_chunk_by_id(self, chunk_id: str) -> MemoryChunk | None:
+        """id でチャンクを取得する。存在しなければ None。"""
         row = self.conn.execute("SELECT * FROM memory_chunks WHERE id = ?", (chunk_id,)).fetchone()
         return _row_to_chunk(row) if row else None
 
@@ -240,6 +240,7 @@ class Database:
         return {r["id"]: _row_to_chunk(r) for r in rows}
 
     def get_next_chunk_index(self, session_id: str) -> int:
+        """セッション内で次に割り当てる chunk_index を返す。"""
         row = self.conn.execute(
             "SELECT MAX(chunk_index) as mx FROM memory_chunks WHERE session_id = ?",
             (session_id,),

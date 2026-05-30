@@ -154,7 +154,7 @@ def handle_session_end(
 ) -> None:
     """SessionEnd: 埋め込み一括生成 + FTS5 最適化"""
     from deepblue.mem.bridge import sync_session_to_observations
-    from deepblue.mem.compaction import detect_low_quality, find_near_duplicates, optimize_db
+    from deepblue.mem.compaction import detect_low_quality, optimize_db
 
     session_id = str(stdin_data.get("session_id", "") or "")
 
@@ -188,8 +188,6 @@ def handle_session_end(
                 if time_module.time() - settings.last_compacted_at >= interval_sec:
                     try:
                         low_quality_ids = detect_low_quality(db)
-                        near_dup_pairs = find_near_duplicates(db)
-                        # TODO: near_dup_pairs の重複削除処理を実装する
                         if low_quality_ids:
                             placeholders = ",".join("?" * len(low_quality_ids))
                             db.conn.execute(
@@ -200,11 +198,7 @@ def handle_session_end(
                         optimize_db(db)
                         settings.last_compacted_at = time_module.time()
                         settings.save_sync_state()
-                        log.info(
-                            "自動圧縮完了: 削除=%d 重複ペア=%d",
-                            len(low_quality_ids),
-                            len(near_dup_pairs),
-                        )
+                        log.info("自動圧縮完了: 削除=%d", len(low_quality_ids))
                     except Exception as e:
                         log.warning("自動圧縮エラー: %s", e)
     except Exception as e:
@@ -218,15 +212,13 @@ def handle_compact(
     log: Any,
 ) -> None:
     """メモリ圧縮コマンド（既定で実行）"""
-    from deepblue.mem.compaction import detect_low_quality, find_near_duplicates, optimize_db
+    from deepblue.mem.compaction import detect_low_quality, optimize_db
 
     try:
         with open_db(settings) as db:
             low_quality_ids = detect_low_quality(db)
-            near_dup_pairs = find_near_duplicates(db)
 
             print(f"削除候補: {len(low_quality_ids)} 件")
-            print(f"重複ペア: {len(near_dup_pairs)} 件")
 
             if low_quality_ids:
                 placeholders = ",".join("?" * len(low_quality_ids))

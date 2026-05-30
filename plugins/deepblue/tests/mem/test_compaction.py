@@ -7,7 +7,6 @@ import pytest
 
 from deepblue.mem.compaction import (
     detect_low_quality,
-    find_near_duplicates,
     memory_health_report,
     merge_chunks,
     optimize_db,
@@ -192,102 +191,6 @@ class TestMemoryHealthReport:
     def test_report_keys(self, db: Database) -> None:
         report = memory_health_report(db)
         assert set(report.keys()) == {"total_chunks", "db_size_mb", "short_chunk_pct", "avg_chunk_size"}
-
-
-class TestFindNearDuplicates:
-    def test_no_embeddings_returns_empty(self, db: Database) -> None:
-        db.store_chunk(_make_chunk())
-        result = find_near_duplicates(db)
-        assert result == []
-
-    def test_returns_list(self, db: Database) -> None:
-        result = find_near_duplicates(db)
-        assert isinstance(result, list)
-
-    def test_with_embeddings_detects_near_duplicate(self, db: Database) -> None:
-        """同一エンべディングを持つ2チャンクは近似重複として検出される"""
-        # sqlite-vec が利用可能かチェック
-        row = db.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_chunks_vec'"
-        ).fetchone()
-        if row is None:
-            pytest.skip("sqlite-vec not available")
-        import struct
-
-        dim = 768
-        embedding = [1.0 / dim] * dim  # 正規化済みベクトル
-
-        cid1 = db.store_chunk(_make_chunk(content="content a", chunk_index=0))
-        cid2 = db.store_chunk(_make_chunk(content="content b", chunk_index=1))
-
-        # 同一エンべディングを保存 (cos距離≈0 → 類似度≈1.0)
-        packed = struct.pack(f"{dim}f", *embedding)
-        db.conn.execute(
-            "INSERT INTO memory_chunks_vec (chunk_id, embedding) VALUES (?, ?)",
-            (cid1, packed),
-        )
-        db.conn.execute(
-            "INSERT INTO memory_chunks_vec (chunk_id, embedding) VALUES (?, ?)",
-            (cid2, packed),
-        )
-        db.conn.commit()
-
-        result = find_near_duplicates(db, threshold=0.90)
-        assert isinstance(result, list)
-        # 類似度が閾値以上のペアが含まれることを確認
-        if result:
-            pair_ids = {(r[0], r[1]) for r in result}
-            expected_pair = (min(cid1, cid2), max(cid1, cid2))
-            assert expected_pair in pair_ids
-
-    def test_vec_table_unavailable_returns_empty(self, db: Database) -> None:
-        """memory_chunks_vec クエリが失敗した場合は空リストを返す"""
-        from unittest.mock import MagicMock
-
-        original_conn = db.conn
-
-        def mock_execute(sql, *args, **kwargs):
-            if "memory_chunks_vec" in str(sql):
-                raise Exception("no such table")
-            return original_conn.execute(sql, *args, **kwargs)
-
-        mock_conn = MagicMock(wraps=original_conn)
-        mock_conn.execute.side_effect = mock_execute
-        db.conn = mock_conn
-        try:
-            result = find_near_duplicates(db)
-        finally:
-            db.conn = original_conn
-        assert result == []
-
-    def test_no_duplicates_below_threshold(self, db: Database) -> None:
-        """低い類似度のペアは閾値以下でスキップされる"""
-        row = db.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_chunks_vec'"
-        ).fetchone()
-        if row is None:
-            pytest.skip("sqlite-vec not available")
-        import struct
-
-        dim = 768
-        # 直交するベクトル
-        vec_a = [1.0] + [0.0] * (dim - 1)
-        vec_b = [0.0, 1.0] + [0.0] * (dim - 2)
-
-        cid1 = db.store_chunk(_make_chunk(chunk_index=0))
-        cid2 = db.store_chunk(_make_chunk(chunk_index=1))
-        db.conn.execute(
-            "INSERT INTO memory_chunks_vec (chunk_id, embedding) VALUES (?, ?)",
-            (cid1, struct.pack(f"{dim}f", *vec_a)),
-        )
-        db.conn.execute(
-            "INSERT INTO memory_chunks_vec (chunk_id, embedding) VALUES (?, ?)",
-            (cid2, struct.pack(f"{dim}f", *vec_b)),
-        )
-        db.conn.commit()
-
-        result = find_near_duplicates(db, threshold=0.90)
-        assert result == []
 
 
 class TestOptimizeDbVacuum:

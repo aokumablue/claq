@@ -28,10 +28,16 @@ _PROMPT_PATTERN = re.compile(
 
 
 def _resolve_python_cmd() -> str:
+    """現在の Python 実行ファイルのパスを返す。"""
     return sys.executable or "python3"
 
 
 def _project_context() -> dict:
+    """環境変数または検出結果からプロジェクトのパス情報をまとめて返す。
+
+    Returns:
+        プロジェクト ID・名前・各種ディレクトリ（Path）を含む辞書。
+    """
     project_dir_env = os.environ.get("PROJECT_DIR")
     project_root_env = os.environ.get("PROJECT_ROOT")
     if project_dir_env and project_root_env:
@@ -63,10 +69,15 @@ def _project_context() -> dict:
 
 
 def _pid_file_candidates(project_dir: Path) -> list[Path]:
+    """PID ファイルの探索候補パス一覧を返す。"""
     return [project_dir / ".observer.pid", _CONFIG_DIR / ".observer.pid"]
 
 
 def _is_running(pid_file: Path) -> bool:
+    """PID ファイルが示すプロセスが稼働中か判定する。
+
+    無効・終了済みの場合は PID ファイルを削除して False を返す。
+    """
     if not pid_file.exists():
         return False
 
@@ -98,6 +109,11 @@ def _is_running(pid_file: Path) -> bool:
 
 
 def _stop_running_observer(pid_file: Path) -> bool:
+    """PID ファイルが示すプロセスへ SIGTERM を送り停止する。
+
+    Returns:
+        停止シグナルを送れた場合は True、未起動・無効なら False。
+    """
     if not pid_file.exists():
         return False
 
@@ -139,16 +155,19 @@ def _stop_running_observer(pid_file: Path) -> bool:
 
 
 def _observer_log_path(project_dir: Path) -> Path:
+    """observer ログファイルのパスを返す。"""
     return project_dir / "observer.log"
 
 
 def _sentinel_path(project_dir: Path, project_root: Path) -> Path:
+    """ガード用センチネル（ロック）ファイルのパスを返す。"""
     if project_root.exists():
         return project_root / ".observer.lock"
     return project_dir / ".observer.lock"
 
 
 def _write_guard_sentinel(project_dir: Path, project_root: Path) -> None:
+    """確認・許可プロンプト検出時に observer 一時停止を示すセンチネルを書き出す。"""
     sentinel = _sentinel_path(project_dir, project_root)
     sentinel.parent.mkdir(parents=True, exist_ok=True)
     sentinel.write_text(
@@ -158,6 +177,7 @@ def _write_guard_sentinel(project_dir: Path, project_root: Path) -> None:
 
 
 def _log_tail(path: Path, start_line: int) -> str:
+    """ログファイルの指定行以降を結合した文字列を返す。"""
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -166,6 +186,11 @@ def _log_tail(path: Path, start_line: int) -> str:
 
 
 def _print_status(project_dir: Path, pid_file: Path, log_file: Path, instincts_dir: Path, observations_file: Path) -> int:
+    """observer の稼働状況・観測数・インスティンクト数を表示する。
+
+    Returns:
+        稼働中なら 0、未起動なら 1。
+    """
     if _is_running(pid_file):
         pid = pid_file.read_text(encoding="utf-8").strip()
         print(f"Observer is running (PID: {pid})")
@@ -191,6 +216,7 @@ def _print_status(project_dir: Path, pid_file: Path, log_file: Path, instincts_d
 
 
 def _run_prune() -> None:
+    """learn CLI の prune サブコマンドを静かに実行する。"""
     try:
         subprocess.run(
             [_resolve_python_cmd(), "-m", "deepblue.skills.learn.cli", "prune", "--quiet"],
@@ -203,6 +229,10 @@ def _run_prune() -> None:
 
 
 def _get_idle_seconds() -> int:
+    """OS ごとの方法でユーザー操作のアイドル秒数を返す。
+
+    取得できない場合や未対応 OS では 0 を返す。
+    """
     system = platform.system()
     if system == "Darwin":
         try:
@@ -256,6 +286,11 @@ def _get_idle_seconds() -> int:
 
 
 def _guardian_allows(project_dir: Path, project_root: Path, log_file: Path) -> bool:
+    """アクティブ時間帯・クールダウン・アイドル状態を確認し解析実行可否を判定する。
+
+    Returns:
+        解析を実行してよい場合は True、抑止すべき場合は False。
+    """
     interval = int(os.environ.get("OBSERVER_INTERVAL_SECONDS", "300"))
     last_run_log = Path(os.environ.get("OBSERVER_LAST_RUN_LOG", str(get_deepblue_dir() / "observer-last-run.log")))
     active_start = int(os.environ.get("OBSERVER_ACTIVE_HOURS_START", "800"))
@@ -318,6 +353,7 @@ def _guardian_allows(project_dir: Path, project_root: Path, log_file: Path) -> b
 
 
 def _append_log(path: Path, message: str) -> None:
+    """タイムスタンプ付きメッセージをログファイルへ追記する。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(f"[{time.strftime('%c')}] {message}\n")
@@ -334,6 +370,11 @@ def _analyze_observations(
     min_observations: int,
     analysis_cooldown: int,
 ) -> None:
+    """観測ログを claude CLI に渡してインスティンクト候補を抽出・書き出す。
+
+    閾値・ガード・プラットフォーム条件を満たす場合のみ解析を実行し、
+    完了後は観測ファイルをアーカイブする。
+    """
     if not observations_file.exists():
         return
 
@@ -477,6 +518,11 @@ def _loop_once(
     wake_event: threading.Event,
     state: dict,
 ) -> None:
+    """1 サイクル分の解析を実行する。
+
+    解析中フラグやクールダウンを確認し、条件を満たす場合のみ
+    _analyze_observations を呼び出して状態を更新する。
+    """
     if state.get("analyzing"):
         _append_log(log_file, "Analysis already in progress, skipping signal")
         return
@@ -506,6 +552,7 @@ def _loop_once(
 
 
 def _run_loop(project_dir: Path, project_root: Path, log_file: Path, pid_file: Path, observations_file: Path, instincts_dir: Path, project_name: str, project_id: str, min_observations: int, interval_seconds: int) -> int:
+    """observer のメインループ。一定間隔または SIGUSR1 受信で解析を回す。"""
     pid_file.write_text(str(os.getpid()), encoding="utf-8")
     _append_log(log_file, f"Observer started for {project_name} (PID: {os.getpid()})")
     _run_prune()
@@ -514,6 +561,7 @@ def _run_loop(project_dir: Path, project_root: Path, log_file: Path, pid_file: P
     state: dict[str, int | bool] = {"analyzing": False, "last_analysis_epoch": 0}
 
     def _on_usr1(signum, frame):  # noqa: ANN001, ARG001
+        """SIGUSR1 ハンドラ。ループの早期起床を要求する。"""
         wake_event.set()
         state["usr1_fired"] = True
 
@@ -542,6 +590,13 @@ def _run_loop(project_dir: Path, project_root: Path, log_file: Path, pid_file: P
 
 
 def _start_observer(project: dict, reset: bool) -> int:
+    """observer プロセスをバックグラウンド起動する。
+
+    既存稼働の確認、起動直後のプロンプト検出によるフェイルクローズを行う。
+
+    Returns:
+        終了コード（0=起動/既存稼働、1=起動失敗、2=プロンプト検出による中止）。
+    """
     project_dir = Path(project["project_dir"])
     pid_file = project_dir / ".observer.pid"
     log_file = _observer_log_path(project_dir)
@@ -616,6 +671,11 @@ def _start_observer(project: dict, reset: bool) -> int:
 
 
 def _stop_observer(project: dict) -> int:
+    """対象プロジェクトの observer を停止する。
+
+    Returns:
+        停止できた場合は 0、未起動なら 1。
+    """
     project_dir = Path(project["project_dir"])
     pid_file = project_dir / ".observer.pid"
     if _stop_running_observer(pid_file):
@@ -628,6 +688,11 @@ def _stop_observer(project: dict) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI エントリポイント。start/stop/status/loop を解釈して実行する。
+
+    Returns:
+        各サブコマンドの終了コード。
+    """
     args = list(sys.argv[1:] if argv is None else argv)
     action = "start"
     reset = False

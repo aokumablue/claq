@@ -106,6 +106,7 @@ class PgDatabase:
     _PROBE_TTL: float = 300.0
 
     def __init__(self, postgres_url: str, *, use_pool: bool = True) -> None:
+        """接続 URL を保持して初期化する（接続は遅延・任意でプール使用）。"""
         self._url = postgres_url
         self._conn: psycopg.Connection | None = None
         self._pool = None
@@ -801,6 +802,7 @@ class PgDatabase:
             self._put_conn(conn)
 
         def _parse_list(val: object) -> list[str]:
+            """list か JSON 文字列を文字列リストに正規化する（失敗時は空リスト）。"""
             if isinstance(val, list):
                 return [str(x) for x in val]
             if isinstance(val, str) and val:

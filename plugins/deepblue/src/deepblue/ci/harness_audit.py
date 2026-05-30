@@ -121,6 +121,7 @@ def read_text(root_dir: str | Path, relative_path: str) -> str:
 
 
 def _walk_dir(root_path: Path):
+    """ディレクトリ以下のエントリを再帰的に走査して順次返す。"""
     stack = [root_path]
     while stack:
         current = stack.pop()

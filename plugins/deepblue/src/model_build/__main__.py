@@ -81,6 +81,7 @@ def _cmd_build(args: argparse.Namespace) -> None:
 
         # tokenizer.json / config.json をコピーして SHA256 を計算
         def _sha256(p: Path) -> str:
+            """ファイルを分割読み込みして SHA256 ハッシュを 16 進文字列で返す。"""
             h = hashlib.sha256()
             with p.open("rb") as f:
                 for chunk in iter(lambda: f.read(1024 * 1024), b""):

@@ -43,6 +43,25 @@ class TestRedact:
             ("file_path", "/home/user/dev/project/src/main.py", False),
             # 短い hex は変更なし（31 文字以下）
             ("short_hex", "deadbeef01234567", False),
+            # 40 桁の大文字 SHA-1 commit hash は base64_long で誤検出しない
+            # （小文字は hex_secret が拾うが、大文字/混在は hex_secret 対象外）
+            ("sha1_upper_commit", "DA39A3EE5E6B4B0D3255BFEF95601890AFD80709", False),
+            # 40 桁の混在ケース commit hash も誤検出しない
+            ("sha1_mixed_commit", "Da39A3ee5E6b4B0d3255Bfef95601890AfD80709", False),
+            # 64 桁の大文字 SHA-256 hash も誤検出しない
+            (
+                "sha256_upper",
+                "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+                False,
+            ),
+            # base64 シークレット（32 バイト鍵 = 44 文字、非 hex 文字を含む）は依然マスクされる
+            ("base64_secret_44", "PsmIacDP/C7LZ/t/GVR8rx8Sl0yQ/Wh8Mzwm6Zy/ww4=", True),
+            # 非 hex 文字を含む 64 文字 base64（48 バイト鍵）も依然マスクされる
+            (
+                "base64_secret_64",
+                "WWQjq6fc3tLz3+KfcziN7rO+GkNwpSA6d6c9Qg3HvhSFUt5gjmio8mHpIEVzVkOx",
+                True,
+            ),
         ],
     )
     def test_redact(self, name: str, text: str, should_redact: bool) -> None:

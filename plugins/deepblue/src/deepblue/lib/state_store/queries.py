@@ -233,6 +233,7 @@ class QueryApi:
     """state store 用クエリ API。"""
 
     def __init__(self, conn: sqlite3.Connection):
+        """SQLite 接続を受け取りクエリ API を初期化する。"""
         self._conn = conn
 
     def get_session_by_id(self, session_id: str) -> Session | None:

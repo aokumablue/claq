@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """comply CLI のエントリポイント。引数を解析してスキルのコンプライアンス計測を実行する。"""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     parser = argparse.ArgumentParser(

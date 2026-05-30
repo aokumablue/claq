@@ -11,14 +11,23 @@ log = _get_logger("DASHBOARD")
 
 
 def activity_by_user(pg: PgDatabase, days: int = 30) -> list[dict[str, Any]]:
-    """ユーザー別アクティビティ（チャンク数）"""
+    """ユーザー別アクティビティ（チャンク数）。
+
+    Args:
+        pg: PostgreSQL データベースハンドル。
+        days: 集計対象とする直近の日数。
+
+    Returns:
+        ``user`` と ``chunks`` を持つ辞書のリスト（チャンク数降順）。
+    """
+    days = int(days)
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT origin_user, COUNT(*) AS chunk_count
            FROM memory_chunks
-           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - INTERVAL '%s days')
+           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - make_interval(days => %s))
            GROUP BY origin_user
            ORDER BY chunk_count DESC""",
                 (days,),
@@ -30,13 +39,14 @@ def activity_by_user(pg: PgDatabase, days: int = 30) -> list[dict[str, Any]]:
 
 def activity_by_project(pg: PgDatabase, days: int = 30) -> list[dict[str, Any]]:
     """プロジェクト別アクティビティ"""
+    days = int(days)
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT project, COUNT(*) AS chunk_count
            FROM memory_chunks
-           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - INTERVAL '%s days')
+           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - make_interval(days => %s))
            GROUP BY project
            ORDER BY chunk_count DESC""",
                 (days,),
@@ -48,6 +58,7 @@ def activity_by_project(pg: PgDatabase, days: int = 30) -> list[dict[str, Any]]:
 
 def tool_usage_distribution(pg: PgDatabase, days: int = 30) -> list[dict[str, Any]]:
     """ツール使用分布"""
+    days = int(days)
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
@@ -55,7 +66,7 @@ def tool_usage_distribution(pg: PgDatabase, days: int = 30) -> list[dict[str, An
                 """SELECT tool, COUNT(*) AS usage_count
            FROM memory_chunks,
                 LATERAL jsonb_array_elements_text(tool_names::jsonb) AS tool
-           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - INTERVAL '%s days')
+           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - make_interval(days => %s))
              AND tool_names IS NOT NULL AND tool_names != 'null'
            GROUP BY tool
            ORDER BY usage_count DESC
@@ -69,6 +80,7 @@ def tool_usage_distribution(pg: PgDatabase, days: int = 30) -> list[dict[str, An
 
 def session_timeline(pg: PgDatabase, days: int = 30) -> list[dict[str, Any]]:
     """日次セッションタイムライン"""
+    days = int(days)
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
@@ -77,7 +89,7 @@ def session_timeline(pg: PgDatabase, days: int = 30) -> list[dict[str, Any]]:
                   COUNT(DISTINCT session_id) AS sessions,
                   COUNT(*) AS chunks
            FROM memory_chunks
-           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - INTERVAL '%s days')
+           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - make_interval(days => %s))
            GROUP BY day
            ORDER BY day""",
                 (days,),
@@ -89,6 +101,7 @@ def session_timeline(pg: PgDatabase, days: int = 30) -> list[dict[str, Any]]:
 
 def instinct_growth(pg: PgDatabase, days: int = 90) -> list[dict[str, Any]]:
     """インスティンクト成長推移"""
+    days = int(days)
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
@@ -97,7 +110,7 @@ def instinct_growth(pg: PgDatabase, days: int = 90) -> list[dict[str, Any]]:
                   COUNT(*) AS new_instincts,
                   AVG(confidence) AS avg_confidence
            FROM instincts
-           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - INTERVAL '%s days')
+           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - make_interval(days => %s))
            GROUP BY day
            ORDER BY day""",
                 (days,),
@@ -143,6 +156,7 @@ def memory_quality_metrics(pg: PgDatabase) -> dict[str, Any]:
 
 def file_change_heatmap(pg: PgDatabase, days: int = 30) -> list[dict[str, Any]]:
     """ファイル変更頻度ヒートマップ"""
+    days = int(days)
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
@@ -150,7 +164,7 @@ def file_change_heatmap(pg: PgDatabase, days: int = 30) -> list[dict[str, Any]]:
                 """SELECT file_path, COUNT(*) AS change_count
            FROM memory_chunks,
                 LATERAL jsonb_array_elements_text(files_modified::jsonb) AS file_path
-           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - INTERVAL '%s days')
+           WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - make_interval(days => %s))
              AND files_modified IS NOT NULL AND files_modified != 'null'
            GROUP BY file_path
            ORDER BY change_count DESC

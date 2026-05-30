@@ -130,6 +130,8 @@ _PYTEST_FAIL = re.compile(r"^FAILED\s+(?P<test>[^\s]+)\s+-\s+(?P<reason>.+)$")
 
 @dataclass
 class _LintGroup:
+    """同一ルールの lint 結果を件数・対象ファイルとともに集約する。"""
+
     rule: str
     severity: str
     count: int = 0

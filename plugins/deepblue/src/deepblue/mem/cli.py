@@ -40,6 +40,7 @@ _CommandHandler = Callable[[Settings, dict[str, Any]], str | None]
 
 @contextmanager
 def _open_db(settings: Settings):
+    """Database を開き、終了時に必ず close するコンテキストマネージャ。"""
     from deepblue.mem.database import Database
 
     db = Database(settings.db_path)
@@ -101,6 +102,7 @@ def embed(texts: list[str]) -> list[list[float]]:
 
 
 def main() -> int:
+    """CLI エントリポイント。コマンドを解釈して実行し終了コードを返す。"""
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
         command = sys.argv[1] if len(sys.argv) >= 2 else ""
         if command in _SESSION_START_COMMANDS:
@@ -214,6 +216,7 @@ def _remove_db_artifacts(db_path: Path) -> None:
 
 
 def _handle_context(settings: Settings, stdin_data: dict) -> str:
+    """context コマンド: ローカル DB から <mem-context> を構築する。"""
     return _session_handlers.handle_context(
         settings,
         stdin_data,
@@ -224,6 +227,7 @@ def _handle_context(settings: Settings, stdin_data: dict) -> str:
 
 
 def _handle_search(settings: Settings, stdin_data: dict) -> None:
+    """search コマンド: ローカル DB を検索する。"""
     _search_handlers.handle_search(
         settings,
         stdin_data,
@@ -235,6 +239,7 @@ def _handle_search(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_session_init(settings: Settings, stdin_data: dict) -> None:
+    """session-init コマンド: セッションを初期化し適応的メモリを注入する。"""
     _session_handlers.handle_session_init(
         settings,
         stdin_data,
@@ -245,6 +250,7 @@ def _handle_session_init(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_observe(settings: Settings, stdin_data: dict) -> None:
+    """observe コマンド: ツール使用チャンクを保存する。"""
     _session_handlers.handle_observe(
         settings,
         stdin_data,
@@ -255,6 +261,7 @@ def _handle_observe(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_session_end(settings: Settings, stdin_data: dict) -> None:
+    """session-end コマンド: 現セッションを埋め込み生成しコンパクションする。"""
     _session_handlers.handle_session_end(
         settings,
         stdin_data,
@@ -266,10 +273,12 @@ def _handle_session_end(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_compact(settings: Settings) -> None:
+    """compact コマンド: メモリコンパクションを実行する。"""
     _session_handlers.handle_compact(settings, open_db=_open_db, log=log)
 
 
 def _handle_search_structured(settings: Settings, stdin_data: dict) -> None:
+    """search-structured コマンド: フィルタ付き構造化検索を実行する。"""
     _search_handlers.handle_search_structured(
         settings,
         stdin_data,
@@ -288,6 +297,7 @@ def _apply_structured_filters(
     date_from: int | str | None,
     date_to: int | str | None,
 ) -> list[int]:
+    """候補 ID 群にツール名・ファイルパターン・日付範囲のフィルタを適用する。"""
     return _search_handlers.apply_structured_filters(
         db,
         candidate_ids,
@@ -299,10 +309,12 @@ def _apply_structured_filters(
 
 
 def _parse_date_to_epoch(value: int | str | None) -> int | None:
+    """日付文字列または epoch を epoch 秒に変換する。"""
     return _search_handlers.parse_date_to_epoch(value)
 
 
 def _handle_record(settings: Settings, stdin_data: dict) -> None:
+    """record コマンド: コマンド/スキル/エージェントのイベントを明示的に記録する。"""
     _record_handlers.handle_record(
         settings,
         stdin_data,
@@ -319,6 +331,7 @@ def _get_project(stdin_data: dict) -> str:
 
 
 def _coerce_int(value: object, default: int) -> int:
+    """値を非負整数に変換する。失敗時は default を返す。"""
     try:
         return max(0, int(value))
     except (TypeError, ValueError):
@@ -331,10 +344,12 @@ def _merge_search_results_rrf(
     top_k: int = 3,
     k: int = 60,
 ) -> list[SearchResult]:
+    """ローカルとチームの検索結果を RRF で統合し上位を返す。"""
     return _search_handlers.merge_search_results_rrf(local_results, team_results, top_k=top_k, k=k)
 
 
 def _render_adaptive_context(db: Database, results: list[SearchResult], max_tokens: int = 400) -> str:
+    """検索結果をトークン上限に収まるよう適応的にレンダリングする。"""
     return _search_handlers.render_adaptive_context(db, results, max_tokens=max_tokens)
 
 
@@ -344,30 +359,37 @@ def _format_fields(
     files_modified: list[str],
     content: str,
 ) -> str:
+    """プロンプト・ツール名・変更ファイル・内容を表示用テキストに整形する。"""
     return _search_handlers.format_fields(user_prompt, tool_names, files_modified, content)
 
 
 def _format_chunk_from_result(result: SearchResult) -> str:
+    """SearchResult を表示用チャンク文字列に整形する。"""
     return _search_handlers.format_chunk_from_result(result)
 
 
 def _format_chunk(chunk: MemoryChunk) -> str:
+    """MemoryChunk を表示用チャンク文字列に整形する。"""
     return _search_handlers.format_chunk(chunk)
 
 
 def _format_timestamp(epoch: int) -> str:
+    """epoch 秒を表示用のタイムスタンプ文字列に整形する。"""
     return _search_handlers.format_timestamp(epoch)
 
 
 def _truncate(text: str, max_len: int) -> str:
+    """テキストを max_len で切り詰める。"""
     return _search_handlers.truncate(text, max_len)
 
 
 def _slim_prompt(text: str, max_len: int = 160) -> str:
+    """プロンプト文字列を表示用に簡潔化・切り詰めする。"""
     return _search_handlers.slim_prompt(text, max_len=max_len)
 
 
 def _slim_context_content(text: str, *, max_prose_lines: int = 6, max_prose_line_length: int = 160) -> str:
+    """コンテキスト本文を行数・行長の上限に収まるよう簡潔化する。"""
     return _search_handlers.slim_context_content(
         text,
         max_prose_lines=max_prose_lines,
@@ -447,18 +469,22 @@ def _handle_migrate_settings(settings: Settings) -> None:  # noqa: ARG001
 
 
 def _handle_sync(settings: Settings, stdin_data: dict) -> None:
+    """sync コマンド: ローカル SQLite を PostgreSQL に同期する。"""
     _sync_handlers.handle_sync(settings, stdin_data)
 
 
 def _handle_sync_check(settings: Settings) -> None:
+    """sync-check コマンド: 同期間隔を確認し必要なら同期する。"""
     _sync_handlers.handle_sync_check(settings, log=log)
 
 
 def _count_lines(path: Path) -> int:
+    """ファイルの行数を返す。"""
     return _dashboard_handlers.count_lines(path)
 
 
 def _collect_project_overview() -> dict:
+    """ダッシュボード用のプロジェクト概要を収集する。"""
     return _dashboard_handlers.collect_project_overview(
         count_lines_fn=_count_lines,
         log=log,
@@ -466,14 +492,17 @@ def _collect_project_overview() -> dict:
 
 
 def _collect_skill_health_overview(options: dict[str, object]) -> dict[str, object]:
+    """ダッシュボード用のスキル健全性概要を収集する。"""
     return _dashboard_handlers.collect_skill_health_overview(options, log=log)
 
 
 def _collect_skill_growth_overview(settings: Settings, days: int) -> dict[str, object]:
+    """ダッシュボード用のスキル成長概要を直近 days 日分収集する。"""
     return _dashboard_handlers.collect_skill_growth_overview(settings, days, log=log)
 
 
 def _handle_import(settings: Settings, stdin_data: dict) -> None:
+    """import コマンド: 外部データ（instincts/adrs/events）を mem に取り込む。"""
     _dashboard_handlers.handle_import(
         settings,
         stdin_data,
@@ -483,6 +512,7 @@ def _handle_import(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_dashboard(settings: Settings, stdin_data: dict) -> None:
+    """dashboard コマンド: PostgreSQL データから静的 HTML ダッシュボードを生成する。"""
     _dashboard_handlers.handle_dashboard(
         settings,
         stdin_data,
@@ -495,6 +525,7 @@ def _handle_dashboard(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_record_interaction(settings: Settings, stdin_data: dict) -> None:
+    """record-interaction コマンド: ユーザー/AI のやり取りを interaction_logs に記録する。"""
     _record_handlers.handle_record_interaction(
         settings,
         stdin_data,
@@ -506,6 +537,7 @@ def _handle_record_interaction(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_record_project_profile(settings: Settings, stdin_data: dict) -> str:
+    """record-project-profile コマンド: プロジェクトの技術スタックを project_profiles に upsert する。"""
     return _record_handlers.handle_record_project_profile(
         settings,
         stdin_data,
@@ -517,6 +549,7 @@ def _handle_record_project_profile(settings: Settings, stdin_data: dict) -> str:
 
 
 def _handle_get_project_profile(settings: Settings, stdin_data: dict) -> None:
+    """get-project-profile コマンド: project_profiles からプロジェクトの技術スタックを取得する。"""
     _record_handlers.handle_get_project_profile(
         settings,
         stdin_data,
@@ -528,6 +561,7 @@ def _handle_get_project_profile(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_record_item_run(settings: Settings, stdin_data: dict) -> None:
+    """record-item-run コマンド: スキル/コマンド/エージェントの実行を mem_item_runs に記録する。"""
     _record_handlers.handle_record_item_run(
         settings,
         stdin_data,
@@ -539,6 +573,7 @@ def _handle_record_item_run(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_team_context(settings: Settings, stdin_data: dict) -> str:
+    """team-context コマンド: PostgreSQL から <team-context> を注入する（FTS のみ、SessionStart）。"""
     return _team_handlers.handle_team_context(
         settings,
         stdin_data,
@@ -549,6 +584,7 @@ def _handle_team_context(settings: Settings, stdin_data: dict) -> str:
 
 
 def _handle_team_session_init(settings: Settings, stdin_data: dict) -> None:
+    """team-session-init コマンド: ハイブリッド検索で <team-context> を注入する（UserPromptSubmit）。"""
     _team_handlers.handle_team_session_init(
         settings,
         stdin_data,

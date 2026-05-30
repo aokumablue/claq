@@ -26,6 +26,8 @@ _ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 
 @dataclass(frozen=True)
 class ScenarioRun:
+    """シナリオ1回の実行結果（観測イベントとサンドボックス）を表す。"""
+
     scenario: Scenario
     observations: tuple[ObservationEvent, ...]
     sandbox_dir: Path

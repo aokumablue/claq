@@ -173,6 +173,7 @@ def improve_description(
 
 
 def main():
+    """improve_description CLI のエントリポイント。引数を解析してスキル説明の改善を実行する。"""
     parser = argparse.ArgumentParser(description="eval 結果に基づいてスキル説明を改善する")
     parser.add_argument("--eval-results", required=True, help="eval 結果 JSON へのパス（run_eval.py の出力）")
     parser.add_argument("--skill-path", required=True, help="スキルディレクトリへのパス")

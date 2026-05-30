@@ -10,6 +10,8 @@ from .parser import ComplianceSpec, ObservationEvent, Step
 
 @dataclass(frozen=True)
 class StepResult:
+    """単一ステップの採点結果（検出有無・根拠・失敗理由）を表す。"""
+
     step_id: str
     detected: bool
     evidence: tuple[ObservationEvent, ...]
@@ -18,6 +20,8 @@ class StepResult:
 
 @dataclass(frozen=True)
 class ComplianceResult:
+    """1シナリオに対する仕様全体の採点結果を表す。"""
+
     spec_id: str
     steps: tuple[StepResult, ...]
     compliance_rate: float

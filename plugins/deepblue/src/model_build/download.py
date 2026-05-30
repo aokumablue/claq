@@ -7,6 +7,7 @@ import ipaddress
 import json
 import shutil
 import ssl
+import sys
 import tarfile
 import tempfile
 import urllib.parse
@@ -107,6 +108,11 @@ def _download_archive(
     """URL からアーカイブをダウンロードする。リダイレクト先も再検証する。"""
     handlers: list[urllib.request.BaseHandler] = [_ValidatingRedirectHandler(extra_allowed_hosts, allow_http=allow_http)]
     if ssl_no_verify:
+        print(
+            "[download] WARNING: TLS 証明書検証が無効です（ssl_no_verify=true）。"
+            "中間者攻撃のリスクがあり本番環境では使用しないでください。",
+            file=sys.stderr,
+        )
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE

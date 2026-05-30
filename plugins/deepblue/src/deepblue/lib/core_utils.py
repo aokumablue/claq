@@ -272,6 +272,7 @@ def find_files(
     results: list[dict[str, Any]] = []
 
     def search_dir(current_dir: Path) -> None:
+        """ディレクトリを走査し、条件に合致するファイルを results に追加する。"""
         try:
             for entry in current_dir.iterdir():
                 if entry.is_file() and regex.match(entry.name):

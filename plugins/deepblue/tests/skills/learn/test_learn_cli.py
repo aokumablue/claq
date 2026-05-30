@@ -360,6 +360,124 @@ def test_validate_relative_path(tmp_path, monkeypatch):
 
 
 # ─────────────────────────────────────────────
+# _assert_safe_url / _fetch_url のテスト（SSRF 対策）
+# ─────────────────────────────────────────────
+
+_PUBLIC_ADDRINFO = [(2, 1, 6, "", ("93.184.216.34", 80))]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1/",  # ループバック
+        "http://169.254.169.254/latest/meta-data/",  # クラウドメタデータ（リンクローカル）
+        "http://10.0.0.1/",  # プライベート
+        "http://192.168.1.1/",  # プライベート
+        "http://[::1]/",  # IPv6 ループバック
+        "http://0.0.0.0/",  # 未指定
+    ],
+)
+def test_assert_safe_url_rejects_internal(url):
+    """内部・予約アドレスへの URL を拒否すること。"""
+    with pytest.raises(ValueError):
+        _mod._assert_safe_url(url)
+
+
+def test_assert_safe_url_rejects_bad_scheme():
+    """http/https 以外のスキームを拒否すること。"""
+    with pytest.raises(ValueError, match="scheme"):
+        _mod._assert_safe_url("file:///etc/passwd")
+
+
+def test_assert_safe_url_rejects_no_host():
+    """ホストのない URL を拒否すること。"""
+    with pytest.raises(ValueError, match="no host"):
+        _mod._assert_safe_url("http:///nohost")
+
+
+def test_assert_safe_url_rejects_unresolvable(monkeypatch):
+    """名前解決に失敗した場合は拒否すること。"""
+
+    def _boom(*_args, **_kwargs):
+        raise _mod.socket.gaierror("no such host")
+
+    monkeypatch.setattr(_mod.socket, "getaddrinfo", _boom)
+    with pytest.raises(ValueError, match="Cannot resolve"):
+        _mod._assert_safe_url("http://example.invalid/")
+
+
+def test_assert_safe_url_allows_public(monkeypatch):
+    """公開アドレスに解決される URL は通過すること。"""
+    monkeypatch.setattr(_mod.socket, "getaddrinfo", lambda *a, **k: _PUBLIC_ADDRINFO)
+    _mod._assert_safe_url("http://example.com/path")  # 例外が出ないこと
+
+
+def test_fetch_url_success(monkeypatch):
+    """検証通過後に本文を取得すること。"""
+    monkeypatch.setattr(_mod.socket, "getaddrinfo", lambda *a, **k: _PUBLIC_ADDRINFO)
+
+    class _FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"hello"
+
+    class _FakeOpener:
+        def open(self, _url):
+            return _FakeResp()
+
+    monkeypatch.setattr(_mod.urllib.request, "build_opener", lambda *a, **k: _FakeOpener())
+    assert _mod._fetch_url("http://example.com/x") == "hello"
+
+
+def test_fetch_url_blocks_internal_before_network():
+    """_fetch_url はネットワークアクセス前に内部アドレスを遮断すること。"""
+    with pytest.raises(ValueError):
+        _mod._fetch_url("http://127.0.0.1/")
+
+
+def test_redirect_handler_rejects_internal():
+    """リダイレクト先が内部アドレスなら拒否すること。"""
+    handler = _mod._SsrfSafeRedirectHandler()
+    with pytest.raises(ValueError):
+        handler.redirect_request(None, None, 302, "Found", {}, "http://169.254.169.254/")
+
+
+def test_redirect_handler_allows_public(monkeypatch):
+    """リダイレクト先が公開アドレスなら追従用 Request を返すこと。"""
+    monkeypatch.setattr(_mod.socket, "getaddrinfo", lambda *a, **k: _PUBLIC_ADDRINFO)
+    handler = _mod._SsrfSafeRedirectHandler()
+    req = _mod.urllib.request.Request("http://example.com/a")
+    new_req = handler.redirect_request(req, io.BytesIO(b""), 302, "Found", {}, "http://example.com/b")
+    assert new_req is not None
+
+
+def test_cmd_import_rejects_internal_url(monkeypatch, capsys):
+    """cmd_import が内部アドレス URL を拒否して非ゼロ終了すること（SSRF 回帰）。"""
+    monkeypatch.setattr(_mod, "detect_project", lambda: {"id": "global", "name": "global"})
+    args = SimpleNamespace(source="http://169.254.169.254/latest/meta-data/", scope="global")
+    assert _mod.cmd_import(args) == 1
+    assert "Invalid URL" in capsys.readouterr().err
+
+
+def test_cmd_import_handles_fetch_error(monkeypatch, capsys):
+    """cmd_import がネットワークエラーを捕捉して非ゼロ終了すること。"""
+    monkeypatch.setattr(_mod, "detect_project", lambda: {"id": "global", "name": "global"})
+
+    def _boom(_url):
+        raise RuntimeError("net down")
+
+    monkeypatch.setattr(_mod, "_fetch_url", _boom)
+    args = SimpleNamespace(source="http://example.com/x", scope="global")
+    assert _mod.cmd_import(args) == 1
+    assert "Error fetching URL" in capsys.readouterr().err
+
+
+# ─────────────────────────────────────────────
 # detect_project のテスト
 # ─────────────────────────────────────────────
 
@@ -1356,7 +1474,10 @@ def test_cmd_import_url_and_path_errors(patch_globals, monkeypatch, capsys):
     project = _make_project(tree)
     monkeypatch.setattr(_mod, "detect_project", lambda: project)
 
-    monkeypatch.setattr(_mod.urllib.request, "urlopen", lambda source: (_ for _ in ()).throw(RuntimeError("boom")))
+    def _raise_fetch(_url):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(_mod, "_fetch_url", _raise_fetch)
     args = SimpleNamespace(source="https://example.com/instinct.yaml", scope="project", dry_run=False, force=True, min_confidence=None)
     assert _mod.cmd_import(args) == 1
     assert "Error fetching URL" in capsys.readouterr().err
@@ -1369,31 +1490,14 @@ def test_cmd_import_url_and_path_errors(patch_globals, monkeypatch, capsys):
 def test_cmd_import_global_fallback_url_success_and_empty_source(patch_globals, global_project, monkeypatch, capsys):
     monkeypatch.setattr(_mod, "detect_project", lambda: global_project)
 
-    class FakeResponse:
-        def __init__(self, body: str) -> None:
-            self.body = body
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
-            return False
-
-        def read(self) -> bytes:
-            return self.body.encode("utf-8")
-
-    monkeypatch.setattr(
-        _mod.urllib.request,
-        "urlopen",
-        lambda source: FakeResponse(SAMPLE_GLOBAL_INSTINCT_YAML),
-    )
+    monkeypatch.setattr(_mod, "_fetch_url", lambda _url: SAMPLE_GLOBAL_INSTINCT_YAML)
     args = SimpleNamespace(source="https://example.com/instinct.yaml", scope="project", dry_run=True, force=True, min_confidence=None)
     assert _mod.cmd_import(args) == 0
     out = capsys.readouterr().out
     assert "No project detected. Importing as global scope." in out
     assert "Target scope: global" in out
 
-    monkeypatch.setattr(_mod.urllib.request, "urlopen", lambda source: FakeResponse(""))
+    monkeypatch.setattr(_mod, "_fetch_url", lambda _url: "")
     args = SimpleNamespace(source="https://example.com/empty.yaml", scope="project", dry_run=False, force=True, min_confidence=None)
     assert _mod.cmd_import(args) == 1
     assert "No valid instincts found in source." in capsys.readouterr().out

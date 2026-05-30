@@ -15,11 +15,14 @@ v2.1: プロジェクトスコープに対応。プロジェクトごとに異�
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -66,6 +69,7 @@ PENDING_EXPIRY_WARNING_DAYS = 7
 
 # グローバルディレクトリの存在を保証（インポート時の副作用を避けるため遅延実行）
 def _ensure_global_dirs():
+    """グローバル instinct 用ディレクトリ群を作成する。"""
     for d in [
         GLOBAL_PERSONAL_DIR,
         GLOBAL_INHERITED_DIR,
@@ -77,10 +81,12 @@ def _ensure_global_dirs():
 
 
 def _preferred_projects_dir() -> Path:
+    """project instinct の保存先ディレクトリを返す。"""
     return PROJECTS_DIR
 
 
 def _preferred_registry_file() -> Path:
+    """project レジストリファイルのパスを返す。"""
     return REGISTRY_FILE
 
 
@@ -167,6 +173,60 @@ def _validate_file_path(path_str: str, must_exist: bool = False) -> Path:
         raise ValueError(f"Path does not exist: {path}")
 
     return path
+
+
+def _assert_safe_url(url: str) -> None:
+    """SSRF を防ぐため、URL のホストが公開アドレスに解決されることを検証する。
+
+    スキームを http/https に限定し、ホストが解決される全 IP の中に
+    プライベート / ループバック / リンクローカル / 予約済み / マルチキャスト /
+    未指定アドレスが含まれる場合は ValueError を送出する。クラウドの
+    メタデータエンドポイント（169.254.169.254 等）やローカルサービスへの
+    到達を遮断する。
+    """
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme: {parsed.scheme!r}")
+    host = parsed.hostname
+    if not host:
+        raise ValueError(f"URL has no host: {url!r}")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        addrinfos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as e:
+        raise ValueError(f"Cannot resolve host {host!r}: {e}") from e
+    for *_, sockaddr in addrinfos:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise ValueError(f"Refusing to fetch from non-public address {ip} for host {host!r}")
+
+
+class _SsrfSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """リダイレクト先 URL を _assert_safe_url で再検証してから追従する。
+
+    リダイレクトを使って公開ホストから内部アドレスへ誘導する SSRF
+    バイパスを防ぐ。
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        """リダイレクト先を検証してから親クラスの処理に委譲する。"""
+        _assert_safe_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _fetch_url(url: str) -> str:
+    """SSRF 検証を行いつつ URL から UTF-8 テキストを取得する。"""
+    _assert_safe_url(url)
+    opener = urllib.request.build_opener(_SsrfSafeRedirectHandler())
+    with opener.open(url) as response:
+        return response.read().decode("utf-8")
 
 
 def _validate_instinct_id(instinct_id: str) -> bool:
@@ -574,8 +634,10 @@ def cmd_import(args) -> int:
     if source.startswith("http://") or source.startswith("https://"):
         print(f"Fetching from URL: {source}")
         try:
-            with urllib.request.urlopen(source) as response:
-                content = response.read().decode("utf-8")
+            content = _fetch_url(source)
+        except ValueError as e:
+            print(f"Invalid URL: {e}", file=sys.stderr)
+            return 1
         except Exception as e:
             print(f"Error fetching URL: {e}", file=sys.stderr)
             return 1
@@ -1450,6 +1512,7 @@ def cmd_prune(args) -> int:
 
 
 def main() -> int:
+    """instinct CLI のエントリポイント。引数を解析してサブコマンドを実行し、終了コードを返す。"""
     _ensure_global_dirs()
     parser = argparse.ArgumentParser(description="Instinct CLI for Continuous Learning v2.1 (Project-Scoped)")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")

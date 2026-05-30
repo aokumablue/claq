@@ -143,6 +143,7 @@ def _format_chunk(chunk: dict) -> str:
 
 
 def _format_timestamp(epoch: int) -> str:
+    """epoch 秒を `YYYY-MM-DD HH:MM`（UTC）に整形する。不正値は文字列で返す。"""
     if epoch <= 0:
         return "unknown"
     try:
@@ -153,6 +154,7 @@ def _format_timestamp(epoch: int) -> str:
 
 
 def _truncate(text: str, max_len: int) -> str:
+    """max_len を超える文字列を切り詰めて末尾に `...` を付ける。"""
     if len(text) <= max_len:
         return text
     return text[:max_len] + "..."

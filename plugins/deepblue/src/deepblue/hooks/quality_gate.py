@@ -85,6 +85,7 @@ def _expand_text(value: str, env: dict[str, str], allowed_names: set[str] | None
         return value
 
     def replace(match: re.Match[str]) -> str:
+        """マッチした変数参照を許可リストに従って環境変数値へ置換する。"""
         name = match.group(1)
         if allowed_names is None:
             allowed = _ALLOWED_EXPANSION_VARS

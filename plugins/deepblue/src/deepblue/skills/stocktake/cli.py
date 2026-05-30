@@ -48,6 +48,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     obs = core.aggregate_observations(obs_file, cutoff_7d, cutoff_30d)
 
     def _scan_dir(directory: Path) -> list[dict]:
+        """ディレクトリ配下のスキルを走査し、メタデータと使用統計の dict 一覧を返す。"""
         skills = []
         home = Path.home()
         for f in sio.walk_skills(directory):

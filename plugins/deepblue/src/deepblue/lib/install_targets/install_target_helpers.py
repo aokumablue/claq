@@ -196,6 +196,7 @@ class InstallTargetAdapter:
     """インストールターゲット用アダプター。"""
 
     def __init__(self, config: InstallTargetConfig):
+        """設定を受け取りアダプターを初期化する。"""
         self._config = config
         self.id = config.id
         self.target = config.target

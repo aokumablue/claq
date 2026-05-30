@@ -235,6 +235,7 @@ def handle_dashboard(
     from deepblue.mem.item_usage_queries import _PG_PLACEHOLDER, _SQLITE_PLACEHOLDER
 
     def _jdumps(obj: object) -> str:
+        """HTML 埋め込み用に `</` をエスケープした JSON 文字列を返す。"""
         return re.sub(r"</", r"<\\/", json.dumps(obj, ensure_ascii=False))
 
     days = stdin_data.get("days", 30)

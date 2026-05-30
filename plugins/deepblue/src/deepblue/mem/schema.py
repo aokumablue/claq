@@ -184,6 +184,12 @@ CREATE INDEX IF NOT EXISTS idx_mir_project ON mem_item_runs(project);
 CREATE INDEX IF NOT EXISTS idx_mir_epoch ON mem_item_runs(created_at_epoch);
 CREATE INDEX IF NOT EXISTS idx_mir_outcome ON mem_item_runs(outcome, created_at_epoch);
 CREATE INDEX IF NOT EXISTS idx_mir_item_type ON mem_item_runs(item_type);
+
+-- マイグレーション適用済みバージョン管理（_MIGRATIONS の適用状態を記録）
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version TEXT PRIMARY KEY,
+  applied_at_epoch INTEGER NOT NULL
+);
 """
 
 # FTS5 と sqlite-vec は別途作成（拡張依存のため）

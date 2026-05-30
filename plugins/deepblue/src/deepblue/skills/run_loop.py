@@ -131,6 +131,7 @@ def run_loop(
         if verbose:
 
             def print_eval_stats(label, results, elapsed):
+                """eval 結果から精度・再現率などの統計を stderr に表示する。"""
                 pos = [r for r in results if r["should_trigger"]]
                 neg = [r for r in results if not r["should_trigger"]]
                 tp = sum(r["triggers"] for r in pos)
@@ -224,6 +225,7 @@ def run_loop(
 
 
 def main():
+    """eval + 改善ループ CLI のエントリポイント。引数を解析してループを実行する。"""
     parser = argparse.ArgumentParser(description="eval + 改善ループを実行する")
     parser.add_argument("--eval-set", required=True, help="eval セット JSON へのパス")
     parser.add_argument("--skill-path", required=True, help="スキルディレクトリへのパス")

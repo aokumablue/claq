@@ -13,6 +13,8 @@ def generate_uuid() -> str:
 
 @dataclass
 class MemoryChunk:
+    """1チャンク分のメモリ（プロンプト・ツール・ファイル・実行品質）を表す。"""
+
     session_id: str
     project: str
     chunk_index: int
@@ -42,6 +44,8 @@ class MemoryChunk:
 
 @dataclass
 class Session:
+    """1セッション分のメタ情報（プロジェクト・git 状態・チャンク数）を表す。"""
+
     session_id: str
     project: str
     started_at_epoch: int

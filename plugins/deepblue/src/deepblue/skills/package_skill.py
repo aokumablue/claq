@@ -110,6 +110,7 @@ def package_skill(skill_path, output_dir=None):
 
 
 def main():
+    """package_skill CLI のエントリポイント。引数のスキルフォルダを .skill にパッケージ化する。"""
     if len(sys.argv) < 2:
         print("使い方: python utils/package_skill.py <path/to/skill-folder> [output-directory]")
         print("\n例:")

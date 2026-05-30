@@ -14,15 +14,22 @@ import logging
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
-# stdoutプロトコルに干渉しないようstderrにログ設定
-logging.basicConfig(
-    stream=sys.stderr,
-    format="[InsAIts] %(message)s",
-    level=logging.DEBUG if os.environ.get("INSAITS_VERBOSE") else logging.WARNING,
-)
+from deepblue.lib.core_utils import get_deepblue_dir
+
+# stdoutプロトコルに干渉しないよう、ルートロガーを汚染せず専用ロガーへ
+# stderr ハンドラを直接付与する。basicConfig はルート全体に影響するため使わない。
 log = logging.getLogger("insaits-hook")
+log.setLevel(logging.DEBUG if os.environ.get("INSAITS_VERBOSE") else logging.WARNING)
+# 多重起動でハンドラが二重登録されないようガードする。
+if not log.handlers:
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setFormatter(logging.Formatter("[InsAIts] %(message)s"))
+    log.addHandler(_handler)
+# ルートロガーへ伝播させない（他ハンドラによる重複出力を防ぐ）。
+log.propagate = False
 
 # InsAIts SDKのインポートを試行
 try:
@@ -33,11 +40,26 @@ except ImportError:
     INSAITS_AVAILABLE = False
 
 # --- 定数 ---
-AUDIT_FILE: str = ".insaits_audit_session.jsonl"
+# CWD 相対だと監査ログ（コマンド全文＝機密混入リスク）が作業ディレクトリに散在し
+# パーミッションも不定になるため、~/.deepblue/logs 配下の絶対パスへ書き込む。
+# None の場合は _resolve_audit_path() が実行時に既定パスを解決する（import 時評価を避ける）。
+AUDIT_FILE: str | None = None
 MIN_CONTENT_LENGTH: int = 10
 MAX_SCAN_LENGTH: int = 4000
 DEFAULT_MODEL: str = "claude-opus"
 BLOCKING_SEVERITIES: frozenset = frozenset({"CRITICAL"})
+
+
+def _resolve_audit_path() -> Path:
+    """監査ログの書き込み先を解決する。
+
+    AUDIT_FILE が設定されていればそのパスを、未設定（None）なら
+    ~/.deepblue/logs 配下の既定パスを実行時に解決して返す。import 時に
+    ホームディレクトリを評価しないことでテストの環境隔離を妨げない。
+    """
+    if AUDIT_FILE is not None:
+        return Path(AUDIT_FILE)
+    return get_deepblue_dir() / "logs" / "insaits_audit.jsonl"
 
 
 def extract_content(data: dict[str, Any]) -> tuple[str, str]:
@@ -95,10 +117,14 @@ def write_audit(event: dict[str, Any]) -> None:
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         enriched["hash"] = hashlib.sha256(json.dumps(enriched, sort_keys=True).encode()).hexdigest()[:16]
-        with open(AUDIT_FILE, "a", encoding="utf-8") as f:
+        path = _resolve_audit_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # 監査ログは所有者のみ読み書き可（機密混入を想定し 0o600）
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(json.dumps(enriched) + "\n")
     except OSError as exc:
-        log.warning("Failed to write audit log %s: %s", AUDIT_FILE, exc)
+        log.warning("Failed to write audit log %s: %s", path, exc)
 
 
 def get_anomaly_attr(anomaly: Any, key: str, default: str = "") -> str:
@@ -151,7 +177,7 @@ def format_feedback(anomalies: list[Any]) -> str:
         [
             "-" * 56,
             "Fix the issues above before continuing.",
-            "Audit log: " + AUDIT_FILE,
+            "Audit log: " + str(_resolve_audit_path()),
         ]
     )
     return "\n".join(lines)

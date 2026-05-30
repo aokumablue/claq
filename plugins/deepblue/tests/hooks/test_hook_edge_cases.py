@@ -592,7 +592,7 @@ def test_pre_bash_commit_quality_main_handles_reader_error(monkeypatch: pytest.M
     assert pre_bash_commit_quality.main() == 0
 
 
-def test_insights_security_monitor_helpers_and_audit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_insights_security_monitor_helpers_and_audit_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     text, context = insights_security_monitor.extract_content(
         {"tool_name": "Write", "tool_input": {"content": "hello world", "file_path": "src/app.py"}}
     )
@@ -629,9 +629,18 @@ def test_insights_security_monitor_helpers_and_audit_errors(monkeypatch: pytest.
         "log",
         SimpleNamespace(warning=lambda msg, *args: warnings.append(msg % args if args else msg), debug=lambda *a, **k: None),
     )
-    monkeypatch.setattr("builtins.open", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("boom")))
+    monkeypatch.setattr(insights_security_monitor, "AUDIT_FILE", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setattr(insights_security_monitor.os, "open", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("boom")))
     insights_security_monitor.write_audit({"tool": "Write"})
     assert any("Failed to write audit log" in message for message in warnings)
+
+
+def test_insights_audit_path_defaults_to_deepblue_logs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """AUDIT_FILE 未設定時は ~/.deepblue/logs 配下の絶対パスを解決すること。"""
+    monkeypatch.setattr(insights_security_monitor, "AUDIT_FILE", None)
+    monkeypatch.setattr(insights_security_monitor, "get_deepblue_dir", lambda: tmp_path)
+    resolved = insights_security_monitor._resolve_audit_path()
+    assert resolved == tmp_path / "logs" / "insaits_audit.jsonl"
 
 
 def test_insights_security_monitor_skips_short_or_invalid_input(

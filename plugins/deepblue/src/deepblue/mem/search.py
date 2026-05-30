@@ -25,6 +25,8 @@ _RETROSPECTIVE_PATTERNS = [
 
 
 class SearchResult(NamedTuple):
+    """検索結果の1件分（チャンク内容とスコア・メタ情報）。"""
+
     chunk_id: str
     score: float
     content: str
@@ -37,7 +39,10 @@ class SearchResult(NamedTuple):
 
 
 class SearchService:
+    """FTS5 + ベクトル検索を RRF と時間減衰で統合する検索サービス。"""
+
     def __init__(self, db: Database, settings: Settings) -> None:
+        """DB と設定を受け取って初期化する。"""
         self.db = db
         self.settings = settings
 

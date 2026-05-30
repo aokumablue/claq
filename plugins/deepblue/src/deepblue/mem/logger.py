@@ -13,6 +13,7 @@ class _RedactingFormatter(logging.Formatter):
     """PII / シークレットを全ログメッセージから除去するフォーマッタ。"""
 
     def format(self, record: logging.LogRecord) -> str:
+        """整形済みログメッセージから PII / シークレットを除去して返す。"""
         from deepblue.mem.redaction import redact
 
         return redact(super().format(record))

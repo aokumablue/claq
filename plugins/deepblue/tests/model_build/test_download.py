@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import shutil
 import tarfile
@@ -10,8 +11,6 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import io
 
 import pytest
 
@@ -366,6 +365,34 @@ class TestDownloadArchiveSizeLimit:
             download_mod._download_archive("https://github.com/x", out_file, 1024, ssl_no_verify=True)
         handlers = mock_build.call_args[0]
         assert any(isinstance(h, urllib.request.HTTPSHandler) for h in handlers)
+
+    def test_ssl_no_verify_warns_on_stderr(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """ssl_no_verify=True のとき TLS 検証無効の警告が stderr に出力される。"""
+        out_file = tmp_path / "out.bin"
+        mock_opener = self._make_mock_opener(b"")
+        with patch("urllib.request.build_opener", return_value=mock_opener):
+            download_mod._download_archive("https://github.com/x", out_file, 1024, ssl_no_verify=True)
+        captured = capsys.readouterr()
+        assert "ssl_no_verify" in captured.err
+        assert "本番環境では使用しない" in captured.err
+
+    def test_no_ssl_warning_when_ssl_no_verify_false(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """ssl_no_verify=False を明示した場合は警告が出ない。"""
+        out_file = tmp_path / "out.bin"
+        mock_opener = self._make_mock_opener(b"")
+        with patch("urllib.request.build_opener", return_value=mock_opener):
+            download_mod._download_archive("https://github.com/x", out_file, 1024, ssl_no_verify=False)
+        captured = capsys.readouterr()
+        assert "ssl_no_verify" not in captured.err
+
+    def test_no_ssl_warning_when_unspecified(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """ssl_no_verify を指定しない場合は警告が出ない。"""
+        out_file = tmp_path / "out.bin"
+        mock_opener = self._make_mock_opener(b"")
+        with patch("urllib.request.build_opener", return_value=mock_opener):
+            download_mod._download_archive("https://github.com/x", out_file, 1024)
+        captured = capsys.readouterr()
+        assert "ssl_no_verify" not in captured.err
 
 
 class TestCollectArchiveMembers:

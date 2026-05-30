@@ -321,6 +321,7 @@ def generate_markdown(benchmark: dict) -> str:
 
 
 def main():
+    """aggregate_benchmark CLI のエントリポイント。引数を解析して benchmark 結果を集約する。"""
     parser = argparse.ArgumentParser(description="benchmark の実行結果を集約してサマリー統計にまとめる")
     parser.add_argument("benchmark_dir", type=Path, help="benchmark ディレクトリへのパス")
     parser.add_argument("--skill-name", default="", help="ベンチマーク対象のスキル名")

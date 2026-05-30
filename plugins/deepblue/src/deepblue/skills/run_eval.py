@@ -270,6 +270,7 @@ def run_eval(
 
 
 def main():
+    """eval CLI のエントリポイント。引数を解析してトリガー評価を実行する。"""
     parser = argparse.ArgumentParser(description="スキル説明のトリガー評価を実行する")
     parser.add_argument("--eval-set", required=True, help="eval セット JSON へのパス")
     parser.add_argument("--skill-path", required=True, help="スキルディレクトリへのパス")

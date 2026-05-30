@@ -239,11 +239,13 @@ def format_chunk(chunk: MemoryChunk) -> str:
 
 
 def format_timestamp(epoch: int) -> str:
+    """epoch 秒を `YYYY-MM-DD HH:MM`（UTC）に整形する。"""
     dt = datetime.fromtimestamp(epoch, tz=UTC)
     return dt.strftime("%Y-%m-%d %H:%M")
 
 
 def truncate(text: str, max_len: int) -> str:
+    """max_len を超える文字列を切り詰めて末尾に `...` を付ける。"""
     if len(text) <= max_len:
         return text
     return text[:max_len] + "..."

@@ -136,6 +136,7 @@ def generate_report(
 
 
 def _overall_compliance(results: list[tuple[str, ComplianceResult, list[ObservationEvent]]]) -> float:
+    """全シナリオの平均コンプライアンス率を返す。"""
     if not results:
         return 0.0
     return sum(r.compliance_rate for _, r, _obs in results) / len(results)
@@ -145,6 +146,7 @@ def _step_compliance_rate(
     step_id: str,
     results: list[tuple[str, ComplianceResult, list[ObservationEvent]]],
 ) -> float:
+    """指定ステップが検出されたシナリオの割合を返す。"""
     detected = sum(1 for _, r, _obs in results for s in r.steps if s.step_id == step_id and s.detected)
     return detected / len(results) if results else 0.0
 
@@ -154,6 +156,7 @@ def _steps_to_promote(
     results: list[tuple[str, ComplianceResult, list[ObservationEvent]]],
     threshold: float,
 ) -> list[str]:
+    """検出率がしきい値を下回る必須ステップ（hook 昇格候補）の ID 一覧を返す。"""
     promote = []
     for step in spec.steps:
         if not step.required:
