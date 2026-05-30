@@ -147,7 +147,8 @@ class PgDatabase:
         try:
             yield conn
             conn.commit()
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -237,7 +238,8 @@ class PgDatabase:
                     ),
                 )
             conn.commit()
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -292,7 +294,8 @@ class PgDatabase:
                 )
             conn.commit()
             count = len(params_list)
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -334,7 +337,8 @@ class PgDatabase:
                     ),
                 )
             conn.commit()
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -380,7 +384,8 @@ class PgDatabase:
                 )
             conn.commit()
             count = len(params_list)
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -421,7 +426,8 @@ class PgDatabase:
                     ),
                 )
             conn.commit()
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -466,7 +472,8 @@ class PgDatabase:
                 )
             conn.commit()
             count = len(params_list)
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -504,7 +511,8 @@ class PgDatabase:
                     ),
                 )
             conn.commit()
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -546,7 +554,8 @@ class PgDatabase:
                 )
             conn.commit()
             count = len(params_list)
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -575,7 +584,8 @@ class PgDatabase:
                     ),
                 )
             conn.commit()
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -606,7 +616,8 @@ class PgDatabase:
                     )
                     count += 1
             conn.commit()
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -643,7 +654,8 @@ class PgDatabase:
                 )
             conn.commit()
             count = len(params_list)
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -875,7 +887,8 @@ class PgDatabase:
                 )
             conn.commit()
             count = len(params_list)
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -931,7 +944,8 @@ class PgDatabase:
                 )
             conn.commit()
             count = len(params_list)
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
@@ -979,7 +993,8 @@ class PgDatabase:
                 )
             conn.commit()
             count = len(params_list)
-        except Exception:
+        except Exception as e:
+            log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
