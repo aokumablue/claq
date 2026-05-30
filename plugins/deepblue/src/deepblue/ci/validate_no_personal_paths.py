@@ -18,8 +18,9 @@ TARGETS = [
 ]
 
 BLOCK_PATTERNS = [
-    re.compile(r"/Users/affoon\b"),
-    re.compile(r"C:\\Users\\affoon\b", re.I),
+    re.compile(r"/Users/[^/\s]+"),  # macOS
+    re.compile(r"/home/[^/\s]+"),  # Linux
+    re.compile(r"C:\\Users\\[^\\/\s]+", re.I),  # Windows
 ]
 FILE_EXTENSIONS = re.compile(r"\.(md|json|js|ts|sh|toml|yml|yaml)$", re.I)
 

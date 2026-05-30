@@ -92,6 +92,9 @@ def normalize_relative_path(relative_path: Any) -> str:
 def resolve_repo_path(repo_root: str | Path, relative_path: Any) -> Path:
     """マニフェスト相対パスをリポジトリルートに対して解決します。
 
+    パストラバーサル（CWE-22）を防ぐため、解決後の絶対パスが
+    ``repo_root`` 配下にあることを保証します。範囲外を指す場合は弾きます。
+
     Args:
         repo_root: リポジトリのルートディレクトリです。
         relative_path: 解決対象の相対パスです。
@@ -100,7 +103,13 @@ def resolve_repo_path(repo_root: str | Path, relative_path: Any) -> Path:
         解決された絶対パスを返します。
 
     Raises:
-        例外は発生しません。
+        ValueError: 解決後パスが repo_root の境界を越える場合に発生します。
     """
     normalized = normalize_relative_path(relative_path)
-    return Path(repo_root) / normalized.lstrip("/")
+    root = Path(repo_root).resolve()
+    candidate = (root / normalized.lstrip("/")).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as error:
+        raise ValueError(f"path escapes repo root: {relative_path!r}") from error
+    return candidate

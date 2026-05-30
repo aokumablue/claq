@@ -58,7 +58,7 @@ def test_validate_skills_accepts_skill_directory(tmp_path: Path) -> None:
 
 def test_validate_no_personal_paths_flags_hardcoded_path(tmp_path: Path) -> None:
     readme = tmp_path / "README.md"
-    readme.write_text("Use /Users/affoon/project for setup.\n", encoding="utf-8")
+    readme.write_text("Use /Users/alice/project for setup.\n", encoding="utf-8")
 
     assert validate_no_personal_paths.validate_no_personal_paths(tmp_path) == 1
 

@@ -237,16 +237,16 @@ def test_validate_no_personal_paths_covers_clean_skip_and_hits(
     root = tmp_path
     (root / "README.md").write_text("Clean docs.\n", encoding="utf-8")
     (root / "docs").mkdir()
-    (root / "docs" / "guide.md").write_text("C:\\Users\\affoon\\secret\n", encoding="utf-8")
-    (root / "docs" / "manual.txt").write_text("/Users/affoon/ignored in txt\n", encoding="utf-8")
+    (root / "docs" / "guide.md").write_text("C:\\Users\\alice\\secret\n", encoding="utf-8")
+    (root / "docs" / "manual.txt").write_text("/Users/bob/ignored in txt\n", encoding="utf-8")
     (root / "skills").mkdir()
     (root / "skills" / "alpha").mkdir()
     (root / "skills" / "alpha" / "SKILL.md").write_text("Clean skill.\n", encoding="utf-8")
     (root / "docs" / "node_modules").mkdir()
-    (root / "docs" / "node_modules" / "ignored.md").write_text("/Users/affoon/should-skip\n", encoding="utf-8")
+    (root / "docs" / "node_modules" / "ignored.md").write_text("/Users/carol/should-skip\n", encoding="utf-8")
     (root / "commands").mkdir()
     (root / "commands" / ".git").mkdir()
-    (root / "commands" / ".git" / "ignored.md").write_text("/Users/affoon/should-skip\n", encoding="utf-8")
+    (root / "commands" / ".git" / "ignored.md").write_text("/Users/dave/should-skip\n", encoding="utf-8")
 
     assert validate_no_personal_paths.validate_no_personal_paths(root) == 1
     stderr = capsys.readouterr().out

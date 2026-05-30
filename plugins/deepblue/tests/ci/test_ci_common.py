@@ -20,7 +20,7 @@ def test_read_json_and_basic_predicates(tmp_path: Path) -> None:
     assert ci_common.is_non_empty_string_array(["x", "y"]) is True
     assert ci_common.is_non_empty_string_array([]) is False
     assert ci_common.normalize_relative_path(r"a\b/") == "a/b"
-    assert ci_common.resolve_repo_path(tmp_path, r"./docs\guide.md") == tmp_path / "docs" / "guide.md"
+    assert ci_common.resolve_repo_path(tmp_path, r"./docs\guide.md") == (tmp_path / "docs" / "guide.md").resolve()
 
 
 def test_read_json_wraps_decode_errors(tmp_path: Path) -> None:
