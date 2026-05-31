@@ -385,6 +385,97 @@ def _record_skill_id(record: Any) -> str | None:
     return None
 
 
+def _resolve_warn_threshold(opts: dict[str, Any]) -> float:
+    """オプションから警告閾値を解決して検証する。
+
+    Args:
+        opts: マージ済みオプション辞書。
+
+    Returns:
+        正の浮動小数点閾値。
+
+    Raises:
+        ValueError: warn_threshold が不正な場合。
+    """
+    warn_threshold_value = get_option(opts, "warn_threshold", "warnThreshold", default=0.1)
+    try:
+        warn_threshold = float(warn_threshold_value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Invalid warn threshold: {warn_threshold_value}") from error
+    # 閾値は負値を許さず、比較用のしきい値として扱う。
+    if warn_threshold < 0:
+        raise ValueError(f"Invalid warn threshold: {warn_threshold_value}")
+    return warn_threshold
+
+
+def _group_records_by_skill_id(records: list[Any]) -> dict[str, list[Any]]:
+    """実行レコードを skill_id でグループ化する。
+
+    Args:
+        records: 実行レコードのリスト。
+
+    Returns:
+        skill_id をキーにしたレコードリストの辞書。
+
+    Raises:
+        なし。
+    """
+    records_by_skill: dict[str, list[Any]] = {}
+    for record in records:
+        skill_id = _record_skill_id(record)
+        # skill_id が無いものはスキル別集計へ載せない。
+        if skill_id is None:
+            continue
+        records_by_skill.setdefault(skill_id, []).append(record)
+    return records_by_skill
+
+
+def _compute_skill_metrics(
+    skill_id: str,
+    skill: dict[str, Any],
+    skill_records: list[Any],
+    now_ms: int,
+    warn_threshold: float,
+) -> dict[str, Any]:
+    """1 スキル分の健全性メトリクスを計算する。
+
+    Args:
+        skill_id: スキルの識別子。
+        skill: スキル定義辞書。
+        skill_records: そのスキルの実行レコードリスト。
+        now_ms: 基準時刻の UNIX ミリ秒。
+        warn_threshold: 悪化判定に使う閾値。
+
+    Returns:
+        スキルの健全性メトリクス辞書。
+
+    Raises:
+        なし。
+    """
+    records_7d = filter_records_within_days(skill_records, now_ms, 7)
+    records_30d = filter_records_within_days(skill_records, now_ms, 30)
+    success_rate_7d = calculate_success_rate(records_7d)
+    success_rate_30d = calculate_success_rate(records_30d)
+    skill_dir = skill.get("skill_dir")
+    # ディレクトリがある場合のみ、現在のバージョン番号を参照する。
+    current_version = versioning.get_current_version(skill_dir) if skill_dir else 0
+    failure_trend = get_failure_trend(success_rate_7d, success_rate_30d, warn_threshold)
+
+    return {
+        "skill_id": skill_id,
+        "skill_type": skill.get("skill_type", provenance.SKILL_TYPES["UNKNOWN"]),
+        "current_version": f"v{current_version}" if current_version > 0 else None,
+        "pending_amendments": count_pending_amendments(skill_dir),
+        "success_rate_7d": success_rate_7d,
+        "success_rate_30d": success_rate_30d,
+        "failure_trend": failure_trend,
+        "declining": failure_trend == "worsening",
+        "last_run": get_last_run(skill_records),
+        "run_count_7d": len(records_7d),
+        "run_count_30d": len(records_30d),
+    }
+
+
 def collect_skill_health(options: dict[str, Any] | None = None, /, **kwargs: Any) -> dict[str, Any]:
     """スキル健全性メトリクスを収集する。
 
@@ -402,32 +493,15 @@ def collect_skill_health(options: dict[str, Any] | None = None, /, **kwargs: Any
     # 評価基準時刻を決め、後続の全計算をこの時刻に揃える。
     now = get_option(opts, "now", default=None) or utc_now_iso()
     now_ms = _resolve_now_ms(now)
-
-    warn_threshold_value = get_option(opts, "warn_threshold", "warnThreshold", default=0.1)
-    try:
-        warn_threshold = float(warn_threshold_value)
-    except (TypeError, ValueError) as error:
-        raise ValueError(f"Invalid warn threshold: {warn_threshold_value}") from error
-    # 閾値は負値を許さず、比較用のしきい値として扱う。
-    if warn_threshold < 0:
-        raise ValueError(f"Invalid warn threshold: {warn_threshold_value}")
+    warn_threshold = _resolve_warn_threshold(opts)
 
     # 実行レコードとスキル一覧をそれぞれ収集し、同じ基準時刻で評価する。
     records = list(tracker.read_skill_execution_records(opts))
     skills_by_id = discover_skills(opts)
-
-    records_by_skill: dict[str, list[Any]] = {}
-    # 実行レコードを skill_id ごとにグループ化する。
-    for record in records:
-        skill_id = _record_skill_id(record)
-        # skill_id が無いものはスキル別集計へ載せない。
-        if skill_id is None:
-            continue
-        records_by_skill.setdefault(skill_id, []).append(record)
+    records_by_skill = _group_records_by_skill_id(records)
 
     # 実行履歴しかない skill_id も、未知スキルとして後から拾えるようにする。
     for skill_id in records_by_skill:
-        # 実行履歴だけ存在するスキルは、未知スキルとして補完する。
         if skill_id not in skills_by_id:
             skills_by_id[skill_id] = {
                 "skill_id": skill_id,
@@ -435,42 +509,48 @@ def collect_skill_health(options: dict[str, Any] | None = None, /, **kwargs: Any
                 "skill_type": provenance.SKILL_TYPES["UNKNOWN"],
             }
 
-    skills: list[dict[str, Any]] = []
-    # すべての skill_id を順番に評価し、健全性メトリクスを作る。
-    for skill_id in sorted(skills_by_id):
-        skill = skills_by_id[skill_id]
-        skill_records = records_by_skill.get(skill_id, [])
-        # 7 日・30 日の両方で成功率を出し、短期変化を比較する。
-        records_7d = filter_records_within_days(skill_records, now_ms, 7)
-        records_30d = filter_records_within_days(skill_records, now_ms, 30)
-        success_rate_7d = calculate_success_rate(records_7d)
-        success_rate_30d = calculate_success_rate(records_30d)
-        skill_dir = skill.get("skill_dir")
-        # ディレクトリがある場合のみ、現在のバージョン番号を参照する。
-        current_version = versioning.get_current_version(skill_dir) if skill_dir else 0
-        failure_trend = get_failure_trend(success_rate_7d, success_rate_30d, warn_threshold)
-
-        skills.append(
-            {
-                "skill_id": skill_id,
-                "skill_type": skill.get("skill_type", provenance.SKILL_TYPES["UNKNOWN"]),
-                "current_version": f"v{current_version}" if current_version > 0 else None,
-                "pending_amendments": count_pending_amendments(skill_dir),
-                "success_rate_7d": success_rate_7d,
-                "success_rate_30d": success_rate_30d,
-                "failure_trend": failure_trend,
-                "declining": failure_trend == "worsening",
-                "last_run": get_last_run(skill_records),
-                "run_count_7d": len(records_7d),
-                "run_count_30d": len(records_30d),
-            }
+    skills = [
+        _compute_skill_metrics(
+            skill_id,
+            skills_by_id[skill_id],
+            records_by_skill.get(skill_id, []),
+            now_ms,
+            warn_threshold,
         )
+        for skill_id in sorted(skills_by_id)
+    ]
 
     return {
         "generated_at": now,
         "warn_threshold": warn_threshold,
         "skills": skills,
     }
+
+
+def _format_skill_row(skill: dict[str, Any]) -> str:
+    """スキル 1 件分の表示行を整形する。
+
+    Args:
+        skill: _compute_skill_metrics が返すスキルメトリクス辞書。
+
+    Returns:
+        表形式の整形済み文字列。
+
+    Raises:
+        なし。
+    """
+    status_label = "!" if skill.get("declining") else " "
+    return " ".join(
+        [
+            f"{status_label}{str(skill.get('skill_id', ''))[:14]}".ljust(16),
+            str(skill.get("current_version") or "-").ljust(9),
+            format_rate(skill.get("success_rate_7d")).ljust(6),
+            format_rate(skill.get("success_rate_30d")).ljust(6),
+            str(skill.get("failure_trend") or "stable").ljust(11),
+            str(skill.get("pending_amendments", 0)).ljust(9),
+            str(skill.get("last_run") or "-"),
+        ]
+    )
 
 
 def format_health_report(report: dict[str, Any], options: dict[str, Any] | None = None, /, **kwargs: Any) -> str:
@@ -516,25 +596,8 @@ def format_health_report(report: dict[str, Any], options: dict[str, Any] | None 
         "skill            version   7d     30d    trend       pending   last run",
         "--------------------------------------------------------------------------",
     ]
-
     # 各スキルを 1 行ずつ整形して、読みやすい一覧にする。
-    for skill in skills:
-        # 重大なスキルは先頭に ! を付けて視認性を上げる。
-        status_label = "!" if skill.get("declining") else " "
-        lines.append(
-            " ".join(
-                [
-                    f"{status_label}{str(skill.get('skill_id', ''))[:14]}".ljust(16),
-                    str(skill.get("current_version") or "-").ljust(9),
-                    format_rate(skill.get("success_rate_7d")).ljust(6),
-                    format_rate(skill.get("success_rate_30d")).ljust(6),
-                    str(skill.get("failure_trend") or "stable").ljust(11),
-                    str(skill.get("pending_amendments", 0)).ljust(9),
-                    str(skill.get("last_run") or "-"),
-                ]
-            )
-        )
-
+    lines.extend(_format_skill_row(skill) for skill in skills)
     return "\n".join(lines) + "\n"
 
 

@@ -338,6 +338,84 @@ def create_version(skill_path: str | Path, options: dict[str, Any] | None = None
     return {"version": next_version, "path": str(snapshot_path), "created_at": created_at}
 
 
+def _validate_target_version(target_version: int | str) -> int:
+    """ロールバック先バージョン番号を検証して正規化する。
+
+    Args:
+        target_version: 復元対象のバージョン番号または文字列。
+
+    Returns:
+        正規化済みの正の整数バージョン番号。
+
+    Raises:
+        ValueError: target_version が不正な場合。
+    """
+    # bool は数値として扱わず、明示的に拒否する。
+    if isinstance(target_version, bool):
+        raise ValueError(f"Invalid target version: {target_version}")
+
+    try:
+        normalized = float(target_version)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Invalid target version: {target_version}") from error
+
+    # 正の整数バージョンだけを許容する。
+    if not normalized.is_integer() or normalized <= 0:
+        raise ValueError(f"Invalid target version: {target_version}")
+
+    return int(normalized)
+
+
+def _apply_rollback(skill_path: str | Path, version_int: int, opts: dict[str, Any]) -> dict[str, Any]:
+    """スナップショット復元と evolution ログ追記を実行する。
+
+    Args:
+        skill_path: スキルディレクトリまたは SKILL.md のパス。
+        version_int: 復元対象の整数バージョン番号。
+        opts: マージ済みオプション辞書。
+
+    Returns:
+        create_version の結果辞書。
+
+    Raises:
+        FileNotFoundError: 対象バージョンや SKILL.md が存在しない場合。
+    """
+    target_path = get_versions_dir(skill_path) / f"v{version_int}.md"
+    # 対象スナップショットが無ければ、復元できない。
+    if not target_path.exists():
+        raise FileNotFoundError(f"Version not found: v{version_int}")
+
+    current_version = get_current_version(skill_path)
+    target_content = target_path.read_text(encoding="utf-8")
+    # 対象バージョンの内容を SKILL.md に戻す。
+    get_skill_file_path(skill_path).write_text(target_content, encoding="utf-8")
+
+    # ロールバック後の状態を新しいバージョンとして記録する。
+    created_version = create_version(
+        skill_path,
+        timestamp=opts.get("timestamp"),
+        reason=opts.get("reason") or f"rollback to v{version_int}",
+        author=opts.get("author"),
+    )
+
+    append_evolution_record(
+        skill_path,
+        "amendments",
+        {
+            "event": "rollback",
+            "version": created_version["version"],
+            "source_version": current_version,
+            "target_version": version_int,
+            "reason": opts.get("reason") or None,
+            "author": opts.get("author") or None,
+            "status": "applied",
+            "created_at": opts.get("timestamp") or utc_now_iso(),
+        },
+    )
+
+    return created_version
+
+
 def rollback_to(
     skill_path: str | Path,
     target_version: int | str,
@@ -361,59 +439,10 @@ def rollback_to(
         FileNotFoundError: 対象バージョンや SKILL.md が存在しない場合。
     """
     opts = merge_options(options, **kwargs)
-
-    # bool は数値として扱わず、明示的に拒否する。
-    if isinstance(target_version, bool):
-        raise ValueError(f"Invalid target version: {target_version}")
-
-    try:
-        normalized_target_version = float(target_version)
-    except (TypeError, ValueError) as error:
-        raise ValueError(f"Invalid target version: {target_version}") from error
-
-    # 正の整数バージョンだけを許容する。
-    if not normalized_target_version.is_integer() or normalized_target_version <= 0:
-        raise ValueError(f"Invalid target version: {target_version}")
-
-    normalized_target_version_int = int(normalized_target_version)
-
+    version_int = _validate_target_version(target_version)
     ensure_skill_exists(skill_path)
     ensure_skill_versioning(skill_path)
-
-    target_path = get_versions_dir(skill_path) / f"v{normalized_target_version_int}.md"
-    # 対象スナップショットが無ければ、復元できない。
-    if not target_path.exists():
-        raise FileNotFoundError(f"Version not found: v{normalized_target_version_int}")
-
-    current_version = get_current_version(skill_path)
-    target_content = target_path.read_text(encoding="utf-8")
-    # 対象バージョンの内容を SKILL.md に戻す。
-    get_skill_file_path(skill_path).write_text(target_content, encoding="utf-8")
-
-    # ロールバック後の状態を新しいバージョンとして記録する。
-    created_version = create_version(
-        skill_path,
-        timestamp=opts.get("timestamp"),
-        reason=opts.get("reason") or f"rollback to v{normalized_target_version_int}",
-        author=opts.get("author"),
-    )
-
-    append_evolution_record(
-        skill_path,
-        "amendments",
-        {
-            "event": "rollback",
-            "version": created_version["version"],
-            "source_version": current_version,
-            "target_version": normalized_target_version_int,
-            "reason": opts.get("reason") or None,
-            "author": opts.get("author") or None,
-            "status": "applied",
-            "created_at": opts.get("timestamp") or utc_now_iso(),
-        },
-    )
-
-    return created_version
+    return _apply_rollback(skill_path, version_int, opts)
 
 
 __all__ = [
