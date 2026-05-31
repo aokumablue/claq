@@ -287,21 +287,15 @@ def create_install_state(
     """新しいインストール状態辞書を作成する。
 
     Args:
-        adapter: adapter の値
-        target_root: ターゲットルート
-        install_state_path: install_state_path の値
-        request: request の値
-        resolution: 解決結果
-        source: source の値
-        operations: operations の値
-        installed_at: installed_at の値
-        last_validated_at: last_validated_at の値
-
-    Returns:
-        dict[str, Any]: 作成結果を返します。
-
-    Raises:
-        例外は発生しません。
+        adapter: アダプター辞書
+        target_root: ターゲットルートパス
+        install_state_path: インストール状態ファイルのパス
+        request: インストールリクエスト辞書
+        resolution: 解決結果辞書
+        source: ソース情報辞書
+        operations: インストール操作リスト（省略可）
+        installed_at: インストール日時 ISO 文字列（省略時は現在時刻）
+        last_validated_at: 最終検証日時（省略可）
     """
     if installed_at is None:
         installed_at = datetime.now().isoformat()

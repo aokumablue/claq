@@ -37,70 +37,47 @@ def _handle_ampersand(
     return current, i + 1
 
 
+def _handle_unquoted_char(
+    command: str, i: int, length: int, ch: str, current: str, segments: list[str]
+) -> tuple[str, str | None, int]:
+    """引用符外の1文字を処理し、(current, new_quote, next_i) を返す。"""
+    if ch == "\\" and i + 1 < length:
+        return current + ch + command[i + 1], None, i + 2
+    if ch in ('"', "'"):
+        return current + ch, ch, i + 1
+    next_ch = command[i + 1] if i + 1 < length else ""
+    if ch == "&" and next_ch == "&":
+        return _try_flush_segment(current, segments), None, i + 2
+    if ch == "|" and next_ch == "|":
+        return _try_flush_segment(current, segments), None, i + 2
+    if ch == ";":
+        return _try_flush_segment(current, segments), None, i + 1
+    if ch == "&":
+        new_current, new_i = _handle_ampersand(command, i, length, current, segments)
+        return new_current, None, new_i
+    return current + ch, None, i + 1
+
+
 def split_shell_segments(command: str) -> list[str]:
-    """シェルコマンドを演算子（&&, ||, ;, &）で分割する。
-    ただし引用符（単/二重）とエスケープ文字は尊重する。
-    リダイレクト演算子（&>, >&, 2>&1）は区切りとして扱わない。
+    """シェルコマンドを &&, ||, ;, & で分割する（引用符・エスケープ考慮）。
 
     Args:
-        command: command の値
+        command: 分割対象のシェルコマンド文字列
 
     Returns:
-        list[str]: str の一覧を返します。
-
-    Raises:
-        例外は発生しません。
+        分割されたセグメントのリスト
     """
     segments: list[str] = []
     current = ""
     quote: str | None = None
     i = 0
     length = len(command)
-
     while i < length:
         ch = command[i]
-
         if quote:
             current, quote, i = _advance_in_quote(command, i, length, ch, quote, current)
-            continue
-
-        # 引用符外のバックスラッシュエスケープ
-        if ch == "\\" and i + 1 < length:
-            current += ch + command[i + 1]
-            i += 2
-            continue
-
-        # 開始引用符
-        if ch in ('"', "'"):
-            quote = ch
-            current += ch
-            i += 1
-            continue
-
-        next_ch = command[i + 1] if i + 1 < length else ""
-
-        if ch == "&" and next_ch == "&":
-            current = _try_flush_segment(current, segments)
-            i += 2
-            continue
-
-        if ch == "|" and next_ch == "|":
-            current = _try_flush_segment(current, segments)
-            i += 2
-            continue
-
-        if ch == ";":
-            current = _try_flush_segment(current, segments)
-            i += 1
-            continue
-
-        if ch == "&" and next_ch != "&":
-            current, i = _handle_ampersand(command, i, length, current, segments)
-            continue
-
-        current += ch
-        i += 1
-
+        else:
+            current, quote, i = _handle_unquoted_char(command, i, length, ch, current, segments)
     _try_flush_segment(current, segments)
     return segments
 
