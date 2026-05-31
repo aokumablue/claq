@@ -397,33 +397,71 @@ def _slim_context_content(text: str, *, max_prose_lines: int = 6, max_prose_line
     )
 
 
-def _handle_migrate_settings(settings: Settings) -> None:  # noqa: ARG001
-    """既存 settings.json を新セキュリティ仕様（パスワード分離・sslmode 強制）に自動移行する。"""
+def _migrate_extract_url(settings_path: Path) -> tuple[str, dict] | tuple[None, None]:
+    """settings.json を読み込み (postgres_url, data) を返す。読み込み失敗・URL なしは (None, None)。"""
     import json as _json
-    from datetime import datetime
-    from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-    from deepblue.mem.cli_sync_handlers import _split_password, _write_pgpass
-
-    settings_path = Path(os.environ.get("HOME", "~")).expanduser() / ".deepblue" / "settings.json"
     if not settings_path.exists():
         log.info("migrate-settings: settings.json が存在しません。スキップ")
-        return
-
+        return None, None
     try:
         data = _json.loads(settings_path.read_text(encoding="utf-8"))
     except Exception as e:
         log.warning("migrate-settings: settings.json 読み込み失敗: %s", e)
-        return
-
+        return None, None
     url: str = data.get("mem", {}).get("sync", {}).get("postgres_url", "") or ""
     if not url:
         log.info("migrate-settings: postgres_url 未設定。スキップ")
+        return None, None
+    return url, data
+
+
+def _migrate_normalize_sslmode(url: str) -> tuple[str, bool]:
+    """sslmode を require に正規化した URL と変更有無を返す。"""
+    from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query, keep_blank_values=True)
+    existing_mode = (qs.get("sslmode", [None])[0] or "").lower()
+    if existing_mode in {"disable", "allow", "prefer"}:
+        log.warning("migrate-settings: 危険な sslmode=%s を sslmode=require に変更します", existing_mode)
+        qs["sslmode"] = ["require"]
+        return urlunparse(parsed._replace(query=urlencode(qs, doseq=True))), True
+    if not existing_mode:
+        qs["sslmode"] = ["require"]
+        log.info("migrate-settings: sslmode=require を付与しました")
+        return urlunparse(parsed._replace(query=urlencode(qs, doseq=True))), True
+    return url, False
+
+
+def _migrate_write_settings(settings_path: Path, data: dict, url: str) -> None:
+    """settings.json にバックアップを作成してから更新された URL を書き戻す。"""
+    import json as _json
+    from datetime import datetime
+
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    bak_path = settings_path.with_name(f"settings.json.bak-{ts}")
+    bak_path.write_bytes(settings_path.read_bytes())
+    bak_path.chmod(0o600)
+    data.setdefault("mem", {}).setdefault("sync", {})["postgres_url"] = url
+    settings_path.write_text(_json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    settings_path.chmod(0o600)
+    log.info("migrate-settings: settings.json を更新しました（バックアップ: %s）", bak_path.name)
+
+
+def _handle_migrate_settings(settings: Settings) -> None:  # noqa: ARG001
+    """既存 settings.json を新セキュリティ仕様（パスワード分離・sslmode 強制）に自動移行する。"""
+    from urllib.parse import urlparse
+
+    from deepblue.mem.cli_sync_handlers import _split_password, _write_pgpass
+
+    settings_path = Path(os.environ.get("HOME", "~")).expanduser() / ".deepblue" / "settings.json"
+    url, data = _migrate_extract_url(settings_path)
+    if url is None or data is None:
         return
 
     changed = False
 
-    # 1. パスワード分離
     stripped_url, password = _split_password(url)
     if password:
         parsed = urlparse(stripped_url)
@@ -436,36 +474,13 @@ def _handle_migrate_settings(settings: Settings) -> None:  # noqa: ARG001
         changed = True
         log.info("migrate-settings: PG パスワードを ~/.pgpass に移行しました")
 
-    # 2. sslmode 正規化
-    parsed = urlparse(url)
-    qs = parse_qs(parsed.query, keep_blank_values=True)
-    existing_mode = (qs.get("sslmode", [None])[0] or "").lower()
-    if existing_mode in {"disable", "allow", "prefer"}:
-        log.warning("migrate-settings: 危険な sslmode=%s を sslmode=require に変更します", existing_mode)
-        qs["sslmode"] = ["require"]
-        url = urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
-        changed = True
-    elif not existing_mode:
-        qs["sslmode"] = ["require"]
-        url = urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
-        changed = True
-        log.info("migrate-settings: sslmode=require を付与しました")
+    url, ssl_changed = _migrate_normalize_sslmode(url)
+    changed = changed or ssl_changed
 
     if not changed:
         log.info("migrate-settings: 移行不要")
         return
-
-    # バックアップ
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    bak_path = settings_path.with_name(f"settings.json.bak-{ts}")
-    bak_path.write_bytes(settings_path.read_bytes())
-    bak_path.chmod(0o600)
-
-    # 書き戻し
-    data.setdefault("mem", {}).setdefault("sync", {})["postgres_url"] = url
-    settings_path.write_text(_json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    settings_path.chmod(0o600)
-    log.info("migrate-settings: settings.json を更新しました（バックアップ: %s）", bak_path.name)
+    _migrate_write_settings(settings_path, data, url)
 
 
 def _handle_sync(settings: Settings, stdin_data: dict) -> None:

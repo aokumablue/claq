@@ -7,7 +7,8 @@ memory_chunks テーブルへのチャンク投入とベクトル / 全文 / チ
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json as _json
+from typing import TYPE_CHECKING, Any
 
 from deepblue.mem.logger import get as _get_logger
 from deepblue.mem.pg_operations._helpers import _to_json
@@ -18,6 +19,53 @@ if TYPE_CHECKING:
     from deepblue.mem.database import MemoryChunk
 
 log = _get_logger("PG")
+
+
+def _parse_list(val: object) -> list[str]:
+    """list か JSON 文字列を文字列リストに正規化する（失敗時は空リスト）。"""
+    if isinstance(val, list):
+        return [str(x) for x in val]
+    if isinstance(val, str) and val:
+        try:
+            parsed = _json.loads(val)
+            return [str(x) for x in parsed] if isinstance(parsed, list) else []
+        except (ValueError, TypeError):
+            return []
+    return []
+
+
+def _row_to_chunk_dict(row: Any) -> dict:
+    """DB 行タプルをチャンク辞書に変換する。"""
+    return {
+        "id": str(row[0]),
+        "origin_user": row[1] or "",
+        "content": row[2] or "",
+        "user_prompt": row[3] or "",
+        "project": row[4] or "",
+        "created_at_epoch": int(row[5]) if row[5] is not None else 0,
+        "tool_names": _parse_list(row[6]),
+        "files_read": _parse_list(row[7]),
+        "files_modified": _parse_list(row[8]),
+    }
+
+
+_UPSERT_CHUNKS_SQL = """INSERT INTO memory_chunks
+             (id, origin_user, session_id, project, chunk_index, content,
+              tool_names, files_read, files_modified, user_prompt,
+              created_at_epoch, access_count, last_accessed_epoch,
+              merged_generation, merged_into, synced_at)
+             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+             ON CONFLICT (origin_user, session_id, chunk_index) DO UPDATE SET
+                content = EXCLUDED.content,
+                tool_names = EXCLUDED.tool_names,
+                files_read = EXCLUDED.files_read,
+               files_modified = EXCLUDED.files_modified,
+               user_prompt = EXCLUDED.user_prompt,
+               access_count = EXCLUDED.access_count,
+               last_accessed_epoch = EXCLUDED.last_accessed_epoch,
+               merged_generation = EXCLUDED.merged_generation,
+               merged_into = EXCLUDED.merged_into,
+               synced_at = NOW()"""
 
 
 class _ChunkOpsMixin:
@@ -85,57 +133,28 @@ class _ChunkOpsMixin:
         if not chunks:
             return 0
         conn = self._get_conn()
+        params_list = [
+            (
+                str(chunk.id), origin_user, chunk.session_id, chunk.project,
+                chunk.chunk_index, chunk.content,
+                _to_json(chunk.tool_names), _to_json(chunk.files_read), _to_json(chunk.files_modified),
+                chunk.user_prompt, chunk.created_at_epoch, chunk.access_count,
+                chunk.last_accessed_epoch, chunk.merged_generation,
+                str(chunk.merged_into) if chunk.merged_into else None,
+            )
+            for chunk in chunks
+        ]
         try:
-            params_list = [
-                (
-                    str(chunk.id),
-                    origin_user,
-                    chunk.session_id,
-                    chunk.project,
-                    chunk.chunk_index,
-                    chunk.content,
-                    _to_json(chunk.tool_names),
-                    _to_json(chunk.files_read),
-                    _to_json(chunk.files_modified),
-                    chunk.user_prompt,
-                    chunk.created_at_epoch,
-                    chunk.access_count,
-                    chunk.last_accessed_epoch,
-                    chunk.merged_generation,
-                    str(chunk.merged_into) if chunk.merged_into else None,
-                )
-                for chunk in chunks
-            ]
             with conn.cursor() as cur:
-                cur.executemany(
-                    """INSERT INTO memory_chunks
-             (id, origin_user, session_id, project, chunk_index, content,
-              tool_names, files_read, files_modified, user_prompt,
-              created_at_epoch, access_count, last_accessed_epoch,
-              merged_generation, merged_into, synced_at)
-             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-             ON CONFLICT (origin_user, session_id, chunk_index) DO UPDATE SET
-                content = EXCLUDED.content,
-                tool_names = EXCLUDED.tool_names,
-                files_read = EXCLUDED.files_read,
-               files_modified = EXCLUDED.files_modified,
-               user_prompt = EXCLUDED.user_prompt,
-               access_count = EXCLUDED.access_count,
-               last_accessed_epoch = EXCLUDED.last_accessed_epoch,
-               merged_generation = EXCLUDED.merged_generation,
-               merged_into = EXCLUDED.merged_into,
-               synced_at = NOW()""",
-                    params_list,
-                )
+                cur.executemany(_UPSERT_CHUNKS_SQL, params_list)
             conn.commit()
-            count = len(params_list)
         except Exception as e:
             log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
             self._put_conn(conn)
-        return count
+        return len(params_list)
 
     # --- 検索メソッド ---
 
@@ -269,8 +288,6 @@ class _ChunkOpsMixin:
             created_at_epoch, tool_names, files_read, files_modified）。
             空入力の場合は空の辞書を返す。
         """
-        import json as _json
-
         if not chunk_ids:
             return {}
 
@@ -288,30 +305,4 @@ class _ChunkOpsMixin:
         finally:
             self._put_conn(conn)
 
-        def _parse_list(val: object) -> list[str]:
-            """list か JSON 文字列を文字列リストに正規化する（失敗時は空リスト）。"""
-            if isinstance(val, list):
-                return [str(x) for x in val]
-            if isinstance(val, str) and val:
-                try:
-                    parsed = _json.loads(val)
-                    return [str(x) for x in parsed] if isinstance(parsed, list) else []
-                except (ValueError, TypeError):
-                    return []
-            return []
-
-        result: dict[str, dict] = {}
-        for row in rows:
-            cid = str(row[0])
-            result[cid] = {
-                "id": cid,
-                "origin_user": row[1] or "",
-                "content": row[2] or "",
-                "user_prompt": row[3] or "",
-                "project": row[4] or "",
-                "created_at_epoch": int(row[5]) if row[5] is not None else 0,
-                "tool_names": _parse_list(row[6]),
-                "files_read": _parse_list(row[7]),
-                "files_modified": _parse_list(row[8]),
-            }
-        return result
+        return {str(row[0]): _row_to_chunk_dict(row) for row in rows}

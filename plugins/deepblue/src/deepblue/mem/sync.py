@@ -197,6 +197,183 @@ class SyncResult:
     error: str | None = None
 
 
+def _dry_run_counts(sqlite_db: Database) -> SyncResult:
+    """DRY RUN 用に未同期行数を数えて SyncResult を返す。"""
+    conn = sqlite_db.conn
+    result = SyncResult(
+        chunks=_count_pending_rows(conn, "memory_chunks"),
+        sessions=_count_pending_rows(conn, "sessions"),
+        instincts=_count_pending_rows(conn, "instincts"),
+        adrs=_count_pending_rows(conn, "adrs"),
+        events=_count_pending_rows(conn, "event_logs"),
+        interaction_logs=_count_pending_rows(conn, "interaction_logs"),
+        project_profiles=_count_pending_rows(conn, "project_profiles"),
+        skill_runs=_count_pending_rows(conn, "mem_item_runs"),
+    )
+    chunk_ids = [
+        row[0]
+        for row in conn.execute(
+            "SELECT id FROM memory_chunks WHERE synced_at IS NULL ORDER BY created_at_epoch"
+        ).fetchall()
+    ]
+    result.embeddings = _count_pending_embeddings(conn, chunk_ids)
+    log.info(
+        "[DRY RUN] 同期対象: chunks=%d, sessions=%d, instincts=%d, adrs=%d, "
+        "events=%d, interactions=%d, profiles=%d, skill_runs=%d",
+        result.chunks, result.sessions, result.instincts, result.adrs,
+        result.events, result.interaction_logs, result.project_profiles, result.skill_runs,
+    )
+    return result
+
+
+def _claim_all_pending(conn: sqlite3.Connection, sync_started_at: str) -> dict:
+    """全テーブルの未同期行を一括で取得して synced_at を立てる。"""
+    return {
+        "chunks": _claim_pending_rows(conn, "memory_chunks", "created_at_epoch", sync_started_at, _row_to_chunk),
+        "sessions": _claim_pending_rows(conn, "sessions", "started_at_epoch", sync_started_at, _row_to_session),
+        "instincts": _claim_pending_rows(conn, "instincts", "created_at_epoch", sync_started_at, _row_to_instinct),
+        "adrs": _claim_pending_rows(conn, "adrs", "created_at_epoch", sync_started_at, _row_to_adr),
+        "events": _claim_pending_rows(conn, "event_logs", "created_at_epoch", sync_started_at, _row_to_event_log),
+        "interaction_logs": _claim_pending_rows(conn, "interaction_logs", "created_at_epoch", sync_started_at, _row_to_interaction_log),
+        "project_profiles": _claim_pending_rows(conn, "project_profiles", "last_updated_epoch", sync_started_at, _row_to_project_profile),
+        "skill_runs": _claim_pending_rows(conn, "mem_item_runs", "created_at_epoch", sync_started_at, _row_to_mem_item_run),
+    }
+
+
+def _upsert_with_origin(items: list, origin_user: str) -> list:
+    """リスト内の各アイテムに origin_user を設定して返す（副作用あり）。"""
+    for item in items:
+        item.origin_user = origin_user
+    return items
+
+
+def _upsert_all_to_pg(pg_db: PgDatabase, pending: dict, origin_user: str) -> SyncResult:
+    """pending 辞書の各テーブルデータを PostgreSQL に UPSERT して SyncResult を返す。"""
+    chunks = pending["chunks"]
+    result = SyncResult(chunks=pg_db.upsert_chunks_batch(chunks, origin_user)) if chunks else SyncResult()
+    if chunks:
+        log.info("chunks: %d 件同期", result.chunks)
+
+    if sessions := pending["sessions"]:
+        result.sessions = pg_db.upsert_sessions_batch(sessions, origin_user)
+        log.info("sessions: %d 件同期", result.sessions)
+
+    if instincts := _upsert_with_origin(pending["instincts"], origin_user):
+        result.instincts = pg_db.upsert_instincts_batch(instincts)
+        log.info("instincts: %d 件同期", result.instincts)
+
+    if adrs := _upsert_with_origin(pending["adrs"], origin_user):
+        result.adrs = pg_db.upsert_adrs_batch(adrs)
+        log.info("adrs: %d 件同期", result.adrs)
+
+    if events := _upsert_with_origin(pending["events"], origin_user):
+        result.events = pg_db.insert_event_logs_batch(events)
+        log.info("events: %d 件同期", result.events)
+
+    if interaction_logs := _upsert_with_origin(pending["interaction_logs"], origin_user):
+        result.interaction_logs = pg_db.upsert_interaction_logs_batch(interaction_logs)
+        log.info("interaction_logs: %d 件同期", result.interaction_logs)
+
+    if project_profiles := _upsert_with_origin(pending["project_profiles"], origin_user):
+        result.project_profiles = pg_db.upsert_project_profiles_batch(project_profiles)
+        log.info("project_profiles: %d 件同期", result.project_profiles)
+
+    if skill_runs := _upsert_with_origin(pending["skill_runs"], origin_user):
+        result.skill_runs = pg_db.upsert_mem_item_runs_batch(skill_runs)
+        log.info("skill_runs: %d 件同期", result.skill_runs)
+
+    return result
+
+
+def _run_sync_transaction(
+    sqlite_db: Database,
+    pg_db: PgDatabase,
+    origin_user: str,
+) -> SyncResult:
+    """SQLite トランザクション内でデータを取得し PG へ UPSERT する。"""
+    sync_started_at = datetime.now(UTC).isoformat()
+    conn = sqlite_db.conn
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        pending = _claim_all_pending(conn, sync_started_at)
+        result = _upsert_all_to_pg(pg_db, pending, origin_user)
+        result.embeddings = _sync_embeddings(sqlite_db, pg_db, pending["chunks"])
+        if result.embeddings > 0:
+            log.info("embeddings: %d 件同期", result.embeddings)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return result
+
+
+def _check_sync_preconditions(settings: Settings) -> SyncResult | None:
+    """同期の事前条件を検証し、スキップすべき場合は SyncResult を返す。問題なければ None。"""
+    sync_cfg = settings.sync
+    if not sync_cfg.enabled:
+        log.info("同期は無効です")
+        return SyncResult(success=True)
+    if not sync_cfg.postgres_url:
+        log.info("同期スキップ: postgres_url 未設定 (~/.deepblue/settings.json の mem.sync.postgres_url を設定してください)")
+        return SyncResult(success=False, error="postgres_url が設定されていません")
+    if not should_sync(settings):
+        log.info("同期は最新状態のためスキップします")
+        return SyncResult(success=True)
+    return None
+
+
+def _open_sync_connections(
+    settings: Settings,
+) -> tuple[Database, PgDatabase] | tuple[None, None]:
+    """SQLite + PgDatabase を開いて返す。PG 接続失敗時は (None, None)。"""
+    sync_cfg = settings.sync
+    sqlite_db = Database(settings.db_path)
+    pg_db = PgDatabase(sync_cfg.postgres_url)
+    if not pg_db.test_connection():
+        sync_cfg.last_sync_success = False
+        try:
+            settings.save_sync_state()
+        except Exception:
+            pass
+        log.error("PG 接続失敗: %s", _mask_url(sync_cfg.postgres_url))
+        sqlite_db.close()
+        pg_db.close()
+        return None, None
+    return sqlite_db, pg_db
+
+
+def _close_sync_connections(
+    sqlite_db: Database | None, pg_db: PgDatabase | None
+) -> None:
+    """同期用の DB 接続をクローズする。"""
+    if sqlite_db is not None:
+        sqlite_db.close()
+    if pg_db is not None:
+        pg_db.close()
+
+
+def _execute_sync(
+    settings: Settings,
+    sqlite_db: Database,
+    pg_db: PgDatabase,
+    origin_user: str,
+    dry_run: bool,
+) -> SyncResult:
+    """実際の同期処理を実行し、成功・失敗フラグを保存して返す。"""
+    sync_cfg = settings.sync
+    if dry_run:
+        log.info("[DRY RUN] 同期をシミュレート中...")
+        return _dry_run_counts(sqlite_db)
+
+    log.info("PostgreSQL への同期を開始...")
+    result = _run_sync_transaction(sqlite_db, pg_db, origin_user)
+    sync_cfg.last_synced_at = time.time()
+    sync_cfg.last_sync_success = True
+    settings.save_sync_state()
+    log.info("同期完了")
+    return result
+
+
 def sync_to_postgres(
     settings: Settings,
     dry_run: bool = False,
@@ -216,166 +393,21 @@ def sync_to_postgres(
             return SyncResult(success=True)
 
         _reload_sync_state(settings)
-        sync_cfg = settings.sync
+        early = _check_sync_preconditions(settings)
+        if early is not None:
+            return early
 
-        if not sync_cfg.enabled:
-            log.info("同期は無効です")
-            return SyncResult(success=True)
-
-        if not sync_cfg.postgres_url:
-            log.info("同期スキップ: postgres_url 未設定 (~/.deepblue/settings.json の mem.sync.postgres_url を設定してください)")
-            return SyncResult(success=False, error="postgres_url が設定されていません")
-
-        if not should_sync(settings):
-            log.info("同期は最新状態のためスキップします")
-            return SyncResult(success=True)
-
-        # 試行開始時刻を実際に同期を始める直前に記録
-        sync_cfg.last_sync_attempt_at = time.time()
-
+        settings.sync.last_sync_attempt_at = time.time()
+        origin_user = get_git_user_name()
         sqlite_db: Database | None = None
         pg_db: PgDatabase | None = None
-        origin_user = get_git_user_name()
-
         try:
-            sqlite_db = Database(settings.db_path)
-            pg_db = PgDatabase(sync_cfg.postgres_url)
-
-            if not pg_db.test_connection():
-                sync_cfg.last_sync_success = False
-                try:
-                    settings.save_sync_state()
-                except Exception:
-                    pass
-                masked_url = _mask_url(sync_cfg.postgres_url)
-                log.error("PG 接続失敗: %s", masked_url)
+            sqlite_db, pg_db = _open_sync_connections(settings)
+            if sqlite_db is None or pg_db is None:
                 return SyncResult(success=False, error="PostgreSQL への接続に失敗しました")
-
-            if dry_run:
-                log.info("[DRY RUN] 同期をシミュレート中...")
-                result = SyncResult(
-                    chunks=_count_pending_rows(sqlite_db.conn, "memory_chunks"),
-                    sessions=_count_pending_rows(sqlite_db.conn, "sessions"),
-                    instincts=_count_pending_rows(sqlite_db.conn, "instincts"),
-                    adrs=_count_pending_rows(sqlite_db.conn, "adrs"),
-                    events=_count_pending_rows(sqlite_db.conn, "event_logs"),
-                    interaction_logs=_count_pending_rows(sqlite_db.conn, "interaction_logs"),
-                    project_profiles=_count_pending_rows(sqlite_db.conn, "project_profiles"),
-                    skill_runs=_count_pending_rows(sqlite_db.conn, "mem_item_runs"),
-                )
-                chunk_ids = [
-                    row[0]
-                    for row in sqlite_db.conn.execute(
-                        "SELECT id FROM memory_chunks WHERE synced_at IS NULL ORDER BY created_at_epoch"
-                    ).fetchall()
-                ]
-                result.embeddings = _count_pending_embeddings(sqlite_db.conn, chunk_ids)
-                log.info(
-                    "[DRY RUN] 同期対象: chunks=%d, sessions=%d, instincts=%d, adrs=%d, "
-                    "events=%d, interactions=%d, profiles=%d, skill_runs=%d",
-                    result.chunks, result.sessions, result.instincts, result.adrs,
-                    result.events, result.interaction_logs, result.project_profiles, result.skill_runs,
-                )
-                return result
-
-            log.info("PostgreSQL への同期を開始...")
-
-            sync_started_at = datetime.now(UTC).isoformat()
-            conn = sqlite_db.conn
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                chunks = _claim_pending_rows(conn, "memory_chunks", "created_at_epoch", sync_started_at, _row_to_chunk)
-                sessions = _claim_pending_rows(conn, "sessions", "started_at_epoch", sync_started_at, _row_to_session)
-                instincts = _claim_pending_rows(conn, "instincts", "created_at_epoch", sync_started_at, _row_to_instinct)
-                adrs = _claim_pending_rows(conn, "adrs", "created_at_epoch", sync_started_at, _row_to_adr)
-                events = _claim_pending_rows(conn, "event_logs", "created_at_epoch", sync_started_at, _row_to_event_log)
-                interaction_logs = _claim_pending_rows(
-                    conn,
-                    "interaction_logs",
-                    "created_at_epoch",
-                    sync_started_at,
-                    _row_to_interaction_log,
-                )
-                project_profiles = _claim_pending_rows(
-                    conn,
-                    "project_profiles",
-                    "last_updated_epoch",
-                    sync_started_at,
-                    _row_to_project_profile,
-                )
-                skill_runs = _claim_pending_rows(
-                    conn,
-                    "mem_item_runs",
-                    "created_at_epoch",
-                    sync_started_at,
-                    _row_to_mem_item_run,
-                )
-
-                if chunks:
-                    result = SyncResult(chunks=pg_db.upsert_chunks_batch(chunks, origin_user))
-                    log.info("chunks: %d 件同期", result.chunks)
-                else:
-                    result = SyncResult()
-
-                if sessions:
-                    result.sessions = pg_db.upsert_sessions_batch(sessions, origin_user)
-                    log.info("sessions: %d 件同期", result.sessions)
-
-                if instincts:
-                    for inst in instincts:
-                        inst.origin_user = origin_user
-                    result.instincts = pg_db.upsert_instincts_batch(instincts)
-                    log.info("instincts: %d 件同期", result.instincts)
-
-                if adrs:
-                    for adr in adrs:
-                        adr.origin_user = origin_user
-                    result.adrs = pg_db.upsert_adrs_batch(adrs)
-                    log.info("adrs: %d 件同期", result.adrs)
-
-                if events:
-                    for ev in events:
-                        ev.origin_user = origin_user
-                    result.events = pg_db.insert_event_logs_batch(events)
-                    log.info("events: %d 件同期", result.events)
-
-                if interaction_logs:
-                    for il in interaction_logs:
-                        il.origin_user = origin_user
-                    result.interaction_logs = pg_db.upsert_interaction_logs_batch(interaction_logs)
-                    log.info("interaction_logs: %d 件同期", result.interaction_logs)
-
-                if project_profiles:
-                    for pp in project_profiles:
-                        pp.origin_user = origin_user
-                    result.project_profiles = pg_db.upsert_project_profiles_batch(project_profiles)
-                    log.info("project_profiles: %d 件同期", result.project_profiles)
-
-                if skill_runs:
-                    for sr in skill_runs:
-                        sr.origin_user = origin_user
-                    result.skill_runs = pg_db.upsert_mem_item_runs_batch(skill_runs)
-                    log.info("skill_runs: %d 件同期", result.skill_runs)
-
-                result.embeddings = _sync_embeddings(sqlite_db, pg_db, chunks)
-                if result.embeddings > 0:
-                    log.info("embeddings: %d 件同期", result.embeddings)
-
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-
-            sync_cfg.last_synced_at = time.time()
-            sync_cfg.last_sync_success = True
-            settings.save_sync_state()
-
-            log.info("同期完了")
-            return result
-
+            return _execute_sync(settings, sqlite_db, pg_db, origin_user, dry_run)
         except Exception as e:
-            # 失敗フラグを永続化（暴走防止のリトライ制御に使用）
-            sync_cfg.last_sync_success = False
+            settings.sync.last_sync_success = False
             try:
                 settings.save_sync_state()
             except Exception:
@@ -383,10 +415,7 @@ def sync_to_postgres(
             log.error("同期エラー: %s", e, exc_info=True)
             return SyncResult(success=False, error=_mask_url(str(e)))
         finally:
-            if sqlite_db is not None:
-                sqlite_db.close()
-            if pg_db is not None:
-                pg_db.close()
+            _close_sync_connections(sqlite_db, pg_db)
 
 
 def should_sync(settings: Settings) -> bool:

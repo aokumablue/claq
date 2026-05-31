@@ -10,27 +10,7 @@ from deepblue.mem.pg_database import PgDatabase
 log = _get_logger("SKILL_ANALYZER")
 
 
-def detect_repeated_patterns(
-    pg: PgDatabase,
-    min_count: int = 3,
-    days: int = 90,
-) -> list[dict[str, Any]]:
-    """繰り返し実行されるパターン（ツール組み合わせ）を検出する。
-
-    Args:
-      pg: PgDatabase インスタンス
-      min_count: 最低出現回数
-      days: 集計期間（日）
-
-    Returns:
-      パターンリスト（tool_combo, count, projects, users 付き）
-    """
-    conn = pg._get_conn()
-    try:
-        with conn.cursor() as cur:
-            # ツール名の配列をソートして正規化し、組み合わせ頻度を集計
-            cur.execute(
-                """
+_REPEATED_PATTERNS_SQL = """
         WITH tool_combos AS (
           SELECT
             session_id,
@@ -57,9 +37,28 @@ def detect_repeated_patterns(
         HAVING COUNT(*) >= %s
         ORDER BY occurrence_count DESC
         LIMIT 30
-        """,
-                (days, min_count),
-            )
+"""
+
+
+def detect_repeated_patterns(
+    pg: PgDatabase,
+    min_count: int = 3,
+    days: int = 90,
+) -> list[dict[str, Any]]:
+    """繰り返し実行されるパターン（ツール組み合わせ）を検出する。
+
+    Args:
+      pg: PgDatabase インスタンス
+      min_count: 最低出現回数
+      days: 集計期間（日）
+
+    Returns:
+      パターンリスト（tool_combo, count, projects, users 付き）
+    """
+    conn = pg._get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_REPEATED_PATTERNS_SQL, (days, min_count))
             rows = cur.fetchall()
             return [
                 {
@@ -75,6 +74,27 @@ def detect_repeated_patterns(
             ]
     finally:
         pg._put_conn(conn)
+
+
+_SKILL_GAPS_SQL = """
+        SELECT
+          LOWER(REGEXP_REPLACE(
+            SUBSTRING(user_prompt, 1, 60),
+            '[^a-zA-Z0-9\\u3040-\\u9FFF\\s]', '', 'g'
+          )) AS prompt_key,
+          COUNT(*) AS occurrence_count,
+          COUNT(DISTINCT origin_user) AS user_count,
+          ARRAY_AGG(DISTINCT origin_user) AS users,
+          MAX(user_prompt) AS sample_prompt
+        FROM memory_chunks
+        WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - %s * INTERVAL '1 day')
+          AND user_prompt IS NOT NULL AND user_prompt != ''
+          AND LENGTH(user_prompt) > 10
+        GROUP BY prompt_key
+        HAVING COUNT(*) >= 2
+        ORDER BY occurrence_count DESC
+        LIMIT %s
+"""
 
 
 def detect_skill_gaps(
@@ -95,29 +115,7 @@ def detect_skill_gaps(
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
-            # user_prompt の先頭キーワード（動詞+目的語）でグループ化
-            cur.execute(
-                """
-        SELECT
-          LOWER(REGEXP_REPLACE(
-            SUBSTRING(user_prompt, 1, 60),
-            '[^a-zA-Z0-9\\u3040-\\u9FFF\\s]', '', 'g'
-          )) AS prompt_key,
-          COUNT(*) AS occurrence_count,
-          COUNT(DISTINCT origin_user) AS user_count,
-          ARRAY_AGG(DISTINCT origin_user) AS users,
-          MAX(user_prompt) AS sample_prompt
-        FROM memory_chunks
-        WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - %s * INTERVAL '1 day')
-          AND user_prompt IS NOT NULL AND user_prompt != ''
-          AND LENGTH(user_prompt) > 10
-        GROUP BY prompt_key
-        HAVING COUNT(*) >= 2
-        ORDER BY occurrence_count DESC
-        LIMIT %s
-        """,
-                (days, top_n),
-            )
+            cur.execute(_SKILL_GAPS_SQL, (days, top_n))
             rows = cur.fetchall()
             return [
                 {
@@ -129,6 +127,55 @@ def detect_skill_gaps(
                 }
                 for r in rows
             ]
+    finally:
+        pg._put_conn(conn)
+
+
+_SKILL_LIKE_COND = (
+    "LOWER(user_prompt) LIKE LOWER(%s) OR LOWER(content) LIKE LOWER(%s)"
+)
+
+
+def _fetch_skill_summary(
+    pg: PgDatabase, skill_name: str, days: int
+) -> tuple[Any, list[dict[str, Any]]]:
+    """スキル集計行と日次タイムラインを返す。集計ゼロ時は (None, [])。"""
+    like = f"%{skill_name}%"
+    conn = pg._get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+        SELECT
+          COUNT(*) AS total_uses,
+          COUNT(DISTINCT origin_user) AS unique_users,
+          COUNT(DISTINCT project) AS unique_projects,
+          ARRAY_AGG(DISTINCT origin_user) AS users,
+          ARRAY_AGG(DISTINCT project) AS projects,
+          AVG(access_count) AS avg_access_count,
+          MAX(created_at_epoch) AS last_used_epoch
+        FROM memory_chunks
+        WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - %s * INTERVAL '1 day')
+          AND ({_SKILL_LIKE_COND})
+        """,
+                (days, like, like),
+            )
+            r = cur.fetchone()
+            if r is None or r[0] == 0:
+                return None, []
+
+            cur.execute(
+                f"""
+        SELECT DATE(TO_TIMESTAMP(created_at_epoch)) AS day, COUNT(*) AS uses
+        FROM memory_chunks
+        WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - %s * INTERVAL '1 day')
+          AND ({_SKILL_LIKE_COND})
+        GROUP BY day ORDER BY day
+        """,
+                (days, like, like),
+            )
+            timeline = [{"date": str(tr[0]), "uses": tr[1]} for tr in cur.fetchall()]
+            return r, timeline
     finally:
         pg._put_conn(conn)
 
@@ -150,95 +197,34 @@ def analyze_skill_usage(
     Returns:
       使用統計（total_uses, unique_users, projects, timeline 付き）
     """
-    conn = pg._get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-        SELECT
-          COUNT(*) AS total_uses,
-          COUNT(DISTINCT origin_user) AS unique_users,
-          COUNT(DISTINCT project) AS unique_projects,
-          ARRAY_AGG(DISTINCT origin_user) AS users,
-          ARRAY_AGG(DISTINCT project) AS projects,
-          AVG(access_count) AS avg_access_count,
-          MAX(created_at_epoch) AS last_used_epoch
-        FROM memory_chunks
-        WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - %s * INTERVAL '1 day')
-          AND (
-            LOWER(user_prompt) LIKE LOWER(%s)
-            OR LOWER(content) LIKE LOWER(%s)
-          )
-        """,
-                (days, f"%{skill_name}%", f"%{skill_name}%"),
-            )
-            r = cur.fetchone()
-            if r is None or r[0] == 0:
-                return {
-                    "total_uses": 0,
-                    "unique_users": 0,
-                    "unique_projects": 0,
-                    "users": [],
-                    "projects": [],
-                    "avg_access_count": 0.0,
-                    "last_used_epoch": None,
-                }
-
-            # 日次タイムライン
-            cur.execute(
-                """
-        SELECT DATE(TO_TIMESTAMP(created_at_epoch)) AS day, COUNT(*) AS uses
-        FROM memory_chunks
-        WHERE created_at_epoch > EXTRACT(EPOCH FROM NOW() - %s * INTERVAL '1 day')
-          AND (
-            LOWER(user_prompt) LIKE LOWER(%s)
-            OR LOWER(content) LIKE LOWER(%s)
-          )
-        GROUP BY day
-        ORDER BY day
-        """,
-                (days, f"%{skill_name}%", f"%{skill_name}%"),
-            )
-            timeline = [{"date": str(tr[0]), "uses": tr[1]} for tr in cur.fetchall()]
-
-            return {
-                "total_uses": r[0],
-                "unique_users": r[1],
-                "unique_projects": r[2],
-                "users": list(r[3] or []),
-                "projects": list(r[4] or []),
-                "avg_access_count": round(float(r[5] or 0), 2),
-                "last_used_epoch": r[6],
-                "timeline": timeline,
-            }
-    finally:
-        pg._put_conn(conn)
+    r, timeline = _fetch_skill_summary(pg, skill_name, days)
+    if r is None:
+        return {
+            "total_uses": 0,
+            "unique_users": 0,
+            "unique_projects": 0,
+            "users": [],
+            "projects": [],
+            "avg_access_count": 0.0,
+            "last_used_epoch": None,
+        }
+    return {
+        "total_uses": r[0],
+        "unique_users": r[1],
+        "unique_projects": r[2],
+        "users": list(r[3] or []),
+        "projects": list(r[4] or []),
+        "avg_access_count": round(float(r[5] or 0), 2),
+        "last_used_epoch": r[6],
+        "timeline": timeline,
+    }
 
 
-def suggest_skill_improvements(
-    pg: PgDatabase,
-    skill_name: str,
-    days: int = 90,
-) -> list[dict[str, Any]]:
-    """スキルの改善提案を生成する。
-
-    スキル使用後に続くツール操作パターンから、スキルがカバーしていない
-    作業を検出して改善提案を生成する。
-
-    Args:
-      pg: PgDatabase インスタンス
-      skill_name: 分析対象スキル名
-      days: 集計期間（日）
-
-    Returns:
-      改善提案リスト（type, description, evidence 付き）
-    """
-    conn = pg._get_conn()
-    try:
-        with conn.cursor() as cur:
-            # スキル使用セッションで頻出するツールを抽出
-            cur.execute(
-                """
+def _query_top_tools(cur: Any, skill_name: str, days: int) -> list[dict[str, Any]]:
+    """単一カーソルを使ってスキル使用セッションで頻出するツール上位10件を返す。"""
+    like = f"%{skill_name}%"
+    cur.execute(
+        """
         WITH skill_sessions AS (
           SELECT DISTINCT session_id
           FROM memory_chunks
@@ -262,13 +248,16 @@ def suggest_skill_improvements(
         )
         SELECT tool_name, usage_count FROM session_tools
         """,
-                (days, f"%{skill_name}%", f"%{skill_name}%"),
-            )
-            top_tools = [{"tool": r[0], "count": r[1]} for r in cur.fetchall()]
+        (days, like, like),
+    )
+    return [{"tool": r[0], "count": r[1]} for r in cur.fetchall()]
 
-            # スキル使用後のファイル変更頻度
-            cur.execute(
-                """
+
+def _query_top_files(cur: Any, skill_name: str, days: int) -> list[dict[str, Any]]:
+    """単一カーソルを使ってスキル使用セッションで頻繁に変更されるファイル上位10件を返す。"""
+    like = f"%{skill_name}%"
+    cur.execute(
+        """
         WITH skill_sessions AS (
           SELECT DISTINCT session_id
           FROM memory_chunks
@@ -289,48 +278,71 @@ def suggest_skill_improvements(
         ORDER BY change_count DESC
         LIMIT 10
         """,
-                (days, f"%{skill_name}%", f"%{skill_name}%"),
-            )
-            top_files = [{"file": r[0], "count": r[1]} for r in cur.fetchall()]
+        (days, like, like),
+    )
+    return [{"file": r[0], "count": r[1]} for r in cur.fetchall()]
 
-    finally:
-        pg._put_conn(conn)
 
+def _build_improvements(
+    skill_name: str,
+    top_tools: list[dict[str, Any]],
+    top_files: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """ツール・ファイルパターンから改善提案リストを構築する。"""
     improvements: list[dict[str, Any]] = []
 
-    # ツールカバレッジのギャップ
     if top_tools:
         high_usage_tools = [t for t in top_tools if t["count"] >= 3]
         if high_usage_tools:
-            improvements.append(
-                {
-                    "type": "tool_coverage",
-                    "description": f"スキル '{skill_name}' のセッションで頻繁に使用されるツールを明示的に案内に追加することを検討してください",
-                    "evidence": high_usage_tools[:5],
-                    "priority": "medium",
-                }
-            )
+            improvements.append({
+                "type": "tool_coverage",
+                "description": f"スキル '{skill_name}' のセッションで頻繁に使用されるツールを明示的に案内に追加することを検討してください",
+                "evidence": high_usage_tools[:5],
+                "priority": "medium",
+            })
 
-    # ファイル変更パターン
     if top_files:
-        improvements.append(
-            {
-                "type": "file_pattern",
-                "description": f"スキル '{skill_name}' 使用時に頻繁に変更されるファイルパターンをドキュメントに追記することを検討してください",
-                "evidence": top_files[:5],
-                "priority": "low",
-            }
-        )
+        improvements.append({
+            "type": "file_pattern",
+            "description": f"スキル '{skill_name}' 使用時に頻繁に変更されるファイルパターンをドキュメントに追記することを検討してください",
+            "evidence": top_files[:5],
+            "priority": "low",
+        })
 
-    # 使用頻度が低い場合の提案
     if not top_tools and not top_files:
-        improvements.append(
-            {
-                "type": "usage_low",
-                "description": f"スキル '{skill_name}' の使用データが少なく十分な分析ができません。より多くのデータ蓄積が必要です",
-                "evidence": [],
-                "priority": "info",
-            }
-        )
+        improvements.append({
+            "type": "usage_low",
+            "description": f"スキル '{skill_name}' の使用データが少なく十分な分析ができません。より多くのデータ蓄積が必要です",
+            "evidence": [],
+            "priority": "info",
+        })
 
     return improvements
+
+
+def suggest_skill_improvements(
+    pg: PgDatabase,
+    skill_name: str,
+    days: int = 90,
+) -> list[dict[str, Any]]:
+    """スキルの改善提案を生成する。
+
+    スキル使用後に続くツール操作パターンから、スキルがカバーしていない
+    作業を検出して改善提案を生成する。
+
+    Args:
+      pg: PgDatabase インスタンス
+      skill_name: 分析対象スキル名
+      days: 集計期間（日）
+
+    Returns:
+      改善提案リスト（type, description, evidence 付き）
+    """
+    conn = pg._get_conn()
+    try:
+        with conn.cursor() as cur:
+            top_tools = _query_top_tools(cur, skill_name, days)
+            top_files = _query_top_files(cur, skill_name, days)
+    finally:
+        pg._put_conn(conn)
+    return _build_improvements(skill_name, top_tools, top_files)

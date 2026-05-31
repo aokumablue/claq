@@ -57,13 +57,33 @@ def handle_team_context(
     return ctx
 
 
+def _build_team_session_context(
+    settings: Any,
+    pg: Any,
+    query: str,
+    git_user: str,
+) -> str:
+    """PgDatabase を使ってチームコンテキスト文字列を生成して返す。失敗時は空文字列。"""
+    from deepblue.mem.team_context import build_team_context
+
+    exclude = git_user if settings.team.exclude_self else ""
+    return build_team_context(
+        pg,
+        query=query,
+        exclude_origin_user=exclude,
+        settings=settings.team,
+        mode="hybrid",
+        embedding_model=settings.embedding_model,
+    )
+
+
 def handle_team_session_init(
-    settings,
+    settings: Any,
     stdin_data: dict[str, Any],
     *,
-    get_project,
-    get_git_user_name,
-    log,
+    get_project: Any,
+    get_git_user_name: Any,
+    log: Any,
 ) -> None:
     """UserPromptSubmit: 過去参照プロンプト検出時にチーム横断ベクトル検索を実行する。"""
     from deepblue.mem.search import should_inject_memory
@@ -85,7 +105,6 @@ def handle_team_session_init(
 
     try:
         from deepblue.mem.pg_database import PgDatabase
-        from deepblue.mem.team_context import build_team_context
     except Exception as e:
         log.warning("team-session-init モジュール読み込み失敗: %s", e)
         return
@@ -95,24 +114,9 @@ def handle_team_session_init(
         if not pg.test_connection():
             log.warning("team-session-init: PostgreSQL 接続失敗")
             return
-        exclude = git_user if settings.team.exclude_self else ""
-        ctx = build_team_context(
-            pg,
-            query=query,
-            exclude_origin_user=exclude,
-            settings=settings.team,
-            mode="hybrid",
-            embedding_model=settings.embedding_model,
-        )
+        ctx = _build_team_session_context(settings, pg, query, git_user)
         if ctx:
-            print(
-                json.dumps(
-                    {
-                        "hookEventName": "UserPromptSubmit",
-                        "additionalContext": ctx,
-                    }
-                )
-            )
+            print(json.dumps({"hookEventName": "UserPromptSubmit", "additionalContext": ctx}))
     except Exception as e:
         log.warning("team-session-init 生成失敗: %s", e)
     finally:

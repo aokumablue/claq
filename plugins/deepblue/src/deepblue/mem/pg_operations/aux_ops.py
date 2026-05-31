@@ -127,25 +127,17 @@ class _AuxOpsMixin:
         if not profiles:
             return 0
         conn = self._get_conn()
+        params_list = [
+            (
+                profile.id, profile.origin_user, profile.project, profile.project_path,
+                _to_json(profile.languages), _to_json(profile.frameworks),
+                profile.primary_language, profile.test_command, profile.build_command,
+                profile.scope_hint, profile.detected_at_epoch, profile.last_updated_epoch,
+                profile.detection_confidence,
+            )
+            for profile in profiles
+        ]
         try:
-            params_list = [
-                (
-                    profile.id,
-                    profile.origin_user,
-                    profile.project,
-                    profile.project_path,
-                    _to_json(profile.languages),
-                    _to_json(profile.frameworks),
-                    profile.primary_language,
-                    profile.test_command,
-                    profile.build_command,
-                    profile.scope_hint,
-                    profile.detected_at_epoch,
-                    profile.last_updated_epoch,
-                    profile.detection_confidence,
-                )
-                for profile in profiles
-            ]
             with conn.cursor() as cur:
                 cur.executemany(
                     """INSERT INTO project_profiles
@@ -168,14 +160,13 @@ class _AuxOpsMixin:
                     params_list,
                 )
             conn.commit()
-            count = len(params_list)
         except Exception as e:
             log.error("PostgreSQL 操作に失敗したためロールバックします: %s", e)
             conn.rollback()
             raise
         finally:
             self._put_conn(conn)
-        return count
+        return len(params_list)
 
     # --- mem_item_runs ---
 

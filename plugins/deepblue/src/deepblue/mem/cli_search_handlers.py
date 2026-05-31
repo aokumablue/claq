@@ -52,6 +52,33 @@ def handle_search(
         print(json.dumps({"results": [], "error": str(e)}))
 
 
+def _get_candidate_ids(db: Any, settings: Any, query: str, project: Any, limit: int) -> list:
+    """クエリがあれば FTS 検索、なければ最近のチャンクから候補 ID を返す。"""
+    from deepblue.mem.search import SearchService
+
+    if query.strip():
+        svc = SearchService(db, settings)
+        return [r.chunk_id for r in svc.search(query=query, project=project, limit=limit * 3)]
+    return [c.id for c in db.get_recent_chunks(limit=limit * 3, project=project) if c.id is not None]
+
+
+def _build_chunk_result(db: Any, chunk_id: str) -> dict | None:
+    """chunk_id からチャンク辞書を構築して返す。存在しない場合は None。"""
+    chunk = db.get_chunk_by_id(chunk_id)
+    if chunk is None:
+        return None
+    return {
+        "chunk_id": chunk_id,
+        "content": chunk.content,
+        "user_prompt": chunk.user_prompt,
+        "project": chunk.project,
+        "created_at_epoch": chunk.created_at_epoch,
+        "tool_names": chunk.tool_names,
+        "files_read": chunk.files_read,
+        "files_modified": chunk.files_modified,
+    }
+
+
 def handle_search_structured(
     settings: Settings,
     stdin_data: dict[str, Any],
@@ -62,8 +89,6 @@ def handle_search_structured(
     log: Any,
 ) -> None:
     """構造化検索: tool_name, files, date_range フィルタをサポート"""
-    from deepblue.mem.search import SearchService
-
     query = str(stdin_data.get("query", "") or "")
     project = stdin_data.get("project") or get_project(stdin_data)
     limit = coerce_int(stdin_data.get("limit"), default=20)
@@ -74,31 +99,9 @@ def handle_search_structured(
 
     try:
         with open_db(settings) as db:
-            if query.strip():
-                svc = SearchService(db, settings)
-                candidate_ids = [r.chunk_id for r in svc.search(query=query, project=project, limit=limit * 3)]
-            else:
-                candidate_ids = [c.id for c in db.get_recent_chunks(limit=limit * 3, project=project) if c.id is not None]
-
+            candidate_ids = _get_candidate_ids(db, settings, query, project, limit)
             filtered = apply_structured_filters(db, candidate_ids, tool_filter, file_pattern, date_from, date_to)
-
-            results = []
-            for chunk_id in filtered[:limit]:
-                chunk = db.get_chunk_by_id(chunk_id)
-                if chunk:
-                    results.append(
-                        {
-                            "chunk_id": chunk_id,
-                            "content": chunk.content,
-                            "user_prompt": chunk.user_prompt,
-                            "project": chunk.project,
-                            "created_at_epoch": chunk.created_at_epoch,
-                            "tool_names": chunk.tool_names,
-                            "files_read": chunk.files_read,
-                            "files_modified": chunk.files_modified,
-                        }
-                    )
-
+            results = [r for cid in filtered[:limit] if (r := _build_chunk_result(db, cid)) is not None]
         print(json.dumps({"results": results, "total": len(results)}))
     except Exception as e:
         log.warning("構造化検索失敗: %s", e)

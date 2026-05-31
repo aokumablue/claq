@@ -234,6 +234,40 @@ class Settings:
         self.sync_state_path.chmod(0o600)
 
     @classmethod
+    def _load_default(cls, settings_path: Path | None) -> Settings:
+        """settings.json が存在しない・読み込み失敗時のデフォルト Settings を返す。"""
+        settings = cls()
+        if settings_path is None:
+            settings.save()
+            settings._load_sync_state()
+        return settings
+
+    @classmethod
+    def _migrate_postgres_url(cls, raw: dict, path: Path, postgres_url: str) -> str:
+        """URL にパスワードがあれば ~/.pgpass に分離して settings.json を書き戻し、新 URL を返す。"""
+        stripped = _strip_password_to_pgpass(postgres_url)
+        if stripped == postgres_url:
+            return postgres_url
+        import logging as _logging
+        _logging.getLogger("SETTINGS").info("postgres_url からパスワードを ~/.pgpass に自動移行しました")
+        raw.setdefault("mem", {}).setdefault("sync", {})["postgres_url"] = stripped
+        tmp_path = path.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        tmp_path.replace(path)
+        path.chmod(0o600)
+        return stripped
+
+    @classmethod
+    def _load_sync_state_for_path(cls, settings: Settings, settings_path: Path | None, path: Path) -> None:
+        """settings_path の有無に応じて sync_state を読み込む。"""
+        if settings_path is None:
+            settings._load_sync_state()
+        else:
+            state_path = path.parent / _SYNC_STATE_FILENAME
+            if state_path.exists():
+                settings._load_sync_state_from(state_path)
+
+    @classmethod
     def load(cls, settings_path: Path | None = None) -> Settings:
         """設定ファイルを読み込む。
 
@@ -248,58 +282,26 @@ class Settings:
             構築された Settings インスタンス。
         """
         path = settings_path or (_DEFAULT_DATA_DIR / "settings.json")
-
         if not path.exists():
-            settings = cls()
-            if settings_path is None:
-                settings.save()
-            # sync_state.json は任意、存在すれば読み込む
-            if settings_path is None:
-                settings._load_sync_state()
-            return settings
+            return cls._load_default(settings_path)
 
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            settings = cls()
-            if settings_path is None:
-                settings._load_sync_state()
-            return settings
+            return cls._load_default(settings_path)
 
         mem_raw = raw.get("mem", {})
         sync_raw = mem_raw.get("sync", {}) if isinstance(mem_raw, dict) else {}
         postgres_url = str(sync_raw.get("postgres_url", "") or "")
-        # ロード時にパスワード付き URL を検出したら即座に分離し、settings.json を書き戻す。
-        # これによりユーザが手動でパスワード付き URL を書いた場合も次回コマンド実行時に自動で除去される。
         if postgres_url:
-            stripped = _strip_password_to_pgpass(postgres_url)
-            if stripped != postgres_url:
-                import logging as _logging
-                _logging.getLogger("SETTINGS").info(
-                    "postgres_url からパスワードを ~/.pgpass に自動移行しました"
-                )
-                postgres_url = stripped
-                # settings.json の該当キーのみ書き戻す（他セクションは保持）
-                raw.setdefault("mem", {}).setdefault("sync", {})["postgres_url"] = postgres_url
-                tmp_path = path.with_suffix(".json.tmp")
-                tmp_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
-                tmp_path.replace(path)
-                path.chmod(0o600)
+            postgres_url = cls._migrate_postgres_url(raw, path, postgres_url)
 
         sync_settings = SyncSettings(
             enabled=bool(sync_raw.get("enabled", False)),
             postgres_url=postgres_url,
         )
-
         settings = cls(sync=sync_settings)
-        # explicit path 指定時はテスト用途なので、既定 sync_state.json は読まない
-        if settings_path is None:
-            settings._load_sync_state()
-        else:
-            # settings_path と同じディレクトリに sync_state.json があれば読む
-            state_path = path.parent / _SYNC_STATE_FILENAME
-            if state_path.exists():
-                settings._load_sync_state_from(state_path)
+        cls._load_sync_state_for_path(settings, settings_path, path)
         return settings
 
     # --- 内部ヘルパ ---

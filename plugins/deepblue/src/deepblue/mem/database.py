@@ -142,6 +142,39 @@ class Database:
 
     # --- チャンク ---
 
+    def _insert_chunk_row(self, chunk: MemoryChunk) -> sqlite3.Row:
+        """チャンクを INSERT して (id, chunk_index) 行を返す。トランザクション管理は呼び出し元の責務。"""
+        cur = self.conn.execute(
+            """INSERT INTO memory_chunks
+             (id, origin_user, session_id, project, chunk_index, content,
+              tool_names, files_read, files_modified,
+              user_prompt, created_at_epoch,
+              execution_status, tool_error, ai_response_summary, tool_sequence)
+             VALUES (?, ?, ?,
+                     ?,
+                     COALESCE((SELECT MAX(chunk_index) + 1 FROM memory_chunks WHERE session_id = ?), 0),
+                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             RETURNING id, chunk_index""",
+            (
+                chunk.id,
+                chunk.origin_user,
+                chunk.session_id,
+                chunk.project,
+                chunk.session_id,
+                chunk.content,
+                json.dumps(chunk.tool_names, ensure_ascii=False),
+                json.dumps(chunk.files_read, ensure_ascii=False),
+                json.dumps(chunk.files_modified, ensure_ascii=False),
+                chunk.user_prompt,
+                chunk.created_at_epoch,
+                chunk.execution_status,
+                chunk.tool_error,
+                chunk.ai_response_summary,
+                json.dumps(chunk.tool_sequence, ensure_ascii=False),
+            ),
+        )
+        return cur.fetchone()
+
     def store_chunk(self, chunk: MemoryChunk) -> str:
         """チャンクを保存し、生成された id を返す。セッションの chunk_count も同一トランザクションで更新。
 
@@ -155,36 +188,7 @@ class Database:
         max_retries = _STORE_CHUNK_MAX_RETRIES
         for attempt in range(max_retries):
             try:
-                cur = self.conn.execute(
-                    """INSERT INTO memory_chunks
-             (id, origin_user, session_id, project, chunk_index, content,
-              tool_names, files_read, files_modified,
-              user_prompt, created_at_epoch,
-              execution_status, tool_error, ai_response_summary, tool_sequence)
-             VALUES (?, ?, ?,
-                     ?,
-                     COALESCE((SELECT MAX(chunk_index) + 1 FROM memory_chunks WHERE session_id = ?), 0),
-                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             RETURNING id, chunk_index""",
-                    (
-                        chunk.id,
-                        chunk.origin_user,
-                        chunk.session_id,
-                        chunk.project,
-                        chunk.session_id,  # サブクエリ用
-                        chunk.content,
-                        json.dumps(chunk.tool_names, ensure_ascii=False),
-                        json.dumps(chunk.files_read, ensure_ascii=False),
-                        json.dumps(chunk.files_modified, ensure_ascii=False),
-                        chunk.user_prompt,
-                        chunk.created_at_epoch,
-                        chunk.execution_status,
-                        chunk.tool_error,
-                        chunk.ai_response_summary,
-                        json.dumps(chunk.tool_sequence, ensure_ascii=False),
-                    ),
-                )
-                row = cur.fetchone()
+                row = self._insert_chunk_row(chunk)
                 chunk.chunk_index = row["chunk_index"]
                 self.conn.execute(
                     "UPDATE sessions SET chunk_count = chunk_count + 1, synced_at = NULL WHERE session_id = ?",
@@ -194,24 +198,17 @@ class Database:
                 return row["id"]
             except sqlite3.IntegrityError as e:
                 self.conn.rollback()
-                # chunk_index 競合（UNIQUE 制約）のみリトライ。PRIMARY KEY 等は即 raise。
                 if "chunk_index" not in str(e):
                     raise
                 if attempt == max_retries - 1:
                     log.error(
                         "chunk_index 競合 %d/%d 回でも解消不能 session=%s: %s",
-                        attempt + 1,
-                        max_retries,
-                        chunk.session_id,
-                        e,
+                        attempt + 1, max_retries, chunk.session_id, e,
                     )
                     raise
                 log.warning(
                     "chunk_index 競合 attempt=%d/%d session=%s: %s",
-                    attempt + 1,
-                    max_retries,
-                    chunk.session_id,
-                    e,
+                    attempt + 1, max_retries, chunk.session_id, e,
                 )
         raise AssertionError("unreachable")  # pragma: no cover
 

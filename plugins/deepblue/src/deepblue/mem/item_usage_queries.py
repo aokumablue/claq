@@ -97,6 +97,31 @@ def item_usage_ranking(
     ]
 
 
+_DAILY_TREND_SQL_PG = """
+    SELECT DATE(TO_TIMESTAMP(created_at_epoch)) AS day,
+           SUM(CASE WHEN item_type = 'skill' THEN 1 ELSE 0 END) AS skill_count,
+           SUM(CASE WHEN item_type = 'command' THEN 1 ELSE 0 END) AS command_count,
+           SUM(CASE WHEN item_type = 'agent' THEN 1 ELSE 0 END) AS agent_count,
+           COUNT(*) AS total
+    FROM mem_item_runs
+    WHERE created_at_epoch > %s
+    GROUP BY day
+    ORDER BY day
+"""
+
+_DAILY_TREND_SQL_SQLITE = """
+    SELECT date(created_at_epoch, 'unixepoch') AS day,
+           SUM(CASE WHEN item_type = 'skill' THEN 1 ELSE 0 END) AS skill_count,
+           SUM(CASE WHEN item_type = 'command' THEN 1 ELSE 0 END) AS command_count,
+           SUM(CASE WHEN item_type = 'agent' THEN 1 ELSE 0 END) AS agent_count,
+           COUNT(*) AS total
+    FROM mem_item_runs
+    WHERE created_at_epoch > ?
+    GROUP BY day
+    ORDER BY day
+"""
+
+
 def daily_trend(
     conn: Any,
     placeholder: Placeholder = _SQLITE_PLACEHOLDER,
@@ -114,42 +139,10 @@ def daily_trend(
         date の昇順でソート済み
     """
     since_epoch = int(time.time()) - days * 86400
-    # date_expr / プレースホルダともリテラル直書きした完成SQLを丸ごと用意する（CWE-89対策）
-    if placeholder == _PG_PLACEHOLDER:
-        # PostgreSQL: TO_TIMESTAMP + DATE キャスト
-        sql = """
-            SELECT DATE(TO_TIMESTAMP(created_at_epoch)) AS day,
-                   SUM(CASE WHEN item_type = 'skill' THEN 1 ELSE 0 END) AS skill_count,
-                   SUM(CASE WHEN item_type = 'command' THEN 1 ELSE 0 END) AS command_count,
-                   SUM(CASE WHEN item_type = 'agent' THEN 1 ELSE 0 END) AS agent_count,
-                   COUNT(*) AS total
-            FROM mem_item_runs
-            WHERE created_at_epoch > %s
-            GROUP BY day
-            ORDER BY day
-        """
-    else:
-        # SQLite: date() 関数
-        sql = """
-            SELECT date(created_at_epoch, 'unixepoch') AS day,
-                   SUM(CASE WHEN item_type = 'skill' THEN 1 ELSE 0 END) AS skill_count,
-                   SUM(CASE WHEN item_type = 'command' THEN 1 ELSE 0 END) AS command_count,
-                   SUM(CASE WHEN item_type = 'agent' THEN 1 ELSE 0 END) AS agent_count,
-                   COUNT(*) AS total
-            FROM mem_item_runs
-            WHERE created_at_epoch > ?
-            GROUP BY day
-            ORDER BY day
-        """
+    sql = _DAILY_TREND_SQL_PG if placeholder == _PG_PLACEHOLDER else _DAILY_TREND_SQL_SQLITE
     rows = _execute(conn, sql, (since_epoch,))
     return [
-        {
-            "date": str(r[0]),
-            "skill": r[1],
-            "command": r[2],
-            "agent": r[3],
-            "total": r[4],
-        }
+        {"date": str(r[0]), "skill": r[1], "command": r[2], "agent": r[3], "total": r[4]}
         for r in rows
     ]
 

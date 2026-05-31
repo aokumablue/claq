@@ -18,6 +18,43 @@ from deepblue.mem.settings import TeamSettings
 log = _get_logger("TEAM_CONTEXT")
 
 
+def _search_ranked_chunks(
+    pg: PgDatabase,
+    query: str,
+    exclude_origin_user: str,
+    *,
+    settings: TeamSettings,
+    mode: Literal["fts", "hybrid"],
+    embedding_model: str | None,
+) -> list[tuple[str, float]]:
+    """モードに応じた検索を実行してランク付き chunk_id リストを返す。失敗時は []。"""
+    try:
+        if mode == "hybrid":
+            if not embedding_model:
+                log.warning("hybrid モードには embedding_model が必要です。FTS フォールバック使用")
+                return pg.fts_search(query, limit=settings.chunk_limit, exclude_origin_user=exclude_origin_user)
+            import deepblue.mem.embedding as _emb
+            embedding = _emb.embed_query(query, embedding_model)
+            return pg.team_search(query, embedding, limit=settings.chunk_limit, exclude_origin_user=exclude_origin_user)
+        return pg.fts_search(query, limit=settings.chunk_limit, exclude_origin_user=exclude_origin_user)
+    except Exception as e:
+        log.warning("チーム検索失敗: %s", e)
+        return []
+
+
+def _fetch_ordered_chunks(
+    pg: PgDatabase, ranked: list[tuple[str, float]]
+) -> list[dict]:
+    """ランク順に chunk_id に対応する行辞書リストを返す。失敗時は []。"""
+    chunk_ids = [cid for cid, _ in ranked]
+    try:
+        rows = pg.fetch_chunks_by_ids(chunk_ids)
+    except Exception as e:
+        log.warning("チームチャンク取得失敗: %s", e)
+        return []
+    return [rows[cid] for cid in chunk_ids if cid in rows]
+
+
 def build_team_context(
     pg: PgDatabase,
     query: str,
@@ -43,46 +80,14 @@ def build_team_context(
     if not query.strip():
         return ""
 
-    try:
-        if mode == "hybrid":
-            if not embedding_model:
-                log.warning("hybrid モードには embedding_model が必要です。FTS フォールバック使用")
-                ranked = pg.fts_search(
-                    query,
-                    limit=settings.chunk_limit,
-                    exclude_origin_user=exclude_origin_user,
-                )
-            else:
-                import deepblue.mem.embedding as _emb
-
-                embedding = _emb.embed_query(query, embedding_model)
-                ranked = pg.team_search(
-                    query,
-                    embedding,
-                    limit=settings.chunk_limit,
-                    exclude_origin_user=exclude_origin_user,
-                )
-        else:
-            ranked = pg.fts_search(
-                query,
-                limit=settings.chunk_limit,
-                exclude_origin_user=exclude_origin_user,
-            )
-    except Exception as e:
-        log.warning("チーム検索失敗: %s", e)
-        return ""
-
+    ranked = _search_ranked_chunks(
+        pg, query, exclude_origin_user,
+        settings=settings, mode=mode, embedding_model=embedding_model,
+    )
     if not ranked:
         return ""
 
-    chunk_ids = [cid for cid, _ in ranked]
-    try:
-        rows = pg.fetch_chunks_by_ids(chunk_ids)
-    except Exception as e:
-        log.warning("チームチャンク取得失敗: %s", e)
-        return ""
-
-    ordered_chunks = [rows[cid] for cid in chunk_ids if cid in rows]
+    ordered_chunks = _fetch_ordered_chunks(pg, ranked)
     if not ordered_chunks:
         return ""
 
@@ -90,11 +95,7 @@ def build_team_context(
     if not selected:
         return ""
 
-    lines: list[str] = [
-        "<team-context>",
-        "# チームメモリコンテキスト（自動注入）",
-        "",
-    ]
+    lines: list[str] = ["<team-context>", "# チームメモリコンテキスト（自動注入）", ""]
     for chunk in selected:
         lines.append(_format_chunk(chunk))
     lines.append("</team-context>")
