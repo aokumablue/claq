@@ -15,14 +15,6 @@ import deepblue.skills.learn.cli as _pkg
 
 from .paths import _preferred_projects_dir, _preferred_registry_file
 
-try:
-    import fcntl
-
-    _HAS_FCNTL = True
-except ImportError:
-    _HAS_FCNTL = False  # ウィンドウズ環境ではファイルロックをスキップ
-
-
 # ─────────────────────────────────────────────
 # プロジェクト検出（共通 Python 実装）
 # ─────────────────────────────────────────────
@@ -110,9 +102,9 @@ def _update_registry(pid: str, pname: str, proot: str, premote: str) -> None:
 
     try:
         # アドバイザリロックを取得して読み取り・更新・書き込みを直列化
-        if _HAS_FCNTL:
+        if _pkg._HAS_FCNTL:
             lock_fd = open(lock_path, "w")
-            fcntl.flock(lock_fd, fcntl.LOCK_EX)  # type: ignore[possibly-undefined]
+            _pkg.fcntl.flock(lock_fd, _pkg.fcntl.LOCK_EX)
 
         try:
             with open(registry_file, encoding="utf-8") as f:
@@ -135,15 +127,20 @@ def _update_registry(pid: str, pname: str, proot: str, premote: str) -> None:
         os.replace(tmp_file, registry_file)
     finally:
         if lock_fd is not None:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)  # type: ignore[possibly-undefined]
+            _pkg.fcntl.flock(lock_fd, _pkg.fcntl.LOCK_UN)
             lock_fd.close()
 
 
 def load_registry() -> dict:
-    """プロジェクトレジストリを読み込む。"""
+    """プロジェクトレジストリを読み込む。
+
+    ``open`` はパッケージ名前空間（``_pkg.open``）経由で参照する。``cli`` パッケージは
+    組込み ``open`` を ``open`` 属性として公開しているため、テストの
+    ``monkeypatch.setattr(cli, "open", ...)`` がそのままこの呼び出しに反映される。
+    """
     registry: dict = {}
     try:
-        with open(_pkg.REGISTRY_FILE, encoding="utf-8") as f:
+        with _pkg.open(_pkg.REGISTRY_FILE, encoding="utf-8") as f:
             registry.update(json.load(f))
     except (FileNotFoundError, json.JSONDecodeError):
         pass

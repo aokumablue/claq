@@ -12,6 +12,11 @@ from pathlib import Path
 
 import deepblue.skills.learn.cli as _pkg
 
+from .instincts import (
+    _print_instincts_by_domain,
+    load_project_only_instincts,
+    parse_instinct_file,
+)
 from .paths import (
     PENDING_EXPIRY_WARNING_DAYS,
     PENDING_TTL_DAYS,
@@ -19,14 +24,8 @@ from .paths import (
     _validate_file_path,
     _yaml_quote,
 )
-from .instincts import (
-    _print_instincts_by_domain,
-    load_project_only_instincts,
-    parse_instinct_file,
-)
 from .pending import _collect_pending_instincts
 from .registry import load_registry
-
 
 # ─────────────────────────────────────────────
 # status サブコマンド

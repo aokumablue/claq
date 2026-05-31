@@ -73,12 +73,12 @@ def _collect_pending_instincts() -> list[dict]:
     """
     now = datetime.now(UTC)
     results = []
-    for pending_dir in _collect_pending_dirs():
+    for pending_dir in _pkg._collect_pending_dirs():
         files = [
             f for f in sorted(pending_dir.iterdir()) if f.is_file() and f.suffix.lower() in ALLOWED_INSTINCT_EXTENSIONS
         ]
         for file_path in files:
-            created = _parse_created_date(file_path)
+            created = _pkg._parse_created_date(file_path)
             if created is None:
                 print(f"Warning: could not parse age for pending instinct: {file_path.name}", file=sys.stderr)
                 continue

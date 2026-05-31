@@ -11,13 +11,13 @@ from datetime import UTC, datetime
 
 import deepblue.skills.learn.cli as _pkg
 
+from .instincts import load_project_only_instincts
 from .paths import (
     PROMOTE_CONFIDENCE_THRESHOLD,
     PROMOTE_MIN_PROJECTS,
     _validate_instinct_id,
     _yaml_quote,
 )
-from .instincts import load_project_only_instincts
 
 
 def cmd_promote(args) -> int:
