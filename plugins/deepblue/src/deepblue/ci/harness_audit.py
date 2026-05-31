@@ -247,18 +247,8 @@ def find_plugin_install(root_dir: str | Path) -> str | None:
     return None
 
 
-def _repo_tool_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
-    """repo モードの Tool Coverage カテゴリのチェック定義を返す。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ
-
-    Returns:
-        Tool Coverage チェック辞書のリスト
-
-    Raises:
-        例外は発生しません。
-    """
+def _repo_tool_coverage_hooks_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """Tool Coverage のフック関連チェック2件を返す。"""
     return [
         {
             "id": "tool-hooks-config",
@@ -280,6 +270,19 @@ def _repo_tool_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "pass": count_files(root_dir, "scripts/hooks", ".js") >= 8,
             "fix": "Add missing hook implementations in scripts/hooks/.",
         },
+    ]
+
+
+def _repo_tool_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """repo モードの Tool Coverage カテゴリのチェック定義を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+
+    Returns:
+        Tool Coverage チェック辞書のリスト
+    """
+    return _repo_tool_coverage_hooks_checks(root_dir) + [
         {
             "id": "tool-agent-count",
             "category": "Tool Coverage",
@@ -313,18 +316,8 @@ def _repo_tool_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _repo_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]]:
-    """repo モードの Context Efficiency カテゴリのチェック定義を返す。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ
-
-    Returns:
-        Context Efficiency チェック辞書のリスト
-
-    Raises:
-        例外は発生しません。
-    """
+def _repo_context_compact_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """Context Efficiency のコンパクト関連チェック2件を返す。"""
     return [
         {
             "id": "context-strategic-compact",
@@ -346,6 +339,19 @@ def _repo_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]
             "pass": file_exists(root_dir, "scripts/hooks/suggest-compact.js"),
             "fix": "Implement scripts/hooks/suggest-compact.js for context pressure hints.",
         },
+    ]
+
+
+def _repo_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """repo モードの Context Efficiency カテゴリのチェック定義を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+
+    Returns:
+        Context Efficiency チェック辞書のリスト
+    """
+    return _repo_context_compact_checks(root_dir) + [
         {
             "id": "context-model-route",
             "category": "Context Efficiency",
@@ -369,19 +375,8 @@ def _repo_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]
     ]
 
 
-def _repo_quality_gates_checks(root_dir: str | Path, package_json: dict[str, Any]) -> list[dict[str, Any]]:
-    """repo モードの Quality Gates カテゴリのチェック定義を返す。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ
-        package_json: 解析済みの package.json（無い場合は空辞書）
-
-    Returns:
-        Quality Gates チェック辞書のリスト
-
-    Raises:
-        例外は発生しません。
-    """
+def _repo_quality_test_checks(root_dir: str | Path, package_json: dict[str, Any]) -> list[dict[str, Any]]:
+    """Quality Gates のテスト基盤チェック2件を返す。"""
     return [
         {
             "id": "quality-test-runner",
@@ -406,6 +401,20 @@ def _repo_quality_gates_checks(root_dir: str | Path, package_json: dict[str, Any
             and "tests/run-all.js" in package_json["scripts"]["test"],
             "fix": "Update package.json test script to run validators plus tests/run-all.js.",
         },
+    ]
+
+
+def _repo_quality_gates_checks(root_dir: str | Path, package_json: dict[str, Any]) -> list[dict[str, Any]]:
+    """repo モードの Quality Gates カテゴリのチェック定義を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+        package_json: 解析済みの package.json（無い場合は空辞書）
+
+    Returns:
+        Quality Gates チェック辞書のリスト
+    """
+    return _repo_quality_test_checks(root_dir, package_json) + [
         {
             "id": "quality-hook-tests",
             "category": "Quality Gates",
@@ -523,19 +532,8 @@ def _repo_eval_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _repo_security_guardrails_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
-    """repo モードの Security Guardrails カテゴリのチェック定義を返す。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ
-        hooks_json: hooks/hooks.json の生テキスト
-
-    Returns:
-        Security Guardrails チェック辞書のリスト
-
-    Raises:
-        例外は発生しません。
-    """
+def _repo_security_core_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """Security Guardrails のスキル・エージェントチェック2件を返す。"""
     return [
         {
             "id": "security-review-skill",
@@ -557,6 +555,20 @@ def _repo_security_guardrails_checks(root_dir: str | Path, hooks_json: str) -> l
             "pass": file_exists(root_dir, "agents/security-auditor.md"),
             "fix": "Add agents/security-auditor.md for delegated security audits.",
         },
+    ]
+
+
+def _repo_security_guardrails_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
+    """repo モードの Security Guardrails カテゴリのチェック定義を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+        hooks_json: hooks/hooks.json の生テキスト
+
+    Returns:
+        Security Guardrails チェック辞書のリスト
+    """
+    return _repo_security_core_checks(root_dir) + [
         {
             "id": "security-prompt-hook",
             "category": "Security Guardrails",
@@ -835,30 +847,10 @@ def _consumer_memory_and_eval_checks(root_dir: str | Path) -> list[dict[str, Any
     ]
 
 
-def _consumer_security_guardrails_checks(
-    root_dir: str | Path,
-    gitignore: str,
-    project_hooks: str,
-    security_path: str,
-    hosting_label: str,
-    security_pass: bool,
+def _consumer_security_policy_checks(
+    gitignore: str, security_path: str, hosting_label: str, security_pass: bool
 ) -> list[dict[str, Any]]:
-    """consumer モードの Security Guardrails カテゴリのチェック定義を返す。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ
-        gitignore: .gitignore の生テキスト
-        project_hooks: .claude/settings.json の生テキスト
-        security_path: 表示用のセキュリティ設定パス
-        hosting_label: Git ホスティングサービスの表示ラベル
-        security_pass: セキュリティポリシーが存在するかの判定結果
-
-    Returns:
-        Security Guardrails チェック辞書のリスト
-
-    Raises:
-        例外は発生しません。
-    """
+    """consumer モードのセキュリティポリシー・シークレット衛生チェック2件を返す。"""
     return [
         {
             "id": "consumer-security-policy",
@@ -880,6 +872,33 @@ def _consumer_security_guardrails_checks(
             "pass": ".env" in gitignore,
             "fix": "Ignore .env-style files in .gitignore so secrets do not land in the repo.",
         },
+    ]
+
+
+def _consumer_security_guardrails_checks(
+    root_dir: str | Path,
+    gitignore: str,
+    project_hooks: str,
+    security_path: str,
+    hosting_label: str,
+    security_pass: bool,
+) -> list[dict[str, Any]]:
+    """consumer モードの Security Guardrails カテゴリのチェック定義を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+        gitignore: .gitignore の生テキスト
+        project_hooks: .claude/settings.json の生テキスト
+        security_path: 表示用のセキュリティ設定パス
+        hosting_label: Git ホスティングサービスの表示ラベル
+        security_pass: セキュリティポリシーが存在するかの判定結果
+
+    Returns:
+        Security Guardrails チェック辞書のリスト
+    """
+    return _consumer_security_policy_checks(
+        gitignore, security_path, hosting_label, security_pass
+    ) + [
         {
             "id": "consumer-hook-guardrails",
             "category": "Security Guardrails",

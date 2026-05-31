@@ -44,6 +44,99 @@ def _require_list(value: Any, label: str, has_errors: list[bool]) -> list[Any]:
     return value
 
 
+def _load_manifest_data(
+    modules_path: Path, profiles_path: Path, components_path: Path
+) -> tuple[Any, Any, Any]:
+    """3 マニフェストファイルを読み込み、型検証済みの辞書を返す。
+
+    Args:
+        modules_path: install-modules.json のパス
+        profiles_path: install-profiles.json のパス
+        components_path: install-components.json のパス（存在しない場合は空データ）
+
+    Returns:
+        (modules_data, profiles_data, components_data) の辞書タプル
+
+    Raises:
+        ValueError: JSON 解析失敗または型不一致
+    """
+    modules_data = read_json(modules_path, "install-modules.json")
+    profiles_data = read_json(profiles_path, "install-profiles.json")
+    components_data = (
+        read_json(components_path, "install-components.json")
+        if components_path.exists()
+        else {"version": None, "components": []}
+    )
+    if not isinstance(modules_data, dict):
+        raise ValueError("install-modules.json はオブジェクトである必要があります")
+    if not isinstance(profiles_data, dict):
+        raise ValueError("install-profiles.json はオブジェクトである必要があります")
+    if not isinstance(components_data, dict):
+        raise ValueError("install-components.json はオブジェクトである必要があります")
+    return modules_data, profiles_data, components_data
+
+
+def _extract_manifest_lists(
+    modules_data: dict[str, Any],
+    profiles_data: dict[str, Any],
+    components_data: dict[str, Any],
+    components_path: Path,
+) -> tuple[list[Any], dict[str, Any], list[Any], bool]:
+    """マニフェスト辞書から modules/profiles/components リストを取り出して検証する。
+
+    Args:
+        modules_data: install-modules.json の辞書
+        profiles_data: install-profiles.json の辞書
+        components_data: install-components.json の辞書
+        components_path: install-components.json のパス（存在確認用）
+
+    Returns:
+        (modules, profiles, components, has_errors) のタプル
+    """
+    errors = [False]
+    modules = _require_list(modules_data.get("modules"), "install-modules.json modules", errors)
+    profiles = profiles_data.get("profiles")
+    if not isinstance(profiles, dict):
+        emit_error("install-profiles.json の profiles はオブジェクトである必要があります")
+        return modules, {}, [], True
+    components_raw = components_data.get("components")
+    components = (
+        _require_list(components_raw, "install-components.json components", errors)
+        if components_path.exists()
+        else []
+    )
+    return modules, profiles, components, errors[0]
+
+
+def _run_manifest_validations(
+    repo_root: str | Path,
+    parsed_modules: list[dict[str, Any]],
+    module_ids: set[str],
+    parsed_profiles: dict[str, list[str]],
+    parsed_components: list[dict[str, Any]],
+) -> bool:
+    """モジュール・プロファイル・コンポーネントの相互参照を一括検証する。
+
+    Args:
+        repo_root: パス解決に使うリポジトリルート
+        parsed_modules: 解析済みモジュールリスト
+        module_ids: 既知のモジュール ID 集合
+        parsed_profiles: 解析済みプロファイル辞書
+        parsed_components: 解析済みコンポーネントリスト
+
+    Returns:
+        エラーがあれば True、なければ False
+    """
+    has_errors = False
+    if _validate_module_relations(repo_root, parsed_modules, module_ids):
+        has_errors = True
+    if _validate_profile_relations(parsed_profiles, module_ids):
+        has_errors = True
+    if _validate_component_relations(parsed_components, module_ids):
+        has_errors = True
+    return has_errors
+
+
 def validate_install_manifests(
     repo_root: str | Path = REPO_ROOT,
     modules_manifest_path: str | Path = DEFAULT_MODULES_MANIFEST_PATH,
@@ -56,89 +149,82 @@ def validate_install_manifests(
     """インストールマニフェストを検証し、JS バリデータと同じメッセージを表示する。
 
     Args:
-        repo_root: 処理に渡す repo_root の値です。
-        modules_manifest_path: 処理に渡す modules_manifest_path の値です。
-        profiles_manifest_path: 処理に渡す profiles_manifest_path の値です。
-        components_manifest_path: 処理に渡す components_manifest_path の値です。
-        modules_schema_path: 処理に渡す modules_schema_path の値です。
-        profiles_schema_path: 処理に渡す profiles_schema_path の値です。
-        components_schema_path: 処理に渡す components_schema_path の値です。
+        repo_root: パス解決に使うリポジトリルート
+        modules_manifest_path: install-modules.json のパス
+        profiles_manifest_path: install-profiles.json のパス
+        components_manifest_path: install-components.json のパス
 
     Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
+        正常終了は 0、エラー時は 1
     """
     modules_path = Path(modules_manifest_path)
     profiles_path = Path(profiles_manifest_path)
     components_path = Path(components_manifest_path)
-
     if not modules_path.exists() or not profiles_path.exists():
         print("install マニフェストが見つかりません。検証をスキップします")
         return 0
-
     try:
-        modules_data = read_json(modules_path, "install-modules.json")
-        profiles_data = read_json(profiles_path, "install-profiles.json")
-        components_data = (
-            read_json(components_path, "install-components.json")
-            if components_path.exists()
-            else {"version": None, "components": []}
+        modules_data, profiles_data, components_data = _load_manifest_data(
+            modules_path, profiles_path, components_path
         )
     except ValueError as error:
         emit_error(str(error))
         return 1
-
-    if not isinstance(modules_data, dict):
-        emit_error("install-modules.json はオブジェクトである必要があります")
-        return 1
-    if not isinstance(profiles_data, dict):
-        emit_error("install-profiles.json はオブジェクトである必要があります")
-        return 1
-    if not isinstance(components_data, dict):
-        emit_error("install-components.json はオブジェクトである必要があります")
-        return 1
-
-    modules = modules_data.get("modules")
-    profiles = profiles_data.get("profiles")
-    components = components_data.get("components")
-
-    errors = [False]
-    modules = _require_list(modules, "install-modules.json modules", errors)
-    if not isinstance(profiles, dict):
-        emit_error("install-profiles.json の profiles はオブジェクトである必要があります")
-        return 1
-    if components_path.exists():
-        components = _require_list(components, "install-components.json components", errors)
-    else:
-        components = []
-
-    has_errors = errors[0]
-
+    modules, profiles, components, has_errors = _extract_manifest_lists(
+        modules_data, profiles_data, components_data, components_path
+    )
     parsed_modules, module_ids, module_errors = _parse_modules(modules)
     has_errors = has_errors or module_errors
-
     parsed_profiles, profile_errors = _parse_profiles(profiles)
     has_errors = has_errors or profile_errors
-
     parsed_components, component_errors = _parse_components(components)
     has_errors = has_errors or component_errors
-
-    if _validate_module_relations(repo_root, parsed_modules, module_ids):
+    if _run_manifest_validations(repo_root, parsed_modules, module_ids, parsed_profiles, parsed_components):
         has_errors = True
-    if _validate_profile_relations(parsed_profiles, module_ids):
-        has_errors = True
-    if _validate_component_relations(parsed_components, module_ids):
-        has_errors = True
-
     if has_errors:
         return 1
-
     print(
         f"{len(parsed_modules)} 個のインストールモジュール、{len(parsed_components)} 個のインストールコンポーネント、{len(profiles)} 個のプロファイルを検証しました"
     )
     return 0
+
+
+def _parse_module_entry(module: Any, module_ids: set[str]) -> tuple[dict[str, Any] | None, bool]:
+    """1 モジュールエントリを検証し正規化済み辞書を返す。
+
+    Args:
+        module: 検証対象のモジュールエントリ
+        module_ids: 既知 ID 集合（重複検出・追加に使用）
+
+    Returns:
+        (正規化済み辞書または None, エラー有無) のタプル
+    """
+    if not isinstance(module, dict):
+        emit_error("モジュールエントリはオブジェクトではありません")
+        return None, True
+    module_id = module.get("id")
+    if not is_non_empty_string(module_id):
+        emit_error("モジュールエントリの id が不足しているか無効です")
+        return None, True
+    has_error = module_id in module_ids
+    if has_error:
+        emit_error(f"重複したインストールモジュール ID: {module_id}")
+    module_ids.add(module_id)
+    dependencies = module.get("dependencies")
+    if dependencies is None:
+        dependencies = []
+    elif not isinstance(dependencies, list):
+        emit_error(f"モジュール {module_id} の dependencies 配列が無効です")
+        has_error = True
+        dependencies = []
+    paths = module.get("paths")
+    if paths is None:
+        paths = []
+    elif not isinstance(paths, list):
+        emit_error(f"モジュール {module_id} の paths 配列が無効です")
+        has_error = True
+        paths = []
+    return {"id": module_id, "dependencies": dependencies, "paths": paths}, has_error
 
 
 def _parse_modules(modules: list[Any]) -> tuple[list[dict[str, Any]], set[str], bool]:
@@ -149,55 +235,16 @@ def _parse_modules(modules: list[Any]) -> tuple[list[dict[str, Any]], set[str], 
 
     Returns:
         (正規化済みモジュールのリスト, モジュール ID の集合, エラー有無) のタプル
-
-    Raises:
-        例外は発生しません。
     """
     has_errors = False
     parsed_modules: list[dict[str, Any]] = []
     module_ids: set[str] = set()
-
     for module in modules:
-        if not isinstance(module, dict):
-            emit_error("モジュールエントリはオブジェクトではありません")
+        parsed, has_err = _parse_module_entry(module, module_ids)
+        if has_err:
             has_errors = True
-            continue
-
-        module_id = module.get("id")
-        if not is_non_empty_string(module_id):
-            emit_error("モジュールエントリの id が不足しているか無効です")
-            has_errors = True
-            continue
-
-        if module_id in module_ids:
-            emit_error(f"重複したインストールモジュール ID: {module_id}")
-            has_errors = True
-        module_ids.add(module_id)
-
-        dependencies = module.get("dependencies")
-        if dependencies is None:
-            dependencies = []
-        elif not isinstance(dependencies, list):
-            emit_error(f"モジュール {module_id} の dependencies 配列が無効です")
-            has_errors = True
-            dependencies = []
-
-        paths = module.get("paths")
-        if paths is None:
-            paths = []
-        elif not isinstance(paths, list):
-            emit_error(f"モジュール {module_id} の paths 配列が無効です")
-            has_errors = True
-            paths = []
-
-        parsed_modules.append(
-            {
-                "id": module_id,
-                "dependencies": dependencies,
-                "paths": paths,
-            }
-        )
-
+        if parsed is not None:
+            parsed_modules.append(parsed)
     return parsed_modules, module_ids, has_errors
 
 
@@ -303,9 +350,6 @@ def _validate_module_relations(
 
     Returns:
         エラーがあれば True、なければ False
-
-    Raises:
-        例外は発生しません。
     """
     has_errors = False
     claimed_paths: dict[str, str] = {}

@@ -173,6 +173,54 @@ def _validate_command_file(
     return has_errors, warn_count
 
 
+def _resolve_command_paths(
+    root_dir: str | Path,
+    commands_dir: str | Path,
+    agents_dir: str | Path,
+    skills_dir: str | Path,
+) -> tuple[Path, Path, Path]:
+    """各ディレクトリを絶対パスに解決して返す。
+
+    Args:
+        root_dir: リポジトリルート
+        commands_dir: コマンドディレクトリ
+        agents_dir: エージェントディレクトリ
+        skills_dir: スキルディレクトリ
+
+    Returns:
+        (commands_path, agents_path, skills_path) のタプル
+    """
+    root = Path(root_dir)
+    commands_path = Path(commands_dir) if Path(commands_dir).is_absolute() else root / commands_dir
+    agents_path = Path(agents_dir) if Path(agents_dir).is_absolute() else root / agents_dir
+    skills_path = Path(skills_dir) if Path(skills_dir).is_absolute() else root / skills_dir
+    return commands_path, agents_path, skills_path
+
+
+def _build_valid_name_sets(
+    commands_path: Path, agents_path: Path, skills_path: Path
+) -> tuple[list[Path], set[str], set[str], set[str]]:
+    """各ディレクトリから有効名の集合を構築して返す。
+
+    Args:
+        commands_path: コマンドディレクトリの絶対パス
+        agents_path: エージェントディレクトリの絶対パス
+        skills_path: スキルディレクトリの絶対パス
+
+    Returns:
+        (files, valid_commands, valid_agents, valid_skills) のタプル
+    """
+    files = _list_markdown_files(commands_path)
+    valid_commands = {f.stem for f in files}
+    valid_agents = (
+        {f.stem for f in _list_markdown_files(agents_path)} if agents_path.exists() else set()
+    )
+    valid_skills = (
+        {e.name for e in skills_path.iterdir() if e.is_dir()} if skills_path.exists() else set()
+    )
+    return files, valid_commands, valid_agents, valid_skills
+
+
 def validate_commands(
     root_dir: str | Path = DEFAULT_ROOT_DIR,
     commands_dir: str | Path = DEFAULT_COMMANDS_DIR,
@@ -189,39 +237,25 @@ def validate_commands(
 
     Returns:
         処理結果を返します。
-
-    Raises:
-        例外は発生しません。
     """
-    root = Path(root_dir)
-    commands_path = Path(commands_dir) if Path(commands_dir).is_absolute() else root / commands_dir
-    agents_path = Path(agents_dir) if Path(agents_dir).is_absolute() else root / agents_dir
-    skills_path = Path(skills_dir) if Path(skills_dir).is_absolute() else root / skills_dir
-
+    commands_path, agents_path, skills_path = _resolve_command_paths(
+        root_dir, commands_dir, agents_dir, skills_dir
+    )
     if not commands_path.exists():
         print("commands ディレクトリが見つかりません。検証をスキップします")
         return 0
-
-    files = _list_markdown_files(commands_path)
-
-    valid_commands = {file_path.stem for file_path in files}
-    valid_agents = (
-        {file_path.stem for file_path in _list_markdown_files(agents_path)} if agents_path.exists() else set()
+    files, valid_commands, valid_agents, valid_skills = _build_valid_name_sets(
+        commands_path, agents_path, skills_path
     )
-    valid_skills = {entry.name for entry in skills_path.iterdir() if entry.is_dir()} if skills_path.exists() else set()
-
     has_errors = False
     warn_count = 0
-
     for file_path in files:
         file_errors, file_warns = _validate_command_file(file_path, valid_commands, valid_agents, valid_skills)
         if file_errors:
             has_errors = True
         warn_count += file_warns
-
     if has_errors:
         return 1
-
     msg = f"{len(files)} 個のコマンドファイルを検証しました"
     if warn_count > 0:
         msg += f"（{warn_count} 件の警告）"
