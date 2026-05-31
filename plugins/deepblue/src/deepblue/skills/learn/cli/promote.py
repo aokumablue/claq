@@ -32,6 +32,22 @@ def cmd_promote(args) -> int:
         return _pkg._promote_auto(project, args.force, args.dry_run)
 
 
+def _build_promoted_content(target: dict, project: dict) -> str:
+    """昇格対象 instinct の YAML テキストを構築する。"""
+    output_content = "---\n"
+    output_content += f"id: {target.get('id')}\n"
+    output_content += f"trigger: {_yaml_quote(target.get('trigger', 'unknown'))}\n"
+    output_content += f"confidence: {target.get('confidence', 0.5)}\n"
+    output_content += f"domain: {target.get('domain', 'general')}\n"
+    output_content += f"source: {target.get('source', 'promoted')}\n"
+    output_content += "scope: global\n"
+    output_content += f"promoted_from: {project['id']}\n"
+    output_content += f"promoted_date: {datetime.now(UTC).isoformat().replace('+00:00', 'Z')}\n"
+    output_content += "---\n\n"
+    output_content += target.get("content", "") + "\n"
+    return output_content
+
+
 def _promote_specific(project: dict, instinct_id: str, force: bool, dry_run: bool = False) -> int:
     """現在のプロジェクトから、指定 ID の instinct をグローバルへ昇格する。"""
     if not _validate_instinct_id(instinct_id):
@@ -45,7 +61,6 @@ def _promote_specific(project: dict, instinct_id: str, force: bool, dry_run: boo
         print(f"Instinct '{instinct_id}' not found in project {project['name']}.")
         return 1
 
-    # すでに global か確認
     global_instincts = _pkg._load_instincts_from_dir(_pkg.GLOBAL_PERSONAL_DIR, "personal", "global")
     global_instincts += _pkg._load_instincts_from_dir(_pkg.GLOBAL_INHERITED_DIR, "inherited", "global")
     if any(i.get("id") == instinct_id for i in global_instincts):
@@ -67,24 +82,57 @@ def _promote_specific(project: dict, instinct_id: str, force: bool, dry_run: boo
             print("Cancelled.")
             return 0
 
-    # global personal ディレクトリへ書き込む
     output_file = _pkg.GLOBAL_PERSONAL_DIR / f"{instinct_id}.yaml"
-    output_content = "---\n"
-    output_content += f"id: {target.get('id')}\n"
-    output_content += f"trigger: {_yaml_quote(target.get('trigger', 'unknown'))}\n"
-    output_content += f"confidence: {target.get('confidence', 0.5)}\n"
-    output_content += f"domain: {target.get('domain', 'general')}\n"
-    output_content += f"source: {target.get('source', 'promoted')}\n"
-    output_content += "scope: global\n"
-    output_content += f"promoted_from: {project['id']}\n"
-    output_content += f"promoted_date: {datetime.now(UTC).isoformat().replace('+00:00', 'Z')}\n"
-    output_content += "---\n\n"
-    output_content += target.get("content", "") + "\n"
-
-    output_file.write_text(output_content, encoding="utf-8")
+    output_file.write_text(_build_promoted_content(target, project), encoding="utf-8")
     print(f"\nPromoted '{instinct_id}' to global scope.")
     print(f"  Saved to: {output_file}")
     return 0
+
+
+def _build_auto_promoted_content(inst: dict, avg_confidence: float, n_projects: int) -> str:
+    """自動昇格 instinct の YAML テキストを構築する。"""
+    output_content = "---\n"
+    output_content += f"id: {inst.get('id')}\n"
+    output_content += f"trigger: {_yaml_quote(inst.get('trigger', 'unknown'))}\n"
+    output_content += f"confidence: {avg_confidence}\n"
+    output_content += f"domain: {inst.get('domain', 'general')}\n"
+    output_content += "source: auto-promoted\n"
+    output_content += "scope: global\n"
+    output_content += f"promoted_date: {datetime.now(UTC).isoformat().replace('+00:00', 'Z')}\n"
+    output_content += f"seen_in_projects: {n_projects}\n"
+    output_content += "---\n\n"
+    output_content += inst.get("content", "") + "\n"
+    return output_content
+
+
+def _collect_auto_candidates(cross: dict, global_ids: set) -> list[dict]:
+    """クロスプロジェクト instinct から自動昇格候補を抽出する。"""
+    candidates = []
+    for iid, entries in cross.items():
+        if iid in global_ids:
+            continue
+        avg_conf = sum(e[2].get("confidence", 0.5) for e in entries) / len(entries)
+        if avg_conf >= PROMOTE_CONFIDENCE_THRESHOLD and len(entries) >= PROMOTE_MIN_PROJECTS:
+            candidates.append({"id": iid, "entries": entries, "avg_confidence": avg_conf})
+    return candidates
+
+
+def _write_auto_promoted(candidates: list) -> int:
+    """候補リストをグローバルスコープへ書き込み、昇格件数を返す。"""
+    promoted = 0
+    for cand in candidates:
+        if not _validate_instinct_id(cand["id"]):
+            print(f"Skipping invalid instinct ID during promotion: {cand['id']}", file=sys.stderr)
+            continue
+        best_entry = max(cand["entries"], key=lambda e: e[2].get("confidence", 0.5))
+        inst = best_entry[2]
+        output_file = _pkg.GLOBAL_PERSONAL_DIR / f"{cand['id']}.yaml"
+        output_file.write_text(
+            _build_auto_promoted_content(inst, cand["avg_confidence"], len(cand["entries"])),
+            encoding="utf-8",
+        )
+        promoted += 1
+    return promoted
 
 
 def _promote_auto(project: dict, force: bool, dry_run: bool) -> int:
@@ -95,25 +143,11 @@ def _promote_auto(project: dict, force: bool, dry_run: bool) -> int:
     global_instincts += _pkg._load_instincts_from_dir(_pkg.GLOBAL_INHERITED_DIR, "inherited", "global")
     global_ids = {i.get("id") for i in global_instincts}
 
-    candidates = []
-    for iid, entries in cross.items():
-        if iid in global_ids:
-            continue
-        avg_conf = sum(e[2].get("confidence", 0.5) for e in entries) / len(entries)
-        if avg_conf >= PROMOTE_CONFIDENCE_THRESHOLD and len(entries) >= PROMOTE_MIN_PROJECTS:
-            candidates.append(
-                {
-                    "id": iid,
-                    "entries": entries,
-                    "avg_confidence": avg_conf,
-                }
-            )
+    candidates = _collect_auto_candidates(cross, global_ids)
 
     if not candidates:
         print("No instincts qualify for auto-promotion.")
-        print(
-            f"  Criteria: appears in {PROMOTE_MIN_PROJECTS}+ projects, avg confidence >= {PROMOTE_CONFIDENCE_THRESHOLD:.0%}"
-        )
+        print(f"  Criteria: appears in {PROMOTE_MIN_PROJECTS}+ projects, avg confidence >= {PROMOTE_CONFIDENCE_THRESHOLD:.0%}")
         return 0
 
     print(f"\n{'=' * 60}")
@@ -135,31 +169,6 @@ def _promote_auto(project: dict, force: bool, dry_run: bool) -> int:
             print("Cancelled.")
             return 0
 
-    promoted = 0
-    for cand in candidates:
-        if not _validate_instinct_id(cand["id"]):
-            print(f"Skipping invalid instinct ID during promotion: {cand['id']}", file=sys.stderr)
-            continue
-
-        # 信頼度が最も高い版を採用
-        best_entry = max(cand["entries"], key=lambda e: e[2].get("confidence", 0.5))
-        inst = best_entry[2]
-
-        output_file = _pkg.GLOBAL_PERSONAL_DIR / f"{cand['id']}.yaml"
-        output_content = "---\n"
-        output_content += f"id: {inst.get('id')}\n"
-        output_content += f"trigger: {_yaml_quote(inst.get('trigger', 'unknown'))}\n"
-        output_content += f"confidence: {cand['avg_confidence']}\n"
-        output_content += f"domain: {inst.get('domain', 'general')}\n"
-        output_content += "source: auto-promoted\n"
-        output_content += "scope: global\n"
-        output_content += f"promoted_date: {datetime.now(UTC).isoformat().replace('+00:00', 'Z')}\n"
-        output_content += f"seen_in_projects: {len(cand['entries'])}\n"
-        output_content += "---\n\n"
-        output_content += inst.get("content", "") + "\n"
-
-        output_file.write_text(output_content, encoding="utf-8")
-        promoted += 1
-
+    promoted = _write_auto_promoted(candidates)
     print(f"\nPromoted {promoted} instincts to global scope.")
     return 0

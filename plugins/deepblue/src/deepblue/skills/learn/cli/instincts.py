@@ -14,6 +14,31 @@ import deepblue.skills.learn.cli as _pkg
 from .paths import ALLOWED_INSTINCT_EXTENSIONS
 
 
+def _unescape_yaml_value(value: str) -> str:
+    """YAML フロントマター中のクォートされた文字列をアンエスケープする。"""
+    if value.startswith('"') and value.endswith('"'):
+        return value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+    if value.startswith("'") and value.endswith("'"):
+        return value[1:-1].replace("''", "'")
+    return value
+
+
+def _parse_frontmatter_line(line: str, current: dict) -> None:
+    """フロントマター行を解析して current 辞書に書き込む。"""
+    if ":" not in line:
+        return
+    key, value = line.split(":", 1)
+    key = key.strip()
+    value = _unescape_yaml_value(value.strip())
+    if key == "confidence":
+        try:
+            current[key] = float(value)
+        except ValueError:
+            current[key] = 0.5
+    else:
+        current[key] = value
+
+
 def parse_instinct_file(content: str) -> list[dict]:
     """YAML 風の instinct ファイル形式を解析する。
 
@@ -22,17 +47,15 @@ def parse_instinct_file(content: str) -> list[dict]:
     曖昧さ回避のため ``***`` または ``___`` を使うこと。
     """
     instincts = []
-    current = {}
+    current: dict = {}
     in_frontmatter = False
-    content_lines = []
+    content_lines: list[str] = []
 
     for line in content.split("\n"):
         if line.strip() == "---":
             if in_frontmatter:
-                # フロントマター終了 - 続いて本文
                 in_frontmatter = False
             else:
-                # 新しいフロントマターブロック開始
                 in_frontmatter = True
                 if current:
                     current["content"] = "\n".join(content_lines).strip()
@@ -40,27 +63,10 @@ def parse_instinct_file(content: str) -> list[dict]:
                 current = {}
                 content_lines = []
         elif in_frontmatter:
-            # YAML 風フロントマターを解析
-            if ":" in line:
-                key, value = line.split(":", 1)
-                key = key.strip()
-                value = value.strip()
-                # クォートされた YAML 文字列をアンエスケープ
-                if value.startswith('"') and value.endswith('"'):
-                    value = value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
-                elif value.startswith("'") and value.endswith("'"):
-                    value = value[1:-1].replace("''", "'")
-                if key == "confidence":
-                    try:
-                        current[key] = float(value)
-                    except ValueError:
-                        current[key] = 0.5  # 信頼度が不正な場合の既定値
-                else:
-                    current[key] = value
+            _parse_frontmatter_line(line, current)
         else:
             content_lines.append(line)
 
-    # 最後の instinct も忘れずに追加
     if current:
         current["content"] = "\n".join(content_lines).strip()
         instincts.append(current)

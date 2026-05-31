@@ -228,6 +228,59 @@ def _run_prune() -> None:
         return
 
 
+def _get_idle_seconds_darwin() -> int:
+    """macOS の ioreg から HIDIdleTime を取得してアイドル秒数を返す。"""
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/ioreg", "-c", "IOHIDSystem"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for line in result.stdout.splitlines():
+            if "HIDIdleTime" in line:
+                value = int(line.split()[-1])
+                return max(0, value // 1_000_000_000)
+    except (OSError, ValueError):
+        pass
+    return 0
+
+
+def _get_idle_seconds_linux() -> int:
+    """Linux の xprintidle コマンドからアイドル秒数を返す。"""
+    if shutil.which("xprintidle") is None:
+        return 0
+    try:
+        result = subprocess.run(["xprintidle"], capture_output=True, text=True, check=False)
+        return max(0, int(result.stdout.strip() or "0") // 1000)
+    except (OSError, ValueError):
+        return 0
+
+
+def _get_idle_seconds_windows() -> int:
+    """Windows の GetLastInputInfo API からアイドル秒数を返す。"""
+    _PS_CMD = (
+        "try { "
+        "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO p); "
+        "[StructLayout(LayoutKind.Sequential)] public struct LASTINPUTINFO { public uint cbSize; public int dwTime; }' "
+        "-Name WinAPI -Namespace PInvoke; "
+        "$l = New-Object PInvoke.WinAPI+LASTINPUTINFO; $l.cbSize = 8; "
+        "[PInvoke.WinAPI]::GetLastInputInfo([ref]$l) | Out-Null; "
+        "[int][Math]::Max(0, [long]([Environment]::TickCount - [long]$l.dwTime) / 1000) "
+        "} catch { 0 }"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _PS_CMD],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return max(0, int((result.stdout or "0").strip().replace("\r", "")))
+    except (OSError, ValueError):
+        return 0
+
+
 def _get_idle_seconds() -> int:
     """OS ごとの方法でユーザー操作のアイドル秒数を返す。
 
@@ -235,91 +288,48 @@ def _get_idle_seconds() -> int:
     """
     system = platform.system()
     if system == "Darwin":
-        try:
-            result = subprocess.run(
-                ["/usr/sbin/ioreg", "-c", "IOHIDSystem"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            for line in result.stdout.splitlines():
-                if "HIDIdleTime" in line:
-                    value = int(line.split()[-1])
-                    return max(0, value // 1_000_000_000)
-        except (OSError, ValueError):
-            return 0
-        return 0
-
+        return _get_idle_seconds_darwin()
     if system == "Linux":
-        if shutil.which("xprintidle") is None:
-            return 0
-        try:
-            result = subprocess.run(["xprintidle"], capture_output=True, text=True, check=False)
-            return max(0, int(result.stdout.strip() or "0") // 1000)
-        except (OSError, ValueError):
-            return 0
-
+        return _get_idle_seconds_linux()
     if system.startswith("MINGW") or system.startswith("MSYS") or system.startswith("CYGWIN"):
-        try:
-            result = subprocess.run(
-                [
-                    "powershell.exe",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    "try { "
-                    "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO p); [StructLayout(LayoutKind.Sequential)] public struct LASTINPUTINFO { public uint cbSize; public int dwTime; }' -Name WinAPI -Namespace PInvoke; "
-                    "$l = New-Object PInvoke.WinAPI+LASTINPUTINFO; $l.cbSize = 8; "
-                    "[PInvoke.WinAPI]::GetLastInputInfo([ref]$l) | Out-Null; "
-                    "[int][Math]::Max(0, [long]([Environment]::TickCount - [long]$l.dwTime) / 1000) "
-                    "} catch { 0 }",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            return max(0, int((result.stdout or "0").strip().replace("\r", "")))
-        except (OSError, ValueError):
-            return 0
-
+        return _get_idle_seconds_windows()
     return 0
 
 
-def _guardian_allows(project_dir: Path, project_root: Path, log_file: Path) -> bool:
-    """アクティブ時間帯・クールダウン・アイドル状態を確認し解析実行可否を判定する。
+def _resolve_project_root(project_root: Path) -> Path:
+    """プロジェクトルートが存在しない場合に git または cwd から解決する。"""
+    if project_root.exists():
+        return project_root
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False).stdout.strip()
+        return Path(top or os.getcwd())
+    except OSError:
+        return Path(os.getcwd())
 
-    Returns:
-        解析を実行してよい場合は True、抑止すべき場合は False。
-    """
-    interval = int(os.environ.get("OBSERVER_INTERVAL_SECONDS", "300"))
-    last_run_log = Path(os.environ.get("OBSERVER_LAST_RUN_LOG", str(get_deepblue_dir() / "observer-last-run.log")))
-    active_start = int(os.environ.get("OBSERVER_ACTIVE_HOURS_START", "800"))
-    active_end = int(os.environ.get("OBSERVER_ACTIVE_HOURS_END", "2300"))
-    max_idle = int(os.environ.get("OBSERVER_MAX_IDLE_SECONDS", "1800"))
 
-    if active_start != 0 or active_end != 0:
-        current_hhmm = int(time.strftime("%H%M"))
-        within_active = False
-        if active_start < active_end:
-            within_active = active_start <= current_hhmm < active_end
-        else:
-            within_active = current_hhmm >= active_start or current_hhmm < active_end
-        if not within_active:
-            _append_log(log_file, f"session-guardian: outside active hours ({current_hhmm}, window {active_start}-{active_end})")
-            return False
+def _check_active_hours(active_start: int, active_end: int, log_file: Path) -> bool:
+    """現在時刻がアクティブ時間帯内かを確認し、外れていればログを残して False を返す。"""
+    if active_start == 0 and active_end == 0:
+        return True
+    current_hhmm = int(time.strftime("%H%M"))
+    if active_start < active_end:
+        within_active = active_start <= current_hhmm < active_end
+    else:
+        within_active = current_hhmm >= active_start or current_hhmm < active_end
+    if not within_active:
+        _append_log(log_file, f"session-guardian: outside active hours ({current_hhmm}, window {active_start}-{active_end})")
+        return False
+    return True
 
-    if not project_root.exists():
-        try:
-            project_root = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False).stdout.strip() or os.getcwd())
-        except OSError:
-            project_root = Path(os.getcwd())
 
+def _check_cooldown(project_root: Path, interval: int, last_run_log: Path, log_file: Path) -> bool:
+    """クールダウン期間中であればログを残して False を返す。通過時は last_run_log を更新する。"""
     project_name = project_root.name
     now = int(time.time())
     last_run_log.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        entries = {}
+        entries: dict[str, str] = {}
         if last_run_log.exists():
             for line in last_run_log.read_text(encoding="utf-8").splitlines():
                 if "\t" not in line:
@@ -342,6 +352,28 @@ def _guardian_allows(project_dir: Path, project_root: Path, log_file: Path) -> b
                 handle.write(f"{key}\t{value}\n")
     except OSError:
         pass
+    return True
+
+
+def _guardian_allows(project_dir: Path, project_root: Path, log_file: Path) -> bool:
+    """アクティブ時間帯・クールダウン・アイドル状態を確認し解析実行可否を判定する。
+
+    Returns:
+        解析を実行してよい場合は True、抑止すべき場合は False。
+    """
+    interval = int(os.environ.get("OBSERVER_INTERVAL_SECONDS", "300"))
+    last_run_log = Path(os.environ.get("OBSERVER_LAST_RUN_LOG", str(get_deepblue_dir() / "observer-last-run.log")))
+    active_start = int(os.environ.get("OBSERVER_ACTIVE_HOURS_START", "800"))
+    active_end = int(os.environ.get("OBSERVER_ACTIVE_HOURS_END", "2300"))
+    max_idle = int(os.environ.get("OBSERVER_MAX_IDLE_SECONDS", "1800"))
+
+    if not _check_active_hours(active_start, active_end, log_file):
+        return False
+
+    project_root = _resolve_project_root(project_root)
+
+    if not _check_cooldown(project_root, interval, last_run_log, log_file):
+        return False
 
     if max_idle > 0:
         idle_seconds = _get_idle_seconds()
@@ -357,6 +389,119 @@ def _append_log(path: Path, message: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(f"[{time.strftime('%c')}] {message}\n")
+
+
+def _build_analysis_prompt(
+    analysis_relpath: str,
+    project_name: str,
+    project_id: str,
+    instincts_dir: Path,
+) -> str:
+    """claude CLI へ渡す解析プロンプト文字列を組み立てる。"""
+    return (
+        "IMPORTANT: You are running in non-interactive --print mode. You MUST use the Write tool directly to create files. "
+        "Do NOT ask for permission, do NOT ask for confirmation, do NOT output summaries instead of writing. Just read, analyze, and write.\n\n"
+        f"Read {analysis_relpath} and identify patterns for the project {project_name} (user corrections, error resolutions, repeated workflows, tool preferences).\n"
+        f"If you find 3+ occurrences of the same pattern, you MUST write an instinct file directly to {instincts_dir}/<id>.md using the Write tool.\n"
+        "Do NOT ask for permission to write files, do NOT describe what you would write, and do NOT stop at analysis when a qualifying pattern exists.\n\n"
+        "CRITICAL: Every instinct file MUST use this exact format:\n\n"
+        "---\n"
+        "id: kebab-case-name\n"
+        "trigger: when <specific condition>\n"
+        "confidence: <0.3-0.85 based on frequency: 3-5 times=0.5, 6-10=0.7, 11+=0.85>\n"
+        "domain: <one of: code-style, testing, git, debugging, workflow, file-patterns>\n"
+        "source: session-observation\n"
+        "scope: project\n"
+        f"project_id: {project_id}\n"
+        f"project_name: {project_name}\n"
+        "---\n\n"
+        "# Title\n\n"
+        "## Action\n"
+        "<what to do, one clear sentence>\n\n"
+        "## Evidence\n"
+        "- Observed N times in session <id>\n"
+        "- Pattern: <description>\n"
+        "- Last observed: <date>\n\n"
+        "Rules:\n"
+        "- Be conservative, only clear patterns with 3+ observations\n"
+        "- Use narrow, specific triggers\n"
+        "- Never include actual code snippets, only describe patterns\n"
+        "- When a qualifying pattern exists, write or update the instinct file in this run instead of asking for confirmation\n"
+        f"- If a similar instinct already exists in {instincts_dir}/, update it instead of creating a duplicate\n"
+        "- The YAML frontmatter (between --- markers) with id field is MANDATORY\n"
+        "- If a pattern seems universal (not project-specific), set scope to global instead of project\n"
+        "- Examples of global patterns: always validate user input, prefer explicit error handling\n"
+        "- Examples of project patterns: use React functional components, follow Django REST framework conventions\n"
+    )
+
+
+def _prepare_analysis_file(
+    observations_file: Path, observer_tmp_dir: Path
+) -> Path | None:
+    """解析用の一時 JSONL ファイルを作成して返す。失敗時は None を返す。"""
+    observer_tmp_dir.mkdir(parents=True, exist_ok=True)
+    analysis_file = observer_tmp_dir / f"deepblue-observer-analysis-{os.getpid()}-{int(time.time())}.jsonl"
+    try:
+        lines = observations_file.read_text(encoding="utf-8").splitlines()
+        recent_lines = lines[-int(os.environ.get("DEEPBLUE_OBSERVER_MAX_ANALYSIS_LINES", "500")):]
+        analysis_file.write_text("\n".join(recent_lines) + ("\n" if recent_lines else ""), encoding="utf-8")
+        return analysis_file
+    except OSError:
+        return None
+
+
+def _run_claude_analysis(
+    prompt: str, project_dir: Path, log_file: Path, analysis_file: Path
+) -> None:
+    """claude CLI を起動して観測解析を実行し、ログへ結果を書き込む。"""
+    timeout_seconds = int(os.environ.get("DEEPBLUE_OBSERVER_TIMEOUT_SECONDS", "120"))
+    max_turns = int(os.environ.get("DEEPBLUE_OBSERVER_MAX_TURNS", "10"))
+    if max_turns < 4:
+        max_turns = 10
+
+    env = os.environ.copy()
+    env["DEEPBLUE_SKIP_OBSERVE"] = "1"
+    try:
+        result = subprocess.run(
+            ["claude", "--model", "haiku", "--max-turns", str(max_turns), "--print", "--allowedTools", "Read,Write", "-p", prompt],
+            text=True,
+            capture_output=True,
+            env=env,
+            cwd=str(project_dir),
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        _append_log(log_file, f"Claude analysis timed out after {timeout_seconds}s; terminating process")
+        return
+    except OSError as error:
+        _append_log(log_file, f"Claude analysis failed to start: {error}")
+        return
+
+    if result.stdout:
+        _append_log(log_file, result.stdout.strip())
+    if result.stderr:
+        _append_log(log_file, result.stderr.strip())
+    if result.returncode != 0:
+        _append_log(log_file, f"Claude analysis failed (exit {result.returncode})")
+
+    try:
+        analysis_file.unlink()
+    except OSError:
+        pass
+
+
+def _archive_observations(observations_file: Path, project_dir: Path) -> None:
+    """観測ファイルをアーカイブディレクトリへ退避する。"""
+    if not observations_file.exists():
+        return
+    archive_dir = project_dir / "observations.archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = archive_dir / f"processed-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.jsonl"
+    try:
+        observations_file.replace(archive_path)
+    except OSError:
+        pass
 
 
 def _analyze_observations(
@@ -400,109 +545,14 @@ def _analyze_observations(
         _append_log(log_file, "Observer cycle skipped by session-guardian")
         return
 
-    observer_tmp_dir = project_dir / ".observer-tmp"
-    observer_tmp_dir.mkdir(parents=True, exist_ok=True)
-    analysis_file = observer_tmp_dir / f"deepblue-observer-analysis-{os.getpid()}-{int(time.time())}.jsonl"
-
-    try:
-        lines = observations_file.read_text(encoding="utf-8").splitlines()
-        recent_lines = lines[-int(os.environ.get("DEEPBLUE_OBSERVER_MAX_ANALYSIS_LINES", "500")) :]
-        analysis_file.write_text("\n".join(recent_lines) + ("\n" if recent_lines else ""), encoding="utf-8")
-    except OSError:
+    analysis_file = _prepare_analysis_file(observations_file, project_dir / ".observer-tmp")
+    if analysis_file is None:
         return
 
     analysis_relpath = f".observer-tmp/{analysis_file.name}"
-    prompt = (
-        "IMPORTANT: You are running in non-interactive --print mode. You MUST use the Write tool directly to create files. "
-        "Do NOT ask for permission, do NOT ask for confirmation, do NOT output summaries instead of writing. Just read, analyze, and write.\n\n"
-        f"Read {analysis_relpath} and identify patterns for the project {project_name} (user corrections, error resolutions, repeated workflows, tool preferences).\n"
-        f"If you find 3+ occurrences of the same pattern, you MUST write an instinct file directly to {instincts_dir}/<id>.md using the Write tool.\n"
-        "Do NOT ask for permission to write files, do NOT describe what you would write, and do NOT stop at analysis when a qualifying pattern exists.\n\n"
-        "CRITICAL: Every instinct file MUST use this exact format:\n\n"
-        "---\n"
-        "id: kebab-case-name\n"
-        "trigger: when <specific condition>\n"
-        "confidence: <0.3-0.85 based on frequency: 3-5 times=0.5, 6-10=0.7, 11+=0.85>\n"
-        "domain: <one of: code-style, testing, git, debugging, workflow, file-patterns>\n"
-        "source: session-observation\n"
-        "scope: project\n"
-        f"project_id: {project_id}\n"
-        f"project_name: {project_name}\n"
-        "---\n\n"
-        "# Title\n\n"
-        "## Action\n"
-        "<what to do, one clear sentence>\n\n"
-        "## Evidence\n"
-        "- Observed N times in session <id>\n"
-        "- Pattern: <description>\n"
-        "- Last observed: <date>\n\n"
-        "Rules:\n"
-        "- Be conservative, only clear patterns with 3+ observations\n"
-        "- Use narrow, specific triggers\n"
-        "- Never include actual code snippets, only describe patterns\n"
-        "- When a qualifying pattern exists, write or update the instinct file in this run instead of asking for confirmation\n"
-        f"- If a similar instinct already exists in {instincts_dir}/, update it instead of creating a duplicate\n"
-        "- The YAML frontmatter (between --- markers) with id field is MANDATORY\n"
-        "- If a pattern seems universal (not project-specific), set scope to global instead of project\n"
-        "- Examples of global patterns: always validate user input, prefer explicit error handling\n"
-        "- Examples of project patterns: use React functional components, follow Django REST framework conventions\n"
-    )
-
-    timeout_seconds = int(os.environ.get("DEEPBLUE_OBSERVER_TIMEOUT_SECONDS", "120"))
-    max_turns = int(os.environ.get("DEEPBLUE_OBSERVER_MAX_TURNS", "10"))
-    if max_turns < 4:
-        max_turns = 10
-
-    env = os.environ.copy()
-    env["DEEPBLUE_SKIP_OBSERVE"] = "1"
-    try:
-        result = subprocess.run(
-            [
-                "claude",
-                "--model",
-                "haiku",
-                "--max-turns",
-                str(max_turns),
-                "--print",
-                "--allowedTools",
-                "Read,Write",
-                "-p",
-                prompt,
-            ],
-            text=True,
-            capture_output=True,
-            env=env,
-            cwd=str(project_dir),
-            timeout=timeout_seconds,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        _append_log(log_file, f"Claude analysis timed out after {timeout_seconds}s; terminating process")
-        return
-    except OSError as error:
-        _append_log(log_file, f"Claude analysis failed to start: {error}")
-        return
-
-    if result.stdout:
-        _append_log(log_file, result.stdout.strip())
-    if result.stderr:
-        _append_log(log_file, result.stderr.strip())
-    if result.returncode != 0:
-        _append_log(log_file, f"Claude analysis failed (exit {result.returncode})")
-
-    try:
-        analysis_file.unlink()
-    except OSError:
-        pass
-
-    if observations_file.exists():
-        archive_dir = project_dir / "observations.archive"
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        archive_path = archive_dir / f"processed-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.jsonl"
-        try:
-            observations_file.replace(archive_path)
-        except OSError:
-            pass
+    prompt = _build_analysis_prompt(analysis_relpath, project_name, project_id, instincts_dir)
+    _run_claude_analysis(prompt, project_dir, log_file, analysis_file)
+    _archive_observations(observations_file, project_dir)
 
 
 def _loop_once(
@@ -589,39 +639,10 @@ def _run_loop(project_dir: Path, project_root: Path, log_file: Path, pid_file: P
         )
 
 
-def _start_observer(project: dict, reset: bool) -> int:
-    """observer プロセスをバックグラウンド起動する。
-
-    既存稼働の確認、起動直後のプロンプト検出によるフェイルクローズを行う。
-
-    Returns:
-        終了コード（0=起動/既存稼働、1=起動失敗、2=プロンプト検出による中止）。
-    """
-    project_dir = Path(project["project_dir"])
-    pid_file = project_dir / ".observer.pid"
-    log_file = _observer_log_path(project_dir)
-    instincts_dir = Path(project["instincts_personal"])
+def _build_observer_env(project: dict, project_dir: Path, pid_file: Path, log_file: Path, instincts_dir: Path) -> dict:
+    """observer 子プロセスへ渡す環境変数辞書を構築する。"""
     min_observations = int(os.environ.get("MIN_OBSERVATIONS", "20"))
     interval_seconds = os.environ.get("OBSERVER_INTERVAL_SECONDS", "300")
-    project_dir.mkdir(parents=True, exist_ok=True)
-    log_file.touch(exist_ok=True)
-
-    if reset:
-        sentinel = _sentinel_path(project_dir, Path(project["root"]))
-        try:
-            sentinel.unlink()
-        except OSError:
-            pass
-
-    for candidate in _pid_file_candidates(project_dir):
-        if _is_running(candidate):
-            pid = candidate.read_text(encoding="utf-8").strip()
-            print(f"Observer already running for {project['name']} (PID: {pid})")
-            return 0
-
-    print(f"Starting observer agent for {project['name']}...")
-    start_line = len(log_file.read_text(encoding="utf-8").splitlines()) if log_file.exists() else 0
-
     env = os.environ.copy()
     env.update(
         {
@@ -639,7 +660,15 @@ def _start_observer(project: dict, reset: bool) -> int:
             "CLV2_IS_WINDOWS": str(platform.system().startswith(("MINGW", "MSYS", "CYGWIN"))).lower(),
         }
     )
+    return env
 
+
+def _spawn_observer_process(project_dir: Path, log_file: Path, env: dict) -> int:
+    """observer ループプロセスをバックグラウンドで生成する。
+
+    Returns:
+        成功時 0、OSError 発生時 1。
+    """
     try:
         with log_file.open("a", encoding="utf-8") as log_handle:
             proc_kwargs: dict[str, object] = {"cwd": str(project_dir), "env": env, "stdout": log_handle, "stderr": subprocess.STDOUT}
@@ -648,16 +677,63 @@ def _start_observer(project: dict, reset: bool) -> int:
             else:
                 proc_kwargs["start_new_session"] = True
             subprocess.Popen([_resolve_python_cmd(), "-m", "deepblue.skills.learn.observer", "loop"], **proc_kwargs)
+        return 0
     except OSError as error:
         print(f"Failed to start observer: {error}")
         return 1
 
+
+def _check_prompt_abort(log_file: Path, start_line: int, project_dir: Path, project_root: Path) -> bool:
+    """起動直後のログにプロンプト検出パターンがあれば停止してセンチネルを書き返す。
+
+    Returns:
+        中止した場合は True。
+    """
+    if not _PROMPT_PATTERN.search(_log_tail(log_file, start_line)):
+        return False
+    print("OBSERVER_ABORT: Confirmation or permission prompt detected in observer output. Failing closed.")
+    for path in _pid_file_candidates(project_dir):
+        _stop_running_observer(path)
+    _write_guard_sentinel(project_dir, project_root)
+    return True
+
+
+def _start_observer(project: dict, reset: bool) -> int:
+    """observer プロセスをバックグラウンド起動する。
+
+    既存稼働の確認、起動直後のプロンプト検出によるフェイルクローズを行う。
+
+    Returns:
+        終了コード（0=起動/既存稼働、1=起動失敗、2=プロンプト検出による中止）。
+    """
+    project_dir = Path(project["project_dir"])
+    pid_file = project_dir / ".observer.pid"
+    log_file = _observer_log_path(project_dir)
+    instincts_dir = Path(project["instincts_personal"])
+    project_dir.mkdir(parents=True, exist_ok=True)
+    log_file.touch(exist_ok=True)
+
+    if reset:
+        try:
+            _sentinel_path(project_dir, Path(project["root"])).unlink()
+        except OSError:
+            pass
+
+    for candidate in _pid_file_candidates(project_dir):
+        if _is_running(candidate):
+            pid = candidate.read_text(encoding="utf-8").strip()
+            print(f"Observer already running for {project['name']} (PID: {pid})")
+            return 0
+
+    print(f"Starting observer agent for {project['name']}...")
+    start_line = len(log_file.read_text(encoding="utf-8").splitlines()) if log_file.exists() else 0
+
+    env = _build_observer_env(project, project_dir, pid_file, log_file, instincts_dir)
+    if _spawn_observer_process(project_dir, log_file, env):
+        return 1
+
     time.sleep(2)
-    if _PROMPT_PATTERN.search(_log_tail(log_file, start_line)):
-        print("OBSERVER_ABORT: Confirmation or permission prompt detected in observer output. Failing closed.")
-        for path in _pid_file_candidates(project_dir):
-            _stop_running_observer(path)
-        _write_guard_sentinel(project_dir, Path(project["root"]))
+    if _check_prompt_abort(log_file, start_line, project_dir, Path(project["root"])):
         return 2
 
     if _is_running(pid_file):
@@ -687,6 +763,41 @@ def _stop_observer(project: dict) -> int:
     return 1
 
 
+def _parse_main_args(argv: list[str]) -> tuple[str, bool]:
+    """CLI 引数を解析してアクションと reset フラグを返す。不正な引数があれば (None, False) を返す。"""
+    action = "start"
+    reset = False
+    for arg in argv:
+        if arg in {"start", "stop", "status", "loop"}:
+            action = arg
+        elif arg == "--reset":
+            reset = True
+        else:
+            print(f"Usage: {Path(sys.argv[0]).name} [start|stop|status] [--reset]")
+            return "", False
+    return action, reset
+
+
+def _run_loop_action(project: dict, project_dir: Path, log_file: Path, pid_file: Path, instincts_dir: Path) -> int:
+    """loop アクション用のループを準備して実行する。"""
+    project_dir.mkdir(parents=True, exist_ok=True)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    interval_seconds = int(os.environ.get("OBSERVER_INTERVAL_SECONDS", "300"))
+    min_observations = int(os.environ.get("MIN_OBSERVATIONS", "20"))
+    return _run_loop(
+        project_dir,
+        Path(project["root"]),
+        log_file,
+        pid_file,
+        Path(project["observations_file"]),
+        instincts_dir,
+        str(project["name"]),
+        str(project["id"]),
+        min_observations,
+        interval_seconds,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI エントリポイント。start/stop/status/loop を解釈して実行する。
 
@@ -694,25 +805,15 @@ def main(argv: list[str] | None = None) -> int:
         各サブコマンドの終了コード。
     """
     args = list(sys.argv[1:] if argv is None else argv)
-    action = "start"
-    reset = False
-
-    for arg in args:
-        if arg in {"start", "stop", "status", "loop"}:
-            action = arg
-        elif arg == "--reset":
-            reset = True
-        else:
-            print(f"Usage: {Path(sys.argv[0]).name} [start|stop|status] [--reset]")
-            return 1
+    action, reset = _parse_main_args(args)
+    if not action:
+        return 1
 
     project = _project_context()
     project_dir = Path(project["project_dir"])
     pid_file = project_dir / ".observer.pid"
     log_file = _observer_log_path(project_dir)
     instincts_dir = Path(project["instincts_personal"])
-    interval_seconds = int(os.environ.get("OBSERVER_INTERVAL_SECONDS", "300"))
-    min_observations = int(os.environ.get("MIN_OBSERVATIONS", "20"))
 
     print(f"Project: {project['name']} ({project['id']})")
     print(f"Storage: {project_dir}")
@@ -725,26 +826,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if action == "stop":
         return _stop_observer(project)
-
     if action == "status":
         return _print_status(project_dir, pid_file, log_file, instincts_dir, Path(project["observations_file"]))
-
     if action == "loop":
-        project_dir.mkdir(parents=True, exist_ok=True)
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        observations_file = Path(project["observations_file"])
-        return _run_loop(
-            project_dir,
-            Path(project["root"]),
-            log_file,
-            pid_file,
-            observations_file,
-            instincts_dir,
-            str(project["name"]),
-            str(project["id"]),
-            min_observations,
-            interval_seconds,
-        )
+        return _run_loop_action(project, project_dir, log_file, pid_file, instincts_dir)
 
     return _start_observer(project, reset)
 

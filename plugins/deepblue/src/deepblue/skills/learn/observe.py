@@ -312,12 +312,8 @@ def _pid_is_running(pid_file: Path) -> bool:
         return False
 
 
-def _signal_observers(project: dict) -> None:
-    """N 件ごとに稼働中オブザーバーへ SIGUSR1 を送る。
-
-    カウンタファイルで間引き、閾値到達時のみシグナルを送出する。
-    """
-    signal_every_n = int(os.environ.get("DEEPBLUE_OBSERVER_SIGNAL_EVERY_N", str(_DEFAULT_SIGNAL_EVERY_N)))
+def _should_signal_now(project: dict, signal_every_n: int) -> bool:
+    """カウンタファイルをインクリメントし、シグナル送出タイミングかを返す。"""
     counter_file = project["project_dir"] / ".observer-signal-counter"
     try:
         counter = int(counter_file.read_text(encoding="utf-8").strip()) if counter_file.exists() else 0
@@ -325,49 +321,67 @@ def _signal_observers(project: dict) -> None:
         counter = 0
 
     counter += 1
-    should_signal = False
     if counter >= signal_every_n:
-        should_signal = True
         counter = 0
+        should = True
+    else:
+        should = False
 
     try:
         counter_file.write_text(str(counter), encoding="utf-8")
     except OSError:
         pass
 
-    if not should_signal or not hasattr(signal, "SIGUSR1"):
+    return should
+
+
+def _send_sigusr1_to_pid_file(pid_file: Path, signaled: set) -> None:
+    """PID ファイルのプロセスが有効なら SIGUSR1 を送る。"""
+    if not pid_file.exists():
+        return
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        return
+
+    if pid in signaled or pid <= 1:
+        return
+
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        return
+
+    try:
+        os.kill(pid, signal.SIGUSR1)
+        signaled.add(pid)
+    except OSError:
+        pass
+
+
+def _signal_observers(project: dict) -> None:
+    """N 件ごとに稼働中オブザーバーへ SIGUSR1 を送る。
+
+    カウンタファイルで間引き、閾値到達時のみシグナルを送出する。
+    """
+    signal_every_n = int(os.environ.get("DEEPBLUE_OBSERVER_SIGNAL_EVERY_N", str(_DEFAULT_SIGNAL_EVERY_N)))
+    if not _should_signal_now(project, signal_every_n):
+        return
+
+    if not hasattr(signal, "SIGUSR1"):
         return
 
     signaled: set[int] = set()
     for pid_file in [project["project_dir"] / ".observer.pid", _CONFIG_DIR / ".observer.pid"]:
-        if not pid_file.exists():
-            continue
-        try:
-            pid = int(pid_file.read_text(encoding="utf-8").strip())
-        except (OSError, ValueError):
-            try:
-                pid_file.unlink()
-            except OSError:
-                pass
-            continue
-
-        if pid in signaled or pid <= 1:
-            continue
-
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            try:
-                pid_file.unlink()
-            except OSError:
-                pass
-            continue
-
-        try:
-            os.kill(pid, signal.SIGUSR1)
-            signaled.add(pid)
-        except OSError:
-            continue
+        _send_sigusr1_to_pid_file(pid_file, signaled)
 
 
 def _write_parse_error(obs_path: Path, raw: str) -> None:
@@ -380,6 +394,39 @@ def _write_parse_error(obs_path: Path, raw: str) -> None:
             "raw": _scrub_secret_text(raw[:2000]),
         },
     )
+
+
+def _handle_parse_error(stdin_data: dict, raw: str) -> None:
+    """解析エラー時にプロジェクトを検出してエラーを記録する。"""
+    previous = _set_project_dir_from_cwd(stdin_data)
+    try:
+        project = detect_project()
+        obs_path = project["observations_file"]
+        _ensure_project_dirs(Path(project["project_dir"]))
+        _write_parse_error(Path(obs_path), raw)
+    finally:
+        _restore_project_dir(previous)
+
+
+def _record_and_signal(stdin_data: dict, phase: str) -> None:
+    """プロジェクトを検出して観測を記録し、オブザーバーへシグナルを送る。"""
+    previous = _set_project_dir_from_cwd(stdin_data)
+    try:
+        project = detect_project()
+    finally:
+        _restore_project_dir(previous)
+
+    project_dir = Path(project["project_dir"])
+    obs_path = Path(project["observations_file"])
+    _ensure_project_dirs(project_dir)
+    _archive_old_observation_files(project_dir)
+    _archive_if_too_large(obs_path, project_dir)
+
+    _append_observation(obs_path, _build_observation(stdin_data, phase, project))
+
+    if not _is_disabled():
+        _start_observer_if_needed(project)
+        _signal_observers(project)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -405,39 +452,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if stdin_data.get("parsed") is False:
-        previous = _set_project_dir_from_cwd(stdin_data)
-        try:
-            project = detect_project()
-            obs_path = project["observations_file"]
-            _ensure_project_dirs(Path(project["project_dir"]))
-            _write_parse_error(Path(obs_path), raw)
-        finally:
-            _restore_project_dir(previous)
+        _handle_parse_error(stdin_data, raw)
         return 0
 
     if _should_skip_automation(stdin_data):
         return 0
 
-    previous = _set_project_dir_from_cwd(stdin_data)
-    try:
-        project = detect_project()
-    finally:
-        _restore_project_dir(previous)
-
-    project_dir = Path(project["project_dir"])
-    obs_path = Path(project["observations_file"])
-    _ensure_project_dirs(project_dir)
-    _archive_old_observation_files(project_dir)
-    _archive_if_too_large(obs_path, project_dir)
-
-    observation = _build_observation(stdin_data, phase, project)
-    _append_observation(obs_path, observation)
-
-    if _is_disabled():
-        return 0
-
-    _start_observer_if_needed(project)
-    _signal_observers(project)
+    _record_and_signal(stdin_data, phase)
     return 0
 
 

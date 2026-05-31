@@ -20,6 +20,92 @@ from .paths import (
 from .registry import load_registry
 
 
+def _build_trigger_clusters(instincts: list) -> list[dict]:
+    """instinct リストから trigger が類似するクラスタを抽出してソート済みリストを返す。"""
+    trigger_clusters: dict = defaultdict(list)
+    for inst in instincts:
+        trigger_key = inst.get("trigger", "").lower()
+        for keyword in ["when", "creating", "writing", "adding", "implementing", "testing"]:
+            trigger_key = trigger_key.replace(keyword, "").strip()
+        trigger_clusters[trigger_key].append(inst)
+
+    skill_candidates = []
+    for trigger, cluster in trigger_clusters.items():
+        if len(cluster) >= 2:
+            avg_conf = sum(i.get("confidence", 0.5) for i in cluster) / len(cluster)
+            skill_candidates.append(
+                {
+                    "trigger": trigger,
+                    "instincts": cluster,
+                    "avg_confidence": avg_conf,
+                    "domains": list({i.get("domain", "general") for i in cluster}),
+                    "scopes": list({i.get("scope", "project") for i in cluster}),
+                }
+            )
+    skill_candidates.sort(key=lambda x: (-len(x["instincts"]), -x["avg_confidence"]))
+    return skill_candidates
+
+
+def _print_skill_candidates(skill_candidates: list) -> None:
+    """スキル候補クラスタを最大 5 件表示する。"""
+    if not skill_candidates:
+        return
+    print("\n## SKILL CANDIDATES\n")
+    for i, cand in enumerate(skill_candidates[:5], 1):
+        scope_info = ", ".join(cand["scopes"])
+        print(f'{i}. Cluster: "{cand["trigger"]}"')
+        print(f"   Instincts: {len(cand['instincts'])}")
+        print(f"   Avg confidence: {cand['avg_confidence']:.0%}")
+        print(f"   Domains: {', '.join(cand['domains'])}")
+        print(f"   Scopes: {scope_info}")
+        print("   Instincts:")
+        for inst in cand["instincts"][:3]:
+            print(f"     - {inst.get('id')} [{inst.get('scope', '?')}]")
+        print()
+
+
+def _print_workflow_candidates(workflow_instincts: list) -> None:
+    """ワークフロー系コマンド候補を最大 5 件表示する。"""
+    if not workflow_instincts:
+        return
+    print(f"\n## COMMAND CANDIDATES ({len(workflow_instincts)})\n")
+    for inst in workflow_instincts[:5]:
+        trigger = inst.get("trigger", "unknown")
+        cmd_name = trigger.replace("when ", "").replace("implementing ", "").replace("a ", "")
+        cmd_name = cmd_name.replace(" ", "-")[:20]
+        print(f"  /{cmd_name}")
+        print(f"    From: {inst.get('id')} [{inst.get('scope', '?')}]")
+        print(f"    Confidence: {inst.get('confidence', 0.5):.0%}")
+        print()
+
+
+def _print_agent_candidates(agent_candidates: list) -> None:
+    """エージェント候補を最大 3 件表示する。"""
+    if not agent_candidates:
+        return
+    print(f"\n## AGENT CANDIDATES ({len(agent_candidates)})\n")
+    for cand in agent_candidates[:3]:
+        agent_name = cand["trigger"].replace(" ", "-")[:20] + "-agent"
+        print(f"  {agent_name}")
+        print(f"    Covers {len(cand['instincts'])} instincts")
+        print(f"    Avg confidence: {cand['avg_confidence']:.0%}")
+        print()
+
+
+def _handle_generate(args, project: dict, skill_candidates: list, workflow_instincts: list, agent_candidates: list) -> None:
+    """--generate フラグが立っている場合に evolved 構造を生成して結果を表示する。"""
+    if not args.generate:
+        return
+    evolved_dir = project["evolved_dir"] if project["id"] != "global" else _pkg.GLOBAL_EVOLVED_DIR
+    generated = _pkg._generate_evolved(skill_candidates, workflow_instincts, agent_candidates, evolved_dir)
+    if generated:
+        print(f"\nGenerated {len(generated)} evolved structures:")
+        for path in generated:
+            print(f"   {path}")
+    else:
+        print("\nNo structures generated (need higher-confidence clusters).")
+
+
 def cmd_evolve(args) -> int:
     """instinct を分析し、skill/command/agent への進化候補を提案する。"""
     project = _pkg.detect_project()
@@ -40,96 +126,22 @@ def cmd_evolve(args) -> int:
     print(f"  Project-scoped: {len(project_instincts)} | Global: {len(global_instincts)}")
     print(f"{SEP}\n")
 
-    # domain ごとにグループ化
-    by_domain = defaultdict(list)
-    for inst in instincts:
-        domain = inst.get("domain", "general")
-        by_domain[domain].append(inst)
-
-    # domain 別の高信頼度 instinct（skill 候補）
     high_conf = [i for i in instincts if i.get("confidence", 0) >= 0.8]
     print(f"High confidence instincts (>=80%): {len(high_conf)}")
 
-    # クラスタを抽出（trigger が類似する instinct）
-    trigger_clusters = defaultdict(list)
-    for inst in instincts:
-        trigger = inst.get("trigger", "")
-        # trigger を正規化
-        trigger_key = trigger.lower()
-        for keyword in ["when", "creating", "writing", "adding", "implementing", "testing"]:
-            trigger_key = trigger_key.replace(keyword, "").strip()
-        trigger_clusters[trigger_key].append(inst)
-
-    # instinct が 2 件以上のクラスタを抽出（有望な skill 候補）
-    skill_candidates = []
-    for trigger, cluster in trigger_clusters.items():
-        if len(cluster) >= 2:
-            avg_conf = sum(i.get("confidence", 0.5) for i in cluster) / len(cluster)
-            skill_candidates.append(
-                {
-                    "trigger": trigger,
-                    "instincts": cluster,
-                    "avg_confidence": avg_conf,
-                    "domains": list({i.get("domain", "general") for i in cluster}),
-                    "scopes": list({i.get("scope", "project") for i in cluster}),
-                }
-            )
-
-    # クラスタ規模と信頼度でソート
-    skill_candidates.sort(key=lambda x: (-len(x["instincts"]), -x["avg_confidence"]))
-
+    skill_candidates = _build_trigger_clusters(instincts)
     print(f"\nPotential skill clusters found: {len(skill_candidates)}")
 
-    if skill_candidates:
-        print("\n## SKILL CANDIDATES\n")
-        for i, cand in enumerate(skill_candidates[:5], 1):
-            scope_info = ", ".join(cand["scopes"])
-            print(f'{i}. Cluster: "{cand["trigger"]}"')
-            print(f"   Instincts: {len(cand['instincts'])}")
-            print(f"   Avg confidence: {cand['avg_confidence']:.0%}")
-            print(f"   Domains: {', '.join(cand['domains'])}")
-            print(f"   Scopes: {scope_info}")
-            print("   Instincts:")
-            for inst in cand["instincts"][:3]:
-                print(f"     - {inst.get('id')} [{inst.get('scope', '?')}]")
-            print()
+    _print_skill_candidates(skill_candidates)
 
-    # コマンド候補（ワークフロードメインかつ高信頼度の instinct）
     workflow_instincts = [i for i in instincts if i.get("domain") == "workflow" and i.get("confidence", 0) >= 0.7]
-    if workflow_instincts:
-        print(f"\n## COMMAND CANDIDATES ({len(workflow_instincts)})\n")
-        for inst in workflow_instincts[:5]:
-            trigger = inst.get("trigger", "unknown")
-            cmd_name = trigger.replace("when ", "").replace("implementing ", "").replace("a ", "")
-            cmd_name = cmd_name.replace(" ", "-")[:20]
-            print(f"  /{cmd_name}")
-            print(f"    From: {inst.get('id')} [{inst.get('scope', '?')}]")
-            print(f"    Confidence: {inst.get('confidence', 0.5):.0%}")
-            print()
+    _print_workflow_candidates(workflow_instincts)
 
-    # agent 候補（複雑な多段パターン）
     agent_candidates = [c for c in skill_candidates if len(c["instincts"]) >= 3 and c["avg_confidence"] >= 0.75]
-    if agent_candidates:
-        print(f"\n## AGENT CANDIDATES ({len(agent_candidates)})\n")
-        for cand in agent_candidates[:3]:
-            agent_name = cand["trigger"].replace(" ", "-")[:20] + "-agent"
-            print(f"  {agent_name}")
-            print(f"    Covers {len(cand['instincts'])} instincts")
-            print(f"    Avg confidence: {cand['avg_confidence']:.0%}")
-            print()
+    _print_agent_candidates(agent_candidates)
 
-    # 昇格候補（global 化できる project instinct）
     _pkg._show_promotion_candidates(project)
-
-    if args.generate:
-        evolved_dir = project["evolved_dir"] if project["id"] != "global" else _pkg.GLOBAL_EVOLVED_DIR
-        generated = _pkg._generate_evolved(skill_candidates, workflow_instincts, agent_candidates, evolved_dir)
-        if generated:
-            print(f"\nGenerated {len(generated)} evolved structures:")
-            for path in generated:
-                print(f"   {path}")
-        else:
-            print("\nNo structures generated (need higher-confidence clusters).")
+    _handle_generate(args, project, skill_candidates, workflow_instincts, agent_candidates)
 
     print(f"\n{SEP}\n")
     return 0
@@ -200,77 +212,96 @@ def _show_promotion_candidates(project: dict) -> None:
         print("  Run `python3 -m deepblue.skills.learn.cli promote` to promote these to global scope.\n")
 
 
+def _generate_skill_file(cand: dict, evolved_dir: Path) -> str | None:
+    """スキル候補から SKILL.md を生成し、生成したパスを返す。スキップ時は None。"""
+    trigger = cand["trigger"].strip()
+    if not trigger:
+        return None
+    name = re.sub(r"[^a-z0-9]+", "-", trigger.lower()).strip("-")[:30]
+    if not name:
+        return None
+
+    skill_dir = evolved_dir / "skills" / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+
+    content = f"# {name}\n\n"
+    content += f"Evolved from {len(cand['instincts'])} instincts "
+    content += f"(avg confidence: {cand['avg_confidence']:.0%})\n\n"
+    content += "## When to Apply\n\n"
+    content += f"Trigger: {trigger}\n\n"
+    content += "## Actions\n\n"
+    for inst in cand["instincts"]:
+        inst_content = inst.get("content", "")
+        action_match = re.search(r"## Action\s*\n\s*(.+?)(?:\n\n|\n##|$)", inst_content, re.DOTALL)
+        action = action_match.group(1).strip() if action_match else inst.get("id", "unnamed")
+        content += f"- {action}\n"
+
+    out = skill_dir / "SKILL.md"
+    out.write_text(content, encoding="utf-8")
+    return str(out)
+
+
+def _generate_command_file(inst: dict, evolved_dir: Path) -> str | None:
+    """ワークフロー instinct からコマンドファイルを生成し、パスを返す。スキップ時は None。"""
+    trigger = inst.get("trigger", "unknown")
+    cmd_name = re.sub(r"[^a-z0-9]+", "-", trigger.lower().replace("when ", "").replace("implementing ", ""))
+    cmd_name = cmd_name.strip("-")[:20]
+    if not cmd_name:
+        return None
+
+    cmd_file = evolved_dir / "commands" / f"{cmd_name}.md"
+    content = f"# {cmd_name}\n\n"
+    content += f"Evolved from instinct: {inst.get('id', 'unnamed')}\n"
+    content += f"Confidence: {inst.get('confidence', 0.5):.0%}\n\n"
+    content += inst.get("content", "")
+
+    cmd_file.write_text(content, encoding="utf-8")
+    return str(cmd_file)
+
+
+def _generate_agent_file(cand: dict, evolved_dir: Path) -> str | None:
+    """エージェント候補からエージェントファイルを生成し、パスを返す。スキップ時は None。"""
+    trigger = cand["trigger"].strip()
+    agent_name = re.sub(r"[^a-z0-9]+", "-", trigger.lower()).strip("-")[:20]
+    if not agent_name:
+        return None
+
+    agent_file = evolved_dir / "agents" / f"{agent_name}.md"
+    domains = ", ".join(cand["domains"])
+    instinct_ids = [i.get("id", "unnamed") for i in cand["instincts"]]
+
+    content = "---\nmodel: sonnet\ntools: Read, Grep, Glob\n---\n"
+    content += f"# {agent_name}\n\n"
+    content += f"Evolved from {len(cand['instincts'])} instincts "
+    content += f"(avg confidence: {cand['avg_confidence']:.0%})\n"
+    content += f"Domains: {domains}\n\n"
+    content += "## Source Instincts\n\n"
+    for iid in instinct_ids:
+        content += f"- {iid}\n"
+
+    agent_file.write_text(content, encoding="utf-8")
+    return str(agent_file)
+
+
 def _generate_evolved(
     skill_candidates: list, workflow_instincts: list, agent_candidates: list, evolved_dir: Path
 ) -> list[str]:
     """分析した instinct クラスタから skill/command/agent ファイルを生成する。"""
     generated = []
 
-    # 上位候補から skill を生成
     for cand in skill_candidates[:5]:
-        trigger = cand["trigger"].strip()
-        if not trigger:
-            continue
-        name = re.sub(r"[^a-z0-9]+", "-", trigger.lower()).strip("-")[:30]
-        if not name:
-            continue
+        path = _generate_skill_file(cand, evolved_dir)
+        if path:
+            generated.append(path)
 
-        skill_dir = evolved_dir / "skills" / name
-        skill_dir.mkdir(parents=True, exist_ok=True)
-
-        content = f"# {name}\n\n"
-        content += f"Evolved from {len(cand['instincts'])} instincts "
-        content += f"(avg confidence: {cand['avg_confidence']:.0%})\n\n"
-        content += "## When to Apply\n\n"
-        content += f"Trigger: {trigger}\n\n"
-        content += "## Actions\n\n"
-        for inst in cand["instincts"]:
-            inst_content = inst.get("content", "")
-            action_match = re.search(r"## Action\s*\n\s*(.+?)(?:\n\n|\n##|$)", inst_content, re.DOTALL)
-            action = action_match.group(1).strip() if action_match else inst.get("id", "unnamed")
-            content += f"- {action}\n"
-
-        (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
-        generated.append(str(skill_dir / "SKILL.md"))
-
-    # workflow instinct から command を生成
     for inst in workflow_instincts[:5]:
-        trigger = inst.get("trigger", "unknown")
-        cmd_name = re.sub(r"[^a-z0-9]+", "-", trigger.lower().replace("when ", "").replace("implementing ", ""))
-        cmd_name = cmd_name.strip("-")[:20]
-        if not cmd_name:
-            continue
+        path = _generate_command_file(inst, evolved_dir)
+        if path:
+            generated.append(path)
 
-        cmd_file = evolved_dir / "commands" / f"{cmd_name}.md"
-        content = f"# {cmd_name}\n\n"
-        content += f"Evolved from instinct: {inst.get('id', 'unnamed')}\n"
-        content += f"Confidence: {inst.get('confidence', 0.5):.0%}\n\n"
-        content += inst.get("content", "")
-
-        cmd_file.write_text(content, encoding="utf-8")
-        generated.append(str(cmd_file))
-
-    # 複雑なクラスタから agent を生成
     for cand in agent_candidates[:3]:
-        trigger = cand["trigger"].strip()
-        agent_name = re.sub(r"[^a-z0-9]+", "-", trigger.lower()).strip("-")[:20]
-        if not agent_name:
-            continue
-
-        agent_file = evolved_dir / "agents" / f"{agent_name}.md"
-        domains = ", ".join(cand["domains"])
-        instinct_ids = [i.get("id", "unnamed") for i in cand["instincts"]]
-
-        content = "---\nmodel: sonnet\ntools: Read, Grep, Glob\n---\n"
-        content += f"# {agent_name}\n\n"
-        content += f"Evolved from {len(cand['instincts'])} instincts "
-        content += f"(avg confidence: {cand['avg_confidence']:.0%})\n"
-        content += f"Domains: {domains}\n\n"
-        content += "## Source Instincts\n\n"
-        for iid in instinct_ids:
-            content += f"- {iid}\n"
-
-        agent_file.write_text(content, encoding="utf-8")
-        generated.append(str(agent_file))
+        path = _generate_agent_file(cand, evolved_dir)
+        if path:
+            generated.append(path)
 
     return generated

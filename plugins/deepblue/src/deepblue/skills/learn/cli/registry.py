@@ -20,49 +20,37 @@ from .paths import _preferred_projects_dir, _preferred_registry_file
 # ─────────────────────────────────────────────
 
 
-def detect_project() -> dict:
-    """現在のプロジェクトコンテキストを検出する。id/name/root/project_dir を含む辞書を返す。"""
-    project_root = None
-
-    # 1. CLAUDE_PROJECT_DIR 環境変数
+def _resolve_project_root() -> str:
+    """CLAUDE_PROJECT_DIR 環境変数または git から現在のプロジェクトルートを解決する。"""
     env_dir = os.environ.get("CLAUDE_PROJECT_DIR")
     if env_dir and os.path.isdir(env_dir):
-        project_root = env_dir
+        return env_dir.rstrip("/")
 
-    # 2. Git リポジトリのルート
-    if not project_root:
-        try:
-            result = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                project_root = result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+    try:
+        result = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return result.stdout.strip().rstrip("/")
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
 
-    # 正規化: ベース名とハッシュを安定させるため末尾スラッシュを除去
-    if project_root:
-        project_root = project_root.rstrip("/")
-    else:
-        project_root = str(Path.cwd().resolve())
+    return str(Path.cwd().resolve())
 
-    project_name = os.path.basename(project_root)
 
-    # Git のリモート URL またはパスから project ID を生成
-    remote_url = ""
+def _resolve_remote_url(project_root: str) -> str:
+    """git リモート URL を取得する。取得できない場合は空文字を返す。"""
     try:
         result = subprocess.run(
             ["git", "-C", project_root, "remote", "get-url", "origin"], capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
-            remote_url = result.stdout.strip()
+            return result.stdout.strip()
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
+    return ""
 
-    hash_source = remote_url if remote_url else project_root
-    project_id = hashlib.sha256(hash_source.encode()).hexdigest()[:12]
 
-    project_dir = _preferred_projects_dir() / project_id
-
-    # プロジェクトディレクトリ構造を保証
+def _ensure_project_dirs(project_dir: Path) -> None:
+    """プロジェクトディレクトリ構造を保証する。"""
     for d in [
         project_dir / "instincts" / "personal",
         project_dir / "instincts" / "inherited",
@@ -73,7 +61,18 @@ def detect_project() -> dict:
     ]:
         d.mkdir(parents=True, exist_ok=True)
 
-    # レジストリを更新
+
+def detect_project() -> dict:
+    """現在のプロジェクトコンテキストを検出する。id/name/root/project_dir を含む辞書を返す。"""
+    project_root = _resolve_project_root()
+    project_name = os.path.basename(project_root)
+
+    remote_url = _resolve_remote_url(project_root)
+    hash_source = remote_url if remote_url else project_root
+    project_id = hashlib.sha256(hash_source.encode()).hexdigest()[:12]
+
+    project_dir = _preferred_projects_dir() / project_id
+    _ensure_project_dirs(project_dir)
     _update_registry(project_id, project_name, project_root, remote_url)
 
     return {
