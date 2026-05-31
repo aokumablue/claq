@@ -139,57 +139,60 @@ def _compute_scope_hint(languages: list[str], frameworks: list[str]) -> str:
     return "project"
 
 
+def _log_git_info(git_info: dict) -> None:
+    """取得した git 情報をログへ出力する。ブランチが未取得の場合は何もしない。"""
+    if git_info["branch"]:
+        log(
+            "[SessionStart] git branch="
+            f"{sanitize_log_value(str(git_info['branch']))} "
+            f"commit={sanitize_log_value(str(git_info['commit_hash']))} "
+            f"uncommitted={git_info['uncommitted_count']}"
+        )
+
+
+def _build_project_profile(project_info: object) -> object:
+    """detect_project の戻り値から ProjectProfile オブジェクトを生成して返す。"""
+    import time
+
+    from deepblue.mem.database import ProjectProfile
+
+    cwd = Path.cwd()
+    languages: list[str] = getattr(project_info, "languages", []) or []
+    frameworks: list[str] = getattr(project_info, "frameworks", []) or []
+    primary_language: str | None = getattr(project_info, "primary_language", None)
+    scope_hint = _compute_scope_hint(languages, frameworks)
+    now = int(time.time())
+    git_info = _get_git_info()
+    _log_git_info(git_info)
+    return ProjectProfile(
+        project=cwd.name,
+        detected_at_epoch=now,
+        last_updated_epoch=now,
+        origin_user=get_git_user_name(),
+        project_path=str(cwd),
+        languages=languages,
+        frameworks=frameworks,
+        primary_language=primary_language,
+        scope_hint=scope_hint,
+    )
+
+
 def _save_project_profile(project_info: object) -> None:
     """検出したプロジェクト情報を mem の project_profiles に保存する。"""
     try:
-        import time
-
-        from deepblue.mem.database import Database, ProjectProfile
+        from deepblue.mem.database import Database
         from deepblue.mem.settings import Settings
 
+        profile = _build_project_profile(project_info)
         settings = Settings.load()
-        cwd = Path.cwd()
-        project = cwd.name
-
-        # detect_project() の戻り値からフィールドを安全に取得
-        languages: list[str] = getattr(project_info, "languages", []) or []
-        frameworks: list[str] = getattr(project_info, "frameworks", []) or []
-        primary_language: str | None = getattr(project_info, "primary_language", None)
-
-        scope_hint = _compute_scope_hint(languages, frameworks)
-        now = int(time.time())
-
-        # git 情報を取得してログ出力（session git info は sessions テーブルへの記録に使う）
-        git_info = _get_git_info()
-        if git_info["branch"]:
-            log(
-                "[SessionStart] git branch="
-                f"{sanitize_log_value(str(git_info['branch']))} "
-                f"commit={sanitize_log_value(str(git_info['commit_hash']))} "
-                f"uncommitted={git_info['uncommitted_count']}"
-            )
-
-        profile = ProjectProfile(
-            project=project,
-            detected_at_epoch=now,
-            last_updated_epoch=now,
-            origin_user=get_git_user_name(),
-            project_path=str(cwd),
-            languages=languages,
-            frameworks=frameworks,
-            primary_language=primary_language,
-            scope_hint=scope_hint,
-        )
-
         db = Database(settings.db_path)
         try:
             db.upsert_project_profile(profile)
         finally:
             db.close()
-
         log(
             "[SessionStart] Project profile saved: "
-            f"{sanitize_log_value(project)} (scope_hint={sanitize_log_value(scope_hint)})"
+            f"{sanitize_log_value(profile.project)} (scope_hint={sanitize_log_value(profile.scope_hint)})"
         )
     except Exception as e:
         log(f"[SessionStart] Project profile save error: {sanitize_log_value(str(e))}")
@@ -256,6 +259,80 @@ def dedupe_recent_sessions(search_dirs: list[Path]) -> list[dict]:
     return results
 
 
+def _collect_session_context(sessions_dir: Path) -> list[str]:
+    """最近のセッション要約と未完了チェックポイントをコンテキストパーツとして収集する。"""
+    parts: list[str] = []
+
+    recent_sessions = dedupe_recent_sessions(get_session_search_dirs())
+    if recent_sessions:
+        latest = recent_sessions[0]
+        log(f"[SessionStart] Found {len(recent_sessions)} recent session(s)")
+        log(f"[SessionStart] Latest: {latest['path']}")
+        content = strip_ansi(read_file(latest["path"]) or "")
+        if content and "[Session context goes here]" not in content:
+            filtered = _filter_session_summary(content)
+            parts.append(f"Previous session summary:\n{filtered}")
+
+    checkpoint_files = find_files(sessions_dir, "checkpoint-*.md", max_age=7)
+    active_checkpoints = [
+        c for c in checkpoint_files if "completed: false" in (read_file(c["path"]) or "")
+    ]
+    if active_checkpoints:
+        latest_checkpoint = active_checkpoints[0]
+        raw_content = strip_ansi(read_file(latest_checkpoint["path"]) or "")
+        if raw_content:
+            parts.append(f"Active checkpoint:\n{compact_line(raw_content, 1000)}")
+            log(f"[SessionStart] Injected active checkpoint: {latest_checkpoint['path']}")
+
+    return parts
+
+
+def _collect_project_context(project_info: object) -> list[str]:
+    """プロジェクト検出結果からコンテキストパーツを生成し、パッケージマネージャーをログ出力する。"""
+    parts: list[str] = []
+
+    pm = get_package_manager()
+    if pm.name is not None:
+        log(f"[SessionStart] Package manager: {pm.name} ({pm.source})")
+    elif (Path.cwd() / "package.json").exists():
+        log(get_selection_prompt())
+    elif "ruby" in project_info.languages:
+        fw = ", ".join(project_info.frameworks) or "none"
+        log(f"[SessionStart] Ruby project detected (bundler) — frameworks: {fw}")
+
+    if project_info.languages or project_info.frameworks:
+        log_parts = []
+        if project_info.languages:
+            log_parts.append(f"languages: {', '.join(project_info.languages)}")
+        if project_info.frameworks:
+            log_parts.append(f"frameworks: {', '.join(project_info.frameworks)}")
+        log(f"[SessionStart] Project detected — {'; '.join(log_parts)}")
+        project_dict: dict = {
+            "languages": project_info.languages,
+            "frameworks": project_info.frameworks,
+            "primary_language": project_info.primary_language,
+        }
+        coverage_hint = extract_coverage_hint_lines(Path.cwd())
+        if coverage_hint:
+            project_dict["coverage_hint"] = coverage_hint
+        parts.append(f"Project type: {json.dumps(project_dict)}")
+    else:
+        log("[SessionStart] No specific project type detected")
+
+    return parts
+
+
+def _inject_slim_skill() -> list[str]:
+    """Slim 設定が有効な場合に SKILL.md の内容をコンテキストパーツとして返す。"""
+    try:
+        slim_cfg = Settings.load().slim
+        if slim_cfg.enabled and _SLIM_SKILL_PATH.exists():
+            return [_SLIM_SKILL_PATH.read_text(encoding="utf-8")]
+    except Exception as e:
+        _log_sanitized_exception("[SessionStart] Slim injection error", e)
+    return []
+
+
 def run(_raw_input: str) -> str:
     """セッション開始フックを実行し hookSpecificOutput の JSON を返す
 
@@ -270,92 +347,23 @@ def run(_raw_input: str) -> str:
     """
     learned_dir = get_learned_skills_dir()
     sessions_dir = get_sessions_dir()
-    additional_context_parts = []
-
-    # ディレクトリの存在を確保
     ensure_dir(sessions_dir)
     ensure_dir(learned_dir)
 
-    # 最近のセッションファイルをチェック（過去 7 日間）
-    recent_sessions = dedupe_recent_sessions(get_session_search_dirs())
+    additional_context_parts: list[str] = []
+    additional_context_parts.extend(_collect_session_context(sessions_dir))
 
-    if recent_sessions:
-        latest = recent_sessions[0]
-        log(f"[SessionStart] Found {len(recent_sessions)} recent session(s)")
-        log(f"[SessionStart] Latest: {latest['path']}")
-
-        # 最新のセッション内容を読み込み Claude のコンテキストへ注入
-        content = strip_ansi(read_file(latest["path"]) or "")
-        if content and "[Session context goes here]" not in content:
-            # セッションに実際のコンテンツがある場合のみ注入（空のテンプレートでない）
-            # Tasks + Files Modified のみを抽出し 2000 文字以内に収める
-            filtered = _filter_session_summary(content)
-            additional_context_parts.append(f"Previous session summary:\n{filtered}")
-
-    # 未完了チェックポイントを検索して注入（7日以内のもの）
-    checkpoint_files = find_files(sessions_dir, "checkpoint-*.md", max_age=7)
-    active_checkpoints = [
-        c for c in checkpoint_files if "completed: false" in (read_file(c["path"]) or "")
-    ]
-    if active_checkpoints:
-        latest_checkpoint = active_checkpoints[0]
-        raw_content = strip_ansi(read_file(latest_checkpoint["path"]) or "")
-        if raw_content:
-            snippet = compact_line(raw_content, 1000)
-            additional_context_parts.append(f"Active checkpoint:\n{snippet}")
-            log(f"[SessionStart] Injected active checkpoint: {latest_checkpoint['path']}")
-
-    # 学習したスキルをチェック
     learned_skills = find_files(learned_dir, "*.md")
-
     if learned_skills:
         log(f"[SessionStart] {len(learned_skills)} learned skill(s) available in {learned_dir}")
 
-    # プロジェクトタイプとフレームワークを先に検出（PM ログで言語情報を参照するため）
     project_info = detect_project(Path.cwd())
+    additional_context_parts.extend(_collect_project_context(project_info))
 
-    # パッケージマネージャーを検出して報告
-    pm = get_package_manager()
-    if pm.name is not None:
-        log(f"[SessionStart] Package manager: {pm.name} ({pm.source})")
-    # package.json があるのに PM が未設定の場合のみ選択プロンプトを表示
-    elif (Path.cwd() / "package.json").exists():
-        log(get_selection_prompt())
-    # Ruby プロジェクトは bundler を使用する旨を報告
-    elif "ruby" in project_info.languages:
-        fw = ", ".join(project_info.frameworks) or "none"
-        log(f"[SessionStart] Ruby project detected (bundler) — frameworks: {fw}")
-    if project_info.languages or project_info.frameworks:
-        parts = []
-        if project_info.languages:
-            parts.append(f"languages: {', '.join(project_info.languages)}")
-        if project_info.frameworks:
-            parts.append(f"frameworks: {', '.join(project_info.frameworks)}")
-        log(f"[SessionStart] Project detected — {'; '.join(parts)}")
-        project_dict = {
-            "languages": project_info.languages,
-            "frameworks": project_info.frameworks,
-            "primary_language": project_info.primary_language,
-        }
-        coverage_hint = extract_coverage_hint_lines(Path.cwd())
-        if coverage_hint:
-            project_dict["coverage_hint"] = coverage_hint
-        additional_context_parts.append(f"Project type: {json.dumps(project_dict)}")
-    else:
-        log("[SessionStart] No specific project type detected")
-
-    # プロジェクトプロファイルを mem DB に保存（スキル scope 判定に使用）
     _save_project_profile(project_info)
     _import_adrs_and_instincts()
 
-    # Slim レスポンス圧縮ルール注入
-    try:
-        slim_cfg = Settings.load().slim
-        if slim_cfg.enabled and _SLIM_SKILL_PATH.exists():
-            skill_content = _SLIM_SKILL_PATH.read_text(encoding="utf-8")
-            additional_context_parts.append(skill_content)
-    except Exception as e:
-        _log_sanitized_exception("[SessionStart] Slim injection error", e)
+    additional_context_parts.extend(_inject_slim_skill())
 
     additional_context = "\n\n".join(additional_context_parts)
     return emit_session_start_output(additional_context)

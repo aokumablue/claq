@@ -183,6 +183,74 @@ def format_feedback(anomalies: list[Any]) -> str:
     return "\n".join(lines)
 
 
+def _parse_input() -> dict[str, Any]:
+    """stdin を読み取り JSON として返す。デコード失敗時は content キーでラップする。"""
+    raw: str = sys.stdin.read().strip()
+    if not raw:
+        sys.exit(0)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"content": raw}
+
+
+def _run_insaits_scan(text: str) -> dict[str, Any]:
+    """InsAIts SDK でテキストをスキャンし、結果辞書を返す。エラー時は fail_mode に従い終了する。
+
+    Args:
+        text: スキャン対象のテキスト。
+
+    Returns:
+        SDK の send_message() 戻り値。
+    """
+    try:
+        monitor: insAItsMonitor = insAItsMonitor(
+            session_name="claude-code-hook",
+            dev_mode=os.environ.get("INSAITS_DEV_MODE", "false").lower() in ("1", "true", "yes"),
+        )
+        return monitor.send_message(
+            text=text[:MAX_SCAN_LENGTH],
+            sender_id="claude-code",
+            llm_id=os.environ.get("INSAITS_MODEL", DEFAULT_MODEL),
+        )
+    except Exception as exc:  # 広範囲のcatchは意図的: SDK内部は未知
+        fail_mode: str = os.environ.get("INSAITS_FAIL_MODE", "open").lower()
+        if fail_mode == "closed":
+            sys.stdout.write(f"InsAIts SDK error ({type(exc).__name__}); blocking execution to avoid unscanned input.\n")
+            sys.exit(2)
+        log.warning("SDK error (%s), skipping security scan: %s", type(exc).__name__, exc)
+        sys.exit(0)
+
+
+def _handle_anomalies(anomalies: list[Any], data: dict[str, Any], text: str, context: str) -> None:
+    """監査ログを書き込み、異常があればフィードバックを出力して必要ならブロックする。
+
+    Args:
+        anomalies: SDK が返した異常リスト。
+        data: 元のフック入力辞書。
+        text: スキャン対象テキスト（文字数計上用）。
+        context: 監査ログ用コンテキストラベル。
+    """
+    write_audit({
+        "tool": data.get("tool_name", "unknown"),
+        "context": context,
+        "anomaly_count": len(anomalies),
+        "anomaly_types": [get_anomaly_attr(a, "type") for a in anomalies],
+        "text_length": len(text),
+    })
+    if not anomalies:
+        log.debug("Clean -- no anomalies detected.")
+        sys.exit(0)
+    has_critical: bool = any(get_anomaly_attr(a, "severity").upper() in BLOCKING_SEVERITIES for a in anomalies)
+    feedback: str = format_feedback(anomalies)
+    if has_critical:
+        sys.stdout.write(feedback + "\n")
+        sys.exit(2)
+    else:
+        log.warning("\n%s", feedback)
+        sys.exit(0)
+
+
 def main() -> None:
     """PreToolUse フックとして入力を検査し、必要ならブロックします。
 
@@ -195,18 +263,9 @@ def main() -> None:
     Raises:
         例外は発生しません。
     """
-    raw: str = sys.stdin.read().strip()
-    if not raw:
-        sys.exit(0)
-
-    try:
-        data: dict[str, Any] = json.loads(raw)
-    except json.JSONDecodeError:
-        data = {"content": raw}
-
+    data = _parse_input()
     text, context = extract_content(data)
 
-    # 非常に短いコンテンツはスキップ (例: "OK"、空のbash結果)
     if len(text.strip()) < MIN_CONTENT_LENGTH:
         sys.exit(0)
 
@@ -214,61 +273,9 @@ def main() -> None:
         log.warning("Not installed. Run: pip install insa-its")
         sys.exit(0)
 
-    # 内部エラーでフックがクラッシュしないようSDK呼び出しをラップ
-    try:
-        monitor: insAItsMonitor = insAItsMonitor(
-            session_name="claude-code-hook",
-            dev_mode=os.environ.get("INSAITS_DEV_MODE", "false").lower() in ("1", "true", "yes"),
-        )
-        result: dict[str, Any] = monitor.send_message(
-            text=text[:MAX_SCAN_LENGTH],
-            sender_id="claude-code",
-            llm_id=os.environ.get("INSAITS_MODEL", DEFAULT_MODEL),
-        )
-    except Exception as exc:  # 広範囲のcatchは意図的: SDK内部は未知
-        fail_mode: str = os.environ.get("INSAITS_FAIL_MODE", "open").lower()
-        if fail_mode == "closed":
-            sys.stdout.write(
-                f"InsAIts SDK error ({type(exc).__name__}); blocking execution to avoid unscanned input.\n"
-            )
-            sys.exit(2)
-        log.warning(
-            "SDK error (%s), skipping security scan: %s",
-            type(exc).__name__,
-            exc,
-        )
-        sys.exit(0)
-
+    result = _run_insaits_scan(text)
     anomalies: list[Any] = result.get("anomalies", [])
-
-    # 検出結果に関わらず監査イベントを書き込み
-    write_audit(
-        {
-            "tool": data.get("tool_name", "unknown"),
-            "context": context,
-            "anomaly_count": len(anomalies),
-            "anomaly_types": [get_anomaly_attr(a, "type") for a in anomalies],
-            "text_length": len(text),
-        }
-    )
-
-    if not anomalies:
-        log.debug("Clean -- no anomalies detected.")
-        sys.exit(0)
-
-    # 最大深刻度を判定
-    has_critical: bool = any(get_anomaly_attr(a, "severity").upper() in BLOCKING_SEVERITIES for a in anomalies)
-
-    feedback: str = format_feedback(anomalies)
-
-    if has_critical:
-        # stdoutフィードバック -> モデルに表示
-        sys.stdout.write(feedback + "\n")
-        sys.exit(2)  # PreToolUse終了コード2 = ツール実行をブロック
-    else:
-        # 非クリティカル: stderr経由で警告 (非ブロッキング)
-        log.warning("\n%s", feedback)
-        sys.exit(0)
+    _handle_anomalies(anomalies, data, text, context)
 
 
 if __name__ == "__main__":

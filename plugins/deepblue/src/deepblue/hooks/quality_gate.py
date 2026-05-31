@@ -325,6 +325,61 @@ def _build_step_cwd(
     return cwd
 
 
+def _resolve_timeout(step: dict[str, Any]) -> float:
+    """step 設定から timeout（秒）を float で返す。不正値は 30.0 にフォールバックする。
+
+    Args:
+        step: step 定義辞書。
+
+    Returns:
+        正の float 値のタイムアウト秒数。
+    """
+    timeout_raw = step.get("timeout_seconds", step.get("timeout", 30))
+    try:
+        timeout = float(timeout_raw)
+        return timeout if timeout > 0 else 30.0
+    except (TypeError, ValueError):
+        return 30.0
+
+
+def _execute_step_command(command: list[str], raw_input: str, cwd: Path, env: dict[str, str], timeout: float, name: str) -> bool:
+    """コマンドをサブプロセスで実行し、stderr を転送して成否を返す。
+
+    Args:
+        command: 実行コマンドリスト。
+        raw_input: 子プロセスへ渡す stdin。
+        cwd: 作業ディレクトリ。
+        env: 環境変数。
+        timeout: タイムアウト秒数。
+        name: ログ用のステップ名。
+
+    Returns:
+        実行できた場合は True、OSError / タイムアウト時は False。
+    """
+    try:
+        result = subprocess.run(
+            command,
+            input=raw_input,
+            text=True,
+            capture_output=True,
+            cwd=str(cwd),
+            env=env,
+            timeout=timeout,
+            check=False,
+        )
+    except OSError as err:
+        log(f"[QualityGate] step skipped ({name}): {err}")
+        return False
+    except subprocess.TimeoutExpired:
+        log(f"[QualityGate] step timed out ({name}): {timeout:g}s")
+        return False
+    if result.stderr:
+        write_stderr(result.stderr)
+    if result.returncode != 0:
+        log(f"[QualityGate] step failed ({name}): exit code {result.returncode}")
+    return True
+
+
 def run_step(
     step: dict[str, Any],
     raw_input: str,
@@ -362,39 +417,10 @@ def run_step(
     cwd = _build_step_cwd(step, default_cwd, env, allowed_names)
     if cwd is None:
         return False
-    timeout_raw = step.get("timeout_seconds", step.get("timeout", 30))
-    try:
-        timeout = float(timeout_raw)
-        if timeout <= 0:
-            timeout = 30.0
-    except (TypeError, ValueError):
-        timeout = 30.0
 
+    timeout = _resolve_timeout(step)
     name = str(step.get("name") or step.get("module") or command[0])
-
-    try:
-        result = subprocess.run(
-            command,
-            input=raw_input,
-            text=True,
-            capture_output=True,
-            cwd=str(cwd),
-            env=env,
-            timeout=timeout,
-            check=False,
-        )
-    except OSError as err:
-        log(f"[QualityGate] step skipped ({name}): {err}")
-        return False
-    except subprocess.TimeoutExpired:
-        log(f"[QualityGate] step timed out ({name}): {timeout:g}s")
-        return False
-
-    if result.stderr:
-        write_stderr(result.stderr)
-    if result.returncode != 0:
-        log(f"[QualityGate] step failed ({name}): exit code {result.returncode}")
-    return True
+    return _execute_step_command(command, raw_input, cwd, env, timeout, name)
 
 
 def exec_command(command: str, args: list[str], cwd: str | Path | None = None) -> dict[str, Any]:
@@ -433,6 +459,31 @@ def exec_command(command: str, args: list[str], cwd: str | Path | None = None) -
         }
 
 
+def _run_rule_steps(rule: dict[str, Any], raw_input: str, base_env: dict[str, str], default_cwd: Path) -> bool:
+    """1つの rule に属する steps をすべて実行し、1つでも起動できたなら True を返す。
+
+    Args:
+        rule: ルール定義辞書。
+        raw_input: 子プロセスへ渡す stdin。
+        base_env: 子プロセスの基本環境。
+        default_cwd: 省略時の作業ディレクトリ。
+
+    Returns:
+        1 step 以上を起動できた場合 True。
+    """
+    steps = rule.get("steps")
+    if not isinstance(steps, list):
+        log("[QualityGate] rule is missing steps")
+        return False
+    rule_ran = False
+    for step in steps:
+        if isinstance(step, dict):
+            rule_ran = run_step(step, raw_input, base_env=base_env, default_cwd=default_cwd) or rule_ran
+        else:
+            log("[QualityGate] invalid step entry ignored")
+    return rule_ran
+
+
 def _run_configured_rules(
     action: str,
     raw_input: str,
@@ -456,11 +507,9 @@ def _run_configured_rules(
     actions = config.get("actions")
     if not isinstance(actions, dict):
         return False
-
     action_config = actions.get(action)
     if not isinstance(action_config, dict):
         return False
-
     rules = action_config.get("rules")
     if not isinstance(rules, list):
         return False
@@ -468,25 +517,9 @@ def _run_configured_rules(
     base_env = _base_env()
     default_cwd = _project_root()
     handled = False
-
     for rule in rules:
-        if not isinstance(rule, dict) or not _rule_matches(rule, input_data):
-            continue
-
-        steps = rule.get("steps")
-        if not isinstance(steps, list):
-            log("[QualityGate] rule is missing steps")
-            continue
-
-        rule_ran = False
-        for step in steps:
-            if isinstance(step, dict):
-                rule_ran = run_step(step, raw_input, base_env=base_env, default_cwd=default_cwd) or rule_ran
-            else:
-                log("[QualityGate] invalid step entry ignored")
-
-        handled = handled or rule_ran
-
+        if isinstance(rule, dict) and _rule_matches(rule, input_data):
+            handled = _run_rule_steps(rule, raw_input, base_env, default_cwd) or handled
     return handled
 
 
