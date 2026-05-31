@@ -63,24 +63,11 @@ def _check_temporal_order(
     return None
 
 
-def grade(
+def _resolve_step_results(
     spec: ComplianceSpec,
-    trace: list[ObservationEvent],
-    classifier_model: str = "haiku",
-) -> ComplianceResult:
-    """LLM分類を用いて、トレースをコンプライアンス仕様に対して採点する。"""
-    sorted_trace = sorted(trace, key=lambda e: e.timestamp)
-
-    # 手順1: LLMで全イベントを一括分類する
-    classification = classify_events(spec, sorted_trace, model=classifier_model)
-
-    # インデックスをイベントに変換
-    classified: dict[str, list[ObservationEvent]] = {
-        step_id: [sorted_trace[i] for i in indices if 0 <= i < len(sorted_trace)]
-        for step_id, indices in classification.items()
-    }
-
-    # 手順2: 時系列順の制約を検証（決定論的）
+    classified: dict[str, list[ObservationEvent]],
+) -> list[StepResult]:
+    """各ステップの時系列制約を検証し、StepResult のリストを返す。"""
     resolved: dict[str, list[ObservationEvent]] = {}
     step_results: list[StepResult] = []
 
@@ -111,6 +98,29 @@ def grade(
                 failure_reason=failure_reason if not detected else None,
             )
         )
+
+    return step_results
+
+
+def grade(
+    spec: ComplianceSpec,
+    trace: list[ObservationEvent],
+    classifier_model: str = "haiku",
+) -> ComplianceResult:
+    """LLM分類を用いて、トレースをコンプライアンス仕様に対して採点する。"""
+    sorted_trace = sorted(trace, key=lambda e: e.timestamp)
+
+    # 手順1: LLMで全イベントを一括分類する
+    classification = classify_events(spec, sorted_trace, model=classifier_model)
+
+    # インデックスをイベントに変換
+    classified: dict[str, list[ObservationEvent]] = {
+        step_id: [sorted_trace[i] for i in indices if 0 <= i < len(sorted_trace)]
+        for step_id, indices in classification.items()
+    }
+
+    # 手順2: 時系列順の制約を検証（決定論的）
+    step_results = _resolve_step_results(spec, classified)
 
     required_ids = {s.id for s in spec.steps if s.required}
     required_steps = [s for s in step_results if s.step_id in required_ids]

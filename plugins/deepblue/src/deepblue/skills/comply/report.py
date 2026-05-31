@@ -27,13 +27,38 @@ def generate_report(
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     overall = _overall_compliance(results)
     threshold = spec.threshold_promote_to_hook
+    promote_steps = _steps_to_promote(spec, results, threshold)
 
     lines: list[str] = []
     lines.append(f"# comply Report: {skill_path.name}")
     lines.append(f"Generated: {now}")
     lines.append("")
 
-    # サマリー
+    _append_summary_section(lines, skill_path, spec, results, overall, threshold, promote_steps)
+    _append_behavioral_sequence_section(lines, spec)
+    _append_scenario_results_section(lines, spec, results)
+
+    if scenarios:
+        _append_scenario_prompts_section(lines, scenarios)
+
+    if promote_steps:
+        _append_hook_promotion_section(lines, spec, results, promote_steps)
+
+    _append_detail_section(lines, spec, results)
+
+    return "\n".join(lines)
+
+
+def _append_summary_section(
+    lines: list[str],
+    skill_path: Path,
+    spec: ComplianceSpec,
+    results: list[tuple[str, ComplianceResult, list[ObservationEvent]]],
+    overall: float,
+    threshold: float,
+    promote_steps: list[str],
+) -> None:
+    """サマリーセクションを lines に追記する。"""
     lines.append("## Summary")
     lines.append("")
     lines.append("| Metric | Value |")
@@ -44,7 +69,6 @@ def generate_report(
     lines.append(f"| Overall Compliance | {overall:.0%} |")
     lines.append(f"| Threshold | {threshold:.0%} |")
 
-    promote_steps = _steps_to_promote(spec, results, threshold)
     if promote_steps:
         step_names = ", ".join(promote_steps)
         lines.append(f"| Recommendation | **Promote {step_names} to hooks** |")
@@ -52,7 +76,9 @@ def generate_report(
         lines.append("| Recommendation | All steps above threshold — no hook promotion needed |")
     lines.append("")
 
-    # 期待される行動シーケンス
+
+def _append_behavioral_sequence_section(lines: list[str], spec: ComplianceSpec) -> None:
+    """期待される行動シーケンスセクションを lines に追記する。"""
     lines.append("## Expected Behavioral Sequence")
     lines.append("")
     lines.append("| # | Step | Required | Description |")
@@ -62,7 +88,13 @@ def generate_report(
         lines.append(f"| {i} | {step.id} | {req} | {step.detector.description} |")
     lines.append("")
 
-    # シナリオ結果
+
+def _append_scenario_results_section(
+    lines: list[str],
+    spec: ComplianceSpec,
+    results: list[tuple[str, ComplianceResult, list[ObservationEvent]]],
+) -> None:
+    """シナリオ結果セクションを lines に追記する。"""
     lines.append("## Scenario Results")
     lines.append("")
     lines.append("| Scenario | Compliance | Failed Steps |")
@@ -77,28 +109,41 @@ def generate_report(
         lines.append(f"| {level_name} | {result.compliance_rate:.0%} | {failed_str} |")
     lines.append("")
 
-    # シナリオプロンプト
-    if scenarios:
-        lines.append("## Scenario Prompts")
-        lines.append("")
-        for s in scenarios:
-            lines.append(f"### {s.level_name} (Level {s.level})")
-            lines.append("")
-            for prompt_line in s.prompt.splitlines():
-                lines.append(f"> {prompt_line}")
-            lines.append("")
 
-    # フック昇格の推奨事項（任意／上級）
-    if promote_steps:
-        lines.append("## Advanced: Hook Promotion Recommendations (optional)")
+def _append_scenario_prompts_section(lines: list[str], scenarios: list[Scenario]) -> None:
+    """シナリオプロンプトセクションを lines に追記する。"""
+    lines.append("## Scenario Prompts")
+    lines.append("")
+    for s in scenarios:
+        lines.append(f"### {s.level_name} (Level {s.level})")
         lines.append("")
-        for step_id in promote_steps:
-            rate = _step_compliance_rate(step_id, results)
-            step = next(s for s in spec.steps if s.id == step_id)
-            lines.append(f"- **{step_id}** (compliance {rate:.0%}): {step.description}")
+        for prompt_line in s.prompt.splitlines():
+            lines.append(f"> {prompt_line}")
         lines.append("")
 
-    # シナリオごとの詳細（タイムライン付き）
+
+def _append_hook_promotion_section(
+    lines: list[str],
+    spec: ComplianceSpec,
+    results: list[tuple[str, ComplianceResult, list[ObservationEvent]]],
+    promote_steps: list[str],
+) -> None:
+    """フック昇格の推奨事項セクションを lines に追記する。"""
+    lines.append("## Advanced: Hook Promotion Recommendations (optional)")
+    lines.append("")
+    for step_id in promote_steps:
+        rate = _step_compliance_rate(step_id, results)
+        step = next(s for s in spec.steps if s.id == step_id)
+        lines.append(f"- **{step_id}** (compliance {rate:.0%}): {step.description}")
+    lines.append("")
+
+
+def _append_detail_section(
+    lines: list[str],
+    spec: ComplianceSpec,
+    results: list[tuple[str, ComplianceResult, list[ObservationEvent]]],
+) -> None:
+    """シナリオごとの詳細セクション（タイムライン付き）を lines に追記する。"""
     lines.append("## Detail")
     lines.append("")
     for level_name, result, observations in results:
@@ -113,26 +158,31 @@ def generate_report(
             lines.append(f"| {sr.step_id} | {req} | {det} | {reason} |")
         lines.append("")
 
-        # タイムライン: エージェントが実際に行った内容を表示
         if observations:
-            # 逆引きインデックスを作成: event_index → step_id
-            index_to_step: dict[int, str] = {}
-            for step_id, indices in result.classification.items():
-                for idx in indices:
-                    index_to_step[idx] = step_id
+            _append_timeline_table(lines, result, observations)
 
-            lines.append(f"**Tool Call Timeline ({len(observations)} calls)**")
-            lines.append("")
-            lines.append("| # | Tool | Input | Output | Classified As |")
-            lines.append("|---|------|-------|--------|------|")
-            for i, obs in enumerate(observations):
-                step_label = index_to_step.get(i, "—")
-                input_summary = obs.input[:100].replace("|", "\\|").replace("\n", " ")
-                output_summary = obs.output[:50].replace("|", "\\|").replace("\n", " ")
-                lines.append(f"| {i} | {obs.tool} | {input_summary} | {output_summary} | {step_label} |")
-            lines.append("")
 
-    return "\n".join(lines)
+def _append_timeline_table(
+    lines: list[str],
+    result: ComplianceResult,
+    observations: list[ObservationEvent],
+) -> None:
+    """ツール呼び出しタイムラインテーブルを lines に追記する。"""
+    index_to_step: dict[int, str] = {}
+    for step_id, indices in result.classification.items():
+        for idx in indices:
+            index_to_step[idx] = step_id
+
+    lines.append(f"**Tool Call Timeline ({len(observations)} calls)**")
+    lines.append("")
+    lines.append("| # | Tool | Input | Output | Classified As |")
+    lines.append("|---|------|-------|--------|------|")
+    for i, obs in enumerate(observations):
+        step_label = index_to_step.get(i, "—")
+        input_summary = obs.input[:100].replace("|", "\\|").replace("\n", " ")
+        output_summary = obs.output[:50].replace("|", "\\|").replace("\n", " ")
+        lines.append(f"| {i} | {obs.tool} | {input_summary} | {output_summary} | {step_label} |")
+    lines.append("")
 
 
 def _overall_compliance(results: list[tuple[str, ComplianceResult, list[ObservationEvent]]]) -> float:

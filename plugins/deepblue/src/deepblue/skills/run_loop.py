@@ -40,6 +40,161 @@ def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tupl
     return train_set, test_set
 
 
+def _print_eval_stats(label: str, results: list[dict], elapsed: float) -> None:
+    """eval 結果から精度・再現率などの統計を stderr に表示する。"""
+    pos = [r for r in results if r["should_trigger"]]
+    neg = [r for r in results if not r["should_trigger"]]
+    tp = sum(r["triggers"] for r in pos)
+    pos_runs = sum(r["runs"] for r in pos)
+    fn = pos_runs - tp
+    fp = sum(r["triggers"] for r in neg)
+    neg_runs = sum(r["runs"] for r in neg)
+    tn = neg_runs - fp
+    total = tp + tn + fp + fn
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 1.0
+    accuracy = (tp + tn) / total if total > 0 else 0.0
+    print(
+        f"{label}: {tp + tn}/{total} correct, precision={precision:.0%} recall={recall:.0%} accuracy={accuracy:.0%} ({elapsed:.1f}s)",
+        file=sys.stderr,
+    )
+    for r in results:
+        status = "合格" if r["pass"] else "不合格"
+        rate_str = f"{r['triggers']}/{r['runs']}"
+        print(
+            f"  [{status}] rate={rate_str} expected={r['should_trigger']}: {r['query'][:60]}",
+            file=sys.stderr,
+        )
+
+
+def _split_eval_results(
+    all_results: dict,
+    train_set: list[dict],
+    test_set: list[dict],
+) -> tuple[dict, dict | None, dict | None]:
+    """全評価結果を train / test に分割し、それぞれのサマリーとともに返す。"""
+    train_queries_set = {q["query"] for q in train_set}
+    train_result_list = [r for r in all_results["results"] if r["query"] in train_queries_set]
+    test_result_list = [r for r in all_results["results"] if r["query"] not in train_queries_set]
+
+    train_passed = sum(1 for r in train_result_list if r["pass"])
+    train_total = len(train_result_list)
+    train_summary = {"passed": train_passed, "failed": train_total - train_passed, "total": train_total}
+    train_results = {"results": train_result_list, "summary": train_summary}
+
+    if test_set:
+        test_passed = sum(1 for r in test_result_list if r["pass"])
+        test_total = len(test_result_list)
+        test_summary: dict | None = {"passed": test_passed, "failed": test_total - test_passed, "total": test_total}
+        test_results: dict | None = {"results": test_result_list, "summary": test_summary}
+    else:
+        test_results = None
+        test_summary = None
+
+    return train_results, test_results, test_summary
+
+
+def _run_single_iteration(
+    iteration: int,
+    max_iterations: int,
+    current_description: str,
+    name: str,
+    content: str,
+    train_set: list[dict],
+    test_set: list[dict],
+    num_workers: int,
+    timeout: int,
+    project_root: Path,
+    runs_per_query: int,
+    trigger_threshold: float,
+    model: str,
+    verbose: bool,
+    history: list[dict],
+    log_dir: Path | None,
+) -> tuple[str, str | None]:
+    """1反復分の eval・採点・改善を実行し、(新しい説明, 終了理由|None) を返す。
+
+    終了理由が None でない場合はループを抜けるべきことを示す。
+    """
+    if verbose:
+        print(f"\n{'=' * 60}", file=sys.stderr)
+        print(f"反復 {iteration}/{max_iterations}", file=sys.stderr)
+        print(f"説明: {current_description}", file=sys.stderr)
+        print(f"{'=' * 60}", file=sys.stderr)
+
+    all_queries = train_set + test_set
+    t0 = time.time()
+    all_results = run_eval(
+        eval_set=all_queries,
+        skill_name=name,
+        description=current_description,
+        num_workers=num_workers,
+        timeout=timeout,
+        project_root=project_root,
+        runs_per_query=runs_per_query,
+        trigger_threshold=trigger_threshold,
+        model=model,
+    )
+    eval_elapsed = time.time() - t0
+
+    train_results, test_results, test_summary = _split_eval_results(all_results, train_set, test_set)
+    train_summary = train_results["summary"]
+
+    history.append(
+        {
+            "iteration": iteration,
+            "description": current_description,
+            "train_passed": train_summary["passed"],
+            "train_failed": train_summary["failed"],
+            "train_total": train_summary["total"],
+            "train_results": train_results["results"],
+            "test_passed": test_summary["passed"] if test_summary else None,
+            "test_failed": test_summary["failed"] if test_summary else None,
+            "test_total": test_summary["total"] if test_summary else None,
+            "test_results": test_results["results"] if test_results else None,
+        }
+    )
+
+    if verbose:
+        _print_eval_stats("学習用", train_results["results"], eval_elapsed)
+        if test_summary:
+            _print_eval_stats("検証用", test_results["results"], 0)  # type: ignore[index]
+
+    if train_summary["failed"] == 0:
+        exit_reason = f"all_passed (iteration {iteration})"
+        if verbose:
+            print(f"\nAll train queries passed on iteration {iteration}!", file=sys.stderr)
+        return current_description, exit_reason
+
+    if iteration == max_iterations:
+        exit_reason = f"max_iterations ({max_iterations})"
+        if verbose:
+            print(f"\nMax iterations reached ({max_iterations}).", file=sys.stderr)
+        return current_description, exit_reason
+
+    if verbose:
+        print("\n説明を改善しています...", file=sys.stderr)
+
+    t0 = time.time()
+    blinded_history = [{k: v for k, v in h.items() if not k.startswith("test_")} for h in history]
+    new_description = improve_description(
+        skill_name=name,
+        skill_content=content,
+        current_description=current_description,
+        eval_results=train_results,
+        history=blinded_history,
+        model=model,
+        log_dir=log_dir,
+        iteration=iteration,
+    )
+    improve_elapsed = time.time() - t0
+
+    if verbose:
+        print(f"提案結果（{improve_elapsed:.1f}s）: {new_description}", file=sys.stderr)
+
+    return new_description, None
+
+
 def run_loop(
     eval_set: list[dict],
     skill_path: Path,
@@ -59,7 +214,6 @@ def run_loop(
     name, original_description, content = parse_skill_md(skill_path)
     current_description = description_override or original_description
 
-    # holdout > 0 なら train / test に分割する
     if holdout > 0:
         train_set, test_set = split_eval_set(eval_set, holdout)
         if verbose:
@@ -68,135 +222,32 @@ def run_loop(
         train_set = eval_set
         test_set = []
 
-    history = []
+    history: list[dict] = []
     exit_reason = "unknown"
 
     for iteration in range(1, max_iterations + 1):
-        if verbose:
-            print(f"\n{'=' * 60}", file=sys.stderr)
-            print(f"反復 {iteration}/{max_iterations}", file=sys.stderr)
-            print(f"説明: {current_description}", file=sys.stderr)
-            print(f"{'=' * 60}", file=sys.stderr)
-
-        # 並列性を確保するため train + test を 1 バッチで評価する
-        all_queries = train_set + test_set
-        t0 = time.time()
-        all_results = run_eval(
-            eval_set=all_queries,
-            skill_name=name,
-            description=current_description,
+        current_description, reason = _run_single_iteration(
+            iteration=iteration,
+            max_iterations=max_iterations,
+            current_description=current_description,
+            name=name,
+            content=content,
+            train_set=train_set,
+            test_set=test_set,
             num_workers=num_workers,
             timeout=timeout,
             project_root=project_root,
             runs_per_query=runs_per_query,
             trigger_threshold=trigger_threshold,
             model=model,
-        )
-        eval_elapsed = time.time() - t0
-
-        # クエリを突き合わせて結果を train / test に戻す
-        train_queries_set = {q["query"] for q in train_set}
-        train_result_list = [r for r in all_results["results"] if r["query"] in train_queries_set]
-        test_result_list = [r for r in all_results["results"] if r["query"] not in train_queries_set]
-
-        train_passed = sum(1 for r in train_result_list if r["pass"])
-        train_total = len(train_result_list)
-        train_summary = {"passed": train_passed, "failed": train_total - train_passed, "total": train_total}
-        train_results = {"results": train_result_list, "summary": train_summary}
-
-        if test_set:
-            test_passed = sum(1 for r in test_result_list if r["pass"])
-            test_total = len(test_result_list)
-            test_summary = {"passed": test_passed, "failed": test_total - test_passed, "total": test_total}
-            test_results = {"results": test_result_list, "summary": test_summary}
-        else:
-            test_results = None
-            test_summary = None
-
-        history.append(
-            {
-                "iteration": iteration,
-                "description": current_description,
-                "train_passed": train_summary["passed"],
-                "train_failed": train_summary["failed"],
-                "train_total": train_summary["total"],
-                "train_results": train_results["results"],
-                "test_passed": test_summary["passed"] if test_summary else None,
-                "test_failed": test_summary["failed"] if test_summary else None,
-                "test_total": test_summary["total"] if test_summary else None,
-                "test_results": test_results["results"] if test_results else None,
-            }
-        )
-
-        if verbose:
-
-            def print_eval_stats(label, results, elapsed):
-                """eval 結果から精度・再現率などの統計を stderr に表示する。"""
-                pos = [r for r in results if r["should_trigger"]]
-                neg = [r for r in results if not r["should_trigger"]]
-                tp = sum(r["triggers"] for r in pos)
-                pos_runs = sum(r["runs"] for r in pos)
-                fn = pos_runs - tp
-                fp = sum(r["triggers"] for r in neg)
-                neg_runs = sum(r["runs"] for r in neg)
-                tn = neg_runs - fp
-                total = tp + tn + fp + fn
-                precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
-                recall = tp / (tp + fn) if (tp + fn) > 0 else 1.0
-                accuracy = (tp + tn) / total if total > 0 else 0.0
-                print(
-                    f"{label}: {tp + tn}/{total} correct, precision={precision:.0%} recall={recall:.0%} accuracy={accuracy:.0%} ({elapsed:.1f}s)",
-                    file=sys.stderr,
-                )
-                for r in results:
-                    status = "合格" if r["pass"] else "不合格"
-                    rate_str = f"{r['triggers']}/{r['runs']}"
-                    print(
-                        f"  [{status}] rate={rate_str} expected={r['should_trigger']}: {r['query'][:60]}",
-                        file=sys.stderr,
-                    )
-
-            print_eval_stats("学習用", train_results["results"], eval_elapsed)
-            if test_summary:
-                print_eval_stats("検証用", test_results["results"], 0)
-
-        if train_summary["failed"] == 0:
-            exit_reason = f"all_passed (iteration {iteration})"
-            if verbose:
-                print(f"\nAll train queries passed on iteration {iteration}!", file=sys.stderr)
-            break
-
-        if iteration == max_iterations:
-            exit_reason = f"max_iterations ({max_iterations})"
-            if verbose:
-                print(f"\nMax iterations reached ({max_iterations}).", file=sys.stderr)
-            break
-
-        # train の結果をもとに説明を改善する
-        if verbose:
-            print("\n説明を改善しています...", file=sys.stderr)
-
-        t0 = time.time()
-        # Strip test scores from history so improvement model can't see them
-        blinded_history = [{k: v for k, v in h.items() if not k.startswith("test_")} for h in history]
-        new_description = improve_description(
-            skill_name=name,
-            skill_content=content,
-            current_description=current_description,
-            eval_results=train_results,
-            history=blinded_history,
-            model=model,
+            verbose=verbose,
+            history=history,
             log_dir=log_dir,
-            iteration=iteration,
         )
-        improve_elapsed = time.time() - t0
+        if reason is not None:
+            exit_reason = reason
+            break
 
-        if verbose:
-            print(f"提案結果（{improve_elapsed:.1f}s）: {new_description}", file=sys.stderr)
-
-        current_description = new_description
-
-    # test スコア（test がなければ train）で最良反復を選ぶ
     if test_set:
         best = max(history, key=lambda h: h["test_passed"] or 0)
         best_score = f"{best['test_passed']}/{best['test_total']}"
@@ -224,8 +275,8 @@ def run_loop(
     }
 
 
-def main():
-    """eval + 改善ループ CLI のエントリポイント。引数を解析してループを実行する。"""
+def _build_loop_parser() -> argparse.ArgumentParser:
+    """run_loop CLI 用の ArgumentParser を構築して返す。"""
     parser = argparse.ArgumentParser(description="eval + 改善ループを実行する")
     parser.add_argument("--eval-set", required=True, help="eval セット JSON へのパス")
     parser.add_argument("--skill-path", required=True, help="スキルディレクトリへのパス")
@@ -243,6 +294,12 @@ def main():
         default=None,
         help="結果（results.json / log.txt）をこの日時付きサブディレクトリに保存する",
     )
+    return parser
+
+
+def main():
+    """eval + 改善ループ CLI のエントリポイント。引数を解析してループを実行する。"""
+    parser = _build_loop_parser()
     args = parser.parse_args()
 
     eval_set = json.loads(Path(args.eval_set).read_text())
@@ -252,7 +309,6 @@ def main():
         print(f"Error: No SKILL.md found at {skill_path}", file=sys.stderr)
         sys.exit(1)
 
-    # 出力先ディレクトリを決める（run_loop 前に作成してログを書けるようにする）
     if args.results_dir:
         timestamp = time.strftime("%Y-%m-%d_%H%M%S")
         results_dir = Path(args.results_dir) / timestamp
@@ -277,7 +333,6 @@ def main():
         log_dir=log_dir,
     )
 
-    # JSON 出力を保存する
     json_output = json.dumps(output, indent=2)
     print(json_output)
     if results_dir:

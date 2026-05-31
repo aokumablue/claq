@@ -37,6 +37,32 @@ def _resolve_dirs(project_dir_arg: str | None) -> tuple[Path, Path, Path]:
     return global_dir, project_dir, obs_file
 
 
+def _scan_dir(directory: Path, obs: dict) -> list[dict]:
+    """ディレクトリ配下のスキルを走査し、メタデータと使用統計の dict 一覧を返す。"""
+    skills = []
+    home = Path.home()
+    for f in sio.walk_skills(directory):
+        name, desc = core.parse_frontmatter(f)
+        mtime_sec = int(f.stat().st_mtime)
+        mtime_str = datetime.fromtimestamp(mtime_sec, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            dp = "~/" + str(f.relative_to(home))
+        except ValueError:
+            dp = str(f)
+        u7, u30 = obs.get(str(f), (0, 0))
+        skills.append(
+            {
+                "path": dp,
+                "name": name,
+                "description": desc,
+                "use_7d": u7,
+                "use_30d": u30,
+                "mtime": mtime_str,
+            }
+        )
+    return skills
+
+
 def _cmd_scan(args: argparse.Namespace) -> int:
     """スキルインベントリを JSON で標準出力する。"""
     global_dir, project_dir, obs_file = _resolve_dirs(args.project_dir)
@@ -44,38 +70,10 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     now = datetime.now(UTC)
     cutoff_7d = now - timedelta(days=7)
     cutoff_30d = now - timedelta(days=30)
-
     obs = core.aggregate_observations(obs_file, cutoff_7d, cutoff_30d)
 
-    def _scan_dir(directory: Path) -> list[dict]:
-        """ディレクトリ配下のスキルを走査し、メタデータと使用統計の dict 一覧を返す。"""
-        skills = []
-        home = Path.home()
-        for f in sio.walk_skills(directory):
-            name, desc = core.parse_frontmatter(f)
-            mtime_sec = int(f.stat().st_mtime)
-            mtime_str = datetime.fromtimestamp(mtime_sec, tz=UTC).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            try:
-                dp = "~/" + str(f.relative_to(home))
-            except ValueError:
-                dp = str(f)
-            u7, u30 = obs.get(str(f), (0, 0))
-            skills.append(
-                {
-                    "path": dp,
-                    "name": name,
-                    "description": desc,
-                    "use_7d": u7,
-                    "use_30d": u30,
-                    "mtime": mtime_str,
-                }
-            )
-        return skills
-
-    global_skills = _scan_dir(global_dir) if global_dir.is_dir() else []
-    project_skills = _scan_dir(project_dir) if project_dir.is_dir() else []
+    global_skills = _scan_dir(global_dir, obs) if global_dir.is_dir() else []
+    project_skills = _scan_dir(project_dir, obs) if project_dir.is_dir() else []
 
     result = {
         "scan_summary": {

@@ -32,22 +32,18 @@ def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
     return result.stdout
 
 
-def improve_description(
+def _build_improve_prompt(
     skill_name: str,
     skill_content: str,
     current_description: str,
     eval_results: dict,
     history: list[dict],
-    model: str,
-    test_results: dict | None = None,
-    log_dir: Path | None = None,
-    iteration: int | None = None,
+    test_results: dict | None,
 ) -> str:
-    """eval 結果に基づいて Claude に説明文の改善を依頼する。"""
+    """説明文改善用プロンプトを組み立てて返す。"""
     failed_triggers = [r for r in eval_results["results"] if r["should_trigger"] and not r["pass"]]
     false_triggers = [r for r in eval_results["results"] if not r["should_trigger"] and not r["pass"]]
 
-    # スコアのサマリーを作る
     train_score = f"{eval_results['summary']['passed']}/{eval_results['summary']['total']}"
     if test_results:
         test_score = f"{test_results['summary']['passed']}/{test_results['summary']['total']}"
@@ -80,23 +76,7 @@ def improve_description(
         prompt += "\n"
 
     if history:
-        prompt += "過去の試行（これらは繰り返さず、構造を変えてください）:\n\n"
-        for h in history:
-            train_s = f"{h.get('train_passed', h.get('passed', 0))}/{h.get('train_total', h.get('total', 0))}"
-            test_s = (
-                f"{h.get('test_passed', '?')}/{h.get('test_total', '?')}" if h.get("test_passed") is not None else None
-            )
-            score_str = f"train={train_s}" + (f", test={test_s}" if test_s else "")
-            prompt += f"<attempt {score_str}>\n"
-            prompt += f'説明: "{h["description"]}"\n'
-            if "results" in h:
-                prompt += "学習結果:\n"
-                for r in h["results"]:
-                    status = "合格" if r["pass"] else "不合格"
-                    prompt += f'  [{status}] "{r["query"][:80]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
-            if h.get("note"):
-                prompt += f"備考: {h['note']}\n"
-            prompt += "</attempt>\n\n"
+        prompt += _format_history_section(history)
 
     prompt += f"""</scores_summary>
 
@@ -121,7 +101,77 @@ def improve_description(
 いくつか違うスタイルを試す機会があるので、創造的に書き換えて構いません。最後に最もスコアが高かったものを採用します。
 
 新しい説明文以外は出力しないでください。<new_description> タグの中だけに入れて返してください。"""
+    return prompt
 
+
+def _format_history_section(history: list[dict]) -> str:
+    """過去の試行履歴をプロンプト用テキストとしてフォーマットして返す。"""
+    text = "過去の試行（これらは繰り返さず、構造を変えてください）:\n\n"
+    for h in history:
+        train_s = f"{h.get('train_passed', h.get('passed', 0))}/{h.get('train_total', h.get('total', 0))}"
+        test_s = (
+            f"{h.get('test_passed', '?')}/{h.get('test_total', '?')}" if h.get("test_passed") is not None else None
+        )
+        score_str = f"train={train_s}" + (f", test={test_s}" if test_s else "")
+        text += f"<attempt {score_str}>\n"
+        text += f'説明: "{h["description"]}"\n'
+        if "results" in h:
+            text += "学習結果:\n"
+            for r in h["results"]:
+                status = "合格" if r["pass"] else "不合格"
+                text += f'  [{status}] "{r["query"][:80]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
+        if h.get("note"):
+            text += f"備考: {h['note']}\n"
+        text += "</attempt>\n\n"
+    return text
+
+
+def _shorten_description_if_needed(
+    description: str,
+    prompt: str,
+    model: str,
+    transcript: dict,
+) -> str:
+    """1024 文字超の説明を再度 LLM に短縮依頼し、短縮版を返す。"""
+    if len(description) <= 1024:
+        return description
+
+    shorten_prompt = (
+        f"{prompt}\n\n"
+        "---\n\n"
+        f"A previous attempt produced this description, which at "
+        f"{len(description)} characters is over the 1024-character hard limit:\n\n"
+        f'"{description}"\n\n'
+        "Rewrite it to be under 1024 characters while keeping the most "
+        "important trigger words and intent coverage. Respond with only "
+        "the new description in <new_description> tags."
+    )
+    shorten_text = _call_claude(shorten_prompt, model)
+    match = re.search(r"<new_description>(.*?)</new_description>", shorten_text, re.DOTALL)
+    shortened = match.group(1).strip().strip('"') if match else shorten_text.strip().strip('"')
+
+    transcript["rewrite_prompt"] = shorten_prompt
+    transcript["rewrite_response"] = shorten_text
+    transcript["rewrite_description"] = shortened
+    transcript["rewrite_char_count"] = len(shortened)
+    return shortened
+
+
+def improve_description(
+    skill_name: str,
+    skill_content: str,
+    current_description: str,
+    eval_results: dict,
+    history: list[dict],
+    model: str,
+    test_results: dict | None = None,
+    log_dir: Path | None = None,
+    iteration: int | None = None,
+) -> str:
+    """eval 結果に基づいて Claude に説明文の改善を依頼する。"""
+    prompt = _build_improve_prompt(
+        skill_name, skill_content, current_description, eval_results, history, test_results
+    )
     text = _call_claude(prompt, model)
 
     match = re.search(r"<new_description>(.*?)</new_description>", text, re.DOTALL)
@@ -136,32 +186,7 @@ def improve_description(
         "over_limit": len(description) > 1024,
     }
 
-    # Safety net: the prompt already states the 1024-char hard limit, but if
-    # the model blew past it anyway, make one fresh single-turn call that
-    # quotes the too-long version and asks for a shorter rewrite. (The old
-    # SDK path did this as a true multi-turn; `claude -p` is one-shot, so we
-    # inline the prior output into the new prompt instead.)
-    if len(description) > 1024:
-        shorten_prompt = (
-            f"{prompt}\n\n"
-            "---\n\n"
-            f"A previous attempt produced this description, which at "
-            f"{len(description)} characters is over the 1024-character hard limit:\n\n"
-            f'"{description}"\n\n'
-            "Rewrite it to be under 1024 characters while keeping the most "
-            "important trigger words and intent coverage. Respond with only "
-            "the new description in <new_description> tags."
-        )
-        shorten_text = _call_claude(shorten_prompt, model)
-        match = re.search(r"<new_description>(.*?)</new_description>", shorten_text, re.DOTALL)
-        shortened = match.group(1).strip().strip('"') if match else shorten_text.strip().strip('"')
-
-        transcript["rewrite_prompt"] = shorten_prompt
-        transcript["rewrite_response"] = shorten_text
-        transcript["rewrite_description"] = shortened
-        transcript["rewrite_char_count"] = len(shortened)
-        description = shortened
-
+    description = _shorten_description_if_needed(description, prompt, model, transcript)
     transcript["final_description"] = description
 
     if log_dir:
@@ -170,6 +195,28 @@ def improve_description(
         log_file.write_text(json.dumps(transcript, indent=2))
 
     return description
+
+
+def _build_improve_output(
+    new_description: str,
+    current_description: str,
+    eval_results: dict,
+    history: list[dict],
+) -> dict:
+    """improve_description の JSON 出力用辞書を構築して返す。"""
+    return {
+        "description": new_description,
+        "history": history
+        + [
+            {
+                "description": current_description,
+                "passed": eval_results["summary"]["passed"],
+                "failed": eval_results["summary"]["failed"],
+                "total": eval_results["summary"]["total"],
+                "results": eval_results["results"],
+            }
+        ],
+    }
 
 
 def main():
@@ -211,20 +258,7 @@ def main():
     if args.verbose:
         print(f"改善後: {new_description}", file=sys.stderr)
 
-    # 新しい説明と更新済み履歴を JSON で出力する
-    output = {
-        "description": new_description,
-        "history": history
-        + [
-            {
-                "description": current_description,
-                "passed": eval_results["summary"]["passed"],
-                "failed": eval_results["summary"]["failed"],
-                "total": eval_results["summary"]["total"],
-                "results": eval_results["results"],
-            }
-        ],
-    }
+    output = _build_improve_output(new_description, current_description, eval_results, history)
     print(json.dumps(output, indent=2))
 
 

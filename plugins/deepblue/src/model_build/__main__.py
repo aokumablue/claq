@@ -30,14 +30,70 @@ def _load_build_config() -> dict:
     return config
 
 
-def _cmd_build(args: argparse.Namespace) -> None:
-    """ONNX 変換 → 量子化 → manifest 生成を一括実行する。"""
+def _sha256(p: Path) -> str:
+    """ファイルを分割読み込みして SHA256 ハッシュを 16 進文字列で返す。"""
     import hashlib
+
+    h = hashlib.sha256()
+    with p.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _copy_artifacts_and_write_manifest(
+    args: argparse.Namespace,
+    build_cfg: dict,
+    quant: str,
+    raw_onnx: Path,
+    quant_onnx: Path,
+    output_dir: Path,
+) -> None:
+    """量子化済み ONNX・補助ファイルを出力先にコピーし、manifest.json を書き出す。"""
     import shutil
-    import tempfile
     from datetime import UTC, datetime
 
     from model_build import __version__
+
+    onnx_export_dir = raw_onnx.parent
+    tokenizer_json = onnx_export_dir / "tokenizer.json"
+    config_json = onnx_export_dir / "config.json"
+    if not tokenizer_json.exists():
+        raise FileNotFoundError(f"tokenizer.json が見つかりません: {tokenizer_json}")
+    if not config_json.exists():
+        raise FileNotFoundError(f"config.json が見つかりません: {config_json}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dst_onnx = output_dir / "model.onnx"
+    dst_tok = output_dir / "tokenizer.json"
+    dst_cfg = output_dir / "config.json"
+    shutil.copy2(quant_onnx, dst_onnx)
+    shutil.copy2(tokenizer_json, dst_tok)
+    shutil.copy2(config_json, dst_cfg)
+
+    manifest = {
+        "model_name": args.model,
+        "hf_revision": args.revision,
+        "quantization": quant,
+        "embedding_dim": build_cfg["embedding_dim"],
+        "tokenizer_max_length": build_cfg["tokenizer_max_length"],
+        "merged_sha256": _sha256(dst_onnx),
+        "auxiliary_files": [
+            {"name": "tokenizer.json", "sha256": _sha256(dst_tok)},
+            {"name": "config.json", "sha256": _sha256(dst_cfg)},
+        ],
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "tool_version": f"model_build/{__version__}",
+    }
+    manifest_path = output_dir / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"[build] manifest: {manifest_path}", flush=True)
+
+
+def _cmd_build(args: argparse.Namespace) -> None:
+    """ONNX 変換 → 量子化 → manifest 生成を一括実行する。"""
+    import tempfile
+
     from model_build.export import export_to_onnx
     from model_build.quantize import quantize
 
@@ -49,10 +105,7 @@ def _cmd_build(args: argparse.Namespace) -> None:
         tmp_path = Path(tmp)
 
         # Step 1: ONNX エクスポート（常に FP32 で取得し、後段で量子化）
-        print(
-            f"[build] Step 1/2: ONNX export ({args.model}@{args.revision[:8]})",
-            flush=True,
-        )
+        print(f"[build] Step 1/2: ONNX export ({args.model}@{args.revision[:8]})", flush=True)
         raw_onnx = export_to_onnx(
             model_name=args.model,
             revision=args.revision,
@@ -64,52 +117,7 @@ def _cmd_build(args: argparse.Namespace) -> None:
         quant_onnx = tmp_path / f"model_{quant}.onnx"
         quantize(raw_onnx, quant_onnx, quant, num_heads=build_cfg["num_heads"], hidden_size=build_cfg["hidden_size"])
 
-        # tokenizer.json / config.json を取得（エクスポート出力から）
-        onnx_export_dir = raw_onnx.parent
-        tokenizer_json = onnx_export_dir / "tokenizer.json"
-        config_json = onnx_export_dir / "config.json"
-        if not tokenizer_json.exists():
-            raise FileNotFoundError(f"tokenizer.json が見つかりません: {tokenizer_json}")
-        if not config_json.exists():
-            raise FileNotFoundError(f"config.json が見つかりません: {config_json}")
-
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # model.onnx を出力先にコピー
-        dst_onnx = output_dir / "model.onnx"
-        shutil.copy2(quant_onnx, dst_onnx)
-
-        # tokenizer.json / config.json をコピーして SHA256 を計算
-        def _sha256(p: Path) -> str:
-            """ファイルを分割読み込みして SHA256 ハッシュを 16 進文字列で返す。"""
-            h = hashlib.sha256()
-            with p.open("rb") as f:
-                for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                    h.update(chunk)
-            return h.hexdigest()
-
-        dst_tok = output_dir / "tokenizer.json"
-        dst_cfg = output_dir / "config.json"
-        shutil.copy2(tokenizer_json, dst_tok)
-        shutil.copy2(config_json, dst_cfg)
-
-        manifest = {
-            "model_name": args.model,
-            "hf_revision": args.revision,
-            "quantization": quant,
-            "embedding_dim": build_cfg["embedding_dim"],
-            "tokenizer_max_length": build_cfg["tokenizer_max_length"],
-            "merged_sha256": _sha256(dst_onnx),
-            "auxiliary_files": [
-                {"name": "tokenizer.json", "sha256": _sha256(dst_tok)},
-                {"name": "config.json", "sha256": _sha256(dst_cfg)},
-            ],
-            "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "tool_version": f"model_build/{__version__}",
-        }
-        manifest_path = output_dir / "manifest.json"
-        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        print(f"[build] manifest: {manifest_path}", flush=True)
+        _copy_artifacts_and_write_manifest(args, build_cfg, quant, raw_onnx, quant_onnx, output_dir)
 
     print("[build] complete", flush=True)
 
@@ -146,15 +154,18 @@ def _cmd_clean(args: argparse.Namespace) -> None:
     print(f"[clean] Removed {removed} files: {output_dir}", flush=True)
 
 
-def main() -> None:
-    """CLI エントリポイント。"""
+def _build_main_parser() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
+    """CLI 用の ArgumentParser を構築し、サブコマンド引数を返す。
+
+    build_config.json を読み込んでデフォルト値を設定するため、
+    パーサー構築と parse_args を一括で行う。
+    """
     parser = argparse.ArgumentParser(
         prog="python3 -m model_build",
         description="deepblue メンテナ向け ONNX ビルドツール",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    # --- build ---
     _build_cfg = _load_build_config()
     p_build = sub.add_parser("build", help="ONNX 変換・量子化・分割を一括実行")
     p_build.add_argument("--model", default=_build_cfg["model_name"], help="HF Hub モデル ID")
@@ -167,14 +178,8 @@ def main() -> None:
     )
     p_build.add_argument("--out", type=Path, default=_DEFAULT_OUT, help="出力ディレクトリ")
 
-    # --- verify ---
     p_verify = sub.add_parser("verify", help="分割済みモデルの検証")
-    p_verify.add_argument(
-        "--model-dir",
-        type=Path,
-        default=_DEFAULT_OUT,
-        help="manifest.json が存在するディレクトリ",
-    )
+    p_verify.add_argument("--model-dir", type=Path, default=_DEFAULT_OUT, help="manifest.json が存在するディレクトリ")
     p_verify.add_argument(
         "--cosine-threshold",
         type=float,
@@ -182,7 +187,6 @@ def main() -> None:
         help="再現性チェックの最低 cosine 類似度 (default: 0.999)",
     )
 
-    # --- download ---
     p_download = sub.add_parser("download", help="外部配布アーカイブからモデルを取得")
     p_download.add_argument(
         "--config",
@@ -192,11 +196,15 @@ def main() -> None:
     )
     p_download.add_argument("--out", type=Path, default=_DEFAULT_OUT, help="出力ディレクトリ")
 
-    # --- clean ---
     p_clean = sub.add_parser("clean", help="生成済み part・manifest を削除")
     p_clean.add_argument("--out", type=Path, default=_DEFAULT_OUT, help="対象ディレクトリ")
 
-    args = parser.parse_args()
+    return parser, parser.parse_args()
+
+
+def main() -> None:
+    """CLI エントリポイント。"""
+    parser, args = _build_main_parser()
 
     try:
         if args.command == "build":

@@ -54,6 +54,89 @@ def calculate_stats(values: list[float]) -> dict:
     }
 
 
+def _resolve_eval_id(eval_dir: Path, eval_idx: int) -> int | str:
+    """eval ディレクトリからメタデータを読んで eval_id を返す。取得できない場合は eval_idx を返す。"""
+    metadata_path = eval_dir / "eval_metadata.json"
+    if metadata_path.exists():
+        try:
+            with open(metadata_path) as mf:
+                return json.load(mf).get("eval_id", eval_idx)
+        except (json.JSONDecodeError, OSError):
+            return eval_idx
+    try:
+        return int(eval_dir.name.split("-")[1])
+    except ValueError:
+        return eval_idx
+
+
+def _extract_run_result(run_dir: Path, eval_id: int | str, grading: dict) -> dict:
+    """grading.json と timing.json から run 結果辞書を構築して返す。"""
+    run_number = int(run_dir.name.split("-")[1])
+    result = {
+        "eval_id": eval_id,
+        "run_number": run_number,
+        "pass_rate": grading.get("summary", {}).get("pass_rate", 0.0),
+        "passed": grading.get("summary", {}).get("passed", 0),
+        "failed": grading.get("summary", {}).get("failed", 0),
+        "total": grading.get("summary", {}).get("total", 0),
+    }
+
+    timing = grading.get("timing", {})
+    result["time_seconds"] = timing.get("total_duration_seconds", 0.0)
+    timing_file = run_dir / "timing.json"
+    if result["time_seconds"] == 0.0 and timing_file.exists():
+        try:
+            with open(timing_file) as tf:
+                timing_data = json.load(tf)
+            result["time_seconds"] = timing_data.get("total_duration_seconds", 0.0)
+            result["tokens"] = timing_data.get("total_tokens", 0)
+        except json.JSONDecodeError:
+            pass
+
+    metrics = grading.get("execution_metrics", {})
+    result["tool_calls"] = metrics.get("total_tool_calls", 0)
+    if not result.get("tokens"):
+        result["tokens"] = metrics.get("output_chars", 0)
+    result["errors"] = metrics.get("errors_encountered", 0)
+
+    raw_expectations = grading.get("expectations", [])
+    for exp in raw_expectations:
+        if "text" not in exp or "passed" not in exp:
+            grading_file = run_dir / "grading.json"
+            print(
+                f"警告: {grading_file} の expectation に必須フィールドがありません（text, passed, evidence）: {exp}"
+            )
+    result["expectations"] = raw_expectations
+
+    notes_summary = grading.get("user_notes_summary", {})
+    notes: list = []
+    notes.extend(notes_summary.get("uncertainties", []))
+    notes.extend(notes_summary.get("needs_review", []))
+    notes.extend(notes_summary.get("workarounds", []))
+    result["notes"] = notes
+    return result
+
+
+def _load_config_results(config_dir: Path, eval_id: int | str, results: dict[str, list]) -> None:
+    """config ディレクトリ配下の run を走査して results に追記する。"""
+    config = config_dir.name
+    if config not in results:
+        results[config] = []
+
+    for run_dir in sorted(config_dir.glob("run-*")):
+        grading_file = run_dir / "grading.json"
+        if not grading_file.exists():
+            print(f"警告: {run_dir} に grading.json が見つかりません")
+            continue
+        try:
+            with open(grading_file) as f:
+                grading = json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"警告: {grading_file} の JSON が不正です: {e}")
+            continue
+        results[config].append(_extract_run_result(run_dir, eval_id, grading))
+
+
 def load_run_results(benchmark_dir: Path) -> dict:
     """
     benchmark ディレクトリから全 run 結果を読み込む。
@@ -64,98 +147,18 @@ def load_run_results(benchmark_dir: Path) -> dict:
     if not any(benchmark_dir.glob("eval-*")):
         print(f"eval ディレクトリが {benchmark_dir} に見つかりません")
         return {}
-    search_dir = benchmark_dir
 
     results: dict[str, list] = {}
 
-    for eval_idx, eval_dir in enumerate(sorted(search_dir.glob("eval-*"))):
-        metadata_path = eval_dir / "eval_metadata.json"
-        if metadata_path.exists():
-            try:
-                with open(metadata_path) as mf:
-                    eval_id = json.load(mf).get("eval_id", eval_idx)
-            except (json.JSONDecodeError, OSError):
-                eval_id = eval_idx
-        else:
-            try:
-                eval_id = int(eval_dir.name.split("-")[1])
-            except ValueError:
-                eval_id = eval_idx
+    for eval_idx, eval_dir in enumerate(sorted(benchmark_dir.glob("eval-*"))):
+        eval_id = _resolve_eval_id(eval_dir, eval_idx)
 
-        # config ディレクトリ名は固定せず動的に検出する
         for config_dir in sorted(eval_dir.iterdir()):
             if not config_dir.is_dir():
                 continue
-            # config 以外のディレクトリ（inputs, outputs など）はスキップする
             if not any(config_dir.glob("run-*")):
                 continue
-            config = config_dir.name
-            if config not in results:
-                results[config] = []
-
-            for run_dir in sorted(config_dir.glob("run-*")):
-                run_number = int(run_dir.name.split("-")[1])
-                grading_file = run_dir / "grading.json"
-
-                if not grading_file.exists():
-                    print(f"警告: {run_dir} に grading.json が見つかりません")
-                    continue
-
-                try:
-                    with open(grading_file) as f:
-                        grading = json.load(f)
-                except json.JSONDecodeError as e:
-                    print(f"警告: {grading_file} の JSON が不正です: {e}")
-                    continue
-
-                # 指標を抽出する
-                result = {
-                    "eval_id": eval_id,
-                    "run_number": run_number,
-                    "pass_rate": grading.get("summary", {}).get("pass_rate", 0.0),
-                    "passed": grading.get("summary", {}).get("passed", 0),
-                    "failed": grading.get("summary", {}).get("failed", 0),
-                    "total": grading.get("summary", {}).get("total", 0),
-                }
-
-                # timing を抽出する（まず grading.json、次に兄弟の timing.json を見る）
-                timing = grading.get("timing", {})
-                result["time_seconds"] = timing.get("total_duration_seconds", 0.0)
-                timing_file = run_dir / "timing.json"
-                if result["time_seconds"] == 0.0 and timing_file.exists():
-                    try:
-                        with open(timing_file) as tf:
-                            timing_data = json.load(tf)
-                        result["time_seconds"] = timing_data.get("total_duration_seconds", 0.0)
-                        result["tokens"] = timing_data.get("total_tokens", 0)
-                    except json.JSONDecodeError:
-                        pass
-
-                # 利用できる場合は metrics も抽出する
-                metrics = grading.get("execution_metrics", {})
-                result["tool_calls"] = metrics.get("total_tool_calls", 0)
-                if not result.get("tokens"):
-                    result["tokens"] = metrics.get("output_chars", 0)
-                result["errors"] = metrics.get("errors_encountered", 0)
-
-                # expectations を抽出する（viewer が必要とする fields: text / passed / evidence）
-                raw_expectations = grading.get("expectations", [])
-                for exp in raw_expectations:
-                    if "text" not in exp or "passed" not in exp:
-                        print(
-                            f"警告: {grading_file} の expectation に必須フィールドがありません（text, passed, evidence）: {exp}"
-                        )
-                result["expectations"] = raw_expectations
-
-                # user_notes_summary から notes を抽出する
-                notes_summary = grading.get("user_notes_summary", {})
-                notes = []
-                notes.extend(notes_summary.get("uncertainties", []))
-                notes.extend(notes_summary.get("needs_review", []))
-                notes.extend(notes_summary.get("workarounds", []))
-                result["notes"] = notes
-
-                results[config].append(result)
+            _load_config_results(config_dir, eval_id, results)
 
     return results
 
@@ -261,12 +264,35 @@ def generate_benchmark(benchmark_dir: Path, skill_name: str = "", skill_path: st
     return benchmark
 
 
+def _append_summary_table_rows(
+    lines: list[str],
+    a_summary: dict,
+    b_summary: dict,
+    delta: dict,
+) -> None:
+    """サマリーテーブルの各指標行（合格率・時間・トークン）を lines に追記する。"""
+    a_pr = a_summary.get("pass_rate", {})
+    b_pr = b_summary.get("pass_rate", {})
+    lines.append(
+        f"| 合格率 | {a_pr.get('mean', 0) * 100:.0f}% ± {a_pr.get('stddev', 0) * 100:.0f}% | {b_pr.get('mean', 0) * 100:.0f}% ± {b_pr.get('stddev', 0) * 100:.0f}% | {delta.get('pass_rate', '—')} |"
+    )
+    a_time = a_summary.get("time_seconds", {})
+    b_time = b_summary.get("time_seconds", {})
+    lines.append(
+        f"| 時間 | {a_time.get('mean', 0):.1f}s ± {a_time.get('stddev', 0):.1f}s | {b_time.get('mean', 0):.1f}s ± {b_time.get('stddev', 0):.1f}s | {delta.get('time_seconds', '—')}s |"
+    )
+    a_tokens = a_summary.get("tokens", {})
+    b_tokens = b_summary.get("tokens", {})
+    lines.append(
+        f"| トークン | {a_tokens.get('mean', 0):.0f} ± {a_tokens.get('stddev', 0):.0f} | {b_tokens.get('mean', 0):.0f} ± {b_tokens.get('stddev', 0):.0f} | {delta.get('tokens', '—')} |"
+    )
+
+
 def generate_markdown(benchmark: dict) -> str:
     """benchmark データから人間向けの benchmark.md を生成する。"""
     metadata = benchmark["metadata"]
     run_summary = benchmark["run_summary"]
 
-    # config 名を決める（"delta" は除外）
     configs = [k for k in run_summary if k != "delta"]
     config_a = configs[0] if len(configs) >= 1 else "config_a"
     config_b = configs[1] if len(configs) >= 2 else "config_b"
@@ -286,32 +312,13 @@ def generate_markdown(benchmark: dict) -> str:
         "|--------|------------|---------------|-------|",
     ]
 
-    a_summary = run_summary.get(config_a, {})
-    b_summary = run_summary.get(config_b, {})
-    delta = run_summary.get("delta", {})
-
-    # pass rate を整形する
-    a_pr = a_summary.get("pass_rate", {})
-    b_pr = b_summary.get("pass_rate", {})
-    lines.append(
-        f"| 合格率 | {a_pr.get('mean', 0) * 100:.0f}% ± {a_pr.get('stddev', 0) * 100:.0f}% | {b_pr.get('mean', 0) * 100:.0f}% ± {b_pr.get('stddev', 0) * 100:.0f}% | {delta.get('pass_rate', '—')} |"
+    _append_summary_table_rows(
+        lines,
+        run_summary.get(config_a, {}),
+        run_summary.get(config_b, {}),
+        run_summary.get("delta", {}),
     )
 
-    # time を整形する
-    a_time = a_summary.get("time_seconds", {})
-    b_time = b_summary.get("time_seconds", {})
-    lines.append(
-        f"| 時間 | {a_time.get('mean', 0):.1f}s ± {a_time.get('stddev', 0):.1f}s | {b_time.get('mean', 0):.1f}s ± {b_time.get('stddev', 0):.1f}s | {delta.get('time_seconds', '—')}s |"
-    )
-
-    # token を整形する
-    a_tokens = a_summary.get("tokens", {})
-    b_tokens = b_summary.get("tokens", {})
-    lines.append(
-        f"| トークン | {a_tokens.get('mean', 0):.0f} ± {a_tokens.get('stddev', 0):.0f} | {b_tokens.get('mean', 0):.0f} ± {b_tokens.get('stddev', 0):.0f} | {delta.get('tokens', '—')} |"
-    )
-
-    # notes セクション
     if benchmark.get("notes"):
         lines.extend(["", "## 備考", ""])
         for note in benchmark["notes"]:

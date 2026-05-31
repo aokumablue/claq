@@ -40,6 +40,37 @@ def should_exclude(rel_path: Path) -> bool:
     return any(fnmatch.fnmatch(name, pat) for pat in EXCLUDE_GLOBS)
 
 
+def _validate_skill_path(skill_path: Path) -> str | None:
+    """スキルパスの存在・型・SKILL.md を検証し、エラーメッセージを返す。問題なければ None。"""
+    if not skill_path.exists():
+        return f"❌ エラー: スキルフォルダが見つかりません: {skill_path}"
+    if not skill_path.is_dir():
+        return f"❌ エラー: パスがディレクトリではありません: {skill_path}"
+    if not (skill_path / "SKILL.md").exists():
+        return f"❌ エラー: {skill_path} に SKILL.md が見つかりません"
+    return None
+
+
+def _create_skill_zip(skill_path: Path, skill_filename: Path) -> Path | None:
+    """スキルフォルダを zip 形式の .skill ファイルにまとめる。失敗時は None を返す。"""
+    try:
+        with zipfile.ZipFile(skill_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in skill_path.rglob("*"):
+                if not file_path.is_file():
+                    continue
+                arcname = file_path.relative_to(skill_path.parent)
+                if should_exclude(arcname):
+                    print(f"  スキップ: {arcname}")
+                    continue
+                zipf.write(file_path, arcname)
+                print(f"  追加: {arcname}")
+        print(f"\n✅ スキルをパッケージ化しました: {skill_filename}")
+        return skill_filename
+    except Exception as e:
+        print(f"❌ .skill ファイルの作成エラー: {e}")
+        return None
+
+
 def package_skill(skill_path, output_dir=None):
     """
     スキルフォルダを .skill ファイルとしてまとめる。
@@ -52,23 +83,11 @@ def package_skill(skill_path, output_dir=None):
         作成した .skill ファイルのパス。エラー時は None。
     """
     skill_path = Path(skill_path).resolve()
-
-    # スキルフォルダの存在を確認する
-    if not skill_path.exists():
-        print(f"❌ エラー: スキルフォルダが見つかりません: {skill_path}")
+    error = _validate_skill_path(skill_path)
+    if error:
+        print(error)
         return None
 
-    if not skill_path.is_dir():
-        print(f"❌ エラー: パスがディレクトリではありません: {skill_path}")
-        return None
-
-    # SKILL.md の存在を確認する
-    skill_md = skill_path / "SKILL.md"
-    if not skill_md.exists():
-        print(f"❌ エラー: {skill_path} に SKILL.md が見つかりません")
-        return None
-
-    # パッケージ化前に検証する
     print("🔍 スキルを検証しています...")
     valid, message = validate_skill(skill_path)
     if not valid:
@@ -77,7 +96,6 @@ def package_skill(skill_path, output_dir=None):
         return None
     print(f"✅ {message}\n")
 
-    # 出力先を決める
     skill_name = skill_path.name
     if output_dir:
         output_path = Path(output_dir).resolve()
@@ -86,27 +104,7 @@ def package_skill(skill_path, output_dir=None):
         output_path = Path.cwd()
 
     skill_filename = output_path / f"{skill_name}.skill"
-
-    # .skill ファイル（zip 形式）を作成する
-    try:
-        with zipfile.ZipFile(skill_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
-            # ビルド成果物を除外しながらスキルディレクトリを走査する
-            for file_path in skill_path.rglob("*"):
-                if not file_path.is_file():
-                    continue
-                arcname = file_path.relative_to(skill_path.parent)
-                if should_exclude(arcname):
-                    print(f"  スキップ: {arcname}")
-                    continue
-                zipf.write(file_path, arcname)
-                print(f"  追加: {arcname}")
-
-        print(f"\n✅ スキルをパッケージ化しました: {skill_filename}")
-        return skill_filename
-
-    except Exception as e:
-        print(f"❌ .skill ファイルの作成エラー: {e}")
-        return None
+    return _create_skill_zip(skill_path, skill_filename)
 
 
 def main():
