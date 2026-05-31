@@ -23,6 +23,11 @@ def test_read_json_and_basic_predicates(tmp_path: Path) -> None:
     assert ci_common.resolve_repo_path(tmp_path, r"./docs\guide.md") == (tmp_path / "docs" / "guide.md").resolve()
 
 
+def test_resolve_repo_path_rejects_traversal(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="path escapes repo root"):
+        ci_common.resolve_repo_path(tmp_path, "../etc/passwd")
+
+
 def test_read_json_wraps_decode_errors(tmp_path: Path) -> None:
     path = tmp_path / "broken.json"
     path.write_text("{", encoding="utf-8")
