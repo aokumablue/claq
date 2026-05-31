@@ -123,49 +123,44 @@ def read_file_or_throw(file_path: str | Path) -> str:
         raise RuntimeError(f"{Path(file_path).name} の読み取りに失敗しました: {error}") from error
 
 
-def parse_readme_expectations(readme_content: str) -> list[dict[str, Any]]:
-    """README.md から期待されるカタログ件数を抽出する。
+def _parse_readme_quick_start(readme_content: str) -> list[dict[str, Any]]:
+    """README.md のクイックスタート要約からカタログ件数を抽出する。
 
     Args:
         readme_content: README.md のテキスト内容
 
     Returns:
-        期待値の辞書リスト（カテゴリ、モード、期待件数、ソースを含む）
+        agents/skills/commands の期待値辞書リスト
 
     Raises:
-        RuntimeError: 必要なカタログ情報が見つからない場合
+        RuntimeError: クイックスタート要約が見つからない場合
     """
-    expectations: list[dict[str, Any]] = []
-
     quick_start_match = re.search(
         r"access to\s+(\d+)\s+agents,\s+(\d+)\s+skills,\s+and\s+(\d+)\s+commands", readme_content, re.I
     )
     if not quick_start_match:
         raise RuntimeError("README.md にクイックスタートのカタログ要約がありません")
 
-    expectations.extend(
-        [
-            {
-                "category": "agents",
-                "mode": "exact",
-                "expected": int(quick_start_match.group(1)),
-                "source": "README.md quick-start summary",
-            },
-            {
-                "category": "skills",
-                "mode": "exact",
-                "expected": int(quick_start_match.group(2)),
-                "source": "README.md quick-start summary",
-            },
-            {
-                "category": "commands",
-                "mode": "exact",
-                "expected": int(quick_start_match.group(3)),
-                "source": "README.md quick-start summary",
-            },
-        ]
-    )
+    source = "README.md quick-start summary"
+    return [
+        {"category": "agents", "mode": "exact", "expected": int(quick_start_match.group(1)), "source": source},
+        {"category": "skills", "mode": "exact", "expected": int(quick_start_match.group(2)), "source": source},
+        {"category": "commands", "mode": "exact", "expected": int(quick_start_match.group(3)), "source": source},
+    ]
 
+
+def _parse_readme_comparison_table(readme_content: str) -> list[dict[str, Any]]:
+    """README.md の比較表からカテゴリ別のカタログ件数を抽出する。
+
+    Args:
+        readme_content: README.md のテキスト内容
+
+    Returns:
+        比較表の各行に対応する期待値辞書リスト
+
+    Raises:
+        RuntimeError: 比較表に必要な行が見つからない場合
+    """
     table_patterns = [
         {
             "category": "agents",
@@ -184,6 +179,7 @@ def parse_readme_expectations(readme_content: str) -> list[dict[str, Any]]:
         },
     ]
 
+    expectations: list[dict[str, Any]] = []
     for pattern in table_patterns:
         match = re.search(pattern["regex"], readme_content, re.I)
         if not match:
@@ -203,6 +199,51 @@ def parse_readme_expectations(readme_content: str) -> list[dict[str, Any]]:
     return expectations
 
 
+def parse_readme_expectations(readme_content: str) -> list[dict[str, Any]]:
+    """README.md から期待されるカタログ件数を抽出する。
+
+    Args:
+        readme_content: README.md のテキスト内容
+
+    Returns:
+        期待値の辞書リスト（カテゴリ、モード、期待件数、ソースを含む）
+
+    Raises:
+        RuntimeError: 必要なカタログ情報が見つからない場合
+    """
+    return [
+        *_parse_readme_quick_start(readme_content),
+        *_parse_readme_comparison_table(readme_content),
+    ]
+
+
+def _match_claude_structure_pattern(claude_content: str, pattern: dict[str, str]) -> dict[str, Any]:
+    """CLAUDE.md の構成パターン1件を照合して期待値辞書を生成する。
+
+    Args:
+        claude_content: CLAUDE.md のテキスト内容
+        pattern: category/mode/regex/source を含むパターン定義
+
+    Returns:
+        マッチした件数を含む期待値辞書
+
+    Raises:
+        RuntimeError: パターンに一致するエントリが見つからない場合
+    """
+    match = re.search(pattern["regex"], claude_content, re.I | re.M)
+    if not match:
+        raise RuntimeError(
+            f"{SOURCE_LABELS.get(pattern['source'], pattern['source'])} に "
+            f"{CATEGORY_LABELS.get(pattern['category'], pattern['category'])} エントリがありません"
+        )
+    return {
+        "category": pattern["category"],
+        "mode": "exact",
+        "expected": int(match.group(1)),
+        "source": f"{pattern['source']} ({pattern['category']})",
+    }
+
+
 def parse_claude_doc_expectations(claude_content: str) -> list[dict[str, Any]]:
     """CLAUDE.md から期待されるカタログ件数を抽出する。
 
@@ -215,8 +256,6 @@ def parse_claude_doc_expectations(claude_content: str) -> list[dict[str, Any]]:
     Raises:
         RuntimeError: 必要なカタログ情報が見つからない場合
     """
-    expectations: list[dict[str, Any]] = []
-
     structure_patterns = [
         {
             "category": "agents",
@@ -238,23 +277,7 @@ def parse_claude_doc_expectations(claude_content: str) -> list[dict[str, Any]]:
         },
     ]
 
-    for pattern in structure_patterns:
-        match = re.search(pattern["regex"], claude_content, re.I | re.M)
-        if not match:
-            raise RuntimeError(
-                f"{SOURCE_LABELS.get(pattern['source'], pattern['source'])} に "
-                f"{CATEGORY_LABELS.get(pattern['category'], pattern['category'])} エントリがありません"
-            )
-        expectations.append(
-            {
-                "category": pattern["category"],
-                "mode": "exact",
-                "expected": int(match.group(1)),
-                "source": f"{pattern['source']} ({pattern['category']})",
-            }
-        )
-
-    return expectations
+    return [_match_claude_structure_pattern(claude_content, pattern) for pattern in structure_patterns]
 
 
 def evaluate_expectations(catalog: dict[str, Any], expectations: list[dict[str, Any]]) -> list[dict[str, Any]]:

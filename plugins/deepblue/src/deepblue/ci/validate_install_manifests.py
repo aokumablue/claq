@@ -115,9 +115,47 @@ def validate_install_manifests(
         components = []
 
     has_errors = errors[0]
+
+    parsed_modules, module_ids, module_errors = _parse_modules(modules)
+    has_errors = has_errors or module_errors
+
+    parsed_profiles, profile_errors = _parse_profiles(profiles)
+    has_errors = has_errors or profile_errors
+
+    parsed_components, component_errors = _parse_components(components)
+    has_errors = has_errors or component_errors
+
+    if _validate_module_relations(repo_root, parsed_modules, module_ids):
+        has_errors = True
+    if _validate_profile_relations(parsed_profiles, module_ids):
+        has_errors = True
+    if _validate_component_relations(parsed_components, module_ids):
+        has_errors = True
+
+    if has_errors:
+        return 1
+
+    print(
+        f"{len(parsed_modules)} 個のインストールモジュール、{len(parsed_components)} 個のインストールコンポーネント、{len(profiles)} 個のプロファイルを検証しました"
+    )
+    return 0
+
+
+def _parse_modules(modules: list[Any]) -> tuple[list[dict[str, Any]], set[str], bool]:
+    """モジュールエントリを解析・検証し、正規化済みモジュールと ID 集合を返す。
+
+    Args:
+        modules: install-modules.json の modules 配列
+
+    Returns:
+        (正規化済みモジュールのリスト, モジュール ID の集合, エラー有無) のタプル
+
+    Raises:
+        例外は発生しません。
+    """
+    has_errors = False
     parsed_modules: list[dict[str, Any]] = []
     module_ids: set[str] = set()
-    claimed_paths: dict[str, str] = {}
 
     for module in modules:
         if not isinstance(module, dict):
@@ -160,6 +198,22 @@ def validate_install_manifests(
             }
         )
 
+    return parsed_modules, module_ids, has_errors
+
+
+def _parse_profiles(profiles: dict[str, Any]) -> tuple[dict[str, list[str]], bool]:
+    """プロファイル定義を解析・検証し、正規化済みプロファイルを返す。
+
+    Args:
+        profiles: install-profiles.json の profiles オブジェクト
+
+    Returns:
+        (プロファイル ID から modules リストへの辞書, エラー有無) のタプル
+
+    Raises:
+        例外は発生しません。
+    """
+    has_errors = False
     expected_profile_ids = ["core", "developer", "security", "research", "full"]
     parsed_profiles: dict[str, list[str]] = {}
 
@@ -184,6 +238,22 @@ def validate_install_manifests(
 
         parsed_profiles[profile_id] = modules_list
 
+    return parsed_profiles, has_errors
+
+
+def _parse_components(components: list[Any]) -> tuple[list[dict[str, Any]], bool]:
+    """コンポーネント定義を解析・検証し、正規化済みコンポーネントを返す。
+
+    Args:
+        components: install-components.json の components 配列
+
+    Returns:
+        (正規化済みコンポーネントのリスト, エラー有無) のタプル
+
+    Raises:
+        例外は発生しません。
+    """
+    has_errors = False
     parsed_components: list[dict[str, Any]] = []
     component_ids: set[str] = set()
 
@@ -218,6 +288,28 @@ def validate_install_manifests(
 
         parsed_components.append({"id": component_id, "family": family, "modules": modules_list})
 
+    return parsed_components, has_errors
+
+
+def _validate_module_relations(
+    repo_root: str | Path, parsed_modules: list[dict[str, Any]], module_ids: set[str]
+) -> bool:
+    """モジュールの依存関係とパス（存在・重複宣言）を検証する。
+
+    Args:
+        repo_root: パス解決に使うリポジトリルート
+        parsed_modules: _parse_modules が返した正規化済みモジュール
+        module_ids: 既知のモジュール ID 集合
+
+    Returns:
+        エラーがあれば True、なければ False
+
+    Raises:
+        例外は発生しません。
+    """
+    has_errors = False
+    claimed_paths: dict[str, str] = {}
+
     for module in parsed_modules:
         module_id = module["id"]
         for dependency in module["dependencies"]:
@@ -251,6 +343,24 @@ def validate_install_manifests(
             else:
                 claimed_paths[normalized_path] = module_id
 
+    return has_errors
+
+
+def _validate_profile_relations(parsed_profiles: dict[str, list[str]], module_ids: set[str]) -> bool:
+    """プロファイルのモジュール参照と full プロファイルの完全性を検証する。
+
+    Args:
+        parsed_profiles: _parse_profiles が返した正規化済みプロファイル
+        module_ids: 既知のモジュール ID 集合
+
+    Returns:
+        エラーがあれば True、なければ False
+
+    Raises:
+        例外は発生しません。
+    """
+    has_errors = False
+
     for profile_id, module_list in parsed_profiles.items():
         seen_modules: set[str] = set()
         for module_id in module_list:
@@ -273,6 +383,24 @@ def validate_install_manifests(
             if module_id not in full_modules:
                 emit_error(f"full プロファイルにモジュール {module_id} がありません")
                 has_errors = True
+
+    return has_errors
+
+
+def _validate_component_relations(parsed_components: list[dict[str, Any]], module_ids: set[str]) -> bool:
+    """コンポーネントの family プレフィックスとモジュール参照を検証する。
+
+    Args:
+        parsed_components: _parse_components が返した正規化済みコンポーネント
+        module_ids: 既知のモジュール ID 集合
+
+    Returns:
+        エラーがあれば True、なければ False
+
+    Raises:
+        例外は発生しません。
+    """
+    has_errors = False
 
     for component in parsed_components:
         component_id = component["id"]
@@ -299,13 +427,7 @@ def validate_install_manifests(
                 has_errors = True
             seen_modules.add(module_id)
 
-    if has_errors:
-        return 1
-
-    print(
-        f"{len(parsed_modules)} 個のインストールモジュール、{len(parsed_components)} 個のインストールコンポーネント、{len(profiles)} 個のプロファイルを検証しました"
-    )
-    return 0
+    return has_errors
 
 
 def build_parser() -> argparse.ArgumentParser:
