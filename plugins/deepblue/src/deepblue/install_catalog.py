@@ -142,27 +142,10 @@ def _read_manifest_data(paths: dict[str, Path]) -> tuple[Any, Any, Any]:
     return modules_data, profiles_data, components_data
 
 
-def load_install_manifests(options: dict[str, Any] | None = None) -> dict[str, Any]:
-    """インストールマニフェストを読み込み、ID でインデックス化します。
-
-    Args:
-        options: リポジトリルートを指定するオプションです。
-
-    Returns:
-        モジュール、プロファイル、コンポーネントを含むマニフェストデータの辞書を返します。
-
-    Raises:
-        RuntimeError: マニフェストファイルが見つからない、または JSON パースに失敗した場合に発生します。
-    """
-    opts = options or {}
-    repo_root = Path(opts.get("repoRoot") or REPO_ROOT)
-    paths = get_manifest_paths(repo_root)
-
-    if not paths["modulesPath"].exists() or not paths["profilesPath"].exists():
-        raise RuntimeError(f"Install manifests not found under {repo_root}")
-
-    modules_data, profiles_data, components_data = _read_manifest_data(paths)
-
+def _extract_manifest_lists(
+    modules_data: Any, profiles_data: Any, components_data: Any
+) -> tuple[list[dict], dict, list[dict]]:
+    """各マニフェストデータから modules/profiles/components を抽出して返す。"""
     modules = (
         modules_data["modules"]
         if isinstance(modules_data, dict) and isinstance(modules_data.get("modules"), list)
@@ -178,22 +161,34 @@ def load_install_manifests(options: dict[str, Any] | None = None) -> dict[str, A
         if isinstance(components_data, dict) and isinstance(components_data.get("components"), list)
         else []
     )
+    return modules, profiles, components
 
-    modules_by_id = {module["id"]: module for module in modules if isinstance(module, dict) and "id" in module}
-    components_by_id = {
-        component["id"]: component for component in components if isinstance(component, dict) and "id" in component
-    }
 
+def load_install_manifests(options: dict[str, Any] | None = None) -> dict[str, Any]:
+    """インストールマニフェストを読み込み、ID でインデックス化します。
+
+    Args:
+        options: リポジトリルートを指定するオプションです（repoRoot キー）。
+
+    Raises:
+        RuntimeError: マニフェストファイルが見つからない場合に発生します。
+    """
+    opts = options or {}
+    repo_root = Path(opts.get("repoRoot") or REPO_ROOT)
+    paths = get_manifest_paths(repo_root)
+    if not paths["modulesPath"].exists() or not paths["profilesPath"].exists():
+        raise RuntimeError(f"Install manifests not found under {repo_root}")
+    modules_data, profiles_data, components_data = _read_manifest_data(paths)
+    modules, profiles, components = _extract_manifest_lists(modules_data, profiles_data, components_data)
+    modules_by_id = {m["id"]: m for m in modules if isinstance(m, dict) and "id" in m}
+    components_by_id = {c["id"]: c for c in components if isinstance(c, dict) and "id" in c}
     return {
         "repoRoot": repo_root,
         "modulesPath": paths["modulesPath"],
         "profilesPath": paths["profilesPath"],
         "componentsPath": paths["componentsPath"],
-        "modules": modules,
-        "profiles": profiles,
-        "components": components,
-        "modulesById": modules_by_id,
-        "componentsById": components_by_id,
+        "modules": modules, "profiles": profiles, "components": components,
+        "modulesById": modules_by_id, "componentsById": components_by_id,
         "modulesVersion": modules_data.get("version") if isinstance(modules_data, dict) else None,
         "profilesVersion": profiles_data.get("version") if isinstance(profiles_data, dict) else None,
         "componentsVersion": components_data.get("version") if isinstance(components_data, dict) else None,

@@ -32,53 +32,9 @@ def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
     return result.stdout
 
 
-def _build_improve_prompt(
-    skill_name: str,
-    skill_content: str,
-    current_description: str,
-    eval_results: dict,
-    history: list[dict],
-    test_results: dict | None,
-) -> str:
-    """説明文改善用プロンプトを組み立てて返す。"""
-    failed_triggers = [r for r in eval_results["results"] if r["should_trigger"] and not r["pass"]]
-    false_triggers = [r for r in eval_results["results"] if not r["should_trigger"] and not r["pass"]]
-
-    train_score = f"{eval_results['summary']['passed']}/{eval_results['summary']['total']}"
-    if test_results:
-        test_score = f"{test_results['summary']['passed']}/{test_results['summary']['total']}"
-        scores_summary = f"学習用: {train_score}, 検証用: {test_score}"
-    else:
-        scores_summary = f"学習用: {train_score}"
-
-    prompt = f"""あなたは "{skill_name}" というスキルの説明文を最適化しています。スキルはプロンプトに少し似ていますが、段階的に情報を開示する仕組みです。エージェントはスキルを使うかどうかを判断するとき、まずタイトルと説明だけを見ます。スキルを使うと判断した場合は .md ファイルを読み、補助ファイルやスクリプト、追加ドキュメントや例も参照します。
-
-この説明は "available_skills" 一覧に表示されます。ユーザーからクエリが来ると、エージェントはタイトルとこの説明だけを頼りにスキルを起動するかどうかを決めます。目的は、関連するクエリでは確実にトリガーし、無関係なクエリではトリガーしない説明を書くことです。
-
-現在の説明:
-<current_description>
-"{current_description}"
-</current_description>
-
-現在のスコア ({scores_summary}):
-<scores_summary>
-"""
-    if failed_triggers:
-        prompt += "トリガー漏れ（本来トリガーすべきだった）:\n"
-        for r in failed_triggers:
-            prompt += f'  - "{r["query"]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
-        prompt += "\n"
-
-    if false_triggers:
-        prompt += "誤トリガー（トリガーすべきでなかった）:\n"
-        for r in false_triggers:
-            prompt += f'  - "{r["query"]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
-        prompt += "\n"
-
-    if history:
-        prompt += _format_history_section(history)
-
-    prompt += f"""</scores_summary>
+def _build_prompt_suffix(skill_content: str) -> str:
+    """プロンプトの後半（スキル内容・ガイドライン）を返す。"""
+    return f"""</scores_summary>
 
 スキル内容（スキルが何をするかの参考）:
 <skill_content>
@@ -101,7 +57,45 @@ def _build_improve_prompt(
 いくつか違うスタイルを試す機会があるので、創造的に書き換えて構いません。最後に最もスコアが高かったものを採用します。
 
 新しい説明文以外は出力しないでください。<new_description> タグの中だけに入れて返してください。"""
-    return prompt
+
+
+def _build_improve_prompt(
+    skill_name: str,
+    skill_content: str,
+    current_description: str,
+    eval_results: dict,
+    history: list[dict],
+    test_results: dict | None,
+) -> str:
+    """説明文改善用プロンプトを組み立てて返す。"""
+    failed_triggers = [r for r in eval_results["results"] if r["should_trigger"] and not r["pass"]]
+    false_triggers = [r for r in eval_results["results"] if not r["should_trigger"] and not r["pass"]]
+    train_score = f"{eval_results['summary']['passed']}/{eval_results['summary']['total']}"
+    if test_results:
+        test_score = f"{test_results['summary']['passed']}/{test_results['summary']['total']}"
+        scores_summary = f"学習用: {train_score}, 検証用: {test_score}"
+    else:
+        scores_summary = f"学習用: {train_score}"
+    prompt = (
+        f'あなたは "{skill_name}" というスキルの説明文を最適化しています。'
+        "スキルはプロンプトに少し似ていますが、段階的に情報を開示する仕組みです。"
+        'この説明は "available_skills" 一覧に表示されます。\n\n'
+        f'現在の説明:\n<current_description>\n"{current_description}"\n</current_description>\n\n'
+        f"現在のスコア ({scores_summary}):\n<scores_summary>\n"
+    )
+    if failed_triggers:
+        prompt += "トリガー漏れ（本来トリガーすべきだった）:\n"
+        for r in failed_triggers:
+            prompt += f'  - "{r["query"]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
+        prompt += "\n"
+    if false_triggers:
+        prompt += "誤トリガー（トリガーすべきでなかった）:\n"
+        for r in false_triggers:
+            prompt += f'  - "{r["query"]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
+        prompt += "\n"
+    if history:
+        prompt += _format_history_section(history)
+    return prompt + _build_prompt_suffix(skill_content)
 
 
 def _format_history_section(history: list[dict]) -> str:

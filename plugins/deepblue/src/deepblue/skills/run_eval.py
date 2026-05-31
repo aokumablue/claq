@@ -101,18 +101,43 @@ def _process_stream_event(
     return None
 
 
+def _process_event_line(
+    line: str, clean_name: str,
+    pending_ref: list, accumulated_ref: list, triggered: list[bool],
+) -> bool | None:
+    """1 行の JSON イベントを処理し、確定したトリガー結果または None を返す。"""
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if event.get("type") == "stream_event":
+        return _process_stream_event(event.get("event", {}), clean_name, pending_ref, accumulated_ref)
+    if event.get("type") == "assistant":
+        for item in event.get("message", {}).get("content", []):
+            if item.get("type") != "tool_use":
+                continue
+            tool_input = item.get("input", {})
+            if item.get("name") == "Skill" and clean_name in tool_input.get("skill", ""):
+                triggered[0] = True
+            elif item.get("name") == "Read" and clean_name in tool_input.get("file_path", ""):
+                triggered[0] = True
+        return triggered[0]
+    if event.get("type") == "result":
+        return triggered[0]
+    return None
+
+
 def _scan_output_for_trigger(
     process: subprocess.Popen,
     clean_name: str,
     timeout: int,
 ) -> bool:
     """プロセスの stdout をストリームで読み、スキルトリガーを検出して bool を返す。"""
-    triggered = False
+    triggered = [False]
     start_time = time.time()
     buffer = ""
-    pending_tool_name_ref = [None]
-    accumulated_json_ref = [""]
-
+    pending_ref: list = [None]
+    accumulated_ref: list = [""]
     try:
         while time.time() - start_time < timeout:
             if process.poll() is not None:
@@ -120,55 +145,26 @@ def _scan_output_for_trigger(
                 if remaining:
                     buffer += remaining.decode("utf-8", errors="replace")
                 break
-
             ready, _, _ = select.select([process.stdout], [], [], 1.0)
             if not ready:
                 continue
-
             chunk = os.read(process.stdout.fileno(), 8192)
             if not chunk:
                 break
             buffer += chunk.decode("utf-8", errors="replace")
-
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
                 line = line.strip()
                 if not line:
                     continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                if event.get("type") == "stream_event":
-                    result = _process_stream_event(
-                        event.get("event", {}), clean_name,
-                        pending_tool_name_ref, accumulated_json_ref,
-                    )
-                    if result is not None:
-                        return result
-
-                elif event.get("type") == "assistant":
-                    message = event.get("message", {})
-                    for content_item in message.get("content", []):
-                        if content_item.get("type") != "tool_use":
-                            continue
-                        tool_name = content_item.get("name", "")
-                        tool_input = content_item.get("input", {})
-                        if tool_name == "Skill" and clean_name in tool_input.get("skill", ""):
-                            triggered = True
-                        elif tool_name == "Read" and clean_name in tool_input.get("file_path", ""):
-                            triggered = True
-                    return triggered
-
-                elif event.get("type") == "result":
-                    return triggered
+                result = _process_event_line(line, clean_name, pending_ref, accumulated_ref, triggered)
+                if result is not None:
+                    return result
     finally:
         if process.poll() is None:
             process.kill()
             process.wait()
-
-    return triggered
+    return triggered[0]
 
 
 def run_single_query(
