@@ -63,6 +63,16 @@ def test_validate_no_personal_paths_flags_hardcoded_path(tmp_path: Path) -> None
     assert validate_no_personal_paths.validate_no_personal_paths(tmp_path) == 1
 
 
+def test_validate_no_personal_paths_skips_placeholders(tmp_path: Path) -> None:
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "Examples: /home/user, /home/<username>, /Users/$USER, and C:\\Users\\{username}.\n",
+        encoding="utf-8",
+    )
+
+    assert validate_no_personal_paths.validate_no_personal_paths(tmp_path) == 0
+
+
 def test_check_unicode_safety_sanitizes_and_flags(tmp_path: Path) -> None:
     doc = tmp_path / "README.md"
     doc.write_text("⚠️  Zero​Width and ✅ emoji\n", encoding="utf-8")

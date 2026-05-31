@@ -18,11 +18,28 @@ TARGETS = [
 ]
 
 BLOCK_PATTERNS = [
-    re.compile(r"/Users/[^/\s]+"),  # macOS
-    re.compile(r"/home/[^/\s]+"),  # Linux
-    re.compile(r"C:\\Users\\[^\\/\s]+", re.I),  # Windows
+    re.compile(r"/Users/([^/\s]+)"),  # macOS
+    re.compile(r"/home/([^/\s]+)"),  # Linux
+    re.compile(r"C:\\Users\\([^\\/\s]+)", re.I),  # Windows
 ]
 FILE_EXTENSIONS = re.compile(r"\.(md|json|js|ts|sh|toml|yml|yaml)$", re.I)
+
+# ドキュメント例示で使われる汎用プレースホルダ。個人を特定しないため検出対象から除外する。
+# 注: "name"/"me" は実ユーザー名と衝突し検出漏れを招くため意図的に含めない（セキュリティ後退防止）。
+PLACEHOLDER_USERS = frozenset(
+    {
+        "user",
+        "users",
+        "username",
+        "usr",
+        "youruser",
+        "yourusername",
+        "your-username",
+        "your_username",
+        "yourname",
+    }
+)
+_PLACEHOLDER_CHARS = frozenset("<>${}")
 
 
 def _collect_files(target_path: Path, out: list[Path]) -> None:
@@ -48,6 +65,26 @@ def _collect_files(target_path: Path, out: list[Path]) -> None:
         if entry.name in {"node_modules", ".git"}:
             continue
         _collect_files(entry, out)
+
+
+def _is_placeholder_user(username: str) -> bool:
+    """ユーザー名セグメントが個人を特定しない汎用プレースホルダかを判定する。
+
+    Args:
+        username: 検出されたパスのユーザー名セグメント。
+
+    Returns:
+        プレースホルダなら True、実ユーザー名らしきなら False。
+
+    Raises:
+        例外は発生しません。
+    """
+    # テンプレート記法（<user>, $USER, ${USER}, {username} 等）は実在パスには現れない。
+    if any(char in _PLACEHOLDER_CHARS for char in username):
+        return True
+    # 文中では `/home/user.` のように句読点が後続しうるため、末尾を除去して比較する。
+    cleaned = username.rstrip(".,;:!?)]'\"`")
+    return cleaned.lower() in PLACEHOLDER_USERS
 
 
 def validate_no_personal_paths(root: str | Path = REPO_ROOT) -> int:
@@ -77,10 +114,10 @@ def validate_no_personal_paths(root: str | Path = REPO_ROOT) -> int:
             continue
 
         for pattern in BLOCK_PATTERNS:
-            match = pattern.search(content)
-            if match:
+            real_users = [user for user in pattern.findall(content) if not _is_placeholder_user(user)]
+            if real_users:
                 print(f"エラー: {file_path.relative_to(root_path)} に個人用パスが検出されました")
-                failures += len(pattern.findall(content))
+                failures += len(real_users)
                 break
 
     if failures > 0:
