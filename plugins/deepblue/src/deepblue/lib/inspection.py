@@ -122,6 +122,32 @@ def _unique_in_order(values: list[Any]) -> list[Any]:
     return result
 
 
+def _build_pattern_entry(group: dict[str, Any], sorted_runs: list[Any]) -> dict[str, Any]:
+    """ソート済み実行リストからパターンエントリ辞書を構築する。"""
+    first_seen = _record_value(sorted_runs[-1], "createdAt", "created_at") if sorted_runs else None
+    last_seen = _record_value(sorted_runs[0], "createdAt", "created_at") if sorted_runs else None
+    session_ids = _unique_in_order(
+        [sid for sid in (_record_value(run, "sessionId", "session_id") for run in sorted_runs) if sid]
+    )
+    versions = _unique_in_order(
+        [v for v in (_record_value(run, "skillVersion", "skill_version") for run in sorted_runs) if v]
+    )
+    raw_reasons = _unique_in_order(
+        [r for r in (_record_value(run, "failureReason", "failure_reason") for run in sorted_runs) if r]
+    )
+    return {
+        "skillId": group["skillId"],
+        "normalizedReason": group["normalizedReason"],
+        "count": len(group["runs"]),
+        "firstSeen": first_seen,
+        "lastSeen": last_seen,
+        "sessionIds": session_ids,
+        "versions": versions,
+        "rawReasons": raw_reasons,
+        "runIds": [get_value(run, "id") for run in sorted_runs],
+    }
+
+
 def detect_patterns(
     skill_runs: list[Any], options: dict[str, Any] | None = None, /, **kwargs: Any
 ) -> list[dict[str, Any]]:
@@ -139,54 +165,19 @@ def detect_patterns(
         例外は発生しません。
     """
     opts = merge_options(options, **kwargs)
-    threshold = get_option(opts, "threshold", default=DEFAULT_FAILURE_THRESHOLD)
-    threshold = int(threshold)
+    threshold = int(get_option(opts, "threshold", default=DEFAULT_FAILURE_THRESHOLD))
     groups = group_failures(skill_runs)
     patterns: list[dict[str, Any]] = []
 
     for group in groups.values():
         if len(group["runs"]) < threshold:
             continue
-
         sorted_runs = sorted(
             group["runs"],
             key=lambda run: _record_value(run, "createdAt", "created_at") or "",
             reverse=True,
         )
-        first_seen = _record_value(sorted_runs[-1], "createdAt", "created_at") if sorted_runs else None
-        last_seen = _record_value(sorted_runs[0], "createdAt", "created_at") if sorted_runs else None
-
-        session_ids = _unique_in_order(
-            [sid for sid in (_record_value(run, "sessionId", "session_id") for run in sorted_runs) if sid]
-        )
-        versions = _unique_in_order(
-            [
-                version
-                for version in (_record_value(run, "skillVersion", "skill_version") for run in sorted_runs)
-                if version
-            ]
-        )
-        raw_reasons = _unique_in_order(
-            [
-                reason
-                for reason in (_record_value(run, "failureReason", "failure_reason") for run in sorted_runs)
-                if reason
-            ]
-        )
-
-        patterns.append(
-            {
-                "skillId": group["skillId"],
-                "normalizedReason": group["normalizedReason"],
-                "count": len(group["runs"]),
-                "firstSeen": first_seen,
-                "lastSeen": last_seen,
-                "sessionIds": session_ids,
-                "versions": versions,
-                "rawReasons": raw_reasons,
-                "runIds": [get_value(run, "id") for run in sorted_runs],
-            }
-        )
+        patterns.append(_build_pattern_entry(group, sorted_runs))
 
     patterns.sort(key=lambda item: (item["count"], item["lastSeen"] or ""), reverse=True)
     return patterns
@@ -219,6 +210,21 @@ def suggest_action(pattern: dict[str, Any]) -> str:
     return "Investigate root cause and consider adding error handling."
 
 
+def _format_pattern_for_report(pattern: dict[str, Any]) -> dict[str, Any]:
+    """パターン辞書をレポート出力形式に変換する。"""
+    return {
+        "skillId": pattern["skillId"],
+        "normalizedReason": pattern["normalizedReason"],
+        "count": pattern["count"],
+        "firstSeen": pattern["firstSeen"],
+        "lastSeen": pattern["lastSeen"],
+        "sessionIds": pattern["sessionIds"],
+        "versions": pattern["versions"],
+        "rawReasons": pattern["rawReasons"][:5],
+        "suggestedAction": suggest_action(pattern),
+    }
+
+
 def generate_report(
     patterns: list[dict[str, Any]], options: dict[str, Any] | None = None, /, **kwargs: Any
 ) -> dict[str, Any]:
@@ -249,27 +255,13 @@ def generate_report(
 
     total_failures = sum(pattern["count"] for pattern in patterns)
     affected_skills = _unique_in_order([pattern["skillId"] for pattern in patterns])
-
     return {
         "generatedAt": generated_at,
         "status": "attention_needed",
         "patternCount": len(patterns),
         "totalFailures": total_failures,
         "affectedSkills": affected_skills,
-        "patterns": [
-            {
-                "skillId": pattern["skillId"],
-                "normalizedReason": pattern["normalizedReason"],
-                "count": pattern["count"],
-                "firstSeen": pattern["firstSeen"],
-                "lastSeen": pattern["lastSeen"],
-                "sessionIds": pattern["sessionIds"],
-                "versions": pattern["versions"],
-                "rawReasons": pattern["rawReasons"][:5],
-                "suggestedAction": suggest_action(pattern),
-            }
-            for pattern in patterns
-        ],
+        "patterns": [_format_pattern_for_report(p) for p in patterns],
         "summary": f"Found {len(patterns)} recurring failure pattern(s) across {len(affected_skills)} skill(s) ({total_failures} total failures).",
     }
 

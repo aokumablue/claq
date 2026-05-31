@@ -12,6 +12,40 @@ from pathlib import Path
 from deepblue.lib.constants import PLUGIN_NAME
 
 
+def _resolve_env_root(env_root: str | None) -> Path | None:
+    """環境変数 CLAUDE_PLUGIN_ROOT からルートパスを解決する。見つからなければ None。"""
+    raw = env_root if env_root is not None else os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if raw and raw.strip():
+        return Path(raw.strip())
+    return None
+
+
+def _search_plugin_cache(claude_dir: Path, probe_paths: list[str]) -> Path | None:
+    """プラグインキャッシュ配下を走査し、probe ファイルを含む最初のバージョンディレクトリを返す。"""
+    def _contains_probe(root: Path) -> bool:
+        """候補ルートに探査対象ファイルが存在するか確認する。"""
+        return any((root / p).exists() for p in probe_paths)
+
+    try:
+        cache_base = claude_dir / "plugins" / "cache" / PLUGIN_NAME
+        if not cache_base.exists():
+            return None
+        for org_entry in cache_base.iterdir():
+            if not org_entry.is_dir():
+                continue
+            try:
+                for ver_entry in org_entry.iterdir():
+                    if not ver_entry.is_dir():
+                        continue
+                    if _contains_probe(ver_entry):
+                        return ver_entry
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return None
+
+
 def resolve_deepblue_root(
     *,
     home_dir: str | Path | None = None,
@@ -31,57 +65,24 @@ def resolve_deepblue_root(
     Raises:
         例外は発生しません。
     """
-    # 環境変数を確認する（CLAUDE_PLUGIN_ROOT を優先）
-    if env_root is not None:
-        root_from_env = env_root
-    else:
-        root_from_env = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-    if root_from_env and root_from_env.strip():
-        return Path(root_from_env.strip())
+    env_path = _resolve_env_root(env_root)
+    if env_path:
+        return env_path
 
-    # home ディレクトリと claude ディレクトリを決定する
     home = Path(home_dir) if home_dir else Path.home()
     claude_dir = home / ".claude"
-
     probe_paths = [probe] if probe else ["src/deepblue/lib/core_utils.py"]
 
     def _contains_probe(root: Path) -> bool:
-        """候補ルートに探査対象ファイルが存在するか確認する。
+        """候補ルートに探査対象ファイルが存在するか確認する。"""
+        return any((root / p).exists() for p in probe_paths)
 
-        Args:
-            root: 探索や判定の基点となるルートパス。
-
-        Returns:
-            True / False を返す真偽値。
-
-        Raises:
-            例外は発生しません。
-        """
-        return any((root / probe_path).exists() for probe_path in probe_paths)
-
-    # 標準インストール — ファイルは ~/.claude/ に直接コピーされる
     if _contains_probe(claude_dir):
         return claude_dir
 
-    # プラグインキャッシュ — マーケットプレイスのプラグインを
-    # ~/.claude/plugins/cache/<plugin-name>/<org>/<version>/ に配置
-    try:
-        cache_base = claude_dir / "plugins" / "cache" / PLUGIN_NAME
-        if cache_base.exists():
-            for org_entry in cache_base.iterdir():
-                if not org_entry.is_dir():
-                    continue
-
-                try:
-                    for ver_entry in org_entry.iterdir():
-                        if not ver_entry.is_dir():
-                            continue
-                        if _contains_probe(ver_entry):
-                            return ver_entry
-                except OSError:
-                    continue
-    except OSError:
-        pass
+    cached = _search_plugin_cache(claude_dir, probe_paths)
+    if cached:
+        return cached
 
     return claude_dir
 

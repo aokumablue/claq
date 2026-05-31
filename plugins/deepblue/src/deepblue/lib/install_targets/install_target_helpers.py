@@ -300,6 +300,31 @@ class InstallTargetAdapter:
             strategy=self.determine_strategy(normalized),
         )
 
+    def _scaffold_module_paths(
+        self,
+        mod: dict,
+        *,
+        source_root: str | None,
+        repo_root: str | None,
+        home_dir: str | None,
+        project_root: str | None,
+    ) -> list[ManagedOperation]:
+        """単一モジュールの paths からスキャフォールド操作リストを生成する。"""
+        paths = mod.get("paths", [])
+        if not isinstance(paths, list):
+            return []
+        return [
+            self.create_scaffold_operation(
+                mod.get("id", ""),
+                path,
+                source_root=source_root,
+                repo_root=repo_root,
+                home_dir=home_dir,
+                project_root=project_root,
+            )
+            for path in paths
+        ]
+
     def plan_operations(
         self,
         *,
@@ -322,41 +347,18 @@ class InstallTargetAdapter:
                 adapter=self,
             )
 
-        operations: list[ManagedOperation] = []
+        kwargs = {"source_root": source_root, "repo_root": repo_root, "home_dir": home_dir, "project_root": project_root}
 
         if modules:
+            operations: list[ManagedOperation] = []
             for mod in modules:
-                paths = mod.get("paths", [])
-                if isinstance(paths, list):
-                    for path in paths:
-                        operations.append(
-                            self.create_scaffold_operation(
-                                mod.get("id", ""),
-                                path,
-                                source_root=source_root,
-                                repo_root=repo_root,
-                                home_dir=home_dir,
-                                project_root=project_root,
-                            )
-                        )
+                operations.extend(self._scaffold_module_paths(mod, **kwargs))
             return operations
 
         if module:
-            paths = module.get("paths", [])
-            if isinstance(paths, list):
-                for path in paths:
-                    operations.append(
-                        self.create_scaffold_operation(
-                            module.get("id", ""),
-                            path,
-                            source_root=source_root,
-                            repo_root=repo_root,
-                            home_dir=home_dir,
-                            project_root=project_root,
-                        )
-                    )
+            return self._scaffold_module_paths(module, **kwargs)
 
-        return operations
+        return []
 
     def validate(
         self,

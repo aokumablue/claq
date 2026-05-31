@@ -7,6 +7,36 @@
 from __future__ import annotations
 
 
+def _advance_in_quote(
+    command: str, i: int, length: int, ch: str, quote: str, current: str
+) -> tuple[str, str | None, int]:
+    """引用符内の1文字を処理し、(current, quote, next_i) を返す。"""
+    if ch == "\\" and i + 1 < length:
+        return current + ch + command[i + 1], quote, i + 2
+    if ch == quote:
+        return current + ch, None, i + 1
+    return current + ch, quote, i + 1
+
+
+def _try_flush_segment(current: str, segments: list[str]) -> str:
+    """current が空でなければ segments に追加し、空文字列を返す。"""
+    if current.strip():
+        segments.append(current.strip())
+    return ""
+
+
+def _handle_ampersand(
+    command: str, i: int, length: int, current: str, segments: list[str]
+) -> tuple[str, int]:
+    """単独の & を処理し、(current, next_i) を返す。リダイレクトは除外する。"""
+    next_ch = command[i + 1] if i + 1 < length else ""
+    prev_ch = command[i - 1] if i > 0 else ""
+    if next_ch == ">" or prev_ch == ">":
+        return current + "&", i + 1
+    current = _try_flush_segment(current, segments)
+    return current, i + 1
+
+
 def split_shell_segments(command: str) -> list[str]:
     """シェルコマンドを演算子（&&, ||, ;, &）で分割する。
     ただし引用符（単/二重）とエスケープ文字は尊重する。
@@ -30,16 +60,8 @@ def split_shell_segments(command: str) -> list[str]:
     while i < length:
         ch = command[i]
 
-        # 引用符内: エスケープと閉じ引用符を処理する
         if quote:
-            if ch == "\\" and i + 1 < length:
-                current += ch + command[i + 1]
-                i += 2
-                continue
-            if ch == quote:
-                quote = None
-            current += ch
-            i += 1
+            current, quote, i = _advance_in_quote(command, i, length, ch, quote, current)
             continue
 
         # 引用符外のバックスラッシュエスケープ
@@ -56,50 +78,30 @@ def split_shell_segments(command: str) -> list[str]:
             continue
 
         next_ch = command[i + 1] if i + 1 < length else ""
-        prev_ch = command[i - 1] if i > 0 else ""
 
-        # && 演算子
         if ch == "&" and next_ch == "&":
-            if current.strip():
-                segments.append(current.strip())
-            current = ""
+            current = _try_flush_segment(current, segments)
             i += 2
             continue
 
-        # || 演算子
         if ch == "|" and next_ch == "|":
-            if current.strip():
-                segments.append(current.strip())
-            current = ""
+            current = _try_flush_segment(current, segments)
             i += 2
             continue
 
-        # ; 区切り
         if ch == ";":
-            if current.strip():
-                segments.append(current.strip())
-            current = ""
+            current = _try_flush_segment(current, segments)
             i += 1
             continue
 
-        # 単独の & — ただしリダイレクトパターン（&>, >&, digit>&）は除外する
         if ch == "&" and next_ch != "&":
-            if next_ch == ">" or prev_ch == ">":
-                current += ch
-                i += 1
-                continue
-            if current.strip():
-                segments.append(current.strip())
-            current = ""
-            i += 1
+            current, i = _handle_ampersand(command, i, length, current, segments)
             continue
 
         current += ch
         i += 1
 
-    if current.strip():
-        segments.append(current.strip())
-
+    _try_flush_segment(current, segments)
     return segments
 
 

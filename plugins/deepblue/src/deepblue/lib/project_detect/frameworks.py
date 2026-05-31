@@ -21,6 +21,38 @@ from deepblue.lib.project_detect.languages import detect_languages
 from deepblue.lib.project_detect.rules import FRAMEWORK_RULES
 
 
+def _check_marker_files(root: Path, rule: object, detected: set[str]) -> None:
+    """ルールのマーカーファイルをチェックし、検出されたらフレームワーク名を追加する。"""
+    for marker_file in rule.files:  # type: ignore[attr-defined]
+        if "*" in marker_file:
+            if any(root.glob(marker_file)):
+                detected.add(rule.name)  # type: ignore[attr-defined]
+                break
+        elif (root / marker_file).exists():
+            detected.add(rule.name)  # type: ignore[attr-defined]
+            break
+
+
+def _check_dependency_files(root: Path, rule: object, detected: set[str]) -> None:
+    """各言語の依存ファイルをチェックし、フレームワーク名を detected に追加する。"""
+    checks = [
+        (rule.package_json, _check_package_json_deps),  # type: ignore[attr-defined]
+        (rule.requirements, _check_requirements_deps),  # type: ignore[attr-defined]
+        (rule.cargo_toml, _check_cargo_toml_deps),  # type: ignore[attr-defined]
+        (rule.go_mod, _check_go_mod_deps),  # type: ignore[attr-defined]
+        (rule.gemfile, _check_gemfile_deps),  # type: ignore[attr-defined]
+        (rule.composer_json, _check_composer_json_deps),  # type: ignore[attr-defined]
+        (rule.pubspec, _check_pubspec_deps),  # type: ignore[attr-defined]
+        (rule.pom_xml, _check_pom_xml_deps),  # type: ignore[attr-defined]
+        (rule.gradle, _check_gradle_deps),  # type: ignore[attr-defined]
+        (rule.csproj, _check_csproj_deps),  # type: ignore[attr-defined]
+    ]
+    for dep_spec, check_fn in checks:
+        if dep_spec and check_fn(root, dep_spec):
+            detected.add(rule.name)  # type: ignore[attr-defined]
+            return
+
+
 def detect_frameworks(
     project_root: str | Path,
     detected_languages: list[str] | None = None,
@@ -47,49 +79,17 @@ def detect_frameworks(
     detected: set[str] = set()
 
     for rule in FRAMEWORK_RULES:
-        # フレームワークの言語が未検出ならスキップ
         if rule.language not in detected_languages:
             continue
 
-        # マーカーファイルを確認
-        for marker_file in rule.files:
-            if "*" in marker_file:
-                if any(root.glob(marker_file)):
-                    detected.add(rule.name)
-                    break
-            elif (root / marker_file).exists():
-                detected.add(rule.name)
-                break
-
+        _check_marker_files(root, rule, detected)
         if rule.name in detected:
             continue
 
-        # 言語に応じた依存ファイルを確認
-        if rule.package_json and _check_package_json_deps(root, rule.package_json):
-            detected.add(rule.name)
-        elif rule.requirements and _check_requirements_deps(root, rule.requirements):
-            detected.add(rule.name)
-        elif rule.cargo_toml and _check_cargo_toml_deps(root, rule.cargo_toml):
-            detected.add(rule.name)
-        elif rule.go_mod and _check_go_mod_deps(root, rule.go_mod):
-            detected.add(rule.name)
-        elif rule.gemfile and _check_gemfile_deps(root, rule.gemfile):
-            detected.add(rule.name)
-        elif rule.composer_json and _check_composer_json_deps(root, rule.composer_json):
-            detected.add(rule.name)
-        elif rule.pubspec and _check_pubspec_deps(root, rule.pubspec):
-            detected.add(rule.name)
-        elif rule.pom_xml and _check_pom_xml_deps(root, rule.pom_xml):
-            detected.add(rule.name)
-        elif rule.gradle and _check_gradle_deps(root, rule.gradle):
-            detected.add(rule.name)
-        elif rule.csproj and _check_csproj_deps(root, rule.csproj):
-            detected.add(rule.name)
-
+        _check_dependency_files(root, rule, detected)
         if rule.name in detected:
             continue
 
-        # ファイル内容を確認
         if rule.file_contents and _check_file_contents(root, rule.file_contents):
             detected.add(rule.name)
 

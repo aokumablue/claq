@@ -244,6 +244,34 @@ def _clone_json_value(value: Any) -> Any:
     return json.loads(json.dumps(value))
 
 
+def _build_install_state_target(adapter: dict[str, Any], target_root: str, install_state_path: str) -> dict[str, Any]:
+    """インストール先 target 辞書を構築し、None フィールドを除去する。"""
+    target: dict[str, Any] = {
+        "id": adapter.get("id"),
+        "target": adapter.get("target"),
+        "kind": adapter.get("kind"),
+        "root": target_root,
+        "installStatePath": install_state_path,
+    }
+    if target["target"] is None:
+        del target["target"]
+    if target["kind"] is None:
+        del target["kind"]
+    return target
+
+
+def _build_install_state_request(request: dict[str, Any]) -> dict[str, Any]:
+    """インストール要求 request 辞書を正規化して返す。"""
+    return {
+        "profile": request.get("profile"),
+        "modules": list(request.get("modules", [])),
+        "includeComponents": list(request.get("includeComponents", [])),
+        "excludeComponents": list(request.get("excludeComponents", [])),
+        "legacyLanguages": list(request.get("legacyLanguages", [])),
+        "legacyMode": bool(request.get("legacyMode", False)),
+    }
+
+
 def create_install_state(
     *,
     adapter: dict[str, Any],
@@ -276,27 +304,13 @@ def create_install_state(
         例外は発生しません。
     """
     if installed_at is None:
-        # インストール時刻がなければ、生成時点を既定値にする。
         installed_at = datetime.now().isoformat()
 
     state: dict[str, Any] = {
         "schemaVersion": "deepblue.install.v1",
         "installedAt": installed_at,
-        "target": {
-            "id": adapter.get("id"),
-            "target": adapter.get("target"),
-            "kind": adapter.get("kind"),
-            "root": target_root,
-            "installStatePath": install_state_path,
-        },
-        "request": {
-            "profile": request.get("profile"),
-            "modules": list(request.get("modules", [])),
-            "includeComponents": list(request.get("includeComponents", [])),
-            "excludeComponents": list(request.get("excludeComponents", [])),
-            "legacyLanguages": list(request.get("legacyLanguages", [])),
-            "legacyMode": bool(request.get("legacyMode", False)),
-        },
+        "target": _build_install_state_target(adapter, target_root, install_state_path),
+        "request": _build_install_state_request(request),
         "resolution": {
             "selectedModules": list(resolution.get("selectedModules", [])),
             "skippedModules": list(resolution.get("skippedModules", [])),
@@ -308,12 +322,6 @@ def create_install_state(
         },
         "operations": [_clone_json_value(op) for op in (operations or [])],
     }
-
-    # target から None 値を除去する（JSでの undefined 相当）
-    if state["target"]["target"] is None:
-        del state["target"]["target"]
-    if state["target"]["kind"] is None:
-        del state["target"]["kind"]
 
     if last_validated_at:
         state["lastValidatedAt"] = last_validated_at

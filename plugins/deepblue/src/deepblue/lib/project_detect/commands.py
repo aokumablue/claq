@@ -41,6 +41,39 @@ def detect_project(project_root: str | Path) -> ProjectInfo:
     )
 
 
+def _get_js_test_command(root: Path) -> str | None:
+    """package.json の scripts からテストコマンドを推定する。"""
+    package_json = root / "package.json"
+    if not package_json.exists():
+        return None
+    scripts = _read_json_file(package_json).get("scripts", {})
+    if "test" in scripts:
+        return "npm test"
+    if "tests" in scripts:
+        return "npm run tests"
+    return None
+
+
+def _get_python_test_command(root: Path) -> str | None:
+    """Python プロジェクトのテストコマンドを推定する。"""
+    if (root / "pytest.ini").exists() or (root / "conftest.py").exists():
+        return "pytest"
+    if (root / "pyproject.toml").exists() and "pytest" in _read_text_file(root / "pyproject.toml"):
+        return "pytest"
+    return None
+
+
+def _get_ruby_test_command(root: Path) -> str | None:
+    """Ruby プロジェクトのテストコマンドを推定する。"""
+    if (root / ".rspec").exists() or (root / "spec").is_dir():
+        return "rspec"
+    if (root / "test" / "test_helper.rb").exists():
+        return "rails test" if _is_rails_app(root) else "rake test"
+    if (root / "Rakefile").exists():
+        return "rake test"
+    return None
+
+
 def get_test_command(project_root: str | Path) -> str | None:
     """プロジェクトに適したテストコマンドを取得する。
 
@@ -55,51 +88,26 @@ def get_test_command(project_root: str | Path) -> str | None:
     """
     root = Path(project_root)
 
-    # package.json の scripts を確認
-    package_json = root / "package.json"
-    if package_json.exists():
-        data = _read_json_file(package_json)
-        scripts = data.get("scripts", {})
-        if "test" in scripts:
-            return "npm test"
-        if "tests" in scripts:
-            return "npm run tests"
+    cmd = _get_js_test_command(root)
+    if cmd:
+        return cmd
 
-    # Python
-    if (root / "pytest.ini").exists() or (root / "conftest.py").exists():
-        return "pytest"
-    if (root / "pyproject.toml").exists():
-        content = _read_text_file(root / "pyproject.toml")
-        if "pytest" in content:
-            return "pytest"
+    cmd = _get_python_test_command(root)
+    if cmd:
+        return cmd
 
-    # Ruby — RSpec を優先し、test/ は Rails と素の Minitest を区別する
-    if (root / ".rspec").exists() or (root / "spec").is_dir():
-        return "rspec"
-    if (root / "test" / "test_helper.rb").exists():
-        # Rails も Minitest を test/test_helper.rb で使うが実行は `rails test`。
-        # Rails マーカーが無ければ素の Minitest プロジェクトとみなし `rake test`。
-        if _is_rails_app(root):
-            return "rails test"
-        return "rake test"
-    if (root / "Rakefile").exists():
-        return "rake test"
+    cmd = _get_ruby_test_command(root)
+    if cmd:
+        return cmd
 
-    # Go
     if (root / "go.mod").exists():
         return "go test ./..."
-
-    # Rust
     if (root / "Cargo.toml").exists():
         return "cargo test"
-
-    # Java
     if (root / "pom.xml").exists():
         return "mvn test"
     if (root / "build.gradle").exists() or (root / "build.gradle.kts").exists():
         return "./gradlew test"
-
-    # Elixir
     if (root / "mix.exs").exists():
         return "mix test"
 

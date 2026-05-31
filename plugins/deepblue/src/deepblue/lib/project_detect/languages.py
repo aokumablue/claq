@@ -58,6 +58,36 @@ def detect_languages(project_root: str | Path) -> list[str]:
     return sorted(detected)
 
 
+_SKIP_DIRS = frozenset(["node_modules", "__pycache__", "venv", ".venv"])
+
+
+def _scan_dir(directory: Path, depth: int, files: list[Path], max_depth: int, max_files: int) -> None:
+    """ディレクトリを再帰的に探索し、見つかったファイルを files リストに追加する。
+
+    Args:
+        directory: 探索対象ディレクトリ。
+        depth: 現在の探索深さ。
+        files: 結果を蓄積するリスト。
+        max_depth: 探索する最大深さ。
+        max_files: 蓄積する最大ファイル数。
+    """
+    if depth > max_depth or len(files) >= max_files:
+        return
+    try:
+        entries = list(directory.iterdir())
+    except (PermissionError, OSError):
+        return
+    for entry in entries:
+        if len(files) >= max_files:
+            return
+        if entry.name.startswith(".") or entry.name in _SKIP_DIRS:
+            continue
+        if entry.is_file():
+            files.append(entry)
+        elif entry.is_dir():
+            _scan_dir(entry, depth + 1, files, max_depth, max_files)
+
+
 def _limited_file_scan(
     root: Path,
     max_depth: int = 3,
@@ -77,45 +107,5 @@ def _limited_file_scan(
         例外は発生しません。
     """
     files: list[Path] = []
-
-    def scan(directory: Path, depth: int) -> None:
-        """ディレクトリを再帰的に探索し、見つかったファイルを外側の files リストに追加する。
-
-        Args:
-            directory: 探索対象ディレクトリ。
-            depth: 現在の探索深さ。
-
-        Returns:
-            None: 結果は外側の files リストに追加されます。
-
-        Raises:
-            例外は発生しません。
-        """
-        if depth > max_depth or len(files) >= max_files:
-            return
-
-        try:
-            entries = list(directory.iterdir())
-        except (PermissionError, OSError):
-            return
-
-        for entry in entries:
-            if len(files) >= max_files:
-                return
-
-            if entry.name.startswith("."):
-                continue
-            if entry.name == "node_modules":
-                continue
-            if entry.name == "__pycache__":
-                continue
-            if entry.name == "venv" or entry.name == ".venv":
-                continue
-
-            if entry.is_file():
-                files.append(entry)
-            elif entry.is_dir():
-                scan(entry, depth + 1)
-
-    scan(root, 0)
+    _scan_dir(root, 0, files, max_depth, max_files)
     return files
