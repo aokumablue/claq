@@ -130,6 +130,8 @@ _PYTEST_FAIL = re.compile(r"^FAILED\s+(?P<test>[^\s]+)\s+-\s+(?P<reason>.+)$")
 
 @dataclass
 class _LintGroup:
+    """同一ルールの lint 結果を件数・対象ファイルとともに集約する。"""
+
     rule: str
     severity: str
     count: int = 0
@@ -147,9 +149,10 @@ def _fmt_files(files: list[str], max_show: int = 3) -> str:
     return result
 
 
-def group_lint_errors(text: str) -> str:
-    """ESLint/ruff/pytest スタイルのエラーをルール別にグループ化して圧縮する。"""
-    lines = text.splitlines()
+def _classify_lint_lines(
+    lines: list[str],
+) -> tuple[dict, dict, dict, set]:
+    """行リストを ESLint/ruff/pytest グループに分類してインデックスセットとともに返す。"""
     eslint_groups: dict[str, _LintGroup] = {}
     ruff_groups: dict[str, _LintGroup] = {}
     pytest_groups: dict[str, list[str]] = {}
@@ -167,7 +170,6 @@ def group_lint_errors(text: str) -> str:
                 eslint_groups[rule].files.append(f)
             grouped_indices.add(i)
             continue
-
         m = _RUFF_LINE.match(line)
         if m:
             code = m.group("code")
@@ -179,17 +181,22 @@ def group_lint_errors(text: str) -> str:
                 ruff_groups[code].files.append(f)
             grouped_indices.add(i)
             continue
-
         m = _PYTEST_FAIL.match(line)
         if m:
-            # 理由の先頭60文字をグループキーにする
             reason = m.group("reason")[:60]
             pytest_groups.setdefault(reason, []).append(m.group("test"))
             grouped_indices.add(i)
 
-    # グループ化されなかった行をそのまま保持
-    output_parts: list[str] = [line for i, line in enumerate(lines) if i not in grouped_indices]
+    return eslint_groups, ruff_groups, pytest_groups, grouped_indices
 
+
+def _render_lint_groups(
+    output_parts: list[str],
+    eslint_groups: dict,
+    ruff_groups: dict,
+    pytest_groups: dict,
+) -> None:
+    """グループ化済みの lint 結果をサマリ形式で output_parts に追記する。"""
     if eslint_groups:
         output_parts.append("--- ESLint/TSLint (グループ化) ---")
         for rule, g in sorted(eslint_groups.items(), key=lambda x: -x[1].count):
@@ -198,19 +205,24 @@ def group_lint_errors(text: str) -> str:
             output_parts.append(f"  {_fmt_files(g.files)}")
             if g.first_msg:
                 output_parts.append(f"  例: {g.first_msg[:80]}")
-
     if ruff_groups:
         output_parts.append("--- ruff/flake8 (グループ化) ---")
         for code, g in sorted(ruff_groups.items(), key=lambda x: -x[1].count):
             output_parts.append(f"[{code}]: {g.count}件 — {g.first_msg[:60]}")
             output_parts.append(f"  {_fmt_files(g.files)}")
-
     if pytest_groups:
         output_parts.append("--- pytest FAILED (グループ化) ---")
         for reason, tests in sorted(pytest_groups.items(), key=lambda x: -len(x[1])):
             output_parts.append(f"{len(tests)}件 — {reason}")
             output_parts.append(f"  {_fmt_files(tests)}")
 
+
+def group_lint_errors(text: str) -> str:
+    """ESLint/ruff/pytest スタイルのエラーをルール別にグループ化して圧縮する。"""
+    lines = text.splitlines()
+    eslint_groups, ruff_groups, pytest_groups, grouped_indices = _classify_lint_lines(lines)
+    output_parts: list[str] = [ln for i, ln in enumerate(lines) if i not in grouped_indices]
+    _render_lint_groups(output_parts, eslint_groups, ruff_groups, pytest_groups)
     return "\n".join(output_parts)
 
 

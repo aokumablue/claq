@@ -233,6 +233,7 @@ class QueryApi:
     """state store 用クエリ API。"""
 
     def __init__(self, conn: sqlite3.Connection):
+        """SQLite 接続を受け取りクエリ API を初期化する。"""
         self._conn = conn
 
     def get_session_by_id(self, session_id: str) -> Session | None:
@@ -455,16 +456,11 @@ class QueryApi:
             created_at=normalized["created_at"],
         )
 
-    def upsert_install_state(self, install_state: dict) -> InstallStateRecord:
-        """インストール状態を挿入または更新する。"""
+    def _normalize_install_state(self, install_state: dict) -> tuple[dict, list, list]:
+        """インストール状態辞書を正規化し、(normalized, modules, operations) を返す。"""
         now = datetime.now().isoformat()
-        modules = install_state.get("modules")
-        if modules is None:
-            modules = []
-        operations = install_state.get("operations")
-        if operations is None:
-            operations = []
-
+        modules = install_state.get("modules") or []
+        operations = install_state.get("operations") or []
         normalized = {
             "target_id": install_state["targetId"],
             "target_root": install_state["targetRoot"],
@@ -474,7 +470,10 @@ class QueryApi:
             "installed_at": install_state.get("installedAt", now),
             "source_version": install_state.get("sourceVersion"),
         }
+        return normalized, modules, operations
 
+    def _execute_upsert_install_state(self, normalized: dict) -> None:
+        """install_state テーブルに upsert クエリを実行する。"""
         self._conn.execute(
             """
             INSERT INTO install_state (
@@ -493,6 +492,10 @@ class QueryApi:
         )
         self._conn.commit()
 
+    def upsert_install_state(self, install_state: dict) -> InstallStateRecord:
+        """インストール状態を挿入または更新する。"""
+        normalized, modules, operations = self._normalize_install_state(install_state)
+        self._execute_upsert_install_state(normalized)
         status = "healthy" if normalized["source_version"] and normalized["installed_at"] else "warning"
         return InstallStateRecord(
             target_id=normalized["target_id"],
@@ -549,15 +552,8 @@ class QueryApi:
             created_at=normalized["created_at"],
         )
 
-    def get_status(
-        self,
-        *,
-        active_limit: int = 5,
-        recent_skill_run_limit: int = 20,
-        pending_limit: int = 5,
-    ) -> dict:
-        """全体ステータスを取得する。"""
-        # アクティブなセッション
+    def _query_active_sessions(self, active_limit: int) -> tuple[int, list]:
+        """アクティブセッションの件数と一覧を取得する。"""
         cursor = self._conn.execute(
             """
             SELECT COUNT(*) FROM sessions
@@ -565,7 +561,6 @@ class QueryApi:
             """
         )
         active_count = cursor.fetchone()[0]
-
         cursor = self._conn.execute(
             """
             SELECT * FROM sessions
@@ -576,8 +571,10 @@ class QueryApi:
             (active_limit,),
         )
         active_sessions = [_map_session_row(row) for row in cursor.fetchall()]
+        return active_count, active_sessions
 
-        # 最近のスキル実行
+    def _query_skill_summary(self, recent_skill_run_limit: int) -> tuple[list, dict]:
+        """最近のスキル実行一覧と集計サマリーを取得する。"""
         cursor = self._conn.execute(
             """
             SELECT * FROM skill_runs
@@ -587,9 +584,7 @@ class QueryApi:
             (recent_skill_run_limit,),
         )
         recent_skill_runs = [_map_skill_run_row(row) for row in cursor.fetchall()]
-
-        # スキル実行を集計
-        skill_summary = {
+        skill_summary: dict = {
             "totalCount": len(recent_skill_runs),
             "knownCount": 0,
             "successCount": 0,
@@ -608,11 +603,12 @@ class QueryApi:
                 skill_summary["knownCount"] += 1
             else:
                 skill_summary["unknownCount"] += 1
-
         skill_summary["successRate"] = _to_percent(skill_summary["successCount"], skill_summary["knownCount"])
         skill_summary["failureRate"] = _to_percent(skill_summary["failureCount"], skill_summary["knownCount"])
+        return recent_skill_runs, skill_summary
 
-        # インストール状態
+    def _query_install_health(self) -> dict:
+        """インストール状態の健全性サマリーを取得する。"""
         cursor = self._conn.execute(
             """
             SELECT * FROM install_state
@@ -620,8 +616,7 @@ class QueryApi:
             """
         )
         installations = [_map_install_state_row(row) for row in cursor.fetchall()]
-
-        install_health = {
+        return {
             "status": "missing"
             if not installations
             else ("warning" if any(i.status == "warning" for i in installations) else "healthy"),
@@ -631,10 +626,10 @@ class QueryApi:
             "installations": installations,
         }
 
-        # 保留中のガバナンスイベント
+    def _query_pending_governance(self, pending_limit: int) -> tuple[int, list]:
+        """未解決ガバナンスイベントの件数と一覧を取得する。"""
         cursor = self._conn.execute("SELECT COUNT(*) FROM governance_events WHERE resolved_at IS NULL")
         pending_count = cursor.fetchone()[0]
-
         cursor = self._conn.execute(
             """
             SELECT * FROM governance_events
@@ -645,7 +640,20 @@ class QueryApi:
             (pending_limit,),
         )
         pending_events = [_map_governance_event_row(row) for row in cursor.fetchall()]
+        return pending_count, pending_events
 
+    def get_status(
+        self,
+        *,
+        active_limit: int = 5,
+        recent_skill_run_limit: int = 20,
+        pending_limit: int = 5,
+    ) -> dict:
+        """全体ステータスを取得する。"""
+        active_count, active_sessions = self._query_active_sessions(active_limit)
+        recent_skill_runs, skill_summary = self._query_skill_summary(recent_skill_run_limit)
+        install_health = self._query_install_health()
+        pending_count, pending_events = self._query_pending_governance(pending_limit)
         return {
             "generatedAt": datetime.now().isoformat(),
             "activeSessions": {

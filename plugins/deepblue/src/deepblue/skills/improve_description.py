@@ -32,73 +32,9 @@ def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
     return result.stdout
 
 
-def improve_description(
-    skill_name: str,
-    skill_content: str,
-    current_description: str,
-    eval_results: dict,
-    history: list[dict],
-    model: str,
-    test_results: dict | None = None,
-    log_dir: Path | None = None,
-    iteration: int | None = None,
-) -> str:
-    """eval 結果に基づいて Claude に説明文の改善を依頼する。"""
-    failed_triggers = [r for r in eval_results["results"] if r["should_trigger"] and not r["pass"]]
-    false_triggers = [r for r in eval_results["results"] if not r["should_trigger"] and not r["pass"]]
-
-    # スコアのサマリーを作る
-    train_score = f"{eval_results['summary']['passed']}/{eval_results['summary']['total']}"
-    if test_results:
-        test_score = f"{test_results['summary']['passed']}/{test_results['summary']['total']}"
-        scores_summary = f"学習用: {train_score}, 検証用: {test_score}"
-    else:
-        scores_summary = f"学習用: {train_score}"
-
-    prompt = f"""あなたは "{skill_name}" というスキルの説明文を最適化しています。スキルはプロンプトに少し似ていますが、段階的に情報を開示する仕組みです。エージェントはスキルを使うかどうかを判断するとき、まずタイトルと説明だけを見ます。スキルを使うと判断した場合は .md ファイルを読み、補助ファイルやスクリプト、追加ドキュメントや例も参照します。
-
-この説明は "available_skills" 一覧に表示されます。ユーザーからクエリが来ると、エージェントはタイトルとこの説明だけを頼りにスキルを起動するかどうかを決めます。目的は、関連するクエリでは確実にトリガーし、無関係なクエリではトリガーしない説明を書くことです。
-
-現在の説明:
-<current_description>
-"{current_description}"
-</current_description>
-
-現在のスコア ({scores_summary}):
-<scores_summary>
-"""
-    if failed_triggers:
-        prompt += "トリガー漏れ（本来トリガーすべきだった）:\n"
-        for r in failed_triggers:
-            prompt += f'  - "{r["query"]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
-        prompt += "\n"
-
-    if false_triggers:
-        prompt += "誤トリガー（トリガーすべきでなかった）:\n"
-        for r in false_triggers:
-            prompt += f'  - "{r["query"]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
-        prompt += "\n"
-
-    if history:
-        prompt += "過去の試行（これらは繰り返さず、構造を変えてください）:\n\n"
-        for h in history:
-            train_s = f"{h.get('train_passed', h.get('passed', 0))}/{h.get('train_total', h.get('total', 0))}"
-            test_s = (
-                f"{h.get('test_passed', '?')}/{h.get('test_total', '?')}" if h.get("test_passed") is not None else None
-            )
-            score_str = f"train={train_s}" + (f", test={test_s}" if test_s else "")
-            prompt += f"<attempt {score_str}>\n"
-            prompt += f'説明: "{h["description"]}"\n'
-            if "results" in h:
-                prompt += "学習結果:\n"
-                for r in h["results"]:
-                    status = "合格" if r["pass"] else "不合格"
-                    prompt += f'  [{status}] "{r["query"][:80]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
-            if h.get("note"):
-                prompt += f"備考: {h['note']}\n"
-            prompt += "</attempt>\n\n"
-
-    prompt += f"""</scores_summary>
+def _build_prompt_suffix(skill_content: str) -> str:
+    """プロンプトの後半（スキル内容・ガイドライン）を返す。"""
+    return f"""</scores_summary>
 
 スキル内容（スキルが何をするかの参考）:
 <skill_content>
@@ -122,6 +58,114 @@ def improve_description(
 
 新しい説明文以外は出力しないでください。<new_description> タグの中だけに入れて返してください。"""
 
+
+def _build_improve_prompt(
+    skill_name: str,
+    skill_content: str,
+    current_description: str,
+    eval_results: dict,
+    history: list[dict],
+    test_results: dict | None,
+) -> str:
+    """説明文改善用プロンプトを組み立てて返す。"""
+    failed_triggers = [r for r in eval_results["results"] if r["should_trigger"] and not r["pass"]]
+    false_triggers = [r for r in eval_results["results"] if not r["should_trigger"] and not r["pass"]]
+    train_score = f"{eval_results['summary']['passed']}/{eval_results['summary']['total']}"
+    if test_results:
+        test_score = f"{test_results['summary']['passed']}/{test_results['summary']['total']}"
+        scores_summary = f"学習用: {train_score}, 検証用: {test_score}"
+    else:
+        scores_summary = f"学習用: {train_score}"
+    prompt = (
+        f'あなたは "{skill_name}" というスキルの説明文を最適化しています。'
+        "スキルはプロンプトに少し似ていますが、段階的に情報を開示する仕組みです。"
+        'この説明は "available_skills" 一覧に表示されます。\n\n'
+        f'現在の説明:\n<current_description>\n"{current_description}"\n</current_description>\n\n'
+        f"現在のスコア ({scores_summary}):\n<scores_summary>\n"
+    )
+    if failed_triggers:
+        prompt += "トリガー漏れ（本来トリガーすべきだった）:\n"
+        for r in failed_triggers:
+            prompt += f'  - "{r["query"]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
+        prompt += "\n"
+    if false_triggers:
+        prompt += "誤トリガー（トリガーすべきでなかった）:\n"
+        for r in false_triggers:
+            prompt += f'  - "{r["query"]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
+        prompt += "\n"
+    if history:
+        prompt += _format_history_section(history)
+    return prompt + _build_prompt_suffix(skill_content)
+
+
+def _format_history_section(history: list[dict]) -> str:
+    """過去の試行履歴をプロンプト用テキストとしてフォーマットして返す。"""
+    text = "過去の試行（これらは繰り返さず、構造を変えてください）:\n\n"
+    for h in history:
+        train_s = f"{h.get('train_passed', h.get('passed', 0))}/{h.get('train_total', h.get('total', 0))}"
+        test_s = (
+            f"{h.get('test_passed', '?')}/{h.get('test_total', '?')}" if h.get("test_passed") is not None else None
+        )
+        score_str = f"train={train_s}" + (f", test={test_s}" if test_s else "")
+        text += f"<attempt {score_str}>\n"
+        text += f'説明: "{h["description"]}"\n'
+        if "results" in h:
+            text += "学習結果:\n"
+            for r in h["results"]:
+                status = "合格" if r["pass"] else "不合格"
+                text += f'  [{status}] "{r["query"][:80]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
+        if h.get("note"):
+            text += f"備考: {h['note']}\n"
+        text += "</attempt>\n\n"
+    return text
+
+
+def _shorten_description_if_needed(
+    description: str,
+    prompt: str,
+    model: str,
+    transcript: dict,
+) -> str:
+    """1024 文字超の説明を再度 LLM に短縮依頼し、短縮版を返す。"""
+    if len(description) <= 1024:
+        return description
+
+    shorten_prompt = (
+        f"{prompt}\n\n"
+        "---\n\n"
+        f"A previous attempt produced this description, which at "
+        f"{len(description)} characters is over the 1024-character hard limit:\n\n"
+        f'"{description}"\n\n'
+        "Rewrite it to be under 1024 characters while keeping the most "
+        "important trigger words and intent coverage. Respond with only "
+        "the new description in <new_description> tags."
+    )
+    shorten_text = _call_claude(shorten_prompt, model)
+    match = re.search(r"<new_description>(.*?)</new_description>", shorten_text, re.DOTALL)
+    shortened = match.group(1).strip().strip('"') if match else shorten_text.strip().strip('"')
+
+    transcript["rewrite_prompt"] = shorten_prompt
+    transcript["rewrite_response"] = shorten_text
+    transcript["rewrite_description"] = shortened
+    transcript["rewrite_char_count"] = len(shortened)
+    return shortened
+
+
+def improve_description(
+    skill_name: str,
+    skill_content: str,
+    current_description: str,
+    eval_results: dict,
+    history: list[dict],
+    model: str,
+    test_results: dict | None = None,
+    log_dir: Path | None = None,
+    iteration: int | None = None,
+) -> str:
+    """eval 結果に基づいて Claude に説明文の改善を依頼する。"""
+    prompt = _build_improve_prompt(
+        skill_name, skill_content, current_description, eval_results, history, test_results
+    )
     text = _call_claude(prompt, model)
 
     match = re.search(r"<new_description>(.*?)</new_description>", text, re.DOTALL)
@@ -136,32 +180,7 @@ def improve_description(
         "over_limit": len(description) > 1024,
     }
 
-    # Safety net: the prompt already states the 1024-char hard limit, but if
-    # the model blew past it anyway, make one fresh single-turn call that
-    # quotes the too-long version and asks for a shorter rewrite. (The old
-    # SDK path did this as a true multi-turn; `claude -p` is one-shot, so we
-    # inline the prior output into the new prompt instead.)
-    if len(description) > 1024:
-        shorten_prompt = (
-            f"{prompt}\n\n"
-            "---\n\n"
-            f"A previous attempt produced this description, which at "
-            f"{len(description)} characters is over the 1024-character hard limit:\n\n"
-            f'"{description}"\n\n'
-            "Rewrite it to be under 1024 characters while keeping the most "
-            "important trigger words and intent coverage. Respond with only "
-            "the new description in <new_description> tags."
-        )
-        shorten_text = _call_claude(shorten_prompt, model)
-        match = re.search(r"<new_description>(.*?)</new_description>", shorten_text, re.DOTALL)
-        shortened = match.group(1).strip().strip('"') if match else shorten_text.strip().strip('"')
-
-        transcript["rewrite_prompt"] = shorten_prompt
-        transcript["rewrite_response"] = shorten_text
-        transcript["rewrite_description"] = shortened
-        transcript["rewrite_char_count"] = len(shortened)
-        description = shortened
-
+    description = _shorten_description_if_needed(description, prompt, model, transcript)
     transcript["final_description"] = description
 
     if log_dir:
@@ -172,7 +191,30 @@ def improve_description(
     return description
 
 
+def _build_improve_output(
+    new_description: str,
+    current_description: str,
+    eval_results: dict,
+    history: list[dict],
+) -> dict:
+    """improve_description の JSON 出力用辞書を構築して返す。"""
+    return {
+        "description": new_description,
+        "history": history
+        + [
+            {
+                "description": current_description,
+                "passed": eval_results["summary"]["passed"],
+                "failed": eval_results["summary"]["failed"],
+                "total": eval_results["summary"]["total"],
+                "results": eval_results["results"],
+            }
+        ],
+    }
+
+
 def main():
+    """improve_description CLI のエントリポイント。引数を解析してスキル説明の改善を実行する。"""
     parser = argparse.ArgumentParser(description="eval 結果に基づいてスキル説明を改善する")
     parser.add_argument("--eval-results", required=True, help="eval 結果 JSON へのパス（run_eval.py の出力）")
     parser.add_argument("--skill-path", required=True, help="スキルディレクトリへのパス")
@@ -210,20 +252,7 @@ def main():
     if args.verbose:
         print(f"改善後: {new_description}", file=sys.stderr)
 
-    # 新しい説明と更新済み履歴を JSON で出力する
-    output = {
-        "description": new_description,
-        "history": history
-        + [
-            {
-                "description": current_description,
-                "passed": eval_results["summary"]["passed"],
-                "failed": eval_results["summary"]["failed"],
-                "total": eval_results["summary"]["total"],
-                "results": eval_results["results"],
-            }
-        ],
-    }
+    output = _build_improve_output(new_description, current_description, eval_results, history)
     print(json.dumps(output, indent=2))
 
 

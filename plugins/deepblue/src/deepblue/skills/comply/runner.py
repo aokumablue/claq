@@ -26,9 +26,31 @@ _ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 
 @dataclass(frozen=True)
 class ScenarioRun:
+    """シナリオ1回の実行結果（観測イベントとサンドボックス）を表す。"""
+
     scenario: Scenario
     observations: tuple[ObservationEvent, ...]
     sandbox_dir: Path
+
+
+def _build_run_cmd(binary: str, scenario: Scenario, model: str, max_turns: int, sandbox_dir: Path) -> list[str]:
+    """LLM CLI 実行コマンドのリストを組み立てて返す。"""
+    cmd = [
+        binary,
+        "-p",
+        scenario.prompt,
+        "--model",
+        model,
+        "--max-turns",
+        str(max_turns),
+        "--add-dir",
+        str(sandbox_dir),
+        *build_tools_args(binary, _ALLOWED_TOOLS),
+        *build_output_format_args(binary, "stream-json"),
+    ]
+    if binary == "claude":
+        cmd.append("--verbose")
+    return cmd
 
 
 def run_scenario(
@@ -48,22 +70,7 @@ def run_scenario(
     sandbox_dir = _safe_sandbox_dir(scenario.id)
     _setup_sandbox(sandbox_dir, scenario)
 
-    cmd = [
-        binary,
-        "-p",
-        scenario.prompt,
-        "--model",
-        model,
-        "--max-turns",
-        str(max_turns),
-        "--add-dir",
-        str(sandbox_dir),
-        *build_tools_args(binary, _ALLOWED_TOOLS),
-        *build_output_format_args(binary, "stream-json"),
-    ]
-    if binary == "claude":
-        cmd.append("--verbose")
-
+    cmd = _build_run_cmd(binary, scenario, model, max_turns, sandbox_dir)
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -107,6 +114,52 @@ def _setup_sandbox(sandbox_dir: Path, scenario: Scenario) -> None:
         subprocess.run(parts, cwd=sandbox_dir, capture_output=True)
 
 
+def _process_assistant_message(msg: dict, pending: dict[str, dict], event_counter: int) -> int:
+    """assistant メッセージから tool_use ブロックを pending に登録し、更新後のカウンタを返す。"""
+    content = msg.get("message", {}).get("content", [])
+    for block in content:
+        if block.get("type") == "tool_use":
+            tool_use_id = block.get("id", "")
+            tool_input = block.get("input", {})
+            input_str = (
+                json.dumps(tool_input)[:5000] if isinstance(tool_input, dict) else str(tool_input)[:5000]
+            )
+            pending[tool_use_id] = {
+                "tool": block.get("name", "unknown"),
+                "input": input_str,
+                "order": event_counter,
+            }
+            event_counter += 1
+    return event_counter
+
+
+def _process_user_message(msg: dict, pending: dict[str, dict], events: list[ObservationEvent]) -> None:
+    """user メッセージから tool_result ブロックを取り出し、ObservationEvent を events に追加する。"""
+    content = msg.get("message", {}).get("content", [])
+    if not isinstance(content, list):
+        return
+    for block in content:
+        tool_use_id = block.get("tool_use_id", "")
+        if tool_use_id not in pending:
+            continue
+        info = pending.pop(tool_use_id)
+        output_content = block.get("content", "")
+        if isinstance(output_content, list):
+            output_str = json.dumps(output_content)[:5000]
+        else:
+            output_str = str(output_content)[:5000]
+        events.append(
+            ObservationEvent(
+                timestamp=f"T{info['order']:04d}",
+                event="tool_complete",
+                tool=info["tool"],
+                session=msg.get("session_id", "unknown"),
+                input=info["input"],
+                output=output_str,
+            )
+        )
+
+
 def _parse_stream_json(stdout: str) -> list[ObservationEvent]:
     """claude の stream-json 出力を ObservationEvent に変換する。
 
@@ -125,46 +178,10 @@ def _parse_stream_json(stdout: str) -> list[ObservationEvent]:
             continue
 
         msg_type = msg.get("type")
-
         if msg_type == "assistant":
-            content = msg.get("message", {}).get("content", [])
-            for block in content:
-                if block.get("type") == "tool_use":
-                    tool_use_id = block.get("id", "")
-                    tool_input = block.get("input", {})
-                    input_str = (
-                        json.dumps(tool_input)[:5000] if isinstance(tool_input, dict) else str(tool_input)[:5000]
-                    )
-                    pending[tool_use_id] = {
-                        "tool": block.get("name", "unknown"),
-                        "input": input_str,
-                        "order": event_counter,
-                    }
-                    event_counter += 1
-
+            event_counter = _process_assistant_message(msg, pending, event_counter)
         elif msg_type == "user":
-            content = msg.get("message", {}).get("content", [])
-            if isinstance(content, list):
-                for block in content:
-                    tool_use_id = block.get("tool_use_id", "")
-                    if tool_use_id in pending:
-                        info = pending.pop(tool_use_id)
-                        output_content = block.get("content", "")
-                        if isinstance(output_content, list):
-                            output_str = json.dumps(output_content)[:5000]
-                        else:
-                            output_str = str(output_content)[:5000]
-
-                        events.append(
-                            ObservationEvent(
-                                timestamp=f"T{info['order']:04d}",
-                                event="tool_complete",
-                                tool=info["tool"],
-                                session=msg.get("session_id", "unknown"),
-                                input=info["input"],
-                                output=output_str,
-                            )
-                        )
+            _process_user_message(msg, pending, events)
 
     for _tool_use_id, info in pending.items():
         events.append(

@@ -145,6 +145,52 @@ def resolve_target_command(
     return [sys.executable, "-m", target, *args]
 
 
+def _drain_stdin() -> None:
+    """フック無効時に stdin を読み捨てる。"""
+    stdin_buffer = getattr(sys.stdin, "buffer", None)
+    if stdin_buffer is not None:
+        stdin_buffer.read()
+    else:
+        sys.stdin.read()
+
+
+def _run_target(hook_id: str, target: str, target_args: list[str], raw: str) -> int:
+    """ターゲットをサブプロセスで実行し、stdout/stderr を転送して終了コードを返す。
+
+    Args:
+        hook_id: フック ID（SESSION_START_HOOK_IDS 判定に使用）。
+        target: ターゲットのパスまたはモジュール名。
+        target_args: ターゲットへ渡す追加引数。
+        raw: 子プロセスへ渡す stdin。
+
+    Returns:
+        子プロセスの終了コード。OSError 発生時は 1。
+    """
+    try:
+        result = subprocess.run(
+            resolve_target_command(target, target_args, plugin_root=REPO_ROOT),
+            input=raw,
+            text=True,
+            capture_output=True,
+            env=build_env(),
+        )
+    except OSError as err:
+        write_stderr(f"[Hook] Error running {hook_id}: {err}\n")
+        return 1
+
+    if result.stdout:
+        write_stdout(result.stdout)
+    elif hook_id in SESSION_START_HOOK_IDS:
+        write_stdout(emit_session_start_output())
+
+    if result.stderr:
+        write_stderr(result.stderr)
+
+    if hook_id in SESSION_START_HOOK_IDS and result.returncode != 0:
+        return 0
+    return result.returncode
+
+
 def main() -> int:
     """フックランチャーのメイン処理を実行します。
 
@@ -167,48 +213,15 @@ def main() -> int:
     target_args = sys.argv[4:] if len(sys.argv) > 4 else []
 
     if not is_hook_enabled(hook_id, profiles=profiles_csv):
-        # フック無効時は stdin を読み捨てて終了する（stdout は空のまま）。
-        stdin_buffer = getattr(sys.stdin, "buffer", None)
-        if stdin_buffer is not None:
-            stdin_buffer.read()
-        else:
-            sys.stdin.read()
+        _drain_stdin()
         return 0
 
     raw, truncated = read_raw_stdin_with_truncation()
-
-    # 切り捨てが発生した状態で保護系フックへ渡すとバイパスに悪用されうるため、
-    # run_with_flags 側でブロックする（該当フックに限定）。
     if truncated and hook_id in _TRUNCATION_GUARD_HOOK_IDS:
         write_stderr(_truncation_blocked_message(hook_id, MAX_STDIN_BYTES) + "\n")
         return 2
 
-    try:
-        result = subprocess.run(
-            resolve_target_command(target, target_args, plugin_root=REPO_ROOT),
-            input=raw,
-            text=True,
-            capture_output=True,
-            env=build_env(),
-        )
-    except OSError as err:
-        write_stderr(f"[Hook] Error running {hook_id}: {err}\n")
-        return 1
-
-    if result.stdout:
-        write_stdout(result.stdout)
-    elif hook_id in SESSION_START_HOOK_IDS:
-        write_stdout(emit_session_start_output())
-    # SESSION_START_HOOK_IDS 以外は子が空 stdout を返した場合も stdout を出さない。
-
-    if result.stderr:
-        write_stderr(result.stderr)
-
-    # SessionStart 系フックで子が非 0 終了しても "Failed with non-blocking status code" を出さない。
-    # stdout には既に上で hookSpecificOutput JSON が書き出されている。
-    if hook_id in SESSION_START_HOOK_IDS and result.returncode != 0:
-        return 0
-    return result.returncode
+    return _run_target(hook_id, target, target_args, raw)
 
 
 if __name__ == "__main__":

@@ -293,6 +293,41 @@ def import_event_logs(db: Database, origin_user: str, project_id: str | None = N
     return count
 
 
+def _parse_ts_to_epoch(ts: object) -> int:
+    """タイムスタンプ値をエポック秒に変換する（ISO 文字列・数値に対応）。"""
+    if isinstance(ts, str):
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            return int(dt.timestamp())
+        except Exception:
+            return int(time.time())
+    if isinstance(ts, (int, float)):
+        return int(ts)
+    return int(time.time())
+
+
+def _build_event_log(
+    data: dict,
+    event_type: str,
+    project_id: str | None,
+    origin_user: str,
+) -> EventLog:
+    """JSONL 行データから EventLog オブジェクトを構築する。"""
+    ts = data.get("timestamp") or data.get("ts") or data.get("created_at")
+    epoch = _parse_ts_to_epoch(ts)
+    content_str = json.dumps(data, sort_keys=True, ensure_ascii=False)
+    content_hash = hashlib.sha256(content_str.encode()).hexdigest()[:16]
+    return EventLog(
+        id=f"{event_type}-{epoch}-{content_hash}",
+        origin_user=origin_user,
+        event_type=event_type,
+        project_id=project_id,
+        content=content_str,
+        created_at_epoch=epoch,
+    )
+
+
 def _import_jsonl_events(
     db: Database,
     file_path: Path,
@@ -310,34 +345,7 @@ def _import_jsonl_events(
                     continue
                 try:
                     data = json.loads(line)
-                    # タイムスタンプ取得（複数フォーマット対応）
-                    ts = data.get("timestamp") or data.get("ts") or data.get("created_at")
-                    if isinstance(ts, str):
-                        # ISO 形式をエポックに変換
-                        try:
-                            from datetime import datetime
-
-                            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                            epoch = int(dt.timestamp())
-                        except Exception:
-                            epoch = int(time.time())
-                    elif isinstance(ts, (int, float)):
-                        epoch = int(ts)
-                    else:
-                        epoch = int(time.time())
-
-                    # content のハッシュベースで ID 生成（重複防止）
-                    content_str = json.dumps(data, sort_keys=True, ensure_ascii=False)
-                    content_hash = hashlib.sha256(content_str.encode()).hexdigest()[:16]
-
-                    event = EventLog(
-                        id=f"{event_type}-{epoch}-{content_hash}",
-                        origin_user=origin_user,
-                        event_type=event_type,
-                        project_id=project_id,
-                        content=content_str,
-                        created_at_epoch=epoch,
-                    )
+                    event = _build_event_log(data, event_type, project_id, origin_user)
                     db.store_event_log(event)
                     count += 1
                 except json.JSONDecodeError:

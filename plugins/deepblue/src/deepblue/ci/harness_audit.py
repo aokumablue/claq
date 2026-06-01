@@ -4,12 +4,31 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from deepblue.ci.harness_audit_repo_checks import get_repo_checks
+from deepblue.ci.harness_audit_utils import (
+    _command_parity_matches as _command_parity_matches,
+)
+from deepblue.ci.harness_audit_utils import (
+    _has_any_file as _has_any_file,
+)
+from deepblue.ci.harness_audit_utils import (
+    _has_gitlab_security_scanning,
+    count_files,
+    detect_target_mode,
+    file_exists,
+    find_plugin_install,
+    has_file_with_extension,
+    safe_parse_json,
+    safe_read,
+)
+from deepblue.ci.harness_audit_utils import (
+    read_text as read_text,
+)
 from deepblue.lib.git_hosting import (
     detect_git_hosting_service,
     get_git_hosting_service_label,
@@ -28,17 +47,6 @@ CATEGORIES = [
 
 VALID_SCOPES = {"repo", "hooks", "skills", "commands", "agents"}
 VALID_FORMATS = {"text", "json"}
-REPO_CORE_MARKERS = [
-    ".claude-plugin/plugin.json",
-    "agents",
-    "skills",
-]
-HARNESS_MARKERS = [
-    "src/deepblue/ci/harness_audit.py",
-]
-COMMAND_PARITY_PAIRS = [
-    ("commands/harness.md", ".opencode/commands/harness.md"),
-]
 
 
 def normalize_scope(scope: str | None) -> str:
@@ -47,6 +55,57 @@ def normalize_scope(scope: str | None) -> str:
     if value not in VALID_SCOPES:
         raise ValueError(f"Invalid scope: {scope}")
     return value
+
+
+def _apply_arg(parsed: dict[str, Any], args: list[str], index: int) -> int:
+    """単一の CLI 引数を解釈して parsed を更新し、次のインデックスを返す。
+
+    Args:
+        parsed: 解析結果を蓄積する辞書（インプレース更新）
+        args: 全引数のリスト
+        index: 現在処理中の引数のインデックス
+
+    Returns:
+        次に処理すべき引数のインデックス
+
+    Raises:
+        ValueError: 不明な引数が渡された場合
+    """
+    arg = args[index]
+
+    if arg in {"--help", "-h"}:
+        parsed["help"] = True
+        return index + 1
+
+    if arg == "--format":
+        parsed["format"] = (args[index + 1] if index + 1 < len(args) else "").lower()
+        return index + 2
+
+    if arg.startswith("--format="):
+        parsed["format"] = arg.split("=", 1)[1].lower()
+        return index + 1
+
+    if arg == "--scope":
+        parsed["scope"] = normalize_scope(args[index + 1] if index + 1 < len(args) else None)
+        return index + 2
+
+    if arg.startswith("--scope="):
+        parsed["scope"] = normalize_scope(arg.split("=", 1)[1])
+        return index + 1
+
+    if arg == "--root":
+        parsed["root"] = Path(args[index + 1] if index + 1 < len(args) else os.getcwd()).resolve()
+        return index + 2
+
+    if arg.startswith("--root="):
+        parsed["root"] = Path(arg.split("=", 1)[1] or os.getcwd()).resolve()
+        return index + 1
+
+    if arg.startswith("-"):
+        raise ValueError(f"Unknown argument: {arg}")
+
+    parsed["scope"] = normalize_scope(arg)
+    return index + 1
 
 
 def parse_args(argv: Sequence[str] | None = None) -> dict[str, Any]:
@@ -61,48 +120,7 @@ def parse_args(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
     index = 0
     while index < len(args):
-        arg = args[index]
-
-        if arg in {"--help", "-h"}:
-            parsed["help"] = True
-            index += 1
-            continue
-
-        if arg == "--format":
-            parsed["format"] = (args[index + 1] if index + 1 < len(args) else "").lower()
-            index += 2
-            continue
-
-        if arg.startswith("--format="):
-            parsed["format"] = arg.split("=", 1)[1].lower()
-            index += 1
-            continue
-
-        if arg == "--scope":
-            parsed["scope"] = normalize_scope(args[index + 1] if index + 1 < len(args) else None)
-            index += 2
-            continue
-
-        if arg.startswith("--scope="):
-            parsed["scope"] = normalize_scope(arg.split("=", 1)[1])
-            index += 1
-            continue
-
-        if arg == "--root":
-            parsed["root"] = Path(args[index + 1] if index + 1 < len(args) else os.getcwd()).resolve()
-            index += 2
-            continue
-
-        if arg.startswith("--root="):
-            parsed["root"] = Path(arg.split("=", 1)[1] or os.getcwd()).resolve()
-            index += 1
-            continue
-
-        if arg.startswith("-"):
-            raise ValueError(f"Unknown argument: {arg}")
-
-        parsed["scope"] = normalize_scope(arg)
-        index += 1
+        index = _apply_arg(parsed, args, index)
 
     if parsed["format"] not in VALID_FORMATS:
         raise ValueError(f"Invalid format: {parsed['format']}. Use text or json.")
@@ -110,437 +128,42 @@ def parse_args(argv: Sequence[str] | None = None) -> dict[str, Any]:
     return parsed
 
 
-def file_exists(root_dir: str | Path, relative_path: str) -> bool:
-    """相対パスが存在するかを確認する。"""
-    return Path(root_dir, relative_path).exists()
+def _consumer_security_status(root_dir: str | Path, hosting_service: str) -> bool:
+    """consumer プロジェクトのセキュリティポリシー有無を判定する。
 
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+        hosting_service: 正規化済みの Git ホスティングサービス名
 
-def read_text(root_dir: str | Path, relative_path: str) -> str:
-    """テキストファイルを UTF-8 で読む。"""
-    return Path(root_dir, relative_path).read_text(encoding="utf-8")
+    Returns:
+        セキュリティポリシー・スキャン設定が存在すれば True
 
-
-def _walk_dir(root_path: Path):
-    stack = [root_path]
-    while stack:
-        current = stack.pop()
-        with os.scandir(current) as entries:
-            for entry in entries:
-                if entry.is_dir(follow_symlinks=False):
-                    stack.append(Path(entry.path))
-                else:
-                    yield entry
-
-
-def count_files(root_dir: str | Path, relative_dir: str, extension: str | None) -> int:
-    """指定ディレクトリ以下のファイル数を数える。"""
-    dir_path = Path(root_dir, relative_dir)
-    if not dir_path.exists():
-        return 0
-
-    count = 0
-    for entry in _walk_dir(dir_path):
-        if extension is None or entry.name.endswith(extension):
-            count += 1
-    return count
-
-
-def safe_read(root_dir: str | Path, relative_path: str) -> str:
-    """失敗しても空文字を返す安全な読み込み。"""
-    try:
-        return read_text(root_dir, relative_path)
-    except OSError:
-        return ""
-
-
-def safe_parse_json(text: str) -> Any | None:
-    """空文字や不正 JSON を None として扱う。"""
-    if not text or not text.strip():
-        return None
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return None
-
-
-def _has_any_file(root_dir: str | Path, relative_paths: Sequence[str]) -> bool:
-    """候補パスのどれか 1 つでも存在するかを調べる。"""
-    return any(file_exists(root_dir, relative_path) for relative_path in relative_paths)
-
-
-def _command_parity_matches(root_dir: str | Path) -> bool:
-    """新旧コマンド名のどちらでもパリティが取れているかを確認する。"""
-    for primary_path, parity_path in COMMAND_PARITY_PAIRS:
-        primary = safe_read(root_dir, primary_path).strip()
-        parity = safe_read(root_dir, parity_path).strip()
-        if primary and primary == parity:
-            return True
-    return False
-
-
-def has_file_with_extension(root_dir: str | Path, relative_dir: str, extensions: str | Sequence[str]) -> bool:
-    """指定拡張子のファイルが 1 つでもあるかを調べる。"""
-    dir_path = Path(root_dir, relative_dir)
-    if not dir_path.exists():
-        return False
-
-    allowed = [extensions] if isinstance(extensions, str) else list(extensions)
-    for entry in _walk_dir(dir_path):
-        if any(entry.name.endswith(extension) for extension in allowed):
-            return True
-    return False
-
-
-def detect_target_mode(root_dir: str | Path) -> str:
-    """repo か consumer かを判定する。"""
-    package_json = safe_parse_json(safe_read(root_dir, "package.json"))
-    if isinstance(package_json, dict) and package_json.get("name") == "everything-claude-code":
-        return "repo"
-
-    if all(file_exists(root_dir, marker) for marker in REPO_CORE_MARKERS) and _has_any_file(root_dir, HARNESS_MARKERS):
-        return "repo"
-
-    return "consumer"
-
-
-def _has_gitlab_security_scanning(root_dir: str | Path) -> bool:
-    """GitLab CI に最低限のセキュリティスキャン設定があるかを確認する。"""
-    content = safe_read(root_dir, ".gitlab-ci.yml")
-    if not content:
-        return False
-
-    patterns = (
-        r"(?mi)^\s*(dependency_scanning|sast|container_scanning|secret_detection|license_scanning)\s*:",
-        r"(?mi)^\s*-\s*template:\s*Security/",
-        r"(?mi)^\s*template:\s*Security/",
-    )
-    return any(re.search(pattern, content) for pattern in patterns)
-
-
-def find_plugin_install(root_dir: str | Path) -> str | None:
-    """ECC のインストール先を探す。"""
-    home_dir = os.environ.get("HOME", "")
-    candidates = [
-        Path(root_dir) / ".claude" / "plugins" / "everything-claude-code" / ".claude-plugin" / "plugin.json",
-        Path(root_dir) / ".claude" / "plugins" / "everything-claude-code" / "plugin.json",
-        Path(home_dir) / ".claude" / "plugins" / "everything-claude-code" / ".claude-plugin" / "plugin.json"
-        if home_dir
-        else None,
-        Path(home_dir) / ".claude" / "plugins" / "everything-claude-code" / "plugin.json" if home_dir else None,
-    ]
-
-    for candidate in candidates:
-        if candidate is not None and candidate.exists():
-            return str(candidate)
-    return None
-
-
-def get_repo_checks(root_dir: str | Path) -> list[dict[str, Any]]:
-    """repo モード向けのチェック定義を返す。"""
-    package_json = safe_parse_json(safe_read(root_dir, "package.json"))
-    if not isinstance(package_json, dict):
-        package_json = {}
-
-    hooks_json = safe_read(root_dir, "hooks/hooks.json")
-
-    return [
-        {
-            "id": "tool-hooks-config",
-            "category": "Tool Coverage",
-            "points": 2,
-            "scopes": ["repo", "hooks"],
-            "path": "hooks/hooks.json",
-            "description": "フック設定ファイルが存在する",
-            "pass": file_exists(root_dir, "hooks/hooks.json"),
-            "fix": "Create hooks/hooks.json and define baseline hook events.",
-        },
-        {
-            "id": "tool-hooks-impl-count",
-            "category": "Tool Coverage",
-            "points": 2,
-            "scopes": ["repo", "hooks"],
-            "path": "scripts/hooks/",
-            "description": "最低8個のフック実装スクリプトが存在する",
-            "pass": count_files(root_dir, "scripts/hooks", ".js") >= 8,
-            "fix": "Add missing hook implementations in scripts/hooks/.",
-        },
-        {
-            "id": "tool-agent-count",
-            "category": "Tool Coverage",
-            "points": 2,
-            "scopes": ["repo", "agents"],
-            "path": "agents/",
-            "description": "最低10個のエージェント定義が存在する",
-            "pass": count_files(root_dir, "agents", ".md") >= 10,
-            "fix": "Add or restore agent definitions under agents/.",
-        },
-        {
-            "id": "tool-skill-count",
-            "category": "Tool Coverage",
-            "points": 2,
-            "scopes": ["repo", "skills"],
-            "path": "skills/",
-            "description": "最低20個のスキル定義が存在する",
-            "pass": count_files(root_dir, "skills", "SKILL.md") >= 20,
-            "fix": "Add missing skill directories with SKILL.md definitions.",
-        },
-        {
-            "id": "tool-command-parity",
-            "category": "Tool Coverage",
-            "points": 2,
-            "scopes": ["repo", "commands"],
-            "path": ".opencode/commands/harness.md",
-            "description": "ハーネス監査コマンドのプライマリと OpenCode コマンドドック間でパリティが取れている",
-            "pass": _command_parity_matches(root_dir),
-            "fix": "Sync commands/harness.md and .opencode/commands/harness.md.",
-        },
-        {
-            "id": "context-strategic-compact",
-            "category": "Context Efficiency",
-            "points": 3,
-            "scopes": ["repo", "skills"],
-            "path": "skills/slim/SKILL.md",
-            "description": "コンテキスト最大圧縮スキルが存在する（LLMレスポンス・ファイルの原始人口調圧縮）",
-            "pass": file_exists(root_dir, "skills/slim/SKILL.md"),
-            "fix": "Add skills/slim/SKILL.md for maximum context compression.",
-        },
-        {
-            "id": "context-suggest-compact-hook",
-            "category": "Context Efficiency",
-            "points": 3,
-            "scopes": ["repo", "hooks"],
-            "path": "scripts/hooks/suggest-compact.js",
-            "description": "コンテキスト圧縮自動化フックが存在する（セッション中にコンテキスト圧縮提案）",
-            "pass": file_exists(root_dir, "scripts/hooks/suggest-compact.js"),
-            "fix": "Implement scripts/hooks/suggest-compact.js for context pressure hints.",
-        },
-        {
-            "id": "context-model-route",
-            "category": "Context Efficiency",
-            "points": 2,
-            "scopes": ["repo", "commands"],
-            "path": "commands/plan.md",
-            "description": "モデルルーティングコマンドが存在する（タスク複雑度に応じたモデル選択）",
-            "pass": file_exists(root_dir, "commands/plan.md"),
-            "fix": "Add plan command guidance in commands/plan.md.",
-        },
-        {
-            "id": "context-token-doc",
-            "category": "Context Efficiency",
-            "points": 2,
-            "scopes": ["repo"],
-            "path": "docs/token-optimization.md",
-            "description": "トークン最適化ドキュメントが存在する",
-            "pass": file_exists(root_dir, "docs/token-optimization.md"),
-            "fix": "Add docs/token-optimization.md with concrete context-cost controls.",
-        },
-        {
-            "id": "quality-test-runner",
-            "category": "Quality Gates",
-            "points": 3,
-            "scopes": ["repo"],
-            "path": "tests/run-all.js",
-            "description": "一元化されたテストランナーが存在する",
-            "pass": file_exists(root_dir, "tests/run-all.js"),
-            "fix": "Add tests/run-all.js to enforce complete suite execution.",
-        },
-        {
-            "id": "quality-ci-validations",
-            "category": "Quality Gates",
-            "points": 3,
-            "scopes": ["repo"],
-            "path": "package.json",
-            "description": "テストスクリプトが検証チェーンを実行してからテストを実行する",
-            "pass": isinstance(package_json.get("scripts"), dict)
-            and isinstance(package_json["scripts"].get("test"), str)
-            and "validate-commands.js" in package_json["scripts"]["test"]
-            and "tests/run-all.js" in package_json["scripts"]["test"],
-            "fix": "Update package.json test script to run validators plus tests/run-all.js.",
-        },
-        {
-            "id": "quality-hook-tests",
-            "category": "Quality Gates",
-            "points": 2,
-            "scopes": ["repo", "hooks"],
-            "path": "tests/hooks/hooks.test.js",
-            "description": "フックカバレッジテストファイルが存在する",
-            "pass": file_exists(root_dir, "tests/hooks/hooks.test.js"),
-            "fix": "Add tests/hooks/hooks.test.js for hook behavior validation.",
-        },
-        {
-            "id": "quality-doctor-script",
-            "category": "Quality Gates",
-            "points": 2,
-            "scopes": ["repo"],
-            "path": "scripts/doctor.js",
-            "description": "インストール状態チェック用ドクタースクリプトが存在する",
-            "pass": file_exists(root_dir, "scripts/doctor.js"),
-            "fix": "Add scripts/doctor.js for install-state integrity checks.",
-        },
-        {
-            "id": "memory-hooks-dir",
-            "category": "Memory Persistence",
-            "points": 4,
-            "scopes": ["repo", "hooks"],
-            "path": "hooks/memory-persistence/",
-            "description": "メモリ永続化フックディレクトリが存在する",
-            "pass": file_exists(root_dir, "hooks/memory-persistence"),
-            "fix": "Add hooks/memory-persistence with lifecycle hook definitions.",
-        },
-        {
-            "id": "memory-session-hooks",
-            "category": "Memory Persistence",
-            "points": 4,
-            "scopes": ["repo", "hooks"],
-            "path": "scripts/hooks/session-start.js",
-            "description": "セッション開始・終了時の永続化スクリプトが存在する",
-            "pass": file_exists(root_dir, "scripts/hooks/session-start.js")
-            and file_exists(root_dir, "scripts/hooks/session-end.js"),
-            "fix": "Implement scripts/hooks/session-start.js and scripts/hooks/session-end.js.",
-        },
-        {
-            "id": "memory-learning-skill",
-            "category": "Memory Persistence",
-            "points": 2,
-            "scopes": ["repo", "skills"],
-            "path": "skills/learn/SKILL.md",
-            "description": "継続学習スキルが存在する（セッション観測→インスティンクト作成→スキル進化）",
-            "pass": file_exists(root_dir, "skills/learn/SKILL.md"),
-            "fix": "Add skills/learn/SKILL.md for memory evolution flow.",
-        },
-        {
-            "id": "eval-skill",
-            "category": "Eval Coverage",
-            "points": 4,
-            "scopes": ["repo", "skills"],
-            "path": "commands/harness.md",
-            "description": "品質監査コマンドが存在する（ハーネス監査・スキル棚卸し・遵守率測定）",
-            "pass": file_exists(root_dir, "commands/harness.md"),
-            "fix": "Add commands/harness.md for quality audit evaluation.",
-        },
-        {
-            "id": "eval-commands",
-            "category": "Eval Coverage",
-            "points": 4,
-            "scopes": ["repo", "commands"],
-            "path": "commands/review.md",
-            "description": "検証コマンドとプランコマンドが存在する",
-            "pass": file_exists(root_dir, "commands/review.md")
-            and file_exists(root_dir, "commands/plan.md"),
-            "fix": "Add commands/review.md and commands/plan.md to standardize verification loops.",
-        },
-        {
-            "id": "eval-tests-presence",
-            "category": "Eval Coverage",
-            "points": 2,
-            "scopes": ["repo"],
-            "path": "tests/",
-            "description": "最低10個のテストファイルが存在する",
-            "pass": count_files(root_dir, "tests", ".test.js") >= 10,
-            "fix": "Increase automated test coverage across scripts/hooks/lib.",
-        },
-        {
-            "id": "security-review-skill",
-            "category": "Security Guardrails",
-            "points": 3,
-            "scopes": ["repo", "skills"],
-            "path": "skills/secure/SKILL.md",
-            "description": "セキュリティレビュースキルが存在する（認証・入力処理・シークレット管理）",
-            "pass": file_exists(root_dir, "skills/secure/SKILL.md"),
-            "fix": "Add skills/secure/SKILL.md for security checklist coverage.",
-        },
-        {
-            "id": "security-agent",
-            "category": "Security Guardrails",
-            "points": 3,
-            "scopes": ["repo", "agents"],
-            "path": "agents/security-auditor.md",
-            "description": "セキュリティレビューエージェントが存在する",
-            "pass": file_exists(root_dir, "agents/security-auditor.md"),
-            "fix": "Add agents/security-auditor.md for delegated security audits.",
-        },
-        {
-            "id": "security-prompt-hook",
-            "category": "Security Guardrails",
-            "points": 2,
-            "scopes": ["repo", "hooks"],
-            "path": "hooks/hooks.json",
-            "description": "フックにプロンプト送信・ツール実行時のセキュリティガードが含まれている",
-            "pass": "beforeSubmitPrompt" in hooks_json or "PreToolUse" in hooks_json,
-            "fix": "Add prompt/tool preflight security guards in hooks/hooks.json.",
-        },
-        {
-            "id": "security-scan-command",
-            "category": "Security Guardrails",
-            "points": 2,
-            "scopes": ["repo", "commands"],
-            "path": "commands/review.md",
-            "description": "セキュリティスキャンコマンドが存在する",
-            "pass": file_exists(root_dir, "commands/review.md"),
-            "fix": "Add commands/review.md with scan and remediation workflow.",
-        },
-        {
-            "id": "cost-skill",
-            "category": "Cost Efficiency",
-            "points": 4,
-            "scopes": ["repo", "skills"],
-            "path": "skills/slim/SKILL.md",
-            "description": "コスト最適化スキルが存在する（トークン削減による予算管理）",
-            "pass": file_exists(root_dir, "skills/slim/SKILL.md"),
-            "fix": "Add skills/slim/SKILL.md for budget-aware routing.",
-        },
-        {
-            "id": "cost-doc",
-            "category": "Cost Efficiency",
-            "points": 3,
-            "scopes": ["repo"],
-            "path": "docs/token-optimization.md",
-            "description": "コスト最適化ドキュメントが存在する",
-            "pass": file_exists(root_dir, "docs/token-optimization.md"),
-            "fix": "Create docs/token-optimization.md with target settings and tradeoffs.",
-        },
-        {
-            "id": "cost-model-route-command",
-            "category": "Cost Efficiency",
-            "points": 3,
-            "scopes": ["repo", "commands"],
-            "path": "commands/plan.md",
-            "description": "モデルルーティングコマンドが存在する（複雑度に応じたモデル選択ポリシー）",
-            "pass": file_exists(root_dir, "commands/plan.md"),
-            "fix": "Add commands/plan.md and route policies for cheap-default execution.",
-        },
-    ]
-
-
-def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github") -> list[dict[str, Any]]:
-    """consumer project 向けのチェック定義を返す。"""
-    package_json = safe_parse_json(safe_read(root_dir, "package.json"))
-    if not isinstance(package_json, dict):
-        package_json = {}
-
-    gitignore = safe_read(root_dir, ".gitignore")
-    project_hooks = safe_read(root_dir, ".claude/settings.json")
-    plugin_install = find_plugin_install(root_dir)
-    hosting_service = normalize_git_hosting_service(git_hosting_service)
-    hosting_label = get_git_hosting_service_label(hosting_service)
-    ci_path = ".gitlab-ci.yml" if hosting_service == "gitlab" else ".github/workflows/"
-    security_path = ".gitlab-ci.yml" if hosting_service == "gitlab" else "SECURITY.md"
-    ci_pass = (
-        file_exists(root_dir, ".gitlab-ci.yml")
-        if hosting_service == "gitlab"
-        else has_file_with_extension(root_dir, ".github/workflows", [".yml", ".yaml"])
-    )
+    Raises:
+        例外は発生しません。
+    """
     security_pass = file_exists(root_dir, "SECURITY.md")
     if hosting_service == "gitlab":
-        security_pass = security_pass or _has_gitlab_security_scanning(root_dir)
-    else:
-        security_pass = (
-            security_pass
-            or file_exists(root_dir, ".github/dependabot.yml")
-            or file_exists(root_dir, ".github/codeql.yml")
-        )
+        return security_pass or _has_gitlab_security_scanning(root_dir)
+    return (
+        security_pass
+        or file_exists(root_dir, ".github/dependabot.yml")
+        or file_exists(root_dir, ".github/codeql.yml")
+    )
 
+
+def _consumer_tool_coverage_checks(root_dir: str | Path, plugin_install: str | None) -> list[dict[str, Any]]:
+    """consumer モードの Tool Coverage カテゴリのチェック定義を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+        plugin_install: 検出されたプラグインのインストールパス（無ければ None）
+
+    Returns:
+        Tool Coverage チェック辞書のリスト
+
+    Raises:
+        例外は発生しません。
+    """
     return [
         {
             "id": "consumer-plugin-install",
@@ -566,6 +189,22 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
             or file_exists(root_dir, ".claude/hooks.json"),
             "fix": "Add project-local .claude hooks, commands, skills, or settings that tailor ECC to this repo.",
         },
+    ]
+
+
+def _consumer_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """consumer モードの Context Efficiency カテゴリのチェック定義を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+
+    Returns:
+        Context Efficiency チェック辞書のリスト
+
+    Raises:
+        例外は発生しません。
+    """
+    return [
         {
             "id": "consumer-instructions",
             "category": "Context Efficiency",
@@ -590,6 +229,32 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
             or file_exists(root_dir, ".claude/settings.local.json"),
             "fix": "Add .mcp.json or .claude/settings.json so project-local tool configuration is explicit.",
         },
+    ]
+
+
+def _consumer_quality_gates_checks(
+    root_dir: str | Path,
+    package_json: dict[str, Any],
+    ci_path: str,
+    hosting_label: str,
+    ci_pass: bool,
+) -> list[dict[str, Any]]:
+    """consumer モードの Quality Gates カテゴリのチェック定義を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+        package_json: 解析済みの package.json（無い場合は空辞書）
+        ci_path: 表示用の CI 設定パス
+        hosting_label: Git ホスティングサービスの表示ラベル
+        ci_pass: CI 設定が存在するかの判定結果
+
+    Returns:
+        Quality Gates チェック辞書のリスト
+
+    Raises:
+        例外は発生しません。
+    """
+    return [
         {
             "id": "consumer-test-suite",
             "category": "Quality Gates",
@@ -614,6 +279,22 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
             "pass": ci_pass,
             "fix": f"Add at least one CI configuration file for {hosting_label} so harness and test checks run outside local development.",
         },
+    ]
+
+
+def _consumer_memory_and_eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """consumer モードの Memory Persistence と Eval Coverage カテゴリのチェック定義を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+
+    Returns:
+        Memory Persistence と Eval Coverage チェック辞書のリスト
+
+    Raises:
+        例外は発生しません。
+    """
+    return [
         {
             "id": "consumer-memory-notes",
             "category": "Memory Persistence",
@@ -634,6 +315,14 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
             "pass": count_files(root_dir, "evals", None) > 0 or count_files(root_dir, "tests", ".test.js") >= 3,
             "fix": "Add eval fixtures or at least a few focused automated tests for critical flows.",
         },
+    ]
+
+
+def _consumer_security_policy_checks(
+    gitignore: str, security_path: str, hosting_label: str, security_pass: bool
+) -> list[dict[str, Any]]:
+    """consumer モードのセキュリティポリシー・シークレット衛生チェック2件を返す。"""
+    return [
         {
             "id": "consumer-security-policy",
             "category": "Security Guardrails",
@@ -654,6 +343,33 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
             "pass": ".env" in gitignore,
             "fix": "Ignore .env-style files in .gitignore so secrets do not land in the repo.",
         },
+    ]
+
+
+def _consumer_security_guardrails_checks(
+    root_dir: str | Path,
+    gitignore: str,
+    project_hooks: str,
+    security_path: str,
+    hosting_label: str,
+    security_pass: bool,
+) -> list[dict[str, Any]]:
+    """consumer モードの Security Guardrails カテゴリのチェック定義を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+        gitignore: .gitignore の生テキスト
+        project_hooks: .claude/settings.json の生テキスト
+        security_path: 表示用のセキュリティ設定パス
+        hosting_label: Git ホスティングサービスの表示ラベル
+        security_pass: セキュリティポリシーが存在するかの判定結果
+
+    Returns:
+        Security Guardrails チェック辞書のリスト
+    """
+    return _consumer_security_policy_checks(
+        gitignore, security_path, hosting_label, security_pass
+    ) + [
         {
             "id": "consumer-hook-guardrails",
             "category": "Security Guardrails",
@@ -666,6 +382,37 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
             or file_exists(root_dir, ".claude/hooks.json"),
             "fix": "Add project-local hook settings or hook definitions for prompt/tool guardrails.",
         },
+    ]
+
+
+def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github") -> list[dict[str, Any]]:
+    """consumer project 向けのチェック定義を返す。"""
+    package_json = safe_parse_json(safe_read(root_dir, "package.json"))
+    if not isinstance(package_json, dict):
+        package_json = {}
+
+    gitignore = safe_read(root_dir, ".gitignore")
+    project_hooks = safe_read(root_dir, ".claude/settings.json")
+    plugin_install = find_plugin_install(root_dir)
+    hosting_service = normalize_git_hosting_service(git_hosting_service)
+    hosting_label = get_git_hosting_service_label(hosting_service)
+    ci_path = ".gitlab-ci.yml" if hosting_service == "gitlab" else ".github/workflows/"
+    security_path = ".gitlab-ci.yml" if hosting_service == "gitlab" else "SECURITY.md"
+    ci_pass = (
+        file_exists(root_dir, ".gitlab-ci.yml")
+        if hosting_service == "gitlab"
+        else has_file_with_extension(root_dir, ".github/workflows", [".yml", ".yaml"])
+    )
+    security_pass = _consumer_security_status(root_dir, hosting_service)
+
+    return [
+        *_consumer_tool_coverage_checks(root_dir, plugin_install),
+        *_consumer_context_efficiency_checks(root_dir),
+        *_consumer_quality_gates_checks(root_dir, package_json, ci_path, hosting_label, ci_pass),
+        *_consumer_memory_and_eval_checks(root_dir),
+        *_consumer_security_guardrails_checks(
+            root_dir, gitignore, project_hooks, security_path, hosting_label, security_pass
+        ),
     ]
 
 

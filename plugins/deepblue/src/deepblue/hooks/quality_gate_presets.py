@@ -88,6 +88,53 @@ def _select_target_path(root: Path, preferred: str = "src") -> str:
     return preferred if (root / preferred).exists() else "."
 
 
+_EMPTY_CONFIG: dict[str, Any] = {"actions": {"post-edit": {"rules": []}}}
+
+
+def _resolve_argv(argv: list[str], language: str, target: str, file_path: str | None) -> list[str]:
+    """argv の最終引数（対象パス）を言語・file_path に応じて解決して返す。
+
+    Args:
+        argv: 元のコマンド引数リスト（文字列化済み）。
+        language: 検出した言語名。
+        target: プロジェクト内の対象ディレクトリ（"src" or "."）。
+        file_path: 変更されたファイルパス。指定時は単一ファイルを対象にする。
+
+    Returns:
+        最終引数を置換済みのコマンドリスト。
+    """
+    resolved = list(argv)
+    if language == "python" and resolved[0] == "ruff" and len(resolved) >= 3 and resolved[1] == "check":
+        if file_path and str(file_path).endswith((".py", ".pyi")):
+            resolved[-1] = str(file_path)
+        else:
+            resolved[-1] = target
+    elif language in {"javascript", "typescript"} and resolved[:3] == ["npx", "--no-install", "eslint"]:
+        resolved[-1] = target
+    return resolved
+
+
+def _build_steps(preset: dict[str, Any], language: str, target: str, file_path: str | None) -> list[dict[str, Any]]:
+    """プリセットの bash コマンド群から実行可能な steps リストを構築する。
+
+    Args:
+        preset: QUALITY_GATE_PRESETS のエントリ。
+        language: 採用した言語名。
+        target: プロジェクト内の対象ディレクトリ。
+        file_path: 変更されたファイルパス（省略可）。
+
+    Returns:
+        {"argv": [...]} 形式の step 辞書リスト。
+    """
+    steps: list[dict[str, Any]] = []
+    for argv in preset.get("bash", []):
+        if not isinstance(argv, list) or not argv or not _has_executable(argv):
+            continue
+        resolved_argv = _resolve_argv([str(x) for x in argv], language, target, file_path)
+        steps.append({"argv": resolved_argv})
+    return steps
+
+
 def resolve_quality_gate_config(
     cwd: str | Path | None = None,
     file_path: str | None = None,
@@ -112,38 +159,19 @@ def resolve_quality_gate_config(
     try:
         info = detect_project(root)
     except Exception:  # noqa: BLE001 - 判定失敗時は空設定
-        return {"actions": {"post-edit": {"rules": []}}}
+        return _EMPTY_CONFIG
 
     language = _select_language(info)
     preset = QUALITY_GATE_PRESETS.get(language) if language else None
     if not preset:
-        return {"actions": {"post-edit": {"rules": []}}}
+        return _EMPTY_CONFIG
 
     target = _select_target_path(root)
-    steps: list[dict[str, Any]] = []
-    for argv in preset.get("bash", []):
-        if not isinstance(argv, list) or not argv:
-            continue
-        if not _has_executable(argv):
-            continue
-        resolved_argv = [str(x) for x in argv]
-        if language == "python" and resolved_argv[0] == "ruff" and len(resolved_argv) >= 3 and resolved_argv[1] == "check":
-            # file_path が .py ファイルなら単一ファイルを対象にする
-            if file_path and str(file_path).endswith((".py", ".pyi")):
-                resolved_argv[-1] = str(file_path)
-            else:
-                resolved_argv[-1] = target
-        elif language in {"javascript", "typescript"} and resolved_argv[:3] == ["npx", "--no-install", "eslint"]:
-            resolved_argv[-1] = target
-        steps.append({"argv": resolved_argv})
-
+    steps = _build_steps(preset, language, target, file_path)
     if not steps:
-        return {"actions": {"post-edit": {"rules": []}}}
+        return _EMPTY_CONFIG
 
-    rule: dict[str, Any] = {
-        "extensions": list(preset.get("extensions", [])),
-        "steps": steps,
-    }
+    rule: dict[str, Any] = {"extensions": list(preset.get("extensions", [])), "steps": steps}
     return {"actions": {"post-edit": {"rules": [rule]}}}
 
 

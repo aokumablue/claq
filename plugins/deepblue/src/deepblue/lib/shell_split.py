@@ -7,99 +7,78 @@
 from __future__ import annotations
 
 
+def _advance_in_quote(
+    command: str, i: int, length: int, ch: str, quote: str, current: str
+) -> tuple[str, str | None, int]:
+    """引用符内の1文字を処理し、(current, quote, next_i) を返す。"""
+    if ch == "\\" and i + 1 < length:
+        return current + ch + command[i + 1], quote, i + 2
+    if ch == quote:
+        return current + ch, None, i + 1
+    return current + ch, quote, i + 1
+
+
+def _try_flush_segment(current: str, segments: list[str]) -> str:
+    """current が空でなければ segments に追加し、空文字列を返す。"""
+    if current.strip():
+        segments.append(current.strip())
+    return ""
+
+
+def _handle_ampersand(
+    command: str, i: int, length: int, current: str, segments: list[str]
+) -> tuple[str, int]:
+    """単独の & を処理し、(current, next_i) を返す。リダイレクトは除外する。"""
+    next_ch = command[i + 1] if i + 1 < length else ""
+    prev_ch = command[i - 1] if i > 0 else ""
+    if next_ch == ">" or prev_ch == ">":
+        return current + "&", i + 1
+    current = _try_flush_segment(current, segments)
+    return current, i + 1
+
+
+def _handle_unquoted_char(
+    command: str, i: int, length: int, ch: str, current: str, segments: list[str]
+) -> tuple[str, str | None, int]:
+    """引用符外の1文字を処理し、(current, new_quote, next_i) を返す。"""
+    if ch == "\\" and i + 1 < length:
+        return current + ch + command[i + 1], None, i + 2
+    if ch in ('"', "'"):
+        return current + ch, ch, i + 1
+    next_ch = command[i + 1] if i + 1 < length else ""
+    if ch == "&" and next_ch == "&":
+        return _try_flush_segment(current, segments), None, i + 2
+    if ch == "|" and next_ch == "|":
+        return _try_flush_segment(current, segments), None, i + 2
+    if ch == ";":
+        return _try_flush_segment(current, segments), None, i + 1
+    if ch == "&":
+        new_current, new_i = _handle_ampersand(command, i, length, current, segments)
+        return new_current, None, new_i
+    return current + ch, None, i + 1
+
+
 def split_shell_segments(command: str) -> list[str]:
-    """シェルコマンドを演算子（&&, ||, ;, &）で分割する。
-    ただし引用符（単/二重）とエスケープ文字は尊重する。
-    リダイレクト演算子（&>, >&, 2>&1）は区切りとして扱わない。
+    """シェルコマンドを &&, ||, ;, & で分割する（引用符・エスケープ考慮）。
 
     Args:
-        command: command の値
+        command: 分割対象のシェルコマンド文字列
 
     Returns:
-        list[str]: str の一覧を返します。
-
-    Raises:
-        例外は発生しません。
+        分割されたセグメントのリスト
     """
     segments: list[str] = []
     current = ""
     quote: str | None = None
     i = 0
     length = len(command)
-
     while i < length:
         ch = command[i]
-
-        # 引用符内: エスケープと閉じ引用符を処理する
         if quote:
-            if ch == "\\" and i + 1 < length:
-                current += ch + command[i + 1]
-                i += 2
-                continue
-            if ch == quote:
-                quote = None
-            current += ch
-            i += 1
-            continue
-
-        # 引用符外のバックスラッシュエスケープ
-        if ch == "\\" and i + 1 < length:
-            current += ch + command[i + 1]
-            i += 2
-            continue
-
-        # 開始引用符
-        if ch in ('"', "'"):
-            quote = ch
-            current += ch
-            i += 1
-            continue
-
-        next_ch = command[i + 1] if i + 1 < length else ""
-        prev_ch = command[i - 1] if i > 0 else ""
-
-        # && 演算子
-        if ch == "&" and next_ch == "&":
-            if current.strip():
-                segments.append(current.strip())
-            current = ""
-            i += 2
-            continue
-
-        # || 演算子
-        if ch == "|" and next_ch == "|":
-            if current.strip():
-                segments.append(current.strip())
-            current = ""
-            i += 2
-            continue
-
-        # ; 区切り
-        if ch == ";":
-            if current.strip():
-                segments.append(current.strip())
-            current = ""
-            i += 1
-            continue
-
-        # 単独の & — ただしリダイレクトパターン（&>, >&, digit>&）は除外する
-        if ch == "&" and next_ch != "&":
-            if next_ch == ">" or prev_ch == ">":
-                current += ch
-                i += 1
-                continue
-            if current.strip():
-                segments.append(current.strip())
-            current = ""
-            i += 1
-            continue
-
-        current += ch
-        i += 1
-
-    if current.strip():
-        segments.append(current.strip())
-
+            current, quote, i = _advance_in_quote(command, i, length, ch, quote, current)
+        else:
+            current, quote, i = _handle_unquoted_char(command, i, length, ch, current, segments)
+    _try_flush_segment(current, segments)
     return segments
 
 

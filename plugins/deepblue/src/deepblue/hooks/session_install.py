@@ -240,6 +240,35 @@ def _handle_install_result(result: subprocess.CompletedProcess[str]) -> bool:
     return True
 
 
+def _run_install_with_lock(plugin_root: Path, current_version: str | None) -> bool:
+    """ロックを取得して install.sh を実行する。成功なら True を返す。
+
+    Args:
+        plugin_root: プラグインルートディレクトリ。
+        current_version: plugin.json から読んだ最新バージョン。
+
+    Returns:
+        install.sh が正常終了した場合 True。スキップ・失敗時は False。
+    """
+    _DEEPBLUE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(_DEEPBLUE_DIR, 0o700)
+    lock_path = _DEEPBLUE_DIR / "install.lock"
+    try:
+        with install_lock(lock_path):
+            if current_version is not None and _lock_phase_should_skip(plugin_root, current_version):
+                return False
+            install_sh = _precheck_install_target(plugin_root)
+            if install_sh is None:
+                return False
+            result = _run_install(install_sh)
+            if result is None:
+                return False
+            return _handle_install_result(result)
+    except OSError as e:
+        print(f"[SessionInstall] ロック取得失敗: {_sanitize_exception(e)}", file=sys.stderr)
+        return False
+
+
 def run(_raw_input: str) -> str:
     """install.sh の実行判定と実行を行い hookSpecificOutput の JSON を返す。
 
@@ -262,7 +291,6 @@ def run(_raw_input: str) -> str:
     current_version = _get_plugin_version(plugin_root)
     installed_version = _get_installed_version()
 
-    # version が一致しているなら install をスキップし、symlink 修復のみ
     if current_version is not None and installed_version == current_version:
         if _should_repair_venv_symlink(plugin_root):
             _repair_venv_symlink(plugin_root)
@@ -275,37 +303,12 @@ def run(_raw_input: str) -> str:
         file=sys.stderr,
     )
 
-    # version 不一致 or 未インストール: install.sh を同期実行（ONNX のみ非同期）
-    _DEEPBLUE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(_DEEPBLUE_DIR, 0o700)
-    lock_path = _DEEPBLUE_DIR / "install.lock"
-
-    try:
-        with install_lock(lock_path):
-            # 別プロセスが先にインストールを完了している可能性をロック取得後に再チェック
-            if current_version is not None and _lock_phase_should_skip(plugin_root, current_version):
-                return _session_start_output()
-
-            install_sh = _precheck_install_target(plugin_root)
-            if install_sh is None:
-                return _session_start_output()
-
-            result = _run_install(install_sh)
-            if result is None:
-                return _session_start_output()
-
-            # install 失敗時は symlink 修復・onnx 通知をスキップして早期 return
-            if not _handle_install_result(result):
-                return _session_start_output()
-    except OSError as e:
-        print(f"[SessionInstall] ロック取得失敗: {_sanitize_exception(e)}", file=sys.stderr)
+    success = _run_install_with_lock(plugin_root, current_version)
+    if not success:
         return _session_start_output()
 
-    # install 成功時のみ symlink 修復と ONNX 通知を行う
     if _should_repair_venv_symlink(plugin_root):
         _repair_venv_symlink(plugin_root)
-
-    # バックグラウンドで ONNX が走っている可能性を通知
     if not (Path.home() / ".deepblue" / "models" / "model.onnx").exists():
         print("[SessionInstall] onnx building...", file=sys.stderr)
 

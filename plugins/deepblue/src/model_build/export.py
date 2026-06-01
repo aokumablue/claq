@@ -38,6 +38,46 @@ def _patch_torch_onnx_symbolic_opset14() -> None:
             setattr(_pub, name, getattr(_internal, name))
 
 
+def _suppress_onnx_warnings() -> warnings.catch_warnings:
+    """ONNX エクスポート中に発生する既知の無害な警告を抑制するコンテキストマネージャを返す。"""
+    ctx = warnings.catch_warnings()
+    ctx.__enter__()
+    warnings.filterwarnings("ignore", message=".*already registered.*", category=UserWarning)
+    warnings.filterwarnings("ignore", category=UserWarning, module="torch.onnx")
+    warnings.filterwarnings("ignore", message=".*torch.tensor results are registered as constants.*")
+    warnings.filterwarnings("ignore", message=".*dynamic_axes.*", category=UserWarning)
+    warnings.filterwarnings("ignore", message=".*LeafSpec.*", category=FutureWarning)
+    return ctx
+
+
+def _run_main_export(model_name: str, revision: str, opset: int, onnx_out: Path) -> None:
+    """optimum の main_export を呼び出し、ONNX ファイルを生成する。
+
+    optimum バグによる FileNotFoundError は model.onnx が存在する場合のみ無視する。
+    """
+    from optimum.exporters.onnx import main_export  # type: ignore[import-untyped]  # noqa: PLC0415
+
+    print(f"[export] main_export(model={model_name}, revision={revision[:8]}, opset={opset})", flush=True)
+    try:
+        main_export(
+            model_name_or_path=model_name,
+            output=onnx_out,
+            task="feature-extraction",
+            opset=opset,
+            revision=revision,
+            trust_remote_code=False,
+            framework="pt",
+            do_validation=False,
+        )
+    except FileNotFoundError as exc:
+        # optimum バグ: torch.onnx dynamo エクスポーターがグラフ最適化時に
+        # model.onnx.data をインライン化して削除するが、optimum のクリーンアップが
+        # その後も削除しようとする。model.onnx が存在すればエクスポートは成功している。
+        if not (onnx_out / "model.onnx").exists():
+            raise
+        print(f"[export] Skipping stale external data cleanup: {exc}", flush=True)
+
+
 def export_to_onnx(
     model_name: str,
     revision: str,
@@ -49,51 +89,19 @@ def export_to_onnx(
     optimum.exporters.onnx.main_export を直接呼び出す。
     出力は output_dir/onnx_export/ に生成される。
     """
-    # PyTorch の既知バグ: @_onnx_symbolic デコレータ実行（import 時）に二重登録警告が出る
-    # transformers の定数トレース警告は公式ドキュメントで「安全に無視可」と明記されている
-    # import より前にフィルタを設定しないと catch_warnings が間に合わない
     _patch_torch_onnx_symbolic_opset14()
-
     # torch.onnx._internal の StreamHandler が torchvision 未インストール等の WARNING を stderr に出力するため抑制
     logging.getLogger("torch.onnx._internal").setLevel(logging.ERROR)
 
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message=".*already registered.*", category=UserWarning)
-        warnings.filterwarnings("ignore", category=UserWarning, module="torch.onnx")
-        warnings.filterwarnings("ignore", message=".*torch.tensor results are registered as constants.*")
-        # optimum が dynamo=True 時に dynamic_axes の代わりに dynamic_shapes を推奨するが本用途では不要
-        warnings.filterwarnings("ignore", message=".*dynamic_axes.*", category=UserWarning)
-        # torch 内部の pytree 実装由来の FutureWarning（torch 側の既知問題）
-        warnings.filterwarnings("ignore", message=".*LeafSpec.*", category=FutureWarning)
-        from optimum.exporters.onnx import main_export  # type: ignore[import-untyped]  # noqa: PLC0415
+    onnx_out = output_dir / "onnx_export"
+    onnx_out.mkdir(parents=True, exist_ok=True)
 
-        onnx_out = output_dir / "onnx_export"
-        onnx_out.mkdir(parents=True, exist_ok=True)
+    ctx = _suppress_onnx_warnings()
+    try:
+        _run_main_export(model_name, revision, opset, onnx_out)
+    finally:
+        ctx.__exit__(None, None, None)
 
-        print(
-            f"[export] main_export(model={model_name}, revision={revision[:8]}, opset={opset})",
-            flush=True,
-        )
-        try:
-            main_export(
-                model_name_or_path=model_name,
-                output=onnx_out,
-                task="feature-extraction",
-                opset=opset,
-                revision=revision,
-                trust_remote_code=False,
-                framework="pt",
-                do_validation=False,
-            )
-        except FileNotFoundError as exc:
-            # optimum バグ: torch.onnx dynamo エクスポーターがグラフ最適化時に
-            # model.onnx.data をインライン化して削除するが、optimum のクリーンアップが
-            # その後も削除しようとする。model.onnx が存在すればエクスポートは成功している。
-            if not (onnx_out / "model.onnx").exists():
-                raise
-            print(f"[export] Skipping stale external data cleanup: {exc}", flush=True)
-
-    # 生成された ONNX ファイルを検索（model.onnx 優先）
     candidates = list(onnx_out.glob("model.onnx")) + list(onnx_out.glob("*.onnx"))
     if not candidates:
         raise FileNotFoundError(f"ONNX ファイルが {onnx_out} に見つかりません。")

@@ -60,24 +60,20 @@ def _select_hooks_container(data: Any) -> Any:
     return data
 
 
-def validate_hook_entry(hook: Any, label: str) -> bool:
-    """単一のフックエントリを検証する。
+def _validate_hook_type_and_timeout(hook: dict, label: str) -> bool:
+    """フックの 'type' と 'timeout' フィールドを検証する。
 
     Args:
-        hook: 処理に渡す hook の値です。
-        label: 処理に渡す label の値です。
+        hook: 検証するフックエントリ（辞書）
+        label: エラーメッセージに使うラベル
 
     Returns:
-        処理結果を返します。
+        エラーがあれば True、なければ False
 
     Raises:
         例外は発生しません。
     """
     has_errors = False
-    if not isinstance(hook, dict):
-        emit_error(f"{label} は 'type' フィールドが不足しているか無効です")
-        return True
-
     hook_type = hook.get("type")
     if not is_non_empty_string(hook_type):
         emit_error(f"{label} は 'type' フィールドが不足しているか無効です")
@@ -92,42 +88,83 @@ def validate_hook_entry(hook: Any, label: str) -> bool:
             emit_error(f"{label} の 'timeout' は 0 以上の数値である必要があります")
             has_errors = True
 
-    if hook_type == "command":
-        if "async" in hook and not isinstance(hook.get("async"), bool):
-            emit_error(f"{label} の 'async' は真偽値である必要があります")
-            has_errors = True
+    return has_errors
 
-        command = hook.get("command")
-        if not is_non_empty_string(command) and not is_non_empty_string_array(command):
-            emit_error(f"{label} は 'command' フィールドが不足しているか無効です")
-            has_errors = True
-        return has_errors
 
-    if "async" in hook:
-        emit_error(f"{label} では 'async' は command フックでのみサポートされています")
+def _validate_command_hook(hook: dict, label: str) -> bool:
+    """command タイプのフック固有フィールドを検証する。
+
+    Args:
+        hook: 検証するフックエントリ（辞書）
+        label: エラーメッセージに使うラベル
+
+    Returns:
+        エラーがあれば True、なければ False
+
+    Raises:
+        例外は発生しません。
+    """
+    has_errors = False
+    if "async" in hook and not isinstance(hook.get("async"), bool):
+        emit_error(f"{label} の 'async' は真偽値である必要があります")
         has_errors = True
 
-    if hook_type == "http":
-        if not is_non_empty_string(hook.get("url")):
-            emit_error(f"{label} は 'url' フィールドが不足しているか無効です")
+    command = hook.get("command")
+    if not is_non_empty_string(command) and not is_non_empty_string_array(command):
+        emit_error(f"{label} は 'command' フィールドが不足しているか無効です")
+        has_errors = True
+    return has_errors
+
+
+def _validate_http_hook(hook: dict, label: str) -> bool:
+    """http タイプのフック固有フィールドを検証する。
+
+    Args:
+        hook: 検証するフックエントリ（辞書）
+        label: エラーメッセージに使うラベル
+
+    Returns:
+        エラーがあれば True、なければ False
+
+    Raises:
+        例外は発生しません。
+    """
+    has_errors = False
+    if not is_non_empty_string(hook.get("url")):
+        emit_error(f"{label} は 'url' フィールドが不足しているか無効です")
+        has_errors = True
+
+    if "headers" in hook:
+        headers = hook.get("headers")
+        if not isinstance(headers, dict) or not all(isinstance(value, str) for value in headers.values()):
+            emit_error(f"{label} の 'headers' は文字列値を持つオブジェクトである必要があります")
             has_errors = True
 
-        if "headers" in hook:
-            headers = hook.get("headers")
-            if not isinstance(headers, dict) or not all(isinstance(value, str) for value in headers.values()):
-                emit_error(f"{label} の 'headers' は文字列値を持つオブジェクトである必要があります")
-                has_errors = True
+    if "allowedEnvVars" in hook:
+        allowed_env_vars = hook.get("allowedEnvVars")
+        if not isinstance(allowed_env_vars, list) or not all(
+            is_non_empty_string(value) for value in allowed_env_vars
+        ):
+            emit_error(f"{label} の 'allowedEnvVars' は文字列の配列である必要があります")
+            has_errors = True
 
-        if "allowedEnvVars" in hook:
-            allowed_env_vars = hook.get("allowedEnvVars")
-            if not isinstance(allowed_env_vars, list) or not all(
-                is_non_empty_string(value) for value in allowed_env_vars
-            ):
-                emit_error(f"{label} の 'allowedEnvVars' は文字列の配列である必要があります")
-                has_errors = True
+    return has_errors
 
-        return has_errors
 
+def _validate_prompt_hook(hook: dict, label: str) -> bool:
+    """prompt タイプ（および非 command/http）のフック固有フィールドを検証する。
+
+    Args:
+        hook: 検証するフックエントリ（辞書）
+        label: エラーメッセージに使うラベル
+
+    Returns:
+        エラーがあれば True、なければ False
+
+    Raises:
+        例外は発生しません。
+    """
+    has_errors = False
     if not is_non_empty_string(hook.get("prompt")):
         emit_error(f"{label} は 'prompt' フィールドが不足しているか無効です")
         has_errors = True
@@ -137,6 +174,113 @@ def validate_hook_entry(hook: Any, label: str) -> bool:
         has_errors = True
 
     return has_errors
+
+
+def validate_hook_entry(hook: Any, label: str) -> bool:
+    """単一のフックエントリを検証する。
+
+    Args:
+        hook: 処理に渡す hook の値です。
+        label: 処理に渡す label の値です。
+
+    Returns:
+        処理結果を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    if not isinstance(hook, dict):
+        emit_error(f"{label} は 'type' フィールドが不足しているか無効です")
+        return True
+
+    has_errors = _validate_hook_type_and_timeout(hook, label)
+    hook_type = hook.get("type")
+
+    if hook_type == "command":
+        return _validate_command_hook(hook, label) or has_errors
+
+    if "async" in hook:
+        emit_error(f"{label} では 'async' は command フックでのみサポートされています")
+        has_errors = True
+
+    if hook_type == "http":
+        return _validate_http_hook(hook, label) or has_errors
+
+    return _validate_prompt_hook(hook, label) or has_errors
+
+
+def _validate_matcher(event_type: str, index: int, matcher: Any) -> bool:
+    """イベント配下の単一マッチャーエントリを検証する。
+
+    Args:
+        event_type: イベントタイプ名
+        index: マッチャーのインデックス
+        matcher: 検証するマッチャー（任意の値）
+
+    Returns:
+        エラーがあれば True、なければ False
+
+    Raises:
+        例外は発生しません。
+    """
+    if not isinstance(matcher, dict):
+        emit_error(f"{event_type}[{index}] はオブジェクトではありません")
+        return True
+
+    has_errors = False
+    matcher_value = matcher.get("matcher")
+    if "matcher" not in matcher and event_type not in EVENTS_WITHOUT_MATCHER:
+        emit_error(f"{event_type}[{index}] は 'matcher' フィールドが不足しています")
+        has_errors = True
+    elif "matcher" in matcher and not (
+        is_non_empty_string(matcher_value) or isinstance(matcher_value, (dict, list))
+    ):
+        emit_error(f"{event_type}[{index}] の 'matcher' フィールドが無効です")
+        has_errors = True
+
+    if "hooks" not in matcher or not isinstance(matcher.get("hooks"), list):
+        emit_error(f"{event_type}[{index}] は 'hooks' 配列が不足しています")
+        has_errors = True
+    else:
+        for hook_index, hook in enumerate(matcher["hooks"]):
+            if validate_hook_entry(hook, f"{event_type}[{index}].hooks[{hook_index}]"):
+                has_errors = True
+
+    return has_errors
+
+
+def _validate_event(event_type: str, matchers: Any) -> tuple[bool, int]:
+    """単一イベントタイプとその配下のマッチャー群を検証する。
+
+    Args:
+        event_type: イベントタイプ名
+        matchers: イベントに紐づくマッチャーのリスト（任意の値）
+
+    Returns:
+        (エラー有無, 検証したマッチャー数) のタプル
+
+    Raises:
+        例外は発生しません。
+    """
+    if event_type not in VALID_EVENTS:
+        emit_error(f"無効なイベントタイプ: {event_type}")
+        return True, 0
+
+    if not isinstance(matchers, list):
+        emit_error(f"{event_type} は配列である必要があります")
+        return True, 0
+
+    has_errors = False
+    total_matchers = 0
+    for index, matcher in enumerate(matchers):
+        if not isinstance(matcher, dict):
+            _validate_matcher(event_type, index, matcher)
+            has_errors = True
+            continue
+        if _validate_matcher(event_type, index, matcher):
+            has_errors = True
+        total_matchers += 1
+    return has_errors, total_matchers
 
 
 def validate_hooks(
@@ -165,50 +309,18 @@ def validate_hooks(
         return 1
 
     hooks = _select_hooks_container(data)
-    has_errors = False
-    total_matchers = 0
 
-    if isinstance(hooks, dict):
-        for event_type, matchers in hooks.items():
-            if event_type not in VALID_EVENTS:
-                emit_error(f"無効なイベントタイプ: {event_type}")
-                has_errors = True
-                continue
-
-            if not isinstance(matchers, list):
-                emit_error(f"{event_type} は配列である必要があります")
-                has_errors = True
-                continue
-
-            for index, matcher in enumerate(matchers):
-                if not isinstance(matcher, dict):
-                    emit_error(f"{event_type}[{index}] はオブジェクトではありません")
-                    has_errors = True
-                    continue
-
-                matcher_value = matcher.get("matcher")
-                if "matcher" not in matcher and event_type not in EVENTS_WITHOUT_MATCHER:
-                    emit_error(f"{event_type}[{index}] は 'matcher' フィールドが不足しています")
-                    has_errors = True
-                elif "matcher" in matcher and not (
-                    is_non_empty_string(matcher_value) or isinstance(matcher_value, (dict, list))
-                ):
-                    emit_error(f"{event_type}[{index}] の 'matcher' フィールドが無効です")
-                    has_errors = True
-
-                if "hooks" not in matcher or not isinstance(matcher.get("hooks"), list):
-                    emit_error(f"{event_type}[{index}] は 'hooks' 配列が不足しています")
-                    has_errors = True
-                else:
-                    for hook_index, hook in enumerate(matcher["hooks"]):
-                        if validate_hook_entry(hook, f"{event_type}[{index}].hooks[{hook_index}]"):
-                            has_errors = True
-
-                total_matchers += 1
-
-    else:
+    if not isinstance(hooks, dict):
         emit_error("hooks.json はオブジェクトまたは配列である必要があります")
         return 1
+
+    has_errors = False
+    total_matchers = 0
+    for event_type, matchers in hooks.items():
+        event_errors, matched_count = _validate_event(event_type, matchers)
+        if event_errors:
+            has_errors = True
+        total_matchers += matched_count
 
     if has_errors:
         return 1

@@ -130,25 +130,8 @@ def get_manifest_paths(repo_root: str | Path = REPO_ROOT) -> dict[str, Path]:
     }
 
 
-def load_install_manifests(options: dict[str, Any] | None = None) -> dict[str, Any]:
-    """インストールマニフェストを読み込み、ID でインデックス化します。
-
-    Args:
-        options: リポジトリルートを指定するオプションです。
-
-    Returns:
-        モジュール、プロファイル、コンポーネントを含むマニフェストデータの辞書を返します。
-
-    Raises:
-        RuntimeError: マニフェストファイルが見つからない、または JSON パースに失敗した場合に発生します。
-    """
-    opts = options or {}
-    repo_root = Path(opts.get("repoRoot") or REPO_ROOT)
-    paths = get_manifest_paths(repo_root)
-
-    if not paths["modulesPath"].exists() or not paths["profilesPath"].exists():
-        raise RuntimeError(f"Install manifests not found under {repo_root}")
-
+def _read_manifest_data(paths: dict[str, Path]) -> tuple[Any, Any, Any]:
+    """3 つのマニフェスト JSON を読み込み、(modules_data, profiles_data, components_data) を返す。"""
     modules_data = read_json(paths["modulesPath"], "install-modules.json")
     profiles_data = read_json(paths["profilesPath"], "install-profiles.json")
     components_data = (
@@ -156,7 +139,13 @@ def load_install_manifests(options: dict[str, Any] | None = None) -> dict[str, A
         if paths["componentsPath"].exists()
         else {"version": None, "components": []}
     )
+    return modules_data, profiles_data, components_data
 
+
+def _extract_manifest_lists(
+    modules_data: Any, profiles_data: Any, components_data: Any
+) -> tuple[list[dict], dict, list[dict]]:
+    """各マニフェストデータから modules/profiles/components を抽出して返す。"""
     modules = (
         modules_data["modules"]
         if isinstance(modules_data, dict) and isinstance(modules_data.get("modules"), list)
@@ -172,22 +161,34 @@ def load_install_manifests(options: dict[str, Any] | None = None) -> dict[str, A
         if isinstance(components_data, dict) and isinstance(components_data.get("components"), list)
         else []
     )
+    return modules, profiles, components
 
-    modules_by_id = {module["id"]: module for module in modules if isinstance(module, dict) and "id" in module}
-    components_by_id = {
-        component["id"]: component for component in components if isinstance(component, dict) and "id" in component
-    }
 
+def load_install_manifests(options: dict[str, Any] | None = None) -> dict[str, Any]:
+    """インストールマニフェストを読み込み、ID でインデックス化します。
+
+    Args:
+        options: リポジトリルートを指定するオプションです（repoRoot キー）。
+
+    Raises:
+        RuntimeError: マニフェストファイルが見つからない場合に発生します。
+    """
+    opts = options or {}
+    repo_root = Path(opts.get("repoRoot") or REPO_ROOT)
+    paths = get_manifest_paths(repo_root)
+    if not paths["modulesPath"].exists() or not paths["profilesPath"].exists():
+        raise RuntimeError(f"Install manifests not found under {repo_root}")
+    modules_data, profiles_data, components_data = _read_manifest_data(paths)
+    modules, profiles, components = _extract_manifest_lists(modules_data, profiles_data, components_data)
+    modules_by_id = {m["id"]: m for m in modules if isinstance(m, dict) and "id" in m}
+    components_by_id = {c["id"]: c for c in components if isinstance(c, dict) and "id" in c}
     return {
         "repoRoot": repo_root,
         "modulesPath": paths["modulesPath"],
         "profilesPath": paths["profilesPath"],
         "componentsPath": paths["componentsPath"],
-        "modules": modules,
-        "profiles": profiles,
-        "components": components,
-        "modulesById": modules_by_id,
-        "componentsById": components_by_id,
+        "modules": modules, "profiles": profiles, "components": components,
+        "modulesById": modules_by_id, "componentsById": components_by_id,
         "modulesVersion": modules_data.get("version") if isinstance(modules_data, dict) else None,
         "profilesVersion": profiles_data.get("version") if isinstance(profiles_data, dict) else None,
         "componentsVersion": components_data.get("version") if isinstance(components_data, dict) else None,
@@ -284,6 +285,31 @@ def list_install_components(options: dict[str, Any] | None = None) -> list[dict[
     return components
 
 
+def _resolve_component_modules(
+    manifests: dict[str, Any],
+    module_ids: list[str],
+) -> list[dict[str, Any]]:
+    """モジュール ID リストをマニフェストから解決し、モジュール詳細辞書のリストを返す。"""
+    modules: list[dict[str, Any]] = []
+    for module_id in module_ids:
+        module = manifests["modulesById"].get(module_id)
+        if not module:
+            continue
+        modules.append(
+            {
+                "id": module.get("id"),
+                "kind": module.get("kind"),
+                "description": module.get("description"),
+                "targets": module.get("targets"),
+                "defaultInstall": module.get("defaultInstall"),
+                "cost": module.get("cost"),
+                "stability": module.get("stability"),
+                "dependencies": dedupe_strings(module.get("dependencies")),
+            }
+        )
+    return modules
+
+
 def get_install_component(component_id: Any, options: dict[str, Any] | None = None) -> dict[str, Any]:
     """指定された ID のインストールコンポーネントを取得します。
 
@@ -308,23 +334,7 @@ def get_install_component(component_id: Any, options: dict[str, Any] | None = No
         raise ValueError(f"Unknown install component: {normalized_component_id}")
 
     module_ids = dedupe_strings(component.get("modules"))
-    modules: list[dict[str, Any]] = []
-    for module_id in module_ids:
-        module = manifests["modulesById"].get(module_id)
-        if not module:
-            continue
-        modules.append(
-            {
-                "id": module.get("id"),
-                "kind": module.get("kind"),
-                "description": module.get("description"),
-                "targets": module.get("targets"),
-                "defaultInstall": module.get("defaultInstall"),
-                "cost": module.get("cost"),
-                "stability": module.get("stability"),
-                "dependencies": dedupe_strings(module.get("dependencies")),
-            }
-        )
+    modules = _resolve_component_modules(manifests, module_ids)
 
     return {
         "id": component.get("id"),

@@ -113,6 +113,7 @@ class ChunkAccumulator:
         self._content_parts.append(part)
 
     def to_chunk(self) -> MemoryChunk:
+        """蓄積した内容を redact・タグ除去した MemoryChunk に変換する。"""
         content = "\n\n".join(self._content_parts)
         # エラーが1件以上あれば failure、それ以外は success
         execution_status = "failure" if self._error_count > 0 else "success"

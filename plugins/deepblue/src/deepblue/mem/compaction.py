@@ -1,17 +1,14 @@
-"""メモリ圧縮・クリーンアップ — 低品質チャンク除去、近似重複統合、DB最適化"""
+"""メモリ圧縮・クリーンアップ — 低品質チャンク除去、DB最適化"""
 
 from __future__ import annotations
 
 import math
-import struct
 import time
 
 from deepblue.mem.database import Database, MemoryChunk
 from deepblue.mem.logger import get as _get_logger
 
 log = _get_logger("COMPACT")
-
-_EMBEDDING_DIM = 768  # ruri-v3-310m の出力次元
 
 
 def detect_low_quality(db: Database) -> list[int]:
@@ -35,40 +32,6 @@ def detect_low_quality(db: Database) -> list[int]:
     candidates.extend(r["id"] for r in rows)
 
     return list(set(candidates))
-
-
-def find_near_duplicates(
-    db: Database,
-    threshold: float = 0.90,
-    k: int = 10,
-) -> list[tuple[int, int, float]]:
-    """近似重複ペアを返す: (chunk_id_a, chunk_id_b, similarity)"""
-    try:
-        rows = db.conn.execute("SELECT chunk_id, embedding FROM memory_chunks_vec").fetchall()
-    except Exception as e:
-        log.warning("重複検索エラー（sqlite-vec 利用不可？）: %s", e)
-        return []
-
-    seen: set[tuple[int, int]] = set()
-    duplicates: list[tuple[int, int, float]] = []
-    for row in rows:
-        vec = list(struct.unpack(f"{_EMBEDDING_DIM}f", row["embedding"]))
-        neighbors = db.vec_search(vec, limit=k)
-        # ruri-v3-310m のノルムは約30。L2距離→コサイン類似度を近似換算する
-        # cosine_sim = 1 - L2^2 / (2 * Na * Nb) ≈ 1 - L2^2 / (2 * norm^2)
-        self_norm = math.sqrt(sum(x * x for x in vec))
-        for neighbor_id, distance in neighbors:
-            if neighbor_id == row["chunk_id"]:
-                continue
-            # sqlite-vec の FLOAT[] はL2距離。コサイン類似度に近似換算して比較
-            cosine_approx = 1.0 - (distance**2) / (2.0 * self_norm**2)
-            if cosine_approx >= threshold:
-                pair = (min(row["chunk_id"], neighbor_id), max(row["chunk_id"], neighbor_id))
-                if pair not in seen:
-                    seen.add(pair)
-                    duplicates.append((*pair, cosine_approx))
-
-    return duplicates
 
 
 def merge_chunks(chunks: list[MemoryChunk]) -> MemoryChunk:

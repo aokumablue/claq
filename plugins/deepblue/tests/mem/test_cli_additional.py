@@ -180,7 +180,6 @@ def test_handle_session_end_and_compact(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr(cli, "embed", lambda texts: [[0.1, 0.2]])
     monkeypatch.setattr(bridge_mod, "sync_session_to_observations", lambda db, session_id: 1)
     monkeypatch.setattr(compaction_mod, "detect_low_quality", lambda db: ["c1"])
-    monkeypatch.setattr(compaction_mod, "find_near_duplicates", lambda db: [("c1", "c2")])
     monkeypatch.setattr(compaction_mod, "optimize_db", lambda db: {"fragmentation_before": 0.25})
     monkeypatch.setattr(cli.time, "time", lambda: 100.0)
 
@@ -507,7 +506,6 @@ def test_handle_session_end_auto_compact_error(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr(cli, "embed", lambda texts: [[0.1, 0.2]])
     monkeypatch.setattr(bridge_mod, "sync_session_to_observations", lambda db, session_id: 1)
     monkeypatch.setattr(compaction_mod, "detect_low_quality", lambda db: (_ for _ in ()).throw(RuntimeError("compact boom")))
-    monkeypatch.setattr(compaction_mod, "find_near_duplicates", lambda db: [])
     monkeypatch.setattr(cli.time, "time", lambda: 100.0)
     warnings: list[str] = []
     monkeypatch.setattr(cli.log, "warning", lambda msg, *args: warnings.append(msg % args if args else msg))

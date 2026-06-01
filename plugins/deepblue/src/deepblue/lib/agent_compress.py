@@ -54,6 +54,47 @@ def parse_frontmatter(content: str) -> dict[str, Any]:
     return {"frontmatter": frontmatter, "body": match.group(2) or ""}
 
 
+def _is_skippable_line(trimmed: str) -> bool:
+    """Markdown の見出し・リスト・表の行など本文に含めない行か判定する。"""
+    return (
+        trimmed.startswith("#")
+        or trimmed.startswith("- ")
+        or trimmed.startswith("* ")
+        or bool(re.match(r"^\d+\.\s", trimmed))
+        or trimmed.startswith("|")
+    )
+
+
+def _collect_paragraphs(lines: list[str]) -> list[str]:
+    """行リストをコードブロックや Markdown 記法を除きつつ段落単位に集約する。"""
+    paragraphs: list[str] = []
+    current: list[str] = []
+    in_code_block = False
+
+    for line in lines:
+        trimmed = line.strip()
+        if trimmed.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        if trimmed == "":
+            if current:
+                paragraphs.append(" ".join(current))
+                current = []
+            continue
+        if _is_skippable_line(trimmed):
+            if current:
+                paragraphs.append(" ".join(current))
+                current = []
+            continue
+        current.append(trimmed)
+
+    if current:
+        paragraphs.append(" ".join(current))
+    return paragraphs
+
+
 def extract_summary(body: str, max_sentences: int = 1) -> str:
     """エージェント本文から意味のある最初の段落を要約として抽出する。
     見出し、リスト項目、コードブロック、表の行は除外する。
@@ -68,49 +109,10 @@ def extract_summary(body: str, max_sentences: int = 1) -> str:
     Raises:
         例外は発生しません。
     """
-    lines = body.split("\n")
-    paragraphs: list[str] = []
-    current: list[str] = []
-    in_code_block = False
-
-    for line in lines:
-        trimmed = line.strip()
-
-        # フェンス付きコードブロックを追跡する
-        if trimmed.startswith("```"):
-            in_code_block = not in_code_block
-            continue
-        if in_code_block:
-            continue
-
-        if trimmed == "":
-            if current:
-                paragraphs.append(" ".join(current))
-                current = []
-            continue
-
-        # 見出し、リスト項目、番号付きリスト、表の行をスキップする
-        if (
-            trimmed.startswith("#")
-            or trimmed.startswith("- ")
-            or trimmed.startswith("* ")
-            or re.match(r"^\d+\.\s", trimmed)
-            or trimmed.startswith("|")
-        ):
-            if current:
-                paragraphs.append(" ".join(current))
-                current = []
-            continue
-
-        current.append(trimmed)
-
-    if current:
-        paragraphs.append(" ".join(current))
-
+    paragraphs = _collect_paragraphs(body.split("\n"))
     first_paragraph = next((p for p in paragraphs if p), None)
     if not first_paragraph:
         return ""
-
     sentences = re.findall(r"[^.!?]+[.!?]+", first_paragraph) or [first_paragraph]
     return " ".join(s.strip() for s in sentences[:max_sentences]).strip()
 
@@ -205,6 +207,18 @@ def compress_to_summary(agent: dict[str, Any]) -> dict[str, Any]:
 ALLOWED_MODES = ("catalog", "summary", "full")
 
 
+def _compress_agents(agents: list[dict[str, Any]], mode: str) -> list[dict[str, Any]]:
+    """モードに応じてエージェントリストを圧縮する。"""
+    if mode == "catalog":
+        return [compress_to_catalog(a) for a in agents]
+    if mode == "summary":
+        return [compress_to_summary(a) for a in agents]
+    return [
+        {"name": a["name"], "description": a["description"], "tools": a["tools"], "model": a["model"], "body": a["body"]}
+        for a in agents
+    ]
+
+
 def build_agent_catalog(
     agents_dir: str | Path,
     *,
@@ -234,28 +248,11 @@ def build_agent_catalog(
         raise ValueError(f'Invalid mode "{mode}". Allowed modes: {", ".join(ALLOWED_MODES)}')
 
     agents = load_agents(agents_dir)
-
     if filter_fn is not None:
         agents = [a for a in agents if filter_fn(a)]
 
     original_bytes = sum(a["byteSize"] for a in agents)
-
-    if mode == "catalog":
-        compressed = [compress_to_catalog(a) for a in agents]
-    elif mode == "summary":
-        compressed = [compress_to_summary(a) for a in agents]
-    else:
-        compressed = [
-            {
-                "name": a["name"],
-                "description": a["description"],
-                "tools": a["tools"],
-                "model": a["model"],
-                "body": a["body"],
-            }
-            for a in agents
-        ]
-
+    compressed = _compress_agents(agents, mode)
     compressed_json = json.dumps(compressed)
     # おおよそのトークン見積もり: 英語テキストでは約 4 文字で 1 トークン
     compressed_token_estimate = len(compressed_json) // 4 + 1

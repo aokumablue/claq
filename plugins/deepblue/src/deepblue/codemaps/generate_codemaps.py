@@ -65,6 +65,7 @@ def walk_dir(root: Path) -> list[Path]:
     results: list[Path] = []
 
     def _walk(current: Path) -> None:
+        """ディレクトリを再帰的に走査し、ファイルを results に追加する。"""
         try:
             for entry in current.iterdir():
                 if entry.is_dir():

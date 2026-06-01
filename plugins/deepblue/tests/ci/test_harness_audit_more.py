@@ -227,3 +227,12 @@ def test_main_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         runpy.run_module("deepblue.ci.harness_audit", run_name="__main__")
 
     assert excinfo.value.code == 1
+
+
+def test_get_consumer_checks_accepts_dict_package_json(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text(json.dumps({"name": "my-project"}), encoding="utf-8")
+
+    checks = harness_audit.get_consumer_checks(tmp_path)
+
+    assert isinstance(checks, list)
+    assert checks

@@ -91,6 +91,76 @@ def _verify_tokenizer(tok_path: Path, models_dir: Path) -> None:
     raise ValueError("manifest.json に tokenizer.json のエントリがありません")
 
 
+def _check_model_files(model_path: Any, tok_path: Any) -> bool:
+    """model.onnx / tokenizer.json の存在を確認し、不在時に警告を出す。
+
+    model.onnx 不在は True（ビルド中）、tokenizer.json 不在は例外を送出する。
+    両ファイル存在時は False を返す。
+    """
+    global _onnx_unavailable_warned  # noqa: PLW0603
+    if not model_path.exists():
+        if not _onnx_unavailable_warned:
+            print("[embedding] onnx building, mem temporarily unavailable", file=sys.stderr)
+            _onnx_unavailable_warned = True
+        return True
+    if not tok_path.exists():
+        raise FileNotFoundError(
+            f"tokenizer.json が見つかりません: {tok_path}\n"
+            "plugins/deepblue/install.sh を実行してモデルを統合してください。"
+        )
+    return False
+
+
+def _build_onnx_session(model_path: Any) -> Any:
+    """ONNX モデルを検証してセッションを構築する（SHA 検証済み前提）。"""
+    import onnxruntime as ort  # type: ignore[import-untyped]
+
+    import onnx  # type: ignore[import-untyped]
+
+    onnx.checker.check_model(str(model_path))
+    sess_opts = ort.SessionOptions()
+    sess_opts.log_severity_level = 3
+    sess_opts.enable_mem_pattern = False
+    sess_opts.intra_op_num_threads = 1
+    return ort.InferenceSession(str(model_path), sess_opts, providers=["CPUExecutionProvider"])
+
+
+def _build_tokenizer(tok_path: Any) -> Any:
+    """トークナイザを構築してパディング・トランケーションを設定する。"""
+    from tokenizers import Tokenizer  # type: ignore[import-untyped]
+
+    tok = Tokenizer.from_file(str(tok_path))
+    tok.enable_padding(pad_token="[PAD]", length=_MAX_LENGTH)
+    tok.enable_truncation(max_length=_MAX_LENGTH)
+    return tok
+
+
+def _load_session_unlocked() -> tuple[Any, Any] | tuple[None, None]:
+    """ロック取得済みの状態でセッション初期化を行う内部関数。"""
+    global _session, _tokenizer  # noqa: PLW0603
+    model_path = _MODELS_DIR / "model.onnx"
+    tok_path = _MODELS_DIR / "tokenizer.json"
+
+    unavailable = _check_model_files(model_path, tok_path)
+    if unavailable:
+        return (None, None)
+
+    log.info("モデルロード: %s@%s", _DEFAULT_EMBEDDING_MODEL, _DEFAULT_EMBEDDING_REVISION[:8])
+    try:
+        _verify_model_sha(_MODELS_DIR)
+        _verify_tokenizer(tok_path, _MODELS_DIR)
+        new_session = _build_onnx_session(model_path)
+        new_tokenizer = _build_tokenizer(tok_path)
+        _session = new_session
+        _tokenizer = new_tokenizer
+    except Exception:
+        _session = None
+        _tokenizer = None
+        raise
+
+    return _session, _tokenizer
+
+
 def _get_session() -> tuple[Any, Any] | tuple[None, None]:
     """ONNX セッションとトークナイザをスレッドセーフにシングルトンでロードする。
 
@@ -103,67 +173,9 @@ def _get_session() -> tuple[Any, Any] | tuple[None, None]:
     ビルド完了後は model.onnx が配置されてこの分岐を通らなくなるため問題ない。
     ONNX ビルド完了後のモデル利用はプロセス再起動後に反映される。
     """
-    global _session, _tokenizer, _onnx_unavailable_warned
     with _lock:
         if _session is None or _tokenizer is None:
-            model_path = _MODELS_DIR / "model.onnx"
-            tok_path = _MODELS_DIR / "tokenizer.json"
-
-            if not model_path.exists():
-                # model.onnx 不在はバックグラウンドビルド中として扱い、空結果で返す
-                if not _onnx_unavailable_warned:
-                    print("[embedding] onnx building, mem temporarily unavailable", file=sys.stderr)
-                    _onnx_unavailable_warned = True
-                return (None, None)
-            if not tok_path.exists():
-                raise FileNotFoundError(
-                    f"tokenizer.json が見つかりません: {tok_path}\n"
-                    "plugins/deepblue/install.sh を実行してモデルを統合してください。"
-                )
-
-            import onnxruntime as ort  # type: ignore[import-untyped]
-            from tokenizers import Tokenizer  # type: ignore[import-untyped]
-
-            import onnx  # type: ignore[import-untyped]
-
-            log.info(
-                "モデルロード: %s@%s",
-                _DEFAULT_EMBEDDING_MODEL,
-                _DEFAULT_EMBEDDING_REVISION[:8],
-            )
-
-            try:
-                # Phase 1: SHA 検証（ファイル操作のみ）
-                _verify_model_sha(_MODELS_DIR)
-                _verify_tokenizer(tok_path, _MODELS_DIR)
-
-                # Phase 2: セッション構築（起動前に ONNX 構造を検証して改ざんを早期検知）
-                onnx.checker.check_model(str(model_path))
-                sess_opts = ort.SessionOptions()
-                sess_opts.log_severity_level = 3  # ERROR のみ
-                sess_opts.enable_mem_pattern = False
-                sess_opts.intra_op_num_threads = 1
-                new_session = ort.InferenceSession(
-                    str(model_path),
-                    sess_opts,
-                    providers=["CPUExecutionProvider"],
-                )
-
-                # Phase 3: トークナイザ構築
-                new_tokenizer = Tokenizer.from_file(str(tok_path))
-                new_tokenizer.enable_padding(pad_token="[PAD]", length=_MAX_LENGTH)
-                new_tokenizer.enable_truncation(max_length=_MAX_LENGTH)
-
-                # Phase 4: 全成功時のみ一括代入
-                _session = new_session
-                _tokenizer = new_tokenizer
-
-            except Exception:
-                # 中途半端な状態を残さない
-                _session = None
-                _tokenizer = None
-                raise
-
+            return _load_session_unlocked()
         return _session, _tokenizer
 
 

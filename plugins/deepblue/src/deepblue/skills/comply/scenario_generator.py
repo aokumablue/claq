@@ -15,6 +15,8 @@ PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 @dataclass(frozen=True)
 class Scenario:
+    """スキルをテストするためのプレッシャーシナリオを表す。"""
+
     id: str
     level: int
     level_name: str

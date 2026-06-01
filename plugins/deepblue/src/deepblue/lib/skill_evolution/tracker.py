@@ -119,6 +119,74 @@ def _to_state_store_payload(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _extract_record_fields(input: dict[str, Any], opts: dict[str, Any]) -> dict[str, Any]:
+    """実行レコード辞書から正規化前のフィールド値を抽出する。
+
+    Args:
+        input: 実行レコードの元データ辞書。
+        opts: マージ済みオプション辞書。
+
+    Returns:
+        抽出したフィールド値をまとめた辞書。
+
+    Raises:
+        なし。
+    """
+    recorded_at = get_value(input, "recorded_at", "recordedAt") or get_option(opts, "now")
+    # recorded_at が無ければ、オプションの now または現在時刻を使う。
+    if recorded_at is None:
+        recorded_at = utc_now_iso()
+
+    return {
+        "skill_id": get_value(input, "skill_id", "skillId"),
+        "skill_version": get_value(input, "skill_version", "skillVersion"),
+        "task_description": get_value(input, "task_description", "task_attempted", "taskAttempted"),
+        "outcome": input.get("outcome"),
+        "recorded_at": recorded_at,
+        "user_feedback": get_value(input, "user_feedback", "userFeedback"),
+        "failure_reason": get_value(input, "failure_reason", "failureReason"),
+        "tokens_used": get_value(input, "tokens_used", "tokensUsed"),
+        "duration_ms": get_value(input, "duration_ms", "durationMs"),
+    }
+
+
+def _validate_record_fields(fields: dict[str, Any]) -> None:
+    """抽出済みフィールドを検証する。
+
+    Args:
+        fields: _extract_record_fields が返すフィールド辞書。
+
+    Returns:
+        なし（検証のみ）。
+
+    Raises:
+        ValueError: 必須項目が欠けているか不正な値の場合。
+    """
+    skill_id = fields["skill_id"]
+    skill_version = fields["skill_version"]
+    task_description = fields["task_description"]
+    outcome = fields["outcome"]
+    user_feedback = fields["user_feedback"]
+    recorded_at = fields["recorded_at"]
+
+    # 必須項目は空文字や空白のみも拒否する。
+    if not isinstance(skill_id, str) or skill_id.strip() == "":
+        raise ValueError("skill_id is required")
+    if not isinstance(skill_version, str) or skill_version.strip() == "":
+        raise ValueError("skill_version is required")
+    if not isinstance(task_description, str) or task_description.strip() == "":
+        raise ValueError("task_description is required")
+    # outcome は定義済みの状態だけを受け付ける。
+    if outcome not in VALID_OUTCOMES:
+        raise ValueError("outcome must be one of success, failure, or partial")
+    # user_feedback は許可済み値または未指定だけを受け付ける。
+    if user_feedback is not None and user_feedback not in VALID_FEEDBACK:
+        raise ValueError("user_feedback must be accepted, corrected, rejected, or null")
+    # recorded_at は ISO 文字列である必要がある。
+    if parse_iso_timestamp(recorded_at) is None:
+        raise ValueError("recorded_at must be an ISO timestamp")
+
+
 def normalize_execution_record(
     input: Any,
     options: dict[str, Any] | None = None,
@@ -144,57 +212,19 @@ def normalize_execution_record(
     if not isinstance(input, dict):
         raise ValueError("skill execution payload must be an object")
 
-    # 受け取った payload から、内部で扱う canonical なフィールドを抜き出す。
-    skill_id = get_value(input, "skill_id", "skillId")
-    skill_version = get_value(input, "skill_version", "skillVersion")
-    task_description = get_value(
-        input,
-        "task_description",
-        "task_attempted",
-        "taskAttempted",
-    )
-    outcome = input.get("outcome")
-    recorded_at = get_value(input, "recorded_at", "recordedAt") or get_option(opts, "now")
-    # recorded_at が無ければ、オプションの now または現在時刻を使う。
-    if recorded_at is None:
-        recorded_at = utc_now_iso()
-    user_feedback = get_value(input, "user_feedback", "userFeedback")
-
-    # 必須項目は空文字や空白のみも拒否する。
-    if not isinstance(skill_id, str) or skill_id.strip() == "":
-        raise ValueError("skill_id is required")
-    # 以降の必須項目も、空文字や空白のみを拒否する。
-    if not isinstance(skill_version, str) or skill_version.strip() == "":
-        raise ValueError("skill_version is required")
-    # task_description も同様に空文字列を許容しない。
-    if not isinstance(task_description, str) or task_description.strip() == "":
-        raise ValueError("task_description is required")
-    # outcome は定義済みの状態だけを受け付ける。
-    if outcome not in VALID_OUTCOMES:
-        raise ValueError("outcome must be one of success, failure, or partial")
-    # user_feedback は許可済み値または未指定だけを受け付ける。
-    if user_feedback is not None and user_feedback not in VALID_FEEDBACK:
-        raise ValueError("user_feedback must be accepted, corrected, rejected, or null")
-    # recorded_at は ISO 文字列である必要がある。
-    if parse_iso_timestamp(recorded_at) is None:
-        raise ValueError("recorded_at must be an ISO timestamp")
+    fields = _extract_record_fields(input, opts)
+    _validate_record_fields(fields)
 
     return {
-        "skill_id": skill_id,
-        "skill_version": skill_version,
-        "task_description": task_description,
-        "outcome": outcome,
-        "failure_reason": get_value(input, "failure_reason", "failureReason"),
-        "tokens_used": to_nullable_number(
-            get_value(input, "tokens_used", "tokensUsed"),
-            "tokens_used",
-        ),
-        "duration_ms": to_nullable_number(
-            get_value(input, "duration_ms", "durationMs"),
-            "duration_ms",
-        ),
-        "user_feedback": user_feedback,
-        "recorded_at": recorded_at,
+        "skill_id": fields["skill_id"],
+        "skill_version": fields["skill_version"],
+        "task_description": fields["task_description"],
+        "outcome": fields["outcome"],
+        "failure_reason": fields["failure_reason"],
+        "tokens_used": to_nullable_number(fields["tokens_used"], "tokens_used"),
+        "duration_ms": to_nullable_number(fields["duration_ms"], "duration_ms"),
+        "user_feedback": fields["user_feedback"],
+        "recorded_at": fields["recorded_at"],
     }
 
 

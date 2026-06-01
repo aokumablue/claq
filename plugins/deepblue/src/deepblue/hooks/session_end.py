@@ -34,6 +34,47 @@ SUMMARY_END_MARKER = "<!-- deepblue:SUMMARY:END -->"
 SESSION_SEPARATOR = "\n---\n"
 
 
+def _collect_user_message(entry: dict) -> str:
+    """トランスクリプトエントリからユーザーメッセージテキストを抽出して返す。空の場合は空文字列。"""
+    if not (
+        entry.get("type") == "user"
+        or entry.get("role") == "user"
+        or entry.get("message", {}).get("role") == "user"
+    ):
+        return ""
+    raw_content = entry.get("message", {}).get("content") or entry.get("content")
+    if isinstance(raw_content, str):
+        text = raw_content
+    elif isinstance(raw_content, list):
+        text = " ".join(str(c.get("text", "")) if isinstance(c, dict) else "" for c in raw_content)
+    else:
+        return ""
+    return compact_line(strip_ansi(text).strip(), 200)
+
+
+def _collect_tool_use(entry: dict, tools_used: set, files_modified: set) -> None:
+    """直接の tool_use エントリおよび assistant ブロックからツール名とファイルパスを収集する。"""
+    if entry.get("type") == "tool_use" or entry.get("tool_name"):
+        tool_name = entry.get("tool_name") or entry.get("name") or ""
+        if tool_name:
+            tools_used.add(tool_name)
+        tool_input = entry.get("tool_input") or entry.get("input") or {}
+        file_path = tool_input.get("file_path") or tool_input.get("path") or ""
+        if file_path and tool_name in ("Edit", "Write"):
+            files_modified.add(file_path)
+
+    if entry.get("type") == "assistant" and isinstance(entry.get("message", {}).get("content"), list):
+        for block in entry["message"]["content"]:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                tool_name = block.get("name", "")
+                if tool_name:
+                    tools_used.add(tool_name)
+                block_input = block.get("input") or {}
+                file_path = block_input.get("file_path") or block_input.get("path") or ""
+                if file_path and tool_name in ("Edit", "Write"):
+                    files_modified.add(file_path)
+
+
 def extract_session_summary(transcript_path: str) -> dict | None:
     """セッショントランスクリプトから意味のあるサマリーを抽出
 
@@ -44,63 +85,21 @@ def extract_session_summary(transcript_path: str) -> dict | None:
         return None
 
     lines = content.split("\n")
-    user_messages = []
-    tools_used = set()
-    files_modified = set()
+    user_messages: list[str] = []
+    tools_used: set[str] = set()
+    files_modified: set[str] = set()
     parse_errors = 0
 
     for line in lines:
         line = line.strip()
         if not line:
             continue
-
         try:
             entry = json.loads(line)
-
-            # ユーザーメッセージを収集（圧縮して 200 文字まで）
-            if (
-                entry.get("type") == "user"
-                or entry.get("role") == "user"
-                or entry.get("message", {}).get("role") == "user"
-            ):
-                # 直接の content とネストされた message.content の両方に対応（JSONL 形式）
-                raw_content = entry.get("message", {}).get("content") or entry.get("content")
-                text = ""
-                if isinstance(raw_content, str):
-                    text = raw_content
-                elif isinstance(raw_content, list):
-                    text = " ".join(str(c.get("text", "")) if isinstance(c, dict) else "" for c in raw_content)
-
-                cleaned = strip_ansi(text).strip()
-                if cleaned:
-                    compacted = compact_line(cleaned, 200)
-                    if compacted:
-                        user_messages.append(compacted)
-
-            # ツール名と変更されたファイルを収集（直接の tool_use エントリ）
-            if entry.get("type") == "tool_use" or entry.get("tool_name"):
-                tool_name = entry.get("tool_name") or entry.get("name") or ""
-                if tool_name:
-                    tools_used.add(tool_name)
-
-                tool_input = entry.get("tool_input") or entry.get("input") or {}
-                file_path = tool_input.get("file_path") or tool_input.get("path") or ""
-                if file_path and tool_name in ("Edit", "Write"):
-                    files_modified.add(file_path)
-
-            # Assistant メッセージの content ブロックからツール使用を抽出（JSONL 形式）
-            if entry.get("type") == "assistant" and isinstance(entry.get("message", {}).get("content"), list):
-                for block in entry["message"]["content"]:
-                    if isinstance(block, dict) and block.get("type") == "tool_use":
-                        tool_name = block.get("name", "")
-                        if tool_name:
-                            tools_used.add(tool_name)
-
-                        block_input = block.get("input") or {}
-                        file_path = block_input.get("file_path") or block_input.get("path") or ""
-                        if file_path and tool_name in ("Edit", "Write"):
-                            files_modified.add(file_path)
-
+            msg = _collect_user_message(entry)
+            if msg:
+                user_messages.append(msg)
+            _collect_tool_use(entry, tools_used, files_modified)
         except json.JSONDecodeError:
             parse_errors += 1
 
@@ -111,7 +110,7 @@ def extract_session_summary(transcript_path: str) -> dict | None:
         return None
 
     return {
-        "userMessages": user_messages[-10:],  # 最後の 10 個のユーザーメッセージ
+        "userMessages": user_messages[-10:],
         "toolsUsed": sorted(tools_used)[:20],
         "filesModified": sorted(files_modified)[:30],
         "totalMessages": len(user_messages),
@@ -294,19 +293,51 @@ def _auto_save_checkpoint(summary: dict, metadata: dict, sessions_dir: Path) -> 
         log(f"[SessionEnd] Created auto-checkpoint: {checkpoint_path}")
 
 
+def _update_session_file(session_file: Path, summary: dict | None, today: str, current_time: str, session_metadata: dict) -> None:
+    """既存のセッションファイルのヘッダーとサマリーブロックを更新する。"""
+    existing = read_file(session_file)
+    updated_content = existing
+
+    if existing:
+        merged = merge_session_header(existing, today, current_time, session_metadata)
+        updated_content = merged if merged else existing
+        if not merged:
+            log(f"[SessionEnd] Failed to normalize header in {session_file}")
+
+    if summary and updated_content:
+        summary_block = build_summary_block(summary)
+        if SUMMARY_START_MARKER in updated_content and SUMMARY_END_MARKER in updated_content:
+            pattern = re.escape(SUMMARY_START_MARKER) + r"[\s\S]*?" + re.escape(SUMMARY_END_MARKER)
+            updated_content = re.sub(pattern, summary_block, updated_content)
+        else:
+            updated_content = re.sub(
+                r"## (?:Session Summary|Current State)[\s\S]*?$",
+                f"{summary_block}\n\n### 次回セッションへの引継ぎ\n-\n\n### 読み込むコンテキスト\n```\n[relevant files]\n```\n",
+                updated_content,
+            )
+
+    if updated_content:
+        write_file(session_file, updated_content)
+    log(f"[SessionEnd] Updated session file: {session_file}")
+
+
+def _create_session_file(session_file: Path, summary: dict | None, today: str, current_time: str, session_metadata: dict) -> None:
+    """新規セッションファイルをサマリーあり・なし両パターンで作成する。"""
+    if summary:
+        summary_section = f"{build_summary_block(summary)}\n\n### 次回セッションへの引継ぎ\n-\n\n### 読み込むコンテキスト\n```\n[relevant files]\n```"
+    else:
+        summary_section = "## 現在の状態\n\n[セッションコンテキストをここに記載]\n\n### 完了済み\n- [ ]\n\n### 進行中\n- [ ]\n\n### 次回セッションへの引継ぎ\n-\n\n### 読み込むコンテキスト\n```\n[relevant files]\n```"
+    template = f"{build_session_header(today, current_time, session_metadata)}{SESSION_SEPARATOR}{summary_section}\n"
+    write_file(session_file, template)
+    log(f"[SessionEnd] Created session file: {session_file}")
+
+
 def run(raw_input: str) -> str:
     """セッション終了フックを実行。入力をそのまま返す（パススルー）"""
     try:
         input_data = parse_json_object(raw_input)
         transcript_path = input_data.get("transcript_path") if input_data else None
-
-        # /goal などの Stop フック駆動ループでは、各反復のたびに Stop イベントが
-        # 再発火する。stop_hook_active=True は、エージェントがユーザーへ制御を返さず
-        # 別の Stop フックがセッションを継続させている状態を示す（＝本当の停止ではない）。
-        # この間に session_stop イベントを記録すると、ループ反復が本来の停止として
-        # 二重計上され event_logs / ダッシュボード / チーム同期を汚染する。
-        # セッション継続用ファイルとチェックポイントはループ中も更新する価値があるため
-        # 維持し、非冪等な session_stop 記録のみをスキップする。
+        # stop_hook_active=True はループ継続中の中間停止。session_stop 記録は本停止時のみ行う。
         stop_hook_active = bool(input_data.get("stop_hook_active")) if input_data else False
 
         sessions_dir = get_sessions_dir()
@@ -314,66 +345,23 @@ def run(raw_input: str) -> str:
         short_id = get_session_id_short()
         session_file = sessions_dir / f"{today}-{short_id}-session.tmp"
         session_metadata = get_session_metadata()
-
         ensure_dir(sessions_dir)
-
         current_time = get_time_string()
 
-        # トランスクリプトからサマリーを抽出
         if transcript_path and not Path(transcript_path).exists():
             log(f"[SessionEnd] Transcript not found: {transcript_path}")
         summary = extract_session_summary(transcript_path) if transcript_path and Path(transcript_path).exists() else None
 
         if session_file.exists():
-            existing = read_file(session_file)
-            updated_content = existing
-
-            if existing:
-                merged = merge_session_header(existing, today, current_time, session_metadata)
-                if merged:
-                    updated_content = merged
-                else:
-                    log(f"[SessionEnd] Failed to normalize header in {session_file}")
-
-            # 新しいサマリーがある場合は、生成されたサマリーブロックのみを更新
-            if summary and updated_content:
-                summary_block = build_summary_block(summary)
-
-                if SUMMARY_START_MARKER in updated_content and SUMMARY_END_MARKER in updated_content:
-                    pattern = re.escape(SUMMARY_START_MARKER) + r"[\s\S]*?" + re.escape(SUMMARY_END_MARKER)
-                    updated_content = re.sub(pattern, summary_block, updated_content)
-                else:
-                    # サマリーマーカーが存在する前に作成されたファイルのマイグレーションパス
-                    updated_content = re.sub(
-                        r"## (?:Session Summary|Current State)[\s\S]*?$",
-                        f"{summary_block}\n\n### 次回セッションへの引継ぎ\n-\n\n### 読み込むコンテキスト\n```\n[relevant files]\n```\n",
-                        updated_content,
-                    )
-
-            if updated_content:
-                write_file(session_file, updated_content)
-
-            log(f"[SessionEnd] Updated session file: {session_file}")
+            _update_session_file(session_file, summary, today, current_time, session_metadata)
         else:
-            # 新しいセッションファイルを作成
-            if summary:
-                summary_section = f"{build_summary_block(summary)}\n\n### 次回セッションへの引継ぎ\n-\n\n### 読み込むコンテキスト\n```\n[relevant files]\n```"
-            else:
-                summary_section = "## 現在の状態\n\n[セッションコンテキストをここに記載]\n\n### 完了済み\n- [ ]\n\n### 進行中\n- [ ]\n\n### 次回セッションへの引継ぎ\n-\n\n### 読み込むコンテキスト\n```\n[relevant files]\n```"
-
-            template = (
-                f"{build_session_header(today, current_time, session_metadata)}{SESSION_SEPARATOR}{summary_section}\n"
-            )
-
-            write_file(session_file, template)
-            log(f"[SessionEnd] Created session file: {session_file}")
+            _create_session_file(session_file, summary, today, current_time, session_metadata)
 
         if not stop_hook_active:
             _record_stop_event(summary, session_metadata)
         else:
             log("[SessionEnd] stop_hook_active=True (loop continuation): skip session_stop event")
 
-        # メッセージ数が閾値を超えた場合はチェックポイントを自動保存
         if summary and summary.get("totalMessages", 0) >= _CHECKPOINT_THRESHOLD:
             _auto_save_checkpoint(summary, session_metadata, sessions_dir)
 

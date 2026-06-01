@@ -66,14 +66,25 @@ def item_usage_ranking(
         uses の降順でソート済み
     """
     since_epoch = int(time.time()) - days * 86400
-    sql = f"""
-        SELECT skill_name, item_type, COUNT(*) AS uses,
-               MAX(created_at_epoch) AS last_used_epoch
-        FROM mem_item_runs
-        WHERE created_at_epoch > {placeholder}
-        GROUP BY skill_name, item_type
-        ORDER BY uses DESC
-    """
+    # プレースホルダをリテラル直書きした完成SQLをDB種別ごとに用意する（CWE-89対策）
+    if placeholder == _PG_PLACEHOLDER:
+        sql = """
+            SELECT skill_name, item_type, COUNT(*) AS uses,
+                   MAX(created_at_epoch) AS last_used_epoch
+            FROM mem_item_runs
+            WHERE created_at_epoch > %s
+            GROUP BY skill_name, item_type
+            ORDER BY uses DESC
+        """
+    else:
+        sql = """
+            SELECT skill_name, item_type, COUNT(*) AS uses,
+                   MAX(created_at_epoch) AS last_used_epoch
+            FROM mem_item_runs
+            WHERE created_at_epoch > ?
+            GROUP BY skill_name, item_type
+            ORDER BY uses DESC
+        """
     rows = _execute(conn, sql, (since_epoch,))
     return [
         {
@@ -84,6 +95,31 @@ def item_usage_ranking(
         }
         for r in rows
     ]
+
+
+_DAILY_TREND_SQL_PG = """
+    SELECT DATE(TO_TIMESTAMP(created_at_epoch)) AS day,
+           SUM(CASE WHEN item_type = 'skill' THEN 1 ELSE 0 END) AS skill_count,
+           SUM(CASE WHEN item_type = 'command' THEN 1 ELSE 0 END) AS command_count,
+           SUM(CASE WHEN item_type = 'agent' THEN 1 ELSE 0 END) AS agent_count,
+           COUNT(*) AS total
+    FROM mem_item_runs
+    WHERE created_at_epoch > %s
+    GROUP BY day
+    ORDER BY day
+"""
+
+_DAILY_TREND_SQL_SQLITE = """
+    SELECT date(created_at_epoch, 'unixepoch') AS day,
+           SUM(CASE WHEN item_type = 'skill' THEN 1 ELSE 0 END) AS skill_count,
+           SUM(CASE WHEN item_type = 'command' THEN 1 ELSE 0 END) AS command_count,
+           SUM(CASE WHEN item_type = 'agent' THEN 1 ELSE 0 END) AS agent_count,
+           COUNT(*) AS total
+    FROM mem_item_runs
+    WHERE created_at_epoch > ?
+    GROUP BY day
+    ORDER BY day
+"""
 
 
 def daily_trend(
@@ -103,34 +139,10 @@ def daily_trend(
         date の昇順でソート済み
     """
     since_epoch = int(time.time()) - days * 86400
-
-    if placeholder == _PG_PLACEHOLDER:
-        # PostgreSQL: TO_TIMESTAMP + DATE キャスト
-        date_expr = "DATE(TO_TIMESTAMP(created_at_epoch))"
-    else:
-        # SQLite: date() 関数
-        date_expr = "date(created_at_epoch, 'unixepoch')"
-
-    sql = f"""
-        SELECT {date_expr} AS day,
-               SUM(CASE WHEN item_type = 'skill' THEN 1 ELSE 0 END) AS skill_count,
-               SUM(CASE WHEN item_type = 'command' THEN 1 ELSE 0 END) AS command_count,
-               SUM(CASE WHEN item_type = 'agent' THEN 1 ELSE 0 END) AS agent_count,
-               COUNT(*) AS total
-        FROM mem_item_runs
-        WHERE created_at_epoch > {placeholder}
-        GROUP BY day
-        ORDER BY day
-    """
+    sql = _DAILY_TREND_SQL_PG if placeholder == _PG_PLACEHOLDER else _DAILY_TREND_SQL_SQLITE
     rows = _execute(conn, sql, (since_epoch,))
     return [
-        {
-            "date": str(r[0]),
-            "skill": r[1],
-            "command": r[2],
-            "agent": r[3],
-            "total": r[4],
-        }
+        {"date": str(r[0]), "skill": r[1], "command": r[2], "agent": r[3], "total": r[4]}
         for r in rows
     ]
 
@@ -151,13 +163,23 @@ def outcome_distribution(
         [{"outcome": str, "count": int}] count の降順でソート済み
     """
     since_epoch = int(time.time()) - days * 86400
-    sql = f"""
-        SELECT outcome, COUNT(*) AS cnt
-        FROM mem_item_runs
-        WHERE created_at_epoch > {placeholder}
-        GROUP BY outcome
-        ORDER BY cnt DESC
-    """
+    # プレースホルダをリテラル直書きした完成SQLをDB種別ごとに用意する（CWE-89対策）
+    if placeholder == _PG_PLACEHOLDER:
+        sql = """
+            SELECT outcome, COUNT(*) AS cnt
+            FROM mem_item_runs
+            WHERE created_at_epoch > %s
+            GROUP BY outcome
+            ORDER BY cnt DESC
+        """
+    else:
+        sql = """
+            SELECT outcome, COUNT(*) AS cnt
+            FROM mem_item_runs
+            WHERE created_at_epoch > ?
+            GROUP BY outcome
+            ORDER BY cnt DESC
+        """
     rows = _execute(conn, sql, (since_epoch,))
     return [{"outcome": r[0], "count": r[1]} for r in rows]
 

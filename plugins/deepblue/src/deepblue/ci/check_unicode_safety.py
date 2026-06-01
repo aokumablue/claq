@@ -414,20 +414,21 @@ def _normalize_relative_path(relative_path: str | Path) -> str:
     return os.path.normpath(str(relative_path))
 
 
-def validate_unicode_safety(root: str | Path = DEFAULT_ROOT, write_mode: bool = False) -> int:
-    """危険な Unicode をスキャンし、必要に応じて書き込み可能なテキストファイルをサニタイズする。
+def _scan_unicode_safety(
+    root_path: Path, write_mode: bool
+) -> tuple[list[str], list[dict[str, object]]]:
+    """ルート配下のテキストファイルを走査し、変更ファイルと違反を収集する。
 
     Args:
-        root: 処理に渡す root の値です。
-        write_mode: 処理に渡す write_mode の値です。
+        root_path: 走査するルートディレクトリ
+        write_mode: True の場合は書き込み可能ファイルをサニタイズして上書きする
 
     Returns:
-        処理結果を返します。
+        (サニタイズしたファイルの相対名リスト, 検出した違反のリスト) のタプル
 
     Raises:
-        例外は発生しません。
+        例外は発生しません（読み取り失敗ファイルはスキップ）。
     """
-    root_path = Path(root)
     changed_files: list[str] = []
     violations: list[dict[str, object]] = []
 
@@ -451,19 +452,52 @@ def validate_unicode_safety(root: str | Path = DEFAULT_ROOT, write_mode: bool = 
         for violation in collect_emoji_matches(text):
             violations.append({"file": relative_name, **violation})
 
+    return changed_files, violations
+
+
+def _report_unicode_violations(violations: list[dict[str, object]]) -> None:
+    """検出した Unicode 違反を標準エラー出力に書き出す。
+
+    Args:
+        violations: collect 系関数が返した違反情報のリスト
+
+    Returns:
+        戻り値はありません。
+
+    Raises:
+        例外は発生しません。
+    """
+    print("Unicode 安全性の違反が検出されました:", file=sys.stderr)
+    for violation in violations:
+        kind = KIND_LABELS.get(str(violation["kind"]), str(violation["kind"]))
+        print(
+            f"{violation['file']}:{violation['line']}:{violation['column']} {kind} {violation['codePoint']}",
+            file=sys.stderr,
+        )
+
+
+def validate_unicode_safety(root: str | Path = DEFAULT_ROOT, write_mode: bool = False) -> int:
+    """危険な Unicode をスキャンし、必要に応じて書き込み可能なテキストファイルをサニタイズする。
+
+    Args:
+        root: 処理に渡す root の値です。
+        write_mode: 処理に渡す write_mode の値です。
+
+    Returns:
+        処理結果を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    changed_files, violations = _scan_unicode_safety(Path(root), write_mode)
+
     if changed_files:
         print(f"{len(changed_files)} 個のファイルをサニタイズしました:")
         for file_name in changed_files:
             print(f"- {file_name}")
 
     if violations:
-        print("Unicode 安全性の違反が検出されました:", file=sys.stderr)
-        for violation in violations:
-            kind = KIND_LABELS.get(str(violation["kind"]), str(violation["kind"]))
-            print(
-                f"{violation['file']}:{violation['line']}:{violation['column']} {kind} {violation['codePoint']}",
-                file=sys.stderr,
-            )
+        _report_unicode_violations(violations)
         return 1
 
     print("Unicode 安全性チェックに合格しました。")

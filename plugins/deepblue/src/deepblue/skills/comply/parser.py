@@ -11,6 +11,8 @@ import yaml
 
 @dataclass(frozen=True)
 class ObservationEvent:
+    """観測トレース中の単一イベント（ツール呼び出し）を表す。"""
+
     timestamp: str
     event: str
     tool: str
@@ -21,6 +23,8 @@ class ObservationEvent:
 
 @dataclass(frozen=True)
 class Detector:
+    """ステップ検出条件と時系列制約（before/after）を表す。"""
+
     description: str
     after_step: str | None = None
     before_step: str | None = None
@@ -28,6 +32,8 @@ class Detector:
 
 @dataclass(frozen=True)
 class Step:
+    """コンプライアンス仕様内の単一ステップを表す。"""
+
     id: str
     description: str
     required: bool
@@ -36,6 +42,8 @@ class Step:
 
 @dataclass(frozen=True)
 class ComplianceSpec:
+    """採点対象となるコンプライアンス仕様全体を表す。"""
+
     id: str
     name: str
     source_rule: str

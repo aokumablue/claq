@@ -243,6 +243,40 @@ def get_available_package_managers() -> list[str]:
     return available
 
 
+def _detect_from_env() -> PackageManagerResult | None:
+    """環境変数 CLAUDE_PACKAGE_MANAGER からパッケージマネージャーを検出する。"""
+    env_pm = os.environ.get("CLAUDE_PACKAGE_MANAGER")
+    if env_pm and env_pm in PACKAGE_MANAGERS:
+        return PackageManagerResult(name=env_pm, config=PACKAGE_MANAGERS[env_pm], source="environment")
+    return None
+
+
+def _detect_from_project_config(project_dir: Path) -> PackageManagerResult | None:
+    """プロジェクト固有設定（.claude/package-manager.json）からパッケージマネージャーを検出する。"""
+    project_config_path = project_dir / ".claude" / "package-manager.json"
+    project_config_content = read_file(project_config_path)
+    if not project_config_content:
+        return None
+    try:
+        config = json.loads(project_config_content)
+        pm_name = config.get("packageManager")
+        if pm_name and pm_name in PACKAGE_MANAGERS:
+            return PackageManagerResult(name=pm_name, config=PACKAGE_MANAGERS[pm_name], source="project-config")
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
+def _detect_from_global_config() -> PackageManagerResult | None:
+    """グローバルユーザー設定からパッケージマネージャーを検出する。"""
+    global_config = load_config()
+    if global_config:
+        pm_name = global_config.get("packageManager")
+        if pm_name and pm_name in PACKAGE_MANAGERS:
+            return PackageManagerResult(name=pm_name, config=PACKAGE_MANAGERS[pm_name], source="global-config")
+    return None
+
+
 def get_package_manager(
     *,
     project_dir: str | Path | None = None,
@@ -271,66 +305,27 @@ def get_package_manager(
     else:
         project_dir = Path(project_dir)
 
-    # 1. 環境変数を確認する
-    env_pm = os.environ.get("CLAUDE_PACKAGE_MANAGER")
-    if env_pm and env_pm in PACKAGE_MANAGERS:
-        return PackageManagerResult(
-            name=env_pm,
-            config=PACKAGE_MANAGERS[env_pm],
-            source="environment",
-        )
+    result = _detect_from_env()
+    if result:
+        return result
 
-    # 2. プロジェクト固有設定を確認する
-    project_config_path = project_dir / ".claude" / "package-manager.json"
-    project_config_content = read_file(project_config_path)
-    if project_config_content:
-        try:
-            config = json.loads(project_config_content)
-            pm_name = config.get("packageManager")
-            if pm_name and pm_name in PACKAGE_MANAGERS:
-                return PackageManagerResult(
-                    name=pm_name,
-                    config=PACKAGE_MANAGERS[pm_name],
-                    source="project-config",
-                )
-        except json.JSONDecodeError:
-            pass
+    result = _detect_from_project_config(project_dir)
+    if result:
+        return result
 
-    # 3. package.json の packageManager フィールドを確認する
     from_package_json = detect_from_package_json(project_dir)
     if from_package_json:
-        return PackageManagerResult(
-            name=from_package_json,
-            config=PACKAGE_MANAGERS[from_package_json],
-            source="package.json",
-        )
+        return PackageManagerResult(name=from_package_json, config=PACKAGE_MANAGERS[from_package_json], source="package.json")
 
-    # 4. ロックファイルを確認する
     from_lock_file = detect_from_lock_file(project_dir)
     if from_lock_file:
-        return PackageManagerResult(
-            name=from_lock_file,
-            config=PACKAGE_MANAGERS[from_lock_file],
-            source="lock-file",
-        )
+        return PackageManagerResult(name=from_lock_file, config=PACKAGE_MANAGERS[from_lock_file], source="lock-file")
 
-    # 5. グローバルなユーザー設定を確認する
-    global_config = load_config()
-    if global_config:
-        pm_name = global_config.get("packageManager")
-        if pm_name and pm_name in PACKAGE_MANAGERS:
-            return PackageManagerResult(
-                name=pm_name,
-                config=PACKAGE_MANAGERS[pm_name],
-                source="global-config",
-            )
+    result = _detect_from_global_config()
+    if result:
+        return result
 
-    # 6. 検出できなかった場合は None を返す（Node.js 以外のプロジェクトは PM 不要）
-    return PackageManagerResult(
-        name=None,
-        config=None,
-        source="none",
-    )
+    return PackageManagerResult(name=None, config=None, source="none")
 
 
 def set_preferred_package_manager(pm_name: str) -> dict[str, Any]:
@@ -500,6 +495,24 @@ def get_selection_prompt() -> str:
     return message
 
 
+_WELL_KNOWN_PATTERNS: dict[str, list[str]] = {
+    "dev": ["npm run dev", "pnpm( run)? dev", "yarn dev", "bun run dev"],
+    "install": ["npm install", "pnpm install", "yarn( install)?", "bun install"],
+    "test": ["npm test", "pnpm test", "yarn test", "bun test"],
+    "build": ["npm run build", "pnpm( run)? build", "yarn build", "bun run build"],
+}
+
+
+def _build_generic_patterns(escaped: str) -> list[str]:
+    """汎用 run コマンドの正規表現パターン一覧を生成する。"""
+    return [
+        f"npm run {escaped}",
+        f"pnpm( run)? {escaped}",
+        f"yarn {escaped}",
+        f"bun run {escaped}",
+    ]
+
+
 def get_command_pattern(action: str) -> str:
     """すべてのパッケージマネージャーのコマンドに一致する正規表現パターンを生成する。
 
@@ -512,47 +525,11 @@ def get_command_pattern(action: str) -> str:
     Raises:
         例外は発生しません。
     """
-    patterns: list[str] = []
     trimmed_action = action.strip()
-
-    if trimmed_action == "dev":
-        patterns = [
-            "npm run dev",
-            "pnpm( run)? dev",
-            "yarn dev",
-            "bun run dev",
-        ]
-    elif trimmed_action == "install":
-        patterns = [
-            "npm install",
-            "pnpm install",
-            "yarn( install)?",
-            "bun install",
-        ]
-    elif trimmed_action == "test":
-        patterns = [
-            "npm test",
-            "pnpm test",
-            "yarn test",
-            "bun test",
-        ]
-    elif trimmed_action == "build":
-        patterns = [
-            "npm run build",
-            "pnpm( run)? build",
-            "yarn build",
-            "bun run build",
-        ]
+    if trimmed_action in _WELL_KNOWN_PATTERNS:
+        patterns = _WELL_KNOWN_PATTERNS[trimmed_action]
     else:
-        # 汎用 run コマンド - 正規表現メタ文字をエスケープする
-        escaped = re.escape(trimmed_action)
-        patterns = [
-            f"npm run {escaped}",
-            f"pnpm( run)? {escaped}",
-            f"yarn {escaped}",
-            f"bun run {escaped}",
-        ]
-
+        patterns = _build_generic_patterns(re.escape(trimmed_action))
     return f"({' | '.join(patterns).replace(' | ', '|')})"
 
 

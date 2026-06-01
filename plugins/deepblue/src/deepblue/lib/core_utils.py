@@ -236,6 +236,20 @@ def get_session_id_short(fallback: str = "default") -> str:
     return sanitize_session_id(get_project_name()) or sanitize_session_id(fallback) or "default"
 
 
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    """グロブパターンを正規表現オブジェクトに変換する。"""
+    regex_pattern = re.escape(pattern).replace(r"\*", ".*").replace(r"\?", ".")
+    return re.compile(f"^{regex_pattern}$")
+
+
+def _is_within_max_age(mtime_ms: float, max_age: float) -> bool:
+    """mtime（ミリ秒）が max_age 日以内かどうかを判定する。"""
+    import time
+
+    age_in_days = (time.time() * 1000 - mtime_ms) / (1000 * 60 * 60 * 24)
+    return age_in_days <= max_age
+
+
 def find_files(
     directory: str | Path,
     pattern: str,
@@ -262,30 +276,18 @@ def find_files(
     if not dir_path.exists():
         return []
 
-    # グロブパターンを正規表現に変換
-    # 正規表現の特殊文字をエスケープし、グロブワイルドカードを変換
-    regex_pattern = re.escape(pattern)
-    # re.escape は * をエスケープするため、\* を .*、\? を . に置換する必要がある
-    regex_pattern = regex_pattern.replace(r"\*", ".*").replace(r"\?", ".")
-    regex = re.compile(f"^{regex_pattern}$")
-
+    regex = _glob_to_regex(pattern)
     results: list[dict[str, Any]] = []
 
     def search_dir(current_dir: Path) -> None:
+        """ディレクトリを走査し、条件に合致するファイルを results に追加する。"""
         try:
             for entry in current_dir.iterdir():
                 if entry.is_file() and regex.match(entry.name):
                     try:
-                        stat = entry.stat()
-                        mtime = stat.st_mtime * 1000  # JS と同様にミリ秒へ変換
-
-                        if max_age is not None:
-                            import time
-
-                            age_in_days = (time.time() * 1000 - mtime) / (1000 * 60 * 60 * 24)
-                            if age_in_days > max_age:
-                                continue
-
+                        mtime = entry.stat().st_mtime * 1000  # JS と同様にミリ秒へ変換
+                        if max_age is not None and not _is_within_max_age(mtime, max_age):
+                            continue
                         results.append({"path": str(entry), "mtime": mtime})
                     except OSError:
                         continue  # iterdir と stat の間でファイルが削除された
@@ -295,8 +297,6 @@ def find_files(
             pass  # 権限エラーは無視
 
     search_dir(dir_path)
-
-    # 更新時刻で並べ替え（新しい順）
     results.sort(key=lambda x: x["mtime"], reverse=True)
     return results
 

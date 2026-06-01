@@ -43,6 +43,35 @@ def handle_context(
     return ctx
 
 
+def _search_and_inject_context(
+    db: Any,
+    settings: Settings,
+    prompt: str,
+    project: str,
+    *,
+    log: Any,
+) -> None:
+    """プロンプトに関連するメモリを検索してコンテキストとして print する。"""
+    from deepblue.mem.search import SearchService
+
+    svc = SearchService(db, settings)
+    local_results = svc.search(query=prompt, project=project, limit=3)
+
+    team_results = []
+    if settings.sync.enabled and settings.sync.postgres_url:
+        git_user = get_git_user_name()
+        exclude = git_user if settings.team.exclude_self else None
+        try:
+            team_results = svc.search_team(query=prompt, limit=3, exclude_origin_user=exclude)
+        except Exception as e:
+            log.warning("チーム検索失敗（ローカルのみ使用）: %s", e)
+
+    merged = merge_search_results_rrf(local_results, team_results, top_k=3)
+    if merged:
+        ctx = render_adaptive_context(db, merged)
+        print(json.dumps({"hookEventName": "UserPromptSubmit", "additionalContext": ctx}))
+
+
 def handle_session_init(
     settings: Settings,
     stdin_data: dict[str, Any],
@@ -53,7 +82,7 @@ def handle_session_init(
 ) -> None:
     """UserPromptSubmit: セッション初期化 + 適応的検索注入"""
     from deepblue.mem.database import Session
-    from deepblue.mem.search import SearchService, should_inject_memory
+    from deepblue.mem.search import should_inject_memory
 
     session_id = str(stdin_data.get("session_id", "") or "")
     project = get_project(stdin_data)
@@ -64,45 +93,13 @@ def handle_session_init(
 
     try:
         with open_db(settings) as db:
-            db.upsert_session(
-                Session(
-                    session_id=session_id,
-                    project=project,
-                    started_at_epoch=int(time.time()),
-                )
-            )
-
-            if not prompt or not should_inject_memory(prompt):
-                return
-
-            svc = SearchService(db, settings)
-            local_results = svc.search(query=prompt, project=project, limit=3)
-
-            team_results = []
-            if settings.sync.enabled and settings.sync.postgres_url:
-                git_user = get_git_user_name()
-                exclude = git_user if settings.team.exclude_self else None
-                try:
-                    team_results = svc.search_team(
-                        query=prompt,
-                        limit=3,
-                        exclude_origin_user=exclude,
-                    )
-                except Exception as e:
-                    log.warning("チーム検索失敗（ローカルのみ使用）: %s", e)
-
-            merged = merge_search_results_rrf(local_results, team_results, top_k=3)
-
-            if merged:
-                ctx = render_adaptive_context(db, merged)
-                print(
-                    json.dumps(
-                        {
-                            "hookEventName": "UserPromptSubmit",
-                            "additionalContext": ctx,
-                        }
-                    )
-                )
+            db.upsert_session(Session(
+                session_id=session_id,
+                project=project,
+                started_at_epoch=int(time.time()),
+            ))
+            if prompt and should_inject_memory(prompt):
+                _search_and_inject_context(db, settings, prompt, project, log=log)
     except Exception as e:
         log.warning("セッション初期化失敗: %s", e)
 
@@ -143,6 +140,34 @@ def handle_observe(
         log.warning("チャンク保存失敗: %s", e)
 
 
+def _auto_compact_if_needed(
+    db: Any, settings: Settings, *, log: Any, time_module: Any
+) -> None:
+    """自動圧縮インターバルが経過していれば低品質チャンクを削除して DB を最適化する。"""
+    from deepblue.mem.compaction import detect_low_quality, optimize_db
+
+    if not settings.auto_compact_enabled:
+        return
+    interval_sec = settings.auto_compact_interval_days * 86400
+    if time_module.time() - settings.last_compacted_at < interval_sec:
+        return
+    try:
+        low_quality_ids = detect_low_quality(db)
+        if low_quality_ids:
+            placeholders = ",".join("?" * len(low_quality_ids))
+            db.conn.execute(
+                f"DELETE FROM memory_chunks WHERE id IN ({placeholders})",
+                low_quality_ids,
+            )
+            db.conn.commit()
+        optimize_db(db)
+        settings.last_compacted_at = time_module.time()
+        settings.save_sync_state()
+        log.info("自動圧縮完了: 削除=%d", len(low_quality_ids))
+    except Exception as e:
+        log.warning("自動圧縮エラー: %s", e)
+
+
 def handle_session_end(
     settings: Settings,
     stdin_data: dict[str, Any],
@@ -154,7 +179,6 @@ def handle_session_end(
 ) -> None:
     """SessionEnd: 埋め込み一括生成 + FTS5 最適化"""
     from deepblue.mem.bridge import sync_session_to_observations
-    from deepblue.mem.compaction import detect_low_quality, find_near_duplicates, optimize_db
 
     session_id = str(stdin_data.get("session_id", "") or "")
 
@@ -183,30 +207,7 @@ def handle_session_end(
             except Exception as e:
                 log.warning("learn 同期失敗: %s", e)
 
-            if settings.auto_compact_enabled:
-                interval_sec = settings.auto_compact_interval_days * 86400
-                if time_module.time() - settings.last_compacted_at >= interval_sec:
-                    try:
-                        low_quality_ids = detect_low_quality(db)
-                        near_dup_pairs = find_near_duplicates(db)
-                        # TODO: near_dup_pairs の重複削除処理を実装する
-                        if low_quality_ids:
-                            placeholders = ",".join("?" * len(low_quality_ids))
-                            db.conn.execute(
-                                f"DELETE FROM memory_chunks WHERE id IN ({placeholders})",
-                                low_quality_ids,
-                            )
-                            db.conn.commit()
-                        optimize_db(db)
-                        settings.last_compacted_at = time_module.time()
-                        settings.save_sync_state()
-                        log.info(
-                            "自動圧縮完了: 削除=%d 重複ペア=%d",
-                            len(low_quality_ids),
-                            len(near_dup_pairs),
-                        )
-                    except Exception as e:
-                        log.warning("自動圧縮エラー: %s", e)
+            _auto_compact_if_needed(db, settings, log=log, time_module=time_module)
     except Exception as e:
         log.warning("セッション終了失敗: %s", e)
 
@@ -218,15 +219,13 @@ def handle_compact(
     log: Any,
 ) -> None:
     """メモリ圧縮コマンド（既定で実行）"""
-    from deepblue.mem.compaction import detect_low_quality, find_near_duplicates, optimize_db
+    from deepblue.mem.compaction import detect_low_quality, optimize_db
 
     try:
         with open_db(settings) as db:
             low_quality_ids = detect_low_quality(db)
-            near_dup_pairs = find_near_duplicates(db)
 
             print(f"削除候補: {len(low_quality_ids)} 件")
-            print(f"重複ペア: {len(near_dup_pairs)} 件")
 
             if low_quality_ids:
                 placeholders = ",".join("?" * len(low_quality_ids))

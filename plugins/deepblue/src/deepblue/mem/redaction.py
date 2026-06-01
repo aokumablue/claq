@@ -38,8 +38,11 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("ipv4", re.compile(r"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b")),
     # 32 文字以上の連続した16進数文字列（ハッシュ・API キー等）
     ("hex_secret", re.compile(r"\b[0-9a-f]{32,}\b")),
-    # Base64 エンコードされた長い文字列（40 文字以上）—JWT の payload 等
-    ("base64_long", re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b")),
+    # Base64 エンコードされた長い文字列（40 文字以上）—JWT の payload 等。
+    # 純粋な16進数（commit hash / UUID / SHA-256 等）は base64 シークレットではないため
+    # 先読み (?![0-9a-fA-F]+\b) で除外し、誤検出を抑える。
+    # 長さ閾値は 40 のまま維持し、32 バイト鍵の base64（44 文字）等の取りこぼしを防ぐ。
+    ("base64_long", re.compile(r"\b(?![0-9a-fA-F]+\b)[A-Za-z0-9+/]{40,}={0,2}\b")),
 ]
 
 

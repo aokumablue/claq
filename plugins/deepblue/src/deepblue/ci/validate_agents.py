@@ -40,6 +40,45 @@ def extract_frontmatter(content: str) -> dict[str, str] | None:
     return frontmatter
 
 
+def _validate_agent_file(file_path: Path) -> bool:
+    """単一のエージェント Markdown ファイルを検証する。
+
+    Args:
+        file_path: 検証するエージェントファイルのパス
+
+    Returns:
+        エラーがあれば True、なければ False
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        content = file_path.read_text(encoding="utf-8")
+    except OSError as err:
+        emit_error(f"{file_path.name} - ファイルの読み取りに失敗しました: {err}")
+        return True
+
+    frontmatter = extract_frontmatter(content)
+    if frontmatter is None:
+        emit_error(f"{file_path.name} - フロントマターがありません")
+        return True
+
+    has_errors = False
+    for field in REQUIRED_FIELDS:
+        if not is_non_empty_string(frontmatter.get(field)):
+            emit_error(f"{file_path.name} - 必須フィールドが不足しています: {field}")
+            has_errors = True
+
+    model = frontmatter.get("model")
+    if model and model not in VALID_MODELS:
+        emit_error(
+            f"{file_path.name} - モデル '{model}' は無効です。次のいずれかである必要があります: {', '.join(VALID_MODELS)}"
+        )
+        has_errors = True
+
+    return has_errors
+
+
 def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR) -> int:
     """エージェント Markdown ファイルを検証し、JS バリデータと同じメッセージを表示する。
 
@@ -61,29 +100,7 @@ def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR) -> int:
     has_errors = False
 
     for file_path in files:
-        try:
-            content = file_path.read_text(encoding="utf-8")
-        except OSError as err:
-            emit_error(f"{file_path.name} - ファイルの読み取りに失敗しました: {err}")
-            has_errors = True
-            continue
-
-        frontmatter = extract_frontmatter(content)
-        if frontmatter is None:
-            emit_error(f"{file_path.name} - フロントマターがありません")
-            has_errors = True
-            continue
-
-        for field in REQUIRED_FIELDS:
-            if not is_non_empty_string(frontmatter.get(field)):
-                emit_error(f"{file_path.name} - 必須フィールドが不足しています: {field}")
-                has_errors = True
-
-        model = frontmatter.get("model")
-        if model and model not in VALID_MODELS:
-            emit_error(
-                f"{file_path.name} - モデル '{model}' は無効です。次のいずれかである必要があります: {', '.join(VALID_MODELS)}"
-            )
+        if _validate_agent_file(file_path):
             has_errors = True
 
     if has_errors:

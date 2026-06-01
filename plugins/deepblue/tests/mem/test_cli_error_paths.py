@@ -126,7 +126,6 @@ def test_session_end_inner_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         lambda db, session_id: (_ for _ in ()).throw(RuntimeError("sync boom")),
     )
     monkeypatch.setattr(compaction_mod, "detect_low_quality", lambda db: [])
-    monkeypatch.setattr(compaction_mod, "find_near_duplicates", lambda db: [])
     monkeypatch.setattr(cli.time, "time", lambda: 100.0)
 
     def fake_execute(sql: str, params=None):  # noqa: ANN001

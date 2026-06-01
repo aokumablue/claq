@@ -29,6 +29,41 @@ def _to_reduce_config(compact: CompactSettings) -> ReduceConfig:
     )
 
 
+def _load_config() -> ReduceConfig:
+    """Settings.load() から ReduceConfig を読み込む。失敗時はデフォルト設定を返す。"""
+    try:
+        settings = Settings.load()
+        return _to_reduce_config(settings.compact)
+    except Exception as e:
+        write_stderr(f"[Compact] settings load failed: {e}\n")
+        return ReduceConfig()
+
+
+def _apply_reduction(original_text: str, data: dict, config: ReduceConfig) -> str:
+    """テキスト削減を適用し、削減後の JSON 文字列を返す。削減効果なしの場合は空文字列を返す。
+
+    Args:
+        original_text: 削減前の Bash ツール出力テキスト。
+        data: 元の入力データ辞書。
+        config: 削減設定。
+
+    Returns:
+        削減効果があれば更新済み JSON 文字列、なければ空文字列。
+    """
+    try:
+        reduced = reduce_bash_output(original_text, config)
+    except Exception as e:
+        write_stderr(f"[Compact] reduction failed: {e}\n")
+        return ""
+    if len(reduced) >= len(original_text):
+        return ""
+    saved_pct = (len(original_text) - len(reduced)) / len(original_text) * 100
+    write_stderr(f"[Compact] {len(original_text)} → {len(reduced)} chars ({saved_pct:.0f}% 削減)\n")
+    output_data = dict(data)
+    output_data["tool_response"] = reduced
+    return json.dumps(output_data, ensure_ascii=False)
+
+
 def evaluate(raw_input: str, config: ReduceConfig | None = None) -> str:
     """Bash ツール出力を削減して返す。
 
@@ -42,46 +77,22 @@ def evaluate(raw_input: str, config: ReduceConfig | None = None) -> str:
     data = parse_json_object(raw_input)
     if data is None:
         return raw_input
-
     if str(data.get("tool_name", "") or "") != "Bash":
         return raw_input
-
     tool_response = data.get("tool_response")
     if not tool_response:
         return raw_input
-
     original_text = str(tool_response)
     if not original_text.strip():
         return raw_input
 
-    # 設定の読み込み（テスト時は引数から注入）
     if config is None:
-        try:
-            settings = Settings.load()
-            config = _to_reduce_config(settings.compact)
-        except Exception as e:
-            write_stderr(f"[Compact] settings load failed: {e}\n")
-            config = ReduceConfig()
-
+        config = _load_config()
     if not config.enabled:
         return raw_input
 
-    try:
-        reduced = reduce_bash_output(original_text, config)
-    except Exception as e:
-        write_stderr(f"[Compact] reduction failed: {e}\n")
-        return raw_input
-
-    # 削減効果がなければ上書きしない
-    if len(reduced) >= len(original_text):
-        return raw_input
-
-    saved_pct = (len(original_text) - len(reduced)) / len(original_text) * 100
-    write_stderr(f"[Compact] {len(original_text)} → {len(reduced)} chars ({saved_pct:.0f}% 削減)\n")
-
-    output_data = dict(data)
-    output_data["tool_response"] = reduced
-    return json.dumps(output_data, ensure_ascii=False)
+    result = _apply_reduction(original_text, data, config)
+    return result if result else raw_input
 
 
 def main() -> int:
