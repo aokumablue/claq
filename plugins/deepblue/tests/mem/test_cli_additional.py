@@ -384,6 +384,44 @@ def test_run_normal_command_dispatch_and_exit_code_contract(
     assert cli._run_normal_command("unknown-command", settings, {}) == 2
 
 
+def test_parse_argv_and_stdin_branches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_parse_argv_and_stdin の stdin 各分岐（tty/空/非dict/正常）を網羅する。"""
+
+    class _FakeStdin:
+        def __init__(self, *, tty: bool, data: str) -> None:
+            self._tty = tty
+            self._data = data
+
+        def isatty(self) -> bool:
+            return self._tty
+
+        def read(self) -> str:
+            return self._data
+
+    monkeypatch.setattr(sys, "argv", ["prog", "search"])
+
+    # stdin が tty → 読み取らず空 dict
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(tty=True, data="{}"))
+    assert cli._parse_argv_and_stdin() == ("search", {})
+
+    # 空入力 → strip で偽となり空 dict
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(tty=False, data="   "))
+    assert cli._parse_argv_and_stdin() == ("search", {})
+
+    # JSON が dict 以外（リスト）→ 無視して空 dict
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(tty=False, data="[1, 2]"))
+    assert cli._parse_argv_and_stdin() == ("search", {})
+
+    # 正常系: dict をパース
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(tty=False, data='{"query": "x"}'))
+    assert cli._parse_argv_and_stdin() == ("search", {"query": "x"})
+
+    # argv に command 無し → command は空文字
+    monkeypatch.setattr(sys, "argv", ["prog"])
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(tty=True, data=""))
+    assert cli._parse_argv_and_stdin() == ("", {})
+
+
 def test_main_preserves_normal_command_exit_code(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

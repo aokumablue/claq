@@ -18,7 +18,7 @@ from deepblue.mem.database import (
     ProjectProfile,
     Session,
 )
-from deepblue.mem.pg_database import PgDatabase, _ensure_ssl, _to_json
+from deepblue.mem.pg_database import PgDatabase, _ensure_ssl, _is_loopback, _to_json
 
 
 class FakeCursor:
@@ -218,8 +218,9 @@ def test_to_json_and_get_conn_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     pool_mod = ModuleType("psycopg_pool")
 
     class ConnectionPool:
-        def __init__(self, url: str, min_size: int, max_size: int) -> None:
+        def __init__(self, url: str, kwargs: dict, min_size: int, max_size: int) -> None:
             self.url = url
+            self.kwargs = kwargs
             self.min_size = min_size
             self.max_size = max_size
             self.getconn_calls = 0
@@ -243,7 +244,7 @@ def test_to_json_and_get_conn_modes(monkeypatch: pytest.MonkeyPatch) -> None:
 
     fallback_conn = FakeConn()
     psycopg_mod = ModuleType("psycopg")
-    psycopg_mod.connect = lambda url: fallback_conn  # type: ignore[assignment]
+    psycopg_mod.connect = lambda url, passfile=None: fallback_conn  # type: ignore[assignment]
     monkeypatch.setitem(sys.modules, "psycopg", psycopg_mod)
     monkeypatch.setitem(sys.modules, "psycopg_pool", ModuleType("psycopg_pool"))
 
@@ -306,6 +307,66 @@ def test_put_conn_returns_to_pool() -> None:
     db._pool = pool
     db._put_conn(conn)
     assert pool.putconn_calls == [conn]
+
+
+def test_get_conn_reuses_existing_pool_and_conn() -> None:
+    """既存プール/接続があれば再生成せず再利用する。"""
+    # プール生成済み → getconn のみ呼ぶ
+    pool_conn = FakeConn()
+    pool = FakePool("postgres://example", 1, 4, pool_conn)
+    db_pool = PgDatabase("postgres://example", use_pool=True)
+    db_pool._pool = pool
+    assert db_pool._get_conn() is pool_conn
+    assert pool.getconn_calls == 1
+
+    # 単一接続が開いている → 既存接続を返す
+    open_conn = FakeConn()
+    db_single = PgDatabase("postgres://example", use_pool=False)
+    db_single._conn = open_conn
+    assert db_single._get_conn() is open_conn
+
+
+def test_close_handles_missing_pool_and_conn() -> None:
+    """close は pool/conn が存在しない場合も安全に動作する。"""
+    # pool=None, conn 開いている → conn のみ閉じる
+    open_conn = FakeConn()
+    db = PgDatabase("postgres://example", use_pool=False)
+    db._conn = open_conn
+    db.close()
+    assert open_conn.closed is True
+    assert db._conn is None
+
+    # pool=None, conn=None → 何もせず正常終了
+    db_empty = PgDatabase("postgres://example", use_pool=False)
+    db_empty.close()
+    assert db_empty._conn is None
+
+
+def test_test_connection_get_conn_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_get_conn が例外を投げると conn は None のまま finally を抜ける。"""
+    db = PgDatabase("postgres://example", use_pool=False)
+
+    def _boom() -> FakeConn:
+        raise RuntimeError("connect failed")
+
+    monkeypatch.setattr(db, "_get_conn", _boom)
+    assert db.test_connection() is False
+
+
+def test_test_connection_falsy_conn_skips_putconn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """conn が falsy でも成功時は putconn をスキップして True を返す。"""
+
+    class FalsyConn(FakeConn):
+        def __bool__(self) -> bool:
+            return False
+
+    conn = FalsyConn(FakeCursor(fetchone_result=(1,)))
+    db = PgDatabase("postgres://example", use_pool=False)
+    put_calls: list[FakeConn] = []
+    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_put_conn", lambda current: put_calls.append(current))
+    assert db.test_connection() is True
+    assert put_calls == []
 
 
 def test_upsert_and_batch_methods(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -588,20 +649,21 @@ class TestEnsureSsl:
         url = "postgresql://user@host/db?sslmode=verify-full"
         assert _ensure_ssl(url) == url
 
-    def test_disable_raises(self) -> None:
-        """sslmode=disable は ValueError を発生させる（フェイルクローズ）。"""
-        with pytest.raises(ValueError, match="sslmode"):
-            _ensure_ssl("postgresql://user@host/db?sslmode=disable")
+    def test_disable_kept_with_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """リモートの sslmode=disable は値を変更せず警告のみ出す。"""
+        url = "postgresql://user@host/db?sslmode=disable"
+        with caplog.at_level("WARNING"):
+            result = _ensure_ssl(url)
+        assert "sslmode=disable" in result
+        assert "安全ではありません" in caplog.text
 
-    def test_allow_raises(self) -> None:
-        """sslmode=allow は ValueError を発生させる。"""
-        with pytest.raises(ValueError, match="sslmode"):
-            _ensure_ssl("postgresql://user@host/db?sslmode=allow")
+    def test_allow_kept(self) -> None:
+        """リモートの sslmode=allow は値を変更せず維持される。"""
+        assert "sslmode=allow" in _ensure_ssl("postgresql://user@host/db?sslmode=allow")
 
-    def test_prefer_raises(self) -> None:
-        """sslmode=prefer は ValueError を発生させる。"""
-        with pytest.raises(ValueError, match="sslmode"):
-            _ensure_ssl("postgresql://user@host/db?sslmode=prefer")
+    def test_prefer_kept(self) -> None:
+        """リモートの sslmode=prefer は値を変更せず維持される。"""
+        assert "sslmode=prefer" in _ensure_ssl("postgresql://user@host/db?sslmode=prefer")
 
     def test_url_with_other_params_preserves_them(self) -> None:
         """他のクエリパラメータは保持される。"""
@@ -634,20 +696,41 @@ class TestEnsureSsl:
         result = _ensure_ssl("postgresql://user@localhost/db")
         assert "sslmode=require" in result
 
-    def test_remote_host_disable_still_raises(self) -> None:
-        """リモートホストでは sslmode=disable は依然として ValueError。"""
-        with pytest.raises(ValueError, match="sslmode"):
-            _ensure_ssl("postgresql://user@remote.example.com/db?sslmode=disable")
+    def test_remote_host_disable_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+        """リモートホストの sslmode=disable は値を維持しつつ警告する。"""
+        url = "postgresql://user@remote.example.com/db?sslmode=disable"
+        with caplog.at_level("WARNING"):
+            result = _ensure_ssl(url)
+        assert "sslmode=disable" in result
+        assert "安全ではありません" in caplog.text
 
-    def test_localhost_allow_still_raises(self) -> None:
-        """localhost でも sslmode=allow は許可しない（disable のみ例外）。"""
-        with pytest.raises(ValueError, match="sslmode"):
-            _ensure_ssl("postgresql://user@localhost/db?sslmode=allow")
+    def test_localhost_allow_kept_without_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """localhost の sslmode=allow は値を維持し警告も出さない。"""
+        url = "postgresql://user@localhost/db?sslmode=allow"
+        with caplog.at_level("WARNING"):
+            result = _ensure_ssl(url)
+        assert "sslmode=allow" in result
+        assert "安全ではありません" not in caplog.text
 
-    def test_localhost_prefer_still_raises(self) -> None:
-        """localhost でも sslmode=prefer は許可しない（disable のみ例外）。"""
-        with pytest.raises(ValueError, match="sslmode"):
-            _ensure_ssl("postgresql://user@localhost/db?sslmode=prefer")
+    def test_localhost_prefer_kept(self) -> None:
+        """localhost の sslmode=prefer は値を維持する。"""
+        assert "sslmode=prefer" in _ensure_ssl("postgresql://user@localhost/db?sslmode=prefer")
+
+
+class TestIsLoopback:
+    """_is_loopback の判定ロジック。"""
+
+    def test_unix_socket_path_is_loopback(self) -> None:
+        """ホストが空/スラッシュ始まり（Unix ソケット）はループバック扱い。"""
+        assert _is_loopback("postgresql:///db") is True
+
+    def test_ipv4_mapped_ipv6_loopback(self) -> None:
+        """IPv4-mapped IPv6 (::ffff:127.0.0.1) はループバックとして判定される。"""
+        assert _is_loopback("postgresql://user@[::ffff:127.0.0.1]/db") is True
+
+    def test_remote_host_not_loopback(self) -> None:
+        """リモートホスト名はループバックではない。"""
+        assert _is_loopback("postgresql://user@remote.example.com/db") is False
 
 
 class TestTestConnectionProbeCache:

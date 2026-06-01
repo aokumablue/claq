@@ -273,7 +273,7 @@ install_user_python() {
     fi
   fi
 
-  # 既存 settings.json のセキュリティ移行（パスワード分離・sslmode 強制）
+  # 既存 settings.json のセキュリティ移行（パスワードを <data_dir>/.pgpass に分離・sslmode 未指定時のみ require 付与）
   if [[ -f "${SETTINGS_PATH}" ]]; then
     echo "[deepblue] Migrating existing settings.json to hardened format"
     "${VENV_PYTHON}" -m deepblue.mem migrate-settings || echo "[deepblue] Note: settings migration skipped."

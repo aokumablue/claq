@@ -49,39 +49,28 @@ def _is_loopback(url: str) -> bool:
 def _ensure_ssl(url: str) -> str:
     """URL に sslmode を適用する。
 
-    - ループバックホスト(localhost/127.0.0.1/::1) + sslmode=disable: 警告のみで許可
-      （SSL 非対応のローカル PG 向け開発用例外）
-    - sslmode=allow/prefer: ループバックでも拒否（中途半端な TLS は意味がない）
-    - sslmode 未指定: sslmode=require を自動付与
-    - sslmode=require: 警告を出して維持（verify-full 推奨）
-    - sslmode=verify-full: そのまま維持
-    - リモートホストで sslmode=disable: ValueError（フェイルクローズ）
+    ユーザが明示指定した sslmode は値を変更せず尊重する。安全性が低い値には
+    警告ログを出すが、接続自体は拒否しない（最低限のセキュリティ担保）。
+
+    - sslmode 明示指定: 値はそのまま維持
+      - disable/allow/prefer: リモートホスト時のみ警告（ローカルは静か）
+      - require: verify-full 推奨の警告を出して維持
+      - verify-full 等: そのまま維持
+    - sslmode 未指定: sslmode=require を自動付与（安全側デフォルト）
     """
     parsed = urlparse(url)
     qs = parse_qs(parsed.query, keep_blank_values=True)
     existing = qs.get("sslmode", [])
     if existing:
         mode = existing[0].lower()
-        if mode == "disable":
-            if _is_loopback(url):
-                # ローカル開発環境: SSL 非対応 PG を許容
-                log.warning(
-                    "sslmode=disable はローカル接続(%s)のみ許可されます。"
-                    "本番環境では sslmode=require 以上を使用してください。",
-                    parsed.hostname,
-                )
-                return url
-            raise ValueError(
-                f"PostgreSQL URL に安全でない sslmode={mode!r} が指定されています。"
-                " sslmode=require 以上を使用してください。"
+        if mode in ("disable", "allow", "prefer") and not _is_loopback(url):
+            log.warning(
+                "sslmode=%s はリモート接続(%s)では安全ではありません。"
+                " 本番環境では sslmode=require 以上を推奨します。",
+                mode,
+                parsed.hostname,
             )
-        if mode in ("allow", "prefer"):
-            raise ValueError(
-                f"PostgreSQL URL に安全でない sslmode={mode!r} が指定されています。"
-                " sslmode=require 以上を使用してください。"
-            )
-        # verify-full / require 等の安全な値はそのまま使用
-        if mode == "require":
+        elif mode == "require":
             log.warning(
                 "sslmode=require は証明書検証を行いません。中間者攻撃への完全な保護には"
                 " sslmode=verify-full を推奨します。"
@@ -114,13 +103,20 @@ class PgDatabase:
         self._probe_cache: tuple[bool, float] | None = None
 
     def _get_conn(self) -> psycopg.Connection:
-        """接続を取得（遅延接続）。プールが有効なら ConnectionPool を使用。"""
+        """接続を取得（遅延接続）。プールが有効なら ConnectionPool を使用。
+
+        パスワードは settings.json から除去され <data_dir>/.pgpass に分離されるため、
+        接続時に passfile パラメータでそのファイルを参照させる（不在時も無害）。
+        """
+        from deepblue.mem.settings import pgpass_path
+
+        passfile = str(pgpass_path())
         if self._use_pool:
             if self._pool is None:
                 try:
                     from psycopg_pool import ConnectionPool
 
-                    self._pool = ConnectionPool(_ensure_ssl(self._url), min_size=1, max_size=4)
+                    self._pool = ConnectionPool(_ensure_ssl(self._url), kwargs={"passfile": passfile}, min_size=1, max_size=4)
                 except ImportError:
                     # psycopg_pool 未インストール時はフォールバック
                     log.debug("psycopg_pool が見つかりません。単一接続を使用します")
@@ -131,7 +127,7 @@ class PgDatabase:
         if self._conn is None or self._conn.closed:
             import psycopg
 
-            self._conn = psycopg.connect(_ensure_ssl(self._url))
+            self._conn = psycopg.connect(_ensure_ssl(self._url), passfile=passfile)
         return self._conn
 
     def _put_conn(self, conn: psycopg.Connection) -> None:
@@ -585,26 +581,28 @@ class PgDatabase:
         if not events:
             return 0
         conn = self._get_conn()
-        count = 0
         try:
+            params_list = [
+                (
+                    event.id,
+                    event.origin_user,
+                    event.event_type,
+                    event.project_id,
+                    event.content,
+                    event.created_at_epoch,
+                )
+                for event in events
+            ]
             with conn.cursor() as cur:
-                for event in events:
-                    cur.execute(
-                        """INSERT INTO event_logs
+                cur.executemany(
+                    """INSERT INTO event_logs
              (id, origin_user, event_type, project_id, content, created_at_epoch, synced_at)
              VALUES (%s, %s, %s, %s, %s, %s, NOW())
              ON CONFLICT (id) DO NOTHING""",
-                        (
-                            event.id,
-                            event.origin_user,
-                            event.event_type,
-                            event.project_id,
-                            event.content,
-                            event.created_at_epoch,
-                        ),
-                    )
-                    count += 1
+                    params_list,
+                )
             conn.commit()
+            count = len(params_list)
         except Exception:
             conn.rollback()
             raise
@@ -691,7 +689,7 @@ class PgDatabase:
              LIMIT %s""",
                         (vec_str, limit),
                     )
-                return [(row[0], row[1]) for row in cur.fetchall()]
+                return [(str(row[0]), row[1]) for row in cur.fetchall()]
         finally:
             self._put_conn(conn)
 
@@ -733,7 +731,7 @@ class PgDatabase:
              LIMIT %s""",
                         (query, query, limit),
                     )
-                return [(row[0], row[1]) for row in cur.fetchall()]
+                return [(str(row[0]), row[1]) for row in cur.fetchall()]
         finally:
             self._put_conn(conn)
 

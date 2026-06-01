@@ -412,17 +412,17 @@ def _handle_migrate_settings(settings: Settings) -> None:  # noqa: ARG001
         _write_pgpass(host, port, db, user, password)
         url = stripped_url
         changed = True
-        log.info("migrate-settings: PG パスワードを ~/.pgpass に移行しました")
+        log.info("migrate-settings: PG パスワードを <data_dir>/.pgpass に移行しました")
 
-    # 2. sslmode 正規化
+    # 2. sslmode 正規化（明示指定は尊重。危険値は警告のみで書き換えない）
     parsed = urlparse(url)
     qs = parse_qs(parsed.query, keep_blank_values=True)
     existing_mode = (qs.get("sslmode", [None])[0] or "").lower()
     if existing_mode in {"disable", "allow", "prefer"}:
-        log.warning("migrate-settings: 危険な sslmode=%s を sslmode=require に変更します", existing_mode)
-        qs["sslmode"] = ["require"]
-        url = urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
-        changed = True
+        log.warning(
+            "migrate-settings: sslmode=%s は安全性が低いです。本番環境では sslmode=require 以上を推奨します",
+            existing_mode,
+        )
     elif not existing_mode:
         qs["sslmode"] = ["require"]
         url = urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
@@ -611,7 +611,7 @@ Commands:
   record-item-run        Record a skill/command/agent execution to mem_item_runs
   team-context           Inject <team-context> from PostgreSQL (FTS-only, SessionStart)
   team-session-init      Inject <team-context> with hybrid search (UserPromptSubmit)
-  migrate-settings       Migrate existing ~/.deepblue/settings.json to hardened format (PG password → ~/.pgpass, sslmode=require)
+  migrate-settings       Migrate existing ~/.deepblue/settings.json to hardened format (PG password → <data_dir>/.pgpass, sslmode=require if unset)
 
 search-structured Input (JSON):
   {"query": "...", "project": "...", "tool_name": "Edit", "file_pattern": "*.py", "date_from": "2024-01-01", "date_to": "2024-12-31"}

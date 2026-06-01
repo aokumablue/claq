@@ -518,28 +518,49 @@ class TestWritePgpass:
     """_write_pgpass のテスト。"""
 
     def test_creates_pgpass_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import deepblue.mem.settings as smod
         from deepblue.mem.cli_sync_handlers import _write_pgpass
 
-        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(smod, "_DEFAULT_DATA_DIR", tmp_path / ".deepblue")
         _write_pgpass("myhost", 5432, "mydb", "myuser", "mypassword")
-        pgpass_path = tmp_path / ".pgpass"
+        pgpass_path = tmp_path / ".deepblue" / ".pgpass"
         assert pgpass_path.exists()
         content = pgpass_path.read_text()
         assert "myhost:5432:mydb:myuser:mypassword" in content
 
     def test_pgpass_chmod_0600(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import deepblue.mem.settings as smod
         from deepblue.mem.cli_sync_handlers import _write_pgpass
 
-        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(smod, "_DEFAULT_DATA_DIR", tmp_path / ".deepblue")
         _write_pgpass("host", 5432, "db", "user", "pass")
-        pgpass_path = tmp_path / ".pgpass"
+        pgpass_path = tmp_path / ".deepblue" / ".pgpass"
         assert pgpass_path.stat().st_mode & 0o777 == 0o600
 
     def test_no_duplicate_entry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import deepblue.mem.settings as smod
         from deepblue.mem.cli_sync_handlers import _write_pgpass
 
-        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(smod, "_DEFAULT_DATA_DIR", tmp_path / ".deepblue")
         _write_pgpass("h", 5432, "d", "u", "p")
         _write_pgpass("h", 5432, "d", "u", "p")
-        content = (tmp_path / ".pgpass").read_text()
+        content = (tmp_path / ".deepblue" / ".pgpass").read_text()
         assert content.count("h:5432:d:u:p") == 1
+
+    def test_appends_to_existing_and_fixes_permissions(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """既存 pgpass が 0600 でなければ 0600 に修正し、別エントリは追記する。"""
+        import deepblue.mem.settings as smod
+        from deepblue.mem.cli_sync_handlers import _write_pgpass
+
+        monkeypatch.setattr(smod, "_DEFAULT_DATA_DIR", tmp_path / ".deepblue")
+        pgpass = tmp_path / ".deepblue" / ".pgpass"
+        pgpass.parent.mkdir(parents=True)
+        pgpass.write_text("other:5432:db:user:pw\n", encoding="utf-8")
+        pgpass.chmod(0o644)
+
+        _write_pgpass("h", 5432, "d", "u", "p")
+
+        assert pgpass.stat().st_mode & 0o777 == 0o600
+        content = pgpass.read_text()
+        assert "other:5432:db:user:pw" in content
+        assert "h:5432:d:u:p" in content

@@ -17,15 +17,6 @@ from typing import IO
 
 _REQUIRED_FILES = ("model.onnx", "tokenizer.json", "config.json", "manifest.json")
 
-_ALLOWED_HOSTS: frozenset[str] = frozenset(
-    {
-        "github.com",
-        "objects.githubusercontent.com",
-        "huggingface.co",
-        "cdn-lfs.huggingface.co",
-    }
-)
-
 _DEFAULT_MAX_DOWNLOAD_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GB
 _DEFAULT_MAX_EXTRACT_BYTES: int = 500 * 1024 * 1024  # 500 MB per file
 _CHUNK_SIZE: int = 1024 * 1024  # 1 MB
@@ -34,52 +25,45 @@ _CHUNK_SIZE: int = 1024 * 1024  # 1 MB
 class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
     """リダイレクト先 URL を再検証するカスタムハンドラー。"""
 
-    def __init__(self, extra_allowed_hosts: frozenset[str] = frozenset(), *, allow_http: bool = False) -> None:
-        """extra_allowed_hosts と allow_http をリダイレクト先検証に引き継ぐ。"""
-        super().__init__()
-        self._extra_allowed_hosts = extra_allowed_hosts
-        self._allow_http = allow_http
-
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
         """リダイレクト URL を _validate_url で再検証してから親クラスに委譲する。"""
-        _validate_url(newurl, self._extra_allowed_hosts, allow_http=self._allow_http)
+        _validate_url(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def _validate_url(url: str, extra_allowed_hosts: frozenset[str] = frozenset(), *, allow_http: bool = False) -> None:
-    """URL が安全かどうか検証する。HTTPS 限定（allow_http=True 時は HTTP も許可）・許可ホスト限定・IP アドレス拒否。"""
+def _validate_url(url: str) -> None:
+    """URL の形式を最低限検証する。
+
+    scheme が http/https のいずれかで hostname を持つことのみ必須とする。
+    HTTP（平文）と IP アドレス指定は許可するが、安全性が低いため警告を出す。
+    ホスト制限は行わない。
+    """
     parsed = urllib.parse.urlparse(url)
-    valid_schemes = frozenset(("https", "http")) if allow_http else frozenset(("https",))
-    if parsed.scheme not in valid_schemes:
-        scheme_desc = "HTTPS or HTTP" if allow_http else "HTTPS"
-        raise ValueError(f"URL must use {scheme_desc} scheme: {url!r}")
+    if parsed.scheme not in ("https", "http"):
+        raise ValueError(f"URL must use HTTPS or HTTP scheme: {url!r}")
 
     host = parsed.hostname or ""
     if not host:
         raise ValueError(f"URL has no valid hostname: {url!r}")
 
-    is_ip = False
+    if parsed.scheme == "http":
+        print(f"[download] WARNING: 平文 HTTP で取得します（中間者攻撃のリスク）: {url!r}")
+
     try:
         ipaddress.ip_address(host)
-        is_ip = True
+        print(f"[download] WARNING: IP アドレス指定の URL です（証明書検証が機能しません）: {host!r}")
     except ValueError:
         pass
-    if is_ip and host not in extra_allowed_hosts:
-        raise ValueError(f"IP address URLs are not allowed: {host!r}")
-
-    if host not in _ALLOWED_HOSTS | extra_allowed_hosts:
-        raise ValueError(f"Host {host!r} is not in the allowed hosts list")
 
 
-def _load_download_settings(config_path: Path) -> tuple[bool, str, str, int, int, frozenset[str], bool, bool]:
+def _load_download_settings(config_path: Path) -> tuple[bool, str, str, int, int, bool]:
     """onnx.json から download 設定を読み込む。
 
     Returns:
-        (enabled, model_url, expected_sha256, max_download_bytes, max_extract_bytes,
-         extra_allowed_hosts, allow_http, ssl_no_verify)
+        (enabled, model_url, expected_sha256, max_download_bytes, max_extract_bytes, ssl_no_verify)
     """
     if not config_path.is_file():
-        return False, "", "", _DEFAULT_MAX_DOWNLOAD_BYTES, _DEFAULT_MAX_EXTRACT_BYTES, frozenset(), False, False
+        return False, "", "", _DEFAULT_MAX_DOWNLOAD_BYTES, _DEFAULT_MAX_EXTRACT_BYTES, False
 
     data = json.loads(config_path.read_text(encoding="utf-8"))
     download = data.get("onnx", {}).get("download", {})
@@ -88,25 +72,21 @@ def _load_download_settings(config_path: Path) -> tuple[bool, str, str, int, int
     expected_sha256 = str(download.get("sha256", "") or "")
     max_download_bytes = int(download.get("max_download_bytes", _DEFAULT_MAX_DOWNLOAD_BYTES))
     max_extract_bytes = int(download.get("max_extract_bytes", _DEFAULT_MAX_EXTRACT_BYTES))
-    extra_hosts_raw = download.get("extra_allowed_hosts", [])
-    extra_allowed_hosts = frozenset(str(h) for h in extra_hosts_raw if h)
-    allow_http = bool(download.get("allow_http", False))
     ssl_no_verify = bool(download.get("ssl_no_verify", False))
-    return enabled, model_url, expected_sha256, max_download_bytes, max_extract_bytes, extra_allowed_hosts, allow_http, ssl_no_verify
+    return enabled, model_url, expected_sha256, max_download_bytes, max_extract_bytes, ssl_no_verify
 
 
 def _download_archive(
     model_url: str,
     archive_path: Path,
     max_bytes: int,
-    extra_allowed_hosts: frozenset[str] = frozenset(),
     *,
-    allow_http: bool = False,
     ssl_no_verify: bool = False,
 ) -> None:
     """URL からアーカイブをダウンロードする。リダイレクト先も再検証する。"""
-    handlers: list[urllib.request.BaseHandler] = [_ValidatingRedirectHandler(extra_allowed_hosts, allow_http=allow_http)]
+    handlers: list[urllib.request.BaseHandler] = [_ValidatingRedirectHandler()]
     if ssl_no_verify:
+        print("[download] WARNING: SSL 証明書検証を無効化しています（中間者攻撃のリスク）")
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -208,13 +188,13 @@ def download_model_bundle(config_path: Path, output_dir: Path) -> int:
         print(f"[download] ONNX model already present (skipping): {model_path}")
         return 0
 
-    enabled, model_url, expected_sha256, max_download_bytes, max_extract_bytes, extra_allowed_hosts, allow_http, ssl_no_verify = _load_download_settings(config_path)
+    enabled, model_url, expected_sha256, max_download_bytes, max_extract_bytes, ssl_no_verify = _load_download_settings(config_path)
     if not enabled:
         return 3
     if not model_url:
         raise ValueError(f"model_url is empty in {config_path}")
 
-    _validate_url(model_url, extra_allowed_hosts, allow_http=allow_http)
+    _validate_url(model_url)
 
     if not expected_sha256:
         raise ValueError(f"sha256 is required when download is enabled in {config_path}")
@@ -227,7 +207,7 @@ def download_model_bundle(config_path: Path, output_dir: Path) -> int:
         extracted_dir.mkdir()
 
         print(f"[download] Fetching ONNX bundle: {model_url}")
-        _download_archive(model_url, archive_path, max_download_bytes, extra_allowed_hosts, allow_http=allow_http, ssl_no_verify=ssl_no_verify)
+        _download_archive(model_url, archive_path, max_download_bytes, ssl_no_verify=ssl_no_verify)
         _verify_archive_sha256(archive_path, expected_sha256)
 
         for required_name in _REQUIRED_FILES:

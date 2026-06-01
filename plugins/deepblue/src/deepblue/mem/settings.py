@@ -25,8 +25,17 @@ _DEFAULT_EMBEDDING_REVISION = "18b60fb8c2b9df296fb4212bb7d23ef94e579cd3"
 _SYNC_STATE_FILENAME = "sync_state.json"
 
 
+def pgpass_path() -> Path:
+    """pgpass ファイルの絶対パス（<data_dir>/.pgpass）を返す。
+
+    データディレクトリは settings.json と同じ ``_DEFAULT_DATA_DIR``
+    （DEEPBLUE_DATA_PATH または ~/.deepblue）を基準とする。
+    """
+    return _DEFAULT_DATA_DIR / ".pgpass"
+
+
 def _strip_password_to_pgpass(url: str) -> str:
-    """URL にパスワードが含まれていれば ~/.pgpass に分離し、パスワードを除いた URL を返す。
+    """URL にパスワードが含まれていれば <data_dir>/.pgpass に分離し、パスワードを除いた URL を返す。
 
     settings.json に平文パスワードが残らないようにするためのフェイルセーフ。
     パスワードが含まれない URL はそのまま返す。
@@ -41,28 +50,29 @@ def _strip_password_to_pgpass(url: str) -> str:
     db = (parsed.path or "/").lstrip("/") or "*"
     user = unquote(parsed.username) if parsed.username else "*"
     password = unquote(parsed.password)
-    pgpass_path = Path(os.environ.get("HOME", "~")).expanduser() / ".pgpass"
+    pgpass = pgpass_path()
+    pgpass.parent.mkdir(parents=True, exist_ok=True)
     entry = f"{host}:{port}:{db}:{user}:{password}\n"
     prefix = f"{host}:{port}:{db}:{user}:"
 
     # pgpass の権限を 0o600 に修正（既存ファイルが緩い場合）
-    if pgpass_path.exists():
-        if pgpass_path.stat().st_mode & 0o777 != 0o600:
+    if pgpass.exists():
+        if pgpass.stat().st_mode & 0o777 != 0o600:
             import logging
-            logging.getLogger("SETTINGS").warning(".pgpass のパーミッションを 0o600 に修正します: %s", pgpass_path)
-            pgpass_path.chmod(0o600)
-        existing_text = pgpass_path.read_text(encoding="utf-8")
+            logging.getLogger("SETTINGS").warning(".pgpass のパーミッションを 0o600 に修正します: %s", pgpass)
+            pgpass.chmod(0o600)
+        existing_text = pgpass.read_text(encoding="utf-8")
         if any(line.startswith(prefix) for line in existing_text.splitlines()):
             # エントリ既存: 追記不要
             pass
         else:
             # O_NOFOLLOW でシンボリックリンク経由の差し替えを防ぎ追記する
-            fd = os.open(str(pgpass_path), os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+            fd = os.open(str(pgpass), os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as f:
                 f.write(entry)
     else:
         # 新規作成: O_CREAT + O_NOFOLLOW で 0o600 の pgpass を生成
-        fd = os.open(str(pgpass_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        fd = os.open(str(pgpass), os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(entry)
 

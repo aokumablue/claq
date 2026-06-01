@@ -26,8 +26,6 @@ def _write_config(
     sha256: str = "",
     max_download_bytes: int = download_mod._DEFAULT_MAX_DOWNLOAD_BYTES,
     max_extract_bytes: int = download_mod._DEFAULT_MAX_EXTRACT_BYTES,
-    extra_allowed_hosts: list[str] | None = None,
-    allow_http: bool | None = None,
     ssl_no_verify: bool | None = None,
 ) -> Path:
     """onnx.json を作成して返す。"""
@@ -39,10 +37,6 @@ def _write_config(
         "max_download_bytes": max_download_bytes,
         "max_extract_bytes": max_extract_bytes,
     }
-    if extra_allowed_hosts is not None:
-        download_section["extra_allowed_hosts"] = extra_allowed_hosts
-    if allow_http is not None:
-        download_section["allow_http"] = allow_http
     if ssl_no_verify is not None:
         download_section["ssl_no_verify"] = ssl_no_verify
     config_path.write_text(
@@ -86,14 +80,8 @@ def _sha256_of(path: Path) -> str:
 class TestValidatingRedirectHandler:
     """_ValidatingRedirectHandler のテスト。"""
 
-    def test_rejects_invalid_redirect_target(self) -> None:
-        """許可リスト外のリダイレクト先は ValueError。"""
-        handler = download_mod._ValidatingRedirectHandler()
-        with pytest.raises(ValueError, match="not in the allowed hosts"):
-            handler.redirect_request(None, None, 301, "Moved", {}, "https://evil.example.com/file.zip")
-
-    def test_accepts_valid_redirect_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """許可ホストへのリダイレクトは super に委譲する。"""
+    def test_accepts_https_redirect(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """HTTPS リダイレクトは super に委譲する。"""
         called: list[str] = []
 
         def fake_super(self: object, req: object, fp: object, code: int, msg: str, headers: object, newurl: str) -> None:
@@ -104,41 +92,24 @@ class TestValidatingRedirectHandler:
         handler.redirect_request(None, None, 301, "Moved", {}, "https://github.com/file.zip")
         assert called == ["https://github.com/file.zip"]
 
-    def test_accepts_extra_allowed_host_redirect(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """extra_allowed_hosts に含まれるホストへのリダイレクトは通過する。"""
+    def test_accepts_http_redirect_with_warning(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """HTTP リダイレクトも警告付きで通過する（ホスト制限なし）。"""
         called: list[str] = []
 
         def fake_super(self: object, req: object, fp: object, code: int, msg: str, headers: object, newurl: str) -> None:
             called.append(newurl)
 
         monkeypatch.setattr(urllib.request.HTTPRedirectHandler, "redirect_request", fake_super)
-        handler = download_mod._ValidatingRedirectHandler(extra_allowed_hosts=frozenset({"internal.corp"}))
-        handler.redirect_request(None, None, 301, "Moved", {}, "https://internal.corp/file.zip")
-        assert called == ["https://internal.corp/file.zip"]
-
-    def test_rejects_host_not_in_extra_list(self) -> None:
-        """extra_allowed_hosts が設定されていても未知ホストは拒否される。"""
-        handler = download_mod._ValidatingRedirectHandler(extra_allowed_hosts=frozenset({"internal.corp"}))
-        with pytest.raises(ValueError, match="not in the allowed hosts"):
-            handler.redirect_request(None, None, 301, "Moved", {}, "https://evil.example.com/file.zip")
-
-    def test_accepts_http_redirect_when_allow_http(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """allow_http=True のハンドラーは HTTP リダイレクトを受け入れる。"""
-        called: list[str] = []
-
-        def fake_super(self: object, req: object, fp: object, code: int, msg: str, headers: object, newurl: str) -> None:
-            called.append(newurl)
-
-        monkeypatch.setattr(urllib.request.HTTPRedirectHandler, "redirect_request", fake_super)
-        handler = download_mod._ValidatingRedirectHandler(
-            extra_allowed_hosts=frozenset({"internal.corp"}), allow_http=True
-        )
+        handler = download_mod._ValidatingRedirectHandler()
         handler.redirect_request(None, None, 301, "Moved", {}, "http://internal.corp/file.tar.gz")
         assert called == ["http://internal.corp/file.tar.gz"]
+        assert "WARNING" in capsys.readouterr().out
 
-    def test_rejects_ftp_redirect_even_with_allow_http(self) -> None:
-        """allow_http=True でも FTP リダイレクトは拒否される。"""
-        handler = download_mod._ValidatingRedirectHandler(allow_http=True)
+    def test_rejects_ftp_redirect(self) -> None:
+        """FTP など http/https 以外のリダイレクトは拒否される。"""
+        handler = download_mod._ValidatingRedirectHandler()
         with pytest.raises(ValueError, match="HTTPS or HTTP scheme"):
             handler.redirect_request(None, None, 301, "Moved", {}, "ftp://github.com/file.zip")
 
@@ -146,74 +117,38 @@ class TestValidatingRedirectHandler:
 class TestValidateUrl:
     """_validate_url のテスト。"""
 
-    def test_accepts_allowed_github_url(self) -> None:
-        """github.com の HTTPS URL は通過する。"""
+    def test_accepts_https_url(self) -> None:
+        """HTTPS URL は通過する。"""
         download_mod._validate_url("https://github.com/owner/repo/releases/download/v1/model.tar.gz")
 
-    def test_accepts_objects_githubusercontent(self) -> None:
-        """objects.githubusercontent.com の HTTPS URL は通過する。"""
-        download_mod._validate_url("https://objects.githubusercontent.com/path/file.zip")
+    def test_accepts_arbitrary_host(self) -> None:
+        """ホスト制限はないため任意ホストの HTTPS URL も通過する。"""
+        download_mod._validate_url("https://example.invalid/file.zip")
 
-    def test_rejects_http(self) -> None:
-        """HTTP は拒否される。"""
-        with pytest.raises(ValueError, match="HTTPS scheme"):
-            download_mod._validate_url("http://github.com/file.zip")
+    def test_accepts_http_with_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """HTTP は通過するが平文警告を出す。"""
+        download_mod._validate_url("http://github.com/file.zip")
+        assert "WARNING" in capsys.readouterr().out
+
+    def test_accepts_ip_address_with_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """IP アドレス指定は通過するが警告を出す。"""
+        download_mod._validate_url("https://192.168.1.1/file.zip")
+        assert "WARNING" in capsys.readouterr().out
+
+    def test_accepts_ipv6_with_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """IPv6 アドレス指定は通過するが警告を出す。"""
+        download_mod._validate_url("https://[::1]/file.zip")
+        assert "WARNING" in capsys.readouterr().out
 
     def test_rejects_ftp(self) -> None:
-        """FTP は拒否される。"""
-        with pytest.raises(ValueError, match="HTTPS scheme"):
+        """http/https 以外の scheme は拒否される。"""
+        with pytest.raises(ValueError, match="HTTPS or HTTP scheme"):
             download_mod._validate_url("ftp://github.com/file.zip")
-
-    def test_rejects_ip_address(self) -> None:
-        """IP アドレス直接指定は拒否される。"""
-        with pytest.raises(ValueError, match="IP address"):
-            download_mod._validate_url("https://192.168.1.1/file.zip")
-
-    def test_rejects_localhost_ip(self) -> None:
-        """loopback IP は拒否される。"""
-        with pytest.raises(ValueError, match="IP address"):
-            download_mod._validate_url("https://127.0.0.1/file.zip")
-
-    def test_rejects_ipv6(self) -> None:
-        """IPv6 アドレスは拒否される。"""
-        with pytest.raises(ValueError, match="IP address"):
-            download_mod._validate_url("https://[::1]/file.zip")
-
-    def test_rejects_unknown_host(self) -> None:
-        """許可リスト外ホストは拒否される。"""
-        with pytest.raises(ValueError, match="not in the allowed hosts"):
-            download_mod._validate_url("https://example.invalid/file.zip")
 
     def test_rejects_empty_host(self) -> None:
         """ホストなし URL は拒否される。"""
         with pytest.raises(ValueError, match="no valid hostname"):
             download_mod._validate_url("https:///path/file.zip")
-
-    def test_accepts_extra_allowed_host(self) -> None:
-        """extra_allowed_hosts に含まれるホストは通過する。"""
-        download_mod._validate_url("https://internal.corp/model.tar.gz", frozenset({"internal.corp"}))
-
-    def test_accepts_ip_in_extra_allowed_hosts(self) -> None:
-        """extra_allowed_hosts に列挙した IP アドレスは通過する。"""
-        download_mod._validate_url("https://192.168.1.100/model.tar.gz", frozenset({"192.168.1.100"}))
-
-    def test_accepts_ip_with_allow_http(self) -> None:
-        """extra_allowed_hosts に列挙した IP アドレスは allow_http=True でも通過する。"""
-        download_mod._validate_url("http://10.0.0.1/model.tar.gz", frozenset({"10.0.0.1"}), allow_http=True)
-
-    def test_rejects_ip_not_in_extra_allowed_hosts(self) -> None:
-        """extra_allowed_hosts に含まれない IP アドレスは拒否される。"""
-        with pytest.raises(ValueError, match="IP address"):
-            download_mod._validate_url("https://192.168.1.1/file.zip", frozenset({"192.168.1.100"}))
-
-    def test_accepts_http_when_allow_http_true(self) -> None:
-        """allow_http=True のとき HTTP URL は通過する。"""
-        download_mod._validate_url("http://github.com/file.zip", allow_http=True)
-
-    def test_rejects_ftp_even_with_allow_http_true(self) -> None:
-        """allow_http=True でも FTP は拒否される。"""
-        with pytest.raises(ValueError, match="HTTPS or HTTP scheme"):
-            download_mod._validate_url("ftp://github.com/file.zip", allow_http=True)
 
 
 class TestVerifyArchiveSha256:
@@ -240,14 +175,12 @@ class TestLoadDownloadSettings:
 
     def test_returns_disabled_when_file_missing(self, tmp_path: Path) -> None:
         """設定ファイルがない場合は disabled を返す。"""
-        enabled, model_url, sha256, max_dl, max_ex, extra_hosts, allow_http, ssl_no_verify = download_mod._load_download_settings(tmp_path / "missing.json")
+        enabled, model_url, sha256, max_dl, max_ex, ssl_no_verify = download_mod._load_download_settings(tmp_path / "missing.json")
         assert enabled is False
         assert model_url == ""
         assert sha256 == ""
         assert max_dl == download_mod._DEFAULT_MAX_DOWNLOAD_BYTES
         assert max_ex == download_mod._DEFAULT_MAX_EXTRACT_BYTES
-        assert extra_hosts == frozenset()
-        assert allow_http is False
         assert ssl_no_verify is False
 
     def test_reads_all_fields(self, tmp_path: Path) -> None:
@@ -260,14 +193,12 @@ class TestLoadDownloadSettings:
             max_download_bytes=100,
             max_extract_bytes=50,
         )
-        enabled, model_url, sha256, max_dl, max_ex, extra_hosts, allow_http, ssl_no_verify = download_mod._load_download_settings(config_path)
+        enabled, model_url, sha256, max_dl, max_ex, ssl_no_verify = download_mod._load_download_settings(config_path)
         assert enabled is True
         assert model_url == "https://github.com/owner/repo/model.zip"
         assert sha256 == "abc123"
         assert max_dl == 100
         assert max_ex == 50
-        assert extra_hosts == frozenset()
-        assert allow_http is False
         assert ssl_no_verify is False
 
     def test_uses_defaults_when_size_fields_absent(self, tmp_path: Path) -> None:
@@ -277,49 +208,20 @@ class TestLoadDownloadSettings:
             json.dumps({"onnx": {"download": {"enabled": True, "model_url": "https://github.com/x"}}}),
             encoding="utf-8",
         )
-        _, _, _, max_dl, max_ex, _, _, _ = download_mod._load_download_settings(config_path)
+        _, _, _, max_dl, max_ex, _ = download_mod._load_download_settings(config_path)
         assert max_dl == download_mod._DEFAULT_MAX_DOWNLOAD_BYTES
         assert max_ex == download_mod._DEFAULT_MAX_EXTRACT_BYTES
-
-    def test_reads_extra_allowed_hosts(self, tmp_path: Path) -> None:
-        """extra_allowed_hosts フィールドを frozenset として返す。"""
-        config_path = _write_config(
-            tmp_path,
-            enabled=True,
-            model_url="https://github.com/x",
-            extra_allowed_hosts=["a.corp", "b.corp"],
-        )
-        _, _, _, _, _, extra_hosts, _, _ = download_mod._load_download_settings(config_path)
-        assert extra_hosts == frozenset({"a.corp", "b.corp"})
-
-    def test_defaults_extra_allowed_hosts_when_absent(self, tmp_path: Path) -> None:
-        """extra_allowed_hosts フィールドがない場合は frozenset() を返す。"""
-        config_path = _write_config(tmp_path, enabled=True, model_url="https://github.com/x")
-        _, _, _, _, _, extra_hosts, _, _ = download_mod._load_download_settings(config_path)
-        assert extra_hosts == frozenset()
-
-    def test_reads_allow_http(self, tmp_path: Path) -> None:
-        """allow_http: true が True として返る。"""
-        config_path = _write_config(tmp_path, enabled=True, model_url="https://github.com/x", allow_http=True)
-        _, _, _, _, _, _, allow_http, _ = download_mod._load_download_settings(config_path)
-        assert allow_http is True
-
-    def test_defaults_allow_http_false_when_absent(self, tmp_path: Path) -> None:
-        """allow_http フィールドがない場合は False を返す。"""
-        config_path = _write_config(tmp_path, enabled=True, model_url="https://github.com/x")
-        _, _, _, _, _, _, allow_http, _ = download_mod._load_download_settings(config_path)
-        assert allow_http is False
 
     def test_reads_ssl_no_verify(self, tmp_path: Path) -> None:
         """ssl_no_verify: true が True として返る。"""
         config_path = _write_config(tmp_path, enabled=True, model_url="https://github.com/x", ssl_no_verify=True)
-        _, _, _, _, _, _, _, ssl_no_verify = download_mod._load_download_settings(config_path)
+        _, _, _, _, _, ssl_no_verify = download_mod._load_download_settings(config_path)
         assert ssl_no_verify is True
 
     def test_defaults_ssl_no_verify_false_when_absent(self, tmp_path: Path) -> None:
         """ssl_no_verify フィールドがない場合は False を返す。"""
         config_path = _write_config(tmp_path, enabled=True, model_url="https://github.com/x")
-        _, _, _, _, _, _, _, ssl_no_verify = download_mod._load_download_settings(config_path)
+        _, _, _, _, _, ssl_no_verify = download_mod._load_download_settings(config_path)
         assert ssl_no_verify is False
 
 
@@ -486,20 +388,6 @@ class TestDownloadModelBundle:
         with pytest.raises(ValueError, match="model_url is empty"):
             download_mod.download_model_bundle(config_path, output_dir)
 
-    def test_raises_when_url_fails_validation(self, tmp_path: Path) -> None:
-        """許可リスト外 URL なら ValueError（ダウンロード前に検証）。"""
-        config_path = _write_config(tmp_path, enabled=True, model_url="https://evil.example.com/model.zip")
-        output_dir = tmp_path / "models"
-        with pytest.raises(ValueError, match="not in the allowed hosts"):
-            download_mod.download_model_bundle(config_path, output_dir)
-
-    def test_raises_when_url_is_http(self, tmp_path: Path) -> None:
-        """HTTP URL なら ValueError。"""
-        config_path = _write_config(tmp_path, enabled=True, model_url="http://github.com/model.zip")
-        output_dir = tmp_path / "models"
-        with pytest.raises(ValueError, match="HTTPS scheme"):
-            download_mod.download_model_bundle(config_path, output_dir)
-
     def test_raises_when_sha256_empty_and_enabled(self, tmp_path: Path) -> None:
         """enabled=true かつ sha256 が空なら ValueError。"""
         config_path = _write_config(tmp_path, enabled=True, model_url="https://github.com/x/model.zip", sha256="")
@@ -516,7 +404,7 @@ class TestDownloadModelBundle:
         )
         output_dir = tmp_path / "models"
 
-        def _fake_download(_url: str, destination: Path, _max_bytes: int, _extra_hosts: frozenset[str] = frozenset(), *, allow_http: bool = False, ssl_no_verify: bool = False) -> None:
+        def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
         monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
@@ -535,7 +423,7 @@ class TestDownloadModelBundle:
         )
         output_dir = tmp_path / "models"
 
-        def _fake_download(_url: str, destination: Path, _max_bytes: int, _extra_hosts: frozenset[str] = frozenset(), *, allow_http: bool = False, ssl_no_verify: bool = False) -> None:
+        def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
         monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
@@ -556,7 +444,7 @@ class TestDownloadModelBundle:
         )
         output_dir = tmp_path / "models"
 
-        def _fake_download(_url: str, destination: Path, _max_bytes: int, _extra_hosts: frozenset[str] = frozenset(), *, allow_http: bool = False, ssl_no_verify: bool = False) -> None:
+        def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
         monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
@@ -573,7 +461,7 @@ class TestDownloadModelBundle:
         )
         output_dir = tmp_path / "models"
 
-        def _fake_download(_url: str, destination: Path, _max_bytes: int, _extra_hosts: frozenset[str] = frozenset(), *, allow_http: bool = False, ssl_no_verify: bool = False) -> None:
+        def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
         monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
@@ -589,15 +477,15 @@ class TestDownloadModelBundle:
         )
         output_dir = tmp_path / "models"
 
-        def _fake_download(_url: str, destination: Path, _max_bytes: int, _extra_hosts: frozenset[str] = frozenset(), *, allow_http: bool = False, ssl_no_verify: bool = False) -> None:
+        def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
         monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
         with pytest.raises(ValueError, match="SHA-256 mismatch"):
             download_mod.download_model_bundle(config_path, output_dir)
 
-    def test_downloads_with_extra_allowed_host(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """extra_allowed_hosts に指定したホストの URL でダウンロードが成功する。"""
+    def test_downloads_from_arbitrary_host(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ホスト制限がないため任意ホストの HTTPS URL でもダウンロードできる。"""
         archive_path = tmp_path / "bundle.zip"
         _create_zip_bundle(archive_path)
         config_path = _write_config(
@@ -605,49 +493,16 @@ class TestDownloadModelBundle:
             enabled=True,
             model_url="https://internal.corp/model.zip",
             sha256=_sha256_of(archive_path),
-            extra_allowed_hosts=["internal.corp"],
         )
         output_dir = tmp_path / "models"
 
-        received_extra_hosts: list[frozenset[str]] = []
-
-        def _fake_download(_url: str, destination: Path, _max_bytes: int, _extra_hosts: frozenset[str] = frozenset(), *, allow_http: bool = False, ssl_no_verify: bool = False) -> None:
-            received_extra_hosts.append(_extra_hosts)
+        def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
         monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
 
         result = download_mod.download_model_bundle(config_path, output_dir)
         assert result == 0
-        assert received_extra_hosts == [frozenset({"internal.corp"})]
-        for name in ("model.onnx", "tokenizer.json", "config.json", "manifest.json"):
-            assert (output_dir / name).exists()
-
-    def test_downloads_with_allow_http_true(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """allow_http=true かつ extra_allowed_hosts に指定した HTTP URL でダウンロードが成功する。"""
-        archive_path = tmp_path / "bundle.zip"
-        _create_zip_bundle(archive_path)
-        config_path = _write_config(
-            tmp_path,
-            enabled=True,
-            model_url="http://internal.corp/model.zip",
-            sha256=_sha256_of(archive_path),
-            extra_allowed_hosts=["internal.corp"],
-            allow_http=True,
-        )
-        output_dir = tmp_path / "models"
-
-        received_allow_http: list[bool] = []
-
-        def _fake_download(_url: str, destination: Path, _max_bytes: int, _extra_hosts: frozenset[str] = frozenset(), *, allow_http: bool = False, ssl_no_verify: bool = False) -> None:
-            received_allow_http.append(allow_http)
-            shutil.copy2(archive_path, destination)
-
-        monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
-
-        result = download_mod.download_model_bundle(config_path, output_dir)
-        assert result == 0
-        assert received_allow_http == [True]
         for name in ("model.onnx", "tokenizer.json", "config.json", "manifest.json"):
             assert (output_dir / name).exists()
 
@@ -666,7 +521,7 @@ class TestDownloadModelBundle:
 
         received_ssl: list[bool] = []
 
-        def _fake_download(_url: str, destination: Path, _max_bytes: int, _extra_hosts: frozenset[str] = frozenset(), *, allow_http: bool = False, ssl_no_verify: bool = False) -> None:
+        def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             received_ssl.append(ssl_no_verify)
             shutil.copy2(archive_path, destination)
 
