@@ -13,8 +13,15 @@ from deepblue.mem.tag_stripping import strip_tags
 
 _FILE_WRITE_TOOLS = {"Write", "Edit", "NotebookEdit"}
 
+# tool_response が入力（編集・書き込み内容）をそのままエコーする書き込み系ツール。
+# これらの response は input_summary と情報が重複し、生 dict（structuredPatch 等）で
+# 肥大化するため、保存時に短い抜粋へ切り詰める（埋め込み・同期・注入密度のコスト削減）。
+# 失敗時のエラー本文は別途 tool_error に保持されるため、要約短縮で情報は欠落しない。
+_ECHO_RESPONSE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
 # tool_output の最大文字数（超過時はトランケート）
 _MAX_OUTPUT_LEN = 1500
+_ECHO_RESPONSE_OUTPUT_LEN = 200  # エコー系ツール response の短縮上限
 _TRUNCATE_KEEP = 500  # 先頭/末尾それぞれ保持する文字数
 
 # AI 応答の要約: 先頭400 + 末尾100 = 計500文字
@@ -100,7 +107,8 @@ class ChunkAccumulator:
 
         # コンテンツの組み立て
         input_summary = _summarize_input(tool_name, inp, tool_input)
-        output_summary = _truncate(strip_tags(str(tool_response or "")))
+        output_max_len = _ECHO_RESPONSE_OUTPUT_LEN if tool_name in _ECHO_RESPONSE_TOOLS else _MAX_OUTPUT_LEN
+        output_summary = _truncate(strip_tags(str(tool_response or "")), max_len=output_max_len)
         part = f"[{tool_name}] {input_summary}"
         if output_summary:
             part += f"\n{output_summary}"

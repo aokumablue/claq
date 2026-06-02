@@ -224,6 +224,21 @@ class TestBuildChunkFromToolUse:
         assert len(chunk.ai_response_summary or "") == 500
         assert (chunk.ai_response_summary or "").startswith("a" * 400)
 
+    def test_error_without_tool_response(self) -> None:
+        """is_error でも tool_response が無ければ tool_error は記録されない。"""
+        chunk = build_chunk_from_tool_use(
+            session_id="s1",
+            project="proj",
+            chunk_index=0,
+            user_prompt="test",
+            tool_name="Bash",
+            tool_input={"command": "false"},
+            tool_response=None,
+            is_error=True,
+        )
+        assert chunk.execution_status == "failure"
+        assert chunk.tool_error is None
+
     def test_truncation(self) -> None:
         chunk = build_chunk_from_tool_use(
             session_id="s1",
@@ -236,6 +251,36 @@ class TestBuildChunkFromToolUse:
             chunk_max_length=2000,
         )
         assert len(chunk.content) <= 2000
+
+    def test_echo_response_tool_output_capped(self) -> None:
+        """Edit/Write 系は response を短い抜粋へ切り詰める（input と重複する生 dict 肥大化を抑制）。"""
+        # 現実的な可変テキスト（redact による圧縮を避ける）
+        long_resp = "the quick brown fox jumps over the lazy dog near the river bank. " * 200
+        edit_chunk = build_chunk_from_tool_use(
+            session_id="s1",
+            project="proj",
+            chunk_index=0,
+            user_prompt="test",
+            tool_name="Edit",
+            tool_input={"file_path": "/c.py", "old_string": "foo", "new_string": "bar"},
+            tool_response=long_resp,
+        )
+        bash_chunk = build_chunk_from_tool_use(
+            session_id="s1",
+            project="proj",
+            chunk_index=0,
+            user_prompt="test",
+            tool_name="Bash",
+            tool_input={"command": "cat big"},
+            tool_response=long_resp,
+        )
+        # input_summary（[Edit] /c.py (foo → ...)）は保持しつつ response は大幅短縮
+        assert "/c.py" in edit_chunk.content
+        assert "truncated" in edit_chunk.content
+        # エコー系は ~200 上限、Bash は 1500 上限 → 同じ response でも Edit は Bash より十分短い
+        assert len(edit_chunk.content) < 400
+        assert len(bash_chunk.content) > 900
+        assert len(bash_chunk.content) > len(edit_chunk.content) * 2
 
 
 class TestChunkAccumulator:
