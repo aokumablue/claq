@@ -27,7 +27,7 @@ from deepblue.lib.core_utils import (
     strip_ansi,
 )
 from deepblue.lib.package_manager import get_package_manager, get_selection_prompt
-from deepblue.lib.project_detect import detect_project
+from deepblue.lib.project_detect import ProjectInfo, detect_project
 from deepblue.lib.sanitize import sanitize_log_value
 from deepblue.lib.settings import extract_coverage_hint_lines
 from deepblue.lib.slim_text import compact_line
@@ -287,7 +287,7 @@ def _collect_session_context(sessions_dir: Path) -> list[str]:
     return parts
 
 
-def _collect_project_context(project_info: object) -> list[str]:
+def _collect_project_context(project_info: ProjectInfo) -> list[str]:
     """プロジェクト検出結果からコンテキストパーツを生成し、パッケージマネージャーをログ出力する。"""
     parts: list[str] = []
 
@@ -337,13 +337,10 @@ def run(_raw_input: str) -> str:
     """セッション開始フックを実行し hookSpecificOutput の JSON を返す
 
     Args:
-        raw_input: 処理に渡す raw_input の値です。
+        _raw_input: フックの生 stdin。本フックでは内容を参照しない。
 
     Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
+        additionalContext を含む hookSpecificOutput を格納した JSON 文字列。
     """
     learned_dir = get_learned_skills_dir()
     sessions_dir = get_sessions_dir()

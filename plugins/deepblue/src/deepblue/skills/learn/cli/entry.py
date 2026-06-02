@@ -51,6 +51,9 @@ def _build_parser() -> argparse.ArgumentParser:
     prune_parser.add_argument("--dry-run", action="store_true", help="Preview without deleting")
     prune_parser.add_argument("--quiet", action="store_true", help="Suppress output (for automated use)")
 
+    subparsers.add_parser("status", help="Show status of all instincts (project + global)")
+    subparsers.add_parser("projects", help="List known projects and their instinct counts")
+
     return parser
 
 
@@ -66,6 +69,10 @@ def _dispatch(args, parser: argparse.ArgumentParser) -> int:
         return _pkg.cmd_promote(args)
     elif args.command == "prune":
         return _pkg.cmd_prune(args)
+    elif args.command == "status":
+        return _pkg.cmd_status(args)
+    elif args.command == "projects":
+        return _pkg.cmd_projects(args)
     else:
         parser.print_help()
         return 1

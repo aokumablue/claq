@@ -19,24 +19,6 @@ VALID_OUTCOMES = {"success", "failure", "partial"}
 VALID_FEEDBACK = {"accepted", "corrected", "rejected"}
 
 
-def resolve_home_dir(home_dir: str | Path | None = None) -> str:
-    """ホームディレクトリの絶対パスを解決する。
-
-    Args:
-        home_dir: 上書き用のホームディレクトリ。
-
-    Returns:
-        解決済みのホームディレクトリパス。
-
-    Raises:
-        なし。
-    """
-    # 未指定なら現在のユーザーホームを採用する。
-    if home_dir is None:
-        return str(Path.home())
-    return str(Path(str(home_dir)).expanduser().resolve())
-
-
 def get_runs_file_path(options: dict[str, Any] | None = None, /, **kwargs: Any) -> str:
     """スキル実行レコード用 JSONL ファイルパスを解決する。
 
@@ -354,6 +336,5 @@ __all__ = [
     "read_jsonl",
     "read_skill_execution_records",
     "record_skill_execution",
-    "resolve_home_dir",
     "to_nullable_number",
 ]

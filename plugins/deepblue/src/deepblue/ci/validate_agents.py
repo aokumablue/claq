@@ -17,13 +17,11 @@ def extract_frontmatter(content: str) -> dict[str, str] | None:
     """シンプルな YAML frontmatter ブロックを抽出する。
 
     Args:
-        content: 処理に渡す content の値です。
+        content: Markdown ファイルの全文。
 
     Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
+        先頭の --- で囲まれた frontmatter を key: value 辞書として返す。
+        frontmatter が無ければ None。
     """
     clean_content = content.lstrip("\ufeff")
     match = re.match(r"^---\r?\n([\s\S]*?)\r?\n---", clean_content)

@@ -10,6 +10,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -346,7 +347,7 @@ def set_preferred_package_manager(pm_name: str) -> dict[str, Any]:
 
     config = load_config() or {}
     config["packageManager"] = pm_name
-    config["setAt"] = __import__("datetime").datetime.now().isoformat()
+    config["setAt"] = datetime.now().isoformat()
 
     save_config(config)
     return config
@@ -381,7 +382,7 @@ def set_project_package_manager(
 
     config = {
         "packageManager": pm_name,
-        "setAt": __import__("datetime").datetime.now().isoformat(),
+        "setAt": datetime.now().isoformat(),
     }
 
     write_file(config_path, json.dumps(config, indent=2))
@@ -517,20 +518,17 @@ def get_command_pattern(action: str) -> str:
     """すべてのパッケージマネージャーのコマンドに一致する正規表現パターンを生成する。
 
     Args:
-        action: action の値
+        action: 対象アクション名（例: "test", "build"）。
 
     Returns:
-        str: 文字列を返します。
-
-    Raises:
-        例外は発生しません。
+        各パッケージマネージャーのコマンドを `|` で連結し丸括弧で囲んだ正規表現文字列。
     """
     trimmed_action = action.strip()
     if trimmed_action in _WELL_KNOWN_PATTERNS:
         patterns = _WELL_KNOWN_PATTERNS[trimmed_action]
     else:
         patterns = _build_generic_patterns(re.escape(trimmed_action))
-    return f"({' | '.join(patterns).replace(' | ', '|')})"
+    return f"({'|'.join(patterns)})"
 
 
 __all__ = [

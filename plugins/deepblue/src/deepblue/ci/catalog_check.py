@@ -385,14 +385,9 @@ def render_markdown(result: dict[str, Any]) -> None:
 def build_parser() -> argparse.ArgumentParser:
     """CLI パーサーを構築する。
 
-    Args:
-        引数はありません。
-
     Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
+        --root / --readme-path / --claude-path / --md / --text を
+        受け付ける argparse.ArgumentParser インスタンス（既定は JSON 出力）。
     """
     parser = argparse.ArgumentParser(
         description="Verify repo catalog counts against README.md and CLAUDE.md", add_help=False
@@ -400,7 +395,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=str(DEFAULT_ROOT))
     parser.add_argument("--readme-path", default=str(DEFAULT_README_PATH))
     parser.add_argument("--claude-path", default=str(DEFAULT_CLAUDE_PATH))
-    parser.add_argument("--json", action="store_true")
     parser.add_argument("--md", action="store_true")
     parser.add_argument("--text", action="store_true")
     return parser
@@ -410,13 +404,10 @@ def main(argv: list[str] | None = None) -> int:
     """CLI のエントリポイント。
 
     Args:
-        argv: 処理に渡す argv の値です。
+        argv: コマンドライン引数。None の場合は sys.argv を使う。
 
     Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
+        全チェック合格なら 0、未合格のチェックがあるか例外発生時は 1。
     """
     args, _unknown = build_parser().parse_known_args(argv)
     try:

@@ -30,11 +30,11 @@ def _build_record_chunk(
     """handle_record 用のチャンクオブジェクトを構築して返す。"""
     from deepblue.mem.database import MemoryChunk
 
-    chunk_index = db.get_next_chunk_index(session_id)
+    # chunk_index は store_chunk の INSERT（SQL の MAX+1）で確定するためここでは 0 を渡す。
     files_read = metadata.get("files_read", [])
     files_modified = metadata.get("files_modified", [])
     return MemoryChunk(
-        session_id=session_id, project=project, chunk_index=chunk_index,
+        session_id=session_id, project=project, chunk_index=0,
         content=content, tool_names=[event_type],
         files_read=files_read if isinstance(files_read, list) else [],
         files_modified=files_modified if isinstance(files_modified, list) else [],

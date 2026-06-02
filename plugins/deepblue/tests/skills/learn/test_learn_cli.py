@@ -1615,6 +1615,8 @@ def test_main_dispatches_commands(monkeypatch, patch_globals):
     monkeypatch.setattr(_mod, "cmd_evolve", lambda args: called.append("evolve") or 0)
     monkeypatch.setattr(_mod, "cmd_promote", lambda args: called.append("promote") or 0)
     monkeypatch.setattr(_mod, "cmd_prune", lambda args: called.append("prune") or 0)
+    monkeypatch.setattr(_mod, "cmd_status", lambda args: called.append("status") or 0)
+    monkeypatch.setattr(_mod, "cmd_projects", lambda args: called.append("projects") or 0)
 
     original_parse_args = argparse.ArgumentParser.parse_args
 
@@ -1623,13 +1625,13 @@ def test_main_dispatches_commands(monkeypatch, patch_globals):
 
     monkeypatch.setattr(argparse.ArgumentParser, "parse_args", fake_parse_args)
 
-    for command in ["import", "export", "evolve", "promote", "prune"]:
+    for command in ["import", "export", "evolve", "promote", "prune", "status", "projects"]:
         fake_parse_args.command = command
         assert _mod.main() == 0
 
     fake_parse_args.command = None
     assert _mod.main() == 1
-    assert called == ["import", "export", "evolve", "promote", "prune"]
+    assert called == ["import", "export", "evolve", "promote", "prune", "status", "projects"]
     monkeypatch.setattr(argparse.ArgumentParser, "parse_args", original_parse_args)
 
 

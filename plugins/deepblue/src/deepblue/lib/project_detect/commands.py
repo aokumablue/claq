@@ -46,11 +46,12 @@ def _get_js_test_command(root: Path) -> str | None:
     package_json = root / "package.json"
     if not package_json.exists():
         return None
-    scripts = _read_json_file(package_json).get("scripts", {})
-    if "test" in scripts:
-        return "npm test"
-    if "tests" in scripts:
-        return "npm run tests"
+    scripts = _read_json_file(package_json).get("scripts")
+    if isinstance(scripts, dict):
+        if "test" in scripts:
+            return "npm test"
+        if "tests" in scripts:
+            return "npm run tests"
     return None
 
 
@@ -132,8 +133,8 @@ def get_build_command(project_root: str | Path) -> str | None:
     package_json = root / "package.json"
     if package_json.exists():
         data = _read_json_file(package_json)
-        scripts = data.get("scripts", {})
-        if "build" in scripts:
+        scripts = data.get("scripts")
+        if isinstance(scripts, dict) and "build" in scripts:
             return "npm run build"
 
     # Go

@@ -507,14 +507,8 @@ def validate_unicode_safety(root: str | Path = DEFAULT_ROOT, write_mode: bool = 
 def build_parser() -> argparse.ArgumentParser:
     """CLI パーサーを構築する。
 
-    Args:
-        引数はありません。
-
     Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
+        --root / --write を受け付ける argparse.ArgumentParser インスタンス。
     """
     parser = argparse.ArgumentParser(description="Scan for dangerous unicode", add_help=False)
     parser.add_argument("--root", default=str(DEFAULT_ROOT))

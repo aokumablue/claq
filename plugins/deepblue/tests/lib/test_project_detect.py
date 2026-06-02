@@ -246,6 +246,12 @@ class TestGetTestCommand:
         result = get_test_command(tmp_path)
         assert result == "npm test"
 
+    def test_non_dict_scripts_is_ignored(self, tmp_path):
+        """scripts が dict でない不正な package.json でも例外を出さないこと。"""
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": None}))
+
+        assert get_test_command(tmp_path) is None
+
     def test_pytest(self, tmp_path):
         (tmp_path / "conftest.py").write_text("")
 
@@ -307,6 +313,12 @@ class TestGetBuildCommand:
 
         result = get_build_command(tmp_path)
         assert result == "npm run build"
+
+    def test_non_dict_scripts_is_ignored(self, tmp_path):
+        """scripts が dict でない不正な package.json でも例外を出さないこと。"""
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": "all"}))
+
+        assert get_build_command(tmp_path) is None
 
     def test_go_build(self, tmp_path):
         (tmp_path / "go.mod").write_text("module test")

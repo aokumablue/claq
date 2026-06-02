@@ -191,10 +191,12 @@ def _resolve_command_paths(
         (commands_path, agents_path, skills_path) のタプル
     """
     root = Path(root_dir)
-    commands_path = Path(commands_dir) if Path(commands_dir).is_absolute() else root / commands_dir
-    agents_path = Path(agents_dir) if Path(agents_dir).is_absolute() else root / agents_dir
-    skills_path = Path(skills_dir) if Path(skills_dir).is_absolute() else root / skills_dir
-    return commands_path, agents_path, skills_path
+
+    def _resolve(sub_dir: str | Path) -> Path:
+        path = Path(sub_dir)
+        return path if path.is_absolute() else root / sub_dir
+
+    return _resolve(commands_dir), _resolve(agents_dir), _resolve(skills_dir)
 
 
 def _build_valid_name_sets(

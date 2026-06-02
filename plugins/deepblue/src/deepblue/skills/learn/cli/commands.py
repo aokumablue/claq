@@ -430,11 +430,11 @@ def cmd_export(args) -> int:
 
     output = _build_export_content(instincts, args, project)
 
-    if args.output:
-        if out_path is not None:
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(output, encoding="utf-8")
-            print(f"Exported {len(instincts)} instincts to {out_path}")
+    # args.output が truthy のとき out_path は上で必ず設定済み（None なら早期 return 済み）。
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(output, encoding="utf-8")
+        print(f"Exported {len(instincts)} instincts to {out_path}")
     else:
         print(output)
 

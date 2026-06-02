@@ -605,6 +605,18 @@ def test_insights_security_monitor_helpers_and_audit_errors(monkeypatch: pytest.
     assert text == "updated"
 
     text, context = insights_security_monitor.extract_content(
+        {
+            "tool_name": "MultiEdit",
+            "tool_input": {
+                "file_path": "src/app.py",
+                "edits": [{"new_string": "first"}, {"new_string": "second"}, "ignored"],
+            },
+        }
+    )
+    assert text == "first\nsecond"
+    assert context == "file:src/app.py"
+
+    text, context = insights_security_monitor.extract_content(
         {"tool_name": "Bash", "tool_input": {"command": "echo hello"}}
     )
     assert text == "echo hello"

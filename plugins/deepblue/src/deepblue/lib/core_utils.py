@@ -62,7 +62,7 @@ def get_home_dir() -> Path:
 
     try:
         return Path.home()
-    except Exception:
+    except RuntimeError:
         return Path.cwd()
 
 
@@ -550,7 +550,7 @@ def replace_in_file(
 
         write_file(file_path, new_content)
         return True
-    except Exception as e:
+    except (OSError, re.error) as e:
         log(f"[Utils] replaceInFile failed for {file_path}: {e}")
         return False
 

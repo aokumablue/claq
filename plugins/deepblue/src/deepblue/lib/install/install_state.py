@@ -355,10 +355,10 @@ def write_install_state(file_path: str | Path, state: dict[str, Any]) -> dict[st
         state: 状態データ
 
     Returns:
-        dict[str, Any]: 処理結果を返します。
+        書き込んだ状態データ（引数 state をそのまま返す）。
 
     Raises:
-        例外は発生しません。
+        ValueError: state が install-state スキーマに適合しない場合。
     """
     assert_valid_install_state(state, str(file_path))
 

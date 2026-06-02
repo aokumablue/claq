@@ -98,7 +98,7 @@ def _collect_skill_ids(records_by_skill: dict[str, list[Any]], skill_list: list[
     """
     defined_ids: set[str] = set()
     for skill in skill_list:
-        skill_id = skill.get("skill_id")
+        skill_id = get_value(skill, "skill_id", "skillId")
         if skill_id is not None:
             defined_ids.add(str(skill_id))
     return sorted({*records_by_skill.keys(), *defined_ids})

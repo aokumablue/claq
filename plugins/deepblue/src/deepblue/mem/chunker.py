@@ -92,8 +92,6 @@ class ChunkAccumulator:
         if is_error:
             self._error_count += 1
             if tool_response:
-                from deepblue.mem.redaction import redact
-
                 self._last_error = redact(tool_response[:500])
 
         # AI 応答の要約を保存（最後のものを上書き）

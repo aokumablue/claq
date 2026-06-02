@@ -58,7 +58,7 @@ def detect_languages(project_root: str | Path) -> list[str]:
     return sorted(detected)
 
 
-_SKIP_DIRS = frozenset(["node_modules", "__pycache__", "venv", ".venv"])
+_SKIP_DIRS = frozenset(["node_modules", "__pycache__", "venv", ".venv", ".git"])
 
 
 def _scan_dir(directory: Path, depth: int, files: list[Path], max_depth: int, max_files: int) -> None:

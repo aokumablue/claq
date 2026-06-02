@@ -170,6 +170,11 @@ def load_install_manifests(options: dict[str, Any] | None = None) -> dict[str, A
     Args:
         options: リポジトリルートを指定するオプションです（repoRoot キー）。
 
+    Returns:
+        次のキーを持つ辞書: repoRoot / modulesPath / profilesPath /
+        componentsPath / modules / profiles / components / modulesById /
+        componentsById / modulesVersion / profilesVersion / componentsVersion。
+
     Raises:
         RuntimeError: マニフェストファイルが見つからない場合に発生します。
     """

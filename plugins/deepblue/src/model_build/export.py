@@ -7,8 +7,10 @@ optimum.exporters.onnx.main_export を直接呼び出す（CLI には `--revisio
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import warnings
+from collections.abc import Iterator
 from pathlib import Path
 
 # torch >= 2.9.0 では private 名と submodule 参照が wildcard import から除外されたため、
@@ -38,16 +40,16 @@ def _patch_torch_onnx_symbolic_opset14() -> None:
             setattr(_pub, name, getattr(_internal, name))
 
 
-def _suppress_onnx_warnings() -> warnings.catch_warnings:
-    """ONNX エクスポート中に発生する既知の無害な警告を抑制するコンテキストマネージャを返す。"""
-    ctx = warnings.catch_warnings()
-    ctx.__enter__()
-    warnings.filterwarnings("ignore", message=".*already registered.*", category=UserWarning)
-    warnings.filterwarnings("ignore", category=UserWarning, module="torch.onnx")
-    warnings.filterwarnings("ignore", message=".*torch.tensor results are registered as constants.*")
-    warnings.filterwarnings("ignore", message=".*dynamic_axes.*", category=UserWarning)
-    warnings.filterwarnings("ignore", message=".*LeafSpec.*", category=FutureWarning)
-    return ctx
+@contextlib.contextmanager
+def _suppress_onnx_warnings() -> Iterator[None]:
+    """ONNX エクスポート中に発生する既知の無害な警告を抑制するコンテキストマネージャ。"""
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*already registered.*", category=UserWarning)
+        warnings.filterwarnings("ignore", category=UserWarning, module="torch.onnx")
+        warnings.filterwarnings("ignore", message=".*torch.tensor results are registered as constants.*")
+        warnings.filterwarnings("ignore", message=".*dynamic_axes.*", category=UserWarning)
+        warnings.filterwarnings("ignore", message=".*LeafSpec.*", category=FutureWarning)
+        yield
 
 
 def _run_main_export(model_name: str, revision: str, opset: int, onnx_out: Path) -> None:
@@ -96,13 +98,10 @@ def export_to_onnx(
     onnx_out = output_dir / "onnx_export"
     onnx_out.mkdir(parents=True, exist_ok=True)
 
-    ctx = _suppress_onnx_warnings()
-    try:
+    with _suppress_onnx_warnings():
         _run_main_export(model_name, revision, opset, onnx_out)
-    finally:
-        ctx.__exit__(None, None, None)
 
-    candidates = list(onnx_out.glob("model.onnx")) + list(onnx_out.glob("*.onnx"))
+    candidates = list(onnx_out.glob("*.onnx"))
     if not candidates:
         raise FileNotFoundError(f"ONNX ファイルが {onnx_out} に見つかりません。")
 

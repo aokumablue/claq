@@ -20,12 +20,13 @@ def _resolve_env_root(env_root: str | None) -> Path | None:
     return None
 
 
+def _contains_probe(root: Path, probe_paths: list[str]) -> bool:
+    """候補ルートに探査対象ファイルのいずれかが存在するか確認する。"""
+    return any((root / p).exists() for p in probe_paths)
+
+
 def _search_plugin_cache(claude_dir: Path, probe_paths: list[str]) -> Path | None:
     """プラグインキャッシュ配下を走査し、probe ファイルを含む最初のバージョンディレクトリを返す。"""
-    def _contains_probe(root: Path) -> bool:
-        """候補ルートに探査対象ファイルが存在するか確認する。"""
-        return any((root / p).exists() for p in probe_paths)
-
     try:
         cache_base = claude_dir / "plugins" / "cache" / PLUGIN_NAME
         if not cache_base.exists():
@@ -37,7 +38,7 @@ def _search_plugin_cache(claude_dir: Path, probe_paths: list[str]) -> Path | Non
                 for ver_entry in org_entry.iterdir():
                     if not ver_entry.is_dir():
                         continue
-                    if _contains_probe(ver_entry):
+                    if _contains_probe(ver_entry, probe_paths):
                         return ver_entry
             except OSError:
                 continue
@@ -55,15 +56,12 @@ def resolve_deepblue_root(
     """deepblue ソースルートディレクトリを解決する。
 
     Args:
-        home_dir: ホームディレクトリ
-        env_root: env_root の値
-        probe: probe の値
+        home_dir: 探索の起点となるホームディレクトリ（省略時は Path.home()）。
+        env_root: 環境変数 CLAUDE_PLUGIN_ROOT の上書き値（テスト用）。
+        probe: 存在確認に使う相対パス（省略時は core_utils.py）。
 
     Returns:
-        Path: 解決結果を返します。
-
-    Raises:
-        例外は発生しません。
+        解決した deepblue ソースルートの Path。
     """
     env_path = _resolve_env_root(env_root)
     if env_path:
@@ -73,11 +71,7 @@ def resolve_deepblue_root(
     claude_dir = home / ".claude"
     probe_paths = [probe] if probe else ["src/deepblue/lib/core_utils.py"]
 
-    def _contains_probe(root: Path) -> bool:
-        """候補ルートに探査対象ファイルが存在するか確認する。"""
-        return any((root / p).exists() for p in probe_paths)
-
-    if _contains_probe(claude_dir):
+    if _contains_probe(claude_dir, probe_paths):
         return claude_dir
 
     cached = _search_plugin_cache(claude_dir, probe_paths)

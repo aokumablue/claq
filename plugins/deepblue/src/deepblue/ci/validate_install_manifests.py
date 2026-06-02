@@ -153,6 +153,10 @@ def validate_install_manifests(
         modules_manifest_path: install-modules.json のパス
         profiles_manifest_path: install-profiles.json のパス
         components_manifest_path: install-components.json のパス
+        modules_schema_path: modules スキーマのパス（CLI 互換のため受け取るが
+            JSON スキーマ検証は未実装で現状は参照されない）
+        profiles_schema_path: profiles スキーマのパス（同上）
+        components_schema_path: components スキーマのパス（同上）
 
     Returns:
         正常終了は 0、エラー時は 1

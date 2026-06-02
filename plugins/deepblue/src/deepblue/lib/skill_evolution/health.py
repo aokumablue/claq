@@ -266,7 +266,7 @@ def get_failure_trend(
 
     # 直近 7 日と 30 日を比較し、しきい値を超えた変化だけを傾向として返す。
     delta = round_rate(success_rate_7d - success_rate_30d)
-    # 差分が計算できない場合は stable を返す。
+    # 差分が計算できない場合は stable を返す（防御的分岐）。
     if delta is None:
         return "stable"
     # 閾値以上の低下は悪化として扱う。

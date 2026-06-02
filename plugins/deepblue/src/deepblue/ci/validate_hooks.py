@@ -44,13 +44,11 @@ def _select_hooks_container(data: Any) -> Any:
     """JS の `data.hooks || data` の挙動を再現する。
 
     Args:
-        data: 処理に渡す data の値です。
+        data: パース済みのフック設定（dict 想定）。
 
     Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
+        data が dict で truthy な "hooks" キーを持てばその値、
+        そうでなければ data 自身を返す。
     """
     if isinstance(data, dict) and "hooks" in data:
         hooks_value = data["hooks"]
@@ -180,14 +178,11 @@ def validate_hook_entry(hook: Any, label: str) -> bool:
     """単一のフックエントリを検証する。
 
     Args:
-        hook: 処理に渡す hook の値です。
-        label: 処理に渡す label の値です。
+        hook: 検証対象のフック定義（dict 想定）。
+        label: エラーメッセージに用いる表示ラベル。
 
     Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
+        検証エラーがあれば True、無ければ False。
     """
     if not isinstance(hook, dict):
         emit_error(f"{label} は 'type' フィールドが不足しているか無効です")

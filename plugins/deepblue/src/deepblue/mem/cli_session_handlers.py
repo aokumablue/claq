@@ -189,9 +189,12 @@ def handle_session_end(
                 return
 
             from deepblue.mem.redaction import redact
-            texts = [redact(c.content) for c in chunks]
+
+            # id を持つチャンクだけを対象にし、texts と chunk_ids のインデックスを一致させる。
+            embeddable = [c for c in chunks if c.id is not None]
+            texts = [redact(c.content) for c in embeddable]
             embeddings = embed_fn(texts)
-            chunk_ids = [c.id for c in chunks if c.id is not None]
+            chunk_ids = [c.id for c in embeddable]
             db.store_embeddings(chunk_ids, embeddings)
             log.info("埋め込み保存: session=%s chunks=%d", session_id, len(chunk_ids))
 

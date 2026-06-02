@@ -1,9 +1,10 @@
 """model_build CLI — `python3 -m model_build <subcommand>` で実行する。
 
 サブコマンド:
-  build    ONNX 変換 → 量子化 → manifest 生成を一括実行
-  verify   manifest.json を使ってモデルを検証
-  clean    output_dir のモデルファイルと manifest を削除
+  build     ONNX 変換 → 量子化 → manifest 生成を一括実行
+  verify    manifest.json を使ってモデルを検証
+  download  外部配布アーカイブからモデルを取得
+  clean     output_dir のモデルファイルと manifest を削除
 """
 
 from __future__ import annotations

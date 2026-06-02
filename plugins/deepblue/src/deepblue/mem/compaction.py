@@ -11,7 +11,7 @@ from deepblue.mem.logger import get as _get_logger
 log = _get_logger("COMPACT")
 
 
-def detect_low_quality(db: Database) -> list[int]:
+def detect_low_quality(db: Database) -> list[str]:
     """削除候補の chunk_id リストを返す"""
     candidates = []
 

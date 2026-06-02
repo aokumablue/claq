@@ -60,7 +60,7 @@ def _collect_tool_use(entry: dict, tools_used: set, files_modified: set) -> None
             tools_used.add(tool_name)
         tool_input = entry.get("tool_input") or entry.get("input") or {}
         file_path = tool_input.get("file_path") or tool_input.get("path") or ""
-        if file_path and tool_name in ("Edit", "Write"):
+        if file_path and tool_name in ("Edit", "Write", "MultiEdit"):
             files_modified.add(file_path)
 
     if entry.get("type") == "assistant" and isinstance(entry.get("message", {}).get("content"), list):
@@ -71,7 +71,7 @@ def _collect_tool_use(entry: dict, tools_used: set, files_modified: set) -> None
                     tools_used.add(tool_name)
                 block_input = block.get("input") or {}
                 file_path = block_input.get("file_path") or block_input.get("path") or ""
-                if file_path and tool_name in ("Edit", "Write"):
+                if file_path and tool_name in ("Edit", "Write", "MultiEdit"):
                     files_modified.add(file_path)
 
 
@@ -318,7 +318,7 @@ def _update_session_file(session_file: Path, summary: dict | None, today: str, c
 
     if updated_content:
         write_file(session_file, updated_content)
-    log(f"[SessionEnd] Updated session file: {session_file}")
+        log(f"[SessionEnd] Updated session file: {session_file}")
 
 
 def _create_session_file(session_file: Path, summary: dict | None, today: str, current_time: str, session_metadata: dict) -> None:

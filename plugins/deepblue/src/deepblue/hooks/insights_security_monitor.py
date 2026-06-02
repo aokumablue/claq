@@ -82,6 +82,10 @@ def extract_content(data: dict[str, Any]) -> tuple[str, str]:
 
     if tool_name in ("Write", "Edit", "MultiEdit"):
         text = tool_input.get("content", "") or tool_input.get("new_string", "")
+        edits = tool_input.get("edits")
+        if isinstance(edits, list):
+            edit_texts = [str(edit.get("new_string", "")) for edit in edits if isinstance(edit, dict)]
+            text = "\n".join(part for part in [text, *edit_texts] if part)
         context = "file:" + str(tool_input.get("file_path", ""))[:80]
     elif tool_name == "Bash":
         # PreToolUse: ツールはまだ実行されていない、コマンドを検査
