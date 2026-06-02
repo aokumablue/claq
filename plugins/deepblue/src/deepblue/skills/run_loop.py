@@ -10,11 +10,150 @@ import json
 import random
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from .improve_description import improve_description
 from .run_eval import find_project_root, run_eval
 from .utils import parse_skill_md
+
+
+@dataclass(frozen=True)
+class EvalConfig:
+    """eval 実行設定をまとめたパラメータオブジェクト。
+
+    Attributes:
+        num_workers: 並列ワーカー数。
+        timeout: クエリごとのタイムアウト秒数。
+        project_root: プロジェクトルートパス。
+        runs_per_query: クエリごとの実行回数。
+        trigger_threshold: トリガー率のしきい値。
+        model: 使用するモデル名。
+    """
+
+    num_workers: int
+    timeout: int
+    project_root: Path
+    runs_per_query: int
+    trigger_threshold: float
+    model: str
+
+
+@dataclass(frozen=True)
+class SkillContext:
+    """スキル情報をまとめたパラメータオブジェクト。
+
+    Attributes:
+        name: スキル名。
+        content: SKILL.md のテキスト内容。
+    """
+
+    name: str
+    content: str
+
+
+@dataclass(frozen=True)
+class LoopConfig:
+    """ループ実行設定をまとめたパラメータオブジェクト。
+
+    Attributes:
+        max_iterations: 改善の最大反復回数。
+        holdout: テスト用に取り分ける eval セットの割合（0 で無効）。
+        verbose: 進捗を stderr に表示するかどうか。
+        log_dir: ログ出力先ディレクトリ（None で無効）。
+        eval_config: eval 実行設定。
+    """
+
+    max_iterations: int
+    holdout: float
+    verbose: bool
+    log_dir: Path | None
+    eval_config: EvalConfig
+
+
+@dataclass(frozen=True)
+class IterationResult:
+    """1反復分の評価結果をまとめたパラメータオブジェクト。
+
+    Attributes:
+        iteration: 反復番号。
+        description: この反復で使用した説明文。
+        train_results: 学習用クエリの評価結果辞書。
+        test_results: 検証用クエリの評価結果辞書（なければ None）。
+        train_summary: 学習用サマリー辞書。
+        test_summary: 検証用サマリー辞書（なければ None）。
+    """
+
+    iteration: int
+    description: str
+    train_results: dict
+    test_results: dict | None
+    train_summary: dict
+    test_summary: dict | None
+
+
+@dataclass(frozen=True)
+class EvalSets:
+    """train / test 分割後の eval セットをまとめたパラメータオブジェクト。
+
+    Attributes:
+        train: 学習用クエリのリスト。
+        test: 検証用クエリのリスト。
+    """
+
+    train: list[dict]
+    test: list[dict]
+
+
+@dataclass(frozen=True)
+class IterationState:
+    """1反復の進行状態をまとめたパラメータオブジェクト。
+
+    Attributes:
+        iteration: 現在の反復番号（1始まり）。
+        current_description: この反復で評価する説明文。
+    """
+
+    iteration: int
+    current_description: str
+
+
+@dataclass(frozen=True)
+class ImproveParams:
+    """説明文改善に必要なパラメータをまとめたオブジェクト。
+
+    Attributes:
+        current_description: 現在の説明文。
+        train_results: 学習用クエリの評価結果辞書。
+        blinded_history: test_ キーを除去した履歴リスト。
+        iteration: 現在の反復番号。
+    """
+
+    current_description: str
+    train_results: dict
+    blinded_history: list[dict]
+    iteration: int
+
+
+@dataclass(frozen=True)
+class LoopOutcome:
+    """ループ実行結果の骨格をまとめたパラメータオブジェクト。
+
+    Attributes:
+        exit_reason: ループ終了理由文字列。
+        original_description: ループ開始時の元説明文。
+        best: 最良反復の履歴エントリ辞書。
+        best_score: 最良スコア文字列。
+        final_description: ループ終了時点の最新説明文。
+        history: 全反復の履歴リスト。
+    """
+
+    exit_reason: str
+    original_description: str
+    best: dict
+    best_score: str
+    final_description: str
+    history: list[dict]
 
 
 def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
@@ -105,86 +244,114 @@ def _print_iteration_header(iteration: int, max_iterations: int, current_descrip
 
 
 def _eval_queries(
-    name: str, current_description: str, all_queries: list[dict],
-    num_workers: int, timeout: int, project_root: Path,
-    runs_per_query: int, trigger_threshold: float, model: str,
+    skill_ctx: SkillContext,
+    current_description: str,
+    all_queries: list[dict],
+    eval_cfg: EvalConfig,
 ) -> tuple[dict, float]:
     """eval を実行し (all_results, elapsed_seconds) を返す。"""
     t0 = time.time()
     results = run_eval(
-        eval_set=all_queries, skill_name=name, description=current_description,
-        num_workers=num_workers, timeout=timeout, project_root=project_root,
-        runs_per_query=runs_per_query, trigger_threshold=trigger_threshold, model=model,
+        eval_set=all_queries,
+        skill_name=skill_ctx.name,
+        description=current_description,
+        num_workers=eval_cfg.num_workers,
+        timeout=eval_cfg.timeout,
+        project_root=eval_cfg.project_root,
+        runs_per_query=eval_cfg.runs_per_query,
+        trigger_threshold=eval_cfg.trigger_threshold,
+        model=eval_cfg.model,
     )
     return results, time.time() - t0
 
 
-def _append_history(
-    history: list[dict], iteration: int, description: str,
-    train_summary: dict, test_summary: dict | None,
-    train_results: dict, test_results: dict | None,
-) -> None:
+def _append_history(history: list[dict], iter_result: IterationResult) -> None:
     """反復結果を history リストに追記する。"""
+    ts = iter_result.test_summary
+    tr = iter_result.test_results
     history.append({
-        "iteration": iteration, "description": description,
-        "train_passed": train_summary["passed"], "train_failed": train_summary["failed"],
-        "train_total": train_summary["total"], "train_results": train_results["results"],
-        "test_passed": test_summary["passed"] if test_summary else None,
-        "test_failed": test_summary["failed"] if test_summary else None,
-        "test_total": test_summary["total"] if test_summary else None,
-        "test_results": test_results["results"] if test_results else None,
+        "iteration": iter_result.iteration,
+        "description": iter_result.description,
+        "train_passed": iter_result.train_summary["passed"],
+        "train_failed": iter_result.train_summary["failed"],
+        "train_total": iter_result.train_summary["total"],
+        "train_results": iter_result.train_results["results"],
+        "test_passed": ts["passed"] if ts else None,
+        "test_failed": ts["failed"] if ts else None,
+        "test_total": ts["total"] if ts else None,
+        "test_results": tr["results"] if tr else None,
     })
 
 
 def _run_improve(
-    name: str, content: str, current_description: str,
-    train_results: dict, blinded_history: list[dict],
-    model: str, log_dir: Path | None, iteration: int, verbose: bool,
+    skill_ctx: SkillContext,
+    loop_cfg: LoopConfig,
+    params: ImproveParams,
 ) -> str:
     """説明文改善を実行し新しい説明文を返す。"""
-    if verbose:
+    if loop_cfg.verbose:
         print("\n説明を改善しています...", file=sys.stderr)
     t0 = time.time()
     new_desc = improve_description(
-        skill_name=name, skill_content=content, current_description=current_description,
-        eval_results=train_results, history=blinded_history,
-        model=model, log_dir=log_dir, iteration=iteration,
+        skill_name=skill_ctx.name,
+        skill_content=skill_ctx.content,
+        current_description=params.current_description,
+        eval_results=params.train_results,
+        history=params.blinded_history,
+        model=loop_cfg.eval_config.model,
+        log_dir=loop_cfg.log_dir,
+        iteration=params.iteration,
     )
-    if verbose:
+    if loop_cfg.verbose:
         print(f"提案結果（{time.time() - t0:.1f}s）: {new_desc}", file=sys.stderr)
     return new_desc
 
 
 def _run_single_iteration(
-    iteration: int, max_iterations: int, current_description: str,
-    name: str, content: str, train_set: list[dict], test_set: list[dict],
-    num_workers: int, timeout: int, project_root: Path, runs_per_query: int,
-    trigger_threshold: float, model: str, verbose: bool,
-    history: list[dict], log_dir: Path | None,
+    state: IterationState,
+    skill_ctx: SkillContext,
+    eval_sets: EvalSets,
+    loop_cfg: LoopConfig,
+    history: list[dict],
 ) -> tuple[str, str | None]:
     """1反復分の eval・採点・改善を実行し、(新しい説明, 終了理由|None) を返す。"""
-    _print_iteration_header(iteration, max_iterations, current_description, verbose)
+    iteration = state.iteration
+    current_description = state.current_description
+    _print_iteration_header(iteration, loop_cfg.max_iterations, current_description, loop_cfg.verbose)
     all_results, eval_elapsed = _eval_queries(
-        name, current_description, train_set + test_set,
-        num_workers, timeout, project_root, runs_per_query, trigger_threshold, model,
+        skill_ctx, current_description, eval_sets.train + eval_sets.test, loop_cfg.eval_config
     )
-    train_results, test_results, test_summary = _split_eval_results(all_results, train_set, test_set)
+    train_results, test_results, test_summary = _split_eval_results(all_results, eval_sets.train, eval_sets.test)
     train_summary = train_results["summary"]
-    _append_history(history, iteration, current_description, train_summary, test_summary, train_results, test_results)
-    if verbose:
+    iter_result = IterationResult(
+        iteration=iteration,
+        description=current_description,
+        train_results=train_results,
+        test_results=test_results,
+        train_summary=train_summary,
+        test_summary=test_summary,
+    )
+    _append_history(history, iter_result)
+    if loop_cfg.verbose:
         _print_eval_stats("学習用", train_results["results"], eval_elapsed)
         if test_summary:
             _print_eval_stats("検証用", test_results["results"], 0)  # type: ignore[index]
     if train_summary["failed"] == 0:
-        if verbose:
+        if loop_cfg.verbose:
             print(f"\nAll train queries passed on iteration {iteration}!", file=sys.stderr)
         return current_description, f"all_passed (iteration {iteration})"
-    if iteration == max_iterations:
-        if verbose:
-            print(f"\nMax iterations reached ({max_iterations}).", file=sys.stderr)
-        return current_description, f"max_iterations ({max_iterations})"
+    if iteration == loop_cfg.max_iterations:
+        if loop_cfg.verbose:
+            print(f"\nMax iterations reached ({loop_cfg.max_iterations}).", file=sys.stderr)
+        return current_description, f"max_iterations ({loop_cfg.max_iterations})"
     blinded = [{k: v for k, v in h.items() if not k.startswith("test_")} for h in history]
-    return _run_improve(name, content, current_description, train_results, blinded, model, log_dir, iteration, verbose), None
+    improve_params = ImproveParams(
+        current_description=current_description,
+        train_results=train_results,
+        blinded_history=blinded,
+        iteration=iteration,
+    )
+    return _run_improve(skill_ctx, loop_cfg, improve_params), None
 
 
 def _find_best(history: list[dict], test_set: list[dict]) -> tuple[dict, str]:
@@ -197,24 +364,25 @@ def _find_best(history: list[dict], test_set: list[dict]) -> tuple[dict, str]:
 
 
 def _build_loop_result(
-    exit_reason: str, original_description: str, best: dict, best_score: str,
-    final_description: str, history: list[dict], holdout: float,
-    train_set: list[dict], test_set: list[dict],
+    outcome: LoopOutcome,
+    loop_cfg: LoopConfig,
+    eval_sets: EvalSets,
 ) -> dict:
     """ループ実行結果辞書を組み立てて返す。"""
+    best = outcome.best
     return {
-        "exit_reason": exit_reason,
-        "original_description": original_description,
+        "exit_reason": outcome.exit_reason,
+        "original_description": outcome.original_description,
         "best_description": best["description"],
-        "best_score": best_score,
+        "best_score": outcome.best_score,
         "best_train_score": f"{best['train_passed']}/{best['train_total']}",
-        "best_test_score": f"{best['test_passed']}/{best['test_total']}" if test_set else None,
-        "final_description": final_description,
-        "iterations_run": len(history),
-        "holdout": holdout,
-        "train_size": len(train_set),
-        "test_size": len(test_set),
-        "history": history,
+        "best_test_score": f"{best['test_passed']}/{best['test_total']}" if eval_sets.test else None,
+        "final_description": outcome.final_description,
+        "iterations_run": len(outcome.history),
+        "holdout": loop_cfg.holdout,
+        "train_size": len(eval_sets.train),
+        "test_size": len(eval_sets.test),
+        "history": outcome.history,
     }
 
 
@@ -222,46 +390,40 @@ def run_loop(
     eval_set: list[dict],
     skill_path: Path,
     description_override: str | None,
-    num_workers: int,
-    timeout: int,
-    max_iterations: int,
-    runs_per_query: int,
-    trigger_threshold: float,
-    holdout: float,
-    model: str,
-    verbose: bool,
-    log_dir: Path | None = None,
+    loop_cfg: LoopConfig,
 ) -> dict:
     """eval + 改善ループを実行する。"""
-    project_root = find_project_root()
     name, original_description, content = parse_skill_md(skill_path)
     current_description = description_override or original_description
-    if holdout > 0:
-        train_set, test_set = split_eval_set(eval_set, holdout)
-        if verbose:
-            print(f"分割: train {len(train_set)} / test {len(test_set)}（holdout={holdout}）", file=sys.stderr)
+    skill_ctx = SkillContext(name=name, content=content)
+    if loop_cfg.holdout > 0:
+        train, test = split_eval_set(eval_set, loop_cfg.holdout)
+        if loop_cfg.verbose:
+            print(f"分割: train {len(train)} / test {len(test)}（holdout={loop_cfg.holdout}）", file=sys.stderr)
     else:
-        train_set, test_set = eval_set, []
+        train, test = eval_set, []
+    eval_sets = EvalSets(train=train, test=test)
     history: list[dict] = []
     exit_reason = "unknown"
-    for iteration in range(1, max_iterations + 1):
-        current_description, reason = _run_single_iteration(
-            iteration, max_iterations, current_description,
-            name, content, train_set, test_set,
-            num_workers, timeout, project_root, runs_per_query,
-            trigger_threshold, model, verbose, history, log_dir,
-        )
+    for iteration in range(1, loop_cfg.max_iterations + 1):
+        state = IterationState(iteration=iteration, current_description=current_description)
+        current_description, reason = _run_single_iteration(state, skill_ctx, eval_sets, loop_cfg, history)
         if reason is not None:
             exit_reason = reason
             break
-    best, best_score = _find_best(history, test_set)
-    if verbose:
+    best, best_score = _find_best(history, eval_sets.test)
+    if loop_cfg.verbose:
         print(f"\n終了理由: {exit_reason}", file=sys.stderr)
         print(f"最良スコア: {best_score}（反復 {best['iteration']}）", file=sys.stderr)
-    return _build_loop_result(
-        exit_reason, original_description, best, best_score,
-        current_description, history, holdout, train_set, test_set,
+    outcome = LoopOutcome(
+        exit_reason=exit_reason,
+        original_description=original_description,
+        best=best,
+        best_score=best_score,
+        final_description=current_description,
+        history=history,
     )
+    return _build_loop_result(outcome, loop_cfg, eval_sets)
 
 
 def _build_loop_parser() -> argparse.ArgumentParser:
@@ -306,20 +468,29 @@ def main():
         results_dir = None
 
     log_dir = results_dir / "logs" if results_dir else None
+    project_root = find_project_root()
+
+    eval_cfg = EvalConfig(
+        num_workers=args.num_workers,
+        timeout=args.timeout,
+        project_root=project_root,
+        runs_per_query=args.runs_per_query,
+        trigger_threshold=args.trigger_threshold,
+        model=args.model,
+    )
+    loop_cfg = LoopConfig(
+        max_iterations=args.max_iterations,
+        holdout=args.holdout,
+        verbose=args.verbose,
+        log_dir=log_dir,
+        eval_config=eval_cfg,
+    )
 
     output = run_loop(
         eval_set=eval_set,
         skill_path=skill_path,
         description_override=args.description,
-        num_workers=args.num_workers,
-        timeout=args.timeout,
-        max_iterations=args.max_iterations,
-        runs_per_query=args.runs_per_query,
-        trigger_threshold=args.trigger_threshold,
-        holdout=args.holdout,
-        model=args.model,
-        verbose=args.verbose,
-        log_dir=log_dir,
+        loop_cfg=loop_cfg,
     )
 
     json_output = json.dumps(output, indent=2)

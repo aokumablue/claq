@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from deepblue.skills import run_eval, run_loop
+from deepblue.skills.run_loop import EvalConfig, LoopConfig
 
 
 class _FakeStdout:
@@ -88,6 +89,29 @@ class _FakeExecutor:
         future = self._futures[len(self.submissions)]
         self.submissions.append((fn, args, kwargs))
         return future
+
+
+def _make_eval_cfg(tmp_path: Path) -> EvalConfig:
+    """テスト用 EvalConfig を生成する。"""
+    return EvalConfig(
+        num_workers=1,
+        timeout=5,
+        project_root=tmp_path,
+        runs_per_query=1,
+        trigger_threshold=0.5,
+        model="sonnet",
+    )
+
+
+def _make_loop_cfg(tmp_path: Path, *, max_iterations: int = 3, holdout: float = 0.0, verbose: bool = False, log_dir: Path | None = None) -> LoopConfig:
+    """テスト用 LoopConfig を生成する。"""
+    return LoopConfig(
+        max_iterations=max_iterations,
+        holdout=holdout,
+        verbose=verbose,
+        log_dir=log_dir,
+        eval_config=_make_eval_cfg(tmp_path),
+    )
 
 
 def test_find_project_root_prefers_claude_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -446,14 +470,7 @@ def test_run_loop_all_passed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         eval_set=[{"query": "q1", "should_trigger": True}],
         skill_path=skill_path,
         description_override=None,
-        num_workers=1,
-        timeout=5,
-        max_iterations=3,
-        runs_per_query=1,
-        trigger_threshold=0.5,
-        holdout=0,
-        model="sonnet",
-        verbose=False,
+        loop_cfg=_make_loop_cfg(tmp_path, max_iterations=3, holdout=0.0),
     )
 
     assert result["exit_reason"] == "all_passed (iteration 1)"
@@ -528,15 +545,7 @@ def test_run_loop_hits_max_iterations(tmp_path: Path, monkeypatch: pytest.Monkey
         ],
         skill_path=skill_path,
         description_override=None,
-        num_workers=1,
-        timeout=5,
-        max_iterations=1,
-        runs_per_query=1,
-        trigger_threshold=0.5,
-        holdout=0.5,
-        model="sonnet",
-        verbose=False,
-        log_dir=tmp_path / "logs",
+        loop_cfg=_make_loop_cfg(tmp_path, max_iterations=1, holdout=0.5, log_dir=tmp_path / "logs"),
     )
 
     assert result["exit_reason"] == "max_iterations (1)"
@@ -615,15 +624,7 @@ def test_run_loop_improves_description_and_chooses_best_test_score(tmp_path: Pat
         ],
         skill_path=skill_path,
         description_override=None,
-        num_workers=1,
-        timeout=5,
-        max_iterations=2,
-        runs_per_query=1,
-        trigger_threshold=0.5,
-        holdout=0.5,
-        model="sonnet",
-        verbose=False,
-        log_dir=tmp_path / "logs",
+        loop_cfg=_make_loop_cfg(tmp_path, max_iterations=2, holdout=0.5, log_dir=tmp_path / "logs"),
     )
 
     assert result["exit_reason"] == "all_passed (iteration 2)"
@@ -758,14 +759,7 @@ def test_run_loop_verbose_prints_train_and_test_stats(
         ],
         skill_path=skill_path,
         description_override=None,
-        num_workers=1,
-        timeout=5,
-        max_iterations=1,
-        runs_per_query=1,
-        trigger_threshold=0.5,
-        holdout=0.5,
-        model="sonnet",
-        verbose=True,
+        loop_cfg=_make_loop_cfg(tmp_path, max_iterations=1, holdout=0.5, verbose=True),
     )
 
     err = capsys.readouterr().err
@@ -938,14 +932,7 @@ def test_run_loop_verbose_improvement_and_all_passed(
         eval_set=[{"query": "train", "should_trigger": True}, {"query": "test", "should_trigger": False}],
         skill_path=skill_path,
         description_override=None,
-        num_workers=1,
-        timeout=5,
-        max_iterations=2,
-        runs_per_query=1,
-        trigger_threshold=0.5,
-        holdout=0.5,
-        model="sonnet",
-        verbose=True,
+        loop_cfg=_make_loop_cfg(tmp_path, max_iterations=2, holdout=0.5, verbose=True),
     )
 
     err = capsys.readouterr().err
