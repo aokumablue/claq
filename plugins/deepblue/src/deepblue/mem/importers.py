@@ -31,6 +31,58 @@ def _project_dirs() -> list[Path]:
 # --- インスティンクト取り込み ---
 
 
+def _import_global_instincts(db: Database, origin_user: str) -> int:
+    """グローバルスコープのインスティンクト YAML を取り込む。
+
+    Args:
+        db: データベース接続
+        origin_user: 同期元ユーザー識別子
+
+    Returns:
+        取り込んだインスティンクト数
+    """
+    count = 0
+    for subdir in ("personal", "inherited"):
+        d = DEEPBLUE_DIR / "instincts" / subdir
+        if d.exists():
+            count += _import_instincts_from_dir(db, d, "global", None, origin_user)
+    return count
+
+
+def _import_project_instincts(
+    db: Database,
+    origin_user: str,
+    project_id: str | None,
+    seen_projects: set[str],
+) -> int:
+    """プロジェクト単位のインスティンクト YAML を取り込む。
+
+    Args:
+        db: データベース接続
+        origin_user: 同期元ユーザー識別子
+        project_id: プロジェクト ID（指定時はそのプロジェクトのみ）
+        seen_projects: 処理済みプロジェクト名の集合（重複スキップ用）
+
+    Returns:
+        取り込んだインスティンクト数
+    """
+    count = 0
+    for projects_dir in _project_dirs():
+        for proj_dir in projects_dir.iterdir():
+            if not proj_dir.is_dir():
+                continue
+            if proj_dir.name in seen_projects:
+                continue
+            seen_projects.add(proj_dir.name)
+            if project_id and proj_dir.name != project_id:
+                continue
+            for subdir in ("personal", "inherited"):
+                instincts_dir = proj_dir / "instincts" / subdir
+                if instincts_dir.exists():
+                    count += _import_instincts_from_dir(db, instincts_dir, "project", proj_dir.name, origin_user)
+    return count
+
+
 def import_instincts(db: Database, origin_user: str, project_id: str | None = None) -> int:
     """インスティンクト YAML ファイルを mem に取り込む。
 
@@ -43,33 +95,10 @@ def import_instincts(db: Database, origin_user: str, project_id: str | None = No
         取り込んだインスティンクト数
     """
     count = 0
-
-    # グローバルインスティンクト
     if project_id is None:
-        global_dirs = [
-            DEEPBLUE_DIR / "instincts" / "personal",
-            DEEPBLUE_DIR / "instincts" / "inherited",
-        ]
-        for d in global_dirs:
-            if d.exists():
-                count += _import_instincts_from_dir(db, d, "global", None, origin_user)
-
-    # プロジェクト単位のインスティンクト
+        count += _import_global_instincts(db, origin_user)
     seen_projects: set[str] = set()
-    for projects_dir in _project_dirs():
-        for proj_dir in projects_dir.iterdir():
-            if not proj_dir.is_dir():
-                continue
-            if proj_dir.name in seen_projects:
-                continue
-            seen_projects.add(proj_dir.name)
-            if project_id and proj_dir.name != project_id:
-                continue
-            for subdir in ["personal", "inherited"]:
-                instincts_dir = proj_dir / "instincts" / subdir
-                if instincts_dir.exists():
-                    count += _import_instincts_from_dir(db, instincts_dir, "project", proj_dir.name, origin_user)
-
+    count += _import_project_instincts(db, origin_user, project_id, seen_projects)
     return count
 
 
@@ -244,27 +273,47 @@ def _get_project_identifier(repo_root: Path) -> str:
 # --- イベントログ取り込み ---
 
 
-def import_event_logs(db: Database, origin_user: str, project_id: str | None = None) -> int:
-    """イベントログ（observations, skill-runs, costs）を mem に取り込む。
+def _import_global_event_logs(db: Database, origin_user: str) -> int:
+    """グローバルスコープのイベントログ（observations, skill-runs, costs）を取り込む。
 
     Args:
         db: データベース接続
         origin_user: 同期元ユーザー識別子
-        project_id: プロジェクト ID（指定時はそのプロジェクトのみ）
 
     Returns:
         取り込んだイベント数
     """
     count = 0
+    global_obs = DEEPBLUE_DIR / "observations.jsonl"
+    if global_obs.exists():
+        count += _import_jsonl_events(db, global_obs, "observation", None, origin_user)
+    skill_runs = DEEPBLUE_STATE_DIR / "skill-runs.jsonl"
+    if skill_runs.exists():
+        count += _import_jsonl_events(db, skill_runs, "skill-run", None, origin_user)
+    costs_file = DEEPBLUE_DIR / "logs" / "costs.jsonl"
+    if costs_file.exists():
+        count += _import_jsonl_events(db, costs_file, "cost", None, origin_user)
+    return count
 
-    # グローバル observations
-    if project_id is None:
-        global_obs = DEEPBLUE_DIR / "observations.jsonl"
-        if global_obs.exists():
-            count += _import_jsonl_events(db, global_obs, "observation", None, origin_user)
 
-    # プロジェクト単位 observations
-    seen_projects: set[str] = set()
+def _import_project_event_logs(
+    db: Database,
+    origin_user: str,
+    project_id: str | None,
+    seen_projects: set[str],
+) -> int:
+    """プロジェクト単位の observations を取り込む。
+
+    Args:
+        db: データベース接続
+        origin_user: 同期元ユーザー識別子
+        project_id: プロジェクト ID（指定時はそのプロジェクトのみ）
+        seen_projects: 処理済みプロジェクト名の集合（重複スキップ用）
+
+    Returns:
+        取り込んだイベント数
+    """
+    count = 0
     for projects_dir in _project_dirs():
         for proj_dir in projects_dir.iterdir():
             if not proj_dir.is_dir():
@@ -277,19 +326,25 @@ def import_event_logs(db: Database, origin_user: str, project_id: str | None = N
             obs_file = proj_dir / "observations.jsonl"
             if obs_file.exists():
                 count += _import_jsonl_events(db, obs_file, "observation", proj_dir.name, origin_user)
+    return count
 
-    # skill-runs.jsonl
+
+def import_event_logs(db: Database, origin_user: str, project_id: str | None = None) -> int:
+    """イベントログ（observations, skill-runs, costs）を mem に取り込む。
+
+    Args:
+        db: データベース接続
+        origin_user: 同期元ユーザー識別子
+        project_id: プロジェクト ID（指定時はそのプロジェクトのみ）
+
+    Returns:
+        取り込んだイベント数
+    """
+    count = 0
     if project_id is None:
-        skill_runs = DEEPBLUE_STATE_DIR / "skill-runs.jsonl"
-        if skill_runs.exists():
-            count += _import_jsonl_events(db, skill_runs, "skill-run", None, origin_user)
-
-    # costs.jsonl
-    if project_id is None:
-        costs_file = DEEPBLUE_DIR / "logs" / "costs.jsonl"
-        if costs_file.exists():
-            count += _import_jsonl_events(db, costs_file, "cost", None, origin_user)
-
+        count += _import_global_event_logs(db, origin_user)
+    seen_projects: set[str] = set()
+    count += _import_project_event_logs(db, origin_user, project_id, seen_projects)
     return count
 
 
