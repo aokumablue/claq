@@ -7,14 +7,71 @@ from pathlib import Path
 from deepblue.lib.project_detect.rules import LANGUAGE_RULES
 
 
+def _collect_root_files(root: Path) -> set[str]:
+    """ルートディレクトリの直下ファイル名一覧を返す（速度のため非再帰）。
+
+    Args:
+        root: 対象ルートディレクトリ。
+
+    Returns:
+        ファイル名の集合。権限エラー時は空集合。
+    """
+    try:
+        return {f.name for f in root.iterdir() if f.is_file()}
+    except (PermissionError, OSError):
+        return set()
+
+
+def _detect_by_marker_files(root: Path, root_files: set[str], detected: set[str]) -> None:
+    """マーカーファイル（またはグロブパターン）で言語を検出し detected へ追加する。
+
+    Args:
+        root: プロジェクトルートディレクトリ。
+        root_files: ルート直下のファイル名集合。
+        detected: 検出済み言語名を蓄積するセット（in-place 更新）。
+    """
+    for rule in LANGUAGE_RULES:
+        for marker_file in rule.files:
+            if "*" in marker_file:
+                if any(root.glob(marker_file)):
+                    detected.add(rule.name)
+                    break
+            elif marker_file in root_files:
+                detected.add(rule.name)
+                break
+
+
+def _build_extension_map() -> dict[str, str]:
+    """拡張子→言語名のマッピングを構築して返す。
+
+    Returns:
+        拡張子をキー、言語名を値とする辞書。
+    """
+    return {ext: rule.name for rule in LANGUAGE_RULES for ext in rule.extensions}
+
+
+def _detect_by_extensions(root: Path, extension_map: dict[str, str], detected: set[str]) -> None:
+    """ファイル拡張子スキャンで言語を検出し detected へ追加する。
+
+    Args:
+        root: プロジェクトルートディレクトリ。
+        extension_map: 拡張子→言語名マッピング。
+        detected: 検出済み言語名を蓄積するセット（in-place 更新）。
+    """
+    for file_path in _limited_file_scan(root, max_depth=3, max_files=1000):
+        lang = extension_map.get(file_path.suffix)
+        if lang is not None:
+            detected.add(lang)
+
+
 def detect_languages(project_root: str | Path) -> list[str]:
     """プロジェクトで使われているプログラミング言語を検出する。
 
     Args:
-        project_root: project_root の値
+        project_root: プロジェクトルートのパス。
 
     Returns:
-        list[str]: str の一覧を返します。
+        検出された言語名のソート済みリスト。存在しないパスの場合は空リスト。
 
     Raises:
         例外は発生しません。
@@ -24,37 +81,9 @@ def detect_languages(project_root: str | Path) -> list[str]:
         return []
 
     detected: set[str] = set()
-
-    # ルートディレクトリのファイルを収集する（速度のため非再帰）
-    try:
-        root_files = {f.name for f in root.iterdir() if f.is_file()}
-    except (PermissionError, OSError):
-        root_files = set()
-
-    for rule in LANGUAGE_RULES:
-        # マーカーファイルを確認
-        for marker_file in rule.files:
-            if "*" in marker_file:
-                # グロブパターンを処理
-                pattern = marker_file
-                if any(root.glob(pattern)):
-                    detected.add(rule.name)
-                    break
-            elif marker_file in root_files:
-                detected.add(rule.name)
-                break
-
-    # 拡張子の高速スキャン（性能のため深さを制限）
-    extension_languages: dict[str, str] = {}
-    for rule in LANGUAGE_RULES:
-        for ext in rule.extensions:
-            extension_languages[ext] = rule.name
-
-    for file_path in _limited_file_scan(root, max_depth=3, max_files=1000):
-        ext = file_path.suffix
-        if ext in extension_languages:
-            detected.add(extension_languages[ext])
-
+    root_files = _collect_root_files(root)
+    _detect_by_marker_files(root, root_files, detected)
+    _detect_by_extensions(root, _build_extension_map(), detected)
     return sorted(detected)
 
 
@@ -96,15 +125,12 @@ def _limited_file_scan(
     """深さと件数の上限付きでファイルを走査する。
 
     Args:
-        root: root の値
-        max_depth: 探索する最大深さ
-        max_files: 返す最大ファイル数
+        root: 走査を開始するルートディレクトリ。
+        max_depth: 探索する最大深さ。
+        max_files: 返す最大ファイル数。
 
     Returns:
-        list[Path]: Path の一覧を返します。
-
-    Raises:
-        例外は発生しません。
+        収集したファイルパスのリスト。
     """
     files: list[Path] = []
     _scan_dir(root, 0, files, max_depth, max_files)
