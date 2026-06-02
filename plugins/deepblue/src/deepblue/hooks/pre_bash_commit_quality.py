@@ -234,6 +234,123 @@ def validate_commit_message(command: str) -> dict | None:
     return {"message": message, "issues": issues}
 
 
+def _count_file_issues(files_to_check: list[str]) -> tuple[int, int, int, int]:
+    """チェック対象ファイルの問題数を集計します。
+
+    各ファイルに対して find_file_issues を呼び出し、severity 別に問題数を返します。
+    ログ出力も行います。
+
+    Args:
+        files_to_check: チェック対象のファイルパスリストです。
+
+    Returns:
+        (total_issues, error_count, warning_count, info_count) のタプルを返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    total_issues = 0
+    error_count = 0
+    warning_count = 0
+    info_count = 0
+    severity_label = {"error": "ERROR", "warning": "WARNING", "info": "INFO"}
+
+    for file_path in files_to_check:
+        file_issues = find_file_issues(file_path)
+        if not file_issues:
+            continue
+        log(f"\n[FILE] {file_path}")
+        for issue in file_issues:
+            label = severity_label.get(issue["severity"], "INFO")
+            log(f"  {label} Line {issue['line']}: {issue['message']}")
+            total_issues += 1
+            if issue["severity"] == "error":
+                error_count += 1
+            elif issue["severity"] == "warning":
+                warning_count += 1
+            elif issue["severity"] == "info":
+                info_count += 1
+
+    return total_issues, error_count, warning_count, info_count
+
+
+def _apply_commit_message_issues(
+    command: str,
+    total_issues: int,
+    warning_count: int,
+) -> tuple[int, int]:
+    """コミットメッセージの問題を検証してカウントに加算します。
+
+    validate_commit_message を呼び出し、問題があればログ出力して
+    更新後の (total_issues, warning_count) を返します。
+
+    Args:
+        command: `git commit` コマンド文字列です。
+        total_issues: 現在の問題総数です。
+        warning_count: 現在の警告数です。
+
+    Returns:
+        (total_issues, warning_count) の更新後タプルを返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    message_validation = validate_commit_message(command)
+    if not (message_validation and message_validation["issues"]):
+        return total_issues, warning_count
+
+    log("\nCommit Message Issues:")
+    for issue in message_validation["issues"]:
+        log(f"  WARNING {issue['message']}")
+        if issue.get("suggestion"):
+            log(f"     TIP {issue['suggestion']}")
+        total_issues += 1
+        warning_count += 1
+
+    return total_issues, warning_count
+
+
+def _finalize_result(
+    total_issues: int,
+    error_count: int,
+    warning_count: int,
+    info_count: int,
+    raw_input: str,
+) -> dict:
+    """問題集計結果をログに記録し、終了コードを含む結果辞書を返します。
+
+    error_count > 0 の場合は exitCode=2（コミットブロック）、
+    それ以外は exitCode=0 を返します。
+
+    Args:
+        total_issues: 検出された問題の総数です。
+        error_count: エラー severity の問題数です。
+        warning_count: 警告 severity の問題数です。
+        info_count: info severity の問題数です。
+        raw_input: そのまま output に返す生の入力文字列です。
+
+    Returns:
+        output と exitCode を含む辞書を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    if total_issues > 0:
+        log(
+            f"\nSummary: {total_issues} issue(s) found "
+            f"({error_count} error(s), {warning_count} warning(s), {info_count} info)"
+        )
+        if error_count > 0:
+            log("\n[Hook] ERROR: Commit blocked due to critical issues. Fix them before committing.")
+            return {"output": raw_input, "exitCode": 2}
+        log("\n[Hook] WARNING: Warnings found. Consider fixing them, but commit is allowed.")
+        log("[Hook] To bypass these checks, use: git commit --no-verify")
+    else:
+        log("\n[Hook] PASS: All checks passed!")
+
+    return {"output": raw_input, "exitCode": 0}
+
+
 def evaluate(raw_input: str) -> dict:
     """入力を評価し、出力内容と終了コードを返します。
 
@@ -263,61 +380,17 @@ def evaluate(raw_input: str) -> dict:
 
         # ステージングされたファイルを取得
         staged_files = get_staged_files()
-
         if not staged_files:
             log('[Hook] No staged files found. Use "git add" to stage files first.')
             return {"output": raw_input, "exitCode": 0}
 
         log(f"[Hook] Checking {len(staged_files)} staged file(s)...")
 
-        # 各ステージングファイルをチェック
         files_to_check = [f for f in staged_files if should_check_file(f)]
-        total_issues = 0
-        error_count = 0
-        warning_count = 0
-        info_count = 0
+        total_issues, error_count, warning_count, info_count = _count_file_issues(files_to_check)
+        total_issues, warning_count = _apply_commit_message_issues(command, total_issues, warning_count)
 
-        for file_path in files_to_check:
-            file_issues = find_file_issues(file_path)
-            if file_issues:
-                log(f"\n[FILE] {file_path}")
-                for issue in file_issues:
-                    label = {"error": "ERROR", "warning": "WARNING", "info": "INFO"}.get(issue["severity"], "INFO")
-                    log(f"  {label} Line {issue['line']}: {issue['message']}")
-                    total_issues += 1
-                    if issue["severity"] == "error":
-                        error_count += 1
-                    elif issue["severity"] == "warning":
-                        warning_count += 1
-                    elif issue["severity"] == "info":
-                        info_count += 1
-
-        # コミットメッセージが提供されている場合は検証
-        message_validation = validate_commit_message(command)
-        if message_validation and message_validation["issues"]:
-            log("\nCommit Message Issues:")
-            for issue in message_validation["issues"]:
-                log(f"  WARNING {issue['message']}")
-                if issue.get("suggestion"):
-                    log(f"     TIP {issue['suggestion']}")
-                total_issues += 1
-                warning_count += 1
-
-        # サマリー
-        if total_issues > 0:
-            log(
-                f"\nSummary: {total_issues} issue(s) found "
-                f"({error_count} error(s), {warning_count} warning(s), {info_count} info)"
-            )
-
-            if error_count > 0:
-                log("\n[Hook] ERROR: Commit blocked due to critical issues. Fix them before committing.")
-                return {"output": raw_input, "exitCode": 2}
-            else:
-                log("\n[Hook] WARNING: Warnings found. Consider fixing them, but commit is allowed.")
-                log("[Hook] To bypass these checks, use: git commit --no-verify")
-        else:
-            log("\n[Hook] PASS: All checks passed!")
+        return _finalize_result(total_issues, error_count, warning_count, info_count, raw_input)
 
     except Exception as err:
         log(f"[Hook] Error: {err}")

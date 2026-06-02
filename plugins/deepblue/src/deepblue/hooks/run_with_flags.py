@@ -94,6 +94,35 @@ def _truncation_blocked_message(hook_id: str, max_bytes: int) -> str:
         "Retry with a smaller edit."
     )
 
+
+def _command_for_existing_file(candidate: Path, args: list[str]) -> list[str] | None:
+    """既存ファイルのパスからコマンドリストを返す。
+
+    拡張子と実行可能ビットに基づいてインタープリタを選択します。
+    対応する拡張子でも実行可能でもない場合は None を返します。
+
+    Args:
+        candidate: 実在するファイルへの Path オブジェクトです。
+        args: コマンドに追加する引数リストです。
+
+    Returns:
+        subprocess に渡すコマンドリスト、または判定不能な場合 None。
+
+    Raises:
+        例外は発生しません。
+    """
+    suffix = candidate.suffix.lower()
+    if suffix == ".py":
+        return [sys.executable, str(candidate), *args]
+    if suffix in {".sh", ".bash"}:
+        return ["bash", str(candidate), *args]
+    if os.name == "nt" and suffix in {".cmd", ".bat"}:
+        return ["cmd", "/c", str(candidate), *args]
+    if os.access(candidate, os.X_OK):
+        return [str(candidate), *args]
+    return None
+
+
 def resolve_target_command(
     target: str,
     args: list[str] | None = None,
@@ -118,29 +147,16 @@ def resolve_target_command(
     if not candidate.is_absolute():
         candidate = candidate if candidate.exists() else plugin_root / candidate
         try:
-            if candidate.resolve().is_relative_to(plugin_root):
-                if candidate.exists():
-                    suffix = candidate.suffix.lower()
-                    if suffix == ".py":
-                        return [sys.executable, str(candidate), *args]
-                    if suffix in {".sh", ".bash"}:
-                        return ["bash", str(candidate), *args]
-                    if os.name == "nt" and suffix in {".cmd", ".bat"}:
-                        return ["cmd", "/c", str(candidate), *args]
-                    if os.access(candidate, os.X_OK):
-                        return [str(candidate), *args]
+            if candidate.resolve().is_relative_to(plugin_root) and candidate.exists():
+                cmd = _command_for_existing_file(candidate, args)
+                if cmd is not None:
+                    return cmd
         except OSError:
             pass
     elif candidate.exists():
-        suffix = candidate.suffix.lower()
-        if suffix == ".py":
-            return [sys.executable, str(candidate), *args]
-        if suffix in {".sh", ".bash"}:
-            return ["bash", str(candidate), *args]
-        if os.name == "nt" and suffix in {".cmd", ".bat"}:
-            return ["cmd", "/c", str(candidate), *args]
-        if os.access(candidate, os.X_OK):
-            return [str(candidate), *args]
+        cmd = _command_for_existing_file(candidate, args)
+        if cmd is not None:
+            return cmd
 
     return [sys.executable, "-m", target, *args]
 
