@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 
+from deepblue.mem.cli_search_handlers import slim_context_content, slim_prompt
 from deepblue.mem.database import Database, MemoryChunk
 from deepblue.mem.search import adaptive_decay
 from deepblue.mem.settings import Settings
@@ -144,7 +145,7 @@ def _format_chunk(chunk: MemoryChunk) -> str:
     parts: list[str] = []
 
     if chunk.user_prompt:
-        parts.append(f"**プロンプト**: {_truncate(chunk.user_prompt, 120)}")
+        parts.append(f"**プロンプト**: {slim_prompt(chunk.user_prompt)}")
 
     if chunk.tool_names:
         parts.append(f"**ツール**: {', '.join(chunk.tool_names)}")
@@ -153,7 +154,7 @@ def _format_chunk(chunk: MemoryChunk) -> str:
         parts.append(f"**変更ファイル**: {', '.join(chunk.files_modified[:3])}")
 
     if chunk.content:
-        parts.append(f"```\n{_truncate(chunk.content, 300)}\n```")
+        parts.append(f"```\n{slim_context_content(chunk.content)}\n```")
 
     parts.append("")
     return "\n".join(parts)
@@ -163,10 +164,3 @@ def _format_timestamp(epoch: int) -> str:
     """epoch 秒を `YYYY-MM-DD HH:MM`（UTC）に整形する。"""
     dt = datetime.fromtimestamp(epoch, tz=UTC)
     return dt.strftime("%Y-%m-%d %H:%M")
-
-
-def _truncate(text: str, max_len: int) -> str:
-    """max_len を超える文字列を切り詰めて末尾に `...` を付ける。"""
-    if len(text) <= max_len:
-        return text
-    return text[:max_len] + "..."

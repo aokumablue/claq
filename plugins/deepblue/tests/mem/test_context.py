@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deepblue.mem.context import _format_timestamp, _select_within_budget, _truncate, build_context, importance_score
+from deepblue.mem.context import _format_timestamp, _select_within_budget, build_context, importance_score
 from deepblue.mem.database import Database, MemoryChunk
 from deepblue.mem.settings import Settings
 
@@ -137,6 +137,25 @@ class TestBuildContext:
         ctx = build_context(db, settings)
         assert ctx.count("## セッション:") == 2
 
+    def test_empty_content_chunk(self, db: Database, settings: Settings) -> None:
+        """content が空でもプロンプト等は注入され、本文ブロックは省略される。"""
+        db.store_chunk(
+            MemoryChunk(
+                session_id="s1",
+                project="proj",
+                chunk_index=0,
+                content="",
+                tool_names=["Edit"],
+                files_read=[],
+                files_modified=[],
+                user_prompt="empty content prompt",
+                created_at_epoch=1700000000,
+            )
+        )
+        ctx = build_context(db, settings)
+        assert "empty content prompt" in ctx
+        assert "```" not in ctx
+
     def test_no_prompt_no_tools(self, db: Database, settings: Settings) -> None:
         """プロンプトもツールもない場合でもクラッシュしない"""
         db.store_chunk(
@@ -232,19 +251,6 @@ class TestFormatTimestamp:
     def test_utc(self) -> None:
         result = _format_timestamp(0)
         assert "1970-01-01 00:00" == result
-
-
-class TestTruncate:
-    def test_short_text(self) -> None:
-        assert _truncate("hello", 100) == "hello"
-
-    def test_long_text(self) -> None:
-        result = _truncate("a" * 300, 200)
-        assert result.endswith("...")
-        assert len(result) == 203  # 200 + "..."
-
-    def test_exact_length(self) -> None:
-        assert _truncate("abc", 3) == "abc"
 
 
 class TestSelectWithinBudget:
