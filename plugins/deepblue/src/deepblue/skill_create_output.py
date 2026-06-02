@@ -289,6 +289,32 @@ def _read_json_stdin(default: Any = None) -> Any:
     return json.loads(raw)
 
 
+def _dispatch_command(command: str, args: list[str]) -> None:
+    """コマンド名に対応するレンダラーを呼び出し、結果を stdout に書き出す。
+
+    未知のコマンドの場合は ValueError を送出する。
+    """
+    if command == "header":
+        sys.stdout.write(render_header(args[1] if len(args) > 1 else ""))
+    elif command == "analysis-results":
+        sys.stdout.write(render_analysis_results(_read_json_stdin({})))
+    elif command == "patterns":
+        sys.stdout.write(render_patterns(_read_json_stdin([])))
+    elif command == "instincts":
+        sys.stdout.write(render_instincts(_read_json_stdin([])))
+    elif command == "output":
+        payload = _read_json_stdin({})
+        sys.stdout.write(render_output(payload.get("skillPath"), payload.get("instinctsPath")))
+    elif command == "next-steps":
+        sys.stdout.write(render_next_steps())
+    elif command == "footer":
+        sys.stdout.write(render_footer())
+    elif command == "analyze-phase":
+        sys.stdout.write(render_analyze_phase(_read_json_stdin({})))
+    else:
+        raise ValueError(f"Unknown command: {command}")
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI のエントリポイント。"""
     args = list(sys.argv[1:] if argv is None else argv)
@@ -297,27 +323,8 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(HELP_TEXT)
         return 0
 
-    command = args[0]
     try:
-        if command == "header":
-            sys.stdout.write(render_header(args[1] if len(args) > 1 else ""))
-        elif command == "analysis-results":
-            sys.stdout.write(render_analysis_results(_read_json_stdin({})))
-        elif command == "patterns":
-            sys.stdout.write(render_patterns(_read_json_stdin([])))
-        elif command == "instincts":
-            sys.stdout.write(render_instincts(_read_json_stdin([])))
-        elif command == "output":
-            payload = _read_json_stdin({})
-            sys.stdout.write(render_output(payload.get("skillPath"), payload.get("instinctsPath")))
-        elif command == "next-steps":
-            sys.stdout.write(render_next_steps())
-        elif command == "footer":
-            sys.stdout.write(render_footer())
-        elif command == "analyze-phase":
-            sys.stdout.write(render_analyze_phase(_read_json_stdin({})))
-        else:
-            raise ValueError(f"Unknown command: {command}")
+        _dispatch_command(args[0], args)
         return 0
     except (json.JSONDecodeError, OSError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)

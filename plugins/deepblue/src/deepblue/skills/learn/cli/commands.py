@@ -498,24 +498,21 @@ def cmd_projects(args) -> int:
 # ─────────────────────────────────────────────
 
 
-def cmd_prune(args) -> int:
-    """TTL しきい値より古い保留 instinct を削除する。"""
-    pending = _collect_pending_instincts()
+def _prune_dry_run_report(expired: list[dict], remaining: list[dict], max_age: int, quiet: bool) -> None:
+    """dry-run モードでの削除予定サマリーを出力する。"""
+    if quiet:
+        return
+    if expired:
+        print(f"\n[DRY RUN] Would prune {len(expired)} pending instinct(s) older than {max_age} days:\n")
+        for item in expired:
+            print(f"  - {item['name']} (age: {item['age_days']}d) — {item['path']}")
+    else:
+        print(f"No pending instincts older than {max_age} days.")
+    print(f"\nSummary: {len(expired)} would be pruned, {len(remaining)} remaining")
 
-    expired = [p for p in pending if p["age_days"] >= args.max_age]
-    remaining = [p for p in pending if p["age_days"] < args.max_age]
 
-    if args.dry_run:
-        if not args.quiet:
-            if expired:
-                print(f"\n[DRY RUN] Would prune {len(expired)} pending instinct(s) older than {args.max_age} days:\n")
-                for item in expired:
-                    print(f"  - {item['name']} (age: {item['age_days']}d) — {item['path']}")
-            else:
-                print(f"No pending instincts older than {args.max_age} days.")
-            print(f"\nSummary: {len(expired)} would be pruned, {len(remaining)} remaining")
-        return 0
-
+def _prune_execute(expired: list[dict], remaining: list[dict], max_age: int, quiet: bool) -> None:
+    """期限切れの保留 instinct ファイルを削除し、結果を出力する。"""
     pruned = 0
     pruned_items = []
     for item in expired:
@@ -524,18 +521,31 @@ def cmd_prune(args) -> int:
             pruned += 1
             pruned_items.append(item)
         except OSError as e:
-            if not args.quiet:
+            if not quiet:
                 print(f"Warning: Failed to delete {item['path']}: {e}", file=sys.stderr)
 
-    if not args.quiet:
+    if not quiet:
         if pruned > 0:
-            print(f"\nPruned {pruned} pending instinct(s) older than {args.max_age} days.")
+            print(f"\nPruned {pruned} pending instinct(s) older than {max_age} days.")
             for item in pruned_items:
                 print(f"  - {item['name']} (age: {item['age_days']}d)")
         else:
-            print(f"No pending instincts older than {args.max_age} days.")
+            print(f"No pending instincts older than {max_age} days.")
         failed = len(expired) - pruned
         remaining_total = len(remaining) + failed
         print(f"\nSummary: {pruned} pruned, {remaining_total} remaining")
 
+
+def cmd_prune(args) -> int:
+    """TTL しきい値より古い保留 instinct を削除する。"""
+    pending = _collect_pending_instincts()
+
+    expired = [p for p in pending if p["age_days"] >= args.max_age]
+    remaining = [p for p in pending if p["age_days"] < args.max_age]
+
+    if args.dry_run:
+        _prune_dry_run_report(expired, remaining, args.max_age, args.quiet)
+        return 0
+
+    _prune_execute(expired, remaining, args.max_age, args.quiet)
     return 0

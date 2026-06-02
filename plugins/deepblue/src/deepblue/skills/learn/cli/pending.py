@@ -22,16 +22,36 @@ def _collect_pending_dirs() -> list[Path]:
     return dirs
 
 
-def _parse_created_date(file_path: Path) -> datetime | None:
-    """instinct ファイルの YAML フロントマターから 'created' 日時を解析する。
+_CREATED_DATE_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S%z",
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d",
+)
 
-    'created' フィールドがない場合は、ファイルの mtime を代わりに使う。
+
+def _parse_created_date_string(date_str: str) -> datetime | None:
+    """日時文字列を既知のフォーマット群で順に試みて datetime を返す。
+
+    いずれのフォーマットにも合致しない場合は None を返す。
+    tzinfo が付いていない場合は UTC として扱う。
     """
-    try:
-        content = file_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
+    for fmt in _CREATED_DATE_FORMATS:
+        try:
+            dt = datetime.strptime(date_str, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            return dt
+        except ValueError:
+            continue
+    return None
 
+
+def _extract_created_from_frontmatter(content: str) -> datetime | None:
+    """YAML フロントマター内の 'created' フィールドを解析して datetime を返す。
+
+    フロントマターが存在しない、または 'created' キーがない場合は None を返す。
+    """
     in_frontmatter = False
     for line in content.split("\n"):
         stripped = line.strip()
@@ -44,19 +64,23 @@ def _parse_created_date(file_path: Path) -> datetime | None:
             key, value = line.split(":", 1)
             if key.strip() == "created":
                 date_str = value.strip().strip('"').strip("'")
-                for fmt in (
-                    "%Y-%m-%dT%H:%M:%S%z",
-                    "%Y-%m-%dT%H:%M:%SZ",
-                    "%Y-%m-%dT%H:%M:%S",
-                    "%Y-%m-%d",
-                ):
-                    try:
-                        dt = datetime.strptime(date_str, fmt)
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=UTC)
-                        return dt
-                    except ValueError:
-                        continue
+                return _parse_created_date_string(date_str)
+    return None
+
+
+def _parse_created_date(file_path: Path) -> datetime | None:
+    """instinct ファイルの YAML フロントマターから 'created' 日時を解析する。
+
+    'created' フィールドがない場合は、ファイルの mtime を代わりに使う。
+    """
+    try:
+        content = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    dt = _extract_created_from_frontmatter(content)
+    if dt is not None:
+        return dt
 
     # フォールバック: ファイル更新時刻
     try:

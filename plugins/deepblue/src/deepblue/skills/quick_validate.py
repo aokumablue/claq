@@ -24,6 +24,47 @@ def _parse_frontmatter(content: str) -> tuple[bool, str, dict | None]:
     return True, "", frontmatter
 
 
+def _validate_name(name_raw: object) -> tuple[bool, str]:
+    """frontmatter の name フィールドを検証する。空文字列は OK、非文字列・形式違反は NG。"""
+    if not isinstance(name_raw, str):
+        return False, f"name は文字列である必要があります（{type(name_raw).__name__} が渡されました）"
+    name = name_raw.strip()
+    if not name:
+        return True, ""
+    if not re.match(r"^[a-z0-9-]+$", name):
+        return False, f"name '{name}' は kebab-case（小文字、数字、ハイフンのみ）である必要があります"
+    if name.startswith("-") or name.endswith("-") or "--" in name:
+        return False, f"name '{name}' は先頭/末尾にハイフンを置けず、連続ハイフンも使えません"
+    if len(name) > 64:
+        return False, f"name が長すぎます（{len(name)} 文字）。最大 64 文字です。"
+    return True, ""
+
+
+def _validate_description(desc_raw: object) -> tuple[bool, str]:
+    """frontmatter の description フィールドを検証する。空文字列は OK、非文字列・形式違反は NG。"""
+    if not isinstance(desc_raw, str):
+        return False, f"description は文字列である必要があります（{type(desc_raw).__name__} が渡されました）"
+    desc = desc_raw.strip()
+    if not desc:
+        return True, ""
+    if "<" in desc or ">" in desc:
+        return False, "description に山括弧（< または >）を含めることはできません"
+    if len(desc) > 1024:
+        return False, f"description が長すぎます（{len(desc)} 文字）。最大 1024 文字です。"
+    return True, ""
+
+
+def _validate_compatibility(compat_raw: object) -> tuple[bool, str]:
+    """frontmatter の compatibility フィールドを検証する。空値は OK、非文字列・長すぎは NG。"""
+    if not compat_raw:
+        return True, ""
+    if not isinstance(compat_raw, str):
+        return False, f"compatibility は文字列である必要があります（{type(compat_raw).__name__} が渡されました）"
+    if len(compat_raw) > 500:
+        return False, f"compatibility が長すぎます（{len(compat_raw)} 文字）。最大 500 文字です。"
+    return True, ""
+
+
 def _validate_frontmatter_keys(frontmatter: dict) -> tuple[bool, str]:
     """frontmatter のキー・name・description・compatibility を検証する。"""
     ALLOWED_PROPERTIES = {"name", "description", "license", "allowed-tools", "metadata", "compatibility"}
@@ -38,34 +79,17 @@ def _validate_frontmatter_keys(frontmatter: dict) -> tuple[bool, str]:
     if "description" not in frontmatter:
         return False, "frontmatter に 'description' がありません"
 
-    name = frontmatter.get("name", "")
-    if not isinstance(name, str):
-        return False, f"name は文字列である必要があります（{type(name).__name__} が渡されました）"
-    name = name.strip()
-    if name:
-        if not re.match(r"^[a-z0-9-]+$", name):
-            return False, f"name '{name}' は kebab-case（小文字、数字、ハイフンのみ）である必要があります"
-        if name.startswith("-") or name.endswith("-") or "--" in name:
-            return False, f"name '{name}' は先頭/末尾にハイフンを置けず、連続ハイフンも使えません"
-        if len(name) > 64:
-            return False, f"name が長すぎます（{len(name)} 文字）。最大 64 文字です。"
+    ok, msg = _validate_name(frontmatter.get("name", ""))
+    if not ok:
+        return False, msg
 
-    description = frontmatter.get("description", "")
-    if not isinstance(description, str):
-        return False, f"description は文字列である必要があります（{type(description).__name__} が渡されました）"
-    description = description.strip()
-    if description:
-        if "<" in description or ">" in description:
-            return False, "description に山括弧（< または >）を含めることはできません"
-        if len(description) > 1024:
-            return False, f"description が長すぎます（{len(description)} 文字）。最大 1024 文字です。"
+    ok, msg = _validate_description(frontmatter.get("description", ""))
+    if not ok:
+        return False, msg
 
-    compatibility = frontmatter.get("compatibility", "")
-    if compatibility:
-        if not isinstance(compatibility, str):
-            return False, f"compatibility は文字列である必要があります（{type(compatibility).__name__} が渡されました）"
-        if len(compatibility) > 500:
-            return False, f"compatibility が長すぎます（{len(compatibility)} 文字）。最大 500 文字です。"
+    ok, msg = _validate_compatibility(frontmatter.get("compatibility", ""))
+    if not ok:
+        return False, msg
 
     return True, "スキルは有効です"
 
