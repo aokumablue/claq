@@ -2,6 +2,7 @@
 name: gitflow
 description: Gitワークフローパターン。ブランチ戦略/コミット規約/マージvsリベース/コンフリクト解決/全規模チーム向け共同開発ベストプラクティス。
 context: fork
+user-invocable: false
 ---
 
 # Git ワークフロー

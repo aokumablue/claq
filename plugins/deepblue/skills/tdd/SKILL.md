@@ -2,6 +2,7 @@
 name: tdd
 description: 新機能実装/バグ修正/リファクタリング時に使用。ユニット・統合テスト中心のTDD徹底。
 context: fork
+user-invocable: false
 ---
 
 # テスト駆動開発

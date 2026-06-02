@@ -2,6 +2,7 @@
 name: learn
 description: セッション観測→信頼度付き原子的インスティンクト作成→skills/commands/agentsに進化させる学習システム。プロジェクト単位インスティンクトでプロジェクト間混入防止。
 context: fork
+user-invocable: false
 ---
 
 # 継続学習

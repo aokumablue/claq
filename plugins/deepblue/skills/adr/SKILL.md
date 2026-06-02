@@ -2,6 +2,7 @@
 name: adr
 description: セッション中アーキテクチャ決定→構造化ADR記録。決定瞬間を自動検出、コンテキスト/代替案/根拠を記録。ADRログでコードベース形成理由を共有。
 context: fork
+user-invocable: false
 ---
 
 # アーキテクチャ決定記録

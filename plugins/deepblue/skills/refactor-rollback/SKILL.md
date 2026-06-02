@@ -2,6 +2,7 @@
 name: refactor-rollback
 description: refactor前にファイル単位ロールバック計画を確定し、失敗時の復旧を高速化する。
 context: fork
+user-invocable: false
 ---
 
 # リファクタ ロールバック設計

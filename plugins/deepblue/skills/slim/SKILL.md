@@ -2,6 +2,7 @@
 name: slim
 description: LLMレスポンス/Markdownファイルを原始人口調で最大圧縮。日本語文法無視・キーワードのみ。技術的正確性完全維持。
 context: fork
+user-invocable: false
 ---
 
 ## 発動タイミング

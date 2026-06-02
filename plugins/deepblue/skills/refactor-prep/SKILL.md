@@ -2,6 +2,7 @@
 name: refactor-prep
 description: リファクタ着手前に対象分割・依存可視化・実行前テストセットを最小コストで確定する事前準備スキル。
 context: fork
+user-invocable: false
 ---
 
 # リファクタ事前準備

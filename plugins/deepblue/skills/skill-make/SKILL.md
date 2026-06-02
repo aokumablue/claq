@@ -2,6 +2,7 @@
 name: skill-make
 description: 新スキル生成/eval実行/ベンチマーク分析/説明文最適化。/skill-genからの委譲先。
 context: fork
+user-invocable: false
 ---
 
 # スキル生成・改善

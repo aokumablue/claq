@@ -2,6 +2,7 @@
 name: guard
 description: 本番環境作業・エージェント自律実行時に破壊的操作を防ぐ。
 context: fork
+user-invocable: false
 ---
 
 # Safety Guard
