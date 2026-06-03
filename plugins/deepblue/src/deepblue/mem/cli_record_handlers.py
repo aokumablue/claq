@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -18,18 +19,28 @@ if TYPE_CHECKING:
     GitUserFn = Callable[[], str]
 
 
+@dataclass(frozen=True)
+class RecordDeps:
+    """record系ハンドラの外部依存（DB接続・プロジェクト解決・gitユーザー名・ロガー）。"""
+
+    open_db: OpenDbFn
+    get_project: GetProjectFn
+    log: Any
+    get_git_user_name: GitUserFn | None = None
+
+
 def _build_record_chunk(
-    db: Any,
+    stdin_data: dict[str, Any],
     session_id: str,
     project: str,
-    event_type: str,
-    content: str,
-    user_prompt: str,
-    metadata: dict,
 ) -> Any:
-    """handle_record 用のチャンクオブジェクトを構築して返す。"""
+    """handle_record 用のチャンクオブジェクトを stdin_data から構築して返す。"""
     from deepblue.mem.database import MemoryChunk
 
+    event_type = str(stdin_data.get("event_type", "custom") or "custom")
+    content = str(stdin_data.get("content", "") or "")
+    user_prompt = str(stdin_data.get("user_prompt", "") or "")
+    metadata = stdin_data.get("metadata", {})
     # chunk_index は store_chunk の INSERT（SQL の MAX+1）で確定するためここでは 0 を渡す。
     files_read = metadata.get("files_read", [])
     files_modified = metadata.get("files_modified", [])
@@ -45,35 +56,29 @@ def _build_record_chunk(
 def handle_record(
     settings: Settings,
     stdin_data: dict[str, Any],
-    *,
-    open_db: OpenDbFn,
-    get_project: GetProjectFn,
-    log: Any,
+    deps: RecordDeps,
 ) -> None:
     """明示的記録: コマンド/スキル/エージェントからの直接記録"""
     from deepblue.mem.database import Session
 
     session_id = str(stdin_data.get("session_id", "") or f"record-{int(time.time())}")
-    project = get_project(stdin_data)
-    event_type = str(stdin_data.get("event_type", "custom") or "custom")
+    project = deps.get_project(stdin_data)
     content = str(stdin_data.get("content", "") or "")
-    user_prompt = str(stdin_data.get("user_prompt", "") or "")
-    metadata = stdin_data.get("metadata", {})
 
     if not content.strip():
         print(json.dumps({"success": False, "error": "content is required"}))
         return
 
     try:
-        with open_db(settings) as db:
+        with deps.open_db(settings) as db:
             db.upsert_session(Session(
                 session_id=session_id, project=project, started_at_epoch=int(time.time()),
             ))
-            chunk = _build_record_chunk(db, session_id, project, event_type, content, user_prompt, metadata)
+            chunk = _build_record_chunk(stdin_data, session_id, project)
             chunk_id = db.store_chunk(chunk)
         print(json.dumps({"success": True, "chunk_id": chunk_id}))
     except Exception as e:
-        log.warning("記録失敗: %s", e)
+        deps.log.warning("記録失敗: %s", e)
         print(json.dumps({"success": False, "error": str(e)}))
 
 
@@ -104,17 +109,13 @@ def _build_interaction_log(
 def handle_record_interaction(
     settings: Settings,
     stdin_data: dict[str, Any],
-    *,
-    open_db: OpenDbFn,
-    get_project: GetProjectFn,
-    get_git_user_name: GitUserFn,
-    log: Any,
+    deps: RecordDeps,
 ) -> None:
     """interaction_logs へのインタラクション記録。"""
     from deepblue.mem.database import Session
 
     session_id = str(stdin_data.get("session_id", "") or "")
-    project = get_project(stdin_data)
+    project = deps.get_project(stdin_data)
     user_prompt_full = str(stdin_data.get("user_prompt_full") or stdin_data.get("prompt") or "")
 
     if not user_prompt_full.strip():
@@ -122,43 +123,39 @@ def handle_record_interaction(
         return
 
     try:
-        with open_db(settings) as db:
+        with deps.open_db(settings) as db:
             db.upsert_session(Session(
                 session_id=session_id, project=project, started_at_epoch=int(time.time()),
             ))
             interaction_index = db.get_next_interaction_index(session_id)
             log_entry = _build_interaction_log(
-                stdin_data, session_id, project, interaction_index, get_git_user_name()
+                stdin_data, session_id, project, interaction_index, deps.get_git_user_name()
             )
             log_id = db.store_interaction_log(log_entry)
         print(json.dumps({"success": True, "id": log_id, "interaction_index": interaction_index}))
     except Exception as e:
-        log.warning("インタラクション記録失敗: %s", e)
+        deps.log.warning("インタラクション記録失敗: %s", e)
         print(json.dumps({"success": False, "error": str(e)}))
 
 
 def handle_record_project_profile(
     settings: Settings,
     stdin_data: dict[str, Any],
-    *,
-    open_db: OpenDbFn,
-    get_project: GetProjectFn,
-    get_git_user_name: GitUserFn,
-    log: Any,
+    deps: RecordDeps,
 ) -> str:
     """project_profiles のアップサート。"""
     from deepblue.mem.database import ProjectProfile
 
-    project = stdin_data.get("project") or get_project(stdin_data)
+    project = stdin_data.get("project") or deps.get_project(stdin_data)
     now = int(time.time())
 
     try:
-        with open_db(settings) as db:
+        with deps.open_db(settings) as db:
             profile = ProjectProfile(
                 project=project,
                 detected_at_epoch=now,
                 last_updated_epoch=now,
-                origin_user=get_git_user_name(),
+                origin_user=deps.get_git_user_name(),
                 project_path=str(stdin_data.get("project_path", "") or "") or None,
                 languages=stdin_data.get("languages", []) or [],
                 frameworks=stdin_data.get("frameworks", []) or [],
@@ -168,27 +165,23 @@ def handle_record_project_profile(
                 scope_hint=str(stdin_data.get("scope_hint", "project") or "project"),
             )
             profile_id = db.upsert_project_profile(profile)
-        log.info("project profile saved: %s (id=%s)", project, profile_id)
+        deps.log.info("project profile saved: %s (id=%s)", project, profile_id)
     except Exception as e:
-        log.warning("プロジェクトプロファイル保存失敗: %s", e)
+        deps.log.warning("プロジェクトプロファイル保存失敗: %s", e)
     return ""
 
 
 def handle_get_project_profile(
     settings: Settings,
     stdin_data: dict[str, Any],
-    *,
-    open_db: OpenDbFn,
-    get_project: GetProjectFn,
-    get_git_user_name: GitUserFn,
-    log: Any,
+    deps: RecordDeps,
 ) -> None:
     """project_profiles の取得。"""
-    project = stdin_data.get("project") or get_project(stdin_data)
+    project = stdin_data.get("project") or deps.get_project(stdin_data)
 
     try:
-        with open_db(settings) as db:
-            profile = db.get_project_profile(project, origin_user=get_git_user_name())
+        with deps.open_db(settings) as db:
+            profile = db.get_project_profile(project, origin_user=deps.get_git_user_name())
         if profile:
             print(
                 json.dumps(
@@ -207,7 +200,7 @@ def handle_get_project_profile(
         else:
             print(json.dumps({"found": False}))
     except Exception as e:
-        log.warning("プロジェクトプロファイル取得失敗: %s", e)
+        deps.log.warning("プロジェクトプロファイル取得失敗: %s", e)
         print(json.dumps({"found": False, "error": str(e)}))
 
 
@@ -234,26 +227,22 @@ def _extract_item_name_and_type(
 def handle_record_item_run(
     settings: Settings,
     stdin_data: dict[str, Any],
-    *,
-    open_db: OpenDbFn,
-    get_project: GetProjectFn,
-    get_git_user_name: GitUserFn,
-    log: Any,
+    deps: RecordDeps,
 ) -> None:
     """スキル・コマンド・エージェントの実行記録を mem_item_runs に保存する。"""
     from deepblue.mem.database import MemItemRun
 
-    extracted = _extract_item_name_and_type(stdin_data, log=log)
+    extracted = _extract_item_name_and_type(stdin_data, log=deps.log)
     if extracted is None:
         return
     skill_name, item_type = extracted
 
     run = MemItemRun(
         session_id=str(stdin_data.get("session_id", "") or ""),
-        project=get_project(stdin_data),
+        project=deps.get_project(stdin_data),
         skill_name=skill_name,
         created_at_epoch=int(time.time()),
-        origin_user=get_git_user_name(),
+        origin_user=deps.get_git_user_name(),
         item_type=item_type,
         outcome=stdin_data.get("outcome", "unknown"),
         skill_trigger=stdin_data.get("skill_trigger"),
@@ -261,10 +250,10 @@ def handle_record_item_run(
     )
 
     try:
-        with open_db(settings) as db:
+        with deps.open_db(settings) as db:
             run_id = db.store_mem_item_run(run)
-        log.info("item_run 記録: %s (%s) id=%s", skill_name, item_type, run_id)
+        deps.log.info("item_run 記録: %s (%s) id=%s", skill_name, item_type, run_id)
         print(json.dumps({"success": True, "id": run_id}))
     except Exception as e:
-        log.warning("record-item-run 失敗: %s", e)
+        deps.log.warning("record-item-run 失敗: %s", e)
         print(json.dumps({"success": False, "error": str(e)}))

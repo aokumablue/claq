@@ -302,14 +302,18 @@ def _parse_date_to_epoch(value: int | str | None) -> int | None:
     return _search_handlers.parse_date_to_epoch(value)
 
 
-def _handle_record(settings: Settings, stdin_data: dict) -> None:
-    _record_handlers.handle_record(
-        settings,
-        stdin_data,
+def _record_deps() -> _record_handlers.RecordDeps:
+    """record系ハンドラへ渡す依存性をまとめて構築する。"""
+    return _record_handlers.RecordDeps(
         open_db=_open_db,
         get_project=_get_project,
         log=log,
+        get_git_user_name=get_git_user_name,
     )
+
+
+def _handle_record(settings: Settings, stdin_data: dict) -> None:
+    _record_handlers.handle_record(settings, stdin_data, _record_deps())
 
 
 def _get_project(stdin_data: dict) -> str:
@@ -495,47 +499,19 @@ def _handle_dashboard(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_record_interaction(settings: Settings, stdin_data: dict) -> None:
-    _record_handlers.handle_record_interaction(
-        settings,
-        stdin_data,
-        open_db=_open_db,
-        get_project=_get_project,
-        get_git_user_name=get_git_user_name,
-        log=log,
-    )
+    _record_handlers.handle_record_interaction(settings, stdin_data, _record_deps())
 
 
 def _handle_record_project_profile(settings: Settings, stdin_data: dict) -> str:
-    return _record_handlers.handle_record_project_profile(
-        settings,
-        stdin_data,
-        open_db=_open_db,
-        get_project=_get_project,
-        get_git_user_name=get_git_user_name,
-        log=log,
-    )
+    return _record_handlers.handle_record_project_profile(settings, stdin_data, _record_deps())
 
 
 def _handle_get_project_profile(settings: Settings, stdin_data: dict) -> None:
-    _record_handlers.handle_get_project_profile(
-        settings,
-        stdin_data,
-        open_db=_open_db,
-        get_project=_get_project,
-        get_git_user_name=get_git_user_name,
-        log=log,
-    )
+    _record_handlers.handle_get_project_profile(settings, stdin_data, _record_deps())
 
 
 def _handle_record_item_run(settings: Settings, stdin_data: dict) -> None:
-    _record_handlers.handle_record_item_run(
-        settings,
-        stdin_data,
-        open_db=_open_db,
-        get_project=_get_project,
-        get_git_user_name=get_git_user_name,
-        log=log,
-    )
+    _record_handlers.handle_record_item_run(settings, stdin_data, _record_deps())
 
 
 def _handle_team_context(settings: Settings, stdin_data: dict) -> str:
