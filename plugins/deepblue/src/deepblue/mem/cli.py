@@ -473,15 +473,14 @@ def _handle_import(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_dashboard(settings: Settings, stdin_data: dict) -> None:
-    _dashboard_handlers.handle_dashboard(
-        settings,
-        stdin_data,
+    deps = _dashboard_handlers.DashboardDeps(
         open_db=_open_db,
         log=log,
         collect_project_overview_fn=_collect_project_overview,
         collect_skill_health_overview_fn=_collect_skill_health_overview,
         collect_skill_growth_overview_fn=_collect_skill_growth_overview,
     )
+    _dashboard_handlers.handle_dashboard(settings, stdin_data, deps)
 
 
 def _handle_record_interaction(settings: Settings, stdin_data: dict) -> None:

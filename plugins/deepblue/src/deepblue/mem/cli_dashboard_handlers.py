@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -20,6 +21,31 @@ if TYPE_CHECKING:
     OpenDbFn = Callable[[Settings], AbstractContextManager[Database]]
     GitUserFn = Callable[[], str]
     CountLinesFn = Callable[[Path], int]
+
+
+@dataclass(frozen=True)
+class DashboardData:
+    """ダッシュボード表示に必要な全データを集約したコンテナ。"""
+
+    days: int
+    pg_data: dict
+    pg_available: bool
+    personal_outcome: list
+    item_vars: dict
+    skill_health: dict
+    skill_growth: dict
+    project_overview: dict
+
+
+@dataclass(frozen=True)
+class DashboardDeps:
+    """handle_dashboard の外部依存（DB接続・コールバック・ロガー）。"""
+
+    open_db: OpenDbFn
+    log: Any
+    collect_project_overview_fn: Callable[[], dict]
+    collect_skill_health_overview_fn: Callable[[dict], dict]
+    collect_skill_growth_overview_fn: Callable[[Settings, int], dict]
 
 
 def count_lines(path: Path) -> int:
@@ -391,49 +417,30 @@ def _build_item_ctx(item_vars: dict, personal_outcome: list) -> dict:
     }
 
 
-def _build_template_context(
-    days: int,
-    pg_data: dict,
-    pg_available: bool,
-    personal_outcome: list,
-    item_vars: dict,
-    skill_health: dict,
-    skill_growth: dict,
-    project_overview: dict,
-) -> dict:
+def _build_template_context(data: DashboardData) -> dict:
     """Jinja2 テンプレートに渡すコンテキスト辞書を構築する。"""
-    ctx = {"generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"), "days": days}
-    ctx.update(_build_pg_data_ctx(pg_data, pg_available))
-    ctx.update(_build_item_ctx(item_vars, personal_outcome))
+    ctx = {"generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"), "days": data.days}
+    ctx.update(_build_pg_data_ctx(data.pg_data, data.pg_available))
+    ctx.update(_build_item_ctx(data.item_vars, data.personal_outcome))
     ctx.update({
-        "skill_health_summary": skill_health["summary"],
-        "skill_health_labels": _jdumps(skill_health["chart_labels"]),
-        "skill_health_7d": _jdumps(skill_health["chart_7d"]),
-        "skill_health_30d": _jdumps(skill_health["chart_30d"]),
-        "skill_health_rows": skill_health["skills"],
-        "skill_growth_summary": skill_growth["summary"],
-        "skill_growth_labels": _jdumps(skill_growth["chart_labels"]),
-        "skill_growth_scores": _jdumps(skill_growth["chart_scores"]),
-        "skill_candidates": skill_growth["skill_candidates"],
-        "gap_candidates": skill_growth["gap_candidates"],
-        "action_items": skill_growth["action_items"],
-        "project_summary": project_overview["summary"],
-        "project_rows": project_overview["projects"],
+        "skill_health_summary": data.skill_health["summary"],
+        "skill_health_labels": _jdumps(data.skill_health["chart_labels"]),
+        "skill_health_7d": _jdumps(data.skill_health["chart_7d"]),
+        "skill_health_30d": _jdumps(data.skill_health["chart_30d"]),
+        "skill_health_rows": data.skill_health["skills"],
+        "skill_growth_summary": data.skill_growth["summary"],
+        "skill_growth_labels": _jdumps(data.skill_growth["chart_labels"]),
+        "skill_growth_scores": _jdumps(data.skill_growth["chart_scores"]),
+        "skill_candidates": data.skill_growth["skill_candidates"],
+        "gap_candidates": data.skill_growth["gap_candidates"],
+        "action_items": data.skill_growth["action_items"],
+        "project_summary": data.project_overview["summary"],
+        "project_rows": data.project_overview["projects"],
     })
     return ctx
 
 
-def _render_dashboard_html(
-    output_path: Path,
-    days: int,
-    pg_data: dict,
-    pg_available: bool,
-    personal_outcome: list,
-    item_vars: dict,
-    skill_health: dict,
-    skill_growth: dict,
-    project_overview: dict,
-) -> None:
+def _render_dashboard_html(output_path: Path, data: DashboardData) -> None:
     """Jinja2 テンプレートを使って HTML ダッシュボードをレンダリングして書き出す。"""
     from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -443,10 +450,7 @@ def _render_dashboard_html(
         autoescape=select_autoescape(["html"]),
     )
     template = env.get_template("dashboard.html")
-    ctx = _build_template_context(
-        days, pg_data, pg_available, personal_outcome, item_vars, skill_health, skill_growth, project_overview
-    )
-    output_path.write_text(template.render(**ctx), encoding="utf-8")
+    output_path.write_text(template.render(**_build_template_context(data)), encoding="utf-8")
 
 
 def _collect_personal_stats(open_db: Any, settings: Settings, days: int) -> tuple[list, list, list]:
@@ -466,12 +470,7 @@ def _collect_personal_stats(open_db: Any, settings: Settings, days: int) -> tupl
 def handle_dashboard(
     settings: Settings,
     stdin_data: dict[str, Any],
-    *,
-    open_db: OpenDbFn,
-    log: Any,
-    collect_project_overview_fn: Callable[[], dict[str, object]],
-    collect_skill_health_overview_fn: Callable[[dict[str, object]], dict[str, object]],
-    collect_skill_growth_overview_fn: Callable[[Settings, int], dict[str, object]],
+    deps: DashboardDeps,
 ) -> None:
     """静的 HTML ダッシュボードを生成する。"""
     days = stdin_data.get("days", 30)
@@ -482,15 +481,25 @@ def handle_dashboard(
         return
     output_format = stdin_data.get("format", "html")
 
-    personal_ranking, personal_trend, personal_outcome = _collect_personal_stats(open_db, settings, days)
-    pg_available, team_ranking, team_trend, pg_data = _collect_pg_dashboard_data(settings, days, log=log)
+    personal_ranking, personal_trend, personal_outcome = _collect_personal_stats(deps.open_db, settings, days)
+    pg_available, team_ranking, team_trend, pg_data = _collect_pg_dashboard_data(settings, days, log=deps.log)
     item_vars = _build_item_ranking_vars(personal_ranking, team_ranking, personal_trend, team_trend)
-    skill_health = collect_skill_health_overview_fn(dict(stdin_data))
-    skill_growth = collect_skill_growth_overview_fn(settings, int(days))
-    project_overview = collect_project_overview_fn()
+    skill_health = deps.collect_skill_health_overview_fn(dict(stdin_data))
+    skill_growth = deps.collect_skill_growth_overview_fn(settings, int(days))
+    project_overview = deps.collect_project_overview_fn()
+    dash_data = DashboardData(
+        days=days,
+        pg_data=pg_data,
+        pg_available=pg_available,
+        personal_outcome=personal_outcome,
+        item_vars=item_vars,
+        skill_health=skill_health,
+        skill_growth=skill_growth,
+        project_overview=project_overview,
+    )
 
     if output_format == "json":
-        data = {
+        json_data = {
             **pg_data,
             "personal_ranking": personal_ranking,
             "team_ranking": team_ranking,
@@ -499,12 +508,9 @@ def handle_dashboard(
             "skill_growth": skill_growth,
             "project_overview": project_overview,
         }
-        output_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        output_path.write_text(json.dumps(json_data, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps({"success": True, "output": str(output_path)}))
         return
 
-    _render_dashboard_html(
-        output_path, days, pg_data, pg_available, personal_outcome,
-        item_vars, skill_health, skill_growth, project_overview,
-    )
+    _render_dashboard_html(output_path, dash_data)
     print(json.dumps({"success": True, "output": str(output_path)}))
