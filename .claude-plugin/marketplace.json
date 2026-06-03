@@ -11,7 +11,7 @@
       "name": "deepblue",
       "source": "./plugins/deepblue",
       "description": "開発に必要な汎用プラグイン集です。エージェント、スキル、フック、コマンドをまとめて導入し、計画・実装・検証・レビューの流れを揃えます。",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "homepage": "https://github.com/aokumablue/deepblue",
       "repository": "https://github.com/aokumablue/deepblue",
       "license": "Apache-2.0",
