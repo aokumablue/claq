@@ -204,15 +204,15 @@ def test_handle_setup_and_observe_branches(monkeypatch: pytest.MonkeyPatch, tmp_
 
     import deepblue.mem.chunker as chunker_mod
 
-    monkeypatch.setattr(chunker_mod, "build_chunk_from_tool_use", lambda **kwargs: MemoryChunk(
-        session_id=kwargs["session_id"],
-        project=kwargs["project"],
-        chunk_index=kwargs["chunk_index"],
+    monkeypatch.setattr(chunker_mod, "build_chunk_from_tool_use", lambda session_id, project, chunk_index, user_prompt, params: MemoryChunk(
+        session_id=session_id,
+        project=project,
+        chunk_index=chunk_index,
         content="observed",
-        tool_names=[kwargs["tool_name"]],
+        tool_names=[params.tool_name],
         files_read=[],
         files_modified=[],
-        user_prompt=kwargs["user_prompt"],
+        user_prompt=user_prompt,
         created_at_epoch=1700000000,
     ))
     cli._handle_observe(

@@ -29,6 +29,18 @@ _AI_RESPONSE_HEAD = 400
 _AI_RESPONSE_TAIL = 100
 
 
+@dataclass(frozen=True)
+class ToolUseParams:
+    """1回のツール使用をチャンクに蓄積するためのパラメータ。"""
+
+    tool_name: str
+    tool_input: dict | str | None
+    tool_response: str | None
+    chunk_max_length: int = 2000
+    is_error: bool = False
+    ai_response: str | None = None
+
+
 def _summarize_ai_response(response: str) -> str:
     """AI 応答を先頭+末尾で最大500文字に要約する。"""
     if len(response) <= _AI_RESPONSE_HEAD + _AI_RESPONSE_TAIL:
@@ -69,16 +81,9 @@ class ChunkAccumulator:
     _last_error: str | None = None
     _ai_response_summary: str | None = None
 
-    def add_tool_use(
-        self,
-        tool_name: str,
-        tool_input: dict | str | None,
-        tool_response: str | None,
-        chunk_max_length: int = 2000,
-        is_error: bool = False,
-        ai_response: str | None = None,
-    ) -> None:
+    def add_tool_use(self, params: ToolUseParams) -> None:
         """ツール使用を蓄積する"""
+        tool_name = params.tool_name
         # 重複排除なし（呼び出し順序を保持）
         self._tool_sequence.append(tool_name)
 
@@ -86,7 +91,7 @@ class ChunkAccumulator:
         if tool_name not in self.tool_names:
             self.tool_names.append(tool_name)
 
-        inp = _parse_tool_input(tool_input)
+        inp = _parse_tool_input(params.tool_input)
 
         # ファイルパスの抽出
         files = _extract_file_paths(tool_name, inp)
@@ -96,25 +101,25 @@ class ChunkAccumulator:
             self.files_read.extend(f for f in files if f not in self.files_read)
 
         # エラー記録
-        if is_error:
+        if params.is_error:
             self._error_count += 1
-            if tool_response:
-                self._last_error = redact(tool_response[:500])
+            if params.tool_response:
+                self._last_error = redact(params.tool_response[:500])
 
         # AI 応答の要約を保存（最後のものを上書き）
-        if ai_response:
-            self._ai_response_summary = _summarize_ai_response(ai_response)
+        if params.ai_response:
+            self._ai_response_summary = _summarize_ai_response(params.ai_response)
 
         # コンテンツの組み立て
-        input_summary = _summarize_input(tool_name, inp, tool_input)
+        input_summary = _summarize_input(tool_name, inp, params.tool_input)
         output_max_len = _ECHO_RESPONSE_OUTPUT_LEN if tool_name in _ECHO_RESPONSE_TOOLS else _MAX_OUTPUT_LEN
-        output_summary = _truncate(strip_tags(str(tool_response or "")), max_len=output_max_len)
+        output_summary = _truncate(strip_tags(str(params.tool_response or "")), max_len=output_max_len)
         part = f"[{tool_name}] {input_summary}"
         if output_summary:
             part += f"\n{output_summary}"
 
         # チャンク最大長に収まるよう制限
-        if sum(len(p) for p in self._content_parts) + len(part) > chunk_max_length:
+        if sum(len(p) for p in self._content_parts) + len(part) > params.chunk_max_length:
             return
         self._content_parts.append(part)
 
@@ -145,12 +150,7 @@ def build_chunk_from_tool_use(
     project: str,
     chunk_index: int,
     user_prompt: str,
-    tool_name: str,
-    tool_input: dict | str | None,
-    tool_response: str | None,
-    chunk_max_length: int = 2000,
-    is_error: bool = False,
-    ai_response: str | None = None,
+    params: ToolUseParams,
 ) -> MemoryChunk:
     """単一ツール使用から即座にチャンクを生成する（PostToolUse 毎の呼び出し）"""
     acc = ChunkAccumulator(
@@ -159,7 +159,7 @@ def build_chunk_from_tool_use(
         user_prompt=user_prompt,
         chunk_index=chunk_index,
     )
-    acc.add_tool_use(tool_name, tool_input, tool_response, chunk_max_length, is_error, ai_response)
+    acc.add_tool_use(params)
     return acc.to_chunk()
 
 

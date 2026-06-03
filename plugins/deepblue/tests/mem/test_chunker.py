@@ -4,6 +4,7 @@ import pytest
 
 from deepblue.mem.chunker import (
     ChunkAccumulator,
+    ToolUseParams,
     _extract_file_paths,
     _parse_tool_input,
     _summarize_ai_response,
@@ -148,9 +149,7 @@ class TestBuildChunkFromToolUse:
             project="proj",
             chunk_index=0,
             user_prompt="test",
-            tool_name=tool_name,
-            tool_input=tool_input,
-            tool_response="ok",
+            params=ToolUseParams(tool_name=tool_name, tool_input=tool_input, tool_response="ok"),
         )
         assert chunk.files_read == expected_files_read
         assert chunk.files_modified == expected_files_modified
@@ -162,9 +161,7 @@ class TestBuildChunkFromToolUse:
             project="proj",
             chunk_index=0,
             user_prompt="test",
-            tool_name="Read",
-            tool_input='{"file_path": "/a.py"}',
-            tool_response="ok",
+            params=ToolUseParams(tool_name="Read", tool_input='{"file_path": "/a.py"}', tool_response="ok"),
         )
         assert chunk.files_read == ["/a.py"]
 
@@ -174,9 +171,7 @@ class TestBuildChunkFromToolUse:
             project="proj",
             chunk_index=0,
             user_prompt="test",
-            tool_name="Read",
-            tool_input=None,
-            tool_response="ok",
+            params=ToolUseParams(tool_name="Read", tool_input=None, tool_response="ok"),
         )
         assert chunk.files_read == []
 
@@ -186,9 +181,7 @@ class TestBuildChunkFromToolUse:
             project="proj",
             chunk_index=0,
             user_prompt="test",
-            tool_name="Bash",
-            tool_input={"command": "echo"},
-            tool_response=None,
+            params=ToolUseParams(tool_name="Bash", tool_input={"command": "echo"}, tool_response=None),
         )
         assert chunk.content  # 空でないこと
 
@@ -198,9 +191,11 @@ class TestBuildChunkFromToolUse:
             project="proj",
             chunk_index=0,
             user_prompt="<private>secret</private> visible prompt",
-            tool_name="Bash",
-            tool_input={"command": "echo hi"},
-            tool_response="<private>hidden</private> output",
+            params=ToolUseParams(
+                tool_name="Bash",
+                tool_input={"command": "echo hi"},
+                tool_response="<private>hidden</private> output",
+            ),
         )
         assert "secret" not in chunk.user_prompt
         assert "visible prompt" in chunk.user_prompt
@@ -213,11 +208,13 @@ class TestBuildChunkFromToolUse:
             project="proj",
             chunk_index=0,
             user_prompt="test",
-            tool_name="Bash",
-            tool_input={"command": "echo hi"},
-            tool_response="boom",
-            is_error=True,
-            ai_response="a" * 600,
+            params=ToolUseParams(
+                tool_name="Bash",
+                tool_input={"command": "echo hi"},
+                tool_response="boom",
+                is_error=True,
+                ai_response="a" * 600,
+            ),
         )
         assert chunk.execution_status == "failure"
         assert chunk.tool_error == "boom"
@@ -231,10 +228,12 @@ class TestBuildChunkFromToolUse:
             project="proj",
             chunk_index=0,
             user_prompt="test",
-            tool_name="Bash",
-            tool_input={"command": "false"},
-            tool_response=None,
-            is_error=True,
+            params=ToolUseParams(
+                tool_name="Bash",
+                tool_input={"command": "false"},
+                tool_response=None,
+                is_error=True,
+            ),
         )
         assert chunk.execution_status == "failure"
         assert chunk.tool_error is None
@@ -245,10 +244,12 @@ class TestBuildChunkFromToolUse:
             project="proj",
             chunk_index=0,
             user_prompt="test",
-            tool_name="Bash",
-            tool_input={"command": "cat big_file"},
-            tool_response="x" * 5000,
-            chunk_max_length=2000,
+            params=ToolUseParams(
+                tool_name="Bash",
+                tool_input={"command": "cat big_file"},
+                tool_response="x" * 5000,
+                chunk_max_length=2000,
+            ),
         )
         assert len(chunk.content) <= 2000
 
@@ -261,18 +262,22 @@ class TestBuildChunkFromToolUse:
             project="proj",
             chunk_index=0,
             user_prompt="test",
-            tool_name="Edit",
-            tool_input={"file_path": "/c.py", "old_string": "foo", "new_string": "bar"},
-            tool_response=long_resp,
+            params=ToolUseParams(
+                tool_name="Edit",
+                tool_input={"file_path": "/c.py", "old_string": "foo", "new_string": "bar"},
+                tool_response=long_resp,
+            ),
         )
         bash_chunk = build_chunk_from_tool_use(
             session_id="s1",
             project="proj",
             chunk_index=0,
             user_prompt="test",
-            tool_name="Bash",
-            tool_input={"command": "cat big"},
-            tool_response=long_resp,
+            params=ToolUseParams(
+                tool_name="Bash",
+                tool_input={"command": "cat big"},
+                tool_response=long_resp,
+            ),
         )
         # input_summary（[Edit] /c.py (foo → ...)）は保持しつつ response は大幅短縮
         assert "/c.py" in edit_chunk.content
@@ -293,8 +298,8 @@ class TestChunkAccumulator:
             user_prompt="fix stuff",
             chunk_index=0,
         )
-        acc.add_tool_use("Read", {"file_path": "/a.py"}, "content of a")
-        acc.add_tool_use("Edit", {"file_path": "/a.py", "old_string": "x", "new_string": "y"}, "ok")
+        acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/a.py"}, tool_response="content of a"))
+        acc.add_tool_use(ToolUseParams(tool_name="Edit", tool_input={"file_path": "/a.py", "old_string": "x", "new_string": "y"}, tool_response="ok"))
 
         chunk = acc.to_chunk()
         assert chunk.tool_names == ["Read", "Edit"]
@@ -308,8 +313,8 @@ class TestChunkAccumulator:
             user_prompt="test",
             chunk_index=0,
         )
-        acc.add_tool_use("Read", {"file_path": "/a.py"}, "ok")
-        acc.add_tool_use("Read", {"file_path": "/b.py"}, "ok")
+        acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/a.py"}, tool_response="ok"))
+        acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/b.py"}, tool_response="ok"))
         chunk = acc.to_chunk()
         assert chunk.tool_names == ["Read"]
 
@@ -320,8 +325,8 @@ class TestChunkAccumulator:
             user_prompt="test",
             chunk_index=0,
         )
-        acc.add_tool_use("Read", {"file_path": "/a.py"}, "ok")
-        acc.add_tool_use("Read", {"file_path": "/a.py"}, "ok again")
+        acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/a.py"}, tool_response="ok"))
+        acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/a.py"}, tool_response="ok again"))
         chunk = acc.to_chunk()
         assert chunk.files_read.count("/a.py") == 1
 
@@ -332,9 +337,9 @@ class TestChunkAccumulator:
             user_prompt="test",
             chunk_index=0,
         )
-        acc.add_tool_use("Read", {"file_path": "/a.py"}, "x" * 1000, chunk_max_length=500)
+        acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/a.py"}, tool_response="x" * 1000, chunk_max_length=500))
         # 最初のツール使用がすでに500を超えるが、_content_parts が空なら追加される
-        acc.add_tool_use("Read", {"file_path": "/b.py"}, "y" * 1000, chunk_max_length=500)
+        acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/b.py"}, tool_response="y" * 1000, chunk_max_length=500))
         # 2つ目は容量超過で追加されない
         chunk = acc.to_chunk()
         assert "/b.py" not in chunk.files_read or len(chunk.content) <= 2000

@@ -113,7 +113,7 @@ def handle_observe(
     log: Any,
 ) -> None:
     """PostToolUse: ツール使用をチャンクとして保存"""
-    from deepblue.mem.chunker import build_chunk_from_tool_use
+    from deepblue.mem.chunker import ToolUseParams, build_chunk_from_tool_use
 
     session_id = str(stdin_data.get("session_id", "") or "")
     project = get_project(stdin_data)
@@ -125,15 +125,18 @@ def handle_observe(
 
     try:
         with open_db(settings) as db:
+            params = ToolUseParams(
+                tool_name=tool_name,
+                tool_input=tool_input,
+                tool_response=str(tool_response) if tool_response else None,
+                chunk_max_length=settings.chunk_max_length,
+            )
             chunk = build_chunk_from_tool_use(
                 session_id=session_id,
                 project=project,
                 chunk_index=0,  # store_chunk が MAX+1 で自動採番するため不要
                 user_prompt=user_prompt,
-                tool_name=tool_name,
-                tool_input=tool_input,
-                tool_response=str(tool_response) if tool_response else None,
-                chunk_max_length=settings.chunk_max_length,
+                params=params,
             )
             db.store_chunk(chunk)
     except Exception as e:
