@@ -34,6 +34,8 @@ AUTHOR_URL="https://github.com/${AUTHOR_NAME}"
 REPO_URL="https://github.com/${AUTHOR_NAME}/${PLUGIN_NAME}"
 
 mapfile -t FILES_TO_DELETE < <(jq -r '.files_to_delete // [] | .[]' "${CONFIG_FILE}")
+LICENSE_NAME="$(jq -r '.license // empty' "${CONFIG_FILE}")"
+REMOVE_AUTHORS="$(jq -r '.remove_authors // false' "${CONFIG_FILE}")"
 
 echo "=================================================="
 echo "  ${FROM_PLUGIN_NAME} → ${PLUGIN_NAME}"
@@ -87,10 +89,32 @@ if [[ "${DRY_RUN}" == true ]]; then
   echo "    ${FROM_PLUGIN_NAME} (残余)        → ${PLUGIN_NAME}"
   echo "    ${FROM_PLUGIN_NAME_UPPER} (残余)  → ${PLUGIN_NAME_UPPER}"
   echo ""
+  if [[ -n "${LICENSE_NAME}" ]]; then
+    echo "  ライセンスファイル・ライセンス名:"
+    if [[ -f "${SCRIPT_DIR}/change-repository-license" ]]; then
+      echo "    scripts/change-repository-license → LICENSE"
+    fi
+    echo "    ライセンス名: ${LICENSE_NAME}"
+    echo "    更新対象: .claude-plugin/marketplace.json, plugins/${PLUGIN_NAME}/.claude-plugin/plugin.json, plugins/${PLUGIN_NAME}/pyproject.toml"
+    echo ""
+  fi
+  if [[ "${REMOVE_AUTHORS}" == "true" ]]; then
+    echo "  著者情報削除 (remove_authors=true):"
+    echo "    plugins/${PLUGIN_NAME}/.claude-plugin/plugin.json: author フィールドを削除"
+    echo "    plugins/${PLUGIN_NAME}/pyproject.toml: authors セクションを削除"
+    echo "    .claude-plugin/marketplace.json: owner は仕様上必須のため削除しません"
+    echo ""
+  fi
   echo "  除外: scripts/change-repository.sh と scripts/change-repository-config.json は置換対象外"
   echo ""
   echo "[dry-run] 実際の変換は --dry-run なしで実行してください"
   exit 0
+fi
+
+# ライセンスファイルの内容を削除前に読み込む（scripts/ が files_to_delete に含まれるため）
+LICENSE_CONTENT=""
+if [[ -f "${SCRIPT_DIR}/change-repository-license" ]]; then
+  LICENSE_CONTENT="$(cat "${SCRIPT_DIR}/change-repository-license")"
 fi
 
 # git ステータス確認
@@ -125,6 +149,15 @@ else
     fi
   done
   shopt -u globstar nullglob
+fi
+
+echo ""
+echo "Step 1.5: ライセンスファイルを配置中..."
+if [[ -n "${LICENSE_CONTENT}" ]]; then
+  printf '%s\n' "${LICENSE_CONTENT}" > "${REPO_DIR}/LICENSE"
+  echo "  配置: LICENSE"
+else
+  echo "  スキップ（scripts/change-repository-license が見つかりません）"
 fi
 
 echo ""
@@ -221,6 +254,47 @@ else
     -e "s|${FROM_PLUGIN_NAME}|${PLUGIN_NAME}|g" \
     -e "s|${FROM_PLUGIN_NAME_UPPER}|${PLUGIN_NAME_UPPER}|g" \
     "${TARGET_FILES[@]}"
+fi
+
+MARKETPLACE_JSON="${REPO_DIR}/.claude-plugin/marketplace.json"
+PLUGIN_JSON="${REPO_DIR}/plugins/${PLUGIN_NAME}/.claude-plugin/plugin.json"
+PYPROJECT_TOML="${REPO_DIR}/plugins/${PLUGIN_NAME}/pyproject.toml"
+
+if [[ -n "${LICENSE_NAME}" ]]; then
+  echo "  ライセンス名..."
+  if [[ -f "${MARKETPLACE_JSON}" ]]; then
+    jq --arg l "${LICENSE_NAME}" '.plugins[].license = $l' "${MARKETPLACE_JSON}" \
+      > "${MARKETPLACE_JSON}.tmp" && mv "${MARKETPLACE_JSON}.tmp" "${MARKETPLACE_JSON}"
+  fi
+  if [[ -f "${PLUGIN_JSON}" ]]; then
+    jq --arg l "${LICENSE_NAME}" '.license = $l' "${PLUGIN_JSON}" \
+      > "${PLUGIN_JSON}.tmp" && mv "${PLUGIN_JSON}.tmp" "${PLUGIN_JSON}"
+  fi
+  if [[ -f "${PYPROJECT_TOML}" ]]; then
+    sed "${SED_INPLACE[@]}" \
+      -E "s|^license = \{ text = \"[^\"]*\" \}|license = { text = \"${LICENSE_NAME}\" }|" \
+      "${PYPROJECT_TOML}"
+  fi
+fi
+
+if [[ "${REMOVE_AUTHORS}" == "true" ]]; then
+  echo "  著者情報削除..."
+  if [[ -f "${PLUGIN_JSON}" ]]; then
+    jq 'del(.author)' "${PLUGIN_JSON}" \
+      > "${PLUGIN_JSON}.tmp" && mv "${PLUGIN_JSON}.tmp" "${PLUGIN_JSON}"
+  fi
+  if [[ -f "${PYPROJECT_TOML}" ]]; then
+    python3 -c "
+import re, sys
+path = sys.argv[1]
+with open(path) as f:
+    content = f.read()
+content = re.sub(r'authors = \[[^\]]*\]\n', '', content, flags=re.DOTALL)
+with open(path, 'w') as f:
+    f.write(content)
+" "${PYPROJECT_TOML}"
+  fi
+  echo "  ※ marketplace.json の owner は仕様上必須のため削除しません"
 fi
 
 echo ""

@@ -3,6 +3,8 @@
   "from_author_name": "aokumablue",
   "plugin_name": "hogeplugin",
   "author_name": "hogename",
+  "license": "MIT",
+  "remove_authors": true,
   "files_to_delete": [
     "plugins/deepblue/tests/",
     "scripts/",
