@@ -209,31 +209,30 @@ def _make_skill_run() -> MemItemRun:
     )
 
 
-def test_to_json_and_get_conn_modes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_to_json_serializes_correctly() -> None:
+    """_to_json が None / list / dict を正しくシリアライズする。"""
     assert _to_json(None) is None
     assert _to_json(["a", "b"]) == '["a", "b"]'
     assert _to_json({"k": "v"}) == '{"k": "v"}'
 
+
+def test_get_conn_uses_pool_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """psycopg_pool が利用可能な場合は ConnectionPool.getconn() を使う。"""
     pool_conn = FakeConn()
     pool_mod = ModuleType("psycopg_pool")
 
     class ConnectionPool:
         def __init__(self, url: str, kwargs: dict, min_size: int, max_size: int) -> None:
             self.url = url
-            self.kwargs = kwargs
-            self.min_size = min_size
-            self.max_size = max_size
-            self.getconn_calls = 0
 
         def getconn(self) -> FakeConn:
-            self.getconn_calls += 1
             return pool_conn
 
         def putconn(self, conn: FakeConn) -> None:  # noqa: ANN001
-            self.putconn_calls = conn
+            pass
 
         def close(self) -> None:
-            self.closed = True
+            pass
 
     pool_mod.ConnectionPool = ConnectionPool
     monkeypatch.setitem(sys.modules, "psycopg_pool", pool_mod)
@@ -242,6 +241,9 @@ def test_to_json_and_get_conn_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     db_pool = PgDatabase("postgres://example", use_pool=True)
     assert db_pool._get_conn() is pool_conn
 
+
+def test_get_conn_falls_back_to_direct_connect_when_pool_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """psycopg_pool が ConnectionPool を持たない場合は psycopg.connect() に fallback する。"""
     fallback_conn = FakeConn()
     psycopg_mod = ModuleType("psycopg")
     psycopg_mod.connect = lambda url, passfile=None: fallback_conn  # type: ignore[assignment]
@@ -577,6 +579,75 @@ def test_search_with_origin_user_exclusion(monkeypatch: pytest.MonkeyPatch) -> N
     assert "origin_user <>" in cursor.executed[0][0]
 
 
+def test_team_search_passes_exclude_origin_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """team_search が exclude_origin_user を fts_search/vec_search に渡す。"""
+    fts_calls: list = []
+    vec_calls: list = []
+    db = PgDatabase("postgres://example", use_pool=False)
+    monkeypatch.setattr(
+        db, "fts_search",
+        lambda query, limit=20, *, exclude_origin_user=None: (
+            fts_calls.append(exclude_origin_user) or []
+        ),
+    )
+    monkeypatch.setattr(
+        db, "vec_search",
+        lambda embedding, limit=20, *, exclude_origin_user=None: (
+            vec_calls.append(exclude_origin_user) or []
+        ),
+    )
+
+    db.team_search("q", [0.1, 0.2], limit=3, exclude_origin_user="me")
+    assert fts_calls == ["me"]
+    assert vec_calls == ["me"]
+
+
+def test_vec_search_puts_conn_on_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """vec_search が例外を送出しても _put_conn が必ず呼ばれる。"""
+    class BoomCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def execute(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise RuntimeError("vec boom")
+
+    put_calls: list = []
+    conn = FakeConn(BoomCursor())
+    db = PgDatabase("postgres://example", use_pool=False)
+    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_put_conn", lambda c: put_calls.append(c))
+
+    with pytest.raises(RuntimeError, match="vec boom"):
+        db.vec_search([0.1, 0.2])
+    assert put_calls == [conn]
+
+
+def test_fts_search_puts_conn_on_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """fts_search が例外を送出しても _put_conn が必ず呼ばれる。"""
+    class BoomCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def execute(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise RuntimeError("fts boom")
+
+    put_calls: list = []
+    conn = FakeConn(BoomCursor())
+    db = PgDatabase("postgres://example", use_pool=False)
+    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_put_conn", lambda c: put_calls.append(c))
+
+    with pytest.raises(RuntimeError, match="fts boom"):
+        db.fts_search("hello")
+    assert put_calls == [conn]
+
+
 def test_query_methods_raise_and_rollback(monkeypatch: pytest.MonkeyPatch) -> None:
     cases = [
         lambda db: db.upsert_chunk(_make_chunk(), "user"),
@@ -629,6 +700,28 @@ def test_fetch_chunks_by_ids_parses_rows(monkeypatch: pytest.MonkeyPatch) -> Non
     assert rows["chunk-1"]["tool_names"] == ["Edit"]
     assert rows["chunk-1"]["files_read"] == ["file.py"]
     assert rows["chunk-1"]["files_modified"] == []
+
+
+def test_fetch_chunks_by_ids_empty_returns_empty_dict() -> None:
+    """空入力は DB アクセスなしで空 dict を返す。"""
+    db = PgDatabase("postgres://example", use_pool=False)
+    assert db.fetch_chunks_by_ids([]) == {}
+    assert db.fetch_chunks_by_ids(set()) == {}
+
+
+def test_fetch_chunks_by_ids_null_epoch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """created_at_epoch が NULL (None) の行は 0 として返す。"""
+    cursor = FakeCursor(
+        fetchall_result=[
+            ("chunk-null", "origin", "content", "prompt", "proj", None, [], [], [])
+        ]
+    )
+    conn = FakeConn(cursor)
+    db = PgDatabase("postgres://example", use_pool=False)
+    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+
+    rows = db.fetch_chunks_by_ids(["chunk-null"])
+    assert rows["chunk-null"]["created_at_epoch"] == 0
 
 
 class TestEnsureSsl:
@@ -796,30 +889,20 @@ class TestTestConnectionProbeCache:
         assert call_count == 2
 
     def test_success_clears_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """成功時はキャッシュをクリアして以降も毎回テストを行う。"""
-        call_count = 0
+        """失敗キャッシュが TTL 切れの後に成功すると _probe_cache が None になる。"""
+        import time
 
-        class CountingCursor(FakeCursor):
-            def __init__(self) -> None:
-                super().__init__(fetchone_result=(1,))
-
-            def execute(self, sql: str, params=None) -> None:  # noqa: ANN001
-                nonlocal call_count
-                call_count += 1
-
-        conn = FakeConn(CountingCursor())
+        conn = FakeConn(FakeCursor(fetchone_result=(1,)))
         db = PgDatabase("postgres://example", use_pool=False)
         monkeypatch.setattr(db, "_get_conn", lambda: conn)
         monkeypatch.setattr(db, "_put_conn", lambda c: None)
 
-        # 失敗キャッシュを事前に設定
-        import time
-        db._probe_cache = (False, time.monotonic())
+        # TTL 切れの失敗キャッシュを設定（cached_at を十分古くする）
+        db._probe_cache = (False, time.monotonic() - db._PROBE_TTL - 1)
 
-        # 成功するよう cursor を差し替え（キャッシュは失敗なので試行は行われない）
-        # ただし TTL 内なのでキャッシュを使う → False を返す
-        assert db.test_connection() is False
-        assert call_count == 0
+        # TTL 切れなので接続試行 → 成功 → キャッシュがクリアされる
+        assert db.test_connection() is True
+        assert db._probe_cache is None
 
     def test_success_when_no_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """初回成功時はキャッシュなしで True を返しキャッシュも None のまま。"""

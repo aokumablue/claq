@@ -88,6 +88,19 @@ class TestShouldSync:
 
         assert should_sync(mock_settings) is False
 
+    def test_returns_true_just_after_retry_backoff_expires(self, mock_settings):
+        """リトライバックオフ（5分）満了直後は True を返す。"""
+        import time
+        from deepblue.mem.sync import _MIN_RETRY_INTERVAL
+
+        now = time.time()
+        mock_settings.sync.last_synced_at = now - 169 * 60 * 60
+        mock_settings.sync.last_sync_success = False
+        # バックオフ期間を 1 秒超過
+        mock_settings.sync.last_sync_attempt_at = now - _MIN_RETRY_INTERVAL - 1
+
+        assert should_sync(mock_settings) is True
+
 
 class TestSyncToPostgres:
     """sync_to_postgres 関数のテスト"""
@@ -294,6 +307,43 @@ class TestSyncResult:
         assert result.sessions == 5
         assert result.success is False
         assert result.error == "Test error"
+
+
+class TestUpsertWithOrigin:
+    """_upsert_with_origin の非破壊性テスト"""
+
+    def test_does_not_mutate_original(self):
+        """元インスタンスの origin_user は変更されない。"""
+        from deepblue.mem.sync import _upsert_with_origin
+
+        orig = Instinct(
+            origin_user="original_user",
+            instinct_id="i1",
+            scope="global",
+            confidence=0.9,
+            content="content",
+            created_at_epoch=1000,
+            updated_at_epoch=1000,
+        )
+        result = _upsert_with_origin([orig], "new_user")
+        assert orig.origin_user == "original_user"
+        assert result[0].origin_user == "new_user"
+        assert result[0] is not orig
+
+    def test_returns_new_instances_for_all_items(self):
+        """全アイテムが新しいインスタンスとして返される。"""
+        from deepblue.mem.sync import _upsert_with_origin
+
+        items = [
+            Instinct(
+                origin_user=f"user{i}", instinct_id=f"i{i}", scope="global",
+                confidence=0.8, content="c", created_at_epoch=1000, updated_at_epoch=1000,
+            )
+            for i in range(3)
+        ]
+        result = _upsert_with_origin(items, "replaced")
+        assert all(r.origin_user == "replaced" for r in result)
+        assert all(r is not orig for r, orig in zip(result, items))
 
 
 class TestSyncToPostgresDetailed:
@@ -869,14 +919,99 @@ class TestSyncEmbeddings:
         assert pg.embeddings[0][1][1] == pytest.approx(0.2)
 
 
+    def test_skips_non_4byte_multiple_embeddings(self):
+        """4バイト倍数でないバイト列はスキップされる（破損データ対策）。"""
+
+        class FakePgDb:
+            def __init__(self) -> None:
+                self.embeddings = None
+
+            def upsert_embeddings_batch(self, embeddings):  # noqa: ANN001
+                self.embeddings = embeddings
+                return len(embeddings)
+
+        class FakeConn:
+            def execute(self, sql: str, params=None):  # noqa: ANN001
+                # 5 バイト（4の倍数でない）→ スキップ対象
+                return SimpleNamespace(fetchall=lambda: [("c1", b"\x00\x01\x02\x03\x04")])
+
+        class FakeSQLiteDb:
+            def __init__(self) -> None:
+                self.conn = FakeConn()
+
+        pg = FakePgDb()
+        count = _sync_embeddings(FakeSQLiteDb(), pg, [MemoryChunk("s", "p", 0, "c", [], [], [], "", 1, id="c1")])
+        assert count == 0
+        assert pg.embeddings is None or pg.embeddings == []
+
+
 class TestSyncHelpers:
     """内部ヘルパーの分岐テスト"""
+
+    def test_begin_immediate_transaction_rolls_back_on_exception(self, tmp_path):
+        """begin_immediate_transaction 内で例外が発生するとロールバックされる。"""
+        db = Database(tmp_path / "test.db")
+        db.conn.execute("CREATE TABLE test_tbl (val TEXT)")
+        db.conn.commit()
+
+        with pytest.raises(ValueError, match="boom"):
+            with db.begin_immediate_transaction() as conn:
+                conn.execute("INSERT INTO test_tbl VALUES ('x')")
+                raise ValueError("boom")
+
+        count = db.conn.execute("SELECT COUNT(*) FROM test_tbl").fetchone()[0]
+        assert count == 0
+        db.close()
+
+    def test_begin_immediate_transaction_commits_on_success(self, tmp_path):
+        """begin_immediate_transaction が正常終了するとコミットされる。"""
+        db = Database(tmp_path / "test.db")
+        db.conn.execute("CREATE TABLE test_tbl (val TEXT)")
+        db.conn.commit()
+
+        with db.begin_immediate_transaction() as conn:
+            conn.execute("INSERT INTO test_tbl VALUES ('y')")
+
+        count = db.conn.execute("SELECT COUNT(*) FROM test_tbl").fetchone()[0]
+        assert count == 1
+        db.close()
+
+    def test_dry_run_counts_embeddings_path(self, tmp_path, monkeypatch):
+        """_dry_run_counts が embeddings カウントを結果に反映する。"""
+        from deepblue.mem.sync import _dry_run_counts
+
+        db = Database(tmp_path / "test.db")
+        monkeypatch.setattr("deepblue.mem.sync._count_pending_embeddings", lambda conn, ids: 42)
+
+        result = _dry_run_counts(db)
+        assert result.embeddings == 42
+        db.close()
 
     def test_count_pending_rows_returns_zero_for_empty_table(self, tmp_path):
         db = Database(tmp_path / "empty-sync.db")
         from deepblue.mem.sync import _count_pending_rows
 
         assert _count_pending_rows(db.conn, "memory_chunks") == 0
+        db.close()
+
+    def test_claim_pending_rows_raises_for_invalid_table(self, tmp_path):
+        """テーブル名が許可リスト外なら ValueError を送出する。"""
+        from deepblue.mem.sync import ClaimConfig, _claim_pending_rows, _row_to_chunk
+
+        db = Database(tmp_path / "test.db")
+        cfg = ClaimConfig(table="evil_table", order_by="created_at_epoch", synced_at="x", row_factory=_row_to_chunk)
+        with pytest.raises(ValueError, match="Invalid table"):
+            _claim_pending_rows(db.conn, cfg)
+        db.close()
+
+    def test_claim_pending_rows_raises_for_invalid_order_by(self, tmp_path):
+        """order_by が許可リスト外なら ValueError を送出する。"""
+        from deepblue.mem.sync import ClaimConfig, _claim_pending_rows, _row_to_chunk
+
+        db = Database(tmp_path / "test.db")
+        cfg = ClaimConfig(table="memory_chunks", order_by="evil_col; DROP TABLE", synced_at="x", row_factory=_row_to_chunk)
+        with pytest.raises(ValueError, match="Invalid order_by column"):
+            _claim_pending_rows(db.conn, cfg)
         db.close()
 
     def test_count_pending_embeddings_handles_empty_and_operational_error(self):

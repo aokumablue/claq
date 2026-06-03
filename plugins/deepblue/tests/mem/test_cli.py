@@ -609,3 +609,37 @@ class TestMainExitCode:
         with redirect_stdout(stdout):
             result = cli.main()
         assert result == 0
+
+    def test_benign_command_exception_returns_0_without_stderr(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """BENIGN コマンド（session-init 等）のハンドラ例外時は exit_code=0 かつ stderr 出力なし。"""
+        import deepblue.mem.settings as settings_mod
+        monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
+        monkeypatch.setattr(sys, "argv", ["python", "session-init"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
+        monkeypatch.setattr(
+            cli, "_run_normal_command", lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("benign failure"))
+        )
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            result = cli.main()
+        assert result == 0
+        assert stderr.getvalue() == ""
+
+    def test_normal_command_exception_writes_to_stderr(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """通常コマンドのハンドラ例外時は exit_code=1 かつ stderr にメッセージを出力する。"""
+        import deepblue.mem.settings as settings_mod
+        monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
+        monkeypatch.setattr(sys, "argv", ["python", "import"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
+        monkeypatch.setattr(
+            cli, "_run_normal_command", lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("import failure"))
+        )
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            result = cli.main()
+        assert result == 1
+        assert "import failure" in stderr.getvalue()
