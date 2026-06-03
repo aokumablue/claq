@@ -181,7 +181,7 @@ class PgDatabase:
             self._probe_cache = (False, time.monotonic())
             return False
         finally:
-            if conn:
+            if conn is not None:
                 self._put_conn(conn)
 
         # 成功時はキャッシュを無効化して以降も毎回テストする

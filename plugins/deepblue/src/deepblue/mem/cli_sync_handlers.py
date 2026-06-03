@@ -43,6 +43,10 @@ def handle_sync(settings, stdin_data: dict[str, Any]) -> None:
             "instincts": result.instincts,
             "adrs": result.adrs,
             "events": result.events,
+            "embeddings": result.embeddings,
+            "interaction_logs": result.interaction_logs,
+            "project_profiles": result.project_profiles,
+            "skill_runs": result.skill_runs,
         },
     }
     print(json.dumps(output, ensure_ascii=False))

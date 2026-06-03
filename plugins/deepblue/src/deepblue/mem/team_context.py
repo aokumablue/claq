@@ -108,7 +108,7 @@ def _select_within_budget(chunks: list[dict], max_tokens: int) -> list[dict]:
     for chunk in chunks:
         entry = _format_chunk(chunk)
         if len(entry) > budget:
-            break
+            continue
         selected.append(chunk)
         budget -= len(entry)
     return selected

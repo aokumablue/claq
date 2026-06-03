@@ -556,7 +556,7 @@ class TestMainExitCode:
     """main() が例外発生時に exit_code=1 を返すことを確認する。"""
 
     def test_settings_load_failure_returns_0_for_session_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """SESSION_START コマンドで設定失敗時はフック継続のため exit_code=0 を返す。"""
+        """SESSION_START コマンドで設定失敗時はフック継続のため exit_code=0 を返す（stderr 出力なし）。"""
         monkeypatch.setattr(sys, "argv", ["python", "context"])
         monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
         monkeypatch.setattr(
@@ -566,7 +566,7 @@ class TestMainExitCode:
         with redirect_stderr(stderr):
             result = cli.main()
         assert result == 0
-        assert "設定/ログ初期化失敗" in stderr.getvalue()
+        assert stderr.getvalue() == ""
 
     def test_settings_load_failure_returns_1_for_normal_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """通常コマンドで設定失敗時は exit_code=1 を返す。"""

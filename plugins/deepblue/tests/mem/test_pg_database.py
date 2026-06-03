@@ -353,8 +353,8 @@ def test_test_connection_get_conn_raises(monkeypatch: pytest.MonkeyPatch) -> Non
     assert db.test_connection() is False
 
 
-def test_test_connection_falsy_conn_skips_putconn(monkeypatch: pytest.MonkeyPatch) -> None:
-    """conn が falsy でも成功時は putconn をスキップして True を返す。"""
+def test_test_connection_falsy_conn_calls_putconn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """conn が falsy（__bool__==False）でも is not None チェックで putconn を呼ぶ。"""
 
     class FalsyConn(FakeConn):
         def __bool__(self) -> bool:
@@ -366,7 +366,7 @@ def test_test_connection_falsy_conn_skips_putconn(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(db, "_get_conn", lambda: conn)
     monkeypatch.setattr(db, "_put_conn", lambda current: put_calls.append(current))
     assert db.test_connection() is True
-    assert put_calls == []
+    assert put_calls == [conn]
 
 
 def test_upsert_and_batch_methods(monkeypatch: pytest.MonkeyPatch) -> None:

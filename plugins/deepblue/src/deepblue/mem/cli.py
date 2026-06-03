@@ -35,6 +35,10 @@ log = _get_logger("CLI")
 _SESSION_START_COMMANDS: frozenset[str] = frozenset(
     {"setup", "context", "record-project-profile", "team-context"}
 )
+# フックから呼ばれるが失敗しても exit_code=0 を維持すべきコマンド（非0 を返すとフックエラーになるため）。
+_BENIGN_COMMANDS: frozenset[str] = frozenset(
+    {"session-init", "team-session-init", "record-interaction", "sync-check"}
+)
 _CommandHandler = Callable[[Settings, dict[str, Any]], str | None]
 
 
@@ -115,11 +119,12 @@ def main() -> int:
     # フックが非 0 を返すとセッション全体がエラー扱いになるため。
     exit_code = 0
     settings: Settings | None = None
+    _silent = command in _SESSION_START_COMMANDS or command in _BENIGN_COMMANDS
     try:
         settings = _load_settings_or_raise()
     except Exception as e:
-        print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
-        if command not in _SESSION_START_COMMANDS:
+        if not _silent:
+            print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
             exit_code = 1
     else:
         try:
@@ -129,7 +134,8 @@ def main() -> int:
                 exit_code = _run_normal_command(command, settings, stdin_data)
         except Exception as e:
             log.error("コマンド %s 失敗: %s", command, e)
-            if command not in _SESSION_START_COMMANDS:
+            if not _silent:
+                print(f"コマンド {command} 失敗: {e}", file=sys.stderr)
                 exit_code = 1
     finally:
         if command in _SESSION_START_COMMANDS:
