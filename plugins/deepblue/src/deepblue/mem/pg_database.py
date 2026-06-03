@@ -76,8 +76,8 @@ def _ensure_ssl(url: str) -> str:
                 " sslmode=verify-full を推奨します。"
             )
         return url
-    # sslmode 未指定 → require を付与
-    qs["sslmode"] = ["require"]
+    # sslmode 未指定 → ループバック接続は disable、それ以外は require
+    qs["sslmode"] = ["disable" if _is_loopback(url) else "require"]
     new_query = urlencode(qs, doseq=True)
     new_parsed = parsed._replace(query=new_query)
     return urlunparse(new_parsed)

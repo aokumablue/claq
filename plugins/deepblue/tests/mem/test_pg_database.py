@@ -691,10 +691,10 @@ class TestEnsureSsl:
         result = _ensure_ssl(url)
         assert "sslmode=disable" in result
 
-    def test_localhost_no_sslmode_adds_require(self) -> None:
-        """localhost でも sslmode 未指定なら sslmode=require を付与する。"""
+    def test_localhost_no_sslmode_adds_disable(self) -> None:
+        """localhost で sslmode 未指定なら sslmode=disable を付与する（SSL非対応ローカルDB対応）。"""
         result = _ensure_ssl("postgresql://user@localhost/db")
-        assert "sslmode=require" in result
+        assert "sslmode=disable" in result
 
     def test_remote_host_disable_warns(self, caplog: pytest.LogCaptureFixture) -> None:
         """リモートホストの sslmode=disable は値を維持しつつ警告する。"""
