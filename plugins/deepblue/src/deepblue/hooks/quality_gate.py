@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -342,7 +343,19 @@ def _resolve_timeout(step: dict[str, Any]) -> float:
         return 30.0
 
 
-def _execute_step_command(command: list[str], raw_input: str, cwd: Path, env: dict[str, str], timeout: float, name: str) -> bool:
+@dataclass(frozen=True)
+class _StepCmd:
+    """_execute_step_command のコマンド実行パラメータ。"""
+
+    command: list[str]
+    raw_input: str
+    cwd: Path
+    env: dict[str, str]
+    timeout: float
+    name: str
+
+
+def _execute_step_command(step_cmd: _StepCmd) -> bool:
     """コマンドをサブプロセスで実行し、stderr を転送して成否を返す。
 
     Args:
@@ -358,25 +371,25 @@ def _execute_step_command(command: list[str], raw_input: str, cwd: Path, env: di
     """
     try:
         result = subprocess.run(
-            command,
-            input=raw_input,
+            step_cmd.command,
+            input=step_cmd.raw_input,
             text=True,
             capture_output=True,
-            cwd=str(cwd),
-            env=env,
-            timeout=timeout,
+            cwd=str(step_cmd.cwd),
+            env=step_cmd.env,
+            timeout=step_cmd.timeout,
             check=False,
         )
     except OSError as err:
-        log(f"[QualityGate] step skipped ({name}): {err}")
+        log(f"[QualityGate] step skipped ({step_cmd.name}): {err}")
         return False
     except subprocess.TimeoutExpired:
-        log(f"[QualityGate] step timed out ({name}): {timeout:g}s")
+        log(f"[QualityGate] step timed out ({step_cmd.name}): {step_cmd.timeout:g}s")
         return False
     if result.stderr:
         write_stderr(result.stderr)
     if result.returncode != 0:
-        log(f"[QualityGate] step failed ({name}): exit code {result.returncode}")
+        log(f"[QualityGate] step failed ({step_cmd.name}): exit code {result.returncode}")
     return True
 
 
@@ -420,7 +433,14 @@ def run_step(
 
     timeout = _resolve_timeout(step)
     name = str(step.get("name") or step.get("module") or command[0])
-    return _execute_step_command(command, raw_input, cwd, env, timeout, name)
+    return _execute_step_command(_StepCmd(
+        command=command,
+        raw_input=raw_input,
+        cwd=cwd,
+        env=env,
+        timeout=timeout,
+        name=name,
+    ))
 
 
 def exec_command(command: str, args: list[str], cwd: str | Path | None = None) -> dict[str, Any]:
