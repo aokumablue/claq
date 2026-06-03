@@ -76,13 +76,15 @@ def test_improve_description_writes_transcript_without_rewrite(tmp_path: Path, m
     )
 
     description = imp.improve_description(
-        skill_name="sample-skill",
-        skill_content="skill content",
-        current_description="current description",
-        eval_results=eval_results,
-        history=history,
+        imp.ImproveContext(
+            skill_name="sample-skill",
+            skill_content="skill content",
+            current_description="current description",
+            eval_results=eval_results,
+            history=history,
+            test_results={"summary": {"passed": 1, "total": 1}},
+        ),
         model="sonnet",
-        test_results={"summary": {"passed": 1, "total": 1}},
         log_dir=log_dir,
         iteration=7,
     )
@@ -114,11 +116,13 @@ def test_improve_description_rewrites_when_description_is_too_long(tmp_path: Pat
     monkeypatch.setattr(imp, "_call_claude", lambda prompt, model, timeout=300: next(calls))
 
     description = imp.improve_description(
-        skill_name="sample-skill",
-        skill_content="skill content",
-        current_description="current description",
-        eval_results={"summary": {"passed": 0, "total": 1}, "results": []},
-        history=[],
+        imp.ImproveContext(
+            skill_name="sample-skill",
+            skill_content="skill content",
+            current_description="current description",
+            eval_results={"summary": {"passed": 0, "total": 1}, "results": []},
+            history=[],
+        ),
         model="sonnet",
         log_dir=log_dir,
         iteration=8,
@@ -166,8 +170,9 @@ def test_main_generates_updated_history(tmp_path: Path, monkeypatch: pytest.Monk
 
     seen = {}
 
-    def fake_improve_description(**kwargs):
-        seen.update(kwargs)
+    def fake_improve_description(ctx, model, **kwargs):
+        seen["ctx"] = ctx
+        seen["model"] = model
         return "new description"
 
     def fake_parse_skill_md(path):
@@ -197,8 +202,8 @@ def test_main_generates_updated_history(tmp_path: Path, monkeypatch: pytest.Monk
     captured = capsys.readouterr()
     output = json.loads(captured.out)
 
-    assert seen["skill_name"] == "sample-skill"
-    assert seen["current_description"] == "old description"
+    assert seen["ctx"].skill_name == "sample-skill"
+    assert seen["ctx"].current_description == "old description"
     assert seen["model"] == "sonnet"
     assert "現在の説明: old description" in captured.err
     assert output["description"] == "new description"

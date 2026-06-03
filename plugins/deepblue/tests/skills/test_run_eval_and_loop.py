@@ -617,7 +617,7 @@ def test_run_loop_improves_description_and_chooses_best_test_score(tmp_path: Pat
     monkeypatch.setattr(
         run_loop,
         "improve_description",
-        lambda **kwargs: improved.append(kwargs["current_description"]) or "improved desc",
+        lambda ctx, **kwargs: improved.append(ctx.current_description) or "improved desc",
     )
 
     result = run_loop.run_loop(
@@ -929,7 +929,7 @@ def test_run_loop_verbose_improvement_and_all_passed(
         }
 
     monkeypatch.setattr(run_loop, "run_eval", fake_run_eval)
-    monkeypatch.setattr(run_loop, "improve_description", lambda **kwargs: "improved desc")
+    monkeypatch.setattr(run_loop, "improve_description", lambda ctx, **kwargs: "improved desc")
 
     result = run_loop.run_loop(
         eval_set=[{"query": "train", "should_trigger": True}, {"query": "test", "should_trigger": False}],

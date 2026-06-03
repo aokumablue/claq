@@ -9,10 +9,23 @@ import argparse
 import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from .cli_runner import run_cli
 from .utils import parse_skill_md
+
+
+@dataclass(frozen=True)
+class ImproveContext:
+    """説明文改善に必要なコンテキスト（スキル名・内容・現在の説明・eval結果・履歴）。"""
+
+    skill_name: str
+    skill_content: str
+    current_description: str
+    eval_results: dict
+    history: list
+    test_results: dict | None = None
 
 
 def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
@@ -59,28 +72,21 @@ def _build_prompt_suffix(skill_content: str) -> str:
 新しい説明文以外は出力しないでください。<new_description> タグの中だけに入れて返してください。"""
 
 
-def _build_improve_prompt(
-    skill_name: str,
-    skill_content: str,
-    current_description: str,
-    eval_results: dict,
-    history: list[dict],
-    test_results: dict | None,
-) -> str:
+def _build_improve_prompt(ctx: ImproveContext) -> str:
     """説明文改善用プロンプトを組み立てて返す。"""
-    failed_triggers = [r for r in eval_results["results"] if r["should_trigger"] and not r["pass"]]
-    false_triggers = [r for r in eval_results["results"] if not r["should_trigger"] and not r["pass"]]
-    train_score = f"{eval_results['summary']['passed']}/{eval_results['summary']['total']}"
-    if test_results:
-        test_score = f"{test_results['summary']['passed']}/{test_results['summary']['total']}"
+    failed_triggers = [r for r in ctx.eval_results["results"] if r["should_trigger"] and not r["pass"]]
+    false_triggers = [r for r in ctx.eval_results["results"] if not r["should_trigger"] and not r["pass"]]
+    train_score = f"{ctx.eval_results['summary']['passed']}/{ctx.eval_results['summary']['total']}"
+    if ctx.test_results:
+        test_score = f"{ctx.test_results['summary']['passed']}/{ctx.test_results['summary']['total']}"
         scores_summary = f"学習用: {train_score}, 検証用: {test_score}"
     else:
         scores_summary = f"学習用: {train_score}"
     prompt = (
-        f'あなたは "{skill_name}" というスキルの説明文を最適化しています。'
+        f'あなたは "{ctx.skill_name}" というスキルの説明文を最適化しています。'
         "スキルはプロンプトに少し似ていますが、段階的に情報を開示する仕組みです。"
         'この説明は "available_skills" 一覧に表示されます。\n\n'
-        f'現在の説明:\n<current_description>\n"{current_description}"\n</current_description>\n\n'
+        f'現在の説明:\n<current_description>\n"{ctx.current_description}"\n</current_description>\n\n'
         f"現在のスコア ({scores_summary}):\n<scores_summary>\n"
     )
     if failed_triggers:
@@ -93,9 +99,9 @@ def _build_improve_prompt(
         for r in false_triggers:
             prompt += f'  - "{r["query"]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
         prompt += "\n"
-    if history:
-        prompt += _format_history_section(history)
-    return prompt + _build_prompt_suffix(skill_content)
+    if ctx.history:
+        prompt += _format_history_section(ctx.history)
+    return prompt + _build_prompt_suffix(ctx.skill_content)
 
 
 def _format_history_section(history: list[dict]) -> str:
@@ -152,20 +158,13 @@ def _shorten_description_if_needed(
 
 
 def improve_description(
-    skill_name: str,
-    skill_content: str,
-    current_description: str,
-    eval_results: dict,
-    history: list[dict],
+    ctx: ImproveContext,
     model: str,
-    test_results: dict | None = None,
     log_dir: Path | None = None,
     iteration: int | None = None,
 ) -> str:
     """eval 結果に基づいて Claude に説明文の改善を依頼する。"""
-    prompt = _build_improve_prompt(
-        skill_name, skill_content, current_description, eval_results, history, test_results
-    )
+    prompt = _build_improve_prompt(ctx)
     text = _call_claude(prompt, model)
 
     match = re.search(r"<new_description>(.*?)</new_description>", text, re.DOTALL)
@@ -241,11 +240,13 @@ def main():
         print(f"スコア: {eval_results['summary']['passed']}/{eval_results['summary']['total']}", file=sys.stderr)
 
     new_description = improve_description(
-        skill_name=name,
-        skill_content=content,
-        current_description=current_description,
-        eval_results=eval_results,
-        history=history,
+        ImproveContext(
+            skill_name=name,
+            skill_content=content,
+            current_description=current_description,
+            eval_results=eval_results,
+            history=history,
+        ),
         model=args.model,
     )
 

@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .grader import ComplianceResult
 from .parser import ComplianceSpec, ObservationEvent
 from .scenario_generator import Scenario
+
+
+@dataclass(frozen=True)
+class _SummaryMeta:
+    """_append_summary_section のメタ情報（スキルパス・仕様・結果・閾値・推奨ステップ）。"""
+
+    skill_path: Path
+    spec: ComplianceSpec
+    results: list
+    overall: float
+    threshold: float
+    promote_steps: list
 
 
 def generate_report(
@@ -34,7 +47,14 @@ def generate_report(
     lines.append(f"Generated: {now}")
     lines.append("")
 
-    _append_summary_section(lines, skill_path, spec, results, overall, threshold, promote_steps)
+    _append_summary_section(lines, _SummaryMeta(
+        skill_path=skill_path,
+        spec=spec,
+        results=results,
+        overall=overall,
+        threshold=threshold,
+        promote_steps=promote_steps,
+    ))
     _append_behavioral_sequence_section(lines, spec)
     _append_scenario_results_section(lines, spec, results)
 
@@ -49,28 +69,20 @@ def generate_report(
     return "\n".join(lines)
 
 
-def _append_summary_section(
-    lines: list[str],
-    skill_path: Path,
-    spec: ComplianceSpec,
-    results: list[tuple[str, ComplianceResult, list[ObservationEvent]]],
-    overall: float,
-    threshold: float,
-    promote_steps: list[str],
-) -> None:
+def _append_summary_section(lines: list[str], meta: _SummaryMeta) -> None:
     """サマリーセクションを lines に追記する。"""
     lines.append("## Summary")
     lines.append("")
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
-    lines.append(f"| Skill | `{skill_path}` |")
-    lines.append(f"| Spec | {spec.id} |")
-    lines.append(f"| Scenarios | {len(results)} |")
-    lines.append(f"| Overall Compliance | {overall:.0%} |")
-    lines.append(f"| Threshold | {threshold:.0%} |")
+    lines.append(f"| Skill | `{meta.skill_path}` |")
+    lines.append(f"| Spec | {meta.spec.id} |")
+    lines.append(f"| Scenarios | {len(meta.results)} |")
+    lines.append(f"| Overall Compliance | {meta.overall:.0%} |")
+    lines.append(f"| Threshold | {meta.threshold:.0%} |")
 
-    if promote_steps:
-        step_names = ", ".join(promote_steps)
+    if meta.promote_steps:
+        step_names = ", ".join(meta.promote_steps)
         lines.append(f"| Recommendation | **Promote {step_names} to hooks** |")
     else:
         lines.append("| Recommendation | All steps above threshold — no hook promotion needed |")

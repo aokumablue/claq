@@ -267,12 +267,15 @@ def _run_improve(
     if loop_cfg.verbose:
         print("\n説明を改善しています...", file=sys.stderr)
     t0 = time.time()
+    from .improve_description import ImproveContext
     new_desc = improve_description(
-        skill_name=skill_ctx.name,
-        skill_content=skill_ctx.content,
-        current_description=params.current_description,
-        eval_results=params.train_results,
-        history=params.blinded_history,
+        ImproveContext(
+            skill_name=skill_ctx.name,
+            skill_content=skill_ctx.content,
+            current_description=params.current_description,
+            eval_results=params.train_results,
+            history=params.blinded_history,
+        ),
         model=loop_cfg.eval_config.model,
         log_dir=loop_cfg.log_dir,
         iteration=params.iteration,
