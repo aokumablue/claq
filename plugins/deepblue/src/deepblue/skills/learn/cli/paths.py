@@ -195,7 +195,7 @@ class _SsrfSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     バイパスを防ぐ。
     """
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: PLR0913
         """リダイレクト先を検証してから親クラスの処理に委譲する。"""
         _assert_safe_url(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)

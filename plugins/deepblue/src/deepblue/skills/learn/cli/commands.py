@@ -7,6 +7,7 @@
 
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -239,10 +240,17 @@ def _collect_stale_paths(
     return stale_paths
 
 
+@dataclass(frozen=True)
+class ImportContext:
+    """インポート操作の共通コンテキスト（取り込み元・スコープ・プロジェクト）。"""
+
+    source: str
+    target_scope: str
+    project: dict
+
+
 def _write_import_file(
-    source: str,
-    target_scope: str,
-    project: dict,
+    ctx: ImportContext,
     output_dir: Path,
     to_add: list,
     to_update: list,
@@ -251,21 +259,21 @@ def _write_import_file(
     """新ファイルを書き込み、古い stale ファイルを削除して保存先パスを返す。"""
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if target_scope == "global":
+    if ctx.target_scope == "global":
         scope_root = _pkg.GLOBAL_INSTINCTS_DIR.resolve()
     else:
         scope_root = (
-            (project["project_dir"] / "instincts").resolve()
-            if project["id"] != "global"
+            (ctx.project["project_dir"] / "instincts").resolve()
+            if ctx.project["id"] != "global"
             else _pkg.GLOBAL_INSTINCTS_DIR.resolve()
         )
     stale_paths = _collect_stale_paths(to_update, existing, scope_root)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    source_name = Path(source).stem if not source.startswith("http") else "web-import"
+    source_name = Path(ctx.source).stem if not ctx.source.startswith("http") else "web-import"
     output_file = output_dir / f"{source_name}-{timestamp}.yaml"
 
-    output_content = _build_import_content(source, target_scope, project, to_add + to_update)
+    output_content = _build_import_content(ctx.source, ctx.target_scope, ctx.project, to_add + to_update)
     output_file.write_text(output_content, encoding="utf-8")
 
     for stale_path in stale_paths:
@@ -304,8 +312,7 @@ def _apply_min_confidence(to_add: list, to_update: list, args) -> tuple[list, li
 
 
 def _confirm_and_write_import(
-    args, source: str, target_scope: str, project: dict,
-    to_add: list, to_update: list, existing: list
+    args, ctx: ImportContext, to_add: list, to_update: list, existing: list
 ) -> int:
     """確認を取り、インポートファイルを書き込んで結果を出力する。"""
     if args.dry_run:
@@ -322,11 +329,11 @@ def _confirm_and_write_import(
             print("Cancelled.")
             return 0
 
-    output_dir = _pkg.GLOBAL_INHERITED_DIR if target_scope == "global" else project["instincts_inherited"]
-    output_file = _write_import_file(source, target_scope, project, output_dir, to_add, to_update, existing)
+    output_dir = _pkg.GLOBAL_INHERITED_DIR if ctx.target_scope == "global" else ctx.project["instincts_inherited"]
+    output_file = _write_import_file(ctx, output_dir, to_add, to_update, existing)
 
     print("\nImport complete!")
-    print(f"   Scope: {target_scope}")
+    print(f"   Scope: {ctx.target_scope}")
     print(f"   Added: {len(to_add)}")
     print(f"   Updated: {len(to_update)}")
     print(f"   Saved to: {output_file}")
@@ -359,7 +366,8 @@ def cmd_import(args) -> int:
     to_add, to_update = _apply_min_confidence(to_add, to_update, args)
     _print_import_summary(to_add, to_update, duplicates)
 
-    return _confirm_and_write_import(args, source, target_scope, project, to_add, to_update, existing)
+    ctx = ImportContext(source=source, target_scope=target_scope, project=project)
+    return _confirm_and_write_import(args, ctx, to_add, to_update, existing)
 
 
 # ─────────────────────────────────────────────
