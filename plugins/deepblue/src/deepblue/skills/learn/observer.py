@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from deepblue.lib.core_utils import get_deepblue_dir
@@ -19,6 +20,46 @@ from deepblue.skills.learn.cli import detect_project
 from deepblue.skills.learn.observer_idle import _get_idle_seconds
 
 _CONFIG_DIR = get_deepblue_dir()
+
+
+@dataclass(frozen=True)
+class ObserverProject:
+    """observer が対象とするプロジェクトの文脈情報をまとめた parameter object。
+
+    Attributes:
+        project_dir: プロジェクトストレージディレクトリ（deepblue 管理下）。
+        project_root: ユーザーのプロジェクトルートディレクトリ（git リポジトリ直下など）。
+        project_name: 表示用プロジェクト名。
+        project_id: プロジェクトの一意識別子。
+        observations_file: 観測ログ JSONL ファイルのパス。
+        instincts_dir: インスティンクトファイルの書き出し先ディレクトリ。
+    """
+
+    project_dir: Path
+    project_root: Path
+    project_name: str
+    project_id: str
+    observations_file: Path
+    instincts_dir: Path
+
+
+@dataclass(frozen=True)
+class ObserverConfig:
+    """observer の動作設定をまとめた parameter object。
+
+    Attributes:
+        log_file: ログ出力先ファイルのパス。
+        min_observations: 解析を実行するために必要な最小観測数。
+        interval_seconds: 解析サイクルのインターバル秒数（クールダウン兼用）。
+        pid_file: observer プロセスの PID を記録するファイルのパス。
+    """
+
+    log_file: Path
+    min_observations: int
+    interval_seconds: int
+    pid_file: Path | None = None
+
+
 _PROMPT_PATTERN = re.compile(
     os.environ.get(
         "CLV2_OBSERVER_PROMPT_PATTERN",
@@ -438,66 +479,56 @@ def _archive_observations(observations_file: Path, project_dir: Path) -> None:
 
 
 def _analyze_observations(
-    project_dir: Path,
-    project_root: Path,
-    project_name: str,
-    project_id: str,
-    observations_file: Path,
-    instincts_dir: Path,
-    log_file: Path,
-    min_observations: int,
-    analysis_cooldown: int,
+    project: ObserverProject,
+    config: ObserverConfig,
 ) -> None:
     """観測ログを claude CLI に渡してインスティンクト候補を抽出・書き出す。
 
     閾値・ガード・プラットフォーム条件を満たす場合のみ解析を実行し、
     完了後は観測ファイルをアーカイブする。
+
+    Args:
+        project: 解析対象プロジェクトの文脈情報。
+        config: observer の動作設定。
     """
-    if not observations_file.exists():
+    if not project.observations_file.exists():
         return
 
     try:
-        obs_count = len(observations_file.read_text(encoding="utf-8").splitlines())
+        obs_count = len(project.observations_file.read_text(encoding="utf-8").splitlines())
     except OSError:
         return
 
-    if obs_count < min_observations:
+    if obs_count < config.min_observations:
         return
 
-    _append_log(log_file, f"Analyzing {obs_count} observations for project {project_name}...")
+    _append_log(config.log_file, f"Analyzing {obs_count} observations for project {project.project_name}...")
 
     if os.environ.get("CLV2_IS_WINDOWS", "false") == "true" and os.environ.get("DEEPBLUE_OBSERVER_ALLOW_WINDOWS", "false") != "true":
-        _append_log(log_file, "Skipping claude analysis on Windows due to known non-interactive hang issue (#295). Set DEEPBLUE_OBSERVER_ALLOW_WINDOWS=true to override.")
+        _append_log(config.log_file, "Skipping claude analysis on Windows due to known non-interactive hang issue (#295). Set DEEPBLUE_OBSERVER_ALLOW_WINDOWS=true to override.")
         return
 
     if shutil.which("claude") is None:
-        _append_log(log_file, "claude CLI not found, skipping analysis")
+        _append_log(config.log_file, "claude CLI not found, skipping analysis")
         return
 
-    if not _guardian_allows(project_dir, project_root, log_file):
-        _append_log(log_file, "Observer cycle skipped by session-guardian")
+    if not _guardian_allows(project.project_dir, project.project_root, config.log_file):
+        _append_log(config.log_file, "Observer cycle skipped by session-guardian")
         return
 
-    analysis_file = _prepare_analysis_file(observations_file, project_dir / ".observer-tmp")
+    analysis_file = _prepare_analysis_file(project.observations_file, project.project_dir / ".observer-tmp")
     if analysis_file is None:
         return
 
     analysis_relpath = f".observer-tmp/{analysis_file.name}"
-    prompt = _build_analysis_prompt(analysis_relpath, project_name, project_id, instincts_dir)
-    _run_claude_analysis(prompt, project_dir, log_file, analysis_file)
-    _archive_observations(observations_file, project_dir)
+    prompt = _build_analysis_prompt(analysis_relpath, project.project_name, project.project_id, project.instincts_dir)
+    _run_claude_analysis(prompt, project.project_dir, config.log_file, analysis_file)
+    _archive_observations(project.observations_file, project.project_dir)
 
 
 def _loop_once(
-    project_dir: Path,
-    project_root: Path,
-    project_name: str,
-    project_id: str,
-    observations_file: Path,
-    instincts_dir: Path,
-    log_file: Path,
-    min_observations: int,
-    analysis_cooldown: int,
+    project: ObserverProject,
+    config: ObserverConfig,
     wake_event: threading.Event,
     state: dict,
 ) -> None:
@@ -505,39 +536,41 @@ def _loop_once(
 
     解析中フラグやクールダウンを確認し、条件を満たす場合のみ
     _analyze_observations を呼び出して状態を更新する。
+
+    Args:
+        project: 解析対象プロジェクトの文脈情報。
+        config: observer の動作設定。
+        wake_event: SIGUSR1 による早期起床を通知するイベント。
+        state: ループ内の解析状態（analyzing フラグ、last_analysis_epoch）。
     """
     if state.get("analyzing"):
-        _append_log(log_file, "Analysis already in progress, skipping signal")
+        _append_log(config.log_file, "Analysis already in progress, skipping signal")
         return
 
     now_epoch = int(time.time())
     elapsed = now_epoch - int(state.get("last_analysis_epoch", 0))
-    if elapsed < analysis_cooldown:
-        _append_log(log_file, f"Analysis cooldown active ({elapsed}s < {analysis_cooldown}s), skipping")
+    if elapsed < config.interval_seconds:
+        _append_log(config.log_file, f"Analysis cooldown active ({elapsed}s < {config.interval_seconds}s), skipping")
         return
 
     state["analyzing"] = True
     try:
-        _analyze_observations(
-            project_dir,
-            project_root,
-            project_name,
-            project_id,
-            observations_file,
-            instincts_dir,
-            log_file,
-            min_observations,
-            analysis_cooldown,
-        )
+        _analyze_observations(project, config)
         state["last_analysis_epoch"] = int(time.time())
     finally:
         state["analyzing"] = False
 
 
-def _run_loop(project_dir: Path, project_root: Path, log_file: Path, pid_file: Path, observations_file: Path, instincts_dir: Path, project_name: str, project_id: str, min_observations: int, interval_seconds: int) -> int:
-    """observer のメインループ。一定間隔または SIGUSR1 受信で解析を回す。"""
-    pid_file.write_text(str(os.getpid()), encoding="utf-8")
-    _append_log(log_file, f"Observer started for {project_name} (PID: {os.getpid()})")
+def _run_loop(project: ObserverProject, config: ObserverConfig) -> int:
+    """observer のメインループ。一定間隔または SIGUSR1 受信で解析を回す。
+
+    Args:
+        project: 解析対象プロジェクトの文脈情報。
+        config: pid_file を含む observer の動作設定。
+    """
+    assert config.pid_file is not None, "ObserverConfig.pid_file must be set for _run_loop"
+    config.pid_file.write_text(str(os.getpid()), encoding="utf-8")
+    _append_log(config.log_file, f"Observer started for {project.project_name} (PID: {os.getpid()})")
     _run_prune()
 
     wake_event = threading.Event()
@@ -552,24 +585,12 @@ def _run_loop(project_dir: Path, project_root: Path, log_file: Path, pid_file: P
         signal.signal(signal.SIGUSR1, _on_usr1)
 
     while True:
-        wake_event.wait(interval_seconds)
+        wake_event.wait(config.interval_seconds)
         usr1_fired = bool(state.pop("usr1_fired", False))
         wake_event.clear()
         if usr1_fired:
             continue
-        _loop_once(
-            project_dir,
-            project_root,
-            project_name,
-            project_id,
-            observations_file,
-            instincts_dir,
-            log_file,
-            min_observations,
-            interval_seconds,
-            wake_event,
-            state,
-        )
+        _loop_once(project, config, wake_event, state)
 
 
 def _build_observer_env(project: dict, project_dir: Path, pid_file: Path, log_file: Path, instincts_dir: Path) -> dict:
@@ -717,18 +738,21 @@ def _run_loop_action(project: dict, project_dir: Path, log_file: Path, pid_file:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     interval_seconds = int(os.environ.get("OBSERVER_INTERVAL_SECONDS", "300"))
     min_observations = int(os.environ.get("MIN_OBSERVATIONS", "20"))
-    return _run_loop(
-        project_dir,
-        Path(project["root"]),
-        log_file,
-        pid_file,
-        Path(project["observations_file"]),
-        instincts_dir,
-        str(project["name"]),
-        str(project["id"]),
-        min_observations,
-        interval_seconds,
+    obs_project = ObserverProject(
+        project_dir=project_dir,
+        project_root=Path(project["root"]),
+        project_name=str(project["name"]),
+        project_id=str(project["id"]),
+        observations_file=Path(project["observations_file"]),
+        instincts_dir=instincts_dir,
     )
+    obs_config = ObserverConfig(
+        log_file=log_file,
+        min_observations=min_observations,
+        interval_seconds=interval_seconds,
+        pid_file=pid_file,
+    )
+    return _run_loop(obs_project, obs_config)
 
 
 def main(argv: list[str] | None = None) -> int:
