@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from deepblue.mem.settings import TeamSettings
-from deepblue.mem.team_context import build_team_context
+from deepblue.mem.team_context import TeamSearchConfig, build_team_context
 
 
 @dataclass
@@ -85,8 +85,7 @@ def test_build_team_context_fts_mode_outputs_tag_and_header() -> None:
         pg,  # type: ignore[arg-type]
         query="x-picflow",
         exclude_origin_user="alice",
-        settings=TeamSettings(),
-        mode="fts",
+        config=TeamSearchConfig(settings=TeamSettings(), mode="fts"),
     )
 
     assert out.startswith("<team-context>")
@@ -104,8 +103,7 @@ def test_build_team_context_empty_query_returns_blank() -> None:
             pg,  # type: ignore[arg-type]
             query="   ",
             exclude_origin_user="me",
-            settings=TeamSettings(),
-            mode="fts",
+            config=TeamSearchConfig(settings=TeamSettings(), mode="fts"),
         )
         == ""
     )
@@ -118,8 +116,7 @@ def test_build_team_context_no_results_returns_blank() -> None:
             pg,  # type: ignore[arg-type]
             query="anything",
             exclude_origin_user="me",
-            settings=TeamSettings(),
-            mode="fts",
+            config=TeamSearchConfig(settings=TeamSettings(), mode="fts"),
         )
         == ""
     )
@@ -132,8 +129,7 @@ def test_build_team_context_missing_rows_returns_blank() -> None:
             pg,  # type: ignore[arg-type]
             query="anything",
             exclude_origin_user="me",
-            settings=TeamSettings(),
-            mode="fts",
+            config=TeamSearchConfig(settings=TeamSettings(), mode="fts"),
         )
         == ""
     )
@@ -146,8 +142,7 @@ def test_build_team_context_hybrid_requires_embedding_model() -> None:
         pg,  # type: ignore[arg-type]
         query="q",
         exclude_origin_user="me",
-        settings=TeamSettings(),
-        mode="hybrid",
+        config=TeamSearchConfig(settings=TeamSettings(), mode="hybrid"),
     )
     assert out != ""  # FTS フォールバックで結果あり
     assert "<team-context>" in out
@@ -173,9 +168,7 @@ def test_build_team_context_hybrid_uses_team_search(
         pg,  # type: ignore[arg-type]
         query="bug fix",
         exclude_origin_user="me",
-        settings=TeamSettings(),
-        mode="hybrid",
-        embedding_model="ruri",
+        config=TeamSearchConfig(settings=TeamSettings(), mode="hybrid", embedding_model="ruri"),
     )
 
     assert "team-knowledge" in out
@@ -195,8 +188,7 @@ def test_build_team_context_token_budget_truncates() -> None:
         pg,  # type: ignore[arg-type]
         query="q",
         exclude_origin_user="me",
-        settings=TeamSettings(max_tokens=200),  # ≒ 700 文字予算
-        mode="fts",
+        config=TeamSearchConfig(settings=TeamSettings(max_tokens=200), mode="fts"),
     )
 
     # 最低 1 件は入り、全 3 件が入りきらない（≒ 1500+ 文字）こと
@@ -211,8 +203,7 @@ def test_build_team_context_budget_too_small_returns_blank() -> None:
             pg,  # type: ignore[arg-type]
             query="q",
             exclude_origin_user="me",
-            settings=TeamSettings(max_tokens=1),
-            mode="fts",
+            config=TeamSearchConfig(settings=TeamSettings(max_tokens=1), mode="fts"),
         )
         == ""
     )
@@ -231,8 +222,7 @@ def test_build_team_context_fetch_exception_returns_blank(
         pg,  # type: ignore[arg-type]
         query="q",
         exclude_origin_user="me",
-        settings=TeamSettings(),
-        mode="fts",
+        config=TeamSearchConfig(settings=TeamSettings(), mode="fts"),
     )
     assert out == ""
 
@@ -250,8 +240,7 @@ def test_build_team_context_search_exception_returns_blank(
         pg,  # type: ignore[arg-type]
         query="q",
         exclude_origin_user="me",
-        settings=TeamSettings(),
-        mode="fts",
+        config=TeamSearchConfig(settings=TeamSettings(), mode="fts"),
     )
     assert out == ""
 

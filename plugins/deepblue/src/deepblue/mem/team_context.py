@@ -8,6 +8,7 @@ FTS のみの軽量モード（SessionStart 用）と、埋め込みを使うハ
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -18,25 +19,31 @@ from deepblue.mem.settings import TeamSettings
 log = _get_logger("TEAM_CONTEXT")
 
 
+@dataclass(frozen=True)
+class TeamSearchConfig:
+    """チーム検索の設定（モード・埋め込みモデル・TeamSettings）。"""
+
+    settings: TeamSettings
+    mode: Literal["fts", "hybrid"]
+    embedding_model: str | None = None
+
+
 def _search_ranked_chunks(
     pg: PgDatabase,
     query: str,
     exclude_origin_user: str,
-    *,
-    settings: TeamSettings,
-    mode: Literal["fts", "hybrid"],
-    embedding_model: str | None,
+    config: TeamSearchConfig,
 ) -> list[tuple[str, float]]:
     """モードに応じた検索を実行してランク付き chunk_id リストを返す。失敗時は []。"""
     try:
-        if mode == "hybrid":
-            if not embedding_model:
+        if config.mode == "hybrid":
+            if not config.embedding_model:
                 log.warning("hybrid モードには embedding_model が必要です。FTS フォールバック使用")
-                return pg.fts_search(query, limit=settings.chunk_limit, exclude_origin_user=exclude_origin_user)
+                return pg.fts_search(query, limit=config.settings.chunk_limit, exclude_origin_user=exclude_origin_user)
             import deepblue.mem.embedding as _emb
-            embedding = _emb.embed_query(query, embedding_model)
-            return pg.team_search(query, embedding, limit=settings.chunk_limit, exclude_origin_user=exclude_origin_user)
-        return pg.fts_search(query, limit=settings.chunk_limit, exclude_origin_user=exclude_origin_user)
+            embedding = _emb.embed_query(query, config.embedding_model)
+            return pg.team_search(query, embedding, limit=config.settings.chunk_limit, exclude_origin_user=exclude_origin_user)
+        return pg.fts_search(query, limit=config.settings.chunk_limit, exclude_origin_user=exclude_origin_user)
     except Exception as e:
         log.warning("チーム検索失敗: %s", e)
         return []
@@ -59,10 +66,7 @@ def build_team_context(
     pg: PgDatabase,
     query: str,
     exclude_origin_user: str,
-    *,
-    settings: TeamSettings,
-    mode: Literal["fts", "hybrid"],
-    embedding_model: str | None = None,
+    config: TeamSearchConfig,
 ) -> str:
     """チーム共有チャンクから ``<team-context>`` 文字列を生成する。
 
@@ -70,9 +74,7 @@ def build_team_context(
         pg: 接続済みの :class:`PgDatabase` インスタンス。
         query: 検索クエリ文字列。
         exclude_origin_user: 除外する origin_user（通常は自分の git user.name）。
-        settings: ``TeamSettings``（``max_tokens`` / ``chunk_limit`` などを参照）。
-        mode: ``"fts"`` なら pg_trgm のみ、``"hybrid"`` なら FTS + ベクトル検索の RRF。
-        embedding_model: ``mode="hybrid"`` のときに使う埋め込みモデル名。
+        config: 検索モード・埋め込みモデル・TeamSettings を含む設定オブジェクト。
 
     Returns:
         生成された Markdown 文字列。該当チャンクが無い・クエリ空・エラー時は空文字列。
@@ -80,10 +82,7 @@ def build_team_context(
     if not query.strip():
         return ""
 
-    ranked = _search_ranked_chunks(
-        pg, query, exclude_origin_user,
-        settings=settings, mode=mode, embedding_model=embedding_model,
-    )
+    ranked = _search_ranked_chunks(pg, query, exclude_origin_user, config)
     if not ranked:
         return ""
 
@@ -91,7 +90,7 @@ def build_team_context(
     if not ordered_chunks:
         return ""
 
-    selected = _select_within_budget(ordered_chunks, settings.max_tokens)
+    selected = _select_within_budget(ordered_chunks, config.settings.max_tokens)
     if not selected:
         return ""
 

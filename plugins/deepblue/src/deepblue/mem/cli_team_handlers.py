@@ -30,7 +30,7 @@ def handle_team_context(
 
     try:
         from deepblue.mem.pg_database import PgDatabase
-        from deepblue.mem.team_context import build_team_context
+        from deepblue.mem.team_context import TeamSearchConfig, build_team_context
     except Exception as e:
         log.warning("team-context モジュール読み込み失敗: %s", e)
         return ""
@@ -46,8 +46,7 @@ def handle_team_context(
             pg,
             query=project,
             exclude_origin_user=exclude,
-            settings=settings.team,
-            mode="fts",
+            config=TeamSearchConfig(settings=settings.team, mode="fts"),
         )
     except Exception as e:
         log.warning("team-context 生成失敗: %s", e)
@@ -64,16 +63,18 @@ def _build_team_session_context(
     git_user: str,
 ) -> str:
     """PgDatabase を使ってチームコンテキスト文字列を生成して返す。失敗時は空文字列。"""
-    from deepblue.mem.team_context import build_team_context
+    from deepblue.mem.team_context import TeamSearchConfig, build_team_context
 
     exclude = git_user if settings.team.exclude_self else ""
     return build_team_context(
         pg,
         query=query,
         exclude_origin_user=exclude,
-        settings=settings.team,
-        mode="hybrid",
-        embedding_model=settings.embedding_model,
+        config=TeamSearchConfig(
+            settings=settings.team,
+            mode="hybrid",
+            embedding_model=settings.embedding_model,
+        ),
     )
 
 

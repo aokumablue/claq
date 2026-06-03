@@ -85,13 +85,13 @@ def test_team_context_prints_additional_context(
 
     captured_kwargs: dict = {}
 
-    def _fake_build(pg, *, query, exclude_origin_user, settings, mode, embedding_model=None):  # noqa: ANN001
+    def _fake_build(pg, query, exclude_origin_user, config):  # noqa: ANN001
         captured_kwargs.update(
             {
                 "query": query,
                 "exclude": exclude_origin_user,
-                "mode": mode,
-                "embedding_model": embedding_model,
+                "mode": config.mode,
+                "embedding_model": config.embedding_model,
             }
         )
         return "<team-context>hello</team-context>"
@@ -149,13 +149,13 @@ def test_team_session_init_fires_on_retrospective_keyword(
 
     captured: dict = {}
 
-    def _fake_build(pg, *, query, exclude_origin_user, settings, mode, embedding_model=None):  # noqa: ANN001
+    def _fake_build(pg, query, exclude_origin_user, config):  # noqa: ANN001
         captured.update(
             {
                 "query": query,
                 "exclude": exclude_origin_user,
-                "mode": mode,
-                "embedding_model": embedding_model,
+                "mode": config.mode,
+                "embedding_model": config.embedding_model,
             }
         )
         return "<team-context>history</team-context>"
@@ -194,7 +194,7 @@ def test_team_session_init_respects_exclude_self_false(
 
     captured: dict = {}
 
-    def _fake_build(pg, *, query, exclude_origin_user, settings, mode, embedding_model=None):  # noqa: ANN001
+    def _fake_build(pg, query, exclude_origin_user, config):  # noqa: ANN001
         captured["exclude"] = exclude_origin_user
         return "<team-context>x</team-context>"
 
