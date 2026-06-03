@@ -272,7 +272,7 @@ def _build_install_state_request(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def create_install_state(
+def create_install_state(  # noqa: PLR0913
     *,
     adapter: dict[str, Any],
     target_root: str,

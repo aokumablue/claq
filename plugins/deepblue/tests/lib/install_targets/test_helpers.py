@@ -9,6 +9,8 @@ import pytest
 from deepblue.lib.install_targets.install_target_helpers import (
     InstallTargetConfig,
     ManagedOperation,
+    PlanParams,
+    ScaffoldParams,
     ValidationIssue,
     build_validation_issue,
     create_install_target_adapter,
@@ -262,12 +264,12 @@ class TestInstallTargetAdapter:
     def test_create_scaffold_operation(self, home_config, tmp_path):
         """scaffold operation を作成できること。"""
         adapter = create_install_target_adapter(home_config)
-        op = adapter.create_scaffold_operation(
-            "mod-1",
-            "agents/test.md",
+        op = adapter.create_scaffold_operation(ScaffoldParams(
+            module_id="mod-1",
+            source_relative_path="agents/test.md",
             repo_root=str(tmp_path / "source"),
             home_dir=str(tmp_path / "home"),
-        )
+        ))
         assert op.module_id == "mod-1"
         assert op.source_relative_path == "agents/test.md"
         assert op.source_path == str(tmp_path / "source" / "agents/test.md")
@@ -280,10 +282,7 @@ class TestInstallTargetAdapter:
             {"id": "mod-1", "paths": ["a.md", "b.md"]},
             {"id": "mod-2", "paths": ["c.md"]},
         ]
-        ops = adapter.plan_operations(
-            modules=modules,
-            home_dir=str(tmp_path),
-        )
+        ops = adapter.plan_operations(PlanParams(modules=modules, home_dir=str(tmp_path)))
         assert len(ops) == 3
         assert ops[0].module_id == "mod-1"
         assert ops[2].module_id == "mod-2"
@@ -292,10 +291,7 @@ class TestInstallTargetAdapter:
         """単一モジュール向け operation を計画できること。"""
         adapter = create_install_target_adapter(home_config)
         module = {"id": "test", "paths": ["x.md", "y.md"]}
-        ops = adapter.plan_operations(
-            module=module,
-            home_dir=str(tmp_path),
-        )
+        ops = adapter.plan_operations(PlanParams(module=module, home_dir=str(tmp_path)))
         assert len(ops) == 2
 
     def test_validate_home_success(self, home_config, tmp_path):
@@ -328,7 +324,7 @@ class TestInstallTargetAdapter:
             plan_operations=plan_operations,
         )
         adapter = create_install_target_adapter(config)
-        ops = adapter.plan_operations(home_dir=str(tmp_path))
+        ops = adapter.plan_operations(PlanParams(home_dir=str(tmp_path)))
         assert ops[0].module_id == "x"
         assert called["adapter"] is adapter
 

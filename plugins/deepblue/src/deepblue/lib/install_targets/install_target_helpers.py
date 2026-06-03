@@ -136,7 +136,7 @@ class ManagedOperation:
         return result
 
 
-def create_managed_operation(
+def create_managed_operation(  # noqa: PLR0913
     *,
     kind: str = "copy-path",
     module_id: str | None = None,
@@ -176,6 +176,30 @@ def create_managed_operation(
         scaffold_only=scaffold_only,
         extra=extra,
     )
+
+
+@dataclass(frozen=True)
+class ScaffoldParams:
+    """create_scaffold_operation の位置・パス引数。"""
+
+    module_id: str
+    source_relative_path: str
+    source_root: str | None = None
+    repo_root: str | None = None
+    home_dir: str | None = None
+    project_root: str | None = None
+
+
+@dataclass(frozen=True)
+class PlanParams:
+    """plan_operations のオプション引数。"""
+
+    modules: list[dict] | None = None
+    module: dict | None = None
+    source_root: str | None = None
+    repo_root: str | None = None
+    home_dir: str | None = None
+    project_root: str | None = None
 
 
 @dataclass
@@ -272,30 +296,21 @@ class InstallTargetAdapter:
 
         return "preserve-relative-path"
 
-    def create_scaffold_operation(
-        self,
-        module_id: str,
-        source_relative_path: str,
-        *,
-        source_root: str | None = None,
-        repo_root: str | None = None,
-        home_dir: str | None = None,
-        project_root: str | None = None,
-    ) -> ManagedOperation:
+    def create_scaffold_operation(self, params: ScaffoldParams) -> ManagedOperation:
         """モジュールファイル用のスキャフォールド操作を作成する。"""
-        normalized = normalize_relative_path(source_relative_path)
-        root = source_root or repo_root
+        normalized = normalize_relative_path(params.source_relative_path)
+        root = params.source_root or params.repo_root
         source_path = str(Path(root) / normalized) if root else normalized
 
         return create_managed_operation(
-            module_id=module_id,
+            module_id=params.module_id,
             source_relative_path=normalized,
             source_path=source_path,
             destination_path=self.resolve_destination_path(
                 normalized,
-                home_dir=home_dir,
-                project_root=project_root,
-                repo_root=repo_root,
+                home_dir=params.home_dir,
+                project_root=params.project_root,
+                repo_root=params.repo_root,
             ),
             strategy=self.determine_strategy(normalized),
         )
@@ -314,49 +329,41 @@ class InstallTargetAdapter:
         if not isinstance(paths, list):
             return []
         return [
-            self.create_scaffold_operation(
-                mod.get("id", ""),
-                path,
+            self.create_scaffold_operation(ScaffoldParams(
+                module_id=mod.get("id", ""),
+                source_relative_path=path,
                 source_root=source_root,
                 repo_root=repo_root,
                 home_dir=home_dir,
                 project_root=project_root,
-            )
+            ))
             for path in paths
         ]
 
-    def plan_operations(
-        self,
-        *,
-        modules: list[dict] | None = None,
-        module: dict | None = None,
-        source_root: str | None = None,
-        repo_root: str | None = None,
-        home_dir: str | None = None,
-        project_root: str | None = None,
-    ) -> list[ManagedOperation]:
+    def plan_operations(self, params: PlanParams | None = None) -> list[ManagedOperation]:
         """指定モジュールの操作計画を立てる。"""
+        p = params or PlanParams()
         if self._config.plan_operations:
             return self._config.plan_operations(
-                modules=modules,
-                module=module,
-                source_root=source_root,
-                repo_root=repo_root,
-                home_dir=home_dir,
-                project_root=project_root,
+                modules=p.modules,
+                module=p.module,
+                source_root=p.source_root,
+                repo_root=p.repo_root,
+                home_dir=p.home_dir,
+                project_root=p.project_root,
                 adapter=self,
             )
 
-        kwargs = {"source_root": source_root, "repo_root": repo_root, "home_dir": home_dir, "project_root": project_root}
+        kwargs = {"source_root": p.source_root, "repo_root": p.repo_root, "home_dir": p.home_dir, "project_root": p.project_root}
 
-        if modules:
+        if p.modules:
             operations: list[ManagedOperation] = []
-            for mod in modules:
+            for mod in p.modules:
                 operations.extend(self._scaffold_module_paths(mod, **kwargs))
             return operations
 
-        if module:
-            return self._scaffold_module_paths(module, **kwargs)
+        if p.module:
+            return self._scaffold_module_paths(p.module, **kwargs)
 
         return []
 
