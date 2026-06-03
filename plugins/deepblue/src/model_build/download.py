@@ -25,7 +25,7 @@ _CHUNK_SIZE: int = 1024 * 1024  # 1 MB
 class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
     """リダイレクト先 URL を再検証するカスタムハンドラー。"""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]  # noqa: PLR0913
         """リダイレクト URL を _validate_url で再検証してから親クラスに委譲する。"""
         _validate_url(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)

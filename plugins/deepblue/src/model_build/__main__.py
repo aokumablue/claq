@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from model_build.quantize import DEFAULT_QUANT, QUANT_CHOICES
@@ -42,21 +43,26 @@ def _sha256(p: Path) -> str:
     return h.hexdigest()
 
 
-def _copy_artifacts_and_write_manifest(
-    args: argparse.Namespace,
-    build_cfg: dict,
-    quant: str,
-    raw_onnx: Path,
-    quant_onnx: Path,
-    output_dir: Path,
-) -> None:
+@dataclass(frozen=True)
+class _ArtifactParams:
+    """_copy_artifacts_and_write_manifest のビルド成果物パラメータ。"""
+
+    args: argparse.Namespace
+    build_cfg: dict
+    quant: str
+    raw_onnx: Path
+    quant_onnx: Path
+    output_dir: Path
+
+
+def _copy_artifacts_and_write_manifest(p: _ArtifactParams) -> None:
     """量子化済み ONNX・補助ファイルを出力先にコピーし、manifest.json を書き出す。"""
     import shutil
     from datetime import UTC, datetime
 
     from model_build import __version__
 
-    onnx_export_dir = raw_onnx.parent
+    onnx_export_dir = p.raw_onnx.parent
     tokenizer_json = onnx_export_dir / "tokenizer.json"
     config_json = onnx_export_dir / "config.json"
     if not tokenizer_json.exists():
@@ -64,20 +70,20 @@ def _copy_artifacts_and_write_manifest(
     if not config_json.exists():
         raise FileNotFoundError(f"config.json が見つかりません: {config_json}")
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    dst_onnx = output_dir / "model.onnx"
-    dst_tok = output_dir / "tokenizer.json"
-    dst_cfg = output_dir / "config.json"
-    shutil.copy2(quant_onnx, dst_onnx)
+    p.output_dir.mkdir(parents=True, exist_ok=True)
+    dst_onnx = p.output_dir / "model.onnx"
+    dst_tok = p.output_dir / "tokenizer.json"
+    dst_cfg = p.output_dir / "config.json"
+    shutil.copy2(p.quant_onnx, dst_onnx)
     shutil.copy2(tokenizer_json, dst_tok)
     shutil.copy2(config_json, dst_cfg)
 
     manifest = {
-        "model_name": args.model,
-        "hf_revision": args.revision,
-        "quantization": quant,
-        "embedding_dim": build_cfg["embedding_dim"],
-        "tokenizer_max_length": build_cfg["tokenizer_max_length"],
+        "model_name": p.args.model,
+        "hf_revision": p.args.revision,
+        "quantization": p.quant,
+        "embedding_dim": p.build_cfg["embedding_dim"],
+        "tokenizer_max_length": p.build_cfg["tokenizer_max_length"],
         "merged_sha256": _sha256(dst_onnx),
         "auxiliary_files": [
             {"name": "tokenizer.json", "sha256": _sha256(dst_tok)},
@@ -86,7 +92,7 @@ def _copy_artifacts_and_write_manifest(
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "tool_version": f"model_build/{__version__}",
     }
-    manifest_path = output_dir / "manifest.json"
+    manifest_path = p.output_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"[build] manifest: {manifest_path}", flush=True)
 
@@ -118,7 +124,10 @@ def _cmd_build(args: argparse.Namespace) -> None:
         quant_onnx = tmp_path / f"model_{quant}.onnx"
         quantize(raw_onnx, quant_onnx, quant, num_heads=build_cfg["num_heads"], hidden_size=build_cfg["hidden_size"])
 
-        _copy_artifacts_and_write_manifest(args, build_cfg, quant, raw_onnx, quant_onnx, output_dir)
+        _copy_artifacts_and_write_manifest(_ArtifactParams(
+            args=args, build_cfg=build_cfg, quant=quant,
+            raw_onnx=raw_onnx, quant_onnx=quant_onnx, output_dir=output_dir,
+        ))
 
     print("[build] complete", flush=True)
 
