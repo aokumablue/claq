@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from deepblue.lib.core_utils import get_git_user_name
@@ -20,6 +21,16 @@ if TYPE_CHECKING:
     OpenDbFn = Callable[[Settings], AbstractContextManager[Database]]
     GetProjectFn = Callable[[dict[str, Any]], str]
     EmbedFn = Callable[[list[str]], list[list[float]]]
+
+
+@dataclass(frozen=True)
+class SessionEndDeps:
+    """handle_session_end の外部依存（DB接続・埋め込み関数・ロガー・timeモジュール）。"""
+
+    open_db: OpenDbFn
+    embed_fn: EmbedFn
+    log: Any
+    time_module: Any = None
 
 
 def handle_context(
@@ -174,19 +185,16 @@ def _auto_compact_if_needed(
 def handle_session_end(
     settings: Settings,
     stdin_data: dict[str, Any],
-    *,
-    open_db: OpenDbFn,
-    embed_fn: EmbedFn,
-    log: Any,
-    time_module: Any = time,
+    deps: SessionEndDeps,
 ) -> None:
     """SessionEnd: 埋め込み一括生成 + FTS5 最適化"""
     from deepblue.mem.bridge import sync_session_to_observations
 
+    time_module = deps.time_module if deps.time_module is not None else time
     session_id = str(stdin_data.get("session_id", "") or "")
 
     try:
-        with open_db(settings) as db:
+        with deps.open_db(settings) as db:
             chunks = db.get_chunks_by_session(session_id)
             if not chunks:
                 return
@@ -196,26 +204,26 @@ def handle_session_end(
             # id を持つチャンクだけを対象にし、texts と chunk_ids のインデックスを一致させる。
             embeddable = [c for c in chunks if c.id is not None]
             texts = [redact(c.content) for c in embeddable]
-            embeddings = embed_fn(texts)
+            embeddings = deps.embed_fn(texts)
             chunk_ids = [c.id for c in embeddable]
             db.store_embeddings(chunk_ids, embeddings)
-            log.info("埋め込み保存: session=%s chunks=%d", session_id, len(chunk_ids))
+            deps.log.info("埋め込み保存: session=%s chunks=%d", session_id, len(chunk_ids))
 
             try:
                 db.conn.execute("INSERT INTO memory_chunks_fts(memory_chunks_fts) VALUES('optimize')")
                 db.conn.commit()
             except Exception as e:
-                log.warning("FTS5 最適化失敗: %s", e)
+                deps.log.warning("FTS5 最適化失敗: %s", e)
 
             try:
                 synced = sync_session_to_observations(db, session_id)
-                log.info("learn 同期: session=%s synced=%d", session_id, synced)
+                deps.log.info("learn 同期: session=%s synced=%d", session_id, synced)
             except Exception as e:
-                log.warning("learn 同期失敗: %s", e)
+                deps.log.warning("learn 同期失敗: %s", e)
 
-            _auto_compact_if_needed(db, settings, log=log, time_module=time_module)
+            _auto_compact_if_needed(db, settings, log=deps.log, time_module=time_module)
     except Exception as e:
-        log.warning("セッション終了失敗: %s", e)
+        deps.log.warning("セッション終了失敗: %s", e)
 
 
 def handle_compact(

@@ -7,11 +7,24 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from deepblue.mem.database import Database
 from deepblue.mem.settings import Settings
+
+
+@dataclass(frozen=True)
+class RecordEventParams:
+    """record_event のパラメータ（イベント種別・内容・ファイル情報・プロジェクト）。"""
+
+    event_type: str
+    content: str
+    user_prompt: str = ""
+    files_read: list[str] = field(default_factory=list)
+    files_modified: list[str] = field(default_factory=list)
+    project: str | None = None
 
 
 def search_similar_context(
@@ -52,38 +65,26 @@ def search_similar_context(
     return result.get("results", [])
 
 
-def record_event(
-    event_type: str,
-    content: str,
-    user_prompt: str = "",
-    files_read: list[str] | None = None,
-    files_modified: list[str] | None = None,
-    project: str | None = None,
-) -> dict[str, Any]:
+def record_event(params: RecordEventParams) -> dict[str, Any]:
     """イベントを明示的に記録する。
 
     Args:
-        event_type: イベント種別（"review", "plan", "audit", "tdd", etc.）
-        content: 記録する内容
-        user_prompt: 関連するユーザープロンプト
-        files_read: 読み取ったファイルのリスト
-        files_modified: 変更したファイルのリスト
-        project: プロジェクト名（省略時は現在のディレクトリ名）
+        params: イベント種別・内容・ファイル情報・プロジェクトを含む RecordEventParams。
 
     Returns:
         記録結果 {"success": bool, "chunk_id": int | None, "error": str | None}
     """
     input_data: dict[str, Any] = {
-        "event_type": event_type,
-        "content": content,
-        "user_prompt": user_prompt,
+        "event_type": params.event_type,
+        "content": params.content,
+        "user_prompt": params.user_prompt,
         "metadata": {
-            "files_read": files_read or [],
-            "files_modified": files_modified or [],
+            "files_read": params.files_read,
+            "files_modified": params.files_modified,
         },
     }
-    if project:
-        input_data["project"] = project
+    if params.project:
+        input_data["project"] = params.project
 
     return _run_mem_cli("record", input_data)
 

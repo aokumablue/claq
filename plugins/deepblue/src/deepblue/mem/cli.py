@@ -258,14 +258,13 @@ def _handle_observe(settings: Settings, stdin_data: dict) -> None:
 
 
 def _handle_session_end(settings: Settings, stdin_data: dict) -> None:
-    _session_handlers.handle_session_end(
-        settings,
-        stdin_data,
+    deps = _session_handlers.SessionEndDeps(
         open_db=_open_db,
         embed_fn=embed,
         log=log,
         time_module=time,
     )
+    _session_handlers.handle_session_end(settings, stdin_data, deps)
 
 
 def _handle_compact(settings: Settings) -> None:

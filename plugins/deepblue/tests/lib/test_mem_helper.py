@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from deepblue.lib.mem_helper import (
+    RecordEventParams,
     _truncate,
     format_context_for_prompt,
     get_project_stats,
@@ -74,9 +75,7 @@ class TestRecordEvent:
         mock_run.return_value = {"success": True, "chunk_id": 42}
 
         result = record_event(
-            event_type="review",
-            content="Code review completed",
-            user_prompt="review code",
+            RecordEventParams(event_type="review", content="Code review completed", user_prompt="review code"),
         )
 
         assert result["success"] is True
@@ -93,11 +92,13 @@ class TestRecordEvent:
         mock_run.return_value = {"success": True, "chunk_id": 43}
 
         record_event(
-            event_type="tdd",
-            content="Tests added",
-            files_read=["src/main.py"],
-            files_modified=["tests/test_main.py"],
-            project="myproject",
+            RecordEventParams(
+                event_type="tdd",
+                content="Tests added",
+                files_read=["src/main.py"],
+                files_modified=["tests/test_main.py"],
+                project="myproject",
+            ),
         )
 
         call_args = mock_run.call_args[0][1]

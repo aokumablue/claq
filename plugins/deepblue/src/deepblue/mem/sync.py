@@ -59,6 +59,17 @@ _ALLOWED_ORDER_BY_COLUMNS: frozenset[str] = frozenset({
     "last_updated_epoch",
 })
 
+@dataclass(frozen=True)
+class ClaimConfig:
+    """_claim_pending_rows の設定（テーブル・ソート列・同期タイムスタンプ・行ファクトリ）。"""
+
+    table: str
+    order_by: str
+    synced_at: str
+    row_factory: Callable[..., object]
+    batch_size: int = _SYNC_BATCH_SIZE
+
+
 _SYNC_TABLES: tuple[str, ...] = (
     "memory_chunks",
     "sessions",
@@ -96,32 +107,24 @@ def _count_pending_rows(conn: sqlite3.Connection, table: str) -> int:
     return int(row[0]) if row else 0
 
 
-def _claim_pending_rows[T](
-    conn: sqlite3.Connection,
-    table: str,
-    order_by: str,
-    synced_at: str,
-    row_factory: Callable[[sqlite3.Row], T],
-    *,
-    batch_size: int = _SYNC_BATCH_SIZE,
-) -> list[T]:
+def _claim_pending_rows[T](conn: sqlite3.Connection, cfg: ClaimConfig) -> list[T]:
     """未同期行を取得して synced_at を立てる（最大 batch_size 件）。"""
-    if table not in _SYNC_TABLES:
-        raise ValueError(f"Invalid table: {table}")
-    if order_by not in _ALLOWED_ORDER_BY_COLUMNS:
-        raise ValueError(f"Invalid order_by column: {order_by}")
+    if cfg.table not in _SYNC_TABLES:
+        raise ValueError(f"Invalid table: {cfg.table}")
+    if cfg.order_by not in _ALLOWED_ORDER_BY_COLUMNS:
+        raise ValueError(f"Invalid order_by column: {cfg.order_by}")
     rows = conn.execute(
-        f"SELECT * FROM {table} WHERE synced_at IS NULL ORDER BY {order_by} LIMIT ?",
-        (batch_size,),
+        f"SELECT * FROM {cfg.table} WHERE synced_at IS NULL ORDER BY {cfg.order_by} LIMIT ?",
+        (cfg.batch_size,),
     ).fetchall()
     if not rows:
         return []
 
     conn.executemany(
-        f"UPDATE {table} SET synced_at = ? WHERE id = ?",
-        [(synced_at, row["id"]) for row in rows],
+        f"UPDATE {cfg.table} SET synced_at = ? WHERE id = ?",
+        [(cfg.synced_at, row["id"]) for row in rows],
     )
-    return [row_factory(row) for row in rows]
+    return [cfg.row_factory(row) for row in rows]
 
 
 def _count_pending_embeddings(conn: sqlite3.Connection, chunk_ids: list[str]) -> int:
@@ -228,15 +231,18 @@ def _dry_run_counts(sqlite_db: Database) -> SyncResult:
 
 def _claim_all_pending(conn: sqlite3.Connection, sync_started_at: str) -> dict:
     """全テーブルの未同期行を一括で取得して synced_at を立てる。"""
+    def _cfg(table: str, order_by: str, row_factory: Callable[..., object]) -> ClaimConfig:
+        return ClaimConfig(table=table, order_by=order_by, synced_at=sync_started_at, row_factory=row_factory)
+
     return {
-        "chunks": _claim_pending_rows(conn, "memory_chunks", "created_at_epoch", sync_started_at, _row_to_chunk),
-        "sessions": _claim_pending_rows(conn, "sessions", "started_at_epoch", sync_started_at, _row_to_session),
-        "instincts": _claim_pending_rows(conn, "instincts", "created_at_epoch", sync_started_at, _row_to_instinct),
-        "adrs": _claim_pending_rows(conn, "adrs", "created_at_epoch", sync_started_at, _row_to_adr),
-        "events": _claim_pending_rows(conn, "event_logs", "created_at_epoch", sync_started_at, _row_to_event_log),
-        "interaction_logs": _claim_pending_rows(conn, "interaction_logs", "created_at_epoch", sync_started_at, _row_to_interaction_log),
-        "project_profiles": _claim_pending_rows(conn, "project_profiles", "last_updated_epoch", sync_started_at, _row_to_project_profile),
-        "skill_runs": _claim_pending_rows(conn, "mem_item_runs", "created_at_epoch", sync_started_at, _row_to_mem_item_run),
+        "chunks": _claim_pending_rows(conn, _cfg("memory_chunks", "created_at_epoch", _row_to_chunk)),
+        "sessions": _claim_pending_rows(conn, _cfg("sessions", "started_at_epoch", _row_to_session)),
+        "instincts": _claim_pending_rows(conn, _cfg("instincts", "created_at_epoch", _row_to_instinct)),
+        "adrs": _claim_pending_rows(conn, _cfg("adrs", "created_at_epoch", _row_to_adr)),
+        "events": _claim_pending_rows(conn, _cfg("event_logs", "created_at_epoch", _row_to_event_log)),
+        "interaction_logs": _claim_pending_rows(conn, _cfg("interaction_logs", "created_at_epoch", _row_to_interaction_log)),
+        "project_profiles": _claim_pending_rows(conn, _cfg("project_profiles", "last_updated_epoch", _row_to_project_profile)),
+        "skill_runs": _claim_pending_rows(conn, _cfg("mem_item_runs", "created_at_epoch", _row_to_mem_item_run)),
     }
 
 
