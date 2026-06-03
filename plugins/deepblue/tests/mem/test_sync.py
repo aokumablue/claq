@@ -117,6 +117,9 @@ class TestSyncToPostgres:
                 self.closed = True
                 self._real_db.close()
 
+            def begin_immediate_transaction(self):  # noqa: ANN201
+                return self._real_db.begin_immediate_transaction()
+
         class FakePgDb:
             def __init__(self) -> None:
                 self.closed = False
@@ -196,6 +199,9 @@ class TestSyncLocking:
             def close(self) -> None:
                 self.closed = True
                 self._real_db.close()
+
+            def begin_immediate_transaction(self):  # noqa: ANN201
+                return self._real_db.begin_immediate_transaction()
 
         class FakePgDb:
             def __init__(self) -> None:
@@ -442,6 +448,9 @@ class TestSyncToPostgresDetailed:
                 self.closed = True
                 self._real_db.close()
 
+            def begin_immediate_transaction(self):  # noqa: ANN201
+                return self._real_db.begin_immediate_transaction()
+
         class FakePgDb:
             def __init__(self) -> None:
                 self.closed = False
@@ -495,6 +504,9 @@ class TestSyncToPostgresDetailed:
             def close(self) -> None:
                 self.closed = True
                 self._real_db.close()
+
+            def begin_immediate_transaction(self):  # noqa: ANN201
+                return self._real_db.begin_immediate_transaction()
 
         class FakePgDb:
             def __init__(self) -> None:
@@ -657,6 +669,9 @@ class TestSyncToPostgresDetailed:
                 self.closed = True
                 self._real_db.close()
 
+            def begin_immediate_transaction(self):  # noqa: ANN201
+                return self._real_db.begin_immediate_transaction()
+
         class FakePgDb:
             def __init__(self) -> None:
                 self.closed = False
@@ -711,6 +726,9 @@ class TestSyncToPostgresDetailed:
                 self.closed = True
                 self._real_db.close()
 
+            def begin_immediate_transaction(self):  # noqa: ANN201
+                return self._real_db.begin_immediate_transaction()
+
         class FakePgDb:
             def __init__(self) -> None:
                 self.closed = False
@@ -754,6 +772,9 @@ class TestSyncToPostgresDetailed:
             def close(self) -> None:
                 self.closed = True
                 self._real_db.close()
+
+            def begin_immediate_transaction(self):  # noqa: ANN201
+                return self._real_db.begin_immediate_transaction()
 
         class FakePgDb:
             def __init__(self) -> None:

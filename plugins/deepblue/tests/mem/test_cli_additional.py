@@ -324,7 +324,7 @@ def test_main_settings_failure_and_invalid_stdin(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(sys, "argv", ["python", "context"])
     assert cli.main() == 0
     captured = capsys.readouterr()
-    assert "設定/ログ初期化失敗" in captured.err
+    assert captured.err == ""
     payload = json.loads(captured.out)
     assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert payload["hookSpecificOutput"]["additionalContext"] == ""

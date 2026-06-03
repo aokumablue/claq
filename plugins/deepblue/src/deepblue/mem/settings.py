@@ -34,13 +34,36 @@ def pgpass_path() -> Path:
     return _DEFAULT_DATA_DIR / ".pgpass"
 
 
+def _write_pgpass_entry(host: str, port: int | str, db: str, user: str, password: str) -> None:
+    """<data_dir>/.pgpass に host:port:db:user:password エントリを追加する（重複は追加しない）。
+
+    O_NOFOLLOW + 0o600 でシンボリックリンク経由の差し替えを防ぐ（CWE-367/276 対策）。
+    """
+    pgpass = pgpass_path()
+    pgpass.parent.mkdir(parents=True, exist_ok=True)
+    entry = f"{host}:{port}:{db}:{user}:{password}\n"
+    prefix = f"{host}:{port}:{db}:{user}:"
+
+    if pgpass.exists():
+        if pgpass.stat().st_mode & 0o777 != 0o600:
+            import logging
+            logging.getLogger("SETTINGS").warning(".pgpass のパーミッションを 0o600 に修正します: %s", pgpass)
+            pgpass.chmod(0o600)
+        existing_text = pgpass.read_text(encoding="utf-8")
+        if any(line.startswith(prefix) for line in existing_text.splitlines()):
+            return
+        fd = os.open(str(pgpass), os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+    else:
+        fd = os.open(str(pgpass), os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as f:
+        f.write(entry)
+
+
 def _strip_password_to_pgpass(url: str) -> str:
     """URL にパスワードが含まれていれば <data_dir>/.pgpass に分離し、パスワードを除いた URL を返す。
 
     settings.json に平文パスワードが残らないようにするためのフェイルセーフ。
     パスワードが含まれない URL はそのまま返す。
-    pgpass への書き込みは os.open で O_NOFOLLOW + 0o600 を指定し、シンボリックリンク経由の
-    ファイル差し替え攻撃と権限昇格を防ぐ（CWE-367/276 対策）。
     """
     parsed = urlparse(url)
     if not parsed.password:
@@ -50,31 +73,7 @@ def _strip_password_to_pgpass(url: str) -> str:
     db = (parsed.path or "/").lstrip("/") or "*"
     user = unquote(parsed.username) if parsed.username else "*"
     password = unquote(parsed.password)
-    pgpass = pgpass_path()
-    pgpass.parent.mkdir(parents=True, exist_ok=True)
-    entry = f"{host}:{port}:{db}:{user}:{password}\n"
-    prefix = f"{host}:{port}:{db}:{user}:"
-
-    # pgpass の権限を 0o600 に修正（既存ファイルが緩い場合）
-    if pgpass.exists():
-        if pgpass.stat().st_mode & 0o777 != 0o600:
-            import logging
-            logging.getLogger("SETTINGS").warning(".pgpass のパーミッションを 0o600 に修正します: %s", pgpass)
-            pgpass.chmod(0o600)
-        existing_text = pgpass.read_text(encoding="utf-8")
-        if any(line.startswith(prefix) for line in existing_text.splitlines()):
-            # エントリ既存: 追記不要
-            pass
-        else:
-            # O_NOFOLLOW でシンボリックリンク経由の差し替えを防ぎ追記する
-            fd = os.open(str(pgpass), os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(fd, "a", encoding="utf-8") as f:
-                f.write(entry)
-    else:
-        # 新規作成: O_CREAT + O_NOFOLLOW で 0o600 の pgpass を生成
-        fd = os.open(str(pgpass), os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(entry)
+    _write_pgpass_entry(host, port, db, user, password)
 
     # パスワードを除いた netloc に再構築
     userinfo = quote(parsed.username, safe="") if parsed.username else ""

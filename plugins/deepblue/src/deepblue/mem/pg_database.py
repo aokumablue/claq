@@ -192,51 +192,7 @@ class PgDatabase:
 
     def upsert_chunk(self, chunk: MemoryChunk, origin_user: str) -> None:
         """チャンクを UPSERT する。"""
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO memory_chunks
-           (id, origin_user, session_id, project, chunk_index, content,
-            tool_names, files_read, files_modified, user_prompt,
-            created_at_epoch, access_count, last_accessed_epoch,
-            merged_generation, merged_into, synced_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-           ON CONFLICT (origin_user, session_id, chunk_index) DO UPDATE SET
-             content = EXCLUDED.content,
-             tool_names = EXCLUDED.tool_names,
-             files_read = EXCLUDED.files_read,
-             files_modified = EXCLUDED.files_modified,
-             user_prompt = EXCLUDED.user_prompt,
-             access_count = EXCLUDED.access_count,
-             last_accessed_epoch = EXCLUDED.last_accessed_epoch,
-             merged_generation = EXCLUDED.merged_generation,
-             merged_into = EXCLUDED.merged_into,
-             synced_at = NOW()""",
-                     (
-                         str(chunk.id),
-                         origin_user,
-                         chunk.session_id,
-                         chunk.project,
-                         chunk.chunk_index,
-                        chunk.content,
-                        _to_json(chunk.tool_names),
-                        _to_json(chunk.files_read),
-                        _to_json(chunk.files_modified),
-                        chunk.user_prompt,
-                        chunk.created_at_epoch,
-                        chunk.access_count,
-                        chunk.last_accessed_epoch,
-                        chunk.merged_generation,
-                        str(chunk.merged_into) if chunk.merged_into else None,
-                    ),
-                )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
+        self.upsert_chunks_batch([chunk], origin_user)
 
     def upsert_chunks_batch(self, chunks: list[MemoryChunk], origin_user: str) -> int:
         """チャンクをバッチで UPSERT する。"""
@@ -298,42 +254,7 @@ class PgDatabase:
 
     def upsert_session(self, session: Session, origin_user: str) -> None:
         """セッションを UPSERT する。"""
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO sessions
-           (id, origin_user, session_id, project, started_at_epoch, chunk_count,
-            branch, commit_hash, uncommitted_count, ended_at_epoch, project_profile_id, synced_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-           ON CONFLICT (origin_user, session_id) DO UPDATE SET
-              chunk_count = EXCLUDED.chunk_count,
-              branch = EXCLUDED.branch,
-              commit_hash = EXCLUDED.commit_hash,
-             uncommitted_count = EXCLUDED.uncommitted_count,
-             ended_at_epoch = EXCLUDED.ended_at_epoch,
-             project_profile_id = EXCLUDED.project_profile_id,
-             synced_at = NOW()""",
-                     (
-                         str(session.id),
-                         origin_user,
-                         session.session_id,
-                         session.project,
-                         session.started_at_epoch,
-                        session.chunk_count,
-                        session.branch,
-                        session.commit_hash,
-                        session.uncommitted_count,
-                        session.ended_at_epoch,
-                        session.project_profile_id,
-                    ),
-                )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
+        self.upsert_sessions_batch([session], origin_user)
 
     def upsert_sessions_batch(self, sessions: list[Session], origin_user: str) -> int:
         """セッションをバッチで UPSERT する。"""
@@ -386,41 +307,7 @@ class PgDatabase:
 
     def upsert_instinct(self, instinct: Instinct) -> None:
         """インスティンクトを UPSERT する。"""
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO instincts
-           (id, origin_user, instinct_id, scope, project_id, trigger_text,
-            confidence, domain, content, created_at_epoch, updated_at_epoch, synced_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-           ON CONFLICT (origin_user, instinct_id, scope, COALESCE(project_id, '')) DO UPDATE SET
-              trigger_text = EXCLUDED.trigger_text,
-              confidence = EXCLUDED.confidence,
-              domain = EXCLUDED.domain,
-              content = EXCLUDED.content,
-              updated_at_epoch = EXCLUDED.updated_at_epoch,
-              synced_at = NOW()""",
-                    (
-                        instinct.id,
-                        instinct.origin_user,
-                        instinct.instinct_id,
-                        instinct.scope,
-                        instinct.project_id,
-                        instinct.trigger_text,
-                        instinct.confidence,
-                        instinct.domain,
-                        instinct.content,
-                        instinct.created_at_epoch,
-                        instinct.updated_at_epoch,
-                    ),
-                )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
+        self.upsert_instincts_batch([instinct])
 
     def upsert_instincts_batch(self, instincts: list[Instinct]) -> int:
         """インスティンクトをバッチで UPSERT する。"""
@@ -472,38 +359,7 @@ class PgDatabase:
 
     def upsert_adr(self, adr: Adr) -> None:
         """ADR を UPSERT する。"""
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO adrs
-           (id, origin_user, project, adr_number, title, status, content,
-            created_at_epoch, updated_at_epoch, synced_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-           ON CONFLICT (origin_user, project, adr_number) DO UPDATE SET
-             title = EXCLUDED.title,
-             status = EXCLUDED.status,
-             content = EXCLUDED.content,
-             updated_at_epoch = EXCLUDED.updated_at_epoch,
-             synced_at = NOW()""",
-                    (
-                        adr.id,
-                        adr.origin_user,
-                        adr.project,
-                        adr.adr_number,
-                        adr.title,
-                        adr.status,
-                        adr.content,
-                        adr.created_at_epoch,
-                        adr.updated_at_epoch,
-                    ),
-                )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
+        self.upsert_adrs_batch([adr])
 
     def upsert_adrs_batch(self, adrs: list[Adr]) -> int:
         """ADR をバッチで UPSERT する。"""
@@ -552,29 +408,7 @@ class PgDatabase:
 
     def insert_event_log(self, event: EventLog) -> None:
         """イベントログを INSERT する（重複は無視）。"""
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO event_logs
-           (id, origin_user, event_type, project_id, content, created_at_epoch, synced_at)
-           VALUES (%s, %s, %s, %s, %s, %s, NOW())
-           ON CONFLICT (id) DO NOTHING""",
-                    (
-                        event.id,
-                        event.origin_user,
-                        event.event_type,
-                        event.project_id,
-                        event.content,
-                        event.created_at_epoch,
-                    ),
-                )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
+        self.insert_event_logs_batch([event])
 
     def insert_event_logs_batch(self, events: list[EventLog]) -> int:
         """イベントログをバッチで INSERT する。"""
@@ -784,6 +618,7 @@ class PgDatabase:
         if not chunk_ids:
             return {}
 
+        # chunk_ids は呼び出し側で _SYNC_BATCH_SIZE 以下にバッチ分割されるためプレースホルダ数は安全
         placeholders = ",".join(["%s"] * len(chunk_ids))
         conn = self._get_conn()
         try:

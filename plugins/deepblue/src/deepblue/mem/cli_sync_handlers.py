@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from typing import Any, TypedDict
 from urllib.parse import urlparse, urlunparse
@@ -162,27 +161,10 @@ def _split_password(url: str) -> tuple[str, str | None]:
 
 
 def _write_pgpass(host: str, port: int | str, db: str, user: str, password: str) -> None:
-    """<data_dir>/.pgpass にエントリを追加する（重複は追加しない）。
+    """<data_dir>/.pgpass にエントリを追加する（重複は追加しない）。"""
+    from deepblue.mem.settings import _write_pgpass_entry
 
-    O_NOFOLLOW + 0o600 でシンボリックリンク経由の差し替えを防ぐ。
-    """
-    from deepblue.mem.settings import pgpass_path
-
-    pgpass = pgpass_path()
-    pgpass.parent.mkdir(parents=True, exist_ok=True)
-    entry = f"{host}:{port}:{db}:{user}:{password}\n"
-    prefix = f"{host}:{port}:{db}:{user}:"
-    if pgpass.exists():
-        if pgpass.stat().st_mode & 0o777 != 0o600:
-            pgpass.chmod(0o600)
-        existing_text = pgpass.read_text(encoding="utf-8")
-        if any(line.startswith(prefix) for line in existing_text.splitlines()):
-            return
-        fd = os.open(str(pgpass), os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW, 0o600)
-    else:
-        fd = os.open(str(pgpass), os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "a", encoding="utf-8") as f:
-        f.write(entry)
+    _write_pgpass_entry(host, port, db, user, password)
 
 
 def _count_all_pending(settings) -> int:

@@ -132,6 +132,7 @@ def _count_pending_embeddings(conn: sqlite3.Connection, chunk_ids: list[str]) ->
     if not chunk_ids:
         return 0
 
+    # chunk_ids は _SYNC_BATCH_SIZE 以下に制限されるためプレースホルダ数は安全
     placeholders = ",".join("?" * len(chunk_ids))
     try:
         row = conn.execute(
@@ -185,7 +186,12 @@ def _reload_sync_state(settings: Settings) -> None:
 
 @dataclass
 class SyncResult:
-    """同期結果"""
+    """PostgreSQL 同期の結果。各フィールドは同期（UPSERT/INSERT）した件数を表す。
+
+    ``embeddings`` は memory_chunks_vec テーブルへの同期件数。
+    ``skill_runs`` は mem_item_runs テーブルへの同期件数。
+    ``success=False`` かつ ``error`` に理由が入る場合は同期が中断されたことを示す。
+    """
 
     chunks: int = 0
     sessions: int = 0
@@ -230,7 +236,13 @@ def _dry_run_counts(sqlite_db: Database) -> SyncResult:
 
 
 def _claim_all_pending(conn: sqlite3.Connection, sync_started_at: str) -> dict:
-    """全テーブルの未同期行を一括で取得して synced_at を立てる。"""
+    """全テーブルの未同期行を一括で取得して synced_at を立てる。
+
+    Returns:
+        テーブル名をキー、dataclass インスタンスのリストを値とする dict。
+        keys: chunks / sessions / instincts / adrs / events /
+              interaction_logs / project_profiles / skill_runs。
+    """
     def _cfg(table: str, order_by: str, row_factory: Callable[..., object]) -> ClaimConfig:
         return ClaimConfig(table=table, order_by=order_by, synced_at=sync_started_at, row_factory=row_factory)
 
@@ -247,14 +259,30 @@ def _claim_all_pending(conn: sqlite3.Connection, sync_started_at: str) -> dict:
 
 
 def _upsert_with_origin(items: list, origin_user: str) -> list:
-    """リスト内の各アイテムに origin_user を設定して返す（副作用あり）。"""
-    for item in items:
-        item.origin_user = origin_user
-    return items
+    """origin_user を上書きした新しいインスタンスのリストを返す（元オブジェクト不変）。
+
+    Args:
+        items: dataclass インスタンスのリスト。
+        origin_user: 上書きする origin_user 値。
+
+    Returns:
+        origin_user が置き換えられた新しいインスタンスのリスト。
+    """
+    import dataclasses
+    return [dataclasses.replace(item, origin_user=origin_user) for item in items]
 
 
 def _upsert_all_to_pg(pg_db: PgDatabase, pending: dict, origin_user: str) -> SyncResult:
-    """pending 辞書の各テーブルデータを PostgreSQL に UPSERT して SyncResult を返す。"""
+    """pending 辞書の各テーブルデータを PostgreSQL に UPSERT して SyncResult を返す。
+
+    Args:
+        pg_db: 接続済みの PgDatabase インスタンス。
+        pending: ``_claim_all_pending`` が返した dict（テーブル名→dataclassリスト）。
+        origin_user: UPSERT 時に origin_user フィールドへ設定するユーザー識別子。
+
+    Returns:
+        各テーブルの同期件数を持つ SyncResult（embeddings は呼び出し側で設定）。
+    """
     chunks = pending["chunks"]
     result = SyncResult(chunks=pg_db.upsert_chunks_batch(chunks, origin_user)) if chunks else SyncResult()
     if chunks:
@@ -298,18 +326,12 @@ def _run_sync_transaction(
 ) -> SyncResult:
     """SQLite トランザクション内でデータを取得し PG へ UPSERT する。"""
     sync_started_at = datetime.now(UTC).isoformat()
-    conn = sqlite_db.conn
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    with sqlite_db.begin_immediate_transaction() as conn:
         pending = _claim_all_pending(conn, sync_started_at)
         result = _upsert_all_to_pg(pg_db, pending, origin_user)
         result.embeddings = _sync_embeddings(sqlite_db, pg_db, pending["chunks"])
         if result.embeddings > 0:
             log.info("embeddings: %d 件同期", result.embeddings)
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
     return result
 
 
@@ -519,7 +541,7 @@ def _sync_embeddings(
     embeddings: list[tuple[str, list[float]]] = []
 
     try:
-        # sqlite-vec テーブルからエンベディングを取得
+        # sqlite-vec テーブルからエンベディングを取得（chunk_ids は _SYNC_BATCH_SIZE 以下）
         placeholders = ",".join("?" * len(chunk_ids))
         rows = sqlite_db.conn.execute(
             f"SELECT chunk_id, embedding FROM memory_chunks_vec WHERE chunk_id IN ({placeholders})",
