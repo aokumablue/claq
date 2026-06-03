@@ -74,8 +74,9 @@ def test_helper_functions_and_render_missing_chunk() -> None:
         created_at_epoch=1704067300,
     )
     filter_db = FakeDB([old_chunk, new_chunk])
-    assert cli._apply_structured_filters(filter_db, ["missing"], None, None, None, None) == []
-    assert cli._apply_structured_filters(filter_db, ["old", "new"], None, None, 1704067200, 1704067200) == []
+    from deepblue.mem.cli_search_handlers import StructuredFilter
+    assert cli._apply_structured_filters(filter_db, ["missing"], StructuredFilter(None, None, None, None)) == []
+    assert cli._apply_structured_filters(filter_db, ["old", "new"], StructuredFilter(None, None, 1704067200, 1704067200)) == []
 
 
 def test_handler_exception_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

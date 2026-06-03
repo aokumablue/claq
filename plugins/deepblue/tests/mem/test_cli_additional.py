@@ -54,8 +54,9 @@ def test_helper_functions_cover_filters_and_rendering() -> None:
     assert cli._parse_date_to_epoch(123) == 123
     assert cli._parse_date_to_epoch("2024-01-01T00:00:00Z") == 1704067200
     assert cli._parse_date_to_epoch("bad") is None
-    assert cli._apply_structured_filters(db, [], None, None, None, None) == []
-    assert cli._apply_structured_filters(db, ["c1", "c2"], "Edit", "*.py", "2024-01-01T00:00:00Z", None) == ["c1"]
+    from deepblue.mem.cli_search_handlers import StructuredFilter
+    assert cli._apply_structured_filters(db, [], StructuredFilter(None, None, None, None)) == []
+    assert cli._apply_structured_filters(db, ["c1", "c2"], StructuredFilter("Edit", "*.py", "2024-01-01T00:00:00Z", None)) == ["c1"]
 
     rendered = cli._render_adaptive_context(
         db,

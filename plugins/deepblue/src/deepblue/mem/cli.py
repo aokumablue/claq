@@ -223,15 +223,18 @@ def _handle_context(settings: Settings, stdin_data: dict) -> str:
     )
 
 
-def _handle_search(settings: Settings, stdin_data: dict) -> None:
-    _search_handlers.handle_search(
-        settings,
-        stdin_data,
+def _search_deps() -> _search_handlers.SearchDeps:
+    """search系ハンドラへ渡す依存性をまとめて構築する。"""
+    return _search_handlers.SearchDeps(
         open_db=_open_db,
         get_project=_get_project,
         coerce_int=_coerce_int,
         log=log,
     )
+
+
+def _handle_search(settings: Settings, stdin_data: dict) -> None:
+    _search_handlers.handle_search(settings, stdin_data, _search_deps())
 
 
 def _handle_session_init(settings: Settings, stdin_data: dict) -> None:
@@ -270,32 +273,15 @@ def _handle_compact(settings: Settings) -> None:
 
 
 def _handle_search_structured(settings: Settings, stdin_data: dict) -> None:
-    _search_handlers.handle_search_structured(
-        settings,
-        stdin_data,
-        open_db=_open_db,
-        get_project=_get_project,
-        coerce_int=_coerce_int,
-        log=log,
-    )
+    _search_handlers.handle_search_structured(settings, stdin_data, _search_deps())
 
 
 def _apply_structured_filters(
     db: Database,
     candidate_ids: list[int],
-    tool_filter: str | None,
-    file_pattern: str | None,
-    date_from: int | str | None,
-    date_to: int | str | None,
+    filt: _search_handlers.StructuredFilter,
 ) -> list[int]:
-    return _search_handlers.apply_structured_filters(
-        db,
-        candidate_ids,
-        tool_filter,
-        file_pattern,
-        date_from,
-        date_to,
-    )
+    return _search_handlers.apply_structured_filters(db, candidate_ids, filt)
 
 
 def _parse_date_to_epoch(value: int | str | None) -> int | None:

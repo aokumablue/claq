@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -22,14 +23,30 @@ if TYPE_CHECKING:
     CoerceIntFn = Callable[[object, int], int]
 
 
+@dataclass(frozen=True)
+class SearchDeps:
+    """検索系ハンドラの外部依存（DB接続・プロジェクト解決・int変換・ロガー）。"""
+
+    open_db: OpenDbFn
+    get_project: GetProjectFn
+    coerce_int: CoerceIntFn
+    log: Any
+
+
+@dataclass(frozen=True)
+class StructuredFilter:
+    """構造化検索のフィルタ条件（ツール名・ファイルパターン・日付範囲）。"""
+
+    tool_filter: str | None
+    file_pattern: str | None
+    date_from: int | str | None
+    date_to: int | str | None
+
+
 def handle_search(
     settings: Settings,
     stdin_data: dict[str, Any],
-    *,
-    open_db: OpenDbFn,
-    get_project: GetProjectFn,
-    coerce_int: CoerceIntFn,
-    log: Any,
+    deps: SearchDeps,
 ) -> None:
     """mem 検索結果を JSON で返す"""
     from deepblue.mem.search import SearchService
@@ -39,16 +56,16 @@ def handle_search(
         print(json.dumps({"results": []}))
         return
 
-    project = stdin_data.get("project") or get_project(stdin_data)
-    limit = coerce_int(stdin_data.get("limit"), default=20)
+    project = stdin_data.get("project") or deps.get_project(stdin_data)
+    limit = deps.coerce_int(stdin_data.get("limit"), default=20)
 
     try:
-        with open_db(settings) as db:
+        with deps.open_db(settings) as db:
             svc = SearchService(db, settings)
             results = svc.search(query=query, project=project, limit=limit)
         print(json.dumps({"results": [r._asdict() for r in results]}))
     except Exception as e:
-        log.warning("検索失敗: %s", e)
+        deps.log.warning("検索失敗: %s", e)
         print(json.dumps({"results": [], "error": str(e)}))
 
 
@@ -82,58 +99,53 @@ def _build_chunk_result(db: Any, chunk_id: str) -> dict | None:
 def handle_search_structured(
     settings: Settings,
     stdin_data: dict[str, Any],
-    *,
-    open_db: OpenDbFn,
-    get_project: GetProjectFn,
-    coerce_int: CoerceIntFn,
-    log: Any,
+    deps: SearchDeps,
 ) -> None:
     """構造化検索: tool_name, files, date_range フィルタをサポート"""
     query = str(stdin_data.get("query", "") or "")
-    project = stdin_data.get("project") or get_project(stdin_data)
-    limit = coerce_int(stdin_data.get("limit"), default=20)
-    tool_filter = stdin_data.get("tool_name")
-    file_pattern = stdin_data.get("file_pattern")
-    date_from = stdin_data.get("date_from")
-    date_to = stdin_data.get("date_to")
+    project = stdin_data.get("project") or deps.get_project(stdin_data)
+    limit = deps.coerce_int(stdin_data.get("limit"), default=20)
+    filt = StructuredFilter(
+        tool_filter=stdin_data.get("tool_name"),
+        file_pattern=stdin_data.get("file_pattern"),
+        date_from=stdin_data.get("date_from"),
+        date_to=stdin_data.get("date_to"),
+    )
 
     try:
-        with open_db(settings) as db:
+        with deps.open_db(settings) as db:
             candidate_ids = _get_candidate_ids(db, settings, query, project, limit)
-            filtered = apply_structured_filters(db, candidate_ids, tool_filter, file_pattern, date_from, date_to)
+            filtered = apply_structured_filters(db, candidate_ids, filt)
             results = [r for cid in filtered[:limit] if (r := _build_chunk_result(db, cid)) is not None]
         print(json.dumps({"results": results, "total": len(results)}))
     except Exception as e:
-        log.warning("構造化検索失敗: %s", e)
+        deps.log.warning("構造化検索失敗: %s", e)
         print(json.dumps({"results": [], "error": str(e)}))
 
 
 def apply_structured_filters(
     db: Database,
     candidate_ids: list[int],
-    tool_filter: str | None,
-    file_pattern: str | None,
-    date_from: int | str | None,
-    date_to: int | str | None,
+    filt: StructuredFilter,
 ) -> list[int]:
     """候補チャンクに構造化フィルタを適用"""
     if not candidate_ids:
         return []
 
     chunks = db.get_chunks_by_ids(candidate_ids)
-    from_epoch = parse_date_to_epoch(date_from) if date_from else None
-    to_epoch = parse_date_to_epoch(date_to) if date_to else None
+    from_epoch = parse_date_to_epoch(filt.date_from) if filt.date_from else None
+    to_epoch = parse_date_to_epoch(filt.date_to) if filt.date_to else None
     filtered = []
 
     for chunk_id in candidate_ids:
         chunk = chunks.get(chunk_id)
         if not chunk:
             continue
-        if tool_filter and tool_filter not in chunk.tool_names:
+        if filt.tool_filter and filt.tool_filter not in chunk.tool_names:
             continue
-        if file_pattern:
+        if filt.file_pattern:
             all_files = chunk.files_read + chunk.files_modified
-            if not any(fnmatch.fnmatch(f, file_pattern) for f in all_files):
+            if not any(fnmatch.fnmatch(f, filt.file_pattern) for f in all_files):
                 continue
         if from_epoch and chunk.created_at_epoch < from_epoch:
             continue
