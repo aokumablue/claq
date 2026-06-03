@@ -6,13 +6,23 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class _ShellCtx:
+    """パース対象のコマンド文字列と長さを保持するコンテキスト。"""
+
+    command: str
+    length: int
+
 
 def _advance_in_quote(
-    command: str, i: int, length: int, ch: str, quote: str, current: str
+    ctx: _ShellCtx, i: int, ch: str, quote: str, current: str
 ) -> tuple[str, str | None, int]:
     """引用符内の1文字を処理し、(current, quote, next_i) を返す。"""
-    if ch == "\\" and i + 1 < length:
-        return current + ch + command[i + 1], quote, i + 2
+    if ch == "\\" and i + 1 < ctx.length:
+        return current + ch + ctx.command[i + 1], quote, i + 2
     if ch == quote:
         return current + ch, None, i + 1
     return current + ch, quote, i + 1
@@ -26,11 +36,11 @@ def _try_flush_segment(current: str, segments: list[str]) -> str:
 
 
 def _handle_ampersand(
-    command: str, i: int, length: int, current: str, segments: list[str]
+    ctx: _ShellCtx, i: int, current: str, segments: list[str]
 ) -> tuple[str, int]:
     """単独の & を処理し、(current, next_i) を返す。リダイレクトは除外する。"""
-    next_ch = command[i + 1] if i + 1 < length else ""
-    prev_ch = command[i - 1] if i > 0 else ""
+    next_ch = ctx.command[i + 1] if i + 1 < ctx.length else ""
+    prev_ch = ctx.command[i - 1] if i > 0 else ""
     if next_ch == ">" or prev_ch == ">":
         return current + "&", i + 1
     current = _try_flush_segment(current, segments)
@@ -38,14 +48,14 @@ def _handle_ampersand(
 
 
 def _handle_unquoted_char(
-    command: str, i: int, length: int, ch: str, current: str, segments: list[str]
+    ctx: _ShellCtx, i: int, ch: str, current: str, segments: list[str]
 ) -> tuple[str, str | None, int]:
     """引用符外の1文字を処理し、(current, new_quote, next_i) を返す。"""
-    if ch == "\\" and i + 1 < length:
-        return current + ch + command[i + 1], None, i + 2
+    if ch == "\\" and i + 1 < ctx.length:
+        return current + ch + ctx.command[i + 1], None, i + 2
     if ch in ('"', "'"):
         return current + ch, ch, i + 1
-    next_ch = command[i + 1] if i + 1 < length else ""
+    next_ch = ctx.command[i + 1] if i + 1 < ctx.length else ""
     if ch == "&" and next_ch == "&":
         return _try_flush_segment(current, segments), None, i + 2
     if ch == "|" and next_ch == "|":
@@ -53,7 +63,7 @@ def _handle_unquoted_char(
     if ch == ";":
         return _try_flush_segment(current, segments), None, i + 1
     if ch == "&":
-        new_current, new_i = _handle_ampersand(command, i, length, current, segments)
+        new_current, new_i = _handle_ampersand(ctx, i, current, segments)
         return new_current, None, new_i
     return current + ch, None, i + 1
 
@@ -71,13 +81,13 @@ def split_shell_segments(command: str) -> list[str]:
     current = ""
     quote: str | None = None
     i = 0
-    length = len(command)
-    while i < length:
+    ctx = _ShellCtx(command=command, length=len(command))
+    while i < ctx.length:
         ch = command[i]
         if quote:
-            current, quote, i = _advance_in_quote(command, i, length, ch, quote, current)
+            current, quote, i = _advance_in_quote(ctx, i, ch, quote, current)
         else:
-            current, quote, i = _handle_unquoted_char(command, i, length, ch, current, segments)
+            current, quote, i = _handle_unquoted_char(ctx, i, ch, current, segments)
     _try_flush_segment(current, segments)
     return segments
 
