@@ -1,0 +1,14 @@
+{
+  "from_plugin_name": "deepblue",
+  "from_author_name": "aokumablue",
+  "plugin_name": "hogeplugin",
+  "author_name": "hogename",
+  "files_to_delete": [
+    "plugins/deepblue/tests/",
+    "scripts/",
+    "README.md",
+    "CLAUDE.md",
+    "conftest.py",
+    "LICENSE"
+  ]
+}

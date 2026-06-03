@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # リポジトリ全体のプラグイン名を一括置換するスクリプト（直接書き換え）
-# 使用法: ./scripts/rename.sh [--dry-run]
+# 使用法: ./scripts/change-repository.sh [--dry-run]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-CONFIG_FILE="${SCRIPT_DIR}/rename-config.json"
+CONFIG_FILE="${SCRIPT_DIR}/change-repository-config.json"
 
 DRY_RUN=false
 
@@ -33,6 +33,8 @@ AUTHOR_NAME="$(jq -r '.author_name' "${CONFIG_FILE}")"
 AUTHOR_URL="https://github.com/${AUTHOR_NAME}"
 REPO_URL="https://github.com/${AUTHOR_NAME}/${PLUGIN_NAME}"
 
+mapfile -t FILES_TO_DELETE < <(jq -r '.files_to_delete // [] | .[]' "${CONFIG_FILE}")
+
 echo "=================================================="
 echo "  ${FROM_PLUGIN_NAME} → ${PLUGIN_NAME}"
 echo "  対象: ${REPO_DIR}（直接置換）"
@@ -42,6 +44,25 @@ echo "=================================================="
 if [[ "${DRY_RUN}" == true ]]; then
   echo ""
   echo "[dry-run] 以下の変換を行います:"
+  echo ""
+  echo "  削除対象（files_to_delete）:"
+  if [[ ${#FILES_TO_DELETE[@]} -eq 0 ]]; then
+    echo "    なし"
+  else
+    shopt -s globstar nullglob
+    for pattern in "${FILES_TO_DELETE[@]}"; do
+      match_count=0
+      for target in "${REPO_DIR}"/${pattern}; do
+        [[ -e "${target}" || -L "${target}" ]] || continue
+        match_count=$((match_count + 1))
+        echo "    ${target#${REPO_DIR}/}"
+      done
+      if [[ ${match_count} -eq 0 ]]; then
+        echo "    ${pattern}（マッチなし）"
+      fi
+    done
+    shopt -u globstar nullglob
+  fi
   echo ""
   echo "  ディレクトリ・ファイル名（*${FROM_PLUGIN_NAME}* を動的検索）:"
   echo "    plugins/${FROM_PLUGIN_NAME}/**/*${FROM_PLUGIN_NAME}* → plugins/${PLUGIN_NAME}/...${PLUGIN_NAME}..."
@@ -66,7 +87,7 @@ if [[ "${DRY_RUN}" == true ]]; then
   echo "    ${FROM_PLUGIN_NAME} (残余)        → ${PLUGIN_NAME}"
   echo "    ${FROM_PLUGIN_NAME_UPPER} (残余)  → ${PLUGIN_NAME_UPPER}"
   echo ""
-  echo "  除外: scripts/rename.sh と scripts/rename-config.json は置換対象外"
+  echo "  除外: scripts/change-repository.sh と scripts/change-repository-config.json は置換対象外"
   echo ""
   echo "[dry-run] 実際の変換は --dry-run なしで実行してください"
   exit 0
@@ -85,7 +106,29 @@ if git -C "${REPO_DIR}" rev-parse --git-dir &>/dev/null 2>&1; then
 fi
 
 echo ""
-echo "Step 1: ディレクトリ・ファイルをリネーム中..."
+echo "Step 1: 不要ファイルを削除中..."
+
+if [[ ${#FILES_TO_DELETE[@]} -eq 0 ]]; then
+  echo "  削除対象なし"
+else
+  shopt -s globstar nullglob
+  for pattern in "${FILES_TO_DELETE[@]}"; do
+    match_count=0
+    for target in "${REPO_DIR}"/${pattern}; do
+      [[ -e "${target}" || -L "${target}" ]] || continue
+      match_count=$((match_count + 1))
+      rm -rf "${target}"
+      echo "  削除: ${target#${REPO_DIR}/}"
+    done
+    if [[ ${match_count} -eq 0 ]]; then
+      echo "  スキップ（マッチなし）: ${pattern}"
+    fi
+  done
+  shopt -u globstar nullglob
+fi
+
+echo ""
+echo "Step 2: ディレクトリ・ファイルをリネーム中..."
 
 if [[ -d "${REPO_DIR}/plugins/${PLUGIN_NAME}" ]]; then
   echo "Error: plugins/${PLUGIN_NAME} は既に存在します。削除してから再実行してください。" >&2
@@ -120,7 +163,7 @@ else
   echo "  plugins/${FROM_PLUGIN_NAME} が見つかりません。スキップ"
 fi
 
-echo "Step 2: テキスト一括置換中..."
+echo "Step 3: テキスト一括置換中..."
 
 if sed --version &>/dev/null 2>&1; then
   SED_INPLACE=(-i)
@@ -135,8 +178,8 @@ mapfile -d '' TARGET_FILES < <(find "${REPO_DIR}" -type f \( \
   -o -name "*.html" -o -name "*.in" \
 \) \
   ! -path "${REPO_DIR}/.git/*" \
-  ! -path "${SCRIPT_DIR}/rename.sh" \
-  ! -path "${SCRIPT_DIR}/rename-config.json" \
+  ! -path "${SCRIPT_DIR}/change-repository.sh" \
+  ! -path "${SCRIPT_DIR}/change-repository-config.json" \
   -print0)
 
 if [[ ${#TARGET_FILES[@]} -eq 0 ]]; then
@@ -181,7 +224,7 @@ else
 fi
 
 echo ""
-echo "Step 3: 残留チェック..."
+echo "Step 4: 残留チェック..."
 RESIDUAL=$(grep -r "${FROM_PLUGIN_NAME}\|${FROM_PLUGIN_NAME_UPPER}\|${FROM_AUTHOR_NAME}" \
   "${REPO_DIR}" \
   --include="*.py" --include="*.sh" --include="*.md" \
@@ -189,7 +232,7 @@ RESIDUAL=$(grep -r "${FROM_PLUGIN_NAME}\|${FROM_PLUGIN_NAME_UPPER}\|${FROM_AUTHO
   --include="*.html" --include="*.in" \
   --exclude-dir=".git" \
   -l 2>/dev/null \
-  | grep -v -e "^${SCRIPT_DIR}/rename\.sh$" -e "^${SCRIPT_DIR}/rename-config\.json$" || true)
+  | grep -v -e "^${SCRIPT_DIR}/change-repository\.sh$" -e "^${SCRIPT_DIR}/change-repository-config\.json$" || true)
 
 if [[ -n "${RESIDUAL}" ]]; then
   echo "  [Warning] 以下のファイルに置換漏れの可能性があります:"
