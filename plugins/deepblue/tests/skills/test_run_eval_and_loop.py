@@ -11,7 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from deepblue.skills import run_eval, run_loop
-from deepblue.skills.run_loop import EvalConfig, LoopConfig
+from deepblue.skills._eval_config import EvalConfig, SingleQueryConfig
+from deepblue.skills.run_loop import LoopConfig
 
 
 class _FakeStdout:
@@ -168,7 +169,7 @@ def test_run_single_query_triggers_on_stream_event(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
     monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", 5, str(project_root))
+    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
 
     assert result is True
     assert process.killed is True
@@ -205,7 +206,7 @@ def test_run_single_query_fallback_assistant_message(tmp_path: Path, monkeypatch
     monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
     monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", 5, str(project_root))
+    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
 
     assert result is True
 
@@ -222,7 +223,7 @@ def test_run_single_query_result_event_returns_false(tmp_path: Path, monkeypatch
     monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
     monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", 5, str(project_root))
+    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
 
     assert result is False
 
@@ -261,7 +262,7 @@ def test_run_single_query_uses_model_and_rejects_unknown_tool(tmp_path: Path, mo
     monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
     monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", 5, str(project_root), model="sonnet")
+    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model="sonnet"))
 
     assert result is False
     assert "--model" in captured_cmds[0]
@@ -287,7 +288,7 @@ def test_run_single_query_skips_invalid_json_and_message_stop(tmp_path: Path, mo
     monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
     monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", 5, str(project_root))
+    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
 
     assert result is False
 
@@ -300,7 +301,7 @@ def test_run_single_query_returns_remaining_output_when_process_already_exited(t
     monkeypatch.setattr(run_eval.uuid, "uuid4", lambda: SimpleNamespace(hex="12345678abcdef"))
     monkeypatch.setattr(run_eval.subprocess, "Popen", lambda *args, **kwargs: process)
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", 5, str(project_root))
+    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
 
     assert result is False
     assert process.killed is False
@@ -327,12 +328,14 @@ def test_run_eval_aggregates_results_and_handles_failures(
         ],
         skill_name="alpha",
         description="desc",
-        num_workers=2,
-        timeout=5,
-        project_root=tmp_path,
-        runs_per_query=2,
-        trigger_threshold=0.5,
-        model="sonnet",
+        eval_cfg=EvalConfig(
+            num_workers=2,
+            timeout=5,
+            project_root=tmp_path,
+            runs_per_query=2,
+            trigger_threshold=0.5,
+            model="sonnet",
+        ),
     )
 
     assert result["summary"] == {"total": 2, "passed": 2, "failed": 0}
@@ -792,7 +795,7 @@ def test_run_single_query_covers_blank_lines_stop_and_skill_fallback(
     monkeypatch.setattr(run_eval.select, "select", fake_select)
     monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", 5, str(project_root))
+    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
     assert result is False
 
     skill_event = (
@@ -819,7 +822,7 @@ def test_run_single_query_covers_blank_lines_stop_and_skill_fallback(
     monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
     monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", 5, str(project_root))
+    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
     assert result is True
 
 
@@ -859,7 +862,7 @@ def test_run_single_query_content_block_stop_returns_false(
     monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
     monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", 5, str(project_root))
+    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
     assert result is False
 
 

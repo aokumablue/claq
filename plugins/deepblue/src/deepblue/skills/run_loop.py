@@ -13,30 +13,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from ._eval_config import EvalConfig
 from .improve_description import improve_description
 from .run_eval import find_project_root, run_eval
 from .utils import parse_skill_md
-
-
-@dataclass(frozen=True)
-class EvalConfig:
-    """eval 実行設定をまとめたパラメータオブジェクト。
-
-    Attributes:
-        num_workers: 並列ワーカー数。
-        timeout: クエリごとのタイムアウト秒数。
-        project_root: プロジェクトルートパス。
-        runs_per_query: クエリごとの実行回数。
-        trigger_threshold: トリガー率のしきい値。
-        model: 使用するモデル名。
-    """
-
-    num_workers: int
-    timeout: int
-    project_root: Path
-    runs_per_query: int
-    trigger_threshold: float
-    model: str
 
 
 @dataclass(frozen=True)
@@ -255,12 +235,7 @@ def _eval_queries(
         eval_set=all_queries,
         skill_name=skill_ctx.name,
         description=current_description,
-        num_workers=eval_cfg.num_workers,
-        timeout=eval_cfg.timeout,
-        project_root=eval_cfg.project_root,
-        runs_per_query=eval_cfg.runs_per_query,
-        trigger_threshold=eval_cfg.trigger_threshold,
-        model=eval_cfg.model,
+        eval_cfg=eval_cfg,
     )
     return results, time.time() - t0
 

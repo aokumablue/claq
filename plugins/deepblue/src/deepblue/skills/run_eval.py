@@ -16,6 +16,7 @@ import uuid
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+from ._eval_config import EvalConfig, SingleQueryConfig
 from .cli_runner import detect_cli_binary
 from .utils import parse_skill_md
 
@@ -171,9 +172,7 @@ def run_single_query(
     query: str,
     skill_name: str,
     skill_description: str,
-    timeout: int,
-    project_root: str,
-    model: str | None = None,
+    query_cfg: SingleQueryConfig,
 ) -> bool:
     """単一クエリを実行し、スキルがトリガーされたかを返す。
 
@@ -182,26 +181,32 @@ def run_single_query(
     LLM CLI を実行する。
     claude 環境では stream-json + --include-partial-messages で早期トリガー判定、
     copilot 環境では json 出力で完了後に判定する。
+
+    Args:
+        query: 評価対象のクエリ文字列。
+        skill_name: スキル名。
+        skill_description: スキル説明文。
+        query_cfg: timeout / project_root / model をまとめた設定オブジェクト。
     """
     binary = detect_cli_binary()
     unique_id = uuid.uuid4().hex[:8]
     clean_name = f"{skill_name}-skill-{unique_id}"
-    project_commands_dir = Path(project_root) / ".claude" / "commands"
+    project_commands_dir = Path(query_cfg.project_root) / ".claude" / "commands"
     command_file = project_commands_dir / f"{clean_name}.md"
 
     try:
         _write_command_file(command_file, skill_name, skill_description)
-        cmd = _build_query_cmd(binary, query, model)
+        cmd = _build_query_cmd(binary, query, query_cfg.model)
         env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            cwd=project_root,
+            cwd=query_cfg.project_root,
             env=env,
         )
-        return _scan_output_for_trigger(process, clean_name, timeout)
+        return _scan_output_for_trigger(process, clean_name, query_cfg.timeout)
     finally:
         if command_file.exists():
             command_file.unlink()
@@ -211,28 +216,34 @@ def _collect_futures(
     eval_set: list[dict],
     skill_name: str,
     description: str,
-    timeout: int,
-    project_root: Path,
-    runs_per_query: int,
-    model: str | None,
-    num_workers: int,
+    eval_cfg: EvalConfig,
 ) -> tuple[dict[str, list[bool]], dict[str, dict]]:
-    """全クエリを並列実行し、クエリごとのトリガー結果と item マップを返す。"""
+    """全クエリを並列実行し、クエリごとのトリガー結果と item マップを返す。
+
+    Args:
+        eval_set: 評価対象クエリの辞書リスト。
+        skill_name: スキル名。
+        description: スキル説明文。
+        eval_cfg: 並列数・タイムアウト・実行回数・モデルなどの設定オブジェクト。
+    """
     query_triggers: dict[str, list[bool]] = {}
     query_items: dict[str, dict] = {}
+    query_cfg = SingleQueryConfig(
+        timeout=eval_cfg.timeout,
+        project_root=str(eval_cfg.project_root),
+        model=eval_cfg.model,
+    )
 
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+    with ProcessPoolExecutor(max_workers=eval_cfg.num_workers) as executor:
         future_to_info = {}
         for item in eval_set:
-            for run_idx in range(runs_per_query):
+            for run_idx in range(eval_cfg.runs_per_query):
                 future = executor.submit(
                     run_single_query,
                     item["query"],
                     skill_name,
                     description,
-                    timeout,
-                    str(project_root),
-                    model,
+                    query_cfg,
                 )
                 future_to_info[future] = (item, run_idx)
 
@@ -255,17 +266,18 @@ def run_eval(
     eval_set: list[dict],
     skill_name: str,
     description: str,
-    num_workers: int,
-    timeout: int,
-    project_root: Path,
-    runs_per_query: int = 1,
-    trigger_threshold: float = 0.5,
-    model: str | None = None,
+    eval_cfg: EvalConfig,
 ) -> dict:
-    """全 eval セットを並列実行し、結果を返す。"""
+    """全 eval セットを並列実行し、結果を返す。
+
+    Args:
+        eval_set: 評価対象クエリの辞書リスト。
+        skill_name: スキル名。
+        description: スキル説明文。
+        eval_cfg: 並列数・タイムアウト・実行回数・閾値・モデルなどの設定オブジェクト。
+    """
     query_triggers, query_items = _collect_futures(
-        eval_set, skill_name, description, timeout, project_root,
-        runs_per_query, model, num_workers,
+        eval_set, skill_name, description, eval_cfg,
     )
 
     results = []
@@ -273,7 +285,7 @@ def run_eval(
         item = query_items[query]
         trigger_rate = sum(triggers) / len(triggers)
         should_trigger = item["should_trigger"]
-        did_pass = trigger_rate >= trigger_threshold if should_trigger else trigger_rate < trigger_threshold
+        did_pass = trigger_rate >= eval_cfg.trigger_threshold if should_trigger else trigger_rate < eval_cfg.trigger_threshold
         results.append(
             {
                 "query": query,
@@ -328,16 +340,19 @@ def main():
     if args.verbose:
         print(f"評価中: {description}", file=sys.stderr)
 
-    output = run_eval(
-        eval_set=eval_set,
-        skill_name=name,
-        description=description,
+    eval_cfg = EvalConfig(
         num_workers=args.num_workers,
         timeout=args.timeout,
         project_root=project_root,
         runs_per_query=args.runs_per_query,
         trigger_threshold=args.trigger_threshold,
         model=args.model,
+    )
+    output = run_eval(
+        eval_set=eval_set,
+        skill_name=name,
+        description=description,
+        eval_cfg=eval_cfg,
     )
 
     if args.verbose:
