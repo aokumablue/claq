@@ -137,7 +137,7 @@ def _run_manifest_validations(
     return has_errors
 
 
-def validate_install_manifests(
+def validate_install_manifests(  # noqa: PLR0913
     repo_root: str | Path = REPO_ROOT,
     modules_manifest_path: str | Path = DEFAULT_MODULES_MANIFEST_PATH,
     profiles_manifest_path: str | Path = DEFAULT_PROFILES_MANIFEST_PATH,

@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -346,14 +347,19 @@ def _consumer_security_policy_checks(
     ]
 
 
-def _consumer_security_guardrails_checks(
-    root_dir: str | Path,
-    gitignore: str,
-    project_hooks: str,
-    security_path: str,
-    hosting_label: str,
-    security_pass: bool,
-) -> list[dict[str, Any]]:
+@dataclass(frozen=True)
+class _GuardrailsCtx:
+    """_consumer_security_guardrails_checks のセキュリティチェックコンテキスト。"""
+
+    root_dir: str | Path
+    gitignore: str
+    project_hooks: str
+    security_path: str
+    hosting_label: str
+    security_pass: bool
+
+
+def _consumer_security_guardrails_checks(ctx: _GuardrailsCtx) -> list[dict[str, Any]]:
     """consumer モードの Security Guardrails カテゴリのチェック定義を返す。
 
     Args:
@@ -368,7 +374,7 @@ def _consumer_security_guardrails_checks(
         Security Guardrails チェック辞書のリスト
     """
     return _consumer_security_policy_checks(
-        gitignore, security_path, hosting_label, security_pass
+        ctx.gitignore, ctx.security_path, ctx.hosting_label, ctx.security_pass
     ) + [
         {
             "id": "consumer-hook-guardrails",
@@ -377,9 +383,9 @@ def _consumer_security_guardrails_checks(
             "scopes": ["repo", "hooks"],
             "path": ".claude/settings.json",
             "description": "プロジェクトローカルフック設定がツール・プロンプトガードを参照している",
-            "pass": "PreToolUse" in project_hooks
-            or "beforeSubmitPrompt" in project_hooks
-            or file_exists(root_dir, ".claude/hooks.json"),
+            "pass": "PreToolUse" in ctx.project_hooks
+            or "beforeSubmitPrompt" in ctx.project_hooks
+            or file_exists(ctx.root_dir, ".claude/hooks.json"),
             "fix": "Add project-local hook settings or hook definitions for prompt/tool guardrails.",
         },
     ]
@@ -410,9 +416,14 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
         *_consumer_context_efficiency_checks(root_dir),
         *_consumer_quality_gates_checks(root_dir, package_json, ci_path, hosting_label, ci_pass),
         *_consumer_memory_and_eval_checks(root_dir),
-        *_consumer_security_guardrails_checks(
-            root_dir, gitignore, project_hooks, security_path, hosting_label, security_pass
-        ),
+        *_consumer_security_guardrails_checks(_GuardrailsCtx(
+            root_dir=root_dir,
+            gitignore=gitignore,
+            project_hooks=project_hooks,
+            security_path=security_path,
+            hosting_label=hosting_label,
+            security_pass=security_pass,
+        )),
     ]
 
 
