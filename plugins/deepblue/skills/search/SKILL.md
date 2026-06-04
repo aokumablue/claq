@@ -2,6 +2,7 @@
 name: search
 description: 実装前 既存解決策探索ワークフロー。ツール/ライブラリ/パターン調査→カスタムコード作成。リサーチャーエージェント呼び出し。
 context: fork
+user-invocable: false
 ---
 
 # コードを書く前に調べる

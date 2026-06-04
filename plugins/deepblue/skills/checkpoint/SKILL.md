@@ -2,6 +2,7 @@
 name: checkpoint
 description: 長い反復ループの進捗をディスクに保存し、中断後の再開を高速化する。レート制限中断が多いセッションや10ステップ超の反復ループで使用。
 context: fork
+user-invocable: false
 ---
 
 # チェックポイント
