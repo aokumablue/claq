@@ -4,7 +4,7 @@ description: セキュリティ/品質レビュー。既定は変更差分対象
 command: /review
 ---
 
-<!-- DRY: 共通文言（grillme / 永続メモリ / 引数）は全コマンド同期。変更時は10ファイル一括 -->
+<!-- DRY: grillme 前段（発火〜他処理に進まない）は全コマンド共通。終了条件・永続メモリ・引数は固有 -->
 
 # コードレビュー
 
@@ -18,15 +18,13 @@ command: /review
 - search: `review violation security` / `{変更ファイル名}` (file_pattern 指定)
 - record: 必要時のみ、最終レビュー結果を1回だけ記録（繰り返し違反は警告レベルを1段階上げ「繰り返し違反」とマーク）
 
-## READ-ONLY 制約（絶対厳守・最後まで解除しない）
+## READ-ONLY 制約（絶対厳守）
 
-このコマンドは**絶対にファイルを変更しない**。後処理を含め、`/review` の起動から完了までの全フェーズで READ-ONLY を維持する。
+起動から完了まで全フェーズでファイルを変更しない。
 
-- Edit / Write / MultiEdit 禁止
-- `git apply` / `sed -i` / `awk -i` 等のファイル書き換えコマンド禁止
-- `deepblue:reviewer` / `deepblue:security-auditor` も同様の制約に従う
-- 修正提案はテキストのみ。コード変更は禁止
-- ユーザー承認があっても**本コマンドは編集を実行しない**。修正は別コマンドに切り分ける
+- Edit / Write / MultiEdit、`git apply` / `sed -i` / `awk -i` 等の書き換え禁止
+- `deepblue:reviewer` / `deepblue:security-auditor` も同制約
+- 修正提案はテキストのみ。ユーザー承認があっても編集せず、別コマンドに切り分ける
 
 ## ステップ1: スコープ確定
 
@@ -57,8 +55,6 @@ command: /review
 | リファクタ | 設計・可読性・保守性・性能・デッドコード | `/refactor [対象パス]` |
 | バグ + リファクタ | 両方 | `/bugfix` 完了後に `/refactor` |
 | 仕様変更 | 大規模設計変更・対象外 | `/plan [要件]` |
-
-`/review` は自身で編集しない。これは最後まで例外なし。
 
 ## 引数
 

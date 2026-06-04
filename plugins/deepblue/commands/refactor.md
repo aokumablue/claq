@@ -4,7 +4,7 @@ description: コードを一気通貫でリファクタリング。差分・指�
 command: /refactor
 ---
 
-<!-- DRY: 共通文言（grillme / 永続メモリ / 引数）は全コマンド同期。変更時は10ファイル一括 -->
+<!-- DRY: grillme 前段（発火〜他処理に進まない）は全コマンド共通。終了条件・永続メモリ・引数は固有 -->
 
 # 統合リファクタリング
 
@@ -59,7 +59,7 @@ command: /refactor
 
 ## ステップ5: perf（`refactor-orchestrator` → `deepblue:perf-optimizer`）
 
-simplify 全グループ完了後に開始。不要計算・重複I/O・N+1・過剰メモリアロケーションを優先改善。変更ごとにテスト→失敗時はリバート。
+simplify 全グループ完了後に開始。不要計算・重複I/O・N+1・過剰メモリアロケーションを優先改善。変更ごとにテスト→失敗時はファイル単位リバート。
 
 ## ステップ6: review + secure（並列, `deepblue:refactor-orchestrator` から委譲）
 

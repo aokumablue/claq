@@ -4,7 +4,7 @@ description: リポジトリ固有入力収集→skill-make スキルに SKILL.m
 command: /skill-gen
 ---
 
-<!-- DRY: 共通文言（grillme / 永続メモリ / 引数）は全コマンド同期。変更時は10ファイル一括 -->
+<!-- DRY: grillme 前段（発火〜他処理に進まない）は全コマンド共通。終了条件・永続メモリ・引数は固有 -->
 
 # スキル生成入力収集
 
