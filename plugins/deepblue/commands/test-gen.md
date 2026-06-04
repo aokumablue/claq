@@ -4,16 +4,19 @@ description: テストコードを自動生成。デシジョンテーブル設�
 command: /test-gen
 ---
 
+<!-- DRY: 共通文言（grillme / 永続メモリ / 引数）は全コマンド同期。変更時は10ファイル一括 -->
+
 # テストコード生成フロー
 
 ## grillme 強制起動（必須）
 
-開始直後に grillme を必ず起動し、完了まで他の処理に進まない。
+開始直後に grillme スキル（`user-invocable: false`、description マッチで自動発火）を起動し、共通理解が固まるまで他処理に進まない。完了時は「合意した方針・制約・成功条件」を1行サマリで確認する。
 
 ## 永続メモリ
 
-search: `test testgen coverage decision-table {対象ファイルパス}`
-record: `{"event_type": "testmod", "content": "Scope: {scope}. Lang: {language}. Tables: {table_count}. Tests added: {tests_added}. Coverage: before {cov_before}% → after {cov_after}%"}`
+- context: SessionStart で `<mem-context>` 自動注入
+- search: `test test-gen coverage decision-table {対象ファイルパス}`
+- record: `{"event_type": "test-gen", "content": "Scope: {scope}. Lang: {language}. Tables: {table_count}. Tests added: {tests_added}. Coverage: before {cov_before}% → after {cov_after}%"}`
 
 ## ステップ1: スコープ確定
 
@@ -24,7 +27,7 @@ record: `{"event_type": "testmod", "content": "Scope: {scope}. Lang: {language}.
 ## ステップ2: プロジェクト検出 + ベースライン取得
 
 1. `get_test_command(project_root)` でテストコマンドを検出
-2. 言語に応じたカバレッジコマンドを選択:
+2. 言語に応じたカバレッジコマンドを選択
 3. 未到達ブランチを記録
 4. テスト失敗がある場合は内容を明示してユーザーに確認（修正後に続行）
 
@@ -49,7 +52,7 @@ record: `{"event_type": "testmod", "content": "Scope: {scope}. Lang: {language}.
 - 目標: 最小テスト数で 100% ブランチカバレッジ達成
 - 組み合わせ爆発が起きる場合は境界値分析で削減し、全ブランチをカバーする最小セットを選ぶ
 
-1. 全関数のテーブルをまとめてユーザーに提示 → **承認を待つ**（「ok」「承認」「proceed」等で判断）
+4. 全関数のテーブルをまとめてユーザーに提示 → **承認を待つ**（「ok」「承認」「proceed」等で判断）
 
 ## ステップ4: テスト実装
 
@@ -103,4 +106,4 @@ Gate: PASS / BLOCKED ({reason})
 
 ## 引数
 
-$ARGUMENTS: `[ファイルパス or ディレクトリ]`（省略時: 変更差分のソースファイル）
+- 位置 #1: `[ファイルパス or ディレクトリ]`（省略時: 変更差分のソースファイル）

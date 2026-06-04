@@ -4,17 +4,19 @@ description: ハーネス監査→改善を一気通貫で実行。スコアカ�
 command: /harness
 ---
 
+<!-- DRY: 共通文言（grillme / 永続メモリ / 引数）は全コマンド同期。変更時は10ファイル一括 -->
+
 # ハーネス管理
 
 ## grillme 強制起動（必須）
 
-開始直後に grillme を必ず起動し、完了まで他の処理に進まない。
+開始直後に grillme スキル（`user-invocable: false`、description マッチで自動発火）を起動し、共通理解が固まるまで他処理に進まない。完了時は「合意した方針・制約・成功条件」を1行サマリで確認する。
 
 ## 永続メモリ
 
-`<mem-context>` 注入で起動。
-search: `harness audit score` / `harness config optimization audit` (days: 90)
-record: `{"event_type": "harness-run", "content": "Harness: Score {before} -> {after}. Changes: {changes}"}`
+- context: SessionStart で `<mem-context>` 自動注入
+- search: `harness audit score` / `harness config optimization audit` (days: 90)
+- record: `{"event_type": "harness-run", "content": "Harness: Score {before} -> {after}. Changes: {changes}"}`
 
 ## 使い方
 
@@ -27,27 +29,44 @@ record: `{"event_type": "harness-run", "content": "Harness: Score {before} -> {a
 
 `scope` は位置引数でも `--scope` でも指定可。既定値は `repo`。
 
-## 実行フロー
-
-1. `deepblue_run deepblue.ci.harness_audit` でベースラインスコア取得・出力
-2. トップ3アクションを特定
-3. 最小限・元に戻せる設定変更を提案・適用・検証
-4. 再度 `deepblue_run deepblue.ci.harness_audit` で改善スコア報告
-5. 変更前後の差分を出力
-
-`--audit-only` はステップ1のみで終了。
-
-## 実行エンジン
+## ステップ1: ベースライン取得
 
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/runtime/deepblue-helpers.sh"
 deepblue_run deepblue.ci.harness_audit <scope> --format <text|json> [--root <path>]
 ```
 
+スコアカードを出力。`--audit-only` 指定時はここで終了。
+
 スコアリングはこのスクリプトのみを根拠とし、手動採点は行わない。
 
 ルーブリック版: `2026-03-30` — 固定カテゴリ7個（各0〜10に正規化）:
 ツール網羅性 / 文脈効率 / 品質ゲート / メモリ永続性 / 評価網羅性 / セキュリティガードレール / コスト効率
+
+## ステップ2: トップ3アクション特定
+
+`top_actions[]` から最も効果が高い3件を抽出。各アクションは `checks[]` の失敗チェックに紐付く正確なファイルパス付き。
+
+## ステップ3: harness-tuner による改善適用
+
+`deepblue:harness-tuner` を起動。ベースラインJSONとトップ3アクションを渡し、信頼性・コスト・スループット最適化を委譲。
+
+harness-tuner は:
+- ハーネス設定（hooks.json / settings.json 等）の最小限の変更を提案
+- 元に戻せる設定変更のみを適用
+- 適用前後の影響範囲を要約
+
+## ステップ4: 改善後スコア
+
+```bash
+deepblue_run deepblue.ci.harness_audit <scope> --format <text|json> [--root <path>]
+```
+
+ステップ1と同条件で再採点。
+
+## ステップ5: 差分要約
+
+変更前後の差分・カテゴリ別スコア変化・harness-tuner が適用した変更内容を出力。
 
 ## 制約
 
@@ -61,11 +80,14 @@ deepblue_run deepblue.ci.harness_audit <scope> --format <text|json> [--root <pat
 1. ベースライン `overall_score` と `max_score`（`repo` では70）
 2. カテゴリ別スコアと指摘
 3. 失敗チェックと正確なファイルパス
-4. 上位3件のアクション（`top_actions`）と適用内容
+4. 上位3件のアクション（`top_actions`）と harness-tuner 適用内容
 5. 改善後スコアカード（`--audit-only` 以外）
 6. 変更前後の差分サマリー
 
 ## 引数
 
-- `[scope]`: `repo|hooks|skills|commands|agents`（既定: `repo`）
-- `--format text|json` / `--root <path>` / `--audit-only`
+- 位置 #1: `[scope]` = `repo|hooks|skills|commands|agents`（既定: `repo`）
+- `--scope=<scope>`: 位置引数の別名（互換維持）
+- `--format=text|json`（既定: `text`）
+- `--root=<path>`: ルートディレクトリ指定
+- `--audit-only`: ステップ1のみで終了

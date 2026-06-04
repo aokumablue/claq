@@ -4,16 +4,23 @@ description: コードを一気通貫でリファクタリング。差分・指�
 command: /refactor
 ---
 
+<!-- DRY: 共通文言（grillme / 永続メモリ / 引数）は全コマンド同期。変更時は10ファイル一括 -->
+
 # 統合リファクタリング
 
 ## grillme 強制起動（必須）
 
-開始直後に grillme を必ず起動し、完了まで他の処理に進まない。
+開始直後に grillme スキル（`user-invocable: false`、description マッチで自動発火）を起動し、共通理解が固まるまで他処理に進まない。完了時は「合意した方針・制約・成功条件」を1行サマリで確認する。
 
 ## 永続メモリ
 
-search: `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`
-record: `{"event_type": "refactor", "content": "Scope: {scope}. Clean: {cleaned}. Simplify: {simplified}. Perf: {perf_fixed}. Blockers: {blockers}"}`
+- context: SessionStart で `<mem-context>` 自動注入
+- search: `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`
+- record: `{"event_type": "refactor", "content": "Scope: {scope}. Clean: {cleaned}. Simplify: {simplified}. Perf: {perf_fixed}. Blockers: {blockers}"}`
+
+## skill 起動メカニズム
+
+`refactor-prep` / `refactor-rollback` は `user-invocable: false` の skill。description マッチで Claude Code が Skill ツール経由で fork 実行する。本コマンドのステップ1で「refactor-prep skill を起動」「refactor-rollback skill を起動」と明示することで発火する。
 
 ## ステップ1: preflight（スコープ確定 + 実行準備）
 
@@ -21,9 +28,9 @@ record: `{"event_type": "refactor", "content": "Scope: {scope}. Clean: {cleaned}
 
 着手前に実行:
 
-- `refactor-prep`（必須）: 対象分割・依存可視化・テストセット確定
-- `refactor-rollback`（必須）: ファイル単位リバート計画（Rollback Blueprint）生成
-- `deepblue:refactor-orchestrator`（必須）: clean/simplify/perf/review の実行順・並列制御
+- `refactor-prep` skill 起動（必須）: 対象分割・依存可視化・テストセット確定
+- `refactor-rollback` skill 起動（必須）: ファイル単位リバート計画（Rollback Blueprint）生成
+- `deepblue:refactor-orchestrator` 起動（必須）: clean/simplify/perf/review の実行順・並列制御
 
 `deps.from` / `deps.to` は `groups` 配列のインデックスを指す。
 
@@ -42,9 +49,13 @@ record: `{"event_type": "refactor", "content": "Scope: {scope}. Clean: {cleaned}
 
 デッドコード削除。各ファイル適用ごとにテスト実行→失敗時は `git checkout -- <file>` で単ファイルリバートして継続。
 
+`--mode=clean` 指定時はステップ3のみ実行して終了。
+
 ## ステップ4: simplify（並列, `refactor-orchestrator` → `deepblue:simplifier`）
 
 グループ化して**同時起動**。可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
+
+`--mode=simplify` 指定時はステップ4のみ実行して終了（その後ステップ7 final gate へ直行）。
 
 ## ステップ5: perf（`refactor-orchestrator` → `deepblue:perf-optimizer`）
 
@@ -91,4 +102,5 @@ Issues は `deepblue:reviewer` と `deepblue:security-auditor` の統合件数�
 
 ## 引数
 
-$ARGUMENTS: `[ファイルパス or ディレクトリ]`（省略時: 変更差分）
+- 位置 #1: `[ファイルパス or ディレクトリ]`（省略時: 変更差分）
+- `--mode=clean|simplify`: 部分モード指定（省略時: clean→simplify→perf→review 全段階実行）

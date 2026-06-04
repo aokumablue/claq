@@ -4,34 +4,42 @@ description: スキル/コマンド/エージェント使用率を個人（SQLit
 command: /dashboard
 ---
 
+<!-- DRY: 共通文言（grillme / 永続メモリ / 引数）は全コマンド同期。変更時は10ファイル一括 -->
+
 # ダッシュボード生成
 
 個人データ（SQLite）常時収集・PostgreSQL設定時はチームデータも収集→個人 vs チーム比較表示の静的HTMLダッシュボード生成。スキル健全性・成長候補・プロジェクト登録もここに集約する。
 
 ## grillme 強制起動（必須）
 
-開始直後に grillme を必ず起動し、完了まで他の処理に進まない。
+開始直後に grillme スキル（`user-invocable: false`、description マッチで自動発火）を起動し、共通理解が固まるまで他処理に進まない。完了時は「合意した方針・制約・成功条件」を1行サマリで確認する。
+
+## 永続メモリ
+
+- context: SessionStart で `<mem-context>` 自動注入
+- search: `dashboard usage skill-health growth`
+- record: `{"event_type": "dashboard", "content": "Period: {days}d. Output: {output}. Format: {format}"}`
 
 ## 前提条件
 
 - ローカルSQLite（`~/.deepblue/mem.db`）初期化済み
 - チーム比較: `settings.json` で `mem.sync.enabled: true` かつ `postgres_url` 設定済み
 
-## 使い方
+## ステップ1: 前提確認
 
-```bash
-/dashboard # 30日・HTML出力
-/dashboard --days 90
-/dashboard --output ~/reports/dashboard.html
-/dashboard --format json
-```
+- `~/.deepblue/mem.db` の存在確認（未初期化なら SessionStart hook を1度走らせる）
+- PostgreSQL 設定確認（任意、`mem.sync.enabled` 確認）
 
-## 実装
+## ステップ2: データ収集 + HTML 生成
 
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/runtime/deepblue-helpers.sh"
 deepblue_mem_json dashboard '{"days": 30, "output": "./deepblue-dashboard.html", "format": "html"}'
 ```
+
+## ステップ3: 出力提示
+
+生成されたファイルパス・期間・集計指標サマリーを 1 行で報告。
 
 ## ダッシュボード内容
 
@@ -53,6 +61,6 @@ deepblue_mem_json dashboard '{"days": 30, "output": "./deepblue-dashboard.html",
 
 ## 引数
 
-- `--days <n>` — 集計期間（デフォルト: 30）
-- `--output <path>` — 出力先（デフォルト: /tmp/deepblue-dashboard.html）
-- `--format <html|json>` — 出力形式（デフォルト: html）
+- `--days=<n>` — 集計期間（既定: 30）
+- `--output=<path>` — 出力先（既定: /tmp/deepblue-dashboard.html）
+- `--format=html|json` — 出力形式（既定: html）

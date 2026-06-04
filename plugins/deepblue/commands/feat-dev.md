@@ -4,30 +4,59 @@ description: 新機能開発の7段階ワークフロー統括。発見→探索
 command: /feat-dev
 ---
 
+<!-- DRY: 共通文言（grillme / 永続メモリ / 引数）は全コマンド同期。変更時は10ファイル一括 -->
+
 # 機能開発フロー
 
 新機能を発見から納品サマリーまで直線遂行。各段階で専門エージェント起動。
 
-## 7段階
+## grillme 強制起動（必須）
 
-1. **発見** — 要求抽出・成功条件明確化。曖昧 → 利用側確認
-2. **探索（並行）** — 以下3つを同時起動し、結果マージ後に次段階へ:
-   - `deepblue:explorer` A: 既存構造・命名規約・類似実装調査
-   - `deepblue:explorer` B: 影響範囲・依存関係・破壊リスク調査
-   - `deepblue:explorer` C: 現行テストカバレッジ・テストパターン調査
-3. **質問** — 探索マージ結果を元に未解決分岐を `grillme` スタイルで徹底質問（推奨回答付き）
-4. **設計（並行）** — 以下2つを同時起動し、結果マージ後に次段階へ:
-   - `deepblue:architect` A: 決定モード → ブループリント取得
-   - `deepblue:perf-optimizer` B: パフォーマンス要件・ボトルネック予測（読み取り専用）
-5. **実装** — `deepblue:tdd-writer` RED→GREEN→REFACTOR 遵守
-6. **レビュー（並行）** — 以下2つを同時起動し、両結果が Approve または Warning のみのとき採用:
-   - `deepblue:reviewer` A: 品質・設計・保守性
-   - `deepblue:security-auditor` B: セキュリティ・脆弱性
-7. **サマリー** — 変更ファイル/追加テスト/残課題を一覧化
+開始直後に grillme スキル（`user-invocable: false`、description マッチで自動発火）を起動し、共通理解が固まるまで他処理に進まない。完了時は「合意した方針・制約・成功条件」を1行サマリで確認する。
 
-**段階飛ばし禁止**: 探索スキップ → 既存パターン無視 → 重複実装発生。
+## 永続メモリ
 
-## 出力形式
+- context: SessionStart で `<mem-context>` 自動注入
+- search: `feat-dev workflow {feature}` / `phase blocker feature`
+- record: `{"event_type": "feat-dev", "content": "Feature: {name}. Phases: {done}/7. Files: {n}. Tests: {n}"}`
+
+## ステップ1: 発見
+
+要求抽出・成功条件明確化。曖昧 → 利用側確認。
+
+## ステップ2: 探索（並列）
+
+以下3エージェントを**同時起動**し、結果マージ後に次段階へ:
+
+- `deepblue:explorer` A: 既存構造・命名規約・類似実装調査
+- `deepblue:explorer` B: 影響範囲・依存関係・破壊リスク調査
+- `deepblue:explorer` C: 現行テストカバレッジ・テストパターン調査
+
+## ステップ3: 質問
+
+探索マージ結果を元に未解決分岐を grillme スタイルで徹底質問（推奨回答付き）。
+
+## ステップ4: 設計（並列）
+
+以下2エージェントを**同時起動**し、結果マージ後に次段階へ:
+
+- `deepblue:architect` A: 決定モード → 単一ブループリント確定
+- `deepblue:perf-optimizer` B: パフォーマンス要件・ボトルネック予測（読み取り専用）
+
+## ステップ5: 実装
+
+`tdd` skill 自動発火（`user-invocable: false`、description マッチで起動）または `deepblue:tdd-writer` 明示起動。RED→GREEN→REFACTOR 遵守。
+
+## ステップ6: レビュー（並列）
+
+以下2エージェントを**同時起動**し、両結果が Approve または Warning のみのとき採用:
+
+- `deepblue:reviewer` A: 品質・設計・保守性
+- `deepblue:security-auditor` B: セキュリティ・脆弱性
+
+## ステップ7: サマリー
+
+変更ファイル/追加テスト/残課題を一覧化:
 
 ```
 ### 変更ファイル
@@ -40,14 +69,14 @@ command: /feat-dev
 - ...
 ```
 
+**段階飛ばし禁止**: 探索スキップ → 既存パターン無視 → 重複実装発生。
+
 ## 制約
 
 - 既存拡張 > 新規作成
 - テスト実行・緑必須（pytest / jest / go test 等）
 - 後方互換フォールバック禁止 → 古コード削除
 
-## 永続メモリ
+## 引数
 
-`<mem-context>` 注入で起動。
-search: `feature-dev workflow {feature}` / `phase blocker feature`
-record: `{"event_type": "feature-dev", "content": "Feature: {name}. Phases: {done}/7. Files: {n}. Tests: {n}"}`
+- 位置 #1: `[機能説明]`（省略時: 直前の会話文脈から要件抽出）
