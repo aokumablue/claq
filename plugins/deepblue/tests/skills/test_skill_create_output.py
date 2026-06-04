@@ -29,7 +29,7 @@ def test_formatters_cover_core_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "Instincts Generated" in sco.render_instincts([{"name": "n", "confidence": 0.5}])
     assert "Generation Complete" in sco.render_output("skill.md", "instincts.md")
     assert "Next Steps" in sco.render_next_steps()
-    assert "GitHub App" in sco.render_footer("github")
+    assert "github-review" in sco.render_footer("github")
     assert "gitlab-review" in sco.render_footer("gitlab")
     assert "Analyzing Repository" in sco.render_analyze_phase({"commits": 2})
 
@@ -43,7 +43,7 @@ def test_formatters_cover_core_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         ("instincts", [{"name": "beta"}], "Instincts Generated"),
         ("output", {"skillPath": "skill.md", "instinctsPath": "instincts.md"}, "Skill File:"),
         ("next-steps", None, "Next Steps"),
-        ("footer", None, "GitHub App"),
+        ("footer", None, "GitHub CLI"),
         ("analyze-phase", {"commits": 4}, "Analyzing Repository"),
     ],
 )

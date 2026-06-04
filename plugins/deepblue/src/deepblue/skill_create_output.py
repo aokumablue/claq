@@ -228,10 +228,7 @@ def render_footer(service: str | None = None) -> str:
     hosting_service = normalize_git_hosting_service(service or detect_git_hosting_service())
     hosting_label = get_git_hosting_service_label(hosting_service)
 
-    if hosting_service == "gitlab":
-        footer_line = f"  {hosting_label} CLI: {get_git_hosting_review_command(hosting_service)}"
-    else:
-        footer_line = "  GitHub App: github.com/apps/skill-creator"
+    footer_line = f"  {hosting_label} CLI: {get_git_hosting_review_command(hosting_service)}"
 
     return "\n".join(
         [
