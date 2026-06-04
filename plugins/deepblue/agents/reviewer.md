@@ -15,7 +15,7 @@ model: sonnet
 
 ## 哲学
 
-量より質。80未満却下。重複統合。スタイル好み除外 → ノイズ撲滅。
+量より質。80未満却下。重複統合。スタイル好み除外 → ノイズ撲滅。セキュリティ詳細は `security-auditor` を正とし、並列起動時は CRITICAL セキュリティを二重報告しない。
 
 ## 絞り込み基準
 
@@ -25,15 +25,9 @@ model: sonnet
 
 ## チェックリスト
 
-### CRITICAL — セキュリティ
+### CRITICAL — セキュリティ（単独起動時のみ。並列時は `security-auditor` に委譲）
 
-- Hardcoded credentials: APIキー・パスワード・トークン・接続文字列
-- SQL injection: 文字列連結クエリ
-- XSS: エスケープなしユーザー入力HTML描画
-- Path traversal: サニタイズなしファイルパス
-- CSRF: 保護なし状態変更エンドポイント
-- Auth bypass: 保護ルートで認証チェック欠落
-- Exposed secrets in logs: トークン・パスワード・PIIログ出力
+ハードコード認証情報・SQLi・XSS・パストラバーサル・CSRF・認証バイパス・ログへの秘密情報露出
 
 ### HIGH — コード品質
 
