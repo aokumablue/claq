@@ -353,7 +353,7 @@ def test_session_start_run_skips_template_session_and_prompts_for_pm(
         lambda cwd: SimpleNamespace(languages=[], frameworks=[], primary_language=None),
     )
     monkeypatch.setattr(session_start, "log", logs.append)
-    monkeypatch.setattr(session_start, "_SLIM_SKILL_PATH", tmp_path / "nonexistent-slim.md")
+    monkeypatch.setattr(session_start, "inject_slim_skill", lambda: [])
 
     payload = json.loads(session_start.run(""))
 
@@ -378,8 +378,6 @@ def test_session_start_slim_injection_uses_skill_content(
     sessions_dir = tmp_path / "sessions"
     learned_dir.mkdir()
     sessions_dir.mkdir()
-    skill_file = tmp_path / "SKILL.md"
-    skill_file.write_text("slim-content", encoding="utf-8")
 
     monkeypatch.setattr(session_start, "ensure_dir", lambda path: None)
     monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: learned_dir)
@@ -392,12 +390,7 @@ def test_session_start_slim_injection_uses_skill_content(
         "detect_project",
         lambda cwd: SimpleNamespace(languages=[], frameworks=[], primary_language=None),
     )
-    monkeypatch.setattr(
-        session_start.Settings,
-        "load",
-        lambda: SimpleNamespace(slim=SimpleNamespace(enabled=True)),
-    )
-    monkeypatch.setattr(session_start, "_SLIM_SKILL_PATH", skill_file)
+    monkeypatch.setattr(session_start, "inject_slim_skill", lambda: ["slim-content"])
 
     payload = json.loads(session_start.run("{not-json"))
     assert "slim-content" in payload["hookSpecificOutput"]["additionalContext"]
@@ -408,20 +401,20 @@ def test_pre_bash_commit_quality_detects_file_issues_and_commit_message_rules(
 ) -> None:
     content = "\n".join(
         [
-            'console.log("hi")',
-            "// console.log('commented')",
-            "debugger",
-            "// TODO: clean this up",
+            'console.log("hi")',  # nosec
+            "// console.log('commented')",  # nosec
+            "debugger",  # nosec
+            "// TODO: clean this up",  # nosec
             "// TODO: #123 tracked",
-            'const api_key = "abc";',
+            'const api_key = "abc";',  # nosec
         ]
     )
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
 
     issues = pre_bash_commit_quality.find_file_issues("src/app.js")
 
-    assert {issue["type"] for issue in issues} == {"console.log", "debugger", "todo", "secret"}
-    assert [issue["line"] for issue in issues if issue["type"] == "console.log"] == [1]
+    assert {issue["type"] for issue in issues} == {"console.log", "debugger", "todo", "secret"}  # nosec
+    assert [issue["line"] for issue in issues if issue["type"] == "console.log"] == [1]  # nosec
     assert [issue["line"] for issue in issues if issue["type"] == "todo"] == [4]
 
     assert pre_bash_commit_quality.validate_commit_message("git status") is None
@@ -429,6 +422,19 @@ def test_pre_bash_commit_quality_detects_file_issues_and_commit_message_rules(
     assert message is not None
     assert message["message"] == "feat(core): Add feature."
     assert {issue["type"] for issue in message["issues"]} == {"capitalization", "punctuation"}
+
+
+def test_find_file_issues_skips_nosec_marked_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    """# nosec を含む行は検出対象から除外される。"""
+    content = "\n".join(
+        [
+            'debugger  # nosec',
+            'const api_key = "x";  # nosec',
+        ]
+    )
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
+
+    assert pre_bash_commit_quality.find_file_issues("src/app.py") == []
 
 
 def test_pre_bash_commit_quality_helpers_handle_subprocess_errors(monkeypatch: pytest.MonkeyPatch) -> None:

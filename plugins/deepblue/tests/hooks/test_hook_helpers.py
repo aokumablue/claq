@@ -213,14 +213,12 @@ def test_session_end_run_logs_outer_exception(monkeypatch: pytest.MonkeyPatch) -
     assert any("Error: boom" in message for message in logs)
 
 
-def test_session_start_slim_injection_and_error_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_session_start_slim_injection_wired_into_context(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """run() が inject_slim_skill() の戻り値を additionalContext に連結する。"""
     learned_dir = tmp_path / "learned"
     sessions_dir = tmp_path / "sessions"
     learned_dir.mkdir()
     sessions_dir.mkdir()
-    skill_file = tmp_path / "SKILL.md"
-    skill_file.write_text("slim-content", encoding="utf-8")
-    logs: list[str] = []
 
     monkeypatch.setattr(session_start, "ensure_dir", lambda path: None)
     monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: learned_dir)
@@ -233,31 +231,10 @@ def test_session_start_slim_injection_and_error_branch(monkeypatch: pytest.Monke
         "detect_project",
         lambda cwd: SimpleNamespace(languages=[], frameworks=[], primary_language=None),
     )
-    monkeypatch.setattr(
-        session_start.Settings,
-        "load",
-        lambda: SimpleNamespace(slim=SimpleNamespace(enabled=True)),
-    )
-    monkeypatch.setattr(session_start, "_SLIM_SKILL_PATH", skill_file)
-    monkeypatch.setattr(session_start, "log", logs.append)
+    monkeypatch.setattr(session_start, "inject_slim_skill", lambda: ["slim-content"])
 
     payload = json.loads(session_start.run(json.dumps({"session_id": "abc"})))
     assert "slim-content" in payload["hookSpecificOutput"]["additionalContext"]
-
-    monkeypatch.setattr(
-        session_start,
-        "_SLIM_SKILL_PATH",
-        SimpleNamespace(
-            exists=lambda: True,
-            read_text=lambda *args, **kwargs: (_ for _ in ()).throw(OSError("boom\nbad\x1b[31m")),
-        ),
-    )
-    assert json.loads(session_start.run(json.dumps({"session_id": "abc"})))["hookSpecificOutput"]["additionalContext"] == ""
-    assert any("Slim injection error" in message for message in logs)
-    assert any(
-        "Slim injection error" in message and "\n" not in message and "\x1b" not in message
-        for message in logs
-    )
 
 
 def test_session_start_main_sanitizes_exception_logs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -304,9 +281,8 @@ def test_session_start_sanitizes_git_logs(monkeypatch: pytest.MonkeyPatch, tmp_p
     )
     monkeypatch.setattr("deepblue.mem.database.Database", FakeDatabase)
     monkeypatch.setattr(
-        session_start.Settings,
-        "load",
-        lambda: SimpleNamespace(db_path=tmp_path / "mem.db", slim=SimpleNamespace(enabled=False)),
+        "deepblue.mem.settings.Settings.load",
+        lambda: SimpleNamespace(db_path=tmp_path / "mem.db"),
     )
 
     session_start._save_project_profile(
@@ -429,11 +405,6 @@ class TestImportAdrsAndInstincts:
         )
         monkeypatch.setattr(ss_mod, "_save_project_profile", lambda info: None)
         monkeypatch.setattr(ss_mod, "_import_adrs_and_instincts", lambda: called.append(True))
-        monkeypatch.setattr(
-            ss_mod.Settings,
-            "load",
-            lambda: SimpleNamespace(slim=SimpleNamespace(enabled=False)),
-        )
         monkeypatch.setattr(ss_mod, "log", lambda msg: None)
 
         ss_mod.run("{}")

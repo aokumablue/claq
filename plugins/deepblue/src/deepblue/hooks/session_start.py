@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 from deepblue.hooks.hook_common import emit_session_start_output, read_raw_stdin
+from deepblue.hooks.slim_fallback import inject_slim_skill
 from deepblue.lib.core_utils import (
     ensure_dir,
     find_files,
@@ -345,6 +346,8 @@ def run(_raw_input: str) -> str:
 
     _save_project_profile(project_info)
     _import_adrs_and_instincts()
+
+    additional_context_parts.extend(inject_slim_skill())
 
     additional_context = "\n\n".join(additional_context_parts)
     return emit_session_start_output(additional_context)

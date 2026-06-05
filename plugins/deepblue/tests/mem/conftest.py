@@ -28,7 +28,7 @@ def pytest_collection_modifyitems(items: list) -> None:
         # embedding / _paths / settings は sqlite-vec に依存しないのでスキップ除外
         if item.fspath.basename in {
             "test_embedding_security.py", "test_embedding.py",
-            "test_paths.py", "test_settings.py", "test_settings_slim.py",
+            "test_paths.py", "test_settings.py",
             "test_cli.py",
         }:
             continue
