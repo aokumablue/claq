@@ -117,13 +117,6 @@ class SyncSettings:
 
 
 @dataclass
-class SlimSettings:
-    """LLM レスポンス圧縮（Slim）設定（ハードコード既定値のみ）"""
-
-    enabled: bool = True
-
-
-@dataclass
 class TeamSettings:
     """team（PostgreSQL チーム共有メモリ検索）設定。
 
@@ -163,7 +156,6 @@ class Settings:
     last_compacted_at: float = 0.0  # ランタイム状態
     sync: SyncSettings = field(default_factory=SyncSettings)
     compact: CompactSettings = field(default_factory=CompactSettings)
-    slim: SlimSettings = field(default_factory=SlimSettings)
     team: TeamSettings = field(default_factory=TeamSettings)
 
     # --- 導出プロパティ ---

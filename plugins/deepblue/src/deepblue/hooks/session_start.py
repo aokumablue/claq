@@ -32,9 +32,6 @@ from deepblue.lib.sanitize import sanitize_log_value
 from deepblue.lib.settings import extract_coverage_hint_lines
 from deepblue.lib.slim_text import compact_line
 from deepblue.lib.subprocess_utils import check_output_text
-from deepblue.mem.settings import Settings
-
-_SLIM_SKILL_PATH = Path(__file__).parents[3] / "skills" / "slim" / "SKILL.md"
 
 _SUMMARY_START = "<!-- deepblue:SUMMARY:START -->"
 _SUMMARY_END = "<!-- deepblue:SUMMARY:END -->"
@@ -322,17 +319,6 @@ def _collect_project_context(project_info: ProjectInfo) -> list[str]:
     return parts
 
 
-def _inject_slim_skill() -> list[str]:
-    """Slim 設定が有効な場合に SKILL.md の内容をコンテキストパーツとして返す。"""
-    try:
-        slim_cfg = Settings.load().slim
-        if slim_cfg.enabled and _SLIM_SKILL_PATH.exists():
-            return [_SLIM_SKILL_PATH.read_text(encoding="utf-8")]
-    except Exception as e:
-        _log_sanitized_exception("[SessionStart] Slim injection error", e)
-    return []
-
-
 def run(_raw_input: str) -> str:
     """セッション開始フックを実行し hookSpecificOutput の JSON を返す
 
@@ -359,8 +345,6 @@ def run(_raw_input: str) -> str:
 
     _save_project_profile(project_info)
     _import_adrs_and_instincts()
-
-    additional_context_parts.extend(_inject_slim_skill())
 
     additional_context = "\n\n".join(additional_context_parts)
     return emit_session_start_output(additional_context)
