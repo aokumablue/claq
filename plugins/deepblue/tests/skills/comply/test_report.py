@@ -134,3 +134,28 @@ def test_generate_report_without_promotions_or_scenarios() -> None:
     assert _overall_compliance([]) == 0.0
     assert _step_compliance_rate("write_test", []) == 0.0
     assert _steps_to_promote(spec, [], 0.5) == []
+
+
+def test_generate_report_no_promotion_and_no_observations(tmp_path: Path) -> None:
+    """全ステップ検出（promote無し）かつ observations 空のレポート。"""
+    spec = _make_spec()
+    skill_path = tmp_path / "skill.md"
+    skill_path.write_text("# Skill", encoding="utf-8")
+    results = [
+        (
+            "strict",
+            ComplianceResult(
+                spec_id=spec.id,
+                steps=(
+                    StepResult(step_id="write_test", detected=True, evidence=(), failure_reason=None),
+                    StepResult(step_id="refactor", detected=True, evidence=(), failure_reason=None),
+                ),
+                compliance_rate=1.0,
+                recommend_hook_promotion=False,
+                classification={},
+            ),
+            [],
+        ),
+    ]
+    report = generate_report(skill_path, spec, results)
+    assert "comply Report" in report

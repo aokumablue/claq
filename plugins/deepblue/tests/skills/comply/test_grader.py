@@ -240,3 +240,25 @@ class TestTemporalOrderAfterStepViolation:
 
         step_b_result = next(s for s in result.steps if s.step_id == "step_b")
         assert step_b_result.detected is True
+
+
+def _ev(ts: str = "t1") -> "ObservationEvent":
+    return ObservationEvent(timestamp=ts, event="tool_use", tool="X", session="s", input="", output="")
+
+
+def test_check_temporal_order_before_step_resolved_empty() -> None:
+    """before_step が resolved に存在し空なら制約を満たす（None）。"""
+    from deepblue.skills.comply.grader import _check_temporal_order
+    from deepblue.skills.comply.parser import Detector, Step
+
+    step = Step(id="s", description="d", required=True, detector=Detector(description="x", before_step="b"))
+    assert _check_temporal_order(step, _ev(), {"b": []}, {}) is None
+
+
+def test_check_temporal_order_before_step_from_classified() -> None:
+    """before_step が resolved に無ければ classified を使い、空なら None。"""
+    from deepblue.skills.comply.grader import _check_temporal_order
+    from deepblue.skills.comply.parser import Detector, Step
+
+    step = Step(id="s", description="d", required=True, detector=Detector(description="x", before_step="b"))
+    assert _check_temporal_order(step, _ev(), {}, {}) is None

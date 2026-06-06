@@ -450,3 +450,34 @@ class TestRunScenario:
         assert len(run.observations) == 2
         assert run.observations[0].tool == "Write"
         assert run.observations[1].tool == "Bash"
+
+
+def test_build_run_cmd_non_claude_binary(tmp_path) -> None:
+    """claude 以外のバイナリでは --verbose を付けない。"""
+    from deepblue.skills.comply.runner import _build_run_cmd
+
+    cmd = _build_run_cmd("codex", _make_scenario(), "model", 5, tmp_path)
+    assert "--verbose" not in cmd
+
+
+def test_process_assistant_message_skips_non_tool_use() -> None:
+    """tool_use 以外のブロックは pending に登録しない。"""
+    from deepblue.skills.comply.runner import _process_assistant_message
+
+    pending: dict = {}
+    counter = _process_assistant_message({"message": {"content": [{"type": "text"}]}}, pending, 0)
+    assert counter == 0
+    assert pending == {}
+
+
+def test_process_user_message_unknown_tool_use_id() -> None:
+    """pending に無い tool_use_id はスキップする。"""
+    from deepblue.skills.comply.runner import _process_user_message
+
+    events: list = []
+    _process_user_message(
+        {"message": {"content": [{"type": "tool_result", "tool_use_id": "unknown"}]}},
+        {},
+        events,
+    )
+    assert events == []
