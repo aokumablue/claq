@@ -1027,3 +1027,117 @@ def test_process_event_line_assistant_read_no_match() -> None:
 
     line = '{"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "other"}}]}}'
     assert _process_event_line(line, "target", [None], [""], [False]) is False
+
+
+def test_run_eval_main_without_verbose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--verbose 無しでは進捗を stderr に出さず JSON のみ出力する。"""
+    eval_file = tmp_path / "eval.json"
+    eval_file.write_text(json.dumps([{"query": "q1", "should_trigger": True}]), encoding="utf-8")
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+    monkeypatch.setattr(run_eval, "parse_skill_md", lambda path: ("alpha", "desc", "content"))
+    monkeypatch.setattr(run_eval, "find_project_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        run_eval,
+        "run_eval",
+        lambda **kwargs: {
+            "skill_name": "alpha",
+            "description": "desc",
+            "results": [{"query": "q1", "should_trigger": True, "trigger_rate": 1.0, "triggers": 1, "runs": 1, "pass": True}],
+            "summary": {"total": 1, "passed": 1, "failed": 0},
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["run_eval.py", "--eval-set", str(eval_file), "--skill-path", str(skill_dir)])
+    run_eval.main()
+    captured = capsys.readouterr()
+    assert '"skill_name": "alpha"' in captured.out
+    assert "評価中" not in captured.err
+
+
+def test_run_single_query_no_remaining_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """プロセス終了済みで残り出力が空でも処理できる。"""
+    process = _PollingProcess(b"")
+    monkeypatch.setattr(run_eval.uuid, "uuid4", lambda: SimpleNamespace(hex="abc"))
+    monkeypatch.setattr(run_eval.subprocess, "Popen", lambda *a, **k: process)
+    result = run_eval.run_single_query(
+        "q", "alpha", "desc", SingleQueryConfig(timeout=5, project_root=str(tmp_path), model=None)
+    )
+    assert result is False
+
+
+def test_run_single_query_timeout_immediately(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """timeout=0 ではループに入らず終了する。"""
+
+    class _NeverExits:
+        def __init__(self):
+            self.stdout = __import__("io").BytesIO(b"")
+            self.killed = False
+            self.waited = False
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self, timeout=None):
+            self.waited = True
+
+    monkeypatch.setattr(run_eval.uuid, "uuid4", lambda: SimpleNamespace(hex="abc"))
+    monkeypatch.setattr(run_eval.subprocess, "Popen", lambda *a, **k: _NeverExits())
+    result = run_eval.run_single_query(
+        "q", "alpha", "desc", SingleQueryConfig(timeout=0, project_root=str(tmp_path), model=None)
+    )
+    assert result is False
+
+
+def test_run_loop_main_without_results_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--results-dir 無しではファイルを書かず JSON のみ出力する。"""
+    eval_file = tmp_path / "eval.json"
+    eval_file.write_text(json.dumps([{"query": "q1", "should_trigger": True}]), encoding="utf-8")
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+    monkeypatch.setattr(
+        run_loop,
+        "run_loop",
+        lambda **kwargs: {
+            "exit_reason": "done", "original_description": "o", "best_description": "d",
+            "best_score": "1/1", "best_train_score": "1/1", "best_test_score": None,
+            "final_description": "d", "iterations_run": 1, "holdout": 0.0,
+            "train_size": 1, "test_size": 0, "history": [],
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["run_loop.py", "--eval-set", str(eval_file), "--skill-path", str(skill_dir), "--model", "sonnet"])
+    run_loop.main()
+    assert '"exit_reason": "done"' in capsys.readouterr().out
+
+
+def test_run_loop_verbose_no_holdout_reaches_max(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """verbose かつ holdout 無しで失敗が続けば最大反復まで回る。"""
+    skill_path = tmp_path / "skill"
+    skill_path.mkdir()
+    (skill_path / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+    monkeypatch.setattr(run_loop, "find_project_root", lambda: tmp_path)
+    monkeypatch.setattr(run_loop, "parse_skill_md", lambda path: ("alpha", "orig desc", "content"))
+    monkeypatch.setattr(
+        run_loop,
+        "run_eval",
+        lambda **kwargs: {
+            "results": [{"query": "q", "should_trigger": True, "trigger_rate": 0.0, "triggers": 0, "runs": 1, "pass": False}],
+            "summary": {"passed": 0, "failed": 1, "total": 1},
+        },
+    )
+    monkeypatch.setattr(run_loop, "improve_description", lambda *a, **k: "new desc")
+    result = run_loop.run_loop(
+        eval_set=[{"query": "q", "should_trigger": True}],
+        skill_path=skill_path,
+        description_override=None,
+        loop_cfg=_make_loop_cfg(tmp_path, max_iterations=2, holdout=0.0, verbose=True),
+    )
+    assert result["iterations_run"] == 2
