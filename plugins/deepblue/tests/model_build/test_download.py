@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import shutil
 import tarfile
@@ -10,8 +11,6 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import io
 
 import pytest
 

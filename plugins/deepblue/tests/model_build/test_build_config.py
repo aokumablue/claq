@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from model_build.__main__ import _load_build_config
 
 _REQUIRED_KEYS = (

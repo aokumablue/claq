@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from model_build._paths import safe_join, sha256_file, validate_sha256_format
 
 
