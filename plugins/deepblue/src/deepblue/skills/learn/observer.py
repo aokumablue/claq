@@ -581,7 +581,7 @@ def _run_loop(project: ObserverProject, config: ObserverConfig) -> int:
         wake_event.set()
         state["usr1_fired"] = True
 
-    if hasattr(signal, "SIGUSR1"):
+    if hasattr(signal, "SIGUSR1"):  # pragma: no branch
         signal.signal(signal.SIGUSR1, _on_usr1)
 
     while True:
@@ -791,5 +791,5 @@ def main(argv: list[str] | None = None) -> int:
     return _start_observer(project, reset)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
