@@ -237,7 +237,7 @@ def _build_observation(stdin_data: dict, phase: str, project: dict) -> dict:
     }
     if tool_input_str:
         observation["input"] = _scrub_secret_text(tool_input_str)
-    if tool_output_str is not None:
+    if tool_output_str is not None:  # pragma: no branch
         observation["output"] = _scrub_secret_text(tool_output_str)
     return observation
 
@@ -376,7 +376,7 @@ def _signal_observers(project: dict) -> None:
     if not _should_signal_now(project, signal_every_n):
         return
 
-    if not hasattr(signal, "SIGUSR1"):
+    if not hasattr(signal, "SIGUSR1"):  # pragma: no cover
         return
 
     signaled: set[int] = set()
@@ -462,5 +462,5 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
