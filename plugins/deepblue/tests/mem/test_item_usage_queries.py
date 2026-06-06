@@ -296,3 +296,23 @@ class TestAlignTeamCounts:
     def test_empty_personal_labels(self) -> None:
         result = align_team_counts([], self.TEAM_RANKING, "skill")
         assert result == []
+
+
+def test_item_usage_ranking_pg_placeholder() -> None:
+    """PG プレースホルダ経路で PG 用 SQL を実行する。"""
+
+    class _FakeCur:
+        def __init__(self) -> None:
+            self.sql = ""
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+            return self
+
+        def fetchall(self):
+            return []
+
+    cur = _FakeCur()
+    result = item_usage_ranking(cur, "%s", days=7)
+    assert result == []
+    assert "%s" in cur.sql

@@ -120,3 +120,13 @@ def test_sync_session_to_observations_handles_write_failures(tmp_path: Path, mon
     assert count == 0
     assert any("書き出し失敗" in warning for warning in warnings)
     db.close()
+
+
+def test_get_project_observations_path_existing_json(tmp_path, monkeypatch) -> None:
+    """project.json が既存なら再作成せずパスを返す。"""
+    import deepblue.mem.bridge as b
+
+    monkeypatch.setattr(b, "_project_base_dir", lambda: tmp_path)
+    b._get_project_observations_path("pid", "name")  # 1回目: 作成
+    result = b._get_project_observations_path("pid", "name")  # 2回目: 既存 → 作成スキップ
+    assert result.name == "observations.jsonl"

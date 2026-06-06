@@ -1088,7 +1088,6 @@ class TestConcurrentChunkInsert:
         - chunk_index=0 を手動で直接 INSERT（先行プロセス相当）
         - その後 store_chunk(chunk_index=0) を呼ぶ → UNIQUE 違反 → 再採番して chunk_index=1 で成功
         """
-        import sqlite3 as _sqlite3
 
         session_id = "retry-session"
         db.upsert_session(Session(session_id=session_id, project="proj", started_at_epoch=int(time.time())))

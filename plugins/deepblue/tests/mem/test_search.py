@@ -310,3 +310,10 @@ class TestShouldInjectMemory:
 
     def test_empty_prompt(self) -> None:
         assert should_inject_memory("") is False
+
+
+def test_pg_search_rows_empty_embedding(db: Database, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    """埋め込みが空（model.onnx 未完了）なら空リストを返す。"""
+    monkeypatch.setattr("deepblue.mem.embedding.embed_query", lambda query, model: [])
+    svc = SearchService(db, settings)
+    assert svc._pg_search_rows(object(), "q", 5, None) == []

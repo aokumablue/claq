@@ -380,3 +380,16 @@ def test_session_init_skips_when_prompt_not_inject(
     )
     # search が呼ばれていないこと（FakeDB の sessions に upsert はされている）
     assert len(db.sessions) >= 1
+
+
+def test_search_and_inject_no_results(tmp_path, monkeypatch, capsys) -> None:
+    """検索結果が空なら何も出力しない。"""
+    from deepblue.mem.cli_session_handlers import _search_and_inject_context
+    from tests.mem.conftest import FakeDB, make_settings
+
+    monkeypatch.setattr(search_mod.SearchService, "search", lambda self, **k: [])
+    settings = make_settings(tmp_path)
+    settings.sync = SimpleNamespace(enabled=False, postgres_url="")
+    log = SimpleNamespace(warning=lambda *a, **k: None)
+    _search_and_inject_context(FakeDB(), settings, "p", "proj", log=log)
+    assert capsys.readouterr().out == ""

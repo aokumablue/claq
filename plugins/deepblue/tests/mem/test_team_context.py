@@ -256,3 +256,14 @@ def test_format_timestamp_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(module, "datetime", _BadDatetime)
     assert module._format_timestamp(0) == "unknown"
     assert module._format_timestamp(1) == "invalid"
+
+
+def test_format_chunk_empty_fields() -> None:
+    """全フィールドが空のチャンクでもヘッダのみで整形できる。"""
+    from deepblue.mem.team_context import _format_chunk
+
+    out = _format_chunk({})
+    assert "unknown" in out
+    assert "**プロンプト**" not in out
+    assert "**ツール**" not in out
+    assert "**変更ファイル**" not in out

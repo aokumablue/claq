@@ -298,3 +298,11 @@ def test_dashboard_negative_paths(
     monkeypatch.setattr(pg_database_mod, "PgDatabase", lambda url: SimpleNamespace(test_connection=lambda: False, close=lambda: None))
     cli._handle_dashboard(settings, {})
     assert json.loads(capsys.readouterr().out)["success"] is True
+
+
+def test_build_chunk_result_missing_chunk() -> None:
+    """存在しない chunk_id は None を返す。"""
+    from deepblue.mem.cli_search_handlers import _build_chunk_result
+    from tests.mem.conftest import FakeDB
+
+    assert _build_chunk_result(FakeDB(), "nope") is None

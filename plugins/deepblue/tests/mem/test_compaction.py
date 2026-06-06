@@ -260,3 +260,31 @@ class TestOptimizeDbVacuum:
         finally:
             db.conn = original_conn
         assert "fragmentation_before" in result
+
+
+def test_optimize_db_vacuum_failure(db: Database) -> None:
+    """断片化率が閾値超でも VACUUM が失敗すれば vacuumed=False を返す。"""
+    import sqlite3
+    from types import SimpleNamespace
+
+    class _FakeConn:
+        def execute(self, sql, *args):
+            if "freelist_count" in sql:
+                return SimpleNamespace(fetchone=lambda: (20,))
+            if "page_count" in sql:
+                return SimpleNamespace(fetchone=lambda: (100,))  # frag=0.2 > 0.15
+            if sql == "VACUUM":
+                raise sqlite3.OperationalError("cannot VACUUM")
+            return SimpleNamespace(fetchone=lambda: (0,))
+
+        def commit(self) -> None:
+            pass
+
+    original = db.conn
+    db.conn = _FakeConn()
+    try:
+        result = optimize_db(db)
+    finally:
+        db.conn = original
+    assert result["vacuumed"] is False
+    assert result["fragmentation_before"] == 0.2

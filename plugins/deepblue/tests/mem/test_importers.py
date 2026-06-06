@@ -548,3 +548,42 @@ class TestImportAll:
             result = import_all(db, "test_user", str(tmp_path), project_id="proj")
 
         assert result == {"instincts": 1, "adrs": 2, "events": 3}
+
+
+def test_get_project_identifier_no_config(tmp_path: Path) -> None:
+    """.git はあるが config が無ければディレクトリ名を返す。"""
+    import deepblue.mem.importers as imp
+
+    (tmp_path / ".git").mkdir()
+    assert imp._get_project_identifier(tmp_path) == tmp_path.name
+
+
+def test_get_project_identifier_no_url(tmp_path: Path) -> None:
+    """.git/config に url 行が無ければディレクトリ名を返す。"""
+    import deepblue.mem.importers as imp
+
+    git = tmp_path / ".git"
+    git.mkdir()
+    (git / "config").write_text("[core]\n", encoding="utf-8")
+    assert imp._get_project_identifier(tmp_path) == tmp_path.name
+
+
+def test_import_adrs_skips_unparseable(tmp_path: Path) -> None:
+    """frontmatter の無い ADR は None 扱いでスキップする。"""
+    from deepblue.mem.importers import import_adrs
+    from tests.mem.conftest import FakeDB
+
+    adr_dir = tmp_path / "docs" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "bad.md").write_text("frontmatter のない本文だけ", encoding="utf-8")
+    assert import_adrs(FakeDB(), "user", tmp_path) == 0
+
+
+def test_import_project_event_logs_no_observations(tmp_path: Path, monkeypatch) -> None:
+    """observations.jsonl の無いプロジェクトはスキップする。"""
+    import deepblue.mem.importers as imp
+    from tests.mem.conftest import FakeDB
+
+    (tmp_path / "projA").mkdir()  # observations.jsonl 無し
+    monkeypatch.setattr(imp, "_project_dirs", lambda: [tmp_path])
+    assert imp._import_project_event_logs(FakeDB(), "user", None, set()) == 0

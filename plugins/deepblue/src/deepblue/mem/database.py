@@ -88,7 +88,7 @@ class Database:
     def _migrate(self) -> None:
         """マイグレーション管理テーブル（schema_migrations は _SCHEMA_SQL で作成済み）を使い、未適用のみ実行する。"""
         applied = {r[0] for r in self.conn.execute("SELECT version FROM schema_migrations").fetchall()}
-        for version, sqls in _MIGRATIONS:
+        for version, sqls in _MIGRATIONS:  # pragma: no cover  # _MIGRATIONS は現状空（本体は将来用）
             if version not in applied:
                 for sql in sqls:
                     self.conn.execute(sql)

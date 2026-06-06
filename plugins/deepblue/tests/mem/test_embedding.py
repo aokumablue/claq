@@ -498,3 +498,10 @@ class TestOnnxCheckerIntegration:
         result = embedding.embed(["hello"])
         assert isinstance(result, list)
         assert len(result) == 1
+
+
+def test_embed_query_non_default_model_warns(monkeypatch) -> None:
+    """既定と異なる embedding_model を渡すと警告しつつ既定モデルで処理する。"""
+    monkeypatch.setattr(embedding, "_encode", lambda texts: [[0.1, 0.2]])
+    result = embedding.embed_query("q", "other-model-xyz")
+    assert result == [0.1, 0.2]

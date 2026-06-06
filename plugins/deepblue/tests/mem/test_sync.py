@@ -91,6 +91,7 @@ class TestShouldSync:
     def test_returns_true_just_after_retry_backoff_expires(self, mock_settings):
         """リトライバックオフ（5分）満了直後は True を返す。"""
         import time
+
         from deepblue.mem.sync import _MIN_RETRY_INTERVAL
 
         now = time.time()
@@ -343,7 +344,7 @@ class TestUpsertWithOrigin:
         ]
         result = _upsert_with_origin(items, "replaced")
         assert all(r.origin_user == "replaced" for r in result)
-        assert all(r is not orig for r, orig in zip(result, items))
+        assert all(r is not orig for r, orig in zip(result, items, strict=False))
 
 
 class TestSyncToPostgresDetailed:
@@ -1192,3 +1193,11 @@ class TestSyncLogVisibility:
 
         monkeypatch.setattr(sync_mod, "urlparse", lambda url: (_ for _ in ()).throw(ValueError("parse error")))
         assert _mask_url("postgresql://user:secret@host/db") == "postgresql://user:secret@host/db"
+
+
+def test_count_pending_rows_invalid_table() -> None:
+    """未知テーブル名は ValueError を送出する。"""
+    import deepblue.mem.sync as sync_mod
+
+    with pytest.raises(ValueError, match="Invalid table"):
+        sync_mod._count_pending_rows(None, "bad_table")

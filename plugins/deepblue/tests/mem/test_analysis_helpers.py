@@ -367,3 +367,18 @@ def test_generate_proposal_builds_candidates_and_actions():
     ]
     assert proposal["action_items"][0]["target"] == "file-workflow"
     assert proposal["action_items"][2]["target"].startswith("first long gap prompt")
+
+
+def test_build_improvements_no_high_usage_tools() -> None:
+    """使用回数が閾値未満のツールしか無ければ tool_coverage 提案を出さない。"""
+    out = sa._build_improvements("s", [{"count": 1, "name": "x"}], [])
+    assert all(i["type"] != "tool_coverage" for i in out)
+
+
+def test_build_action_items_low_occurrence_gap() -> None:
+    """occurrence_count が閾値未満の gap は fill_gap アクションにしない。"""
+    out = sp._build_action_items(
+        [],
+        [{"occurrence_count": 2, "sample_prompt": "p", "suggestion": "s", "priority": "low"}],
+    )
+    assert all(a["action"] != "fill_gap" for a in out)

@@ -1234,3 +1234,18 @@ def test_resolve_safe_dashboard_output_path_resolve_oserror(
 
     monkeypatch.setattr(Path, "resolve", _resolve)
     assert _resolve_safe_dashboard_output_path(settings, str(tmp_path / "x.html")) is None
+
+
+def test_slim_prompt_codeblock_blank_only() -> None:
+    """コードブロック内が空白のみなら空文字を返す。"""
+    from deepblue.mem.cli_search_handlers import slim_prompt
+
+    assert slim_prompt("```\n \n```") == ""
+
+
+def test_slim_context_content_prose_over_limit() -> None:
+    """prose 行数上限超で省略記号を一度だけ付け以降はスキップする。"""
+    from deepblue.mem.cli_search_handlers import slim_context_content
+
+    out = slim_context_content("a\nb\nc", max_prose_lines=1)
+    assert out.count("...") == 1

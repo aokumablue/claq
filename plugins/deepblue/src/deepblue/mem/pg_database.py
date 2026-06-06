@@ -181,7 +181,7 @@ class PgDatabase:
             self._probe_cache = (False, time.monotonic())
             return False
         finally:
-            if conn is not None:
+            if conn is not None:  # pragma: no branch  # conn None は except 経路のみで finally 後に成功 return しない
                 self._put_conn(conn)
 
         # 成功時はキャッシュを無効化して以降も毎回テストする
