@@ -201,7 +201,7 @@ def _build_main_parser() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     p_download.add_argument(
         "--config",
         type=Path,
-        default=Path(__file__).resolve().parents[2] / "onnx" / "onnx.json",
+        default=Path(__file__).resolve().parents[2] / "onnx.json",
         help="download 設定の JSON",
     )
     p_download.add_argument("--out", type=Path, default=_DEFAULT_OUT, help="出力ディレクトリ")

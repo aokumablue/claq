@@ -240,7 +240,7 @@ install_user_python() {
   # ONNX モデルは既存ファイルを最優先で使い、未生成なら外部配布 → 現行ビルドの順で解決する。
   local model_target="${HOME}/.deepblue/models"
   local model_onnx="${model_target}/model.onnx"
-  local onnx_config="${SCRIPT_DIR}/onnx/onnx.json"
+  local onnx_config="${SCRIPT_DIR}/onnx.json"
   local src_dir="${SCRIPT_DIR}/src"
 
   if [[ -f "${model_onnx}" ]]; then
@@ -267,9 +267,13 @@ install_user_python() {
       fi
     else
       # 手動実行: 従来どおり同期ビルド
-      # shellcheck source=onnx/_build_onnx_lib.sh
-      source "${SCRIPT_DIR}/onnx/_build_onnx_lib.sh"
-      build_onnx_if_missing "${model_target}" "fp16"
+      if [[ -f "${SCRIPT_DIR}/onnx/_build_onnx_lib.sh" ]]; then
+        # shellcheck source=onnx/_build_onnx_lib.sh
+        source "${SCRIPT_DIR}/onnx/_build_onnx_lib.sh"
+        build_onnx_if_missing "${model_target}" "fp16"
+      else
+        echo "[deepblue] Warning: ONNX build scripts not available. Please build manually." >&2
+      fi
     fi
   fi
 

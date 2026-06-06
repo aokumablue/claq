@@ -44,6 +44,7 @@ echo "Filtering dev-only files..."
 git filter-repo \
   --invert-paths \
   --path plugins/deepblue/tests/ \
+  --path plugins/deepblue/onnx/ \
   --path plugins/deepblue/src/model_build/ \
   --path scripts/ \
   --path CLAUDE.md \
