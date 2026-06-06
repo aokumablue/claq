@@ -2298,3 +2298,111 @@ def test_find_cross_project_skips_duplicate_within_project(patch_globals):
     tree["registry_file"].write_text(json.dumps(registry))
     result = ev._find_cross_project_instincts()
     assert result == {}
+
+
+def test_print_pending_summary_few_and_none_expiring(capsys):
+    """pending が 5 未満かつ期限間近が無ければ警告を出さない。"""
+    import deepblue.skills.learn.cli.commands as cmds
+
+    cmds._print_pending_summary([], "---")
+    out = capsys.readouterr().out
+    assert "auto-delete" not in out
+    assert "Expiring" not in out
+
+
+def test_build_export_content_no_scope_global_project():
+    """scope 未指定かつ global プロジェクトのエクスポートヘッダ。"""
+    from types import SimpleNamespace
+
+    import deepblue.skills.learn.cli.commands as cmds
+
+    out = cmds._build_export_content([], SimpleNamespace(scope=None), {"id": "global", "name": "g"})
+    assert "Scope:" not in out
+    assert "Project:" not in out
+
+
+def test_prune_dry_run_report_quiet():
+    """quiet なら dry-run レポートを出力しない。"""
+    import deepblue.skills.learn.cli.commands as cmds
+
+    cmds._prune_dry_run_report([], [], 30, quiet=True)
+
+
+def test_prune_execute_oserror_quiet(monkeypatch, tmp_path):
+    """削除失敗かつ quiet では警告を出さない。"""
+    from pathlib import Path
+
+    import deepblue.skills.learn.cli.commands as cmds
+
+    f = tmp_path / "x.yaml"
+    f.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(Path, "unlink", lambda self, **k: (_ for _ in ()).throw(OSError("boom")))
+    cmds._prune_execute([{"path": f}], [], 30, quiet=True)
+
+
+def test_print_status_instincts_global_only(capsys):
+    """プロジェクトスコープが無く global のみの状態表示。"""
+    import deepblue.skills.learn.cli.commands as cmds
+
+    cmds._print_status_instincts(
+        {"name": "p", "id": "i"},
+        [{"_scope_label": "global", "id": "g", "content": ""}],
+        "---",
+    )
+    out = capsys.readouterr().out
+    assert "GLOBAL" in out
+    assert "PROJECT-SCOPED" not in out
+
+
+def test_classify_instincts_keeps_highest_confidence():
+    """同一 id の新規候補は最高確信度を優先する。"""
+    import deepblue.skills.learn.cli.commands as cmds
+
+    to_add, to_update, dupes = cmds._classify_instincts(
+        [{"id": "x", "confidence": 0.9, "content": "a"}, {"id": "x", "confidence": 0.3, "content": "b"}],
+        [],
+    )
+    assert len(to_add) == 1
+
+
+def test_collect_stale_paths_no_matching_existing(tmp_path):
+    """更新対象に対応する既存ファイルが無ければ空。"""
+    import deepblue.skills.learn.cli.commands as cmds
+
+    assert cmds._collect_stale_paths([{"id": "x"}], [], tmp_path) == []
+
+
+def test_print_import_summary_few_duplicates(capsys):
+    """重複が 5 件以下なら省略表示を出さない。"""
+    import deepblue.skills.learn.cli.commands as cmds
+
+    cmds._print_import_summary([], [], [{"id": "a"}])
+    out = capsys.readouterr().out
+    assert "SKIP" in out
+    assert "more" not in out
+
+
+def test_collect_stale_paths_source_file_outside_scope(tmp_path):
+    """既存ファイルがスコープ外/不在なら収集しない。"""
+    import deepblue.skills.learn.cli.commands as cmds
+
+    existing = [{"id": "x", "_source_file": "/nonexistent/x.yaml"}]
+    assert cmds._collect_stale_paths([{"id": "x"}], existing, tmp_path) == []
+
+
+def test_confirm_and_write_import_interactive_yes(tmp_path, monkeypatch):
+    """force 無しで y 確認するとインポートファイルを書き込む。"""
+    from types import SimpleNamespace
+
+    import deepblue.skills.learn.cli.commands as cmds
+
+    inherited = tmp_path / "instincts" / "inherited"
+    inherited.mkdir(parents=True)
+    ctx = cmds.ImportContext(
+        source="src", target_scope="project", project={"instincts_inherited": inherited, "project_dir": tmp_path, "id": "p", "name": "n"}
+    )
+    args = SimpleNamespace(dry_run=False, force=False)
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+    to_add = [{"id": "x", "confidence": 0.9, "content": "## Action\na", "trigger": "t", "domain": "general"}]
+    ret = cmds._confirm_and_write_import(args, ctx, to_add, [], [])
+    assert ret == 0
