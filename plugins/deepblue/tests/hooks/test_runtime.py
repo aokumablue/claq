@@ -309,3 +309,65 @@ def test_run_with_flags_forwards_extra_args(tmp_path: Path) -> None:
 
 def test_doc_file_warning_treats_gitlab_dir_as_structured() -> None:
     assert not is_suspicious_doc_path(".gitlab/NOTES.md")
+
+
+def test_read_raw_stdin_no_truncation(monkeypatch) -> None:
+    """入力が上限以下なら truncated=False で返す。"""
+    from types import SimpleNamespace
+
+    from deepblue.hooks import run_with_flags
+
+    monkeypatch.setattr(run_with_flags.sys, "stdin", SimpleNamespace(read=lambda n: "short"))
+    text, truncated = run_with_flags.read_raw_stdin_with_truncation()
+    assert text == "short"
+    assert truncated is False
+
+
+def test_command_for_existing_file_executable(tmp_path) -> None:
+    """拡張子なしの実行可能ファイルはそのまま起動コマンドにする。"""
+    from deepblue.hooks.run_with_flags import _command_for_existing_file
+
+    f = tmp_path / "tool"
+    f.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    f.chmod(0o755)
+    assert _command_for_existing_file(f, ["arg"]) == [str(f), "arg"]
+
+
+def test_resolve_relative_noncommand_falls_back(tmp_path) -> None:
+    """plugin_root 配下だが起動方法不明なファイルは python -m へフォールバック。"""
+    from deepblue.hooks.run_with_flags import resolve_target_command
+
+    (tmp_path / "plain").write_text("x", encoding="utf-8")  # 拡張子なし・非実行
+    assert resolve_target_command("plain", plugin_root=tmp_path) == [sys.executable, "-m", "plain"]
+
+
+def test_resolve_absolute_missing_falls_back(tmp_path) -> None:
+    """絶対パスで不在なら python -m へフォールバック。"""
+    from deepblue.hooks.run_with_flags import resolve_target_command
+
+    missing = str(tmp_path / "nope_abs")
+    assert resolve_target_command(missing, plugin_root=tmp_path)[:2] == [sys.executable, "-m"]
+
+
+def test_resolve_absolute_noncommand_falls_back(tmp_path) -> None:
+    """絶対パス存在だが起動方法不明なら python -m へフォールバック。"""
+    from deepblue.hooks.run_with_flags import resolve_target_command
+
+    f = tmp_path / "plainabs"
+    f.write_text("x", encoding="utf-8")
+    assert resolve_target_command(str(f), plugin_root=tmp_path)[:2] == [sys.executable, "-m"]
+
+
+def test_run_target_session_start_nonzero_returns_zero(monkeypatch) -> None:
+    """SessionStart フックは子プロセスが非0終了でも 0 を返す。"""
+    from types import SimpleNamespace
+
+    from deepblue.hooks import run_with_flags
+
+    hook_id = next(iter(run_with_flags.SESSION_START_HOOK_IDS))
+    monkeypatch.setattr(run_with_flags.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout="", stderr="", returncode=1))
+    monkeypatch.setattr(run_with_flags, "emit_session_start_output", lambda: "out")
+    monkeypatch.setattr(run_with_flags, "write_stdout", lambda x: None)
+    monkeypatch.setattr(run_with_flags, "write_stderr", lambda x: None)
+    monkeypatch.setattr(run_with_flags, "build_env", lambda: {})
+    assert run_with_flags._run_target(hook_id, "target", [], "raw") == 0
