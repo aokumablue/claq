@@ -986,3 +986,47 @@ class TestLogOutput:
         output({"key": "value"})
         captured = capsys.readouterr()
         assert captured.out == '{"key": "value"}\n'
+
+
+def test_get_session_id_short_unsanitizable(monkeypatch) -> None:
+    """セッションIDが記号のみで無害化後に空ならフォールバックを使う。"""
+    import deepblue.lib.core_utils as cu
+
+    monkeypatch.setenv("CLAUDE_SESSION_ID", "!!!!!!!!")
+    monkeypatch.setattr(cu, "get_project_name", lambda: None)
+    assert cu.get_session_id_short("fb") == "fb"
+
+
+def test_run_command_list_input() -> None:
+    """list 形式のコマンドはリスト変換経路を通る。"""
+    from deepblue.lib.core_utils import run_command
+
+    result = run_command(["git", "status"])
+    assert "output" in result
+
+
+def test_run_command_empty_list() -> None:
+    """空コマンドはエラーを返す。"""
+    from deepblue.lib.core_utils import run_command
+
+    result = run_command([])
+    assert result["success"] is False
+
+
+def test_read_stdin_json_sync_windows(monkeypatch) -> None:
+    """Windows では select を使わず直接読み込む。"""
+    from types import SimpleNamespace
+
+    import deepblue.lib.core_utils as cu
+
+    monkeypatch.setattr(cu, "IS_WINDOWS", True)
+    monkeypatch.setattr(cu.sys, "stdin", SimpleNamespace(read=lambda n: '{"a": 1}', isatty=lambda: False))
+    assert cu.read_stdin_json_sync() == {"a": 1}
+
+
+def test_get_git_modified_files_invalid_pattern() -> None:
+    """不正な正規表現パターンはスキップして全ファイルを返す。"""
+    from deepblue.lib.core_utils import get_git_modified_files
+
+    result = get_git_modified_files(["["])  # 不正regex → compiled空 → フィルタなし
+    assert isinstance(result, list)

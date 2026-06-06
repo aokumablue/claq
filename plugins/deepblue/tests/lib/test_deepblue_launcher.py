@@ -212,3 +212,41 @@ def test_main_handles_oserror_and_entrypoint(monkeypatch: pytest.MonkeyPatch, ca
         runpy.run_module("deepblue.launcher", run_name="__main__")
 
     assert excinfo.value.code == 1
+
+
+def test_build_env_without_path(monkeypatch, tmp_path) -> None:
+    """PATH 未設定でも venv の PATH を構築する。"""
+    from deepblue import launcher
+
+    monkeypatch.setattr(launcher, "_runtime_python", lambda: ("py", tmp_path))
+    monkeypatch.delenv("PATH", raising=False)
+    env = launcher.build_env()
+    assert env["VIRTUAL_ENV"] == str(tmp_path)
+    assert str(tmp_path / "bin") in env["PATH"]
+
+
+def test_resolve_command_nonexecutable_falls_back(tmp_path) -> None:
+    """存在するが起動方法不明なファイルは python -m へフォールバック。"""
+    from deepblue import launcher
+
+    f = tmp_path / "plain"
+    f.write_text("x", encoding="utf-8")  # 非実行・拡張子なし
+    cmd = launcher.resolve_command(str(f), [])
+    assert "-m" in cmd
+
+
+def test_main_inserts_src_dir_when_missing(monkeypatch) -> None:
+    """src ディレクトリが sys.path に無ければ挿入する。"""
+    import sys
+    from types import SimpleNamespace
+
+    from deepblue import launcher
+
+    src = str(launcher.REPO_ROOT / "src")
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p != src])
+    monkeypatch.setattr(launcher, "resolve_command", lambda t, a: ["true"])
+    monkeypatch.setattr(launcher, "build_env", lambda: {})
+    monkeypatch.setattr(launcher.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
+    assert launcher.main(["target"]) == 0
+    assert src in sys.path
