@@ -626,3 +626,101 @@ class TestMain:
             runpy.run_module("deepblue.hooks.session_install", run_name="__main__")
 
         assert exc_info.value.code == 0
+
+
+import subprocess as _subprocess  # noqa: E402
+
+
+def _raise(exc):
+    def _inner(*a, **k):
+        raise exc
+    return _inner
+
+
+def test_should_repair_venv_symlink_resolve_error(tmp_path, monkeypatch) -> None:
+    """symlink の解決に失敗したら修復対象と判定する。"""
+    link = tmp_path / ".venv"
+    link.symlink_to(tmp_path / "target")
+    monkeypatch.setattr(session_install.Path, "resolve", _raise(OSError()))
+    assert session_install._should_repair_venv_symlink(tmp_path) is True
+
+
+def test_repair_venv_symlink_unlink_error(tmp_path, monkeypatch, capsys) -> None:
+    """破損 symlink の削除失敗を警告して中断する。"""
+    link = tmp_path / ".venv"
+    link.symlink_to(tmp_path / "missing")  # 先が無い→exists False
+    monkeypatch.setattr(session_install.Path, "unlink", _raise(OSError("x")))
+    session_install._repair_venv_symlink(tmp_path)
+    assert "削除失敗" in capsys.readouterr().err
+
+
+def test_repair_venv_symlink_create_error(tmp_path, monkeypatch, capsys) -> None:
+    """symlink 作成失敗を警告する。"""
+    monkeypatch.setattr(session_install.Path, "symlink_to", _raise(OSError("y")))
+    session_install._repair_venv_symlink(tmp_path)
+    assert "作成失敗" in capsys.readouterr().err
+
+
+def test_lock_phase_version_read_error(tmp_path, monkeypatch, capsys) -> None:
+    """インストール済みバージョン読込失敗ならスキップする。"""
+    monkeypatch.setattr(session_install, "_get_installed_version", _raise(OSError()))
+    assert session_install._lock_phase_should_skip(tmp_path, "1.0") is True
+    assert "読み込みに失敗" in capsys.readouterr().err
+
+
+def test_lock_phase_already_installed_repairs(tmp_path, monkeypatch) -> None:
+    """既に同一バージョンなら venv 修復してスキップする。"""
+    monkeypatch.setattr(session_install, "_get_installed_version", lambda: "1.0")
+    monkeypatch.setattr(session_install, "_should_repair_venv_symlink", lambda r: True)
+    repaired: list = []
+    monkeypatch.setattr(session_install, "_repair_venv_symlink", lambda r: repaired.append(r))
+    assert session_install._lock_phase_should_skip(tmp_path, "1.0") is True
+    assert repaired
+
+
+def test_run_install_subprocess_error(tmp_path, monkeypatch) -> None:
+    """install.sh 実行失敗時は None を返す。"""
+    monkeypatch.setattr(session_install, "run_text", _raise(_subprocess.SubprocessError()))
+    assert session_install._run_install(tmp_path / "install.sh") is None
+
+
+def test_run_install_with_lock_result_none(tmp_path, monkeypatch) -> None:
+    """install 実行が None を返せば False。"""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fake_lock(p):
+        yield
+
+    monkeypatch.setattr(session_install, "_DEEPBLUE_DIR", tmp_path)
+    monkeypatch.setattr(session_install, "install_lock", fake_lock)
+    monkeypatch.setattr(session_install, "_lock_phase_should_skip", lambda r, v: False)
+    monkeypatch.setattr(session_install, "_precheck_install_target", lambda r: tmp_path / "install.sh")
+    monkeypatch.setattr(session_install, "_run_install", lambda s: None)
+    assert session_install._run_install_with_lock(tmp_path, "1.0") is False
+
+
+def test_run_install_with_lock_oserror(tmp_path, monkeypatch, capsys) -> None:
+    """ロック取得が OSError なら False。"""
+    monkeypatch.setattr(session_install, "_DEEPBLUE_DIR", tmp_path)
+    monkeypatch.setattr(session_install, "install_lock", _raise(OSError("lock")))
+    assert session_install._run_install_with_lock(tmp_path, "1.0") is False
+    assert "ロック取得失敗" in capsys.readouterr().err
+
+
+def test_lock_phase_already_installed_no_repair(tmp_path, monkeypatch) -> None:
+    """同一バージョンで venv 修復不要ならそのままスキップする。"""
+    monkeypatch.setattr(session_install, "_get_installed_version", lambda: "1.0")
+    monkeypatch.setattr(session_install, "_should_repair_venv_symlink", lambda r: False)
+    assert session_install._lock_phase_should_skip(tmp_path, "1.0") is True
+
+
+def test_run_success_without_repair(tmp_path, monkeypatch) -> None:
+    """インストール成功かつ venv 修復不要の経路。"""
+    monkeypatch.setattr(session_install, "_resolve_plugin_root", lambda: tmp_path)
+    monkeypatch.setattr(session_install, "_get_plugin_version", lambda r: "2.0")
+    monkeypatch.setattr(session_install, "_get_installed_version", lambda: "1.0")
+    monkeypatch.setattr(session_install, "_run_install_with_lock", lambda r, v: True)
+    monkeypatch.setattr(session_install, "_should_repair_venv_symlink", lambda r: False)
+    out = session_install.run("")
+    assert isinstance(out, str)
