@@ -1095,3 +1095,12 @@ def test_build_summary_section_skips_empty_message() -> None:
     summary = {"userMessages": ["", "real task"], "filesModified": [], "toolsUsed": [], "totalMessages": 2}
     out = session_end.build_summary_section(summary)
     assert "real task" in out
+
+
+def test_update_session_file_no_existing_no_summary(monkeypatch, tmp_path: Path) -> None:
+    """既存ファイルもサマリーも無ければ書き込みしない。"""
+    monkeypatch.setattr(session_end, "read_file", lambda f: None)
+    written: list[str] = []
+    monkeypatch.setattr(session_end, "write_file", lambda f, c: written.append(c))
+    session_end._update_session_file(tmp_path / "s.md", None, "2026-01-01", "00:00", {})
+    assert written == []
