@@ -84,7 +84,7 @@ def smart_filter(text: str) -> str:
 # 戦略2: 重複排除
 # ---------------------------------------------------------------------------
 
-_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
+_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?")
 _HEXADDR_RE = re.compile(r"0x[0-9a-fA-F]{4,}")
 _LONG_DIGITS_RE = re.compile(r"\b\d{3,}\b")
 
@@ -101,6 +101,9 @@ def dedup_lines(text: str, threshold: int = 3) -> str:
     """同一の正規化行が threshold 回以上出現する行を折りたたむ。
 
     最初の出現行のみ保持し、その直後に折りたたみ通知を挿入する。
+    非連続に出現する重複（``A, B, A, B, A`` 等）も最初の ``A`` の直後に
+    まとめて通知し、2 件目以降の同一行は出力しない。このため折りたたみ後の
+    行順は元の出現順とは一致しないことがある。
     """
     lines = text.splitlines()
     key_counts: Counter[str] = Counter(_normalize_for_dedup(ln) for ln in lines)
@@ -126,14 +129,19 @@ def dedup_lines(text: str, threshold: int = 3) -> str:
 # 戦略3: グループ化（lint エラー集約）
 # ---------------------------------------------------------------------------
 
-# ESLint/TSLint 出力パターン（ファイル:行:列 severity メッセージ rule）
-_ESLINT_LINE = re.compile(
-    r"^\s+(?P<file>[^\s:][^:]+):(?P<line>\d+):(?P<col>\d+)\s+"
-    r"(?P<severity>error|warning)\s+(?P<msg>.+?)\s{2,}(?P<rule>\S+)\s*$",
+# ESLint/TSLint 出力パターン（ファイル:行:列 severity 以降）。
+# メッセージと rule は 2 連続空白区切り。``.+?\s{2,}\S+$`` の貪欲＋末尾アンカー
+# は無区切りの長い行で二次のバックトラックを招くため、正規表現では severity
+# までを取り、残り（rest）は _split_eslint_rest で線形分割する。
+_ESLINT_HEAD = re.compile(
+    r"^\s+(?P<file>[^\s:][^:]*):(?P<line>\d+):(?P<col>\d+)\s+"
+    r"(?P<severity>error|warning)\s+(?P<rest>.+)$",
     re.I,
 )
-# ruff/flake8 出力パターン（ファイル:行:列: エラーコード メッセージ）
-_RUFF_LINE = re.compile(r"^(?P<file>[^:\s][^:]*):(?P<line>\d+):(?P<col>\d+):\s+(?P<code>[A-Z]\d+)\s+(?P<msg>.+)$")
+_DOUBLE_SPACE_RE = re.compile(r"\s{2,}")
+# ruff/flake8 出力パターン（ファイル:行:列: エラーコード メッセージ）。
+# file は単一量化子 [^:\s]+ で表し、重複量化子による余分なバックトラックを避ける。
+_RUFF_LINE = re.compile(r"^(?P<file>[^:\s]+):(?P<line>\d+):(?P<col>\d+):\s+(?P<code>[A-Z]\d+)\s+(?P<msg>.+)$")
 # pytest FAILED 出力パターン（FAILED テスト名 - 失敗理由）
 _PYTEST_FAIL = re.compile(r"^FAILED\s+(?P<test>[^\s]+)\s+-\s+(?P<reason>.+)$")
 
@@ -159,9 +167,30 @@ def _fmt_files(files: list[str], max_show: int = 3) -> str:
     return result
 
 
+def _split_eslint_rest(rest: str) -> tuple[str, str] | None:
+    """ESLint 行の severity 以降（メッセージ + rule）を 2 連続空白で分割する。
+
+    rule は末尾の 2 連続以上の空白で区切られた最終トークン。区切りが無ければ
+    ESLint 行とみなさず None を返す。``re.split`` は線形動作のため、貪欲な
+    正規表現が長い無区切り行で起こす二次のバックトラックを避けられる。
+
+    Args:
+        rest: severity の直後から行末までのテキスト。
+
+    Returns:
+        ``(msg, rule)`` のタプル。2 連続空白の区切りが無ければ None。
+    """
+    parts = _DOUBLE_SPACE_RE.split(rest)
+    if len(parts) < 2 or not parts[-1].strip():
+        return None
+    rule = parts[-1].strip()
+    msg = "  ".join(parts[:-1]).strip()
+    return msg, rule
+
+
 def _classify_lint_lines(
     lines: list[str],
-) -> tuple[dict, dict, dict, set]:
+) -> tuple[dict[str, _LintGroup], dict[str, _LintGroup], dict[str, list[str]], set[int]]:
     """行リストを ESLint/ruff/pytest グループに分類してインデックスセットとともに返す。"""
     eslint_groups: dict[str, _LintGroup] = {}
     ruff_groups: dict[str, _LintGroup] = {}
@@ -169,13 +198,14 @@ def _classify_lint_lines(
     grouped_indices: set[int] = set()
 
     for i, line in enumerate(lines):
-        m = _ESLINT_LINE.match(line)
-        if m:
-            rule = m.group("rule")
+        head = _ESLINT_HEAD.match(line)
+        parsed = _split_eslint_rest(head.group("rest")) if head else None
+        if head and parsed is not None:
+            msg, rule = parsed
             if rule not in eslint_groups:
-                eslint_groups[rule] = _LintGroup(rule=rule, severity=m.group("severity"), first_msg=m.group("msg"))
+                eslint_groups[rule] = _LintGroup(rule=rule, severity=head.group("severity"), first_msg=msg)
             eslint_groups[rule].count += 1
-            f = m.group("file")
+            f = head.group("file")
             if f not in eslint_groups[rule].files:
                 eslint_groups[rule].files.append(f)
             grouped_indices.add(i)
@@ -202,9 +232,9 @@ def _classify_lint_lines(
 
 def _render_lint_groups(
     output_parts: list[str],
-    eslint_groups: dict,
-    ruff_groups: dict,
-    pytest_groups: dict,
+    eslint_groups: dict[str, _LintGroup],
+    ruff_groups: dict[str, _LintGroup],
+    pytest_groups: dict[str, list[str]],
 ) -> None:
     """グループ化済みの lint 結果をサマリ形式で output_parts に追記する。"""
     if eslint_groups:

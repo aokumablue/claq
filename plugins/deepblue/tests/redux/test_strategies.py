@@ -186,6 +186,14 @@ class TestGroupLintErrors:
         assert result.count("src/a.ts") == 1
         assert "2件" in result
 
+    def test_eslint_head_without_rule_separator_passthrough(self) -> None:
+        """ESLint 風だが rule を区切る 2 連続空白が無い行はグループ化せず残す。"""
+        # severity の後に 2 連続空白区切りが無い → _split_eslint_rest が None を返す
+        text = "  src/a.ts:10:5  error message without a double-space rule separator"
+        result = group_lint_errors(text)
+        assert text in result
+        assert "グループ化" not in result
+
     def test_ruff_dedup_files(self) -> None:
         """ruff でも同一ファイルは files に1回だけ。"""
         text = "src/a.py:1:1: E501 long\nsrc/a.py:2:1: E501 long\n"
