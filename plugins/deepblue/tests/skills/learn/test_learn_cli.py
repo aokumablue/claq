@@ -2123,8 +2123,9 @@ def test_project_dir_score_counts_artifacts(tmp_path) -> None:
 
 def test_project_dir_score_missing_dir() -> None:
     """存在しない project_dir は -1。"""
-    import deepblue.skills.learn.cli.paths as p
     from pathlib import Path
+
+    import deepblue.skills.learn.cli.paths as p
 
     assert p._project_dir_score(Path("/nonexistent/xyz")) == -1
 

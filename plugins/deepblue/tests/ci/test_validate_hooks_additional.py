@@ -195,3 +195,10 @@ def test_repo_mem_cli_hooks_split_target_and_args() -> None:
             "sync-check",
             "session-end",
         }
+
+
+def test_validate_http_hook_without_optional_fields() -> None:
+    """headers / allowedEnvVars が無い HTTP フックは検証を通る。"""
+    from deepblue.ci.validate_hooks import _validate_http_hook
+
+    assert _validate_http_hook({"url": "https://example.com"}, "test-hook") is False

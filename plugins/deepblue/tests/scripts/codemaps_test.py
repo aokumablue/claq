@@ -291,3 +291,13 @@ if __name__ == "__main__":
     print("✓ test_full_generation が成功しました")
 
     print("\nすべてのテストが成功しました！")
+
+
+def test_walk_dir_skips_broken_symlink(tmp_path) -> None:
+    """ディレクトリでもファイルでもないエントリ（壊れた symlink）はスキップする。"""
+    from deepblue.codemaps.generate_codemaps import walk_dir
+
+    (tmp_path / "link").symlink_to(tmp_path / "nonexistent")
+    (tmp_path / "real.py").write_text("x", encoding="utf-8")
+    files = walk_dir(tmp_path)
+    assert all(f.name != "link" for f in files)

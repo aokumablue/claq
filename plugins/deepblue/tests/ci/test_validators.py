@@ -84,3 +84,11 @@ def test_check_unicode_safety_sanitizes_and_flags(tmp_path: Path) -> None:
 def test_check_unicode_safety_helpers_detect_invisible_and_emoji() -> None:
     assert check_unicode_safety.collect_dangerous_invisible_matches("x\u200by")
     assert check_unicode_safety.collect_emoji_matches("🙂")
+
+
+def test_extract_frontmatter_skips_lines_without_colon() -> None:
+    """コロンが無い frontmatter 行はスキップする。"""
+    from deepblue.ci.validate_agents import extract_frontmatter
+
+    fm = extract_frontmatter("---\nname: x\nnocolon\n---\nbody")
+    assert fm == {"name": "x"}

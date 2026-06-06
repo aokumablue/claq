@@ -113,3 +113,24 @@ class TestQuantizeImports:
         with patch.dict("sys.modules", {"onnxruntime.transformers": None, "onnxruntime.transformers.optimizer": None}):
             with pytest.raises((ImportError, TypeError)):
                 quantize(src, dst, "fp16")
+
+
+def test_quantize_int8(tmp_path, monkeypatch) -> None:
+    """int8 量子化は _to_int8 経由で出力する。"""
+    import sys
+    import types
+
+    from model_build.quantize import quantize
+
+    src = tmp_path / "m.onnx"
+    src.write_bytes(b"x")
+    dst = tmp_path / "out.onnx"
+
+    fake = types.ModuleType("onnxruntime.quantization")
+    fake.QuantType = types.SimpleNamespace(QInt8="qint8")
+    fake.quantize_dynamic = lambda s, d, **k: __import__("pathlib").Path(d).write_bytes(b"q")
+    monkeypatch.setitem(sys.modules, "onnxruntime.quantization", fake)
+
+    result = quantize(src, dst, "int8")
+    assert result == dst
+    assert dst.exists()
