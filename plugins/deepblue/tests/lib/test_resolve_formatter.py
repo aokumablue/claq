@@ -311,3 +311,13 @@ class TestNamedTuples:
         info = FormatterBinInfo(bin="/path/to/bin", prefix=["--flag"])
         assert info.bin == "/path/to/bin"
         assert info.prefix == ["--flag"]
+
+
+def test_detect_formatter_package_json_without_prettier(tmp_path) -> None:
+    """package.json に prettier が無ければ prettier を返さない。"""
+    import json
+
+    from deepblue.lib.resolve_formatter import detect_formatter
+
+    (tmp_path / "package.json").write_text(json.dumps({"name": "x"}), encoding="utf-8")
+    assert detect_formatter(tmp_path) != "prettier"

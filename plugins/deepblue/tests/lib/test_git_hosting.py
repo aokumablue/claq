@@ -147,3 +147,14 @@ class TestNormalizeGitHostingServiceEdgeCases:
     def test_extract_returns_none_when_normalization_returns_unknown(self, monkeypatch) -> None:
         monkeypatch.setattr("deepblue.lib.git_hosting.normalize_git_hosting_service", lambda value, default="github": "bitbucket")
         assert extract_git_hosting_item_details("github", "https://github.com/owner/repo/pull/1") is None
+
+
+def test_normalize_invalid_value_and_invalid_default() -> None:
+    """値もデフォルトも不正なら GITHUB にフォールバックする。"""
+    import warnings
+
+    from deepblue.lib.git_hosting import GITHUB, normalize_git_hosting_service
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert normalize_git_hosting_service("invalid", default="alsobad") == GITHUB

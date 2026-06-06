@@ -257,3 +257,11 @@ class TestRubyRailsCompatibilityRegression:
         assert project.frameworks == []
         assert project.primary_language is None
         assert pd.get_test_command(tmp_path) is None
+
+
+def test_check_requirements_pipfile_without_dep(tmp_path) -> None:
+    """Pipfile はあるが対象依存が無ければ False。"""
+    from deepblue.lib.project_detect.dependency_checks import _check_requirements_deps
+
+    (tmp_path / "Pipfile").write_text("[packages]\nfoo = '*'\n", encoding="utf-8")
+    assert _check_requirements_deps(tmp_path, ["django"]) is False

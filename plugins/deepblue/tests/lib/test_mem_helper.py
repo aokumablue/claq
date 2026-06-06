@@ -312,3 +312,12 @@ class TestRunMemCliPaths:
             lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
         )
         assert mem_helper._run_mem_cli("search", {}) == {"error": "boom"}
+
+
+def test_format_context_for_prompt_without_content() -> None:
+    """content が空のチャンクでもコードブロックを付けず整形する。"""
+    from deepblue.lib.mem_helper import format_context_for_prompt
+
+    out = format_context_for_prompt([{"user_prompt": "p", "tool_names": [], "files_modified": [], "content": ""}])
+    assert "## 関連する過去の作業" in out
+    assert "```" not in out

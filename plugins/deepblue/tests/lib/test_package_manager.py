@@ -399,3 +399,23 @@ def test_package_manager_helpers_cover_remaining_branches(tmp_path, monkeypatch)
     (tmp_path / "yarn.lock").write_text("", encoding="utf-8")
     with patch.dict(os.environ, {}, clear=True):
         assert get_run_command("dev", project_dir=tmp_path) == "yarn dev"
+
+
+def test_detect_from_project_config_no_pm_field(tmp_path) -> None:
+    """project 設定に packageManager が無ければ None。"""
+    import json
+
+    from deepblue.lib.package_manager import _detect_from_project_config
+
+    cfg = tmp_path / ".claude" / "package-manager.json"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text(json.dumps({"other": "x"}), encoding="utf-8")
+    assert _detect_from_project_config(tmp_path) is None
+
+
+def test_detect_from_global_config_no_pm_field(monkeypatch) -> None:
+    """global 設定に packageManager が無ければ None。"""
+    import deepblue.lib.package_manager as pm
+
+    monkeypatch.setattr(pm, "load_config", lambda: {"other": "x"})
+    assert pm._detect_from_global_config() is None

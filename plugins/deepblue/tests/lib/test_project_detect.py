@@ -432,3 +432,23 @@ testpaths = ["tests"]
 
         assert "python" in result.languages
         assert "javascript" in result.languages
+
+
+def test_get_js_test_command_no_test_script(tmp_path) -> None:
+    """scripts に test/tests が無ければ None を返す。"""
+    import json
+
+    from deepblue.lib.project_detect.commands import _get_js_test_command
+
+    (tmp_path / "package.json").write_text(json.dumps({"scripts": {"build": "x"}}), encoding="utf-8")
+    assert _get_js_test_command(tmp_path) is None
+
+
+def test_scan_dir_skips_broken_symlink(tmp_path) -> None:
+    """file でも dir でもないエントリ（壊れた symlink）はスキップする。"""
+    from deepblue.lib.project_detect.languages import _scan_dir
+
+    (tmp_path / "link").symlink_to(tmp_path / "nonexistent")
+    files: list = []
+    _scan_dir(tmp_path, 0, files, 5, 100)
+    assert all(f.name != "link" for f in files)

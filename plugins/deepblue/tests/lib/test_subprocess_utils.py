@@ -52,3 +52,11 @@ def test_check_output_text_enforces_text_encoding(monkeypatch) -> None:
     assert kwargs["errors"] == "replace"
     assert kwargs["stderr"] == subprocess.DEVNULL
     assert kwargs["timeout"] == 3.0
+
+
+def test_run_text_without_extra_env() -> None:
+    """extra_env 未指定でもコマンドを実行できる。"""
+    from deepblue.lib.subprocess_utils import run_text
+
+    result = run_text(["true"], timeout=10)
+    assert result.returncode == 0
