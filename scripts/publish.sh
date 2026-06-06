@@ -26,7 +26,7 @@ echo "Squashing to single release commit..."
 RELEASE_TAG="$(git log -1 --format='%h')"
 git checkout --orphan release
 git add -A
-git commit -m "${COMMIT_MSG:-release: $RELEASE_TAG}"
+git commit -m "release: ${COMMIT_MSG:-$RELEASE_TAG}"
 git branch -D main
 git branch -m main
 
