@@ -19,15 +19,16 @@ def _engine(limit: int = 1) -> ReduxEngine:
     return ReduxEngine([spec])
 
 
-def _payload(tool_name: str = "Bash", tool_response: str = "", command: str = "ps aux") -> str:
-    """テスト用ペイロード JSON を生成する。"""
-    return json.dumps(
-        {
-            "tool_name": tool_name,
-            "tool_input": {"command": command},
-            "tool_response": tool_response,
-        }
-    )
+def _payload(tool_name: str = "Bash", stdout: str = "", command: str = "ps aux", **response_extra: object) -> str:
+    """テスト用ペイロード JSON を生成する（tool_response はツール出力オブジェクト）。"""
+    tool_response: dict[str, object] = {"stdout": stdout, "stderr": "", "interrupted": False, "isImage": False}
+    tool_response.update(response_extra)
+    return json.dumps({"tool_name": tool_name, "tool_input": {"command": command}, "tool_response": tool_response})
+
+
+def _updated(result: str) -> dict:
+    """updatedToolOutput オブジェクトを取り出す。"""
+    return json.loads(result)["hookSpecificOutput"]["updatedToolOutput"]
 
 
 class _BoomEngine:
@@ -37,55 +38,89 @@ class _BoomEngine:
         raise RuntimeError("boom")
 
 
+class _CaptureEngine:
+    """reduce に渡された command を記録するエンジン（引数検証用）。"""
+
+    def __init__(self) -> None:
+        self.command = ""
+
+    def reduce(self, command: str, output: str, config: ReduxConfig) -> str:
+        self.command = command
+        return "x"
+
+
 class TestEvaluate:
-    def test_invalid_json_passthrough(self) -> None:
-        assert hook.evaluate("not json", config=ReduxConfig(), engine=_engine()) == "not json"
+    def test_invalid_json_returns_empty(self) -> None:
+        assert hook.evaluate("not json", config=ReduxConfig(), engine=_engine()) == ""
 
-    def test_non_bash_passthrough(self) -> None:
-        payload = _payload(tool_name="Read", tool_response="a\nb\nc")
-        assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine()) == payload
+    def test_non_bash_returns_empty(self) -> None:
+        payload = _payload(tool_name="Read", stdout="a\nb\nc")
+        assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine()) == ""
 
-    def test_no_tool_response_passthrough(self) -> None:
-        payload = _payload(tool_response="")
-        assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine()) == payload
+    def test_non_dict_tool_response_returns_empty(self) -> None:
+        # tool_response が文字列（ツール出力 shape でない）→ 透過
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ps"}, "tool_response": "a\nb\nc"})
+        assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine()) == ""
 
-    def test_blank_tool_response_passthrough(self) -> None:
-        payload = _payload(tool_response="   ")
-        assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine()) == payload
+    def test_no_stdout_returns_empty(self) -> None:
+        payload = _payload(stdout="")
+        assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine()) == ""
 
-    def test_disabled_passthrough(self) -> None:
-        payload = _payload(tool_response="a\nb\nc")
-        assert hook.evaluate(payload, config=ReduxConfig(enabled=False), engine=_engine()) == payload
+    def test_non_str_stdout_returns_empty(self) -> None:
+        payload = _payload(stdout="")
+        payload = payload.replace('"stdout": ""', '"stdout": 123')
+        assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine()) == ""
 
-    def test_reduces_output(self) -> None:
+    def test_blank_stdout_returns_empty(self) -> None:
+        payload = _payload(stdout="   ")
+        assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine()) == ""
+
+    def test_disabled_returns_empty(self) -> None:
+        payload = _payload(stdout="a\nb\nc")
+        assert hook.evaluate(payload, config=ReduxConfig(enabled=False), engine=_engine()) == ""
+
+    def test_reduces_output_updates_tool_output(self) -> None:
         body = "\n".join(f"data line {i}" for i in range(50))
-        payload = _payload(tool_response=body)
+        payload = _payload(stdout=body, exitCode=0)
         result = hook.evaluate(payload, config=ReduxConfig(), engine=_engine(limit=1))
-        data = json.loads(result)
-        assert data["tool_response"] == "data line 0\n... (49 行切り捨て)"
-        assert len(data["tool_response"]) < len(body)
+        out = json.loads(result)
+        assert out["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
+        updated = out["hookSpecificOutput"]["updatedToolOutput"]
+        assert updated["stdout"] == "data line 0\n... (49 行切り捨て)"
+        assert len(updated["stdout"]) < len(body)
+        # stdout 以外のツール出力キーは保持される（output shape を維持）
+        assert updated["stderr"] == ""
+        assert updated["interrupted"] is False
+        assert updated["isImage"] is False
+        assert updated["exitCode"] == 0
 
-    def test_no_effect_passthrough(self) -> None:
+    def test_no_effect_returns_empty(self) -> None:
         # 1 行なので limit_lines=1 では圧縮されない
-        payload = _payload(tool_response="single line")
-        assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine(limit=1)) == payload
+        payload = _payload(stdout="single line")
+        assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine(limit=1)) == ""
 
-    def test_reduction_exception_passthrough(self) -> None:
-        payload = _payload(tool_response="a\nb\nc")
-        assert hook.evaluate(payload, config=ReduxConfig(), engine=_BoomEngine()) == payload  # type: ignore[arg-type]
+    def test_reduction_exception_returns_empty(self) -> None:
+        payload = _payload(stdout="a\nb\nc")
+        assert hook.evaluate(payload, config=ReduxConfig(), engine=_BoomEngine()) == ""  # type: ignore[arg-type]
+
+    def test_long_command_is_truncated(self) -> None:
+        engine = _CaptureEngine()
+        payload = _payload(stdout="a\nb\nc", command="echo " + "z" * 5000)
+        hook.evaluate(payload, config=ReduxConfig(), engine=engine)  # type: ignore[arg-type]
+        assert len(engine.command) == hook._MAX_COMMAND_LEN
 
     def test_config_none_loads_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(Settings, "load", classmethod(lambda cls: Settings()))
         body = "\n".join(f"row {i}" for i in range(50))
-        payload = _payload(tool_response=body)
+        payload = _payload(stdout=body)
         result = hook.evaluate(payload, engine=_engine(limit=1))
-        assert json.loads(result)["tool_response"] == "row 0\n... (49 行切り捨て)"
+        assert _updated(result)["stdout"] == "row 0\n... (49 行切り捨て)"
 
     def test_engine_none_uses_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(hook, "_ENGINE", None)
-        payload = _payload(tool_response="x", command="echo x")
-        # 実エンジンで圧縮効果なし → raw パススルー（例外なく通ること）
-        assert hook.evaluate(payload, config=ReduxConfig()) == payload
+        payload = _payload(stdout="x", command="echo x")
+        # 実エンジンで圧縮効果なし → 空文字列（例外なく通ること）
+        assert hook.evaluate(payload, config=ReduxConfig()) == ""
 
 
 class TestLoadConfig:
@@ -137,17 +172,26 @@ class TestGetEngine:
 
 
 class TestMain:
-    def test_success(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-        payload = _payload(tool_response="a\nb\nc\nd")
+    def test_success_writes_output(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        payload = _payload(stdout="a\nb\nc\nd")
         monkeypatch.setattr(hook, "read_raw_stdin", lambda: payload)
-        monkeypatch.setattr(hook, "evaluate", lambda raw: '{"tool_response": "x"}')
+        monkeypatch.setattr(hook, "evaluate", lambda raw: '{"hookSpecificOutput": {}}')
         assert hook.main() == 0
-        assert capsys.readouterr().out == '{"tool_response": "x"}'
+        assert capsys.readouterr().out == '{"hookSpecificOutput": {}}'
 
-    def test_exception_falls_back_to_raw(
+    def test_empty_output_writes_nothing(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        payload = _payload(tool_response="a\nb")
+        payload = _payload(stdout="a")
+        monkeypatch.setattr(hook, "read_raw_stdin", lambda: payload)
+        monkeypatch.setattr(hook, "evaluate", lambda raw: "")
+        assert hook.main() == 0
+        assert capsys.readouterr().out == ""
+
+    def test_exception_writes_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        payload = _payload(stdout="a\nb")
 
         def _boom(raw: str) -> str:
             raise RuntimeError("eval failed")
@@ -155,4 +199,4 @@ class TestMain:
         monkeypatch.setattr(hook, "read_raw_stdin", lambda: payload)
         monkeypatch.setattr(hook, "evaluate", _boom)
         assert hook.main() == 0
-        assert capsys.readouterr().out == payload
+        assert capsys.readouterr().out == ""

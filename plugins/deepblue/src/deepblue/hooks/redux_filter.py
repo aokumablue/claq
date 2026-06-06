@@ -1,9 +1,12 @@
 """Bash ツール出力に redux コマンド別圧縮を適用する PostToolUse フック。
 
 ``tool_input.command`` でコマンド種別を判定し、対応する redux フィルタで
-``tool_response`` を圧縮する。圧縮後 JSON を stdout に出力して tool_response を
-上書きする。圧縮効果がない場合やエラー時は raw をそのまま返し、非破壊的
-フォールバックを保証する。
+ツール出力（``tool_response.stdout``）を圧縮する。圧縮できた場合のみ
+Claude Code の ``hookSpecificOutput.updatedToolOutput`` 契約で更新後の
+ツール出力を返し、stdout を上書きする。``updatedToolOutput`` は元の
+ツール出力と同じ形（stdout/stderr/interrupted/isImage…）を保つ必要があり、
+形が合わないと Claude Code 側で破棄され元出力が使われる。圧縮効果がない・
+対象外・エラー時は何も出力せず、元のツール出力をそのまま通す。
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from deepblue.redux.config import ReduxConfig
 from deepblue.redux.engine import ReduxEngine
 
 _ENGINE: ReduxEngine | None = None
+_MAX_COMMAND_LEN = 2000
 
 
 def _to_redux_config(redux: ReduxSettings) -> ReduxConfig:
@@ -52,35 +56,47 @@ def _get_engine() -> ReduxEngine:
     return _ENGINE
 
 
-def _apply_reduction(command: str, original_text: str, data: dict, config: ReduxConfig, engine: ReduxEngine) -> str:
-    """redux 圧縮を適用し、削減後の JSON 文字列を返す。削減効果なしの場合は空文字列を返す。
+def _apply_reduction(
+    command: str,
+    original_stdout: str,
+    tool_response: dict,
+    config: ReduxConfig,
+    engine: ReduxEngine,
+) -> str:
+    """redux 圧縮を適用し、``updatedToolOutput`` 契約の JSON 文字列を返す。
 
     Args:
         command: 実行された Bash コマンド文字列。
-        original_text: 圧縮前の tool_response テキスト。
-        data: 元の入力データ辞書。
+        original_stdout: 圧縮前の ``tool_response.stdout`` テキスト。
+        tool_response: 元のツール出力オブジェクト。stdout 以外のキーを保持して
+            output shape を維持するために使う。
         config: 圧縮設定。
         engine: フィルタ適用エンジン。
 
     Returns:
-        圧縮効果があれば更新済み JSON 文字列、なければ空文字列。
+        圧縮効果があれば ``updatedToolOutput`` を含む JSON 文字列、なければ空文字列。
     """
     try:
-        reduced = engine.reduce(command, original_text, config)
+        reduced = engine.reduce(command, original_stdout, config)
     except Exception as e:
         write_stderr(f"[redux] reduction failed: {e}\n")
         return ""
-    if len(reduced) >= len(original_text):
+    if len(reduced) >= len(original_stdout):
         return ""
-    saved_pct = (len(original_text) - len(reduced)) / len(original_text) * 100
-    write_stderr(f"[redux] {len(original_text)} → {len(reduced)} chars ({saved_pct:.0f}% 削減)\n")
-    output_data = dict(data)
-    output_data["tool_response"] = reduced
-    return json.dumps(output_data, ensure_ascii=False)
+    saved_pct = (len(original_stdout) - len(reduced)) / len(original_stdout) * 100
+    write_stderr(f"[redux] {len(original_stdout)} → {len(reduced)} chars ({saved_pct:.0f}% 削減)\n")
+    updated_output = {**tool_response, "stdout": reduced}
+    output = {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "updatedToolOutput": updated_output,
+        }
+    }
+    return json.dumps(output, ensure_ascii=False)
 
 
 def evaluate(raw_input: str, config: ReduxConfig | None = None, engine: ReduxEngine | None = None) -> str:
-    """Bash ツール出力を redux で圧縮して返す。
+    """Bash ツール出力を redux で圧縮し、``updatedToolOutput`` 契約の JSON を返す。
 
     Args:
         raw_input: フックに渡された生の入力 JSON 文字列。
@@ -88,31 +104,31 @@ def evaluate(raw_input: str, config: ReduxConfig | None = None, engine: ReduxEng
         engine: フィルタ適用エンジン。None の場合はキャッシュ済みエンジンを使う。
 
     Returns:
-        圧縮後の JSON 文字列、または元の raw_input（変更なしの場合）。
+        圧縮できた場合は ``updatedToolOutput`` を含む JSON 文字列。
+        対象外・無効・圧縮効果なし・エラー時は空文字列（フックは出力せず透過する）。
     """
     data = parse_json_object(raw_input)
     if data is None:
-        return raw_input
+        return ""
     if str(data.get("tool_name", "") or "") != "Bash":
-        return raw_input
+        return ""
     tool_response = data.get("tool_response")
-    if not tool_response:
-        return raw_input
-    original_text = str(tool_response)
-    if not original_text.strip():
-        return raw_input
+    if not isinstance(tool_response, dict):
+        return ""
+    stdout = tool_response.get("stdout")
+    if not isinstance(stdout, str) or not stdout.strip():
+        return ""
 
     if config is None:
         config = _load_config()
     if not config.enabled:
-        return raw_input
+        return ""
 
-    command = str((data.get("tool_input") or {}).get("command") or "")
+    command = str((data.get("tool_input") or {}).get("command") or "")[:_MAX_COMMAND_LEN]
     if engine is None:
         engine = _get_engine()
 
-    result = _apply_reduction(command, original_text, data, config, engine)
-    return result if result else raw_input
+    return _apply_reduction(command, stdout, tool_response, config, engine)
 
 
 def main() -> int:
@@ -126,8 +142,9 @@ def main() -> int:
         output = evaluate(raw)
     except Exception as e:
         write_stderr(f"[redux] unexpected error: {e}\n")
-        output = raw
-    write_stdout(output)
+        output = ""
+    if output:
+        write_stdout(output)
     return 0
 
 
