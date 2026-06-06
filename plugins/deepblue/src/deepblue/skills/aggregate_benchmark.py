@@ -374,5 +374,5 @@ def main():
     print(f"  差分:          {delta.get('pass_rate', '—')}")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
