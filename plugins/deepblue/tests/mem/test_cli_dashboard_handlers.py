@@ -52,6 +52,7 @@ def test_collect_pg_dashboard_data_fetch_error(monkeypatch: pytest.MonkeyPatch) 
         test_connection=lambda: True,
         _get_conn=lambda: object(),
         _put_conn=lambda c: None,
+        close=lambda: None,
     )
     monkeypatch.setattr("deepblue.mem.pg_database.PgDatabase", lambda url: fake_pg)
     monkeypatch.setattr(
