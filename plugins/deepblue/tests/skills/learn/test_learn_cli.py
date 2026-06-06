@@ -2196,3 +2196,105 @@ def test_update_registry_without_fcntl(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(r, "_preferred_registry_file", lambda: tmp_path / "projects.json")
     r._update_registry("pid", "name", "root", "remote")
     assert (tmp_path / "projects.json").exists()
+
+
+def test_promote_specific_interactive_yes(patch_globals, monkeypatch, capsys):
+    """force 無しで y 確認すると昇格する。"""
+    tree = patch_globals
+    project = _make_project(tree)
+    (project["instincts_personal"] / "inst.yaml").write_text(SAMPLE_INSTINCT_YAML)
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+    ret = _promote_specific(project, "test-instinct", force=False)
+    assert ret == 0
+    assert "Promoted" in capsys.readouterr().out
+
+
+def test_promote_auto_interactive_yes(patch_globals, monkeypatch, capsys):
+    """force 無しで y 確認すると自動昇格を書き込む。"""
+    tree = patch_globals
+    p1 = _make_project(tree, pid="proj1", pname="project-one")
+    p2 = _make_project(tree, pid="proj2", pname="project-two")
+    high_conf_yaml = (
+        "---\nid: universal-pattern\ntrigger: \"when coding\"\nconfidence: 0.85\n"
+        "domain: general\nscope: project\n---\n\n## Action\nUse descriptive names.\n"
+    )
+    (p1["instincts_personal"] / "uni.yaml").write_text(high_conf_yaml)
+    (p2["instincts_personal"] / "uni.yaml").write_text(high_conf_yaml)
+    registry = {
+        "proj1": {"name": "project-one", "root": "/a", "remote": "", "last_seen": "2025-01-01T00:00:00Z"},
+        "proj2": {"name": "project-two", "root": "/b", "remote": "", "last_seen": "2025-01-01T00:00:00Z"},
+    }
+    tree["registry_file"].write_text(json.dumps(registry))
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+    assert _promote_auto(p1, force=False, dry_run=False) == 0
+    assert (tree["global_personal"] / "universal-pattern.yaml").exists()
+
+
+def test_promote_auto_skips_low_confidence(patch_globals, capsys):
+    """確信度が閾値未満の instinct は自動昇格候補にしない。"""
+    tree = patch_globals
+    p1 = _make_project(tree, pid="proj1", pname="project-one")
+    p2 = _make_project(tree, pid="proj2", pname="project-two")
+    low_conf_yaml = (
+        "---\nid: weak-pattern\ntrigger: \"x\"\nconfidence: 0.3\n"
+        "domain: general\nscope: project\n---\n\n## Action\nweak.\n"
+    )
+    (p1["instincts_personal"] / "w.yaml").write_text(low_conf_yaml)
+    (p2["instincts_personal"] / "w.yaml").write_text(low_conf_yaml)
+    registry = {
+        "proj1": {"name": "project-one", "root": "/a", "remote": "", "last_seen": "2025-01-01T00:00:00Z"},
+        "proj2": {"name": "project-two", "root": "/b", "remote": "", "last_seen": "2025-01-01T00:00:00Z"},
+    }
+    tree["registry_file"].write_text(json.dumps(registry))
+    assert _promote_auto(p1, force=True, dry_run=False) == 0
+    assert not (tree["global_personal"] / "weak-pattern.yaml").exists()
+
+
+def test_show_promotion_candidates_low_confidence(patch_globals, capsys):
+    """確信度が閾値未満なら昇格候補として表示しない。"""
+    import deepblue.skills.learn.cli.evolve as ev
+
+    tree = patch_globals
+    p1 = _make_project(tree, pid="proj1", pname="project-one")
+    p2 = _make_project(tree, pid="proj2", pname="project-two")
+    low = (
+        "---\nid: weak\ntrigger: \"x\"\nconfidence: 0.3\ndomain: general\nscope: project\n---\n\n## Action\nw.\n"
+    )
+    (p1["instincts_personal"] / "w.yaml").write_text(low)
+    (p2["instincts_personal"] / "w.yaml").write_text(low)
+    registry = {
+        "proj1": {"name": "project-one", "root": "/a", "remote": "", "last_seen": "2025-01-01T00:00:00Z"},
+        "proj2": {"name": "project-two", "root": "/b", "remote": "", "last_seen": "2025-01-01T00:00:00Z"},
+    }
+    tree["registry_file"].write_text(json.dumps(registry))
+    ev._show_promotion_candidates(p1)
+    assert "PROMOTION CANDIDATES" not in capsys.readouterr().out
+
+
+def test_find_cross_project_skips_instinct_without_id(patch_globals):
+    """id を持たない instinct は集計しない。"""
+    import deepblue.skills.learn.cli.evolve as ev
+
+    tree = patch_globals
+    p1 = _make_project(tree, pid="proj1", pname="project-one")
+    noid = "---\ntrigger: \"x\"\nconfidence: 0.9\ndomain: general\nscope: project\n---\n\n## Action\na.\n"
+    (p1["instincts_personal"] / "noid.yaml").write_text(noid)
+    registry = {"proj1": {"name": "project-one", "root": "/a", "remote": "", "last_seen": "2025-01-01T00:00:00Z"}}
+    tree["registry_file"].write_text(json.dumps(registry))
+    result = ev._find_cross_project_instincts()
+    assert result == {}
+
+
+def test_find_cross_project_skips_duplicate_within_project(patch_globals):
+    """同一プロジェクト内で personal/inherited に重複する instinct は二重計上しない。"""
+    import deepblue.skills.learn.cli.evolve as ev
+
+    tree = patch_globals
+    p1 = _make_project(tree, pid="proj1", pname="project-one")
+    dup = "---\nid: dup\ntrigger: \"x\"\nconfidence: 0.9\ndomain: general\nscope: project\n---\n\n## Action\na.\n"
+    (p1["instincts_personal"] / "d.yaml").write_text(dup)
+    (p1["instincts_inherited"] / "d.yaml").write_text(dup)
+    registry = {"proj1": {"name": "project-one", "root": "/a", "remote": "", "last_seen": "2025-01-01T00:00:00Z"}}
+    tree["registry_file"].write_text(json.dumps(registry))
+    result = ev._find_cross_project_instincts()
+    assert result == {}
