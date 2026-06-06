@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import json
 import math
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+import model_build.verify as verifymod
 from model_build.verify import (
     _check_dim,
     _check_l2_norm,
     _check_reproducibility,
     _cosine_similarity,
+    _infer_embedding,
     _run_inference_check,
+    main,
+    verify,
 )
 
 
@@ -151,3 +158,127 @@ class TestRunInferenceCheckOnnxChecker:
         with patch.dict(sys.modules, {"onnx": mock_onnx}):
             with pytest.raises(ValueError, match="ONNX 構造検証失敗"):
                 _run_inference_check(model_bytes, tmp_path, manifest, cosine_threshold=0.999)
+
+
+class TestInferEmbeddingTokenTypeIds:
+    """_infer_embedding の token_type_ids 入力分岐のテスト。"""
+
+    def test_adds_token_type_ids_when_required(self) -> None:
+        """モデルが token_type_ids を要求すれば inputs に追加して推論する。"""
+        import numpy as np
+
+        session = MagicMock()
+        tt_input = MagicMock()
+        tt_input.name = "token_type_ids"
+        session.get_inputs.return_value = [tt_input]
+        session.run.return_value = [np.array([[[1.0, 0.0]]], dtype=np.float32)]
+
+        tok = MagicMock()
+        enc = MagicMock()
+        enc.ids = [1, 2, 3]
+        enc.attention_mask = [1, 1, 1]
+        tok.encode.return_value = enc
+
+        result = _infer_embedding(session, tok, "text")
+        assert isinstance(result, list)
+        # token_type_ids を含む inputs で run が呼ばれている
+        called_inputs = session.run.call_args.args[1]
+        assert "token_type_ids" in called_inputs
+
+
+class TestVerify:
+    """verify のエンドツーエンド分岐テスト。"""
+
+    def test_manifest_missing_raises(self, tmp_path: Path) -> None:
+        """manifest.json が無ければ FileNotFoundError。"""
+        with pytest.raises(FileNotFoundError, match="manifest.json"):
+            verify(tmp_path)
+
+    def test_model_sha_mismatch_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """model.onnx の SHA256 が不一致なら ValueError。"""
+        manifest = {"merged_sha256": "a" * 64, "auxiliary_files": []}
+        (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (tmp_path / "model.onnx").write_bytes(b"x")
+        monkeypatch.setattr(verifymod, "_validate_sha256_format", lambda *a: None)
+        monkeypatch.setattr(verifymod, "_sha256_file", lambda p: "b" * 64)
+        with pytest.raises(ValueError, match="model.onnx SHA256 不一致"):
+            verify(tmp_path)
+
+    def test_aux_sha_mismatch_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """補助ファイルの SHA256 が不一致なら ValueError。"""
+        manifest = {
+            "merged_sha256": "m" * 64,
+            "auxiliary_files": [{"name": "tokenizer.json", "sha256": "t" * 64}],
+        }
+        (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (tmp_path / "model.onnx").write_bytes(b"x")
+        (tmp_path / "tokenizer.json").write_bytes(b"y")
+        monkeypatch.setattr(verifymod, "_validate_sha256_format", lambda *a: None)
+        monkeypatch.setattr(verifymod, "_sha256_file", lambda p: "m" * 64 if Path(p).name == "model.onnx" else "x" * 64)
+        with pytest.raises(ValueError, match="補助ファイル SHA256 不一致"):
+            verify(tmp_path)
+
+    def test_full_verify_success(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+        """全 SHA256 が一致すれば推論検証へ進む。"""
+        manifest = {
+            "merged_sha256": "m" * 64,
+            "auxiliary_files": [{"name": "tokenizer.json", "sha256": "t" * 64}],
+        }
+        (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (tmp_path / "model.onnx").write_bytes(b"x")
+        (tmp_path / "tokenizer.json").write_bytes(b"y")
+        sha_map = {"model.onnx": "m" * 64, "tokenizer.json": "t" * 64}
+        monkeypatch.setattr(verifymod, "_validate_sha256_format", lambda *a: None)
+        monkeypatch.setattr(verifymod, "_sha256_file", lambda p: sha_map[Path(p).name])
+        ran = []
+        monkeypatch.setattr(verifymod, "_run_inference_check", lambda *a: ran.append(a))
+        verify(tmp_path)
+        assert ran
+        assert "SHA256 verification OK" in capsys.readouterr().out
+
+
+class TestRunInferenceCheckSuccess:
+    """_run_inference_check の正常フローのテスト。"""
+
+    def test_full_inference_flow(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+        """ONNX 検証通過後に推論・各種チェックを順に呼ぶ。"""
+        manifest = {"tokenizer_max_length": 512, "embedding_dim": 768}
+
+        mock_ort = MagicMock()
+        mock_session = MagicMock()
+        mock_ort.InferenceSession.return_value = mock_session
+        mock_onnx = MagicMock()  # load_from_string / checker.check_model は成功
+        mock_tokenizers = MagicMock()
+        mock_tokenizers.Tokenizer.from_file.return_value = MagicMock()
+
+        monkeypatch.setattr(verifymod, "_infer_embedding", lambda s, t, txt: [0.1] * 768)
+        monkeypatch.setattr(verifymod, "_check_dim", lambda v, d: None)
+        monkeypatch.setattr(verifymod, "_check_l2_norm", lambda v: None)
+        monkeypatch.setattr(verifymod, "_check_reproducibility", lambda *a: None)
+
+        with patch.dict(sys.modules, {"onnxruntime": mock_ort, "onnx": mock_onnx, "tokenizers": mock_tokenizers}):
+            _run_inference_check(b"bytes", tmp_path, manifest, cosine_threshold=0.999)
+        assert "all verifications PASSED" in capsys.readouterr().out
+
+
+class TestMain:
+    """main の CLI 動作テスト。"""
+
+    def test_main_success(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """verify が成功すれば 0 を返す。"""
+        monkeypatch.setattr(verifymod, "verify", lambda d: None)
+        assert main(["--models-dir", str(tmp_path)]) == 0
+
+    def test_main_default_dir_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--models-dir 省略時は DEEPBLUE_MODELS_DIR を使う。"""
+        monkeypatch.setenv("DEEPBLUE_MODELS_DIR", str(tmp_path))
+        received = []
+        monkeypatch.setattr(verifymod, "verify", lambda d: received.append(d))
+        assert main([]) == 0
+        assert received[0] == tmp_path
+
+    def test_main_error_returns_one(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+        """verify が例外を送出すれば traceback を出して 1 を返す。"""
+        monkeypatch.setattr(verifymod, "verify", MagicMock(side_effect=RuntimeError("boom")))
+        assert main([]) == 1
+        assert "boom" in capsys.readouterr().err
