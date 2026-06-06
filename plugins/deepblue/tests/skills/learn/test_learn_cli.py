@@ -2175,3 +2175,24 @@ def test_print_agent_candidates_empty() -> None:
     from deepblue.skills.learn.cli.evolve import _print_agent_candidates
 
     _print_agent_candidates([])
+
+
+def test_resolve_project_root_git_nonzero(monkeypatch) -> None:
+    """環境変数が無く git が失敗すれば cwd を返す。"""
+    from types import SimpleNamespace
+
+    import deepblue.skills.learn.cli.registry as r
+
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.setattr(r.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=1, stdout=""))
+    assert isinstance(r._resolve_project_root(), str)
+
+
+def test_update_registry_without_fcntl(monkeypatch, tmp_path) -> None:
+    """fcntl が無い環境ではロック無しでレジストリを書き込む。"""
+    import deepblue.skills.learn.cli.registry as r
+
+    monkeypatch.setattr(r._pkg, "_HAS_FCNTL", False)
+    monkeypatch.setattr(r, "_preferred_registry_file", lambda: tmp_path / "projects.json")
+    r._update_registry("pid", "name", "root", "remote")
+    assert (tmp_path / "projects.json").exists()
