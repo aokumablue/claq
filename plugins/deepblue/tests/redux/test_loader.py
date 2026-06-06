@@ -68,6 +68,44 @@ class TestBuildSpec:
         with pytest.raises(ValueError, match="未知の戦略"):
             loader._build_spec("x", {"command_pattern": ".", "strategies": ["bogus"]})
 
+    def test_long_command_pattern_rejected_when_untrusted(self) -> None:
+        long_pat = "a" * (loader._MAX_USER_PATTERN_LEN + 1)
+        with pytest.raises(ValueError, match="長すぎます"):
+            loader._build_spec("x", {"command_pattern": long_pat}, trusted=False)
+
+    def test_long_pattern_allowed_when_trusted(self) -> None:
+        # 組込（trusted=True）は長さ検証をスキップする
+        long_pat = "a" * (loader._MAX_USER_PATTERN_LEN + 1)
+        spec = loader._build_spec("x", {"command_pattern": long_pat}, trusted=True)
+        assert spec.name == "x"
+
+    def test_pattern_length_check_scans_all_fields(self) -> None:
+        # 全種別のパターン（短い）を含み検証を通過する（収集経路を網羅）
+        spec = loader._build_spec(
+            "x",
+            {
+                "command_pattern": "^x",
+                "substitute": [{"pattern": r"\d", "replacement": "N"}],
+                "short_circuit": [{"pattern": "OK", "message": "m", "unless": "ERR"}],
+                "drop_lines": [r"^D"],
+            },
+            trusted=False,
+        )
+        assert spec.name == "x"
+
+    def test_pattern_length_check_keep_and_no_unless(self) -> None:
+        # keep_lines 経路と unless 無し short_circuit を網羅
+        spec = loader._build_spec(
+            "x",
+            {
+                "command_pattern": "^x",
+                "short_circuit": [{"pattern": "OK", "message": "m"}],
+                "keep_lines": [r"ERR"],
+            },
+            trusted=False,
+        )
+        assert spec.name == "x"
+
 
 # ---------------------------------------------------------------------------
 # _parse_toml
@@ -146,6 +184,29 @@ class TestLoadFilterSpecs:
         monkeypatch.setattr(loader, "_user_filter_paths", lambda: [missing])
         specs = loader.load_filter_specs()
         assert all(s.name != "mine" for s in specs)
+
+    def test_user_parse_error_skipped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # 不正な TOML はスキップし、組込フィルタは無効化されない
+        bad = _write(tmp_path / "filters.toml", "= not valid =")
+        monkeypatch.setattr(loader, "_user_filter_paths", lambda: [bad])
+        specs = loader.load_filter_specs()
+        assert any(s.name == "default" for s in specs)
+        assert "ユーザーフィルタを無視" in capsys.readouterr().err
+
+    def test_user_long_pattern_skipped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        long_pat = "a" * (loader._MAX_USER_PATTERN_LEN + 1)
+        user = _write(
+            tmp_path / "filters.toml",
+            f'schema_version = 1\n[filters.mine]\ncommand_pattern = "{long_pat}"\n',
+        )
+        monkeypatch.setattr(loader, "_user_filter_paths", lambda: [user])
+        specs = loader.load_filter_specs()
+        assert all(s.name != "mine" for s in specs)
+        assert "ユーザーフィルタを無視" in capsys.readouterr().err
 
 
 class TestLoadBuiltinCases:
