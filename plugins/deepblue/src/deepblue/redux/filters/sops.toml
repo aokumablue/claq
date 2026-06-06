@@ -1,0 +1,17 @@
+schema_version = 1
+[filters.sops]
+description = "Compact sops output"
+command_pattern = "^sops\\b"
+strip_ansi = true
+drop_lines = ["^\\s*$"]
+limit_lines = 40
+
+[[cases.sops]]
+name = "strips blank lines"
+input = "mac: xyz123\n\nversion: 3.8.1"
+expected = "mac: xyz123\nversion: 3.8.1"
+
+[[cases.sops]]
+name = "preserves non-blank output unchanged"
+input = "mac: abc123\nversion: 3.8.1"
+expected = "mac: abc123\nversion: 3.8.1"

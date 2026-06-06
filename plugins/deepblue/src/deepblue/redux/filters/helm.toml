@@ -1,0 +1,30 @@
+schema_version = 1
+[filters.helm]
+description = "Compact helm output"
+command_pattern = "^helm\\b"
+strip_ansi = true
+drop_lines = [
+  "^\\s*$",
+  "^W\\d{4}",
+]
+clip_width = 120
+limit_lines = 40
+
+[[cases.helm]]
+name = "strips blank lines, preserves release info"
+input = """
+NAME: my-release
+LAST DEPLOYED: Mon Jan 15 10:30:00 2024
+NAMESPACE: default
+STATUS: deployed
+REVISION: 3
+
+NOTES:
+Application is running.
+"""
+expected = "NAME: my-release\nLAST DEPLOYED: Mon Jan 15 10:30:00 2024\nNAMESPACE: default\nSTATUS: deployed\nREVISION: 3\nNOTES:\nApplication is running."
+
+[[cases.helm]]
+name = "strips glog W-prefix warnings"
+input = "W0115 10:30:00 warning message from internal\nNAME: my-chart\nSTATUS: deployed"
+expected = "NAME: my-chart\nSTATUS: deployed"

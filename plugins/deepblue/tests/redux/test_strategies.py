@@ -1,14 +1,16 @@
-"""reducer.py のユニットテスト — RTK スタイルのトークン削減ロジック。"""
+"""redux 戦略（strategies.py）のユニットテスト。"""
 
 from __future__ import annotations
 
 import pytest
 
-from deepblue.mem.reducer import (
-    ReduceConfig,
+from deepblue.redux.config import ReduxConfig
+from deepblue.redux.strategies import (
+    STRATEGY_DISPATCH,
+    _LintGroup,
+    _render_lint_groups,
     dedup_lines,
     group_lint_errors,
-    reduce_bash_output,
     smart_filter,
     smart_truncate,
 )
@@ -32,6 +34,9 @@ class TestSmartFilter:
             ("=====", "区切り線（イコール）"),
             ("  20 passing", "mocha passing"),
             ("  5 pending", "mocha pending"),
+            ("# shell comment", "シェルコメント"),
+            ("  .  ", "pytest ドット行"),
+            ("remote: Counting objects: 100", "git push verbosity"),
         ],
     )
     def test_removes_boilerplate(self, line: str, desc: str) -> None:
@@ -47,7 +52,9 @@ class TestSmartFilter:
             ("fatal: not a git repository", "fatal 行"),
             ("Traceback (most recent call last):", "Python Traceback"),
             ('  File "foo.py", line 10', "Python スタックトレース"),
+            ("  at fn (foo.js:1)", "JS スタックトレース"),
             ("AssertionError: expected 1, got 2", "AssertionError"),
+            ("  3 errors found", "エラー件数行"),
         ],
     )
     def test_preserves_important_lines(self, line: str, desc: str) -> None:
@@ -82,7 +89,6 @@ class TestDedupLines:
         text = "\n".join([line] * 10)
         result = dedup_lines(text, threshold=3)
         lines = result.splitlines()
-        # 最初の1行のみ保持 + 折りたたみ通知
         assert lines.count(line) == 1
         assert any("×10" in ln for ln in lines), "折りたたみ通知が挿入されるべき"
 
@@ -90,20 +96,18 @@ class TestDedupLines:
         line = "[ERROR] Connection refused"
         text = "\n".join([line] * 2)
         result = dedup_lines(text, threshold=3)
-        # threshold 未満はそのまま
         assert result.count(line) == 2
         assert "折りたたみ" not in result
 
-    def test_normalizes_timestamps(self) -> None:
+    def test_normalizes_timestamps_addr_digits(self) -> None:
         lines = [
-            "2026-01-01T12:00:00Z ERROR: disk full",
-            "2026-01-01T12:00:01Z ERROR: disk full",
-            "2026-01-01T12:00:02Z ERROR: disk full",
-            "2026-01-01T12:00:03Z ERROR: disk full",
+            "2026-01-01T12:00:00Z ERROR at 0xdeadbeef code 12345",
+            "2026-01-01T12:00:01Z ERROR at 0xcafef00d code 67890",
+            "2026-01-01T12:00:02Z ERROR at 0xfeedface code 11111",
+            "2026-01-01T12:00:03Z ERROR at 0xabad1dea code 22222",
         ]
         text = "\n".join(lines)
         result = dedup_lines(text, threshold=3)
-        # タイムスタンプ違いも同一視される
         non_notice_lines = [ln for ln in result.splitlines() if "折りたたみ" not in ln]
         assert len(non_notice_lines) == 1
 
@@ -134,7 +138,6 @@ class TestGroupLintErrors:
         result = group_lint_errors(text)
         assert "[E501]: 3件" in result
         assert "[F401]: 1件" in result
-        # 元の行は除去される
         assert "src/foo.py:1:5:" not in result
 
     def test_groups_eslint_errors_by_rule(self) -> None:
@@ -147,6 +150,7 @@ class TestGroupLintErrors:
         assert "[prefer-const]" in result
         assert "2件" in result
         assert "[semi]" in result
+        assert "(warning)" in result
 
     def test_groups_pytest_failures(self) -> None:
         text = (
@@ -155,7 +159,6 @@ class TestGroupLintErrors:
             "FAILED tests/baz.py::test_c - AssertionError: expected 2\n"
         )
         result = group_lint_errors(text)
-        # AssertionError: expected 1 が2件グループ化される
         assert "2件" in result
         assert "pytest FAILED" in result
 
@@ -168,12 +171,34 @@ class TestGroupLintErrors:
         assert group_lint_errors("") == ""
 
     def test_fmt_files_shows_overflow_count(self) -> None:
-        """4件以上のファイルがある場合、+Nファイル が表示される。"""
-        # ruff エラーを4ファイルで発生させる
         text = "\n".join(f"src/file{i}.py:1:1: E501 line too long" for i in range(4))
         result = group_lint_errors(text)
-        # max_show=3 なので +1ファイル が表示される
         assert "+1ファイル" in result
+
+    def test_eslint_dedup_files(self) -> None:
+        """同一ファイルが複数回出ても files には1回だけ追加される。"""
+        text = (
+            "  src/a.ts:10:5  error  msg one  prefer-const\n"
+            "  src/a.ts:20:3  error  msg two  prefer-const\n"
+        )
+        result = group_lint_errors(text)
+        # files は src/a.ts のみ（重複なし）
+        assert result.count("src/a.ts") == 1
+        assert "2件" in result
+
+    def test_ruff_dedup_files(self) -> None:
+        """ruff でも同一ファイルは files に1回だけ。"""
+        text = "src/a.py:1:1: E501 long\nsrc/a.py:2:1: E501 long\n"
+        result = group_lint_errors(text)
+        assert "[E501]: 2件" in result
+
+    def test_render_eslint_without_first_msg(self) -> None:
+        """first_msg が空の eslint グループでは『例:』行を出力しない。"""
+        parts: list[str] = []
+        group = _LintGroup(rule="r", severity="error", count=1, files=["f.ts"], first_msg="")
+        _render_lint_groups(parts, {"r": group}, {}, {})
+        assert not any("例:" in p for p in parts)
+        assert any("[r]" in p for p in parts)
 
 
 # ---------------------------------------------------------------------------
@@ -193,9 +218,9 @@ class TestSmartTruncate:
         text = "\n".join(lines)
         result = smart_truncate(text, max_len=100, head_lines=5, tail_lines=5)
         assert "省略" in result
-        assert "line 0" in result  # 先頭は保持
-        assert "line 199" in result  # 末尾は保持
-        assert "line 100" not in result  # 中間は省略
+        assert "line 0" in result
+        assert "line 199" in result
+        assert "line 100" not in result
 
     def test_truncation_message_shows_counts(self) -> None:
         lines = [f"line {i}" for i in range(100)]
@@ -205,51 +230,66 @@ class TestSmartTruncate:
         assert "計 100 行" in result
 
     def test_character_based_truncation_for_few_long_lines(self) -> None:
-        """行数は少ないが文字数が多い場合、文字数ベースでトランケートされる（lines 240-241）。"""
-        text = "a" * 500  # 1行で 500 文字
+        text = "a" * 500
         result = smart_truncate(text, max_len=100, head_lines=30, tail_lines=30)
         assert "文字省略" in result
-        # 先頭/末尾の文字が含まれる
         assert result.startswith("a" * 50)
         assert result.endswith("a" * 50)
 
 
 # ---------------------------------------------------------------------------
-# パイプライン統合
+# 戦略ディスパッチ
 # ---------------------------------------------------------------------------
 
 
-class TestReduceBashOutput:
-    """reduce_bash_output のテスト"""
+class TestStrategyDispatch:
+    """STRATEGY_DISPATCH の各戦略と enabled フラグ。"""
 
-    def test_disabled_returns_original(self) -> None:
-        text = "npm warn deprecated foo\n" * 100
-        config = ReduceConfig(enabled=False)
-        assert reduce_bash_output(text, config) == text
+    def test_smart_filter_enabled(self) -> None:
+        cfg = ReduxConfig()
+        out = STRATEGY_DISPATCH["smart_filter"]("npm warn x\nkeep me", cfg)
+        assert "npm warn" not in out
+        assert "keep me" in out
 
-    def test_empty_input_returns_original(self) -> None:
-        assert reduce_bash_output("") == ""
-        assert reduce_bash_output("   ") == "   "
+    def test_smart_filter_disabled(self) -> None:
+        cfg = ReduxConfig(smart_filter_enabled=False)
+        text = "npm warn x"
+        assert STRATEGY_DISPATCH["smart_filter"](text, cfg) == text
 
-    def test_pipeline_applies_all_strategies(self) -> None:
-        # ruff エラー + 重複ログ + ボイラープレート + 大量行
-        lines = (
-            ["npm warn deprecated foo"]
-            + ["src/foo.py:1:1: E501 line too long"] * 5
-            + ["src/bar.py:2:1: E501 line too long"] * 5
-            + ["2026-01-01 12:00:00 INFO: processing"] * 10
-            + [f"data line {i}" for i in range(100)]
-        )
-        text = "\n".join(lines)
-        config = ReduceConfig(max_output_len=500, head_lines=10, tail_lines=10)
-        result = reduce_bash_output(text, config)
+    def test_dedup_enabled(self) -> None:
+        cfg = ReduxConfig(dedup_threshold=3)
+        text = "\n".join(["same line"] * 5)
+        out = STRATEGY_DISPATCH["dedup"](text, cfg)
+        assert "折りたたみ" in out
 
-        assert len(result) < len(text), "削減されるべき"
-        # ruff エラーはグループ化される
-        assert "[E501]" in result or "E501" in result
+    def test_dedup_disabled(self) -> None:
+        cfg = ReduxConfig(dedup_enabled=False)
+        text = "\n".join(["same line"] * 5)
+        assert STRATEGY_DISPATCH["dedup"](text, cfg) == text
 
-    def test_does_not_expand_short_output(self) -> None:
-        text = "All tests passed!"
-        result = reduce_bash_output(text)
-        # 短い出力は変わらない（グループ化ヘッダー等が付かない）
-        assert len(result) <= len(text) + 10  # ほぼ同じ長さ
+    def test_group_lint_enabled(self) -> None:
+        cfg = ReduxConfig()
+        text = "src/a.py:1:1: E501 long\nsrc/b.py:2:1: E501 long\n"
+        out = STRATEGY_DISPATCH["group_lint"](text, cfg)
+        assert "[E501]" in out
+
+    def test_group_lint_disabled(self) -> None:
+        cfg = ReduxConfig(group_lint_enabled=False)
+        text = "src/a.py:1:1: E501 long"
+        assert STRATEGY_DISPATCH["group_lint"](text, cfg) == text
+
+    def test_smart_truncate_enabled(self) -> None:
+        cfg = ReduxConfig(smart_truncate_enabled=True, max_output_len=10, head_lines=2, tail_lines=2)
+        text = "\n".join(f"line {i}" for i in range(50))
+        out = STRATEGY_DISPATCH["smart_truncate"](text, cfg)
+        assert "省略" in out
+
+    def test_smart_truncate_disabled(self) -> None:
+        cfg = ReduxConfig(smart_truncate_enabled=False, max_output_len=10)
+        text = "\n".join(f"line {i}" for i in range(50))
+        assert STRATEGY_DISPATCH["smart_truncate"](text, cfg) == text
+
+    def test_smart_truncate_under_limit_passthrough(self) -> None:
+        cfg = ReduxConfig(smart_truncate_enabled=True, max_output_len=100000)
+        text = "short"
+        assert STRATEGY_DISPATCH["smart_truncate"](text, cfg) == text

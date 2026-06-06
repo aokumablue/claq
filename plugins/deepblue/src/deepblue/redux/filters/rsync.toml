@@ -1,0 +1,49 @@
+schema_version = 1
+[filters.rsync]
+description = "Compact rsync output — short-circuit on success, strip progress"
+command_pattern = "^rsync\\b"
+strip_ansi = true
+drop_lines = [
+  "^\\s*$",
+  "^sending incremental file list",
+  "^sent \\d",
+]
+short_circuit = [
+  { pattern = "total size is", message = "ok (synced)", unless = "error|failed|No such file" },
+]
+limit_lines = 20
+
+[[cases.rsync]]
+name = "successful sync short-circuits to ok"
+input = """
+sending incremental file list
+./
+file1.txt
+file2.txt
+
+sent 1,234 bytes  received 42 bytes  2,552.00 bytes/sec
+total size is 98,765  speedup is 77.31
+"""
+expected = "ok (synced)"
+
+[[cases.rsync]]
+name = "error lines pass through"
+input = """
+sending incremental file list
+rsync: [Receiver] mkdir "/remote/path" failed: Permission denied (13)
+rsync error: error in file system (code 11) at receiver.c(741) [Receiver=3.2.7]
+"""
+expected = """rsync: [Receiver] mkdir "/remote/path" failed: Permission denied (13)
+rsync error: error in file system (code 11) at receiver.c(741) [Receiver=3.2.7]"""
+
+[[cases.rsync]]
+name = "errors not swallowed when total size present"
+input = """
+rsync: [sender] error
+error in rsync protocol data stream (code 12)
+sent 100 bytes  received 200 bytes  60.00 bytes/sec
+total size is 1000  speedup is 3.33
+"""
+expected = """rsync: [sender] error
+error in rsync protocol data stream (code 12)
+total size is 1000  speedup is 3.33"""

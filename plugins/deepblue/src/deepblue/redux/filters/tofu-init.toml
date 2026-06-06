@@ -1,0 +1,39 @@
+schema_version = 1
+[filters.tofu-init]
+description = "Compact OpenTofu init output"
+command_pattern = "^tofu\\s+init(\\s|$)"
+strip_ansi = true
+drop_lines = [
+  "^- Downloading",
+  "^- Installing",
+  "^- Using previously-installed",
+  "^\\s*$",
+  "^Initializing provider",
+  "^Initializing the backend",
+  "^Initializing modules",
+]
+limit_lines = 20
+empty_message = "tofu init: ok"
+
+[[cases.tofu-init]]
+name = "strips downloading/installing lines"
+input = """
+Initializing the backend...
+Initializing provider plugins...
+- Downloading hashicorp/aws 5.0.0...
+- Installing hashicorp/aws 5.0.0...
+- Using previously-installed hashicorp/random 3.5.1
+
+OpenTofu has been successfully initialized!
+"""
+expected = "OpenTofu has been successfully initialized!"
+
+[[cases.tofu-init]]
+name = "on_empty when all noise stripped"
+input = """
+Initializing the backend...
+Initializing provider plugins...
+- Using previously-installed hashicorp/aws 5.0.0
+
+"""
+expected = "tofu init: ok"

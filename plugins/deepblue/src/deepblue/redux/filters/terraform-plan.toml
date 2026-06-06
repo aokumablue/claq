@@ -1,0 +1,36 @@
+schema_version = 1
+[filters.terraform-plan]
+description = "Compact Terraform plan output"
+command_pattern = "^terraform\\s+plan"
+strip_ansi = true
+drop_lines = [
+  "^Refreshing state",
+  "^\\s*#.*unchanged",
+  "^\\s*$",
+  "^Acquiring state lock",
+  "^Releasing state lock",
+]
+limit_lines = 80
+empty_message = "terraform plan: no changes detected"
+
+[[cases.terraform-plan]]
+name = "strips Refreshing state lines and blank lines"
+input = """
+Acquiring state lock. This may take a few moments...
+Refreshing state... [id=vpc-abc]
+Refreshing state... [id=sg-123]
+Releasing state lock. This may take a few moments...
+
+Terraform will perform the following actions:
+
+  # aws_instance.web will be created
+  + resource "aws_instance" "web" {}
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+"""
+expected = "Terraform will perform the following actions:\n  # aws_instance.web will be created\n  + resource \"aws_instance\" \"web\" {}\nPlan: 1 to add, 0 to change, 0 to destroy."
+
+[[cases.terraform-plan]]
+name = "strips noise, preserves non-blank content"
+input = "Refreshing state... [id=vpc-abc]\nNo changes. Your infrastructure matches the configuration."
+expected = "No changes. Your infrastructure matches the configuration."

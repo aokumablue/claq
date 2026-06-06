@@ -85,8 +85,8 @@ def _strip_password_to_pgpass(url: str) -> str:
 
 
 @dataclass
-class CompactSettings:
-    """Bash 出力のトークン削減設定（すべてハードコード既定値）"""
+class ReduxSettings:
+    """redux コマンド別トークン圧縮の設定（すべてハードコード既定値）"""
 
     enabled: bool = True
     smart_filter_enabled: bool = True
@@ -155,7 +155,7 @@ class Settings:
     auto_compact_interval_days: int = 7
     last_compacted_at: float = 0.0  # ランタイム状態
     sync: SyncSettings = field(default_factory=SyncSettings)
-    compact: CompactSettings = field(default_factory=CompactSettings)
+    redux: ReduxSettings = field(default_factory=ReduxSettings)
     team: TeamSettings = field(default_factory=TeamSettings)
 
     # --- 導出プロパティ ---

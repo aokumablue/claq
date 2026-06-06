@@ -1,0 +1,17 @@
+schema_version = 1
+[filters.ps]
+description = "Compact ps output — truncate wide lines, limit rows"
+command_pattern = "^ps(\\s|$)"
+strip_ansi = true
+clip_width = 120
+limit_lines = 30
+
+[[cases.ps]]
+name = "short process list passes through unchanged"
+input = "USER   PID %CPU %MEM COMMAND\nroot     1  0.0  0.0 /sbin/launchd\nflorian  42  0.1  0.2 bash"
+expected = "USER   PID %CPU %MEM COMMAND\nroot     1  0.0  0.0 /sbin/launchd\nflorian  42  0.1  0.2 bash"
+
+[[cases.ps]]
+name = "empty input passes through"
+input = ""
+expected = ""

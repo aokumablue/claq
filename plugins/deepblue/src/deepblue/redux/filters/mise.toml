@@ -1,0 +1,31 @@
+schema_version = 1
+[filters.mise]
+description = "Compact mise task runner output — strip status lines, keep task results"
+command_pattern = "^mise\\s+(run|exec|install|upgrade)\\b"
+strip_ansi = true
+drop_lines = [
+  "^\\s*$",
+  "^mise\\s+(trust|install|upgrade).*✓",
+  "^mise\\s+Installing\\s",
+  "^mise\\s+Downloading\\s",
+  "^mise\\s+Extracting\\s",
+  "^mise\\s+\\w+@[\\d.]+ installed",
+]
+clip_width = 150
+limit_lines = 50
+empty_message = "mise: ok"
+
+[[cases.mise]]
+name = "strips install noise, keeps task output"
+input = "mise Installing node@20.0.0\nmise Downloading node@20.0.0\nmise Extracting node@20.0.0\nmise node@20.0.0 installed\n\nlint check passed\n2 warnings found"
+expected = "lint check passed\n2 warnings found"
+
+[[cases.mise]]
+name = "preserves error output"
+input = "mise run lint\nError: biome check failed\nsrc/index.ts:5 — unused variable"
+expected = "mise run lint\nError: biome check failed\nsrc/index.ts:5 — unused variable"
+
+[[cases.mise]]
+name = "empty after stripping"
+input = "mise trust ~/dev/.mise.toml ✓\nmise install node@20 ✓\n"
+expected = "mise: ok"

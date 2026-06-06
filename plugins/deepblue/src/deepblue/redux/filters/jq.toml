@@ -1,0 +1,25 @@
+schema_version = 1
+[filters.jq]
+description = "Compact jq output — truncate large JSON results"
+command_pattern = "^jq\\b"
+strip_ansi = true
+drop_lines = [
+  "^\\s*$",
+]
+limit_lines = 40
+clip_width = 120
+
+[[cases.jq]]
+name = "short output passes through"
+input = """
+{
+  "name": "test",
+  "version": "1.0"
+}
+"""
+expected = "{\n  \"name\": \"test\",\n  \"version\": \"1.0\"\n}"
+
+[[cases.jq]]
+name = "empty input passes through"
+input = ""
+expected = ""

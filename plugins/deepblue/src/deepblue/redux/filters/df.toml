@@ -1,0 +1,17 @@
+schema_version = 1
+[filters.df]
+description = "Compact df output — truncate wide columns, limit rows"
+command_pattern = "^df(\\s|$)"
+strip_ansi = true
+clip_width = 80
+limit_lines = 20
+
+[[cases.df]]
+name = "short output passes through unchanged"
+input = "Filesystem     1K-blocks   Used Available Use% Mounted on\n/dev/sda1        4096000 123456   3972544   4% /"
+expected = "Filesystem     1K-blocks   Used Available Use% Mounted on\n/dev/sda1        4096000 123456   3972544   4% /"
+
+[[cases.df]]
+name = "empty input passes through"
+input = ""
+expected = ""

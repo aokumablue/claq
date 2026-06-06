@@ -1,0 +1,29 @@
+schema_version = 1
+[filters.jj]
+description = "Compact Jujutsu (jj) output — strip blank lines, truncate"
+command_pattern = "^jj\\b"
+strip_ansi = true
+drop_lines = [
+  "^\\s*$",
+  "^Hint:",
+  "^Working copy now at:",
+]
+limit_lines = 30
+clip_width = 120
+
+[[cases.jj]]
+name = "log output stripped of hints"
+input = """
+@  qpvuntsm patrick@example.com 2026-03-10 12:00 abc123
+│  feat: add new feature
+◉  zzzzzzzz root()
+
+Working copy now at: qpvuntsm abc123 feat: add new feature
+Hint: use `jj log` to see the full history
+"""
+expected = "@  qpvuntsm patrick@example.com 2026-03-10 12:00 abc123\n│  feat: add new feature\n◉  zzzzzzzz root()"
+
+[[cases.jj]]
+name = "empty input passes through"
+input = ""
+expected = ""

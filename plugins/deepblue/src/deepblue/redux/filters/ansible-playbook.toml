@@ -1,0 +1,35 @@
+schema_version = 1
+[filters.ansible-playbook]
+description = "Compact ansible-playbook output"
+command_pattern = "^ansible-playbook\\b"
+strip_ansi = true
+drop_lines = [
+  "^\\s*$",
+  "^ok: \\[",
+  "^skipping: \\[",
+]
+limit_lines = 60
+
+[[cases.ansible-playbook]]
+name = "strips ok and skipping lines, keeps changed and failures"
+input = """
+PLAY [all] *********************************************************************
+
+TASK [Gathering Facts] *********************************************************
+ok: [web01]
+ok: [web02]
+
+TASK [Install nginx] ***********************************************************
+changed: [web01]
+skipping: [web02]
+
+PLAY RECAP *********************************************************************
+web01                      : ok=2    changed=1    unreachable=0    failed=0
+web02                      : ok=1    changed=0    unreachable=0    failed=0
+"""
+expected = "PLAY [all] *********************************************************************\nTASK [Gathering Facts] *********************************************************\nTASK [Install nginx] ***********************************************************\nchanged: [web01]\nPLAY RECAP *********************************************************************\nweb01                      : ok=2    changed=1    unreachable=0    failed=0\nweb02                      : ok=1    changed=0    unreachable=0    failed=0"
+
+[[cases.ansible-playbook]]
+name = "failed task preserved"
+input = "TASK [Start service] ***\nfailed: [web01] => {\"msg\": \"Service not found\"}\nPLAY RECAP ***\nweb01 : ok=1 failed=1"
+expected = "TASK [Start service] ***\nfailed: [web01] => {\"msg\": \"Service not found\"}\nPLAY RECAP ***\nweb01 : ok=1 failed=1"

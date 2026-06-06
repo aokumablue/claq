@@ -1,0 +1,9 @@
+schema_version = 1
+
+# catch-all フィルタ — どのコマンド別フィルタにも一致しなかった出力に
+# コマンド非依存の汎用戦略を適用する。command_pattern = ".*" のため必ず最後に
+# 評価される（loader が default.toml を末尾に固定）。
+[filters.default]
+description = "コマンド非依存の汎用圧縮（catch-all）"
+command_pattern = ".*"
+strategies = ["smart_filter", "dedup", "group_lint", "smart_truncate"]

@@ -1,0 +1,42 @@
+schema_version = 1
+[filters.quarto-render]
+description = "Compact quarto render output"
+command_pattern = "^quarto\\s+render"
+strip_ansi = true
+drop_lines = [
+  "^\\s*$",
+  "^\\s*processing file:",
+  "^\\s*\\d+/\\d+\\s",
+  "^\\s*running",
+  "^\\s*Rendering",
+  "^pandoc ",
+  "^  Validating",
+  "^  Resolving",
+]
+short_circuit = [
+  { pattern = "Output created:", message = "ok (output created)" },
+]
+limit_lines = 20
+
+[[cases.quarto-render]]
+name = "success short-circuits to ok"
+input = """
+processing file: index.qmd
+  Validating schema
+  Resolving resources
+pandoc to html5
+Output created: _site/index.html
+"""
+expected = "ok (output created)"
+
+[[cases.quarto-render]]
+name = "error passes through"
+input = """
+processing file: broken.qmd
+  Validating schema
+ERROR: Render failed
+
+caused by:
+  syntax error at line 10
+"""
+expected = "ERROR: Render failed\ncaused by:\n  syntax error at line 10"

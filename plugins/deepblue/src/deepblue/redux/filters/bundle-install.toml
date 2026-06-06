@@ -1,0 +1,62 @@
+schema_version = 1
+[filters.bundle-install]
+description = "Compact bundle install/update — strip 'Using' lines, keep installs and errors"
+command_pattern = "^bundle\\s+(install|update)\\b"
+strip_ansi = true
+drop_lines = [
+  "^Using ",
+  "^\\s*$",
+  "^Fetching gem metadata",
+  "^Resolving dependencies",
+]
+short_circuit = [
+  { pattern = "Bundle complete!", message = "ok bundle: complete" },
+  { pattern = "Bundle updated!", message = "ok bundle: updated" },
+]
+limit_lines = 30
+
+[[cases.bundle-install]]
+name = "all cached short-circuits"
+input = """
+Using bundler 2.5.6
+Using rake 13.1.0
+Using ast 2.4.2
+Using base64 0.2.0
+Using minitest 5.22.2
+Bundle complete! 85 Gemfile dependencies, 200 gems now installed.
+Use `bundle info [gemname]` to see where a bundled gem is installed.
+"""
+expected = "ok bundle: complete"
+
+[[cases.bundle-install]]
+name = "mixed install keeps Fetching and Installing lines"
+input = """
+Fetching gem metadata from https://rubygems.org/.........
+Resolving dependencies...
+Using rake 13.1.0
+Using ast 2.4.2
+Fetching rspec 3.13.0
+Installing rspec 3.13.0
+Using rubocop 1.62.0
+Fetching simplecov 0.22.0
+Installing simplecov 0.22.0
+Bundle complete! 85 Gemfile dependencies, 202 gems now installed.
+"""
+expected = "ok bundle: complete"
+
+[[cases.bundle-install]]
+name = "update output"
+input = """
+Fetching gem metadata from https://rubygems.org/.........
+Resolving dependencies...
+Using rake 13.1.0
+Fetching rspec 3.14.0 (was 3.13.0)
+Installing rspec 3.14.0 (was 3.13.0)
+Bundle updated!
+"""
+expected = "ok bundle: updated"
+
+[[cases.bundle-install]]
+name = "empty output"
+input = ""
+expected = ""

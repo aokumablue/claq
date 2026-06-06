@@ -211,11 +211,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"post:bash:compact\" \"deepblue.hooks.post_bash_compact\" \"standard,strict\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/deepblue/launcher.py\" deepblue.hooks.run_with_flags \"post:redux:filter\" \"deepblue.hooks.redux_filter\" \"standard,strict\"",
             "timeout": 10
           }
         ],
-        "description": "Bash 出力のトークン削減: フィルタリング・グループ化・重複排除・トランケーション"
+        "description": "redux: Bash 出力をコマンド別フィルタで圧縮（無一致時は汎用戦略でトークン削減）"
       },
       {
         "matcher": "Bash",

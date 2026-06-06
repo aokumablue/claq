@@ -1,17 +1,27 @@
-"""Bash ツール出力のトークン削減（RTK スタイル） — LLM 不要の純 Python 実装。
+"""アルゴリズム的圧縮戦略 — 宣言的フィルタでは表現できない処理を担う。
 
-4 戦略を順次適用するパイプライン:
-  1. smart_filter       — ボイラープレート行・コメント行を除去
-  2. dedup_lines        — 同一行をカウント付きで折りたたむ
-  3. group_lint_errors  — ESLint/ruff/pytest エラーをルール別に集約
-  4. smart_truncate     — 先頭/末尾を保持しながら中間を省略
+宣言的フィルタ（TOML の行フィルタ・truncate など）が静的ルールで圧縮するのに対し、
+本モジュールの戦略は入力全体を解析して動的に圧縮する:
+
+  - ``smart_filter``    — ボイラープレート行・コメント行を除去
+  - ``dedup``           — 同一パターン行をカウント付きで折りたたむ
+  - ``group_lint``      — ESLint/ruff/pytest エラーをルール別に集約
+  - ``smart_truncate``  — 先頭/末尾を保持しながら中間を省略
+
+``default.toml`` の catch-all フィルタがこれらを ``strategies`` で宣言し、
+コマンド非依存の汎用圧縮として適用する。
 """
 
 from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from deepblue.redux.config import ReduxConfig
 
 # ---------------------------------------------------------------------------
 # 戦略1: スマートフィルタリング
@@ -259,59 +269,44 @@ def smart_truncate(
 
 
 # ---------------------------------------------------------------------------
-# パイプライン統合
+# 戦略ディスパッチ — 宣言的フィルタの ``strategies`` から名前で呼び出す
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class ReduceConfig:
-    """トークン削減パイプラインの設定。"""
-
-    enabled: bool = True
-    smart_filter_enabled: bool = True
-    group_lint_enabled: bool = True
-    dedup_enabled: bool = True
-    smart_truncate_enabled: bool = True
-    max_output_len: int = 3000
-    head_lines: int = 30
-    tail_lines: int = 30
-    dedup_threshold: int = 3
-
-
-def reduce_bash_output(text: str, config: ReduceConfig | None = None) -> str:
-    """RTK スタイルの4戦略を順次適用して Bash 出力を削減する。
-
-    Args:
-        text: 削減対象のテキスト。
-        config: 削減設定。None の場合はデフォルト設定を使用。
-
-    Returns:
-        削減後のテキスト。enabled=False または空入力の場合は元テキストをそのまま返す。
-    """
-    if not text or not text.strip():
+def _run_smart_filter(text: str, config: ReduxConfig) -> str:
+    """smart_filter 戦略を設定フラグ付きで実行する。"""
+    if not config.smart_filter_enabled:
         return text
+    return smart_filter(text)
 
-    cfg = config or ReduceConfig()
-    if not cfg.enabled:
+
+def _run_dedup(text: str, config: ReduxConfig) -> str:
+    """dedup 戦略を設定フラグ付きで実行する。"""
+    if not config.dedup_enabled:
         return text
+    return dedup_lines(text, threshold=config.dedup_threshold)
 
-    result = text
 
-    if cfg.smart_filter_enabled:
-        result = smart_filter(result)
+def _run_group_lint(text: str, config: ReduxConfig) -> str:
+    """group_lint 戦略を設定フラグ付きで実行する。"""
+    if not config.group_lint_enabled:
+        return text
+    return group_lint_errors(text)
 
-    if cfg.dedup_enabled:
-        result = dedup_lines(result, threshold=cfg.dedup_threshold)
 
-    if cfg.group_lint_enabled:
-        result = group_lint_errors(result)
+def _run_smart_truncate(text: str, config: ReduxConfig) -> str:
+    """smart_truncate 戦略を設定フラグ付きで実行する。"""
+    if not config.smart_truncate_enabled:
+        return text
+    if len(text) <= config.max_output_len:
+        return text
+    return smart_truncate(text, config.max_output_len, config.head_lines, config.tail_lines)
 
-    if cfg.smart_truncate_enabled and len(result) > cfg.max_output_len:
-        result = smart_truncate(
-            result,
-            max_len=cfg.max_output_len,
-            head_lines=cfg.head_lines,
-            tail_lines=cfg.tail_lines,
-        )
 
-    return result
+# 戦略名 → 実行関数。未知の名前は engine 側で検証・拒否する。
+STRATEGY_DISPATCH: dict[str, Callable[[str, ReduxConfig], str]] = {
+    "smart_filter": _run_smart_filter,
+    "dedup": _run_dedup,
+    "group_lint": _run_group_lint,
+    "smart_truncate": _run_smart_truncate,
+}

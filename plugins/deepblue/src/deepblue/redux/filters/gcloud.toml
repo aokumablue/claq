@@ -1,0 +1,23 @@
+schema_version = 1
+[filters.gcloud]
+description = "Compact gcloud output"
+command_pattern = "^gcloud\\b"
+strip_ansi = true
+drop_lines = ["^\\s*$"]
+clip_width = 120
+limit_lines = 30
+
+[[cases.gcloud]]
+name = "strips blank lines, preserves output"
+input = """
+Updated property [core/project].
+
+NAME        REGION        STATUS
+my-cluster  us-central1   RUNNING
+"""
+expected = "Updated property [core/project].\nNAME        REGION        STATUS\nmy-cluster  us-central1   RUNNING"
+
+[[cases.gcloud]]
+name = "single line passthrough"
+input = "Listed 0 items."
+expected = "Listed 0 items."

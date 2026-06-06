@@ -1,0 +1,24 @@
+schema_version = 1
+[filters.ollama]
+description = "Strip ANSI spinners and cursor control from ollama output, keep final text"
+command_pattern = "^ollama\\s+run\\b"
+strip_ansi = true
+drop_lines = [
+  "^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\\s]*$",
+  "^\\s*$",
+]
+
+[[cases.ollama]]
+name = "strips spinner lines, keeps response"
+input = "⠋ \n⠙ \n⠹ \nHello! How can I help you today?"
+expected = "Hello! How can I help you today?"
+
+[[cases.ollama]]
+name = "preserves multi-line response"
+input = "⠋ \n⠙ \nLine one of the response.\nLine two of the response."
+expected = "Line one of the response.\nLine two of the response."
+
+[[cases.ollama]]
+name = "empty input"
+input = ""
+expected = ""

@@ -1,0 +1,16 @@
+schema_version = 1
+[filters.mix-format]
+description = "Compact mix format output"
+command_pattern = "^mix\\s+format(\\s|$)"
+empty_message = "mix format: ok"
+limit_lines = 20
+
+[[cases.mix-format]]
+name = "empty output returns ok"
+input = ""
+expected = "mix format: ok"
+
+[[cases.mix-format]]
+name = "changed files pass through"
+input = "lib/my_app.ex\ntest/my_app_test.exs"
+expected = "lib/my_app.ex\ntest/my_app_test.exs"

@@ -1,0 +1,37 @@
+schema_version = 1
+[filters.make]
+description = "Compact make output"
+command_pattern = "^make\\b"
+drop_lines = [
+  "^make\\[\\d+\\]:",
+  "^\\s*$",
+  "^Nothing to be done",
+]
+limit_lines = 50
+empty_message = "make: ok"
+
+[[cases.make]]
+name = "strips entering/leaving lines"
+input = """
+make[1]: Entering directory '/home/user'
+gcc -O2 foo.c
+make[1]: Leaving directory '/home/user'
+"""
+expected = "gcc -O2 foo.c"
+
+[[cases.make]]
+name = "strips blank lines"
+input = """
+gcc -O2 foo.c
+
+gcc -O2 bar.c
+"""
+expected = "gcc -O2 foo.c\ngcc -O2 bar.c"
+
+[[cases.make]]
+name = "on_empty when all stripped"
+input = """
+make[1]: Entering directory '/home/user'
+make[1]: Leaving directory '/home/user'
+"""
+expected = "make: ok"

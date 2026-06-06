@@ -74,7 +74,7 @@ class TestSettingsSave:
         assert "chunk_max_length" not in raw["mem"]
         assert "embedding_model" not in raw["mem"]
         assert "last_compacted_at" not in raw["mem"]
-        assert "compact" not in raw["mem"]
+        assert "redux" not in raw["mem"]
 
     def test_save_preserves_other_plugin_sections(self, tmp_path: Path) -> None:
         """保存時に他プラグインのセクションを保持する"""
