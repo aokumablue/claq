@@ -928,3 +928,23 @@ def test_insights_extract_content_list_and_str() -> None:
     assert "hello" in text_list
     text_str, _ = extract_content({"content": "world"})
     assert text_str == "world"
+
+
+def test_insights_extract_content_absent_and_non_text() -> None:
+    """content も対象ツールも無い／content が非リスト非文字列なら空テキスト。"""
+    from deepblue.hooks.insights_security_monitor import extract_content
+
+    assert extract_content({}) == ("", "")
+    text, _ = extract_content({"content": 123})
+    assert text == ""
+
+
+def test_validate_commit_message_lowercase_no_period() -> None:
+    """conventional commit で小文字始まり・末尾ピリオド無しなら指摘なし。"""
+    from deepblue.hooks.pre_bash_commit_quality import validate_commit_message
+
+    result = validate_commit_message('git commit -m "feat: add new feature"')
+    assert result is not None
+    types = {i["type"] for i in result["issues"]}
+    assert "capitalization" not in types
+    assert "punctuation" not in types

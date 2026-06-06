@@ -226,3 +226,13 @@ class TestRun:
             runpy.run_module("deepblue.hooks.desktop_notify", run_name="__main__")
 
         assert excinfo.value.code == 0
+
+
+def test_find_powershell_all_candidates_nonzero(monkeypatch) -> None:
+    """全候補が非0終了なら None を返す。"""
+    from types import SimpleNamespace
+
+    from deepblue.hooks import desktop_notify
+
+    monkeypatch.setattr(desktop_notify.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=1))
+    assert desktop_notify.find_powershell() is None

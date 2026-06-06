@@ -201,3 +201,13 @@ def test_preset_table_uses_list_of_argvs() -> None:
         for argv in preset["bash"]:
             assert isinstance(argv, list), f"{language}: bash entries must be argv lists"
             assert argv, f"{language}: argv must be non-empty"
+
+
+def test_select_language_non_list_languages() -> None:
+    """languages が list でなければ primary_language のみ採用する。"""
+    from types import SimpleNamespace
+
+    from deepblue.hooks.quality_gate_presets import _select_language
+
+    info = SimpleNamespace(primary_language="python", languages="notalist")
+    assert _select_language(info) == "python"
