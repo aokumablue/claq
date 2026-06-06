@@ -253,3 +253,13 @@ def test_main_module_entrypoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 
     output = json.loads(capsys.readouterr().out)
     assert output["description"] == "From entrypoint"
+
+
+def test_format_history_section_without_results_or_note() -> None:
+    """results も note も無い履歴でも整形できる。"""
+    from deepblue.skills.improve_description import _format_history_section
+
+    out = _format_history_section([{"description": "d", "passed": 1, "total": 2}])
+    assert "<attempt" in out
+    assert "学習結果" not in out
+    assert "備考" not in out

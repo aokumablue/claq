@@ -64,3 +64,15 @@ def test_parse_skill_md_rejects_missing_frontmatter_end(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="末尾の --- がない"):
         parse_skill_md(skill_dir)
 
+
+
+def test_parse_skill_md_ignores_other_frontmatter_lines(tmp_path) -> None:
+    """name/description 以外の frontmatter 行はスキップする。"""
+    from deepblue.skills.utils import parse_skill_md
+
+    (tmp_path / "SKILL.md").write_text(
+        "---\nname: myskill\nother: value\ndescription: desc\n---\nbody text\n", encoding="utf-8"
+    )
+    name, description, _ = parse_skill_md(tmp_path)
+    assert name == "myskill"
+    assert description == "desc"

@@ -241,3 +241,17 @@ def test_package_skill_module_entrypoint(tmp_path: Path, monkeypatch: pytest.Mon
         runpy.run_module("deepblue.skills.package_skill", run_name="__main__")
 
     assert exc_info.value.code in (0, None)
+
+
+def test_quick_validate_name_empty() -> None:
+    """name が空なら検証 OK。"""
+    from deepblue.skills.quick_validate import _validate_name
+
+    assert _validate_name("") == (True, "")
+
+
+def test_quick_validate_description_empty() -> None:
+    """description が空文字なら検証 OK。"""
+    from deepblue.skills.quick_validate import _validate_description
+
+    assert _validate_description("") == (True, "")

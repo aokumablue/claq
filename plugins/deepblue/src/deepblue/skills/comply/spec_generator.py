@@ -84,4 +84,4 @@ def generate_spec(
 
     # range(max_retries + 1) は max_retries >= 0 のとき必ず1回以上実行されるため
     # ここには到達しない（上記バリデーションで保証）
-    raise AssertionError("unreachable")
+    raise AssertionError("unreachable")  # pragma: no cover
