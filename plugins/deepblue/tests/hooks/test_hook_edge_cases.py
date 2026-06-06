@@ -918,3 +918,13 @@ def test_insights_security_monitor_import_reload_and_entrypoint(
         runpy.run_module("deepblue.hooks.insights_security_monitor", run_name="__main__")
 
     assert entry_excinfo.value.code == 0
+
+
+def test_insights_extract_content_list_and_str() -> None:
+    """content が list/str いずれの形でもテキストを抽出する。"""
+    from deepblue.hooks.insights_security_monitor import extract_content
+
+    text_list, _ = extract_content({"content": [{"type": "text", "text": "hello"}]})
+    assert "hello" in text_list
+    text_str, _ = extract_content({"content": "world"})
+    assert text_str == "world"

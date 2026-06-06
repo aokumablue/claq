@@ -515,3 +515,10 @@ def test_quality_gate_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch) -> 
         runpy.run_module("deepblue.hooks.quality_gate", run_name="__main__")
 
     assert excinfo.value.code == 0
+
+
+def test_extract_file_path_non_string_values() -> None:
+    """tool_input.file_path も input_data.file_path も文字列でなければ空文字。"""
+    from deepblue.hooks.quality_gate import _extract_file_path
+
+    assert _extract_file_path({"tool_input": {"file_path": 123}}) == ""

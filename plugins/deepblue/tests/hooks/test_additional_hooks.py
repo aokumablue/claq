@@ -1033,3 +1033,39 @@ class TestFilterSessionSummary:
         from deepblue.hooks.session_start import _filter_session_summary
 
         assert _filter_session_summary("") == ""
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "block_no_verify",
+        "doc_file_warning",
+        "post_bash_build_complete",
+        "config_protection",
+        "pre_bash_git_push_reminder",
+    ],
+)
+def test_empty_input_passthrough(monkeypatch: pytest.MonkeyPatch, module_name: str) -> None:
+    """空入力（data None）では本処理をスキップして 0 を返す。"""
+    import importlib
+
+    mod = importlib.import_module(f"deepblue.hooks.{module_name}")
+    _capture_io(monkeypatch, mod, "")
+    assert mod.main() == 0
+
+
+def test_config_protection_blank_file_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """file_path が空なら保護判定をスキップする。"""
+    from deepblue.hooks import config_protection
+
+    payload = json.dumps({"tool_input": {"file_path": ""}})
+    _capture_io(monkeypatch, config_protection, payload)
+    assert config_protection.main() == 0
+
+def test_evaluate_session_config_without_min_length(tmp_path, monkeypatch) -> None:
+    """設定に min_session_length が無ければ既定値 10 を維持する。"""
+    monkeypatch.setattr(
+        evaluate_session, "read_file", lambda path: json.dumps({"learned_skills_path": "~/x"})
+    )
+    min_len, _ = evaluate_session._load_learn_config(tmp_path / "config.json")
+    assert min_len == 10

@@ -63,3 +63,15 @@ def test_main_entrypoint_exits_zero_and_writes_stdout(monkeypatch: pytest.Monkey
 
     assert exc.value.code == 0
     assert outputs == ["{}"]
+
+
+def test_evaluate_non_create_command_passthrough() -> None:
+    """create コマンドでなければ何も付加せず raw を返す。"""
+    raw = json.dumps({"tool_input": {"command": "git status"}})
+    assert pr_created.evaluate(raw, "github") == raw
+
+
+def test_evaluate_create_command_without_details() -> None:
+    """create コマンドだが出力から詳細を抽出できなければ raw を返す。"""
+    raw = json.dumps({"tool_input": {"command": "gh pr create --title x"}, "tool_output": {"output": ""}})
+    assert pr_created.evaluate(raw, "github") == raw
