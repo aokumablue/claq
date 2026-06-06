@@ -952,3 +952,78 @@ def test_run_loop_main_entrypoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         runpy.run_module("deepblue.skills.run_loop", run_name="__main__")
 
     assert excinfo.value.code == 0
+
+
+def test_build_query_cmd_non_claude() -> None:
+    """claude 以外のバイナリは json 出力形式で組み立てる。"""
+    from deepblue.skills.run_eval import _build_query_cmd
+
+    cmd = _build_query_cmd("codex", "q", None)
+    assert "--verbose" not in cmd
+    assert "json" in cmd
+
+
+def test_process_stream_event_non_tool_use_block() -> None:
+    """tool_use 以外の content_block は None を返す。"""
+    from deepblue.skills.run_eval import _process_stream_event
+
+    pending: list = [None]
+    acc: list = [""]
+    result = _process_stream_event(
+        {"type": "content_block_start", "content_block": {"type": "text"}}, "name", pending, acc
+    )
+    assert result is None
+
+
+def test_process_stream_event_delta_without_match() -> None:
+    """delta に対象名が含まれなければ None を返す。"""
+    from deepblue.skills.run_eval import _process_stream_event
+
+    pending: list = ["Skill"]
+    acc: list = [""]
+    result = _process_stream_event(
+        {"type": "content_block_delta", "delta": {"type": "input_json_delta", "partial_json": "x"}},
+        "target",
+        pending,
+        acc,
+    )
+    assert result is None
+
+
+def test_process_event_line_unknown_type() -> None:
+    """assistant/result 以外のイベントは None を返す。"""
+    from deepblue.skills.run_eval import _process_event_line
+
+    result = _process_event_line('{"type": "other"}', "name", [None], [""], [False])
+    assert result is None
+
+
+def test_process_stream_event_delta_non_json_delta() -> None:
+    """delta が input_json_delta 以外なら None。"""
+    from deepblue.skills.run_eval import _process_stream_event
+
+    assert _process_stream_event(
+        {"type": "content_block_delta", "delta": {"type": "other"}}, "n", ["Skill"], [""]
+    ) is None
+
+
+def test_process_stream_event_block_stop_without_pending() -> None:
+    """pending 無しの content_block_stop は None。"""
+    from deepblue.skills.run_eval import _process_stream_event
+
+    assert _process_stream_event({"type": "content_block_stop"}, "n", [None], [""]) is None
+
+
+def test_process_stream_event_unknown_type() -> None:
+    """未知の stream event タイプは None。"""
+    from deepblue.skills.run_eval import _process_stream_event
+
+    assert _process_stream_event({"type": "unknown"}, "n", [None], [""]) is None
+
+
+def test_process_event_line_assistant_read_no_match() -> None:
+    """assistant の Read が対象に一致しなければトリガーしない。"""
+    from deepblue.skills.run_eval import _process_event_line
+
+    line = '{"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "other"}}]}}'
+    assert _process_event_line(line, "target", [None], [""], [False]) is False
