@@ -2160,3 +2160,17 @@ def test_print_instincts_by_domain_without_action(capsys) -> None:
     out = capsys.readouterr().out
     assert "trigger:" in out
     assert "action:" not in out
+
+
+def test_print_skill_candidates_empty() -> None:
+    """スキル候補が空なら何も出力しない。"""
+    from deepblue.skills.learn.cli.evolve import _print_skill_candidates
+
+    _print_skill_candidates([])
+
+
+def test_print_agent_candidates_empty() -> None:
+    """エージェント候補が空なら何も出力しない。"""
+    from deepblue.skills.learn.cli.evolve import _print_agent_candidates
+
+    _print_agent_candidates([])
