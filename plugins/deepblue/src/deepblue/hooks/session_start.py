@@ -278,7 +278,7 @@ def _collect_session_context(sessions_dir: Path) -> list[str]:
     if active_checkpoints:
         latest_checkpoint = active_checkpoints[0]
         raw_content = strip_ansi(read_file(latest_checkpoint["path"]) or "")
-        if raw_content:
+        if raw_content:  # pragma: no branch  # active 判定と同一ファイル読込のため空にはならない
             parts.append(f"Active checkpoint:\n{compact_line(raw_content, 1000)}")
             log(f"[SessionStart] Injected active checkpoint: {latest_checkpoint['path']}")
 

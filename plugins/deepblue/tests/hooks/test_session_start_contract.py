@@ -243,3 +243,92 @@ class TestRunWithFlagsSessionStartContract:
 
         ret = run_with_flags.main()
         assert ret == 0
+
+
+def test_log_git_info_no_branch() -> None:
+    """ブランチ未取得なら git 情報ログを出さない（例外なく完了）。"""
+    session_start._log_git_info({"branch": None, "commit_hash": None, "uncommitted_count": 0})
+
+
+def test_get_git_info_not_in_worktree(monkeypatch) -> None:
+    """git work tree 外なら初期値（branch=None）を返す。"""
+    monkeypatch.setattr(session_start, "check_output_text", lambda *a, **k: "false")
+    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
+    info = session_start._get_git_info()
+    assert info["branch"] is None
+
+
+def test_save_project_profile_error(monkeypatch) -> None:
+    """プロファイル保存中の例外はログに記録して握りつぶす。"""
+    monkeypatch.setattr(
+        session_start, "_build_project_profile",
+        lambda pi: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    logs: list[str] = []
+    monkeypatch.setattr(session_start, "log", logs.append)
+    session_start._save_project_profile(object())
+    assert any("save error" in m for m in logs)
+
+
+def _pi(languages=None, frameworks=None, primary=None):
+    from types import SimpleNamespace
+    return SimpleNamespace(languages=languages or [], frameworks=frameworks or [], primary_language=primary)
+
+
+def test_collect_project_context_package_json_and_coverage(monkeypatch, tmp_path) -> None:
+    """パッケージマネージャ未検出+package.json有+coverage hint有の経路。"""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source=""))
+    monkeypatch.setattr(session_start, "get_selection_prompt", lambda: "select")
+    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
+    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "- cov 100%")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    parts = session_start._collect_project_context(_pi(languages=["typescript"]))
+    assert any("coverage_hint" in p for p in parts)
+
+
+def test_collect_project_context_ruby(monkeypatch, tmp_path) -> None:
+    """pm未検出+package.json無+ruby言語の経路。"""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source=""))
+    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
+    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "")
+    monkeypatch.chdir(tmp_path)
+    session_start._collect_project_context(_pi(languages=["ruby"], frameworks=["rails"]))
+
+
+def test_collect_project_context_other_language(monkeypatch, tmp_path) -> None:
+    """pm未検出+package.json無+ruby以外の言語の経路。"""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source=""))
+    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
+    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "")
+    monkeypatch.chdir(tmp_path)
+    session_start._collect_project_context(_pi(languages=["go"]))
+
+
+def test_collect_project_context_frameworks_only(monkeypatch, tmp_path) -> None:
+    """言語が空でフレームワークのみでもプロジェクト情報を出力する。"""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name="npm", source="x"))
+    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
+    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "")
+    parts = session_start._collect_project_context(_pi(languages=[], frameworks=["rails"]))
+    assert any("Project type" in p for p in parts)
+
+
+def test_dedupe_recent_sessions_keeps_newer(monkeypatch) -> None:
+    """同名セッションは新しい mtime の方を残す。"""
+    batches = iter([
+        [{"path": "/a/x-session.tmp", "mtime": 100}],
+        [{"path": "/b/x-session.tmp", "mtime": 50}],
+    ])
+    monkeypatch.setattr(session_start, "find_files", lambda d, pat, max_age=7: next(batches))
+    result = session_start.dedupe_recent_sessions([Path("/a"), Path("/b")])
+    assert len(result) == 1
+    assert result[0]["mtime"] == 100
