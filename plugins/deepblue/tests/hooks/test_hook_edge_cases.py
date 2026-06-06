@@ -948,3 +948,23 @@ def test_validate_commit_message_lowercase_no_period() -> None:
     types = {i["type"] for i in result["issues"]}
     assert "capitalization" not in types
     assert "punctuation" not in types
+
+
+def test_count_file_issues_unknown_severity(monkeypatch) -> None:
+    """未知の severity は error/warning/info いずれにも加算しない。"""
+    import deepblue.hooks.pre_bash_commit_quality as pbcq
+
+    monkeypatch.setattr(pbcq, "find_file_issues", lambda fp: [{"severity": "unknown", "line": 1, "message": "x"}])
+    monkeypatch.setattr(pbcq, "log", lambda *a, **k: None)
+    total, err, warn, info = pbcq._count_file_issues(["f.py"])
+    assert (total, err, warn, info) == (1, 0, 0, 0)
+
+
+def test_apply_commit_message_issues_without_suggestion(monkeypatch) -> None:
+    """suggestion の無い issue でもカウントを加算する。"""
+    import deepblue.hooks.pre_bash_commit_quality as pbcq
+
+    monkeypatch.setattr(pbcq, "log", lambda *a, **k: None)
+    monkeypatch.setattr(pbcq, "validate_commit_message", lambda cmd: {"issues": [{"message": "m"}]})
+    total, warn = pbcq._apply_commit_message_issues("git commit -m x", 0, 0)
+    assert (total, warn) == (1, 1)

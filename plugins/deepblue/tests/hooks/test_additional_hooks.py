@@ -1069,3 +1069,29 @@ def test_evaluate_session_config_without_min_length(tmp_path, monkeypatch) -> No
     )
     min_len, _ = evaluate_session._load_learn_config(tmp_path / "config.json")
     assert min_len == 10
+
+
+def test_collect_user_message_non_text_content() -> None:
+    """content が文字列でもリストでもなければ空文字を返す。"""
+    assert session_end._collect_user_message({"type": "user", "content": 123}) == ""
+
+
+def test_collect_tool_use_empty_name_and_non_tool_block() -> None:
+    """ツール名が空・非tool_useブロックでも例外なく走査する。"""
+    tools: set[str] = set()
+    files: set[str] = set()
+    session_end._collect_tool_use({"type": "tool_use"}, tools, files)  # tool_name空・file無
+    session_end._collect_tool_use(
+        {"type": "assistant", "message": {"content": [{"type": "text"}, {"type": "tool_use", "name": "", "input": {}}]}},
+        tools,
+        files,
+    )
+    assert tools == set()
+    assert files == set()
+
+
+def test_build_summary_section_skips_empty_message() -> None:
+    """空のユーザーメッセージはスキップする。"""
+    summary = {"userMessages": ["", "real task"], "filesModified": [], "toolsUsed": [], "totalMessages": 2}
+    out = session_end.build_summary_section(summary)
+    assert "real task" in out
