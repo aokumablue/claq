@@ -242,7 +242,7 @@ class TestTemporalOrderAfterStepViolation:
         assert step_b_result.detected is True
 
 
-def _ev(ts: str = "t1") -> "ObservationEvent":
+def _ev(ts: str = "t1") -> ObservationEvent:
     return ObservationEvent(timestamp=ts, event="tool_use", tool="X", session="s", input="", output="")
 
 
