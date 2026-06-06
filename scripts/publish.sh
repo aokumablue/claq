@@ -1,5 +1,5 @@
 #!/bin/bash
-# deepblue（ユーザー向けリポジトリ）に dev ファイルを除いて force push する
+# deepblue（ユーザー向けリポジトリ）に dev ファイルを除いたスナップショットを1コミットで push する
 set -euo pipefail
 
 PUBLISH_REMOTE="${DEEPBLUE_PUBLISH_REMOTE:-$HOME/dev/deepblue}"
@@ -20,6 +20,14 @@ git filter-repo \
   --path CLAUDE.md \
   --path conftest.py \
   --force
+
+echo "Squashing to single release commit..."
+RELEASE_TAG="$(git log -1 --format='%h')"
+git checkout --orphan release
+git add -A
+git commit -m "release: $RELEASE_TAG"
+git branch -D main
+git branch -m main
 
 echo "Pushing to $PUBLISH_REMOTE..."
 git remote add publish "$PUBLISH_REMOTE"
