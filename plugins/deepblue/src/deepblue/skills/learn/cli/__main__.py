@@ -9,7 +9,7 @@
 当ファイルの実行行がカバレッジ対象から除外され、``fail_under = 100`` を満たす。
 """
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     import sys
 
     from deepblue.skills.learn.cli.entry import main

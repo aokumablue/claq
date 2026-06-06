@@ -2088,3 +2088,75 @@ def test_main_module_entrypoint_uses_sys_exit(tmp_path, monkeypatch):
         runpy.run_module("deepblue.skills.learn.cli", run_name="__main__")
 
     assert excinfo.value.code == 1
+
+
+def test_all_project_dirs_when_projects_dir_missing(monkeypatch, tmp_path) -> None:
+    """PROJECTS_DIR が存在しなければ空リストを返す。"""
+    import deepblue.skills.learn.cli.paths as p
+
+    monkeypatch.setattr(p._pkg, "PROJECTS_DIR", tmp_path / "nope")
+    assert p._all_project_dirs() == []
+
+
+def test_all_project_dirs_skips_non_directories(monkeypatch, tmp_path) -> None:
+    """PROJECTS_DIR 配下のファイルはスキップしてディレクトリのみ返す。"""
+    import deepblue.skills.learn.cli.paths as p
+
+    (tmp_path / "file.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "proj").mkdir()
+    monkeypatch.setattr(p._pkg, "PROJECTS_DIR", tmp_path)
+    dirs = p._all_project_dirs()
+    assert [d.name for d in dirs] == ["proj"]
+
+
+def test_project_dir_score_counts_artifacts(tmp_path) -> None:
+    """各種データの存在に応じてスコアを加算する。"""
+    import deepblue.skills.learn.cli.paths as p
+
+    (tmp_path / "project.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "observations.jsonl").write_text("", encoding="utf-8")
+    personal = tmp_path / "instincts" / "personal"
+    personal.mkdir(parents=True)
+    (personal / "x.md").write_text("y", encoding="utf-8")
+    assert p._project_dir_score(tmp_path) >= 5
+
+
+def test_project_dir_score_missing_dir() -> None:
+    """存在しない project_dir は -1。"""
+    import deepblue.skills.learn.cli.paths as p
+    from pathlib import Path
+
+    assert p._project_dir_score(Path("/nonexistent/xyz")) == -1
+
+
+def test_project_dir_score_empty_project(tmp_path) -> None:
+    """データが無い project_dir のスコアは 0。"""
+    import deepblue.skills.learn.cli.paths as p
+
+    assert p._project_dir_score(tmp_path) == 0
+
+
+def test_parse_frontmatter_line_without_colon() -> None:
+    """コロンが無い行は無視する。"""
+    from deepblue.skills.learn.cli.instincts import _parse_frontmatter_line
+
+    current: dict = {}
+    _parse_frontmatter_line("no colon here", current)
+    assert current == {}
+
+
+def test_extract_created_frontmatter_ends_without_created() -> None:
+    """created キーが無いまま frontmatter が終われば None。"""
+    from deepblue.skills.learn.cli.pending import _extract_created_from_frontmatter
+
+    assert _extract_created_from_frontmatter("---\nname: x\n---\nbody") is None
+
+
+def test_print_instincts_by_domain_without_action(capsys) -> None:
+    """content に Action セクションが無ければ action 行を出さない。"""
+    from deepblue.skills.learn.cli.instincts import _print_instincts_by_domain
+
+    _print_instincts_by_domain([{"domain": "d", "id": "i", "content": "no action section here"}])
+    out = capsys.readouterr().out
+    assert "trigger:" in out
+    assert "action:" not in out
