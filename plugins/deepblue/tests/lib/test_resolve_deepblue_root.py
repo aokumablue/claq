@@ -120,3 +120,12 @@ def test_resolve_deepblue_root_handles_outer_oserror(tmp_path: Path, monkeypatch
 
     result = resolve_deepblue_root(home_dir=tmp_path, env_root="")
     assert result == tmp_path / ".claude"
+
+
+def test_search_plugin_cache_version_without_probe(tmp_path) -> None:
+    """probe を含まないバージョンディレクトリはスキップする。"""
+    from deepblue.lib.resolve_deepblue_root import PLUGIN_NAME, _search_plugin_cache
+
+    ver = tmp_path / "plugins" / "cache" / PLUGIN_NAME / "org" / "ver"
+    ver.mkdir(parents=True)  # probe 無し
+    assert _search_plugin_cache(tmp_path, ["probe.txt"]) is None

@@ -158,3 +158,10 @@ def test_normalize_invalid_value_and_invalid_default() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         assert normalize_git_hosting_service("invalid", default="alsobad") == GITHUB
+
+
+def test_normalize_empty_value_with_valid_default() -> None:
+    """値が空で有効なデフォルトがあれば警告なしでデフォルトを返す。"""
+    from deepblue.lib.git_hosting import normalize_git_hosting_service
+
+    assert normalize_git_hosting_service("", default="github") == "github"

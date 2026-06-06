@@ -35,3 +35,17 @@ def test_strip_markdown_prefix_variants() -> None:
     assert _strip_markdown_prefix("# heading") == "heading"
     assert _strip_markdown_prefix("- item") == "item"
     assert _strip_markdown_prefix("1. numbered") == "numbered"
+
+
+def test_first_meaningful_line_all_stripped() -> None:
+    """記号のみで意味のある行が無ければ空文字を返す。"""
+    from deepblue.lib.slim_text import first_meaningful_line
+
+    assert first_meaningful_line("```") == ""
+
+
+def test_normalize_line_markdown_only_becomes_empty() -> None:
+    """マークダウン記号のみの行は正規化で空になる。"""
+    from deepblue.lib.slim_text import _normalize_line
+
+    assert _normalize_line("```") == ""

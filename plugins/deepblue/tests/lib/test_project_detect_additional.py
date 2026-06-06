@@ -265,3 +265,19 @@ def test_check_requirements_pipfile_without_dep(tmp_path) -> None:
 
     (tmp_path / "Pipfile").write_text("[packages]\nfoo = '*'\n", encoding="utf-8")
     assert _check_requirements_deps(tmp_path, ["django"]) is False
+
+
+def test_check_file_contents_glob_matches_directory(tmp_path) -> None:
+    """glob がディレクトリにマッチしてもファイルでなければ無視する。"""
+    from deepblue.lib.project_detect.dependency_checks import _check_file_contents
+
+    (tmp_path / "sub.txt").mkdir()  # *.txt にマッチするが dir
+    assert _check_file_contents(tmp_path, [{"file": "*.txt", "pattern": "x"}]) is False
+
+
+def test_check_file_contents_no_pattern_match(tmp_path) -> None:
+    """ファイルは存在するがパターンに一致しなければ False。"""
+    from deepblue.lib.project_detect.dependency_checks import _check_file_contents
+
+    (tmp_path / "f.txt").write_text("nomatch here", encoding="utf-8")
+    assert _check_file_contents(tmp_path, [{"file": "f.txt", "pattern": "xyz"}]) is False

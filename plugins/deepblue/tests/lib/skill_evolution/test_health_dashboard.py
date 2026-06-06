@@ -404,3 +404,50 @@ def test_dashboard_and_health_helpers_cover_remaining_edges(skill_env, make_skil
         dashboard.render_dashboard({**skill_env, "now": "bad"})
 
     assert health.discover_skills(skill_env)["alpha"]["skill_dir"] == str(skill_dir)
+
+
+def test_list_skills_in_root_skips_dir_without_skill_md(tmp_path) -> None:
+    """SKILL.md が無いディレクトリはスキル扱いしない。"""
+    from deepblue.lib.skill_evolution.health import _list_skills_in_root
+
+    (tmp_path / "notaskill").mkdir()
+    skill = tmp_path / "realskill"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("x", encoding="utf-8")
+    result = _list_skills_in_root(tmp_path)
+    ids = {s["skill_id"] for s in result}
+    assert "realskill" in ids
+    assert "notaskill" not in ids
+
+
+def test_build_failure_clusters_record_without_skill_id() -> None:
+    """skill_id の無い失敗レコードでもクラスタ化できる。"""
+    from deepblue.lib.skill_evolution.dashboard import _build_failure_clusters
+
+    clusters = _build_failure_clusters([{"failure_reason": "timeout"}])
+    assert clusters
+    assert clusters[0]["count"] == 1
+
+
+def test_collect_skill_ids_skips_entry_without_id() -> None:
+    """skill_id の無いエントリは収集しない。"""
+    from deepblue.lib.skill_evolution.dashboard_normalize import _collect_skill_ids
+
+    ids = _collect_skill_ids({}, [{"name": "x"}])
+    assert ids == []
+
+
+def test_discover_skills_dedupes_same_skill_id(tmp_path) -> None:
+    """複数ルートに同一 skill_id があれば最初の定義を優先する。"""
+    from deepblue.lib.skill_evolution.health import discover_skills
+
+    for root in ("a", "b"):
+        d = tmp_path / root / "dup"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("x", encoding="utf-8")
+    result = discover_skills(
+        skills_root=str(tmp_path / "a"),
+        learned_root=str(tmp_path / "b"),
+        imported_root=str(tmp_path / "c"),
+    )
+    assert "dup" in result

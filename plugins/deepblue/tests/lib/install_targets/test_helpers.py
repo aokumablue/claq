@@ -294,6 +294,17 @@ class TestInstallTargetAdapter:
         ops = adapter.plan_operations(PlanParams(module=module, home_dir=str(tmp_path)))
         assert len(ops) == 2
 
+    def test_plan_operations_without_module(self, home_config, tmp_path):
+        """module も modules も無ければ空の操作リストを返す。"""
+        adapter = create_install_target_adapter(home_config)
+        assert adapter.plan_operations(PlanParams(home_dir=str(tmp_path))) == []
+
+    def test_plan_operations_module_paths_not_list(self, home_config, tmp_path):
+        """module の paths が list でなければ空を返す。"""
+        adapter = create_install_target_adapter(home_config)
+        ops = adapter.plan_operations(PlanParams(module={"id": "m", "paths": "notlist"}, home_dir=str(tmp_path)))
+        assert ops == []
+
     def test_validate_home_success(self, home_config, tmp_path):
         """home ターゲットで正常に検証できること。"""
         adapter = create_install_target_adapter(home_config)
@@ -373,3 +384,12 @@ class TestValidationIssueDataclass:
         assert issue.code == "code"
         assert issue.message == "message"
         assert issue.extra == {}
+
+
+def test_managed_operation_to_dict_without_source_path() -> None:
+    """source_path が無ければ sourcePath キーを出力しない。"""
+    from deepblue.lib.install_targets.install_target_helpers import ManagedOperation
+
+    op = ManagedOperation(kind="copy-path", module_id="m")
+    d = op.to_dict()
+    assert "sourcePath" not in d

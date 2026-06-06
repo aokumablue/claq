@@ -279,3 +279,36 @@ def test_get_runs_file_path_accepts_explicit_path(tmp_path):
     """明示的な runs ファイルパスを返せること。"""
     path = tracker.get_runs_file_path(runs_file_path=tmp_path / "custom.jsonl")
     assert path == str((tmp_path / "custom.jsonl").resolve())
+
+
+def test_record_skill_execution_state_store_without_method(skill_env):
+    """state-store にメソッドが無ければ JSONL へフォールバックする。"""
+
+    class NoMethod:
+        pass
+
+    result = tracker.record_skill_execution(
+        {
+            "skill_id": "g",
+            "skill_version": "v1",
+            "task_description": "t",
+            "outcome": "success",
+            "recorded_at": "2026-03-15T11:00:00.000Z",
+        },
+        state_store=NoMethod(),
+        runs_file_path=skill_env["runs_file"],
+    )
+    assert result["storage"] == "jsonl"
+
+
+def test_read_skill_execution_records_state_store_without_method(skill_env):
+    """読み出しメソッドが無ければ JSONL を読む。"""
+
+    class NoMethod:
+        pass
+
+    records = tracker.read_skill_execution_records(
+        state_store=NoMethod(),
+        runs_file_path=skill_env["runs_file"],
+    )
+    assert isinstance(records, list)

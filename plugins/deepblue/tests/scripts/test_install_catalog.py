@@ -316,3 +316,11 @@ def test_install_catalog_main_block_invokes_main(monkeypatch: pytest.MonkeyPatch
         runpy.run_module("deepblue.install_catalog", run_name="__main__")
 
     assert excinfo.value.code == 0
+
+
+def test_print_component_without_modules(capsys) -> None:
+    """modules が空でも例外なく出力する。"""
+    catalog._print_component(
+        {"id": "x", "family": "f", "targets": [], "moduleIds": [], "description": "d", "modules": []}
+    )
+    assert "Install component: x" in capsys.readouterr().out

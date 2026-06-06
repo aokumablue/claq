@@ -69,3 +69,13 @@ def test_utc_now_iso_uses_z_suffix(monkeypatch) -> None:
     monkeypatch.setattr(compat, "datetime", FakeDatetime)
 
     assert compat.utc_now_iso() == "2026-03-15T12:34:56.123000Z"
+
+
+def test_get_value_object_attribute_fallback() -> None:
+    """オブジェクトで最初の名前が無ければ次の名前を試す。"""
+    from deepblue.lib.skill_evolution.skill_evolution_compat import get_value
+
+    class _Obj:
+        b = 2
+
+    assert get_value(_Obj(), "a", "b") == 2
