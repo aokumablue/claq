@@ -3,6 +3,7 @@
 set -euo pipefail
 
 PUBLISH_REMOTE="${DEEPBLUE_PUBLISH_REMOTE:-$HOME/dev/deepblue}"
+COMMIT_MSG="${1:-}"
 TMPDIR="$(mktemp -d)"
 trap "rm -rf $TMPDIR" EXIT
 
@@ -25,7 +26,7 @@ echo "Squashing to single release commit..."
 RELEASE_TAG="$(git log -1 --format='%h')"
 git checkout --orphan release
 git add -A
-git commit -m "release: $RELEASE_TAG"
+git commit -m "${COMMIT_MSG:-release: $RELEASE_TAG}"
 git branch -D main
 git branch -m main
 
