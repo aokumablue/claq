@@ -7,7 +7,7 @@ TMPDIR="$(mktemp -d)"
 trap "rm -rf $TMPDIR" EXIT
 
 echo "Cloning deepblue-dev..."
-git clone --local . "$TMPDIR/repo"
+git clone --local --no-hardlinks . "$TMPDIR/repo"
 cd "$TMPDIR/repo"
 
 echo "Filtering dev-only files..."
@@ -24,5 +24,8 @@ git filter-repo \
 echo "Pushing to $PUBLISH_REMOTE..."
 git remote add publish "$PUBLISH_REMOTE"
 git push publish HEAD:main --force
+
+# ワーキングツリーをプッシュ内容に同期
+git -C "$PUBLISH_REMOTE" reset --hard HEAD
 
 echo "Done: published to $PUBLISH_REMOTE"
