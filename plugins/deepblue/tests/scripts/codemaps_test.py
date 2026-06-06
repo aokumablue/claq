@@ -301,3 +301,15 @@ def test_walk_dir_skips_broken_symlink(tmp_path) -> None:
     (tmp_path / "real.py").write_text("x", encoding="utf-8")
     files = walk_dir(tmp_path)
     assert all(f.name != "link" for f in files)
+
+
+def test_classify_files_unmatched_and_dedup_directory() -> None:
+    """マッチしないファイルはスキップ、同一ディレクトリは重複登録しない。"""
+    from pathlib import Path
+
+    from deepblue.codemaps.generate_codemaps import classify_files
+
+    areas = classify_files([Path("components/a.py"), Path("components/b.py"), Path("nomatch/x.txt")])
+    front = areas["frontend"]
+    assert len(front.files) == 2
+    assert len(front.directories) == 1

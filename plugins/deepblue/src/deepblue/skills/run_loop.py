@@ -383,7 +383,7 @@ def run_loop(
     eval_sets = EvalSets(train=train, test=test)
     history: list[dict] = []
     exit_reason = "unknown"
-    for iteration in range(1, loop_cfg.max_iterations + 1):
+    for iteration in range(1, loop_cfg.max_iterations + 1):  # pragma: no branch  # 最終反復は必ず reason を返し break する
         state = IterationState(iteration=iteration, current_description=current_description)
         current_description, reason = _run_single_iteration(state, skill_ctx, eval_sets, loop_cfg, history)
         if reason is not None:

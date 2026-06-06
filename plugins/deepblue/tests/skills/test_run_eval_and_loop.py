@@ -1141,3 +1141,28 @@ def test_run_loop_verbose_no_holdout_reaches_max(tmp_path: Path, monkeypatch: py
         loop_cfg=_make_loop_cfg(tmp_path, max_iterations=2, holdout=0.0, verbose=True),
     )
     assert result["iterations_run"] == 2
+
+
+def test_run_loop_single_iteration_no_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """max_iterations=1 で失敗のまま反復が尽きてループ終了する。"""
+    skill_path = tmp_path / "skill"
+    skill_path.mkdir()
+    (skill_path / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+    monkeypatch.setattr(run_loop, "find_project_root", lambda: tmp_path)
+    monkeypatch.setattr(run_loop, "parse_skill_md", lambda path: ("alpha", "orig desc", "content"))
+    monkeypatch.setattr(
+        run_loop,
+        "run_eval",
+        lambda **kwargs: {
+            "results": [{"query": "q", "should_trigger": True, "trigger_rate": 0.0, "triggers": 0, "runs": 1, "pass": False}],
+            "summary": {"passed": 0, "failed": 1, "total": 1},
+        },
+    )
+    monkeypatch.setattr(run_loop, "improve_description", lambda *a, **k: "new desc")
+    result = run_loop.run_loop(
+        eval_set=[{"query": "q", "should_trigger": True}],
+        skill_path=skill_path,
+        description_override=None,
+        loop_cfg=_make_loop_cfg(tmp_path, max_iterations=1, holdout=0.0),
+    )
+    assert result["iterations_run"] == 1

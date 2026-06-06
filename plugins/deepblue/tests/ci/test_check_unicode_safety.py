@@ -139,3 +139,12 @@ def test_validate_unicode_safety_skips_unreadable_files_and_entrypoint(
         runpy.run_module("deepblue.ci.check_unicode_safety", run_name="__main__")
 
     assert excinfo.value.code == 0
+
+
+def test_scan_unicode_safety_no_change_in_write_mode(tmp_path) -> None:
+    """write_mode でもサニタイズ不要なファイルは書き換えない。"""
+    from deepblue.ci.check_unicode_safety import _scan_unicode_safety
+
+    (tmp_path / "clean.md").write_text("clean ascii text\n", encoding="utf-8")
+    changed, violations = _scan_unicode_safety(tmp_path, write_mode=True)
+    assert changed == []

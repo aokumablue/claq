@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from model_build.quantize import DEFAULT_QUANT, QUANT_CHOICES, _to_int8, quantize
 
 
