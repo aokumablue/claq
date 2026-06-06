@@ -39,3 +39,26 @@ def test_handle_import_no_types(tmp_path: Path, capsys: pytest.CaptureFixture[st
     )
     result = json.loads(capsys.readouterr().out)["imported"]
     assert result == {"instincts": 0, "adrs": 0, "events": 0}
+
+
+def test_collect_pg_dashboard_data_fetch_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """パネルデータ取得が例外でも握りつぶして空データを返す。"""
+    from types import SimpleNamespace
+
+    import deepblue.mem.cli_dashboard_handlers as h
+    from deepblue.mem.settings import Settings, SyncSettings
+
+    fake_pg = SimpleNamespace(
+        test_connection=lambda: True,
+        _get_conn=lambda: object(),
+        _put_conn=lambda c: None,
+    )
+    monkeypatch.setattr("deepblue.mem.pg_database.PgDatabase", lambda url: fake_pg)
+    monkeypatch.setattr(
+        h, "_fetch_pg_panel_data",
+        lambda pg, conn, days: (_ for _ in ()).throw(RuntimeError("fetch fail")),
+    )
+    settings = Settings()
+    settings.sync = SyncSettings(enabled=True, postgres_url="postgres://x")
+    result = h._collect_pg_dashboard_data(settings, 7, log=SimpleNamespace(warning=lambda *a, **k: None))
+    assert result[0] is False

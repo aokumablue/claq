@@ -393,3 +393,29 @@ def test_search_and_inject_no_results(tmp_path, monkeypatch, capsys) -> None:
     log = SimpleNamespace(warning=lambda *a, **k: None)
     _search_and_inject_context(FakeDB(), settings, "p", "proj", log=log)
     assert capsys.readouterr().out == ""
+
+
+def test_team_context_pg_construction_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """PgDatabase 構築自体が失敗しても握りつぶして空文字を返す。"""
+    monkeypatch.setattr(cli_module, "get_git_user_name", lambda: "me")
+    monkeypatch.setattr(
+        "deepblue.mem.pg_database.PgDatabase",
+        lambda url: (_ for _ in ()).throw(RuntimeError("ctor fail")),
+    )
+    assert cli_module._handle_team_context(_settings(), {"cwd": "/p/proj"}) == ""
+    assert capsys.readouterr().out == ""
+
+
+def test_team_session_init_empty_context(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """生成コンテキストが空なら additionalContext を出力しない。"""
+    monkeypatch.setattr(cli_module, "get_git_user_name", lambda: "me")
+    monkeypatch.setattr("deepblue.mem.pg_database.PgDatabase", lambda url: _FakePg(connected=True))
+    monkeypatch.setattr("deepblue.mem.team_context.build_team_context", lambda *a, **kw: "")
+    cli_module._handle_team_session_init(
+        _settings(), {"cwd": "/home/u/proj", "prompt": "前回どう直した？"}
+    )
+    assert capsys.readouterr().out == ""
