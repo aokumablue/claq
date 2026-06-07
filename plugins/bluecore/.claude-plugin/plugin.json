@@ -1,0 +1,44 @@
+{
+  "name": "bluecore",
+  "version": "0.9.1",
+  "description": "開発に必要な汎用プラグイン集です。エージェント、スキル、フック、コマンドをまとめて導入し、計画・実装・検証・レビューの流れを揃えます。",
+  "author": {
+    "name": "aokumablue"
+  },
+  "homepage": "https://github.com/aokumablue/bluecore",
+  "repository": "https://github.com/aokumablue/bluecore",
+  "license": "Apache-2.0",
+  "keywords": [
+    "agents",
+    "skills",
+    "commands",
+    "hooks",
+    "rules",
+    "workflow",
+    "plugin"
+  ],
+  "agents": [
+    "./agents/bench-analyzer.md",
+    "./agents/architect.md",
+    "./agents/dead-code-cleaner.md",
+    "./agents/comparator.md",
+    "./agents/explorer.md",
+    "./agents/grader.md",
+    "./agents/harness-tuner.md",
+    "./agents/session-observer.md",
+    "./agents/perf-optimizer.md",
+    "./agents/planner.md",
+    "./agents/refactor-orchestrator.md",
+    "./agents/reviewer.md",
+    "./agents/security-auditor.md",
+    "./agents/simplifier.md",
+    "./agents/tdd-writer.md"
+  ],
+  "skills": [
+    "./skills/"
+  ],
+  "commands": [
+    "./commands/"
+  ],
+  "outputStyles": "./output-styles/"
+}

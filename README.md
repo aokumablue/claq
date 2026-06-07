@@ -1,17 +1,17 @@
-# deepblue
+# bluecore
 
 Claude Code 向けの汎用プラグイン集です。エージェント、スキル、コマンド、フック、永続メモリをひとまとめに導入し、計画・実装・検証・レビューの流れを揃えます。
 
 ## これは何か
 
-deepblue は、Claude Code の作業を「最初の計画からレビューまで」通して支えるプラグインです。
+bluecore は、Claude Code の作業を「最初の計画からレビューまで」通して支えるプラグインです。
 ユーザープロジェクトの言語ランタイムに依存せず、必要なときだけ個別のツールやコマンドを使います。
 
 ---
 
 ## 想定読者
 
-本 README は **deepblue プラグインを Claude Code に導入する開発者** 向けです。
+本 README は **bluecore プラグインを Claude Code に導入する開発者** 向けです。
 
 - Claude Code 自体の基本操作（プロンプト送信、ファイル編集の許可など）は前提とします。
 - Claude Code がまだの場合は、まず公式の Claude Code を導入してから本プラグインを使ってください。
@@ -33,7 +33,7 @@ deepblue は、Claude Code の作業を「最初の計画からレビューま�
 
 ## 用語
 
-5つの要素を理解すれば deepblue の全フローが追えます。
+5つの要素を理解すれば bluecore の全フローが追えます。
 
 | 用語 | 種別 | 起動方法 | 例 |
 |---|---|---|---|
@@ -52,8 +52,8 @@ deepblue は、Claude Code の作業を「最初の計画からレビューま�
 ### プラグインマーケットプレイス
 
 ```bash
-claude plugin marketplace add aokumablue/deepblue
-claude plugin install deepblue@deepblue
+claude plugin marketplace add aokumablue/bluecore
+claude plugin install bluecore@bluecore
 ```
 
 インストール後、まず試すなら:
@@ -66,14 +66,14 @@ claude plugin install deepblue@deepblue
 
 ## 設定
 
-チーム同期を使う場合だけ、`~/.deepblue/settings.json` を以下のように設定します。
+チーム同期を使う場合だけ、`~/.bluecore/settings.json` を以下のように設定します。
 
 ```json
 {
   "mem": {
     "sync": {
       "enabled": true,
-      "postgres_url": "postgresql://deepblue:PASSWORD@localhost:5432/deepblue_mem"
+      "postgres_url": "postgresql://bluecore:PASSWORD@localhost:5432/bluecore_mem"
     }
   }
 }
@@ -89,22 +89,22 @@ claude plugin install deepblue@deepblue
 
 | コマンド | 用途 | 引数 | 一言説明 |
 |---|---|---|---|
-| [`/plan`](plugins/deepblue/commands/plan.md) | 実装前計画 | `[要件説明]` | 要件言い換え→リスク評価→段階的計画。コード前にユーザー確認 |
-| [`/feat-dev`](plugins/deepblue/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見→探索→質問→設計→実装→レビュー の7段階一気通貫 |
-| [`/bugfix`](plugins/deepblue/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 再現→原因分析→最小修正→回帰防止→レビュー の一気通貫 |
-| [`/refactor`](plugins/deepblue/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | clean→simplify→perf→review の安全な自動連鎖。`--mode` で部分実行 |
-| [`/review`](plugins/deepblue/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。**READ-ONLY 完全保証** |
-| [`/harness`](plugins/deepblue/commands/harness.md) | 品質管理 | `[scope] [--audit-only] [--format=text\|json]` | スコア取得→harness-tuner で改善→再採点 |
-| [`/skill-gen`](plugins/deepblue/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--output=path] [--instincts]` | 入力収集→skill-make→skill-tune→grader/comparator/bench-analyzer 評価 |
-| [`/instinct`](plugins/deepblue/commands/instinct.md) | インスティンクト管理 | `<export\|import\|promote\|prune\|evolve>` | 学習成果の昇格・削除・スキル化 |
-| [`/dashboard`](plugins/deepblue/commands/dashboard.md) | 利用率可視化 | `[--days=N] [--output=path] [--format=html\|json]` | 個人(SQLite) と チーム(PostgreSQL) の使用率比較 HTML |
-| [`/test-gen`](plugins/deepblue/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→承認→実装。言語非依存 |
+| [`/plan`](plugins/bluecore/commands/plan.md) | 実装前計画 | `[要件説明]` | 要件言い換え→リスク評価→段階的計画。コード前にユーザー確認 |
+| [`/feat-dev`](plugins/bluecore/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見→探索→質問→設計→実装→レビュー の7段階一気通貫 |
+| [`/bugfix`](plugins/bluecore/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 再現→原因分析→最小修正→回帰防止→レビュー の一気通貫 |
+| [`/refactor`](plugins/bluecore/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | clean→simplify→perf→review の安全な自動連鎖。`--mode` で部分実行 |
+| [`/review`](plugins/bluecore/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。**READ-ONLY 完全保証** |
+| [`/harness`](plugins/bluecore/commands/harness.md) | 品質管理 | `[scope] [--audit-only] [--format=text\|json]` | スコア取得→harness-tuner で改善→再採点 |
+| [`/skill-gen`](plugins/bluecore/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--output=path] [--instincts]` | 入力収集→skill-make→skill-tune→grader/comparator/bench-analyzer 評価 |
+| [`/instinct`](plugins/bluecore/commands/instinct.md) | インスティンクト管理 | `<export\|import\|promote\|prune\|evolve>` | 学習成果の昇格・削除・スキル化 |
+| [`/dashboard`](plugins/bluecore/commands/dashboard.md) | 利用率可視化 | `[--days=N] [--output=path] [--format=html\|json]` | 個人(SQLite) と チーム(PostgreSQL) の使用率比較 HTML |
+| [`/test-gen`](plugins/bluecore/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→承認→実装。言語非依存 |
 
 ---
 
 ## 🧭 Workflows
 
-deepblue が「どの場面でどう動くか」を 11 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。
+bluecore が「どの場面でどう動くか」を 11 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。
 
 ### 凡例
 
@@ -530,7 +530,7 @@ flowchart TB
   end
 
   subgraph persistence["💾 Persistence"]
-    DB[("~/.deepblue/mem.db<br/>SQLite")]:::store
+    DB[("~/.bluecore/mem.db<br/>SQLite")]:::store
     PG[("PostgreSQL<br/>チーム共有")]:::store
   end
 
@@ -546,4 +546,4 @@ flowchart TB
 - スキルは全て `context: fork`（内部委譲専用、ユーザー直接起動不可）に統一
 - 永続化は **SQLite（個人）→ PostgreSQL（チーム共有）** の 2 層
 
-各コマンドの詳細仕様は [`plugins/deepblue/commands/`](plugins/deepblue/commands/) 配下を参照。
+各コマンドの詳細仕様は [`plugins/bluecore/commands/`](plugins/bluecore/commands/) 配下を参照。

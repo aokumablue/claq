@@ -1,12 +1,12 @@
 {
-  "from_plugin_name": "deepblue",
+  "from_plugin_name": "bluecore",
   "from_author_name": "aokumablue",
   "plugin_name": "hogeplugin",
   "author_name": "hogename",
   "license": "MIT",
   "remove_authors": true,
   "files_to_delete": [
-    "plugins/deepblue/tests/",
+    "plugins/bluecore/tests/",
     "scripts/",
     "README.md",
     "CLAUDE.md",

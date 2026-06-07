@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
-SKIP_PYTHON="${DEEPBLUE_INSTALL_SKIP_PYTHON:-0}"
+SKIP_PYTHON="${BLUECORE_INSTALL_SKIP_PYTHON:-0}"
 
 usage() {
   cat <<'EOF'
@@ -64,14 +64,14 @@ done
 
 # ---- 変数確定（引数パース後に設定） ----
 
-VENV_DIR="${HOME}/.deepblue/.venv"
+VENV_DIR="${HOME}/.bluecore/.venv"
 VENV_PYTHON="${VENV_DIR}/bin/python3"
 
 # ---- 開発者向け追加インストール ----
 
 if [[ "${SKIP_PYTHON}" == "1" ]]; then
-  echo "[deepblue] Developer extras skipped because --skip-python was requested"
-  echo "[deepblue] OK"
+  echo "[bluecore] Developer extras skipped because --skip-python was requested"
+  echo "[bluecore] OK"
   exit 0
 fi
 
@@ -81,22 +81,22 @@ if [[ ! -x "${VENV_PYTHON}" ]]; then
 fi
 
 if ! "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
-  echo "[deepblue] Bootstrapping pip via ensurepip"
+  echo "[bluecore] Bootstrapping pip via ensurepip"
   run_quietly "${VENV_PYTHON}" -m ensurepip --upgrade
 fi
 
-echo "[deepblue] Installing developer-only Python extras"
+echo "[bluecore] Installing developer-only Python extras"
 pip_install_quiet -e "${REPO_ROOT}[dev]"
 
 # PATH にシムリンクを作成 (venv 外から hook が呼べるように)
 for tool in ruff vulture; do
   if ! command -v "${tool}" >/dev/null 2>&1; then
     if [[ -x "${VENV_DIR}/bin/${tool}" ]]; then
-      echo "[deepblue] Symlinking ${tool} -> /usr/local/bin/${tool}"
+      echo "[bluecore] Symlinking ${tool} -> /usr/local/bin/${tool}"
       sudo ln -sf "${VENV_DIR}/bin/${tool}" "/usr/local/bin/${tool}" 2>/dev/null \
-        || echo "[deepblue] Warning: could not symlink ${tool} to /usr/local/bin (no sudo?). Add ${VENV_DIR}/bin to PATH." >&2
+        || echo "[bluecore] Warning: could not symlink ${tool} to /usr/local/bin (no sudo?). Add ${VENV_DIR}/bin to PATH." >&2
     fi
   fi
 done
 
-echo "[deepblue] OK"
+echo "[bluecore] OK"

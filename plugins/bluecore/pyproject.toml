@@ -1,0 +1,80 @@
+[project]
+name = "bluecore"
+version = "0.9.1"
+description = "開発に必要な汎用プラグイン集です。エージェント、スキル、フック、コマンドをまとめて導入し、計画・実装・検証・レビューの流れを揃えます。"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12"
+authors = [
+    { name = "aokumablue", url = "https://github.com/aokumablue" }
+]
+keywords = [
+    "agents",
+    "skills",
+    "commands",
+    "hooks",
+    "rules",
+    "workflow",
+    "plugin"
+]
+
+dependencies = [
+    "pydantic>=2.0",
+    "onnxruntime>=1.18",
+    "onnx>=1.16,<2",
+    "tokenizers>=0.20",
+    "sqlite-vec>=0.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+postgres = [
+    "psycopg[binary]>=3.1",
+]
+dashboard = [
+    "jinja2>=3.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.4",
+    "vulture>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/aokumablue/bluecore#readme"
+Repository = "https://github.com/aokumablue/bluecore.git"
+Issues = "https://github.com/aokumablue/bluecore/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bluecore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "C4", "UP"]
+ignore = ["E501"]
+
+[tool.coverage.run]
+source = ["src/bluecore", "src/model_build"]
+branch = true
+
+
+[tool.coverage.report]
+fail_under = 100
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

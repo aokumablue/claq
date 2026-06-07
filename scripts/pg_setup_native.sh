@@ -12,9 +12,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---- デフォルト値 ----
 
-PG_USER="deepblue"
+PG_USER="bluecore"
 PG_PASSWORD=""
-PG_DB="deepblue_mem"
+PG_DB="bluecore_mem"
 PG_HOST="localhost"
 PG_PORT="5432"
 PG_SUPERUSER="postgres"
@@ -72,15 +72,15 @@ Usage:
   bash pg_setup_native.sh [OPTIONS]
 
 Options:
-  --user USER                PostgreSQL ユーザ名 (default: deepblue)
+  --user USER                PostgreSQL ユーザ名 (default: bluecore)
   --password PASSWORD        ユーザのパスワード (default: auto-generate)
-  --db DB_NAME              データベース名 (default: deepblue_mem)
+  --db DB_NAME              データベース名 (default: bluecore_mem)
   --host HOST               PostgreSQL ホスト (default: localhost)
   --port PORT               PostgreSQL ポート (default: 5432)
   --postgres-password PASS  PostgreSQL 管理者ユーザ(postgres)のパスワード
   --origin-user USER        settings.json の origin_user (default: $(id -un))
   --sql-file PATH           SQL スクリプトパス (default: ./pg_setup.sql)
-  --credentials-file PATH   認証情報を保存するファイル (default: ~/.deepblue/pg_credentials.json)
+  --credentials-file PATH   認証情報を保存するファイル (default: ~/.bluecore/pg_credentials.json)
   --no-install-pgvector     pg_vector インストールをスキップ
   --skip-schema             スキーマ初期化をスキップ
   --force                   既存ユーザ・DB を削除して再作成
@@ -568,7 +568,7 @@ load_schema() {
 
 save_credentials() {
   if [[ -z "${CREDENTIALS_FILE}" ]]; then
-    CREDENTIALS_FILE="${HOME}/.deepblue/pg_credentials.json"
+    CREDENTIALS_FILE="${HOME}/.bluecore/pg_credentials.json"
   fi
 
   local credentials_dir
@@ -609,7 +609,7 @@ print_connection_info() {
   printf '\n'
   printf 'Next steps:\n'
   printf '1. Store the password securely (see above)\n'
-  printf '2. Edit ~/.deepblue/settings.json:\n'
+  printf '2. Edit ~/.bluecore/settings.json:\n'
   printf '   {\n'
   printf '     "mem": {\n'
   printf '       "sync": {\n'
@@ -620,7 +620,7 @@ print_connection_info() {
   printf '       }\n'
   printf '     }\n'
   printf '   }\n'
-  printf '3. Run: python3 -m deepblue.mem sync\n'
+  printf '3. Run: python3 -m bluecore.mem sync\n'
   printf '\n'
 }
 

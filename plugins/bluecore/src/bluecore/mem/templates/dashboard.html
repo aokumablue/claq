@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bluecore Control Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }
+  h1 { font-size: 1.8rem; margin-bottom: 8px; color: #58a6ff; }
+  .meta { color: #8b949e; margin-bottom: 24px; font-size: 0.9rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 20px; margin-bottom: 24px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
+  .card h2 { font-size: 1.1rem; color: #58a6ff; margin-bottom: 12px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; text-align: center; }
+  .stat .value { font-size: 2rem; font-weight: bold; color: #58a6ff; }
+  .stat .label { font-size: 0.8rem; color: #8b949e; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #30363d; }
+  th { color: #8b949e; font-weight: 600; }
+  canvas { max-height: 300px; }
+</style>
+</head>
+<body>
+<h1>bluecore Control Dashboard</h1>
+<p class="meta">Generated: {{ generated_at }} | Period: {{ days }} days</p>
+
+<div class="stats">
+  <div class="stat"><div class="value">{{ quality.total_chunks }}</div><div class="label">Total Chunks</div></div>
+  <div class="stat"><div class="value">{{ quality.total_users }}</div><div class="label">Users</div></div>
+  <div class="stat"><div class="value">{{ quality.total_projects }}</div><div class="label">Projects</div></div>
+  <div class="stat"><div class="value">{{ quality.total_sessions }}</div><div class="label">Sessions</div></div>
+  <div class="stat"><div class="value">{{ quality.access_rate }}%</div><div class="label">Access Rate</div></div>
+  <div class="stat"><div class="value">{{ quality.short_chunk_rate }}%</div><div class="label">Short Chunk Rate</div></div>
+</div>
+
+<h2 style="color:#58a6ff;margin:32px 0 16px;font-size:1.4rem;">Skill Health & Growth</h2>
+<div class="stats">
+  <div class="stat"><div class="value">{{ skill_health_summary.total_skills }}</div><div class="label">Skills</div></div>
+  <div class="stat"><div class="value">{{ skill_health_summary.healthy_skills }}</div><div class="label">Healthy</div></div>
+  <div class="stat"><div class="value">{{ skill_health_summary.declining_skills }}</div><div class="label">Declining</div></div>
+  <div class="stat"><div class="value">{{ skill_growth_summary.skill_candidates }}</div><div class="label">Skill Candidates</div></div>
+  <div class="stat"><div class="value">{{ skill_growth_summary.gap_candidates }}</div><div class="label">Gap Candidates</div></div>
+  <div class="stat"><div class="value">{{ skill_growth_summary.total_patterns }}</div><div class="label">Patterns</div></div>
+</div>
+
+<div class="grid">
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>Skill Health Trend</h2>
+    <canvas id="skillHealthChart" style="max-height:360px;"></canvas>
+  </div>
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>Skill Health Snapshot</h2>
+    <table>
+      <thead>
+        <tr><th>Skill</th><th>7d</th><th>30d</th><th>Trend</th><th>Pending</th><th>Last Run</th></tr>
+      </thead>
+      <tbody>
+      {% for skill in skill_health_rows %}
+        <tr>
+          <td>{{ skill.skill_id }}</td>
+          <td>{{ (skill.success_rate_7d * 100) | round(1) if skill.success_rate_7d is not none else 'n/a' }}%</td>
+          <td>{{ (skill.success_rate_30d * 100) | round(1) if skill.success_rate_30d is not none else 'n/a' }}%</td>
+          <td>{{ skill.failure_trend }}</td>
+          <td>{{ skill.pending_amendments }}</td>
+          <td>{{ skill.last_run or '-' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Skill Growth Priority</h2>
+    <canvas id="skillGrowthChart" style="max-height:360px;"></canvas>
+  </div>
+  <div class="card">
+    <h2>Growth Action Items</h2>
+    <table>
+      <thead>
+        <tr><th>Priority</th><th>Action</th><th>Target</th></tr>
+      </thead>
+      <tbody>
+      {% for item in action_items %}
+        <tr>
+          <td>{{ item.priority }}</td>
+          <td>{{ item.action }}</td>
+          <td>{{ item.target }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>Skill Growth Candidates</h2>
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Priority</th><th>Score</th><th>Evidence</th></tr>
+      </thead>
+      <tbody>
+      {% for candidate in skill_candidates %}
+        <tr>
+          <td>{{ candidate.suggested_name }}</td>
+          <td>{{ candidate.priority }}</td>
+          <td>{{ candidate.priority_score }}</td>
+          <td>{{ candidate.evidence.occurrence_count }} uses / {{ candidate.evidence.user_count }} users / {{ candidate.evidence.project_count }} projects</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>Gap Candidates</h2>
+    <table>
+      <thead>
+        <tr><th>Priority</th><th>Prompt Key</th><th>Count</th><th>Users</th></tr>
+      </thead>
+      <tbody>
+      {% for candidate in gap_candidates %}
+        <tr>
+          <td>{{ candidate.priority }}</td>
+          <td>{{ candidate.sample_prompt }}</td>
+          <td>{{ candidate.occurrence_count }}</td>
+          <td>{{ candidate.user_count }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<h2 style="color:#58a6ff;margin:32px 0 16px;font-size:1.4rem;">Projects & Instincts</h2>
+<div class="stats">
+  <div class="stat"><div class="value">{{ project_summary.total_projects }}</div><div class="label">Registered Projects</div></div>
+  <div class="stat"><div class="value">{{ project_summary.personal_instincts }}</div><div class="label">Project Personal</div></div>
+  <div class="stat"><div class="value">{{ project_summary.inherited_instincts }}</div><div class="label">Project Inherited</div></div>
+  <div class="stat"><div class="value">{{ project_summary.global_personal }}</div><div class="label">Global Personal</div></div>
+  <div class="stat"><div class="value">{{ project_summary.global_inherited }}</div><div class="label">Global Inherited</div></div>
+  <div class="stat"><div class="value">{{ project_summary.total_projects + project_summary.global_personal + project_summary.global_inherited }}</div><div class="label">Registry Scope</div></div>
+</div>
+
+<div class="grid">
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>Project Registry</h2>
+    <table>
+      <thead>
+        <tr><th>Project</th><th>Personal</th><th>Inherited</th><th>Observations</th><th>Last Seen</th></tr>
+      </thead>
+      <tbody>
+      {% for project in project_rows %}
+        <tr>
+          <td>{{ project.name }}</td>
+          <td>{{ project.personal_instincts }}</td>
+          <td>{{ project.inherited_instincts }}</td>
+          <td>{{ project.observations }}</td>
+          <td>{{ project.last_seen }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>ユーザー別アクティビティ</h2>
+    <canvas id="userChart"></canvas>
+  </div>
+  <div class="card">
+    <h2>プロジェクト別アクティビティ</h2>
+    <canvas id="projectChart"></canvas>
+  </div>
+  <div class="card">
+    <h2>ツール使用分布</h2>
+    <canvas id="toolChart"></canvas>
+  </div>
+  <div class="card">
+    <h2>日次アクティビティ推移</h2>
+    <canvas id="timelineChart"></canvas>
+  </div>
+  <div class="card">
+    <h2>ファイル変更頻度 Top 20</h2>
+    <table>
+      <thead><tr><th>File</th><th>Changes</th></tr></thead>
+      <tbody>
+      {% for f in file_heatmap %}
+        <tr><td>{{ f.file }}</td><td>{{ f.changes }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>インスティンクト成長</h2>
+    <canvas id="instinctChart"></canvas>
+  </div>
+</div>
+
+<!-- ===== アイテム使用率セクション ===== -->
+<h2 style="color:#58a6ff;margin:32px 0 16px;font-size:1.4rem;">スキル・コマンド・エージェント 使用率</h2>
+{% if not item_has_data %}
+<p style="color:#8b949e;margin-bottom:16px;">記録がまだありません。スキルを実行すると自動的に集計されます。</p>
+{% endif %}
+
+<div class="grid">
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>スキル使用回数ランキング</h2>
+    {% if not pg_available %}
+    <p style="color:#8b949e;font-size:0.85rem;margin-bottom:8px;">チームデータ: PostgreSQL 未設定（個人データのみ表示）</p>
+    {% endif %}
+    <canvas id="skillRankChart" style="max-height:400px;"></canvas>
+  </div>
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>コマンド使用回数ランキング</h2>
+    <canvas id="commandRankChart" style="max-height:300px;"></canvas>
+  </div>
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>エージェント使用回数ランキング</h2>
+    <canvas id="agentRankChart" style="max-height:300px;"></canvas>
+  </div>
+  <div class="card">
+    <h2>日次実行トレンド（個人 vs チーム）</h2>
+    <canvas id="itemTrendChart"></canvas>
+  </div>
+  <div class="card">
+    <h2>アウトカム分布</h2>
+    <canvas id="outcomeChart"></canvas>
+  </div>
+</div>
+
+<script>
+const colors = ['#58a6ff','#3fb950','#d29922','#f85149','#bc8cff','#79c0ff','#56d364','#e3b341'];
+const bgColors = colors.map(c => c + '33');
+
+// ユーザー別
+new Chart(document.getElementById('userChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ user_labels | safe }},
+    datasets: [{ label: 'Chunks', data: {{ user_data | safe }}, backgroundColor: bgColors, borderColor: colors, borderWidth: 1 }]
+  },
+  options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#c9d1d9' } } } }
+});
+
+// プロジェクト別
+new Chart(document.getElementById('projectChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ project_labels | safe }},
+    datasets: [{ label: 'Chunks', data: {{ project_data | safe }}, backgroundColor: bgColors, borderColor: colors, borderWidth: 1 }]
+  },
+  options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#c9d1d9' } } } }
+});
+
+// ツール使用分布
+new Chart(document.getElementById('toolChart'), {
+  type: 'doughnut',
+  data: {
+    labels: {{ tool_labels | safe }},
+    datasets: [{ data: {{ tool_data | safe }}, backgroundColor: colors }]
+  },
+  options: { plugins: { legend: { labels: { color: '#c9d1d9' } } } }
+});
+
+// 日次タイムライン
+new Chart(document.getElementById('timelineChart'), {
+  type: 'line',
+  data: {
+    labels: {{ timeline_dates | safe }},
+    datasets: [
+      { label: 'Sessions', data: {{ timeline_sessions | safe }}, borderColor: '#58a6ff', tension: 0.3, fill: false },
+      { label: 'Chunks', data: {{ timeline_chunks | safe }}, borderColor: '#3fb950', tension: 0.3, fill: false }
+    ]
+  },
+  options: { scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#8b949e' } } }, plugins: { legend: { labels: { color: '#c9d1d9' } } } }
+});
+
+// インスティンクト成長
+new Chart(document.getElementById('instinctChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ instinct_dates | safe }},
+    datasets: [{ label: 'New Instincts', data: {{ instinct_counts | safe }}, backgroundColor: '#bc8cff33', borderColor: '#bc8cff', borderWidth: 1 }]
+  },
+  options: { scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#8b949e' } } }, plugins: { legend: { labels: { color: '#c9d1d9' } } } }
+});
+
+// Skill health trend
+new Chart(document.getElementById('skillHealthChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ skill_health_labels | safe }},
+    datasets: [
+      { label: '7d', data: {{ skill_health_7d | safe }}, backgroundColor: '#58a6ff55', borderColor: '#58a6ff', borderWidth: 1 },
+      { label: '30d', data: {{ skill_health_30d | safe }}, backgroundColor: '#3fb95055', borderColor: '#3fb950', borderWidth: 1 }
+    ]
+  },
+  options: { indexAxis: 'y', scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#c9d1d9' } } }, plugins: { legend: { labels: { color: '#c9d1d9' } } } }
+});
+
+// Skill growth priority
+new Chart(document.getElementById('skillGrowthChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ skill_growth_labels | safe }},
+    datasets: [{ label: 'Priority score', data: {{ skill_growth_scores | safe }}, backgroundColor: '#bc8cff55', borderColor: '#bc8cff', borderWidth: 1 }]
+  },
+  options: { indexAxis: 'y', scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#c9d1d9' } } }, plugins: { legend: { labels: { color: '#c9d1d9' } } } }
+});
+
+// ===== アイテム使用率チャート =====
+const axisOpts = { scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#c9d1d9' } } }, plugins: { legend: { labels: { color: '#c9d1d9' } } } };
+
+// スキルランキング（個人 vs チーム grouped bar）
+const skillLabels = {{ item_skill_labels | safe }};
+const skillPersonal = {{ item_skill_personal | safe }};
+const skillTeam = {{ item_skill_team | safe }};
+const pgAvailable = {{ 'true' if pg_available else 'false' }};
+const skillDatasets = [
+  { label: '個人', data: skillPersonal, backgroundColor: '#58a6ff55', borderColor: '#58a6ff', borderWidth: 1 }
+];
+if (pgAvailable) {
+  skillDatasets.push({ label: 'チーム', data: skillTeam, backgroundColor: '#3fb95055', borderColor: '#3fb950', borderWidth: 1 });
+}
+new Chart(document.getElementById('skillRankChart'), {
+  type: 'bar',
+  data: { labels: skillLabels, datasets: skillDatasets },
+  options: { indexAxis: 'y', ...axisOpts }
+});
+
+// コマンドランキング
+const cmdLabels = {{ item_command_labels | safe }};
+const cmdPersonal = {{ item_command_personal | safe }};
+const cmdTeam = {{ item_command_team | safe }};
+const cmdDatasets = [
+  { label: '個人', data: cmdPersonal, backgroundColor: '#3fb95055', borderColor: '#3fb950', borderWidth: 1 }
+];
+if (pgAvailable) {
+  cmdDatasets.push({ label: 'チーム', data: cmdTeam, backgroundColor: '#d2992255', borderColor: '#d29922', borderWidth: 1 });
+}
+new Chart(document.getElementById('commandRankChart'), {
+  type: 'bar',
+  data: { labels: cmdLabels, datasets: cmdDatasets },
+  options: { indexAxis: 'y', ...axisOpts }
+});
+
+// エージェントランキング
+const agentLabels = {{ item_agent_labels | safe }};
+const agentPersonal = {{ item_agent_personal | safe }};
+const agentTeam = {{ item_agent_team | safe }};
+const agentDatasets = [
+  { label: '個人', data: agentPersonal, backgroundColor: '#d2992255', borderColor: '#d29922', borderWidth: 1 }
+];
+if (pgAvailable) {
+  agentDatasets.push({ label: 'チーム', data: agentTeam, backgroundColor: '#bc8cff55', borderColor: '#bc8cff', borderWidth: 1 });
+}
+new Chart(document.getElementById('agentRankChart'), {
+  type: 'bar',
+  data: { labels: agentLabels, datasets: agentDatasets },
+  options: { indexAxis: 'y', ...axisOpts }
+});
+
+// 日次トレンド
+const trendDates = {{ item_trend_dates | safe }};
+const trendPersonal = {{ item_trend_personal | safe }};
+const trendTeam = {{ item_trend_team | safe }};
+const trendDatasets = [
+  { label: '個人', data: trendPersonal, borderColor: '#58a6ff', tension: 0.3, fill: false }
+];
+if (pgAvailable) {
+  trendDatasets.push({ label: 'チーム', data: trendTeam, borderColor: '#3fb950', tension: 0.3, fill: false });
+}
+new Chart(document.getElementById('itemTrendChart'), {
+  type: 'line',
+  data: { labels: trendDates, datasets: trendDatasets },
+  options: axisOpts
+});
+
+// アウトカム分布
+new Chart(document.getElementById('outcomeChart'), {
+  type: 'doughnut',
+  data: {
+    labels: {{ item_outcome_labels | safe }},
+    datasets: [{ data: {{ item_outcome_personal | safe }}, backgroundColor: ['#3fb950','#d29922','#f85149','#8b949e'] }]
+  },
+  options: { plugins: { legend: { labels: { color: '#c9d1d9' } } } }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.block_no_verify"
+          }
+        ],
+        "description": "git hook-bypassフラグをブロックして、pre-commit、commit-msg、pre-pushフックがスキップされないように保護します。"
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:bash:commit-quality\" \"bluecore.hooks.pre_bash_commit_quality\" \"strict\""
+          }
+        ],
+        "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:write:doc-file-warning\" \"bluecore.hooks.doc_file_warning\" \"standard,strict\""
+          }
+        ],
+        "description": "ドキュメントファイル警告: 標準規格外のドキュメントファイルについて警告します (終了コード 0; 警告のみ)"
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:edit-write:suggest-compact\" \"bluecore.hooks.suggest_compact\" \"standard,strict\""
+          }
+        ],
+        "description": "論理的な間隔で手動のコンパクションを提案します"
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:config-protection\" \"bluecore.hooks.config_protection\" \"standard,strict\"",
+            "timeout": 5
+          }
+        ],
+        "description": "linter/formatterの設定ファイルへの変更をブロックします。エージェントが設定を弱めるのではなく、コードを修正するように導きます。"
+      },
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:observe\" \"bluecore.skills.learn.observe\" \"standard,strict\" pre",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "キャプチャツールの使用状況を観察して継続的な学習に役立てる"
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:compact\" \"bluecore.hooks.pre_compact\" \"standard,strict\""
+          }
+        ],
+        "description": "コンテキストの圧縮前に状態を保存します"
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.session_install",
+            "timeout": 150
+          }
+        ],
+        "description": "プラグイン初回/更新時の自動インストールと .venv symlink 修復（ONNX ビルドはバックグラウンド実行）"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:mem:setup\" \"bluecore.mem.cli\" \"minimal,standard,strict\" setup",
+            "timeout": 120
+          }
+        ],
+        "description": "永続メモリデータベースのスキーマ初期化とデータディレクトリ作成"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:start\" \"bluecore.hooks.session_start\" \"minimal,standard,strict\""
+          }
+        ],
+        "description": "新しいセッションで以前のコンテキストを読み込み、パッケージマネージャを検出する"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:mem:record-project-profile\" \"bluecore.mem.cli\" \"standard,strict\" record-project-profile",
+            "timeout": 15
+          }
+        ],
+        "description": "mem: プロジェクトプロファイル自動記録（言語、フレームワーク）"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:mem:context\" \"bluecore.mem.cli\" \"strict\" context",
+            "timeout": 60
+          }
+        ],
+        "description": "mem: 過去のメモリチャンクからコンテキストを注入"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"user:mem:session-init\" \"bluecore.mem.cli\" \"standard,strict\" \"session-init\"",
+            "timeout": 30
+          }
+        ],
+        "description": "mem: 適応的メモリ検索 (「前回」「以前」等のキーワードで自動注入)"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"user:team:session-init\" \"bluecore.mem.cli\" \"standard,strict\" \"team-session-init\"",
+            "timeout": 30
+          }
+        ],
+        "description": "team: 過去参照プロンプト検出時に PostgreSQL のチーム共有チャンク（自分以外）をベクトル検索して注入"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"user:mem:record-interaction\" \"bluecore.mem.cli\" \"standard,strict\" \"record-interaction\"",
+            "timeout": 30
+          }
+        ],
+        "description": "mem: ユーザープロンプトと AI 応答のペア記録（interaction_logs）"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"user:mem:sync-check\" \"bluecore.mem.cli\" \"standard,strict\" \"sync-check\"",
+            "async": true,
+            "timeout": 600
+          }
+        ],
+        "description": "mem: プロンプト送信時に同期間隔をチェック（長時間セッションでも確実に同期）"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli observe",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "mem: ツール実行（Bash/Write/Edit/MultiEdit）をメモリチャンクに記録"
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli record-item-run",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "mem: スキル実行を mem_item_runs に記録（item_type=skill）"
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"post:redux:filter\" \"bluecore.hooks.redux_filter\" \"standard,strict\"",
+            "timeout": 10
+          }
+        ],
+        "description": "redux: Bash 出力をコマンド別フィルタで圧縮（無一致時は汎用戦略でトークン削減）"
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"post:bash:pr-created\" \"bluecore.hooks.post_bash_pr_created\" \"standard,strict\""
+          }
+        ],
+        "description": "PR URLを記録し、PR作成後にレビュー コマンドを提供します"
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"post:quality-gate\" \"bluecore.hooks.quality_gate\" \"standard,strict\" \"post-edit\"",
+            "async": true,
+            "timeout": 30
+          }
+        ],
+        "description": "編集後の品質ゲートを settings.json の hooks.quality-gate 設定に従って実行します"
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"stop:session-end\" \"bluecore.hooks.session_end\" \"minimal,standard,strict\"",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "各応答後もセッション状態を保持する（停止時にはtranscript_pathが保持される）"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"stop:evaluate-session\" \"bluecore.hooks.evaluate_session\" \"minimal,standard,strict\"",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "セッションを評価して抽出可能なパターンを特定する"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:end:marker\" \"bluecore.hooks.session_end_marker\" \"minimal,standard,strict\"",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "セッション終了ライフサイクルマーカー（非ブロッキング）"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:mem:end\" \"bluecore.mem.cli\" \"standard,strict\" \"session-end\"",
+            "async": true,
+            "timeout": 120
+          }
+        ],
+        "description": "mem: エンべディング一括生成とメモリ最適化"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:mem:sync-check\" \"bluecore.mem.cli\" \"standard,strict\" \"sync-check\"",
+            "async": false,
+            "timeout": 600
+          }
+        ],
+        "description": "mem: 同期間隔をチェックし、必要なら PostgreSQL へバッチ同期（セッション終了前に完了を保証）"
+      }
+    ]
+  }
+}

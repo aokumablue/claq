@@ -15,10 +15,10 @@
 ## 作業ルール
 
 - Python は `python3` を使う
-- 変更後は `.venv` を有効化して `python3 -m pytest -q` と `ruff check plugins/deepblue/src` が成功することを確認（警告なし）
-- venv は 2 種類。両方とも `~/.deepblue/` 配下に置く
-  - `~/.deepblue/.venv` — 本体ランタイム用（`install.sh` が作成）。Claude/Copilot 各キャッシュフォルダには symlink を張る
-  - `~/.deepblue/.venv-modelbuild` — ONNX ビルド専用（初回のみ自動作成）。torch pickle RCE リスクと 5GB 配布回避のため本体 venv とは分離する
+- 変更後は `.venv` を有効化して `python3 -m pytest -q` と `ruff check plugins/bluecore/src` が成功することを確認（警告なし）
+- venv は 2 種類。両方とも `~/.bluecore/` 配下に置く
+  - `~/.bluecore/.venv` — 本体ランタイム用（`install.sh` が作成）。Claude/Copilot 各キャッシュフォルダには symlink を張る
+  - `~/.bluecore/.venv-modelbuild` — ONNX ビルド専用（初回のみ自動作成）。torch pickle RCE リスクと 5GB 配布回避のため本体 venv とは分離する
 
 ## スコープ規律
 
@@ -29,8 +29,8 @@
 
 ## 永続メモリ
 
-- `SessionStart`: `deepblue.mem.cli context` が `<mem-context>` を注入
+- `SessionStart`: `bluecore.mem.cli context` が `<mem-context>` を注入
 - `PreToolUse` / `PostToolUse`: ツール操作を記録
 - `SessionEnd`: 埋め込み生成と learn ブリッジ
-- DB: `~/.deepblue/mem.db`
-- 実装起点: `plugins/deepblue/src/deepblue/mem/{cli,search,context,bridge}.py`
+- DB: `~/.bluecore/mem.db`
+- 実装起点: `plugins/bluecore/src/bluecore/mem/{cli,search,context,bridge}.py`
