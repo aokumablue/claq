@@ -41,7 +41,8 @@ _SUMMARY_PATTERN = re.compile(
     re.DOTALL,
 )
 _SECTION_PATTERN = re.compile(r"(### .+?\n.*?)(?=\n### |\Z)", re.DOTALL)
-_KEEP_SECTIONS = {"### Tasks", "### Files Modified"}
+# Files Modified は次セッションでプロジェクト探索から再取得できるため注入しない（トークン削減）
+_KEEP_SECTIONS = {"### Tasks"}
 
 
 def _log_sanitized_exception(prefix: str, exc: BaseException) -> None:
@@ -279,7 +280,7 @@ def _collect_session_context(sessions_dir: Path) -> list[str]:
         latest_checkpoint = active_checkpoints[0]
         raw_content = strip_ansi(read_file(latest_checkpoint["path"]) or "")
         if raw_content:  # pragma: no branch  # active 判定と同一ファイル読込のため空にはならない
-            parts.append(f"Active checkpoint:\n{compact_line(raw_content, 1000)}")
+            parts.append(f"Active checkpoint:\n{compact_line(raw_content, 500)}")
             log(f"[SessionStart] Injected active checkpoint: {latest_checkpoint['path']}")
 
     return parts

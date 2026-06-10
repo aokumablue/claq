@@ -843,6 +843,35 @@ class TestCheckpointInjection:
         context = payload["hookSpecificOutput"]["additionalContext"]
         assert "Active checkpoint:" in context
 
+    def test_active_checkpoint_is_capped_at_500_chars(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """チェックポイント注入は 500 文字上限に切り詰めること（注入トークン削減）。"""
+        from bluecore.hooks import session_start
+
+        sessions_dir = tmp_path / "session-data"
+        sessions_dir.mkdir()
+        checkpoint = sessions_dir / "checkpoint-2026-06-11-cap.md"
+        checkpoint.write_text(
+            "---\ntask: test\ncompleted: false\n---\n\n## 目標\n" + "ながいほんぶん " * 200 + "\n",
+            encoding="utf-8",
+        )
+
+        self._make_session_start_base_patches(monkeypatch, tmp_path)
+        monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
+        monkeypatch.setattr(session_start, "get_session_search_dirs", lambda: [sessions_dir])
+        monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: tmp_path / "learned")
+        monkeypatch.setattr(session_start, "find_files", lambda path, pattern, **kw: (
+            [{"path": str(checkpoint), "mtime": 9999}] if "checkpoint-" in pattern else []
+        ))
+        monkeypatch.setattr(session_start, "read_file", lambda p: checkpoint.read_text(encoding="utf-8") if str(p) == str(checkpoint) else "")
+
+        output = session_start.run("{}")
+        payload = json.loads(output)
+        context = payload["hookSpecificOutput"]["additionalContext"]
+        marker = "Active checkpoint:\n"
+        assert marker in context
+        injected = context.split(marker, 1)[1].split("\n\n", 1)[0]
+        assert len(injected) <= 510  # 500 + "..." 分のマージン
+
     def test_completed_checkpoint_is_not_injected(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """completed: true のチェックポイントは注入されないこと。"""
         from bluecore.hooks import session_start
@@ -969,8 +998,8 @@ class TestFilterSessionSummary:
     def _wrap(self, body: str) -> str:
         return f"# Session: 2026-05-09\n---\n{self._START}\n{body}\n{self._END}\n### 次回セッションへの引継ぎ\n-\n### 読み込むコンテキスト\n```\n[relevant files]\n```\n"
 
-    def test_keeps_tasks_and_files_modified(self) -> None:
-        """Tasks と Files Modified のみを保持すること。"""
+    def test_keeps_only_tasks(self) -> None:
+        """Tasks のみを保持し Files Modified は除外すること（注入トークン削減）。"""
         from bluecore.hooks.session_start import _filter_session_summary
 
         body = "### Tasks\n- msg1\n- msg2\n\n### Files Modified\n- foo.py\n\n### 使用したツール\nEdit, Read\n\n### 統計\n- ユーザーメッセージ総数: 5"
@@ -978,8 +1007,8 @@ class TestFilterSessionSummary:
 
         assert "### Tasks" in result
         assert "msg1" in result
-        assert "### Files Modified" in result
-        assert "foo.py" in result
+        assert "### Files Modified" not in result
+        assert "foo.py" not in result
         assert "使用したツール" not in result
         assert "統計" not in result
 
