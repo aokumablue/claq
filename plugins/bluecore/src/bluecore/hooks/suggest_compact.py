@@ -114,7 +114,12 @@ def main() -> int:
     try:
         read_raw_stdin()
 
-        session_id = sanitize_session_id(os.environ.get("CLAUDE_SESSION_ID") or "default")
+        raw_session_id = os.environ.get("CLAUDE_SESSION_ID")
+        if not raw_session_id:
+            # セッション ID なしでは並行セッション間でカウンタが混線するため提案しない
+            return 0
+
+        session_id = sanitize_session_id(raw_session_id)
         counter_file = get_node_temp_dir() / f"claude-tool-count-{session_id}"
         threshold = parse_threshold(os.environ.get("COMPACT_THRESHOLD"))
 

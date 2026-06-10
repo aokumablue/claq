@@ -121,6 +121,21 @@ def test_suggest_compact_helpers_and_error_fallback(
     assert writes == [(counter, "1")]
 
 
+def test_suggest_compact_skips_without_session_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLAUDE_SESSION_ID 未設定時はカウンタを作らず提案もしない（並行セッション混線防止）。"""
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+    monkeypatch.setenv("COMPACT_THRESHOLD", "1")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+
+    stderr = io.StringIO()
+    with redirect_stderr(stderr):
+        assert suggest_compact.main() == 0
+
+    assert stderr.getvalue() == ""
+    assert not (tmp_path / "claude-tool-count-default").exists()
+
+
 def test_suggest_compact_main_logs_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(suggest_compact, "read_raw_stdin", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     stderr = io.StringIO()
