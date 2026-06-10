@@ -1019,6 +1019,22 @@ def test_count_lines_returns_zero_when_missing(tmp_path: Path) -> None:
     assert cdh.count_lines(tmp_path / "nope.jsonl") == 0
 
 
+def test_count_lines_counts_existing_file(tmp_path: Path) -> None:
+    """count_lines は既存ファイルの行数を返す。"""
+    from bluecore.mem import cli_dashboard_handlers as cdh
+
+    target = tmp_path / "data.jsonl"
+    target.write_text("a\nb\nc\n", encoding="utf-8")
+    assert cdh.count_lines(target) == 3
+
+
+def test_cli_count_lines_delegates_to_dashboard_handlers(tmp_path: Path) -> None:
+    """cli._count_lines は cli_dashboard_handlers.count_lines に委譲する。"""
+    target = tmp_path / "data.jsonl"
+    target.write_text("x\n", encoding="utf-8")
+    assert cli._count_lines(target) == 1
+
+
 def test_collect_skill_health_overview_handles_collect_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
