@@ -127,7 +127,7 @@ def load_agent(file_path: str | Path) -> dict[str, Any]:
         dict[str, Any]: 処理結果を返します。
 
     Raises:
-        例外は発生しません。
+        OSError: ファイルが読み込めない場合。
     """
     path = Path(file_path)
     content = path.read_text(encoding="utf-8")
@@ -160,7 +160,7 @@ def load_agents(agents_dir: str | Path) -> list[dict[str, Any]]:
         list[dict[str, Any]]: dict[str, Any] の一覧を返します。
 
     Raises:
-        例外は発生しません。
+        OSError: いずれかのエージェントファイルが読み込めない場合。
     """
     path = Path(agents_dir)
     return [load_agent(f) for f in sorted(path.glob("*.md"))]
