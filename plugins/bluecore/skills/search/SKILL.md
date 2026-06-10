@@ -31,7 +31,7 @@ user-invocable: false
 1. リポジトリ内に既存実装？ → `rg` で探す
 2. パッケージレジストリ検索
 3. MCP はある？ → `~/.claude/settings.json` 確認
-4. スキルはある？ → `~/.claude/skills/` 確認
+4. スキルはある？ → `~/.claude/skills/`（個人）・`.claude/skills/`（プロジェクト）・インストール済みプラグインのスキル一覧を確認
 5. GitHub OSS → 保守継続中を検索
 
 ## 完全モード（エージェント並列）
@@ -45,7 +45,7 @@ Return top 3: name, version, weekly downloads, last update, license
 
 # B: MCP・スキル・ローカル資産
 1. ~/.claude/settings.json でMCP確認
-2. ~/.claude/skills/ で関連スキル確認
+2. ~/.claude/skills/（個人）・.claude/skills/（プロジェクト）・インストール済みプラグインのスキルで関連スキル確認
 3. rg で既存実装確認
 Return: type, name/path, match_quality
 
