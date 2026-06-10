@@ -11,7 +11,7 @@ model: sonnet
 
 ## ワークフロー
 
-1. `/harness --audit-only` でベースラインスコア収集
+1. 呼び出し元（/harness ステップ3）から渡されるベースライン JSON とトップ3アクションを入力とする（単体起動時のみ `bluecore_run bluecore.ci.harness_audit <scope> --format json` で自己収集）
 2. トップ3レバレッジエリア特定（フック・評価・ルーティング・コンテキスト・安全性）
 3. 最小限・元に戻せる設定変更提案
 4. 変更適用・検証
