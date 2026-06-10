@@ -1285,3 +1285,11 @@ def test_slim_context_content_prose_over_limit() -> None:
 
     out = slim_context_content("a\nb\nc", max_prose_lines=1)
     assert out.count("...") == 1
+
+
+def test_record_deps_requires_get_git_user_name() -> None:
+    """RecordDeps は get_git_user_name を必須依存として要求する。"""
+    from bluecore.mem.cli_record_handlers import RecordDeps
+
+    with pytest.raises(TypeError):
+        RecordDeps(open_db=lambda settings: None, get_project=lambda data: "p", log=lambda *args: None)

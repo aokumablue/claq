@@ -26,7 +26,7 @@ class RecordDeps:
     open_db: OpenDbFn
     get_project: GetProjectFn
     log: Any
-    get_git_user_name: GitUserFn | None = None
+    get_git_user_name: GitUserFn
 
 
 def _build_record_chunk(
