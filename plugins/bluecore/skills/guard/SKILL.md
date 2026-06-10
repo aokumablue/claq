@@ -24,7 +24,7 @@ user-invocable: false
 
 ## 実装
 
-PreToolUse フックで Bash/Write/Edit/MultiEdit を検知。コマンド・パスを有効ルールと照合後、実行許可。
+本スキルは行動規範（モデル側監視）: Bash/Write/Edit/MultiEdit の実行前に内容を有効ルールと照合してから進める。フックで機械的に強制されるのは `--no-verify` ブロック（block_no_verify）と設定ファイル保護（config_protection）のみで、他パターンの検知はスキル指示に依存する。
 
 ## 永続メモリ
 
