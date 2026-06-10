@@ -126,8 +126,8 @@ class TeamSettings:
     """
 
     enabled: bool = True
-    max_tokens: int = 1000
-    chunk_limit: int = 5
+    max_tokens: int = 500
+    chunk_limit: int = 3
     exclude_self: bool = True
 
 
@@ -145,10 +145,10 @@ class Settings:
     search_half_life_days: float = 30.0
     chunk_max_length: int = 2000
     context_chunk_count: int = 30
-    context_max_tokens: int = 1500
-    # ティアード・メモリ設定（hot=400, warm=600, archive=500）
+    context_max_tokens: int = 1200
+    # ティアード・メモリ設定（hot=400, warm=400, archive=残り 400）
     context_hot_tokens: int = 400
-    context_warm_tokens: int = 600
+    context_warm_tokens: int = 400
     context_hot_hours: int = 24
     context_warm_days: int = 7
     auto_compact_enabled: bool = True

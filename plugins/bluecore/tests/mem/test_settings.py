@@ -34,10 +34,18 @@ class TestSettingsDefaults:
         assert s.search_half_life_days == 30.0
         assert s.chunk_max_length == 2000
         assert s.context_chunk_count == 30
-        assert s.context_max_tokens == 1500
+        assert s.context_max_tokens == 1200
         assert s.context_hot_tokens == 400
-        assert s.context_warm_tokens == 600
+        assert s.context_warm_tokens == 400
         assert s.excluded_projects == []
+
+    def test_team_settings_defaults(self) -> None:
+        """TeamSettings の注入予算既定値（トークン削減後の値）を固定する。"""
+        from bluecore.mem.settings import TeamSettings
+
+        team = TeamSettings()
+        assert team.max_tokens == 500
+        assert team.chunk_limit == 3
 
     def test_derived_properties(self, tmp_path: Path) -> None:
         s = Settings()
