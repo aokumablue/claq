@@ -250,3 +250,49 @@ def test_main_inserts_src_dir_when_missing(monkeypatch) -> None:
     monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
     assert launcher.main(["target"]) == 0
     assert src in sys.path
+
+
+def test_subprocess_timeout_default_and_env_override(monkeypatch) -> None:
+    """timeout は既定 55 秒、環境変数で上書きでき、無効値は既定へ戻る。"""
+    monkeypatch.delenv("BLUECORE_HOOK_TIMEOUT", raising=False)
+    assert launcher._subprocess_timeout() == 55.0
+
+    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "10")
+    assert launcher._subprocess_timeout() == 10.0
+
+    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "abc")
+    assert launcher._subprocess_timeout() == 55.0
+
+    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "-5")
+    assert launcher._subprocess_timeout() == 55.0
+
+
+def test_main_passes_timeout_to_subprocess(monkeypatch) -> None:
+    """main は subprocess.run に timeout を渡す。"""
+    captured = {}
+    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(True, ""))
+    monkeypatch.setattr(launcher, "build_env", lambda: {})
+    monkeypatch.delenv("BLUECORE_HOOK_TIMEOUT", raising=False)
+
+    def fake_run(*args, **kwargs):
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+
+    assert launcher.main(["dummy-target"]) == 0
+    assert captured["timeout"] == 55.0
+
+
+def test_main_returns_one_on_timeout_expired(monkeypatch, capsys) -> None:
+    """サブプロセスの timeout 超過は stderr 通知のうえ 1 を返す。"""
+    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(True, ""))
+    monkeypatch.setattr(launcher, "build_env", lambda: {})
+
+    def fake_run(*args, **kwargs):
+        raise launcher.subprocess.TimeoutExpired(cmd=["dummy"], timeout=55)
+
+    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+
+    assert launcher.main(["dummy-target"]) == 1
+    assert "ERROR" in capsys.readouterr().err

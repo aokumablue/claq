@@ -10,6 +10,32 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Claude Code 既定のフックタイムアウト（60 秒）より先に自決して孫プロセスの孤立を防ぐ。
+DEFAULT_SUBPROCESS_TIMEOUT = 55.0
+
+
+def _subprocess_timeout() -> float:
+    """サブプロセスの timeout 秒数を環境変数から解決します。
+
+    Args:
+        なし
+
+    Returns:
+        BLUECORE_HOOK_TIMEOUT が正の数値ならその秒数、未設定・無効値なら既定の 55 秒。
+
+    Raises:
+        例外は発生しません。
+    """
+    raw = os.environ.get("BLUECORE_HOOK_TIMEOUT")
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return DEFAULT_SUBPROCESS_TIMEOUT
+        if value > 0:
+            return value
+    return DEFAULT_SUBPROCESS_TIMEOUT
+
 
 def _runtime_python() -> tuple[str, Path | None]:
     """実行に使う Python を解決します。"""
@@ -126,8 +152,9 @@ def main(argv: list[str] | None = None) -> int:
             text=True,
             capture_output=True,
             env=build_env(),
+            timeout=_subprocess_timeout(),
         )
-    except OSError as error:
+    except (OSError, subprocess.TimeoutExpired) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
 

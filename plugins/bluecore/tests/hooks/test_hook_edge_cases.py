@@ -49,10 +49,12 @@ def test_run_with_flags_builds_env_and_emits_no_stdout_on_empty_child_output(
         text: bool,
         capture_output: bool,
         env: dict[str, str],
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
         captured["command"] = command
         captured["input"] = input
         captured["env"] = env
+        captured["timeout"] = timeout
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="child stderr")
 
     monkeypatch.setattr(run_with_flags.subprocess, "run", fake_run)

@@ -371,3 +371,55 @@ def test_run_target_session_start_nonzero_returns_zero(monkeypatch) -> None:
     monkeypatch.setattr(run_with_flags, "write_stderr", lambda x: None)
     monkeypatch.setattr(run_with_flags, "build_env", lambda: {})
     assert run_with_flags._run_target(hook_id, "target", [], "raw") == 0
+
+
+def test_run_with_flags_subprocess_timeout_env_override(monkeypatch) -> None:
+    """_subprocess_timeout は既定 55 秒で環境変数上書き・無効値復帰に対応する。"""
+    from bluecore.hooks import run_with_flags
+
+    monkeypatch.delenv("BLUECORE_HOOK_TIMEOUT", raising=False)
+    assert run_with_flags._subprocess_timeout() == 55.0
+
+    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "10")
+    assert run_with_flags._subprocess_timeout() == 10.0
+
+    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "abc")
+    assert run_with_flags._subprocess_timeout() == 55.0
+
+    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "-5")
+    assert run_with_flags._subprocess_timeout() == 55.0
+
+
+def test_run_target_passes_timeout_to_subprocess(monkeypatch) -> None:
+    """_run_target は subprocess.run に timeout を渡す。"""
+    from types import SimpleNamespace
+
+    from bluecore.hooks import run_with_flags
+
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.delenv("BLUECORE_HOOK_TIMEOUT", raising=False)
+    monkeypatch.setattr(run_with_flags.subprocess, "run", fake_run)
+    monkeypatch.setattr(run_with_flags, "build_env", lambda: {})
+    assert run_with_flags._run_target("post:test", "target", [], "raw") == 0
+    assert captured["timeout"] == 55.0
+
+
+def test_run_target_returns_one_on_timeout_expired(monkeypatch) -> None:
+    """_run_target は timeout 超過時に stderr 通知のうえ 1 を返す。"""
+    from bluecore.hooks import run_with_flags
+
+    errors: list[str] = []
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=["dummy"], timeout=55)
+
+    monkeypatch.setattr(run_with_flags.subprocess, "run", fake_run)
+    monkeypatch.setattr(run_with_flags, "build_env", lambda: {})
+    monkeypatch.setattr(run_with_flags, "write_stderr", errors.append)
+    assert run_with_flags._run_target("post:test", "target", [], "raw") == 1
+    assert any("post:test" in message for message in errors)
