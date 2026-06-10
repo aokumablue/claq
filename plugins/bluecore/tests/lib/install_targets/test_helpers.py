@@ -85,11 +85,8 @@ class TestResolveBaseRoot:
             resolve_base_root("invalid")
 
 
-    def test_home_validation_branch_can_be_forced(self, monkeypatch):
-        """home の検証分岐を強制できること。"""
-        from bluecore.lib.install_targets import install_target_helpers as helpers
-
-        monkeypatch.setattr(helpers.os.path, "expanduser", lambda value: "")
+    def test_home_kind_without_home_dir_is_valid(self):
+        """home ターゲットは homeDir 未指定でも検証エラーを出さないこと。"""
         adapter = create_install_target_adapter(
             InstallTargetConfig(
                 id="test-home",
@@ -99,8 +96,7 @@ class TestResolveBaseRoot:
                 install_state_path_segments=["state.json"],
             )
         )
-        issues = adapter.validate()
-        assert issues[0].code == "missing-home-dir"
+        assert adapter.validate() == []
 
 
 class TestBuildValidationIssue:

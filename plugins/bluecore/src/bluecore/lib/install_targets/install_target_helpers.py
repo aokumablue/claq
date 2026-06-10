@@ -394,14 +394,8 @@ class InstallTargetAdapter:
                 )
             )
 
-        if self._config.kind == "home" and not home_dir and not os.path.expanduser("~"):
-            issues.append(
-                build_validation_issue(
-                    "error",
-                    "missing-home-dir",
-                    "homeDir is required for home install targets",
-                )
-            )
+        # home ターゲットは resolve_base_root が homeDir 未指定でも
+        # os.path.expanduser("~") で常に解決するため検証不要。
 
         return issues
 
