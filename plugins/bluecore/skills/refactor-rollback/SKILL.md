@@ -1,6 +1,6 @@
 ---
 name: refactor-rollback
-description: refactor前にファイル単位ロールバック計画を確定し、失敗時の復旧を高速化する。
+description: refactor-prep 実行後にその出力（対象分割・グループ）を受けてファイル単位ロールバック計画を確定し、失敗時の復旧を高速化する。refactor-prep 未実行の段階では発動しない。
 context: fork
 user-invocable: false
 ---
