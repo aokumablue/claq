@@ -1306,3 +1306,34 @@ def test_record_deps_requires_get_git_user_name() -> None:
 
     with pytest.raises(TypeError):
         RecordDeps(open_db=lambda settings: None, get_project=lambda data: "p", log=lambda *args: None)
+
+
+def test_format_fields_limits_files_modified_to_two() -> None:
+    """変更ファイルは先頭 2 件のみ表示する（注入トークン削減）。"""
+    from bluecore.mem.cli_search_handlers import format_fields
+
+    out = format_fields("p", ["Edit"], ["a.py", "b.py", "c.py", "d.py"], "")
+    assert "**変更ファイル**: a.py, b.py" in out
+    assert "c.py" not in out
+
+
+def test_slim_context_content_caps_code_block_lines() -> None:
+    """コードブロックは max_code_lines 行で打ち切り省略記号を付ける。"""
+    from bluecore.mem.cli_search_handlers import slim_context_content
+
+    code = "\n".join(f"line{i}" for i in range(30))
+    out = slim_context_content(f"```python\n{code}\n```", max_code_lines=20)
+
+    assert "line19" in out
+    assert "line20" not in out
+    assert out.count("...") == 1
+    assert out.count("```") == 2
+
+
+def test_slim_context_content_keeps_short_code_block_intact() -> None:
+    """上限以下のコードブロックは全行そのまま通す。"""
+    from bluecore.mem.cli_search_handlers import slim_context_content
+
+    out = slim_context_content("```\na\nb\n```", max_code_lines=20)
+    assert "a" in out and "b" in out
+    assert "..." not in out
