@@ -46,9 +46,16 @@ def test_get_project_id_covers_hash_and_fallback(monkeypatch: pytest.MonkeyPatch
     assert bridge._get_project_id("proj", cwd="/tmp") == "proj"
 
 
+def test_project_base_dir_resolves_lazily(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_project_base_dir は呼び出し時に get_bluecore_dir を解決する（import 時固定ではない）。"""
+    monkeypatch.setattr(bridge, "get_bluecore_dir", lambda: tmp_path / "lazy")
+
+    assert bridge._project_base_dir() == tmp_path / "lazy" / "projects"
+
+
 def test_get_project_observations_path_creates_project_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_get_project_observations_path が project.json を作成すること。"""
-    monkeypatch.setattr(bridge, "_BLUECORE_DIR", tmp_path / ".bluecore")
+    monkeypatch.setattr(bridge, "get_bluecore_dir", lambda: tmp_path / ".bluecore")
 
     obs_path = bridge._get_project_observations_path("proj", "project-name")
     assert obs_path.name == "observations.jsonl"
@@ -62,7 +69,7 @@ def test_get_project_observations_path_uses_bluecore_projects_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """project.json と observations.jsonl は ~/.bluecore/projects 配下に作成されること。"""
-    monkeypatch.setattr(bridge, "_BLUECORE_DIR", tmp_path / ".bluecore")
+    monkeypatch.setattr(bridge, "get_bluecore_dir", lambda: tmp_path / ".bluecore")
 
     legacy_dir = tmp_path / ".claude" / "c-projects" / "proj"
     legacy_dir.mkdir(parents=True)

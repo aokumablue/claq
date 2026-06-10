@@ -18,13 +18,10 @@ from bluecore.mem.logger import get as _get_logger
 
 log = _get_logger("BRIDGE")
 
-# learn の観測ディレクトリ
-_BLUECORE_DIR = get_bluecore_dir()
-
 
 def _project_base_dir() -> Path:
-    """project 保存先を返す。"""
-    return _BLUECORE_DIR / "projects"
+    """learn の観測 project 保存先を呼び出し時に解決して返す。"""
+    return get_bluecore_dir() / "projects"
 
 
 def _get_project_id(project_name: str, cwd: str | None = None) -> str:
