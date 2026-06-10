@@ -92,7 +92,7 @@ def _save_report(args: argparse.Namespace, spec: Any, graded_results: list, scen
     logger.info("[4/4] Generating report...")
     report = generate_report(args.skill, spec, graded_results, scenarios=scenarios)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(report)
+    output_path.write_text(report, encoding="utf-8")
     logger.info("       Report saved to %s", output_path)
 
     if not graded_results:

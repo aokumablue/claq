@@ -34,8 +34,8 @@ def generate_scenarios(
 
     scenario_generator プロンプトで LLM CLI を呼び出し、YAML出力を解析する。
     """
-    skill_content = skill_path.read_text()
-    prompt_template = (PROMPTS_DIR / "scenario_generator.md").read_text()
+    skill_content = skill_path.read_text(encoding="utf-8")
+    prompt_template = (PROMPTS_DIR / "scenario_generator.md").read_text(encoding="utf-8")
     prompt = prompt_template.replace("{skill_content}", skill_content).replace("{spec_yaml}", spec_yaml)
 
     result = run_cli(

@@ -33,7 +33,7 @@ def classify_events(
         for i, event in enumerate(trace)
     )
 
-    prompt_template = (PROMPTS_DIR / "classifier.md").read_text()
+    prompt_template = (PROMPTS_DIR / "classifier.md").read_text(encoding="utf-8")
     prompt = prompt_template.replace("{steps_description}", steps_desc).replace("{tool_calls}", tool_calls)
 
     result = run_cli(

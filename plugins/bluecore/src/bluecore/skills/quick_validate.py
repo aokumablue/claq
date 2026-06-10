@@ -101,7 +101,7 @@ def validate_skill(skill_path):
     if not skill_md.exists():
         return False, "SKILL.md が見つかりません"
 
-    content = skill_md.read_text()
+    content = skill_md.read_text(encoding="utf-8")
     ok, error_msg, frontmatter = _parse_frontmatter(content)
     if not ok:
         return False, error_msg

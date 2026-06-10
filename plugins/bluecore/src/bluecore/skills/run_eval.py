@@ -52,7 +52,7 @@ def _write_command_file(
         f"# {skill_name}\n\n"
         f"This skill handles: {skill_description}\n"
     )
-    command_file.write_text(command_content)
+    command_file.write_text(command_content, encoding="utf-8")
 
 
 def _build_query_cmd(binary: str, query: str, model: str | None) -> list[str]:
@@ -332,7 +332,7 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="進捗を stderr に表示する")
     args = parser.parse_args()
 
-    eval_set = json.loads(Path(args.eval_set).read_text())
+    eval_set = json.loads(Path(args.eval_set).read_text(encoding="utf-8"))
     skill_path = Path(args.skill_path)
 
     if not (skill_path / "SKILL.md").exists():

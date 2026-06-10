@@ -64,8 +64,8 @@ def generate_spec(
     if max_retries < 0:
         raise ValueError(f"max_retries must be >= 0, got {max_retries}")
 
-    skill_content = skill_path.read_text()
-    prompt_template = (PROMPTS_DIR / "spec_generator.md").read_text()
+    skill_content = skill_path.read_text(encoding="utf-8")
+    prompt_template = (PROMPTS_DIR / "spec_generator.md").read_text(encoding="utf-8")
     base_prompt = prompt_template.replace("{skill_content}", skill_content)
 
     last_error: Exception | None = None

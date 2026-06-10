@@ -59,7 +59,7 @@ def _resolve_eval_id(eval_dir: Path, eval_idx: int) -> int | str:
     metadata_path = eval_dir / "eval_metadata.json"
     if metadata_path.exists():
         try:
-            with open(metadata_path) as mf:
+            with open(metadata_path, encoding="utf-8") as mf:
                 return json.load(mf).get("eval_id", eval_idx)
         except (json.JSONDecodeError, OSError):
             return eval_idx
@@ -86,7 +86,7 @@ def _extract_run_result(run_dir: Path, eval_id: int | str, grading: dict) -> dic
     timing_file = run_dir / "timing.json"
     if result["time_seconds"] == 0.0 and timing_file.exists():
         try:
-            with open(timing_file) as tf:
+            with open(timing_file, encoding="utf-8") as tf:
                 timing_data = json.load(tf)
             result["time_seconds"] = timing_data.get("total_duration_seconds", 0.0)
             result["tokens"] = timing_data.get("total_tokens", 0)
@@ -129,7 +129,7 @@ def _load_config_results(config_dir: Path, eval_id: int | str, results: dict[str
             print(f"警告: {run_dir} に grading.json が見つかりません")
             continue
         try:
-            with open(grading_file) as f:
+            with open(grading_file, encoding="utf-8") as f:
                 grading = json.load(f)
         except json.JSONDecodeError as e:
             print(f"警告: {grading_file} の JSON が不正です: {e}")
@@ -351,13 +351,13 @@ def main():
     output_md = output_json.with_suffix(".md")
 
     # benchmark.json を書き出す
-    with open(output_json, "w") as f:
+    with open(output_json, "w", encoding="utf-8") as f:
         json.dump(benchmark, f, indent=2)
     print(f"生成しました: {output_json}")
 
     # benchmark.md を書き出す
     markdown = generate_markdown(benchmark)
-    with open(output_md, "w") as f:
+    with open(output_md, "w", encoding="utf-8") as f:
         f.write(markdown)
     print(f"生成しました: {output_md}")
 

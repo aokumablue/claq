@@ -431,7 +431,7 @@ def main():
     parser = _build_loop_parser()
     args = parser.parse_args()
 
-    eval_set = json.loads(Path(args.eval_set).read_text())
+    eval_set = json.loads(Path(args.eval_set).read_text(encoding="utf-8"))
     skill_path = Path(args.skill_path)
 
     if not (skill_path / "SKILL.md").exists():
@@ -474,7 +474,7 @@ def main():
     json_output = json.dumps(output, indent=2)
     print(json_output)
     if results_dir:
-        (results_dir / "results.json").write_text(json_output)
+        (results_dir / "results.json").write_text(json_output, encoding="utf-8")
         print(f"結果を保存しました: {results_dir}", file=sys.stderr)
 
 

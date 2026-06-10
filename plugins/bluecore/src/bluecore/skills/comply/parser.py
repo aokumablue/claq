@@ -57,7 +57,7 @@ def parse_trace(path: Path) -> list[ObservationEvent]:
     if not path.is_file():
         raise FileNotFoundError(f"Trace file not found: {path}")
 
-    text = path.read_text().strip()
+    text = path.read_text(encoding="utf-8").strip()
     if not text:
         return []
 
@@ -88,7 +88,7 @@ def parse_spec(path: Path) -> ComplianceSpec:
     """YAML形式のコンプライアンス仕様ファイルを解析する。"""
     if not path.is_file():
         raise FileNotFoundError(f"Spec file not found: {path}")
-    raw = yaml.safe_load(path.read_text())
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
 
     steps: list[Step] = []
     for s in raw["steps"]:
