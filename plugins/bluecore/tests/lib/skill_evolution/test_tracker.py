@@ -188,53 +188,6 @@ def test_record_skill_execution_uses_state_store(now):
     assert store.payload["taskDescription"] == "Import skill"
 
 
-def test_record_skill_execution_supports_alternate_state_store_methods(now):
-    """state-store の別メソッド名も吸収できること。"""
-
-    class RecordStore:
-        def __init__(self) -> None:
-            self.payload = None
-
-        def recordSkillExecution(self, payload):  # noqa: N802
-            self.payload = payload
-            return {"ok": "record"}
-
-    class InsertStore:
-        def __init__(self) -> None:
-            self.payload = None
-
-        def insertSkillRun(self, payload):  # noqa: N802
-            self.payload = payload
-            return {"ok": "insert"}
-
-    record_store = RecordStore()
-    insert_store = InsertStore()
-
-    record_result = tracker.record_skill_execution(
-        {
-            "skill_id": "beta",
-            "skill_version": "v2",
-            "task_description": "Record",
-            "outcome": "partial",
-            "recorded_at": now,
-        },
-        state_store=record_store,
-    )
-    insert_result = tracker.record_skill_execution(
-        {
-            "skill_id": "gamma",
-            "skill_version": "v3",
-            "task_description": "Insert",
-            "outcome": "failure",
-            "recorded_at": now,
-        },
-        state_store=insert_store,
-    )
-
-    assert record_result["result"] == {"ok": "record"}
-    assert record_store.payload["skill_version"] == "v2"
-    assert insert_result["result"] == {"ok": "insert"}
-    assert insert_store.payload["skillId"] == "gamma"
 
 
 def test_read_jsonl_skips_malformed_rows(skill_env):
@@ -259,19 +212,8 @@ def test_get_runs_file_path_defaults_to_bluecore(monkeypatch, tmp_path):
     assert str(tmp_path / ".bluecore") in path
 
 
-def test_read_skill_execution_records_supports_state_store_read_methods(skill_env):
-    """state-store の read/list 系メソッドを順に利用できること。"""
-
-    class ReadStore:
-        def readSkillExecutionRecords(self):  # noqa: N802
-            return [{"skill_id": "alpha"}]
-
-    class ListStore:
-        def listSkillExecutionRecords(self):  # noqa: N802
-            return [{"skill_id": "beta"}]
-
-    assert tracker.read_skill_execution_records(state_store=ReadStore()) == [{"skill_id": "alpha"}]
-    assert tracker.read_skill_execution_records(state_store=ListStore()) == [{"skill_id": "beta"}]
+def test_read_skill_execution_records_returns_empty_for_new_file(skill_env):
+    """新規ファイルでは空リストを返すこと。"""
     assert tracker.read_skill_execution_records(runs_file_path=skill_env["runs_file"]) == []
 
 
@@ -301,14 +243,3 @@ def test_record_skill_execution_state_store_without_method(skill_env):
     assert result["storage"] == "jsonl"
 
 
-def test_read_skill_execution_records_state_store_without_method(skill_env):
-    """読み出しメソッドが無ければ JSONL を読む。"""
-
-    class NoMethod:
-        pass
-
-    records = tracker.read_skill_execution_records(
-        state_store=NoMethod(),
-        runs_file_path=skill_env["runs_file"],
-    )
-    assert isinstance(records, list)

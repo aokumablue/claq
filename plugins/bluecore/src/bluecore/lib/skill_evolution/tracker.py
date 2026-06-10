@@ -266,25 +266,9 @@ def record_skill_execution(
 
     state_store = get_option(opts, "state_store", "stateStore")
     # state-store が利用できる場合は、そちらを優先して保存する。
-    if state_store is not None:
-        # state-store の実装差分を吸収するため、複数のメソッド名を順に試す。
-        method = (
-            getattr(state_store, "record_skill_execution", None)
-            or getattr(state_store, "recordSkillExecution", None)
-            or getattr(state_store, "insert_skill_run", None)
-            or getattr(state_store, "insertSkillRun", None)
-        )
-        # 保存メソッドが見つかった場合だけ実行する。
-        if method is not None:
-            method_name = getattr(method, "__name__", "")
-            # insert 系メソッドは camelCase ペイロードを期待するため変換する。
-            if method_name in {"insert_skill_run", "insertSkillRun"}:
-                payload = _to_state_store_payload(record)
-            # 通常の record 系メソッドには、そのままの正規化レコードを渡す。
-            else:
-                payload = record
-            result = method(payload)
-            return {"storage": "state-store", "record": record, "result": result}
+    if state_store is not None and hasattr(state_store, "insert_skill_run"):
+        result = state_store.insert_skill_run(_to_state_store_payload(record))
+        return {"storage": "state-store", "record": record, "result": result}
 
     # state-store が使えない場合は JSONL に追記して永続化する。
     runs_file_path = get_runs_file_path(opts)
@@ -310,21 +294,6 @@ def read_skill_execution_records(
         なし。
     """
     opts = merge_options(options, **kwargs)
-    state_store = get_option(opts, "state_store", "stateStore")
-    # state-store が利用できる場合は、その読み出し API を優先する。
-    if state_store is not None:
-        # 読み出し側も state-store 実装差分を順に吸収する。
-        method = (
-            getattr(state_store, "read_skill_execution_records", None)
-            or getattr(state_store, "readSkillExecutionRecords", None)
-            or getattr(state_store, "list_skill_execution_records", None)
-            or getattr(state_store, "listSkillExecutionRecords", None)
-        )
-        # 読み出しメソッドが見つかった場合だけ呼び出す。
-        if method is not None:
-            return method()
-
-    # state-store が無い場合は JSONL をそのまま読む。
     return read_jsonl(get_runs_file_path(opts))
 
 
