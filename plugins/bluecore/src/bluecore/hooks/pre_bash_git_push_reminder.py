@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
+from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
 
 
 def main() -> int:
@@ -34,7 +34,6 @@ def main() -> int:
             write_stderr("[Hook] Review changes before push...\n")
             write_stderr("[Hook] Continuing with push (remove this hook to add interactive review)\n")
 
-    write_stdout(raw)
     return 0
 
 

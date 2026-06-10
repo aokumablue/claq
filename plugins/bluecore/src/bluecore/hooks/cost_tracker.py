@@ -12,7 +12,7 @@ import json
 import os
 from datetime import datetime
 
-from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stdout
+from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin
 from bluecore.lib.core_utils import append_file, ensure_dir, get_bluecore_dir
 
 
@@ -106,7 +106,6 @@ def main() -> int:
         }
         append_file(metrics_dir / "costs.jsonl", f"{json.dumps(row)}\n")
 
-    write_stdout(raw)
     return 0
 
 

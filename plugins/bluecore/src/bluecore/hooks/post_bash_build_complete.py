@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
+from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
 
 
 def main() -> int:
@@ -33,7 +33,6 @@ def main() -> int:
         if re.search(r"(npm run build|pnpm build|yarn build)", command):
             write_stderr("[Hook] Build completed - async analysis running in background\n")
 
-    write_stdout(raw)
     return 0
 
 

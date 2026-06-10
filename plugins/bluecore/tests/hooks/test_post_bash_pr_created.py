@@ -47,12 +47,12 @@ def test_evaluate_reports_host_specific_commands(
         }
     )
 
-    assert pr_created.evaluate(payload, service=service) == payload
+    assert pr_created.evaluate(payload, service=service) is None
     assert any(expected_label in message for message in messages)
     assert any(expected_review_command in message for message in messages)
 
 
-def test_main_entrypoint_exits_zero_and_writes_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_entrypoint_exits_zero_without_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "{}")
     outputs: list[str] = []
     monkeypatch.setattr("bluecore.hooks.hook_common.write_stdout", outputs.append)
@@ -62,16 +62,16 @@ def test_main_entrypoint_exits_zero_and_writes_stdout(monkeypatch: pytest.Monkey
         runpy.run_module("bluecore.hooks.post_bash_pr_created", run_name="__main__")
 
     assert exc.value.code == 0
-    assert outputs == ["{}"]
+    assert outputs == []
 
 
-def test_evaluate_non_create_command_passthrough() -> None:
-    """create コマンドでなければ何も付加せず raw を返す。"""
+def test_evaluate_non_create_command_emits_nothing() -> None:
+    """create コマンドでなければ通知を出さない。"""
     raw = json.dumps({"tool_input": {"command": "git status"}})
-    assert pr_created.evaluate(raw, "github") == raw
+    assert pr_created.evaluate(raw, "github") is None
 
 
 def test_evaluate_create_command_without_details() -> None:
-    """create コマンドだが出力から詳細を抽出できなければ raw を返す。"""
+    """create コマンドだが出力から詳細を抽出できなければ通知を出さない。"""
     raw = json.dumps({"tool_input": {"command": "gh pr create --title x"}, "tool_response": {"stdout": ""}})
-    assert pr_created.evaluate(raw, "github") == raw
+    assert pr_created.evaluate(raw, "github") is None

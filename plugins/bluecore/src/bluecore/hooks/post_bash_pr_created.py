@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
+from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
 from bluecore.lib.git_hosting import (
     build_git_hosting_item_url,
     detect_git_hosting_service,
@@ -20,7 +20,7 @@ from bluecore.lib.git_hosting import (
 )
 
 
-def evaluate(raw_input: str, service: str | None = None) -> str:
+def evaluate(raw_input: str, service: str | None = None) -> None:
     """create コマンドの結果を解析して通知を出す。
 
     Args:
@@ -28,7 +28,7 @@ def evaluate(raw_input: str, service: str | None = None) -> str:
         service: hosting service 名です。省略時は `git remote get-url origin` から自動判定します。
 
     Returns:
-        元の入力をそのまま返します。
+        なし（通知は stderr へ出力する）。
 
     Raises:
         例外は発生しません。
@@ -50,8 +50,6 @@ def evaluate(raw_input: str, service: str | None = None) -> str:
                 write_stderr(f"[Hook] {item_label} created: {item_url}\n")
                 write_stderr(f"[Hook] To review: {review_command} {item_number} --repo {repo}\n")
 
-    return raw_input
-
 
 def main() -> int:
     """PR 作成後に URL とレビューコマンドを表示する。
@@ -65,9 +63,7 @@ def main() -> int:
     Raises:
         例外は発生しません。
     """
-    raw = read_raw_stdin()
-    output = evaluate(raw)
-    write_stdout(output)
+    evaluate(read_raw_stdin())
     return 0
 
 

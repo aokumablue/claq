@@ -63,7 +63,7 @@ class TestGitPushReminder:
         stdout, stderr = _capture_io(monkeypatch, pre_bash_git_push_reminder, payload)
 
         assert pre_bash_git_push_reminder.main() == 0
-        assert stdout == [payload]
+        assert stdout == []
         assert any("Review changes before push" in message for message in stderr)
 
     def test_non_push_passthrough(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -71,7 +71,7 @@ class TestGitPushReminder:
         stdout, stderr = _capture_io(monkeypatch, pre_bash_git_push_reminder, payload)
 
         assert pre_bash_git_push_reminder.main() == 0
-        assert stdout == [payload]
+        assert stdout == []
         assert stderr == []
 
 
@@ -81,7 +81,7 @@ class TestBuildComplete:
         stdout, stderr = _capture_io(monkeypatch, post_bash_build_complete, payload)
 
         assert post_bash_build_complete.main() == 0
-        assert stdout == [payload]
+        assert stdout == []
         assert any("Build completed" in message for message in stderr)
 
     def test_non_build_passthrough(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,7 +89,7 @@ class TestBuildComplete:
         stdout, stderr = _capture_io(monkeypatch, post_bash_build_complete, payload)
 
         assert post_bash_build_complete.main() == 0
-        assert stdout == [payload]
+        assert stdout == []
         assert stderr == []
 
 
@@ -136,18 +136,15 @@ class TestCostTracker:
                 "usage": {"input_tokens": 12, "output_tokens": 34},
             }
         )
-        stdout: list[str] = []
         appended: list[tuple[Path, str]] = []
 
         monkeypatch.setattr(cost_tracker, "read_raw_stdin", lambda: payload)
-        monkeypatch.setattr(cost_tracker, "write_stdout", stdout.append)
         monkeypatch.setattr(cost_tracker, "append_file", lambda path, content: appended.append((Path(path), content)))
         monkeypatch.setattr(cost_tracker, "ensure_dir", lambda path: Path(path))
         monkeypatch.setattr(cost_tracker, "get_bluecore_dir", lambda: tmp_path)
         monkeypatch.setenv("CLAUDE_SESSION_ID", "session-123")
 
         assert cost_tracker.main() == 0
-        assert stdout == [payload]
         assert appended[0][0] == tmp_path / "metrics" / "costs.jsonl"
 
         row = json.loads(appended[0][1].strip())
@@ -157,14 +154,14 @@ class TestCostTracker:
         assert row["output_tokens"] == 34
         assert row["estimated_cost_usd"] == cost_tracker.estimate_cost("haiku", 12, 34)
 
-    def test_main_entrypoint_passthroughs_raw_input(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_main_entrypoint_emits_no_stdout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "{}")
         monkeypatch.setattr("bluecore.hooks.hook_common.parse_json_object", lambda raw: None)
         outputs: list[str] = []
         monkeypatch.setattr("bluecore.hooks.hook_common.write_stdout", outputs.append)
 
         assert _run_entrypoint("bluecore.hooks.cost_tracker") == 0
-        assert outputs == ["{}"]
+        assert outputs == []
 
 
 class TestEvaluateSession:
