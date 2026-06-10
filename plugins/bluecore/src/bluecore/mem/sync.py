@@ -533,6 +533,10 @@ def _sync_embeddings(
 
     Returns:
         同期したエンベディング数
+
+    Raises:
+        Exception: vec テーブル不在以外の読み取り失敗・PG UPSERT 失敗時。
+            呼び出し元トランザクションの rollback で synced_at が立たず再同期される。
     """
     if not chunks:
         return 0
@@ -557,9 +561,13 @@ def _sync_embeddings(
                 vec = list(struct.unpack(f"{n_floats}f", raw_bytes))
                 embeddings.append((chunk_id, vec))
 
-    except Exception as e:
-        log.debug("sqlite-vec からの読み取りをスキップ: %s", e)
-        return 0
+    except sqlite3.OperationalError as e:
+        # sqlite-vec 拡張なし環境では vec テーブルが存在しない（正常系スキップ）。
+        # それ以外の読み取り失敗は伝播させ、トランザクション rollback で再同期可能にする。
+        if "no such table" in str(e):
+            log.debug("sqlite-vec からの読み取りをスキップ: %s", e)
+            return 0
+        raise
 
     if not embeddings:
         return 0

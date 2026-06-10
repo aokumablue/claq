@@ -860,14 +860,16 @@ class TestSyncToPostgresDetailed:
 class TestSyncEmbeddings:
     """_sync_embeddings のテスト"""
 
-    def test_handles_empty_and_error_paths(self, monkeypatch):
+    def test_handles_empty_and_missing_vec_table_paths(self):
+        """空チャンクと vec テーブル不在（sqlite-vec なし環境）は 0 を返す。"""
+
         class FakePgDb:
             def upsert_embeddings_batch(self, embeddings):  # noqa: ANN001
                 return len(embeddings)
 
         class FakeConn:
             def execute(self, sql: str, params=None):  # noqa: ANN001
-                raise RuntimeError("boom")
+                raise sqlite3.OperationalError("no such table: memory_chunks_vec")
 
         class FakeSQLiteDb:
             def __init__(self) -> None:
@@ -875,6 +877,24 @@ class TestSyncEmbeddings:
 
         assert _sync_embeddings(FakeSQLiteDb(), FakePgDb(), []) == 0
         assert _sync_embeddings(FakeSQLiteDb(), FakePgDb(), [MemoryChunk("s", "p", 0, "c", [], [], [], "", 1, id="c1")]) == 0
+
+    def test_read_failure_propagates_for_rollback(self):
+        """vec テーブル不在以外の読み取り失敗は伝播し、rollback で synced_at が立たず再同期される。"""
+
+        class FakePgDb:
+            def upsert_embeddings_batch(self, embeddings):  # noqa: ANN001
+                return len(embeddings)
+
+        class FakeConn:
+            def execute(self, sql: str, params=None):  # noqa: ANN001
+                raise sqlite3.OperationalError("database disk image is malformed")
+
+        class FakeSQLiteDb:
+            def __init__(self) -> None:
+                self.conn = FakeConn()
+
+        with pytest.raises(sqlite3.OperationalError):
+            _sync_embeddings(FakeSQLiteDb(), FakePgDb(), [MemoryChunk("s", "p", 0, "c", [], [], [], "", 1, id="c1")])
 
     def test_returns_zero_when_no_embeddings_are_found(self):
         class FakePgDb:
