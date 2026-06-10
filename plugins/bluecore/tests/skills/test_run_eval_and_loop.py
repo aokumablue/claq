@@ -1166,3 +1166,16 @@ def test_run_loop_single_iteration_no_pass(tmp_path: Path, monkeypatch: pytest.M
         loop_cfg=_make_loop_cfg(tmp_path, max_iterations=1, holdout=0.0),
     )
     assert result["iterations_run"] == 1
+
+
+def test_run_single_query_raises_on_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows では select.select がパイプに使えないため明示エラーで失敗する。"""
+    monkeypatch.setattr(run_eval, "IS_WINDOWS", True)
+
+    with pytest.raises(RuntimeError, match="Windows"):
+        run_eval.run_single_query(
+            "query",
+            "alpha",
+            "skill description",
+            SingleQueryConfig(timeout=5, project_root=str(tmp_path), model=None),
+        )
