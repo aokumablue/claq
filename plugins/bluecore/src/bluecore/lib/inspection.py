@@ -279,20 +279,16 @@ def inspect(store: Any, options: dict[str, Any] | None = None, /, **kwargs: Any)
         dict[str, Any]: 処理結果を返します。
 
     Raises:
-        ValueError: 入力の不正や処理失敗時に発生します。
+        AttributeError: store に get_status メソッドが存在しない場合。
     """
     opts = merge_options(options, **kwargs)
     window_size = int(get_option(opts, "window_size", "windowSize", default=DEFAULT_WINDOW_SIZE))
     threshold = int(get_option(opts, "threshold", default=DEFAULT_FAILURE_THRESHOLD))
 
-    method = getattr(store, "get_status", None) or getattr(store, "getStatus", None)
-    if method is None:
+    if not hasattr(store, "get_status"):
         raise AttributeError("store must provide get_status or getStatus")
 
-    try:
-        status = method(recent_skill_run_limit=window_size)
-    except TypeError:
-        status = method({"recentSkillRunLimit": window_size})
+    status = store.get_status(recent_skill_run_limit=window_size)
 
     skill_runs_container = get_value(status, "skillRuns", "skill_runs", default={})
     if isinstance(skill_runs_container, dict):

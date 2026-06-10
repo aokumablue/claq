@@ -145,10 +145,12 @@ def test_inspect_pipeline_with_state_store():
     assert report["generatedAt"] == "2026-03-15T12:00:00Z"
 
 
-def test_inspect_handles_typeerror_fallback_and_object_container():
+def test_inspect_handles_object_container():
+    """skillRuns がオブジェクト（dict 以外）でも recent を取得できること。"""
+
     class Store:
-        def get_status(self, payload):  # noqa: ANN001
-            assert payload == {"recentSkillRunLimit": 2}
+        def get_status(self, *, recent_skill_run_limit):  # noqa: ANN001
+            assert recent_skill_run_limit == 2
             return {
                 "generatedAt": "2026-03-15T12:00:00Z",
                 "skillRuns": type("RecentRuns", (), {"recent": [make_skill_run(id="r1", failureReason="timeout")]})(),
