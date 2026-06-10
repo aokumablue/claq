@@ -75,9 +75,14 @@ grading後に、eval改善の余地が明確なら指摘。
 
 細かい粗探しではなく、eval作成者が「助かった」と言いそうな指摘だけに絞る。
 
-### 7. grading結果を書く
+### 7. メトリクスと時間を読む
 
-結果を `{outputs_dir}/../grading.json` に保存。
+1. `{outputs_dir}/metrics.json` があれば読み込む
+2. `{outputs_dir}/../timing.json` があれば読み込む
+
+### 8. grading結果を書く
+
+結果を `{outputs_dir}/../grading.json` に保存（出力形式の `execution_metrics` / `timing` を含む完全な JSON）。
 
 ## 判定基準
 
@@ -94,11 +99,6 @@ grading後に、eval改善の余地が明確なら指摘。
 - たまたま一致しているだけで実際にはできていない
 
 **迷ったら**: 通す側が証明責任を負う。
-
-### 8. メトリクスと時間を読む
-
-1. `{outputs_dir}/metrics.json` があれば読み込む
-2. `{outputs_dir}/../timing.json` があれば読み込む
 
 ## 出力形式
 
