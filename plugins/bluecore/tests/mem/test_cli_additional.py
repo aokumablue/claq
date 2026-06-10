@@ -706,6 +706,26 @@ def test_handle_dashboard_rejects_unsafe_output_path_and_allows_safe_path(
     assert safe_output.exists()
 
 
+def test_handle_dashboard_coerces_string_days_and_rejects_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """days は文字列でも int に変換され、非数値はエラー JSON を返す。"""
+    settings = make_settings(tmp_path)
+    settings.sync.enabled = False
+    monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(FakeDB()))
+
+    output = tmp_path / "dashboard-days.json"
+    cli._handle_dashboard(settings, {"output": str(output), "format": "json", "days": "7"})
+    assert json.loads(capsys.readouterr().out)["success"] is True
+
+    cli._handle_dashboard(settings, {"output": str(output), "format": "json", "days": "abc"})
+    rejected = json.loads(capsys.readouterr().out)
+    assert rejected["success"] is False
+    assert "days" in rejected["error"]
+
+
 def test_handle_dashboard_json_and_main_entrypoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     settings = make_settings(tmp_path)
 
