@@ -129,7 +129,7 @@ def _format_history_section(history: list[dict]) -> str:
 def _shorten_description_if_needed(
     description: str,
     prompt: str,
-    model: str,
+    model: str | None,
     transcript: dict,
 ) -> str:
     """1024 文字超の説明を再度 LLM に短縮依頼し、短縮版を返す。"""
@@ -159,7 +159,7 @@ def _shorten_description_if_needed(
 
 def improve_description(
     ctx: ImproveContext,
-    model: str,
+    model: str | None,
     log_dir: Path | None = None,
     iteration: int | None = None,
 ) -> str:
