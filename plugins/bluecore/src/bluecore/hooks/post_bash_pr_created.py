@@ -40,7 +40,7 @@ def evaluate(raw_input: str, service: str | None = None) -> str:
         command = str((data.get("tool_input") or {}).get("command") or "")
         create_command = get_git_hosting_create_command(hosting_service)
         if create_command in command:
-            output = str((data.get("tool_output") or {}).get("output") or "")
+            output = str((data.get("tool_response") or {}).get("stdout") or "")
             details = extract_git_hosting_item_details(hosting_service, output)
             if details:
                 repo, item_number = details

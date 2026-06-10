@@ -43,7 +43,7 @@ def test_evaluate_reports_host_specific_commands(
     payload = json.dumps(
         {
             "tool_input": {"command": command},
-            "tool_output": {"output": output},
+            "tool_response": {"stdout": output},
         }
     )
 
@@ -73,5 +73,5 @@ def test_evaluate_non_create_command_passthrough() -> None:
 
 def test_evaluate_create_command_without_details() -> None:
     """create コマンドだが出力から詳細を抽出できなければ raw を返す。"""
-    raw = json.dumps({"tool_input": {"command": "gh pr create --title x"}, "tool_output": {"output": ""}})
+    raw = json.dumps({"tool_input": {"command": "gh pr create --title x"}, "tool_response": {"stdout": ""}})
     assert pr_created.evaluate(raw, "github") == raw
