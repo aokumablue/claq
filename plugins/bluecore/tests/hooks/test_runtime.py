@@ -374,20 +374,26 @@ def test_run_target_session_start_nonzero_returns_zero(monkeypatch) -> None:
 
 
 def test_run_with_flags_subprocess_timeout_env_override(monkeypatch) -> None:
-    """_subprocess_timeout は既定 55 秒で環境変数上書き・無効値復帰に対応する。"""
+    """_subprocess_timeout は既定 590 秒で環境変数上書き・無効値/非有限値復帰に対応する。"""
     from bluecore.hooks import run_with_flags
 
     monkeypatch.delenv("BLUECORE_HOOK_TIMEOUT", raising=False)
-    assert run_with_flags._subprocess_timeout() == 55.0
+    assert run_with_flags._subprocess_timeout() == 590.0
 
     monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "10")
     assert run_with_flags._subprocess_timeout() == 10.0
 
     monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "abc")
-    assert run_with_flags._subprocess_timeout() == 55.0
+    assert run_with_flags._subprocess_timeout() == 590.0
 
     monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "-5")
-    assert run_with_flags._subprocess_timeout() == 55.0
+    assert run_with_flags._subprocess_timeout() == 590.0
+
+    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "inf")
+    assert run_with_flags._subprocess_timeout() == 590.0
+
+    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "nan")
+    assert run_with_flags._subprocess_timeout() == 590.0
 
 
 def test_run_target_passes_timeout_to_subprocess(monkeypatch) -> None:
@@ -406,7 +412,7 @@ def test_run_target_passes_timeout_to_subprocess(monkeypatch) -> None:
     monkeypatch.setattr(run_with_flags.subprocess, "run", fake_run)
     monkeypatch.setattr(run_with_flags, "build_env", lambda: {})
     assert run_with_flags._run_target("post:test", "target", [], "raw") == 0
-    assert captured["timeout"] == 55.0
+    assert captured["timeout"] == 590.0
 
 
 def test_run_target_returns_one_on_timeout_expired(monkeypatch) -> None:

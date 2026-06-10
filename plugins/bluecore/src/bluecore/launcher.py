@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import subprocess
 import sys
@@ -10,8 +11,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Claude Code 既定のフックタイムアウト（60 秒）より先に自決して孫プロセスの孤立を防ぐ。
-DEFAULT_SUBPROCESS_TIMEOUT = 55.0
+# hooks.json の最長エントリ（600 秒）より先に自決して孫プロセスの孤立を防ぐ。
+# それより短い timeout のエントリでは Claude Code 側の kill が先に働く。
+DEFAULT_SUBPROCESS_TIMEOUT = 590.0
 
 
 def _subprocess_timeout() -> float:
@@ -21,7 +23,7 @@ def _subprocess_timeout() -> float:
         なし
 
     Returns:
-        BLUECORE_HOOK_TIMEOUT が正の数値ならその秒数、未設定・無効値なら既定の 55 秒。
+        BLUECORE_HOOK_TIMEOUT が正の有限数値ならその秒数、未設定・無効値なら既定の 590 秒。
 
     Raises:
         例外は発生しません。
@@ -32,7 +34,7 @@ def _subprocess_timeout() -> float:
             value = float(raw)
         except ValueError:
             return DEFAULT_SUBPROCESS_TIMEOUT
-        if value > 0:
+        if value > 0 and math.isfinite(value):
             return value
     return DEFAULT_SUBPROCESS_TIMEOUT
 

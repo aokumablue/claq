@@ -253,18 +253,24 @@ def test_main_inserts_src_dir_when_missing(monkeypatch) -> None:
 
 
 def test_subprocess_timeout_default_and_env_override(monkeypatch) -> None:
-    """timeout は既定 55 秒、環境変数で上書きでき、無効値は既定へ戻る。"""
+    """timeout は既定 590 秒、環境変数で上書きでき、無効値・非有限値は既定へ戻る。"""
     monkeypatch.delenv("BLUECORE_HOOK_TIMEOUT", raising=False)
-    assert launcher._subprocess_timeout() == 55.0
+    assert launcher._subprocess_timeout() == 590.0
 
     monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "10")
     assert launcher._subprocess_timeout() == 10.0
 
     monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "abc")
-    assert launcher._subprocess_timeout() == 55.0
+    assert launcher._subprocess_timeout() == 590.0
 
     monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "-5")
-    assert launcher._subprocess_timeout() == 55.0
+    assert launcher._subprocess_timeout() == 590.0
+
+    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "inf")
+    assert launcher._subprocess_timeout() == 590.0
+
+    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "nan")
+    assert launcher._subprocess_timeout() == 590.0
 
 
 def test_main_passes_timeout_to_subprocess(monkeypatch) -> None:
@@ -281,7 +287,7 @@ def test_main_passes_timeout_to_subprocess(monkeypatch) -> None:
     monkeypatch.setattr(launcher.subprocess, "run", fake_run)
 
     assert launcher.main(["dummy-target"]) == 0
-    assert captured["timeout"] == 55.0
+    assert captured["timeout"] == 590.0
 
 
 def test_main_returns_one_on_timeout_expired(monkeypatch, capsys) -> None:
