@@ -1198,6 +1198,7 @@ class TestConcurrentChunkInsert:
         unique_err = _sqlite3.IntegrityError(
             "UNIQUE constraint failed: memory_chunks.session_id, memory_chunks.chunk_index"
         )
+        unique_err.sqlite_errorcode = _sqlite3.SQLITE_CONSTRAINT_UNIQUE
 
         class AlwaysFailConn:
             """INSERT 時に常に chunk_index UNIQUE 違反を起こすラッパー。"""
@@ -1221,3 +1222,52 @@ class TestConcurrentChunkInsert:
 
         db4.conn = real_conn
         db4.close()
+
+    def test_non_unique_error_mentioning_chunk_index_raises_immediately(self, tmp_path: Path) -> None:
+        """UNIQUE 以外の制約違反はメッセージに chunk_index を含んでもリトライしない。"""
+        import sqlite3 as _sqlite3
+
+        db5 = Database(tmp_path / "notnull.db")
+        session_id = "notnull-session"
+        db5.upsert_session(Session(session_id=session_id, project="proj", started_at_epoch=int(time.time())))
+
+        chunk = MemoryChunk(
+            session_id=session_id,
+            project="proj",
+            chunk_index=0,
+            content="content",
+            tool_names=[],
+            files_read=[],
+            files_modified=[],
+            user_prompt="",
+            created_at_epoch=int(time.time()),
+        )
+
+        real_conn = db5.conn
+        notnull_err = _sqlite3.IntegrityError("NOT NULL constraint failed: memory_chunks.chunk_index")
+        notnull_err.sqlite_errorcode = _sqlite3.SQLITE_CONSTRAINT_NOTNULL
+        attempts = {"count": 0}
+
+        class AlwaysNotNullFailConn:
+            """INSERT 時に常に NOT NULL 違反を起こすラッパー。"""
+
+            def __getattr__(self, name: str):
+                return getattr(real_conn, name)
+
+            def execute(self, sql: str, params=()) -> object:
+                if "INSERT INTO memory_chunks" in sql:
+                    attempts["count"] += 1
+                    raise notnull_err
+                return real_conn.execute(sql, params)
+
+            def rollback(self) -> None:
+                real_conn.rollback()
+
+        db5.conn = AlwaysNotNullFailConn()  # type: ignore[assignment]
+
+        with pytest.raises(_sqlite3.IntegrityError):
+            db5.store_chunk(chunk)
+        assert attempts["count"] == 1  # リトライなしの即 raise
+
+        db5.conn = real_conn
+        db5.close()

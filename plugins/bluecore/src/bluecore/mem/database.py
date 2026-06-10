@@ -195,8 +195,8 @@ class Database:
         """チャンクを保存し、生成された id を返す。セッションの chunk_count も同一トランザクションで更新。
 
         並列の async hook が同一 session_id に同時挿入すると chunk_index の UNIQUE 制約に違反する。
-        UNIQUE 制約違反（chunk_index 競合）のみリトライ対象。上限は _STORE_CHUNK_MAX_RETRIES。
-        PRIMARY KEY 違反等の他の IntegrityError は即 raise する。
+        SQLITE_CONSTRAINT_UNIQUE かつ chunk_index を含む違反のみリトライ対象。
+        上限は _STORE_CHUNK_MAX_RETRIES。PRIMARY KEY 違反等の他の IntegrityError は即 raise する。
         """
         if not chunk.id:
             chunk.id = generate_uuid()
@@ -214,7 +214,7 @@ class Database:
                 return row["id"]
             except sqlite3.IntegrityError as e:
                 self.conn.rollback()
-                if "chunk_index" not in str(e):
+                if e.sqlite_errorcode != sqlite3.SQLITE_CONSTRAINT_UNIQUE or "chunk_index" not in str(e):
                     raise
                 if attempt == max_retries - 1:
                     log.error(
