@@ -84,3 +84,51 @@ class TestSessionStartHookIds:
             "session:mem:record-project-profile",
         }
         assert required.issubset(SESSION_START_HOOK_IDS)
+
+
+class TestReadRawStdin:
+    """read_raw_stdin のバイト単位制限のテスト。"""
+
+    def test_limits_by_bytes_not_chars_with_buffer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """buffer 付き stdin はバイト単位で読み取りを制限する。"""
+        from bluecore.hooks import hook_common
+
+        class _FakeBuffer:
+            def __init__(self, data: bytes) -> None:
+                self._data = data
+
+            def read(self, n: int = -1) -> bytes:
+                return self._data[:n] if n >= 0 else self._data
+
+        class _FakeStdin:
+            def __init__(self, text: str) -> None:
+                self.buffer = _FakeBuffer(text.encode("utf-8"))
+
+            def read(self, n: int = -1) -> str:
+                raise AssertionError("バイト読みでは text read を使わない")
+
+        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("あ" * 10))
+
+        result = hook_common.read_raw_stdin(max_bytes=10)
+
+        # 10 バイト = 「あ」3 文字（9 バイト）+ 切断された 1 バイト（置換文字）
+        assert result == "あああ�"
+
+    def test_text_stdin_is_byte_truncated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """buffer を持たない stdin（io.StringIO 等）もバイト換算で切り捨てる。"""
+        from bluecore.hooks import hook_common
+
+        monkeypatch.setattr(hook_common.sys, "stdin", io.StringIO("あ" * 10))
+
+        result = hook_common.read_raw_stdin(max_bytes=10)
+
+        assert len(result.encode("utf-8")) <= 12  # 置換文字を含む 10 バイト相当
+        assert result.startswith("あああ")
+
+    def test_small_input_passes_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """制限未満の入力はそのまま返る。"""
+        from bluecore.hooks import hook_common
+
+        monkeypatch.setattr(hook_common.sys, "stdin", io.StringIO("hello"))
+
+        assert hook_common.read_raw_stdin() == "hello"

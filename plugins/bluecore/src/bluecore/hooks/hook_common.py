@@ -15,18 +15,25 @@ MAX_STDIN_BYTES = 1024 * 1024
 
 
 def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
-    """標準入力から生のテキストを読み取ります。
+    """標準入力から生のテキストをバイト単位の上限つきで読み取ります。
 
     Args:
         max_bytes: 読み取る最大バイト数です。
 
     Returns:
-        読み取られた文字列を返します。
+        読み取られた文字列（max_bytes バイトで切り捨て済み）を返します。
 
     Raises:
         例外は発生しません。
     """
-    return sys.stdin.read(max_bytes)
+    stdin_buffer = getattr(sys.stdin, "buffer", None)
+    if stdin_buffer is not None:
+        raw_bytes = stdin_buffer.read(max_bytes)
+    else:
+        # io.StringIO など .buffer を持たない stdin を想定した分岐。
+        # 文字数 read ではバイト上限を最大 4 倍超過しうるためバイト換算で切り詰める。
+        raw_bytes = sys.stdin.read(max_bytes).encode("utf-8", errors="replace")
+    return raw_bytes[:max_bytes].decode("utf-8", errors="replace")
 
 
 def parse_json_object(raw: str) -> dict[str, Any] | None:
