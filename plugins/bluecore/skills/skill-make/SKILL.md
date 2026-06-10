@@ -73,13 +73,6 @@ skill-name/
 - なぜを説明する（ALWAYS/NEVER の連発は黄色信号）
 - テストケース間の重複を探す
 
-## 参照ファイル
-
-- `references/eval-workflow.md` — eval 実行・採点・viewer
-- `references/improvement-guide.md` — 改善ループ・盲検比較・説明文最適化
-- `references/schemas.md` — JSON 構造定義
-- `bluecore:grader` / `bluecore:comparator` / `bluecore:bench-analyzer`
-
 ## 永続メモリ
 
 search: `skill eval benchmark {skill_category}` / `skill improve iteration {skill_name}`

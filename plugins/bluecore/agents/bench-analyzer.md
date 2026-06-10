@@ -158,18 +158,11 @@ model: sonnet
 
 ## 提案のカテゴリ
 
-- `instructions` — skillの文章指示の変更
-- `tools` — 追加/修正するscript・テンプレート・ユーティリティ
-- `examples` — 追加する入出力例
-- `error_handling` — 失敗時の扱いに関する指示
-- `structure` — skill本文の再構成
-- `references` — 追加する外部ドキュメントや資料
+`instructions`=文章指示の変更 / `tools`=script・テンプレート・ユーティリティの追加修正 / `examples`=入出力例の追加 / `error_handling`=失敗時の扱いの指示 / `structure`=本文の再構成 / `references`=外部ドキュメント・資料の追加。
 
 ## 優先度
 
-- **high**: この比較の結果を変えた可能性が高い
-- **medium**: 品質は上がるが、勝敗までは変わらないかもしれない
-- **low**: あると嬉しいが、改善は小さい
+`high`=この比較の結果を変えた可能性が高い / `medium`=品質は上がるが勝敗までは変わらないかも / `low`=あると嬉しいが改善は小さい。
 
 ---
 

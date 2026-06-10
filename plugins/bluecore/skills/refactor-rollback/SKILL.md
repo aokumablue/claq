@@ -63,18 +63,6 @@ Skip Rules:
 ──────────────────────────────
 ```
 
-必須キー:
-
-```json
-{
-  "file_rules": [{"file": "path/a.py", "revert": "git checkout -- path/a.py", "verify": "python3 -m pytest -q tests/test_a.py", "risk": "CAUTION"}],
-  "revert_files": ["path/a.py"],
-  "deps_order": [{"from": 1, "to": 0}],
-  "risk_files": [{"file": "path/a.py", "risk": "CAUTION", "reason": "public_api", "action": "manual_review"}],
-  "skip_rules": [{"file": "path/a.py", "reason": "dynamic_reference", "required_action": "extra_test"}]
-}
-```
-
 ## ルール
 
 - 復旧単位は**ファイル単位**
