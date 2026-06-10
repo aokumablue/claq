@@ -151,7 +151,7 @@ def _format_chunk(chunk: MemoryChunk) -> str:
         parts.append(f"**ツール**: {', '.join(chunk.tool_names)}")
 
     if chunk.files_modified:
-        parts.append(f"**変更ファイル**: {', '.join(chunk.files_modified[:3])}")
+        parts.append(f"**変更ファイル**: {', '.join(chunk.files_modified[:2])}")
 
     if chunk.content:
         parts.append(f"```\n{slim_context_content(chunk.content)}\n```")

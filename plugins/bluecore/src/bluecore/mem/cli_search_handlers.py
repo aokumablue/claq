@@ -332,4 +332,8 @@ def slim_context_content(
             lines.append(compacted)
             prose_lines += 1
 
+    # 閉じフェンスなしで終端した場合は補完し、後続 Markdown の崩壊を防ぐ
+    if in_code_block:
+        lines.append("```")
+
     return "\n".join(lines)

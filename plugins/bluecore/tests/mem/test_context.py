@@ -310,3 +310,25 @@ class TestSelectWithinBudget:
         selected = _select_within_budget([(big, 1.0), (small, 0.5)], max_tokens=4)
 
         assert selected == [small]
+
+
+def test_format_chunk_limits_files_modified_to_two() -> None:
+    """_format_chunk の変更ファイル表示は search 側 format_fields と同じ 2 件上限。"""
+    from bluecore.mem.context import _format_chunk
+
+    chunk = MemoryChunk(
+        session_id="s1",
+        project="proj",
+        chunk_index=0,
+        content="",
+        tool_names=[],
+        files_read=[],
+        files_modified=["a.py", "b.py", "c.py"],
+        user_prompt="",
+        created_at_epoch=1700000000,
+    )
+
+    rendered = _format_chunk(chunk)
+
+    assert "**変更ファイル**: a.py, b.py" in rendered
+    assert "c.py" not in rendered

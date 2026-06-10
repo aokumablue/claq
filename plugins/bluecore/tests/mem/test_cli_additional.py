@@ -1337,3 +1337,12 @@ def test_slim_context_content_keeps_short_code_block_intact() -> None:
     out = slim_context_content("```\na\nb\n```", max_code_lines=20)
     assert "a" in out and "b" in out
     assert "..." not in out
+
+
+def test_slim_context_content_closes_unclosed_fence() -> None:
+    """閉じフェンスなしで終端する入力にはフェンスを補完する。"""
+    from bluecore.mem.cli_search_handlers import slim_context_content
+
+    out = slim_context_content("```python\nline1\nline2", max_code_lines=1)
+    assert out.endswith("```")
+    assert out.count("```") == 2
