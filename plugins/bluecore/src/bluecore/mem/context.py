@@ -134,7 +134,7 @@ def _select_within_budget(
     for chunk, _score in scored:
         entry = _format_chunk(chunk)
         if len(entry) > budget:
-            break
+            continue
         selected.append(chunk)
         budget -= len(entry)
     return selected

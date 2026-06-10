@@ -281,3 +281,32 @@ class TestSelectWithinBudget:
         selected = _select_within_budget([(chunk_a, 1.0), (chunk_b, 0.5)], max_tokens=4)
 
         assert selected == [chunk_a]
+
+    def test_oversized_leading_chunk_does_not_drop_smaller_followers(self) -> None:
+        """先頭の大きいチャンクが予算超過でも、後続の収まるチャンクは選択される。"""
+        big = MemoryChunk(
+            session_id="s1",
+            project="proj",
+            chunk_index=0,
+            content="x" * 100,
+            tool_names=[],
+            files_read=[],
+            files_modified=[],
+            user_prompt="",
+            created_at_epoch=1700000000,
+        )
+        small = MemoryChunk(
+            session_id="s1",
+            project="proj",
+            chunk_index=1,
+            content="fit",
+            tool_names=[],
+            files_read=[],
+            files_modified=[],
+            user_prompt="",
+            created_at_epoch=1700000001,
+        )
+
+        selected = _select_within_budget([(big, 1.0), (small, 0.5)], max_tokens=4)
+
+        assert selected == [small]
