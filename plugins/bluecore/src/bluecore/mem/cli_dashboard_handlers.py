@@ -322,14 +322,12 @@ def _collect_pg_dashboard_data(
         if not pg.test_connection():
             return empty
         try:
-            pg_conn = pg._get_conn()
             try:
-                pg_available, team_ranking, team_trend, pg_data = _fetch_pg_panel_data(pg, pg_conn, days)
+                with pg.transaction() as pg_conn:
+                    pg_available, team_ranking, team_trend, pg_data = _fetch_pg_panel_data(pg, pg_conn, days)
             except Exception as e:
                 log.warning("既存パネルデータ取得失敗: %s", e)
                 pg_available, team_ranking, team_trend, pg_data = False, [], [], dict(_PG_DATA_EMPTY)
-            finally:
-                pg._put_conn(pg_conn)
         finally:
             pg.close()
         return pg_available, team_ranking, team_trend, pg_data

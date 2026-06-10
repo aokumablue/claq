@@ -520,24 +520,34 @@ def test_handle_dashboard_html_and_disabled_pg(monkeypatch: pytest.MonkeyPatch, 
     html_output = tmp_path / "dashboard.html"
 
     class _FakePg:
+        last: _FakePg | None = None
+
         def __init__(self, url: str) -> None:
             self.url = url
             self.closed = False
+            self.transaction_used = False
             self.conn = SimpleNamespace(
                 execute=lambda *args, **kwargs: SimpleNamespace(
                     fetchone=lambda: (0,),
                     fetchall=lambda: [],
                 )
             )
+            type(self).last = self
 
         def test_connection(self) -> bool:
             return True
 
-        def _get_conn(self) -> SimpleNamespace:
-            return SimpleNamespace()
+        def transaction(self):  # noqa: ANN201
+            self.transaction_used = True
 
-        def _put_conn(self, conn) -> None:  # noqa: ANN001
-            return None
+            class _Tx:
+                def __enter__(self_tx) -> SimpleNamespace:  # noqa: N805
+                    return SimpleNamespace()
+
+                def __exit__(self_tx, *exc) -> bool:  # noqa: N805, ANN002
+                    return False
+
+            return _Tx()
 
         def close(self) -> None:
             self.closed = True
@@ -669,6 +679,9 @@ def test_handle_dashboard_html_and_disabled_pg(monkeypatch: pytest.MonkeyPatch, 
     cli._handle_dashboard(settings, {"output": str(html_output), "format": "html", "days": 7})
     assert json.loads(capsys.readouterr().out)["success"] is True
     assert html_output.read_text(encoding="utf-8") == "HTML:7"
+    assert _FakePg.last is not None
+    assert _FakePg.last.transaction_used is True  # 公開 API transaction() 経由で取得
+    assert _FakePg.last.closed is True
 
     monkeypatch.setattr(
         pg_database_mod,
