@@ -13,6 +13,25 @@ import re
 from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
 
 NO_VERIFY_RE = re.compile(r"\bgit\s+(commit|push)\b.*?(--no-verify|-n)\b", re.IGNORECASE)
+QUOTED_RE = re.compile(r""""[^"]*"|'[^']*'""")
+
+
+def strip_quoted(command: str) -> str:
+    """シェルコマンドからクォート文字列リテラルを除去する。
+
+    コミットメッセージ等のクォート内に現れる ``-n`` / ``--no-verify`` への
+    誤検知を防ぐ。
+
+    Args:
+        command: 対象のシェルコマンド文字列。
+
+    Returns:
+        クォート文字列を除去したコマンド文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return QUOTED_RE.sub("", command)
 
 
 def main() -> int:
@@ -32,7 +51,7 @@ def main() -> int:
 
     if data:
         command = str((data.get("tool_input") or {}).get("command") or "")
-        if NO_VERIFY_RE.search(command):
+        if NO_VERIFY_RE.search(strip_quoted(command)):
             write_stderr("[Hook] BLOCKED: git hook bypass flags are not allowed\n")
             return 2
 

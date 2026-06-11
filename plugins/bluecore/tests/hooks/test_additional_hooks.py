@@ -46,6 +46,10 @@ class TestBlockNoVerify:
             ("git commit --no-verify", 2, True),
             ("git push -n", 2, True),
             ("git status", 0, False),
+            ('git commit -m "docs: explain -n flag usage"', 0, False),
+            ("git commit -m 'note: --no-verify is banned'", 0, False),
+            ('git commit --no-verify -m "fix: x"', 2, True),
+            ('echo "git commit --no-verify"', 0, False),
         ],
     )
     def test_main(self, monkeypatch: pytest.MonkeyPatch, command: str, expected_code: int, blocked: bool) -> None:
