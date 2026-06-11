@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from bluecore.hooks.hook_common import emit_user_prompt_submit_output
 from bluecore.lib.core_utils import get_git_user_name
+from bluecore.lib.harness import normalize_tool_name
 from bluecore.mem.cli_search_handlers import merge_search_results_rrf, render_adaptive_context
 
 if TYPE_CHECKING:
@@ -128,7 +129,7 @@ def handle_observe(
 
     session_id = str(stdin_data.get("session_id", "") or "")
     project = get_project(stdin_data)
-    tool_name = str(stdin_data.get("tool_name", "") or "")
+    tool_name = normalize_tool_name(str(stdin_data.get("tool_name", "") or ""))
 
     tool_input = stdin_data.get("tool_input")
     tool_response = stdin_data.get("tool_response")

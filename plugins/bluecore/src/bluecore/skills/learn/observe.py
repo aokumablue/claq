@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from bluecore.lib.core_utils import get_bluecore_dir
+from bluecore.lib.harness import normalize_tool_name
 from bluecore.skills.learn.project import detect_project
 
 _CONFIG_DIR = get_bluecore_dir()
@@ -211,7 +212,7 @@ def _build_observation(stdin_data: dict, phase: str, project: dict) -> dict:
     入力・出力は 5000 文字で切り詰め、シークレットを除去して格納する。
     """
     event = "tool_start" if phase == "pre" else "tool_complete"
-    tool_name = stdin_data.get("tool_name", stdin_data.get("tool", "unknown"))
+    tool_name = normalize_tool_name(str(stdin_data.get("tool_name", stdin_data.get("tool", "unknown"))))
     tool_input = stdin_data.get("tool_input", stdin_data.get("input", ""))
     tool_output = stdin_data.get("tool_response")
     if tool_output is None:

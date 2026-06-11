@@ -720,3 +720,10 @@ def test_main_records(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(observe, "_record_and_signal", lambda d, p: recorded.append((d, p)))
     assert observe.main([]) == 0
     assert recorded and recorded[0][1] == "post"
+
+
+def test_build_observation_normalizes_apply_patch(project: dict) -> None:
+    """Codex の apply_patch ツール名は Edit に正規化して記録する。"""
+    stdin_data = {"tool_name": "apply_patch", "tool_input": {"input": "patch"}}
+    obs = observe._build_observation(stdin_data, "pre", project)
+    assert obs["tool"] == "Edit"

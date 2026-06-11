@@ -1357,3 +1357,44 @@ def test_slim_context_content_clips_long_code_lines() -> None:
 
     code_line = out.splitlines()[1]
     assert len(code_line) == 160
+
+
+def test_handle_observe_normalizes_apply_patch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex の apply_patch ツール名は Edit に正規化して記録する。"""
+    settings = make_settings(tmp_path)
+    db = FakeDB()
+    monkeypatch.setattr(cli, "_open_db", lambda current_settings: open_fake_db(db))
+    assert cli._handle_setup(settings) == ""
+
+    import bluecore.mem.chunker as chunker_mod
+
+    monkeypatch.setattr(
+        chunker_mod,
+        "build_chunk_from_tool_use",
+        lambda session_id, project, chunk_index, user_prompt, params: MemoryChunk(
+            session_id=session_id,
+            project=project,
+            chunk_index=chunk_index,
+            content="observed",
+            tool_names=[params.tool_name],
+            files_read=[],
+            files_modified=[],
+            user_prompt=user_prompt,
+            created_at_epoch=1700000000,
+        ),
+    )
+    cli._handle_observe(
+        settings,
+        {
+            "session_id": "s1",
+            "cwd": str(tmp_path),
+            "tool_name": "apply_patch",
+            "tool_input": {"input": "*** Begin Patch\n*** Update File: a.py\n*** End Patch"},
+            "tool_response": "ok",
+            "prompt": "patch file",
+        },
+    )
+    assert db.stored_chunks
+    assert db.stored_chunks[0].tool_names == ["Edit"]

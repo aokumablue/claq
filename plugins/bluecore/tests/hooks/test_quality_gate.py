@@ -522,3 +522,21 @@ def test_extract_file_path_non_string_values() -> None:
     from bluecore.hooks.quality_gate import _extract_file_path
 
     assert _extract_file_path({"tool_input": {"file_path": 123}}) == ""
+
+
+def test_extract_tool_name_normalizes_apply_patch() -> None:
+    """Codex の apply_patch は Edit に正規化される。"""
+    assert quality_gate._extract_tool_name({"tool_name": "apply_patch"}) == "Edit"
+
+
+def test_extract_file_path_from_apply_patch_input() -> None:
+    """apply_patch のパッチテキストから先頭ファイルを取り出す。"""
+    patch = "*** Begin Patch\n*** Update File: src/x.py\n@@\n-a\n+b\n*** End Patch"
+    data = {"tool_name": "apply_patch", "tool_input": {"input": patch}}
+    assert quality_gate._extract_file_path(data) == "src/x.py"
+
+
+def test_extract_file_path_apply_patch_unparseable_returns_empty() -> None:
+    """パース不能な apply_patch 入力は空文字列を返す。"""
+    data = {"tool_name": "apply_patch", "tool_input": {"input": "garbage"}}
+    assert quality_gate._extract_file_path(data) == ""

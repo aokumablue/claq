@@ -20,6 +20,7 @@ from typing import Any
 from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
 from bluecore.hooks.quality_gate_presets import resolve_quality_gate_config
 from bluecore.lib.core_utils import log
+from bluecore.lib.harness import extract_file_paths, normalize_tool_name
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 
@@ -156,6 +157,8 @@ def load_config(file_path: str | None = None) -> dict[str, Any]:
 def _extract_file_path(input_data: dict[str, Any]) -> str:
     """フック入力から file_path を取り出す。
 
+    Codex の apply_patch はパッチテキストから先頭の対象ファイルを取り出す。
+
     Args:
         input_data: hook 入力です。
 
@@ -170,6 +173,10 @@ def _extract_file_path(input_data: dict[str, Any]) -> str:
         file_path = tool_input.get("file_path")
         if isinstance(file_path, str):
             return file_path
+        if str(input_data.get("tool_name") or "") == "apply_patch":
+            paths = extract_file_paths("apply_patch", tool_input)
+            if paths:
+                return paths[0]
 
     file_path = input_data.get("file_path")
     if isinstance(file_path, str):
@@ -191,7 +198,7 @@ def _extract_tool_name(input_data: dict[str, Any]) -> str:
     """
     tool_name = input_data.get("tool_name")
     if isinstance(tool_name, str):
-        return tool_name
+        return normalize_tool_name(tool_name)
     return ""
 
 
