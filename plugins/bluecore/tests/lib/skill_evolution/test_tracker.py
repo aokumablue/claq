@@ -204,6 +204,16 @@ def test_read_jsonl_skips_malformed_rows(skill_env):
     assert records[0]["skill_id"] == "alpha"
 
 
+def test_read_jsonl_survives_invalid_utf8_line(skill_env):
+    """非 UTF-8 バイト混入行があっても他レコードの読み込みは継続すること。"""
+    valid = '{"skill_id":"alpha","skill_version":"v1","task_description":"ok","outcome":"success","recorded_at":"2026-03-15T11:00:00.000Z"}'
+    skill_env["runs_file"].write_bytes(valid.encode("utf-8") + b"\n\xff\xfe\x00broken\n" + valid.encode("utf-8") + b"\n")
+
+    records = tracker.read_jsonl(skill_env["runs_file"])
+    assert len(records) == 2
+    assert all(r["skill_id"] == "alpha" for r in records)
+
+
 def test_get_runs_file_path_defaults_to_bluecore(monkeypatch, tmp_path):
     """既定の runs ファイルパスが ~/.bluecore/state/ 配下になること。"""
     monkeypatch.setattr(tracker, "get_bluecore_dir", lambda: tmp_path / ".bluecore")

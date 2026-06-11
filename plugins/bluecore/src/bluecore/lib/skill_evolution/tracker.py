@@ -229,7 +229,8 @@ def read_jsonl(file_path: str | Path) -> list[dict[str, Any]]:
 
     records: list[dict[str, Any]] = []
     # 1 行ずつ読み込み、JSON として解釈できるものだけ残す。
-    for line in path.read_text(encoding="utf-8").splitlines():
+    # 非 UTF-8 バイトが 1 行混入しても全件読込失敗にしない（壊れた行は JSON パースで除外される）。
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
         # 空行は記録対象ではないため読み飛ばす。
         if not line:
