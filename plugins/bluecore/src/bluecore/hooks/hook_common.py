@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from bluecore.hooks.output_adapter import adapt_context_output
+from bluecore.hooks.output_adapter import adapt_context_output, emit_block
 
 MAX_STDIN_BYTES = 1024 * 1024
 
@@ -147,6 +147,29 @@ BACKGROUND_HOOK_IDS: frozenset[str] = frozenset(
         "session:mem:end",
     }
 )
+
+
+def emit_block_output(reason: str) -> int:
+    """ツール実行ブロックをハーネス別プロトコルで stdout/stderr に書き出す。
+
+    launcher から直接起動されるブロック系フック（run_with_flags の exit code
+    変換を経由しないもの）はこのヘルパを使うこと。
+
+    Args:
+        reason: ブロック理由（ユーザー / エージェントに提示される）。
+
+    Returns:
+        フックが返すべき終了コード。
+
+    Raises:
+        例外は発生しません。
+    """
+    exit_code, deny_out, reason_err = emit_block(reason)
+    if deny_out:
+        write_stdout(deny_out)
+    if reason_err:
+        write_stderr(reason_err + "\n")
+    return exit_code
 
 
 def _emit_hook_specific_output(event_name: str, additional_context: str) -> str:

@@ -69,6 +69,64 @@ def test_config_protection_allows_safe_file(monkeypatch: pytest.MonkeyPatch) -> 
     assert stderr.getvalue() == ""
 
 
+def test_config_protection_blocks_protected_file_in_apply_patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex の apply_patch パッチ内の保護ファイルをブロックする。"""
+    patch = "*** Begin Patch\n*** Update File: ruff.toml\n@@\n-a\n+b\n*** End Patch"
+    payload = json.dumps({"tool_name": "apply_patch", "tool_input": {"input": patch}})
+    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
+
+    stderr = io.StringIO()
+    stdout = io.StringIO()
+    with redirect_stderr(stderr), redirect_stdout(stdout):
+        assert config_protection.main() == 2
+
+    assert "Modifying ruff.toml is not allowed" in stderr.getvalue()
+
+
+def test_config_protection_blocks_unparseable_apply_patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """パース不能な apply_patch 入力は fail-closed でブロックする。"""
+    payload = json.dumps({"tool_name": "apply_patch", "tool_input": {"input": "garbage"}})
+    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
+
+    stderr = io.StringIO()
+    stdout = io.StringIO()
+    with redirect_stderr(stderr), redirect_stdout(stdout):
+        assert config_protection.main() == 2
+
+    assert "Could not determine target files" in stderr.getvalue()
+
+
+def test_config_protection_allows_safe_apply_patch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """保護対象を含まない apply_patch は許可する。"""
+    patch = "*** Begin Patch\n*** Update File: src/main.py\n@@\n-a\n+b\n*** End Patch"
+    payload = json.dumps({"tool_name": "apply_patch", "tool_input": {"input": patch}})
+    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
+
+    stderr = io.StringIO()
+    stdout = io.StringIO()
+    with redirect_stderr(stderr), redirect_stdout(stdout):
+        assert config_protection.main() == 0
+
+    assert stderr.getvalue() == ""
+
+
+def test_config_protection_blocks_legacy_file_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    """file フィールドのみ持つ入力でも保護ファイルをブロックする。"""
+    payload = json.dumps({"tool_input": {"file": "biome.json"}})
+    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
+
+    stderr = io.StringIO()
+    stdout = io.StringIO()
+    with redirect_stderr(stderr), redirect_stdout(stdout):
+        assert config_protection.main() == 2
+
+    assert "Modifying biome.json is not allowed" in stderr.getvalue()
+
+
 def test_doc_file_warning_main_warns_for_ad_hoc_documents(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = json.dumps({"tool_input": {"file_path": "notes/TODO.md"}})
     stdout = io.StringIO()

@@ -2,15 +2,15 @@
 
 トリガー: pre:bash
 入力: bashコマンドを含むJSON
-出力: ブロック時はstderrにエラーメッセージ
-終了: no-verify検出時は2 (実行をブロック)、それ以外は0
+出力: ブロック時はハーネス別のブロック出力（Claude/Codex: stderr、Copilot: deny JSON）
+終了: no-verify検出時はハーネス別のブロックコード、それ以外は0
 """
 
 from __future__ import annotations
 
 import re
 
-from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
+from bluecore.hooks.hook_common import emit_block_output, parse_json_object, read_raw_stdin
 
 NO_VERIFY_RE = re.compile(r"\bgit\s+(commit|push)\b.*?(--no-verify|-n)\b", re.IGNORECASE)
 QUOTED_RE = re.compile(r""""[^"]*"|'[^']*'""")
@@ -41,7 +41,7 @@ def main() -> int:
         引数はありません（標準入力から読み取る）。
 
     Returns:
-        終了コード（0: 許可、2: ブロック）
+        終了コード（0: 許可、ブロック時はハーネス別コード）
 
     Raises:
         例外は発生しません。
@@ -52,8 +52,7 @@ def main() -> int:
     if data:
         command = str((data.get("tool_input") or {}).get("command") or "")
         if NO_VERIFY_RE.search(strip_quoted(command)):
-            write_stderr("[Hook] BLOCKED: git hook bypass flags are not allowed\n")
-            return 2
+            return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
 
     return 0
 
