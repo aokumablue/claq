@@ -11,6 +11,7 @@ import pytest
 from bluecore.hooks.hook_common import (
     SESSION_START_HOOK_IDS,
     emit_session_start_output,
+    emit_user_prompt_submit_output,
     print_session_start_output,
 )
 
@@ -53,6 +54,33 @@ class TestEmitSessionStartOutput:
     def test_no_trailing_newline(self) -> None:
         result = emit_session_start_output()
         assert not result.endswith("\n")
+
+
+class TestEmitUserPromptSubmitOutput:
+    @pytest.mark.parametrize(
+        "additional_context",
+        [
+            "simple context",
+            "改行\n含む\nテキスト",
+            "unicode: 日本語テスト 🐍",
+            "<mem-context>関連メモリ</mem-context>",
+        ],
+        ids=["simple", "newlines", "unicode", "mem-context"],
+    )
+    def test_returns_valid_json(self, additional_context: str) -> None:
+        payload = json.loads(emit_user_prompt_submit_output(additional_context))
+        inner = payload["hookSpecificOutput"]
+        assert inner["hookEventName"] == "UserPromptSubmit"
+        assert inner["additionalContext"] == additional_context
+
+    def test_no_top_level_event_name(self) -> None:
+        """トップレベル hookEventName 形式（旧バグ）に戻っていないこと。"""
+        payload = json.loads(emit_user_prompt_submit_output("ctx"))
+        assert "hookEventName" not in payload
+        assert "additionalContext" not in payload
+
+    def test_unicode_not_escaped(self) -> None:
+        assert "日本語" in emit_user_prompt_submit_output("日本語")
 
 
 class TestPrintSessionStartOutput:

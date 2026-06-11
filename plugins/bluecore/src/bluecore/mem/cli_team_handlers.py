@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
+
+from bluecore.hooks.hook_common import emit_user_prompt_submit_output
 
 
 def handle_team_context(
@@ -117,7 +118,7 @@ def handle_team_session_init(
             return
         ctx = _build_team_session_context(settings, pg, query, git_user)
         if ctx:
-            print(json.dumps({"hookEventName": "UserPromptSubmit", "additionalContext": ctx}))
+            print(emit_user_prompt_submit_output(ctx))
     except Exception as e:
         log.warning("team-session-init 生成失敗: %s", e)
     finally:

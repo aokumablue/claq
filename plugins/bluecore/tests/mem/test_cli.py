@@ -134,9 +134,10 @@ def test_session_init_injects_context_from_local_db(monkeypatch, tmp_path: Path)
     )
     assert stderr == ""
     payload = json.loads(stdout)
-    assert payload["hookEventName"] == "UserPromptSubmit"
-    assert "<mem-context>" in payload["additionalContext"]
-    assert "previous work" in payload["additionalContext"]
+    inner = payload["hookSpecificOutput"]
+    assert inner["hookEventName"] == "UserPromptSubmit"
+    assert "<mem-context>" in inner["additionalContext"]
+    assert "previous work" in inner["additionalContext"]
 
 
 def test_init_command_recreates_local_db(monkeypatch, tmp_path: Path) -> None:
@@ -548,8 +549,9 @@ class TestSessionInitPgIntegration:
         )
         assert stdout != ""
         payload = json.loads(stdout)
-        assert payload["hookEventName"] == "UserPromptSubmit"
-        assert "fallback work" in payload["additionalContext"]
+        inner = payload["hookSpecificOutput"]
+        assert inner["hookEventName"] == "UserPromptSubmit"
+        assert "fallback work" in inner["additionalContext"]
 
 
 class TestMainExitCode:

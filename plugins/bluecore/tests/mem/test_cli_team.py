@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from types import ModuleType, SimpleNamespace
 
@@ -166,7 +167,10 @@ def test_team_session_init_fires_on_retrospective_keyword(
         _settings(), {"cwd": "/home/u/x-picflow", "prompt": "前回どう直した？"}
     )
 
-    assert capsys.readouterr().out.strip().startswith('{"hookEventName"')
+    out = json.loads(capsys.readouterr().out.strip())
+    inner = out["hookSpecificOutput"]
+    assert inner["hookEventName"] == "UserPromptSubmit"
+    assert inner["additionalContext"] == "<team-context>history</team-context>"
     assert captured["mode"] == "hybrid"
     assert captured["exclude"] == "me"
     assert "前回どう直した？" in captured["query"]

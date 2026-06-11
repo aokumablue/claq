@@ -130,6 +130,30 @@ SESSION_START_HOOK_IDS: frozenset[str] = frozenset(
 )
 
 
+def _emit_hook_specific_output(event_name: str, additional_context: str) -> str:
+    """hookSpecificOutput でラップした JSON 文字列を返す。
+
+    Args:
+        event_name: hookEventName に設定するイベント名。
+        additional_context: コンテキストに注入する追加文字列。
+
+    Returns:
+        hookSpecificOutput を含む JSON 文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "additionalContext": additional_context,
+            }
+        },
+        ensure_ascii=False,
+    )
+
+
 def emit_session_start_output(additional_context: str = "") -> str:
     """SessionStart 用の hookSpecificOutput JSON 文字列を返す。
 
@@ -144,15 +168,25 @@ def emit_session_start_output(additional_context: str = "") -> str:
     Raises:
         例外は発生しません。
     """
-    return json.dumps(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": "SessionStart",
-                "additionalContext": additional_context,
-            }
-        },
-        ensure_ascii=False,
-    )
+    return _emit_hook_specific_output("SessionStart", additional_context)
+
+
+def emit_user_prompt_submit_output(additional_context: str) -> str:
+    """UserPromptSubmit 用の hookSpecificOutput JSON 文字列を返す。
+
+    トップレベルに hookEventName を置く形式は Claude Code に構造化処理されず
+    生 JSON のままコンテキストに注入されるため、必ずこのラッパー形式で出力する。
+
+    Args:
+        additional_context: コンテキストに注入する追加文字列。
+
+    Returns:
+        hookSpecificOutput を含む JSON 文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _emit_hook_specific_output("UserPromptSubmit", additional_context)
 
 
 def print_session_start_output(additional_context: str = "") -> None:

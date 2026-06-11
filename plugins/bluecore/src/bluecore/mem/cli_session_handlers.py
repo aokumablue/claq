@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from bluecore.hooks.hook_common import emit_user_prompt_submit_output
 from bluecore.lib.core_utils import get_git_user_name
 from bluecore.mem.cli_search_handlers import merge_search_results_rrf, render_adaptive_context
 
@@ -80,7 +80,7 @@ def _search_and_inject_context(
     merged = merge_search_results_rrf(local_results, team_results, top_k=3)
     if merged:
         ctx = render_adaptive_context(db, merged)
-        print(json.dumps({"hookEventName": "UserPromptSubmit", "additionalContext": ctx}))
+        print(emit_user_prompt_submit_output(ctx))
 
 
 def handle_session_init(
