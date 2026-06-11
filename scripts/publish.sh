@@ -67,9 +67,12 @@ git branch -D main
 git branch -m main
 
 echo "Pushing to $PUBLISH_REMOTE..."
+# $PUBLISH_REMOTE は非 bare で main をチェックアウト済みのため、既定の
+# receive.denyCurrentBranch=refuse では現在ブランチへの push が拒否される。
+# updateInstead を設定すると push が ref と作業ツリーを安全に（作業ツリーが
+# clean なときだけ）更新する。dirty なら push 自体を拒否するので破壊もない。
+git -C "$PUBLISH_REMOTE" config receive.denyCurrentBranch updateInstead
 git remote add publish "$PUBLISH_REMOTE"
 git push publish HEAD:main --force
-
-git -C "$PUBLISH_REMOTE" reset --hard HEAD
 
 echo "Done: published to $PUBLISH_REMOTE"
