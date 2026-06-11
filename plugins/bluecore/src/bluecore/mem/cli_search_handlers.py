@@ -318,7 +318,8 @@ def slim_context_content(
                 if lines and lines[-1] != "...":
                     lines.append("...")
                 continue
-            lines.append(line)
+            # 1 行が極端に長いコードで注入予算を食い潰さないよう行長もクリップする
+            lines.append(line[:max_prose_line_length])
             code_lines += 1
             continue
 

@@ -1346,3 +1346,14 @@ def test_slim_context_content_closes_unclosed_fence() -> None:
     out = slim_context_content("```python\nline1\nline2", max_code_lines=1)
     assert out.endswith("```")
     assert out.count("```") == 2
+
+
+def test_slim_context_content_clips_long_code_lines() -> None:
+    """コードブロック内の行も max_prose_line_length でクリップされる。"""
+    from bluecore.mem.cli_search_handlers import slim_context_content
+
+    long_line = "x" * 500
+    out = slim_context_content(f"```\n{long_line}\n```", max_prose_line_length=160)
+
+    code_line = out.splitlines()[1]
+    assert len(code_line) == 160
