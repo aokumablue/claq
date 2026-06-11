@@ -200,3 +200,37 @@ class TestMain:
         monkeypatch.setattr(hook, "evaluate", _boom)
         assert hook.main() == 0
         assert capsys.readouterr().out == ""
+
+
+class TestCopilotOutputContract:
+    """Copilot 環境での modifiedResult 契約のテスト。"""
+
+    @pytest.fixture(autouse=True)
+    def _reset_harness(self, monkeypatch):
+        """ハーネス判定キャッシュをリセットする。"""
+        from bluecore.lib import harness
+
+        monkeypatch.delenv("CLAUDECODE", raising=False)
+        harness.detect_harness.cache_clear()
+        yield
+        harness.detect_harness.cache_clear()
+
+    def test_copilot_emits_modified_result(self, monkeypatch):
+        """Copilot では modifiedResult 契約で圧縮出力を返す。"""
+        monkeypatch.setenv("COPILOT_AGENT_PROMPT", "x")
+        config = ReduxConfig(enabled=True, max_output_len=10, head_lines=1, tail_lines=1)
+        raw = _payload(stdout="line1\n" * 100)
+        result = hook.evaluate(raw, config=config, engine=ReduxEngine.load())
+        payload = json.loads(result)
+        assert "hookSpecificOutput" not in payload
+        assert payload["modifiedResult"]["resultType"] == "success"
+        assert payload["modifiedResult"]["textResultForLlm"]
+        assert len(payload["modifiedResult"]["textResultForLlm"]) < len("line1\n" * 100)
+
+    def test_codex_keeps_claude_contract(self, monkeypatch):
+        """Codex では Claude 形式（updatedToolOutput）のまま出力する。"""
+        monkeypatch.setenv("PLUGIN_DATA", "/tmp/data")
+        config = ReduxConfig(enabled=True, max_output_len=10, head_lines=1, tail_lines=1)
+        raw = _payload(stdout="line1\n" * 100)
+        result = hook.evaluate(raw, config=config, engine=ReduxEngine.load())
+        assert "updatedToolOutput" in json.loads(result)["hookSpecificOutput"]

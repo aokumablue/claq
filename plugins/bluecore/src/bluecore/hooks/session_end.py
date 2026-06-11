@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 
-from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin
+from bluecore.hooks.hook_common import detach_process, parse_json_object, read_raw_stdin
 from bluecore.lib.core_utils import (
     ensure_dir,
     get_date_string,
@@ -27,6 +28,7 @@ from bluecore.lib.core_utils import (
     strip_ansi,
     write_file,
 )
+from bluecore.lib.harness import detect_harness
 from bluecore.lib.slim_text import compact_line
 
 SUMMARY_START_MARKER = "<!-- bluecore:SUMMARY:START -->"
@@ -371,12 +373,34 @@ def run(raw_input: str) -> str:
     return raw_input
 
 
+def _trigger_codex_session_end_fallback(raw: str) -> None:
+    """Codex では SessionEnd イベントが無いため Stop で mem session-end を起動する。
+
+    mem session-end は未エンベッドチャンクの差分処理で冪等なため、ターンごとの
+    起動でもコストは新規チャンク分のみ。detached 起動でセッションをブロックしない。
+
+    Args:
+        raw: フックに渡された生の stdin（session_id を含む JSON）。
+
+    Returns:
+        None: 値を返しません。
+
+    Raises:
+        例外は発生しません。
+    """
+    if detect_harness() != "codex":
+        return
+    if not detach_process([sys.executable, "-m", "bluecore.mem.cli", "session-end"], raw):
+        log("[SessionEnd] mem session-end fallback の起動に失敗しました")
+
+
 def main() -> int:
     """スクリプトとして実行されたときのエントリポイント"""
 
     try:
         raw = read_raw_stdin()
         run(raw)
+        _trigger_codex_session_end_fallback(raw)
         return 0
     except Exception as err:
         log(f"[SessionEnd] Error: {err}")
@@ -384,6 +408,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    import sys
-
     sys.exit(main())

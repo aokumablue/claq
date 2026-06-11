@@ -7,7 +7,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -147,6 +150,46 @@ BACKGROUND_HOOK_IDS: frozenset[str] = frozenset(
         "session:mem:end",
     }
 )
+
+
+def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None = None) -> bool:
+    """コマンドを detached（新セッション）で起動し stdin を一時ファイル経由で渡す。
+
+    親プロセスの終了に影響されず子を走らせ続けるために使う。一時ファイルは
+    起動直後に unlink する（継承済み fd は有効なまま）。
+
+    Args:
+        cmd: subprocess に渡すコマンドリスト。
+        raw_stdin: 子プロセスへ渡す stdin の内容。
+        env: 子プロセスの環境変数。None なら親の環境を継承する。
+
+    Returns:
+        起動に成功した場合 True、OSError 時は False。
+
+    Raises:
+        例外は発生しません。
+    """
+    tmp = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".stdin", delete=False)
+    try:
+        tmp.write(raw_stdin)
+        tmp.close()
+        with open(tmp.name, encoding="utf-8") as stdin_fh:
+            subprocess.Popen(
+                cmd,
+                stdin=stdin_fh,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                start_new_session=True,
+            )
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
 
 
 def emit_block_output(reason: str) -> int:

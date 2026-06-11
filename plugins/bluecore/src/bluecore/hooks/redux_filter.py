@@ -15,6 +15,7 @@ import json
 import sys
 
 from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
+from bluecore.lib.harness import detect_harness
 from bluecore.mem.settings import ReduxSettings, Settings
 from bluecore.redux.config import ReduxConfig
 from bluecore.redux.engine import ReduxEngine
@@ -85,13 +86,22 @@ def _apply_reduction(
         return ""
     saved_pct = (len(original_stdout) - len(reduced)) / len(original_stdout) * 100
     write_stderr(f"[redux] {len(original_stdout)} → {len(reduced)} chars ({saved_pct:.0f}% 削減)\n")
-    updated_output = {**tool_response, "stdout": reduced}
-    output = {
-        "hookSpecificOutput": {
-            "hookEventName": "PostToolUse",
-            "updatedToolOutput": updated_output,
+    if detect_harness() == "copilot":
+        # Copilot の postToolUse は modifiedResult 契約でツール出力を上書きする
+        output: dict = {
+            "modifiedResult": {
+                "resultType": "success",
+                "textResultForLlm": reduced,
+            }
         }
-    }
+    else:
+        updated_output = {**tool_response, "stdout": reduced}
+        output = {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "updatedToolOutput": updated_output,
+            }
+        }
     return json.dumps(output, ensure_ascii=False)
 
 

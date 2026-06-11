@@ -11,13 +11,13 @@ import math
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from bluecore.hooks.hook_common import (
     BACKGROUND_HOOK_IDS,
     MAX_STDIN_BYTES,
     SESSION_START_HOOK_IDS,
+    detach_process,
     emit_session_start_output,
     write_stderr,
     write_stdout,
@@ -218,26 +218,13 @@ def _detach_target(hook_id: str, target: str, target_args: list[str], raw: str) 
     Returns:
         常に 0。起動失敗時も非ブロッキングエラーとして 0 を返す。
     """
-    tmp = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".stdin", delete=False)
-    try:
-        tmp.write(raw)
-        tmp.close()
-        with open(tmp.name, encoding="utf-8") as stdin_fh:
-            subprocess.Popen(
-                resolve_target_command(target, target_args, plugin_root=REPO_ROOT),
-                stdin=stdin_fh,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=build_env(),
-                start_new_session=True,
-            )
-    except OSError as err:
-        write_stderr(f"[Hook] Error detaching {hook_id}: {err}\n")
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
+    launched = detach_process(
+        resolve_target_command(target, target_args, plugin_root=REPO_ROOT),
+        raw,
+        env=build_env(),
+    )
+    if not launched:
+        write_stderr(f"[Hook] Error detaching {hook_id}\n")
     return 0
 
 

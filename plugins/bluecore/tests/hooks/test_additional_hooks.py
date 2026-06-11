@@ -1160,3 +1160,57 @@ def test_update_session_file_no_existing_no_summary(monkeypatch, tmp_path: Path)
     monkeypatch.setattr(session_end, "write_file", lambda f, c: written.append(c))
     session_end._update_session_file(tmp_path / "s.md", None, "2026-01-01", "00:00", {})
     assert written == []
+
+
+class TestCodexSessionEndFallback:
+    """session_end の Codex フォールバックのテスト。"""
+
+    @pytest.fixture(autouse=True)
+    def _reset_harness(self, monkeypatch):
+        """ハーネス判定キャッシュをリセットする。"""
+        from bluecore.lib import harness
+
+        monkeypatch.delenv("CLAUDECODE", raising=False)
+        harness.detect_harness.cache_clear()
+        yield
+        harness.detect_harness.cache_clear()
+
+    def test_codex_triggers_mem_session_end_detached(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Codex では mem session-end が detached 起動される。"""
+        monkeypatch.setenv("PLUGIN_DATA", "/tmp/data")
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            session_end, "detach_process", lambda cmd, raw, **k: calls.append(cmd) or True
+        )
+        session_end._trigger_codex_session_end_fallback('{"session_id": "s1"}')
+        assert len(calls) == 1
+        assert calls[0][-2:] == ["bluecore.mem.cli", "session-end"]
+
+    def test_claude_does_not_trigger_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Claude では SessionEnd イベントが存在するためフォールバックしない。"""
+        monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.setattr(
+            session_end,
+            "detach_process",
+            lambda *a, **k: pytest.fail("detach されてはならない"),
+        )
+        session_end._trigger_codex_session_end_fallback("{}")
+
+    def test_detach_failure_is_logged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """detach 失敗時はログに記録され例外は出ない。"""
+        monkeypatch.setenv("PLUGIN_DATA", "/tmp/data")
+        logs: list[str] = []
+        monkeypatch.setattr(session_end, "detach_process", lambda *a, **k: False)
+        monkeypatch.setattr(session_end, "log", logs.append)
+        session_end._trigger_codex_session_end_fallback("{}")
+        assert any("session-end fallback" in line for line in logs)
+
+    def test_main_invokes_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """main が run 後にフォールバック判定を呼ぶ。"""
+        monkeypatch.setenv("CLAUDECODE", "1")
+        called: list[str] = []
+        monkeypatch.setattr(session_end, "read_raw_stdin", lambda: "{}")
+        monkeypatch.setattr(session_end, "run", lambda raw: raw)
+        monkeypatch.setattr(session_end, "_trigger_codex_session_end_fallback", called.append)
+        assert session_end.main() == 0
+        assert called == ["{}"]
