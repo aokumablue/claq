@@ -1,19 +1,29 @@
-"""ONNX 配布アーカイブのダウンロード処理。"""
+"""ONNX モデルダウンロード — onnx.json に従い配布アーカイブを取得する。
+
+install.sh から `python -m bluecore.onnx_download` で呼び出す。
+stdlib のみ使用するため venv 構築前でも動作する。
+
+exit code:
+  0  ダウンロード成功（または既に model.onnx が存在）
+  3  download が無効または設定ファイルが存在しない
+  1  エラー
+"""
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import ipaddress
 import json
 import shutil
 import ssl
+import sys
 import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import IO
 
 _REQUIRED_FILES = ("model.onnx", "tokenizer.json", "config.json", "manifest.json")
 
@@ -92,7 +102,7 @@ def _download_archive(
         ctx.verify_mode = ssl.CERT_NONE
         handlers.append(urllib.request.HTTPSHandler(context=ctx))
     opener = urllib.request.build_opener(*handlers)
-    request = urllib.request.Request(model_url, headers={"User-Agent": "bluecore-model-build/1.0"})
+    request = urllib.request.Request(model_url, headers={"User-Agent": "bluecore-install/1.0"})
     downloaded = 0
     with opener.open(request, timeout=600) as response, archive_path.open("wb") as out:
         while chunk := response.read(_CHUNK_SIZE):
@@ -113,14 +123,14 @@ def _verify_archive_sha256(archive_path: Path, expected_sha256: str) -> None:
         raise ValueError(f"Archive SHA-256 mismatch: expected {expected_sha256!r}, got {actual!r}")
 
 
-def _copy_with_size_limit(src: IO[bytes], out: IO[bytes], max_bytes: int, name: str) -> None:
+def _copy_with_size_limit(src: object, out: object, max_bytes: int, name: str) -> None:
     """src から out へコピーしながら抽出サイズ上限を強制する。"""
     written = 0
-    while chunk := src.read(_CHUNK_SIZE):
+    while chunk := src.read(_CHUNK_SIZE):  # type: ignore[union-attr]
         written += len(chunk)
         if written > max_bytes:
             raise ValueError(f"Extracted file {name!r} exceeds size limit of {max_bytes} bytes")
-        out.write(chunk)
+        out.write(chunk)  # type: ignore[union-attr]
 
 
 def _collect_archive_members(archive_path: Path, required_name: str) -> list[tuple[str, object]]:
@@ -222,3 +232,31 @@ def download_model_bundle(config_path: Path, output_dir: Path) -> int:
 
     print(f"[download] Installed ONNX bundle into: {output_dir}")
     return 0
+
+
+def _parse_args() -> argparse.Namespace:
+    """CLI 引数を解析する。"""
+    parser = argparse.ArgumentParser(
+        prog="python -m bluecore.onnx_download",
+        description="ONNX モデルを onnx.json に従いダウンロードする",
+    )
+    parser.add_argument("--config", type=Path, required=True, help="download 設定の JSON")
+    parser.add_argument("--out", type=Path, required=True, help="出力ディレクトリ")
+    return parser.parse_args()
+
+
+def main() -> None:
+    """CLI エントリポイント。"""
+    args = _parse_args()
+    try:
+        rc = download_model_bundle(args.config, args.out)
+        sys.exit(rc)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

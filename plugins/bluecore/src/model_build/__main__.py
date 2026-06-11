@@ -3,7 +3,6 @@
 サブコマンド:
   build     ONNX 変換 → 量子化 → manifest 生成を一括実行
   verify    manifest.json を使ってモデルを検証
-  download  外部配布アーカイブからモデルを取得
   clean     output_dir のモデルファイルと manifest を削除
 """
 
@@ -139,13 +138,6 @@ def _cmd_verify(args: argparse.Namespace) -> None:
     verify(args.model_dir, cosine_threshold=args.cosine_threshold)
 
 
-def _cmd_download(args: argparse.Namespace) -> int:
-    """onnx.json に従って配布アーカイブを取得する。"""
-    from model_build.download import download_model_bundle
-
-    return download_model_bundle(args.config, args.out)
-
-
 def _cmd_clean(args: argparse.Namespace) -> None:
     """output_dir のモデルファイルと manifest を削除する。
 
@@ -197,15 +189,6 @@ def _build_main_parser() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         help="再現性チェックの最低 cosine 類似度 (default: 0.999)",
     )
 
-    p_download = sub.add_parser("download", help="外部配布アーカイブからモデルを取得")
-    p_download.add_argument(
-        "--config",
-        type=Path,
-        default=Path(__file__).resolve().parents[2] / "onnx.json",
-        help="download 設定の JSON",
-    )
-    p_download.add_argument("--out", type=Path, default=_DEFAULT_OUT, help="出力ディレクトリ")
-
     p_clean = sub.add_parser("clean", help="生成済み part・manifest を削除")
     p_clean.add_argument("--out", type=Path, default=_DEFAULT_OUT, help="対象ディレクトリ")
 
@@ -221,10 +204,6 @@ def main() -> None:
             _cmd_build(args)
         elif args.command == "verify":
             _cmd_verify(args)
-        elif args.command == "download":
-            rc = _cmd_download(args)
-            if rc != 0:
-                sys.exit(rc)
         elif args.command == "clean":
             _cmd_clean(args)
     except Exception as exc:

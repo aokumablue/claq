@@ -245,7 +245,7 @@ install_user_python() {
 
   if [[ -f "${model_onnx}" ]]; then
     echo "[bluecore] ONNX model already present (skipping): ${model_onnx}"
-  elif PYTHONPATH="${src_dir}" "${PYTHON3}" -m model_build download --config "${onnx_config}" --out "${model_target}"; then
+  elif "${VENV_PYTHON}" -m bluecore.onnx_download --config "${onnx_config}" --out "${model_target}"; then
     echo "[bluecore] ONNX model downloaded: ${model_onnx}"
   else
     local download_status=$?

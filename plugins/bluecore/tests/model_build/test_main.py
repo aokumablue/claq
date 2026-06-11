@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import model_build.__main__ as mainmod
-from model_build.__main__ import _cmd_clean, _cmd_download, _cmd_verify
+from model_build.__main__ import _cmd_clean, _cmd_verify
 
 
 class TestCmdClean:
@@ -92,18 +92,6 @@ class TestCmdVerify:
         with patch("model_build.verify.verify", side_effect=FileNotFoundError("missing")):
             with pytest.raises(FileNotFoundError, match="missing"):
                 _cmd_verify(self._make_args(tmp_path))
-
-
-class TestCmdDownload:
-    """download サブコマンドのテスト。"""
-
-    def test_download_called_with_correct_args(self, tmp_path: Path) -> None:
-        """download_model_bundle() が正しい引数で呼ばれる。"""
-        args = argparse.Namespace(config=tmp_path / "onnx.json", out=tmp_path / "models")
-        with patch("model_build.download.download_model_bundle", return_value=0) as mock_download:
-            rc = _cmd_download(args)
-        assert rc == 0
-        mock_download.assert_called_once_with(args.config, args.out)
 
 
 class TestVerifyModuleMain:
@@ -287,7 +275,7 @@ class TestCmdBuild:
 class TestBuildMainParser:
     """_build_main_parser のテスト。"""
 
-    @pytest.mark.parametrize("command", ["build", "verify", "download", "clean"])
+    @pytest.mark.parametrize("command", ["build", "verify", "clean"])
     def test_parses_subcommands(self, command: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """各サブコマンドを解析できる。"""
         monkeypatch.setattr(mainmod, "_load_build_config", lambda: _VALID_BUILD_CFG)
@@ -318,20 +306,6 @@ class TestMain:
         monkeypatch.setattr(mainmod, "_cmd_verify", lambda a: called.append(a))
         mainmod.main()
         assert called
-
-    def test_main_download_ok(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """download が rc=0 を返せば正常終了。"""
-        self._patch_parser(monkeypatch, argparse.Namespace(command="download"))
-        monkeypatch.setattr(mainmod, "_cmd_download", lambda a: 0)
-        mainmod.main()  # sys.exit されない
-
-    def test_main_download_nonzero_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """download が非0 を返せば sys.exit(rc)。"""
-        self._patch_parser(monkeypatch, argparse.Namespace(command="download"))
-        monkeypatch.setattr(mainmod, "_cmd_download", lambda a: 3)
-        with pytest.raises(SystemExit) as exc:
-            mainmod.main()
-        assert exc.value.code == 3
 
     def test_main_clean(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """clean は _cmd_clean を呼ぶ。"""

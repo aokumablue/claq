@@ -1,4 +1,4 @@
-"""download モジュールのユニットテスト。"""
+"""bluecore.onnx_download のユニットテスト。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from model_build import download as download_mod
+import bluecore.onnx_download as mod
 
 
 def _write_config(
@@ -23,8 +23,8 @@ def _write_config(
     enabled: bool,
     model_url: str,
     sha256: str = "",
-    max_download_bytes: int = download_mod._DEFAULT_MAX_DOWNLOAD_BYTES,
-    max_extract_bytes: int = download_mod._DEFAULT_MAX_EXTRACT_BYTES,
+    max_download_bytes: int = mod._DEFAULT_MAX_DOWNLOAD_BYTES,
+    max_extract_bytes: int = mod._DEFAULT_MAX_EXTRACT_BYTES,
     ssl_no_verify: bool | None = None,
 ) -> Path:
     """onnx.json を作成して返す。"""
@@ -87,7 +87,7 @@ class TestValidatingRedirectHandler:
             called.append(newurl)
 
         monkeypatch.setattr(urllib.request.HTTPRedirectHandler, "redirect_request", fake_super)
-        handler = download_mod._ValidatingRedirectHandler()
+        handler = mod._ValidatingRedirectHandler()
         handler.redirect_request(None, None, 301, "Moved", {}, "https://github.com/file.zip")
         assert called == ["https://github.com/file.zip"]
 
@@ -101,14 +101,14 @@ class TestValidatingRedirectHandler:
             called.append(newurl)
 
         monkeypatch.setattr(urllib.request.HTTPRedirectHandler, "redirect_request", fake_super)
-        handler = download_mod._ValidatingRedirectHandler()
+        handler = mod._ValidatingRedirectHandler()
         handler.redirect_request(None, None, 301, "Moved", {}, "http://internal.corp/file.tar.gz")
         assert called == ["http://internal.corp/file.tar.gz"]
         assert "WARNING" in capsys.readouterr().out
 
     def test_rejects_ftp_redirect(self) -> None:
         """FTP など http/https 以外のリダイレクトは拒否される。"""
-        handler = download_mod._ValidatingRedirectHandler()
+        handler = mod._ValidatingRedirectHandler()
         with pytest.raises(ValueError, match="HTTPS or HTTP scheme"):
             handler.redirect_request(None, None, 301, "Moved", {}, "ftp://github.com/file.zip")
 
@@ -118,36 +118,36 @@ class TestValidateUrl:
 
     def test_accepts_https_url(self) -> None:
         """HTTPS URL は通過する。"""
-        download_mod._validate_url("https://github.com/owner/repo/releases/download/v1/model.tar.gz")
+        mod._validate_url("https://github.com/owner/repo/releases/download/v1/model.tar.gz")
 
     def test_accepts_arbitrary_host(self) -> None:
         """ホスト制限はないため任意ホストの HTTPS URL も通過する。"""
-        download_mod._validate_url("https://example.invalid/file.zip")
+        mod._validate_url("https://example.invalid/file.zip")
 
     def test_accepts_http_with_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
         """HTTP は通過するが平文警告を出す。"""
-        download_mod._validate_url("http://github.com/file.zip")
+        mod._validate_url("http://github.com/file.zip")
         assert "WARNING" in capsys.readouterr().out
 
     def test_accepts_ip_address_with_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
         """IP アドレス指定は通過するが警告を出す。"""
-        download_mod._validate_url("https://192.168.1.1/file.zip")
+        mod._validate_url("https://192.168.1.1/file.zip")
         assert "WARNING" in capsys.readouterr().out
 
     def test_accepts_ipv6_with_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
         """IPv6 アドレス指定は通過するが警告を出す。"""
-        download_mod._validate_url("https://[::1]/file.zip")
+        mod._validate_url("https://[::1]/file.zip")
         assert "WARNING" in capsys.readouterr().out
 
     def test_rejects_ftp(self) -> None:
         """http/https 以外の scheme は拒否される。"""
         with pytest.raises(ValueError, match="HTTPS or HTTP scheme"):
-            download_mod._validate_url("ftp://github.com/file.zip")
+            mod._validate_url("ftp://github.com/file.zip")
 
     def test_rejects_empty_host(self) -> None:
         """ホストなし URL は拒否される。"""
         with pytest.raises(ValueError, match="no valid hostname"):
-            download_mod._validate_url("https:///path/file.zip")
+            mod._validate_url("https:///path/file.zip")
 
 
 class TestVerifyArchiveSha256:
@@ -159,14 +159,14 @@ class TestVerifyArchiveSha256:
         archive = tmp_path / "bundle.bin"
         archive.write_bytes(data)
         expected = hashlib.sha256(data).hexdigest()
-        download_mod._verify_archive_sha256(archive, expected)
+        mod._verify_archive_sha256(archive, expected)
 
     def test_raises_when_sha256_mismatch(self, tmp_path: Path) -> None:
         """SHA-256 が不一致なら ValueError。"""
         archive = tmp_path / "bundle.bin"
         archive.write_bytes(b"real content")
         with pytest.raises(ValueError, match="SHA-256 mismatch"):
-            download_mod._verify_archive_sha256(archive, "a" * 64)
+            mod._verify_archive_sha256(archive, "a" * 64)
 
 
 class TestLoadDownloadSettings:
@@ -174,12 +174,12 @@ class TestLoadDownloadSettings:
 
     def test_returns_disabled_when_file_missing(self, tmp_path: Path) -> None:
         """設定ファイルがない場合は disabled を返す。"""
-        enabled, model_url, sha256, max_dl, max_ex, ssl_no_verify = download_mod._load_download_settings(tmp_path / "missing.json")
+        enabled, model_url, sha256, max_dl, max_ex, ssl_no_verify = mod._load_download_settings(tmp_path / "missing.json")
         assert enabled is False
         assert model_url == ""
         assert sha256 == ""
-        assert max_dl == download_mod._DEFAULT_MAX_DOWNLOAD_BYTES
-        assert max_ex == download_mod._DEFAULT_MAX_EXTRACT_BYTES
+        assert max_dl == mod._DEFAULT_MAX_DOWNLOAD_BYTES
+        assert max_ex == mod._DEFAULT_MAX_EXTRACT_BYTES
         assert ssl_no_verify is False
 
     def test_reads_all_fields(self, tmp_path: Path) -> None:
@@ -192,7 +192,7 @@ class TestLoadDownloadSettings:
             max_download_bytes=100,
             max_extract_bytes=50,
         )
-        enabled, model_url, sha256, max_dl, max_ex, ssl_no_verify = download_mod._load_download_settings(config_path)
+        enabled, model_url, sha256, max_dl, max_ex, ssl_no_verify = mod._load_download_settings(config_path)
         assert enabled is True
         assert model_url == "https://github.com/owner/repo/model.zip"
         assert sha256 == "abc123"
@@ -207,20 +207,20 @@ class TestLoadDownloadSettings:
             json.dumps({"onnx": {"download": {"enabled": True, "model_url": "https://github.com/x"}}}),
             encoding="utf-8",
         )
-        _, _, _, max_dl, max_ex, _ = download_mod._load_download_settings(config_path)
-        assert max_dl == download_mod._DEFAULT_MAX_DOWNLOAD_BYTES
-        assert max_ex == download_mod._DEFAULT_MAX_EXTRACT_BYTES
+        _, _, _, max_dl, max_ex, _ = mod._load_download_settings(config_path)
+        assert max_dl == mod._DEFAULT_MAX_DOWNLOAD_BYTES
+        assert max_ex == mod._DEFAULT_MAX_EXTRACT_BYTES
 
     def test_reads_ssl_no_verify(self, tmp_path: Path) -> None:
         """ssl_no_verify: true が True として返る。"""
         config_path = _write_config(tmp_path, enabled=True, model_url="https://github.com/x", ssl_no_verify=True)
-        _, _, _, _, _, ssl_no_verify = download_mod._load_download_settings(config_path)
+        _, _, _, _, _, ssl_no_verify = mod._load_download_settings(config_path)
         assert ssl_no_verify is True
 
     def test_defaults_ssl_no_verify_false_when_absent(self, tmp_path: Path) -> None:
         """ssl_no_verify フィールドがない場合は False を返す。"""
         config_path = _write_config(tmp_path, enabled=True, model_url="https://github.com/x")
-        _, _, _, _, _, ssl_no_verify = download_mod._load_download_settings(config_path)
+        _, _, _, _, _, ssl_no_verify = mod._load_download_settings(config_path)
         assert ssl_no_verify is False
 
 
@@ -242,13 +242,13 @@ class TestDownloadArchiveSizeLimit:
 
     def test_raises_when_download_exceeds_limit(self, tmp_path: Path) -> None:
         """ダウンロードサイズが上限を超えたら ValueError。"""
-        mock_opener = self._make_mock_opener([b"x" * download_mod._CHUNK_SIZE, b"extra", b""])
+        mock_opener = self._make_mock_opener([b"x" * mod._CHUNK_SIZE, b"extra", b""])
         with patch("urllib.request.build_opener", return_value=mock_opener):
             with pytest.raises(ValueError, match="Download size exceeded limit"):
-                download_mod._download_archive(
+                mod._download_archive(
                     "https://github.com/x",
                     tmp_path / "out.bin",
-                    download_mod._CHUNK_SIZE,
+                    mod._CHUNK_SIZE,
                 )
 
     def test_empty_response_exits_loop_immediately(self, tmp_path: Path) -> None:
@@ -256,7 +256,7 @@ class TestDownloadArchiveSizeLimit:
         out_file = tmp_path / "out.bin"
         mock_opener = self._make_mock_opener(b"")
         with patch("urllib.request.build_opener", return_value=mock_opener):
-            download_mod._download_archive("https://github.com/x", out_file, 1024)
+            mod._download_archive("https://github.com/x", out_file, 1024)
         assert out_file.read_bytes() == b""
 
     def test_ssl_no_verify_adds_https_handler(self, tmp_path: Path) -> None:
@@ -264,7 +264,7 @@ class TestDownloadArchiveSizeLimit:
         out_file = tmp_path / "out.bin"
         mock_opener = self._make_mock_opener(b"")
         with patch("urllib.request.build_opener", return_value=mock_opener) as mock_build:
-            download_mod._download_archive("https://github.com/x", out_file, 1024, ssl_no_verify=True)
+            mod._download_archive("https://github.com/x", out_file, 1024, ssl_no_verify=True)
         handlers = mock_build.call_args[0]
         assert any(isinstance(h, urllib.request.HTTPSHandler) for h in handlers)
 
@@ -276,7 +276,7 @@ class TestCollectArchiveMembers:
         """zip から一致する basename の要素を列挙する。"""
         archive_path = tmp_path / "bundle.zip"
         _create_zip_bundle(archive_path)
-        members = download_mod._collect_archive_members(archive_path, "tokenizer.json")
+        members = mod._collect_archive_members(archive_path, "tokenizer.json")
         assert len(members) == 1
         assert members[0][0] == "zip"
 
@@ -284,7 +284,7 @@ class TestCollectArchiveMembers:
         """tar から一致する basename の要素を列挙する。"""
         archive_path = tmp_path / "bundle.tar.gz"
         _create_tar_bundle(archive_path)
-        members = download_mod._collect_archive_members(archive_path, "config.json")
+        members = mod._collect_archive_members(archive_path, "config.json")
         assert len(members) == 1
         assert members[0][0] == "tar"
 
@@ -293,7 +293,7 @@ class TestCollectArchiveMembers:
         archive_path = tmp_path / "bundle.txt"
         archive_path.write_text("not-archive", encoding="utf-8")
         with pytest.raises(ValueError, match="Unsupported archive format"):
-            download_mod._collect_archive_members(archive_path, "model.onnx")
+            mod._collect_archive_members(archive_path, "model.onnx")
 
 
 class TestExtractRequiredFile:
@@ -303,18 +303,18 @@ class TestExtractRequiredFile:
         """tar メンバーを指定先へ抽出する。"""
         archive_path = tmp_path / "bundle.tar.gz"
         _create_tar_bundle(archive_path)
-        member = download_mod._collect_archive_members(archive_path, "model.onnx")[0][1]
+        member = mod._collect_archive_members(archive_path, "model.onnx")[0][1]
         destination = tmp_path / "out" / "model.onnx"
-        download_mod._extract_required_file(archive_path, "tar", member, destination, 1024 * 1024)
+        mod._extract_required_file(archive_path, "tar", member, destination, 1024 * 1024)
         assert destination.read_bytes() == b"onnx"
 
     def test_extracts_zip_member(self, tmp_path: Path) -> None:
         """zip メンバーを指定先へ抽出する。"""
         archive_path = tmp_path / "bundle.zip"
         _create_zip_bundle(archive_path)
-        member = download_mod._collect_archive_members(archive_path, "model.onnx")[0][1]
+        member = mod._collect_archive_members(archive_path, "model.onnx")[0][1]
         destination = tmp_path / "out" / "model.onnx"
-        download_mod._extract_required_file(archive_path, "zip", member, destination, 1024 * 1024)
+        mod._extract_required_file(archive_path, "zip", member, destination, 1024 * 1024)
         assert destination.read_bytes() == b"onnx"
 
     def test_raises_for_unsupported_kind(self, tmp_path: Path) -> None:
@@ -322,7 +322,7 @@ class TestExtractRequiredFile:
         archive_path = tmp_path / "bundle.zip"
         _create_zip_bundle(archive_path)
         with pytest.raises(ValueError, match="Unsupported archive kind"):
-            download_mod._extract_required_file(archive_path, "unknown", object(), tmp_path / "out.bin", 1024 * 1024)
+            mod._extract_required_file(archive_path, "unknown", object(), tmp_path / "out.bin", 1024 * 1024)
 
     def test_raises_when_extract_exceeds_limit(self, tmp_path: Path) -> None:
         """抽出サイズが上限を超えたら ValueError。"""
@@ -333,27 +333,27 @@ class TestExtractRequiredFile:
             archive.writestr("bundle/tokenizer.json", "{}")
             archive.writestr("bundle/config.json", "{}")
             archive.writestr("bundle/manifest.json", "{}")
-        member = download_mod._collect_archive_members(archive_path, "model.onnx")[0][1]
+        member = mod._collect_archive_members(archive_path, "model.onnx")[0][1]
         destination = tmp_path / "out" / "model.onnx"
         with pytest.raises(ValueError, match="exceeds size limit"):
-            download_mod._extract_required_file(archive_path, "zip", member, destination, 10)
+            mod._extract_required_file(archive_path, "zip", member, destination, 10)
 
     def test_copy_with_size_limit_empty_source(self) -> None:
         """空ソースは何も書かず正常終了する。"""
         src = io.BytesIO(b"")
         out = io.BytesIO()
-        download_mod._copy_with_size_limit(src, out, 1024, "test.bin")
+        mod._copy_with_size_limit(src, out, 1024, "test.bin")
         assert out.getvalue() == b""
 
     def test_raises_when_extractfile_returns_none(self, tmp_path: Path) -> None:
         """extractfile が None を返す場合は ValueError。"""
         archive_path = tmp_path / "bundle.tar.gz"
         _create_tar_bundle(archive_path)
-        member = download_mod._collect_archive_members(archive_path, "model.onnx")[0][1]
+        member = mod._collect_archive_members(archive_path, "model.onnx")[0][1]
         destination = tmp_path / "out" / "model.onnx"
         with patch.object(tarfile.TarFile, "extractfile", return_value=None):
             with pytest.raises(ValueError, match="not readable"):
-                download_mod._extract_required_file(archive_path, "tar", member, destination, 1024 * 1024)
+                mod._extract_required_file(archive_path, "tar", member, destination, 1024 * 1024)
 
 
 class TestDownloadModelBundle:
@@ -364,20 +364,20 @@ class TestDownloadModelBundle:
         output_dir = tmp_path / "models"
         output_dir.mkdir()
         (output_dir / "model.onnx").write_bytes(b"exists")
-        result = download_mod.download_model_bundle(tmp_path / "any.json", output_dir)
+        result = mod.download_model_bundle(tmp_path / "any.json", output_dir)
         assert result == 0
 
     def test_returns_three_when_config_missing(self, tmp_path: Path) -> None:
         """設定ファイル未作成なら 3（fallback 指示）。"""
         output_dir = tmp_path / "models"
-        result = download_mod.download_model_bundle(tmp_path / "missing.json", output_dir)
+        result = mod.download_model_bundle(tmp_path / "missing.json", output_dir)
         assert result == 3
 
     def test_returns_three_when_disabled(self, tmp_path: Path) -> None:
         """enabled=false なら 3（fallback 指示）。"""
         config_path = _write_config(tmp_path, enabled=False, model_url="https://github.com/x/model.zip")
         output_dir = tmp_path / "models"
-        result = download_mod.download_model_bundle(config_path, output_dir)
+        result = mod.download_model_bundle(config_path, output_dir)
         assert result == 3
 
     def test_raises_when_enabled_without_url(self, tmp_path: Path) -> None:
@@ -385,14 +385,14 @@ class TestDownloadModelBundle:
         config_path = _write_config(tmp_path, enabled=True, model_url="")
         output_dir = tmp_path / "models"
         with pytest.raises(ValueError, match="model_url is empty"):
-            download_mod.download_model_bundle(config_path, output_dir)
+            mod.download_model_bundle(config_path, output_dir)
 
     def test_raises_when_sha256_empty_and_enabled(self, tmp_path: Path) -> None:
         """enabled=true かつ sha256 が空なら ValueError。"""
         config_path = _write_config(tmp_path, enabled=True, model_url="https://github.com/x/model.zip", sha256="")
         output_dir = tmp_path / "models"
         with pytest.raises(ValueError, match="sha256 is required"):
-            download_mod.download_model_bundle(config_path, output_dir)
+            mod.download_model_bundle(config_path, output_dir)
 
     def test_downloads_and_extracts_zip_bundle(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """zip 配布物を取得して必須4ファイルを配置する。"""
@@ -406,9 +406,9 @@ class TestDownloadModelBundle:
         def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
-        monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
+        monkeypatch.setattr(mod, "_download_archive", _fake_download)
 
-        result = download_mod.download_model_bundle(config_path, output_dir)
+        result = mod.download_model_bundle(config_path, output_dir)
         assert result == 0
         for name in ("model.onnx", "tokenizer.json", "config.json", "manifest.json"):
             assert (output_dir / name).exists()
@@ -425,9 +425,9 @@ class TestDownloadModelBundle:
         def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
-        monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
+        monkeypatch.setattr(mod, "_download_archive", _fake_download)
 
-        result = download_mod.download_model_bundle(config_path, output_dir)
+        result = mod.download_model_bundle(config_path, output_dir)
         assert result == 0
         for name in ("model.onnx", "tokenizer.json", "config.json", "manifest.json"):
             assert (output_dir / name).exists()
@@ -446,10 +446,10 @@ class TestDownloadModelBundle:
         def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
-        monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
+        monkeypatch.setattr(mod, "_download_archive", _fake_download)
 
         with pytest.raises(ValueError, match="Expected exactly one tokenizer.json"):
-            download_mod.download_model_bundle(config_path, output_dir)
+            mod.download_model_bundle(config_path, output_dir)
 
     def test_verifies_sha256_when_provided(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """sha256 が設定されている場合、一致するアーカイブは通過する。"""
@@ -463,8 +463,8 @@ class TestDownloadModelBundle:
         def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
-        monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
-        result = download_mod.download_model_bundle(config_path, output_dir)
+        monkeypatch.setattr(mod, "_download_archive", _fake_download)
+        result = mod.download_model_bundle(config_path, output_dir)
         assert result == 0
 
     def test_raises_when_sha256_mismatch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -479,9 +479,9 @@ class TestDownloadModelBundle:
         def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
-        monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
+        monkeypatch.setattr(mod, "_download_archive", _fake_download)
         with pytest.raises(ValueError, match="SHA-256 mismatch"):
-            download_mod.download_model_bundle(config_path, output_dir)
+            mod.download_model_bundle(config_path, output_dir)
 
     def test_downloads_from_arbitrary_host(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """ホスト制限がないため任意ホストの HTTPS URL でもダウンロードできる。"""
@@ -498,9 +498,9 @@ class TestDownloadModelBundle:
         def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
             shutil.copy2(archive_path, destination)
 
-        monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
+        monkeypatch.setattr(mod, "_download_archive", _fake_download)
 
-        result = download_mod.download_model_bundle(config_path, output_dir)
+        result = mod.download_model_bundle(config_path, output_dir)
         assert result == 0
         for name in ("model.onnx", "tokenizer.json", "config.json", "manifest.json"):
             assert (output_dir / name).exists()
@@ -524,8 +524,36 @@ class TestDownloadModelBundle:
             received_ssl.append(ssl_no_verify)
             shutil.copy2(archive_path, destination)
 
-        monkeypatch.setattr(download_mod, "_download_archive", _fake_download)
+        monkeypatch.setattr(mod, "_download_archive", _fake_download)
 
-        result = download_mod.download_model_bundle(config_path, output_dir)
+        result = mod.download_model_bundle(config_path, output_dir)
         assert result == 0
         assert received_ssl == [True]
+
+
+class TestMain:
+    """main() および _parse_args() のテスト。"""
+
+    def test_main_exits_zero_on_success(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """download_model_bundle が 0 を返すと sys.exit(0)。"""
+        monkeypatch.setattr(mod, "download_model_bundle", lambda *_: 0)
+        monkeypatch.setattr("sys.argv", ["prog", "--config", str(tmp_path / "onnx.json"), "--out", str(tmp_path / "models")])
+        with pytest.raises(SystemExit) as exc_info:
+            mod.main()
+        assert exc_info.value.code == 0
+
+    def test_main_exits_three_when_disabled(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """download_model_bundle が 3 を返すと sys.exit(3)。"""
+        monkeypatch.setattr(mod, "download_model_bundle", lambda *_: 3)
+        monkeypatch.setattr("sys.argv", ["prog", "--config", str(tmp_path / "onnx.json"), "--out", str(tmp_path / "models")])
+        with pytest.raises(SystemExit) as exc_info:
+            mod.main()
+        assert exc_info.value.code == 3
+
+    def test_main_exits_one_on_exception(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """download_model_bundle が例外を投げると sys.exit(1)。"""
+        monkeypatch.setattr(mod, "download_model_bundle", lambda *_: (_ for _ in ()).throw(ValueError("fail")))
+        monkeypatch.setattr("sys.argv", ["prog", "--config", str(tmp_path / "onnx.json"), "--out", str(tmp_path / "models")])
+        with pytest.raises(SystemExit) as exc_info:
+            mod.main()
+        assert exc_info.value.code == 1
