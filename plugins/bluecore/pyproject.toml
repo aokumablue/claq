@@ -1,6 +1,6 @@
 [project]
 name = "bluecore"
-version = "0.9.1"
+version = "0.9.2"
 description = "開発に必要な汎用プラグイン集です。エージェント、スキル、フック、コマンドをまとめて導入し、計画・実装・検証・レビューの流れを揃えます。"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
