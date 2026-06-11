@@ -1,7 +1,7 @@
 """LLM CLI（claude / copilot）の実行環境を抽象化するヘルパー。
 
 環境判定:
-  CLAUDECODE=1 が設定されている → "claude"（Claude Code が自動設定）
+  ハーネスが claude（lib.harness.detect_harness）→ "claude"
   それ以外で copilot が PATH に存在 → "copilot"
   フォールバック → "claude"
 """
@@ -12,10 +12,12 @@ import os
 import shutil
 import subprocess
 
+from bluecore.lib.harness import detect_harness
+
 
 def detect_cli_binary() -> str:
     """実行環境に応じて使用する LLM CLI バイナリ名を返す。"""
-    if os.environ.get("CLAUDECODE"):
+    if detect_harness() == "claude":
         return "claude"
     if shutil.which("copilot"):
         return "copilot"

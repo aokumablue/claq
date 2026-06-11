@@ -31,3 +31,17 @@ def _fresh_runpy_module(monkeypatch: pytest.MonkeyPatch) -> None:
         return original_run_module(module_name, *args, **kwargs)
 
     monkeypatch.setattr(runpy, "run_module", run_module)
+
+
+@pytest.fixture(autouse=True)
+def _clear_harness_detection_cache():
+    """各テストの前後で detect_harness のメモ化キャッシュをクリアする。
+
+    ハーネス判定は環境変数を見るため、テスト間でキャッシュが漏れると
+    monkeypatch.setenv/delenv の効果が反映されない。
+    """
+    from bluecore.lib.harness import detect_harness
+
+    detect_harness.cache_clear()
+    yield
+    detect_harness.cache_clear()

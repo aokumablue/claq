@@ -1,27 +1,23 @@
-"""output-styles 非対応環境（GitHub Copilot 等）向けの slim フォールバック注入。
+"""output-styles 非対応環境（GitHub Copilot / Codex 等）向けの slim フォールバック注入。
 
 Claude Code では slim は output-style（force-for-plugin）として自動適用されるため、
-このフック注入は不要。CLAUDECODE 環境変数の有無で環境を判定する。
+このフック注入は不要。ハーネス判定は lib.harness.detect_harness に集約する。
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from bluecore.lib.core_utils import log
+from bluecore.lib.harness import detect_harness
 from bluecore.lib.sanitize import sanitize_log_value
 
 _SLIM_STYLE_PATH = Path(__file__).parents[3] / "output-styles" / "slim.md"
 
 
 def output_styles_supported() -> bool:
-    """output-styles が効く環境（Claude Code）かを返す。
-
-    Claude Code は CLAUDECODE 環境変数を設定するが、GitHub Copilot 等は設定しない
-    （判定シグナルは cli_runner.detect_cli_binary と同一）。
-    """
-    return bool(os.environ.get("CLAUDECODE"))
+    """output-styles が効く環境（Claude Code）かを返す。"""
+    return detect_harness() == "claude"
 
 
 def strip_frontmatter(text: str) -> str:
