@@ -17,15 +17,16 @@ import bluecore.launcher as launcher
 class FakeStdin:
     """stdin の代替オブジェクト。"""
 
-    def __init__(self, tty: bool, data: str) -> None:
+    def __init__(self, tty: bool, data: str | bytes) -> None:
         self._tty = tty
-        self._data = data
+        self._data = data.encode("utf-8") if isinstance(data, str) else data
         self.read_called = False
+        self.buffer = SimpleNamespace(read=self._read_bytes)
 
     def isatty(self) -> bool:
         return self._tty
 
-    def read(self, n: int = -1) -> str:
+    def _read_bytes(self, n: int = -1) -> bytes:
         self.read_called = True
         return self._data[:n] if n >= 0 else self._data
 
@@ -65,6 +66,24 @@ def test_main_reads_stdin_only_when_piped(
     assert result == 0
     assert captured.get("input", "") == expected_input
     assert capsys.readouterr().out == "ok"
+
+
+def test_main_decodes_non_utf8_stdin_with_replacement(monkeypatch, capsys) -> None:
+    """非 UTF-8 バイト列の stdin は置換文字でデコードしクラッシュしない。"""
+    fake_stdin = FakeStdin(False, b'{"command": "ls \xff\xfe"}')
+    captured = {}
+
+    monkeypatch.setattr(launcher.sys, "stdin", fake_stdin)
+    monkeypatch.setattr(launcher, "build_env", lambda: {})
+
+    def fake_run(*args, **kwargs):
+        captured["input"] = kwargs["input"]
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+
+    assert launcher.main(["dummy-target"]) == 0
+    assert captured["input"] == '{"command": "ls ��"}'
 
 
 def test_main_does_not_echo_piped_input_when_subprocess_is_silent(monkeypatch, capsys) -> None:
@@ -186,7 +205,7 @@ def test_main_covers_usage_stderr_and_entrypoint(
         captured["stderr"] = "child stderr"
         return SimpleNamespace(stdout="child stdout", stderr="child stderr", returncode=7)
 
-    monkeypatch.setattr(launcher.sys, "stdin", SimpleNamespace(isatty=lambda: False, read=lambda n=-1: "payload"))
+    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(False, "payload"))
     monkeypatch.setattr(launcher, "build_env", lambda: {})
     monkeypatch.setattr(launcher.subprocess, "run", fake_run)
 
@@ -198,7 +217,7 @@ def test_main_covers_usage_stderr_and_entrypoint(
 
 
 def test_main_handles_oserror_and_entrypoint(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr(launcher.sys, "stdin", SimpleNamespace(isatty=lambda: False, read=lambda n=-1: "payload"))
+    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(False, "payload"))
     monkeypatch.setattr(launcher, "build_env", lambda: {})
     monkeypatch.setattr(launcher.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("boom")))
 

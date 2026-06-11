@@ -145,7 +145,8 @@ def main(argv: list[str] | None = None) -> int:
     if sys.stdin.isatty():
         raw_input = ""
     else:
-        raw_input = sys.stdin.read()
+        # バイナリ混じりの出力（非 UTF-8）でも UnicodeDecodeError で落ちないよう置換デコード
+        raw_input = sys.stdin.buffer.read().decode("utf-8", errors="replace")
 
     try:
         result = subprocess.run(
