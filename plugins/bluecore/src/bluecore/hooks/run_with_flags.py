@@ -11,15 +11,19 @@ import math
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from bluecore.hooks.hook_common import (
+    BACKGROUND_HOOK_IDS,
     MAX_STDIN_BYTES,
     SESSION_START_HOOK_IDS,
     emit_session_start_output,
     write_stderr,
     write_stdout,
 )
+from bluecore.hooks.output_adapter import emit_block
+from bluecore.lib.harness import detect_harness
 from bluecore.lib.hook_flags import is_hook_enabled
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -198,6 +202,45 @@ def _drain_stdin() -> None:
         sys.stdin.read()
 
 
+def _detach_target(hook_id: str, target: str, target_args: list[str], raw: str) -> int:
+    """ターゲットを detached で起動し即座に 0 を返す。
+
+    "async": true を解釈しないハーネス（Codex 等）でフックが同期実行され
+    セッションをブロックするのを防ぐ。stdin は一時ファイル経由で渡し、
+    起動直後に unlink する（継承済み fd は有効なまま）。
+
+    Args:
+        hook_id: フック ID（エラーメッセージに使用）。
+        target: ターゲットのパスまたはモジュール名。
+        target_args: ターゲットへ渡す追加引数。
+        raw: 子プロセスへ渡す stdin。
+
+    Returns:
+        常に 0。起動失敗時も非ブロッキングエラーとして 0 を返す。
+    """
+    tmp = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".stdin", delete=False)
+    try:
+        tmp.write(raw)
+        tmp.close()
+        with open(tmp.name, encoding="utf-8") as stdin_fh:
+            subprocess.Popen(
+                resolve_target_command(target, target_args, plugin_root=REPO_ROOT),
+                stdin=stdin_fh,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=build_env(),
+                start_new_session=True,
+            )
+    except OSError as err:
+        write_stderr(f"[Hook] Error detaching {hook_id}: {err}\n")
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+    return 0
+
+
 def _run_target(hook_id: str, target: str, target_args: list[str], raw: str) -> int:
     """ターゲットをサブプロセスで実行し、stdout/stderr を転送して終了コードを返す。
 
@@ -233,6 +276,16 @@ def _run_target(hook_id: str, target: str, target_args: list[str], raw: str) -> 
 
     if hook_id in SESSION_START_HOOK_IDS and result.returncode != 0:
         return 0
+
+    if result.returncode == 2 and hook_id.startswith("pre:"):
+        # Copilot は exit 2 が fail-open のため permissionDecision: deny へ変換する。
+        # Claude / Codex では emit_block が (2, "", reason) を返し従来動作と同一。
+        reason = (result.stderr or "").strip() or f"Blocked by hook {hook_id}"
+        exit_code, deny_out, _ = emit_block(reason)
+        if deny_out:
+            write_stdout(deny_out)
+        return exit_code
+
     return result.returncode
 
 
@@ -263,8 +316,15 @@ def main() -> int:
 
     raw, truncated = read_raw_stdin_with_truncation()
     if truncated and hook_id in _TRUNCATION_GUARD_HOOK_IDS:
-        write_stderr(_truncation_blocked_message(hook_id, MAX_STDIN_BYTES) + "\n")
-        return 2
+        message = _truncation_blocked_message(hook_id, MAX_STDIN_BYTES)
+        exit_code, deny_out, _ = emit_block(message)
+        if deny_out:
+            write_stdout(deny_out)
+        write_stderr(message + "\n")
+        return exit_code
+
+    if hook_id in BACKGROUND_HOOK_IDS and detect_harness() != "claude":
+        return _detach_target(hook_id, target, target_args, raw)
 
     return _run_target(hook_id, target, target_args, raw)
 
