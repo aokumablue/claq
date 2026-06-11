@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from bluecore.hooks.output_adapter import adapt_context_output
+
 MAX_STDIN_BYTES = 1024 * 1024
 
 
@@ -130,28 +132,37 @@ SESSION_START_HOOK_IDS: frozenset[str] = frozenset(
 )
 
 
+# hooks.json で "async": true 指定されている run_with_flags 経由の hook_id 集合。
+# Claude Code はホスト側で非同期実行するが、Codex 等 async 未サポートのハーネスでは
+# run_with_flags が子プロセスを detach してフックを即時終了させる。
+# hooks.json の async エントリを増減する際はここも更新する。
+BACKGROUND_HOOK_IDS: frozenset[str] = frozenset(
+    {
+        "pre:observe",
+        "user:mem:sync-check",
+        "post:quality-gate",
+        "stop:session-end",
+        "stop:evaluate-session",
+        "session:end:marker",
+        "session:mem:end",
+    }
+)
+
+
 def _emit_hook_specific_output(event_name: str, additional_context: str) -> str:
-    """hookSpecificOutput でラップした JSON 文字列を返す。
+    """コンテキスト注入出力を実行中ハーネスのプロトコルで返す。
 
     Args:
         event_name: hookEventName に設定するイベント名。
         additional_context: コンテキストに注入する追加文字列。
 
     Returns:
-        hookSpecificOutput を含む JSON 文字列。
+        ハーネスのプロトコルに適合した JSON 文字列。
 
     Raises:
         例外は発生しません。
     """
-    return json.dumps(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": event_name,
-                "additionalContext": additional_context,
-            }
-        },
-        ensure_ascii=False,
-    )
+    return adapt_context_output(event_name, additional_context)
 
 
 def emit_session_start_output(additional_context: str = "") -> str:
