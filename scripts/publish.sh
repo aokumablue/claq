@@ -1,78 +1,206 @@
 #!/bin/bash
-# bluecore（ユーザー向けリポジトリ）に dev ファイルを除いたスナップショットを push する
+# bluecore（ユーザー向け公開リポジトリ）へ dev スナップショットを線形履歴で公開する。
 #
 # 使い方:
-#   ./scripts/publish.sh [--message <msg>] [--no-commit]
+#   ./scripts/publish.sh [--no-push]
 #
-#   --message <msg>  コミットメッセージ（"release: <msg>" 形式）。省略時は commit hash。
-#   --no-commit      コミット・push せずファイルだけ $PUBLISH_REMOTE に展開する。
+#   --no-push   版アップ・コミット・publish コミット構築までローカルで実施し、
+#               dev / publish 両 origin への push を省略する（検証用）。
+#
+# 動作:
+#   1. dev 作業ツリーが clean か確認（未コミット変更があれば中断）
+#   2. 公開先 origin/main の版を末尾桁 +1 した新版を算出
+#   3. version-up.sh で dev の版ファイルを更新し pytest+ruff を通してコミット
+#   4. dev スナップショット（dev 専用ファイル除外）を公開先 origin/main の上に
+#      線形リリースコミットとして構築
+#   5. dev origin → publish origin の順に push
+#
+# 次版は「公開先 origin/main の公開版 +1」から導出するため、push 失敗後に
+# 再実行しても版が飛ばず安全に再開できる。
 set -euo pipefail
 
 PUBLISH_REMOTE="${BLUECORE_PUBLISH_REMOTE:-$HOME/dev/bluecore}"
-MESSAGE=""
-NO_COMMIT=false
+VENV="${BLUECORE_VENV:-$HOME/.bluecore/.venv}"
+NO_PUSH=false
+TMPDIR=""
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/publish.sh [--no-push]
+
+  --no-push   ローカル構築のみ実施し dev / publish への push を省略（検証用）
+  --help      このヘルプを表示
+EOF
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --message)
-      MESSAGE="$2"
-      shift 2
-      ;;
-    --message=*)
-      MESSAGE="${1#--message=}"
+    --no-push)
+      NO_PUSH=true
       shift
       ;;
-    --no-commit)
-      NO_COMMIT=true
-      shift
+    --help|-h)
+      usage
+      exit 0
       ;;
     *)
       echo "Unknown option: $1" >&2
+      usage >&2
       exit 1
       ;;
   esac
 done
 
+trap 'if [[ -n "${TMPDIR}" ]]; then rm -rf "${TMPDIR}"; fi' EXIT
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}"
+
+PLUGIN_JSON="plugins/bluecore/.claude-plugin/plugin.json"
+VERSION_FILES=(
+  "plugins/bluecore/pyproject.toml"
+  "${PLUGIN_JSON}"
+  ".claude-plugin/marketplace.json"
+  "plugins/bluecore/src/bluecore/mem/__init__.py"
+)
+
+# プラグイン版を JSON から読む（引数: plugin.json のパス）
+read_version() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$1"
+}
+
+# 末尾桁 +1（引数: X.Y.Z → X.Y.(Z+1)）
+bump_patch() {
+  python3 -c '
+import sys
+parts = sys.argv[1].split(".")
+if len(parts) != 3 or not all(p.isdigit() for p in parts):
+    sys.exit(f"invalid version: {sys.argv[1]}")
+parts[2] = str(int(parts[2]) + 1)
+print(".".join(parts))
+' "$1"
+}
+
+# pytest + ruff ゲート（venv のバイナリを直接実行）
+run_gate() {
+  echo "Running test gate (pytest + ruff)..."
+  if [[ ! -x "${VENV}/bin/python" ]]; then
+    echo "ERROR: venv が見つかりません: ${VENV}" >&2
+    return 1
+  fi
+  "${VENV}/bin/python" -m pytest -q || return 1
+  "${VENV}/bin/ruff" check plugins/bluecore/src || return 1
+  return 0
+}
+
+# ── Preflight（検証のみ・無変更）──
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "ERROR: 作業ツリーに未コミット変更があります。コミットまたは退避してから再実行してください。" >&2
+  git status --short >&2
+  exit 1
+fi
+
+if [[ ! -d "${PUBLISH_REMOTE}/.git" ]]; then
+  echo "ERROR: 公開先リポジトリが見つかりません: ${PUBLISH_REMOTE}" >&2
+  exit 1
+fi
+
+echo "Fetching publish origin..."
+git -C "${PUBLISH_REMOTE}" fetch --quiet origin
+if ! git -C "${PUBLISH_REMOTE}" rev-parse --verify --quiet origin/main >/dev/null; then
+  echo "ERROR: ${PUBLISH_REMOTE} に origin/main がありません。" >&2
+  exit 1
+fi
+
+PUBLISHED="$(git -C "${PUBLISH_REMOTE}" show "origin/main:${PLUGIN_JSON}" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+DEVVER="$(read_version "${PLUGIN_JSON}")"
+NEXT="$(bump_patch "${PUBLISHED}")"
+echo "公開版: ${PUBLISHED} / dev版: ${DEVVER} / 次版: ${NEXT}"
+
+# ── モード判定（冪等再開）──
+if [[ "${DEVVER}" == "${PUBLISHED}" ]]; then
+  MODE="normal"
+elif [[ "${DEVVER}" == "${NEXT}" ]]; then
+  MODE="resume"
+  echo "再開モード: dev は既に v${NEXT}。版アップをスキップします。"
+else
+  echo "ERROR: 版が不整合です (dev=${DEVVER}, published=${PUBLISHED})。手動で確認してください。" >&2
+  exit 1
+fi
+
+# ── 版アップ + テストゲート + コミット ──
+if [[ "${MODE}" == "normal" ]]; then
+  echo "Bumping version ${DEVVER} -> ${NEXT}..."
+  bash scripts/version-up.sh --version "${NEXT}"
+  if ! run_gate; then
+    git restore -- "${VERSION_FILES[@]}"
+    echo "ERROR: テストゲート失敗。版アップを巻き戻しました（push なし）。" >&2
+    exit 1
+  fi
+  git add -- "${VERSION_FILES[@]}"
+  git commit -m "release: v${NEXT}"
+else
+  if ! run_gate; then
+    echo "ERROR: テストゲート失敗（再開モード、push なし）。" >&2
+    exit 1
+  fi
+fi
+
+# ── publish スナップショット構築（ローカル）──
 TMPDIR="$(mktemp -d)"
-trap "rm -rf $TMPDIR" EXIT
 
-echo "Cloning bluecore-dev..."
-git clone --local --no-hardlinks . "$TMPDIR/repo"
-cd "$TMPDIR/repo"
+echo "Cloning and filtering dev snapshot..."
+git clone --quiet --local --no-hardlinks . "${TMPDIR}/repo"
+(
+  cd "${TMPDIR}/repo"
+  git filter-repo \
+    --invert-paths \
+    --path plugins/bluecore/tests/ \
+    --path plugins/bluecore/onnx/ \
+    --path plugins/bluecore/src/model_build/ \
+    --path scripts/ \
+    --path CLAUDE.md \
+    --path conftest.py \
+    --force
+)
 
-echo "Filtering dev-only files..."
-git filter-repo \
-  --invert-paths \
-  --path plugins/bluecore/tests/ \
-  --path plugins/bluecore/onnx/ \
-  --path plugins/bluecore/src/model_build/ \
-  --path scripts/ \
-  --path CLAUDE.md \
-  --path conftest.py \
-  --force
+echo "Building linear release commit on publish repo..."
+git -C "${PUBLISH_REMOTE}" fetch --no-tags --quiet "${TMPDIR}/repo" HEAD
+TREE="$(git -C "${PUBLISH_REMOTE}" rev-parse 'FETCH_HEAD^{tree}')"
+PARENT="$(git -C "${PUBLISH_REMOTE}" rev-parse origin/main)"
+NEW="$(git -C "${PUBLISH_REMOTE}" commit-tree "${TREE}" -p "${PARENT}" -m "release: v${NEXT}")"
+git -C "${PUBLISH_REMOTE}" update-ref refs/heads/main "${NEW}"
+git -C "${PUBLISH_REMOTE}" reset --quiet --hard main
 
-if [[ "$NO_COMMIT" == true ]]; then
-  echo "Extracting files to $PUBLISH_REMOTE (no commit)..."
-  git archive HEAD | tar -x -C "$PUBLISH_REMOTE"
-  echo "Done: files extracted to $PUBLISH_REMOTE (commit manually)"
+if ! git -C "${PUBLISH_REMOTE}" merge-base --is-ancestor "${PARENT}" "${NEW}"; then
+  echo "ERROR: 構築したコミットが origin/main の子孫ではありません（fast-forward 不可）。" >&2
+  exit 1
+fi
+
+# ── push（最後・不可逆）──
+if [[ "${NO_PUSH}" == true ]]; then
+  echo ""
+  echo "=== --no-push: ローカル構築完了（push なし）==="
+  echo "  dev    : $(git rev-parse --short HEAD)  release: v${NEXT}"
+  echo "  publish: $(git -C "${PUBLISH_REMOTE}" rev-parse --short main)  (parent: $(git -C "${PUBLISH_REMOTE}" rev-parse --short origin/main))"
+  echo "  push するには --no-push なしで再実行してください。"
   exit 0
 fi
 
-echo "Squashing to single release commit..."
-RELEASE_TAG="$(git log -1 --format='%h')"
-git checkout --orphan release
-git add -A
-git commit -m "release: ${MESSAGE:-$RELEASE_TAG}"
-git branch -D main
-git branch -m main
+echo "Pushing dev to origin..."
+if ! git push origin HEAD:main; then
+  echo "ERROR: dev の push に失敗しました。再実行で再開できます（版は飛びません）。" >&2
+  exit 1
+fi
 
-echo "Pushing to $PUBLISH_REMOTE..."
-# $PUBLISH_REMOTE は非 bare で main をチェックアウト済みのため、既定の
-# receive.denyCurrentBranch=refuse では現在ブランチへの push が拒否される。
-# updateInstead を設定すると push が ref と作業ツリーを安全に（作業ツリーが
-# clean なときだけ）更新する。dirty なら push 自体を拒否するので破壊もない。
-git -C "$PUBLISH_REMOTE" config receive.denyCurrentBranch updateInstead
-git remote add publish "$PUBLISH_REMOTE"
-git push publish HEAD:main --force
+echo "Pushing publish to origin..."
+if ! git -C "${PUBLISH_REMOTE}" push origin main; then
+  echo "ERROR: publish の push に失敗しました。再実行で再開できます（版は飛びません）。" >&2
+  exit 1
+fi
 
-echo "Done: published to $PUBLISH_REMOTE"
+echo ""
+echo "Done: v${NEXT} を公開しました。"
+echo "  dev    : $(git rev-parse --short HEAD)"
+echo "  publish: $(git -C "${PUBLISH_REMOTE}" rev-parse --short main)"
