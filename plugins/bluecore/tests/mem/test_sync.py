@@ -1118,15 +1118,15 @@ class TestSyncLogVisibility:
         assert result.error == "PostgreSQL への接続に失敗しました"
         assert any("PG 接続失敗" in r.message and r.levelno == logging.ERROR for r in caplog.records)
 
-    def test_sync_to_postgres_logs_error_with_traceback_on_exception(
+    def test_sync_to_postgres_logs_masked_error_without_traceback(
         self, mock_settings, monkeypatch, caplog
     ):
-        """例外発生時に error + exc_info が出て、プロセスが継続することを確認する。"""
+        """例外発生時はマスク済みメッセージのみを error ログし、traceback（接続情報混入経路）は出さない。"""
         import logging
 
         class BoomDatabase:
             def __init__(self, path):  # noqa: ANN001
-                raise RuntimeError("DB 接続失敗")
+                raise RuntimeError("connection failed: postgresql://user:TESTPASSWORD@host/db")
 
         monkeypatch.setattr("bluecore.mem.sync.Database", BoomDatabase)
 
@@ -1136,10 +1136,11 @@ class TestSyncLogVisibility:
         # result.error は _mask_url を通すためパスワード断片を含まない
         assert result.error is not None
         assert "TESTPASSWORD" not in (result.error or "")
-        # exc_info=True が付いているので traceback が caplog に含まれる
+        # ログメッセージもマスク済みで、traceback は付けない
         error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
         assert error_records, "error レベルのログが出ていない"
-        assert error_records[-1].exc_info is not None
+        assert error_records[-1].exc_info is None
+        assert "TESTPASSWORD" not in error_records[-1].getMessage()
 
     def test_resolve_sync_lock_path_falls_back_when_path_invalid(self, monkeypatch):
         """sync_lock_path が Path 化できないオブジェクトのとき、HOME 配下にフォールバックする（lines 134-135）。"""
@@ -1208,11 +1209,16 @@ class TestSyncLogVisibility:
         masked_empty = _mask_url("postgresql://user:@host/db")
         assert "user:" in masked_empty
         assert "@host" in masked_empty
-        # urlparse が例外を投げる場合は元の URL をそのまま返す
+        # 文中に埋め込まれた URL（例外メッセージ等）もマスクされる
+        assert (
+            _mask_url("connection failed: postgresql://user:secret@host/db (timeout)")
+            == "connection failed: postgresql://user:***@host/db (timeout)"
+        )
+        # urlparse が例外を投げる場合もフォールバック正規表現でマスクされる
         import bluecore.mem.sync as sync_mod
 
         monkeypatch.setattr(sync_mod, "urlparse", lambda url: (_ for _ in ()).throw(ValueError("parse error")))
-        assert _mask_url("postgresql://user:secret@host/db") == "postgresql://user:secret@host/db"
+        assert _mask_url("postgresql://user:secret@host/db") == "postgresql://user:***@host/db"
 
 
 def test_count_pending_rows_invalid_table() -> None:
