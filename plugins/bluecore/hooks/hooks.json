@@ -85,7 +85,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.session_install",
-            "timeout": 150
+            "timeout": 300
           }
         ],
         "description": "プラグイン初回/更新時の自動インストールと .venv symlink 修復（ONNX ビルドはバックグラウンド実行）"

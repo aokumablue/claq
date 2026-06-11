@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from bluecore.hooks._install_lock import install_lock
@@ -25,6 +26,12 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 _BLUECORE_DIR = Path.home() / BASE_DIR_NAME
 _VERSION_FILE = _BLUECORE_DIR / "plugin_installed_version"
 _VENV_DIR = Path.home() / BASE_DIR_NAME / ".venv"
+_MODEL_ONNX = _BLUECORE_DIR / "models" / "model.onnx"
+_ONNX_LAST_ATTEMPT = _BLUECORE_DIR / "onnx_last_attempt"
+# ONNX 取得のバックグラウンドリトライ間隔（秒）。flock が多重実行を防ぐため起動頻度の抑制のみ
+_ONNX_RETRY_INTERVAL = 3600.0
+# pip フルインストールと symlink 張りを許容しつつ hooks.json の timeout(300) より先に自決する
+_INSTALL_TIMEOUT = 280.0
 
 
 def _session_start_output() -> str:
@@ -85,6 +92,53 @@ def _repair_venv_symlink(plugin_root: Path) -> None:
         print(f"[SessionInstall] .venv symlink 修復: {link} -> {_VENV_DIR}", file=sys.stderr)
     except OSError as e:
         print(f"[SessionInstall] symlink 作成失敗: {_sanitize_exception(e)}", file=sys.stderr)
+
+
+def _ensure_onnx_model(plugin_root: Path) -> None:
+    """model.onnx 不在時にバックグラウンド取得スクリプトを detached 起動する。
+
+    前回試行から _ONNX_RETRY_INTERVAL 秒以内ならスキップする（多重実行自体は
+    スクリプト側の flock が防ぐため、ここでは起動頻度の抑制のみ行う）。
+
+    Args:
+        plugin_root: プラグインルートディレクトリのパス。
+
+    Returns:
+        None: 値を返しません。
+
+    Raises:
+        例外は発生しません。
+    """
+    if _MODEL_ONNX.exists():
+        return
+    try:
+        last_attempt = float(_ONNX_LAST_ATTEMPT.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        last_attempt = 0.0
+    if time.time() - last_attempt < _ONNX_RETRY_INTERVAL:
+        return
+    bg_script = plugin_root / "onnx" / "_run_onnx_background.sh"
+    if not bg_script.is_file():
+        print(f"[SessionInstall] ONNX バックグラウンドスクリプトがありません: {bg_script}", file=sys.stderr)
+        return
+    # 最小限の環境のみ渡し、PYTHONPATH/LD_PRELOAD 等の汚染を防ぐ（install.sh の env -i と同等）
+    env = {
+        "HOME": str(Path.home()),
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "LANG": os.environ.get("LANG", "C"),
+    }
+    try:
+        subprocess.Popen(
+            ["bash", str(bg_script)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            start_new_session=True,
+        )
+        print("[SessionInstall] ONNX モデル取得をバックグラウンド起動しました", file=sys.stderr)
+    except OSError as e:
+        print(f"[SessionInstall] ONNX バックグラウンド起動失敗: {_sanitize_exception(e)}", file=sys.stderr)
 
 
 def _resolve_plugin_root() -> Path | None:
@@ -206,8 +260,12 @@ def _run_install(install_sh: Path) -> subprocess.CompletedProcess[str] | None:
         subprocess.CompletedProcess。実行失敗時は None。
     """
     try:
-        # BLUECORE_INSTALL_ONNX_ASYNC=1 で ONNX ビルドをバックグラウンドに切り出す（タイムアウト回避）
-        return run_text(["bash", str(install_sh)], timeout=120, extra_env={"BLUECORE_INSTALL_ONNX_ASYNC": "1"})
+        # BLUECORE_INSTALL_ONNX_ASYNC=1 で ONNX 取得をバックグラウンドに切り出す（タイムアウト回避）
+        return run_text(
+            ["bash", str(install_sh)],
+            timeout=_INSTALL_TIMEOUT,
+            extra_env={"BLUECORE_INSTALL_ONNX_ASYNC": "1"},
+        )
     except (subprocess.SubprocessError, OSError) as e:
         print(f"[SessionInstall] install.sh の実行に失敗しました: {_sanitize_exception(e)}", file=sys.stderr)
         return None
@@ -294,6 +352,7 @@ def run(_raw_input: str) -> str:
     if current_version is not None and installed_version == current_version:
         if _should_repair_venv_symlink(plugin_root):
             _repair_venv_symlink(plugin_root)
+        _ensure_onnx_model(plugin_root)
         print(f"[SessionInstall] 既にインストール済みです: {sanitize_log_value(str(current_version))}", file=sys.stderr)
         return _session_start_output()
 
@@ -309,8 +368,9 @@ def run(_raw_input: str) -> str:
 
     if _should_repair_venv_symlink(plugin_root):
         _repair_venv_symlink(plugin_root)
-    if not (Path.home() / ".bluecore" / "models" / "model.onnx").exists():
-        print("[SessionInstall] onnx building...", file=sys.stderr)
+    if not _MODEL_ONNX.exists():
+        # install.sh が ONNX 取得をバックグラウンド起動済み（flock が多重実行を防ぐ）
+        print("[SessionInstall] ONNX モデル取得をバックグラウンドで実行中です", file=sys.stderr)
 
     return _session_start_output()
 

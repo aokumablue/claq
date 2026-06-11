@@ -245,6 +245,19 @@ install_user_python() {
 
   if [[ -f "${model_onnx}" ]]; then
     echo "[bluecore] ONNX model already present (skipping): ${model_onnx}"
+  elif [[ "${BLUECORE_INSTALL_ONNX_ASYNC:-0}" == "1" ]]; then
+    # SessionStart 経由: ダウンロードもビルドもバックグラウンドへ委譲し、
+    # install.sh をフックの timeout 内で確実に完了させる（version 記録と ONNX 取得の分離）
+    local bg_script="${SCRIPT_DIR}/onnx/_run_onnx_background.sh"
+    if [[ ! -f "${bg_script}" ]]; then
+      echo "[bluecore] Warning: ONNX background script not found: ${bg_script}" >&2
+    else
+      echo "[bluecore] Launching ONNX model acquisition in background. Log: ${HOME}/.bluecore/logs/modelbuild.log"
+      # env -i で最小限の環境のみ渡し、PYTHONPATH/LD_PRELOAD 等の汚染を防ぐ
+      env -i HOME="${HOME}" PATH="${PATH}" LANG="${LANG:-C}" \
+        nohup setsid bash "${bg_script}" </dev/null >/dev/null 2>&1 &
+      disown
+    fi
   elif "${VENV_PYTHON}" -m bluecore.onnx_download --config "${onnx_config}" --out "${model_target}"; then
     echo "[bluecore] ONNX model downloaded: ${model_onnx}"
   else
@@ -253,27 +266,13 @@ install_user_python() {
       exit "${download_status}"
     fi
 
-    # config が disabled / 未設定なら、現行の生成処理へフォールバックする。
-    if [[ "${BLUECORE_INSTALL_ONNX_ASYNC:-0}" == "1" ]]; then
-      local bg_script="${SCRIPT_DIR}/onnx/_run_onnx_background.sh"
-      if [[ ! -f "${bg_script}" ]]; then
-        echo "[bluecore] Warning: ONNX background script not found: ${bg_script}" >&2
-      else
-        echo "[bluecore] Launching ONNX build in background. Log: ${HOME}/.bluecore/logs/modelbuild.log"
-        # env -i で最小限の環境のみ渡し、PYTHONPATH/LD_PRELOAD 等の汚染を防ぐ
-        env -i HOME="${HOME}" PATH="${PATH}" LANG="${LANG:-C}" \
-          nohup setsid bash "${bg_script}" </dev/null >/dev/null 2>&1 &
-        disown
-      fi
+    # 手動実行で config が disabled / 未設定なら、現行の生成処理へフォールバックする。
+    if [[ -f "${SCRIPT_DIR}/onnx/_build_onnx_lib.sh" ]]; then
+      # shellcheck source=onnx/_build_onnx_lib.sh
+      source "${SCRIPT_DIR}/onnx/_build_onnx_lib.sh"
+      build_onnx_if_missing "${model_target}" "fp16"
     else
-      # 手動実行: 従来どおり同期ビルド
-      if [[ -f "${SCRIPT_DIR}/onnx/_build_onnx_lib.sh" ]]; then
-        # shellcheck source=onnx/_build_onnx_lib.sh
-        source "${SCRIPT_DIR}/onnx/_build_onnx_lib.sh"
-        build_onnx_if_missing "${model_target}" "fp16"
-      else
-        echo "[bluecore] Warning: ONNX build scripts not available. Please build manually." >&2
-      fi
+      echo "[bluecore] Warning: ONNX build scripts not available. Please build manually." >&2
     fi
   fi
 

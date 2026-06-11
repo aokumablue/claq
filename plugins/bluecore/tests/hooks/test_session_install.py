@@ -60,6 +60,20 @@ class TestResolvePluginRoot:
         assert session_install._resolve_plugin_root() is None
         assert "不正なプラグインルート" in capsys.readouterr().err
 
+    def test_returns_none_when_root_mismatch(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        other_root = tmp_path / "other"
+        other_root.mkdir()
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(other_root))
+        monkeypatch.setattr(session_install, "_PLUGIN_ROOT", tmp_path)
+
+        assert session_install._resolve_plugin_root() is None
+        assert "不正なプラグインルート" in capsys.readouterr().err
+
     def test_returns_resolved_root_when_valid(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         plugin_json = tmp_path / ".claude-plugin" / "plugin.json"
         plugin_json.parent.mkdir()
@@ -258,13 +272,13 @@ class TestRun:
 
         assert captured_extra_env.get("BLUECORE_INSTALL_ONNX_ASYNC") == "1"
 
-    def test_warns_onnx_building_when_model_missing(
+    def test_warns_onnx_acquisition_when_model_missing(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """install 成功後 model.onnx が無いなら 'onnx building...' を出力する。"""
+        """install 成功後 model.onnx が無いならバックグラウンド実行中の旨を出力する。"""
         plugin_root = _make_plugin_root(tmp_path, "0.0.3")
         install_sh = plugin_root / "install.sh"
         install_sh.write_text("#!/usr/bin/env bash\n")
@@ -277,7 +291,7 @@ class TestRun:
         monkeypatch.setattr(session_install, "_BLUECORE_DIR", tmp_path)
         # model.onnx が存在しない状態をシミュレート
         model_onnx = tmp_path / "models" / "model.onnx"
-        monkeypatch.setattr(session_install.Path, "home", lambda: tmp_path)
+        monkeypatch.setattr(session_install, "_MODEL_ONNX", model_onnx)
 
         fake_result = MagicMock(spec=subprocess.CompletedProcess)
         fake_result.stdout = ""
@@ -288,16 +302,16 @@ class TestRun:
             session_install.run("")
 
         err = capsys.readouterr().err
-        assert "onnx building..." in err
+        assert "ONNX モデル取得をバックグラウンドで実行中です" in err
         assert model_onnx.exists() is False  # model.onnx はまだない
 
-    def test_does_not_warn_onnx_building_when_model_present(
+    def test_does_not_warn_onnx_acquisition_when_model_present(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """model.onnx が存在するなら 'onnx building...' を出力しない。"""
+        """model.onnx が存在するならバックグラウンド実行中の旨を出力しない。"""
         plugin_root = _make_plugin_root(tmp_path, "0.0.3")
         install_sh = plugin_root / "install.sh"
         install_sh.write_text("#!/usr/bin/env bash\n")
@@ -309,10 +323,11 @@ class TestRun:
         monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
         monkeypatch.setattr(session_install, "_BLUECORE_DIR", tmp_path)
         # model.onnx が存在する状態をシミュレート
-        model_dir = tmp_path / ".bluecore" / "models"
+        model_dir = tmp_path / "models"
         model_dir.mkdir(parents=True)
-        (model_dir / "model.onnx").write_bytes(b"")
-        monkeypatch.setattr(session_install.Path, "home", lambda: tmp_path)
+        model_onnx = model_dir / "model.onnx"
+        model_onnx.write_bytes(b"")
+        monkeypatch.setattr(session_install, "_MODEL_ONNX", model_onnx)
 
         fake_result = MagicMock(spec=subprocess.CompletedProcess)
         fake_result.stdout = ""
@@ -323,7 +338,7 @@ class TestRun:
             session_install.run("")
 
         err = capsys.readouterr().err
-        assert "onnx building..." not in err
+        assert "ONNX モデル取得をバックグラウンドで実行中です" not in err
 
     def test_install_stdout_stderr_routed_to_stderr(
         self,
@@ -724,3 +739,96 @@ def test_run_success_without_repair(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(session_install, "_should_repair_venv_symlink", lambda r: False)
     out = session_install.run("")
     assert isinstance(out, str)
+
+
+class TestEnsureOnnxModel:
+    """_ensure_onnx_model のテスト。"""
+
+    def _setup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, with_script: bool = True) -> Path:
+        """model 不在・試行記録なしの基本状態を作り plugin_root を返す。"""
+        monkeypatch.setattr(session_install, "_MODEL_ONNX", tmp_path / "models" / "model.onnx")
+        monkeypatch.setattr(session_install, "_ONNX_LAST_ATTEMPT", tmp_path / "onnx_last_attempt")
+        plugin_root = tmp_path / "plugin"
+        if with_script:
+            script = plugin_root / "onnx" / "_run_onnx_background.sh"
+            script.parent.mkdir(parents=True)
+            script.write_text("#!/usr/bin/env bash\n")
+        return plugin_root
+
+    def test_skips_when_model_present(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """model.onnx が存在すれば何もしない。"""
+        plugin_root = self._setup(tmp_path, monkeypatch)
+        model = tmp_path / "models" / "model.onnx"
+        model.parent.mkdir(parents=True)
+        model.write_bytes(b"")
+        with patch.object(session_install.subprocess, "Popen") as mock_popen:
+            session_install._ensure_onnx_model(plugin_root)
+        mock_popen.assert_not_called()
+
+    def test_skips_when_recent_attempt(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """前回試行がリトライ間隔内ならスキップする。"""
+        plugin_root = self._setup(tmp_path, monkeypatch)
+        (tmp_path / "onnx_last_attempt").write_text(str(session_install.time.time()))
+        with patch.object(session_install.subprocess, "Popen") as mock_popen:
+            session_install._ensure_onnx_model(plugin_root)
+        mock_popen.assert_not_called()
+
+    def test_invalid_attempt_file_treated_as_stale(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """試行記録が不正値なら 0 扱いで起動する。"""
+        plugin_root = self._setup(tmp_path, monkeypatch)
+        (tmp_path / "onnx_last_attempt").write_text("not-a-number")
+        with patch.object(session_install.subprocess, "Popen") as mock_popen:
+            session_install._ensure_onnx_model(plugin_root)
+        mock_popen.assert_called_once()
+        assert "バックグラウンド起動しました" in capsys.readouterr().err
+
+    def test_warns_when_script_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """バックグラウンドスクリプト不在なら警告して終了する。"""
+        plugin_root = self._setup(tmp_path, monkeypatch, with_script=False)
+        with patch.object(session_install.subprocess, "Popen") as mock_popen:
+            session_install._ensure_onnx_model(plugin_root)
+        mock_popen.assert_not_called()
+        assert "バックグラウンドスクリプトがありません" in capsys.readouterr().err
+
+    def test_launches_detached_with_minimal_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """detached（start_new_session）かつ最小限の環境変数で起動する。"""
+        plugin_root = self._setup(tmp_path, monkeypatch)
+        with patch.object(session_install.subprocess, "Popen") as mock_popen:
+            session_install._ensure_onnx_model(plugin_root)
+        mock_popen.assert_called_once()
+        kwargs = mock_popen.call_args.kwargs
+        assert kwargs["start_new_session"] is True
+        assert set(kwargs["env"]) == {"HOME", "PATH", "LANG"}
+        cmd = mock_popen.call_args.args[0]
+        assert cmd[0] == "bash"
+        assert cmd[1].endswith("_run_onnx_background.sh")
+
+    def test_popen_oserror_is_caught(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Popen の OSError は捕捉してエラー出力する。"""
+        plugin_root = self._setup(tmp_path, monkeypatch)
+        with patch.object(session_install.subprocess, "Popen", side_effect=OSError("spawn")):
+            session_install._ensure_onnx_model(plugin_root)
+        assert "ONNX バックグラウンド起動失敗" in capsys.readouterr().err
+
+    def test_version_match_fast_path_calls_ensure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """version 一致の fast path で _ensure_onnx_model が呼ばれる。"""
+        monkeypatch.setattr(session_install, "_resolve_plugin_root", lambda: tmp_path)
+        monkeypatch.setattr(session_install, "_get_plugin_version", lambda r: "1.0")
+        monkeypatch.setattr(session_install, "_get_installed_version", lambda: "1.0")
+        monkeypatch.setattr(session_install, "_should_repair_venv_symlink", lambda r: False)
+        called: list[Path] = []
+        monkeypatch.setattr(session_install, "_ensure_onnx_model", called.append)
+        session_install.run("")
+        assert called == [tmp_path]

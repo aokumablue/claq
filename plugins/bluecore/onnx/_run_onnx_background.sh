@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# _run_onnx_background.sh — ONNX ビルドを排他制御付きでバックグラウンド実行する。
-# install.sh から BLUECORE_INSTALL_ONNX_ASYNC=1 のとき nohup setsid で起動される。
-# 直接実行しない（install.sh から使用）。
+# _run_onnx_background.sh — ONNX モデル取得を排他制御付きでバックグラウンド実行する。
+# 外部配布ダウンロードを先に試行し、config disabled（exit 3）のときのみビルドへ
+# フォールバックする。install.sh（BLUECORE_INSTALL_ONNX_ASYNC=1）と SessionStart の
+# session_install から nohup setsid / detached で起動される。
+# 直接実行しない。
 
 set -euo pipefail
 
@@ -34,6 +36,35 @@ if ! flock -n 200; then
   exit 0
 fi
 
+# 試行時刻を記録する（SessionStart の session_install がリトライ間隔の判定に使う）
+date +%s > "${HOME}/.bluecore/onnx_last_attempt"
+
+if [[ -f "${MODEL_TARGET}/model.onnx" ]]; then
+  echo "[onnx-bg] model already present, exiting" >> "${LOG_FILE}"
+  exit 0
+fi
+
+# 第 1 段: 外部配布ダウンロード（exit 3 = config disabled → ビルドへフォールバック）
+VENV_PYTHON="${HOME}/.bluecore/.venv/bin/python3"
+ONNX_CONFIG="${SCRIPT_DIR}/../onnx.json"
+download_status=3
+if [[ -x "${VENV_PYTHON}" && -f "${ONNX_CONFIG}" ]]; then
+  if "${VENV_PYTHON}" -m bluecore.onnx_download --config "${ONNX_CONFIG}" --out "${MODEL_TARGET}" \
+      >> "${LOG_FILE}" 2>&1; then
+    echo "[onnx-bg] model downloaded: ${MODEL_TARGET}/model.onnx" >> "${LOG_FILE}"
+    exit 0
+  fi
+  download_status=$?
+fi
+
+if [[ "${download_status}" != "3" ]]; then
+  # ネットワーク等の一時障害: ビルド（巨大依存の取得）も失敗する公算が高いので
+  # ここでは終了し、次回 SessionStart のリトライに委ねる
+  echo "[onnx-bg] download failed (exit ${download_status}), will retry on next session" >> "${LOG_FILE}"
+  exit 1
+fi
+
+# 第 2 段: config disabled / venv 未準備時は現行のローカルビルドへフォールバック
 # shellcheck source=_build_onnx_lib.sh
 source "${SCRIPT_DIR}/_build_onnx_lib.sh"
 build_onnx_if_missing "${MODEL_TARGET}" "fp16" >> "${LOG_FILE}" 2>&1
