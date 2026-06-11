@@ -1,0 +1,169 @@
+"""bluecore.lib.harness のテスト。"""
+
+from __future__ import annotations
+
+import pytest
+
+from bluecore.lib import harness
+
+
+@pytest.fixture(autouse=True)
+def _clear_harness_cache(monkeypatch):
+    """各テストでハーネス判定キャッシュと判定用環境変数をリセットする。"""
+    for key in list(__import__("os").environ):
+        if key.startswith(("CODEX_", "COPILOT_")) or key in {
+            "CLAUDECODE",
+            "PLUGIN_DATA",
+            "CLAUDE_PLUGIN_ROOT",
+            "CLAUDE_SESSION_ID",
+            "CLAUDE_PROJECT_DIR",
+        }:
+            monkeypatch.delenv(key, raising=False)
+    harness.detect_harness.cache_clear()
+    yield
+    harness.detect_harness.cache_clear()
+
+
+class TestDetectHarness:
+    """detect_harness のテスト。"""
+
+    def test_claudecode_env_returns_claude(self, monkeypatch):
+        """CLAUDECODE 設定時は claude を返す。"""
+        monkeypatch.setenv("CLAUDECODE", "1")
+        assert harness.detect_harness() == "claude"
+
+    def test_claudecode_takes_precedence(self, monkeypatch):
+        """CLAUDECODE は他の判定材料より優先される。"""
+        monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.setenv("PLUGIN_DATA", "/tmp/plugin-data")
+        assert harness.detect_harness() == "claude"
+
+    def test_plugin_data_returns_codex(self, monkeypatch):
+        """PLUGIN_DATA 設定時は codex を返す。"""
+        monkeypatch.setenv("PLUGIN_DATA", "/tmp/plugin-data")
+        assert harness.detect_harness() == "codex"
+
+    def test_codex_prefix_env_returns_codex(self, monkeypatch):
+        """CODEX_ プレフィックス環境変数で codex を返す。"""
+        monkeypatch.setenv("CODEX_HOME", "/home/u/.codex")
+        assert harness.detect_harness() == "codex"
+
+    def test_copilot_prefix_env_returns_copilot(self, monkeypatch):
+        """COPILOT_ プレフィックス環境変数で copilot を返す。"""
+        monkeypatch.setenv("COPILOT_AGENT_PROMPT", "do something")
+        assert harness.detect_harness() == "copilot"
+
+    def test_copilot_plugin_root_path_returns_copilot(self, monkeypatch):
+        """CLAUDE_PLUGIN_ROOT が copilot キャッシュ配下なら copilot を返す。"""
+        monkeypatch.setenv(
+            "CLAUDE_PLUGIN_ROOT", "/home/u/.copilot/installed-plugins/bluecore/bluecore"
+        )
+        assert harness.detect_harness() == "copilot"
+
+    def test_no_markers_returns_unknown(self, monkeypatch):
+        """判定材料が無ければ unknown を返す。"""
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", "/home/u/dev/repo")
+        assert harness.detect_harness() == "unknown"
+
+    def test_result_is_memoized(self, monkeypatch):
+        """判定結果はメモ化され環境変更後も維持される。"""
+        monkeypatch.setenv("CLAUDECODE", "1")
+        assert harness.detect_harness() == "claude"
+        monkeypatch.delenv("CLAUDECODE")
+        assert harness.detect_harness() == "claude"
+
+
+class TestNormalizeToolName:
+    """normalize_tool_name のテスト。"""
+
+    def test_apply_patch_maps_to_edit(self):
+        """Codex の apply_patch は Edit に正規化される。"""
+        assert harness.normalize_tool_name("apply_patch") == "Edit"
+
+    @pytest.mark.parametrize("name", ["Bash", "Edit", "Write", "MultiEdit", "Skill", ""])
+    def test_other_names_pass_through(self, name):
+        """マッピング対象外のツール名はそのまま返す。"""
+        assert harness.normalize_tool_name(name) == name
+
+
+class TestExtractFilePaths:
+    """extract_file_paths のテスト。"""
+
+    def test_file_path_field(self):
+        """Edit/Write 系は file_path フィールドを返す。"""
+        assert harness.extract_file_paths("Edit", {"file_path": "/a/b.py"}) == ["/a/b.py"]
+
+    def test_missing_file_path_returns_empty(self):
+        """file_path 不在時は空リストを返す（対象ファイル無し）。"""
+        assert harness.extract_file_paths("Bash", {"command": "ls"}) == []
+
+    def test_non_string_file_path_returns_empty(self):
+        """file_path が文字列以外なら空リストを返す。"""
+        assert harness.extract_file_paths("Edit", {"file_path": 123}) == []
+
+    def test_apply_patch_update_marker(self):
+        """apply_patch の Update File マーカーをパースする。"""
+        patch = "*** Begin Patch\n*** Update File: src/x.py\n@@\n-a\n+b\n*** End Patch"
+        assert harness.extract_file_paths("apply_patch", {"input": patch}) == ["src/x.py"]
+
+    def test_apply_patch_multiple_markers(self):
+        """Add/Update/Delete の複数マーカーをすべて抽出する。"""
+        patch = (
+            "*** Begin Patch\n"
+            "*** Add File: new.py\n"
+            "+x = 1\n"
+            "*** Update File: mod.py\n"
+            "@@\n"
+            "*** Delete File: old.py\n"
+            "*** End Patch"
+        )
+        assert harness.extract_file_paths("apply_patch", {"input": patch}) == [
+            "new.py",
+            "mod.py",
+            "old.py",
+        ]
+
+    def test_apply_patch_without_markers_returns_none(self):
+        """マーカーが無いパッチは None（判定不能 → fail-closed）。"""
+        assert harness.extract_file_paths("apply_patch", {"input": "garbage"}) is None
+
+    def test_apply_patch_non_string_input_returns_none(self):
+        """input が文字列以外なら None（判定不能 → fail-closed）。"""
+        assert harness.extract_file_paths("apply_patch", {"input": None}) is None
+        assert harness.extract_file_paths("apply_patch", {}) is None
+
+
+class TestResolveSessionId:
+    """resolve_session_id のテスト。"""
+
+    def test_payload_session_id_wins(self, monkeypatch):
+        """ペイロードの session_id が最優先。"""
+        monkeypatch.setenv("CLAUDE_SESSION_ID", "env-id")
+        assert harness.resolve_session_id({"session_id": "payload-id"}) == "payload-id"
+
+    def test_env_fallback(self, monkeypatch):
+        """ペイロードに無ければ CLAUDE_SESSION_ID を使う。"""
+        monkeypatch.setenv("CLAUDE_SESSION_ID", "env-id")
+        assert harness.resolve_session_id({}) == "env-id"
+
+    def test_default_fallback(self):
+        """どちらも無ければ default を返す。"""
+        assert harness.resolve_session_id({"session_id": ""}) == "default"
+
+
+class TestResolveProjectDir:
+    """resolve_project_dir のテスト。"""
+
+    def test_env_wins(self, monkeypatch):
+        """CLAUDE_PROJECT_DIR が最優先。"""
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", "/proj")
+        assert harness.resolve_project_dir({"cwd": "/payload"}) == "/proj"
+
+    def test_payload_cwd_fallback(self):
+        """環境変数が無ければペイロードの cwd を使う。"""
+        assert harness.resolve_project_dir({"cwd": "/payload"}) == "/payload"
+
+    def test_getcwd_fallback(self, monkeypatch, tmp_path):
+        """どちらも無ければカレントディレクトリを返す。"""
+        monkeypatch.chdir(tmp_path)
+        assert harness.resolve_project_dir({"cwd": ""}) == str(tmp_path)

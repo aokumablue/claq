@@ -1,0 +1,136 @@
+"""コーディングエージェントハーネス（Claude Code / Copilot CLI / Codex）の判定と差分吸収。
+
+判定順はコスト昇順で、Claude Code では環境変数チェック 1 回で確定する。
+すべて純 stdlib のみに依存する（venv 不在時のフォールバック実行を保証するため）。
+"""
+
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+
+# Codex のツール名 → Claude Code 相当ツール名
+_TOOL_NAME_MAP = {"apply_patch": "Edit"}
+
+# Codex apply_patch パッチテキストのファイル操作マーカー
+_PATCH_FILE_MARKERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ")
+
+
+@lru_cache(maxsize=1)
+def detect_harness() -> str:
+    """実行中のコーディングエージェントハーネスを判定する。
+
+    Args:
+        引数はありません。
+
+    Returns:
+        "claude" / "codex" / "copilot" / "unknown" のいずれか。
+        unknown は Claude 互換形式で出力する（最も安全側）。
+
+    Raises:
+        例外は発生しません。
+    """
+    if os.environ.get("CLAUDECODE"):
+        return "claude"
+    env = os.environ
+    if "PLUGIN_DATA" in env or any(k.startswith("CODEX_") for k in env):
+        return "codex"
+    plugin_root = env.get("CLAUDE_PLUGIN_ROOT", "")
+    if "/.copilot/installed-plugins/" in plugin_root or any(k.startswith("COPILOT_") for k in env):
+        return "copilot"
+    return "unknown"
+
+
+def normalize_tool_name(tool_name: str) -> str:
+    """ハーネス固有のツール名を Claude Code 相当のツール名へ正規化する。
+
+    Codex の apply_patch は Edit に対応する。Claude Code に apply_patch という
+    ツールは存在しないため、ハーネス判定なしの無条件マッピングで安全。
+
+    Args:
+        tool_name: フック stdin の tool_name フィールド値。
+
+    Returns:
+        正規化後のツール名。マッピング対象外はそのまま返す。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _TOOL_NAME_MAP.get(tool_name, tool_name)
+
+
+def extract_file_paths(tool_name: str, tool_input: dict) -> list[str] | None:
+    """ツール入力から操作対象のファイルパス一覧を抽出する。
+
+    Edit/Write/MultiEdit は file_path フィールド、Codex の apply_patch は
+    パッチテキストのファイル操作マーカー行をパースする。
+
+    Args:
+        tool_name: フック stdin の tool_name フィールド値（正規化前）。
+        tool_input: フック stdin の tool_input フィールド値。
+
+    Returns:
+        ファイルパスのリスト。判定不能（apply_patch でマーカーが 1 つも
+        見つからない等）の場合は None を返す。呼び出し側は None を
+        fail-closed として扱うこと。
+
+    Raises:
+        例外は発生しません。
+    """
+    if tool_name == "apply_patch":
+        patch_text = tool_input.get("input")
+        if not isinstance(patch_text, str):
+            return None
+        paths = [
+            line[len(marker) :].strip()
+            for line in patch_text.splitlines()
+            for marker in _PATCH_FILE_MARKERS
+            if line.startswith(marker)
+        ]
+        return paths or None
+
+    file_path = tool_input.get("file_path")
+    if isinstance(file_path, str) and file_path:
+        return [file_path]
+    return []
+
+
+def resolve_session_id(payload: dict) -> str:
+    """フックペイロードと環境変数からセッション ID を解決する。
+
+    Args:
+        payload: フック stdin の JSON ペイロード。
+
+    Returns:
+        session_id フィールド値、無ければ CLAUDE_SESSION_ID、どちらも
+        無ければ "default"。
+
+    Raises:
+        例外は発生しません。
+    """
+    session_id = payload.get("session_id")
+    if isinstance(session_id, str) and session_id:
+        return session_id
+    return os.environ.get("CLAUDE_SESSION_ID") or "default"
+
+
+def resolve_project_dir(payload: dict) -> str:
+    """フックペイロードと環境変数からプロジェクトディレクトリを解決する。
+
+    Args:
+        payload: フック stdin の JSON ペイロード。
+
+    Returns:
+        CLAUDE_PROJECT_DIR、無ければペイロードの cwd、どちらも無ければ
+        カレントディレクトリ。
+
+    Raises:
+        例外は発生しません。
+    """
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
+    if project_dir:
+        return project_dir
+    cwd = payload.get("cwd")
+    if isinstance(cwd, str) and cwd:
+        return cwd
+    return os.getcwd()
