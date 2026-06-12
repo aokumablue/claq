@@ -19,9 +19,9 @@ from urllib.parse import quote, unquote, urlparse, urlunparse
 from bluecore.lib.constants import BASE_DIR_NAME
 
 _DEFAULT_DATA_DIR = Path(os.environ["BLUECORE_DATA_PATH"]) if "BLUECORE_DATA_PATH" in os.environ else Path.home() / BASE_DIR_NAME
-_DEFAULT_EMBEDDING_MODEL = "cl-nagoya/ruri-v3-310m"
+_DEFAULT_EMBEDDING_MODEL = "hotchpotch/static-embedding-japanese"
 # HF Hub commit SHA をピン留めし、サプライチェーン攻撃（名前空間再利用・改竄プッシュ）を防ぐ
-_DEFAULT_EMBEDDING_REVISION = "18b60fb8c2b9df296fb4212bb7d23ef94e579cd3"
+_DEFAULT_EMBEDDING_REVISION = "95b3d9c80a7ccf604e2b5daee7b1b3eed6b1a9d3"
 _SYNC_STATE_FILENAME = "sync_state.json"
 
 

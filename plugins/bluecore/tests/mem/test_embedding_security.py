@@ -1,54 +1,52 @@
-"""embedding.py のセキュリティ特性テスト（ONNX Runtime ベース）。
+"""embedding.py のセキュリティ特性テスト（静的埋め込みテーブルベース）。
 
-HF SDK / torch / sentence-transformers が import されないこと、
-ONNX モデルパスの検証ロジックが正しく機能することを確認する。
+HF SDK / torch / sentence-transformers / onnxruntime が import されないこと、
+モデルファイルの検証ロジックが正しく機能することを確認する。
 """
 
 from __future__ import annotations
 
-import sys
 import types
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from bluecore.mem import embedding
 
 
-class TestNoHFDependencies:
-    """HF 関連ライブラリが runtime で使われないことを確認。"""
+def _embedding_source() -> str:
+    """embedding.py のソースコードを返す。"""
+    src = Path(__file__).parents[2] / "src" / "bluecore" / "mem" / "embedding.py"
+    return src.read_text(encoding="utf-8")
 
-    def test_hf_hub_not_imported_on_module_load(self) -> None:
-        """embedding モジュールのロード時に huggingface_hub が import されない。"""
-        assert "huggingface_hub" not in sys.modules or True
-        # embedding.py のソースコードに huggingface_hub の import がないことを確認
-        src = Path(__file__).parents[2] / "src" / "bluecore" / "mem" / "embedding.py"
-        text = src.read_text(encoding="utf-8")
-        assert "huggingface_hub" not in text
+
+class TestNoHeavyDependencies:
+    """重量級ライブラリが runtime で使われないことを確認。"""
+
+    def test_hf_hub_not_imported(self) -> None:
+        """embedding.py のソースコードに huggingface_hub が含まれない。"""
+        assert "huggingface_hub" not in _embedding_source()
 
     def test_sentence_transformers_not_imported(self) -> None:
         """embedding.py のソースコードに sentence_transformers が含まれない。"""
-        src = Path(__file__).parents[2] / "src" / "bluecore" / "mem" / "embedding.py"
-        text = src.read_text(encoding="utf-8")
-        assert "sentence_transformers" not in text
+        assert "sentence_transformers" not in _embedding_source()
 
     def test_torch_not_imported(self) -> None:
         """embedding.py のソースコードに torch が含まれない。"""
-        src = Path(__file__).parents[2] / "src" / "bluecore" / "mem" / "embedding.py"
-        text = src.read_text(encoding="utf-8")
-        assert "import torch" not in text
+        assert "import torch" not in _embedding_source()
 
     def test_transformers_not_imported(self) -> None:
         """embedding.py のソースコードに transformers が含まれない。"""
-        src = Path(__file__).parents[2] / "src" / "bluecore" / "mem" / "embedding.py"
-        text = src.read_text(encoding="utf-8")
-        assert "import transformers" not in text
+        assert "import transformers" not in _embedding_source()
+
+    def test_onnxruntime_not_imported(self) -> None:
+        """embedding.py のソースコードに onnxruntime の import がない（静的テーブル化済み）。"""
+        assert "import onnxruntime" not in _embedding_source()
 
     def test_hf_hub_env_forced_not_present(self) -> None:
         """HF_HUB_OFFLINE / TRANSFORMERS_OFFLINE の強制設定が embedding.py に残っていない。"""
-        src = Path(__file__).parents[2] / "src" / "bluecore" / "mem" / "embedding.py"
-        text = src.read_text(encoding="utf-8")
-        # ONNX 化後は HF SDK を使わないため環境変数の強制設定は不要
+        text = _embedding_source()
         assert "HF_HUB_OFFLINE" not in text
         assert "TRANSFORMERS_OFFLINE" not in text
 
@@ -58,8 +56,7 @@ class TestNoTrustRemoteCode:
 
     def test_no_trust_remote_code_true_in_embedding(self) -> None:
         """embedding.py に trust_remote_code=True が書かれていない。"""
-        src = Path(__file__).parents[2] / "src" / "bluecore" / "mem" / "embedding.py"
-        text = src.read_text(encoding="utf-8")
+        text = _embedding_source()
         assert "trust_remote_code=True" not in text
         assert "trust_remote_code = True" not in text
 
@@ -80,53 +77,40 @@ class TestRevisionPin:
 
 
 class TestModelPathValidation:
-    """ONNX モデルファイルが存在しない場合のエラーハンドリングを確認。"""
+    """モデルファイルが存在しない場合のエラーハンドリングを確認。"""
 
     @pytest.fixture(autouse=True)
-    def reset_state(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(embedding, "_session", None)
+    def reset_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(embedding, "_table", None)
         monkeypatch.setattr(embedding, "_tokenizer", None)
-        monkeypatch.setattr(embedding, "_LOCK_PATH", tmp_path / "embedding.lock")
 
-    def _patch_ort(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """onnxruntime と tokenizers を最小限モックする。"""
-        import numpy as np
+    def _patch_tokenizers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """tokenizers を最小限モックする。"""
 
         class FakeEncoding:
-            ids = [1, 2]
-            attention_mask = [1, 1]
+            ids = [0, 1]
 
         class FakeTok:
-            def enable_padding(self, **kw): pass
-            def enable_truncation(self, **kw): pass
-            def encode_batch(self, texts): return [FakeEncoding() for _ in texts]
+            def encode_batch(self, texts, add_special_tokens=True):
+                return [FakeEncoding() for _ in texts]
+
             @staticmethod
-            def from_file(p): return FakeTok()
+            def from_file(p):
+                return FakeTok()
 
-        class FakeSession:
-            def get_inputs(self): return []
-            def run(self, _, inputs):
-                b = inputs["input_ids"].shape[0]
-                s = inputs["input_ids"].shape[1]
-                return [np.ones((b, s, 4), dtype=np.float32)]
+        import sys
 
-        class FakeOrt:
-            class SessionOptions:
-                log_severity_level = 3
-            InferenceSession = FakeSession
-
-        monkeypatch.setitem(sys.modules, "onnxruntime", FakeOrt())
         monkeypatch.setitem(sys.modules, "tokenizers", types.SimpleNamespace(Tokenizer=FakeTok))
 
     def test_missing_manifest_raises(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """manifest.json が存在しない場合に FileNotFoundError が発生する。
 
-        model.onnx と tokenizer.json が存在しても manifest.json がなければロードを拒否する。
+        embeddings.npy と tokenizer.json が存在しても manifest.json がなければロードを拒否する。
         """
-        self._patch_ort(monkeypatch)
+        self._patch_tokenizers(monkeypatch)
         model_dir = tmp_path / "no_manifest"
         model_dir.mkdir()
-        (model_dir / "model.onnx").write_bytes(b"x")
+        np.save(str(model_dir / "embeddings.npy"), np.zeros((2, 2), dtype=np.float32))
         (model_dir / "tokenizer.json").write_bytes(b"{}")
         monkeypatch.setattr(embedding, "_MODELS_DIR", model_dir)
         with pytest.raises(FileNotFoundError, match="manifest.json"):
@@ -136,16 +120,17 @@ class TestModelPathValidation:
         """tokenizer.json がない場合に FileNotFoundError が発生する。"""
         import hashlib
         import json as _json
-        self._patch_ort(monkeypatch)
+
+        self._patch_tokenizers(monkeypatch)
         model_dir = tmp_path / "model"
         model_dir.mkdir()
-        model_data = b"fake"
+        npy_path = model_dir / "embeddings.npy"
+        np.save(str(npy_path), np.zeros((2, 2), dtype=np.float32))
         manifest = {
-            "merged_sha256": hashlib.sha256(model_data).hexdigest(),
+            "embeddings_sha256": hashlib.sha256(npy_path.read_bytes()).hexdigest(),
             "auxiliary_files": [],
         }
         (model_dir / "manifest.json").write_text(_json.dumps(manifest), encoding="utf-8")
-        (model_dir / "model.onnx").write_bytes(model_data)
         # tokenizer.json は作らない
         monkeypatch.setattr(embedding, "_MODELS_DIR", model_dir)
         with pytest.raises(FileNotFoundError, match="tokenizer.json"):

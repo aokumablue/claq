@@ -1,68 +1,50 @@
-"""embedding モジュールのテスト（ONNX Runtime ベース）。"""
+"""embedding モジュールのテスト（静的埋め込みテーブルベース）。"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sys
 import types
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from bluecore.mem import embedding
 
-# ---- ONNX / tokenizers のモック構築ヘルパ ----
+# テスト用テーブル: 4 語彙 × 3 次元
+_TABLE = np.array(
+    [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [2.0, 2.0, 2.0],
+    ],
+    dtype=np.float32,
+)
 
-def _make_fake_ort(hidden_dim: int = 4):
-    """onnxruntime のモック。encode 入力長をスコアとする偽推論を返す。"""
-    import numpy as np
-
-    class FakeInput:
-        def __init__(self, name: str) -> None:
-            self.name = name
-
-    class FakeSession:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        def get_inputs(self):
-            return [FakeInput("input_ids"), FakeInput("attention_mask")]
-
-        def run(self, output_names, inputs):
-            # (batch, seq_len, hidden_dim) を返す。各次元は 1.0
-            batch = inputs["input_ids"].shape[0]
-            seq_len = inputs["input_ids"].shape[1]
-            return [np.ones((batch, seq_len, hidden_dim), dtype=np.float32)]
-
-    class FakeSessionOptions:
-        log_severity_level = 3
-
-    fake_ort = types.SimpleNamespace(
-        InferenceSession=FakeSession,
-        SessionOptions=FakeSessionOptions,
-    )
-    return fake_ort
+# fake tokenizer が返すトークン ids（未登録テキストは [0, 1]）
+_IDS_BY_TEXT: dict[str, list[int]] = {
+    "empty": [],
+    "single": [3],
+}
 
 
-def _make_fake_tokenizers(seq_len: int = 8):
-    """tokenizers のモック。固定長の ids / attention_mask を返す。"""
+def _make_fake_tokenizers():
+    """tokenizers のモック。テキストごとに固定 ids を返す。"""
+
     class FakeEncoding:
-        ids = [1] * seq_len
-        attention_mask = [1] * seq_len
+        def __init__(self, ids: list[int]) -> None:
+            self.ids = ids
 
     class FakeTokenizer:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
+        encode_batch_kwargs: dict = {}
 
-        def enable_padding(self, **kwargs) -> None:
-            pass
-
-        def enable_truncation(self, **kwargs) -> None:
-            pass
-
-        def encode_batch(self, texts):
-            return [FakeEncoding() for _ in texts]
+        def encode_batch(self, texts, add_special_tokens=True):
+            FakeTokenizer.encode_batch_kwargs = {"add_special_tokens": add_special_tokens}
+            return [FakeEncoding(_IDS_BY_TEXT.get(t, [0, 1])) for t in texts]
 
         @staticmethod
         def from_file(path: str) -> FakeTokenizer:
@@ -71,92 +53,118 @@ def _make_fake_tokenizers(seq_len: int = 8):
     return types.SimpleNamespace(Tokenizer=FakeTokenizer)
 
 
-def _write_fake_model_dir(model_dir: Path, model_data: bytes = b"fake-onnx") -> None:
-    """テスト用のモデルディレクトリ（model.onnx + manifest.json + tokenizer.json）を作成する。"""
+def _write_fake_model_dir(model_dir: Path, table: np.ndarray = _TABLE) -> None:
+    """テスト用のモデルディレクトリ（embeddings.npy + manifest.json + tokenizer.json）を作成する。"""
     model_dir.mkdir(parents=True, exist_ok=True)
-    merged_sha = hashlib.sha256(model_data).hexdigest()
+    npy_path = model_dir / "embeddings.npy"
+    np.save(str(npy_path), table)
     tok_data = b"{}"
-    tok_sha = hashlib.sha256(tok_data).hexdigest()
     manifest = {
-        "model_name": "cl-nagoya/ruri-v3-310m",
+        "model_name": "hotchpotch/static-embedding-japanese",
         "hf_revision": "abc123",
-        "quantization": "fp16",
-        "embedding_dim": 4,
-        "tokenizer_max_length": 512,
-        "merged_sha256": merged_sha,
-        "auxiliary_files": [{"name": "tokenizer.json", "sha256": tok_sha}],
+        "embedding_dim": table.shape[1],
+        "vocab_size": table.shape[0],
+        "embeddings_sha256": hashlib.sha256(npy_path.read_bytes()).hexdigest(),
+        "auxiliary_files": [{"name": "tokenizer.json", "sha256": hashlib.sha256(tok_data).hexdigest()}],
     }
     (model_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    (model_dir / "model.onnx").write_bytes(model_data)
     (model_dir / "tokenizer.json").write_bytes(tok_data)
 
 
 @pytest.fixture(autouse=True)
 def reset_embedding_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """各テスト前に内部シングルトンをリセットし、モデル/ロックパスを tmp_path に向ける。"""
-    monkeypatch.setattr(embedding, "_session", None)
+    """各テスト前に内部シングルトンをリセットし、モデルパスを tmp_path に向ける。"""
+    monkeypatch.setattr(embedding, "_table", None)
     monkeypatch.setattr(embedding, "_tokenizer", None)
     model_dir = tmp_path / "models"
     _write_fake_model_dir(model_dir)
     monkeypatch.setattr(embedding, "_MODELS_DIR", model_dir)
-    monkeypatch.setattr(embedding, "_LOCK_PATH", tmp_path / "embedding.lock")
 
 
-def _patch_backends(monkeypatch: pytest.MonkeyPatch, hidden_dim: int = 4):
-    """onnxruntime / tokenizers を monkeypatch でモックに差し替える。
-
-    onnx パッケージは差し替えない: _build_onnx_session が check_model を
-    呼ばなくなったため不要（モックなしで動くこと自体が非依存の検証）。
-    """
-    fake_ort = _make_fake_ort(hidden_dim)
+def _patch_tokenizers(monkeypatch: pytest.MonkeyPatch):
+    """tokenizers を monkeypatch でモックに差し替える（numpy は実物を使う）。"""
     fake_tok = _make_fake_tokenizers()
-    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
     monkeypatch.setitem(sys.modules, "tokenizers", fake_tok)
-    # numpy は実物を使う（軽量なので問題なし）
-    return fake_ort, fake_tok
+    return fake_tok
+
+
+def _expected_vector(ids: list[int]) -> list[float]:
+    """テーブル参照の平均 + L2 正規化の期待値を計算する。"""
+    mean = _TABLE[ids].mean(axis=0)
+    return (mean / np.linalg.norm(mean)).tolist()
 
 
 class TestEmbed:
     """embed() の動作テスト。"""
 
-    def test_empty_input_returns_empty_list(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    def test_empty_input_returns_empty_list(self, monkeypatch: pytest.MonkeyPatch):
         """空リストを渡すとモデルをロードせずに空リストを返す。"""
-        _patch_backends(monkeypatch)
+        _patch_tokenizers(monkeypatch)
         assert embedding.embed([]) == []
-        assert embedding._session is None
+        assert embedding._table is None
 
-    def test_embed_returns_list_of_vectors(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    def test_embed_returns_list_of_vectors(self, monkeypatch: pytest.MonkeyPatch):
         """テキストリストを渡すとベクトルのリストを返す。"""
-        _patch_backends(monkeypatch, hidden_dim=4)
+        _patch_tokenizers(monkeypatch)
         result = embedding.embed(["hello", "world"])
         assert len(result) == 2
         assert isinstance(result[0], list)
 
-    def test_embed_vectors_are_l2_normalized(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    def test_embed_vectors_are_l2_normalized(self, monkeypatch: pytest.MonkeyPatch):
         """返されるベクトルが L2 正規化されている（norm ≈ 1.0）。"""
-        import math
-        _patch_backends(monkeypatch, hidden_dim=4)
+        _patch_tokenizers(monkeypatch)
         result = embedding.embed(["test"])
         norm = math.sqrt(sum(x * x for x in result[0]))
         assert abs(norm - 1.0) < 1e-5
 
-    def test_model_loaded_lazily(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        """embed([]) ではモデルがロードされない（遅延ロード）。"""
-        _patch_backends(monkeypatch)
-        embedding.embed([])
-        assert embedding._session is None
+    def test_embed_computes_mean_of_token_embeddings(self, monkeypatch: pytest.MonkeyPatch):
+        """トークン埋め込みの平均を L2 正規化した値を返す（StaticEmbedding 仕様）。"""
+        _patch_tokenizers(monkeypatch)
+        # "hello" → ids [0, 1] → mean (0.5, 0.5, 0.0) → 正規化 (1/√2, 1/√2, 0)
+        result = embedding.embed(["hello"])
+        assert result[0] == pytest.approx(_expected_vector([0, 1]))
 
-    def test_session_cached_on_second_call(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        """2 回目の embed() でセッションが再ロードされない（シングルトン）。"""
-        _patch_backends(monkeypatch)
+    def test_embed_single_token_text(self, monkeypatch: pytest.MonkeyPatch):
+        """単一トークンのテキストはそのトークンの正規化ベクトルを返す。"""
+        _patch_tokenizers(monkeypatch)
+        result = embedding.embed(["single"])
+        assert result[0] == pytest.approx(_expected_vector([3]))
+
+    def test_embed_empty_tokens_returns_zero_vector(self, monkeypatch: pytest.MonkeyPatch):
+        """トークンが得られないテキストはゼロベクトルになる。"""
+        _patch_tokenizers(monkeypatch)
+        result = embedding.embed(["empty"])
+        assert result[0] == [0.0, 0.0, 0.0]
+
+    def test_encode_batch_called_without_special_tokens(self, monkeypatch: pytest.MonkeyPatch):
+        """encode_batch は add_special_tokens=False で呼ばれる（StaticEmbedding 仕様）。"""
+        fake_tok = _patch_tokenizers(monkeypatch)
+        embedding.embed(["test"])
+        assert fake_tok.Tokenizer.encode_batch_kwargs == {"add_special_tokens": False}
+
+    def test_model_loaded_lazily(self, monkeypatch: pytest.MonkeyPatch):
+        """embed([]) ではモデルがロードされない（遅延ロード）。"""
+        _patch_tokenizers(monkeypatch)
+        embedding.embed([])
+        assert embedding._table is None
+
+    def test_table_cached_on_second_call(self, monkeypatch: pytest.MonkeyPatch):
+        """2 回目の embed() でテーブルが再ロードされない（シングルトン）。"""
+        _patch_tokenizers(monkeypatch)
         embedding.embed(["a"])
-        session_first = embedding._session
+        table_first = embedding._table
         embedding.embed(["b"])
-        assert embedding._session is session_first
+        assert embedding._table is table_first
+
+    def test_table_opened_as_mmap(self, monkeypatch: pytest.MonkeyPatch):
+        """テーブルは mmap モードで開かれる（全体をメモリに載せない）。"""
+        _patch_tokenizers(monkeypatch)
+        embedding.embed(["a"])
+        assert isinstance(embedding._table, np.memmap)
 
     def test_str_input_raises_type_error(self, monkeypatch: pytest.MonkeyPatch):
         """文字列を直接渡すと明確な TypeError が出る（内部ライブラリの不明瞭なエラーを防ぐ）。"""
-        _patch_backends(monkeypatch)
+        _patch_tokenizers(monkeypatch)
         with pytest.raises(TypeError, match="expects list\\[str\\]"):
             embedding.embed("not a list")
 
@@ -164,75 +172,81 @@ class TestEmbed:
 class TestEmbedQuery:
     """embed_query() の動作テスト。"""
 
-    def test_returns_single_vector(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    def test_returns_single_vector(self, monkeypatch: pytest.MonkeyPatch):
         """単一クエリを渡すと 1 つのベクトルを返す。"""
-        _patch_backends(monkeypatch, hidden_dim=4)
-        result = embedding.embed_query("テスト", "cl-nagoya/ruri-v3-310m")
+        _patch_tokenizers(monkeypatch)
+        result = embedding.embed_query("テスト", "hotchpotch/static-embedding-japanese")
         assert isinstance(result, list)
         assert isinstance(result[0], float)
 
-    def test_query_vector_is_l2_normalized(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    def test_query_vector_is_l2_normalized(self, monkeypatch: pytest.MonkeyPatch):
         """クエリベクトルが L2 正規化されている。"""
-        import math
-        _patch_backends(monkeypatch, hidden_dim=4)
-        vec = embedding.embed_query("検索テスト", "cl-nagoya/ruri-v3-310m")
+        _patch_tokenizers(monkeypatch)
+        vec = embedding.embed_query("検索テスト", "hotchpotch/static-embedding-japanese")
         norm = math.sqrt(sum(x * x for x in vec))
         assert abs(norm - 1.0) < 1e-5
+
+    def test_query_embedded_without_prefix(self, monkeypatch: pytest.MonkeyPatch):
+        """クエリはプレフィックスなしでそのまま埋め込まれる（本モデルは prompt なし）。"""
+        _patch_tokenizers(monkeypatch)
+        # "single" がそのまま渡れば ids [3]、プレフィックス付きなら既定 [0, 1] になる
+        vec = embedding.embed_query("single", "hotchpotch/static-embedding-japanese")
+        assert vec == pytest.approx(_expected_vector([3]))
 
     def test_returns_empty_list_when_model_missing(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ):
-        """model.onnx が不在の場合は空リストを返す。"""
-        _patch_backends(monkeypatch)
+        """embeddings.npy が不在の場合は空リストを返す。"""
+        _patch_tokenizers(monkeypatch)
         bad_dir = tmp_path / "no_model"
         bad_dir.mkdir()
         monkeypatch.setattr(embedding, "_MODELS_DIR", bad_dir)
-        monkeypatch.setattr(embedding, "_onnx_unavailable_warned", False)
-        result = embedding.embed_query("test query", "cl-nagoya/ruri-v3-310m")
+        monkeypatch.setattr(embedding, "_model_unavailable_warned", False)
+        result = embedding.embed_query("test query", "hotchpotch/static-embedding-japanese")
         assert result == []
 
 
 class TestModelNotFound:
-    """モデルファイル未展開時の動作テスト。"""
+    """モデルファイル未配置時の動作テスト。"""
 
-    def test_missing_model_onnx_returns_empty_list(
+    def test_missing_embeddings_npy_returns_empty_list(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ):
-        """model.onnx が存在しない場合は例外を出さず空リストを返す（ONNX バックグラウンドビルド中）。"""
-        _patch_backends(monkeypatch)
+        """embeddings.npy が存在しない場合は例外を出さず空リストを返す（ダウンロード中）。"""
+        _patch_tokenizers(monkeypatch)
         bad_dir = tmp_path / "no_model"
         bad_dir.mkdir()
         (bad_dir / "tokenizer.json").write_bytes(b"{}")
         monkeypatch.setattr(embedding, "_MODELS_DIR", bad_dir)
-        monkeypatch.setattr(embedding, "_onnx_unavailable_warned", False)
+        monkeypatch.setattr(embedding, "_model_unavailable_warned", False)
         result = embedding.embed(["test"])
         assert result == []
-        assert "onnx building" in capsys.readouterr().err
+        assert "model not ready" in capsys.readouterr().err
 
-    def test_missing_model_onnx_warns_only_once(
+    def test_missing_embeddings_npy_warns_only_once(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ):
-        """model.onnx が存在しない場合、警告は 1 度だけ出力される。"""
-        _patch_backends(monkeypatch)
+        """embeddings.npy が存在しない場合、警告は 1 度だけ出力される。"""
+        _patch_tokenizers(monkeypatch)
         bad_dir = tmp_path / "no_model"
         bad_dir.mkdir()
         (bad_dir / "tokenizer.json").write_bytes(b"{}")
         monkeypatch.setattr(embedding, "_MODELS_DIR", bad_dir)
-        monkeypatch.setattr(embedding, "_onnx_unavailable_warned", False)
+        monkeypatch.setattr(embedding, "_model_unavailable_warned", False)
         embedding.embed(["test"])
         embedding.embed(["test2"])
         err = capsys.readouterr().err
-        assert err.count("onnx building") == 1
+        assert err.count("model not ready") == 1
 
     def test_missing_manifest_raises_file_not_found(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ):
         """manifest.json が存在しない場合は FileNotFoundError。"""
-        _patch_backends(monkeypatch)
+        _patch_tokenizers(monkeypatch)
         bad_dir = tmp_path / "no_manifest"
         bad_dir.mkdir()
-        # model.onnx と tokenizer.json は必要（_verify_model_sha に到達するため）
-        (bad_dir / "model.onnx").write_bytes(b"fake")
+        # embeddings.npy と tokenizer.json は必要（_verify_model_sha に到達するため）
+        np.save(str(bad_dir / "embeddings.npy"), _TABLE)
         (bad_dir / "tokenizer.json").write_bytes(b"{}")
         # manifest.json は置かない → _verify_model_sha が FileNotFoundError を出す
         monkeypatch.setattr(embedding, "_MODELS_DIR", bad_dir)
@@ -242,25 +256,24 @@ class TestModelNotFound:
     def test_missing_tokenizer_raises_file_not_found(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ):
-        """tokenizer.json が存在しない場合は FileNotFoundError（model.onnx は存在する異常状態）。"""
-        _patch_backends(monkeypatch)
+        """tokenizer.json が存在しない場合は FileNotFoundError（embeddings.npy は存在する異常状態）。"""
+        _patch_tokenizers(monkeypatch)
         bad_dir = tmp_path / "no_tok"
         bad_dir.mkdir()
-        (bad_dir / "model.onnx").write_bytes(b"fake")
+        np.save(str(bad_dir / "embeddings.npy"), _TABLE)
         monkeypatch.setattr(embedding, "_MODELS_DIR", bad_dir)
         with pytest.raises(FileNotFoundError, match="tokenizer.json"):
             embedding.embed(["test"])
 
-    def test_model_sha256_mismatch_raises_value_error(
+    def test_embeddings_sha256_mismatch_raises_value_error(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ):
-        """model.onnx の SHA256 が manifest と不一致なら ValueError。"""
-        _patch_backends(monkeypatch)
+        """embeddings.npy の SHA256 が manifest と不一致なら ValueError。"""
+        _patch_tokenizers(monkeypatch)
         bad_dir = tmp_path / "bad_sha"
-        bad_dir.mkdir()
-        # model.onnx を改竄（SHA が変わる）
         _write_fake_model_dir(bad_dir)
-        (bad_dir / "model.onnx").write_bytes(b"tampered-data")
+        # embeddings.npy を改竄（SHA が変わる）
+        (bad_dir / "embeddings.npy").write_bytes(b"tampered-data")
         monkeypatch.setattr(embedding, "_MODELS_DIR", bad_dir)
         with pytest.raises(ValueError, match="SHA256 不一致"):
             embedding.embed(["test"])
@@ -269,9 +282,8 @@ class TestModelNotFound:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ):
         """tokenizer.json の SHA256 が manifest と不一致なら ValueError。"""
-        _patch_backends(monkeypatch)
+        _patch_tokenizers(monkeypatch)
         bad_dir = tmp_path / "bad_tok_sha"
-        bad_dir.mkdir()
         _write_fake_model_dir(bad_dir)
         # tokenizer.json を改竄
         (bad_dir / "tokenizer.json").write_bytes(b"tampered-tokenizer")
@@ -280,69 +292,24 @@ class TestModelNotFound:
             embedding.embed(["test"])
 
 
-class TestTokenTypeIdsBranch:
-    """token_type_ids が必要なモデルの分岐をカバーするテスト。"""
-
-    def test_token_type_ids_inserted_when_required(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        """token_type_ids 入力を持つモデルでは zeros_like が渡される。"""
-        import numpy as np
-
-        captured: dict = {}
-
-        class FakeInput:
-            def __init__(self, name: str) -> None:
-                self.name = name
-
-        class FakeSession:
-            def __init__(self, *args, **kwargs) -> None:
-                pass
-
-            def get_inputs(self):
-                return [
-                    FakeInput("input_ids"),
-                    FakeInput("attention_mask"),
-                    FakeInput("token_type_ids"),
-                ]
-
-            def run(self, output_names, inputs):
-                captured.update(inputs)
-                batch = inputs["input_ids"].shape[0]
-                seq_len = inputs["input_ids"].shape[1]
-                return [np.ones((batch, seq_len, 4), dtype=np.float32)]
-
-        fake_ort = types.SimpleNamespace(
-            InferenceSession=FakeSession,
-            SessionOptions=type("SO", (), {"log_severity_level": 3}),
-        )
-        monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
-        monkeypatch.setitem(sys.modules, "tokenizers", _make_fake_tokenizers())
-
-        result = embedding.embed(["x"])
-        assert "token_type_ids" in captured
-        assert len(result) == 1
-
-
 class TestEncodeArray:
     """_encode_array() の内部 API テスト。"""
 
-    def test_returns_numpy_array(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    def test_returns_numpy_array(self, monkeypatch: pytest.MonkeyPatch):
         """_encode_array は numpy 配列を返す（.tolist() 前の内部表現）。"""
-        import numpy as np
-        _patch_backends(monkeypatch, hidden_dim=4)
+        _patch_tokenizers(monkeypatch)
         result = embedding._encode_array(["hello"])
         assert isinstance(result, np.ndarray)
 
-    def test_encode_array_shape(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        """返される配列の shape は (batch, hidden_dim)。"""
-        _patch_backends(monkeypatch, hidden_dim=4)
+    def test_encode_array_shape(self, monkeypatch: pytest.MonkeyPatch):
+        """返される配列の shape は (batch, embedding_dim)。"""
+        _patch_tokenizers(monkeypatch)
         result = embedding._encode_array(["a", "b"])
-        assert result.shape == (2, 4)
+        assert result.shape == (2, 3)
 
-    def test_encode_is_tolist_of_encode_array(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    def test_encode_is_tolist_of_encode_array(self, monkeypatch: pytest.MonkeyPatch):
         """_encode の結果は _encode_array().tolist() と一致する。"""
-        _patch_backends(monkeypatch, hidden_dim=4)
+        _patch_tokenizers(monkeypatch)
         arr = embedding._encode_array(["test"])
         lst = embedding._encode(["test"])
         assert lst == arr.tolist()
@@ -353,12 +320,10 @@ class TestVerifyTokenizer:
 
     def test_raises_when_no_tokenizer_entry_in_manifest(self, tmp_path: Path):
         """manifest に tokenizer.json エントリがない場合は ValueError。"""
-        import json
-
         model_dir = tmp_path / "models"
         model_dir.mkdir(exist_ok=True)
         manifest = {
-            "merged_sha256": "a" * 64,
+            "embeddings_sha256": "a" * 64,
             "auxiliary_files": [{"name": "config.json", "sha256": "b" * 64}],
         }
         (model_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -370,15 +335,12 @@ class TestVerifyTokenizer:
 
     def test_skips_non_tokenizer_auxiliary_entries(self, tmp_path: Path):
         """manifest に config.json エントリがあっても tokenizer.json を正しく検証する。"""
-        import hashlib
-        import json
-
         tok_data = b"{}"
         tok_sha = hashlib.sha256(tok_data).hexdigest()
         model_dir = tmp_path / "models"
         model_dir.mkdir(exist_ok=True)
         manifest = {
-            "merged_sha256": "a" * 64,
+            "embeddings_sha256": "a" * 64,
             "auxiliary_files": [
                 {"name": "config.json", "sha256": "b" * 64},
                 {"name": "tokenizer.json", "sha256": tok_sha},
@@ -393,79 +355,38 @@ class TestVerifyTokenizer:
 
 
 class TestTwoPhaseInitRollback:
-    """2-phase 初期化ロールバック（H-4）のテスト。"""
+    """2-phase 初期化ロールバックのテスト。"""
 
-    def test_session_reset_when_tokenizer_fails(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        """トークナイザ構築が失敗した場合 _session と _tokenizer が None にリセットされる。"""
-        import numpy as np
-
-        class FakeSessionOptions:
-            log_severity_level = 3
-            enable_mem_pattern = False
-            intra_op_num_threads = 1
-
-        class FakeInput:
-            def __init__(self, name: str) -> None:
-                self.name = name
-
-        class FakeSession:
-            def __init__(self, *args, **kwargs) -> None:
-                pass
-
-            def get_inputs(self):
-                return [FakeInput("input_ids"), FakeInput("attention_mask")]
-
-            def run(self, output_names, inputs):
-                batch = inputs["input_ids"].shape[0]
-                seq_len = inputs["input_ids"].shape[1]
-                return [np.ones((batch, seq_len, 4), dtype=np.float32)]
+    def test_table_reset_when_tokenizer_fails(self, monkeypatch: pytest.MonkeyPatch):
+        """トークナイザ構築が失敗した場合 _table と _tokenizer が None にリセットされる。"""
 
         class BrokenTokenizer:
             @staticmethod
             def from_file(path: str) -> None:
                 raise RuntimeError("tokenizer broken")
 
-        fake_ort = types.SimpleNamespace(
-            InferenceSession=FakeSession,
-            SessionOptions=FakeSessionOptions,
-        )
-        monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
         monkeypatch.setitem(sys.modules, "tokenizers", types.SimpleNamespace(Tokenizer=BrokenTokenizer))
 
         with pytest.raises(RuntimeError, match="tokenizer broken"):
             embedding.embed(["test"])
 
         # 失敗後はシングルトンがリセットされている
-        assert embedding._session is None
+        assert embedding._table is None
         assert embedding._tokenizer is None
 
+    def test_table_load_failure_resets_singletons(self, monkeypatch: pytest.MonkeyPatch):
+        """テーブルロードが例外を出すとシングルトンが None リセットされる。"""
+        _patch_tokenizers(monkeypatch)
 
-class TestSessionInitFailure:
-    """セッション初期化失敗時の状態リセットテスト。"""
+        def _fail(_path: object) -> None:
+            raise RuntimeError("bad npy")
 
-    def test_session_init_failure_resets_singletons(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """InferenceSession 構築が例外を出すとシングルトンが None リセットされる。"""
-        # autouse フィクスチャが _MODELS_DIR を tmp_path/models に設定済みだが、
-        # このテストでは別の model_dir を使う
-        model_dir = tmp_path / "session_fail_test"
-        _write_fake_model_dir(model_dir)
-        monkeypatch.setattr(embedding, "_MODELS_DIR", model_dir)
-        monkeypatch.setattr(embedding, "_session", None)
-        monkeypatch.setattr(embedding, "_tokenizer", None)
+        monkeypatch.setattr(embedding, "_build_table", _fail)
 
-        # ort.InferenceSession を失敗させるモック
-        def _fail(*_a: object, **_kw: object) -> None:
-            raise RuntimeError("bad onnx")
-
-        fake_ort = _make_fake_ort(hidden_dim=4)
-        fake_ort.InferenceSession = _fail
-        monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
-        monkeypatch.setitem(sys.modules, "tokenizers", _make_fake_tokenizers())
-
-        with pytest.raises(RuntimeError, match="bad onnx"):
+        with pytest.raises(RuntimeError, match="bad npy"):
             embedding.embed(["test"])
 
-        assert embedding._session is None
+        assert embedding._table is None
         assert embedding._tokenizer is None
 
 
@@ -474,58 +395,3 @@ def test_embed_query_non_default_model_warns(monkeypatch) -> None:
     monkeypatch.setattr(embedding, "_encode", lambda texts: [[0.1, 0.2]])
     result = embedding.embed_query("q", "other-model-xyz")
     assert result == [0.1, 0.2]
-
-
-class TestModelLoadLock:
-    """_model_load_lock のプロセス間排他テスト。"""
-
-    def test_lock_excludes_other_holders_and_releases(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """ロック区間中は別の open からの flock 取得が失敗し、解放後は成功する。"""
-        import fcntl
-
-        lock_path = tmp_path / "embedding.lock"
-        monkeypatch.setattr(embedding, "_LOCK_PATH", lock_path)
-        with embedding._model_load_lock():
-            assert lock_path.exists()
-            with open(lock_path, "w") as other:
-                with pytest.raises(BlockingIOError):
-                    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        with open(lock_path, "w") as other:
-            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            fcntl.flock(other, fcntl.LOCK_UN)
-
-    def test_lock_not_acquired_when_model_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """model.onnx 不在（ビルド中）時は fcntl ロックを取得せず即 (None, None) を返す。"""
-        from contextlib import contextmanager
-
-        empty_dir = tmp_path / "empty_models"
-        empty_dir.mkdir()
-        monkeypatch.setattr(embedding, "_MODELS_DIR", empty_dir)
-        monkeypatch.setattr(embedding, "_onnx_unavailable_warned", True)
-
-        @contextmanager
-        def _fail_lock():
-            pytest.fail("モデル不在時にロックを取得してはならない")
-            yield
-
-        monkeypatch.setattr(embedding, "_model_load_lock", _fail_lock)
-        assert embedding._get_session() == (None, None)
-
-    def test_get_session_acquires_load_lock(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """初期化経路で _model_load_lock が取得される。"""
-        from contextlib import contextmanager
-
-        _patch_backends(monkeypatch)
-        acquired: list[bool] = []
-
-        @contextmanager
-        def _spy_lock():
-            acquired.append(True)
-            yield
-
-        monkeypatch.setattr(embedding, "_model_load_lock", _spy_lock)
-        embedding.embed(["a"])
-        assert acquired == [True]
-        # シングルトン確立後はロックを再取得しない
-        embedding.embed(["b"])
-        assert acquired == [True]
