@@ -217,13 +217,15 @@ def test_to_json_serializes_correctly() -> None:
 
 
 def test_get_conn_uses_pool_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    """psycopg_pool が利用可能な場合は ConnectionPool.getconn() を使う。"""
+    """psycopg_pool が利用可能な場合は ConnectionPool.getconn() を使い connect_timeout を渡す。"""
     pool_conn = FakeConn()
     pool_mod = ModuleType("psycopg_pool")
+    captured_kwargs: dict = {}
 
     class ConnectionPool:
         def __init__(self, url: str, kwargs: dict, min_size: int, max_size: int) -> None:
             self.url = url
+            captured_kwargs.update(kwargs)
 
         def getconn(self) -> FakeConn:
             return pool_conn
@@ -240,19 +242,27 @@ def test_get_conn_uses_pool_when_available(monkeypatch: pytest.MonkeyPatch) -> N
 
     db_pool = PgDatabase("postgres://example", use_pool=True)
     assert db_pool._get_conn() is pool_conn
+    assert captured_kwargs["connect_timeout"] == 5
 
 
 def test_get_conn_falls_back_to_direct_connect_when_pool_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """psycopg_pool が ConnectionPool を持たない場合は psycopg.connect() に fallback する。"""
+    """psycopg_pool が ConnectionPool を持たない場合は psycopg.connect() に fallback し connect_timeout を渡す。"""
     fallback_conn = FakeConn()
+    captured_kwargs: dict = {}
+
+    def _connect(url: str, passfile: str | None = None, connect_timeout: int | None = None) -> FakeConn:
+        captured_kwargs["connect_timeout"] = connect_timeout
+        return fallback_conn
+
     psycopg_mod = ModuleType("psycopg")
-    psycopg_mod.connect = lambda url, passfile=None: fallback_conn  # type: ignore[assignment]
+    psycopg_mod.connect = _connect  # type: ignore[assignment]
     monkeypatch.setitem(sys.modules, "psycopg", psycopg_mod)
     monkeypatch.setitem(sys.modules, "psycopg_pool", ModuleType("psycopg_pool"))
 
     db_fallback = PgDatabase("postgres://fallback", use_pool=True)
     assert db_fallback._get_conn() is fallback_conn
     assert db_fallback._use_pool is False
+    assert captured_kwargs["connect_timeout"] == 5
 
 
 def test_transaction_close_and_test_connection(monkeypatch: pytest.MonkeyPatch) -> None:
