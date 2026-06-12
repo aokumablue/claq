@@ -154,16 +154,17 @@ def load_config(file_path: str | None = None) -> dict[str, Any]:
     return resolve_quality_gate_config(file_path=file_path)
 
 
-def _extract_file_path(input_data: dict[str, Any]) -> str:
-    """フック入力から file_path を取り出す。
+def _extract_target_file_paths(input_data: dict[str, Any]) -> list[str]:
+    """フック入力から対象ファイルパスをすべて取り出す。
 
-    Codex の apply_patch はパッチテキストから先頭の対象ファイルを取り出す。
+    Codex の apply_patch はパッチテキストから全対象ファイルを取り出す
+    （複数ファイルパッチの一部だけ lint が走る取りこぼしを防ぐ）。
 
     Args:
         input_data: hook 入力です。
 
     Returns:
-        file_path があれば文字列、なければ空文字列を返します。
+        ファイルパスのリスト。判定不能な場合は空リストを返します。
 
     Raises:
         例外は発生しません。
@@ -171,17 +172,15 @@ def _extract_file_path(input_data: dict[str, Any]) -> str:
     tool_input = input_data.get("tool_input")
     if isinstance(tool_input, dict):
         file_path = tool_input.get("file_path")
-        if isinstance(file_path, str):
-            return file_path
+        if isinstance(file_path, str) and file_path:
+            return [file_path]
         if str(input_data.get("tool_name") or "") == "apply_patch":
-            paths = extract_file_paths("apply_patch", tool_input)
-            if paths:
-                return paths[0]
+            return extract_file_paths("apply_patch", tool_input) or []
 
     file_path = input_data.get("file_path")
-    if isinstance(file_path, str):
-        return file_path
-    return ""
+    if isinstance(file_path, str) and file_path:
+        return [file_path]
+    return []
 
 
 def _extract_tool_name(input_data: dict[str, Any]) -> str:
@@ -202,12 +201,13 @@ def _extract_tool_name(input_data: dict[str, Any]) -> str:
     return ""
 
 
-def _rule_matches(rule: dict[str, Any], input_data: dict[str, Any]) -> bool:
+def _rule_matches(rule: dict[str, Any], input_data: dict[str, Any], file_path: str = "") -> bool:
     """設定ルールが入力に一致するか判定する。
 
     Args:
         rule: ルール定義です。
         input_data: hook 入力です。
+        file_path: 拡張子判定の対象ファイルパス（対象なしは空文字列）。
 
     Returns:
         一致する場合は True、それ以外は False を返します。
@@ -217,7 +217,6 @@ def _rule_matches(rule: dict[str, Any], input_data: dict[str, Any]) -> bool:
     """
     extensions = rule.get("extensions")
     if extensions is not None:
-        file_path = _extract_file_path(input_data)
         if not file_path:
             return False
 
@@ -516,6 +515,8 @@ def _run_configured_rules(
     raw_input: str,
     input_data: dict[str, Any],
     config: dict[str, Any],
+    file_path: str = "",
+    run_pathless: bool = True,
 ) -> bool:
     """設定ファイルに従って rule を実行する。
 
@@ -524,6 +525,10 @@ def _run_configured_rules(
         raw_input: 子プロセスへ渡す stdin です。
         input_data: hook 入力です。
         config: 読み込んだ quality-gate 設定です。
+        file_path: 拡張子判定の対象ファイルパス（対象なしは空文字列）。
+        run_pathless: extensions 指定のない rule を実行するか。複数ファイル
+            パッチで 2 件目以降のファイルを処理する際に False を渡し、
+            プロジェクト全体ルールの重複実行を防ぎます。
 
     Returns:
         1 つ以上の step を実行した場合は True を返します。
@@ -545,7 +550,11 @@ def _run_configured_rules(
     default_cwd = _project_root()
     handled = False
     for rule in rules:
-        if isinstance(rule, dict) and _rule_matches(rule, input_data):
+        if not isinstance(rule, dict):
+            continue
+        if rule.get("extensions") is None and not run_pathless:
+            continue
+        if _rule_matches(rule, input_data, file_path):
             handled = _run_rule_steps(rule, raw_input, base_env, default_cwd) or handled
     return handled
 
@@ -565,9 +574,17 @@ def run(raw_input: str, action: str = "post-edit") -> None:
     """
     normalized_action = _normalize_name(action) or "post-edit"
     input_data = parse_json_object(raw_input) or {}
-    fp = _extract_file_path(input_data) or None
-    config = load_config(file_path=fp)
-    _run_configured_rules(normalized_action, raw_input, input_data, config)
+    paths = _extract_target_file_paths(input_data)
+    for index, fp in enumerate(paths or [None]):
+        config = load_config(file_path=fp)
+        _run_configured_rules(
+            normalized_action,
+            raw_input,
+            input_data,
+            config,
+            file_path=fp or "",
+            run_pathless=index == 0,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

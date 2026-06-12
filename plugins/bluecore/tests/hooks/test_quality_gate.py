@@ -377,7 +377,9 @@ def test_quality_gate_run_configured_rules_handles_mismatches_and_invalid_entrie
     }
     input_data = {"tool_name": "Edit", "tool_input": {"file_path": "src/example.py"}}
 
-    assert quality_gate._run_configured_rules("post-edit", "payload", input_data, config)
+    assert quality_gate._run_configured_rules(
+        "post-edit", "payload", input_data, config, file_path="src/example.py"
+    )
     assert executed == [{"argv": ["run"]}]
 
 
@@ -411,7 +413,7 @@ def test_quality_gate_rule_and_step_helpers_cover_missing_branches(
     env = {"HOME": "/home/tester"}
 
     assert quality_gate._normalize_extension(None) == ""
-    assert quality_gate._extract_file_path({"file_path": "src/app.py"}) == "src/app.py"
+    assert quality_gate._extract_target_file_paths({"file_path": "src/app.py"}) == ["src/app.py"]
     assert quality_gate._extract_tool_name({"tool_name": 123}) == ""
     assert not quality_gate._rule_matches({"extensions": [".py"]}, {"tool_name": "Edit"})
     assert not quality_gate._rule_matches({"tool_names": ["edit"]}, {"tool_name": "Write"})
@@ -517,11 +519,9 @@ def test_quality_gate_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch) -> 
     assert excinfo.value.code == 0
 
 
-def test_extract_file_path_non_string_values() -> None:
-    """tool_input.file_path も input_data.file_path も文字列でなければ空文字。"""
-    from bluecore.hooks.quality_gate import _extract_file_path
-
-    assert _extract_file_path({"tool_input": {"file_path": 123}}) == ""
+def test_extract_target_file_paths_non_string_values() -> None:
+    """tool_input.file_path も input_data.file_path も文字列でなければ空リスト。"""
+    assert quality_gate._extract_target_file_paths({"tool_input": {"file_path": 123}}) == []
 
 
 def test_extract_tool_name_normalizes_apply_patch() -> None:
@@ -529,14 +529,50 @@ def test_extract_tool_name_normalizes_apply_patch() -> None:
     assert quality_gate._extract_tool_name({"tool_name": "apply_patch"}) == "Edit"
 
 
-def test_extract_file_path_from_apply_patch_input() -> None:
-    """apply_patch のパッチテキストから先頭ファイルを取り出す。"""
-    patch = "*** Begin Patch\n*** Update File: src/x.py\n@@\n-a\n+b\n*** End Patch"
+def test_extract_target_file_paths_from_apply_patch_input() -> None:
+    """apply_patch のパッチテキストから全対象ファイルを取り出す。"""
+    patch = "*** Begin Patch\n*** Update File: src/x.py\n@@\n-a\n+b\n*** Add File: src/y.ts\n+a\n*** End Patch"
     data = {"tool_name": "apply_patch", "tool_input": {"input": patch}}
-    assert quality_gate._extract_file_path(data) == "src/x.py"
+    assert quality_gate._extract_target_file_paths(data) == ["src/x.py", "src/y.ts"]
 
 
-def test_extract_file_path_apply_patch_unparseable_returns_empty() -> None:
-    """パース不能な apply_patch 入力は空文字列を返す。"""
+def test_extract_target_file_paths_apply_patch_unparseable_returns_empty() -> None:
+    """パース不能な apply_patch 入力は空リストを返す。"""
     data = {"tool_name": "apply_patch", "tool_input": {"input": "garbage"}}
-    assert quality_gate._extract_file_path(data) == ""
+    assert quality_gate._extract_target_file_paths(data) == []
+
+
+def test_quality_gate_run_lints_every_file_in_multi_file_patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """複数ファイルパッチでは全ファイルが拡張子ルールの対象になる。"""
+    linted: list[str | None] = []
+
+    def fake_resolve(**kwargs: Any) -> dict[str, Any]:
+        linted.append(kwargs.get("file_path"))
+        return {
+            "actions": {
+                "post-edit": {
+                    "rules": [
+                        {"extensions": [".py", ".ts"], "steps": [{"argv": ["lint"]}]},
+                        {"steps": [{"argv": ["project-wide"]}]},
+                    ]
+                }
+            }
+        }
+
+    executed: list[list[str]] = []
+    monkeypatch.setattr(quality_gate, "resolve_quality_gate_config", fake_resolve)
+    monkeypatch.setattr(
+        quality_gate,
+        "run_step",
+        lambda step, raw_input, base_env=None, default_cwd=None: executed.append(step["argv"]) or True,
+    )
+
+    patch = "*** Begin Patch\n*** Update File: src/x.py\n@@\n*** Add File: src/y.ts\n+a\n*** End Patch"
+    raw_input = json.dumps({"tool_name": "apply_patch", "tool_input": {"input": patch}})
+    quality_gate.run(raw_input, action="post-edit")
+
+    assert linted == ["src/x.py", "src/y.ts"]
+    # 拡張子ルールはファイルごと、extensions なしルールは初回のみ実行される
+    assert executed == [["lint"], ["project-wide"], ["lint"]]
