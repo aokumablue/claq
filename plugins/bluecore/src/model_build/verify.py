@@ -1,4 +1,9 @@
-"""検証 — model.onnx を読み込んで推論・品質チェックを実行する。"""
+"""検証 — embeddings.npy を読み込んで推論・品質チェックを実行する。
+
+bluecore.mem.embedding と同じ推論仕様（add_special_tokens=False のトークン化 →
+テーブル参照の平均 → L2 正規化）で検証する。model_build は配布物として
+独立しているため bluecore パッケージは import せず、同一仕様を実装する。
+"""
 
 from __future__ import annotations
 
@@ -6,10 +11,15 @@ import hmac
 import json
 import math
 from pathlib import Path
+from typing import Any
 
 from model_build._paths import safe_join as _safe_join
 from model_build._paths import sha256_file as _sha256_file
 from model_build._paths import validate_sha256_format as _validate_sha256_format
+
+# 意味的サニティチェック: 類似ペアの cosine が非類似ペアを上回ることを確認する
+_SIMILAR_PAIR = ("今日の天気は晴れです", "本日は快晴です")
+_DISSIMILAR_TEXT = "データベースのインデックス設計"
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -22,28 +32,26 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _infer_embedding(session: object, tokenizer: object, text: str) -> list[float]:
-    """テキストを ONNX 推論でベクトル化し、mean pooling + L2 正規化を適用して返す。"""
-    import numpy as np
+def _infer_embedding(table: Any, tokenizer: Any, text: str) -> list[float]:
+    """テキストを静的埋め込みテーブルでベクトル化し、L2 正規化して返す。
 
-    enc = tokenizer.encode(text)  # type: ignore[union-attr]
-    input_ids = np.array([enc.ids], dtype=np.int64)
-    attention_mask = np.array([enc.attention_mask], dtype=np.int64)
-    inputs: dict = {"input_ids": input_ids, "attention_mask": attention_mask}
-    if any(inp.name == "token_type_ids" for inp in session.get_inputs()):  # type: ignore[union-attr]
-        inputs["token_type_ids"] = np.zeros_like(input_ids)
+    sentence-transformers の StaticEmbedding と同仕様:
+    add_special_tokens=False でトークン化し、トークン埋め込みの平均を取る。
+    """
+    import numpy as np  # type: ignore[import-untyped]
 
-    outputs = session.run(None, inputs)  # type: ignore[union-attr]
-    token_embs = outputs[0]  # (1, seq_len, hidden_dim)
-    mask = attention_mask[0].astype(np.float32)[:, np.newaxis]
-    summed = (token_embs[0] * mask).sum(axis=0)
-    mean_vec = summed / mask.sum().clip(min=1e-9)
+    enc = tokenizer.encode(text, add_special_tokens=False)
+    if not enc.ids:
+        return [0.0] * table.shape[1]
+    mean_vec = np.asarray(table[enc.ids], dtype=np.float32).mean(axis=0)
     norm = np.linalg.norm(mean_vec)
+    if norm < 1e-9:
+        return [0.0] * table.shape[1]
     return (mean_vec / norm).tolist()
 
 
 def verify(model_dir: Path, cosine_threshold: float = 0.999) -> None:
-    """manifest.json を読み込んで model.onnx を検証し、推論で品質を確認する。
+    """manifest.json を読み込んで embeddings.npy を検証し、推論で品質を確認する。
 
     cosine_threshold: 再推論間のベクトル最低 cosine 類似度
     """
@@ -53,17 +61,17 @@ def verify(model_dir: Path, cosine_threshold: float = 0.999) -> None:
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    # 1. model.onnx の SHA256 検証
-    model_path = _safe_join(model_dir, "model.onnx")
-    _validate_sha256_format(manifest["merged_sha256"], "merged_sha256")
-    actual = _sha256_file(model_path)
-    if not hmac.compare_digest(actual, manifest["merged_sha256"]):
+    # 1. embeddings.npy の SHA256 検証
+    npy_path = _safe_join(model_dir, "embeddings.npy")
+    _validate_sha256_format(manifest["embeddings_sha256"], "embeddings_sha256")
+    actual = _sha256_file(npy_path)
+    if not hmac.compare_digest(actual, manifest["embeddings_sha256"]):
         raise ValueError(
-            f"model.onnx SHA256 不一致\n"
-            f"  expected: {manifest['merged_sha256']}\n"
+            f"embeddings.npy SHA256 不一致\n"
+            f"  expected: {manifest['embeddings_sha256']}\n"
             f"  actual:   {actual}"
         )
-    print("[verify] model.onnx SHA256 verification OK", flush=True)
+    print("[verify] embeddings.npy SHA256 verification OK", flush=True)
 
     # 2. 補助ファイルの SHA256 検証
     for aux in manifest["auxiliary_files"]:
@@ -78,9 +86,8 @@ def verify(model_dir: Path, cosine_threshold: float = 0.999) -> None:
             )
     print("[verify] auxiliary file SHA256 verification OK", flush=True)
 
-    # 3. 推論テスト（onnxruntime + tokenizers）
-    model_bytes = model_path.read_bytes()
-    _run_inference_check(model_bytes, model_dir, manifest, cosine_threshold)
+    # 3. 推論テスト（numpy + tokenizers）
+    _run_inference_check(model_dir, manifest, cosine_threshold)
 
 
 def _check_dim(vectors: list[list[float]], dim: int) -> None:
@@ -100,56 +107,62 @@ def _check_l2_norm(vectors: list[list[float]]) -> None:
 
 
 def _check_reproducibility(
-    session: object,
-    tokenizer: object,
+    table: Any,
+    tokenizer: Any,
     text: str,
     ref_vec: list[float],
     threshold: float,
 ) -> None:
     """同一入力で 2 回推論し、cosine 類似度が閾値以上であることを確認する。
 
-    threshold 0.999 は CPU FP16 丸め誤差の上限として設定している。
-    FP32 では完全一致（≈1.0）が期待できるが、INT8/FP16 ではわずかな誤差を許容する。
+    静的テーブル参照は決定的なため、ほぼ完全一致（cosine ≈ 1.0）が期待できる。
     """
-    vec2 = _infer_embedding(session, tokenizer, text)
+    vec2 = _infer_embedding(table, tokenizer, text)
     sim = _cosine_similarity(ref_vec, vec2)
     if sim < threshold:
         raise ValueError(f"再現性チェック失敗: cosine={sim:.6f} < {threshold}")
     print(f"[verify] reproducibility check OK: cosine={sim:.6f}", flush=True)
 
 
+def _check_semantics(table: Any, tokenizer: Any) -> None:
+    """類似文ペアの cosine が非類似ペアを上回ることを確認する。
+
+    テーブル・トークナイザの組み合わせ間違い（語彙とテーブルの不整合）は
+    SHA 検証では検出できず、推論結果の意味的な崩れとして現れるため、
+    既知の類似/非類似ペアで簡易チェックする。
+    """
+    vec_a = _infer_embedding(table, tokenizer, _SIMILAR_PAIR[0])
+    vec_b = _infer_embedding(table, tokenizer, _SIMILAR_PAIR[1])
+    vec_c = _infer_embedding(table, tokenizer, _DISSIMILAR_TEXT)
+    sim_ab = _cosine_similarity(vec_a, vec_b)
+    sim_ac = _cosine_similarity(vec_a, vec_c)
+    if sim_ab <= sim_ac:
+        raise ValueError(f"意味的サニティチェック失敗: similar={sim_ab:.4f} <= dissimilar={sim_ac:.4f}")
+    print(f"[verify] semantic sanity check OK: similar={sim_ab:.4f} > dissimilar={sim_ac:.4f}", flush=True)
+
+
 def _run_inference_check(
-    model_bytes: bytes,
     model_dir: Path,
     manifest: dict,
     cosine_threshold: float,
 ) -> None:
-    """メモリ上の ONNX バイト列でサンプル推論を実行し、次元・正規化・再現性を検証する。"""
-    import onnxruntime as ort  # type: ignore[import-untyped]
+    """embeddings.npy でサンプル推論を実行し、次元・正規化・再現性・意味を検証する。"""
+    import numpy as np  # type: ignore[import-untyped]
     from tokenizers import Tokenizer  # type: ignore[import-untyped]
 
-    import onnx  # type: ignore[import-untyped]
-
     tokenizer = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
-    tokenizer.enable_padding(pad_token="[PAD]", length=manifest["tokenizer_max_length"])
-    tokenizer.enable_truncation(max_length=manifest["tokenizer_max_length"])
+    table = np.load(model_dir / "embeddings.npy", mmap_mode="r")
 
-    # InferenceSession より前に ONNX 構造を検証する（不正モデルの早期検知）
-    try:
-        onnx.checker.check_model(onnx.load_from_string(model_bytes))
-    except Exception as exc:
-        raise ValueError(f"ONNX 構造検証失敗: {exc}") from exc
+    if table.shape != (manifest["vocab_size"], manifest["embedding_dim"]):
+        raise ValueError(f"テーブル shape 不一致: expected {(manifest['vocab_size'], manifest['embedding_dim'])}, got {table.shape}")
 
-    sess_opts = ort.SessionOptions()
-    sess_opts.log_severity_level = 3
-    session = ort.InferenceSession(model_bytes, sess_opts, providers=["CPUExecutionProvider"])
-
-    test_texts = ["検索クエリ: 日本語のテスト文", "検索クエリ: ベクトル品質確認"]
-    vectors = [_infer_embedding(session, tokenizer, t) for t in test_texts]
+    test_texts = ["日本語のテスト文", "ベクトル品質確認"]
+    vectors = [_infer_embedding(table, tokenizer, t) for t in test_texts]
 
     _check_dim(vectors, manifest["embedding_dim"])
     _check_l2_norm(vectors)
-    _check_reproducibility(session, tokenizer, test_texts[0], vectors[0], cosine_threshold)
+    _check_reproducibility(table, tokenizer, test_texts[0], vectors[0], cosine_threshold)
+    _check_semantics(table, tokenizer)
     print("[verify] all verifications PASSED", flush=True)
 
 
@@ -160,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     import sys
     import traceback
 
-    parser = argparse.ArgumentParser(description="model.onnx 品質検証")
+    parser = argparse.ArgumentParser(description="embeddings.npy 品質検証")
     parser.add_argument(
         "--models-dir",
         type=Path,

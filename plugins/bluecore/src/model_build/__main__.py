@@ -1,9 +1,12 @@
 """model_build CLI — `python3 -m model_build <subcommand>` で実行する。
 
 サブコマンド:
-  build     ONNX 変換 → 量子化 → manifest 生成を一括実行
+  build     model.safetensors から embeddings.npy 抽出 → manifest 生成を一括実行
   verify    manifest.json を使ってモデルを検証
   clean     output_dir のモデルファイルと manifest を削除
+
+build は bluecore.model_download がダウンロード済みの model.safetensors /
+tokenizer.json を入力とする。numpy のみで動作し torch を必要としない。
 """
 
 from __future__ import annotations
@@ -11,10 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-
-from model_build.quantize import DEFAULT_QUANT, QUANT_CHOICES
 
 _BUILD_CONFIG_PATH = Path(__file__).resolve().parent / "build_config.json"
 _DEFAULT_OUT = Path.home() / ".bluecore" / "models"
@@ -25,7 +25,7 @@ def _load_build_config() -> dict:
     if not _BUILD_CONFIG_PATH.exists():
         raise FileNotFoundError(f"build_config.json が見つかりません: {_BUILD_CONFIG_PATH}")
     config = json.loads(_BUILD_CONFIG_PATH.read_text(encoding="utf-8"))
-    for key in ("model_name", "hf_revision", "model_type", "num_heads", "hidden_size", "embedding_dim", "tokenizer_max_length"):
+    for key in ("model_name", "hf_revision", "vocab_size", "source_embedding_dim", "embedding_dim"):
         if key not in config:
             raise ValueError(f"build_config.json に必須キーがありません: '{key}'")
     return config
@@ -42,97 +42,65 @@ def _sha256(p: Path) -> str:
     return h.hexdigest()
 
 
-@dataclass(frozen=True)
-class _ArtifactParams:
-    """_copy_artifacts_and_write_manifest のビルド成果物パラメータ。"""
-
-    args: argparse.Namespace
-    build_cfg: dict
-    quant: str
-    raw_onnx: Path
-    quant_onnx: Path
-    output_dir: Path
-
-
-def _copy_artifacts_and_write_manifest(p: _ArtifactParams) -> None:
-    """量子化済み ONNX・補助ファイルを出力先にコピーし、manifest.json を書き出す。"""
-    import shutil
+def _write_manifest(output_dir: Path, build_cfg: dict) -> None:
+    """embeddings.npy・tokenizer.json の SHA256 を含む manifest.json を書き出す。"""
     from datetime import UTC, datetime
 
     from model_build import __version__
 
-    onnx_export_dir = p.raw_onnx.parent
-    tokenizer_json = onnx_export_dir / "tokenizer.json"
-    config_json = onnx_export_dir / "config.json"
-    if not tokenizer_json.exists():
-        raise FileNotFoundError(f"tokenizer.json が見つかりません: {tokenizer_json}")
-    if not config_json.exists():
-        raise FileNotFoundError(f"config.json が見つかりません: {config_json}")
-
-    p.output_dir.mkdir(parents=True, exist_ok=True)
-    dst_onnx = p.output_dir / "model.onnx"
-    dst_tok = p.output_dir / "tokenizer.json"
-    dst_cfg = p.output_dir / "config.json"
-    shutil.copy2(p.quant_onnx, dst_onnx)
-    shutil.copy2(tokenizer_json, dst_tok)
-    shutil.copy2(config_json, dst_cfg)
-
     manifest = {
-        "model_name": p.args.model,
-        "hf_revision": p.args.revision,
-        "quantization": p.quant,
-        "embedding_dim": p.build_cfg["embedding_dim"],
-        "tokenizer_max_length": p.build_cfg["tokenizer_max_length"],
-        "merged_sha256": _sha256(dst_onnx),
+        "model_name": build_cfg["model_name"],
+        "hf_revision": build_cfg["hf_revision"],
+        "embedding_dim": build_cfg["embedding_dim"],
+        "vocab_size": build_cfg["vocab_size"],
+        "embeddings_sha256": _sha256(output_dir / "embeddings.npy"),
         "auxiliary_files": [
-            {"name": "tokenizer.json", "sha256": _sha256(dst_tok)},
-            {"name": "config.json", "sha256": _sha256(dst_cfg)},
+            {"name": "tokenizer.json", "sha256": _sha256(output_dir / "tokenizer.json")},
         ],
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "tool_version": f"model_build/{__version__}",
     }
-    manifest_path = p.output_dir / "manifest.json"
+    manifest_path = output_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"[build] manifest: {manifest_path}", flush=True)
 
 
 def _cmd_build(args: argparse.Namespace) -> None:
-    """ONNX 変換 → 量子化 → manifest 生成を一括実行する。"""
-    import tempfile
+    """埋め込みテーブル抽出 → manifest 生成を一括実行する。
 
-    from model_build.export import export_to_onnx
-    from model_build.quantize import quantize
+    入力の model.safetensors は抽出完了後に削除する
+    （embeddings.npy があれば再ビルド不要のため保持する理由がない）。
+    """
+    from model_build.extract import extract_embeddings
 
     build_cfg = _load_build_config()
     output_dir: Path = args.out
-    quant: str = args.quant
 
-    with tempfile.TemporaryDirectory(prefix="bluecore_build_") as tmp:
-        tmp_path = Path(tmp)
+    st_path = output_dir / "model.safetensors"
+    tok_path = output_dir / "tokenizer.json"
+    if not st_path.exists():
+        raise FileNotFoundError(f"model.safetensors が見つかりません: {st_path}\npython3 -m bluecore.model_download を先に実行してください。")
+    if not tok_path.exists():
+        raise FileNotFoundError(f"tokenizer.json が見つかりません: {tok_path}\npython3 -m bluecore.model_download を先に実行してください。")
 
-        # Step 1: ONNX エクスポート（常に FP32 で取得し、後段で量子化）
-        print(f"[build] Step 1/2: ONNX export ({args.model}@{args.revision[:8]})", flush=True)
-        raw_onnx = export_to_onnx(
-            model_name=args.model,
-            revision=args.revision,
-            output_dir=tmp_path,
-        )
+    print(f"[build] Step 1/2: extract embeddings ({build_cfg['model_name']}@{build_cfg['hf_revision'][:8]}, dim={build_cfg['embedding_dim']})", flush=True)
+    extract_embeddings(
+        st_path,
+        output_dir / "embeddings.npy",
+        vocab_size=build_cfg["vocab_size"],
+        source_dim=build_cfg["source_embedding_dim"],
+        embedding_dim=build_cfg["embedding_dim"],
+    )
 
-        # Step 2: 量子化（fp32: コピー、fp16: ort optimizer、int8: 動的量子化）
-        print(f"[build] Step 2/2: quantization ({quant}) → {output_dir}", flush=True)
-        quant_onnx = tmp_path / f"model_{quant}.onnx"
-        quantize(raw_onnx, quant_onnx, quant, num_heads=build_cfg["num_heads"], hidden_size=build_cfg["hidden_size"])
+    print("[build] Step 2/2: write manifest", flush=True)
+    _write_manifest(output_dir, build_cfg)
 
-        _copy_artifacts_and_write_manifest(_ArtifactParams(
-            args=args, build_cfg=build_cfg, quant=quant,
-            raw_onnx=raw_onnx, quant_onnx=quant_onnx, output_dir=output_dir,
-        ))
-
+    st_path.unlink()
     print("[build] complete", flush=True)
 
 
 def _cmd_verify(args: argparse.Namespace) -> None:
-    """manifest.json を使って分割済みモデルを検証する。"""
+    """manifest.json を使ってビルド済みモデルを検証する。"""
     from model_build.verify import verify
 
     verify(args.model_dir, cosine_threshold=args.cosine_threshold)
@@ -148,7 +116,7 @@ def _cmd_clean(args: argparse.Namespace) -> None:
         print(f"[clean] Directory not found: {output_dir}", flush=True)
         return
     removed = 0
-    for name in ("model.onnx", "tokenizer.json", "config.json", "manifest.json"):
+    for name in ("embeddings.npy", "model.safetensors", "tokenizer.json", "manifest.json"):
         p = output_dir / name
         if p.exists() and not p.is_symlink():
             p.unlink()
@@ -157,30 +125,17 @@ def _cmd_clean(args: argparse.Namespace) -> None:
 
 
 def _build_main_parser() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
-    """CLI 用の ArgumentParser を構築し、サブコマンド引数を返す。
-
-    build_config.json を読み込んでデフォルト値を設定するため、
-    パーサー構築と parse_args を一括で行う。
-    """
+    """CLI 用の ArgumentParser を構築し、サブコマンド引数を返す。"""
     parser = argparse.ArgumentParser(
         prog="python3 -m model_build",
-        description="bluecore メンテナ向け ONNX ビルドツール",
+        description="bluecore 静的埋め込みモデル ビルドツール",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    _build_cfg = _load_build_config()
-    p_build = sub.add_parser("build", help="ONNX 変換・量子化・分割を一括実行")
-    p_build.add_argument("--model", default=_build_cfg["model_name"], help="HF Hub モデル ID")
-    p_build.add_argument("--revision", default=_build_cfg["hf_revision"], help="HF Hub commit SHA")
-    p_build.add_argument(
-        "--quant",
-        default=DEFAULT_QUANT,
-        choices=QUANT_CHOICES,
-        help=f"量子化レベル (default: {DEFAULT_QUANT})",
-    )
-    p_build.add_argument("--out", type=Path, default=_DEFAULT_OUT, help="出力ディレクトリ")
+    p_build = sub.add_parser("build", help="ダウンロード済みファイルから embeddings.npy と manifest を生成")
+    p_build.add_argument("--out", type=Path, default=_DEFAULT_OUT, help="model.safetensors の配置先 兼 出力ディレクトリ")
 
-    p_verify = sub.add_parser("verify", help="分割済みモデルの検証")
+    p_verify = sub.add_parser("verify", help="ビルド済みモデルの検証")
     p_verify.add_argument("--model-dir", type=Path, default=_DEFAULT_OUT, help="manifest.json が存在するディレクトリ")
     p_verify.add_argument(
         "--cosine-threshold",
@@ -189,7 +144,7 @@ def _build_main_parser() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         help="再現性チェックの最低 cosine 類似度 (default: 0.999)",
     )
 
-    p_clean = sub.add_parser("clean", help="生成済み part・manifest を削除")
+    p_clean = sub.add_parser("clean", help="生成済みモデルファイル・manifest を削除")
     p_clean.add_argument("--out", type=Path, default=_DEFAULT_OUT, help="対象ディレクトリ")
 
     return parser, parser.parse_args()

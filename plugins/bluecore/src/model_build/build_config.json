@@ -1,11 +1,9 @@
 {
-  "schema_version": 1,
-  "model_name": "cl-nagoya/ruri-v3-310m",
-  "hf_revision": "18b60fb8c2b9df296fb4212bb7d23ef94e579cd3",
-  "model_type": "bert",
-  "num_heads": 16,
-  "hidden_size": 1024,
-  "embedding_dim": 768,
-  "tokenizer_max_length": 512,
-  "opset": 18
+  "schema_version": 2,
+  "model_name": "hotchpotch/static-embedding-japanese",
+  "hf_revision": "95b3d9c80a7ccf604e2b5daee7b1b3eed6b1a9d3",
+  "model_type": "static_embedding",
+  "vocab_size": 32768,
+  "source_embedding_dim": 1024,
+  "embedding_dim": 256
 }

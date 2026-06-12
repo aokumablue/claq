@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import math
-import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 import model_build.verify as verifymod
@@ -15,12 +15,29 @@ from model_build.verify import (
     _check_dim,
     _check_l2_norm,
     _check_reproducibility,
+    _check_semantics,
     _cosine_similarity,
     _infer_embedding,
     _run_inference_check,
     main,
     verify,
 )
+
+
+def _make_tokenizer(ids_by_text: dict[str, list[int]] | None = None, default_ids: list[int] | None = None) -> MagicMock:
+    """テキストごとに指定 ids を返すトークナイザモックを作成する。"""
+    tok = MagicMock()
+
+    def encode(text: str, add_special_tokens: bool = True) -> MagicMock:
+        enc = MagicMock()
+        if ids_by_text is not None and text in ids_by_text:
+            enc.ids = ids_by_text[text]
+        else:
+            enc.ids = [0, 1] if default_ids is None else default_ids
+        return enc
+
+    tok.encode.side_effect = encode
+    return tok
 
 
 class TestCosineSimilarity:
@@ -50,13 +67,46 @@ class TestCosineSimilarity:
         assert _cosine_similarity(a, b) == 0.0
 
 
+class TestInferEmbedding:
+    """_infer_embedding のテスト。"""
+
+    def test_mean_pooling_and_l2_norm(self) -> None:
+        """トークン埋め込みの平均を L2 正規化して返す。"""
+        table = np.array([[2.0, 0.0], [0.0, 2.0]], dtype=np.float32)
+        tok = _make_tokenizer(default_ids=[0, 1])
+
+        result = _infer_embedding(table, tok, "text")
+
+        # 平均 (1.0, 1.0) → 正規化 (1/√2, 1/√2)
+        assert result == pytest.approx([1.0 / math.sqrt(2)] * 2)
+
+    def test_uses_add_special_tokens_false(self) -> None:
+        """encode は add_special_tokens=False で呼ばれる（StaticEmbedding 仕様）。"""
+        table = np.eye(2, dtype=np.float32)
+        tok = _make_tokenizer(default_ids=[0])
+        _infer_embedding(table, tok, "text")
+        assert tok.encode.call_args.kwargs == {"add_special_tokens": False}
+
+    def test_empty_ids_returns_zero_vector(self) -> None:
+        """トークンが得られない場合はゼロベクトルを返す。"""
+        table = np.eye(3, dtype=np.float32)
+        tok = _make_tokenizer(default_ids=[])
+        assert _infer_embedding(table, tok, "") == [0.0, 0.0, 0.0]
+
+    def test_zero_norm_returns_zero_vector(self) -> None:
+        """埋め込みの平均が零ベクトルの場合もゼロベクトルを返す。"""
+        table = np.zeros((2, 3), dtype=np.float32)
+        tok = _make_tokenizer(default_ids=[0, 1])
+        assert _infer_embedding(table, tok, "text") == [0.0, 0.0, 0.0]
+
+
 class TestCheckDim:
     """_check_dim のテスト。"""
 
     def test_correct_dim(self, capsys: pytest.CaptureFixture) -> None:
         """期待次元と一致すれば例外なし。"""
-        vectors = [[0.1] * 768, [0.2] * 768]
-        _check_dim(vectors, 768)
+        vectors = [[0.1] * 256, [0.2] * 256]
+        _check_dim(vectors, 256)
         captured = capsys.readouterr()
         assert "OK" in captured.out
 
@@ -64,7 +114,7 @@ class TestCheckDim:
         """期待次元と異なれば ValueError。"""
         vectors = [[0.1] * 512]
         with pytest.raises(ValueError, match="次元数不一致"):
-            _check_dim(vectors, 768)
+            _check_dim(vectors, 256)
 
 
 class TestCheckL2Norm:
@@ -72,14 +122,14 @@ class TestCheckL2Norm:
 
     def test_unit_vectors_pass(self, capsys: pytest.CaptureFixture) -> None:
         """L2 norm ≈ 1.0 のベクトルは通過する。"""
-        v = [1.0 / math.sqrt(768)] * 768
+        v = [1.0 / math.sqrt(256)] * 256
         _check_l2_norm([v])
         captured = capsys.readouterr()
         assert "OK" in captured.out
 
     def test_non_unit_vector_raises(self) -> None:
         """L2 norm が 1.0 から外れたベクトルは ValueError。"""
-        v = [1.0] * 768  # norm = sqrt(768) ≈ 27.7
+        v = [1.0] * 256  # norm = 16
         with pytest.raises(ValueError, match="L2 ノルム不正"):
             _check_l2_norm([v])
 
@@ -87,103 +137,50 @@ class TestCheckL2Norm:
 class TestCheckReproducibility:
     """_check_reproducibility のテスト。"""
 
-    def _make_session_and_tokenizer(self, vec: list[float]) -> tuple[MagicMock, MagicMock]:
-        """指定ベクトルを返す推論モックを作成する。"""
-        import numpy as np
-
-        mock_session = MagicMock()
-        mock_session.get_inputs.return_value = []
-        token_embs = np.array([[vec]], dtype=np.float32)
-        mock_session.run.return_value = [token_embs]
-
-        mock_tok = MagicMock()
-        enc = MagicMock()
-        enc.ids = [1, 2, 3]
-        enc.attention_mask = [1, 1, 1]
-        mock_tok.encode.return_value = enc
-
-        return mock_session, mock_tok
-
     def test_identical_output_passes(self, capsys: pytest.CaptureFixture) -> None:
         """2 回同じ推論結果なら再現性チェック通過。"""
-        vec = [1.0 / math.sqrt(3)] * 3
-        ref_vec = list(vec)
-        session, tokenizer = self._make_session_and_tokenizer(vec)
+        table = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        tok = _make_tokenizer(default_ids=[0])
+        ref_vec = _infer_embedding(table, tok, "test text")
 
-        _check_reproducibility(session, tokenizer, "test text", ref_vec, threshold=0.999)
+        _check_reproducibility(table, tok, "test text", ref_vec, threshold=0.999)
         captured = capsys.readouterr()
         assert "OK" in captured.out
 
     def test_diverged_output_raises(self) -> None:
         """cosine 類似度が閾値未満なら ValueError。"""
-        ref_vec = [1.0, 0.0, 0.0]
-        diverged_vec = [0.0, 1.0, 0.0]
-        session, tokenizer = self._make_session_and_tokenizer(diverged_vec)
+        table = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        tok = _make_tokenizer(default_ids=[0])
+        ref_vec = [0.0, 1.0]  # 推論結果 (1.0, 0.0) と直交
 
         with pytest.raises(ValueError, match="再現性チェック失敗"):
-            _check_reproducibility(session, tokenizer, "text", ref_vec, threshold=0.999)
+            _check_reproducibility(table, tok, "text", ref_vec, threshold=0.999)
 
 
-class TestRunInferenceCheckOnnxChecker:
-    """_run_inference_check の onnx.checker 検証テスト。"""
+class TestCheckSemantics:
+    """_check_semantics のテスト。"""
 
-    def _make_tokenizer_json(self, tmp_path: Path) -> None:
-        """テスト用 tokenizer.json を tmp_path に生成する。"""
-        from tokenizers import Tokenizer  # type: ignore[import-untyped]
-        from tokenizers.models import BPE  # type: ignore[import-untyped]
+    def test_similar_pair_above_dissimilar_passes(self, capsys: pytest.CaptureFixture) -> None:
+        """類似ペアの cosine が非類似ペアを上回れば通過する。"""
+        table = np.array([[1.0, 0.0], [0.9, 0.1], [0.0, 1.0]], dtype=np.float32)
+        tok = _make_tokenizer(ids_by_text={
+            verifymod._SIMILAR_PAIR[0]: [0],
+            verifymod._SIMILAR_PAIR[1]: [1],
+            verifymod._DISSIMILAR_TEXT: [2],
+        })
+        _check_semantics(table, tok)
+        assert "OK" in capsys.readouterr().out
 
-        tok = Tokenizer(BPE())
-        tok.save(str(tmp_path / "tokenizer.json"))
-
-    def test_invalid_onnx_raises_value_error(self, tmp_path: Path) -> None:
-        """不正 ONNX バイナリで onnx.checker が例外を出すと ValueError になる。"""
-        self._make_tokenizer_json(tmp_path)
-        model_bytes = b"invalid_onnx_bytes"
-        manifest = {"tokenizer_max_length": 512, "embedding_dim": 768}
-
-        with pytest.raises(ValueError, match="ONNX 構造検証失敗"):
-            _run_inference_check(model_bytes, tmp_path, manifest, cosine_threshold=0.999)
-
-    def test_check_model_exception_is_wrapped(self, tmp_path: Path) -> None:
-        """onnx.checker.check_model の任意例外が ValueError でラップされる。"""
-        self._make_tokenizer_json(tmp_path)
-        model_bytes = b"any_bytes"
-        manifest = {"tokenizer_max_length": 512, "embedding_dim": 768}
-
-        # 関数内 import の onnx を sys.modules 経由で差し替える
-        import sys
-        mock_onnx = MagicMock()
-        mock_onnx.load_from_string.return_value = MagicMock()
-        mock_onnx.checker.check_model.side_effect = RuntimeError("bad model")
-        with patch.dict(sys.modules, {"onnx": mock_onnx}):
-            with pytest.raises(ValueError, match="ONNX 構造検証失敗"):
-                _run_inference_check(model_bytes, tmp_path, manifest, cosine_threshold=0.999)
-
-
-class TestInferEmbeddingTokenTypeIds:
-    """_infer_embedding の token_type_ids 入力分岐のテスト。"""
-
-    def test_adds_token_type_ids_when_required(self) -> None:
-        """モデルが token_type_ids を要求すれば inputs に追加して推論する。"""
-        import numpy as np
-
-        session = MagicMock()
-        tt_input = MagicMock()
-        tt_input.name = "token_type_ids"
-        session.get_inputs.return_value = [tt_input]
-        session.run.return_value = [np.array([[[1.0, 0.0]]], dtype=np.float32)]
-
-        tok = MagicMock()
-        enc = MagicMock()
-        enc.ids = [1, 2, 3]
-        enc.attention_mask = [1, 1, 1]
-        tok.encode.return_value = enc
-
-        result = _infer_embedding(session, tok, "text")
-        assert isinstance(result, list)
-        # token_type_ids を含む inputs で run が呼ばれている
-        called_inputs = session.run.call_args.args[1]
-        assert "token_type_ids" in called_inputs
+    def test_similar_pair_below_dissimilar_raises(self) -> None:
+        """類似ペアの cosine が非類似ペア以下なら ValueError。"""
+        table = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 0.0]], dtype=np.float32)
+        tok = _make_tokenizer(ids_by_text={
+            verifymod._SIMILAR_PAIR[0]: [0],
+            verifymod._SIMILAR_PAIR[1]: [1],
+            verifymod._DISSIMILAR_TEXT: [2],
+        })
+        with pytest.raises(ValueError, match="意味的サニティチェック失敗"):
+            _check_semantics(table, tok)
 
 
 class TestVerify:
@@ -194,40 +191,40 @@ class TestVerify:
         with pytest.raises(FileNotFoundError, match="manifest.json"):
             verify(tmp_path)
 
-    def test_model_sha_mismatch_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """model.onnx の SHA256 が不一致なら ValueError。"""
-        manifest = {"merged_sha256": "a" * 64, "auxiliary_files": []}
+    def test_embeddings_sha_mismatch_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """embeddings.npy の SHA256 が不一致なら ValueError。"""
+        manifest = {"embeddings_sha256": "a" * 64, "auxiliary_files": []}
         (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        (tmp_path / "model.onnx").write_bytes(b"x")
+        (tmp_path / "embeddings.npy").write_bytes(b"x")
         monkeypatch.setattr(verifymod, "_validate_sha256_format", lambda *a: None)
         monkeypatch.setattr(verifymod, "_sha256_file", lambda p: "b" * 64)
-        with pytest.raises(ValueError, match="model.onnx SHA256 不一致"):
+        with pytest.raises(ValueError, match="embeddings.npy SHA256 不一致"):
             verify(tmp_path)
 
     def test_aux_sha_mismatch_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """補助ファイルの SHA256 が不一致なら ValueError。"""
         manifest = {
-            "merged_sha256": "m" * 64,
+            "embeddings_sha256": "m" * 64,
             "auxiliary_files": [{"name": "tokenizer.json", "sha256": "t" * 64}],
         }
         (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        (tmp_path / "model.onnx").write_bytes(b"x")
+        (tmp_path / "embeddings.npy").write_bytes(b"x")
         (tmp_path / "tokenizer.json").write_bytes(b"y")
         monkeypatch.setattr(verifymod, "_validate_sha256_format", lambda *a: None)
-        monkeypatch.setattr(verifymod, "_sha256_file", lambda p: "m" * 64 if Path(p).name == "model.onnx" else "x" * 64)
+        monkeypatch.setattr(verifymod, "_sha256_file", lambda p: "m" * 64 if Path(p).name == "embeddings.npy" else "x" * 64)
         with pytest.raises(ValueError, match="補助ファイル SHA256 不一致"):
             verify(tmp_path)
 
     def test_full_verify_success(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
         """全 SHA256 が一致すれば推論検証へ進む。"""
         manifest = {
-            "merged_sha256": "m" * 64,
+            "embeddings_sha256": "m" * 64,
             "auxiliary_files": [{"name": "tokenizer.json", "sha256": "t" * 64}],
         }
         (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        (tmp_path / "model.onnx").write_bytes(b"x")
+        (tmp_path / "embeddings.npy").write_bytes(b"x")
         (tmp_path / "tokenizer.json").write_bytes(b"y")
-        sha_map = {"model.onnx": "m" * 64, "tokenizer.json": "t" * 64}
+        sha_map = {"embeddings.npy": "m" * 64, "tokenizer.json": "t" * 64}
         monkeypatch.setattr(verifymod, "_validate_sha256_format", lambda *a: None)
         monkeypatch.setattr(verifymod, "_sha256_file", lambda p: sha_map[Path(p).name])
         ran = []
@@ -237,28 +234,46 @@ class TestVerify:
         assert "SHA256 verification OK" in capsys.readouterr().out
 
 
-class TestRunInferenceCheckSuccess:
-    """_run_inference_check の正常フローのテスト。"""
+class TestRunInferenceCheck:
+    """_run_inference_check のテスト。"""
+
+    def _setup_model_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, table: np.ndarray) -> dict:
+        """embeddings.npy・tokenizer.json と Tokenizer モックを準備し manifest を返す。"""
+        np.save(tmp_path / "embeddings.npy", table)
+        (tmp_path / "tokenizer.json").write_text("{}", encoding="utf-8")
+
+        # 関数内 import の tokenizers.Tokenizer.from_file をモック
+        import tokenizers
+
+        tok = _make_tokenizer(ids_by_text={
+            "日本語のテスト文": [0],
+            "ベクトル品質確認": [1],
+            verifymod._SIMILAR_PAIR[0]: [0],
+            verifymod._SIMILAR_PAIR[1]: [2],
+            verifymod._DISSIMILAR_TEXT: [3],
+        })
+        monkeypatch.setattr(tokenizers.Tokenizer, "from_file", staticmethod(lambda _p: tok))
+        return {"vocab_size": table.shape[0], "embedding_dim": table.shape[1]}
 
     def test_full_inference_flow(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
-        """ONNX 検証通過後に推論・各種チェックを順に呼ぶ。"""
-        manifest = {"tokenizer_max_length": 512, "embedding_dim": 768}
+        """テーブル読み込み後に次元・正規化・再現性・意味チェックを順に通過する。"""
+        table = np.array(
+            [[1.0, 0.0], [0.0, 1.0], [0.9, 0.1], [-0.5, 0.5]],
+            dtype=np.float32,
+        )
+        manifest = self._setup_model_dir(tmp_path, monkeypatch, table)
 
-        mock_ort = MagicMock()
-        mock_session = MagicMock()
-        mock_ort.InferenceSession.return_value = mock_session
-        mock_onnx = MagicMock()  # load_from_string / checker.check_model は成功
-        mock_tokenizers = MagicMock()
-        mock_tokenizers.Tokenizer.from_file.return_value = MagicMock()
-
-        monkeypatch.setattr(verifymod, "_infer_embedding", lambda s, t, txt: [0.1] * 768)
-        monkeypatch.setattr(verifymod, "_check_dim", lambda v, d: None)
-        monkeypatch.setattr(verifymod, "_check_l2_norm", lambda v: None)
-        monkeypatch.setattr(verifymod, "_check_reproducibility", lambda *a: None)
-
-        with patch.dict(sys.modules, {"onnxruntime": mock_ort, "onnx": mock_onnx, "tokenizers": mock_tokenizers}):
-            _run_inference_check(b"bytes", tmp_path, manifest, cosine_threshold=0.999)
+        _run_inference_check(tmp_path, manifest, cosine_threshold=0.999)
         assert "all verifications PASSED" in capsys.readouterr().out
+
+    def test_table_shape_mismatch_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """テーブル shape が manifest と不一致なら ValueError。"""
+        table = np.eye(4, 2, dtype=np.float32)
+        manifest = self._setup_model_dir(tmp_path, monkeypatch, table)
+        manifest["vocab_size"] = 99
+
+        with pytest.raises(ValueError, match="テーブル shape 不一致"):
+            _run_inference_check(tmp_path, manifest, cosine_threshold=0.999)
 
 
 class TestMain:

@@ -10,9 +10,18 @@ import pytest
 from model_build.__main__ import _load_build_config
 
 _REQUIRED_KEYS = (
-    "model_name", "hf_revision", "model_type",
-    "num_heads", "hidden_size", "embedding_dim", "tokenizer_max_length",
+    "model_name", "hf_revision", "vocab_size", "source_embedding_dim", "embedding_dim",
 )
+
+_VALID_DATA = {
+    "schema_version": 2,
+    "model_name": "test/static-model",
+    "hf_revision": "a" * 40,
+    "model_type": "static_embedding",
+    "vocab_size": 32768,
+    "source_embedding_dim": 1024,
+    "embedding_dim": 256,
+}
 
 
 class TestLoadBuildConfig:
@@ -26,25 +35,15 @@ class TestLoadBuildConfig:
 
     def test_loads_valid_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """有効な build_config.json を正常に読み込む。"""
-        data = {
-            "schema_version": 1,
-            "model_name": "test/model",
-            "hf_revision": "a" * 40,
-            "model_type": "bert",
-            "num_heads": 16,
-            "hidden_size": 1024,
-            "embedding_dim": 768,
-            "tokenizer_max_length": 512,
-        }
-        p = self._write_config(tmp_path, data)
+        p = self._write_config(tmp_path, _VALID_DATA)
 
         import model_build.__main__ as mm
         monkeypatch.setattr(mm, "_BUILD_CONFIG_PATH", p)
 
         config = _load_build_config()
-        assert config["model_name"] == "test/model"
-        assert config["num_heads"] == 16
-        assert config["embedding_dim"] == 768
+        assert config["model_name"] == "test/static-model"
+        assert config["vocab_size"] == 32768
+        assert config["embedding_dim"] == 256
 
     def test_missing_file_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """ファイルが存在しないと FileNotFoundError。"""
@@ -59,16 +58,7 @@ class TestLoadBuildConfig:
         self, tmp_path: Path, missing_key: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """必須キーが欠落した場合 ValueError。"""
-        data = {
-            "schema_version": 1,
-            "model_name": "test/model",
-            "hf_revision": "a" * 40,
-            "model_type": "bert",
-            "num_heads": 16,
-            "hidden_size": 1024,
-            "embedding_dim": 768,
-            "tokenizer_max_length": 512,
-        }
+        data = dict(_VALID_DATA)
         del data[missing_key]
         p = self._write_config(tmp_path, data)
 
@@ -77,3 +67,10 @@ class TestLoadBuildConfig:
 
         with pytest.raises(ValueError, match=missing_key):
             _load_build_config()
+
+    def test_repo_config_is_valid(self) -> None:
+        """リポジトリ同梱の build_config.json が必須キーを満たしている。"""
+        config = _load_build_config()
+        for key in _REQUIRED_KEYS:
+            assert key in config
+        assert 0 < config["embedding_dim"] <= config["source_embedding_dim"]

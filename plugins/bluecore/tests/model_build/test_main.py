@@ -5,14 +5,24 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 import model_build.__main__ as mainmod
-from model_build.__main__ import _cmd_clean, _cmd_verify
+from model_build.__main__ import _cmd_build, _cmd_clean, _cmd_verify
+from tests.model_build.conftest import make_safetensors
+
+_VALID_BUILD_CFG = {
+    "model_name": "m/static",
+    "hf_revision": "abcdef1234",
+    "model_type": "static_embedding",
+    "vocab_size": 8,
+    "source_embedding_dim": 6,
+    "embedding_dim": 3,
+}
 
 
 class TestCmdClean:
@@ -23,18 +33,18 @@ class TestCmdClean:
         return argparse.Namespace(out=out)
 
     def test_clean_removes_model_files_and_manifest(self, tmp_path: Path) -> None:
-        """model.onnx・tokenizer.json・config.json・manifest.json が削除される。"""
-        (tmp_path / "model.onnx").write_bytes(b"x")
+        """embeddings.npy・model.safetensors・tokenizer.json・manifest.json が削除される。"""
+        (tmp_path / "embeddings.npy").write_bytes(b"x")
+        (tmp_path / "model.safetensors").write_bytes(b"x")
         (tmp_path / "tokenizer.json").write_text("{}", encoding="utf-8")
-        (tmp_path / "config.json").write_text("{}", encoding="utf-8")
         (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
         (tmp_path / "other.txt").write_bytes(b"keep")  # 保持されるはず
 
         _cmd_clean(self._make_args(tmp_path))
 
-        assert not (tmp_path / "model.onnx").exists()
+        assert not (tmp_path / "embeddings.npy").exists()
+        assert not (tmp_path / "model.safetensors").exists()
         assert not (tmp_path / "tokenizer.json").exists()
-        assert not (tmp_path / "config.json").exists()
         assert not (tmp_path / "manifest.json").exists()
         assert (tmp_path / "other.txt").exists()
 
@@ -44,7 +54,7 @@ class TestCmdClean:
 
     def test_clean_reports_count(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
         """削除ファイル数を出力する。"""
-        (tmp_path / "model.onnx").write_bytes(b"x")
+        (tmp_path / "embeddings.npy").write_bytes(b"x")
         (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
 
         _cmd_clean(self._make_args(tmp_path))
@@ -63,9 +73,9 @@ class TestCmdClean:
 
     def test_clean_skips_symlinks(self, tmp_path: Path) -> None:
         """symlink は削除対象外。"""
-        real = tmp_path / "real.onnx"
+        real = tmp_path / "real.npy"
         real.write_bytes(b"x")
-        link = tmp_path / "model.onnx"
+        link = tmp_path / "embeddings.npy"
         link.symlink_to(real)
 
         _cmd_clean(self._make_args(tmp_path))
@@ -139,17 +149,6 @@ class TestVerifyModuleMain:
         mock_verify.assert_called_once_with(expected_dir)
 
 
-_VALID_BUILD_CFG = {
-    "model_name": "m",
-    "hf_revision": "abcdef1234",
-    "model_type": "bert",
-    "num_heads": 4,
-    "hidden_size": 8,
-    "embedding_dim": 16,
-    "tokenizer_max_length": 128,
-}
-
-
 class TestLoadBuildConfig:
     """_load_build_config のテスト。"""
 
@@ -172,7 +171,7 @@ class TestLoadBuildConfig:
         cfg = tmp_path / "build_config.json"
         cfg.write_text(json.dumps(_VALID_BUILD_CFG), encoding="utf-8")
         monkeypatch.setattr(mainmod, "_BUILD_CONFIG_PATH", cfg)
-        assert mainmod._load_build_config()["model_name"] == "m"
+        assert mainmod._load_build_config()["model_name"] == "m/static"
 
 
 class TestSha256:
@@ -196,80 +195,73 @@ class TestSha256:
         assert mainmod._sha256(f) == hashlib.sha256(data).hexdigest()
 
 
-class TestCopyArtifactsAndWriteManifest:
-    """_copy_artifacts_and_write_manifest のテスト。"""
+class TestWriteManifest:
+    """_write_manifest のテスト。"""
 
-    def _params(self, tmp_path: Path) -> mainmod._ArtifactParams:
-        """成果物パラメータを構築する。"""
-        export_dir = tmp_path / "export"
-        export_dir.mkdir()
-        raw_onnx = export_dir / "model.onnx"
-        raw_onnx.write_bytes(b"raw")
-        quant_onnx = tmp_path / "model_int8.onnx"
-        quant_onnx.write_bytes(b"quant")
-        return mainmod._ArtifactParams(
-            args=argparse.Namespace(model="m", revision="abcdef1234"),
-            build_cfg=_VALID_BUILD_CFG,
-            quant="int8",
-            raw_onnx=raw_onnx,
-            quant_onnx=quant_onnx,
-            output_dir=tmp_path / "out",
-        )
+    def test_writes_manifest_with_hashes(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+        """embeddings.npy と tokenizer.json の SHA256 を含む manifest を出力する。"""
+        import hashlib
 
-    def test_missing_tokenizer_raises(self, tmp_path: Path) -> None:
-        """tokenizer.json が無ければ FileNotFoundError。"""
-        params = self._params(tmp_path)
-        with pytest.raises(FileNotFoundError, match="tokenizer.json"):
-            mainmod._copy_artifacts_and_write_manifest(params)
+        (tmp_path / "embeddings.npy").write_bytes(b"npy-bytes")
+        (tmp_path / "tokenizer.json").write_text("{}", encoding="utf-8")
 
-    def test_missing_config_raises(self, tmp_path: Path) -> None:
-        """config.json が無ければ FileNotFoundError。"""
-        params = self._params(tmp_path)
-        (params.raw_onnx.parent / "tokenizer.json").write_text("{}", encoding="utf-8")
-        with pytest.raises(FileNotFoundError, match="config.json"):
-            mainmod._copy_artifacts_and_write_manifest(params)
+        mainmod._write_manifest(tmp_path, _VALID_BUILD_CFG)
 
-    def test_writes_manifest(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
-        """補助ファイルが揃えば manifest を出力する。"""
-        params = self._params(tmp_path)
-        (params.raw_onnx.parent / "tokenizer.json").write_text("{}", encoding="utf-8")
-        (params.raw_onnx.parent / "config.json").write_text("{}", encoding="utf-8")
-        mainmod._copy_artifacts_and_write_manifest(params)
-        manifest = json.loads((params.output_dir / "manifest.json").read_text(encoding="utf-8"))
-        assert manifest["model_name"] == "m"
-        assert manifest["quantization"] == "int8"
-        assert len(manifest["auxiliary_files"]) == 2
+        manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["model_name"] == "m/static"
+        assert manifest["embedding_dim"] == 3
+        assert manifest["vocab_size"] == 8
+        assert manifest["embeddings_sha256"] == hashlib.sha256(b"npy-bytes").hexdigest()
+        assert manifest["auxiliary_files"] == [
+            {"name": "tokenizer.json", "sha256": hashlib.sha256(b"{}").hexdigest()},
+        ]
         assert "manifest" in capsys.readouterr().out
 
 
 class TestCmdBuild:
-    """_cmd_build のテスト（export/quantize を sys.modules でモック）。"""
+    """_cmd_build のテスト。"""
+
+    def _setup_inputs(self, tmp_path: Path) -> Path:
+        """ダウンロード済み相当の model.safetensors / tokenizer.json を配置する。"""
+        out = tmp_path / "out"
+        out.mkdir()
+        table = np.arange(
+            _VALID_BUILD_CFG["vocab_size"] * _VALID_BUILD_CFG["source_embedding_dim"],
+            dtype=np.float32,
+        ).reshape(_VALID_BUILD_CFG["vocab_size"], _VALID_BUILD_CFG["source_embedding_dim"])
+        make_safetensors(out / "model.safetensors", table)
+        (out / "tokenizer.json").write_text("{}", encoding="utf-8")
+        return out
 
     def test_build_pipeline(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
-        """ONNX export → 量子化 → manifest 生成を順に呼ぶ。"""
+        """抽出 → manifest 生成 → safetensors 削除を順に実行する。"""
         monkeypatch.setattr(mainmod, "_load_build_config", lambda: _VALID_BUILD_CFG)
+        out = self._setup_inputs(tmp_path)
 
-        def fake_export(model_name: str, revision: str, output_dir: Path) -> Path:
-            raw = Path(output_dir) / "model.onnx"
-            raw.write_bytes(b"raw")
-            return raw
+        _cmd_build(argparse.Namespace(out=out))
 
-        fake_export_mod = types.ModuleType("model_build.export")
-        fake_export_mod.export_to_onnx = fake_export
-        monkeypatch.setitem(sys.modules, "model_build.export", fake_export_mod)
-
-        quant_mock = MagicMock()
-        monkeypatch.setattr(sys.modules["model_build.quantize"], "quantize", quant_mock)
-
-        copy_mock = MagicMock()
-        monkeypatch.setattr(mainmod, "_copy_artifacts_and_write_manifest", copy_mock)
-
-        args = argparse.Namespace(model="m", revision="abcdef1234", quant="int8", out=tmp_path / "out")
-        mainmod._cmd_build(args)
-
-        quant_mock.assert_called_once()
-        copy_mock.assert_called_once()
+        loaded = np.load(out / "embeddings.npy")
+        assert loaded.shape == (_VALID_BUILD_CFG["vocab_size"], _VALID_BUILD_CFG["embedding_dim"])
+        assert (out / "manifest.json").exists()
+        assert not (out / "model.safetensors").exists()
         assert "complete" in capsys.readouterr().out
+
+    def test_build_missing_safetensors_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """model.safetensors がなければ FileNotFoundError。"""
+        monkeypatch.setattr(mainmod, "_load_build_config", lambda: _VALID_BUILD_CFG)
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "tokenizer.json").write_text("{}", encoding="utf-8")
+        with pytest.raises(FileNotFoundError, match="model.safetensors"):
+            _cmd_build(argparse.Namespace(out=out))
+
+    def test_build_missing_tokenizer_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """tokenizer.json がなければ FileNotFoundError。"""
+        monkeypatch.setattr(mainmod, "_load_build_config", lambda: _VALID_BUILD_CFG)
+        out = self._setup_inputs(tmp_path)
+        (out / "tokenizer.json").unlink()
+        with pytest.raises(FileNotFoundError, match="tokenizer.json"):
+            _cmd_build(argparse.Namespace(out=out))
 
 
 class TestBuildMainParser:
@@ -278,7 +270,6 @@ class TestBuildMainParser:
     @pytest.mark.parametrize("command", ["build", "verify", "clean"])
     def test_parses_subcommands(self, command: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """各サブコマンドを解析できる。"""
-        monkeypatch.setattr(mainmod, "_load_build_config", lambda: _VALID_BUILD_CFG)
         monkeypatch.setattr(sys, "argv", ["prog", command])
         parser, args = mainmod._build_main_parser()
         assert args.command == command

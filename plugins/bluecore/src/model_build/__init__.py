@@ -1,7 +1,8 @@
-"""model_build — メンテナ専用 ONNX ビルドツール。
+"""model_build — 静的埋め込みモデル ビルドツール。
 
-エンドユーザーの venv にはインストールされない。
-`scripts/build_onnx_model.sh` からのみ呼び出される。
+bluecore.model_download がダウンロードした model.safetensors から
+埋め込みテーブル（embeddings.npy）と manifest.json を生成する。
+numpy のみで動作し torch / onnxruntime を必要としない。
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
