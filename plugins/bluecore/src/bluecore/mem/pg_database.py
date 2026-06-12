@@ -60,7 +60,8 @@ def _ensure_ssl(url: str) -> str:
       - disable/allow/prefer: リモートホスト時のみ警告（ローカルは静か）
       - require: verify-full 推奨の警告を出して維持
       - verify-full 等: そのまま維持
-    - sslmode 未指定: sslmode=require を自動付与（安全側デフォルト）
+    - sslmode 未指定: ループバック接続は sslmode=disable、それ以外は
+      sslmode=require を自動付与（安全側デフォルト）
     """
     parsed = urlparse(url)
     qs = parse_qs(parsed.query, keep_blank_values=True)
