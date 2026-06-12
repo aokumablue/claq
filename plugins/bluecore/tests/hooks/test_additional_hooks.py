@@ -1146,6 +1146,45 @@ def test_collect_tool_use_empty_name_and_non_tool_block() -> None:
     assert files == set()
 
 
+def test_collect_tool_use_normalizes_apply_patch() -> None:
+    """apply_patch は Edit へ正規化し、パッチ内の全対象ファイルを収集する。"""
+    tools: set[str] = set()
+    files: set[str] = set()
+    patch = "*** Begin Patch\n*** Add File: a.py\n+x\n*** Update File: b.py\n*** End Patch"
+    session_end._collect_tool_use(
+        {"type": "tool_use", "tool_name": "apply_patch", "tool_input": {"input": patch}},
+        tools,
+        files,
+    )
+    assert tools == {"Edit"}
+    assert files == {"a.py", "b.py"}
+
+
+def test_collect_tool_use_apply_patch_in_assistant_block_without_paths() -> None:
+    """assistant ブロック経由の apply_patch でも正規化され、パス不明時は収集しない。"""
+    tools: set[str] = set()
+    files: set[str] = set()
+    session_end._collect_tool_use(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use", "name": "apply_patch", "input": {"input": "no markers"}}]},
+        },
+        tools,
+        files,
+    )
+    assert tools == {"Edit"}
+    assert files == set()
+
+
+def test_record_tool_use_non_dict_input() -> None:
+    """tool_input が dict 以外でも例外なく空入力として扱う。"""
+    tools: set[str] = set()
+    files: set[str] = set()
+    session_end._record_tool_use("Write", "not-a-dict", tools, files)
+    assert tools == {"Write"}
+    assert files == set()
+
+
 def test_build_summary_section_skips_empty_message() -> None:
     """空のユーザーメッセージはスキップする。"""
     summary = {"userMessages": ["", "real task"], "filesModified": [], "toolsUsed": [], "totalMessages": 2}
