@@ -33,20 +33,39 @@ _CHUNK_SIZE: int = 1024 * 1024  # 1 MB
 
 
 class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """リダイレクト先 URL を再検証するカスタムハンドラー。"""
+    """リダイレクト先 URL を再検証するカスタムハンドラー。
+
+    allow_http が False（初回 URL が https）のとき、リダイレクトによる
+    平文 HTTP へのダウングレードを拒否する。http の利用は onnx.json で
+    明示的に http URL を設定した場合のオプトインに限定する。
+    """
+
+    def __init__(self, *, allow_http: bool = False) -> None:
+        """ハンドラーを初期化する。
+
+        Args:
+            allow_http: リダイレクト先に平文 HTTP を許可するか。
+        """
+        super().__init__()
+        self._allow_http = allow_http
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]  # noqa: PLR0913
         """リダイレクト URL を _validate_url で再検証してから親クラスに委譲する。"""
-        _validate_url(newurl)
+        _validate_url(newurl, allow_http=self._allow_http)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def _validate_url(url: str) -> None:
+def _validate_url(url: str, *, allow_http: bool = True) -> None:
     """URL の形式を最低限検証する。
 
     scheme が http/https のいずれかで hostname を持つことのみ必須とする。
     HTTP（平文）と IP アドレス指定は許可するが、安全性が低いため警告を出す。
     ホスト制限は行わない。
+
+    Args:
+        url: 検証対象の URL。
+        allow_http: 平文 HTTP を許可するか。False の場合（https 開始の
+            ダウンロードのリダイレクト先検証）は http を拒否する。
     """
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("https", "http"):
@@ -57,6 +76,8 @@ def _validate_url(url: str) -> None:
         raise ValueError(f"URL has no valid hostname: {url!r}")
 
     if parsed.scheme == "http":
+        if not allow_http:
+            raise ValueError(f"Refusing redirect downgrade from HTTPS to plaintext HTTP: {url!r}")
         print(f"[download] WARNING: 平文 HTTP で取得します（中間者攻撃のリスク）: {url!r}")
 
     try:
@@ -93,8 +114,13 @@ def _download_archive(
     *,
     ssl_no_verify: bool = False,
 ) -> None:
-    """URL からアーカイブをダウンロードする。リダイレクト先も再検証する。"""
-    handlers: list[urllib.request.BaseHandler] = [_ValidatingRedirectHandler()]
+    """URL からアーカイブをダウンロードする。リダイレクト先も再検証する。
+
+    初回 URL が https の場合、リダイレクト先での平文 HTTP への
+    ダウングレードは拒否する（http は明示設定時のみ許可）。
+    """
+    allow_http = urllib.parse.urlparse(model_url).scheme == "http"
+    handlers: list[urllib.request.BaseHandler] = [_ValidatingRedirectHandler(allow_http=allow_http)]
     if ssl_no_verify:
         print("[download] WARNING: SSL 証明書検証を無効化しています（中間者攻撃のリスク）")
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)

@@ -91,20 +91,26 @@ class TestValidatingRedirectHandler:
         handler.redirect_request(None, None, 301, "Moved", {}, "https://github.com/file.zip")
         assert called == ["https://github.com/file.zip"]
 
-    def test_accepts_http_redirect_with_warning(
+    def test_accepts_http_redirect_with_warning_when_opted_in(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """HTTP リダイレクトも警告付きで通過する（ホスト制限なし）。"""
+        """初回 URL が http（明示オプトイン）なら HTTP リダイレクトも警告付きで通過する。"""
         called: list[str] = []
 
         def fake_super(self: object, req: object, fp: object, code: int, msg: str, headers: object, newurl: str) -> None:
             called.append(newurl)
 
         monkeypatch.setattr(urllib.request.HTTPRedirectHandler, "redirect_request", fake_super)
-        handler = mod._ValidatingRedirectHandler()
+        handler = mod._ValidatingRedirectHandler(allow_http=True)
         handler.redirect_request(None, None, 301, "Moved", {}, "http://internal.corp/file.tar.gz")
         assert called == ["http://internal.corp/file.tar.gz"]
         assert "WARNING" in capsys.readouterr().out
+
+    def test_rejects_https_to_http_downgrade_redirect(self) -> None:
+        """初回 URL が https の場合、平文 HTTP へのダウングレードリダイレクトを拒否する。"""
+        handler = mod._ValidatingRedirectHandler(allow_http=False)
+        with pytest.raises(ValueError, match="Refusing redirect downgrade"):
+            handler.redirect_request(None, None, 301, "Moved", {}, "http://evil.example/file.zip")
 
     def test_rejects_ftp_redirect(self) -> None:
         """FTP など http/https 以外のリダイレクトは拒否される。"""
