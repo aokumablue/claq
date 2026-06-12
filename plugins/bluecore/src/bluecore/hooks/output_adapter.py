@@ -62,7 +62,9 @@ def adapt_context_output(event_name: str, additional_context: str) -> str:
     Raises:
         例外は発生しません。
     """
-    return _CONTEXT_OUTPUT_BUILDERS[detect_harness()](event_name, additional_context)
+    # 将来のハーネス追加でテーブル更新が漏れても KeyError にせず Claude 形式へ倒す
+    builder = _CONTEXT_OUTPUT_BUILDERS.get(detect_harness(), _claude_context_output)
+    return builder(event_name, additional_context)
 
 
 def emit_block(reason: str) -> tuple[int, str, str]:

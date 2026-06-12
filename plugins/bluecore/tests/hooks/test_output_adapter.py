@@ -55,6 +55,12 @@ class TestAdaptContextOutput:
         result = output_adapter.adapt_context_output("SessionStart", "ctx")
         assert json.loads(result) == _CLAUDE_EXPECTED
 
+    def test_unmapped_harness_falls_back_to_claude_format(self, monkeypatch):
+        """テーブル未登録のハーネス値でも KeyError にせず Claude 形式へ倒す。"""
+        monkeypatch.setattr(output_adapter, "detect_harness", lambda: "future-harness")
+        result = output_adapter.adapt_context_output("SessionStart", "ctx")
+        assert json.loads(result) == _CLAUDE_EXPECTED
+
     def test_user_prompt_submit_event_name(self, monkeypatch):
         """イベント名が出力に反映される。"""
         monkeypatch.setenv("CLAUDECODE", "1")
