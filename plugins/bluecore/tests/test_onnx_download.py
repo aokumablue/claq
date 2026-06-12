@@ -17,6 +17,12 @@ import pytest
 import bluecore.onnx_download as mod
 
 
+@pytest.fixture(autouse=True)
+def _isolate_warning_marker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """警告マーカーの書き込み先を実 HOME からテスト用ディレクトリへ隔離する。"""
+    monkeypatch.setattr(mod, "_WARNING_MARKER", tmp_path / "marker" / "onnx_download_warning")
+
+
 def _write_config(
     tmp_path: Path,
     *,
@@ -117,6 +123,39 @@ class TestValidatingRedirectHandler:
         handler = mod._ValidatingRedirectHandler()
         with pytest.raises(ValueError, match="HTTPS or HTTP scheme"):
             handler.redirect_request(None, None, 301, "Moved", {}, "ftp://github.com/file.zip")
+
+
+class TestWarn:
+    """_warn のテスト。"""
+
+    def test_writes_warning_to_stdout_and_marker(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """警告を stdout とマーカーファイルの両方へ記録する。"""
+        mod._warn("first")
+        mod._warn("second")
+        assert "WARNING: first" in capsys.readouterr().out
+        assert mod._WARNING_MARKER.read_text(encoding="utf-8") == "first\nsecond\n"
+
+    def test_stops_appending_when_marker_exceeds_cap(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """マーカーが上限超過なら追記しない（stdout 出力は維持）。"""
+        mod._WARNING_MARKER.parent.mkdir(parents=True, exist_ok=True)
+        mod._WARNING_MARKER.write_text("x" * (mod._MAX_MARKER_BYTES + 1), encoding="utf-8")
+        mod._warn("overflow")
+        assert "WARNING: overflow" in capsys.readouterr().out
+        assert "overflow" not in mod._WARNING_MARKER.read_text(encoding="utf-8")
+
+    def test_marker_write_failure_is_ignored(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """マーカー書き込み失敗でも警告出力自体は成功する。"""
+        blocked = tmp_path / "not-a-dir"
+        blocked.write_text("file", encoding="utf-8")
+        monkeypatch.setattr(mod, "_WARNING_MARKER", blocked / "marker")
+        mod._warn("best-effort")
+        assert "WARNING: best-effort" in capsys.readouterr().out
 
 
 class TestValidateUrl:

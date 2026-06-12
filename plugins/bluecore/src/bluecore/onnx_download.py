@@ -37,6 +37,31 @@ _CHUNK_SIZE: int = 1024 * 1024  # 1 MB
 # ここで打ち切って次回セッションのリトライに委ねる。
 _MAX_DOWNLOAD_SECONDS: int = 1800  # 30 分
 
+# detached 実行の警告はログファイルにしか届かないため、マーカーへ書き残して
+# 次回 SessionStart で session_install がユーザーへ 1 回通知する
+_WARNING_MARKER = Path.home() / ".bluecore" / "onnx_download_warning"
+_MAX_MARKER_BYTES: int = 16 * 1024
+
+
+def _warn(message: str) -> None:
+    """セキュリティ警告を stdout と通知マーカーの両方へ記録する。
+
+    Args:
+        message: 警告メッセージ（WARNING プレフィックスなし）。
+
+    Raises:
+        例外は発生しません（マーカー書き込みは best-effort）。
+    """
+    print(f"[download] WARNING: {message}")
+    try:
+        _WARNING_MARKER.parent.mkdir(parents=True, exist_ok=True)
+        if _WARNING_MARKER.exists() and _WARNING_MARKER.stat().st_size > _MAX_MARKER_BYTES:
+            return
+        with _WARNING_MARKER.open("a", encoding="utf-8") as fh:
+            fh.write(message + "\n")
+    except OSError:
+        pass  # 通知は付随機能。ダウンロード本体を止めない
+
 
 class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
     """リダイレクト先 URL を再検証するカスタムハンドラー。
@@ -84,11 +109,11 @@ def _validate_url(url: str, *, allow_http: bool = True) -> None:
     if parsed.scheme == "http":
         if not allow_http:
             raise ValueError(f"Refusing redirect downgrade from HTTPS to plaintext HTTP: {url!r}")
-        print(f"[download] WARNING: 平文 HTTP で取得します（中間者攻撃のリスク）: {url!r}")
+        _warn(f"平文 HTTP で取得します（中間者攻撃のリスク）: {url!r}")
 
     try:
         ipaddress.ip_address(host)
-        print(f"[download] WARNING: IP アドレス指定の URL です（証明書検証が機能しません）: {host!r}")
+        _warn(f"IP アドレス指定の URL です（証明書検証が機能しません）: {host!r}")
     except ValueError:
         pass
 
@@ -154,7 +179,7 @@ def _download_archive(
     allow_http = urllib.parse.urlparse(model_url).scheme == "http"
     handlers: list[urllib.request.BaseHandler] = [_ValidatingRedirectHandler(allow_http=allow_http)]
     if ssl_no_verify:
-        print("[download] WARNING: SSL 証明書検証を無効化しています（中間者攻撃のリスク）")
+        _warn("SSL 証明書検証を無効化しています（中間者攻撃のリスク）")
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE

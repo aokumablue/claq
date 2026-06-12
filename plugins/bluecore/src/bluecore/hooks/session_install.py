@@ -32,11 +32,45 @@ _ONNX_LAST_ATTEMPT = _BLUECORE_DIR / "onnx_last_attempt"
 _ONNX_RETRY_INTERVAL = 3600.0
 # pip フルインストールと symlink 張りを許容しつつ hooks.json の timeout(300) より先に自決する
 _INSTALL_TIMEOUT = 280.0
+# onnx_download が detached 実行中に書き残すセキュリティ警告マーカー
+_ONNX_WARNING_MARKER = _BLUECORE_DIR / "onnx_download_warning"
+
+
+def _consume_onnx_download_warnings() -> str:
+    """ONNX ダウンロード警告マーカーを読み取り、削除して内容を返す。
+
+    detached ダウンロードの警告（平文 HTTP / SSL 検証無効化等）は
+    modelbuild.log にしか届かないため、次回 SessionStart で 1 回だけ
+    ユーザーへ通知する。
+
+    Returns:
+        警告メッセージ（複数行）。マーカーが無い・読めない場合は空文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        if not _ONNX_WARNING_MARKER.is_file():
+            return ""
+        content = _ONNX_WARNING_MARKER.read_text(encoding="utf-8").strip()
+        _ONNX_WARNING_MARKER.unlink()
+        return content
+    except OSError:
+        return ""
 
 
 def _session_start_output() -> str:
-    """SessionStart 互換の hookSpecificOutput を返す。"""
-    return _emit_session_start_output()
+    """SessionStart 互換の hookSpecificOutput を返す。
+
+    ONNX ダウンロードの未通知セキュリティ警告があれば additionalContext で
+    ユーザーへ可視化する。
+    """
+    warnings = _consume_onnx_download_warnings()
+    if not warnings:
+        return _emit_session_start_output()
+    print(f"[SessionInstall] ONNX ダウンロード警告: {sanitize_log_value(warnings)}", file=sys.stderr)
+    context = "[bluecore] 前回の ONNX モデルダウンロードでセキュリティ警告が発生:\n" + warnings
+    return _emit_session_start_output(context)
 
 
 def _sanitize_exception(exc: BaseException) -> str:

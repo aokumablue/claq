@@ -13,6 +13,61 @@ import pytest
 from bluecore.hooks import session_install
 
 
+@pytest.fixture(autouse=True)
+def _isolate_onnx_warning_marker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """ONNX 警告マーカーの参照先を実 HOME からテスト用ディレクトリへ隔離する。"""
+    monkeypatch.setattr(
+        session_install, "_ONNX_WARNING_MARKER", tmp_path / "isolated" / "onnx_download_warning"
+    )
+
+
+class TestConsumeOnnxDownloadWarnings:
+    """_consume_onnx_download_warnings と警告通知のテスト。"""
+
+    def test_returns_empty_when_marker_absent(self) -> None:
+        """マーカーが無ければ空文字列を返す。"""
+        assert session_install._consume_onnx_download_warnings() == ""
+
+    def test_reads_and_deletes_marker(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """マーカーの内容を返し、ファイルを削除する（再通知しない）。"""
+        marker = tmp_path / "onnx_download_warning"
+        marker.write_text("平文 HTTP で取得します\n", encoding="utf-8")
+        monkeypatch.setattr(session_install, "_ONNX_WARNING_MARKER", marker)
+        assert session_install._consume_onnx_download_warnings() == "平文 HTTP で取得します"
+        assert not marker.exists()
+
+    def test_read_failure_returns_empty(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """マーカー読み取り失敗時は空文字列（セッションを止めない）。"""
+        marker = tmp_path / "onnx_download_warning"
+        marker.write_text("x", encoding="utf-8")
+        monkeypatch.setattr(session_install, "_ONNX_WARNING_MARKER", marker)
+
+        def raise_oserror(*_a, **_k):
+            raise OSError("denied")
+
+        monkeypatch.setattr(type(marker), "read_text", raise_oserror)
+        assert session_install._consume_onnx_download_warnings() == ""
+
+    def test_session_start_output_includes_warnings(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """警告マーカーがあれば additionalContext と stderr で可視化する。"""
+        marker = tmp_path / "onnx_download_warning"
+        marker.write_text("SSL 証明書検証を無効化しています\n", encoding="utf-8")
+        monkeypatch.setattr(session_install, "_ONNX_WARNING_MARKER", marker)
+
+        payload = json.loads(session_install._session_start_output())
+        context = payload["hookSpecificOutput"]["additionalContext"]
+        assert "セキュリティ警告" in context
+        assert "SSL 証明書検証を無効化しています" in context
+        assert "ONNX ダウンロード警告" in capsys.readouterr().err
+
+    def test_session_start_output_empty_without_warnings(self) -> None:
+        """警告が無ければ従来どおり空の additionalContext を返す。"""
+        payload = json.loads(session_install._session_start_output())
+        assert payload["hookSpecificOutput"]["additionalContext"] == ""
+
+
 class TestGetPluginVersion:
     def test_reads_version_from_plugin_json(self, tmp_path: Path) -> None:
         plugin_json = tmp_path / ".claude-plugin" / "plugin.json"
