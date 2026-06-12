@@ -93,12 +93,13 @@ def _write_fake_model_dir(model_dir: Path, model_data: bytes = b"fake-onnx") -> 
 
 @pytest.fixture(autouse=True)
 def reset_embedding_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """各テスト前に内部シングルトンをリセットし、モデルパスを tmp_path に向ける。"""
+    """各テスト前に内部シングルトンをリセットし、モデル/ロックパスを tmp_path に向ける。"""
     monkeypatch.setattr(embedding, "_session", None)
     monkeypatch.setattr(embedding, "_tokenizer", None)
     model_dir = tmp_path / "models"
     _write_fake_model_dir(model_dir)
     monkeypatch.setattr(embedding, "_MODELS_DIR", model_dir)
+    monkeypatch.setattr(embedding, "_LOCK_PATH", tmp_path / "embedding.lock")
 
 
 def _patch_backends(monkeypatch: pytest.MonkeyPatch, hidden_dim: int = 4):
@@ -481,3 +482,41 @@ def test_embed_query_non_default_model_warns(monkeypatch) -> None:
     monkeypatch.setattr(embedding, "_encode", lambda texts: [[0.1, 0.2]])
     result = embedding.embed_query("q", "other-model-xyz")
     assert result == [0.1, 0.2]
+
+
+class TestModelLoadLock:
+    """_model_load_lock のプロセス間排他テスト。"""
+
+    def test_lock_excludes_other_holders_and_releases(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """ロック区間中は別の open からの flock 取得が失敗し、解放後は成功する。"""
+        import fcntl
+
+        lock_path = tmp_path / "embedding.lock"
+        monkeypatch.setattr(embedding, "_LOCK_PATH", lock_path)
+        with embedding._model_load_lock():
+            assert lock_path.exists()
+            with open(lock_path, "w") as other:
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with open(lock_path, "w") as other:
+            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(other, fcntl.LOCK_UN)
+
+    def test_get_session_acquires_load_lock(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """初期化経路で _model_load_lock が取得される。"""
+        from contextlib import contextmanager
+
+        _patch_backends(monkeypatch)
+        acquired: list[bool] = []
+
+        @contextmanager
+        def _spy_lock():
+            acquired.append(True)
+            yield
+
+        monkeypatch.setattr(embedding, "_model_load_lock", _spy_lock)
+        embedding.embed(["a"])
+        assert acquired == [True]
+        # シングルトン確立後はロックを再取得しない
+        embedding.embed(["b"])
+        assert acquired == [True]

@@ -83,9 +83,10 @@ class TestModelPathValidation:
     """ONNX モデルファイルが存在しない場合のエラーハンドリングを確認。"""
 
     @pytest.fixture(autouse=True)
-    def reset_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def reset_state(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(embedding, "_session", None)
         monkeypatch.setattr(embedding, "_tokenizer", None)
+        monkeypatch.setattr(embedding, "_LOCK_PATH", tmp_path / "embedding.lock")
 
     def _patch_ort(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """onnxruntime と tokenizers を最小限モックする。"""

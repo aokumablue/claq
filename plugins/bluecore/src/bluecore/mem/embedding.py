@@ -7,12 +7,17 @@ install.sh が python3 -m model_build build を実行してモデルを生成す
 
 from __future__ import annotations
 
+import fcntl
 import hmac
 import json
 import sys
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 from bluecore.lib.constants import BASE_DIR_NAME
 from bluecore.mem._paths import sha256_file as _sha256_file
@@ -37,6 +42,9 @@ def _mean_pool_l2(token_embs: Any, attention_mask: Any) -> Any:
 
 # 統合済み model.onnx は ~/.bluecore/models/ に格納（install.sh が配置）
 _MODELS_DIR = Path.home() / BASE_DIR_NAME / "models"
+
+# モデルロードのプロセス間直列化用ロックファイル
+_LOCK_PATH = Path.home() / BASE_DIR_NAME / "embedding.lock"
 
 # セッションはプロセス内でシングルトン（スレッドセーフ）
 _session: Any = None
@@ -138,6 +146,24 @@ def _build_tokenizer(tok_path: Any) -> Any:
     return tok
 
 
+@contextmanager
+def _model_load_lock() -> Generator[None, None, None]:
+    """モデルロードをプロセス間で直列化する fcntl 排他ロック。
+
+    フックは毎回独立プロセスで起動するため threading.Lock では多重ロードを
+    防げない。複数プロセスが同時に数百 MB のモデルをロードすると合計数 GB の
+    メモリスパイクでスワップ突入し OS 全体が不安定になるため、ロード区間を
+    システム全体で 1 プロセスに制限する（ブロッキング取得・先行プロセスの
+    ロード完了を待つ）。"""
+    _LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_LOCK_PATH, "w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
 def _load_session_unlocked() -> tuple[Any, Any] | tuple[None, None]:
     """ロック取得済みの状態でセッション初期化を行う内部関数。"""
     global _session, _tokenizer  # noqa: PLW0603
@@ -178,7 +204,8 @@ def _get_session() -> tuple[Any, Any] | tuple[None, None]:
     """
     with _lock:
         if _session is None or _tokenizer is None:
-            return _load_session_unlocked()
+            with _model_load_lock():
+                return _load_session_unlocked()
         return _session, _tokenizer
 
 
