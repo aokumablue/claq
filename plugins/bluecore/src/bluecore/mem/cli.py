@@ -289,6 +289,17 @@ def _handle_compact(settings: Settings) -> None:
     _session_handlers.handle_compact(settings, open_db=_open_db, log=log)
 
 
+def _handle_reembed(settings: Settings) -> None:
+    """reembed コマンド: vec テーブルを再作成し全チャンクの埋め込みを再生成する。"""
+    deps = _session_handlers.SessionEndDeps(
+        open_db=_open_db,
+        embed_fn=embed,
+        log=log,
+        time_module=time,
+    )
+    _session_handlers.handle_reembed(settings, deps)
+
+
 def _handle_search_structured(settings: Settings, stdin_data: dict) -> None:
     """search-structured コマンド: フィルタ付き構造化検索を実行する。"""
     _search_handlers.handle_search_structured(settings, stdin_data, _search_deps())
@@ -574,6 +585,7 @@ _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "observe": _handle_observe,
     "session-end": _handle_session_end,
     "compact": lambda settings, stdin_data: (_handle_compact(settings) or None),
+    "reembed": lambda settings, stdin_data: (_handle_reembed(settings) or None),
     "search-structured": _handle_search_structured,
     "record": _handle_record,
     "sync": _handle_sync,
@@ -607,6 +619,7 @@ Commands:
   observe            Store a tool-use chunk (reads JSON from stdin)
   session-end        Embed and compact the current session (reads JSON from stdin)
   compact            Execute memory compaction
+  reembed            Recreate the vector table and re-embed all chunks (after model change)
   sync               Sync local SQLite data to PostgreSQL (reads JSON from stdin)
   sync-check         Check sync interval and sync if needed
   import             Import external data (instincts, adrs, events) to mem

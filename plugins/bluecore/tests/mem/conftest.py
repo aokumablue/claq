@@ -72,6 +72,8 @@ class FakeDB:
         self.interactions: list[object] = []
         self.project_profiles: dict[str, object] = {}
         self.item_runs: list[object] = []
+        self.vec_available = True
+        self.vec_recreated = False
         self.conn = SimpleNamespace(execute=self.execute, commit=self.commit)
 
     def __enter__(self) -> FakeDB:
@@ -92,6 +94,13 @@ class FakeDB:
 
     def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:  # noqa: ANN001
         return self.chunks
+
+    def get_all_chunks(self) -> list[MemoryChunk]:
+        return self.chunks
+
+    def recreate_vec_table(self) -> bool:
+        self.vec_recreated = self.vec_available
+        return self.vec_available
 
     def store_embeddings(self, ids, embeddings) -> None:  # noqa: ANN001
         self.embeddings.append((list(ids), list(embeddings)))

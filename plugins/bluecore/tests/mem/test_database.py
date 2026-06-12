@@ -434,6 +434,48 @@ class TestDatabase:
         # sqlite-vec が利用不可でも空リストを返す
         assert results == [] or isinstance(results, list)
 
+    def test_recreate_vec_table_replaces_old_dimension(self, db: Database) -> None:
+        """recreate_vec_table が旧次元のテーブルを現行スキーマで再作成する"""
+        row = db.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_chunks_vec'"
+        ).fetchone()
+        if row is None:
+            pytest.skip("sqlite-vec not available")
+        # 旧次元（768）のテーブルに差し替えてから再作成する
+        db.conn.execute("DROP TABLE memory_chunks_vec")
+        db.conn.execute(
+            "CREATE VIRTUAL TABLE memory_chunks_vec USING vec0(chunk_id TEXT PRIMARY KEY, embedding FLOAT[768])"
+        )
+        db.conn.commit()
+
+        assert db.recreate_vec_table() is True
+
+        # 再作成後は 256 次元のベクトルを保存できる
+        cid = db.store_chunk(
+            MemoryChunk(
+                session_id="s1",
+                project="proj",
+                chunk_index=0,
+                content="test",
+                tool_names=[],
+                files_read=[],
+                files_modified=[],
+                user_prompt="",
+                created_at_epoch=1700000000,
+            )
+        )
+        db.store_embeddings([cid], [[0.1] * 256])
+        assert db.vec_search([0.1] * 256, limit=1)[0][0] == cid
+
+    def test_recreate_vec_table_returns_false_without_sqlite_vec(
+        self, db: Database, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """sqlite-vec が import できない場合は False を返す"""
+        import sys
+
+        monkeypatch.setitem(sys.modules, "sqlite_vec", None)
+        assert db.recreate_vec_table() is False
+
 
 class TestSchemaInit:
     """スキーマ初期化のテスト"""

@@ -296,6 +296,25 @@ class Database:
             )
         self.conn.commit()
 
+    def recreate_vec_table(self) -> bool:
+        """memory_chunks_vec を DROP して現行スキーマで再作成する。
+
+        埋め込みモデルの次元変更時に使用する（旧次元のテーブルは
+        CREATE TABLE IF NOT EXISTS では更新されないため）。
+
+        Returns:
+            sqlite-vec が利用可能で再作成した場合 True、利用不可なら False。
+        """
+        try:
+            import sqlite_vec  # type: ignore[import-untyped]  # noqa: F401
+        except ImportError:
+            log.debug("sqlite-vec は利用できません（vec テーブル再作成をスキップ）")
+            return False
+        self.conn.execute("DROP TABLE IF EXISTS memory_chunks_vec")
+        self.conn.executescript(_VEC_SQL)
+        self.conn.commit()
+        return True
+
     def vec_search(self, embedding: list[float], limit: int = 40) -> list[tuple[str, float]]:
         """sqlite-vec ベクトル検索。(chunk_id, distance) のリストを返す。"""
         try:

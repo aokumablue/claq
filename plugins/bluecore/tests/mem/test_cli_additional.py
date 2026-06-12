@@ -193,6 +193,87 @@ def test_handle_session_end_and_compact(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert any("DELETE FROM memory_chunks" in sql for sql, _ in db.executed)
 
 
+def _make_chunk(chunk_id: str | None, index: int) -> MemoryChunk:
+    """reembed テスト用のチャンクを作成する。"""
+    return MemoryChunk(
+        id=chunk_id,
+        session_id="s1",
+        project="repo",
+        chunk_index=index,
+        content=f"content-{index}",
+        tool_names=[],
+        files_read=[],
+        files_modified=[],
+        user_prompt="",
+        created_at_epoch=1704067200,
+    )
+
+
+def test_handle_reembed_regenerates_all_embeddings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """reembed は vec テーブルを再作成し、id を持つ全チャンクを再埋め込みする。"""
+    chunks = [_make_chunk("c0", 0), _make_chunk(None, 1), _make_chunk("c2", 2)]
+    db = FakeDB(chunks)
+    settings = make_settings(tmp_path)
+    monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(db))
+    monkeypatch.setattr(cli, "embed", lambda texts: [[0.1, 0.2] for _ in texts])
+
+    cli._handle_reembed(settings)
+
+    assert db.vec_recreated is True
+    assert db.embeddings == [(["c0", "c2"], [[0.1, 0.2], [0.1, 0.2]])]
+    assert "2 件" in capsys.readouterr().out
+
+
+def test_handle_reembed_processes_in_batches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """チャンク数がバッチサイズを超える場合は分割して埋め込む。"""
+    chunks = [_make_chunk(f"c{i}", i) for i in range(300)]
+    db = FakeDB(chunks)
+    settings = make_settings(tmp_path)
+    monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(db))
+    monkeypatch.setattr(cli, "embed", lambda texts: [[0.1] for _ in texts])
+
+    cli._handle_reembed(settings)
+
+    assert len(db.embeddings) == 2
+    assert len(db.embeddings[0][0]) == 256
+    assert len(db.embeddings[1][0]) == 44
+
+
+def test_handle_reembed_skips_without_sqlite_vec(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """sqlite-vec が利用できない場合はメッセージを出してスキップする。"""
+    db = FakeDB([_make_chunk("c0", 0)])
+    db.vec_available = False
+    settings = make_settings(tmp_path)
+    monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(db))
+    monkeypatch.setattr(cli, "embed", lambda texts: [[0.1] for _ in texts])
+
+    cli._handle_reembed(settings)
+
+    assert db.embeddings == []
+    assert "スキップ" in capsys.readouterr().out
+
+
+def test_handle_reembed_aborts_when_model_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """埋め込みモデル未配置（embed が空を返す）の場合は中断する。"""
+    db = FakeDB([_make_chunk("c0", 0)])
+    settings = make_settings(tmp_path)
+    monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(db))
+    monkeypatch.setattr(cli, "embed", lambda texts: [])
+
+    cli._handle_reembed(settings)
+
+    assert db.embeddings == []
+    assert "中断" in capsys.readouterr().err
+
+
 def test_handle_setup_and_observe_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     db = FakeDB()

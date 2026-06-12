@@ -227,6 +227,36 @@ def handle_session_end(
         deps.log.warning("セッション終了失敗: %s", e)
 
 
+def handle_reembed(
+    settings: Settings,
+    deps: SessionEndDeps,
+) -> None:
+    """reembed: vec テーブルを再作成し、全チャンクの埋め込みを再生成する。
+
+    埋め込みモデル（次元）変更後のローカル DB 移行に使用する。
+    バッチ処理のためチャンク数に依らずメモリ使用量は一定。
+    """
+    from bluecore.mem.redaction import redact
+
+    batch_size = 256
+    with deps.open_db(settings) as db:
+        if not db.recreate_vec_table():
+            print("reembed: sqlite-vec が利用できないためスキップしました")
+            return
+        embeddable = [c for c in db.get_all_chunks() if c.id is not None]
+        total = 0
+        for start in range(0, len(embeddable), batch_size):
+            batch = embeddable[start:start + batch_size]
+            embeddings = deps.embed_fn([redact(c.content) for c in batch])
+            if not embeddings:
+                print("reembed: 埋め込みモデルが未配置のため中断しました", file=sys.stderr)
+                return
+            db.store_embeddings([c.id for c in batch], embeddings)
+            total += len(batch)
+        deps.log.info("reembed 完了: chunks=%d", total)
+        print(f"reembed: {total} 件の埋め込みを再生成しました")
+
+
 def handle_compact(
     settings: Settings,
     *,
