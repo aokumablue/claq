@@ -432,6 +432,60 @@ class TestDownloadModelBundle:
         for name in ("model.onnx", "tokenizer.json", "config.json", "manifest.json"):
             assert (output_dir / name).exists()
 
+    def test_installs_model_onnx_last(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """完了マーカーの model.onnx は必ず最後に配置される。"""
+        archive_path = tmp_path / "bundle.zip"
+        _create_zip_bundle(archive_path)
+        config_path = _write_config(
+            tmp_path, enabled=True, model_url="https://github.com/x/model.zip", sha256=_sha256_of(archive_path)
+        )
+        output_dir = tmp_path / "models"
+
+        def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
+            shutil.copy2(archive_path, destination)
+
+        monkeypatch.setattr(mod, "_download_archive", _fake_download)
+
+        installed: list[str] = []
+        original_replace = mod.os.replace
+
+        def tracking_replace(src: str | Path, dst: str | Path) -> None:
+            installed.append(Path(dst).name)
+            original_replace(src, dst)
+
+        monkeypatch.setattr(mod.os, "replace", tracking_replace)
+        assert mod.download_model_bundle(config_path, output_dir) == 0
+        assert installed[-1] == "model.onnx"
+        assert set(installed) == set(mod._REQUIRED_FILES)
+
+    def test_partial_install_failure_leaves_no_model_onnx(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """model.onnx 以外の配置失敗時、model.onnx は出力先に残らない（完了誤判定の防止）。"""
+        archive_path = tmp_path / "bundle.zip"
+        _create_zip_bundle(archive_path)
+        config_path = _write_config(
+            tmp_path, enabled=True, model_url="https://github.com/x/model.zip", sha256=_sha256_of(archive_path)
+        )
+        output_dir = tmp_path / "models"
+
+        def _fake_download(_url: str, destination: Path, _max_bytes: int, *, ssl_no_verify: bool = False) -> None:
+            shutil.copy2(archive_path, destination)
+
+        monkeypatch.setattr(mod, "_download_archive", _fake_download)
+
+        original_replace = mod.os.replace
+
+        def failing_replace(src: str | Path, dst: str | Path) -> None:
+            if Path(dst).name == "config.json":
+                raise OSError("disk full")
+            original_replace(src, dst)
+
+        monkeypatch.setattr(mod.os, "replace", failing_replace)
+        with pytest.raises(OSError, match="disk full"):
+            mod.download_model_bundle(config_path, output_dir)
+        assert not (output_dir / "model.onnx").exists()
+
     def test_raises_when_archive_contains_duplicate_required_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

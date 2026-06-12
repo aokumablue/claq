@@ -15,7 +15,7 @@ import argparse
 import hashlib
 import ipaddress
 import json
-import shutil
+import os
 import ssl
 import sys
 import tarfile
@@ -227,8 +227,13 @@ def download_model_bundle(config_path: Path, output_dir: Path) -> int:
             archive_kind, member = candidates[0]
             _extract_required_file(archive_path, archive_kind, member, extracted_dir / required_name, max_extract_bytes)
 
-        for required_name in _REQUIRED_FILES:
-            shutil.copy2(extracted_dir / required_name, output_dir / required_name)
+        # model.onnx の存在が「インストール完了」の判定マーカーのため必ず最後に
+        # 配置する。途中失敗時に部分インストールが完了扱いで恒久化されるのを防ぐ。
+        # temp_root は output_dir.parent 配下にあり同一ファイルシステムなので
+        # os.replace はファイル単位でアトミックに働く。
+        install_order = sorted(_REQUIRED_FILES, key=lambda name: name == "model.onnx")
+        for required_name in install_order:
+            os.replace(extracted_dir / required_name, output_dir / required_name)
 
     print(f"[download] Installed ONNX bundle into: {output_dir}")
     return 0
