@@ -88,7 +88,7 @@
             "timeout": 300
           }
         ],
-        "description": "プラグイン初回/更新時の自動インストールと .venv symlink 修復（ONNX ビルドはバックグラウンド実行）"
+        "description": "プラグイン初回/更新時の自動インストールと .venv symlink 修復（埋め込みモデル欠落時はバックグラウンド取得）"
       },
       {
         "matcher": "*",
@@ -286,7 +286,7 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:mem:end\" \"bluecore.mem.cli\" \"standard,strict\" \"session-end\"",
             "async": true,
-            "timeout": 120
+            "timeout": 30
           }
         ],
         "description": "mem: エンべディング一括生成とメモリ最適化"

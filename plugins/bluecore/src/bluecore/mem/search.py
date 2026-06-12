@@ -116,7 +116,7 @@ class SearchService:
     ) -> list[SearchResult]:
         """PgDatabase を使ってチーム横断検索し SearchResult リストを返す。
 
-        model.onnx 未完了・PG 結果ゼロの場合は空リストを返す。
+        埋め込みモデル未配置・PG 結果ゼロの場合は空リストを返す。
         """
         import bluecore.mem.embedding as _emb
 

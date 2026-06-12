@@ -4,7 +4,7 @@ install.sh の自動実行を管理する SessionStart フック。
 
 ~/.bluecore/plugin_installed_version のバージョンと plugin.json のバージョンを比較し、
 差異がある場合のみ install.sh を実行して仮想環境を再構築する。
-ONNX モデルビルドは BLUECORE_INSTALL_ONNX_ASYNC=1 でバックグラウンド非同期実行に切り替わる。
+埋め込みモデル（embeddings.npy）が欠落している場合はバックグラウンドで取得する。
 """
 
 from __future__ import annotations
@@ -26,18 +26,19 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 _BLUECORE_DIR = Path.home() / BASE_DIR_NAME
 _VERSION_FILE = _BLUECORE_DIR / "plugin_installed_version"
 _VENV_DIR = Path.home() / BASE_DIR_NAME / ".venv"
-_MODEL_ONNX = _BLUECORE_DIR / "models" / "model.onnx"
-_ONNX_LAST_ATTEMPT = _BLUECORE_DIR / "onnx_last_attempt"
-# ONNX 取得のバックグラウンドリトライ間隔（秒）。flock が多重実行を防ぐため起動頻度の抑制のみ
-_ONNX_RETRY_INTERVAL = 3600.0
+_MODEL_NPY = _BLUECORE_DIR / "models" / "embeddings.npy"
+_MODEL_LAST_ATTEMPT = _BLUECORE_DIR / "model_last_attempt"
+# モデル取得のバックグラウンドリトライ間隔（秒）。ダウンロードは冪等
+# （SHA 一致でスキップ・一時ディレクトリ経由配置）のため起動頻度の抑制のみ
+_MODEL_RETRY_INTERVAL = 3600.0
 # pip フルインストールと symlink 張りを許容しつつ hooks.json の timeout(300) より先に自決する
 _INSTALL_TIMEOUT = 280.0
-# onnx_download が detached 実行中に書き残すセキュリティ警告マーカー
-_ONNX_WARNING_MARKER = _BLUECORE_DIR / "onnx_download_warning"
+# model_download が detached 実行中に書き残すセキュリティ警告マーカー
+_MODEL_WARNING_MARKER = _BLUECORE_DIR / "model_download_warning"
 
 
-def _consume_onnx_download_warnings() -> str:
-    """ONNX ダウンロード警告マーカーを読み取り、削除して内容を返す。
+def _consume_model_download_warnings() -> str:
+    """モデルダウンロード警告マーカーを読み取り、削除して内容を返す。
 
     detached ダウンロードの警告（平文 HTTP / SSL 検証無効化等）は
     modelbuild.log にしか届かないため、次回 SessionStart で 1 回だけ
@@ -50,10 +51,10 @@ def _consume_onnx_download_warnings() -> str:
         例外は発生しません。
     """
     try:
-        if not _ONNX_WARNING_MARKER.is_file():
+        if not _MODEL_WARNING_MARKER.is_file():
             return ""
-        content = _ONNX_WARNING_MARKER.read_text(encoding="utf-8").strip()
-        _ONNX_WARNING_MARKER.unlink()
+        content = _MODEL_WARNING_MARKER.read_text(encoding="utf-8").strip()
+        _MODEL_WARNING_MARKER.unlink()
         return content
     except OSError:
         return ""
@@ -62,14 +63,14 @@ def _consume_onnx_download_warnings() -> str:
 def _session_start_output() -> str:
     """SessionStart 互換の hookSpecificOutput を返す。
 
-    ONNX ダウンロードの未通知セキュリティ警告があれば additionalContext で
+    モデルダウンロードの未通知セキュリティ警告があれば additionalContext で
     ユーザーへ可視化する。
     """
-    warnings = _consume_onnx_download_warnings()
+    warnings = _consume_model_download_warnings()
     if not warnings:
         return _emit_session_start_output()
-    print(f"[SessionInstall] ONNX ダウンロード警告: {sanitize_log_value(warnings)}", file=sys.stderr)
-    context = "[bluecore] 前回の ONNX モデルダウンロードでセキュリティ警告が発生:\n" + warnings
+    print(f"[SessionInstall] モデルダウンロード警告: {sanitize_log_value(warnings)}", file=sys.stderr)
+    context = "[bluecore] 前回の埋め込みモデルダウンロードでセキュリティ警告が発生:\n" + warnings
     return _emit_session_start_output(context)
 
 
@@ -128,11 +129,13 @@ def _repair_venv_symlink(plugin_root: Path) -> None:
         print(f"[SessionInstall] symlink 作成失敗: {_sanitize_exception(e)}", file=sys.stderr)
 
 
-def _ensure_onnx_model(plugin_root: Path) -> None:
-    """model.onnx 不在時にバックグラウンド取得スクリプトを detached 起動する。
+def _ensure_model(plugin_root: Path) -> None:
+    """embeddings.npy 不在時にモデル取得チェーンを detached 起動する。
 
-    前回試行から _ONNX_RETRY_INTERVAL 秒以内ならスキップする（多重実行自体は
-    スクリプト側の flock が防ぐため、ここでは起動頻度の抑制のみ行う）。
+    model_download（DL + SHA 検証）→ model_build build（テーブル抽出）→
+    reembed（既存チャンク再埋め込み）を順に実行する。各ステップは冪等のため
+    多重起動しても壊れず、前回試行から _MODEL_RETRY_INTERVAL 秒以内なら
+    起動頻度の抑制のためスキップする。
 
     Args:
         plugin_root: プラグインルートディレクトリのパス。
@@ -143,18 +146,25 @@ def _ensure_onnx_model(plugin_root: Path) -> None:
     Raises:
         例外は発生しません。
     """
-    if _MODEL_ONNX.exists():
+    if _MODEL_NPY.exists():
         return
     try:
-        last_attempt = float(_ONNX_LAST_ATTEMPT.read_text(encoding="utf-8").strip())
+        last_attempt = float(_MODEL_LAST_ATTEMPT.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         last_attempt = 0.0
-    if time.time() - last_attempt < _ONNX_RETRY_INTERVAL:
+    if time.time() - last_attempt < _MODEL_RETRY_INTERVAL:
         return
-    bg_script = plugin_root / "onnx" / "_run_onnx_background.sh"
-    if not bg_script.is_file():
-        print(f"[SessionInstall] ONNX バックグラウンドスクリプトがありません: {bg_script}", file=sys.stderr)
+    venv_python = _VENV_DIR / "bin" / "python3"
+    model_config = plugin_root / "model.json"
+    if not venv_python.is_file() or not model_config.is_file():
+        print("[SessionInstall] venv または model.json がありません。モデル取得をスキップします。", file=sys.stderr)
         return
+    models_dir = _BLUECORE_DIR / "models"
+    chain = (
+        f'"{venv_python}" -m bluecore.model_download --config "{model_config}" --out "{models_dir}"'
+        f' && "{venv_python}" -m model_build build --out "{models_dir}"'
+        f' && "{venv_python}" -m bluecore.mem reembed'
+    )
     # 最小限の環境のみ渡し、PYTHONPATH/LD_PRELOAD 等の汚染を防ぐ（install.sh の env -i と同等）
     env = {
         "HOME": str(Path.home()),
@@ -162,17 +172,19 @@ def _ensure_onnx_model(plugin_root: Path) -> None:
         "LANG": os.environ.get("LANG", "C"),
     }
     try:
+        _MODEL_LAST_ATTEMPT.parent.mkdir(parents=True, exist_ok=True)
+        _MODEL_LAST_ATTEMPT.write_text(str(time.time()), encoding="utf-8")
         subprocess.Popen(
-            ["bash", str(bg_script)],
+            ["bash", "-c", chain],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=env,
             start_new_session=True,
         )
-        print("[SessionInstall] ONNX モデル取得をバックグラウンド起動しました", file=sys.stderr)
+        print("[SessionInstall] 埋め込みモデル取得をバックグラウンド起動しました", file=sys.stderr)
     except OSError as e:
-        print(f"[SessionInstall] ONNX バックグラウンド起動失敗: {_sanitize_exception(e)}", file=sys.stderr)
+        print(f"[SessionInstall] モデル取得バックグラウンド起動失敗: {_sanitize_exception(e)}", file=sys.stderr)
 
 
 def _resolve_plugin_root() -> Path | None:
@@ -285,7 +297,11 @@ def _lock_phase_should_skip(plugin_root: Path, current_version: str) -> bool:
 
 
 def _run_install(install_sh: Path) -> subprocess.CompletedProcess[str] | None:
-    """install.sh を ONNX 非同期モードで実行し結果を返す。失敗時は None を返す。
+    """install.sh を実行し結果を返す。失敗時は None を返す。
+
+    モデル取得（数十 MB の DL + テーブル抽出）も install.sh 内で同期実行される。
+    タイムアウトで中断された場合も DL は SHA 一致スキップで再開でき、
+    次回 SessionStart の _ensure_model がリトライする。
 
     Args:
         install_sh: 実行する install.sh の Path。
@@ -294,11 +310,9 @@ def _run_install(install_sh: Path) -> subprocess.CompletedProcess[str] | None:
         subprocess.CompletedProcess。実行失敗時は None。
     """
     try:
-        # BLUECORE_INSTALL_ONNX_ASYNC=1 で ONNX 取得をバックグラウンドに切り出す（タイムアウト回避）
         return run_text(
             ["bash", str(install_sh)],
             timeout=_INSTALL_TIMEOUT,
-            extra_env={"BLUECORE_INSTALL_ONNX_ASYNC": "1"},
         )
     except (subprocess.SubprocessError, OSError) as e:
         print(f"[SessionInstall] install.sh の実行に失敗しました: {_sanitize_exception(e)}", file=sys.stderr)
@@ -364,8 +378,8 @@ def _run_install_with_lock(plugin_root: Path, current_version: str | None) -> bo
 def run(_raw_input: str) -> str:
     """install.sh の実行判定と実行を行い hookSpecificOutput の JSON を返す。
 
-    バージョン一致時は .venv symlink 修復のみ行う。
-    バージョン不一致・未インストール時は install.sh を同期実行（ONNX のみ非同期）。
+    バージョン一致時は .venv symlink 修復と埋め込みモデル欠落チェックのみ行う。
+    バージョン不一致・未インストール時は install.sh を同期実行する。
 
     Args:
         _raw_input: フックへの標準入力（未使用）。
@@ -386,7 +400,7 @@ def run(_raw_input: str) -> str:
     if current_version is not None and installed_version == current_version:
         if _should_repair_venv_symlink(plugin_root):
             _repair_venv_symlink(plugin_root)
-        _ensure_onnx_model(plugin_root)
+        _ensure_model(plugin_root)
         print(f"[SessionInstall] 既にインストール済みです: {sanitize_log_value(str(current_version))}", file=sys.stderr)
         return _session_start_output()
 
@@ -402,9 +416,9 @@ def run(_raw_input: str) -> str:
 
     if _should_repair_venv_symlink(plugin_root):
         _repair_venv_symlink(plugin_root)
-    if not _MODEL_ONNX.exists():
-        # install.sh が ONNX 取得をバックグラウンド起動済み（flock が多重実行を防ぐ）
-        print("[SessionInstall] ONNX モデル取得をバックグラウンドで実行中です", file=sys.stderr)
+    if not _MODEL_NPY.exists():
+        # download disabled またはタイムアウト中断。次回 SessionStart の _ensure_model がリトライする
+        print("[SessionInstall] 埋め込みモデルが未取得です（次回セッションでリトライ）", file=sys.stderr)
 
     return _session_start_output()
 

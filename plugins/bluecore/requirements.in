@@ -1,7 +1,6 @@
 # Runtime dependencies for plugins/bluecore/install.sh
 # Regenerate: pip-compile --generate-hashes plugins/bluecore/requirements.in -o plugins/bluecore/requirements.txt
-onnxruntime>=1.18
-onnx>=1.16,<2
+numpy>=2.0
 tokenizers>=0.20
 pyyaml>=6.0
 psycopg[binary]>=3.1

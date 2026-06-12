@@ -55,9 +55,9 @@ def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch
     assert stdout.getvalue() == ""
 
 
-def test_config_protection_blocks_onnx_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ダウンロード完全性の信頼アンカーである onnx.json の書き換えをブロックする。"""
-    payload = json.dumps({"tool_input": {"file_path": "plugins/bluecore/onnx.json"}})
+def test_config_protection_blocks_model_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ダウンロード完全性の信頼アンカーである model.json の書き換えをブロックする。"""
+    payload = json.dumps({"tool_input": {"file_path": "plugins/bluecore/model.json"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
     stderr = io.StringIO()
@@ -65,7 +65,7 @@ def test_config_protection_blocks_onnx_json(monkeypatch: pytest.MonkeyPatch) -> 
     with redirect_stderr(stderr), redirect_stdout(stdout):
         assert config_protection.main() == 2
 
-    assert "Modifying onnx.json is not allowed" in stderr.getvalue()
+    assert "Modifying model.json is not allowed" in stderr.getvalue()
 
 
 def test_config_protection_allows_safe_file(monkeypatch: pytest.MonkeyPatch) -> None:

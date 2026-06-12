@@ -242,43 +242,25 @@ install_user_python() {
   # editable install は --require-hashes と排他のため別途実行する
   pip_install_quiet --no-deps -e "${REPO_ROOT}"
 
-  # ONNX モデルは既存ファイルを最優先で使い、未生成なら外部配布 → 現行ビルドの順で解決する。
+  # 静的埋め込みモデルは既存ファイルを最優先で使い、未生成なら DL → テーブル抽出で解決する。
+  # DL は数十 MB・抽出は数秒のため同期実行で完結する（torch ビルド venv は不要）。
   local model_target="${HOME}/.bluecore/models"
-  local model_onnx="${model_target}/model.onnx"
-  local onnx_config="${SCRIPT_DIR}/onnx.json"
-  local src_dir="${SCRIPT_DIR}/src"
+  local model_npy="${model_target}/embeddings.npy"
+  local model_config="${SCRIPT_DIR}/model.json"
 
-  if [[ -f "${model_onnx}" ]]; then
-    echo "[bluecore] ONNX model already present (skipping): ${model_onnx}"
-  elif [[ "${BLUECORE_INSTALL_ONNX_ASYNC:-0}" == "1" ]]; then
-    # SessionStart 経由: ダウンロードもビルドもバックグラウンドへ委譲し、
-    # install.sh をフックの timeout 内で確実に完了させる（version 記録と ONNX 取得の分離）
-    local bg_script="${SCRIPT_DIR}/onnx/_run_onnx_background.sh"
-    if [[ ! -f "${bg_script}" ]]; then
-      echo "[bluecore] Warning: ONNX background script not found: ${bg_script}" >&2
-    else
-      echo "[bluecore] Launching ONNX model acquisition in background. Log: ${HOME}/.bluecore/logs/modelbuild.log"
-      # env -i で最小限の環境のみ渡し、PYTHONPATH/LD_PRELOAD 等の汚染を防ぐ
-      env -i HOME="${HOME}" PATH="${PATH}" LANG="${LANG:-C}" \
-        nohup setsid bash "${bg_script}" </dev/null >/dev/null 2>&1 &
-      disown
-    fi
-  elif "${VENV_PYTHON}" -m bluecore.onnx_download --config "${onnx_config}" --out "${model_target}"; then
-    echo "[bluecore] ONNX model downloaded: ${model_onnx}"
+  if [[ -f "${model_npy}" ]]; then
+    echo "[bluecore] Embedding model already present (skipping): ${model_npy}"
+  elif "${VENV_PYTHON}" -m bluecore.model_download --config "${model_config}" --out "${model_target}"; then
+    "${VENV_PYTHON}" -m model_build build --out "${model_target}"
+    echo "[bluecore] Embedding model built: ${model_npy}"
+    # モデル更新（次元変更）後は既存チャンクの埋め込みを再生成する
+    MODEL_NEWLY_BUILT=1
   else
     local download_status=$?
     if [[ "${download_status}" != "3" ]]; then
       exit "${download_status}"
     fi
-
-    # 手動実行で config が disabled / 未設定なら、現行の生成処理へフォールバックする。
-    if [[ -f "${SCRIPT_DIR}/onnx/_build_onnx_lib.sh" ]]; then
-      # shellcheck source=onnx/_build_onnx_lib.sh
-      source "${SCRIPT_DIR}/onnx/_build_onnx_lib.sh"
-      build_onnx_if_missing "${model_target}" "fp16"
-    else
-      echo "[bluecore] Warning: ONNX build scripts not available. Please build manually." >&2
-    fi
+    echo "[bluecore] Model download disabled in ${model_config}. Embedding features will be unavailable." >&2
   fi
 
   # 既存 settings.json のセキュリティ移行（パスワードを <data_dir>/.pgpass に分離・sslmode 未指定時のみ require 付与）
@@ -419,6 +401,12 @@ fi
 if [[ "${SKIP_PYTHON}" != "1" ]]; then
   echo "[bluecore] Initializing mem database at ${SETTINGS_DIR}/mem.db"
   "${VENV_PYTHON}" -m bluecore.mem setup
+  # モデルを今回新規生成した場合は既存チャンクの埋め込みを再生成する（次元変更対応）
+  if [[ "${MODEL_NEWLY_BUILT:-0}" == "1" ]]; then
+    echo "[bluecore] Re-embedding existing chunks with the new model"
+    "${VENV_PYTHON}" -m bluecore.mem reembed \
+      || echo "[bluecore] Note: reembed failed. Run 'python3 -m bluecore.mem reembed' manually." >&2
+  fi
 fi
 
 # インストール済みバージョンを記録する（SKIP_PYTHON=1 のときは Python 未インストールなので記録しない）
