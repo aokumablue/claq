@@ -146,8 +146,9 @@ class TestBackgroundDetach:
 class TestDetachTarget:
     """_detach_target のテスト。"""
 
-    def test_detaches_with_stdin_tempfile(self, monkeypatch):
+    def test_detaches_with_stdin_tempfile(self, monkeypatch, tmp_path):
         """stdin を一時ファイル経由で渡し detached 起動する。"""
+        monkeypatch.setenv("HOME", str(tmp_path))
         popen_calls: list[dict] = []
 
         def fake_popen(cmd, **kwargs):
@@ -185,8 +186,10 @@ class TestDetachTarget:
         assert run_with_flags._detach_target("session:mem:end", "bluecore.mem.cli", [], "{}") == 0
         assert "Error detaching session:mem:end" in capsys.readouterr().err
 
-    def test_popen_oserror_returns_zero_nonblocking(self, monkeypatch, capsys):
+    def test_popen_oserror_returns_zero_nonblocking(self, monkeypatch, capsys, tmp_path):
         """Popen の OSError は非ブロッキングエラーとして 0 を返す。"""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
         def raise_oserror(*a, **k):
             raise OSError("spawn failed")
 
@@ -194,8 +197,13 @@ class TestDetachTarget:
         assert run_with_flags._detach_target("session:mem:end", "bluecore.mem.cli", [], "{}") == 0
         assert "Error detaching session:mem:end" in capsys.readouterr().err
 
-    def test_unlink_failure_is_ignored(self, monkeypatch):
-        """一時ファイル削除失敗は無視される。"""
+    def test_unlink_failure_is_ignored(self, monkeypatch, tmp_path):
+        """一時ファイル削除失敗は無視される。
+
+        os.unlink のモックは os モジュール共有のため hook_common 側にも波及し
+        実ファイルが残留する。HOME を tmp_path に隔離して実環境汚染を防ぐ。
+        """
+        monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setattr(
             run_with_flags.subprocess, "Popen", lambda *a, **k: SimpleNamespace(pid=1)
         )
