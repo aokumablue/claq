@@ -253,8 +253,6 @@ install_user_python() {
   elif "${VENV_PYTHON}" -m bluecore.model_download --config "${model_config}" --out "${model_target}"; then
     "${VENV_PYTHON}" -m model_build build --out "${model_target}"
     echo "[bluecore] Embedding model built: ${model_npy}"
-    # モデル更新（次元変更）後は既存チャンクの埋め込みを再生成する
-    MODEL_NEWLY_BUILT=1
   else
     local download_status=$?
     if [[ "${download_status}" != "3" ]]; then
@@ -401,12 +399,6 @@ fi
 if [[ "${SKIP_PYTHON}" != "1" ]]; then
   echo "[bluecore] Initializing mem database at ${SETTINGS_DIR}/mem.db"
   "${VENV_PYTHON}" -m bluecore.mem setup
-  # モデルを今回新規生成した場合は既存チャンクの埋め込みを再生成する（次元変更対応）
-  if [[ "${MODEL_NEWLY_BUILT:-0}" == "1" ]]; then
-    echo "[bluecore] Re-embedding existing chunks with the new model"
-    "${VENV_PYTHON}" -m bluecore.mem reembed \
-      || echo "[bluecore] Note: reembed failed. Run 'python3 -m bluecore.mem reembed' manually." >&2
-  fi
 fi
 
 # インストール済みバージョンを記録する（SKIP_PYTHON=1 のときは Python 未インストールなので記録しない）

@@ -883,7 +883,6 @@ class TestEnsureModel:
         assert cmd[:2] == ["bash", "-c"]
         assert "bluecore.model_download" in cmd[2]
         assert "model_build build" in cmd[2]
-        assert "bluecore.mem reembed" in cmd[2]
         # 試行記録が書き込まれている
         assert (tmp_path / "model_last_attempt").is_file()
 
