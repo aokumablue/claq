@@ -178,13 +178,29 @@ class TestDetachTarget:
         assert popen_calls[0]["start_new_session"] is True
 
     def test_tempfile_is_removed_after_launch(self, monkeypatch, tmp_path):
-        """起動後に stdin 一時ファイルが削除される。"""
-        monkeypatch.setenv("TMPDIR", str(tmp_path))
+        """stdin 一時ファイルは ~/.bluecore 配下に作成され、起動後に削除される。"""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        seen_dirs: list[str] = []
         monkeypatch.setattr(
-            run_with_flags.subprocess, "Popen", lambda *a, **k: SimpleNamespace(pid=1)
+            run_with_flags.subprocess,
+            "Popen",
+            lambda *a, **k: seen_dirs.append(k["stdin"].name) or SimpleNamespace(pid=1),
         )
         run_with_flags._detach_target("session:mem:end", "bluecore.mem.cli", [], "{}")
-        assert list(tmp_path.iterdir()) == []
+        assert len(seen_dirs) == 1
+        assert seen_dirs[0].startswith(str(tmp_path / ".bluecore"))
+        assert list((tmp_path / ".bluecore").glob("*.stdin")) == []
+
+    def test_tempfile_creation_failure_returns_zero(self, monkeypatch, capsys):
+        """一時ファイル作成失敗（ディスク不可等）でも非ブロッキングで 0 を返す。"""
+        from bluecore.hooks import hook_common
+
+        def raise_oserror(*a, **k):
+            raise OSError("no space")
+
+        monkeypatch.setattr(hook_common.tempfile, "NamedTemporaryFile", raise_oserror)
+        assert run_with_flags._detach_target("session:mem:end", "bluecore.mem.cli", [], "{}") == 0
+        assert "Error detaching session:mem:end" in capsys.readouterr().err
 
     def test_popen_oserror_returns_zero_nonblocking(self, monkeypatch, capsys):
         """Popen の OSError は非ブロッキングエラーとして 0 を返す。"""

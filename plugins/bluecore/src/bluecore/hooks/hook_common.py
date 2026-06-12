@@ -156,7 +156,9 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
     """コマンドを detached（新セッション）で起動し stdin を一時ファイル経由で渡す。
 
     親プロセスの終了に影響されず子を走らせ続けるために使う。一時ファイルは
-    起動直後に unlink する（継承済み fd は有効なまま）。
+    world-writable な /tmp を避けて ~/.bluecore 配下に作成し、close→reopen の
+    TOCTOU 窓を作らないよう同一 fd を seek(0) して子へ継承する。起動直後に
+    unlink する（継承済み fd は有効なまま）。
 
     Args:
         cmd: subprocess に渡すコマンドリスト。
@@ -169,23 +171,31 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
     Raises:
         例外は発生しません。
     """
-    tmp = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".stdin", delete=False)
+    try:
+        private_dir = Path.home() / ".bluecore"
+        private_dir.mkdir(parents=True, exist_ok=True)
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w+", encoding="utf-8", suffix=".stdin", dir=private_dir, delete=False
+        )
+    except OSError:
+        return False
     try:
         tmp.write(raw_stdin)
-        tmp.close()
-        with open(tmp.name, encoding="utf-8") as stdin_fh:
-            subprocess.Popen(
-                cmd,
-                stdin=stdin_fh,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=env,
-                start_new_session=True,
-            )
+        tmp.flush()
+        tmp.seek(0)
+        subprocess.Popen(
+            cmd,
+            stdin=tmp,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            start_new_session=True,
+        )
         return True
     except OSError:
         return False
     finally:
+        tmp.close()
         try:
             os.unlink(tmp.name)
         except OSError:
