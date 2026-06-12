@@ -165,14 +165,14 @@ def _model_load_lock() -> Generator[None, None, None]:
 
 
 def _load_session_unlocked() -> tuple[Any, Any] | tuple[None, None]:
-    """ロック取得済みの状態でセッション初期化を行う内部関数。"""
+    """ロック取得済みの状態でセッション初期化を行う内部関数。
+
+    _lock と _model_load_lock の両方を取得済みの前提で呼ぶ。モデルファイルの
+    存在確認は呼び出し元（_get_session）がロック取得前に実施済み。
+    """
     global _session, _tokenizer  # noqa: PLW0603
     model_path = _MODELS_DIR / "model.onnx"
     tok_path = _MODELS_DIR / "tokenizer.json"
-
-    unavailable = _check_model_files(model_path, tok_path)
-    if unavailable:
-        return (None, None)
 
     log.info("モデルロード: %s@%s", _DEFAULT_EMBEDDING_MODEL, _DEFAULT_EMBEDDING_REVISION[:8])
     try:
@@ -198,12 +198,20 @@ def _get_session() -> tuple[Any, Any] | tuple[None, None]:
     これにより、部分的に初期化された状態が外部から見えることを防ぐ（CWE-667 / 状態不整合防止）。
 
     model.onnx が存在しない場合（バックグラウンドビルド中など）は (None, None) を返す。
+    この判定は _model_load_lock の取得前に行い、ビルド中に他プロセスのロード待ちで
+    無意味にブロックしないようにする。
     _onnx_unavailable_warned はプロセス内で 1 度だけ警告を出すフラグ。
     ビルド完了後は model.onnx が配置されてこの分岐を通らなくなるため問題ない。
     ONNX ビルド完了後のモデル利用はプロセス再起動後に反映される。
+
+    フックは単一スレッドの独立プロセスとして起動される前提。_lock 保持中に
+    _model_load_lock をブロッキング取得するため、プロセス内マルチスレッドで
+    embed() を併用する設計に変える場合はロック順序の見直しが必要。
     """
     with _lock:
         if _session is None or _tokenizer is None:
+            if _check_model_files(_MODELS_DIR / "model.onnx", _MODELS_DIR / "tokenizer.json"):
+                return (None, None)
             with _model_load_lock():
                 return _load_session_unlocked()
         return _session, _tokenizer

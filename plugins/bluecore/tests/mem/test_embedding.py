@@ -316,12 +316,8 @@ class TestTokenTypeIdsBranch:
             InferenceSession=FakeSession,
             SessionOptions=type("SO", (), {"log_severity_level": 3}),
         )
-        mock_onnx = types.SimpleNamespace(
-            checker=types.SimpleNamespace(check_model=lambda *_a, **_kw: None)
-        )
         monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
         monkeypatch.setitem(sys.modules, "tokenizers", _make_fake_tokenizers())
-        monkeypatch.setitem(sys.modules, "onnx", mock_onnx)
 
         result = embedding.embed(["x"])
         assert "token_type_ids" in captured
@@ -433,12 +429,8 @@ class TestTwoPhaseInitRollback:
             InferenceSession=FakeSession,
             SessionOptions=FakeSessionOptions,
         )
-        mock_onnx = types.SimpleNamespace(
-            checker=types.SimpleNamespace(check_model=lambda *_a, **_kw: None)
-        )
         monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
         monkeypatch.setitem(sys.modules, "tokenizers", types.SimpleNamespace(Tokenizer=BrokenTokenizer))
-        monkeypatch.setitem(sys.modules, "onnx", mock_onnx)
 
         with pytest.raises(RuntimeError, match="tokenizer broken"):
             embedding.embed(["test"])
@@ -501,6 +493,23 @@ class TestModelLoadLock:
         with open(lock_path, "w") as other:
             fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
             fcntl.flock(other, fcntl.LOCK_UN)
+
+    def test_lock_not_acquired_when_model_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """model.onnx 不在（ビルド中）時は fcntl ロックを取得せず即 (None, None) を返す。"""
+        from contextlib import contextmanager
+
+        empty_dir = tmp_path / "empty_models"
+        empty_dir.mkdir()
+        monkeypatch.setattr(embedding, "_MODELS_DIR", empty_dir)
+        monkeypatch.setattr(embedding, "_onnx_unavailable_warned", True)
+
+        @contextmanager
+        def _fail_lock():
+            pytest.fail("モデル不在時にロックを取得してはならない")
+            yield
+
+        monkeypatch.setattr(embedding, "_model_load_lock", _fail_lock)
+        assert embedding._get_session() == (None, None)
 
     def test_get_session_acquires_load_lock(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """初期化経路で _model_load_lock が取得される。"""

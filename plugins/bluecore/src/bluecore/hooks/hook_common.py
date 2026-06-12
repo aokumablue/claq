@@ -156,6 +156,7 @@ BACKGROUND_HOOK_IDS: frozenset[str] = frozenset(
 # detach 起動した子の実行時間上限（秒）。start_new_session=True の子はハーネスの
 # timeout で kill されないため、coreutils timeout で自決させる。hooks.json の
 # 最長エントリ（600 秒）より先に終わるよう 590 とする。
+# --kill-after は GNU coreutils 固有のため Linux 前提（BSD/macOS の timeout は不可）。
 DETACH_TIMEOUT_SECONDS = 590
 # SIGTERM を無視して詰まったプロセスを SIGKILL で確実に回収するまでの猶予（秒）。
 _DETACH_KILL_AFTER_SECONDS = 30
