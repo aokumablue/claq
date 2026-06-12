@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 
 # Codex のツール名 → Claude Code 相当ツール名
@@ -95,23 +96,33 @@ def extract_file_paths(tool_name: str, tool_input: dict) -> list[str] | None:
     return []
 
 
+# セッション ID として許容する形式（ファイル名に使われるため英数・._- のみ）
+_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+
 def resolve_session_id(payload: dict) -> str:
     """フックペイロードと環境変数からセッション ID を解決する。
+
+    ペイロードは信頼できない入力のため、ファイル名に安全な形式
+    （英数・ピリオド・ハイフン・アンダースコア、128 文字以内）以外は
+    fail-closed で "default" に倒す。
 
     Args:
         payload: フック stdin の JSON ペイロード。
 
     Returns:
         session_id フィールド値、無ければ CLAUDE_SESSION_ID、どちらも
-        無ければ "default"。
+        無ければ（または不正形式なら）"default"。
 
     Raises:
         例外は発生しません。
     """
     session_id = payload.get("session_id")
-    if isinstance(session_id, str) and session_id:
+    if not (isinstance(session_id, str) and session_id):
+        session_id = os.environ.get("CLAUDE_SESSION_ID") or ""
+    if _SESSION_ID_PATTERN.fullmatch(session_id):
         return session_id
-    return os.environ.get("CLAUDE_SESSION_ID") or "default"
+    return "default"
 
 
 def resolve_project_dir(payload: dict) -> str:

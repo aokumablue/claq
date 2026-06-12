@@ -133,6 +133,17 @@ class TestResolveSessionId:
         """どちらも無ければ default を返す。"""
         assert harness.resolve_session_id({"session_id": ""}) == "default"
 
+    def test_unsafe_session_id_falls_back_to_default(self):
+        """ファイル名に安全でない session_id は fail-closed で default に倒す。"""
+        assert harness.resolve_session_id({"session_id": "../../etc/passwd"}) == "default"
+        assert harness.resolve_session_id({"session_id": "a/b"}) == "default"
+        assert harness.resolve_session_id({"session_id": "x" * 129}) == "default"
+
+    def test_unsafe_env_session_id_falls_back_to_default(self, monkeypatch):
+        """環境変数由来でも不正形式は default に倒す。"""
+        monkeypatch.setenv("CLAUDE_SESSION_ID", "bad id with spaces")
+        assert harness.resolve_session_id({}) == "default"
+
 
 class TestResolveProjectDir:
     """resolve_project_dir のテスト。"""
