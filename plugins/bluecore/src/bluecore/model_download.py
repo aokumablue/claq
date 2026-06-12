@@ -28,7 +28,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-# ビルド完了の判定マーカー（model_build build の最終成果物）
+# ビルド完了の判定マーカー（bluecore.model_build build の最終成果物）
 _BUILT_MARKER = "embeddings.npy"
 
 _DEFAULT_MAX_DOWNLOAD_BYTES: int = 256 * 1024 * 1024  # 256 MB

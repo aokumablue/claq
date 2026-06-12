@@ -158,7 +158,6 @@ git clone --quiet --local --no-hardlinks . "${TMPDIR}/repo"
     --invert-paths \
     --path plugins/bluecore/tests/ \
     --path plugins/bluecore/onnx/ \
-    --path plugins/bluecore/src/model_build/ \
     --path scripts/ \
     --path CLAUDE.md \
     --path conftest.py \

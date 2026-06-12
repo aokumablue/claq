@@ -132,7 +132,7 @@ def _repair_venv_symlink(plugin_root: Path) -> None:
 def _ensure_model(plugin_root: Path) -> None:
     """embeddings.npy 不在時にモデル取得チェーンを detached 起動する。
 
-    model_download（DL + SHA 検証）→ model_build build（テーブル抽出）を
+    model_download（DL + SHA 検証）→ bluecore.model_build build（テーブル抽出）を
     順に実行する。各ステップは冪等のため多重起動しても壊れず、
     前回試行から _MODEL_RETRY_INTERVAL 秒以内なら起動頻度の抑制のため
     スキップする。
@@ -162,7 +162,7 @@ def _ensure_model(plugin_root: Path) -> None:
     models_dir = _BLUECORE_DIR / "models"
     chain = (
         f'"{venv_python}" -m bluecore.model_download --config "{model_config}" --out "{models_dir}"'
-        f' && "{venv_python}" -m model_build build --out "{models_dir}"'
+        f' && "{venv_python}" -m bluecore.model_build build --out "{models_dir}"'
     )
     # 最小限の環境のみ渡し、PYTHONPATH/LD_PRELOAD 等の汚染を防ぐ（install.sh の env -i と同等）
     env = {

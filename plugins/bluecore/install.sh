@@ -251,7 +251,7 @@ install_user_python() {
   if [[ -f "${model_npy}" ]]; then
     echo "[bluecore] Embedding model already present (skipping): ${model_npy}"
   elif "${VENV_PYTHON}" -m bluecore.model_download --config "${model_config}" --out "${model_target}"; then
-    "${VENV_PYTHON}" -m model_build build --out "${model_target}"
+    "${VENV_PYTHON}" -m bluecore.model_build build --out "${model_target}"
     echo "[bluecore] Embedding model built: ${model_npy}"
   else
     local download_status=$?

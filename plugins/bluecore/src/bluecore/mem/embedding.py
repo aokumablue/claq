@@ -2,7 +2,7 @@
 
 sentence-transformers / torch / onnxruntime に依存しない。
 モデルは ~/.bluecore/models/embeddings.npy（語彙×次元の静的テーブル）を使用する。
-install.sh が bluecore.model_download → model_build build でモデルを配置する。
+install.sh が bluecore.model_download → bluecore.model_build build でモデルを配置する。
 
 推論は sentence-transformers の StaticEmbedding と同仕様:
 add_special_tokens=False でトークン化し、トークン埋め込みの平均を
