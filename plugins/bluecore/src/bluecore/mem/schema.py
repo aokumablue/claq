@@ -229,7 +229,7 @@ END;
 _VEC_SQL = """\
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_chunks_vec USING vec0(
   chunk_id TEXT PRIMARY KEY,
-  embedding FLOAT[768]
+  embedding FLOAT[256]
 );
 """
 

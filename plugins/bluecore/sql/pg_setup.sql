@@ -209,10 +209,10 @@ CREATE INDEX IF NOT EXISTS idx_mir_item_type ON mem_item_runs(item_type);
 
 -- ベクトル検索テーブル（pgvector 拡張を有効にする必要がある）
 -- セキュリティ: 埋め込み反転攻撃（Vec2Text）対策として行レベルセキュリティ（RLS）を有効化する。
--- 768 次元ベクトルから元テキストが ~92% 復元可能なため、原文と同等の機密扱いとする。
+-- 埋め込みベクトルから元テキストの相当部分が復元可能なため、原文と同等の機密扱いとする。
 CREATE TABLE IF NOT EXISTS memory_chunks_vec (
   chunk_id TEXT PRIMARY KEY REFERENCES memory_chunks(id),
-  embedding vector(768)
+  embedding vector(256)
 );
 CREATE INDEX IF NOT EXISTS idx_vec_embedding ON memory_chunks_vec USING ivfflat (embedding vector_l2_ops);
 

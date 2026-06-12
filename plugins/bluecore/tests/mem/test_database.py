@@ -422,7 +422,7 @@ class TestDatabase:
         ).fetchone()
         if row is None:
             pytest.skip("sqlite-vec not available")
-        emb = [0.1] * 768
+        emb = [0.1] * 256
         db.store_embeddings([cid], [emb])
         results = db.vec_search(emb, limit=5)
         assert len(results) >= 1
@@ -430,7 +430,7 @@ class TestDatabase:
 
     def test_vec_search_no_data(self, db: Database) -> None:
         """ベクトル検索：データなしの場合"""
-        results = db.vec_search([0.1] * 768)
+        results = db.vec_search([0.1] * 256)
         # sqlite-vec が利用不可でも空リストを返す
         assert results == [] or isinstance(results, list)
 
