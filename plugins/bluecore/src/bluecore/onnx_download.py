@@ -20,6 +20,7 @@ import ssl
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 import zipfile
@@ -30,6 +31,11 @@ _REQUIRED_FILES = ("model.onnx", "tokenizer.json", "config.json", "manifest.json
 _DEFAULT_MAX_DOWNLOAD_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GB
 _DEFAULT_MAX_EXTRACT_BYTES: int = 500 * 1024 * 1024  # 500 MB per file
 _CHUNK_SIZE: int = 1024 * 1024  # 1 MB
+# ダウンロード全体のウォールクロック上限。urlopen の timeout は socket 単位の
+# 無通信検出のみで、低速送信を続けるサーバーには全体時間の上限が効かない。
+# 終わらないダウンロードは flock を占有し以後のリトライを恒久停止させるため、
+# ここで打ち切って次回セッションのリトライに委ねる。
+_MAX_DOWNLOAD_SECONDS: int = 1800  # 30 分
 
 
 class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -156,8 +162,11 @@ def _download_archive(
     opener = urllib.request.build_opener(*handlers)
     request = urllib.request.Request(model_url, headers={"User-Agent": "bluecore-install/1.0"})
     downloaded = 0
+    deadline = time.monotonic() + _MAX_DOWNLOAD_SECONDS
     with opener.open(request, timeout=600) as response, archive_path.open("wb") as out:
         while chunk := response.read(_CHUNK_SIZE):
+            if time.monotonic() > deadline:
+                raise ValueError(f"Download exceeded time limit of {_MAX_DOWNLOAD_SECONDS} seconds")
             downloaded += len(chunk)
             if downloaded > max_bytes:
                 raise ValueError(f"Download size exceeded limit of {max_bytes} bytes")

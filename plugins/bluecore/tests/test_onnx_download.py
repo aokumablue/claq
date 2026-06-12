@@ -288,6 +288,18 @@ class TestDownloadArchiveSizeLimit:
             mod._download_archive("https://github.com/x", out_file, 1024)
         assert out_file.read_bytes() == b""
 
+    def test_raises_when_download_exceeds_time_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ウォールクロック上限を超えたダウンロードは ValueError で打ち切る。"""
+        # 1 回目: deadline 計算、2 回目: 上限超過判定
+        clock = iter([0.0, mod._MAX_DOWNLOAD_SECONDS + 1.0])
+        monkeypatch.setattr(mod.time, "monotonic", lambda: next(clock))
+        mock_opener = self._make_mock_opener([b"x", b""])
+        with patch("urllib.request.build_opener", return_value=mock_opener):
+            with pytest.raises(ValueError, match="Download exceeded time limit"):
+                mod._download_archive("https://github.com/x", tmp_path / "out.bin", 1024)
+
     def test_ssl_no_verify_adds_https_handler(self, tmp_path: Path) -> None:
         """ssl_no_verify=True のとき HTTPSHandler が opener に渡される。"""
         out_file = tmp_path / "out.bin"
