@@ -160,6 +160,8 @@ class TestDetachTarget:
         assert run_with_flags._detach_target("session:mem:end", "bluecore.mem.cli", [], '{"k": "v"}') == 0
         assert len(popen_calls) == 1
         assert popen_calls[0]["start_new_session"] is True
+        # detach 後の子はハーネス管轄外のため coreutils timeout で実行時間上限を課す
+        assert popen_calls[0]["cmd"][:3] == ["timeout", "--kill-after=30", "590"]
 
     def test_tempfile_is_removed_after_launch(self, monkeypatch, tmp_path):
         """stdin 一時ファイルは ~/.bluecore 配下に作成され、起動後に削除される。"""
