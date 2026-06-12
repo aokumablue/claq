@@ -84,6 +84,11 @@ ensure_venv_module() {
 
   local py_ver
   py_ver="$("${PYTHON3}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+  # インタープリタ出力をパッケージ名に埋め込むため、想定形式以外を拒否する
+  if [[ ! "${py_ver}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: unexpected python version string: ${py_ver}" >&2
+    exit 1
+  fi
 
   if command -v apt-get >/dev/null 2>&1; then
     echo "[bluecore] Running: sudo apt-get install python${py_ver}-venv"
