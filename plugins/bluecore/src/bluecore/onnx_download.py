@@ -219,53 +219,74 @@ def _copy_with_size_limit(src: object, out: object, max_bytes: int, name: str) -
         out.write(chunk)  # type: ignore[union-attr]
 
 
-def _collect_archive_members(archive_path: Path, required_name: str) -> list[tuple[str, object]]:
-    """アーカイブ内で required_name に一致するファイル候補を集める。"""
-    candidates: list[tuple[str, object]] = []
+def _require_unique_members(found: dict[str, list], names: tuple[str, ...]) -> None:
+    """必須ファイルがアーカイブ内にちょうど 1 つずつ存在することを検証する。
+
+    Args:
+        found: basename → 一致した member リストの辞書。
+        names: 必須ファイル名のタプル。
+
+    Raises:
+        ValueError: 必須ファイルが 0 件または複数件の場合。
+    """
+    for name in names:
+        count = len(found.get(name, []))
+        if count != 1:
+            raise ValueError(f"Expected exactly one {name} in archive, got {count}")
+
+
+def _extract_required_files(
+    archive_path: Path,
+    names: tuple[str, ...],
+    destination_dir: Path,
+    max_bytes: int,
+) -> None:
+    """アーカイブを 1 回だけ開き、必須ファイル一式を安全に抽出する。
+
+    tar.gz はシーク不可で getmembers() のたびに全ストリームを解凍走査するため、
+    1 パスで全 member を収集し、アーカイブ内の出現順に抽出して再走査を避ける。
+
+    Args:
+        archive_path: ダウンロード済みアーカイブのパス。
+        names: 抽出する必須ファイル名（basename）のタプル。
+        destination_dir: 抽出先ディレクトリ。
+        max_bytes: ファイルごとの抽出サイズ上限。
+
+    Raises:
+        ValueError: 非対応フォーマット、必須ファイルの欠落・重複、
+            読み取り不能エントリ、サイズ上限超過の場合。
+    """
+    destination_dir.mkdir(parents=True, exist_ok=True)
     if tarfile.is_tarfile(archive_path):
         with tarfile.open(archive_path) as archive:
+            found_tar: dict[str, list[tarfile.TarInfo]] = {}
             for member in archive.getmembers():
-                if member.isfile() and Path(member.name).name == required_name:
-                    candidates.append(("tar", member))
-        return candidates
+                if member.isfile() and Path(member.name).name in names:
+                    found_tar.setdefault(Path(member.name).name, []).append(member)
+            _require_unique_members(found_tar, names)
+            # gzip ストリームの巻き戻しを避けるためオフセット順に抽出する
+            for member in sorted((found_tar[name][0] for name in names), key=lambda m: m.offset):
+                src = archive.extractfile(member)
+                if src is None:
+                    raise ValueError(f"Archive entry is not readable: {member.name}")
+                with src, (destination_dir / Path(member.name).name).open("wb") as out:
+                    _copy_with_size_limit(src, out, max_bytes, member.name)
+        return
 
     if zipfile.is_zipfile(archive_path):
         with zipfile.ZipFile(archive_path) as archive:
-            for member in archive.infolist():
-                if not member.is_dir() and Path(member.filename).name == required_name:
-                    candidates.append(("zip", member))
-        return candidates
+            found_zip: dict[str, list[zipfile.ZipInfo]] = {}
+            for info in archive.infolist():
+                if not info.is_dir() and Path(info.filename).name in names:
+                    found_zip.setdefault(Path(info.filename).name, []).append(info)
+            _require_unique_members(found_zip, names)
+            for name in names:
+                info = found_zip[name][0]
+                with archive.open(info) as src, (destination_dir / name).open("wb") as out:
+                    _copy_with_size_limit(src, out, max_bytes, info.filename)
+        return
 
     raise ValueError(f"Unsupported archive format: {archive_path}")
-
-
-def _extract_required_file(
-    archive_path: Path,
-    archive_kind: str,
-    member: object,
-    destination: Path,
-    max_bytes: int,
-) -> None:
-    """アーカイブから 1 ファイルだけ安全に抽出する。"""
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if archive_kind == "tar":
-        with tarfile.open(archive_path) as archive, destination.open("wb") as out:
-            assert isinstance(member, tarfile.TarInfo)
-            src = archive.extractfile(member)
-            if src is None:
-                raise ValueError(f"Archive entry is not readable: {member.name}")
-            with src:
-                _copy_with_size_limit(src, out, max_bytes, member.name)
-        return
-
-    if archive_kind == "zip":
-        with zipfile.ZipFile(archive_path) as archive, destination.open("wb") as out:
-            assert isinstance(member, zipfile.ZipInfo)
-            with archive.open(member) as src:
-                _copy_with_size_limit(src, out, max_bytes, member.filename)
-        return
-
-    raise ValueError(f"Unsupported archive kind: {archive_kind}")
 
 
 def download_model_bundle(config_path: Path, output_dir: Path) -> int:
@@ -306,12 +327,7 @@ def download_model_bundle(config_path: Path, output_dir: Path) -> int:
         _download_archive(model_url, archive_path, max_download_bytes, ssl_no_verify=ssl_no_verify)
         _verify_archive_sha256(archive_path, expected_sha256)
 
-        for required_name in _REQUIRED_FILES:
-            candidates = _collect_archive_members(archive_path, required_name)
-            if len(candidates) != 1:
-                raise ValueError(f"Expected exactly one {required_name} in archive, got {len(candidates)}")
-            archive_kind, member = candidates[0]
-            _extract_required_file(archive_path, archive_kind, member, extracted_dir / required_name, max_extract_bytes)
+        _extract_required_files(archive_path, _REQUIRED_FILES, extracted_dir, max_extract_bytes)
 
         # model.onnx の存在が「インストール完了」の判定マーカーのため必ず最後に
         # 配置する。途中失敗時に部分インストールが完了扱いで恒久化されるのを防ぐ。

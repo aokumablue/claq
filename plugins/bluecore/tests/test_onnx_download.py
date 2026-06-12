@@ -349,74 +349,83 @@ class TestDownloadArchiveSizeLimit:
         assert any(isinstance(h, urllib.request.HTTPSHandler) for h in handlers)
 
 
-class TestCollectArchiveMembers:
-    """_collect_archive_members のテスト。"""
+class TestExtractRequiredFiles:
+    """_extract_required_files のテスト。"""
 
-    def test_collects_zip_member(self, tmp_path: Path) -> None:
-        """zip から一致する basename の要素を列挙する。"""
+    def test_extracts_all_files_from_zip(self, tmp_path: Path) -> None:
+        """zip から必須ファイル一式を抽出する。"""
         archive_path = tmp_path / "bundle.zip"
         _create_zip_bundle(archive_path)
-        members = mod._collect_archive_members(archive_path, "tokenizer.json")
-        assert len(members) == 1
-        assert members[0][0] == "zip"
+        out_dir = tmp_path / "out"
+        mod._extract_required_files(archive_path, mod._REQUIRED_FILES, out_dir, 1024 * 1024)
+        assert (out_dir / "model.onnx").read_bytes() == b"onnx"
+        for name in mod._REQUIRED_FILES:
+            assert (out_dir / name).exists()
 
-    def test_collects_tar_member(self, tmp_path: Path) -> None:
-        """tar から一致する basename の要素を列挙する。"""
+    def test_extracts_all_files_from_tar(self, tmp_path: Path) -> None:
+        """tar から必須ファイル一式を抽出する。"""
         archive_path = tmp_path / "bundle.tar.gz"
         _create_tar_bundle(archive_path)
-        members = mod._collect_archive_members(archive_path, "config.json")
-        assert len(members) == 1
-        assert members[0][0] == "tar"
+        out_dir = tmp_path / "out"
+        mod._extract_required_files(archive_path, mod._REQUIRED_FILES, out_dir, 1024 * 1024)
+        assert (out_dir / "model.onnx").read_bytes() == b"onnx"
+        for name in mod._REQUIRED_FILES:
+            assert (out_dir / name).exists()
+
+    def test_scans_tar_members_only_once(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """tar.gz の全ストリーム走査（getmembers）は 1 回だけ実行される。"""
+        archive_path = tmp_path / "bundle.tar.gz"
+        _create_tar_bundle(archive_path)
+        scans: list[int] = []
+        original_getmembers = tarfile.TarFile.getmembers
+
+        def counting_getmembers(self: tarfile.TarFile):
+            scans.append(1)
+            return original_getmembers(self)
+
+        monkeypatch.setattr(tarfile.TarFile, "getmembers", counting_getmembers)
+        mod._extract_required_files(archive_path, mod._REQUIRED_FILES, tmp_path / "out", 1024 * 1024)
+        assert len(scans) == 1
 
     def test_raises_for_unsupported_archive(self, tmp_path: Path) -> None:
         """非対応フォーマットでは ValueError。"""
         archive_path = tmp_path / "bundle.txt"
         archive_path.write_text("not-archive", encoding="utf-8")
         with pytest.raises(ValueError, match="Unsupported archive format"):
-            mod._collect_archive_members(archive_path, "model.onnx")
+            mod._extract_required_files(archive_path, mod._REQUIRED_FILES, tmp_path / "out", 1024)
 
+    def test_raises_when_required_file_missing(self, tmp_path: Path) -> None:
+        """必須ファイル欠落（0 件）は ValueError。"""
+        archive_path = tmp_path / "bundle.zip"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("bundle/model.onnx", b"onnx")
+        with pytest.raises(ValueError, match="Expected exactly one tokenizer.json in archive, got 0"):
+            mod._extract_required_files(archive_path, mod._REQUIRED_FILES, tmp_path / "out", 1024)
 
-class TestExtractRequiredFile:
-    """_extract_required_file のテスト。"""
-
-    def test_extracts_tar_member(self, tmp_path: Path) -> None:
-        """tar メンバーを指定先へ抽出する。"""
+    def test_raises_when_required_file_duplicated_in_tar(self, tmp_path: Path) -> None:
+        """tar 内の必須ファイル重複は ValueError。"""
         archive_path = tmp_path / "bundle.tar.gz"
-        _create_tar_bundle(archive_path)
-        member = mod._collect_archive_members(archive_path, "model.onnx")[0][1]
-        destination = tmp_path / "out" / "model.onnx"
-        mod._extract_required_file(archive_path, "tar", member, destination, 1024 * 1024)
-        assert destination.read_bytes() == b"onnx"
-
-    def test_extracts_zip_member(self, tmp_path: Path) -> None:
-        """zip メンバーを指定先へ抽出する。"""
-        archive_path = tmp_path / "bundle.zip"
-        _create_zip_bundle(archive_path)
-        member = mod._collect_archive_members(archive_path, "model.onnx")[0][1]
-        destination = tmp_path / "out" / "model.onnx"
-        mod._extract_required_file(archive_path, "zip", member, destination, 1024 * 1024)
-        assert destination.read_bytes() == b"onnx"
-
-    def test_raises_for_unsupported_kind(self, tmp_path: Path) -> None:
-        """非対応 kind では ValueError。"""
-        archive_path = tmp_path / "bundle.zip"
-        _create_zip_bundle(archive_path)
-        with pytest.raises(ValueError, match="Unsupported archive kind"):
-            mod._extract_required_file(archive_path, "unknown", object(), tmp_path / "out.bin", 1024 * 1024)
+        src = tmp_path / "tar_src"
+        src.mkdir()
+        for name in mod._REQUIRED_FILES:
+            (src / name).write_bytes(b"x")
+        with tarfile.open(archive_path, "w:gz") as archive:
+            for name in mod._REQUIRED_FILES:
+                archive.add(src / name, arcname=f"a/{name}")
+            archive.add(src / "config.json", arcname="b/config.json")
+        with pytest.raises(ValueError, match="Expected exactly one config.json in archive, got 2"):
+            mod._extract_required_files(archive_path, mod._REQUIRED_FILES, tmp_path / "out", 1024)
 
     def test_raises_when_extract_exceeds_limit(self, tmp_path: Path) -> None:
         """抽出サイズが上限を超えたら ValueError。"""
         archive_path = tmp_path / "bundle.zip"
-        large_content = b"x" * 200
         with zipfile.ZipFile(archive_path, "w") as archive:
-            archive.writestr("bundle/model.onnx", large_content)
+            archive.writestr("bundle/model.onnx", b"x" * 200)
             archive.writestr("bundle/tokenizer.json", "{}")
             archive.writestr("bundle/config.json", "{}")
             archive.writestr("bundle/manifest.json", "{}")
-        member = mod._collect_archive_members(archive_path, "model.onnx")[0][1]
-        destination = tmp_path / "out" / "model.onnx"
         with pytest.raises(ValueError, match="exceeds size limit"):
-            mod._extract_required_file(archive_path, "zip", member, destination, 10)
+            mod._extract_required_files(archive_path, mod._REQUIRED_FILES, tmp_path / "out", 10)
 
     def test_copy_with_size_limit_empty_source(self) -> None:
         """空ソースは何も書かず正常終了する。"""
@@ -429,11 +438,9 @@ class TestExtractRequiredFile:
         """extractfile が None を返す場合は ValueError。"""
         archive_path = tmp_path / "bundle.tar.gz"
         _create_tar_bundle(archive_path)
-        member = mod._collect_archive_members(archive_path, "model.onnx")[0][1]
-        destination = tmp_path / "out" / "model.onnx"
         with patch.object(tarfile.TarFile, "extractfile", return_value=None):
             with pytest.raises(ValueError, match="not readable"):
-                mod._extract_required_file(archive_path, "tar", member, destination, 1024 * 1024)
+                mod._extract_required_files(archive_path, mod._REQUIRED_FILES, tmp_path / "out", 1024 * 1024)
 
 
 class TestDownloadModelBundle:
