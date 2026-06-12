@@ -112,12 +112,15 @@ def _check_model_files(model_path: Any, tok_path: Any) -> bool:
 
 
 def _build_onnx_session(model_path: Any) -> Any:
-    """ONNX モデルを検証してセッションを構築する（SHA 検証済み前提）。"""
+    """ONNX セッションを構築する（SHA 検証済み前提）。
+
+    onnx.checker.check_model は呼ばない: Protobuf をメモリ上に全展開するため
+    数百 MB のモデルでロードが二重化し、フックプロセスごとに 1 GB 超の
+    メモリスパイクを起こす。改竄検出は _verify_model_sha の SHA256 照合で、
+    グラフ妥当性検証はビルド時の model_build.verify で担保済み。
+    """
     import onnxruntime as ort  # type: ignore[import-untyped]
 
-    import onnx  # type: ignore[import-untyped]
-
-    onnx.checker.check_model(str(model_path))
     sess_opts = ort.SessionOptions()
     sess_opts.log_severity_level = 3
     sess_opts.enable_mem_pattern = False

@@ -102,16 +102,15 @@ def reset_embedding_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
 
 def _patch_backends(monkeypatch: pytest.MonkeyPatch, hidden_dim: int = 4):
-    """onnxruntime / tokenizers / onnx を monkeypatch でモックに差し替える。"""
+    """onnxruntime / tokenizers を monkeypatch でモックに差し替える。
+
+    onnx パッケージは差し替えない: _build_onnx_session が check_model を
+    呼ばなくなったため不要（モックなしで動くこと自体が非依存の検証）。
+    """
     fake_ort = _make_fake_ort(hidden_dim)
     fake_tok = _make_fake_tokenizers()
-    # onnx.checker.check_model を no-op にする（テスト用偽 ONNX は検証スキップ）
-    mock_onnx = types.SimpleNamespace(
-        checker=types.SimpleNamespace(check_model=lambda *_a, **_kw: None)
-    )
     monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
     monkeypatch.setitem(sys.modules, "tokenizers", fake_tok)
-    monkeypatch.setitem(sys.modules, "onnx", mock_onnx)
     # numpy は実物を使う（軽量なので問題なし）
     return fake_ort, fake_tok
 
@@ -448,56 +447,33 @@ class TestTwoPhaseInitRollback:
         assert embedding._tokenizer is None
 
 
-class TestOnnxCheckerIntegration:
-    """onnx.checker.check_model の統合テスト（Phase 5 LS-2）。"""
+class TestSessionInitFailure:
+    """セッション初期化失敗時の状態リセットテスト。"""
 
-    def test_invalid_onnx_resets_singletons(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """onnx.checker が例外を出すとシングルトンが None リセットされる。"""
+    def test_session_init_failure_resets_singletons(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """InferenceSession 構築が例外を出すとシングルトンが None リセットされる。"""
         # autouse フィクスチャが _MODELS_DIR を tmp_path/models に設定済みだが、
         # このテストでは別の model_dir を使う
-        model_dir = tmp_path / "onnx_check_test"
+        model_dir = tmp_path / "session_fail_test"
         _write_fake_model_dir(model_dir)
         monkeypatch.setattr(embedding, "_MODELS_DIR", model_dir)
         monkeypatch.setattr(embedding, "_session", None)
         monkeypatch.setattr(embedding, "_tokenizer", None)
 
-        # onnx.checker.check_model を失敗させるモック
+        # ort.InferenceSession を失敗させるモック
         def _fail(*_a: object, **_kw: object) -> None:
             raise RuntimeError("bad onnx")
 
-        mock_onnx = types.SimpleNamespace(
-            checker=types.SimpleNamespace(check_model=_fail)
-        )
-        monkeypatch.setitem(sys.modules, "onnx", mock_onnx)
+        fake_ort = _make_fake_ort(hidden_dim=4)
+        fake_ort.InferenceSession = _fail
+        monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
+        monkeypatch.setitem(sys.modules, "tokenizers", _make_fake_tokenizers())
 
         with pytest.raises(RuntimeError, match="bad onnx"):
             embedding.embed(["test"])
 
         assert embedding._session is None
         assert embedding._tokenizer is None
-
-    def test_valid_onnx_passes_checker(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """onnx.checker が成功すれば通常の推論フローに進む。"""
-        model_dir = tmp_path / "onnx_pass_test"
-        _write_fake_model_dir(model_dir)
-        monkeypatch.setattr(embedding, "_MODELS_DIR", model_dir)
-        monkeypatch.setattr(embedding, "_session", None)
-        monkeypatch.setattr(embedding, "_tokenizer", None)
-
-        fake_ort = _make_fake_ort(hidden_dim=4)
-        fake_tok = _make_fake_tokenizers(seq_len=8)
-
-        # onnx.checker を no-op に差し替える
-        mock_onnx = types.SimpleNamespace(
-            checker=types.SimpleNamespace(check_model=lambda *_a, **_kw: None)
-        )
-        monkeypatch.setitem(sys.modules, "onnx", mock_onnx)
-        monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
-        monkeypatch.setitem(sys.modules, "tokenizers", fake_tok)
-
-        result = embedding.embed(["hello"])
-        assert isinstance(result, list)
-        assert len(result) == 1
 
 
 def test_embed_query_non_default_model_warns(monkeypatch) -> None:
