@@ -7,23 +7,6 @@ import pytest
 from bluecore.lib import harness
 
 
-@pytest.fixture(autouse=True)
-def _clear_harness_cache(monkeypatch):
-    """各テストでハーネス判定キャッシュと判定用環境変数をリセットする。"""
-    for key in list(__import__("os").environ):
-        if key.startswith(("CODEX_", "COPILOT_")) or key in {
-            "CLAUDECODE",
-            "PLUGIN_DATA",
-            "CLAUDE_PLUGIN_ROOT",
-            "CLAUDE_SESSION_ID",
-            "CLAUDE_PROJECT_DIR",
-        }:
-            monkeypatch.delenv(key, raising=False)
-    harness.detect_harness.cache_clear()
-    yield
-    harness.detect_harness.cache_clear()
-
-
 class TestDetectHarness:
     """detect_harness のテスト。"""
 

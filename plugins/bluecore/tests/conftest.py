@@ -50,6 +50,8 @@ def _clear_harness_detection_cache(monkeypatch: pytest.MonkeyPatch):
             "CLAUDECODE",
             "PLUGIN_DATA",
             "CLAUDE_PLUGIN_ROOT",
+            "CLAUDE_SESSION_ID",
+            "CLAUDE_PROJECT_DIR",
         }:
             monkeypatch.delenv(key, raising=False)
     detect_harness.cache_clear()

@@ -4,28 +4,11 @@ from __future__ import annotations
 
 import io
 import json
-import os
 from types import SimpleNamespace
 
 import pytest
 
 from bluecore.hooks import run_with_flags
-from bluecore.lib import harness
-
-
-@pytest.fixture(autouse=True)
-def _clear_harness_cache(monkeypatch):
-    """各テストでハーネス判定キャッシュと判定用環境変数をリセットする。"""
-    for key in list(os.environ):
-        if key.startswith(("CODEX_", "COPILOT_")) or key in {
-            "CLAUDECODE",
-            "PLUGIN_DATA",
-            "CLAUDE_PLUGIN_ROOT",
-        }:
-            monkeypatch.delenv(key, raising=False)
-    harness.detect_harness.cache_clear()
-    yield
-    harness.detect_harness.cache_clear()
 
 
 def _fake_result(returncode: int, stdout: str = "", stderr: str = "") -> SimpleNamespace:
