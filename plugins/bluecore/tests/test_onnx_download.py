@@ -229,6 +229,29 @@ class TestLoadDownloadSettings:
         _, _, _, _, _, ssl_no_verify = mod._load_download_settings(config_path)
         assert ssl_no_verify is False
 
+    @pytest.mark.parametrize("bad_value", ["false", "true", "0", 1, [], {}])
+    def test_rejects_non_bool_ssl_no_verify(self, tmp_path: Path, bad_value: object) -> None:
+        """ssl_no_verify が JSON boolean でなければ fail-closed で拒否する。"""
+        config_path = tmp_path / "onnx.json"
+        config_path.write_text(
+            json.dumps(
+                {"onnx": {"download": {"enabled": True, "model_url": "https://github.com/x", "ssl_no_verify": bad_value}}}
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="ssl_no_verify must be a JSON boolean"):
+            mod._load_download_settings(config_path)
+
+    def test_rejects_non_bool_enabled(self, tmp_path: Path) -> None:
+        """enabled が文字列 \"false\"（truthy）の場合も拒否する。"""
+        config_path = tmp_path / "onnx.json"
+        config_path.write_text(
+            json.dumps({"onnx": {"download": {"enabled": "false", "model_url": "https://github.com/x"}}}),
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="enabled must be a JSON boolean"):
+            mod._load_download_settings(config_path)
+
 
 class TestDownloadArchiveSizeLimit:
     """_download_archive のサイズ上限テスト。"""

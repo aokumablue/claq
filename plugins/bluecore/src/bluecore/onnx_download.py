@@ -87,23 +87,49 @@ def _validate_url(url: str, *, allow_http: bool = True) -> None:
         pass
 
 
+def _require_bool(download: dict, key: str) -> bool:
+    """download 設定から JSON boolean を厳格に読み取る。
+
+    文字列 "false" 等は truthy のため `bool()` で読むと意図と逆の値になる
+    （特に ssl_no_verify では検証の意図しない無効化につながる）。
+    bool 型以外は fail-closed で拒否する。
+
+    Args:
+        download: onnx.json の download セクション。
+        key: 読み取るキー。
+
+    Returns:
+        キーの bool 値。未設定は False。
+
+    Raises:
+        ValueError: 値が JSON boolean でない場合。
+    """
+    value = download.get(key, False)
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a JSON boolean (true/false), got {value!r}")
+    return value
+
+
 def _load_download_settings(config_path: Path) -> tuple[bool, str, str, int, int, bool]:
     """onnx.json から download 設定を読み込む。
 
     Returns:
         (enabled, model_url, expected_sha256, max_download_bytes, max_extract_bytes, ssl_no_verify)
+
+    Raises:
+        ValueError: enabled / ssl_no_verify が JSON boolean でない場合。
     """
     if not config_path.is_file():
         return False, "", "", _DEFAULT_MAX_DOWNLOAD_BYTES, _DEFAULT_MAX_EXTRACT_BYTES, False
 
     data = json.loads(config_path.read_text(encoding="utf-8"))
     download = data.get("onnx", {}).get("download", {})
-    enabled = bool(download.get("enabled", False))
+    enabled = _require_bool(download, "enabled")
     model_url = str(download.get("model_url", "") or "")
     expected_sha256 = str(download.get("sha256", "") or "")
     max_download_bytes = int(download.get("max_download_bytes", _DEFAULT_MAX_DOWNLOAD_BYTES))
     max_extract_bytes = int(download.get("max_extract_bytes", _DEFAULT_MAX_EXTRACT_BYTES))
-    ssl_no_verify = bool(download.get("ssl_no_verify", False))
+    ssl_no_verify = _require_bool(download, "ssl_no_verify")
     return enabled, model_url, expected_sha256, max_download_bytes, max_extract_bytes, ssl_no_verify
 
 
