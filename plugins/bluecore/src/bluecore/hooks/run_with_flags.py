@@ -58,6 +58,10 @@ def _subprocess_timeout() -> float:
 # 入力切り捨て時に config-protection をバイパスさせないためのガード対象 hook id 集合。
 # 設定ファイル保護は truncated payload を見逃すとバイパスに悪用されうるため、
 # run_with_flags 側でブロックする。
+# 切り捨てバイパスのリスクがあるセキュリティ系フックのみを列挙する。
+# run_with_flags 経由のブロック系フックを hooks.json に追加する際は、
+# truncated payload で判定をすり抜けないか必ず検討し、必要ならここへ追加すること
+# （block_no_verify は launcher 直接起動のため対象外）。
 _TRUNCATION_GUARD_HOOK_IDS = frozenset({"pre:config-protection"})
 
 

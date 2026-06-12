@@ -33,7 +33,7 @@
         "description": "ドキュメントファイル警告: 標準規格外のドキュメントファイルについて警告します (終了コード 0; 警告のみ)"
       },
       {
-        "matcher": "Edit|Write|apply_patch",
+        "matcher": "Edit|Write|MultiEdit|apply_patch",
         "hooks": [
           {
             "type": "command",
