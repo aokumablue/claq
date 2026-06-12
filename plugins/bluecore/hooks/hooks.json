@@ -297,11 +297,11 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:mem:sync-check\" \"bluecore.mem.cli\" \"standard,strict\" \"sync-check\"",
-            "async": false,
+            "async": true,
             "timeout": 600
           }
         ],
-        "description": "mem: 同期間隔をチェックし、必要なら PostgreSQL へバッチ同期（セッション終了前に完了を保証）"
+        "description": "mem: 同期間隔をチェックし、必要なら PostgreSQL へバッチ同期（非ブロッキング・セッション終了を妨げない）"
       }
     ]
   }

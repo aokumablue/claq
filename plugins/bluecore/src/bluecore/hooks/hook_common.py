@@ -148,6 +148,7 @@ BACKGROUND_HOOK_IDS: frozenset[str] = frozenset(
         "stop:evaluate-session",
         "session:end:marker",
         "session:mem:end",
+        "session:mem:sync-check",
     }
 )
 
