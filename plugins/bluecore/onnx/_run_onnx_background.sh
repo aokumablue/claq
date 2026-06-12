@@ -31,6 +31,11 @@ fi
 
 # flock で重複起動を防ぐ（非ブロッキング: 既に走っていれば即終了）
 exec 200>"${LOCK_FILE}"
+# 事前チェックと exec の間に symlink を差し込まれた場合（TOCTOU）を検出する
+if [[ -L "${LOCK_FILE}" ]]; then
+  echo "[onnx-bg] lock file became a symlink, aborting" >> "${LOG_FILE}"
+  exit 1
+fi
 if ! flock -n 200; then
   echo "[onnx-bg] another build is in progress, exiting" >> "${LOG_FILE}"
   exit 0
@@ -49,12 +54,15 @@ VENV_PYTHON="${HOME}/.bluecore/.venv/bin/python3"
 ONNX_CONFIG="${SCRIPT_DIR}/../onnx.json"
 download_status=3
 if [[ -x "${VENV_PYTHON}" && -f "${ONNX_CONFIG}" ]]; then
-  if "${VENV_PYTHON}" -m bluecore.onnx_download --config "${ONNX_CONFIG}" --out "${MODEL_TARGET}" \
-      >> "${LOG_FILE}" 2>&1; then
+  # `if cmd; then ... fi` 直後の $? は if 文の終了コード（条件 false 時は 0）に
+  # なるため、|| で失敗コードを直接捕捉する
+  download_status=0
+  "${VENV_PYTHON}" -m bluecore.onnx_download --config "${ONNX_CONFIG}" --out "${MODEL_TARGET}" \
+      >> "${LOG_FILE}" 2>&1 || download_status=$?
+  if [[ "${download_status}" -eq 0 ]]; then
     echo "[onnx-bg] model downloaded: ${MODEL_TARGET}/model.onnx" >> "${LOG_FILE}"
     exit 0
   fi
-  download_status=$?
 fi
 
 if [[ "${download_status}" != "3" ]]; then
@@ -65,6 +73,11 @@ if [[ "${download_status}" != "3" ]]; then
 fi
 
 # 第 2 段: config disabled / venv 未準備時は現行のローカルビルドへフォールバック
+# set -e による無記録の異常終了を避けるため、source 前に存在を確認する
+if [[ ! -f "${SCRIPT_DIR}/_build_onnx_lib.sh" ]]; then
+  echo "[onnx-bg] build lib not found, aborting" >> "${LOG_FILE}"
+  exit 1
+fi
 # shellcheck source=_build_onnx_lib.sh
 source "${SCRIPT_DIR}/_build_onnx_lib.sh"
 build_onnx_if_missing "${MODEL_TARGET}" "fp16" >> "${LOG_FILE}" 2>&1
