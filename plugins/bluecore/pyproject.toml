@@ -66,7 +66,7 @@ select = ["E", "F", "W", "I", "B", "C4", "UP"]
 ignore = ["E501"]
 
 [tool.coverage.run]
-source = ["src/bluecore", "src/model_build"]
+source = ["src/bluecore"]
 branch = true
 
 

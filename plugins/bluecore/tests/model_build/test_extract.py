@@ -1,4 +1,4 @@
-"""model_build.extract のユニットテスト。"""
+"""bluecore.model_build.extract のユニットテスト。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from model_build.extract import extract_embeddings, read_embedding_table
+from bluecore.model_build.extract import extract_embeddings, read_embedding_table
 from tests.model_build.conftest import make_safetensors
 
 _VOCAB = 8

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from model_build.__main__ import _load_build_config
+from bluecore.model_build.__main__ import _load_build_config
 
 _REQUIRED_KEYS = (
     "model_name", "hf_revision", "vocab_size", "source_embedding_dim", "embedding_dim",
@@ -37,7 +37,7 @@ class TestLoadBuildConfig:
         """有効な build_config.json を正常に読み込む。"""
         p = self._write_config(tmp_path, _VALID_DATA)
 
-        import model_build.__main__ as mm
+        import bluecore.model_build.__main__ as mm
         monkeypatch.setattr(mm, "_BUILD_CONFIG_PATH", p)
 
         config = _load_build_config()
@@ -47,7 +47,7 @@ class TestLoadBuildConfig:
 
     def test_missing_file_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """ファイルが存在しないと FileNotFoundError。"""
-        import model_build.__main__ as mm
+        import bluecore.model_build.__main__ as mm
         monkeypatch.setattr(mm, "_BUILD_CONFIG_PATH", tmp_path / "no_config.json")
 
         with pytest.raises(FileNotFoundError, match="build_config.json"):
@@ -62,7 +62,7 @@ class TestLoadBuildConfig:
         del data[missing_key]
         p = self._write_config(tmp_path, data)
 
-        import model_build.__main__ as mm
+        import bluecore.model_build.__main__ as mm
         monkeypatch.setattr(mm, "_BUILD_CONFIG_PATH", p)
 
         with pytest.raises(ValueError, match=missing_key):

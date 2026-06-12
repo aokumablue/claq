@@ -1,8 +1,4 @@
-"""bluecore.mem._paths のユニットテスト。
-
-仕様は tests/model_build/test_paths.py と共有する。
-両者は配布物として独立しているため、同一仕様のテストをコピーして維持する。
-"""
+"""bluecore.mem._paths のユニットテスト。"""
 
 from __future__ import annotations
 
