@@ -81,30 +81,6 @@ claude plugin install bluecore@bluecore
 
 `mem.sync.enabled` が `false` の場合は、ローカル利用のみで動きます。
 
-### 埋め込みモデル移行（ONNX → 静的埋め込み）
-
-埋め込みモデルを `cl-nagoya/ruri-v3-310m`（ONNX、768 次元）から
-`hotchpotch/static-embedding-japanese`（静的テーブル、256 次元）に変更しました。
-SessionEnd フックのピークメモリは約 1/10 になります。モデルの取得先は
-`plugins/bluecore/model.json` の URL（既定は Hugging Face。社内サーバの URL に差し替え可）です。
-
-**ローカル DB**: `install.sh` の再実行で自動移行されます（モデル DL →
-`memory_chunks_vec` 再作成 → 全チャンク再埋め込み）。手動で行う場合:
-
-```bash
-python3 -m bluecore.mem reembed
-```
-
-**チーム PostgreSQL**: ベクトル次元が変わるため旧テーブルとの互換はありません
-（768/256 の混在不可。互換層はありません）。以下の順で移行します。
-
-1. 全メンバーの sync を一時停止する（`mem.sync.enabled: false`）
-2. チーム DB で旧ベクトルテーブルを削除する: `DROP TABLE memory_chunks_vec;`
-3. `plugins/bluecore/sql/pg_setup.sql` を再適用する（`vector(256)` で再作成される）
-4. 全メンバーが新モデルへ移行（`install.sh` 再実行 + `reembed`）したことを確認する
-5. sync を再開する（`mem.sync.enabled: true`）。各メンバーの再埋め込み済み
-   ベクトルが次回 sync で再アップロードされる
-
 ---
 
 ## 🚀 Commands (10)
@@ -187,6 +163,7 @@ flowchart LR
 **期待効果**: 探索→設計→実装→レビュー→セキュリティ検証が自動連鎖。段階飛ばし禁止のため既存パターン無視・重複実装が起きない
 
 **実行例**:
+
 ```bash
 /plan "ユーザー認証に 2FA を追加"
 /feat-dev
@@ -225,6 +202,7 @@ flowchart LR
 **期待効果**: 再現テストを先に作るので「再現できないバグ」を直したつもりが残らない。回帰防止テストも自動追加
 
 **実行例**:
+
 ```bash
 /bugfix "ログイン直後にダッシュボードが空になる" src/dashboard/
 ```
@@ -267,6 +245,7 @@ flowchart LR
 **期待効果**: clean → simplify（並列）→ perf → review を安全に自動連鎖。各段階の失敗は即ファイル単位でリバート、CRITICAL/HIGH 残存時は最終 gate でブロック
 
 **実行例**:
+
 ```bash
 /plan "認証層のユーティリティ重複を整理"
 /refactor src/auth/
@@ -295,6 +274,7 @@ flowchart LR
 **期待効果**: 最大並列でファイルグループを同時単純化。clean / perf はスキップ
 
 **実行例**:
+
 ```bash
 /refactor --mode=simplify src/api/
 ```
@@ -322,6 +302,7 @@ flowchart LR
 **期待効果**: 削除ごとにテスト実行、失敗時は即リバート。安全に dead code を排除
 
 **実行例**:
+
 ```bash
 /refactor --mode=clean
 ```
@@ -364,6 +345,7 @@ flowchart LR
 **期待効果**: 生成→eval→ベンチマーク分析が自動連鎖。連続2回で新規不明瞭点ゼロ、または同一勝者で収束判定
 
 **実行例**:
+
 ```bash
 /skill-gen --commits=200 --instincts
 ```
@@ -396,6 +378,7 @@ flowchart LR
 **期待効果**: ダッシュボードで利用率を確認 → ハーネスで自動採点 → harness-tuner で改善案を適用 → 再採点で効果検証
 
 **実行例**:
+
 ```bash
 /dashboard --days=7
 /harness repo
@@ -466,6 +449,7 @@ flowchart LR
 **期待効果**: OWASP 検出 (security-auditor) + 設計チェックリスト (secure) の二段構え。CRITICAL/HIGH があれば commit をブロック
 
 **実行例**:
+
 ```bash
 /plan "決済モジュールに 3D セキュア対応を追加"
 /feat-dev
@@ -525,6 +509,7 @@ flowchart TD
 **期待効果**: デシジョンテーブルによるブランチ網羅 → 承認後に自動実装。失敗テストは自動修正しないので仕様の不明点が露呈する
 
 **実行例**:
+
 ```bash
 /test-gen src/auth/login.py
 ```
@@ -566,6 +551,7 @@ flowchart TB
 ```
 
 **設計方針**:
+
 - ユーザーは **Commands のみ選択** すれば内部で Agents / Skills が自動連鎖
 - スキルは全て `context: fork`（内部委譲専用、ユーザー直接起動不可）に統一
 - 永続化は **SQLite（個人）→ PostgreSQL（チーム共有）** の 2 層
