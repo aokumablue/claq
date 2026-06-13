@@ -299,8 +299,8 @@ class Database:
     def recreate_vec_table(self) -> bool:
         """memory_chunks_vec を DROP して現行スキーマで再作成する。
 
-        埋め込みモデルの次元変更時に使用する（旧次元のテーブルは
-        CREATE TABLE IF NOT EXISTS では更新されないため）。
+        埋め込み次元が変わっても CREATE TABLE IF NOT EXISTS では既存テーブルが更新されないため、
+        破棄して現行スキーマで作り直す。
 
         Returns:
             sqlite-vec が利用可能で再作成した場合 True、利用不可なら False。

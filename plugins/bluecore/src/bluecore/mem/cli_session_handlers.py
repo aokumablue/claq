@@ -233,7 +233,7 @@ def handle_reembed(
 ) -> None:
     """reembed: vec テーブルを再作成し、全チャンクの埋め込みを再生成する。
 
-    埋め込みモデル（次元）変更後のローカル DB 移行に使用する。
+    埋め込みモデル（次元）変更後に既存チャンクの埋め込みを現行モデルで再生成する。
     バッチ処理のためチャンク数に依らずメモリ使用量は一定。
     """
     from bluecore.mem.redaction import redact
