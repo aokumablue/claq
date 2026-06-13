@@ -963,6 +963,27 @@ def test_build_query_cmd_non_claude() -> None:
     assert "json" in cmd
 
 
+def test_build_query_cmd_claude() -> None:
+    """claude バイナリは stream-json + --verbose + --include-partial-messages で組み立てる。"""
+    from bluecore.skills.run_eval import _build_query_cmd
+
+    cmd = _build_query_cmd("claude", "my query", None)
+    assert cmd[0] == "claude"
+    assert "stream-json" in cmd
+    assert "--verbose" in cmd
+    assert "--include-partial-messages" in cmd
+    assert "--model" not in cmd
+
+
+def test_build_query_cmd_claude_with_model() -> None:
+    """claude バイナリでモデル指定時は --model が付く。"""
+    from bluecore.skills.run_eval import _build_query_cmd
+
+    cmd = _build_query_cmd("claude", "q", "sonnet")
+    assert "--model" in cmd
+    assert "sonnet" in cmd
+
+
 def test_process_stream_event_non_tool_use_block() -> None:
     """tool_use 以外の content_block は None を返す。"""
     from bluecore.skills.run_eval import _process_stream_event
