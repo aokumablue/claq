@@ -871,7 +871,7 @@ class TestEnsureModel:
     def test_launches_detached_with_minimal_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """detached（start_new_session）かつ最小限の環境変数で取得チェーンを起動する。"""
+        """detached（start_new_session）かつ最小限の環境変数でランチャを起動する。"""
         plugin_root = self._setup(tmp_path, monkeypatch)
         with patch.object(session_install.subprocess, "Popen") as mock_popen:
             session_install._ensure_model(plugin_root)
@@ -880,9 +880,11 @@ class TestEnsureModel:
         assert kwargs["start_new_session"] is True
         assert set(kwargs["env"]) == {"HOME", "PATH", "LANG"}
         cmd = mock_popen.call_args.args[0]
-        assert cmd[:2] == ["bash", "-c"]
-        assert "bluecore.model_download" in cmd[2]
-        assert "bluecore.model_build build" in cmd[2]
+        # argv 形式: [venv_python, "-c", _LAUNCHER_CODE, model_config, models_dir]
+        assert cmd[1] == "-c"
+        assert cmd[2] == session_install._LAUNCHER_CODE
+        assert "model.json" in cmd[3]
+        assert "models" in cmd[4]
         # 試行記録が書き込まれている
         assert (tmp_path / "model_last_attempt").is_file()
 
@@ -894,6 +896,61 @@ class TestEnsureModel:
         with patch.object(session_install.subprocess, "Popen", side_effect=OSError("spawn")):
             session_install._ensure_model(plugin_root)
         assert "モデル取得バックグラウンド起動失敗" in capsys.readouterr().err
+
+    def test_launcher_code_runs_both_steps_on_success(self, tmp_path: Path) -> None:
+        """_LAUNCHER_CODE: 1段目成功時に2段目も実行する。"""
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **_kwargs: object) -> object:
+            calls.append(cmd)
+
+            class _Result:
+                returncode = 0
+
+            return _Result()
+
+        ns: dict[str, object] = {"__name__": "__main__"}
+        import sys as _sys
+        original_argv = _sys.argv[:]
+        original_run = __import__("subprocess").run
+        try:
+            _sys.argv = ["launcher", str(tmp_path / "model.json"), str(tmp_path / "models")]
+            __import__("subprocess").run = fake_run  # type: ignore[assignment]
+            exec(session_install._LAUNCHER_CODE, ns)  # noqa: S102
+        finally:
+            _sys.argv = original_argv
+            __import__("subprocess").run = original_run
+        assert len(calls) == 2
+        assert "bluecore.model_download" in calls[0]
+        assert "bluecore.model_build" in calls[1]
+
+    def test_launcher_code_skips_second_step_on_failure(self, tmp_path: Path) -> None:
+        """_LAUNCHER_CODE: 1段目失敗時に2段目をスキップする。"""
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **_kwargs: object) -> object:
+            calls.append(cmd)
+
+            class _Result:
+                returncode = 1
+
+            return _Result()
+
+        ns: dict[str, object] = {"__name__": "__main__"}
+        import sys as _sys
+        original_argv = _sys.argv[:]
+        original_run = __import__("subprocess").run
+        try:
+            _sys.argv = ["launcher", str(tmp_path / "model.json"), str(tmp_path / "models")]
+            __import__("subprocess").run = fake_run  # type: ignore[assignment]
+            with pytest.raises(SystemExit) as exc_info:
+                exec(session_install._LAUNCHER_CODE, ns)  # noqa: S102
+        finally:
+            _sys.argv = original_argv
+            __import__("subprocess").run = original_run
+        assert exc_info.value.code == 0
+        assert len(calls) == 1
+        assert "bluecore.model_download" in calls[0]
 
     def test_version_match_fast_path_calls_ensure(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

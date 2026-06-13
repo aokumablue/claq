@@ -35,6 +35,19 @@ _MODEL_RETRY_INTERVAL = 3600.0
 _INSTALL_TIMEOUT = 280.0
 # model_download が detached 実行中に書き残すセキュリティ警告マーカー
 _MODEL_WARNING_MARKER = _BLUECORE_DIR / "model_download_warning"
+# モデル取得チェーンのランチャコード。
+# argv[1]=model_config パス、argv[2]=models_dir パスを受け取り
+# model_download → model_build build を順に実行する（シェル非経由）。
+# f-string・動的値の埋め込み禁止。
+_LAUNCHER_CODE = (
+    "import subprocess, sys;"
+    " r = subprocess.run("
+    "[sys.executable, '-m', 'bluecore.model_download',"
+    " '--config', sys.argv[1], '--out', sys.argv[2]]);"
+    " sys.exit(0) if r.returncode != 0 else subprocess.run("
+    "[sys.executable, '-m', 'bluecore.model_build',"
+    " 'build', '--out', sys.argv[2]])"
+)
 
 
 def _consume_model_download_warnings() -> str:
@@ -160,10 +173,6 @@ def _ensure_model(plugin_root: Path) -> None:
         print("[SessionInstall] venv または model.json がありません。モデル取得をスキップします。", file=sys.stderr)
         return
     models_dir = _BLUECORE_DIR / "models"
-    chain = (
-        f'"{venv_python}" -m bluecore.model_download --config "{model_config}" --out "{models_dir}"'
-        f' && "{venv_python}" -m bluecore.model_build build --out "{models_dir}"'
-    )
     # 最小限の環境のみ渡し、PYTHONPATH/LD_PRELOAD 等の汚染を防ぐ（install.sh の env -i と同等）
     env = {
         "HOME": str(Path.home()),
@@ -174,7 +183,7 @@ def _ensure_model(plugin_root: Path) -> None:
         _MODEL_LAST_ATTEMPT.parent.mkdir(parents=True, exist_ok=True)
         _MODEL_LAST_ATTEMPT.write_text(str(time.time()), encoding="utf-8")
         subprocess.Popen(
-            ["bash", "-c", chain],
+            [str(venv_python), "-c", _LAUNCHER_CODE, str(model_config), str(models_dir)],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
