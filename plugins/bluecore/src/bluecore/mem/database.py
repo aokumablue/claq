@@ -85,6 +85,8 @@ class Database:
         AttributeError / sqlite3.Error）では False を返し、ベクトル検索を
         無効化して FTS5 のみで縮退する。store_embeddings / vec_search は
         このフラグでガードし、テーブル不在による例外（no such table）を防ぐ。
+        SQLite は既定で拡張ロードを禁止しているため enable_load_extension で
+        一時的に許可し、拡張ロード後は再度禁止してセキュリティ縮小する。
 
         Args:
             cur: スキーマ適用に使うカーソル。
@@ -95,8 +97,10 @@ class Database:
         try:
             import sqlite_vec  # type: ignore[import-untyped]
 
+            self.conn.enable_load_extension(True)
             sqlite_vec.load(self.conn)
             cur.executescript(_VEC_SQL)
+            self.conn.enable_load_extension(False)
             return True
         except ImportError:
             log.debug("sqlite-vec は利用できません（ベクトル検索は無効）")
