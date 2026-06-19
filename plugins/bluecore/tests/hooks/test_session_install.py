@@ -810,6 +810,10 @@ class TestEnsureModel:
         monkeypatch.setattr(session_install, "_BLUECORE_DIR", tmp_path)
         monkeypatch.setattr(session_install, "_MODEL_NPY", tmp_path / "models" / "embeddings.npy")
         monkeypatch.setattr(session_install, "_MODEL_LAST_ATTEMPT", tmp_path / "model_last_attempt")
+        monkeypatch.setattr(session_install, "_MODEL_OVERRIDE", tmp_path / "model.json")
+        monkeypatch.setattr(
+            session_install, "_MODELBUILD_LOG", tmp_path / "logs" / "modelbuild.log"
+        )
         venv_dir = tmp_path / "venv"
         monkeypatch.setattr(session_install, "_VENV_DIR", venv_dir)
         if with_venv:
@@ -887,6 +891,24 @@ class TestEnsureModel:
         assert "models" in cmd[4]
         # 試行記録が書き込まれている
         assert (tmp_path / "model_last_attempt").is_file()
+        # detached 出力ログのヘッダが追記されている
+        log_text = (tmp_path / "logs" / "modelbuild.log").read_text(encoding="utf-8")
+        assert "model fetch start" in log_text
+
+    def test_persistent_override_takes_precedence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """永続オーバーライド model.json が存在すれば同梱版より優先する。"""
+        plugin_root = self._setup(tmp_path, monkeypatch)
+        override = tmp_path / "model.json"
+        override.write_text("{}", encoding="utf-8")
+        with patch.object(session_install.subprocess, "Popen") as mock_popen:
+            session_install._ensure_model(plugin_root)
+        mock_popen.assert_called_once()
+        cmd = mock_popen.call_args.args[0]
+        # オーバーライド側パス（plugin_root 配下ではない）が使われている
+        assert cmd[3] == str(override)
+        assert str(plugin_root) not in cmd[3]
 
     def test_popen_oserror_is_caught(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
