@@ -410,6 +410,13 @@ shellingham==1.5.4 \
     --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686 \
     --hash=sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de
     # via typer
+sqlite-vec==0.1.9 \
+    --hash=sha256:1515727990b49e79bcaf75fdee2ffc7d461f8b66905013231251f1c8938e7786 \
+    --hash=sha256:1b62a7f0a060d9475575d4e599bbf94a13d85af896bc1ce86ee80d1b5b48e5fb \
+    --hash=sha256:1d52e30513bae4cc9778ddbf6145610434081be4c3afe57cd877893bad9f6b6c \
+    --hash=sha256:4a28dc12fa4b53d7b1dced22da2488fade444e96b5d16fd2d698cd670675cf32 \
+    --hash=sha256:4e921e592f24a5f9a18f590b6ddd530eb637e2d474e3b1972f9bbeb773aa3cb9
+    # via -r plugins/bluecore/requirements.in
 tokenizers==0.23.1 \
     --hash=sha256:120468fb4c24faf0543c835a4fabafa4deb3f20a035c9b6e83d0b553a97615d4 \
     --hash=sha256:1974288a609c343774f1b897c8b482c791ab17b75ab5c8c2b1737565c1d82288 \
