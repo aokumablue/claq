@@ -102,8 +102,9 @@ class Database:
             log.debug("sqlite-vec は利用できません（ベクトル検索は無効）")
             return False
         except (AttributeError, sqlite3.Error) as e:
-            # enable_load_extension 非対応 Python・拡張ロード禁止ビルド等
-            log.warning("sqlite-vec ロード失敗（ベクトル検索は無効）: %s", e)
+            # enable_load_extension 非対応 Python・拡張ロード禁止ビルド等。
+            # 恒久的な環境特性であり ImportError 同様 debug で静かに縮退する。
+            log.debug("sqlite-vec ロード失敗（ベクトル検索は無効）: %s", e)
             return False
 
     def _migrate(self) -> None:

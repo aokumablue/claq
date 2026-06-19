@@ -208,6 +208,14 @@ def _initialize_db(settings: Settings, *, recreate: bool = False) -> None:
     with _open_db(settings):
         pass
 
+    if recreate:
+        # WAL モードの新規接続が残す -wal/-shm を除去し、再作成後の
+        # データディレクトリを pristine に保つ。close 時の checkpoint で
+        # データは mem.db へ反映済みのため安全。SQLite ビルドにより
+        # close 時に自動削除されない環境があるため明示削除する。
+        for suffix in ("-wal", "-shm", "-journal"):
+            Path(f"{settings.db_path}{suffix}").unlink(missing_ok=True)
+
 
 def _remove_db_artifacts(db_path: Path) -> None:
     """SQLite DB と sidecar を削除する。"""
