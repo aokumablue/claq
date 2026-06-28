@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from functools import lru_cache
@@ -60,15 +61,43 @@ def normalize_tool_name(tool_name: str) -> str:
     return _TOOL_NAME_MAP.get(tool_name, tool_name)
 
 
-def extract_file_paths(tool_name: str, tool_input: dict) -> list[str] | None:
+def _extract_apply_patch_text(tool_input: dict | str | None) -> str | None:
+    """apply_patch 入力からパッチ本文を取り出す。
+
+    Copilot CLI では生のパッチ文字列、他ハーネスでは {"input": "..."} の
+    ような dict で渡ることがあるため、両方を吸収する。JSON 文字列化された
+    dict が来た場合も input フィールドを復元する。
+    """
+    if isinstance(tool_input, dict):
+        patch_text = tool_input.get("input")
+        return patch_text if isinstance(patch_text, str) else None
+
+    if isinstance(tool_input, str):
+        stripped = tool_input.lstrip()
+        if stripped.startswith("{"):
+            try:
+                parsed = json.loads(tool_input)
+            except (json.JSONDecodeError, TypeError):
+                pass
+            else:
+                if isinstance(parsed, dict):
+                    patch_text = parsed.get("input")
+                    if isinstance(patch_text, str):
+                        return patch_text
+        return tool_input
+
+    return None
+
+
+def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[str] | None:
     """ツール入力から操作対象のファイルパス一覧を抽出する。
 
-    Edit/Write/MultiEdit は file_path フィールド、Codex の apply_patch は
-    パッチテキストのファイル操作マーカー行をパースする。
+    Edit/Write/MultiEdit は file_path フィールド、Copilot/Codex の
+    apply_patch はパッチテキストのファイル操作マーカー行をパースする。
 
     Args:
         tool_name: フック stdin の tool_name フィールド値（正規化前）。
-        tool_input: フック stdin の tool_input フィールド値。
+        tool_input: フック stdin の tool_input フィールド値。dict / 文字列 / None。
 
     Returns:
         ファイルパスのリスト。判定不能（apply_patch でマーカーが 1 つも
@@ -79,7 +108,7 @@ def extract_file_paths(tool_name: str, tool_input: dict) -> list[str] | None:
         例外は発生しません。
     """
     if tool_name == "apply_patch":
-        patch_text = tool_input.get("input")
+        patch_text = _extract_apply_patch_text(tool_input)
         if not isinstance(patch_text, str):
             return None
         paths = [
@@ -89,6 +118,9 @@ def extract_file_paths(tool_name: str, tool_input: dict) -> list[str] | None:
             if line.startswith(marker)
         ]
         return paths or None
+
+    if not isinstance(tool_input, dict):
+        return []
 
     file_path = tool_input.get("file_path")
     if isinstance(file_path, str) and file_path:

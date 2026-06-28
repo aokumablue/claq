@@ -91,13 +91,13 @@ def main() -> int:
     data = parse_json_object(raw)
     if data:
         tool_name = str(data.get("tool_name") or "")
-        tool_input = data.get("tool_input") or {}
+        tool_input = data.get("tool_input")
         file_paths = extract_file_paths(tool_name, tool_input)
         if file_paths is None:
             # apply_patch のパッチがパース不能: 保護対象か判定できないため fail-closed
             write_stderr("BLOCKED: Could not determine target files from patch input.\n")
             return 2
-        if not file_paths:
+        if not file_paths and isinstance(tool_input, dict):
             # 旧形式の file フィールドのみ持つ入力を補完する
             legacy = str(tool_input.get("file") or "")
             if legacy:
