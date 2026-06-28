@@ -261,15 +261,18 @@ def _emit_hook_specific_output(event_name: str, additional_context: str) -> str:
 
 
 def emit_session_start_output(additional_context: str = "") -> str:
-    """SessionStart 用の hookSpecificOutput JSON 文字列を返す。
+    """SessionStart 用のフック出力 JSON 文字列を返す。
 
+    ハーネスに応じたフォーマットを output_adapter 経由で選択する。
     stdout への書き込みは行わない純粋関数として使う。
 
     Args:
         additional_context: コンテキストに注入する追加文字列。
 
     Returns:
-        hookSpecificOutput を含む JSON 文字列。
+        ハーネス別フォーマットの JSON 文字列。
+        Claude Code: hookSpecificOutput ラッパー形式。
+        Copilot CLI: {"additionalContext": "..."} トップレベル形式。
 
     Raises:
         例外は発生しません。
@@ -278,16 +281,17 @@ def emit_session_start_output(additional_context: str = "") -> str:
 
 
 def emit_user_prompt_submit_output(additional_context: str) -> str:
-    """UserPromptSubmit 用の hookSpecificOutput JSON 文字列を返す。
+    """UserPromptSubmit 用のフック出力 JSON 文字列を返す。
 
-    トップレベルに hookEventName を置く形式は Claude Code に構造化処理されず
-    生 JSON のままコンテキストに注入されるため、必ずこのラッパー形式で出力する。
+    ハーネスに応じたフォーマットを output_adapter 経由で選択する。
 
     Args:
         additional_context: コンテキストに注入する追加文字列。
 
     Returns:
-        hookSpecificOutput を含む JSON 文字列。
+        ハーネス別フォーマットの JSON 文字列。
+        Claude Code: hookSpecificOutput ラッパー形式。
+        Copilot CLI: {"additionalContext": "..."} トップレベル形式。
 
     Raises:
         例外は発生しません。
@@ -296,7 +300,7 @@ def emit_user_prompt_submit_output(additional_context: str) -> str:
 
 
 def print_session_start_output(additional_context: str = "") -> None:
-    """SessionStart 用の hookSpecificOutput を stdout に出力する。
+    """SessionStart 用のフック出力を stdout に書き出す。
 
     Args:
         additional_context: コンテキストに注入する追加文字列。
