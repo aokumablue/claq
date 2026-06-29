@@ -28,6 +28,15 @@ _VERSION_FILE = _BLUECORE_DIR / "plugin_installed_version"
 _VENV_DIR = Path.home() / BASE_DIR_NAME / ".venv"
 _MODEL_NPY = _BLUECORE_DIR / "models" / "embeddings.npy"
 _MODEL_LAST_ATTEMPT = _BLUECORE_DIR / "model_last_attempt"
+# ユーザーが配置する永続モデル設定。存在すれば同梱 model.json より優先する。
+# 同梱 model.json はプラグイン更新のたびに再展開され編集が失われるため、
+# 社内 URL / IP / ssl_no_verify 等のカスタム設定はここに置く。
+# config_protection が basename "model.json" の書き換えをブロックするため
+# エージェントによる改竄は防がれ、ダウンロード時の sha256 検証も維持される。
+_MODEL_OVERRIDE = _BLUECORE_DIR / "model.json"
+# detached なモデル取得の stdout/stderr 出力先。従来は DEVNULL で失敗理由が
+# 一切残らず「原因不明」だったため、診断可能なようログへ追記する。
+_MODELBUILD_LOG = _BLUECORE_DIR / "logs" / "modelbuild.log"
 # モデル取得のバックグラウンドリトライ間隔（秒）。ダウンロードは冪等
 # （SHA 一致でスキップ・一時ディレクトリ経由配置）のため起動頻度の抑制のみ
 _MODEL_RETRY_INTERVAL = 3600.0
@@ -168,7 +177,8 @@ def _ensure_model(plugin_root: Path) -> None:
     if time.time() - last_attempt < _MODEL_RETRY_INTERVAL:
         return
     venv_python = _VENV_DIR / "bin" / "python3"
-    model_config = plugin_root / "model.json"
+    # 永続オーバーライドを最優先。無ければ同梱版を使う。
+    model_config = _MODEL_OVERRIDE if _MODEL_OVERRIDE.is_file() else plugin_root / "model.json"
     if not venv_python.is_file() or not model_config.is_file():
         print("[SessionInstall] venv または model.json がありません。モデル取得をスキップします。", file=sys.stderr)
         return
@@ -182,14 +192,20 @@ def _ensure_model(plugin_root: Path) -> None:
     try:
         _MODEL_LAST_ATTEMPT.parent.mkdir(parents=True, exist_ok=True)
         _MODEL_LAST_ATTEMPT.write_text(str(time.time()), encoding="utf-8")
-        subprocess.Popen(
-            [str(venv_python), "-c", _LAUNCHER_CODE, str(model_config), str(models_dir)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=env,
-            start_new_session=True,
-        )
+        _MODELBUILD_LOG.parent.mkdir(parents=True, exist_ok=True)
+        # detached プロセスの出力をログへ追記して失敗理由を残す。
+        # Popen が子へ fd を複製した後はこちらのハンドルを閉じてよい。
+        with _MODELBUILD_LOG.open("a", encoding="utf-8") as log_fh:
+            log_fh.write(f"\n===== model fetch start {time.strftime('%Y-%m-%d %H:%M:%S')} (config={model_config}) =====\n")
+            log_fh.flush()
+            subprocess.Popen(
+                [str(venv_python), "-c", _LAUNCHER_CODE, str(model_config), str(models_dir)],
+                stdin=subprocess.DEVNULL,
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+                env=env,
+                start_new_session=True,
+            )
         print("[SessionInstall] 埋め込みモデル取得をバックグラウンド起動しました", file=sys.stderr)
     except OSError as e:
         print(f"[SessionInstall] モデル取得バックグラウンド起動失敗: {_sanitize_exception(e)}", file=sys.stderr)

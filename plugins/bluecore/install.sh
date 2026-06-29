@@ -246,7 +246,14 @@ install_user_python() {
   # DL は数十 MB・抽出は数秒のため同期実行で完結する（torch ビルド venv は不要）。
   local model_target="${HOME}/.bluecore/models"
   local model_npy="${model_target}/embeddings.npy"
+  # 永続オーバーライド（${SETTINGS_DIR}/model.json）を最優先。無ければ同梱版。
+  # 同梱版はプラグイン更新で再展開され編集が失われるため、社内 URL/IP/
+  # ssl_no_verify 等のカスタム設定はオーバーライド側に置く。
   local model_config="${SCRIPT_DIR}/model.json"
+  if [[ -f "${SETTINGS_DIR}/model.json" ]]; then
+    model_config="${SETTINGS_DIR}/model.json"
+    echo "[bluecore] Using persistent model config: ${model_config}"
+  fi
 
   if [[ -f "${model_npy}" ]]; then
     echo "[bluecore] Embedding model already present (skipping): ${model_npy}"

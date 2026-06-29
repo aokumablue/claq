@@ -1,6 +1,7 @@
 """database のテスト"""
 
 import json
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -467,14 +468,26 @@ class TestDatabase:
         db.store_embeddings([cid], [[0.1] * 256])
         assert db.vec_search([0.1] * 256, limit=1)[0][0] == cid
 
-    def test_recreate_vec_table_returns_false_without_sqlite_vec(
-        self, db: Database, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """sqlite-vec が import できない場合は False を返す"""
-        import sys
-
-        monkeypatch.setitem(sys.modules, "sqlite_vec", None)
+    def test_recreate_vec_table_returns_false_when_vec_disabled(self, db: Database) -> None:
+        """vec 無効環境（vec_enabled=False）では再作成せず False を返す"""
+        db.vec_enabled = False
         assert db.recreate_vec_table() is False
+
+    def test_store_embeddings_noop_when_vec_disabled(self, db: Database) -> None:
+        """vec 無効環境では store_embeddings は何もしない（no such table を防ぐ）"""
+        db.vec_enabled = False
+
+        class ExplodingConn:
+            def execute(self, *_args: object, **_kwargs: object) -> None:
+                raise AssertionError("vec 無効時に execute を呼んではならない")
+
+        db.conn = ExplodingConn()  # type: ignore[assignment]
+        db.store_embeddings(["chunk-1"], [[0.1] * 256])  # 例外が出なければ no-op 成立
+
+    def test_vec_search_returns_empty_when_vec_disabled(self, db: Database) -> None:
+        """vec 無効環境では vec_search は空リストを返す"""
+        db.vec_enabled = False
+        assert db.vec_search([0.1] * 256) == []
 
 
 class TestSchemaInit:
@@ -520,6 +533,22 @@ class TestSchemaInit:
                 sys.modules["sqlite_vec"] = original
             else:
                 sys.modules.pop("sqlite_vec", None)
+
+    def test_sqlite_vec_load_failure_degrades(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """拡張ロード非対応 Python（sqlite3.Error 等）でも vec 無効で動作継続する。"""
+        fake_module = SimpleNamespace(
+            load=lambda _conn: (_ for _ in ()).throw(sqlite3.OperationalError("not authorized"))
+        )
+        monkeypatch.setitem(sys.modules, "sqlite_vec", fake_module)
+        db = Database(tmp_path / "test_vec_load_fail.db")
+        try:
+            assert db.vec_enabled is False
+            # vec 無効でも基本機能は利用可能
+            assert db.vec_search([0.1] * 256) == []
+        finally:
+            db.close()
 
 
 class TestParseJsonList:
@@ -819,6 +848,7 @@ class TestAdvancedTables:
                 calls.append(("commit", ()))
 
         db.conn = FakeConn()  # type: ignore[assignment]
+        db.vec_enabled = True  # 拡張ロード非対応環境でも SQL 経路を検証する
 
         db.store_embeddings(["chunk-1"], [[0.1, 0.2]])
         assert calls[0][0].startswith("INSERT OR REPLACE INTO memory_chunks_vec")

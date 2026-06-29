@@ -20,9 +20,10 @@
 set -euo pipefail
 
 PUBLISH_REMOTE="${BLUECORE_PUBLISH_REMOTE:-$HOME/dev/bluecore}"
-VENV="${BLUECORE_VENV:-$HOME/.bluecore/.venv}"
+VENV="${BLUECORE_VENV:-}"
 NO_PUSH=false
 TMPDIR=""
+BOOTSTRAP=false
 
 usage() {
   cat <<'EOF'
@@ -55,6 +56,8 @@ trap 'if [[ -n "${TMPDIR}" ]]; then rm -rf "${TMPDIR}"; fi' EXIT
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
+# gate 用 venv 既定は repo ローカル .venv（BLUECORE_VENV で上書き可）
+: "${VENV:=${REPO_ROOT}/.venv}"
 
 PLUGIN_JSON="plugins/bluecore/.claude-plugin/plugin.json"
 VERSION_FILES=(
@@ -106,27 +109,41 @@ if [[ ! -d "${PUBLISH_REMOTE}/.git" ]]; then
 fi
 
 echo "Fetching publish origin..."
-git -C "${PUBLISH_REMOTE}" fetch --quiet origin
-if ! git -C "${PUBLISH_REMOTE}" rev-parse --verify --quiet origin/main >/dev/null; then
-  echo "ERROR: ${PUBLISH_REMOTE} に origin/main がありません。" >&2
-  exit 1
-fi
+# 空リポジトリでは fetch が失敗し得るので許容する
+git -C "${PUBLISH_REMOTE}" fetch --quiet origin || true
 
-PUBLISHED="$(git -C "${PUBLISH_REMOTE}" show "origin/main:${PLUGIN_JSON}" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
 DEVVER="$(read_version "${PLUGIN_JSON}")"
-NEXT="$(bump_patch "${PUBLISHED}")"
-echo "公開版: ${PUBLISHED} / dev版: ${DEVVER} / 次版: ${NEXT}"
 
-# ── モード判定（冪等再開）──
-if [[ "${DEVVER}" == "${PUBLISHED}" ]]; then
-  MODE="normal"
-elif [[ "${DEVVER}" == "${NEXT}" ]]; then
-  MODE="resume"
-  echo "再開モード: dev は既に v${NEXT}。版アップをスキップします。"
+if ! git -C "${PUBLISH_REMOTE}" rev-parse --verify --quiet origin/main >/dev/null; then
+  # origin/main 不在 → 初回公開（bootstrap）として続行
+  BOOTSTRAP=true
+  PUBLISHED="(none)"
+  # 冪等性: dev HEAD が既に release: v${DEVVER} なら bump 済みとみなし再開
+  if [[ "$(git log -1 --pretty=%s)" == "release: v${DEVVER}" ]]; then
+    NEXT="${DEVVER}"
+    MODE="resume"
+  else
+    NEXT="$(bump_patch "${DEVVER}")"
+    MODE="normal"
+  fi
+  echo "公開版: ${PUBLISHED} / dev版: ${DEVVER} / 次版: ${NEXT}"
+  echo "Bootstrap モード: 公開先に origin/main がありません。初回公開として v${NEXT} を公開します。"
 else
-  echo "ERROR: 版が不整合です (dev=${DEVVER}, published=${PUBLISHED})。手動で確認してください。" >&2
-  exit 1
+  PUBLISHED="$(git -C "${PUBLISH_REMOTE}" show "origin/main:${PLUGIN_JSON}" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+  NEXT="$(bump_patch "${PUBLISHED}")"
+  echo "公開版: ${PUBLISHED} / dev版: ${DEVVER} / 次版: ${NEXT}"
+
+  # ── モード判定（冪等再開）──
+  if [[ "${DEVVER}" == "${PUBLISHED}" ]]; then
+    MODE="normal"
+  elif [[ "${DEVVER}" == "${NEXT}" ]]; then
+    MODE="resume"
+    echo "再開モード: dev は既に v${NEXT}。版アップをスキップします。"
+  else
+    echo "ERROR: 版が不整合です (dev=${DEVVER}, published=${PUBLISHED})。手動で確認してください。" >&2
+    exit 1
+  fi
 fi
 
 # ── 版アップ + テストゲート + コミット ──
@@ -167,14 +184,21 @@ git clone --quiet --local --no-hardlinks . "${TMPDIR}/repo"
 echo "Building linear release commit on publish repo..."
 git -C "${PUBLISH_REMOTE}" fetch --no-tags --quiet "${TMPDIR}/repo" HEAD
 TREE="$(git -C "${PUBLISH_REMOTE}" rev-parse 'FETCH_HEAD^{tree}')"
-PARENT="$(git -C "${PUBLISH_REMOTE}" rev-parse origin/main)"
-NEW="$(git -C "${PUBLISH_REMOTE}" commit-tree "${TREE}" -p "${PARENT}" -m "release: v${NEXT}")"
-git -C "${PUBLISH_REMOTE}" update-ref refs/heads/main "${NEW}"
-git -C "${PUBLISH_REMOTE}" reset --quiet --hard main
+if [[ "${BOOTSTRAP}" == true ]]; then
+  # bootstrap: 親なしの root リリースコミット（ancestor チェック不要）
+  NEW="$(git -C "${PUBLISH_REMOTE}" commit-tree "${TREE}" -m "release: v${NEXT}")"
+  git -C "${PUBLISH_REMOTE}" update-ref refs/heads/main "${NEW}"
+  git -C "${PUBLISH_REMOTE}" reset --quiet --hard main
+else
+  PARENT="$(git -C "${PUBLISH_REMOTE}" rev-parse origin/main)"
+  NEW="$(git -C "${PUBLISH_REMOTE}" commit-tree "${TREE}" -p "${PARENT}" -m "release: v${NEXT}")"
+  git -C "${PUBLISH_REMOTE}" update-ref refs/heads/main "${NEW}"
+  git -C "${PUBLISH_REMOTE}" reset --quiet --hard main
 
-if ! git -C "${PUBLISH_REMOTE}" merge-base --is-ancestor "${PARENT}" "${NEW}"; then
-  echo "ERROR: 構築したコミットが origin/main の子孫ではありません（fast-forward 不可）。" >&2
-  exit 1
+  if ! git -C "${PUBLISH_REMOTE}" merge-base --is-ancestor "${PARENT}" "${NEW}"; then
+    echo "ERROR: 構築したコミットが origin/main の子孫ではありません（fast-forward 不可）。" >&2
+    exit 1
+  fi
 fi
 
 # ── push（最後・不可逆）──
@@ -182,7 +206,12 @@ if [[ "${NO_PUSH}" == true ]]; then
   echo ""
   echo "=== --no-push: ローカル構築完了（push なし）==="
   echo "  dev    : $(git rev-parse --short HEAD)  release: v${NEXT}"
-  echo "  publish: $(git -C "${PUBLISH_REMOTE}" rev-parse --short main)  (parent: $(git -C "${PUBLISH_REMOTE}" rev-parse --short origin/main))"
+  if [[ "${BOOTSTRAP}" == true ]]; then
+    PARENT_DISP="(none / bootstrap)"
+  else
+    PARENT_DISP="$(git -C "${PUBLISH_REMOTE}" rev-parse --short origin/main)"
+  fi
+  echo "  publish: $(git -C "${PUBLISH_REMOTE}" rev-parse --short main)  (parent: ${PARENT_DISP})"
   echo "  push するには --no-push なしで再実行してください。"
   exit 0
 fi

@@ -74,16 +74,42 @@ class Database:
         except sqlite3.OperationalError as e:
             log.warning("FTS5 初期化失敗（古い SQLite?）: %s", e)
 
-        # sqlite-vec 拡張（オプショナル）
+        self.vec_enabled = self._init_vec(cur)
+        self.conn.commit()
+
+    def _init_vec(self, cur: sqlite3.Cursor) -> bool:
+        """sqlite-vec 拡張をロードし vec テーブルを作成する。
+
+        利用可否を返す。拡張パッケージ未導入（ImportError）や、拡張ロードを
+        サポートしない Python（enable_load_extension が無い pyenv ビルド等で
+        AttributeError / sqlite3.Error）では False を返し、ベクトル検索を
+        無効化して FTS5 のみで縮退する。store_embeddings / vec_search は
+        このフラグでガードし、テーブル不在による例外（no such table）を防ぐ。
+        SQLite は既定で拡張ロードを禁止しているため enable_load_extension で
+        一時的に許可し、拡張ロード後は再度禁止してセキュリティ縮小する。
+
+        Args:
+            cur: スキーマ適用に使うカーソル。
+
+        Returns:
+            sqlite-vec が利用可能で vec テーブルを作成できた場合 True。
+        """
         try:
             import sqlite_vec  # type: ignore[import-untyped]
 
+            self.conn.enable_load_extension(True)
             sqlite_vec.load(self.conn)
             cur.executescript(_VEC_SQL)
+            self.conn.enable_load_extension(False)
+            return True
         except ImportError:
             log.debug("sqlite-vec は利用できません（ベクトル検索は無効）")
-
-        self.conn.commit()
+            return False
+        except (AttributeError, sqlite3.Error) as e:
+            # enable_load_extension 非対応 Python・拡張ロード禁止ビルド等。
+            # 恒久的な環境特性であり ImportError 同様 debug で静かに縮退する。
+            log.debug("sqlite-vec ロード失敗（ベクトル検索は無効）: %s", e)
+            return False
 
     def _migrate(self) -> None:
         """マイグレーション管理テーブル（schema_migrations は _SCHEMA_SQL で作成済み）を使い、未適用のみ実行する。"""
@@ -287,7 +313,9 @@ class Database:
     # --- ベクトル検索 ---
 
     def store_embeddings(self, chunk_ids: list[str], embeddings: list[list[float]]) -> None:
-        """エンべディングを一括保存する。"""
+        """エンべディングを一括保存する。vec 無効環境では何もしない。"""
+        if not self.vec_enabled:
+            return
         for cid, emb in zip(chunk_ids, embeddings, strict=False):
             blob = struct.pack(f"{len(emb)}f", *emb)
             self.conn.execute(
@@ -305,9 +333,7 @@ class Database:
         Returns:
             sqlite-vec が利用可能で再作成した場合 True、利用不可なら False。
         """
-        try:
-            import sqlite_vec  # type: ignore[import-untyped]  # noqa: F401
-        except ImportError:
+        if not self.vec_enabled:
             log.debug("sqlite-vec は利用できません（vec テーブル再作成をスキップ）")
             return False
         self.conn.execute("DROP TABLE IF EXISTS memory_chunks_vec")
@@ -317,6 +343,8 @@ class Database:
 
     def vec_search(self, embedding: list[float], limit: int = 40) -> list[tuple[str, float]]:
         """sqlite-vec ベクトル検索。(chunk_id, distance) のリストを返す。"""
+        if not self.vec_enabled:
+            return []
         try:
             blob = struct.pack(f"{len(embedding)}f", *embedding)
             rows = self.conn.execute(

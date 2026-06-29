@@ -150,7 +150,11 @@ def _archive_old_observation_files(project_dir: Path) -> None:
     archive_dir = project_dir / "observations.archive"
     archive_dir.mkdir(parents=True, exist_ok=True)
     cutoff = datetime.now(UTC).timestamp() - (30 * 24 * 60 * 60)
-    for path in archive_dir.glob("observations-*.jsonl"):
+    try:
+        archived = list(archive_dir.glob("observations-*.jsonl"))
+    except OSError:
+        archived = []
+    for path in archived:
         try:
             if path.stat().st_mtime < cutoff:
                 path.unlink()
@@ -165,11 +169,8 @@ def _archive_old_observation_files(project_dir: Path) -> None:
 
 def _archive_if_too_large(obs_path: Path, project_dir: Path) -> None:
     """観測ファイルが 10MB を超えたらアーカイブへ退避する。"""
-    if not obs_path.exists():
-        return
-
     try:
-        if obs_path.stat().st_size < 10 * 1024 * 1024:
+        if not obs_path.exists() or obs_path.stat().st_size < 10 * 1024 * 1024:
             return
     except OSError:
         return
