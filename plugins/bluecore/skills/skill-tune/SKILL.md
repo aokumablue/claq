@@ -2,7 +2,7 @@
 name: skill-tune
 description: スキル/コマンド/プロンプト新規作成・大幅改訂後、またはエージェント挙動が期待外れで原因を指示側の曖昧さに求めるとき発動。新規subagentに実行させ、自己申告（不明瞭点・裁量補完）と指示側メトリクス（精度・steps・duration）の両面評価→最小修正→再評価を収束まで繰り返す。
 context: fork
-user-invocable: false
+user-invocable: true
 ---
 
 # プロンプトチューニング

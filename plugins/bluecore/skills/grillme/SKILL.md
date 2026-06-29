@@ -2,7 +2,7 @@
 name: grillme
 description: 計画/設計を含む実行全般で共通理解まで徹底質問→意思決定ツリー各分岐を解決。ストレステスト/設計問いただし/方針確定時に使用。
 context: fork
-user-invocable: false
+user-invocable: true
 ---
 
 # 仕様徹底確認
