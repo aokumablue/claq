@@ -115,6 +115,18 @@ class TestExtractFilePaths:
         assert harness.extract_file_paths("apply_patch", {"input": None}) is None
         assert harness.extract_file_paths("apply_patch", {}) is None
 
+    def test_apply_patch_raw_string_input(self):
+        """tool_input が生文字列（dict ではなく）でもパッチをパースできる。"""
+        patch_text = (
+            "*** Begin Patch\n"
+            "*** Update File: /tmp/example.txt\n"
+            "@@\n"
+            "-old\n"
+            "+new\n"
+            "*** End Patch\n"
+        )
+        assert harness.extract_file_paths("apply_patch", patch_text) == ["/tmp/example.txt"]
+
 
 class TestResolveSessionId:
     """resolve_session_id のテスト。"""
