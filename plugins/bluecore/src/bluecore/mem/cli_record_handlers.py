@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from bluecore.lib.harness import detect_harness
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
@@ -106,6 +108,48 @@ def _build_interaction_log(
     )
 
 
+def _resolve_profile_list_field(
+    stdin_data: dict[str, Any],
+    key: str,
+    fallback: list[str],
+) -> list[str]:
+    """プロジェクトプロファイルの list[str] 項目を解決する。"""
+    if key not in stdin_data:
+        return list(fallback)
+    raw_value = stdin_data.get(key)
+    if not isinstance(raw_value, list):
+        return []
+    return [str(item).strip() for item in raw_value if str(item).strip()]
+
+
+def _resolve_profile_optional_string(
+    stdin_data: dict[str, Any],
+    key: str,
+    fallback: str | None,
+) -> str | None:
+    """プロジェクトプロファイルの任意文字列項目を解決する。"""
+    if key not in stdin_data:
+        return fallback
+    value = str(stdin_data.get(key, "") or "").strip()
+    return value or None
+
+
+def _resolve_scope_hint(
+    stdin_data: dict[str, Any],
+    fallback: str,
+) -> str:
+    """scope_hint を解決する。未指定時は既存値を維持する。"""
+    if "scope_hint" not in stdin_data:
+        return fallback
+    value = str(stdin_data.get("scope_hint", "") or "").strip()
+    return value or fallback
+
+
+def _should_preserve_existing_profile_fields() -> bool:
+    """Copilot CLI では sparse な SessionStart payload による上書きを防ぐ。"""
+    return detect_harness() == "copilot"
+
+
 def handle_record_interaction(
     settings: Settings,
     stdin_data: dict[str, Any],
@@ -148,21 +192,57 @@ def handle_record_project_profile(
 
     project = stdin_data.get("project") or deps.get_project(stdin_data)
     now = int(time.time())
+    origin_user = deps.get_git_user_name()
 
     try:
         with deps.open_db(settings) as db:
+            existing = (
+                db.get_project_profile(project, origin_user=origin_user)
+                if _should_preserve_existing_profile_fields()
+                else None
+            )
             profile = ProjectProfile(
                 project=project,
-                detected_at_epoch=now,
+                detected_at_epoch=existing.detected_at_epoch if existing is not None else now,
                 last_updated_epoch=now,
-                origin_user=deps.get_git_user_name(),
-                project_path=str(stdin_data.get("project_path", "") or "") or None,
-                languages=stdin_data.get("languages", []) or [],
-                frameworks=stdin_data.get("frameworks", []) or [],
-                primary_language=str(stdin_data.get("primary_language", "") or "") or None,
-                test_command=str(stdin_data.get("test_command", "") or "") or None,
-                build_command=str(stdin_data.get("build_command", "") or "") or None,
-                scope_hint=str(stdin_data.get("scope_hint", "project") or "project"),
+                origin_user=origin_user,
+                project_path=_resolve_profile_optional_string(
+                    stdin_data,
+                    "project_path",
+                    existing.project_path if existing is not None else None,
+                ),
+                languages=_resolve_profile_list_field(
+                    stdin_data,
+                    "languages",
+                    existing.languages if existing is not None else [],
+                ),
+                frameworks=_resolve_profile_list_field(
+                    stdin_data,
+                    "frameworks",
+                    existing.frameworks if existing is not None else [],
+                ),
+                primary_language=_resolve_profile_optional_string(
+                    stdin_data,
+                    "primary_language",
+                    existing.primary_language if existing is not None else None,
+                ),
+                test_command=_resolve_profile_optional_string(
+                    stdin_data,
+                    "test_command",
+                    existing.test_command if existing is not None else None,
+                ),
+                build_command=_resolve_profile_optional_string(
+                    stdin_data,
+                    "build_command",
+                    existing.build_command if existing is not None else None,
+                ),
+                scope_hint=_resolve_scope_hint(
+                    stdin_data,
+                    existing.scope_hint if existing is not None else "project",
+                ),
+                detection_confidence=(
+                    existing.detection_confidence if existing is not None else 1.0
+                ),
             )
             profile_id = db.upsert_project_profile(profile)
         deps.log.info("project profile saved: %s (id=%s)", project, profile_id)
