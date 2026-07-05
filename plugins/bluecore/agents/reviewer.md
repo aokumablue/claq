@@ -43,22 +43,24 @@ O(n²)アルゴリズム・不要再レンダリング・ライブラリ全体�
 
 ## 出力形式
 
+指摘は severity タグ付きの 3 分類見出しに構造化。各指摘は「ファイルパス:行 — 指摘 1 行 — 修正方針 1 行」の 1 行形式:
+
 ```
-[CRITICAL] API キーがハードコードされている
-Confidence: 95
-File: path/to/file:行番号
-Issue: 説明
-Fix: 修正方法
+### BLOCKER (CRITICAL|HIGH)
+path/to/file:42 — API キーがハードコードされている — 環境変数へ移動しシークレット管理に載せる
+
+### WARNING (MEDIUM|LOW)
+path/to/file:88 — O(n²) のループネスト — 辞書化して O(n) に変更
+
+### INFO
+path/to/file:10 — チケット参照なし TODO — チケット番号を付与
+
+Blockers: 1
 ```
 
 Confidence 80-100 のみ報告。80未満 → 黙殺。
 
-最後にサマリー:
-
-```
-| 重大度 | 件数 | ステータス |
-判定: Approve / Warning / Block
-```
+末尾の `Blockers: {n}` 集計行は必須（呼び出し元の反復ループ（loop-dev）が blocker ゼロ判定を機械的に読むため）。指摘ゼロの分類は見出しごと省略可だが、集計行は `Blockers: 0` でも必ず出力する。
 
 **承認基準:** Approve = CRITICAL/HIGH なし / Warning = HIGHのみ / Block = CRITICALあり
 
