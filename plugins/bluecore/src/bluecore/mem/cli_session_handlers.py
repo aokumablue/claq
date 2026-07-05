@@ -117,7 +117,8 @@ def _search_and_inject_context(
     digest_ctx = render_digest_context(digest_results)
     chunk_ctx = render_adaptive_context(db, merged) if merged else ""
 
-    combined = digest_ctx + chunk_ctx
+    # 両方非空の場合のみ改行区切り（`</mem-context><mem-context>` の隣接を防ぐ）。
+    combined = f"{digest_ctx}\n{chunk_ctx}" if digest_ctx and chunk_ctx else digest_ctx + chunk_ctx
     if combined:
         print(emit_user_prompt_submit_output(combined))
 

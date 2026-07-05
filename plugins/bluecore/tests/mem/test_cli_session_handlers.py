@@ -217,6 +217,40 @@ class TestSearchAndInjectContextDigestFirst:
         assert "chunk content" in ctx
         assert ctx.index("digest summary") < ctx.index("chunk content")
 
+    def test_digest_and_chunk_blocks_separated_by_newline(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """digest・chunk 双方非空のとき `</mem-context><mem-context>` が隣接せず改行区切りになる（Minor 修正）。"""
+        chunk = MemoryChunk(
+            id="c1",
+            session_id="other-session",
+            project="proj",
+            chunk_index=0,
+            content="chunk content",
+            tool_names=[],
+            files_read=[],
+            files_modified=[],
+            user_prompt="chunk prompt",
+            created_at_epoch=1700000000,
+        )
+        db = FakeDB([chunk])
+        digest = _make_digest(session_id="digest-session")
+
+        monkeypatch.setattr(
+            search_mod.SearchService, "search_digests",
+            lambda self, *a, **k: [DigestSearchResult(digest=digest, score=1.0)],
+        )
+        monkeypatch.setattr(
+            search_mod.SearchService, "search",
+            lambda self, **k: [_make_search_result(chunk_id="c1", content="chunk content")],
+        )
+
+        _search_and_inject_context(db, self._base_settings(tmp_path), "prompt", "proj", log=_LOG)
+        ctx = _extract_additional_context(capsys.readouterr().out)
+
+        assert "</mem-context><mem-context>" not in ctx
+        assert "</mem-context>\n<mem-context>" in ctx
+
     def test_chunk_from_digest_session_excluded(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:

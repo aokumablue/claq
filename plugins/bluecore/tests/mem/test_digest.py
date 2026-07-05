@@ -117,6 +117,13 @@ class TestAggregateChunksKeyFiles:
         result = _aggregate_chunks([_make_chunk()], [])
         assert result.key_files == []
 
+    def test_redacts_secrets_in_file_paths(self) -> None:
+        """files_modified に秘密情報が混入していても redact されること（念のための防御）。"""
+        chunks = [_make_chunk(files_modified=["leak@example.com.py"])]
+        result = _aggregate_chunks(chunks, [])
+        assert "leak@example.com" not in result.key_files[0]
+        assert "[REDACTED]" in result.key_files[0]
+
 
 class TestAggregateChunksKeyDecisions:
     """_aggregate_chunks の key_decisions 集約テスト"""
@@ -143,11 +150,27 @@ class TestAggregateChunksKeyDecisions:
         assert result.key_decisions == ["d0", "d4", "d5", "d6", "d7"]
 
     def test_truncates_to_120_chars(self) -> None:
-        long_prompt = "x" * 200
+        # 単語区切りのある長文にする（連続した英数字は redact の base64_long パターンに
+        # 誤マッチし丸ごと [REDACTED] に置換されてしまうため、切り詰めの検証には使えない）。
+        long_prompt = " ".join(["word"] * 40)
         logs = [_make_log(long_prompt, 0)]
         result = _aggregate_chunks([], logs)
         assert len(result.key_decisions[0]) <= 123  # compact_line は "..." (3字) 付与を許容
         assert result.key_decisions[0].endswith("...")
+
+    def test_redacts_secrets_in_interaction_log_prompts(self) -> None:
+        """interaction_logs の生プロンプトに含まれる秘密情報が redact されること（Critical 修正）。"""
+        logs = [_make_log("my email is leak@example.com please use it", 0)]
+        result = _aggregate_chunks([], logs)
+        assert "leak@example.com" not in result.key_decisions[0]
+        assert "[REDACTED]" in result.key_decisions[0]
+
+    def test_redacts_secrets_in_chunk_user_prompt_fallback(self) -> None:
+        """interaction_logs が無く chunk の user_prompt にフォールバックする場合も redact される。"""
+        chunks = [_make_chunk(user_prompt="token: sk-ant-abcdefghijklmnopqrstuvwxyz0123456789")]
+        result = _aggregate_chunks(chunks, [])
+        assert "sk-ant-abcdefghijklmnopqrstuvwxyz0123456789" not in result.key_decisions[0]
+        assert "[REDACTED]" in result.key_decisions[0]
 
 
 class TestExtractFinalAssistantText:
@@ -319,7 +342,7 @@ class TestBuildSessionDigest:
             def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:
                 return chunks
 
-            def get_interaction_logs(self, session_id: str) -> list[InteractionLog]:
+            def get_interaction_logs(self, session_id: str, limit: int = 100) -> list[InteractionLog]:
                 return []
 
         digest = build_session_digest(FakeDB(), "sess-1")
@@ -346,7 +369,7 @@ class TestBuildSessionDigest:
             def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:
                 return chunks
 
-            def get_interaction_logs(self, session_id: str) -> list[InteractionLog]:
+            def get_interaction_logs(self, session_id: str, limit: int = 100) -> list[InteractionLog]:
                 return []
 
         digest = build_session_digest(FakeDB(), "sess-1", transcript_path=str(transcript), harness="claude")
@@ -362,12 +385,47 @@ class TestBuildSessionDigest:
             def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:
                 return chunks
 
-            def get_interaction_logs(self, session_id: str) -> list[InteractionLog]:
+            def get_interaction_logs(self, session_id: str, limit: int = 100) -> list[InteractionLog]:
                 return []
 
         digest = build_session_digest(FakeDB(), "sess-1", transcript_path="/nonexistent/path.jsonl")
         assert digest is not None
         assert digest.source == "chunks"
+
+    def test_calls_get_interaction_logs_with_explicit_large_limit(self) -> None:
+        """デフォルト limit=100 で長セッションの末尾プロンプトが欠落しないよう、
+        build_session_digest は get_interaction_logs に十分大きい limit を明示する。"""
+        chunks = [_make_chunk()]
+        captured: dict[str, int] = {}
+
+        class FakeDB:
+            def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:
+                return chunks
+
+            def get_interaction_logs(self, session_id: str, limit: int = 100) -> list[InteractionLog]:
+                captured["limit"] = limit
+                return []
+
+        build_session_digest(FakeDB(), "sess-1")
+        assert captured["limit"] == 10000
+
+    def test_tail_prompt_survives_for_sessions_with_over_100_interactions(self) -> None:
+        """100件超の interaction_logs でも末尾プロンプトが key_decisions に残ること。"""
+        chunks = [_make_chunk()]
+        logs = [_make_log(f"decision-{i}", i) for i in range(150)]
+
+        class FakeDB:
+            def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:
+                return chunks
+
+            def get_interaction_logs(self, session_id: str, limit: int = 100) -> list[InteractionLog]:
+                # 実 DB のデフォルト limit=100 と同じ挙動を模擬する（先頭 limit 件のみ返す）
+                return logs[:limit]
+
+        digest = build_session_digest(FakeDB(), "sess-1")
+        assert digest is not None
+        # limit=10000 が渡っていなければ末尾（decision-149）は取得できず消える
+        assert "decision-149" in digest.key_decisions
 
     def test_applies_redaction_to_summary(self, tmp_path: Path) -> None:
         transcript = tmp_path / "t.jsonl"
@@ -381,7 +439,7 @@ class TestBuildSessionDigest:
             def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:
                 return chunks
 
-            def get_interaction_logs(self, session_id: str) -> list[InteractionLog]:
+            def get_interaction_logs(self, session_id: str, limit: int = 100) -> list[InteractionLog]:
                 return []
 
         digest = build_session_digest(FakeDB(), "sess-1", transcript_path=str(transcript), harness="claude")
@@ -401,7 +459,7 @@ class TestGenerateAndStoreDigest:
             def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:
                 return chunks
 
-            def get_interaction_logs(self, session_id: str) -> list[InteractionLog]:
+            def get_interaction_logs(self, session_id: str, limit: int = 100) -> list[InteractionLog]:
                 return []
 
             def upsert_session_digest(self, digest: SessionDigest) -> str:
@@ -419,7 +477,7 @@ class TestGenerateAndStoreDigest:
             def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:
                 return []
 
-            def get_interaction_logs(self, session_id: str) -> list[InteractionLog]:
+            def get_interaction_logs(self, session_id: str, limit: int = 100) -> list[InteractionLog]:
                 return []
 
             def upsert_session_digest(self, digest: SessionDigest) -> str:
@@ -444,7 +502,7 @@ class TestGenerateAndStoreDigest:
             def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:
                 return chunks
 
-            def get_interaction_logs(self, session_id: str) -> list[InteractionLog]:
+            def get_interaction_logs(self, session_id: str, limit: int = 100) -> list[InteractionLog]:
                 return []
 
             def upsert_session_digest(self, digest: SessionDigest) -> str:
@@ -463,7 +521,7 @@ class TestGenerateAndStoreDigest:
             def get_chunks_by_session(self, session_id: str) -> list[MemoryChunk]:
                 return chunks
 
-            def get_interaction_logs(self, session_id: str) -> list[InteractionLog]:
+            def get_interaction_logs(self, session_id: str, limit: int = 100) -> list[InteractionLog]:
                 return []
 
             def upsert_session_digest(self, digest: SessionDigest) -> str:

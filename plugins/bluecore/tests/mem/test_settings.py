@@ -34,7 +34,6 @@ class TestSettingsDefaults:
         assert s.search_half_life_days == 30.0
         assert s.chunk_max_length == 2000
         assert s.context_chunk_count == 30
-        assert s.context_max_tokens == 1200
         assert s.context_hot_tokens == 400
         assert s.context_hot_hours == 24
         assert s.context_digest_tokens == 800
@@ -46,6 +45,11 @@ class TestSettingsDefaults:
         s = Settings()
         assert not hasattr(s, "context_warm_tokens")
         assert not hasattr(s, "context_warm_days")
+
+    def test_no_context_max_tokens(self) -> None:
+        """context_max_tokens（死コード化していたため削除済み）が存在しないことを確認する。"""
+        s = Settings()
+        assert not hasattr(s, "context_max_tokens")
 
     def test_team_settings_defaults(self) -> None:
         """TeamSettings の注入予算既定値（トークン削減後の値）を固定する。"""

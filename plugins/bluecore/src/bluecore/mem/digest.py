@@ -30,6 +30,11 @@ _MAX_TRANSCRIPT_BYTES = 20 * 1024 * 1024
 # 既知の実行ステータス（outcome 集約の分母に使う）
 _KNOWN_STATUSES = ("success", "partial", "failure")
 
+# get_interaction_logs のデフォルト limit=100 だと長セッション（100件超）で
+# 末尾のインタラクションが取得できず「先頭1+末尾4」の意味論が壊れるため、
+# build_session_digest からは十分大きい limit を明示指定する。
+_INTERACTION_LOGS_LIMIT = 10000
+
 
 def _extract_claude_style_text(entry: dict) -> str:
     """claude/codex 形式のトランスクリプトエントリからテキストを抽出する。
@@ -122,16 +127,26 @@ class ChunkAggregate:
 
 
 def _aggregate_key_files(chunks: list[MemoryChunk]) -> list[str]:
-    """全チャンクの files_modified を集計し、上位10件（count降順・path昇順）を返す。"""
+    """全チャンクの files_modified を集計し、上位10件（count降順・path昇順）を redact して返す。
+
+    ファイルパスに秘密情報が混入する可能性は低いが、念のため PII/シークレット
+    マスキング（``redaction.redact``）を適用してから返す（DB 保存・PG 同期・
+    コンテキスト再注入に晒されるため）。
+    """
     counter: Counter[str] = Counter()
     for chunk in chunks:
         counter.update(chunk.files_modified)
     ranked = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))
-    return [path for path, _ in ranked[:10]]
+    return [redact(path) for path, _ in ranked[:10]]
 
 
 def _aggregate_key_decisions(chunks: list[MemoryChunk], interaction_logs: list[InteractionLog]) -> list[str]:
-    """ユーザープロンプトを重複排除し、先頭1件+末尾4件（最大5件・120字切り詰め）を返す。"""
+    """ユーザープロンプトを重複排除し、先頭1件+末尾4件（最大5件・redact 後に120字切り詰め）を返す。
+
+    interaction_logs の ``user_prompt_full`` は無 redact の生プロンプトのため、
+    切り詰め（``compact_line``）より前に ``redaction.redact`` を適用する
+    （切り詰め後だと秘密情報の一部が漏れたりマッチを逃したりし得るため）。
+    """
     prompts = [log_entry.user_prompt_full for log_entry in interaction_logs if log_entry.user_prompt_full]
     if not prompts:
         prompts = [chunk.user_prompt for chunk in chunks if chunk.user_prompt]
@@ -141,7 +156,7 @@ def _aggregate_key_decisions(chunks: list[MemoryChunk], interaction_logs: list[I
         selected = deduped
     else:
         selected = [deduped[0], *deduped[-4:]]
-    return [compact_line(prompt, 120) for prompt in selected]
+    return [compact_line(redact(prompt), 120) for prompt in selected]
 
 
 def _aggregate_outcome(chunks: list[MemoryChunk]) -> str:
@@ -247,7 +262,7 @@ def build_session_digest(
     if not chunks:
         return None
 
-    interaction_logs = db.get_interaction_logs(session_id=session_id)
+    interaction_logs = db.get_interaction_logs(session_id=session_id, limit=_INTERACTION_LOGS_LIMIT)
     aggregate = _aggregate_chunks(chunks, interaction_logs)
 
     transcript_text = None

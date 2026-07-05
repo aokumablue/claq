@@ -145,7 +145,6 @@ class Settings:
     search_half_life_days: float = 30.0
     chunk_max_length: int = 2000
     context_chunk_count: int = 30
-    context_max_tokens: int = 1200
     # 2層メモリ設定（hot=400: 直近生チャンク, digest=800: セッション要約）
     context_hot_tokens: int = 400
     context_hot_hours: int = 24
