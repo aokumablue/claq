@@ -6,6 +6,7 @@ import io
 import json
 import runpy
 import sys
+import time
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -53,7 +54,7 @@ def test_context_command_uses_local_db(monkeypatch, tmp_path: Path) -> None:
             files_read=[],
             files_modified=["file.py"],
             user_prompt="fix the bug",
-            created_at_epoch=1700000000,
+            created_at_epoch=int(time.time()),  # hot 層（直近24h）に収まる必要がある
         )
     )
     db.close()

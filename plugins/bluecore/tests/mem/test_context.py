@@ -1,12 +1,22 @@
-"""context のテスト"""
+"""context のテスト（hot + digest 2層メモリ）"""
 
 import time
 from pathlib import Path
 
 import pytest
 
-from bluecore.mem.context import _format_timestamp, _select_within_budget, build_context, importance_score
+from bluecore.mem.context import (
+    _filter_hot_chunks,
+    _format_date,
+    _format_digest,
+    _format_timestamp,
+    _select_digests_within_budget,
+    _select_within_budget,
+    build_context,
+    importance_score,
+)
 from bluecore.mem.database import Database, MemoryChunk
+from bluecore.mem.models import SessionDigest
 from bluecore.mem.settings import Settings
 
 
@@ -28,14 +38,44 @@ def settings(tmp_path: Path) -> Settings:
     return Settings(context_chunk_count=50)
 
 
+def _now() -> int:
+    """テスト実行時刻（hot 層の 24h ウィンドウ内に収まる epoch 秒）を返す。"""
+    return int(time.time())
+
+
+def _make_digest(
+    *,
+    session_id: str,
+    project: str = "proj",
+    summary: str = "summary",
+    started_at_epoch: int,
+    created_at_epoch: int,
+    key_files: list[str] | None = None,
+    key_decisions: list[str] | None = None,
+    outcome: str = "success",
+) -> SessionDigest:
+    """テスト用の SessionDigest を構築する。"""
+    return SessionDigest(
+        session_id=session_id,
+        project=project,
+        summary=summary,
+        started_at_epoch=started_at_epoch,
+        created_at_epoch=created_at_epoch,
+        key_files=key_files or [],
+        key_decisions=key_decisions or [],
+        outcome=outcome,
+    )
+
+
 class TestBuildContext:
-    """コンテキスト生成のテスト"""
+    """コンテキスト生成のテスト（hot 層）"""
 
     def test_empty_db(self, db: Database, settings: Settings) -> None:
         ctx = build_context(db, settings)
         assert ctx == ""
 
     def test_with_chunks(self, db: Database, settings: Settings) -> None:
+        now = _now()
         db.store_chunk(
             MemoryChunk(
                 session_id="s1",
@@ -46,7 +86,7 @@ class TestBuildContext:
                 files_read=[],
                 files_modified=["file.py"],
                 user_prompt="fix the bug",
-                created_at_epoch=1700000000,
+                created_at_epoch=now,
             )
         )
         ctx = build_context(db, settings)
@@ -58,6 +98,7 @@ class TestBuildContext:
         assert "did some work" in ctx
 
     def test_project_filter(self, db: Database, settings: Settings) -> None:
+        now = _now()
         db.store_chunk(
             MemoryChunk(
                 session_id="s1",
@@ -68,7 +109,7 @@ class TestBuildContext:
                 files_read=[],
                 files_modified=[],
                 user_prompt="",
-                created_at_epoch=1700000000,
+                created_at_epoch=now,
             )
         )
         db.store_chunk(
@@ -81,7 +122,7 @@ class TestBuildContext:
                 files_read=[],
                 files_modified=[],
                 user_prompt="",
-                created_at_epoch=1700000001,
+                created_at_epoch=now,
             )
         )
         ctx = build_context(db, settings, project="proj-a")
@@ -89,6 +130,7 @@ class TestBuildContext:
         assert "work b" not in ctx
 
     def test_session_grouping(self, db: Database, settings: Settings) -> None:
+        now = _now()
         for i in range(3):
             db.store_chunk(
                 MemoryChunk(
@@ -100,7 +142,7 @@ class TestBuildContext:
                     files_read=[],
                     files_modified=[],
                     user_prompt="",
-                    created_at_epoch=1700000000 + i,
+                    created_at_epoch=now + i,
                 )
             )
         ctx = build_context(db, settings)
@@ -108,6 +150,7 @@ class TestBuildContext:
         assert ctx.count("## セッション:") == 1
 
     def test_multiple_sessions(self, db: Database, settings: Settings) -> None:
+        now = _now()
         db.store_chunk(
             MemoryChunk(
                 session_id="s1",
@@ -118,7 +161,7 @@ class TestBuildContext:
                 files_read=[],
                 files_modified=[],
                 user_prompt="",
-                created_at_epoch=1700000000,
+                created_at_epoch=now,
             )
         )
         db.store_chunk(
@@ -131,7 +174,7 @@ class TestBuildContext:
                 files_read=[],
                 files_modified=[],
                 user_prompt="",
-                created_at_epoch=1700001000,
+                created_at_epoch=now + 10,
             )
         )
         ctx = build_context(db, settings)
@@ -139,6 +182,7 @@ class TestBuildContext:
 
     def test_empty_content_chunk(self, db: Database, settings: Settings) -> None:
         """content が空でもプロンプト等は注入され、本文ブロックは省略される。"""
+        now = _now()
         db.store_chunk(
             MemoryChunk(
                 session_id="s1",
@@ -149,7 +193,7 @@ class TestBuildContext:
                 files_read=[],
                 files_modified=[],
                 user_prompt="empty content prompt",
-                created_at_epoch=1700000000,
+                created_at_epoch=now,
             )
         )
         ctx = build_context(db, settings)
@@ -158,6 +202,7 @@ class TestBuildContext:
 
     def test_no_prompt_no_tools(self, db: Database, settings: Settings) -> None:
         """プロンプトもツールもない場合でもクラッシュしない"""
+        now = _now()
         db.store_chunk(
             MemoryChunk(
                 session_id="s1",
@@ -168,7 +213,7 @@ class TestBuildContext:
                 files_read=[],
                 files_modified=[],
                 user_prompt="",
-                created_at_epoch=1700000000,
+                created_at_epoch=now,
             )
         )
         ctx = build_context(db, settings)
@@ -176,6 +221,185 @@ class TestBuildContext:
         assert "**Prompt**" not in ctx
         assert "**Tools**" not in ctx
         assert "**Modified**" not in ctx
+
+    def test_old_chunk_outside_hot_window_is_excluded(self, db: Database, settings: Settings) -> None:
+        """hot_hours を超える古いチャンクは hot 層に含まれない（digest も無ければ空になる）。"""
+        old_epoch = _now() - (settings.context_hot_hours * 3600 + 3600)
+        db.store_chunk(
+            MemoryChunk(
+                session_id="s1",
+                project="proj",
+                chunk_index=0,
+                content="ancient work",
+                tool_names=[],
+                files_read=[],
+                files_modified=[],
+                user_prompt="",
+                created_at_epoch=old_epoch,
+            )
+        )
+        ctx = build_context(db, settings)
+        assert ctx == ""
+
+
+class TestBuildContextDigestLayer:
+    """コンテキスト生成のテスト（digest 層と重複除外）"""
+
+    def test_digest_included_when_no_hot_overlap(self, db: Database, settings: Settings) -> None:
+        """hot 層に無いセッションの digest はそのまま注入される。"""
+        digest = _make_digest(
+            session_id="past-session",
+            summary="past work summary",
+            started_at_epoch=1700000000,
+            created_at_epoch=1700000100,
+            key_files=["a.py"],
+            key_decisions=["decided X"],
+            outcome="success",
+        )
+        db.upsert_session_digest(digest)
+        ctx = build_context(db, settings)
+        assert "<mem-context>" in ctx
+        assert "## 過去セッション: proj" in ctx
+        assert "past work summary" in ctx
+
+    def test_digest_excluded_when_session_in_hot_layer(self, db: Database, settings: Settings) -> None:
+        """hot 層に採用された session_id の digest は重複注入を避けるため除外される。"""
+        now = _now()
+        db.store_chunk(
+            MemoryChunk(
+                session_id="dup-session",
+                project="proj",
+                chunk_index=0,
+                content="hot content",
+                tool_names=[],
+                files_read=[],
+                files_modified=[],
+                user_prompt="hot prompt",
+                created_at_epoch=now,
+            )
+        )
+        db.upsert_session_digest(
+            _make_digest(
+                session_id="dup-session",
+                summary="should be excluded",
+                started_at_epoch=now - 100,
+                created_at_epoch=now - 50,
+            )
+        )
+        ctx = build_context(db, settings)
+        assert "hot prompt" in ctx
+        assert "should be excluded" not in ctx
+        assert "## 過去セッション:" not in ctx
+
+    def test_digest_zero_results_hot_only_ok(self, db: Database, settings: Settings) -> None:
+        """digest が0件でも hot 層のみで正常に動作する。"""
+        now = _now()
+        db.store_chunk(
+            MemoryChunk(
+                session_id="s1",
+                project="proj",
+                chunk_index=0,
+                content="hot only",
+                tool_names=[],
+                files_read=[],
+                files_modified=[],
+                user_prompt="",
+                created_at_epoch=now,
+            )
+        )
+        ctx = build_context(db, settings)
+        assert "hot only" in ctx
+        assert "## 過去セッション:" not in ctx
+
+    def test_digest_budget_truncation(self, db: Database) -> None:
+        """digest_tokens を超えるダイジェストは打ち切られる。"""
+        small_settings = Settings(context_chunk_count=50, context_digest_tokens=1)
+        db.upsert_session_digest(
+            _make_digest(
+                session_id="d1",
+                summary="x" * 500,
+                started_at_epoch=1700000000,
+                created_at_epoch=1700000000,
+            )
+        )
+        ctx = build_context(db, small_settings)
+        assert ctx == ""
+
+    def test_digest_project_filter(self, db: Database, settings: Settings) -> None:
+        """project 指定時は digest 層も対象プロジェクトのみに絞られる。"""
+        db.upsert_session_digest(
+            _make_digest(
+                session_id="d-a",
+                project="proj-a",
+                summary="summary a",
+                started_at_epoch=1700000000,
+                created_at_epoch=1700000000,
+            )
+        )
+        db.upsert_session_digest(
+            _make_digest(
+                session_id="d-b",
+                project="proj-b",
+                summary="summary b",
+                started_at_epoch=1700000001,
+                created_at_epoch=1700000001,
+            )
+        )
+        ctx = build_context(db, settings, project="proj-a")
+        assert "summary a" in ctx
+        assert "summary b" not in ctx
+
+    def test_output_order_digest_before_hot(self, db: Database, settings: Settings) -> None:
+        """出力順は digest 層（古→新）→ hot 層。"""
+        now = _now()
+        db.store_chunk(
+            MemoryChunk(
+                session_id="hot-session",
+                project="proj",
+                chunk_index=0,
+                content="hot content",
+                tool_names=[],
+                files_read=[],
+                files_modified=[],
+                user_prompt="",
+                created_at_epoch=now,
+            )
+        )
+        db.upsert_session_digest(
+            _make_digest(
+                session_id="past-session",
+                summary="past summary",
+                started_at_epoch=1700000000,
+                created_at_epoch=1700000000,
+            )
+        )
+        ctx = build_context(db, settings)
+        digest_pos = ctx.index("## 過去セッション:")
+        hot_pos = ctx.index("## セッション:")
+        assert digest_pos < hot_pos
+
+    def test_digest_order_oldest_to_newest(self, db: Database, settings: Settings) -> None:
+        """複数 digest は created_at_epoch 昇順（古→新）で並ぶ。"""
+        db.upsert_session_digest(
+            _make_digest(
+                session_id="newer",
+                summary="newer summary",
+                started_at_epoch=1700000200,
+                created_at_epoch=1700000200,
+            )
+        )
+        db.upsert_session_digest(
+            _make_digest(
+                session_id="older",
+                summary="older summary",
+                started_at_epoch=1700000100,
+                created_at_epoch=1700000100,
+            )
+        )
+        ctx = build_context(db, settings)
+        older_pos = ctx.index("older summary")
+        newer_pos = ctx.index("newer summary")
+        assert older_pos < newer_pos
 
 
 class TestImportanceScore:
@@ -221,9 +445,10 @@ class TestImportanceScore:
 class TestBuildContextTokenBudget:
     """トークン予算制のテスト"""
 
-    def test_token_budget_limits_output(self, db: Database) -> None:
-        # 非常に小さいトークン予算を設定
-        small_settings = Settings(context_max_tokens=1, context_chunk_count=50)
+    def test_hot_token_budget_limits_output(self, db: Database) -> None:
+        """hot_tokens が極小の場合、hot 層は空になる（digest も無ければ全体が空）。"""
+        now = _now()
+        small_settings = Settings(context_hot_tokens=1, context_chunk_count=50)
         for i in range(5):
             db.store_chunk(
                 MemoryChunk(
@@ -235,11 +460,10 @@ class TestBuildContextTokenBudget:
                     files_read=[],
                     files_modified=["f.py"],
                     user_prompt="do stuff",
-                    created_at_epoch=1700000000 + i,
+                    created_at_epoch=now + i,
                 )
             )
         ctx = build_context(db, small_settings)
-        # 予算が小さすぎるため何も注入されない（または空）
         assert ctx == "" or len(ctx) < 500
 
 
@@ -251,6 +475,141 @@ class TestFormatTimestamp:
     def test_utc(self) -> None:
         result = _format_timestamp(0)
         assert "1970-01-01 00:00" == result
+
+
+class TestFormatDate:
+    """_format_date のテスト"""
+
+    def test_format(self) -> None:
+        assert _format_date(1700000000) == "2023-11-14"
+
+    def test_epoch_zero(self) -> None:
+        assert _format_date(0) == "1970-01-01"
+
+
+class TestFormatDigest:
+    """_format_digest のテスト"""
+
+    def test_full_fields(self) -> None:
+        digest = _make_digest(
+            session_id="s1",
+            project="myproj",
+            summary="did great work",
+            started_at_epoch=1700000000,
+            created_at_epoch=1700000100,
+            key_files=["a.py", "b.py", "c.py", "d.py"],
+            key_decisions=["decision 1", "decision 2", "decision 3"],
+            outcome="partial",
+        )
+        rendered = _format_digest(digest)
+        assert "## 過去セッション: myproj (2023-11-14) [partial]" in rendered
+        assert "**要約**: did great work" in rendered
+        assert "**変更**: a.py, b.py, c.py" in rendered
+        assert "d.py" not in rendered
+        assert "**論点**: decision 1 / decision 2" in rendered
+        assert "decision 3" not in rendered
+
+    def test_empty_key_files_line_omitted(self) -> None:
+        digest = _make_digest(
+            session_id="s1",
+            summary="summary only",
+            started_at_epoch=1700000000,
+            created_at_epoch=1700000000,
+            key_files=[],
+            key_decisions=["only decision"],
+        )
+        rendered = _format_digest(digest)
+        assert "**変更**:" not in rendered
+        assert "**論点**: only decision" in rendered
+
+    def test_empty_key_decisions_line_omitted(self) -> None:
+        digest = _make_digest(
+            session_id="s1",
+            summary="summary only",
+            started_at_epoch=1700000000,
+            created_at_epoch=1700000000,
+            key_files=["a.py"],
+            key_decisions=[],
+        )
+        rendered = _format_digest(digest)
+        assert "**変更**: a.py" in rendered
+        assert "**論点**:" not in rendered
+
+    def test_both_empty(self) -> None:
+        digest = _make_digest(
+            session_id="s1",
+            summary="bare summary",
+            started_at_epoch=1700000000,
+            created_at_epoch=1700000000,
+            key_files=[],
+            key_decisions=[],
+        )
+        rendered = _format_digest(digest)
+        assert "**変更**:" not in rendered
+        assert "**論点**:" not in rendered
+        assert "**要約**: bare summary" in rendered
+
+
+class TestFilterHotChunks:
+    """_filter_hot_chunks のテスト"""
+
+    def _chunk(self, epoch: int) -> MemoryChunk:
+        return MemoryChunk(
+            session_id="s1",
+            project="proj",
+            chunk_index=0,
+            content="c",
+            tool_names=[],
+            files_read=[],
+            files_modified=[],
+            user_prompt="",
+            created_at_epoch=epoch,
+        )
+
+    def test_excludes_older_than_cutoff(self) -> None:
+        recent = self._chunk(1000)
+        old = self._chunk(500)
+        result = _filter_hot_chunks([(recent, 0.5), (old, 0.9)], hot_cutoff=800)
+        assert result == [(recent, 0.5)]
+
+    def test_sorted_by_score_descending(self) -> None:
+        a = self._chunk(1000)
+        b = self._chunk(1001)
+        result = _filter_hot_chunks([(a, 0.2), (b, 0.9)], hot_cutoff=0)
+        assert result == [(b, 0.9), (a, 0.2)]
+
+
+class TestSelectDigestsWithinBudget:
+    """_select_digests_within_budget のテスト"""
+
+    def test_stops_when_next_digest_does_not_fit(self) -> None:
+        digest_a = _make_digest(
+            session_id="a", summary="fit", started_at_epoch=1, created_at_epoch=1
+        )
+        digest_b = _make_digest(
+            session_id="b", summary="x" * 2000, started_at_epoch=2, created_at_epoch=2
+        )
+        # digest_a はギリギリ収まるが digest_b は収まらない予算に設定する
+        budget_chars = len(_format_digest(digest_a)) + 1
+        max_tokens = budget_chars / 3.5
+        selected = _select_digests_within_budget([digest_a, digest_b], max_tokens=max_tokens)
+        assert selected == [digest_a]
+
+    def test_oversized_leading_digest_does_not_drop_smaller_followers(self) -> None:
+        """先頭の大きい digest が予算超過でも、後続の収まる digest は選択される。"""
+        big = _make_digest(
+            session_id="big", summary="x" * 2000, started_at_epoch=1, created_at_epoch=1
+        )
+        small = _make_digest(
+            session_id="small", summary="fit", started_at_epoch=2, created_at_epoch=2
+        )
+        budget_chars = len(_format_digest(small)) + 1
+        max_tokens = budget_chars / 3.5
+        selected = _select_digests_within_budget([big, small], max_tokens=max_tokens)
+        assert selected == [small]
+
+    def test_empty_list(self) -> None:
+        assert _select_digests_within_budget([], max_tokens=800) == []
 
 
 class TestSelectWithinBudget:

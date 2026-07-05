@@ -146,11 +146,11 @@ class Settings:
     chunk_max_length: int = 2000
     context_chunk_count: int = 30
     context_max_tokens: int = 1200
-    # ティアード・メモリ設定（hot=400, warm=400, archive=残り 400）
+    # 2層メモリ設定（hot=400: 直近生チャンク, digest=800: セッション要約）
     context_hot_tokens: int = 400
-    context_warm_tokens: int = 400
     context_hot_hours: int = 24
-    context_warm_days: int = 7
+    context_digest_tokens: int = 800
+    context_digest_count: int = 12
     auto_compact_enabled: bool = True
     auto_compact_interval_days: int = 7
     last_compacted_at: float = 0.0  # ランタイム状態

@@ -36,8 +36,16 @@ class TestSettingsDefaults:
         assert s.context_chunk_count == 30
         assert s.context_max_tokens == 1200
         assert s.context_hot_tokens == 400
-        assert s.context_warm_tokens == 400
+        assert s.context_hot_hours == 24
+        assert s.context_digest_tokens == 800
+        assert s.context_digest_count == 12
         assert s.excluded_projects == []
+
+    def test_no_warm_settings(self) -> None:
+        """warm 層設定（廃止済み）が存在しないことを確認する。"""
+        s = Settings()
+        assert not hasattr(s, "context_warm_tokens")
+        assert not hasattr(s, "context_warm_days")
 
     def test_team_settings_defaults(self) -> None:
         """TeamSettings の注入予算既定値（トークン削減後の値）を固定する。"""
