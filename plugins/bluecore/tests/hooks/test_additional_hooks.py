@@ -1099,6 +1099,7 @@ class TestFilterSessionSummary:
         "post_bash_build_complete",
         "config_protection",
         "pre_bash_git_push_reminder",
+        "pre_agent_nudge",
     ],
 )
 def test_empty_input_passthrough(monkeypatch: pytest.MonkeyPatch, module_name: str) -> None:
