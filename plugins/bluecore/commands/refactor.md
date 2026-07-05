@@ -20,7 +20,7 @@ command: /refactor
 
 ## skill 起動メカニズム
 
-`refactor-prep` / `refactor-rollback` は `user-invocable: false` の skill。description マッチで Claude Code が Skill ツール経由で fork 実行する。本コマンドのステップ1で「refactor-prep skill を起動」「refactor-rollback skill を起動」と明示することで発火する。
+`refactor-prep` / `refactor-rollback` / `loop-dev` は `user-invocable: false` の skill。description マッチで Claude Code が Skill ツール経由で fork 実行する。本コマンドのステップ1で「refactor-prep skill を起動」「refactor-rollback skill を起動」、ステップ7で「loop-dev skill を起動」と明示することで発火する。
 
 ## ステップ1: preflight（スコープ確定 + 実行準備）
 
@@ -74,6 +74,8 @@ simplify 全グループ完了後に開始。不要計算・重複I/O・N+1・�
 3. 失敗変更はファイル単位リバートし再検証
 4. 全通過のみ完了
 
+CRITICAL/HIGH blocker 検出時またはテスト/lint 失敗時は `loop-dev` skill を起動（入力: `approved_plan` = blocker 一覧で plan 縮退 / `task_type` = `refactor-fix`）。loop-dev 停止時（2 反復で未収束）はファイル単位リバート方針に従い、未解消分を要約に記載。
+
 ## ステップ8: 要約
 
 orchestrator の出力テンプレート（`../agents/refactor-orchestrator.md` 参照）をそのまま提示する。
@@ -88,6 +90,7 @@ Issues は `bluecore:reviewer` と `bluecore:security-auditor` の統合件数�
 - 機能変更禁止（WHAT不変）。挙動変更の疑義がある変更は要確認として報告
 - 安全性に疑義がある変更はスキップし最終要約に記載
 - サブエージェント委譲必須（`bluecore:refactor-orchestrator` 統括 → `bluecore:dead-code-cleaner` / `bluecore:simplifier` / `bluecore:perf-optimizer` / `bluecore:reviewer` / `bluecore:security-auditor`）
+- 役割直交: `refactor-orchestrator` = ファイル単位リバート付き生成統括に限定。収束 gate の最終権限は loop-dev の evaluate
 
 ## 引数
 
