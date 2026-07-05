@@ -74,6 +74,8 @@ class FakeDB:
         self.item_runs: list[object] = []
         self.vec_available = True
         self.vec_recreated = False
+        self.ended_sessions: list[str] = []
+        self.digests: list[object] = []
         self.conn = SimpleNamespace(execute=self.execute, commit=self.commit)
 
     def __enter__(self) -> FakeDB:
@@ -119,6 +121,16 @@ class FakeDB:
 
     def upsert_session(self, session) -> None:  # noqa: ANN001
         self.sessions.append(session)
+
+    def end_session(self, session_id: str) -> None:  # noqa: ANN001
+        self.ended_sessions.append(session_id)
+
+    def get_interaction_logs(self, session_id: str | None = None, project: str | None = None, limit: int = 100) -> list:  # noqa: ANN001
+        return self.interactions
+
+    def upsert_session_digest(self, digest) -> str:  # noqa: ANN001
+        self.digests.append(digest)
+        return f"digest-{len(self.digests)}"
 
     def store_chunk(self, chunk: MemoryChunk):  # noqa: ANN001
         if chunk.id is None:

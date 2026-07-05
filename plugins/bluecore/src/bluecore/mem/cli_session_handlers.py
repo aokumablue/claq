@@ -188,14 +188,16 @@ def handle_session_end(
     stdin_data: dict[str, Any],
     deps: SessionEndDeps,
 ) -> None:
-    """SessionEnd: 埋め込み一括生成 + FTS5 最適化"""
+    """SessionEnd: セッション終了記録 + 埋め込み一括生成 + FTS5 最適化 + セッション要約生成"""
     from bluecore.mem.bridge import sync_session_to_observations
+    from bluecore.mem.digest import generate_and_store_digest
 
     time_module = deps.time_module if deps.time_module is not None else time
     session_id = str(stdin_data.get("session_id", "") or "")
 
     try:
         with deps.open_db(settings) as db:
+            db.end_session(session_id)  # G3 修正: チャンクがゼロでも終了時刻を記録する
             chunks = db.get_chunks_by_session(session_id)
             if not chunks:
                 return
@@ -221,6 +223,16 @@ def handle_session_end(
                 deps.log.info("learn 同期: session=%s synced=%d", session_id, synced)
             except Exception as e:
                 deps.log.warning("learn 同期失敗: %s", e)
+
+            try:
+                generate_and_store_digest(
+                    db,
+                    session_id,
+                    transcript_path=str(stdin_data.get("transcript_path", "") or ""),
+                    log=deps.log,
+                )
+            except Exception as e:
+                deps.log.warning("digest 生成失敗: %s", e)
 
             _auto_compact_if_needed(db, settings, log=deps.log, time_module=time_module)
     except Exception as e:
