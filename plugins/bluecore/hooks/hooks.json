@@ -64,6 +64,17 @@
           }
         ],
         "description": "キャプチャツールの使用状況を観察して継続的な学習に役立てる"
+      },
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:agent:nudge\" \"bluecore.hooks.pre_agent_nudge\" \"standard,strict\"",
+            "timeout": 5
+          }
+        ],
+        "description": "general-purpose サブエージェント起動時に bluecore 専門エージェント対応表を additionalContext で提示します（非ブロック）"
       }
     ],
     "PreCompact": [
