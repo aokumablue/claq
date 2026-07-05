@@ -150,6 +150,26 @@ class ProjectProfile:
 
 
 @dataclass
+class SessionDigest:
+    """セッション全体の要約（トランスクリプト/チャンクから生成する短期記憶の圧縮版）"""
+
+    session_id: str
+    project: str
+    summary: str  # 最大500字要約
+    started_at_epoch: int
+    created_at_epoch: int
+    id: str | None = None
+    origin_user: str = ""
+    key_files: list[str] = field(default_factory=list)
+    key_decisions: list[str] = field(default_factory=list)
+    outcome: str = "unknown"  # 'success'|'partial'|'failure'|'unknown'
+    harness: str = "unknown"  # 'claude'|'codex'|'copilot'|'unknown'
+    source: str = "chunks"  # 'transcript+chunks'|'chunks'
+    chunk_count: int = 0
+    ended_at_epoch: int | None = None
+
+
+@dataclass
 class MemItemRun:
     """メムサブシステムが観測したスキル・コマンド・エージェントの実行記録（ベストエフォート）"""
 

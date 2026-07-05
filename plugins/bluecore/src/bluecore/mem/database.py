@@ -20,6 +20,7 @@ from bluecore.mem.models import (
     MemoryChunk,
     ProjectProfile,
     Session,
+    SessionDigest,
     generate_uuid,
 )
 from bluecore.mem.row_converters import (
@@ -30,6 +31,7 @@ from bluecore.mem.row_converters import (
     _row_to_interaction_log,
     _row_to_mem_item_run,
     _row_to_project_profile,
+    _row_to_session_digest,
 )
 from bluecore.mem.schema import _FTS5_SQL, _MIGRATIONS, _SCHEMA_SQL, _VEC_SQL
 
@@ -741,3 +743,94 @@ class Database:
             "SELECT * FROM mem_item_runs ORDER BY created_at_epoch"
         ).fetchall()
         return [_row_to_mem_item_run(r) for r in rows]
+
+    # --- セッション要約 ---
+
+    def upsert_session_digest(self, digest: SessionDigest) -> str:
+        """セッション要約を保存または更新し、id を返す。"""
+        if not digest.id:
+            digest.id = generate_uuid()
+        self.conn.execute(
+            """INSERT INTO session_digests
+         (id, origin_user, session_id, project, summary,
+          key_files, key_decisions, outcome, harness, source,
+          chunk_count, started_at_epoch, ended_at_epoch, created_at_epoch)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+            summary = excluded.summary,
+            key_files = excluded.key_files,
+            key_decisions = excluded.key_decisions,
+            outcome = excluded.outcome,
+            harness = excluded.harness,
+            source = excluded.source,
+            chunk_count = excluded.chunk_count,
+            ended_at_epoch = excluded.ended_at_epoch,
+            synced_at = NULL""",
+            (
+                digest.id,
+                digest.origin_user,
+                digest.session_id,
+                digest.project,
+                digest.summary,
+                json.dumps(digest.key_files, ensure_ascii=False),
+                json.dumps(digest.key_decisions, ensure_ascii=False),
+                digest.outcome,
+                digest.harness,
+                digest.source,
+                digest.chunk_count,
+                digest.started_at_epoch,
+                digest.ended_at_epoch,
+                digest.created_at_epoch,
+            ),
+        )
+        self.conn.commit()
+        return digest.id
+
+    def get_digest_by_session(self, session_id: str) -> SessionDigest | None:
+        """session_id でセッション要約を取得する。存在しなければ None。"""
+        row = self.conn.execute(
+            "SELECT * FROM session_digests WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        return _row_to_session_digest(row) if row else None
+
+    def get_recent_digests(self, project: str | None = None, limit: int = 12) -> list[SessionDigest]:
+        """最新のセッション要約を取得する。project 指定時はプロジェクトで絞り込む。"""
+        if project:
+            rows = self.conn.execute(
+                "SELECT * FROM session_digests WHERE project = ? ORDER BY created_at_epoch DESC LIMIT ?",
+                (project, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM session_digests ORDER BY created_at_epoch DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [_row_to_session_digest(r) for r in rows]
+
+    def get_digests_by_ids(self, ids: list[str]) -> dict[str, SessionDigest]:
+        """複数セッション要約を一括取得する（N+1 クエリ回避）。"""
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            f"SELECT * FROM session_digests WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        return {r["id"]: _row_to_session_digest(r) for r in rows}
+
+    def fts_search_digests(self, query: str, limit: int = 10) -> list[tuple[str, float]]:
+        """FTS5 trigram でセッション要約を検索する。(digest_id, rank) のリストを返す。"""
+        try:
+            rows = self.conn.execute(
+                """SELECT digest_id, rank
+           FROM session_digests_fts
+           WHERE session_digests_fts MATCH ?
+           ORDER BY rank
+           LIMIT ?""",
+                (f'"{query}"', limit),
+            ).fetchall()
+            return [(r["digest_id"], r["rank"]) for r in rows]
+        except sqlite3.OperationalError as e:
+            log.warning("FTS5 検索エラー（session_digests）: %s", e)
+            return []

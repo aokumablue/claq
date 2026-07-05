@@ -14,6 +14,7 @@ from bluecore.mem.models import (
     MemItemRun,
     MemoryChunk,
     ProjectProfile,
+    SessionDigest,
 )
 
 log = _get_logger("DB")
@@ -151,6 +152,26 @@ def _row_to_project_profile(row: sqlite3.Row) -> ProjectProfile:
         detected_at_epoch=row["detected_at_epoch"],
         last_updated_epoch=row["last_updated_epoch"],
         detection_confidence=row["detection_confidence"],
+    )
+
+
+def _row_to_session_digest(row: sqlite3.Row) -> SessionDigest:
+    """session_digests の Row を SessionDigest に変換する。"""
+    return SessionDigest(
+        id=row["id"],
+        origin_user=row["origin_user"],
+        session_id=row["session_id"],
+        project=row["project"],
+        summary=row["summary"],
+        key_files=_parse_json_list(row["key_files"]),
+        key_decisions=_parse_json_list(row["key_decisions"]),
+        outcome=row["outcome"],
+        harness=row["harness"],
+        source=row["source"],
+        chunk_count=row["chunk_count"],
+        started_at_epoch=row["started_at_epoch"],
+        ended_at_epoch=row["ended_at_epoch"],
+        created_at_epoch=row["created_at_epoch"],
     )
 
 

@@ -22,6 +22,7 @@ from bluecore.mem.models import (
     MemoryChunk,
     ProjectProfile,
     Session,
+    SessionDigest,
 )
 from bluecore.mem.row_converters import (
     _parse_json_dict_list,
@@ -1343,3 +1344,251 @@ class TestConcurrentChunkInsert:
 
         db5.conn = real_conn
         db5.close()
+
+
+class TestSessionDigests:
+    """session_digests テーブルの CRUD / FTS のテストケース"""
+
+    def test_upsert_is_idempotent_and_updates_fields(self, db: Database) -> None:
+        """同一 session_id で2回 upsert すると1行のみになり、内容が更新される。"""
+        digest = SessionDigest(
+            session_id="sess-1",
+            project="proj",
+            summary="first summary",
+            started_at_epoch=1700000000,
+            created_at_epoch=1700000010,
+            key_files=["a.py"],
+            key_decisions=["decision A"],
+            outcome="success",
+            harness="claude",
+            source="chunks",
+            chunk_count=3,
+        )
+        digest_id_1 = db.upsert_session_digest(digest)
+        assert isinstance(digest_id_1, str)
+        assert len(digest_id_1) == 36
+
+        count = db.conn.execute(
+            "SELECT COUNT(*) as c FROM session_digests WHERE session_id = ?",
+            ("sess-1",),
+        ).fetchone()["c"]
+        assert count == 1
+
+        # synced_at を「同期済み」にマークしてから更新し、リセットされることを確認する
+        db.conn.execute(
+            "UPDATE session_digests SET synced_at = ? WHERE session_id = ?",
+            ("already-synced", "sess-1"),
+        )
+        db.conn.commit()
+
+        updated = SessionDigest(
+            id=digest_id_1,
+            session_id="sess-1",
+            project="proj",
+            summary="updated summary",
+            started_at_epoch=1700000000,
+            created_at_epoch=1700000010,
+            key_files=["a.py", "b.py"],
+            key_decisions=["decision A", "decision B"],
+            outcome="partial",
+            harness="codex",
+            source="transcript+chunks",
+            chunk_count=5,
+            ended_at_epoch=1700000099,
+        )
+        digest_id_2 = db.upsert_session_digest(updated)
+        assert digest_id_2 == digest_id_1
+
+        count_after = db.conn.execute(
+            "SELECT COUNT(*) as c FROM session_digests WHERE session_id = ?",
+            ("sess-1",),
+        ).fetchone()["c"]
+        assert count_after == 1
+
+        stored = db.get_digest_by_session("sess-1")
+        assert stored is not None
+        assert stored.summary == "updated summary"
+        assert stored.key_files == ["a.py", "b.py"]
+        assert stored.key_decisions == ["decision A", "decision B"]
+        assert stored.outcome == "partial"
+        assert stored.harness == "codex"
+        assert stored.source == "transcript+chunks"
+        assert stored.chunk_count == 5
+        assert stored.ended_at_epoch == 1700000099
+
+        row = db.conn.execute(
+            "SELECT synced_at FROM session_digests WHERE session_id = ?",
+            ("sess-1",),
+        ).fetchone()
+        assert row["synced_at"] is None
+
+    def test_upsert_generates_id_when_absent(self, db: Database) -> None:
+        """id 未指定の場合は UUID を自動生成する。"""
+        digest = SessionDigest(
+            session_id="sess-auto",
+            project="proj",
+            summary="s",
+            started_at_epoch=1700000000,
+            created_at_epoch=1700000000,
+        )
+        assert digest.id is None
+        digest_id = db.upsert_session_digest(digest)
+        assert digest.id == digest_id
+        assert len(digest_id) == 36
+
+    def test_get_digest_by_session_not_found(self, db: Database) -> None:
+        assert db.get_digest_by_session("missing") is None
+
+    def test_get_recent_digests_order_and_limit(self, db: Database) -> None:
+        for i in range(5):
+            db.upsert_session_digest(
+                SessionDigest(
+                    session_id=f"sess-{i}",
+                    project="proj",
+                    summary=f"summary {i}",
+                    started_at_epoch=1700000000 + i,
+                    created_at_epoch=1700000000 + i,
+                )
+            )
+        recent = db.get_recent_digests(limit=3)
+        assert len(recent) == 3
+        assert [d.created_at_epoch for d in recent] == sorted(
+            (d.created_at_epoch for d in recent), reverse=True
+        )
+        assert recent[0].session_id == "sess-4"
+
+    def test_get_recent_digests_project_filter(self, db: Database) -> None:
+        db.upsert_session_digest(
+            SessionDigest(
+                session_id="s1",
+                project="proj-a",
+                summary="a",
+                started_at_epoch=1700000000,
+                created_at_epoch=1700000000,
+            )
+        )
+        db.upsert_session_digest(
+            SessionDigest(
+                session_id="s2",
+                project="proj-b",
+                summary="b",
+                started_at_epoch=1700000001,
+                created_at_epoch=1700000001,
+            )
+        )
+        recent = db.get_recent_digests(project="proj-a", limit=10)
+        assert len(recent) == 1
+        assert recent[0].project == "proj-a"
+
+    def test_get_digests_by_ids(self, db: Database) -> None:
+        ids = []
+        for i in range(3):
+            digest = SessionDigest(
+                session_id=f"sess-{i}",
+                project="proj",
+                summary=f"summary {i}",
+                started_at_epoch=1700000000 + i,
+                created_at_epoch=1700000000 + i,
+            )
+            ids.append(db.upsert_session_digest(digest))
+        result = db.get_digests_by_ids(ids)
+        assert len(result) == 3
+        assert all(digest_id in result for digest_id in ids)
+
+    def test_get_digests_by_ids_empty(self, db: Database) -> None:
+        assert db.get_digests_by_ids([]) == {}
+
+    def test_fts_search_digests_insert_and_hit(self, db: Database) -> None:
+        db.upsert_session_digest(
+            SessionDigest(
+                session_id="sess-1",
+                project="proj",
+                summary="fixed authentication regression in login flow",
+                started_at_epoch=1700000000,
+                created_at_epoch=1700000000,
+            )
+        )
+        results = db.fts_search_digests("authentication")
+        assert len(results) == 1
+        assert results[0][0] is not None
+
+    def test_fts_search_digests_no_results(self, db: Database) -> None:
+        assert db.fts_search_digests("xyznonexistent") == []
+
+    def test_fts_search_digests_update_resyncs(self, db: Database) -> None:
+        digest = SessionDigest(
+            session_id="sess-1",
+            project="proj",
+            summary="alpha content",
+            started_at_epoch=1700000000,
+            created_at_epoch=1700000000,
+        )
+        digest_id = db.upsert_session_digest(digest)
+        assert len(db.fts_search_digests("alpha")) == 1
+        assert len(db.fts_search_digests("betaword")) == 0
+
+        digest.id = digest_id
+        digest.summary = "betaword content"
+        db.upsert_session_digest(digest)
+
+        assert len(db.fts_search_digests("alpha")) == 0
+        assert len(db.fts_search_digests("betaword")) == 1
+
+    def test_fts_search_digests_delete_removes_entry(self, db: Database) -> None:
+        digest = SessionDigest(
+            session_id="sess-1",
+            project="proj",
+            summary="gamma content",
+            started_at_epoch=1700000000,
+            created_at_epoch=1700000000,
+        )
+        digest_id = db.upsert_session_digest(digest)
+        assert len(db.fts_search_digests("gamma")) == 1
+
+        db.conn.execute("DELETE FROM session_digests WHERE id = ?", (digest_id,))
+        db.conn.commit()
+        assert len(db.fts_search_digests("gamma")) == 0
+
+    def test_fts_search_digests_operational_error(self, db: Database) -> None:
+        """FTS テーブルが壊れている場合、空リストを返す"""
+        db.conn.execute("DROP TABLE IF EXISTS session_digests_fts")
+        db.conn.commit()
+        assert db.fts_search_digests("test") == []
+
+    def test_reconnect_adds_table_and_fts_to_existing_db(self, tmp_path: Path) -> None:
+        """session_digests 導入前に作られた既存 DB に再接続すると、テーブルと FTS が追加される。"""
+        db_path = tmp_path / "legacy.db"
+        legacy_db = Database(db_path)
+        legacy_db.conn.execute("DROP TABLE IF EXISTS session_digests_fts")
+        legacy_db.conn.execute("DROP TRIGGER IF EXISTS digests_ai")
+        legacy_db.conn.execute("DROP TRIGGER IF EXISTS digests_ad")
+        legacy_db.conn.execute("DROP TRIGGER IF EXISTS digests_au")
+        legacy_db.conn.execute("DROP TABLE IF EXISTS session_digests")
+        legacy_db.conn.commit()
+        legacy_db.close()
+
+        reopened = Database(db_path)
+        try:
+            table = reopened.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='session_digests'"
+            ).fetchone()
+            fts_table = reopened.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='session_digests_fts'"
+            ).fetchone()
+            assert table is not None
+            assert fts_table is not None
+
+            digest_id = reopened.upsert_session_digest(
+                SessionDigest(
+                    session_id="sess-reconnect",
+                    project="proj",
+                    summary="reconnect works",
+                    started_at_epoch=1700000000,
+                    created_at_epoch=1700000000,
+                )
+            )
+            assert reopened.get_digest_by_session("sess-reconnect") is not None
+            assert len(reopened.fts_search_digests("reconnect")) == 1
+            assert digest_id
+        finally:
+            reopened.close()

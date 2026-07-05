@@ -190,6 +190,29 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
   version TEXT PRIMARY KEY,
   applied_at_epoch INTEGER NOT NULL
 );
+
+-- セッション要約（トランスクリプト/チャンクから生成する短期記憶の圧縮版）
+CREATE TABLE IF NOT EXISTS session_digests (
+  id TEXT PRIMARY KEY,
+  origin_user TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL,
+  project TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  key_files TEXT NOT NULL DEFAULT '[]',
+  key_decisions TEXT NOT NULL DEFAULT '[]',
+  outcome TEXT NOT NULL DEFAULT 'unknown',
+  harness TEXT NOT NULL DEFAULT 'unknown',
+  source TEXT NOT NULL DEFAULT 'chunks',
+  chunk_count INTEGER NOT NULL DEFAULT 0,
+  started_at_epoch INTEGER NOT NULL,
+  ended_at_epoch INTEGER,
+  created_at_epoch INTEGER NOT NULL,
+  synced_at TEXT,
+  UNIQUE(session_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_digests_project_epoch ON session_digests(project, created_at_epoch);
+CREATE INDEX IF NOT EXISTS idx_digests_origin ON session_digests(origin_user);
 """
 
 # FTS5 と sqlite-vec は別途作成（拡張依存のため）
@@ -223,6 +246,27 @@ CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON memory_chunks BEGIN
       files_modified = new.files_modified,
       ai_response_summary = new.ai_response_summary
   WHERE chunk_id = new.id;
+END;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS session_digests_fts USING fts5(
+  digest_id UNINDEXED, summary, key_files, key_decisions, tokenize='trigram'
+);
+
+CREATE TRIGGER IF NOT EXISTS digests_ai AFTER INSERT ON session_digests BEGIN
+  INSERT INTO session_digests_fts(digest_id, summary, key_files, key_decisions)
+  VALUES (new.id, new.summary, new.key_files, new.key_decisions);
+END;
+
+CREATE TRIGGER IF NOT EXISTS digests_ad AFTER DELETE ON session_digests BEGIN
+  DELETE FROM session_digests_fts WHERE digest_id = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS digests_au AFTER UPDATE ON session_digests BEGIN
+  UPDATE session_digests_fts
+  SET summary = new.summary,
+      key_files = new.key_files,
+      key_decisions = new.key_decisions
+  WHERE digest_id = new.id;
 END;
 """
 
