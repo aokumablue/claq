@@ -18,6 +18,10 @@ command: /plan
 - search: `{要件のキーワード}` / `risk blocker error {関連キーワード}`
 - record: `{"event_type": "plan", "content": "{計画サマリー}"}`
 
+## skill 起動メカニズム
+
+`loop-dev` は `user-invocable: false` の skill。本文で「loop-dev skill を起動」と明示することで Skill ツール経由の fork 実行で発火する。
+
 ## 使用タイミング
 
 - 新機能開始・大きなアーキテクチャ変更・複雑なリファクタリング
@@ -65,9 +69,11 @@ architect の動作モード:
 - "別アプローチ: [代替案]"
 - "フェーズ N を飛ばしてフェーズ M を先に進める"
 
+肯定応答受領 → loop-dev へ移行。
+
 ## 連携
 
-- 実装: `tdd` skill 自動発火 または `bluecore:tdd-writer` 明示起動
+- 実装: ユーザー承認後、`loop-dev` skill を起動（入力: `approved_plan` = 承認済み計画で plan 段縮退。変更ファイル一覧・テストコマンドを引き継ぐ）
 - 完成後: `/review`
 
 ## 引数
