@@ -18,6 +18,10 @@ command: /bugfix
 - search: `bug fix regression repro root cause verify` / `{対象ファイルパス}` / `{症状キーワード}`
 - record: `{"event_type": "bugfix", "content": "Scope: {scope}. Repro: {repro}. Root cause: {root_cause}. Fix: {fix}. Tests: {tests}. Prevention: {prevention}"}`
 
+## skill 起動メカニズム
+
+`loop-dev` は `user-invocable: false` の skill。本文で「loop-dev skill を起動」と明示することで Skill ツール経由の fork 実行で発火する。
+
 ## ステップ1: 要件整理
 
 1. 症状・期待動作・実際の動作を分ける
@@ -30,24 +34,17 @@ command: /bugfix
 2. 既存テストで失敗を確認
 3. 再現できない場合は不足情報を明示して止める
 
-## ステップ3: 原因分析と修正方針
+## ステップ3: loop-dev 反復修正
 
-1. grillme で症状を本質化し原因候補を絞る
-2. 修正案を複数出し、メリット/デメリット/コストを比較
-3. 最小修正を基本に、同類バグがあれば合わせて直す
+`loop-dev` skill を起動（必須）。plan→generate→evaluate を最大 2 反復で収束させる。
 
-## ステップ4: 修正
+入力:
 
-1. 根本原因を直接直す
-2. 既存の正常系を壊さない
-3. 振る舞い変更が必要なら理由と影響を明示
+- `task` = 再現テスト・原因候補を含む修正要件
+- `task_type` = `bugfix`
+- `converge_extra` = 「再現テスト green + 回帰テスト追加済み」
 
-## ステップ5: 検証とレビュー（並列）
-
-1. 再現テストを通す
-2. 回帰テストを追加
-3. 周辺の既存テストを再実行
-4. `bluecore:reviewer` と `bluecore:security-auditor` を**同時起動**して品質・安全性を確認
+loop-dev から収束 or 停止報告を受領して記録へ進む。
 
 ## 記録テンプレート
 
@@ -59,6 +56,7 @@ Repro:      PASS / FAIL
 Root cause: {root_cause}
 Fix:        {fix}
 Tests:      {tests}
+Loop:       {n}/2
 Review:     PASS / BLOCKED
 ──────────────────────────────
 ```
