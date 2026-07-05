@@ -17,6 +17,7 @@ from bluecore.mem.database import (
     MemoryChunk,
     ProjectProfile,
     Session,
+    SessionDigest,
 )
 from bluecore.mem.pg_database import PgDatabase, _ensure_ssl, _is_loopback, _to_json
 
@@ -207,6 +208,61 @@ def _make_skill_run() -> MemItemRun:
         tools_used=["Edit", "Bash"],
         files_modified_count=2,
     )
+
+
+def _make_session_digest() -> SessionDigest:
+    return SessionDigest(
+        id="digest-1",
+        session_id="sess-1",
+        project="proj",
+        summary="did some work",
+        started_at_epoch=1700000000,
+        created_at_epoch=1700000100,
+        origin_user="user",
+        key_files=["a.py"],
+        key_decisions=["decided X"],
+        outcome="success",
+        harness="claude",
+        source="transcript+chunks",
+        chunk_count=3,
+        ended_at_epoch=1700000050,
+    )
+
+
+def test_upsert_session_digests_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """session_digests バッチ upsert のテスト（SQL/パラメータ検証）。"""
+    cursor = FakeCursor()
+    conn = FakeConn(cursor)
+    db = PgDatabase("postgres://example", use_pool=False)
+    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+
+    assert db.upsert_session_digests_batch([], "user") == 0
+
+    digest = _make_session_digest()
+    assert db.upsert_session_digests_batch([digest], "test_user") == 1
+    assert conn.commit_calls == 1
+    assert any("session_digests" in sql for sql, _ in cursor.executed)
+
+    sql, params = cursor.executed[0]
+    assert "ON CONFLICT (origin_user, session_id) DO UPDATE" in sql
+    assert "summary" in sql
+    assert "key_files" in sql
+    assert "key_decisions" in sql
+    assert "outcome" in sql
+    assert "harness" in sql
+    assert "source" in sql
+    assert "chunk_count" in sql
+    assert "started_at_epoch" in sql
+    assert "ended_at_epoch" in sql
+    assert "created_at_epoch" in sql
+    assert params is not None
+    assert params[0] == "digest-1"
+    # origin_user 引数がそのまま使われる（digest.origin_user ではなく関数の引数）
+    assert params[1] == "test_user"
+    assert "did some work" in params
+    assert "success" in params
+    assert "claude" in params
+    assert "transcript+chunks" in params
 
 
 def test_to_json_serializes_correctly() -> None:
@@ -674,6 +730,7 @@ def test_query_methods_raise_and_rollback(monkeypatch: pytest.MonkeyPatch) -> No
         lambda db: db.upsert_interaction_logs_batch([_make_interaction_log()]),
         lambda db: db.upsert_project_profiles_batch([_make_project_profile()]),
         lambda db: db.upsert_mem_item_runs_batch([_make_skill_run()]),
+        lambda db: db.upsert_session_digests_batch([_make_session_digest()], "user"),
     ]
 
     for call in cases:

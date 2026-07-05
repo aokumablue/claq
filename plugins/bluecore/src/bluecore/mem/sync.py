@@ -28,6 +28,7 @@ from bluecore.mem.database import (
     _row_to_interaction_log,
     _row_to_mem_item_run,
     _row_to_project_profile,
+    _row_to_session_digest,
 )
 from bluecore.mem.logger import get as _get_logger
 from bluecore.mem.pg_database import PgDatabase
@@ -85,6 +86,7 @@ _SYNC_TABLES: tuple[str, ...] = (
     "interaction_logs",
     "project_profiles",
     "mem_item_runs",
+    "session_digests",
 )
 
 
@@ -208,6 +210,7 @@ class SyncResult:
     interaction_logs: int = 0
     project_profiles: int = 0
     skill_runs: int = 0
+    session_digests: int = 0
     success: bool = True
     error: str | None = None
 
@@ -224,6 +227,7 @@ def _dry_run_counts(sqlite_db: Database) -> SyncResult:
         interaction_logs=_count_pending_rows(conn, "interaction_logs"),
         project_profiles=_count_pending_rows(conn, "project_profiles"),
         skill_runs=_count_pending_rows(conn, "mem_item_runs"),
+        session_digests=_count_pending_rows(conn, "session_digests"),
     )
     chunk_ids = [
         row[0]
@@ -234,9 +238,10 @@ def _dry_run_counts(sqlite_db: Database) -> SyncResult:
     result.embeddings = _count_pending_embeddings(conn, chunk_ids)
     log.info(
         "[DRY RUN] 同期対象: chunks=%d, sessions=%d, instincts=%d, adrs=%d, "
-        "events=%d, interactions=%d, profiles=%d, skill_runs=%d",
+        "events=%d, interactions=%d, profiles=%d, skill_runs=%d, session_digests=%d",
         result.chunks, result.sessions, result.instincts, result.adrs,
         result.events, result.interaction_logs, result.project_profiles, result.skill_runs,
+        result.session_digests,
     )
     return result
 
@@ -261,6 +266,7 @@ def _claim_all_pending(conn: sqlite3.Connection, sync_started_at: str) -> dict:
         "interaction_logs": _claim_pending_rows(conn, _cfg("interaction_logs", "created_at_epoch", _row_to_interaction_log)),
         "project_profiles": _claim_pending_rows(conn, _cfg("project_profiles", "last_updated_epoch", _row_to_project_profile)),
         "skill_runs": _claim_pending_rows(conn, _cfg("mem_item_runs", "created_at_epoch", _row_to_mem_item_run)),
+        "session_digests": _claim_pending_rows(conn, _cfg("session_digests", "created_at_epoch", _row_to_session_digest)),
     }
 
 
@@ -321,6 +327,10 @@ def _upsert_all_to_pg(pg_db: PgDatabase, pending: dict, origin_user: str) -> Syn
     if skill_runs := _upsert_with_origin(pending["skill_runs"], origin_user):
         result.skill_runs = pg_db.upsert_mem_item_runs_batch(skill_runs)
         log.info("skill_runs: %d 件同期", result.skill_runs)
+
+    if session_digests := pending["session_digests"]:
+        result.session_digests = pg_db.upsert_session_digests_batch(session_digests, origin_user)
+        log.info("session_digests: %d 件同期", result.session_digests)
 
     return result
 

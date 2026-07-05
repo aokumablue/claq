@@ -564,3 +564,25 @@ class TestWritePgpass:
         content = pgpass.read_text()
         assert "other:5432:db:user:pw" in content
         assert "h:5432:d:u:p" in content
+
+
+class TestHandleSync:
+    """handle_sync の出力 JSON 契約テスト。"""
+
+    def test_output_includes_session_digests_count(
+        self, mock_settings, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """synced 辞書に session_digests 件数が含まれる。"""
+        from bluecore.mem.cli_sync_handlers import handle_sync
+        from bluecore.mem.sync import SyncResult
+
+        monkeypatch.setattr(
+            "bluecore.mem.sync.sync_to_postgres",
+            lambda settings, dry_run=False: SyncResult(chunks=1, session_digests=38),
+        )
+
+        handle_sync(mock_settings, {"dry_run": True})
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["synced"]["session_digests"] == 38
+        assert payload["synced"]["chunks"] == 1

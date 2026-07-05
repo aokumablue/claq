@@ -207,6 +207,45 @@ CREATE INDEX IF NOT EXISTS idx_mir_epoch ON mem_item_runs(created_at_epoch);
 CREATE INDEX IF NOT EXISTS idx_mir_outcome ON mem_item_runs(outcome, created_at_epoch);
 CREATE INDEX IF NOT EXISTS idx_mir_item_type ON mem_item_runs(item_type);
 
+-- session_digests テーブル（セッション要約の遡及/継続同期）
+CREATE TABLE IF NOT EXISTS session_digests (
+  id TEXT PRIMARY KEY,
+  origin_user TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  project TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  key_files TEXT DEFAULT '[]',
+  key_decisions TEXT DEFAULT '[]',
+  outcome TEXT DEFAULT 'unknown',
+  harness TEXT DEFAULT 'unknown',
+  source TEXT DEFAULT 'chunks',
+  chunk_count INTEGER DEFAULT 0,
+  started_at_epoch BIGINT NOT NULL,
+  ended_at_epoch BIGINT,
+  created_at_epoch BIGINT NOT NULL,
+  synced_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(origin_user, session_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_digests_project_epoch ON session_digests(project, created_at_epoch);
+CREATE INDEX IF NOT EXISTS idx_digests_origin ON session_digests(origin_user);
+
+-- RLS: 自ユーザーの digest のみアクセス可能にする
+ALTER TABLE session_digests ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'session_digests' AND policyname = 'digests_owner_policy'
+  ) THEN
+    EXECUTE $policy$
+      CREATE POLICY digests_owner_policy ON session_digests
+        USING (origin_user = current_user)
+    $policy$;
+  END IF;
+END $$;
+
 -- ベクトル検索テーブル（pgvector 拡張を有効にする必要がある）
 -- セキュリティ: 埋め込み反転攻撃（Vec2Text）対策として行レベルセキュリティ（RLS）を有効化する。
 -- 埋め込みベクトルから元テキストの相当部分が復元可能なため、原文と同等の機密扱いとする。

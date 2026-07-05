@@ -18,6 +18,7 @@ from bluecore.mem.database import (
     MemoryChunk,
     ProjectProfile,
     Session,
+    SessionDigest,
 )
 from bluecore.mem.logger import get as _get_logger
 
@@ -815,6 +816,65 @@ class PgDatabase:
              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
              ON CONFLICT (id) DO UPDATE SET
                item_type = EXCLUDED.item_type,
+               synced_at = NOW()""",
+                    params_list,
+                )
+            conn.commit()
+            count = len(params_list)
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._put_conn(conn)
+        return count
+
+
+    # --- session_digests ---
+
+    def upsert_session_digests_batch(self, digests: list[SessionDigest], origin_user: str) -> int:
+        """セッション要約をバッチで UPSERT する。"""
+        if not digests:
+            return 0
+        conn = self._get_conn()
+        try:
+            params_list = [
+                (
+                    digest.id,
+                    origin_user,
+                    digest.session_id,
+                    digest.project,
+                    digest.summary,
+                    _to_json(digest.key_files),
+                    _to_json(digest.key_decisions),
+                    digest.outcome,
+                    digest.harness,
+                    digest.source,
+                    digest.chunk_count,
+                    digest.started_at_epoch,
+                    digest.ended_at_epoch,
+                    digest.created_at_epoch,
+                )
+                for digest in digests
+            ]
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """INSERT INTO session_digests
+             (id, origin_user, session_id, project, summary,
+              key_files, key_decisions, outcome, harness, source,
+              chunk_count, started_at_epoch, ended_at_epoch, created_at_epoch, synced_at)
+             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+             ON CONFLICT (origin_user, session_id) DO UPDATE SET
+               project = EXCLUDED.project,
+               summary = EXCLUDED.summary,
+               key_files = EXCLUDED.key_files,
+               key_decisions = EXCLUDED.key_decisions,
+               outcome = EXCLUDED.outcome,
+               harness = EXCLUDED.harness,
+               source = EXCLUDED.source,
+               chunk_count = EXCLUDED.chunk_count,
+               started_at_epoch = EXCLUDED.started_at_epoch,
+               ended_at_epoch = EXCLUDED.ended_at_epoch,
+               created_at_epoch = EXCLUDED.created_at_epoch,
                synced_at = NOW()""",
                     params_list,
                 )

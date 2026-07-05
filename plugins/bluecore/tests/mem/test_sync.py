@@ -21,6 +21,7 @@ from bluecore.mem.database import (
     MemoryChunk,
     ProjectProfile,
     Session,
+    SessionDigest,
 )
 from bluecore.mem.sync import SyncResult, _sync_embeddings, should_sync, sync_check, sync_to_postgres
 
@@ -477,6 +478,17 @@ class TestSyncToPostgresDetailed:
                 interaction_log_id=interaction_id,
             )
         )
+        db.upsert_session_digest(
+            SessionDigest(
+                id="digest-1",
+                session_id="sess-1",
+                project="proj",
+                summary="summary",
+                started_at_epoch=1700000012,
+                created_at_epoch=1700000012,
+                origin_user="sqlite-user",
+            )
+        )
 
         db.conn.commit()
         return {
@@ -528,6 +540,7 @@ class TestSyncToPostgresDetailed:
         assert result.interaction_logs == 1
         assert result.project_profiles == 1
         assert result.skill_runs == 1
+        assert result.session_digests == 1
         assert sqlite_db.closed is True
         assert pg_db.closed is True
         assert mock_settings.sync.last_synced_at == 0.0
@@ -565,6 +578,7 @@ class TestSyncToPostgresDetailed:
                 self.calls: list[tuple[str, object]] = []
                 self.project_profiles = []
                 self.skill_runs = []
+                self.session_digests = []
 
             def test_connection(self) -> bool:
                 return True
@@ -603,6 +617,11 @@ class TestSyncToPostgresDetailed:
                 self.skill_runs = runs
                 return len(runs)
 
+            def upsert_session_digests_batch(self, digests, origin_user):  # noqa: ANN001
+                self.calls.append(("session_digests", (origin_user, len(digests))))
+                self.session_digests = digests
+                return len(digests)
+
             def close(self) -> None:
                 self.closed = True
 
@@ -624,6 +643,7 @@ class TestSyncToPostgresDetailed:
         assert result.interaction_logs == 1
         assert result.project_profiles == 1
         assert result.skill_runs == 1
+        assert result.session_digests == 1
         assert result.embeddings == 1
         assert sqlite_db.closed is True
         assert pg_db.closed is True
@@ -633,6 +653,7 @@ class TestSyncToPostgresDetailed:
         assert pg_db.calls[1] == ("sessions", ("test_user", 1))
         assert pg_db.project_profiles[0].origin_user == "test_user"
         assert pg_db.skill_runs[0].origin_user == "test_user"
+        assert pg_db.calls[-1] == ("session_digests", ("test_user", 1))
 
         conn = sqlite3.connect(mock_settings.db_path)
         conn.row_factory = sqlite3.Row
@@ -689,6 +710,10 @@ class TestSyncToPostgresDetailed:
                 self.calls.append("skill_runs")
                 return len(runs)
 
+            def upsert_session_digests_batch(self, digests, origin_user):  # noqa: ANN001
+                self.calls.append("session_digests")
+                return len(digests)
+
             def close(self) -> None:
                 self.closed = True
 
@@ -700,6 +725,7 @@ class TestSyncToPostgresDetailed:
         assert result.success is True
         assert result.chunks == 0
         assert result.sessions == 0
+        assert result.session_digests == 0
         assert result.embeddings == 0
         assert pg_db.closed is True
         assert pg_db.calls == []
@@ -761,6 +787,11 @@ class TestSyncToPostgresDetailed:
             (ids["session_id"],),
         ).fetchone()
         assert session_row["synced_at"] is None
+        digest_row = conn.execute(
+            "SELECT synced_at FROM session_digests WHERE session_id = ?",
+            (ids["session_id"],),
+        ).fetchone()
+        assert digest_row["synced_at"] is None
         conn.close()
 
     def test_failed_sync_ignores_save_state_errors(self, mock_settings, monkeypatch, mock_git_user):
