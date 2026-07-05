@@ -60,7 +60,7 @@ command: /test-gen
 
 ## ステップ4: loop-dev 反復実装
 
-承認後、`loop-dev` skill を起動（必須）。generate→evaluate を最大 2 反復で収束させる。
+承認後、`loop-dev` skill を起動（必須）。`approved_plan` で plan 段を縮退（planner/architect 省略）しつつ、generate→evaluate を最大 2 反復で収束させる。
 
 入力:
 

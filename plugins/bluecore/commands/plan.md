@@ -73,7 +73,8 @@ architect の動作モード:
 
 ## 連携
 
-- 実装: ユーザー承認後、`loop-dev` skill を起動（入力: `approved_plan` = 承認済み計画で plan 段縮退。変更ファイル一覧・テストコマンドを引き継ぐ）
+- 実装: ユーザー承認後、`loop-dev` skill を起動（入力: `task` = 承認済み計画の実装要件サマリー（1〜3 文） / `task_type` = 計画の性質に応じて `feature` | `bugfix` | `test` | `refactor-fix` から選択 / `approved_plan` = 承認済み計画で plan 段縮退。変更ファイル一覧・テストコマンドを引き継ぐ）
+- loop-dev から収束 or 停止報告を受領後、Loop-Dev Result を転記して要約を提示
 - 完成後: `/review`
 
 ## 引数
