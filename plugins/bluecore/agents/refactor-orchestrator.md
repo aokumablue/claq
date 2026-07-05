@@ -1,6 +1,6 @@
 ---
 name: refactor-orchestrator
-description: refactor全体を統括し、依存順と並列実行を両立して安全に完了させる。
+description: refactor全体を統括し、依存順と並列実行を両立して安全に完了させる。複数段階リファクタリング統括時に自律発火。
 tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob", "Agent"]
 model: sonnet
 ---

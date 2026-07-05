@@ -1,6 +1,6 @@
 ---
 name: dead-code-cleaner
-description: デッドコード除去専門。未使用コード/重複/リファクタリング対象を特定し安全削除。
+description: デッドコード除去専門。未使用コード/重複/リファクタリング対象を特定し安全削除。リファクタリング/クリーンアップ時に積極使用。
 tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob", "Agent"]
 model: sonnet
 ---
