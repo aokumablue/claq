@@ -34,6 +34,35 @@ model: opus
    - 「行数削減」より可読性優先
    - デバッグ・拡張困難化禁止
 
+## 具体例
+
+Before（ネスト 3 段・冗長分岐）:
+
+```python
+def status(user):
+    """ユーザー状態を返す。"""
+    if user:
+        if user.active:
+            if user.verified:
+                return "ok"
+    return "ng"
+```
+
+After（条件統合・挙動不変）:
+
+```python
+def status(user):
+    """ユーザー状態を返す。"""
+    if user and user.active and user.verified:
+        return "ok"
+    return "ng"
+```
+
+## 数値基準
+
+- ネスト 3 段超は分解（早期 return・ガード節・関数抽出）
+- 関数 50 行超は分割検討（責務単位で抽出）
+
 ## プロセス
 
 1. 変更済みコード特定
@@ -44,3 +73,10 @@ model: opus
 6. 理解に影響する変更のみ記録
 
 コード変更直後に自律発火（明示要求不要）。
+
+## 永続メモリ
+
+`<mem-context>` 注入で起動。
+search: `simplify readability {file_pattern}` / `convention naming pattern`
+record: `{"event_type": "simplify", "content": "Simplified: {files}. Changes: {n}. Nest reduced: {n}"}`
+参照: プロジェクト規約 / 過剰単純化の失敗例 / 命名パターン

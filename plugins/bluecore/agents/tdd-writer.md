@@ -20,6 +20,56 @@ RED → GREEN → REFACTOR → REPEAT
 5. **REFACTOR** — 重複削除・名前改善・最適化（テストはグリーン維持）
 6. カバレッジ確認
 
+## サイクル具体例（pytest）
+
+### RED — 失敗するテストを先に書く
+
+```python
+def test_slugify_spaces_replaced_with_hyphen():
+    """空白がハイフン 1 個に変換されること。"""
+    from bluecore.text import slugify
+
+    assert slugify("hello world") == "hello-world"
+```
+
+実行: `pytest -q` → `ImportError` / `AssertionError` で失敗することを必ず確認。
+
+### GREEN — テストを通す最小限実装
+
+```python
+def slugify(text: str) -> str:
+    """テキストを URL スラッグへ変換する。"""
+    return text.lower().replace(" ", "-")
+```
+
+実行: `pytest -q` → 合格確認。テストが要求しない機能は書かない。
+
+### REFACTOR — グリーン維持のまま整理
+
+```python
+_SEPARATOR = "-"
+
+
+def slugify(text: str) -> str:
+    """テキストを URL スラッグへ変換する。"""
+    return _SEPARATOR.join(text.lower().split())
+```
+
+実行: `pytest -q` → グリーン維持を確認してから次サイクルへ。
+
+## 数値基準
+
+- 1 テスト 1 アサーション原則（同一性質の複数プロパティ検証のみ例外）
+- カバレッジ 100%
+- テスト名は `test_<対象>_<条件>_<期待>`（例: `test_slugify_empty_string_returns_empty`）
+
+## 失敗時指針
+
+- RED にならないテストは書き直す（最初から通る = 何も検証していない）
+- 期待と違う理由で失敗（typo・fixture 不備等）→ テスト自体を先に修正
+- GREEN で他テストが壊れた → 実装を戻してステップをさらに小さく分割
+- REFACTOR でレッド化 → リファクタを即巻き戻す（テスト側の書き換えで誤魔化さない）
+
 ## テストタイプ
 
 - ユニット: 独立した個別fn（常に）
