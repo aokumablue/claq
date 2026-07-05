@@ -160,3 +160,48 @@ class TestEmitBlock:
             "permissionDecision": "deny",
             "permissionDecisionReason": "dangerous flag",
         }
+
+
+class TestAdaptPreToolUseContextOutput:
+    """adapt_pre_tool_use_context_output のテスト。
+
+    PreToolUse では全ハーネスで Claude 形式（hookSpecificOutput）を返す。
+    Copilot CLI の _vsCodeCompat ブランチが preToolUse では hookSpecificOutput を
+    参照するため（モジュール docstring 参照）、copilot も Claude 形式とする第一仮説。
+    """
+
+    def test_claude_emits_pre_tool_use_hook_specific_output(self):
+        """claude ハーネスで hookSpecificOutput 形式を返す。"""
+        with patch("bluecore.hooks.output_adapter.detect_harness", return_value="claude"):
+            result = output_adapter.adapt_pre_tool_use_context_output("ctx")
+        parsed = json.loads(result)
+        assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+        assert parsed["hookSpecificOutput"]["additionalContext"] == "ctx"
+
+    def test_codex_emits_pre_tool_use_hook_specific_output(self):
+        """codex ハーネスで hookSpecificOutput 形式を返す。"""
+        with patch("bluecore.hooks.output_adapter.detect_harness", return_value="codex"):
+            result = output_adapter.adapt_pre_tool_use_context_output("ctx")
+        parsed = json.loads(result)
+        assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+        assert parsed["hookSpecificOutput"]["additionalContext"] == "ctx"
+
+    def test_copilot_emits_pre_tool_use_hook_specific_output(self):
+        """copilot ハーネスも第一仮説では hookSpecificOutput 形式を返す。
+
+        Copilot CLI は preToolUse の _vsCodeCompat ブランチで hookSpecificOutput を
+        参照するため、SessionStart/UserPromptSubmit とは異なる形式が正しい。
+        """
+        with patch("bluecore.hooks.output_adapter.detect_harness", return_value="copilot"):
+            result = output_adapter.adapt_pre_tool_use_context_output("ctx")
+        parsed = json.loads(result)
+        assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+        assert parsed["hookSpecificOutput"]["additionalContext"] == "ctx"
+
+    def test_unknown_emits_pre_tool_use_hook_specific_output(self):
+        """unknown ハーネスで hookSpecificOutput 形式を返す。"""
+        with patch("bluecore.hooks.output_adapter.detect_harness", return_value="unknown"):
+            result = output_adapter.adapt_pre_tool_use_context_output("ctx")
+        parsed = json.loads(result)
+        assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+        assert parsed["hookSpecificOutput"]["additionalContext"] == "ctx"

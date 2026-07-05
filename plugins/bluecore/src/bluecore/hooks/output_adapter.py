@@ -97,6 +97,39 @@ def adapt_context_output(event_name: str, additional_context: str) -> str:
     return builder(event_name, additional_context)
 
 
+# PreToolUse ハーネス → コンテキスト注入出力ビルダーのマッピング。
+# Copilot CLI は preToolUse の _vsCodeCompat ブランチで hookSpecificOutput を参照する
+# （SessionStart/UserPromptSubmit とは異なり、トップレベル形式は無視される）。
+# 実機検証後に copilot エントリのみ差し替え可能なデータ駆動構造にしてある。
+_PRE_TOOL_USE_OUTPUT_BUILDERS = {
+    "claude": _claude_context_output,
+    "codex": _claude_context_output,
+    "copilot": _claude_context_output,
+    "unknown": _claude_context_output,
+}
+
+
+def adapt_pre_tool_use_context_output(additional_context: str) -> str:
+    """PreToolUse コンテキスト注入出力を実行中ハーネスのプロトコルに合わせて生成する。
+
+    全ハーネスで Claude 形式（hookSpecificOutput ラッパー）を返す第一仮説。
+    Copilot CLI は preToolUse の _vsCodeCompat ブランチで hookSpecificOutput を
+    参照するため（SessionStart/UserPromptSubmit とは異なる）、copilot も
+    Claude 形式が正しい（実機検証後に copilot エントリのみ差し替え可）。
+
+    Args:
+        additional_context: コンテキストに注入する追加文字列。
+
+    Returns:
+        ハーネスのプロトコルに適合した JSON 文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    builder = _PRE_TOOL_USE_OUTPUT_BUILDERS.get(detect_harness(), _claude_context_output)
+    return builder("PreToolUse", additional_context)
+
+
 def emit_block(reason: str) -> tuple[int, str, str]:
     """ツール実行ブロックの出力をハーネス別に組み立てる。
 
