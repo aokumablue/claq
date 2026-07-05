@@ -14,8 +14,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
 
-    from bluecore.mem.database import Database, MemoryChunk
-    from bluecore.mem.search import SearchResult
+    from bluecore.mem.database import Database, MemoryChunk, SessionDigest
+    from bluecore.mem.search import DigestSearchResult, SearchResult
     from bluecore.mem.settings import Settings
 
     OpenDbFn = Callable[[Settings], AbstractContextManager[Database]]
@@ -218,6 +218,45 @@ def render_adaptive_context(db: Database, results: list[SearchResult], max_token
             break
         lines.append(chunk_str)
         budget -= len(chunk_str)
+
+    lines.append("</mem-context>")
+    return "\n".join(lines)
+
+
+def _format_digest_entry(digest: SessionDigest) -> str:
+    """SessionDigest を「見出し + 要約」の簡潔なブロックとして整形する（render_digest_context 用）。
+
+    context.py の `_format_digest` と見出し体裁を揃えるが、key_files / key_decisions は
+    含めない簡潔形式にする。
+    """
+    date = datetime.fromtimestamp(digest.started_at_epoch, tz=UTC).strftime("%Y-%m-%d")
+    return f"## 過去セッション: {digest.project} ({date}) [{digest.outcome}]\n\n**要約**: {digest.summary}\n"
+
+
+def render_digest_context(results: list[DigestSearchResult], max_tokens: int = 150) -> str:
+    """digest 検索結果を <mem-context> でラップした簡潔な Markdown 文字列に整形する。
+
+    予算 max_tokens×3.5 文字を超えるエントリはスキップして後続を継続する
+    （先頭が予算超過でも後続の収まるエントリは選択される greedy 継続方式）。
+    結果が空、または1件も予算内に収まらない場合は空文字を返す。
+    """
+    if not results:
+        return ""
+
+    lines = ["<mem-context>", "# 関連する過去セッション", ""]
+    budget = max_tokens * 3.5
+    included = 0
+
+    for result in results:
+        entry = _format_digest_entry(result.digest)
+        if len(entry) > budget:
+            continue
+        lines.append(entry)
+        budget -= len(entry)
+        included += 1
+
+    if included == 0:
+        return ""
 
     lines.append("</mem-context>")
     return "\n".join(lines)

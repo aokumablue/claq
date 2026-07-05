@@ -7,7 +7,7 @@ import re
 import time
 from typing import Any, NamedTuple
 
-from bluecore.mem.database import Database
+from bluecore.mem.database import Database, SessionDigest
 from bluecore.mem.logger import get as _get_logger
 from bluecore.mem.settings import Settings
 
@@ -23,6 +23,9 @@ _RETROSPECTIVE_PATTERNS = [
     r"how did we",
 ]
 
+# RRF / digest ランクスコア共通の平滑化定数
+_RANK_FUSION_K = 60
+
 
 class SearchResult(NamedTuple):
     """検索結果の1件分（チャンク内容とスコア・メタ情報）。"""
@@ -36,6 +39,13 @@ class SearchResult(NamedTuple):
     tool_names: list[str]
     files_read: list[str]
     files_modified: list[str]
+
+
+class DigestSearchResult(NamedTuple):
+    """digest 検索結果の1件分（SessionDigest 本体とスコア）。"""
+
+    digest: SessionDigest
+    score: float
 
 
 class SearchService:
@@ -110,6 +120,46 @@ class SearchService:
         if hit_ids:
             self.db.update_access(hit_ids)
         return results
+
+    def search_digests(
+        self,
+        query: str,
+        project: str | None = None,
+        limit: int = 1,
+    ) -> list[DigestSearchResult]:
+        """セッション要約（session_digests）を FTS5 trigram で検索し、時間減衰込みでスコアリングして返す。
+
+        FTS ヒット順位（0始まり）から RRF と同様の平滑化式で基本スコアを算出し、
+        ``adaptive_decay`` の時間減衰を掛けてスコア降順で上位 limit 件を返す。
+
+        Args:
+            query: 検索クエリ文字列。
+            project: 指定時はこのプロジェクトの digest のみに絞り込む。
+            limit: 返す件数の上限。
+
+        Returns:
+            DigestSearchResult のリスト（スコア降順）。ヒットが無ければ空リスト。
+
+        Raises:
+            例外は発生しません。
+        """
+        fts_results = self.db.fts_search_digests(query, limit=10)
+        digest_ids = [digest_id for digest_id, _ in fts_results]
+        digests = self.db.get_digests_by_ids(digest_ids)
+
+        scored: list[tuple[SessionDigest, float]] = []
+        for position, (digest_id, _rank) in enumerate(fts_results):
+            digest = digests.get(digest_id)
+            if digest is None:
+                continue
+            if project and digest.project != project:
+                continue
+            base_score = 1.0 / (_RANK_FUSION_K + position + 1)
+            decay = adaptive_decay(digest.created_at_epoch, None, 0)
+            scored.append((digest, base_score * decay))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [DigestSearchResult(digest=d, score=s) for d, s in scored[:limit]]
 
     def _pg_search_rows(
         self, pg_db: Any, query: str, limit: int, exclude_origin_user: str | None

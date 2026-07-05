@@ -9,7 +9,14 @@ from unittest.mock import patch
 import pytest
 
 from bluecore.mem.database import Database, MemoryChunk
-from bluecore.mem.search import SearchService, _reciprocal_rank_fusion, adaptive_decay, should_inject_memory
+from bluecore.mem.models import SessionDigest
+from bluecore.mem.search import (
+    DigestSearchResult,
+    SearchService,
+    _reciprocal_rank_fusion,
+    adaptive_decay,
+    should_inject_memory,
+)
 from bluecore.mem.settings import Settings
 
 
@@ -242,6 +249,101 @@ class TestSearchService:
         assert FakePg.last is not None
         assert FakePg.last.team_calls[-1]["exclude"] == "me"
         assert FakePg.last.closed is True
+
+
+def _make_digest(
+    *,
+    session_id: str,
+    project: str = "proj",
+    summary: str = "summary",
+    started_at_epoch: int | None = None,
+    created_at_epoch: int | None = None,
+) -> SessionDigest:
+    """テスト用の SessionDigest を構築する。"""
+    now = int(time.time())
+    return SessionDigest(
+        session_id=session_id,
+        project=project,
+        summary=summary,
+        started_at_epoch=started_at_epoch if started_at_epoch is not None else now,
+        created_at_epoch=created_at_epoch if created_at_epoch is not None else now,
+    )
+
+
+class TestSearchDigests:
+    """SearchService.search_digests のテスト"""
+
+    def test_hit(self, db: Database, settings: Settings) -> None:
+        db.upsert_session_digest(
+            _make_digest(session_id="s1", summary="fixed authentication regression in login flow")
+        )
+        svc = SearchService(db, settings)
+        results = svc.search_digests("authentication")
+        assert len(results) == 1
+        assert isinstance(results[0], DigestSearchResult)
+        assert results[0].digest.session_id == "s1"
+        assert results[0].score > 0
+
+    def test_no_results(self, db: Database, settings: Settings) -> None:
+        svc = SearchService(db, settings)
+        assert svc.search_digests("xyznonexistent") == []
+
+    def test_project_filter(self, db: Database, settings: Settings) -> None:
+        db.upsert_session_digest(
+            _make_digest(session_id="a", project="proj-a", summary="work on alpha module")
+        )
+        db.upsert_session_digest(
+            _make_digest(session_id="b", project="proj-b", summary="work on alpha module too")
+        )
+        svc = SearchService(db, settings)
+
+        all_results = svc.search_digests("alpha module", limit=10)
+        assert len(all_results) == 2
+
+        filtered = svc.search_digests("alpha module", project="proj-a", limit=10)
+        assert len(filtered) == 1
+        assert filtered[0].digest.project == "proj-a"
+
+    def test_limit(self, db: Database, settings: Settings) -> None:
+        for i in range(3):
+            db.upsert_session_digest(
+                _make_digest(session_id=f"s{i}", summary=f"database migration attempt {i}")
+            )
+        svc = SearchService(db, settings)
+        results = svc.search_digests("database migration", limit=2)
+        assert len(results) == 2
+
+    def test_decay_applied_recent_ranks_above_old(
+        self, db: Database, settings: Settings, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """同じ FTS 順位でも、時間減衰により新しい digest の方が高スコアになる。"""
+        old_epoch = int(time.time()) - 365 * 86400
+        recent_epoch = int(time.time())
+        old_digest = _make_digest(
+            session_id="old", summary="old summary", created_at_epoch=old_epoch, started_at_epoch=old_epoch
+        )
+        recent_digest = _make_digest(
+            session_id="recent",
+            summary="recent summary",
+            created_at_epoch=recent_epoch,
+            started_at_epoch=recent_epoch,
+        )
+        old_id = db.upsert_session_digest(old_digest)
+        recent_id = db.upsert_session_digest(recent_digest)
+
+        # FTS の生の順位は同点（old が先）と仮定し、decay の影響のみを検証する
+        monkeypatch.setattr(db, "fts_search_digests", lambda query, limit=10: [(old_id, -1.0), (recent_id, -1.0)])
+
+        svc = SearchService(db, settings)
+        results = svc.search_digests("anything", limit=10)
+        assert results[0].digest.session_id == "recent"
+        assert results[0].score > results[1].score
+
+    def test_digest_id_not_found_is_skipped(self, db: Database, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+        """FTS が返した digest_id が DB に存在しない場合はスキップされる。"""
+        monkeypatch.setattr(db, "fts_search_digests", lambda query, limit=10: [("missing-id", -1.0)])
+        svc = SearchService(db, settings)
+        assert svc.search_digests("anything") == []
 
 
 class TestAdaptiveDecay:

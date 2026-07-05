@@ -1,23 +1,60 @@
-"""cli_session_handlers の自動圧縮・手動圧縮・セッション終了の分岐テスト。"""
+"""cli_session_handlers の自動圧縮・手動圧縮・セッション終了・検索注入の分岐テスト。"""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 import bluecore.mem.bridge as bridge_mod
+import bluecore.mem.search as search_mod
+from bluecore.mem.cli_search_handlers import _format_digest_entry, render_digest_context
 from bluecore.mem.cli_session_handlers import (
     SessionEndDeps,
     _auto_compact_if_needed,
+    _search_and_inject_context,
     handle_compact,
     handle_session_end,
 )
-from bluecore.mem.models import MemoryChunk
+from bluecore.mem.models import MemoryChunk, SessionDigest
+from bluecore.mem.search import DigestSearchResult, SearchResult
 from tests.mem.conftest import FakeDB, make_settings, open_fake_db
 
 _LOG = SimpleNamespace(warning=lambda *a, **k: None, error=lambda *a, **k: None, info=lambda *a, **k: None)
+
+
+def _make_digest(session_id: str = "digest-session", project: str = "proj", summary: str = "digest summary") -> SessionDigest:
+    """テスト用の SessionDigest を構築する。"""
+    return SessionDigest(
+        session_id=session_id,
+        project=project,
+        summary=summary,
+        started_at_epoch=1700000000,
+        created_at_epoch=1700000000,
+    )
+
+
+def _make_search_result(chunk_id: str = "c1", content: str = "chunk content", score: float = 0.9) -> SearchResult:
+    """テスト用の SearchResult を構築する。"""
+    return SearchResult(
+        chunk_id=chunk_id,
+        score=score,
+        content=content,
+        user_prompt="",
+        project="proj",
+        created_at_epoch=1700000000,
+        tool_names=[],
+        files_read=[],
+        files_modified=[],
+    )
+
+
+def _extract_additional_context(out: str) -> str:
+    """print() で出力された JSON から additionalContext を取り出す。"""
+    payload = json.loads(out)
+    return payload["hookSpecificOutput"]["additionalContext"]
 
 
 def _make_chunk(session_id: str = "sess-1", chunk_id: str = "c1") -> MemoryChunk:
@@ -134,3 +171,174 @@ class TestHandleSessionEndG3AndDigest:
         assert any("digest 生成失敗" in warning for warning in warnings)
         # digest 失敗後も embedding 保存（前段）は完了している
         assert db.embeddings == [(["c1"], [[0.1, 0.2]])]
+
+
+class TestSearchAndInjectContextDigestFirst:
+    """_search_and_inject_context の digest 優先2段検索テスト。"""
+
+    def _base_settings(self, tmp_path: Path):
+        """team 検索を無効化した Settings 互換オブジェクトを返す。"""
+        settings = make_settings(tmp_path)
+        settings.sync = SimpleNamespace(enabled=False, postgres_url="")
+        return settings
+
+    def test_digest_hit_appears_before_chunk_context(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """digest がヒットした場合、注入テキストの先頭に digest コンテキストが入る。"""
+        chunk = MemoryChunk(
+            id="c1",
+            session_id="other-session",
+            project="proj",
+            chunk_index=0,
+            content="chunk content",
+            tool_names=[],
+            files_read=[],
+            files_modified=[],
+            user_prompt="chunk prompt",
+            created_at_epoch=1700000000,
+        )
+        db = FakeDB([chunk])
+        digest = _make_digest(session_id="digest-session")
+
+        monkeypatch.setattr(
+            search_mod.SearchService, "search_digests",
+            lambda self, *a, **k: [DigestSearchResult(digest=digest, score=1.0)],
+        )
+        monkeypatch.setattr(
+            search_mod.SearchService, "search",
+            lambda self, **k: [_make_search_result(chunk_id="c1", content="chunk content")],
+        )
+
+        _search_and_inject_context(db, self._base_settings(tmp_path), "prompt", "proj", log=_LOG)
+        ctx = _extract_additional_context(capsys.readouterr().out)
+
+        assert "digest summary" in ctx
+        assert "chunk content" in ctx
+        assert ctx.index("digest summary") < ctx.index("chunk content")
+
+    def test_chunk_from_digest_session_excluded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """digest ヒット済みセッションのチャンクは chunk 検索結果から除外される。"""
+        chunk_same = MemoryChunk(
+            id="c1",
+            session_id="dup-session",
+            project="proj",
+            chunk_index=0,
+            content="dup content",
+            tool_names=[],
+            files_read=[],
+            files_modified=[],
+            user_prompt="",
+            created_at_epoch=1700000000,
+        )
+        chunk_other = MemoryChunk(
+            id="c2",
+            session_id="other-session",
+            project="proj",
+            chunk_index=0,
+            content="other content",
+            tool_names=[],
+            files_read=[],
+            files_modified=[],
+            user_prompt="",
+            created_at_epoch=1700000000,
+        )
+        db = FakeDB([chunk_same, chunk_other])
+        digest = _make_digest(session_id="dup-session")
+
+        monkeypatch.setattr(
+            search_mod.SearchService, "search_digests",
+            lambda self, *a, **k: [DigestSearchResult(digest=digest, score=1.0)],
+        )
+        monkeypatch.setattr(
+            search_mod.SearchService, "search",
+            lambda self, **k: [
+                _make_search_result(chunk_id="c1", content="dup content", score=0.9),
+                _make_search_result(chunk_id="c2", content="other content", score=0.5),
+            ],
+        )
+
+        _search_and_inject_context(db, self._base_settings(tmp_path), "prompt", "proj", log=_LOG)
+        ctx = _extract_additional_context(capsys.readouterr().out)
+
+        assert "digest summary" in ctx
+        assert "other content" in ctx
+        assert "dup content" not in ctx
+
+    def test_no_digest_hit_falls_back_to_chunk_only_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """digest 0件のとき、注入テキストは chunk 検索結果のみになる（見出しは digest 無し）。"""
+        chunk = MemoryChunk(
+            id="c1",
+            session_id="s1",
+            project="proj",
+            chunk_index=0,
+            content="chunk only content",
+            tool_names=[],
+            files_read=[],
+            files_modified=[],
+            user_prompt="",
+            created_at_epoch=1700000000,
+        )
+        db = FakeDB([chunk])
+
+        monkeypatch.setattr(search_mod.SearchService, "search_digests", lambda self, *a, **k: [])
+        monkeypatch.setattr(
+            search_mod.SearchService, "search",
+            lambda self, **k: [_make_search_result(chunk_id="c1", content="chunk only content")],
+        )
+
+        _search_and_inject_context(db, self._base_settings(tmp_path), "prompt", "proj", log=_LOG)
+        ctx = _extract_additional_context(capsys.readouterr().out)
+
+        assert "chunk only content" in ctx
+        assert "過去セッション" not in ctx
+
+    def test_no_results_at_all_prints_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """digest・chunk とも0件なら何も出力しない。"""
+        db = FakeDB()
+        monkeypatch.setattr(search_mod.SearchService, "search_digests", lambda self, *a, **k: [])
+        monkeypatch.setattr(search_mod.SearchService, "search", lambda self, **k: [])
+
+        _search_and_inject_context(db, self._base_settings(tmp_path), "prompt", "proj", log=_LOG)
+        assert capsys.readouterr().out == ""
+
+
+class TestRenderDigestContext:
+    """render_digest_context のテスト（配置: cli_search_handlers.py の新設関数）。"""
+
+    def test_empty_list_returns_empty_string(self) -> None:
+        assert render_digest_context([]) == ""
+
+    def test_single_result_rendered(self) -> None:
+        digest = _make_digest(project="myproj", summary="did great work")
+        rendered = render_digest_context([DigestSearchResult(digest=digest, score=1.0)])
+        assert "<mem-context>" in rendered
+        assert "</mem-context>" in rendered
+        assert "myproj" in rendered
+        assert "did great work" in rendered
+
+    def test_budget_truncation_skips_oversized_entries(self) -> None:
+        """max_tokens を超えるエントリは打ち切られ、収まらない場合は空文字。"""
+        digest = _make_digest(summary="x" * 2000)
+        rendered = render_digest_context([DigestSearchResult(digest=digest, score=1.0)], max_tokens=1)
+        assert rendered == ""
+
+    def test_oversized_leading_entry_does_not_drop_smaller_followers(self) -> None:
+        """先頭が予算超過でも、後続の収まるエントリは選択される。"""
+        big = _make_digest(session_id="big", summary="x" * 2000)
+        small = _make_digest(session_id="small", summary="fit")
+        small_entry_len = len(_format_digest_entry(small))
+        max_tokens = (small_entry_len + 1) / 3.5
+
+        rendered = render_digest_context(
+            [DigestSearchResult(digest=big, score=1.0), DigestSearchResult(digest=small, score=0.5)],
+            max_tokens=max_tokens,
+        )
+        assert "fit" in rendered
+        assert "x" * 2000 not in rendered

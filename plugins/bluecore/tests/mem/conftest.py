@@ -132,6 +132,12 @@ class FakeDB:
         self.digests.append(digest)
         return f"digest-{len(self.digests)}"
 
+    def fts_search_digests(self, query: str, limit: int = 10) -> list[tuple[str, float]]:  # noqa: ANN001
+        return []
+
+    def get_digests_by_ids(self, ids) -> dict:  # noqa: ANN001
+        return {}
+
     def store_chunk(self, chunk: MemoryChunk):  # noqa: ANN001
         if chunk.id is None:
             chunk.id = f"chunk-{len(self.stored_chunks) + 1}"
