@@ -19,7 +19,9 @@ user-invocable: true
 
 1. frontmatter `description` の trigger/用途を読む
 2. body がカバーする範囲を読む
-3. 乖離あり → iter 1 前に合わせる
+3. md クロス参照・description は実装と一致（壊れた参照・存在しないコマンド参照・循環参照の禁止）
+4. output-style への prose 注入は tool-call 破損リスクがあるため境界原則（圧縮/改変対象外の明記）を確認
+5. 乖離あり → iter 1 前に合わせる
 
 **スキップ禁止**: subagent は description に合わせて body を「再解釈」→スキル要件未達でも精度が出る（false positive）
 
