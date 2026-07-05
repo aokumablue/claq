@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from bluecore.hooks.hook_common import print_session_start_output
 from bluecore.lib.core_utils import get_git_user_name
 from bluecore.mem import cli_dashboard_handlers as _dashboard_handlers
+from bluecore.mem import cli_digest_handlers as _digest_handlers
 from bluecore.mem import cli_record_handlers as _record_handlers
 from bluecore.mem import cli_search_handlers as _search_handlers
 from bluecore.mem import cli_session_handlers as _session_handlers
@@ -572,6 +573,12 @@ def _handle_team_context(settings: Settings, stdin_data: dict) -> str:
     )
 
 
+def _handle_digest_backfill(settings: Settings, stdin_data: dict) -> None:
+    """digest-backfill コマンド: 既存セッションの session digest を遡及生成する。"""
+    deps = _digest_handlers.DigestBackfillDeps(open_db=_open_db, log=log)
+    _digest_handlers.handle_digest_backfill(settings, stdin_data, deps)
+
+
 def _handle_team_session_init(settings: Settings, stdin_data: dict) -> None:
     """team-session-init コマンド: ハイブリッド検索で ``<team-context>`` を注入する。"""
     _team_handlers.handle_team_session_init(
@@ -607,6 +614,7 @@ _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "record-item-run": _handle_record_item_run,
     "team-context": _handle_team_context,
     "team-session-init": _handle_team_session_init,
+    "digest-backfill": _handle_digest_backfill,
 }
 
 
@@ -639,6 +647,7 @@ Commands:
   team-context           Inject <team-context> from PostgreSQL (FTS-only, SessionStart)
   team-session-init      Inject <team-context> with hybrid search (UserPromptSubmit)
   migrate-settings       Migrate existing ~/.bluecore/settings.json to hardened format (PG password → <data_dir>/.pgpass, sslmode=require if unset)
+  digest-backfill        Backfill session digests for existing sessions (reads JSON from stdin)
 
 search-structured Input (JSON):
   {"query": "...", "project": "...", "tool_name": "Edit", "file_pattern": "*.py", "date_from": "2024-01-01", "date_to": "2024-12-31"}
@@ -651,6 +660,9 @@ sync Input (JSON):
 
 import Input (JSON):
   {"types": ["instincts", "adrs", "events"], "repo_root": "/path/to/repo"}
+
+digest-backfill Input (JSON):
+  {"force": false, "project": null, "limit": null}
 """
 
 

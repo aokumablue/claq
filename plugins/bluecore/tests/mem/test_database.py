@@ -1027,6 +1027,73 @@ class TestGetAllChunks:
         assert epochs == sorted(epochs)
 
 
+class TestGetSessionIdsWithChunks:
+    """get_session_ids_with_chunks のテスト（digest-backfill 用）"""
+
+    def test_empty_db(self, db: Database) -> None:
+        assert db.get_session_ids_with_chunks() == []
+
+    def test_returns_distinct_session_ids(self, db: Database) -> None:
+        for i in range(2):
+            db.store_chunk(
+                MemoryChunk(
+                    session_id="s1",
+                    project="proj",
+                    chunk_index=i,
+                    content=f"chunk {i}",
+                    tool_names=[],
+                    files_read=[],
+                    files_modified=[],
+                    user_prompt="",
+                    created_at_epoch=1700000000 + i,
+                )
+            )
+        db.store_chunk(
+            MemoryChunk(
+                session_id="s2",
+                project="proj",
+                chunk_index=0,
+                content="other session",
+                tool_names=[],
+                files_read=[],
+                files_modified=[],
+                user_prompt="",
+                created_at_epoch=1700000002,
+            )
+        )
+        session_ids = db.get_session_ids_with_chunks()
+        assert sorted(session_ids) == ["s1", "s2"]
+
+    def test_project_filter(self, db: Database) -> None:
+        db.store_chunk(
+            MemoryChunk(
+                session_id="s-a",
+                project="proj-a",
+                chunk_index=0,
+                content="a",
+                tool_names=[],
+                files_read=[],
+                files_modified=[],
+                user_prompt="",
+                created_at_epoch=1700000000,
+            )
+        )
+        db.store_chunk(
+            MemoryChunk(
+                session_id="s-b",
+                project="proj-b",
+                chunk_index=0,
+                content="b",
+                tool_names=[],
+                files_read=[],
+                files_modified=[],
+                user_prompt="",
+                created_at_epoch=1700000001,
+            )
+        )
+        assert db.get_session_ids_with_chunks(project="proj-a") == ["s-a"]
+
+
 class TestInteractionAndRunQueries:
     """interaction_logs / mem_item_runs の取得系テスト"""
 

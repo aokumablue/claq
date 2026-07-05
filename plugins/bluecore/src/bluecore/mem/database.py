@@ -294,6 +294,17 @@ class Database:
         rows = self.conn.execute("SELECT * FROM memory_chunks ORDER BY created_at_epoch").fetchall()
         return [_row_to_chunk(r) for r in rows]
 
+    def get_session_ids_with_chunks(self, project: str | None = None) -> list[str]:
+        """memory_chunks に存在するセッション ID を重複排除して返す（digest-backfill 用）。"""
+        if project:
+            rows = self.conn.execute(
+                "SELECT DISTINCT session_id FROM memory_chunks WHERE project = ?",
+                (project,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute("SELECT DISTINCT session_id FROM memory_chunks").fetchall()
+        return [r["session_id"] for r in rows]
+
     # --- FTS5 検索 ---
 
     def fts_search(self, query: str, limit: int = 40) -> list[tuple[str, float]]:

@@ -281,6 +281,40 @@ def build_session_digest(
     )
 
 
+def resolve_transcript_path(session_id: str) -> tuple[Path | None, str]:
+    """session_id からトランスクリプトファイルのパスとハーネス種別を解決する（digest-backfill 用）。
+
+    1. ``~/.claude/projects/*/{session_id}.jsonl`` を glob 探索する。
+       複数ヒット時はパス文字列の昇順ソートで先頭の1件を返す。
+    2. 見つからなければ ``~/.copilot/session-state/{session_id}/events.jsonl`` を確認する。
+    3. どちらも見つからなければ (None, "unknown") を返す。
+
+    ホームディレクトリは ``Path.home()`` を都度呼び出して解決するため、
+    テストから ``monkeypatch.setattr(Path, "home", ...)`` で差し替え可能。
+
+    Args:
+        session_id: 対象セッション ID。
+
+    Returns:
+        (トランスクリプトパス, ハーネス種別) のタプル。
+        ハーネス種別は "claude" / "copilot" / "unknown"。
+
+    Raises:
+        例外は発生しません。
+    """
+    home = Path.home()
+
+    claude_matches = sorted(home.glob(f".claude/projects/*/{session_id}.jsonl"))
+    if claude_matches:
+        return claude_matches[0], "claude"
+
+    copilot_path = home / ".copilot" / "session-state" / session_id / "events.jsonl"
+    if copilot_path.exists():
+        return copilot_path, "copilot"
+
+    return None, "unknown"
+
+
 def generate_and_store_digest(
     db: Any,
     session_id: str,

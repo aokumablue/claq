@@ -13,6 +13,7 @@ from bluecore.mem.digest import (
     _truncate_summary,
     build_session_digest,
     generate_and_store_digest,
+    resolve_transcript_path,
 )
 from bluecore.mem.models import InteractionLog, MemoryChunk, SessionDigest
 
@@ -481,3 +482,81 @@ class _NullLog:
 
     def warning(self, *args: object, **kwargs: object) -> None:
         """warning ログを無視する。"""
+
+
+class TestResolveTranscriptPath:
+    """resolve_transcript_path の3分岐テスト（digest-backfill 用）。"""
+
+    def _patch_home(self, monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
+        """Path.home() をテスト用ディレクトリに固定する。"""
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+    def test_claude_transcript_found(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch_home(monkeypatch, tmp_path)
+        project_dir = tmp_path / ".claude" / "projects" / "my-project"
+        project_dir.mkdir(parents=True)
+        transcript = project_dir / "sess-123.jsonl"
+        transcript.write_text("{}", encoding="utf-8")
+
+        path, harness = resolve_transcript_path("sess-123")
+
+        assert path == transcript
+        assert harness == "claude"
+
+    def test_copilot_transcript_found_when_claude_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._patch_home(monkeypatch, tmp_path)
+        session_dir = tmp_path / ".copilot" / "session-state" / "sess-456"
+        session_dir.mkdir(parents=True)
+        events = session_dir / "events.jsonl"
+        events.write_text("{}", encoding="utf-8")
+
+        path, harness = resolve_transcript_path("sess-456")
+
+        assert path == events
+        assert harness == "copilot"
+
+    def test_neither_found_returns_unknown(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch_home(monkeypatch, tmp_path)
+
+        path, harness = resolve_transcript_path("sess-missing")
+
+        assert path is None
+        assert harness == "unknown"
+
+    def test_claude_takes_precedence_over_copilot(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """claude と copilot 両方に存在する場合、claude が優先される。"""
+        self._patch_home(monkeypatch, tmp_path)
+        project_dir = tmp_path / ".claude" / "projects" / "proj"
+        project_dir.mkdir(parents=True)
+        claude_transcript = project_dir / "sess-both.jsonl"
+        claude_transcript.write_text("{}", encoding="utf-8")
+
+        copilot_dir = tmp_path / ".copilot" / "session-state" / "sess-both"
+        copilot_dir.mkdir(parents=True)
+        (copilot_dir / "events.jsonl").write_text("{}", encoding="utf-8")
+
+        path, harness = resolve_transcript_path("sess-both")
+
+        assert path == claude_transcript
+        assert harness == "claude"
+
+    def test_multiple_claude_hits_returns_first_sorted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """複数プロジェクトディレクトリに同一 session_id が存在する場合、先頭（ソート順）の1件を返す。"""
+        self._patch_home(monkeypatch, tmp_path)
+        dir_b = tmp_path / ".claude" / "projects" / "project-b"
+        dir_a = tmp_path / ".claude" / "projects" / "project-a"
+        dir_b.mkdir(parents=True)
+        dir_a.mkdir(parents=True)
+        (dir_b / "sess-dup.jsonl").write_text("{}", encoding="utf-8")
+        (dir_a / "sess-dup.jsonl").write_text("{}", encoding="utf-8")
+
+        path, harness = resolve_transcript_path("sess-dup")
+
+        assert path == dir_a / "sess-dup.jsonl"
+        assert harness == "claude"
