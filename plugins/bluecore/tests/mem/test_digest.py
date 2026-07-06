@@ -268,7 +268,7 @@ class TestExtractFinalAssistantText:
         path = tmp_path / "t.jsonl"
         path.write_text("{}", encoding="utf-8")
 
-        def _raise_os_error(self: Path) -> None:
+        def _raise_os_error(self: Path, **kwargs: object) -> None:
             raise OSError("boom")
 
         monkeypatch.setattr(Path, "stat", _raise_os_error)
