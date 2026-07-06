@@ -44,6 +44,7 @@ user-invocable: false
    - スコープガード: `approved_plan` に変更ファイル一覧を特定できる場合のみ、編集ファイルが一覧内かを照合し、逸脱は blocker 扱い（一覧のない呼び出し元では非発動）
 5. **収束判定**: change 由来 red ゼロ（`red_baseline` 記載 nodeid を除く red がゼロ）+ lint green かつ evaluate blocker（CRITICAL/HIGH）ゼロ かつ `converge_extra` 充足 → 収束
    - `red_baseline` 記載の red は収束を妨げない。未収束エスカレーション時は本文で隔離報告し、収束時は出力 `Assumptions` に `pre-existing red: {n}` を付記（ボックス行は増やさない）
+   - 不成立時は circuit breaker early trigger を判定（`## circuit breaker` 参照）
    - flake 判定: テスト失敗時は同一 nodeid を最大 2 回再実行し、結果が不安定なら flake と分類。flake をプロダクトコード変更で握りつぶすのは禁止。エスカレーション本文で隔離報告し、報告後は収束判定から除外可（出力ボックスに flake 行は追加しない）。`red_baseline` 記載 nodeid は flake 再実行・分類の対象外
 6. checkpoint 更新 + green コミット
 
@@ -63,6 +64,8 @@ user-invocable: false
 
 - 照合: 反復1の checkpoint 反復履歴に記録済みのシグネチャ（定義は `../checkpoint/SKILL.md` が単一情報源。本ファイルで再定義しない）と反復2 generate 自己検証結果を文字列完全一致で比較
 - hard trigger: 同一 pytest nodeid（`red_baseline` 記載 nodeid を除く）が反復2 の自己検証でも red → evaluate をスキップし即エスカレーション・停止（反復履歴に `result=circuit-break` を記録、green コミットしない）
+- early trigger（反復1 収束判定 不成立時）: 収束判定時点の red nodeid 集合（`red_baseline` 除外後）がベースライン記録時（同除外後）と完全一致（= 新規 red なし・green 化なし・改善デルタ≈0）かつ残 blocker/red の根本原因を 1 行で特定できない場合、反復2 を省略し即エスカレーション・停止（反復履歴に `result=circuit-break`、rootcause 欄に `early-escalation: {理由}` を記録、green コミットしない）
+- 根本原因を 1 行で特定済みなら early trigger は発火せず反復2 を実行（rootcause 欄に記録）
 - soft trigger: blocker シグネチャ一致はエスカレーション材料のみ（それ単独では停止しない）
 
 ## checkpoint 連携
