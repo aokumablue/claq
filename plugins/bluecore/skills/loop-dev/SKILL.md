@@ -40,7 +40,7 @@ user-invocable: false
 
    生成直後に自己検証必須: 検出済みテストコマンド + linter（本リポジトリなら `python3 -m pytest -q` + `ruff check plugins/bluecore/src`）を実行し、red なら evaluate に進む前に同一 generate 内で修正
 4. **evaluate（条件付き並列）**: `bluecore:reviewer` 必須。認証/ユーザー入力/シークレット/API エンドポイント/支払いに触れる変更のみ `bluecore:security-auditor` を並列追加
-   - reviewer 起動時は `verify_mode: reexecute` + 失敗 pytest nodeid（反復履歴 tests= 記録と同一）+ 自己検証で使ったテストコマンドを `test_cmd` として渡す。generate の自己申告（「テスト通過」等の要約）は渡さない — diff とテスト結果は reviewer が一次取得（反復2 の evaluate も同様）
+   - reviewer 起動時は `verify_mode: reexecute` + 失敗 pytest nodeid（反復履歴 tests= 記録と同一）+ 自己検証で使ったテストコマンドを `test_cmd` として渡す（`approved_plan` から変更予定テストファイルを特定できる場合はその一覧も渡す）。generate の自己申告（「テスト通過」等の要約）は渡さない — diff とテスト結果は reviewer が一次取得（反復2 の evaluate も同様）
    - スコープガード: `approved_plan` に変更ファイル一覧を特定できる場合のみ、編集ファイルが一覧内かを照合し、逸脱は blocker 扱い（一覧のない呼び出し元では非発動）
 5. **収束判定**: change 由来 red ゼロ（`red_baseline` 記載 nodeid を除く red がゼロ）+ lint green かつ evaluate blocker（CRITICAL/HIGH）ゼロ かつ `converge_extra` 充足 → 収束
    - `red_baseline` 記載の red は収束を妨げない。未収束エスカレーション時は本文で隔離報告し、収束時は出力 `Assumptions` に `pre-existing red: {n}` を付記（ボックス行は増やさない）
