@@ -58,7 +58,7 @@ loop-engineering checklist の 10 領域を履歴の実測で充足評価（各�
 2. maker/checker 分離 — evaluate（reviewer 一次検証）が全実行で走っているか
 3. 状態永続化 — checkpoint + 反復履歴が実行ごとに存在するか
 4. 反復上限 — iter 3 以上の行がゼロか
-5. circuit breaker — 同一 nodeid 再 red が circuit-break として記録されているか
+5. circuit breaker — 同一テスト失敗シグネチャの再 red が circuit-break として記録されているか
 6. 根本原因診断 — 反復2 行の rootcause 記入率
 7. flake 分類 — flake の隔離報告があり、隠蔽コミットがないか
 8. scope guard — scope=VIOLATION の発生率と blocker 化の有無

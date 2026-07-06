@@ -66,17 +66,17 @@ Confidence 80-100 のみ報告。80未満 → 黙殺。
 
 ## 一次検証（verify_mode: reexecute 指定時のみ）
 
-呼び出し元が `verify_mode: reexecute` を指定した場合のみ有効。指定時は失敗 pytest nodeid 一覧と、実装者が自己検証に使った実行コマンド `test_cmd` が併せて渡される。**未指定時（`/review` 等）は本節を一切適用せず、動作は完全に現状どおり。**
+呼び出し元が `verify_mode: reexecute` を指定した場合のみ有効。指定時は失敗テストのシグネチャ（例: pytest なら nodeid）一覧と、実装者が自己検証に使った実行コマンド `test_cmd` が併せて渡される。**未指定時（`/review` 等）は本節を一切適用せず、動作は完全に現状どおり。**
 
 有効時は Bash で自ら実行し、**実行出力のみ**を証跡として PASS/FAIL を報告する:
 
 0. **`test_cmd` 検証（実行前必須）**: 文字列**全体**が allowlist 正規表現 `^(source\s+[\w./]+/activate\s+&&\s+)?(python3\s+-m\s+)?pytest\b[\w\-./:= ]*$` に一致すること（全体一致のため改行・単独 `&`・`pytest -q && 任意コマンド` 等の連結は自動的に不一致 = 拒否）。不一致なら**実行せず** BLOCKER として報告
-1. **テスト改ざんガード（実行前・決定的・task_type 非依存）**: `git diff --staged` と `git diff` のテスト関連差分（`tests/` 配下・`test_*.py`・`*_test.py`・任意パスの `conftest.py`・pytest/coverage 設定 = `pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`）に (a) テスト関数・テストファイルの削除 (b) `@pytest.mark.skip`/`@pytest.mark.xfail` の新規付与 (c) assert 行のコメントアウト・`assert True`/`pass` への置換 (d) 収集範囲の縮小・skip 追加・カバレッジ閾値緩和につながる設定・フック変更（`testpaths`/`addopts`/`python_files`/`fail_under` 等の設定キー、`conftest.py` への `pytest_collection_modifyitems` 等の収集操作フック追加を含む） のいずれかを検出したら、以降の再実行を行わず BLOCKER として報告
+1. **テスト改ざんガード（実行前・決定的・task_type 非依存・言語非依存）**: `git diff --staged` と `git diff` のテスト関連差分（対象 = 検出済みテスト基盤のテストファイルとテスト・カバレッジ設定。例: Python/pytest なら `tests/` 配下・`test_*.py`・`*_test.py`・任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `*.test.*`/`*.spec.*`・`jest.config.*` 等）に (a) テスト関数・テストファイルの削除 (b) テスト無効化マーカーの新規付与（例: `@pytest.mark.skip`/`@pytest.mark.xfail`、`it.skip`/`xit`） (c) アサーション行のコメントアウト・恒真化（例: `assert True`/`pass` への置換） (d) 収集範囲の縮小・skip 追加・カバレッジ閾値緩和につながる設定・フック変更（例: `testpaths`/`addopts`/`python_files`/`fail_under` 等の設定キー、`conftest.py` への `pytest_collection_modifyitems` 等の収集操作フック追加） のいずれかを検出したら、以降の再実行を行わず BLOCKER として報告
    - 除外（許可）: 純増の新規テスト追加 / 呼び出し元から変更予定テストファイル一覧が渡された場合はその一覧内のファイル
    - 上記 3 種以外（期待値変更・弱体化疑い）は決定的に判定できないため WARNING 止まり（Confidence 80 基準は従来どおり）
 2. `ruff check` を全体実行
-3. 渡された失敗 nodeid を、渡された `test_cmd` を基底コマンドとして pytest で再実行（RED→GREEN 遷移の独立確認）。テストコマンドを推測・再導出しない — 必ず渡された `test_cmd` を使う
-4. 変更ファイル関連テストのサブセット実行: 変更ファイルの stem に一致する `tests/**/test_*{stem}*`。一致なしなら ④ はスキップ
+3. 渡された失敗テストを、渡された `test_cmd` を基底コマンドとして再実行（RED→GREEN 遷移の独立確認）。テストコマンドを推測・再導出しない — 必ず渡された `test_cmd` を使う
+4. 変更ファイル関連テストのサブセット実行: 変更ファイルの stem に一致するテストファイル（例: Python なら `tests/**/test_*{stem}*`）。一致なしなら ④ はスキップ
 
 - 実装者の自己申告・会話上の主張（「テスト通った」等）は検証入力として認めない
 - verify_mode 指定時の既定スタンス: 拒否理由を能動的に探す（Confidence 80 未満は黙殺の基準は従来どおり）

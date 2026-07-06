@@ -45,10 +45,10 @@ completed: false
 <次セッションで必要な最小限コンテキスト。500文字以内。>
 
 ## 反復履歴
-- iter{n} | blockers=[{blockerシグネチャ, ...}] | tests={PASS|FAIL:{nodeid, ...}} | lint={PASS|FAIL} | scope={OK|VIOLATION} | result={converged|not-converged|circuit-break|stopped} | rootcause={1行 or -}
+- iter{n} | blockers=[{blockerシグネチャ, ...}] | tests={PASS|FAIL:{テスト失敗シグネチャ, ...}} | lint={PASS|FAIL} | scope={OK|VIOLATION} | result={converged|not-converged|circuit-break|stopped} | rootcause={1行 or -}
 
 ## ベースライン
-- red_baseline={nodeid, ...|-}
+- red_baseline={テスト失敗シグネチャ, ...|-}
 ```
 
 ## 反復履歴の記録ルール
@@ -64,7 +64,7 @@ completed: false
 
 circuit-breaker シグネチャの定義は本ファイルが単一情報源。loop-dev の SKILL.md は本ファイルを参照するのみ。
 
-- テスト失敗シグネチャ: pytest nodeid をそのまま使用
+- テスト失敗シグネチャ: テストランナーが出力する一意なテスト識別子をそのまま使用（例: pytest なら nodeid、jest ならフルテスト名）
 - blocker シグネチャ: `正規化相対パス~指摘要旨先頭8語` — 小文字化し、行番号を除去、数値をマスクした上での先頭8語
 - 正規化は記録時に確定し、以後の比較は文字列の完全一致のみ（再正規化のブレを排除）
 - blocker シグネチャ・rootcause・`red_baseline` の記録前に、シークレット様文字列（`sk-` `ghp_` `AKIA` 接頭辞・JWT 形式・長い Base64 等）を `***REDACTED***` にマスクする
@@ -73,7 +73,7 @@ circuit-breaker シグネチャの定義は本ファイルが単一情報源。l
 
 - 任意セクション。反復ループ実行時のみ、run 単位で 1 回、反復1 generate 前にフルスイート結果から記録する
 - 記録後は不変（追記・編集とも禁止）。red ゼロなら `-`
-- 入力・plan で green 化を明示された既存 red nodeid は除外して記録する（収束判定・改善デルタの対象に残すため）
+- 入力・plan で green 化を明示された既存 red のシグネチャは除外して記録する（収束判定・改善デルタの対象に残すため）
 - 必ずトップレベルの `## ` 見出しで記載する（理由は反復履歴と同じ）
 
 ## 操作
