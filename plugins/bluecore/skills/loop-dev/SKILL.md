@@ -28,7 +28,8 @@ user-invocable: false
 ### 反復1（重量反復: 一発収束を狙う）
 
 1. **plan（並列）**: `bluecore:planner` と `bluecore:architect` 決定モードを同時起動し、結果をマージ。分業: planner = 手順分解・依存関係・複雑度見積もり / architect = 構造影響・技術リスク・単一ブループリント確定。`approved_plan` があれば両者省略
-2. **generate**: 下表でエージェントをルーティング
+2. **baseline**: フルスイート（検出済みテストコマンド）を 1 回実行し、既存 red の nodeid 集合を checkpoint `## ベースライン` に記録（フォーマット・記録ルールは `../checkpoint/SKILL.md` が単一情報源）。run 単位 1 回・記録後不変
+3. **generate**: 下表でエージェントをルーティング
 
    | 作業内容 | 担当エージェント |
    |---|---|
@@ -38,12 +39,13 @@ user-invocable: false
    | 性能改善 | `bluecore:perf-optimizer` |
 
    生成直後に自己検証必須: 検出済みテストコマンド + linter（本リポジトリなら `python3 -m pytest -q` + `ruff check plugins/bluecore/src`）を実行し、red なら evaluate に進む前に同一 generate 内で修正
-3. **evaluate（条件付き並列）**: `bluecore:reviewer` 必須。認証/ユーザー入力/シークレット/API エンドポイント/支払いに触れる変更のみ `bluecore:security-auditor` を並列追加
+4. **evaluate（条件付き並列）**: `bluecore:reviewer` 必須。認証/ユーザー入力/シークレット/API エンドポイント/支払いに触れる変更のみ `bluecore:security-auditor` を並列追加
    - reviewer 起動時は `verify_mode: reexecute` + 失敗 pytest nodeid（反復履歴 tests= 記録と同一）+ 自己検証で使ったテストコマンドを `test_cmd` として渡す。generate の自己申告（「テスト通過」等の要約）は渡さない — diff とテスト結果は reviewer が一次取得（反復2 の evaluate も同様）
    - スコープガード: `approved_plan` に変更ファイル一覧を特定できる場合のみ、編集ファイルが一覧内かを照合し、逸脱は blocker 扱い（一覧のない呼び出し元では非発動）
-4. **収束判定**: テスト+lint green かつ evaluate blocker（CRITICAL/HIGH）ゼロ かつ `converge_extra` 充足 → 収束
-   - flake 判定: テスト失敗時は同一 nodeid を最大 2 回再実行し、結果が不安定なら flake と分類。flake をプロダクトコード変更で握りつぶすのは禁止。エスカレーション本文で隔離報告し、報告後は収束判定から除外可（出力ボックスに flake 行は追加しない）
-5. checkpoint 更新 + green コミット
+5. **収束判定**: change 由来 red ゼロ（`red_baseline` 記載 nodeid を除く red がゼロ）+ lint green かつ evaluate blocker（CRITICAL/HIGH）ゼロ かつ `converge_extra` 充足 → 収束
+   - `red_baseline` 記載の red は収束を妨げない。未収束エスカレーション時は本文で隔離報告し、収束時は出力 `Assumptions` に `pre-existing red: {n}` を付記（ボックス行は増やさない）
+   - flake 判定: テスト失敗時は同一 nodeid を最大 2 回再実行し、結果が不安定なら flake と分類。flake をプロダクトコード変更で握りつぶすのは禁止。エスカレーション本文で隔離報告し、報告後は収束判定から除外可（出力ボックスに flake 行は追加しない）。`red_baseline` 記載 nodeid は flake 再実行・分類の対象外
+6. checkpoint 更新 + green コミット
 
 ### 反復2（修正専用: スコープ拡張禁止）
 
@@ -55,12 +57,12 @@ user-invocable: false
 
 ### 上限超過時
 
-反復2 で未収束なら checkpoint を `completed: false` で保存し、残 blocker + 根本原因 + 推奨次アクション + 反復履歴全文（flake 隔離報告を含む）をエスカレーション本文として出力しユーザー報告・停止。
+反復2 で未収束なら checkpoint を `completed: false` で保存し、残 blocker + 根本原因 + 推奨次アクション + 反復履歴全文（flake・baseline red の隔離報告を含む）をエスカレーション本文として出力しユーザー報告・停止。
 
 ## circuit breaker
 
 - 照合: 反復1の checkpoint 反復履歴に記録済みのシグネチャ（定義は `../checkpoint/SKILL.md` が単一情報源。本ファイルで再定義しない）と反復2 generate 自己検証結果を文字列完全一致で比較
-- hard trigger: 同一 pytest nodeid が反復2 の自己検証でも red → evaluate をスキップし即エスカレーション・停止（反復履歴に `result=circuit-break` を記録、green コミットしない）
+- hard trigger: 同一 pytest nodeid（`red_baseline` 記載 nodeid を除く）が反復2 の自己検証でも red → evaluate をスキップし即エスカレーション・停止（反復履歴に `result=circuit-break` を記録、green コミットしない）
 - soft trigger: blocker シグネチャ一致はエスカレーション材料のみ（それ単独では停止しない）
 
 ## checkpoint 連携
