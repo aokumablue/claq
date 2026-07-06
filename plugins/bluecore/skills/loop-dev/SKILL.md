@@ -45,13 +45,20 @@ user-invocable: false
 ### 反復2（修正専用: スコープ拡張禁止）
 
 1. plan 省略。反復1の evaluate blocker を修正タスクへ直変換
-2. **generate**: blocker 該当箇所のみ修正（新機能追加・リファクタ拡大禁止）+ 自己検証
-3. **evaluate**: reviewer 再実行 — 前回 blocker の解消確認のみに限定（新規指摘の掘り起こし禁止）
-4. 収束判定 → checkpoint 更新 → green コミット
+2. **generate**: 各 blocker の修正前に根本原因を 1 行で明記（対症療法パッチ禁止。反復履歴行の rootcause に記録）。blocker 該当箇所のみ修正（新機能追加・リファクタ拡大禁止）+ 自己検証
+3. **circuit breaker 判定**: 自己検証結果を反復1のシグネチャと照合（`## circuit breaker` 参照）。hard trigger 時は evaluate をスキップ
+4. **evaluate**: reviewer 再実行 — 前回 blocker の解消確認のみに限定（新規指摘の掘り起こし禁止）
+5. 収束判定 → checkpoint 更新 → green コミット
 
 ### 上限超過時
 
 反復2 で未収束なら checkpoint を `completed: false` で保存し、残 blocker 一覧 + 推奨次アクションを出力してユーザー報告・停止。
+
+## circuit breaker
+
+- 照合: 反復1の checkpoint 反復履歴に記録済みのシグネチャ（定義は `../checkpoint/SKILL.md` が単一情報源。本ファイルで再定義しない）と反復2 generate 自己検証結果を文字列完全一致で比較
+- hard trigger: 同一 pytest nodeid が反復2 の自己検証でも red → evaluate をスキップし即エスカレーション・停止（反復履歴に `result=circuit-break` を記録、green コミットしない）
+- soft trigger: blocker シグネチャ一致はエスカレーション材料のみ（それ単独では停止しない）
 
 ## checkpoint 連携
 
@@ -59,7 +66,7 @@ Skill ネスト発火は使わない。checkpoint skill のフォーマット（
 
 - 保存先: `~/.bluecore/session-data/checkpoint-<YYYY-MM-DD>-<task-slug>.md`
 - 反復1 開始前に新規作成（`completed: false`）
-- 各反復後に完了ステップ・変更済みファイルを更新
+- 各反復の収束判定後に完了ステップ・変更済みファイルを更新し、`## 反復履歴` へ 1 行追記 + State Rot 除去（フォーマット・ルールは `../checkpoint/SKILL.md`）
 - 収束時 `completed: true`（次セッション自動注入を停止）
 - 上限超過停止時は `completed: false` のまま「再開コンテキスト」に残 blocker を記載
 
