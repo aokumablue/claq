@@ -39,7 +39,10 @@ user-invocable: false
 
    生成直後に自己検証必須: 検出済みテストコマンド + linter（本リポジトリなら `python3 -m pytest -q` + `ruff check plugins/bluecore/src`）を実行し、red なら evaluate に進む前に同一 generate 内で修正
 3. **evaluate（条件付き並列）**: `bluecore:reviewer` 必須。認証/ユーザー入力/シークレット/API エンドポイント/支払いに触れる変更のみ `bluecore:security-auditor` を並列追加
+   - reviewer 起動時は `verify_mode: reexecute` + 失敗 pytest nodeid（反復履歴 tests= 記録と同一）+ 自己検証で使ったテストコマンドを `test_cmd` として渡す。generate の自己申告（「テスト通過」等の要約）は渡さない — diff とテスト結果は reviewer が一次取得（反復2 の evaluate も同様）
+   - スコープガード: `approved_plan` に変更ファイル一覧を特定できる場合のみ、編集ファイルが一覧内かを照合し、逸脱は blocker 扱い（一覧のない呼び出し元では非発動）
 4. **収束判定**: テスト+lint green かつ evaluate blocker（CRITICAL/HIGH）ゼロ かつ `converge_extra` 充足 → 収束
+   - flake 判定: テスト失敗時は同一 nodeid を最大 2 回再実行し、結果が不安定なら flake と分類。flake をプロダクトコード変更で握りつぶすのは禁止。エスカレーション本文で隔離報告し、報告後は収束判定から除外可（出力ボックスに flake 行は追加しない）
 5. checkpoint 更新 + green コミット
 
 ### 反復2（修正専用: スコープ拡張禁止）
@@ -52,7 +55,7 @@ user-invocable: false
 
 ### 上限超過時
 
-反復2 で未収束なら checkpoint を `completed: false` で保存し、残 blocker 一覧 + 推奨次アクションを出力してユーザー報告・停止。
+反復2 で未収束なら checkpoint を `completed: false` で保存し、残 blocker + 根本原因 + 推奨次アクション + 反復履歴全文（flake 隔離報告を含む）をエスカレーション本文として出力しユーザー報告・停止。
 
 ## circuit breaker
 
@@ -86,6 +89,7 @@ Loop-Dev Result
 Task:        {task}
 Iterations:  {1|2} / 2
 Converged:   YES / NO (stopped)
+Circuit-Break: {YES|NO}
 Tests:       PASS / FAIL
 Lint:        PASS / FAIL
 Blockers:    {n} remaining
@@ -102,11 +106,18 @@ Assumptions: {仮決定事項 or "-"}
 - 反復2 のスコープは反復1 の blocker のみ
 - 自己検証（テスト+lint）を evaluate より前に必ず実行（evaluate に red コードを渡さない）
 - 後方互換フォールバック禁止・古いコード削除
-- レート制限 90% 超で次反復に進まず checkpoint 保存してユーザー確認
-- 収束 gate の最終権限は loop-dev の evaluate。委譲先エージェントが独自 gate を持つ場合（例: refactor-orchestrator の final gate）も loop-dev 判定を正とする
 - generate 委譲先エージェントの Agent 再委譲は 1 段まで（多層ネストによるコンテキスト消費と収束遅延の防止）
+
+## Human Gate
+
+人間の確認・停止点は次の 4 つのみ（自律度パラメータは導入しない）。収束 gate の最終権限は loop-dev の evaluate — 委譲先エージェントが独自 gate を持つ場合（例: refactor-orchestrator の final gate）も loop-dev 判定を正とする。
+
+1. 計画承認: 呼び出し元コマンドで合意済み（本 skill 内では行わない）
+2. 上限超過・circuit break: エスカレーション出力してユーザー報告・停止
+3. レート制限 90% 超: 次反復に進まず checkpoint 保存してユーザー確認
+4. コミット禁止規約: 対象リポジトリの規約でコミット禁止なら自動コミットせず「未コミット（理由）」を報告
 
 ## 永続メモリ
 
 search: `loop-dev iteration blocker converge {task キーワード}`
-record: `{"event_type":"loop-dev","content":"Task:{task}. Iter:{n}/2. Converged:{y/n}. Blockers:{n}. Commits:{n}"}`
+record（各反復終了ごとに 1 件発行。Result は反復履歴の 4 値と同一語彙。loop-audit skill の副次データソース）: `{"event_type":"loop-dev","content":"Task:{task}. Iter:{n}/2. Result:{converged|not-converged|circuit-break|stopped}. Blockers:{n}. Flake:{n}. Commits:{hash}"}`
