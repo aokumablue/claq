@@ -70,7 +70,10 @@ Confidence 80-100 のみ報告。80未満 → 黙殺。
 
 有効時は Bash で自ら実行し、**実行出力のみ**を証跡として PASS/FAIL を報告する:
 
-0. **`test_cmd` 検証（実行前必須）**: 文字列**全体**が allowlist 正規表現 `^(source\s+[\w./]+/activate\s+&&\s+)?(python3\s+-m\s+)?(pytest|jest|vitest|go\s+test|cargo\s+test|npx\s+(jest|vitest))\b[\w\-./:= ]*$` に一致すること（既知テストランナーの直接実行限定・全体一致のため改行・単独 `&`・`pytest -q && 任意コマンド` 等の連結・未知ランナーは自動的に不一致 = 拒否。`npm`/`pnpm`/`yarn` の `test` 系は `package.json` の `scripts` = ユーザー編集可能文字列へ委譲するため許可しない）。不一致なら**実行せず** BLOCKER として報告
+0. **`test_cmd` 検証（実行前必須・言語非依存の三層検証）**: 次の 3 点をすべて満たすこと。1 点でも不一致なら**実行せず** BLOCKER として報告
+   - 由来: `test_cmd` が呼び出し元 orchestrator の baseline step（変更適用前）で自ら検出・実行したコマンドである旨が呼び出し時に明示されていること（実装者の自己申告コマンドは受け付けない）
+   - 形状: 文字列**全体**が `^(source [\w./]+/activate && )?[A-Za-z][\w.\-]*( [\w\-./:=]+)*$` に一致（テストランナー名は限定しない。シェル演算子 `& ; | > <`・引用符・バッククォート・`$()`・改行・環境変数前置は文字クラス外 = 連結・注入は自動拒否）
+   - HEAD 照合: 先頭のランナートークンが、`git show HEAD:` で読んだ**コミット済み**プロジェクト設定（例: `pyproject.toml`・`package.json` の `scripts.test`・CI 設定・`Makefile` の test ターゲット・`CLAUDE.md`）または言語慣行（`go.mod`→`go test`、`Cargo.toml`→`cargo test` 等）から導出したテストコマンドの先頭トークンと一致すること。作業ツリーの未コミット変更は参照しない（実装者の変更の影響を受けない）。導出不能なら拒否（安全側）
 1. **テスト改ざんガード（実行前・決定的・task_type 非依存・言語非依存）**: `git diff --staged` と `git diff` のテスト関連差分（対象 = 検出済みテスト基盤のテストファイルとテスト・カバレッジ設定。例: Python/pytest なら `tests/` 配下・`test_*.py`・`*_test.py`・任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `*.test.*`/`*.spec.*`・`jest.config.*`/`vitest.config.*`・`package.json` の `scripts`、Go なら `*_test.go`、Rust なら `tests/` 配下）に (a) テスト関数・テストファイルの削除 (b) テスト無効化マーカーの新規付与（例: `@pytest.mark.skip`/`@pytest.mark.xfail`、`it.skip`/`xit`、`t.Skip()`、`#[ignore]`） (c) アサーション行のコメントアウト・恒真化（例: `assert True`/`pass` への置換） (d) 収集範囲の縮小・skip 追加・カバレッジ閾値緩和につながる設定・フック変更（例: `testpaths`/`addopts`/`python_files`/`fail_under` 等の設定キー、`conftest.py` への `pytest_collection_modifyitems` 等の収集操作フック追加、`package.json` の `scripts.test` 等の値変更） のいずれかを検出したら、以降の再実行を行わず BLOCKER として報告。テストがプロダクトファイル内にインライン混在する言語（例: Rust の `#[cfg(test)]` モジュール）はファイルパターンで対象を特定できないため、(a)〜(c) を全差分に対して直接走査する
    - 除外（許可）: 純増の新規テスト追加 / 呼び出し元から変更予定テストファイル一覧が渡された場合はその一覧内のファイル
    - 上記 3 種以外（期待値変更・弱体化疑い）は決定的に判定できないため WARNING 止まり（Confidence 80 基準は従来どおり）
