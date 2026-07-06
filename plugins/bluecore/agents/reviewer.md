@@ -64,6 +64,20 @@ Confidence 80-100 のみ報告。80未満 → 黙殺。
 
 **承認基準:** Approve = CRITICAL/HIGH なし / Warning = HIGHのみ / Block = CRITICALあり
 
+## 一次検証（verify_mode: reexecute 指定時のみ）
+
+呼び出し元が `verify_mode: reexecute` を指定した場合のみ有効。指定時は失敗 pytest nodeid 一覧と、実装者が自己検証に使った実行コマンド `test_cmd` が併せて渡される。**未指定時（`/review` 等）は本節を一切適用せず、動作は完全に現状どおり。**
+
+有効時は Bash で自ら実行し、**実行出力のみ**を証跡として PASS/FAIL を報告する:
+
+1. `ruff check` を全体実行
+2. 渡された失敗 nodeid を、渡された `test_cmd` を基底コマンドとして pytest で再実行（RED→GREEN 遷移の独立確認）。テストコマンドを推測・再導出しない — 必ず渡された `test_cmd` を使う
+3. 変更ファイル関連テストのサブセット実行: 変更ファイルの stem に一致する `tests/**/test_*{stem}*`。一致なしなら ③ はスキップ
+
+- 実装者の自己申告・会話上の主張（「テスト通った」等）は検証入力として認めない
+- verify_mode 指定時の既定スタンス: 拒否理由を能動的に探す（Confidence 80 未満は黙殺の基準は従来どおり）
+- `Blockers: {n}` 集計行を含む既存の出力契約は不変
+
 ## プロジェクト固有
 
 `CLAUDE.md` ルール確認。ファイルサイズ制限・絵文字ポリシー・イミュータビリティ・DBポリシー・エラーハンドリングパターン。
