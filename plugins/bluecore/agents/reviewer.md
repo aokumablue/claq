@@ -70,7 +70,7 @@ Confidence 80-100 のみ報告。80未満 → 黙殺。
 
 有効時は Bash で自ら実行し、**実行出力のみ**を証跡として PASS/FAIL を報告する:
 
-0. **`test_cmd` 検証（実行前必須）**: 文字列**全体**が allowlist 正規表現 `^(source\s+[\w./]+/activate\s+&&\s+)?(python3\s+-m\s+)?pytest\b[\w\-./:= ]*$` に一致すること（全体一致のため改行・単独 `&`・`pytest -q && 任意コマンド` 等の連結は自動的に不一致 = 拒否）。不一致なら**実行せず** BLOCKER として報告
+0. **`test_cmd` 検証（実行前必須）**: 文字列**全体**が allowlist 正規表現 `^(source\s+[\w./]+/activate\s+&&\s+)?(python3\s+-m\s+)?(pytest|jest|vitest|go\s+test|cargo\s+test|(npx|npm|pnpm|yarn)\s+(run\s+)?(test|jest|vitest))\b[\w\-./:= ]*$` に一致すること（既知テストランナー限定・全体一致のため改行・単独 `&`・`pytest -q && 任意コマンド` 等の連結・未知ランナーは自動的に不一致 = 拒否）。不一致なら**実行せず** BLOCKER として報告
 1. **テスト改ざんガード（実行前・決定的・task_type 非依存・言語非依存）**: `git diff --staged` と `git diff` のテスト関連差分（対象 = 検出済みテスト基盤のテストファイルとテスト・カバレッジ設定。例: Python/pytest なら `tests/` 配下・`test_*.py`・`*_test.py`・任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `*.test.*`/`*.spec.*`・`jest.config.*` 等）に (a) テスト関数・テストファイルの削除 (b) テスト無効化マーカーの新規付与（例: `@pytest.mark.skip`/`@pytest.mark.xfail`、`it.skip`/`xit`） (c) アサーション行のコメントアウト・恒真化（例: `assert True`/`pass` への置換） (d) 収集範囲の縮小・skip 追加・カバレッジ閾値緩和につながる設定・フック変更（例: `testpaths`/`addopts`/`python_files`/`fail_under` 等の設定キー、`conftest.py` への `pytest_collection_modifyitems` 等の収集操作フック追加） のいずれかを検出したら、以降の再実行を行わず BLOCKER として報告
    - 除外（許可）: 純増の新規テスト追加 / 呼び出し元から変更予定テストファイル一覧が渡された場合はその一覧内のファイル
    - 上記 3 種以外（期待値変更・弱体化疑い）は決定的に判定できないため WARNING 止まり（Confidence 80 基準は従来どおり）
