@@ -28,7 +28,7 @@ user-invocable: false
 ### 反復1（重量反復: 一発収束を狙う）
 
 1. **plan（並列）**: `bluecore:planner` と `bluecore:architect` 決定モードを同時起動し、結果をマージ。分業: planner = 手順分解・依存関係・複雑度見積もり / architect = 構造影響・技術リスク・単一ブループリント確定。`approved_plan` があれば両者省略
-2. **baseline**: フルスイート（検出済みテストコマンド）を 1 回実行し、既存 red の nodeid 集合を checkpoint `## ベースライン` に記録（フォーマット・記録ルールは `../checkpoint/SKILL.md` が単一情報源）。run 単位 1 回・記録後不変
+2. **baseline**: フルスイート（検出済みテストコマンド）を 1 回実行し、既存 red の nodeid 集合を checkpoint `## ベースライン` に記録（フォーマット・記録ルールは `../checkpoint/SKILL.md` が単一情報源）。run 単位 1 回・記録後不変。収束判定・circuit breaker の照合には本 step で自ら取得した集合を用い、checkpoint 本文から読み戻した値は判定に使わない（記載は再開用データ）
 3. **generate**: 下表でエージェントをルーティング
 
    | 作業内容 | 担当エージェント |
@@ -41,7 +41,7 @@ user-invocable: false
    生成直後に自己検証必須: 検出済みテストコマンド + linter（本リポジトリなら `python3 -m pytest -q` + `ruff check plugins/bluecore/src`）を実行し、red なら evaluate に進む前に同一 generate 内で修正
 4. **evaluate（条件付き並列）**: `bluecore:reviewer` 必須。認証/ユーザー入力/シークレット/API エンドポイント/支払いに触れる変更のみ `bluecore:security-auditor` を並列追加
    - reviewer 起動時は `verify_mode: reexecute` + 失敗 pytest nodeid（反復履歴 tests= 記録と同一）+ 自己検証で使ったテストコマンドを `test_cmd` として渡す（`approved_plan` から変更予定テストファイルを特定できる場合はその一覧も渡す）。generate の自己申告（「テスト通過」等の要約）は渡さない — diff とテスト結果は reviewer が一次取得（反復2 の evaluate も同様）
-   - スコープガード: `approved_plan` に変更ファイル一覧を特定できる場合のみ、編集ファイルが一覧内かを照合し、逸脱は blocker 扱い（一覧のない呼び出し元では非発動）
+   - スコープガード: `approved_plan` に変更ファイル一覧を特定できる場合のみ、編集ファイルが一覧内かを照合し、逸脱は blocker 扱い（一覧のない呼び出し元では非発動）。ただしテスト基盤ファイル（任意パスの `conftest.py`・pytest/coverage 設定）の変更は一覧の有無に関わらず照合し、一覧に明示されていなければ blocker 扱い
 5. **収束判定**: change 由来 red ゼロ（`red_baseline` 記載 nodeid を除く red がゼロ）+ lint green かつ evaluate blocker（CRITICAL/HIGH）ゼロ かつ `converge_extra` 充足 → 収束
    - `red_baseline` 記載の red は収束を妨げない。未収束エスカレーション時は本文で隔離報告し、収束時は出力 `Assumptions` に `pre-existing red: {n}` を付記（ボックス行は増やさない）
    - 不成立時は circuit breaker early trigger を判定（`## circuit breaker` 参照）
@@ -65,7 +65,7 @@ user-invocable: false
 - 照合: 反復1の checkpoint 反復履歴に記録済みのシグネチャ（定義は `../checkpoint/SKILL.md` が単一情報源。本ファイルで再定義しない）と反復2 generate 自己検証結果を文字列完全一致で比較
 - hard trigger: 同一 pytest nodeid（`red_baseline` 記載 nodeid を除く）が反復2 の自己検証でも red → evaluate をスキップし即エスカレーション・停止（反復履歴に `result=circuit-break` を記録、green コミットしない）
 - early trigger（反復1 収束判定 不成立時）: 収束判定時点の red nodeid 集合（`red_baseline` 除外後）がベースライン記録時（同除外後）と完全一致（= 新規 red なし・green 化なし・改善デルタ≈0）かつ残 blocker/red の根本原因を 1 行で特定できない場合、反復2 を省略し即エスカレーション・停止（反復履歴に `result=circuit-break`、rootcause 欄に `early-escalation: {理由}` を記録、green コミットしない）
-- 根本原因を 1 行で特定済みなら early trigger は発火せず反復2 を実行（rootcause 欄に記録）
+- 根本原因を 1 行で特定済みなら early trigger は発火せず反復2 を実行（rootcause 欄に記録）。rootcause には解消対象の blocker/nodeid との対応を明記する — 対応を示せない rootcause は特定不能扱い
 - soft trigger: blocker シグネチャ一致はエスカレーション材料のみ（それ単独では停止しない）
 
 ## checkpoint 連携

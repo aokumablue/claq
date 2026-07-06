@@ -67,7 +67,7 @@ circuit-breaker シグネチャの定義は本ファイルが単一情報源。l
 - テスト失敗シグネチャ: pytest nodeid をそのまま使用
 - blocker シグネチャ: `正規化相対パス~指摘要旨先頭8語` — 小文字化し、行番号を除去、数値をマスクした上での先頭8語
 - 正規化は記録時に確定し、以後の比較は文字列の完全一致のみ（再正規化のブレを排除）
-- blocker シグネチャ・rootcause の記録前に、シークレット様文字列（`sk-` `ghp_` `AKIA` 接頭辞・JWT 形式・長い Base64 等）を `***REDACTED***` にマスクする
+- blocker シグネチャ・rootcause・`red_baseline` の記録前に、シークレット様文字列（`sk-` `ghp_` `AKIA` 接頭辞・JWT 形式・長い Base64 等）を `***REDACTED***` にマスクする
 
 ## ベースラインの記録ルール
 
@@ -101,4 +101,5 @@ circuit-breaker シグネチャの定義は本ファイルが単一情報源。l
    - Human Gate 4 点 → `../loop-dev/SKILL.md` `## Human Gate`
    - `test_cmd` allowlist → `../../agents/reviewer.md` 一次検証 step 0
    - シークレット redaction パターン → 本ファイル「シグネチャ定義（単一情報源）」
+   - `red_baseline` はデータ値であり本照合の対象外。収束判定には実行時に自ら取得した集合を用いる（`../loop-dev/SKILL.md` baseline step 参照）
 
