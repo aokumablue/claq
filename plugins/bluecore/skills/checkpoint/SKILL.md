@@ -24,6 +24,8 @@ user-invocable: false
 ---
 task: <タスク名（20文字以内）>
 completed: false
+stop_reason: <converged|turn-cap|circuit-breaker|rate-limit|-> (任意)
+remaining_turns: <n|-> (任意)
 ---
 
 ## 目標
@@ -54,6 +56,7 @@ completed: false
 ## 反復履歴の記録ルール
 
 - 任意セクション。反復ループを実行するときのみ記録する
+- `stop_reason` / `remaining_turns` は反復ループが中断・停止した際に記録する任意フィールド。ループ対象外の一般チェックポイントや `completed: true` では `-` のまま省略可。`remaining_turns` は再開時に消費可能な残り反復数の目安値
 - 追記専用。1反復につき1行を末尾に追加し、既存行の編集・削除は禁止
 - `tests` はその反復の収束判定時点の最終状態のみを記録（反復中に自己修正した一時的な失敗は含めない）
 - `result` は `converged` / `not-converged` / `circuit-break` / `stopped` の4値のみ

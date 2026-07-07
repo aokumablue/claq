@@ -9,6 +9,10 @@ user-invocable: false
 
 合意済み要件を入力に plan→generate→evaluate を最大 2 反復で回し、テスト green + blocker ゼロで収束させる。
 
+## 停止条件（goal-based loop）
+
+本スキルは goal-based loop であり、停止は次のいずれか成立時のみ発生する: (1) 収束条件成立（下記「収束判定」）、(2) turn cap 到達（最大 2 反復、下記手順章）、(3) circuit breaker 発火（`## circuit breaker`）。これ以外の理由（「大体直った」等の主観判断）での打ち切りは禁止。
+
 ## 前提（grillme 済み入力契約）
 
 再 grillme 禁止。要件は呼び出し元コマンドで合意済みであり、fork のため対話コストが高い。
@@ -114,6 +118,7 @@ Assumptions: {仮決定事項 or "-"}
 - 自己検証（テスト+lint）を evaluate より前に必ず実行（evaluate に red コードを渡さない）
 - 後方互換フォールバック禁止・古いコード削除
 - generate 委譲先エージェントの Agent 再委譲は 1 段まで（多層ネストによるコンテキスト消費と収束遅延の防止）
+- baseline 取得・テスト実行コマンドは反復1 baseline step で確定した一つを全反復で再利用し、反復ごとに再導出しない（`test_cmd` は baseline step 由来のみとする既定と整合）
 
 ## Human Gate
 

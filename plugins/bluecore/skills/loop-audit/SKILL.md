@@ -67,6 +67,14 @@ loop-engineering checklist の 10 領域を履歴の実測で充足評価（各�
 
 実測不能な領域は N/A とし、分母から除外して 10 点満点換算する（未計測を 0 点扱いしない）。
 
+## 補助観点（スコア対象外）
+
+Loop Readiness の 10 領域とは別に、以下を履歴・loop-dev SKILL.md 定義から確認し改善提案の材料とする（採点には算入しない）:
+
+- 停止条件の明文化: `../loop-dev/SKILL.md` に turn cap・収束条件・circuit breaker の 3 点が定義されているか
+- 検証の rules-based 度: evaluate の証跡が exit code・テスト出力等の機械的シグナルか、自己申告に依存していないか
+- トークン境界: 反復間で持ち越すコンテキスト（checkpoint 再開コンテキスト等の分量）が最小化されているか
+
 ## 期間指定と before/after 比較
 
 - 引数は自由文（例: 「2026-06-15 前後で比較」「6月分」）。日付を解釈し、checkpoint はファイル名 `checkpoint-<YYYY-MM-DD>-<slug>.md` の日付、コミットは `git log --since/--until` で期間に振り分ける
