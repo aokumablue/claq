@@ -19,36 +19,28 @@
 
 ## クラウドセキュリティチェックリスト
 
+各例で `PASS` = 推奨、`FAIL` = アンチパターン。
+
 ### 1. IAM とアクセス制御
 
 #### 最小権限の原則
 
 ```yaml
-# PASS: CORRECT: Minimal permissions
+# PASS: 特定リソースへ必要な read のみ
 iam_role:
-  permissions:
-    - s3:GetObject  # Only read access
-    - s3:ListBucket
-  resources:
-    - arn:aws:s3:::my-bucket/*  # Specific bucket only
+  permissions: [s3:GetObject, s3:ListBucket]
+  resources: [arn:aws:s3:::my-bucket/*]
 
-# FAIL: WRONG: Overly broad permissions
-iam_role:
-  permissions:
-    - s3:*  # All S3 actions
-  resources:
-    - "*"  # All resources
+# FAIL: s3:* を "*"（全アクション×全リソース）に付与
 ```
 
 #### 多要素認証（MFA）
 
 ```bash
-# ALWAYS enable MFA for root/admin accounts
-aws iam enable-mfa-device \
-  --user-name admin \
+# ルート/管理者アカウントは必ず MFA を有効化
+aws iam enable-mfa-device --user-name admin \
   --serial-number arn:aws:iam::123456789:mfa/admin \
-  --authentication-code1 123456 \
-  --authentication-code2 789012
+  --authentication-code1 123456 --authentication-code2 789012
 ```
 
 #### 確認項目
@@ -65,23 +57,18 @@ aws iam enable-mfa-device \
 #### クラウドシークレットマネージャー
 
 ```typescript
-// PASS: CORRECT: Use cloud secrets manager
-import { SecretsManager } from '@aws-sdk/client-secrets-manager';
-
-const client = new SecretsManager({ region: 'us-east-1' });
+// PASS: クラウド secrets manager から取得
 const secret = await client.getSecretValue({ SecretId: 'prod/api-key' });
 const apiKey = JSON.parse(secret.SecretString).key;
 
-// FAIL: WRONG: Hardcoded or in environment variables only
-const apiKey = process.env.API_KEY; // Not rotated, not audited
+// FAIL: process.env.API_KEY のみ（未ローテーション・未監査）
 ```
 
 #### シークレットのローテーション
 
 ```bash
-# Set up automatic rotation for database credentials
-aws secretsmanager rotate-secret \
-  --secret-id prod/db-password \
+# DB 認証情報を 30 日ごとに自動ローテーション
+aws secretsmanager rotate-secret --secret-id prod/db-password \
   --rotation-lambda-arn arn:aws:lambda:region:account:function:rotate \
   --rotation-rules AutomaticallyAfterDays=30
 ```
@@ -99,34 +86,19 @@ aws secretsmanager rotate-secret \
 #### VPC とファイアウォールの設定
 
 ```terraform
-# PASS: CORRECT: Restricted security group
+# PASS: 制限された security group（内部VPCのみ受信、HTTPS外向きのみ）
 resource "aws_security_group" "app" {
-  name = "app-sg"
-
   ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/16"]  # Internal VPC only
+    from_port = 443; to_port = 443; protocol = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
   }
-
   egress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  # Only HTTPS outbound
+    from_port = 443; to_port = 443; protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
-# FAIL: WRONG: Open to the internet
-resource "aws_security_group" "bad" {
-  ingress {
-    from_port   = 0
-    to_port     = 65535
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  # All ports, all IPs!
-  }
-}
+# FAIL: from_port=0 to_port=65535 protocol="tcp" cidr_blocks=["0.0.0.0/0"]（全ポート×全IP）
 ```
 
 #### 確認項目
@@ -142,25 +114,15 @@ resource "aws_security_group" "bad" {
 #### CloudWatch/ログ設定
 
 ```typescript
-// PASS: CORRECT: Comprehensive logging
-import { CloudWatchLogsClient, CreateLogStreamCommand } from '@aws-sdk/client-cloudwatch-logs';
-
-const logSecurityEvent = async (event: SecurityEvent) => {
-  await cloudwatch.putLogEvents({
-    logGroupName: '/aws/security/events',
-    logStreamName: 'authentication',
-    logEvents: [{
-      timestamp: Date.now(),
-      message: JSON.stringify({
-        type: event.type,
-        userId: event.userId,
-        ip: event.ip,
-        result: event.result,
-        // Never log sensitive data
-      })
-    }]
-  });
-};
+// PASS: 包括的なロギング（機微データは記録しない）
+await cloudwatch.putLogEvents({
+  logGroupName: '/aws/security/events',
+  logStreamName: 'authentication',
+  logEvents: [{
+    timestamp: Date.now(),
+    message: JSON.stringify({ type: event.type, userId: event.userId, ip: event.ip, result: event.result }),
+  }],
+});
 ```
 
 #### 確認項目
@@ -177,32 +139,18 @@ const logSecurityEvent = async (event: SecurityEvent) => {
 #### 安全なパイプライン設定
 
 ```yaml
-# PASS: CORRECT: Secure GitHub Actions workflow
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-
+# PASS: 安全な GitHub Actions ワークフロー
 jobs:
   deploy:
-    runs-on: ubuntu-latest
     permissions:
-      contents: read  # Minimal permissions
-
+      contents: read           # 最小権限
     steps:
       - uses: actions/checkout@v4
-
-      # Scan for secrets
-      - name: Secret scanning
+      - name: Secret scanning   # シークレット走査
         uses: trufflesecurity/trufflehog@main
-
-      # Dependency audit
       - name: Audit dependencies
         run: npm audit --audit-level=high
-
-      # Use OIDC, not long-lived tokens
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials  # 長期トークンでなく OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::123456789:role/GitHubActionsRole
@@ -211,16 +159,7 @@ jobs:
 
 #### サプライチェーンセキュリティ
 
-```json
-// package.json - Use lock files and integrity checks
-{
-  "scripts": {
-    "install": "npm ci",  // Use ci for reproducible builds
-    "audit": "npm audit --audit-level=moderate",
-    "check": "npm outdated"
-  }
-}
-```
+再現可能ビルドのため lock ファイル + 整合性チェックを使う（`npm ci` でインストール、`npm audit` で監査）。
 
 #### 確認項目
 
@@ -237,35 +176,18 @@ jobs:
 #### Cloudflare のセキュリティ設定
 
 ```typescript
-// PASS: CORRECT: Cloudflare Workers with security headers
-export default {
-  async fetch(request: Request): Promise<Response> {
-    const response = await fetch(request);
-
-    // Add security headers
-    const headers = new Headers(response.headers);
-    headers.set('X-Frame-Options', 'DENY');
-    headers.set('X-Content-Type-Options', 'nosniff');
-    headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-    headers.set('Permissions-Policy', 'geolocation=(), microphone=()');
-
-    return new Response(response.body, {
-      status: response.status,
-      headers
-    });
-  }
-};
+// PASS: Cloudflare Workers でセキュリティヘッダーを付与
+const headers = new Headers(response.headers);
+headers.set('X-Frame-Options', 'DENY');
+headers.set('X-Content-Type-Options', 'nosniff');
+headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+headers.set('Permissions-Policy', 'geolocation=(), microphone=()');
+return new Response(response.body, { status: response.status, headers });
 ```
 
 #### WAF ルール
 
-```bash
-# Enable Cloudflare WAF managed rules
-# - OWASP Core Ruleset
-# - Cloudflare Managed Ruleset
-# - Rate limiting rules
-# - Bot protection
-```
+Cloudflare WAF のマネージドルールを有効化: OWASP Core Ruleset / Cloudflare Managed Ruleset / レート制限 / ボット保護。
 
 #### 確認項目
 
@@ -281,18 +203,11 @@ export default {
 #### 自動バックアップ
 
 ```terraform
-# PASS: CORRECT: Automated RDS backups
+# PASS: RDS の自動バックアップ
 resource "aws_db_instance" "main" {
-  allocated_storage     = 20
-  engine               = "postgres"
-
-  backup_retention_period = 30  # 30 days retention
-  backup_window          = "03:00-04:00"
-  maintenance_window     = "mon:04:00-mon:05:00"
-
-  enabled_cloudwatch_logs_exports = ["postgresql"]
-
-  deletion_protection = true  # Prevent accidental deletion
+  backup_retention_period = 30       # 30 日保持
+  backup_window           = "03:00-04:00"
+  deletion_protection     = true     # 誤削除防止
 }
 ```
 
@@ -324,31 +239,8 @@ resource "aws_db_instance" "main" {
 
 ## よくあるクラウドセキュリティの設定ミス
 
-### S3 バケットの公開
-
-```bash
-# FAIL: WRONG: Public bucket
-aws s3api put-bucket-acl --bucket my-bucket --acl public-read
-
-# PASS: CORRECT: Private bucket with specific access
-aws s3api put-bucket-acl --bucket my-bucket --acl private
-aws s3api put-bucket-policy --bucket my-bucket --policy file://policy.json
-```
-
-### RDS のパブリックアクセス
-
-```terraform
-# FAIL: WRONG
-resource "aws_db_instance" "bad" {
-  publicly_accessible = true  # NEVER do this!
-}
-
-# PASS: CORRECT
-resource "aws_db_instance" "good" {
-  publicly_accessible = false
-  vpc_security_group_ids = [aws_security_group.db.id]
-}
-```
+- **S3 バケットの公開**: `--acl public-read` は不可。`--acl private` + 特定アクセスのみ許可する bucket policy を使う。
+- **RDS のパブリックアクセス**: `publicly_accessible = true` は不可。`false` にし `vpc_security_group_ids` で制限する。
 
 ## 参考資料
 

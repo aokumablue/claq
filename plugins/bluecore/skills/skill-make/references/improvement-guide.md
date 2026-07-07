@@ -49,11 +49,11 @@
 
 ## 説明文の最適化
 
-SKILL.mdの前置きにある `description` は、Claudeがスキルを呼ぶかどうかを左右する主な要素。スキルを作成・改善した後、トリガー精度を上げるために説明文の最適化を提案。
+SKILL.md 前置きの `description` は Claude がスキルを呼ぶかを左右する主要因。作成・改善後、トリガー精度向上のため最適化を提案する。train/holdout で過適合を避ける収束判断の考え方は `skill-tune`（Step 7 の hold-out 過適合チェック）に準拠する。
 
 ### 1. トリガー用evalクエリを作る
 
-20個の評価クエリを作る。`トリガー対象` と `トリガー対象外` を混ぜてJSONで保存。
+`should_trigger` の true/false を混ぜた 20 件を JSON 保存。should-trigger 8〜10 件（同意図の別表現を広く）、should-not-trigger 8〜10 件（近接するが別タスクが必要なもの）。クエリは実際のユーザーが打つ具体的な実例（パス・列名・会社名・URL など背景付き。小文字/略語/タイポ/口語も可、長さにばらつきを持たせエッジケース重視）。
 
 ```json
 [
@@ -62,19 +62,14 @@ SKILL.mdの前置きにある `description` は、Claudeがスキルを呼ぶか
 ]
 ```
 
-クエリは実際のユーザーが打ちそうな具体的で詳細なもの。パス・個人的な状況・列名・会社名・URLなど、少し背景のある実例。小文字・略語・タイポ・くだけた言い方が混ざっていても構わない。長さにばらつきを持たせ、エッジケースを重視。
-
-**should-trigger**（8〜10件）: 同じ意図の別表現を広く集める。
-**should-not-trigger**（8〜10件）: 近接しつつも別タスクが必要なものを選ぶ。
-
 ### 2. 最適化ループを回す
+
+`run_loop` が eval セットを train 60% / holdout test 40% に分けて反復改善し、`best_description` を test スコアで選ぶ。現セッションを動かす model ID を渡す。
 
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
 bluecore_run bluecore.skills.run_loop --eval-set <path-to-trigger-eval.json> --skill-path <path-to-skill> --model <model-id-powering-this-session> --max-iterations 5 --verbose
 ```
-
-現セッションを動かしているmodel IDを使う。evalセットをtrain 60% / holdout test 40%に分け、反復改善。`best_description` はtestスコアで選ぶ。
 
 ### 3. 結果を反映する
 
