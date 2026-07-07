@@ -170,6 +170,7 @@ class TestAgentTableRegression:
     """AGENT_TABLE 退行防止テスト。"""
 
     @pytest.mark.parametrize("agent_name", [
+        "bluecore:executor",
         "bluecore:explorer",
         "bluecore:planner",
         "bluecore:architect",
@@ -182,8 +183,60 @@ class TestAgentTableRegression:
         "bluecore:refactor-orchestrator",
     ])
     def test_agent_table_contains_all_agents(self, agent_name: str) -> None:
-        """AGENT_TABLE に全 10 エージェント名を含む。"""
+        """AGENT_TABLE に全 11 エージェント名を含む。"""
         assert agent_name in pre_agent_nudge.AGENT_TABLE
+
+
+class TestPreAgentNudgeExplore:
+    """Explore subagent_type 検知テスト。"""
+
+    def test_explore_emits_hook_specific_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Explore 検知時に hookSpecificOutput を stdout に書き出し、return 0。"""
+        payload = json.dumps({
+            "tool_name": "Agent",
+            "tool_input": {"subagent_type": "Explore", "prompt": "hello"},
+        })
+        stdout, _ = _capture_io(monkeypatch, payload)
+        result = pre_agent_nudge.main()
+        assert result == 0
+        assert len(stdout) == 1
+        parsed = json.loads(stdout[0])
+        assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+
+    def test_explore_context_contains_explore_table(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Explore 検知時に additionalContext に EXPLORE_TABLE を含む。"""
+        payload = json.dumps({
+            "tool_name": "Agent",
+            "tool_input": {"subagent_type": "Explore"},
+        })
+        stdout, _ = _capture_io(monkeypatch, payload)
+        pre_agent_nudge.main()
+        parsed = json.loads(stdout[0])
+        ctx = parsed["hookSpecificOutput"]["additionalContext"]
+        assert "bluecore:explorer" in ctx
+
+    def test_explore_lowercase_returns_0_no_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """小文字 explore は非該当のため出力なし・return 0（大文字小文字厳密一致）。"""
+        payload = json.dumps({
+            "tool_name": "Agent",
+            "tool_input": {"subagent_type": "explore"},
+        })
+        stdout, _ = _capture_io(monkeypatch, payload)
+        result = pre_agent_nudge.main()
+        assert result == 0
+        assert stdout == []
+
+
+class TestExploreTableRegression:
+    """EXPLORE_TABLE 退行防止テスト。"""
+
+    def test_explore_table_contains_bluecore_prefix(self) -> None:
+        """EXPLORE_TABLE が [bluecore] 接頭辞を含む。"""
+        assert pre_agent_nudge.EXPLORE_TABLE.startswith("[bluecore]")
+
+    def test_explore_table_contains_explorer_agent(self) -> None:
+        """EXPLORE_TABLE に bluecore:explorer を含む。"""
+        assert "bluecore:explorer" in pre_agent_nudge.EXPLORE_TABLE
 
 
 def test_main_entrypoint_exits_0(monkeypatch: pytest.MonkeyPatch) -> None:
