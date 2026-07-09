@@ -23,7 +23,7 @@ model: opus
 
 ## Phase 1: [フェーズ名]
 1. **[ステップ名]** (path/to/file)
-   - Action / Why / Dependencies / Risk: Low|Medium|High
+   - Action / Why / Verify（検証手段1行） / Dependencies / Risk: Low|Medium|High
 
 ## テスト戦略 / リスクと緩和策 / 成功条件
 ```
@@ -40,16 +40,19 @@ model: opus
 1. **引数定義追加** (plugins/bluecore/src/bluecore/mem/cli.py)
    - Action: search サブコマンドに `--limit` int 引数を追加（既定 10）
    - Why: 呼び出し側で件数を制御するため
+   - Verify: `mem search --help` に `--limit`（既定 10）が表示される
    - Dependencies: なし / 複雑度: 低 / Risk: Low
 2. **search 関数へ伝播** (plugins/bluecore/src/bluecore/mem/search.py)
    - Action: `search()` に `limit` パラメータを追加し SQL の LIMIT に反映
    - Why: CLI 引数を実クエリへ接続するため
+   - Verify: `search(limit=3)` が 3 件のみ返す（ステップ3のテストで確認）
    - Dependencies: ステップ1 / 複雑度: 低 / Risk: Low
 
 ## Phase 2: テスト
 3. **ユニットテスト追加** (tests/mem/test_search.py)
    - Action: limit 指定 / 既定 / 0 件境界のテストを追加
    - Why: カバレッジ 100% 維持
+   - Verify: `pytest -q tests/mem/test_search.py` が exit 0
    - Dependencies: ステップ2 / 複雑度: 中 / Risk: Low
 
 ## テスト戦略
@@ -64,6 +67,8 @@ model: opus
 - 1 ステップ 1 検証可能成果物（ステップ単独でテスト/確認できる粒度に割る）
 - 依存の明示（各ステップに Dependencies を必ず記載。なければ「なし」と書く）
 - 複雑度見積もり（低/中/高）を各ステップに付与。高は分割を検討
+- 各ステップの成功条件は機械検証可能形（テスト名/コマンド/観測値）で記す
+- 不確定前提は Assumptions として明示し確定事実と分離（推測を計画へ混ぜない）
 
 ## ベストプラクティス
 
