@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from bluecore.hooks.hook_common import emit_block_output
 from bluecore.lib.core_utils import get_bluecore_dir
 
 # stdoutプロトコルに干渉しないよう、ルートロガーを汚染せず専用ロガーへ
@@ -201,6 +202,9 @@ def _parse_input() -> dict[str, Any]:
 def _run_insaits_scan(text: str) -> dict[str, Any]:
     """InsAIts SDK でテキストをスキャンし、結果辞書を返す。エラー時は fail_mode に従い終了する。
 
+    fail-closed 時のブロックは emit_block_output() でハーネス別プロトコルに
+    変換する（Claude/Codex: stderr + exit 2、Copilot: deny JSON + exit 0）。
+
     Args:
         text: スキャン対象のテキスト。
 
@@ -220,14 +224,20 @@ def _run_insaits_scan(text: str) -> dict[str, Any]:
     except Exception as exc:  # 広範囲のcatchは意図的: SDK内部は未知
         fail_mode: str = os.environ.get("INSAITS_FAIL_MODE", "open").lower()
         if fail_mode == "closed":
-            sys.stdout.write(f"InsAIts SDK error ({type(exc).__name__}); blocking execution to avoid unscanned input.\n")
-            sys.exit(2)
+            sys.exit(
+                emit_block_output(
+                    f"InsAIts SDK error ({type(exc).__name__}); blocking execution to avoid unscanned input."
+                )
+            )
         log.warning("SDK error (%s), skipping security scan: %s", type(exc).__name__, exc)
         sys.exit(0)
 
 
 def _handle_anomalies(anomalies: list[Any], data: dict[str, Any], text: str, context: str) -> None:
     """監査ログを書き込み、異常があればフィードバックを出力して必要ならブロックする。
+
+    CRITICAL 異常のブロックは emit_block_output() でハーネス別プロトコルに
+    変換する（Claude/Codex: stderr + exit 2、Copilot: deny JSON + exit 0）。
 
     Args:
         anomalies: SDK が返した異常リスト。
@@ -248,8 +258,7 @@ def _handle_anomalies(anomalies: list[Any], data: dict[str, Any], text: str, con
     has_critical: bool = any(get_anomaly_attr(a, "severity").upper() in BLOCKING_SEVERITIES for a in anomalies)
     feedback: str = format_feedback(anomalies)
     if has_critical:
-        sys.stdout.write(feedback + "\n")
-        sys.exit(2)
+        sys.exit(emit_block_output(feedback))
     else:
         log.warning("\n%s", feedback)
         sys.exit(0)
@@ -259,7 +268,9 @@ def main() -> None:
     """PreToolUse フックとして入力を検査し、必要ならブロックします。
 
     Returns:
-        None を返します。重大な異常がある場合は sys.exit(2) で終了します。
+        None を返します。重大な異常がある場合は emit_block_output() の
+        ハーネス別プロトコル（Claude/Codex: exit 2、Copilot: deny JSON +
+        exit 0）でブロックして終了します。
 
     Args:
         引数はありません。

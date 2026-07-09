@@ -10,7 +10,7 @@ import runpy
 import subprocess
 import sys
 import types
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -703,13 +703,20 @@ def test_insights_security_monitor_reports_missing_sdk(monkeypatch: pytest.Monke
 
 
 @pytest.mark.parametrize(
-    ("fail_mode", "expected_code"),
-    [("open", 0), ("closed", 2)],
+    ("fail_mode", "harness", "expected_code"),
+    [("open", "claude", 0), ("closed", "claude", 2), ("closed", "copilot", 0)],
 )
 def test_insights_security_monitor_handles_sdk_errors(
-    monkeypatch: pytest.MonkeyPatch, fail_mode: str, expected_code: int
+    monkeypatch: pytest.MonkeyPatch, fail_mode: str, harness: str, expected_code: int
 ) -> None:
+    """SDK エラー時、fail-closed のブロックがハーネス別プロトコルで出力されること。
+
+    Claude は stderr + exit 2、Copilot は permissionDecision: deny の
+    stdout JSON + exit 0 でブロックする（exit 2 直書きの fail-open 回帰防止）。
+    """
+
     class FailingMonitor:
+        """send_message が常に失敗する SDK スタブ。"""
         def __init__(self, *args, **kwargs):
             pass
 
@@ -726,6 +733,7 @@ def test_insights_security_monitor_handles_sdk_errors(
         SimpleNamespace(warning=lambda msg, *args: warnings.append(msg % args if args else msg), debug=lambda *a, **k: None),
     )
     monkeypatch.setenv("INSAITS_FAIL_MODE", fail_mode)
+    monkeypatch.setattr("bluecore.hooks.output_adapter.detect_harness", lambda: harness)
     monkeypatch.setattr(
         insights_security_monitor.sys,
         "stdin",
@@ -733,28 +741,47 @@ def test_insights_security_monitor_handles_sdk_errors(
     )
 
     stdout = io.StringIO()
-    with redirect_stdout(stdout), pytest.raises(SystemExit) as excinfo:
+    stderr = io.StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr), pytest.raises(SystemExit) as excinfo:
         insights_security_monitor.main()
 
     assert excinfo.value.code == expected_code
-    if expected_code == 0:
+    if fail_mode == "open":
         assert any("SDK error" in message for message in warnings)
         assert stdout.getvalue() == ""
+    elif harness == "claude":
+        assert "blocking execution" in stderr.getvalue()
+        assert stdout.getvalue() == ""
     else:
-        assert "blocking execution" in stdout.getvalue()
+        payload = json.loads(stdout.getvalue())
+        assert payload["permissionDecision"] == "deny"
+        assert "blocking execution" in payload["permissionDecisionReason"]
+        assert stderr.getvalue() == ""
 
 
 @pytest.mark.parametrize(
-    ("anomalies", "expected_code", "critical"),
+    ("anomalies", "harness", "expected_code", "critical"),
     [
-        ([{"severity": "CRITICAL", "type": "LEAK", "details": "bad"}], 2, True),
-        ([{"severity": "MEDIUM", "type": "NOTICE", "details": "warn"}], 0, False),
+        ([{"severity": "CRITICAL", "type": "LEAK", "details": "bad"}], "claude", 2, True),
+        ([{"severity": "MEDIUM", "type": "NOTICE", "details": "warn"}], "claude", 0, False),
+        ([{"severity": "CRITICAL", "type": "LEAK", "details": "bad"}], "copilot", 0, True),
     ],
 )
 def test_insights_security_monitor_writes_audit_and_handles_anomalies(
-    monkeypatch: pytest.MonkeyPatch, anomalies: list[dict[str, str]], expected_code: int, critical: bool
+    monkeypatch: pytest.MonkeyPatch,
+    anomalies: list[dict[str, str]],
+    harness: str,
+    expected_code: int,
+    critical: bool,
 ) -> None:
+    """CRITICAL 異常のブロックがハーネス別プロトコルで出力されること。
+
+    Claude は stderr + exit 2、Copilot は permissionDecision: deny の
+    stdout JSON + exit 0 でブロックする（exit 2 直書きの fail-open 回帰防止）。
+    """
+
     class Monitor:
+        """固定の異常リストを返す SDK スタブ。"""
         def __init__(self, *args, **kwargs):
             pass
 
@@ -771,6 +798,7 @@ def test_insights_security_monitor_writes_audit_and_handles_anomalies(
         SimpleNamespace(warning=lambda msg, *args: warnings.append(msg % args if args else msg), debug=lambda *a, **k: None),
     )
     monkeypatch.setattr(insights_security_monitor, "write_audit", lambda event: audits.append(event))
+    monkeypatch.setattr("bluecore.hooks.output_adapter.detect_harness", lambda: harness)
     monkeypatch.setattr(
         insights_security_monitor.sys,
         "stdin",
@@ -778,17 +806,24 @@ def test_insights_security_monitor_writes_audit_and_handles_anomalies(
     )
 
     stdout = io.StringIO()
-    with redirect_stdout(stdout), pytest.raises(SystemExit) as excinfo:
+    stderr = io.StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr), pytest.raises(SystemExit) as excinfo:
         insights_security_monitor.main()
 
     assert excinfo.value.code == expected_code
     assert audits and audits[0]["anomaly_count"] == len(anomalies)
     assert audits[0]["anomaly_types"] == [item["type"] for item in anomalies]
 
-    if critical:
-        assert "Issues Detected" in stdout.getvalue()
-    else:
+    if not critical:
         assert any("Issues Detected" in message for message in warnings)
+    elif harness == "claude":
+        assert "Issues Detected" in stderr.getvalue()
+        assert stdout.getvalue() == ""
+    else:
+        payload = json.loads(stdout.getvalue())
+        assert payload["permissionDecision"] == "deny"
+        assert "Issues Detected" in payload["permissionDecisionReason"]
+        assert stderr.getvalue() == ""
 
 
 def test_run_with_flags_build_env_and_resolve_command_branches(
