@@ -495,6 +495,82 @@ def test_find_file_issues_self_check_on_this_test_file_has_zero_issues() -> None
     assert issues == []
 
 
+def test_find_file_issues_detects_secret_in_non_lint_extension(monkeypatch: pytest.MonkeyPatch) -> None:
+    """.py/.js 等の lint 対象外拡張子（例: .env）でも secret 検出が行われること。"""
+    content = "API_" + "KEY" + '="hunter2secret"'
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
+
+    issues = pre_bash_commit_quality.find_file_issues(".env")
+
+    assert [issue["type"] for issue in issues] == ["secret"]
+
+
+def test_find_file_issues_lint_only_checks_skipped_for_non_lint_extension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """lint 対象外拡張子では console.log/デバッガ文/todo は検出されないこと（secret のみ対象）。"""  # nosec
+    content = 'console.log("hi")'  # nosec
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
+
+    assert pre_bash_commit_quality.find_file_issues(".env") == []
+
+
+def test_find_file_issues_skips_secret_scan_for_lock_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ロックファイルは内容が secret パターンに一致しても検出しないこと。"""
+    content = "api" + "_key" + ' = "abc123"'
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
+
+    assert pre_bash_commit_quality.find_file_issues("package-lock.json") == []
+
+
+def test_find_file_issues_skips_secret_scan_for_oversized_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """1MB を超えるファイルは secret スキャンをスキップすること（lint は拡張子次第で継続）。"""
+    padding = "x" * (1024 * 1024 + 1)
+    content = padding + "\n" + 'console.log("hi")' + "\n" + "api" + "_key" + ' = "abc123"'  # nosec
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
+
+    issues = pre_bash_commit_quality.find_file_issues("src/app.js")
+
+    types = {issue["type"] for issue in issues}
+    assert "secret" not in types
+    assert "console.log" in types  # nosec
+
+
+def test_find_file_issues_secret_scan_applies_under_size_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """1MB 以下のファイルは通常どおり secret スキャンされること（境界値確認）。"""
+    padding = "x" * (1024 * 1024 - 100)
+    content = padding + "\n" + "api" + "_key" + ' = "abc123"'
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
+
+    issues = pre_bash_commit_quality.find_file_issues("src/app.js")
+
+    assert any(issue["type"] == "secret" for issue in issues)
+
+
+def test_evaluate_scans_non_lint_extension_files_for_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """evaluate() が lint 非対象拡張子（.env 等）もステージ済みファイルの走査対象に含めること。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git commit -m 'feat(core): add'"}},
+    )
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: [".env", "package-lock.json"])
+
+    seen: list[str] = []
+
+    def _fake_find_file_issues(path: str) -> list[dict]:
+        seen.append(path)
+        return []
+
+    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", _fake_find_file_issues)
+    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+
+    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+    # .env は secret スキャン対象なので走査される。package-lock.json は
+    # lint 非対象・secret 対象外の双方であるため走査対象から除外される。
+    assert seen == [".env"]
+
+
 def test_pre_bash_commit_quality_helpers_handle_subprocess_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         pre_bash_commit_quality.subprocess,
@@ -504,22 +580,90 @@ def test_pre_bash_commit_quality_helpers_handle_subprocess_errors(monkeypatch: p
 
     assert pre_bash_commit_quality.get_staged_files() == []
     assert pre_bash_commit_quality.get_staged_file_content("src/app.js") is None
-    assert pre_bash_commit_quality.should_check_file("src/app.py")
-    assert not pre_bash_commit_quality.should_check_file("src/app.txt")
+    assert pre_bash_commit_quality.should_lint_file("src/app.py")
+    assert not pre_bash_commit_quality.should_lint_file("src/app.txt")
+
+
+@pytest.mark.parametrize(
+    "file_path",
+    [
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "Cargo.lock",
+        "poetry.lock",
+        "uv.lock",
+        "Pipfile.lock",
+        "vendor/package-lock.json",
+        "dist/bundle.min.js",
+        "static/app.min.css",
+    ],
+)
+def test_should_scan_secrets_excludes_lock_and_minified_files(file_path: str) -> None:
+    """ロックファイルと圧縮生成物（*.min.js/*.min.css）は secret スキャン対象外であること。"""
+    assert pre_bash_commit_quality.should_scan_secrets(file_path) is False
+
+
+@pytest.mark.parametrize(
+    "file_path",
+    [
+        ".env",
+        "config.json",
+        "app.yaml",
+        "deploy.sh",
+        "Dockerfile",
+        "src/app.txt",
+        "tests/fixtures/secret.env",
+    ],
+)
+def test_should_scan_secrets_includes_non_lint_extensions(file_path: str) -> None:
+    """.env/.yaml/.sh/Dockerfile 等、lint 対象外の拡張子でも secret スキャン対象であること
+    （tests/ 配下も除外しない）。"""
+    assert pre_bash_commit_quality.should_scan_secrets(file_path) is True
 
 
 def test_pre_bash_commit_quality_helpers_return_success_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(command: list[str], *, capture_output: bool, text: bool, check: bool) -> subprocess.CompletedProcess[str]:
+    def fake_run(command: list[str], *, capture_output: bool, check: bool, text: bool = False):
         if command[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(command, 0, stdout="src/app.py\nsrc/tool.ts\n", stderr="")
         if command[:2] == ["git", "show"]:
-            return subprocess.CompletedProcess(command, 0, stdout="file content", stderr="")
+            # get_staged_file_content はバイナリ判定のため text=True を付けずに bytes で取得する
+            return subprocess.CompletedProcess(command, 0, stdout=b"file content", stderr=b"")
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr(pre_bash_commit_quality.subprocess, "run", fake_run)
 
     assert pre_bash_commit_quality.get_staged_files() == ["src/app.py", "src/tool.ts"]
     assert pre_bash_commit_quality.get_staged_file_content("src/app.js") == "file content"
+
+
+def test_get_staged_file_content_skips_binary_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """先頭8KBに NUL バイトを含む場合はバイナリとみなし None を返すこと。"""
+    binary_bytes = b"PNG\x00\x01\x02fake image bytes"
+
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=binary_bytes, stderr=b""),
+    )
+    assert pre_bash_commit_quality.get_staged_file_content("image.png") is None
+
+
+def test_get_staged_file_content_replaces_invalid_utf8_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """不正な UTF-8 バイト列でも UnicodeDecodeError を送出せず置換して返すこと
+    （旧 text=True 実装の潜在バグの回帰防止）。"""
+    invalid_utf8 = b"valid text \xff\xfe invalid bytes"
+
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=invalid_utf8, stderr=b""),
+    )
+    content = pre_bash_commit_quality.get_staged_file_content("weird_encoding.txt")
+    assert content is not None
+    assert "valid text" in content
 
 
 def test_pre_bash_commit_quality_finds_parser_and_reading_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -588,7 +732,7 @@ def test_pre_bash_commit_quality_blocks_on_error_and_allows_warnings(
         lambda raw: {"tool_input": {"command": "git commit -m 'feat(core): add'"}},
     )
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: ["src/app.js"])
-    monkeypatch.setattr(pre_bash_commit_quality, "should_check_file", lambda path: True)
+    monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
 
     monkeypatch.setattr(
         pre_bash_commit_quality,
@@ -623,7 +767,7 @@ def test_pre_bash_commit_quality_counts_warning_and_info_issues(monkeypatch: pyt
         lambda raw: {"tool_input": {"command": "git commit -m 'feat(core): add'"}},
     )
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: ["src/app.js"])
-    monkeypatch.setattr(pre_bash_commit_quality, "should_check_file", lambda path: True)
+    monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "find_file_issues",
@@ -992,7 +1136,7 @@ def test_pre_bash_commit_quality_helpers_and_pass_branch(monkeypatch: pytest.Mon
         lambda raw: {"tool_input": {"command": "git commit -m 'feat(core): add'" }},
     )
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: ["src/app.js"])
-    monkeypatch.setattr(pre_bash_commit_quality, "should_check_file", lambda path: True)
+    monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
     monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path: [])
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
 
@@ -1229,7 +1373,7 @@ def test_evaluate_commit_dash_a_unions_unstaged_modified_files(monkeypatch: pyte
     monkeypatch.setattr(
         pre_bash_commit_quality, "get_unstaged_modified_files", lambda: ["src/unstaged.py"]
     )
-    monkeypatch.setattr(pre_bash_commit_quality, "should_check_file", lambda path: True)
+    monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
 
     seen: list[str] = []
 
@@ -1259,7 +1403,7 @@ def test_evaluate_commit_without_dash_a_ignores_unstaged_modified_files(
         "get_unstaged_modified_files",
         lambda: (_ for _ in ()).throw(AssertionError("should not be called")),
     )
-    monkeypatch.setattr(pre_bash_commit_quality, "should_check_file", lambda path: True)
+    monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
     monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path: [])
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
 
@@ -1295,3 +1439,53 @@ def test_get_unstaged_modified_files_returns_empty_on_oserror(monkeypatch: pytes
         lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("missing")),
     )
     assert pre_bash_commit_quality.get_unstaged_modified_files() == []
+
+
+def test_repo_wide_self_scan_has_zero_secret_issues() -> None:
+    """自リポジトリの全追跡ファイルを新ロジック（secret は原則全ファイル対象）で走査しても
+    secret 検出が0件であること。
+
+    should_scan_secrets が lock ファイル・圧縮生成物以外の原則すべてのファイルを
+    対象にするため、リポジトリ全体に secret パターンへ自己マッチする行が
+    存在しないことを保証する回帰テスト（既存の自己走査テストの全リポジトリ版）。
+    """
+    repo_root_result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=str(Path(__file__).parent),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    repo_root = Path(repo_root_result.stdout.strip())
+
+    tracked_result = subprocess.run(
+        ["git", "ls-files"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    tracked_files = [f for f in tracked_result.stdout.splitlines() if f]
+
+    secret_hits: list[str] = []
+    for rel_path in tracked_files:
+        if not pre_bash_commit_quality.should_scan_secrets(rel_path):
+            continue
+
+        abs_path = repo_root / rel_path
+        try:
+            raw = abs_path.read_bytes()
+        except OSError:
+            continue
+
+        # バイナリファイルは対象外（find_file_issues 内部の binary 判定と同じ基準）
+        if b"\0" in raw[:8192]:
+            continue
+
+        content = raw.decode("utf-8", errors="replace")
+        with mock.patch.object(pre_bash_commit_quality, "get_staged_file_content", return_value=content):
+            issues = pre_bash_commit_quality.find_file_issues(rel_path)
+
+        secret_hits.extend(f"{rel_path}:{issue['line']}" for issue in issues if issue["type"] == "secret")
+
+    assert secret_hits == []

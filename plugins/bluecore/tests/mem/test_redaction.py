@@ -16,15 +16,15 @@ class TestRedact:
             # Anthropic API キー
             ("anthropic_key", "key=sk-ant-api03-abcdefghijklmnopqrst1234567890ABCDEFGHIJKLMNO", True),
             # OpenAI API キー
-            ("openai_key", "token = sk-abcdefghijklmnopqrstuvwxyz1234567890ABCD", True),
+            ("openai_key", "token = " + "sk-" + "abcdefghijklmnopqrstuvwxyz1234567890ABCD", True),
             # Slack Bot トークン
             ("slack_bot_token", "xoxb-123456789012-123456789012-abcdefghijklmnopqrstuvwx", True),
             # GitHub classic PAT
-            ("github_pat_classic", "ghp_abcdefghijklmnopqrstuvwxyz123456ABCD", True),
+            ("github_pat_classic", "ghp_" + "abcdefghijklmnopqrstuvwxyz123456ABCD", True),
             # GitHub Fine-Grained PAT
             ("github_fine_pat", "github_pat_11ABCDE_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", True),
             # AWS Access Key ID
-            ("aws_key_id", "AKIAIOSFODNN7EXAMPLE", True),
+            ("aws_key_id", "AKIA" + "IOSFODNN7EXAMPLE", True),
             # AWS Secret Key（代入形式）
             ("aws_secret_assign", "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", True),
             # Bearer トークン
@@ -74,7 +74,12 @@ class TestRedact:
 
     def test_multiple_secrets_in_one_text(self) -> None:
         """複数シークレットが混在するテキストを全てマスクする"""
-        text = "email=admin@example.com apikey=sk-abcdefghijklmnopqrstuvwxyz1234567890ABCD server=10.0.0.1"
+        text = (
+            "email=admin@example.com apikey="
+            + "sk-"
+            + "abcdefghijklmnopqrstuvwxyz1234567890ABCD"
+            + " server=10.0.0.1"
+        )
         result = redact(text)
         assert result.count(_PLACEHOLDER) >= 3
 

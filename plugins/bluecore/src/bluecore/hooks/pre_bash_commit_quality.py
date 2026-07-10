@@ -28,6 +28,18 @@ from bluecore.lib.core_utils import log
 _GIT_GLOBAL_OPTS_WITH_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
 _SHELL_SEPARATORS = {"&&", "||", ";", "|"}
 
+_BINARY_SNIFF_SIZE = 8192  # 8KB
+_SECRET_SCAN_MAX_BYTES = 1024 * 1024  # 1MB
+_SECRET_SCAN_EXCLUDED_FILENAMES = {
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "Cargo.lock",
+    "poetry.lock",
+    "uv.lock",
+    "Pipfile.lock",
+}
+
 
 def get_staged_files() -> list[str]:
     """ステージング済みファイルの一覧を取得します。
@@ -84,14 +96,34 @@ def get_unstaged_modified_files() -> list[str]:
         return []
 
 
+def _is_binary_content(raw: bytes) -> bool:
+    """先頭 `_BINARY_SNIFF_SIZE` バイトに NUL バイトが含まれるかでバイナリ判定します。
+
+    Args:
+        raw: 判定対象のバイト列です。
+
+    Returns:
+        バイナリファイルとみなすなら True を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    return b"\0" in raw[:_BINARY_SNIFF_SIZE]
+
+
 def get_staged_file_content(file_path: str) -> str | None:
-    """ステージング済みファイルの内容を取得します。
+    """ステージング済みファイルの内容をテキストとして取得します。
+
+    `git show :path` の出力を bytes で取得し、先頭 `_BINARY_SNIFF_SIZE`
+    バイトに NUL バイトが含まれる場合はバイナリファイルとみなし None を
+    返します。テキストは UTF-8 として `errors="replace"` でデコードします
+    （不正なバイト列による `UnicodeDecodeError` を避けるためです）。
 
     Args:
         file_path: 対象ファイルのパスです。
 
     Returns:
-        ファイル内容、または取得できない場合は None を返します。
+        ファイル内容の文字列。取得できない・バイナリの場合は None を返します。
 
     Raises:
         例外は発生しません。
@@ -100,30 +132,61 @@ def get_staged_file_content(file_path: str) -> str | None:
         result = subprocess.run(
             ["git", "show", f":{file_path}"],
             capture_output=True,
-            text=True,
             check=False,
         )
         if result.returncode != 0:
             return None
-        return result.stdout
+        raw: bytes = result.stdout
+        if _is_binary_content(raw):
+            return None
+        return raw.decode("utf-8", errors="replace")
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
 
-def should_check_file(file_path: str) -> bool:
-    """対象ファイルかどうかを判定します。
+def should_lint_file(file_path: str) -> bool:
+    """console.log / デバッガ文 / TODO の lint チェック対象かどうかを判定します。
 
     Args:
         file_path: 判定対象のファイルパスです。
 
     Returns:
-        品質チェック対象なら True を返します。
+        lint チェック対象なら True を返します。
 
     Raises:
         例外は発生しません。
     """
     checkable_extensions = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
     return Path(file_path).suffix in checkable_extensions
+
+
+def should_scan_secrets(file_path: str) -> bool:
+    """ハードコードされたシークレットのスキャン対象かどうかを判定します。
+
+    lint チェックとは異なり拡張子で絞り込まず、原則として全ファイルを対象と
+    します（`tests/` 配下も除外しません）。以下のみ除外します:
+
+    - パッケージマネージャのロックファイル（内容が長大かつ生成物のため）
+    - 圧縮・生成物（`*.min.js` / `*.min.css`）
+
+    ファイルサイズ（1MB 超）による除外は、実際に取得した内容の長さを
+    用いて呼び出し側（`find_file_issues`）で判定します。
+
+    Args:
+        file_path: 判定対象のファイルパスです。
+
+    Returns:
+        シークレットスキャン対象なら True を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    name = Path(file_path).name
+    if name in _SECRET_SCAN_EXCLUDED_FILENAMES:
+        return False
+    if name.endswith(".min.js") or name.endswith(".min.css"):
+        return False
+    return True
 
 
 def _find_git_commit_args(tokens: list[str]) -> list[str] | None:
@@ -239,6 +302,11 @@ def _is_commit_all_flag(commit_args: list[str]) -> bool:
 def find_file_issues(file_path: str) -> list[dict]:
     """ファイル内容から代表的な問題を検出します。
 
+    lint チェック（console.log / debugger / TODO）は `should_lint_file` が
+    True の拡張子のみ対象です。シークレット検出は `should_scan_secrets` が
+    True かつサイズが `_SECRET_SCAN_MAX_BYTES` 以下のファイルを対象とし、
+    lint 対象拡張子に限定しません（`.env` 等も対象）。
+
     `# nosec` を含む行は console.log / debugger / TODO チェックを抑制します
     （検出器自身のテストフィクスチャ等、意図的にパターンを含む行のため）。
     ただし、ハードコードされたシークレットの検出は `# nosec` の対象外とし、
@@ -268,6 +336,12 @@ def find_file_issues(file_path: str) -> list[dict]:
         if content is None:
             return issues
 
+        do_lint = should_lint_file(file_path)
+        do_secrets = should_scan_secrets(file_path) and len(content.encode("utf-8")) <= _SECRET_SCAN_MAX_BYTES
+
+        if not do_lint and not do_secrets:
+            return issues
+
         lines = content.split("\n")
 
         for index, line in enumerate(lines):
@@ -278,7 +352,7 @@ def find_file_issues(file_path: str) -> list[dict]:
             # シークレット検出は nosec の対象外（常に検査）。
             suppressed = "# nosec" in line
 
-            if not suppressed:
+            if do_lint and not suppressed:
                 # ログ出力呼び出しをチェック
                 if "console.log" in line and not line.strip().startswith(("//", "*")):  # nosec
                     issues.append(
@@ -314,16 +388,17 @@ def find_file_issues(file_path: str) -> list[dict]:
                     )
 
             # ハードコードされたシークレットをチェック（nosec があっても常に検査）
-            for pattern, name in secret_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    issues.append(
-                        {
-                            "type": "secret",
-                            "message": f"Potential {name} exposed at line {line_num}",
-                            "line": line_num,
-                            "severity": "error",
-                        }
-                    )
+            if do_secrets:
+                for pattern, name in secret_patterns:
+                    if re.search(pattern, line, re.IGNORECASE):
+                        issues.append(
+                            {
+                                "type": "secret",
+                                "message": f"Potential {name} exposed at line {line_num}",
+                                "line": line_num,
+                                "severity": "error",
+                            }
+                        )
 
     except Exception:
         # ファイルが読めない場合はスキップ
@@ -553,7 +628,7 @@ def evaluate(raw_input: str) -> dict:
 
         log(f"[Hook] Checking {len(staged_files)} staged file(s)...")
 
-        files_to_check = [f for f in staged_files if should_check_file(f)]
+        files_to_check = [f for f in staged_files if should_lint_file(f) or should_scan_secrets(f)]
         total_issues, error_count, warning_count, info_count = _count_file_issues(files_to_check)
         total_issues, warning_count = _apply_commit_message_issues(command, total_issues, warning_count)
 
