@@ -48,7 +48,7 @@ loop-dev から収束 or 停止報告を受領して記録へ進む。
 
 ## 記録テンプレート
 
-記録は loop-dev の Loop-Dev Result からの転記のみ。未受領項目を PASS と書かない。
+記録対象は出所別に分離する。Tests/Review と Loop（反復数）は loop-dev の Loop-Dev Result からの転記。Repro/Root cause/Fix はステップ1-2（要件整理・再現テスト確立）での自己記録に基づく（loop-dev の出力契約には存在しない）。未受領項目を PASS と書かない。
 
 ```
 Bug Fix

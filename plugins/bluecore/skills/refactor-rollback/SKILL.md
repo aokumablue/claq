@@ -38,7 +38,7 @@ user-invocable: false
 
 ## 手順
 
-1. 変更対象列挙→各ファイルの tracked/untracked を `git ls-files` で判定してから復旧コマンドを確定（tracked=`git checkout -- {file}` / untracked（新規作成）=`rm {file}`）
+1. 変更対象列挙→各ファイルの tracked/untracked を `git ls-files` で判定してから復旧コマンドを確定（tracked=`git checkout -- {file}` / untracked（新規作成）=`rm {file}`）。`git ls-files` 不一致だけで untracked 確定しない — 対象パスを canonicalize し、リポジトリルート配下の相対パスで `..` を含まないことを検証する。満たさないパス（`..`・絶対パス・リポジトリ外）は SAFE/CAUTION 判定せず `rm` を生成せず、Skip Rules（`required_action=manual_review`）へ回す（fail-safe）
 2. 高リスク境界を `CAUTION` タグ付け
 3. ファイルごとに検証コマンドを紐付け
 4. グループ依存がある場合、復旧順序を依存逆順で定義。循環依存時（refactor-prep が記録しうる）は循環に属する全ファイルを1グループとして一括 revert 対象にし、Skip Rules に cyclic-dependency を記録
@@ -66,7 +66,7 @@ Skip Rules:
 ## ルール
 
 - 復旧単位は**ファイル単位**（循環依存グループのみ一括）
-- 復旧コマンドは tracked=`git checkout -- {file}` / untracked（新規作成）=`rm {file}`。`git ls-files` で判定してから確定
+- 復旧コマンドは tracked=`git checkout -- {file}` / untracked（新規作成）=`rm {file}`。`git ls-files` で判定してから確定。untracked と判定しても、canonicalize してリポジトリルート配下の相対パス（`..` 非含有）でなければ `rm` を生成せず Skip Rules（`required_action=manual_review`）に回す（範囲外パスの不可逆削除を防ぐ）
 - 不確実な変更は `Skip Rules` に記録
 - 機能変更禁止（WHAT不変）
 

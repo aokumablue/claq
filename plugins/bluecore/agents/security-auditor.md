@@ -35,7 +35,7 @@ model: sonnet
 
 ## 原則
 
-多層防御・最小権限・安全に失敗・入力不信・依存関係定期更新。Confidence 80% 未満の指摘は報告しない。推測は「未確認」と明示する（reviewer と対称）。
+多層防御・最小権限・安全に失敗・入力不信・依存関係定期更新。確信度ゲートは非対称に適用する — 即時指摘パターン（ハードコード認証情報・SQLi・XSS 等）一致時と CRITICAL 疑いは 80% ゲートを適用除外し、確信度が低くても「未確認」ラベル付きで必ず報告する（セキュリティは false negative のコストが高い）。80% ゲートは MEDIUM/LOW のノイズ抑制に限定する。推測は「未確認」と明示する（reviewer と対称）。
 
 ## CRITICAL発見時（READ-ONLY: 提案のみ。ファイル変更・コマンド実行はしない）
 
@@ -60,9 +60,10 @@ path/to/file:42 — SQL 文字列連結によるインジェクション — パ
 path/to/file:88 — 未サニタイズ出力による XSS — 出力エスケープ・CSP 設定
 
 CRITICAL: 1 / HIGH: 1
+Blockers: 2
 ```
 
-末尾の `CRITICAL: {n} / HIGH: {n}` 集計行は必須（reviewer の Blockers 集計と対称。呼び出し元が機械的に読む）。Confidence 80-100 のみ報告し、指摘ゼロでも `CRITICAL: 0 / HIGH: 0` を出力する。
+末尾は severity 別内訳 `CRITICAL: {n} / HIGH: {n}` に続けて、reviewer と同形の `Blockers: {n}`（n=CRITICAL+HIGH 件数）行も併記する（呼び出し元が両エージェントから Blockers を統一的に機械読みできるようにする）。両行とも必須で、指摘ゼロでも `CRITICAL: 0 / HIGH: 0` と `Blockers: 0` を出力する。即時指摘パターン一致・CRITICAL 疑いは確信度ゲート適用除外（「未確認」ラベル付きで報告）、80% ゲートは MEDIUM/LOW のノイズ抑制に限定する。
 
 ## 永続メモリ
 

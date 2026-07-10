@@ -74,6 +74,8 @@ simplify 全グループ完了後に開始。不要計算・重複I/O・N+1・�
 3. 失敗変更はファイル単位リバートし再検証
 4. 全通過のみ完了
 
+`--mode=clean/simplify`（部分モード）時のステップ7はテスト/lint 再実行のみを指す。CRITICAL/HIGH ブロック判定（項目2、ステップ6 review 由来）は部分モードではステップ6をスキップし判定データが無いため適用外。
+
 CRITICAL/HIGH blocker 検出時またはテスト/lint 失敗時は `loop-dev` skill を起動（入力: `task` = blocker 修正タスク（final gate の CRITICAL/HIGH 指摘一覧の解消） / `approved_plan` = blocker 一覧で plan 縮退 / `task_type` = `refactor-fix`）。loop-dev 停止時（2 反復で未収束）はファイル単位リバート方針に従い、未解消分を要約に記載。
 
 ## ステップ8: 要約
