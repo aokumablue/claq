@@ -1091,3 +1091,207 @@ def test_apply_commit_message_issues_without_suggestion(monkeypatch) -> None:
     monkeypatch.setattr(pbcq, "validate_commit_message", lambda cmd: {"issues": [{"message": "m"}]})
     total, warn = pbcq._apply_commit_message_issues("git commit -m x", 0, 0)
     assert (total, warn) == (1, 1)
+
+
+# ─────────────────────────────────────────────
+# _is_git_commit_command / _is_amend_commit / _is_commit_all_flag（トークン化）
+# ─────────────────────────────────────────────
+
+
+def test_is_git_commit_command_detects_double_space() -> None:
+    """連続空白（git  commit）でも commit 検出が成立すること。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    is_commit, args = pbcq._is_git_commit_command("git  commit -m x")
+    assert is_commit is True
+    assert args == ["-m", "x"]
+
+
+def test_is_git_commit_command_detects_newline_separated() -> None:
+    """改行区切り（git\\ncommit）でも commit 検出が成立すること。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    is_commit, _args = pbcq._is_git_commit_command("git\ncommit -m x")
+    assert is_commit is True
+
+
+def test_is_git_commit_command_skips_global_dash_c_option() -> None:
+    """`git -C <path> commit` のようなグローバルオプション付きでも検出できること。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    is_commit, args = pbcq._is_git_commit_command("git -C /tmp/repo commit -m x")
+    assert is_commit is True
+    assert args == ["-m", "x"]
+
+
+def test_is_git_commit_command_detects_within_composite_command() -> None:
+    """`&&` で連結された複合コマンド中の git commit も検出できること。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    is_commit, args = pbcq._is_git_commit_command("echo hi && git commit -m x")
+    assert is_commit is True
+    assert args == ["-m", "x"]
+
+
+def test_is_git_commit_command_returns_false_for_non_commit() -> None:
+    """git commit を含まないコマンドは False を返すこと。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    is_commit, args = pbcq._is_git_commit_command("git status")
+    assert is_commit is False
+    assert args == []
+
+
+def test_is_git_commit_command_falls_back_on_shlex_failure() -> None:
+    """クォート不整合（heredoc 等）で shlex.split が失敗しても検出を継続すること。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    broken_command = "git commit -m 'unterminated quote"
+    is_commit, _args = pbcq._is_git_commit_command(broken_command)
+    assert is_commit is True
+
+
+def test_is_git_commit_command_fallback_non_commit_returns_false() -> None:
+    """フォールバック経路でも git commit を含まなければ False を返すこと。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    broken_command = "echo 'unterminated quote"
+    is_commit, args = pbcq._is_git_commit_command(broken_command)
+    assert is_commit is False
+    assert args == []
+
+
+def test_is_git_commit_command_returns_false_when_only_options_follow_git() -> None:
+    """git の後がオプションのみで commit が現れなければ False を返すこと。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    is_commit, args = pbcq._is_git_commit_command("git --version")
+    assert is_commit is False
+    assert args == []
+
+
+def test_is_git_commit_command_regex_fallback_true_when_tokens_miss_it() -> None:
+    """トークン走査では見つからなくても、引用符内のテキスト等で `git commit` が
+    文字列として現れれば保守的に True を返すこと（過剰検出側のフェイルセーフ）。
+    """
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    # 実際は `git status` だが、引用符内のメッセージに "git commit" という
+    # 語が偶然含まれるケース。トークン走査では検出できないため、regex
+    # フォールバックが保守的に True を返す。
+    is_commit, args = pbcq._is_git_commit_command("git status -m 'please run git commit later'")
+    assert is_commit is True
+    assert args == []
+
+
+def test_is_amend_commit_detects_token() -> None:
+    """--amend トークンが引数中にあれば True を返すこと。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    assert pbcq._is_amend_commit(["--amend", "-m", "x"]) is True
+    assert pbcq._is_amend_commit(["-m", "x"]) is False
+
+
+def test_is_commit_all_flag_detects_short_long_and_combined() -> None:
+    """-a / --all / -am のような結合短形式を検出すること。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    assert pbcq._is_commit_all_flag(["-a", "-m", "x"]) is True
+    assert pbcq._is_commit_all_flag(["--all", "-m", "x"]) is True
+    assert pbcq._is_commit_all_flag(["-am", "x"]) is True
+    assert pbcq._is_commit_all_flag(["-m", "x"]) is False
+    assert pbcq._is_commit_all_flag(["--amend", "-m", "x"]) is False
+
+
+def test_evaluate_commit_amend_skipped_with_messy_spacing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """連続空白を含む --amend コマンドでも従来どおりスキップされること。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git   commit  --amend -m 'feat(core): add'"}},
+    )
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "get_staged_files",
+        lambda: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+
+
+def test_evaluate_commit_dash_a_unions_unstaged_modified_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`git commit -a` では未ステージの変更ファイルもスキャン対象に加わること。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git commit -am 'feat(core): add'"}},
+    )
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: ["src/staged.py"])
+    monkeypatch.setattr(
+        pre_bash_commit_quality, "get_unstaged_modified_files", lambda: ["src/unstaged.py"]
+    )
+    monkeypatch.setattr(pre_bash_commit_quality, "should_check_file", lambda path: True)
+
+    seen: list[str] = []
+
+    def _fake_find_file_issues(path: str) -> list[dict]:
+        seen.append(path)
+        return []
+
+    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", _fake_find_file_issues)
+    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+
+    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+    assert set(seen) == {"src/staged.py", "src/unstaged.py"}
+
+
+def test_evaluate_commit_without_dash_a_ignores_unstaged_modified_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`-a` の無い通常コミットでは未ステージの変更ファイルを取得しないこと。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git commit -m 'feat(core): add'"}},
+    )
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: ["src/staged.py"])
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "get_unstaged_modified_files",
+        lambda: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+    monkeypatch.setattr(pre_bash_commit_quality, "should_check_file", lambda path: True)
+    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path: [])
+    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+
+    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+
+
+def test_get_unstaged_modified_files_returns_success_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`git diff HEAD` の成功出力からファイル一覧を返すこと。"""
+
+    def fake_run(command: list[str], *, capture_output: bool, text: bool, check: bool):
+        assert command == ["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"]
+        return subprocess.CompletedProcess(command, 0, stdout="src/a.py\nsrc/b.py\n", stderr="")
+
+    monkeypatch.setattr(pre_bash_commit_quality.subprocess, "run", fake_run)
+    assert pre_bash_commit_quality.get_unstaged_modified_files() == ["src/a.py", "src/b.py"]
+
+
+def test_get_unstaged_modified_files_returns_empty_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HEAD が存在しない等で失敗した場合は空リストを返すこと（非ブロッキング）。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 128, stdout="", stderr="fatal"),
+    )
+    assert pre_bash_commit_quality.get_unstaged_modified_files() == []
+
+
+def test_get_unstaged_modified_files_returns_empty_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
+    """subprocess が OSError 系例外を投げても空リストを返すこと。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("missing")),
+    )
+    assert pre_bash_commit_quality.get_unstaged_modified_files() == []

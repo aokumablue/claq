@@ -4,16 +4,29 @@
 
 pre:bash で `git commit` を検出したときだけ、lint や簡易静的チェックを実行します。
 問題が見つかった場合はコミットを止め、それ以外は入力をそのまま通過させます。
+
+commit 検出は `shlex` によるトークン化を用い、`git` グローバルオプション
+（`-C <path>` 等）や連続空白・改行・`&&`/`;`/`|` 区切りの複合コマンドを
+考慮します。`git commit -a`/`--all`/結合短形式（例: `-am`）を検出した場合は
+`git diff HEAD` の未ステージ変更もスキャン対象へ加えます。
+
+非目標: ラッパースクリプトやシェルエイリアス経由の `git commit` 呼び出し検出、
+および `git commit <pathspec>` で明示指定された未ステージファイルの取り込み
+（`-a`/`--all` を伴わない場合は対象外）。
 """
 
 from __future__ import annotations
 
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
 from bluecore.hooks.hook_common import parse_json_object
 from bluecore.lib.core_utils import log
+
+_GIT_GLOBAL_OPTS_WITH_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
+_SHELL_SEPARATORS = {"&&", "||", ";", "|"}
 
 
 def get_staged_files() -> list[str]:
@@ -36,6 +49,35 @@ def get_staged_files() -> list[str]:
             check=False,
         )
         if result.returncode != 0:
+            return []
+        return [f for f in result.stdout.strip().split("\n") if f]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+
+
+def get_unstaged_modified_files() -> list[str]:
+    """`git commit -a` 相当で追加取り込む作業ツリーの変更ファイル一覧を取得します。
+
+    `git diff HEAD --name-only --diff-filter=ACMR` の結果を返します。
+
+    Returns:
+        変更されている作業ツリーファイルパスのリストを返します。
+
+    Args:
+        引数はありません。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            # HEAD が存在しない（初回コミット）等の場合は非ブロッキングで空リスト
             return []
         return [f for f in result.stdout.strip().split("\n") if f]
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -82,6 +124,116 @@ def should_check_file(file_path: str) -> bool:
     """
     checkable_extensions = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
     return Path(file_path).suffix in checkable_extensions
+
+
+def _find_git_commit_args(tokens: list[str]) -> list[str] | None:
+    """トークン列内の `git commit` 呼び出しを探し、commit 直後の引数トークンを返します。
+
+    `git` トークンの後に `-C <path>` / `-c <k=v>` などのグローバルオプション
+    （値を取るものは値トークンも消費）をスキップしつつ `commit` サブコマンド
+    が続くかを判定します。見つかった場合、`commit` 以降 `&&`/`;`/`|` 等の
+    シェル区切りトークンが現れるまでを引数リストとして返します。
+
+    Args:
+        tokens: `shlex` 等でトークン化されたコマンド列です。
+
+    Returns:
+        commit 呼び出しの引数トークンリスト。見つからなければ None を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    for i, token in enumerate(tokens):
+        if token != "git":
+            continue
+        j = i + 1
+        while j < len(tokens):
+            tok = tokens[j]
+            if tok == "commit":
+                args: list[str] = []
+                k = j + 1
+                while k < len(tokens) and tokens[k] not in _SHELL_SEPARATORS:
+                    args.append(tokens[k])
+                    k += 1
+                return args
+            if not tok.startswith("-"):
+                break
+            j += 2 if tok in _GIT_GLOBAL_OPTS_WITH_ARG else 1
+    return None
+
+
+def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
+    """コマンド文字列が `git commit` 呼び出しかを判定し、commit 引数トークンを返します。
+
+    `shlex.split` でトークン化し、`git` → グローバルオプション → `commit`
+    の並びを検出します。連続空白・改行・`&&`/`;`/`|` 区切りの複合コマンドは
+    トークン走査で自然に扱えます。
+
+    `shlex.split` がクォート不整合（heredoc 等）で `ValueError` を送出した
+    場合は、空白による簡易分割へフォールバックしてトークン走査を継続し、
+    それでも判定できなければ `re.search(r"\\bgit\\s+commit\\b", command)` で
+    最終判定します。過剰検出側に倒すフェイルセーフ設計です。
+
+    Args:
+        command: 検査対象のコマンド文字列です。
+
+    Returns:
+        (is_commit, commit_args) のタプル。is_commit が False の場合、
+        commit_args は空リストです。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+
+    commit_args = _find_git_commit_args(tokens)
+    if commit_args is not None:
+        return True, commit_args
+
+    if re.search(r"\bgit\s+commit\b", command):
+        return True, []
+    return False, []
+
+
+def _is_amend_commit(commit_args: list[str]) -> bool:
+    """commit 引数トークンに `--amend` が含まれるかを判定します。
+
+    Args:
+        commit_args: `git commit` 呼び出しの引数トークン列です。
+
+    Returns:
+        `--amend` が含まれるなら True を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    return "--amend" in commit_args
+
+
+def _is_commit_all_flag(commit_args: list[str]) -> bool:
+    """commit 引数トークンに `-a`/`--all`（結合短形式含む）が含まれるかを判定します。
+
+    `-am` のような結合短形式は、`-` 始まり・`--` ではない・`=` を含まない
+    短形式トークンを文字単位に展開して `a` を探す最小実装です。
+
+    Args:
+        commit_args: `git commit` 呼び出しの引数トークン列です。
+
+    Returns:
+        `-a` 相当のフラグが含まれるなら True を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    for tok in commit_args:
+        if tok == "--all":
+            return True
+        if tok.startswith("-") and not tok.startswith("--") and "=" not in tok and "a" in tok[1:]:
+            return True
+    return False
 
 
 def find_file_issues(file_path: str) -> list[dict]:
@@ -382,16 +534,19 @@ def evaluate(raw_input: str) -> dict:
 
         command = input_data.get("tool_input", {}).get("command", "")
 
-        # git commit コマンドの場合のみ実行
-        if "git commit" not in command:
+        # git commit コマンドの場合のみ実行（トークン化して堅牢に判定）
+        is_commit, commit_args = _is_git_commit_command(command)
+        if not is_commit:
             return {"output": raw_input, "exitCode": 0}
 
         # --amend の場合はチェックをスキップ（ブロックを避けるため）
-        if "--amend" in command:
+        if _is_amend_commit(commit_args):
             return {"output": raw_input, "exitCode": 0}
 
-        # ステージングされたファイルを取得
+        # ステージングされたファイルを取得（-a/--all の場合は未ステージの変更も加える）
         staged_files = get_staged_files()
+        if _is_commit_all_flag(commit_args):
+            staged_files = sorted(set(staged_files) | set(get_unstaged_modified_files()))
         if not staged_files:
             log('[Hook] No staged files found. Use "git add" to stage files first.')
             return {"output": raw_input, "exitCode": 0}
