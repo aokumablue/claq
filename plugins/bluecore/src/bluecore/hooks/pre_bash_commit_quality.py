@@ -87,8 +87,11 @@ def should_check_file(file_path: str) -> bool:
 def find_file_issues(file_path: str) -> list[dict]:
     """ファイル内容から代表的な問題を検出します。
 
-    `# nosec` を含む行は、意図的にパターンを含む行（検出器自身のテスト
-    フィクスチャ等）として検出対象から除外します。
+    `# nosec` を含む行は console.log / debugger / TODO チェックを抑制します
+    （検出器自身のテストフィクスチャ等、意図的にパターンを含む行のため）。
+    ただし、ハードコードされたシークレットの検出は `# nosec` の対象外とし、
+    常に検査します。シークレット検出行に `# nosec` を付与するだけでコミット
+    ブロックをバイパスできてしまう抜け道を塞ぐためです。
 
     Args:
         file_path: 調査対象のファイルパスです。
@@ -101,6 +104,13 @@ def find_file_issues(file_path: str) -> list[dict]:
     """
     issues = []
 
+    secret_patterns = [
+        (r"sk-[a-zA-Z0-9]{20,}", "OpenAI API key"),
+        (r"ghp_[a-zA-Z0-9]{36}", "GitHub PAT"),
+        (r"AKIA[A-Z0-9]{16}", "AWS Access Key"),
+        (r"api[_-]?key\s*[=:]\s*['\"][^'\"]+['\"]", "API key"),
+    ]
+
     try:
         content = get_staged_file_content(file_path)
         if content is None:
@@ -112,52 +122,46 @@ def find_file_issues(file_path: str) -> list[dict]:
             line_num = index + 1
 
             # 抑制マーカー付き行（検出器自身のテストフィクスチャ等、意図的に
-            # パターンを含む行）はスキップする
-            if "# nosec" in line:
-                continue
+            # パターンを含む行）は console.log/debugger/todo のみスキップする。
+            # シークレット検出は nosec の対象外（常に検査）。
+            suppressed = "# nosec" in line
 
-            # ログ出力呼び出しをチェック
-            if "console.log" in line and not line.strip().startswith(("//", "*")):  # nosec
-                issues.append(
-                    {
-                        "type": "console.log",  # nosec
-                        "message": f"console.log found at line {line_num}",  # nosec
-                        "line": line_num,
-                        "severity": "warning",
-                    }
-                )
+            if not suppressed:
+                # ログ出力呼び出しをチェック
+                if "console.log" in line and not line.strip().startswith(("//", "*")):  # nosec
+                    issues.append(
+                        {
+                            "type": "console.log",  # nosec
+                            "message": f"console.log found at line {line_num}",  # nosec
+                            "line": line_num,
+                            "severity": "warning",
+                        }
+                    )
 
-            # デバッガ文をチェック
-            if re.search(r"\bdebugger\b", line) and not line.strip().startswith("//"):
-                issues.append(
-                    {
-                        "type": "debugger",  # nosec
-                        "message": f"debugger statement at line {line_num}",  # nosec
-                        "line": line_num,
-                        "severity": "error",
-                    }
-                )
+                # デバッガ文をチェック
+                if re.search(r"\bdebugger\b", line) and not line.strip().startswith("//"):
+                    issues.append(
+                        {
+                            "type": "debugger",  # nosec
+                            "message": f"debugger statement at line {line_num}",  # nosec
+                            "line": line_num,
+                            "severity": "error",
+                        }
+                    )
 
-            # Issue 参照のない TODO/FIXME をチェック
-            todo_match = re.search(r"(?://|#)\s*(TODO|FIXME):?\s*(.+)", line)
-            if todo_match and not re.search(r"#\d+|issue", todo_match.group(2), re.IGNORECASE):
-                issues.append(
-                    {
-                        "type": "todo",
-                        "message": f'TODO/FIXME without issue reference at line {line_num}: "{todo_match.group(2).strip()}"',
-                        "line": line_num,
-                        "severity": "info",
-                    }
-                )
+                # Issue 参照のない TODO/FIXME をチェック
+                todo_match = re.search(r"(?://|#)\s*(TODO|FIXME):?\s*(.+)", line)
+                if todo_match and not re.search(r"#\d+|issue", todo_match.group(2), re.IGNORECASE):
+                    issues.append(
+                        {
+                            "type": "todo",
+                            "message": f'TODO/FIXME without issue reference at line {line_num}: "{todo_match.group(2).strip()}"',
+                            "line": line_num,
+                            "severity": "info",
+                        }
+                    )
 
-            # ハードコードされたシークレットをチェック（基本パターン）
-            secret_patterns = [
-                (r"sk-[a-zA-Z0-9]{20,}", "OpenAI API key"),
-                (r"ghp_[a-zA-Z0-9]{36}", "GitHub PAT"),
-                (r"AKIA[A-Z0-9]{16}", "AWS Access Key"),
-                (r"api[_-]?key\s*[=:]\s*['\"][^'\"]+['\"]", "API key"),
-            ]
-
+            # ハードコードされたシークレットをチェック（nosec があっても常に検査）
             for pattern, name in secret_patterns:
                 if re.search(pattern, line, re.IGNORECASE):
                     issues.append(

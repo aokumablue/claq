@@ -427,7 +427,7 @@ def test_pre_bash_commit_quality_detects_file_issues_and_commit_message_rules(
 
 
 def test_find_file_issues_skips_nosec_marked_lines(monkeypatch: pytest.MonkeyPatch) -> None:
-    """# nosec を含む行は検出対象から除外される。"""
+    """# nosec は console.log/debugger/todo を抑制するが、secret 検出は抑制しない。"""
     content = "\n".join(
         [
             'debugger  # nosec',
@@ -436,7 +436,45 @@ def test_find_file_issues_skips_nosec_marked_lines(monkeypatch: pytest.MonkeyPat
     )
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
 
+    issues = pre_bash_commit_quality.find_file_issues("src/app.py")
+
+    # debugger は nosec で抑制される
+    assert not any(issue["type"] == "debugger" for issue in issues)
+    # secret は nosec があっても検出される（バイパス防止）
+    assert [issue["type"] for issue in issues] == ["secret"]
+    assert issues[0]["line"] == 2
+
+
+def test_find_file_issues_secret_detection_not_bypassed_by_nosec(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`# nosec` を付与しても api_key のようなシークレットパターンはブロック対象として検出され続ける。"""
+    content = 'api_key = "hunter2secret"  # nosec'
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
+
+    issues = pre_bash_commit_quality.find_file_issues("src/app.py")
+
+    assert len(issues) == 1
+    assert issues[0]["type"] == "secret"
+    assert issues[0]["severity"] == "error"
+
+
+def test_find_file_issues_console_log_still_suppressed_by_nosec(monkeypatch: pytest.MonkeyPatch) -> None:
+    """secret を含まない行では従来どおり console.log が nosec で抑制されること。"""
+    content = 'console.log("debug")  # nosec'
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
+
     assert pre_bash_commit_quality.find_file_issues("src/app.py") == []
+
+
+def test_find_file_issues_self_check_has_zero_secret_issues(monkeypatch: pytest.MonkeyPatch) -> None:
+    """このフック自身のソースを検査しても secret 検出が0件であること（自己検出回避の nosec が secret を隠していないことの担保）。"""
+    source_path = Path(pre_bash_commit_quality.__file__)
+    own_source = source_path.read_text(encoding="utf-8")
+
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: own_source)
+    issues = pre_bash_commit_quality.find_file_issues(str(source_path))
+
+    secret_issues = [issue for issue in issues if issue["type"] == "secret"]
+    assert secret_issues == []
 
 
 def test_pre_bash_commit_quality_helpers_handle_subprocess_errors(monkeypatch: pytest.MonkeyPatch) -> None:
