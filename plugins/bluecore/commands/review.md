@@ -64,8 +64,8 @@ command: /review
 
 承認時は種別ごとに自律実行:
 
-- **バグ**: loop-dev skill を起動（`task` = 承認済み指摘の解消 / `task_type` = `bugfix`）
-- **リファクタ**: loop-dev skill を起動（`task` = 承認済み指摘の解消 / `task_type` = `refactor-fix`）
+- **バグ**: loop-dev skill を起動（`task` = 承認済み指摘の解消 / `task_type` = `bugfix`）。承認済みスコープ（対象ファイルパス）を明示的に引き渡す
+- **リファクタ**: loop-dev skill を起動（`task` = 承認済み指摘の解消 / `task_type` = `refactor-fix`）。承認済みスコープ（対象ファイルパス）を明示的に引き渡す
 - **バグ + リファクタ**: bugfix 完了（テスト green）確認後に refactor-fix を順次実行。承認済みスコープ（対象ファイルパス）を各起動に明示的に引き渡す
 - **仕様変更**: `/plan` の提示に留める（要件判断はユーザー領域のため自律実行しない）
 
