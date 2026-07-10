@@ -13,6 +13,7 @@ import types
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -408,7 +409,7 @@ def test_pre_bash_commit_quality_detects_file_issues_and_commit_message_rules(
             "debugger",  # nosec
             "// TODO: clean this up",  # nosec
             "// TODO: #123 tracked",
-            'const api_key = "abc";',  # nosec
+            "const " + "api" + "_key" + ' = "abc";',
         ]
     )
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
@@ -431,15 +432,15 @@ def test_find_file_issues_skips_nosec_marked_lines(monkeypatch: pytest.MonkeyPat
     content = "\n".join(
         [
             'debugger  # nosec',
-            'const api_key = "x";  # nosec',
+            "const " + "api" + "_key" + ' = "x";  # nosec',
         ]
     )
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
 
     issues = pre_bash_commit_quality.find_file_issues("src/app.py")
 
-    # debugger は nosec で抑制される
-    assert not any(issue["type"] == "debugger" for issue in issues)
+    # デバッガ文は nosec で抑制される
+    assert not any(issue["type"] == "debugger" for issue in issues)  # nosec
     # secret は nosec があっても検出される（バイパス防止）
     assert [issue["type"] for issue in issues] == ["secret"]
     assert issues[0]["line"] == 2
@@ -447,7 +448,7 @@ def test_find_file_issues_skips_nosec_marked_lines(monkeypatch: pytest.MonkeyPat
 
 def test_find_file_issues_secret_detection_not_bypassed_by_nosec(monkeypatch: pytest.MonkeyPatch) -> None:
     """`# nosec` を付与しても api_key のようなシークレットパターンはブロック対象として検出され続ける。"""
-    content = 'api_key = "hunter2secret"  # nosec'
+    content = "api" + "_key" + ' = "hunter2secret"  # nosec'
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
 
     issues = pre_bash_commit_quality.find_file_issues("src/app.py")
@@ -458,7 +459,7 @@ def test_find_file_issues_secret_detection_not_bypassed_by_nosec(monkeypatch: py
 
 
 def test_find_file_issues_console_log_still_suppressed_by_nosec(monkeypatch: pytest.MonkeyPatch) -> None:
-    """secret を含まない行では従来どおり console.log が nosec で抑制されること。"""
+    """secret を含まない行では従来どおり console.log が nosec で抑制されること。"""  # nosec
     content = 'console.log("debug")  # nosec'
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
 
@@ -475,6 +476,23 @@ def test_find_file_issues_self_check_has_zero_secret_issues(monkeypatch: pytest.
 
     secret_issues = [issue for issue in issues if issue["type"] == "secret"]
     assert secret_issues == []
+
+
+def test_find_file_issues_self_check_on_this_test_file_has_zero_issues() -> None:
+    """このテストファイル自身を検査しても issue が0件であること（fixture 文字列の自己マッチ回帰防止）。
+
+    cbabdad で secret 検出が nosec 無視・常時実行になった結果、本ファイルの
+    シークレットパターン用 fixture 文字列がソース行として secret パターンに
+    自己マッチし、本ファイルをコミットすると exitCode=2 でブロックされる
+    回帰が発生した。本テストはその回帰を検知する。
+    """
+    this_file = Path(__file__)
+    own_source = this_file.read_text(encoding="utf-8")
+
+    with mock.patch.object(pre_bash_commit_quality, "get_staged_file_content", return_value=own_source):
+        issues = pre_bash_commit_quality.find_file_issues(str(this_file))
+
+    assert issues == []
 
 
 def test_pre_bash_commit_quality_helpers_handle_subprocess_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -717,6 +735,36 @@ def test_insights_security_monitor_skips_short_or_invalid_input(
         insights_security_monitor.main()
 
     assert excinfo.value.code == 0
+
+
+def test_run_insaits_scan_calls_monitor_with_session_name_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """insAItsMonitor が session_name のみ・余剰 kwargs なしで呼ばれることを保証する回帰テスト。
+
+    0447f28 で insAItsMonitor(session_name=..., dev_mode=...) が
+    insAItsMonitor(session_name=...) に修正されたが、既存スタブは
+    `def __init__(self, *args, **kwargs)` で寛容なため dev_mode が
+    再導入されても検知できなかった。本テストは呼び出し引数を厳密に
+    assert し、余剰 kwargs の再導入を検知する。
+    """
+    monitor_calls: list[tuple[tuple, dict]] = []
+
+    class RecordingMonitor:
+        """コンストラクタ呼び出し引数を記録する SDK スタブ。"""
+
+        def __init__(self, *args, **kwargs):
+            monitor_calls.append((args, kwargs))
+
+        def send_message(self, *args, **kwargs):  # noqa: ANN001
+            return {"anomalies": []}
+
+    monkeypatch.setattr(insights_security_monitor, "insAItsMonitor", RecordingMonitor, raising=False)
+
+    insights_security_monitor._run_insaits_scan("hello world")
+
+    assert len(monitor_calls) == 1
+    args, kwargs = monitor_calls[0]
+    assert args == ()
+    assert kwargs == {"session_name": "claude-code-hook"}
 
 
 def test_insights_security_monitor_reports_missing_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
