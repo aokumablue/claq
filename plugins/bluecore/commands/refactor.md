@@ -87,6 +87,7 @@ Issues は `bluecore:reviewer` と `bluecore:security-auditor` の統合件数�
 - 既定スコープは変更差分。パス/ディレクトリ指定で任意ファイルにも対応
 - 失敗時は必ずファイル単位リバート
 - CRITICAL/HIGH が残る状態では承認・コミットしない
+- 各委譲の完了主張はテスト/lint 出力で裏取りし、証跡なき完了は未検証扱いとする
 - 機能変更禁止（WHAT不変）。挙動変更の疑義がある変更は要確認として報告
 - 安全性に疑義がある変更はスキップし最終要約に記載
 - サブエージェント委譲必須（`bluecore:refactor-orchestrator` 統括 → `bluecore:dead-code-cleaner` / `bluecore:simplifier` / `bluecore:perf-optimizer` / `bluecore:reviewer` / `bluecore:security-auditor`）
