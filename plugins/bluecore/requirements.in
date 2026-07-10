@@ -6,3 +6,4 @@ sqlite-vec>=0.1
 pyyaml>=6.0
 psycopg[binary]>=3.1
 jinja2>=3.0
+insa-its>=0.1

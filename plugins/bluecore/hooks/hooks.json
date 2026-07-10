@@ -54,6 +54,17 @@
         "description": "linter/formatterの設定ファイルへの変更をブロックします。エージェントが設定を弱めるのではなく、コードを修正するように導きます。"
       },
       {
+        "matcher": "Bash|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.insights_security_monitor",
+            "timeout": 10
+          }
+        ],
+        "description": "InsAIts SDK でツール入力を検査し、認証情報の露出やプロンプトインジェクションを検出します。CRITICAL 異常はブロックし、監査イベントを JSONL に記録します（SDK 未導入時はスキップ）。"
+      },
+      {
         "matcher": "Bash|Write|Edit|MultiEdit|apply_patch",
         "hooks": [
           {
@@ -275,6 +286,17 @@
           }
         ],
         "description": "セッションを評価して抽出可能なパターンを特定する"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"stop:desktop-notify\" \"bluecore.hooks.desktop_notify\" \"minimal,standard,strict\"",
+            "timeout": 10
+          }
+        ],
+        "description": "応答完了時にタスクサマリー付きデスクトップ通知を送信します（macOS: osascript、WSL: PowerShell + BurntToast）"
       }
     ],
     "SessionEnd": [

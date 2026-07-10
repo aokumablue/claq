@@ -212,10 +212,7 @@ def _run_insaits_scan(text: str) -> dict[str, Any]:
         SDK の send_message() 戻り値。
     """
     try:
-        monitor: insAItsMonitor = insAItsMonitor(
-            session_name="claude-code-hook",
-            dev_mode=os.environ.get("INSAITS_DEV_MODE", "false").lower() in ("1", "true", "yes"),
-        )
+        monitor: insAItsMonitor = insAItsMonitor(session_name="claude-code-hook")
         return monitor.send_message(
             text=text[:MAX_SCAN_LENGTH],
             sender_id="claude-code",

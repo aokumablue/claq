@@ -10,10 +10,7 @@ import pytest
 
 from bluecore.hooks import (
     block_no_verify,
-    cost_tracker,
     evaluate_session,
-    post_bash_build_complete,
-    pre_bash_git_push_reminder,
     pre_compact,
     session_end,
     session_end_marker,
@@ -87,42 +84,6 @@ class TestBlockNoVerify:
         assert deny["permissionDecision"] == "deny"
 
 
-class TestGitPushReminder:
-    def test_git_push_triggers_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        payload = json.dumps({"tool_input": {"command": "git push origin main"}})
-        stdout, stderr = _capture_io(monkeypatch, pre_bash_git_push_reminder, payload)
-
-        assert pre_bash_git_push_reminder.main() == 0
-        assert stdout == []
-        assert any("Review changes before push" in message for message in stderr)
-
-    def test_non_push_passthrough(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        payload = json.dumps({"tool_input": {"command": "git commit -m 'test'"}})
-        stdout, stderr = _capture_io(monkeypatch, pre_bash_git_push_reminder, payload)
-
-        assert pre_bash_git_push_reminder.main() == 0
-        assert stdout == []
-        assert stderr == []
-
-
-class TestBuildComplete:
-    def test_build_command_triggers_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        payload = json.dumps({"tool_input": {"command": "npm run build"}})
-        stdout, stderr = _capture_io(monkeypatch, post_bash_build_complete, payload)
-
-        assert post_bash_build_complete.main() == 0
-        assert stdout == []
-        assert any("Build completed" in message for message in stderr)
-
-    def test_non_build_passthrough(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        payload = json.dumps({"tool_input": {"command": "npm test"}})
-        stdout, stderr = _capture_io(monkeypatch, post_bash_build_complete, payload)
-
-        assert post_bash_build_complete.main() == 0
-        assert stdout == []
-        assert stderr == []
-
-
 class TestSessionEndMarker:
     def test_main_passes_input_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
         payload = '{"session": "end"}'
@@ -131,67 +92,6 @@ class TestSessionEndMarker:
         assert session_end_marker.main() == 0
         assert stdout == []
         assert stderr == []
-
-
-class TestCostTracker:
-    @pytest.mark.parametrize(
-        ("value", "expected"),
-        [
-            ("3", 3.0),
-            ("3.5", 3.5),
-            (None, 0),
-            ("nan", 0),
-            (float("inf"), 0),
-        ],
-    )
-    def test_to_number(self, value: object, expected: int | float) -> None:
-        assert cost_tracker.to_number(value) == expected
-
-    @pytest.mark.parametrize(
-        ("model", "input_tokens", "output_tokens", "expected"),
-        [
-            ("haiku", 1_000_000, 1_000_000, 4.8),
-            ("sonnet", 1_000_000, 1_000_000, 18.0),
-            ("opus", 1_000_000, 1_000_000, 90.0),
-            ("unknown", 1_000_000, 1_000_000, 18.0),
-        ],
-    )
-    def test_estimate_cost(self, model: str, input_tokens: int, output_tokens: int, expected: float) -> None:
-        assert cost_tracker.estimate_cost(model, input_tokens, output_tokens) == expected
-
-    def test_main_writes_metrics_row(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        payload = json.dumps(
-            {
-                "model": "haiku",
-                "usage": {"input_tokens": 12, "output_tokens": 34},
-            }
-        )
-        appended: list[tuple[Path, str]] = []
-
-        monkeypatch.setattr(cost_tracker, "read_raw_stdin", lambda: payload)
-        monkeypatch.setattr(cost_tracker, "append_file", lambda path, content: appended.append((Path(path), content)))
-        monkeypatch.setattr(cost_tracker, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(cost_tracker, "get_bluecore_dir", lambda: tmp_path)
-        monkeypatch.setenv("CLAUDE_SESSION_ID", "session-123")
-
-        assert cost_tracker.main() == 0
-        assert appended[0][0] == tmp_path / "metrics" / "costs.jsonl"
-
-        row = json.loads(appended[0][1].strip())
-        assert row["session_id"] == "session-123"
-        assert row["model"] == "haiku"
-        assert row["input_tokens"] == 12
-        assert row["output_tokens"] == 34
-        assert row["estimated_cost_usd"] == cost_tracker.estimate_cost("haiku", 12, 34)
-
-    def test_main_entrypoint_emits_no_stdout(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "{}")
-        monkeypatch.setattr("bluecore.hooks.hook_common.parse_json_object", lambda raw: None)
-        outputs: list[str] = []
-        monkeypatch.setattr("bluecore.hooks.hook_common.write_stdout", outputs.append)
-
-        assert _run_entrypoint("bluecore.hooks.cost_tracker") == 0
-        assert outputs == []
 
 
 class TestEvaluateSession:
@@ -780,22 +680,6 @@ class TestSimpleHookEntrypoints:
 
         assert _run_entrypoint("bluecore.hooks.block_no_verify") == 0
 
-    def test_git_push_reminder_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "bluecore.hooks.hook_common.read_raw_stdin",
-            lambda: json.dumps({"tool_input": {"command": "git commit -m 'test'"}}),
-        )
-
-        assert _run_entrypoint("bluecore.hooks.pre_bash_git_push_reminder") == 0
-
-    def test_build_complete_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "bluecore.hooks.hook_common.read_raw_stdin",
-            lambda: json.dumps({"tool_input": {"command": "npm test"}}),
-        )
-
-        assert _run_entrypoint("bluecore.hooks.post_bash_build_complete") == 0
-
     def test_session_end_marker_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: '{"session":"end"}')
 
@@ -1096,9 +980,7 @@ class TestFilterSessionSummary:
     [
         "block_no_verify",
         "doc_file_warning",
-        "post_bash_build_complete",
         "config_protection",
-        "pre_bash_git_push_reminder",
         "pre_agent_nudge",
     ],
 )
