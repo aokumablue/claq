@@ -38,21 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_project ON memory_chunks(project);
 CREATE INDEX IF NOT EXISTS idx_chunks_epoch ON memory_chunks(created_at_epoch);
 CREATE INDEX IF NOT EXISTS idx_chunks_content_trgm ON memory_chunks USING gin (content gin_trgm_ops);
 
--- RLS: 自ユーザーのチャンクのみアクセス可能にする
-ALTER TABLE memory_chunks ENABLE ROW LEVEL SECURITY;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE tablename = 'memory_chunks' AND policyname = 'chunks_owner_policy'
-  ) THEN
-    EXECUTE $policy$
-      CREATE POLICY chunks_owner_policy ON memory_chunks
-        USING (origin_user = current_user)
-    $policy$;
-  END IF;
-END $$;
+-- RLS ポリシーは末尾の「RLS 実効化」セクションで一括設定する。
 
 -- sessions テーブル
 CREATE TABLE IF NOT EXISTS sessions (
@@ -230,58 +216,105 @@ CREATE TABLE IF NOT EXISTS session_digests (
 CREATE INDEX IF NOT EXISTS idx_digests_project_epoch ON session_digests(project, created_at_epoch);
 CREATE INDEX IF NOT EXISTS idx_digests_origin ON session_digests(origin_user);
 
--- RLS: 自ユーザーの digest のみアクセス可能にする
-ALTER TABLE session_digests ENABLE ROW LEVEL SECURITY;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE tablename = 'session_digests' AND policyname = 'digests_owner_policy'
-  ) THEN
-    EXECUTE $policy$
-      CREATE POLICY digests_owner_policy ON session_digests
-        USING (origin_user = current_user)
-    $policy$;
-  END IF;
-END $$;
-
 -- ベクトル検索テーブル（pgvector 拡張を有効にする必要がある）
--- セキュリティ: 埋め込み反転攻撃（Vec2Text）対策として行レベルセキュリティ（RLS）を有効化する。
--- 埋め込みベクトルから元テキストの相当部分が復元可能なため、原文と同等の機密扱いとする。
 CREATE TABLE IF NOT EXISTS memory_chunks_vec (
   chunk_id TEXT PRIMARY KEY REFERENCES memory_chunks(id),
   embedding vector(256)
 );
 CREATE INDEX IF NOT EXISTS idx_vec_embedding ON memory_chunks_vec USING ivfflat (embedding vector_l2_ops);
 
--- RLS: 自ユーザーが書き込んだチャンクのベクトルのみ参照可能にする
-ALTER TABLE memory_chunks_vec ENABLE ROW LEVEL SECURITY;
+-- =====================================================================
+-- RLS（行レベルセキュリティ）実効化 — 共有 DB での WRITE 所有モデル
+-- =====================================================================
+-- 方針:
+--   * READ  : チーム全員が全行を参照可能（USING (true)）。team_search など
+--             他ユーザーの経験横断検索を成立させるため read は開放する。
+--   * WRITE : origin_user が current_setting('app.current_user') と一致する
+--             自分の行のみ INSERT/UPDATE/DELETE 可能。
+--   * app.current_user は PgDatabase が接続ごとに set_config(..., is_local=true)
+--     で注入する git user.name。
+--   * FORCE ROW LEVEL SECURITY: テーブル所有者にも RLS を適用して実効化する
+--     （スーパーユーザーのみバイパス可能。app ロールには BYPASSRLS を与えない）。
+--   * PUBLIC からは全権限を剥奪し、非所有者ロール bluecore_app にのみ DML を付与する。
+--   * 空 identity ガード: current_setting が空/未設定なら NULLIF で NULL となり、
+--     origin_user = NULL は成立しないため WRITE は全拒否される。
+--
+-- セキュリティ補足（memory_chunks_vec）:
+--   目的は機密隔離ではなく WRITE 所有（他ユーザーの埋め込み行の上書き・詐称防止）。
+--   READ はチーム共有プールの設計前提どおり全行に開放する（origin_user 列を
+--   持たないため WRITE 所有者判定は memory_chunks 経由で行う）。
+--
+-- 監査: postgresql.conf で log_statement = 'mod' を設定し変更操作を記録する。
+--       pg_dump / COPY による全件エクスポートは管理者ロールのみ許可する。
 
--- 既存ポリシーの重複定義を防ぐ
+-- 非所有者アプリロール（全メンバーの同期クライアントが共有する単一 LOGIN 認証情報。
+-- 各人の書き込み帰属は PG ロールでなくアプリ側 set_config('app.current_user', ...) の
+-- RLS 判定で行うため、資格情報自体はチームで共有してよい設計）。
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE tablename = 'memory_chunks_vec' AND policyname = 'vec_owner_policy'
-  ) THEN
-    EXECUTE $policy$
-      CREATE POLICY vec_owner_policy ON memory_chunks_vec
-        USING (
-          chunk_id IN (
-            SELECT id FROM memory_chunks WHERE origin_user = current_user
-          )
-        )
-    $policy$;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'bluecore_app') THEN
+    CREATE ROLE bluecore_app LOGIN NOSUPERUSER NOBYPASSRLS;
   END IF;
 END $$;
 
--- スーパーユーザーは RLS をバイパスできるため、通常の app ロールには BYPASSRLS を与えない。
--- pg_dump / COPY による全件エクスポートは管理者ロールのみ許可する。
--- 監査: log_statement = 'mod' を postgresql.conf で設定し、変更操作を記録する。
--- PUBLIC からアクセスを剥奪して RLS を実効化する（<app_role> は実際のロール名に差し替えること）
+-- ポリシー是正は単一トランザクションで原子的に行う（DROP → CREATE を不可分に）
+BEGIN;
+
+-- 旧 owner ポリシー（current_user ベース）を撤去する
+DROP POLICY IF EXISTS chunks_owner_policy ON memory_chunks;
+DROP POLICY IF EXISTS digests_owner_policy ON session_digests;
+DROP POLICY IF EXISTS vec_owner_policy ON memory_chunks_vec;
+
+-- origin_user 列を持つ 9 テーブルへ統一ポリシーを付与
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'memory_chunks', 'sessions', 'instincts', 'adrs', 'event_logs',
+    'interaction_logs', 'project_profiles', 'mem_item_runs', 'session_digests'
+  ] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
+    EXECUTE format('REVOKE ALL ON %I FROM PUBLIC', t);
+    EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO bluecore_app', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON %I', t || '_read', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON %I', t || '_write', t);
+    EXECUTE format('CREATE POLICY %I ON %I FOR SELECT USING (true)', t || '_read', t);
+    EXECUTE format(
+      'CREATE POLICY %I ON %I FOR ALL '
+      'USING (origin_user = NULLIF(current_setting(''app.current_user'', true), '''')) '
+      'WITH CHECK (origin_user = NULLIF(current_setting(''app.current_user'', true), ''''))',
+      t || '_write', t
+    );
+  END LOOP;
+END $$;
+
+-- memory_chunks_vec: origin_user 列が無いため memory_chunks 経由で WRITE 所有者判定
+ALTER TABLE memory_chunks_vec ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_chunks_vec FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON memory_chunks_vec FROM PUBLIC;
--- GRANT SELECT ON memory_chunks_vec TO <app_role>;
+GRANT SELECT, INSERT, UPDATE, DELETE ON memory_chunks_vec TO bluecore_app;
+DROP POLICY IF EXISTS memory_chunks_vec_read ON memory_chunks_vec;
+DROP POLICY IF EXISTS memory_chunks_vec_write ON memory_chunks_vec;
+CREATE POLICY memory_chunks_vec_read ON memory_chunks_vec
+  FOR SELECT USING (true);
+CREATE POLICY memory_chunks_vec_write ON memory_chunks_vec
+  FOR ALL
+  USING (
+    chunk_id IN (
+      SELECT id FROM memory_chunks
+      WHERE origin_user = NULLIF(current_setting('app.current_user', true), '')
+    )
+  )
+  WITH CHECK (
+    chunk_id IN (
+      SELECT id FROM memory_chunks
+      WHERE origin_user = NULLIF(current_setting('app.current_user', true), '')
+    )
+  );
+
+COMMIT;
 
 -- 完了メッセージ
 DO $$
