@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+from bluecore.lib.core_utils import get_git_user_name
 from bluecore.mem.database import (
     Adr,
     EventLog,
@@ -100,13 +101,32 @@ class PgDatabase:
     # 成功時はキャッシュしない（毎回テストする）。
     _PROBE_TTL: float = 300.0
 
-    def __init__(self, postgres_url: str, *, use_pool: bool = True) -> None:
+    def __init__(
+        self,
+        postgres_url: str,
+        *,
+        use_pool: bool = True,
+        identity: str | None = None,
+    ) -> None:
         self._url = postgres_url
         self._conn: psycopg.Connection | None = None
         self._pool = None
         self._use_pool = use_pool
+        # RLS ポリシーが参照する current_setting('app.current_user') の値。
+        # 明示指定が無ければ git user.name に一本化する（共有 DB の WRITE 所有判定）。
+        self._identity = identity if identity is not None else get_git_user_name()
         # (result, cached_at) — 失敗時のみ設定する
         self._probe_cache: tuple[bool, float] | None = None
+
+    def _apply_identity(self, conn: psycopg.Connection) -> None:
+        """接続に RLS 用のアプリユーザー識別子を session-local で設定する。
+
+        RLS ポリシーが参照する current_setting('app.current_user') を
+        git user.name（self._identity）に一本化する。is_local=true により
+        設定は現在のトランザクション終了時に失効し、プール接続へ漏れない。
+        """
+        with conn.cursor() as cur:
+            cur.execute("SELECT set_config('app.current_user', %s, true)", (self._identity,))
 
     def _get_conn(self) -> psycopg.Connection:
         """接続を取得（遅延接続）。プールが有効なら ConnectionPool を使用。
@@ -133,13 +153,18 @@ class PgDatabase:
                     log.debug("psycopg_pool が見つかりません。単一接続を使用します")
                     self._use_pool = False
                     return self._get_conn()
-            return self._pool.getconn()
-        # フォールバック: 単一接続
-        if self._conn is None or self._conn.closed:
-            import psycopg
+            conn = self._pool.getconn()
+        else:
+            # フォールバック: 単一接続
+            if self._conn is None or self._conn.closed:
+                import psycopg
 
-            self._conn = psycopg.connect(_ensure_ssl(self._url), passfile=passfile, connect_timeout=_CONNECT_TIMEOUT)
-        return self._conn
+                self._conn = psycopg.connect(
+                    _ensure_ssl(self._url), passfile=passfile, connect_timeout=_CONNECT_TIMEOUT
+                )
+            conn = self._conn
+        self._apply_identity(conn)
+        return conn
 
     def _put_conn(self, conn: psycopg.Connection) -> None:
         """プール使用時に接続を返却する。"""

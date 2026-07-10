@@ -301,6 +301,80 @@ def test_get_conn_uses_pool_when_available(monkeypatch: pytest.MonkeyPatch) -> N
     assert captured_kwargs["connect_timeout"] == 5
 
 
+def test_identity_defaults_to_git_user_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """identity 未指定なら git user.name に一本化される。"""
+    monkeypatch.setattr("bluecore.mem.pg_database.get_git_user_name", lambda: "git-alice")
+    db = PgDatabase("postgres://example", use_pool=False)
+    assert db._identity == "git-alice"
+
+
+def test_identity_explicit_overrides_git(monkeypatch: pytest.MonkeyPatch) -> None:
+    """identity を明示指定すると git user.name は参照されない。"""
+    called = False
+
+    def _boom() -> str:
+        nonlocal called
+        called = True
+        return "should-not-be-used"
+
+    monkeypatch.setattr("bluecore.mem.pg_database.get_git_user_name", _boom)
+    db = PgDatabase("postgres://example", use_pool=False, identity="explicit-user")
+    assert db._identity == "explicit-user"
+    assert called is False
+
+
+def test_get_conn_injects_set_config_single(monkeypatch: pytest.MonkeyPatch) -> None:
+    """単一接続経路で _get_conn が set_config('app.current_user', identity, true) を注入する。"""
+    conn = FakeConn()
+
+    def _connect(url: str, passfile: str | None = None, connect_timeout: int | None = None) -> FakeConn:
+        return conn
+
+    psycopg_mod = ModuleType("psycopg")
+    psycopg_mod.connect = _connect  # type: ignore[assignment]
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg_mod)
+
+    db = PgDatabase("postgres://example", use_pool=False, identity="rls-user")
+    assert db._get_conn() is conn
+
+    identity_calls = [
+        params for sql, params in conn.cursor_obj.executed if "set_config('app.current_user'" in sql
+    ]
+    assert identity_calls == [("rls-user",)]
+    # is_local=true（第3引数 true）で注入される
+    assert any(", true)" in sql for sql, _ in conn.cursor_obj.executed if "set_config" in sql)
+
+
+def test_get_conn_injects_set_config_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """プール経路でも _get_conn が identity を set_config で注入する。"""
+    pool_conn = FakeConn()
+    pool_mod = ModuleType("psycopg_pool")
+
+    class ConnectionPool:
+        def __init__(self, url: str, kwargs: dict, min_size: int, max_size: int) -> None:
+            pass
+
+        def getconn(self) -> FakeConn:
+            return pool_conn
+
+        def putconn(self, conn: FakeConn) -> None:  # noqa: ANN001
+            pass
+
+        def close(self) -> None:
+            pass
+
+    pool_mod.ConnectionPool = ConnectionPool
+    monkeypatch.setitem(sys.modules, "psycopg_pool", pool_mod)
+    monkeypatch.setitem(sys.modules, "psycopg", ModuleType("psycopg"))
+
+    db = PgDatabase("postgres://example", use_pool=True, identity="pool-user")
+    assert db._get_conn() is pool_conn
+    identity_calls = [
+        params for sql, params in pool_conn.cursor_obj.executed if "set_config('app.current_user'" in sql
+    ]
+    assert identity_calls == [("pool-user",)]
+
+
 def test_get_conn_falls_back_to_direct_connect_when_pool_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     """psycopg_pool が ConnectionPool を持たない場合は psycopg.connect() に fallback し connect_timeout を渡す。"""
     fallback_conn = FakeConn()
