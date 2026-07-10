@@ -1670,6 +1670,58 @@ def test_get_worktree_file_content_reads_real_file(tmp_path: Path) -> None:
     assert content == "value = 1\n"
 
 
+def test_get_worktree_file_content_rejects_symlink_escaping_repo_root(tmp_path: Path) -> None:
+    """repo 外の実体を指すシンボリックリンクは None を返すこと（realpath 包含チェック）。
+
+    OS レベルでシンボリックリンクを追跡すると、repo 内の悪意あるリンクが
+    `git commit -a` の対象に入った場合に repo 外の実体（秘密鍵等）を読み、
+    secret パターン一致でログに一部露出しうる欠陥の回帰防止。
+    """
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    outside_secret = tmp_path / "outside_secret.txt"
+    outside_secret.write_text("api" + "_key" + ' = "hunter2secret"', encoding="utf-8")
+
+    link = repo_root / "evil_link.py"
+    link.symlink_to(outside_secret)
+
+    assert pre_bash_commit_quality.get_worktree_file_content(repo_root, "evil_link.py") is None
+
+
+def test_get_worktree_file_content_rejects_absolute_file_path(tmp_path: Path) -> None:
+    """file_path が絶対パスの場合は None を返すこと（pathlib の仕様上 repo_root が無視される経路）。"""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    outside_secret = tmp_path / "outside_secret.txt"
+    outside_secret.write_text("secret content", encoding="utf-8")
+
+    assert pre_bash_commit_quality.get_worktree_file_content(repo_root, str(outside_secret)) is None
+
+
+def test_get_worktree_file_content_rejects_dotdot_traversal(tmp_path: Path) -> None:
+    """`..` を含む file_path で repo_root 外へ脱出しようとした場合は None を返すこと。"""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    outside_secret = tmp_path / "outside_secret.txt"
+    outside_secret.write_text("secret content", encoding="utf-8")
+
+    assert pre_bash_commit_quality.get_worktree_file_content(repo_root, "../outside_secret.txt") is None
+
+
+def test_get_worktree_file_content_rejects_symlinked_intermediate_directory(tmp_path: Path) -> None:
+    """中間ディレクトリがシンボリックリンクで repo 外へ脱出する場合も None を返すこと。"""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    outside_dir = tmp_path / "outside_dir"
+    outside_dir.mkdir()
+    (outside_dir / "app.py").write_text("secret content", encoding="utf-8")
+
+    linked_subdir = repo_root / "linked_subdir"
+    linked_subdir.symlink_to(outside_dir)
+
+    assert pre_bash_commit_quality.get_worktree_file_content(repo_root, "linked_subdir/app.py") is None
+
+
 def test_find_git_commit_args_stops_at_separator_before_commit() -> None:
     """git の直後にシェル区切りが現れた場合、その git 呼び出しは commit と
     みなさないこと（オプション読み飛ばしのループが区切りで打ち切られる分岐）。

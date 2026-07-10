@@ -199,18 +199,39 @@ def get_worktree_file_content(repo_root: Path, file_path: str) -> str | None:
     の変更ファイル（INDEX には反映されていない）はここから読む必要が
     あります。UTF-8 として `errors="replace"` でデコードします。
 
+    読み取り前に realpath 包含チェックを行い、解決後の絶対パスが
+    `repo_root` 配下に収まっていることを確認します。これにより以下を
+    まとめて封鎖します:
+
+    - `file_path` 自身、または中間ディレクトリがシンボリックリンクで
+      `repo_root` 外の実体を指している場合（OS レベルでリンクを追跡すると
+      repo 外の秘密鍵等を読み込み、secret 検出結果としてログに一部露出
+      しうるため）
+    - `file_path` が絶対パスの場合（pathlib の仕様上 `repo_root` が無視される）
+    - `file_path` に `..` が含まれ `repo_root` 外へ traversal する場合
+
+    包含チェックに違反した場合は無言で None を返します（既存の「読めなければ
+    None」契約と一致させ、fail-open のノイズを増やさないためです）。
+    repo 内に留まる正当なシンボリックリンクは通過し従来どおり読みます
+    （最小修正の方針。過検知は避けつつ実体は別経路でも検出されます）。
+
     Args:
         repo_root: リポジトリルートの絶対パスです。
         file_path: `repo_root` からの相対ファイルパスです。
 
     Returns:
-        ファイル内容の文字列。読み取れない場合は None を返します。
+        ファイル内容の文字列。読み取れない・repo_root 外の場合は None を
+        返します。
 
     Raises:
         例外は発生しません。
     """
     try:
-        raw = (repo_root / file_path).read_bytes()
+        base = repo_root.resolve()
+        target = (repo_root / file_path).resolve()
+        if not target.is_relative_to(base):
+            return None
+        raw = target.read_bytes()
     except OSError:
         return None
     return raw.decode("utf-8", errors="replace")
