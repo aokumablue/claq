@@ -38,10 +38,10 @@ user-invocable: false
 
 ## 手順
 
-1. 変更対象列挙→各ファイルの復旧コマンド定義
+1. 変更対象列挙→各ファイルの tracked/untracked を `git ls-files` で判定してから復旧コマンドを確定（tracked=`git checkout -- {file}` / untracked（新規作成）=`rm {file}`）
 2. 高リスク境界を `CAUTION` タグ付け
 3. ファイルごとに検証コマンドを紐付け
-4. グループ依存がある場合、復旧順序を依存逆順で定義
+4. グループ依存がある場合、復旧順序を依存逆順で定義。循環依存時（refactor-prep が記録しうる）は循環に属する全ファイルを1グループとして一括 revert 対象にし、Skip Rules に cyclic-dependency を記録
 5. Rollback Blueprint 出力
 
 `CAUTION` 判定: 公開API/外部I/O/永続化境界を含む・依存グループをまたぐ
@@ -55,7 +55,7 @@ Rollback Blueprint
 ──────────────────────────────
 Scope: {n} files
 File Rules:
-  - {file}: revert="git checkout -- {file}" verify="{cmd}" risk={SAFE|CAUTION}
+  - {file}: revert="{git checkout -- {file} | rm {file}}" verify="{cmd}" risk={SAFE|CAUTION}
 Order:
   - revert group {g2} -> {g1}
 Skip Rules:
@@ -65,8 +65,8 @@ Skip Rules:
 
 ## ルール
 
-- 復旧単位は**ファイル単位**
-- 復旧コマンドは `git checkout -- <file>`
+- 復旧単位は**ファイル単位**（循環依存グループのみ一括）
+- 復旧コマンドは tracked=`git checkout -- {file}` / untracked（新規作成）=`rm {file}`。`git ls-files` で判定してから確定
 - 不確実な変更は `Skip Rules` に記録
 - 機能変更禁止（WHAT不変）
 

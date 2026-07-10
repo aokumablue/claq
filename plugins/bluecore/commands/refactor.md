@@ -49,13 +49,13 @@ command: /refactor
 
 デッドコード削除。各ファイル適用ごとにテスト実行→失敗時は `git checkout -- <file>` で単ファイルリバートして継続。
 
-`--mode=clean` 指定時はステップ3のみ実行して終了。
+`--mode=clean` 指定時はステップ3を実行後、ステップ7 final gate（テスト/lint 再実行）で終了。
 
 ## ステップ4: simplify（並列, `refactor-orchestrator` → `bluecore:simplifier`）
 
 グループ化して**同時起動**。可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
 
-`--mode=simplify` 指定時はステップ4のみ実行して終了（その後ステップ7 final gate へ直行）。
+`--mode=simplify` 指定時はステップ4を実行後、ステップ7 final gate（テスト/lint 再実行）で終了。
 
 ## ステップ5: perf（`refactor-orchestrator` → `bluecore:perf-optimizer`）
 
