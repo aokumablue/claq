@@ -107,11 +107,14 @@ def _setup_sandbox(sandbox_dir: Path, scenario: Scenario) -> None:
         shutil.rmtree(sandbox_dir)
     sandbox_dir.mkdir(parents=True)
 
-    subprocess.run(["git", "init"], cwd=sandbox_dir, capture_output=True)
+    subprocess.run(["git", "init"], cwd=sandbox_dir, capture_output=True, timeout=5)
 
     for cmd in scenario.setup_commands:
         parts = shlex.split(cmd)
-        subprocess.run(parts, cwd=sandbox_dir, capture_output=True)
+        try:
+            subprocess.run(parts, cwd=sandbox_dir, capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def _process_assistant_message(msg: dict, pending: dict[str, dict], event_counter: int) -> int:

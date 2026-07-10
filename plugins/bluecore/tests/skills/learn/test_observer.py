@@ -388,6 +388,23 @@ def test_run_prune_oserror() -> None:
         observer._run_prune()
 
 
+def test_run_prune_uses_hard_timeout() -> None:
+    """prune 実行にハードタイムアウトが付与されること。"""
+    with mock.patch.object(observer.subprocess, "run") as run:
+        observer._run_prune()
+        assert run.call_args.kwargs.get("timeout") == 60
+
+
+def test_run_prune_timeout_expired_swallowed() -> None:
+    """タイムアウト時も例外を伝播させず握りつぶす。"""
+    with mock.patch.object(
+        observer.subprocess,
+        "run",
+        side_effect=observer.subprocess.TimeoutExpired(cmd="prune", timeout=60),
+    ):
+        observer._run_prune()
+
+
 # --- _resolve_project_root ---------------------------------------------------
 
 
@@ -415,6 +432,25 @@ def test_resolve_project_root_oserror(tmp_path: Path, monkeypatch: pytest.Monkey
     """git が OSError なら cwd を使う。"""
     monkeypatch.setattr(observer.os, "getcwd", lambda: str(tmp_path))
     with mock.patch.object(observer.subprocess, "run", side_effect=OSError):
+        assert observer._resolve_project_root(tmp_path / "missing") == tmp_path
+
+
+def test_resolve_project_root_uses_hard_timeout(tmp_path: Path) -> None:
+    """git 呼び出しにハードタイムアウトが付与されること。"""
+    completed = SimpleNamespace(stdout=str(tmp_path) + "\n")
+    with mock.patch.object(observer.subprocess, "run", return_value=completed) as run:
+        observer._resolve_project_root(tmp_path / "missing")
+        assert run.call_args.kwargs.get("timeout") == 5
+
+
+def test_resolve_project_root_timeout_expired(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """git がタイムアウトしたら cwd を使う。"""
+    monkeypatch.setattr(observer.os, "getcwd", lambda: str(tmp_path))
+    with mock.patch.object(
+        observer.subprocess,
+        "run",
+        side_effect=observer.subprocess.TimeoutExpired(cmd="git", timeout=5),
+    ):
         assert observer._resolve_project_root(tmp_path / "missing") == tmp_path
 
 

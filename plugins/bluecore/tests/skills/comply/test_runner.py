@@ -31,6 +31,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -361,6 +362,45 @@ class TestSetupSandbox:
             _setup_sandbox(sandbox, scenario)
 
         # git init + 2 コマンド = 3 回呼ばれる
+        assert mock_run.call_count == 3
+
+    def test_git_init_uses_hard_timeout(self, tmp_path: Path) -> None:
+        """git init 呼び出しに timeout=5 が付与されること。"""
+        sandbox = tmp_path / "sandbox"
+        scenario = _make_scenario()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            _setup_sandbox(sandbox, scenario)
+
+        git_init_call = mock_run.call_args_list[0]
+        assert git_init_call.kwargs.get("timeout") == 5
+
+    def test_setup_commands_use_hard_timeout(self, tmp_path: Path) -> None:
+        """setup_commands の各実行に timeout=60 が付与されること。"""
+        sandbox = tmp_path / "sandbox"
+        scenario = _make_scenario(setup_commands=("echo hello",))
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            _setup_sandbox(sandbox, scenario)
+
+        setup_cmd_call = mock_run.call_args_list[1]
+        assert setup_cmd_call.kwargs.get("timeout") == 60
+
+    def test_setup_command_timeout_expired_continues(self, tmp_path: Path) -> None:
+        """setup_commands の1つがタイムアウトしても後続コマンドの実行を継続すること。"""
+        sandbox = tmp_path / "sandbox"
+        scenario = _make_scenario(setup_commands=("sleep 999", "echo world"))
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0),  # git init
+                subprocess.TimeoutExpired(cmd="sleep 999", timeout=60),
+                MagicMock(returncode=0),  # echo world
+            ]
+            _setup_sandbox(sandbox, scenario)  # 例外が伝播しないこと
+
         assert mock_run.call_count == 3
 
 

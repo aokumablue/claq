@@ -265,8 +265,9 @@ def _run_prune() -> None:
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            timeout=60,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return
 
 
@@ -275,9 +276,15 @@ def _resolve_project_root(project_root: Path) -> Path:
     if project_root.exists():
         return project_root
     try:
-        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False).stdout.strip()
+        top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        ).stdout.strip()
         return Path(top or os.getcwd())
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return Path(os.getcwd())
 
 

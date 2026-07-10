@@ -427,11 +427,50 @@ def test_fetch_url_success(monkeypatch):
             return b"hello"
 
     class _FakeOpener:
-        def open(self, _url):
+        def open(self, _url, timeout=None):
             return _FakeResp()
 
     monkeypatch.setattr(_mod.urllib.request, "build_opener", lambda *a, **k: _FakeOpener())
     assert _mod._fetch_url("http://example.com/x") == "hello"
+
+
+def test_fetch_url_uses_hard_timeout(monkeypatch):
+    """opener.open にハードタイムアウトが付与されること。"""
+    monkeypatch.setattr(_mod.socket, "getaddrinfo", lambda *a, **k: _PUBLIC_ADDRINFO)
+    calls: dict = {}
+
+    class _FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"hello"
+
+    class _FakeOpener:
+        def open(self, url, timeout=None):
+            calls["url"] = url
+            calls["timeout"] = timeout
+            return _FakeResp()
+
+    monkeypatch.setattr(_mod.urllib.request, "build_opener", lambda *a, **k: _FakeOpener())
+    _mod._fetch_url("http://example.com/x")
+    assert calls["timeout"] == 30
+
+
+def test_fetch_url_propagates_timeout(monkeypatch):
+    """opener.open がタイムアウトした場合は例外を呼び出し元へ伝播すること。"""
+    monkeypatch.setattr(_mod.socket, "getaddrinfo", lambda *a, **k: _PUBLIC_ADDRINFO)
+
+    class _FakeOpener:
+        def open(self, _url, timeout=None):
+            raise TimeoutError("timed out")
+
+    monkeypatch.setattr(_mod.urllib.request, "build_opener", lambda *a, **k: _FakeOpener())
+    with pytest.raises(TimeoutError):
+        _mod._fetch_url("http://example.com/x")
 
 
 def test_fetch_url_blocks_internal_before_network():

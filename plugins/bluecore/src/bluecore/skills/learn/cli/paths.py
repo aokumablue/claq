@@ -205,7 +205,7 @@ def _fetch_url(url: str) -> str:
     """SSRF 検証を行いつつ URL から UTF-8 テキストを取得する。"""
     _assert_safe_url(url)
     opener = urllib.request.build_opener(_SsrfSafeRedirectHandler())
-    with opener.open(url) as response:
+    with opener.open(url, timeout=30) as response:
         return response.read().decode("utf-8")
 
 
