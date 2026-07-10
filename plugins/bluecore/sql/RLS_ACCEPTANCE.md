@@ -55,6 +55,14 @@ psql "<admin_url>" -f pg_setup.sql
 - [ ] 同じセッションで `origin_user='bob'`（他者になりすまし）を指定して
       INSERT すると、ポリシー違反（`new row violates row-level security policy`）
       で拒否される。
+- [ ] `bob` として接続（`set_config('app.current_user', 'bob', true)`）し、
+      `alice` が所有する既存行に対し `UPDATE ... SET content='x' WHERE id=<alice の行>`
+      を実行しても影響行数 0（他者行を書き換えられない）。
+- [ ] 同様に `bob` として `alice` の既存行に `DELETE ... WHERE id=<alice の行>`
+      を実行しても影響行数 0（他者行を削除できない）。
+      ※この UPDATE/DELETE 拒否は `_read`(USING true) と `_write`(FOR ALL) の
+      共存下での可視性判定（SELECT ポリシーの USING が UPDATE/DELETE の既存行判定に
+      AND 結合される PostgreSQL 意味論）に依存する非自明な部分のため、実 DB で必ず確認する。
 - [ ] `set_config` を一切呼ばずに INSERT すると、
       `current_setting('app.current_user', true)` が NULL のため
       `origin_user = NULL` は決して真にならず拒否される（フェイルクローズ）。
