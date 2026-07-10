@@ -68,6 +68,21 @@ model: sonnet
 
 サーバサイド: レスポンスタイム改善・DB クエリ数削減・メモリ安定 / Web: Lighthouse > 90 / Core Web Vitals 全項目良好 / バンドルサイズ予算内
 
+## 出力形式
+
+最適化結果を executor 準拠の構造で提示し、各変更に before→after の実測値を添える:
+
+```
+## 変更内容
+- path/to/file — 最適化概要（根本原因1行）／ 指標 before→after（実測値）
+
+## 検証（テストコマンド・exit code）
+- 実行コマンド / exit code / 結果
+
+## 未確認・スコープ外
+- 項目（あれば）
+```
+
 ## 永続メモリ
 
 `<mem-context>` 注入で起動。

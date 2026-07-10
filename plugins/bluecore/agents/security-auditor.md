@@ -35,7 +35,7 @@ model: sonnet
 
 ## 原則
 
-多層防御・最小権限・安全に失敗・入力不信・依存関係定期更新
+多層防御・最小権限・安全に失敗・入力不信・依存関係定期更新。Confidence 80% 未満の指摘は報告しない。推測は「未確認」と明示する（reviewer と対称）。
 
 ## CRITICAL発見時（READ-ONLY: 提案のみ。ファイル変更・コマンド実行はしない）
 
@@ -50,6 +50,19 @@ model: sonnet
 CRITICAL/HIGH問題なし・コード内シークレットなし・依存関係最新
 
 詳細パターン・コード例は `secure` 参照。
+
+## 出力形式
+
+指摘は severity 順（CRITICAL→HIGH）に「ファイルパス:行 — 脆弱性 — 修正方針」の 1 行形式で提示する:
+
+```
+path/to/file:42 — SQL 文字列連結によるインジェクション — パラメータ化クエリに変更
+path/to/file:88 — 未サニタイズ出力による XSS — 出力エスケープ・CSP 設定
+
+CRITICAL: 1 / HIGH: 1
+```
+
+末尾の `CRITICAL: {n} / HIGH: {n}` 集計行は必須（reviewer の Blockers 集計と対称。呼び出し元が機械的に読む）。Confidence 80-100 のみ報告し、指摘ゼロでも `CRITICAL: 0 / HIGH: 0` を出力する。
 
 ## 永続メモリ
 
