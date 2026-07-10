@@ -523,8 +523,14 @@ def test_find_file_issues_skips_secret_scan_for_lock_files(monkeypatch: pytest.M
     assert pre_bash_commit_quality.find_file_issues("package-lock.json") == []
 
 
-def test_find_file_issues_skips_secret_scan_for_oversized_files(monkeypatch: pytest.MonkeyPatch) -> None:
-    """1MB を超えるファイルは secret スキャンをスキップすること（lint は拡張子次第で継続）。"""
+def test_find_file_issues_oversized_files_truncate_secret_scan_not_skip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """1MB を超えるファイルは secret スキャンを全面放棄せず、先頭
+    _SECRET_SCAN_MAX_BYTES バイトに切り詰めて継続すること（水増しによる
+    全面回避の防止）。境界を超えた末尾側の secret はこの実装では検出でき
+    ない（切り詰めの仕様上の限界）ため、lint（ログ出力チェック）は継続
+    検出されることも合わせて確認する。"""  # nosec
     padding = "x" * (1024 * 1024 + 1)
     content = padding + "\n" + 'console.log("hi")' + "\n" + "api" + "_key" + ' = "abc123"'  # nosec
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
@@ -532,8 +538,25 @@ def test_find_file_issues_skips_secret_scan_for_oversized_files(monkeypatch: pyt
     issues = pre_bash_commit_quality.find_file_issues("src/app.js")
 
     types = {issue["type"] for issue in issues}
+    # 切り詰め境界より後ろにある secret は検出できない（仕様上の限界）
     assert "secret" not in types
+    # lint はサイズに関わらず継続する
     assert "console.log" in types  # nosec
+
+
+def test_find_file_issues_oversized_files_scan_prefix_for_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """1MB 超のファイルでも、切り詰め境界より前（先頭側）にある secret は
+    検出されること（全面スキップではなく先頭側スキャン継続の確認）。"""
+    secret_line = "api" + "_key" + ' = "abc123"'
+    padding = "x" * (1024 * 1024 + 1)
+    content = secret_line + "\n" + padding
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
+
+    issues = pre_bash_commit_quality.find_file_issues("src/app.js")
+
+    assert any(issue["type"] == "secret" and issue["line"] == 1 for issue in issues)
 
 
 def test_find_file_issues_secret_scan_applies_under_size_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -547,6 +570,22 @@ def test_find_file_issues_secret_scan_applies_under_size_limit(monkeypatch: pyte
     assert any(issue["type"] == "secret" for issue in issues)
 
 
+def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """バイナリ判定（先頭に NUL を含む）は lint 抑制のみに用い、secret 検出は
+    継続すること（NUL バイトを1つ混ぜるだけで secret 検査を回避できてしまう
+    抜け道の回帰防止）。"""
+    content = "\0binary preamble\n" + 'console.log("hi")\n' + "api" + "_key" + ' = "abc123"'  # nosec
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
+
+    issues = pre_bash_commit_quality.find_file_issues("weird.js")
+
+    types = {issue["type"] for issue in issues}
+    assert "secret" in types
+    assert "console.log" not in types  # nosec
+
+
 def test_evaluate_scans_non_lint_extension_files_for_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     """evaluate() が lint 非対象拡張子（.env 等）もステージ済みファイルの走査対象に含めること。"""
     monkeypatch.setattr(
@@ -558,7 +597,7 @@ def test_evaluate_scans_non_lint_extension_files_for_secrets(monkeypatch: pytest
 
     seen: list[str] = []
 
-    def _fake_find_file_issues(path: str) -> list[dict]:
+    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None) -> list[dict]:
         seen.append(path)
         return []
 
@@ -637,8 +676,14 @@ def test_pre_bash_commit_quality_helpers_return_success_outputs(monkeypatch: pyt
     assert pre_bash_commit_quality.get_staged_file_content("src/app.js") == "file content"
 
 
-def test_get_staged_file_content_skips_binary_files(monkeypatch: pytest.MonkeyPatch) -> None:
-    """先頭8KBに NUL バイトを含む場合はバイナリとみなし None を返すこと。"""
+def test_get_staged_file_content_does_not_filter_binary_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_staged_file_content 自体はバイナリ判定を行わず、NUL を含む内容もそのまま返すこと。
+
+    バイナリ判定（`_is_binary_content`）は `find_file_issues` 側で lint 抑制の
+    みに使う設計であり、ここで None を返してしまうと secret 検出まで巻き
+    込んで全放棄されてしまう（NUL 1個で secret 検査を回避できる抜け道）ため、
+    取得層では判定しないことを保証する。
+    """
     binary_bytes = b"PNG\x00\x01\x02fake image bytes"
 
     monkeypatch.setattr(
@@ -646,7 +691,9 @@ def test_get_staged_file_content_skips_binary_files(monkeypatch: pytest.MonkeyPa
         "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=binary_bytes, stderr=b""),
     )
-    assert pre_bash_commit_quality.get_staged_file_content("image.png") is None
+    content = pre_bash_commit_quality.get_staged_file_content("image.png")
+    assert content is not None
+    assert "\0" in content
 
 
 def test_get_staged_file_content_replaces_invalid_utf8_without_raising(
@@ -737,14 +784,14 @@ def test_pre_bash_commit_quality_blocks_on_error_and_allows_warnings(
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "find_file_issues",
-        lambda path: [{"severity": "error", "line": 1, "message": "boom"}],
+        lambda path, *, repo_root=None: [{"severity": "error", "line": 1, "message": "boom"}],
     )
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
     assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 2}
 
     warning_logs: list[str] = []
     monkeypatch.setattr(pre_bash_commit_quality, "log", warning_logs.append)
-    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path: [])
+    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None: [])
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "validate_commit_message",
@@ -771,7 +818,7 @@ def test_pre_bash_commit_quality_counts_warning_and_info_issues(monkeypatch: pyt
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "find_file_issues",
-        lambda path: [
+        lambda path, *, repo_root=None: [
             {"severity": "warning", "line": 1, "message": "warn"},
             {"severity": "info", "line": 2, "message": "info"},
         ],
@@ -1137,7 +1184,7 @@ def test_pre_bash_commit_quality_helpers_and_pass_branch(monkeypatch: pytest.Mon
     )
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: ["src/app.js"])
     monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
-    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path: [])
+    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None: [])
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
 
     assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
@@ -1221,7 +1268,9 @@ def test_count_file_issues_unknown_severity(monkeypatch) -> None:
     """未知の severity は error/warning/info いずれにも加算しない。"""
     import bluecore.hooks.pre_bash_commit_quality as pbcq
 
-    monkeypatch.setattr(pbcq, "find_file_issues", lambda fp: [{"severity": "unknown", "line": 1, "message": "x"}])
+    monkeypatch.setattr(
+        pbcq, "find_file_issues", lambda fp, *, repo_root=None: [{"severity": "unknown", "line": 1, "message": "x"}]
+    )
     monkeypatch.setattr(pbcq, "log", lambda *a, **k: None)
     total, err, warn, info = pbcq._count_file_issues(["f.py"])
     assert (total, err, warn, info) == (1, 0, 0, 0)
@@ -1266,6 +1315,30 @@ def test_is_git_commit_command_skips_global_dash_c_option() -> None:
     is_commit, args = pbcq._is_git_commit_command("git -C /tmp/repo commit -m x")
     assert is_commit is True
     assert args == ["-m", "x"]
+
+
+def test_is_git_commit_command_skips_unknown_global_option_with_value() -> None:
+    """allowlist に無いグローバルオプション（--exec-path 等）でも検出漏れしないこと。
+
+    旧実装は既知オプション（-C/-c 等）のみ値トークンをスキップしていたため、
+    `--exec-path <path>` のような未知オプションの値トークンで走査が
+    打ち切られ検出漏れになっていた（フェイルセーフ違反）。新実装は
+    オプション・値を区別せず commit まで読み飛ばす。
+    """
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    is_commit, args = pbcq._is_git_commit_command("git --exec-path /foo commit -m x")
+    assert is_commit is True
+    assert args == ["-m", "x"]
+
+
+def test_is_git_commit_command_skips_unknown_global_option_detects_dash_a() -> None:
+    """未知グローバルオプション経由でも -a 相当のフラグが検出できること。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    is_commit, args = pbcq._is_git_commit_command("git --super-prefix /x commit -am y")
+    assert is_commit is True
+    assert pbcq._is_commit_all_flag(args) is True
 
 
 def test_is_git_commit_command_detects_within_composite_command() -> None:
@@ -1363,7 +1436,9 @@ def test_evaluate_commit_amend_skipped_with_messy_spacing(monkeypatch: pytest.Mo
 
 
 def test_evaluate_commit_dash_a_unions_unstaged_modified_files(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`git commit -a` では未ステージの変更ファイルもスキャン対象に加わること。"""
+    """`git commit -a` では未ステージの変更ファイルもスキャン対象に加わり、
+    その分は作業ツリー（repo_root 経由）から読まれること
+    （INDEX を読んで機能していなかった実欠陥の回帰防止）。"""
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "parse_json_object",
@@ -1375,9 +1450,41 @@ def test_evaluate_commit_dash_a_unions_unstaged_modified_files(monkeypatch: pyte
     )
     monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
 
+    dummy_repo_root = Path("/dummy/repo")
+    monkeypatch.setattr(pre_bash_commit_quality, "_resolve_repo_root", lambda: dummy_repo_root)
+
+    seen: list[tuple[str, Path | None]] = []
+
+    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None) -> list[dict]:
+        seen.append((path, repo_root))
+        return []
+
+    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", _fake_find_file_issues)
+    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+
+    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+    assert dict(seen) == {"src/staged.py": None, "src/unstaged.py": dummy_repo_root}
+
+
+def test_evaluate_commit_dash_a_worktree_skipped_when_repo_root_unresolvable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """repo root が解決できない場合、-a の未ステージ分は非ブロッキングでスキップされること。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git commit -am 'feat(core): add'"}},
+    )
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: ["src/staged.py"])
+    monkeypatch.setattr(
+        pre_bash_commit_quality, "get_unstaged_modified_files", lambda: ["src/unstaged.py"]
+    )
+    monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
+    monkeypatch.setattr(pre_bash_commit_quality, "_resolve_repo_root", lambda: None)
+
     seen: list[str] = []
 
-    def _fake_find_file_issues(path: str) -> list[dict]:
+    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None) -> list[dict]:
         seen.append(path)
         return []
 
@@ -1385,7 +1492,7 @@ def test_evaluate_commit_dash_a_unions_unstaged_modified_files(monkeypatch: pyte
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
 
     assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
-    assert set(seen) == {"src/staged.py", "src/unstaged.py"}
+    assert seen == ["src/staged.py"]
 
 
 def test_evaluate_commit_without_dash_a_ignores_unstaged_modified_files(
@@ -1404,10 +1511,80 @@ def test_evaluate_commit_without_dash_a_ignores_unstaged_modified_files(
         lambda: (_ for _ in ()).throw(AssertionError("should not be called")),
     )
     monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
-    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path: [])
+    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None: [])
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
 
     assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+
+
+def _init_repo_with_initial_commit(repo: Path, initial_content: str) -> Path:
+    """テスト用に実 git リポジトリを初期化し、app.py を1回コミットする。"""
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True, capture_output=True)
+    app_py = repo / "app.py"
+    app_py.write_text(initial_content, encoding="utf-8")
+    subprocess.run(["git", "add", "app.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "feat(core): initial"], cwd=repo, check=True, capture_output=True)
+    return app_py
+
+
+def test_evaluate_commit_dash_a_detects_secret_in_unstaged_worktree_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`git commit -a` は未ステージの作業ツリー変更を読み、新規シークレットを
+    検出すること（INDEX（git show :file）を読んでいたため未ステージの
+    シークレットが検出できなかった実欠陥の回帰防止。空サンドボックスで
+    CRITICAL として実証済みのシナリオ）。"""
+    repo = tmp_path / "repo"
+    app_py = _init_repo_with_initial_commit(repo, "value = 'clean'\n")
+
+    # 作業ツリーのみ変更（git add しない）— INDEX は "clean" のまま
+    secret_line = "api" + "_key" + ' = "hunter2secret"'
+    app_py.write_text("value = 'clean'\n" + secret_line + "\n", encoding="utf-8")
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git commit -am 'feat(core): update'"}},
+    )
+
+    result = pre_bash_commit_quality.evaluate("payload")
+
+    assert result["exitCode"] == 2
+
+
+def test_evaluate_commit_without_dash_a_reads_index_when_worktree_diverges(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`-a` を伴わない通常コミットでは、ステージ後に作業ツリーがさらに変更
+    されても INDEX（ステージ済み内容）のシークレットを検出すること
+    （読み取り元が誤って作業ツリーに切り替わっていないことの回帰防止＝
+    従来の staged 経路の不変性確認）。"""
+    repo = tmp_path / "repo"
+    app_py = _init_repo_with_initial_commit(repo, "value = 'clean'\n")
+
+    secret_line = "api" + "_key" + ' = "hunter2secret"'
+    app_py.write_text("value = 'clean'\n" + secret_line + "\n", encoding="utf-8")
+    subprocess.run(["git", "add", "app.py"], cwd=repo, check=True, capture_output=True)
+
+    # ステージ後、作業ツリーだけをさらに変更して secret を除去（再ステージしない）
+    app_py.write_text("value = 'clean'\n", encoding="utf-8")
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git commit -m 'feat(core): update'"}},
+    )
+
+    result = pre_bash_commit_quality.evaluate("payload")
+
+    # INDEX（ステージ済み secret 版）を読んで検出する。誤って作業ツリー
+    # （secret 除去後）を読んでいれば exitCode は 0 になってしまう。
+    assert result["exitCode"] == 2
 
 
 def test_get_unstaged_modified_files_returns_success_output(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1439,6 +1616,84 @@ def test_get_unstaged_modified_files_returns_empty_on_oserror(monkeypatch: pytes
         lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("missing")),
     )
     assert pre_bash_commit_quality.get_unstaged_modified_files() == []
+
+
+def test_resolve_repo_root_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """git rev-parse が失敗（returncode != 0）した場合は None を返すこと。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 128, stdout="", stderr="fatal"),
+    )
+    assert pre_bash_commit_quality._resolve_repo_root() is None
+
+
+def test_resolve_repo_root_returns_none_on_empty_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """git rev-parse の出力が空の場合は None を返すこと。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+    )
+    assert pre_bash_commit_quality._resolve_repo_root() is None
+
+
+def test_resolve_repo_root_returns_none_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """git rev-parse がタイムアウトした場合は非ブロッキングで None を返すこと。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired(cmd="git", timeout=5)),
+    )
+    assert pre_bash_commit_quality._resolve_repo_root() is None
+
+
+def test_resolve_repo_root_returns_path_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """git rev-parse が成功すればそのパスを返すこと。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="/repo/root\n", stderr=""),
+    )
+    assert pre_bash_commit_quality._resolve_repo_root() == Path("/repo/root")
+
+
+def test_get_worktree_file_content_returns_none_on_oserror(tmp_path: Path) -> None:
+    """作業ツリーにファイルが無い等で読み取れない場合は None を返すこと。"""
+    assert pre_bash_commit_quality.get_worktree_file_content(tmp_path, "missing.py") is None
+
+
+def test_get_worktree_file_content_reads_real_file(tmp_path: Path) -> None:
+    """作業ツリー上の実ファイルを読み取れること。"""
+    (tmp_path / "app.py").write_text("value = 1\n", encoding="utf-8")
+    content = pre_bash_commit_quality.get_worktree_file_content(tmp_path, "app.py")
+    assert content == "value = 1\n"
+
+
+def test_find_git_commit_args_stops_at_separator_before_commit() -> None:
+    """git の直後にシェル区切りが現れた場合、その git 呼び出しは commit と
+    みなさないこと（オプション読み飛ばしのループが区切りで打ち切られる分岐）。
+    """
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    is_commit, args = pbcq._is_git_commit_command("git && echo hi")
+    assert is_commit is False
+    assert args == []
+
+
+def test_find_file_issues_minified_js_lints_but_skips_secret_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """圧縮生成物（*.min.js）は lint 対象（拡張子は .js）だが secret スキャンは
+    対象外であること（do_lint=True かつ do_secrets=False の組み合わせ）。"""
+    content = 'console.log("hi")\n' + "api" + "_key" + ' = "abc123"'  # nosec
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_file_content", lambda path: content)
+
+    issues = pre_bash_commit_quality.find_file_issues("dist/app.min.js")
+
+    types = {issue["type"] for issue in issues}
+    assert "console.log" in types  # nosec
+    assert "secret" not in types
 
 
 def test_repo_wide_self_scan_has_zero_secret_issues() -> None:
