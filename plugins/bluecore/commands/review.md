@@ -40,7 +40,7 @@ command: /review
 
 以下の2エージェントを**同時起動**し、両結果が揃ってからレポートを統合:
 
-- **`bluecore:reviewer`**: 品質・設計・保守性。50行超fn / 800行超ファイル / 4階層超ネスト / エラーハンドリング不足 / テスト不足 / console.log / TODO-FIXME / a11y 確認
+- **`bluecore:reviewer`**: 品質・設計・保守性（閾値・観点は agents/reviewer.md のチェックリストに準拠）
 - **`bluecore:security-auditor`**: セキュリティ・脆弱性。ハードコード認証情報 / SQLi / XSS / 入力検証不足 / パストラバーサル確認
 
 ## ステップ3: レポート
