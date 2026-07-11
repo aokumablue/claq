@@ -80,10 +80,9 @@ def _extract_apply_patch_text(tool_input: dict | str | None) -> str | None:
             except (json.JSONDecodeError, TypeError):
                 pass
             else:
-                if isinstance(parsed, dict):
-                    patch_text = parsed.get("input")
-                    if isinstance(patch_text, str):
-                        return patch_text
+                patch_text = parsed.get("input")
+                if isinstance(patch_text, str):
+                    return patch_text
         return tool_input
 
     return None

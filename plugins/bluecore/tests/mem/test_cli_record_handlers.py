@@ -81,6 +81,25 @@ def test_record_project_profile_preserves_existing_fields_when_input_is_sparse(m
     assert profile.detected_at_epoch == now
 
 
+def test_record_project_profile_non_list_field_becomes_empty_list(monkeypatch, tmp_path) -> None:
+    """languages が list 型でない場合は空リストとして保存される（型不正の fail-safe）。"""
+    monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
+    settings = Settings()
+    deps = _build_deps()
+
+    handle_record_project_profile(
+        settings,
+        {"cwd": "/repo/bluecore", "languages": "python-not-a-list"},
+        deps,
+    )
+
+    with _open_db(settings) as db:
+        profile = db.get_project_profile("bluecore", origin_user="tester")
+
+    assert profile is not None
+    assert profile.languages == []
+
+
 def test_record_project_profile_updates_fields_when_values_are_provided(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
     monkeypatch.setattr("bluecore.mem.cli_record_handlers.detect_harness", lambda: "copilot")

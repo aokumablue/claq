@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from bluecore.lib import harness
@@ -126,6 +128,31 @@ class TestExtractFilePaths:
             "*** End Patch\n"
         )
         assert harness.extract_file_paths("apply_patch", patch_text) == ["/tmp/example.txt"]
+
+    def test_apply_patch_json_encoded_string_input(self):
+        """tool_input が JSON 文字列化された dict（{"input": "..."}）でも input を復元できる。"""
+        patch_text = "*** Begin Patch\n*** Add File: new.py\n+x = 1\n*** End Patch"
+        wrapped = json.dumps({"input": patch_text})
+        assert harness.extract_file_paths("apply_patch", wrapped) == ["new.py"]
+
+    def test_apply_patch_malformed_json_string_falls_back_to_raw(self):
+        """{ で始まるが JSON として不正な文字列は、そのまま生パッチとしてマーカー探索する。"""
+        assert harness.extract_file_paths("apply_patch", "{not valid json") is None
+
+    def test_apply_patch_json_string_without_string_input_field_falls_back_to_raw(self):
+        """JSON dict だが input フィールドが文字列でない場合は、生文字列としてマーカー探索する。"""
+        wrapped = json.dumps({"input": 123})
+        assert harness.extract_file_paths("apply_patch", wrapped) is None
+
+    def test_apply_patch_non_dict_non_string_input_returns_none(self):
+        """tool_input が dict でも str でもない場合は判定不能で None。"""
+        assert harness.extract_file_paths("apply_patch", None) is None
+        assert harness.extract_file_paths("apply_patch", 123) is None
+
+    def test_non_apply_patch_non_dict_input_returns_empty(self):
+        """apply_patch 以外で tool_input が dict でない場合は空リストを返す。"""
+        assert harness.extract_file_paths("Bash", "ls -la") == []
+        assert harness.extract_file_paths("Edit", None) == []
 
 
 class TestResolveSessionId:
