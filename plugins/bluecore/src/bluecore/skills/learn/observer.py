@@ -115,39 +115,46 @@ def _pid_file_candidates(project_dir: Path) -> list[Path]:
     return [project_dir / ".observer.pid", _CONFIG_DIR / ".observer.pid"]
 
 
+def _safe_unlink(path: Path) -> None:
+    """ファイルを削除する。存在しない・削除失敗時は何もしない。"""
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def _read_live_pid(pid_file: Path) -> int | None:
+    """PID ファイルから稼働中プロセスの PID を返す。
+
+    無効・終了済みの場合は PID ファイルを削除して None を返す。
+    """
+    if not pid_file.exists():
+        return None
+
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        _safe_unlink(pid_file)
+        return None
+
+    if pid <= 1:
+        _safe_unlink(pid_file)
+        return None
+
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        _safe_unlink(pid_file)
+        return None
+    return pid
+
+
 def _is_running(pid_file: Path) -> bool:
     """PID ファイルが示すプロセスが稼働中か判定する。
 
     無効・終了済みの場合は PID ファイルを削除して False を返す。
     """
-    if not pid_file.exists():
-        return False
-
-    try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-        return False
-
-    if pid <= 1:
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-        return False
-
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-        return False
+    return _read_live_pid(pid_file) is not None
 
 
 def _stop_running_observer(pid_file: Path) -> bool:
@@ -156,32 +163,8 @@ def _stop_running_observer(pid_file: Path) -> bool:
     Returns:
         停止シグナルを送れた場合は True、未起動・無効なら False。
     """
-    if not pid_file.exists():
-        return False
-
-    try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-        return False
-
-    if pid <= 1:
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-        return False
-
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
+    pid = _read_live_pid(pid_file)
+    if pid is None:
         return False
 
     try:
@@ -189,10 +172,7 @@ def _stop_running_observer(pid_file: Path) -> bool:
     except OSError:
         return False
 
-    try:
-        pid_file.unlink()
-    except OSError:
-        pass
+    _safe_unlink(pid_file)
     return True
 
 
@@ -206,6 +186,11 @@ def _sentinel_path(project_dir: Path, project_root: Path) -> Path:
     if project_root.exists():
         return project_root / ".observer.lock"
     return project_dir / ".observer.lock"
+
+
+def _clear_guard_sentinel(project_dir: Path, project_root: Path) -> None:
+    """reset 指定時にガードセンチネルを削除する。存在しなければ何もしない。"""
+    _safe_unlink(_sentinel_path(project_dir, project_root))
 
 
 def _write_guard_sentinel(project_dir: Path, project_root: Path) -> None:
@@ -248,11 +233,7 @@ def _print_status(project_dir: Path, pid_file: Path, log_file: Path, instincts_d
         print(f"Instincts: {instinct_count}")
         return 0
 
-    if pid_file.exists():
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
+    _safe_unlink(pid_file)
     print("Observer not running")
     return 1
 
@@ -466,10 +447,7 @@ def _run_claude_analysis(
     if result.returncode != 0:
         _append_log(log_file, f"Claude analysis failed (exit {result.returncode})")
 
-    try:
-        analysis_file.unlink()
-    except OSError:
-        pass
+    _safe_unlink(analysis_file)
 
 
 def _archive_observations(observations_file: Path, project_dir: Path) -> None:
@@ -675,10 +653,7 @@ def _start_observer(project: dict, reset: bool) -> int:
     log_file.touch(exist_ok=True)
 
     if reset:
-        try:
-            _sentinel_path(project_dir, Path(project["root"])).unlink()
-        except OSError:
-            pass
+        _clear_guard_sentinel(project_dir, Path(project["root"]))
 
     for candidate in _pid_file_candidates(project_dir):
         if _is_running(candidate):
@@ -783,10 +758,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Storage: {project_dir}")
 
     if reset:
-        try:
-            _sentinel_path(project_dir, Path(project["root"])).unlink()
-        except OSError:
-            pass
+        _clear_guard_sentinel(project_dir, Path(project["root"]))
 
     if action == "stop":
         return _stop_observer(project)
