@@ -74,8 +74,24 @@ def test_no_current_user_ownership(sql: str) -> None:
 
 
 def test_empty_identity_guard(sql: str) -> None:
-    """空 identity は NULLIF で NULL 化され WRITE が全拒否される。"""
-    assert "NULLIF(current_setting('app.current_user', true), '')" in sql
+    """空 identity は NULLIF で NULL 化され WRITE が全拒否される。
+
+    vec 直書きポリシー（シングルクォート版）が USING / WITH CHECK の
+    2 箇所に存在することを回数一致で検証する（片側欠落・重複増殖を検知）。
+    """
+    assert sql.count("NULLIF(current_setting('app.current_user', true), '')") == 2
+
+
+def test_loop_empty_identity_guard(sql: str) -> None:
+    """FOREACH ループ生成ポリシーも空 identity ガードを持つ。
+
+    format() リテラル内はクォートが '' でエスケープされるため
+    シングルクォート版とは別文字列になる。二重クォート版が USING /
+    WITH CHECK の 2 箇所に存在することを回数一致で検証し、ループ側の
+    エスケープ破壊やガード欠落（origin_user 9 テーブルの WRITE ポリシー
+    退行）を検知する。
+    """
+    assert sql.count("NULLIF(current_setting(''app.current_user'', true), '''')") == 2
 
 
 def test_read_policy_is_open(sql: str) -> None:
