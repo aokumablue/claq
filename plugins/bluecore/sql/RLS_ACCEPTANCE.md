@@ -32,9 +32,11 @@ psql "<admin_url>" -f pg_setup.sql
    ロール部分だけ `bluecore_app` に差し替えた接続文字列に更新する
    （ホスト・ポート・DB 名は変更しない）。
 3. パスワードは平文で `settings.json` に残さない。
-   `PgDatabase` 初回接続時に自動で `<data_dir>/.pgpass` へ分離されるため、
-   パスワード付き URL を一度設定すれば以降は `.pgpass` から解決される
-   （`bluecore.mem.settings._migrate_postgres_url` / `pgpass_path()` 参照）。
+   `Settings.load()`（`settings.json` 読み込み時）が自動で `<data_dir>/.pgpass` へ
+   分離するため、パスワード付き URL を一度設定すれば以降は `.pgpass` から解決される
+   （`bluecore.mem.settings.Settings.load` → `_migrate_postgres_url` / `pgpass_path()` 参照。
+   `PgDatabase` は分離済みの `.pgpass` を `passfile` 接続パラメータで参照するだけで、
+   分離処理自体は行わない）。
 4. **無停止移行が成立する理由**: `pg_setup.sql` は対象10テーブル全てに
    `FORCE ROW LEVEL SECURITY` を適用しているため、切替前の所有者ロール接続でも
    （所有者は本来 RLS をバイパスできるところを FORCE が上書きするため）

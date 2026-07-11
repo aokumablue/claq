@@ -19,7 +19,7 @@
 
 ## データモデルの前提
 
-- PostgreSQL（`sql/pg_setup.sql`）は**チーム共有の蓄積メモリ**。全メンバーが全行を READ できるのが設計意図（`team_search` / ダッシュボード集計は他者行の横断 READ に依存）。メンバー間に機密境界は無い
+- PostgreSQL（`plugins/bluecore/sql/pg_setup.sql`）は**チーム共有の蓄積メモリ**。全メンバーが全行を READ できるのが設計意図（`team_search` / ダッシュボード集計は他者行の横断 READ に依存）。メンバー間に機密境界は無い
 - したがって RLS の目的は**機密性（READ 隔離）ではなく完全性（WRITE 所有）**。守るのは「他者の origin_user を詐称した書き込み」「他者行の上書き・削除」の防止のみ。READ を `origin_user` で絞るポリシー・提案は設計意図に反する（監査で「個人データが全員に見える」を漏洩と見なすのは誤り＝仕様）
 - `origin_user` は `git config user.name`（`core_utils.py` `get_git_user_name`、自己申告）。ハードな認証境界ではなく多層防御
 

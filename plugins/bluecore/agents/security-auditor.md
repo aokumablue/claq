@@ -63,7 +63,7 @@ CRITICAL: 1 / HIGH: 1
 Blockers: 2
 ```
 
-末尾は severity 別内訳 `CRITICAL: {n} / HIGH: {n}` に続けて、reviewer と同形の `Blockers: {n}`（n=CRITICAL+HIGH 件数）行も併記する（呼び出し元が両エージェントから Blockers を統一的に機械読みできるようにする）。両行とも必須で、指摘ゼロでも `CRITICAL: 0 / HIGH: 0` と `Blockers: 0` を出力する。即時指摘パターン一致・CRITICAL 疑いは確信度ゲート適用除外（「未確認」ラベル付きで報告）、80% ゲートは MEDIUM/LOW のノイズ抑制に限定する。
+末尾は severity 別内訳 `CRITICAL: {n} / HIGH: {n}` に続けて、reviewer と同形の `Blockers: {n}`（n=CRITICAL+HIGH 件数）行も併記する（呼び出し元が両エージェントから Blockers を統一的に機械読みできるようにする）。両行とも必須で、指摘ゼロでも `CRITICAL: 0 / HIGH: 0` と `Blockers: 0` を出力する。確信度ゲートの適用規則（即時指摘パターン一致・CRITICAL 疑いの適用除外、MEDIUM/LOW への限定）は「## 原則」に従う。
 
 ## 永続メモリ
 
