@@ -11,7 +11,7 @@ from tests.mem.test_pg_database import FakeConn, FakeCursor
 def _db_with(monkeypatch: pytest.MonkeyPatch, cursor: FakeCursor) -> tuple[PgDatabase, FakeConn]:
     conn = FakeConn(cursor)
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
     monkeypatch.setattr(db, "_put_conn", lambda _c: None)
     return db, conn
 

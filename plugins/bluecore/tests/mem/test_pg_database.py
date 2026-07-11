@@ -19,7 +19,8 @@ from bluecore.mem.database import (
     Session,
     SessionDigest,
 )
-from bluecore.mem.pg_database import PgDatabase, _ensure_ssl, _is_loopback, _to_json
+from bluecore.mem.pg_database import PgDatabase, _ensure_ssl, _is_loopback
+from bluecore.mem.pg_write_mixin import _to_json
 
 
 class FakeCursor:
@@ -234,7 +235,7 @@ def test_upsert_session_digests_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     cursor = FakeCursor()
     conn = FakeConn(cursor)
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
 
     assert db.upsert_session_digests_batch([], "user") == 0
 
@@ -375,6 +376,93 @@ def test_get_conn_injects_set_config_pool(monkeypatch: pytest.MonkeyPatch) -> No
     assert identity_calls == [("pool-user",)]
 
 
+def test_get_conn_for_write_false_skips_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """for_write=False を明示指定すると _apply_identity（set_config）の DB ラウンドトリップをスキップする。"""
+    conn = FakeConn()
+
+    def _connect(url: str, passfile: str | None = None, connect_timeout: int | None = None) -> FakeConn:
+        return conn
+
+    psycopg_mod = ModuleType("psycopg")
+    psycopg_mod.connect = _connect  # type: ignore[assignment]
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg_mod)
+
+    db = PgDatabase("postgres://example", use_pool=False, identity="rls-user")
+    assert db._get_conn(for_write=False) is conn
+    assert conn.cursor_obj.executed == []
+
+
+def test_write_path_applies_identity_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WRITE 経路（pg_write_mixin 経由の upsert）は _get_conn() のデフォルトで identity を必ず適用する。"""
+    conn = FakeConn()
+
+    def _connect(url: str, passfile: str | None = None, connect_timeout: int | None = None) -> FakeConn:
+        return conn
+
+    psycopg_mod = ModuleType("psycopg")
+    psycopg_mod.connect = _connect  # type: ignore[assignment]
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg_mod)
+
+    db = PgDatabase("postgres://example", use_pool=False, identity="rls-user")
+    db.upsert_chunk(_make_chunk(), "user")
+
+    identity_calls = [
+        params for sql, params in conn.cursor_obj.executed if "set_config('app.current_user'" in sql
+    ]
+    assert identity_calls == [("rls-user",)]
+
+
+def test_read_only_methods_skip_identity_application(monkeypatch: pytest.MonkeyPatch) -> None:
+    """READ 専用経路（test_connection/vec_search/fts_search/fetch_chunks_by_ids）は
+    identity 適用（set_config への DB ラウンドトリップ）をスキップする。
+    """
+
+    def _connect(url: str, passfile: str | None = None, connect_timeout: int | None = None) -> FakeConn:
+        return FakeConn(FakeCursor(fetchone_result=(1,), fetchall_result=[]))
+
+    psycopg_mod = ModuleType("psycopg")
+    psycopg_mod.connect = _connect  # type: ignore[assignment]
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg_mod)
+
+    db = PgDatabase("postgres://example", use_pool=False, identity="rls-user")
+
+    assert db.test_connection() is True
+    assert db.vec_search([0.1, 0.2], limit=1) == []
+    assert db.fts_search("q", limit=1) == []
+    assert db.fetch_chunks_by_ids(["chunk-1"]) == {}
+
+    executed = db._conn.cursor_obj.executed
+    assert not any("set_config" in sql for sql, _ in executed)
+
+
+def test_transaction_for_write_false_skips_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """transaction(for_write=False) を明示指定すると identity 適用をスキップする。"""
+    conn = FakeConn()
+
+    def _connect(url: str, passfile: str | None = None, connect_timeout: int | None = None) -> FakeConn:
+        return conn
+
+    psycopg_mod = ModuleType("psycopg")
+    psycopg_mod.connect = _connect  # type: ignore[assignment]
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg_mod)
+
+    db = PgDatabase("postgres://example", use_pool=False, identity="rls-user")
+    with db.transaction(for_write=False) as tx_conn:
+        assert tx_conn is conn
+    assert not any("set_config" in sql for sql, _ in conn.cursor_obj.executed)
+
+    # デフォルト（for_write 省略）は identity を適用する
+    db2 = PgDatabase("postgres://example", use_pool=False, identity="rls-user")
+    conn2 = FakeConn()
+    monkeypatch.setattr(psycopg_mod, "connect", lambda *a, **k: conn2)
+    with db2.transaction() as tx_conn2:
+        assert tx_conn2 is conn2
+    identity_calls = [
+        params for sql, params in conn2.cursor_obj.executed if "set_config('app.current_user'" in sql
+    ]
+    assert identity_calls == [("rls-user",)]
+
+
 def test_get_conn_falls_back_to_direct_connect_when_pool_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     """psycopg_pool が ConnectionPool を持たない場合は psycopg.connect() に fallback し connect_timeout を渡す。"""
     fallback_conn = FakeConn()
@@ -454,7 +542,7 @@ def test_transaction_close_and_test_connection(monkeypatch: pytest.MonkeyPatch) 
     conn = FakeConn()
     db = PgDatabase("postgres://example", use_pool=False)
     put_calls: list[FakeConn] = []
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
     monkeypatch.setattr(db, "_put_conn", lambda current: put_calls.append(current))
 
     with db.transaction():
@@ -471,7 +559,7 @@ def test_transaction_close_and_test_connection(monkeypatch: pytest.MonkeyPatch) 
     success_conn = FakeConn(success_cursor)
     db = PgDatabase("postgres://example", use_pool=False)
     put_calls.clear()
-    monkeypatch.setattr(db, "_get_conn", lambda: success_conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: success_conn)
     monkeypatch.setattr(db, "_put_conn", lambda current: put_calls.append(current))
     assert db.test_connection() is True
     assert put_calls == [success_conn]
@@ -483,7 +571,7 @@ def test_transaction_close_and_test_connection(monkeypatch: pytest.MonkeyPatch) 
     error_conn = FakeConn(ErrorCursor())
     db = PgDatabase("postgres://example", use_pool=False)
     put_calls.clear()
-    monkeypatch.setattr(db, "_get_conn", lambda: error_conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: error_conn)
     monkeypatch.setattr(db, "_put_conn", lambda current: put_calls.append(current))
     assert db.test_connection() is False
     assert put_calls == [error_conn]
@@ -560,7 +648,7 @@ def test_test_connection_falsy_conn_calls_putconn(monkeypatch: pytest.MonkeyPatc
     conn = FalsyConn(FakeCursor(fetchone_result=(1,)))
     db = PgDatabase("postgres://example", use_pool=False)
     put_calls: list[FakeConn] = []
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
     monkeypatch.setattr(db, "_put_conn", lambda current: put_calls.append(current))
     assert db.test_connection() is True
     assert put_calls == [conn]
@@ -570,7 +658,7 @@ def test_upsert_and_batch_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     cursor = FakeCursor()
     conn = FakeConn(cursor)
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
 
     chunk = _make_chunk()
     session = _make_session()
@@ -608,7 +696,7 @@ def test_upsert_session_includes_git_fields(monkeypatch: pytest.MonkeyPatch) -> 
     cursor = FakeCursor()
     conn = FakeConn(cursor)
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
 
     session = Session(
         id="session-2",
@@ -653,7 +741,7 @@ def test_upsert_interaction_logs_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     cursor = FakeCursor()
     conn = FakeConn(cursor)
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
 
     assert db.upsert_interaction_logs_batch([]) == 0
 
@@ -675,7 +763,7 @@ def test_upsert_project_profiles_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     cursor = FakeCursor()
     conn = FakeConn(cursor)
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
 
     assert db.upsert_project_profiles_batch([]) == 0
 
@@ -699,7 +787,7 @@ def test_upsert_mem_item_runs_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     cursor = FakeCursor()
     conn = FakeConn(cursor)
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
 
     assert db.upsert_mem_item_runs_batch([]) == 0
 
@@ -723,7 +811,7 @@ def test_embeddings_search_and_team_search(monkeypatch: pytest.MonkeyPatch) -> N
     embeddings_conn = FakeConn(embeddings_cursor)
     db = PgDatabase("postgres://example", use_pool=False)
     put_calls: list[FakeConn] = []
-    monkeypatch.setattr(db, "_get_conn", lambda: embeddings_conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: embeddings_conn)
     monkeypatch.setattr(db, "_put_conn", lambda current: put_calls.append(current))
 
     assert db.upsert_embeddings_batch([]) == 0
@@ -734,13 +822,13 @@ def test_embeddings_search_and_team_search(monkeypatch: pytest.MonkeyPatch) -> N
 
     vec_cursor = FakeCursor(fetchall_result=[("chunk-1", 0.1), ("chunk-2", 0.2)])
     vec_conn = FakeConn(vec_cursor)
-    monkeypatch.setattr(db, "_get_conn", lambda: vec_conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: vec_conn)
     assert db.vec_search([0.1, 0.2], limit=2) == [("chunk-1", 0.1), ("chunk-2", 0.2)]
     assert "embedding <->" in vec_cursor.executed[0][0]
 
     fts_cursor = FakeCursor(fetchall_result=[("chunk-3", 0.9)])
     fts_conn = FakeConn(fts_cursor)
-    monkeypatch.setattr(db, "_get_conn", lambda: fts_conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: fts_conn)
     assert db.fts_search("hello", limit=1) == [("chunk-3", 0.9)]
     assert "similarity(content" in fts_cursor.executed[0][0]
 
@@ -762,14 +850,14 @@ def test_search_with_origin_user_exclusion(monkeypatch: pytest.MonkeyPatch) -> N
     cursor = FakeCursor(fetchall_result=[("chunk-1", 0.1)])
     conn = FakeConn(cursor)
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
 
     assert db.vec_search([0.1, 0.2], limit=1, exclude_origin_user="me") == [("chunk-1", 0.1)]
     assert "origin_user <>" in cursor.executed[0][0]
 
     cursor = FakeCursor(fetchall_result=[("chunk-2", 0.9)])
     conn = FakeConn(cursor)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
     assert db.fts_search("hello", limit=1, exclude_origin_user="me") == [("chunk-2", 0.9)]
     assert "origin_user <>" in cursor.executed[0][0]
 
@@ -812,7 +900,7 @@ def test_vec_search_puts_conn_on_exception(monkeypatch: pytest.MonkeyPatch) -> N
     put_calls: list = []
     conn = FakeConn(BoomCursor())
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
     monkeypatch.setattr(db, "_put_conn", lambda c: put_calls.append(c))
 
     with pytest.raises(RuntimeError, match="vec boom"):
@@ -835,7 +923,7 @@ def test_fts_search_puts_conn_on_exception(monkeypatch: pytest.MonkeyPatch) -> N
     put_calls: list = []
     conn = FakeConn(BoomCursor())
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
     monkeypatch.setattr(db, "_put_conn", lambda c: put_calls.append(c))
 
     with pytest.raises(RuntimeError, match="fts boom"):
@@ -866,7 +954,7 @@ def test_query_methods_raise_and_rollback(monkeypatch: pytest.MonkeyPatch) -> No
         cursor = BoomCursor()
         conn = FakeConn(cursor)
         db = PgDatabase("postgres://example", use_pool=False)
-        monkeypatch.setattr(db, "_get_conn", lambda conn=conn: conn)
+        monkeypatch.setattr(db, "_get_conn", lambda conn=conn, for_write=True: conn)
         with pytest.raises(RuntimeError):
             call(db)
         assert conn.rollback_calls == 1
@@ -890,7 +978,7 @@ def test_fetch_chunks_by_ids_parses_rows(monkeypatch: pytest.MonkeyPatch) -> Non
     )
     conn = FakeConn(cursor)
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
 
     rows = db.fetch_chunks_by_ids(["chunk-1"])
     assert rows["chunk-1"]["tool_names"] == ["Edit"]
@@ -914,7 +1002,7 @@ def test_fetch_chunks_by_ids_null_epoch(monkeypatch: pytest.MonkeyPatch) -> None
     )
     conn = FakeConn(cursor)
     db = PgDatabase("postgres://example", use_pool=False)
-    monkeypatch.setattr(db, "_get_conn", lambda: conn)
+    monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
 
     rows = db.fetch_chunks_by_ids(["chunk-null"])
     assert rows["chunk-null"]["created_at_epoch"] == 0
@@ -1044,7 +1132,7 @@ class TestTestConnectionProbeCache:
 
         conn = FakeConn(CountingCursor())
         db = PgDatabase("postgres://example", use_pool=False)
-        monkeypatch.setattr(db, "_get_conn", lambda: conn)
+        monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
         monkeypatch.setattr(db, "_put_conn", lambda c: None)
 
         # 1回目: 接続試行してキャッシュ
@@ -1069,7 +1157,7 @@ class TestTestConnectionProbeCache:
 
         conn = FakeConn(CountingCursor())
         db = PgDatabase("postgres://example", use_pool=False)
-        monkeypatch.setattr(db, "_get_conn", lambda: conn)
+        monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
         monkeypatch.setattr(db, "_put_conn", lambda c: None)
 
         # 1回目: 失敗してキャッシュ
@@ -1090,7 +1178,7 @@ class TestTestConnectionProbeCache:
 
         conn = FakeConn(FakeCursor(fetchone_result=(1,)))
         db = PgDatabase("postgres://example", use_pool=False)
-        monkeypatch.setattr(db, "_get_conn", lambda: conn)
+        monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
         monkeypatch.setattr(db, "_put_conn", lambda c: None)
 
         # TTL 切れの失敗キャッシュを設定（cached_at を十分古くする）
@@ -1105,7 +1193,7 @@ class TestTestConnectionProbeCache:
         cursor = FakeCursor(fetchone_result=(1,))
         conn = FakeConn(cursor)
         db = PgDatabase("postgres://example", use_pool=False)
-        monkeypatch.setattr(db, "_get_conn", lambda: conn)
+        monkeypatch.setattr(db, "_get_conn", lambda for_write=True: conn)
         monkeypatch.setattr(db, "_put_conn", lambda c: None)
 
         assert db.test_connection() is True
