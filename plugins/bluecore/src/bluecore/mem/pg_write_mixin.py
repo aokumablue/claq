@@ -43,6 +43,29 @@ class PgWriteMixin:
 
         def _put_conn(self, conn: psycopg.Connection) -> None: ...
 
+    def _executemany_batch(self, sql: str, params_list: list[tuple]) -> int:
+        """`sql` を `params_list` でバッチ実行し、コミットして件数を返す。
+
+        `params_list` が空なら接続を取得せず 0 を返す。例外時は rollback して
+        再送出し、finally で必ず接続を返却する。`_get_conn` はデフォルトの
+        `for_write=True`（WRITE 経路・RLS identity 適用）で呼ぶ。全バッチ
+        書き込みメソッドはこのヘルパに委譲し、トランザクション境界と戻り値を
+        統一する。
+        """
+        if not params_list:
+            return 0
+        conn = self._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(sql, params_list)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._put_conn(conn)
+        return len(params_list)
+
     # --- memory_chunks ---
 
     def upsert_chunk(self, chunk: MemoryChunk, origin_user: str) -> None:
@@ -51,33 +74,28 @@ class PgWriteMixin:
 
     def upsert_chunks_batch(self, chunks: list[MemoryChunk], origin_user: str) -> int:
         """チャンクをバッチで UPSERT する。"""
-        if not chunks:
-            return 0
-        conn = self._get_conn()
-        try:
-            params_list = [
-                (
-                    str(chunk.id),
-                    origin_user,
-                    chunk.session_id,
-                    chunk.project,
-                    chunk.chunk_index,
-                    chunk.content,
-                    _to_json(chunk.tool_names),
-                    _to_json(chunk.files_read),
-                    _to_json(chunk.files_modified),
-                    chunk.user_prompt,
-                    chunk.created_at_epoch,
-                    chunk.access_count,
-                    chunk.last_accessed_epoch,
-                    chunk.merged_generation,
-                    str(chunk.merged_into) if chunk.merged_into else None,
-                )
-                for chunk in chunks
-            ]
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """INSERT INTO memory_chunks
+        params_list = [
+            (
+                str(chunk.id),
+                origin_user,
+                chunk.session_id,
+                chunk.project,
+                chunk.chunk_index,
+                chunk.content,
+                _to_json(chunk.tool_names),
+                _to_json(chunk.files_read),
+                _to_json(chunk.files_modified),
+                chunk.user_prompt,
+                chunk.created_at_epoch,
+                chunk.access_count,
+                chunk.last_accessed_epoch,
+                chunk.merged_generation,
+                str(chunk.merged_into) if chunk.merged_into else None,
+            )
+            for chunk in chunks
+        ]
+        return self._executemany_batch(
+            """INSERT INTO memory_chunks
              (id, origin_user, session_id, project, chunk_index, content,
               tool_names, files_read, files_modified, user_prompt,
               created_at_epoch, access_count, last_accessed_epoch,
@@ -94,16 +112,8 @@ class PgWriteMixin:
                merged_generation = EXCLUDED.merged_generation,
                merged_into = EXCLUDED.merged_into,
                synced_at = NOW()""",
-                    params_list,
-                )
-            conn.commit()
-            count = len(params_list)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
-        return count
+            params_list,
+        )
 
     # --- sessions ---
 
@@ -113,29 +123,24 @@ class PgWriteMixin:
 
     def upsert_sessions_batch(self, sessions: list[Session], origin_user: str) -> int:
         """セッションをバッチで UPSERT する。"""
-        if not sessions:
-            return 0
-        conn = self._get_conn()
-        try:
-            params_list = [
-                (
-                    str(session.id),
-                    origin_user,
-                    session.session_id,
-                    session.project,
-                    session.started_at_epoch,
-                    session.chunk_count,
-                    session.branch,
-                    session.commit_hash,
-                    session.uncommitted_count,
-                    session.ended_at_epoch,
-                    session.project_profile_id,
-                )
-                for session in sessions
-            ]
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """INSERT INTO sessions
+        params_list = [
+            (
+                str(session.id),
+                origin_user,
+                session.session_id,
+                session.project,
+                session.started_at_epoch,
+                session.chunk_count,
+                session.branch,
+                session.commit_hash,
+                session.uncommitted_count,
+                session.ended_at_epoch,
+                session.project_profile_id,
+            )
+            for session in sessions
+        ]
+        return self._executemany_batch(
+            """INSERT INTO sessions
              (id, origin_user, session_id, project, started_at_epoch, chunk_count,
               branch, commit_hash, uncommitted_count, ended_at_epoch, project_profile_id, synced_at)
              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
@@ -147,16 +152,8 @@ class PgWriteMixin:
                ended_at_epoch = EXCLUDED.ended_at_epoch,
                project_profile_id = EXCLUDED.project_profile_id,
                synced_at = NOW()""",
-                    params_list,
-                )
-            conn.commit()
-            count = len(params_list)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
-        return count
+            params_list,
+        )
 
     # --- instincts ---
 
@@ -166,29 +163,24 @@ class PgWriteMixin:
 
     def upsert_instincts_batch(self, instincts: list[Instinct]) -> int:
         """インスティンクトをバッチで UPSERT する。"""
-        if not instincts:
-            return 0
-        conn = self._get_conn()
-        try:
-            params_list = [
-                (
-                    inst.id,
-                    inst.origin_user,
-                    inst.instinct_id,
-                    inst.scope,
-                    inst.project_id,
-                    inst.trigger_text,
-                    inst.confidence,
-                    inst.domain,
-                    inst.content,
-                    inst.created_at_epoch,
-                    inst.updated_at_epoch,
-                )
-                for inst in instincts
-            ]
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """INSERT INTO instincts
+        params_list = [
+            (
+                inst.id,
+                inst.origin_user,
+                inst.instinct_id,
+                inst.scope,
+                inst.project_id,
+                inst.trigger_text,
+                inst.confidence,
+                inst.domain,
+                inst.content,
+                inst.created_at_epoch,
+                inst.updated_at_epoch,
+            )
+            for inst in instincts
+        ]
+        return self._executemany_batch(
+            """INSERT INTO instincts
              (id, origin_user, instinct_id, scope, project_id, trigger_text,
               confidence, domain, content, created_at_epoch, updated_at_epoch, synced_at)
              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
@@ -199,16 +191,8 @@ class PgWriteMixin:
                 content = EXCLUDED.content,
                 updated_at_epoch = EXCLUDED.updated_at_epoch,
                 synced_at = NOW()""",
-                    params_list,
-                )
-            conn.commit()
-            count = len(params_list)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
-        return count
+            params_list,
+        )
 
     # --- adrs ---
 
@@ -218,27 +202,22 @@ class PgWriteMixin:
 
     def upsert_adrs_batch(self, adrs: list[Adr]) -> int:
         """ADR をバッチで UPSERT する。"""
-        if not adrs:
-            return 0
-        conn = self._get_conn()
-        try:
-            params_list = [
-                (
-                    adr.id,
-                    adr.origin_user,
-                    adr.project,
-                    adr.adr_number,
-                    adr.title,
-                    adr.status,
-                    adr.content,
-                    adr.created_at_epoch,
-                    adr.updated_at_epoch,
-                )
-                for adr in adrs
-            ]
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """INSERT INTO adrs
+        params_list = [
+            (
+                adr.id,
+                adr.origin_user,
+                adr.project,
+                adr.adr_number,
+                adr.title,
+                adr.status,
+                adr.content,
+                adr.created_at_epoch,
+                adr.updated_at_epoch,
+            )
+            for adr in adrs
+        ]
+        return self._executemany_batch(
+            """INSERT INTO adrs
              (id, origin_user, project, adr_number, title, status, content,
               created_at_epoch, updated_at_epoch, synced_at)
              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
@@ -248,16 +227,8 @@ class PgWriteMixin:
                content = EXCLUDED.content,
                updated_at_epoch = EXCLUDED.updated_at_epoch,
                synced_at = NOW()""",
-                    params_list,
-                )
-            conn.commit()
-            count = len(params_list)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
-        return count
+            params_list,
+        )
 
     # --- event_logs ---
 
@@ -267,37 +238,24 @@ class PgWriteMixin:
 
     def insert_event_logs_batch(self, events: list[EventLog]) -> int:
         """イベントログをバッチで INSERT する。"""
-        if not events:
-            return 0
-        conn = self._get_conn()
-        try:
-            params_list = [
-                (
-                    event.id,
-                    event.origin_user,
-                    event.event_type,
-                    event.project_id,
-                    event.content,
-                    event.created_at_epoch,
-                )
-                for event in events
-            ]
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """INSERT INTO event_logs
+        params_list = [
+            (
+                event.id,
+                event.origin_user,
+                event.event_type,
+                event.project_id,
+                event.content,
+                event.created_at_epoch,
+            )
+            for event in events
+        ]
+        return self._executemany_batch(
+            """INSERT INTO event_logs
              (id, origin_user, event_type, project_id, content, created_at_epoch, synced_at)
              VALUES (%s, %s, %s, %s, %s, %s, NOW())
              ON CONFLICT (id) DO NOTHING""",
-                    params_list,
-                )
-            conn.commit()
-            count = len(params_list)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
-        return count
+            params_list,
+        )
 
     # --- embeddings (memory_chunks_vec) ---
 
@@ -310,61 +268,43 @@ class PgWriteMixin:
         Returns:
             UPSERT した件数
         """
-        if not embeddings:
-            return 0
-        conn = self._get_conn()
-        try:
-            # pgvector 形式に変換: [0.1, 0.2, ...] → '[0.1,0.2,...]'
-            params_list = [
-                (chunk_id, "[" + ",".join(str(v) for v in vec) + "]")
-                for chunk_id, vec in embeddings
-            ]
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """INSERT INTO memory_chunks_vec (chunk_id, embedding)
+        # pgvector 形式に変換: [0.1, 0.2, ...] → '[0.1,0.2,...]'
+        params_list = [
+            (chunk_id, "[" + ",".join(str(v) for v in vec) + "]")
+            for chunk_id, vec in embeddings
+        ]
+        return self._executemany_batch(
+            """INSERT INTO memory_chunks_vec (chunk_id, embedding)
                VALUES (%s, %s::vector)
                ON CONFLICT (chunk_id) DO UPDATE SET
                  embedding = EXCLUDED.embedding""",
-                    params_list,
-                )
-            conn.commit()
-            count = len(params_list)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
-        return count
+            params_list,
+        )
 
     # --- interaction_logs ---
 
     def upsert_interaction_logs_batch(self, logs: list[InteractionLog]) -> int:
         """インタラクションログをバッチで UPSERT する。"""
-        if not logs:
-            return 0
-        conn = self._get_conn()
-        try:
-            params_list = [
-                (
-                    entry.id,
-                    entry.origin_user,
-                    entry.session_id,
-                    entry.project,
-                    entry.user_prompt_full,
-                    entry.user_prompt_hash,
-                    entry.ai_response_summary,
-                    entry.ai_response_tool_plan,
-                    entry.chunk_id,
-                    entry.execution_outcome,
-                    entry.tool_error_count,
-                    entry.interaction_index,
-                    entry.created_at_epoch,
-                )
-                for entry in logs
-            ]
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """INSERT INTO interaction_logs
+        params_list = [
+            (
+                entry.id,
+                entry.origin_user,
+                entry.session_id,
+                entry.project,
+                entry.user_prompt_full,
+                entry.user_prompt_hash,
+                entry.ai_response_summary,
+                entry.ai_response_tool_plan,
+                entry.chunk_id,
+                entry.execution_outcome,
+                entry.tool_error_count,
+                entry.interaction_index,
+                entry.created_at_epoch,
+            )
+            for entry in logs
+        ]
+        return self._executemany_batch(
+            """INSERT INTO interaction_logs
              (id, origin_user, session_id, project,
               user_prompt_full, user_prompt_hash,
               ai_response_summary, ai_response_tool_plan,
@@ -377,46 +317,33 @@ class PgWriteMixin:
                execution_outcome = EXCLUDED.execution_outcome,
                tool_error_count = EXCLUDED.tool_error_count,
                synced_at = NOW()""",
-                    params_list,
-                )
-            conn.commit()
-            count = len(params_list)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
-        return count
+            params_list,
+        )
 
     # --- project_profiles ---
 
     def upsert_project_profiles_batch(self, profiles: list[ProjectProfile]) -> int:
         """プロジェクトプロファイルをバッチで UPSERT する。"""
-        if not profiles:
-            return 0
-        conn = self._get_conn()
-        try:
-            params_list = [
-                (
-                    profile.id,
-                    profile.origin_user,
-                    profile.project,
-                    profile.project_path,
-                    _to_json(profile.languages),
-                    _to_json(profile.frameworks),
-                    profile.primary_language,
-                    profile.test_command,
-                    profile.build_command,
-                    profile.scope_hint,
-                    profile.detected_at_epoch,
-                    profile.last_updated_epoch,
-                    profile.detection_confidence,
-                )
-                for profile in profiles
-            ]
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """INSERT INTO project_profiles
+        params_list = [
+            (
+                profile.id,
+                profile.origin_user,
+                profile.project,
+                profile.project_path,
+                _to_json(profile.languages),
+                _to_json(profile.frameworks),
+                profile.primary_language,
+                profile.test_command,
+                profile.build_command,
+                profile.scope_hint,
+                profile.detected_at_epoch,
+                profile.last_updated_epoch,
+                profile.detection_confidence,
+            )
+            for profile in profiles
+        ]
+        return self._executemany_batch(
+            """INSERT INTO project_profiles
              (id, origin_user, project, project_path,
               languages, frameworks, primary_language,
               test_command, build_command, scope_hint,
@@ -433,46 +360,33 @@ class PgWriteMixin:
                last_updated_epoch = EXCLUDED.last_updated_epoch,
                detection_confidence = EXCLUDED.detection_confidence,
                synced_at = NOW()""",
-                    params_list,
-                )
-            conn.commit()
-            count = len(params_list)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
-        return count
+            params_list,
+        )
 
     # --- mem_item_runs ---
 
     def upsert_mem_item_runs_batch(self, runs: list[MemItemRun]) -> int:
         """アイテム実行記録をバッチで UPSERT する。"""
-        if not runs:
-            return 0
-        conn = self._get_conn()
-        try:
-            params_list = [
-                (
-                    run.id,
-                    run.origin_user,
-                    run.session_id,
-                    run.project,
-                    run.skill_name,
-                    run.skill_trigger,
-                    run.outcome,
-                    _to_json(run.tools_used),
-                    run.files_modified_count,
-                    run.duration_seconds,
-                    run.interaction_log_id,
-                    run.created_at_epoch,
-                    run.item_type,
-                )
-                for run in runs
-            ]
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """INSERT INTO mem_item_runs
+        params_list = [
+            (
+                run.id,
+                run.origin_user,
+                run.session_id,
+                run.project,
+                run.skill_name,
+                run.skill_trigger,
+                run.outcome,
+                _to_json(run.tools_used),
+                run.files_modified_count,
+                run.duration_seconds,
+                run.interaction_log_id,
+                run.created_at_epoch,
+                run.item_type,
+            )
+            for run in runs
+        ]
+        return self._executemany_batch(
+            """INSERT INTO mem_item_runs
              (id, origin_user, session_id, project,
               skill_name, skill_trigger, outcome,
               tools_used, files_modified_count, duration_seconds,
@@ -481,47 +395,34 @@ class PgWriteMixin:
              ON CONFLICT (id) DO UPDATE SET
                item_type = EXCLUDED.item_type,
                synced_at = NOW()""",
-                    params_list,
-                )
-            conn.commit()
-            count = len(params_list)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
-        return count
+            params_list,
+        )
 
     # --- session_digests ---
 
     def upsert_session_digests_batch(self, digests: list[SessionDigest], origin_user: str) -> int:
         """セッション要約をバッチで UPSERT する。"""
-        if not digests:
-            return 0
-        conn = self._get_conn()
-        try:
-            params_list = [
-                (
-                    digest.id,
-                    origin_user,
-                    digest.session_id,
-                    digest.project,
-                    digest.summary,
-                    _to_json(digest.key_files),
-                    _to_json(digest.key_decisions),
-                    digest.outcome,
-                    digest.harness,
-                    digest.source,
-                    digest.chunk_count,
-                    digest.started_at_epoch,
-                    digest.ended_at_epoch,
-                    digest.created_at_epoch,
-                )
-                for digest in digests
-            ]
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """INSERT INTO session_digests
+        params_list = [
+            (
+                digest.id,
+                origin_user,
+                digest.session_id,
+                digest.project,
+                digest.summary,
+                _to_json(digest.key_files),
+                _to_json(digest.key_decisions),
+                digest.outcome,
+                digest.harness,
+                digest.source,
+                digest.chunk_count,
+                digest.started_at_epoch,
+                digest.ended_at_epoch,
+                digest.created_at_epoch,
+            )
+            for digest in digests
+        ]
+        return self._executemany_batch(
+            """INSERT INTO session_digests
              (id, origin_user, session_id, project, summary,
               key_files, key_decisions, outcome, harness, source,
               chunk_count, started_at_epoch, ended_at_epoch, created_at_epoch, synced_at)
@@ -539,16 +440,8 @@ class PgWriteMixin:
                ended_at_epoch = EXCLUDED.ended_at_epoch,
                created_at_epoch = EXCLUDED.created_at_epoch,
                synced_at = NOW()""",
-                    params_list,
-                )
-            conn.commit()
-            count = len(params_list)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._put_conn(conn)
-        return count
+            params_list,
+        )
 
 
 def _to_json(val: list | dict | None) -> str | None:
