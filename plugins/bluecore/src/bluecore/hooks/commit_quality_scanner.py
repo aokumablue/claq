@@ -174,7 +174,7 @@ def should_scan_secrets(file_path: str) -> bool:
     return True
 
 
-def _scan_lint_issues(content: str) -> list[dict]:
+def _scan_lint_issues(lines: list[str]) -> list[dict]:
     """ファイル内容から console.log / debugger / Issue 参照なし TODO を検出します。
 
     `# nosec` を含む行は検出器自身のテストフィクスチャ等、意図的に
@@ -182,7 +182,8 @@ def _scan_lint_issues(content: str) -> list[dict]:
     抑制します（シークレット検出は別関数で `# nosec` の対象外です）。
 
     Args:
-        content: 検査対象のデコード済みファイル内容です。
+        lines: 検査対象のデコード済みファイル内容を改行で分割した行リストです
+            （呼び出し側 `find_file_issues` が一度だけ分割して渡します）。
 
     Returns:
         検出した lint 問題の辞書リストを返します。
@@ -191,7 +192,7 @@ def _scan_lint_issues(content: str) -> list[dict]:
         例外は発生しません。
     """
     issues = []
-    for index, line in enumerate(content.split("\n")):
+    for index, line in enumerate(lines):
         line_num = index + 1
 
         # 抑制マーカー付き行（検出器自身のテストフィクスチャ等、意図的に
@@ -236,7 +237,7 @@ def _scan_lint_issues(content: str) -> list[dict]:
     return issues
 
 
-def _scan_secret_issues(content: str) -> list[dict]:
+def _scan_secret_issues(content: str, lines: list[str]) -> list[dict]:
     """ファイル内容からハードコードされたシークレットを検出します。
 
     バイナリ判定・`# nosec`・ファイルサイズに関わらず常に実行します
@@ -247,7 +248,12 @@ def _scan_secret_issues(content: str) -> list[dict]:
     が、水増しによる全面回避は防げます）。
 
     Args:
-        content: 検査対象のデコード済みファイル内容です。
+        content: 検査対象のデコード済みファイル内容です（バイト長判定・
+            切り詰めに使用します）。
+        lines: `content` を改行で分割済みの行リストです。切り詰めが
+            発生しない（大多数の）場合はこれを再利用し、`content.split`
+            の再計算を避けます（呼び出し側 `find_file_issues` が
+            lint スキャンと共有する分割結果です）。
 
     Returns:
         検出したシークレット問題の辞書リストを返します。
@@ -263,15 +269,17 @@ def _scan_secret_issues(content: str) -> list[dict]:
     ]
 
     # 大容量ファイルは全面放棄せず、先頭 _SECRET_SCAN_MAX_BYTES バイトに
-    # 切り詰めてスキャンを継続する（水増しによる回避を防ぐ）。
+    # 切り詰めてスキャンを継続する（水増しによる回避を防ぐ）。切り詰めが
+    # 発生しない場合は呼び出し側で分割済みの lines をそのまま使う。
     raw_bytes = content.encode("utf-8")
     if len(raw_bytes) > _SECRET_SCAN_MAX_BYTES:
         secret_scan_text = raw_bytes[:_SECRET_SCAN_MAX_BYTES].decode("utf-8", errors="ignore")
+        scan_lines = secret_scan_text.split("\n")
     else:
-        secret_scan_text = content
+        scan_lines = lines
 
     issues = []
-    for index, line in enumerate(secret_scan_text.split("\n")):
+    for index, line in enumerate(scan_lines):
         line_num = index + 1
         for pattern, name in secret_patterns:
             if re.search(pattern, line, re.IGNORECASE):
@@ -340,10 +348,13 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
         if not do_lint and not do_secrets:
             return issues
 
+        # lint / secret 双方が対象の場合、content.split("\n") の重複計算を
+        # 避けるため一度だけ分割して共有する。
+        lines = content.split("\n")
         if do_lint:
-            issues.extend(_scan_lint_issues(content))
+            issues.extend(_scan_lint_issues(lines))
         if do_secrets:
-            issues.extend(_scan_secret_issues(content))
+            issues.extend(_scan_secret_issues(content, lines))
 
     except Exception:
         # ファイルが読めない場合はスキップ
