@@ -11,7 +11,7 @@
       "name": "bluecore",
       "source": "./plugins/bluecore",
       "description": "開発に必要な汎用プラグイン集です。エージェント、スキル、フック、コマンドをまとめて導入し、計画・実装・検証・レビューの流れを揃えます。",
-      "version": "0.9.16",
+      "version": "0.9.17",
       "homepage": "https://github.com/aokumablue/bluecore",
       "repository": "https://github.com/aokumablue/bluecore",
       "license": "Apache-2.0",
