@@ -13,7 +13,6 @@ from bluecore.ci import (
     validate_commands,
     validate_hooks,
     validate_no_personal_paths,
-    validate_rules,
     validate_skills,
 )
 
@@ -186,51 +185,6 @@ def test_validate_commands_reports_errors_and_io_failures(tmp_path: Path, monkey
     assert "存在しないエージェント \"missing\"" in stderr
 
 
-def test_validate_rules_reports_empty_and_read_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    rules_dir = tmp_path / "rules"
-    nested = rules_dir / "security" / "sub"
-    nested.mkdir(parents=True)
-    (rules_dir / "security" / "policy.md").write_text("Policy\n", encoding="utf-8")
-    (nested / "notes.txt").write_text("ignore\n", encoding="utf-8")
-    empty_file = nested / "empty.md"
-    empty_file.write_text("", encoding="utf-8")
-    broken_file = rules_dir / "broken.md"
-    broken_file.write_text("Broken\n", encoding="utf-8")
-
-    original_read_text = Path.read_text
-
-    def fake_read_text(self: Path, *args, **kwargs):  # noqa: ANN001
-        if self == broken_file:
-            raise OSError("boom")
-        return original_read_text(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", fake_read_text)
-
-    assert validate_rules.validate_rules(rules_dir) == 1
-    stderr = capsys.readouterr().err
-    assert "ルールファイルが空です" in stderr
-    assert "ファイルの読み取りに失敗しました" in stderr
-
-
-def test_validate_rules_counts_recursive_markdown(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    rules_dir = tmp_path / "rules"
-    nested = rules_dir / "security" / "sub"
-    nested.mkdir(parents=True)
-    (rules_dir / "security" / "policy.md").write_text("Policy\n", encoding="utf-8")
-    (nested / "notes.txt").write_text("ignore\n", encoding="utf-8")
-    (nested / "guide.md").write_text("Guide\n", encoding="utf-8")
-
-    assert validate_rules.validate_rules(rules_dir) == 0
-    assert "2 個のルールファイルを検証しました" in capsys.readouterr().out
-
-
-def test_validate_rules_skips_missing_dir(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert validate_rules.validate_rules(tmp_path / "missing") == 0
-    assert "検証をスキップします" in capsys.readouterr().out
-
-
 def test_validate_no_personal_paths_covers_clean_skip_and_hits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -287,10 +241,6 @@ def test_validator_main_entrypoints(
     commands_dir.mkdir()
     (commands_dir / "alpha.md").write_text("Use `/alpha`.\n", encoding="utf-8")
 
-    rules_dir = tmp_path / "rules"
-    rules_dir.mkdir()
-    (rules_dir / "policy.md").write_text("Policy\n", encoding="utf-8")
-
     docs_root = tmp_path / "docs-root"
     docs_root.mkdir()
     (docs_root / "README.md").write_text("Clean docs.\n", encoding="utf-8")
@@ -309,14 +259,12 @@ def test_validator_main_entrypoints(
             str(skills_dir),
         ]
     ) == 0
-    assert validate_rules.main(["--rules-dir", str(rules_dir)]) == 0
     assert validate_no_personal_paths.main(["--root", str(docs_root)]) == 0
 
     stdout = capsys.readouterr().out
     assert "1 個のスキルディレクトリを検証しました" in stdout
     assert "1 個のエージェントファイルを検証しました" in stdout
     assert "1 個のコマンドファイルを検証しました" in stdout
-    assert "1 個のルールファイルを検証しました" in stdout
     assert "検証済み: 配布対象" in stdout
 
     entrypoints = [
@@ -335,7 +283,6 @@ def test_validator_main_entrypoints(
                 str(skills_dir),
             ],
         ),
-        ("bluecore.ci.validate_rules", ["--rules-dir", str(rules_dir)]),
         ("bluecore.ci.validate_no_personal_paths", ["--root", str(docs_root)]),
     ]
 

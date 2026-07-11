@@ -1,6 +1,6 @@
 """CI 検証モジュールのテスト。
 
-エージェント、コマンド、フック、ルール、スキル、
+エージェント、コマンド、フック、スキル、
 インストールマニフェスト、Unicode 安全性、個人パス検出の検証を対象とする。
 """
 
@@ -12,7 +12,6 @@ import bluecore.ci.check_unicode_safety as check_unicode_safety
 import bluecore.ci.validate_agents as validate_agents
 import bluecore.ci.validate_commands as validate_commands
 import bluecore.ci.validate_no_personal_paths as validate_no_personal_paths
-import bluecore.ci.validate_rules as validate_rules
 import bluecore.ci.validate_skills as validate_skills
 
 
@@ -35,15 +34,6 @@ def test_validate_commands_flags_invalid_references(tmp_path: Path) -> None:
     (commands_dir / "build.md").write_text("Use `/missing-command` and agents/missing.md\n", encoding="utf-8")
 
     assert validate_commands.validate_commands(root, commands_dir, agents_dir, skills_dir) == 1
-
-
-def test_validate_rules_rejects_empty_files(tmp_path: Path) -> None:
-    rules_dir = tmp_path / "rules"
-    rules_dir.mkdir()
-    (rules_dir / "security").mkdir()
-    (rules_dir / "security" / "policy.md").write_text("", encoding="utf-8")
-
-    assert validate_rules.validate_rules(rules_dir) == 1
 
 
 def test_validate_skills_accepts_skill_directory(tmp_path: Path) -> None:
