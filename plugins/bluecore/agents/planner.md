@@ -26,6 +26,8 @@ model: opus
    - Action / Why / Verify（検証手段1行） / Dependencies / Risk: Low|Medium|High
 
 ## テスト戦略 / リスクと緩和策 / 成功条件
+
+## Assumptions（不確定前提。確定事実と分離して列挙。なければ「なし」）
 ```
 
 ## 計画出力例
@@ -60,6 +62,9 @@ model: opus
 
 ## 成功条件
 `--limit 3` で 3 件のみ返る / 既存呼び出しの挙動不変 / カバレッジ 100%
+
+## Assumptions
+- 既定値 10 は現行仕様のまま変更しない前提（変更要望は未確認）
 ```
 
 ## 品質基準
