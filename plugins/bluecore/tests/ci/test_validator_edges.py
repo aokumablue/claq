@@ -77,7 +77,6 @@ def test_validate_agents_handles_valid_bom_crlf_and_errors(
     (agents_dir / "planner.md").write_text("\ufeff---\r\nmodel: sonnet\r\ntools: bash\r\n---\r\n# Planner\r\n", encoding="utf-8")
     (agents_dir / "missing_frontmatter.md").write_text("plain text", encoding="utf-8")
     (agents_dir / "missing_fields.md").write_text("---\nmodel: sonnet\n---\n", encoding="utf-8")
-    (agents_dir / "invalid_model.md").write_text("---\nmodel: gemini\ntools: bash\n---\n", encoding="utf-8")
     broken_file = agents_dir / "broken.md"
     broken_file.write_text("---\nmodel: sonnet\ntools: bash\n---\n", encoding="utf-8")
 
@@ -94,7 +93,6 @@ def test_validate_agents_handles_valid_bom_crlf_and_errors(
     stderr = capsys.readouterr().err
     assert "フロントマターがありません" in stderr
     assert "必須フィールドが不足しています: tools" in stderr
-    assert "モデル 'gemini' は無効です" in stderr
     assert "ファイルの読み取りに失敗しました" in stderr
 
 
@@ -107,6 +105,16 @@ def test_validate_agents_accepts_valid_bom_crlf_file(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
     (agents_dir / "planner.md").write_text("\ufeff---\r\nmodel: opus\r\ntools: bash\r\n---\r\n# Planner\r\n", encoding="utf-8")
+
+    assert validate_agents.validate_agents(agents_dir) == 0
+
+
+def test_validate_agents_allows_missing_model_and_inherit(tmp_path: Path) -> None:
+    """model は任意: 未指定でも model: inherit でも tools があれば PASS する。"""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "no_model.md").write_text("---\ntools: bash\n---\n# No model\n", encoding="utf-8")
+    (agents_dir / "inherit_model.md").write_text("---\ntools: bash\nmodel: inherit\n---\n# Inherit\n", encoding="utf-8")
 
     assert validate_agents.validate_agents(agents_dir) == 0
 

@@ -2,7 +2,6 @@
 name: executor
 description: 複数ステップの実装・修正・検証を単独で完遂する汎用実行エージェント。調査だけでなくファイル編集・コマンド実行を伴うタスク、複数ファイルにまたがる変更、探索と実装が混在するタスクで使用する。読み取り専用の深い調査のみが目的なら explorer、コードレビューのみが目的なら reviewer を使う。
 tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob", "Agent"]
-model: inherit
 ---
 
 # 汎用実行者

@@ -9,8 +9,7 @@ from pathlib import Path
 from bluecore.ci.ci_common import REPO_ROOT, emit_error, is_non_empty_string
 
 DEFAULT_AGENTS_DIR = REPO_ROOT / "agents"
-REQUIRED_FIELDS = ["model", "tools"]
-VALID_MODELS = ["haiku", "sonnet", "opus"]
+REQUIRED_FIELDS = ["tools"]
 
 
 def extract_frontmatter(content: str) -> dict[str, str] | None:
@@ -66,13 +65,6 @@ def _validate_agent_file(file_path: Path) -> bool:
         if not is_non_empty_string(frontmatter.get(field)):
             emit_error(f"{file_path.name} - 必須フィールドが不足しています: {field}")
             has_errors = True
-
-    model = frontmatter.get("model")
-    if model and model not in VALID_MODELS:
-        emit_error(
-            f"{file_path.name} - モデル '{model}' は無効です。次のいずれかである必要があります: {', '.join(VALID_MODELS)}"
-        )
-        has_errors = True
 
     return has_errors
 
