@@ -31,6 +31,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -403,6 +404,30 @@ class TestSetupSandbox:
 
         assert mock_run.call_count == 3
 
+    def test_setup_command_timeout_expired_logs_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """setup_commands がタイムアウトした場合、warning ログを記録し後続コマンドを継続実行すること。
+
+        修正前はタイムアウト捕捉後にログなしで continue しており、部分的失敗の痕跡が残らなかった。
+        """
+        sandbox = tmp_path / "sandbox"
+        scenario = _make_scenario(setup_commands=("sleep 999", "echo world"))
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0),  # git init
+                subprocess.TimeoutExpired(cmd="sleep 999", timeout=60),
+                MagicMock(returncode=0),  # echo world
+            ]
+            with caplog.at_level(logging.WARNING, logger="bluecore.skills.comply.runner"):
+                _setup_sandbox(sandbox, scenario)
+
+        assert mock_run.call_count == 3
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("sleep 999" in r.message for r in warnings)
+        assert any("60" in r.message for r in warnings)
+
 
 # ========================
 # run_scenario テスト
@@ -498,6 +523,14 @@ def test_build_run_cmd_non_claude_binary(tmp_path) -> None:
 
     cmd = _build_run_cmd("codex", _make_scenario(), "model", 5, tmp_path)
     assert "--verbose" not in cmd
+
+
+def test_build_run_cmd_claude_binary_appends_verbose(tmp_path) -> None:
+    """claude バイナリでは --verbose を末尾に付ける。"""
+    from bluecore.skills.comply.runner import _build_run_cmd
+
+    cmd = _build_run_cmd("claude", _make_scenario(), "model", 5, tmp_path)
+    assert cmd[-1] == "--verbose"
 
 
 def test_process_assistant_message_skips_non_tool_use() -> None:

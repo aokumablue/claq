@@ -163,7 +163,15 @@ class PgDatabase:
                     _ensure_ssl(self._url), passfile=passfile, connect_timeout=_CONNECT_TIMEOUT
                 )
             conn = self._conn
-        self._apply_identity(conn)
+        try:
+            self._apply_identity(conn)
+        except Exception:
+            if self._use_pool:
+                self._pool.putconn(conn)
+            else:
+                self._conn.close()
+                self._conn = None
+            raise
         return conn
 
     def _put_conn(self, conn: psycopg.Connection) -> None:

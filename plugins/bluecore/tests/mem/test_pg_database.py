@@ -395,6 +395,61 @@ def test_get_conn_falls_back_to_direct_connect_when_pool_unavailable(monkeypatch
     assert captured_kwargs["connect_timeout"] == 5
 
 
+def test_get_conn_pool_putconn_called_on_apply_identity_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """プール経路で _apply_identity が例外を送出した場合、putconn してから例外を再送出すること。
+
+    修正前は getconn 直後の例外で putconn されず、max_size=4 のプールが枯渇する不具合があった。
+    """
+    pool_conn = FakeConn(cursor=BoomCursor())
+    putconn_calls: list[FakeConn] = []
+    pool_mod = ModuleType("psycopg_pool")
+
+    class ConnectionPool:
+        def __init__(self, url: str, kwargs: dict, min_size: int, max_size: int) -> None:
+            pass
+
+        def getconn(self) -> FakeConn:
+            return pool_conn
+
+        def putconn(self, conn: FakeConn) -> None:  # noqa: ANN001
+            putconn_calls.append(conn)
+
+        def close(self) -> None:
+            pass
+
+    pool_mod.ConnectionPool = ConnectionPool
+    monkeypatch.setitem(sys.modules, "psycopg_pool", pool_mod)
+    monkeypatch.setitem(sys.modules, "psycopg", ModuleType("psycopg"))
+
+    db = PgDatabase("postgres://example", use_pool=True, identity="pool-user")
+    with pytest.raises(RuntimeError, match="boom"):
+        db._get_conn()
+
+    assert putconn_calls == [pool_conn]
+
+
+def test_get_conn_single_closes_and_resets_on_apply_identity_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """単一接続経路で _apply_identity が例外を送出した場合、接続を close し self._conn を None に戻すこと。
+
+    修正前は失敗した接続が self._conn に残り続け、次回呼び出しでも壊れた接続が再利用されていた。
+    """
+    conn = FakeConn(cursor=BoomCursor())
+
+    def _connect(url: str, passfile: str | None = None, connect_timeout: int | None = None) -> FakeConn:
+        return conn
+
+    psycopg_mod = ModuleType("psycopg")
+    psycopg_mod.connect = _connect  # type: ignore[assignment]
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg_mod)
+
+    db = PgDatabase("postgres://example", use_pool=False, identity="rls-user")
+    with pytest.raises(RuntimeError, match="boom"):
+        db._get_conn()
+
+    assert conn.close_calls == 1
+    assert db._conn is None
+
+
 def test_transaction_close_and_test_connection(monkeypatch: pytest.MonkeyPatch) -> None:
     conn = FakeConn()
     db = PgDatabase("postgres://example", use_pool=False)

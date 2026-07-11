@@ -7,6 +7,7 @@ copilot 環境: json 出力を完了後に一括解析。
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shlex
 import shutil
@@ -18,6 +19,8 @@ from pathlib import Path
 from ..cli_runner import build_output_format_args, build_tools_args, detect_cli_binary
 from .parser import ObservationEvent
 from .scenario_generator import Scenario
+
+log = logging.getLogger(__name__)
 
 SANDBOX_BASE = Path(tempfile.gettempdir()) / "comply-sandbox"
 ALLOWED_MODELS = frozenset({"haiku", "sonnet", "opus"})
@@ -114,6 +117,7 @@ def _setup_sandbox(sandbox_dir: Path, scenario: Scenario) -> None:
         try:
             subprocess.run(parts, cwd=sandbox_dir, capture_output=True, timeout=60)
         except subprocess.TimeoutExpired:
+            log.warning("setup command timed out (timeout=%ss): %s", 60, cmd)
             continue
 
 
