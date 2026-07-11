@@ -34,22 +34,15 @@ import shlex
 import subprocess
 from pathlib import Path
 
+from bluecore.hooks.commit_quality_scanner import (
+    find_file_issues,
+    should_lint_file,
+    should_scan_secrets,
+)
 from bluecore.hooks.hook_common import parse_json_object
 from bluecore.lib.core_utils import log
 
 _SHELL_SEPARATORS = {"&&", "||", ";", "|"}
-
-_BINARY_SNIFF_SIZE = 8192  # 8KB
-_SECRET_SCAN_MAX_BYTES = 1024 * 1024  # 1MB
-_SECRET_SCAN_EXCLUDED_FILENAMES = {
-    "package-lock.json",
-    "yarn.lock",
-    "pnpm-lock.yaml",
-    "Cargo.lock",
-    "poetry.lock",
-    "uv.lock",
-    "Pipfile.lock",
-}
 
 
 def get_staged_files() -> list[str]:
@@ -140,149 +133,6 @@ def _resolve_repo_root() -> Path | None:
         return None
 
 
-def _is_binary_content(content: str) -> bool:
-    """先頭 `_BINARY_SNIFF_SIZE` 文字に NUL 文字（`\\x00`）が含まれるかでバイナリ判定します。
-
-    UTF-8 の NUL バイト（0x00）はデコード後も `\\x00` 文字として保持される
-    ため、デコード済みテキストに対して判定できます。この判定は lint
-    チェックの抑制にのみ使用し、シークレット検出には使いません
-    （バイナリ判定を悪用して secret 検査を回避できないようにするためです）。
-
-    Args:
-        content: 判定対象のデコード済み文字列です。
-
-    Returns:
-        バイナリファイルとみなすなら True を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    return "\0" in content[:_BINARY_SNIFF_SIZE]
-
-
-def get_staged_file_content(file_path: str) -> str | None:
-    """INDEX（ステージング領域）からファイル内容をテキストとして取得します。
-
-    `git show :path` の出力を bytes で取得し、UTF-8 として
-    `errors="replace"` でデコードします（不正なバイト列による
-    `UnicodeDecodeError` を避けるためです）。バイナリ判定はここでは行わず
-    `find_file_issues` 側で `_is_binary_content` を用いて lint 抑制のみに
-    適用します（シークレット検出はバイナリでも常に実行するためです）。
-
-    Args:
-        file_path: 対象ファイルのパスです。
-
-    Returns:
-        ファイル内容の文字列。取得できない場合は None を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    try:
-        result = subprocess.run(
-            ["git", "show", f":{file_path}"],
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            return None
-        raw: bytes = result.stdout
-        return raw.decode("utf-8", errors="replace")
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-
-def get_worktree_file_content(repo_root: Path, file_path: str) -> str | None:
-    """作業ツリーからファイル内容をテキストとして取得します。
-
-    `git commit -a` は作業ツリーの現在の内容をコミットするため、未ステージ
-    の変更ファイル（INDEX には反映されていない）はここから読む必要が
-    あります。UTF-8 として `errors="replace"` でデコードします。
-
-    読み取り前に realpath 包含チェックを行い、解決後の絶対パスが
-    `repo_root` 配下に収まっていることを確認します。これにより以下を
-    まとめて封鎖します:
-
-    - `file_path` 自身、または中間ディレクトリがシンボリックリンクで
-      `repo_root` 外の実体を指している場合（OS レベルでリンクを追跡すると
-      repo 外の秘密鍵等を読み込み、secret 検出結果としてログに一部露出
-      しうるため）
-    - `file_path` が絶対パスの場合（pathlib の仕様上 `repo_root` が無視される）
-    - `file_path` に `..` が含まれ `repo_root` 外へ traversal する場合
-
-    包含チェックに違反した場合は無言で None を返します（既存の「読めなければ
-    None」契約と一致させ、fail-open のノイズを増やさないためです）。
-    repo 内に留まる正当なシンボリックリンクは通過し従来どおり読みます
-    （最小修正の方針。過検知は避けつつ実体は別経路でも検出されます）。
-
-    Args:
-        repo_root: リポジトリルートの絶対パスです。
-        file_path: `repo_root` からの相対ファイルパスです。
-
-    Returns:
-        ファイル内容の文字列。読み取れない・repo_root 外の場合は None を
-        返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    try:
-        base = repo_root.resolve()
-        target = (repo_root / file_path).resolve()
-        if not target.is_relative_to(base):
-            return None
-        raw = target.read_bytes()
-    except OSError:
-        return None
-    return raw.decode("utf-8", errors="replace")
-
-
-def should_lint_file(file_path: str) -> bool:
-    """console.log / デバッガ文 / TODO の lint チェック対象かどうかを判定します。
-
-    Args:
-        file_path: 判定対象のファイルパスです。
-
-    Returns:
-        lint チェック対象なら True を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    checkable_extensions = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
-    return Path(file_path).suffix in checkable_extensions
-
-
-def should_scan_secrets(file_path: str) -> bool:
-    """ハードコードされたシークレットのスキャン対象かどうかを判定します。
-
-    lint チェックとは異なり拡張子で絞り込まず、原則として全ファイルを対象と
-    します（`tests/` 配下も除外しません）。以下のみ除外します:
-
-    - パッケージマネージャのロックファイル（内容が長大かつ生成物のため）
-    - 圧縮・生成物（`*.min.js` / `*.min.css`）
-
-    ファイルサイズ（1MB 超）による扱いは除外ではなく、実際に取得した内容を
-    `_SECRET_SCAN_MAX_BYTES` まで切り詰めてスキャンを継続します
-    （呼び出し側 `find_file_issues` が行います）。
-
-    Args:
-        file_path: 判定対象のファイルパスです。
-
-    Returns:
-        シークレットスキャン対象なら True を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    name = Path(file_path).name
-    if name in _SECRET_SCAN_EXCLUDED_FILENAMES:
-        return False
-    if name.endswith(".min.js") or name.endswith(".min.css"):
-        return False
-    return True
-
-
 def _find_git_commit_args(tokens: list[str]) -> list[str] | None:
     """トークン列内の `git commit` 呼び出しを探し、commit 直後の引数トークンを返します。
 
@@ -311,16 +161,35 @@ def _find_git_commit_args(tokens: list[str]) -> list[str] | None:
         while j < len(tokens):
             tok = tokens[j]
             if tok == "commit":
-                args: list[str] = []
-                k = j + 1
-                while k < len(tokens) and tokens[k] not in _SHELL_SEPARATORS:
-                    args.append(tokens[k])
-                    k += 1
-                return args
+                return _collect_args_until_separator(tokens, j + 1)
             if tok in _SHELL_SEPARATORS:
                 break
             j += 1
     return None
+
+
+def _collect_args_until_separator(tokens: list[str], start: int) -> list[str]:
+    """`start` からシェル区切りトークンが現れるまでの引数トークンを収集します。
+
+    `git commit` の直後（`start`）から `&&`/`;`/`|` 等のシェル区切りに達する
+    直前までを commit 引数として返します。
+
+    Args:
+        tokens: `shlex` 等でトークン化されたコマンド列です。
+        start: 収集を開始するインデックス（`commit` トークンの次）です。
+
+    Returns:
+        収集した引数トークンのリストを返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    args: list[str] = []
+    k = start
+    while k < len(tokens) and tokens[k] not in _SHELL_SEPARATORS:
+        args.append(tokens[k])
+        k += 1
+    return args
 
 
 def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
@@ -400,139 +269,6 @@ def _is_commit_all_flag(commit_args: list[str]) -> bool:
         if tok.startswith("-") and not tok.startswith("--") and "=" not in tok and "a" in tok[1:]:
             return True
     return False
-
-
-def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[dict]:
-    """ファイル内容から代表的な問題を検出します。
-
-    `repo_root` が None（既定）なら INDEX（`git show :path`、
-    `get_staged_file_content`）から読みます。`repo_root` を渡すと作業ツリー
-    （`get_worktree_file_content`）から読みます。`git commit -a` で
-    コミットされる未ステージ変更ファイルは作業ツリーの内容がコミット対象と
-    なるため、`repo_root` 経由で読む必要があります。
-
-    lint チェック（console.log / debugger / TODO）は `should_lint_file` が
-    True、かつバイナリでない（先頭 `_BINARY_SNIFF_SIZE` 文字に NUL を含まない）
-    ファイルのみ対象です。
-
-    シークレット検出は `should_scan_secrets` が True のファイルであれば、
-    バイナリ判定・`# nosec`・ファイルサイズに関わらず常に実行します
-    （NUL バイトを1つ混ぜるだけで検査を回避できるバイパスや、大容量化に
-    よる全面スキップを防ぐためです）。`_SECRET_SCAN_MAX_BYTES` を超える
-    場合は全体を放棄せず、先頭 `_SECRET_SCAN_MAX_BYTES` バイトに切り詰めて
-    スキャンを継続します（末尾側のみに存在するシークレットは検出できません
-    が、水増しによる全面回避は防げます）。
-
-    `# nosec` を含む行は console.log / debugger / TODO チェックを抑制します
-    （検出器自身のテストフィクスチャ等、意図的にパターンを含む行のため）。
-    シークレット検出は `# nosec` の対象外です。
-
-    Args:
-        file_path: 調査対象のファイルパスです。
-        repo_root: 指定すると作業ツリーから読みます（`git commit -a` の
-            未ステージ変更用）。None なら INDEX から読みます。
-
-    Returns:
-        検出した問題の辞書リストを返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    issues = []
-
-    secret_patterns = [
-        (r"sk-[a-zA-Z0-9]{20,}", "OpenAI API key"),
-        (r"ghp_[a-zA-Z0-9]{36}", "GitHub PAT"),
-        (r"AKIA[A-Z0-9]{16}", "AWS Access Key"),
-        (r"api[_-]?key\s*[=:]\s*['\"][^'\"]+['\"]", "API key"),
-    ]
-
-    try:
-        content = (
-            get_worktree_file_content(repo_root, file_path)
-            if repo_root is not None
-            else get_staged_file_content(file_path)
-        )
-        if content is None:
-            return issues
-
-        is_binary = _is_binary_content(content)
-        do_lint = should_lint_file(file_path) and not is_binary
-        do_secrets = should_scan_secrets(file_path)
-
-        if not do_lint and not do_secrets:
-            return issues
-
-        if do_lint:
-            for index, line in enumerate(content.split("\n")):
-                line_num = index + 1
-
-                # 抑制マーカー付き行（検出器自身のテストフィクスチャ等、意図的に
-                # パターンを含む行）は console.log/debugger/todo をスキップする。
-                if "# nosec" in line:
-                    continue
-
-                # ログ出力呼び出しをチェック
-                if "console.log" in line and not line.strip().startswith(("//", "*")):  # nosec
-                    issues.append(
-                        {
-                            "type": "console.log",  # nosec
-                            "message": f"console.log found at line {line_num}",  # nosec
-                            "line": line_num,
-                            "severity": "warning",
-                        }
-                    )
-
-                # デバッガ文をチェック
-                if re.search(r"\bdebugger\b", line) and not line.strip().startswith("//"):
-                    issues.append(
-                        {
-                            "type": "debugger",  # nosec
-                            "message": f"debugger statement at line {line_num}",  # nosec
-                            "line": line_num,
-                            "severity": "error",
-                        }
-                    )
-
-                # Issue 参照のない TODO/FIXME をチェック
-                todo_match = re.search(r"(?://|#)\s*(TODO|FIXME):?\s*(.+)", line)
-                if todo_match and not re.search(r"#\d+|issue", todo_match.group(2), re.IGNORECASE):
-                    issues.append(
-                        {
-                            "type": "todo",
-                            "message": f'TODO/FIXME without issue reference at line {line_num}: "{todo_match.group(2).strip()}"',
-                            "line": line_num,
-                            "severity": "info",
-                        }
-                    )
-
-        if do_secrets:
-            # 大容量ファイルは全面放棄せず、先頭 _SECRET_SCAN_MAX_BYTES バイトに
-            # 切り詰めてスキャンを継続する（水増しによる回避を防ぐ）。
-            raw_bytes = content.encode("utf-8")
-            if len(raw_bytes) > _SECRET_SCAN_MAX_BYTES:
-                secret_scan_text = raw_bytes[:_SECRET_SCAN_MAX_BYTES].decode("utf-8", errors="ignore")
-            else:
-                secret_scan_text = content
-
-            for index, line in enumerate(secret_scan_text.split("\n")):
-                line_num = index + 1
-                for pattern, name in secret_patterns:
-                    if re.search(pattern, line, re.IGNORECASE):
-                        issues.append(
-                            {
-                                "type": "secret",
-                                "message": f"Potential {name} exposed at line {line_num}",
-                                "line": line_num,
-                                "severity": "error",
-                            }
-                        )
-
-    except Exception:
-        # ファイルが読めない場合はスキップ
-        pass
-
-    return issues
 
 
 def validate_commit_message(command: str) -> dict | None:
@@ -751,6 +487,52 @@ def _finalize_result(
     return {"output": raw_input, "exitCode": 0}
 
 
+def _collect_worktree_issues(
+    worktree_targets: list[str],
+    total_issues: int,
+    error_count: int,
+    warning_count: int,
+    info_count: int,
+) -> tuple[int, int, int, int]:
+    """`git commit -a` の作業ツリー対象ファイルの問題数を集計に加算します。
+
+    リポジトリルートを解決し、作業ツリー（`repo_root` 経由）から各ファイルを
+    読んで `_count_file_issues` で集計し、既存のカウントに加算した結果を
+    返します。作業ツリー対象が無い、または repo root が解決できない場合は
+    非ブロッキングで作業ツリー分をスキップし、入力のカウントをそのまま
+    返します。
+
+    Args:
+        worktree_targets: 作業ツリーから読むチェック対象ファイルパスです。
+        total_issues: 現在の問題総数です。
+        error_count: 現在のエラー数です。
+        warning_count: 現在の警告数です。
+        info_count: 現在の info 数です。
+
+    Returns:
+        (total_issues, error_count, warning_count, info_count) の更新後
+        タプルを返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    if not worktree_targets:
+        return total_issues, error_count, warning_count, info_count
+
+    repo_root = _resolve_repo_root()
+    if repo_root is None:
+        # repo root が解決できない場合は非ブロッキングで作業ツリー分をスキップする
+        return total_issues, error_count, warning_count, info_count
+
+    wt_total, wt_error, wt_warning, wt_info = _count_file_issues(worktree_targets, repo_root=repo_root)
+    return (
+        total_issues + wt_total,
+        error_count + wt_error,
+        warning_count + wt_warning,
+        info_count + wt_info,
+    )
+
+
 def evaluate(raw_input: str) -> dict:
     """入力を評価し、出力内容と終了コードを返します。
 
@@ -794,18 +576,9 @@ def evaluate(raw_input: str) -> dict:
         worktree_targets = [f for f in worktree_files if should_lint_file(f) or should_scan_secrets(f)]
 
         total_issues, error_count, warning_count, info_count = _count_file_issues(index_targets)
-
-        if worktree_targets:
-            repo_root = _resolve_repo_root()
-            if repo_root is not None:
-                wt_total, wt_error, wt_warning, wt_info = _count_file_issues(
-                    worktree_targets, repo_root=repo_root
-                )
-                total_issues += wt_total
-                error_count += wt_error
-                warning_count += wt_warning
-                info_count += wt_info
-            # repo root が解決できない場合は非ブロッキングで作業ツリー分をスキップする
+        total_issues, error_count, warning_count, info_count = _collect_worktree_issues(
+            worktree_targets, total_issues, error_count, warning_count, info_count
+        )
 
         total_issues, warning_count = _apply_commit_message_issues(command, total_issues, warning_count)
 
