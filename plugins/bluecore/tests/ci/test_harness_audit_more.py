@@ -236,3 +236,32 @@ def test_get_consumer_checks_accepts_dict_package_json(tmp_path: Path) -> None:
 
     assert isinstance(checks, list)
     assert checks
+
+
+def test_get_repo_checks_python_structure_checks_pass_on_real_repo() -> None:
+    """JS 前提から Python 構造ベースへ書き換えた8チェックが実リポジトリで pass すること。
+
+    ハーネス監査は元々 Node.js 実装(everything-claude-code)のルーブリックを
+    引き継いでいたため、tool-hooks-impl-count 等8件が scripts/hooks/*.js の
+    ような JS 専用パスを前提にしていた。本リポジトリは Python 実装のため
+    該当チェックは常に false-negative になっていた。実際の Python 構造
+    （src/bluecore/hooks/ 等）を対象にした変換後、実リポジトリに対して
+    pass=True になることを確認する。
+    """
+    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
+
+    plugin_root = Path(__file__).resolve().parents[2]
+    checks = {check["id"]: check for check in get_repo_checks(plugin_root)}
+
+    python_structure_check_ids = [
+        "tool-hooks-impl-count",
+        "context-suggest-compact-hook",
+        "quality-test-runner",
+        "quality-ci-validations",
+        "quality-hook-tests",
+        "quality-doctor-script",
+        "memory-session-hooks",
+        "eval-tests-presence",
+    ]
+    for check_id in python_structure_check_ids:
+        assert checks[check_id]["pass"] is True, f"{check_id} should pass on the real repo structure"
