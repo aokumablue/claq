@@ -44,17 +44,17 @@ bluecore_run bluecore.skills.learn.cli <subcommand>
 ### export
 全インスティンクトを YAML 形式で stdout に出力する。
 
-### import `<file-or-url>`
-ローカルファイルまたは URL から取り込む。2段階で実行する: ① `import <file-or-url> --dry-run` で件数・出所・差分を提示 → ② AskUserQuestion で承認を得てから `import <file-or-url> --force` で適用。承認なしの `--force` 実行は禁止。取込元による確認ゲートの非対称は設けない（汚染済みローカルファイルの無確認取込を防ぐ）。
+### import `"<file-or-url>"`
+ローカルファイルまたは URL から取り込む。URL/パスは必ず単一のクォート済み引数として渡す（シェル解釈による分割・展開を防ぐ）。2段階で実行する: ① `import "<file-or-url>" --dry-run` で件数・出所・差分を提示 → ② AskUserQuestion で承認を得てから `import "<file-or-url>" --force` で適用。承認なしの `--force` 実行は禁止。取込元による確認ゲートの非対称は設けない（汚染済みローカルファイルの無確認取込を防ぐ）。
 
 ### promote
-昇格条件（2プロジェクト以上に出現・信頼度しきい値を満たす）の全候補を project → global へ自動昇格。
+昇格条件（2プロジェクト以上に出現・信頼度しきい値を満たす）の候補を project → global へ昇格する。2段階で実行する: ① `promote --dry-run` で昇格候補を提示 → ② AskUserQuestion で承認を得てから ③ `promote --force` を本実行。承認なしの `--force` 実行は禁止。
 
 ### prune
 30日より古い未レビュー・未昇格の保留インスティンクトを削除。2段階で実行する: ① `prune --dry-run` で削除対象件数を提示 → ② AskUserQuestion で承認を得てから `prune` を本実行。CLI 側に確認機構はないため、承認前の本実行は禁止。
 
 ### evolve
-蓄積インスティンクトからスキル・コマンド・エージェント候補を検出し `evolved/{skills,commands,agents}/` 配下にファイル生成。
+蓄積インスティンクトからスキル・コマンド・エージェント候補を検出し `evolved/{skills,commands,agents}/` 配下にファイル生成。2段階で実行する: 分析のみ = `evolve`（候補の検出・提示まで） → 生成 = `evolve --generate`（ファイル生成を実行）。
 
 - プロジェクトコンテキスト検出 → project/global インスティンクト読込（ID衝突時は project 優先）→ パターン分類 → 候補特定 → ファイル生成
 - 進化ルール: Command=ユーザー明示呼び出し / Skill=自動発火パターン / Agent=複雑多段階処理
@@ -66,4 +66,4 @@ bluecore_run bluecore.skills.learn.cli <subcommand>
 
 ## 引数
 
-- 位置 #1: `<subcommand>` = `export | import <file-or-url> | promote | prune | evolve`
+- 位置 #1: `<subcommand>` = `export | import "<file-or-url>" | promote | prune | evolve`

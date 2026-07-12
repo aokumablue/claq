@@ -36,7 +36,7 @@ source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
 bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> [--root <path>]
 ```
 
-スコアカードを出力。`--audit-only` 指定時はここで終了。
+スコアカードを出力。`--audit-only` は /harness レベルの制御フラグであり `bluecore_run` へ渡さない。指定時はここで終了。
 
 スコアリングはこのスクリプトのみを根拠とし、手動採点は行わない。
 
@@ -59,6 +59,7 @@ harness-tuner は:
 ## ステップ4: 改善後スコア
 
 ```bash
+source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
 bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> [--root <path>]
 ```
 
@@ -90,4 +91,4 @@ bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> [--root <pat
 - `--scope=<scope>`: 位置引数の別名（互換維持）
 - `--format=text|json`（既定: `text`）
 - `--root=<path>`: ルートディレクトリ指定
-- `--audit-only`: ステップ1のみで終了
+- `--audit-only`: ステップ1のみで終了（/harness レベルの制御フラグ。`bluecore_run` へ渡さない）
