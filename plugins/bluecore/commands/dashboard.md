@@ -34,7 +34,7 @@ command: /dashboard
 
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
-bluecore_mem_json dashboard '{"days": 30, "output": "./bluecore-dashboard.html", "format": "html"}'
+bluecore_mem_json dashboard '{"days": 30, "format": "html"}'
 ```
 
 ## ステップ3: 出力提示
@@ -62,5 +62,5 @@ bluecore_mem_json dashboard '{"days": 30, "output": "./bluecore-dashboard.html",
 ## 引数
 
 - `--days=<n>` — 集計期間（既定: 30）
-- `--output=<path>` — 出力先（既定: /tmp/bluecore-dashboard.html）
+- `--output=<path>` — 出力先（既定: `~/.bluecore/bluecore-dashboard.html`。相対パスは `~/.bluecore` 基準で解決され、`~/.bluecore` 配下以外のパスは拒否される）
 - `--format=html|json` — 出力形式（既定: html）

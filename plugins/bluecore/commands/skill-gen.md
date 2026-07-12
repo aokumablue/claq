@@ -22,7 +22,7 @@ command: /skill-gen
 
 ## skill 起動メカニズム
 
-`skill-make` / `skill-tune` は `user-invocable: false` の skill。description マッチで Claude Code が Skill ツール経由で fork 実行する。本コマンドのステップ3 / ステップ4で「skill-make skill を起動」「skill-tune skill を起動」と明示することで発火する。
+`skill-make` は `user-invocable: false` の skill で、description マッチにより Claude Code が Skill ツール経由で fork 実行する。`skill-tune` は `user-invocable: true` のため同様の自動発火に加えユーザーが直接呼び出すことも可能。本コマンドのステップ3 / ステップ4で「skill-make skill を起動」「skill-tune skill を起動」と明示することで発火する。
 
 ## ステップ1: 入力候補収集
 

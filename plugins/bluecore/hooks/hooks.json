@@ -62,7 +62,7 @@
             "timeout": 10
           }
         ],
-        "description": "InsAIts SDK でツール入力を検査し、認証情報の露出やプロンプトインジェクションを検出します。CRITICAL 異常はブロックし、監査イベントを JSONL に記録します（SDK 未導入時はスキップ）。"
+        "description": "InsAIts SDK が導入済みの環境では稼働中で、ツール入力を検査し認証情報の露出やプロンプトインジェクションを検出します。CRITICAL 異常はツール実行を実際にブロックし、監査イベントを JSONL に記録します。SDK 未導入環境では検査自体をスキップします（フェイルオープン）。"
       },
       {
         "matcher": "Bash|Write|Edit|MultiEdit|apply_patch",

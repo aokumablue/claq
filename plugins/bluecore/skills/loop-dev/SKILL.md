@@ -38,7 +38,7 @@ user-invocable: false
    | 作業内容 | 担当エージェント |
    |---|---|
    | コード追加を伴う feature/bugfix/test | `bluecore:tdd-writer` |
-   | 可読性・重複整理 | `bluecore:simplifier` |
+   | 可読性・重複整理 | `bluecore:simplifier`（`model: "fable"` を明示指定。高頻度発火の既定 `opus` 固定を回避） |
    | 未使用コード削除 | `bluecore:dead-code-cleaner` |
    | 性能改善 | `bluecore:perf-optimizer` |
 

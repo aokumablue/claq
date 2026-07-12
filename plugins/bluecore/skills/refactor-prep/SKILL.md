@@ -18,6 +18,8 @@ user-invocable: false
 
 ## 出力
 
+テキストサマリーに加え、下流（`refactor-rollback` / `refactor-orchestrator` / `refactor` コマンド）が参照する JSON 契約を同時に渡す。フィールド名・構造は `refactor-rollback/SKILL.md` の入力契約と一致させる。
+
 ```
 Refactor Preflight
 ──────────────────────────────
@@ -31,6 +33,23 @@ Test Set:
   - final: {cmds}
 ──────────────────────────────
 ```
+
+JSON 契約（下流3ファイルが前提とする形。`deps.from`/`deps.to` は `groups` 配列のインデックス）:
+
+```json
+{
+  "scope_files": ["path/a.py", "path/b.py"],
+  "groups": [["path/a.py"], ["path/b.py"]],
+  "deps": [{"from": 1, "to": 0}],
+  "tests": {
+    "baseline": ["python3 -m pytest -q"],
+    "group": ["python3 -m pytest -q tests/test_a.py"],
+    "final": ["python3 -m pytest -q", "ruff check plugins/bluecore/src plugins/bluecore/tests"]
+  }
+}
+```
+
+必須: `scope_files` / `groups` / `deps` / `tests.baseline` / `tests.group` / `tests.final`。テストが実在確認できない場合は該当配列を空にし、テキストサマリー側に「検証手段なし」と明記する。
 
 ## ルール
 

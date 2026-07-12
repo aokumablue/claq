@@ -53,7 +53,7 @@ command: /refactor
 
 ## ステップ4: simplify（並列, `refactor-orchestrator` → `bluecore:simplifier`）
 
-グループ化して**同時起動**。可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
+グループ化して**同時起動**。可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。高頻度発火（グループ数分の並列起動）となるため `bluecore:simplifier` 起動時は `model: "fable"` を明示指定し、既定 `opus` 固定によるコスト増を回避する。
 
 `--mode=simplify` 指定時はステップ4を実行後、ステップ7 final gate（テスト/lint 再実行）で終了。
 
