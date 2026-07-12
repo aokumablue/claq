@@ -31,6 +31,11 @@ class FakeStdin:
         return self._data[:n] if n >= 0 else self._data
 
 
+def _patch_select_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    """select を常に ready 扱いへ差し替える（FakeStdin は実 fd を持たないため）。"""
+    monkeypatch.setattr(launcher.select, "select", lambda r, w, x, t: (r, [], []))
+
+
 def _create_repo_venv(tmp_path: Path) -> Path:
     venv_python = tmp_path / ".venv" / "bin" / "python3"
     venv_python.parent.mkdir(parents=True, exist_ok=True)
@@ -54,6 +59,7 @@ def test_main_reads_stdin_only_when_piped(
 
     monkeypatch.setattr(launcher.sys, "stdin", fake_stdin)
     monkeypatch.setattr(launcher, "build_env", lambda: {})
+    _patch_select_ready(monkeypatch)
 
     def fake_run(*args, **kwargs):
         captured["input"] = kwargs["input"]
@@ -75,6 +81,7 @@ def test_main_decodes_non_utf8_stdin_with_replacement(monkeypatch, capsys) -> No
 
     monkeypatch.setattr(launcher.sys, "stdin", fake_stdin)
     monkeypatch.setattr(launcher, "build_env", lambda: {})
+    _patch_select_ready(monkeypatch)
 
     def fake_run(*args, **kwargs):
         captured["input"] = kwargs["input"]
@@ -92,6 +99,7 @@ def test_main_does_not_echo_piped_input_when_subprocess_is_silent(monkeypatch, c
 
     monkeypatch.setattr(launcher.sys, "stdin", fake_stdin)
     monkeypatch.setattr(launcher, "build_env", lambda: {})
+    _patch_select_ready(monkeypatch)
 
     def fake_run(*args, **kwargs):
         captured["input"] = kwargs["input"]
@@ -137,6 +145,7 @@ def test_build_env_prepends_repo_venv_to_path(monkeypatch, tmp_path: Path) -> No
     _create_repo_venv(tmp_path)
     monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
     monkeypatch.setenv("PATH", "/usr/local/bin")
+    monkeypatch.delenv("PYTHONPATH", raising=False)
 
     env = launcher.build_env()
 
@@ -207,6 +216,7 @@ def test_main_covers_usage_stderr_and_entrypoint(
 
     monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(False, "payload"))
     monkeypatch.setattr(launcher, "build_env", lambda: {})
+    _patch_select_ready(monkeypatch)
     monkeypatch.setattr(launcher.subprocess, "run", fake_run)
 
     assert launcher.main(["dummy-target"]) == 7
@@ -219,6 +229,7 @@ def test_main_covers_usage_stderr_and_entrypoint(
 def test_main_handles_oserror_and_entrypoint(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(False, "payload"))
     monkeypatch.setattr(launcher, "build_env", lambda: {})
+    _patch_select_ready(monkeypatch)
     monkeypatch.setattr(launcher.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("boom")))
 
     assert launcher.main(["dummy-target"]) == 1
@@ -307,6 +318,65 @@ def test_main_passes_timeout_to_subprocess(monkeypatch) -> None:
 
     assert launcher.main(["dummy-target"]) == 0
     assert captured["timeout"] == 590.0
+
+
+def test_main_uses_empty_input_when_stdin_never_arrives(monkeypatch, capsys) -> None:
+    """select タイムアウト時は read せず stderr 警告のうえ空入力で続行する（NG-B1 回帰）。"""
+    fake_stdin = FakeStdin(False, "payload")
+    captured = {}
+
+    monkeypatch.setattr(launcher.sys, "stdin", fake_stdin)
+    monkeypatch.setattr(launcher, "build_env", lambda: {})
+    monkeypatch.setattr(launcher.select, "select", lambda r, w, x, t: ([], [], []))
+
+    def fake_run(*args, **kwargs):
+        captured["input"] = kwargs["input"]
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+
+    assert launcher.main(["dummy-target"]) == 0
+    assert fake_stdin.read_called is False
+    assert captured["input"] == ""
+    assert "リダイレクト漏れ" in capsys.readouterr().err
+
+
+def test_read_stdin_returns_payload_when_ready(monkeypatch) -> None:
+    """select が ready を返した場合はパイプ入力全体を読み取る。"""
+    fake_stdin = FakeStdin(False, "payload")
+    monkeypatch.setattr(launcher.sys, "stdin", fake_stdin)
+    _patch_select_ready(monkeypatch)
+
+    assert launcher._read_stdin() == "payload"
+    assert fake_stdin.read_called is True
+
+
+def test_read_stdin_skips_select_on_tty(monkeypatch) -> None:
+    """TTY 接続時は select を呼ばず空文字列を返す。"""
+    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(True, "payload"))
+
+    def fail_select(*args):
+        raise AssertionError("select must not be called for tty stdin")
+
+    monkeypatch.setattr(launcher.select, "select", fail_select)
+
+    assert launcher._read_stdin() == ""
+
+
+def test_main_replaces_non_utf8_subprocess_output(monkeypatch, capsys, tmp_path: Path) -> None:
+    """非 UTF-8 バイトを出力する実サブプロセスでも置換文字で完走する（NG-B2 回帰）。"""
+    script = tmp_path / "emit_invalid_byte.py"
+    script.write_text(
+        "import sys\nsys.stdout.buffer.write(b'\\xff')\nsys.stderr.buffer.write(b'\\xfe')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher, "_runtime_python", lambda: (sys.executable, None))
+    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(True, ""))
+
+    assert launcher.main([str(script)]) == 0
+    output = capsys.readouterr()
+    assert output.out == "�"
+    assert output.err == "�"
 
 
 def test_main_returns_one_on_timeout_expired(monkeypatch, capsys) -> None:

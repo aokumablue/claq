@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import os
+import select
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # hooks.json の最長エントリ（600 秒）より先に自決して孫プロセスの孤立を防ぐ。
 # それより短い timeout のエントリでは Claude Code 側の kill が先に働く。
 DEFAULT_SUBPROCESS_TIMEOUT = 590.0
+
+# hooks は Claude Code が spawn 直後に stdin へ JSON を書き込むため、
+# 最初のバイト到着まで 2 秒あれば十分な余裕がある。
+# stdin リダイレクト漏れ（パイプ未接続のまま open）での無期限ブロックを防ぐ。
+STDIN_FIRST_BYTE_TIMEOUT = 2.0
 
 
 def _subprocess_timeout() -> float:
@@ -119,8 +125,39 @@ def resolve_command(target: str, args: list[str]) -> list[str]:
     return [runtime_python, "-m", target, *args]
 
 
+def _read_stdin() -> str:
+    """stdin のパイプ入力をタイムアウト付きで読み取ります。
+
+    Args:
+        なし
+
+    Returns:
+        パイプ入力を UTF-8 として読み取った文字列（不正バイトは置換文字へ変換し、
+        UnicodeDecodeError を防ぐ）。TTY 接続時、または STDIN_FIRST_BYTE_TIMEOUT
+        秒以内に最初のバイトが到着しない場合は空文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    if sys.stdin.isatty():
+        return ""
+
+    ready, _, _ = select.select([sys.stdin], [], [], STDIN_FIRST_BYTE_TIMEOUT)
+    if not ready:
+        print(
+            "WARNING: stdin から入力が届かないため空入力で続行します（stdin リダイレクト漏れの可能性）",
+            file=sys.stderr,
+        )
+        return ""
+
+    return str(sys.stdin.buffer.read(), encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
     """ランチャーのメインエントリポイントです。
+
+    stdin は _read_stdin() でタイムアウト付きに読み取り、サブプロセスの
+    出力は UTF-8（不正バイトは置換文字）として取得します。
 
     Args:
         argv: コマンドライン引数のリストです。
@@ -142,18 +179,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     target, target_args = args[0], args[1:]
-    if sys.stdin.isatty():
-        raw_input = ""
-    else:
-        # バイナリ混じりの出力（非 UTF-8）でも UnicodeDecodeError で落ちないよう置換デコード
-        raw_input = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    raw_input = _read_stdin()
 
     try:
+        # サブプロセス出力が非 UTF-8 バイトを含んでも UnicodeDecodeError で
+        # 落ちないよう、置換文字へ変換して読み取る
         result = subprocess.run(
             resolve_command(target, target_args),
             input=raw_input,
-            text=True,
             capture_output=True,
+            encoding="utf-8",
+            errors="replace",
             env=build_env(),
             timeout=_subprocess_timeout(),
         )
