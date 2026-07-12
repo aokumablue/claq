@@ -530,3 +530,35 @@ bluecore プラグイン(0.9.17) の全 agents/commands/skills/hooks 起動検�
 | **合計** | **45 コンポーネント** | **45** | **NG-B1/B2 + C1〜C5（計7）→ 全修正・コミット済み** |
 
 **総括**: §9.2 の残（agents 16 / commands 9 / skills 11 / 停止時 hooks）を**全て実起動検証し消化**。定義精読では露見しなかった実行系実害 NG を 7 件検出し、うち方針分岐のあるもの（NG-B1 の修正方式・harness root・dashboard 出力先）はユーザー合意または grillme で根拠確定のうえ修正まで完了。残課題は §9.5 + §10.6b に集約（別タスク化候補）。コミット済み: `afd5a7a`・`9c49c55`（NG 修正）。本レポート `plugin-verification-report-0.9.17.md` と `docs/adr/` はユーザー明示指示待ち（未コミット）。
+
+## 11. §9.5 + §10.6b 残課題11件の解消（継続セッション3）
+
+### 11.1 対応状況
+
+| item | 内容 | 対応 | commit |
+|---|---|---|---|
+| 1 | hooks.json の insights description が前提（未導入時スキップ）と実挙動（稼働中・CRITICAL ブロック）で乖離 | 修正済み | `7e7a4b7` |
+| 2 | dashboard 出力先デフォルトの自己矛盾（`/tmp/...` vs `./...`） | 修正済み（実際の許可境界 `~/.bluecore` に合わせて記述統一） | `7e7a4b7` |
+| 3 | skill-gen.md の skill-tune user-invocable 記述（false）と実装（true）の不一致 | 修正済み | `7e7a4b7` |
+| 4 | refactor-prep 出力契約（テキストのみ）が下流3ファイルの JSON 前提と不一致 | 修正済み（JSON 契約を追加、`refactor-rollback/SKILL.md` の入力契約と一致） | `7e7a4b7` |
+| 5 | simplifier 高頻度発火が既定 `opus` 固定でコスト増 | 修正済み（`refactor.md` / `loop-dev/SKILL.md` の呼び出し2箇所に `model: "fable"` 明示を追記） | `7e7a4b7` |
+| 6 | tdd-writer.md の tools に Glob 欠落 | 修正済み | `7e7a4b7` |
+| 7 | comply/stocktake が dead code 疑い（要判別） | **決定: 現状維持**（11.2 参照） | 記録のみ（本 commit） |
+| 8 | insights の bytes→str 変換誤検知（false-positive ブロック） | **未適用・ユーザー承認待ち**（11.3 参照） | 未コミット |
+| 9 | harness_audit の repo チェック8件が JS（Node.js 実装）前提で Python 実装と不整合 | 修正済み（Python 構造ベースへ書き換え・実リポジトリ pass=True の回帰テスト追加・モジュールカバレッジ100%） | `b331cdf` |
+| 10 | instinct.md の承認ゲート不備 | 対象外（別タスク。本セッションでは着手しない） | - |
+| 11 | mem `stats` 実装時の対象ストア未確定 | **決定: 両方**（11.4 参照） | 記録のみ（本 commit） |
+
+### 11.2 item7 決定: comply/stocktake は現状維持
+
+`src/bluecore/skills/comply/` `src/bluecore/skills/stocktake/` はいずれも `tests/skills/comply/`（7ファイル）・`tests/skills/stocktake/`（3ファイル）に対応する既存テストが確認でき、能動的にテストされている実装であり dead code ではない。削除せず現状維持とする。
+
+### 11.3 item8 状況: 未適用（ユーザー承認待ち）
+
+`insights_security_monitor.py` に post フィルタ（異常 `details.flags` を読む専用アクセサを新設し、`goal_shift_after_tool_load` 除外後の有意フラグ数が2件未満なら `CRITICAL` を `MEDIUM` に降格。2件以上なら `CRITICAL` 維持）を実装し、対応テスト（RED→GREEN、モジュールカバレッジ100%）まで設計・準備した。
+
+その検証中、当該変更を実際にテスト実行（pytest）しようとした Bash 呼び出しが、**Claude Code の自動モードセキュリティ分類器により「CRITICAL ブロックを弱める変更をユーザーの明示的許可なく検証しようとしている」として拒否**された。分類器はこの変更を「セキュリティ制御の弱体化」と判定しており、本タスクの `approved_plan` に記載された仕様だけでは実行時の承認として扱われないため、**該当の実装・テストは作業ツリーから revert しコミットしていない**。設計は完了しているため、ユーザーが内容を確認のうえ明示的に許可すれば次セッションで再適用・検証・コミット可能。
+
+### 11.4 item11 決定: mem stats 対象ストアは両方
+
+`/dashboard` の既存パターン（個人データは SQLite に常時収集、PostgreSQL は `mem.sync.enabled` 設定時のみチームデータも収集）を踏襲し、`mem stats` も個人ストア（常時）・チーム PostgreSQL（設定時のみ）の両方を対象とする。実装は別タスクとする。
