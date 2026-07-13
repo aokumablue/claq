@@ -1170,7 +1170,7 @@ def test_insights_security_monitor_writes_audit_and_handles_anomalies(
 def test_effective_severity_downgrades_only_tool_description_divergence(
     anomaly: object, expected: str
 ) -> None:
-    """TOOL_DESCRIPTION_DIVERGENCE の単一シグナルのみ MEDIUM に降格し、他 type・複数シグナルは維持される。"""
+    """述語自体の一般則を検証する（この hook の実呼び出し経路では複数シグナルは到達しないが、predicate としては正しく2件以上でCRITICALを維持する）。"""
     assert insights_security_monitor._effective_severity(anomaly) == expected
 
 

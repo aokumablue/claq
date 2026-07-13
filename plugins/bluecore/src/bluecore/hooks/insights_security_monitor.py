@@ -168,6 +168,13 @@ def _effective_severity(anomaly: Any) -> str:
     トレードオフとして、同じ単一フラグ構成になる真の攻撃（誤検知と区別
     できない場合）も同様に降格される点は承認済みの許容リスクです。
 
+    注記: このモジュールが呼ぶ insa-its API（tool_name 引数なし）では、
+    この anomaly type が生成しうる有意フラグは理論上最大1件のため、
+    「2件以上なら維持」の分岐は現状の呼び出し方では到達しません。
+    本関数は vendor 側の一般則をそのまま実装したものであり、呼び出し側が
+    将来 tool_name を渡すよう変更されれば同分岐は意味を持ちます
+    （docs/reports/plugin-verification-report-0.9.17.md §11.3 参照）。
+
     Args:
         anomaly: dict または属性アクセス可能な異常オブジェクトです。
 

@@ -557,7 +557,7 @@ bluecore プラグイン(0.9.17) の全 agents/commands/skills/hooks 起動検�
 
 前セッションでは当該変更のテスト実行（pytest）が Bash 呼び出し時に自動モードの安全性判定により毎回拒否され、未適用・未検証のまま作業ツリーから revert していた。継続セッションで、承認された「単一フラグ全般の降格」ではなく**対象を `TOOL_DESCRIPTION_DIVERGENCE` anomaly type に限定**する設計へ narrowing した上で再実装し、以下を確認して commit した。
 
-- **実装**: `insights_security_monitor.py` に `_effective_severity()` を追加。severity 降格は anomaly `type` が `TOOL_DESCRIPTION_DIVERGENCE` の場合のみ適用（他 type、例えば資格情報露出検知等は対象外で従来どおり単一フラグでも `CRITICAL` を維持）。対象 type 内では `details.flags`（ネストされた格納位置）から `goal_shift_after_tool_load` を除いた有意フラグ数が2件未満なら `MEDIUM` に降格、2件以上なら `CRITICAL` を維持
+- **実装**: `insights_security_monitor.py` に `_effective_severity()` を追加。severity 降格は anomaly `type` が `TOOL_DESCRIPTION_DIVERGENCE` の場合のみ適用（他 type、例えば資格情報露出検知等は対象外で従来どおり単一フラグでも `CRITICAL` を維持）。対象 type 内では `details.flags` から `goal_shift_after_tool_load` を除いた有意フラグ数が2件未満なら `MEDIUM` に降格、2件以上なら `CRITICAL` を維持する、という insa-its 側 `ai_monitor.py` アダプタと同一の一般則を実装（**ただしこの hook の実呼び出し経路での到達可能性は 11.3 追加調査を参照**）
 - **単体テスト**: `_effective_severity()` の7ケース（他type不変・単一flag降格・複数flag維持・goal_shift除外後1件で降格・details欠落/非dict/属性アクセス型の防御的分岐）+ 既存の end-to-end パラメトライズドテストに `TOOL_DESCRIPTION_DIVERGENCE` の降格/維持2ケースを追加。モジュールカバレッジ100%・全体3244件 pass・ruff clean
 - **実SDKでのlive確認**: スタブでなく実際の insa_its（v4.9.7）へ、バイト列を文字列へ変換する呼び出し1件のみを含むテキストを送信し、返る anomaly が severity=critical・type=TOOL_DESCRIPTION_DIVERGENCE・details.flags=[hidden_instructions_in_message]（1件のみ）であること、および `_effective_severity()` 適用後に MEDIUM へ降格し非ブロックとなることを実行確認済み（スタブ前提が実装と一致しているかという懸念を解消）
 - **前回指摘の反映**: 「効果が変換呼び出しの誤検知に限定されず単一シグナル CRITICAL 全般を広く弱める」という懸念は、対象を `TOOL_DESCRIPTION_DIVERGENCE` type に限定したことで解消。他の anomaly type（資格情報漏洩・プロンプトインジェクション等）は本変更の影響を受けない。ただし `TOOL_DESCRIPTION_DIVERGENCE` 自体が単一シグナルで真陽性を検出したケースも同様に MEDIUM へ降格される点は、承認済みトレードオフとして残る（同 type はエンコーディング関連キーワードで発火するため、実際の攻撃は多くの場合2つ目のフラグか別 anomaly type も伴う想定）
@@ -567,9 +567,17 @@ bluecore プラグイン(0.9.17) の全 agents/commands/skills/hooks 起動検�
 
 - Blocker（reviewer）: `pyproject.toml` の `[tool.coverage.run] branch = true` により当該モジュールは branch coverage 100% が要件だが、`_handle_anomalies` 内の `isinstance(a, dict)` 分岐の False 側（非 dict anomaly）を通す統合テストが無く実測 99.43% だった。`_handle_anomalies` を直接呼び出し非 dict anomaly（`CREDENTIAL_EXPOSURE` 型）を渡すテストを追加し branch coverage 100% を確認・修正
 - High（security-auditor）: `write_audit` に severity 降格の証跡（`anomaly_severities` / `effective_severities`）が記録されておらずフォレンジック不可という指摘を受け、監査ログへ両方を記録するよう修正。あわせて `has_critical` 判定を `_effective_severity()` の戻り値に直接基づく形へ統一し（従来は dict への in-place mutation 後の値を再読していたため非 dict anomaly では type 別の降格ルールが判定に反映されない不整合があった）、dict/非 dict どちらの anomaly でもブロック判定が一貫するよう修正
-- Critical（security-auditor、未解消のまま開示）: 「`TOOL_DESCRIPTION_DIVERGENCE` の有意フラグ数が insa-its 側の非公開ロジックに全面依存しており、攻撃者がフラグを1件以下に抑える入力を作れれば CRITICAL ブロックを回避できる可能性がある」という指摘。これは §11.3 冒頭で言及した「単一シグナルの真陽性も同様に降格される」トレードオフと同じ根（1フラグ以下は無条件で MEDIUM）であり、grillme 時点でユーザーに開示・承認済みの設計判断の裏面。コード側の追加対応はせず、既知の許容リスクとして本セッションでは維持（新たなコード変更は行っていない）
+- Critical（security-auditor、指摘の前提を追加調査で訂正）: 「`TOOL_DESCRIPTION_DIVERGENCE` の有意フラグ数閾値が insa-its 側の非公開ロジックに全面依存しており、攻撃者がフラグを1件以下に抑える入力を作れれば CRITICAL ブロックを回避できる可能性がある」という指摘を受け、advisor同席のうえ `tool_description_divergence.py` の `check()` 全文と `monitor.py` の呼び出し引数を追加調査した。
 
-修正後: 全体 pytest 3245 件 pass・`insights_security_monitor.py` の branch coverage 100%・ruff clean（コミット別途）。
+  **判明した事実（前回記載より事態は踏み込んでいた）**: `check()` が生成しうる flag は6種類あるが、`cross_category_behavior`/`behavior_shift_detected`/`semantic_divergence`/`tool_description_contains_hidden_instructions` の4種は `tool_name` 引数ありの呼び出し（`register_tool_description`経由の別API）でのみ発火する。bluecore が実際に呼ぶ `insAItsMonitor.send_message()` は `tool_name` を渡さない（`monitor.py`の唯一の呼出し箇所は位置引数2つのみ）ため、この4 flag は**このhookの呼び出し経路では構造的に発火し得ない**。到達可能なのは `hidden_instructions_in_message` と `goal_shift_after_tool_load` の2 flag のみで、後者は `_NON_SIGNIFICANT_FLAGS` として有意カウントから常に除外される。**したがって有意フラグ数の理論上限は1であり、`_effective_severity()` の「2件以上なら `CRITICAL` 維持」分岐は、この呼び出し経路では到達不能**。つまり `TOOL_DESCRIPTION_DIVERGENCE` はこの hook 経由では入力内容によらず常に `MEDIUM` に降格される（「単一フラグのみ降格」ではなく実質「全件降格」）。
+
+  **security-auditor の指摘への回答**: 前提（攻撃者がフラグ数を操作して1件に抑える）は誤り——操作の余地なく最初から1件が上限のため、この経路に「フラグ数を悪用した回避」という攻撃手段は成立しない。ただし結論部分（このtypeでCRITICALブロックが実質機能していない）は指摘より正しい方向に踏み込んでいた。
+
+  **それでも許容と判断する根拠**: `hidden_instructions_in_message` は正規表現一致（base64・hex・rot13・エンコード関連キーワードの直後に区切り記号が続く形）のみで発火し、これはコード中の変換呼び出し構文には広く一致する一方、シェルコマンドラインでの実際の変換型攻撃には**そもそも一致しない**（区切り記号が続かない形のため）。純粋な字句一致であり意味解析を伴わないこの信号は、そもそも単独で CRITICAL ブロックに値する検知精度を持っていなかった（誤検知を量産していた item8 の発生自体がその証拠）。したがって「この hook 経由では常時 MEDIUM」という実態は、想定より広いが、実害の観点では「元々ほぼ防御力のなかった検知をブロックしないことにした」というだけであり、新たな穴を開けたわけではない。資格情報露出等の他 anomaly type は本変更の影響を受けず引き続き CRITICAL を維持する
+  - **開示すべき残余リスク**: 変換呼び出し構文で難読化し、かつ他のどの anomaly type/flag も一切トリップしない悪意あるコードは、CRITICAL ではなく MEDIUM（監査ログ記録＋警告、自動ブロックなし）として通過する。これは本 hook が唯一の防御層ではない（多層防御の一枚）ことを前提に許容する
+  - **コード変更方針**: `_effective_severity()` 自体は insa-its 側アダプタの一般則を正しく実装した predicate であり、コードとしての妥当性に問題はない（到達可能性は呼び出し側 `_run_insaits_scan()` が `tool_name` を渡すかどうかに依存する外部要因であり、predicate 自体を歪めていない）。プロジェクト規約（到達不能コード削除・投機的な将来対応禁止）に照らし、「いつか `tool_name` を渡すかもしれないから残す」という将来対応目的では正当化しない——あくまで「vendor の実際のロジックを忠実に表す一般則である」という理由でのみ現状維持する。コード自体の変更は行わず、本節の記述訂正のみで対応する
+
+修正後: 全体 pytest 3245 件 pass・`insights_security_monitor.py` の branch coverage 100%・ruff clean（コミット別途）。コードは無変更、本節の記述訂正のみ。
 
 ### 11.4 item11 決定: mem stats 対象ストアは両方
 
