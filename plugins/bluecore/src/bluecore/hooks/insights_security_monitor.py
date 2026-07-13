@@ -165,6 +165,8 @@ def _effective_severity(anomaly: Any) -> str:
     リテラル）だけで hidden_instructions_in_message フラグを単独で立てる
     誤検知が多いため、goal_shift_after_tool_load を除いた有意フラグが
     2件未満なら MEDIUM に降格します。他の anomaly type は対象外です。
+    トレードオフとして、同じ単一フラグ構成になる真の攻撃（誤検知と区別
+    できない場合）も同様に降格される点は承認済みの許容リスクです。
 
     Args:
         anomaly: dict または属性アクセス可能な異常オブジェクトです。
@@ -275,20 +277,23 @@ def _handle_anomalies(anomalies: list[Any], data: dict[str, Any], text: str, con
         text: スキャン対象テキスト（文字数計上用）。
         context: 監査ログ用コンテキストラベル。
     """
+    effective_severities: list[str] = [_effective_severity(a) for a in anomalies]
     write_audit({
         "tool": data.get("tool_name", "unknown"),
         "context": context,
         "anomaly_count": len(anomalies),
         "anomaly_types": [get_anomaly_attr(a, "type") for a in anomalies],
+        "anomaly_severities": [get_anomaly_attr(a, "severity").upper() for a in anomalies],
+        "effective_severities": effective_severities,
         "text_length": len(text),
     })
     if not anomalies:
         log.debug("Clean -- no anomalies detected.")
         sys.exit(0)
-    for a in anomalies:
+    for a, effective in zip(anomalies, effective_severities, strict=True):
         if isinstance(a, dict):
-            a["severity"] = _effective_severity(a)
-    has_critical: bool = any(get_anomaly_attr(a, "severity").upper() in BLOCKING_SEVERITIES for a in anomalies)
+            a["severity"] = effective
+    has_critical: bool = any(sev in BLOCKING_SEVERITIES for sev in effective_severities)
     feedback: str = format_feedback(anomalies)
     if has_critical:
         sys.exit(emit_block_output(feedback))

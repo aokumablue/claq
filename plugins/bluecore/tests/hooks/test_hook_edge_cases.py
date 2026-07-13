@@ -1174,6 +1174,25 @@ def test_effective_severity_downgrades_only_tool_description_divergence(
     assert insights_security_monitor._effective_severity(anomaly) == expected
 
 
+def test_handle_anomalies_does_not_mutate_non_dict_anomaly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """dict でない anomaly は in-place mutation の対象外（fail-safe で severity 維持のままブロック）。"""
+    monkeypatch.setattr(insights_security_monitor, "AUDIT_FILE", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setattr("bluecore.hooks.output_adapter.detect_harness", lambda: "claude")
+    non_dict_anomaly = SimpleNamespace(severity="CRITICAL", type="CREDENTIAL_EXPOSURE", details=None)
+
+    stderr = io.StringIO()
+    with redirect_stderr(stderr), pytest.raises(SystemExit) as excinfo:
+        insights_security_monitor._handle_anomalies(
+            [non_dict_anomaly], {"tool_name": "Bash"}, "x" * 20, "ctx"
+        )
+
+    assert excinfo.value.code == 2
+    assert non_dict_anomaly.severity == "CRITICAL"
+    assert "Issues Detected" in stderr.getvalue()
+
+
 def test_run_with_flags_build_env_and_resolve_command_branches(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -563,6 +563,14 @@ bluecore プラグイン(0.9.17) の全 agents/commands/skills/hooks 起動検�
 - **前回指摘の反映**: 「効果が変換呼び出しの誤検知に限定されず単一シグナル CRITICAL 全般を広く弱める」という懸念は、対象を `TOOL_DESCRIPTION_DIVERGENCE` type に限定したことで解消。他の anomaly type（資格情報漏洩・プロンプトインジェクション等）は本変更の影響を受けない。ただし `TOOL_DESCRIPTION_DIVERGENCE` 自体が単一シグナルで真陽性を検出したケースも同様に MEDIUM へ降格される点は、承認済みトレードオフとして残る（同 type はエンコーディング関連キーワードで発火するため、実際の攻撃は多くの場合2つ目のフラグか別 anomaly type も伴う想定）
 - **自動モード分類器の再現性**: 本セッションでは同一 diff に対する pytest 実行が拒否されなかった（直接の Bash 実行では再現せず）。前回の拒否がどの実行経路・文脈に依存したかは未特定だが、今回は実測で通過している
 
+**reviewer + security-auditor レビュー後の追加修正**:
+
+- Blocker（reviewer）: `pyproject.toml` の `[tool.coverage.run] branch = true` により当該モジュールは branch coverage 100% が要件だが、`_handle_anomalies` 内の `isinstance(a, dict)` 分岐の False 側（非 dict anomaly）を通す統合テストが無く実測 99.43% だった。`_handle_anomalies` を直接呼び出し非 dict anomaly（`CREDENTIAL_EXPOSURE` 型）を渡すテストを追加し branch coverage 100% を確認・修正
+- High（security-auditor）: `write_audit` に severity 降格の証跡（`anomaly_severities` / `effective_severities`）が記録されておらずフォレンジック不可という指摘を受け、監査ログへ両方を記録するよう修正。あわせて `has_critical` 判定を `_effective_severity()` の戻り値に直接基づく形へ統一し（従来は dict への in-place mutation 後の値を再読していたため非 dict anomaly では type 別の降格ルールが判定に反映されない不整合があった）、dict/非 dict どちらの anomaly でもブロック判定が一貫するよう修正
+- Critical（security-auditor、未解消のまま開示）: 「`TOOL_DESCRIPTION_DIVERGENCE` の有意フラグ数が insa-its 側の非公開ロジックに全面依存しており、攻撃者がフラグを1件以下に抑える入力を作れれば CRITICAL ブロックを回避できる可能性がある」という指摘。これは §11.3 冒頭で言及した「単一シグナルの真陽性も同様に降格される」トレードオフと同じ根（1フラグ以下は無条件で MEDIUM）であり、grillme 時点でユーザーに開示・承認済みの設計判断の裏面。コード側の追加対応はせず、既知の許容リスクとして本セッションでは維持（新たなコード変更は行っていない）
+
+修正後: 全体 pytest 3245 件 pass・`insights_security_monitor.py` の branch coverage 100%・ruff clean（コミット別途）。
+
 ### 11.4 item11 決定: mem stats 対象ストアは両方
 
 `/dashboard` の既存パターン（個人データは SQLite に常時収集、PostgreSQL は `mem.sync.enabled` 設定時のみチームデータも収集）を踏襲し、`mem stats` も個人ストア（常時）・チーム PostgreSQL（設定時のみ）の両方を対象とする。実装は別タスクとする。
