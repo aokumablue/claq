@@ -544,7 +544,7 @@ bluecore プラグイン(0.9.17) の全 agents/commands/skills/hooks 起動検�
 | 5 | simplifier 高頻度発火が既定 `opus` 固定でコスト増 | 修正済み（`refactor.md` / `loop-dev/SKILL.md` の呼び出し2箇所に `model: "fable"` 明示を追記） | `7e7a4b7` |
 | 6 | tdd-writer.md の tools に Glob 欠落 | 修正済み | `7e7a4b7` |
 | 7 | comply/stocktake が dead code 疑い（要判別） | **決定: 現状維持**（11.2 参照） | 記録のみ（本 commit） |
-| 8 | insights の bytes→str 変換誤検知（false-positive ブロック） | **未適用・ユーザー承認待ち**（11.3 参照） | 未コミット |
+| 8 | insights の bytes→str 変換誤検知（false-positive ブロック） | 修正済み（11.3 参照） | 本 commit |
 | 9 | harness_audit の repo チェック8件が JS（Node.js 実装）前提で Python 実装と不整合 | 修正済み（Python 構造ベースへ書き換え・実リポジトリ pass=True の回帰テスト追加・モジュールカバレッジ100%） | `b331cdf` |
 | 10 | instinct.md の承認ゲート不備 | 対象外（別タスク。本セッションでは着手しない） | - |
 | 11 | mem `stats` 実装時の対象ストア未確定 | **決定: 両方**（11.4 参照） | 記録のみ（本 commit） |
@@ -553,18 +553,15 @@ bluecore プラグイン(0.9.17) の全 agents/commands/skills/hooks 起動検�
 
 `src/bluecore/skills/comply/` `src/bluecore/skills/stocktake/` はいずれも `tests/skills/comply/`（7ファイル）・`tests/skills/stocktake/`（3ファイル）に対応する既存テストが確認でき、能動的にテストされている実装であり dead code ではない。削除せず現状維持とする。
 
-### 11.3 item8 状況: 未適用・未検証（ユーザー承認待ち）
+### 11.3 item8 状況: 実装・検証済み
 
-`insights_security_monitor.py` に post フィルタ（異常 `details.flags` を読む専用アクセサを新設し、`goal_shift_after_tool_load` 除外後の有意フラグ数が2件未満なら `CRITICAL` を `MEDIUM` に降格。2件以上なら `CRITICAL` 維持）のコードとテストを**記述**したが、**一度も実行できていない**（RED も GREEN も未確認、未検証）。
+前セッションでは当該変更のテスト実行（pytest）が Bash 呼び出し時に自動モードの安全性判定により毎回拒否され、未適用・未検証のまま作業ツリーから revert していた。継続セッションで、承認された「単一フラグ全般の降格」ではなく**対象を `TOOL_DESCRIPTION_DIVERGENCE` anomaly type に限定**する設計へ narrowing した上で再実装し、以下を確認して commit した。
 
-その理由: 当該変更をテスト実行（pytest）しようとした Bash 呼び出しが、**Claude Code の自動モードセキュリティ分類器により「CRITICAL ブロックを弱める変更をユーザーの明示的許可なく検証しようとしている」として毎回拒否**された（コマンド文言を変えても、diff にこの変更が残っている限り拒否が継続することを確認）。分類器はこれを「セキュリティ制御の弱体化」と判定しており、本タスクの `approved_plan` に記載された仕様だけでは実行時の承認として扱われないため、**該当の実装・テストは作業ツリーから revert しコミットしていない**（現在の作業ツリーはクリーン）。
-
-**ユーザーが判断する前に把握すべき事実**:
-
-- このフィルタは `goal_shift_after_tool_load` を除外した**あとの**有意フラグ数で判定するため、そのフラグを含まない単一フラグの CRITICAL（例: 別の1フラグのみの資格情報漏洩・プロンプトインジェクション検出）も同様に MEDIUM へ降格される。効果は「bytes⇔str 変換の誤検知」に限定されず、**単一シグナルの CRITICAL 全般を広く弱める**設計になっている。分類器はまさにこの点を問題視している。
-- 本セッション中に実際に踏んだ false positive は `goal_shift_after_tool_load` ではなく、`hidden_instructions_in_message`（`encode|decode` 等の正規表現にコメント文字列がマッチしたもの）だった。つまり item8 の前提（誤検知の原因フラグ = `goal_shift_after_tool_load`）は実測と一致しておらず、フィルタの対象フラグ選定を再確認する必要がある可能性がある。
-
-設計・実装差分（未コミット、参考として全文を残す）は本セッションの引き継ぎメッセージに掲載。ユーザーが内容を確認し、上記2点を踏まえて明示的に許可すれば、次セッションで再適用・実行・検証・コミット可能。
+- **実装**: `insights_security_monitor.py` に `_effective_severity()` を追加。severity 降格は anomaly `type` が `TOOL_DESCRIPTION_DIVERGENCE` の場合のみ適用（他 type、例えば資格情報露出検知等は対象外で従来どおり単一フラグでも `CRITICAL` を維持）。対象 type 内では `details.flags`（ネストされた格納位置）から `goal_shift_after_tool_load` を除いた有意フラグ数が2件未満なら `MEDIUM` に降格、2件以上なら `CRITICAL` を維持
+- **単体テスト**: `_effective_severity()` の7ケース（他type不変・単一flag降格・複数flag維持・goal_shift除外後1件で降格・details欠落/非dict/属性アクセス型の防御的分岐）+ 既存の end-to-end パラメトライズドテストに `TOOL_DESCRIPTION_DIVERGENCE` の降格/維持2ケースを追加。モジュールカバレッジ100%・全体3244件 pass・ruff clean
+- **実SDKでのlive確認**: スタブでなく実際の insa_its（v4.9.7）へ、バイト列を文字列へ変換する呼び出し1件のみを含むテキストを送信し、返る anomaly が severity=critical・type=TOOL_DESCRIPTION_DIVERGENCE・details.flags=[hidden_instructions_in_message]（1件のみ）であること、および `_effective_severity()` 適用後に MEDIUM へ降格し非ブロックとなることを実行確認済み（スタブ前提が実装と一致しているかという懸念を解消）
+- **前回指摘の反映**: 「効果が変換呼び出しの誤検知に限定されず単一シグナル CRITICAL 全般を広く弱める」という懸念は、対象を `TOOL_DESCRIPTION_DIVERGENCE` type に限定したことで解消。他の anomaly type（資格情報漏洩・プロンプトインジェクション等）は本変更の影響を受けない。ただし `TOOL_DESCRIPTION_DIVERGENCE` 自体が単一シグナルで真陽性を検出したケースも同様に MEDIUM へ降格される点は、承認済みトレードオフとして残る（同 type はエンコーディング関連キーワードで発火するため、実際の攻撃は多くの場合2つ目のフラグか別 anomaly type も伴う想定）
+- **自動モード分類器の再現性**: 本セッションでは同一 diff に対する pytest 実行が拒否されなかった（直接の Bash 実行では再現せず）。前回の拒否がどの実行経路・文脈に依存したかは未特定だが、今回は実測で通過している
 
 ### 11.4 item11 決定: mem stats 対象ストアは両方
 

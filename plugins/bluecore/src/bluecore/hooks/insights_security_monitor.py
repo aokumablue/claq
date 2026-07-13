@@ -49,6 +49,13 @@ MIN_CONTENT_LENGTH: int = 10
 MAX_SCAN_LENGTH: int = 4000
 DEFAULT_MODEL: str = "claude-opus"
 BLOCKING_SEVERITIES: frozenset = frozenset({"CRITICAL"})
+# insa-its の TOOL_DESCRIPTION_DIVERGENCE 検知器のみ対象。他の anomaly type
+# （CREDENTIAL_EXPOSURE 等）は単一フラグでも従来どおり CRITICAL を維持する。
+_DOWNGRADE_ANOMALY_TYPES: frozenset = frozenset({"TOOL_DESCRIPTION_DIVERGENCE"})
+# goal_shift_after_tool_load は他フラグとの共起有無で真偽を判定する補助フラグ
+# のため、有意フラグ数のカウントから除外する（insa-its 側 ai_monitor.py の
+# ToolDescriptionDivergenceAdapter と同じ扱い）。
+_NON_SIGNIFICANT_FLAGS: frozenset = frozenset({"goal_shift_after_tool_load"})
 
 
 def _resolve_audit_path() -> Path:
@@ -149,6 +156,32 @@ def get_anomaly_attr(anomaly: Any, key: str, default: str = "") -> str:
     if isinstance(anomaly, dict):
         return str(anomaly.get(key, default))
     return str(getattr(anomaly, key, default))
+
+
+def _effective_severity(anomaly: Any) -> str:
+    """TOOL_DESCRIPTION_DIVERGENCE の単一シグナル誤検知のみ severity を降格します。
+
+    insa-its の当該検知器は bytes<->str 変換呼び出し（decode/encode 等の
+    リテラル）だけで hidden_instructions_in_message フラグを単独で立てる
+    誤検知が多いため、goal_shift_after_tool_load を除いた有意フラグが
+    2件未満なら MEDIUM に降格します。他の anomaly type は対象外です。
+
+    Args:
+        anomaly: dict または属性アクセス可能な異常オブジェクトです。
+
+    Returns:
+        大文字化した実効 severity 文字列を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    severity: str = get_anomaly_attr(anomaly, "severity").upper()
+    if get_anomaly_attr(anomaly, "type") not in _DOWNGRADE_ANOMALY_TYPES:
+        return severity
+    details: Any = anomaly.get("details") if isinstance(anomaly, dict) else getattr(anomaly, "details", None)
+    flags: list[Any] = details.get("flags", []) if isinstance(details, dict) else []
+    significant: list[Any] = [flag for flag in flags if flag not in _NON_SIGNIFICANT_FLAGS]
+    return "MEDIUM" if len(significant) < 2 else severity
 
 
 def format_feedback(anomalies: list[Any]) -> str:
@@ -252,6 +285,9 @@ def _handle_anomalies(anomalies: list[Any], data: dict[str, Any], text: str, con
     if not anomalies:
         log.debug("Clean -- no anomalies detected.")
         sys.exit(0)
+    for a in anomalies:
+        if isinstance(a, dict):
+            a["severity"] = _effective_severity(a)
     has_critical: bool = any(get_anomaly_attr(a, "severity").upper() in BLOCKING_SEVERITIES for a in anomalies)
     feedback: str = format_feedback(anomalies)
     if has_critical:

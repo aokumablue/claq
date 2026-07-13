@@ -1049,6 +1049,30 @@ def test_insights_security_monitor_handles_sdk_errors(
         ([{"severity": "CRITICAL", "type": "LEAK", "details": "bad"}], "claude", 2, True),
         ([{"severity": "MEDIUM", "type": "NOTICE", "details": "warn"}], "claude", 0, False),
         ([{"severity": "CRITICAL", "type": "LEAK", "details": "bad"}], "copilot", 0, True),
+        (
+            [
+                {
+                    "severity": "CRITICAL",
+                    "type": "TOOL_DESCRIPTION_DIVERGENCE",
+                    "details": {"flags": ["hidden_instructions_in_message"]},
+                }
+            ],
+            "claude",
+            0,
+            False,
+        ),
+        (
+            [
+                {
+                    "severity": "CRITICAL",
+                    "type": "TOOL_DESCRIPTION_DIVERGENCE",
+                    "details": {"flags": ["hidden_instructions_in_message", "semantic_divergence"]},
+                }
+            ],
+            "claude",
+            2,
+            True,
+        ),
     ],
 )
 def test_insights_security_monitor_writes_audit_and_handles_anomalies(
@@ -1108,6 +1132,46 @@ def test_insights_security_monitor_writes_audit_and_handles_anomalies(
         assert payload["permissionDecision"] == "deny"
         assert "Issues Detected" in payload["permissionDecisionReason"]
         assert stderr.getvalue() == ""
+
+
+@pytest.mark.parametrize(
+    ("anomaly", "expected"),
+    [
+        ({"severity": "CRITICAL", "type": "CREDENTIAL_EXPOSURE", "details": {"flags": ["x"]}}, "CRITICAL"),
+        (
+            {
+                "severity": "CRITICAL",
+                "type": "TOOL_DESCRIPTION_DIVERGENCE",
+                "details": {"flags": ["hidden_instructions_in_message"]},
+            },
+            "MEDIUM",
+        ),
+        (
+            {
+                "severity": "CRITICAL",
+                "type": "TOOL_DESCRIPTION_DIVERGENCE",
+                "details": {"flags": ["hidden_instructions_in_message", "semantic_divergence"]},
+            },
+            "CRITICAL",
+        ),
+        (
+            {
+                "severity": "CRITICAL",
+                "type": "TOOL_DESCRIPTION_DIVERGENCE",
+                "details": {"flags": ["goal_shift_after_tool_load", "hidden_instructions_in_message"]},
+            },
+            "MEDIUM",
+        ),
+        ({"severity": "CRITICAL", "type": "TOOL_DESCRIPTION_DIVERGENCE"}, "MEDIUM"),
+        ({"severity": "CRITICAL", "type": "TOOL_DESCRIPTION_DIVERGENCE", "details": "not-a-dict"}, "MEDIUM"),
+        (SimpleNamespace(severity="CRITICAL", type="TOOL_DESCRIPTION_DIVERGENCE", details=None), "MEDIUM"),
+    ],
+)
+def test_effective_severity_downgrades_only_tool_description_divergence(
+    anomaly: object, expected: str
+) -> None:
+    """TOOL_DESCRIPTION_DIVERGENCE の単一シグナルのみ MEDIUM に降格し、他 type・複数シグナルは維持される。"""
+    assert insights_security_monitor._effective_severity(anomaly) == expected
 
 
 def test_run_with_flags_build_env_and_resolve_command_branches(
