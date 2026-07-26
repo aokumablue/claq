@@ -35,6 +35,7 @@ command: /refactor
 `deps.from` / `deps.to` は `groups` 配列のインデックスを指す。
 
 `refactor-rollback` 運用規約:
+
 - `CAUTION` ファイルは自動適用せず最終要約に記録
 - `Skip Rules` は `{file, reason, required_action}` で出力し処理対象から除外
 - `deps_order` はトポロジカル順で解決し、復旧時は逆順で適用
@@ -53,7 +54,7 @@ command: /refactor
 
 ## ステップ4: simplify（並列, `refactor-orchestrator` → `bluecore:simplifier`）
 
-グループ化して**同時起動**。可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。高頻度発火（グループ数分の並列起動）となるため `bluecore:simplifier` 起動時は `model: "fable"` を明示指定し、既定 `opus` 固定によるコスト増を回避する。
+グループ化して**同時起動**。可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
 
 `--mode=simplify` 指定時はステップ4を実行後、ステップ7 final gate（テスト/lint 再実行）で終了。
 
@@ -64,6 +65,7 @@ simplify 全グループ完了後に開始。不要計算・重複I/O・N+1・�
 ## ステップ6: review + secure（並列, `bluecore:refactor-orchestrator` から委譲）
 
 以下を**同時起動**し結果を統合:
+
 - `bluecore:reviewer`: 品質・設計・保守性
 - `bluecore:security-auditor`: セキュリティ・脆弱性
 

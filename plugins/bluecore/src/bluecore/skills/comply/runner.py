@@ -16,7 +16,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..cli_runner import build_output_format_args, build_tools_args, detect_cli_binary
+from ..cli_runner import build_output_format_args, build_permission_args, build_tools_args, detect_cli_binary
 from .parser import ObservationEvent
 from .scenario_generator import Scenario
 
@@ -51,6 +51,7 @@ def _build_run_cmd(binary: str, scenario: Scenario, model: str, max_turns: int, 
         "--add-dir",
         str(sandbox_dir),
         *build_tools_args(binary, _ALLOWED_TOOLS),
+        *build_permission_args(binary, _ALLOWED_TOOLS),
         *build_output_format_args(binary, "stream-json"),
     ]
     if binary == "claude":
@@ -205,5 +206,4 @@ def _parse_stream_json(stdout: str) -> list[ObservationEvent]:
         )
 
     return sorted(events, key=lambda e: e.timestamp)
-
 

@@ -14,6 +14,21 @@ import subprocess
 
 from bluecore.lib.harness import detect_harness
 
+_COPILOT_TOOL_NAMES = {
+    "Read": "view",
+    "Write": "edit",
+    "Edit": "edit",
+    "Bash": "bash",
+    "Glob": "glob",
+    "Grep": "grep",
+    "Agent": "task",
+}
+_COPILOT_PERMISSION_NAMES = {
+    "Write": "write",
+    "Edit": "write",
+    "Bash": "shell",
+}
+
 
 def detect_cli_binary() -> str:
     """実行環境に応じて使用する LLM CLI バイナリ名を返す。"""
@@ -25,14 +40,36 @@ def detect_cli_binary() -> str:
 
 
 def build_tools_args(binary: str, tools: list[str]) -> list[str]:
-    """バイナリ別のツール許可フラグを組み立てる。
+    """バイナリ別にモデルが利用できるツールの制限フラグを組み立てる。
 
     claude: --allowedTools Read,Write,...
-    copilot: --allow-tool Read --allow-tool Write ...
+    copilot: --available-tools view edit ...
     """
     if binary == "claude":
         return ["--allowedTools", ",".join(tools)]
-    return [arg for tool in tools for arg in ("--allow-tool", tool)]
+    copilot_tools = _map_tools(tools, _COPILOT_TOOL_NAMES)
+    return ["--available-tools", *copilot_tools]
+
+
+def build_permission_args(binary: str, tools: list[str]) -> list[str]:
+    """バイナリ別に承認プロンプトを省略する権限フラグを組み立てる。"""
+    if binary == "claude":
+        return []
+    permissions = _map_tools(tools, _COPILOT_PERMISSION_NAMES, ignore_unmapped=True)
+    return ["--allow-tool", *permissions] if permissions else []
+
+
+def _map_tools(tools: list[str], mapping: dict[str, str], *, ignore_unmapped: bool = False) -> list[str]:
+    mapped: list[str] = []
+    for tool in tools:
+        if tool not in mapping:
+            if ignore_unmapped:
+                continue
+            raise ValueError(f"Unsupported tool for Copilot: {tool!r}")
+        value = mapping[tool]
+        if value not in mapped:
+            mapped.append(value)
+    return mapped
 
 
 def build_output_format_args(binary: str, fmt: str) -> list[str]:

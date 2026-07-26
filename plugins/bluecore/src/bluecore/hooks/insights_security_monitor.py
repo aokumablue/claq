@@ -82,8 +82,13 @@ def extract_content(data: dict[str, Any]) -> tuple[str, str]:
     Raises:
         例外は発生しません。
     """
-    tool_name: str = data.get("tool_name", "")
-    tool_input: dict[str, Any] = data.get("tool_input", {})
+    tool_name: str = str(data.get("tool_name", ""))
+    tool_input: Any = data.get("tool_input", {})
+
+    if isinstance(tool_input, str):
+        return tool_input, f"{tool_name.lower()}:raw"
+    if not isinstance(tool_input, dict):
+        return "", ""
 
     text: str = ""
     context: str = ""

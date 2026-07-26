@@ -39,6 +39,41 @@ import pytest
 
 from bluecore.skills import cli_runner
 
+from bluecore.skills.cli_runner import build_permission_args, build_tools_args
+
+
+def test_build_tools_args_for_claude() -> None:
+    assert build_tools_args("claude", ["Read", "Write"]) == ["--allowedTools", "Read,Write"]
+
+
+def test_build_tools_args_for_copilot_uses_available_tools() -> None:
+    assert build_tools_args("copilot", ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]) == [
+        "--available-tools",
+        "view",
+        "edit",
+        "bash",
+        "glob",
+        "grep",
+    ]
+
+
+def test_build_permission_args_for_copilot_uses_permission_patterns() -> None:
+    assert build_permission_args("copilot", ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]) == [
+        "--allow-tool",
+        "write",
+        "shell",
+    ]
+
+
+def test_build_permission_args_for_claude_is_empty() -> None:
+    assert build_permission_args("claude", ["Read", "Write"]) == []
+
+
+def test_build_tools_args_rejects_unknown_copilot_tool() -> None:
+    with pytest.raises(ValueError, match="Unsupported tool for Copilot"):
+        build_tools_args("copilot", ["rg"])
+
+
 # ========================
 # detect_cli_binary テスト
 # ========================
@@ -64,30 +99,6 @@ class TestDetectCliBinary:
         monkeypatch.delenv("CLAUDECODE", raising=False)
         monkeypatch.setattr(cli_runner.shutil, "which", lambda name: None)
         assert cli_runner.detect_cli_binary() == "claude"
-
-
-# ========================
-# build_tools_args テスト
-# ========================
-
-
-class TestBuildToolsArgs:
-    """build_tools_args のテスト。"""
-
-    def test_claude_uses_allowedtools_flag(self) -> None:
-        """ケース1: claude では --allowedTools にカンマ区切りで渡す。"""
-        result = cli_runner.build_tools_args("claude", ["Read", "Write"])
-        assert result == ["--allowedTools", "Read,Write"]
-
-    def test_copilot_uses_per_tool_flags(self) -> None:
-        """ケース2: copilot では --allow-tool をツールごとに繰り返す。"""
-        result = cli_runner.build_tools_args("copilot", ["Read", "Write"])
-        assert result == ["--allow-tool", "Read", "--allow-tool", "Write"]
-
-    def test_empty_tools_list(self) -> None:
-        """ツールリストが空のとき claude は空文字列、copilot は空リスト。"""
-        assert cli_runner.build_tools_args("claude", []) == ["--allowedTools", ""]
-        assert cli_runner.build_tools_args("copilot", []) == []
 
 
 # ========================
