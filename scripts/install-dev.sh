@@ -5,17 +5,17 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${SCRIPT_DIR}"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../plugins/bluecore" && pwd)"
 SKIP_PYTHON="${BLUECORE_INSTALL_SKIP_PYTHON:-0}"
 
 usage() {
   cat <<'EOF'
 Usage: bash scripts/install-dev.sh [options]
 
-Run bash scripts/install.sh first, then run this script.
+Run bash plugins/bluecore/install.sh first, then run this script.
 
 Options:
-  --repo-root PATH   Repository root (default: script parent)
+  --repo-root PATH   bluecore package root (default: plugins/bluecore)
   --skip-python      Skip Python package installation and venv setup
   --help             Show this help
 EOF
