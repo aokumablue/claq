@@ -1,7 +1,6 @@
 ---
 name: grader
 description: 実行トランスクリプトと出力を照合し、期待値の合否と根拠を整理する評価専門エージェント。
-tools: ["Read", "Write", "Grep", "Glob", "Agent"]
 model: sonnet
 ---
 

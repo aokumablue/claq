@@ -1,4 +1,4 @@
-"""エージェント Markdown ファイルに必須 frontmatter があるか検証する。"""
+"""エージェント Markdown ファイルの frontmatter を検証する。"""
 
 from __future__ import annotations
 
@@ -6,10 +6,9 @@ import argparse
 import re
 from pathlib import Path
 
-from bluecore.ci.ci_common import REPO_ROOT, emit_error, is_non_empty_string
+from bluecore.ci.ci_common import REPO_ROOT, emit_error
 
 DEFAULT_AGENTS_DIR = REPO_ROOT / "agents"
-REQUIRED_FIELDS = ["tools"]
 
 
 def extract_frontmatter(content: str) -> dict[str, str] | None:
@@ -38,7 +37,7 @@ def extract_frontmatter(content: str) -> dict[str, str] | None:
 
 
 def _validate_agent_file(file_path: Path) -> bool:
-    """単一のエージェント Markdown ファイルを検証する。
+    """単一のエージェント Markdown ファイルに frontmatter があるか検証する。
 
     Args:
         file_path: 検証するエージェントファイルのパス
@@ -60,13 +59,7 @@ def _validate_agent_file(file_path: Path) -> bool:
         emit_error(f"{file_path.name} - フロントマターがありません")
         return True
 
-    has_errors = False
-    for field in REQUIRED_FIELDS:
-        if not is_non_empty_string(frontmatter.get(field)):
-            emit_error(f"{file_path.name} - 必須フィールドが不足しています: {field}")
-            has_errors = True
-
-    return has_errors
+    return False
 
 
 def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR) -> int:

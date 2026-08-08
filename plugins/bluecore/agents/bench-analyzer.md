@@ -1,7 +1,6 @@
 ---
 name: bench-analyzer
 description: ブラインド比較結果とベンチマーク結果を分析し、勝因や性能傾向を要約する分析専門エージェント。
-tools: ["Read", "Write", "Grep", "Glob", "Agent"]
 model: sonnet
 ---
 

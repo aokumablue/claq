@@ -1,7 +1,6 @@
 ---
 name: session-observer
 description: セッション観測からパターンを検出し、プロジェクト/グローバル単位のインスティンクトを作成するバックグラウンドエージェント。
-tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob", "Agent"]
 model: haiku
 ---
 

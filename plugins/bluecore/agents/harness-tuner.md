@@ -1,7 +1,6 @@
 ---
 name: harness-tuner
 description: ローカルエージェントハーネス設定 分析・改善。信頼性/コスト/スループット最適化。
-tools: ["Read", "Grep", "Glob", "Bash", "Edit", "Agent"]
 model: sonnet
 ---
 

@@ -74,11 +74,10 @@ def test_validate_agents_handles_valid_bom_crlf_and_errors(
 ) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "planner.md").write_text("\ufeff---\r\nmodel: sonnet\r\ntools: bash\r\n---\r\n# Planner\r\n", encoding="utf-8")
+    (agents_dir / "planner.md").write_text("\ufeff---\r\nmodel: sonnet\r\n---\r\n# Planner\r\n", encoding="utf-8")
     (agents_dir / "missing_frontmatter.md").write_text("plain text", encoding="utf-8")
-    (agents_dir / "missing_fields.md").write_text("---\nmodel: sonnet\n---\n", encoding="utf-8")
     broken_file = agents_dir / "broken.md"
-    broken_file.write_text("---\nmodel: sonnet\ntools: bash\n---\n", encoding="utf-8")
+    broken_file.write_text("---\nmodel: sonnet\n---\n", encoding="utf-8")
 
     original_read_text = Path.read_text
 
@@ -92,7 +91,6 @@ def test_validate_agents_handles_valid_bom_crlf_and_errors(
     assert validate_agents.validate_agents(agents_dir) == 1
     stderr = capsys.readouterr().err
     assert "フロントマターがありません" in stderr
-    assert "必須フィールドが不足しています: tools" in stderr
     assert "ファイルの読み取りに失敗しました" in stderr
 
 
@@ -104,17 +102,17 @@ def test_validate_agents_skips_missing_dir(tmp_path: Path, capsys: pytest.Captur
 def test_validate_agents_accepts_valid_bom_crlf_file(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "planner.md").write_text("\ufeff---\r\nmodel: opus\r\ntools: bash\r\n---\r\n# Planner\r\n", encoding="utf-8")
+    (agents_dir / "planner.md").write_text("\ufeff---\r\nmodel: opus\r\n---\r\n# Planner\r\n", encoding="utf-8")
 
     assert validate_agents.validate_agents(agents_dir) == 0
 
 
 def test_validate_agents_allows_missing_model_and_inherit(tmp_path: Path) -> None:
-    """model は任意: 未指定でも model: inherit でも tools があれば PASS する。"""
+    """model は任意: 未指定でも model: inherit でも PASS する。"""
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "no_model.md").write_text("---\ntools: bash\n---\n# No model\n", encoding="utf-8")
-    (agents_dir / "inherit_model.md").write_text("---\ntools: bash\nmodel: inherit\n---\n# Inherit\n", encoding="utf-8")
+    (agents_dir / "no_model.md").write_text("---\nname: agent\n---\n# No model\n", encoding="utf-8")
+    (agents_dir / "inherit_model.md").write_text("---\nmodel: inherit\n---\n# Inherit\n", encoding="utf-8")
 
     assert validate_agents.validate_agents(agents_dir) == 0
 
@@ -243,7 +241,7 @@ def test_validator_main_entrypoints(
 
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "alpha.md").write_text("---\nmodel: sonnet\ntools: bash\n---\n", encoding="utf-8")
+    (agents_dir / "alpha.md").write_text("---\nmodel: sonnet\n---\n", encoding="utf-8")
 
     commands_dir = tmp_path / "commands"
     commands_dir.mkdir()
@@ -304,8 +302,8 @@ def test_validator_main_entrypoints(
 def test_validate_agents_accepts_quoted_model_values(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "double.md").write_text('---\nmodel: "sonnet"\ntools: bash\n---\n', encoding="utf-8")
-    (agents_dir / "single.md").write_text("---\nmodel: 'opus'\ntools: bash\n---\n", encoding="utf-8")
+    (agents_dir / "double.md").write_text('---\nmodel: "sonnet"\n---\n', encoding="utf-8")
+    (agents_dir / "single.md").write_text("---\nmodel: 'opus'\n---\n", encoding="utf-8")
 
     assert validate_agents.validate_agents(agents_dir) == 0
 
@@ -324,9 +322,9 @@ def test_validate_hooks_main_without_schema_path(tmp_path: Path, capsys: pytest.
 def test_validate_agents_accepts_quoted_model_with_spaces(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "leading.md").write_text('---\nmodel: " sonnet"\ntools: bash\n---\n', encoding="utf-8")
-    (agents_dir / "trailing.md").write_text('---\nmodel: "opus "\ntools: bash\n---\n', encoding="utf-8")
-    (agents_dir / "both.md").write_text("---\nmodel: ' haiku '\ntools: bash\n---\n", encoding="utf-8")
+    (agents_dir / "leading.md").write_text('---\nmodel: " sonnet"\n---\n', encoding="utf-8")
+    (agents_dir / "trailing.md").write_text('---\nmodel: "opus "\n---\n', encoding="utf-8")
+    (agents_dir / "both.md").write_text("---\nmodel: ' haiku '\n---\n", encoding="utf-8")
 
     assert validate_agents.validate_agents(agents_dir) == 0
 

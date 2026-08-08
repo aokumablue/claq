@@ -18,7 +18,19 @@ import bluecore.ci.validate_skills as validate_skills
 def test_validate_agents_accepts_valid_agent(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "planner.md").write_text("---\nmodel: sonnet\ntools: bash\n---\n# Planner\n", encoding="utf-8")
+    (agents_dir / "planner.md").write_text("---\nmodel: sonnet\n---\n# Planner\n", encoding="utf-8")
+
+    assert validate_agents.validate_agents(agents_dir) == 0
+
+
+def test_validate_agents_allows_a_custom_agent_without_a_tool_allowlist(tmp_path: Path) -> None:
+    """tools frontmatter が無いカスタムエージェントも許容する。"""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "agent.md").write_text(
+        "---\nname: agent\ndescription: A portable custom agent.\n---\n",
+        encoding="utf-8",
+    )
 
     assert validate_agents.validate_agents(agents_dir) == 0
 

@@ -24,7 +24,7 @@ command: /review
 
 ## READ-ONLY 制約（絶対厳守）
 
-適用範囲はレビュー実行フェーズ（ステップ1〜3）と `bluecore:reviewer` / `bluecore:security-auditor`。この範囲ではファイルを変更しない。
+適用範囲はレビュー実行フェーズ（ステップ1〜3）と `bluecore:reviewer` / `bluecore:security-auditor`。この範囲ではファイルを変更しない。この制約はエージェント定義のツール権限剥奪による技術的強制ではなく、本コマンド・各エージェントへのプロンプト指示として厳守する（Claude Code のツール許可機構ではなく、エージェント自身の規律に依存する）。
 
 - Edit / Write / MultiEdit、`git apply` / `sed -i` / `awk -i` 等の書き換え禁止
 - `bluecore:reviewer` / `bluecore:security-auditor` は起動から完了まで同制約
