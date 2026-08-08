@@ -1,1 +1,0 @@
-"""stocktake skill package."""

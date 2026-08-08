@@ -543,15 +543,25 @@ bluecore プラグイン(0.9.17) の全 agents/commands/skills/hooks 起動検�
 | 4 | refactor-prep 出力契約（テキストのみ）が下流3ファイルの JSON 前提と不一致 | 修正済み（JSON 契約を追加、`refactor-rollback/SKILL.md` の入力契約と一致） | `7e7a4b7` |
 | 5 | simplifier 高頻度発火が既定 `opus` 固定でコスト増 | 修正済み（`refactor.md` / `loop-dev/SKILL.md` の呼び出し2箇所に `model: "fable"` 明示を追記） | `7e7a4b7` |
 | 6 | tdd-writer.md の tools に Glob 欠落 | 修正済み | `7e7a4b7` |
-| 7 | comply/stocktake が dead code 疑い（要判別） | **決定: 現状維持**（11.2 参照） | 記録のみ（本 commit） |
+| 7 | comply/stocktake が dead code 疑い（要判別） | **決定: 現状維持** → **0.9.21 で撤回・削除**（11.2 参照） | 記録のみ（本 commit）／削除は 0.9.21 |
 | 8 | insights の bytes→str 変換誤検知（false-positive ブロック） | 修正済み（11.3 参照） | 本 commit |
 | 9 | harness_audit の repo チェック8件が JS（Node.js 実装）前提で Python 実装と不整合 | 修正済み（Python 構造ベースへ書き換え・実リポジトリ pass=True の回帰テスト追加・モジュールカバレッジ100%） | `b331cdf` |
 | 10 | instinct.md の承認ゲート不備 | 対象外（別タスク。本セッションでは着手しない） | - |
 | 11 | mem `stats` 実装時の対象ストア未確定 | **決定: 両方**（11.4 参照） | 記録のみ（本 commit） |
 
-### 11.2 item7 決定: comply/stocktake は現状維持
+### 11.2 item7 決定: comply/stocktake は現状維持（0.9.21 で撤回・削除）
 
-`src/bluecore/skills/comply/` `src/bluecore/skills/stocktake/` はいずれも `tests/skills/comply/`（7ファイル）・`tests/skills/stocktake/`（3ファイル）に対応する既存テストが確認でき、能動的にテストされている実装であり dead code ではない。削除せず現状維持とする。
+**当初決定（本セッション）**: `src/bluecore/skills/comply/` `src/bluecore/skills/stocktake/` はいずれも `tests/skills/comply/`（7ファイル）・`tests/skills/stocktake/`（3ファイル）に対応する既存テストが確認でき、能動的にテストされている実装であり dead code ではない。削除せず現状維持とする。
+
+**撤回（0.9.21・`refactor/slim-plugin`）**: 上記の論拠「対応するテストが存在するので dead code ではない」は循環論法だったと判明したため撤回する。`pyproject.toml` の `fail_under = 100` 下では、デッドモジュールであっても削除するまでカバレッジ要件によりテストが維持され続ける（＝テストの存在自体は当該時点でのカバレッジ要件遵守の帰結であり、機能が使われている証拠にはならない）。加えて本文 `:202` と `:231`（本レポート §5 相当）は当時から「dead code か未公開機能かは本調査範囲では判別不能」「別途要確認」と留保しており、§11.2 の断定的な「現状維持」はその留保と整合していなかった。
+
+0.9.21 のデッドコード削除作業で改めて調査した結果、以下を確認した。
+
+- 13 本ある `SKILL.md` のいずれにも `comply` / `stocktake` の記載がなく、起動導線（スキルとしての呼び出し経路）が存在しない
+- `hooks.json` / `install.sh` / `commands/*.md` / `agents/*.md` のいずれからも参照がない（grep 全件該当なし。テスト以外）
+- comply の機能は `skills/run_eval.py` + `run_loop.py` + `aggregate_benchmark.py` と grader/comparator エージェントに、stocktake は `/dashboard` + `learn observe` にそれぞれ重複している
+
+これらを踏まえ、`src/bluecore/skills/comply/` `src/bluecore/skills/stocktake/` および対応するテスト（`tests/skills/comply/` 7ファイル・`tests/skills/stocktake/` 3ファイル）を削除した（コミットは 0.9.21 側の refactor コミット参照）。
 
 ### 11.3 item8 状況: 実装・検証済み
 
