@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import subprocess
 import sys
 import tempfile
@@ -18,9 +19,46 @@ from bluecore.hooks.output_adapter import adapt_context_output, emit_block
 
 MAX_STDIN_BYTES = 1024 * 1024
 
+# hooks は Claude Code が spawn 直後に stdin へ JSON を書き込むため、
+# 最初のバイト到着まで 2 秒あれば十分な余裕がある。
+# stdin リダイレクト漏れ（パイプ未接続のまま open）での無期限ブロックを防ぐ。
+# launcher がインプロセス実行になったことで、この guard は各フックが
+# 自分で stdin を読む read_raw_stdin* の先頭に置く（旧: launcher._read_stdin）。
+STDIN_FIRST_BYTE_TIMEOUT = 2.0
+
+
+def _stdin_ready() -> bool:
+    """stdin が TTY でなく、最初のバイトが時間内に届くかを判定します。
+
+    Args:
+        なし
+
+    Returns:
+        読み取りを続行してよければ True。TTY 接続時、または
+        STDIN_FIRST_BYTE_TIMEOUT 秒以内に最初のバイトが到着しない場合は
+        False（後者は stderr に警告を出す）。
+
+    Raises:
+        例外は発生しません。
+    """
+    if sys.stdin.isatty():
+        return False
+
+    ready, _, _ = select.select([sys.stdin], [], [], STDIN_FIRST_BYTE_TIMEOUT)
+    if not ready:
+        write_stderr(
+            "WARNING: stdin から入力が届かないため空入力で続行します（stdin リダイレクト漏れの可能性）\n"
+        )
+        return False
+    return True
+
 
 def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
     """標準入力から生のテキストをバイト単位の上限つきで読み取ります。
+
+    TTY 接続時、または最初のバイトが STDIN_FIRST_BYTE_TIMEOUT 秒以内に
+    届かない場合は空文字列を返します（stdin リダイレクト漏れでの無期限
+    ブロックを防ぐ）。
 
     Args:
         max_bytes: 読み取る最大バイト数です。
@@ -31,6 +69,8 @@ def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
     Raises:
         例外は発生しません。
     """
+    if not _stdin_ready():
+        return ""
     stdin_buffer = getattr(sys.stdin, "buffer", None)
     if stdin_buffer is not None:
         raw_bytes = stdin_buffer.read(max_bytes)
@@ -39,6 +79,38 @@ def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
         # 文字数 read ではバイト上限を最大 4 倍超過しうるためバイト換算で切り詰める。
         raw_bytes = sys.stdin.read(max_bytes).encode("utf-8", errors="replace")
     return raw_bytes[:max_bytes].decode("utf-8", errors="replace")
+
+
+def read_raw_stdin_with_truncation(max_bytes: int = MAX_STDIN_BYTES) -> tuple[str, bool]:
+    """標準入力を読み取り、切り捨ての有無を返します。
+
+    TTY 接続時、または最初のバイトが STDIN_FIRST_BYTE_TIMEOUT 秒以内に
+    届かない場合は ("", False) を返します（stdin リダイレクト漏れでの
+    無期限ブロックを防ぐ）。
+
+    Args:
+        max_bytes: 読み取る最大バイト数です。
+
+    Returns:
+        読み取った文字列と、切り捨てが発生したかどうかのタプルを返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    if not _stdin_ready():
+        return "", False
+    stdin_buffer = getattr(sys.stdin, "buffer", None)
+    if stdin_buffer is not None:
+        raw_bytes = stdin_buffer.read(max_bytes + 1)
+    else:
+        # io.StringIO など .buffer を持たない stdin を想定したフォールバック。
+        # バイト上限を大きく超える無制限 read を避けるため、最大 +1 文字だけ読む。
+        raw_text = sys.stdin.read(max_bytes + 1)
+        raw_bytes = raw_text.encode("utf-8", errors="replace")
+    truncated = len(raw_bytes) > max_bytes
+    if truncated:
+        raw_bytes = raw_bytes[:max_bytes]
+    return raw_bytes.decode("utf-8", errors="replace"), truncated
 
 
 def parse_json_object(raw: str) -> dict[str, Any] | None:
@@ -122,35 +194,6 @@ def basename(path: str) -> str:
     return Path(path).name
 
 
-# SessionStart フックが stdout に出力すべき hookSpecificOutput を持つ hook_id 集合。
-# run_with_flags は子の stdout が空のとき、この集合に含まれる hook_id のみ
-# フォールバック JSON を出力する。新規 SessionStart hook を追加する際はここに追加する。
-SESSION_START_HOOK_IDS: frozenset[str] = frozenset(
-    {
-        "session:start",
-        "session:mem:setup",
-        "session:mem:context",
-        "session:mem:record-project-profile",
-    }
-)
-
-
-# hooks.json で "async": true 指定されている run_with_flags 経由の hook_id 集合。
-# Claude Code はホスト側で非同期実行するが、Codex 等 async 未サポートのハーネスでは
-# run_with_flags が子プロセスを detach してフックを即時終了させる。
-# hooks.json の async エントリを増減する際はここも更新する。
-BACKGROUND_HOOK_IDS: frozenset[str] = frozenset(
-    {
-        "pre:observe",
-        "post:quality-gate",
-        "stop:session-end",
-        "stop:evaluate-session",
-        "session:end:marker",
-        "session:mem:end",
-    }
-)
-
-
 # detach 起動した子の実行時間上限（秒）。start_new_session=True の子はハーネスの
 # timeout で kill されないため、coreutils timeout で自決させる。hooks.json の
 # 最長エントリ（600 秒）より先に終わるよう 590 とする。
@@ -222,8 +265,9 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
 def emit_block_output(reason: str) -> int:
     """ツール実行ブロックをハーネス別プロトコルで stdout/stderr に書き出す。
 
-    launcher から直接起動されるブロック系フック（run_with_flags の exit code
-    変換を経由しないもの）はこのヘルパを使うこと。
+    ツール実行をブロックするフックは終了コードを直接返さず、このヘルパの
+    戻り値を返すこと（Claude/Codex: stderr + exit 2、Copilot: deny JSON +
+    exit 0 へ変換される）。
 
     Args:
         reason: ブロック理由（ユーザー / エージェントに提示される）。
@@ -295,6 +339,25 @@ def emit_user_prompt_submit_output(additional_context: str) -> str:
         例外は発生しません。
     """
     return _emit_hook_specific_output("UserPromptSubmit", additional_context)
+
+
+def emit_post_tool_use_output(additional_context: str) -> str:
+    """PostToolUse 用のフック出力 JSON 文字列を返す。
+
+    ハーネスに応じたフォーマットを output_adapter 経由で選択する。
+
+    Args:
+        additional_context: コンテキストに注入する追加文字列。
+
+    Returns:
+        ハーネス別フォーマットの JSON 文字列。
+        Claude Code: hookSpecificOutput ラッパー形式。
+        Copilot CLI: {"additionalContext": "..."} トップレベル形式。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _emit_hook_specific_output("PostToolUse", additional_context)
 
 
 def print_session_start_output(additional_context: str = "") -> None:

@@ -11,15 +11,12 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from pathlib import Path
 
 from bluecore.hooks.hook_common import emit_session_start_output, read_raw_stdin
-from bluecore.hooks.slim_fallback import inject_slim_skill
 from bluecore.lib.core_utils import (
     ensure_dir,
     find_files,
-    get_git_user_name,
     get_learned_skills_dir,
     get_session_search_dirs,
     get_sessions_dir,
@@ -32,7 +29,6 @@ from bluecore.lib.project_detect import ProjectInfo, detect_project
 from bluecore.lib.sanitize import sanitize_log_value
 from bluecore.lib.settings import extract_coverage_hint_lines
 from bluecore.lib.slim_text import compact_line
-from bluecore.lib.subprocess_utils import check_output_text
 
 _SUMMARY_START = "<!-- bluecore:SUMMARY:START -->"
 _SUMMARY_END = "<!-- bluecore:SUMMARY:END -->"
@@ -83,118 +79,6 @@ def _filter_session_summary(content: str, max_length: int = 2000) -> str:
     if len(result) > max_length:
         result = compact_line(result, max_length - 3)  # -3 to account for "..." suffix
     return result
-
-
-def _get_git_info() -> dict:
-    """現在ディレクトリの git 状態を取得する。失敗時は空の値を返す。"""
-    info: dict = {"branch": None, "commit_hash": None, "uncommitted_count": 0}
-
-    # git 管理下かを事前判定し、管理外なら 3 回の失敗ログを抑制する
-    try:
-        inside = check_output_text(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            timeout=5,
-        ).strip()
-        if inside != "true":
-            log("[SessionStart] not inside a git work tree; skipping git lookups")
-            return info
-    except (OSError, subprocess.SubprocessError):
-        log("[SessionStart] git not available or not a repository; skipping git lookups")
-        return info
-
-    try:
-        info["branch"] = check_output_text(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            timeout=5,
-        ).strip()
-    except (OSError, subprocess.SubprocessError) as e:
-        log(f"[SessionStart] git branch lookup failed: {sanitize_log_value(str(e))}")
-    try:
-        info["commit_hash"] = check_output_text(
-            ["git", "rev-parse", "--short=12", "HEAD"],
-            timeout=5,
-        ).strip()
-    except (OSError, subprocess.SubprocessError) as e:
-        log(f"[SessionStart] git commit lookup failed: {sanitize_log_value(str(e))}")
-    try:
-        status = check_output_text(
-            ["git", "status", "--porcelain"],
-            timeout=5,
-        )
-        info["uncommitted_count"] = len([line for line in status.splitlines() if line.strip()])
-    except (OSError, subprocess.SubprocessError) as e:
-        log(f"[SessionStart] git status lookup failed: {sanitize_log_value(str(e))}")
-    return info
-
-
-def _compute_scope_hint(languages: list[str], frameworks: list[str]) -> str:
-    """プロジェクトの技術スタックから instinct の推奨スコープを計算する。"""
-    project_specific = {"django", "rails", "sinatra", "laravel", "spring", "next.js", "nextjs", "nuxt", "angular", "fastapi"}
-    if any(f.lower() in project_specific for f in frameworks):
-        return "project"
-    generic_only = {"shell", "powershell", "bash"}
-    if languages and all(lang.lower() in generic_only for lang in languages):
-        return "global"
-    return "project"
-
-
-def _log_git_info(git_info: dict) -> None:
-    """取得した git 情報をログへ出力する。ブランチが未取得の場合は何もしない。"""
-    if git_info["branch"]:
-        log(
-            "[SessionStart] git branch="
-            f"{sanitize_log_value(str(git_info['branch']))} "
-            f"commit={sanitize_log_value(str(git_info['commit_hash']))} "
-            f"uncommitted={git_info['uncommitted_count']}"
-        )
-
-
-def _build_project_profile(project_info: object) -> object:
-    """detect_project の戻り値から ProjectProfile オブジェクトを生成して返す。"""
-    import time
-
-    from bluecore.mem.database import ProjectProfile
-
-    cwd = Path.cwd()
-    languages: list[str] = getattr(project_info, "languages", []) or []
-    frameworks: list[str] = getattr(project_info, "frameworks", []) or []
-    primary_language: str | None = getattr(project_info, "primary_language", None)
-    scope_hint = _compute_scope_hint(languages, frameworks)
-    now = int(time.time())
-    git_info = _get_git_info()
-    _log_git_info(git_info)
-    return ProjectProfile(
-        project=cwd.name,
-        detected_at_epoch=now,
-        last_updated_epoch=now,
-        origin_user=get_git_user_name(),
-        project_path=str(cwd),
-        languages=languages,
-        frameworks=frameworks,
-        primary_language=primary_language,
-        scope_hint=scope_hint,
-    )
-
-
-def _save_project_profile(project_info: object) -> None:
-    """検出したプロジェクト情報を mem の project_profiles に保存する。"""
-    try:
-        from bluecore.mem.database import Database
-        from bluecore.mem.settings import Settings
-
-        profile = _build_project_profile(project_info)
-        settings = Settings.load()
-        db = Database(settings.db_path)
-        try:
-            db.upsert_project_profile(profile)
-        finally:
-            db.close()
-        log(
-            "[SessionStart] Project profile saved: "
-            f"{sanitize_log_value(profile.project)} (scope_hint={sanitize_log_value(profile.scope_hint)})"
-        )
-    except Exception as e:
-        log(f"[SessionStart] Project profile save error: {sanitize_log_value(str(e))}")
 
 
 def _import_adrs_and_instincts() -> None:
@@ -345,10 +229,7 @@ def run(_raw_input: str) -> str:
     project_info = detect_project(Path.cwd())
     additional_context_parts.extend(_collect_project_context(project_info))
 
-    _save_project_profile(project_info)
     _import_adrs_and_instincts()
-
-    additional_context_parts.extend(inject_slim_skill())
 
     additional_context = "\n\n".join(additional_context_parts)
     return emit_session_start_output(additional_context)

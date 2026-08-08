@@ -19,7 +19,6 @@ log = _get_logger("IMPORT")
 # --- パス定義 ---
 
 BLUECORE_DIR = get_bluecore_dir()
-BLUECORE_STATE_DIR = get_bluecore_dir() / "state"
 
 
 def _project_dirs() -> list[Path]:
@@ -274,7 +273,7 @@ def _get_project_identifier(repo_root: Path) -> str:
 
 
 def _import_global_event_logs(db: Database, origin_user: str) -> int:
-    """グローバルスコープのイベントログ（observations, skill-runs, costs）を取り込む。
+    """グローバルスコープのイベントログ（observations, costs）を取り込む。
 
     Args:
         db: データベース接続
@@ -287,9 +286,6 @@ def _import_global_event_logs(db: Database, origin_user: str) -> int:
     global_obs = BLUECORE_DIR / "observations.jsonl"
     if global_obs.exists():
         count += _import_jsonl_events(db, global_obs, "observation", None, origin_user)
-    skill_runs = BLUECORE_STATE_DIR / "skill-runs.jsonl"
-    if skill_runs.exists():
-        count += _import_jsonl_events(db, skill_runs, "skill-run", None, origin_user)
     costs_file = BLUECORE_DIR / "logs" / "costs.jsonl"
     if costs_file.exists():
         count += _import_jsonl_events(db, costs_file, "cost", None, origin_user)
@@ -330,7 +326,7 @@ def _import_project_event_logs(
 
 
 def import_event_logs(db: Database, origin_user: str, project_id: str | None = None) -> int:
-    """イベントログ（observations, skill-runs, costs）を mem に取り込む。
+    """イベントログ（observations, costs）を mem に取り込む。
 
     Args:
         db: データベース接続

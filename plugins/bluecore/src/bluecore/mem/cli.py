@@ -14,8 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from bluecore.hooks.hook_common import print_session_start_output
 from bluecore.lib.core_utils import get_git_user_name
-from bluecore.mem import cli_dashboard_handlers as _dashboard_handlers
-from bluecore.mem import cli_digest_handlers as _digest_handlers
+from bluecore.mem import cli_import_handlers as _import_handlers
 from bluecore.mem import cli_record_handlers as _record_handlers
 from bluecore.mem import cli_search_handlers as _search_handlers
 from bluecore.mem import cli_session_handlers as _session_handlers
@@ -31,7 +30,7 @@ log = _get_logger("CLI")
 # SessionStart フックで JSON 出力が必須なコマンドの集合。
 # main() のフォールバック保証とエラー時の早期 return に使用する。
 _SESSION_START_COMMANDS: frozenset[str] = frozenset(
-    {"setup", "context", "record-project-profile"}
+    {"setup", "context"}
 )
 # フックから呼ばれるが失敗しても exit_code=0 を維持すべきコマンド（非0 を返すとフックエラーになるため）。
 _BENIGN_COMMANDS: frozenset[str] = frozenset(
@@ -275,25 +274,6 @@ def _handle_reembed(settings: Settings) -> None:
     _session_handlers.handle_reembed(settings, deps)
 
 
-def _handle_search_structured(settings: Settings, stdin_data: dict) -> None:
-    """search-structured コマンド: フィルタ付き構造化検索を実行する。"""
-    _search_handlers.handle_search_structured(settings, stdin_data, _search_deps())
-
-
-def _apply_structured_filters(
-    db: Database,
-    candidate_ids: list[int],
-    filt: _search_handlers.StructuredFilter,
-) -> list[int]:
-    """候補 chunk_id を構造化フィルタで絞り込む。"""
-    return _search_handlers.apply_structured_filters(db, candidate_ids, filt)
-
-
-def _parse_date_to_epoch(value: int | str | None) -> int | None:
-    """日付文字列または epoch を epoch 秒に変換する。"""
-    return _search_handlers.parse_date_to_epoch(value)
-
-
 def _record_deps() -> _record_handlers.RecordDeps:
     """record系ハンドラへ渡す依存性をまとめて構築する。"""
     return _record_handlers.RecordDeps(
@@ -329,13 +309,12 @@ def _render_adaptive_context(db: Database, results: list[SearchResult], max_toke
 
 
 def _format_fields(
-    user_prompt: str,
     tool_names: list[str],
     files_modified: list[str],
     content: str,
 ) -> str:
-    """プロンプト・ツール・変更ファイル・内容を表示用フィールド文字列に整形する。"""
-    return _search_handlers.format_fields(user_prompt, tool_names, files_modified, content)
+    """ツール・変更ファイル・内容を表示用フィールド文字列に整形する。"""
+    return _search_handlers.format_fields(tool_names, files_modified, content)
 
 
 def _format_chunk_from_result(result: SearchResult) -> str:
@@ -358,11 +337,6 @@ def _truncate(text: str, max_len: int) -> str:
     return _search_handlers.truncate(text, max_len)
 
 
-def _slim_prompt(text: str, max_len: int = 160) -> str:
-    """プロンプト文字列を表示用に簡略化する。"""
-    return _search_handlers.slim_prompt(text, max_len=max_len)
-
-
 def _slim_context_content(text: str, *, max_prose_lines: int = 6, max_prose_line_length: int = 160) -> str:
     """コンテキスト本文を行数・行長の上限で簡略化する。"""
     return _search_handlers.slim_context_content(
@@ -372,27 +346,9 @@ def _slim_context_content(text: str, *, max_prose_lines: int = 6, max_prose_line
     )
 
 
-def _count_lines(path: Path) -> int:
-    """ファイルの行数を数える。"""
-    return _dashboard_handlers.count_lines(path)
-
-
-def _collect_project_overview() -> dict:
-    """ダッシュボード用にプロジェクト概況を収集する。"""
-    return _dashboard_handlers.collect_project_overview(
-        count_lines_fn=_count_lines,
-        log=log,
-    )
-
-
-def _collect_skill_health_overview(options: dict[str, object]) -> dict[str, object]:
-    """ダッシュボード用にスキル健全性の概況を収集する。"""
-    return _dashboard_handlers.collect_skill_health_overview(options, log=log)
-
-
 def _handle_import(settings: Settings, stdin_data: dict) -> None:
     """import コマンド: 外部データ（instincts/adrs/events）を mem に取り込む。"""
-    _dashboard_handlers.handle_import(
+    _import_handlers.handle_import(
         settings,
         stdin_data,
         open_db=_open_db,
@@ -400,40 +356,9 @@ def _handle_import(settings: Settings, stdin_data: dict) -> None:
     )
 
 
-def _handle_dashboard(settings: Settings, stdin_data: dict) -> None:
-    """dashboard コマンド: SQLite データから静的 HTML ダッシュボードを生成する。"""
-    deps = _dashboard_handlers.DashboardDeps(
-        open_db=_open_db,
-        collect_project_overview_fn=_collect_project_overview,
-        collect_skill_health_overview_fn=_collect_skill_health_overview,
-    )
-    _dashboard_handlers.handle_dashboard(settings, stdin_data, deps)
-
-
 def _handle_record_interaction(settings: Settings, stdin_data: dict) -> None:
     """record-interaction コマンド: ユーザー/AI のやり取りを interaction_logs に記録する。"""
     _record_handlers.handle_record_interaction(settings, stdin_data, _record_deps())
-
-
-def _handle_record_project_profile(settings: Settings, stdin_data: dict) -> str:
-    """record-project-profile コマンド: プロジェクトの技術スタックを project_profiles に upsert する。"""
-    return _record_handlers.handle_record_project_profile(settings, stdin_data, _record_deps())
-
-
-def _handle_get_project_profile(settings: Settings, stdin_data: dict) -> None:
-    """get-project-profile コマンド: project_profiles から技術スタックを取得する。"""
-    _record_handlers.handle_get_project_profile(settings, stdin_data, _record_deps())
-
-
-def _handle_record_item_run(settings: Settings, stdin_data: dict) -> None:
-    """record-item-run コマンド: スキル/コマンド/エージェントの実行を mem_item_runs に記録する。"""
-    _record_handlers.handle_record_item_run(settings, stdin_data, _record_deps())
-
-
-def _handle_digest_backfill(settings: Settings, stdin_data: dict) -> None:
-    """digest-backfill コマンド: 既存セッションの session digest を遡及生成する。"""
-    deps = _digest_handlers.DigestBackfillDeps(open_db=_open_db, log=log)
-    _digest_handlers.handle_digest_backfill(settings, stdin_data, deps)
 
 
 _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
@@ -446,15 +371,9 @@ _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "session-end": _handle_session_end,
     "compact": lambda settings, stdin_data: (_handle_compact(settings) or None),
     "reembed": lambda settings, stdin_data: (_handle_reembed(settings) or None),
-    "search-structured": _handle_search_structured,
     "record": _handle_record,
     "import": _handle_import,
-    "dashboard": _handle_dashboard,
     "record-interaction": _handle_record_interaction,
-    "record-project-profile": _handle_record_project_profile,
-    "get-project-profile": _handle_get_project_profile,
-    "record-item-run": _handle_record_item_run,
-    "digest-backfill": _handle_digest_backfill,
 }
 
 
@@ -469,7 +388,6 @@ Commands:
   setup              Initialize the local mem database
   context            Build <mem-context> from the local database (reads JSON from stdin)
   search             Search the local database (reads JSON from stdin)
-  search-structured  Structured search with filters (tool_name, file_pattern, date_range)
   record             Explicitly record an event from commands/skills/agents
   session-init       Initialize a session and inject adaptive memory (reads JSON from stdin)
   observe            Store a tool-use chunk (reads JSON from stdin)
@@ -477,24 +395,14 @@ Commands:
   compact            Execute memory compaction
   reembed            Recreate the vector table and re-embed all chunks (after model change)
   import             Import external data (instincts, adrs, events) to mem
-  dashboard          Generate a static HTML dashboard from local SQLite data
   record-interaction     Record a user/AI interaction pair to interaction_logs
-  record-project-profile Upsert project tech stack to project_profiles
-  get-project-profile    Get project tech stack from project_profiles
-  record-item-run        Record a skill/command/agent execution to mem_item_runs
-  digest-backfill        Backfill session digests for existing sessions (reads JSON from stdin)
-
-search-structured Input (JSON):
-  {"query": "...", "project": "...", "tool_name": "Edit", "file_pattern": "*.py", "date_from": "2024-01-01", "date_to": "2024-12-31"}
 
 record Input (JSON):
-  {"event_type": "review|plan|audit|...", "content": "...", "user_prompt": "...", "metadata": {"files_read": [], "files_modified": []}}
+  {"event_type": "review|plan|audit|...", "content": "...", "metadata": {"files_read": [], "files_modified": []}}
 
 import Input (JSON):
   {"types": ["instincts", "adrs", "events"], "repo_root": "/path/to/repo"}
 
-digest-backfill Input (JSON):
-  {"force": false, "project": null, "limit": null}
 """
 
 

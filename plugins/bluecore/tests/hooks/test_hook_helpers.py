@@ -22,28 +22,28 @@ from bluecore.hooks import (
     config_protection as config_protection,
 )
 from bluecore.hooks import (
-    doc_file_warning as doc_file_warning,
-)
-from bluecore.hooks import (
     session_end as session_end,
 )
 from bluecore.hooks import (
     session_start as session_start,
 )
-from bluecore.hooks import (
-    suggest_compact as suggest_compact,
-)
 from bluecore.hooks.hook_common import is_truthy
 
 
-def test_doc_file_warning_flags_ad_hoc_documents() -> None:
-    assert doc_file_warning.is_suspicious_doc_path("notes/TODO.md")
-    assert doc_file_warning.is_suspicious_doc_path("scratch/WIP.txt")
-    assert not doc_file_warning.is_suspicious_doc_path("docs/TODO.md")
-    assert not doc_file_warning.is_suspicious_doc_path("commands/plan.md")
+def _patch_stdin_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    """hook_common.read_raw_stdin* が使う select を常に ready 扱いにする。
+
+    io.StringIO は実 fd を持たないため、select.select をそのまま通すと
+    io.UnsupportedOperation で落ちる（_stdin_ready の TTY/タイムアウト
+    ガードは launcher._read_stdin から移設済み）。
+    """
+    from bluecore.hooks import hook_common
+
+    monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: (r, [], []))
 
 
 def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_stdin_ready(monkeypatch)
     monkeypatch.setattr(
         sys,
         "stdin",
@@ -61,6 +61,7 @@ def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch
 
 def test_config_protection_blocks_model_json(monkeypatch: pytest.MonkeyPatch) -> None:
     """ダウンロード完全性の信頼アンカーである model.json の書き換えをブロックする。"""
+    _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": "plugins/bluecore/model.json"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
@@ -73,6 +74,7 @@ def test_config_protection_blocks_model_json(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_config_protection_allows_safe_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": "README.md"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
@@ -90,6 +92,7 @@ def test_config_protection_blocks_protected_file_in_apply_patch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Codex の apply_patch パッチ内の保護ファイルをブロックする。"""
+    _patch_stdin_ready(monkeypatch)
     patch = "*** Begin Patch\n*** Update File: ruff.toml\n@@\n-a\n+b\n*** End Patch"
     payload = json.dumps({"tool_name": "apply_patch", "tool_input": {"input": patch}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
@@ -106,6 +109,7 @@ def test_config_protection_blocks_unparseable_apply_patch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """パース不能な apply_patch 入力は fail-closed でブロックする。"""
+    _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_name": "apply_patch", "tool_input": {"input": "garbage"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
@@ -119,6 +123,7 @@ def test_config_protection_blocks_unparseable_apply_patch(
 
 def test_config_protection_allows_safe_apply_patch(monkeypatch: pytest.MonkeyPatch) -> None:
     """保護対象を含まない apply_patch は許可する。"""
+    _patch_stdin_ready(monkeypatch)
     patch = "*** Begin Patch\n*** Update File: src/main.py\n@@\n-a\n+b\n*** End Patch"
     payload = json.dumps({"tool_name": "apply_patch", "tool_input": {"input": patch}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
@@ -133,6 +138,7 @@ def test_config_protection_allows_safe_apply_patch(monkeypatch: pytest.MonkeyPat
 
 def test_config_protection_blocks_legacy_file_field(monkeypatch: pytest.MonkeyPatch) -> None:
     """file フィールドのみ持つ入力でも保護ファイルをブロックする。"""
+    _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_name": "Write", "tool_input": {"file": "biome.json"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
@@ -142,84 +148,6 @@ def test_config_protection_blocks_legacy_file_field(monkeypatch: pytest.MonkeyPa
         assert config_protection.main() == 2
 
     assert "Modifying biome.json is not allowed" in stderr.getvalue()
-
-
-def test_doc_file_warning_main_warns_for_ad_hoc_documents(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = json.dumps({"tool_input": {"file_path": "notes/TODO.md"}})
-    stdout = io.StringIO()
-    stderr = io.StringIO()
-    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
-
-    with redirect_stdout(stdout), redirect_stderr(stderr):
-        assert doc_file_warning.main() == 0
-
-    # 警告のみで stdout は空（パススルー不要）
-    assert stdout.getvalue() == ""
-    assert "Ad-hoc documentation filename detected" in stderr.getvalue()
-
-
-def test_suggest_compact_increments_counter_and_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path))
-    monkeypatch.setenv("CLAUDE_SESSION_ID", "session-123")
-    monkeypatch.setenv("COMPACT_THRESHOLD", "2")
-    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-
-    stderr = io.StringIO()
-    with redirect_stderr(stderr):
-        assert suggest_compact.main() == 0
-        assert suggest_compact.main() == 0
-
-    output = stderr.getvalue()
-    assert "2 tool calls reached" in output
-    assert (tmp_path / "claude-tool-count-session-123").read_text(encoding="utf-8") == "2"
-
-
-def test_suggest_compact_helpers_and_error_fallback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    assert suggest_compact.sanitize_session_id(None) == "default"
-    assert suggest_compact.sanitize_session_id("sess/ion!123") == "session123"
-    assert suggest_compact.parse_threshold("10") == 10
-    assert suggest_compact.parse_threshold("0") == 50
-    assert suggest_compact.parse_threshold("bad") == 50
-
-    monkeypatch.setattr(
-        suggest_compact.Path,
-        "open",
-        lambda self, *args, **kwargs: (_ for _ in ()).throw(OSError("boom")),
-    )
-    writes: list[tuple[Path, str]] = []
-    monkeypatch.setattr(suggest_compact, "write_file", lambda path, content: writes.append((Path(path), content)))
-
-    counter = tmp_path / "counter"
-    assert suggest_compact.read_and_increment(counter) == 1
-    assert writes == [(counter, "1")]
-
-
-def test_suggest_compact_skips_without_session_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """CLAUDE_SESSION_ID 未設定時はカウンタを作らず提案もしない（並行セッション混線防止）。"""
-    monkeypatch.setenv("TMPDIR", str(tmp_path))
-    monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-    monkeypatch.setenv("COMPACT_THRESHOLD", "1")
-    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-
-    stderr = io.StringIO()
-    with redirect_stderr(stderr):
-        assert suggest_compact.main() == 0
-
-    assert stderr.getvalue() == ""
-    assert not (tmp_path / "claude-tool-count-default").exists()
-
-
-def test_suggest_compact_main_logs_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(suggest_compact, "read_raw_stdin", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-    stderr = io.StringIO()
-
-    with redirect_stderr(stderr):
-        assert suggest_compact.main() == 0
-
-    assert "StrategicCompact" in stderr.getvalue()
-    assert "boom" in stderr.getvalue()
 
 
 def test_session_start_deduplicates_recent_sessions(tmp_path: Path) -> None:
@@ -269,21 +197,8 @@ def test_session_end_extracts_summary(tmp_path: Path) -> None:
     assert summary["totalMessages"] == 2
 
 
-def test_doc_file_warning_non_document_and_entrypoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = json.dumps({"tool_input": {"file_path": "notes/README.png"}})
-
-    assert not doc_file_warning.is_suspicious_doc_path("notes/README.png")
-
-    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
-    monkeypatch.setattr(sys, "argv", ["doc_file_warning.py"])
-
-    with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("bluecore.hooks.doc_file_warning", run_name="__main__")
-
-    assert excinfo.value.code == 0
-
-
 def test_config_protection_entrypoint_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_input": {"file_path": "README.md"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
     monkeypatch.setattr(sys, "argv", ["config_protection.py"])
@@ -303,30 +218,6 @@ def test_session_end_run_logs_outer_exception(monkeypatch: pytest.MonkeyPatch) -
     assert any("Error: boom" in message for message in logs)
 
 
-def test_session_start_slim_injection_wired_into_context(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """run() が inject_slim_skill() の戻り値を additionalContext に連結する。"""
-    learned_dir = tmp_path / "learned"
-    sessions_dir = tmp_path / "sessions"
-    learned_dir.mkdir()
-    sessions_dir.mkdir()
-
-    monkeypatch.setattr(session_start, "ensure_dir", lambda path: None)
-    monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: learned_dir)
-    monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
-    monkeypatch.setattr(session_start, "get_session_search_dirs", lambda: [])
-    monkeypatch.setattr(session_start, "find_files", lambda *args, **kwargs: [])
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source="auto"))
-    monkeypatch.setattr(
-        session_start,
-        "detect_project",
-        lambda cwd: SimpleNamespace(languages=[], frameworks=[], primary_language=None),
-    )
-    monkeypatch.setattr(session_start, "inject_slim_skill", lambda: ["slim-content"])
-
-    payload = json.loads(session_start.run(json.dumps({"session_id": "abc"})))
-    assert "slim-content" in payload["hookSpecificOutput"]["additionalContext"]
-
-
 def test_session_start_main_sanitizes_exception_logs(monkeypatch: pytest.MonkeyPatch) -> None:
     logs: list[str] = []
     monkeypatch.setattr(session_start, "read_raw_stdin", lambda: "raw")
@@ -341,46 +232,6 @@ def test_session_start_main_sanitizes_exception_logs(monkeypatch: pytest.MonkeyP
     assert stdout.getvalue().strip().startswith("{")
     assert any("[SessionStart] Error" in message for message in logs)
     assert any("[SessionStart] Error" in message and "\n" not in message and "\x1b" not in message for message in logs)
-
-
-def test_session_start_sanitizes_git_logs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    logs: list[str] = []
-
-    class FakeDatabase:
-        def __init__(self, path: Path) -> None:
-            self.path = path
-
-        def upsert_project_profile(self, profile) -> None:  # noqa: ANN001
-            self.profile = profile
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(session_start, "log", logs.append)
-    monkeypatch.setattr(session_start, "get_git_user_name", lambda: "me")
-    monkeypatch.setattr(
-        session_start,
-        "check_output_text",
-        lambda cmd, timeout=5.0: {
-            ("git", "rev-parse", "--is-inside-work-tree"): "true",
-            ("git", "rev-parse", "--abbrev-ref", "HEAD"): "feature\nbranch\x1b[31m",
-            ("git", "rev-parse", "--short=12", "HEAD"): "abc123\x00def",
-            ("git", "status", "--porcelain"): " M file.py\n",
-        }[tuple(cmd)],
-    )
-    monkeypatch.setattr("bluecore.mem.database.Database", FakeDatabase)
-    monkeypatch.setattr(
-        "bluecore.mem.settings.Settings.load",
-        lambda: SimpleNamespace(db_path=tmp_path / "mem.db"),
-    )
-
-    session_start._save_project_profile(
-        SimpleNamespace(languages=["python"], frameworks=["pytest"], primary_language="python")
-    )
-
-    assert any("git branch=" in message for message in logs)
-    assert all("\n" not in message and "\x1b" not in message for message in logs)
 
 
 def test_hook_common_is_truthy_handles_falsey_values() -> None:
@@ -402,32 +253,6 @@ def test_session_start_main_success_and_entrypoint(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(SystemExit) as excinfo:
         runpy.run_module("bluecore.hooks.session_start", run_name="__main__")
-
-    assert excinfo.value.code == 0
-
-
-def test_suggest_compact_invalid_counter_and_checkpoint_entrypoint(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    invalid_counter = tmp_path / "invalid-counter"
-    invalid_counter.write_text("oops", encoding="utf-8")
-    assert suggest_compact.read_and_increment(invalid_counter) == 1
-
-    counter_file = tmp_path / "claude-tool-count-session-123"
-    counter_file.write_text("26", encoding="utf-8")
-    monkeypatch.setenv("TMPDIR", str(tmp_path))
-    monkeypatch.setenv("CLAUDE_SESSION_ID", "session-123")
-    monkeypatch.setenv("COMPACT_THRESHOLD", "2")
-    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-
-    stderr = io.StringIO()
-    with redirect_stderr(stderr):
-        assert suggest_compact.main() == 0
-
-    assert "27 tool calls" in stderr.getvalue()
-
-    with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("bluecore.hooks.suggest_compact", run_name="__main__")
 
     assert excinfo.value.code == 0
 
@@ -475,32 +300,6 @@ class TestImportAdrsAndInstincts:
         ss_mod._import_adrs_and_instincts()
 
         assert any("mem import error" in msg for msg in logs)
-
-    def test_session_start_run_calls_import(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """session_start.run() が _import_adrs_and_instincts を呼ぶことを確認。"""
-        called: list[bool] = []
-
-        import bluecore.hooks.session_start as ss_mod
-
-        monkeypatch.setattr(ss_mod, "ensure_dir", lambda path: None)
-        monkeypatch.setattr(ss_mod, "get_learned_skills_dir", lambda: tmp_path / "learned")
-        monkeypatch.setattr(ss_mod, "get_sessions_dir", lambda: tmp_path / "sessions")
-        monkeypatch.setattr(ss_mod, "get_session_search_dirs", lambda: [])
-        monkeypatch.setattr(ss_mod, "find_files", lambda *args, **kwargs: [])
-        monkeypatch.setattr(ss_mod, "get_package_manager", lambda: SimpleNamespace(name=None, source="auto"))
-        monkeypatch.setattr(
-            ss_mod,
-            "detect_project",
-            lambda cwd: SimpleNamespace(languages=[], frameworks=[], primary_language=None),
-        )
-        monkeypatch.setattr(ss_mod, "_save_project_profile", lambda info: None)
-        monkeypatch.setattr(ss_mod, "_import_adrs_and_instincts", lambda: called.append(True))
-        monkeypatch.setattr(ss_mod, "log", lambda msg: None)
-
-        ss_mod.run("{}")
-
-        assert called == [True]
-
 
 class TestRecordStopEvent:
     def test_success(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

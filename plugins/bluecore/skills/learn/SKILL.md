@@ -50,7 +50,6 @@ project_id: "a1b2c3d4e5f6"
 - `/instinct evolve` — クラスタ化
 - `/instinct export/import <file>` — エクスポート/インポート
 - `/instinct promote [id]` — project → global 昇格
-- `/dashboard` — スキル健全性・成長候補可視化
 
 ## スコープ判定
 

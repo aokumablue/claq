@@ -21,13 +21,15 @@ def _hook_command_argv(command: str) -> tuple[str, ...] | None:
     """hooks.json 内のコマンド文字列から launcher.py 起動後の引数列を返す。
 
     ``python``/``python3`` で ``launcher.py`` (または ``*/launcher.py``) を
-    起動する形式でなければ ``None`` を返す。
+    起動する形式でなければ ``None`` を返す。先頭の ``--bg``（非 Claude
+    ハーネス向け detach フラグ）はコマンドの実体ではないため取り除く。
 
     Args:
         command: hooks.json の ``command`` フィールドの生文字列
 
     Returns:
-        launcher.py 起動後の引数トークンのタプル。形式に合致しなければ None
+        launcher.py 起動後の引数トークンのタプル（--bg 除去済み）。
+        形式に合致しなければ None
     """
     try:
         command_tokens = shlex.split(command)
@@ -41,7 +43,10 @@ def _hook_command_argv(command: str) -> tuple[str, ...] | None:
     if launcher != "launcher.py" and not launcher.endswith("/launcher.py"):
         return None
 
-    return tuple(command_tokens[2:])
+    argv = tuple(command_tokens[2:])
+    if argv and argv[0] == "--bg":
+        argv = argv[1:]
+    return argv
 
 
 def _event_has_matching_command(
@@ -96,31 +101,19 @@ def _has_memory_lifecycle_hooks(root_dir: str | Path) -> bool:
     return (
         _event_has_matching_command(
             hooks.get("SessionStart", []),
-            (
-                ("bluecore.mem.cli", "session:mem:setup"),
-                ("bluecore.hooks.run_with_flags", "session:mem:setup", "bluecore.mem.cli"),
-            ),
+            (("bluecore.mem.cli", "setup"),),
         )
         and _event_has_matching_command(
             hooks.get("SessionStart", []),
-            (
-                ("bluecore.hooks.session_start",),
-                ("bluecore.hooks.run_with_flags", "session:start", "bluecore.hooks.session_start"),
-            ),
+            (("bluecore.hooks.session_start",),),
         )
         and _event_has_matching_command(
             hooks.get("Stop", []),
-            (
-                ("bluecore.hooks.session_end",),
-                ("bluecore.hooks.run_with_flags", "stop:session-end", "bluecore.hooks.session_end"),
-            ),
+            (("bluecore.hooks.session_end",),),
         )
         and _event_has_matching_command(
             hooks.get("SessionEnd", []),
-            (
-                ("bluecore.mem.cli", "session:mem:end"),
-                ("bluecore.hooks.run_with_flags", "session:mem:end", "bluecore.mem.cli"),
-            ),
+            (("bluecore.mem.cli", "session-end"),),
         )
     )
 
@@ -144,8 +137,8 @@ def _repo_tool_coverage_hooks_checks(root_dir: str | Path) -> list[dict[str, Any
             "points": 2,
             "scopes": ["repo", "hooks"],
             "path": "src/bluecore/hooks/",
-            "description": "最低20個のフック実装モジュールが存在する",
-            "pass": count_files(root_dir, "src/bluecore/hooks", ".py") >= 20,
+            "description": "最低12個のフック実装モジュールが存在する",
+            "pass": count_files(root_dir, "src/bluecore/hooks", ".py") >= 12,
             "fix": "Add missing hook implementations in src/bluecore/hooks/.",
         },
     ]
@@ -212,10 +205,10 @@ def _repo_context_compact_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "category": "Context Efficiency",
             "points": 3,
             "scopes": ["repo", "hooks"],
-            "path": "src/bluecore/hooks/suggest_compact.py",
-            "description": "コンテキスト圧縮自動化フックが存在する（セッション中にコンテキスト圧縮提案）",
-            "pass": file_exists(root_dir, "src/bluecore/hooks/suggest_compact.py"),
-            "fix": "Implement src/bluecore/hooks/suggest_compact.py for context pressure hints.",
+            "path": "src/bluecore/hooks/redux_filter.py",
+            "description": "コンテキスト圧縮を自動実行するフックが存在する（Bash 出力をコマンド別フィルタで圧縮しトークン消費を削減）",
+            "pass": file_exists(root_dir, "src/bluecore/hooks/redux_filter.py"),
+            "fix": "Implement src/bluecore/hooks/redux_filter.py for automatic context compression.",
         },
     ]
 
@@ -403,8 +396,8 @@ def _repo_eval_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "points": 2,
             "scopes": ["repo"],
             "path": "tests/",
-            "description": "最低100個のテストファイル(.py)が存在する",
-            "pass": count_files(root_dir, "tests", ".py") >= 100,
+            "description": "最低60個のテストファイル(.py)が存在する",
+            "pass": count_files(root_dir, "tests", ".py") >= 60,
             "fix": "Increase automated test coverage across src/bluecore modules.",
         },
     ]

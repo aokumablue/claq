@@ -65,7 +65,6 @@ class FakeDB:
         self.stored_chunks: list[MemoryChunk] = []
         self.interactions: list[object] = []
         self.project_profiles: dict[str, object] = {}
-        self.item_runs: list[object] = []
         self.vec_available = True
         self.vec_recreated = False
         self.ended_sessions: list[str] = []
@@ -153,10 +152,6 @@ class FakeDB:
 
     def get_project_profile(self, project: str, origin_user: str | None = None):  # noqa: ANN001
         return self.project_profiles.get(project)
-
-    def store_mem_item_run(self, run) -> str:  # noqa: ANN001
-        self.item_runs.append(run)
-        return f"run-{len(self.item_runs)}"
 
 
 @contextmanager

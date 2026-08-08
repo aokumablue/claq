@@ -7,7 +7,6 @@ from bluecore.mem.chunker import (
     ToolUseParams,
     _extract_file_paths,
     _parse_tool_input,
-    _summarize_ai_response,
     _summarize_input,
     _truncate,
     build_chunk_from_tool_use,
@@ -148,7 +147,6 @@ class TestBuildChunkFromToolUse:
             session_id="s1",
             project="proj",
             chunk_index=0,
-            user_prompt="test",
             params=ToolUseParams(tool_name=tool_name, tool_input=tool_input, tool_response="ok"),
         )
         assert chunk.files_read == expected_files_read
@@ -160,7 +158,6 @@ class TestBuildChunkFromToolUse:
             session_id="s1",
             project="proj",
             chunk_index=0,
-            user_prompt="test",
             params=ToolUseParams(tool_name="Read", tool_input='{"file_path": "/a.py"}', tool_response="ok"),
         )
         assert chunk.files_read == ["/a.py"]
@@ -170,7 +167,6 @@ class TestBuildChunkFromToolUse:
             session_id="s1",
             project="proj",
             chunk_index=0,
-            user_prompt="test",
             params=ToolUseParams(tool_name="Read", tool_input=None, tool_response="ok"),
         )
         assert chunk.files_read == []
@@ -180,7 +176,6 @@ class TestBuildChunkFromToolUse:
             session_id="s1",
             project="proj",
             chunk_index=0,
-            user_prompt="test",
             params=ToolUseParams(tool_name="Bash", tool_input={"command": "echo"}, tool_response=None),
         )
         assert chunk.content  # 空でないこと
@@ -190,36 +185,13 @@ class TestBuildChunkFromToolUse:
             session_id="s1",
             project="proj",
             chunk_index=0,
-            user_prompt="<private>secret</private> visible prompt",
             params=ToolUseParams(
                 tool_name="Bash",
                 tool_input={"command": "echo hi"},
                 tool_response="<private>hidden</private> output",
             ),
         )
-        assert "secret" not in chunk.user_prompt
-        assert "visible prompt" in chunk.user_prompt
         assert "hidden" not in chunk.content
-
-    def test_error_and_ai_response_summary(self) -> None:
-        assert _summarize_ai_response("short text") == "short text"
-        chunk = build_chunk_from_tool_use(
-            session_id="s1",
-            project="proj",
-            chunk_index=0,
-            user_prompt="test",
-            params=ToolUseParams(
-                tool_name="Bash",
-                tool_input={"command": "echo hi"},
-                tool_response="boom",
-                is_error=True,
-                ai_response="a" * 600,
-            ),
-        )
-        assert chunk.execution_status == "failure"
-        assert chunk.tool_error == "boom"
-        assert len(chunk.ai_response_summary or "") == 500
-        assert (chunk.ai_response_summary or "").startswith("a" * 400)
 
     def test_error_without_tool_response(self) -> None:
         """is_error でも tool_response が無ければ tool_error は記録されない。"""
@@ -227,23 +199,18 @@ class TestBuildChunkFromToolUse:
             session_id="s1",
             project="proj",
             chunk_index=0,
-            user_prompt="test",
             params=ToolUseParams(
                 tool_name="Bash",
                 tool_input={"command": "false"},
                 tool_response=None,
-                is_error=True,
             ),
         )
-        assert chunk.execution_status == "failure"
-        assert chunk.tool_error is None
 
     def test_truncation(self) -> None:
         chunk = build_chunk_from_tool_use(
             session_id="s1",
             project="proj",
             chunk_index=0,
-            user_prompt="test",
             params=ToolUseParams(
                 tool_name="Bash",
                 tool_input={"command": "cat big_file"},
@@ -261,7 +228,6 @@ class TestBuildChunkFromToolUse:
             session_id="s1",
             project="proj",
             chunk_index=0,
-            user_prompt="test",
             params=ToolUseParams(
                 tool_name="Edit",
                 tool_input={"file_path": "/c.py", "old_string": "foo", "new_string": "bar"},
@@ -272,7 +238,6 @@ class TestBuildChunkFromToolUse:
             session_id="s1",
             project="proj",
             chunk_index=0,
-            user_prompt="test",
             params=ToolUseParams(
                 tool_name="Bash",
                 tool_input={"command": "cat big"},
@@ -295,7 +260,6 @@ class TestChunkAccumulator:
         acc = ChunkAccumulator(
             session_id="s1",
             project="proj",
-            user_prompt="fix stuff",
             chunk_index=0,
         )
         acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/a.py"}, tool_response="content of a"))
@@ -310,7 +274,6 @@ class TestChunkAccumulator:
         acc = ChunkAccumulator(
             session_id="s1",
             project="proj",
-            user_prompt="test",
             chunk_index=0,
         )
         acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/a.py"}, tool_response="ok"))
@@ -322,7 +285,6 @@ class TestChunkAccumulator:
         acc = ChunkAccumulator(
             session_id="s1",
             project="proj",
-            user_prompt="test",
             chunk_index=0,
         )
         acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/a.py"}, tool_response="ok"))
@@ -348,7 +310,6 @@ class TestChunkAccumulator:
         acc = ChunkAccumulator(
             session_id="s1",
             project="proj",
-            user_prompt="test",
             chunk_index=0,
         )
         acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/a.py"}, tool_response="ok"))
@@ -364,7 +325,6 @@ class TestChunkAccumulator:
         acc = ChunkAccumulator(
             session_id="s1",
             project="proj",
-            user_prompt="test",
             chunk_index=0,
         )
         acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/a.py"}, tool_response="x" * 1000, chunk_max_length=500))

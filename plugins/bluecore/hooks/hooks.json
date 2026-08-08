@@ -17,37 +17,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:bash:commit-quality\" \"bluecore.hooks.pre_bash_commit_quality\" \"strict\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.pre_bash_commit_quality"
           }
         ],
         "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:write:doc-file-warning\" \"bluecore.hooks.doc_file_warning\" \"standard,strict\""
-          }
-        ],
-        "description": "ドキュメントファイル警告: 標準規格外のドキュメントファイルについて警告します (終了コード 0; 警告のみ)"
       },
       {
         "matcher": "Edit|Write|MultiEdit|apply_patch",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:edit-write:suggest-compact\" \"bluecore.hooks.suggest_compact\" \"standard,strict\""
-          }
-        ],
-        "description": "論理的な間隔で手動のコンパクションを提案します"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:config-protection\" \"bluecore.hooks.config_protection\" \"standard,strict\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.config_protection",
             "timeout": 5
           }
         ],
@@ -58,18 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.insights_security_monitor",
-            "timeout": 10
-          }
-        ],
-        "description": "InsAIts SDK が導入済みの環境では稼働中で、ツール入力を検査し認証情報の露出やプロンプトインジェクションを検出します。CRITICAL 異常はツール実行を実際にブロックし、監査イベントを JSONL に記録します。SDK 未導入環境では検査自体をスキップします（フェイルオープン）。"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:observe\" \"bluecore.skills.learn.observe\" \"standard,strict\" pre",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.skills.learn.observe pre",
             "async": true,
             "timeout": 10
           }
@@ -81,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:agent:nudge\" \"bluecore.hooks.pre_agent_nudge\" \"standard,strict\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.pre_agent_nudge",
             "timeout": 5
           }
         ],
@@ -94,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:compact\" \"bluecore.hooks.pre_compact\" \"standard,strict\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.pre_compact"
           }
         ],
         "description": "コンテキストの圧縮前に状態を保存します"
@@ -117,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:mem:setup\" \"bluecore.mem.cli\" \"minimal,standard,strict\" setup",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli setup",
             "timeout": 120
           }
         ],
@@ -128,7 +97,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:start\" \"bluecore.hooks.session_start\" \"minimal,standard,strict\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.session_start"
           }
         ],
         "description": "新しいセッションで以前のコンテキストを読み込み、パッケージマネージャを検出する"
@@ -138,18 +107,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:mem:record-project-profile\" \"bluecore.mem.cli\" \"standard,strict\" record-project-profile",
-            "timeout": 15
-          }
-        ],
-        "description": "mem: プロジェクトプロファイル自動記録（言語、フレームワーク）"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:mem:context\" \"bluecore.mem.cli\" \"strict\" context",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli context",
             "timeout": 60
           }
         ],
@@ -162,7 +120,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"user:mem:session-init\" \"bluecore.mem.cli\" \"standard,strict\" \"session-init\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli session-init",
             "timeout": 30
           }
         ],
@@ -173,7 +131,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"user:mem:record-interaction\" \"bluecore.mem.cli\" \"standard,strict\" \"record-interaction\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli record-interaction",
             "timeout": 30
           }
         ],
@@ -186,7 +144,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli observe",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.mem.cli observe",
             "async": true,
             "timeout": 10
           }
@@ -194,46 +152,23 @@
         "description": "mem: 全ツールイベントを受け、対象ツールだけをメモリチャンクに記録"
       },
       {
-        "matcher": "Skill",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli record-item-run",
-            "async": true,
-            "timeout": 10
-          }
-        ],
-        "description": "mem: スキル実行を mem_item_runs に記録（item_type=skill）"
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"post:redux:filter\" \"bluecore.hooks.redux_filter\" \"standard,strict\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.redux_filter",
             "timeout": 10
           }
         ],
         "description": "redux: Bash 出力をコマンド別フィルタで圧縮（無一致時は汎用戦略でトークン削減）"
       },
       {
-        "matcher": "Bash",
+        "matcher": "Edit|Write|MultiEdit|apply_patch",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"post:bash:pr-created\" \"bluecore.hooks.post_bash_pr_created\" \"standard,strict\""
-          }
-        ],
-        "description": "PR URLを記録し、PR作成後にレビュー コマンドを提供します"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"post:quality-gate\" \"bluecore.hooks.quality_gate\" \"standard,strict\" \"post-edit\"",
-            "async": true,
-            "timeout": 30
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.quality_gate post-edit",
+            "timeout": 15
           }
         ],
         "description": "編集後の品質ゲートを settings.json の hooks.quality-gate 設定に従って実行します"
@@ -245,7 +180,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"stop:session-end\" \"bluecore.hooks.session_end\" \"minimal,standard,strict\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.hooks.session_end",
             "async": true,
             "timeout": 10
           }
@@ -257,20 +192,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"stop:evaluate-session\" \"bluecore.hooks.evaluate_session\" \"minimal,standard,strict\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.hooks.desktop_notify",
             "async": true,
-            "timeout": 10
-          }
-        ],
-        "description": "セッションを評価して抽出可能なパターンを特定する"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"stop:desktop-notify\" \"bluecore.hooks.desktop_notify\" \"minimal,standard,strict\"",
-            "timeout": 10
+            "timeout": 5
           }
         ],
         "description": "応答完了時にタスクサマリー付きデスクトップ通知を送信します（macOS: osascript、WSL: PowerShell + BurntToast）"
@@ -282,19 +206,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:end:marker\" \"bluecore.hooks.session_end_marker\" \"minimal,standard,strict\"",
-            "async": true,
-            "timeout": 10
-          }
-        ],
-        "description": "セッション終了ライフサイクルマーカー（非ブロッキング）"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:mem:end\" \"bluecore.mem.cli\" \"standard,strict\" \"session-end\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.mem.cli session-end",
             "async": true,
             "timeout": 30
           }

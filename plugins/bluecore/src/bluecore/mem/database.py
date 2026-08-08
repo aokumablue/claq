@@ -15,24 +15,17 @@ from bluecore.mem.models import (
     EventLog,
     Instinct,
     InteractionLog,
-    MemItemRun,
     MemoryChunk,
-    ProjectProfile,
     Session,
     SessionDigest,
     generate_uuid,
 )
 from bluecore.mem.row_converters import (
-    _row_to_adr,
     _row_to_chunk,
-    _row_to_event_log,
-    _row_to_instinct,
     _row_to_interaction_log,
-    _row_to_mem_item_run,
-    _row_to_project_profile,
     _row_to_session_digest,
 )
-from bluecore.mem.schema import _FTS5_SQL, _MIGRATIONS, _SCHEMA_SQL, _VEC_SQL
+from bluecore.mem.schema import _FTS5_SQL, _SCHEMA_SQL, _VEC_SQL
 
 log = _get_logger("DB")
 
@@ -58,7 +51,6 @@ class Database:
             path.chmod(0o600)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
-        self._migrate()
         # Phase 0: パフォーマンス最適化 PRAGMA
         self.conn.execute("PRAGMA temp_store = MEMORY")
         self.conn.execute("PRAGMA mmap_size = 268435456")
@@ -112,19 +104,6 @@ class Database:
             log.debug("sqlite-vec ロード失敗（ベクトル検索は無効）: %s", e)
             return False
 
-    def _migrate(self) -> None:
-        """マイグレーション管理テーブル（schema_migrations は _SCHEMA_SQL で作成済み）を使い、未適用のみ実行する。"""
-        applied = {r[0] for r in self.conn.execute("SELECT version FROM schema_migrations").fetchall()}
-        for version, sqls in _MIGRATIONS:  # pragma: no cover  # _MIGRATIONS は現状空（本体は将来用）
-            if version not in applied:
-                for sql in sqls:
-                    self.conn.execute(sql)
-                self.conn.execute(
-                    "INSERT INTO schema_migrations (version, applied_at_epoch) VALUES (?, ?)",
-                    (version, int(time.time())),
-                )
-        self.conn.commit()
-
     def close(self) -> None:
         """DB 接続を閉じる。"""
         self.conn.close()
@@ -138,9 +117,8 @@ class Database:
 
         cur = self.conn.execute(
             """INSERT INTO sessions
-         (id, origin_user, session_id, project, started_at_epoch,
-          branch, commit_hash, uncommitted_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         (id, origin_user, session_id, project, started_at_epoch)
+         VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(session_id) DO UPDATE SET
             chunk_count = chunk_count
           RETURNING id""",
@@ -150,9 +128,6 @@ class Database:
                 session.session_id,
                 session.project,
                 session.started_at_epoch,
-                session.branch,
-                session.commit_hash,
-                session.uncommitted_count,
             ),
         )
         row = cur.fetchone()
@@ -174,13 +149,11 @@ class Database:
         cur = self.conn.execute(
             """INSERT INTO memory_chunks
              (id, origin_user, session_id, project, chunk_index, content,
-              tool_names, files_read, files_modified,
-              user_prompt, created_at_epoch,
-              execution_status, tool_error, ai_response_summary, tool_sequence)
+              tool_names, files_read, files_modified, created_at_epoch)
              VALUES (?, ?, ?,
                      ?,
                      COALESCE((SELECT MAX(chunk_index) + 1 FROM memory_chunks WHERE session_id = ?), 0),
-                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ?, ?, ?, ?, ?)
              RETURNING id, chunk_index""",
             (
                 chunk.id,
@@ -192,12 +165,7 @@ class Database:
                 json.dumps(chunk.tool_names, ensure_ascii=False),
                 json.dumps(chunk.files_read, ensure_ascii=False),
                 json.dumps(chunk.files_modified, ensure_ascii=False),
-                chunk.user_prompt,
                 chunk.created_at_epoch,
-                chunk.execution_status,
-                chunk.tool_error,
-                chunk.ai_response_summary,
-                json.dumps(chunk.tool_sequence, ensure_ascii=False),
             ),
         )
         return cur.fetchone()
@@ -262,15 +230,6 @@ class Database:
             chunk_ids,
         ).fetchall()
         return {r["id"]: _row_to_chunk(r) for r in rows}
-
-    def get_next_chunk_index(self, session_id: str) -> int:
-        """セッション内で次に割り当てる chunk_index を返す。"""
-        row = self.conn.execute(
-            "SELECT MAX(chunk_index) as mx FROM memory_chunks WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        mx = row["mx"]
-        return (mx if mx is not None else -1) + 1
 
     def get_all_chunks(self) -> list[MemoryChunk]:
         """全チャンクを取得する（圧縮・プルーニング用）。"""
@@ -434,26 +393,6 @@ class Database:
         self.conn.commit()
         return instinct_uuid
 
-    def get_instincts(self, scope: str | None = None, project_id: str | None = None) -> list[Instinct]:
-        """インスティンクトを取得する。"""
-        if scope and project_id:
-            rows = self.conn.execute(
-                "SELECT * FROM instincts WHERE scope = ? AND project_id = ?",
-                (scope, project_id),
-            ).fetchall()
-        elif scope:
-            rows = self.conn.execute("SELECT * FROM instincts WHERE scope = ?", (scope,)).fetchall()
-        else:
-            rows = self.conn.execute("SELECT * FROM instincts").fetchall()
-        return [_row_to_instinct(r) for r in rows]
-
-    def get_all_instincts(self) -> list[Instinct]:
-        """全インスティンクトを取得する（同期用）。"""
-        rows = self.conn.execute("SELECT * FROM instincts ORDER BY created_at_epoch").fetchall()
-        return [_row_to_instinct(r) for r in rows]
-
-    # --- ADR ---
-
     def upsert_adr(self, adr: Adr) -> str:
         """ADR を保存または更新し、id を返す。"""
         adr_uuid = adr.id or generate_uuid()
@@ -482,24 +421,6 @@ class Database:
         self.conn.commit()
         return adr_uuid
 
-    def get_adrs(self, project: str | None = None) -> list[Adr]:
-        """ADR を取得する。"""
-        if project:
-            rows = self.conn.execute(
-                "SELECT * FROM adrs WHERE project = ? ORDER BY adr_number",
-                (project,),
-            ).fetchall()
-        else:
-            rows = self.conn.execute("SELECT * FROM adrs ORDER BY project, adr_number").fetchall()
-        return [_row_to_adr(r) for r in rows]
-
-    def get_all_adrs(self) -> list[Adr]:
-        """全 ADR を取得する（同期用）。"""
-        rows = self.conn.execute("SELECT * FROM adrs ORDER BY created_at_epoch").fetchall()
-        return [_row_to_adr(r) for r in rows]
-
-    # --- イベントログ ---
-
     def store_event_log(self, event: EventLog) -> str:
         """イベントログを保存し、id を返す。"""
         event_uuid = event.id or generate_uuid()
@@ -519,27 +440,6 @@ class Database:
         self.conn.commit()
         return event_uuid
 
-    def get_event_logs(self, event_type: str | None = None, limit: int = 100) -> list[EventLog]:
-        """イベントログを取得する。"""
-        if event_type:
-            rows = self.conn.execute(
-                "SELECT * FROM event_logs WHERE event_type = ? ORDER BY created_at_epoch DESC LIMIT ?",
-                (event_type, limit),
-            ).fetchall()
-        else:
-            rows = self.conn.execute(
-                "SELECT * FROM event_logs ORDER BY created_at_epoch DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [_row_to_event_log(r) for r in rows]
-
-    def get_all_event_logs(self) -> list[EventLog]:
-        """全イベントログを取得する（同期用）。"""
-        rows = self.conn.execute("SELECT * FROM event_logs ORDER BY created_at_epoch").fetchall()
-        return [_row_to_event_log(r) for r in rows]
-
-    # --- インタラクションログ ---
-
     def store_interaction_log(self, log_entry: InteractionLog) -> str:
         """インタラクションログを保存し、id を返す。"""
         log_uuid = log_entry.id or generate_uuid()
@@ -548,10 +448,8 @@ class Database:
             """INSERT OR IGNORE INTO interaction_logs
          (id, origin_user, session_id, project,
           user_prompt_full, user_prompt_hash,
-          ai_response_summary, ai_response_tool_plan,
-          chunk_id, execution_outcome, tool_error_count,
           interaction_index, created_at_epoch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 log_uuid,
                 log_entry.origin_user,
@@ -559,11 +457,6 @@ class Database:
                 log_entry.project,
                 log_entry.user_prompt_full,
                 prompt_hash,
-                log_entry.ai_response_summary,
-                log_entry.ai_response_tool_plan,
-                log_entry.chunk_id,
-                log_entry.execution_outcome,
-                log_entry.tool_error_count,
                 log_entry.interaction_index,
                 log_entry.created_at_epoch,
             ),
@@ -595,13 +488,6 @@ class Database:
             ).fetchall()
         return [_row_to_interaction_log(r) for r in rows]
 
-    def get_all_interaction_logs(self) -> list[InteractionLog]:
-        """全インタラクションログを取得する（同期用）。"""
-        rows = self.conn.execute(
-            "SELECT * FROM interaction_logs ORDER BY created_at_epoch"
-        ).fetchall()
-        return [_row_to_interaction_log(r) for r in rows]
-
     def get_next_interaction_index(self, session_id: str) -> int:
         """セッション内の次の interaction_index を返す。"""
         row = self.conn.execute(
@@ -613,129 +499,6 @@ class Database:
 
     # --- プロジェクトプロファイル ---
 
-    def upsert_project_profile(self, profile: ProjectProfile) -> str:
-        """プロジェクトプロファイルを保存または更新し、id を返す。"""
-        profile_uuid = profile.id or generate_uuid()
-        self.conn.execute(
-            """INSERT INTO project_profiles
-         (id, origin_user, project, project_path,
-          languages, frameworks, primary_language,
-          test_command, build_command, scope_hint,
-          detected_at_epoch, last_updated_epoch, detection_confidence)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(origin_user, project) DO UPDATE SET
-            project_path = excluded.project_path,
-            languages = excluded.languages,
-            frameworks = excluded.frameworks,
-            primary_language = excluded.primary_language,
-            test_command = excluded.test_command,
-            build_command = excluded.build_command,
-            scope_hint = excluded.scope_hint,
-            last_updated_epoch = excluded.last_updated_epoch,
-            detection_confidence = excluded.detection_confidence""",
-            (
-                profile_uuid,
-                profile.origin_user,
-                profile.project,
-                profile.project_path,
-                json.dumps(profile.languages, ensure_ascii=False),
-                json.dumps(profile.frameworks, ensure_ascii=False),
-                profile.primary_language,
-                profile.test_command,
-                profile.build_command,
-                profile.scope_hint,
-                profile.detected_at_epoch,
-                profile.last_updated_epoch,
-                profile.detection_confidence,
-            ),
-        )
-        self.conn.commit()
-        return profile_uuid
-
-    def get_project_profile(self, project: str, origin_user: str = "") -> ProjectProfile | None:
-        """プロジェクトプロファイルを取得する。"""
-        if origin_user:
-            row = self.conn.execute(
-                "SELECT * FROM project_profiles WHERE project = ? AND origin_user = ?",
-                (project, origin_user),
-            ).fetchone()
-        else:
-            row = self.conn.execute(
-                "SELECT * FROM project_profiles WHERE project = ? ORDER BY last_updated_epoch DESC LIMIT 1",
-                (project,),
-            ).fetchone()
-        return _row_to_project_profile(row) if row else None
-
-    def get_all_project_profiles(self) -> list[ProjectProfile]:
-        """全プロジェクトプロファイルを取得する（同期用）。"""
-        rows = self.conn.execute(
-            "SELECT * FROM project_profiles ORDER BY last_updated_epoch"
-        ).fetchall()
-        return [_row_to_project_profile(r) for r in rows]
-
-    # --- スキル実行記録 ---
-
-    def store_mem_item_run(self, run: MemItemRun) -> str:
-        """アイテム実行記録を保存し、id を返す。"""
-        run_uuid = run.id or generate_uuid()
-        self.conn.execute(
-            """INSERT INTO mem_item_runs
-         (id, origin_user, session_id, project,
-          skill_name, skill_trigger, outcome,
-          tools_used, files_modified_count, duration_seconds,
-          interaction_log_id, created_at_epoch, item_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                run_uuid,
-                run.origin_user,
-                run.session_id,
-                run.project,
-                run.skill_name,
-                run.skill_trigger,
-                run.outcome,
-                json.dumps(run.tools_used, ensure_ascii=False),
-                run.files_modified_count,
-                run.duration_seconds,
-                run.interaction_log_id,
-                run.created_at_epoch,
-                run.item_type,
-            ),
-        )
-        self.conn.commit()
-        return run_uuid
-
-    def get_skill_run_stats(
-        self,
-        skill_name: str | None = None,
-        project: str | None = None,
-        limit: int = 100,
-    ) -> list[MemItemRun]:
-        """スキル実行記録を取得する。"""
-        conditions = []
-        params: list = []
-        if skill_name:
-            conditions.append("skill_name = ?")
-            params.append(skill_name)
-        if project:
-            conditions.append("project = ?")
-            params.append(project)
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        params.append(limit)
-        rows = self.conn.execute(
-            f"SELECT * FROM mem_item_runs {where} ORDER BY created_at_epoch DESC LIMIT ?",
-            params,
-        ).fetchall()
-        return [_row_to_mem_item_run(r) for r in rows]
-
-    def get_all_mem_item_runs(self) -> list[MemItemRun]:
-        """全アイテム実行記録を取得する（同期用）。"""
-        rows = self.conn.execute(
-            "SELECT * FROM mem_item_runs ORDER BY created_at_epoch"
-        ).fetchall()
-        return [_row_to_mem_item_run(r) for r in rows]
-
-    # --- セッション要約 ---
-
     def upsert_session_digest(self, digest: SessionDigest) -> str:
         """セッション要約を保存または更新し、id を返す。"""
         if not digest.id:
@@ -743,14 +506,13 @@ class Database:
         self.conn.execute(
             """INSERT INTO session_digests
          (id, origin_user, session_id, project, summary,
-          key_files, key_decisions, outcome, harness, source,
+          key_files, key_decisions, harness, source,
           chunk_count, started_at_epoch, ended_at_epoch, created_at_epoch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
             summary = excluded.summary,
             key_files = excluded.key_files,
             key_decisions = excluded.key_decisions,
-            outcome = excluded.outcome,
             harness = excluded.harness,
             source = excluded.source,
             chunk_count = excluded.chunk_count,
@@ -763,7 +525,6 @@ class Database:
                 digest.summary,
                 json.dumps(digest.key_files, ensure_ascii=False),
                 json.dumps(digest.key_decisions, ensure_ascii=False),
-                digest.outcome,
                 digest.harness,
                 digest.source,
                 digest.chunk_count,

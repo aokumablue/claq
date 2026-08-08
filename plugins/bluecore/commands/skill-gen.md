@@ -68,7 +68,6 @@ learn 連携用インスティンクトもステップ1〜4と同じ流れで生
 ## 関連
 
 - `/instinct import` — 生成インスティンクトをインポート
-- `/dashboard` — 成長候補の可視化
 - `/instinct evolve` — インスティンクトを skills/agents にクラスタリング
 
 ## 引数

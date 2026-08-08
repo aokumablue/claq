@@ -7,10 +7,7 @@ import pytest
 
 from bluecore.mem.compaction import (
     detect_low_quality,
-    memory_health_report,
-    merge_chunks,
     optimize_db,
-    prune_candidates,
 )
 from bluecore.mem.database import Database, MemoryChunk
 
@@ -38,7 +35,6 @@ def _make_chunk(
         tool_names=tool_names or [],
         files_read=[],
         files_modified=files_modified or [],
-        user_prompt="",
         created_at_epoch=created_at_epoch or int(time.time()),
         access_count=access_count,
     )
@@ -101,62 +97,6 @@ class TestDetectLowQuality:
         assert len(candidates) == len(set(candidates))
 
 
-class TestMergeChunks:
-    def test_uses_newest_as_base(self) -> None:
-        old = _make_chunk(content="old content", created_at_epoch=1000000, tool_names=["Read"], files_modified=[])
-        new = _make_chunk(content="new content", created_at_epoch=2000000, tool_names=["Edit"], files_modified=["a.py"])
-        merged = merge_chunks([old, new])
-        assert merged.content == "new content"
-        assert merged.created_at_epoch == 2000000
-
-    def test_tool_names_union(self) -> None:
-        c1 = _make_chunk(tool_names=["Read", "Edit"])
-        c2 = _make_chunk(tool_names=["Edit", "Write"])
-        merged = merge_chunks([c1, c2])
-        assert set(merged.tool_names) == {"Read", "Edit", "Write"}
-
-    def test_files_modified_union(self) -> None:
-        c1 = _make_chunk(files_modified=["a.py"])
-        c2 = _make_chunk(files_modified=["b.py"])
-        merged = merge_chunks([c1, c2])
-        assert set(merged.files_modified) == {"a.py", "b.py"}
-
-    def test_generation_incremented(self) -> None:
-        c1 = _make_chunk()
-        c1.merged_generation = 0
-        c2 = _make_chunk()
-        c2.merged_generation = 1
-        merged = merge_chunks([c1, c2])
-        assert merged.merged_generation == 2
-
-    def test_single_chunk(self) -> None:
-        chunk = _make_chunk(content="solo", created_at_epoch=1000000)
-        merged = merge_chunks([chunk])
-        assert merged.content == "solo"
-        assert merged.merged_generation == 1
-
-
-class TestPruneCandidates:
-    def test_very_old_unaccessed_chunk_pruned(self, db: Database) -> None:
-        # 非常に古いチャンク（減衰 < 0.01）でアクセスなし
-        very_old = int(time.time()) - 500 * 86400  # 500日前
-        cid = db.store_chunk(_make_chunk(created_at_epoch=very_old, access_count=0))
-        candidates = prune_candidates(db)
-        assert cid in candidates
-
-    def test_accessed_chunk_not_pruned(self, db: Database) -> None:
-        very_old = int(time.time()) - 500 * 86400
-        cid = db.store_chunk(_make_chunk(created_at_epoch=very_old))
-        db.update_access([cid])  # access_count = 1 をDBに反映
-        candidates = prune_candidates(db)
-        assert cid not in candidates
-
-    def test_recent_chunk_not_pruned(self, db: Database) -> None:
-        cid = db.store_chunk(_make_chunk(created_at_epoch=int(time.time())))
-        candidates = prune_candidates(db)
-        assert cid not in candidates
-
-
 class TestOptimizeDb:
     def test_returns_dict(self, db: Database) -> None:
         result = optimize_db(db)
@@ -171,26 +111,6 @@ class TestOptimizeDb:
         # 空DBでも失敗しない
         result = optimize_db(db)
         assert result is not None
-
-
-class TestMemoryHealthReport:
-    def test_empty_db(self, db: Database) -> None:
-        report = memory_health_report(db)
-        assert report["total_chunks"] == 0
-        assert report["short_chunk_pct"] == 0
-        assert report["db_size_mb"] >= 0
-
-    def test_with_chunks(self, db: Database) -> None:
-        db.store_chunk(_make_chunk(content="x" * 100))
-        db.store_chunk(_make_chunk(content="short", chunk_index=1))
-        report = memory_health_report(db)
-        assert report["total_chunks"] == 2
-        assert report["short_chunk_pct"] == 50.0
-        assert report["avg_chunk_size"] > 0
-
-    def test_report_keys(self, db: Database) -> None:
-        report = memory_health_report(db)
-        assert set(report.keys()) == {"total_chunks", "db_size_mb", "short_chunk_pct", "avg_chunk_size"}
 
 
 class TestOptimizeDbVacuum:

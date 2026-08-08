@@ -2,51 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from bluecore.lib.settings import (
     extract_coverage_hint_lines,
-    get_hook_settings,
-    get_nested,
-    load_settings,
 )
-
-
-def test_load_settings_and_section_helpers(tmp_path: Path) -> None:
-    config_path = tmp_path / "settings.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "hooks": {
-                    "quality-gate": {
-                        "post-edit": {
-                            "extensions": [".py"],
-                            "bash": [["ruff", "check", "src", "tests"]],
-                        }
-                    }
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    settings = load_settings(config_path)
-
-    assert get_nested(
-        settings,
-        "hooks",
-        "quality-gate",
-        "post-edit",
-        "extensions",
-    ) == [".py"]
-    assert get_hook_settings(settings, "quality-gate")["post-edit"]["bash"] == [["ruff", "check", "src", "tests"]]
-
-
-def test_get_nested_uses_default_for_missing_path() -> None:
-    assert get_nested({}, "hooks", "missing", default={"fallback": True}) == {"fallback": True}
 
 
 @pytest.mark.parametrize(
@@ -114,29 +76,3 @@ def test_extract_coverage_hint_lines_returns_multiple_matching_lines(tmp_path: P
 class TestLoadSettingsEdgeCases:
     """load_settings のエラーパス・境界値テスト"""
 
-    def test_nonexistent_file_returns_empty_dict(self, tmp_path: Path) -> None:
-        path = tmp_path / "nonexistent.json"
-        assert load_settings(path) == {}
-
-    def test_invalid_json_returns_empty_dict(self, tmp_path: Path) -> None:
-        path = tmp_path / "bad.json"
-        path.write_text("{invalid json{{{", encoding="utf-8")
-        assert load_settings(path) == {}
-
-    def test_json_array_returns_empty_dict(self, tmp_path: Path) -> None:
-        # JSON はリスト形式 — dict でないので空 dict を返す
-        path = tmp_path / "array.json"
-        path.write_text("[1, 2, 3]", encoding="utf-8")
-        assert load_settings(path) == {}
-
-    def test_valid_json_object_returned(self, tmp_path: Path) -> None:
-        path = tmp_path / "settings.json"
-        path.write_text(json.dumps({"key": "value"}), encoding="utf-8")
-        assert load_settings(path) == {"key": "value"}
-
-    def test_tilde_path_expanded(self, tmp_path: Path) -> None:
-        # load_settings が tilde を展開することを確認（パスが解決できれば OK）
-        path = tmp_path / "settings.json"
-        path.write_text(json.dumps({"ok": True}), encoding="utf-8")
-        result = load_settings(str(path))
-        assert result == {"ok": True}

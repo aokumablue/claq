@@ -5,14 +5,21 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 
-from bluecore.mem.cli_search_handlers import slim_context_content, slim_prompt
+from bluecore.mem.cli_search_handlers import slim_context_content
 from bluecore.mem.database import Database, MemoryChunk, SessionDigest
 from bluecore.mem.search import adaptive_decay
 from bluecore.mem.settings import Settings
 
 
 def importance_score(chunk: MemoryChunk) -> float:
-    """ルールベースの重要度スコア（0.0〜1.0）を付与する"""
+    """ルールベースの重要度スコア（0.0〜1.0）を付与する。
+
+    以前は access_count による popularity に重み 0.40 を割り当てていたが、
+    実 DB 実測で access_count > 0 のチャンクは全体の 0.22% しかなく、
+    スコアの 4 割が事実上定数として働いていた。popularity を外し、
+    実際に差が出る 3 指標へ重みを再配分する。access_count 自体は
+    search.adaptive_decay が半減期の調整に使うため保持する。
+    """
     scores = {}
 
     # (a) 情報密度: コンテンツ長
@@ -24,14 +31,10 @@ def importance_score(chunk: MemoryChunk) -> float:
     # (c) ツール多様性: 複数ツール使用 = 複合的な作業
     scores["tool_diversity"] = min(len(chunk.tool_names) / 3, 1.0)
 
-    # (d) アクセス頻度: 検索でヒットした回数
-    scores["popularity"] = min(chunk.access_count / 5, 1.0)
-
     weights = {
-        "density": 0.15,
-        "actionable": 0.30,
-        "tool_diversity": 0.15,
-        "popularity": 0.40,
+        "density": 0.30,
+        "actionable": 0.45,
+        "tool_diversity": 0.25,
     }
     return sum(scores[k] * weights[k] for k in weights)
 
@@ -152,8 +155,6 @@ def _format_chunk(chunk: MemoryChunk) -> str:
     """チャンクを文字列にフォーマットする"""
     parts: list[str] = []
 
-    if chunk.user_prompt:
-        parts.append(f"**プロンプト**: {slim_prompt(chunk.user_prompt)}")
 
     if chunk.tool_names:
         parts.append(f"**ツール**: {', '.join(chunk.tool_names)}")
@@ -187,7 +188,7 @@ def _format_digest(digest: SessionDigest) -> str:
     """
     ts = _format_date(digest.started_at_epoch)
     parts: list[str] = [
-        f"## 過去セッション: {digest.project} ({ts}) [{digest.outcome}]",
+        f"## 過去セッション: {digest.project} ({ts})",
         "",
         f"**要約**: {digest.summary}",
     ]

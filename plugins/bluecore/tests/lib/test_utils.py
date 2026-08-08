@@ -2,11 +2,8 @@
 
 import os
 import re
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from bluecore.lib.core_utils import (
     IS_LINUX,
@@ -17,23 +14,20 @@ from bluecore.lib.core_utils import (
     count_in_file,
     ensure_dir,
     find_files,
+    get_bluecore_dir,
     get_claude_dir,
     get_date_string,
     get_datetime_string,
-    get_bluecore_dir,
     get_git_user_name,
     get_home_dir,
     get_learned_skills_dir,
     get_session_id_short,
     get_session_search_dirs,
     get_sessions_dir,
-    get_temp_dir,
     get_time_string,
-    grep_file,
     log,
     output,
     read_file,
-    replace_in_file,
     run_command,
     sanitize_session_id,
     strip_ansi,
@@ -105,20 +99,6 @@ class TestDirectoryFunctions:
         """claude ディレクトリ配下の skills/learned を返すこと。"""
         skills = get_learned_skills_dir()
         assert skills == get_claude_dir() / "skills" / "learned"
-
-    def test_get_temp_dir(self):
-        """一時ディレクトリを返すこと。"""
-        temp = get_temp_dir()
-        assert isinstance(temp, Path)
-        assert temp.exists()
-
-    def test_get_temp_dir_respects_tmpdir(self, monkeypatch, tmp_path):
-        """TMPDIR があれば一時ディレクトリ解決に反映されること。"""
-        monkeypatch.setenv("TMPDIR", str(tmp_path))
-        monkeypatch.setattr(tempfile, "tempdir", None, raising=False)
-
-        assert get_temp_dir() == tmp_path
-
 
 class TestEnsureDir:
     """ensure_dir 関数のテスト。"""
@@ -288,30 +268,6 @@ class TestFindFiles:
 class TestReplaceInFile:
     """replace_in_file 関数のテスト。"""
 
-    def test_replaces_first_occurrence(self, tmp_path):
-        """デフォルトでは最初の一致のみ置換すること。"""
-        test_file = tmp_path / "test.txt"
-        test_file.write_text("foo foo foo")
-
-        result = replace_in_file(test_file, "foo", "bar")
-        assert result is True
-        assert test_file.read_text() == "bar foo foo"
-
-    def test_replaces_all_occurrences(self, tmp_path):
-        """replace_all=True ではすべて置換すること。"""
-        test_file = tmp_path / "test.txt"
-        test_file.write_text("foo foo foo")
-
-        result = replace_in_file(test_file, "foo", "bar", replace_all=True)
-        assert result is True
-        assert test_file.read_text() == "bar bar bar"
-
-    def test_returns_false_for_missing_file(self, tmp_path):
-        """ファイルがない場合は False を返すこと。"""
-        result = replace_in_file(tmp_path / "missing.txt", "a", "b")
-        assert result is False
-
-
 class TestCountInFile:
     """count_in_file 関数のテスト。"""
 
@@ -331,25 +287,6 @@ class TestCountInFile:
 
 class TestGrepFile:
     """grep_file 関数のテスト。"""
-
-    def test_finds_matching_lines(self, tmp_path):
-        """パターンに一致する行を見つけること。"""
-        test_file = tmp_path / "test.txt"
-        test_file.write_text("line one\nmatching line\nline three\n")
-
-        results = grep_file(test_file, "matching")
-        assert len(results) == 1
-        assert results[0]["lineNumber"] == 2
-        assert results[0]["content"] == "matching line"
-
-    def test_returns_empty_for_no_matches(self, tmp_path):
-        """一致がない場合は空リストを返すこと。"""
-        test_file = tmp_path / "test.txt"
-        test_file.write_text("line one\nline two\n")
-
-        results = grep_file(test_file, "nonexistent")
-        assert results == []
-
 
 class TestStripAnsi:
     """strip_ansi 関数のテスト。"""
@@ -605,99 +542,8 @@ class TestRunCommandEdgeCases:
 class TestGetGitModifiedFiles:
     """get_git_modified_files テスト。"""
 
-    def test_returns_empty_when_not_git_repo(self, monkeypatch):
-        """git リポジトリでない場合は空リストを返すこと。"""
-        from bluecore.lib.core_utils import get_git_modified_files
-
-        with patch("bluecore.lib.core_utils.is_git_repo", return_value=False):
-            assert get_git_modified_files() == []
-
-    def test_returns_empty_when_git_diff_fails(self, monkeypatch):
-        """git diff が失敗した場合は空リストを返すこと。"""
-        from bluecore.lib.core_utils import get_git_modified_files
-
-        with (
-            patch("bluecore.lib.core_utils.is_git_repo", return_value=True),
-            patch("bluecore.lib.core_utils.run_command", return_value={"success": False, "output": ""}),
-        ):
-            assert get_git_modified_files() == []
-
-    def test_returns_all_files_without_patterns(self, monkeypatch):
-        """パターンなしの場合すべてのファイルを返すこと。"""
-        from bluecore.lib.core_utils import get_git_modified_files
-
-        with (
-            patch("bluecore.lib.core_utils.is_git_repo", return_value=True),
-            patch("bluecore.lib.core_utils.run_command", return_value={"success": True, "output": "a.py\nb.py\nc.py"}),
-        ):
-            files = get_git_modified_files()
-        assert files == ["a.py", "b.py", "c.py"]
-
-    def test_filters_by_patterns(self, monkeypatch):
-        """patterns が指定された場合にフィルタリングすること。"""
-        from bluecore.lib.core_utils import get_git_modified_files
-
-        with (
-            patch("bluecore.lib.core_utils.is_git_repo", return_value=True),
-            patch("bluecore.lib.core_utils.run_command", return_value={"success": True, "output": "a.py\nb.js\nc.py"}),
-        ):
-            files = get_git_modified_files(patterns=[r"\.py$"])
-        assert files == ["a.py", "c.py"]
-
-    def test_invalid_regex_pattern_skipped(self, monkeypatch):
-        """不正な正規表現パターンはスキップされること。"""
-        from bluecore.lib.core_utils import get_git_modified_files
-
-        with (
-            patch("bluecore.lib.core_utils.is_git_repo", return_value=True),
-            patch("bluecore.lib.core_utils.run_command", return_value={"success": True, "output": "a.py\nb.py"}),
-        ):
-            # 有効パターン + 不正パターン → 不正はスキップ、有効パターンでフィルタ
-            files = get_git_modified_files(patterns=[r"\.py$", "[invalid"])
-        assert "a.py" in files
-
-    def test_empty_pattern_skipped(self, monkeypatch):
-        """空文字列パターンはスキップされること。"""
-        from bluecore.lib.core_utils import get_git_modified_files
-
-        with (
-            patch("bluecore.lib.core_utils.is_git_repo", return_value=True),
-            patch("bluecore.lib.core_utils.run_command", return_value={"success": True, "output": "a.py"}),
-        ):
-            files = get_git_modified_files(patterns=["", None, r"\.py$"])  # type: ignore[list-item]
-        assert files == ["a.py"]
-
-
 class TestReplaceInFileEdgeCases:
     """replace_in_file の未カバーパステスト。"""
-
-    def test_replace_with_regex_pattern(self, tmp_path: Path):
-        """正規表現パターンで置換すること。"""
-        f = tmp_path / "file.txt"
-        f.write_text("hello world 123")
-        result = replace_in_file(f, re.compile(r"\d+"), "NUM")
-        assert result is True
-        assert f.read_text() == "hello world NUM"
-
-    def test_replace_all_false_replaces_first_only(self, tmp_path: Path):
-        """replace_all=False は最初の1件のみ置換すること。"""
-        f = tmp_path / "file.txt"
-        f.write_text("foo foo foo")
-        replace_in_file(f, "foo", "bar", replace_all=False)
-        assert f.read_text() == "bar foo foo"
-
-    def test_replace_all_true_replaces_all(self, tmp_path: Path):
-        """replace_all=True はすべて置換すること。"""
-        f = tmp_path / "file.txt"
-        f.write_text("foo foo foo")
-        replace_in_file(f, "foo", "bar", replace_all=True)
-        assert f.read_text() == "bar bar bar"
-
-    def test_returns_false_for_missing_file(self, tmp_path: Path):
-        """存在しないファイルでは False を返すこと。"""
-        result = replace_in_file(tmp_path / "missing.txt", "foo", "bar")
-        assert result is False
-
 
 class TestCountInFileEdgeCases:
     """count_in_file の未カバーパステスト。"""
@@ -719,27 +565,6 @@ class TestCountInFileEdgeCases:
 
 class TestGrepFileEdgeCases:
     """grep_file の未カバーパステスト。"""
-
-    def test_compiled_regex_pattern(self, tmp_path: Path):
-        """コンパイル済み正規表現パターンで検索すること。"""
-        f = tmp_path / "file.txt"
-        f.write_text("error: foo\ninfo: bar\nerror: baz")
-        results = grep_file(f, re.compile(r"^error:"))
-        assert len(results) == 2
-        assert results[0]["lineNumber"] == 1
-
-    def test_invalid_regex_string_returns_empty(self, tmp_path: Path):
-        """不正な正規表現文字列は空リストを返すこと。"""
-        f = tmp_path / "file.txt"
-        f.write_text("abc")
-        results = grep_file(f, "[invalid")
-        assert results == []
-
-    def test_returns_empty_for_missing_file(self, tmp_path: Path):
-        """存在しないファイルでは空リストを返すこと。"""
-        results = grep_file(tmp_path / "missing.txt", "pattern")
-        assert results == []
-
 
 class TestFindFilesEmptyArgs:
     """find_files の空引数テスト (line 211)。"""
@@ -785,29 +610,8 @@ class TestIsGitRepo:
 class TestReplaceInFileException:
     """replace_in_file の Exception パス (line 510-512)。"""
 
-    def test_write_exception_returns_false(self, tmp_path: Path, monkeypatch):
-        """write_file が例外を起こしたとき False を返すこと。"""
-        f = tmp_path / "file.txt"
-        f.write_text("hello world")
-
-        with patch("bluecore.lib.core_utils.write_file", side_effect=PermissionError("denied")):
-            result = replace_in_file(f, "hello", "goodbye")
-        assert result is False
-
-
 class TestReadStdinJsonSync:
     """read_stdin_json_sync の基本テスト (line 299-316)。"""
-
-    def test_tty_returns_empty_dict(self, monkeypatch):
-        """stdin が tty の場合は空辞書を返すこと。"""
-        import sys
-
-        from bluecore.lib.core_utils import read_stdin_json_sync
-
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-        result = read_stdin_json_sync()
-        assert result == {}
-
 
 class TestReadStdinJsonAsync:
     """read_stdin_json の基本テスト (line 266-285)。"""
@@ -891,57 +695,6 @@ class TestReadStdinJsonAsync:
 class TestReadStdinJsonSyncEdgeCases:
     """read_stdin_json_sync の追加テスト (line 306-316)。"""
 
-    def test_select_timeout_returns_empty_dict(self, monkeypatch):
-        """select.select がタイムアウト（空リスト返却）の場合は空辞書を返すこと。"""
-        import sys
-
-        from bluecore.lib.core_utils import IS_WINDOWS, read_stdin_json_sync
-
-        if IS_WINDOWS:
-            pytest.skip("Windows では select を使わない")
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-
-        import select
-
-        monkeypatch.setattr(select, "select", lambda *args, **kwargs: ([], [], []))
-        result = read_stdin_json_sync()
-        assert result == {}
-
-    def test_json_decode_error_returns_empty_dict(self, monkeypatch):
-        """stdin から不正 JSON を読み込んだ場合は空辞書を返すこと。"""
-        import sys
-
-        from bluecore.lib.core_utils import IS_WINDOWS, read_stdin_json_sync
-
-        if IS_WINDOWS:
-            pytest.skip("Windows では select を使わない")
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-
-        import select
-
-        monkeypatch.setattr(select, "select", lambda *args, **kwargs: ([sys.stdin], [], []))
-        monkeypatch.setattr(sys.stdin, "read", lambda n: "{invalid json")
-        result = read_stdin_json_sync()
-        assert result == {}
-
-    def test_empty_data_returns_empty_dict(self, monkeypatch):
-        """stdin から空データを読み込んだ場合は空辞書を返すこと (line 314)。"""
-        import sys
-
-        from bluecore.lib.core_utils import IS_WINDOWS, read_stdin_json_sync
-
-        if IS_WINDOWS:
-            pytest.skip("Windows では select を使わない")
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-
-        import select
-
-        monkeypatch.setattr(select, "select", lambda *args, **kwargs: ([sys.stdin], [], []))
-        monkeypatch.setattr(sys.stdin, "read", lambda n: "   ")
-        result = read_stdin_json_sync()
-        assert result == {}
-
-
 class TestCommandExistsWindows:
     """command_exists の Windows 分岐テスト (line 371)。"""
 
@@ -1013,20 +766,3 @@ def test_run_command_empty_list() -> None:
     assert result["success"] is False
 
 
-def test_read_stdin_json_sync_windows(monkeypatch) -> None:
-    """Windows では select を使わず直接読み込む。"""
-    from types import SimpleNamespace
-
-    import bluecore.lib.core_utils as cu
-
-    monkeypatch.setattr(cu, "IS_WINDOWS", True)
-    monkeypatch.setattr(cu.sys, "stdin", SimpleNamespace(read=lambda n: '{"a": 1}', isatty=lambda: False))
-    assert cu.read_stdin_json_sync() == {"a": 1}
-
-
-def test_get_git_modified_files_invalid_pattern() -> None:
-    """不正な正規表現パターンはスキップして全ファイルを返す。"""
-    from bluecore.lib.core_utils import get_git_modified_files
-
-    result = get_git_modified_files(["["])  # 不正regex → compiled空 → フィルタなし
-    assert isinstance(result, list)

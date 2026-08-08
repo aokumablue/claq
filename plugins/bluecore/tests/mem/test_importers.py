@@ -369,10 +369,7 @@ class TestImportEventLogs:
         db = MagicMock()
 
         # 存在しないディレクトリをモック
-        with (
-            patch("bluecore.mem.importers.BLUECORE_DIR", tmp_path / "nonexistent" / ".bluecore"),
-            patch("bluecore.mem.importers.BLUECORE_STATE_DIR", tmp_path / "nonexistent" / "state"),
-        ):
+        with patch("bluecore.mem.importers.BLUECORE_DIR", tmp_path / "nonexistent" / ".bluecore"):
             result = import_event_logs(db, "test_user")
         assert result == 0
 
@@ -390,13 +387,7 @@ class TestImportEventLogs:
             '{"action": "read", "file": "main.py", "timestamp": 1704067300}\n'
         )
 
-        state_dir = tmp_path / ".claude" / "state"
-        state_dir.mkdir(parents=True)
-
-        with (
-            patch("bluecore.mem.importers.BLUECORE_DIR", bluecore_dir),
-            patch("bluecore.mem.importers.BLUECORE_STATE_DIR", state_dir),
-        ):
+        with patch("bluecore.mem.importers.BLUECORE_DIR", bluecore_dir):
             result = import_event_logs(db, "test_user")
 
         assert result == 2
@@ -443,26 +434,20 @@ class TestImportEventLogs:
 
         db = MagicMock()
         bluecore_root = tmp_path / ".bluecore"
-        state_dir = tmp_path / ".claude" / "state"
         project_dir = bluecore_root / "projects" / "proj-1"
         project_dir.mkdir(parents=True)
-        state_dir.mkdir(parents=True)
         (bluecore_root / "observations.jsonl").parent.mkdir(parents=True, exist_ok=True)
         (bluecore_root / "observations.jsonl").write_text(json.dumps({"payload": "global"}) + "\n", encoding="utf-8")
         (project_dir / "observations.jsonl").write_text(json.dumps({"payload": "project"}) + "\n", encoding="utf-8")
-        (state_dir / "skill-runs.jsonl").write_text(json.dumps({"payload": "skill"}) + "\n", encoding="utf-8")
         logs_dir = bluecore_root / "logs"
         logs_dir.mkdir(parents=True)
         (logs_dir / "costs.jsonl").write_text(json.dumps({"payload": "cost"}) + "\n", encoding="utf-8")
 
-        with (
-            patch("bluecore.mem.importers.BLUECORE_DIR", bluecore_root),
-            patch("bluecore.mem.importers.BLUECORE_STATE_DIR", state_dir),
-        ):
+        with patch("bluecore.mem.importers.BLUECORE_DIR", bluecore_root):
             result = import_event_logs(db, "test_user")
 
-        assert result == 4
-        assert db.store_event_log.call_count == 4
+        assert result == 3
+        assert db.store_event_log.call_count == 3
 
     def test_import_event_logs_honors_project_filter(self, tmp_path):
         from bluecore.mem.importers import import_event_logs
@@ -526,10 +511,7 @@ class TestImportAll:
         db.get_instinct_by_key.return_value = None
         db.get_adr_by_key.return_value = None
 
-        with (
-            patch("bluecore.mem.importers.BLUECORE_DIR", tmp_path / "nonexistent" / ".bluecore"),
-            patch("bluecore.mem.importers.BLUECORE_STATE_DIR", tmp_path / "nonexistent" / "state"),
-        ):
+        with patch("bluecore.mem.importers.BLUECORE_DIR", tmp_path / "nonexistent" / ".bluecore"):
             result = import_all(db, "test_user", str(tmp_path))
 
         assert "instincts" in result

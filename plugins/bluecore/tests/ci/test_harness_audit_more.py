@@ -335,8 +335,7 @@ def test_memory_hooks_lifecycle_check_fails_when_only_partial_lifecycle_present(
                             "type": "command",
                             "command": (
                                 'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                'bluecore.hooks.run_with_flags "session:mem:setup" "bluecore.mem.cli" '
-                                '"minimal,standard,strict" setup'
+                                "bluecore.mem.cli setup"
                             ),
                         }
                     ]
@@ -353,7 +352,11 @@ def test_memory_hooks_lifecycle_check_fails_when_only_partial_lifecycle_present(
 
 
 def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_path: Path) -> None:
-    """実際の hooks/hooks.json と同形式の4イベントが揃っていれば合格する。"""
+    """実際の hooks/hooks.json と同形式の4イベントが揃っていれば合格する。
+
+    Stop 側は非 Claude ハーネス向け --bg フラグ付きで登録される想定
+    （launcher --bg の実際の使い方に合わせる）。
+    """
     _write_hooks_json(
         tmp_path,
         {
@@ -364,8 +367,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                             "type": "command",
                             "command": (
                                 'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                'bluecore.hooks.run_with_flags "session:mem:setup" "bluecore.mem.cli" '
-                                '"minimal,standard,strict" setup'
+                                "bluecore.mem.cli setup"
                             ),
                         }
                     ]
@@ -376,8 +378,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                             "type": "command",
                             "command": (
                                 'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                'bluecore.hooks.run_with_flags "session:start" "bluecore.hooks.session_start" '
-                                '"minimal,standard,strict"'
+                                "bluecore.hooks.session_start"
                             ),
                         }
                     ]
@@ -390,8 +391,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                             "type": "command",
                             "command": (
                                 'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                'bluecore.hooks.run_with_flags "stop:session-end" "bluecore.hooks.session_end" '
-                                '"minimal,standard,strict"'
+                                "--bg bluecore.hooks.session_end"
                             ),
                         }
                     ]
@@ -404,8 +404,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                             "type": "command",
                             "command": (
                                 'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                'bluecore.hooks.run_with_flags "session:mem:end" "bluecore.mem.cli" '
-                                '"standard,strict" "session-end"'
+                                "--bg bluecore.mem.cli session-end"
                             ),
                         }
                     ]
@@ -442,6 +441,8 @@ def test_hook_command_argv_covers_parse_edge_cases() -> None:
     assert _hook_command_argv("python3 other.py a b") is None
     assert _hook_command_argv("python3 launcher.py a b") == ("a", "b")
     assert _hook_command_argv('python3 "${ROOT}/launcher.py" a b') == ("a", "b")
+    # 先頭の --bg（非 Claude ハーネス向け detach フラグ）は実体でないため除去する
+    assert _hook_command_argv("python3 launcher.py --bg a b") == ("a", "b")
 
 
 def test_event_has_matching_command_covers_branches() -> None:

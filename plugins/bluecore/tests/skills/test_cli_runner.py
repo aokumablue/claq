@@ -38,7 +38,6 @@ from types import SimpleNamespace
 import pytest
 
 from bluecore.skills import cli_runner
-
 from bluecore.skills.cli_runner import build_permission_args, build_tools_args
 
 

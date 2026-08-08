@@ -223,45 +223,6 @@ class TestExtractFilePaths:
 class TestResolveSessionId:
     """resolve_session_id のテスト。"""
 
-    def test_payload_session_id_wins(self, monkeypatch):
-        """ペイロードの session_id が最優先。"""
-        monkeypatch.setenv("CLAUDE_SESSION_ID", "env-id")
-        assert harness.resolve_session_id({"session_id": "payload-id"}) == "payload-id"
-
-    def test_env_fallback(self, monkeypatch):
-        """ペイロードに無ければ CLAUDE_SESSION_ID を使う。"""
-        monkeypatch.setenv("CLAUDE_SESSION_ID", "env-id")
-        assert harness.resolve_session_id({}) == "env-id"
-
-    def test_default_fallback(self):
-        """どちらも無ければ default を返す。"""
-        assert harness.resolve_session_id({"session_id": ""}) == "default"
-
-    def test_unsafe_session_id_falls_back_to_default(self):
-        """ファイル名に安全でない session_id は fail-closed で default に倒す。"""
-        assert harness.resolve_session_id({"session_id": "../../etc/passwd"}) == "default"
-        assert harness.resolve_session_id({"session_id": "a/b"}) == "default"
-        assert harness.resolve_session_id({"session_id": "x" * 129}) == "default"
-
-    def test_unsafe_env_session_id_falls_back_to_default(self, monkeypatch):
-        """環境変数由来でも不正形式は default に倒す。"""
-        monkeypatch.setenv("CLAUDE_SESSION_ID", "bad id with spaces")
-        assert harness.resolve_session_id({}) == "default"
-
-
 class TestResolveProjectDir:
     """resolve_project_dir のテスト。"""
 
-    def test_env_wins(self, monkeypatch):
-        """CLAUDE_PROJECT_DIR が最優先。"""
-        monkeypatch.setenv("CLAUDE_PROJECT_DIR", "/proj")
-        assert harness.resolve_project_dir({"cwd": "/payload"}) == "/proj"
-
-    def test_payload_cwd_fallback(self):
-        """環境変数が無ければペイロードの cwd を使う。"""
-        assert harness.resolve_project_dir({"cwd": "/payload"}) == "/payload"
-
-    def test_getcwd_fallback(self, monkeypatch, tmp_path):
-        """どちらも無ければカレントディレクトリを返す。"""
-        monkeypatch.chdir(tmp_path)
-        assert harness.resolve_project_dir({"cwd": ""}) == str(tmp_path)

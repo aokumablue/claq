@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from bluecore.lib.core_utils import command_exists, get_bluecore_dir, read_file, write_file
+from bluecore.lib.core_utils import get_bluecore_dir, read_file, write_file
 
 
 @dataclass
@@ -219,31 +219,6 @@ def detect_from_package_json(project_dir: str | Path | None = None) -> str | Non
     return None
 
 
-def get_available_package_managers() -> list[str]:
-    """利用可能なパッケージマネージャー（システムにインストール済み）を取得する。
-
-    警告: これは各パッケージマネージャーごとに子プロセスを起動する。
-    セッション開始フック中には呼び出さないこと。
-    高頻度経路では detect_from_lock_file() か detect_from_package_json() を使うこと。
-
-    Returns:
-        list[str]: str の一覧を返します。
-
-    Args:
-        引数はありません。
-
-    Raises:
-        例外は発生しません。
-    """
-    available = []
-
-    for pm_name in PACKAGE_MANAGERS:
-        if command_exists(pm_name):
-            available.append(pm_name)
-
-    return available
-
-
 def _detect_from_env() -> PackageManagerResult | None:
     """環境変数 CLAUDE_PACKAGE_MANAGER からパッケージマネージャーを検出する。"""
     env_pm = os.environ.get("CLAUDE_PACKAGE_MANAGER")
@@ -353,123 +328,6 @@ def set_preferred_package_manager(pm_name: str) -> dict[str, Any]:
     return config
 
 
-def set_project_package_manager(
-    pm_name: str,
-    project_dir: str | Path | None = None,
-) -> dict[str, Any]:
-    """
-    プロジェクトの既定パッケージマネージャーを設定する。
-
-    Args:
-        pm_name: パッケージマネージャー名
-        project_dir: プロジェクトディレクトリ
-
-    Returns:
-        dict[str, Any]: 情報を格納した辞書を返します。
-
-    Raises:
-        ValueError: 入力の不正や処理失敗時に発生します。
-    """
-    if pm_name not in PACKAGE_MANAGERS:
-        raise ValueError(f"Unknown package manager: {pm_name}")
-
-    if project_dir is None:
-        project_dir = Path.cwd()
-    else:
-        project_dir = Path(project_dir)
-
-    config_path = project_dir / ".claude" / "package-manager.json"
-
-    config = {
-        "packageManager": pm_name,
-        "setAt": datetime.now().isoformat(),
-    }
-
-    write_file(config_path, json.dumps(config, indent=2))
-    return config
-
-
-def get_run_command(
-    script: str,
-    *,
-    project_dir: str | Path | None = None,
-) -> str | None:
-    """
-    スクリプトを実行するコマンドを取得する。
-
-    PM が検出できない場合（Node.js 以外のプロジェクト等）は None を返す。
-
-    Args:
-        script: スクリプト名
-        project_dir: プロジェクトディレクトリ
-
-    Returns:
-        コマンド文字列。PM が未検出の場合は None を返します。
-
-    Raises:
-        ValueError: 入力の不正や処理失敗時に発生します。
-    """
-    if not script or not isinstance(script, str):
-        raise ValueError("Script name must be a non-empty string")
-    if not SAFE_NAME_REGEX.match(script):
-        raise ValueError(f"Script name contains unsafe characters: {script}")
-
-    pm = get_package_manager(project_dir=project_dir)
-
-    # PM が検出されなかった場合（Node.js 非依存プロジェクト）
-    if pm.config is None:
-        return None
-
-    if script == "install":
-        return pm.config.install_cmd
-    elif script == "test":
-        return pm.config.test_cmd
-    elif script == "build":
-        return pm.config.build_cmd
-    elif script == "dev":
-        return pm.config.dev_cmd
-    else:
-        return f"{pm.config.run_cmd} {script}"
-
-
-def get_exec_command(
-    binary: str,
-    args: str = "",
-    *,
-    project_dir: str | Path | None = None,
-) -> str | None:
-    """
-    パッケージバイナリを実行するコマンドを取得する。
-
-    PM が検出できない場合（Node.js 以外のプロジェクト等）は None を返す。
-
-    Args:
-        binary: バイナリ名
-        args: 引数文字列
-        project_dir: プロジェクトディレクトリ
-
-    Returns:
-        コマンド文字列。PM が未検出の場合は None を返します。
-
-    Raises:
-        ValueError: 入力の不正や処理失敗時に発生します。
-    """
-    if not binary or not isinstance(binary, str):
-        raise ValueError("Binary name must be a non-empty string")
-    if not SAFE_NAME_REGEX.match(binary):
-        raise ValueError(f"Binary name contains unsafe characters: {binary}")
-    if args and isinstance(args, str) and not SAFE_ARGS_REGEX.match(args):
-        raise ValueError(f"Arguments contain unsafe characters: {args}")
-
-    pm = get_package_manager(project_dir=project_dir)
-
-    # PM が検出されなかった場合（Node.js 非依存プロジェクト）
-    if pm.config is None:
-        return None
-
-    return f"{pm.config.exec_cmd} {binary}{' ' + args if args else ''}"
-
-
 def get_selection_prompt() -> str:
     """Node.js パッケージマネージャーが未設定の場合に設定方法を返す。
 
@@ -504,46 +362,3 @@ _WELL_KNOWN_PATTERNS: dict[str, list[str]] = {
 }
 
 
-def _build_generic_patterns(escaped: str) -> list[str]:
-    """汎用 run コマンドの正規表現パターン一覧を生成する。"""
-    return [
-        f"npm run {escaped}",
-        f"pnpm( run)? {escaped}",
-        f"yarn {escaped}",
-        f"bun run {escaped}",
-    ]
-
-
-def get_command_pattern(action: str) -> str:
-    """すべてのパッケージマネージャーのコマンドに一致する正規表現パターンを生成する。
-
-    Args:
-        action: 対象アクション名（例: "test", "build"）。
-
-    Returns:
-        各パッケージマネージャーのコマンドを `|` で連結し丸括弧で囲んだ正規表現文字列。
-    """
-    trimmed_action = action.strip()
-    if trimmed_action in _WELL_KNOWN_PATTERNS:
-        patterns = _WELL_KNOWN_PATTERNS[trimmed_action]
-    else:
-        patterns = _build_generic_patterns(re.escape(trimmed_action))
-    return f"({'|'.join(patterns)})"
-
-
-__all__ = [
-    "DETECTION_PRIORITY",
-    "PACKAGE_MANAGERS",
-    "PackageManagerConfig",
-    "PackageManagerResult",
-    "detect_from_lock_file",
-    "detect_from_package_json",
-    "get_available_package_managers",
-    "get_command_pattern",
-    "get_exec_command",
-    "get_package_manager",
-    "get_run_command",
-    "get_selection_prompt",
-    "set_preferred_package_manager",
-    "set_project_package_manager",
-]

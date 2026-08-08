@@ -334,7 +334,7 @@ def test_quality_gate_run_step_builds_command_env_and_timeout(
     assert captured["command"] == [sys.executable, "-m", "pkg.tool", "/home/tester", "${NOT_ALLOWED}"]
     assert captured["input"] == "payload"
     assert captured["cwd"] == str(tmp_path / "nested")
-    assert captured["timeout"] == 30.0
+    assert captured["timeout"] == quality_gate.DEFAULT_STEP_TIMEOUT
     captured_env: dict[str, str] = captured["env"]  # type: ignore[assignment]
     assert captured_env["EXTRA"] == "/home/tester"
     assert captured_env["CLAUDE_PLUGIN_ROOT"] == str(quality_gate.PLUGIN_ROOT)
@@ -455,7 +455,7 @@ def test_quality_gate_run_step_exec_command_and_configured_rules_error_paths(
         base_env={"BASE": "1"},
         default_cwd=tmp_path,
     )
-    assert captured["timeout"] == 30.0
+    assert captured["timeout"] == quality_gate.DEFAULT_STEP_TIMEOUT
 
     monkeypatch.setattr(
         quality_gate.subprocess,
@@ -502,10 +502,10 @@ def test_quality_gate_main_success_and_exception_paths(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(quality_gate, "read_raw_stdin", lambda: "payload")
-    monkeypatch.setattr(quality_gate, "run", lambda raw, action="post-edit": None)
+    monkeypatch.setattr(quality_gate, "run", lambda raw, action="post-edit": [])
 
     assert quality_gate.main(["post-edit"]) == 0
-    # quality_gate は PostToolUse フックのため stdout は出さない
+    # lint に失敗がなければ additionalContext を出さない（トークンコスト 0）
     assert capsys.readouterr().out == ""
 
     logs: list[str] = []
@@ -518,6 +518,90 @@ def test_quality_gate_main_success_and_exception_paths(
 
     assert quality_gate.main(["post-edit"]) == 0
     assert any("unexpected error: boom" in message for message in logs)
+
+
+def test_build_failure_context_reports_only_failing_steps_with_output() -> None:
+    """成功 step と出力なし step は additionalContext に載せない。"""
+    results = [
+        quality_gate._StepResult(name="ok", returncode=0, output="all clear"),
+        quality_gate._StepResult(name="silent", returncode=1, output=""),
+        quality_gate._StepResult(name="ruff", returncode=1, output="F401 unused import"),
+    ]
+
+    context = quality_gate._build_failure_context(results)
+
+    assert context.startswith("<quality-gate>")
+    assert context.endswith("</quality-gate>")
+    assert "## ruff (exit 1)" in context
+    assert "F401 unused import" in context
+    assert "all clear" not in context
+    assert "silent" not in context
+
+
+def test_build_failure_context_returns_empty_when_nothing_failed() -> None:
+    """報告すべき失敗がなければ空文字列を返す。"""
+    assert quality_gate._build_failure_context([]) == ""
+    assert (
+        quality_gate._build_failure_context(
+            [quality_gate._StepResult(name="ruff", returncode=0, output="clean")]
+        )
+        == ""
+    )
+
+
+def test_build_failure_context_truncates_at_context_limit() -> None:
+    """全体長は CONTEXT_LIMIT で打ち切る。"""
+    huge = quality_gate._StepResult(name="ruff", returncode=1, output="x" * 5000)
+
+    context = quality_gate._build_failure_context([huge])
+
+    body = context.removeprefix("<quality-gate>\n").removesuffix("\n</quality-gate>")
+    assert len(body) == quality_gate.CONTEXT_LIMIT
+
+
+def test_quality_gate_main_emits_additional_context_on_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """lint が失敗したら additionalContext を stdout に出し、exit は 0 のまま。"""
+    monkeypatch.setattr(quality_gate, "read_raw_stdin", lambda: "payload")
+    monkeypatch.setattr(
+        quality_gate,
+        "run",
+        lambda raw, action="post-edit": [
+            quality_gate._StepResult(name="ruff", returncode=1, output="F401 unused import")
+        ],
+    )
+
+    assert quality_gate.main(["post-edit"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    hook_output = payload["hookSpecificOutput"]
+    assert hook_output["hookEventName"] == "PostToolUse"
+    assert "F401 unused import" in hook_output["additionalContext"]
+
+
+def test_run_rule_steps_skips_steps_that_failed_to_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """起動できなかった step（None）は結果に含めず、後続 step の実行を止めない。"""
+    monkeypatch.setattr(
+        quality_gate,
+        "run_step",
+        lambda step, raw_input, **_kw: (
+            None
+            if step["name"] == "broken"
+            else quality_gate._StepResult(name=step["name"], returncode=0, output="")
+        ),
+    )
+
+    results = quality_gate._run_rule_steps(
+        {"steps": [{"name": "broken"}, {"name": "works"}]},
+        "payload",
+        {"BASE": "1"},
+        tmp_path,
+    )
+
+    assert [r.name for r in results] == ["works"]
 
 
 def test_quality_gate_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch) -> None:

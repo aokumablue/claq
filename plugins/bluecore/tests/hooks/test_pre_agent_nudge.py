@@ -241,7 +241,12 @@ class TestExploreTableRegression:
 
 def test_main_entrypoint_exits_0(monkeypatch: pytest.MonkeyPatch) -> None:
     """__main__ として実行したとき SystemExit(0) で終了する。"""
+    from bluecore.hooks import hook_common
+
     monkeypatch.setattr("sys.stdin.buffer.read", lambda n: b"")
+    # pytest がキャプチャする stdin は実 fd を持たないため、
+    # read_raw_stdin 内の select.select（_stdin_ready）を素通りさせる。
+    monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: (r, [], []))
     with pytest.raises(SystemExit) as excinfo:
         runpy.run_module("bluecore.hooks.pre_agent_nudge", run_name="__main__")
     assert excinfo.value.code == 0

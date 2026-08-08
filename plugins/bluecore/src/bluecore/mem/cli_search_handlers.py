@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import fnmatch
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bluecore.lib.slim_text import compact_line, first_meaningful_line
+from bluecore.lib.slim_text import compact_line
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,16 +30,6 @@ class SearchDeps:
     get_project: GetProjectFn
     coerce_int: CoerceIntFn
     log: Any
-
-
-@dataclass(frozen=True)
-class StructuredFilter:
-    """構造化検索のフィルタ条件（ツール名・ファイルパターン・日付範囲）。"""
-
-    tool_filter: str | None
-    file_pattern: str | None
-    date_from: int | str | None
-    date_to: int | str | None
 
 
 def handle_search(
@@ -67,106 +56,6 @@ def handle_search(
     except Exception as e:
         deps.log.warning("検索失敗: %s", e)
         print(json.dumps({"results": [], "error": str(e)}))
-
-
-def _get_candidate_ids(db: Any, settings: Any, query: str, project: Any, limit: int) -> list:
-    """クエリがあれば FTS 検索、なければ最近のチャンクから候補 ID を返す。"""
-    from bluecore.mem.search import SearchService
-
-    if query.strip():
-        svc = SearchService(db, settings)
-        return [r.chunk_id for r in svc.search(query=query, project=project, limit=limit * 3)]
-    return [c.id for c in db.get_recent_chunks(limit=limit * 3, project=project) if c.id is not None]
-
-
-def _build_chunk_result(db: Any, chunk_id: str) -> dict | None:
-    """chunk_id からチャンク辞書を構築して返す。存在しない場合は None。"""
-    chunk = db.get_chunk_by_id(chunk_id)
-    if chunk is None:
-        return None
-    return {
-        "chunk_id": chunk_id,
-        "content": chunk.content,
-        "user_prompt": chunk.user_prompt,
-        "project": chunk.project,
-        "created_at_epoch": chunk.created_at_epoch,
-        "tool_names": chunk.tool_names,
-        "files_read": chunk.files_read,
-        "files_modified": chunk.files_modified,
-    }
-
-
-def handle_search_structured(
-    settings: Settings,
-    stdin_data: dict[str, Any],
-    deps: SearchDeps,
-) -> None:
-    """構造化検索: tool_name, files, date_range フィルタをサポート"""
-    query = str(stdin_data.get("query", "") or "")
-    project = stdin_data.get("project") or deps.get_project(stdin_data)
-    limit = deps.coerce_int(stdin_data.get("limit"), default=20)
-    filt = StructuredFilter(
-        tool_filter=stdin_data.get("tool_name"),
-        file_pattern=stdin_data.get("file_pattern"),
-        date_from=stdin_data.get("date_from"),
-        date_to=stdin_data.get("date_to"),
-    )
-
-    try:
-        with deps.open_db(settings) as db:
-            candidate_ids = _get_candidate_ids(db, settings, query, project, limit)
-            filtered = apply_structured_filters(db, candidate_ids, filt)
-            results = [r for cid in filtered[:limit] if (r := _build_chunk_result(db, cid)) is not None]
-        print(json.dumps({"results": results, "total": len(results)}))
-    except Exception as e:
-        deps.log.warning("構造化検索失敗: %s", e)
-        print(json.dumps({"results": [], "error": str(e)}))
-
-
-def apply_structured_filters(
-    db: Database,
-    candidate_ids: list[int],
-    filt: StructuredFilter,
-) -> list[int]:
-    """候補チャンクに構造化フィルタを適用"""
-    if not candidate_ids:
-        return []
-
-    chunks = db.get_chunks_by_ids(candidate_ids)
-    from_epoch = parse_date_to_epoch(filt.date_from) if filt.date_from else None
-    to_epoch = parse_date_to_epoch(filt.date_to) if filt.date_to else None
-    filtered = []
-
-    for chunk_id in candidate_ids:
-        chunk = chunks.get(chunk_id)
-        if not chunk:
-            continue
-        if filt.tool_filter and filt.tool_filter not in chunk.tool_names:
-            continue
-        if filt.file_pattern:
-            all_files = chunk.files_read + chunk.files_modified
-            if not any(fnmatch.fnmatch(f, filt.file_pattern) for f in all_files):
-                continue
-        if from_epoch and chunk.created_at_epoch < from_epoch:
-            continue
-        if to_epoch and chunk.created_at_epoch > to_epoch:
-            continue
-        filtered.append(chunk_id)
-
-    return filtered
-
-
-def parse_date_to_epoch(value: int | str | None) -> int | None:
-    """日付（epoch または ISO 8601）をエポックに変換"""
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    try:
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return int(dt.timestamp())
-    except (ValueError, AttributeError):
-        return None
 
 
 def render_adaptive_context(db: Database, results: list[SearchResult], max_tokens: int = 400) -> str:
@@ -203,7 +92,7 @@ def _format_digest_entry(digest: SessionDigest) -> str:
     含めない簡潔形式にする。
     """
     date = datetime.fromtimestamp(digest.started_at_epoch, tz=UTC).strftime("%Y-%m-%d")
-    return f"## 過去セッション: {digest.project} ({date}) [{digest.outcome}]\n\n**要約**: {digest.summary}\n"
+    return f"## 過去セッション: {digest.project} ({date})\n\n**要約**: {digest.summary}\n"
 
 
 def render_digest_context(results: list[DigestSearchResult], max_tokens: int = 150) -> str:
@@ -236,15 +125,12 @@ def render_digest_context(results: list[DigestSearchResult], max_tokens: int = 1
 
 
 def format_fields(
-    user_prompt: str,
     tool_names: list[str],
     files_modified: list[str],
     content: str,
 ) -> str:
-    """プロンプト・ツール・変更ファイル・本文を Markdown 形式にフォーマットする。"""
+    """ツール・変更ファイル・本文を Markdown 形式にフォーマットする。"""
     parts: list[str] = []
-    if user_prompt:
-        parts.append(f"**プロンプト**: {slim_prompt(user_prompt)}")
     if tool_names:
         parts.append(f"**ツール**: {', '.join(tool_names)}")
     if files_modified:
@@ -257,12 +143,12 @@ def format_fields(
 
 def format_chunk_from_result(result: SearchResult) -> str:
     """SearchResult をチャンクフォーマットに変換する（ローカル DB に該当チャンクが無い場合のフォールバック用）。"""
-    return format_fields(result.user_prompt, result.tool_names, result.files_modified, result.content)
+    return format_fields(result.tool_names, result.files_modified, result.content)
 
 
 def format_chunk(chunk: MemoryChunk) -> str:
     """MemoryChunk をチャンクフォーマットに変換する。"""
-    return format_fields(chunk.user_prompt, chunk.tool_names, chunk.files_modified, chunk.content)
+    return format_fields(chunk.tool_names, chunk.files_modified, chunk.content)
 
 
 def format_timestamp(epoch: int) -> str:
@@ -276,24 +162,6 @@ def truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[:max_len] + "..."
-
-
-def slim_prompt(text: str, max_len: int = 160) -> str:
-    """会話調の前置きを落として、プロンプトを短く直接的に整える。"""
-    line = first_meaningful_line(text)
-    if line:
-        return compact_line(line, max_len)
-
-    in_code_block = False
-    for raw_line in text.splitlines():
-        stripped = raw_line.strip()
-        if stripped.startswith("```"):
-            in_code_block = not in_code_block
-            continue
-        if in_code_block and stripped:
-            return compact_line(stripped, max_len)
-
-    return ""
 
 
 def slim_context_content(

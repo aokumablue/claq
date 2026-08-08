@@ -53,7 +53,6 @@ def test_context_command_uses_local_db(monkeypatch, tmp_path: Path) -> None:
             tool_names=["Edit"],
             files_read=[],
             files_modified=["file.py"],
-            user_prompt="fix the bug",
             created_at_epoch=int(time.time()),  # hot 層（直近24h）に収まる必要がある
         )
     )
@@ -72,7 +71,6 @@ def test_search_command_returns_results(monkeypatch, tmp_path: Path) -> None:
         chunk_id=1,
         score=0.99,
         content="direct db result",
-        user_prompt="prompt",
         project="repo",
         created_at_epoch=1700000000,
         tool_names=["Read"],
@@ -107,7 +105,6 @@ def test_session_init_injects_context_from_local_db(monkeypatch, tmp_path: Path)
             tool_names=["Write"],
             files_read=[],
             files_modified=["src/app.py"],
-            user_prompt="before",
             created_at_epoch=1700000000,
         )
     )
@@ -117,7 +114,6 @@ def test_session_init_injects_context_from_local_db(monkeypatch, tmp_path: Path)
         chunk_id=chunk_id,
         score=0.99,
         content="previous work",
-        user_prompt="before",
         project="repo",
         created_at_epoch=1700000000,
         tool_names=["Write"],
@@ -155,7 +151,6 @@ def test_init_command_recreates_local_db(monkeypatch, tmp_path: Path) -> None:
             tool_names=["Edit"],
             files_read=[],
             files_modified=["src/app.py"],
-            user_prompt="before",
             created_at_epoch=1700000000,
         )
     )
@@ -190,99 +185,6 @@ def test_remove_db_artifacts_handles_missing_and_directory(tmp_path: Path) -> No
     assert not db_path.exists()
     assert not wal_dir.exists()
     assert not (tmp_path / "mem.db-journal").exists()
-
-
-def test_search_structured_with_tool_filter(monkeypatch, tmp_path: Path) -> None:
-    """構造化検索: tool_name フィルタのテスト"""
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
-    db = Database(tmp_path / "mem.db")
-    # Edit ツールのチャンク
-    db.store_chunk(
-        MemoryChunk(
-            session_id="s1",
-            project="repo",
-            chunk_index=0,
-            content="edit work",
-            tool_names=["Edit"],
-            files_read=[],
-            files_modified=["file.py"],
-            user_prompt="edit file",
-            created_at_epoch=1700000000,
-        )
-    )
-    # Bash ツールのチャンク
-    db.store_chunk(
-        MemoryChunk(
-            session_id="s1",
-            project="repo",
-            chunk_index=1,
-            content="bash work",
-            tool_names=["Bash"],
-            files_read=[],
-            files_modified=[],
-            user_prompt="run test",
-            created_at_epoch=1700000001,
-        )
-    )
-    db.close()
-
-    stdout, stderr = _run_cli(
-        monkeypatch,
-        tmp_path,
-        ["search-structured"],
-        {"cwd": str(repo_dir), "tool_name": "Edit", "limit": 10},
-    )
-    assert stderr == ""
-    payload = json.loads(stdout)
-    assert len(payload["results"]) == 1
-    assert payload["results"][0]["content"] == "edit work"
-    assert "Edit" in payload["results"][0]["tool_names"]
-
-
-def test_search_structured_with_file_pattern(monkeypatch, tmp_path: Path) -> None:
-    """構造化検索: file_pattern フィルタのテスト"""
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
-    db = Database(tmp_path / "mem.db")
-    db.store_chunk(
-        MemoryChunk(
-            session_id="s1",
-            project="repo",
-            chunk_index=0,
-            content="python work",
-            tool_names=["Edit"],
-            files_read=[],
-            files_modified=["src/main.py"],
-            user_prompt="edit python",
-            created_at_epoch=1700000000,
-        )
-    )
-    db.store_chunk(
-        MemoryChunk(
-            session_id="s1",
-            project="repo",
-            chunk_index=1,
-            content="js work",
-            tool_names=["Edit"],
-            files_read=[],
-            files_modified=["src/app.js"],
-            user_prompt="edit js",
-            created_at_epoch=1700000001,
-        )
-    )
-    db.close()
-
-    stdout, stderr = _run_cli(
-        monkeypatch,
-        tmp_path,
-        ["search-structured"],
-        {"cwd": str(repo_dir), "file_pattern": "*.py", "limit": 10},
-    )
-    assert stderr == ""
-    payload = json.loads(stdout)
-    assert len(payload["results"]) == 1
-    assert payload["results"][0]["content"] == "python work"
 
 
 def test_record_command(monkeypatch, tmp_path: Path) -> None:

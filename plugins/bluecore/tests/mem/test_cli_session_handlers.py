@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import pytest
 
-import bluecore.mem.bridge as bridge_mod
 import bluecore.mem.search as search_mod
 from bluecore.mem.cli_search_handlers import _format_digest_entry, render_digest_context
 from bluecore.mem.cli_session_handlers import (
@@ -42,7 +41,6 @@ def _make_search_result(chunk_id: str = "c1", content: str = "chunk content", sc
         chunk_id=chunk_id,
         score=score,
         content=content,
-        user_prompt="",
         project="proj",
         created_at_epoch=1700000000,
         tool_names=[],
@@ -68,7 +66,6 @@ def _make_chunk(session_id: str = "sess-1", chunk_id: str = "c1") -> MemoryChunk
         tool_names=["Edit"],
         files_read=[],
         files_modified=["a.py"],
-        user_prompt="prompt",
         created_at_epoch=1704067200,
     )
 
@@ -129,7 +126,6 @@ class TestHandleSessionEndG3AndDigest:
         chunk = _make_chunk()
         db = FakeDB([chunk])
         settings = make_settings(tmp_path, auto_compact_enabled=False)
-        monkeypatch.setattr(bridge_mod, "sync_session_to_observations", lambda db, session_id: 1)
 
         handle_session_end(settings, {"session_id": "sess-1"}, _make_deps(db))
 
@@ -146,7 +142,6 @@ class TestHandleSessionEndG3AndDigest:
         chunk = _make_chunk()
         db = FakeDB([chunk])
         settings = make_settings(tmp_path, auto_compact_enabled=False)
-        monkeypatch.setattr(bridge_mod, "sync_session_to_observations", lambda db, session_id: 1)
         monkeypatch.setattr(
             digest_mod,
             "generate_and_store_digest",
@@ -193,7 +188,6 @@ class TestSearchAndInjectContextDigestFirst:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="chunk prompt",
             created_at_epoch=1700000000,
         )
         db = FakeDB([chunk])
@@ -228,7 +222,6 @@ class TestSearchAndInjectContextDigestFirst:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="chunk prompt",
             created_at_epoch=1700000000,
         )
         db = FakeDB([chunk])
@@ -262,7 +255,6 @@ class TestSearchAndInjectContextDigestFirst:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=1700000000,
         )
         chunk_other = MemoryChunk(
@@ -274,7 +266,6 @@ class TestSearchAndInjectContextDigestFirst:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=1700000000,
         )
         db = FakeDB([chunk_same, chunk_other])
@@ -312,7 +303,6 @@ class TestSearchAndInjectContextDigestFirst:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=1700000000,
         )
         db = FakeDB([chunk])

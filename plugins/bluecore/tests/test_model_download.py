@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 import urllib.request
 from pathlib import Path
 from unittest.mock import MagicMock, patch

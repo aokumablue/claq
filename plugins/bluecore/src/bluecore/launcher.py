@@ -1,52 +1,37 @@
 #!/usr/bin/env python3
-"""リポジトリ内の Python モジュールと実行可能スクリプトの汎用ランチャー。"""
+"""bluecore フックのインプロセスランチャー。
+
+Claude Code 等のハーネスから `python3 launcher.py [--bg] <module> [args...]`
+の形で起動される。repo-local venv が見つかれば os.execve で自己置換した
+うえで、対象モジュールをサブプロセスを spawn せず runpy でインプロセス
+実行する。stdin はターゲット自身が `hook_common.read_raw_stdin()` 等で
+直接読む（launcher は代読しない）。
+"""
 
 from __future__ import annotations
 
-import math
 import os
-import select
-import subprocess
+import runpy
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
-# hooks.json の最長エントリ（600 秒）より先に自決して孫プロセスの孤立を防ぐ。
-# それより短い timeout のエントリでは Claude Code 側の kill が先に働く。
-DEFAULT_SUBPROCESS_TIMEOUT = 590.0
-
-# hooks は Claude Code が spawn 直後に stdin へ JSON を書き込むため、
-# 最初のバイト到着まで 2 秒あれば十分な余裕がある。
-# stdin リダイレクト漏れ（パイプ未接続のまま open）での無期限ブロックを防ぐ。
-STDIN_FIRST_BYTE_TIMEOUT = 2.0
+_LAUNCHER_PATH = str(REPO_ROOT / "src" / "bluecore" / "launcher.py")
 
 
-def _subprocess_timeout() -> float:
-    """サブプロセスの timeout 秒数を環境変数から解決します。
+def _runtime_python() -> tuple[str, Path | None]:
+    """実行に使う repo-local venv の Python を解決します。
 
     Args:
         なし
 
     Returns:
-        BLUECORE_HOOK_TIMEOUT が正の有限数値ならその秒数、未設定・無効値なら既定の 590 秒。
+        (python 実行ファイルのパス文字列, venv ルート) のタプル。
+        repo-local venv が見つからなければ (sys.executable, None) を返す。
 
     Raises:
         例外は発生しません。
     """
-    raw = os.environ.get("BLUECORE_HOOK_TIMEOUT")
-    if raw:
-        try:
-            value = float(raw)
-        except ValueError:
-            return DEFAULT_SUBPROCESS_TIMEOUT
-        if value > 0 and math.isfinite(value):
-            return value
-    return DEFAULT_SUBPROCESS_TIMEOUT
-
-
-def _runtime_python() -> tuple[str, Path | None]:
-    """実行に使う Python を解決します。"""
     for candidate in (
         REPO_ROOT / ".venv" / "bin" / "python3",
         REPO_ROOT / ".venv" / "bin" / "python",
@@ -58,7 +43,7 @@ def _runtime_python() -> tuple[str, Path | None]:
 
 
 def build_env() -> dict[str, str]:
-    """サブプロセス用の環境変数を構築します。
+    """子プロセス/execve 用の環境変数を構築します。
 
     Args:
         なし
@@ -92,72 +77,108 @@ def build_env() -> dict[str, str]:
     return env
 
 
-def resolve_command(target: str, args: list[str]) -> list[str]:
-    """ターゲットから実行コマンドを解決します。
+def _reexec_into_venv_if_needed() -> None:
+    """repo-local venv の Python へ os.execve で自己置換します。
 
-    Args:
-        target: 実行するモジュール名またはスクリプトパスです。
-        args: ターゲットに渡す引数のリストです。
+    venv が見つからない場合（初回インストール前）はシステム Python の
+    まま続行します（fail-open）。os.execve はプロセスイメージを置換する
+    だけで fork しないため、成功時にプロセス数は増えません。
 
-    Returns:
-        subprocess に渡すコマンドとその引数のリストを返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    candidate = Path(target)
-    if not candidate.is_absolute():
-        candidate = candidate if candidate.exists() else REPO_ROOT / candidate
-
-    if candidate.exists():
-        suffix = candidate.suffix.lower()
-        if suffix == ".py":
-            runtime_python, _ = _runtime_python()
-            return [runtime_python, str(candidate), *args]
-        if suffix in {".sh", ".bash"}:
-            return ["bash", str(candidate), *args]
-        if os.name == "nt" and suffix in {".cmd", ".bat"}:
-            return ["cmd", "/c", str(candidate), *args]
-        if os.access(candidate, os.X_OK):
-            return [str(candidate), *args]
-
-    runtime_python, _ = _runtime_python()
-    return [runtime_python, "-m", target, *args]
-
-
-def _read_stdin() -> str:
-    """stdin のパイプ入力をタイムアウト付きで読み取ります。
+    venv の python3 実行ファイルは多くの場合ベースインタプリタへの
+    symlink（コピーではない）であり、``os.path.samefile(sys.executable,
+    venv_python)`` は symlink 先の実体が同じというだけで True になって
+    しまう。Python の venv 有効化は「起動に使われたパス」に隣接する
+    pyvenv.cfg の有無で決まる（``sys.prefix``）ため、実体比較ではなく
+    ``sys.prefix != sys.base_prefix``（何らかの venv が有効か）で判定し、
+    有効な venv がある場合のみ、その prefix が対象 venv と一致するかを
+    実体比較で確認する。system python 実行時（多くのフック起動はこちら）
+    は必ず exec して venv の site-packages（pydantic 等）を有効化する。
 
     Args:
         なし
 
     Returns:
-        パイプ入力を UTF-8 として読み取った文字列（不正バイトは置換文字へ変換し、
-        UnicodeDecodeError を防ぐ）。TTY 接続時、または STDIN_FIRST_BYTE_TIMEOUT
-        秒以内に最初のバイトが到着しない場合は空文字列。
+        None（execve に成功すると戻らない。venv 不在・既に対象 venv 上・
+        execve 失敗時のみ戻る）
 
     Raises:
         例外は発生しません。
     """
-    if sys.stdin.isatty():
-        return ""
+    venv_python, venv_root = _runtime_python()
+    if venv_root is None:
+        return
 
-    ready, _, _ = select.select([sys.stdin], [], [], STDIN_FIRST_BYTE_TIMEOUT)
-    if not ready:
-        print(
-            "WARNING: stdin から入力が届かないため空入力で続行します（stdin リダイレクト漏れの可能性）",
-            file=sys.stderr,
-        )
-        return ""
+    if sys.prefix != sys.base_prefix:
+        # 既に何らかの venv が有効。対象 venv と一致するなら re-exec 不要。
+        try:
+            if os.path.samefile(sys.prefix, venv_root):
+                return
+        except OSError:
+            pass
 
-    return str(sys.stdin.buffer.read(), encoding="utf-8", errors="replace")
+    try:
+        os.execve(venv_python, [venv_python, _LAUNCHER_PATH, *sys.argv[1:]], build_env())
+    except OSError:
+        # exec 失敗時は現行インタプリタで続行する（fail-open）。
+        return
+
+
+def _run_module_in_process(target: str, target_args: list[str]) -> int:
+    """モジュールをインプロセスで実行し、終了コードを返します。
+
+    runpy.run_module に run_name="__main__" を渡すことで、対象モジュールの
+    `if __name__ == "__main__":` 経路を従来のサブプロセス実行と同一の
+    入口から通す。sys.argv[1:] にターゲット引数を設定してから実行する
+    （mem.cli 等はサブコマンドを sys.argv[1] から読むため）。
+
+    Args:
+        target: 実行するモジュールの dotted name。
+        target_args: ターゲットへ渡す追加引数。
+
+    Returns:
+        ターゲットの終了コード。全フックは SystemExit 経由で終了する
+        （raise SystemExit(main()) / sys.exit(main()) 形式）ことを確認済み。
+
+    Raises:
+        例外は発生しません（内部で捕捉し 1 を返す）。
+    """
+    sys.argv = [target, *target_args]
+    try:
+        runpy.run_module(target, run_name="__main__", alter_sys=True)
+    except SystemExit as exc:
+        if exc.code is None:
+            return 0
+        if isinstance(exc.code, int):
+            return exc.code
+        sys.stderr.write(str(exc.code) + "\n")
+        return 1
+    except Exception as exc:  # noqa: BLE001 - フックは常に終了コードを返す契約にする
+        sys.stderr.write(f"ERROR: {target}: {exc}\n")
+        return 1
+    return 0
+
+
+def _resolve_module_command(target: str, target_args: list[str]) -> list[str]:
+    """detach（--bg かつ非 Claude ハーネス）起動用のコマンドリストを構築します。
+
+    hooks.json / bluecore-helpers.sh のターゲットはすべて dotted module
+    name であることを確認済みのため、`-m` 起動のみをサポートする。
+
+    Args:
+        target: 実行するモジュールの dotted name。
+        target_args: ターゲットへ渡す追加引数。
+
+    Returns:
+        subprocess に渡すコマンドリスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    return [sys.executable, "-m", target, *target_args]
 
 
 def main(argv: list[str] | None = None) -> int:
     """ランチャーのメインエントリポイントです。
-
-    stdin は _read_stdin() でタイムアウト付きに読み取り、サブプロセスの
-    出力は UTF-8（不正バイトは置換文字）として取得します。
 
     Args:
         argv: コマンドライン引数のリストです。
@@ -166,44 +187,44 @@ def main(argv: list[str] | None = None) -> int:
         ターゲットの終了コード、またはエラー時は 1 を返します。
 
     Raises:
-        例外はキャッチされ、エラーメッセージとして出力されます。
+        例外は発生しません。
     """
-    # PYTHONPATH 未設定時の自己解決（launcher.py はサブプロセスに PYTHONPATH を渡すが自身には未設定のため）
+    _reexec_into_venv_if_needed()
+
     src_dir = str(REPO_ROOT / "src")
     if src_dir not in sys.path:
         sys.path.insert(0, src_dir)
 
+    from bluecore.hooks.hook_common import detach_process, read_raw_stdin, write_stderr
+    from bluecore.lib.harness import detect_harness
+
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
-        print("Usage: python3 src/bluecore/launcher.py <module-or-script> [args...]", file=sys.stderr)
+        print("Usage: python3 src/bluecore/launcher.py [--bg] <module> [args...]", file=sys.stderr)
+        return 1
+
+    background = False
+    if args[0] == "--bg":
+        background = True
+        args = args[1:]
+
+    if not args:
+        print("Usage: python3 src/bluecore/launcher.py [--bg] <module> [args...]", file=sys.stderr)
         return 1
 
     target, target_args = args[0], args[1:]
-    raw_input = _read_stdin()
 
-    try:
-        # サブプロセス出力が非 UTF-8 バイトを含んでも UnicodeDecodeError で
-        # 落ちないよう、置換文字へ変換して読み取る
-        result = subprocess.run(
-            resolve_command(target, target_args),
-            input=raw_input,
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-            env=build_env(),
-            timeout=_subprocess_timeout(),
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 1
+    if background and detect_harness() != "claude":
+        # Claude Code はホスト側で非同期実行するためインプロセス実行のまま
+        # 進めてよい。Codex 等 async 未サポートのハーネスでは detach して
+        # 即 0 を返す（フックがセッションを同期ブロックしないようにする）。
+        raw = read_raw_stdin()
+        launched = detach_process(_resolve_module_command(target, target_args), raw, env=build_env())
+        if not launched:
+            write_stderr(f"[Hook] Error detaching {target}\n")
+        return 0
 
-    if result.stdout:
-        sys.stdout.write(result.stdout)
-
-    if result.stderr:
-        sys.stderr.write(result.stderr)
-
-    return result.returncode
+    return _run_module_in_process(target, target_args)
 
 
 if __name__ == "__main__":

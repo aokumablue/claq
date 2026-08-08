@@ -16,8 +16,7 @@ _FILE_WRITE_TOOLS = {"Write", "Edit", "NotebookEdit"}
 
 # tool_response が入力（編集・書き込み内容）をそのままエコーする書き込み系ツール。
 # これらの response は input_summary と情報が重複し、生 dict（structuredPatch 等）で
-# 肥大化するため、保存時に短い抜粋へ切り詰める（埋め込み・同期・注入密度のコスト削減）。
-# 失敗時のエラー本文は別途 tool_error に保持されるため、要約短縮で情報は欠落しない。
+# 肥大化するため、保存時に短い抜粋へ切り詰める（埋め込み・注入密度のコスト削減）。
 _ECHO_RESPONSE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 
 # tool_output の最大文字数（超過時はトランケート）
@@ -25,9 +24,6 @@ _MAX_OUTPUT_LEN = 1500
 _ECHO_RESPONSE_OUTPUT_LEN = 200  # エコー系ツール response の短縮上限
 _TRUNCATE_KEEP = 500  # 先頭/末尾それぞれ保持する文字数
 
-# AI 応答の要約: 先頭400 + 末尾100 = 計500文字
-_AI_RESPONSE_HEAD = 400
-_AI_RESPONSE_TAIL = 100
 
 
 @dataclass(frozen=True)
@@ -38,15 +34,6 @@ class ToolUseParams:
     tool_input: dict | str | None
     tool_response: str | None
     chunk_max_length: int = 2000
-    is_error: bool = False
-    ai_response: str | None = None
-
-
-def _summarize_ai_response(response: str) -> str:
-    """AI 応答を先頭+末尾で最大500文字に要約する。"""
-    if len(response) <= _AI_RESPONSE_HEAD + _AI_RESPONSE_TAIL:
-        return response
-    return response[:_AI_RESPONSE_HEAD] + response[-_AI_RESPONSE_TAIL:]
 
 
 def _parse_tool_input(tool_input: dict | str | None) -> dict:
@@ -69,26 +56,15 @@ class ChunkAccumulator:
 
     session_id: str
     project: str
-    user_prompt: str
     chunk_index: int
     tool_names: list[str] = field(default_factory=list)
     files_read: list[str] = field(default_factory=list)
     files_modified: list[str] = field(default_factory=list)
     _content_parts: list[str] = field(default_factory=list)
 
-    # 実行品質トラッキング
-    _tool_sequence: list[str] = field(default_factory=list)  # 順序保持・重複あり
-    _error_count: int = 0
-    _last_error: str | None = None
-    _ai_response_summary: str | None = None
-
     def add_tool_use(self, params: ToolUseParams) -> None:
         """ツール使用を蓄積する"""
         tool_name = params.tool_name
-        # 重複排除なし（呼び出し順序を保持）
-        self._tool_sequence.append(tool_name)
-
-        # tool_names は重複排除（後方互換）
         if tool_name not in self.tool_names:
             self.tool_names.append(tool_name)
 
@@ -101,16 +77,6 @@ class ChunkAccumulator:
             self.files_modified.extend(f for f in files if f not in self.files_modified)
         elif files:
             self.files_read.extend(f for f in files if f not in self.files_read)
-
-        # エラー記録
-        if params.is_error:
-            self._error_count += 1
-            if params.tool_response:
-                self._last_error = redact(params.tool_response[:500])
-
-        # AI 応答の要約を保存（最後のものを上書き）
-        if params.ai_response:
-            self._ai_response_summary = _summarize_ai_response(params.ai_response)
 
         # コンテンツの組み立て
         input_summary = _summarize_input(tool_name, inp, params.tool_input)
@@ -128,8 +94,6 @@ class ChunkAccumulator:
     def to_chunk(self) -> MemoryChunk:
         """蓄積した内容を redact・タグ除去した MemoryChunk に変換する。"""
         content = "\n\n".join(self._content_parts)
-        # エラーが1件以上あれば failure、それ以外は success
-        execution_status = "failure" if self._error_count > 0 else "success"
         return MemoryChunk(
             session_id=self.session_id,
             project=self.project,
@@ -138,12 +102,7 @@ class ChunkAccumulator:
             tool_names=self.tool_names,
             files_read=self.files_read,
             files_modified=self.files_modified,
-            user_prompt=redact(strip_tags(self.user_prompt)),
             created_at_epoch=int(time.time()),
-            execution_status=execution_status,
-            tool_error=self._last_error,
-            ai_response_summary=self._ai_response_summary,
-            tool_sequence=list(self._tool_sequence),
         )
 
 
@@ -151,14 +110,12 @@ def build_chunk_from_tool_use(
     session_id: str,
     project: str,
     chunk_index: int,
-    user_prompt: str,
     params: ToolUseParams,
 ) -> MemoryChunk:
     """単一ツール使用から即座にチャンクを生成する（PostToolUse 毎の呼び出し）"""
     acc = ChunkAccumulator(
         session_id=session_id,
         project=project,
-        user_prompt=user_prompt,
         chunk_index=chunk_index,
     )
     acc.add_tool_use(params)

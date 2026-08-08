@@ -1,39 +1,15 @@
-"""launcher モジュールのテスト。"""
+"""launcher モジュール（インプロセス実行版）のテスト。"""
 
 from __future__ import annotations
 
-import io
 import os
 import runpy
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 import bluecore.launcher as launcher
-
-
-class FakeStdin:
-    """stdin の代替オブジェクト。"""
-
-    def __init__(self, tty: bool, data: str | bytes) -> None:
-        self._tty = tty
-        self._data = data.encode("utf-8") if isinstance(data, str) else data
-        self.read_called = False
-        self.buffer = SimpleNamespace(read=self._read_bytes)
-
-    def isatty(self) -> bool:
-        return self._tty
-
-    def _read_bytes(self, n: int = -1) -> bytes:
-        self.read_called = True
-        return self._data[:n] if n >= 0 else self._data
-
-
-def _patch_select_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    """select を常に ready 扱いへ差し替える（FakeStdin は実 fd を持たないため）。"""
-    monkeypatch.setattr(launcher.select, "select", lambda r, w, x, t: (r, [], []))
 
 
 def _create_repo_venv(tmp_path: Path) -> Path:
@@ -44,350 +20,370 @@ def _create_repo_venv(tmp_path: Path) -> Path:
     return venv_python
 
 
-@pytest.mark.parametrize(
-    ("tty", "expected_input", "should_read"),
-    [
-        (True, "", False),
-        (False, "payload", True),
-    ],
-)
-def test_main_reads_stdin_only_when_piped(
-    monkeypatch, capsys, tty: bool, expected_input: str, should_read: bool
-) -> None:
-    fake_stdin = FakeStdin(tty, "payload")
-    captured = {}
+class TestRuntimePython:
+    def test_prefers_repo_venv_python(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        venv_python = _create_repo_venv(tmp_path)
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
 
-    monkeypatch.setattr(launcher.sys, "stdin", fake_stdin)
-    monkeypatch.setattr(launcher, "build_env", lambda: {})
-    _patch_select_ready(monkeypatch)
+        python, venv_root = launcher._runtime_python()
 
-    def fake_run(*args, **kwargs):
-        captured["input"] = kwargs["input"]
-        return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+        assert python == str(venv_python)
+        assert venv_root == tmp_path / ".venv"
 
-    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+    def test_falls_back_to_system_python_without_repo_venv(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
 
-    result = launcher.main(["dummy-target"])
+        python, venv_root = launcher._runtime_python()
 
-    assert result == 0
-    assert captured.get("input", "") == expected_input
-    assert capsys.readouterr().out == "ok"
+        assert python == sys.executable
+        assert venv_root is None
 
 
-def test_main_decodes_non_utf8_stdin_with_replacement(monkeypatch, capsys) -> None:
-    """非 UTF-8 バイト列の stdin は置換文字でデコードしクラッシュしない。"""
-    fake_stdin = FakeStdin(False, b'{"command": "ls \xff\xfe"}')
-    captured = {}
+class TestBuildEnv:
+    def test_prepends_repo_venv_to_path(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        _create_repo_venv(tmp_path)
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        monkeypatch.setenv("PATH", "/usr/local/bin")
+        monkeypatch.delenv("PYTHONPATH", raising=False)
 
-    monkeypatch.setattr(launcher.sys, "stdin", fake_stdin)
-    monkeypatch.setattr(launcher, "build_env", lambda: {})
-    _patch_select_ready(monkeypatch)
+        env = launcher.build_env()
 
-    def fake_run(*args, **kwargs):
-        captured["input"] = kwargs["input"]
-        return SimpleNamespace(stdout="", stderr="", returncode=0)
+        assert env["CLAUDE_PLUGIN_ROOT"] == str(tmp_path)
+        assert env["VIRTUAL_ENV"] == str(tmp_path / ".venv")
+        assert env["PATH"].split(os.pathsep)[0] == str(tmp_path / ".venv" / "bin")
 
-    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+    def test_appends_existing_pythonpath(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(launcher, "_runtime_python", lambda: (sys.executable, None))
+        monkeypatch.setenv("PYTHONPATH", "base-path")
 
-    assert launcher.main(["dummy-target"]) == 0
-    assert captured["input"] == '{"command": "ls ��"}'
+        env = launcher.build_env()
 
+        assert env["PYTHONPATH"] == os.pathsep.join([str(tmp_path / "src"), "base-path"])
 
-def test_main_does_not_echo_piped_input_when_subprocess_is_silent(monkeypatch, capsys) -> None:
-    fake_stdin = FakeStdin(False, "payload")
-    captured = {}
+    def test_without_path_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """PATH 未設定でも venv の PATH を構築する。"""
+        monkeypatch.setattr(launcher, "_runtime_python", lambda: ("py", tmp_path))
+        monkeypatch.delenv("PATH", raising=False)
 
-    monkeypatch.setattr(launcher.sys, "stdin", fake_stdin)
-    monkeypatch.setattr(launcher, "build_env", lambda: {})
-    _patch_select_ready(monkeypatch)
+        env = launcher.build_env()
 
-    def fake_run(*args, **kwargs):
-        captured["input"] = kwargs["input"]
-        return SimpleNamespace(stdout="", stderr="", returncode=0)
-
-    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
-
-    result = launcher.main(["dummy-target"])
-
-    assert result == 0
-    assert fake_stdin.read_called is True
-    assert captured["input"] == "payload"
-    assert capsys.readouterr().out == ""
+        assert env["VIRTUAL_ENV"] == str(tmp_path)
+        assert str(tmp_path / "bin") in env["PATH"]
 
 
-def test_resolve_command_prefers_repo_venv_python(monkeypatch, tmp_path: Path) -> None:
-    venv_python = _create_repo_venv(tmp_path)
-    monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+class TestReexecIntoVenvIfNeeded:
+    """os.execve による venv 自己置換の判定ロジックのテスト。
 
-    cmd = launcher.resolve_command("bluecore.hooks.doc_file_warning", ["arg1"])
+    venv の python3 実行ファイルは多くの場合ベースインタプリタへの symlink
+    のため、単純な実体比較（samefile）では venv 有効化の要否を誤判定する
+    （NG 回帰）。sys.prefix != sys.base_prefix を主判定に使うことを確認する。
+    """
 
-    assert cmd == [str(venv_python), "-m", "bluecore.hooks.doc_file_warning", "arg1"]
+    def test_no_venv_skips_exec(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(launcher, "_runtime_python", lambda: (sys.executable, None))
+        called = []
+        monkeypatch.setattr(launcher.os, "execve", lambda *a: called.append(a))
 
+        launcher._reexec_into_venv_if_needed()
 
-def test_resolve_command_falls_back_to_system_python_without_repo_venv(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        assert called == []
 
-    cmd = launcher.resolve_command("bluecore.hooks.doc_file_warning", [])
+    def test_bare_system_python_always_execs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """sys.prefix == sys.base_prefix（venv 非活性）なら、venv python3 が
+        システム python への symlink であっても必ず exec する。"""
+        venv_python = _create_repo_venv(tmp_path)
+        venv_root = tmp_path / ".venv"
+        monkeypatch.setattr(launcher, "_runtime_python", lambda: (str(venv_python), venv_root))
+        monkeypatch.setattr(launcher.sys, "prefix", "/usr")
+        monkeypatch.setattr(launcher.sys, "base_prefix", "/usr")
+        # samefile が True（symlink 先が同じ実体）でも exec すべきことを保証するため、
+        # わざと同一ファイルとの比較で True を返すよう仕込む。
+        monkeypatch.setattr(launcher.os.path, "samefile", lambda a, b: True)
+        called = []
+        monkeypatch.setattr(launcher.os, "execve", lambda *a: called.append(a))
+        monkeypatch.setattr(launcher, "build_env", lambda: {"X": "1"})
 
-    assert cmd == [sys.executable, "-m", "bluecore.hooks.doc_file_warning"]
+        launcher._reexec_into_venv_if_needed()
 
+        assert len(called) == 1
+        assert called[0][0] == str(venv_python)
 
-def test_resolve_command_runs_python_script_with_repo_venv(monkeypatch, tmp_path: Path) -> None:
-    venv_python = _create_repo_venv(tmp_path)
-    script = tmp_path / "tool.py"
-    script.write_text("print('ok')", encoding="utf-8")
-    monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+    def test_already_in_matching_venv_skips_exec(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        venv_python = _create_repo_venv(tmp_path)
+        venv_root = tmp_path / ".venv"
+        monkeypatch.setattr(launcher, "_runtime_python", lambda: (str(venv_python), venv_root))
+        monkeypatch.setattr(launcher.sys, "prefix", str(venv_root))
+        monkeypatch.setattr(launcher.sys, "base_prefix", "/usr")
+        monkeypatch.setattr(launcher.os.path, "samefile", lambda a, b: True)
+        called = []
+        monkeypatch.setattr(launcher.os, "execve", lambda *a: called.append(a))
 
-    assert launcher.resolve_command(str(script), ["arg"]) == [str(venv_python), str(script), "arg"]
+        launcher._reexec_into_venv_if_needed()
 
+        assert called == []
 
-def test_build_env_prepends_repo_venv_to_path(monkeypatch, tmp_path: Path) -> None:
-    _create_repo_venv(tmp_path)
-    monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
-    monkeypatch.setenv("PATH", "/usr/local/bin")
-    monkeypatch.delenv("PYTHONPATH", raising=False)
+    def test_in_different_venv_still_execs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        venv_python = _create_repo_venv(tmp_path)
+        venv_root = tmp_path / ".venv"
+        monkeypatch.setattr(launcher, "_runtime_python", lambda: (str(venv_python), venv_root))
+        monkeypatch.setattr(launcher.sys, "prefix", "/some/other/venv")
+        monkeypatch.setattr(launcher.sys, "base_prefix", "/usr")
+        monkeypatch.setattr(launcher.os.path, "samefile", lambda a, b: False)
+        called = []
+        monkeypatch.setattr(launcher.os, "execve", lambda *a: called.append(a))
+        monkeypatch.setattr(launcher, "build_env", lambda: {})
 
-    env = launcher.build_env()
+        launcher._reexec_into_venv_if_needed()
 
-    assert env["CLAUDE_PLUGIN_ROOT"] == str(tmp_path)
-    assert env["VIRTUAL_ENV"] == str(tmp_path / ".venv")
-    assert env["PATH"].split(os.pathsep)[0] == str(tmp_path / ".venv" / "bin")
+        assert len(called) == 1
 
+    def test_samefile_oserror_falls_through_to_exec(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        venv_python = _create_repo_venv(tmp_path)
+        venv_root = tmp_path / ".venv"
+        monkeypatch.setattr(launcher, "_runtime_python", lambda: (str(venv_python), venv_root))
+        monkeypatch.setattr(launcher.sys, "prefix", str(venv_root))
+        monkeypatch.setattr(launcher.sys, "base_prefix", "/usr")
 
-def test_build_env_appends_existing_pythonpath(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(launcher, "_runtime_python", lambda: (sys.executable, None))
-    monkeypatch.setenv("PYTHONPATH", "base-path")
-
-    env = launcher.build_env()
-
-    assert env["PYTHONPATH"] == os.pathsep.join([str(tmp_path / "src"), "base-path"])
-
-
-def test_resolve_command_covers_shell_batch_and_executable_targets(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    shell_script = tmp_path / "tool.sh"
-    shell_script.write_text("#!/bin/sh\necho ok", encoding="utf-8")
-    assert launcher.resolve_command(str(shell_script), []) == ["bash", str(shell_script)]
-
-    executable = tmp_path / "tool"
-    executable.write_text("#!/bin/sh\necho ok", encoding="utf-8")
-    executable.chmod(0o755)
-    assert launcher.resolve_command(str(executable), []) == [str(executable)]
-
-    batch = tmp_path / "tool.cmd"
-    batch.write_text("@echo off\necho ok", encoding="utf-8")
-    monkeypatch.setattr(launcher.os, "name", "nt", raising=False)
-    assert launcher.resolve_command(str(batch), []) == ["cmd", "/c", str(batch)]
-
-
-def test_resolve_command_falls_back_when_candidate_resolution_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    plugin_root = tmp_path / "plugin"
-    plugin_root.mkdir()
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
-
-    original_resolve = launcher.Path.resolve
-
-    def fake_resolve(self, *args, **kwargs):  # noqa: ANN001
-        if self.name == "bad-target":
+        def fail_samefile(a, b):  # noqa: ANN001
             raise OSError("boom")
-        return original_resolve(self, *args, **kwargs)
 
-    monkeypatch.setattr(launcher.Path, "resolve", fake_resolve)
+        monkeypatch.setattr(launcher.os.path, "samefile", fail_samefile)
+        called = []
+        monkeypatch.setattr(launcher.os, "execve", lambda *a: called.append(a))
+        monkeypatch.setattr(launcher, "build_env", lambda: {})
 
-    expected_python, _ = launcher._runtime_python()
-    assert launcher.resolve_command("bad-target", ["arg"]) == [expected_python, "-m", "bad-target", "arg"]
+        launcher._reexec_into_venv_if_needed()
 
+        assert len(called) == 1
 
-def test_main_covers_usage_stderr_and_entrypoint(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    assert launcher.main([]) == 1
-    assert "Usage: python3" in capsys.readouterr().err
+    def test_execve_oserror_is_swallowed(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        venv_python = _create_repo_venv(tmp_path)
+        venv_root = tmp_path / ".venv"
+        monkeypatch.setattr(launcher, "_runtime_python", lambda: (str(venv_python), venv_root))
+        monkeypatch.setattr(launcher.sys, "prefix", "/usr")
+        monkeypatch.setattr(launcher.sys, "base_prefix", "/usr")
+        monkeypatch.setattr(launcher, "build_env", lambda: {})
 
-    captured = {}
+        def fail_execve(*a):
+            raise OSError("exec failed")
 
-    def fake_run(*args, **kwargs):
-        captured["stderr"] = "child stderr"
-        return SimpleNamespace(stdout="child stdout", stderr="child stderr", returncode=7)
+        monkeypatch.setattr(launcher.os, "execve", fail_execve)
 
-    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(False, "payload"))
-    monkeypatch.setattr(launcher, "build_env", lambda: {})
-    _patch_select_ready(monkeypatch)
-    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
-
-    assert launcher.main(["dummy-target"]) == 7
-    output = capsys.readouterr()
-    assert output.out == "child stdout"
-    assert output.err == "child stderr"
-    assert captured["stderr"] == "child stderr"
+        # 例外を送出せず戻ってくることを確認する（fail-open）。
+        launcher._reexec_into_venv_if_needed()
 
 
-def test_main_handles_oserror_and_entrypoint(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(False, "payload"))
-    monkeypatch.setattr(launcher, "build_env", lambda: {})
-    _patch_select_ready(monkeypatch)
-    monkeypatch.setattr(launcher.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("boom")))
+class TestRunModuleInProcess:
+    def test_system_exit_zero_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
 
-    assert launcher.main(["dummy-target"]) == 1
-    assert "ERROR: boom" in capsys.readouterr().err
+        def fake_run_module(target, run_name=None, alter_sys=None):  # noqa: ANN001
+            raise SystemExit(0)
 
-    monkeypatch.setattr(sys, "argv", ["launcher.py"])
-    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+        monkeypatch.setattr(launcher.runpy, "run_module", fake_run_module)
 
-    with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("bluecore.launcher", run_name="__main__")
+        assert launcher._run_module_in_process("bluecore.hooks.block_no_verify", []) == 0
 
-    assert excinfo.value.code == 1
+    def test_system_exit_nonzero_returns_code(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        monkeypatch.setattr(
+            launcher.runpy, "run_module", lambda *a, **k: (_ for _ in ()).throw(SystemExit(2))
+        )
 
+        assert launcher._run_module_in_process("target", []) == 2
 
-def test_build_env_without_path(monkeypatch, tmp_path) -> None:
-    """PATH 未設定でも venv の PATH を構築する。"""
-    from bluecore import launcher
+    def test_system_exit_none_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        monkeypatch.setattr(
+            launcher.runpy, "run_module", lambda *a, **k: (_ for _ in ()).throw(SystemExit())
+        )
 
-    monkeypatch.setattr(launcher, "_runtime_python", lambda: ("py", tmp_path))
-    monkeypatch.delenv("PATH", raising=False)
-    env = launcher.build_env()
-    assert env["VIRTUAL_ENV"] == str(tmp_path)
-    assert str(tmp_path / "bin") in env["PATH"]
+        assert launcher._run_module_in_process("target", []) == 0
 
+    def test_system_exit_with_string_message_returns_one(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        monkeypatch.setattr(
+            launcher.runpy, "run_module", lambda *a, **k: (_ for _ in ()).throw(SystemExit("bad"))
+        )
 
-def test_resolve_command_nonexecutable_falls_back(tmp_path) -> None:
-    """存在するが起動方法不明なファイルは python -m へフォールバック。"""
-    from bluecore import launcher
+        assert launcher._run_module_in_process("target", []) == 1
+        assert "bad" in capsys.readouterr().err
 
-    f = tmp_path / "plain"
-    f.write_text("x", encoding="utf-8")  # 非実行・拡張子なし
-    cmd = launcher.resolve_command(str(f), [])
-    assert "-m" in cmd
+    def test_generic_exception_returns_one(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        monkeypatch.setattr(
+            launcher.runpy, "run_module", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        )
 
+        assert launcher._run_module_in_process("target", []) == 1
+        assert "ERROR: target: boom" in capsys.readouterr().err
 
-def test_main_inserts_src_dir_when_missing(monkeypatch) -> None:
-    """src ディレクトリが sys.path に無ければ挿入する。"""
-    import sys
-    from types import SimpleNamespace
+    def test_normal_completion_without_system_exit_returns_zero(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        monkeypatch.setattr(launcher.runpy, "run_module", lambda *a, **k: None)
 
-    from bluecore import launcher
+        assert launcher._run_module_in_process("target", []) == 0
 
-    src = str(launcher.REPO_ROOT / "src")
-    monkeypatch.setattr(sys, "path", [p for p in sys.path if p != src])
-    monkeypatch.setattr(launcher, "resolve_command", lambda t, a: ["true"])
-    monkeypatch.setattr(launcher, "build_env", lambda: {})
-    monkeypatch.setattr(launcher.sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
-    assert launcher.main(["target"]) == 0
-    assert src in sys.path
+    def test_sets_argv_from_target_and_args(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        captured = {}
 
+        def fake_run_module(target, run_name=None, alter_sys=None):  # noqa: ANN001
+            captured["argv"] = list(sys.argv)
+            captured["run_name"] = run_name
+            captured["alter_sys"] = alter_sys
 
-def test_subprocess_timeout_default_and_env_override(monkeypatch) -> None:
-    """timeout は既定 590 秒、環境変数で上書きでき、無効値・非有限値は既定へ戻る。"""
-    monkeypatch.delenv("BLUECORE_HOOK_TIMEOUT", raising=False)
-    assert launcher._subprocess_timeout() == 590.0
+        monkeypatch.setattr(launcher.runpy, "run_module", fake_run_module)
 
-    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "10")
-    assert launcher._subprocess_timeout() == 10.0
+        launcher._run_module_in_process("bluecore.mem.cli", ["setup"])
 
-    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "abc")
-    assert launcher._subprocess_timeout() == 590.0
-
-    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "-5")
-    assert launcher._subprocess_timeout() == 590.0
-
-    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "inf")
-    assert launcher._subprocess_timeout() == 590.0
-
-    monkeypatch.setenv("BLUECORE_HOOK_TIMEOUT", "nan")
-    assert launcher._subprocess_timeout() == 590.0
+        assert captured["argv"] == ["bluecore.mem.cli", "setup"]
+        assert captured["run_name"] == "__main__"
+        assert captured["alter_sys"] is True
 
 
-def test_main_passes_timeout_to_subprocess(monkeypatch) -> None:
-    """main は subprocess.run に timeout を渡す。"""
-    captured = {}
-    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(True, ""))
-    monkeypatch.setattr(launcher, "build_env", lambda: {})
-    monkeypatch.delenv("BLUECORE_HOOK_TIMEOUT", raising=False)
+class TestResolveModuleCommand:
+    def test_builds_module_invocation(self) -> None:
+        cmd = launcher._resolve_module_command("bluecore.hooks.config_protection", ["a", "b"])
+        assert cmd == [sys.executable, "-m", "bluecore.hooks.config_protection", "a", "b"]
 
-    def fake_run(*args, **kwargs):
-        captured["timeout"] = kwargs.get("timeout")
-        return SimpleNamespace(stdout="", stderr="", returncode=0)
-
-    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
-
-    assert launcher.main(["dummy-target"]) == 0
-    assert captured["timeout"] == 590.0
+    def test_builds_module_invocation_without_args(self) -> None:
+        cmd = launcher._resolve_module_command("bluecore.hooks.session_start", [])
+        assert cmd == [sys.executable, "-m", "bluecore.hooks.session_start"]
 
 
-def test_main_uses_empty_input_when_stdin_never_arrives(monkeypatch, capsys) -> None:
-    """select タイムアウト時は read せず stderr 警告のうえ空入力で続行する（NG-B1 回帰）。"""
-    fake_stdin = FakeStdin(False, "payload")
-    captured = {}
+class TestMain:
+    def _quiet_reexec(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """テストでは実際の execve を発火させない。"""
+        monkeypatch.setattr(launcher, "_reexec_into_venv_if_needed", lambda: None)
 
-    monkeypatch.setattr(launcher.sys, "stdin", fake_stdin)
-    monkeypatch.setattr(launcher, "build_env", lambda: {})
-    monkeypatch.setattr(launcher.select, "select", lambda r, w, x, t: ([], [], []))
+    def test_no_args_prints_usage(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._quiet_reexec(monkeypatch)
 
-    def fake_run(*args, **kwargs):
-        captured["input"] = kwargs["input"]
-        return SimpleNamespace(stdout="", stderr="", returncode=0)
+        assert launcher.main([]) == 1
+        assert "Usage: python3" in capsys.readouterr().err
 
-    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+    def test_bg_without_target_prints_usage(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._quiet_reexec(monkeypatch)
 
-    assert launcher.main(["dummy-target"]) == 0
-    assert fake_stdin.read_called is False
-    assert captured["input"] == ""
-    assert "リダイレクト漏れ" in capsys.readouterr().err
+        assert launcher.main(["--bg"]) == 1
+        assert "Usage: python3" in capsys.readouterr().err
 
+    def test_normal_invocation_runs_in_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._quiet_reexec(monkeypatch)
+        captured = {}
 
-def test_read_stdin_returns_payload_when_ready(monkeypatch) -> None:
-    """select が ready を返した場合はパイプ入力全体を読み取る。"""
-    fake_stdin = FakeStdin(False, "payload")
-    monkeypatch.setattr(launcher.sys, "stdin", fake_stdin)
-    _patch_select_ready(monkeypatch)
+        def fake_run_in_process(target, target_args):  # noqa: ANN001
+            captured["target"] = target
+            captured["args"] = target_args
+            return 0
 
-    assert launcher._read_stdin() == "payload"
-    assert fake_stdin.read_called is True
+        monkeypatch.setattr(launcher, "_run_module_in_process", fake_run_in_process)
 
+        assert launcher.main(["bluecore.hooks.config_protection", "extra"]) == 0
+        assert captured == {"target": "bluecore.hooks.config_protection", "args": ["extra"]}
 
-def test_read_stdin_skips_select_on_tty(monkeypatch) -> None:
-    """TTY 接続時は select を呼ばず空文字列を返す。"""
-    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(True, "payload"))
+    def test_bg_on_claude_runs_in_process_without_detach(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Claude はホスト側で非同期実行するため、--bg でも detach せずインプロセス実行する。"""
+        self._quiet_reexec(monkeypatch)
+        monkeypatch.setattr("bluecore.lib.harness.detect_harness", lambda: "claude")
 
-    def fail_select(*args):
-        raise AssertionError("select must not be called for tty stdin")
+        detach_called = []
+        monkeypatch.setattr("bluecore.hooks.hook_common.detach_process", lambda *a, **k: detach_called.append(a) or True)
 
-    monkeypatch.setattr(launcher.select, "select", fail_select)
+        captured = {}
 
-    assert launcher._read_stdin() == ""
+        def fake_run_in_process(target, args):  # noqa: ANN001
+            captured["target"] = target
+            return 0
 
+        monkeypatch.setattr(launcher, "_run_module_in_process", fake_run_in_process)
 
-def test_main_replaces_non_utf8_subprocess_output(monkeypatch, capsys, tmp_path: Path) -> None:
-    """非 UTF-8 バイトを出力する実サブプロセスでも置換文字で完走する（NG-B2 回帰）。"""
-    script = tmp_path / "emit_invalid_byte.py"
-    script.write_text(
-        "import sys\nsys.stdout.buffer.write(b'\\xff')\nsys.stderr.buffer.write(b'\\xfe')\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(launcher, "_runtime_python", lambda: (sys.executable, None))
-    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(True, ""))
+        assert launcher.main(["--bg", "bluecore.mem.cli", "observe"]) == 0
+        assert detach_called == []
+        assert captured["target"] == "bluecore.mem.cli"
 
-    assert launcher.main([str(script)]) == 0
-    output = capsys.readouterr()
-    assert output.out == "�"
-    assert output.err == "�"
+    def test_bg_on_non_claude_detaches_and_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._quiet_reexec(monkeypatch)
+        monkeypatch.setattr("bluecore.lib.harness.detect_harness", lambda: "codex")
+        monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "{}")
 
+        captured = {}
 
-def test_main_returns_one_on_timeout_expired(monkeypatch, capsys) -> None:
-    """サブプロセスの timeout 超過は stderr 通知のうえ 1 を返す。"""
-    monkeypatch.setattr(launcher.sys, "stdin", FakeStdin(True, ""))
-    monkeypatch.setattr(launcher, "build_env", lambda: {})
+        def fake_detach(cmd, raw, *, env=None):  # noqa: ANN001
+            captured["cmd"] = cmd
+            captured["raw"] = raw
+            return True
 
-    def fake_run(*args, **kwargs):
-        raise launcher.subprocess.TimeoutExpired(cmd=["dummy"], timeout=55)
+        monkeypatch.setattr("bluecore.hooks.hook_common.detach_process", fake_detach)
+        monkeypatch.setattr(launcher, "build_env", lambda: {})
 
-    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+        run_in_process_called = []
+        monkeypatch.setattr(
+            launcher, "_run_module_in_process", lambda *a: run_in_process_called.append(a)
+        )
 
-    assert launcher.main(["dummy-target"]) == 1
-    assert "ERROR" in capsys.readouterr().err
+        assert launcher.main(["--bg", "bluecore.mem.cli", "session-end"]) == 0
+        assert run_in_process_called == []
+        assert captured["cmd"] == [sys.executable, "-m", "bluecore.mem.cli", "session-end"]
+        assert captured["raw"] == "{}"
+
+    def test_bg_on_non_claude_detach_failure_still_returns_zero(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._quiet_reexec(monkeypatch)
+        monkeypatch.setattr("bluecore.lib.harness.detect_harness", lambda: "codex")
+        monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "")
+        monkeypatch.setattr("bluecore.hooks.hook_common.detach_process", lambda *a, **k: False)
+        monkeypatch.setattr(launcher, "build_env", lambda: {})
+
+        assert launcher.main(["--bg", "bluecore.hooks.session_end"]) == 0
+        assert "Error detaching" in capsys.readouterr().err
+
+    def test_inserts_src_dir_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """src ディレクトリが sys.path に無ければ挿入する。"""
+        self._quiet_reexec(monkeypatch)
+        src = str(launcher.REPO_ROOT / "src")
+        monkeypatch.setattr(sys, "path", [p for p in sys.path if p != src])
+        monkeypatch.setattr(launcher, "_run_module_in_process", lambda target, args: 0)
+
+        assert launcher.main(["some.target"]) == 0
+        assert src in sys.path
+
+    def test_entrypoint_returns_usage_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # runpy.run_module は launcher モジュールを "__main__" として再実行するため、
+        # 既存の launcher オブジェクトへの monkeypatch は effective ではない。
+        # os.execve をグローバルに封じることで、テスト環境のプロセスが本当に
+        # 自己置換されてしまう事故を防ぐ（_reexec_into_venv_if_needed は OSError
+        # を握りつぶして続行する設計のため安全に空振りできる）。
+        def blocked_execve(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+            raise OSError("execve blocked in test")
+
+        monkeypatch.setattr(os, "execve", blocked_execve)
+        monkeypatch.setattr(sys, "argv", ["launcher.py"])
+
+        with pytest.raises(SystemExit) as excinfo:
+            runpy.run_module("bluecore.launcher", run_name="__main__")
+
+        assert excinfo.value.code == 1

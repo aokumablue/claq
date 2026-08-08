@@ -1,6 +1,5 @@
 """database のテスト"""
 
-import json
 import sqlite3
 import sys
 import time
@@ -15,22 +14,15 @@ from bluecore.mem.database import (
 )
 from bluecore.mem.models import (
     Adr,
-    EventLog,
     Instinct,
     InteractionLog,
-    MemItemRun,
     MemoryChunk,
-    ProjectProfile,
     Session,
     SessionDigest,
 )
 from bluecore.mem.row_converters import (
     _parse_json_dict_list,
     _parse_json_list,
-    _row_to_adr,
-    _row_to_chunk,
-    _row_to_event_log,
-    _row_to_instinct,
 )
 
 
@@ -51,7 +43,6 @@ class TestDatabase:
             tool_names=["Read"],
             files_read=["/path/to/file.py"],
             files_modified=[],
-            user_prompt="show me the file",
             created_at_epoch=1700000000,
         )
         chunk_id = db.store_chunk(chunk)
@@ -76,7 +67,6 @@ class TestDatabase:
                     tool_names=["Bash"],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="do stuff",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -102,23 +92,6 @@ class TestDatabase:
         ).fetchone()
         assert row["ended_at_epoch"] is not None
 
-    def test_next_chunk_index(self, db: Database) -> None:
-        assert db.get_next_chunk_index("sess-new") == 0
-        db.store_chunk(
-            MemoryChunk(
-                session_id="sess-new",
-                project="proj",
-                chunk_index=0,
-                content="c0",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                user_prompt="",
-                created_at_epoch=1700000000,
-            )
-        )
-        assert db.get_next_chunk_index("sess-new") == 1
-
     def test_fts_search(self, db: Database) -> None:
         db.store_chunk(
             MemoryChunk(
@@ -129,7 +102,6 @@ class TestDatabase:
                 tool_names=["Edit"],
                 files_read=[],
                 files_modified=["auth.py"],
-                user_prompt="fix the auth bug",
                 created_at_epoch=1700000000,
             )
         )
@@ -159,7 +131,6 @@ class TestDatabase:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -177,7 +148,6 @@ class TestDatabase:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -190,7 +160,6 @@ class TestDatabase:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000001,
             )
         )
@@ -213,7 +182,6 @@ class TestDatabase:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -234,21 +202,7 @@ class TestDatabase:
         db = Database(tmp_path / "test.db")
         db.close()
         with pytest.raises(sqlite3.ProgrammingError):
-            db.get_next_chunk_index("s1")
-
-    def test_user_prompt_null_handling(self, db: Database) -> None:
-        """user_prompt が None でも空文字列になる"""
-        db.conn.execute(
-            """INSERT INTO memory_chunks
-         (session_id, project, chunk_index, content,
-          tool_names, files_read, files_modified,
-          user_prompt, created_at_epoch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("s1", "p", 0, "content", "[]", "[]", "[]", None, 1700000000),
-        )
-        db.conn.commit()
-        chunks = db.get_chunks_by_session("s1")
-        assert chunks[0].user_prompt == ""
+            db.get_chunks_by_session("s1")
 
     def test_store_and_vec_search_embeddings(self, db: Database) -> None:
         """エンべディング保存とベクトル検索のテスト"""
@@ -261,7 +215,6 @@ class TestDatabase:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -309,7 +262,6 @@ class TestDatabase:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -358,7 +310,6 @@ class TestSchemaInit:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000,
                 )
             )
@@ -416,59 +367,6 @@ class TestParseJsonList:
         assert _parse_json_list(input_val) == expected
 
 
-class TestMigration:
-    """スキーママイグレーションのテスト"""
-
-    def test_new_columns_exist(self, db: Database) -> None:
-        """v0.0.1 マイグレーション後に新カラムが存在する"""
-        cols = {row[1] for row in db.conn.execute("PRAGMA table_info(memory_chunks)").fetchall()}
-        assert "access_count" in cols
-        assert "last_accessed_epoch" in cols
-        assert "merged_generation" in cols
-        assert "merged_into" in cols
-
-    def test_migration_idempotent(self, tmp_path: Path) -> None:
-        """マイグレーションは2回実行しても失敗しない"""
-        db = Database(tmp_path / "idem.db")
-        # 再度 _migrate() を呼んでも例外が出ない
-        db._migrate()
-        db.close()
-
-    def test_schema_migrations_table_exists(self, db: Database) -> None:
-        row = db.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
-        ).fetchone()
-        assert row is not None
-
-    def test_migration_table_empty_initially(self, db: Database) -> None:
-        """bluecore版では _MIGRATIONS が空なので schema_migrations は空"""
-        versions = {r[0] for r in db.conn.execute("SELECT version FROM schema_migrations").fetchall()}
-        # bluecore版では初期マイグレーションは空（カラムはスキーマ定義に含まれている）
-        assert isinstance(versions, set)
-
-    def test_applies_registered_migrations(self, tmp_path: Path) -> None:
-        import bluecore.mem.database as db_mod
-
-        original = db_mod._MIGRATIONS
-        db_mod._MIGRATIONS = [("v-test", ["CREATE TABLE IF NOT EXISTS migration_marker (id INTEGER);"])]
-        try:
-            db = Database(tmp_path / "migrated.db")
-            try:
-                row = db.conn.execute(
-                    "SELECT version FROM schema_migrations WHERE version = ?",
-                    ("v-test",),
-                ).fetchone()
-                assert row["version"] == "v-test"
-                marker = db.conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='migration_marker'"
-                ).fetchone()
-                assert marker is not None
-            finally:
-                db.close()
-        finally:
-            db_mod._MIGRATIONS = original
-
-
 class TestAdvancedTables:
     """インスティンクト、ADR、イベントログのテスト"""
 
@@ -499,10 +397,12 @@ class TestAdvancedTables:
         db.upsert_instinct(other)
 
         assert first_id == second_id == "instinct-fixed"
-        assert len(db.get_instincts(scope="project", project_id="proj")) == 1
-        assert len(db.get_instincts(scope="global")) == 1
-        assert len(db.get_instincts()) == 2
-        assert db.get_all_instincts()[0].content == "updated"
+        # 読み出し API は未使用のため削除済み。書き込み結果は生 SQL で検証する。
+        rows = db.conn.execute(
+            "SELECT scope, content FROM instincts ORDER BY instinct_id"
+        ).fetchall()
+        assert [row["scope"] for row in rows] == ["project", "global"]
+        assert rows[0]["content"] == "updated"
 
     def test_adr_upsert_and_getters(self, db: Database) -> None:
         adr = Adr(
@@ -533,163 +433,12 @@ class TestAdvancedTables:
         db.upsert_adr(other)
 
         assert first_id == second_id == "adr-fixed"
-        assert [item.title for item in db.get_adrs(project="proj")] == ["Updated"]
-        assert len(db.get_adrs()) == 2
-        assert db.get_all_adrs()[0].title == "Updated"
-
-    def test_event_logs_and_row_helpers(self, db: Database) -> None:
-        event = EventLog(
-            id="event-fixed",
-            event_type="notice",
-            content="hello",
-            created_at_epoch=1,
-            project_id="proj",
-        )
-        first_id = db.store_event_log(event)
-        second_id = db.store_event_log(event)
-        db.store_event_log(
-            EventLog(
-                event_type="other",
-                content="world",
-                created_at_epoch=2,
-            )
-        )
-
-        assert first_id == second_id == "event-fixed"
-        assert len(db.get_event_logs(event_type="notice")) == 1
-        assert len(db.get_event_logs()) == 2
-        assert db.get_all_event_logs()[0].content == "hello"
-
-        db.conn.execute(
-            """INSERT INTO memory_chunks
-         (id, session_id, project, chunk_index, content,
-          tool_names, files_read, files_modified,
-          user_prompt, created_at_epoch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                "chunk-1",
-                "sess",
-                "proj",
-                0,
-                "content",
-                json.dumps(["Read"]),
-                json.dumps(["file.py"]),
-                json.dumps([]),
-                None,
-                1,
-            ),
-        )
-        db.conn.commit()
-        db.update_access(["chunk-1"])
-        row = db.conn.execute("SELECT access_count, last_accessed_epoch FROM memory_chunks WHERE id = ?", ("chunk-1",)).fetchone()
-        assert row["access_count"] == 1
-        assert row["last_accessed_epoch"] is not None
-
-        class FakeRow(dict):
-            def keys(self) -> list[str]:
-                return list(super().keys())
-
-        chunk = _row_to_chunk(
-            FakeRow(
-                {
-                    "id": "chunk-x",
-                    "session_id": "sess",
-                    "project": "proj",
-                    "chunk_index": 1,
-                    "content": "content",
-                    "tool_names": json.dumps(["Write"]),
-                    "files_read": json.dumps([]),
-                    "files_modified": json.dumps([]),
-                    "user_prompt": None,
-                    "created_at_epoch": 2,
-                }
-            )
-        )
-        instinct = _row_to_instinct(
-            FakeRow(
-                {
-                    "id": "instinct-x",
-                    "origin_user": "user",
-                    "instinct_id": "i1",
-                    "scope": "global",
-                    "project_id": None,
-                    "trigger_text": "trigger",
-                    "confidence": 0.7,
-                    "domain": "domain",
-                    "content": "content",
-                    "created_at_epoch": 1,
-                    "updated_at_epoch": 2,
-                }
-            )
-        )
-        adr = _row_to_adr(
-            FakeRow(
-                {
-                    "id": "adr-x",
-                    "origin_user": "user",
-                    "project": "proj",
-                    "adr_number": 9,
-                    "title": "Title",
-                    "status": "accepted",
-                    "content": "content",
-                    "created_at_epoch": 1,
-                    "updated_at_epoch": 2,
-                }
-            )
-        )
-        event_log = _row_to_event_log(
-            FakeRow(
-                {
-                    "id": "event-x",
-                    "origin_user": "user",
-                    "event_type": "notice",
-                    "project_id": "proj",
-                    "content": "content",
-                    "created_at_epoch": 1,
-                }
-            )
-        )
-
-        assert chunk.user_prompt == ""
-        assert instinct.instinct_id == "i1"
-        assert adr.adr_number == 9
-        assert event_log.event_type == "notice"
-
-    def test_project_profile_upsert_and_getters(self, db: Database) -> None:
-        profile1 = ProjectProfile(
-            id="profile-1",
-            origin_user="user-a",
-            project="proj",
-            detected_at_epoch=1,
-            last_updated_epoch=1,
-            project_path="/repo/a",
-            languages=["python"],
-        )
-        profile2 = ProjectProfile(
-            id="profile-2",
-            origin_user="user-b",
-            project="proj",
-            detected_at_epoch=2,
-            last_updated_epoch=2,
-            project_path="/repo/b",
-            languages=["rust"],
-        )
-
-        db.upsert_project_profile(profile1)
-        db.upsert_project_profile(profile2)
-
-        latest = db.get_project_profile("proj")
-        assert latest is not None
-        assert latest.id == "profile-2"
-        assert latest.project_path == "/repo/b"
-        assert db.get_project_profile("proj", origin_user="user-a").id == "profile-1"
-        assert [profile.id for profile in db.get_all_project_profiles()] == ["profile-1", "profile-2"]
-
-        profile1.project_path = "/repo/a-updated"
-        profile1.last_updated_epoch = 9
-        second_id = db.upsert_project_profile(profile1)
-        assert second_id == "profile-1"
-        assert db.get_project_profile("proj", origin_user="user-a").project_path == "/repo/a-updated"
+        # 読み出し API は未使用のため削除済み。書き込み結果は生 SQL で検証する。
+        rows = db.conn.execute(
+            "SELECT project, title FROM adrs ORDER BY created_at_epoch"
+        ).fetchall()
+        assert [row["title"] for row in rows] == ["Updated", "Other"]
+        assert rows[0]["project"] == "proj"
 
     def test_store_embeddings_and_vec_search_with_fake_connection(self, db: Database) -> None:
         calls: list[tuple[str, tuple]] = []
@@ -745,7 +494,6 @@ class TestUpdateAccess:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -764,7 +512,6 @@ class TestUpdateAccess:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -784,7 +531,6 @@ class TestUpdateAccess:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -807,7 +553,6 @@ class TestUpdateAccess:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -853,7 +598,6 @@ class TestGetAllChunks:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -871,7 +615,6 @@ class TestGetAllChunks:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000002 - i,
                 )
             )
@@ -897,7 +640,6 @@ class TestGetSessionIdsWithChunks:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -910,7 +652,6 @@ class TestGetSessionIdsWithChunks:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000002,
             )
         )
@@ -927,7 +668,6 @@ class TestGetSessionIdsWithChunks:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -940,15 +680,14 @@ class TestGetSessionIdsWithChunks:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000001,
             )
         )
         assert db.get_session_ids_with_chunks(project="proj-a") == ["s-a"]
 
 
-class TestInteractionAndRunQueries:
-    """interaction_logs / mem_item_runs の取得系テスト"""
+class TestInteractionQueries:
+    """interaction_logs の取得系テスト"""
 
     def test_interaction_log_queries_and_prompt_hash(self, db: Database) -> None:
         log1 = InteractionLog(
@@ -990,45 +729,12 @@ class TestInteractionAndRunQueries:
         assert [log.interaction_index for log in session_logs] == [0, 1]
         assert len(project_logs) == 2
         assert len(all_logs) == 3
-        assert db.get_all_interaction_logs()[0].created_at_epoch == 1
+        row = db.conn.execute(
+            "SELECT created_at_epoch FROM interaction_logs ORDER BY created_at_epoch"
+        ).fetchone()
+        assert row["created_at_epoch"] == 1
         assert db.get_next_interaction_index("sess-1") == 2
         assert db.get_next_interaction_index("missing") == 0
-
-    def test_mem_item_run_queries(self, db: Database) -> None:
-        run1 = MemItemRun(
-            session_id="sess-1",
-            project="proj-a",
-            skill_name="learn",
-            created_at_epoch=1,
-            item_type="skill",
-        )
-        run2 = MemItemRun(
-            session_id="sess-1",
-            project="proj-a",
-            skill_name="dashboard",
-            created_at_epoch=2,
-            item_type="command",
-        )
-        run3 = MemItemRun(
-            session_id="sess-2",
-            project="proj-b",
-            skill_name="reviewer",
-            created_at_epoch=3,
-            item_type="agent",
-        )
-
-        db.store_mem_item_run(run1)
-        db.store_mem_item_run(run2)
-        db.store_mem_item_run(run3)
-
-        by_skill = db.get_skill_run_stats(skill_name="learn")
-        by_project = db.get_skill_run_stats(project="proj-a")
-        all_runs = db.get_skill_run_stats()
-
-        assert [run.skill_name for run in by_skill] == ["learn"]
-        assert [run.skill_name for run in by_project] == ["dashboard", "learn"]
-        assert [run.skill_name for run in all_runs] == ["reviewer", "dashboard", "learn"]
-        assert [run.skill_name for run in db.get_all_mem_item_runs()] == ["learn", "dashboard", "reviewer"]
 
     @pytest.mark.parametrize(
         "input_val, expected",
@@ -1089,9 +795,8 @@ class TestConcurrentChunkInsert:
         db.conn.execute(
             """INSERT INTO memory_chunks
              (id, origin_user, session_id, project, chunk_index, content,
-              tool_names, files_read, files_modified, user_prompt, created_at_epoch,
-              execution_status, tool_sequence)
-             VALUES (?, '', ?, 'proj', 0, '[Bash] prior process', '[]', '[]', '[]', '', ?, 'unknown', '[]')""",
+              tool_names, files_read, files_modified, created_at_epoch)
+             VALUES (?, '', ?, 'proj', 0, '[Bash] prior process', '[]', '[]', '[]', ?)""",
             ("prior-chunk-id", session_id, int(time.time())),
         )
         db.conn.commit()
@@ -1105,7 +810,6 @@ class TestConcurrentChunkInsert:
             tool_names=["Bash"],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=int(time.time()),
         )
         cid = db.store_chunk(chunk)
@@ -1139,7 +843,6 @@ class TestConcurrentChunkInsert:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=int(time.time()),
         )
         first.id = fixed_id
@@ -1154,7 +857,6 @@ class TestConcurrentChunkInsert:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=int(time.time()),
         )
         second.id = fixed_id
@@ -1183,7 +885,6 @@ class TestConcurrentChunkInsert:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=int(time.time()),
         )
 
@@ -1232,7 +933,6 @@ class TestConcurrentChunkInsert:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=int(time.time()),
         )
 
@@ -1279,7 +979,6 @@ class TestSessionDigests:
             created_at_epoch=1700000010,
             key_files=["a.py"],
             key_decisions=["decision A"],
-            outcome="success",
             harness="claude",
             source="chunks",
             chunk_count=3,
@@ -1303,7 +1002,6 @@ class TestSessionDigests:
             created_at_epoch=1700000010,
             key_files=["a.py", "b.py"],
             key_decisions=["decision A", "decision B"],
-            outcome="partial",
             harness="codex",
             source="transcript+chunks",
             chunk_count=5,
@@ -1323,7 +1021,6 @@ class TestSessionDigests:
         assert stored.summary == "updated summary"
         assert stored.key_files == ["a.py", "b.py"]
         assert stored.key_decisions == ["decision A", "decision B"]
-        assert stored.outcome == "partial"
         assert stored.harness == "codex"
         assert stored.source == "transcript+chunks"
         assert stored.chunk_count == 5

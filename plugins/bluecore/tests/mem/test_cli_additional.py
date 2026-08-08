@@ -8,19 +8,14 @@ import io
 import json
 import sys
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
 
 import pytest
 
 import bluecore.mem.importers as importers_mod
-import bluecore.mem.item_usage_queries as item_usage_queries_mod
 from bluecore.mem import cli
 from bluecore.mem.database import MemoryChunk
 from bluecore.mem.search import SearchResult
 from tests.mem.conftest import FakeDB, make_settings, open_fake_db
-
-# dashboard_queries / pg_database は PostgreSQL チーム同期廃止に伴い、それらへ依存する
-# cli_dashboard_handlers 側は次タスクで解消予定。当該テスト関数内でのみ遅延 import する。
 
 
 def test_helper_functions_cover_filters_and_rendering() -> None:
@@ -33,7 +28,6 @@ def test_helper_functions_cover_filters_and_rendering() -> None:
         tool_names=["Edit"],
         files_read=["src/app.py"],
         files_modified=["src/app.py"],
-        user_prompt="y" * 210,
         created_at_epoch=1704067200,
     )
     chunk_b = MemoryChunk(
@@ -45,35 +39,26 @@ def test_helper_functions_cover_filters_and_rendering() -> None:
         tool_names=["Bash"],
         files_read=["README.md"],
         files_modified=[],
-        user_prompt="prompt",
         created_at_epoch=1704067300,
     )
     db = FakeDB([chunk_a, chunk_b])
 
-    assert cli._parse_date_to_epoch(123) == 123
-    assert cli._parse_date_to_epoch("2024-01-01T00:00:00Z") == 1704067200
-    assert cli._parse_date_to_epoch("bad") is None
-    from bluecore.mem.cli_search_handlers import StructuredFilter
-    assert cli._apply_structured_filters(db, [], StructuredFilter(None, None, None, None)) == []
-    assert cli._apply_structured_filters(db, ["c1", "c2"], StructuredFilter("Edit", "*.py", "2024-01-01T00:00:00Z", None)) == ["c1"]
 
     rendered = cli._render_adaptive_context(
         db,
         [
-            SearchResult("c1", 0.9, "", "", "", 0, [], [], []),
-            SearchResult("c2", 0.8, "", "", "", 0, [], [], []),
+            SearchResult("c1", 0.9, "", "", 0, [], [], []),
+            SearchResult("c2", 0.8, "", "", 0, [], [], []),
         ],
     )
     assert rendered.startswith("<mem-context>")
     assert "## repo (2024-01-01 00:00)" in rendered
-    assert "**プロンプト**" in rendered
     assert "..." in rendered
-    assert cli._format_chunk(chunk_a).startswith("**プロンプト**")
+    assert cli._format_chunk(chunk_a).startswith("**ツール**")
     rich_result = SearchResult(
         "team-1",
         0.9,
         "z" * 600,
-        "p" * 210,
         "repo",
         1704067200,
         ["Edit", "Bash"],
@@ -87,75 +72,11 @@ def test_helper_functions_cover_filters_and_rendering() -> None:
     assert "```" not in rich_formatted
     assert "..." in rich_formatted
     tiny_render = cli._render_adaptive_context(db, [rich_result], max_tokens=1)
-    assert "**プロンプト**" not in tiny_render
+    # 予算 1 トークンではエントリが 1 件も入らず、ヘッダのみが残る
+    assert "zzzz" not in tiny_render
+    assert "**ツール**" not in tiny_render
     assert cli._format_timestamp(1704067200) == "2024-01-01 00:00"
     assert cli._truncate("abc", 10) == "abc"
-
-
-def test_format_chunk_keeps_code_blocks_and_compacts_prose() -> None:
-    chunk = MemoryChunk(
-        id="c3",
-        session_id="s1",
-        project="repo",
-        chunk_index=2,
-        content="\n".join(
-            [
-                "ご質問ありがとうございます。",
-                "```python",
-                "print('hello')",
-                "```",
-                "  これは詳細説明です。",
-            ]
-        ),
-        tool_names=["Edit"],
-        files_read=[],
-        files_modified=["src/app.py"],
-        user_prompt="お力になれれば幸いです。 えーと 設定変更することができます。",
-        created_at_epoch=1704067400,
-    )
-
-    rendered = cli._format_chunk(chunk)
-
-    assert "**プロンプト**: 設定変更できます" in rendered
-    assert "ご質問ありがとうございます" not in rendered
-    assert rendered.count("```") == 2
-    assert "print('hello')" in rendered
-    assert "これは詳細説明です" in rendered
-
-
-def test_format_chunk_preserves_code_only_prompt_and_late_code_block() -> None:
-    chunk = MemoryChunk(
-        id="c4",
-        session_id="s1",
-        project="repo",
-        chunk_index=3,
-        content="\n".join(
-            [
-                "説明 1",
-                "説明 2",
-                "説明 3",
-                "説明 4",
-                "説明 5",
-                "説明 6",
-                "説明 7",
-                "```python",
-                "print('late')",
-                "```",
-            ]
-        ),
-        tool_names=["Read"],
-        files_read=[],
-        files_modified=[],
-        user_prompt="\n".join(["```python", "selected prompt", "```"]),
-        created_at_epoch=1704067500,
-    )
-
-    rendered = cli._format_chunk(chunk)
-
-    assert "**プロンプト**: selected prompt" in rendered
-    assert "print('late')" in rendered
-    assert rendered.count("```") == 2
-    assert "..." in rendered
 
 
 def test_handle_session_end_and_compact(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -169,18 +90,14 @@ def test_handle_session_end_and_compact(monkeypatch: pytest.MonkeyPatch, tmp_pat
         tool_names=["Edit"],
         files_read=[],
         files_modified=["src/app.py"],
-        user_prompt="prompt",
         created_at_epoch=1704067200,
     )
     db = FakeDB([chunk])
-    import bluecore.mem.bridge as bridge_mod
     import bluecore.mem.compaction as compaction_mod
 
     monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(db))
     monkeypatch.setattr(cli, "embed", lambda texts: [[0.1, 0.2]])
-    monkeypatch.setattr(bridge_mod, "sync_session_to_observations", lambda db, session_id: 1)
     monkeypatch.setattr(compaction_mod, "detect_low_quality", lambda db: ["c1"])
-    monkeypatch.setattr(compaction_mod, "optimize_db", lambda db: {"fragmentation_before": 0.25})
     monkeypatch.setattr(cli.time, "time", lambda: 100.0)
 
     cli._handle_session_end(settings, {"session_id": "s1"})
@@ -203,7 +120,6 @@ def _make_chunk(chunk_id: str | None, index: int) -> MemoryChunk:
         tool_names=[],
         files_read=[],
         files_modified=[],
-        user_prompt="",
         created_at_epoch=1704067200,
     )
 
@@ -284,7 +200,7 @@ def test_handle_setup_and_observe_branches(monkeypatch: pytest.MonkeyPatch, tmp_
 
     import bluecore.mem.chunker as chunker_mod
 
-    monkeypatch.setattr(chunker_mod, "build_chunk_from_tool_use", lambda session_id, project, chunk_index, user_prompt, params: MemoryChunk(
+    monkeypatch.setattr(chunker_mod, "build_chunk_from_tool_use", lambda session_id, project, chunk_index, params: MemoryChunk(
         session_id=session_id,
         project=project,
         chunk_index=chunk_index,
@@ -292,7 +208,6 @@ def test_handle_setup_and_observe_branches(monkeypatch: pytest.MonkeyPatch, tmp_
         tool_names=[params.tool_name],
         files_read=[],
         files_modified=[],
-        user_prompt=user_prompt,
         created_at_epoch=1700000000,
     ))
     cli._handle_observe(
@@ -372,7 +287,7 @@ def test_handle_observe_records_copilot_lowercase_observed_tool(
     monkeypatch.setattr(
         chunker_mod,
         "build_chunk_from_tool_use",
-        lambda session_id, project, chunk_index, user_prompt, params: MemoryChunk(
+        lambda session_id, project, chunk_index, params: MemoryChunk(
             session_id=session_id,
             project=project,
             chunk_index=chunk_index,
@@ -380,7 +295,6 @@ def test_handle_observe_records_copilot_lowercase_observed_tool(
             tool_names=[params.tool_name],
             files_read=[],
             files_modified=[],
-            user_prompt=user_prompt,
             created_at_epoch=1700000000,
         ),
     )
@@ -397,33 +311,6 @@ def test_handle_observe_records_copilot_lowercase_observed_tool(
     )
 
     assert db.stored_chunks
-
-
-def test_handle_session_start_commands_emit_json(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    settings = make_settings(tmp_path)
-    db = FakeDB()
-
-    monkeypatch.setattr(cli, "_open_db", lambda current_settings: open_fake_db(db))
-
-    assert cli._handle_setup(settings) == ""
-    assert capsys.readouterr().out == ""
-
-    assert cli._handle_record_project_profile(
-        settings,
-        {
-            "project": "repo",
-            "project_path": str(tmp_path),
-            "languages": ["python"],
-            "frameworks": ["pytest"],
-            "primary_language": "python",
-            "scope_hint": "project",
-        },
-    ) == ""
-    assert capsys.readouterr().out == ""
-
-    assert cli._handle_context(settings, {"cwd": str(tmp_path)}) == ""
 
 
 def test_import_helpers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -646,16 +533,13 @@ def test_handle_session_end_auto_compact_error(monkeypatch: pytest.MonkeyPatch, 
         tool_names=["Edit"],
         files_read=[],
         files_modified=["src/app.py"],
-        user_prompt="prompt",
         created_at_epoch=1704067200,
     )
     db = FakeDB([chunk])
-    import bluecore.mem.bridge as bridge_mod
     import bluecore.mem.compaction as compaction_mod
 
     monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(db))
     monkeypatch.setattr(cli, "embed", lambda texts: [[0.1, 0.2]])
-    monkeypatch.setattr(bridge_mod, "sync_session_to_observations", lambda db, session_id: 1)
     monkeypatch.setattr(compaction_mod, "detect_low_quality", lambda db: (_ for _ in ()).throw(RuntimeError("compact boom")))
     monkeypatch.setattr(cli.time, "time", lambda: 100.0)
     warnings: list[str] = []
@@ -663,245 +547,6 @@ def test_handle_session_end_auto_compact_error(monkeypatch: pytest.MonkeyPatch, 
 
     cli._handle_session_end(settings, {"session_id": "s1"})
     assert any("自動圧縮エラー" in message for message in warnings)
-
-
-def test_handle_dashboard_html_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """個人 SQLite データのみでダッシュボード HTML を生成する。"""
-    settings = make_settings(tmp_path)
-    html_output = tmp_path / "dashboard.html"
-
-    monkeypatch.setattr(
-        cli,
-        "_collect_skill_health_overview",
-        lambda options: {
-            "report": {"generated_at": "2024-01-01T00:00:00Z", "skills": []},
-            "summary": {"total_skills": 1, "healthy_skills": 1, "declining_skills": 0},
-            "skills": [
-                {
-                    "skill_id": "skill-a",
-                    "success_rate_7d": 0.8,
-                    "success_rate_30d": 0.7,
-                    "failure_trend": "stable",
-                    "pending_amendments": 1,
-                    "last_run": "2024-01-01T00:00:00Z",
-                }
-            ],
-            "chart_labels": ["skill-a"],
-            "chart_7d": [80.0],
-            "chart_30d": [70.0],
-        },
-    )
-    monkeypatch.setattr(
-        cli,
-        "_collect_project_overview",
-        lambda: {
-            "summary": {
-                "total_projects": 1,
-                "personal_instincts": 2,
-                "inherited_instincts": 1,
-                "global_personal": 1,
-                "global_inherited": 0,
-            },
-            "projects": [
-                {
-                    "id": "p1",
-                    "name": "repo",
-                    "personal_instincts": 2,
-                    "inherited_instincts": 1,
-                    "observations": 4,
-                    "last_seen": "2024-01-01T00:00:00Z",
-                }
-            ],
-        },
-    )
-    monkeypatch.setattr(
-        item_usage_queries_mod,
-        "item_usage_ranking",
-        lambda conn, days: [  # noqa: ARG005
-            {"item_name": "skill-a", "item_type": "skill", "uses": 2, "last_used_epoch": 1}
-        ],
-    )
-    monkeypatch.setattr(
-        item_usage_queries_mod,
-        "daily_trend",
-        lambda conn, days: [  # noqa: ARG005
-            {"date": "2024-01-01", "skill": 1, "command": 0, "agent": 0, "total": 1}
-        ],
-    )
-    monkeypatch.setattr(
-        item_usage_queries_mod,
-        "outcome_distribution",
-        lambda conn, days: [  # noqa: ARG005
-            {"outcome": "success", "count": 1}
-        ],
-    )
-
-    fake_jinja2 = ModuleType("jinja2")
-
-    class FakeTemplate:
-        def render(self, **kwargs) -> str:  # noqa: ANN003
-            return f"HTML:{kwargs['days']}"
-
-    class FakeEnvironment:
-        def __init__(self, loader, autoescape=False) -> None:  # noqa: ANN001
-            self.loader = loader
-
-        def get_template(self, name):  # noqa: ANN001
-            return FakeTemplate()
-
-    class FakeFileSystemLoader:
-        def __init__(self, path) -> None:  # noqa: ANN001
-            self.path = path
-
-    fake_jinja2.Environment = FakeEnvironment
-    fake_jinja2.FileSystemLoader = FakeFileSystemLoader
-    fake_jinja2.select_autoescape = lambda enabled_extensions=(): True
-    monkeypatch.setitem(sys.modules, "jinja2", fake_jinja2)
-
-    cli._handle_dashboard(settings, {"output": str(html_output), "format": "html", "days": 7})
-    assert json.loads(capsys.readouterr().out)["success"] is True
-    assert html_output.read_text(encoding="utf-8") == "HTML:7"
-
-
-def test_handle_dashboard_rejects_unsafe_output_path_and_allows_safe_path(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    settings = make_settings(tmp_path)
-    monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(FakeDB()))
-
-    unsafe_output = tmp_path.parent / "dashboard-unsafe.json"
-    cli._handle_dashboard(settings, {"output": str(unsafe_output), "format": "json"})
-    rejected = json.loads(capsys.readouterr().out)
-    assert rejected["success"] is False
-    assert "output path" in rejected["error"]
-    assert not unsafe_output.exists()
-
-    safe_output = tmp_path / "dashboard-safe.json"
-    cli._handle_dashboard(settings, {"output": str(safe_output), "format": "json"})
-    accepted = json.loads(capsys.readouterr().out)
-    assert accepted["success"] is True
-    assert safe_output.exists()
-
-
-def test_handle_dashboard_coerces_string_days_and_rejects_invalid(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """days は文字列でも int に変換され、非数値はエラー JSON を返す。"""
-    settings = make_settings(tmp_path)
-    monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(FakeDB()))
-
-    output = tmp_path / "dashboard-days.json"
-    cli._handle_dashboard(settings, {"output": str(output), "format": "json", "days": "7"})
-    assert json.loads(capsys.readouterr().out)["success"] is True
-
-    cli._handle_dashboard(settings, {"output": str(output), "format": "json", "days": "abc"})
-    rejected = json.loads(capsys.readouterr().out)
-    assert rejected["success"] is False
-    assert "days" in rejected["error"]
-
-
-def test_handle_dashboard_json_and_main_entrypoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    settings = make_settings(tmp_path)
-
-    monkeypatch.setattr(
-        cli,
-        "_collect_skill_health_overview",
-        lambda options: {
-            "report": {"generated_at": "2024-01-01T00:00:00Z", "skills": []},
-            "summary": {"total_skills": 1, "healthy_skills": 1, "declining_skills": 0},
-            "skills": [],
-            "chart_labels": [],
-            "chart_7d": [],
-            "chart_30d": [],
-        },
-    )
-    monkeypatch.setattr(
-        cli,
-        "_collect_project_overview",
-        lambda: {
-            "summary": {
-                "total_projects": 1,
-                "personal_instincts": 2,
-                "inherited_instincts": 1,
-                "global_personal": 0,
-                "global_inherited": 0,
-            },
-            "projects": [
-                {
-                    "id": "p1",
-                    "name": "repo",
-                    "personal_instincts": 2,
-                    "inherited_instincts": 1,
-                    "observations": 4,
-                    "last_seen": "2024-01-01T00:00:00Z",
-                }
-            ],
-        },
-    )
-    cli._handle_dashboard(settings, {"output": str(tmp_path / "dashboard.json"), "format": "json"})
-    out_data = json.loads((tmp_path / "dashboard.json").read_text(encoding="utf-8"))
-    assert "personal_ranking" in out_data
-    assert out_data["project_overview"]["projects"][0]["id"] == "p1"
-
-    monkeypatch.setattr(sys, "argv", ["python"])
-    assert cli.main() == 0
-
-    monkeypatch.setattr(cli.Settings, "load", lambda: settings)
-    monkeypatch.setattr("bluecore.mem.logger.setup", lambda *args, **kwargs: None)
-    monkeypatch.setattr(sys, "argv", ["python", "not-a-command"])
-    assert cli.main() == 2
-
-
-def test_collect_project_overview_skips_invalid_registry_entries(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import bluecore.skills.learn.cli as learn_cli
-
-    project_dir = tmp_path / "proj"
-    project_dir.mkdir()
-
-    monkeypatch.setattr(learn_cli, "load_registry", lambda: {"bad": None, "good": {"name": "repo", "last_seen": "2024-01-01T00:00:00Z"}})
-    monkeypatch.setattr(learn_cli, "_project_dir_for_id", lambda project_id: project_dir)
-    monkeypatch.setattr(learn_cli, "_load_instincts_from_dir", lambda directory, source_type, scope_label: [])  # noqa: ARG005
-    monkeypatch.setattr(cli, "_count_lines", lambda path: 0)
-
-    overview = cli._collect_project_overview()
-
-    assert overview["summary"]["total_projects"] == 1
-    assert overview["projects"][0]["name"] == "repo"
-
-
-def test_main_routes_all_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import bluecore.mem.logger as logger_mod
-
-    settings = make_settings(tmp_path)
-    monkeypatch.setattr(cli.Settings, "load", lambda: settings)
-    monkeypatch.setattr(logger_mod, "setup", lambda *args, **kwargs: None)
-
-    called: list[str] = []
-
-    commands = [
-        "init", "setup", "context", "search", "session-init", "observe",
-        "session-end", "compact", "search-structured", "record",
-        "import", "dashboard", "record-interaction",
-        "record-project-profile", "get-project-profile", "record-item-run",
-    ]
-
-    for name in commands:
-        monkeypatch.setitem(
-            cli._COMMAND_HANDLERS,
-            name,
-            lambda *args, _name=name, **kwargs: called.append(_name) or "",
-        )
-
-    for command in commands:
-        monkeypatch.setattr(sys, "argv", ["python", command])
-        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
-        assert cli.main() == 0
-
-    assert called == commands
 
 
 def test_setup_command_imports_without_torch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1024,7 +669,7 @@ def test_main_help_arg_invokes_session_start_wrapper(
 
 
 def test_format_wrappers_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_format_fields / _slim_prompt / _slim_context_content は _search_handlers に委譲する。"""
+    """_format_fields / _slim_context_content は _search_handlers に委譲する。"""
     chunk = MemoryChunk(
         id="c1",
         session_id="s1",
@@ -1034,17 +679,15 @@ def test_format_wrappers_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
         tool_names=["Edit"],
         files_read=[],
         files_modified=[],
-        user_prompt="p",
         created_at_epoch=1704067200,
     )
-    result = SearchResult("c1", 0.9, "content", "p", "repo", 1704067200, ["Edit"], [], [])
+    result = SearchResult("c1", 0.9, "content", "repo", 1704067200, ["Edit"], [], [])
 
-    assert isinstance(cli._format_fields("p", ["Edit"], ["a.py"], "body"), str)
+    assert isinstance(cli._format_fields(["Edit"], ["a.py"], "body"), str)
     assert isinstance(cli._format_chunk_from_result(result), str)
     assert isinstance(cli._format_chunk(chunk), str)
     assert isinstance(cli._format_timestamp(1704067200), str)
     assert cli._truncate("abcdef", 3) == "abc..."
-    assert isinstance(cli._slim_prompt("x" * 200, max_len=10), str)
     assert isinstance(
         cli._slim_context_content(
             "line1\nline2\nline3",
@@ -1055,109 +698,21 @@ def test_format_wrappers_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-# === cli_dashboard_handlers のカバレッジ補完 ===
-
-
-def test_count_lines_returns_zero_on_oserror(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """count_lines は OSError 発生時に 0 を返す。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    target = tmp_path / "a.jsonl"
-    target.write_text("line\n")
-
-    def _raise(*_args, **_kwargs):
-        raise OSError("denied")
-
-    monkeypatch.setattr(Path, "open", _raise)
-    assert cdh.count_lines(target) == 0
-
-
-def test_count_lines_returns_zero_when_missing(tmp_path: Path) -> None:
-    """count_lines は存在しないパスに対して 0 を返す。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    assert cdh.count_lines(tmp_path / "nope.jsonl") == 0
-
-
-def test_count_lines_counts_existing_file(tmp_path: Path) -> None:
-    """count_lines は既存ファイルの行数を返す。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    target = tmp_path / "data.jsonl"
-    target.write_text("a\nb\nc\n", encoding="utf-8")
-    assert cdh.count_lines(target) == 3
-
-
-def test_cli_count_lines_delegates_to_dashboard_handlers(tmp_path: Path) -> None:
-    """cli._count_lines は cli_dashboard_handlers.count_lines に委譲する。"""
-    target = tmp_path / "data.jsonl"
-    target.write_text("x\n", encoding="utf-8")
-    assert cli._count_lines(target) == 1
-
-
-def test_collect_skill_health_overview_handles_collect_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """collect_skill_health が例外を出してもダッシュボードは止まらず空 report で続行する。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    def _boom(_options):
-        raise RuntimeError("health boom")
-
-    monkeypatch.setattr(cdh, "collect_skill_health", _boom)
-    monkeypatch.setattr(cdh, "summarize_health_report", lambda _r: {"summary": "x"})
-
-    warnings: list[str] = []
-    fake_log = SimpleNamespace(warning=lambda msg, *args: warnings.append(msg % args if args else msg))
-
-    result = cdh.collect_skill_health_overview({"k": "v"}, log=fake_log)
-    assert result["report"] == {"generated_at": None, "skills": []}
-    assert result["skills"] == []
-    assert any("skill health collection failed" in w for w in warnings)
-
-
-def test_resolve_safe_dashboard_output_path_invalid_value(tmp_path: Path) -> None:
-    """非 str / 空白 / 解決不能パスはすべて None。"""
-    from bluecore.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
-
-    settings = make_settings(tmp_path)
-    assert _resolve_safe_dashboard_output_path(settings, None) is None
-    assert _resolve_safe_dashboard_output_path(settings, 123) is None
-    assert _resolve_safe_dashboard_output_path(settings, "   ") is None
-
-
-def test_resolve_safe_dashboard_output_path_relative(tmp_path: Path) -> None:
-    """相対パスは settings.data_path 配下に展開される。"""
-    from bluecore.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
-
-    settings = make_settings(tmp_path)
-    resolved = _resolve_safe_dashboard_output_path(settings, "out/inner.html")
-    assert resolved is not None
-    assert str(resolved).startswith(str(Path(settings.data_path).resolve()))
-
-
-def test_resolve_safe_dashboard_output_path_outside_root(tmp_path: Path) -> None:
-    """data_path 外のパスは拒否される。"""
-    from bluecore.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
-
-    settings = make_settings(tmp_path)
-    outside = str(tmp_path.parent / "outside.html")
-    assert _resolve_safe_dashboard_output_path(settings, outside) is None
-
-
-def test_slim_prompt_returns_empty_when_no_meaningful_content() -> None:
-    """first_meaningful_line も in_code_block も拾えない場合は空文字を返す（line 267）。"""
-    from bluecore.mem.cli_search_handlers import slim_prompt
-
-    # 空白のみ＋未閉鎖コードブロック相当：すべての行が空 or ```で in_code_block の切り替えのみ
-    assert slim_prompt("```\n```\n", max_len=80) == ""
-
-
 def test_slim_context_content_returns_empty_for_empty_text() -> None:
     """text が空なら空文字を返す（line 273）。"""
     from bluecore.mem.cli_search_handlers import slim_context_content
 
     assert slim_context_content("") == ""
+
+
+def test_slim_context_content_drops_lines_that_compact_to_empty() -> None:
+    """strip 後は非空でも compact_line が空を返す行（見出し記号のみ等）は落とす。"""
+    from bluecore.mem.cli_search_handlers import slim_context_content
+
+    result = slim_context_content("###\nreal prose line\n")
+
+    assert "real prose line" in result
+    assert "###" not in result
 
 
 def test_slim_context_content_skips_blank_lines() -> None:
@@ -1168,35 +723,6 @@ def test_slim_context_content_skips_blank_lines() -> None:
     assert "hello world" in result
     # 余分な空行が含まれない
     assert "\n\n" not in result
-
-
-def test_resolve_safe_dashboard_output_path_resolve_oserror(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Path.resolve が OSError を出した場合は None を返す。"""
-    from bluecore.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
-
-    settings = make_settings(tmp_path)
-
-    original_resolve = Path.resolve
-    call_count = {"n": 0}
-
-    def _resolve(self_path: Path, *args, **kwargs):  # type: ignore[override]
-        # 1回目（allowed_root 計算）は通常通り、2回目（candidate.resolve()）は例外
-        call_count["n"] += 1
-        if call_count["n"] >= 2:
-            raise OSError("resolve fail")
-        return original_resolve(self_path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "resolve", _resolve)
-    assert _resolve_safe_dashboard_output_path(settings, str(tmp_path / "x.html")) is None
-
-
-def test_slim_prompt_codeblock_blank_only() -> None:
-    """コードブロック内が空白のみなら空文字を返す。"""
-    from bluecore.mem.cli_search_handlers import slim_prompt
-
-    assert slim_prompt("```\n \n```") == ""
 
 
 def test_slim_context_content_prose_over_limit() -> None:
@@ -1219,7 +745,7 @@ def test_format_fields_limits_files_modified_to_two() -> None:
     """変更ファイルは先頭 2 件のみ表示する（注入トークン削減）。"""
     from bluecore.mem.cli_search_handlers import format_fields
 
-    out = format_fields("p", ["Edit"], ["a.py", "b.py", "c.py", "d.py"], "")
+    out = format_fields(["Edit"], ["a.py", "b.py", "c.py", "d.py"], "")
     assert "**変更ファイル**: a.py, b.py" in out
     assert "c.py" not in out
 
@@ -1280,7 +806,7 @@ def test_handle_observe_normalizes_apply_patch(
     monkeypatch.setattr(
         chunker_mod,
         "build_chunk_from_tool_use",
-        lambda session_id, project, chunk_index, user_prompt, params: MemoryChunk(
+        lambda session_id, project, chunk_index, params: MemoryChunk(
             session_id=session_id,
             project=project,
             chunk_index=chunk_index,
@@ -1288,7 +814,6 @@ def test_handle_observe_normalizes_apply_patch(
             tool_names=[params.tool_name],
             files_read=[],
             files_modified=[],
-            user_prompt=user_prompt,
             created_at_epoch=1700000000,
         ),
     )
