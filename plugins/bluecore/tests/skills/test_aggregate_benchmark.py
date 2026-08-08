@@ -3,14 +3,16 @@
 対象:
   - calculate_stats() — 空/単一/複数の統計計算
   - _resolve_eval_id() — メタデータ・ディレクトリ名からの eval_id 解決
+  - _parse_run_number() — run-<正の整数> 形式の厳密な検証（fail-loud）
+  - _load_timing() — timing.json の必須フィールド検証（fail-loud、フォールバックなし）
   - _extract_run_result() — grading.json + timing.json からの結果構築
-  - _load_config_results() — config 配下 run 走査と異常スキップ
+  - _load_config_results() — config 配下 run 走査と異常スキップ／fail-loud
   - load_run_results() — benchmark ディレクトリ全体の読み込み
   - aggregate_results() — config 別統計と delta 計算
   - generate_benchmark() — benchmark.json 生成
   - _append_summary_table_rows() — サマリーテーブル行生成
   - generate_markdown() — benchmark.md 生成
-  - main() — CLI エントリポイント（存在チェック・出力先決定）
+  - main() — CLI エントリポイント（存在チェック・出力先決定・fail-loud な入力検証）
 
 ファイル I/O は tmp_path、argv は monkeypatch、出力は capsys で検証する。
 """
@@ -93,25 +95,26 @@ def test_resolve_eval_id_dirname_value_error(tmp_path: Path) -> None:
 # --- _extract_run_result -----------------------------------------------------
 
 
-def test_extract_run_result_grading_timing(tmp_path: Path) -> None:
-    """grading に timing があれば timing.json を読まず metrics からトークンを得る。"""
+def test_extract_run_result_uses_timing_json_only(tmp_path: Path) -> None:
+    """time_seconds/tokens は timing.json 由来の値のみを使い、grading.json の timing は無視する。"""
     run_dir = tmp_path / "run-1"
     run_dir.mkdir()
+    _write_json(run_dir / "timing.json", {"total_duration_seconds": 8.0, "total_tokens": 555})
     grading = {
         "summary": {"pass_rate": 0.5, "passed": 1, "failed": 1, "total": 2},
-        "timing": {"total_duration_seconds": 12.5},
+        "timing": {"total_duration_seconds": 12.5},  # 無視されるべき（黙示的フォールバック禁止）
         "execution_metrics": {"total_tool_calls": 3, "output_chars": 100, "errors_encountered": 0},
         "expectations": [{"text": "x", "passed": True}],
     }
     result = mod._extract_run_result(run_dir, 1, grading)
-    assert result["time_seconds"] == 12.5
-    assert result["tokens"] == 100
+    assert result["time_seconds"] == 8.0
+    assert result["tokens"] == 555
     assert result["tool_calls"] == 3
     assert result["run_number"] == 1
 
 
 def test_extract_run_result_reads_timing_file(tmp_path: Path) -> None:
-    """grading の time が 0 かつ timing.json があれば そこから読む。"""
+    """timing.json があれば time_seconds/tokens をそこから読む。"""
     run_dir = tmp_path / "run-2"
     run_dir.mkdir()
     _write_json(run_dir / "timing.json", {"total_duration_seconds": 8.0, "total_tokens": 555})
@@ -121,33 +124,112 @@ def test_extract_run_result_reads_timing_file(tmp_path: Path) -> None:
     assert result["tokens"] == 555
 
 
-def test_extract_run_result_timing_file_corrupt(tmp_path: Path) -> None:
-    """timing.json が壊れていれば例外を握りつぶし metrics へフォールバック。"""
+def test_extract_run_result_timing_file_corrupt_raises(tmp_path: Path) -> None:
+    """timing.json が壊れていれば ValueError を送出する（フォールバックしない）。"""
     run_dir = tmp_path / "run-3"
     run_dir.mkdir()
     (run_dir / "timing.json").write_text("{ broken", encoding="utf-8")
     grading = {"summary": {}, "execution_metrics": {"output_chars": 42}, "expectations": []}
-    result = mod._extract_run_result(run_dir, 1, grading)
-    assert result["time_seconds"] == 0.0
-    assert result["tokens"] == 42
+    with pytest.raises(ValueError, match="JSON が不正です"):
+        mod._extract_run_result(run_dir, 1, grading)
 
 
-def test_extract_run_result_no_timing_file(tmp_path: Path) -> None:
-    """timing.json が無ければ metrics の output_chars をトークンに使う。"""
+def test_extract_run_result_no_timing_file_raises(tmp_path: Path) -> None:
+    """timing.json が無ければ ValueError を送出する（metrics へのフォールバックはしない）。"""
     run_dir = tmp_path / "run-4"
     run_dir.mkdir()
     grading = {"summary": {}, "execution_metrics": {"output_chars": 7}, "expectations": []}
-    result = mod._extract_run_result(run_dir, 1, grading)
-    assert result["tokens"] == 7
+    with pytest.raises(ValueError, match="timing.json が見つかりません"):
+        mod._extract_run_result(run_dir, 1, grading)
+
+
+def test_extract_run_result_timing_missing_required_fields_raises(tmp_path: Path) -> None:
+    """timing.json に total_duration_seconds/total_tokens が無ければ ValueError を送出する。"""
+    run_dir = tmp_path / "run-4"
+    run_dir.mkdir()
+    _write_json(run_dir / "timing.json", {"total_duration_seconds": 1.0})
+    grading = {"summary": {}, "execution_metrics": {}, "expectations": []}
+    with pytest.raises(ValueError, match="必須フィールドがありません"):
+        mod._extract_run_result(run_dir, 1, grading)
 
 
 def test_extract_run_result_warns_on_bad_expectation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """expectation に必須フィールドが無ければ警告を出す。"""
     run_dir = tmp_path / "run-5"
     run_dir.mkdir()
+    _write_json(run_dir / "timing.json", {"total_duration_seconds": 1.0, "total_tokens": 1})
     grading = {"summary": {}, "execution_metrics": {}, "expectations": [{"text": "only"}]}
     mod._extract_run_result(run_dir, 1, grading)
     assert "必須フィールドがありません" in capsys.readouterr().out
+
+
+def test_extract_run_result_invalid_run_name_raises(tmp_path: Path) -> None:
+    """run ディレクトリ名が run-<正の整数> 形式でなければ ValueError を送出する。"""
+    run_dir = tmp_path / "run-1abc"
+    run_dir.mkdir()
+    _write_json(run_dir / "timing.json", {"total_duration_seconds": 1.0, "total_tokens": 1})
+    grading = {"summary": {}, "execution_metrics": {}, "expectations": []}
+    with pytest.raises(ValueError, match="run-N 形式"):
+        mod._extract_run_result(run_dir, 1, grading)
+
+
+# --- _parse_run_number --------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["run-abc", "run-1abc", "run-", "run-01", "run-0", "run-1.5", "run-1-2"])
+def test_parse_run_number_rejects_invalid_names(tmp_path: Path, name: str) -> None:
+    """run-<正の整数> 形式でない名前は ValueError を送出する（先頭ゼロ・非数値サフィックス等）。"""
+    run_dir = tmp_path / name
+    run_dir.mkdir()
+    with pytest.raises(ValueError, match="run-N 形式"):
+        mod._parse_run_number(run_dir)
+
+
+@pytest.mark.parametrize(("name", "expected"), [("run-1", 1), ("run-12", 12), ("run-999", 999)])
+def test_parse_run_number_accepts_canonical_names(tmp_path: Path, name: str, expected: int) -> None:
+    """run-<正の整数> 形式は正しい番号を返す。"""
+    run_dir = tmp_path / name
+    run_dir.mkdir()
+    assert mod._parse_run_number(run_dir) == expected
+
+
+# --- _load_timing --------------------------------------------------------------
+
+
+def test_load_timing_missing_file(tmp_path: Path) -> None:
+    """timing.json が無ければ ValueError を送出する（フォールバックしない）。"""
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    with pytest.raises(ValueError, match="timing.json が見つかりません"):
+        mod._load_timing(run_dir)
+
+
+def test_load_timing_corrupt_json(tmp_path: Path) -> None:
+    """timing.json が壊れていれば ValueError を送出する（フォールバックしない）。"""
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    (run_dir / "timing.json").write_text("{ broken", encoding="utf-8")
+    with pytest.raises(ValueError, match="JSON が不正です"):
+        mod._load_timing(run_dir)
+
+
+def test_load_timing_missing_required_fields(tmp_path: Path) -> None:
+    """total_duration_seconds/total_tokens が無ければ ValueError を送出する。"""
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    _write_json(run_dir / "timing.json", {"total_duration_seconds": 1.0})
+    with pytest.raises(ValueError, match="必須フィールドがありません"):
+        mod._load_timing(run_dir)
+
+
+def test_load_timing_valid(tmp_path: Path) -> None:
+    """timing.json に必須フィールドがあればそのまま返す。"""
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    _write_json(run_dir / "timing.json", {"total_duration_seconds": 8.0, "total_tokens": 555})
+    timing = mod._load_timing(run_dir)
+    assert timing["total_duration_seconds"] == 8.0
+    assert timing["total_tokens"] == 555
 
 
 # --- _load_config_results ----------------------------------------------------
@@ -158,6 +240,7 @@ def test_load_config_results_new_and_skips(tmp_path: Path, capsys: pytest.Captur
     config_dir = tmp_path / "with_skill"
     good = config_dir / "run-1"
     _write_json(good / "grading.json", {"summary": {"pass_rate": 1.0}, "execution_metrics": {}, "expectations": []})
+    _write_json(good / "timing.json", {"total_duration_seconds": 1.0, "total_tokens": 10})
     (config_dir / "run-2").mkdir(parents=True)  # grading.json 無し
     bad = config_dir / "run-3"
     bad.mkdir()
@@ -180,9 +263,22 @@ def test_load_config_results_existing_key(tmp_path: Path) -> None:
         config_dir / "run-1" / "grading.json",
         {"summary": {}, "execution_metrics": {}, "expectations": []},
     )
+    _write_json(
+        config_dir / "run-1" / "timing.json",
+        {"total_duration_seconds": 1.0, "total_tokens": 10},
+    )
     results: dict[str, list] = {"with_skill": [{"eval_id": 0}]}
     mod._load_config_results(config_dir, 1, results)
     assert len(results["with_skill"]) == 2
+
+
+def test_load_config_results_invalid_run_name_raises(tmp_path: Path) -> None:
+    """run-N 形式でないディレクトリ名は ValueError を送出する（fail-loud）。"""
+    config_dir = tmp_path / "with_skill"
+    (config_dir / "run-1abc").mkdir(parents=True)
+    results: dict[str, list] = {}
+    with pytest.raises(ValueError, match="run-N 形式"):
+        mod._load_config_results(config_dir, 1, results)
 
 
 # --- load_run_results --------------------------------------------------------
@@ -203,6 +299,10 @@ def test_load_run_results_skips_file_and_empty_config(tmp_path: Path) -> None:
     _write_json(
         eval_dir / "with_skill" / "run-1" / "grading.json",
         {"summary": {"pass_rate": 1.0}, "execution_metrics": {}, "expectations": []},
+    )
+    _write_json(
+        eval_dir / "with_skill" / "run-1" / "timing.json",
+        {"total_duration_seconds": 1.0, "total_tokens": 10},
     )
     results = mod.load_run_results(tmp_path)
     assert set(results.keys()) == {"with_skill"}
@@ -266,11 +366,25 @@ def test_generate_benchmark_with_data(tmp_path: Path) -> None:
             "expectations": [{"text": "x", "passed": True}],
         },
     )
+    _write_json(
+        tmp_path / "eval-0" / "with_skill" / "run-1" / "timing.json",
+        {"total_duration_seconds": 3.0, "total_tokens": 50},
+    )
     benchmark = mod.generate_benchmark(tmp_path, "myskill", "path/to/myskill")
     assert benchmark["metadata"]["skill_name"] == "myskill"
     assert benchmark["metadata"]["skill_path"] == "path/to/myskill"
     assert len(benchmark["runs"]) == 1
     assert benchmark["metadata"]["evals_run"] == [0]
+
+
+def test_generate_benchmark_missing_timing_raises(tmp_path: Path) -> None:
+    """timing.json 欠落時は集計全体を止めるため ValueError を送出する（fail-loud）。"""
+    _write_json(
+        tmp_path / "eval-0" / "with_skill" / "run-1" / "grading.json",
+        {"summary": {"pass_rate": 1.0}, "execution_metrics": {}, "expectations": []},
+    )
+    with pytest.raises(ValueError, match="timing.json"):
+        mod.generate_benchmark(tmp_path)
 
 
 # --- _append_summary_table_rows / generate_markdown --------------------------
@@ -344,6 +458,10 @@ def test_main_default_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
         tmp_path / "eval-0" / "with_skill" / "run-1" / "grading.json",
         {"summary": {"pass_rate": 1.0}, "execution_metrics": {}, "expectations": []},
     )
+    _write_json(
+        tmp_path / "eval-0" / "with_skill" / "run-1" / "timing.json",
+        {"total_duration_seconds": 1.0, "total_tokens": 10},
+    )
     monkeypatch.setattr("sys.argv", ["prog", str(tmp_path)])
     mod.main()
     assert (tmp_path / "benchmark.json").exists()
@@ -356,9 +474,28 @@ def test_main_explicit_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
         tmp_path / "eval-0" / "with_skill" / "run-1" / "grading.json",
         {"summary": {"pass_rate": 1.0}, "execution_metrics": {}, "expectations": []},
     )
+    _write_json(
+        tmp_path / "eval-0" / "with_skill" / "run-1" / "timing.json",
+        {"total_duration_seconds": 1.0, "total_tokens": 10},
+    )
     out = tmp_path / "custom" / "result.json"
     out.parent.mkdir()
     monkeypatch.setattr("sys.argv", ["prog", str(tmp_path), "-o", str(out)])
     mod.main()
     assert out.exists()
     assert out.with_suffix(".md").exists()
+
+
+def test_main_aggregation_error_exits(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """timing.json 欠落など入力不正時は集計全体を止め sys.exit(1) する（fail-loud）。"""
+    _write_json(
+        tmp_path / "eval-0" / "with_skill" / "run-1" / "grading.json",
+        {"summary": {"pass_rate": 1.0}, "execution_metrics": {}, "expectations": []},
+    )
+    monkeypatch.setattr("sys.argv", ["prog", str(tmp_path)])
+    with pytest.raises(SystemExit) as exc:
+        mod.main()
+    assert exc.value.code == 1
+    assert "timing.json" in capsys.readouterr().out

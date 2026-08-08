@@ -27,9 +27,12 @@ run ディレクトリの grading.json を読み込み、次を出力する:
 import argparse
 import json
 import math
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+
+_RUN_NAME_PATTERN = re.compile(r"run-([1-9][0-9]*)\Z")
 
 
 def calculate_stats(values: list[float]) -> dict:
@@ -69,9 +72,42 @@ def _resolve_eval_id(eval_dir: Path, eval_idx: int) -> int | str:
         return eval_idx
 
 
+def _parse_run_number(run_dir: Path) -> int:
+    """run ディレクトリ名から run 番号を厳密に抽出する。
+
+    ``run-<正の整数>``（先頭ゼロなし）形式のみ許可し、不一致の場合は
+    ValueError を送出する（fail-loud）。
+    """
+    match = _RUN_NAME_PATTERN.fullmatch(run_dir.name)
+    if match is None:
+        raise ValueError(f"{run_dir}: run-N 形式ではありません（run-<正の整数> のみ許可）")
+    return int(match.group(1))
+
+
+def _load_timing(run_dir: Path) -> dict:
+    """run ディレクトリの timing.json を読み込み、必須フィールドを検証して返す。
+
+    time_seconds/tokens は timing.json 由来の値のみを信頼する。grading.json の
+    timing や execution_metrics へのフォールバックは行わない。ファイル欠落・
+    JSON 不正・必須フィールド欠落時は ValueError を送出する（fail-loud）。
+    """
+    timing_file = run_dir / "timing.json"
+    if not timing_file.exists():
+        raise ValueError(f"{timing_file}: timing.json が見つかりません（time_seconds/tokens は必須）")
+    try:
+        with open(timing_file, encoding="utf-8") as tf:
+            timing_data = json.load(tf)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{timing_file}: JSON が不正です: {error}") from error
+    missing = [field for field in ("total_duration_seconds", "total_tokens") if field not in timing_data]
+    if missing:
+        raise ValueError(f"{timing_file}: 必須フィールドがありません: {', '.join(missing)}")
+    return timing_data
+
+
 def _extract_run_result(run_dir: Path, eval_id: int | str, grading: dict) -> dict:
     """grading.json と timing.json から run 結果辞書を構築して返す。"""
-    run_number = int(run_dir.name.split("-")[1])
+    run_number = _parse_run_number(run_dir)
     result = {
         "eval_id": eval_id,
         "run_number": run_number,
@@ -81,22 +117,12 @@ def _extract_run_result(run_dir: Path, eval_id: int | str, grading: dict) -> dic
         "total": grading.get("summary", {}).get("total", 0),
     }
 
-    timing = grading.get("timing", {})
-    result["time_seconds"] = timing.get("total_duration_seconds", 0.0)
-    timing_file = run_dir / "timing.json"
-    if result["time_seconds"] == 0.0 and timing_file.exists():
-        try:
-            with open(timing_file, encoding="utf-8") as tf:
-                timing_data = json.load(tf)
-            result["time_seconds"] = timing_data.get("total_duration_seconds", 0.0)
-            result["tokens"] = timing_data.get("total_tokens", 0)
-        except json.JSONDecodeError:
-            pass
+    timing_data = _load_timing(run_dir)
+    result["time_seconds"] = timing_data["total_duration_seconds"]
+    result["tokens"] = timing_data["total_tokens"]
 
     metrics = grading.get("execution_metrics", {})
     result["tool_calls"] = metrics.get("total_tool_calls", 0)
-    if not result.get("tokens"):
-        result["tokens"] = metrics.get("output_chars", 0)
     result["errors"] = metrics.get("errors_encountered", 0)
 
     raw_expectations = grading.get("expectations", [])
@@ -124,6 +150,7 @@ def _load_config_results(config_dir: Path, eval_id: int | str, results: dict[str
         results[config] = []
 
     for run_dir in sorted(config_dir.glob("run-*")):
+        _parse_run_number(run_dir)  # run-N 形式でなければここで fail-loud に停止する
         grading_file = run_dir / "grading.json"
         if not grading_file.exists():
             print(f"警告: {run_dir} に grading.json が見つかりません")
@@ -344,7 +371,11 @@ def main():
         sys.exit(1)
 
     # benchmark を生成する
-    benchmark = generate_benchmark(args.benchmark_dir, args.skill_name, args.skill_path)
+    try:
+        benchmark = generate_benchmark(args.benchmark_dir, args.skill_name, args.skill_path)
+    except ValueError as error:
+        print(f"入力が不正です:\n{error}")
+        sys.exit(1)
 
     # 出力先を決める
     output_json = args.output or (args.benchmark_dir / "benchmark.json")
