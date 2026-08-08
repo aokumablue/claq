@@ -284,6 +284,15 @@ def test_archive_old_stat_oserror(tmp_path: Path) -> None:
         observe._archive_old_observation_files(tmp_path)
 
 
+def test_archive_old_glob_oserror(tmp_path: Path) -> None:
+    """archive_dir.glob が OSError なら archived=[] 扱いで処理を継続する。"""
+    archive = tmp_path / "observations.archive"
+    archive.mkdir()
+    with mock.patch.object(Path, "glob", side_effect=OSError):
+        observe._archive_old_observation_files(tmp_path)
+    assert (tmp_path / ".last-purge").exists()
+
+
 def test_archive_old_unlink_oserror(tmp_path: Path) -> None:
     """古いファイルの unlink が OSError でも continue する。"""
     archive = tmp_path / "observations.archive"
