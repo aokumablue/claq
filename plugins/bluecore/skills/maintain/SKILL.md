@@ -7,7 +7,7 @@ user-invocable: true
 
 # ハーネス定期メンテ
 
-commands/skills/agents/hooks を周期的にレビューし、実害を修正し、下位モデルでも Fable5 品質で動くよう強化し、再レビューで裏を取るまでを1回で完遂する。
+commands/skills/agents/hooks を周期的にレビューし、実害を修正し、下位モデルでも安定した品質で動くよう強化し、再レビューで裏を取るまでを1回で完遂する。
 
 ## 焼き込み原則（この5つを全工程で守る）
 
@@ -16,10 +16,6 @@ commands/skills/agents/hooks を周期的にレビューし、実害を修正し
 3. **現物実証**: CRITICAL 指摘は鵜呑みにせず、サンドボックスや実行で失敗を再現してから直す。
 4. **canonical 再利用**: 新表現を発明せず executor / tdd-writer / reviewer / feat-dev / loop-dev の既存文言を再利用（トークン増と表現ゆれを回避）。過去知見「列挙型禁止は逆効果、肯定形・原則化が正」に従う。
 5. **両ハーネス互換**: プラグインは Claude Code（主）と GitHub Copilot CLI（副）の両方で動く。ハーネス依存の入出力は `hook_common` / `output_adapter` の既存チョークポイント（`emit_block_output` / `adapt_context_output` 等）経由に一本化し、Copilot で実現不可能な機能には**フォールバック**（同等動作、不可能なら安全側の明示スキップ）を実装する。Claude Code 側の処理経路は変更しない。ハーネス判定やプロトコル分岐をフック内へ直書きした実装はレビューで指摘・是正する（前例: insights_security_monitor の Copilot fail-open を emit_block_output 一本化で解消）。
-
-## モデル規律
-
-サブエージェント委譲は常に `model:"fable"` オーバーライドで起動する（`architect`/`planner`/`simplifier` は frontmatter で Opus 固定のため、指定しないと Opus を消費する）。専門プロンプトは保ちつつ Fable で走らせる。
 
 ## スコープ
 
@@ -51,7 +47,7 @@ collect_skill_create_inputs "${COMMITS:-200}"        # コミット規約・同�
 
 既存失敗を記録し新規失敗判定の基準にする。
 
-## ステップ2: レビュー（READ-ONLY・並列・`model:"fable"`）
+## ステップ2: レビュー（READ-ONLY・並列）
 
 対象群に `bluecore:reviewer`（品質・設計・保守性）と `bluecore:security-auditor`（脆弱性）を**同時起動**。両結果を深刻度（CRITICAL/HIGH/MEDIUM/LOW）・ファイル位置・行番号・推奨修正で統合。ステップ1の web トレンドを踏まえ「最新プラクティスとの乖離」も観点に含める。
 
@@ -67,7 +63,7 @@ hooks / `src/bluecore/hooks/` を対象に含む回は**両ハーネス互換（
 | 強化（条項注入・出力形式・トークン整理） | ステップ4で直接編集 |
 | 仕様変更・新機能 | `/plan` 提示に留め自動実装しない |
 
-## ステップ4: 修正（承認後・`model:"fable"` 委譲）
+## ステップ4: 修正（承認後・委譲）
 
 - **バグ**: `bluecore:tdd-writer` で RED→GREEN（現物実証＝原則3）。実害脆弱性も同様。
 - **フック修正**: ハーネス依存の入出力は `hook_common` / `output_adapter` のチョークポイントへ寄せる（原則5）。新規フック・外部呼び出しは非ブロッキング + ハードタイムアウト必須（CLAUDE.md 準拠）。
@@ -75,7 +71,7 @@ hooks / `src/bluecore/hooks/` を対象に含む回は**両ハーネス互換（
 - **仕様変更**: 実装せず `/plan` 用の要件だけ整理。
 - 各修正の単位ごとに検証（baseline と同じ4コマンド）→ 新規失敗はその単位をリバートして継続し、リバート分はステップ7の残タスクに記載。作業内容に応じ細分化し、現在のブランチへ `type(scope): 要約` 規約でコミット（main へ直コミットしない）。
 
-## ステップ5: 再レビュー（並列・`model:"fable"`）＝原則1
+## ステップ5: 再レビュー（並列）＝原則1
 
 修正差分に `bluecore:reviewer` + `bluecore:security-auditor` を再起動。強化で新たな穴が入っていないかを必ず確認する。CRITICAL 指摘はステップ4同様に現物実証してから対応。
 
