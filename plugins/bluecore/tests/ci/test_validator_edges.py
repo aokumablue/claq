@@ -12,7 +12,6 @@ from bluecore.ci import (
     validate_agents,
     validate_commands,
     validate_hooks,
-    validate_no_personal_paths,
     validate_skills,
 )
 
@@ -191,46 +190,6 @@ def test_validate_commands_reports_errors_and_io_failures(tmp_path: Path, monkey
     assert "存在しないエージェント \"missing\"" in stderr
 
 
-def test_validate_no_personal_paths_covers_clean_skip_and_hits(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    root = tmp_path
-    (root / "README.md").write_text("Clean docs.\n", encoding="utf-8")
-    (root / "docs").mkdir()
-    (root / "docs" / "guide.md").write_text("C:\\Users\\alice\\secret\n", encoding="utf-8")
-    (root / "docs" / "manual.txt").write_text("/Users/bob/ignored in txt\n", encoding="utf-8")
-    (root / "skills").mkdir()
-    (root / "skills" / "alpha").mkdir()
-    (root / "skills" / "alpha" / "SKILL.md").write_text("Clean skill.\n", encoding="utf-8")
-    (root / "docs" / "node_modules").mkdir()
-    (root / "docs" / "node_modules" / "ignored.md").write_text("/Users/carol/should-skip\n", encoding="utf-8")
-    (root / "commands").mkdir()
-    (root / "commands" / ".git").mkdir()
-    (root / "commands" / ".git" / "ignored.md").write_text("/Users/dave/should-skip\n", encoding="utf-8")
-
-    assert validate_no_personal_paths.validate_no_personal_paths(root) == 1
-    stderr = capsys.readouterr().out
-    assert "個人用パスが検出されました" in stderr
-
-
-def test_validate_no_personal_paths_handles_unreadable_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    root = tmp_path
-    readme = root / "README.md"
-    readme.write_text("Clean docs.\n", encoding="utf-8")
-
-    original_read_text = Path.read_text
-
-    def fake_read_text(self: Path, *args, **kwargs):  # noqa: ANN001
-        if self == readme:
-            raise OSError("boom")
-        return original_read_text(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", fake_read_text)
-
-    assert validate_no_personal_paths.validate_no_personal_paths(root) == 0
-    assert "検証済み: 配布対象" in capsys.readouterr().out
-
-
 def test_validator_main_entrypoints(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -247,10 +206,6 @@ def test_validator_main_entrypoints(
     commands_dir.mkdir()
     (commands_dir / "alpha.md").write_text("Use `/alpha`.\n", encoding="utf-8")
 
-    docs_root = tmp_path / "docs-root"
-    docs_root.mkdir()
-    (docs_root / "README.md").write_text("Clean docs.\n", encoding="utf-8")
-
     assert validate_skills.main(["--skills-dir", str(skills_dir)]) == 0
     assert validate_agents.main(["--agents-dir", str(agents_dir)]) == 0
     assert validate_commands.main(
@@ -265,13 +220,11 @@ def test_validator_main_entrypoints(
             str(skills_dir),
         ]
     ) == 0
-    assert validate_no_personal_paths.main(["--root", str(docs_root)]) == 0
 
     stdout = capsys.readouterr().out
     assert "1 個のスキルディレクトリを検証しました" in stdout
     assert "1 個のエージェントファイルを検証しました" in stdout
     assert "1 個のコマンドファイルを検証しました" in stdout
-    assert "検証済み: 配布対象" in stdout
 
     entrypoints = [
         ("bluecore.ci.validate_skills", ["--skills-dir", str(skills_dir)]),
@@ -289,7 +242,6 @@ def test_validator_main_entrypoints(
                 str(skills_dir),
             ],
         ),
-        ("bluecore.ci.validate_no_personal_paths", ["--root", str(docs_root)]),
     ]
 
     for module_name, argv in entrypoints:

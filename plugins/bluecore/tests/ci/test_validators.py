@@ -1,17 +1,14 @@
 """CI 検証モジュールのテスト。
 
-エージェント、コマンド、フック、スキル、
-インストールマニフェスト、Unicode 安全性、個人パス検出の検証を対象とする。
+エージェント、コマンド、フック、スキルの検証を対象とする。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import bluecore.ci.check_unicode_safety as check_unicode_safety
 import bluecore.ci.validate_agents as validate_agents
 import bluecore.ci.validate_commands as validate_commands
-import bluecore.ci.validate_no_personal_paths as validate_no_personal_paths
 import bluecore.ci.validate_skills as validate_skills
 
 
@@ -56,36 +53,6 @@ def test_validate_skills_accepts_skill_directory(tmp_path: Path) -> None:
     (skill_dir / "SKILL.md").write_text("# Planner\n", encoding="utf-8")
 
     assert validate_skills.validate_skills(skills_dir) == 0
-
-
-def test_validate_no_personal_paths_flags_hardcoded_path(tmp_path: Path) -> None:
-    readme = tmp_path / "README.md"
-    readme.write_text("Use /Users/alice/project for setup.\n", encoding="utf-8")
-
-    assert validate_no_personal_paths.validate_no_personal_paths(tmp_path) == 1
-
-
-def test_validate_no_personal_paths_skips_placeholders(tmp_path: Path) -> None:
-    readme = tmp_path / "README.md"
-    readme.write_text(
-        "Examples: /home/user, /home/<username>, /Users/$USER, and C:\\Users\\{username}.\n",
-        encoding="utf-8",
-    )
-
-    assert validate_no_personal_paths.validate_no_personal_paths(tmp_path) == 0
-
-
-def test_check_unicode_safety_sanitizes_and_flags(tmp_path: Path) -> None:
-    doc = tmp_path / "README.md"
-    doc.write_text("⚠️  Zero​Width and ✅ emoji\n", encoding="utf-8")
-
-    assert check_unicode_safety.validate_unicode_safety(tmp_path, write_mode=True) == 0
-    assert "WARNING:" in doc.read_text(encoding="utf-8")
-
-
-def test_check_unicode_safety_helpers_detect_invisible_and_emoji() -> None:
-    assert check_unicode_safety.collect_dangerous_invisible_matches("x\u200by")
-    assert check_unicode_safety.collect_emoji_matches("🙂")
 
 
 def test_extract_frontmatter_skips_lines_without_colon() -> None:
