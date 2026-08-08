@@ -23,7 +23,7 @@
         "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"
       },
       {
-        "matcher": "*",
+        "matcher": "Edit|Write|MultiEdit|apply_patch",
         "hooks": [
           {
             "type": "command",
@@ -174,7 +174,7 @@
         "description": "redux: Bash 出力をコマンド別フィルタで圧縮（無一致時は汎用戦略でトークン削減）"
       },
       {
-        "matcher": "*",
+        "matcher": "Edit|Write|MultiEdit|apply_patch",
         "hooks": [
           {
             "type": "command",
@@ -205,7 +205,8 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"stop:desktop-notify\" \"bluecore.hooks.desktop_notify\" \"minimal,standard,strict\"",
-            "timeout": 10
+            "async": true,
+            "timeout": 5
           }
         ],
         "description": "応答完了時にタスクサマリー付きデスクトップ通知を送信します（macOS: osascript、WSL: PowerShell + BurntToast）"

@@ -144,6 +144,7 @@ BACKGROUND_HOOK_IDS: frozenset[str] = frozenset(
         "pre:observe",
         "post:quality-gate",
         "stop:session-end",
+        "stop:desktop-notify",
         "session:mem:end",
     }
 )
