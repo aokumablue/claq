@@ -148,16 +148,6 @@ def test_session_start_mem_hooks_use_separate_target_args(
         (
             (
                 "bluecore.hooks.run_with_flags",
-                "user:team:session-init",
-                "bluecore.mem.cli",
-                "standard,strict",
-                "team-session-init",
-            ),
-            json.dumps({"cwd": str(REPO_ROOT), "prompt": "hello"}),
-        ),
-        (
-            (
-                "bluecore.hooks.run_with_flags",
                 "user:mem:record-interaction",
                 "bluecore.mem.cli",
                 "standard,strict",
@@ -168,32 +158,12 @@ def test_session_start_mem_hooks_use_separate_target_args(
         (
             (
                 "bluecore.hooks.run_with_flags",
-                "user:mem:sync-check",
-                "bluecore.mem.cli",
-                "standard,strict",
-                "sync-check",
-            ),
-            "{}",
-        ),
-        (
-            (
-                "bluecore.hooks.run_with_flags",
                 "session:mem:end",
                 "bluecore.mem.cli",
                 "standard,strict",
                 "session-end",
             ),
             json.dumps({"session_id": "s-session-end"}),
-        ),
-        (
-            (
-                "bluecore.hooks.run_with_flags",
-                "session:mem:sync-check",
-                "bluecore.mem.cli",
-                "standard,strict",
-                "sync-check",
-            ),
-            "{}",
         ),
     ],
 )

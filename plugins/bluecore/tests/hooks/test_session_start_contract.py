@@ -11,7 +11,7 @@ import json
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from bluecore.hooks import hook_common, session_install, session_start
 from bluecore.hooks.hook_common import emit_session_start_output
@@ -109,30 +109,6 @@ class TestMemCliRecordProjectProfileContract:
         monkeypatch.setattr(cli, "_open_db", MagicMock(side_effect=RuntimeError("db error")))
         stdin = {"cwd": str(tmp_path)}
         stdout, _ = _run_cli_main(["record-project-profile"], stdin, monkeypatch, tmp_path)
-        _assert_session_start_json(stdout)
-
-
-class TestMemCliTeamContextContract:
-    def test_pg_disabled_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        stdout, _ = _run_cli_main(["team-context"], {"cwd": str(tmp_path)}, monkeypatch, tmp_path)
-        _assert_session_start_json(stdout)
-
-    def test_pg_connection_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        import bluecore.mem.settings as settings_mod
-        from bluecore.mem.settings import Settings
-
-        pg_settings = MagicMock(spec=Settings)
-        pg_settings.team = MagicMock(enabled=True, exclude_self=False)
-        pg_settings.sync = MagicMock(enabled=True, postgres_url="postgresql://localhost/test")
-        pg_settings.excluded_projects = []
-        monkeypatch.setattr(settings_mod.Settings, "load", classmethod(lambda cls: pg_settings))
-
-        with patch("bluecore.mem.pg_database.PgDatabase") as mock_pg_cls:
-            mock_pg = MagicMock()
-            mock_pg.test_connection.return_value = False
-            mock_pg_cls.return_value = mock_pg
-            stdout, _ = _run_cli_main(["team-context"], {"cwd": str(tmp_path)}, monkeypatch, tmp_path)
-
         _assert_session_start_json(stdout)
 
 

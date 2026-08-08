@@ -267,12 +267,6 @@ install_user_python() {
     fi
     echo "[bluecore] Model download disabled in ${model_config}. Embedding features will be unavailable." >&2
   fi
-
-  # 既存 settings.json のセキュリティ移行（パスワードを <data_dir>/.pgpass に分離・sslmode 未指定時のみ require 付与）
-  if [[ -f "${SETTINGS_PATH}" ]]; then
-    echo "[bluecore] Migrating existing settings.json to hardened format"
-    "${VENV_PYTHON}" -m bluecore.mem migrate-settings || echo "[bluecore] Note: settings migration skipped."
-  fi
 }
 
 # キャッシュディレクトリ内の .venv を VENV_DIR へのシンボリックリンクに差し替える共通処理。
@@ -397,10 +391,6 @@ fi
 
 update_claude_cache_symlinks
 update_copilot_cache_symlink
-
-if ! command -v psql >/dev/null 2>&1; then
-  echo "[bluecore] Note: PostgreSQL client (psql) is required for mem sync features."
-fi
 
 # ~/.bluecore/mem.db スキーマを初期化する（べき等: 既存DBは変更しない）
 if [[ "${SKIP_PYTHON}" != "1" ]]; then

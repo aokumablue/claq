@@ -1,9 +1,7 @@
 """search のテスト"""
 
-import sys
 import time
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import patch
 
 import pytest
@@ -160,96 +158,6 @@ class TestSearchService:
         # 存在する ID のみ結果に含まれる
         chunk_ids = [r.chunk_id for r in results]
         assert 99999 not in chunk_ids
-
-    def test_search_team_branches(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        settings = Settings()
-        settings.sync.enabled = True
-        settings.sync.postgres_url = "postgres://example"
-        settings.embedding_model = "model"
-        svc = SearchService(object(), settings)  # type: ignore[arg-type]
-
-        monkeypatch.setattr(
-            "bluecore.mem.embedding.embed_query",
-            lambda query, model: [0.1, 0.2],
-        )
-
-        class FakePg:
-            connected = True
-            team_results: list[tuple[str, float]] = []
-            rows: dict[str, dict] = {}
-            last: "FakePg | None" = None
-
-            def __init__(self, url: str) -> None:
-                self.url = url
-                self.closed = False
-                self.team_calls: list[dict[str, object]] = []
-                self.fetch_calls: list[list[str]] = []
-                FakePg.last = self
-
-            def test_connection(self) -> bool:
-                return FakePg.connected
-
-            def team_search(
-                self,
-                query: str,
-                embedding,
-                limit: int = 20,
-                *,
-                exclude_origin_user=None,
-            ):  # noqa: ANN001
-                self.team_calls.append(
-                    {
-                        "query": query,
-                        "embedding": embedding,
-                        "limit": limit,
-                        "exclude": exclude_origin_user,
-                    }
-                )
-                return list(FakePg.team_results)
-
-            def fetch_chunks_by_ids(self, chunk_ids: list[str]) -> dict[str, dict]:
-                self.fetch_calls.append(list(chunk_ids))
-                return dict(FakePg.rows)
-
-            def close(self) -> None:
-                self.closed = True
-
-        fake_pg_mod = ModuleType("bluecore.mem.pg_database")
-        fake_pg_mod.PgDatabase = FakePg
-        monkeypatch.setitem(sys.modules, "bluecore.mem.pg_database", fake_pg_mod)
-
-        settings.sync.enabled = False
-        assert svc.search_team("query") == []
-
-        settings.sync.enabled = True
-        FakePg.connected = False
-        assert svc.search_team("query") == []
-        assert FakePg.last is not None and FakePg.last.closed is True
-
-        FakePg.connected = True
-        FakePg.team_results = []
-        assert svc.search_team("query") == []
-        assert FakePg.last is not None and FakePg.last.closed is True
-
-        FakePg.team_results = [("c-1", 0.9), ("c-2", 0.8)]
-        FakePg.rows = {
-            "c-2": {
-                "content": "content-2",
-                "user_prompt": "prompt-2",
-                "project": "proj",
-                "created_at_epoch": 1,
-                "tool_names": ["Edit"],
-                "files_read": [],
-                "files_modified": ["b.py"],
-            }
-        }
-        results = svc.search_team("query", limit=1, exclude_origin_user="me")
-        assert len(results) == 1
-        assert results[0].chunk_id == "c-2"
-        assert FakePg.last is not None
-        assert FakePg.last.team_calls[-1]["exclude"] == "me"
-        assert FakePg.last.closed is True
-
 
 def _make_digest(
     *,
@@ -412,10 +320,3 @@ class TestShouldInjectMemory:
 
     def test_empty_prompt(self) -> None:
         assert should_inject_memory("") is False
-
-
-def test_pg_search_rows_empty_embedding(db: Database, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
-    """埋め込みが空（モデル未配置）なら空リストを返す。"""
-    monkeypatch.setattr("bluecore.mem.embedding.embed_query", lambda query, model: [])
-    svc = SearchService(db, settings)
-    assert svc._pg_search_rows(object(), "q", 5, None) == []

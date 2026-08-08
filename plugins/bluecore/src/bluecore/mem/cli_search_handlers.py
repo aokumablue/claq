@@ -169,33 +169,6 @@ def parse_date_to_epoch(value: int | str | None) -> int | None:
         return None
 
 
-def merge_search_results_rrf(
-    local_results: list[SearchResult],
-    team_results: list[SearchResult],
-    top_k: int = 3,
-    k: int = 60,
-) -> list[SearchResult]:
-    """ローカルとチームの検索結果を RRF で統合して上位 top_k 件を返す。"""
-    if not team_results:
-        return local_results[:top_k]
-
-    scores: dict[str, float] = {}
-    result_map: dict[str, SearchResult] = {}
-
-    for rank, result in enumerate(local_results):
-        key = str(result.chunk_id)
-        scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank + 1)
-        result_map[key] = result
-
-    for rank, result in enumerate(team_results):
-        key = f"team:{result.chunk_id}"
-        scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank + 1)
-        result_map[key] = result
-
-    sorted_keys = sorted(scores, key=lambda x: scores[x], reverse=True)
-    return [result_map[kk] for kk in sorted_keys[:top_k]]
-
-
 def render_adaptive_context(db: Database, results: list[SearchResult], max_tokens: int = 400) -> str:
     """検索結果を <mem-context> タグでラップした Markdown 文字列を生成する。"""
     lines = ["<mem-context>", "# 関連メモリ（適応的注入）", ""]
@@ -283,7 +256,7 @@ def format_fields(
 
 
 def format_chunk_from_result(result: SearchResult) -> str:
-    """SearchResult をチャンクフォーマットに変換する（team 検索結果用）。"""
+    """SearchResult をチャンクフォーマットに変換する（ローカル DB に該当チャンクが無い場合のフォールバック用）。"""
     return format_fields(result.user_prompt, result.tool_names, result.files_modified, result.content)
 
 

@@ -190,9 +190,7 @@ def test_repo_mem_cli_hooks_split_target_and_args() -> None:
             "context",
             "record-project-profile",
             "session-init",
-            "team-session-init",
             "record-interaction",
-            "sync-check",
             "session-end",
         }
 

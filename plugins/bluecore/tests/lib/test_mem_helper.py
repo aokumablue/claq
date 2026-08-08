@@ -289,7 +289,7 @@ class TestRunMemCliIntegration:
 
         monkeypatch.setitem(os.environ, "BLUECORE_DATA_PATH", str(tmp_path))
         # 正常なコマンドはタイムアウトしない
-        result = _run_mem_cli("sync-status", {})
+        result = _run_mem_cli("compact", {})
         # タイムアウトエラーではないことを確認
         assert result.get("error") != "Timeout"
 

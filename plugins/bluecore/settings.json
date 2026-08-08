@@ -1,8 +1,1 @@
-{
-  "mem": {
-    "sync": {
-      "enabled": false,
-      "postgres_url": ""
-    }
-  }
-}
+{}

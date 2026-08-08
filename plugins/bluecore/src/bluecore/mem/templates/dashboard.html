@@ -205,9 +205,6 @@
 <div class="grid">
   <div class="card" style="grid-column: 1 / -1;">
     <h2>スキル使用回数ランキング</h2>
-    {% if not pg_available %}
-    <p style="color:#8b949e;font-size:0.85rem;margin-bottom:8px;">チームデータ: PostgreSQL 未設定（個人データのみ表示）</p>
-    {% endif %}
     <canvas id="skillRankChart" style="max-height:400px;"></canvas>
   </div>
   <div class="card" style="grid-column: 1 / -1;">
@@ -219,7 +216,7 @@
     <canvas id="agentRankChart" style="max-height:300px;"></canvas>
   </div>
   <div class="card">
-    <h2>日次実行トレンド（個人 vs チーム）</h2>
+    <h2>日次実行トレンド（個人）</h2>
     <canvas id="itemTrendChart"></canvas>
   </div>
   <div class="card">
@@ -311,68 +308,47 @@ new Chart(document.getElementById('skillGrowthChart'), {
 // ===== アイテム使用率チャート =====
 const axisOpts = { scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#c9d1d9' } } }, plugins: { legend: { labels: { color: '#c9d1d9' } } } };
 
-// スキルランキング（個人 vs チーム grouped bar）
+// スキルランキング（個人）
 const skillLabels = {{ item_skill_labels | safe }};
 const skillPersonal = {{ item_skill_personal | safe }};
-const skillTeam = {{ item_skill_team | safe }};
-const pgAvailable = {{ 'true' if pg_available else 'false' }};
-const skillDatasets = [
-  { label: '個人', data: skillPersonal, backgroundColor: '#58a6ff55', borderColor: '#58a6ff', borderWidth: 1 }
-];
-if (pgAvailable) {
-  skillDatasets.push({ label: 'チーム', data: skillTeam, backgroundColor: '#3fb95055', borderColor: '#3fb950', borderWidth: 1 });
-}
 new Chart(document.getElementById('skillRankChart'), {
   type: 'bar',
-  data: { labels: skillLabels, datasets: skillDatasets },
+  data: { labels: skillLabels, datasets: [
+    { label: '個人', data: skillPersonal, backgroundColor: '#58a6ff55', borderColor: '#58a6ff', borderWidth: 1 }
+  ] },
   options: { indexAxis: 'y', ...axisOpts }
 });
 
 // コマンドランキング
 const cmdLabels = {{ item_command_labels | safe }};
 const cmdPersonal = {{ item_command_personal | safe }};
-const cmdTeam = {{ item_command_team | safe }};
-const cmdDatasets = [
-  { label: '個人', data: cmdPersonal, backgroundColor: '#3fb95055', borderColor: '#3fb950', borderWidth: 1 }
-];
-if (pgAvailable) {
-  cmdDatasets.push({ label: 'チーム', data: cmdTeam, backgroundColor: '#d2992255', borderColor: '#d29922', borderWidth: 1 });
-}
 new Chart(document.getElementById('commandRankChart'), {
   type: 'bar',
-  data: { labels: cmdLabels, datasets: cmdDatasets },
+  data: { labels: cmdLabels, datasets: [
+    { label: '個人', data: cmdPersonal, backgroundColor: '#3fb95055', borderColor: '#3fb950', borderWidth: 1 }
+  ] },
   options: { indexAxis: 'y', ...axisOpts }
 });
 
 // エージェントランキング
 const agentLabels = {{ item_agent_labels | safe }};
 const agentPersonal = {{ item_agent_personal | safe }};
-const agentTeam = {{ item_agent_team | safe }};
-const agentDatasets = [
-  { label: '個人', data: agentPersonal, backgroundColor: '#d2992255', borderColor: '#d29922', borderWidth: 1 }
-];
-if (pgAvailable) {
-  agentDatasets.push({ label: 'チーム', data: agentTeam, backgroundColor: '#bc8cff55', borderColor: '#bc8cff', borderWidth: 1 });
-}
 new Chart(document.getElementById('agentRankChart'), {
   type: 'bar',
-  data: { labels: agentLabels, datasets: agentDatasets },
+  data: { labels: agentLabels, datasets: [
+    { label: '個人', data: agentPersonal, backgroundColor: '#d2992255', borderColor: '#d29922', borderWidth: 1 }
+  ] },
   options: { indexAxis: 'y', ...axisOpts }
 });
 
 // 日次トレンド
 const trendDates = {{ item_trend_dates | safe }};
 const trendPersonal = {{ item_trend_personal | safe }};
-const trendTeam = {{ item_trend_team | safe }};
-const trendDatasets = [
-  { label: '個人', data: trendPersonal, borderColor: '#58a6ff', tension: 0.3, fill: false }
-];
-if (pgAvailable) {
-  trendDatasets.push({ label: 'チーム', data: trendTeam, borderColor: '#3fb950', tension: 0.3, fill: false });
-}
 new Chart(document.getElementById('itemTrendChart'), {
   type: 'line',
-  data: { labels: trendDates, datasets: trendDatasets },
+  data: { labels: trendDates, datasets: [
+    { label: '個人', data: trendPersonal, borderColor: '#58a6ff', tension: 0.3, fill: false }
+  ] },
   options: axisOpts
 });
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 import time
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from bluecore.mem.database import Database, SessionDigest
 from bluecore.mem.logger import get as _get_logger
@@ -160,72 +160,6 @@ class SearchService:
 
         scored.sort(key=lambda x: x[1], reverse=True)
         return [DigestSearchResult(digest=d, score=s) for d, s in scored[:limit]]
-
-    def _pg_search_rows(
-        self, pg_db: Any, query: str, limit: int, exclude_origin_user: str | None
-    ) -> list[SearchResult]:
-        """PgDatabase を使ってチーム横断検索し SearchResult リストを返す。
-
-        埋め込みモデル未配置・PG 結果ゼロの場合は空リストを返す。
-        """
-        import bluecore.mem.embedding as _emb
-
-        query_embedding = _emb.embed_query(query, self.settings.embedding_model)
-        if not query_embedding:
-            return []
-        pg_results = pg_db.team_search(
-            query, query_embedding, limit=limit, exclude_origin_user=exclude_origin_user,
-        )
-        if not pg_results:
-            return []
-
-        chunk_ids = [cid for cid, _ in pg_results]
-        rows = pg_db.fetch_chunks_by_ids(chunk_ids)
-        score_map = dict(pg_results)
-        return [
-            SearchResult(
-                chunk_id=cid,
-                score=score_map[cid],
-                content=rows[cid]["content"],
-                user_prompt=rows[cid]["user_prompt"],
-                project=rows[cid]["project"],
-                created_at_epoch=rows[cid]["created_at_epoch"],
-                tool_names=rows[cid]["tool_names"],
-                files_read=rows[cid]["files_read"],
-                files_modified=rows[cid]["files_modified"],
-            )
-            for cid in chunk_ids
-            if cid in rows
-        ]
-
-    def search_team(
-        self,
-        query: str,
-        limit: int = 20,
-        *,
-        exclude_origin_user: str | None = None,
-    ) -> list[SearchResult]:
-        """PostgreSQL を使ったチーム横断検索（FTS + ベクトル + RRF）。
-
-        ``exclude_origin_user`` を指定すると、PG 側で該当ユーザの行を除外して返す。
-        PG 同期が無効・接続失敗・結果ゼロのいずれでも空リストを返す。
-        """
-        from bluecore.mem.pg_database import PgDatabase
-
-        sync_cfg = self.settings.sync
-        if not sync_cfg.enabled or not sync_cfg.postgres_url:
-            log.info("チーム検索にはPG同期の有効化が必要です")
-            return []
-
-        pg_db = PgDatabase(sync_cfg.postgres_url)
-        try:
-            if not pg_db.test_connection():
-                log.error("PostgreSQL への接続に失敗しました")
-                return []
-            return self._pg_search_rows(pg_db, query, limit, exclude_origin_user)
-        finally:
-            pg_db.close()
-
 
 def adaptive_decay(
     created_at_epoch: int,

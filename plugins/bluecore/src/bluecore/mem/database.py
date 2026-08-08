@@ -7,7 +7,6 @@ import json
 import sqlite3
 import struct
 import time
-from contextlib import contextmanager
 from pathlib import Path
 
 from bluecore.mem.logger import get as _get_logger
@@ -129,21 +128,6 @@ class Database:
     def close(self) -> None:
         """DB 接続を閉じる。"""
         self.conn.close()
-
-    @contextmanager
-    def begin_immediate_transaction(self):
-        """BEGIN IMMEDIATE トランザクションを開始し、接続を yield する。
-
-        ロック競合時（OperationalError）を含む例外でロールバックする。
-        正常終了時にコミットする。
-        """
-        self.conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield self.conn
-            self.conn.commit()
-        except Exception:
-            self.conn.rollback()
-            raise
 
     # --- セッション ---
 

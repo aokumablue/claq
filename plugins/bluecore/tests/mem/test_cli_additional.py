@@ -12,16 +12,15 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-import bluecore.mem.dashboard_queries as dashboard_queries_mod
 import bluecore.mem.importers as importers_mod
 import bluecore.mem.item_usage_queries as item_usage_queries_mod
-import bluecore.mem.pg_database as pg_database_mod
-import bluecore.mem.sync as sync_mod
 from bluecore.mem import cli
 from bluecore.mem.database import MemoryChunk
 from bluecore.mem.search import SearchResult
-from bluecore.mem.sync import SyncResult
 from tests.mem.conftest import FakeDB, make_settings, open_fake_db
+
+# dashboard_queries / pg_database は PostgreSQL チーム同期廃止に伴い、それらへ依存する
+# cli_dashboard_handlers 側は次タスクで解消予定。当該テスト関数内でのみ遅延 import する。
 
 
 def test_helper_functions_cover_filters_and_rendering() -> None:
@@ -427,17 +426,8 @@ def test_handle_session_start_commands_emit_json(
     assert cli._handle_context(settings, {"cwd": str(tmp_path)}) == ""
 
 
-def test_sync_import_and_dashboard_helpers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_import_helpers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     settings = make_settings(tmp_path)
-
-    monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(FakeDB()))
-    monkeypatch.setattr(sync_mod, "sync_to_postgres", lambda settings, dry_run=False: SyncResult(chunks=2, sessions=3, success=True))
-    cli._handle_sync(settings, {"dry_run": True})
-    assert json.loads(capsys.readouterr().out)["synced"]["chunks"] == 2
-
-    monkeypatch.setattr(sync_mod, "should_sync", lambda settings: False)
-    cli._handle_sync_check(settings)
-    assert capsys.readouterr().out == ""
 
     import_calls: list[tuple[str, str, str | None]] = []
     monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(FakeDB()))
@@ -448,21 +438,10 @@ def test_sync_import_and_dashboard_helpers(monkeypatch: pytest.MonkeyPatch, tmp_
     assert json.loads(capsys.readouterr().out)["imported"] == {"instincts": 1, "adrs": 2, "events": 3}
 
 
-def test_handle_session_end_empty_and_sync_check_runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_handle_session_end_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     settings = make_settings(tmp_path)
     monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(FakeDB([])))
     cli._handle_session_end(settings, {"session_id": "s1"})
-
-    sync_calls: list[bool] = []
-
-    def fake_sync_to_postgres(settings, dry_run=False):  # noqa: ANN001
-        sync_calls.append(dry_run)
-        return SyncResult(success=False, error="boom")
-
-    monkeypatch.setattr(sync_mod, "should_sync", lambda settings: True)
-    monkeypatch.setattr(sync_mod, "sync_to_postgres", fake_sync_to_postgres)
-    cli._handle_sync_check(settings)
-    assert sync_calls == [False]
     assert capsys.readouterr().out == ""
 
 
@@ -686,51 +665,11 @@ def test_handle_session_end_auto_compact_error(monkeypatch: pytest.MonkeyPatch, 
     assert any("自動圧縮エラー" in message for message in warnings)
 
 
-def test_handle_dashboard_html_and_disabled_pg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_handle_dashboard_html_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """個人 SQLite データのみでダッシュボード HTML を生成する。"""
     settings = make_settings(tmp_path)
     html_output = tmp_path / "dashboard.html"
 
-    class _FakePg:
-        last: _FakePg | None = None
-
-        def __init__(self, url: str) -> None:
-            self.url = url
-            self.closed = False
-            self.transaction_used = False
-            self.conn = SimpleNamespace(
-                execute=lambda *args, **kwargs: SimpleNamespace(
-                    fetchone=lambda: (0,),
-                    fetchall=lambda: [],
-                )
-            )
-            type(self).last = self
-
-        def test_connection(self) -> bool:
-            return True
-
-        def transaction(self):  # noqa: ANN201
-            self.transaction_used = True
-
-            class _Tx:
-                def __enter__(self_tx) -> SimpleNamespace:  # noqa: N805
-                    return SimpleNamespace()
-
-                def __exit__(self_tx, *exc) -> bool:  # noqa: N805, ANN002
-                    return False
-
-            return _Tx()
-
-        def close(self) -> None:
-            self.closed = True
-
-    monkeypatch.setattr(pg_database_mod, "PgDatabase", _FakePg)
-    monkeypatch.setattr(dashboard_queries_mod, "activity_by_user", lambda pg, days: [{"user": "u", "chunks": 1}])
-    monkeypatch.setattr(dashboard_queries_mod, "activity_by_project", lambda pg, days: [{"project": "p", "chunks": 2}])
-    monkeypatch.setattr(dashboard_queries_mod, "tool_usage_distribution", lambda pg, days: [{"tool": "Edit", "count": 3}])
-    monkeypatch.setattr(dashboard_queries_mod, "session_timeline", lambda pg, days: [{"date": "2024-01-01", "sessions": 1, "chunks": 1}])
-    monkeypatch.setattr(dashboard_queries_mod, "instinct_growth", lambda pg: [{"date": "2024-01-01", "count": 4}])
-    monkeypatch.setattr(dashboard_queries_mod, "memory_quality_metrics", lambda pg: {"quality": "good"})
-    monkeypatch.setattr(dashboard_queries_mod, "file_change_heatmap", lambda pg, days: {"heat": 1})
     monkeypatch.setattr(
         cli,
         "_collect_skill_health_overview",
@@ -750,34 +689,6 @@ def test_handle_dashboard_html_and_disabled_pg(monkeypatch: pytest.MonkeyPatch, 
             "chart_labels": ["skill-a"],
             "chart_7d": [80.0],
             "chart_30d": [70.0],
-        },
-    )
-    monkeypatch.setattr(
-        cli,
-        "_collect_skill_growth_overview",
-        lambda settings, days: {
-            "summary": {"total_patterns": 2, "total_gaps": 1, "skill_candidates": 1, "gap_candidates": 1},
-            "skill_candidates": [
-                {
-                    "suggested_name": "file-workflow",
-                    "priority": "high",
-                    "priority_score": 42,
-                    "evidence": {"occurrence_count": 3, "user_count": 2, "project_count": 1},
-                }
-            ],
-            "gap_candidates": [
-                {
-                    "priority": "medium",
-                    "sample_prompt": "build dashboard",
-                    "occurrence_count": 4,
-                    "user_count": 2,
-                }
-            ],
-            "action_items": [
-                {"priority": "high", "action": "create_skill", "target": "file-workflow"}
-            ],
-            "chart_labels": ["file-workflow"],
-            "chart_scores": [42],
         },
     )
     monkeypatch.setattr(
@@ -806,21 +717,21 @@ def test_handle_dashboard_html_and_disabled_pg(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr(
         item_usage_queries_mod,
         "item_usage_ranking",
-        lambda conn, placeholder, days: [  # noqa: ARG005
+        lambda conn, days: [  # noqa: ARG005
             {"item_name": "skill-a", "item_type": "skill", "uses": 2, "last_used_epoch": 1}
         ],
     )
     monkeypatch.setattr(
         item_usage_queries_mod,
         "daily_trend",
-        lambda conn, placeholder, days: [  # noqa: ARG005
+        lambda conn, days: [  # noqa: ARG005
             {"date": "2024-01-01", "skill": 1, "command": 0, "agent": 0, "total": 1}
         ],
     )
     monkeypatch.setattr(
         item_usage_queries_mod,
         "outcome_distribution",
-        lambda conn, placeholder, days: [  # noqa: ARG005
+        lambda conn, days: [  # noqa: ARG005
             {"outcome": "success", "count": 1}
         ],
     )
@@ -850,21 +761,6 @@ def test_handle_dashboard_html_and_disabled_pg(monkeypatch: pytest.MonkeyPatch, 
     cli._handle_dashboard(settings, {"output": str(html_output), "format": "html", "days": 7})
     assert json.loads(capsys.readouterr().out)["success"] is True
     assert html_output.read_text(encoding="utf-8") == "HTML:7"
-    assert _FakePg.last is not None
-    assert _FakePg.last.transaction_used is True  # 公開 API transaction() 経由で取得
-    assert _FakePg.last.closed is True
-
-    monkeypatch.setattr(
-        pg_database_mod,
-        "PgDatabase",
-        lambda url: (_ for _ in ()).throw(RuntimeError("boom")),
-    )
-    cli._handle_dashboard(settings, {"output": str(html_output), "format": "json"})
-    assert json.loads(capsys.readouterr().out)["success"] is True
-
-    settings.sync.enabled = False
-    cli._handle_dashboard(settings, {"output": str(html_output), "format": "json"})
-    assert json.loads(capsys.readouterr().out)["success"] is True
 
 
 def test_handle_dashboard_rejects_unsafe_output_path_and_allows_safe_path(
@@ -873,7 +769,6 @@ def test_handle_dashboard_rejects_unsafe_output_path_and_allows_safe_path(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     settings = make_settings(tmp_path)
-    settings.sync.enabled = False
     monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(FakeDB()))
 
     unsafe_output = tmp_path.parent / "dashboard-unsafe.json"
@@ -897,7 +792,6 @@ def test_handle_dashboard_coerces_string_days_and_rejects_invalid(
 ) -> None:
     """days は文字列でも int に変換され、非数値はエラー JSON を返す。"""
     settings = make_settings(tmp_path)
-    settings.sync.enabled = False
     monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(FakeDB()))
 
     output = tmp_path / "dashboard-days.json"
@@ -913,14 +807,6 @@ def test_handle_dashboard_coerces_string_days_and_rejects_invalid(
 def test_handle_dashboard_json_and_main_entrypoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     settings = make_settings(tmp_path)
 
-    monkeypatch.setattr(pg_database_mod, "PgDatabase", lambda url: SimpleNamespace(test_connection=lambda: True, close=lambda: None))
-    monkeypatch.setattr(dashboard_queries_mod, "activity_by_user", lambda pg, days: [{"user": "u", "chunks": 1}])
-    monkeypatch.setattr(dashboard_queries_mod, "activity_by_project", lambda pg, days: [{"project": "p", "chunks": 2}])
-    monkeypatch.setattr(dashboard_queries_mod, "tool_usage_distribution", lambda pg, days: [{"tool": "Edit", "count": 3}])
-    monkeypatch.setattr(dashboard_queries_mod, "session_timeline", lambda pg, days: [{"date": "2024-01-01", "sessions": 1, "chunks": 1}])
-    monkeypatch.setattr(dashboard_queries_mod, "instinct_growth", lambda pg: [{"date": "2024-01-01", "count": 4}])
-    monkeypatch.setattr(dashboard_queries_mod, "memory_quality_metrics", lambda pg: {"quality": "good"})
-    monkeypatch.setattr(dashboard_queries_mod, "file_change_heatmap", lambda pg, days: {"heat": 1})
     monkeypatch.setattr(
         cli,
         "_collect_skill_health_overview",
@@ -931,18 +817,6 @@ def test_handle_dashboard_json_and_main_entrypoints(monkeypatch: pytest.MonkeyPa
             "chart_labels": [],
             "chart_7d": [],
             "chart_30d": [],
-        },
-    )
-    monkeypatch.setattr(
-        cli,
-        "_collect_skill_growth_overview",
-        lambda settings, days: {
-            "summary": {"total_patterns": 0, "total_gaps": 0, "skill_candidates": 0, "gap_candidates": 0},
-            "skill_candidates": [],
-            "gap_candidates": [],
-            "action_items": [],
-            "chart_labels": [],
-            "chart_scores": [],
         },
     )
     monkeypatch.setattr(
@@ -970,7 +844,6 @@ def test_handle_dashboard_json_and_main_entrypoints(monkeypatch: pytest.MonkeyPa
     )
     cli._handle_dashboard(settings, {"output": str(tmp_path / "dashboard.json"), "format": "json"})
     out_data = json.loads((tmp_path / "dashboard.json").read_text(encoding="utf-8"))
-    assert "quality" in out_data
     assert "personal_ranking" in out_data
     assert out_data["project_overview"]["projects"][0]["id"] == "p1"
 
@@ -1011,10 +884,9 @@ def test_main_routes_all_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
     commands = [
         "init", "setup", "context", "search", "session-init", "observe",
-        "session-end", "compact", "search-structured", "record", "sync",
-        "sync-check", "import", "dashboard", "record-interaction",
+        "session-end", "compact", "search-structured", "record",
+        "import", "dashboard", "record-interaction",
         "record-project-profile", "get-project-profile", "record-item-run",
-        "team-context", "team-session-init",
     ]
 
     for name in commands:
@@ -1183,22 +1055,6 @@ def test_format_wrappers_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_migrate_settings_json_decode_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """settings.json が壊れていれば migrate-settings はログだけ出して return する。"""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    bluecore_dir = tmp_path / ".bluecore"
-    bluecore_dir.mkdir()
-    (bluecore_dir / "settings.json").write_text("{not-json", encoding="utf-8")
-
-    warnings: list[str] = []
-    monkeypatch.setattr(cli.log, "warning", lambda msg, *args: warnings.append(msg % args if args else msg))
-
-    cli._handle_migrate_settings(make_settings(tmp_path))
-    assert any("settings.json 読み込み失敗" in w for w in warnings)
-
-
 # === cli_dashboard_handlers のカバレッジ補完 ===
 
 
@@ -1258,126 +1114,6 @@ def test_collect_skill_health_overview_handles_collect_failure(
     assert result["report"] == {"generated_at": None, "skills": []}
     assert result["skills"] == []
     assert any("skill health collection failed" in w for w in warnings)
-
-
-def test_collect_skill_growth_overview_disabled_returns_empty(tmp_path: Path) -> None:
-    """sync 無効時は早期 return で空辞書を返す。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    settings = make_settings(tmp_path)
-    settings.sync.enabled = False
-    fake_log = SimpleNamespace(warning=lambda *a, **kw: None)
-    result = cdh.collect_skill_growth_overview(settings, 30, log=fake_log)
-    assert result["summary"]["total_patterns"] == 0
-    assert result["skill_candidates"] == []
-
-
-def test_collect_skill_growth_overview_pg_not_connectable(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """sync 有効でも test_connection が False なら空辞書を返す。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    settings = make_settings(tmp_path)
-    settings.sync.enabled = True
-    settings.sync.postgres_url = "postgresql://example"
-
-    class _PG:
-        def __init__(self, _url: str) -> None:
-            pass
-
-        def test_connection(self) -> bool:
-            return False
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr("bluecore.mem.pg_database.PgDatabase", _PG)
-    fake_log = SimpleNamespace(warning=lambda *a, **kw: None)
-    result = cdh.collect_skill_growth_overview(settings, 30, log=fake_log)
-    assert result["skill_candidates"] == []
-
-
-def test_collect_skill_growth_overview_success(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """成功パスで proposal が返され、ランキングが構築される。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    settings = make_settings(tmp_path)
-    settings.sync.enabled = True
-    settings.sync.postgres_url = "postgresql://example"
-
-    closed: dict[str, bool] = {"value": False}
-
-    class _PG:
-        def __init__(self, _url: str) -> None:
-            pass
-
-        def test_connection(self) -> bool:
-            return True
-
-        def close(self) -> None:
-            closed["value"] = True
-
-    monkeypatch.setattr("bluecore.mem.pg_database.PgDatabase", _PG)
-
-    import bluecore.mem.skill_analyzer as analyzer_mod
-    import bluecore.mem.skill_proposal as proposal_mod
-
-    monkeypatch.setattr(analyzer_mod, "detect_repeated_patterns", lambda *a, **kw: ["p"])
-    monkeypatch.setattr(analyzer_mod, "detect_skill_gaps", lambda *a, **kw: ["g"])
-    monkeypatch.setattr(
-        proposal_mod,
-        "generate_proposal",
-        lambda patterns, gaps: {
-            "summary": {"x": 1},
-            "skill_candidates": [{"suggested_name": "skill-a", "priority_score": 5}],
-            "gap_candidates": [{"name": "gap-a"}],
-            "action_items": [{"item": "do"}],
-        },
-    )
-    fake_log = SimpleNamespace(warning=lambda *a, **kw: None)
-    result = cdh.collect_skill_growth_overview(settings, 30, log=fake_log)
-    assert result["chart_labels"] == ["skill-a"]
-    assert result["chart_scores"] == [5]
-    assert closed["value"] is True
-
-
-def test_collect_skill_growth_overview_inner_exception(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """skill_analyzer 経由で例外が起きてもログを出して空 dict を返す。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    settings = make_settings(tmp_path)
-    settings.sync.enabled = True
-    settings.sync.postgres_url = "postgresql://example"
-
-    class _PG:
-        def __init__(self, _url: str) -> None:
-            pass
-
-        def test_connection(self) -> bool:
-            return True
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr("bluecore.mem.pg_database.PgDatabase", _PG)
-    import bluecore.mem.skill_analyzer as analyzer_mod
-
-    def _boom(*_args, **_kwargs):
-        raise RuntimeError("analyzer boom")
-
-    monkeypatch.setattr(analyzer_mod, "detect_repeated_patterns", _boom)
-
-    warnings: list[str] = []
-    fake_log = SimpleNamespace(warning=lambda msg, *args: warnings.append(msg % args if args else msg))
-
-    result = cdh.collect_skill_growth_overview(settings, 30, log=fake_log)
-    assert result["skill_candidates"] == []
-    assert any("skill growth collection failed" in w for w in warnings)
 
 
 def test_resolve_safe_dashboard_output_path_invalid_value(tmp_path: Path) -> None:

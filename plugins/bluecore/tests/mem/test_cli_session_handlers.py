@@ -177,10 +177,8 @@ class TestSearchAndInjectContextDigestFirst:
     """_search_and_inject_context の digest 優先2段検索テスト。"""
 
     def _base_settings(self, tmp_path: Path):
-        """team 検索を無効化した Settings 互換オブジェクトを返す。"""
-        settings = make_settings(tmp_path)
-        settings.sync = SimpleNamespace(enabled=False, postgres_url="")
-        return settings
+        """テスト用の Settings インスタンスを返す。"""
+        return make_settings(tmp_path)
 
     def test_digest_hit_appears_before_chunk_context(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

@@ -8,10 +8,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from bluecore.hooks.hook_common import emit_user_prompt_submit_output
-from bluecore.lib.core_utils import get_git_user_name
 from bluecore.lib.harness import normalize_tool_name
 from bluecore.mem.cli_search_handlers import (
-    merge_search_results_rrf,
     render_adaptive_context,
     render_digest_context,
 )
@@ -94,9 +92,9 @@ def _search_and_inject_context(
     """プロンプトに関連するメモリを検索してコンテキストとして print する（digest 優先の2段検索）。
 
     1. digest（セッション要約）を最優先で検索する（limit=1）。
-    2. 既存の chunk 検索（ローカル RRF + team）を行うが、digest がヒットした
+    2. ローカル chunk 検索を行うが、digest がヒットした
        session_id のチャンクは重複注入防止のため除外する。
-    3. digest 出力 + chunk 出力を連結して注入する（RRF には digest を混ぜない。
+    3. digest 出力 + chunk 出力を連結して注入する（検索ランキングには digest を混ぜない。
        SearchResult がチャンク形状のため）。
     """
     from bluecore.mem.search import SearchService
@@ -109,19 +107,8 @@ def _search_and_inject_context(
     local_results = svc.search(query=prompt, project=project, limit=3)
     local_results = _exclude_digest_sessions(db, local_results, digest_session_ids)
 
-    team_results = []
-    if settings.sync.enabled and settings.sync.postgres_url:
-        git_user = get_git_user_name()
-        exclude = git_user if settings.team.exclude_self else None
-        try:
-            team_results = svc.search_team(query=prompt, limit=3, exclude_origin_user=exclude)
-        except Exception as e:
-            log.warning("チーム検索失敗（ローカルのみ使用）: %s", e)
-
-    merged = merge_search_results_rrf(local_results, team_results, top_k=3)
-
     digest_ctx = render_digest_context(digest_results)
-    chunk_ctx = render_adaptive_context(db, merged) if merged else ""
+    chunk_ctx = render_adaptive_context(db, local_results[:3]) if local_results else ""
 
     # 両方非空の場合のみ改行区切り（`</mem-context><mem-context>` の隣接を防ぐ）。
     combined = f"{digest_ctx}\n{chunk_ctx}" if digest_ctx and chunk_ctx else digest_ctx + chunk_ctx
@@ -224,7 +211,7 @@ def _auto_compact_if_needed(
             db.conn.commit()
         optimize_db(db)
         settings.last_compacted_at = time_module.time()
-        settings.save_sync_state()
+        settings.save()
         log.info("自動圧縮完了: 削除=%d", len(low_quality_ids))
     except Exception as e:
         log.warning("自動圧縮エラー: %s", e)

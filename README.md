@@ -64,25 +64,6 @@ claude plugin install bluecore@bluecore
 
 ---
 
-## 設定
-
-チーム同期を使う場合だけ、`~/.bluecore/settings.json` を以下のように設定します。
-
-```json
-{
-  "mem": {
-    "sync": {
-      "enabled": true,
-      "postgres_url": "postgresql://bluecore:PASSWORD@localhost:5432/bluecore_mem"
-    }
-  }
-}
-```
-
-`mem.sync.enabled` が `false` の場合は、ローカル利用のみで動きます。
-
----
-
 ## 🚀 Commands (10)
 
 各コマンドの詳細はリンク先 `.md` ファイル参照。
@@ -97,7 +78,7 @@ claude plugin install bluecore@bluecore
 | [`/harness`](plugins/bluecore/commands/harness.md) | 品質管理 | `[scope] [--audit-only] [--format=text\|json]` | スコア取得→harness-tuner で改善→再採点 |
 | [`/skill-gen`](plugins/bluecore/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--output=path] [--instincts]` | 入力収集→skill-make→skill-tune→grader/comparator/bench-analyzer 評価 |
 | [`/instinct`](plugins/bluecore/commands/instinct.md) | インスティンクト管理 | `<export\|import\|promote\|prune\|evolve>` | 学習成果の昇格・削除・スキル化 |
-| [`/dashboard`](plugins/bluecore/commands/dashboard.md) | 利用率可視化 | `[--days=N] [--output=path] [--format=html\|json]` | 個人(SQLite) と チーム(PostgreSQL) の使用率比較 HTML |
+| [`/dashboard`](plugins/bluecore/commands/dashboard.md) | 利用率可視化 | `[--days=N] [--output=path] [--format=html\|json]` | 個人(SQLite) の使用率を可視化する静的 HTML |
 | [`/test-gen`](plugins/bluecore/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→承認→実装。言語非依存 |
 
 ---
@@ -116,7 +97,7 @@ WF 図で繰り返し使う色・線・記号の意味は以下で統一して�
 | 🟢 **緑** (#059669) | Agent | 内部から委譲される専門家 |
 | 🟣 **紫** (#7c3aed) | Skill / Hook | 条件発火する知識モジュール |
 | 🟠 **橙** (#ea580c) | 自動処理 | システム側で自動発火（SessionStart 等） |
-| ⬛ **灰** (#374151) | 永続化ストア | SQLite / PostgreSQL |
+| ⬛ **灰** (#374151) | 永続化ストア | SQLite |
 
 | 線種 | 意味 |
 |---|---|
@@ -540,20 +521,18 @@ flowchart TB
 
   subgraph persistence["💾 Persistence"]
     DB[("~/.bluecore/mem.db<br/>SQLite")]:::store
-    PG[("PostgreSQL<br/>チーム共有")]:::store
   end
 
   CMD --> AGT
   CMD --> SKL
   AGT -.-> SKL
   AGT --> DB
-  DB -.-> PG
 ```
 
 **設計方針**:
 
 - ユーザーは **Commands のみ選択** すれば内部で Agents / Skills が自動連鎖
 - スキルは全て `context: fork`（内部委譲専用、ユーザー直接起動不可）に統一
-- 永続化は **SQLite（個人）→ PostgreSQL（チーム共有）** の 2 層
+- 永続化は **SQLite（個人）** の単層
 
 各コマンドの詳細仕様は [`plugins/bluecore/commands/`](plugins/bluecore/commands/) 配下を参照。

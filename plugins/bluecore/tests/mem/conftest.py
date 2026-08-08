@@ -43,11 +43,6 @@ def make_settings(tmp_path: Path, *, auto_compact_enabled: bool = True) -> Simpl
         data_path=tmp_path,
         log_dir=tmp_path / "logs",
         log_level="INFO",
-        sync=SimpleNamespace(
-            enabled=True,
-            postgres_url="postgres://user:pass@localhost/db",
-            origin_user="user",
-        ),
         chunk_max_length=200,
         embedding_model="model",
         auto_compact_enabled=auto_compact_enabled,
@@ -55,7 +50,6 @@ def make_settings(tmp_path: Path, *, auto_compact_enabled: bool = True) -> Simpl
         last_compacted_at=0,
         excluded_projects=set(),
         save=lambda: None,
-        save_sync_state=lambda: None,
     )
 
 

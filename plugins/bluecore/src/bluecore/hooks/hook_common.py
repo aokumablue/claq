@@ -142,13 +142,11 @@ SESSION_START_HOOK_IDS: frozenset[str] = frozenset(
 BACKGROUND_HOOK_IDS: frozenset[str] = frozenset(
     {
         "pre:observe",
-        "user:mem:sync-check",
         "post:quality-gate",
         "stop:session-end",
         "stop:evaluate-session",
         "session:end:marker",
         "session:mem:end",
-        "session:mem:sync-check",
     }
 )
 

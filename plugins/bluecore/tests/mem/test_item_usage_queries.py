@@ -11,8 +11,6 @@ import pytest
 
 from bluecore.mem.database import Database, MemItemRun
 from bluecore.mem.item_usage_queries import (
-    _SQLITE_PLACEHOLDER,
-    align_team_counts,
     daily_trend,
     item_usage_ranking,
     make_ranking_data,
@@ -63,23 +61,23 @@ def db_with_records(db_conn):
 
 class TestItemUsageRanking:
     def test_returns_all_records(self, db_with_records: sqlite3.Connection) -> None:
-        result = item_usage_ranking(db_with_records, _SQLITE_PLACEHOLDER, days=365)
+        result = item_usage_ranking(db_with_records, days=365)
         assert len(result) == 4  # learn, tdd, dashboard, reviewer
 
     def test_sorted_by_uses_desc(self, db_with_records: sqlite3.Connection) -> None:
-        result = item_usage_ranking(db_with_records, _SQLITE_PLACEHOLDER, days=365)
+        result = item_usage_ranking(db_with_records, days=365)
         uses = [r["uses"] for r in result]
         assert uses == sorted(uses, reverse=True)
 
     def test_correct_item_type(self, db_with_records: sqlite3.Connection) -> None:
-        result = item_usage_ranking(db_with_records, _SQLITE_PLACEHOLDER, days=365)
+        result = item_usage_ranking(db_with_records, days=365)
         type_map = {r["item_name"]: r["item_type"] for r in result}
         assert type_map["learn"] == "skill"
         assert type_map["dashboard"] == "command"
         assert type_map["reviewer"] == "agent"
 
     def s_learn_uses_count(self, db_with_records: sqlite3.Connection) -> None:
-        result = item_usage_ranking(db_with_records, _SQLITE_PLACEHOLDER, days=365)
+        result = item_usage_ranking(db_with_records, days=365)
         skill = next(r for r in result if r["item_name"] == "learn")
         assert skill["uses"] == 3
 
@@ -93,12 +91,12 @@ class TestItemUsageRanking:
             ("old-id", "", "sess", "proj", "s-old", "skill", "success", old_epoch),
         )
         db_conn.commit()
-        result = item_usage_ranking(db_conn, _SQLITE_PLACEHOLDER, days=30)
+        result = item_usage_ranking(db_conn, days=30)
         names = [r["item_name"] for r in result]
         assert "s-old" not in names
 
     def test_empty_db(self, db_conn: sqlite3.Connection) -> None:
-        result = item_usage_ranking(db_conn, _SQLITE_PLACEHOLDER, days=30)
+        result = item_usage_ranking(db_conn, days=30)
         assert result == []
 
 
@@ -107,62 +105,28 @@ class TestItemUsageRanking:
 
 class TestDailyTrend:
     def test_returns_list(self, db_with_records: sqlite3.Connection) -> None:
-        result = daily_trend(db_with_records, _SQLITE_PLACEHOLDER, days=365)
+        result = daily_trend(db_with_records, days=365)
         assert isinstance(result, list)
 
     def test_has_required_keys(self, db_with_records: sqlite3.Connection) -> None:
-        result = daily_trend(db_with_records, _SQLITE_PLACEHOLDER, days=365)
+        result = daily_trend(db_with_records, days=365)
         if result:
             row = result[0]
             assert set(row.keys()) == {"date", "skill", "command", "agent", "total"}
 
     def test_total_equals_sum(self, db_with_records: sqlite3.Connection) -> None:
-        result = daily_trend(db_with_records, _SQLITE_PLACEHOLDER, days=365)
+        result = daily_trend(db_with_records, days=365)
         for row in result:
             assert row["total"] == row["skill"] + row["command"] + row["agent"]
 
     def test_dates_sorted(self, db_with_records: sqlite3.Connection) -> None:
-        result = daily_trend(db_with_records, _SQLITE_PLACEHOLDER, days=365)
+        result = daily_trend(db_with_records, days=365)
         dates = [r["date"] for r in result]
         assert dates == sorted(dates)
 
     def test_empty_db(self, db_conn: sqlite3.Connection) -> None:
-        result = daily_trend(db_conn, _SQLITE_PLACEHOLDER, days=30)
+        result = daily_trend(db_conn, days=30)
         assert result == []
-
-    def test_postgres_placeholder_uses_psycopg_execution(self) -> None:
-        class _Cursor:
-            def __init__(self) -> None:
-                self.executed: list[tuple[str, tuple]] = []
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
-                return False
-
-            def execute(self, sql: str, params=None) -> None:  # noqa: ANN001
-                self.executed.append((sql, params))
-
-            def fetchall(self):  # noqa: ANN001
-                return [("2024-01-01", 1, 2, 3, 6)]
-
-        class _Conn:
-            __module__ = "psycopg.connection"
-
-            def __init__(self) -> None:
-                self.cursor_obj = _Cursor()
-
-            def cursor(self):
-                return self.cursor_obj
-
-        conn = _Conn()
-        result = daily_trend(conn, "%s", days=1)
-        assert result == [{"date": "2024-01-01", "skill": 1, "command": 2, "agent": 3, "total": 6}]
-        assert "TO_TIMESTAMP" in conn.cursor_obj.executed[0][0]
-
-        out = outcome_distribution(conn, "%s", days=1)
-        assert out == [{"outcome": "2024-01-01", "count": 1}]
 
 
 # --- outcome_distribution ---
@@ -170,22 +134,22 @@ class TestDailyTrend:
 
 class TestOutcomeDistribution:
     def test_returns_all_outcomes(self, db_with_records: sqlite3.Connection) -> None:
-        result = outcome_distribution(db_with_records, _SQLITE_PLACEHOLDER, days=365)
+        result = outcome_distribution(db_with_records, days=365)
         outcomes = {r["outcome"] for r in result}
         assert outcomes == {"success", "failure", "unknown"}
 
     def test_success_count(self, db_with_records: sqlite3.Connection) -> None:
-        result = outcome_distribution(db_with_records, _SQLITE_PLACEHOLDER, days=365)
+        result = outcome_distribution(db_with_records, days=365)
         success = next(r for r in result if r["outcome"] == "success")
         assert success["count"] == 5  # 7件中 success が5件
 
     def test_sorted_by_count_desc(self, db_with_records: sqlite3.Connection) -> None:
-        result = outcome_distribution(db_with_records, _SQLITE_PLACEHOLDER, days=365)
+        result = outcome_distribution(db_with_records, days=365)
         counts = [r["count"] for r in result]
         assert counts == sorted(counts, reverse=True)
 
     def test_empty_db(self, db_conn: sqlite3.Connection) -> None:
-        result = outcome_distribution(db_conn, _SQLITE_PLACEHOLDER, days=30)
+        result = outcome_distribution(db_conn, days=30)
         assert result == []
 
 
@@ -233,7 +197,7 @@ class TestItemTypeColumn:
         db.close()
 
 
-# --- make_ranking_data / align_team_counts ---
+# --- make_ranking_data ---
 
 
 class TestMakeRankingData:
@@ -265,54 +229,3 @@ class TestMakeRankingData:
         labels, counts = make_ranking_data(self.RANKING, "unknown_type")
         assert labels == []
         assert counts == []
-
-
-class TestAlignTeamCounts:
-    """align_team_counts のユニットテスト。"""
-
-    PERSONAL_LABELS = ["learn", "tdd", "new"]
-    TEAM_RANKING = [
-        {"item_name": "learn", "item_type": "skill", "uses": 10, "last_used_epoch": None},
-        {"item_name": "other", "item_type": "skill", "uses": 7, "last_used_epoch": None},
-    ]
-
-    def test_aligns_to_personal_order(self) -> None:
-        result = align_team_counts(self.PERSONAL_LABELS, self.TEAM_RANKING, "skill")
-        # learn=10, tdd=未使用=0, new=未使用=0
-        assert result == [10, 0, 0]
-
-    def test_missing_items_get_zero(self) -> None:
-        result = align_team_counts(["tdd"], self.TEAM_RANKING, "skill")
-        assert result == [0]
-
-    def test_filters_by_item_type(self) -> None:
-        team_mixed = [
-            {"item_name": "learn", "item_type": "skill", "uses": 10, "last_used_epoch": None},
-            {"item_name": "learn", "item_type": "command", "uses": 99, "last_used_epoch": None},
-        ]
-        result = align_team_counts(["learn"], team_mixed, "skill")
-        assert result == [10]  # command 側の 99 は無視される
-
-    def test_empty_personal_labels(self) -> None:
-        result = align_team_counts([], self.TEAM_RANKING, "skill")
-        assert result == []
-
-
-def test_item_usage_ranking_pg_placeholder() -> None:
-    """PG プレースホルダ経路で PG 用 SQL を実行する。"""
-
-    class _FakeCur:
-        def __init__(self) -> None:
-            self.sql = ""
-
-        def execute(self, sql, params=None):
-            self.sql = sql
-            return self
-
-        def fetchall(self):
-            return []
-
-    cur = _FakeCur()
-    result = item_usage_ranking(cur, "%s", days=7)
-    assert result == []
-    assert "%s" in cur.sql

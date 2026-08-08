@@ -11,7 +11,6 @@ import pytest
 import bluecore.mem.bridge as bridge_mod
 import bluecore.mem.cli as cli
 import bluecore.mem.compaction as compaction_mod
-import bluecore.mem.pg_database as pg_database_mod
 import bluecore.mem.search as search_mod
 from bluecore.mem.models import MemoryChunk
 from bluecore.mem.row_converters import _parse_json_list
@@ -280,24 +279,6 @@ def test_record_and_profile_failure_paths(
     payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     assert any(payload.get("error") == "boom" for payload in payloads)
     assert any(payload.get("success") is False for payload in payloads)
-
-
-def test_dashboard_negative_paths(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """PG 周りの否定系コマンド分岐を通す。"""
-    settings = make_settings(tmp_path, auto_compact_enabled=False)
-
-    settings.sync.enabled = False
-    cli._handle_dashboard(settings, {})
-    assert json.loads(capsys.readouterr().out)["success"] is True
-
-    settings.sync.enabled = True
-    monkeypatch.setattr(pg_database_mod, "PgDatabase", lambda url: SimpleNamespace(test_connection=lambda: False, close=lambda: None))
-    cli._handle_dashboard(settings, {})
-    assert json.loads(capsys.readouterr().out)["success"] is True
 
 
 def test_build_chunk_result_missing_chunk() -> None:
