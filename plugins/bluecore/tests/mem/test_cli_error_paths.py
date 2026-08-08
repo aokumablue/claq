@@ -124,12 +124,14 @@ def test_session_end_inner_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     assert any("FTS5 最適化失敗" in warning for warning in warnings)
 
 
-def test_record_and_profile_handlers(
+
+
+def test_record_interaction_handler(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """記録系ハンドラの成功系と早期 return を通す。"""
+    """record-interaction の成功系と早期 return を通す。"""
     settings = make_settings(tmp_path, auto_compact_enabled=False)
     db = FakeDB()
 
@@ -143,75 +145,30 @@ def test_record_and_profile_handlers(
     assert result["reason"] == "no prompt"
 
     # Claude Code UserPromptSubmit は "prompt" キーで渡す: フォールバック確認
-    cli._handle_record_interaction(
-        settings,
-        {"session_id": "s1", "prompt": "prompt via new key"},
-    )
+    cli._handle_record_interaction(settings, {"session_id": "s1", "prompt": "prompt via new key"})
     result2 = json.loads(capsys.readouterr().out)
     assert result2["success"] is True
     assert "skipped" not in result2
 
-    cli._handle_record_interaction(
-        settings,
-        {
-            "session_id": "s1",
-            "user_prompt_full": "prompt",
-            "ai_response_summary": "summary",
-            "ai_response_tool_plan": "plan",
-            "chunk_id": "c1",
-            "execution_outcome": "success",
-            "tool_error_count": 2,
-        },
-    )
+    cli._handle_record_interaction(settings, {"session_id": "s1", "user_prompt_full": "prompt"})
     payload = json.loads(capsys.readouterr().out)
     assert payload["success"] is True
     # "prompt" キー経由で先に1件追加されているため index は 1
     assert payload["interaction_index"] == 1
 
-    assert cli._handle_record_project_profile(
-        settings,
-        {
-            "project": "repo",
-            "project_path": "/repo",
-            "languages": ["python"],
-            "frameworks": ["pytest"],
-            "primary_language": "python",
-            "test_command": "pytest",
-            "build_command": "build",
-            "scope_hint": "project",
-        },
-    ) == ""
-    assert capsys.readouterr().out == ""
-    assert db.project_profiles["repo"].languages == ["python"]
 
-    cli._handle_get_project_profile(settings, {"project": "repo"})
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["found"] is True
-    assert payload["project"] == "repo"
-
-    cli._handle_get_project_profile(settings, {"project": "missing"})
-    assert json.loads(capsys.readouterr().out) == {"found": False}
-
-
-def test_record_and_profile_failure_paths(
+def test_record_interaction_failure_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """記録系ハンドラの例外パスを通す。"""
+    """record-interaction の例外パスを通す。"""
     settings = make_settings(tmp_path, auto_compact_enabled=False)
     monkeypatch.setattr(cli, "_open_db", lambda settings: (_ for _ in ()).throw(RuntimeError("boom")))
     monkeypatch.setattr(cli, "get_git_user_name", lambda: "origin")
 
-    cli._handle_record_interaction(
-        settings,
-        {"session_id": "s1", "user_prompt_full": "prompt"},
-    )
-    assert cli._handle_record_project_profile(settings, {"project": "repo"}) == ""
-    assert cli._handle_get_project_profile(settings, {"project": "repo"}) is None
+    cli._handle_record_interaction(settings, {"session_id": "s1", "user_prompt_full": "prompt"})
 
     payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     assert any(payload.get("error") == "boom" for payload in payloads)
     assert any(payload.get("success") is False for payload in payloads)
-
-

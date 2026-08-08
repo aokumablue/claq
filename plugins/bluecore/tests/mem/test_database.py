@@ -17,7 +17,6 @@ from bluecore.mem.models import (
     Instinct,
     InteractionLog,
     MemoryChunk,
-    ProjectProfile,
     Session,
     SessionDigest,
 )
@@ -368,51 +367,6 @@ class TestParseJsonList:
         assert _parse_json_list(input_val) == expected
 
 
-class TestMigration:
-    """スキーママイグレーションのテスト"""
-
-    def test_migration_idempotent(self, tmp_path: Path) -> None:
-        """マイグレーションは2回実行しても失敗しない"""
-        db = Database(tmp_path / "idem.db")
-        # 再度 _migrate() を呼んでも例外が出ない
-        db._migrate()
-        db.close()
-
-    def test_schema_migrations_table_exists(self, db: Database) -> None:
-        row = db.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
-        ).fetchone()
-        assert row is not None
-
-    def test_migration_table_empty_initially(self, db: Database) -> None:
-        """bluecore版では _MIGRATIONS が空なので schema_migrations は空"""
-        versions = {r[0] for r in db.conn.execute("SELECT version FROM schema_migrations").fetchall()}
-        # bluecore版では初期マイグレーションは空（カラムはスキーマ定義に含まれている）
-        assert isinstance(versions, set)
-
-    def test_applies_registered_migrations(self, tmp_path: Path) -> None:
-        import bluecore.mem.database as db_mod
-
-        original = db_mod._MIGRATIONS
-        db_mod._MIGRATIONS = [("v-test", ["CREATE TABLE IF NOT EXISTS migration_marker (id INTEGER);"])]
-        try:
-            db = Database(tmp_path / "migrated.db")
-            try:
-                row = db.conn.execute(
-                    "SELECT version FROM schema_migrations WHERE version = ?",
-                    ("v-test",),
-                ).fetchone()
-                assert row["version"] == "v-test"
-                marker = db.conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='migration_marker'"
-                ).fetchone()
-                assert marker is not None
-            finally:
-                db.close()
-        finally:
-            db_mod._MIGRATIONS = original
-
-
 class TestAdvancedTables:
     """インスティンクト、ADR、イベントログのテスト"""
 
@@ -485,42 +439,6 @@ class TestAdvancedTables:
         ).fetchall()
         assert [row["title"] for row in rows] == ["Updated", "Other"]
         assert rows[0]["project"] == "proj"
-
-    def test_project_profile_upsert_and_getters(self, db: Database) -> None:
-        profile1 = ProjectProfile(
-            id="profile-1",
-            origin_user="user-a",
-            project="proj",
-            detected_at_epoch=1,
-            last_updated_epoch=1,
-            project_path="/repo/a",
-            languages=["python"],
-        )
-        profile2 = ProjectProfile(
-            id="profile-2",
-            origin_user="user-b",
-            project="proj",
-            detected_at_epoch=2,
-            last_updated_epoch=2,
-            project_path="/repo/b",
-            languages=["rust"],
-        )
-
-        db.upsert_project_profile(profile1)
-        db.upsert_project_profile(profile2)
-
-        latest = db.get_project_profile("proj")
-        assert latest is not None
-        assert latest.id == "profile-2"
-        assert latest.project_path == "/repo/b"
-        assert db.get_project_profile("proj", origin_user="user-a").id == "profile-1"
-        assert [profile.id for profile in db.get_all_project_profiles()] == ["profile-1", "profile-2"]
-
-        profile1.project_path = "/repo/a-updated"
-        profile1.last_updated_epoch = 9
-        second_id = db.upsert_project_profile(profile1)
-        assert second_id == "profile-1"
-        assert db.get_project_profile("proj", origin_user="user-a").project_path == "/repo/a-updated"
 
     def test_store_embeddings_and_vec_search_with_fake_connection(self, db: Database) -> None:
         calls: list[tuple[str, tuple]] = []

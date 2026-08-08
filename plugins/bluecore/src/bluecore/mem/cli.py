@@ -30,7 +30,7 @@ log = _get_logger("CLI")
 # SessionStart フックで JSON 出力が必須なコマンドの集合。
 # main() のフォールバック保証とエラー時の早期 return に使用する。
 _SESSION_START_COMMANDS: frozenset[str] = frozenset(
-    {"setup", "context", "record-project-profile"}
+    {"setup", "context"}
 )
 # フックから呼ばれるが失敗しても exit_code=0 を維持すべきコマンド（非0 を返すとフックエラーになるため）。
 _BENIGN_COMMANDS: frozenset[str] = frozenset(
@@ -361,16 +361,6 @@ def _handle_record_interaction(settings: Settings, stdin_data: dict) -> None:
     _record_handlers.handle_record_interaction(settings, stdin_data, _record_deps())
 
 
-def _handle_record_project_profile(settings: Settings, stdin_data: dict) -> str:
-    """record-project-profile コマンド: プロジェクトの技術スタックを project_profiles に upsert する。"""
-    return _record_handlers.handle_record_project_profile(settings, stdin_data, _record_deps())
-
-
-def _handle_get_project_profile(settings: Settings, stdin_data: dict) -> None:
-    """get-project-profile コマンド: project_profiles から技術スタックを取得する。"""
-    _record_handlers.handle_get_project_profile(settings, stdin_data, _record_deps())
-
-
 _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "init": lambda settings, stdin_data: (_handle_init(settings) or None),
     "setup": lambda settings, stdin_data: (_handle_setup(settings) or None),
@@ -384,8 +374,6 @@ _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "record": _handle_record,
     "import": _handle_import,
     "record-interaction": _handle_record_interaction,
-    "record-project-profile": _handle_record_project_profile,
-    "get-project-profile": _handle_get_project_profile,
 }
 
 
@@ -408,8 +396,6 @@ Commands:
   reembed            Recreate the vector table and re-embed all chunks (after model change)
   import             Import external data (instincts, adrs, events) to mem
   record-interaction     Record a user/AI interaction pair to interaction_logs
-  record-project-profile Upsert project tech stack to project_profiles
-  get-project-profile    Get project tech stack from project_profiles
 
 record Input (JSON):
   {"event_type": "review|plan|audit|...", "content": "...", "metadata": {"files_read": [], "files_modified": []}}

@@ -545,28 +545,6 @@ class TestSimpleHookEntrypoints:
 class TestSessionStartRubyLog:
     """session_start フックが Ruby プロジェクトでログを出すことを確認するテスト。"""
 
-    def test_ruby_project_emits_bundler_log(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """Gemfile のみのプロジェクトで Ruby detected ログが出ること。"""
-        from bluecore.hooks import session_start
-        from bluecore.lib.package_manager import PackageManagerResult
-
-        (tmp_path / "Gemfile").write_text('source "https://rubygems.org"\ngem "sinatra"\n', encoding="utf-8")
-
-        logs: list[str] = []
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(session_start, "read_raw_stdin", lambda: "{}")
-        monkeypatch.setattr(session_start, "log", logs.append)
-        monkeypatch.setattr(session_start, "get_package_manager", lambda: PackageManagerResult(name=None, config=None, source="none"))
-        monkeypatch.setattr(session_start, "ensure_dir", lambda _: None)
-        monkeypatch.setattr(session_start, "find_files", lambda *_a, **_kw: [])
-        monkeypatch.setattr(session_start, "_save_project_profile", lambda _: None)
-        monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda _: None)
-
-        output = session_start.run("{}")
-        assert any("Ruby project detected" in msg for msg in logs), f"Expected Ruby log in: {logs}"
-        assert "ruby" in output
-
-
 class TestCheckpointInjection:
     """session_start がアクティブなチェックポイントを注入するテスト。"""
 
@@ -583,7 +561,6 @@ class TestCheckpointInjection:
         monkeypatch.setattr(session_start, "log", lambda _: None)
         monkeypatch.setattr(session_start, "get_package_manager", lambda: PackageManagerResult(name=None, config=None, source="none"))
         monkeypatch.setattr(session_start, "ensure_dir", lambda _: None)
-        monkeypatch.setattr(session_start, "_save_project_profile", lambda _: None)
         monkeypatch.setattr(session_start, "_import_adrs_and_instincts", lambda: None)
         monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda _: None)
 

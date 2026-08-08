@@ -73,55 +73,6 @@ def test_session_start_run_injects_previous_session_and_project_context(
     assert any("Package manager: npm" in message for message in logs)
 
 
-def test_session_start_git_info_and_scope_hint_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
-    logs: list[str] = []
-    monkeypatch.setattr(session_start, "log", logs.append)
-
-    def fake_check_output(cmd: list[str], **_kwargs: object) -> str:
-        if "--is-inside-work-tree" in cmd:
-            return "true"
-        if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
-            raise subprocess.CalledProcessError(1, cmd, output=b"", stderr=b"no branch")
-        if cmd[:3] == ["git", "rev-parse", "--short=12"]:
-            raise subprocess.CalledProcessError(1, cmd, output=b"", stderr=b"no commit")
-        if cmd[:2] == ["git", "status"]:
-            return " M file1\n?? file2\n"
-        raise AssertionError(f"unexpected command: {cmd}")
-
-    monkeypatch.setattr(session_start, "check_output_text", fake_check_output)
-
-    info = session_start._get_git_info()
-    assert info["branch"] is None
-    assert info["commit_hash"] is None
-    assert info["uncommitted_count"] == 2
-    assert any("git branch lookup failed" in message for message in logs)
-    assert any("git commit lookup failed" in message for message in logs)
-
-    logs.clear()
-
-    def fake_check_output_status(cmd: list[str], **_kwargs: object) -> str:
-        if "--is-inside-work-tree" in cmd:
-            return "true"
-        if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
-            return "main\n"
-        if cmd[:3] == ["git", "rev-parse", "--short=12"]:
-            return "abc123\n"
-        if cmd[:2] == ["git", "status"]:
-            raise subprocess.CalledProcessError(1, cmd, output=b"", stderr=b"no status")
-        raise AssertionError(f"unexpected command: {cmd}")
-
-    monkeypatch.setattr(session_start, "check_output_text", fake_check_output_status)
-
-    info = session_start._get_git_info()
-    assert info["branch"] == "main"
-    assert info["commit_hash"] == "abc123"
-    assert info["uncommitted_count"] == 0
-    assert any("git status lookup failed" in message for message in logs)
-
-    assert session_start._compute_scope_hint(["python"], ["Django"]) == "project"
-    assert session_start._compute_scope_hint(["bash", "Shell"], []) == "global"
-
-
 def test_session_start_run_skips_template_session_and_prompts_for_pm(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

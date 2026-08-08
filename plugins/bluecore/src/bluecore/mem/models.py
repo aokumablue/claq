@@ -47,11 +47,7 @@ class Session:
     origin_user: str = ""
 
     # git 状態（セッション開始時のスナップショット）
-    branch: str | None = None
-    commit_hash: str | None = None  # HEAD 先頭12文字
-    uncommitted_count: int = 0
     ended_at_epoch: int | None = None
-    project_profile_id: str | None = None  # project_profiles への参照
 
 
 @dataclass
@@ -116,30 +112,6 @@ class InteractionLog:
     id: str | None = None
     origin_user: str = ""
     user_prompt_hash: str | None = None  # SHA256先頭16文字
-    ai_response_summary: str | None = None  # 最大2000文字
-    ai_response_tool_plan: str | None = None  # JSON配列（最大10件）
-    chunk_id: str | None = None
-    execution_outcome: str = "unknown"  # 'success'|'partial'|'failure'|'unknown'
-    tool_error_count: int = 0
-
-
-@dataclass
-class ProjectProfile:
-    """プロジェクトの技術スタック情報（instinct の scope 判定に使用）"""
-
-    project: str
-    detected_at_epoch: int
-    last_updated_epoch: int
-    id: str | None = None
-    origin_user: str = ""
-    project_path: str | None = None
-    languages: list[str] = field(default_factory=list)
-    frameworks: list[str] = field(default_factory=list)
-    primary_language: str | None = None
-    test_command: str | None = None
-    build_command: str | None = None
-    scope_hint: str = "project"  # 'global'|'project'
-    detection_confidence: float = 1.0
 
 
 @dataclass

@@ -37,11 +37,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   started_at TEXT DEFAULT (datetime('now')),
   started_at_epoch INTEGER NOT NULL,
   chunk_count INTEGER DEFAULT 0,
-  branch TEXT,
-  commit_hash TEXT,
-  uncommitted_count INTEGER DEFAULT 0,
   ended_at_epoch INTEGER,
-  project_profile_id TEXT,
   UNIQUE(session_id)
 );
 
@@ -110,11 +106,6 @@ CREATE TABLE IF NOT EXISTS interaction_logs (
   project TEXT NOT NULL,
   user_prompt_full TEXT NOT NULL,
   user_prompt_hash TEXT,
-  ai_response_summary TEXT,
-  ai_response_tool_plan TEXT,
-  chunk_id TEXT REFERENCES memory_chunks(id),
-  execution_outcome TEXT DEFAULT 'unknown',
-  tool_error_count INTEGER DEFAULT 0,
   interaction_index INTEGER NOT NULL,
   created_at_epoch INTEGER NOT NULL,
   UNIQUE(session_id, interaction_index)
@@ -123,35 +114,7 @@ CREATE TABLE IF NOT EXISTS interaction_logs (
 CREATE INDEX IF NOT EXISTS idx_ilog_session ON interaction_logs(session_id);
 CREATE INDEX IF NOT EXISTS idx_ilog_project ON interaction_logs(project);
 CREATE INDEX IF NOT EXISTS idx_ilog_epoch ON interaction_logs(created_at_epoch);
-CREATE INDEX IF NOT EXISTS idx_ilog_outcome ON interaction_logs(execution_outcome);
 CREATE INDEX IF NOT EXISTS idx_ilog_hash ON interaction_logs(user_prompt_hash);
-
--- プロジェクトの技術スタック情報（instinct の scope 判定に使用）
-CREATE TABLE IF NOT EXISTS project_profiles (
-  id TEXT PRIMARY KEY,
-  origin_user TEXT NOT NULL DEFAULT '',
-  project TEXT NOT NULL,
-  project_path TEXT,
-  languages TEXT NOT NULL DEFAULT '[]',
-  frameworks TEXT NOT NULL DEFAULT '[]',
-  primary_language TEXT,
-  test_command TEXT,
-  build_command TEXT,
-  scope_hint TEXT DEFAULT 'project',
-  detected_at_epoch INTEGER NOT NULL,
-  last_updated_epoch INTEGER NOT NULL,
-  detection_confidence REAL DEFAULT 1.0,
-  UNIQUE(origin_user, project)
-);
-
-CREATE INDEX IF NOT EXISTS idx_proj_prof_user ON project_profiles(origin_user);
-CREATE INDEX IF NOT EXISTS idx_proj_prof_lang ON project_profiles(primary_language);
-
--- マイグレーション適用済みバージョン管理（_MIGRATIONS の適用状態を記録）
-CREATE TABLE IF NOT EXISTS schema_migrations (
-  version TEXT PRIMARY KEY,
-  applied_at_epoch INTEGER NOT NULL
-);
 
 -- セッション要約（トランスクリプト/チャンクから生成する短期記憶の圧縮版）
 CREATE TABLE IF NOT EXISTS session_digests (
@@ -233,6 +196,3 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memory_chunks_vec USING vec0(
 );
 """
 
-# --- マイグレーション ---
-
-_MIGRATIONS: list[tuple[str, list[str]]] = []

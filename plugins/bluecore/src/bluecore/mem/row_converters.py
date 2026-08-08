@@ -9,7 +9,6 @@ from bluecore.mem.logger import get as _get_logger
 from bluecore.mem.models import (
     InteractionLog,
     MemoryChunk,
-    ProjectProfile,
     SessionDigest,
 )
 
@@ -66,32 +65,8 @@ def _row_to_interaction_log(row: sqlite3.Row) -> InteractionLog:
         project=row["project"],
         user_prompt_full=row["user_prompt_full"],
         user_prompt_hash=row["user_prompt_hash"],
-        ai_response_summary=row["ai_response_summary"],
-        ai_response_tool_plan=row["ai_response_tool_plan"],
-        chunk_id=row["chunk_id"],
-        execution_outcome=row["execution_outcome"],
-        tool_error_count=row["tool_error_count"],
         interaction_index=row["interaction_index"],
         created_at_epoch=row["created_at_epoch"],
-    )
-
-
-def _row_to_project_profile(row: sqlite3.Row) -> ProjectProfile:
-    """project_profiles の Row を ProjectProfile に変換する。"""
-    return ProjectProfile(
-        id=row["id"],
-        origin_user=row["origin_user"],
-        project=row["project"],
-        project_path=row["project_path"],
-        languages=_parse_json_list(row["languages"]),
-        frameworks=_parse_json_list(row["frameworks"]),
-        primary_language=row["primary_language"],
-        test_command=row["test_command"],
-        build_command=row["build_command"],
-        scope_hint=row["scope_hint"],
-        detected_at_epoch=row["detected_at_epoch"],
-        last_updated_epoch=row["last_updated_epoch"],
-        detection_confidence=row["detection_confidence"],
     )
 
 

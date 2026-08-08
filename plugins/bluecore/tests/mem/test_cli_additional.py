@@ -313,33 +313,6 @@ def test_handle_observe_records_copilot_lowercase_observed_tool(
     assert db.stored_chunks
 
 
-def test_handle_session_start_commands_emit_json(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    settings = make_settings(tmp_path)
-    db = FakeDB()
-
-    monkeypatch.setattr(cli, "_open_db", lambda current_settings: open_fake_db(db))
-
-    assert cli._handle_setup(settings) == ""
-    assert capsys.readouterr().out == ""
-
-    assert cli._handle_record_project_profile(
-        settings,
-        {
-            "project": "repo",
-            "project_path": str(tmp_path),
-            "languages": ["python"],
-            "frameworks": ["pytest"],
-            "primary_language": "python",
-            "scope_hint": "project",
-        },
-    ) == ""
-    assert capsys.readouterr().out == ""
-
-    assert cli._handle_context(settings, {"cwd": str(tmp_path)}) == ""
-
-
 def test_import_helpers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     settings = make_settings(tmp_path)
 
@@ -574,37 +547,6 @@ def test_handle_session_end_auto_compact_error(monkeypatch: pytest.MonkeyPatch, 
 
     cli._handle_session_end(settings, {"session_id": "s1"})
     assert any("自動圧縮エラー" in message for message in warnings)
-
-
-def test_main_routes_all_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import bluecore.mem.logger as logger_mod
-
-    settings = make_settings(tmp_path)
-    monkeypatch.setattr(cli.Settings, "load", lambda: settings)
-    monkeypatch.setattr(logger_mod, "setup", lambda *args, **kwargs: None)
-
-    called: list[str] = []
-
-    commands = [
-        "init", "setup", "context", "search", "session-init", "observe",
-        "session-end", "compact", "record",
-        "import", "record-interaction",
-        "record-project-profile", "get-project-profile",
-    ]
-
-    for name in commands:
-        monkeypatch.setitem(
-            cli._COMMAND_HANDLERS,
-            name,
-            lambda *args, _name=name, **kwargs: called.append(_name) or "",
-        )
-
-    for command in commands:
-        monkeypatch.setattr(sys, "argv", ["python", command])
-        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
-        assert cli.main() == 0
-
-    assert called == commands
 
 
 def test_setup_command_imports_without_torch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

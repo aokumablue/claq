@@ -107,17 +107,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli record-project-profile",
-            "timeout": 15
-          }
-        ],
-        "description": "mem: プロジェクトプロファイル自動記録（言語、フレームワーク）"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli context",
             "timeout": 60
           }

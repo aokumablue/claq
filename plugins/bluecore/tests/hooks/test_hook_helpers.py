@@ -234,46 +234,6 @@ def test_session_start_main_sanitizes_exception_logs(monkeypatch: pytest.MonkeyP
     assert any("[SessionStart] Error" in message and "\n" not in message and "\x1b" not in message for message in logs)
 
 
-def test_session_start_sanitizes_git_logs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    logs: list[str] = []
-
-    class FakeDatabase:
-        def __init__(self, path: Path) -> None:
-            self.path = path
-
-        def upsert_project_profile(self, profile) -> None:  # noqa: ANN001
-            self.profile = profile
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(session_start, "log", logs.append)
-    monkeypatch.setattr(session_start, "get_git_user_name", lambda: "me")
-    monkeypatch.setattr(
-        session_start,
-        "check_output_text",
-        lambda cmd, timeout=5.0: {
-            ("git", "rev-parse", "--is-inside-work-tree"): "true",
-            ("git", "rev-parse", "--abbrev-ref", "HEAD"): "feature\nbranch\x1b[31m",
-            ("git", "rev-parse", "--short=12", "HEAD"): "abc123\x00def",
-            ("git", "status", "--porcelain"): " M file.py\n",
-        }[tuple(cmd)],
-    )
-    monkeypatch.setattr("bluecore.mem.database.Database", FakeDatabase)
-    monkeypatch.setattr(
-        "bluecore.mem.settings.Settings.load",
-        lambda: SimpleNamespace(db_path=tmp_path / "mem.db"),
-    )
-
-    session_start._save_project_profile(
-        SimpleNamespace(languages=["python"], frameworks=["pytest"], primary_language="python")
-    )
-
-    assert any("git branch=" in message for message in logs)
-    assert all("\n" not in message and "\x1b" not in message for message in logs)
-
-
 def test_hook_common_is_truthy_handles_falsey_values() -> None:
     assert is_truthy(None) is False
     assert is_truthy("") is False
@@ -340,32 +300,6 @@ class TestImportAdrsAndInstincts:
         ss_mod._import_adrs_and_instincts()
 
         assert any("mem import error" in msg for msg in logs)
-
-    def test_session_start_run_calls_import(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """session_start.run() が _import_adrs_and_instincts を呼ぶことを確認。"""
-        called: list[bool] = []
-
-        import bluecore.hooks.session_start as ss_mod
-
-        monkeypatch.setattr(ss_mod, "ensure_dir", lambda path: None)
-        monkeypatch.setattr(ss_mod, "get_learned_skills_dir", lambda: tmp_path / "learned")
-        monkeypatch.setattr(ss_mod, "get_sessions_dir", lambda: tmp_path / "sessions")
-        monkeypatch.setattr(ss_mod, "get_session_search_dirs", lambda: [])
-        monkeypatch.setattr(ss_mod, "find_files", lambda *args, **kwargs: [])
-        monkeypatch.setattr(ss_mod, "get_package_manager", lambda: SimpleNamespace(name=None, source="auto"))
-        monkeypatch.setattr(
-            ss_mod,
-            "detect_project",
-            lambda cwd: SimpleNamespace(languages=[], frameworks=[], primary_language=None),
-        )
-        monkeypatch.setattr(ss_mod, "_save_project_profile", lambda info: None)
-        monkeypatch.setattr(ss_mod, "_import_adrs_and_instincts", lambda: called.append(True))
-        monkeypatch.setattr(ss_mod, "log", lambda msg: None)
-
-        ss_mod.run("{}")
-
-        assert called == [True]
-
 
 class TestRecordStopEvent:
     def test_success(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

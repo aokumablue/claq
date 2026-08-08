@@ -16,7 +16,6 @@ from bluecore.mem.models import (
     Instinct,
     InteractionLog,
     MemoryChunk,
-    ProjectProfile,
     Session,
     SessionDigest,
     generate_uuid,
@@ -24,10 +23,9 @@ from bluecore.mem.models import (
 from bluecore.mem.row_converters import (
     _row_to_chunk,
     _row_to_interaction_log,
-    _row_to_project_profile,
     _row_to_session_digest,
 )
-from bluecore.mem.schema import _FTS5_SQL, _MIGRATIONS, _SCHEMA_SQL, _VEC_SQL
+from bluecore.mem.schema import _FTS5_SQL, _SCHEMA_SQL, _VEC_SQL
 
 log = _get_logger("DB")
 
@@ -53,7 +51,6 @@ class Database:
             path.chmod(0o600)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
-        self._migrate()
         # Phase 0: パフォーマンス最適化 PRAGMA
         self.conn.execute("PRAGMA temp_store = MEMORY")
         self.conn.execute("PRAGMA mmap_size = 268435456")
@@ -107,19 +104,6 @@ class Database:
             log.debug("sqlite-vec ロード失敗（ベクトル検索は無効）: %s", e)
             return False
 
-    def _migrate(self) -> None:
-        """マイグレーション管理テーブル（schema_migrations は _SCHEMA_SQL で作成済み）を使い、未適用のみ実行する。"""
-        applied = {r[0] for r in self.conn.execute("SELECT version FROM schema_migrations").fetchall()}
-        for version, sqls in _MIGRATIONS:  # pragma: no cover  # _MIGRATIONS は現状空（本体は将来用）
-            if version not in applied:
-                for sql in sqls:
-                    self.conn.execute(sql)
-                self.conn.execute(
-                    "INSERT INTO schema_migrations (version, applied_at_epoch) VALUES (?, ?)",
-                    (version, int(time.time())),
-                )
-        self.conn.commit()
-
     def close(self) -> None:
         """DB 接続を閉じる。"""
         self.conn.close()
@@ -133,9 +117,8 @@ class Database:
 
         cur = self.conn.execute(
             """INSERT INTO sessions
-         (id, origin_user, session_id, project, started_at_epoch,
-          branch, commit_hash, uncommitted_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         (id, origin_user, session_id, project, started_at_epoch)
+         VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(session_id) DO UPDATE SET
             chunk_count = chunk_count
           RETURNING id""",
@@ -145,9 +128,6 @@ class Database:
                 session.session_id,
                 session.project,
                 session.started_at_epoch,
-                session.branch,
-                session.commit_hash,
-                session.uncommitted_count,
             ),
         )
         row = cur.fetchone()
@@ -468,10 +448,8 @@ class Database:
             """INSERT OR IGNORE INTO interaction_logs
          (id, origin_user, session_id, project,
           user_prompt_full, user_prompt_hash,
-          ai_response_summary, ai_response_tool_plan,
-          chunk_id, execution_outcome, tool_error_count,
           interaction_index, created_at_epoch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 log_uuid,
                 log_entry.origin_user,
@@ -479,11 +457,6 @@ class Database:
                 log_entry.project,
                 log_entry.user_prompt_full,
                 prompt_hash,
-                log_entry.ai_response_summary,
-                log_entry.ai_response_tool_plan,
-                log_entry.chunk_id,
-                log_entry.execution_outcome,
-                log_entry.tool_error_count,
                 log_entry.interaction_index,
                 log_entry.created_at_epoch,
             ),
@@ -525,68 +498,6 @@ class Database:
         return (mx if mx is not None else -1) + 1
 
     # --- プロジェクトプロファイル ---
-
-    def upsert_project_profile(self, profile: ProjectProfile) -> str:
-        """プロジェクトプロファイルを保存または更新し、id を返す。"""
-        profile_uuid = profile.id or generate_uuid()
-        self.conn.execute(
-            """INSERT INTO project_profiles
-         (id, origin_user, project, project_path,
-          languages, frameworks, primary_language,
-          test_command, build_command, scope_hint,
-          detected_at_epoch, last_updated_epoch, detection_confidence)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(origin_user, project) DO UPDATE SET
-            project_path = excluded.project_path,
-            languages = excluded.languages,
-            frameworks = excluded.frameworks,
-            primary_language = excluded.primary_language,
-            test_command = excluded.test_command,
-            build_command = excluded.build_command,
-            scope_hint = excluded.scope_hint,
-            last_updated_epoch = excluded.last_updated_epoch,
-            detection_confidence = excluded.detection_confidence""",
-            (
-                profile_uuid,
-                profile.origin_user,
-                profile.project,
-                profile.project_path,
-                json.dumps(profile.languages, ensure_ascii=False),
-                json.dumps(profile.frameworks, ensure_ascii=False),
-                profile.primary_language,
-                profile.test_command,
-                profile.build_command,
-                profile.scope_hint,
-                profile.detected_at_epoch,
-                profile.last_updated_epoch,
-                profile.detection_confidence,
-            ),
-        )
-        self.conn.commit()
-        return profile_uuid
-
-    def get_project_profile(self, project: str, origin_user: str = "") -> ProjectProfile | None:
-        """プロジェクトプロファイルを取得する。"""
-        if origin_user:
-            row = self.conn.execute(
-                "SELECT * FROM project_profiles WHERE project = ? AND origin_user = ?",
-                (project, origin_user),
-            ).fetchone()
-        else:
-            row = self.conn.execute(
-                "SELECT * FROM project_profiles WHERE project = ? ORDER BY last_updated_epoch DESC LIMIT 1",
-                (project,),
-            ).fetchone()
-        return _row_to_project_profile(row) if row else None
-
-    def get_all_project_profiles(self) -> list[ProjectProfile]:
-        """全プロジェクトプロファイルを取得する（同期用）。"""
-        rows = self.conn.execute(
-            "SELECT * FROM project_profiles ORDER BY last_updated_epoch"
-        ).fetchall()
-        return [_row_to_project_profile(r) for r in rows]
-
-    # --- セッション要約 ---
 
     def upsert_session_digest(self, digest: SessionDigest) -> str:
         """セッション要約を保存または更新し、id を返す。"""

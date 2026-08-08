@@ -7,8 +7,6 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from bluecore.lib.harness import detect_harness
-
 if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
@@ -99,54 +97,7 @@ def _build_interaction_log(
         interaction_index=interaction_index,
         created_at_epoch=int(time.time()),
         origin_user=origin_user,
-        ai_response_summary=str(stdin_data.get("ai_response_summary", "") or "") or None,
-        ai_response_tool_plan=str(stdin_data.get("ai_response_tool_plan", "") or "") or None,
-        chunk_id=str(stdin_data.get("chunk_id", "") or "") or None,
-        execution_outcome=str(stdin_data.get("execution_outcome", "unknown") or "unknown"),
-        tool_error_count=int(stdin_data.get("tool_error_count", 0) or 0),
     )
-
-
-def _resolve_profile_list_field(
-    stdin_data: dict[str, Any],
-    key: str,
-    fallback: list[str],
-) -> list[str]:
-    """プロジェクトプロファイルの list[str] 項目を解決する。"""
-    if key not in stdin_data:
-        return list(fallback)
-    raw_value = stdin_data.get(key)
-    if not isinstance(raw_value, list):
-        return []
-    return [str(item).strip() for item in raw_value if str(item).strip()]
-
-
-def _resolve_profile_optional_string(
-    stdin_data: dict[str, Any],
-    key: str,
-    fallback: str | None,
-) -> str | None:
-    """プロジェクトプロファイルの任意文字列項目を解決する。"""
-    if key not in stdin_data:
-        return fallback
-    value = str(stdin_data.get(key, "") or "").strip()
-    return value or None
-
-
-def _resolve_scope_hint(
-    stdin_data: dict[str, Any],
-    fallback: str,
-) -> str:
-    """scope_hint を解決する。未指定時は既存値を維持する。"""
-    if "scope_hint" not in stdin_data:
-        return fallback
-    value = str(stdin_data.get("scope_hint", "") or "").strip()
-    return value or fallback
-
-
-def _should_preserve_existing_profile_fields() -> bool:
-    """Copilot CLI では sparse な SessionStart payload による上書きを防ぐ。"""
-    return detect_harness() == "copilot"
 
 
 def handle_record_interaction(
@@ -181,103 +132,3 @@ def handle_record_interaction(
         print(json.dumps({"success": False, "error": str(e)}))
 
 
-def handle_record_project_profile(
-    settings: Settings,
-    stdin_data: dict[str, Any],
-    deps: RecordDeps,
-) -> str:
-    """project_profiles のアップサート。"""
-    from bluecore.mem.database import ProjectProfile
-
-    project = stdin_data.get("project") or deps.get_project(stdin_data)
-    now = int(time.time())
-    origin_user = deps.get_git_user_name()
-
-    try:
-        with deps.open_db(settings) as db:
-            existing = (
-                db.get_project_profile(project, origin_user=origin_user)
-                if _should_preserve_existing_profile_fields()
-                else None
-            )
-            profile = ProjectProfile(
-                project=project,
-                detected_at_epoch=existing.detected_at_epoch if existing is not None else now,
-                last_updated_epoch=now,
-                origin_user=origin_user,
-                project_path=_resolve_profile_optional_string(
-                    stdin_data,
-                    "project_path",
-                    existing.project_path if existing is not None else None,
-                ),
-                languages=_resolve_profile_list_field(
-                    stdin_data,
-                    "languages",
-                    existing.languages if existing is not None else [],
-                ),
-                frameworks=_resolve_profile_list_field(
-                    stdin_data,
-                    "frameworks",
-                    existing.frameworks if existing is not None else [],
-                ),
-                primary_language=_resolve_profile_optional_string(
-                    stdin_data,
-                    "primary_language",
-                    existing.primary_language if existing is not None else None,
-                ),
-                test_command=_resolve_profile_optional_string(
-                    stdin_data,
-                    "test_command",
-                    existing.test_command if existing is not None else None,
-                ),
-                build_command=_resolve_profile_optional_string(
-                    stdin_data,
-                    "build_command",
-                    existing.build_command if existing is not None else None,
-                ),
-                scope_hint=_resolve_scope_hint(
-                    stdin_data,
-                    existing.scope_hint if existing is not None else "project",
-                ),
-                detection_confidence=(
-                    existing.detection_confidence if existing is not None else 1.0
-                ),
-            )
-            profile_id = db.upsert_project_profile(profile)
-        deps.log.info("project profile saved: %s (id=%s)", project, profile_id)
-    except Exception as e:
-        deps.log.warning("プロジェクトプロファイル保存失敗: %s", e)
-    return ""
-
-
-def handle_get_project_profile(
-    settings: Settings,
-    stdin_data: dict[str, Any],
-    deps: RecordDeps,
-) -> None:
-    """project_profiles の取得。"""
-    project = stdin_data.get("project") or deps.get_project(stdin_data)
-
-    try:
-        with deps.open_db(settings) as db:
-            profile = db.get_project_profile(project, origin_user=deps.get_git_user_name())
-        if profile:
-            print(
-                json.dumps(
-                    {
-                        "found": True,
-                        "project": profile.project,
-                        "languages": profile.languages,
-                        "frameworks": profile.frameworks,
-                        "primary_language": profile.primary_language,
-                        "scope_hint": profile.scope_hint,
-                        "last_updated_epoch": profile.last_updated_epoch,
-                    },
-                    ensure_ascii=False,
-                )
-            )
-        else:
-            print(json.dumps({"found": False}))
-    except Exception as e:
-        deps.log.warning("プロジェクトプロファイル取得失敗: %s", e)
-        print(json.dumps({"found": False, "error": str(e)}))
