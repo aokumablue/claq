@@ -28,7 +28,6 @@ CREATE TABLE IF NOT EXISTS memory_chunks (
   tool_error TEXT,
   ai_response_summary TEXT,
   tool_sequence TEXT DEFAULT '[]',
-  synced_at TEXT,
   UNIQUE(session_id, chunk_index)
 );
 
@@ -50,7 +49,6 @@ CREATE TABLE IF NOT EXISTS sessions (
   uncommitted_count INTEGER DEFAULT 0,
   ended_at_epoch INTEGER,
   project_profile_id TEXT,
-  synced_at TEXT,
   UNIQUE(session_id)
 );
 
@@ -73,7 +71,6 @@ CREATE TABLE IF NOT EXISTS instincts (
   confidence_reasons TEXT DEFAULT '[]',
   source_interaction_ids TEXT DEFAULT '[]',
   last_activated_epoch INTEGER,
-  synced_at TEXT,
   UNIQUE(origin_user, instinct_id, scope, project_id)
 );
 
@@ -92,7 +89,6 @@ CREATE TABLE IF NOT EXISTS adrs (
   content TEXT NOT NULL,
   created_at_epoch INTEGER NOT NULL,
   updated_at_epoch INTEGER NOT NULL,
-  synced_at TEXT,
   UNIQUE(origin_user, project, adr_number)
 );
 
@@ -106,8 +102,7 @@ CREATE TABLE IF NOT EXISTS event_logs (
   event_type TEXT NOT NULL,
   project_id TEXT,
   content TEXT NOT NULL,
-  created_at_epoch INTEGER NOT NULL,
-  synced_at TEXT
+  created_at_epoch INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_type ON event_logs(event_type);
@@ -129,7 +124,6 @@ CREATE TABLE IF NOT EXISTS interaction_logs (
   tool_error_count INTEGER DEFAULT 0,
   interaction_index INTEGER NOT NULL,
   created_at_epoch INTEGER NOT NULL,
-  synced_at TEXT,
   UNIQUE(session_id, interaction_index)
 );
 
@@ -154,7 +148,6 @@ CREATE TABLE IF NOT EXISTS project_profiles (
   detected_at_epoch INTEGER NOT NULL,
   last_updated_epoch INTEGER NOT NULL,
   detection_confidence REAL DEFAULT 1.0,
-  synced_at TEXT,
   UNIQUE(origin_user, project)
 );
 
@@ -175,7 +168,6 @@ CREATE TABLE IF NOT EXISTS mem_item_runs (
   duration_seconds INTEGER,
   interaction_log_id TEXT REFERENCES interaction_logs(id),
   created_at_epoch INTEGER NOT NULL,
-  synced_at TEXT,
   item_type TEXT NOT NULL DEFAULT 'skill'
 );
 
@@ -207,7 +199,6 @@ CREATE TABLE IF NOT EXISTS session_digests (
   started_at_epoch INTEGER NOT NULL,
   ended_at_epoch INTEGER,
   created_at_epoch INTEGER NOT NULL,
-  synced_at TEXT,
   UNIQUE(session_id)
 );
 

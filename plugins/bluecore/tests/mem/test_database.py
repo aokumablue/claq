@@ -87,172 +87,19 @@ class TestDatabase:
     def test_upsert_session(self, db: Database) -> None:
         session = Session(session_id="sess-1", project="proj", started_at_epoch=1700000000)
         id1 = db.upsert_session(session)
-        db.conn.execute(
-            "UPDATE sessions SET synced_at = ? WHERE session_id = ?",
-            ("already-synced", session.session_id),
-        )
-        db.conn.commit()
         id2 = db.upsert_session(session)
         assert id1 == id2
-        row = db.conn.execute(
-            "SELECT synced_at FROM sessions WHERE session_id = ?",
-            (session.session_id,),
-        ).fetchone()
-        assert row["synced_at"] is None
 
-    def test_schema_includes_synced_at_columns(self, db: Database) -> None:
-        tables = [
-            "memory_chunks",
-            "sessions",
-            "instincts",
-            "adrs",
-            "event_logs",
-            "interaction_logs",
-            "project_profiles",
-            "mem_item_runs",
-        ]
-        for table in tables:
-            columns = {
-                row["name"]
-                for row in db.conn.execute(f"PRAGMA table_info({table})").fetchall()
-            }
-            assert "synced_at" in columns
-
-    def test_write_paths_clear_synced_at(self, db: Database) -> None:
+    def test_end_session(self, db: Database) -> None:
         session = Session(session_id="sess-1", project="proj", started_at_epoch=1700000000)
         db.upsert_session(session)
-        chunk_id = db.store_chunk(
-            MemoryChunk(
-                session_id="sess-1",
-                project="proj",
-                chunk_index=0,
-                content="chunk content",
-                tool_names=["Read"],
-                files_read=[],
-                files_modified=[],
-                user_prompt="prompt",
-                created_at_epoch=1700000001,
-            )
-        )
-        instinct = Instinct(
-            instinct_id="inst-1",
-            scope="project",
-            confidence=0.7,
-            content="content",
-            created_at_epoch=1700000002,
-            updated_at_epoch=1700000003,
-            project_id="proj",
-        )
-        instinct_id = db.upsert_instinct(instinct)
-        adr = Adr(
-            project="proj",
-            adr_number=1,
-            title="ADR",
-            status="accepted",
-            content="content",
-            created_at_epoch=1700000004,
-            updated_at_epoch=1700000005,
-        )
-        adr_id = db.upsert_adr(adr)
-        profile = ProjectProfile(
-            project="proj",
-            detected_at_epoch=1700000006,
-            last_updated_epoch=1700000007,
-        )
-        profile_id = db.upsert_project_profile(profile)
-
-        db.conn.execute("UPDATE memory_chunks SET synced_at = ? WHERE id = ?", ("done", chunk_id))
-        db.conn.execute("UPDATE sessions SET synced_at = ? WHERE session_id = ?", ("done", session.session_id))
-        db.conn.execute("UPDATE instincts SET synced_at = ? WHERE id = ?", ("done", instinct_id))
-        db.conn.execute("UPDATE adrs SET synced_at = ? WHERE id = ?", ("done", adr_id))
-        db.conn.execute("UPDATE project_profiles SET synced_at = ? WHERE id = ?", ("done", profile_id))
-        db.conn.commit()
-
-        db.update_access([chunk_id])
-        db.store_chunk(
-            MemoryChunk(
-                session_id="sess-1",
-                project="proj",
-                chunk_index=1,
-                content="chunk content 2",
-                tool_names=["Edit"],
-                files_read=[],
-                files_modified=[],
-                user_prompt="prompt 2",
-                created_at_epoch=1700000008,
-            )
-        )
-        db.upsert_instinct(
-            Instinct(
-                instinct_id="inst-1",
-                scope="project",
-                confidence=0.8,
-                content="updated",
-                created_at_epoch=1700000002,
-                updated_at_epoch=1700000009,
-                project_id="proj",
-            )
-        )
-        db.upsert_adr(
-            Adr(
-                project="proj",
-                adr_number=1,
-                title="ADR",
-                status="accepted",
-                content="updated",
-                created_at_epoch=1700000004,
-                updated_at_epoch=1700000010,
-            )
-        )
-        db.upsert_project_profile(
-            ProjectProfile(
-                project="proj",
-                detected_at_epoch=1700000006,
-                last_updated_epoch=1700000011,
-                detection_confidence=0.5,
-            )
-        )
-
-        rows = {
-            "memory_chunks": db.conn.execute(
-                "SELECT synced_at FROM memory_chunks WHERE id = ?",
-                (chunk_id,),
-            ).fetchone()["synced_at"],
-            "sessions": db.conn.execute(
-                "SELECT synced_at FROM sessions WHERE session_id = ?",
-                (session.session_id,),
-            ).fetchone()["synced_at"],
-            "instincts": db.conn.execute(
-                "SELECT synced_at FROM instincts WHERE id = ?",
-                (instinct_id,),
-            ).fetchone()["synced_at"],
-            "adrs": db.conn.execute(
-                "SELECT synced_at FROM adrs WHERE id = ?",
-                (adr_id,),
-            ).fetchone()["synced_at"],
-            "project_profiles": db.conn.execute(
-                "SELECT synced_at FROM project_profiles WHERE id = ?",
-                (profile_id,),
-            ).fetchone()["synced_at"],
-        }
-        assert all(value is None for value in rows.values())
-
-    def test_end_session_clears_synced_at(self, db: Database) -> None:
-        session = Session(session_id="sess-1", project="proj", started_at_epoch=1700000000)
-        db.upsert_session(session)
-        db.conn.execute(
-            "UPDATE sessions SET synced_at = ? WHERE session_id = ?",
-            ("already-synced", session.session_id),
-        )
-        db.conn.commit()
 
         db.end_session(session.session_id)
 
         row = db.conn.execute(
-            "SELECT synced_at, ended_at_epoch FROM sessions WHERE session_id = ?",
+            "SELECT ended_at_epoch FROM sessions WHERE session_id = ?",
             (session.session_id,),
         ).fetchone()
-        assert row["synced_at"] is None
         assert row["ended_at_epoch"] is not None
 
     def test_next_chunk_index(self, db: Database) -> None:
@@ -837,6 +684,12 @@ class TestAdvancedTables:
         assert latest.project_path == "/repo/b"
         assert db.get_project_profile("proj", origin_user="user-a").id == "profile-1"
         assert [profile.id for profile in db.get_all_project_profiles()] == ["profile-1", "profile-2"]
+
+        profile1.project_path = "/repo/a-updated"
+        profile1.last_updated_epoch = 9
+        second_id = db.upsert_project_profile(profile1)
+        assert second_id == "profile-1"
+        assert db.get_project_profile("proj", origin_user="user-a").project_path == "/repo/a-updated"
 
     def test_store_embeddings_and_vec_search_with_fake_connection(self, db: Database) -> None:
         calls: list[tuple[str, tuple]] = []
@@ -1441,13 +1294,6 @@ class TestSessionDigests:
         ).fetchone()["c"]
         assert count == 1
 
-        # synced_at を「同期済み」にマークしてから更新し、リセットされることを確認する
-        db.conn.execute(
-            "UPDATE session_digests SET synced_at = ? WHERE session_id = ?",
-            ("already-synced", "sess-1"),
-        )
-        db.conn.commit()
-
         updated = SessionDigest(
             id=digest_id_1,
             session_id="sess-1",
@@ -1482,12 +1328,6 @@ class TestSessionDigests:
         assert stored.source == "transcript+chunks"
         assert stored.chunk_count == 5
         assert stored.ended_at_epoch == 1700000099
-
-        row = db.conn.execute(
-            "SELECT synced_at FROM session_digests WHERE session_id = ?",
-            ("sess-1",),
-        ).fetchone()
-        assert row["synced_at"] is None
 
     def test_upsert_generates_id_when_absent(self, db: Database) -> None:
         """id 未指定の場合は UUID を自動生成する。"""

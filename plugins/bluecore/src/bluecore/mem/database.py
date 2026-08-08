@@ -142,8 +142,7 @@ class Database:
           branch, commit_hash, uncommitted_count)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(session_id) DO UPDATE SET
-            chunk_count = chunk_count,
-            synced_at = NULL
+            chunk_count = chunk_count
           RETURNING id""",
             (
                 session.id,
@@ -163,7 +162,7 @@ class Database:
     def end_session(self, session_id: str) -> None:
         """セッション終了時刻を記録する。"""
         self.conn.execute(
-            "UPDATE sessions SET ended_at_epoch = ?, synced_at = NULL WHERE session_id = ?",
+            "UPDATE sessions SET ended_at_epoch = ? WHERE session_id = ?",
             (int(time.time()), session_id),
         )
         self.conn.commit()
@@ -219,7 +218,7 @@ class Database:
                 row = self._insert_chunk_row(chunk)
                 chunk.chunk_index = row["chunk_index"]
                 self.conn.execute(
-                    "UPDATE sessions SET chunk_count = chunk_count + 1, synced_at = NULL WHERE session_id = ?",
+                    "UPDATE sessions SET chunk_count = chunk_count + 1 WHERE session_id = ?",
                     (chunk.session_id,),
                 )
                 self.conn.commit()
@@ -369,8 +368,7 @@ class Database:
             self.conn.executemany(
                 """UPDATE memory_chunks
               SET access_count = access_count + 1,
-                 last_accessed_epoch = ?,
-                 synced_at = NULL
+                 last_accessed_epoch = ?
               WHERE id = ?""",
                 [(now, cid) for cid in unique_ids],
             )
@@ -414,8 +412,7 @@ class Database:
             observation_count = excluded.observation_count,
             confidence_reasons = excluded.confidence_reasons,
             source_interaction_ids = excluded.source_interaction_ids,
-            last_activated_epoch = excluded.last_activated_epoch,
-            synced_at = NULL""",
+            last_activated_epoch = excluded.last_activated_epoch""",
             (
                 instinct_uuid,
                 instinct.origin_user,
@@ -469,8 +466,7 @@ class Database:
             title = excluded.title,
             status = excluded.status,
             content = excluded.content,
-            updated_at_epoch = excluded.updated_at_epoch,
-            synced_at = NULL""",
+            updated_at_epoch = excluded.updated_at_epoch""",
             (
                 adr_uuid,
                 adr.origin_user,
@@ -636,8 +632,7 @@ class Database:
             build_command = excluded.build_command,
             scope_hint = excluded.scope_hint,
             last_updated_epoch = excluded.last_updated_epoch,
-            detection_confidence = excluded.detection_confidence,
-            synced_at = NULL""",
+            detection_confidence = excluded.detection_confidence""",
             (
                 profile_uuid,
                 profile.origin_user,
@@ -759,8 +754,7 @@ class Database:
             harness = excluded.harness,
             source = excluded.source,
             chunk_count = excluded.chunk_count,
-            ended_at_epoch = excluded.ended_at_epoch,
-            synced_at = NULL""",
+            ended_at_epoch = excluded.ended_at_epoch""",
             (
                 digest.id,
                 digest.origin_user,
