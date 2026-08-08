@@ -52,6 +52,146 @@ class TestFindPowerShell:
         assert hook.find_powershell() is None
 
 
+class TestFindPowerShellBudget:
+    """find_powershell()のdeadlineベース予算管理に対する回帰テスト群。
+
+    候補ごとのプローブがtimeoutいっぱいまでブロックする最悪ケースを
+    フェイク時計（time.monotonicのモック）で決定的にシミュレートし、
+    合計プローブ時間が指定した予算を超過しないことを検証する。
+    """
+
+    @staticmethod
+    def _install_fake_clock(monkeypatch: pytest.MonkeyPatch) -> dict[str, float]:
+        clock = {"t": 0.0}
+        monkeypatch.setattr(hook.time, "monotonic", lambda: clock["t"])
+        return clock
+
+    def test_total_probe_time_does_not_exceed_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """全候補が最悪ケース(timeoutいっぱい)でブロックしても、合計プローブ時間が予算内に収まる。"""
+        clock = self._install_fake_clock(monkeypatch)
+        observed_timeouts: list[float] = []
+
+        def fake_run(cmd, **kwargs):
+            timeout = kwargs["timeout"]
+            observed_timeouts.append(timeout)
+            clock["t"] += timeout
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+
+        monkeypatch.setattr(hook.subprocess, "run", fake_run)
+
+        budget = 4.0
+        deadline = hook.time.monotonic() + budget
+
+        assert hook.find_powershell(deadline) is None
+        assert sum(observed_timeouts) <= budget
+        # POWERSHELL_PROBE_TIMEOUT(3秒)が予算(4秒)を上回るため、
+        # 4候補全てはプローブされず途中で打ち切られる。
+        assert len(observed_timeouts) < 4
+
+    def test_each_probe_timeout_never_exceeds_probe_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """予算が十分でも、1候補あたりのtimeoutはPOWERSHELL_PROBE_TIMEOUTを超えない。"""
+        clock = self._install_fake_clock(monkeypatch)
+        observed_timeouts: list[float] = []
+
+        def fake_run(cmd, **kwargs):
+            observed_timeouts.append(kwargs["timeout"])
+            raise FileNotFoundError("missing")
+
+        monkeypatch.setattr(hook.subprocess, "run", fake_run)
+
+        deadline = hook.time.monotonic() + 100.0  # 潤沢な予算
+        clock["t"] = 0.0
+
+        assert hook.find_powershell(deadline) is None
+        assert observed_timeouts
+        assert all(t <= hook.POWERSHELL_PROBE_TIMEOUT for t in observed_timeouts)
+
+    def test_probe_timeout_shrinks_with_remaining_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """残り予算がPOWERSHELL_PROBE_TIMEOUTより小さくなった候補には、残り予算分だけが配分される。"""
+        clock = self._install_fake_clock(monkeypatch)
+        observed_timeouts: list[float] = []
+
+        def fake_run(cmd, **kwargs):
+            timeout = kwargs["timeout"]
+            observed_timeouts.append(timeout)
+            clock["t"] += timeout
+            raise FileNotFoundError("missing")
+
+        monkeypatch.setattr(hook.subprocess, "run", fake_run)
+
+        deadline = hook.time.monotonic() + 4.0  # 3秒キャップの候補が2つ入らない予算
+
+        assert hook.find_powershell(deadline) is None
+        assert observed_timeouts[0] == pytest.approx(hook.POWERSHELL_PROBE_TIMEOUT)
+        assert observed_timeouts[1] == pytest.approx(1.0)
+        assert len(observed_timeouts) == 2
+
+    def test_stops_probing_when_deadline_already_passed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """呼び出し時点で既にdeadlineを過ぎている場合、1候補もプローブしない。"""
+        clock = self._install_fake_clock(monkeypatch)
+        clock["t"] = 10.0
+
+        def fake_run(cmd, **kwargs):
+            raise AssertionError("deadline超過後はsubprocessを呼び出すべきではない")
+
+        monkeypatch.setattr(hook.subprocess, "run", fake_run)
+
+        assert hook.find_powershell(deadline=5.0) is None
+
+    def test_none_deadline_defaults_to_default_notification_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """deadline未指定時はDEFAULT_NOTIFICATION_TIMEOUT秒後を締切として使う。"""
+        self._install_fake_clock(monkeypatch)
+        captured_timeouts: list[float] = []
+
+        def fake_run(cmd, **kwargs):
+            captured_timeouts.append(kwargs["timeout"])
+            return SimpleNamespace(returncode=0)
+
+        monkeypatch.setattr(hook.subprocess, "run", fake_run)
+
+        assert hook.find_powershell() == "pwsh.exe"
+        assert captured_timeouts[0] == pytest.approx(hook.POWERSHELL_PROBE_TIMEOUT)
+
+
+class TestNotificationTimeout:
+    def test_returns_default_when_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("BLUECORE_DESKTOP_NOTIFY_TIMEOUT", raising=False)
+
+        assert hook._notification_timeout() == hook.DEFAULT_NOTIFICATION_TIMEOUT
+
+    def test_returns_default_when_env_invalid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("BLUECORE_DESKTOP_NOTIFY_TIMEOUT", "not-a-number")
+
+        assert hook._notification_timeout() == hook.DEFAULT_NOTIFICATION_TIMEOUT
+
+    def test_returns_default_when_env_non_positive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("BLUECORE_DESKTOP_NOTIFY_TIMEOUT", "0")
+
+        assert hook._notification_timeout() == hook.DEFAULT_NOTIFICATION_TIMEOUT
+
+    def test_returns_default_when_env_infinite(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("BLUECORE_DESKTOP_NOTIFY_TIMEOUT", "inf")
+
+        assert hook._notification_timeout() == hook.DEFAULT_NOTIFICATION_TIMEOUT
+
+    def test_returns_env_value_when_valid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("BLUECORE_DESKTOP_NOTIFY_TIMEOUT", "2.5")
+
+        assert hook._notification_timeout() == pytest.approx(2.5)
+
+
+class TestRemainingTimeout:
+    def test_returns_positive_remainder_before_deadline(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(hook.time, "monotonic", lambda: 10.0)
+
+        assert hook._remaining_timeout(15.0) == pytest.approx(5.0)
+
+    def test_returns_zero_when_deadline_passed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(hook.time, "monotonic", lambda: 20.0)
+
+        assert hook._remaining_timeout(15.0) == 0.0
+
+
 class TestIsWsl:
     def test_returns_cached_value_and_non_linux_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(hook, "_is_wsl", None)
@@ -189,17 +329,105 @@ class TestRun:
         calls: list[tuple[str, str]] = []
         monkeypatch.setattr(hook, "IS_MACOS", True)
         monkeypatch.setattr(hook, "is_wsl", lambda: False)
-        monkeypatch.setattr(hook, "notify_macos", lambda title, body: calls.append((title, body)))
+        monkeypatch.setattr(
+            hook, "notify_macos", lambda title, body, **kwargs: calls.append((title, body))  # noqa: ARG005
+        )
 
         raw = json.dumps({"last_assistant_message": "first line\nsecond"})
         assert hook.run(raw) == raw
         assert calls == [(hook.TITLE, "first line")]
 
+    def test_macos_branch_passes_remaining_budget_as_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """macOS通知には、予算(_notification_timeout())から算出した残り時間がtimeoutとして渡される。"""
+        monkeypatch.setattr(hook.time, "monotonic", lambda: 0.0)
+        monkeypatch.setattr(hook, "IS_MACOS", True)
+        monkeypatch.setattr(hook, "is_wsl", lambda: False)
+        monkeypatch.setattr(hook, "_notification_timeout", lambda: 3.0)
+        captured: dict[str, float] = {}
+        monkeypatch.setattr(
+            hook, "notify_macos", lambda title, body, **kwargs: captured.update(kwargs)  # noqa: ARG005
+        )
+
+        raw = json.dumps({"last_assistant_message": "hello"})
+        assert hook.run(raw) == raw
+        assert captured["timeout"] == pytest.approx(3.0)
+
+    def test_macos_branch_skips_notify_when_budget_already_exhausted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """deadline計算後に予算を使い切っていた場合、macOS通知は送信されない。"""
+        clock_values = iter([0.0, 10.0])
+        monkeypatch.setattr(hook.time, "monotonic", lambda: next(clock_values))
+        monkeypatch.setattr(hook, "IS_MACOS", True)
+        monkeypatch.setattr(hook, "is_wsl", lambda: False)
+        monkeypatch.setattr(hook, "_notification_timeout", lambda: 1.0)
+        called: list[tuple] = []
+        monkeypatch.setattr(hook, "notify_macos", lambda *args, **kwargs: called.append((args, kwargs)))
+
+        raw = json.dumps({"last_assistant_message": "hello"})
+        assert hook.run(raw) == raw
+        assert called == []
+
+    def test_wsl_passes_deadline_to_find_powershell(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """WSL経路ではfind_powershellに_notification_timeout()由来のdeadlineが渡される。"""
+        monkeypatch.setattr(hook.time, "monotonic", lambda: 100.0)
+        monkeypatch.setattr(hook, "IS_MACOS", False)
+        monkeypatch.setattr(hook, "is_wsl", lambda: True)
+        monkeypatch.setattr(hook, "_notification_timeout", lambda: 7.5)
+        captured: dict[str, float] = {}
+
+        def fake_find_powershell(deadline):
+            captured["deadline"] = deadline
+            return None
+
+        monkeypatch.setattr(hook, "find_powershell", fake_find_powershell)
+        monkeypatch.setattr(hook, "log", lambda *args, **kwargs: None)
+
+        raw = json.dumps({"last_assistant_message": "hello"})
+        hook.run(raw)
+        assert captured["deadline"] == pytest.approx(107.5)
+
+    def test_wsl_skips_notify_when_budget_exhausted_during_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """PowerShell探索で予算を使い切った場合、notify_windowsは呼ばれずrawを返す。"""
+        clock = {"t": 0.0}
+        monkeypatch.setattr(hook.time, "monotonic", lambda: clock["t"])
+        monkeypatch.setattr(hook, "IS_MACOS", False)
+        monkeypatch.setattr(hook, "is_wsl", lambda: True)
+        monkeypatch.setattr(hook, "_notification_timeout", lambda: 1.0)
+
+        def fake_find_powershell(deadline):
+            clock["t"] += 2.0  # 予算を使い果たしてから見つかったケースを模擬
+            return "pwsh"
+
+        monkeypatch.setattr(hook, "find_powershell", fake_find_powershell)
+        called: list[tuple] = []
+        monkeypatch.setattr(hook, "notify_windows", lambda *args, **kwargs: called.append((args, kwargs)))
+
+        raw = json.dumps({"last_assistant_message": "hello"})
+        assert hook.run(raw) == raw
+        assert called == []
+
+    def test_wsl_passes_remaining_budget_as_notify_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """notify_windowsには予算の残り時間がtimeoutとして渡される。"""
+        monkeypatch.setattr(hook.time, "monotonic", lambda: 0.0)
+        monkeypatch.setattr(hook, "IS_MACOS", False)
+        monkeypatch.setattr(hook, "is_wsl", lambda: True)
+        monkeypatch.setattr(hook, "_notification_timeout", lambda: 4.0)
+        monkeypatch.setattr(hook, "find_powershell", lambda deadline: "pwsh")
+        captured: dict[str, float] = {}
+        monkeypatch.setattr(
+            hook,
+            "notify_windows",
+            lambda ps, title, body, **kwargs: captured.update(kwargs) or {"success": True, "reason": None},
+        )
+
+        raw = json.dumps({"last_assistant_message": "hello"})
+        assert hook.run(raw) == raw
+        assert captured["timeout"] == pytest.approx(4.0)
+
     def test_wsl_burnttoast_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
         messages: list[str] = []
         monkeypatch.setattr(hook, "IS_MACOS", False)
         monkeypatch.setattr(hook, "is_wsl", lambda: True)
-        monkeypatch.setattr(hook, "find_powershell", lambda: "pwsh")
+        monkeypatch.setattr(hook, "find_powershell", lambda *args, **kwargs: "pwsh")  # noqa: ARG005
         monkeypatch.setattr(
             hook,
             "notify_windows",
@@ -215,7 +443,7 @@ class TestRun:
         messages: list[str] = []
         monkeypatch.setattr(hook, "IS_MACOS", False)
         monkeypatch.setattr(hook, "is_wsl", lambda: True)
-        monkeypatch.setattr(hook, "find_powershell", lambda: "pwsh")
+        monkeypatch.setattr(hook, "find_powershell", lambda *args, **kwargs: "pwsh")  # noqa: ARG005
         monkeypatch.setattr(hook, "notify_windows", lambda *args, **kwargs: {"success": True, "reason": None})
         monkeypatch.setattr(hook, "log", messages.append)
 
@@ -227,7 +455,7 @@ class TestRun:
         messages: list[str] = []
         monkeypatch.setattr(hook, "IS_MACOS", False)
         monkeypatch.setattr(hook, "is_wsl", lambda: True)
-        monkeypatch.setattr(hook, "find_powershell", lambda: None)
+        monkeypatch.setattr(hook, "find_powershell", lambda *args, **kwargs: None)  # noqa: ARG005
         monkeypatch.setattr(hook, "log", messages.append)
 
         raw = json.dumps({"last_assistant_message": "hello"})
@@ -238,7 +466,7 @@ class TestRun:
         messages: list[str] = []
         monkeypatch.setattr(hook, "IS_MACOS", False)
         monkeypatch.setattr(hook, "is_wsl", lambda: True)
-        monkeypatch.setattr(hook, "find_powershell", lambda: "pwsh")
+        monkeypatch.setattr(hook, "find_powershell", lambda *args, **kwargs: "pwsh")  # noqa: ARG005
         monkeypatch.setattr(hook, "notify_windows", lambda *args, **kwargs: {"success": False, "reason": "boom"})
         monkeypatch.setattr(hook, "log", messages.append)
 

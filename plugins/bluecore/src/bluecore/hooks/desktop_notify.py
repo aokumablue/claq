@@ -10,7 +10,10 @@ Claudeが応答を完了したときにタスクサマリーを含むネイテ�
 
 from __future__ import annotations
 
+import math
+import os
 import subprocess
+import time
 from pathlib import Path
 
 from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin
@@ -19,6 +22,14 @@ from bluecore.lib.slim_text import compact_line, first_meaningful_line
 
 TITLE = "通知"
 MAX_BODY_LENGTH = 100
+
+# デスクトップ通知処理全体（PowerShell探索 + 通知送信）に許容する既定の予算秒数。
+# 呼び出し元のhookタイムアウトをブロックしないよう、BLUECORE_HOOK_TIMEOUT（既定590秒）
+# とは別に、通知処理専用の短い予算をここで管理する。
+DEFAULT_NOTIFICATION_TIMEOUT = 10.0
+
+# PowerShell候補1件のプローブに使う最大秒数。予算が十分残っていてもこれを超えない。
+POWERSHELL_PROBE_TIMEOUT = 3.0
 
 # メモ化されたWSL検出
 _is_wsl: bool | None = None
@@ -44,8 +55,64 @@ def is_wsl() -> bool:
     return _is_wsl
 
 
-def find_powershell() -> str | None:
-    """WSL上で利用可能なPowerShell実行ファイルを探します。"""
+def _notification_timeout() -> float:
+    """通知処理全体に許容する予算秒数を環境変数から解決します。
+
+    Args:
+        なし
+
+    Returns:
+        BLUECORE_DESKTOP_NOTIFY_TIMEOUT が正の有限数値ならその秒数、
+        未設定・無効値なら既定の DEFAULT_NOTIFICATION_TIMEOUT 秒。
+
+    Raises:
+        例外は発生しません。
+    """
+    raw = os.environ.get("BLUECORE_DESKTOP_NOTIFY_TIMEOUT")
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return DEFAULT_NOTIFICATION_TIMEOUT
+        if value > 0 and math.isfinite(value):
+            return value
+    return DEFAULT_NOTIFICATION_TIMEOUT
+
+
+def _remaining_timeout(deadline: float) -> float:
+    """指定したdeadline（time.monotonic基準）までの残り秒数を返します。
+
+    Args:
+        deadline: time.monotonic()と同じ基準の締切時刻（秒）。
+
+    Returns:
+        残り秒数。deadlineを過ぎている場合は0.0。
+
+    Raises:
+        例外は発生しません。
+    """
+    return max(0.0, deadline - time.monotonic())
+
+
+def find_powershell(deadline: float | None = None) -> str | None:
+    """WSL上で利用可能なPowerShell実行ファイルをdeadline内で探します。
+
+    候補への1回のプローブは最大でもPOWERSHELL_PROBE_TIMEOUT秒に制限され、
+    かつdeadlineまでの残り時間を超えないよう動的に配分されます。
+    残り時間が枯渇した時点で以降の候補プローブは打ち切られます。
+
+    Args:
+        deadline: time.monotonic()と同じ基準の締切時刻（秒）。Noneの場合は
+            呼び出し時点からDEFAULT_NOTIFICATION_TIMEOUT秒後を締切とします。
+
+    Returns:
+        最初に応答したPowerShell実行ファイルのパス。全候補が失敗した場合はNone。
+
+    Raises:
+        例外は発生しません。
+    """
+    if deadline is None:
+        deadline = time.monotonic() + DEFAULT_NOTIFICATION_TIMEOUT
 
     candidates = [
         "pwsh.exe",  # WSL interopがWindows PATHから解決
@@ -55,11 +122,14 @@ def find_powershell() -> str | None:
     ]
 
     for path in candidates:
+        timeout = min(POWERSHELL_PROBE_TIMEOUT, _remaining_timeout(deadline))
+        if timeout <= 0:
+            break
         try:
             result = subprocess.run(
                 [path, "-Command", "exit 0"],
                 capture_output=True,
-                timeout=3,
+                timeout=timeout,
             )
             if result.returncode == 0:
                 return path
@@ -81,10 +151,20 @@ def _decode_stderr(stderr: bytes | str | None) -> str | None:
     return stderr
 
 
-def notify_windows(pwsh_path: str, title: str, body: str) -> dict:
+def notify_windows(pwsh_path: str, title: str, body: str, *, timeout: float = DEFAULT_NOTIFICATION_TIMEOUT) -> dict:
     """PowerShell BurntToast経由でWindowsトースト通知を送信します。
 
-    'success' (bool)と'reason' (str|None)を含む辞書を返します。
+    Args:
+        pwsh_path: 使用するPowerShell実行ファイルのパス。
+        title: 通知タイトル。
+        body: 通知本文。
+        timeout: subprocess呼び出しの最大待機秒数。既定はDEFAULT_NOTIFICATION_TIMEOUT。
+
+    Returns:
+        'success' (bool)と'reason' (str|None)を含む辞書。
+
+    Raises:
+        例外は発生しません（内部でTimeoutExpired/FileNotFoundErrorを捕捉します）。
     """
     safe_body = body.replace("'", "''")
     safe_title = title.replace("'", "''")
@@ -94,7 +174,7 @@ def notify_windows(pwsh_path: str, title: str, body: str) -> dict:
         result = subprocess.run(
             [pwsh_path, "-Command", command],
             capture_output=True,
-            timeout=5,
+            timeout=timeout,
         )
         if result.returncode == 0:
             return {"success": True, "reason": None}
@@ -120,10 +200,22 @@ def extract_summary(message: str | None) -> str:
     return compacted or "Done"
 
 
-def notify_macos(title: str, body: str) -> None:
+def notify_macos(title: str, body: str, *, timeout: float = DEFAULT_NOTIFICATION_TIMEOUT) -> None:
     """osascript経由でmacOS通知を送信します。
+
     AppleScript文字列はバックスラッシュエスケープをサポートしないため、
     埋め込み前にダブルクォートをカーリークォートに置換し、バックスラッシュを削除します。
+
+    Args:
+        title: 通知タイトル。
+        body: 通知本文。
+        timeout: subprocess呼び出しの最大待機秒数。既定はDEFAULT_NOTIFICATION_TIMEOUT。
+
+    Returns:
+        なし。
+
+    Raises:
+        例外は発生しません（内部でTimeoutExpired/FileNotFoundErrorを捕捉します）。
     """
     safe_body = body.replace("\\", "").replace('"', "\u201c")
     safe_title = title.replace("\\", "").replace('"', "\u201c")
@@ -133,24 +225,35 @@ def notify_macos(title: str, body: str) -> None:
         subprocess.run(
             ["osascript", "-e", script],
             capture_output=True,
-            timeout=5,
+            timeout=timeout,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         log(f"[DesktopNotify] osascript failed: {e}")
 
 
 def run(raw_input: str) -> str:
-    """デスクトップ通知フックを実行します。生入力をそのまま返します (パススルー)。"""
+    """デスクトップ通知フックを実行します。生入力をそのまま返します (パススルー)。
+
+    通知処理全体（PowerShell探索 + 通知送信）は_notification_timeout()秒の
+    予算内で完結するようdeadlineベースで管理され、予算を使い切った時点で
+    以降の処理（探索・送信）は打ち切られます。
+    """
     try:
         input_data = (parse_json_object(raw_input.strip()) if raw_input.strip() else None) or {}
         summary = extract_summary(input_data.get("last_assistant_message"))
+        deadline = time.monotonic() + _notification_timeout()
 
         if IS_MACOS:
-            notify_macos(TITLE, summary)
+            timeout = _remaining_timeout(deadline)
+            if timeout > 0:
+                notify_macos(TITLE, summary, timeout=timeout)
         elif is_wsl():
-            ps = find_powershell()
+            ps = find_powershell(deadline)
             if ps:
-                result = notify_windows(ps, TITLE, summary)
+                timeout = _remaining_timeout(deadline)
+                if timeout <= 0:
+                    return raw_input
+                result = notify_windows(ps, TITLE, summary, timeout=timeout)
                 if result.get("reason") and "burnttoast" in result["reason"].lower():
                     log("[DesktopNotify] Tip: Install BurntToast module to enable notifications")
                 elif result.get("reason"):
