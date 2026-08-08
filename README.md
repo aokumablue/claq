@@ -93,7 +93,7 @@ claude plugin install bluecore@bluecore
 | [`/feat-dev`](plugins/bluecore/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見→探索→質問→設計→実装→レビュー の7段階一気通貫 |
 | [`/bugfix`](plugins/bluecore/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 再現→原因分析→最小修正→回帰防止→レビュー の一気通貫 |
 | [`/refactor`](plugins/bluecore/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | clean→simplify→perf→review の安全な自動連鎖。`--mode` で部分実行 |
-| [`/review`](plugins/bluecore/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。**READ-ONLY 完全保証** |
+| [`/review`](plugins/bluecore/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。**READ-ONLY 厳守**（プロンプト指示ベース） |
 | [`/harness`](plugins/bluecore/commands/harness.md) | 品質管理 | `[scope] [--audit-only] [--format=text\|json]` | スコア取得→harness-tuner で改善→再採点 |
 | [`/skill-gen`](plugins/bluecore/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--output=path] [--instincts]` | 入力収集→skill-make→skill-tune→grader/comparator/bench-analyzer 評価 |
 | [`/instinct`](plugins/bluecore/commands/instinct.md) | インスティンクト管理 | `<export\|import\|promote\|prune\|evolve>` | 学習成果の昇格・削除・スキル化 |
