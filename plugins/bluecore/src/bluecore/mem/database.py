@@ -22,10 +22,7 @@ from bluecore.mem.models import (
     generate_uuid,
 )
 from bluecore.mem.row_converters import (
-    _row_to_adr,
     _row_to_chunk,
-    _row_to_event_log,
-    _row_to_instinct,
     _row_to_interaction_log,
     _row_to_project_profile,
     _row_to_session_digest,
@@ -261,15 +258,6 @@ class Database:
         ).fetchall()
         return {r["id"]: _row_to_chunk(r) for r in rows}
 
-    def get_next_chunk_index(self, session_id: str) -> int:
-        """セッション内で次に割り当てる chunk_index を返す。"""
-        row = self.conn.execute(
-            "SELECT MAX(chunk_index) as mx FROM memory_chunks WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        mx = row["mx"]
-        return (mx if mx is not None else -1) + 1
-
     def get_all_chunks(self) -> list[MemoryChunk]:
         """全チャンクを取得する（圧縮・プルーニング用）。"""
         rows = self.conn.execute("SELECT * FROM memory_chunks ORDER BY created_at_epoch").fetchall()
@@ -432,26 +420,6 @@ class Database:
         self.conn.commit()
         return instinct_uuid
 
-    def get_instincts(self, scope: str | None = None, project_id: str | None = None) -> list[Instinct]:
-        """インスティンクトを取得する。"""
-        if scope and project_id:
-            rows = self.conn.execute(
-                "SELECT * FROM instincts WHERE scope = ? AND project_id = ?",
-                (scope, project_id),
-            ).fetchall()
-        elif scope:
-            rows = self.conn.execute("SELECT * FROM instincts WHERE scope = ?", (scope,)).fetchall()
-        else:
-            rows = self.conn.execute("SELECT * FROM instincts").fetchall()
-        return [_row_to_instinct(r) for r in rows]
-
-    def get_all_instincts(self) -> list[Instinct]:
-        """全インスティンクトを取得する（同期用）。"""
-        rows = self.conn.execute("SELECT * FROM instincts ORDER BY created_at_epoch").fetchall()
-        return [_row_to_instinct(r) for r in rows]
-
-    # --- ADR ---
-
     def upsert_adr(self, adr: Adr) -> str:
         """ADR を保存または更新し、id を返す。"""
         adr_uuid = adr.id or generate_uuid()
@@ -480,24 +448,6 @@ class Database:
         self.conn.commit()
         return adr_uuid
 
-    def get_adrs(self, project: str | None = None) -> list[Adr]:
-        """ADR を取得する。"""
-        if project:
-            rows = self.conn.execute(
-                "SELECT * FROM adrs WHERE project = ? ORDER BY adr_number",
-                (project,),
-            ).fetchall()
-        else:
-            rows = self.conn.execute("SELECT * FROM adrs ORDER BY project, adr_number").fetchall()
-        return [_row_to_adr(r) for r in rows]
-
-    def get_all_adrs(self) -> list[Adr]:
-        """全 ADR を取得する（同期用）。"""
-        rows = self.conn.execute("SELECT * FROM adrs ORDER BY created_at_epoch").fetchall()
-        return [_row_to_adr(r) for r in rows]
-
-    # --- イベントログ ---
-
     def store_event_log(self, event: EventLog) -> str:
         """イベントログを保存し、id を返す。"""
         event_uuid = event.id or generate_uuid()
@@ -516,27 +466,6 @@ class Database:
         )
         self.conn.commit()
         return event_uuid
-
-    def get_event_logs(self, event_type: str | None = None, limit: int = 100) -> list[EventLog]:
-        """イベントログを取得する。"""
-        if event_type:
-            rows = self.conn.execute(
-                "SELECT * FROM event_logs WHERE event_type = ? ORDER BY created_at_epoch DESC LIMIT ?",
-                (event_type, limit),
-            ).fetchall()
-        else:
-            rows = self.conn.execute(
-                "SELECT * FROM event_logs ORDER BY created_at_epoch DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [_row_to_event_log(r) for r in rows]
-
-    def get_all_event_logs(self) -> list[EventLog]:
-        """全イベントログを取得する（同期用）。"""
-        rows = self.conn.execute("SELECT * FROM event_logs ORDER BY created_at_epoch").fetchall()
-        return [_row_to_event_log(r) for r in rows]
-
-    # --- インタラクションログ ---
 
     def store_interaction_log(self, log_entry: InteractionLog) -> str:
         """インタラクションログを保存し、id を返す。"""
@@ -591,13 +520,6 @@ class Database:
                 "SELECT * FROM interaction_logs ORDER BY created_at_epoch DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-        return [_row_to_interaction_log(r) for r in rows]
-
-    def get_all_interaction_logs(self) -> list[InteractionLog]:
-        """全インタラクションログを取得する（同期用）。"""
-        rows = self.conn.execute(
-            "SELECT * FROM interaction_logs ORDER BY created_at_epoch"
-        ).fetchall()
         return [_row_to_interaction_log(r) for r in rows]
 
     def get_next_interaction_index(self, session_id: str) -> int:

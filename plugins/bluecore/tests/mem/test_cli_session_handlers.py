@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import pytest
 
-import bluecore.mem.bridge as bridge_mod
 import bluecore.mem.search as search_mod
 from bluecore.mem.cli_search_handlers import _format_digest_entry, render_digest_context
 from bluecore.mem.cli_session_handlers import (
@@ -129,7 +128,6 @@ class TestHandleSessionEndG3AndDigest:
         chunk = _make_chunk()
         db = FakeDB([chunk])
         settings = make_settings(tmp_path, auto_compact_enabled=False)
-        monkeypatch.setattr(bridge_mod, "sync_session_to_observations", lambda db, session_id: 1)
 
         handle_session_end(settings, {"session_id": "sess-1"}, _make_deps(db))
 
@@ -146,7 +144,6 @@ class TestHandleSessionEndG3AndDigest:
         chunk = _make_chunk()
         db = FakeDB([chunk])
         settings = make_settings(tmp_path, auto_compact_enabled=False)
-        monkeypatch.setattr(bridge_mod, "sync_session_to_observations", lambda db, session_id: 1)
         monkeypatch.setattr(
             digest_mod,
             "generate_and_store_digest",

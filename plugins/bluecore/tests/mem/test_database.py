@@ -26,10 +26,7 @@ from bluecore.mem.models import (
 from bluecore.mem.row_converters import (
     _parse_json_dict_list,
     _parse_json_list,
-    _row_to_adr,
     _row_to_chunk,
-    _row_to_event_log,
-    _row_to_instinct,
 )
 
 
@@ -100,23 +97,6 @@ class TestDatabase:
             (session.session_id,),
         ).fetchone()
         assert row["ended_at_epoch"] is not None
-
-    def test_next_chunk_index(self, db: Database) -> None:
-        assert db.get_next_chunk_index("sess-new") == 0
-        db.store_chunk(
-            MemoryChunk(
-                session_id="sess-new",
-                project="proj",
-                chunk_index=0,
-                content="c0",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                user_prompt="",
-                created_at_epoch=1700000000,
-            )
-        )
-        assert db.get_next_chunk_index("sess-new") == 1
 
     def test_fts_search(self, db: Database) -> None:
         db.store_chunk(
@@ -233,7 +213,7 @@ class TestDatabase:
         db = Database(tmp_path / "test.db")
         db.close()
         with pytest.raises(sqlite3.ProgrammingError):
-            db.get_next_chunk_index("s1")
+            db.get_chunks_by_session("s1")
 
     def test_user_prompt_null_handling(self, db: Database) -> None:
         """user_prompt が None でも空文字列になる"""
@@ -498,10 +478,12 @@ class TestAdvancedTables:
         db.upsert_instinct(other)
 
         assert first_id == second_id == "instinct-fixed"
-        assert len(db.get_instincts(scope="project", project_id="proj")) == 1
-        assert len(db.get_instincts(scope="global")) == 1
-        assert len(db.get_instincts()) == 2
-        assert db.get_all_instincts()[0].content == "updated"
+        # 読み出し API は未使用のため削除済み。書き込み結果は生 SQL で検証する。
+        rows = db.conn.execute(
+            "SELECT scope, content FROM instincts ORDER BY instinct_id"
+        ).fetchall()
+        assert [row["scope"] for row in rows] == ["project", "global"]
+        assert rows[0]["content"] == "updated"
 
     def test_adr_upsert_and_getters(self, db: Database) -> None:
         adr = Adr(
@@ -532,9 +514,12 @@ class TestAdvancedTables:
         db.upsert_adr(other)
 
         assert first_id == second_id == "adr-fixed"
-        assert [item.title for item in db.get_adrs(project="proj")] == ["Updated"]
-        assert len(db.get_adrs()) == 2
-        assert db.get_all_adrs()[0].title == "Updated"
+        # 読み出し API は未使用のため削除済み。書き込み結果は生 SQL で検証する。
+        rows = db.conn.execute(
+            "SELECT project, title FROM adrs ORDER BY created_at_epoch"
+        ).fetchall()
+        assert [row["title"] for row in rows] == ["Updated", "Other"]
+        assert rows[0]["project"] == "proj"
 
     def test_event_logs_and_row_helpers(self, db: Database) -> None:
         event = EventLog(
@@ -555,9 +540,12 @@ class TestAdvancedTables:
         )
 
         assert first_id == second_id == "event-fixed"
-        assert len(db.get_event_logs(event_type="notice")) == 1
-        assert len(db.get_event_logs()) == 2
-        assert db.get_all_event_logs()[0].content == "hello"
+        # event_logs は書き込み専用テーブル（読み手なし）。生 SQL で検証する。
+        rows = db.conn.execute(
+            "SELECT event_type, content FROM event_logs ORDER BY created_at_epoch"
+        ).fetchall()
+        assert [row["event_type"] for row in rows] == ["notice", "other"]
+        assert rows[0]["content"] == "hello"
 
         db.conn.execute(
             """INSERT INTO memory_chunks
@@ -604,55 +592,8 @@ class TestAdvancedTables:
                 }
             )
         )
-        instinct = _row_to_instinct(
-            FakeRow(
-                {
-                    "id": "instinct-x",
-                    "origin_user": "user",
-                    "instinct_id": "i1",
-                    "scope": "global",
-                    "project_id": None,
-                    "trigger_text": "trigger",
-                    "confidence": 0.7,
-                    "domain": "domain",
-                    "content": "content",
-                    "created_at_epoch": 1,
-                    "updated_at_epoch": 2,
-                }
-            )
-        )
-        adr = _row_to_adr(
-            FakeRow(
-                {
-                    "id": "adr-x",
-                    "origin_user": "user",
-                    "project": "proj",
-                    "adr_number": 9,
-                    "title": "Title",
-                    "status": "accepted",
-                    "content": "content",
-                    "created_at_epoch": 1,
-                    "updated_at_epoch": 2,
-                }
-            )
-        )
-        event_log = _row_to_event_log(
-            FakeRow(
-                {
-                    "id": "event-x",
-                    "origin_user": "user",
-                    "event_type": "notice",
-                    "project_id": "proj",
-                    "content": "content",
-                    "created_at_epoch": 1,
-                }
-            )
-        )
 
         assert chunk.user_prompt == ""
-        assert instinct.instinct_id == "i1"
-        assert adr.adr_number == 9
-        assert event_log.event_type == "notice"
 
     def test_project_profile_upsert_and_getters(self, db: Database) -> None:
         profile1 = ProjectProfile(
@@ -989,7 +930,10 @@ class TestInteractionQueries:
         assert [log.interaction_index for log in session_logs] == [0, 1]
         assert len(project_logs) == 2
         assert len(all_logs) == 3
-        assert db.get_all_interaction_logs()[0].created_at_epoch == 1
+        row = db.conn.execute(
+            "SELECT created_at_epoch FROM interaction_logs ORDER BY created_at_epoch"
+        ).fetchone()
+        assert row["created_at_epoch"] == 1
         assert db.get_next_interaction_index("sess-1") == 2
         assert db.get_next_interaction_index("missing") == 0
 

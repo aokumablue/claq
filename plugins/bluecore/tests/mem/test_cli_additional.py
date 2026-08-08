@@ -45,12 +45,6 @@ def test_helper_functions_cover_filters_and_rendering() -> None:
     )
     db = FakeDB([chunk_a, chunk_b])
 
-    assert cli._parse_date_to_epoch(123) == 123
-    assert cli._parse_date_to_epoch("2024-01-01T00:00:00Z") == 1704067200
-    assert cli._parse_date_to_epoch("bad") is None
-    from bluecore.mem.cli_search_handlers import StructuredFilter
-    assert cli._apply_structured_filters(db, [], StructuredFilter(None, None, None, None)) == []
-    assert cli._apply_structured_filters(db, ["c1", "c2"], StructuredFilter("Edit", "*.py", "2024-01-01T00:00:00Z", None)) == ["c1"]
 
     rendered = cli._render_adaptive_context(
         db,
@@ -168,14 +162,11 @@ def test_handle_session_end_and_compact(monkeypatch: pytest.MonkeyPatch, tmp_pat
         created_at_epoch=1704067200,
     )
     db = FakeDB([chunk])
-    import bluecore.mem.bridge as bridge_mod
     import bluecore.mem.compaction as compaction_mod
 
     monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(db))
     monkeypatch.setattr(cli, "embed", lambda texts: [[0.1, 0.2]])
-    monkeypatch.setattr(bridge_mod, "sync_session_to_observations", lambda db, session_id: 1)
     monkeypatch.setattr(compaction_mod, "detect_low_quality", lambda db: ["c1"])
-    monkeypatch.setattr(compaction_mod, "optimize_db", lambda db: {"fragmentation_before": 0.25})
     monkeypatch.setattr(cli.time, "time", lambda: 100.0)
 
     cli._handle_session_end(settings, {"session_id": "s1"})
@@ -645,12 +636,10 @@ def test_handle_session_end_auto_compact_error(monkeypatch: pytest.MonkeyPatch, 
         created_at_epoch=1704067200,
     )
     db = FakeDB([chunk])
-    import bluecore.mem.bridge as bridge_mod
     import bluecore.mem.compaction as compaction_mod
 
     monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(db))
     monkeypatch.setattr(cli, "embed", lambda texts: [[0.1, 0.2]])
-    monkeypatch.setattr(bridge_mod, "sync_session_to_observations", lambda db, session_id: 1)
     monkeypatch.setattr(compaction_mod, "detect_low_quality", lambda db: (_ for _ in ()).throw(RuntimeError("compact boom")))
     monkeypatch.setattr(cli.time, "time", lambda: 100.0)
     warnings: list[str] = []
@@ -671,7 +660,7 @@ def test_main_routes_all_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
     commands = [
         "init", "setup", "context", "search", "session-init", "observe",
-        "session-end", "compact", "search-structured", "record",
+        "session-end", "compact", "record",
         "import", "record-interaction",
         "record-project-profile", "get-project-profile",
     ]

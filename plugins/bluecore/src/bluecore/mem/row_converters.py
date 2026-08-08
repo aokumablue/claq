@@ -7,9 +7,6 @@ import sqlite3
 
 from bluecore.mem.logger import get as _get_logger
 from bluecore.mem.models import (
-    Adr,
-    EventLog,
-    Instinct,
     InteractionLog,
     MemoryChunk,
     ProjectProfile,
@@ -64,55 +61,6 @@ def _row_to_chunk(row: sqlite3.Row) -> MemoryChunk:
         tool_error=row["tool_error"] if "tool_error" in keys else None,
         ai_response_summary=row["ai_response_summary"] if "ai_response_summary" in keys else None,
         tool_sequence=_parse_json_list(row["tool_sequence"]) if "tool_sequence" in keys else [],
-    )
-
-
-def _row_to_instinct(row: sqlite3.Row) -> Instinct:
-    """instincts の Row を Instinct に変換する。"""
-    keys = row.keys()
-    return Instinct(
-        id=row["id"],
-        origin_user=row["origin_user"],
-        instinct_id=row["instinct_id"],
-        scope=row["scope"],
-        project_id=row["project_id"],
-        trigger_text=row["trigger_text"],
-        confidence=row["confidence"],
-        domain=row["domain"],
-        content=row["content"],
-        created_at_epoch=row["created_at_epoch"],
-        updated_at_epoch=row["updated_at_epoch"],
-        observation_count=row["observation_count"] if "observation_count" in keys else 0,
-        confidence_reasons=_parse_json_dict_list(row["confidence_reasons"]) if "confidence_reasons" in keys else [],
-        source_interaction_ids=_parse_json_list(row["source_interaction_ids"]) if "source_interaction_ids" in keys else [],
-        last_activated_epoch=row["last_activated_epoch"] if "last_activated_epoch" in keys else None,
-    )
-
-
-def _row_to_adr(row: sqlite3.Row) -> Adr:
-    """adrs の Row を Adr に変換する。"""
-    return Adr(
-        id=row["id"],
-        origin_user=row["origin_user"],
-        project=row["project"],
-        adr_number=row["adr_number"],
-        title=row["title"],
-        status=row["status"],
-        content=row["content"],
-        created_at_epoch=row["created_at_epoch"],
-        updated_at_epoch=row["updated_at_epoch"],
-    )
-
-
-def _row_to_event_log(row: sqlite3.Row) -> EventLog:
-    """event_logs の Row を EventLog に変換する。"""
-    return EventLog(
-        id=row["id"],
-        origin_user=row["origin_user"],
-        event_type=row["event_type"],
-        project_id=row["project_id"],
-        content=row["content"],
-        created_at_epoch=row["created_at_epoch"],
     )
 
 

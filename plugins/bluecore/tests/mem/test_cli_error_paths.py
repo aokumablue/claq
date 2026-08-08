@@ -8,10 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import bluecore.mem.bridge as bridge_mod
 import bluecore.mem.cli as cli
 import bluecore.mem.compaction as compaction_mod
-import bluecore.mem.search as search_mod
 from bluecore.mem.models import MemoryChunk
 from bluecore.mem.row_converters import _parse_json_list
 from bluecore.mem.search import SearchResult
@@ -20,7 +18,6 @@ from tests.mem.conftest import FakeDB, make_settings
 
 def test_helper_functions_and_render_missing_chunk() -> None:
     """補助関数の None / 欠損チャンク分岐を通す。"""
-    assert cli._parse_date_to_epoch(None) is None
     assert _parse_json_list(None) == []
     assert _parse_json_list("not-json") == []
 
@@ -73,9 +70,6 @@ def test_helper_functions_and_render_missing_chunk() -> None:
         created_at_epoch=1704067300,
     )
     filter_db = FakeDB([old_chunk, new_chunk])
-    from bluecore.mem.cli_search_handlers import StructuredFilter
-    assert cli._apply_structured_filters(filter_db, ["missing"], StructuredFilter(None, None, None, None)) == []
-    assert cli._apply_structured_filters(filter_db, ["old", "new"], StructuredFilter(None, None, 1704067200, 1704067200)) == []
 
 
 def test_handler_exception_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -89,7 +83,6 @@ def test_handler_exception_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     cli._handle_observe(settings, {"cwd": str(tmp_path), "session_id": "s1", "tool_name": "Write"})
     cli._handle_session_end(settings, {"session_id": "s1"})
     cli._handle_compact(settings)
-    cli._handle_search_structured(settings, {"query": "needle"})
     cli._handle_record(settings, {"content": "note"})
 
     captured = capsys.readouterr()
@@ -120,11 +113,6 @@ def test_session_end_inner_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     warnings: list[str] = []
     monkeypatch.setattr(cli.log, "warning", lambda msg, *args: warnings.append(msg % args if args else msg))
     monkeypatch.setattr(cli, "embed", lambda texts: [[0.1, 0.2]])
-    monkeypatch.setattr(
-        bridge_mod,
-        "sync_session_to_observations",
-        lambda db, session_id: (_ for _ in ()).throw(RuntimeError("sync boom")),
-    )
     monkeypatch.setattr(compaction_mod, "detect_low_quality", lambda db: [])
     monkeypatch.setattr(cli.time, "time", lambda: 100.0)
 
@@ -138,39 +126,6 @@ def test_session_end_inner_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 
     cli._handle_session_end(settings, {"session_id": "s1"})
     assert any("FTS5 最適化失敗" in warning for warning in warnings)
-    assert any("learn 同期失敗" in warning for warning in warnings)
-
-
-def test_search_structured_query_and_compact_dry_run(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """構造化検索の query 分岐と compact の dry-run 分岐を通す。"""
-    settings = make_settings(tmp_path, auto_compact_enabled=False)
-    chunk = MemoryChunk(
-        id="c1",
-        session_id="s1",
-        project="repo",
-        chunk_index=0,
-        content="content",
-        tool_names=["Edit"],
-        files_read=[],
-        files_modified=[],
-        user_prompt="prompt",
-        created_at_epoch=1704067200,
-    )
-    db = FakeDB([chunk])
-    monkeypatch.setattr(cli, "_open_db", lambda settings: db)
-    monkeypatch.setattr(
-        search_mod.SearchService,
-        "search",
-        lambda self, **kwargs: [SearchResult("c1", 0.9, "content", "prompt", "repo", 1704067200, ["Edit"], [], [])],
-    )
-
-    cli._handle_search_structured(settings, {"query": "needle", "limit": 1})
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["results"][0]["content"] == "content"
 
 
 def test_record_and_profile_handlers(
@@ -265,9 +220,3 @@ def test_record_and_profile_failure_paths(
     assert any(payload.get("success") is False for payload in payloads)
 
 
-def test_build_chunk_result_missing_chunk() -> None:
-    """存在しない chunk_id は None を返す。"""
-    from bluecore.mem.cli_search_handlers import _build_chunk_result
-    from tests.mem.conftest import FakeDB
-
-    assert _build_chunk_result(FakeDB(), "nope") is None

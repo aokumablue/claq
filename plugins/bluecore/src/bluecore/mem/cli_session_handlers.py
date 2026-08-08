@@ -193,7 +193,7 @@ def _auto_compact_if_needed(
     db: Any, settings: Settings, *, log: Any, time_module: Any
 ) -> None:
     """自動圧縮インターバルが経過していれば低品質チャンクを削除して DB を最適化する。"""
-    from bluecore.mem.compaction import detect_low_quality, optimize_db
+    from bluecore.mem.compaction import detect_low_quality
 
     if not settings.auto_compact_enabled:
         return
@@ -209,7 +209,6 @@ def _auto_compact_if_needed(
                 low_quality_ids,
             )
             db.conn.commit()
-        optimize_db(db)
         settings.last_compacted_at = time_module.time()
         settings.save()
         log.info("自動圧縮完了: 削除=%d", len(low_quality_ids))
@@ -223,7 +222,6 @@ def handle_session_end(
     deps: SessionEndDeps,
 ) -> None:
     """SessionEnd: セッション終了記録 + 埋め込み一括生成 + FTS5 最適化 + セッション要約生成"""
-    from bluecore.mem.bridge import sync_session_to_observations
     from bluecore.mem.digest import generate_and_store_digest
 
     time_module = deps.time_module if deps.time_module is not None else time
@@ -251,12 +249,6 @@ def handle_session_end(
                 db.conn.commit()
             except Exception as e:
                 deps.log.warning("FTS5 最適化失敗: %s", e)
-
-            try:
-                synced = sync_session_to_observations(db, session_id)
-                deps.log.info("learn 同期: session=%s synced=%d", session_id, synced)
-            except Exception as e:
-                deps.log.warning("learn 同期失敗: %s", e)
 
             try:
                 generate_and_store_digest(

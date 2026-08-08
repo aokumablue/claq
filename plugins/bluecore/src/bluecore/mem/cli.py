@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 
 from bluecore.hooks.hook_common import print_session_start_output
 from bluecore.lib.core_utils import get_git_user_name
-from bluecore.mem import cli_digest_handlers as _digest_handlers
 from bluecore.mem import cli_import_handlers as _import_handlers
 from bluecore.mem import cli_record_handlers as _record_handlers
 from bluecore.mem import cli_search_handlers as _search_handlers
@@ -275,25 +274,6 @@ def _handle_reembed(settings: Settings) -> None:
     _session_handlers.handle_reembed(settings, deps)
 
 
-def _handle_search_structured(settings: Settings, stdin_data: dict) -> None:
-    """search-structured コマンド: フィルタ付き構造化検索を実行する。"""
-    _search_handlers.handle_search_structured(settings, stdin_data, _search_deps())
-
-
-def _apply_structured_filters(
-    db: Database,
-    candidate_ids: list[int],
-    filt: _search_handlers.StructuredFilter,
-) -> list[int]:
-    """候補 chunk_id を構造化フィルタで絞り込む。"""
-    return _search_handlers.apply_structured_filters(db, candidate_ids, filt)
-
-
-def _parse_date_to_epoch(value: int | str | None) -> int | None:
-    """日付文字列または epoch を epoch 秒に変換する。"""
-    return _search_handlers.parse_date_to_epoch(value)
-
-
 def _record_deps() -> _record_handlers.RecordDeps:
     """record系ハンドラへ渡す依存性をまとめて構築する。"""
     return _record_handlers.RecordDeps(
@@ -397,12 +377,6 @@ def _handle_get_project_profile(settings: Settings, stdin_data: dict) -> None:
     _record_handlers.handle_get_project_profile(settings, stdin_data, _record_deps())
 
 
-def _handle_digest_backfill(settings: Settings, stdin_data: dict) -> None:
-    """digest-backfill コマンド: 既存セッションの session digest を遡及生成する。"""
-    deps = _digest_handlers.DigestBackfillDeps(open_db=_open_db, log=log)
-    _digest_handlers.handle_digest_backfill(settings, stdin_data, deps)
-
-
 _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "init": lambda settings, stdin_data: (_handle_init(settings) or None),
     "setup": lambda settings, stdin_data: (_handle_setup(settings) or None),
@@ -413,13 +387,11 @@ _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "session-end": _handle_session_end,
     "compact": lambda settings, stdin_data: (_handle_compact(settings) or None),
     "reembed": lambda settings, stdin_data: (_handle_reembed(settings) or None),
-    "search-structured": _handle_search_structured,
     "record": _handle_record,
     "import": _handle_import,
     "record-interaction": _handle_record_interaction,
     "record-project-profile": _handle_record_project_profile,
     "get-project-profile": _handle_get_project_profile,
-    "digest-backfill": _handle_digest_backfill,
 }
 
 
@@ -434,7 +406,6 @@ Commands:
   setup              Initialize the local mem database
   context            Build <mem-context> from the local database (reads JSON from stdin)
   search             Search the local database (reads JSON from stdin)
-  search-structured  Structured search with filters (tool_name, file_pattern, date_range)
   record             Explicitly record an event from commands/skills/agents
   session-init       Initialize a session and inject adaptive memory (reads JSON from stdin)
   observe            Store a tool-use chunk (reads JSON from stdin)
@@ -445,10 +416,6 @@ Commands:
   record-interaction     Record a user/AI interaction pair to interaction_logs
   record-project-profile Upsert project tech stack to project_profiles
   get-project-profile    Get project tech stack from project_profiles
-  digest-backfill        Backfill session digests for existing sessions (reads JSON from stdin)
-
-search-structured Input (JSON):
-  {"query": "...", "project": "...", "tool_name": "Edit", "file_pattern": "*.py", "date_from": "2024-01-01", "date_to": "2024-12-31"}
 
 record Input (JSON):
   {"event_type": "review|plan|audit|...", "content": "...", "user_prompt": "...", "metadata": {"files_read": [], "files_modified": []}}
@@ -456,8 +423,6 @@ record Input (JSON):
 import Input (JSON):
   {"types": ["instincts", "adrs", "events"], "repo_root": "/path/to/repo"}
 
-digest-backfill Input (JSON):
-  {"force": false, "project": null, "limit": null}
 """
 
 
