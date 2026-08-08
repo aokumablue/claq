@@ -12,6 +12,8 @@ import pytest
 from bluecore.skills import package_skill as pkg
 from bluecore.skills import quick_validate as qv
 
+REPO_SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
+
 
 def _write_skill_md(skill_dir: Path, content: str) -> None:
     skill_dir.mkdir(parents=True, exist_ok=True)
@@ -60,6 +62,16 @@ def test_validate_skill_accepts_valid_skill(tmp_path: Path) -> None:
         ("---\nname: skill\ndescription: " + "x" * 1025 + "\n---\nBody\n", "description が長すぎます"),
         ("---\nname: skill\ndescription: desc\ncompatibility: [a, b]\n---\nBody\n", "compatibility は文字列である必要があります"),
         ("---\nname: skill\ndescription: desc\ncompatibility: " + "x" * 501 + "\n---\nBody\n", "compatibility が長すぎます"),
+        ("---\nname: skill\ndescription: desc\ncontext: 123\n---\nBody\n", "context は空でない文字列である必要があります"),
+        ("---\nname: skill\ndescription: desc\ncontext: ''\n---\nBody\n", "context は空でない文字列である必要があります"),
+        (
+            "---\nname: skill\ndescription: desc\nuser-invocable: maybe\n---\nBody\n",
+            "user-invocable は真偽値である必要があります",
+        ),
+        (
+            "---\nname: skill\ndescription: desc\nuser-invocable: 1\n---\nBody\n",
+            "user-invocable は真偽値である必要があります",
+        ),
     ],
 )
 def test_validate_skill_rejects_invalid_inputs(
@@ -241,6 +253,37 @@ def test_package_skill_module_entrypoint(tmp_path: Path, monkeypatch: pytest.Mon
         runpy.run_module("bluecore.skills.package_skill", run_name="__main__")
 
     assert exc_info.value.code in (0, None)
+
+
+def test_validate_skill_accepts_context_and_user_invocable(tmp_path: Path) -> None:
+    """context / user-invocable を含む frontmatter が有効判定されることを確認する。"""
+    skill_dir = tmp_path / "skill"
+    _write_skill_md(
+        skill_dir,
+        "---\n"
+        "name: sample-skill\n"
+        "description: sample description\n"
+        "context: fork\n"
+        "user-invocable: false\n"
+        "---\n"
+        "Body\n",
+    )
+
+    valid, message = qv.validate_skill(skill_dir)
+
+    assert valid is True
+    assert message == "スキルは有効です"
+
+
+def test_validate_skill_accepts_all_repo_skill_md_files() -> None:
+    """リポジトリ内の実在 SKILL.md が全て検証を通ることを確認する（context/user-invocable 含む）。"""
+    skill_md_paths = sorted(REPO_SKILLS_DIR.glob("*/SKILL.md"))
+
+    assert skill_md_paths, "SKILL.md が1件も見つかりません"
+
+    for skill_md_path in skill_md_paths:
+        valid, message = qv.validate_skill(skill_md_path.parent)
+        assert valid is True, f"{skill_md_path}: {message}"
 
 
 def test_quick_validate_name_empty() -> None:

@@ -65,9 +65,32 @@ def _validate_compatibility(compat_raw: object) -> tuple[bool, str]:
     return True, ""
 
 
+def _validate_context(context_raw: object) -> tuple[bool, str]:
+    """frontmatter の context フィールドを検証する。非空文字列のみ OK。"""
+    if not isinstance(context_raw, str) or not context_raw.strip():
+        return False, "context は空でない文字列である必要があります"
+    return True, ""
+
+
+def _validate_user_invocable(user_invocable_raw: object) -> tuple[bool, str]:
+    """frontmatter の user-invocable フィールドを検証する。真偽値のみ OK。"""
+    if not isinstance(user_invocable_raw, bool):
+        return False, "user-invocable は真偽値である必要があります"
+    return True, ""
+
+
 def _validate_frontmatter_keys(frontmatter: dict) -> tuple[bool, str]:
-    """frontmatter のキー・name・description・compatibility を検証する。"""
-    ALLOWED_PROPERTIES = {"name", "description", "license", "allowed-tools", "metadata", "compatibility"}
+    """frontmatter のキーと各プロパティの値を検証する。"""
+    ALLOWED_PROPERTIES = {
+        "name",
+        "description",
+        "license",
+        "allowed-tools",
+        "metadata",
+        "compatibility",
+        "context",
+        "user-invocable",
+    }
     unexpected_keys = set(frontmatter.keys()) - ALLOWED_PROPERTIES
     if unexpected_keys:
         return False, (
@@ -90,6 +113,16 @@ def _validate_frontmatter_keys(frontmatter: dict) -> tuple[bool, str]:
     ok, msg = _validate_compatibility(frontmatter.get("compatibility", ""))
     if not ok:
         return False, msg
+
+    if "context" in frontmatter:
+        ok, msg = _validate_context(frontmatter["context"])
+        if not ok:
+            return False, msg
+
+    if "user-invocable" in frontmatter:
+        ok, msg = _validate_user_invocable(frontmatter["user-invocable"])
+        if not ok:
+            return False, msg
 
     return True, "スキルは有効です"
 
