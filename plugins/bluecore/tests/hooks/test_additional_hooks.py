@@ -18,7 +18,12 @@ from bluecore.hooks import (
 def _capture_io(monkeypatch: pytest.MonkeyPatch, module, payload: str) -> tuple[list[str], list[str]]:
     stdout: list[str] = []
     stderr: list[str] = []
-    monkeypatch.setattr(module, "read_raw_stdin", lambda: payload)
+    if hasattr(module, "read_raw_stdin_with_truncation"):
+        # config_protection は自己完結した truncation guard を持つため
+        # (raw, truncated) タプルを返す read_raw_stdin_with_truncation を使う。
+        monkeypatch.setattr(module, "read_raw_stdin_with_truncation", lambda: (payload, False))
+    else:
+        monkeypatch.setattr(module, "read_raw_stdin", lambda: payload)
     if hasattr(module, "write_stdout"):
         monkeypatch.setattr(module, "write_stdout", stdout.append)
     if hasattr(module, "write_stderr"):

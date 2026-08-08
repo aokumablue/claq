@@ -705,7 +705,11 @@ def test_pre_bash_commit_quality_run_wrapper_and_main_success(monkeypatch: pytes
     assert pre_bash_commit_quality.run("payload") == pre_bash_commit_quality.evaluate("payload")
 
     monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "payload")
-    monkeypatch.setattr(pre_bash_commit_quality, "evaluate", lambda raw: {"output": raw, "exitCode": 2})
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "evaluate",
+        lambda raw: {"output": raw, "exitCode": 2, "reason": "[Hook] BLOCKED: boom"},
+    )
     stdout = io.StringIO()
     with redirect_stdout(stdout):
         assert pre_bash_commit_quality.main() == 2
@@ -765,7 +769,11 @@ def test_pre_bash_commit_quality_blocks_on_error_and_allows_warnings(
         lambda path, *, repo_root=None: [{"severity": "error", "line": 1, "message": "boom"}],
     )
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
-    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 2}
+    assert pre_bash_commit_quality.evaluate("payload") == {
+        "output": "payload",
+        "exitCode": 2,
+        "reason": "[Hook] BLOCKED: 1 error(s) found in staged files. Fix them before committing.",
+    }
 
     warning_logs: list[str] = []
     monkeypatch.setattr(pre_bash_commit_quality, "log", warning_logs.append)

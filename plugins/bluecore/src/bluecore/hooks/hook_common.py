@@ -41,6 +41,32 @@ def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
     return raw_bytes[:max_bytes].decode("utf-8", errors="replace")
 
 
+def read_raw_stdin_with_truncation(max_bytes: int = MAX_STDIN_BYTES) -> tuple[str, bool]:
+    """標準入力を読み取り、切り捨ての有無を返します。
+
+    Args:
+        max_bytes: 読み取る最大バイト数です。
+
+    Returns:
+        読み取った文字列と、切り捨てが発生したかどうかのタプルを返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    stdin_buffer = getattr(sys.stdin, "buffer", None)
+    if stdin_buffer is not None:
+        raw_bytes = stdin_buffer.read(max_bytes + 1)
+    else:
+        # io.StringIO など .buffer を持たない stdin を想定したフォールバック。
+        # バイト上限を大きく超える無制限 read を避けるため、最大 +1 文字だけ読む。
+        raw_text = sys.stdin.read(max_bytes + 1)
+        raw_bytes = raw_text.encode("utf-8", errors="replace")
+    truncated = len(raw_bytes) > max_bytes
+    if truncated:
+        raw_bytes = raw_bytes[:max_bytes]
+    return raw_bytes.decode("utf-8", errors="replace"), truncated
+
+
 def parse_json_object(raw: str) -> dict[str, Any] | None:
     """JSON 文字列を辞書としてパースします。
 
@@ -294,6 +320,25 @@ def emit_user_prompt_submit_output(additional_context: str) -> str:
         例外は発生しません。
     """
     return _emit_hook_specific_output("UserPromptSubmit", additional_context)
+
+
+def emit_post_tool_use_output(additional_context: str) -> str:
+    """PostToolUse 用のフック出力 JSON 文字列を返す。
+
+    ハーネスに応じたフォーマットを output_adapter 経由で選択する。
+
+    Args:
+        additional_context: コンテキストに注入する追加文字列。
+
+    Returns:
+        ハーネス別フォーマットの JSON 文字列。
+        Claude Code: hookSpecificOutput ラッパー形式。
+        Copilot CLI: {"additionalContext": "..."} トップレベル形式。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _emit_hook_specific_output("PostToolUse", additional_context)
 
 
 def print_session_start_output(additional_context: str = "") -> None:

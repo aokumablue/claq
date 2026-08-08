@@ -455,8 +455,8 @@ def _finalize_result(
 ) -> dict:
     """問題集計結果をログに記録し、終了コードを含む結果辞書を返します。
 
-    error_count > 0 の場合は exitCode=2（コミットブロック）、
-    それ以外は exitCode=0 を返します。
+    error_count > 0 の場合は exitCode=2（コミットブロック）＋ reason（
+    emit_block_output に渡すブロック理由）、それ以外は exitCode=0 を返します。
 
     Args:
         total_issues: 検出された問題の総数です。
@@ -466,7 +466,7 @@ def _finalize_result(
         raw_input: そのまま output に返す生の入力文字列です。
 
     Returns:
-        output と exitCode を含む辞書を返します。
+        output と exitCode（exitCode=2 の場合は reason も）を含む辞書を返します。
 
     Raises:
         例外は発生しません。
@@ -478,7 +478,11 @@ def _finalize_result(
         )
         if error_count > 0:
             log("\n[Hook] ERROR: Commit blocked due to critical issues. Fix them before committing.")
-            return {"output": raw_input, "exitCode": 2}
+            reason = (
+                f"[Hook] BLOCKED: {error_count} error(s) found in staged files. "
+                "Fix them before committing."
+            )
+            return {"output": raw_input, "exitCode": 2, "reason": reason}
         log("\n[Hook] WARNING: Warnings found. Consider fixing them, but commit is allowed.")
         log("[Hook] To bypass these checks, use: git commit --no-verify")
     else:
@@ -609,8 +613,12 @@ def run(raw_input: str) -> dict:
 def main() -> int:
     """スクリプト実行時に入力を読み取り、品質チェックを行います。
 
+    ブロック時（exitCode == 2）は emit_block_output でハーネス別プロトコルに
+    変換する（Claude/Codex: stderr + exit 2、Copilot: deny JSON + exit 0）。
+
     Returns:
-        コミットを許可する場合は 0、ブロックする場合は 2 を返します。
+        コミットを許可する場合は 0、ブロックする場合は 2（Copilot では
+        emit_block_output により 0）を返します。
 
     Args:
         引数はありません。
@@ -618,11 +626,13 @@ def main() -> int:
     Raises:
         例外は発生しません。
     """
-    from bluecore.hooks.hook_common import read_raw_stdin
+    from bluecore.hooks.hook_common import emit_block_output, read_raw_stdin
 
     try:
         raw = read_raw_stdin()
         result = evaluate(raw)
+        if result["exitCode"] == 2:
+            return emit_block_output(result["reason"])
         return result["exitCode"]
     except Exception:
         return 0

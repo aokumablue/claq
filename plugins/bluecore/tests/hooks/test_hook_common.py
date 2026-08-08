@@ -1,4 +1,4 @@
-"""hook_common の SessionStart 出力ヘルパーのテスト。"""
+"""hook_common のフック出力ヘルパー（SessionStart/UserPromptSubmit/PostToolUse）のテスト。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import pytest
 
 from bluecore.hooks.hook_common import (
     SESSION_START_HOOK_IDS,
+    emit_post_tool_use_output,
     emit_session_start_output,
     emit_user_prompt_submit_output,
     print_session_start_output,
@@ -81,6 +82,23 @@ class TestEmitUserPromptSubmitOutput:
 
     def test_unicode_not_escaped(self) -> None:
         assert "日本語" in emit_user_prompt_submit_output("日本語")
+
+
+class TestEmitPostToolUseOutput:
+    @pytest.mark.parametrize(
+        "additional_context",
+        [
+            "simple context",
+            "改行\n含む\nテキスト",
+            "unicode: 日本語テスト 🐍",
+        ],
+        ids=["simple", "newlines", "unicode"],
+    )
+    def test_returns_valid_json(self, additional_context: str) -> None:
+        payload = json.loads(emit_post_tool_use_output(additional_context))
+        inner = payload["hookSpecificOutput"]
+        assert inner["hookEventName"] == "PostToolUse"
+        assert inner["additionalContext"] == additional_context
 
 
 class TestPrintSessionStartOutput:

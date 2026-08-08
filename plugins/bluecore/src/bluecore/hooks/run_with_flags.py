@@ -19,6 +19,7 @@ from bluecore.hooks.hook_common import (
     SESSION_START_HOOK_IDS,
     detach_process,
     emit_session_start_output,
+    read_raw_stdin_with_truncation,
     write_stderr,
     write_stdout,
 )
@@ -63,32 +64,6 @@ def _subprocess_timeout() -> float:
 # truncated payload で判定をすり抜けないか必ず検討し、必要ならここへ追加すること
 # （block_no_verify は launcher 直接起動のため対象外）。
 _TRUNCATION_GUARD_HOOK_IDS = frozenset({"pre:config-protection"})
-
-
-def read_raw_stdin_with_truncation(max_bytes: int = MAX_STDIN_BYTES) -> tuple[str, bool]:
-    """標準入力を読み取り、切り捨ての有無を返します。
-
-    Args:
-        max_bytes: 読み取る最大バイト数です。
-
-    Returns:
-        読み取った文字列と、切り捨てが発生したかどうかのタプルを返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    stdin_buffer = getattr(sys.stdin, "buffer", None)
-    if stdin_buffer is not None:
-        raw_bytes = stdin_buffer.read(max_bytes + 1)
-    else:
-        # io.StringIO など .buffer を持たない stdin を想定したフォールバック。
-        # バイト上限を大きく超える無制限 read を避けるため、最大 +1 文字だけ読む。
-        raw_text = sys.stdin.read(max_bytes + 1)
-        raw_bytes = raw_text.encode("utf-8", errors="replace")
-    truncated = len(raw_bytes) > max_bytes
-    if truncated:
-        raw_bytes = raw_bytes[:max_bytes]
-    return raw_bytes.decode("utf-8", errors="replace"), truncated
 
 
 def build_env() -> dict[str, str]:
