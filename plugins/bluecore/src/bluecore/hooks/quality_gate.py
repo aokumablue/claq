@@ -157,8 +157,11 @@ def load_config(file_path: str | None = None) -> dict[str, Any]:
 def _extract_target_file_paths(input_data: dict[str, Any]) -> list[str]:
     """フック入力から対象ファイルパスをすべて取り出す。
 
-    Codex の apply_patch はパッチテキストから全対象ファイルを取り出す
-    （複数ファイルパッチの一部だけ lint が走る取りこぼしを防ぐ）。
+    構造化パッチ（Codex の apply_patch 等）はパッチテキストから全対象
+    ファイルを取り出す（複数ファイルパッチの一部だけ lint が走る取りこぼしを
+    防ぐ）。パッチかどうかは tool_name の文字列一致だけに頼らず、
+    ``extract_file_paths`` が生入力の内容（マーカー行の有無）でも判定する
+    ため、ハーネスごとの tool_name の表記ゆれでも取りこぼさない。
 
     Args:
         input_data: hook 入力です。
@@ -174,8 +177,11 @@ def _extract_target_file_paths(input_data: dict[str, Any]) -> list[str]:
         file_path = tool_input.get("file_path")
         if isinstance(file_path, str) and file_path:
             return [file_path]
-        if str(input_data.get("tool_name") or "") == "apply_patch":
-            return extract_file_paths("apply_patch", tool_input) or []
+
+    tool_name = str(input_data.get("tool_name") or "")
+    structured_paths = extract_file_paths(tool_name, tool_input) or []
+    if structured_paths:
+        return structured_paths
 
     file_path = input_data.get("file_path")
     if isinstance(file_path, str) and file_path:

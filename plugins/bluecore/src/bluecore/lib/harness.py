@@ -31,7 +31,7 @@ _TOOL_NAME_MAP = {
     "write": "Write",
 }
 
-# Codex apply_patch パッチテキストのファイル操作マーカー
+# 構造化パッチテキストのファイル操作マーカー（Codex apply_patch 形式）
 _PATCH_FILE_MARKERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ")
 
 
@@ -81,12 +81,13 @@ def normalize_tool_name(tool_name: str) -> str:
     return _TOOL_NAME_MAP.get(tool_name.lower(), tool_name)
 
 
-def _extract_apply_patch_text(tool_input: dict | str | None) -> str | None:
-    """apply_patch 入力からパッチ本文を取り出す。
+def _extract_patch_text(tool_input: dict | str | None) -> str | None:
+    """入力から構造化パッチ本文候補を取り出す。
 
     Copilot CLI では生のパッチ文字列、他ハーネスでは {"input": "..."} の
     ような dict で渡ることがあるため、両方を吸収する。JSON 文字列化された
-    dict が来た場合も input フィールドを復元する。
+    dict が来た場合も input フィールドを復元する。ツール名に関わらず、
+    渡された入力の「形」だけから候補テキストを取り出す（判定は呼び出し側）。
     """
     if isinstance(tool_input, dict):
         patch_text = tool_input.get("input")
@@ -108,28 +109,36 @@ def _extract_apply_patch_text(tool_input: dict | str | None) -> str | None:
     return None
 
 
+def _has_patch_markers(patch_text: str) -> bool:
+    """テキストが構造化パッチのファイル操作マーカー行を 1 つ以上含むか判定する。"""
+    return any(line.startswith(marker) for line in patch_text.splitlines() for marker in _PATCH_FILE_MARKERS)
+
+
 def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[str] | None:
     """ツール入力から操作対象のファイルパス一覧を抽出する。
 
-    Edit/Write/MultiEdit は file_path フィールド、Copilot/Codex の
-    apply_patch はパッチテキストのファイル操作マーカー行をパースする。
+    Edit/Write/MultiEdit は file_path フィールドを使う。構造化パッチ
+    （Copilot/Codex の apply_patch 等）はパッチテキストのファイル操作
+    マーカー行をパースする。パッチかどうかは tool_name の文字列一致
+    だけに頼らず、生入力の内容（マーカー行の有無）でも判定する。
+    ハーネスごとの命名差異でツール名が "apply_patch" と一致しない
+    場合でも、構造化パッチの内容が検査対象から漏れないようにするため。
 
     Args:
         tool_name: フック stdin の tool_name フィールド値（正規化前）。
         tool_input: フック stdin の tool_input フィールド値。dict / 文字列 / None。
 
     Returns:
-        ファイルパスのリスト。判定不能（apply_patch でマーカーが 1 つも
-        見つからない等）の場合は None を返す。呼び出し側は None を
-        fail-closed として扱うこと。
+        ファイルパスのリスト。判定不能（パッチ本文と分かっているのに
+        マーカーが 1 つも見つからない等）の場合は None を返す。呼び出し側は
+        None を fail-closed として扱うこと。
 
     Raises:
         例外は発生しません。
     """
-    if tool_name == "apply_patch":
-        patch_text = _extract_apply_patch_text(tool_input)
-        if not isinstance(patch_text, str):
-            return None
+    patch_text = _extract_patch_text(tool_input)
+    is_declared_patch_tool = tool_name == "apply_patch"
+    if isinstance(patch_text, str) and (is_declared_patch_tool or _has_patch_markers(patch_text)):
         paths = [
             line[len(marker) :].strip()
             for line in patch_text.splitlines()
@@ -137,6 +146,10 @@ def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[st
             if line.startswith(marker)
         ]
         return paths or None
+
+    if is_declared_patch_tool:
+        # apply_patch と明示されているのにパッチ本文を取り出せない: 判定不能
+        return None
 
     if not isinstance(tool_input, dict):
         return []

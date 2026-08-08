@@ -174,6 +174,51 @@ class TestExtractFilePaths:
         assert harness.extract_file_paths("Bash", "ls -la") == []
         assert harness.extract_file_paths("Edit", None) == []
 
+    def test_mismatched_tool_name_raw_patch_string_is_still_detected(self):
+        """tool_name が "apply_patch" と一致しなくても、生入力が構造化パッチ
+        マーカーを含む文字列なら内容ベースで検出し、ファイル一覧を返す
+        （ツール名の表記ゆれで保護対象ファイルが漏れる fail-open の回帰防止）。
+        """
+        patch_text = "*** Update File: model.json\n@@\n-old\n+new\n"
+        assert harness.extract_file_paths("edit", patch_text) == ["model.json"]
+
+    def test_mismatched_tool_name_dict_wrapped_patch_is_still_detected(self):
+        """tool_name が未知の値でも、{"input": ...} 形式で構造化パッチ本文を
+        運ぶ dict なら内容ベースでマーカーをパースする。
+        """
+        patch = (
+            "*** Begin Patch\n"
+            "*** Add File: new.py\n"
+            "+x = 1\n"
+            "*** Update File: mod.py\n"
+            "@@\n"
+            "*** End Patch"
+        )
+        assert harness.extract_file_paths("unknown-harness-tool", {"input": patch}) == [
+            "new.py",
+            "mod.py",
+        ]
+
+    def test_mismatched_tool_name_json_encoded_patch_is_still_detected(self):
+        """tool_name 不一致でも JSON 文字列化された {"input": ...} 形式を復元し、
+        マーカーをパースする。
+        """
+        patch_text = "*** Update File: eslint.config.js\n@@\n-a\n+b\n"
+        wrapped = json.dumps({"input": patch_text})
+        assert harness.extract_file_paths("Edit", wrapped) == ["eslint.config.js"]
+
+    def test_mismatched_tool_name_without_markers_falls_back_to_normal_handling(self):
+        """tool_name 不一致かつ内容にパッチマーカーが無い文字列は、
+        通常の非パッチ入力として空リストを返す（Bash コマンド等の誤ブロック防止）。
+        """
+        assert harness.extract_file_paths("edit", "echo *** not a patch ***") == []
+
+    def test_mismatched_tool_name_dict_with_file_path_prefers_file_path(self):
+        """tool_name 不一致でも file_path フィールドを持つ dict は最優先で使う。"""
+        assert harness.extract_file_paths("unknown-harness-tool", {"file_path": "/a/b.py"}) == [
+            "/a/b.py"
+        ]
+
 
 class TestResolveSessionId:
     """resolve_session_id のテスト。"""
