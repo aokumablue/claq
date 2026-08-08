@@ -6,7 +6,13 @@ from pathlib import Path
 
 from bluecore.skills.comply.grader import ComplianceResult, StepResult
 from bluecore.skills.comply.parser import ComplianceSpec, Detector, ObservationEvent, Step
-from bluecore.skills.comply.report import _overall_compliance, _step_compliance_rate, _steps_to_promote, generate_report
+from bluecore.skills.comply.report import (
+    ScenarioNotMeasured,
+    _overall_compliance,
+    _step_compliance_rate,
+    _steps_to_promote,
+    generate_report,
+)
 from bluecore.skills.comply.scenario_generator import Scenario
 
 
@@ -46,13 +52,14 @@ def _make_event(timestamp: str, tool: str, input_text: str, output_text: str) ->
     )
 
 
-def _make_scenario(level: int, name: str, prompt: str) -> Scenario:
+def _make_scenario(level: int, name: str, prompt: str, required_tools: tuple[str, ...] = ("Read",)) -> Scenario:
     return Scenario(
         id=f"scenario-{name}",
         level=level,
         level_name=name,
         description=f"{name} scenario",
         prompt=prompt,
+        required_tools=required_tools,
         setup_commands=(),
     )
 
@@ -159,3 +166,61 @@ def test_generate_report_no_promotion_and_no_observations(tmp_path: Path) -> Non
     ]
     report = generate_report(skill_path, spec, results)
     assert "comply Report" in report
+
+
+def test_generate_report_without_not_measured_omits_section() -> None:
+    """not_measured 未指定（None）の場合、'Not Measured' セクションは出力されず、
+    サマリーの未計測件数は 0 と表示されること。
+    """
+    spec = _make_spec(required=False, threshold=0.5)
+
+    report = generate_report(Path("/tmp/skill.md"), spec, [])
+
+    assert "## Not Measured (Unsupported Tools)" not in report
+    assert "| Not Measured (unsupported tools) | 0 |" in report
+
+
+def test_generate_report_with_not_measured_scenarios(tmp_path: Path) -> None:
+    """not_measured が指定された場合、専用セクションとサマリー件数に反映され、
+    PASS/FAIL の Scenario Results テーブルには影響しないこと。
+
+    修正前は UnsupportedScenarioError / ScenarioNotMeasured という概念が存在せず、
+    ツール不足のシナリオは「未計測」として区別する手段がなかった。
+    """
+    spec = _make_spec()
+    skill_path = tmp_path / "skill.md"
+    skill_path.write_text("# Skill", encoding="utf-8")
+
+    strict_event = _make_event("2026-01-01T00:00:01Z", "Read", "read file", "ok")
+    results = [
+        (
+            "strict",
+            ComplianceResult(
+                spec_id=spec.id,
+                steps=(
+                    StepResult(step_id="write_test", detected=True, evidence=(strict_event,), failure_reason=None),
+                    StepResult(step_id="refactor", detected=True, evidence=(), failure_reason=None),
+                ),
+                compliance_rate=1.0,
+                recommend_hook_promotion=False,
+                classification={"write_test": [0]},
+            ),
+            [strict_event],
+        ),
+    ]
+    not_measured = [
+        ScenarioNotMeasured(
+            scenario=_make_scenario(2, "relaxed", "only one line", required_tools=("Read", "WebFetch")),
+            unsupported_tools=("WebFetch",),
+            reason="Required tools are unavailable in this environment",
+        ),
+    ]
+
+    report = generate_report(skill_path, spec, results, not_measured=not_measured)
+
+    assert "## Not Measured (Unsupported Tools)" in report
+    assert "| relaxed | WebFetch | Required tools are unavailable in this environment |" in report
+    assert "| Not Measured (unsupported tools) | 1 |" in report
+    # PASS/FAIL 集計は measured の1件のみで、100% のまま（未計測分に引きずられない）
+    assert "| Overall Compliance | 100% |" in report
+    assert "| Scenarios | 1 |" in report

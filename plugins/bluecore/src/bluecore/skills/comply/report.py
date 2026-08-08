@@ -12,6 +12,19 @@ from .scenario_generator import Scenario
 
 
 @dataclass(frozen=True)
+class ScenarioNotMeasured:
+    """ツール不足により実行できず、未計測として分離されたシナリオを表す。
+
+    UnsupportedScenarioError を捕捉した際に生成し、コンプライアンス計測（PASS/FAIL）
+    とは別カテゴリとしてレポートへ明示する。
+    """
+
+    scenario: Scenario
+    unsupported_tools: tuple[str, ...]
+    reason: str
+
+
+@dataclass(frozen=True)
 class _SummaryMeta:
     """_append_summary_section のメタ情報（スキルパス・仕様・結果・閾値・推奨ステップ）。"""
 
@@ -21,6 +34,7 @@ class _SummaryMeta:
     overall: float
     threshold: float
     promote_steps: list
+    not_measured_count: int
 
 
 def generate_report(
@@ -28,6 +42,7 @@ def generate_report(
     spec: ComplianceSpec,
     results: list[tuple[str, ComplianceResult, list[ObservationEvent]]],
     scenarios: list[Scenario] | None = None,
+    not_measured: list[ScenarioNotMeasured] | None = None,
 ) -> str:
     """Markdown形式のコンプライアンスレポートを生成する。
 
@@ -36,7 +51,9 @@ def generate_report(
         spec: 評価に使用したコンプライアンス仕様。
         results: (scenario_level_name, ComplianceResult, observations) のタプル一覧。
         scenarios: プロンプトを含む元のシナリオ定義。
+        not_measured: ツール不足で実行できず未計測として分離されたシナリオ一覧。
     """
+    not_measured = not_measured or []
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     overall = _overall_compliance(results)
     threshold = spec.threshold_promote_to_hook
@@ -54,9 +71,13 @@ def generate_report(
         overall=overall,
         threshold=threshold,
         promote_steps=promote_steps,
+        not_measured_count=len(not_measured),
     ))
     _append_behavioral_sequence_section(lines, spec)
     _append_scenario_results_section(lines, spec, results)
+
+    if not_measured:
+        _append_not_measured_section(lines, not_measured)
 
     if scenarios:
         _append_scenario_prompts_section(lines, scenarios)
@@ -78,6 +99,7 @@ def _append_summary_section(lines: list[str], meta: _SummaryMeta) -> None:
     lines.append(f"| Skill | `{meta.skill_path}` |")
     lines.append(f"| Spec | {meta.spec.id} |")
     lines.append(f"| Scenarios | {len(meta.results)} |")
+    lines.append(f"| Not Measured (unsupported tools) | {meta.not_measured_count} |")
     lines.append(f"| Overall Compliance | {meta.overall:.0%} |")
     lines.append(f"| Threshold | {meta.threshold:.0%} |")
 
@@ -119,6 +141,22 @@ def _append_scenario_results_section(
         ]
         failed_str = ", ".join(failed) if failed else "—"
         lines.append(f"| {level_name} | {result.compliance_rate:.0%} | {failed_str} |")
+    lines.append("")
+
+
+def _append_not_measured_section(lines: list[str], not_measured: list[ScenarioNotMeasured]) -> None:
+    """未計測（ツール不足）シナリオのセクションを lines に追記する。
+
+    実行環境の制約で測定できなかったシナリオを、PASS/FAIL の集計とは
+    独立して一覧化し、「未計測」と「実際の失敗」の混同を防ぐ。
+    """
+    lines.append("## Not Measured (Unsupported Tools)")
+    lines.append("")
+    lines.append("| Scenario | Unsupported Tools | Reason |")
+    lines.append("|----------|--------------------|--------|")
+    for entry in not_measured:
+        tools = ", ".join(entry.unsupported_tools)
+        lines.append(f"| {entry.scenario.level_name} | {tools} | {entry.reason} |")
     lines.append("")
 
 

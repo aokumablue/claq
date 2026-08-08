@@ -15,13 +15,19 @@ PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 @dataclass(frozen=True)
 class Scenario:
-    """スキルをテストするためのプレッシャーシナリオを表す。"""
+    """スキルをテストするためのプレッシャーシナリオを表す。
+
+    required_tools はこのシナリオの実行に必要なツール名の一覧。実行環境で
+    利用できないツールが含まれる場合、runner はシナリオ実行前に
+    UnsupportedScenarioError を送出し「未計測」として分離する。
+    """
 
     id: str
     level: int
     level_name: str
     description: str
     prompt: str
+    required_tools: tuple[str, ...]
     setup_commands: tuple[str, ...]
 
 
@@ -59,6 +65,7 @@ def generate_scenarios(
             level_name=s["level_name"],
             description=s["description"],
             prompt=s["prompt"].strip(),
+            required_tools=tuple(s["required_tools"]),
             setup_commands=tuple(s.get("setup_commands", [])),
         )
         for s in parsed["scenarios"]

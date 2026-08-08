@@ -20,6 +20,15 @@
   | 1 | model が ALLOWED_MODELS 外        | ValueError                        |
   | 2 | model が有効 + llm-cli 成功       | ScenarioRun が返る               |
   | 3 | llm-cli が returncode!=0          | RuntimeError                     |
+  | 4 | required_tools に未対応ツールあり  | UnsupportedScenarioError（サンドボックス作成前） |
+  | 5 | required_tools が全て対応済み     | 通常どおり実行される              |
+
+デシジョンテーブル (_ensure_supported_scenario):
+  | # | required_tools                    | 期待結果                         |
+  |---|-----------------------------------|-----------------------------------|
+  | 1 | _ALLOWED_TOOLS の部分集合          | 例外なし                          |
+  | 2 | _ALLOWED_TOOLS に無いツールを含む  | UnsupportedScenarioError          |
+  | 3 | 空タプル                          | 例外なし                          |
 
 デシジョンテーブル (_safe_sandbox_dir):
   | # | scenario_id                       | 期待動作                         |
@@ -42,6 +51,8 @@ from bluecore.skills.comply.parser import ObservationEvent
 from bluecore.skills.comply.runner import (
     SANDBOX_BASE,
     ScenarioRun,
+    UnsupportedScenarioError,
+    _ensure_supported_scenario,
     _parse_stream_json,
     _safe_sandbox_dir,
     _setup_sandbox,
@@ -54,6 +65,7 @@ def _make_scenario(
     sid: str = "test-scenario",
     level: int = 1,
     setup_commands: tuple[str, ...] = (),
+    required_tools: tuple[str, ...] = ("Read",),
 ) -> Scenario:
     """テスト用シナリオファクトリ。"""
     return Scenario(
@@ -62,6 +74,7 @@ def _make_scenario(
         level_name="strict",
         description="desc",
         prompt="do something",
+        required_tools=required_tools,
         setup_commands=setup_commands,
     )
 
@@ -444,6 +457,37 @@ class TestSetupSandbox:
 
 
 # ========================
+# _ensure_supported_scenario テスト
+# ========================
+
+
+class TestEnsureSupportedScenario:
+    """_ensure_supported_scenario のデシジョンテーブルテスト。"""
+
+    def test_subset_of_allowed_tools_raises_nothing(self) -> None:
+        """ケース1: required_tools が _ALLOWED_TOOLS の部分集合なら例外なし。"""
+        scenario = _make_scenario(required_tools=("Read", "Bash"))
+        _ensure_supported_scenario(scenario)  # 例外が発生しないこと
+
+    def test_unsupported_tool_raises_with_details(self) -> None:
+        """ケース2: _ALLOWED_TOOLS に無いツールを含むと、不足ツールを保持した例外が発生する。"""
+        scenario = _make_scenario(required_tools=("Read", "WebFetch", "TodoWrite"))
+
+        with pytest.raises(UnsupportedScenarioError) as exc_info:
+            _ensure_supported_scenario(scenario)
+
+        assert exc_info.value.scenario_id == scenario.id
+        assert exc_info.value.unsupported_tools == ("WebFetch", "TodoWrite")
+        assert "WebFetch" in str(exc_info.value)
+        assert "TodoWrite" in str(exc_info.value)
+
+    def test_empty_required_tools_raises_nothing(self) -> None:
+        """ケース3: required_tools が空タプルなら例外なし。"""
+        scenario = _make_scenario(required_tools=())
+        _ensure_supported_scenario(scenario)  # 例外が発生しないこと
+
+
+# ========================
 # run_scenario テスト
 # ========================
 
@@ -505,6 +549,41 @@ class TestRunScenario:
             ):
                 run = run_scenario(scenario, model=model)
             assert isinstance(run, ScenarioRun)
+
+    def test_unsupported_required_tool_raises_before_sandbox_setup(self, tmp_path: Path) -> None:
+        """ケース4: required_tools に環境未対応ツールがあると、サンドボックス作成前に
+        UnsupportedScenarioError が発生し、LLM CLI は一切起動されない。
+
+        修正前は required_tools という概念自体が存在せず、ツール不足のシナリオでも
+        そのまま実行されて低いコンプライアンス率がそのまま「失敗」として集計されていた。
+        """
+        scenario = _make_scenario(required_tools=("WebFetch",))
+
+        with (
+            patch("bluecore.skills.comply.runner._setup_sandbox") as mock_setup,
+            patch("subprocess.run") as mock_run,
+        ):
+            with pytest.raises(UnsupportedScenarioError, match="WebFetch") as exc_info:
+                run_scenario(scenario, model="haiku")
+
+        assert exc_info.value.scenario_id == scenario.id
+        assert exc_info.value.unsupported_tools == ("WebFetch",)
+        mock_setup.assert_not_called()
+        mock_run.assert_not_called()
+
+    def test_supported_required_tools_execute_normally(self, tmp_path: Path) -> None:
+        """ケース5: required_tools が全て利用可能なツールのときは通常どおり実行される。"""
+        scenario = _make_scenario(required_tools=("Read", "Write"))
+        mock_result = MagicMock(returncode=0, stdout="", stderr="")
+
+        with (
+            patch("bluecore.skills.comply.runner._safe_sandbox_dir", return_value=tmp_path / "sandbox"),
+            patch("bluecore.skills.comply.runner._setup_sandbox"),
+            patch("subprocess.run", return_value=mock_result),
+        ):
+            run = run_scenario(scenario, model="haiku")
+
+        assert isinstance(run, ScenarioRun)
 
     def test_observations_parsed_from_stdout(self, tmp_path: Path) -> None:
         """stdout の tool_use/tool_result が ObservationEvent として格納される。"""

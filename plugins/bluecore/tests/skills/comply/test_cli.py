@@ -31,7 +31,7 @@ import pytest
 from bluecore.skills.comply import cli
 from bluecore.skills.comply.grader import ComplianceResult, StepResult
 from bluecore.skills.comply.parser import ComplianceSpec, Detector, Step
-from bluecore.skills.comply.runner import ScenarioRun
+from bluecore.skills.comply.runner import ScenarioRun, UnsupportedScenarioError
 from bluecore.skills.comply.scenario_generator import Scenario
 
 
@@ -67,6 +67,7 @@ def _make_scenario(level_name: str = "strict", level: int = 1) -> Scenario:
         level_name=level_name,
         description="desc",
         prompt="do something",
+        required_tools=("Read",),
         setup_commands=(),
     )
 
@@ -250,6 +251,88 @@ class TestCliScenarioErrorHandling:
             with pytest.raises(SystemExit) as exc:
                 cli.main()
         assert exc.value.code == 1
+
+
+class TestCliUnsupportedScenarios:
+    """UnsupportedScenarioError（ツール不足）の分離集計・表示テスト。
+
+    修正前は required_tools / UnsupportedScenarioError という概念が存在せず、
+    ツール不足のシナリオも通常のシナリオと同様に実行され、その結果生じる
+    低いコンプライアンス率がそのまま「失敗」として Overall Compliance に
+    混入していた（未計測と実際の失敗が区別できなかった）。
+    """
+
+    def test_unsupported_scenario_is_not_measured_not_failed(self, skill_file: Path) -> None:
+        """UnsupportedScenarioError は SKIPPED ではなく UNSUPPORTED として分離され、
+        graded_results（PASS/FAIL集計）には一切含まれないこと。
+        """
+        scenarios = [_make_scenario("strict", 1), _make_scenario("standard", 2)]
+        good_run = _make_run(scenarios[1])
+        spec = _make_spec()
+        warnings: list[str] = []
+
+        def run_side_effect(scenario, **kwargs):
+            if scenario.level_name == "strict":
+                raise UnsupportedScenarioError("scenario-strict", ("WebFetch",))
+            return good_run
+
+        report_calls: list[dict] = []
+
+        def fake_generate_report(*args, **kwargs):
+            report_calls.append(kwargs)
+            return "# Report"
+
+        with (
+            patch("sys.argv", ["comply", str(skill_file)]),
+            patch("bluecore.skills.comply.cli.generate_spec", return_value=spec),
+            patch("bluecore.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("bluecore.skills.comply.cli.generate_report", side_effect=fake_generate_report),
+            patch("bluecore.skills.comply.cli.run_scenario", side_effect=run_side_effect),
+            patch("bluecore.skills.comply.cli.grade", return_value=_make_result()) as mock_grade,
+            patch.object(Path, "mkdir"),
+            patch.object(Path, "write_text"),
+            patch("logging.Logger.warning", side_effect=_capture_logged_messages(warnings)),
+        ):
+            cli.main()
+
+        # 未対応シナリオでは grade が呼ばれない（PASS/FAIL集計の対象外）
+        assert mock_grade.call_count == 1
+        # UNSUPPORTED として明示的にログ出力される（SKIPPED とは区別される）
+        assert any("UNSUPPORTED" in w and "WebFetch" in w for w in warnings)
+        assert not any("SKIPPED" in w for w in warnings)
+        # generate_report に not_measured が1件渡される
+        assert len(report_calls) == 1
+        not_measured = report_calls[0]["not_measured"]
+        assert len(not_measured) == 1
+        assert not_measured[0].scenario.level_name == "strict"
+        assert not_measured[0].unsupported_tools == ("WebFetch",)
+
+    def test_all_scenarios_unsupported_logs_measurement_unavailable(self, skill_file: Path) -> None:
+        """全シナリオが UnsupportedScenarioError の場合、'No scenarios were executed.' ではなく
+        ツール不足を明示する 'Measurement unavailable' 警告を出すこと。
+        """
+        scenarios = [_make_scenario("strict", 1)]
+        spec = _make_spec()
+        warnings: list[str] = []
+
+        with (
+            patch("sys.argv", ["comply", str(skill_file)]),
+            patch("bluecore.skills.comply.cli.generate_spec", return_value=spec),
+            patch("bluecore.skills.comply.cli.generate_scenarios", return_value=scenarios),
+            patch("bluecore.skills.comply.cli.generate_report", return_value="# Report"),
+            patch(
+                "bluecore.skills.comply.cli.run_scenario",
+                side_effect=UnsupportedScenarioError("scenario-strict", ("Bash",)),
+            ),
+            patch("bluecore.skills.comply.cli.grade"),
+            patch.object(Path, "mkdir"),
+            patch.object(Path, "write_text"),
+            patch("logging.Logger.warning", side_effect=_capture_logged_messages(warnings)),
+        ):
+            cli.main()
+
+        assert any("Measurement unavailable" in w for w in warnings)
+        assert not any("No scenarios were executed" in w for w in warnings)
 
 
 class TestCliDryRun:

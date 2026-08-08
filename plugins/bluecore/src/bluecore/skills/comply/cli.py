@@ -12,8 +12,8 @@ from typing import Any
 import yaml
 
 from .grader import grade
-from .report import generate_report
-from .runner import run_scenario
+from .report import ScenarioNotMeasured, generate_report
+from .runner import UnsupportedScenarioError, run_scenario
 from .scenario_generator import generate_scenarios
 from .spec_generator import generate_spec
 
@@ -64,14 +64,31 @@ def _dry_run_report(spec: Any, scenarios: list) -> None:
         logger.info("  [%s] %s: %s", marker, step.id, step.description)
 
 
-def _execute_scenarios(args: argparse.Namespace, spec: Any, scenarios: list) -> list[tuple[str, Any, list[Any]]]:
-    """各シナリオを実行して採点結果のリストを返す。"""
+def _execute_scenarios(
+    args: argparse.Namespace, spec: Any, scenarios: list
+) -> tuple[list[tuple[str, Any, list[Any]]], list[ScenarioNotMeasured]]:
+    """各シナリオを実行し、採点結果と未計測（ツール不足）結果のリストを返す。"""
     logger.info("[3/4] Executing scenarios (model=%s)...", args.model)
     graded_results: list[tuple[str, Any, list[Any]]] = []
+    not_measured: list[ScenarioNotMeasured] = []
     for scenario in scenarios:
         logger.info("       Running %s...", scenario.level_name)
         try:
             run = run_scenario(scenario, model=args.model)
+        except UnsupportedScenarioError as e:
+            logger.warning(
+                "       %s: UNSUPPORTED (missing tools: %s)",
+                scenario.level_name,
+                ", ".join(e.unsupported_tools),
+            )
+            not_measured.append(
+                ScenarioNotMeasured(
+                    scenario=scenario,
+                    unsupported_tools=e.unsupported_tools,
+                    reason="Required tools are unavailable in this environment",
+                )
+            )
+            continue
         except (RuntimeError, subprocess.TimeoutExpired) as e:
             logger.warning("       %s: SKIPPED (runner error: %s)", scenario.level_name, e)
             continue
@@ -82,21 +99,31 @@ def _execute_scenarios(args: argparse.Namespace, spec: Any, scenarios: list) -> 
             continue
         graded_results.append((scenario.level_name, result, list(run.observations)))
         logger.info("       %s: %.0f%%", scenario.level_name, result.compliance_rate * 100)
-    return graded_results
+    return graded_results, not_measured
 
 
-def _save_report(args: argparse.Namespace, spec: Any, graded_results: list, scenarios: list, results_dir: Path) -> None:
+def _save_report(
+    args: argparse.Namespace,
+    spec: Any,
+    graded_results: list,
+    not_measured: list[ScenarioNotMeasured],
+    scenarios: list,
+    results_dir: Path,
+) -> None:
     """レポートを生成してファイルに保存し、最終サマリーをログ出力する。"""
     skill_name = args.skill.parent.name if args.skill.stem == "SKILL" else args.skill.stem
     output_path = args.output or results_dir / f"{skill_name}.md"
     logger.info("[4/4] Generating report...")
-    report = generate_report(args.skill, spec, graded_results, scenarios=scenarios)
+    report = generate_report(args.skill, spec, graded_results, scenarios=scenarios, not_measured=not_measured)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(report, encoding="utf-8")
     logger.info("       Report saved to %s", output_path)
 
     if not graded_results:
-        logger.warning("No scenarios were executed.")
+        if not_measured:
+            logger.warning("Measurement unavailable: all scenarios require unsupported tools.")
+        else:
+            logger.warning("No scenarios were executed.")
         return
     overall = sum(r.compliance_rate for _, r, _obs in graded_results) / len(graded_results)
     logger.info("\n%s", "=" * 50)
@@ -128,8 +155,8 @@ def main() -> None:
         _dry_run_report(spec, scenarios)
         return
 
-    graded_results = _execute_scenarios(args, spec, scenarios)
-    _save_report(args, spec, graded_results, scenarios, results_dir)
+    graded_results, not_measured = _execute_scenarios(args, spec, scenarios)
+    _save_report(args, spec, graded_results, not_measured, scenarios, results_dir)
 
 
 if __name__ == "__main__":

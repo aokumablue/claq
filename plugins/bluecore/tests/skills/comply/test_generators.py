@@ -48,12 +48,14 @@ scenarios:
     level: 2
     level_name: medium
     description: Middle
+    required_tools: ["Read", "Write"]
     prompt: "  middle  "
     setup_commands: ["echo middle"]
   - id: strict
     level: 1
     level_name: strict
     description: Strict
+    required_tools: ["Read"]
     prompt: "strict"
     setup_commands: []
 """,
@@ -67,7 +69,9 @@ scenarios:
 
     assert [scenario.level for scenario in scenarios] == [1, 2]
     assert scenarios[0].prompt == "strict"
+    assert scenarios[0].required_tools == ("Read",)
     assert scenarios[1].setup_commands == ("echo middle",)
+    assert scenarios[1].required_tools == ("Read", "Write")
     assert "skill=# skill" in captured_prompts[0]
     assert "spec=steps: []" in captured_prompts[0]
 

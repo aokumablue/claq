@@ -29,6 +29,23 @@ _SETUP_TIMEOUT = 60
 """サンドボックスの各セットアップコマンドに課すハードタイムアウト（秒）。"""
 
 
+class UnsupportedScenarioError(RuntimeError):
+    """シナリオの required_tools が実行環境で利用可能なツール集合に含まれない場合に送出する例外。
+
+    ツール不足で実行不能なシナリオを「未計測（環境要因）」として明示的に分離するために使う。
+    スキル非遵守による失敗と混同してコンプライアンス計測に含めてはならない。
+    """
+
+    def __init__(self, scenario_id: str, unsupported_tools: tuple[str, ...]) -> None:
+        """未対応シナリオの ID と不足ツール一覧を保持して初期化する。"""
+        self.scenario_id = scenario_id
+        self.unsupported_tools = unsupported_tools
+        super().__init__(
+            f"scenario {scenario_id!r} requires tools unavailable in this environment: "
+            f"{', '.join(unsupported_tools)}"
+        )
+
+
 @dataclass(frozen=True)
 class ScenarioRun:
     """シナリオ1回の実行結果（観測イベントとサンドボックス）を表す。"""
@@ -71,6 +88,7 @@ def run_scenario(
     """
     if model not in ALLOWED_MODELS:
         raise ValueError(f"Unknown model: {model!r}. Allowed: {ALLOWED_MODELS}")
+    _ensure_supported_scenario(scenario)
 
     binary = detect_cli_binary()
     sandbox_dir = _safe_sandbox_dir(scenario.id)
@@ -96,6 +114,17 @@ def run_scenario(
         observations=tuple(observations),
         sandbox_dir=sandbox_dir,
     )
+
+
+def _ensure_supported_scenario(scenario: Scenario) -> None:
+    """scenario.required_tools が実行環境の利用可能ツール集合に含まれるかを検証する。
+
+    含まれないツールがあれば、サンドボックス作成や LLM CLI 起動より前に
+    UnsupportedScenarioError を送出し、環境要因による未計測を早期に確定させる。
+    """
+    unsupported = tuple(tool for tool in scenario.required_tools if tool not in _ALLOWED_TOOLS)
+    if unsupported:
+        raise UnsupportedScenarioError(scenario.id, unsupported)
 
 
 def _safe_sandbox_dir(scenario_id: str) -> Path:

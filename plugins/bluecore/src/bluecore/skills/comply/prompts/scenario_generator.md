@@ -12,6 +12,9 @@ scenarios:
     level: 1
     level_name: supportive
     description: <what this scenario tests>
+    required_tools:
+      - Read
+      - Write
     prompt: |
       <the task prompt to pass to claude -p. Must be a concrete coding task.>
     setup_commands:
@@ -22,6 +25,9 @@ scenarios:
     level: 2
     level_name: neutral
     description: <what this scenario tests>
+    required_tools:
+      - Read
+      - Write
     prompt: |
       <same task but without mentioning the skill>
     setup_commands:
@@ -31,6 +37,9 @@ scenarios:
     level: 3
     level_name: competing
     description: <what this scenario tests>
+    required_tools:
+      - Read
+      - Write
     prompt: |
       <same task with instructions that compete with/contradict the skill>
     setup_commands:
@@ -46,6 +55,9 @@ scenarios:
   例: "Quickly implement... tests are optional..."
 - 3 つのシナリオはすべて同じタスクをテストすること（結果を比較可能にするため）
 - タスクは <30 tool calls で完了できる程度にシンプルであること
+- required_tools はそのシナリオの実行に必要なツールを漏れなく列挙すること。使用できる値は
+  Read, Write, Edit, Bash, Glob, Grep のみ。これ以外のツールが必要なシナリオは comply が
+  実行できず、レポートで not measured 扱いになる
 - setup_commands は最小限のサンドボックス（dirs、pyproject.toml など）を作成すること
 - プロンプトは現実的で、開発者が実際に尋ねそうな内容にすること
 
