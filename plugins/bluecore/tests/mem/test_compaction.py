@@ -35,7 +35,6 @@ def _make_chunk(
         tool_names=tool_names or [],
         files_read=[],
         files_modified=files_modified or [],
-        user_prompt="",
         created_at_epoch=created_at_epoch or int(time.time()),
         access_count=access_count,
     )

@@ -28,7 +28,6 @@ def test_helper_functions_cover_filters_and_rendering() -> None:
         tool_names=["Edit"],
         files_read=["src/app.py"],
         files_modified=["src/app.py"],
-        user_prompt="y" * 210,
         created_at_epoch=1704067200,
     )
     chunk_b = MemoryChunk(
@@ -40,7 +39,6 @@ def test_helper_functions_cover_filters_and_rendering() -> None:
         tool_names=["Bash"],
         files_read=["README.md"],
         files_modified=[],
-        user_prompt="prompt",
         created_at_epoch=1704067300,
     )
     db = FakeDB([chunk_a, chunk_b])
@@ -49,20 +47,18 @@ def test_helper_functions_cover_filters_and_rendering() -> None:
     rendered = cli._render_adaptive_context(
         db,
         [
-            SearchResult("c1", 0.9, "", "", "", 0, [], [], []),
-            SearchResult("c2", 0.8, "", "", "", 0, [], [], []),
+            SearchResult("c1", 0.9, "", "", 0, [], [], []),
+            SearchResult("c2", 0.8, "", "", 0, [], [], []),
         ],
     )
     assert rendered.startswith("<mem-context>")
     assert "## repo (2024-01-01 00:00)" in rendered
-    assert "**プロンプト**" in rendered
     assert "..." in rendered
-    assert cli._format_chunk(chunk_a).startswith("**プロンプト**")
+    assert cli._format_chunk(chunk_a).startswith("**ツール**")
     rich_result = SearchResult(
         "team-1",
         0.9,
         "z" * 600,
-        "p" * 210,
         "repo",
         1704067200,
         ["Edit", "Bash"],
@@ -76,75 +72,11 @@ def test_helper_functions_cover_filters_and_rendering() -> None:
     assert "```" not in rich_formatted
     assert "..." in rich_formatted
     tiny_render = cli._render_adaptive_context(db, [rich_result], max_tokens=1)
-    assert "**プロンプト**" not in tiny_render
+    # 予算 1 トークンではエントリが 1 件も入らず、ヘッダのみが残る
+    assert "zzzz" not in tiny_render
+    assert "**ツール**" not in tiny_render
     assert cli._format_timestamp(1704067200) == "2024-01-01 00:00"
     assert cli._truncate("abc", 10) == "abc"
-
-
-def test_format_chunk_keeps_code_blocks_and_compacts_prose() -> None:
-    chunk = MemoryChunk(
-        id="c3",
-        session_id="s1",
-        project="repo",
-        chunk_index=2,
-        content="\n".join(
-            [
-                "ご質問ありがとうございます。",
-                "```python",
-                "print('hello')",
-                "```",
-                "  これは詳細説明です。",
-            ]
-        ),
-        tool_names=["Edit"],
-        files_read=[],
-        files_modified=["src/app.py"],
-        user_prompt="お力になれれば幸いです。 えーと 設定変更することができます。",
-        created_at_epoch=1704067400,
-    )
-
-    rendered = cli._format_chunk(chunk)
-
-    assert "**プロンプト**: 設定変更できます" in rendered
-    assert "ご質問ありがとうございます" not in rendered
-    assert rendered.count("```") == 2
-    assert "print('hello')" in rendered
-    assert "これは詳細説明です" in rendered
-
-
-def test_format_chunk_preserves_code_only_prompt_and_late_code_block() -> None:
-    chunk = MemoryChunk(
-        id="c4",
-        session_id="s1",
-        project="repo",
-        chunk_index=3,
-        content="\n".join(
-            [
-                "説明 1",
-                "説明 2",
-                "説明 3",
-                "説明 4",
-                "説明 5",
-                "説明 6",
-                "説明 7",
-                "```python",
-                "print('late')",
-                "```",
-            ]
-        ),
-        tool_names=["Read"],
-        files_read=[],
-        files_modified=[],
-        user_prompt="\n".join(["```python", "selected prompt", "```"]),
-        created_at_epoch=1704067500,
-    )
-
-    rendered = cli._format_chunk(chunk)
-
-    assert "**プロンプト**: selected prompt" in rendered
-    assert "print('late')" in rendered
-    assert rendered.count("```") == 2
-    assert "..." in rendered
 
 
 def test_handle_session_end_and_compact(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -158,7 +90,6 @@ def test_handle_session_end_and_compact(monkeypatch: pytest.MonkeyPatch, tmp_pat
         tool_names=["Edit"],
         files_read=[],
         files_modified=["src/app.py"],
-        user_prompt="prompt",
         created_at_epoch=1704067200,
     )
     db = FakeDB([chunk])
@@ -189,7 +120,6 @@ def _make_chunk(chunk_id: str | None, index: int) -> MemoryChunk:
         tool_names=[],
         files_read=[],
         files_modified=[],
-        user_prompt="",
         created_at_epoch=1704067200,
     )
 
@@ -270,7 +200,7 @@ def test_handle_setup_and_observe_branches(monkeypatch: pytest.MonkeyPatch, tmp_
 
     import bluecore.mem.chunker as chunker_mod
 
-    monkeypatch.setattr(chunker_mod, "build_chunk_from_tool_use", lambda session_id, project, chunk_index, user_prompt, params: MemoryChunk(
+    monkeypatch.setattr(chunker_mod, "build_chunk_from_tool_use", lambda session_id, project, chunk_index, params: MemoryChunk(
         session_id=session_id,
         project=project,
         chunk_index=chunk_index,
@@ -278,7 +208,6 @@ def test_handle_setup_and_observe_branches(monkeypatch: pytest.MonkeyPatch, tmp_
         tool_names=[params.tool_name],
         files_read=[],
         files_modified=[],
-        user_prompt=user_prompt,
         created_at_epoch=1700000000,
     ))
     cli._handle_observe(
@@ -358,7 +287,7 @@ def test_handle_observe_records_copilot_lowercase_observed_tool(
     monkeypatch.setattr(
         chunker_mod,
         "build_chunk_from_tool_use",
-        lambda session_id, project, chunk_index, user_prompt, params: MemoryChunk(
+        lambda session_id, project, chunk_index, params: MemoryChunk(
             session_id=session_id,
             project=project,
             chunk_index=chunk_index,
@@ -366,7 +295,6 @@ def test_handle_observe_records_copilot_lowercase_observed_tool(
             tool_names=[params.tool_name],
             files_read=[],
             files_modified=[],
-            user_prompt=user_prompt,
             created_at_epoch=1700000000,
         ),
     )
@@ -632,7 +560,6 @@ def test_handle_session_end_auto_compact_error(monkeypatch: pytest.MonkeyPatch, 
         tool_names=["Edit"],
         files_read=[],
         files_modified=["src/app.py"],
-        user_prompt="prompt",
         created_at_epoch=1704067200,
     )
     db = FakeDB([chunk])
@@ -800,7 +727,7 @@ def test_main_help_arg_invokes_session_start_wrapper(
 
 
 def test_format_wrappers_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_format_fields / _slim_prompt / _slim_context_content は _search_handlers に委譲する。"""
+    """_format_fields / _slim_context_content は _search_handlers に委譲する。"""
     chunk = MemoryChunk(
         id="c1",
         session_id="s1",
@@ -810,17 +737,15 @@ def test_format_wrappers_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
         tool_names=["Edit"],
         files_read=[],
         files_modified=[],
-        user_prompt="p",
         created_at_epoch=1704067200,
     )
-    result = SearchResult("c1", 0.9, "content", "p", "repo", 1704067200, ["Edit"], [], [])
+    result = SearchResult("c1", 0.9, "content", "repo", 1704067200, ["Edit"], [], [])
 
-    assert isinstance(cli._format_fields("p", ["Edit"], ["a.py"], "body"), str)
+    assert isinstance(cli._format_fields(["Edit"], ["a.py"], "body"), str)
     assert isinstance(cli._format_chunk_from_result(result), str)
     assert isinstance(cli._format_chunk(chunk), str)
     assert isinstance(cli._format_timestamp(1704067200), str)
     assert cli._truncate("abcdef", 3) == "abc..."
-    assert isinstance(cli._slim_prompt("x" * 200, max_len=10), str)
     assert isinstance(
         cli._slim_context_content(
             "line1\nline2\nline3",
@@ -831,19 +756,21 @@ def test_format_wrappers_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_slim_prompt_returns_empty_when_no_meaningful_content() -> None:
-    """first_meaningful_line も in_code_block も拾えない場合は空文字を返す（line 267）。"""
-    from bluecore.mem.cli_search_handlers import slim_prompt
-
-    # 空白のみ＋未閉鎖コードブロック相当：すべての行が空 or ```で in_code_block の切り替えのみ
-    assert slim_prompt("```\n```\n", max_len=80) == ""
-
-
 def test_slim_context_content_returns_empty_for_empty_text() -> None:
     """text が空なら空文字を返す（line 273）。"""
     from bluecore.mem.cli_search_handlers import slim_context_content
 
     assert slim_context_content("") == ""
+
+
+def test_slim_context_content_drops_lines_that_compact_to_empty() -> None:
+    """strip 後は非空でも compact_line が空を返す行（見出し記号のみ等）は落とす。"""
+    from bluecore.mem.cli_search_handlers import slim_context_content
+
+    result = slim_context_content("###\nreal prose line\n")
+
+    assert "real prose line" in result
+    assert "###" not in result
 
 
 def test_slim_context_content_skips_blank_lines() -> None:
@@ -854,13 +781,6 @@ def test_slim_context_content_skips_blank_lines() -> None:
     assert "hello world" in result
     # 余分な空行が含まれない
     assert "\n\n" not in result
-
-
-def test_slim_prompt_codeblock_blank_only() -> None:
-    """コードブロック内が空白のみなら空文字を返す。"""
-    from bluecore.mem.cli_search_handlers import slim_prompt
-
-    assert slim_prompt("```\n \n```") == ""
 
 
 def test_slim_context_content_prose_over_limit() -> None:
@@ -883,7 +803,7 @@ def test_format_fields_limits_files_modified_to_two() -> None:
     """変更ファイルは先頭 2 件のみ表示する（注入トークン削減）。"""
     from bluecore.mem.cli_search_handlers import format_fields
 
-    out = format_fields("p", ["Edit"], ["a.py", "b.py", "c.py", "d.py"], "")
+    out = format_fields(["Edit"], ["a.py", "b.py", "c.py", "d.py"], "")
     assert "**変更ファイル**: a.py, b.py" in out
     assert "c.py" not in out
 
@@ -944,7 +864,7 @@ def test_handle_observe_normalizes_apply_patch(
     monkeypatch.setattr(
         chunker_mod,
         "build_chunk_from_tool_use",
-        lambda session_id, project, chunk_index, user_prompt, params: MemoryChunk(
+        lambda session_id, project, chunk_index, params: MemoryChunk(
             session_id=session_id,
             project=project,
             chunk_index=chunk_index,
@@ -952,7 +872,6 @@ def test_handle_observe_normalizes_apply_patch(
             tool_names=[params.tool_name],
             files_read=[],
             files_modified=[],
-            user_prompt=user_prompt,
             created_at_epoch=1700000000,
         ),
     )

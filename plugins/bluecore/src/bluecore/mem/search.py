@@ -33,7 +33,6 @@ class SearchResult(NamedTuple):
     chunk_id: str
     score: float
     content: str
-    user_prompt: str
     project: str
     created_at_epoch: int
     tool_names: list[str]
@@ -95,7 +94,6 @@ class SearchService:
                 chunk_id=cid,
                 score=score,
                 content=chunks[cid].content,
-                user_prompt=chunks[cid].user_prompt,
                 project=chunks[cid].project,
                 created_at_epoch=chunks[cid].created_at_epoch,
                 tool_names=chunks[cid].tool_names,

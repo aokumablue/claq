@@ -167,8 +167,6 @@ def handle_observe(
 
     tool_input = stdin_data.get("tool_input")
     tool_response = stdin_data.get("tool_response")
-    user_prompt = str(stdin_data.get("prompt", "") or "")
-
     try:
         with open_db(settings) as db:
             params = ToolUseParams(
@@ -181,7 +179,6 @@ def handle_observe(
                 session_id=session_id,
                 project=project,
                 chunk_index=0,  # store_chunk が MAX+1 で自動採番するため不要
-                user_prompt=user_prompt,
                 params=params,
             )
             db.store_chunk(chunk)

@@ -169,13 +169,11 @@ class Database:
         cur = self.conn.execute(
             """INSERT INTO memory_chunks
              (id, origin_user, session_id, project, chunk_index, content,
-              tool_names, files_read, files_modified,
-              user_prompt, created_at_epoch,
-              execution_status, tool_error, ai_response_summary, tool_sequence)
+              tool_names, files_read, files_modified, created_at_epoch)
              VALUES (?, ?, ?,
                      ?,
                      COALESCE((SELECT MAX(chunk_index) + 1 FROM memory_chunks WHERE session_id = ?), 0),
-                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ?, ?, ?, ?, ?)
              RETURNING id, chunk_index""",
             (
                 chunk.id,
@@ -187,12 +185,7 @@ class Database:
                 json.dumps(chunk.tool_names, ensure_ascii=False),
                 json.dumps(chunk.files_read, ensure_ascii=False),
                 json.dumps(chunk.files_modified, ensure_ascii=False),
-                chunk.user_prompt,
                 chunk.created_at_epoch,
-                chunk.execution_status,
-                chunk.tool_error,
-                chunk.ai_response_summary,
-                json.dumps(chunk.tool_sequence, ensure_ascii=False),
             ),
         )
         return cur.fetchone()
@@ -602,14 +595,13 @@ class Database:
         self.conn.execute(
             """INSERT INTO session_digests
          (id, origin_user, session_id, project, summary,
-          key_files, key_decisions, outcome, harness, source,
+          key_files, key_decisions, harness, source,
           chunk_count, started_at_epoch, ended_at_epoch, created_at_epoch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
             summary = excluded.summary,
             key_files = excluded.key_files,
             key_decisions = excluded.key_decisions,
-            outcome = excluded.outcome,
             harness = excluded.harness,
             source = excluded.source,
             chunk_count = excluded.chunk_count,
@@ -622,7 +614,6 @@ class Database:
                 digest.summary,
                 json.dumps(digest.key_files, ensure_ascii=False),
                 json.dumps(digest.key_decisions, ensure_ascii=False),
-                digest.outcome,
                 digest.harness,
                 digest.source,
                 digest.chunk_count,

@@ -1,6 +1,5 @@
 """database のテスト"""
 
-import json
 import sqlite3
 import sys
 import time
@@ -15,7 +14,6 @@ from bluecore.mem.database import (
 )
 from bluecore.mem.models import (
     Adr,
-    EventLog,
     Instinct,
     InteractionLog,
     MemoryChunk,
@@ -26,7 +24,6 @@ from bluecore.mem.models import (
 from bluecore.mem.row_converters import (
     _parse_json_dict_list,
     _parse_json_list,
-    _row_to_chunk,
 )
 
 
@@ -47,7 +44,6 @@ class TestDatabase:
             tool_names=["Read"],
             files_read=["/path/to/file.py"],
             files_modified=[],
-            user_prompt="show me the file",
             created_at_epoch=1700000000,
         )
         chunk_id = db.store_chunk(chunk)
@@ -72,7 +68,6 @@ class TestDatabase:
                     tool_names=["Bash"],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="do stuff",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -108,7 +103,6 @@ class TestDatabase:
                 tool_names=["Edit"],
                 files_read=[],
                 files_modified=["auth.py"],
-                user_prompt="fix the auth bug",
                 created_at_epoch=1700000000,
             )
         )
@@ -138,7 +132,6 @@ class TestDatabase:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -156,7 +149,6 @@ class TestDatabase:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -169,7 +161,6 @@ class TestDatabase:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000001,
             )
         )
@@ -192,7 +183,6 @@ class TestDatabase:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -215,20 +205,6 @@ class TestDatabase:
         with pytest.raises(sqlite3.ProgrammingError):
             db.get_chunks_by_session("s1")
 
-    def test_user_prompt_null_handling(self, db: Database) -> None:
-        """user_prompt が None でも空文字列になる"""
-        db.conn.execute(
-            """INSERT INTO memory_chunks
-         (session_id, project, chunk_index, content,
-          tool_names, files_read, files_modified,
-          user_prompt, created_at_epoch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("s1", "p", 0, "content", "[]", "[]", "[]", None, 1700000000),
-        )
-        db.conn.commit()
-        chunks = db.get_chunks_by_session("s1")
-        assert chunks[0].user_prompt == ""
-
     def test_store_and_vec_search_embeddings(self, db: Database) -> None:
         """エンべディング保存とベクトル検索のテスト"""
         cid = db.store_chunk(
@@ -240,7 +216,6 @@ class TestDatabase:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -288,7 +263,6 @@ class TestDatabase:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -337,7 +311,6 @@ class TestSchemaInit:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000,
                 )
             )
@@ -397,14 +370,6 @@ class TestParseJsonList:
 
 class TestMigration:
     """スキーママイグレーションのテスト"""
-
-    def test_new_columns_exist(self, db: Database) -> None:
-        """v0.0.1 マイグレーション後に新カラムが存在する"""
-        cols = {row[1] for row in db.conn.execute("PRAGMA table_info(memory_chunks)").fetchall()}
-        assert "access_count" in cols
-        assert "last_accessed_epoch" in cols
-        assert "merged_generation" in cols
-        assert "merged_into" in cols
 
     def test_migration_idempotent(self, tmp_path: Path) -> None:
         """マイグレーションは2回実行しても失敗しない"""
@@ -521,80 +486,6 @@ class TestAdvancedTables:
         assert [row["title"] for row in rows] == ["Updated", "Other"]
         assert rows[0]["project"] == "proj"
 
-    def test_event_logs_and_row_helpers(self, db: Database) -> None:
-        event = EventLog(
-            id="event-fixed",
-            event_type="notice",
-            content="hello",
-            created_at_epoch=1,
-            project_id="proj",
-        )
-        first_id = db.store_event_log(event)
-        second_id = db.store_event_log(event)
-        db.store_event_log(
-            EventLog(
-                event_type="other",
-                content="world",
-                created_at_epoch=2,
-            )
-        )
-
-        assert first_id == second_id == "event-fixed"
-        # event_logs は書き込み専用テーブル（読み手なし）。生 SQL で検証する。
-        rows = db.conn.execute(
-            "SELECT event_type, content FROM event_logs ORDER BY created_at_epoch"
-        ).fetchall()
-        assert [row["event_type"] for row in rows] == ["notice", "other"]
-        assert rows[0]["content"] == "hello"
-
-        db.conn.execute(
-            """INSERT INTO memory_chunks
-         (id, session_id, project, chunk_index, content,
-          tool_names, files_read, files_modified,
-          user_prompt, created_at_epoch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                "chunk-1",
-                "sess",
-                "proj",
-                0,
-                "content",
-                json.dumps(["Read"]),
-                json.dumps(["file.py"]),
-                json.dumps([]),
-                None,
-                1,
-            ),
-        )
-        db.conn.commit()
-        db.update_access(["chunk-1"])
-        row = db.conn.execute("SELECT access_count, last_accessed_epoch FROM memory_chunks WHERE id = ?", ("chunk-1",)).fetchone()
-        assert row["access_count"] == 1
-        assert row["last_accessed_epoch"] is not None
-
-        class FakeRow(dict):
-            def keys(self) -> list[str]:
-                return list(super().keys())
-
-        chunk = _row_to_chunk(
-            FakeRow(
-                {
-                    "id": "chunk-x",
-                    "session_id": "sess",
-                    "project": "proj",
-                    "chunk_index": 1,
-                    "content": "content",
-                    "tool_names": json.dumps(["Write"]),
-                    "files_read": json.dumps([]),
-                    "files_modified": json.dumps([]),
-                    "user_prompt": None,
-                    "created_at_epoch": 2,
-                }
-            )
-        )
-
-        assert chunk.user_prompt == ""
-
     def test_project_profile_upsert_and_getters(self, db: Database) -> None:
         profile1 = ProjectProfile(
             id="profile-1",
@@ -685,7 +576,6 @@ class TestUpdateAccess:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -704,7 +594,6 @@ class TestUpdateAccess:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -724,7 +613,6 @@ class TestUpdateAccess:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -747,7 +635,6 @@ class TestUpdateAccess:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -793,7 +680,6 @@ class TestGetAllChunks:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -811,7 +697,6 @@ class TestGetAllChunks:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000002 - i,
                 )
             )
@@ -837,7 +722,6 @@ class TestGetSessionIdsWithChunks:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=1700000000 + i,
                 )
             )
@@ -850,7 +734,6 @@ class TestGetSessionIdsWithChunks:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000002,
             )
         )
@@ -867,7 +750,6 @@ class TestGetSessionIdsWithChunks:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000000,
             )
         )
@@ -880,7 +762,6 @@ class TestGetSessionIdsWithChunks:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=1700000001,
             )
         )
@@ -996,9 +877,8 @@ class TestConcurrentChunkInsert:
         db.conn.execute(
             """INSERT INTO memory_chunks
              (id, origin_user, session_id, project, chunk_index, content,
-              tool_names, files_read, files_modified, user_prompt, created_at_epoch,
-              execution_status, tool_sequence)
-             VALUES (?, '', ?, 'proj', 0, '[Bash] prior process', '[]', '[]', '[]', '', ?, 'unknown', '[]')""",
+              tool_names, files_read, files_modified, created_at_epoch)
+             VALUES (?, '', ?, 'proj', 0, '[Bash] prior process', '[]', '[]', '[]', ?)""",
             ("prior-chunk-id", session_id, int(time.time())),
         )
         db.conn.commit()
@@ -1012,7 +892,6 @@ class TestConcurrentChunkInsert:
             tool_names=["Bash"],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=int(time.time()),
         )
         cid = db.store_chunk(chunk)
@@ -1046,7 +925,6 @@ class TestConcurrentChunkInsert:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=int(time.time()),
         )
         first.id = fixed_id
@@ -1061,7 +939,6 @@ class TestConcurrentChunkInsert:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=int(time.time()),
         )
         second.id = fixed_id
@@ -1090,7 +967,6 @@ class TestConcurrentChunkInsert:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=int(time.time()),
         )
 
@@ -1139,7 +1015,6 @@ class TestConcurrentChunkInsert:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=int(time.time()),
         )
 
@@ -1186,7 +1061,6 @@ class TestSessionDigests:
             created_at_epoch=1700000010,
             key_files=["a.py"],
             key_decisions=["decision A"],
-            outcome="success",
             harness="claude",
             source="chunks",
             chunk_count=3,
@@ -1210,7 +1084,6 @@ class TestSessionDigests:
             created_at_epoch=1700000010,
             key_files=["a.py", "b.py"],
             key_decisions=["decision A", "decision B"],
-            outcome="partial",
             harness="codex",
             source="transcript+chunks",
             chunk_count=5,
@@ -1230,7 +1103,6 @@ class TestSessionDigests:
         assert stored.summary == "updated summary"
         assert stored.key_files == ["a.py", "b.py"]
         assert stored.key_decisions == ["decision A", "decision B"]
-        assert stored.outcome == "partial"
         assert stored.harness == "codex"
         assert stored.source == "transcript+chunks"
         assert stored.chunk_count == 5

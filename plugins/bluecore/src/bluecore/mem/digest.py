@@ -27,8 +27,6 @@ if TYPE_CHECKING:
 # トランスクリプト読み込み上限（20MB 超はスキップしてメモリ枯渇を防ぐ）
 _MAX_TRANSCRIPT_BYTES = 20 * 1024 * 1024
 
-# 既知の実行ステータス（outcome 集約の分母に使う）
-_KNOWN_STATUSES = ("success", "partial", "failure")
 
 # get_interaction_logs のデフォルト limit=100 だと長セッション（100件超）で
 # 末尾のインタラクションが取得できず「先頭1+末尾4」の意味論が壊れるため、
@@ -123,7 +121,6 @@ class ChunkAggregate:
 
     key_files: list[str]
     key_decisions: list[str]
-    outcome: str
 
 
 def _aggregate_key_files(chunks: list[MemoryChunk]) -> list[str]:
@@ -140,7 +137,7 @@ def _aggregate_key_files(chunks: list[MemoryChunk]) -> list[str]:
     return [redact(path) for path, _ in ranked[:10]]
 
 
-def _aggregate_key_decisions(chunks: list[MemoryChunk], interaction_logs: list[InteractionLog]) -> list[str]:
+def _aggregate_key_decisions(interaction_logs: list[InteractionLog]) -> list[str]:
     """ユーザープロンプトを重複排除し、先頭1件+末尾4件（最大5件・redact 後に120字切り詰め）を返す。
 
     interaction_logs の ``user_prompt_full`` は無 redact の生プロンプトのため、
@@ -148,9 +145,6 @@ def _aggregate_key_decisions(chunks: list[MemoryChunk], interaction_logs: list[I
     （切り詰め後だと秘密情報の一部が漏れたりマッチを逃したりし得るため）。
     """
     prompts = [log_entry.user_prompt_full for log_entry in interaction_logs if log_entry.user_prompt_full]
-    if not prompts:
-        prompts = [chunk.user_prompt for chunk in chunks if chunk.user_prompt]
-
     deduped = list(dict.fromkeys(prompts))
     if len(deduped) <= 5:
         selected = deduped
@@ -159,32 +153,11 @@ def _aggregate_key_decisions(chunks: list[MemoryChunk], interaction_logs: list[I
     return [compact_line(redact(prompt), 120) for prompt in selected]
 
 
-def _aggregate_outcome(chunks: list[MemoryChunk]) -> str:
-    """execution_status を集約して 'success'|'partial'|'failure'|'unknown' を返す。
-
-    known = 既知ステータス（success/partial/failure）のチャンク数。
-    failure_score = failure を1、partial を0.5として合計。
-    failure_score / known >= 0.5 なら 'failure'、> 0 なら 'partial'、
-    known が 0 なら 'unknown'、それ以外は 'success'。
-    """
-    known = [c.execution_status for c in chunks if c.execution_status in _KNOWN_STATUSES]
-    if not known:
-        return "unknown"
-    failure_score = sum(1.0 if s == "failure" else 0.5 if s == "partial" else 0.0 for s in known)
-    ratio = failure_score / len(known)
-    if ratio >= 0.5:
-        return "failure"
-    if ratio > 0:
-        return "partial"
-    return "success"
-
-
 def _aggregate_chunks(chunks: list[MemoryChunk], interaction_logs: list[InteractionLog]) -> ChunkAggregate:
-    """チャンクとインタラクションログから key_files / key_decisions / outcome を集約する。"""
+    """チャンクとインタラクションログから key_files / key_decisions を集約する。"""
     return ChunkAggregate(
         key_files=_aggregate_key_files(chunks),
-        key_decisions=_aggregate_key_decisions(chunks, interaction_logs),
-        outcome=_aggregate_outcome(chunks),
+        key_decisions=_aggregate_key_decisions(interaction_logs),
     )
 
 
@@ -231,10 +204,10 @@ def _top_tool_names(chunks: list[MemoryChunk], limit: int = 5) -> list[str]:
 
 def _build_rule_based_summary(chunks: list[MemoryChunk], aggregate: ChunkAggregate) -> str:
     """トランスクリプトが使えない場合のルール合成サマリーを組み立てる。"""
-    first_prompt = compact_line(chunks[0].user_prompt or "", 160) or "(不明)"
+    first_prompt = aggregate.key_decisions[0] if aggregate.key_decisions else "(不明)"
     top_files = ", ".join(aggregate.key_files[:3]) or "(なし)"
     top_tools = ", ".join(_top_tool_names(chunks, 5)) or "(なし)"
-    return f"目的:{first_prompt} / 結果:{aggregate.outcome} / 主変更:{top_files} / ツール:{top_tools}"
+    return f"目的:{first_prompt} / 主変更:{top_files} / ツール:{top_tools}"
 
 
 def build_session_digest(
@@ -286,7 +259,6 @@ def build_session_digest(
         summary=summary,
         key_files=aggregate.key_files,
         key_decisions=aggregate.key_decisions,
-        outcome=aggregate.outcome,
         harness=harness,
         source=source,
         chunk_count=len(chunks),
@@ -360,4 +332,4 @@ def generate_and_store_digest(
         return
 
     db.upsert_session_digest(digest)
-    log.info("digest 保存: session=%s outcome=%s harness=%s", session_id, digest.outcome, digest.harness)
+    log.info("digest 保存: session=%s harness=%s", session_id, digest.harness)

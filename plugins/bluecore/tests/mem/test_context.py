@@ -63,7 +63,6 @@ def _make_digest(
         created_at_epoch=created_at_epoch,
         key_files=key_files or [],
         key_decisions=key_decisions or [],
-        outcome=outcome,
     )
 
 
@@ -85,14 +84,12 @@ class TestBuildContext:
                 tool_names=["Edit"],
                 files_read=[],
                 files_modified=["file.py"],
-                user_prompt="fix the bug",
                 created_at_epoch=now,
             )
         )
         ctx = build_context(db, settings)
         assert "<mem-context>" in ctx
         assert "</mem-context>" in ctx
-        assert "fix the bug" in ctx
         assert "Edit" in ctx
         assert "file.py" in ctx
         assert "did some work" in ctx
@@ -108,7 +105,6 @@ class TestBuildContext:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=now,
             )
         )
@@ -121,7 +117,6 @@ class TestBuildContext:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=now,
             )
         )
@@ -141,7 +136,6 @@ class TestBuildContext:
                     tool_names=[],
                     files_read=[],
                     files_modified=[],
-                    user_prompt="",
                     created_at_epoch=now + i,
                 )
             )
@@ -160,7 +154,6 @@ class TestBuildContext:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=now,
             )
         )
@@ -173,7 +166,6 @@ class TestBuildContext:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=now + 10,
             )
         )
@@ -192,12 +184,10 @@ class TestBuildContext:
                 tool_names=["Edit"],
                 files_read=[],
                 files_modified=[],
-                user_prompt="empty content prompt",
                 created_at_epoch=now,
             )
         )
         ctx = build_context(db, settings)
-        assert "empty content prompt" in ctx
         assert "```" not in ctx
 
     def test_no_prompt_no_tools(self, db: Database, settings: Settings) -> None:
@@ -212,7 +202,6 @@ class TestBuildContext:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=now,
             )
         )
@@ -234,7 +223,6 @@ class TestBuildContext:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=old_epoch,
             )
         )
@@ -254,7 +242,6 @@ class TestBuildContextDigestLayer:
             created_at_epoch=1700000100,
             key_files=["a.py"],
             key_decisions=["decided X"],
-            outcome="success",
         )
         db.upsert_session_digest(digest)
         ctx = build_context(db, settings)
@@ -274,7 +261,6 @@ class TestBuildContextDigestLayer:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="hot prompt",
                 created_at_epoch=now,
             )
         )
@@ -287,7 +273,6 @@ class TestBuildContextDigestLayer:
             )
         )
         ctx = build_context(db, settings)
-        assert "hot prompt" in ctx
         assert "should be excluded" not in ctx
         assert "## 過去セッション:" not in ctx
 
@@ -303,7 +288,6 @@ class TestBuildContextDigestLayer:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=now,
             )
         )
@@ -361,7 +345,6 @@ class TestBuildContextDigestLayer:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=now,
             )
         )
@@ -414,7 +397,6 @@ class TestImportanceScore:
             tool_names=tool_names or [],
             files_read=[],
             files_modified=files_modified or [],
-            user_prompt="",
             created_at_epoch=int(time.time()),
             access_count=access_count,
         )
@@ -459,7 +441,6 @@ class TestBuildContextTokenBudget:
                     tool_names=["Edit"],
                     files_read=[],
                     files_modified=["f.py"],
-                    user_prompt="do stuff",
                     created_at_epoch=now + i,
                 )
             )
@@ -499,10 +480,9 @@ class TestFormatDigest:
             created_at_epoch=1700000100,
             key_files=["a.py", "b.py", "c.py", "d.py"],
             key_decisions=["decision 1", "decision 2", "decision 3"],
-            outcome="partial",
         )
         rendered = _format_digest(digest)
-        assert "## 過去セッション: myproj (2023-11-14) [partial]" in rendered
+        assert "## 過去セッション: myproj (2023-11-14)" in rendered
         assert "**要約**: did great work" in rendered
         assert "**変更**: a.py, b.py, c.py" in rendered
         assert "d.py" not in rendered
@@ -562,7 +542,6 @@ class TestFilterHotChunks:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=epoch,
         )
 
@@ -622,7 +601,6 @@ class TestSelectWithinBudget:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=1700000000,
         )
         chunk_b = MemoryChunk(
@@ -633,7 +611,6 @@ class TestSelectWithinBudget:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=1700000001,
         )
 
@@ -651,7 +628,6 @@ class TestSelectWithinBudget:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=1700000000,
         )
         small = MemoryChunk(
@@ -662,7 +638,6 @@ class TestSelectWithinBudget:
             tool_names=[],
             files_read=[],
             files_modified=[],
-            user_prompt="",
             created_at_epoch=1700000001,
         )
 
@@ -683,7 +658,6 @@ def test_format_chunk_limits_files_modified_to_two() -> None:
         tool_names=[],
         files_read=[],
         files_modified=["a.py", "b.py", "c.py"],
-        user_prompt="",
         created_at_epoch=1700000000,
     )
 

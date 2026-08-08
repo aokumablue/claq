@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 
-from bluecore.mem.cli_search_handlers import slim_context_content, slim_prompt
+from bluecore.mem.cli_search_handlers import slim_context_content
 from bluecore.mem.database import Database, MemoryChunk, SessionDigest
 from bluecore.mem.search import adaptive_decay
 from bluecore.mem.settings import Settings
@@ -152,8 +152,6 @@ def _format_chunk(chunk: MemoryChunk) -> str:
     """チャンクを文字列にフォーマットする"""
     parts: list[str] = []
 
-    if chunk.user_prompt:
-        parts.append(f"**プロンプト**: {slim_prompt(chunk.user_prompt)}")
 
     if chunk.tool_names:
         parts.append(f"**ツール**: {', '.join(chunk.tool_names)}")
@@ -187,7 +185,7 @@ def _format_digest(digest: SessionDigest) -> str:
     """
     ts = _format_date(digest.started_at_epoch)
     parts: list[str] = [
-        f"## 過去セッション: {digest.project} ({ts}) [{digest.outcome}]",
+        f"## 過去セッション: {digest.project} ({ts})",
         "",
         f"**要約**: {digest.summary}",
     ]

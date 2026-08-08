@@ -309,13 +309,12 @@ def _render_adaptive_context(db: Database, results: list[SearchResult], max_toke
 
 
 def _format_fields(
-    user_prompt: str,
     tool_names: list[str],
     files_modified: list[str],
     content: str,
 ) -> str:
-    """プロンプト・ツール・変更ファイル・内容を表示用フィールド文字列に整形する。"""
-    return _search_handlers.format_fields(user_prompt, tool_names, files_modified, content)
+    """ツール・変更ファイル・内容を表示用フィールド文字列に整形する。"""
+    return _search_handlers.format_fields(tool_names, files_modified, content)
 
 
 def _format_chunk_from_result(result: SearchResult) -> str:
@@ -336,11 +335,6 @@ def _format_timestamp(epoch: int) -> str:
 def _truncate(text: str, max_len: int) -> str:
     """テキストを max_len 文字に切り詰める。"""
     return _search_handlers.truncate(text, max_len)
-
-
-def _slim_prompt(text: str, max_len: int = 160) -> str:
-    """プロンプト文字列を表示用に簡略化する。"""
-    return _search_handlers.slim_prompt(text, max_len=max_len)
 
 
 def _slim_context_content(text: str, *, max_prose_lines: int = 6, max_prose_line_length: int = 160) -> str:
@@ -418,7 +412,7 @@ Commands:
   get-project-profile    Get project tech stack from project_profiles
 
 record Input (JSON):
-  {"event_type": "review|plan|audit|...", "content": "...", "user_prompt": "...", "metadata": {"files_read": [], "files_modified": []}}
+  {"event_type": "review|plan|audit|...", "content": "...", "metadata": {"files_read": [], "files_modified": []}}
 
 import Input (JSON):
   {"types": ["instincts", "adrs", "events"], "repo_root": "/path/to/repo"}

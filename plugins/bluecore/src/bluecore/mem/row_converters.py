@@ -51,16 +51,9 @@ def _row_to_chunk(row: sqlite3.Row) -> MemoryChunk:
         tool_names=_parse_json_list(row["tool_names"]),
         files_read=_parse_json_list(row["files_read"]),
         files_modified=_parse_json_list(row["files_modified"]),
-        user_prompt=row["user_prompt"] or "",
         created_at_epoch=row["created_at_epoch"],
         access_count=row["access_count"] if "access_count" in keys else 0,
         last_accessed_epoch=row["last_accessed_epoch"] if "last_accessed_epoch" in keys else None,
-        merged_generation=row["merged_generation"] if "merged_generation" in keys else 0,
-        merged_into=row["merged_into"] if "merged_into" in keys else None,
-        execution_status=row["execution_status"] if "execution_status" in keys else "unknown",
-        tool_error=row["tool_error"] if "tool_error" in keys else None,
-        ai_response_summary=row["ai_response_summary"] if "ai_response_summary" in keys else None,
-        tool_sequence=_parse_json_list(row["tool_sequence"]) if "tool_sequence" in keys else [],
     )
 
 
@@ -112,7 +105,6 @@ def _row_to_session_digest(row: sqlite3.Row) -> SessionDigest:
         summary=row["summary"],
         key_files=_parse_json_list(row["key_files"]),
         key_decisions=_parse_json_list(row["key_decisions"]),
-        outcome=row["outcome"],
         harness=row["harness"],
         source=row["source"],
         chunk_count=row["chunk_count"],

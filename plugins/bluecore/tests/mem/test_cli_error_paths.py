@@ -30,15 +30,14 @@ def test_helper_functions_and_render_missing_chunk() -> None:
         tool_names=["Edit"],
         files_read=[],
         files_modified=[],
-        user_prompt="prompt",
         created_at_epoch=1704067200,
     )
     db = FakeDB([chunk])
     rendered = cli._render_adaptive_context(
         db,
         [
-            SearchResult("missing", 0.9, "", "", "", 0, [], [], []),
-            SearchResult("c1", 0.8, "", "", "", 0, [], [], []),
+            SearchResult("missing", 0.9, "", "", 0, [], [], []),
+            SearchResult("c1", 0.8, "", "", 0, [], [], []),
         ],
     )
     assert rendered.startswith("<mem-context>")
@@ -54,7 +53,6 @@ def test_helper_functions_and_render_missing_chunk() -> None:
         tool_names=["Edit"],
         files_read=[],
         files_modified=[],
-        user_prompt="prompt",
         created_at_epoch=1704067100,
     )
     new_chunk = MemoryChunk(
@@ -66,7 +64,6 @@ def test_helper_functions_and_render_missing_chunk() -> None:
         tool_names=["Edit"],
         files_read=[],
         files_modified=[],
-        user_prompt="prompt",
         created_at_epoch=1704067300,
     )
     filter_db = FakeDB([old_chunk, new_chunk])
@@ -106,7 +103,6 @@ def test_session_end_inner_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         tool_names=["Edit"],
         files_read=[],
         files_modified=[],
-        user_prompt="prompt",
         created_at_epoch=1704067200,
     )
     db = FakeDB([chunk])
@@ -171,7 +167,6 @@ def test_record_and_profile_handlers(
     assert payload["success"] is True
     # "prompt" キー経由で先に1件追加されているため index は 1
     assert payload["interaction_index"] == 1
-    assert db.interactions[1].ai_response_summary == "summary"
 
     assert cli._handle_record_project_profile(
         settings,

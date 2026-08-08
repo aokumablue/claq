@@ -74,7 +74,6 @@ class TestSearchService:
                 tool_names=["Edit"],
                 files_read=[],
                 files_modified=["auth.py"],
-                user_prompt="add JWT auth",
                 created_at_epoch=int(time.time()),
             )
         )
@@ -87,7 +86,6 @@ class TestSearchService:
                 tool_names=["Edit"],
                 files_read=[],
                 files_modified=["db.py"],
-                user_prompt="fix db pool",
                 created_at_epoch=int(time.time()),
             )
         )
@@ -107,7 +105,6 @@ class TestSearchService:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=int(time.time()),
             )
         )
@@ -120,7 +117,6 @@ class TestSearchService:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=int(time.time()),
             )
         )
@@ -147,7 +143,6 @@ class TestSearchService:
                 tool_names=[],
                 files_read=[],
                 files_modified=[],
-                user_prompt="",
                 created_at_epoch=int(time.time()),
             )
         )

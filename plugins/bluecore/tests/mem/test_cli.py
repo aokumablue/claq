@@ -53,7 +53,6 @@ def test_context_command_uses_local_db(monkeypatch, tmp_path: Path) -> None:
             tool_names=["Edit"],
             files_read=[],
             files_modified=["file.py"],
-            user_prompt="fix the bug",
             created_at_epoch=int(time.time()),  # hot 層（直近24h）に収まる必要がある
         )
     )
@@ -72,7 +71,6 @@ def test_search_command_returns_results(monkeypatch, tmp_path: Path) -> None:
         chunk_id=1,
         score=0.99,
         content="direct db result",
-        user_prompt="prompt",
         project="repo",
         created_at_epoch=1700000000,
         tool_names=["Read"],
@@ -107,7 +105,6 @@ def test_session_init_injects_context_from_local_db(monkeypatch, tmp_path: Path)
             tool_names=["Write"],
             files_read=[],
             files_modified=["src/app.py"],
-            user_prompt="before",
             created_at_epoch=1700000000,
         )
     )
@@ -117,7 +114,6 @@ def test_session_init_injects_context_from_local_db(monkeypatch, tmp_path: Path)
         chunk_id=chunk_id,
         score=0.99,
         content="previous work",
-        user_prompt="before",
         project="repo",
         created_at_epoch=1700000000,
         tool_names=["Write"],
@@ -155,7 +151,6 @@ def test_init_command_recreates_local_db(monkeypatch, tmp_path: Path) -> None:
             tool_names=["Edit"],
             files_read=[],
             files_modified=["src/app.py"],
-            user_prompt="before",
             created_at_epoch=1700000000,
         )
     )

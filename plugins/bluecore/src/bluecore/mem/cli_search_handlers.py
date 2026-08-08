@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bluecore.lib.slim_text import compact_line, first_meaningful_line
+from bluecore.lib.slim_text import compact_line
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -92,7 +92,7 @@ def _format_digest_entry(digest: SessionDigest) -> str:
     含めない簡潔形式にする。
     """
     date = datetime.fromtimestamp(digest.started_at_epoch, tz=UTC).strftime("%Y-%m-%d")
-    return f"## 過去セッション: {digest.project} ({date}) [{digest.outcome}]\n\n**要約**: {digest.summary}\n"
+    return f"## 過去セッション: {digest.project} ({date})\n\n**要約**: {digest.summary}\n"
 
 
 def render_digest_context(results: list[DigestSearchResult], max_tokens: int = 150) -> str:
@@ -125,15 +125,12 @@ def render_digest_context(results: list[DigestSearchResult], max_tokens: int = 1
 
 
 def format_fields(
-    user_prompt: str,
     tool_names: list[str],
     files_modified: list[str],
     content: str,
 ) -> str:
-    """プロンプト・ツール・変更ファイル・本文を Markdown 形式にフォーマットする。"""
+    """ツール・変更ファイル・本文を Markdown 形式にフォーマットする。"""
     parts: list[str] = []
-    if user_prompt:
-        parts.append(f"**プロンプト**: {slim_prompt(user_prompt)}")
     if tool_names:
         parts.append(f"**ツール**: {', '.join(tool_names)}")
     if files_modified:
@@ -146,12 +143,12 @@ def format_fields(
 
 def format_chunk_from_result(result: SearchResult) -> str:
     """SearchResult をチャンクフォーマットに変換する（ローカル DB に該当チャンクが無い場合のフォールバック用）。"""
-    return format_fields(result.user_prompt, result.tool_names, result.files_modified, result.content)
+    return format_fields(result.tool_names, result.files_modified, result.content)
 
 
 def format_chunk(chunk: MemoryChunk) -> str:
     """MemoryChunk をチャンクフォーマットに変換する。"""
-    return format_fields(chunk.user_prompt, chunk.tool_names, chunk.files_modified, chunk.content)
+    return format_fields(chunk.tool_names, chunk.files_modified, chunk.content)
 
 
 def format_timestamp(epoch: int) -> str:
@@ -165,24 +162,6 @@ def truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[:max_len] + "..."
-
-
-def slim_prompt(text: str, max_len: int = 160) -> str:
-    """会話調の前置きを落として、プロンプトを短く直接的に整える。"""
-    line = first_meaningful_line(text)
-    if line:
-        return compact_line(line, max_len)
-
-    in_code_block = False
-    for raw_line in text.splitlines():
-        stripped = raw_line.strip()
-        if stripped.startswith("```"):
-            in_code_block = not in_code_block
-            continue
-        if in_code_block and stripped:
-            return compact_line(stripped, max_len)
-
-    return ""
 
 
 def slim_context_content(

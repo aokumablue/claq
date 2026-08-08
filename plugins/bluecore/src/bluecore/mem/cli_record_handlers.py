@@ -41,7 +41,6 @@ def _build_record_chunk(
 
     event_type = str(stdin_data.get("event_type", "custom") or "custom")
     content = str(stdin_data.get("content", "") or "")
-    user_prompt = str(stdin_data.get("user_prompt", "") or "")
     metadata = stdin_data.get("metadata", {})
     # chunk_index は store_chunk の INSERT（SQL の MAX+1）で確定するためここでは 0 を渡す。
     files_read = metadata.get("files_read", [])
@@ -51,7 +50,7 @@ def _build_record_chunk(
         content=content, tool_names=[event_type],
         files_read=files_read if isinstance(files_read, list) else [],
         files_modified=files_modified if isinstance(files_modified, list) else [],
-        user_prompt=user_prompt, created_at_epoch=int(time.time()),
+        created_at_epoch=int(time.time()),
     )
 
 

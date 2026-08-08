@@ -22,7 +22,6 @@ class MemoryChunk:
     tool_names: list[str]
     files_read: list[str]
     files_modified: list[str]
-    user_prompt: str
     created_at_epoch: int
     id: str | None = None
     origin_user: str = ""
@@ -32,14 +31,8 @@ class MemoryChunk:
     last_accessed_epoch: int | None = None
 
     # Phase 2: メモリ圧縮
-    merged_generation: int = 0
-    merged_into: str | None = None
 
     # Phase 3: 実行品質トラッキング
-    execution_status: str = "unknown"  # 'success'|'partial'|'failure'|'unknown'
-    tool_error: str | None = None  # エラーメッセージ先頭500文字
-    ai_response_summary: str | None = None  # AI応答の要約（最大500文字）
-    tool_sequence: list[str] = field(default_factory=list)  # 順序保持・重複ありリスト
 
 
 @dataclass
@@ -162,7 +155,6 @@ class SessionDigest:
     origin_user: str = ""
     key_files: list[str] = field(default_factory=list)
     key_decisions: list[str] = field(default_factory=list)
-    outcome: str = "unknown"  # 'success'|'partial'|'failure'|'unknown'
     harness: str = "unknown"  # 'claude'|'codex'|'copilot'|'unknown'
     source: str = "chunks"  # 'transcript+chunks'|'chunks'
     chunk_count: int = 0

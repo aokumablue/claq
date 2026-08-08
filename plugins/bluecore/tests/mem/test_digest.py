@@ -26,9 +26,7 @@ def _make_chunk(
     content: str = "content",
     tool_names: list[str] | None = None,
     files_modified: list[str] | None = None,
-    user_prompt: str = "prompt",
     created_at_epoch: int = 1700000000,
-    execution_status: str = "unknown",
 ) -> MemoryChunk:
     """テスト用の MemoryChunk を構築する。"""
     return MemoryChunk(
@@ -39,9 +37,7 @@ def _make_chunk(
         tool_names=tool_names or [],
         files_read=[],
         files_modified=files_modified or [],
-        user_prompt=user_prompt,
         created_at_epoch=created_at_epoch,
-        execution_status=execution_status,
     )
 
 
@@ -54,44 +50,6 @@ def _make_log(prompt: str, index: int, epoch: int = 1700000000) -> InteractionLo
         interaction_index=index,
         created_at_epoch=epoch,
     )
-
-
-class TestAggregateChunksOutcome:
-    """_aggregate_chunks の outcome デシジョンテーブル"""
-
-    @pytest.mark.parametrize(
-        "statuses, expected",
-        [
-            ([], "unknown"),
-            (["unknown", "unknown"], "unknown"),
-            (["success"], "success"),
-            (["success", "success"], "success"),
-            (["failure"], "failure"),
-            (["partial"], "failure"),  # partial 単独 → 比率0.5 → failure（境界値）
-            (["success", "success", "partial"], "partial"),  # 比率 1/6 ≒ 0.167
-            (["success", "success", "success", "failure"], "partial"),  # 比率 0.25
-            (["success", "failure"], "failure"),  # 比率 0.5（境界値）
-            (["failure", "failure", "success", "success"], "failure"),  # 比率 0.5
-            (["failure", "unknown", "unknown"], "failure"),  # unknown は分母から除外
-        ],
-        ids=[
-            "empty",
-            "all-unknown",
-            "single-success",
-            "all-success",
-            "single-failure",
-            "single-partial-boundary",
-            "mostly-success-one-partial",
-            "mostly-success-one-failure",
-            "half-failure-boundary",
-            "half-failure-four",
-            "unknown-excluded-from-denominator",
-        ],
-    )
-    def test_outcome(self, statuses: list[str], expected: str) -> None:
-        chunks = [_make_chunk(execution_status=s, chunk_index=i) for i, s in enumerate(statuses)]
-        result = _aggregate_chunks(chunks, [])
-        assert result.outcome == expected
 
 
 class TestAggregateChunksKeyFiles:
@@ -130,14 +88,9 @@ class TestAggregateChunksKeyDecisions:
 
     def test_uses_interaction_logs_when_available(self) -> None:
         logs = [_make_log(f"decision {i}", i) for i in range(3)]
-        chunks = [_make_chunk(user_prompt="ignored")]
+        chunks = [_make_chunk()]
         result = _aggregate_chunks(chunks, logs)
         assert result.key_decisions == ["decision 0", "decision 1", "decision 2"]
-
-    def test_falls_back_to_chunk_user_prompt(self) -> None:
-        chunks = [_make_chunk(chunk_index=i, user_prompt=f"prompt {i}") for i in range(3)]
-        result = _aggregate_chunks(chunks, [])
-        assert result.key_decisions == ["prompt 0", "prompt 1", "prompt 2"]
 
     def test_dedupes_preserving_order(self) -> None:
         logs = [_make_log("same", 0), _make_log("same", 1), _make_log("other", 2)]
@@ -164,14 +117,6 @@ class TestAggregateChunksKeyDecisions:
         result = _aggregate_chunks([], logs)
         assert "leak@example.com" not in result.key_decisions[0]
         assert "[REDACTED]" in result.key_decisions[0]
-
-    def test_redacts_secrets_in_chunk_user_prompt_fallback(self) -> None:
-        """interaction_logs が無く chunk の user_prompt にフォールバックする場合も redact される。"""
-        chunks = [_make_chunk(user_prompt="token: sk-ant-abcdefghijklmnopqrstuvwxyz0123456789")]
-        result = _aggregate_chunks(chunks, [])
-        assert "sk-ant-abcdefghijklmnopqrstuvwxyz0123456789" not in result.key_decisions[0]
-        assert "[REDACTED]" in result.key_decisions[0]
-
 
 class TestExtractFinalAssistantText:
     """_extract_final_assistant_text のトランスクリプト解析テスト"""
@@ -325,16 +270,13 @@ class TestBuildSessionDigest:
                 chunk_index=0,
                 tool_names=["Edit"],
                 files_modified=["a.py"],
-                user_prompt="fix the bug in auth module",
                 created_at_epoch=1700000000,
-                execution_status="success",
             ),
             _make_chunk(
                 chunk_index=1,
                 tool_names=["Bash"],
                 files_modified=["b.py"],
                 created_at_epoch=1700000100,
-                execution_status="success",
             ),
         ]
 
@@ -348,12 +290,10 @@ class TestBuildSessionDigest:
         digest = build_session_digest(FakeDB(), "sess-1")
         assert digest is not None
         assert digest.source == "chunks"
-        assert digest.outcome == "success"
         assert digest.chunk_count == 2
         assert digest.started_at_epoch == 1700000000
         assert digest.ended_at_epoch == 1700000100
         assert "目的:" in digest.summary
-        assert "結果:success" in digest.summary
         assert "主変更:" in digest.summary
         assert "ツール:" in digest.summary
 

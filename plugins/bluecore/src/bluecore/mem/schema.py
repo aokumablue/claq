@@ -17,17 +17,10 @@ CREATE TABLE IF NOT EXISTS memory_chunks (
   tool_names TEXT,
   files_read TEXT,
   files_modified TEXT,
-  user_prompt TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   created_at_epoch INTEGER NOT NULL,
   access_count INTEGER DEFAULT 0,
   last_accessed_epoch INTEGER,
-  merged_generation INTEGER DEFAULT 0,
-  merged_into TEXT REFERENCES memory_chunks(id),
-  execution_status TEXT DEFAULT 'unknown',
-  tool_error TEXT,
-  ai_response_summary TEXT,
-  tool_sequence TEXT DEFAULT '[]',
   UNIQUE(session_id, chunk_index)
 );
 
@@ -169,7 +162,6 @@ CREATE TABLE IF NOT EXISTS session_digests (
   summary TEXT NOT NULL,
   key_files TEXT NOT NULL DEFAULT '[]',
   key_decisions TEXT NOT NULL DEFAULT '[]',
-  outcome TEXT NOT NULL DEFAULT 'unknown',
   harness TEXT NOT NULL DEFAULT 'unknown',
   source TEXT NOT NULL DEFAULT 'chunks',
   chunk_count INTEGER NOT NULL DEFAULT 0,
@@ -188,17 +180,15 @@ _FTS5_SQL = """\
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_chunks_fts USING fts5(
   chunk_id UNINDEXED,
   content,
-  user_prompt,
   tool_names,
   files_read,
   files_modified,
-  ai_response_summary,
   tokenize='trigram'
 );
 
 CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON memory_chunks BEGIN
-  INSERT INTO memory_chunks_fts(chunk_id, content, user_prompt, tool_names, files_read, files_modified, ai_response_summary)
-  VALUES (new.id, new.content, new.user_prompt, new.tool_names, new.files_read, new.files_modified, new.ai_response_summary);
+  INSERT INTO memory_chunks_fts(chunk_id, content, tool_names, files_read, files_modified)
+  VALUES (new.id, new.content, new.tool_names, new.files_read, new.files_modified);
 END;
 
 CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON memory_chunks BEGIN
@@ -208,11 +198,9 @@ END;
 CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON memory_chunks BEGIN
   UPDATE memory_chunks_fts
   SET content = new.content,
-      user_prompt = new.user_prompt,
       tool_names = new.tool_names,
       files_read = new.files_read,
-      files_modified = new.files_modified,
-      ai_response_summary = new.ai_response_summary
+      files_modified = new.files_modified
   WHERE chunk_id = new.id;
 END;
 
