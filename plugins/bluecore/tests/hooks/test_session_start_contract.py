@@ -13,8 +13,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from bluecore.hooks import hook_common, session_install, session_start
-from bluecore.hooks.hook_common import emit_session_start_output
+from bluecore.hooks import session_install, session_start
 
 
 def _assert_session_start_json(output: str) -> dict:
@@ -186,39 +185,6 @@ class TestSessionStartHookContract:
         assert call_count == 1
         # 個別失敗ログ（"failed:" を含む）が出ていないことを確認
         assert not any("failed:" in m for m in messages)
-
-
-class TestRunWithFlagsSessionStartContract:
-    def test_fallback_output_is_valid_json(self) -> None:
-        result = emit_session_start_output()
-        _assert_session_start_json(result)
-
-    def test_session_start_hook_ids_in_hook_common(self) -> None:
-        """SESSION_START_HOOK_IDS が hook_common の single source of truth から取得されること。"""
-        from bluecore.hooks.run_with_flags import SESSION_START_HOOK_IDS as rwf_ids
-
-        assert rwf_ids is hook_common.SESSION_START_HOOK_IDS
-
-    def test_child_nonzero_return_suppressed_for_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        """SessionStart 系の hook で子プロセスが非 0 を返しても returncode を 0 にする。"""
-        import subprocess
-
-        import bluecore.lib.hook_flags as flags_mod
-        from bluecore.hooks import run_with_flags
-
-        monkeypatch.setattr(flags_mod, "is_hook_enabled", lambda *a, **kw: True)
-
-        mock_result = MagicMock()
-        mock_result.stdout = hook_common.emit_session_start_output()
-        mock_result.stderr = ""
-        mock_result.returncode = 1
-
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
-        monkeypatch.setattr(sys, "argv", ["rwf", "session:start", "bluecore.hooks.session_start", "minimal"])
-        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
-
-        ret = run_with_flags.main()
-        assert ret == 0
 
 
 def test_log_git_info_no_branch() -> None:

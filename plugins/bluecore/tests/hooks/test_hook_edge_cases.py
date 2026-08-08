@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import runpy
 import subprocess
 import sys
@@ -17,211 +16,7 @@ import pytest
 
 from bluecore.hooks import commit_quality_scanner as commit_quality_scanner
 from bluecore.hooks import pre_bash_commit_quality as pre_bash_commit_quality
-from bluecore.hooks import run_with_flags as run_with_flags
 from bluecore.hooks import session_start as session_start
-
-
-def test_run_with_flags_reports_error_when_not_enough_args(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured_stderr: list[str] = []
-    monkeypatch.setattr(run_with_flags.sys, "argv", ["launcher.py", "hook-only"])
-    monkeypatch.setattr(run_with_flags, "write_stderr", captured_stderr.append)
-
-    assert run_with_flags.main() == 1
-    assert any("引数が不足" in msg for msg in captured_stderr)
-
-
-def test_run_with_flags_builds_env_and_emits_no_stdout_on_empty_child_output(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    stdout: list[str] = []
-    stderr: list[str] = []
-    captured: dict[str, object] = {}
-
-    monkeypatch.setattr(run_with_flags.sys, "argv", ["launcher.py", "hook-id", "target", "standard", "alpha"])
-    monkeypatch.setattr(run_with_flags, "read_raw_stdin_with_truncation", lambda max_bytes=0: ("payload", True))
-    monkeypatch.setattr(run_with_flags, "is_hook_enabled", lambda hook_id, profiles=None: True)
-
-    def fake_run(
-        command: list[str],
-        *,
-        input: str,
-        text: bool,
-        capture_output: bool,
-        env: dict[str, str],
-        timeout: float,
-    ) -> subprocess.CompletedProcess[str]:
-        captured["command"] = command
-        captured["input"] = input
-        captured["env"] = env
-        captured["timeout"] = timeout
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="child stderr")
-
-    monkeypatch.setattr(run_with_flags.subprocess, "run", fake_run)
-    monkeypatch.setattr(run_with_flags, "write_stdout", stdout.append)
-    monkeypatch.setattr(run_with_flags, "write_stderr", stderr.append)
-
-    assert run_with_flags.main() == 0
-    assert stdout == []
-    assert stderr == ["child stderr"]
-    assert captured["input"] == "payload"
-    assert captured["command"] == [sys.executable, "-m", "target", "alpha"]
-    env = captured["env"]
-    assert isinstance(env, dict)
-    assert "BLUECORE_HOOK_INPUT_TRUNCATED" not in env
-    assert "BLUECORE_HOOK_INPUT_MAX_BYTES" not in env
-    assert env["PYTHONPATH"].startswith(str(run_with_flags.REPO_ROOT / "src"))
-
-
-def test_run_with_flags_reports_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
-    stderr: list[str] = []
-
-    monkeypatch.setattr(run_with_flags.sys, "argv", ["launcher.py", "hook-id", "target"])
-    monkeypatch.setattr(run_with_flags, "read_raw_stdin_with_truncation", lambda max_bytes=0: ("payload", False))
-    monkeypatch.setattr(run_with_flags, "is_hook_enabled", lambda hook_id, profiles=None: True)
-    monkeypatch.setattr(run_with_flags.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("boom")))
-    monkeypatch.setattr(run_with_flags, "write_stderr", stderr.append)
-
-    assert run_with_flags.main() == 1
-    assert any("Error running hook-id" in message for message in stderr)
-
-
-def test_run_with_flags_reads_and_truncates_utf8_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    class DummyStdin:
-        def __init__(self, raw: bytes) -> None:
-            self.buffer = io.BytesIO(raw)
-
-    monkeypatch.setattr(run_with_flags.sys, "stdin", DummyStdin(b"\xe3\x81\x82"))
-
-    text, truncated = run_with_flags.read_raw_stdin_with_truncation(2)
-
-    assert truncated is True
-    assert text == "�"
-
-
-def test_run_with_flags_reads_without_stdin_buffer(monkeypatch: pytest.MonkeyPatch) -> None:
-    class DummyTextStdin:
-        def __init__(self, raw: str) -> None:
-            self._stream = io.StringIO(raw)
-            self.read_calls: list[int] = []
-
-        def read(self, size: int = -1) -> str:
-            self.read_calls.append(size)
-            return self._stream.read(size)
-
-    dummy_stdin = DummyTextStdin("abcdef")
-    monkeypatch.setattr(run_with_flags.sys, "stdin", dummy_stdin)
-
-    text, truncated = run_with_flags.read_raw_stdin_with_truncation(3)
-
-    assert truncated is True
-    assert text == "abc"
-    assert dummy_stdin.read_calls == [4]
-
-
-def test_run_with_flags_returns_child_stdout_when_hook_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    stdout: list[str] = []
-    monkeypatch.setattr(run_with_flags.sys, "argv", ["launcher.py", "hook-id", "target"])
-    monkeypatch.setattr(run_with_flags, "read_raw_stdin_with_truncation", lambda max_bytes=0: ("payload", False))
-    monkeypatch.setattr(run_with_flags, "is_hook_enabled", lambda hook_id, profiles=None: True)
-    monkeypatch.setattr(
-        run_with_flags.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="child-out", stderr=""),
-    )
-    monkeypatch.setattr(run_with_flags, "write_stdout", stdout.append)
-
-    assert run_with_flags.main() == 0
-    assert stdout == ["child-out"]
-
-
-def test_run_with_flags_emits_session_start_fallback_json_when_child_stdout_empty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    stdout: list[str] = []
-    monkeypatch.setattr(run_with_flags.sys, "argv", ["launcher.py", "session:start", "target"])
-    monkeypatch.setattr(run_with_flags, "read_raw_stdin_with_truncation", lambda max_bytes=0: ("payload", False))
-    monkeypatch.setattr(run_with_flags, "is_hook_enabled", lambda hook_id, profiles=None: True)
-    monkeypatch.setattr(
-        run_with_flags.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
-    )
-    monkeypatch.setattr(run_with_flags, "write_stdout", stdout.append)
-
-    assert run_with_flags.main() == 0
-    payload = json.loads(stdout[0])
-    assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    assert payload["hookSpecificOutput"]["additionalContext"] == ""
-
-
-def test_run_with_flags_skips_disabled_hook_with_unbounded_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = "payload-" + "x" * 1024
-    calls: list[int] = []
-
-    class _Buffer:
-        def read(self) -> bytes:
-            calls.append(-1)
-            return payload.encode("utf-8")
-
-    class _StdIn:
-        def __init__(self) -> None:
-            self.buffer = _Buffer()
-
-        def read(self, *_args: object, **_kwargs: object) -> str:
-            raise AssertionError("disabled hook path must not use truncated stdin reader")
-
-    monkeypatch.setattr(run_with_flags.sys, "argv", ["launcher.py", "hook-id", "target"])
-    monkeypatch.setattr(run_with_flags.sys, "stdin", _StdIn())
-    monkeypatch.setattr(
-        run_with_flags,
-        "read_raw_stdin_with_truncation",
-        lambda max_bytes=0: (_ for _ in ()).throw(AssertionError("should not be called")),
-    )
-    monkeypatch.setattr(run_with_flags, "is_hook_enabled", lambda hook_id, profiles=None: False)
-    monkeypatch.setattr(
-        run_with_flags.subprocess,
-        "run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not run")),
-    )
-
-    assert run_with_flags.main() == 0
-    # hook 無効時は stdin を読み捨てるだけで stdout には何も出さない
-    assert calls == [-1]
-
-
-def test_run_with_flags_blocks_truncated_payload_for_guarded_hook(monkeypatch: pytest.MonkeyPatch) -> None:
-    stdout: list[str] = []
-    stderr: list[str] = []
-
-    monkeypatch.setattr(run_with_flags.sys, "argv", ["launcher.py", "pre:config-protection", "target-module"])
-    monkeypatch.setattr(run_with_flags, "read_raw_stdin_with_truncation", lambda max_bytes=0: ("payload", True))
-    monkeypatch.setattr(run_with_flags, "is_hook_enabled", lambda hook_id, profiles=None: True)
-    monkeypatch.setattr(run_with_flags, "write_stdout", stdout.append)
-    monkeypatch.setattr(run_with_flags, "write_stderr", stderr.append)
-
-    assert run_with_flags.main() == 2
-    assert stdout == []
-    assert any("BLOCKED: Hook input exceeded" in message for message in stderr)
-
-
-def test_run_with_flags_resolve_target_command_accepts_executable_targets(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    plugin_root = tmp_path / "plugin"
-    plugin_root.mkdir()
-    relative = plugin_root / "tool"
-    relative.write_text("#!/bin/sh\necho ok", encoding="utf-8")
-    relative.chmod(0o755)
-
-    monkeypatch.setattr(run_with_flags, "REPO_ROOT", plugin_root)
-
-    assert run_with_flags.resolve_target_command("tool", ["x"]) == [str(relative), "x"]
-
-    absolute = tmp_path / "absolute-tool"
-    absolute.write_text("#!/bin/sh\necho ok", encoding="utf-8")
-    absolute.chmod(0o755)
-
-    assert run_with_flags.resolve_target_command(str(absolute)) == [str(absolute)]
 
 
 def test_session_start_run_injects_previous_session_and_project_context(
@@ -708,6 +503,17 @@ def test_pre_bash_commit_quality_run_wrapper_and_main_success(monkeypatch: pytes
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "evaluate",
+        lambda raw: {"output": raw, "exitCode": 0},
+    )
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        assert pre_bash_commit_quality.main() == 0
+
+    assert stdout.getvalue() == ""
+
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "evaluate",
         lambda raw: {"output": raw, "exitCode": 2, "reason": "[Hook] BLOCKED: boom"},
     )
     stdout = io.StringIO()
@@ -831,67 +637,6 @@ def test_pre_bash_commit_quality_main_handles_reader_error(monkeypatch: pytest.M
     )
 
     assert pre_bash_commit_quality.main() == 0
-
-
-def test_run_with_flags_build_env_and_resolve_command_branches(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(run_with_flags, "REPO_ROOT", tmp_path)
-    monkeypatch.setenv("PYTHONPATH", "base-path")
-    plugin_root = tmp_path / "plugin"
-    plugin_root.mkdir()
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
-
-    env = run_with_flags.build_env()
-    assert env["PYTHONPATH"] == f"{tmp_path / 'src'}{os.pathsep}base-path"
-    assert "BLUECORE_HOOK_INPUT_TRUNCATED" not in env
-    assert "BLUECORE_HOOK_INPUT_MAX_BYTES" not in env
-
-    shell_script = tmp_path / "tool.sh"
-    shell_script.write_text("#!/bin/sh\necho ok", encoding="utf-8")
-    assert run_with_flags.resolve_target_command(str(shell_script), []) == ["bash", str(shell_script)]
-
-    relative_shell = plugin_root / "rel-tool.sh"
-    relative_shell.write_text("#!/bin/sh\necho ok", encoding="utf-8")
-    assert run_with_flags.resolve_target_command(
-        "rel-tool.sh",
-        ["y"],
-        plugin_root=plugin_root,
-    ) == ["bash", str(relative_shell), "y"]
-
-    batch_script = tmp_path / "tool.cmd"
-    batch_script.write_text("@echo off\necho ok", encoding="utf-8")
-    monkeypatch.setattr(run_with_flags, "Path", type(tmp_path))
-    monkeypatch.setattr(run_with_flags.os, "name", "nt", raising=False)
-    assert run_with_flags.resolve_target_command(str(batch_script), []) == ["cmd", "/c", str(batch_script)]
-
-    relative_cmd = plugin_root / "rel-tool.cmd"
-    relative_cmd.write_text("@echo off\necho ok", encoding="utf-8")
-    assert run_with_flags.resolve_target_command(
-        "rel-tool.cmd",
-        ["z"],
-        plugin_root=plugin_root,
-    ) == ["cmd", "/c", str(relative_cmd), "z"]
-
-    original_resolve = run_with_flags.Path.resolve
-
-    def fake_resolve(self, *args, **kwargs):  # noqa: ANN001
-        if self.name == "bad-target":
-            raise OSError("boom")
-        return original_resolve(self, *args, **kwargs)
-
-    monkeypatch.setattr(run_with_flags.Path, "resolve", fake_resolve)
-    assert run_with_flags.resolve_target_command("bad-target", ["x"]) == [sys.executable, "-m", "bad-target", "x"]
-
-
-def test_run_with_flags_entrypoint_exits_one_when_no_args(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(run_with_flags.sys, "argv", ["run_with_flags.py"])
-
-    with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("bluecore.hooks.run_with_flags", run_name="__main__")
-
-    # 引数不足時は exit 1 で終了する（stdin の読み取りは不要）
-    assert excinfo.value.code == 1
 
 
 def test_pre_bash_commit_quality_helpers_and_pass_branch(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -123,6 +123,9 @@ def test_resolve_skips_invalid_bash_entries_and_empty_executable_list(
 
     monkeypatch.setattr(quality_gate_presets, "detect_project", fake_detect)
     assert quality_gate_presets._has_executable([]) is False
+    # shutil.which による実判定（見つかる/見つからない双方の分岐）を直接確認する。
+    assert quality_gate_presets._has_executable(["python3"]) is True
+    assert quality_gate_presets._has_executable(["definitely-not-a-real-command-xyz"]) is False
     monkeypatch.setattr(quality_gate_presets, "_has_executable", lambda _argv: True)
     monkeypatch.setitem(
         quality_gate_presets.QUALITY_GATE_PRESETS,

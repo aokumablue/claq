@@ -6,9 +6,9 @@
 終了: 0 (許可) または 2 (ブロック。Copilot は emit_block_output により
       exit 0 + permissionDecision: deny の JSON へ変換される)
 
-入力切り捨て時のブロックは本モジュール自身が判定する（run_with_flags 経由
-しない直接起動でも fail-closed を保つため）。ファイル名の保護判定と合わせ
-自己完結させている。
+入力切り捨て時のブロックは本モジュール自身が判定する（launcher はインプロ
+セスで直接ターゲットを実行するだけで stdin を代読しないため）。ファイル名
+の保護判定と合わせ自己完結させている。
 """
 
 from __future__ import annotations
@@ -91,7 +91,6 @@ def blocked_message_for_file(file_name: str) -> str:
 def _truncation_blocked_message(max_bytes: int) -> str:
     """入力切り捨て時のブロック理由メッセージを生成する。
 
-    run_with_flags 経由しない直接起動（launcher 直接呼び出し等）でも、
     切り捨てられたペイロードで保護判定をすり抜けさせないための guard。
 
     Args:

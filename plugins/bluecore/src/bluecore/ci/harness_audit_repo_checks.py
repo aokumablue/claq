@@ -21,13 +21,15 @@ def _hook_command_argv(command: str) -> tuple[str, ...] | None:
     """hooks.json 内のコマンド文字列から launcher.py 起動後の引数列を返す。
 
     ``python``/``python3`` で ``launcher.py`` (または ``*/launcher.py``) を
-    起動する形式でなければ ``None`` を返す。
+    起動する形式でなければ ``None`` を返す。先頭の ``--bg``（非 Claude
+    ハーネス向け detach フラグ）はコマンドの実体ではないため取り除く。
 
     Args:
         command: hooks.json の ``command`` フィールドの生文字列
 
     Returns:
-        launcher.py 起動後の引数トークンのタプル。形式に合致しなければ None
+        launcher.py 起動後の引数トークンのタプル（--bg 除去済み）。
+        形式に合致しなければ None
     """
     try:
         command_tokens = shlex.split(command)
@@ -41,7 +43,10 @@ def _hook_command_argv(command: str) -> tuple[str, ...] | None:
     if launcher != "launcher.py" and not launcher.endswith("/launcher.py"):
         return None
 
-    return tuple(command_tokens[2:])
+    argv = tuple(command_tokens[2:])
+    if argv and argv[0] == "--bg":
+        argv = argv[1:]
+    return argv
 
 
 def _event_has_matching_command(
@@ -96,31 +101,19 @@ def _has_memory_lifecycle_hooks(root_dir: str | Path) -> bool:
     return (
         _event_has_matching_command(
             hooks.get("SessionStart", []),
-            (
-                ("bluecore.mem.cli", "session:mem:setup"),
-                ("bluecore.hooks.run_with_flags", "session:mem:setup", "bluecore.mem.cli"),
-            ),
+            (("bluecore.mem.cli", "setup"),),
         )
         and _event_has_matching_command(
             hooks.get("SessionStart", []),
-            (
-                ("bluecore.hooks.session_start",),
-                ("bluecore.hooks.run_with_flags", "session:start", "bluecore.hooks.session_start"),
-            ),
+            (("bluecore.hooks.session_start",),),
         )
         and _event_has_matching_command(
             hooks.get("Stop", []),
-            (
-                ("bluecore.hooks.session_end",),
-                ("bluecore.hooks.run_with_flags", "stop:session-end", "bluecore.hooks.session_end"),
-            ),
+            (("bluecore.hooks.session_end",),),
         )
         and _event_has_matching_command(
             hooks.get("SessionEnd", []),
-            (
-                ("bluecore.mem.cli", "session:mem:end"),
-                ("bluecore.hooks.run_with_flags", "session:mem:end", "bluecore.mem.cli"),
-            ),
+            (("bluecore.mem.cli", "session-end"),),
         )
     )
 

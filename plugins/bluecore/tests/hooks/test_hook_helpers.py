@@ -30,7 +30,20 @@ from bluecore.hooks import (
 from bluecore.hooks.hook_common import is_truthy
 
 
+def _patch_stdin_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    """hook_common.read_raw_stdin* が使う select を常に ready 扱いにする。
+
+    io.StringIO は実 fd を持たないため、select.select をそのまま通すと
+    io.UnsupportedOperation で落ちる（_stdin_ready の TTY/タイムアウト
+    ガードは launcher._read_stdin から移設済み）。
+    """
+    from bluecore.hooks import hook_common
+
+    monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: (r, [], []))
+
+
 def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_stdin_ready(monkeypatch)
     monkeypatch.setattr(
         sys,
         "stdin",
@@ -48,6 +61,7 @@ def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch
 
 def test_config_protection_blocks_model_json(monkeypatch: pytest.MonkeyPatch) -> None:
     """ダウンロード完全性の信頼アンカーである model.json の書き換えをブロックする。"""
+    _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": "plugins/bluecore/model.json"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
@@ -60,6 +74,7 @@ def test_config_protection_blocks_model_json(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_config_protection_allows_safe_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": "README.md"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
@@ -77,6 +92,7 @@ def test_config_protection_blocks_protected_file_in_apply_patch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Codex の apply_patch パッチ内の保護ファイルをブロックする。"""
+    _patch_stdin_ready(monkeypatch)
     patch = "*** Begin Patch\n*** Update File: ruff.toml\n@@\n-a\n+b\n*** End Patch"
     payload = json.dumps({"tool_name": "apply_patch", "tool_input": {"input": patch}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
@@ -93,6 +109,7 @@ def test_config_protection_blocks_unparseable_apply_patch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """パース不能な apply_patch 入力は fail-closed でブロックする。"""
+    _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_name": "apply_patch", "tool_input": {"input": "garbage"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
@@ -106,6 +123,7 @@ def test_config_protection_blocks_unparseable_apply_patch(
 
 def test_config_protection_allows_safe_apply_patch(monkeypatch: pytest.MonkeyPatch) -> None:
     """保護対象を含まない apply_patch は許可する。"""
+    _patch_stdin_ready(monkeypatch)
     patch = "*** Begin Patch\n*** Update File: src/main.py\n@@\n-a\n+b\n*** End Patch"
     payload = json.dumps({"tool_name": "apply_patch", "tool_input": {"input": patch}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
@@ -120,6 +138,7 @@ def test_config_protection_allows_safe_apply_patch(monkeypatch: pytest.MonkeyPat
 
 def test_config_protection_blocks_legacy_file_field(monkeypatch: pytest.MonkeyPatch) -> None:
     """file フィールドのみ持つ入力でも保護ファイルをブロックする。"""
+    _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_name": "Write", "tool_input": {"file": "biome.json"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
@@ -179,6 +198,7 @@ def test_session_end_extracts_summary(tmp_path: Path) -> None:
 
 
 def test_config_protection_entrypoint_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_input": {"file_path": "README.md"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
     monkeypatch.setattr(sys, "argv", ["config_protection.py"])

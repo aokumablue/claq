@@ -596,7 +596,7 @@ def evaluate(raw_input: str) -> dict:
 
 
 def run(raw_input: str) -> dict:
-    """フックを実行し、run_with_flags 用の結果を返します。
+    """フックを実行し、output と exitCode を含む結果を返します。
 
     Args:
         raw_input: フックに渡された生の入力文字列です。

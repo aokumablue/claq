@@ -167,6 +167,10 @@ def test_validate_hooks_reports_invalid_matcher_and_entrypoint(
 
 
 def test_repo_mem_cli_hooks_split_target_and_args() -> None:
+    """実際の hooks.json の bluecore.mem.cli 呼び出しが、launcher 直後に
+    モジュール名・サブコマンドの順で並んでいることを確認する（--bg が付く
+    非 Claude ハーネス向け detach エントリも許容する）。
+    """
     repo_root = Path(__file__).resolve().parents[4]
     hooks_file = repo_root / "plugins/bluecore/hooks/hooks.json"
     hooks = json.loads(hooks_file.read_text(encoding="utf-8"))
@@ -175,23 +179,27 @@ def test_repo_mem_cli_hooks_split_target_and_args() -> None:
         for event_hooks in hooks["hooks"].values()
         for matcher in event_hooks
         for hook in matcher.get("hooks", [])
-        if hook.get("type") == "command" and "bluecore.hooks.run_with_flags" in hook.get("command", "")
+        if hook.get("type") == "command"
     ]
 
-    mem_cli_commands = [command for command in commands if "\"bluecore.mem.cli\"" in command]
+    mem_cli_commands = [command for command in commands if "bluecore.mem.cli" in command]
     assert mem_cli_commands
     for command in mem_cli_commands:
         parts = shlex.split(command)
-        assert parts[4] == "bluecore.mem.cli"
-        assert " " not in parts[4]
-        assert parts[5]
-        assert parts[6] in {
+        launcher_index = next(i for i, part in enumerate(parts) if part.endswith("launcher.py"))
+        argv = parts[launcher_index + 1 :]
+        if argv and argv[0] == "--bg":
+            argv = argv[1:]
+
+        assert argv[0] == "bluecore.mem.cli"
+        assert argv[1] in {
             "setup",
             "context",
             "record-project-profile",
             "session-init",
             "record-interaction",
             "session-end",
+            "observe",
         }
 
 
