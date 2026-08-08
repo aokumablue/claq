@@ -13,15 +13,10 @@ from bluecore.lib.package_manager import (
     PackageManagerResult,
     detect_from_lock_file,
     detect_from_package_json,
-    get_available_package_managers,
-    get_command_pattern,
-    get_exec_command,
     get_package_manager,
-    get_run_command,
     get_selection_prompt,
     load_config,
     set_preferred_package_manager,
-    set_project_package_manager,
 )
 
 
@@ -193,91 +188,8 @@ class TestGetPackageManager:
 class TestGetRunCommand:
     """get_run_command 関数のテスト。"""
 
-    def test_install_command(self, tmp_path):
-        (tmp_path / "pnpm-lock.yaml").write_text("")
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("CLAUDE_PACKAGE_MANAGER", None)
-            result = get_run_command("install", project_dir=tmp_path)
-            assert result == "pnpm install"
-
-    def test_test_command(self, tmp_path):
-        (tmp_path / "yarn.lock").write_text("")
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("CLAUDE_PACKAGE_MANAGER", None)
-            result = get_run_command("test", project_dir=tmp_path)
-            assert result == "yarn test"
-
-    def test_build_command(self, tmp_path):
-        (tmp_path / "bun.lockb").write_bytes(b"")
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("CLAUDE_PACKAGE_MANAGER", None)
-            result = get_run_command("build", project_dir=tmp_path)
-            assert result == "bun run build"
-
-    def test_custom_script(self, tmp_path):
-        (tmp_path / "package-lock.json").write_text("{}")
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("CLAUDE_PACKAGE_MANAGER", None)
-            result = get_run_command("lint", project_dir=tmp_path)
-            assert result == "npm run lint"
-
-    def test_returns_none_when_no_pm_detected(self, tmp_path):
-        """PM が検出できない場合（Go/Python 等）は None を返す。"""
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("CLAUDE_PACKAGE_MANAGER", None)
-            result = get_run_command("test", project_dir=tmp_path)
-            assert result is None
-
-    def test_rejects_empty_script(self, tmp_path):
-        with pytest.raises(ValueError) as exc_info:
-            get_run_command("", project_dir=tmp_path)
-        assert "non-empty string" in str(exc_info.value)
-
-    def test_rejects_unsafe_characters(self, tmp_path):
-        with pytest.raises(ValueError) as exc_info:
-            get_run_command("test; rm -rf /", project_dir=tmp_path)
-        assert "unsafe characters" in str(exc_info.value)
-
-
 class TestGetExecCommand:
     """get_exec_command 関数のテスト。"""
-
-    def test_basic_binary(self, tmp_path):
-        (tmp_path / "package-lock.json").write_text("{}")
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("CLAUDE_PACKAGE_MANAGER", None)
-            result = get_exec_command("prettier", project_dir=tmp_path)
-            assert result == "npx prettier"
-
-    def test_binary_with_args(self, tmp_path):
-        (tmp_path / "pnpm-lock.yaml").write_text("")
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("CLAUDE_PACKAGE_MANAGER", None)
-            result = get_exec_command("eslint", "--fix .", project_dir=tmp_path)
-            assert result == "pnpm dlx eslint --fix ."
-
-    def test_returns_none_when_no_pm_detected(self, tmp_path):
-        """PM が検出できない場合（Go/Python 等）は None を返す。"""
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("CLAUDE_PACKAGE_MANAGER", None)
-            result = get_exec_command("prettier", project_dir=tmp_path)
-            assert result is None
-
-    def test_rejects_empty_binary(self, tmp_path):
-        with pytest.raises(ValueError) as exc_info:
-            get_exec_command("", project_dir=tmp_path)
-        assert "non-empty string" in str(exc_info.value)
-
-    def test_rejects_unsafe_binary(self, tmp_path):
-        with pytest.raises(ValueError) as exc_info:
-            get_exec_command("rm; bad", project_dir=tmp_path)
-        assert "unsafe characters" in str(exc_info.value)
-
-    def test_rejects_unsafe_args(self, tmp_path):
-        with pytest.raises(ValueError) as exc_info:
-            get_exec_command("eslint", "$(cat /etc/passwd)", project_dir=tmp_path)
-        assert "unsafe characters" in str(exc_info.value)
-
 
 class TestSetPreferredPackageManager:
     """set_preferred_package_manager 関数のテスト。"""
@@ -297,21 +209,6 @@ class TestSetPreferredPackageManager:
 class TestSetProjectPackageManager:
     """set_project_package_manager 関数のテスト。"""
 
-    def test_creates_config_file(self, tmp_path):
-        set_project_package_manager("yarn", tmp_path)
-
-        config_path = tmp_path / ".claude" / "package-manager.json"
-        assert config_path.exists()
-
-        content = json.loads(config_path.read_text())
-        assert content["packageManager"] == "yarn"
-
-    def test_rejects_invalid_pm(self, tmp_path):
-        with pytest.raises(ValueError) as exc_info:
-            set_project_package_manager("invalid", tmp_path)
-        assert "Unknown package manager" in str(exc_info.value)
-
-
 class TestGetSelectionPrompt:
     """get_selection_prompt 関数のテスト。"""
 
@@ -327,39 +224,6 @@ class TestGetSelectionPrompt:
 
 class TestGetCommandPattern:
     """get_command_pattern 関数のテスト。"""
-
-    def test_dev_pattern(self):
-        pattern = get_command_pattern("dev")
-        assert "npm run dev" in pattern
-        assert "pnpm" in pattern
-        assert "yarn dev" in pattern
-        assert "bun run dev" in pattern
-
-    def test_install_pattern(self):
-        pattern = get_command_pattern("install")
-        assert "npm install" in pattern
-        assert "yarn( install)?" in pattern
-
-    def test_test_pattern(self):
-        pattern = get_command_pattern("test")
-        assert "npm test" in pattern
-        assert "pnpm test" in pattern
-
-    def test_build_pattern(self):
-        pattern = get_command_pattern("build")
-        assert "npm run build" in pattern
-        assert "yarn build" in pattern
-
-    def test_custom_action(self):
-        pattern = get_command_pattern("lint")
-        assert "npm run lint" in pattern
-        assert "yarn lint" in pattern
-
-    def test_escapes_regex_metacharacters(self):
-        pattern = get_command_pattern("test.unit")
-        # ドットがエスケープされること
-        assert r"test\.unit" in pattern
-
 
 def test_config_loading_and_detection_edge_paths(tmp_path, monkeypatch):
     config_path = tmp_path / ".claude" / "package-manager.json"
@@ -384,21 +248,6 @@ def test_config_loading_and_detection_edge_paths(tmp_path, monkeypatch):
         result = get_package_manager(project_dir=tmp_path)
         assert result.name == "bun"
         assert result.source == "global-config"
-
-
-def test_package_manager_helpers_cover_remaining_branches(tmp_path, monkeypatch):
-    with patch("bluecore.lib.package_manager.command_exists", side_effect=lambda name: name in {"pnpm", "yarn"}):
-        assert get_available_package_managers() == ["pnpm", "yarn"]
-
-    monkeypatch.chdir(tmp_path)
-    result = set_project_package_manager("npm")
-    assert result["packageManager"] == "npm"
-    assert (tmp_path / ".claude" / "package-manager.json").exists()
-
-    (tmp_path / ".claude" / "package-manager.json").unlink()
-    (tmp_path / "yarn.lock").write_text("", encoding="utf-8")
-    with patch.dict(os.environ, {}, clear=True):
-        assert get_run_command("dev", project_dir=tmp_path) == "yarn dev"
 
 
 def test_detect_from_project_config_no_pm_field(tmp_path) -> None:

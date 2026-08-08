@@ -153,6 +153,17 @@ def builtin_filter_paths() -> list[Path]:
         paths.append(default_path)
     return paths
 
+def load_builtin_cases() -> list[FilterCase]:
+    """組込フィルタの全インラインテストケースを返す。
+
+    tests/redux/test_builtin_filters.py が全 TOML フィルタの
+    インラインケースをパラメトライズするために使う。
+    """
+    cases: list[FilterCase] = []
+    for path in builtin_filter_paths():
+        _, file_cases = _parse_toml(path)
+        cases.extend(file_cases)
+    return cases
 
 def load_filter_specs() -> list[ReduxFilterSpec]:
     """ユーザー定義 → 組込の順でフィルタ定義を統合して返す。
@@ -177,10 +188,3 @@ def load_filter_specs() -> list[ReduxFilterSpec]:
     return specs
 
 
-def load_builtin_cases() -> list[FilterCase]:
-    """組込フィルタの全インラインテストケースを返す。"""
-    cases: list[FilterCase] = []
-    for path in builtin_filter_paths():
-        _, file_cases = _parse_toml(path)
-        cases.extend(file_cases)
-    return cases

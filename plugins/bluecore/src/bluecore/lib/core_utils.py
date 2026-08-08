@@ -105,13 +105,6 @@ def get_learned_skills_dir() -> Path:
     return get_claude_dir() / "skills" / "learned"
 
 
-def get_temp_dir() -> Path:
-    """一時ディレクトリを取得する（クロスプラットフォーム）。"""
-    import tempfile
-
-    return Path(tempfile.gettempdir())
-
-
 def ensure_dir(dir_path: str | Path) -> Path:
     """
     ディレクトリが存在することを保証する（なければ作成）。
@@ -330,37 +323,6 @@ async def read_stdin_json(*, timeout_ms: int = 5000, max_size: int = 1024 * 1024
         return {}
 
 
-def read_stdin_json_sync(*, timeout_ms: int = 5000, max_size: int = 1024 * 1024) -> dict[str, Any]:
-    """
-    Synchronous version of read_stdin_json.
-
-    Args:
-        timeout_ms: タイムアウト（ミリ秒、デフォルト: 5000）
-        max_size: 入力サイズ上限（バイト）
-
-    Returns:
-        解析済みJSONオブジェクト。stdin が空または不正なら空辞書
-    """
-    import select
-
-    try:
-        if sys.stdin.isatty():
-            return {}
-
-        # Unix ではタイムアウトに select を使用
-        if not IS_WINDOWS:
-            readable, _, _ = select.select([sys.stdin], [], [], timeout_ms / 1000)
-            if not readable:
-                return {}
-
-        data = sys.stdin.read(max_size)
-        if data.strip():
-            return json.loads(data)
-        return {}
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-
 def log(message: str) -> None:
     """stderr にログを出力する。"""
     print(message, file=sys.stderr)
@@ -478,83 +440,6 @@ def is_git_repo() -> bool:
     return run_command("git rev-parse --git-dir")["success"]
 
 
-def get_git_modified_files(patterns: list[str] | None = None) -> list[str]:
-    """
-    git の変更ファイルを取得し、必要に応じて正規表現で絞り込む。
-
-    Args:
-        patterns: ファイル絞り込み用の正規表現パターン文字列配列。
-            不正なパターンは静かにスキップされる。
-
-    Returns:
-        変更ファイルパスの配列
-    """
-    if not is_git_repo():
-        return []
-
-    result = run_command("git diff --name-only HEAD")
-    if not result["success"]:
-        return []
-
-    files = [f for f in result["output"].split("\n") if f]
-
-    if patterns:
-        compiled: list[re.Pattern[str]] = []
-        for pattern in patterns:
-            if not isinstance(pattern, str) or not pattern:
-                continue
-            try:
-                compiled.append(re.compile(pattern))
-            except re.error:
-                pass  # 不正な正規表現パターンはスキップ
-
-        if compiled:
-            files = [f for f in files if any(regex.search(f) for regex in compiled)]
-
-    return files
-
-
-def replace_in_file(
-    file_path: str | Path,
-    search: str | re.Pattern[str],
-    replace: str,
-    *,
-    replace_all: bool = False,
-) -> bool:
-    """
-    ファイル内のテキストを置換する。
-
-    Args:
-        file_path: 対象ファイルのパス
-        search: 検索パターン。文字列の場合は最初の1件のみ置換し、
-            replace_all=True のときのみ全件置換する。正規表現はそのまま使う。
-        replace: 置換文字列
-        replace_all: True かつ search が文字列の場合、全件置換する。
-            正規表現パターンでは無視される。
-
-    Returns:
-        ファイル書き込み成功時は True、エラー時は False
-    """
-    content = read_file(file_path)
-    if content is None:
-        return False
-
-    try:
-        if isinstance(search, str):
-            if replace_all:
-                new_content = content.replace(search, replace)
-            else:
-                new_content = content.replace(search, replace, 1)
-        else:
-            new_content = search.sub(replace, content)
-
-        write_file(file_path, new_content)
-        return True
-    except (OSError, re.error) as e:
-        log(f"[Utils] replaceInFile failed for {file_path}: {e}")
-        return False
-
-
 def count_in_file(file_path: str | Path, pattern: str | re.Pattern[str]) -> int:
     """
     ファイル内のパターン出現回数を数える。
@@ -606,80 +491,3 @@ def strip_ansi(text: str) -> str:
     )
 
 
-def grep_file(file_path: str | Path, pattern: str | re.Pattern[str]) -> list[dict[str, Any]]:
-    """
-    ファイル内でパターン検索し、行番号付きで一致行を返す。
-
-    Args:
-        file_path: 対象ファイルのパス
-        pattern: 検索パターン
-
-    Returns:
-        'lineNumber' と 'content' を持つ辞書のリスト
-    """
-    content = read_file(file_path)
-    if content is None:
-        return []
-
-    try:
-        if isinstance(pattern, re.Pattern):
-            # グローバルフラグ由来の挙動差を避けるため新しいパターンを作成
-            regex = re.compile(pattern.pattern, pattern.flags & ~re.MULTILINE)
-        else:
-            regex = re.compile(pattern)
-    except re.error:
-        return []
-
-    results: list[dict[str, Any]] = []
-    for i, line in enumerate(content.split("\n"), start=1):
-        if regex.search(line):
-            results.append({"lineNumber": i, "content": line})
-
-    return results
-
-
-# 公開関数と定数をすべてエクスポート
-__all__ = [
-    # プラットフォーム情報
-    "IS_WINDOWS",
-    "IS_MACOS",
-    "IS_LINUX",
-    # ディレクトリ
-    "get_home_dir",
-    "get_claude_dir",
-    "get_sessions_dir",
-    "get_session_search_dirs",
-    "get_learned_skills_dir",
-    "get_temp_dir",
-    "ensure_dir",
-    # 日付/時刻
-    "get_date_string",
-    "get_time_string",
-    "get_datetime_string",
-    # セッション/プロジェクト
-    "sanitize_session_id",
-    "get_session_id_short",
-    "get_git_repo_name",
-    "get_git_user_name",
-    "get_project_name",
-    # ファイル操作
-    "find_files",
-    "read_file",
-    "write_file",
-    "append_file",
-    "replace_in_file",
-    "count_in_file",
-    "grep_file",
-    # 文字列サニタイズ
-    "strip_ansi",
-    # フックI/O
-    "read_stdin_json",
-    "read_stdin_json_sync",
-    "log",
-    "output",
-    # システム
-    "command_exists",
-    "run_command",
-    "is_git_repo",
-    "get_git_modified_files",
-]

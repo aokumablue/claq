@@ -209,12 +209,6 @@ class TestLoadFilterSpecs:
         assert "ユーザーフィルタを無視" in capsys.readouterr().err
 
 
-class TestLoadBuiltinCases:
-    def test_returns_list(self) -> None:
-        cases = loader.load_builtin_cases()
-        assert isinstance(cases, list)
-
-
 class TestEngineLoad:
     def test_load_builds_engine(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(loader, "_user_filter_paths", lambda: [])

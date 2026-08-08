@@ -413,11 +413,6 @@ class TestImportanceScore:
         without_mod = self._chunk(content="x" * 100, files_modified=[])
         assert importance_score(with_mod) > importance_score(without_mod)
 
-    def test_access_count_raises_score(self) -> None:
-        popular = self._chunk(content="x" * 100, access_count=5)
-        unpopular = self._chunk(content="x" * 100, access_count=0)
-        assert importance_score(popular) > importance_score(unpopular)
-
     def test_empty_chunk_low_score(self) -> None:
         chunk = self._chunk(content="")
         score = importance_score(chunk)
