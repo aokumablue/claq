@@ -178,9 +178,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.hooks.quality_gate post-edit",
-            "async": true,
-            "timeout": 30
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.quality_gate post-edit",
+            "timeout": 15
           }
         ],
         "description": "編集後の品質ゲートを settings.json の hooks.quality-gate 設定に従って実行します"

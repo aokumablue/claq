@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr
+from bluecore.hooks.hook_common import emit_post_tool_use_output, parse_json_object, read_raw_stdin
 from bluecore.hooks.quality_gate_presets import resolve_quality_gate_config
 from bluecore.lib.core_utils import log
 from bluecore.lib.harness import extract_file_paths, normalize_tool_name
@@ -35,10 +35,19 @@ _ALLOWED_EXPANSION_VARS = frozenset(
         "TEMP",
     }
 )
-# matcher が "*"（全ツール）のため、書込み系ツールのみを対象にする早期 return に使う。
-# _extract_tool_name() が正規化した Claude Code 表記（Codex の apply_patch は
-# Edit、Copilot CLI の lowercase tool_name も正規化済み）を小文字化して比較する。
+# hooks.json の matcher は書込み系に絞ってあるが、matcher の解釈が異なるハーネス
+# でも対象外ツールを弾けるよう早期 return の判定に使う。_extract_tool_name() が
+# 正規化した Claude Code 表記（Codex の apply_patch は Edit、Copilot CLI の
+# lowercase tool_name も正規化済み）を小文字化して比較する。
 _WRITE_TOOL_NAMES = frozenset({"edit", "write", "multiedit"})
+
+# step の timeout 既定値。hooks.json の timeout（15秒）より十分小さくして、
+# ハーネス側で打ち切られる前にフック自身が結果を返せるようにする。
+DEFAULT_STEP_TIMEOUT = 10.0
+# 1 step あたりの出力上限（文字）。
+STEP_OUTPUT_LIMIT = 1500
+# additionalContext 全体の上限（文字）。壊れたビルドがコンテキストを食い潰さないため。
+CONTEXT_LIMIT = 4000
 
 
 def _normalize_name(value: str | None) -> str:
@@ -369,12 +378,12 @@ def _resolve_timeout(step: dict[str, Any]) -> float:
     Returns:
         正の float 値のタイムアウト秒数。
     """
-    timeout_raw = step.get("timeout_seconds", step.get("timeout", 30))
+    timeout_raw = step.get("timeout_seconds", step.get("timeout", DEFAULT_STEP_TIMEOUT))
     try:
         timeout = float(timeout_raw)
-        return timeout if timeout > 0 else 30.0
+        return timeout if timeout > 0 else DEFAULT_STEP_TIMEOUT
     except (TypeError, ValueError):
-        return 30.0
+        return DEFAULT_STEP_TIMEOUT
 
 
 @dataclass(frozen=True)
@@ -389,19 +398,28 @@ class _StepCmd:
     name: str
 
 
-def _execute_step_command(step_cmd: _StepCmd) -> bool:
-    """コマンドをサブプロセスで実行し、stderr を転送して成否を返す。
+@dataclass(frozen=True)
+class _StepResult:
+    """1 step の実行結果。additionalContext の組み立てに使う。"""
+
+    name: str
+    returncode: int
+    output: str
+
+
+def _execute_step_command(step_cmd: _StepCmd) -> _StepResult | None:
+    """コマンドをサブプロセスで実行し、結果を返す。
+
+    stdout と stderr を結合して STEP_OUTPUT_LIMIT 文字で切り詰め、呼び出し元が
+    additionalContext に載せられる形で返す。stderr の素通し転送は行わない
+    （Claude Code では PostToolUse の stderr がモデルに渡らないため）。
 
     Args:
-        command: 実行コマンドリスト。
-        raw_input: 子プロセスへ渡す stdin。
-        cwd: 作業ディレクトリ。
-        env: 環境変数。
-        timeout: タイムアウト秒数。
-        name: ログ用のステップ名。
+        step_cmd: 実行パラメータ。
 
     Returns:
-        実行できた場合は True、OSError / タイムアウト時は False。
+        実行できた場合は _StepResult、OSError / タイムアウトで起動できなかった
+        場合は None。
     """
     try:
         result = subprocess.run(
@@ -416,15 +434,18 @@ def _execute_step_command(step_cmd: _StepCmd) -> bool:
         )
     except OSError as err:
         log(f"[QualityGate] step skipped ({step_cmd.name}): {err}")
-        return False
+        return None
     except subprocess.TimeoutExpired:
         log(f"[QualityGate] step timed out ({step_cmd.name}): {step_cmd.timeout:g}s")
-        return False
-    if result.stderr:
-        write_stderr(result.stderr)
+        return None
     if result.returncode != 0:
         log(f"[QualityGate] step failed ({step_cmd.name}): exit code {result.returncode}")
-    return True
+    combined = "".join(part for part in (result.stdout, result.stderr) if part)
+    return _StepResult(
+        name=step_cmd.name,
+        returncode=result.returncode,
+        output=combined.strip()[:STEP_OUTPUT_LIMIT],
+    )
 
 
 def run_step(
@@ -433,7 +454,7 @@ def run_step(
     *,
     base_env: dict[str, str] | None = None,
     default_cwd: Path | None = None,
-) -> bool:
+) -> _StepResult | None:
     """設定された step を 1 回実行する。
 
     Args:
@@ -443,7 +464,7 @@ def run_step(
         default_cwd: 省略時の作業ディレクトリです。
 
     Returns:
-        step を起動できた場合は True、設定不備で起動できなかった場合は False を返します。
+        step を起動できた場合は _StepResult、設定不備や起動失敗の場合は None を返します。
 
     Raises:
         例外は発生しません。
@@ -459,11 +480,11 @@ def run_step(
     command = _build_step_command(step, env, allowed_names)
     if not command:
         log("[QualityGate] invalid step definition: module or argv is required")
-        return False
+        return None
 
     cwd = _build_step_cwd(step, default_cwd, env, allowed_names)
     if cwd is None:
-        return False
+        return None
 
     timeout = _resolve_timeout(step)
     name = str(step.get("name") or step.get("module") or command[0])
@@ -513,8 +534,10 @@ def exec_command(command: str, args: list[str], cwd: str | Path | None = None) -
         }
 
 
-def _run_rule_steps(rule: dict[str, Any], raw_input: str, base_env: dict[str, str], default_cwd: Path) -> bool:
-    """1つの rule に属する steps をすべて実行し、1つでも起動できたなら True を返す。
+def _run_rule_steps(
+    rule: dict[str, Any], raw_input: str, base_env: dict[str, str], default_cwd: Path
+) -> list[_StepResult]:
+    """1つの rule に属する steps をすべて実行し、起動できた step の結果を返す。
 
     Args:
         rule: ルール定義辞書。
@@ -523,19 +546,21 @@ def _run_rule_steps(rule: dict[str, Any], raw_input: str, base_env: dict[str, st
         default_cwd: 省略時の作業ディレクトリ。
 
     Returns:
-        1 step 以上を起動できた場合 True。
+        起動できた step の _StepResult のリスト。
     """
     steps = rule.get("steps")
     if not isinstance(steps, list):
         log("[QualityGate] rule is missing steps")
-        return False
-    rule_ran = False
+        return []
+    results: list[_StepResult] = []
     for step in steps:
         if isinstance(step, dict):
-            rule_ran = run_step(step, raw_input, base_env=base_env, default_cwd=default_cwd) or rule_ran
+            result = run_step(step, raw_input, base_env=base_env, default_cwd=default_cwd)
+            if result is not None:
+                results.append(result)
         else:
             log("[QualityGate] invalid step entry ignored")
-    return rule_ran
+    return results
 
 
 def _run_configured_rules(
@@ -545,7 +570,7 @@ def _run_configured_rules(
     config: dict[str, Any],
     file_path: str = "",
     run_pathless: bool = True,
-) -> bool:
+) -> list[_StepResult]:
     """設定ファイルに従って rule を実行する。
 
     Args:
@@ -559,35 +584,35 @@ def _run_configured_rules(
             プロジェクト全体ルールの重複実行を防ぎます。
 
     Returns:
-        1 つ以上の step を実行した場合は True を返します。
+        起動できた step の _StepResult のリストを返します。
 
     Raises:
         例外は発生しません。
     """
     actions = config.get("actions")
     if not isinstance(actions, dict):
-        return False
+        return []
     action_config = actions.get(action)
     if not isinstance(action_config, dict):
-        return False
+        return []
     rules = action_config.get("rules")
     if not isinstance(rules, list):
-        return False
+        return []
 
     base_env = _base_env()
     default_cwd = _project_root()
-    handled = False
+    results: list[_StepResult] = []
     for rule in rules:
         if not isinstance(rule, dict):
             continue
         if rule.get("extensions") is None and not run_pathless:
             continue
         if _rule_matches(rule, input_data, file_path):
-            handled = _run_rule_steps(rule, raw_input, base_env, default_cwd) or handled
-    return handled
+            results.extend(_run_rule_steps(rule, raw_input, base_env, default_cwd))
+    return results
 
 
-def run(raw_input: str, action: str = "post-edit") -> None:
+def run(raw_input: str, action: str = "post-edit") -> list[_StepResult]:
     """quality-gate を実行する。
 
     Args:
@@ -595,7 +620,8 @@ def run(raw_input: str, action: str = "post-edit") -> None:
         action: 実行するアクション名です。
 
     Returns:
-        None
+        起動できた step の _StepResult のリストを返します。書き込み系ツール
+        以外の入力では空リストを返します。
 
     Raises:
         例外は発生しません。
@@ -603,28 +629,55 @@ def run(raw_input: str, action: str = "post-edit") -> None:
     normalized_action = _normalize_name(action) or "post-edit"
     input_data = parse_json_object(raw_input) or {}
     if not _is_write_tool(input_data):
-        return
+        return []
+    results: list[_StepResult] = []
     paths = _extract_target_file_paths(input_data)
     for index, fp in enumerate(paths or [None]):
         config = load_config(file_path=fp)
-        _run_configured_rules(
-            normalized_action,
-            raw_input,
-            input_data,
-            config,
-            file_path=fp or "",
-            run_pathless=index == 0,
+        results.extend(
+            _run_configured_rules(
+                normalized_action,
+                raw_input,
+                input_data,
+                config,
+                file_path=fp or "",
+                run_pathless=index == 0,
+            )
         )
+    return results
+
+
+def _build_failure_context(results: list[_StepResult]) -> str:
+    """失敗した step の出力から additionalContext 本文を組み立てる。
+
+    Args:
+        results: 実行済み step の結果リスト。
+
+    Returns:
+        additionalContext に載せる文字列。報告すべき失敗がなければ空文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    failures = [r for r in results if r.returncode != 0 and r.output]
+    if not failures:
+        return ""
+    body = "\n\n".join(f"## {r.name} (exit {r.returncode})\n{r.output}" for r in failures)
+    return f"<quality-gate>\n{body[:CONTEXT_LIMIT]}\n</quality-gate>"
 
 
 def main(argv: list[str] | None = None) -> int:
     """スクリプト実行時のエントリーポイント。
 
+    lint が失敗した step があれば、その出力を additionalContext として stdout に
+    返す。成功時は何も出力しないためトークンコストはゼロ。ブロックは行わず
+    常に 0 を返す。
+
     Args:
         argv: コマンドライン引数です。省略時は sys.argv を使います。
 
     Returns:
-        終了コードを返します。
+        常に 0 を返します。
 
     Raises:
         例外は発生しません。
@@ -635,7 +688,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         raw = read_raw_stdin()
-        run(raw, action=action)
+        context = _build_failure_context(run(raw, action=action))
+        if context:
+            print(emit_post_tool_use_output(context), end="")
         return 0
     except Exception as err:  # noqa: BLE001 - hook must remain non-blocking
         log(f"[QualityGate] unexpected error: {err}")
