@@ -9,6 +9,39 @@ model: sonnet
 
 プロダクトコードではなくハーネス設定改善でエージェント完了品質向上。
 
+## 入力契約
+
+- 基本入力は**生の baseline JSON**（`harness_audit --format json` の完全出力）
+- baseline JSON が渡されない単体起動時のみ、変更前に自分で1回だけ採取する
+- 要約テキストや概算スコアから baseline を再構成してはいけない
+- `baseline_report` で包んだり `top_actions` を別オブジェクトへ複製したりしない。`top_actions` は生の監査レポートのフィールドを使う
+
+期待する最小入力スキーマ:
+
+```json
+{
+  "scope": "repo",
+  "root_dir": "/abs/path/to/repo",
+  "target_mode": "repo",
+  "deterministic": true,
+  "rubric_version": "2026-03-30",
+  "overall_score": 50,
+  "max_score": 70,
+  "categories": {},
+  "checks": [],
+  "top_actions": [
+    {
+      "action": "Fix ...",
+      "path": "path/to/file",
+      "category": "Quality Gates",
+      "points": 3
+    }
+  ]
+}
+```
+
+このルートオブジェクトの必須フィールドまたは `top_actions` が無い場合は **FAIL**。
+
 ## ワークフロー
 
 1. 呼び出し元（/harness ステップ3）から渡されるベースライン JSON とトップ3アクションを入力とする（単体起動時のみ `bluecore_run bluecore.ci.harness_audit <scope> --format json` で自己収集）
@@ -24,12 +57,15 @@ model: sonnet
 - クロスプラットフォーム動作保持
 - 脆弱シェルクォーティング導入禁止
 - エディタ間互換性維持
+- 予測値は `estimated` と明記し **measured** と混同しない。実測は再実行した baseline/after JSON がある場合のみ
+- OpenCode 系指摘は、その repo / platform が `.opencode/commands/*` を実際に管理対象としている場合だけ修正候補にする
+- メモリ永続化系指摘は、現在の scope で実際に使われている hooks / modules に照合し、旧パス名だけを根拠に欠落扱いしない
 
 ## 出力
 
 - ベースラインスコアカード
 - 適用変更
-- 測定改善
+- 測定改善（実測）または推定影響（estimated）
 - 残存リスク
 
 ## 永続メモリ

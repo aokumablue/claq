@@ -17,6 +17,7 @@ A/Bどちらが課題をよりよく満たすかを、内容と構造だけで�
 - **output_b_path**: B 側の出力ファイルまたはディレクトリのパス
 - **eval_prompt**: 実際に実行した元のタスク／プロンプト
 - **expectations**: 確認する期待値のリスト（任意）
+- **output_storage_path**: 比較結果 JSON の保存先（任意。未指定時は `comparison.json`）
 
 ## 手順
 
@@ -66,7 +67,14 @@ A/Bそれぞれについて:
 
 ### 7. 結果を書く
 
-結果をJSONにして、指定パス（未指定なら `comparison.json`）へ保存。
+結果を JSON にして `output_storage_path`（未指定時は `comparison.json`）へ保存する。
+
+## 出力契約
+
+- 最終出力は**単一の JSON object 1個のみ**
+- 前置きテキスト・Markdown 見出し・コードフェンス・複数 JSON の連続出力は禁止
+- `expectations` がある場合は `expectation_results.A` と `expectation_results.B` の両方を必ず出力する
+- rubric / expectation の項目名は重複させず一意にする
 
 ## 出力形式
 

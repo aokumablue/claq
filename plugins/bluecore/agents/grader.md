@@ -72,7 +72,7 @@ grading後に、eval改善の余地が明確なら指摘。
 
 ### 7. メトリクスと時間を読む
 
-`{outputs_dir}/metrics.json` と `{outputs_dir}/../timing.json` があれば読み込む。
+`{outputs_dir}/metrics.json` と `{outputs_dir}/../timing.json` があれば読み込む。`grading.json.timing` は grader が記録する executor と grader の所要時間であり、`timing.json` のタスク完了通知（トークン数・経過時間）とは別の集計である。両者を同値にせず、ベンチマークの時間・トークンは `timing.json` を正とする。
 
 ### 8. grading結果を書く
 
@@ -177,11 +177,12 @@ grading後に、eval改善の余地が明確なら指摘。
   - **evidence**: 判定の根拠になる引用
 - **summary**: 集計情報（passed/failed/total/pass_rate）
 - **execution_metrics**: executorの `metrics.json` からコピーした情報
-  - **output_chars**: 出力ファイルの総文字数（トークンの代理）
+  - **output_chars**: 出力ファイルの総文字数（トークンの代理ではなく、ベンチマークの tokens には使わない）
   - **transcript_chars**: トランスクリプトの文字数
-- **timing**: `timing.json` にある実時間
+- **timing**: grader が記録する executor/grader 所要時間集計
   - **executor_duration_seconds**: executorサブエージェントの実行時間
-  - **total_duration_seconds**: 全体の経過時間
+  - **grader_duration_seconds**: graderの実行時間
+  - **total_duration_seconds**: 両者を含む経過時間（合計以上）
 - **claims**: 抽出して検証した主張
   - **claim**: 検証対象の文
   - **type**: `factual` / `process` / `quality`

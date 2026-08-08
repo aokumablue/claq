@@ -22,6 +22,7 @@ RED → GREEN → REFACTOR → REPEAT
 
 - 各 GREEN 到達ごとに検証を通してコミット可能な状態にし、1 サイクル 1 論理変更で進める
 - 合否報告はテスト実行の出力を証跡とし、実行していないテストの成否は報告しない
+- timeout/subprocess 実装にも例外なく RED → GREEN → REFACTOR を適用する。タイムアウト分岐・正常終了・非ゼロ終了・例外・後始末を別々に RED で再現してから最小実装に進む
 
 ## サイクル具体例（pytest）
 
@@ -59,6 +60,30 @@ def slugify(text: str) -> str:
 ```
 
 実行: `pytest -q` → グリーン維持を確認してから次サイクルへ。
+
+## timeout/subprocess テスト契約
+
+timeout/subprocess を含むサイクルでは、RED の前にテスト仕様へ次を明記する。
+
+- 対象関数（subject function）と入力条件
+- 期待する exit codes（正常・非ゼロ・timeout 時）
+- 許容時間（permitted duration。テストおよび subprocess に許容する上限時間）
+- cleanup（timeout・例外・成功の各経路で回収するプロセス・ファイル・ハンドル）
+- mock 境界（notifier/clock/subprocess のどこまでをモックし何を実物として検証するか）
+- 対象テストコマンド（このサイクルで実行する具体的なテストコマンド）
+
+実時間待機や実プロセス起動に依存せず、clock と subprocess をモックして timeout を決定的に発火させる。cleanup は finally 経路または同等の経路を通ることをテストで検証し、notifier は副作用そのものではなく呼び出し内容を検証する。
+
+## 出力契約
+
+各サイクルの出力には、次をこの順で含める。
+
+1. `RED`: 対象関数・失敗させた条件・対象テストコマンド・実際の exit code と失敗要約
+2. `GREEN`: 最小実装の file:line・同じ対象テストコマンド・実際の exit code と結果
+3. `REFACTOR`: 整理内容・再実行した対象テストコマンド・実際の exit code と結果
+4. timeout/subprocess の場合: exit codes・許容時間・cleanup・mock 境界
+
+テスト未実行・期限超過・cleanup 未検証の項目は PASS と書かず、未検証として明記する。
 
 ## 数値基準
 
