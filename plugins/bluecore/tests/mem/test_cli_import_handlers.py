@@ -1,4 +1,4 @@
-"""cli_dashboard_handlers.handle_import の取り込み分岐テスト。"""
+"""cli_import_handlers.handle_import の取り込み分岐テスト。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import bluecore.mem.importers as imp
-from bluecore.mem.cli_dashboard_handlers import handle_import
+from bluecore.mem.cli_import_handlers import handle_import
 from tests.mem.conftest import FakeDB, make_settings, open_fake_db
 
 

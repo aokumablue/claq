@@ -18,7 +18,6 @@ from bluecore.mem.models import (
     EventLog,
     Instinct,
     InteractionLog,
-    MemItemRun,
     MemoryChunk,
     ProjectProfile,
     Session,
@@ -947,8 +946,8 @@ class TestGetSessionIdsWithChunks:
         assert db.get_session_ids_with_chunks(project="proj-a") == ["s-a"]
 
 
-class TestInteractionAndRunQueries:
-    """interaction_logs / mem_item_runs の取得系テスト"""
+class TestInteractionQueries:
+    """interaction_logs の取得系テスト"""
 
     def test_interaction_log_queries_and_prompt_hash(self, db: Database) -> None:
         log1 = InteractionLog(
@@ -993,42 +992,6 @@ class TestInteractionAndRunQueries:
         assert db.get_all_interaction_logs()[0].created_at_epoch == 1
         assert db.get_next_interaction_index("sess-1") == 2
         assert db.get_next_interaction_index("missing") == 0
-
-    def test_mem_item_run_queries(self, db: Database) -> None:
-        run1 = MemItemRun(
-            session_id="sess-1",
-            project="proj-a",
-            skill_name="learn",
-            created_at_epoch=1,
-            item_type="skill",
-        )
-        run2 = MemItemRun(
-            session_id="sess-1",
-            project="proj-a",
-            skill_name="dashboard",
-            created_at_epoch=2,
-            item_type="command",
-        )
-        run3 = MemItemRun(
-            session_id="sess-2",
-            project="proj-b",
-            skill_name="reviewer",
-            created_at_epoch=3,
-            item_type="agent",
-        )
-
-        db.store_mem_item_run(run1)
-        db.store_mem_item_run(run2)
-        db.store_mem_item_run(run3)
-
-        by_skill = db.get_skill_run_stats(skill_name="learn")
-        by_project = db.get_skill_run_stats(project="proj-a")
-        all_runs = db.get_skill_run_stats()
-
-        assert [run.skill_name for run in by_skill] == ["learn"]
-        assert [run.skill_name for run in by_project] == ["dashboard", "learn"]
-        assert [run.skill_name for run in all_runs] == ["reviewer", "dashboard", "learn"]
-        assert [run.skill_name for run in db.get_all_mem_item_runs()] == ["learn", "dashboard", "reviewer"]
 
     @pytest.mark.parametrize(
         "input_val, expected",

@@ -154,29 +154,6 @@ CREATE TABLE IF NOT EXISTS project_profiles (
 CREATE INDEX IF NOT EXISTS idx_proj_prof_user ON project_profiles(origin_user);
 CREATE INDEX IF NOT EXISTS idx_proj_prof_lang ON project_profiles(primary_language);
 
--- アイテム実行記録（スキル・コマンド・エージェント、ベストエフォート観測）
-CREATE TABLE IF NOT EXISTS mem_item_runs (
-  id TEXT PRIMARY KEY,
-  origin_user TEXT NOT NULL DEFAULT '',
-  session_id TEXT NOT NULL,
-  project TEXT NOT NULL,
-  skill_name TEXT NOT NULL,
-  skill_trigger TEXT,
-  outcome TEXT DEFAULT 'unknown',
-  tools_used TEXT DEFAULT '[]',
-  files_modified_count INTEGER DEFAULT 0,
-  duration_seconds INTEGER,
-  interaction_log_id TEXT REFERENCES interaction_logs(id),
-  created_at_epoch INTEGER NOT NULL,
-  item_type TEXT NOT NULL DEFAULT 'skill'
-);
-
-CREATE INDEX IF NOT EXISTS idx_mir_skill ON mem_item_runs(skill_name);
-CREATE INDEX IF NOT EXISTS idx_mir_project ON mem_item_runs(project);
-CREATE INDEX IF NOT EXISTS idx_mir_epoch ON mem_item_runs(created_at_epoch);
-CREATE INDEX IF NOT EXISTS idx_mir_outcome ON mem_item_runs(outcome, created_at_epoch);
-CREATE INDEX IF NOT EXISTS idx_mir_item_type ON mem_item_runs(item_type);
-
 -- マイグレーション適用済みバージョン管理（_MIGRATIONS の適用状態を記録）
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version TEXT PRIMARY KEY,

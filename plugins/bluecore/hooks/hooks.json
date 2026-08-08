@@ -194,18 +194,6 @@
         "description": "mem: 全ツールイベントを受け、対象ツールだけをメモリチャンクに記録"
       },
       {
-        "matcher": "Skill",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli record-item-run",
-            "async": true,
-            "timeout": 10
-          }
-        ],
-        "description": "mem: スキル実行を mem_item_runs に記録（item_type=skill）"
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {

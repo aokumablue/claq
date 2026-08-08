@@ -1,4 +1,4 @@
-"""mem CLI: record/profile/item-run handlers."""
+"""mem CLI: record/profile handlers."""
 
 from __future__ import annotations
 
@@ -282,58 +282,3 @@ def handle_get_project_profile(
     except Exception as e:
         deps.log.warning("プロジェクトプロファイル取得失敗: %s", e)
         print(json.dumps({"found": False, "error": str(e)}))
-
-
-def _extract_item_name_and_type(
-    stdin_data: dict[str, Any], *, log: Any
-) -> tuple[str, str] | None:
-    """stdin_data からスキル名と item_type を抽出して返す。無効な場合は None。"""
-    tool_input = stdin_data.get("tool_input", {})
-    if isinstance(tool_input, dict) and tool_input.get("skill"):
-        skill_name = str(tool_input["skill"])
-        item_type = "skill"
-    else:
-        skill_name = str(stdin_data.get("skill_name", "") or "")
-        item_type = stdin_data.get("item_type", "skill")
-
-    if not skill_name:
-        return None
-    if item_type not in ("skill", "command", "agent"):
-        log.warning("record-item-run: 不正な item_type=%s", item_type)
-        return None
-    return skill_name, item_type
-
-
-def handle_record_item_run(
-    settings: Settings,
-    stdin_data: dict[str, Any],
-    deps: RecordDeps,
-) -> None:
-    """スキル・コマンド・エージェントの実行記録を mem_item_runs に保存する。"""
-    from bluecore.mem.database import MemItemRun
-
-    extracted = _extract_item_name_and_type(stdin_data, log=deps.log)
-    if extracted is None:
-        return
-    skill_name, item_type = extracted
-
-    run = MemItemRun(
-        session_id=str(stdin_data.get("session_id", "") or ""),
-        project=deps.get_project(stdin_data),
-        skill_name=skill_name,
-        created_at_epoch=int(time.time()),
-        origin_user=deps.get_git_user_name(),
-        item_type=item_type,
-        outcome=stdin_data.get("outcome", "unknown"),
-        skill_trigger=stdin_data.get("skill_trigger"),
-        duration_seconds=stdin_data.get("duration_seconds"),
-    )
-
-    try:
-        with deps.open_db(settings) as db:
-            run_id = db.store_mem_item_run(run)
-        deps.log.info("item_run 記録: %s (%s) id=%s", skill_name, item_type, run_id)
-        print(json.dumps({"success": True, "id": run_id}))
-    except Exception as e:
-        deps.log.warning("record-item-run 失敗: %s", e)
-        print(json.dumps({"success": False, "error": str(e)}))

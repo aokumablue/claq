@@ -8,19 +8,14 @@ import io
 import json
 import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
 import bluecore.mem.importers as importers_mod
-import bluecore.mem.item_usage_queries as item_usage_queries_mod
 from bluecore.mem import cli
 from bluecore.mem.database import MemoryChunk
 from bluecore.mem.search import SearchResult
 from tests.mem.conftest import FakeDB, make_settings, open_fake_db
-
-# dashboard_queries / pg_database は PostgreSQL チーム同期廃止に伴い、それらへ依存する
-# cli_dashboard_handlers 側は次タスクで解消予定。当該テスト関数内でのみ遅延 import する。
 
 
 def test_helper_functions_cover_filters_and_rendering() -> None:
@@ -665,181 +660,6 @@ def test_handle_session_end_auto_compact_error(monkeypatch: pytest.MonkeyPatch, 
     assert any("自動圧縮エラー" in message for message in warnings)
 
 
-def test_handle_dashboard_html_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """個人 SQLite データのみでダッシュボード HTML を生成する。"""
-    settings = make_settings(tmp_path)
-    html_output = tmp_path / "dashboard.html"
-
-    monkeypatch.setattr(
-        cli,
-        "_collect_project_overview",
-        lambda: {
-            "summary": {
-                "total_projects": 1,
-                "personal_instincts": 2,
-                "inherited_instincts": 1,
-                "global_personal": 1,
-                "global_inherited": 0,
-            },
-            "projects": [
-                {
-                    "id": "p1",
-                    "name": "repo",
-                    "personal_instincts": 2,
-                    "inherited_instincts": 1,
-                    "observations": 4,
-                    "last_seen": "2024-01-01T00:00:00Z",
-                }
-            ],
-        },
-    )
-    monkeypatch.setattr(
-        item_usage_queries_mod,
-        "item_usage_ranking",
-        lambda conn, days: [  # noqa: ARG005
-            {"item_name": "skill-a", "item_type": "skill", "uses": 2, "last_used_epoch": 1}
-        ],
-    )
-    monkeypatch.setattr(
-        item_usage_queries_mod,
-        "daily_trend",
-        lambda conn, days: [  # noqa: ARG005
-            {"date": "2024-01-01", "skill": 1, "command": 0, "agent": 0, "total": 1}
-        ],
-    )
-    monkeypatch.setattr(
-        item_usage_queries_mod,
-        "outcome_distribution",
-        lambda conn, days: [  # noqa: ARG005
-            {"outcome": "success", "count": 1}
-        ],
-    )
-
-    fake_jinja2 = ModuleType("jinja2")
-
-    class FakeTemplate:
-        def render(self, **kwargs) -> str:  # noqa: ANN003
-            return f"HTML:{kwargs['days']}"
-
-    class FakeEnvironment:
-        def __init__(self, loader, autoescape=False) -> None:  # noqa: ANN001
-            self.loader = loader
-
-        def get_template(self, name):  # noqa: ANN001
-            return FakeTemplate()
-
-    class FakeFileSystemLoader:
-        def __init__(self, path) -> None:  # noqa: ANN001
-            self.path = path
-
-    fake_jinja2.Environment = FakeEnvironment
-    fake_jinja2.FileSystemLoader = FakeFileSystemLoader
-    fake_jinja2.select_autoescape = lambda enabled_extensions=(): True
-    monkeypatch.setitem(sys.modules, "jinja2", fake_jinja2)
-
-    cli._handle_dashboard(settings, {"output": str(html_output), "format": "html", "days": 7})
-    assert json.loads(capsys.readouterr().out)["success"] is True
-    assert html_output.read_text(encoding="utf-8") == "HTML:7"
-
-
-def test_handle_dashboard_rejects_unsafe_output_path_and_allows_safe_path(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    settings = make_settings(tmp_path)
-    monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(FakeDB()))
-
-    unsafe_output = tmp_path.parent / "dashboard-unsafe.json"
-    cli._handle_dashboard(settings, {"output": str(unsafe_output), "format": "json"})
-    rejected = json.loads(capsys.readouterr().out)
-    assert rejected["success"] is False
-    assert "output path" in rejected["error"]
-    assert not unsafe_output.exists()
-
-    safe_output = tmp_path / "dashboard-safe.json"
-    cli._handle_dashboard(settings, {"output": str(safe_output), "format": "json"})
-    accepted = json.loads(capsys.readouterr().out)
-    assert accepted["success"] is True
-    assert safe_output.exists()
-
-
-def test_handle_dashboard_coerces_string_days_and_rejects_invalid(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """days は文字列でも int に変換され、非数値はエラー JSON を返す。"""
-    settings = make_settings(tmp_path)
-    monkeypatch.setattr(cli, "_open_db", lambda settings: open_fake_db(FakeDB()))
-
-    output = tmp_path / "dashboard-days.json"
-    cli._handle_dashboard(settings, {"output": str(output), "format": "json", "days": "7"})
-    assert json.loads(capsys.readouterr().out)["success"] is True
-
-    cli._handle_dashboard(settings, {"output": str(output), "format": "json", "days": "abc"})
-    rejected = json.loads(capsys.readouterr().out)
-    assert rejected["success"] is False
-    assert "days" in rejected["error"]
-
-
-def test_handle_dashboard_json_and_main_entrypoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    settings = make_settings(tmp_path)
-
-    monkeypatch.setattr(
-        cli,
-        "_collect_project_overview",
-        lambda: {
-            "summary": {
-                "total_projects": 1,
-                "personal_instincts": 2,
-                "inherited_instincts": 1,
-                "global_personal": 0,
-                "global_inherited": 0,
-            },
-            "projects": [
-                {
-                    "id": "p1",
-                    "name": "repo",
-                    "personal_instincts": 2,
-                    "inherited_instincts": 1,
-                    "observations": 4,
-                    "last_seen": "2024-01-01T00:00:00Z",
-                }
-            ],
-        },
-    )
-    cli._handle_dashboard(settings, {"output": str(tmp_path / "dashboard.json"), "format": "json"})
-    out_data = json.loads((tmp_path / "dashboard.json").read_text(encoding="utf-8"))
-    assert "personal_ranking" in out_data
-    assert out_data["project_overview"]["projects"][0]["id"] == "p1"
-
-    monkeypatch.setattr(sys, "argv", ["python"])
-    assert cli.main() == 0
-
-    monkeypatch.setattr(cli.Settings, "load", lambda: settings)
-    monkeypatch.setattr("bluecore.mem.logger.setup", lambda *args, **kwargs: None)
-    monkeypatch.setattr(sys, "argv", ["python", "not-a-command"])
-    assert cli.main() == 2
-
-
-def test_collect_project_overview_skips_invalid_registry_entries(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import bluecore.skills.learn.cli as learn_cli
-
-    project_dir = tmp_path / "proj"
-    project_dir.mkdir()
-
-    monkeypatch.setattr(learn_cli, "load_registry", lambda: {"bad": None, "good": {"name": "repo", "last_seen": "2024-01-01T00:00:00Z"}})
-    monkeypatch.setattr(learn_cli, "_project_dir_for_id", lambda project_id: project_dir)
-    monkeypatch.setattr(learn_cli, "_load_instincts_from_dir", lambda directory, source_type, scope_label: [])  # noqa: ARG005
-    monkeypatch.setattr(cli, "_count_lines", lambda path: 0)
-
-    overview = cli._collect_project_overview()
-
-    assert overview["summary"]["total_projects"] == 1
-    assert overview["projects"][0]["name"] == "repo"
-
-
 def test_main_routes_all_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import bluecore.mem.logger as logger_mod
 
@@ -852,8 +672,8 @@ def test_main_routes_all_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     commands = [
         "init", "setup", "context", "search", "session-init", "observe",
         "session-end", "compact", "search-structured", "record",
-        "import", "dashboard", "record-interaction",
-        "record-project-profile", "get-project-profile", "record-item-run",
+        "import", "record-interaction",
+        "record-project-profile", "get-project-profile",
     ]
 
     for name in commands:
@@ -1022,75 +842,6 @@ def test_format_wrappers_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-# === cli_dashboard_handlers のカバレッジ補完 ===
-
-
-def test_count_lines_returns_zero_on_oserror(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """count_lines は OSError 発生時に 0 を返す。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    target = tmp_path / "a.jsonl"
-    target.write_text("line\n")
-
-    def _raise(*_args, **_kwargs):
-        raise OSError("denied")
-
-    monkeypatch.setattr(Path, "open", _raise)
-    assert cdh.count_lines(target) == 0
-
-
-def test_count_lines_returns_zero_when_missing(tmp_path: Path) -> None:
-    """count_lines は存在しないパスに対して 0 を返す。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    assert cdh.count_lines(tmp_path / "nope.jsonl") == 0
-
-
-def test_count_lines_counts_existing_file(tmp_path: Path) -> None:
-    """count_lines は既存ファイルの行数を返す。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    target = tmp_path / "data.jsonl"
-    target.write_text("a\nb\nc\n", encoding="utf-8")
-    assert cdh.count_lines(target) == 3
-
-
-def test_cli_count_lines_delegates_to_dashboard_handlers(tmp_path: Path) -> None:
-    """cli._count_lines は cli_dashboard_handlers.count_lines に委譲する。"""
-    target = tmp_path / "data.jsonl"
-    target.write_text("x\n", encoding="utf-8")
-    assert cli._count_lines(target) == 1
-
-
-def test_resolve_safe_dashboard_output_path_invalid_value(tmp_path: Path) -> None:
-    """非 str / 空白 / 解決不能パスはすべて None。"""
-    from bluecore.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
-
-    settings = make_settings(tmp_path)
-    assert _resolve_safe_dashboard_output_path(settings, None) is None
-    assert _resolve_safe_dashboard_output_path(settings, 123) is None
-    assert _resolve_safe_dashboard_output_path(settings, "   ") is None
-
-
-def test_resolve_safe_dashboard_output_path_relative(tmp_path: Path) -> None:
-    """相対パスは settings.data_path 配下に展開される。"""
-    from bluecore.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
-
-    settings = make_settings(tmp_path)
-    resolved = _resolve_safe_dashboard_output_path(settings, "out/inner.html")
-    assert resolved is not None
-    assert str(resolved).startswith(str(Path(settings.data_path).resolve()))
-
-
-def test_resolve_safe_dashboard_output_path_outside_root(tmp_path: Path) -> None:
-    """data_path 外のパスは拒否される。"""
-    from bluecore.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
-
-    settings = make_settings(tmp_path)
-    outside = str(tmp_path.parent / "outside.html")
-    assert _resolve_safe_dashboard_output_path(settings, outside) is None
-
-
 def test_slim_prompt_returns_empty_when_no_meaningful_content() -> None:
     """first_meaningful_line も in_code_block も拾えない場合は空文字を返す（line 267）。"""
     from bluecore.mem.cli_search_handlers import slim_prompt
@@ -1114,28 +865,6 @@ def test_slim_context_content_skips_blank_lines() -> None:
     assert "hello world" in result
     # 余分な空行が含まれない
     assert "\n\n" not in result
-
-
-def test_resolve_safe_dashboard_output_path_resolve_oserror(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Path.resolve が OSError を出した場合は None を返す。"""
-    from bluecore.mem.cli_dashboard_handlers import _resolve_safe_dashboard_output_path
-
-    settings = make_settings(tmp_path)
-
-    original_resolve = Path.resolve
-    call_count = {"n": 0}
-
-    def _resolve(self_path: Path, *args, **kwargs):  # type: ignore[override]
-        # 1回目（allowed_root 計算）は通常通り、2回目（candidate.resolve()）は例外
-        call_count["n"] += 1
-        if call_count["n"] >= 2:
-            raise OSError("resolve fail")
-        return original_resolve(self_path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "resolve", _resolve)
-    assert _resolve_safe_dashboard_output_path(settings, str(tmp_path / "x.html")) is None
 
 
 def test_slim_prompt_codeblock_blank_only() -> None:

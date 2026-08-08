@@ -15,7 +15,6 @@ from bluecore.mem.models import (
     EventLog,
     Instinct,
     InteractionLog,
-    MemItemRun,
     MemoryChunk,
     ProjectProfile,
     Session,
@@ -28,7 +27,6 @@ from bluecore.mem.row_converters import (
     _row_to_event_log,
     _row_to_instinct,
     _row_to_interaction_log,
-    _row_to_mem_item_run,
     _row_to_project_profile,
     _row_to_session_digest,
 )
@@ -672,67 +670,6 @@ class Database:
             "SELECT * FROM project_profiles ORDER BY last_updated_epoch"
         ).fetchall()
         return [_row_to_project_profile(r) for r in rows]
-
-    # --- スキル実行記録 ---
-
-    def store_mem_item_run(self, run: MemItemRun) -> str:
-        """アイテム実行記録を保存し、id を返す。"""
-        run_uuid = run.id or generate_uuid()
-        self.conn.execute(
-            """INSERT INTO mem_item_runs
-         (id, origin_user, session_id, project,
-          skill_name, skill_trigger, outcome,
-          tools_used, files_modified_count, duration_seconds,
-          interaction_log_id, created_at_epoch, item_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                run_uuid,
-                run.origin_user,
-                run.session_id,
-                run.project,
-                run.skill_name,
-                run.skill_trigger,
-                run.outcome,
-                json.dumps(run.tools_used, ensure_ascii=False),
-                run.files_modified_count,
-                run.duration_seconds,
-                run.interaction_log_id,
-                run.created_at_epoch,
-                run.item_type,
-            ),
-        )
-        self.conn.commit()
-        return run_uuid
-
-    def get_skill_run_stats(
-        self,
-        skill_name: str | None = None,
-        project: str | None = None,
-        limit: int = 100,
-    ) -> list[MemItemRun]:
-        """スキル実行記録を取得する。"""
-        conditions = []
-        params: list = []
-        if skill_name:
-            conditions.append("skill_name = ?")
-            params.append(skill_name)
-        if project:
-            conditions.append("project = ?")
-            params.append(project)
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        params.append(limit)
-        rows = self.conn.execute(
-            f"SELECT * FROM mem_item_runs {where} ORDER BY created_at_epoch DESC LIMIT ?",
-            params,
-        ).fetchall()
-        return [_row_to_mem_item_run(r) for r in rows]
-
-    def get_all_mem_item_runs(self) -> list[MemItemRun]:
-        """全アイテム実行記録を取得する（同期用）。"""
-        rows = self.conn.execute(
-            "SELECT * FROM mem_item_runs ORDER BY created_at_epoch"
-        ).fetchall()
-        return [_row_to_mem_item_run(r) for r in rows]
 
     # --- セッション要約 ---
 

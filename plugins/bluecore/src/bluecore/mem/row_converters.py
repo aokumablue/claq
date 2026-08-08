@@ -11,7 +11,6 @@ from bluecore.mem.models import (
     EventLog,
     Instinct,
     InteractionLog,
-    MemItemRun,
     MemoryChunk,
     ProjectProfile,
     SessionDigest,
@@ -172,24 +171,4 @@ def _row_to_session_digest(row: sqlite3.Row) -> SessionDigest:
         started_at_epoch=row["started_at_epoch"],
         ended_at_epoch=row["ended_at_epoch"],
         created_at_epoch=row["created_at_epoch"],
-    )
-
-
-def _row_to_mem_item_run(row: sqlite3.Row) -> MemItemRun:
-    """mem_item_runs の Row を MemItemRun に変換する。"""
-    keys = row.keys()
-    return MemItemRun(
-        id=row["id"],
-        origin_user=row["origin_user"],
-        session_id=row["session_id"],
-        project=row["project"],
-        skill_name=row["skill_name"],
-        skill_trigger=row["skill_trigger"],
-        outcome=row["outcome"],
-        tools_used=_parse_json_list(row["tools_used"]),
-        files_modified_count=row["files_modified_count"],
-        duration_seconds=row["duration_seconds"],
-        interaction_log_id=row["interaction_log_id"],
-        created_at_epoch=row["created_at_epoch"],
-        item_type=row["item_type"] if "item_type" in keys else "skill",
     )

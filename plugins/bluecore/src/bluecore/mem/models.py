@@ -167,22 +167,3 @@ class SessionDigest:
     source: str = "chunks"  # 'transcript+chunks'|'chunks'
     chunk_count: int = 0
     ended_at_epoch: int | None = None
-
-
-@dataclass
-class MemItemRun:
-    """メムサブシステムが観測したスキル・コマンド・エージェントの実行記録（ベストエフォート）"""
-
-    session_id: str
-    project: str
-    skill_name: str
-    created_at_epoch: int
-    id: str | None = None
-    origin_user: str = ""
-    skill_trigger: str | None = None  # トリガープロンプト先頭200文字
-    outcome: str = "unknown"  # 'success'|'partial'|'failure'|'unknown'
-    tools_used: list[str] = field(default_factory=list)
-    files_modified_count: int = 0
-    duration_seconds: int | None = None
-    interaction_log_id: str | None = None
-    item_type: str = "skill"  # 'skill'|'command'|'agent'

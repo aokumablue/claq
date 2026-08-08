@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 from bluecore.hooks.hook_common import print_session_start_output
 from bluecore.lib.core_utils import get_git_user_name
-from bluecore.mem import cli_dashboard_handlers as _dashboard_handlers
 from bluecore.mem import cli_digest_handlers as _digest_handlers
+from bluecore.mem import cli_import_handlers as _import_handlers
 from bluecore.mem import cli_record_handlers as _record_handlers
 from bluecore.mem import cli_search_handlers as _search_handlers
 from bluecore.mem import cli_session_handlers as _session_handlers
@@ -372,36 +372,14 @@ def _slim_context_content(text: str, *, max_prose_lines: int = 6, max_prose_line
     )
 
 
-def _count_lines(path: Path) -> int:
-    """ファイルの行数を数える。"""
-    return _dashboard_handlers.count_lines(path)
-
-
-def _collect_project_overview() -> dict:
-    """ダッシュボード用にプロジェクト概況を収集する。"""
-    return _dashboard_handlers.collect_project_overview(
-        count_lines_fn=_count_lines,
-        log=log,
-    )
-
-
 def _handle_import(settings: Settings, stdin_data: dict) -> None:
     """import コマンド: 外部データ（instincts/adrs/events）を mem に取り込む。"""
-    _dashboard_handlers.handle_import(
+    _import_handlers.handle_import(
         settings,
         stdin_data,
         open_db=_open_db,
         get_git_user_name=get_git_user_name,
     )
-
-
-def _handle_dashboard(settings: Settings, stdin_data: dict) -> None:
-    """dashboard コマンド: SQLite データから静的 HTML ダッシュボードを生成する。"""
-    deps = _dashboard_handlers.DashboardDeps(
-        open_db=_open_db,
-        collect_project_overview_fn=_collect_project_overview,
-    )
-    _dashboard_handlers.handle_dashboard(settings, stdin_data, deps)
 
 
 def _handle_record_interaction(settings: Settings, stdin_data: dict) -> None:
@@ -417,11 +395,6 @@ def _handle_record_project_profile(settings: Settings, stdin_data: dict) -> str:
 def _handle_get_project_profile(settings: Settings, stdin_data: dict) -> None:
     """get-project-profile コマンド: project_profiles から技術スタックを取得する。"""
     _record_handlers.handle_get_project_profile(settings, stdin_data, _record_deps())
-
-
-def _handle_record_item_run(settings: Settings, stdin_data: dict) -> None:
-    """record-item-run コマンド: スキル/コマンド/エージェントの実行を mem_item_runs に記録する。"""
-    _record_handlers.handle_record_item_run(settings, stdin_data, _record_deps())
 
 
 def _handle_digest_backfill(settings: Settings, stdin_data: dict) -> None:
@@ -443,11 +416,9 @@ _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "search-structured": _handle_search_structured,
     "record": _handle_record,
     "import": _handle_import,
-    "dashboard": _handle_dashboard,
     "record-interaction": _handle_record_interaction,
     "record-project-profile": _handle_record_project_profile,
     "get-project-profile": _handle_get_project_profile,
-    "record-item-run": _handle_record_item_run,
     "digest-backfill": _handle_digest_backfill,
 }
 
@@ -471,11 +442,9 @@ Commands:
   compact            Execute memory compaction
   reembed            Recreate the vector table and re-embed all chunks (after model change)
   import             Import external data (instincts, adrs, events) to mem
-  dashboard          Generate a static HTML dashboard from local SQLite data
   record-interaction     Record a user/AI interaction pair to interaction_logs
   record-project-profile Upsert project tech stack to project_profiles
   get-project-profile    Get project tech stack from project_profiles
-  record-item-run        Record a skill/command/agent execution to mem_item_runs
   digest-backfill        Backfill session digests for existing sessions (reads JSON from stdin)
 
 search-structured Input (JSON):

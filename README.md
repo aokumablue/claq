@@ -78,7 +78,6 @@ claude plugin install bluecore@bluecore
 | [`/harness`](plugins/bluecore/commands/harness.md) | 品質管理 | `[scope] [--audit-only] [--format=text\|json]` | スコア取得→harness-tuner で改善→再採点 |
 | [`/skill-gen`](plugins/bluecore/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--output=path] [--instincts]` | 入力収集→skill-make→skill-tune→grader/comparator/bench-analyzer 評価 |
 | [`/instinct`](plugins/bluecore/commands/instinct.md) | インスティンクト管理 | `<export\|import\|promote\|prune\|evolve>` | 学習成果の昇格・削除・スキル化 |
-| [`/dashboard`](plugins/bluecore/commands/dashboard.md) | 利用率可視化 | `[--days=N] [--output=path] [--format=html\|json]` | 個人(SQLite) の使用率を可視化する静的 HTML |
 | [`/test-gen`](plugins/bluecore/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→承認→実装。言語非依存 |
 
 ---
@@ -343,8 +342,7 @@ flowchart LR
   classDef cmd    fill:#2563eb,stroke:#1e40af,color:#fff,rx:6
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
 
-  U(["📊 定期メンテ"]) --> CD["/dashboard"]:::cmd
-  CD --> CH["/harness"]:::cmd
+  U(["📊 定期メンテ"]) --> CH["/harness"]:::cmd
 
   subgraph harness["⚙️ harness 内部（5ステップ）"]
     direction TB
@@ -356,17 +354,16 @@ flowchart LR
 ```
 
 **トリガー**: 週次・月次の品質チェック
-**期待効果**: ダッシュボードで利用率を確認 → ハーネスで自動採点 → harness-tuner で改善案を適用 → 再採点で効果検証
+**期待効果**: ハーネスで自動採点 → harness-tuner で改善案を適用 → 再採点で効果検証
 
 **実行例**:
 
 ```bash
-/dashboard --days=7
 /harness repo
 ```
 
 **難度**: ★★☆☆☆ (初心者向け)
-**想定所要時間**: dashboard 1分 / harness 10分
+**想定所要時間**: harness 10分
 
 ---
 

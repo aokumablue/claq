@@ -173,7 +173,7 @@ def test_search_structured_query_and_compact_dry_run(
     assert payload["results"][0]["content"] == "content"
 
 
-def test_record_and_profile_and_item_run_handlers(
+def test_record_and_profile_handlers(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -242,21 +242,6 @@ def test_record_and_profile_and_item_run_handlers(
     cli._handle_get_project_profile(settings, {"project": "missing"})
     assert json.loads(capsys.readouterr().out) == {"found": False}
 
-    cli._handle_record_item_run(
-        settings,
-        {
-            "tool_input": {"skill": "skill-a"},
-            "session_id": "s1",
-            "cwd": str(tmp_path),
-            "outcome": "success",
-        },
-    )
-    assert json.loads(capsys.readouterr().out)["success"] is True
-    assert db.item_runs[0].skill_name == "skill-a"
-
-    cli._handle_record_item_run(settings, {"skill_name": "", "item_type": "skill"})
-    cli._handle_record_item_run(settings, {"skill_name": "skill-b", "item_type": "bogus"})
-
 
 def test_record_and_profile_failure_paths(
     monkeypatch: pytest.MonkeyPatch,
@@ -274,7 +259,6 @@ def test_record_and_profile_failure_paths(
     )
     assert cli._handle_record_project_profile(settings, {"project": "repo"}) == ""
     assert cli._handle_get_project_profile(settings, {"project": "repo"}) is None
-    cli._handle_record_item_run(settings, {"skill_name": "skill-a"})
 
     payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     assert any(payload.get("error") == "boom" for payload in payloads)
