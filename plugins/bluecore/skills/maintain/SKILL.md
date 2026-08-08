@@ -35,7 +35,6 @@ collect_skill_create_inputs "${COMMITS:-200}"        # コミット規約・同�
 
 - **蓄積メモリ**: `echo '{"query": "maintain harness 勘所 違反"}' | PYTHONPATH=plugins/bluecore/src python3 -m bluecore.mem search` で過去メンテの勘所・繰り返し違反を引く（mem CLI は stdin JSON プロトコル。裸起動は空結果を返すので必ず pipe する）
 - **過去セッション**: `~/.bluecore/session-data/checkpoint-*.md` と git log
-- **チーム共有 PostgreSQL**（`sync.enabled=True` かつ `postgres_url` 設定時のみ）: mem CLI が判定を内包。無効時は SQLite（`~/.bluecore/mem.db`）に自然フォールバック
 - **最新 ClaudeCode トレンド**（既定ON・`--no-web` で無効）: WebSearch/WebFetch でハーネス設計のベストプラクティスを調べる。**ハード上限（検索5件・フェッチ3件）・タイムアウト付き・非ブロッキング**。失敗/オフライン時は「トレンド入力なし」と明記して続行
 
 **baseline 取得**（すべて `.venv` 有効化 + `PYTHONPATH=plugins/bluecore/src` で実行）:
