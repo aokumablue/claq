@@ -216,6 +216,15 @@ class TestDetachTarget:
         assert run_with_flags._detach_target("session:mem:end", "bluecore.mem.cli", [], "{}") == 0
 
 
+def test_build_env_without_pythonpath_uses_repo_src_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PYTHONPATH 未設定時は REPO_ROOT/src のみが設定される（if pythonpath: の False 分岐）。"""
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    env = run_with_flags.build_env()
+
+    assert env["PYTHONPATH"] == str(run_with_flags.REPO_ROOT / "src")
+
+
 def test_background_hook_ids_match_hooks_json():
     """BACKGROUND_HOOK_IDS が hooks.json の async: true エントリと一致する。"""
     import re

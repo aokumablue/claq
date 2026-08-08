@@ -1,5 +1,10 @@
+import builtins
+import importlib
+import sys
+
 import pytest
 
+from bluecore.hooks import insights_security_monitor
 from bluecore.hooks.insights_security_monitor import extract_content
 
 
@@ -81,3 +86,33 @@ def test_extract_content_non_str_non_dict_tool_input_returns_empty() -> None:
 
     assert text == ""
     assert context == ""
+
+
+def test_insaits_import_failure_sets_available_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    """insa_its が未インストールの環境では INSAITS_AVAILABLE が False になる（モジュール import 時の except ImportError 分岐)。
+
+    importlib.reload() はターゲットが sys.modules 上の同一オブジェクトであることを
+    要求するが、他テスト（runpy.run_module 経由の実行）が本モジュールを
+    sys.modules から外したまま別オブジェクトとして再インポートさせるケースが
+    あり、reload() だと ImportError になりうる。pop + import_module による
+    フルインポートはその不一致に依存しないため、テスト順序に関わらず確実に
+    トリガー・復元できる。
+    """
+    module_name = insights_security_monitor.__name__
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: ANN001
+        if name == "insa_its":
+            raise ImportError("no insa_its")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    sys.modules.pop(module_name, None)
+    try:
+        reloaded = importlib.import_module(module_name)
+        assert reloaded.INSAITS_AVAILABLE is False
+    finally:
+        monkeypatch.setattr(builtins, "__import__", original_import)
+        sys.modules.pop(module_name, None)
+        restored = importlib.import_module(module_name)
+        assert restored.INSAITS_AVAILABLE is True

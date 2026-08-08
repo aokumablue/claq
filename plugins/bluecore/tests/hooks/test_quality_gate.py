@@ -267,6 +267,17 @@ def test_quality_gate_uses_language_preset(
     assert steps_executed[0].get("argv") == ["ruff", "check", "src", "tests"]
 
 
+def test_quality_gate_base_env_without_pythonpath_uses_plugin_src_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PYTHONPATH 未設定時は PLUGIN_ROOT/src のみが設定される（if pythonpath: の False 分岐）。"""
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    env = quality_gate._base_env()
+
+    assert env["PYTHONPATH"] == str(quality_gate.PLUGIN_ROOT / "src")
+
+
 def test_quality_gate_load_config_delegates_to_preset_resolver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
