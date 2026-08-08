@@ -8,7 +8,7 @@ command: /dashboard
 
 # ダッシュボード生成
 
-個人データ（SQLite）を収集し静的HTMLダッシュボード生成。スキル健全性・成長候補・プロジェクト登録もここに集約する。
+個人データ（SQLite）を収集し静的HTMLダッシュボード生成。成長候補・プロジェクト登録もここに集約する。
 
 ## grillme 強制起動（必須）
 
@@ -17,7 +17,7 @@ command: /dashboard
 ## 永続メモリ
 
 - context: SessionStart で `<mem-context>` 自動注入
-- search: `dashboard usage skill-health growth`
+- search: `dashboard usage growth`
 - record: `{"event_type": "dashboard", "content": "Period: {days}d. Output: {output}. Format: {format}"}`
 
 ## 前提条件
@@ -47,9 +47,8 @@ bluecore_mem_json dashboard '{"days": 30, "format": "html"}'
 - 日次実行トレンド: 折れ線
 - アウトカム分布: ドーナツ（success/partial/failure/unknown）
 
-### Skill Health / Growth / Projects
+### Growth / Projects
 
-- スキル健全性: 7日/30日成功率、低下トレンド、保留修正
 - 成長候補: 繰り返しパターン、ギャップ候補
 - プロジェクト登録: インスティンクト数・観測数・最終検出時刻
 

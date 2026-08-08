@@ -36,41 +36,14 @@
   <div class="stat"><div class="value">{{ quality.short_chunk_rate }}%</div><div class="label">Short Chunk Rate</div></div>
 </div>
 
-<h2 style="color:#58a6ff;margin:32px 0 16px;font-size:1.4rem;">Skill Health & Growth</h2>
+<h2 style="color:#58a6ff;margin:32px 0 16px;font-size:1.4rem;">Skill Growth</h2>
 <div class="stats">
-  <div class="stat"><div class="value">{{ skill_health_summary.total_skills }}</div><div class="label">Skills</div></div>
-  <div class="stat"><div class="value">{{ skill_health_summary.healthy_skills }}</div><div class="label">Healthy</div></div>
-  <div class="stat"><div class="value">{{ skill_health_summary.declining_skills }}</div><div class="label">Declining</div></div>
   <div class="stat"><div class="value">{{ skill_growth_summary.skill_candidates }}</div><div class="label">Skill Candidates</div></div>
   <div class="stat"><div class="value">{{ skill_growth_summary.gap_candidates }}</div><div class="label">Gap Candidates</div></div>
   <div class="stat"><div class="value">{{ skill_growth_summary.total_patterns }}</div><div class="label">Patterns</div></div>
 </div>
 
 <div class="grid">
-  <div class="card" style="grid-column: 1 / -1;">
-    <h2>Skill Health Trend</h2>
-    <canvas id="skillHealthChart" style="max-height:360px;"></canvas>
-  </div>
-  <div class="card" style="grid-column: 1 / -1;">
-    <h2>Skill Health Snapshot</h2>
-    <table>
-      <thead>
-        <tr><th>Skill</th><th>7d</th><th>30d</th><th>Trend</th><th>Pending</th><th>Last Run</th></tr>
-      </thead>
-      <tbody>
-      {% for skill in skill_health_rows %}
-        <tr>
-          <td>{{ skill.skill_id }}</td>
-          <td>{{ (skill.success_rate_7d * 100) | round(1) if skill.success_rate_7d is not none else 'n/a' }}%</td>
-          <td>{{ (skill.success_rate_30d * 100) | round(1) if skill.success_rate_30d is not none else 'n/a' }}%</td>
-          <td>{{ skill.failure_trend }}</td>
-          <td>{{ skill.pending_amendments }}</td>
-          <td>{{ skill.last_run or '-' }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
   <div class="card">
     <h2>Skill Growth Priority</h2>
     <canvas id="skillGrowthChart" style="max-height:360px;"></canvas>
@@ -280,19 +253,6 @@ new Chart(document.getElementById('instinctChart'), {
     datasets: [{ label: 'New Instincts', data: {{ instinct_counts | safe }}, backgroundColor: '#bc8cff33', borderColor: '#bc8cff', borderWidth: 1 }]
   },
   options: { scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#8b949e' } } }, plugins: { legend: { labels: { color: '#c9d1d9' } } } }
-});
-
-// Skill health trend
-new Chart(document.getElementById('skillHealthChart'), {
-  type: 'bar',
-  data: {
-    labels: {{ skill_health_labels | safe }},
-    datasets: [
-      { label: '7d', data: {{ skill_health_7d | safe }}, backgroundColor: '#58a6ff55', borderColor: '#58a6ff', borderWidth: 1 },
-      { label: '30d', data: {{ skill_health_30d | safe }}, backgroundColor: '#3fb95055', borderColor: '#3fb950', borderWidth: 1 }
-    ]
-  },
-  options: { indexAxis: 'y', scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#c9d1d9' } } }, plugins: { legend: { labels: { color: '#c9d1d9' } } } }
 });
 
 // Skill growth priority

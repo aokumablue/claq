@@ -8,7 +8,7 @@ import io
 import json
 import sys
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 
 import pytest
 
@@ -672,27 +672,6 @@ def test_handle_dashboard_html_output(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     monkeypatch.setattr(
         cli,
-        "_collect_skill_health_overview",
-        lambda options: {
-            "report": {"generated_at": "2024-01-01T00:00:00Z", "skills": []},
-            "summary": {"total_skills": 1, "healthy_skills": 1, "declining_skills": 0},
-            "skills": [
-                {
-                    "skill_id": "skill-a",
-                    "success_rate_7d": 0.8,
-                    "success_rate_30d": 0.7,
-                    "failure_trend": "stable",
-                    "pending_amendments": 1,
-                    "last_run": "2024-01-01T00:00:00Z",
-                }
-            ],
-            "chart_labels": ["skill-a"],
-            "chart_7d": [80.0],
-            "chart_30d": [70.0],
-        },
-    )
-    monkeypatch.setattr(
-        cli,
         "_collect_project_overview",
         lambda: {
             "summary": {
@@ -807,18 +786,6 @@ def test_handle_dashboard_coerces_string_days_and_rejects_invalid(
 def test_handle_dashboard_json_and_main_entrypoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     settings = make_settings(tmp_path)
 
-    monkeypatch.setattr(
-        cli,
-        "_collect_skill_health_overview",
-        lambda options: {
-            "report": {"generated_at": "2024-01-01T00:00:00Z", "skills": []},
-            "summary": {"total_skills": 1, "healthy_skills": 1, "declining_skills": 0},
-            "skills": [],
-            "chart_labels": [],
-            "chart_7d": [],
-            "chart_30d": [],
-        },
-    )
     monkeypatch.setattr(
         cli,
         "_collect_project_overview",
@@ -1093,27 +1060,6 @@ def test_cli_count_lines_delegates_to_dashboard_handlers(tmp_path: Path) -> None
     target = tmp_path / "data.jsonl"
     target.write_text("x\n", encoding="utf-8")
     assert cli._count_lines(target) == 1
-
-
-def test_collect_skill_health_overview_handles_collect_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """collect_skill_health が例外を出してもダッシュボードは止まらず空 report で続行する。"""
-    from bluecore.mem import cli_dashboard_handlers as cdh
-
-    def _boom(_options):
-        raise RuntimeError("health boom")
-
-    monkeypatch.setattr(cdh, "collect_skill_health", _boom)
-    monkeypatch.setattr(cdh, "summarize_health_report", lambda _r: {"summary": "x"})
-
-    warnings: list[str] = []
-    fake_log = SimpleNamespace(warning=lambda msg, *args: warnings.append(msg % args if args else msg))
-
-    result = cdh.collect_skill_health_overview({"k": "v"}, log=fake_log)
-    assert result["report"] == {"generated_at": None, "skills": []}
-    assert result["skills"] == []
-    assert any("skill health collection failed" in w for w in warnings)
 
 
 def test_resolve_safe_dashboard_output_path_invalid_value(tmp_path: Path) -> None:

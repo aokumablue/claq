@@ -9,8 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bluecore.lib.skill_evolution import collect_skill_health, summarize_health_report
-
 if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
@@ -30,7 +28,6 @@ class DashboardData:
     days: int
     personal_outcome: list
     item_vars: dict
-    skill_health: dict
     project_overview: dict
 
 
@@ -40,7 +37,6 @@ class DashboardDeps:
 
     open_db: OpenDbFn
     collect_project_overview_fn: Callable[[], dict]
-    collect_skill_health_overview_fn: Callable[[dict], dict]
 
 
 def count_lines(path: Path) -> int:
@@ -121,41 +117,6 @@ def collect_project_overview(*, count_lines_fn: CountLinesFn, log: Any) -> dict:
             "global_personal": global_personal,
             "global_inherited": global_inherited,
         },
-    }
-
-
-def collect_skill_health_overview(options: dict[str, object], *, log: Any) -> dict[str, object]:
-    """skill health の集計データを返す。"""
-    try:
-        report = collect_skill_health(options)
-    except Exception as error:  # noqa: BLE001 - ダッシュボードは失敗で止めない
-        log.warning("skill health collection failed: %s", error)
-        report = {"generated_at": None, "skills": []}
-
-    summary = summarize_health_report(report)
-    skills = sorted(
-        report.get("skills", []),
-        key=lambda skill: (
-            not bool(skill.get("declining")),
-            -int(skill.get("run_count_30d", 0) or 0),
-            str(skill.get("skill_id", "")),
-        ),
-    )
-    display_skills = skills[:20]
-
-    return {
-        "report": report,
-        "summary": summary,
-        "skills": display_skills,
-        "chart_labels": [str(skill.get("skill_id", "")) for skill in display_skills],
-        "chart_7d": [
-            round(float(skill.get("success_rate_7d") or 0) * 100, 1) if skill.get("success_rate_7d") is not None else 0
-            for skill in display_skills
-        ],
-        "chart_30d": [
-            round(float(skill.get("success_rate_30d") or 0) * 100, 1) if skill.get("success_rate_30d") is not None else 0
-            for skill in display_skills
-        ],
     }
 
 
@@ -258,11 +219,6 @@ def _build_template_context(data: DashboardData) -> dict:
     ctx = {"generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"), "days": data.days}
     ctx.update(_build_item_ctx(data.item_vars, data.personal_outcome))
     ctx.update({
-        "skill_health_summary": data.skill_health["summary"],
-        "skill_health_labels": _jdumps(data.skill_health["chart_labels"]),
-        "skill_health_7d": _jdumps(data.skill_health["chart_7d"]),
-        "skill_health_30d": _jdumps(data.skill_health["chart_30d"]),
-        "skill_health_rows": data.skill_health["skills"],
         "project_summary": data.project_overview["summary"],
         "project_rows": data.project_overview["projects"],
     })
@@ -315,13 +271,11 @@ def handle_dashboard(
 
     personal_ranking, personal_trend, personal_outcome = _collect_personal_stats(deps.open_db, settings, days)
     item_vars = _build_item_ranking_vars(personal_ranking, personal_trend)
-    skill_health = deps.collect_skill_health_overview_fn(dict(stdin_data))
     project_overview = deps.collect_project_overview_fn()
     dash_data = DashboardData(
         days=days,
         personal_outcome=personal_outcome,
         item_vars=item_vars,
-        skill_health=skill_health,
         project_overview=project_overview,
     )
 
@@ -330,7 +284,6 @@ def handle_dashboard(
             "personal_ranking": personal_ranking,
             "personal_trend": personal_trend,
             "personal_outcome": personal_outcome,
-            "skill_health": skill_health,
             "project_overview": project_overview,
         }
         output_path.write_text(json.dumps(json_data, ensure_ascii=False, indent=2), encoding="utf-8")

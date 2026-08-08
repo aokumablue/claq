@@ -385,11 +385,6 @@ def _collect_project_overview() -> dict:
     )
 
 
-def _collect_skill_health_overview(options: dict[str, object]) -> dict[str, object]:
-    """ダッシュボード用にスキル健全性の概況を収集する。"""
-    return _dashboard_handlers.collect_skill_health_overview(options, log=log)
-
-
 def _handle_import(settings: Settings, stdin_data: dict) -> None:
     """import コマンド: 外部データ（instincts/adrs/events）を mem に取り込む。"""
     _dashboard_handlers.handle_import(
@@ -405,7 +400,6 @@ def _handle_dashboard(settings: Settings, stdin_data: dict) -> None:
     deps = _dashboard_handlers.DashboardDeps(
         open_db=_open_db,
         collect_project_overview_fn=_collect_project_overview,
-        collect_skill_health_overview_fn=_collect_skill_health_overview,
     )
     _dashboard_handlers.handle_dashboard(settings, stdin_data, deps)
 
