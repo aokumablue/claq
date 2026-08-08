@@ -53,3 +53,18 @@ def test_main_allows_non_protected_file_for_apply_patch_string(monkeypatch) -> N
 
     assert config_protection.main() == 0
     assert messages == []
+
+
+def test_main_blocks_protected_file_for_copilot_lowercase_write(monkeypatch) -> None:
+    """Copilot CLI の lowercase tool_name（write）でも保護ファイルをブロックする。
+
+    extract_file_paths() は apply_patch 以外は tool_name の値によらず
+    file_path フィールドを抽出するため、正規化なしでも動作することの回帰確認。
+    """
+    messages: list[str] = []
+    payload = json.dumps({"tool_name": "write", "tool_input": {"file_path": ".prettierrc"}})
+    monkeypatch.setattr(config_protection, "read_raw_stdin", lambda: payload)
+    monkeypatch.setattr(config_protection, "write_stderr", messages.append)
+
+    assert config_protection.main() == 2
+    assert "BLOCKED: Modifying .prettierrc is not allowed." in "".join(messages)

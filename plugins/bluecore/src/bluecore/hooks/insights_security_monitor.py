@@ -19,6 +19,7 @@ from typing import Any
 
 from bluecore.hooks.hook_common import emit_block_output
 from bluecore.lib.core_utils import get_bluecore_dir
+from bluecore.lib.harness import normalize_tool_name
 
 # stdoutプロトコルに干渉しないよう、ルートロガーを汚染せず専用ロガーへ
 # stderr ハンドラを直接付与する。basicConfig はルート全体に影響するため使わない。
@@ -82,7 +83,7 @@ def extract_content(data: dict[str, Any]) -> tuple[str, str]:
     Raises:
         例外は発生しません。
     """
-    tool_name: str = str(data.get("tool_name", ""))
+    tool_name: str = normalize_tool_name(str(data.get("tool_name", "")))
     tool_input: Any = data.get("tool_input", {})
 
     if isinstance(tool_input, str):

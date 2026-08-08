@@ -11,8 +11,25 @@ import os
 import re
 from functools import lru_cache
 
-# Codex のツール名 → Claude Code 相当ツール名
-_TOOL_NAME_MAP = {"apply_patch": "Edit"}
+# 各ハーネスのツール名 → Claude Code 相当ツール名。
+#
+# Codex の apply_patch は Edit に対応する。Copilot CLI はフックイベントに
+# lowercase の runtime tool 名（write/edit/bash 等）を渡すため、大文字小文字を
+# 区別しない照合で Claude Code 表記へ正規化する。
+_TOOL_NAME_MAP = {
+    "apply_patch": "Edit",
+    "agent": "Agent",
+    "bash": "Bash",
+    "edit": "Edit",
+    "glob": "Glob",
+    "grep": "Grep",
+    "multiedit": "MultiEdit",
+    "notebookedit": "NotebookEdit",
+    "read": "Read",
+    "task": "Agent",
+    "view": "Read",
+    "write": "Write",
+}
 
 # Codex apply_patch パッチテキストのファイル操作マーカー
 _PATCH_FILE_MARKERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ")
@@ -46,8 +63,11 @@ def detect_harness() -> str:
 def normalize_tool_name(tool_name: str) -> str:
     """ハーネス固有のツール名を Claude Code 相当のツール名へ正規化する。
 
-    Codex の apply_patch は Edit に対応する。Claude Code に apply_patch という
-    ツールは存在しないため、ハーネス判定なしの無条件マッピングで安全。
+    Codex の apply_patch は Edit に対応する。Copilot CLI はフックイベントに
+    lowercase の runtime tool 名（write/edit/bash 等）を渡すため、大文字小文字を
+    区別しない照合で Claude Code 表記へ正規化する。Claude Code に apply_patch
+    というツールは存在せず、Claude Code 自身のツール名は既に正規形のため、
+    ハーネス判定なしの無条件マッピングで安全。
 
     Args:
         tool_name: フック stdin の tool_name フィールド値。
@@ -58,7 +78,7 @@ def normalize_tool_name(tool_name: str) -> str:
     Raises:
         例外は発生しません。
     """
-    return _TOOL_NAME_MAP.get(tool_name, tool_name)
+    return _TOOL_NAME_MAP.get(tool_name.lower(), tool_name)
 
 
 def _extract_apply_patch_text(tool_input: dict | str | None) -> str | None:

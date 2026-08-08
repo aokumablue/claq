@@ -70,6 +70,26 @@ class TestNormalizeToolName:
         """マッピング対象外のツール名はそのまま返す。"""
         assert harness.normalize_tool_name(name) == name
 
+    @pytest.mark.parametrize(
+        ("copilot_name", "expected"),
+        [
+            ("write", "Write"),
+            ("edit", "Edit"),
+            ("bash", "Bash"),
+            ("multiedit", "MultiEdit"),
+            ("read", "Read"),
+            ("view", "Read"),
+            ("glob", "Glob"),
+            ("grep", "Grep"),
+            ("task", "Agent"),
+            ("agent", "Agent"),
+            ("notebookedit", "NotebookEdit"),
+        ],
+    )
+    def test_copilot_lowercase_names_normalize_to_claude_code_form(self, copilot_name, expected):
+        """Copilot CLI が渡す lowercase runtime tool 名を Claude Code 表記へ正規化する。"""
+        assert harness.normalize_tool_name(copilot_name) == expected
+
 
 class TestExtractFilePaths:
     """extract_file_paths のテスト。"""
