@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import shlex
 import shutil
 import subprocess
 import tempfile
@@ -19,6 +18,7 @@ from pathlib import Path
 from ..cli_runner import build_output_format_args, build_permission_args, build_tools_args, detect_cli_binary
 from .parser import ObservationEvent
 from .scenario_generator import Scenario
+from .utils import run_validated_setup_command
 
 log = logging.getLogger(__name__)
 
@@ -116,11 +116,13 @@ def _setup_sandbox(sandbox_dir: Path, scenario: Scenario) -> None:
     subprocess.run(["git", "init"], cwd=sandbox_dir, capture_output=True, timeout=5)
 
     for cmd in scenario.setup_commands:
-        parts = shlex.split(cmd)
         try:
-            subprocess.run(parts, cwd=sandbox_dir, capture_output=True, timeout=_SETUP_TIMEOUT)
+            run_validated_setup_command(cmd, cwd=sandbox_dir, timeout=_SETUP_TIMEOUT)
         except subprocess.TimeoutExpired:
             log.warning("setup command timed out (timeout=%ss): %s", _SETUP_TIMEOUT, cmd)
+            continue
+        except ValueError as exc:
+            log.warning("skipping disallowed setup command: %s (%s)", cmd, exc)
             continue
 
 

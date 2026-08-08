@@ -354,16 +354,30 @@ class TestSetupSandbox:
         assert any("git" in c and "init" in c for c in calls)
 
     def test_runs_setup_commands(self, tmp_path: Path) -> None:
-        """setup_commands が順に実行されること。"""
+        """setup_commands が順に検証・実行され、許可コマンドの効果がサンドボックスへ反映されること。"""
         sandbox = tmp_path / "sandbox"
-        scenario = _make_scenario(setup_commands=("echo hello", "echo world"))
+        scenario = _make_scenario(setup_commands=("mkdir sub", "touch sub/file.txt"))
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             _setup_sandbox(sandbox, scenario)
 
-        # git init + 2 コマンド = 3 回呼ばれる
+        # git init + 2 コマンド = 3 回サブプロセスが呼ばれる
         assert mock_run.call_count == 3
+
+    def test_disallowed_setup_command_is_skipped_without_raising(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """許可外の setup_command（危険なコマンド）は ValueError を捕捉してスキップされ、サンドボックス全体は失敗しないこと。"""
+        sandbox = tmp_path / "sandbox"
+        scenario = _make_scenario(setup_commands=("rm -rf /", "mkdir ok"))
+
+        with caplog.at_level(logging.WARNING, logger="bluecore.skills.comply.runner"):
+            _setup_sandbox(sandbox, scenario)  # 例外が伝播しないこと
+
+        assert (sandbox / "ok").is_dir()
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("rm -rf /" in r.message for r in warnings)
 
     def test_git_init_uses_hard_timeout(self, tmp_path: Path) -> None:
         """git init 呼び出しに timeout=5 が付与されること。"""
@@ -380,7 +394,7 @@ class TestSetupSandbox:
     def test_setup_commands_use_hard_timeout(self, tmp_path: Path) -> None:
         """setup_commands の各実行に timeout=60 が付与されること。"""
         sandbox = tmp_path / "sandbox"
-        scenario = _make_scenario(setup_commands=("echo hello",))
+        scenario = _make_scenario(setup_commands=("mkdir hello",))
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
@@ -392,13 +406,13 @@ class TestSetupSandbox:
     def test_setup_command_timeout_expired_continues(self, tmp_path: Path) -> None:
         """setup_commands の1つがタイムアウトしても後続コマンドの実行を継続すること。"""
         sandbox = tmp_path / "sandbox"
-        scenario = _make_scenario(setup_commands=("sleep 999", "echo world"))
+        scenario = _make_scenario(setup_commands=("mkdir slow", "mkdir world"))
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0),  # git init
-                subprocess.TimeoutExpired(cmd="sleep 999", timeout=60),
-                MagicMock(returncode=0),  # echo world
+                subprocess.TimeoutExpired(cmd="mkdir slow", timeout=60),
+                MagicMock(returncode=0),  # mkdir world
             ]
             _setup_sandbox(sandbox, scenario)  # 例外が伝播しないこと
 
@@ -412,20 +426,20 @@ class TestSetupSandbox:
         修正前はタイムアウト捕捉後にログなしで continue しており、部分的失敗の痕跡が残らなかった。
         """
         sandbox = tmp_path / "sandbox"
-        scenario = _make_scenario(setup_commands=("sleep 999", "echo world"))
+        scenario = _make_scenario(setup_commands=("mkdir slow", "mkdir world"))
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0),  # git init
-                subprocess.TimeoutExpired(cmd="sleep 999", timeout=60),
-                MagicMock(returncode=0),  # echo world
+                subprocess.TimeoutExpired(cmd="mkdir slow", timeout=60),
+                MagicMock(returncode=0),  # mkdir world
             ]
             with caplog.at_level(logging.WARNING, logger="bluecore.skills.comply.runner"):
                 _setup_sandbox(sandbox, scenario)
 
         assert mock_run.call_count == 3
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-        assert any("sleep 999" in r.message for r in warnings)
+        assert any("mkdir slow" in r.message for r in warnings)
         assert any("60" in r.message for r in warnings)
 
 
