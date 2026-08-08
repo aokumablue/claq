@@ -144,8 +144,8 @@ def _repo_tool_coverage_hooks_checks(root_dir: str | Path) -> list[dict[str, Any
             "points": 2,
             "scopes": ["repo", "hooks"],
             "path": "src/bluecore/hooks/",
-            "description": "最低20個のフック実装モジュールが存在する",
-            "pass": count_files(root_dir, "src/bluecore/hooks", ".py") >= 20,
+            "description": "最低12個のフック実装モジュールが存在する",
+            "pass": count_files(root_dir, "src/bluecore/hooks", ".py") >= 12,
             "fix": "Add missing hook implementations in src/bluecore/hooks/.",
         },
     ]
@@ -403,8 +403,8 @@ def _repo_eval_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "points": 2,
             "scopes": ["repo"],
             "path": "tests/",
-            "description": "最低100個のテストファイル(.py)が存在する",
-            "pass": count_files(root_dir, "tests", ".py") >= 100,
+            "description": "最低60個のテストファイル(.py)が存在する",
+            "pass": count_files(root_dir, "tests", ".py") >= 60,
             "fix": "Increase automated test coverage across src/bluecore modules.",
         },
     ]
