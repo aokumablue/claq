@@ -301,12 +301,102 @@ def test_handle_setup_and_observe_branches(monkeypatch: pytest.MonkeyPatch, tmp_
         {
             "session_id": "s1",
             "cwd": str(tmp_path),
-            "tool_name": "Read",
+            "tool_name": "Write",
             "tool_input": {"path": "file.py"},
             "tool_response": "ok",
             "prompt": "read file",
         },
     )
+    assert db.stored_chunks
+
+
+def test_handle_observe_skips_non_observed_tool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """PostToolUse の matcher が "*" に広がっても、Read 等の対象外ツールはチャンク保存しない（早期 return）。"""
+    settings = make_settings(tmp_path)
+    db = FakeDB()
+
+    monkeypatch.setattr(cli, "_open_db", lambda current_settings: open_fake_db(db))
+    assert cli._handle_setup(settings) == ""
+
+    cli._handle_observe(
+        settings,
+        {
+            "session_id": "s1",
+            "cwd": str(tmp_path),
+            "tool_name": "Read",
+            "tool_input": {"file_path": "file.py"},
+            "tool_response": "ok",
+            "prompt": "read file",
+        },
+    )
+
+    assert db.stored_chunks == []
+
+
+def test_handle_observe_skips_copilot_lowercase_non_observed_tool(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Copilot CLI の lowercase 対象外ツール名（read）でも早期 return する。"""
+    settings = make_settings(tmp_path)
+    db = FakeDB()
+
+    monkeypatch.setattr(cli, "_open_db", lambda current_settings: open_fake_db(db))
+    assert cli._handle_setup(settings) == ""
+
+    cli._handle_observe(
+        settings,
+        {
+            "session_id": "s1",
+            "cwd": str(tmp_path),
+            "tool_name": "read",
+            "tool_input": {"file_path": "file.py"},
+            "tool_response": "ok",
+            "prompt": "read file",
+        },
+    )
+
+    assert db.stored_chunks == []
+
+
+def test_handle_observe_records_copilot_lowercase_observed_tool(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Copilot CLI の lowercase 記録対象ツール名（write）ではチャンクを保存する。"""
+    settings = make_settings(tmp_path)
+    db = FakeDB()
+
+    monkeypatch.setattr(cli, "_open_db", lambda current_settings: open_fake_db(db))
+    assert cli._handle_setup(settings) == ""
+
+    import bluecore.mem.chunker as chunker_mod
+
+    monkeypatch.setattr(
+        chunker_mod,
+        "build_chunk_from_tool_use",
+        lambda session_id, project, chunk_index, user_prompt, params: MemoryChunk(
+            session_id=session_id,
+            project=project,
+            chunk_index=chunk_index,
+            content="observed",
+            tool_names=[params.tool_name],
+            files_read=[],
+            files_modified=[],
+            user_prompt=user_prompt,
+            created_at_epoch=1700000000,
+        ),
+    )
+    cli._handle_observe(
+        settings,
+        {
+            "session_id": "s1",
+            "cwd": str(tmp_path),
+            "tool_name": "write",
+            "tool_input": {"file_path": "file.py", "content": "x"},
+            "tool_response": "ok",
+            "prompt": "write file",
+        },
+    )
+
     assert db.stored_chunks
 
 

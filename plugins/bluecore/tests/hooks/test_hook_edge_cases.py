@@ -935,6 +935,28 @@ def test_insights_security_monitor_skips_short_or_invalid_input(
     assert excinfo.value.code == 0
 
 
+def test_insights_security_monitor_skips_copilot_lowercase_unrelated_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """matcher が "*" に広がっても、Read 等（Copilot CLI の lowercase tool_name 含む）は
+    スキャン対象テキストが空になるため main() が exit(0) で早期終了する回帰確認。
+    """
+    monkeypatch.setattr(insights_security_monitor, "INSAITS_AVAILABLE", True)
+    monkeypatch.setattr(
+        insights_security_monitor,
+        "insAItsMonitor",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("monitor should not be created")),
+        raising=False,
+    )
+    payload = json.dumps({"tool_name": "read", "tool_input": {"file_path": "src/app.py"}})
+    monkeypatch.setattr(insights_security_monitor.sys, "stdin", io.StringIO(payload))
+
+    with pytest.raises(SystemExit) as excinfo:
+        insights_security_monitor.main()
+
+    assert excinfo.value.code == 0
+
+
 def test_run_insaits_scan_calls_monitor_with_session_name_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """insAItsMonitor が session_name のみ・余剰 kwargs なしで呼ばれることを保証する回帰テスト。
 

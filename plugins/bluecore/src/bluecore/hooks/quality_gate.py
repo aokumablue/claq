@@ -35,6 +35,10 @@ _ALLOWED_EXPANSION_VARS = frozenset(
         "TEMP",
     }
 )
+# matcher が "*"（全ツール）のため、書込み系ツールのみを対象にする早期 return に使う。
+# _extract_tool_name() が正規化した Claude Code 表記（Codex の apply_patch は
+# Edit、Copilot CLI の lowercase tool_name も正規化済み）を小文字化して比較する。
+_WRITE_TOOL_NAMES = frozenset({"edit", "write", "multiedit"})
 
 
 def _normalize_name(value: str | None) -> str:
@@ -205,6 +209,24 @@ def _extract_tool_name(input_data: dict[str, Any]) -> str:
     if isinstance(tool_name, str):
         return normalize_tool_name(tool_name)
     return ""
+
+
+def _is_write_tool(input_data: dict[str, Any]) -> bool:
+    """入力が quality-gate 対象の書込み系ツールか判定する。
+
+    matcher が "*" のため、Edit/Write/MultiEdit（Codex の apply_patch・
+    Copilot CLI の lowercase tool_name を含む）以外は対象外として扱う。
+
+    Args:
+        input_data: hook 入力です。
+
+    Returns:
+        書込み系ツールなら True、それ以外は False を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _normalize_name(_extract_tool_name(input_data)) in _WRITE_TOOL_NAMES
 
 
 def _rule_matches(rule: dict[str, Any], input_data: dict[str, Any], file_path: str = "") -> bool:
@@ -580,6 +602,8 @@ def run(raw_input: str, action: str = "post-edit") -> None:
     """
     normalized_action = _normalize_name(action) or "post-edit"
     input_data = parse_json_object(raw_input) or {}
+    if not _is_write_tool(input_data):
+        return
     paths = _extract_target_file_paths(input_data)
     for index, fp in enumerate(paths or [None]):
         config = load_config(file_path=fp)

@@ -997,7 +997,7 @@ def test_config_protection_blank_file_path(monkeypatch: pytest.MonkeyPatch) -> N
     """file_path が空なら保護判定をスキップする。"""
     from bluecore.hooks import config_protection
 
-    payload = json.dumps({"tool_input": {"file_path": ""}})
+    payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": ""}})
     _capture_io(monkeypatch, config_protection, payload)
     assert config_protection.main() == 0
 

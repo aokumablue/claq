@@ -44,7 +44,11 @@ def test_doc_file_warning_flags_ad_hoc_documents() -> None:
 
 
 def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_input": {"file_path": "eslint.config.js"}})))
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(json.dumps({"tool_name": "Write", "tool_input": {"file_path": "eslint.config.js"}})),
+    )
 
     stderr = io.StringIO()
     stdout = io.StringIO()
@@ -57,7 +61,7 @@ def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch
 
 def test_config_protection_blocks_model_json(monkeypatch: pytest.MonkeyPatch) -> None:
     """ダウンロード完全性の信頼アンカーである model.json の書き換えをブロックする。"""
-    payload = json.dumps({"tool_input": {"file_path": "plugins/bluecore/model.json"}})
+    payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": "plugins/bluecore/model.json"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
     stderr = io.StringIO()
@@ -69,7 +73,7 @@ def test_config_protection_blocks_model_json(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_config_protection_allows_safe_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = json.dumps({"tool_input": {"file_path": "README.md"}})
+    payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": "README.md"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
     stderr = io.StringIO()
@@ -129,7 +133,7 @@ def test_config_protection_allows_safe_apply_patch(monkeypatch: pytest.MonkeyPat
 
 def test_config_protection_blocks_legacy_file_field(monkeypatch: pytest.MonkeyPatch) -> None:
     """file フィールドのみ持つ入力でも保護ファイルをブロックする。"""
-    payload = json.dumps({"tool_input": {"file": "biome.json"}})
+    payload = json.dumps({"tool_name": "Write", "tool_input": {"file": "biome.json"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
 
     stderr = io.StringIO()

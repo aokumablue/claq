@@ -64,7 +64,7 @@ def test_quality_gate_runs_configured_step_and_preserves_input(
     }
     _patch_preset(monkeypatch, preset)
 
-    raw_input = json.dumps({"tool_input": {"file_path": "src/example.ts"}})
+    raw_input = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "src/example.ts"}})
     quality_gate.run(raw_input, action="post-edit")
 
     assert marker.read_text(encoding="utf-8") == "ran"
@@ -100,7 +100,7 @@ def test_quality_gate_skips_non_matching_file_extension(
     }
     _patch_preset(monkeypatch, preset)
 
-    raw_input = json.dumps({"tool_input": {"file_path": "src/example.py"}})
+    raw_input = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "src/example.py"}})
     quality_gate.run(raw_input, action="post-edit")
 
     assert not marker.exists()
@@ -125,7 +125,7 @@ def test_quality_gate_skips_when_preset_is_empty(
 
     monkeypatch.setattr(quality_gate, "run_step", fake_run_step)
 
-    raw_input = json.dumps({"tool_input": {"file_path": "src/example.py"}})
+    raw_input = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "src/example.py"}})
     quality_gate.run(raw_input, action="post-edit")
 
     assert steps_executed == []
@@ -174,7 +174,7 @@ def test_quality_gate_expands_step_env_before_argv(
     }
     _patch_preset(monkeypatch, preset)
 
-    raw_input = json.dumps({"tool_input": {"file_path": "src/example.ts"}})
+    raw_input = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "src/example.ts"}})
     quality_gate.run(raw_input, action="post-edit")
 
     assert marker.read_text(encoding="utf-8") == "hello"
@@ -200,7 +200,7 @@ def test_quality_gate_does_not_run_linter_when_rule_has_no_steps(
 
     monkeypatch.setattr(quality_gate, "exec_command", fake_exec_command)
 
-    raw_input = json.dumps({"tool_input": {"file_path": str(py_file)}})
+    raw_input = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": str(py_file)}})
     quality_gate.run(raw_input, action="post-edit")
 
     assert calls == []
@@ -223,7 +223,7 @@ def test_quality_gate_no_fallback_when_rules_empty(
 
     monkeypatch.setattr(quality_gate, "exec_command", fake_exec_command)
 
-    raw_input = json.dumps({"tool_input": {"file_path": str(py_file)}})
+    raw_input = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": str(py_file)}})
     quality_gate.run(raw_input, action="post-edit")
 
     assert calls == []
@@ -260,7 +260,7 @@ def test_quality_gate_uses_language_preset(
 
     monkeypatch.setattr(quality_gate, "run_step", fake_run_step)
 
-    raw_input = json.dumps({"tool_input": {"file_path": "src/example.py"}})
+    raw_input = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "src/example.py"}})
     quality_gate.run(raw_input, action="post-edit")
 
     assert len(steps_executed) == 1
@@ -522,7 +522,11 @@ def test_quality_gate_main_success_and_exception_paths(
 
 def test_quality_gate_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["quality_gate.py"])
-    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    # tool_name を書込み系にしておかないと _is_write_tool ゲートで早期 return し、
+    # load_config() 経由の実プリセット解決（quality_gate_presets の実コード
+    # パス）が一切実行されなくなる。空 stdin のままだと entrypoint smoke test
+    # としては通るが、他モジュールのカバレッジ低下を招くため書込みツールにする。
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Edit"})))
 
     with pytest.raises(SystemExit) as excinfo:
         runpy.run_module("bluecore.hooks.quality_gate", run_name="__main__")
@@ -551,6 +555,129 @@ def test_extract_target_file_paths_apply_patch_unparseable_returns_empty() -> No
     """パース不能な apply_patch 入力は空リストを返す。"""
     data = {"tool_name": "apply_patch", "tool_input": {"input": "garbage"}}
     assert quality_gate._extract_target_file_paths(data) == []
+
+
+def test_quality_gate_run_skips_non_write_tool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """matcher が "*" に広がっても、Read 等の非書込みツールでは quality-gate 自体を実行しない（早期 return）。"""
+    marker = tmp_path / "marker.txt"
+    step_script = tmp_path / "step.py"
+    _write_step_script(step_script)
+
+    preset = {
+        "actions": {
+            "post-edit": {
+                "rules": [
+                    {
+                        "extensions": [".ts"],
+                        "steps": [
+                            {
+                                "argv": [
+                                    sys.executable,
+                                    str(step_script),
+                                    str(marker),
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+    }
+    _patch_preset(monkeypatch, preset)
+
+    raw_input = json.dumps({"tool_name": "Read", "tool_input": {"file_path": "src/example.ts"}})
+    quality_gate.run(raw_input, action="post-edit")
+
+    assert not marker.exists()
+
+
+def test_quality_gate_run_skips_copilot_lowercase_non_write_tool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Copilot CLI の lowercase 非書込みツール名（read）でも早期 return する。"""
+    marker = tmp_path / "marker.txt"
+    step_script = tmp_path / "step.py"
+    _write_step_script(step_script)
+
+    preset = {
+        "actions": {
+            "post-edit": {
+                "rules": [
+                    {
+                        "extensions": [".ts"],
+                        "steps": [
+                            {
+                                "argv": [
+                                    sys.executable,
+                                    str(step_script),
+                                    str(marker),
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+    }
+    _patch_preset(monkeypatch, preset)
+
+    raw_input = json.dumps({"tool_name": "read", "tool_input": {"file_path": "src/example.ts"}})
+    quality_gate.run(raw_input, action="post-edit")
+
+    assert not marker.exists()
+
+
+def test_quality_gate_run_runs_for_copilot_lowercase_write_tool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Copilot CLI の lowercase 書込みツール名（write）では quality-gate を実行する。"""
+    marker = tmp_path / "marker.txt"
+    step_script = tmp_path / "step.py"
+    _write_step_script(step_script)
+
+    preset = {
+        "actions": {
+            "post-edit": {
+                "rules": [
+                    {
+                        "extensions": [".ts"],
+                        "steps": [
+                            {
+                                "argv": [
+                                    sys.executable,
+                                    str(step_script),
+                                    str(marker),
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+    }
+    _patch_preset(monkeypatch, preset)
+
+    raw_input = json.dumps({"tool_name": "write", "tool_input": {"file_path": "src/example.ts"}})
+    quality_gate.run(raw_input, action="post-edit")
+
+    assert marker.read_text(encoding="utf-8") == "ran"
+
+
+def test_is_write_tool_normalizes_apply_patch_and_copilot_lowercase() -> None:
+    """_is_write_tool は apply_patch と Copilot CLI の lowercase tool_name を正しく判定する。"""
+    assert quality_gate._is_write_tool({"tool_name": "write"})
+    assert quality_gate._is_write_tool({"tool_name": "edit"})
+    assert quality_gate._is_write_tool({"tool_name": "multiedit"})
+    assert quality_gate._is_write_tool({"tool_name": "apply_patch"})
+    assert quality_gate._is_write_tool({"tool_name": "Edit"})
+    assert not quality_gate._is_write_tool({"tool_name": "bash"})
+    assert not quality_gate._is_write_tool({"tool_name": "Read"})
+    assert not quality_gate._is_write_tool({})
 
 
 def test_quality_gate_run_lints_every_file_in_multi_file_patch(

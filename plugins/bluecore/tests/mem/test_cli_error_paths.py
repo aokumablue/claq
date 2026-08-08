@@ -87,7 +87,7 @@ def test_handler_exception_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
     monkeypatch.setattr(cli, "_open_db", lambda settings: (_ for _ in ()).throw(RuntimeError("boom")))
     cli._handle_session_init(settings, {"cwd": str(tmp_path), "session_id": "s1", "prompt": "prompt"})
-    cli._handle_observe(settings, {"cwd": str(tmp_path), "session_id": "s1", "tool_name": "Read"})
+    cli._handle_observe(settings, {"cwd": str(tmp_path), "session_id": "s1", "tool_name": "Write"})
     cli._handle_session_end(settings, {"session_id": "s1"})
     cli._handle_compact(settings)
     cli._handle_search_structured(settings, {"query": "needle"})

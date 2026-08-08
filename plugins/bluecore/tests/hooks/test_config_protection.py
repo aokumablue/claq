@@ -68,3 +68,36 @@ def test_main_blocks_protected_file_for_copilot_lowercase_write(monkeypatch) -> 
 
     assert config_protection.main() == 2
     assert "BLOCKED: Modifying .prettierrc is not allowed." in "".join(messages)
+
+
+def test_main_skips_non_write_tool_even_with_protected_path(monkeypatch) -> None:
+    """matcher が "*" に広がっても、Read 等の非書込みツールでは保護判定自体を行わない（早期 return）。"""
+    messages: list[str] = []
+    payload = json.dumps({"tool_name": "Read", "tool_input": {"file_path": ".prettierrc"}})
+    monkeypatch.setattr(config_protection, "read_raw_stdin", lambda: payload)
+    monkeypatch.setattr(config_protection, "write_stderr", messages.append)
+
+    assert config_protection.main() == 0
+    assert messages == []
+
+
+def test_main_skips_copilot_lowercase_non_write_tool(monkeypatch) -> None:
+    """Copilot CLI の lowercase 非書込みツール名（read）でも早期 return する。"""
+    messages: list[str] = []
+    payload = json.dumps({"tool_name": "read", "tool_input": {"file_path": ".prettierrc"}})
+    monkeypatch.setattr(config_protection, "read_raw_stdin", lambda: payload)
+    monkeypatch.setattr(config_protection, "write_stderr", messages.append)
+
+    assert config_protection.main() == 0
+    assert messages == []
+
+
+def test_main_blocks_protected_file_for_copilot_lowercase_edit(monkeypatch) -> None:
+    """Copilot CLI の lowercase tool_name（edit）でも保護ファイルをブロックする。"""
+    messages: list[str] = []
+    payload = json.dumps({"tool_name": "edit", "tool_input": {"file_path": "biome.json"}})
+    monkeypatch.setattr(config_protection, "read_raw_stdin", lambda: payload)
+    monkeypatch.setattr(config_protection, "write_stderr", messages.append)
+
+    assert config_protection.main() == 2
+    assert "BLOCKED: Modifying biome.json is not allowed." in "".join(messages)

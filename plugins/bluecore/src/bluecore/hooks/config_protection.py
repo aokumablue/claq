@@ -12,7 +12,13 @@
 from __future__ import annotations
 
 from bluecore.hooks.hook_common import basename, parse_json_object, read_raw_stdin, write_stderr
-from bluecore.lib.harness import extract_file_paths
+from bluecore.lib.harness import extract_file_paths, normalize_tool_name
+
+# matcher が "*"（全ツール）のため、書込み系ツールのみを対象にする早期 return に使う。
+# normalize_tool_name() が Codex の apply_patch を "Edit" に、Copilot CLI の
+# lowercase tool_name（write/edit/multiedit）を Claude Code 表記へ正規化するため、
+# 正規化後に小文字化した値をこの集合と比較する。
+_WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
 
 PROTECTED_FILES = {
     ".eslintrc",
@@ -91,6 +97,8 @@ def main() -> int:
     data = parse_json_object(raw)
     if data:
         tool_name = str(data.get("tool_name") or "")
+        if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES:
+            return 0
         tool_input = data.get("tool_input")
         file_paths = extract_file_paths(tool_name, tool_input)
         if file_paths is None:

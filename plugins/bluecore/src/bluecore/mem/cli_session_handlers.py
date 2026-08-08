@@ -28,6 +28,12 @@ if TYPE_CHECKING:
     GetProjectFn = Callable[[dict[str, Any]], str]
     EmbedFn = Callable[[list[str]], list[list[float]]]
 
+# PostToolUse の matcher が "*"（全ツール）のため、記録対象ツールのみを扱う
+# 早期 return に使う。normalize_tool_name() が Codex の apply_patch を "Edit"
+# に、Copilot CLI の lowercase tool_name（bash/write/edit/multiedit）を
+# Claude Code 表記へ正規化するため、正規化後の値をこの集合と比較する。
+_OBSERVED_TOOL_NAMES = frozenset({"Bash", "Write", "Edit", "MultiEdit"})
+
 
 @dataclass(frozen=True)
 class SessionEndDeps:
@@ -169,6 +175,8 @@ def handle_observe(
     session_id = str(stdin_data.get("session_id", "") or "")
     project = get_project(stdin_data)
     tool_name = normalize_tool_name(str(stdin_data.get("tool_name", "") or ""))
+    if tool_name not in _OBSERVED_TOOL_NAMES:
+        return
 
     tool_input = stdin_data.get("tool_input")
     tool_response = stdin_data.get("tool_response")
