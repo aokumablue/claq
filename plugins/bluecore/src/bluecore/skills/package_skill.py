@@ -43,11 +43,11 @@ def should_exclude(rel_path: Path) -> bool:
 def _validate_skill_path(skill_path: Path) -> str | None:
     """スキルパスの存在・型・SKILL.md を検証し、エラーメッセージを返す。問題なければ None。"""
     if not skill_path.exists():
-        return f"❌ エラー: スキルフォルダが見つかりません: {skill_path}"
+        return f"FAIL: エラー: スキルフォルダが見つかりません: {skill_path}"
     if not skill_path.is_dir():
-        return f"❌ エラー: パスがディレクトリではありません: {skill_path}"
+        return f"FAIL: エラー: パスがディレクトリではありません: {skill_path}"
     if not (skill_path / "SKILL.md").exists():
-        return f"❌ エラー: {skill_path} に SKILL.md が見つかりません"
+        return f"FAIL: エラー: {skill_path} に SKILL.md が見つかりません"
     return None
 
 
@@ -64,10 +64,10 @@ def _create_skill_zip(skill_path: Path, skill_filename: Path) -> Path | None:
                     continue
                 zipf.write(file_path, arcname)
                 print(f"  追加: {arcname}")
-        print(f"\n✅ スキルをパッケージ化しました: {skill_filename}")
+        print(f"\nPASS: スキルをパッケージ化しました: {skill_filename}")
         return skill_filename
     except Exception as e:
-        print(f"❌ .skill ファイルの作成エラー: {e}")
+        print(f"FAIL: .skill ファイルの作成エラー: {e}")
         return None
 
 
@@ -88,13 +88,13 @@ def package_skill(skill_path, output_dir=None):
         print(error)
         return None
 
-    print("🔍 スキルを検証しています...")
+    print("CHECKING: スキルを検証しています...")
     valid, message = validate_skill(skill_path)
     if not valid:
-        print(f"❌ 検証失敗: {message}")
+        print(f"FAIL: 検証失敗: {message}")
         print("   パッケージ化する前に検証エラーを修正してください。")
         return None
-    print(f"✅ {message}\n")
+    print(f"PASS: {message}\n")
 
     skill_name = skill_path.name
     if output_dir:
@@ -119,7 +119,7 @@ def main():
     skill_path = sys.argv[1]
     output_dir = sys.argv[2] if len(sys.argv) > 2 else None
 
-    print(f"📦 スキルをパッケージ化しています: {skill_path}")
+    print(f"PACKAGING: スキルをパッケージ化しています: {skill_path}")
     if output_dir:
         print(f"   出力先ディレクトリ: {output_dir}")
     print()
