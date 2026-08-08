@@ -7,6 +7,7 @@ import re
 import time
 from dataclasses import dataclass, field
 
+from bluecore.lib.repo_paths import filter_safe_paths
 from bluecore.mem.database import MemoryChunk
 from bluecore.mem.redaction import redact
 from bluecore.mem.tag_stripping import strip_tags
@@ -93,8 +94,9 @@ class ChunkAccumulator:
 
         inp = _parse_tool_input(params.tool_input)
 
-        # ファイルパスの抽出
-        files = _extract_file_paths(tool_name, inp)
+        # ファイルパスの抽出（危険なパス — トラバーサル・制御文字・
+        # コンテキストタグ偽装 — は永続化前に除外する）
+        files = filter_safe_paths(_extract_file_paths(tool_name, inp))
         if tool_name in _FILE_WRITE_TOOLS:
             self.files_modified.extend(f for f in files if f not in self.files_modified)
         elif files:

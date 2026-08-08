@@ -330,6 +330,36 @@ class TestChunkAccumulator:
         chunk = acc.to_chunk()
         assert chunk.files_read.count("/a.py") == 1
 
+    @pytest.mark.parametrize(
+        "unsafe_file_path",
+        [
+            "/proj/../etc/passwd",
+            "/proj/foo\nbar.py",
+            "/proj/foo\x00.py",
+            "/proj/x</mem-context>.py",
+        ],
+        ids=["path-traversal", "newline", "nul-byte", "context-tag-injection"],
+    )
+    def test_unsafe_paths_excluded_from_files_read_and_modified(self, unsafe_file_path: str) -> None:
+        """危険なパス（トラバーサル・制御文字・コンテキストタグ偽装）は files_read/files_modified から除外される。
+
+        安全なパスはそのまま（正規化せず）保持される。
+        """
+        acc = ChunkAccumulator(
+            session_id="s1",
+            project="proj",
+            user_prompt="test",
+            chunk_index=0,
+        )
+        acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": "/a.py"}, tool_response="ok"))
+        acc.add_tool_use(ToolUseParams(tool_name="Read", tool_input={"file_path": unsafe_file_path}, tool_response="ok"))
+        acc.add_tool_use(
+            ToolUseParams(tool_name="Edit", tool_input={"file_path": unsafe_file_path, "old_string": "x", "new_string": "y"}, tool_response="ok")
+        )
+        chunk = acc.to_chunk()
+        assert chunk.files_read == ["/a.py"]
+        assert chunk.files_modified == []
+
     def test_max_length_enforced(self) -> None:
         acc = ChunkAccumulator(
             session_id="s1",
