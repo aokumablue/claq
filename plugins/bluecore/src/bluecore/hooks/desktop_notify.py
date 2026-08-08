@@ -69,6 +69,18 @@ def find_powershell() -> str | None:
     return None
 
 
+def _decode_stderr(stderr: bytes | str | None) -> str | None:
+    """subprocessのstderrをUTF-8としてデコードします。
+
+    Windows環境のPowerShell出力がUTF-8以外のコードページで書かれている場合でも
+    デコード例外を送出しないよう、不正なバイト列は置換文字で継続します。
+    bytes以外（str/None）はそのまま返します。
+    """
+    if isinstance(stderr, bytes):
+        return stderr.decode("utf-8", errors="replace")
+    return stderr
+
+
 def notify_windows(pwsh_path: str, title: str, body: str) -> dict:
     """PowerShell BurntToast経由でWindowsトースト通知を送信します。
 
@@ -82,13 +94,12 @@ def notify_windows(pwsh_path: str, title: str, body: str) -> dict:
         result = subprocess.run(
             [pwsh_path, "-Command", command],
             capture_output=True,
-            text=True,
             timeout=5,
         )
         if result.returncode == 0:
             return {"success": True, "reason": None}
 
-        error_msg = result.stderr or f"exit {result.returncode}"
+        error_msg = _decode_stderr(result.stderr) or f"exit {result.returncode}"
         return {"success": False, "reason": error_msg}
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         return {"success": False, "reason": str(e)}

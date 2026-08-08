@@ -81,26 +81,81 @@ class TestIsWsl:
         assert hook.is_wsl() is True
 
 
+class TestDecodeStderr:
+    def test_bytes_decoded_as_utf8(self) -> None:
+        assert hook._decode_stderr("日本語".encode()) == "日本語"
+
+    def test_invalid_utf8_bytes_replaced_not_raised(self) -> None:
+        result = hook._decode_stderr(b"\xff\xfe")
+        assert isinstance(result, str)
+
+    def test_str_passthrough(self) -> None:
+        assert hook._decode_stderr("already decoded") == "already decoded"
+
+    def test_none_passthrough(self) -> None:
+        assert hook._decode_stderr(None) is None
+
+
 class TestNotifyWindows:
     def test_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls = []
 
         def fake_run(cmd, **kwargs):
-            calls.append(cmd)
-            return SimpleNamespace(returncode=0, stderr="")
+            calls.append((cmd, kwargs))
+            return SimpleNamespace(returncode=0, stderr=b"")
 
         monkeypatch.setattr(hook.subprocess, "run", fake_run)
 
         assert hook.notify_windows("pwsh", "title", "body") == {"success": True, "reason": None}
-        assert calls[0][0] == "pwsh"
+        assert calls[0][0][0] == "pwsh"
 
-    def test_failure_with_stderr(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_does_not_request_text_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """stdout/stderrをPython側でデコードさせず、生バイト列で受け取ること（text=Trueを使わない）。"""
+        calls = []
+
         def fake_run(cmd, **kwargs):
-            return SimpleNamespace(returncode=1, stderr="boom")
+            calls.append(kwargs)
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        monkeypatch.setattr(hook.subprocess, "run", fake_run)
+
+        hook.notify_windows("pwsh", "title", "body")
+
+        assert "text" not in calls[0]
+        assert calls[0]["capture_output"] is True
+
+    def test_failure_with_stderr_bytes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """stderrがUTF-8として正常デコード可能なバイト列のケース。"""
+
+        def fake_run(cmd, **kwargs):
+            return SimpleNamespace(returncode=1, stderr=b"boom")
 
         monkeypatch.setattr(hook.subprocess, "run", fake_run)
 
         assert hook.notify_windows("pwsh", "title", "body") == {"success": False, "reason": "boom"}
+
+    def test_failure_with_invalid_utf8_stderr_does_not_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """stderrがUTF-8として不正なバイト列でも例外を送出せず、置換文字でデコードすること。"""
+
+        def fake_run(cmd, **kwargs):
+            return SimpleNamespace(returncode=1, stderr=b"\xff\xfe\x00invalid")
+
+        monkeypatch.setattr(hook.subprocess, "run", fake_run)
+
+        result = hook.notify_windows("pwsh", "title", "body")
+
+        assert result["success"] is False
+        assert isinstance(result["reason"], str)
+
+    def test_failure_with_none_stderr_falls_back_to_exit_code(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """stderrがNoneの場合はexitコードを使ったメッセージにフォールバックすること。"""
+
+        def fake_run(cmd, **kwargs):
+            return SimpleNamespace(returncode=2, stderr=None)
+
+        monkeypatch.setattr(hook.subprocess, "run", fake_run)
+
+        assert hook.notify_windows("pwsh", "title", "body") == {"success": False, "reason": "exit 2"}
 
     def test_timeout_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def fake_run(cmd, **kwargs):
