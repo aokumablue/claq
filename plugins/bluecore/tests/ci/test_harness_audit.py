@@ -68,7 +68,7 @@ def test_build_report_defaults_to_repo_mode_with_repo_markers(tmp_path: Path) ->
     assert report["max_score"] == 70
     assert len(report["checks"]) == 26
     assert report["categories"]["Tool Coverage"]["max"] == 10
-    assert report["top_actions"][0]["path"] == "hooks/memory-persistence/"
+    assert report["top_actions"][0]["path"] == "hooks/hooks.json"
 
 
 def test_build_report_defaults_to_consumer_mode_on_empty_root(monkeypatch, tmp_path: Path) -> None:

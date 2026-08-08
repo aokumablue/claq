@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -9,8 +10,119 @@ from bluecore.ci.harness_audit_utils import (
     _command_parity_matches,
     count_files,
     file_exists,
+    safe_parse_json,
     safe_read,
 )
+
+_LAUNCHER_INTERPRETERS = {"python", "python3"}
+
+
+def _hook_command_argv(command: str) -> tuple[str, ...] | None:
+    """hooks.json 内のコマンド文字列から launcher.py 起動後の引数列を返す。
+
+    ``python``/``python3`` で ``launcher.py`` (または ``*/launcher.py``) を
+    起動する形式でなければ ``None`` を返す。
+
+    Args:
+        command: hooks.json の ``command`` フィールドの生文字列
+
+    Returns:
+        launcher.py 起動後の引数トークンのタプル。形式に合致しなければ None
+    """
+    try:
+        command_tokens = shlex.split(command)
+    except ValueError:
+        return None
+
+    if len(command_tokens) < 3 or command_tokens[0] not in _LAUNCHER_INTERPRETERS:
+        return None
+
+    launcher = command_tokens[1]
+    if launcher != "launcher.py" and not launcher.endswith("/launcher.py"):
+        return None
+
+    return tuple(command_tokens[2:])
+
+
+def _event_has_matching_command(
+    event_hooks: Any, argv_patterns: tuple[tuple[str, ...], ...]
+) -> bool:
+    """イベント配下のフック定義に、指定パターンに一致する起動引数があるかを返す。
+
+    Args:
+        event_hooks: hooks.json の特定イベントに紐づく matcher エントリ配列
+        argv_patterns: launcher.py 起動後の引数列として許容するプレフィックス群
+
+    Returns:
+        いずれかのフックコマンドがいずれかのパターンに前方一致すれば True
+    """
+    if not isinstance(event_hooks, list):
+        return False
+
+    for matcher in event_hooks:
+        if not isinstance(matcher, dict) or not isinstance(matcher.get("hooks"), list):
+            continue
+        for hook in matcher["hooks"]:
+            command = hook.get("command") if isinstance(hook, dict) else None
+            if not isinstance(command, str):
+                continue
+            launcher_argv = _hook_command_argv(command)
+            if launcher_argv is None:
+                continue
+            if any(launcher_argv[: len(pattern)] == pattern for pattern in argv_patterns):
+                return True
+    return False
+
+
+def _has_memory_lifecycle_hooks(root_dir: str | Path) -> bool:
+    """実際に使用されるメモリ永続化ライフサイクル定義が hooks.json にあるかを返す。
+
+    ディレクトリの存在だけでなく、``hooks/hooks.json`` を実際にパースし、
+    ``SessionStart``/``Stop``/``SessionEnd`` の各イベントが実在のメモリ永続化
+    コマンド（``bluecore.mem.cli`` の setup/end、``bluecore.hooks.session_start``/
+    ``session_end``）を起動していることを確認する。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+
+    Returns:
+        全ライフサイクルイベントで実コマンドが確認できれば True
+    """
+    hooks_config = safe_parse_json(safe_read(root_dir, "hooks/hooks.json"))
+    if not isinstance(hooks_config, dict) or not isinstance(hooks_config.get("hooks"), dict):
+        return False
+
+    hooks = hooks_config["hooks"]
+    return (
+        _event_has_matching_command(
+            hooks.get("SessionStart", []),
+            (
+                ("bluecore.mem.cli", "session:mem:setup"),
+                ("bluecore.hooks.run_with_flags", "session:mem:setup", "bluecore.mem.cli"),
+            ),
+        )
+        and _event_has_matching_command(
+            hooks.get("SessionStart", []),
+            (
+                ("bluecore.hooks.session_start",),
+                ("bluecore.hooks.run_with_flags", "session:start", "bluecore.hooks.session_start"),
+            ),
+        )
+        and _event_has_matching_command(
+            hooks.get("Stop", []),
+            (
+                ("bluecore.hooks.session_end",),
+                ("bluecore.hooks.run_with_flags", "stop:session-end", "bluecore.hooks.session_end"),
+            ),
+        )
+        and _event_has_matching_command(
+            hooks.get("SessionEnd", []),
+            (
+                ("bluecore.mem.cli", "session:mem:end"),
+                ("bluecore.hooks.run_with_flags", "session:mem:end", "bluecore.mem.cli"),
+            ),
+        )
+    )
 
 
 def _repo_tool_coverage_hooks_checks(root_dir: str | Path) -> list[dict[str, Any]]:
@@ -216,14 +328,16 @@ def _repo_memory_persistence_checks(root_dir: str | Path) -> list[dict[str, Any]
     """
     return [
         {
-            "id": "memory-hooks-dir",
+            "id": "memory-hooks-lifecycle",
             "category": "Memory Persistence",
             "points": 4,
             "scopes": ["repo", "hooks"],
-            "path": "hooks/memory-persistence/",
-            "description": "メモリ永続化フックディレクトリが存在する",
-            "pass": file_exists(root_dir, "hooks/memory-persistence"),
-            "fix": "Add hooks/memory-persistence with lifecycle hook definitions.",
+            "path": "hooks/hooks.json",
+            "description": "実際に使用されるメモリ永続化ライフサイクル定義が hooks/hooks.json に存在する",
+            "pass": _has_memory_lifecycle_hooks(root_dir),
+            "fix": "Wire real memory lifecycle commands (bluecore.mem.cli setup/end, "
+            "bluecore.hooks.session_start/session_end) into hooks/hooks.json's "
+            "SessionStart/Stop/SessionEnd events.",
         },
         {
             "id": "memory-session-hooks",

@@ -265,3 +265,218 @@ def test_get_repo_checks_python_structure_checks_pass_on_real_repo() -> None:
     ]
     for check_id in python_structure_check_ids:
         assert checks[check_id]["pass"] is True, f"{check_id} should pass on the real repo structure"
+
+
+def _write_hooks_json(root_dir: Path, hooks: dict) -> None:
+    """テスト用の hooks/hooks.json を書き出す。"""
+    hooks_dir = root_dir / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    (hooks_dir / "hooks.json").write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
+
+
+def test_memory_hooks_lifecycle_check_fails_when_hooks_json_missing(tmp_path: Path) -> None:
+    """回帰テスト: hooks/hooks.json が存在しない場合は不合格になる。
+
+    旧実装(id=memory-hooks-dir)は hooks/memory-persistence/ ディレクトリの存在
+    だけで合格していたため、hooks.json の中身が空・欠落していても満点扱いに
+    なる誤判定があった。
+    """
+    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
+
+    checks = {check["id"]: check for check in get_repo_checks(tmp_path)}
+
+    assert "memory-hooks-lifecycle" in checks
+    assert checks["memory-hooks-lifecycle"]["pass"] is False
+
+
+def test_memory_hooks_lifecycle_check_fails_when_dir_exists_but_commands_are_stale(
+    tmp_path: Path,
+) -> None:
+    """回帰テスト: フックディレクトリ相当が残っていても実コマンドが不正なら不合格。"""
+    (tmp_path / "hooks" / "memory-persistence").mkdir(parents=True)
+    _write_hooks_json(
+        tmp_path,
+        {
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": "python3 launcher.py bluecore.hooks.unrelated"}]}
+            ],
+            "Stop": [],
+            "SessionEnd": [],
+        },
+    )
+
+    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
+
+    checks = {check["id"]: check for check in get_repo_checks(tmp_path)}
+
+    assert checks["memory-hooks-lifecycle"]["pass"] is False
+
+
+def test_memory_hooks_lifecycle_check_fails_when_hooks_value_not_dict(tmp_path: Path) -> None:
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks" / "hooks.json").write_text(json.dumps({"hooks": ["not", "a", "dict"]}), encoding="utf-8")
+
+    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
+
+    checks = {check["id"]: check for check in get_repo_checks(tmp_path)}
+
+    assert checks["memory-hooks-lifecycle"]["pass"] is False
+
+
+def test_memory_hooks_lifecycle_check_fails_when_only_partial_lifecycle_present(tmp_path: Path) -> None:
+    """SessionStart の mem:setup は正しいが Stop/SessionEnd が欠けている場合は不合格。"""
+    _write_hooks_json(
+        tmp_path,
+        {
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": (
+                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
+                                'bluecore.hooks.run_with_flags "session:mem:setup" "bluecore.mem.cli" '
+                                '"minimal,standard,strict" setup'
+                            ),
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
+
+    checks = {check["id"]: check for check in get_repo_checks(tmp_path)}
+
+    assert checks["memory-hooks-lifecycle"]["pass"] is False
+
+
+def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_path: Path) -> None:
+    """実際の hooks/hooks.json と同形式の4イベントが揃っていれば合格する。"""
+    _write_hooks_json(
+        tmp_path,
+        {
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": (
+                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
+                                'bluecore.hooks.run_with_flags "session:mem:setup" "bluecore.mem.cli" '
+                                '"minimal,standard,strict" setup'
+                            ),
+                        }
+                    ]
+                },
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": (
+                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
+                                'bluecore.hooks.run_with_flags "session:start" "bluecore.hooks.session_start" '
+                                '"minimal,standard,strict"'
+                            ),
+                        }
+                    ]
+                },
+            ],
+            "Stop": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": (
+                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
+                                'bluecore.hooks.run_with_flags "stop:session-end" "bluecore.hooks.session_end" '
+                                '"minimal,standard,strict"'
+                            ),
+                        }
+                    ]
+                }
+            ],
+            "SessionEnd": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": (
+                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
+                                'bluecore.hooks.run_with_flags "session:mem:end" "bluecore.mem.cli" '
+                                '"standard,strict" "session-end"'
+                            ),
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
+
+    checks = {check["id"]: check for check in get_repo_checks(tmp_path)}
+
+    assert checks["memory-hooks-lifecycle"]["pass"] is True
+    assert checks["memory-hooks-lifecycle"]["path"] == "hooks/hooks.json"
+
+
+def test_memory_hooks_lifecycle_check_passes_on_real_repo_hooks_json() -> None:
+    """実リポジトリの hooks/hooks.json に対して合格することを確認する。"""
+    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
+
+    plugin_root = Path(__file__).resolve().parents[2]
+    checks = {check["id"]: check for check in get_repo_checks(plugin_root)}
+
+    assert checks["memory-hooks-lifecycle"]["pass"] is True
+
+
+def test_hook_command_argv_covers_parse_edge_cases() -> None:
+    """_hook_command_argv の分岐（不正引用符・トークン不足・起動形式不一致等）を網羅する。"""
+    from bluecore.ci.harness_audit_repo_checks import _hook_command_argv
+
+    assert _hook_command_argv('python3 "unterminated') is None
+    assert _hook_command_argv("python3 launcher.py") is None
+    assert _hook_command_argv("node launcher.py a b") is None
+    assert _hook_command_argv("python3 other.py a b") is None
+    assert _hook_command_argv("python3 launcher.py a b") == ("a", "b")
+    assert _hook_command_argv('python3 "${ROOT}/launcher.py" a b') == ("a", "b")
+
+
+def test_event_has_matching_command_covers_branches() -> None:
+    """_event_has_matching_command の全分岐（型不正・不一致・一致）を網羅する。"""
+    from bluecore.ci.harness_audit_repo_checks import _event_has_matching_command
+
+    patterns = (("bluecore.mem.cli", "session:mem:setup"),)
+
+    assert _event_has_matching_command("not-a-list", patterns) is False
+    assert _event_has_matching_command([], patterns) is False
+    assert _event_has_matching_command(["not-a-dict"], patterns) is False
+    assert _event_has_matching_command([{"hooks": "not-a-list"}], patterns) is False
+    assert _event_has_matching_command([{"hooks": ["not-a-dict"]}], patterns) is False
+    assert _event_has_matching_command([{"hooks": [{"command": 123}]}], patterns) is False
+    assert _event_has_matching_command([{"hooks": [{"command": "python3 launcher.py"}]}], patterns) is False
+    assert (
+        _event_has_matching_command(
+            [{"hooks": [{"command": "python3 launcher.py bluecore.mem.cli other:action"}]}],
+            patterns,
+        )
+        is False
+    )
+    assert (
+        _event_has_matching_command(
+            [{"hooks": [{"command": "python3 launcher.py bluecore.mem.cli session:mem:setup"}]}],
+            patterns,
+        )
+        is True
+    )
+
+
+def test_has_memory_lifecycle_hooks_returns_false_on_malformed_json(tmp_path: Path) -> None:
+    """_has_memory_lifecycle_hooks が不正 JSON・hooks 欠落時に False を返すことを確認する。"""
+    from bluecore.ci.harness_audit_repo_checks import _has_memory_lifecycle_hooks
+
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks" / "hooks.json").write_text("not-json", encoding="utf-8")
+    assert _has_memory_lifecycle_hooks(tmp_path) is False
