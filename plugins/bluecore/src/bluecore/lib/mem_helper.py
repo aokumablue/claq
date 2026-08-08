@@ -194,7 +194,14 @@ def _run_mem_cli(command: str, input_data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _truncate(text: str, max_len: int) -> str:
-    """テキストを最大長で切り詰める。"""
+    """テキストを最大長で切り詰める。
+
+    常に ``len(結果) <= max_len`` を保証する。省略記号 "..." を付与すると
+    max_len を超えてしまう小さな max_len（4文字未満）では、省略記号を付けず
+    単純に文字数で切り詰める。
+    """
     if len(text) <= max_len:
         return text
+    if max_len < 4:
+        return text[:max_len]
     return text[: max_len - 3] + "..."

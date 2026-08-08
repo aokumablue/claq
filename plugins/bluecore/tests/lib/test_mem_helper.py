@@ -234,8 +234,36 @@ class TestTruncate:
         assert _truncate("hello world", 8) == "hello..."
 
     def test_very_short_max(self) -> None:
-        """非常に短い最大長"""
-        assert _truncate("hello", 3) == "..."
+        """非常に短い最大長（3文字以下は"..."を付けず単純切り詰め）"""
+        assert _truncate("hello", 3) == "hel"
+
+    @pytest.mark.parametrize("max_len", [0, 1, 2, 3, 4, 5, 10, 100])
+    def test_result_never_exceeds_max_len(self, max_len: int) -> None:
+        """max_lenがどんな値でも、結果の長さがmax_lenを超えないこと。"""
+        assert len(_truncate("hello world, this is a long text", max_len)) <= max_len
+
+    def test_max_len_zero(self) -> None:
+        """max_len=0では空文字列になる（"..."も付けない）"""
+        assert _truncate("hello", 0) == ""
+
+    def test_max_len_one(self) -> None:
+        """max_len=1では"..."を付けず1文字に切り詰める"""
+        assert _truncate("hello", 1) == "h"
+
+    def test_max_len_two(self) -> None:
+        """max_len=2では"..."を付けず2文字に切り詰める"""
+        assert _truncate("hello", 2) == "he"
+
+    def test_max_len_four(self) -> None:
+        """max_len=4は"..."より1文字長いため、1文字+"..."になる"""
+        assert _truncate("hello", 4) == "h..."
+
+    def test_normal_case_unaffected(self) -> None:
+        """通常ケース（max_len=100）の出力は変わらない"""
+        text = "A" * 200
+        result = _truncate(text, 100)
+        assert result == "A" * 97 + "..."
+        assert len(result) == 100
 
 
 class TestRunMemCliIntegration:
