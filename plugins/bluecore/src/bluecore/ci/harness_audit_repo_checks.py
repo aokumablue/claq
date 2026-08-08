@@ -212,10 +212,10 @@ def _repo_context_compact_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "category": "Context Efficiency",
             "points": 3,
             "scopes": ["repo", "hooks"],
-            "path": "src/bluecore/hooks/suggest_compact.py",
-            "description": "コンテキスト圧縮自動化フックが存在する（セッション中にコンテキスト圧縮提案）",
-            "pass": file_exists(root_dir, "src/bluecore/hooks/suggest_compact.py"),
-            "fix": "Implement src/bluecore/hooks/suggest_compact.py for context pressure hints.",
+            "path": "src/bluecore/hooks/redux_filter.py",
+            "description": "コンテキスト圧縮を自動実行するフックが存在する（Bash 出力をコマンド別フィルタで圧縮しトークン消費を削減）",
+            "pass": file_exists(root_dir, "src/bluecore/hooks/redux_filter.py"),
+            "fix": "Implement src/bluecore/hooks/redux_filter.py for automatic context compression.",
         },
     ]
 

@@ -23,26 +23,6 @@
         "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"
       },
       {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:write:doc-file-warning\" \"bluecore.hooks.doc_file_warning\" \"standard,strict\""
-          }
-        ],
-        "description": "ドキュメントファイル警告: 標準規格外のドキュメントファイルについて警告します (終了コード 0; 警告のみ)"
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit|apply_patch",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"pre:edit-write:suggest-compact\" \"bluecore.hooks.suggest_compact\" \"standard,strict\""
-          }
-        ],
-        "description": "論理的な間隔で手動のコンパクションを提案します"
-      },
-      {
         "matcher": "*",
         "hooks": [
           {
@@ -52,17 +32,6 @@
           }
         ],
         "description": "linter/formatterの設定ファイルへの変更をブロックします。エージェントが設定を弱めるのではなく、コードを修正するように導きます。"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.insights_security_monitor",
-            "timeout": 10
-          }
-        ],
-        "description": "InsAIts SDK が導入済みの環境では稼働中で、ツール入力を検査し認証情報の露出やプロンプトインジェクションを検出します。CRITICAL 異常はツール実行を実際にブロックし、監査イベントを JSONL に記録します。SDK 未導入環境では検査自体をスキップします（フェイルオープン）。"
       },
       {
         "matcher": "*",
@@ -205,16 +174,6 @@
         "description": "redux: Bash 出力をコマンド別フィルタで圧縮（無一致時は汎用戦略でトークン削減）"
       },
       {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"post:bash:pr-created\" \"bluecore.hooks.post_bash_pr_created\" \"standard,strict\""
-          }
-        ],
-        "description": "PR URLを記録し、PR作成後にレビュー コマンドを提供します"
-      },
-      {
         "matcher": "*",
         "hooks": [
           {
@@ -245,18 +204,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"stop:evaluate-session\" \"bluecore.hooks.evaluate_session\" \"minimal,standard,strict\"",
-            "async": true,
-            "timeout": 10
-          }
-        ],
-        "description": "セッションを評価して抽出可能なパターンを特定する"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"stop:desktop-notify\" \"bluecore.hooks.desktop_notify\" \"minimal,standard,strict\"",
             "timeout": 10
           }
@@ -265,18 +212,6 @@
       }
     ],
     "SessionEnd": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.run_with_flags \"session:end:marker\" \"bluecore.hooks.session_end_marker\" \"minimal,standard,strict\"",
-            "async": true,
-            "timeout": 10
-          }
-        ],
-        "description": "セッション終了ライフサイクルマーカー（非ブロッキング）"
-      },
       {
         "matcher": "*",
         "hooks": [

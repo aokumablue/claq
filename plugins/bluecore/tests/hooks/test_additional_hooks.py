@@ -10,10 +10,8 @@ import pytest
 
 from bluecore.hooks import (
     block_no_verify,
-    evaluate_session,
     pre_compact,
     session_end,
-    session_end_marker,
 )
 
 
@@ -82,148 +80,6 @@ class TestBlockNoVerify:
             harness.detect_harness.cache_clear()
         deny = json.loads(capsys.readouterr().out)
         assert deny["permissionDecision"] == "deny"
-
-
-class TestSessionEndMarker:
-    def test_main_passes_input_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        payload = '{"session": "end"}'
-        stdout, stderr = _capture_io(monkeypatch, session_end_marker, payload)
-
-        assert session_end_marker.main() == 0
-        assert stdout == []
-        assert stderr == []
-
-
-class TestEvaluateSession:
-    def test_main_skips_when_transcript_is_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        payload = json.dumps({})
-        logs: list[str] = []
-        monkeypatch.setattr(evaluate_session, "read_raw_stdin", lambda: payload)
-        monkeypatch.setattr(evaluate_session, "log", logs.append)
-        monkeypatch.setattr(evaluate_session, "get_learned_skills_dir", lambda: tmp_path / "learned")
-        monkeypatch.setattr(evaluate_session, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(
-            evaluate_session,
-            "read_file",
-            lambda path: json.dumps({"min_session_length": 2}) if Path(path).name == "config.json" else None,
-        )
-        monkeypatch.setattr(evaluate_session, "_default_config_path", lambda: tmp_path / "config.json")
-
-        assert evaluate_session.main() == 0
-        assert logs == []
-
-    def test_main_uses_custom_learned_skills_path_and_short_session(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        config_path = tmp_path / "config.json"
-        transcript_path = tmp_path / "transcript.jsonl"
-        transcript_path.write_text('{"type":"user","content":"hello"}\n', encoding="utf-8")
-        config_path.write_text(
-            json.dumps({"min_session_length": 2, "learned_skills_path": "~/learned"}),
-            encoding="utf-8",
-        )
-
-        logs: list[str] = []
-        ensured: list[Path] = []
-
-        monkeypatch.setattr(evaluate_session, "read_raw_stdin", lambda: json.dumps({"transcript_path": str(transcript_path)}))
-        monkeypatch.setattr(evaluate_session, "log", logs.append)
-        monkeypatch.setattr(evaluate_session, "ensure_dir", lambda path: ensured.append(Path(path)))
-        monkeypatch.setattr(evaluate_session.Path, "home", lambda: tmp_path)
-        monkeypatch.setattr(evaluate_session, "_default_config_path", lambda: config_path)
-
-        assert evaluate_session.main() == 0
-        assert ensured == [tmp_path / "learned"]
-        assert any("Session too short" in message for message in logs)
-
-    def test_main_logs_invalid_config_and_continues_with_defaults(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        config_path = tmp_path / "config.json"
-        transcript_path = tmp_path / "transcript.jsonl"
-        transcript_path.write_text('{"type":"user","content":"hello"}\n', encoding="utf-8")
-
-        logs: list[str] = []
-        monkeypatch.setattr(
-            evaluate_session,
-            "read_raw_stdin",
-            lambda: json.dumps({"transcript_path": str(transcript_path)}),
-        )
-        monkeypatch.setattr(evaluate_session, "log", logs.append)
-        monkeypatch.setattr(evaluate_session, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(evaluate_session, "get_learned_skills_dir", lambda: tmp_path / "learned")
-        monkeypatch.setattr(evaluate_session, "read_file", lambda path: "not-json" if Path(path) == config_path else None)
-        monkeypatch.setattr(evaluate_session, "_default_config_path", lambda: config_path)
-
-        assert evaluate_session.main() == 0
-        assert any("Failed to parse config" in message for message in logs)
-
-    def test_main_logs_outer_exception(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        transcript_path = tmp_path / "transcript.jsonl"
-        transcript_path.write_text('{"type":"user","content":"hello"}\n', encoding="utf-8")
-
-        logs: list[str] = []
-        monkeypatch.setattr(
-            evaluate_session,
-            "read_raw_stdin",
-            lambda: json.dumps({"transcript_path": str(transcript_path)}),
-        )
-        monkeypatch.setattr(evaluate_session, "log", logs.append)
-        monkeypatch.setattr(evaluate_session, "read_file", lambda path: None)
-
-        def fail_ensure_dir(path):  # noqa: ANN001
-            raise RuntimeError("boom")
-
-        monkeypatch.setattr(evaluate_session, "ensure_dir", fail_ensure_dir)
-        monkeypatch.setattr(evaluate_session, "get_learned_skills_dir", lambda: tmp_path / "learned")
-
-        assert evaluate_session.main() == 0
-        assert any("Error: boom" in message for message in logs)
-
-    def test_main_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "{}")
-        monkeypatch.setattr("bluecore.lib.core_utils.read_file", lambda path: None)
-        monkeypatch.setattr("bluecore.lib.core_utils.get_learned_skills_dir", lambda: tmp_path / "learned")
-        monkeypatch.setattr("bluecore.lib.core_utils.ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr("bluecore.lib.core_utils.log", lambda message: None)
-
-        assert _run_entrypoint("bluecore.hooks.evaluate_session") == 0
-
-    def test_main_reports_long_sessions(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        config_path = tmp_path / "config.json"
-        transcript_path = tmp_path / "transcript.jsonl"
-        transcript_path.write_text(
-            "\n".join(
-                [
-                    json.dumps({"type": "user", "content": "one"}),
-                    json.dumps({"type": "user", "content": "two"}),
-                ]
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        config_path.write_text(
-            json.dumps({"min_session_length": 1, "learned_skills_path": str(tmp_path / "learned")}),
-            encoding="utf-8",
-        )
-
-        logs: list[str] = []
-        ensured: list[Path] = []
-
-        monkeypatch.setattr(
-            evaluate_session,
-            "read_raw_stdin",
-            lambda: json.dumps({"transcript_path": str(transcript_path)}),
-        )
-        monkeypatch.setattr(evaluate_session, "log", logs.append)
-        monkeypatch.setattr(evaluate_session, "ensure_dir", lambda path: ensured.append(Path(path)))
-        monkeypatch.setattr(evaluate_session, "read_file", lambda path: config_path.read_text(encoding="utf-8"))
-        monkeypatch.setattr(evaluate_session, "_default_config_path", lambda: config_path)
-
-        assert evaluate_session.main() == 0
-        assert ensured == [tmp_path / "learned"]
-        assert any("Session has 2 messages" in message for message in logs)
-        assert any("Save learned skills to" in message for message in logs)
 
 
 class TestSessionEndHelpers:
@@ -680,11 +536,6 @@ class TestSimpleHookEntrypoints:
 
         assert _run_entrypoint("bluecore.hooks.block_no_verify") == 0
 
-    def test_session_end_marker_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: '{"session":"end"}')
-
-        assert _run_entrypoint("bluecore.hooks.session_end_marker") == 0
-
 
 class TestSessionStartRubyLog:
     """session_start フックが Ruby プロジェクトでログを出すことを確認するテスト。"""
@@ -979,7 +830,6 @@ class TestFilterSessionSummary:
     "module_name",
     [
         "block_no_verify",
-        "doc_file_warning",
         "config_protection",
         "pre_agent_nudge",
     ],
@@ -1000,14 +850,6 @@ def test_config_protection_blank_file_path(monkeypatch: pytest.MonkeyPatch) -> N
     payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": ""}})
     _capture_io(monkeypatch, config_protection, payload)
     assert config_protection.main() == 0
-
-def test_evaluate_session_config_without_min_length(tmp_path, monkeypatch) -> None:
-    """設定に min_session_length が無ければ既定値 10 を維持する。"""
-    monkeypatch.setattr(
-        evaluate_session, "read_file", lambda path: json.dumps({"learned_skills_path": "~/x"})
-    )
-    min_len, _ = evaluate_session._load_learn_config(tmp_path / "config.json")
-    assert min_len == 10
 
 
 def test_collect_user_message_non_text_content() -> None:

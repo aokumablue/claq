@@ -22,25 +22,12 @@ from bluecore.hooks import (
     config_protection as config_protection,
 )
 from bluecore.hooks import (
-    doc_file_warning as doc_file_warning,
-)
-from bluecore.hooks import (
     session_end as session_end,
 )
 from bluecore.hooks import (
     session_start as session_start,
 )
-from bluecore.hooks import (
-    suggest_compact as suggest_compact,
-)
 from bluecore.hooks.hook_common import is_truthy
-
-
-def test_doc_file_warning_flags_ad_hoc_documents() -> None:
-    assert doc_file_warning.is_suspicious_doc_path("notes/TODO.md")
-    assert doc_file_warning.is_suspicious_doc_path("scratch/WIP.txt")
-    assert not doc_file_warning.is_suspicious_doc_path("docs/TODO.md")
-    assert not doc_file_warning.is_suspicious_doc_path("commands/plan.md")
 
 
 def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,84 +131,6 @@ def test_config_protection_blocks_legacy_file_field(monkeypatch: pytest.MonkeyPa
     assert "Modifying biome.json is not allowed" in stderr.getvalue()
 
 
-def test_doc_file_warning_main_warns_for_ad_hoc_documents(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = json.dumps({"tool_input": {"file_path": "notes/TODO.md"}})
-    stdout = io.StringIO()
-    stderr = io.StringIO()
-    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
-
-    with redirect_stdout(stdout), redirect_stderr(stderr):
-        assert doc_file_warning.main() == 0
-
-    # 警告のみで stdout は空（パススルー不要）
-    assert stdout.getvalue() == ""
-    assert "Ad-hoc documentation filename detected" in stderr.getvalue()
-
-
-def test_suggest_compact_increments_counter_and_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path))
-    monkeypatch.setenv("CLAUDE_SESSION_ID", "session-123")
-    monkeypatch.setenv("COMPACT_THRESHOLD", "2")
-    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-
-    stderr = io.StringIO()
-    with redirect_stderr(stderr):
-        assert suggest_compact.main() == 0
-        assert suggest_compact.main() == 0
-
-    output = stderr.getvalue()
-    assert "2 tool calls reached" in output
-    assert (tmp_path / "claude-tool-count-session-123").read_text(encoding="utf-8") == "2"
-
-
-def test_suggest_compact_helpers_and_error_fallback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    assert suggest_compact.sanitize_session_id(None) == "default"
-    assert suggest_compact.sanitize_session_id("sess/ion!123") == "session123"
-    assert suggest_compact.parse_threshold("10") == 10
-    assert suggest_compact.parse_threshold("0") == 50
-    assert suggest_compact.parse_threshold("bad") == 50
-
-    monkeypatch.setattr(
-        suggest_compact.Path,
-        "open",
-        lambda self, *args, **kwargs: (_ for _ in ()).throw(OSError("boom")),
-    )
-    writes: list[tuple[Path, str]] = []
-    monkeypatch.setattr(suggest_compact, "write_file", lambda path, content: writes.append((Path(path), content)))
-
-    counter = tmp_path / "counter"
-    assert suggest_compact.read_and_increment(counter) == 1
-    assert writes == [(counter, "1")]
-
-
-def test_suggest_compact_skips_without_session_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """CLAUDE_SESSION_ID 未設定時はカウンタを作らず提案もしない（並行セッション混線防止）。"""
-    monkeypatch.setenv("TMPDIR", str(tmp_path))
-    monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-    monkeypatch.setenv("COMPACT_THRESHOLD", "1")
-    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-
-    stderr = io.StringIO()
-    with redirect_stderr(stderr):
-        assert suggest_compact.main() == 0
-
-    assert stderr.getvalue() == ""
-    assert not (tmp_path / "claude-tool-count-default").exists()
-
-
-def test_suggest_compact_main_logs_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(suggest_compact, "read_raw_stdin", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-    stderr = io.StringIO()
-
-    with redirect_stderr(stderr):
-        assert suggest_compact.main() == 0
-
-    assert "StrategicCompact" in stderr.getvalue()
-    assert "boom" in stderr.getvalue()
-
-
 def test_session_start_deduplicates_recent_sessions(tmp_path: Path) -> None:
     first_dir = tmp_path / "first"
     second_dir = tmp_path / "second"
@@ -269,20 +178,6 @@ def test_session_end_extracts_summary(tmp_path: Path) -> None:
     assert summary["totalMessages"] == 2
 
 
-def test_doc_file_warning_non_document_and_entrypoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = json.dumps({"tool_input": {"file_path": "notes/README.png"}})
-
-    assert not doc_file_warning.is_suspicious_doc_path("notes/README.png")
-
-    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
-    monkeypatch.setattr(sys, "argv", ["doc_file_warning.py"])
-
-    with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("bluecore.hooks.doc_file_warning", run_name="__main__")
-
-    assert excinfo.value.code == 0
-
-
 def test_config_protection_entrypoint_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = json.dumps({"tool_input": {"file_path": "README.md"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
@@ -301,30 +196,6 @@ def test_session_end_run_logs_outer_exception(monkeypatch: pytest.MonkeyPatch) -
 
     assert session_end.run("{}") == "{}"
     assert any("Error: boom" in message for message in logs)
-
-
-def test_session_start_slim_injection_wired_into_context(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """run() が inject_slim_skill() の戻り値を additionalContext に連結する。"""
-    learned_dir = tmp_path / "learned"
-    sessions_dir = tmp_path / "sessions"
-    learned_dir.mkdir()
-    sessions_dir.mkdir()
-
-    monkeypatch.setattr(session_start, "ensure_dir", lambda path: None)
-    monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: learned_dir)
-    monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
-    monkeypatch.setattr(session_start, "get_session_search_dirs", lambda: [])
-    monkeypatch.setattr(session_start, "find_files", lambda *args, **kwargs: [])
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source="auto"))
-    monkeypatch.setattr(
-        session_start,
-        "detect_project",
-        lambda cwd: SimpleNamespace(languages=[], frameworks=[], primary_language=None),
-    )
-    monkeypatch.setattr(session_start, "inject_slim_skill", lambda: ["slim-content"])
-
-    payload = json.loads(session_start.run(json.dumps({"session_id": "abc"})))
-    assert "slim-content" in payload["hookSpecificOutput"]["additionalContext"]
 
 
 def test_session_start_main_sanitizes_exception_logs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -402,32 +273,6 @@ def test_session_start_main_success_and_entrypoint(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(SystemExit) as excinfo:
         runpy.run_module("bluecore.hooks.session_start", run_name="__main__")
-
-    assert excinfo.value.code == 0
-
-
-def test_suggest_compact_invalid_counter_and_checkpoint_entrypoint(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    invalid_counter = tmp_path / "invalid-counter"
-    invalid_counter.write_text("oops", encoding="utf-8")
-    assert suggest_compact.read_and_increment(invalid_counter) == 1
-
-    counter_file = tmp_path / "claude-tool-count-session-123"
-    counter_file.write_text("26", encoding="utf-8")
-    monkeypatch.setenv("TMPDIR", str(tmp_path))
-    monkeypatch.setenv("CLAUDE_SESSION_ID", "session-123")
-    monkeypatch.setenv("COMPACT_THRESHOLD", "2")
-    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-
-    stderr = io.StringIO()
-    with redirect_stderr(stderr):
-        assert suggest_compact.main() == 0
-
-    assert "27 tool calls" in stderr.getvalue()
-
-    with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("bluecore.hooks.suggest_compact", run_name="__main__")
 
     assert excinfo.value.code == 0
 

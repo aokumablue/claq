@@ -4,4 +4,3 @@ numpy>=2.0
 tokenizers>=0.20
 sqlite-vec>=0.1
 pyyaml>=6.0
-insa-its>=0.1

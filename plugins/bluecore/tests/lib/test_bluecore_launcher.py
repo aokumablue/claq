@@ -119,17 +119,17 @@ def test_resolve_command_prefers_repo_venv_python(monkeypatch, tmp_path: Path) -
     venv_python = _create_repo_venv(tmp_path)
     monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
 
-    cmd = launcher.resolve_command("bluecore.hooks.doc_file_warning", ["arg1"])
+    cmd = launcher.resolve_command("bluecore.hooks.config_protection", ["arg1"])
 
-    assert cmd == [str(venv_python), "-m", "bluecore.hooks.doc_file_warning", "arg1"]
+    assert cmd == [str(venv_python), "-m", "bluecore.hooks.config_protection", "arg1"]
 
 
 def test_resolve_command_falls_back_to_system_python_without_repo_venv(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
 
-    cmd = launcher.resolve_command("bluecore.hooks.doc_file_warning", [])
+    cmd = launcher.resolve_command("bluecore.hooks.config_protection", [])
 
-    assert cmd == [sys.executable, "-m", "bluecore.hooks.doc_file_warning"]
+    assert cmd == [sys.executable, "-m", "bluecore.hooks.config_protection"]
 
 
 def test_resolve_command_runs_python_script_with_repo_venv(monkeypatch, tmp_path: Path) -> None:

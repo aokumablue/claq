@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from bluecore.hooks.doc_file_warning import is_suspicious_doc_path
 from bluecore.hooks.run_with_flags import resolve_target_command
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -36,15 +35,6 @@ def run_launcher(
         env=run_env,
         check=False,
     )
-
-
-def test_launcher_runs_python_hook_and_preserves_payload() -> None:
-    payload = json.dumps({"tool_input": {"file_path": "notes/TODO.md"}})
-    result = run_launcher("bluecore.hooks.doc_file_warning", input_text=payload)
-
-    assert result.returncode == 0
-    assert result.stdout == ""
-    assert "Ad-hoc documentation filename detected" in result.stderr
 
 
 def test_run_with_flags_skips_disabled_hook() -> None:
@@ -179,14 +169,14 @@ def test_mem_cli_hooks_use_separate_target_args(
 
 def test_resolve_target_command_module_name() -> None:
     """モジュール名からコマンドを解決します。"""
-    cmd = resolve_target_command("bluecore.hooks.doc_file_warning", ["arg1", "arg2"])
-    assert cmd == [sys.executable, "-m", "bluecore.hooks.doc_file_warning", "arg1", "arg2"]
+    cmd = resolve_target_command("bluecore.hooks.config_protection", ["arg1", "arg2"])
+    assert cmd == [sys.executable, "-m", "bluecore.hooks.config_protection", "arg1", "arg2"]
 
 
 def test_resolve_target_command_module_name_no_args() -> None:
     """引数なしでモジュール名からコマンドを解決します。"""
-    cmd = resolve_target_command("bluecore.hooks.doc_file_warning")
-    assert cmd == [sys.executable, "-m", "bluecore.hooks.doc_file_warning"]
+    cmd = resolve_target_command("bluecore.hooks.config_protection")
+    assert cmd == [sys.executable, "-m", "bluecore.hooks.config_protection"]
 
 
 def test_resolve_target_command_absolute_python_script(tmp_path: Path) -> None:
@@ -275,10 +265,6 @@ def test_run_with_flags_forwards_extra_args(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert data["args"] == ["alpha", "beta"]
     assert data["stdin"] == "payload"
-
-
-def test_doc_file_warning_treats_gitlab_dir_as_structured() -> None:
-    assert not is_suspicious_doc_path(".gitlab/NOTES.md")
 
 
 def test_read_raw_stdin_no_truncation(monkeypatch) -> None:
