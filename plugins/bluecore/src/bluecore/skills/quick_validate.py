@@ -5,22 +5,29 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
+from bluecore.lib.frontmatter import (
+    FrontmatterError,
+    MissingFrontmatterError,
+    UnterminatedFrontmatterError,
+    parse_yaml,
+    split_frontmatter,
+)
 
 
 def _parse_frontmatter(content: str) -> tuple[bool, str, dict | None]:
     """SKILL.md テキストから frontmatter を解析し、(ok, error_msg, frontmatter_dict) を返す。"""
-    if not content.startswith("---"):
+    try:
+        block = split_frontmatter(content)
+    except MissingFrontmatterError:
         return False, "YAML frontmatter が見つかりません", None
-    match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
-    if not match:
+    except UnterminatedFrontmatterError:
         return False, "frontmatter の形式が不正です", None
     try:
-        frontmatter = yaml.safe_load(match.group(1))
-        if not isinstance(frontmatter, dict):
-            return False, "frontmatter は YAML の辞書である必要があります", None
-    except yaml.YAMLError as e:
-        return False, f"frontmatter 内の YAML が不正です: {e}", None
+        frontmatter = parse_yaml(block)
+    except FrontmatterError as err:
+        return False, f"frontmatter 内の YAML が不正です: {err}", None
+    if not isinstance(frontmatter, dict):
+        return False, "frontmatter は YAML の辞書である必要があります", None
     return True, "", frontmatter
 
 
