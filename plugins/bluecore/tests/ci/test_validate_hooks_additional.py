@@ -192,15 +192,7 @@ def test_repo_mem_cli_hooks_split_target_and_args() -> None:
             argv = argv[1:]
 
         assert argv[0] == "bluecore.mem.cli"
-        assert argv[1] in {
-            "setup",
-            "context",
-            "record-project-profile",
-            "session-init",
-            "record-interaction",
-            "session-end",
-            "observe",
-        }
+        assert argv[1] in {"setup"}
 
 
 def test_validate_http_hook_without_optional_fields() -> None:

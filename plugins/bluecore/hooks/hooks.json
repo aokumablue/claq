@@ -101,56 +101,9 @@
           }
         ],
         "description": "新しいセッションで以前のコンテキストを読み込み、パッケージマネージャを検出する"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli context",
-            "timeout": 60
-          }
-        ],
-        "description": "mem: 過去のメモリチャンクからコンテキストを注入"
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli session-init",
-            "timeout": 30
-          }
-        ],
-        "description": "mem: 適応的メモリ検索 (「前回」「以前」等のキーワードで自動注入)"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli record-interaction",
-            "timeout": 30
-          }
-        ],
-        "description": "mem: ユーザープロンプトと AI 応答のペア記録（interaction_logs）"
       }
     ],
     "PostToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.mem.cli observe",
-            "async": true,
-            "timeout": 10
-          }
-        ],
-        "description": "mem: 全ツールイベントを受け、対象ツールだけをメモリチャンクに記録"
-      },
       {
         "matcher": "Bash",
         "hooks": [
@@ -198,20 +151,6 @@
           }
         ],
         "description": "応答完了時にタスクサマリー付きデスクトップ通知を送信します（macOS: osascript、WSL: PowerShell + BurntToast）"
-      }
-    ],
-    "SessionEnd": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.mem.cli session-end",
-            "async": true,
-            "timeout": 30
-          }
-        ],
-        "description": "mem: エンべディング一括生成とメモリ最適化"
       }
     ]
   }

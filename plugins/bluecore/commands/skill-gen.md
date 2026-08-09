@@ -29,7 +29,6 @@ command: /skill-gen
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
 collect_skill_create_inputs "${COMMITS:-200}"
-bluecore_mem_search "<search query>" 3
 ```
 
 ## ステップ2: パターン検出

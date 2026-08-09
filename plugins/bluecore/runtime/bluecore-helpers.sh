@@ -21,36 +21,6 @@ bluecore_run() {
   python3 "${plugin_root}/src/bluecore/launcher.py" "$@"
 }
 
-# Pipe JSON input into bluecore.mem subcommands.
-bluecore_mem_json() {
-  local command="${1:?Usage: bluecore_mem_json <subcommand> [json] }"
-  shift || true
-
-  if [ "$#" -gt 0 ]; then
-    printf '%s' "$1" | bluecore_run bluecore.mem.cli "$command"
-  else
-    cat | bluecore_run bluecore.mem.cli "$command"
-  fi
-}
-
-# Build and execute a repository-scoped mem search payload.
-bluecore_mem_search() {
-  local query="${1:?Usage: bluecore_mem_search <query> [limit]}"
-  local limit="${2:-3}"
-  local cwd
-  cwd="$(git rev-parse --show-toplevel)"
-
-  bluecore_mem_json search "$(
-    python3 - "$cwd" "$query" "$limit" <<'PY'
-import json
-import sys
-
-cwd, query, limit = sys.argv[1], sys.argv[2], int(sys.argv[3])
-print(json.dumps({"cwd": cwd, "query": query, "limit": limit}))
-PY
-  )"
-}
-
 # Run a bluecore launcher command in the background and print the PID.
 bluecore_run_bg() {
   local plugin_root
