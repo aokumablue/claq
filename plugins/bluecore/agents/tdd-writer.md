@@ -125,7 +125,7 @@ Null/Undefined・空配列/文字列・無効型・境界値（最小/最大）�
 
 ## 永続メモリ
 
-`<mem-context>` 注入で起動。
-search: `test {feature_domain} pattern` / `bug fix regression test`
-record: `{"event_type": "tdd-result", "content": "TDD: {feature}. Tests: {n}. Coverage: {coverage}%. Pass: {pass}"}`
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
+search: `mem search` — クエリ例 `test {feature_domain} pattern` / `bug fix regression test`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: テストテンプレート / クリティカルコード検出 / カバレッジ傾向

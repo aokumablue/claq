@@ -68,7 +68,7 @@ Blockers: 2
 
 ## 永続メモリ
 
-`<mem-context>` 注入で起動。
-search: `security vulnerability {category}` / `fix remediation {vulnerability_type}`
-record: `{"event_type": "security-review", "content": "Security: {files}. CRITICAL: {n}, HIGH: {n}. Fixed: {n}"}`
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
+search: `mem search` — クエリ例 `security vulnerability {category}` / `fix remediation {vulnerability_type}`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: 脆弱性パターン / 修復履歴 / 繰り返し違反（優先度上げ）

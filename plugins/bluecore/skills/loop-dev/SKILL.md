@@ -131,5 +131,22 @@ Assumptions: {仮決定事項 or "-"}
 
 ## 永続メモリ
 
-search: `loop-dev iteration blocker converge {task キーワード}`
-record（各反復終了ごとに 1 件発行。Result は反復履歴の 4 値と同一語彙。loop-audit skill の副次データソース）: `{"event_type":"loop-dev","content":"Task:{task}. Iter:{n}/2. Result:{converged|not-converged|circuit-break|stopped}. Blockers:{n}. Flake:{n}. Commits:{hash}"}`
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
+
+search: `mem search` — クエリ例 `loop-dev iteration blocker converge {task キーワード}`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+
+record（2 種類あり、混同しないこと）:
+
+1. **反復テレメトリ** — 収束したかどうかにかかわらず、1 実行につき 1 件を **`--status pending`** で発行する。loop-audit skill の副次データソース。`pending` なので SessionStart には注入されず、注入枠を消費しない。Result は反復履歴の 4 値と同一語彙。
+
+   ```bash
+   source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+   bluecore_mem_learn --key "loop-dev-{task-slug}" --kind fact --scope repo --status pending \
+     --domain loop-dev --confidence 0.5 \
+     --title "loop-dev converge {task}: Result:{converged|not-converged|circuit-break|stopped} Iter:{n}/2" \
+     --body "Task:{task}. Iter:{n}/2. Result:{...}. Blockers:{n}. Flake:{n}. Commits:{hash}"
+   ```
+
+   title に `loop-dev converge` と Result・Iter を必ず含める（loop-audit が title だけで集計するため）。
+
+2. **学び** — 実装中に踏んだ罠・判明した事実は別カードとして `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」。テレメトリと同じカードに混ぜない。

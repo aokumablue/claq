@@ -53,7 +53,7 @@ executor と同一見出しで、削除候補・実施内容・検証結果を�
 
 ## 永続メモリ
 
-`<mem-context>` 注入で起動。
-search: `rollback revert delete {file_path}` / `clean dead code removal`
-record: `{"event_type": "code-cleanup", "content": "Cleanup: {n} files removed. Safe: {n}, Careful: {n}, Risky: {n}"}`
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
+search: `mem search` — クエリ例 `rollback revert delete {file_path}` / `clean dead code removal`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: 危険削除履歴 / アーキテクチャ制約 / ADR参照

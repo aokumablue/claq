@@ -25,7 +25,7 @@ loop-dev の実行履歴（checkpoint 反復履歴 + git log）を全件走査�
 
 ### 二次（近似 — 補助のみ）
 
-mem `search`（クエリ `loop-dev converge`）。record フォーマットは `../loop-dev/SKILL.md` の永続メモリ節を参照。**`search` は関連度の上位 `--limit` 件しか返さず全件列挙ができないため近似**。一次源との件数乖離は「近似による欠落」として扱い、指標の母数には使わない（Flake 数など一次源にないフィールドの補完に限る）。
+mem `search`（クエリ `loop-dev converge`、**`--status pending`**）。loop-dev の反復テレメトリは注入枠を消費しないよう `status='pending'` で登録されるため、既定の `active` では 1 件も引けない。record フォーマットは `../loop-dev/SKILL.md` の永続メモリ節を参照。**`search` は関連度の上位 `--limit` 件しか返さず全件列挙ができないため近似**。一次源との件数乖離は「近似による欠落」として扱い、指標の母数には使わない（Flake 数など一次源にないフィールドの補完に限る）。
 
 `search` が返すのは 1 件 1 行の `- [kind] title (key)` だけで body は含まない（0 件ならそもそも無出力）。本文が要るカードだけ key を 1 件ずつ `show` に渡す。
 
@@ -33,10 +33,10 @@ mem `search`（クエリ `loop-dev converge`）。record フォーマットは `
 
 ```bash
 # 開発リポジトリ（bluecore-dev 直下）
-PYTHONPATH=plugins/bluecore/src python3 -m bluecore.mem.cli search "loop-dev converge" --limit 20
+PYTHONPATH=plugins/bluecore/src python3 -m bluecore.mem.cli search "loop-dev converge" --status pending --limit 20
 
 # 配布ランタイム（~/.bluecore/.venv 有効化済み）
-python3 -m bluecore.mem.cli search "loop-dev converge" --limit 20
+python3 -m bluecore.mem.cli search "loop-dev converge" --status pending --limit 20
 
 # 本文が要るカードだけ 1 件ずつ
 python3 -m bluecore.mem.cli show <key>
@@ -50,7 +50,7 @@ python3 -m bluecore.mem.cli show <key>
 | 平均反復数 | Σ 最終 iter 番号 / 全実行数 |
 | circuit break 率 | result=circuit-break の実行数 / 全実行数 |
 | blocker 再発率 | 同一 blocker シグネチャが複数反復に出現した実行数 / blocker が 1 件以上あった実行数 |
-| flake 検出数 | mem record の Flake 合計（二次源。近似と明記して報告） |
+| flake 検出数 | テレメトリカード body の Flake 合計（二次源。近似と明記して報告） |
 | エスカレーション率 | result ∈ {circuit-break, stopped} の実行数 / 全実行数 |
 
 ## Loop Readiness スコア

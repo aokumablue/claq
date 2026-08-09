@@ -64,7 +64,7 @@ caller → callee → ...
 
 ## 永続メモリ
 
-`<mem-context>` 注入で起動。
-search: `explore codebase {feature_keywords}` / `entrypoint callchain {module}`
-record: `{"event_type": "code-explore", "content": "Explored: {feature}. Entry: {entry}. Impacted: {files}"}`
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
+search: `mem search` — クエリ例 `explore codebase {feature_keywords}` / `entrypoint callchain {module}`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: 探索履歴 / 既存パターン / 影響範囲テンプレ

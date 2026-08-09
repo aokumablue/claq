@@ -72,5 +72,5 @@ Skip Rules:
 
 ## 永続メモリ
 
-search: `refactor rollback blueprint {file_path}` / `revert failure pattern`
-record: `{"event_type":"refrb","content":"Scope:{scope}. RevertPlan:{n_files}. RiskFiles:{risk_files}"}`
+search: `mem search` — クエリ例 `refactor rollback blueprint {file_path}` / `revert failure pattern`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

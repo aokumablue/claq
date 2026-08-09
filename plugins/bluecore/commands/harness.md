@@ -14,9 +14,9 @@ command: /harness
 
 ## 永続メモリ
 
-- context: SessionStart で `<mem-context>` 自動注入
-- search: `harness audit score` / `harness config optimization audit` (days: 90)
-- record: `{"event_type": "harness-run", "content": "Harness: Score {before} -> {after}. Changes: {changes}"}`
+- 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
+- 参照: `mem search`（クエリ例 `harness audit score` / `harness config optimization audit` (days: 90)）→ 本文が要る key だけ `mem show <key>`
+- 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## 使い方
 

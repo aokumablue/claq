@@ -14,9 +14,9 @@ command: /review
 
 ## 永続メモリ
 
-- context: SessionStart で `<mem-context>` 自動注入
-- search: `review violation security` / `{変更ファイル名}` (file_pattern 指定)
-- record: 必要時のみ、最終レビュー結果を1回だけ記録（繰り返し違反は警告レベルを1段階上げ「繰り返し違反」とマーク）
+- 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
+- 参照: `mem search`（クエリ例 `review violation security` / `{変更ファイル名}`）→ 本文が要る key だけ `mem show <key>`。既存カードと同じ違反が再発していれば警告レベルを1段階上げ「繰り返し違反」とマーク
+- 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## skill 起動メカニズム
 

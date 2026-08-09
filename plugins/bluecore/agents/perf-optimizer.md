@@ -84,7 +84,7 @@ model: sonnet
 
 ## 永続メモリ
 
-`<mem-context>` 注入で起動。
-search: `performance baseline benchmark metrics` / `optimization improve bundle LCP`
-record: `{"event_type": "perf-audit", "content": "Perf: Score {score}. LCP: {lcp}. Bundle: {size}KB. Issues: {n}"}`
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
+search: `mem search` — クエリ例 `performance baseline benchmark metrics` / `optimization improve bundle LCP`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: ベースライン比較 / 最適化パターン / 回帰検出

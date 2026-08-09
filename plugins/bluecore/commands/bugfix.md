@@ -14,9 +14,9 @@ command: /bugfix
 
 ## 永続メモリ
 
-- context: SessionStart で `<mem-context>` 自動注入
-- search: `bug fix regression repro root cause verify` / `{対象ファイルパス}` / `{症状キーワード}`
-- record: `{"event_type": "bugfix", "content": "Scope: {scope}. Repro: {repro}. Root cause: {root_cause}. Fix: {fix}. Tests: {tests}. Prevention: {prevention}"}`
+- 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
+- 参照: `mem search`（クエリ例 `bug fix regression repro root cause verify` / `{対象ファイルパス}` / `{症状キーワード}`）→ 本文が要る key だけ `mem show <key>`
+- 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## skill 起動メカニズム
 

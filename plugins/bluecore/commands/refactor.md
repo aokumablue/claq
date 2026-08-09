@@ -14,9 +14,9 @@ command: /refactor
 
 ## 永続メモリ
 
-- context: SessionStart で `<mem-context>` 自動注入
-- search: `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`
-- record: `{"event_type": "refactor", "content": "Scope: {scope}. Clean: {cleaned}. Simplify: {simplified}. Perf: {perf_fixed}. Blockers: {blockers}"}`
+- 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
+- 参照: `mem search`（クエリ例 `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`）→ 本文が要る key だけ `mem show <key>`
+- 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## skill 起動メカニズム
 

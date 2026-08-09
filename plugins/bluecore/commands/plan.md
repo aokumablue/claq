@@ -14,9 +14,9 @@ command: /plan
 
 ## 永続メモリ
 
-- context: SessionStart で `<mem-context>` 自動注入
-- search: `{要件のキーワード}` / `risk blocker error {関連キーワード}`
-- record: `{"event_type": "plan", "content": "{計画サマリー}"}`
+- 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
+- 参照: `mem search`（クエリ例 `{要件のキーワード}` / `risk blocker error {関連キーワード}`）→ 本文が要る key だけ `mem show <key>`
+- 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## skill 起動メカニズム
 
@@ -34,7 +34,7 @@ command: /plan
 
 ## ステップ2: 過去類似実装検索
 
-`<mem-context>` と mem search で類似作業を参照。再利用可能な既存実装・パターン・知見を抽出。
+`<bluecore-memory>` の注入内容と `mem search` で類似作業を参照。再利用可能な既存実装・パターン・知見を抽出。
 
 ## ステップ3: リスク特定（並列）
 

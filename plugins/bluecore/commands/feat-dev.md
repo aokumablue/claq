@@ -16,9 +16,9 @@ command: /feat-dev
 
 ## 永続メモリ
 
-- context: SessionStart で `<mem-context>` 自動注入
-- search: `feat-dev workflow {feature}` / `phase blocker feature`
-- record: `{"event_type": "feat-dev", "content": "Feature: {name}. Iter: {n}/2. Files: {n}. Tests: {n}"}`
+- 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
+- 参照: `mem search`（クエリ例 `feat-dev workflow {feature}` / `phase blocker feature`）→ 本文が要る key だけ `mem show <key>`
+- 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## skill 起動メカニズム
 

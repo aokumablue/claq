@@ -59,7 +59,7 @@ Final Gate: PASS / BLOCKED
 
 ## 永続メモリ
 
-`<mem-context>` 注入で起動。
-search: `refactor orchestration parallel gate rollback` / `critical high blocker refactor`
-record: `{"event_type":"reforch","content":"Scope:{n}. Clean:{c}. Simplify:{s}. Perf:{p}. Reverted:{r}. Gate:{status}"}`
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
+search: `mem search` — クエリ例 `refactor orchestration parallel gate rollback` / `critical high blocker refactor`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: リファクタ履歴 / 復旧履歴 / 失敗パターン

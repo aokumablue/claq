@@ -16,9 +16,9 @@ command: /skill-gen
 
 ## 永続メモリ
 
-- context: SessionStart で `<mem-context>` 自動注入
-- search: `skill-gen pattern repository workflow`
-- record: `{"event_type": "skill-gen", "content": "Skill: {name}. Iterations: {n}. Grader: {pass}/{total}. Comparator winner: {winner}. Bench: {summary}"}`
+- 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
+- 参照: `mem search`（クエリ例 `skill-gen pattern repository workflow`）→ 本文が要る key だけ `mem show <key>`
+- 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## skill 起動メカニズム
 
@@ -49,9 +49,20 @@ collect_skill_create_inputs "${COMMITS:-200}"
 
 収束条件: 連続2回の反復で grader の新規不明瞭点ゼロ、または comparator の判定が連続2回同一勝者。
 
-## ステップ5: インスティンクト生成（`--instincts` 時のみ）
+## ステップ5: 知識カード生成（`--knowledge` 時のみ）
 
-learn 連携用インスティンクトもステップ1〜4と同じ流れで生成。
+ステップ1の入力収集で見つかったリポジトリ規約・繰り返しワークフローのうち、
+SKILL.md に落とし込めなかったものを知識カードとして登録する。
+
+```bash
+source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+bluecore_mem_learn --key <slug> --kind convention --scope repo --status pending \
+  --title "<1 行要約>" --domain <domain> --body "<根拠>"
+```
+
+`--status pending` で登録し、採否は人間が `/instinct` でレビューして決める
+（自動生成の候補をそのまま注入枠に載せない）。記録基準は `../skills/learn/SKILL.md` の
+「記録する / しない」に従い、リポジトリを読めば分かることは登録しない。
 
 ## 役割分担
 
@@ -66,11 +77,10 @@ learn 連携用インスティンクトもステップ1〜4と同じ流れで生
 
 ## 関連
 
-- `/instinct import` — 生成インスティンクトをインポート
-- `/instinct evolve` — インスティンクトを skills/agents にクラスタリング
+- `/instinct` — 生成した知識カード（`status='pending'`）のレビューと昇格
 
 ## 引数
 
 - `--commits=<n>` — 直近コミット件数（既定: 200）
 - `--output=<path>` — 生成先（既定: `skills/`）
-- `--instincts` — インスティンクト生成も依頼
+- `--knowledge` — 知識カード生成も依頼（ステップ5）

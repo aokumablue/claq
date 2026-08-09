@@ -94,7 +94,7 @@ Confidence 80-100 のみ報告。80未満 → 黙殺。
 
 ## 永続メモリ
 
-`<mem-context>` 注入で起動。
-search: `review violation {file_pattern}` / `convention rule style`
-record: `{"event_type": "code-review", "content": "Review: {files}. CRITICAL: {n}, HIGH: {n}, Verdict: {verdict}"}`
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
+search: `mem search` — クエリ例 `review violation {file_pattern}` / `convention rule style`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: プロジェクト固有ルール / 頻出違反パターン / 自動修正候補

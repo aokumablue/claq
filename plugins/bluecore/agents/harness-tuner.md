@@ -69,7 +69,7 @@ model: sonnet
 
 ## 永続メモリ
 
-`<mem-context>` 注入で起動。
-search: `harness config optimization audit` / `harness improvement score`
-record: `{"event_type": "harness-optimize", "content": "Harness: Score {before} -> {after}. Changes: {changes}"}`
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
+search: `mem search` — クエリ例 `harness config optimization audit` / `harness improvement score`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: スコア推移 / 効果的な変更 / プラットフォーム互換性
