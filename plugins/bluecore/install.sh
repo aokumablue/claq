@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install.sh
-# bluecore の Python 依存を ~/.bluecore/.venv に導入し、初回の ~/.bluecore/settings.json を作成する。
+# bluecore 実行用の venv (~/.bluecore/.venv) を用意し、初回の ~/.bluecore/settings.json を作成する。
 # Claude / Copilot どちらか片方で実行すれば両方から共有できる。
 # Ubuntu と macOS に対応。
 # 使い方:
@@ -23,33 +23,14 @@ Usage: bash plugins/bluecore/install.sh [options]
 
 Options:
   --repo-root PATH   Repository root (default: script directory)
-  --skip-python      Skip Python package installation and venv setup
+  --skip-python      Skip virtual environment setup
   --assume-yes       Allow sudo package installation without confirmation
   --help             Show this help
 
 Environment:
-  BLUECORE_INSTALL_SKIP_PYTHON=1  Skip Python package installation and venv setup
+  BLUECORE_INSTALL_SKIP_PYTHON=1  Skip virtual environment setup
   BLUECORE_INSTALL_ASSUME_YES=1   Allow sudo package installation without confirmation
 EOF
-}
-
-run_quietly() {
-  local output_file
-  output_file="$(mktemp)"
-  local status=0
-  if "$@" >"${output_file}" 2>&1; then
-    rm -f "${output_file}"
-    return 0
-  else
-    status=$?
-    cat "${output_file}" >&2
-    rm -f "${output_file}"
-    return "${status}"
-  fi
-}
-
-pip_install_quiet() {
-  run_quietly "${VENV_PYTHON}" -m pip install --no-input --quiet --disable-pip-version-check "$@"
 }
 
 # Python 3.12+ のバイナリを探す
@@ -208,7 +189,12 @@ PY
   echo "[bluecore] Wrote full default settings file: ${SETTINGS_PATH}"
 }
 
-install_user_python() {
+# bluecore 実行用の venv を用意する。パッケージのインストールは行わない。
+# bluecore 本体は launcher.py が sys.path へ src を差し込んで解決するため venv への
+# インストールは不要。venv は (1) install.sh の find_python3 が確認した Python 3.12+ での
+# 実行を launcher.py の re-exec 経由で保証するため、(2) 開発ツール
+# （scripts/install-dev.sh が入れる pytest / ruff / vulture）の置き場として維持する。
+ensure_user_venv() {
   # 旧パス（REPO_ROOT/.venv）に実体 venv が残っていれば削除する
   # シンボリックリンクを先に判定し、正しいリンクは触らない
   if [[ -L "${_LEGACY_VENV}" ]]; then
@@ -224,18 +210,6 @@ install_user_python() {
 
   check_and_reset_venv
   ensure_virtualenv
-
-  if ! "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
-    echo "[bluecore] Bootstrapping pip via ensurepip"
-    run_quietly "${VENV_PYTHON}" -m ensurepip --upgrade
-  fi
-
-  echo "[bluecore] Installing bluecore into ${VENV_DIR}"
-  pip_install_quiet --upgrade pip wheel
-
-  # --no-deps: bluecore はランタイム依存ゼロ（標準ライブラリのみ）のため依存解決自体が不要。
-  # 将来サードパーティ依存が誤混入しても暗黙に取得されないための防御として明示する。
-  pip_install_quiet --no-deps -e "${REPO_ROOT}"
 }
 
 # キャッシュディレクトリ内の .venv を VENV_DIR へのシンボリックリンクに差し替える共通処理。
@@ -355,7 +329,7 @@ fi
 ensure_settings_json
 
 if [[ "${SKIP_PYTHON}" != "1" ]]; then
-  install_user_python
+  ensure_user_venv
 fi
 
 update_claude_cache_symlinks
@@ -365,7 +339,7 @@ update_copilot_cache_symlink
 # SessionStart の `bluecore.mem.cli context` が Database() 経由で
 # 親ディレクトリ作成とスキーマ初期化を毎セッション冪等に済ませるため。
 
-# インストール済みバージョンを記録する（SKIP_PYTHON=1 のときは Python 未インストールなので記録しない）
+# インストール済みバージョンを記録する（SKIP_PYTHON=1 のときは venv 未作成なので記録しない）
 # SessionStart の session_install フックが参照する
 if [[ "${SKIP_PYTHON}" != "1" ]]; then
   # ヒアドキュメント + 引数渡しでパスをシェルから分離してインジェクションを防ぐ
