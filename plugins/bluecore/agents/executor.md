@@ -64,5 +64,5 @@ description: 複数ステップの実装・修正・検証を単独で完遂す�
 
 `<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
 search: `mem search` — クエリ例 `execute implementation {task_keywords}` / `verification pattern {file_type}`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
-record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
+record: **自分では書かない**。学びの候補は呼び出し元へ報告し、記録は呼び出し元コマンドの「学びの記録」ステップに任せる（本エージェントの成果は final gate でリバートされうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: 過去の実装パターン / 検証コマンド履歴 / スコープ逸脱事例

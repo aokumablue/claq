@@ -46,6 +46,39 @@ command: /bugfix
 
 loop-dev から収束 or 停止報告を受領して記録へ進む。
 
+## ステップ4: 学びの記録（必須実行・記録は該当時のみ）
+
+ステップ2で特定した**根本原因**を、次に同じ状況へ来る自分が回り道せずに済む形で残す。
+根本原因が「調べて初めて分かったこと」なら、それはほぼ確実に記録対象。
+
+記録する:
+
+| 見つけたもの | kind | title に書くこと |
+|---|---|---|
+| 原因が非自明で、同じ状況なら次も踏む罠 | `pitfall` | 症状ではなく**回避条件**（「X するときは Y が要る」） |
+| 調べないと分からなかったこのリポジトリ固有の事実 | `fact` | 事実そのもの（「venv は ~/.bluecore/.venv の 1 つだけ」） |
+| 再現手順が毎回同じで、次も同じ手順を踏む | `howto` | 手順の目的（「hook の再現は stdin に JSON を流す」） |
+| 明文化されていなかった規約に反していたのが原因 | `convention` | 守るべきルール |
+
+記録しない:
+
+- **リポジトリを読めば分かること** — README・CLAUDE.md・型定義・docstring に既に書いてあること
+- **作業ログ** — 「このバグを直した」「どのファイルを触った」。SessionEnd の `handoff` が自動で残す
+- **diff の要約** — コードを読めば分かる修正内容
+- **そのセッション限りの事情** — 「今回は別ブランチの変更が混ざっていた」
+- **一般的なプログラミング知識** — off-by-one、null チェック漏れなど
+
+```bash
+source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+bluecore_mem_learn --kind pitfall --scope repo --domain <domain> \
+  --title "<回避条件を 1 行で>" \
+  --body "<根本原因と、次に踏まないための具体策>"
+```
+
+該当ゼロなら 1 件も記録しない（0 件は正しい結果。埋め合わせで書かない）。
+確信が持てないものは `--status pending` を付け、採否は `/instinct` のレビューに委ねる。
+詳細基準は `../skills/learn/SKILL.md` の「記録する / しない」。
+
 ## 記録テンプレート
 
 記録対象は出所別に分離する。Tests と Loop（反復数）は loop-dev の Loop-Dev Result からの転記。Review は loop-dev の `Blockers: {n} remaining` から導出する（0 件 → PASS / 1 件以上 → BLOCKED）— Loop-Dev Result に `Review` フィールドは存在しないため転記ではなく導出。Repro/Root cause/Fix はステップ1-2（要件整理・再現テスト確立）での自己記録に基づく（loop-dev の出力契約には存在しない）。未受領項目を PASS と書かない。
@@ -60,8 +93,11 @@ Fix:        {fix}
 Tests:      {tests}
 Loop:       {n}/2
 Review:     PASS / BLOCKED
+Learned:    {記録した key} / なし
 ──────────────────────────────
 ```
+
+`Learned` はステップ4の実行結果。記録対象が無かった場合は `なし` と書く（欄ごと省略しない）。
 
 ## ルール
 

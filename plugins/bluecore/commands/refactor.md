@@ -80,11 +80,43 @@ simplify 全グループ完了後に開始。不要計算・重複I/O・N+1・�
 
 CRITICAL/HIGH blocker 検出時またはテスト/lint 失敗時は `loop-dev` skill を起動（入力: `task` = blocker 修正タスク（final gate の CRITICAL/HIGH 指摘一覧の解消） / `approved_plan` = blocker 一覧で plan 縮退 / `task_type` = `refactor-fix`）。loop-dev 停止時（2 反復で未収束）はファイル単位リバート方針に従い、未解消分を要約に記載。
 
-## ステップ8: 要約
+## ステップ8: 学びの記録（必須実行・記録は該当時のみ）
+
+ファイル単位リバートが発生した変更と、ステップ1の依存可視化で分かった構造は
+次のリファクタでも効く。要約の前にここで残す。
+
+記録する:
+
+| 見つけたもの | kind | title に書くこと |
+|---|---|---|
+| リバートを引き起こした変更パターン | `pitfall` | 「X を Y にするとテストが落ちる」という回避条件 |
+| モジュール間の隠れた依存・暗黙の契約 | `fact` | 依存の向きと理由 |
+| 3 回以上繰り返した安全な手順 | `howto` | 手順の目的（「分割 → テスト → 適用の順で回す」） |
+| 合意された、明文化されていないコーディング規約 | `convention` | 守るべきルール |
+| 採用した設計と却下した案 | `decision` | 選択と理由 |
+
+記録しない:
+
+- **リポジトリを読めば分かること** — ディレクトリ構成、公開 API、型定義
+- **作業ログ** — 削除ファイル一覧・件数・スコア。要約に書けば足りる
+- **そのセッション限りの妥協** — 「今回は時間の都合で perf を飛ばした」
+- **一般的なリファクタ知識** — 「長い関数は分割する」など
+
+```bash
+source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+bluecore_mem_learn --kind fact --scope repo --domain <domain> \
+  --title "<構造上の事実を 1 行で>" \
+  --body "<根拠と、次に触るときの注意>"
+```
+
+該当ゼロなら 1 件も記録しない（0 件は正しい結果）。詳細基準は `../skills/learn/SKILL.md` の「記録する / しない」。
+
+## ステップ9: 要約
 
 orchestrator の出力テンプレート（`../agents/refactor-orchestrator.md` 参照）をそのまま提示する。
 
 Issues は `bluecore:reviewer` と `bluecore:security-auditor` の統合件数。
+末尾にステップ8で記録した key を 1 行で添える（記録が無ければ `Learned: なし`）。
 
 ## ルール
 
