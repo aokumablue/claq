@@ -81,27 +81,6 @@ def _filter_session_summary(content: str, max_length: int = 2000) -> str:
     return result
 
 
-def _import_adrs_and_instincts() -> None:
-    """SessionStart 時に ADR・instincts を mem DB に取り込む（トークン増加なし）。"""
-    try:
-        from bluecore.lib.core_utils import get_git_user_name
-        from bluecore.mem.database import Database
-        from bluecore.mem.importers import import_adrs, import_instincts
-        from bluecore.mem.settings import Settings
-
-        settings = Settings.load()
-        origin_user = get_git_user_name()
-        db = Database(settings.db_path)
-        try:
-            n_instincts = import_instincts(db, origin_user)
-            n_adrs = import_adrs(db, origin_user, repo_root=Path.cwd())
-        finally:
-            db.close()
-        log(f"[SessionStart] mem import: instincts={n_instincts} adrs={n_adrs}")
-    except Exception as e:
-        log(f"[SessionStart] mem import error: {sanitize_log_value(str(e))}")
-
-
 def dedupe_recent_sessions(search_dirs: list[Path]) -> list[dict]:
     """basename で最近のセッションを重複排除し、名前ごとに最新のものを保持
 
@@ -228,8 +207,6 @@ def run(_raw_input: str) -> str:
 
     project_info = detect_project(Path.cwd())
     additional_context_parts.extend(_collect_project_context(project_info))
-
-    _import_adrs_and_instincts()
 
     additional_context = "\n\n".join(additional_context_parts)
     return emit_session_start_output(additional_context)

@@ -1,1198 +1,422 @@
-"""database のテスト"""
+"""bluecore.mem.database — repos / sessions / knowledge の 3 テーブルのテスト。"""
+
+from __future__ import annotations
 
 import sqlite3
-import sys
-import time
+import stat
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from bluecore.mem.database import (
-    Database,
-    _make_prompt_hash,
-)
-from bluecore.mem.models import (
-    Adr,
-    Instinct,
-    InteractionLog,
-    MemoryChunk,
-    Session,
-    SessionDigest,
-)
-from bluecore.mem.row_converters import (
-    _parse_json_dict_list,
-    _parse_json_list,
-)
+from bluecore.mem.database import Database
+from bluecore.mem.models import Knowledge, Repo, Session, utc_now_iso
 
 
 @pytest.fixture
 def db(tmp_path: Path) -> Database:
-    return Database(tmp_path / "test.db")
+    """テスト用の空 DB を開いて返す。"""
+    database = Database(tmp_path / "mem.db")
+    yield database
+    database.close()
 
 
-class TestDatabase:
-    """データベース基本操作のテストケース"""
-
-    def test_store_and_retrieve_chunk(self, db: Database) -> None:
-        chunk = MemoryChunk(
-            session_id="sess-1",
-            project="my-project",
-            chunk_index=0,
-            content="[Read] /path/to/file.py",
-            tool_names=["Read"],
-            files_read=["/path/to/file.py"],
-            files_modified=[],
-            created_at_epoch=1700000000,
-        )
-        chunk_id = db.store_chunk(chunk)
-        assert isinstance(chunk_id, str)
-        assert len(chunk_id) == 36  # UUID format
-
-        retrieved = db.get_chunk_by_id(chunk_id)
-        assert retrieved is not None
-        assert retrieved.session_id == "sess-1"
-        assert retrieved.project == "my-project"
-        assert retrieved.tool_names == ["Read"]
-        assert retrieved.files_read == ["/path/to/file.py"]
-
-    def test_get_chunks_by_session(self, db: Database) -> None:
-        for i in range(3):
-            db.store_chunk(
-                MemoryChunk(
-                    session_id="sess-1",
-                    project="proj",
-                    chunk_index=i,
-                    content=f"chunk {i}",
-                    tool_names=["Bash"],
-                    files_read=[],
-                    files_modified=[],
-                    created_at_epoch=1700000000 + i,
-                )
-            )
-        chunks = db.get_chunks_by_session("sess-1")
-        assert len(chunks) == 3
-        assert [c.chunk_index for c in chunks] == [0, 1, 2]
-
-    def test_upsert_session(self, db: Database) -> None:
-        session = Session(session_id="sess-1", project="proj", started_at_epoch=1700000000)
-        id1 = db.upsert_session(session)
-        id2 = db.upsert_session(session)
-        assert id1 == id2
-
-    def test_end_session(self, db: Database) -> None:
-        session = Session(session_id="sess-1", project="proj", started_at_epoch=1700000000)
-        db.upsert_session(session)
-
-        db.end_session(session.session_id)
-
-        row = db.conn.execute(
-            "SELECT ended_at_epoch FROM sessions WHERE session_id = ?",
-            (session.session_id,),
-        ).fetchone()
-        assert row["ended_at_epoch"] is not None
-
-    def test_fts_search(self, db: Database) -> None:
-        db.store_chunk(
-            MemoryChunk(
-                session_id="sess-1",
-                project="proj",
-                chunk_index=0,
-                content="fixed authentication bug in login handler",
-                tool_names=["Edit"],
-                files_read=[],
-                files_modified=["auth.py"],
-                created_at_epoch=1700000000,
-            )
-        )
-        results = db.fts_search("authentication")
-        assert len(results) > 0
-
-    def test_fts_search_no_results(self, db: Database) -> None:
-        results = db.fts_search("xyznonexistent")
-        assert results == []
-
-    def test_fts_search_operational_error(self, db: Database) -> None:
-        """FTS5 テーブルが壊れている場合、空リストを返す"""
-        # FTS テーブルを削除して OperationalError を発生させる
-        db.conn.execute("DROP TABLE IF EXISTS memory_chunks_fts")
-        db.conn.commit()
-        results = db.fts_search("test")
-        assert results == []
-
-    def test_recent_chunks(self, db: Database) -> None:
-        for i in range(5):
-            db.store_chunk(
-                MemoryChunk(
-                    session_id="sess-1",
-                    project="proj",
-                    chunk_index=i,
-                    content=f"chunk {i}",
-                    tool_names=[],
-                    files_read=[],
-                    files_modified=[],
-                    created_at_epoch=1700000000 + i,
-                )
-            )
-        recent = db.get_recent_chunks(limit=3)
-        assert len(recent) == 3
-        assert recent[0].created_at_epoch >= recent[-1].created_at_epoch
-
-    def test_recent_chunks_with_project_filter(self, db: Database) -> None:
-        db.store_chunk(
-            MemoryChunk(
-                session_id="s1",
-                project="proj-a",
-                chunk_index=0,
-                content="a",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                created_at_epoch=1700000000,
-            )
-        )
-        db.store_chunk(
-            MemoryChunk(
-                session_id="s2",
-                project="proj-b",
-                chunk_index=0,
-                content="b",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                created_at_epoch=1700000001,
-            )
-        )
-        recent = db.get_recent_chunks(limit=10, project="proj-a")
-        assert len(recent) == 1
-        assert recent[0].project == "proj-a"
-
-    def test_get_chunk_by_id_not_found(self, db: Database) -> None:
-        assert db.get_chunk_by_id(99999) is None
-
-    def test_get_chunks_by_ids(self, db: Database) -> None:
-        ids = []
-        for i in range(3):
-            cid = db.store_chunk(
-                MemoryChunk(
-                    session_id="s1",
-                    project="proj",
-                    chunk_index=i,
-                    content=f"c{i}",
-                    tool_names=[],
-                    files_read=[],
-                    files_modified=[],
-                    created_at_epoch=1700000000 + i,
-                )
-            )
-            ids.append(cid)
-        result = db.get_chunks_by_ids(ids)
-        assert len(result) == 3
-        assert all(cid in result for cid in ids)
-
-    def test_get_chunks_by_ids_empty(self, db: Database) -> None:
-        assert db.get_chunks_by_ids([]) == {}
-
-    def test_get_chunks_by_session_empty(self, db: Database) -> None:
-        assert db.get_chunks_by_session("nonexistent") == []
-
-    def test_close(self, tmp_path: Path) -> None:
-        import sqlite3
-
-        db = Database(tmp_path / "test.db")
-        db.close()
-        with pytest.raises(sqlite3.ProgrammingError):
-            db.get_chunks_by_session("s1")
-
-    def test_store_and_vec_search_embeddings(self, db: Database) -> None:
-        """エンべディング保存とベクトル検索のテスト"""
-        cid = db.store_chunk(
-            MemoryChunk(
-                session_id="s1",
-                project="proj",
-                chunk_index=0,
-                content="test",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                created_at_epoch=1700000000,
-            )
-        )
-        # sqlite-vec テーブルが存在するかチェック
-        row = db.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_chunks_vec'"
-        ).fetchone()
-        if row is None:
-            pytest.skip("sqlite-vec not available")
-        emb = [0.1] * 256
-        db.store_embeddings([cid], [emb])
-        results = db.vec_search(emb, limit=5)
-        assert len(results) >= 1
-        assert results[0][0] == cid
-
-    def test_vec_search_no_data(self, db: Database) -> None:
-        """ベクトル検索：データなしの場合"""
-        results = db.vec_search([0.1] * 256)
-        # sqlite-vec が利用不可でも空リストを返す
-        assert results == [] or isinstance(results, list)
-
-    def test_recreate_vec_table_replaces_old_dimension(self, db: Database) -> None:
-        """recreate_vec_table が旧次元のテーブルを現行スキーマで再作成する"""
-        row = db.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_chunks_vec'"
-        ).fetchone()
-        if row is None:
-            pytest.skip("sqlite-vec not available")
-        # 旧次元（768）のテーブルに差し替えてから再作成する
-        db.conn.execute("DROP TABLE memory_chunks_vec")
-        db.conn.execute(
-            "CREATE VIRTUAL TABLE memory_chunks_vec USING vec0(chunk_id TEXT PRIMARY KEY, embedding FLOAT[768])"
-        )
-        db.conn.commit()
-
-        assert db.recreate_vec_table() is True
-
-        # 再作成後は 256 次元のベクトルを保存できる
-        cid = db.store_chunk(
-            MemoryChunk(
-                session_id="s1",
-                project="proj",
-                chunk_index=0,
-                content="test",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                created_at_epoch=1700000000,
-            )
-        )
-        db.store_embeddings([cid], [[0.1] * 256])
-        assert db.vec_search([0.1] * 256, limit=1)[0][0] == cid
-
-    def test_recreate_vec_table_returns_false_when_vec_disabled(self, db: Database) -> None:
-        """vec 無効環境（vec_enabled=False）では再作成せず False を返す"""
-        db.vec_enabled = False
-        assert db.recreate_vec_table() is False
-
-    def test_store_embeddings_noop_when_vec_disabled(self, db: Database) -> None:
-        """vec 無効環境では store_embeddings は何もしない（no such table を防ぐ）"""
-        db.vec_enabled = False
-
-        class ExplodingConn:
-            def execute(self, *_args: object, **_kwargs: object) -> None:
-                raise AssertionError("vec 無効時に execute を呼んではならない")
-
-        db.conn = ExplodingConn()  # type: ignore[assignment]
-        db.store_embeddings(["chunk-1"], [[0.1] * 256])  # 例外が出なければ no-op 成立
-
-    def test_vec_search_returns_empty_when_vec_disabled(self, db: Database) -> None:
-        """vec 無効環境では vec_search は空リストを返す"""
-        db.vec_enabled = False
-        assert db.vec_search([0.1] * 256) == []
-
-
-class TestSchemaInit:
-    """スキーマ初期化のテスト"""
-
-    def test_fts5_init_failure(self, tmp_path: Path) -> None:
-        """FTS5 初期化失敗時もデータベースは使用可能"""
-        import bluecore.mem.database as db_mod
-
-        original_fts5 = db_mod._FTS5_SQL
-        db_mod._FTS5_SQL = "CREATE VIRTUAL TABLE nonexistent USING invalid_module();"
-        try:
-            db = Database(tmp_path / "test_fts5_fail.db")
-            cid = db.store_chunk(
-                MemoryChunk(
-                    session_id="s1",
-                    project="proj",
-                    chunk_index=0,
-                    content="test",
-                    tool_names=[],
-                    files_read=[],
-                    files_modified=[],
-                    created_at_epoch=1700000000,
-                )
-            )
-            assert isinstance(cid, str)
-            assert len(cid) == 36
-            db.close()
-        finally:
-            db_mod._FTS5_SQL = original_fts5
-
-    def test_sqlite_vec_init_failure_raises(self, tmp_path: Path) -> None:
-        """sqlite-vec はオプショナル依存のため、インポート失敗時も動作する"""
-        original = sys.modules.pop("sqlite_vec", None)
-        sys.modules["sqlite_vec"] = None  # type: ignore[assignment]
-        try:
-            # オプショナルなので例外は発生しない
-            db = Database(tmp_path / "test_vec_fail.db")
-            db.close()
-        finally:
-            if original is not None:
-                sys.modules["sqlite_vec"] = original
-            else:
-                sys.modules.pop("sqlite_vec", None)
-
-    def test_sqlite_vec_load_failure_degrades(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """拡張ロード非対応 Python（sqlite3.Error 等）でも vec 無効で動作継続する。"""
-        fake_module = SimpleNamespace(
-            load=lambda _conn: (_ for _ in ()).throw(sqlite3.OperationalError("not authorized"))
-        )
-        monkeypatch.setitem(sys.modules, "sqlite_vec", fake_module)
-        db = Database(tmp_path / "test_vec_load_fail.db")
-        try:
-            assert db.vec_enabled is False
-            # vec 無効でも基本機能は利用可能
-            assert db.vec_search([0.1] * 256) == []
-        finally:
-            db.close()
-
-
-class TestParseJsonList:
-    """_parse_json_list のテスト"""
-
-    @pytest.mark.parametrize(
-        "input_val, expected",
-        [
-            (None, []),
-            ("", []),
-            ('["a", "b"]', ["a", "b"]),
-            ("invalid json", []),
-        ],
-        ids=["none", "empty", "valid", "invalid-json"],
+def _repo(repo_id: str = "bluecore-dev", identity_key: str = "git@github.com:x/bluecore.git") -> Repo:
+    """テスト用 Repo を組み立てる。"""
+    return Repo(
+        id=repo_id,
+        identity_key=identity_key,
+        root_path="/Users/x/dev/bluecore-dev",
+        remote_url="git@github.com:x/bluecore.git",
+        first_seen_at="2026-01-01T00:00:00+00:00",
+        last_seen_at="2026-01-01T00:00:00+00:00",
     )
-    def test_parse(self, input_val: str | None, expected: list) -> None:
-        assert _parse_json_list(input_val) == expected
 
 
-class TestAdvancedTables:
-    """インスティンクト、ADR、イベントログのテスト"""
+def _knowledge(key: str = "use-python3", **overrides: object) -> Knowledge:
+    """テスト用 Knowledge を組み立てる。"""
+    params: dict = {
+        "key": key,
+        "scope": "global",
+        "kind": "convention",
+        "title": "Python は python3 コマンドで実行する",
+        "source": "human",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    params.update(overrides)
+    return Knowledge(**params)
 
-    def test_instinct_upsert_and_getters(self, db: Database) -> None:
-        first = Instinct(
-            id="instinct-fixed",
-            instinct_id="instinct-1",
-            scope="project",
-            confidence=0.5,
-            content="first",
-            created_at_epoch=1,
-            updated_at_epoch=1,
-            project_id="proj",
-        )
-        first_id = db.upsert_instinct(first)
-        first.content = "updated"
-        first.updated_at_epoch = 2
-        second_id = db.upsert_instinct(first)
 
-        other = Instinct(
-            instinct_id="instinct-2",
-            scope="global",
-            confidence=0.8,
-            content="other",
-            created_at_epoch=3,
-            updated_at_epoch=3,
-        )
-        db.upsert_instinct(other)
+class TestSchema:
+    """DDL が意図通りのテーブル・制約を作ることを確認する。"""
 
-        assert first_id == second_id == "instinct-fixed"
-        # 読み出し API は未使用のため削除済み。書き込み結果は生 SQL で検証する。
+    def test_creates_exactly_three_tables(self, db: Database) -> None:
+        """作られる実テーブルは repos / sessions / knowledge の 3 つだけ。"""
         rows = db.conn.execute(
-            "SELECT scope, content FROM instincts ORDER BY instinct_id"
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
         ).fetchall()
-        assert [row["scope"] for row in rows] == ["project", "global"]
-        assert rows[0]["content"] == "updated"
+        assert sorted(r["name"] for r in rows) == ["knowledge", "repos", "sessions"]
 
-    def test_adr_upsert_and_getters(self, db: Database) -> None:
-        adr = Adr(
-            id="adr-fixed",
-            project="proj",
-            adr_number=1,
-            title="Initial",
-            status="accepted",
-            content="first",
-            created_at_epoch=1,
-            updated_at_epoch=1,
-        )
-        first_id = db.upsert_adr(adr)
-        adr.title = "Updated"
-        adr.status = "superseded"
-        adr.updated_at_epoch = 2
-        second_id = db.upsert_adr(adr)
-
-        other = Adr(
-            project="proj-2",
-            adr_number=2,
-            title="Other",
-            status="proposed",
-            content="other",
-            created_at_epoch=3,
-            updated_at_epoch=3,
-        )
-        db.upsert_adr(other)
-
-        assert first_id == second_id == "adr-fixed"
-        # 読み出し API は未使用のため削除済み。書き込み結果は生 SQL で検証する。
-        rows = db.conn.execute(
-            "SELECT project, title FROM adrs ORDER BY created_at_epoch"
+    def test_no_virtual_tables_or_triggers(self, db: Database) -> None:
+        """FTS5 / sqlite-vec 仮想テーブルと同期トリガは残っていない。"""
+        rows = db.conn.execute("SELECT sql FROM sqlite_master WHERE type = 'trigger'").fetchall()
+        assert rows == []
+        virtual = db.conn.execute(
+            "SELECT name FROM sqlite_master WHERE sql LIKE '%VIRTUAL TABLE%'"
         ).fetchall()
-        assert [row["title"] for row in rows] == ["Updated", "Other"]
-        assert rows[0]["project"] == "proj"
+        assert virtual == []
 
-    def test_store_embeddings_and_vec_search_with_fake_connection(self, db: Database) -> None:
-        calls: list[tuple[str, tuple]] = []
+    def test_foreign_keys_enabled(self, db: Database) -> None:
+        """PRAGMA foreign_keys が有効。"""
+        assert db.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
-        class FakeConn:
-            def execute(self, sql: str, params: tuple) -> None:
-                calls.append((sql, params))
+    def test_journal_mode_is_wal(self, db: Database) -> None:
+        """PRAGMA journal_mode が WAL。"""
+        assert db.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
-            def commit(self) -> None:
-                calls.append(("commit", ()))
+    def test_scope_repo_id_consistency_check(self, db: Database) -> None:
+        """scope='repo' で repo_id が NULL の行は CHECK 制約で弾かれる。"""
+        with pytest.raises(sqlite3.IntegrityError):
+            db.upsert_knowledge(_knowledge(scope="repo", repo_id=None))
 
-        db.conn = FakeConn()  # type: ignore[assignment]
-        db.vec_enabled = True  # 拡張ロード非対応環境でも SQL 経路を検証する
+    def test_global_scope_rejects_repo_id(self, db: Database) -> None:
+        """scope='global' で repo_id を持つ行は CHECK 制約で弾かれる。"""
+        db.upsert_repo(_repo())
+        with pytest.raises(sqlite3.IntegrityError):
+            db.upsert_knowledge(_knowledge(scope="global", repo_id="bluecore-dev"))
 
-        db.store_embeddings(["chunk-1"], [[0.1, 0.2]])
-        assert calls[0][0].startswith("INSERT OR REPLACE INTO memory_chunks_vec")
-        assert calls[-1][0] == "commit"
+    def test_invalid_kind_rejected(self, db: Database) -> None:
+        """kind の許容値外は CHECK 制約で弾かれる。"""
+        with pytest.raises(sqlite3.IntegrityError):
+            db.upsert_knowledge(_knowledge(kind="rumor"))
 
-        class FakeRow:
-            def __init__(self, chunk_id: str, distance: float) -> None:
-                self.chunk_id = chunk_id
-                self.distance = distance
+    def test_invalid_source_rejected(self, db: Database) -> None:
+        """source の許容値外は CHECK 制約で弾かれる。"""
+        with pytest.raises(sqlite3.IntegrityError):
+            db.upsert_knowledge(_knowledge(source="oracle"))
 
-            def __getitem__(self, key: str) -> str | float:
-                return getattr(self, key)
+    def test_confidence_range_enforced(self, db: Database) -> None:
+        """confidence は 0〜1 の範囲外を弾く。"""
+        with pytest.raises(sqlite3.IntegrityError):
+            db.upsert_knowledge(_knowledge(confidence=1.5))
 
-        class FakeSearchConn:
-            def execute(self, sql: str, params: tuple) -> SimpleNamespace:
-                assert "memory_chunks_vec" in sql
-                return SimpleNamespace(fetchall=lambda: [FakeRow("chunk-1", 0.1)])
-
-        db.conn = FakeSearchConn()  # type: ignore[assignment]
-        assert db.vec_search([0.1, 0.2]) == [("chunk-1", 0.1)]
-
-        class ErrorConn:
-            def execute(self, sql: str, params: tuple) -> SimpleNamespace:
-                raise RuntimeError("boom")
-
-        db.conn = ErrorConn()  # type: ignore[assignment]
-        assert db.vec_search([0.1, 0.2]) == []
-
-
-class TestUpdateAccess:
-    """アクセス追跡のテスト"""
-
-    def test_access_count_incremented(self, db: Database) -> None:
-        cid = db.store_chunk(
-            MemoryChunk(
-                session_id="s1",
-                project="proj",
-                chunk_index=0,
-                content="test content",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                created_at_epoch=1700000000,
-            )
-        )
-        db.update_access([cid])
-        chunk = db.get_chunk_by_id(cid)
-        assert chunk is not None
-        assert chunk.access_count == 1
-
-    def test_access_count_increments_multiple_times(self, db: Database) -> None:
-        cid = db.store_chunk(
-            MemoryChunk(
-                session_id="s1",
-                project="proj",
-                chunk_index=0,
-                content="test content",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                created_at_epoch=1700000000,
-            )
-        )
-        db.update_access([cid])
-        db.update_access([cid])
-        chunk = db.get_chunk_by_id(cid)
-        assert chunk is not None
-        assert chunk.access_count == 2
-
-    def test_last_accessed_epoch_set(self, db: Database) -> None:
-        cid = db.store_chunk(
-            MemoryChunk(
-                session_id="s1",
-                project="proj",
-                chunk_index=0,
-                content="test content",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                created_at_epoch=1700000000,
-            )
-        )
-        before = int(time.time())
-        db.update_access([cid])
-        after = int(time.time())
-        chunk = db.get_chunk_by_id(cid)
-        assert chunk is not None
-        assert before <= chunk.last_accessed_epoch <= after  # type: ignore[operator]
-
-    def test_batch_update(self, db: Database) -> None:
-        ids = []
-        for i in range(3):
-            cid = db.store_chunk(
-                MemoryChunk(
-                    session_id="s1",
-                    project="proj",
-                    chunk_index=i,
-                    content="test content",
-                    tool_names=[],
-                    files_read=[],
-                    files_modified=[],
-                    created_at_epoch=1700000000 + i,
-                )
-            )
-            ids.append(cid)
-        db.update_access(ids)
-        for cid in ids:
-            chunk = db.get_chunk_by_id(cid)
-            assert chunk is not None
-            assert chunk.access_count == 1
-
-    def test_empty_ids_no_error(self, db: Database) -> None:
-        db.update_access([])  # 空リストでも失敗しない
-
-    def test_update_access_handles_database_error(self, tmp_path: Path) -> None:
-        db = Database(tmp_path / "access_error.db")
-
-        class FailingConn:
-            def executemany(self, sql: str, params: list[tuple[int, str]]) -> None:  # noqa: ANN001
-                raise RuntimeError("boom")
-
-            def close(self) -> None:
-                pass
-
-        db.conn = FailingConn()  # type: ignore[assignment]
-
-        db.update_access(["chunk-1"])
+    def test_repo_delete_cascades_to_knowledge(self, db: Database) -> None:
+        """repos の削除は repo スコープの knowledge を CASCADE 削除する。"""
+        db.upsert_repo(_repo())
+        db.upsert_knowledge(_knowledge(scope="repo", repo_id="bluecore-dev"))
+        db.conn.execute("DELETE FROM repos WHERE id = ?", ("bluecore-dev",))
+        db.conn.commit()
+        assert db.list_knowledge() == []
 
 
-class TestGetAllChunks:
-    """get_all_chunks のテスト"""
+class TestConnection:
+    """接続・初期化・後始末の挙動。"""
 
-    def test_empty_db(self, db: Database) -> None:
-        assert db.get_all_chunks() == []
+    def test_new_db_is_chmod_0600(self, tmp_path: Path) -> None:
+        """新規作成時の DB ファイルは 0600。"""
+        db_path = tmp_path / "nested" / "mem.db"
+        with Database(db_path):
+            pass
+        assert stat.S_IMODE(db_path.stat().st_mode) == 0o600
 
-    def test_returns_all(self, db: Database) -> None:
-        for i in range(3):
-            db.store_chunk(
-                MemoryChunk(
-                    session_id="s1",
-                    project="proj",
-                    chunk_index=i,
-                    content=f"chunk {i}",
-                    tool_names=[],
-                    files_read=[],
-                    files_modified=[],
-                    created_at_epoch=1700000000 + i,
-                )
-            )
-        chunks = db.get_all_chunks()
-        assert len(chunks) == 3
-
-    def test_ordered_by_epoch(self, db: Database) -> None:
-        for i in range(3):
-            db.store_chunk(
-                MemoryChunk(
-                    session_id="s1",
-                    project="proj",
-                    chunk_index=i,
-                    content=f"chunk {i}",
-                    tool_names=[],
-                    files_read=[],
-                    files_modified=[],
-                    created_at_epoch=1700000002 - i,
-                )
-            )
-        chunks = db.get_all_chunks()
-        epochs = [c.created_at_epoch for c in chunks]
-        assert epochs == sorted(epochs)
-
-
-class TestGetSessionIdsWithChunks:
-    """get_session_ids_with_chunks のテスト（digest-backfill 用）"""
-
-    def test_empty_db(self, db: Database) -> None:
-        assert db.get_session_ids_with_chunks() == []
-
-    def test_returns_distinct_session_ids(self, db: Database) -> None:
-        for i in range(2):
-            db.store_chunk(
-                MemoryChunk(
-                    session_id="s1",
-                    project="proj",
-                    chunk_index=i,
-                    content=f"chunk {i}",
-                    tool_names=[],
-                    files_read=[],
-                    files_modified=[],
-                    created_at_epoch=1700000000 + i,
-                )
-            )
-        db.store_chunk(
-            MemoryChunk(
-                session_id="s2",
-                project="proj",
-                chunk_index=0,
-                content="other session",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                created_at_epoch=1700000002,
-            )
-        )
-        session_ids = db.get_session_ids_with_chunks()
-        assert sorted(session_ids) == ["s1", "s2"]
-
-    def test_project_filter(self, db: Database) -> None:
-        db.store_chunk(
-            MemoryChunk(
-                session_id="s-a",
-                project="proj-a",
-                chunk_index=0,
-                content="a",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                created_at_epoch=1700000000,
-            )
-        )
-        db.store_chunk(
-            MemoryChunk(
-                session_id="s-b",
-                project="proj-b",
-                chunk_index=0,
-                content="b",
-                tool_names=[],
-                files_read=[],
-                files_modified=[],
-                created_at_epoch=1700000001,
-            )
-        )
-        assert db.get_session_ids_with_chunks(project="proj-a") == ["s-a"]
-
-
-class TestInteractionQueries:
-    """interaction_logs の取得系テスト"""
-
-    def test_interaction_log_queries_and_prompt_hash(self, db: Database) -> None:
-        log1 = InteractionLog(
-            session_id="sess-1",
-            project="proj-a",
-            user_prompt_full="alpha",
-            interaction_index=0,
-            created_at_epoch=1,
-        )
-        log2 = InteractionLog(
-            session_id="sess-1",
-            project="proj-a",
-            user_prompt_full="beta",
-            interaction_index=1,
-            created_at_epoch=2,
-        )
-        log3 = InteractionLog(
-            session_id="sess-2",
-            project="proj-b",
-            user_prompt_full="gamma",
-            interaction_index=0,
-            created_at_epoch=3,
-        )
-
-        first_id = db.store_interaction_log(log1)
-        db.store_interaction_log(log2)
-        db.store_interaction_log(log3)
-
-        row = db.conn.execute(
-            "SELECT user_prompt_hash FROM interaction_logs WHERE id = ?",
-            (first_id,),
-        ).fetchone()
-        assert row["user_prompt_hash"] == _make_prompt_hash("alpha")
-
-        session_logs = db.get_interaction_logs(session_id="sess-1")
-        project_logs = db.get_interaction_logs(project="proj-a")
-        all_logs = db.get_interaction_logs()
-
-        assert [log.interaction_index for log in session_logs] == [0, 1]
-        assert len(project_logs) == 2
-        assert len(all_logs) == 3
-        row = db.conn.execute(
-            "SELECT created_at_epoch FROM interaction_logs ORDER BY created_at_epoch"
-        ).fetchone()
-        assert row["created_at_epoch"] == 1
-        assert db.get_next_interaction_index("sess-1") == 2
-        assert db.get_next_interaction_index("missing") == 0
-
-    @pytest.mark.parametrize(
-        "input_val, expected",
-        [
-            (None, []),
-            ("", []),
-            ('[{"reason": "because"}]', [{"reason": "because"}]),
-            ("invalid json", []),
-            ('{"reason": "not a list"}', []),
-        ],
-        ids=["none", "empty", "valid", "invalid-json", "not-a-list"],
-    )
-    def test_parse_json_dict_list(self, input_val: str | None, expected: list[dict]) -> None:
-        assert _parse_json_dict_list(input_val) == expected
-
-
-class TestDatabaseFilePermissions:
-    """新規 DB 作成時のファイル権限検証。"""
-
-    def test_new_db_chmod_0600(self, tmp_path: Path) -> None:
-        """新規作成された mem.db は chmod 0600 になる。"""
+    def test_existing_db_permission_untouched(self, tmp_path: Path) -> None:
+        """既存 DB を開き直してもパーミッションを触らない。"""
         db_path = tmp_path / "mem.db"
-        db = Database(str(db_path))
-        db.close()
-        mode = db_path.stat().st_mode & 0o777
-        assert mode == 0o600, f"期待 0o600 だが {oct(mode)} が設定されている"
-
-    def test_existing_db_permissions_unchanged(self, tmp_path: Path) -> None:
-        """既存 DB を再 open しても権限を変更しない（既存ユーザの DB を破壊しない）。"""
-        db_path = tmp_path / "mem.db"
-        # 最初に作成（→ 0o600）
-        db = Database(str(db_path))
-        db.close()
-        # 権限を変えた状態でシミュレート
+        with Database(db_path):
+            pass
         db_path.chmod(0o644)
-        # 再 open
-        db2 = Database(str(db_path))
-        db2.close()
-        mode = db_path.stat().st_mode & 0o777
-        assert mode == 0o644, "既存 DB の権限を変更してはいけない"
+        with Database(db_path):
+            pass
+        assert stat.S_IMODE(db_path.stat().st_mode) == 0o644
+
+    def test_context_manager_closes_connection(self, tmp_path: Path) -> None:
+        """with を抜けると接続が閉じている。"""
+        with Database(tmp_path / "mem.db") as database:
+            assert isinstance(database, Database)
+        with pytest.raises(sqlite3.ProgrammingError):
+            database.conn.execute("SELECT 1")
+
+    def test_performance_pragmas_applied(self, db: Database) -> None:
+        """最適化 PRAGMA が適用されている。"""
+        assert db.conn.execute("PRAGMA temp_store").fetchone()[0] == 2
+        assert db.conn.execute("PRAGMA mmap_size").fetchone()[0] == 268435456
 
 
-class TestConcurrentChunkInsert:
-    """並行 store_chunk 時の UNIQUE 制約違反リトライをテストする。"""
+class TestRepos:
+    """repos の CRUD。"""
 
-    def test_retry_on_unique_violation(self, db: Database) -> None:
-        """chunk_index が重複しても store_chunk がリトライして全件保存できる。
+    def test_upsert_inserts_new_repo(self, db: Database) -> None:
+        """新規リポジトリを挿入して格納値を返す。"""
+        stored = db.upsert_repo(_repo())
+        assert stored.id == "bluecore-dev"
+        assert stored.identity_key == "git@github.com:x/bluecore.git"
+        assert stored.first_seen_at == "2026-01-01T00:00:00+00:00"
 
-        別プロセスの async hook が同一 session に先に書き込んだケースをシミュレートする:
-        - chunk_index=0 を手動で直接 INSERT（先行プロセス相当）
-        - その後 store_chunk(chunk_index=0) を呼ぶ → UNIQUE 違反 → 再採番して chunk_index=1 で成功
-        """
-
-        session_id = "retry-session"
-        db.upsert_session(Session(session_id=session_id, project="proj", started_at_epoch=int(time.time())))
-
-        # 先行プロセスが chunk_index=0 を既に書き込んだ状況を作る
-        db.conn.execute(
-            """INSERT INTO memory_chunks
-             (id, origin_user, session_id, project, chunk_index, content,
-              tool_names, files_read, files_modified, created_at_epoch)
-             VALUES (?, '', ?, 'proj', 0, '[Bash] prior process', '[]', '[]', '[]', ?)""",
-            ("prior-chunk-id", session_id, int(time.time())),
+    def test_upsert_resolves_conflict_by_identity_key(self, db: Database) -> None:
+        """identity_key が一致すれば id と first_seen_at を保持して観測情報のみ更新する。"""
+        db.upsert_repo(_repo())
+        moved = Repo(
+            id="別のスラッグ",
+            identity_key="git@github.com:x/bluecore.git",
+            root_path="/Users/x/worktrees/feature",
+            remote_url=None,
+            first_seen_at="2026-06-01T00:00:00+00:00",
+            last_seen_at="2026-06-01T00:00:00+00:00",
         )
+        stored = db.upsert_repo(moved)
+        assert stored.id == "bluecore-dev"
+        assert stored.first_seen_at == "2026-01-01T00:00:00+00:00"
+        assert stored.root_path == "/Users/x/worktrees/feature"
+        assert stored.remote_url is None
+        assert stored.last_seen_at == "2026-06-01T00:00:00+00:00"
+        assert len(db.list_repos()) == 1
+
+    def test_get_repo_returns_none_when_missing(self, db: Database) -> None:
+        """未登録の id では None を返す。"""
+        assert db.get_repo("unknown") is None
+
+    def test_get_repo_returns_repo(self, db: Database) -> None:
+        """登録済みの id では Repo を返す。"""
+        db.upsert_repo(_repo())
+        found = db.get_repo("bluecore-dev")
+        assert found is not None
+        assert found.root_path == "/Users/x/dev/bluecore-dev"
+
+    def test_list_repos_orders_by_last_seen_desc(self, db: Database) -> None:
+        """最終観測の新しい順に返す。"""
+        db.upsert_repo(_repo("old", "key-old"))
+        newer = _repo("new", "key-new")
+        newer.last_seen_at = "2026-07-01T00:00:00+00:00"
+        db.upsert_repo(newer)
+        assert [r.id for r in db.list_repos()] == ["new", "old"]
+
+    def test_list_repos_empty(self, db: Database) -> None:
+        """1 件も無ければ空リスト。"""
+        assert db.list_repos() == []
+
+
+class TestKnowledge:
+    """knowledge の CRUD。"""
+
+    def test_upsert_inserts_global_knowledge(self, db: Database) -> None:
+        """global スコープの知識カードを挿入する。"""
+        stored = db.upsert_knowledge(_knowledge())
+        assert stored.id is not None
+        assert stored.repo_id is None
+        assert stored.status == "active"
+        assert stored.confidence == 0.5
+        assert stored.body == ""
+
+    def test_upsert_updates_on_key_conflict_keeping_created_at(self, db: Database) -> None:
+        """同一 key の再投入は id と created_at を保持して内容を更新する。"""
+        first = db.upsert_knowledge(_knowledge())
+        second = db.upsert_knowledge(
+            _knowledge(
+                title="Python は python3 で実行する（改訂）",
+                body="venv は ~/.bluecore/.venv のみ",
+                confidence=0.9,
+                updated_at="2026-02-02T00:00:00+00:00",
+            )
+        )
+        assert second.id == first.id
+        assert second.created_at == "2026-01-01T00:00:00+00:00"
+        assert second.updated_at == "2026-02-02T00:00:00+00:00"
+        assert second.confidence == 0.9
+        assert len(db.list_knowledge()) == 1
+
+    def test_same_key_allowed_across_scopes(self, db: Database) -> None:
+        """global と repo で同じ key を並存できる（式インデックスの境界）。"""
+        db.upsert_repo(_repo())
+        db.upsert_knowledge(_knowledge())
+        db.upsert_knowledge(_knowledge(scope="repo", repo_id="bluecore-dev"))
+        assert len(db.list_knowledge()) == 2
+
+    def test_same_key_conflicts_within_same_repo(self, db: Database) -> None:
+        """同一 repo 内で同じ key は 1 行に集約される。"""
+        db.upsert_repo(_repo())
+        db.upsert_knowledge(_knowledge(scope="repo", repo_id="bluecore-dev"))
+        db.upsert_knowledge(_knowledge(scope="repo", repo_id="bluecore-dev", title="上書き"))
+        rows = db.list_knowledge(scope="repo")
+        assert len(rows) == 1
+        assert rows[0].title == "上書き"
+
+    def test_upsert_persists_all_optional_columns(self, db: Database) -> None:
+        """任意カラムがすべて往復する。"""
+        db.upsert_repo(_repo())
+        session = db.start_session(Session(session_uid="uid-1", repo_id="bluecore-dev"))
+        base = db.upsert_knowledge(_knowledge("old-way"))
+        stored = db.upsert_knowledge(
+            _knowledge(
+                "new-way",
+                kind="pitfall",
+                body="理由の説明",
+                domain="testing",
+                confidence=0.8,
+                status="pending",
+                source="observer",
+                source_ref="plugins/bluecore/src/bluecore/mem/database.py",
+                session_id=session.id,
+                superseded_by=base.id,
+            )
+        )
+        assert stored.kind == "pitfall"
+        assert stored.body == "理由の説明"
+        assert stored.domain == "testing"
+        assert stored.confidence == 0.8
+        assert stored.status == "pending"
+        assert stored.source == "observer"
+        assert stored.source_ref.endswith("database.py")
+        assert stored.session_id == session.id
+        assert stored.superseded_by == base.id
+
+    def test_get_by_key_global(self, db: Database) -> None:
+        """repo_id 省略で global スコープの行を引く。"""
+        db.upsert_knowledge(_knowledge())
+        found = db.get_knowledge_by_key("use-python3")
+        assert found is not None
+        assert found.scope == "global"
+
+    def test_get_by_key_scoped_to_repo(self, db: Database) -> None:
+        """repo_id 指定で repo スコープの行だけを引く。"""
+        db.upsert_repo(_repo())
+        db.upsert_knowledge(_knowledge(scope="repo", repo_id="bluecore-dev", title="repo 側"))
+        db.upsert_knowledge(_knowledge(title="global 側"))
+        found = db.get_knowledge_by_key("use-python3", repo_id="bluecore-dev")
+        assert found is not None
+        assert found.title == "repo 側"
+
+    def test_get_by_key_returns_none_when_missing(self, db: Database) -> None:
+        """該当なしなら None。"""
+        assert db.get_knowledge_by_key("nope") is None
+
+    def test_list_without_filters_returns_all(self, db: Database) -> None:
+        """絞り込み無しは全件を更新の新しい順で返す。"""
+        db.upsert_knowledge(_knowledge("a", updated_at="2026-01-01T00:00:00+00:00"))
+        db.upsert_knowledge(_knowledge("b", updated_at="2026-03-01T00:00:00+00:00"))
+        assert [k.key for k in db.list_knowledge()] == ["b", "a"]
+
+    def test_list_with_all_filters(self, db: Database) -> None:
+        """scope・repo_id・status のすべてで絞り込む。"""
+        db.upsert_repo(_repo())
+        db.upsert_repo(_repo("other", "key-other"))
+        db.upsert_knowledge(_knowledge("hit", scope="repo", repo_id="bluecore-dev"))
+        db.upsert_knowledge(_knowledge("wrong-repo", scope="repo", repo_id="other"))
+        db.upsert_knowledge(_knowledge("wrong-scope"))
+        db.upsert_knowledge(
+            _knowledge("wrong-status", scope="repo", repo_id="bluecore-dev", status="archived")
+        )
+        rows = db.list_knowledge(scope="repo", repo_id="bluecore-dev", status="active")
+        assert [k.key for k in rows] == ["hit"]
+
+    def test_set_status_updates_row(self, db: Database) -> None:
+        """status と updated_at を更新して True を返す。"""
+        stored = db.upsert_knowledge(_knowledge())
+        assert db.set_knowledge_status(stored.id, "archived", updated_at="2026-05-05T00:00:00+00:00") is True
+        after = db.get_knowledge_by_key("use-python3")
+        assert after.status == "archived"
+        assert after.updated_at == "2026-05-05T00:00:00+00:00"
+
+    def test_set_status_defaults_updated_at_to_now(self, db: Database) -> None:
+        """updated_at 省略時は現在時刻を書き込む。"""
+        stored = db.upsert_knowledge(_knowledge())
+        assert db.set_knowledge_status(stored.id, "pending") is True
+        after = db.get_knowledge_by_key("use-python3")
+        assert after.updated_at > "2026-01-01T00:00:00+00:00"
+
+    def test_set_status_returns_false_when_missing(self, db: Database) -> None:
+        """該当行が無ければ False。"""
+        assert db.set_knowledge_status(9999, "archived") is False
+
+
+class TestSessions:
+    """sessions の CRUD。"""
+
+    def test_start_session_inserts(self, db: Database) -> None:
+        """セッションを開始登録して id を採番する。"""
+        db.upsert_repo(_repo())
+        stored = db.start_session(
+            Session(session_uid="uid-1", repo_id="bluecore-dev", harness="claude", started_at="2026-01-01T00:00:00+00:00")
+        )
+        assert stored.id is not None
+        assert stored.harness == "claude"
+        assert stored.handoff == ""
+        assert stored.ended_at is None
+
+    def test_start_session_is_idempotent(self, db: Database) -> None:
+        """同一 session_uid の再入は started_at を保持し harness だけ更新する。"""
+        db.upsert_repo(_repo())
+        first = db.start_session(
+            Session(session_uid="uid-1", repo_id="bluecore-dev", started_at="2026-01-01T00:00:00+00:00")
+        )
+        second = db.start_session(
+            Session(
+                session_uid="uid-1",
+                repo_id="bluecore-dev",
+                harness="codex",
+                started_at="2026-09-09T00:00:00+00:00",
+            )
+        )
+        assert second.id == first.id
+        assert second.started_at == "2026-01-01T00:00:00+00:00"
+        assert second.harness == "codex"
+
+    def test_start_session_requires_existing_repo(self, db: Database) -> None:
+        """未登録 repo_id は外部キー制約で弾かれる。"""
+        with pytest.raises(sqlite3.IntegrityError):
+            db.start_session(Session(session_uid="uid-1", repo_id="missing"))
+
+    def test_finish_session_records_handoff(self, db: Database) -> None:
+        """handoff と ended_at を記録して True を返す。"""
+        db.upsert_repo(_repo())
+        db.start_session(Session(session_uid="uid-1", repo_id="bluecore-dev"))
+        assert db.finish_session("uid-1", "次はテストを書く", ended_at="2026-01-02T00:00:00+00:00") is True
+        latest = db.get_latest_session("bluecore-dev")
+        assert latest.handoff == "次はテストを書く"
+        assert latest.ended_at == "2026-01-02T00:00:00+00:00"
+
+    def test_finish_session_defaults_ended_at_to_now(self, db: Database) -> None:
+        """ended_at 省略時は現在時刻を書き込む。"""
+        db.upsert_repo(_repo())
+        db.start_session(Session(session_uid="uid-1", repo_id="bluecore-dev"))
+        assert db.finish_session("uid-1", "引き継ぎ") is True
+        latest = db.get_latest_session("bluecore-dev")
+        assert latest.ended_at is not None
+        assert latest.ended_at <= utc_now_iso()
+
+    def test_finish_session_returns_false_when_missing(self, db: Database) -> None:
+        """未登録の session_uid では False。"""
+        assert db.finish_session("unknown", "引き継ぎ") is False
+
+    def test_get_latest_session_skips_empty_handoff(self, db: Database) -> None:
+        """handoff が空のセッションは対象外。"""
+        db.upsert_repo(_repo())
+        db.start_session(
+            Session(session_uid="uid-1", repo_id="bluecore-dev", started_at="2026-01-01T00:00:00+00:00")
+        )
+        assert db.get_latest_session("bluecore-dev") is None
+
+    def test_get_latest_session_returns_newest_with_handoff(self, db: Database) -> None:
+        """引き継ぎを持つ中で最新の 1 件を返す。"""
+        db.upsert_repo(_repo())
+        for uid, started in (("uid-1", "2026-01-01T00:00:00+00:00"), ("uid-2", "2026-02-01T00:00:00+00:00")):
+            db.start_session(Session(session_uid=uid, repo_id="bluecore-dev", started_at=started))
+            db.finish_session(uid, f"handoff for {uid}")
+        latest = db.get_latest_session("bluecore-dev")
+        assert latest.session_uid == "uid-2"
+
+    def test_repo_delete_cascades_to_sessions(self, db: Database) -> None:
+        """repos の削除は sessions を CASCADE 削除する。"""
+        db.upsert_repo(_repo())
+        db.start_session(Session(session_uid="uid-1", repo_id="bluecore-dev"))
+        db.conn.execute("DELETE FROM repos WHERE id = ?", ("bluecore-dev",))
         db.conn.commit()
+        assert db.conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
 
-        # 後続プロセスも chunk_index=0 で store_chunk を試みる → リトライで chunk_index=1 になる
-        chunk = MemoryChunk(
-            session_id=session_id,
-            project="proj",
-            chunk_index=0,  # 衝突する index
-            content="[Bash] later process output",
-            tool_names=["Bash"],
-            files_read=[],
-            files_modified=[],
-            created_at_epoch=int(time.time()),
-        )
-        cid = db.store_chunk(chunk)
-
-        assert cid is not None
-        saved = db.get_chunk_by_id(cid)
-        assert saved is not None
-        assert saved.content == chunk.content
-        assert saved.chunk_index == 1  # 再採番されて 1 になる
-
-    def test_id_duplicate_raises_immediately(self, tmp_path: Path) -> None:
-        """id PRIMARY KEY 重複の IntegrityError はリトライせず即 raise する。
-
-        chunk_index UNIQUE 違反のみをリトライ対象とし、他の制約違反は
-        リトライなしに伝播することを確認する。
-        """
-        import sqlite3 as _sqlite3
-
-        db3 = Database(tmp_path / "id_dup.db")
-        session_id = "id-dup-session"
-        db3.upsert_session(Session(session_id=session_id, project="proj", started_at_epoch=int(time.time())))
-
-        fixed_id = "fixed-uuid-0000-0000-0000-000000000000"
-
-        # 同じ id で1件目を保存
-        first = MemoryChunk(
-            session_id=session_id,
-            project="proj",
-            chunk_index=0,
-            content="first",
-            tool_names=[],
-            files_read=[],
-            files_modified=[],
-            created_at_epoch=int(time.time()),
-        )
-        first.id = fixed_id
-        db3.store_chunk(first)
-
-        # 同じ id で2件目を試みる → PRIMARY KEY 違反 → 即 raise
-        second = MemoryChunk(
-            session_id=session_id,
-            project="proj",
-            chunk_index=999,  # 異なる chunk_index
-            content="second",
-            tool_names=[],
-            files_read=[],
-            files_modified=[],
-            created_at_epoch=int(time.time()),
-        )
-        second.id = fixed_id
-        with pytest.raises(_sqlite3.IntegrityError):
-            db3.store_chunk(second)
-
-    def test_max_retries_exceeded_raises(self, tmp_path: Path) -> None:
-        """_STORE_CHUNK_MAX_RETRIES 回全て UNIQUE 制約違反が続く場合は IntegrityError を raise する。
-
-        conn をラッパーで置き換え、INSERT が常に chunk_index UNIQUE 違反を返すようにする。
-        """
-        import sqlite3 as _sqlite3
-        import unittest.mock as mock
-
-        import bluecore.mem.database as db_mod
-
-        db4 = Database(tmp_path / "max_retry.db")
-        session_id = "max-retry-session"
-        db4.upsert_session(Session(session_id=session_id, project="proj", started_at_epoch=int(time.time())))
-
-        chunk = MemoryChunk(
-            session_id=session_id,
-            project="proj",
-            chunk_index=0,
-            content="content",
-            tool_names=[],
-            files_read=[],
-            files_modified=[],
-            created_at_epoch=int(time.time()),
-        )
-
-        real_conn = db4.conn
-        unique_err = _sqlite3.IntegrityError(
-            "UNIQUE constraint failed: memory_chunks.session_id, memory_chunks.chunk_index"
-        )
-        unique_err.sqlite_errorcode = _sqlite3.SQLITE_CONSTRAINT_UNIQUE
-
-        class AlwaysFailConn:
-            """INSERT 時に常に chunk_index UNIQUE 違反を起こすラッパー。"""
-
-            def __getattr__(self, name: str):
-                return getattr(real_conn, name)
-
-            def execute(self, sql: str, params=()) -> object:
-                if "INSERT INTO memory_chunks" in sql:
-                    raise unique_err
-                return real_conn.execute(sql, params)
-
-            def rollback(self) -> None:
-                real_conn.rollback()
-
-        db4.conn = AlwaysFailConn()  # type: ignore[assignment]
-
-        with mock.patch.object(db_mod, "_STORE_CHUNK_MAX_RETRIES", 3):
-            with pytest.raises(_sqlite3.IntegrityError):
-                db4.store_chunk(chunk)
-
-        db4.conn = real_conn
-        db4.close()
-
-    def test_non_unique_error_mentioning_chunk_index_raises_immediately(self, tmp_path: Path) -> None:
-        """UNIQUE 以外の制約違反はメッセージに chunk_index を含んでもリトライしない。"""
-        import sqlite3 as _sqlite3
-
-        db5 = Database(tmp_path / "notnull.db")
-        session_id = "notnull-session"
-        db5.upsert_session(Session(session_id=session_id, project="proj", started_at_epoch=int(time.time())))
-
-        chunk = MemoryChunk(
-            session_id=session_id,
-            project="proj",
-            chunk_index=0,
-            content="content",
-            tool_names=[],
-            files_read=[],
-            files_modified=[],
-            created_at_epoch=int(time.time()),
-        )
-
-        real_conn = db5.conn
-        notnull_err = _sqlite3.IntegrityError("NOT NULL constraint failed: memory_chunks.chunk_index")
-        notnull_err.sqlite_errorcode = _sqlite3.SQLITE_CONSTRAINT_NOTNULL
-        attempts = {"count": 0}
-
-        class AlwaysNotNullFailConn:
-            """INSERT 時に常に NOT NULL 違反を起こすラッパー。"""
-
-            def __getattr__(self, name: str):
-                return getattr(real_conn, name)
-
-            def execute(self, sql: str, params=()) -> object:
-                if "INSERT INTO memory_chunks" in sql:
-                    attempts["count"] += 1
-                    raise notnull_err
-                return real_conn.execute(sql, params)
-
-            def rollback(self) -> None:
-                real_conn.rollback()
-
-        db5.conn = AlwaysNotNullFailConn()  # type: ignore[assignment]
-
-        with pytest.raises(_sqlite3.IntegrityError):
-            db5.store_chunk(chunk)
-        assert attempts["count"] == 1  # リトライなしの即 raise
-
-        db5.conn = real_conn
-        db5.close()
-
-
-class TestSessionDigests:
-    """session_digests テーブルの CRUD / FTS のテストケース"""
-
-    def test_upsert_is_idempotent_and_updates_fields(self, db: Database) -> None:
-        """同一 session_id で2回 upsert すると1行のみになり、内容が更新される。"""
-        digest = SessionDigest(
-            session_id="sess-1",
-            project="proj",
-            summary="first summary",
-            started_at_epoch=1700000000,
-            created_at_epoch=1700000010,
-            key_files=["a.py"],
-            key_decisions=["decision A"],
-            harness="claude",
-            source="chunks",
-            chunk_count=3,
-        )
-        digest_id_1 = db.upsert_session_digest(digest)
-        assert isinstance(digest_id_1, str)
-        assert len(digest_id_1) == 36
-
-        count = db.conn.execute(
-            "SELECT COUNT(*) as c FROM session_digests WHERE session_id = ?",
-            ("sess-1",),
-        ).fetchone()["c"]
-        assert count == 1
-
-        updated = SessionDigest(
-            id=digest_id_1,
-            session_id="sess-1",
-            project="proj",
-            summary="updated summary",
-            started_at_epoch=1700000000,
-            created_at_epoch=1700000010,
-            key_files=["a.py", "b.py"],
-            key_decisions=["decision A", "decision B"],
-            harness="codex",
-            source="transcript+chunks",
-            chunk_count=5,
-            ended_at_epoch=1700000099,
-        )
-        digest_id_2 = db.upsert_session_digest(updated)
-        assert digest_id_2 == digest_id_1
-
-        count_after = db.conn.execute(
-            "SELECT COUNT(*) as c FROM session_digests WHERE session_id = ?",
-            ("sess-1",),
-        ).fetchone()["c"]
-        assert count_after == 1
-
-        stored = db.get_digest_by_session("sess-1")
-        assert stored is not None
-        assert stored.summary == "updated summary"
-        assert stored.key_files == ["a.py", "b.py"]
-        assert stored.key_decisions == ["decision A", "decision B"]
-        assert stored.harness == "codex"
-        assert stored.source == "transcript+chunks"
-        assert stored.chunk_count == 5
-        assert stored.ended_at_epoch == 1700000099
-
-    def test_upsert_generates_id_when_absent(self, db: Database) -> None:
-        """id 未指定の場合は UUID を自動生成する。"""
-        digest = SessionDigest(
-            session_id="sess-auto",
-            project="proj",
-            summary="s",
-            started_at_epoch=1700000000,
-            created_at_epoch=1700000000,
-        )
-        assert digest.id is None
-        digest_id = db.upsert_session_digest(digest)
-        assert digest.id == digest_id
-        assert len(digest_id) == 36
-
-    def test_get_digest_by_session_not_found(self, db: Database) -> None:
-        assert db.get_digest_by_session("missing") is None
-
-    def test_get_recent_digests_order_and_limit(self, db: Database) -> None:
-        for i in range(5):
-            db.upsert_session_digest(
-                SessionDigest(
-                    session_id=f"sess-{i}",
-                    project="proj",
-                    summary=f"summary {i}",
-                    started_at_epoch=1700000000 + i,
-                    created_at_epoch=1700000000 + i,
-                )
-            )
-        recent = db.get_recent_digests(limit=3)
-        assert len(recent) == 3
-        assert [d.created_at_epoch for d in recent] == sorted(
-            (d.created_at_epoch for d in recent), reverse=True
-        )
-        assert recent[0].session_id == "sess-4"
-
-    def test_get_recent_digests_project_filter(self, db: Database) -> None:
-        db.upsert_session_digest(
-            SessionDigest(
-                session_id="s1",
-                project="proj-a",
-                summary="a",
-                started_at_epoch=1700000000,
-                created_at_epoch=1700000000,
-            )
-        )
-        db.upsert_session_digest(
-            SessionDigest(
-                session_id="s2",
-                project="proj-b",
-                summary="b",
-                started_at_epoch=1700000001,
-                created_at_epoch=1700000001,
-            )
-        )
-        recent = db.get_recent_digests(project="proj-a", limit=10)
-        assert len(recent) == 1
-        assert recent[0].project == "proj-a"
-
-    def test_get_digests_by_ids(self, db: Database) -> None:
-        ids = []
-        for i in range(3):
-            digest = SessionDigest(
-                session_id=f"sess-{i}",
-                project="proj",
-                summary=f"summary {i}",
-                started_at_epoch=1700000000 + i,
-                created_at_epoch=1700000000 + i,
-            )
-            ids.append(db.upsert_session_digest(digest))
-        result = db.get_digests_by_ids(ids)
-        assert len(result) == 3
-        assert all(digest_id in result for digest_id in ids)
-
-    def test_get_digests_by_ids_empty(self, db: Database) -> None:
-        assert db.get_digests_by_ids([]) == {}
-
-    def test_fts_search_digests_insert_and_hit(self, db: Database) -> None:
-        db.upsert_session_digest(
-            SessionDigest(
-                session_id="sess-1",
-                project="proj",
-                summary="fixed authentication regression in login flow",
-                started_at_epoch=1700000000,
-                created_at_epoch=1700000000,
-            )
-        )
-        results = db.fts_search_digests("authentication")
-        assert len(results) == 1
-        assert results[0][0] is not None
-
-    def test_fts_search_digests_no_results(self, db: Database) -> None:
-        assert db.fts_search_digests("xyznonexistent") == []
-
-    def test_fts_search_digests_update_resyncs(self, db: Database) -> None:
-        digest = SessionDigest(
-            session_id="sess-1",
-            project="proj",
-            summary="alpha content",
-            started_at_epoch=1700000000,
-            created_at_epoch=1700000000,
-        )
-        digest_id = db.upsert_session_digest(digest)
-        assert len(db.fts_search_digests("alpha")) == 1
-        assert len(db.fts_search_digests("betaword")) == 0
-
-        digest.id = digest_id
-        digest.summary = "betaword content"
-        db.upsert_session_digest(digest)
-
-        assert len(db.fts_search_digests("alpha")) == 0
-        assert len(db.fts_search_digests("betaword")) == 1
-
-    def test_fts_search_digests_delete_removes_entry(self, db: Database) -> None:
-        digest = SessionDigest(
-            session_id="sess-1",
-            project="proj",
-            summary="gamma content",
-            started_at_epoch=1700000000,
-            created_at_epoch=1700000000,
-        )
-        digest_id = db.upsert_session_digest(digest)
-        assert len(db.fts_search_digests("gamma")) == 1
-
-        db.conn.execute("DELETE FROM session_digests WHERE id = ?", (digest_id,))
+    def test_session_delete_nulls_knowledge_link(self, db: Database) -> None:
+        """sessions の削除で knowledge.session_id は NULL になる（SET NULL）。"""
+        db.upsert_repo(_repo())
+        session = db.start_session(Session(session_uid="uid-1", repo_id="bluecore-dev"))
+        db.upsert_knowledge(_knowledge(session_id=session.id))
+        db.conn.execute("DELETE FROM sessions WHERE id = ?", (session.id,))
         db.conn.commit()
-        assert len(db.fts_search_digests("gamma")) == 0
-
-    def test_fts_search_digests_operational_error(self, db: Database) -> None:
-        """FTS テーブルが壊れている場合、空リストを返す"""
-        db.conn.execute("DROP TABLE IF EXISTS session_digests_fts")
-        db.conn.commit()
-        assert db.fts_search_digests("test") == []
-
-    def test_reconnect_adds_table_and_fts_to_existing_db(self, tmp_path: Path) -> None:
-        """session_digests 導入前に作られた既存 DB に再接続すると、テーブルと FTS が追加される。"""
-        db_path = tmp_path / "legacy.db"
-        legacy_db = Database(db_path)
-        legacy_db.conn.execute("DROP TABLE IF EXISTS session_digests_fts")
-        legacy_db.conn.execute("DROP TRIGGER IF EXISTS digests_ai")
-        legacy_db.conn.execute("DROP TRIGGER IF EXISTS digests_ad")
-        legacy_db.conn.execute("DROP TRIGGER IF EXISTS digests_au")
-        legacy_db.conn.execute("DROP TABLE IF EXISTS session_digests")
-        legacy_db.conn.commit()
-        legacy_db.close()
-
-        reopened = Database(db_path)
-        try:
-            table = reopened.conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='session_digests'"
-            ).fetchone()
-            fts_table = reopened.conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='session_digests_fts'"
-            ).fetchone()
-            assert table is not None
-            assert fts_table is not None
-
-            digest_id = reopened.upsert_session_digest(
-                SessionDigest(
-                    session_id="sess-reconnect",
-                    project="proj",
-                    summary="reconnect works",
-                    started_at_epoch=1700000000,
-                    created_at_epoch=1700000000,
-                )
-            )
-            assert reopened.get_digest_by_session("sess-reconnect") is not None
-            assert len(reopened.fts_search_digests("reconnect")) == 1
-            assert digest_id
-        finally:
-            reopened.close()
+        assert db.get_knowledge_by_key("use-python3").session_id is None

@@ -6,23 +6,23 @@ import io
 import json
 import runpy
 import sys
-import time
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
 
 from bluecore.mem import cli
-from bluecore.mem.database import Database, MemoryChunk
-from bluecore.mem.search import SearchResult
+from bluecore.mem.database import Database
+from bluecore.mem.models import Repo
 
 
 def _run_cli(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     argv: list[str],
     stdin_payload: dict,
-) -> tuple[str, str]:
+) -> tuple[str, str, int]:
+    """データディレクトリを tmp_path に差し替えて cli.main() を実行する。"""
     import bluecore.mem.settings as settings_mod
 
     monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
@@ -32,308 +32,177 @@ def _run_cli(
     stdout = io.StringIO()
     stderr = io.StringIO()
     with redirect_stdout(stdout), redirect_stderr(stderr):
-        try:
-            cli.main()
-        except SystemExit as exc:
-            if exc.code not in (0, None):
-                raise
-    return stdout.getvalue(), stderr.getvalue()
+        exit_code = cli.main()
+    return stdout.getvalue(), stderr.getvalue(), exit_code
 
 
-def test_context_command_uses_local_db(monkeypatch, tmp_path: Path) -> None:
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
-    db = Database(tmp_path / "mem.db")
-    db.store_chunk(
-        MemoryChunk(
-            session_id="s1",
-            project="repo",
-            chunk_index=0,
-            content="did some work",
-            tool_names=["Edit"],
-            files_read=[],
-            files_modified=["file.py"],
-            created_at_epoch=int(time.time()),  # hot 層（直近24h）に収まる必要がある
+class TestSetup:
+    """setup コマンド（SessionStart フック経路）。"""
+
+    def test_creates_database_and_emits_session_start_json(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """DB を作成し、SessionStart 契約の JSON を stdout に出す。"""
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["setup"], {})
+        assert exit_code == 0
+        assert stderr == ""
+        payload = json.loads(stdout)
+        assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+        assert (tmp_path / "mem.db").exists()
+
+    def test_swallows_db_failure(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """DB 初期化が失敗してもフックを壊さず JSON を返す。"""
+        monkeypatch.setattr(
+            cli, "_initialize_db", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db broken"))
         )
-    )
-    db.close()
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["setup"], {})
+        assert exit_code == 0
+        assert stderr == ""
+        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 
-    stdout, stderr = _run_cli(monkeypatch, tmp_path, ["context"], {"cwd": str(repo_dir)})
-    assert stderr == ""
-    payload = json.loads(stdout)
-    assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    assert "<mem-context>" in payload["hookSpecificOutput"]["additionalContext"]
-    assert "did some work" in payload["hookSpecificOutput"]["additionalContext"]
-
-
-def test_search_command_returns_results(monkeypatch, tmp_path: Path) -> None:
-    fake_result = SearchResult(
-        chunk_id=1,
-        score=0.99,
-        content="direct db result",
-        project="repo",
-        created_at_epoch=1700000000,
-        tool_names=["Read"],
-        files_read=["README.md"],
-        files_modified=[],
-    )
-    import bluecore.mem.search as search_mod
-    monkeypatch.setattr(search_mod.SearchService, "search", lambda self, **kwargs: [fake_result])
-
-    stdout, stderr = _run_cli(
-        monkeypatch,
-        tmp_path,
-        ["search"],
-        {"query": "direct db", "project": "repo", "limit": 5},
-    )
-    assert stderr == ""
-    payload = json.loads(stdout)
-    assert payload["results"][0]["content"] == "direct db result"
-    assert payload["results"][0]["project"] == "repo"
-
-
-def test_session_init_injects_context_from_local_db(monkeypatch, tmp_path: Path) -> None:
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
-    db = Database(tmp_path / "mem.db")
-    chunk_id = db.store_chunk(
-        MemoryChunk(
-            session_id="s1",
-            project="repo",
-            chunk_index=0,
-            content="previous work",
-            tool_names=["Write"],
-            files_read=[],
-            files_modified=["src/app.py"],
-            created_at_epoch=1700000000,
+    def test_settings_failure_still_emits_session_start_json(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """設定ロード失敗でも exit_code=0 と JSON 出力を維持する。"""
+        monkeypatch.setattr(
+            cli, "_load_settings_or_raise", lambda: (_ for _ in ()).throw(RuntimeError("設定失敗"))
         )
-    )
-    db.close()
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["setup"], {})
+        assert exit_code == 0
+        assert stderr == ""
+        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 
-    fake_result = SearchResult(
-        chunk_id=chunk_id,
-        score=0.99,
-        content="previous work",
-        project="repo",
-        created_at_epoch=1700000000,
-        tool_names=["Write"],
-        files_read=[],
-        files_modified=["src/app.py"],
-    )
-    import bluecore.mem.search as search_mod
-    monkeypatch.setattr(search_mod.SearchService, "search", lambda self, **kwargs: [fake_result])
-
-    stdout, stderr = _run_cli(
-        monkeypatch,
-        tmp_path,
-        ["session-init"],
-        {"cwd": str(repo_dir), "session_id": "session-1", "prompt": "前回のやり方を教えて"},
-    )
-    assert stderr == ""
-    payload = json.loads(stdout)
-    inner = payload["hookSpecificOutput"]
-    assert inner["hookEventName"] == "UserPromptSubmit"
-    assert "<mem-context>" in inner["additionalContext"]
-    assert "previous work" in inner["additionalContext"]
-
-
-def test_init_command_recreates_local_db(monkeypatch, tmp_path: Path) -> None:
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
-    db_path = tmp_path / "mem.db"
-    db = Database(db_path)
-    db.store_chunk(
-        MemoryChunk(
-            session_id="s1",
-            project="repo",
-            chunk_index=0,
-            content="old data",
-            tool_names=["Edit"],
-            files_read=[],
-            files_modified=["src/app.py"],
-            created_at_epoch=1700000000,
+    def test_handler_exception_keeps_exit_code_1_but_emits_json(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """ハンドラ例外時も JSON を出しつつ exit_code=1 を返す。"""
+        monkeypatch.setattr(
+            cli, "_run_session_start_command", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom"))
         )
-    )
-    db.close()
-
-    for suffix in ("-wal", "-shm", "-journal"):
-        (tmp_path / f"mem.db{suffix}").write_text("stale", encoding="utf-8")
-
-    stdout, stderr = _run_cli(monkeypatch, tmp_path, ["init"], {"cwd": str(repo_dir)})
-    assert stderr == ""
-    assert stdout == ""
-
-    assert not (tmp_path / "mem.db-wal").exists()
-    assert not (tmp_path / "mem.db-shm").exists()
-    assert not (tmp_path / "mem.db-journal").exists()
-
-    recreated = Database(db_path)
-    assert recreated.get_all_chunks() == []
-    recreated.close()
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["setup"], {})
+        assert exit_code == 1
+        assert "boom" in stderr
+        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 
 
-def test_remove_db_artifacts_handles_missing_and_directory(tmp_path: Path) -> None:
-    db_path = tmp_path / "mem.db"
-    db_path.write_text("db", encoding="utf-8")
-    wal_dir = Path(f"{db_path}-wal")
-    wal_dir.mkdir()
-    (tmp_path / "mem.db-shm").unlink(missing_ok=True)
-    (tmp_path / "mem.db-journal").write_text("stale", encoding="utf-8")
+class TestInit:
+    """init コマンド（DB 再作成）。"""
 
-    cli._remove_db_artifacts(db_path)
+    def test_recreates_database_dropping_old_rows(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """既存 DB と sidecar を破棄して空の DB を作り直す。"""
+        db_path = tmp_path / "mem.db"
+        with Database(db_path) as db:
+            db.upsert_repo(Repo(id="old", identity_key="key-old", root_path="/tmp/old"))
+        for suffix in ("-wal", "-shm", "-journal"):
+            (tmp_path / f"mem.db{suffix}").write_text("stale", encoding="utf-8")
 
-    assert not db_path.exists()
-    assert not wal_dir.exists()
-    assert not (tmp_path / "mem.db-journal").exists()
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["init"], {})
+        assert exit_code == 0
+        assert (stdout, stderr) == ("", "")
+        for suffix in ("-wal", "-shm", "-journal"):
+            assert not (tmp_path / f"mem.db{suffix}").exists()
 
+        with Database(db_path) as db:
+            assert db.list_repos() == []
 
-def test_record_command(monkeypatch, tmp_path: Path) -> None:
-    """record コマンドのテスト"""
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
+    def test_remove_db_artifacts_tolerates_missing_files(self, tmp_path: Path) -> None:
+        """存在しないファイルがあっても例外を出さない。"""
+        db_path = tmp_path / "mem.db"
+        db_path.write_text("db", encoding="utf-8")
+        (tmp_path / "mem.db-journal").write_text("stale", encoding="utf-8")
 
-    stdout, stderr = _run_cli(
-        monkeypatch,
-        tmp_path,
-        ["record"],
-        {
-            "cwd": str(repo_dir),
-            "event_type": "review",
-            "content": "Found 3 issues: XSS, SQL injection, hardcoded secret",
-            "user_prompt": "review the auth module",
-            "metadata": {
-                "files_read": ["src/auth.py"],
-                "files_modified": [],
-            },
-        },
-    )
-    assert stderr == ""
-    payload = json.loads(stdout)
-    assert payload["success"] is True
-    assert payload["chunk_id"] is not None
+        cli._remove_db_artifacts(db_path)
 
-    # 記録されたチャンクを確認
-    db = Database(tmp_path / "mem.db")
-    chunks = db.get_all_chunks()
-    db.close()
-    assert len(chunks) == 1
-    assert chunks[0].content == "Found 3 issues: XSS, SQL injection, hardcoded secret"
-    assert "review" in chunks[0].tool_names
+        assert not db_path.exists()
+        assert not (tmp_path / "mem.db-journal").exists()
 
 
-def test_record_command_requires_content(monkeypatch, tmp_path: Path) -> None:
-    """record コマンド: content 必須のテスト"""
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
+class TestArgvAndStdin:
+    """引数と stdin の解釈。"""
 
-    stdout, stderr = _run_cli(
-        monkeypatch,
-        tmp_path,
-        ["record"],
-        {"cwd": str(repo_dir), "event_type": "test", "content": ""},
-    )
-    assert stderr == ""
-    payload = json.loads(stdout)
-    assert payload["success"] is False
-    assert "content is required" in payload["error"]
+    def test_no_command_prints_help(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """引数なしは HELP_TEXT を出力する。"""
+        monkeypatch.setattr(sys, "argv", ["python"])
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            assert cli.main() == 0
+        assert "CLI Commands for mem" in stdout.getvalue()
+
+    def test_help_flag_prints_help(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--help も HELP_TEXT を出力する。"""
+        monkeypatch.setattr(sys, "argv", ["python", "--help"])
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            assert cli.main() == 0
+        assert "CLI Commands for mem" in stdout.getvalue()
+
+    def test_unknown_command_returns_2(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """未知のコマンドは exit_code=2。"""
+        _stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["nonexistent"], {})
+        assert exit_code == 2
+
+    def test_tty_stdin_is_not_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """stdin が tty なら読み取らず空 dict を返す。"""
+        monkeypatch.setattr(sys, "argv", ["python", "init"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        assert cli._parse_argv_and_stdin() == ("init", {})
+
+    @pytest.mark.parametrize("raw", ["", "   ", "[1, 2]", "{ broken"])
+    def test_unusable_stdin_yields_empty_dict(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+        """空・非 dict・不正 JSON はすべて空 dict に落とす。"""
+        monkeypatch.setattr(sys, "argv", ["python", "init"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(raw))
+        assert cli._parse_argv_and_stdin() == ("init", {})
+
+    def test_valid_stdin_is_parsed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """dict の JSON はそのまま返る。"""
+        monkeypatch.setattr(sys, "argv", ["python", "init"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO('{"cwd": "/tmp"}'))
+        assert cli._parse_argv_and_stdin() == ("init", {"cwd": "/tmp"})
+
+    def test_stdin_os_error_is_logged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """stdin の読み取りが OSError でも空 dict に落とす。"""
+        class _BrokenStdin:
+            def isatty(self) -> bool:
+                return False
+
+            def read(self) -> str:
+                raise OSError("stdin gone")
+
+        monkeypatch.setattr(sys, "argv", ["python", "init"])
+        monkeypatch.setattr(sys, "stdin", _BrokenStdin())
+        assert cli._parse_argv_and_stdin() == ("init", {})
+
+
+class TestNormalCommandFailures:
+    """SessionStart 以外のコマンドのエラー経路。"""
+
+    def test_settings_failure_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """設定ロード失敗は exit_code=1 と stderr 出力。"""
+        monkeypatch.setattr(
+            cli, "_load_settings_or_raise", lambda: (_ for _ in ()).throw(RuntimeError("設定失敗"))
+        )
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["init"], {})
+        assert exit_code == 1
+        assert "設定/ログ初期化失敗" in stderr
+
+    def test_handler_exception_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """ハンドラ例外は exit_code=1 と stderr 出力。"""
+        monkeypatch.setattr(
+            cli, "_run_normal_command", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("init failure"))
+        )
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["init"], {})
+        assert exit_code == 1
+        assert "init failure" in stderr
 
 
 def test_mem_main_module_invokes_cli_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    """python -m bluecore.mem が cli.main() を呼ぶ。"""
     monkeypatch.setattr(sys, "argv", ["python", "--help"])
     with pytest.raises(SystemExit) as excinfo:
         runpy.run_module("bluecore.mem.__main__", run_name="__main__")
 
     assert excinfo.value.code == 0
-
-
-class TestMainExitCode:
-    """main() が例外発生時に exit_code=1 を返すことを確認する。"""
-
-    def test_settings_load_failure_returns_0_for_session_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """SESSION_START コマンドで設定失敗時はフック継続のため exit_code=0 を返す（stderr 出力なし）。"""
-        monkeypatch.setattr(sys, "argv", ["python", "context"])
-        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
-        monkeypatch.setattr(
-            cli, "_load_settings_or_raise", lambda: (_ for _ in ()).throw(RuntimeError("設定失敗"))
-        )
-        stderr = io.StringIO()
-        with redirect_stderr(stderr):
-            result = cli.main()
-        assert result == 0
-        assert stderr.getvalue() == ""
-
-    def test_settings_load_failure_returns_1_for_normal_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """通常コマンドで設定失敗時は exit_code=1 を返す。"""
-        monkeypatch.setattr(sys, "argv", ["python", "search"])
-        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
-        monkeypatch.setattr(
-            cli, "_load_settings_or_raise", lambda: (_ for _ in ()).throw(RuntimeError("設定失敗"))
-        )
-        stderr = io.StringIO()
-        with redirect_stderr(stderr):
-            result = cli.main()
-        assert result == 1
-        assert "設定/ログ初期化失敗" in stderr.getvalue()
-
-    def test_command_exception_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """_run_normal_command が例外を送出すると exit_code=1 を返す。"""
-        import bluecore.mem.settings as settings_mod
-        monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
-        # "search" は _run_normal_command 経由（_SESSION_START_COMMANDS 外）
-        monkeypatch.setattr(sys, "argv", ["python", "search"])
-        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
-        monkeypatch.setattr(
-            cli, "_run_normal_command", lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("コマンド失敗"))
-        )
-        result = cli.main()
-        assert result == 1
-
-    def test_session_start_command_success_returns_0(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """SESSION_START_COMMANDS 例外でも _SESSION_START_COMMANDS 経路は exit_code=0 を維持する。"""
-        import bluecore.mem.settings as settings_mod
-        monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
-        monkeypatch.setattr(sys, "argv", ["python", "session-init"])
-        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
-        monkeypatch.setattr(
-            cli, "_run_session_start_command", lambda *_a, **_kw: ""
-        )
-        stdout = io.StringIO()
-        with redirect_stdout(stdout):
-            result = cli.main()
-        assert result == 0
-
-    def test_benign_command_exception_returns_0_without_stderr(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """BENIGN コマンド（session-init 等）のハンドラ例外時は exit_code=0 かつ stderr 出力なし。"""
-        import bluecore.mem.settings as settings_mod
-        monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
-        monkeypatch.setattr(sys, "argv", ["python", "session-init"])
-        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
-        monkeypatch.setattr(
-            cli, "_run_normal_command", lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("benign failure"))
-        )
-        stderr = io.StringIO()
-        with redirect_stderr(stderr):
-            result = cli.main()
-        assert result == 0
-        assert stderr.getvalue() == ""
-
-    def test_normal_command_exception_writes_to_stderr(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """通常コマンドのハンドラ例外時は exit_code=1 かつ stderr にメッセージを出力する。"""
-        import bluecore.mem.settings as settings_mod
-        monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
-        monkeypatch.setattr(sys, "argv", ["python", "import"])
-        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
-        monkeypatch.setattr(
-            cli, "_run_normal_command", lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("import failure"))
-        )
-        stderr = io.StringIO()
-        with redirect_stderr(stderr):
-            result = cli.main()
-        assert result == 1
-        assert "import failure" in stderr.getvalue()

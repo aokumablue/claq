@@ -1,133 +1,175 @@
-"""mem サブシステムのデータクラス定義群（database.py から分離）。"""
+"""mem サブシステムのデータクラス定義群（database.py から分離）。
+
+``repos`` / ``sessions`` / ``knowledge`` の 3 テーブルに 1 対 1 対応する
+dataclass を定義し、``sqlite3.Row`` からの復元を ``from_row`` で提供する。
+タイムスタンプはすべて TEXT ISO8601（UTC）で保持する。
+"""
 
 from __future__ import annotations
 
-import uuid
+import sqlite3
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 
-def generate_uuid() -> str:
-    """UUID v4 を生成する"""
-    return str(uuid.uuid4())
+def utc_now_iso() -> str:
+    """現在時刻を秒精度の ISO8601（UTC）文字列で返す。
+
+    Returns:
+        ``2026-08-09T12:34:56+00:00`` 形式の文字列。
+    """
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 @dataclass
-class MemoryChunk:
-    """1チャンク分のメモリ（プロンプト・ツール・ファイル・実行品質）を表す。"""
+class Repo:
+    """リポジトリ台帳 1 行。知識のスコープ境界を表す。
 
-    session_id: str
-    project: str
-    chunk_index: int
-    content: str
-    tool_names: list[str]
-    files_read: list[str]
-    files_modified: list[str]
-    created_at_epoch: int
-    id: str | None = None
-    origin_user: str = ""
+    Attributes:
+        id: 人間可読スラッグ（例 ``bluecore-dev``）。
+        identity_key: 正規化 remote URL、無ければ repo root 絶対パス。
+        root_path: 最後に観測した絶対パス。
+        remote_url: 生の remote URL（無ければ None）。
+        first_seen_at: 初回観測時刻（ISO8601）。
+        last_seen_at: 最終観測時刻（ISO8601）。
+    """
 
-    # Phase 1: コンテキスト品質向上
-    access_count: int = 0
-    last_accessed_epoch: int | None = None
+    id: str
+    identity_key: str
+    root_path: str
+    remote_url: str | None = None
+    first_seen_at: str = field(default_factory=utc_now_iso)
+    last_seen_at: str = field(default_factory=utc_now_iso)
 
-    # Phase 2: メモリ圧縮
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Repo:
+        """``repos`` の Row を Repo に変換する。
 
-    # Phase 3: 実行品質トラッキング
+        Args:
+            row: ``SELECT * FROM repos`` で得た行。
+
+        Returns:
+            復元された Repo。
+        """
+        return cls(
+            id=row["id"],
+            identity_key=row["identity_key"],
+            root_path=row["root_path"],
+            remote_url=row["remote_url"],
+            first_seen_at=row["first_seen_at"],
+            last_seen_at=row["last_seen_at"],
+        )
 
 
 @dataclass
 class Session:
-    """1セッション分のメタ情報（プロジェクト・git 状態・チャンク数）を表す。"""
+    """セッション履歴 1 行。knowledge の出所であり引き継ぎを持つ。
 
-    session_id: str
-    project: str
-    started_at_epoch: int
-    chunk_count: int = 0
-    id: str | None = None
-    origin_user: str = ""
+    Attributes:
+        session_uid: ハーネスが渡す session_id。
+        repo_id: 所属リポジトリの ``repos.id``。
+        harness: ``claude`` / ``codex`` / ``copilot`` / ``unknown``。
+        handoff: 次セッションへの引き継ぎ（人間可読の散文）。
+        started_at: 開始時刻（ISO8601）。
+        ended_at: 終了時刻（ISO8601）。未終了なら None。
+        id: 採番済みの主キー。未保存なら None。
+    """
 
-    # git 状態（セッション開始時のスナップショット）
-    ended_at_epoch: int | None = None
+    session_uid: str
+    repo_id: str
+    harness: str = "unknown"
+    handoff: str = ""
+    started_at: str = field(default_factory=utc_now_iso)
+    ended_at: str | None = None
+    id: int | None = None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Session:
+        """``sessions`` の Row を Session に変換する。
+
+        Args:
+            row: ``SELECT * FROM sessions`` で得た行。
+
+        Returns:
+            復元された Session。
+        """
+        return cls(
+            session_uid=row["session_uid"],
+            repo_id=row["repo_id"],
+            harness=row["harness"],
+            handoff=row["handoff"],
+            started_at=row["started_at"],
+            ended_at=row["ended_at"],
+            id=row["id"],
+        )
 
 
 @dataclass
-class Instinct:
-    """インスティンクトデータ"""
+class Knowledge:
+    """知識カード 1 行。1 行 = 1 つの再利用可能な言明。
 
-    instinct_id: str
+    Attributes:
+        key: kebab-case スラッグ。重複投入の防止キー。
+        scope: ``global`` または ``repo``。
+        kind: ``convention`` / ``decision`` / ``pitfall`` / ``howto`` /
+            ``fact`` / ``preference``。
+        title: 1 行。これ単体で意味が通ること。
+        source: ``agent`` / ``observer`` / ``human``。
+        repo_id: ``scope='repo'`` のとき必須、``global`` のとき None。
+        body: why / how の補足。空でよい。
+        domain: ``testing`` ``git`` ``build`` 等。任意。
+        confidence: 0.0〜1.0 の確信度。
+        status: ``active`` / ``pending`` / ``archived``。
+        source_ref: 出所の自由記述（ファイルパス等）。
+        session_id: 出所セッションの ``sessions.id``。
+        superseded_by: この行を置き換えた ``knowledge.id``。
+        created_at: 作成時刻（ISO8601）。
+        updated_at: 更新時刻（ISO8601）。
+        id: 採番済みの主キー。未保存なら None。
+    """
+
+    key: str
     scope: str
-    confidence: float
-    content: str
-    created_at_epoch: int
-    updated_at_epoch: int
-    id: str | None = None
-    origin_user: str = ""
-    project_id: str | None = None
-    trigger_text: str | None = None
-    domain: str | None = None
-
-    # 信頼度の根拠
-    observation_count: int = 0
-    confidence_reasons: list[dict] = field(default_factory=list)  # [{reason, weight}]
-    source_interaction_ids: list[str] = field(default_factory=list)  # interaction_log IDs
-    last_activated_epoch: int | None = None
-
-
-@dataclass
-class Adr:
-    """ADR データ"""
-
-    project: str
-    adr_number: int
+    kind: str
     title: str
-    status: str
-    content: str
-    created_at_epoch: int
-    updated_at_epoch: int
-    id: str | None = None
-    origin_user: str = ""
+    source: str
+    repo_id: str | None = None
+    body: str = ""
+    domain: str | None = None
+    confidence: float = 0.5
+    status: str = "active"
+    source_ref: str | None = None
+    session_id: int | None = None
+    superseded_by: int | None = None
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+    id: int | None = None
 
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Knowledge:
+        """``knowledge`` の Row を Knowledge に変換する。
 
-@dataclass
-class EventLog:
-    """汎用イベントログ"""
+        Args:
+            row: ``SELECT * FROM knowledge`` で得た行。
 
-    event_type: str
-    content: str
-    created_at_epoch: int
-    id: str | None = None
-    origin_user: str = ""
-    project_id: str | None = None
-
-
-@dataclass
-class InteractionLog:
-    """ユーザー指示と AI 応答のペア記録（スキル自動生成の原料）"""
-
-    session_id: str
-    project: str
-    user_prompt_full: str  # トランケートなし全文
-    interaction_index: int  # セッション内通し番号
-    created_at_epoch: int
-    id: str | None = None
-    origin_user: str = ""
-    user_prompt_hash: str | None = None  # SHA256先頭16文字
-
-
-@dataclass
-class SessionDigest:
-    """セッション全体の要約（トランスクリプト/チャンクから生成する短期記憶の圧縮版）"""
-
-    session_id: str
-    project: str
-    summary: str  # 最大500字要約
-    started_at_epoch: int
-    created_at_epoch: int
-    id: str | None = None
-    origin_user: str = ""
-    key_files: list[str] = field(default_factory=list)
-    key_decisions: list[str] = field(default_factory=list)
-    harness: str = "unknown"  # 'claude'|'codex'|'copilot'|'unknown'
-    source: str = "chunks"  # 'transcript+chunks'|'chunks'
-    chunk_count: int = 0
-    ended_at_epoch: int | None = None
+        Returns:
+            復元された Knowledge。
+        """
+        return cls(
+            key=row["key"],
+            scope=row["scope"],
+            kind=row["kind"],
+            title=row["title"],
+            source=row["source"],
+            repo_id=row["repo_id"],
+            body=row["body"],
+            domain=row["domain"],
+            confidence=row["confidence"],
+            status=row["status"],
+            source_ref=row["source_ref"],
+            session_id=row["session_id"],
+            superseded_by=row["superseded_by"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            id=row["id"],
+        )

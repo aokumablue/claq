@@ -80,19 +80,6 @@ class TestMemCliSetupContract:
         _assert_session_start_json(stdout)
 
 
-class TestMemCliContextContract:
-    def test_normal_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        stdout, _ = _run_cli_main(["context"], {"cwd": str(tmp_path)}, monkeypatch, tmp_path)
-        _assert_session_start_json(stdout)
-
-    def test_build_context_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        import bluecore.mem.context as context_mod
-
-        monkeypatch.setattr(context_mod, "build_context", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("ctx broken")))
-        stdout, _ = _run_cli_main(["context"], {"cwd": str(tmp_path)}, monkeypatch, tmp_path)
-        _assert_session_start_json(stdout)
-
-
 class TestSessionInstallContract:
     def test_install_sh_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
         plugin_json = tmp_path / ".claude-plugin" / "plugin.json"

@@ -18,7 +18,6 @@ from bluecore.lib.core_utils import (
     get_claude_dir,
     get_date_string,
     get_datetime_string,
-    get_git_user_name,
     get_home_dir,
     get_learned_skills_dir,
     get_session_id_short,
@@ -381,12 +380,6 @@ class TestGetGitRepoName:
         with patch("bluecore.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
             result = get_project_name()
         assert result == tmp_path.name
-
-    def test_get_git_user_name_empty_on_failure(self) -> None:
-        """git user.name が取得できない場合は空文字列を返すこと。"""
-        with patch("bluecore.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
-            assert get_git_user_name() == ""
-
 
 class TestSanitizeSessionIdEdgeCases:
     """sanitize_session_id の追加境界値テスト。"""

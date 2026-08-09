@@ -219,43 +219,6 @@ def build_summary_block(summary: dict) -> str:
     return f"{SUMMARY_START_MARKER}\n{build_summary_section(summary).strip()}\n{SUMMARY_END_MARKER}"
 
 
-def _record_stop_event(summary: dict | None, metadata: dict) -> None:
-    """Stop 時にセッションイベントを event_logs に記録（AI コンテキスト注入なし）。"""
-    try:
-        import time
-
-        from bluecore.lib.core_utils import get_git_user_name
-        from bluecore.mem.database import Database, EventLog
-        from bluecore.mem.settings import Settings
-
-        settings = Settings.load()
-        content = json.dumps(
-            {
-                "project": metadata.get("project"),
-                "branch": metadata.get("branch"),
-                "tools_used": summary.get("toolsUsed") if summary else [],
-                "files_modified": summary.get("filesModified") if summary else [],
-                "total_messages": summary.get("totalMessages") if summary else 0,
-            },
-            ensure_ascii=False,
-        )
-        event = EventLog(
-            origin_user=get_git_user_name(),
-            event_type="session_stop",
-            content=content,
-            created_at_epoch=int(time.time()),
-            project_id=metadata.get("project"),
-        )
-        db = Database(settings.db_path)
-        try:
-            db.store_event_log(event)
-        finally:
-            db.close()
-        log(f"[SessionEnd] event_log recorded: project={metadata.get('project')}")
-    except Exception as e:
-        log(f"[SessionEnd] event_log error: {e}")
-
-
 _CHECKPOINT_THRESHOLD = 30
 _CHECKPOINT_CONTEXT_MAX = 500
 
@@ -354,8 +317,6 @@ def run(raw_input: str) -> str:
     try:
         input_data = parse_json_object(raw_input)
         transcript_path = input_data.get("transcript_path") if input_data else None
-        # stop_hook_active=True はループ継続中の中間停止。session_stop 記録は本停止時のみ行う。
-        stop_hook_active = bool(input_data.get("stop_hook_active")) if input_data else False
 
         sessions_dir = get_sessions_dir()
         today = get_date_string()
@@ -373,11 +334,6 @@ def run(raw_input: str) -> str:
             _update_session_file(session_file, summary, today, current_time, session_metadata)
         else:
             _create_session_file(session_file, summary, today, current_time, session_metadata)
-
-        if not stop_hook_active:
-            _record_stop_event(summary, session_metadata)
-        else:
-            log("[SessionEnd] stop_hook_active=True (loop continuation): skip session_stop event")
 
         if summary and summary.get("totalMessages", 0) >= _CHECKPOINT_THRESHOLD:
             _auto_save_checkpoint(summary, session_metadata, sessions_dir)

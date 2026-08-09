@@ -150,18 +150,6 @@ def get_git_repo_name() -> str | None:
     return Path(result["output"]).name
 
 
-def get_git_user_name() -> str:
-    """git config の user.name を取得する。
-
-    Returns:
-        取得できれば user.name の値、未設定または失敗時は空文字列。
-    """
-    result = run_command("git config --get user.name")
-    if not result["success"]:
-        return ""
-    return result["output"].strip()
-
-
 def get_project_name() -> str | None:
     """git リポジトリまたは現在ディレクトリからプロジェクト名を取得する。"""
     repo_name = get_git_repo_name()
