@@ -9,9 +9,6 @@ from pathlib import Path
 from bluecore.lib.constants import BASE_DIR_NAME
 
 _DEFAULT_DATA_DIR = Path(os.environ["BLUECORE_DATA_PATH"]) if "BLUECORE_DATA_PATH" in os.environ else Path.home() / BASE_DIR_NAME
-_DEFAULT_EMBEDDING_MODEL = "hotchpotch/static-embedding-japanese"
-# HF Hub commit SHA をピン留めし、サプライチェーン攻撃（名前空間再利用・改竄プッシュ）を防ぐ
-_DEFAULT_EMBEDDING_REVISION = "95b3d9c80a7ccf604e2b5daee7b1b3eed6b1a9d3"
 
 # --- context 注入の予算 ---
 
@@ -54,7 +51,6 @@ class Settings:
     """
 
     log_level: str = "info"
-    embedding_model: str = _DEFAULT_EMBEDDING_MODEL
     redux: ReduxSettings = field(default_factory=ReduxSettings)
 
     # --- 導出プロパティ ---

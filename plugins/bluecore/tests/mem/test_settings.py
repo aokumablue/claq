@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from bluecore.mem.settings import _DEFAULT_EMBEDDING_MODEL, Settings
+from bluecore.mem.settings import Settings
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +25,6 @@ class TestSettingsDefaults:
     def test_default_values(self) -> None:
         s = Settings()
         assert s.log_level == "info"
-        assert s.embedding_model == _DEFAULT_EMBEDDING_MODEL
 
     def test_no_warm_settings(self) -> None:
         """warm 層設定（廃止済み）が存在しないことを確認する。"""
@@ -59,6 +58,7 @@ class TestSettingsDefaults:
             "auto_compact_enabled",
             "auto_compact_interval_days",
             "last_compacted_at",
+            "embedding_model",
         ):
             assert not hasattr(s, name), name
 

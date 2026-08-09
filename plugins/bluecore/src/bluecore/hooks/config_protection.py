@@ -61,10 +61,6 @@ PROTECTED_FILES = {
     ".markdownlint.json",
     ".markdownlint.yaml",
     ".markdownlintrc",
-    # 埋め込みモデルダウンロード設定。files の url / sha256 / ssl_no_verify が
-    # ダウンロード完全性検証の信頼アンカーのため、エージェントによる
-    # 書き換え（URL 差し替え + 偽ハッシュ + 検証無効化）をブロックする
-    "model.json",
 }
 
 

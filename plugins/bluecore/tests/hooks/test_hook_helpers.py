@@ -56,8 +56,8 @@ def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch
     assert stdout.getvalue() == ""
 
 
-def test_config_protection_blocks_model_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ダウンロード完全性の信頼アンカーである model.json の書き換えをブロックする。"""
+def test_config_protection_allows_model_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """埋め込みモデル廃止に伴い model.json は保護対象から外れている。"""
     _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": "plugins/bluecore/model.json"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
@@ -65,9 +65,9 @@ def test_config_protection_blocks_model_json(monkeypatch: pytest.MonkeyPatch) ->
     stderr = io.StringIO()
     stdout = io.StringIO()
     with redirect_stderr(stderr), redirect_stdout(stdout):
-        assert config_protection.main() == 2
+        assert config_protection.main() == 0
 
-    assert "Modifying model.json is not allowed" in stderr.getvalue()
+    assert stderr.getvalue() == ""
 
 
 def test_config_protection_allows_safe_file(monkeypatch: pytest.MonkeyPatch) -> None:
