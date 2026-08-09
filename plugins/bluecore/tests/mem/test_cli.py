@@ -13,8 +13,13 @@ import pytest
 
 from bluecore.mem import cli
 from bluecore.mem.database import Database
-from bluecore.mem.models import Knowledge, Repo
+from bluecore.mem.models import Knowledge, Repo, Session
 from bluecore.mem.repo_identity import resolve_repo
+from bluecore.mem.settings import (
+    CONTEXT_GLOBAL_CHAR_BUDGET,
+    CONTEXT_HANDOFF_CHAR_BUDGET,
+    CONTEXT_ITEM_CHAR_LIMIT,
+)
 
 
 def _run_cli(
@@ -477,11 +482,11 @@ class TestList:
 
     def test_fit_budget_keeps_everything_within_budget(self) -> None:
         """予算内なら全行そのまま返す。"""
-        assert cli._fit_budget(["a", "b"]) == ["a", "b"]
+        assert cli._fit_budget(["a", "b"], cli.LIST_CHAR_BUDGET) == ["a", "b"]
 
     def test_fit_budget_truncates_first_line(self) -> None:
         """1 行目から予算超過なら告知行だけを返す。"""
-        assert cli._fit_budget(["x" * (cli.LIST_CHAR_BUDGET + 1), "y"]) == ["… +2 件"]
+        assert cli._fit_budget(["x" * (cli.LIST_CHAR_BUDGET + 1), "y"], cli.LIST_CHAR_BUDGET) == ["… +2 件"]
 
 
 class TestShow:
@@ -599,6 +604,216 @@ class TestForget:
         with Database(tmp_path / "mem.db") as db:
             found = db.get_knowledge_by_key("old")
         assert found is not None and found.status == "active"
+
+
+class TestContext:
+    """context コマンド（SessionStart 注入経路）。"""
+
+    @staticmethod
+    def _inject(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path, payload: dict | None = None
+    ) -> str:
+        """context を実行し、注入される additionalContext を取り出す。"""
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"], payload or {})
+        assert (stderr, exit_code) == ("", 0)
+        return json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+
+    @staticmethod
+    def _seed_session(tmp_path: Path, repo_id: str, **overrides: object) -> None:
+        """sessions 行を 1 件直接投入する。"""
+        fields: dict = {
+            "session_uid": "prev-session",
+            "repo_id": repo_id,
+            "handoff": "前回の作業内容",
+            "started_at": "2026-08-09T09:00:00+00:00",
+            "ended_at": "2026-08-09T14:03:22+00:00",
+        }
+        fields.update(overrides)
+        with Database(tmp_path / "mem.db") as db:
+            db.start_session(Session(**fields))
+
+    def test_no_knowledge_injects_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """知識も引き継ぎも無ければ 1 文字も注入しない。"""
+        assert self._inject(monkeypatch, tmp_path) == ""
+
+    def test_injects_three_sections(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """共通知識・リポジトリ・前回の続きの 3 層を規定の書式で注入する。"""
+        repo_id = _repo_id(tmp_path)
+        _seed(tmp_path, key="g1", kind="convention", title="Python は python3 を使う", confidence=0.9)
+        _seed(tmp_path, key="g2", kind="pitfall", title="set -o pipefail が必須", confidence=0.8)
+        _seed(
+            tmp_path,
+            key="r1",
+            scope="repo",
+            repo_id=repo_id,
+            kind="howto",
+            title="PYTHONPATH=plugins/bluecore/src を付与",
+            body="venv の bluecore はプラグインキャッシュ側を解決するため",
+            confidence=0.7,
+        )
+        self._seed_session(tmp_path, repo_id, handoff="スキーマ確定まで完了、実装未着手。")
+
+        assert self._inject(monkeypatch, tmp_path) == (
+            "<bluecore-memory>\n"
+            "## 共通知識\n"
+            "- [convention] Python は python3 を使う\n"
+            "- [pitfall] set -o pipefail が必須\n"
+            "\n"
+            f"## {repo_id}\n"
+            "- [howto] PYTHONPATH=plugins/bluecore/src を付与 — "
+            "venv の bluecore はプラグインキャッシュ側を解決するため\n"
+            "\n"
+            "## 前回の続き (2026-08-09 14:03)\n"
+            "スキーマ確定まで完了、実装未着手。\n"
+            "</bluecore-memory>"
+        )
+
+    def test_empty_sections_are_omitted_entirely(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """global だけある場合、リポジトリ節と前回の続き節は見出しごと出さない。"""
+        _seed(tmp_path, key="g", kind="fact", title="only global")
+
+        injected = self._inject(monkeypatch, tmp_path)
+        assert injected == "<bluecore-memory>\n## 共通知識\n- [fact] only global\n</bluecore-memory>"
+
+    def test_pending_and_archived_are_not_injected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """observer の下書き（pending）と archived は注入しない。"""
+        repo_id = _repo_id(tmp_path)
+        _seed(tmp_path, key="p", title="pending card", status="pending")
+        _seed(tmp_path, key="a", title="archived card", status="archived")
+        _seed(tmp_path, key="rp", scope="repo", repo_id=repo_id, title="repo draft", status="pending")
+
+        assert self._inject(monkeypatch, tmp_path) == ""
+
+    def test_orders_by_confidence_then_updated_at(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """confidence DESC → updated_at DESC の順に並べる。"""
+        _seed(tmp_path, key="low", title="low", confidence=0.1, updated_at="2026-08-09T00:00:00+00:00")
+        _seed(tmp_path, key="old", title="old", confidence=0.9, updated_at="2026-01-01T00:00:00+00:00")
+        _seed(tmp_path, key="new", title="new", confidence=0.9, updated_at="2026-08-09T00:00:00+00:00")
+
+        injected = self._inject(monkeypatch, tmp_path)
+        assert injected.splitlines()[2:5] == ["- [fact] new", "- [fact] old", "- [fact] low"]
+
+    def test_body_is_appended_when_item_fits(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """1 件が上限に収まるなら body を ``—`` で続ける。"""
+        _seed(tmp_path, key="g", kind="fact", title="短い題", body="短い補足")
+
+        assert "- [fact] 短い題 — 短い補足" in self._inject(monkeypatch, tmp_path)
+
+    def test_oversized_body_is_dropped_keeping_title(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """1 件が上限を超えるなら body を落として title だけにする。"""
+        _seed(tmp_path, key="g", kind="fact", title="題", body="あ" * CONTEXT_ITEM_CHAR_LIMIT)
+
+        injected = self._inject(monkeypatch, tmp_path)
+        assert "- [fact] 題\n" in injected
+        assert "—" not in injected
+
+    def test_blank_body_is_not_appended(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """空白だけの body は区切りごと出さない。"""
+        _seed(tmp_path, key="g", kind="fact", title="題", body="   ")
+
+        assert "- [fact] 題\n" in self._inject(monkeypatch, tmp_path)
+
+    def test_section_is_truncated_at_char_budget(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """節の予算超過分は捨てて ``… +N 件`` を 1 行だけ添える。"""
+        for index in range(40):
+            _seed(tmp_path, key=f"k{index}", title="あ" * 100)
+
+        lines = self._inject(monkeypatch, tmp_path).splitlines()
+        assert lines[-2].startswith("… +")
+        # 見出し・タグ・envelope を除いた明細だけで予算内に収まっている
+        assert sum(len(line) + 1 for line in lines[2:-2]) <= CONTEXT_GLOBAL_CHAR_BUDGET
+
+    def test_long_handoff_is_truncated(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """引き継ぎが予算を超えたら末尾を省略記号で切る。"""
+        repo_id = _repo_id(tmp_path)
+        self._seed_session(tmp_path, repo_id, handoff="あ" * (CONTEXT_HANDOFF_CHAR_BUDGET + 50))
+
+        handoff_line = self._inject(monkeypatch, tmp_path).splitlines()[2]
+        assert len(handoff_line) == CONTEXT_HANDOFF_CHAR_BUDGET
+        assert handoff_line.endswith("…")
+
+    def test_handoff_falls_back_to_started_at(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """未終了セッションの見出しは started_at を使う。"""
+        repo_id = _repo_id(tmp_path)
+        self._seed_session(tmp_path, repo_id, ended_at=None, started_at="2026-08-09T09:30:00+00:00")
+
+        assert "## 前回の続き (2026-08-09 09:30)" in self._inject(monkeypatch, tmp_path)
+
+    def test_whitespace_only_handoff_is_skipped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """空白だけの引き継ぎは節ごと出さない。"""
+        repo_id = _repo_id(tmp_path)
+        self._seed_session(tmp_path, repo_id, handoff="   ")
+
+        assert self._inject(monkeypatch, tmp_path) == ""
+
+    def test_handoff_of_other_repo_is_not_injected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """別リポジトリの引き継ぎは混ざらない。"""
+        _repo_id(tmp_path)
+        with Database(tmp_path / "mem.db") as db:
+            db.upsert_repo(Repo(id="other", identity_key="key-other", root_path="/tmp/other"))
+        self._seed_session(tmp_path, "other", handoff="別リポジトリの続き")
+
+        assert self._inject(monkeypatch, tmp_path) == ""
+
+    def test_records_session_row(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """hook の session_id で sessions 行を作り harness を記録する。"""
+        monkeypatch.setattr(cli, "detect_harness", lambda: "claude")
+        self._inject(monkeypatch, tmp_path, {"session_id": "abc-123"})
+
+        with Database(tmp_path / "mem.db") as db:
+            row = db.conn.execute("SELECT * FROM sessions").fetchone()
+        assert row is not None
+        assert (row["session_uid"], row["harness"], row["handoff"]) == ("abc-123", "claude", "")
+        assert row["repo_id"] == _repo_id(tmp_path)
+
+    def test_missing_session_id_records_no_row(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """session_id を渡さないハーネスでは sessions 行を作らない。"""
+        self._inject(monkeypatch, tmp_path, {"cwd": str(tmp_path)})
+
+        with Database(tmp_path / "mem.db") as db:
+            assert db.conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"] == 0
+
+    def test_resolves_repo_from_hook_cwd(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """repos は stdin の cwd から解決し last_seen_at を更新する。"""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        _seed(tmp_path, key="g", title="global card")
+
+        injected = self._inject(monkeypatch, tmp_path, {"cwd": str(workdir)})
+        assert injected != ""
+        with Database(tmp_path / "mem.db") as db:
+            assert [repo.root_path for repo in db.list_repos()] == [str(workdir.resolve())]
+
+    def test_failure_is_swallowed_and_injects_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """組み立てに失敗してもフックを壊さず注入ゼロに倒す。"""
+        monkeypatch.setattr(
+            cli, "_build_context", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db broken"))
+        )
+        assert self._inject(monkeypatch, tmp_path) == ""
 
 
 def test_mem_main_module_invokes_cli_main(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,8 +1,8 @@
 """フックおよび人間・エージェントから呼び出される CLI エントリポイント。
 
-提供するのは DB の初期化（``init`` / ``setup``）と知識 CRUD
-（``learn`` / ``list`` / ``show`` / ``promote`` / ``forget``）。
-context / handoff / search は後続タスクで追加する。
+提供するのは DB の初期化（``init`` / ``setup``）、知識 CRUD
+（``learn`` / ``list`` / ``show`` / ``promote`` / ``forget``）、および
+SessionStart への知識注入（``context``）。handoff / search は後続タスクで追加する。
 
 設計原則は **出力トークンの最小化**。重い絞り込みは Python プロセス内で
 完結させ、LLM のコンテキストへ返すのは最小限のテキストだけにする:
@@ -21,21 +21,29 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from bluecore.hooks.hook_common import print_session_start_output
+from bluecore.lib.harness import detect_harness
 from bluecore.mem.database import Database
 from bluecore.mem.logger import get as _get_logger
-from bluecore.mem.models import Knowledge, utc_now_iso
+from bluecore.mem.models import Knowledge, Repo, Session, utc_now_iso
 from bluecore.mem.repo_identity import resolve_repo, slugify
-from bluecore.mem.settings import Settings
+from bluecore.mem.settings import (
+    CONTEXT_GLOBAL_CHAR_BUDGET,
+    CONTEXT_HANDOFF_CHAR_BUDGET,
+    CONTEXT_ITEM_CHAR_LIMIT,
+    CONTEXT_REPO_CHAR_BUDGET,
+    Settings,
+)
 
 log = _get_logger("CLI")
 
 # SessionStart フックで JSON 出力が必須なコマンドの集合。
 # main() のフォールバック保証とエラー時の早期 return に使用する。
-_SESSION_START_COMMANDS: frozenset[str] = frozenset({"setup"})
+_SESSION_START_COMMANDS: frozenset[str] = frozenset({"setup", "context"})
 # WAL モードの接続が残す sidecar ファイルの拡張子。
 _DB_SIDECAR_SUFFIXES: tuple[str, ...] = ("-wal", "-shm", "-journal")
 
@@ -478,11 +486,12 @@ def _find_knowledge(db: Database, key: str) -> Knowledge:
     return found
 
 
-def _fit_budget(lines: list[str]) -> list[str]:
+def _fit_budget(lines: list[str], budget: int) -> list[str]:
     """出力行を文字数予算に収め、切り捨て分を 1 行で告知する。
 
     Args:
         lines: 出力予定の行（改行を含まない）。
+        budget: 収めるべき文字数の上限（改行 1 文字分を各行に加算して数える）。
 
     Returns:
         予算内に収まる行のリスト。打ち切った場合は末尾に ``… +N 件`` を足す。
@@ -491,7 +500,7 @@ def _fit_budget(lines: list[str]) -> list[str]:
     used = 0
     for index, line in enumerate(lines):
         cost = len(line) + 1
-        if used + cost > LIST_CHAR_BUDGET:
+        if used + cost > budget:
             return [*kept, f"… +{len(lines) - index} 件"]
         kept.append(line)
         used += cost
@@ -613,7 +622,7 @@ def _handle_list(settings: Settings, args: CommandArgs) -> None:
         print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         return
 
-    for line in _fit_budget([f"- [{row.kind}] {row.title} ({row.key})" for row in rows]):
+    for line in _fit_budget([f"- [{row.kind}] {row.title} ({row.key})" for row in rows], LIST_CHAR_BUDGET):
         print(line)
 
 
@@ -692,9 +701,153 @@ def _handle_forget(settings: Settings, args: CommandArgs) -> None:
     print(f"forgot: {key}{suffix}")
 
 
+# --- SessionStart への知識注入 ---
+
+
+def _format_injected_item(row: Knowledge) -> str:
+    """知識カード 1 件を注入用の 1 行へ整形する。
+
+    既定は ``- [kind] title`` のみ。``body`` を足しても 1 行が
+    ``CONTEXT_ITEM_CHAR_LIMIT`` 文字に収まる場合だけ ``—`` で続ける。
+    長い body を抱えたカードが 1 件で節の予算を食い潰すのを防ぐ。
+
+    Args:
+        row: 注入対象の知識カード。
+
+    Returns:
+        整形済みの 1 行（改行を含まない）。
+    """
+    head = f"- [{row.kind}] {row.title}"
+    body = row.body.strip()
+    if not body:
+        return head
+    combined = f"{head} — {body}"
+    return combined if len(combined) <= CONTEXT_ITEM_CHAR_LIMIT else head
+
+
+def _knowledge_section(heading: str, rows: list[Knowledge], budget: int) -> str:
+    """知識カード群を見出し付きの 1 節へ組み立てる。
+
+    並び順は ``confidence DESC, updated_at DESC``（同値は ``id`` の新しい順）。
+    0 件なら見出しごと出さない。
+
+    Args:
+        heading: 節の見出し（``## `` は本関数が付ける）。
+        rows: 節に載せる知識カード。
+        budget: 明細行に使ってよい文字数の上限。
+
+    Returns:
+        見出しと明細からなる節の文字列。*rows* が空なら空文字列。
+    """
+    if not rows:
+        return ""
+    ordered = sorted(rows, key=lambda row: (row.confidence, row.updated_at, row.id or 0), reverse=True)
+    lines = _fit_budget([_format_injected_item(row) for row in ordered], budget)
+    return "\n".join([f"## {heading}", *lines])
+
+
+def _handoff_section(db: Database, repo_id: str) -> str:
+    """直近セッションの引き継ぎを ``前回の続き`` 節へ組み立てる。
+
+    Args:
+        db: 参照する mem データベース。
+        repo_id: 対象リポジトリの ``repos.id``。
+
+    Returns:
+        見出しと引き継ぎ本文からなる節。引き継ぎが無ければ空文字列。
+    """
+    session = db.get_latest_session(repo_id)
+    if session is None:
+        return ""
+    handoff = session.handoff.strip()
+    if not handoff:
+        return ""
+    if len(handoff) > CONTEXT_HANDOFF_CHAR_BUDGET:
+        handoff = handoff[: CONTEXT_HANDOFF_CHAR_BUDGET - 1] + "…"
+    stamp = datetime.fromisoformat(session.ended_at or session.started_at).strftime("%Y-%m-%d %H:%M")
+    return f"## 前回の続き ({stamp})\n{handoff}"
+
+
+def _record_session(db: Database, repo: Repo, payload: dict[str, Any]) -> None:
+    """ハーネスの session_id で ``sessions`` に開始行を作る。
+
+    ここが ``sessions`` 行を作る唯一の場所。SessionEnd 側の handoff 記録は
+    この行の更新になる。session_id を渡さないハーネスでは行を作らない
+    （``session_uid`` は NOT NULL UNIQUE のため空文字で埋めると衝突する）。
+
+    Args:
+        db: 書き込み先の mem データベース。
+        repo: 解決済みのリポジトリ。
+        payload: フックが stdin へ渡した JSON。
+    """
+    session_uid = str(payload.get("session_id") or "").strip()
+    if not session_uid:
+        return
+    db.start_session(Session(session_uid=session_uid, repo_id=repo.id, harness=detect_harness()))
+
+
+def _build_context(settings: Settings, args: CommandArgs) -> str:
+    """注入する ``<bluecore-memory>`` ブロックを組み立てる。
+
+    共通知識（``scope='global'``）・リポジトリ知識（``scope='repo'``）・
+    前回の引き継ぎの 3 節を、いずれも ``status='active'`` に限って集める
+    （``pending`` は observer の下書きでノイズになるため注入しない）。
+
+    Args:
+        settings: mem 設定。
+        args: コマンド引数とフックの stdin JSON。
+
+    Returns:
+        注入する文字列。3 節すべて空なら空文字列（注入をゼロにする）。
+    """
+    payload = args.stdin_data
+    with Database(settings.db_path) as db:
+        repo = resolve_repo(_optional_str(payload.get("cwd")), db)
+        _record_session(db, repo, payload)
+        sections = [
+            _knowledge_section(
+                "共通知識",
+                db.list_knowledge(scope="global", status="active"),
+                CONTEXT_GLOBAL_CHAR_BUDGET,
+            ),
+            _knowledge_section(
+                repo.id,
+                db.list_knowledge(scope="repo", repo_id=repo.id, status="active"),
+                CONTEXT_REPO_CHAR_BUDGET,
+            ),
+            _handoff_section(db, repo.id),
+        ]
+
+    body = "\n\n".join(section for section in sections if section)
+    if not body:
+        return ""
+    return f"<bluecore-memory>\n{body}\n</bluecore-memory>"
+
+
+def _handle_context(settings: Settings, args: CommandArgs) -> str:
+    """context コマンド: SessionStart へ蓄積済みの知識を注入する。
+
+    毎セッション必ず走る唯一の注入口。フックを壊さないため失敗は握り潰し、
+    注入なし（空文字列）に倒す。
+
+    Args:
+        settings: mem 設定。
+        args: コマンド引数とフックの stdin JSON。
+
+    Returns:
+        注入する追加コンテキスト。組み立てに失敗した場合は空文字列。
+    """
+    try:
+        return _build_context(settings, args)
+    except Exception as e:
+        log.warning("context 失敗: %s", e)
+        return ""
+
+
 _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "init": lambda settings, args: _handle_init(settings),
     "setup": lambda settings, args: _handle_setup(settings),
+    "context": _handle_context,
     "learn": _handle_learn,
     "list": _handle_list,
     "show": _handle_show,
@@ -712,6 +865,7 @@ Usage:
 Commands:
   init                                  Recreate the local mem database from scratch
   setup                                 Initialize the local mem database
+  context                               Emit the SessionStart knowledge injection (hook JSON on stdin)
   learn                                 Store one knowledge card read as JSON from stdin
   list [--global|--repo]                List knowledge titles (default: repo + global, active, 20)
        [--status S] [--kind K]
