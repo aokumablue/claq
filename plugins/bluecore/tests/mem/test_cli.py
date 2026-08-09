@@ -816,6 +816,102 @@ class TestContext:
         assert self._inject(monkeypatch, tmp_path) == ""
 
 
+class TestHandoff:
+    """handoff コマンド（SessionEnd 引き継ぎ記録経路）。"""
+
+    @staticmethod
+    def _run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, payload: dict) -> None:
+        """handoff を実行し、無出力・終了コード 0 であることを確かめる。"""
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["handoff"], payload)
+        assert (stdout, stderr, exit_code) == ("", "", 0)
+
+    @staticmethod
+    def _sessions(tmp_path: Path) -> list[dict]:
+        """sessions テーブルの全行を dict のリストで返す。"""
+        with Database(tmp_path / "mem.db") as db:
+            return [dict(row) for row in db.conn.execute("SELECT * FROM sessions ORDER BY id").fetchall()]
+
+    def test_updates_the_row_created_by_context(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """SessionStart が作った行に引き継ぎと終了時刻を書き込む。"""
+        _run_cli(monkeypatch, tmp_path, ["context"], {"session_id": "s1"})
+        started_at = self._sessions(tmp_path)[0]["started_at"]
+
+        self._run(monkeypatch, tmp_path, {"session_id": "s1", "handoff": "タスク5まで完了"})
+
+        rows = self._sessions(tmp_path)
+        assert len(rows) == 1
+        assert rows[0]["handoff"] == "タスク5まで完了"
+        assert rows[0]["started_at"] == started_at
+        assert rows[0]["ended_at"] is not None
+
+    def test_creates_the_row_when_session_start_never_ran(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """SessionStart 未実行でも行を新設し started_at は ended_at と同値にする。"""
+        monkeypatch.setattr(cli, "detect_harness", lambda: "codex")
+
+        self._run(monkeypatch, tmp_path, {"session_id": "orphan", "handoff": "引き継ぎ"})
+
+        rows = self._sessions(tmp_path)
+        assert len(rows) == 1
+        assert (rows[0]["session_uid"], rows[0]["harness"]) == ("orphan", "codex")
+        assert rows[0]["started_at"] == rows[0]["ended_at"]
+        assert rows[0]["repo_id"] == _repo_id(tmp_path)
+
+    def test_resolves_repo_from_hook_cwd(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """行を新設するとき repos は stdin の cwd から解決する。"""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+
+        self._run(monkeypatch, tmp_path, {"session_id": "s1", "cwd": str(workdir), "handoff": "続き"})
+
+        with Database(tmp_path / "mem.db") as db:
+            assert [repo.root_path for repo in db.list_repos()] == [str(workdir.resolve())]
+
+    def test_round_trip_feeds_the_next_context(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """context → handoff → context で ``前回の続き`` が次セッションへ渡る。"""
+        _run_cli(monkeypatch, tmp_path, ["context"], {"session_id": "s1"})
+        self._run(monkeypatch, tmp_path, {"session_id": "s1", "handoff": "タスク5まで完了"})
+
+        stdout, _, _ = _run_cli(monkeypatch, tmp_path, ["context"], {"session_id": "s2"})
+        injected = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+
+        assert "## 前回の続き (" in injected
+        assert injected.endswith("タスク5まで完了\n</bluecore-memory>")
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"handoff": "引き継ぎ"},
+            {"session_id": "   ", "handoff": "引き継ぎ"},
+            {"session_id": "s1", "handoff": "   "},
+            {"session_id": "s1"},
+        ],
+        ids=["missing-session-id", "blank-session-id", "blank-handoff", "no-material"],
+    )
+    def test_records_nothing_without_material(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, payload: dict
+    ) -> None:
+        """session_id か引き継ぎ本文が欠けていれば何も記録せず正常終了する。"""
+        self._run(monkeypatch, tmp_path, payload)
+
+        assert self._sessions(tmp_path) == []
+
+    def test_failure_is_swallowed_and_keeps_exit_code_0(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """記録に失敗してもフックを壊さず終了コード 0 を保つ。"""
+        monkeypatch.setattr(
+            cli, "_record_handoff", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db broken"))
+        )
+
+        self._run(monkeypatch, tmp_path, {"session_id": "s1", "handoff": "引き継ぎ"})
+
+
 def test_mem_main_module_invokes_cli_main(monkeypatch: pytest.MonkeyPatch) -> None:
     """python -m bluecore.mem が cli.main() を呼ぶ。"""
     monkeypatch.setattr(sys, "argv", ["python", "--help"])

@@ -1,8 +1,9 @@
 """フックおよび人間・エージェントから呼び出される CLI エントリポイント。
 
 提供するのは DB の初期化（``init`` / ``setup``）、知識 CRUD
-（``learn`` / ``list`` / ``show`` / ``promote`` / ``forget``）、および
-SessionStart への知識注入（``context``）。handoff / search は後続タスクで追加する。
+（``learn`` / ``list`` / ``show`` / ``promote`` / ``forget``）、
+SessionStart への知識注入（``context``）、および SessionEnd の引き継ぎ
+記録（``handoff``）。search は後続タスクで追加する。
 
 設計原則は **出力トークンの最小化**。重い絞り込みは Python プロセス内で
 完結させ、LLM のコンテキストへ返すのは最小限のテキストだけにする:
@@ -28,6 +29,7 @@ from typing import Any
 from bluecore.hooks.hook_common import print_session_start_output
 from bluecore.lib.harness import detect_harness
 from bluecore.mem.database import Database
+from bluecore.mem.handoff import build_handoff
 from bluecore.mem.logger import get as _get_logger
 from bluecore.mem.models import Knowledge, Repo, Session, utc_now_iso
 from bluecore.mem.repo_identity import resolve_repo, slugify
@@ -844,10 +846,70 @@ def _handle_context(settings: Settings, args: CommandArgs) -> str:
         return ""
 
 
+# --- SessionEnd の引き継ぎ記録 ---
+
+
+def _record_handoff(settings: Settings, payload: dict[str, Any]) -> None:
+    """引き継ぎ本文を組み立てて ``sessions`` へ書き込む。
+
+    既存行があれば更新し、無ければ作る（SessionStart が走らなかった
+    ハーネスでも引き継ぎは残すべきため）。行を新設する場合、開始時刻は
+    不明なので ``ended_at`` と同値にする。``session_id`` が無い場合は
+    何も書かない（``session_uid`` は NOT NULL UNIQUE で、空文字で埋めると
+    全セッションが 1 行に衝突する）。
+
+    Args:
+        settings: mem 設定。
+        payload: SessionEnd フックが stdin へ渡した JSON。
+    """
+    session_uid = str(payload.get("session_id") or "").strip()
+    if not session_uid:
+        return
+
+    handoff = build_handoff(payload)
+    if not handoff:
+        return
+
+    now = utc_now_iso()
+    with Database(settings.db_path) as db:
+        if db.finish_session(session_uid, handoff, now):
+            return
+        repo = resolve_repo(_optional_str(payload.get("cwd")), db)
+        db.start_session(
+            Session(
+                session_uid=session_uid,
+                repo_id=repo.id,
+                harness=detect_harness(),
+                handoff=handoff,
+                started_at=now,
+                ended_at=now,
+            )
+        )
+
+
+def _handle_handoff(settings: Settings, args: CommandArgs) -> None:
+    """handoff コマンド: SessionEnd の引き継ぎを ``sessions`` へ記録する。
+
+    フック経路のため失敗は握り潰して終了コード 0 を保つ。出力は無い。
+    外部 I/O はトランスクリプト走査（``TRANSCRIPT_TIMEOUT_SEC`` で打ち切り）と
+    ローカル SQLite（``sqlite3`` の既定 busy timeout 5 秒で打ち切り）のみで、
+    いずれも上限時間を持つ。
+
+    Args:
+        settings: mem 設定。
+        args: コマンド引数とフックの stdin JSON。
+    """
+    try:
+        _record_handoff(settings, args.stdin_data)
+    except Exception as e:
+        log.warning("handoff 失敗: %s", e)
+
+
 _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "init": lambda settings, args: _handle_init(settings),
     "setup": lambda settings, args: _handle_setup(settings),
     "context": _handle_context,
+    "handoff": _handle_handoff,
     "learn": _handle_learn,
     "list": _handle_list,
     "show": _handle_show,
@@ -866,6 +928,7 @@ Commands:
   init                                  Recreate the local mem database from scratch
   setup                                 Initialize the local mem database
   context                               Emit the SessionStart knowledge injection (hook JSON on stdin)
+  handoff                               Record the SessionEnd handoff (hook JSON on stdin; "handoff" key wins)
   learn                                 Store one knowledge card read as JSON from stdin
   list [--global|--repo]                List knowledge titles (default: repo + global, active, 20)
        [--status S] [--kind K]
