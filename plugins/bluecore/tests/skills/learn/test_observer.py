@@ -30,7 +30,7 @@ import pytest
 import bluecore.mem.settings as settings_mod
 from bluecore.mem.database import Database
 from bluecore.mem.knowledge_input import KnowledgeInputError
-from bluecore.mem.models import Knowledge, Repo
+from bluecore.mem.models import Knowledge
 from bluecore.skills.learn import observer
 from bluecore.skills.learn.storage import ObservationTarget
 
