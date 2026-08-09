@@ -7,6 +7,7 @@ import json
 import runpy
 import sys
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -487,6 +488,251 @@ class TestList:
     def test_fit_budget_truncates_first_line(self) -> None:
         """1 行目から予算超過なら告知行だけを返す。"""
         assert cli._fit_budget(["x" * (cli.LIST_CHAR_BUDGET + 1), "y"], cli.LIST_CHAR_BUDGET) == ["… +2 件"]
+
+
+class TestQueryTerms:
+    """検索クエリの語分解。"""
+
+    def test_splits_on_whitespace_and_lowercases(self) -> None:
+        """空白で割り、小文字化する。2 語以上なら連結語も足す。"""
+        assert cli._query_terms("Alpha BETA") == ("alpha", "beta", "alphabeta")
+
+    def test_single_term_is_used_as_is(self) -> None:
+        """空白の無い日本語クエリは、そのままクエリ全体の部分一致になる。"""
+        assert cli._query_terms("型ヒント") == ("型ヒント",)
+
+    def test_duplicate_terms_are_deduplicated(self) -> None:
+        """同じ語の重複はスコアの二重加算を避けるため畳む。"""
+        assert cli._query_terms("ab ab") == ("ab", "abab")
+
+    def test_blank_query_raises(self) -> None:
+        """空白のみのクエリは CommandError。"""
+        with pytest.raises(cli.CommandError, match="検索クエリ"):
+            cli._query_terms("   ")
+
+
+class TestScoring:
+    """検索スコアの構成要素。"""
+
+    _NOW = datetime(2026, 8, 9, tzinfo=UTC)
+
+    def _card(self, **overrides: object) -> Knowledge:
+        """採点用の Knowledge を組み立てる。"""
+        fields: dict = {
+            "key": "k",
+            "scope": "global",
+            "kind": "fact",
+            "title": "title",
+            "source": "agent",
+            "updated_at": self._NOW.isoformat(),
+        }
+        fields.update(overrides)
+        return Knowledge(**fields)
+
+    @pytest.mark.parametrize(
+        ("overrides", "expected"),
+        [
+            ({"title": "alpha"}, 3.0),
+            ({"key": "alpha"}, 1.5),
+            ({"domain": "alpha"}, 1.0),
+            ({"body": "alpha"}, 0.5),
+            ({"title": "alpha", "body": "alpha"}, 3.5),
+            ({}, 0.0),
+        ],
+    )
+    def test_match_score_weights_each_field(self, overrides: dict, expected: float) -> None:
+        """項目ごとの重みを合算する。domain が None でも落ちない。"""
+        assert cli._match_score(self._card(**overrides), ("alpha",)) == expected
+
+    def test_match_score_is_case_insensitive(self) -> None:
+        """大文字小文字を無視して部分一致する。"""
+        assert cli._match_score(self._card(title="ALPHA guide"), ("alpha",)) == 3.0
+
+    def test_match_score_accumulates_per_term(self) -> None:
+        """語ごとに加算されるので、カバーした語数が多い行ほど高くなる。"""
+        card = self._card(title="alpha beta")
+        assert cli._match_score(card, ("alpha", "beta")) == 6.0
+        assert cli._match_score(card, ("alpha",)) == 3.0
+
+    @pytest.mark.parametrize(
+        ("updated_at", "expected"),
+        [
+            ("2026-08-09T00:00:00+00:00", 1.0),
+            ("2026-11-07T00:00:00+00:00", 1.0),
+            ("2026-05-11T00:00:00+00:00", 0.75),
+        ],
+    )
+    def test_recency_factor(self, updated_at: str, expected: float) -> None:
+        """現在・未来は 1.0、90 日前は 0.75。"""
+        assert cli._recency_factor(updated_at, self._NOW) == pytest.approx(expected)
+
+    def test_recency_factor_never_reaches_floor(self) -> None:
+        """どれだけ古くても下限 0.5 を下回らない。"""
+        factor = cli._recency_factor("1990-01-01T00:00:00+00:00", self._NOW)
+        assert cli._SEARCH_MULTIPLIER_FLOOR < factor < 0.51
+
+    def test_score_is_zero_without_any_hit(self) -> None:
+        """1 語も当たらなければ 0.0。"""
+        assert cli._score_knowledge(self._card(), ("alpha",), self._NOW) == 0.0
+
+    def test_score_multiplies_confidence(self) -> None:
+        """confidence は 0.5〜1.0 の係数として掛かる。"""
+        low = cli._score_knowledge(self._card(title="alpha", confidence=0.0), ("alpha",), self._NOW)
+        high = cli._score_knowledge(self._card(title="alpha", confidence=1.0), ("alpha",), self._NOW)
+        assert (low, high) == (pytest.approx(1.5), pytest.approx(3.0))
+
+    def test_matched_row_always_scores_positive(self) -> None:
+        """confidence=0.0 でも一致した行は正のスコアを持つ（除外されない）。"""
+        card = self._card(body="alpha", confidence=0.0, updated_at="1990-01-01T00:00:00+00:00")
+        assert cli._score_knowledge(card, ("alpha",), self._NOW) > 0.0
+
+
+class TestSearch:
+    """search コマンド。"""
+
+    def test_no_hit_prints_nothing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """ヒット 0 件なら 1 文字も出力しない。"""
+        _seed(tmp_path, key="g", title="global card")
+
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["search", "nomatch"])
+        assert (stdout, stderr, exit_code) == ("", "", 0)
+
+    def test_blank_query_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """クエリ無しは stderr 1 行と exit_code=1。"""
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["search"])
+        assert (stdout, exit_code) == ("", 1)
+        assert "検索クエリ" in stderr
+
+    def test_matches_body_but_never_prints_it(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """body はスコア計算にだけ使い、出力には出さない。"""
+        _seed(tmp_path, key="g", kind="pitfall", title="short title", body="SECRET alpha detail")
+
+        stdout, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha"])
+        assert stdout == "- [pitfall] short title (g)\n"
+
+    def test_long_body_does_not_grow_output(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """body の長さは出力バイト数に影響しない。"""
+        _seed(tmp_path, key="g", title="short title", body="alpha " + "x" * 20000)
+        long_body_output, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha"])
+
+        with Database(tmp_path / "mem.db") as db:
+            card = db.get_knowledge_by_key("g")
+            card.body = "alpha"
+            db.upsert_knowledge(card)
+        short_body_output, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha"])
+
+        assert long_body_output == short_body_output
+
+    def test_title_outranks_body(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """title ヒットは body ヒットより上位。"""
+        _seed(tmp_path, key="b", title="unrelated", body="alpha")
+        _seed(tmp_path, key="t", title="alpha guide")
+
+        stdout, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha"])
+        assert stdout.splitlines() == ["- [fact] alpha guide (t)", "- [fact] unrelated (b)"]
+
+    def test_excludes_rows_without_any_hit(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """1 語も当たらない知識は結果に出さない。"""
+        _seed(tmp_path, key="hit", title="alpha guide")
+        _seed(tmp_path, key="miss", title="beta guide")
+
+        stdout, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha"])
+        assert stdout == "- [fact] alpha guide (hit)\n"
+
+    def test_japanese_query_without_spaces(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """空白の無い日本語クエリはクエリ全体の部分一致で拾う。"""
+        _seed(tmp_path, key="j", kind="convention", title="カバレッジは 100% を維持する")
+
+        stdout, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "カバレッジ"])
+        assert stdout == "- [convention] カバレッジは 100% を維持する (j)\n"
+
+    def test_japanese_spaced_query_matches_unspaced_text(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """利用者が入れた空白は連結語のフォールバックで吸収する。"""
+        _seed(tmp_path, key="j", kind="howto", title="型ヒントを付ける")
+
+        stdout, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "型", "ヒント"])
+        assert stdout == "- [howto] 型ヒントを付ける (j)\n"
+
+    def test_matches_domain_and_key(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """domain と key も検索対象。"""
+        _seed(tmp_path, key="alpha-slug", title="one")
+        _seed(tmp_path, key="two", title="two", domain="alpha")
+
+        stdout, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha"])
+        assert sorted(stdout.splitlines()) == ["- [fact] one (alpha-slug)", "- [fact] two (two)"]
+
+    def test_default_limit_is_5(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """既定は 5 件で打ち切る。"""
+        for index in range(8):
+            _seed(tmp_path, key=f"k{index}", title=f"alpha {index}")
+
+        stdout, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha"])
+        assert len(stdout.splitlines()) == cli.SEARCH_DEFAULT_LIMIT
+
+    def test_limit_option_overrides_default(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """--limit は既定件数を上書きする。"""
+        for index in range(8):
+            _seed(tmp_path, key=f"k{index}", title=f"alpha {index}")
+
+        stdout, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha", "--limit", "2"])
+        assert len(stdout.splitlines()) == 2
+
+    def test_kind_and_status_filters(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """--kind と --status は list と同じ意味で効く。"""
+        _seed(tmp_path, key="a", kind="fact", title="alpha fact")
+        _seed(tmp_path, key="b", kind="howto", title="alpha howto")
+        _seed(tmp_path, key="c", kind="fact", title="alpha pending", status="pending")
+
+        by_kind, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha", "--kind", "howto"])
+        by_status, _stderr, _exit = _run_cli(
+            monkeypatch, tmp_path, ["search", "alpha", "--status", "pending"]
+        )
+        assert by_kind == "- [howto] alpha howto (b)\n"
+        assert by_status == "- [fact] alpha pending (c)\n"
+
+    def test_scope_flags(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """--global / --repo でスコープを片方に絞る。"""
+        repo_id = _repo_id(tmp_path)
+        _seed(tmp_path, key="g", title="alpha global")
+        _seed(tmp_path, key="r", scope="repo", repo_id=repo_id, title="alpha repo")
+
+        only_global, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha", "--global"])
+        only_repo, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha", "--repo"])
+        assert only_global == "- [fact] alpha global (g)\n"
+        assert only_repo == "- [fact] alpha repo (r)\n"
+
+    def test_json_flag_emits_single_line(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """--json は body を含まない 1 行 JSON を出す。"""
+        _seed(tmp_path, key="g", title="alpha card", body="LONG BODY alpha")
+
+        stdout, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "alpha", "--json"])
+        assert json.loads(stdout) == [
+            {"key": "g", "scope": "global", "kind": "fact", "title": "alpha card"}
+        ]
+
+    def test_output_is_truncated_at_char_budget(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """予算超過分は捨てて ``… +N 件`` の 1 行だけ添える。"""
+        for index in range(cli.SEARCH_DEFAULT_LIMIT):
+            _seed(tmp_path, key=f"k{index}", title="共通" + "あ" * 200)
+
+        stdout, _stderr, _exit = _run_cli(monkeypatch, tmp_path, ["search", "共通"])
+        lines = stdout.splitlines()
+        assert lines[-1].startswith("… +")
+        assert len(stdout) <= cli.SEARCH_CHAR_BUDGET + len(lines[-1]) + 1
 
 
 class TestShow:

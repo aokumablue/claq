@@ -1,17 +1,23 @@
 """フックおよび人間・エージェントから呼び出される CLI エントリポイント。
 
 提供するのは DB の初期化（``init`` / ``setup``）、知識 CRUD
-（``learn`` / ``list`` / ``show`` / ``promote`` / ``forget``）、
-SessionStart への知識注入（``context``）、および SessionEnd の引き継ぎ
-記録（``handoff``）。search は後続タスクで追加する。
+（``learn`` / ``list`` / ``show`` / ``promote`` / ``forget``）、全文検索
+（``search``）、SessionStart への知識注入（``context``）、および SessionEnd の
+引き継ぎ記録（``handoff``）。
 
 設計原則は **出力トークンの最小化**。重い絞り込みは Python プロセス内で
 完結させ、LLM のコンテキストへ返すのは最小限のテキストだけにする:
 
-* ``body`` を返すのは ``show`` のみ。``list`` は ``title`` だけを 1 件 1 行で出す。
-* ``list`` の既定件数は 20 件、出力は ``LIST_CHAR_BUDGET`` 文字で打ち切る。
+* ``body`` を返すのは ``show`` のみ。``list`` / ``search`` は ``title`` だけを
+  1 件 1 行で出す。``body`` は ``search`` のスコア計算にしか使わない。
+* ``list`` の既定件数は 20 件、``search`` は 5 件。出力はそれぞれ
+  ``LIST_CHAR_BUDGET`` / ``SEARCH_CHAR_BUDGET`` 文字で打ち切る。
 * 0 件なら何も出力しない（「見つかりません」も出さない）。
 * 既定出力は素のテキスト。``--json`` は機械処理用のオプトインに留める。
+
+``search`` は転置インデックスも仮想テーブルも持たない。知識カードは数百件
+オーダーに収まるため、全件を ``list_knowledge`` でロードして Python 側で
+スコアリングするほうが安く、DB も肥大しない。
 """
 
 from __future__ import annotations
@@ -22,7 +28,7 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +71,38 @@ LIST_DEFAULT_LIMIT = 20
 LIST_CHAR_BUDGET = 1400
 """``list`` の出力予算（文字数）。400 トークン相当で打ち切る。"""
 
+SEARCH_DEFAULT_LIMIT = 5
+"""``search`` の既定表示件数。上位だけ返し、詳細は ``show`` に任せる。"""
+
+SEARCH_CHAR_BUDGET = 700
+"""``search`` の出力予算（文字数）。200 トークン相当で打ち切る。"""
+
+_SEARCH_FIELD_WEIGHTS: tuple[tuple[str, float], ...] = (
+    ("title", 3.0),
+    ("key", 1.5),
+    ("domain", 1.0),
+    ("body", 0.5),
+)
+"""検索語がどの項目に当たったかの重み。
+
+``title`` は人が書いた 1 行要約で、語が出るならそれが主題そのものなので最重量。
+``key`` は title 由来のスラッグで意味は同じだが機械生成で語が落ちるため半減。
+``domain`` は分類語で、当たれば主題を示すが粒度が粗い。``body`` は長文ゆえに
+無関係な語が偶然含まれる確率が高く、``title`` の 1/6 まで下げる。
+"""
+
+_SEARCH_RECENCY_SCALE_DAYS = 90.0
+"""新しさ係数の減衰スケール（日）。この日数で係数が 1.0 → 0.75 に落ちる。"""
+
+_SEARCH_MULTIPLIER_FLOOR = 0.5
+"""confidence / 新しさ係数の下限。
+
+どちらも下限 0.5・上限 1.0 に収めるため、両方が最悪でもスコアは 1/4 までしか
+下がらない。``title`` ヒット（3.0）が ``body`` ヒット（0.5）を下回ることはなく、
+確度と鮮度は僅差の順位を決める補正に留まる。confidence=0.0 のカードが
+スコア 0 に潰れて「ヒットしなかった」扱いになるのも防ぐ。
+"""
+
 _ASCII_ALNUM_RE = re.compile(r"[A-Za-z0-9]")
 _KEY_HASH_LENGTH = 8
 
@@ -94,6 +132,9 @@ class CommandArgs:
 
 
 _CommandHandler = Callable[[Settings, CommandArgs], str | None]
+
+_Ranker = Callable[[Knowledge], float]
+"""知識カード 1 件に検索スコアを与える関数。0.0 は「ヒットなし」を意味する。"""
 
 
 def _parse_options(argv: list[str]) -> CommandArgs:
@@ -405,11 +446,12 @@ def _coerce_confidence(value: Any) -> float:
     return confidence
 
 
-def _coerce_limit(value: str | None) -> int:
+def _coerce_limit(value: str | None, default: int) -> int:
     """``--limit`` の値を正の整数へ変換する。
 
     Args:
-        value: コマンドラインで渡された文字列。None なら既定件数。
+        value: コマンドラインで渡された文字列。None なら *default* を返す。
+        default: ``--limit`` 未指定時の件数。
 
     Returns:
         表示件数の上限。
@@ -418,7 +460,7 @@ def _coerce_limit(value: str | None) -> int:
         CommandError: 整数に変換できない、または 1 未満の場合。
     """
     if value is None:
-        return LIST_DEFAULT_LIMIT
+        return default
     try:
         limit = int(value)
     except ValueError as e:
@@ -562,8 +604,14 @@ def _handle_learn(settings: Settings, args: CommandArgs) -> None:
     print(f"learned: {key}")
 
 
-def _collect_list_rows(settings: Settings, args: CommandArgs) -> list[Knowledge]:
-    """list コマンドの対象行を DB から集めて整列する。
+def _collect_list_rows(
+    settings: Settings,
+    args: CommandArgs,
+    *,
+    default_limit: int = LIST_DEFAULT_LIMIT,
+    rank: _Ranker | None = None,
+) -> list[Knowledge]:
+    """``list`` / ``search`` の対象行を DB から集めて整列する。
 
     既定は cwd の repo スコープと global スコープの両方。``--global`` /
     ``--repo`` でどちらか一方に絞る。
@@ -571,9 +619,13 @@ def _collect_list_rows(settings: Settings, args: CommandArgs) -> list[Knowledge]
     Args:
         settings: mem 設定。
         args: コマンド引数。
+        default_limit: ``--limit`` 未指定時の件数。
+        rank: 各行のスコアを返す関数。None なら更新の新しい順に並べる。
+            指定した場合はスコアの高い順（同点は更新の新しい順）に並べ、
+            スコアが 0 以下の行は落とす。
 
     Returns:
-        更新の新しい順に並べ、``--limit`` 件で切った Knowledge のリスト。
+        整列して ``--limit`` 件で切った Knowledge のリスト。
 
     Raises:
         CommandError: スコープ指定が矛盾する、または列挙値・件数が不正な場合。
@@ -587,7 +639,7 @@ def _collect_list_rows(settings: Settings, args: CommandArgs) -> list[Knowledge]
     kind = args.values.get("--kind")
     if kind is not None:
         _validate_choice("kind", kind, _KINDS)
-    limit = _coerce_limit(args.values.get("--limit"))
+    limit = _coerce_limit(args.values.get("--limit"), default_limit)
 
     rows: list[Knowledge] = []
     with Database(settings.db_path) as db:
@@ -599,8 +651,39 @@ def _collect_list_rows(settings: Settings, args: CommandArgs) -> list[Knowledge]
 
     if kind is not None:
         rows = [row for row in rows if row.kind == kind]
-    rows.sort(key=lambda row: (row.updated_at, row.id or 0), reverse=True)
-    return rows[:limit]
+    if rank is None:
+        rows.sort(key=lambda row: (row.updated_at, row.id or 0), reverse=True)
+        return rows[:limit]
+
+    hits = [(rank(row), row) for row in rows]
+    hits = [hit for hit in hits if hit[0] > 0.0]
+    hits.sort(key=lambda hit: (hit[0], hit[1].updated_at, hit[1].id or 0), reverse=True)
+    return [row for _score, row in hits[:limit]]
+
+
+def _emit_rows(rows: list[Knowledge], args: CommandArgs, budget: int) -> None:
+    """知識カード群を 1 件 1 行で出力する。
+
+    ``body`` は決して出さない。0 件なら 1 文字も出さない（「見つかりません」も
+    出さず、エージェントの空振りコストを 0 トークンに落とす）。
+
+    Args:
+        rows: 出力する知識カード。
+        args: コマンド引数。``--json`` の有無だけを見る。
+        budget: 素テキスト出力に使ってよい文字数の上限。
+    """
+    if not rows:
+        return
+
+    if "--json" in args.flags:
+        payload = [
+            {"key": row.key, "scope": row.scope, "kind": row.kind, "title": row.title} for row in rows
+        ]
+        print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        return
+
+    for line in _fit_budget([f"- [{row.kind}] {row.title} ({row.key})" for row in rows], budget):
+        print(line)
 
 
 def _handle_list(settings: Settings, args: CommandArgs) -> None:
@@ -613,19 +696,119 @@ def _handle_list(settings: Settings, args: CommandArgs) -> None:
         settings: mem 設定。
         args: コマンド引数。
     """
-    rows = _collect_list_rows(settings, args)
-    if not rows:
-        return
+    _emit_rows(_collect_list_rows(settings, args), args, LIST_CHAR_BUDGET)
 
-    if "--json" in args.flags:
-        payload = [
-            {"key": row.key, "scope": row.scope, "kind": row.kind, "title": row.title} for row in rows
-        ]
-        print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
-        return
 
-    for line in _fit_budget([f"- [{row.kind}] {row.title} ({row.key})" for row in rows], LIST_CHAR_BUDGET):
-        print(line)
+def _query_terms(query: str) -> tuple[str, ...]:
+    """検索クエリを小文字の検索語へ分解する。
+
+    空白区切りの語を返す。語が 2 つ以上に割れた場合は、空白を取り除いた
+    クエリ全体も検索語として足す。日本語のように空白で語が割れない言語では
+    split が 1 語（= クエリ全体）を返すため、そのままクエリ全体の部分一致に
+    なり、``型 ヒント`` のように利用者が空白を入れたクエリでも本文の
+    ``型ヒント`` を拾える。
+
+    Args:
+        query: 利用者が渡したクエリ文字列。
+
+    Returns:
+        重複を除いた検索語のタプル。
+
+    Raises:
+        CommandError: 空白のみで検索語が 1 つも取れない場合。
+    """
+    terms = [term.lower() for term in query.split()]
+    if not terms:
+        raise CommandError("search: 検索クエリを指定してください")
+    if len(terms) > 1:
+        terms.append("".join(terms))
+    return tuple(dict.fromkeys(terms))
+
+
+def _match_score(row: Knowledge, terms: tuple[str, ...]) -> float:
+    """検索語が知識カードのどの項目に当たったかを重み付きで合算する。
+
+    項目ごとの重みは ``_SEARCH_FIELD_WEIGHTS``。1 語が複数項目に当たれば
+    その分だけ加算し、語ごとの合算で「何語をカバーしたか」も自然に効く。
+
+    Args:
+        row: 採点対象の知識カード。
+        terms: 小文字化済みの検索語。
+
+    Returns:
+        一致の重み合計。1 語も当たらなければ 0.0。
+    """
+    haystacks = {
+        "title": row.title.lower(),
+        "key": row.key.lower(),
+        "domain": (row.domain or "").lower(),
+        "body": row.body.lower(),
+    }
+    return sum(
+        weight for term in terms for field_name, weight in _SEARCH_FIELD_WEIGHTS if term in haystacks[field_name]
+    )
+
+
+def _recency_factor(updated_at: str, now: datetime) -> float:
+    """更新時刻の新しさを ``_SEARCH_MULTIPLIER_FLOOR``〜1.0 の係数へ写す。
+
+    Args:
+        updated_at: 知識カードの ISO8601 更新時刻。
+        now: 現在時刻（tz-aware）。
+
+    Returns:
+        新しいほど 1.0 に近く、古いほど下限へ漸近する係数。
+    """
+    age_days = max((now - datetime.fromisoformat(updated_at)).total_seconds(), 0.0) / 86400.0
+    decay = 1.0 / (1.0 + age_days / _SEARCH_RECENCY_SCALE_DAYS)
+    return _SEARCH_MULTIPLIER_FLOOR + (1.0 - _SEARCH_MULTIPLIER_FLOOR) * decay
+
+
+def _score_knowledge(row: Knowledge, terms: tuple[str, ...], now: datetime) -> float:
+    """知識カード 1 件の検索スコアを返す。
+
+    一致の重み合計に、確度と新しさの係数（いずれも下限
+    ``_SEARCH_MULTIPLIER_FLOOR``・上限 1.0）を掛ける。係数に下限があるので、
+    一度でも一致した行のスコアは必ず正になり「ヒットなし」と混ざらない。
+
+    Args:
+        row: 採点対象の知識カード。
+        terms: 小文字化済みの検索語。
+        now: 現在時刻（tz-aware）。
+
+    Returns:
+        検索スコア。1 語も当たらなければ 0.0。
+    """
+    matched = _match_score(row, terms)
+    if matched == 0.0:
+        return 0.0
+    confidence = _SEARCH_MULTIPLIER_FLOOR + (1.0 - _SEARCH_MULTIPLIER_FLOOR) * row.confidence
+    return matched * confidence * _recency_factor(row.updated_at, now)
+
+
+def _handle_search(settings: Settings, args: CommandArgs) -> None:
+    """search コマンド: クエリに一致する知識カードを 1 件 1 行で出す。
+
+    全件を DB からロードして Python 側で採点する（インデックスは持たない）。
+    ``body`` はスコア計算にだけ使い、出力には一切出さない。本文を読みたい
+    場合は上位の key を 1 件だけ ``show`` に渡す二段構えにする。
+
+    Args:
+        settings: mem 設定。
+        args: コマンド引数。位置引数の連結が検索クエリ。
+
+    Raises:
+        CommandError: 検索クエリが空、またはオプション値が不正な場合。
+    """
+    terms = _query_terms(" ".join(args.positionals))
+    now = datetime.now(UTC)
+    rows = _collect_list_rows(
+        settings,
+        args,
+        default_limit=SEARCH_DEFAULT_LIMIT,
+        rank=lambda row: _score_knowledge(row, terms, now),
+    )
+    _emit_rows(rows, args, SEARCH_CHAR_BUDGET)
 
 
 def _handle_show(settings: Settings, args: CommandArgs) -> None:
@@ -912,6 +1095,7 @@ _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "handoff": _handle_handoff,
     "learn": _handle_learn,
     "list": _handle_list,
+    "search": _handle_search,
     "show": _handle_show,
     "promote": _handle_promote,
     "forget": _handle_forget,
@@ -933,6 +1117,9 @@ Commands:
   list [--global|--repo]                List knowledge titles (default: repo + global, active, 20)
        [--status S] [--kind K]
        [--limit N] [--json]
+  search <query> [--global|--repo]      Rank knowledge titles by relevance (default: repo + global, active, 5)
+         [--status S] [--kind K]        Scores title/key/domain/body but never prints body
+         [--limit N] [--json]
   show <key>                            Show one knowledge card including its body
   promote <key>                         Flip a pending knowledge card to active
   forget <key> [--superseded-by KEY]    Archive a knowledge card

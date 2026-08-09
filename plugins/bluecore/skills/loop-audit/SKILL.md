@@ -25,18 +25,21 @@ loop-dev の実行履歴（checkpoint 反復履歴 + git log）を全件走査�
 
 ### 二次（近似 — 補助のみ）
 
-mem `search-structured`（`tool_name=loop-dev` フィルタ）。record フォーマットは `../loop-dev/SKILL.md` の永続メモリ節を参照。**CLI は結果件数に上限があり event_type の全件列挙ができないため近似**。一次源との件数乖離は「近似による欠落」として扱い、指標の母数には使わない（Flake 数など一次源にないフィールドの補完に限る）。
+mem `search`（クエリ `loop-dev converge`）。record フォーマットは `../loop-dev/SKILL.md` の永続メモリ節を参照。**`search` は関連度の上位 `--limit` 件しか返さず全件列挙ができないため近似**。一次源との件数乖離は「近似による欠落」として扱い、指標の母数には使わない（Flake 数など一次源にないフィールドの補完に限る）。
+
+`search` が返すのは 1 件 1 行の `- [kind] title (key)` だけで body は含まない（0 件ならそもそも無出力）。本文が要るカードだけ key を 1 件ずつ `show` に渡す。
 
 実行コマンド（環境で切り替え）:
 
 ```bash
 # 開発リポジトリ（bluecore-dev 直下）
-echo '{"query":"loop-dev converge","tool_name":"loop-dev"}' | \
-  PYTHONPATH=plugins/bluecore/src python3 -m bluecore.mem.cli search-structured
+PYTHONPATH=plugins/bluecore/src python3 -m bluecore.mem.cli search "loop-dev converge" --limit 20
 
 # 配布ランタイム（~/.bluecore/.venv 有効化済み）
-echo '{"query":"loop-dev converge","tool_name":"loop-dev"}' | \
-  python3 -m bluecore.mem.cli search-structured
+python3 -m bluecore.mem.cli search "loop-dev converge" --limit 20
+
+# 本文が要るカードだけ 1 件ずつ
+python3 -m bluecore.mem.cli show <key>
 ```
 
 ## 指標
