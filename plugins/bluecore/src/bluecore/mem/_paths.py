@@ -12,19 +12,6 @@ from pathlib import Path
 _CHUNK = 4 * 1024 * 1024  # 4 MB 読み取りバッファ
 
 
-def safe_join(base: Path, name: str) -> Path:
-    """name を base に結合し、base 配下に収まることを検証する（パストラバーサル防止）。
-
-    エラーメッセージは repr(name) で制御文字混入を可視化する。
-    Python 3.12+ の Path.is_relative_to を使用（install.sh で確保済み）。
-    """
-    resolved = (base / name).resolve()
-    base_resolved = base.resolve()
-    if resolved != base_resolved and not resolved.is_relative_to(base_resolved):
-        raise ValueError(f"不正なパス: {repr(name)} は許可されたディレクトリ外を指しています")
-    return resolved
-
-
 def validate_sha256_format(value: str, label: str) -> None:
     """SHA256 文字列が 64 文字の16進数であることを検証する。
 

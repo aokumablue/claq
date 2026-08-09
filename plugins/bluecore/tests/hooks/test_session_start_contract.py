@@ -53,10 +53,10 @@ class TestMemCliContextContract:
         stdout, _ = _run_cli_main(["context"], {}, monkeypatch, tmp_path)
         _assert_session_start_json(stdout)
 
-    def test_settings_load_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        import bluecore.mem.settings as settings_mod
+    def test_settings_init_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
+        from bluecore.mem import cli as cli_mod
 
-        monkeypatch.setattr(settings_mod.Settings, "load", classmethod(lambda cls: (_ for _ in ()).throw(RuntimeError("settings broken"))))
+        monkeypatch.setattr(cli_mod, "Settings", lambda: (_ for _ in ()).throw(RuntimeError("settings broken")))
         monkeypatch.setattr(sys, "argv", ["python", "context"])
         monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
 

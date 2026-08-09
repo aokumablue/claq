@@ -103,18 +103,6 @@ class Database:
         self.conn.commit()
         return Repo.from_row(row)
 
-    def get_repo(self, repo_id: str) -> Repo | None:
-        """``repos.id`` でリポジトリを取得する。
-
-        Args:
-            repo_id: 人間可読スラッグ。
-
-        Returns:
-            該当する Repo。存在しなければ None。
-        """
-        row = self.conn.execute("SELECT * FROM repos WHERE id = ?", (repo_id,)).fetchone()
-        return Repo.from_row(row) if row else None
-
     def list_repos(self) -> list[Repo]:
         """登録済みリポジトリを最終観測の新しい順に返す。
 

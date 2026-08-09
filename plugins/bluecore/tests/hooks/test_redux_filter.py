@@ -109,8 +109,7 @@ class TestEvaluate:
         hook.evaluate(payload, config=ReduxConfig(), engine=engine)  # type: ignore[arg-type]
         assert len(engine.command) == hook._MAX_COMMAND_LEN
 
-    def test_config_none_loads_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(Settings, "load", classmethod(lambda cls: Settings()))
+    def test_config_none_loads_settings(self) -> None:
         body = "\n".join(f"row {i}" for i in range(50))
         payload = _payload(stdout=body)
         result = hook.evaluate(payload, engine=_engine(limit=1))
@@ -127,16 +126,16 @@ class TestLoadConfig:
     def test_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         settings = Settings()
         settings.redux = ReduxSettings(enabled=False, max_output_len=123)
-        monkeypatch.setattr(Settings, "load", classmethod(lambda cls: settings))
+        monkeypatch.setattr(hook, "Settings", lambda: settings)
         cfg = hook._load_config()
         assert cfg.enabled is False
         assert cfg.max_output_len == 123
 
     def test_failure_returns_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def _boom(cls: type[Settings]) -> Settings:
-            raise RuntimeError("load failed")
+        def _boom() -> Settings:
+            raise RuntimeError("settings failed")
 
-        monkeypatch.setattr(Settings, "load", classmethod(_boom))
+        monkeypatch.setattr(hook, "Settings", _boom)
         cfg = hook._load_config()
         assert cfg == ReduxConfig()
 

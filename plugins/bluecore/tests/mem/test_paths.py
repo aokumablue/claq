@@ -6,51 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from bluecore.mem._paths import safe_join, sha256_file, validate_sha256_format
-
-
-class TestSafeJoin:
-    """safe_join のテスト。"""
-
-    def test_normal(self, tmp_path: Path) -> None:
-        """通常のファイル名は base 配下のパスを返す。"""
-        result = safe_join(tmp_path, "file.txt")
-        assert result == (tmp_path / "file.txt").resolve()
-
-    def test_dot_dot_rejected(self, tmp_path: Path) -> None:
-        """.. を含む名前はエラー。"""
-        with pytest.raises(ValueError, match="不正なパス"):
-            safe_join(tmp_path, "../outside.txt")
-
-    def test_absolute_path_rejected(self, tmp_path: Path) -> None:
-        """絶対パスはエラー。"""
-        with pytest.raises(ValueError, match="不正なパス"):
-            safe_join(tmp_path, "/etc/passwd")
-
-    def test_symlink_resolved(self, tmp_path: Path) -> None:
-        """シンボリックリンクが base 内を指す場合は OK。"""
-        real_file = tmp_path / "real.txt"
-        real_file.write_text("hello")
-        link = tmp_path / "link.txt"
-        link.symlink_to(real_file)
-        result = safe_join(tmp_path, "link.txt")
-        assert result == real_file.resolve()
-
-    def test_symlink_outside_rejected(self, tmp_path: Path) -> None:
-        """シンボリックリンクが base 外を指す場合はエラー。"""
-        outside = tmp_path.parent / "outside.txt"
-        outside.write_text("outside")
-        link = tmp_path / "evil_link.txt"
-        link.symlink_to(outside)
-        with pytest.raises(ValueError, match="不正なパス"):
-            safe_join(tmp_path, "evil_link.txt")
-
-    def test_repr_used_in_error_message(self, tmp_path: Path) -> None:
-        """エラーメッセージに repr(name) が使われる（制御文字の可視化）。"""
-        name = "../evil\ttab"
-        with pytest.raises(ValueError) as exc_info:
-            safe_join(tmp_path, name)
-        assert repr(name) in str(exc_info.value)
+from bluecore.mem._paths import sha256_file, validate_sha256_format
 
 
 class TestValidateSha256Format:

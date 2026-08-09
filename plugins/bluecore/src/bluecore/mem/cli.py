@@ -220,14 +220,14 @@ def _load_settings_or_raise() -> Settings:
     """Settings と logger を初期化して返す。
 
     Returns:
-        ロード済みの Settings。
+        初期化済みの Settings。
 
     Raises:
-        Exception: Settings のロードまたは logger 初期化に失敗した場合。
+        Exception: logger 初期化に失敗した場合。
     """
     import bluecore.mem.logger as _logger_mod
 
-    settings = Settings.load()
+    settings = Settings()
     _logger_mod.setup(settings.log_dir, settings.log_level)
     return settings
 

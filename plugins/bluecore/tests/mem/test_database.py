@@ -171,17 +171,6 @@ class TestRepos:
         assert stored.last_seen_at == "2026-06-01T00:00:00+00:00"
         assert len(db.list_repos()) == 1
 
-    def test_get_repo_returns_none_when_missing(self, db: Database) -> None:
-        """未登録の id では None を返す。"""
-        assert db.get_repo("unknown") is None
-
-    def test_get_repo_returns_repo(self, db: Database) -> None:
-        """登録済みの id では Repo を返す。"""
-        db.upsert_repo(_repo())
-        found = db.get_repo("bluecore-dev")
-        assert found is not None
-        assert found.root_path == "/Users/x/dev/bluecore-dev"
-
     def test_list_repos_orders_by_last_seen_desc(self, db: Database) -> None:
         """最終観測の新しい順に返す。"""
         db.upsert_repo(_repo("old", "key-old"))
