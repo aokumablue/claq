@@ -22,9 +22,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -36,9 +34,17 @@ from bluecore.hooks.hook_common import print_session_start_output
 from bluecore.lib.harness import detect_harness
 from bluecore.mem.database import Database
 from bluecore.mem.handoff import build_handoff
+from bluecore.mem.knowledge_input import (
+    KINDS,
+    STATUSES,
+    KnowledgeInputError,
+    optional_str,
+    parse_knowledge_payload,
+    validate_choice,
+)
 from bluecore.mem.logger import get as _get_logger
 from bluecore.mem.models import Knowledge, Repo, Session, utc_now_iso
-from bluecore.mem.repo_identity import resolve_repo, slugify
+from bluecore.mem.repo_identity import resolve_repo
 from bluecore.mem.settings import (
     CONTEXT_GLOBAL_CHAR_BUDGET,
     CONTEXT_HANDOFF_CHAR_BUDGET,
@@ -54,12 +60,6 @@ log = _get_logger("CLI")
 _SESSION_START_COMMANDS: frozenset[str] = frozenset({"context"})
 # WAL モードの接続が残す sidecar ファイルの拡張子。
 _DB_SIDECAR_SUFFIXES: tuple[str, ...] = ("-wal", "-shm", "-journal")
-
-# knowledge の列挙値。DB の CHECK 制約に到達する前に CLI 側で弾く。
-_KINDS: frozenset[str] = frozenset({"convention", "decision", "pitfall", "howto", "fact", "preference"})
-_SCOPES: frozenset[str] = frozenset({"global", "repo"})
-_STATUSES: frozenset[str] = frozenset({"active", "pending", "archived"})
-_SOURCES: frozenset[str] = frozenset({"agent", "observer", "human"})
 
 # 値を伴うオプションと、真偽のみのフラグ。
 _VALUE_OPTIONS: frozenset[str] = frozenset({"--status", "--kind", "--limit", "--superseded-by"})
@@ -102,9 +102,6 @@ _SEARCH_MULTIPLIER_FLOOR = 0.5
 確度と鮮度は僅差の順位を決める補正に留まる。confidence=0.0 のカードが
 スコア 0 に潰れて「ヒットしなかった」扱いになるのも防ぐ。
 """
-
-_ASCII_ALNUM_RE = re.compile(r"[A-Za-z0-9]")
-_KEY_HASH_LENGTH = 8
 
 
 class CommandError(Exception):
@@ -360,58 +357,19 @@ def _remove_db_sidecars(db_path: Path) -> None:
 # --- 知識 CRUD の補助 ---
 
 
-def _validate_choice(name: str, value: str, allowed: frozenset[str]) -> str:
-    """列挙値を検証して返す。
+def _reject_bad_input(error: KnowledgeInputError) -> CommandError:
+    """入力検証エラーを CLI の想定内エラーへ包み直す。
+
+    ``knowledge_input`` は CLI 非依存のため ``KnowledgeInputError`` を送出する。
+    main() が捕捉するのは ``CommandError`` だけなので、境界でここを通す。
 
     Args:
-        name: エラーメッセージに出す項目名。
-        value: 検証したい値。
-        allowed: 許可される値の集合。
+        error: ``knowledge_input`` が送出した検証エラー。
 
     Returns:
-        検証を通った *value*。
-
-    Raises:
-        CommandError: *value* が *allowed* に含まれない場合。
+        同じメッセージを持つ CommandError。
     """
-    if value not in allowed:
-        raise CommandError(f"{name} は {'/'.join(sorted(allowed))} のいずれか: {value!r}")
-    return value
-
-
-def _optional_str(value: Any) -> str | None:
-    """空でない値だけを文字列にして返す。
-
-    Args:
-        value: JSON から得た任意の値。
-
-    Returns:
-        文字列化した値。None・空文字・空コンテナなら None。
-    """
-    return str(value) if value else None
-
-
-def _coerce_confidence(value: Any) -> float:
-    """confidence を 0.0〜1.0 の float に変換する。
-
-    Args:
-        value: JSON から得た確信度。None なら既定値 0.5。
-
-    Returns:
-        変換済みの確信度。
-
-    Raises:
-        CommandError: 数値に変換できない、または範囲外の場合。
-    """
-    if value is None:
-        return 0.5
-    try:
-        confidence = float(value)
-    except (TypeError, ValueError) as e:
-        raise CommandError(f"confidence は数値で指定してください: {value!r}") from e
-    if not 0.0 <= confidence <= 1.0:
-        raise CommandError(f"confidence は 0.0〜1.0 の範囲で指定してください: {confidence}")
-    return confidence
+    return CommandError(str(error))
 
 
 def _coerce_limit(value: str | None, default: int) -> int:
@@ -436,29 +394,6 @@ def _coerce_limit(value: str | None, default: int) -> int:
     if limit < 1:
         raise CommandError(f"--limit は 1 以上で指定してください: {limit}")
     return limit
-
-
-def generate_key(title: str, kind: str) -> str:
-    """title から知識カードの key スラッグを生成する。
-
-    ASCII 英数字を 1 文字でも含む title は ``slugify`` で kebab-case 化する。
-    日本語まじりでも ``pytest をパイプする際は set -o pipefail が必須`` →
-    ``pytest-set-o-pipefail`` のように識別子として読める形に落ちる。
-    ASCII 英数字を全く含まない title はスラッグ化すると空になるため、
-    ``kind`` と title の SHA-1 先頭 8 桁で決定的な key を作る
-    （同じ title の再投入が同じ key に落ちて重複行を作らない）。
-
-    Args:
-        title: 知識カードの 1 行タイトル。
-        kind: 知識の種別。ハッシュ由来 key の接頭辞に使う。
-
-    Returns:
-        ``[a-z0-9-]`` のみからなる key。
-    """
-    if _ASCII_ALNUM_RE.search(title):
-        return slugify(title)
-    digest = hashlib.sha1(title.encode("utf-8")).hexdigest()[:_KEY_HASH_LENGTH]
-    return f"{kind}-{digest}"
 
 
 def _require_key(args: CommandArgs) -> str:
@@ -535,41 +470,15 @@ def _handle_learn(settings: Settings, args: CommandArgs) -> None:
     Raises:
         CommandError: title 欠落や列挙値・数値の不正がある場合。
     """
-    payload = args.stdin_data
-    title = str(payload.get("title") or "").strip()
-    if not title:
-        raise CommandError("learn: title は必須です")
+    try:
+        draft = parse_knowledge_payload(args.stdin_data, status_override=args.values.get("--status"))
+    except KnowledgeInputError as e:
+        raise _reject_bad_input(e) from e
 
-    kind = _validate_choice("kind", str(payload.get("kind") or ""), _KINDS)
-    scope = _validate_choice("scope", str(payload.get("scope") or "repo"), _SCOPES)
-    source = _validate_choice("source", str(payload.get("source") or "agent"), _SOURCES)
-    status = _validate_choice(
-        "status", args.values.get("--status") or str(payload.get("status") or "active"), _STATUSES
-    )
-    confidence = _coerce_confidence(payload.get("confidence"))
-    key = str(payload.get("key") or "").strip() or generate_key(title, kind)
-
-    now = utc_now_iso()
     with Database(settings.db_path) as db:
-        repo_id = resolve_repo(None, db).id if scope == "repo" else None
-        db.upsert_knowledge(
-            Knowledge(
-                key=key,
-                scope=scope,
-                kind=kind,
-                title=title,
-                source=source,
-                repo_id=repo_id,
-                body=str(payload.get("body") or ""),
-                domain=_optional_str(payload.get("domain")),
-                confidence=confidence,
-                status=status,
-                source_ref=_optional_str(payload.get("source_ref")),
-                created_at=now,
-                updated_at=now,
-            )
-        )
-    print(f"learned: {key}")
+        repo_id = resolve_repo(None, db).id if draft.scope == "repo" else None
+        db.upsert_knowledge(draft.to_knowledge(repo_id))
+    print(f"learned: {draft.key}")
 
 
 def _collect_list_rows(
@@ -603,10 +512,13 @@ def _collect_list_rows(
     if only_global and only_repo:
         raise CommandError("--global と --repo は同時に指定できません")
 
-    status = _validate_choice("status", args.values.get("--status", "active"), _STATUSES)
-    kind = args.values.get("--kind")
-    if kind is not None:
-        _validate_choice("kind", kind, _KINDS)
+    try:
+        status = validate_choice("status", args.values.get("--status", "active"), STATUSES)
+        kind = args.values.get("--kind")
+        if kind is not None:
+            validate_choice("kind", kind, KINDS)
+    except KnowledgeInputError as e:
+        raise _reject_bad_input(e) from e
     limit = _coerce_limit(args.values.get("--limit"), default_limit)
 
     rows: list[Knowledge] = []
@@ -955,7 +867,7 @@ def _build_context(settings: Settings, args: CommandArgs) -> str:
     """
     payload = args.stdin_data
     with Database(settings.db_path) as db:
-        repo = resolve_repo(_optional_str(payload.get("cwd")), db)
+        repo = resolve_repo(optional_str(payload.get("cwd")), db)
         _record_session(db, repo, payload)
         sections = [
             _knowledge_section(
@@ -1025,7 +937,7 @@ def _record_handoff(settings: Settings, payload: dict[str, Any]) -> None:
     with Database(settings.db_path) as db:
         if db.finish_session(session_uid, handoff, now):
             return
-        repo = resolve_repo(_optional_str(payload.get("cwd")), db)
+        repo = resolve_repo(optional_str(payload.get("cwd")), db)
         db.start_session(
             Session(
                 session_uid=session_uid,

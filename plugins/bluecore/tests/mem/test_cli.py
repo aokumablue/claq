@@ -248,22 +248,6 @@ class TestNormalCommandFailures:
         assert "init failure" in stderr
 
 
-class TestGenerateKey:
-    """key の自動生成規則。"""
-
-    def test_ascii_tokens_survive_japanese_title(self) -> None:
-        """日本語まじりでも ASCII トークンだけの読める key になる。"""
-        key = cli.generate_key("pytest をパイプする際は set -o pipefail が必須", "pitfall")
-        assert key == "pytest-set-o-pipefail"
-
-    def test_pure_japanese_title_falls_back_to_hash(self) -> None:
-        """ASCII 英数字を含まない title は kind + ハッシュの決定的 key になる。"""
-        key = cli.generate_key("テーブル定義変更は移行不要", "decision")
-        assert key.startswith("decision-")
-        assert len(key) == len("decision-") + 8
-        assert key == cli.generate_key("テーブル定義変更は移行不要", "decision")
-
-
 class TestLearn:
     """learn コマンド。"""
 

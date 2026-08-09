@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Observation hook runtime for learn."""
+"""Observation hook runtime for learn.
+
+ツール呼び出しごとに 1 行の観測を ``~/.bluecore/repos/<repo-id>/observations.jsonl``
+へ追記し、必要なら observer プロセスを起こす。ここは **生ログの置き場** であり、
+観測から抽出した知識は observer が ``knowledge`` テーブルへ書く。
+"""
 
 from __future__ import annotations
 
@@ -12,11 +17,14 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from bluecore.lib.core_utils import get_bluecore_dir
 from bluecore.lib.harness import normalize_tool_name
-from bluecore.skills.learn.project import detect_project
+from bluecore.mem.settings import Settings
+from bluecore.skills.learn.storage import (
+    ObservationTarget,
+    ensure_storage_dirs,
+    resolve_observation_target,
+)
 
-_CONFIG_DIR = get_bluecore_dir()
 _DEFAULT_SIGNAL_EVERY_N = 20
 _DEFAULT_SKIP_PATHS = ("observer-sessions", ".claude-mem")
 _SECRET_RE = re.compile(
@@ -42,13 +50,24 @@ def _resolve_python_cmd() -> str:
     return sys.executable or "python3"
 
 
+def _data_dir() -> Path:
+    """bluecore のデータディレクトリを返す。
+
+    ``Settings`` 経由で解決するため ``BLUECORE_DATA_PATH`` による隔離が効く。
+
+    Returns:
+        ``~/.bluecore`` 相当のパス。
+    """
+    return Settings().data_path
+
+
 def _is_disabled() -> bool:
     """学習機能が無効化されているかを判定する。
 
     設定ディレクトリまたは CLV2_CONFIG の隣に ``disabled`` ファイルがあれば
     無効とみなす。
     """
-    if (_CONFIG_DIR / "disabled").exists():
+    if (_data_dir() / "disabled").exists():
         return True
 
     clv2_config = os.environ.get("CLV2_CONFIG")
@@ -84,39 +103,23 @@ def _should_skip_automation(stdin_data: dict) -> bool:
     return False
 
 
-def _set_project_dir_from_cwd(stdin_data: dict) -> str | None:
-    """cwd から git トップレベルを求めて CLAUDE_PROJECT_DIR を設定する。
+def _resolve_target(stdin_data: dict) -> ObservationTarget:
+    """フック入力の cwd から観測ログの書き込み先を解決する。
+
+    フックが渡す ``cwd`` を最優先し、無ければ ``CLAUDE_PROJECT_DIR``、
+    それも無ければプロセスの cwd（``resolve_observation_target`` の既定）を使う。
+    git 本体リポジトリへの寄せ込みは ``repos`` の正体キー解決が行う。
+
+    Args:
+        stdin_data: フックが渡した JSON。
 
     Returns:
-        上書き前の CLAUDE_PROJECT_DIR の値（未設定なら ``None``）。復元に使う。
+        解決した ObservationTarget。
     """
     cwd = str(stdin_data.get("cwd", "") or "")
     if not cwd or not Path(cwd).is_dir():
-        return None
-
-    try:
-        result = subprocess.run(
-            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        project_dir = result.stdout.strip() if result.returncode == 0 else cwd
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        project_dir = cwd
-
-    previous = os.environ.get("CLAUDE_PROJECT_DIR")
-    os.environ["CLAUDE_PROJECT_DIR"] = project_dir
-    return previous
-
-
-def _restore_project_dir(previous: str | None) -> None:
-    """CLAUDE_PROJECT_DIR を以前の値（または未設定）に復元する。"""
-    if previous is None:
-        os.environ.pop("CLAUDE_PROJECT_DIR", None)
-    else:
-        os.environ["CLAUDE_PROJECT_DIR"] = previous
+        cwd = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    return resolve_observation_target(cwd or None)
 
 
 def _scrub_secret_text(value: str | None) -> str | None:
@@ -126,19 +129,9 @@ def _scrub_secret_text(value: str | None) -> str | None:
     return _SECRET_RE.sub(lambda match: match.group(1) + match.group(2) + (match.group(3) or "") + "[REDACTED]", str(value))
 
 
-def _ensure_project_dirs(project_dir: Path) -> None:
-    """観測・インスティンクト・進化物の保存先ディレクトリ群を作成する。"""
-    (project_dir / "observations.archive").mkdir(parents=True, exist_ok=True)
-    (project_dir / "instincts" / "personal").mkdir(parents=True, exist_ok=True)
-    (project_dir / "instincts" / "inherited").mkdir(parents=True, exist_ok=True)
-    (project_dir / "evolved" / "skills").mkdir(parents=True, exist_ok=True)
-    (project_dir / "evolved" / "commands").mkdir(parents=True, exist_ok=True)
-    (project_dir / "evolved" / "agents").mkdir(parents=True, exist_ok=True)
-
-
-def _archive_old_observation_files(project_dir: Path) -> None:
+def _archive_old_observation_files(target: ObservationTarget) -> None:
     """1 日 1 回、30 日より古いアーカイブ済み観測ファイルを削除する。"""
-    purge_marker = project_dir / ".last-purge"
+    purge_marker = target.storage_dir / ".last-purge"
     try:
         stale = not purge_marker.exists() or (datetime.now(UTC).timestamp() - purge_marker.stat().st_mtime) > 86400
     except OSError:
@@ -147,7 +140,7 @@ def _archive_old_observation_files(project_dir: Path) -> None:
     if not stale:
         return
 
-    archive_dir = project_dir / "observations.archive"
+    archive_dir = target.archive_dir
     archive_dir.mkdir(parents=True, exist_ok=True)
     cutoff = datetime.now(UTC).timestamp() - (30 * 24 * 60 * 60)
     try:
@@ -167,15 +160,16 @@ def _archive_old_observation_files(project_dir: Path) -> None:
         pass
 
 
-def _archive_if_too_large(obs_path: Path, project_dir: Path) -> None:
+def _archive_if_too_large(target: ObservationTarget) -> None:
     """観測ファイルが 10MB を超えたらアーカイブへ退避する。"""
+    obs_path = target.observations_file
     try:
         if not obs_path.exists() or obs_path.stat().st_size < 10 * 1024 * 1024:
             return
     except OSError:
         return
 
-    archive_dir = project_dir / "observations.archive"
+    archive_dir = target.archive_dir
     archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = archive_dir / f"observations-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.jsonl"
     try:
@@ -207,7 +201,7 @@ def _parse_input(raw: str) -> dict | None:
         return {"parsed": False, "error": str(error)}
 
 
-def _build_observation(stdin_data: dict, phase: str, project: dict) -> dict:
+def _build_observation(stdin_data: dict, phase: str, target: ObservationTarget) -> dict:
     """フック入力から 1 件分の観測レコードを構築する。
 
     入力・出力は 5000 文字で切り詰め、シークレットを除去して格納する。
@@ -234,8 +228,7 @@ def _build_observation(stdin_data: dict, phase: str, project: dict) -> dict:
         "event": event,
         "tool": tool_name,
         "session": stdin_data.get("session_id", stdin_data.get("session", "unknown")),
-        "project_id": project["id"],
-        "project_name": project["name"],
+        "repo": target.repo_id,
     }
     if tool_input_str:
         observation["input"] = _scrub_secret_text(tool_input_str)
@@ -244,14 +237,14 @@ def _build_observation(stdin_data: dict, phase: str, project: dict) -> dict:
     return observation
 
 
-def _start_observer_if_needed(project: dict) -> None:
+def _start_observer_if_needed(target: ObservationTarget) -> None:
     """オブザーバーが未起動なら子プロセスとして起動する。
 
     PID ファイルで稼働中のプロセスがあれば何もしない。
     """
     pid_files = [
-        project["project_dir"] / ".observer.pid",
-        _CONFIG_DIR / ".observer.pid",
+        target.storage_dir / ".observer.pid",
+        _data_dir() / ".observer.pid",
     ]
     if any(_pid_is_running(path) for path in pid_files):
         return
@@ -259,16 +252,12 @@ def _start_observer_if_needed(project: dict) -> None:
     env = os.environ.copy()
     env["BLUECORE_SKIP_OBSERVE"] = "1"
     env.setdefault("CLV2_IS_WINDOWS", "false")
-    env["PROJECT_DIR"] = str(project["project_dir"])
-    env["PROJECT_ROOT"] = str(project["root"])
-    env["PROJECT_NAME"] = str(project["name"])
-    env["PROJECT_ID"] = str(project["id"])
-    env["OBSERVATIONS_FILE"] = str(project["observations_file"])
-    env["INSTINCTS_DIR"] = str(project["instincts_personal"])
+    env["REPO_ID"] = target.repo_id
+    env["REPO_ROOT"] = str(target.repo_root)
     try:
         subprocess.Popen(
             [_resolve_python_cmd(), "-m", "bluecore.skills.learn.observer", "start"],
-            cwd=str(project["root"]),
+            cwd=str(target.repo_root),
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -314,9 +303,9 @@ def _pid_is_running(pid_file: Path) -> bool:
         return False
 
 
-def _should_signal_now(project: dict, signal_every_n: int) -> bool:
+def _should_signal_now(target: ObservationTarget, signal_every_n: int) -> bool:
     """カウンタファイルをインクリメントし、シグナル送出タイミングかを返す。"""
-    counter_file = project["project_dir"] / ".observer-signal-counter"
+    counter_file = target.storage_dir / ".observer-signal-counter"
     try:
         counter = int(counter_file.read_text(encoding="utf-8").strip()) if counter_file.exists() else 0
     except (OSError, ValueError):
@@ -369,20 +358,20 @@ def _send_sigusr1_to_pid_file(pid_file: Path, signaled: set) -> None:
         pass
 
 
-def _signal_observers(project: dict) -> None:
+def _signal_observers(target: ObservationTarget) -> None:
     """N 件ごとに稼働中オブザーバーへ SIGUSR1 を送る。
 
     カウンタファイルで間引き、閾値到達時のみシグナルを送出する。
     """
     signal_every_n = int(os.environ.get("BLUECORE_OBSERVER_SIGNAL_EVERY_N", str(_DEFAULT_SIGNAL_EVERY_N)))
-    if not _should_signal_now(project, signal_every_n):
+    if not _should_signal_now(target, signal_every_n):
         return
 
     if not hasattr(signal, "SIGUSR1"):  # pragma: no cover
         return
 
     signaled: set[int] = set()
-    for pid_file in [project["project_dir"] / ".observer.pid", _CONFIG_DIR / ".observer.pid"]:
+    for pid_file in [target.storage_dir / ".observer.pid", _data_dir() / ".observer.pid"]:
         _send_sigusr1_to_pid_file(pid_file, signaled)
 
 
@@ -399,36 +388,24 @@ def _write_parse_error(obs_path: Path, raw: str) -> None:
 
 
 def _handle_parse_error(stdin_data: dict, raw: str) -> None:
-    """解析エラー時にプロジェクトを検出してエラーを記録する。"""
-    previous = _set_project_dir_from_cwd(stdin_data)
-    try:
-        project = detect_project()
-        obs_path = project["observations_file"]
-        _ensure_project_dirs(Path(project["project_dir"]))
-        _write_parse_error(Path(obs_path), raw)
-    finally:
-        _restore_project_dir(previous)
+    """解析エラー時にリポジトリを解決してエラーを記録する。"""
+    target = _resolve_target(stdin_data)
+    ensure_storage_dirs(target)
+    _write_parse_error(target.observations_file, raw)
 
 
 def _record_and_signal(stdin_data: dict, phase: str) -> None:
-    """プロジェクトを検出して観測を記録し、オブザーバーへシグナルを送る。"""
-    previous = _set_project_dir_from_cwd(stdin_data)
-    try:
-        project = detect_project()
-    finally:
-        _restore_project_dir(previous)
+    """リポジトリを解決して観測を記録し、オブザーバーへシグナルを送る。"""
+    target = _resolve_target(stdin_data)
+    ensure_storage_dirs(target)
+    _archive_old_observation_files(target)
+    _archive_if_too_large(target)
 
-    project_dir = Path(project["project_dir"])
-    obs_path = Path(project["observations_file"])
-    _ensure_project_dirs(project_dir)
-    _archive_old_observation_files(project_dir)
-    _archive_if_too_large(obs_path, project_dir)
-
-    _append_observation(obs_path, _build_observation(stdin_data, phase, project))
+    _append_observation(target.observations_file, _build_observation(stdin_data, phase, target))
 
     if not _is_disabled():
-        _start_observer_if_needed(project)
-        _signal_observers(project)
+        _start_observer_if_needed(target)
+        _signal_observers(target)
 
 
 def main(argv: list[str] | None = None) -> int:

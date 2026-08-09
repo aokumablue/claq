@@ -47,16 +47,6 @@ def get_bluecore_dir() -> Path:
     return get_home_dir() / BASE_DIR_NAME
 
 
-def get_projects_dir() -> Path:
-    """プロジェクト保存ディレクトリを取得する。"""
-    return get_bluecore_dir() / "projects"
-
-
-def get_registry_file() -> Path:
-    """プロジェクトレジストリファイルを取得する。"""
-    return get_bluecore_dir() / "projects.json"
-
-
 def get_sessions_dir() -> Path:
     """セッションディレクトリを取得する。"""
     return get_bluecore_dir() / SESSION_DATA_DIR_NAME
