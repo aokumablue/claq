@@ -76,3 +76,31 @@ def test_parse_skill_md_ignores_other_frontmatter_lines(tmp_path) -> None:
     name, description, _ = parse_skill_md(tmp_path)
     assert name == "myskill"
     assert description == "desc"
+
+
+def test_parse_skill_md_returns_empty_fields_for_empty_frontmatter(tmp_path: Path) -> None:
+    """frontmatter が空なら name と description は空文字列になる。"""
+    content = "---\n---\nBody\n"
+    skill_dir = _write_skill(tmp_path, content)
+
+    assert parse_skill_md(skill_dir) == ("", "", content)
+
+
+def test_parse_skill_md_returns_empty_fields_for_missing_keys(tmp_path: Path) -> None:
+    """name と description が無い frontmatter では空文字列を返す。"""
+    skill_dir = _write_skill(tmp_path, "---\nmodel: opus\n---\n# Body\n")
+
+    name, description, _ = parse_skill_md(skill_dir)
+
+    assert name == ""
+    assert description == ""
+
+
+def test_parse_skill_md_renders_booleans_as_yaml_literals(tmp_path: Path) -> None:
+    """真偽値は Python の True/False ではなく YAML 表記の文字列で返す。"""
+    skill_dir = _write_skill(tmp_path, "---\nname: true\ndescription: false\n---\n# Body\n")
+
+    name, description, _ = parse_skill_md(skill_dir)
+
+    assert name == "true"
+    assert description == "false"

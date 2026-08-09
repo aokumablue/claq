@@ -2,47 +2,54 @@
 
 from pathlib import Path
 
+from bluecore.lib.frontmatter import (
+    MissingFrontmatterError,
+    UnterminatedFrontmatterError,
+    parse_yaml,
+    split_frontmatter,
+)
+
+
+def _as_text(value: object) -> str:
+    """frontmatter のスカラー値を SKILL.md 表示用の文字列へ落とす。
+
+    ブロックスカラーの解析結果には末尾改行が残るため、必ず strip して正規化する。
+    bool は Python の ``True`` / ``False`` ではなく YAML 表記へ戻す。
+
+    Args:
+        value: frontmatter から取り出した値。
+
+    Returns:
+        表示用に正規化した文字列。値が無ければ空文字列。
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value).strip()
+
 
 def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
-    """SKILL.md を解析し、(name, description, full_content) を返す。"""
+    """SKILL.md を解析し、(name, description, full_content) を返す。
+
+    Args:
+        skill_path: SKILL.md を含むスキルディレクトリのパス。
+
+    Returns:
+        name、description、SKILL.md の全文のタプル。frontmatter が辞書でない場合は
+        name と description が空文字列になる。
+
+    Raises:
+        ValueError: frontmatter の開始または終了の ``---`` が無い場合。
+    """
     content = (skill_path / "SKILL.md").read_text(encoding="utf-8")
-    lines = content.split("\n")
-
-    if lines[0].strip() != "---":
-        raise ValueError("SKILL.md の frontmatter がありません（先頭の --- がない）")
-
-    end_idx = None
-    for i, line in enumerate(lines[1:], start=1):
-        if line.strip() == "---":
-            end_idx = i
-            break
-
-    if end_idx is None:
-        raise ValueError("SKILL.md の frontmatter がありません（末尾の --- がない）")
-
-    name = ""
-    description = ""
-    frontmatter_lines = lines[1:end_idx]
-    i = 0
-    while i < len(frontmatter_lines):
-        line = frontmatter_lines[i]
-        if line.startswith("name:"):
-            name = line[len("name:") :].strip().strip('"').strip("'")
-        elif line.startswith("description:"):
-            value = line[len("description:") :].strip()
-            # YAML の複数行表記（>, |, >-, |-）を処理する
-            if value in (">", "|", ">-", "|-"):
-                continuation_lines: list[str] = []
-                i += 1
-                while i < len(frontmatter_lines) and (
-                    frontmatter_lines[i].startswith("  ") or frontmatter_lines[i].startswith("\t")
-                ):
-                    continuation_lines.append(frontmatter_lines[i].strip())
-                    i += 1
-                description = " ".join(continuation_lines)
-                continue
-            else:
-                description = value.strip('"').strip("'")
-        i += 1
-
-    return name, description, content
+    try:
+        block = split_frontmatter(content)
+    except MissingFrontmatterError as err:
+        raise ValueError("SKILL.md の frontmatter がありません（先頭の --- がない）") from err
+    except UnterminatedFrontmatterError as err:
+        raise ValueError("SKILL.md の frontmatter がありません（末尾の --- がない）") from err
+    data = parse_yaml(block, lenient=True)
+    if not isinstance(data, dict):
+        return "", "", content
+    return _as_text(data.get("name")), _as_text(data.get("description")), content
