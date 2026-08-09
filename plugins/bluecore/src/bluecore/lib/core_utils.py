@@ -5,7 +5,6 @@ Windows・macOS・Linux で動作する。
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import platform
@@ -24,34 +23,6 @@ IS_MACOS = platform.system() == "Darwin"
 IS_LINUX = platform.system() == "Linux"
 
 SESSION_DATA_DIR_NAME = "session-data"
-
-WINDOWS_RESERVED_SESSION_IDS = frozenset(
-    [
-        "CON",
-        "PRN",
-        "AUX",
-        "NUL",
-        "COM1",
-        "COM2",
-        "COM3",
-        "COM4",
-        "COM5",
-        "COM6",
-        "COM7",
-        "COM8",
-        "COM9",
-        "LPT1",
-        "LPT2",
-        "LPT3",
-        "LPT4",
-        "LPT5",
-        "LPT6",
-        "LPT7",
-        "LPT8",
-        "LPT9",
-    ]
-)
-
 
 def get_home_dir() -> Path:
     """ユーザーのホームディレクトリを取得する（クロスプラットフォーム）。"""
@@ -91,15 +62,6 @@ def get_sessions_dir() -> Path:
     return get_bluecore_dir() / SESSION_DATA_DIR_NAME
 
 
-def get_session_search_dirs() -> list[Path]:
-    """セッション検索対象ディレクトリのリストを返す。
-
-    現在は sessions_dir のみだが、将来的に複数パスに拡張できるよう
-    リストで返す。
-    """
-    return [get_sessions_dir()]
-
-
 def get_learned_skills_dir() -> Path:
     """学習済みスキルのディレクトリを取得する。"""
     return get_claude_dir() / "skills" / "learned"
@@ -132,11 +94,6 @@ def get_date_string() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def get_time_string() -> str:
-    """現在時刻を HH:MM 形式で取得する。"""
-    return datetime.now().strftime("%H:%M")
-
-
 def get_datetime_string() -> str:
     """現在日時を YYYY-MM-DD HH:MM:SS 形式で取得する。"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -157,64 +114,6 @@ def get_project_name() -> str | None:
         return repo_name
     cwd = Path.cwd()
     return cwd.name if cwd.name else None
-
-
-def sanitize_session_id(raw: str | None) -> str | None:
-    """
-    セッション用ファイル名セグメントとして使えるよう文字列をサニタイズする。
-
-    不正文字をハイフンに置換し、連続記号を圧縮し、
-    先頭/末尾のハイフンを除去し、先頭ドットも取り除いて隠しディレクトリ名が
-    「.claude」のような名前を「claude」に適切に変換する。
-
-    非ASCIIのみの入力には安定した8文字ハッシュを付与し、異なる名前が
-    同じフォールバックセッションIDに潰れないようにする。混在文字種の入力は
-    ASCII部分を保持しつつ短いハッシュ接尾辞で識別可能にする。
-    """
-    if not raw or not isinstance(raw, str):
-        return None
-
-    has_non_ascii = any(ord(char) > 0x7F for char in raw)
-    normalized = raw.lstrip(".")
-
-    # 不正文字をハイフンに置換
-    sanitized = re.sub(r"[^a-zA-Z0-9_-]", "-", normalized)
-    # 連続するハイフンを圧縮
-    sanitized = re.sub(r"-{2,}", "-", sanitized)
-    # 先頭/末尾のハイフンを除去
-    sanitized = sanitized.strip("-")
-
-    if sanitized:
-        suffix = hashlib.sha256(normalized.encode()).hexdigest()[:6]
-        if sanitized.upper() in WINDOWS_RESERVED_SESSION_IDS:
-            return f"{sanitized}-{suffix}"
-        if not has_non_ascii:
-            return sanitized
-        return f"{sanitized}-{suffix}"
-
-    # 非ASCIIのみ、または記号/空白のみの場合
-    # Python の re は \p{P} をサポートしないため、明示的な句読点判定を使う
-    import unicodedata
-
-    meaningful = "".join(c for c in normalized if not c.isspace() and unicodedata.category(c)[0] != "P")
-    if not meaningful:
-        return None
-
-    return hashlib.sha256(normalized.encode()).hexdigest()[:8]
-
-
-def get_session_id_short(fallback: str = "default") -> str:
-    """
-    CLAUDE_SESSION_ID 環境変数から短いセッションIDを取得する。
-    末尾8文字を返し、取得できない場合はサニタイズ済みプロジェクト名、最後に「default」を使う。
-    """
-    session_id = os.environ.get("CLAUDE_SESSION_ID", "")
-    if session_id:
-        sanitized = sanitize_session_id(session_id[-8:])
-        if sanitized:
-            return sanitized
-
-    return sanitize_session_id(get_project_name()) or sanitize_session_id(fallback) or "default"
 
 
 def _glob_to_regex(pattern: str) -> re.Pattern[str]:

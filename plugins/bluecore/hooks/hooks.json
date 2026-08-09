@@ -86,11 +86,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli setup",
-            "timeout": 120
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli context",
+            "timeout": 60
           }
         ],
-        "description": "永続メモリデータベースのスキーマ初期化とデータディレクトリ作成"
+        "description": "永続メモリから共通知識・リポジトリ知識・前回の引き継ぎを <bluecore-memory> として注入する（DB が無ければ作成）"
       },
       {
         "matcher": "*",
@@ -151,6 +151,20 @@
           }
         ],
         "description": "応答完了時にタスクサマリー付きデスクトップ通知を送信します（macOS: osascript、WSL: PowerShell + BurntToast）"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.mem.cli handoff",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "セッション終了時に次セッションへの引き継ぎを sessions.handoff へ記録する（非ブロッキング）"
       }
     ]
   }

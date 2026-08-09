@@ -392,11 +392,9 @@ fi
 update_claude_cache_symlinks
 update_copilot_cache_symlink
 
-# ~/.bluecore/mem.db スキーマを初期化する（べき等: 既存DBは変更しない）
-if [[ "${SKIP_PYTHON}" != "1" ]]; then
-  echo "[bluecore] Initializing mem database at ${SETTINGS_DIR}/mem.db"
-  "${VENV_PYTHON}" -m bluecore.mem setup
-fi
+# mem.db の作成はインストーラでは行わない。
+# SessionStart の `bluecore.mem.cli context` が Database() 経由で
+# 親ディレクトリ作成とスキーマ初期化を毎セッション冪等に済ませるため。
 
 # インストール済みバージョンを記録する（SKIP_PYTHON=1 のときは Python 未インストールなので記録しない）
 # SessionStart の session_install フックが参照する

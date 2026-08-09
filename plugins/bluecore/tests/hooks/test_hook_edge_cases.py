@@ -19,31 +19,22 @@ from bluecore.hooks import pre_bash_commit_quality as pre_bash_commit_quality
 from bluecore.hooks import session_start as session_start
 
 
-def test_session_start_run_injects_previous_session_and_project_context(
+def test_session_start_run_injects_checkpoint_and_project_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    first_dir = tmp_path / "first"
-    second_dir = tmp_path / "second"
     learned_dir = tmp_path / "learned"
     sessions_dir = tmp_path / "sessions"
-    first_dir.mkdir()
-    second_dir.mkdir()
     learned_dir.mkdir()
     sessions_dir.mkdir()
 
-    older = first_dir / "daily-session.tmp"
-    newer = second_dir / "daily-session.tmp"
-    older.write_text("older", encoding="utf-8")
-    newer.write_text("\x1b[31mLatest summary\x1b[0m", encoding="utf-8")
+    checkpoint = sessions_dir / "checkpoint-2026-01-01-repo.md"
+    checkpoint.write_text("---\ncompleted: false\n---\n\x1b[31m進行中の作業\x1b[0m", encoding="utf-8")
 
     logs: list[str] = []
 
     def fake_find_files(dir_path: Path, pattern: str, max_age: int = 7) -> list[dict[str, object]]:
-        if pattern == "*-session.tmp":
-            if dir_path == first_dir:
-                return [{"path": str(older), "mtime": 100.0}]
-            if dir_path == second_dir:
-                return [{"path": str(newer), "mtime": 200.0}]
+        if pattern == "checkpoint-*.md" and dir_path == sessions_dir:
+            return [{"path": str(checkpoint), "mtime": 200.0}]
         if pattern == "*.md" and dir_path == learned_dir:
             return [{"path": str(learned_dir / "skill.md"), "mtime": 1.0}]
         return []
@@ -51,9 +42,8 @@ def test_session_start_run_injects_previous_session_and_project_context(
     monkeypatch.setattr(session_start, "ensure_dir", lambda path: None)
     monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: learned_dir)
     monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
-    monkeypatch.setattr(session_start, "get_session_search_dirs", lambda: [first_dir, second_dir])
     monkeypatch.setattr(session_start, "find_files", fake_find_files)
-    monkeypatch.setattr(session_start, "read_file", lambda path: newer.read_text(encoding="utf-8"))
+    monkeypatch.setattr(session_start, "read_file", lambda path: checkpoint.read_text(encoding="utf-8"))
     monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name="npm", source="auto"))
     monkeypatch.setattr(
         session_start,
@@ -65,32 +55,25 @@ def test_session_start_run_injects_previous_session_and_project_context(
     payload = json.loads(session_start.run(""))
     additional_context = payload["hookSpecificOutput"]["additionalContext"]
 
-    assert "Previous session summary:" in additional_context
-    assert "Latest summary" in additional_context
+    assert "Active checkpoint:" in additional_context
+    assert "進行中の作業" in additional_context
     assert "\x1b[" not in additional_context
     assert "Project type:" in additional_context
+    assert "Previous session summary:" not in additional_context
     assert any("learned skill(s) available" in message for message in logs)
     assert any("Package manager: npm" in message for message in logs)
 
 
-def test_session_start_run_skips_template_session_and_prompts_for_pm(
+def test_session_start_run_emits_empty_context_and_prompts_for_pm(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     logs: list[str] = []
-    session_file = tmp_path / "daily-session.tmp"
-    session_file.write_text("[Session context goes here]", encoding="utf-8")
     (tmp_path / "package.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(session_start, "ensure_dir", lambda path: None)
     monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: tmp_path / "learned")
     monkeypatch.setattr(session_start, "get_sessions_dir", lambda: tmp_path / "sessions")
-    monkeypatch.setattr(session_start, "get_session_search_dirs", lambda: [tmp_path])
-    monkeypatch.setattr(
-        session_start,
-        "find_files",
-        lambda dir_path, pattern, max_age=7: [{"path": str(session_file), "mtime": 1.0}] if pattern == "*-session.tmp" else [],
-    )
-    monkeypatch.setattr(session_start, "read_file", lambda path: session_file.read_text(encoding="utf-8"))
+    monkeypatch.setattr(session_start, "find_files", lambda dir_path, pattern, max_age=7: [])
     monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source="auto"))
     monkeypatch.setattr(session_start, "get_selection_prompt", lambda: "SELECT A PACKAGE MANAGER")
     monkeypatch.setattr(session_start.Path, "cwd", lambda: tmp_path)

@@ -324,7 +324,7 @@ def test_memory_hooks_lifecycle_check_fails_when_hooks_value_not_dict(tmp_path: 
 
 
 def test_memory_hooks_lifecycle_check_fails_when_only_partial_lifecycle_present(tmp_path: Path) -> None:
-    """SessionStart の mem:setup は正しいが session_start/Stop が欠けている場合は不合格。"""
+    """SessionStart の mem context は正しいが session_start/Stop が欠けている場合は不合格。"""
     _write_hooks_json(
         tmp_path,
         {
@@ -335,7 +335,7 @@ def test_memory_hooks_lifecycle_check_fails_when_only_partial_lifecycle_present(
                             "type": "command",
                             "command": (
                                 'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                "bluecore.mem.cli setup"
+                                "bluecore.mem.cli context"
                             ),
                         }
                     ]
@@ -354,7 +354,7 @@ def test_memory_hooks_lifecycle_check_fails_when_only_partial_lifecycle_present(
 def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_path: Path) -> None:
     """実際の hooks/hooks.json と同形式のライフサイクル定義が揃っていれば合格する。
 
-    Stop 側は非 Claude ハーネス向け --bg フラグ付きで登録される想定
+    Stop / SessionEnd 側は非ブロッキングの --bg フラグ付きで登録される想定
     （launcher --bg の実際の使い方に合わせる）。
     """
     _write_hooks_json(
@@ -367,7 +367,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                             "type": "command",
                             "command": (
                                 'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                "bluecore.mem.cli setup"
+                                "bluecore.mem.cli context"
                             ),
                         }
                     ]
@@ -392,6 +392,19 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                             "command": (
                                 'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
                                 "--bg bluecore.hooks.session_end"
+                            ),
+                        }
+                    ]
+                }
+            ],
+            "SessionEnd": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": (
+                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
+                                "--bg bluecore.mem.cli handoff"
                             ),
                         }
                     ]

@@ -8,13 +8,10 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import runpy
 import sys
-import time
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -150,26 +147,6 @@ def test_config_protection_blocks_legacy_file_field(monkeypatch: pytest.MonkeyPa
     assert "Modifying biome.json is not allowed" in stderr.getvalue()
 
 
-def test_session_start_deduplicates_recent_sessions(tmp_path: Path) -> None:
-    first_dir = tmp_path / "first"
-    second_dir = tmp_path / "second"
-    first_dir.mkdir()
-    second_dir.mkdir()
-
-    older = first_dir / "daily-session.tmp"
-    newer = second_dir / "daily-session.tmp"
-    older.write_text("older", encoding="utf-8")
-    newer.write_text("newer", encoding="utf-8")
-    now = time.time()
-    os.utime(older, (now - 120, now - 120))
-    os.utime(newer, (now - 60, now - 60))
-
-    result = session_start.dedupe_recent_sessions([first_dir, second_dir])
-
-    assert [item["path"] for item in result] == [str(newer)]
-    assert result[0]["basename"] == "daily-session.tmp"
-
-
 def test_session_end_extracts_summary(tmp_path: Path) -> None:
     transcript = tmp_path / "transcript.jsonl"
     lines = [
@@ -190,11 +167,7 @@ def test_session_end_extracts_summary(tmp_path: Path) -> None:
 
     summary = session_end.extract_session_summary(str(transcript))
 
-    assert summary is not None
-    assert summary["userMessages"] == ["Fix docs", "Add tests"]
-    assert summary["toolsUsed"] == ["Bash", "Edit", "Write"]
-    assert summary["filesModified"] == ["README.md", "docs/notes.md"]
-    assert summary["totalMessages"] == 2
+    assert summary == {"filesModified": ["README.md", "docs/notes.md"], "totalMessages": 2}
 
 
 def test_config_protection_entrypoint_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -207,15 +180,6 @@ def test_config_protection_entrypoint_passthrough(monkeypatch: pytest.MonkeyPatc
         runpy.run_module("bluecore.hooks.config_protection", run_name="__main__")
 
     assert excinfo.value.code == 0
-
-
-def test_session_end_run_logs_outer_exception(monkeypatch: pytest.MonkeyPatch) -> None:
-    logs: list[str] = []
-    monkeypatch.setattr(session_end, "get_sessions_dir", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-    monkeypatch.setattr(session_end, "log", logs.append)
-
-    assert session_end.run("{}") == "{}"
-    assert any("Error: boom" in message for message in logs)
 
 
 def test_session_start_main_sanitizes_exception_logs(monkeypatch: pytest.MonkeyPatch) -> None:

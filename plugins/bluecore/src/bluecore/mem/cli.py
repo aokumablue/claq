@@ -1,6 +1,6 @@
 """フックおよび人間・エージェントから呼び出される CLI エントリポイント。
 
-提供するのは DB の初期化（``init`` / ``setup``）、知識 CRUD
+提供するのは DB の作り直し（``init``）、知識 CRUD
 （``learn`` / ``list`` / ``show`` / ``promote`` / ``forget``）、全文検索
 （``search``）、SessionStart への知識注入（``context``）、および SessionEnd の
 引き継ぎ記録（``handoff``）。
@@ -51,7 +51,7 @@ log = _get_logger("CLI")
 
 # SessionStart フックで JSON 出力が必須なコマンドの集合。
 # main() のフォールバック保証とエラー時の早期 return に使用する。
-_SESSION_START_COMMANDS: frozenset[str] = frozenset({"setup", "context"})
+_SESSION_START_COMMANDS: frozenset[str] = frozenset({"context"})
 # WAL モードの接続が残す sidecar ファイルの拡張子。
 _DB_SIDECAR_SUFFIXES: tuple[str, ...] = ("-wal", "-shm", "-journal")
 
@@ -313,60 +313,28 @@ def main() -> int:
     return exit_code
 
 
-# --- DB 初期化 ---
-
-
-def _handle_setup(settings: Settings) -> str:
-    """setup コマンド: データディレクトリと DB を初期化する。
-
-    SessionStart フックから呼ばれるため、失敗しても例外を伝播させない。
-
-    Args:
-        settings: mem 設定。
-
-    Returns:
-        追加コンテキスト（本コマンドは常に空文字列）。
-    """
-    try:
-        _initialize_db(settings)
-        log.info("セットアップ完了: %s", settings.data_path)
-    except Exception as e:
-        log.warning("setup 失敗: %s", e)
-
-    return ""
+# --- DB の作り直し ---
 
 
 def _handle_init(settings: Settings) -> None:
-    """init コマンド: 既存 DB を削除して再作成する。
+    """init コマンド: 既存 DB を削除して空の DB を作り直す。
+
+    通常運用で DB を作るのは ``Database`` のコンストラクタ（親ディレクトリ作成 +
+    ``_init_schema``）であり、``context`` が毎セッション走るため初期化専用の
+    コマンドは要らない。本コマンドは中身を捨てて作り直す手動操作専用。
 
     Args:
         settings: mem 設定。
     """
-    _initialize_db(settings, recreate=True)
-    log.info("DB再作成完了: %s", settings.db_path)
-
-
-def _initialize_db(settings: Settings, *, recreate: bool = False) -> None:
-    """データディレクトリと mem.db を初期化する。
-
-    Args:
-        settings: mem 設定。
-        recreate: True なら既存 DB を破棄してから作り直す。
-    """
-    if recreate:
-        _remove_db_artifacts(settings.db_path)
-
-    settings.data_path.mkdir(parents=True, exist_ok=True)
-    settings.save()
+    _remove_db_artifacts(settings.db_path)
     with Database(settings.db_path):
         pass
-
-    if recreate:
-        # WAL モードの新規接続が残す -wal/-shm を除去し、再作成後の
-        # データディレクトリを pristine に保つ。close 時の checkpoint で
-        # データは mem.db へ反映済みのため安全。SQLite ビルドにより
-        # close 時に自動削除されない環境があるため明示削除する。
-        _remove_db_sidecars(settings.db_path)
+    # WAL モードの新規接続が残す -wal/-shm を除去し、再作成後の
+    # データディレクトリを pristine に保つ。close 時の checkpoint で
+    # データは mem.db へ反映済みのため安全。SQLite ビルドにより
+    # close 時に自動削除されない環境があるため明示削除する。
+    _remove_db_sidecars(settings.db_path)
+    log.info("DB再作成完了: %s", settings.db_path)
 
 
 def _remove_db_artifacts(db_path: Path) -> None:
@@ -1090,7 +1058,6 @@ def _handle_handoff(settings: Settings, args: CommandArgs) -> None:
 
 _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
     "init": lambda settings, args: _handle_init(settings),
-    "setup": lambda settings, args: _handle_setup(settings),
     "context": _handle_context,
     "handoff": _handle_handoff,
     "learn": _handle_learn,
@@ -1110,8 +1077,7 @@ Usage:
 
 Commands:
   init                                  Recreate the local mem database from scratch
-  setup                                 Initialize the local mem database
-  context                               Emit the SessionStart knowledge injection (hook JSON on stdin)
+  context                             Emit the SessionStart knowledge injection (hook JSON on stdin)
   handoff                               Record the SessionEnd handoff (hook JSON on stdin; "handoff" key wins)
   learn                                 Store one knowledge card read as JSON from stdin
   list [--global|--repo]                List knowledge titles (default: repo + global, active, 20)

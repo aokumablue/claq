@@ -64,14 +64,14 @@ def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
         return db.upsert_knowledge(Knowledge(**fields))
 
 
-class TestSetup:
-    """setup コマンド（SessionStart フック経路）。"""
+class TestSessionStartContract:
+    """SessionStart フック経路（context）の出力契約。"""
 
     def test_creates_database_and_emits_session_start_json(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """DB を作成し、SessionStart 契約の JSON を stdout に出す。"""
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["setup"])
+        """DB が無くても作成し、SessionStart 契約の JSON を stdout に出す。"""
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert exit_code == 0
         assert stderr == ""
         payload = json.loads(stdout)
@@ -79,11 +79,11 @@ class TestSetup:
         assert (tmp_path / "mem.db").exists()
 
     def test_swallows_db_failure(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """DB 初期化が失敗してもフックを壊さず JSON を返す。"""
+        """コンテキスト組み立てが失敗してもフックを壊さず JSON を返す。"""
         monkeypatch.setattr(
-            cli, "_initialize_db", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db broken"))
+            cli, "_build_context", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db broken"))
         )
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["setup"])
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert exit_code == 0
         assert stderr == ""
         assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
@@ -95,7 +95,7 @@ class TestSetup:
         monkeypatch.setattr(
             cli, "_load_settings_or_raise", lambda: (_ for _ in ()).throw(RuntimeError("設定失敗"))
         )
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["setup"])
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert exit_code == 0
         assert stderr == ""
         assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
@@ -107,7 +107,7 @@ class TestSetup:
         monkeypatch.setattr(
             cli, "_run_session_start_command", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom"))
         )
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["setup"])
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert exit_code == 1
         assert "boom" in stderr
         assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"

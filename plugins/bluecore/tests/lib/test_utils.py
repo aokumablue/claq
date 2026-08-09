@@ -20,15 +20,11 @@ from bluecore.lib.core_utils import (
     get_datetime_string,
     get_home_dir,
     get_learned_skills_dir,
-    get_session_id_short,
-    get_session_search_dirs,
     get_sessions_dir,
-    get_time_string,
     log,
     output,
     read_file,
     run_command,
-    sanitize_session_id,
     strip_ansi,
     write_file,
 )
@@ -89,11 +85,6 @@ class TestDirectoryFunctions:
         sessions = get_sessions_dir()
         assert sessions == get_bluecore_dir() / "session-data"
 
-    def test_get_session_search_dirs_no_duplicates(self):
-        """重複のないディレクトリ一覧を返すこと。"""
-        dirs = get_session_search_dirs()
-        assert len(dirs) == len(set(dirs))
-
     def test_get_learned_skills_dir(self):
         """claude ディレクトリ配下の skills/learned を返すこと。"""
         skills = get_learned_skills_dir()
@@ -126,77 +117,10 @@ class TestDateTimeFunctions:
         date_str = get_date_string()
         assert re.match(r"^\d{4}-\d{2}-\d{2}$", date_str)
 
-    def test_get_time_string_format(self):
-        """HH:MM 形式で返すこと。"""
-        time_str = get_time_string()
-        assert re.match(r"^\d{2}:\d{2}$", time_str)
-
     def test_get_datetime_string_format(self):
         """YYYY-MM-DD HH:MM:SS 形式で返すこと。"""
         dt_str = get_datetime_string()
         assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", dt_str)
-
-
-class TestSanitizeSessionId:
-    """sanitize_session_id 関数のテスト。"""
-
-    def test_returns_none_for_empty(self):
-        """空入力では None を返すこと。"""
-        assert sanitize_session_id(None) is None
-        assert sanitize_session_id("") is None
-
-    def test_sanitizes_simple_string(self):
-        """単純な英数字文字列はそのまま通すこと。"""
-        assert sanitize_session_id("test123") == "test123"
-        assert sanitize_session_id("my-project") == "my-project"
-
-    def test_replaces_invalid_chars(self):
-        """無効文字はハイフンに置き換えること。"""
-        assert sanitize_session_id("test@project!") == "test-project"
-        assert sanitize_session_id("my project") == "my-project"
-
-    def test_collapses_multiple_hyphens(self):
-        """連続するハイフンはまとめること。"""
-        assert sanitize_session_id("test--project") == "test-project"
-        assert sanitize_session_id("a---b") == "a-b"
-
-    def test_strips_leading_dots(self):
-        """先頭のドットは除去すること。"""
-        assert sanitize_session_id(".claude") == "claude"
-        assert sanitize_session_id("..hidden") == "hidden"
-
-    def test_handles_windows_reserved_names(self):
-        """Windows の予約語にはハッシュ接尾辞を付けること。"""
-        result = sanitize_session_id("CON")
-        assert result.startswith("CON-")
-        assert len(result) == 10  # CON + - + 16 進 6 文字
-
-    def test_handles_non_ascii(self):
-        """非 ASCII 入力にはハッシュ接尾辞を付けること。"""
-        result = sanitize_session_id("プロジェクト")
-        assert result is not None
-        # 非 ASCII のみの場合は 8 文字のハッシュになる
-        assert len(result) == 8
-
-
-class TestGetSessionIdShort:
-    """get_session_id_short 関数のテスト。"""
-
-    def test_returns_default_without_env(self):
-        """環境変数が未設定ならデフォルトを返すこと。"""
-        with patch.dict(os.environ, {}, clear=True):
-            # CLAUDE_SESSION_ID があればクリアする
-            os.environ.pop("CLAUDE_SESSION_ID", None)
-            result = get_session_id_short()
-            assert result is not None
-            assert len(result) > 0
-
-    def test_uses_env_var_when_set(self):
-        """CLAUDE_SESSION_ID が設定されていればそれを使うこと。"""
-        with patch.dict(os.environ, {"CLAUDE_SESSION_ID": "abcdefghij"}):
-            result = get_session_id_short()
-            # 末尾 8 文字: cdefghij
-            assert result == "cdefghij"
 
 
 class TestFileFunctions:
@@ -381,34 +305,6 @@ class TestGetGitRepoName:
             result = get_project_name()
         assert result == tmp_path.name
 
-class TestSanitizeSessionIdEdgeCases:
-    """sanitize_session_id の追加境界値テスト。"""
-
-    def test_windows_reserved_id_gets_suffix(self):
-        """Windows 予約済み ID にはハッシュサフィックスが付くこと。"""
-        # "CON" など大文字の予約語を渡すとサフィックスが付く
-        result = sanitize_session_id("CON")
-        assert result is not None
-        assert result.startswith("con-") or "-" in result
-
-    def test_non_ascii_with_ascii_chars_gets_suffix(self):
-        """ASCII と非 ASCII の混在入力はサフィックス付きで返すこと。"""
-        result = sanitize_session_id("project-プロジェクト")
-        assert result is not None
-        assert "-" in result
-
-    def test_punctuation_only_returns_none(self):
-        """句読点のみの入力は None を返すこと。"""
-        result = sanitize_session_id("!!!???...")
-        assert result is None
-
-    def test_non_ascii_only_returns_hash(self):
-        """非 ASCII のみの入力は 8 文字ハッシュを返すこと。"""
-        result = sanitize_session_id("プロジェクト")
-        assert result is not None
-        assert len(result) == 8
-
-
 class TestFindFilesEdgeCases:
     """find_files の未カバーパステスト。"""
 
@@ -420,8 +316,6 @@ class TestFindFilesEdgeCases:
         f.write_text("content")
         # mtime を過去に設定（10日前）
         old_mtime = time.time() - 10 * 24 * 3600
-        import os
-
         os.utime(str(f), (old_mtime, old_mtime))
 
         results = find_files(tmp_path, "*.tmp", max_age=5)
@@ -732,15 +626,6 @@ class TestLogOutput:
         output({"key": "value"})
         captured = capsys.readouterr()
         assert captured.out == '{"key": "value"}\n'
-
-
-def test_get_session_id_short_unsanitizable(monkeypatch) -> None:
-    """セッションIDが記号のみで無害化後に空ならフォールバックを使う。"""
-    import bluecore.lib.core_utils as cu
-
-    monkeypatch.setenv("CLAUDE_SESSION_ID", "!!!!!!!!")
-    monkeypatch.setattr(cu, "get_project_name", lambda: None)
-    assert cu.get_session_id_short("fb") == "fb"
 
 
 def test_run_command_list_input() -> None:

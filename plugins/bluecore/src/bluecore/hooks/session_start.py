@@ -2,15 +2,18 @@
 """
 新しいセッションで以前のコンテキストを読み込む SessionStart フック
 
-新しい Claude セッション開始時に実行されます。最新のセッションサマリーを
-stdout 経由で Claude のコンテキストに読み込み、利用可能なセッションと
-学習したスキルを報告します。
+新しい Claude セッション開始時に実行されます。未完了チェックポイントと
+検出したプロジェクト種別を stdout 経由で Claude のコンテキストに読み込みます。
+
+前回セッションの要約（直近の依頼・変更ファイル）は本フックでは扱いません。
+同じ情報は ``bluecore.mem.cli context`` が DB の ``sessions.handoff`` から
+``## 前回の続き`` として注入するため、二重管理になるからです。本フックが
+注入するのは checkpoint（中断した反復ループの再開点）だけです。
 """
 
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 from bluecore.hooks.hook_common import emit_session_start_output, read_raw_stdin
@@ -18,7 +21,6 @@ from bluecore.lib.core_utils import (
     ensure_dir,
     find_files,
     get_learned_skills_dir,
-    get_session_search_dirs,
     get_sessions_dir,
     log,
     read_file,
@@ -30,110 +32,22 @@ from bluecore.lib.sanitize import sanitize_log_value
 from bluecore.lib.settings import extract_coverage_hint_lines
 from bluecore.lib.slim_text import compact_line
 
-_SUMMARY_START = "<!-- bluecore:SUMMARY:START -->"
-_SUMMARY_END = "<!-- bluecore:SUMMARY:END -->"
-_SUMMARY_PATTERN = re.compile(
-    re.escape(_SUMMARY_START) + r"\n(.*?)\n" + re.escape(_SUMMARY_END),
-    re.DOTALL,
-)
-_SECTION_PATTERN = re.compile(r"(### .+?\n.*?)(?=\n### |\Z)", re.DOTALL)
-# Files Modified は次セッションでプロジェクト探索から再取得できるため注入しない（トークン削減）
-_KEEP_SECTIONS = {"### Tasks"}
-
 
 def _log_sanitized_exception(prefix: str, exc: BaseException) -> None:
     """例外をサニタイズして単一行ログとして出力する。"""
     log(f"{prefix}: {sanitize_log_value(str(exc))}")
 
 
-def _filter_session_summary(content: str, max_length: int = 2000) -> str:
-    """Tasks と Files Modified のみを抽出し、上限文字数に収める。
-
-    SUMMARY マーカーが見つからない場合は compact_line でフォールバックする。
-
-    Args:
-        content: session.tmp の全文字列。
-        max_length: 出力の最大文字数。
-
-    Returns:
-        フィルタ済みの文字列を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    if not content:
-        return content
-
-    m = _SUMMARY_PATTERN.search(content)
-    if not m:
-        return compact_line(content, max_length)
-
-    block = m.group(1)
-    parts: list[str] = []
-    for sec in _SECTION_PATTERN.finditer(block):
-        header = sec.group(1).split("\n", 1)[0]
-        if header in _KEEP_SECTIONS:
-            parts.append(sec.group(1).strip())
-
-    result = "\n\n".join(parts)
-    if len(result) > max_length:
-        result = compact_line(result, max_length - 3)  # -3 to account for "..." suffix
-    return result
-
-
-def dedupe_recent_sessions(search_dirs: list[Path]) -> list[dict]:
-    """basename で最近のセッションを重複排除し、名前ごとに最新のものを保持
-
-    mtime でソートされたリストを返す（新しいものが先）
-
-    Args:
-        search_dirs: 処理に渡す search_dirs の値です。
-
-    Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    recent_sessions_by_name = {}
-
-    for dir_index, dir_path in enumerate(search_dirs):
-        matches = find_files(dir_path, "*-session.tmp", max_age=7)
-
-        for match in matches:
-            basename = Path(match["path"]).name
-            current = {
-                **match,
-                "basename": basename,
-                "dir_index": dir_index,
-            }
-            existing = recent_sessions_by_name.get(basename)
-
-            if (
-                not existing
-                or current["mtime"] > existing["mtime"]
-                or (current["mtime"] == existing["mtime"] and current["dir_index"] < existing["dir_index"])
-            ):
-                recent_sessions_by_name[basename] = current
-
-    results = list(recent_sessions_by_name.values())
-    results.sort(key=lambda x: (-x["mtime"], x["dir_index"]))
-    return results
-
-
 def _collect_session_context(sessions_dir: Path) -> list[str]:
-    """最近のセッション要約と未完了チェックポイントをコンテキストパーツとして収集する。"""
-    parts: list[str] = []
+    """未完了チェックポイントをコンテキストパーツとして収集する。
 
-    recent_sessions = dedupe_recent_sessions(get_session_search_dirs())
-    if recent_sessions:
-        latest = recent_sessions[0]
-        log(f"[SessionStart] Found {len(recent_sessions)} recent session(s)")
-        log(f"[SessionStart] Latest: {latest['path']}")
-        content = strip_ansi(read_file(latest["path"]) or "")
-        if content and "[Session context goes here]" not in content:
-            filtered = _filter_session_summary(content)
-            parts.append(f"Previous session summary:\n{filtered}")
+    Args:
+        sessions_dir: checkpoint ファイルを探すディレクトリ。
+
+    Returns:
+        注入するコンテキストパーツ。未完了 checkpoint が無ければ空リスト。
+    """
+    parts: list[str] = []
 
     checkpoint_files = find_files(sessions_dir, "checkpoint-*.md", max_age=7)
     active_checkpoints = [
