@@ -92,7 +92,12 @@ def _reexec_into_venv_if_needed() -> None:
     ``sys.prefix != sys.base_prefix``（何らかの venv が有効か）で判定し、
     有効な venv がある場合のみ、その prefix が対象 venv と一致するかを
     実体比較で確認する。system python 実行時（多くのフック起動はこちら）
-    は必ず exec して venv の site-packages（pydantic 等）を有効化する。
+    は必ず exec する。bluecore はランタイム依存ゼロで、本体も main() の
+    ``sys.path.insert`` で解決するため、site-packages を取り込むことが
+    目的ではない。exec の目的は Python バージョンの保証にある。venv は
+    install.sh の find_python3 が選んだ Python 3.12+ で作られており、
+    ハーネスが起動する system python はこれを下回りうる（例: macOS 標準の
+    /usr/bin/python3 は 3.9 で ``from datetime import UTC`` に失敗する）。
 
     Args:
         なし
