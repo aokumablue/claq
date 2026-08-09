@@ -1,8 +1,10 @@
 """observe の観測フックランタイムを検証するテスト。
 
+追記・ローテーション・アーカイブ purge は storage.JsonlLog の責務であり、
+その検証は test_storage.py にある（ここでは委譲の結線だけを見る）。
+
 対象: _now_utc / _read_raw_stdin / _resolve_python_cmd / _data_dir /
 _is_disabled / _should_skip_automation / _resolve_target / _scrub_secret_text /
-_archive_old_observation_files / _archive_if_too_large / _append_observation /
 _parse_input / _build_observation / _start_observer_if_needed / _pid_is_running /
 _should_signal_now / _send_sigusr1_to_pid_file / _signal_observers /
 _write_parse_error / _handle_parse_error / _record_and_signal / main
@@ -203,128 +205,6 @@ def test_scrub_redacts_with_prefix() -> None:
 def test_scrub_no_secret() -> None:
     """シークレットが無ければ原文を返す。"""
     assert observe._scrub_secret_text("hello world") == "hello world"
-
-
-# --- _append_observation -----------------------------------------------------
-
-
-def test_append_observation(tmp_path: Path) -> None:
-    """観測を JSONL 1 行として追記する。"""
-    obs = tmp_path / "sub" / "observations.jsonl"
-    observe._append_observation(obs, {"a": 1})
-    assert json.loads(obs.read_text(encoding="utf-8").strip()) == {"a": 1}
-
-
-# --- _archive_old_observation_files ------------------------------------------
-
-
-def test_archive_old_no_marker(target: ObservationTarget) -> None:
-    """purge marker 無し→stale 判定で古いファイルを削除し marker を作る。"""
-    target.archive_dir.mkdir()
-    old = target.archive_dir / "observations-old.jsonl"
-    old.touch()
-    import os as _os
-
-    _os.utime(old, (0, 0))  # 1970 年→cutoff より古い
-    new = target.archive_dir / "observations-new.jsonl"
-    new.touch()
-    observe._archive_old_observation_files(target)
-    assert not old.exists()
-    assert new.exists()
-    assert (target.storage_dir / ".last-purge").exists()
-
-
-def test_archive_old_not_stale(target: ObservationTarget) -> None:
-    """新しい purge marker があれば何もしない。"""
-    (target.storage_dir / ".last-purge").touch()
-    target.archive_dir.mkdir()
-    old = target.archive_dir / "observations-old.jsonl"
-    old.touch()
-    import os as _os
-
-    _os.utime(old, (0, 0))
-    observe._archive_old_observation_files(target)
-    assert old.exists()  # not stale なので削除されない
-
-
-def test_archive_old_stat_oserror(target: ObservationTarget) -> None:
-    """marker の stat が OSError なら stale 扱いで処理を進める。"""
-    (target.storage_dir / ".last-purge").touch()
-    with mock.patch.object(Path, "stat", side_effect=OSError):
-        # stale=True 経路。glob 対象なしでも touch 失敗を握りつぶし完走する
-        observe._archive_old_observation_files(target)
-
-
-def test_archive_old_glob_oserror(target: ObservationTarget) -> None:
-    """archive_dir.glob が OSError なら archived=[] 扱いで処理を継続する。"""
-    target.archive_dir.mkdir()
-    with mock.patch.object(Path, "glob", side_effect=OSError):
-        observe._archive_old_observation_files(target)
-    assert (target.storage_dir / ".last-purge").exists()
-
-
-def test_archive_old_unlink_oserror(target: ObservationTarget) -> None:
-    """古いファイルの unlink が OSError でも continue する。"""
-    target.archive_dir.mkdir()
-    old = target.archive_dir / "observations-old.jsonl"
-    old.touch()
-    import os as _os
-
-    _os.utime(old, (0, 0))
-    with mock.patch.object(Path, "unlink", side_effect=OSError):
-        observe._archive_old_observation_files(target)
-
-
-def test_archive_old_touch_oserror(target: ObservationTarget) -> None:
-    """marker の touch が OSError でも握りつぶす。"""
-    target.archive_dir.mkdir()
-    with mock.patch.object(Path, "touch", side_effect=OSError):
-        observe._archive_old_observation_files(target)
-
-
-# --- _archive_if_too_large ---------------------------------------------------
-
-
-def test_archive_large_not_exists(target: ObservationTarget) -> None:
-    """観測ファイルが無ければ何もしない。"""
-    observe._archive_if_too_large(target)
-    assert not target.archive_dir.exists()
-
-
-def test_archive_large_small(target: ObservationTarget) -> None:
-    """10MB 未満なら退避しない。"""
-    target.observations_file.write_text("small", encoding="utf-8")
-    observe._archive_if_too_large(target)
-    assert target.observations_file.exists()
-
-
-def test_archive_large_stat_oserror(target: ObservationTarget) -> None:
-    """stat が OSError なら return する。"""
-    target.observations_file.touch()
-    with mock.patch.object(Path, "stat", side_effect=OSError):
-        observe._archive_if_too_large(target)
-    assert target.observations_file.exists()
-
-
-def test_archive_large_replaces(target: ObservationTarget) -> None:
-    """10MB 超ならアーカイブへ退避する。"""
-    target.observations_file.touch()
-    big = SimpleNamespace(st_size=11 * 1024 * 1024)
-    with mock.patch.object(Path, "stat", return_value=big):
-        observe._archive_if_too_large(target)
-    assert not target.observations_file.exists()
-    assert list(target.archive_dir.glob("observations-*.jsonl"))
-
-
-def test_archive_large_replace_oserror(target: ObservationTarget) -> None:
-    """replace が OSError でも握りつぶす。"""
-    target.observations_file.touch()
-    big = SimpleNamespace(st_size=11 * 1024 * 1024)
-    with (
-        mock.patch.object(Path, "stat", return_value=big),
-        mock.patch.object(Path, "replace", side_effect=OSError),
-    ):
-        observe._archive_if_too_large(target)
 
 
 # --- _parse_input ------------------------------------------------------------
@@ -633,11 +513,10 @@ def test_start_observer_oserror(
 # --- _write_parse_error / _handle_parse_error --------------------------------
 
 
-def test_write_parse_error(tmp_path: Path) -> None:
+def test_write_parse_error(target: ObservationTarget) -> None:
     """parse_error イベントを記録する。"""
-    obs = tmp_path / "observations.jsonl"
-    observe._write_parse_error(obs, "raw text")
-    assert json.loads(obs.read_text(encoding="utf-8").strip())["event"] == "parse_error"
+    observe._write_parse_error(target.observations_log, "raw text")
+    assert json.loads(target.observations_file.read_text(encoding="utf-8").strip())["event"] == "parse_error"
 
 
 def test_handle_parse_error(target: ObservationTarget, monkeypatch: pytest.MonkeyPatch) -> None:

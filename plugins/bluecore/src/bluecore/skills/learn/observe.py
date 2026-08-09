@@ -20,6 +20,7 @@ from pathlib import Path
 from bluecore.lib.harness import normalize_tool_name
 from bluecore.mem.settings import Settings
 from bluecore.skills.learn.storage import (
+    JsonlLog,
     ObservationTarget,
     ensure_storage_dirs,
     resolve_observation_target,
@@ -127,62 +128,6 @@ def _scrub_secret_text(value: str | None) -> str | None:
     if value is None:
         return None
     return _SECRET_RE.sub(lambda match: match.group(1) + match.group(2) + (match.group(3) or "") + "[REDACTED]", str(value))
-
-
-def _archive_old_observation_files(target: ObservationTarget) -> None:
-    """1 日 1 回、30 日より古いアーカイブ済み観測ファイルを削除する。"""
-    purge_marker = target.storage_dir / ".last-purge"
-    try:
-        stale = not purge_marker.exists() or (datetime.now(UTC).timestamp() - purge_marker.stat().st_mtime) > 86400
-    except OSError:
-        stale = True
-
-    if not stale:
-        return
-
-    archive_dir = target.archive_dir
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    cutoff = datetime.now(UTC).timestamp() - (30 * 24 * 60 * 60)
-    try:
-        archived = list(archive_dir.glob("observations-*.jsonl"))
-    except OSError:
-        archived = []
-    for path in archived:
-        try:
-            if path.stat().st_mtime < cutoff:
-                path.unlink()
-        except OSError:
-            continue
-
-    try:
-        purge_marker.touch()
-    except OSError:
-        pass
-
-
-def _archive_if_too_large(target: ObservationTarget) -> None:
-    """観測ファイルが 10MB を超えたらアーカイブへ退避する。"""
-    obs_path = target.observations_file
-    try:
-        if not obs_path.exists() or obs_path.stat().st_size < 10 * 1024 * 1024:
-            return
-    except OSError:
-        return
-
-    archive_dir = target.archive_dir
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = archive_dir / f"observations-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.jsonl"
-    try:
-        obs_path.replace(archive_path)
-    except OSError:
-        pass
-
-
-def _append_observation(obs_path: Path, payload: dict) -> None:
-    """観測ペイロードを JSONL として 1 行追記する。"""
-    obs_path.parent.mkdir(parents=True, exist_ok=True)
-    with obs_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload) + "\n")
 
 
 def _parse_input(raw: str) -> dict | None:
@@ -375,10 +320,9 @@ def _signal_observers(target: ObservationTarget) -> None:
         _send_sigusr1_to_pid_file(pid_file, signaled)
 
 
-def _write_parse_error(obs_path: Path, raw: str) -> None:
-    """解析失敗イベントを観測ファイルに記録する。"""
-    _append_observation(
-        obs_path,
+def _write_parse_error(log: JsonlLog, raw: str) -> None:
+    """解析失敗イベントを観測ログに記録する。"""
+    log.append(
         {
             "timestamp": _now_utc(),
             "event": "parse_error",
@@ -391,17 +335,17 @@ def _handle_parse_error(stdin_data: dict, raw: str) -> None:
     """解析エラー時にリポジトリを解決してエラーを記録する。"""
     target = _resolve_target(stdin_data)
     ensure_storage_dirs(target)
-    _write_parse_error(target.observations_file, raw)
+    _write_parse_error(target.observations_log, raw)
 
 
 def _record_and_signal(stdin_data: dict, phase: str) -> None:
     """リポジトリを解決して観測を記録し、オブザーバーへシグナルを送る。"""
     target = _resolve_target(stdin_data)
     ensure_storage_dirs(target)
-    _archive_old_observation_files(target)
-    _archive_if_too_large(target)
+    log = target.observations_log
+    log.maintain()
 
-    _append_observation(target.observations_file, _build_observation(stdin_data, phase, target))
+    log.append(_build_observation(stdin_data, phase, target))
 
     if not _is_disabled():
         _start_observer_if_needed(target)
