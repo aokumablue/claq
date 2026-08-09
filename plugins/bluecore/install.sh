@@ -230,16 +230,11 @@ install_user_python() {
     run_quietly "${VENV_PYTHON}" -m ensurepip --upgrade
   fi
 
-  echo "[bluecore] Installing Python package dependencies into ${VENV_DIR}"
+  echo "[bluecore] Installing bluecore into ${VENV_DIR}"
   pip_install_quiet --upgrade pip wheel
 
-  # ハッシュロックで PyPI レジストリ側改ざんを検知する（LS-1）。
-  # 再生成: pip-compile --generate-hashes plugins/bluecore/requirements.in -o plugins/bluecore/requirements.txt
-  run_quietly "${VENV_PYTHON}" -m pip install --no-input --quiet --disable-pip-version-check \
-    --require-hashes -r "${SCRIPT_DIR}/requirements.txt"
-
-  # --no-deps: pyproject.toml の依存解決をスキップして上で固定したバージョンを維持する
-  # editable install は --require-hashes と排他のため別途実行する
+  # --no-deps: bluecore はランタイム依存ゼロ（標準ライブラリのみ）のため依存解決自体が不要。
+  # 将来サードパーティ依存が誤混入しても暗黙に取得されないための防御として明示する。
   pip_install_quiet --no-deps -e "${REPO_ROOT}"
 }
 
