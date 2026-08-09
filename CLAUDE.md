@@ -12,7 +12,6 @@
 - Python は `python3` を使う
 - 変更後は `.venv` を有効化して `python3 -m pytest -q` と `ruff check plugins/bluecore/src` が成功することを確認（警告なし）
 - venv は `~/.bluecore/.venv` の 1 つのみ — 本体ランタイム用（配布時は `install.sh` が作成。この開発環境では `install.sh` 未実行・手動構築）。Claude/Copilot 各キャッシュフォルダには symlink を張る
-- 埋め込みモデルは静的テーブル（`~/.bluecore/models/embeddings.npy`）。`model.json` の URL から DL し `bluecore.model_build` が抽出する（torch / onnxruntime 不要）
 - 新規 hook・外部呼び出し（DB/ネットワーク/DL）は非ブロッキング + ハードタイムアウト必須
 - pytest をパイプする際は `set -o pipefail` 必須
 - 開発中コードの CLI/モジュール実行は `PYTHONPATH=plugins/bluecore/src` を付与（venv の bluecore はプラグインキャッシュ側を解決するため）
@@ -20,5 +19,9 @@
 ## データモデルの前提
 
 - 永続化は `~/.bluecore/mem.db`（SQLite）単独。チーム共有ストア（旧 PostgreSQL 同期）は全廃済み — 各メンバーのメモリは自身の SQLite に閉じる
-- `origin_user` は `git config user.name`（`core_utils.py` `get_git_user_name`、自己申告）。同一マシン上の複数ユーザー識別用のラベルであり、ハードな認証境界ではない
+- テーブルは `repos` / `knowledge` / `sessions` の 3 つだけ（`mem/schema.py`）。リポジトリ識別は `repos.id`（人間可読スラッグ）の 1 系統で、別台帳ファイルは持たない
+- 記憶の単位は **知識カード**（`knowledge` の 1 行）。`kind` は `convention` / `decision` / `pitfall` / `howto` / `fact` / `preference` の 6 値、`scope` は `global` / `repo`。SessionStart に注入されるのは `status='active'` のみで、`pending` は人間が `/instinct promote` で昇格させるまで注入されない
+- 検索は埋め込みベクトルも FTS5 も使わない。知識カードは数百件オーダーに収まるため、全件をロードして Python 側でスコアリングする（`mem/cli.py`）。静的埋め込みテーブル・`bluecore.model_build`・numpy・sqlite-vec はいずれも全廃済み
+- ランタイム依存は `pyyaml` のみ（`plugins/bluecore/requirements.in`）
+- 出力トークンの最小化が設計原則。`list` / `search` は `- [kind] title (key)` の 1 行だけを返し、`body` を返すのは `mem show <key>` だけ。0 件なら 1 文字も出力しない
 
