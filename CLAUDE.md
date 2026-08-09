@@ -11,10 +11,10 @@
 
 - Python は `python3` を使う
 - 変更後は `.venv` を有効化して `python3 -m pytest -q` と `ruff check plugins/bluecore/src` が成功することを確認（警告なし）
-- venv は `~/.bluecore/.venv` の 1 つのみ — 本体ランタイム用（配布時は `install.sh` が作成。この開発環境では `install.sh` 未実行・手動構築）。Claude/Copilot 各キャッシュフォルダには symlink を張る
+- venv は `~/.bluecore/.venv` の 1 つのみ。`install.sh` は venv を作るだけで bluecore は入れない — 用途は launcher.py の re-exec 先（`find_python3` が選んだ Python 3.12+ での実行保証）と、開発ツール（`scripts/install-dev.sh` が入れる pytest / ruff / vulture）の置き場。Claude/Copilot 各キャッシュフォルダには symlink を張る
 - 新規 hook・外部呼び出し（DB/ネットワーク/DL）は非ブロッキング + ハードタイムアウト必須
 - pytest をパイプする際は `set -o pipefail` 必須
-- 開発中コードの CLI/モジュール実行は `PYTHONPATH=plugins/bluecore/src` を付与（venv の bluecore はプラグインキャッシュ側を解決するため）
+- 開発中コードの CLI/モジュール実行に `PYTHONPATH=plugins/bluecore/src` は不要 — `scripts/install-dev.sh` の editable install が venv の `bluecore` をこのリポジトリの `plugins/bluecore/src` へ向け、`install.sh` は venv に bluecore を入れないためキャッシュ側パスで上書きされない。`~/.bluecore/.venv/lib/*/site-packages/_editable_impl_bluecore.pth` がキャッシュ側を指していたら `install-dev.sh` を再実行して直す
 
 ## データモデルの前提
 
