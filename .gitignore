@@ -19,3 +19,10 @@ Dockerfile.postgres*
 compose.yaml
 compose.*.yaml
 .DS_Store
+
+# ローカル実行で生成される mem ランタイム成果物（正規の置き場は ~/.bluecore/）
+mem.db
+mem.db-wal
+mem.db-shm
+logs/
+repos/
