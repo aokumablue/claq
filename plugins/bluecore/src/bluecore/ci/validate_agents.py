@@ -3,37 +3,31 @@
 from __future__ import annotations
 
 import argparse
-import re
 from pathlib import Path
 
 from bluecore.ci.ci_common import REPO_ROOT, emit_error
+from bluecore.lib.frontmatter import FrontmatterError, parse_yaml, split_frontmatter
 
 DEFAULT_AGENTS_DIR = REPO_ROOT / "agents"
 
 
-def extract_frontmatter(content: str) -> dict[str, str] | None:
-    """シンプルな YAML frontmatter ブロックを抽出する。
+def extract_frontmatter(content: str) -> dict[str, object] | None:
+    """先頭の --- で囲まれた frontmatter を辞書として返す。無ければ None。
+
+    解釈できない行を読み飛ばして部分結果を返す寛容モードで解析する。
 
     Args:
         content: Markdown ファイルの全文。
 
     Returns:
-        先頭の --- で囲まれた frontmatter を key: value 辞書として返す。
-        frontmatter が無ければ None。
+        frontmatter の辞書。frontmatter が無い、または辞書でない場合は None。
     """
-    clean_content = content.lstrip("\ufeff")
-    match = re.match(r"^---\r?\n([\s\S]*?)\r?\n---", clean_content)
-    if not match:
+    try:
+        block = split_frontmatter(content)
+    except FrontmatterError:
         return None
-
-    frontmatter: dict[str, str] = {}
-    for line in match.group(1).splitlines():
-        colon_idx = line.find(":")
-        if colon_idx > 0:
-            key = line[:colon_idx].strip()
-            value = line[colon_idx + 1 :].strip().strip("\"'").strip()
-            frontmatter[key] = value
-    return frontmatter
+    data = parse_yaml(block, lenient=True)
+    return data if isinstance(data, dict) else None
 
 
 def _validate_agent_file(file_path: Path) -> bool:

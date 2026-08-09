@@ -61,3 +61,10 @@ def test_extract_frontmatter_skips_lines_without_colon() -> None:
 
     fm = extract_frontmatter("---\nname: x\nnocolon\n---\nbody")
     assert fm == {"name": "x"}
+
+
+def test_extract_frontmatter_returns_none_for_non_mapping_frontmatter() -> None:
+    """トップレベルが辞書でない frontmatter は None を返す。"""
+    from bluecore.ci.validate_agents import extract_frontmatter
+
+    assert extract_frontmatter("---\n- item\n---\nbody") is None
