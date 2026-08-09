@@ -75,5 +75,5 @@ skill-name/
 
 ## 永続メモリ
 
-search: `skill eval benchmark {skill_category}` / `skill improve iteration {skill_name}`
-record: `{"event_type": "skill-eval", "content": "Evaluated {skill_name}: pass_rate {rate}%, iterations {n}"}`
+search: `mem search` — クエリ例 `skill eval benchmark {skill_category}` / `skill improve iteration {skill_name}`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

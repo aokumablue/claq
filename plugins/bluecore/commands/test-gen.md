@@ -14,9 +14,9 @@ command: /test-gen
 
 ## 永続メモリ
 
-- context: SessionStart で `<mem-context>` 自動注入
-- search: `test test-gen coverage decision-table {対象ファイルパス}`
-- record: `{"event_type": "test-gen", "content": "Scope: {scope}. Lang: {language}. Tables: {table_count}. Tests added: {tests_added}. Coverage: before {cov_before}% → after {cov_after}%"}`
+- 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
+- 参照: `mem search`（クエリ例 `test test-gen coverage decision-table {対象ファイルパス}`）→ 本文が要る key だけ `mem show <key>`
+- 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## skill 起動メカニズム
 

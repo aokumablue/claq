@@ -65,5 +65,5 @@ user-invocable: false
 
 ## 永続メモリ
 
-search: `security vulnerability violation {category}` / `{vulnerability_type} fix repair patch`
-record: `{"event_type": "security-review", "content": "Security review: {pass}/{total} checks passed. Issues: {issues}"}`
+search: `mem search` — クエリ例 `security vulnerability violation {category}` / `{vulnerability_type} fix repair patch`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

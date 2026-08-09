@@ -65,5 +65,5 @@ docs/adr/
 
 ## 永続メモリ
 
-search: `ADR architecture decision {topic}` / `{technology} vs alternative decision`
-record: `{"event_type": "adr-create", "content": "Created ADR-{num}: {title}. Decision: {summary}"}`
+search: `mem search` — クエリ例 `ADR architecture decision {topic}` / `{technology} vs alternative decision`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

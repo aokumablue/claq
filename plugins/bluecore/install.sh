@@ -241,32 +241,6 @@ install_user_python() {
   # --no-deps: pyproject.toml の依存解決をスキップして上で固定したバージョンを維持する
   # editable install は --require-hashes と排他のため別途実行する
   pip_install_quiet --no-deps -e "${REPO_ROOT}"
-
-  # 静的埋め込みモデルは既存ファイルを最優先で使い、未生成なら DL → テーブル抽出で解決する。
-  # DL は数十 MB・抽出は数秒のため同期実行で完結する（torch ビルド venv は不要）。
-  local model_target="${HOME}/.bluecore/models"
-  local model_npy="${model_target}/embeddings.npy"
-  # 永続オーバーライド（${SETTINGS_DIR}/model.json）を最優先。無ければ同梱版。
-  # 同梱版はプラグイン更新で再展開され編集が失われるため、社内 URL/IP/
-  # ssl_no_verify 等のカスタム設定はオーバーライド側に置く。
-  local model_config="${SCRIPT_DIR}/model.json"
-  if [[ -f "${SETTINGS_DIR}/model.json" ]]; then
-    model_config="${SETTINGS_DIR}/model.json"
-    echo "[bluecore] Using persistent model config: ${model_config}"
-  fi
-
-  if [[ -f "${model_npy}" ]]; then
-    echo "[bluecore] Embedding model already present (skipping): ${model_npy}"
-  elif "${VENV_PYTHON}" -m bluecore.model_download --config "${model_config}" --out "${model_target}"; then
-    "${VENV_PYTHON}" -m bluecore.model_build build --out "${model_target}"
-    echo "[bluecore] Embedding model built: ${model_npy}"
-  else
-    local download_status=$?
-    if [[ "${download_status}" != "3" ]]; then
-      exit "${download_status}"
-    fi
-    echo "[bluecore] Model download disabled in ${model_config}. Embedding features will be unavailable." >&2
-  fi
 }
 
 # キャッシュディレクトリ内の .venv を VENV_DIR へのシンボリックリンクに差し替える共通処理。
@@ -392,11 +366,9 @@ fi
 update_claude_cache_symlinks
 update_copilot_cache_symlink
 
-# ~/.bluecore/mem.db スキーマを初期化する（べき等: 既存DBは変更しない）
-if [[ "${SKIP_PYTHON}" != "1" ]]; then
-  echo "[bluecore] Initializing mem database at ${SETTINGS_DIR}/mem.db"
-  "${VENV_PYTHON}" -m bluecore.mem setup
-fi
+# mem.db の作成はインストーラでは行わない。
+# SessionStart の `bluecore.mem.cli context` が Database() 経由で
+# 親ディレクトリ作成とスキーマ初期化を毎セッション冪等に済ませるため。
 
 # インストール済みバージョンを記録する（SKIP_PYTHON=1 のときは Python 未インストールなので記録しない）
 # SessionStart の session_install フックが参照する

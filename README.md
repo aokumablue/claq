@@ -27,7 +27,7 @@ bluecore は、Claude Code の作業を「最初の計画からレビューま�
 | Skills | ワークフローや運用知識を段階的に案内 |
 | Commands | 定番作業をすぐ呼び出し |
 | Hooks | ツール実行の前後に自動チェックや記録を実行 |
-| Memory | セッション履歴を SQLite に保持 |
+| Memory | 知識カードと引き継ぎを SQLite（`~/.bluecore/mem.db`）に保持 |
 
 ---
 
@@ -40,10 +40,10 @@ bluecore は、Claude Code の作業を「最初の計画からレビューま�
 | **Command** | ユーザーが明示的に呼ぶ | `/<name> [args]` | `/plan`, `/review`, `/feat-dev` |
 | **Agent** | 内部から委譲される専門家 | コマンド / skill から `Task` ツール経由で `subagent_type` 指定起動 | `reviewer`, `architect`, `tdd-writer` |
 | **Skill** | 条件発火 or 委譲先の知識モジュール | description マッチで Claude Code が自動起動 / fork コンテキストで委譲 | `grillme`, `tdd`, `skill-make` |
-| **Instinct** | 観測から学習したパターン | SessionStart で `<mem-context>` として自動注入 | `/instinct` で管理 |
+| **Knowledge** | 蓄積された知識カード（罠・規約・手順・事実） | SessionStart で `<bluecore-memory>` として自動注入（`status='active'` のみ） | `/instinct` で棚卸し・昇格 |
 | **Hook** | ツール実行時に自動発火するスクリプト | `hooks.json` 登録 → Claude Code が呼ぶ | PreToolUse, SessionStart, SessionEnd |
 
-**ざっくりまとめると**: ユーザーは Command だけを覚えれば OK。Command が内部で必要な Agent / Skill を自動で連れてきます。Instinct と Hook はバックグラウンドで動く仕組みです。
+**ざっくりまとめると**: ユーザーは Command だけを覚えれば OK。Command が内部で必要な Agent / Skill を自動で連れてきます。Knowledge と Hook はバックグラウンドで動く仕組みです。
 
 ---
 
@@ -76,8 +76,8 @@ claude plugin install bluecore@bluecore
 | [`/refactor`](plugins/bluecore/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | clean→simplify→perf→review の安全な自動連鎖。`--mode` で部分実行 |
 | [`/review`](plugins/bluecore/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。**READ-ONLY 厳守**（プロンプト指示ベース） |
 | [`/harness`](plugins/bluecore/commands/harness.md) | 品質管理 | `[scope] [--audit-only] [--format=text\|json]` | スコア取得→harness-tuner で改善→再採点 |
-| [`/skill-gen`](plugins/bluecore/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--output=path] [--instincts]` | 入力収集→skill-make→skill-tune→grader/comparator/bench-analyzer 評価 |
-| [`/instinct`](plugins/bluecore/commands/instinct.md) | インスティンクト管理 | `<export\|import\|promote\|prune\|evolve>` | 学習成果の昇格・削除・スキル化 |
+| [`/skill-gen`](plugins/bluecore/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--output=path] [--knowledge]` | 入力収集→skill-make→skill-tune→grader/comparator/bench-analyzer 評価 |
+| [`/instinct`](plugins/bluecore/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
 | [`/test-gen`](plugins/bluecore/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→承認→実装。言語非依存 |
 
 ---
@@ -327,7 +327,7 @@ flowchart LR
 **実行例**:
 
 ```bash
-/skill-gen --commits=200 --instincts
+/skill-gen --commits=200 --knowledge
 ```
 
 **難度**: ★★★★☆ (上級)
@@ -375,25 +375,29 @@ flowchart TD
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
   classDef auto   fill:#ea580c,stroke:#c2410c,color:#fff,rx:4
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
+  classDef store  fill:#374151,stroke:#1f2937,color:#fff,rx:4
 
-  SS(["🌅 SessionStart"]) --> SL["slim<br/>文脈圧縮注入"]:::skill
-  SS --> MC(["📥 mem-context<br/>自動注入"]):::auto
+  SS(["🌅 SessionStart"]) --> MC(["📥 mem context<br/>bluecore-memory 注入"]):::auto
 
   subgraph session["💻 セッション中"]
     direction LR
     SAD["adr<br/>アーキ決定記録"]:::skill
-    SGU["guard<br/>破壊的操作防止"]:::skill
+    CW["学びの記録<br/>bluecore_mem_learn"]:::cmd
     AO["👁️ session-observer<br/>5分毎観測"]:::agent
   end
 
-  SE(["🌙 SessionEnd"]) --> SLE["learn<br/>観測→インスティンクト"]:::skill
-  SLE --> CI["/instinct<br/>昇格・管理"]:::cmd
+  CW --> KA[("knowledge<br/>status=active")]:::store
+  KA --> MC
+
+  SE(["🌙 SessionEnd"]) --> SLE["mem handoff<br/>引き継ぎ記録"]:::auto
+  AO --> PK[("knowledge<br/>status=pending")]:::store
+  PK --> CI["/instinct promote<br/>昇格レビュー"]:::cmd
 ```
 
 **トリガー**: 自動（ユーザー操作不要）
-**期待効果**: セッション中の知識が自動的にインスティンクトとして蓄積。ユーザーは `/instinct` でメンテだけ実行
+**期待効果**: セッション中の知識が知識カードとして蓄積。observer が入れた候補は `status='pending'` で注入されないため、ユーザーは `/instinct` で昇格レビューだけ実行
 
-**実行例**: ユーザー操作不要。週次で `/instinct promote && /instinct prune` を実行する程度
+**実行例**: ユーザー操作不要。週次で `/instinct list --status pending` → 採用分だけ `/instinct promote <key>` を実行する程度
 
 **難度**: ★☆☆☆☆ (自動)
 **想定所要時間**: バックグラウンド常時
@@ -507,13 +511,13 @@ flowchart TB
   classDef store  fill:#374151,stroke:#1f2937,color:#fff,rx:4
 
   subgraph user["👤 User Layer"]
-    CMD["Commands (10)"]:::cmd
+    CMD["Commands (9)"]:::cmd
   end
 
   subgraph internal["⚙️ Internal Layer"]
     direction LR
-    AGT["Agents (15)<br/>reviewer / architect / tdd-writer ..."]:::agent
-    SKL["Skills (14, all fork)<br/>grillme / tdd / secure ..."]:::skill
+    AGT["Agents (16)<br/>reviewer / architect / tdd-writer ..."]:::agent
+    SKL["Skills (13, all fork)<br/>grillme / learn / secure ..."]:::skill
   end
 
   subgraph persistence["💾 Persistence"]
@@ -523,13 +527,15 @@ flowchart TB
   CMD --> AGT
   CMD --> SKL
   AGT -.-> SKL
-  AGT --> DB
+  CMD --> DB
 ```
 
 **設計方針**:
 
 - ユーザーは **Commands のみ選択** すれば内部で Agents / Skills が自動連鎖
 - スキルは全て `context: fork`（内部委譲専用、ユーザー直接起動不可）に統一
-- 永続化は **SQLite（個人）** の単層
+- 永続化は **SQLite（個人）** の単層。テーブルは `repos` / `knowledge` / `sessions` の 3 つだけ
+- 検索は埋め込みも FTS5 も使わず Python 側でスコアリング（ランタイム依存は `pyyaml` のみ）
+- 知識カードを書くのは Commands の「学びの記録」ステップのみ。Agents は候補を呼び出し元へ報告する
 
 各コマンドの詳細仕様は [`plugins/bluecore/commands/`](plugins/bluecore/commands/) 配下を参照。

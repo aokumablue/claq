@@ -83,9 +83,10 @@ def _has_memory_lifecycle_hooks(root_dir: str | Path) -> bool:
     """実際に使用されるメモリ永続化ライフサイクル定義が hooks.json にあるかを返す。
 
     ディレクトリの存在だけでなく、``hooks/hooks.json`` を実際にパースし、
-    ``SessionStart``/``Stop``/``SessionEnd`` の各イベントが実在のメモリ永続化
-    コマンド（``bluecore.mem.cli`` の setup/end、``bluecore.hooks.session_start``/
-    ``session_end``）を起動していることを確認する。
+    ``SessionStart``/``Stop``/``SessionEnd`` の各イベントが実在のメモリ
+    永続化コマンド（``bluecore.mem.cli context``、``bluecore.hooks.session_start``、
+    ``bluecore.hooks.session_end``、``bluecore.mem.cli handoff``）を
+    起動していることを確認する。
 
     Args:
         root_dir: 監査対象のルートディレクトリ
@@ -101,7 +102,7 @@ def _has_memory_lifecycle_hooks(root_dir: str | Path) -> bool:
     return (
         _event_has_matching_command(
             hooks.get("SessionStart", []),
-            (("bluecore.mem.cli", "setup"),),
+            (("bluecore.mem.cli", "context"),),
         )
         and _event_has_matching_command(
             hooks.get("SessionStart", []),
@@ -113,7 +114,7 @@ def _has_memory_lifecycle_hooks(root_dir: str | Path) -> bool:
         )
         and _event_has_matching_command(
             hooks.get("SessionEnd", []),
-            (("bluecore.mem.cli", "session-end"),),
+            (("bluecore.mem.cli", "handoff"),),
         )
     )
 
@@ -328,7 +329,7 @@ def _repo_memory_persistence_checks(root_dir: str | Path) -> list[dict[str, Any]
             "path": "hooks/hooks.json",
             "description": "実際に使用されるメモリ永続化ライフサイクル定義が hooks/hooks.json に存在する",
             "pass": _has_memory_lifecycle_hooks(root_dir),
-            "fix": "Wire real memory lifecycle commands (bluecore.mem.cli setup/end, "
+            "fix": "Wire real memory lifecycle commands (bluecore.mem.cli context/handoff, "
             "bluecore.hooks.session_start/session_end) into hooks/hooks.json's "
             "SessionStart/Stop/SessionEnd events.",
         },

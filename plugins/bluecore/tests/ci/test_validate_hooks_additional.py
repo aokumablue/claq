@@ -166,10 +166,11 @@ def test_validate_hooks_reports_invalid_matcher_and_entrypoint(
     assert excinfo.value.code == 0
 
 
-def test_repo_mem_cli_hooks_split_target_and_args() -> None:
-    """実際の hooks.json の bluecore.mem.cli 呼び出しが、launcher 直後に
-    モジュール名・サブコマンドの順で並んでいることを確認する（--bg が付く
-    非 Claude ハーネス向け detach エントリも許容する）。
+def _repo_hook_argv() -> list[list[str]]:
+    """実際の hooks.json の command フックを launcher 以降の argv へ分解して返す。
+
+    Returns:
+        ``--bg`` を取り除いた argv のリスト（先頭がモジュール名）。
     """
     repo_root = Path(__file__).resolve().parents[4]
     hooks_file = repo_root / "plugins/bluecore/hooks/hooks.json"
@@ -182,25 +183,32 @@ def test_repo_mem_cli_hooks_split_target_and_args() -> None:
         if hook.get("type") == "command"
     ]
 
-    mem_cli_commands = [command for command in commands if "bluecore.mem.cli" in command]
-    assert mem_cli_commands
-    for command in mem_cli_commands:
+    argvs: list[list[str]] = []
+    for command in commands:
         parts = shlex.split(command)
         launcher_index = next(i for i, part in enumerate(parts) if part.endswith("launcher.py"))
         argv = parts[launcher_index + 1 :]
-        if argv and argv[0] == "--bg":
-            argv = argv[1:]
+        argvs.append(argv[1:] if argv and argv[0] == "--bg" else argv)
+    return argvs
 
-        assert argv[0] == "bluecore.mem.cli"
-        assert argv[1] in {
-            "setup",
-            "context",
-            "record-project-profile",
-            "session-init",
-            "record-interaction",
-            "session-end",
-            "observe",
-        }
+
+def test_repo_hook_modules_are_importable() -> None:
+    """hooks.json が起動する全モジュールが実在することを確認する。"""
+    for argv in _repo_hook_argv():
+        assert importlib.util.find_spec(argv[0]) is not None, f"モジュールが存在しません: {argv[0]}"
+
+
+def test_repo_mem_cli_hooks_split_target_and_args() -> None:
+    """実際の hooks.json の bluecore.mem.cli 呼び出しが、launcher 直後に
+    モジュール名・サブコマンドの順で並び、かつサブコマンドが CLI に実在する
+    ことを確認する（``--bg`` が付く detach エントリも許容する）。
+    """
+    from bluecore.mem.cli import _COMMAND_HANDLERS
+
+    mem_cli_argv = [argv for argv in _repo_hook_argv() if argv[0] == "bluecore.mem.cli"]
+    assert mem_cli_argv
+    for argv in mem_cli_argv:
+        assert argv[1] in _COMMAND_HANDLERS, f"未定義のサブコマンド: {argv[1]}"
 
 
 def test_validate_http_hook_without_optional_fields() -> None:

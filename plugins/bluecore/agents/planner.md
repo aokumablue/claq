@@ -100,7 +100,7 @@ model: opus
 
 ## 永続メモリ
 
-`<mem-context>` 注入で起動。
-search: `plan implementation {feature_keywords}` / `risk blocker issue plan`
-record: `{"event_type": "plan-create", "content": "Created plan: {feature}. Phases: {n}. Risks: {risks}"}`
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
+search: `mem search` — クエリ例 `plan implementation {feature_keywords}` / `risk blocker issue plan`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: **自分では書かない**。学びの候補は呼び出し元へ報告し、記録は呼び出し元コマンドの「学びの記録」ステップに任せる（本エージェントの成果は final gate でリバートされうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: 類似計画 / リスクパターン / 見積もり精度

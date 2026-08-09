@@ -91,47 +91,26 @@ class TestSessionEndHelpers:
     def test_get_session_metadata_uses_git_branch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(session_end, "get_project_name", lambda: "repo")
         monkeypatch.setattr(session_end, "run_command", lambda cmd: {"success": True, "output": "feature/test"})
-        monkeypatch.setattr(session_end.Path, "cwd", lambda: Path("/worktree"))
 
         assert session_end.get_session_metadata() == {
             "project": "repo",
             "branch": "feature/test",
-            "worktree": "/worktree",
         }
 
     def test_get_session_metadata_falls_back_when_branch_lookup_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(session_end, "get_project_name", lambda: None)
         monkeypatch.setattr(session_end, "run_command", lambda cmd: {"success": False, "output": ""})
-        monkeypatch.setattr(session_end.Path, "cwd", lambda: Path("/worktree"))
 
         assert session_end.get_session_metadata()["branch"] == "unknown"
 
-    def test_build_summary_section_and_block(self) -> None:
-        summary = {
-            "userMessages": ["ご質問ありがとうございます。  Fix `docs`\nnow"],
-            "filesModified": ["README.md"],
-            "toolsUsed": ["Write"],
-            "totalMessages": 1,
-        }
-
-        section = session_end.build_summary_section(summary)
-        block = session_end.build_summary_block(summary)
-
-        assert "ご質問ありがとうございます。" not in section
-        assert "Fix \\`docs\\` now" in section
-        assert "### Files Modified" in section
-        assert "### 使用したツール" in section
-        assert "### 統計" in section
-        assert block.startswith(session_end.SUMMARY_START_MARKER)
-        assert block.endswith(session_end.SUMMARY_END_MARKER)
-
-    def test_extract_session_summary_compacts_user_messages(self, tmp_path: Path) -> None:
+    def test_extract_session_summary_counts_user_messages(self, tmp_path: Path) -> None:
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
             "\n".join(
                 [
                     json.dumps({"type": "user", "content": "ご質問ありがとうございます。  修正お願いします。"}),
                     json.dumps({"type": "user", "content": "   second line"}),
+                    json.dumps({"type": "user", "content": ""}),
                 ]
             )
             + "\n",
@@ -140,33 +119,7 @@ class TestSessionEndHelpers:
 
         summary = session_end.extract_session_summary(str(transcript))
 
-        assert summary is not None
-        assert summary["userMessages"] == ["修正お願いします", "second line"]
-
-    def test_merge_session_header_handles_separator(self) -> None:
-        content = "# Session: old\n**Date:** 2025-01-01\n**Started:** 09:00\n---\nbody"
-        merged = session_end.merge_session_header(
-            content,
-            today="2026-01-01",
-            current_time="10:00",
-            metadata={"project": "repo", "branch": "main", "worktree": "/worktree"},
-        )
-
-        assert merged is not None
-        assert "**Project:** repo" in merged
-        assert "**Last Updated:** 10:00" in merged
-        assert merged.endswith("body")
-
-    def test_merge_session_header_returns_none_without_separator(self) -> None:
-        assert (
-            session_end.merge_session_header(
-                "# Session: old",
-                today="2026-01-01",
-                current_time="10:00",
-                metadata={"project": "repo", "branch": "main", "worktree": "/worktree"},
-            )
-            is None
-        )
+        assert summary == {"filesModified": [], "totalMessages": 2}
 
     def test_extract_session_summary_returns_none_for_empty_content(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(session_end, "read_file", lambda path: "")
@@ -197,199 +150,35 @@ class TestSessionEndHelpers:
 
 
 class TestSessionEndMain:
-    def test_main_creates_session_file_with_summary(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
-        transcript_path = tmp_path / "transcript.jsonl"
-        transcript_path.write_text("{}", encoding="utf-8")
-
-        summary = {
-            "userMessages": ["Fix docs"],
-            "filesModified": ["README.md"],
-            "toolsUsed": ["Write"],
-            "totalMessages": 1,
-        }
-        writes: list[tuple[Path, str]] = []
-
-        monkeypatch.setattr(session_end, "read_raw_stdin", lambda: json.dumps({"transcript_path": str(transcript_path)}))
-        monkeypatch.setattr(session_end, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_end, "get_date_string", lambda: "2026-01-01")
-        monkeypatch.setattr(session_end, "get_session_id_short", lambda: "abc123")
-        monkeypatch.setattr(session_end, "get_session_metadata", lambda: {"project": "repo", "branch": "main", "worktree": "/repo"})
-        monkeypatch.setattr(session_end, "get_time_string", lambda: "10:00")
-        monkeypatch.setattr(session_end, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(session_end, "extract_session_summary", lambda path: summary)
-        monkeypatch.setattr(session_end, "write_file", lambda path, content: writes.append((Path(path), content)))
-
-        assert session_end.main() == 0
-        assert capsys.readouterr().out == ""
-        assert writes[0][0] == sessions_dir / "2026-01-01-abc123-session.tmp"
-        assert "Fix docs" in writes[0][1]
-        assert "README.md" in writes[0][1]
-
-    def test_main_updates_existing_session_file(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
-        transcript_path = tmp_path / "transcript.jsonl"
-        transcript_path.write_text("{}", encoding="utf-8")
-        session_file = sessions_dir / "2026-01-01-abc123-session.tmp"
-        session_file.write_text(
-            "\n".join(
-                [
-                    "# Session: old",
-                    "**Date:** 2026-01-01",
-                    "**Started:** 09:00",
-                    "**Last Updated:** 09:00",
-                    "**Project:** repo",
-                    "**Branch:** main",
-                    "**Worktree:** /repo",
-                    "",
-                ]
-            )
-            + session_end.SESSION_SEPARATOR
-            + "\n".join(
-                [
-                    session_end.SUMMARY_START_MARKER,
-                    "old summary",
-                    session_end.SUMMARY_END_MARKER,
-                    "old body",
-                ]
-            ),
-            encoding="utf-8",
+    def test_run_skips_when_transcript_path_is_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """transcript_path が無ければ何もしない（checkpoint も書かない）。"""
+        monkeypatch.setattr(
+            session_end, "extract_session_summary", lambda path: pytest.fail("走査してはならない")
         )
 
-        summary = {
-            "userMessages": ["Fix docs"],
-            "filesModified": ["README.md"],
-            "toolsUsed": ["Write"],
-            "totalMessages": 1,
-        }
-        writes: list[tuple[Path, str]] = []
+        assert session_end.run("{}") is None
+
+    def test_run_logs_when_transcript_is_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """transcript_path が実在しなければログを残して終わる。"""
         logs: list[str] = []
-
-        monkeypatch.setattr(session_end, "read_raw_stdin", lambda: json.dumps({"transcript_path": str(transcript_path)}))
-        monkeypatch.setattr(session_end, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_end, "get_date_string", lambda: "2026-01-01")
-        monkeypatch.setattr(session_end, "get_session_id_short", lambda: "abc123")
-        monkeypatch.setattr(session_end, "get_session_metadata", lambda: {"project": "repo", "branch": "main", "worktree": "/repo"})
-        monkeypatch.setattr(session_end, "get_time_string", lambda: "10:00")
-        monkeypatch.setattr(session_end, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(session_end, "extract_session_summary", lambda path: summary)
-        monkeypatch.setattr(session_end, "write_file", lambda path, content: writes.append((Path(path), content)))
         monkeypatch.setattr(session_end, "log", logs.append)
+        monkeypatch.setattr(
+            session_end, "extract_session_summary", lambda path: pytest.fail("走査してはならない")
+        )
 
-        assert session_end.main() == 0
-        assert capsys.readouterr().out == ""
-        assert writes[0][0] == session_file
-        assert "Fix docs" in writes[0][1]
-        assert any(msg.startswith("[SessionEnd] Updated session file:") for msg in logs)
+        session_end.run(json.dumps({"transcript_path": str(tmp_path / "missing.jsonl")}))
 
-    def test_main_creates_default_template_when_transcript_is_missing(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
-        transcript_path = tmp_path / "missing-transcript.jsonl"
-        writes: list[tuple[Path, str]] = []
-        logs: list[str] = []
-
-        monkeypatch.setattr(session_end, "read_raw_stdin", lambda: json.dumps({"transcript_path": str(transcript_path)}))
-        monkeypatch.setattr(session_end, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_end, "get_date_string", lambda: "2026-01-01")
-        monkeypatch.setattr(session_end, "get_session_id_short", lambda: "abc123")
-        monkeypatch.setattr(session_end, "get_session_metadata", lambda: {"project": "repo", "branch": "main", "worktree": "/repo"})
-        monkeypatch.setattr(session_end, "get_time_string", lambda: "10:00")
-        monkeypatch.setattr(session_end, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(session_end, "write_file", lambda path, content: writes.append((Path(path), content)))
-        monkeypatch.setattr(session_end, "log", logs.append)
-
-        assert session_end.main() == 0
-        assert capsys.readouterr().out == ""
         assert any("Transcript not found" in message for message in logs)
-        assert writes[0][0] == sessions_dir / "2026-01-01-abc123-session.tmp"
-        assert "## 現在の状態" in writes[0][1]
 
-    def test_main_logs_when_header_normalization_fails(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
-        session_file = sessions_dir / "2026-01-01-abc123-session.tmp"
-        session_file.write_text("# Session: old\nbody", encoding="utf-8")
-        writes: list[tuple[Path, str]] = []
-        logs: list[str] = []
-
-        monkeypatch.setattr(session_end, "read_raw_stdin", lambda: "{}")
-        monkeypatch.setattr(session_end, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_end, "get_date_string", lambda: "2026-01-01")
-        monkeypatch.setattr(session_end, "get_session_id_short", lambda: "abc123")
-        monkeypatch.setattr(session_end, "get_session_metadata", lambda: {"project": "repo", "branch": "main", "worktree": "/repo"})
-        monkeypatch.setattr(session_end, "get_time_string", lambda: "10:00")
-        monkeypatch.setattr(session_end, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(session_end, "write_file", lambda path, content: writes.append((Path(path), content)))
-        monkeypatch.setattr(session_end, "log", logs.append)
-
-        assert session_end.main() == 0
-        assert capsys.readouterr().out == ""
-        assert any("Failed to normalize header" in message for message in logs)
-        assert writes[0][0] == session_file
-
-    def test_main_migrates_legacy_summary_block(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
-        transcript_path = tmp_path / "transcript.jsonl"
-        transcript_path.write_text(
-            "\n".join(
-                [
-                    json.dumps({"type": "user", "content": "Fix docs"}),
-                    json.dumps({"type": "tool_use", "tool_name": "Write", "tool_input": {"file_path": "README.md"}}),
-                ]
-            )
-            + "\n",
-            encoding="utf-8",
+    def test_run_skips_checkpoint_below_threshold(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """閾値未満のセッションでは checkpoint を書かない。"""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(json.dumps({"type": "user", "content": "one"}) + "\n", encoding="utf-8")
+        monkeypatch.setattr(
+            session_end, "_auto_save_checkpoint", lambda *a: pytest.fail("保存してはならない")
         )
-        session_file = sessions_dir / "2026-01-01-abc123-session.tmp"
-        session_file.write_text(
-            "\n".join(
-                [
-                    "# Session: old",
-                    "**Date:** 2026-01-01",
-                    "**Started:** 09:00",
-                    "**Last Updated:** 09:00",
-                    "**Project:** repo",
-                    "**Branch:** main",
-                    "**Worktree:** /repo",
-                    "",
-                    "## Session Summary",
-                    "old summary",
-                ]
-            ),
-            encoding="utf-8",
-        )
-        writes: list[tuple[Path, str]] = []
-        logs: list[str] = []
 
-        monkeypatch.setattr(session_end, "read_raw_stdin", lambda: json.dumps({"transcript_path": str(transcript_path)}))
-        monkeypatch.setattr(session_end, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_end, "get_date_string", lambda: "2026-01-01")
-        monkeypatch.setattr(session_end, "get_session_id_short", lambda: "abc123")
-        monkeypatch.setattr(session_end, "get_session_metadata", lambda: {"project": "repo", "branch": "main", "worktree": "/repo"})
-        monkeypatch.setattr(session_end, "get_time_string", lambda: "10:00")
-        monkeypatch.setattr(session_end, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(session_end, "write_file", lambda path, content: writes.append((Path(path), content)))
-        monkeypatch.setattr(session_end, "log", logs.append)
-
-        assert session_end.main() == 0
-        assert capsys.readouterr().out == ""
-        assert session_end.SUMMARY_START_MARKER in writes[0][1]
-        assert "### 次回セッションへの引継ぎ" in writes[0][1]
-        assert any("Updated session file" in message for message in logs)
+        session_end.run(json.dumps({"transcript_path": str(transcript)}))
 
     def test_main_logs_on_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
         logs: list[str] = []
@@ -402,111 +191,31 @@ class TestSessionEndMain:
 
     def test_run_logs_on_outer_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
         logs: list[str] = []
-        monkeypatch.setattr(session_end, "get_sessions_dir", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        monkeypatch.setattr(session_end, "parse_json_object", lambda raw: (_ for _ in ()).throw(RuntimeError("boom")))
         monkeypatch.setattr(session_end, "log", logs.append)
 
-        assert session_end.run("{}") == "{}"
+        assert session_end.run("{}") is None
         assert any("Error: boom" in message for message in logs)
 
-    def test_run_skips_stop_event_during_loop_continuation(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """stop_hook_active=True（/goal などのループ継続）では session_stop を記録しない。"""
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
-        transcript_path = tmp_path / "transcript.jsonl"
-        transcript_path.write_text("{}", encoding="utf-8")
-        summary = {"userMessages": ["work"], "filesModified": [], "toolsUsed": [], "totalMessages": 1}
-        writes: list[tuple[Path, str]] = []
-        recorded: list[tuple] = []
-        logs: list[str] = []
-
-        monkeypatch.setattr(session_end, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_end, "get_date_string", lambda: "2026-01-01")
-        monkeypatch.setattr(session_end, "get_session_id_short", lambda: "abc123")
-        monkeypatch.setattr(
-            session_end, "get_session_metadata", lambda: {"project": "repo", "branch": "main", "worktree": "/repo"}
-        )
-        monkeypatch.setattr(session_end, "get_time_string", lambda: "10:00")
-        monkeypatch.setattr(session_end, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(session_end, "extract_session_summary", lambda path: summary)
-        monkeypatch.setattr(session_end, "write_file", lambda path, content: writes.append((Path(path), content)))
-        monkeypatch.setattr(session_end, "_record_stop_event", lambda *args: recorded.append(args))
-        monkeypatch.setattr(session_end, "log", logs.append)
-
-        raw = json.dumps({"transcript_path": str(transcript_path), "stop_hook_active": True})
-        assert session_end.run(raw) == raw
-        # ループ継続中は session_stop を記録しない
-        assert recorded == []
-        # 継続用セッションファイルは引き続き更新される
-        assert writes and writes[0][0] == sessions_dir / "2026-01-01-abc123-session.tmp"
-        assert any("loop continuation" in message for message in logs)
-
-    def test_run_records_stop_event_on_genuine_stop(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """stop_hook_active が無い通常停止では session_stop を記録する。"""
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
-        transcript_path = tmp_path / "transcript.jsonl"
-        transcript_path.write_text("{}", encoding="utf-8")
-        summary = {"userMessages": ["work"], "filesModified": [], "toolsUsed": [], "totalMessages": 1}
-        recorded: list[tuple] = []
-
-        monkeypatch.setattr(session_end, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_end, "get_date_string", lambda: "2026-01-01")
-        monkeypatch.setattr(session_end, "get_session_id_short", lambda: "abc123")
-        monkeypatch.setattr(
-            session_end, "get_session_metadata", lambda: {"project": "repo", "branch": "main", "worktree": "/repo"}
-        )
-        monkeypatch.setattr(session_end, "get_time_string", lambda: "10:00")
-        monkeypatch.setattr(session_end, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(session_end, "extract_session_summary", lambda path: summary)
-        monkeypatch.setattr(session_end, "write_file", lambda path, content: None)
-        monkeypatch.setattr(session_end, "_record_stop_event", lambda *args: recorded.append(args))
-        monkeypatch.setattr(session_end, "log", lambda message: None)
-
-        raw = json.dumps({"transcript_path": str(transcript_path)})
-        assert session_end.run(raw) == raw
-        assert len(recorded) == 1
-        assert recorded[0][0] == summary
-
-    def test_main_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_main_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "{}")
-        monkeypatch.setattr("bluecore.lib.core_utils.get_sessions_dir", lambda: tmp_path / "sessions")
-        monkeypatch.setattr("bluecore.lib.core_utils.get_date_string", lambda: "2026-01-01")
-        monkeypatch.setattr("bluecore.lib.core_utils.get_session_id_short", lambda: "abc123")
-        monkeypatch.setattr("bluecore.lib.core_utils.get_project_name", lambda: "repo")
-        monkeypatch.setattr("bluecore.lib.core_utils.run_command", lambda cmd: {"success": True, "output": "main"})
-        monkeypatch.setattr("bluecore.lib.core_utils.get_time_string", lambda: "10:00")
-        monkeypatch.setattr("bluecore.lib.core_utils.ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr("bluecore.lib.core_utils.write_file", lambda path, content: None)
-        monkeypatch.setattr("bluecore.lib.core_utils.log", lambda message: None)
 
         assert _run_entrypoint("bluecore.hooks.session_end") == 0
 
 
 class TestPreCompact:
-    def test_main_logs_and_updates_active_session(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        session_file = tmp_path / "2026-01-01-abc-session.tmp"
-        session_file.write_text("session", encoding="utf-8")
-
+    def test_main_logs_compaction(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         appended: list[tuple[Path, str]] = []
         logs: list[str] = []
 
         monkeypatch.setattr(pre_compact, "get_sessions_dir", lambda: tmp_path)
         monkeypatch.setattr(pre_compact, "ensure_dir", lambda path: Path(path))
         monkeypatch.setattr(pre_compact, "append_file", lambda path, content: appended.append((Path(path), content)))
-        monkeypatch.setattr(pre_compact, "find_files", lambda directory, pattern: [{"path": str(session_file)}])
         monkeypatch.setattr(pre_compact, "log", logs.append)
         monkeypatch.setattr(pre_compact, "get_datetime_string", lambda: "2026-01-01 00:00:00")
-        monkeypatch.setattr(pre_compact, "get_time_string", lambda: "10:00")
 
         assert pre_compact.main() == 0
-        assert appended[0][0] == tmp_path / "compaction-log.txt"
-        assert "Context compaction triggered" in appended[0][1]
-        assert appended[1][0] == session_file
-        assert "Context was summarized" in appended[1][1]
+        assert appended == [(tmp_path / "compaction-log.txt", "[2026-01-01 00:00:00] Context compaction triggered\n")]
         assert logs == ["[PreCompact] State saved before compaction"]
 
     def test_main_logs_on_exception(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -514,7 +223,6 @@ class TestPreCompact:
         monkeypatch.setattr(pre_compact, "get_sessions_dir", lambda: tmp_path)
         monkeypatch.setattr(pre_compact, "ensure_dir", lambda path: Path(path))
         monkeypatch.setattr(pre_compact, "append_file", lambda path, content: (_ for _ in ()).throw(RuntimeError("boom")))
-        monkeypatch.setattr(pre_compact, "find_files", lambda directory, pattern: [])
         monkeypatch.setattr(pre_compact, "log", logs.append)
 
         assert pre_compact.main() == 0
@@ -524,9 +232,7 @@ class TestPreCompact:
         monkeypatch.setattr("bluecore.lib.core_utils.get_sessions_dir", lambda: tmp_path)
         monkeypatch.setattr("bluecore.lib.core_utils.ensure_dir", lambda path: Path(path))
         monkeypatch.setattr("bluecore.lib.core_utils.append_file", lambda path, content: None)
-        monkeypatch.setattr("bluecore.lib.core_utils.find_files", lambda directory, pattern: [])
         monkeypatch.setattr("bluecore.lib.core_utils.get_datetime_string", lambda: "2026-01-01 00:00:00")
-        monkeypatch.setattr("bluecore.lib.core_utils.get_time_string", lambda: "10:00")
         monkeypatch.setattr("bluecore.lib.core_utils.log", lambda message: None)
 
         assert _run_entrypoint("bluecore.hooks.pre_compact") == 0
@@ -561,7 +267,6 @@ class TestCheckpointInjection:
         monkeypatch.setattr(session_start, "log", lambda _: None)
         monkeypatch.setattr(session_start, "get_package_manager", lambda: PackageManagerResult(name=None, config=None, source="none"))
         monkeypatch.setattr(session_start, "ensure_dir", lambda _: None)
-        monkeypatch.setattr(session_start, "_import_adrs_and_instincts", lambda: None)
         monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda _: None)
 
     def test_active_checkpoint_is_injected(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -578,7 +283,6 @@ class TestCheckpointInjection:
 
         self._make_session_start_base_patches(monkeypatch, tmp_path)
         monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_start, "get_session_search_dirs", lambda: [sessions_dir])
         monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: tmp_path / "learned")
         monkeypatch.setattr(session_start, "find_files", lambda path, pattern, **kw: (
             [{"path": str(checkpoint), "mtime": 9999}] if "checkpoint-" in pattern else []
@@ -604,7 +308,6 @@ class TestCheckpointInjection:
 
         self._make_session_start_base_patches(monkeypatch, tmp_path)
         monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_start, "get_session_search_dirs", lambda: [sessions_dir])
         monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: tmp_path / "learned")
         monkeypatch.setattr(session_start, "find_files", lambda path, pattern, **kw: (
             [{"path": str(checkpoint), "mtime": 9999}] if "checkpoint-" in pattern else []
@@ -633,7 +336,6 @@ class TestCheckpointInjection:
 
         self._make_session_start_base_patches(monkeypatch, tmp_path)
         monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_start, "get_session_search_dirs", lambda: [sessions_dir])
         monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: tmp_path / "learned")
         monkeypatch.setattr(session_start, "find_files", lambda path, pattern, **kw: (
             [{"path": str(checkpoint), "mtime": 9999}] if "checkpoint-" in pattern else []
@@ -652,8 +354,6 @@ class TestAutoCheckpointSave:
     def _make_summary(self, total_messages: int = 35) -> dict:
         """テスト用サマリーを生成する。"""
         return {
-            "userMessages": [f"msg{i}" for i in range(min(total_messages, 10))],
-            "toolsUsed": ["Edit", "Read"],
             "filesModified": ["path/to/file.py"],
             "totalMessages": total_messages,
         }
@@ -662,7 +362,7 @@ class TestAutoCheckpointSave:
         """メッセージ数が閾値以上のとき新規チェックポイントが作成されること。"""
         sessions_dir = tmp_path / "session-data"
         sessions_dir.mkdir()
-        metadata = {"project": "bluecore", "branch": "develop", "worktree": str(tmp_path)}
+        metadata = {"project": "bluecore", "branch": "develop"}
         summary = self._make_summary(35)
 
         session_end._auto_save_checkpoint(summary, metadata, sessions_dir)
@@ -683,7 +383,7 @@ class TestAutoCheckpointSave:
             "---\ntask: bluecore\ncompleted: false\n---\n\n## 変更済みファイル\n- old.py\n\n## 再開コンテキスト\nold\n",
             encoding="utf-8",
         )
-        metadata = {"project": "bluecore", "branch": "main", "worktree": str(tmp_path)}
+        metadata = {"project": "bluecore", "branch": "main"}
         summary = self._make_summary(40)
         summary["filesModified"] = ["new.py"]
 
@@ -703,7 +403,7 @@ class TestAutoCheckpointSave:
             "---\ntask: bluecore\ncompleted: true\n---\n\n## 変更済みファイル\n- old.py\n",
             encoding="utf-8",
         )
-        metadata = {"project": "bluecore", "branch": "main", "worktree": str(tmp_path)}
+        metadata = {"project": "bluecore", "branch": "main"}
         summary = self._make_summary(40)
 
         session_end._auto_save_checkpoint(summary, metadata, sessions_dir)
@@ -726,86 +426,11 @@ class TestAutoCheckpointSave:
 
         monkeypatch.setattr(session_end, "_auto_save_checkpoint", fake_auto_save)
         monkeypatch.setattr(session_end, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_end, "_record_stop_event", lambda *_a: None)
-        monkeypatch.setattr(session_end, "write_file", lambda *_a: None)
-        monkeypatch.setattr(session_end, "ensure_dir", lambda _: None)
 
         raw = json.dumps({"transcript_path": str(transcript)})
         session_end.run(raw)
 
         assert called, "Expected _auto_save_checkpoint to be called"
-
-
-class TestFilterSessionSummary:
-    """_filter_session_summary のユニットテスト。"""
-
-    _START = "<!-- bluecore:SUMMARY:START -->"
-    _END = "<!-- bluecore:SUMMARY:END -->"
-
-    def _wrap(self, body: str) -> str:
-        return f"# Session: 2026-05-09\n---\n{self._START}\n{body}\n{self._END}\n### 次回セッションへの引継ぎ\n-\n### 読み込むコンテキスト\n```\n[relevant files]\n```\n"
-
-    def test_keeps_only_tasks(self) -> None:
-        """Tasks のみを保持し Files Modified は除外すること（注入トークン削減）。"""
-        from bluecore.hooks.session_start import _filter_session_summary
-
-        body = "### Tasks\n- msg1\n- msg2\n\n### Files Modified\n- foo.py\n\n### 使用したツール\nEdit, Read\n\n### 統計\n- ユーザーメッセージ総数: 5"
-        result = _filter_session_summary(self._wrap(body))
-
-        assert "### Tasks" in result
-        assert "msg1" in result
-        assert "### Files Modified" not in result
-        assert "foo.py" not in result
-        assert "使用したツール" not in result
-        assert "統計" not in result
-
-    def test_no_files_modified_section(self) -> None:
-        """Files Modified がない場合は Tasks のみを返すこと。"""
-        from bluecore.hooks.session_start import _filter_session_summary
-
-        body = "### Tasks\n- only task\n\n### 使用したツール\nRead"
-        result = _filter_session_summary(self._wrap(body))
-
-        assert "### Tasks" in result
-        assert "only task" in result
-        assert "Files Modified" not in result
-
-    def test_removes_template_sections(self) -> None:
-        """テンプレート部分（引継ぎ・コンテキスト）を除外すること。"""
-        from bluecore.hooks.session_start import _filter_session_summary
-
-        body = "### Tasks\n- t1\n\n### Files Modified\n- a.py"
-        result = _filter_session_summary(self._wrap(body))
-
-        assert "次回セッションへの引継ぎ" not in result
-        assert "読み込むコンテキスト" not in result
-        assert "[relevant files]" not in result
-
-    def test_truncates_when_exceeds_max_length(self) -> None:
-        """2000文字を超える場合は compact_line で切り詰めること。"""
-        from bluecore.hooks.session_start import _filter_session_summary
-
-        long_tasks = "\n".join(f"- {'x' * 100}" for _ in range(30))
-        body = f"### Tasks\n{long_tasks}\n\n### Files Modified\n- f.py"
-        result = _filter_session_summary(self._wrap(body), max_length=2000)
-
-        assert len(result) <= 2000
-        assert result.endswith("...")
-
-    def test_fallback_when_no_marker(self) -> None:
-        """SUMMARY マーカーがない旧形式は compact_line にフォールバックすること。"""
-        from bluecore.hooks.session_start import _filter_session_summary
-
-        old_format = "## Session Summary\n- did something\n" * 50
-        result = _filter_session_summary(old_format, max_length=2000)
-
-        assert len(result) <= 2000
-
-    def test_empty_content_returns_empty(self) -> None:
-        """空文字列を渡すと空文字列を返すこと。"""
-        from bluecore.hooks.session_start import _filter_session_summary
-
-        assert _filter_session_summary("") == ""
 
 
 @pytest.mark.parametrize(
@@ -839,124 +464,57 @@ def test_collect_user_message_non_text_content() -> None:
     assert session_end._collect_user_message({"type": "user", "content": 123}) == ""
 
 
-def test_collect_tool_use_empty_name_and_non_tool_block() -> None:
-    """ツール名が空・非tool_useブロックでも例外なく走査する。"""
-    tools: set[str] = set()
+def test_collect_user_message_ignores_non_dict_message() -> None:
+    """message が dict でないエントリはユーザー発話として扱わない。"""
+    assert session_end._collect_user_message({"message": "not-a-dict"}) == ""
+
+
+def test_collect_modified_files_empty_name_and_non_tool_block() -> None:
+    """ツール名が空・非 tool_use ブロックでも例外なく走査する。"""
     files: set[str] = set()
-    session_end._collect_tool_use({"type": "tool_use"}, tools, files)  # tool_name空・file無
-    session_end._collect_tool_use(
+    session_end._collect_modified_files({"type": "tool_use"}, files)  # tool_name 空
+    session_end._collect_modified_files(
         {"type": "assistant", "message": {"content": [{"type": "text"}, {"type": "tool_use", "name": "", "input": {}}]}},
-        tools,
         files,
     )
-    assert tools == set()
     assert files == set()
 
 
-def test_collect_tool_use_normalizes_apply_patch() -> None:
+def test_collect_modified_files_ignores_non_edit_tools() -> None:
+    """編集系でないツールはファイルを収集しない。"""
+    files: set[str] = set()
+    session_end._collect_modified_files(
+        {"type": "tool_use", "tool_name": "Read", "tool_input": {"file_path": "a.py"}}, files
+    )
+    assert files == set()
+
+
+def test_collect_modified_files_normalizes_apply_patch() -> None:
     """apply_patch は Edit へ正規化し、パッチ内の全対象ファイルを収集する。"""
-    tools: set[str] = set()
     files: set[str] = set()
     patch = "*** Begin Patch\n*** Add File: a.py\n+x\n*** Update File: b.py\n*** End Patch"
-    session_end._collect_tool_use(
+    session_end._collect_modified_files(
         {"type": "tool_use", "tool_name": "apply_patch", "tool_input": {"input": patch}},
-        tools,
         files,
     )
-    assert tools == {"Edit"}
     assert files == {"a.py", "b.py"}
 
 
-def test_collect_tool_use_apply_patch_in_assistant_block_without_paths() -> None:
-    """assistant ブロック経由の apply_patch でも正規化され、パス不明時は収集しない。"""
-    tools: set[str] = set()
+def test_collect_modified_files_apply_patch_in_assistant_block_without_paths() -> None:
+    """assistant ブロック経由の apply_patch でパス不明なら収集しない。"""
     files: set[str] = set()
-    session_end._collect_tool_use(
+    session_end._collect_modified_files(
         {
             "type": "assistant",
             "message": {"content": [{"type": "tool_use", "name": "apply_patch", "input": {"input": "no markers"}}]},
         },
-        tools,
         files,
     )
-    assert tools == {"Edit"}
     assert files == set()
 
 
-def test_record_tool_use_non_dict_input() -> None:
+def test_record_modified_files_non_dict_input() -> None:
     """tool_input が dict 以外でも例外なく空入力として扱う。"""
-    tools: set[str] = set()
     files: set[str] = set()
-    session_end._record_tool_use("Write", "not-a-dict", tools, files)
-    assert tools == {"Write"}
+    session_end._record_modified_files("Write", "not-a-dict", files)
     assert files == set()
-
-
-def test_build_summary_section_skips_empty_message() -> None:
-    """空のユーザーメッセージはスキップする。"""
-    summary = {"userMessages": ["", "real task"], "filesModified": [], "toolsUsed": [], "totalMessages": 2}
-    out = session_end.build_summary_section(summary)
-    assert "real task" in out
-
-
-def test_update_session_file_no_existing_no_summary(monkeypatch, tmp_path: Path) -> None:
-    """既存ファイルもサマリーも無ければ書き込みしない。"""
-    monkeypatch.setattr(session_end, "read_file", lambda f: None)
-    written: list[str] = []
-    monkeypatch.setattr(session_end, "write_file", lambda f, c: written.append(c))
-    session_end._update_session_file(tmp_path / "s.md", None, "2026-01-01", "00:00", {})
-    assert written == []
-
-
-class TestCodexSessionEndFallback:
-    """session_end の Codex フォールバックのテスト。"""
-
-    @pytest.fixture(autouse=True)
-    def _reset_harness(self, monkeypatch):
-        """ハーネス判定キャッシュをリセットする。"""
-        from bluecore.lib import harness
-
-        monkeypatch.delenv("CLAUDECODE", raising=False)
-        harness.detect_harness.cache_clear()
-        yield
-        harness.detect_harness.cache_clear()
-
-    def test_codex_triggers_mem_session_end_detached(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Codex では mem session-end が detached 起動される。"""
-        monkeypatch.setenv("PLUGIN_DATA", "/tmp/data")
-        calls: list[list[str]] = []
-        monkeypatch.setattr(
-            session_end, "detach_process", lambda cmd, raw, **k: calls.append(cmd) or True
-        )
-        session_end._trigger_codex_session_end_fallback('{"session_id": "s1"}')
-        assert len(calls) == 1
-        assert calls[0][-2:] == ["bluecore.mem.cli", "session-end"]
-
-    def test_claude_does_not_trigger_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Claude では SessionEnd イベントが存在するためフォールバックしない。"""
-        monkeypatch.setenv("CLAUDECODE", "1")
-        monkeypatch.setattr(
-            session_end,
-            "detach_process",
-            lambda *a, **k: pytest.fail("detach されてはならない"),
-        )
-        session_end._trigger_codex_session_end_fallback("{}")
-
-    def test_detach_failure_is_logged(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """detach 失敗時はログに記録され例外は出ない。"""
-        monkeypatch.setenv("PLUGIN_DATA", "/tmp/data")
-        logs: list[str] = []
-        monkeypatch.setattr(session_end, "detach_process", lambda *a, **k: False)
-        monkeypatch.setattr(session_end, "log", logs.append)
-        session_end._trigger_codex_session_end_fallback("{}")
-        assert any("session-end fallback" in line for line in logs)
-
-    def test_main_invokes_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """main が run 後にフォールバック判定を呼ぶ。"""
-        monkeypatch.setenv("CLAUDECODE", "1")
-        called: list[str] = []
-        monkeypatch.setattr(session_end, "read_raw_stdin", lambda: "{}")
-        monkeypatch.setattr(session_end, "run", lambda raw: raw)
-        monkeypatch.setattr(session_end, "_trigger_codex_session_end_fallback", called.append)
-        assert session_end.main() == 0
-        assert called == ["{}"]

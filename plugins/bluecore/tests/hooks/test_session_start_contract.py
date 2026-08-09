@@ -48,16 +48,16 @@ def _run_cli_main(argv: list[str], stdin_json: dict, monkeypatch, tmp_path: Path
     return buf_out.getvalue(), buf_err.getvalue()
 
 
-class TestMemCliSetupContract:
+class TestMemCliContextContract:
     def test_normal_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        stdout, _ = _run_cli_main(["setup"], {}, monkeypatch, tmp_path)
+        stdout, _ = _run_cli_main(["context"], {}, monkeypatch, tmp_path)
         _assert_session_start_json(stdout)
 
-    def test_settings_load_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        import bluecore.mem.settings as settings_mod
+    def test_settings_init_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
+        from bluecore.mem import cli as cli_mod
 
-        monkeypatch.setattr(settings_mod.Settings, "load", classmethod(lambda cls: (_ for _ in ()).throw(RuntimeError("settings broken"))))
-        monkeypatch.setattr(sys, "argv", ["python", "setup"])
+        monkeypatch.setattr(cli_mod, "Settings", lambda: (_ for _ in ()).throw(RuntimeError("settings broken")))
+        monkeypatch.setattr(sys, "argv", ["python", "context"])
         monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
 
         from bluecore.mem import cli
@@ -75,21 +75,8 @@ class TestMemCliSetupContract:
         """DB 初期化失敗でも JSON を返す。"""
         from bluecore.mem import cli
 
-        monkeypatch.setattr(cli, "_initialize_db", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db broken")))
-        stdout, _ = _run_cli_main(["setup"], {}, monkeypatch, tmp_path)
-        _assert_session_start_json(stdout)
-
-
-class TestMemCliContextContract:
-    def test_normal_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        stdout, _ = _run_cli_main(["context"], {"cwd": str(tmp_path)}, monkeypatch, tmp_path)
-        _assert_session_start_json(stdout)
-
-    def test_build_context_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        import bluecore.mem.context as context_mod
-
-        monkeypatch.setattr(context_mod, "build_context", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("ctx broken")))
-        stdout, _ = _run_cli_main(["context"], {"cwd": str(tmp_path)}, monkeypatch, tmp_path)
+        monkeypatch.setattr(cli, "_build_context", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db broken")))
+        stdout, _ = _run_cli_main(["context"], {}, monkeypatch, tmp_path)
         _assert_session_start_json(stdout)
 
 
@@ -140,18 +127,6 @@ class TestSessionStartHookContract:
             code = session_start.main()
         assert code == 0
         _assert_session_start_json(buf_out.getvalue())
-
-def test_dedupe_recent_sessions_keeps_newer(monkeypatch) -> None:
-    """同名セッションは新しい mtime の方を残す。"""
-    batches = iter([
-        [{"path": "/a/x-session.tmp", "mtime": 100}],
-        [{"path": "/b/x-session.tmp", "mtime": 50}],
-    ])
-    monkeypatch.setattr(session_start, "find_files", lambda d, pat, max_age=7: next(batches))
-    result = session_start.dedupe_recent_sessions([Path("/a"), Path("/b")])
-    assert len(result) == 1
-    assert result[0]["mtime"] == 100
-
 
 def _pi(languages=None, frameworks=None, primary=None):
     from types import SimpleNamespace

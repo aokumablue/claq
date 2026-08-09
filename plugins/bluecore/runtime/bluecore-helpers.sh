@@ -21,36 +21,6 @@ bluecore_run() {
   python3 "${plugin_root}/src/bluecore/launcher.py" "$@"
 }
 
-# Pipe JSON input into bluecore.mem subcommands.
-bluecore_mem_json() {
-  local command="${1:?Usage: bluecore_mem_json <subcommand> [json] }"
-  shift || true
-
-  if [ "$#" -gt 0 ]; then
-    printf '%s' "$1" | bluecore_run bluecore.mem.cli "$command"
-  else
-    cat | bluecore_run bluecore.mem.cli "$command"
-  fi
-}
-
-# Build and execute a repository-scoped mem search payload.
-bluecore_mem_search() {
-  local query="${1:?Usage: bluecore_mem_search <query> [limit]}"
-  local limit="${2:-3}"
-  local cwd
-  cwd="$(git rev-parse --show-toplevel)"
-
-  bluecore_mem_json search "$(
-    python3 - "$cwd" "$query" "$limit" <<'PY'
-import json
-import sys
-
-cwd, query, limit = sys.argv[1], sys.argv[2], int(sys.argv[3])
-print(json.dumps({"cwd": cwd, "query": query, "limit": limit}))
-PY
-  )"
-}
-
 # Run a bluecore launcher command in the background and print the PID.
 bluecore_run_bg() {
   local plugin_root
@@ -58,6 +28,110 @@ bluecore_run_bg() {
 
   nohup python3 "${plugin_root}/src/bluecore/launcher.py" "$@" >/dev/null 2>&1 &
   printf '%s\n' "$!"
+}
+
+# Record one knowledge card in the mem database (`mem learn`).
+#
+# Usage:
+#   bluecore_mem_learn --kind <kind> --title "<one line>" \
+#                      [--body "<why/how>"] [--key <slug>] \
+#                      [--scope repo|global] [--domain <tag>] \
+#                      [--confidence 0.0-1.0] [--status active|pending] \
+#                      [--source-ref <path-or-url>]
+#
+# --kind and --title are required; everything else has a default.
+#   kind    : convention | decision | pitfall | howto | fact | preference
+#   scope   : repo (default) | global
+#   status  : active (default, injected at SessionStart) | pending (needs
+#             a human to run `/instinct promote` before it is injected)
+#   key     : defaults to a slug derived from the title, so re-recording the
+#             same title updates that card instead of piling up duplicates.
+#
+# Values are marshalled into JSON by python3, so quotes, newlines and
+# non-ASCII text in --title / --body need no shell escaping.
+bluecore_mem_learn() {
+  # zsh marks `status` (and friends) read-only, so every local is prefixed.
+  local card_key="" card_kind="" card_scope="" card_title="" card_body=""
+  local card_domain="" card_confidence="" card_status="" card_source_ref=""
+
+  while [ "$#" -gt 0 ]; do
+    if [ "$#" -lt 2 ]; then
+      printf 'bluecore_mem_learn: %s needs a value\n' "$1" >&2
+      return 2
+    fi
+    case "$1" in
+      --key) card_key="$2" ;;
+      --kind) card_kind="$2" ;;
+      --scope) card_scope="$2" ;;
+      --title) card_title="$2" ;;
+      --body) card_body="$2" ;;
+      --domain) card_domain="$2" ;;
+      --confidence) card_confidence="$2" ;;
+      --status) card_status="$2" ;;
+      --source-ref) card_source_ref="$2" ;;
+      *)
+        printf 'bluecore_mem_learn: unknown option: %s\n' "$1" >&2
+        return 2
+        ;;
+    esac
+    shift 2
+  done
+
+  if [ -z "$card_kind" ] || [ -z "$card_title" ]; then
+    printf 'bluecore_mem_learn: --kind and --title are required\n' >&2
+    return 2
+  fi
+
+  BLUECORE_LEARN_KEY="$card_key" \
+  BLUECORE_LEARN_KIND="$card_kind" \
+  BLUECORE_LEARN_SCOPE="$card_scope" \
+  BLUECORE_LEARN_TITLE="$card_title" \
+  BLUECORE_LEARN_BODY="$card_body" \
+  BLUECORE_LEARN_DOMAIN="$card_domain" \
+  BLUECORE_LEARN_CONFIDENCE="$card_confidence" \
+  BLUECORE_LEARN_STATUS="$card_status" \
+  BLUECORE_LEARN_SOURCE_REF="$card_source_ref" \
+  python3 -c 'import json, os, sys
+fields = ("key", "kind", "scope", "title", "body", "domain", "confidence", "status", "source_ref")
+payload = {f: os.environ["BLUECORE_LEARN_" + f.upper()] for f in fields}
+json.dump({k: v for k, v in payload.items() if v}, sys.stdout, ensure_ascii=False)
+' | bluecore_run bluecore.mem.cli learn
+}
+
+# Append one loop-dev iteration telemetry record to the JSONL raw log.
+#
+# Telemetry is a raw log, NOT knowledge: it never goes into the `knowledge`
+# table. `bluecore_mem_learn` stays knowledge-only — use it for the lessons
+# learned during a run, and this function for the run's own metrics. The
+# records land in ~/.bluecore/repos/<repo-id>/loop-dev.jsonl next to the learn
+# observation log, and rotate/purge on the same 10MB / 30-day policy.
+#
+# Usage:
+#   bluecore_loop_telemetry --task "<one line>" \
+#                           --result converged|not-converged|circuit-break|stopped \
+#                           --iterations <n> [--max-iterations <n>] \
+#                           [--blockers <n>] [--flakes <n>] \
+#                           [--commit <hash>]... [--note "<text>"]
+#
+# --task, --result and --iterations are required; the rest default to 0 / 2.
+# --commit may be repeated once per commit produced by the run.
+#
+# The record path is resolved through the `repos` ledger (SQLite), so the CLI
+# arms a hard timeout (5s) on itself and drops the record rather than stalling
+# the caller. On success it prints the JSONL path it wrote to.
+bluecore_loop_telemetry() {
+  bluecore_run bluecore.skills.loop_dev.telemetry record "$@"
+}
+
+# Read loop-dev iteration telemetry back as JSONL (archives included).
+#
+# Usage:
+#   bluecore_loop_telemetry_list [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--limit <n>]
+#
+# Prints every matching record, oldest first, one JSON object per line. There
+# is no relevance cutoff, so callers get an exact count rather than a sample.
+bluecore_loop_telemetry_list() {
+  bluecore_run bluecore.skills.loop_dev.telemetry list "$@"
 }
 
 # Collect the repeated inputs used by /skill-gen.

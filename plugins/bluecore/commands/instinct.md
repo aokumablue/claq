@@ -1,14 +1,19 @@
 ---
 name: instinct
-description: インスティンクト エクスポート/インポート/昇格/削除/進化の統合コマンド。
+description: 蓄積された知識（knowledge）の一覧・閲覧・検索・昇格・アーカイブ・追加を行う統合コマンド。
 command: /instinct
 ---
 
 <!-- DRY: grillme 前段（発火〜他処理に進まない）は全コマンド共通。終了条件・永続メモリ・引数は固有 -->
 
-# インスティンクト管理
+# 知識管理
 
-学習済みインスティンクトの管理・昇格・削除・進化を扱う。
+`knowledge` テーブルに蓄積された **知識カード** の棚卸しを扱う。
+知識モデル・kind の使い分け・記録基準は `../skills/learn/SKILL.md` が正。
+
+中心となるワークフローは **昇格**: `mem learn --status pending` や observer が入れた候補は
+`status='pending'` のままで SessionStart に注入されない。人間がここでレビューして
+`promote` した知識だけが `status='active'` になり、以後の全セッションへ注入される。
 
 ## grillme 強制起動（必須）
 
@@ -16,21 +21,22 @@ command: /instinct
 
 ## 永続メモリ
 
-- context: SessionStart で `<mem-context>` 自動注入
-- search: `instinct applied used`
-- record (export/import/promote/prune): `{"event_type": "instinct-{action}", "content": "{summary}"}`
-- record (evolve): `{"event_type": "instinct-evolve", "content": "Evolved: X skills, Y commands, Z agents from N instincts"}`
+- 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
+- 参照: `mem search`（クエリ例 `{棚卸し対象の domain}` / `{key}`）→ 本文が要る key だけ `mem show <key>`
+- 記録: 本コマンド自身の実行結果は記録しない（棚卸しはセッション限りの作業でありノイズになる）。記録基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## ステップ1: サブコマンド確定
 
 明示サブコマンドあり → そのまま実行。
 
 明示サブコマンドなし → プロンプトキーワード照合で自動判定:
-- 書き出/エクスポート → `export`
-- 取り込/インポート → `import`
-- 昇格/グローバル化 → `promote`
-- 整理/削除 → `prune`
-- 進化/生成/スキル化 → `evolve`
+
+- 一覧/棚卸し/確認 → `list`
+- 中身/本文/詳細 → `show`
+- 検索/探す → `search`
+- 昇格/有効化/採用 → `promote`
+- 削除/整理/忘れ/廃止 → `forget`
+- 追加/登録/覚え → `learn`
 
 推論結果は実行前に1行表示。複数一致 / 該当なしの場合は grillme を再起動してユーザーに確定を促す。
 
@@ -38,32 +44,71 @@ command: /instinct
 
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
-bluecore_run bluecore.skills.learn.cli <subcommand>
+bluecore_run bluecore.mem.cli <subcommand> [args...]
 ```
 
-### export
-全インスティンクトを YAML 形式で stdout に出力する。
+### list
 
-### import `"<file-or-url>"`
-ローカルファイルまたは URL から取り込む。URL/パスは必ず単一のクォート済み引数として渡す（シェル解釈による分割・展開を防ぐ）。2段階で実行する: ① `import "<file-or-url>" --dry-run` で件数・出所・差分を提示 → ② ユーザの承認を得てから `import "<file-or-url>" --force` で適用。承認なしの `--force` 実行は禁止。取込元による確認ゲートの非対称は設けない（汚染済みローカルファイルの無確認取込を防ぐ）。
+知識カードの title を 1 件 1 行（`- [kind] title (key)`）で出す。`body` は出ない。
+既定は「このリポジトリ + global」「`status='active'`」「20 件」。
 
-### promote
-昇格条件（2プロジェクト以上に出現・信頼度しきい値を満たす）の候補を project → global へ昇格する。2段階で実行する: ① `promote --dry-run` で昇格候補を提示 → ② ユーザの承認を得てから ③ `promote --force` を本実行。承認なしの `--force` 実行は禁止。
+```bash
+bluecore_run bluecore.mem.cli list                          # 有効な知識の棚卸し
+bluecore_run bluecore.mem.cli list --status pending         # 昇格待ちの候補（レビュー対象）
+bluecore_run bluecore.mem.cli list --global --kind pitfall  # global の罠だけ
+```
 
-### prune
-30日より古い未レビュー・未昇格の保留インスティンクトを削除。2段階で実行する: ① `prune --dry-run` で削除対象件数を提示 → ② ユーザの承認を得てから `prune` を本実行。CLI 側に確認機構はないため、承認前の本実行は禁止。
+オプション: `--global` / `--repo`（排他）・`--status active|pending|archived`・
+`--kind convention|decision|pitfall|howto|fact|preference`・`--limit N`・`--json`。
 
-### evolve
-蓄積インスティンクトからスキル・コマンド・エージェント候補を検出し `evolved/{skills,commands,agents}/` 配下にファイル生成。2段階で実行する: 分析のみ = `evolve`（候補の検出・提示まで） → 生成 = `evolve --generate`（ファイル生成を実行）。
+0 件なら 1 文字も出力されない（「見つかりません」も出ない）。
 
-- プロジェクトコンテキスト検出 → project/global インスティンクト読込（ID衝突時は project 優先）→ パターン分類 → 候補特定 → ファイル生成
-- 進化ルール: Command=ユーザー明示呼び出し / Skill=自動発火パターン / Agent=複雑多段階処理
-- 生成ファイル frontmatter: `name` / `description` / `evolved_from: [{instinct-ids}]`
+### show `<key>`
 
-## ステップ3: 記録
+知識カード 1 件を全項目表示する。**`body` を読める唯一の口**。
+key は「このリポジトリの repo スコープ → global スコープ」の順で解決する。
 
-実行結果サマリーを永続メモリに記録（上記 record テンプレートに従う）。
+### search `<query>`
+
+title / key / domain / body へのヒットを重み付けし、confidence と新しさで補正して上位順に出す。
+出力は `list` と同じ 1 行形式で `body` は含まない（既定 5 件）。
+本文が要るカードだけ key を `show` に渡す。
+
+### promote `<key>`
+
+`status` を `active` にする。以後 SessionStart で注入される。
+
+**レビュー手順**: `list --status pending` で候補を出す → 気になる key を `show` で読む →
+`../skills/learn/SKILL.md` の「記録する / しない」に照らして採否を決める → 採用分だけ `promote`。
+昇格は注入枠を消費するので、一覧をそのまま全件昇格しない。
+
+### forget `<key>` [`--superseded-by <new-key>`]
+
+`status` を `archived` にする（行は消さない）。
+新しい知識で置き換えた場合は `--superseded-by <new-key>` を付けて置換関係を残す。
+
+対象: 前提が変わって成り立たなくなった知識・重複・title が曖昧で検索に引っかからない知識。
+
+### learn
+
+stdin の JSON から知識カードを 1 件登録する。ヘルパ経由が簡単:
+
+```bash
+bluecore_mem_learn --key sqlite-wal-sidecars --kind pitfall --scope repo \
+  --title "WAL モードの接続は -wal/-shm を残す" \
+  --domain sqlite --confidence 0.8 \
+  --body "close 時に自動削除されない SQLite ビルドがあるため、DB 再作成後は明示的に unlink する。"
+```
+
+同じ `key` への `learn` は上書き更新になる（重複行は作られない）。
+`--status pending` を付けると昇格待ちで登録される。
+
+## ステップ3: 結果報告
+
+実行したサブコマンドと対象 key を 1 行で報告する。`promote` / `forget` は
+「昇格/アーカイブした key」と「見送った key + 理由」を分けて提示する。
 
 ## 引数
 
-- 位置 #1: `<subcommand>` = `export | import "<file-or-url>" | promote | prune | evolve`
+- 位置 #1: `<subcommand>` = `list | show <key> | search "<query>" | promote <key> | forget <key> | learn`
+- 位置 #2 以降: サブコマンドの引数・オプション（上記各節を参照）

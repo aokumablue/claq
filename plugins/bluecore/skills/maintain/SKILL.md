@@ -33,7 +33,7 @@ collect_skill_create_inputs "${COMMITS:-200}"        # コミット規約・同�
 
 集める入力（各ソースは失敗しても本体を止めない＝ベストエフォート）:
 
-- **蓄積メモリ**: `echo '{"query": "maintain harness 勘所 違反"}' | PYTHONPATH=plugins/bluecore/src python3 -m bluecore.mem search` で過去メンテの勘所・繰り返し違反を引く（mem CLI は stdin JSON プロトコル。裸起動は空結果を返すので必ず pipe する）
+- **蓄積メモリ**: `PYTHONPATH=plugins/bluecore/src python3 -m bluecore.mem.cli search "maintain harness 勘所 違反"` で過去メンテの勘所・繰り返し違反を引く。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要るカードだけ `python3 -m bluecore.mem.cli show <key>` に渡す（0 件なら無出力）
 - **過去セッション**: `~/.bluecore/session-data/checkpoint-*.md` と git log
 - **最新 ClaudeCode トレンド**（既定ON・`--no-web` で無効）: WebSearch/WebFetch でハーネス設計のベストプラクティスを調べる。**ハード上限（検索5件・フェッチ3件）・タイムアウト付き・非ブロッキング**。失敗/オフライン時は「トレンド入力なし」と明記して続行
 
@@ -87,11 +87,21 @@ hooks / `src/bluecore/hooks/` を対象に含む回は**両ハーネス互換（
 
 ## ステップ7: 記録・要約
 
-`{"event_type": "maintain", "content": "Scope. Reviewed. Fixed(bug/enhance). Blockers→0. Audit: {before}→{after}. Trend入力: {あり/なし}"}` を mem record。要約は結論先行で、修正コミット・final gate 結果・残タスク（`/plan` 提示分）を提示。
+今回のメンテで判明した **ハーネス定義の勘所・繰り返し違反** を知識カードとして登録する（作業ログは登録しない）:
+
+```bash
+source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+bluecore_mem_learn --key <slug> --kind pitfall --scope repo --domain harness \
+  --title "<1 行要約>" --body "<根拠と回避法>"
+```
+
+記録基準は `../learn/SKILL.md` の「記録する / しない」。同じ違反が 2 回目なら既存カードと同じ `key` で更新し `confidence` を上げる。
+
+要約は結論先行で、修正コミット・final gate 結果・残タスク（`/plan` 提示分）を提示。
 
 ## 引数
 
 - `--scope=<path>`: 対象上書き（既定 `plugins/bluecore/{commands,skills,agents,hooks}`）
 - `--commits=<n>`: 入力収集のコミット数（既定 200）
 - `--no-web`: web トレンド調査を無効化
-- `--dry-run`: ステップ1-2のみ（audit + レビュー報告）で編集しない（ステップ7の mem record も行わない）
+- `--dry-run`: ステップ1-2のみ（audit + レビュー報告）で編集しない（ステップ7の `mem learn` も行わない）

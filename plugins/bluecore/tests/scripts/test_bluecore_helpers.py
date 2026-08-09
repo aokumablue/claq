@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
@@ -16,30 +15,6 @@ def _run_bash(script: str, *, env: dict[str, str] | None = None) -> subprocess.C
         text=True,
         env=env,
     )
-
-
-def test_bluecore_mem_search_builds_repo_scoped_payload() -> None:
-    repo_root = Path(__file__).resolve().parents[4]
-    helper = repo_root / "plugins" / "bluecore" / "runtime" / "bluecore-helpers.sh"
-    script = f'''
-set -euo pipefail
-cd "{repo_root}"
-source "{helper}"
-bluecore_mem_json() {{
-  printf '%s\n%s\n' "$1" "$2"
-}}
-bluecore_mem_search "hello world" 7
-'''
-
-    result = _run_bash(script)
-    lines = result.stdout.strip().splitlines()
-    assert lines[0] == "search"
-    payload = json.loads(lines[1])
-    assert payload == {
-        "cwd": str(repo_root),
-        "query": "hello world",
-        "limit": 7,
-    }
 
 
 def test_bluecore_run_bg_returns_pid(tmp_path: Path) -> None:

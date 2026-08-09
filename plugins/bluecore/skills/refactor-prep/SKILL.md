@@ -60,5 +60,5 @@ JSON 契約（下流3ファイルが前提とする形。`deps.from`/`deps.to` �
 
 ## 永続メモリ
 
-search: `refactor preflight scope split dependency testset`
-record: `{"event_type":"refprep","content":"Scope:{scope}. Groups:{groups}. TestSet:{tests}"}`
+search: `mem search` — クエリ例 `refactor preflight scope split dependency testset`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

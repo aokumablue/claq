@@ -8,6 +8,7 @@ import re
 _TAGS = (
     "private",
     "mem-context",
+    "bluecore-memory",
     "system_instruction",
     "system-instruction",
 )

@@ -1,9 +1,0 @@
-{
-  "schema_version": 2,
-  "model_name": "hotchpotch/static-embedding-japanese",
-  "hf_revision": "95b3d9c80a7ccf604e2b5daee7b1b3eed6b1a9d3",
-  "model_type": "static_embedding",
-  "vocab_size": 32768,
-  "source_embedding_dim": 1024,
-  "embedding_dim": 256
-}

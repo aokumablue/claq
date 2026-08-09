@@ -81,5 +81,5 @@ Check: stars, last commit, open issues, license. Return top 3
 
 ## 永続メモリ
 
-search: `adopt reject tool library {category}` / `{tool_name} success fail issue`
-record: `{"event_type": "tool-search", "content": "Searched for {category}. Adopted: {tool_name}. Reason: {reason}"}`
+search: `mem search` — クエリ例 `adopt reject tool library {category}` / `{tool_name} success fail issue`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

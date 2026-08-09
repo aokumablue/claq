@@ -1,4 +1,9 @@
-"""mem サブシステムの SQLite スキーマ定義（database.py から分離）。"""
+"""mem サブシステムの SQLite スキーマ定義（database.py から分離）。
+
+``repos`` / ``sessions`` / ``knowledge`` の 3 テーブルのみで構成する。
+``knowledge.session_id`` が ``sessions`` を参照するため、DDL は
+``repos`` → ``sessions`` → ``knowledge`` の順に並べる。
+"""
 
 from __future__ import annotations
 
@@ -7,192 +12,59 @@ PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE IF NOT EXISTS memory_chunks (
-  id TEXT PRIMARY KEY,
-  origin_user TEXT NOT NULL DEFAULT '',
-  session_id TEXT NOT NULL,
-  project TEXT NOT NULL,
-  chunk_index INTEGER NOT NULL,
-  content TEXT NOT NULL,
-  tool_names TEXT,
-  files_read TEXT,
-  files_modified TEXT,
-  created_at TEXT DEFAULT (datetime('now')),
-  created_at_epoch INTEGER NOT NULL,
-  access_count INTEGER DEFAULT 0,
-  last_accessed_epoch INTEGER,
-  UNIQUE(session_id, chunk_index)
+-- リポジトリ台帳。知識のスコープ境界。
+-- id は人間可読スラッグ、正体キーは identity_key に分離する。
+CREATE TABLE IF NOT EXISTS repos (
+  id            TEXT PRIMARY KEY,          -- 'bluecore-dev'（同名衝突時のみ '-2' を付す）
+  identity_key  TEXT NOT NULL UNIQUE,      -- 正規化 remote URL、無ければ repo root 絶対パス
+  root_path     TEXT NOT NULL,             -- 最後に観測した絶対パス（worktree でも本体に寄せる）
+  remote_url    TEXT,                      -- 生の remote（無ければ NULL）
+  first_seen_at TEXT NOT NULL,             -- ISO8601
+  last_seen_at  TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_chunks_session ON memory_chunks(session_id);
-CREATE INDEX IF NOT EXISTS idx_chunks_project ON memory_chunks(project);
-CREATE INDEX IF NOT EXISTS idx_chunks_epoch ON memory_chunks(created_at_epoch);
-CREATE INDEX IF NOT EXISTS idx_chunks_origin ON memory_chunks(origin_user);
-
+-- セッション履歴。knowledge の出所であり、次セッションへの引き継ぎを持つ。
 CREATE TABLE IF NOT EXISTS sessions (
-  id TEXT PRIMARY KEY,
-  origin_user TEXT NOT NULL DEFAULT '',
-  session_id TEXT NOT NULL,
-  project TEXT NOT NULL,
-  started_at TEXT DEFAULT (datetime('now')),
-  started_at_epoch INTEGER NOT NULL,
-  chunk_count INTEGER DEFAULT 0,
-  ended_at_epoch INTEGER,
-  UNIQUE(session_id)
+  id          INTEGER PRIMARY KEY,
+  session_uid TEXT NOT NULL UNIQUE,        -- ハーネスが渡す session_id
+  repo_id     TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+  harness     TEXT NOT NULL DEFAULT 'unknown',
+  handoff     TEXT NOT NULL DEFAULT '',    -- 次セッションへの引き継ぎ（人間可読の散文）
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_repo
+  ON sessions(repo_id, started_at DESC);
+
+-- 知識カード。1行 = 1つの再利用可能な言明。
+-- title だけ読んで意味が通ることを必須とする（注入は原則 title のみ）。
+CREATE TABLE IF NOT EXISTS knowledge (
+  id            INTEGER PRIMARY KEY,
+  key           TEXT NOT NULL,             -- kebab-case スラッグ。重複投入の防止キー
+  scope         TEXT NOT NULL CHECK (scope IN ('global','repo')),
+  repo_id       TEXT REFERENCES repos(id) ON DELETE CASCADE,
+  kind          TEXT NOT NULL CHECK (kind IN
+                  ('convention','decision','pitfall','howto','fact','preference')),
+  title         TEXT NOT NULL,             -- 1行。これ単体で意味が通ること
+  body          TEXT NOT NULL DEFAULT '',  -- why / how の補足。空でよい
+  domain        TEXT,                      -- 'testing' 'git' 'build' 等。任意
+  confidence    REAL NOT NULL DEFAULT 0.5 CHECK (confidence BETWEEN 0 AND 1),
+  status        TEXT NOT NULL DEFAULT 'active'
+                  CHECK (status IN ('active','pending','archived')),
+  source        TEXT NOT NULL CHECK (source IN ('agent','observer','human')),
+  source_ref    TEXT,                      -- 出所の自由記述（ファイルパス等）
+  session_id    INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+  superseded_by INTEGER REFERENCES knowledge(id) ON DELETE SET NULL,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  -- scope と repo_id の整合を強制する
+  CHECK ((scope = 'global' AND repo_id IS NULL)
+      OR (scope = 'repo'   AND repo_id IS NOT NULL))
 );
 
-CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(origin_user);
-
--- インスティンクト
-CREATE TABLE IF NOT EXISTS instincts (
-  id TEXT PRIMARY KEY,
-  origin_user TEXT NOT NULL DEFAULT '',
-  instinct_id TEXT NOT NULL,
-  scope TEXT NOT NULL,
-  project_id TEXT,
-  trigger_text TEXT,
-  confidence REAL NOT NULL,
-  domain TEXT,
-  content TEXT NOT NULL,
-  created_at_epoch INTEGER NOT NULL,
-  updated_at_epoch INTEGER NOT NULL,
-  observation_count INTEGER DEFAULT 0,
-  confidence_reasons TEXT DEFAULT '[]',
-  source_interaction_ids TEXT DEFAULT '[]',
-  last_activated_epoch INTEGER,
-  UNIQUE(origin_user, instinct_id, scope, project_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_instincts_user ON instincts(origin_user);
-CREATE INDEX IF NOT EXISTS idx_instincts_scope ON instincts(scope);
-CREATE INDEX IF NOT EXISTS idx_instincts_project ON instincts(project_id);
-
--- ADR
-CREATE TABLE IF NOT EXISTS adrs (
-  id TEXT PRIMARY KEY,
-  origin_user TEXT NOT NULL DEFAULT '',
-  project TEXT NOT NULL,
-  adr_number INTEGER NOT NULL,
-  title TEXT NOT NULL,
-  status TEXT NOT NULL,
-  content TEXT NOT NULL,
-  created_at_epoch INTEGER NOT NULL,
-  updated_at_epoch INTEGER NOT NULL,
-  UNIQUE(origin_user, project, adr_number)
-);
-
-CREATE INDEX IF NOT EXISTS idx_adrs_user ON adrs(origin_user);
-CREATE INDEX IF NOT EXISTS idx_adrs_project ON adrs(project);
-
--- 汎用イベントログ
-CREATE TABLE IF NOT EXISTS event_logs (
-  id TEXT PRIMARY KEY,
-  origin_user TEXT NOT NULL DEFAULT '',
-  event_type TEXT NOT NULL,
-  project_id TEXT,
-  content TEXT NOT NULL,
-  created_at_epoch INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_events_type ON event_logs(event_type);
-CREATE INDEX IF NOT EXISTS idx_events_epoch ON event_logs(created_at_epoch);
-CREATE INDEX IF NOT EXISTS idx_events_project ON event_logs(project_id);
-
--- ユーザー指示と AI 応答のペア記録（スキル自動生成の最重要原料）
-CREATE TABLE IF NOT EXISTS interaction_logs (
-  id TEXT PRIMARY KEY,
-  origin_user TEXT NOT NULL DEFAULT '',
-  session_id TEXT NOT NULL,
-  project TEXT NOT NULL,
-  user_prompt_full TEXT NOT NULL,
-  user_prompt_hash TEXT,
-  interaction_index INTEGER NOT NULL,
-  created_at_epoch INTEGER NOT NULL,
-  UNIQUE(session_id, interaction_index)
-);
-
-CREATE INDEX IF NOT EXISTS idx_ilog_session ON interaction_logs(session_id);
-CREATE INDEX IF NOT EXISTS idx_ilog_project ON interaction_logs(project);
-CREATE INDEX IF NOT EXISTS idx_ilog_epoch ON interaction_logs(created_at_epoch);
-CREATE INDEX IF NOT EXISTS idx_ilog_hash ON interaction_logs(user_prompt_hash);
-
--- セッション要約（トランスクリプト/チャンクから生成する短期記憶の圧縮版）
-CREATE TABLE IF NOT EXISTS session_digests (
-  id TEXT PRIMARY KEY,
-  origin_user TEXT NOT NULL DEFAULT '',
-  session_id TEXT NOT NULL,
-  project TEXT NOT NULL,
-  summary TEXT NOT NULL,
-  key_files TEXT NOT NULL DEFAULT '[]',
-  key_decisions TEXT NOT NULL DEFAULT '[]',
-  harness TEXT NOT NULL DEFAULT 'unknown',
-  source TEXT NOT NULL DEFAULT 'chunks',
-  chunk_count INTEGER NOT NULL DEFAULT 0,
-  started_at_epoch INTEGER NOT NULL,
-  ended_at_epoch INTEGER,
-  created_at_epoch INTEGER NOT NULL,
-  UNIQUE(session_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_digests_project_epoch ON session_digests(project, created_at_epoch);
-CREATE INDEX IF NOT EXISTS idx_digests_origin ON session_digests(origin_user);
+-- global 行は repo_id が NULL のため、式インデックスで一意性を担保する
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_key
+  ON knowledge(COALESCE(repo_id, ''), key);
+CREATE INDEX IF NOT EXISTS idx_knowledge_inject
+  ON knowledge(status, scope, repo_id);
 """
-
-# FTS5 と sqlite-vec は別途作成（拡張依存のため）
-_FTS5_SQL = """\
-CREATE VIRTUAL TABLE IF NOT EXISTS memory_chunks_fts USING fts5(
-  chunk_id UNINDEXED,
-  content,
-  tool_names,
-  files_read,
-  files_modified,
-  tokenize='trigram'
-);
-
-CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON memory_chunks BEGIN
-  INSERT INTO memory_chunks_fts(chunk_id, content, tool_names, files_read, files_modified)
-  VALUES (new.id, new.content, new.tool_names, new.files_read, new.files_modified);
-END;
-
-CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON memory_chunks BEGIN
-  DELETE FROM memory_chunks_fts WHERE chunk_id = old.id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON memory_chunks BEGIN
-  UPDATE memory_chunks_fts
-  SET content = new.content,
-      tool_names = new.tool_names,
-      files_read = new.files_read,
-      files_modified = new.files_modified
-  WHERE chunk_id = new.id;
-END;
-
-CREATE VIRTUAL TABLE IF NOT EXISTS session_digests_fts USING fts5(
-  digest_id UNINDEXED, summary, key_files, key_decisions, tokenize='trigram'
-);
-
-CREATE TRIGGER IF NOT EXISTS digests_ai AFTER INSERT ON session_digests BEGIN
-  INSERT INTO session_digests_fts(digest_id, summary, key_files, key_decisions)
-  VALUES (new.id, new.summary, new.key_files, new.key_decisions);
-END;
-
-CREATE TRIGGER IF NOT EXISTS digests_ad AFTER DELETE ON session_digests BEGIN
-  DELETE FROM session_digests_fts WHERE digest_id = old.id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS digests_au AFTER UPDATE ON session_digests BEGIN
-  UPDATE session_digests_fts
-  SET summary = new.summary,
-      key_files = new.key_files,
-      key_decisions = new.key_decisions
-  WHERE digest_id = new.id;
-END;
-"""
-
-_VEC_SQL = """\
-CREATE VIRTUAL TABLE IF NOT EXISTS memory_chunks_vec USING vec0(
-  chunk_id TEXT PRIMARY KEY,
-  embedding FLOAT[256]
-);
-"""
-

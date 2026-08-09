@@ -40,10 +40,9 @@ def _to_redux_config(redux: ReduxSettings) -> ReduxConfig:
 
 
 def _load_config() -> ReduxConfig:
-    """Settings.load() から ReduxConfig を読み込む。失敗時はデフォルト設定を返す。"""
+    """Settings から ReduxConfig を読み込む。失敗時はデフォルト設定を返す。"""
     try:
-        settings = Settings.load()
-        return _to_redux_config(settings.redux)
+        return _to_redux_config(Settings().redux)
     except Exception as e:
         write_stderr(f"[redux] settings load failed: {e}\n")
         return ReduxConfig()
@@ -110,7 +109,7 @@ def evaluate(raw_input: str, config: ReduxConfig | None = None, engine: ReduxEng
 
     Args:
         raw_input: フックに渡された生の入力 JSON 文字列。
-        config: 圧縮設定。None の場合は Settings.load() から読み込む。
+        config: 圧縮設定。None の場合は Settings から読み込む。
         engine: フィルタ適用エンジン。None の場合はキャッシュ済みエンジンを使う。
 
     Returns:
