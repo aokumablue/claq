@@ -535,7 +535,7 @@ flowchart TB
 - ユーザーは **Commands のみ選択** すれば内部で Agents / Skills が自動連鎖
 - スキルは全て `context: fork`（内部委譲専用、ユーザー直接起動不可）に統一
 - 永続化は **SQLite（個人）** の単層。テーブルは `repos` / `knowledge` / `sessions` の 3 つだけ
-- 検索は埋め込みも FTS5 も使わず Python 側でスコアリング（ランタイム依存は `pyyaml` のみ）
+- 検索は埋め込みも FTS5 も使わず Python 側でスコアリング（ランタイム依存はゼロ、標準ライブラリのみ）
 - 知識カードを書くのは Commands の「学びの記録」ステップのみ。Agents は候補を呼び出し元へ報告する
 
 各コマンドの詳細仕様は [`plugins/bluecore/commands/`](plugins/bluecore/commands/) 配下を参照。
