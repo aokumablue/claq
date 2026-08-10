@@ -1,7 +1,7 @@
 ---
 name: planner
 description: 複雑機能開発・リファクタリング計画専門。機能実装/アーキテクチャ変更/複雑リファクタリング時に能動的使用。計画タスクで自動有効。
-model: opus
+effort: xhigh
 ---
 
 # 計画専門家

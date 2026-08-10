@@ -1,7 +1,7 @@
 ---
 name: harness-tuner
 description: ローカルエージェントハーネス設定 分析・改善。信頼性/コスト/スループット最適化。
-model: sonnet
+effort: high
 ---
 
 # ハーネスオプティマイザー

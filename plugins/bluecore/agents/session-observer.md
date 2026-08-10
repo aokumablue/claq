@@ -1,7 +1,7 @@
 ---
 name: session-observer
 description: セッション観測からパターンを検出し、repo/global スコープの知識カード候補を作成するバックグラウンドエージェント。
-model: haiku
+effort: low
 ---
 
 # オブザーバーエージェント
