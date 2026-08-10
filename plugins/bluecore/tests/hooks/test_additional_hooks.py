@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import runpy
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,93 @@ from bluecore.hooks import (
     pre_compact,
     session_end,
 )
+
+# ``--no-verify``。テストケース表の横幅を抑えるための別名。
+NV = "--no-verify"
+
+# ブロックされなければならないコマンド。
+_BYPASS_COMMANDS = [
+    # 素の形
+    f"git commit {NV}",
+    f"git push {NV}",
+    "git commit -n",
+    f'git commit {NV} -m "fix: x"',
+    f"git commit {NV} -m 'wip'",
+    # git グローバルオプションを挟むバイパス（実際に突破された形）
+    f"git --no-pager commit {NV}",
+    f"git -C /tmp/repo commit {NV}",
+    f"git -c core.hooksPath=/dev/null commit {NV}",
+    f"git --git-dir /x --work-tree /y commit {NV}",
+    f"git --git-dir=/x commit {NV}",
+    f"git --exec-path /x commit {NV}",
+    # segment 先頭が git 以外のバイパス（環境変数プレフィックス・ラッパー・パス付き）
+    f"GIT_DIR=.git git commit {NV}",
+    f"FOO=bar git commit {NV}",
+    f"env git commit {NV}",
+    f"sudo git commit {NV}",
+    f"nice git commit {NV}",
+    f"command git commit {NV}",
+    f"/usr/bin/git commit {NV}",
+    f"xargs -I% git commit {NV}",
+    f"timeout 5 git commit {NV}",
+    # 1 segment 内に git トークンが複数（先頭側はユーザー名 / 別コマンドの引数）
+    "sudo -u git git commit -n",
+    "git submodule foreach git commit -n",
+    # 改行区切り（shlex では区切りトークンにならず 1 segment になる）
+    "git add -A\ngit commit -n",
+    # 複合コマンド（空白あり / なし）
+    f"git add -A && git --no-pager commit {NV}",
+    f"git add -A&&git commit {NV}",
+    "git add -A; git commit -n -m x",
+    f"git status | grep x || git commit {NV}",
+    f"&& git commit {NV}",
+    # 短オプションのクラスタ
+    "git commit -an -m x",
+    "git commit -u -n",
+    "git commit -F - -n",
+    # 未知のグローバルオプションで subcommand 解決がずれる形は fail-closed
+    f"git --future-option value commit {NV}",
+    "git --future-option value commit -n",
+    "git -Z value commit -n",
+    # shlex 失敗（未閉じクォート）は fail-closed
+    f'git commit -m "unclosed {NV}',
+]
+
+# 通さなければならないコマンド（誤検知の回帰防止）。
+_ALLOWED_COMMANDS = [
+    # -n が --dry-run / 件数指定であるサブコマンド
+    "git push -n",
+    "git log -n 5",
+    "git push --dry-run",
+    "git clean -n",
+    "git bisect run ./t.sh -n",
+    # 既知の boolean グローバルオプションは subcommand 解決を乱さない
+    "git --no-pager log -n 5",
+    "git -p log -n 5",
+    "git -c foo.bar=1 log -n 5",
+    # クォート内の -n / --no-verify はフラグではない
+    'git commit -m "use -n flag"',
+    "git commit -m'msg with -n'",
+    f"git commit -m 'note: {NV} is banned'",
+    f'echo "git commit {NV}"',
+    'grep -r "git commit" .',
+    # 短縮クラスタの既存挙動
+    "git commit -mmsg",
+    'git commit -am "x"',
+    "git commit -uno -m x",
+    "git commit --amend --no-edit",
+    "git commit -m x -- -n",
+    # git 起動トークンより前の -n は git のフラグではない
+    "grep -rn git .",
+    "ls -n /usr/bin/git",
+    "xargs -n 2 git status",
+    # その他
+    "git status",
+    "git rebase --continue",
+    f"gitk {NV}",
+    "",
+    "git",
+]
 
 
 def _capture_io(monkeypatch: pytest.MonkeyPatch, module, payload: str) -> tuple[list[str], list[str]]:
@@ -44,7 +133,9 @@ class TestBlockNoVerify:
         ("command", "expected_code", "blocked"),
         [
             ("git commit --no-verify", 2, True),
-            ("git push -n", 2, True),
+            # git push の -n は --dry-run（フックバイパスではない）ため通す。
+            ("git push -n", 0, False),
+            ("git push --no-verify", 2, True),
             ("git status", 0, False),
             ('git commit -m "docs: explain -n flag usage"', 0, False),
             ("git commit -m 'note: --no-verify is banned'", 0, False),
@@ -67,6 +158,94 @@ class TestBlockNoVerify:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert bool(captured.err) is blocked
+
+    @pytest.mark.parametrize("command", _BYPASS_COMMANDS)
+    def test_has_bypass_flag_blocks(self, command: str) -> None:
+        """ラッパー・パス付き起動・グローバルオプション経由のバイパスを検出する。"""
+        assert block_no_verify.has_bypass_flag(command) is True
+
+    @pytest.mark.parametrize("command", _ALLOWED_COMMANDS)
+    def test_has_bypass_flag_allows(self, command: str) -> None:
+        """バイパスでないコマンドを誤検知しない。"""
+        assert block_no_verify.has_bypass_flag(command) is False
+
+    def test_tokenize_falls_back_to_whitespace_split(self) -> None:
+        """クォート不整合時は空白分割へフォールバックする（fail-closed）。"""
+        assert block_no_verify.tokenize('git commit -m "x') == ["git", "commit", "-m", '"x']
+
+    def test_split_segments_drops_empty_segments(self) -> None:
+        """連続する区切りトークンで空セグメントを作らない。"""
+        tokens = ["&&", "git", "status", ";", ";", "git", "commit"]
+        assert block_no_verify.split_segments(tokens) == [["git", "status"], ["git", "commit"]]
+
+    def test_parse_git_segment_returns_subcommand_and_flags(self) -> None:
+        """グローバルオプションを読み飛ばしてサブコマンドとフラグを返す。"""
+        segment = ["git", "-C", "/tmp", "--no-pager", "commit", "-am", "msg", "--no-verify"]
+
+        invocation = block_no_verify.parse_git_segment(segment)
+
+        assert invocation.subcommand == "commit"
+        assert invocation.flags == ["-C", "--no-pager", "-a", "-m", "--no-verify"]
+        assert invocation.subcommand_certain is True
+
+    @pytest.mark.parametrize(
+        ("segment", "certain"),
+        [
+            # 既知の boolean グローバルオプションはサブコマンド解決を乱さない。
+            (["git", "--no-pager", "log"], True),
+            (["git", "-p", "log"], True),
+            # 未知の long オプションは値を取るか不明なので解決を信用しない。
+            (["git", "--future-option", "value", "commit"], False),
+            # 未知の short オプションも同様（クラスタ内の 1 文字でも未知なら不確定）。
+            (["git", "-Z", "value", "commit"], False),
+            # サブコマンド解決後の未知オプションは解決結果に影響しない。
+            (["git", "commit", "--future-option", "value"], True),
+            (["git", "push", "-Z"], True),
+            # 値が = で結合された未知オプションは次トークンを食わないので確定。
+            (["git", "--future-option=value", "commit"], True),
+        ],
+    )
+    def test_parse_git_segment_subcommand_certainty(self, segment: list[str], certain: bool) -> None:
+        """未知グローバルオプションの有無でサブコマンド確度を切り替える。"""
+        assert block_no_verify.parse_git_segment(segment).subcommand_certain is certain
+
+    @pytest.mark.parametrize(
+        ("token", "expected"),
+        [
+            ("git", True),
+            ("/usr/bin/git", True),
+            ("./git", True),
+            ("gitk", False),
+            ("GIT_DIR=.git", False),
+            (".git", False),
+            ("git/", False),
+            ("git commit --no-verify", False),
+        ],
+    )
+    def test_is_git_invocation(self, token: str, expected: bool) -> None:
+        """basename が git のトークンだけを git 起動として扱う。"""
+        assert block_no_verify.is_git_invocation(token) is expected
+
+    @pytest.mark.parametrize(
+        ("command", "expected_code"),
+        [(command, 2) for command in _BYPASS_COMMANDS] + [(command, 0) for command in _ALLOWED_COMMANDS],
+    )
+    def test_end_to_end_via_module_subprocess(self, command: str, expected_code: int) -> None:
+        """実 JSON を stdin へ流す ``python -m`` 実行で判定を end-to-end 検証する。"""
+        payload = json.dumps({"tool_input": {"command": command}})
+        src_root = Path(block_no_verify.__file__).resolve().parents[2]
+        completed = subprocess.run(
+            [sys.executable, "-m", "bluecore.hooks.block_no_verify"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            check=False,
+            env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(src_root), "CLAUDECODE": "1"},
+        )
+
+        assert completed.returncode == expected_code
+        assert completed.stdout == ""
+        assert bool(completed.stderr) is (expected_code != 0)
 
     def test_blocked_on_copilot_emits_deny_json(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
