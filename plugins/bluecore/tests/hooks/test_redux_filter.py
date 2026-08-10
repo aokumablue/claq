@@ -226,6 +226,28 @@ class TestCopilotOutputContract:
         assert payload["modifiedResult"]["textResultForLlm"]
         assert len(payload["modifiedResult"]["textResultForLlm"]) < len("line1\n" * 100)
 
+    def test_lowercase_bash_tool_name_is_normalized(self, monkeypatch):
+        """Copilot の実経路（小文字 tool_name + modifiedResult 契約）を突く。
+
+        Copilot CLI は tool_name を lowercase ("bash") で渡すため
+        normalize_tool_name で "Bash" に正規化して初めて処理対象になる。
+        小文字 tool_name と Claude 契約の組合せは本番に存在しないため、
+        Copilot 環境変数を立てた状態で payload の形まで検証する。
+        """
+        monkeypatch.setenv("COPILOT_AGENT_PROMPT", "x")
+        body = "\n".join(f"data line {i}" for i in range(50))
+        result = hook.evaluate(
+            _payload(tool_name="bash", stdout=body),
+            config=ReduxConfig(),
+            engine=_engine(limit=1),
+        )
+        payload = json.loads(result)
+        assert "hookSpecificOutput" not in payload
+        assert payload["modifiedResult"] == {
+            "resultType": "success",
+            "textResultForLlm": "data line 0\n... (49 行切り捨て)",
+        }
+
     def test_codex_keeps_claude_contract(self, monkeypatch):
         """Codex では Claude 形式（updatedToolOutput）のまま出力する。"""
         monkeypatch.setenv("PLUGIN_DATA", "/tmp/data")

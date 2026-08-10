@@ -6,6 +6,11 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import signal
+import subprocess
+import sys
+import time
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -289,8 +294,7 @@ class TestReadRawStdinWithTruncation:
 class TestDetachProcess:
     """detach_process の一時ファイル経由 stdin 引き渡し・エラー処理のテスト。
 
-    launcher --bg（非 Claude ハーネス）と session_end の Codex フォール
-    バックの双方から呼ばれる共通の detach 実装。
+    呼び出し元は launcher.py の `--bg` 実行 1 箇所のみ（`_run_background`）。
     """
 
     def test_launches_detached_process_and_cleans_up_tmp_file(
@@ -315,8 +319,12 @@ class TestDetachProcess:
         result = detach_process(["python3", "-m", "bluecore.mem.cli", "observe"], "raw-payload", env={"X": "1"})
 
         assert result is True
-        assert captured["cmd"][:3] == ["timeout", "--kill-after=30", "590"]
-        assert captured["cmd"][3:] == ["python3", "-m", "bluecore.mem.cli", "observe"]
+        assert captured["cmd"][:3] == [hook_common.sys.executable, "-c", hook_common._WATCHDOG_SCRIPT]
+        assert captured["cmd"][3:5] == [
+            str(hook_common.DETACH_TIMEOUT_SECONDS),
+            str(hook_common._DETACH_KILL_AFTER_SECONDS),
+        ]
+        assert captured["cmd"][5:] == ["python3", "-m", "bluecore.mem.cli", "observe"]
         assert captured["env"] == {"X": "1"}
         assert captured["start_new_session"] is True
         assert written_stdin_content["text"] == "raw-payload"
@@ -367,3 +375,139 @@ class TestDetachProcess:
         monkeypatch.setattr(hook_common.os, "unlink", fail_unlink)
 
         assert detach_process(["true"], "raw") is True
+
+
+def _pid_alive(pid: int) -> bool:
+    """指定 PID のプロセスが生存しているかを判定する。
+
+    Args:
+        pid: 判定対象のプロセス ID。
+
+    Returns:
+        生存していれば True。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _wait_until_dead(pid: int, deadline_seconds: float = 10.0) -> bool:
+    """PID が消えるまでポーリングし、消えたかどうかを返す。
+
+    Args:
+        pid: 判定対象のプロセス ID。
+        deadline_seconds: 待機する最大秒数。
+
+    Returns:
+        期限内にプロセスが消えたら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    limit = time.monotonic() + deadline_seconds
+    while time.monotonic() < limit:
+        if not _pid_alive(pid):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+class TestWatchdogKillsProcessGroup:
+    """_WATCHDOG_SCRIPT が孫プロセスまで実プロセスで確実に殺すことのテスト。
+
+    Popen.terminate()/kill() は直接の子 1 プロセスにしか届かず、子が起動した
+    孫（desktop_notify の osascript / PowerShell、quality_gate の lint ステップ）
+    が残留する退行があったため、argv 一致アサートではなく実際にプロセスを
+    起動して wall-clock で検証する。
+    """
+
+    def _spawn_watchdog(
+        self,
+        tmp_path: Path,
+        *,
+        timeout: float,
+        kill_after: float,
+        ignore_sigterm: bool,
+    ) -> tuple[subprocess.Popen, Path, int]:
+        """watchdog → 子 → 孫の 3 段プロセスを起動し、孫の PID を返す。
+
+        孫は `grandchild_sleep_seconds` 秒後にマーカーファイルを書くため、
+        マーカーが存在しないことが「孫が仕事を完了する前に殺された」証跡になる。
+
+        Args:
+            tmp_path: マーカー / PID ファイルを置く一時ディレクトリ。
+            timeout: watchdog が子へ SIGTERM を送るまでの秒数。
+            kill_after: SIGTERM 後 SIGKILL へ昇格するまでの猶予秒数。
+            ignore_sigterm: True なら子と孫が SIGTERM を無視する。
+
+        Returns:
+            (watchdog の Popen, マーカーパス, 孫の PID) のタプル。
+
+        Raises:
+            AssertionError: 孫の PID ファイルが期限内に作られない場合。
+        """
+        from bluecore.hooks import hook_common
+
+        marker = tmp_path / "grandchild-marker"
+        pid_file = tmp_path / "grandchild-pid"
+        guard = "import signal;signal.signal(signal.SIGTERM, signal.SIG_IGN);" if ignore_sigterm else ""
+        grandchild = f"{guard}import time;time.sleep(5);open({str(marker)!r},'w').write('alive')"
+        child = (
+            f"{guard}import subprocess,sys,time;"
+            f"p=subprocess.Popen([sys.executable,'-c',{grandchild!r}]);"
+            f"open({str(pid_file)!r},'w').write(str(p.pid));"
+            "time.sleep(60)"
+        )
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                hook_common._WATCHDOG_SCRIPT,
+                str(timeout),
+                str(kill_after),
+                sys.executable,
+                "-c",
+                child,
+            ]
+        )
+        limit = time.monotonic() + 10.0
+        while time.monotonic() < limit and not pid_file.exists():
+            time.sleep(0.02)
+        assert pid_file.exists(), "孫プロセスが起動しなかった"
+        return proc, marker, int(pid_file.read_text())
+
+    def test_timeout_kills_grandchild(self, tmp_path: Path) -> None:
+        """timeout 到達時、子だけでなく孫もプロセスグループごと殺される。"""
+        proc, marker, grandchild_pid = self._spawn_watchdog(
+            tmp_path, timeout=0.3, kill_after=0.3, ignore_sigterm=False
+        )
+        proc.wait(timeout=30)
+
+        assert _wait_until_dead(grandchild_pid), "孫プロセスが生存し続けた"
+        assert not marker.exists(), "孫プロセスが仕事を完了してしまった"
+
+    def test_sigterm_ignoring_grandchild_is_escalated_to_sigkill(self, tmp_path: Path) -> None:
+        """SIGTERM を無視する孫も kill_after 経過後 SIGKILL で回収される。"""
+        proc, marker, grandchild_pid = self._spawn_watchdog(
+            tmp_path, timeout=0.3, kill_after=0.3, ignore_sigterm=True
+        )
+        proc.wait(timeout=30)
+
+        assert _wait_until_dead(grandchild_pid), "SIGTERM を無視する孫が生存し続けた"
+        assert not marker.exists(), "孫プロセスが仕事を完了してしまった"
+
+    def test_watchdog_sigterm_cascades_to_grandchild(self, tmp_path: Path) -> None:
+        """watchdog 自身が SIGTERM を受けたとき、孫まで cascade して殺される。"""
+        proc, marker, grandchild_pid = self._spawn_watchdog(
+            tmp_path, timeout=60, kill_after=0.3, ignore_sigterm=False
+        )
+        proc.send_signal(signal.SIGTERM)
+        proc.wait(timeout=30)
+
+        assert _wait_until_dead(grandchild_pid), "watchdog 終了後に孫が残留した"
+        assert not marker.exists(), "孫プロセスが仕事を完了してしまった"

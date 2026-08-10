@@ -3,7 +3,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "^(Bash|bash)$",
         "hooks": [
           {
             "type": "command",
@@ -13,7 +13,7 @@
         "description": "git hook-bypassフラグをブロックして、pre-commit、commit-msg、pre-pushフックがスキップされないように保護します。"
       },
       {
-        "matcher": "Bash",
+        "matcher": "^(Bash|bash)$",
         "hooks": [
           {
             "type": "command",
@@ -23,7 +23,7 @@
         "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"
       },
       {
-        "matcher": "Edit|Write|MultiEdit|apply_patch",
+        "matcher": "^(Edit|edit|Write|write|MultiEdit|multiedit|apply_patch)$",
         "hooks": [
           {
             "type": "command",
@@ -46,7 +46,7 @@
         "description": "キャプチャツールの使用状況を観察して継続的な学習に役立てる"
       },
       {
-        "matcher": "Task|Agent",
+        "matcher": "^(Task|task|Agent|agent)$",
         "hooks": [
           {
             "type": "command",
@@ -105,7 +105,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "^(Bash|bash)$",
         "hooks": [
           {
             "type": "command",
@@ -116,7 +116,7 @@
         "description": "redux: Bash 出力をコマンド別フィルタで圧縮（無一致時は汎用戦略でトークン削減）"
       },
       {
-        "matcher": "Edit|Write|MultiEdit|apply_patch",
+        "matcher": "^(Edit|edit|Write|write|MultiEdit|multiedit|apply_patch)$",
         "hooks": [
           {
             "type": "command",

@@ -205,3 +205,46 @@ class TestAdaptPreToolUseContextOutput:
         parsed = json.loads(result)
         assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
         assert parsed["hookSpecificOutput"]["additionalContext"] == "ctx"
+
+
+class TestAdaptToolOutput:
+    """adapt_tool_output のテスト（PostToolUse のツール出力差し替え）。"""
+
+    _TOOL_RESPONSE = {"stdout": "raw", "stderr": "err", "interrupted": False, "isImage": False, "exitCode": 0}
+
+    @pytest.mark.parametrize("harness", ["claude", "codex", "unknown"])
+    def test_claude_shaped_harnesses_emit_updated_tool_output(self, harness):
+        """Claude / Codex / unknown は updatedToolOutput 形式で stdout のみ差し替える。"""
+        with patch("bluecore.hooks.output_adapter.detect_harness", return_value=harness):
+            result = output_adapter.adapt_tool_output("reduced", self._TOOL_RESPONSE)
+        parsed = json.loads(result)
+        assert parsed["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
+        # stdout だけが差し替わり、他のキーは output shape 維持のため保持される
+        assert parsed["hookSpecificOutput"]["updatedToolOutput"] == {**self._TOOL_RESPONSE, "stdout": "reduced"}
+
+    def test_copilot_emits_modified_result(self):
+        """copilot は modifiedResult 形式でツール出力をまるごと差し替える。"""
+        with patch("bluecore.hooks.output_adapter.detect_harness", return_value="copilot"):
+            result = output_adapter.adapt_tool_output("reduced", self._TOOL_RESPONSE)
+        parsed = json.loads(result)
+        assert "hookSpecificOutput" not in parsed
+        assert parsed["modifiedResult"] == {"resultType": "success", "textResultForLlm": "reduced"}
+
+    def test_unmapped_harness_falls_back_to_claude_format(self):
+        """テーブル未登録のハーネスは KeyError にせず Claude 形式へ倒す。"""
+        with patch("bluecore.hooks.output_adapter.detect_harness", return_value="future-harness"):
+            result = output_adapter.adapt_tool_output("reduced", self._TOOL_RESPONSE)
+        assert "updatedToolOutput" in json.loads(result)["hookSpecificOutput"]
+
+    def test_does_not_mutate_original_tool_response(self):
+        """元の tool_response を破壊しない（同一 dict を後段で再利用できる）。"""
+        original = dict(self._TOOL_RESPONSE)
+        with patch("bluecore.hooks.output_adapter.detect_harness", return_value="claude"):
+            output_adapter.adapt_tool_output("reduced", original)
+        assert original == self._TOOL_RESPONSE
+
+    def test_non_ascii_is_not_escaped(self):
+        """日本語を含む出力が \\uXXXX へエスケープされない。"""
+        with patch("bluecore.hooks.output_adapter.detect_harness", return_value="copilot"):
+            result = output_adapter.adapt_tool_output("圧縮済み", self._TOOL_RESPONSE)
+        assert "圧縮済み" in result

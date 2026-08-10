@@ -195,12 +195,84 @@ def basename(path: str) -> str:
 
 
 # detach 起動した子の実行時間上限（秒）。start_new_session=True の子はハーネスの
-# timeout で kill されないため、coreutils timeout で自決させる。hooks.json の
-# 最長エントリ（600 秒）より先に終わるよう 590 とする。
-# --kill-after は GNU coreutils 固有のため Linux 前提（BSD/macOS の timeout は不可）。
-DETACH_TIMEOUT_SECONDS = 590
+# timeout で kill されないため、自前の watchdog で自決させる。
+#
+# この値は hooks.json の timeout とは無関係に決める。detach 後の子はハーネスの
+# 管轄外であり、hooks.json の値（最大は session_install の 300 秒だが、これは
+# detach しない同期エントリ）と紐付ける論拠がないため。
+#
+# detach 対象（launcher --bg: learn.observe / session_end / desktop_notify /
+# mem.cli handoff）はいずれも正常系ではローカル I/O 数秒で終わる。したがって
+# 上限は「正常系を絶対に切らない」ことを優先した安全網の閾値であり、
+# 10 分走り続けていれば確実に異常（ハング・暴走）と断定できる 600 秒を採る。
+DETACH_TIMEOUT_SECONDS = 600
 # SIGTERM を無視して詰まったプロセスを SIGKILL で確実に回収するまでの猶予（秒）。
 _DETACH_KILL_AFTER_SECONDS = 30
+
+# detach した子を DETACH_TIMEOUT_SECONDS で SIGTERM、応答なければ
+# _DETACH_KILL_AFTER_SECONDS 後に SIGKILL する watchdog。coreutils の
+# `timeout`/`gtimeout` は BSD/macOS に標準で存在せず（--kill-after は GNU 固有）、
+# ランタイム依存ゼロの方針にも反するため、既に起動に使っている sys.executable
+# 自身で実装し外部コマンドへの依存をなくす。
+#
+# シグナルは GNU timeout と同様に「プロセスグループ」へ送る。子を
+# start_new_session=True で新しいセッション（= 新しいプロセスグループ）の
+# リーダーにし、os.killpg で子と孫をまとめて回収する。Popen.terminate()/kill()
+# は直接の子 1 プロセスにしか届かず、子が起動した孫（desktop_notify の
+# osascript / PowerShell、quality_gate の lint ステップ）が無期限に残留する。
+#
+# watchdog 自身が SIGTERM を受けた場合も、そのまま終了すると孫が残るため、
+# ハンドラで子グループへ SIGTERM を cascade し、猶予後に SIGKILL してから
+# 抜ける（ハンドラ内で proc.wait() を再入させないよう time.sleep で待つ）。
+#
+# コスト: detach 1 回につき watchdog + 対象の 2 プロセスが起動する。hooks.json の
+# `--bg bluecore.skills.learn.observe pre` は matcher "*" で全ツールコールに発火
+# するため、非 Claude ハーネスではツールコールごとにこの 2 プロセスを払う。これは
+# 意図的なコストであり、削減目的で watchdog を外してはならない:
+#   - watchdog を消すと、detach 済みの子と孫を kill する主体が消滅する。子は
+#     ハーネス timeout の管轄外なので、ハングした子と孫が無制限に残留する。
+#   - 子プロセス内の `signal.alarm` では代替できない。alarm は自プロセスにしか
+#     届かず、子が起動した孫（desktop_notify の osascript / PowerShell、
+#     quality_gate の lint ステップ）を回収できないため等価ではない。
+#   - watchdog は sys.executable の `-c` 実行で、対象モジュールを import せず
+#     待つだけなので、追加コストは Python インタプリタ起動 1 回分に留まる。
+# すなわち「毎回 1 プロセス分の起動コスト」と「孫プロセスの無制限残留を防ぐ
+# kill 保証」のトレードオフであり、後者を採る。
+_WATCHDOG_SCRIPT = """
+import os, signal, subprocess, sys, time
+
+timeout, kill_after = float(sys.argv[1]), float(sys.argv[2])
+proc = subprocess.Popen(
+    sys.argv[3:],
+    stdin=sys.stdin,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    start_new_session=True,
+)
+
+def signal_group(sig):
+    try:
+        os.killpg(os.getpgid(proc.pid), sig)
+    except (ProcessLookupError, OSError):
+        pass
+
+def cascade(signum, frame):
+    signal_group(signal.SIGTERM)
+    time.sleep(kill_after)
+    signal_group(signal.SIGKILL)
+    os._exit(128 + signum)
+
+signal.signal(signal.SIGTERM, cascade)
+try:
+    proc.wait(timeout=timeout)
+except subprocess.TimeoutExpired:
+    signal_group(signal.SIGTERM)
+    try:
+        proc.wait(timeout=kill_after)
+    except subprocess.TimeoutExpired:
+        signal_group(signal.SIGKILL)
+        proc.wait()
+"""
 
 
 def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None = None) -> bool:
@@ -211,9 +283,10 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
     TOCTOU 窓を作らないよう同一 fd を seek(0) して子へ継承する。起動直後に
     unlink する（継承済み fd は有効なまま）。
 
-    detach 後の子はハーネスの timeout の管轄外になるため、coreutils timeout で
+    detach 後の子はハーネスの timeout の管轄外になるため、_WATCHDOG_SCRIPT で
     ラップして DETACH_TIMEOUT_SECONDS で SIGTERM、さらに猶予後 SIGKILL を送り、
-    暴走プロセスの無期限残留を防ぐ。
+    暴走プロセスの無期限残留を防ぐ。シグナルは子のプロセスグループへ送るため、
+    子が起動した孫プロセスもまとめて回収される。
 
     Args:
         cmd: subprocess に渡すコマンドリスト。
@@ -240,9 +313,11 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
         tmp.seek(0)
         subprocess.Popen(
             [
-                "timeout",
-                f"--kill-after={_DETACH_KILL_AFTER_SECONDS}",
+                sys.executable,
+                "-c",
+                _WATCHDOG_SCRIPT,
                 str(DETACH_TIMEOUT_SECONDS),
+                str(_DETACH_KILL_AFTER_SECONDS),
                 *cmd,
             ],
             stdin=tmp,

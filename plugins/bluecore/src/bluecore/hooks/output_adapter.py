@@ -130,6 +130,86 @@ def adapt_pre_tool_use_context_output(additional_context: str) -> str:
     return builder("PreToolUse", additional_context)
 
 
+def _claude_tool_output(reduced_stdout: str, tool_response: dict) -> str:
+    """Claude Code の updatedToolOutput 形式 JSON を返す。
+
+    ``updatedToolOutput`` は元のツール出力と同じ形（stdout/stderr/interrupted/
+    isImage…）を保つ必要があり、形が合わないと Claude Code 側で破棄され元出力が
+    使われる。そのため stdout のみを差し替え、他のキーは元のまま引き継ぐ。
+
+    Args:
+        reduced_stdout: 圧縮後の stdout テキスト。
+        tool_response: 元のツール出力オブジェクト。
+
+    Returns:
+        hookSpecificOutput.updatedToolOutput を含む JSON 文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "updatedToolOutput": {**tool_response, "stdout": reduced_stdout},
+            }
+        },
+        ensure_ascii=False,
+    )
+
+
+def _copilot_tool_output(reduced_stdout: str, tool_response: dict) -> str:
+    """Copilot CLI の modifiedResult 形式 JSON を返す。
+
+    Copilot CLI の postToolUse は Claude Code の updatedToolOutput を解釈せず、
+    ``modifiedResult`` でツール出力をまるごと差し替える。テキスト 1 本しか
+    渡せないため、stdout 以外のキー（stderr/interrupted…）は表現できない。
+
+    Args:
+        reduced_stdout: 圧縮後の stdout テキスト。
+        tool_response: 未使用（Copilot CLI は元のツール出力 shape を参照しない）。
+
+    Returns:
+        {"modifiedResult": {...}} 形式の JSON 文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return json.dumps(
+        {"modifiedResult": {"resultType": "success", "textResultForLlm": reduced_stdout}},
+        ensure_ascii=False,
+    )
+
+
+# PostToolUse ハーネス → ツール出力差し替えビルダーのマッピング。
+# Copilot CLI は modifiedResult 契約でツール出力を上書きする（実機検証済み）。
+# Codex は未検証のため Claude 形式を維持。
+_TOOL_OUTPUT_BUILDERS = {
+    "claude": _claude_tool_output,
+    "codex": _claude_tool_output,
+    "copilot": _copilot_tool_output,
+    "unknown": _claude_tool_output,
+}
+
+
+def adapt_tool_output(reduced_stdout: str, tool_response: dict) -> str:
+    """PostToolUse のツール出力差し替えを実行中ハーネスのプロトコルで生成する。
+
+    Args:
+        reduced_stdout: 圧縮後の stdout テキスト。
+        tool_response: 元のツール出力オブジェクト。
+
+    Returns:
+        ハーネスのプロトコルに適合した JSON 文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    # 将来のハーネス追加でテーブル更新が漏れても KeyError にせず Claude 形式へ倒す
+    builder = _TOOL_OUTPUT_BUILDERS.get(detect_harness(), _claude_tool_output)
+    return builder(reduced_stdout, tool_response)
+
+
 def emit_block(reason: str) -> tuple[int, str, str]:
     """ツール実行ブロックの出力をハーネス別に組み立てる。
 

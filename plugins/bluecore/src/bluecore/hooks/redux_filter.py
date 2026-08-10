@@ -2,20 +2,19 @@
 
 ``tool_input.command`` でコマンド種別を判定し、対応する redux フィルタで
 ツール出力（``tool_response.stdout``）を圧縮する。圧縮できた場合のみ
-Claude Code の ``hookSpecificOutput.updatedToolOutput`` 契約で更新後の
-ツール出力を返し、stdout を上書きする。``updatedToolOutput`` は元の
-ツール出力と同じ形（stdout/stderr/interrupted/isImage…）を保つ必要があり、
-形が合わないと Claude Code 側で破棄され元出力が使われる。圧縮効果がない・
-対象外・エラー時は何も出力せず、元のツール出力をそのまま通す。
+ツール出力の差し替えを返し、stdout を上書きする。ハーネス別の出力契約
+（Claude Code の ``updatedToolOutput`` / Copilot CLI の ``modifiedResult``）は
+``output_adapter.adapt_tool_output`` に集約してあり、本フックは分岐を持たない。
+圧縮効果がない・対象外・エラー時は何も出力せず、元のツール出力をそのまま通す。
 """
 
 from __future__ import annotations
 
-import json
 import sys
 
 from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
-from bluecore.lib.harness import detect_harness
+from bluecore.hooks.output_adapter import adapt_tool_output
+from bluecore.lib.harness import normalize_tool_name
 from bluecore.mem.settings import ReduxSettings, Settings
 from bluecore.redux.config import ReduxConfig
 from bluecore.redux.engine import ReduxEngine
@@ -63,7 +62,7 @@ def _apply_reduction(
     config: ReduxConfig,
     engine: ReduxEngine,
 ) -> str:
-    """redux 圧縮を適用し、``updatedToolOutput`` 契約の JSON 文字列を返す。
+    """redux 圧縮を適用し、ツール出力差し替え契約の JSON 文字列を返す。
 
     Args:
         command: 実行された Bash コマンド文字列。
@@ -74,7 +73,8 @@ def _apply_reduction(
         engine: フィルタ適用エンジン。
 
     Returns:
-        圧縮効果があれば ``updatedToolOutput`` を含む JSON 文字列、なければ空文字列。
+        圧縮効果があればハーネス別のツール出力差し替え JSON 文字列、
+        なければ空文字列。
     """
     try:
         reduced = engine.reduce(command, original_stdout, config)
@@ -85,27 +85,11 @@ def _apply_reduction(
         return ""
     saved_pct = (len(original_stdout) - len(reduced)) / len(original_stdout) * 100
     write_stderr(f"[redux] {len(original_stdout)} → {len(reduced)} chars ({saved_pct:.0f}% 削減)\n")
-    if detect_harness() == "copilot":
-        # Copilot の postToolUse は modifiedResult 契約でツール出力を上書きする
-        output: dict = {
-            "modifiedResult": {
-                "resultType": "success",
-                "textResultForLlm": reduced,
-            }
-        }
-    else:
-        updated_output = {**tool_response, "stdout": reduced}
-        output = {
-            "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
-                "updatedToolOutput": updated_output,
-            }
-        }
-    return json.dumps(output, ensure_ascii=False)
+    return adapt_tool_output(reduced, tool_response)
 
 
 def evaluate(raw_input: str, config: ReduxConfig | None = None, engine: ReduxEngine | None = None) -> str:
-    """Bash ツール出力を redux で圧縮し、``updatedToolOutput`` 契約の JSON を返す。
+    """Bash ツール出力を redux で圧縮し、ツール出力差し替え契約の JSON を返す。
 
     Args:
         raw_input: フックに渡された生の入力 JSON 文字列。
@@ -113,13 +97,13 @@ def evaluate(raw_input: str, config: ReduxConfig | None = None, engine: ReduxEng
         engine: フィルタ適用エンジン。None の場合はキャッシュ済みエンジンを使う。
 
     Returns:
-        圧縮できた場合は ``updatedToolOutput`` を含む JSON 文字列。
+        圧縮できた場合はハーネス別のツール出力差し替え JSON 文字列。
         対象外・無効・圧縮効果なし・エラー時は空文字列（フックは出力せず透過する）。
     """
     data = parse_json_object(raw_input)
     if data is None:
         return ""
-    if str(data.get("tool_name", "") or "") != "Bash":
+    if normalize_tool_name(str(data.get("tool_name", "") or "")) != "Bash":
         return ""
     tool_response = data.get("tool_response")
     if not isinstance(tool_response, dict):
