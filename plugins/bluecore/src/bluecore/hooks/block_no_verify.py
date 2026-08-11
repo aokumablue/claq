@@ -63,6 +63,7 @@ import shlex
 from typing import NamedTuple
 
 from bluecore.hooks.hook_common import emit_block_output, parse_json_object, read_raw_stdin
+from bluecore.lib.harness import extract_bash_command
 
 # コマンド全体をセグメントに割るシェル区切りトークン。
 _SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
@@ -360,7 +361,7 @@ def main() -> int:
     data = parse_json_object(raw)
 
     if data:
-        command = str((data.get("tool_input") or {}).get("command") or "")
+        command = extract_bash_command(data)
         if has_bypass_flag(command):
             return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
 

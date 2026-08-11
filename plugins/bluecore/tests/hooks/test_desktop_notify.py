@@ -334,7 +334,7 @@ class TestRun:
         )
 
         raw = json.dumps({"last_assistant_message": "first line\nsecond"})
-        assert hook.run(raw) == raw
+        assert hook.run(raw) is None
         assert calls == [(hook.TITLE, "first line")]
 
     def test_macos_branch_passes_remaining_budget_as_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -349,7 +349,7 @@ class TestRun:
         )
 
         raw = json.dumps({"last_assistant_message": "hello"})
-        assert hook.run(raw) == raw
+        assert hook.run(raw) is None
         assert captured["timeout"] == pytest.approx(3.0)
 
     def test_macos_branch_skips_notify_when_budget_already_exhausted(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -363,7 +363,7 @@ class TestRun:
         monkeypatch.setattr(hook, "notify_macos", lambda *args, **kwargs: called.append((args, kwargs)))
 
         raw = json.dumps({"last_assistant_message": "hello"})
-        assert hook.run(raw) == raw
+        assert hook.run(raw) is None
         assert called == []
 
     def test_wsl_passes_deadline_to_find_powershell(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -402,7 +402,7 @@ class TestRun:
         monkeypatch.setattr(hook, "notify_windows", lambda *args, **kwargs: called.append((args, kwargs)))
 
         raw = json.dumps({"last_assistant_message": "hello"})
-        assert hook.run(raw) == raw
+        assert hook.run(raw) is None
         assert called == []
 
     def test_wsl_passes_remaining_budget_as_notify_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -420,7 +420,7 @@ class TestRun:
         )
 
         raw = json.dumps({"last_assistant_message": "hello"})
-        assert hook.run(raw) == raw
+        assert hook.run(raw) is None
         assert captured["timeout"] == pytest.approx(4.0)
 
     def test_wsl_burnttoast_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -436,7 +436,7 @@ class TestRun:
         monkeypatch.setattr(hook, "log", messages.append)
 
         raw = json.dumps({"last_assistant_message": "hello"})
-        assert hook.run(raw) == raw
+        assert hook.run(raw) is None
         assert any("BurntToast" in message for message in messages)
 
     def test_wsl_success_passthrough(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -448,7 +448,7 @@ class TestRun:
         monkeypatch.setattr(hook, "log", messages.append)
 
         raw = json.dumps({"last_assistant_message": "hello"})
-        assert hook.run(raw) == raw
+        assert hook.run(raw) is None
         assert messages == []
 
     def test_wsl_without_powershell_logs_tip(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -459,7 +459,7 @@ class TestRun:
         monkeypatch.setattr(hook, "log", messages.append)
 
         raw = json.dumps({"last_assistant_message": "hello"})
-        assert hook.run(raw) == raw
+        assert hook.run(raw) is None
         assert any("PowerShell" in message for message in messages)
 
     def test_wsl_generic_failure_logs_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -471,7 +471,7 @@ class TestRun:
         monkeypatch.setattr(hook, "log", messages.append)
 
         raw = json.dumps({"last_assistant_message": "hello"})
-        assert hook.run(raw) == raw
+        assert hook.run(raw) is None
         assert any("Notification failed: boom" in message for message in messages)
 
     def test_exception_is_logged(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -485,15 +485,17 @@ class TestRun:
         monkeypatch.setattr(hook, "log", messages.append)
 
         raw = json.dumps({"last_assistant_message": "hello"})
-        assert hook.run(raw) == raw
+        assert hook.run(raw) is None
         assert any("Error: boom" in message for message in messages)
 
-    def test_main_passthrough(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_main_does_not_echo_stdout(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         monkeypatch.setattr(hook, "read_raw_stdin", lambda: "raw")
-        monkeypatch.setattr(hook, "run", lambda raw: raw + "-out")
+        called: list[str] = []
+        monkeypatch.setattr(hook, "run", lambda raw: called.append(raw))
 
         assert hook.main() == 0
-        assert capsys.readouterr().out == "raw-out"
+        assert called == ["raw"]
+        assert capsys.readouterr().out == ""
 
     def test_main_returns_zero_on_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(hook, "read_raw_stdin", lambda: (_ for _ in ()).throw(RuntimeError("boom")))

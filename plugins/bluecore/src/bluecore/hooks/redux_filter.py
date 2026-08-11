@@ -14,7 +14,7 @@ import sys
 
 from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stderr, write_stdout
 from bluecore.hooks.output_adapter import adapt_tool_output
-from bluecore.lib.harness import normalize_tool_name
+from bluecore.lib.harness import extract_bash_command, extract_tool_result_text, normalize_tool_name
 from bluecore.mem.settings import ReduxSettings, Settings
 from bluecore.redux.config import ReduxConfig
 from bluecore.redux.engine import ReduxEngine
@@ -103,13 +103,11 @@ def evaluate(raw_input: str, config: ReduxConfig | None = None, engine: ReduxEng
     data = parse_json_object(raw_input)
     if data is None:
         return ""
-    if normalize_tool_name(str(data.get("tool_name", "") or "")) != "Bash":
+    tool_name = str(data.get("tool_name") or data.get("toolName") or "")
+    if normalize_tool_name(tool_name) != "Bash":
         return ""
-    tool_response = data.get("tool_response")
-    if not isinstance(tool_response, dict):
-        return ""
-    stdout = tool_response.get("stdout")
-    if not isinstance(stdout, str) or not stdout.strip():
+    stdout, tool_response = extract_tool_result_text(data)
+    if not stdout:
         return ""
 
     if config is None:
@@ -117,7 +115,7 @@ def evaluate(raw_input: str, config: ReduxConfig | None = None, engine: ReduxEng
     if not config.enabled:
         return ""
 
-    command = str((data.get("tool_input") or {}).get("command") or "")[:_MAX_COMMAND_LEN]
+    command = extract_bash_command(data)[:_MAX_COMMAND_LEN]
     if engine is None:
         engine = _get_engine()
 

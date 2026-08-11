@@ -74,6 +74,8 @@ _CONTEXT_OUTPUT_BUILDERS = {
     "claude": _claude_context_output,
     "codex": _claude_context_output,
     "copilot": _copilot_context_output,
+    # Grok Build は Claude 互換プラグイン形式（hookSpecificOutput）を解釈する
+    "grok": _claude_context_output,
     "unknown": _claude_context_output,
 }
 
@@ -105,6 +107,7 @@ _PRE_TOOL_USE_OUTPUT_BUILDERS = {
     "claude": _claude_context_output,
     "codex": _claude_context_output,
     "copilot": _claude_context_output,
+    "grok": _claude_context_output,
     "unknown": _claude_context_output,
 }
 
@@ -188,6 +191,7 @@ _TOOL_OUTPUT_BUILDERS = {
     "claude": _claude_tool_output,
     "codex": _claude_tool_output,
     "copilot": _copilot_tool_output,
+    "grok": _claude_tool_output,
     "unknown": _claude_tool_output,
 }
 
@@ -213,9 +217,11 @@ def adapt_tool_output(reduced_stdout: str, tool_response: dict) -> str:
 def emit_block(reason: str) -> tuple[int, str, str]:
     """ツール実行ブロックの出力をハーネス別に組み立てる。
 
-    Claude Code / Codex は exit code 2 + stderr でブロックする。Copilot CLI は
-    exit code 2 が warning（fail-open）のため、permissionDecision: deny の
-    stdout JSON + exit code 0 へ変換する。
+    Claude Code / Codex / Grok は exit code 2 + stderr でブロックする
+    （command preToolUse の非ゼロ終了は fail-closed）。
+    Copilot CLI は permissionDecision を stdout JSON で返す契約のため、
+    ``permissionDecision: deny`` の stdout JSON + exit code 0 へ変換する
+    （公式: 非ゼロでも deny だが、decision JSON の方が理由を確実に伝える）。
 
     Args:
         reason: ブロック理由（ユーザー / エージェントに提示される）。

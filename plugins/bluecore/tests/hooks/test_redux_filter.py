@@ -58,9 +58,25 @@ class TestEvaluate:
         assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine()) == ""
 
     def test_non_dict_tool_response_returns_empty(self) -> None:
-        # tool_response が文字列（ツール出力 shape でない）→ 透過
+        # tool_response が文字列（Claude shape でない）→ 透過
         payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ps"}, "tool_response": "a\nb\nc"})
         assert hook.evaluate(payload, config=ReduxConfig(), engine=_engine()) == ""
+
+    def test_copilot_tool_result_and_tool_args_reduce(self) -> None:
+        """Copilot 形式 toolResult + toolArgs でも圧縮できる。"""
+        body = "\n".join(f"data line {i}" for i in range(50))
+        payload = json.dumps(
+            {
+                "toolName": "bash",
+                "toolArgs": json.dumps({"command": "ps aux"}),
+                "toolResult": {"resultType": "success", "textResultForLlm": body},
+            }
+        )
+        result = hook.evaluate(payload, config=ReduxConfig(), engine=_engine(limit=1))
+        assert result
+        out = json.loads(result)
+        # harness が claude 想定のテスト環境では updatedToolOutput 経路
+        assert "hookSpecificOutput" in out or "modifiedResult" in out
 
     def test_no_stdout_returns_empty(self) -> None:
         payload = _payload(stdout="")

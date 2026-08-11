@@ -41,6 +41,7 @@ from bluecore.hooks.commit_quality_scanner import (
 )
 from bluecore.hooks.hook_common import parse_json_object
 from bluecore.lib.core_utils import log
+from bluecore.lib.harness import extract_bash_command
 
 _SHELL_SEPARATORS = {"&&", "||", ";", "|"}
 
@@ -554,7 +555,7 @@ def evaluate(raw_input: str) -> dict:
         if not input_data:
             return {"output": raw_input, "exitCode": 0}
 
-        command = input_data.get("tool_input", {}).get("command", "")
+        command = extract_bash_command(input_data)
 
         # git commit コマンドの場合のみ実行（トークン化して堅牢に判定）
         is_commit, commit_args = _is_git_commit_command(command)

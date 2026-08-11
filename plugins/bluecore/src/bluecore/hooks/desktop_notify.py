@@ -231,16 +231,52 @@ def notify_macos(title: str, body: str, *, timeout: float = DEFAULT_NOTIFICATION
         log(f"[DesktopNotify] osascript failed: {e}")
 
 
-def run(raw_input: str) -> str:
-    """デスクトップ通知フックを実行します。生入力をそのまま返します (パススルー)。
+def _assistant_message(input_data: dict) -> str | None:
+    """Stop 系 payload からアシスタント最終メッセージ候補を取り出す。
+
+    Args:
+        input_data: フック stdin の dict。
+
+    Returns:
+        メッセージ文字列、または見つからなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    for key in (
+        "last_assistant_message",
+        "lastAssistantMessage",
+        "response",
+        "last_assistant_text",
+    ):
+        value = input_data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def run(raw_input: str) -> None:
+    """デスクトップ通知フックを実行する。stdout には何も書かない。
+
+    Stop / agentStop の出力は decision 制御に使われうるため、stdin を
+    エコーしない（以前はパススルーで raw JSON を stdout に出していた）。
 
     通知処理全体（PowerShell探索 + 通知送信）は_notification_timeout()秒の
     予算内で完結するようdeadlineベースで管理され、予算を使い切った時点で
     以降の処理（探索・送信）は打ち切られます。
+
+    Args:
+        raw_input: フックに渡された生の stdin JSON。
+
+    Returns:
+        なし。
+
+    Raises:
+        例外は発生しません。
     """
     try:
         input_data = (parse_json_object(raw_input.strip()) if raw_input.strip() else None) or {}
-        summary = extract_summary(input_data.get("last_assistant_message"))
+        summary = extract_summary(_assistant_message(input_data))
         deadline = time.monotonic() + _notification_timeout()
 
         if IS_MACOS:
@@ -252,7 +288,7 @@ def run(raw_input: str) -> str:
             if ps:
                 timeout = _remaining_timeout(deadline)
                 if timeout <= 0:
-                    return raw_input
+                    return
                 result = notify_windows(ps, TITLE, summary, timeout=timeout)
                 if result.get("reason") and "burnttoast" in result["reason"].lower():
                     log("[DesktopNotify] Tip: Install BurntToast module to enable notifications")
@@ -263,16 +299,13 @@ def run(raw_input: str) -> str:
     except Exception as err:
         log(f"[DesktopNotify] Error: {err}")
 
-    return raw_input
-
 
 def main() -> int:
     """スクリプトとして実行されたときのエントリーポイント。"""
 
     try:
         raw = read_raw_stdin()
-        output = run(raw)
-        print(output, end="")
+        run(raw)
         return 0
     except Exception:
         return 0
