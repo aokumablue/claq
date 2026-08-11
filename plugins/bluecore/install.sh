@@ -272,6 +272,68 @@ update_copilot_cache_symlink() {
   _replace_with_symlink "${copilot_plugin_dir}/.venv"
 }
 
+# Grok Build: ${CLAUDE_PLUGIN_ROOT} は ~/.grok/plugins/bluecore に展開されるが、
+# 実体は ~/.grok/installed-plugins/bluecore-<hash>/ にある。hooks の launcher
+# 解決のため symlink を張る。
+update_grok_plugin_root_symlink() {
+  local grok_plugins="${HOME}/.grok/plugins"
+  local installed="${HOME}/.grok/installed-plugins"
+  local target=""
+
+  # install.sh が installed-plugins 配下で走っている場合はそれを優先
+  case "${SCRIPT_DIR}" in
+    *"/installed-plugins/bluecore-"*)
+      if [[ -f "${SCRIPT_DIR}/src/bluecore/launcher.py" ]]; then
+        target="${SCRIPT_DIR}"
+      fi
+      ;;
+  esac
+
+  if [[ -z "${target}" && -d "${installed}" ]]; then
+    # 更新日時が新しい bluecore-* を選ぶ
+    target="$(ls -1dt "${installed}"/bluecore-* 2>/dev/null | while read -r d; do
+      if [[ -f "${d}/src/bluecore/launcher.py" ]]; then
+        printf '%s\n' "${d}"
+        break
+      fi
+    done)"
+  fi
+
+  # 開発ツリーからの install（SCRIPT_DIR が repo の plugins/bluecore）
+  if [[ -z "${target}" && -f "${SCRIPT_DIR}/src/bluecore/launcher.py" ]]; then
+    # installed-plugins が無い場合は開発実体でも可（hooks 経路の保険）
+    if [[ ! -d "${installed}" ]]; then
+      target="${SCRIPT_DIR}"
+    fi
+  fi
+
+  [[ -n "${target}" && -d "${target}" ]] || return 0
+  [[ -f "${target}/src/bluecore/launcher.py" ]] || return 0
+
+  mkdir -p "${grok_plugins}"
+  local link="${grok_plugins}/bluecore"
+  if [[ -L "${link}" ]]; then
+    local current
+    current="$(readlink "${link}" 2>/dev/null || true)"
+    if [[ "${current}" == "${target}" ]]; then
+      return 0
+    fi
+    rm -f "${link}"
+  elif [[ -e "${link}" ]]; then
+    if [[ -f "${link}/src/bluecore/launcher.py" ]]; then
+      return 0
+    fi
+    # 壊れた配置のみ除去（中身がある通常ディレクトリは触らない）
+    if [[ -d "${link}" ]] && [[ -z "$(ls -A "${link}" 2>/dev/null)" ]]; then
+      rmdir "${link}" 2>/dev/null || return 0
+    else
+      return 0
+    fi
+  fi
+  ln -sfn "${target}" "${link}"
+  echo "[bluecore] Grok plugin root symlink: ${link} -> ${target}"
+}
+
 # ---- 引数パース ----
 
 while [[ $# -gt 0 ]]; do
@@ -334,6 +396,7 @@ fi
 
 update_claude_cache_symlinks
 update_copilot_cache_symlink
+update_grok_plugin_root_symlink
 
 # mem.db の作成はインストーラでは行わない。
 # SessionStart の `bluecore.mem.cli context` が Database() 経由で
