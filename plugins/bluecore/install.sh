@@ -272,6 +272,20 @@ update_copilot_cache_symlink() {
   _replace_with_symlink "${copilot_plugin_dir}/.venv"
 }
 
+# Grok installed-plugins 各 bluecore-* に .venv → ~/.bluecore/.venv を張る
+# （Claude cache / Copilot installed-plugins と同じ共有 venv 方式）
+update_grok_venv_symlinks() {
+  local installed="${HOME}/.grok/installed-plugins"
+  [[ -d "${installed}" ]] || return 0
+
+  local d
+  for d in "${installed}"/bluecore-*; do
+    [[ -d "${d}" ]] || continue
+    [[ -f "${d}/src/bluecore/launcher.py" ]] || continue
+    _replace_with_symlink "${d}/.venv"
+  done
+}
+
 # Grok Build: ${CLAUDE_PLUGIN_ROOT} は ~/.grok/plugins/bluecore に展開されるが、
 # 実体は ~/.grok/installed-plugins/bluecore-<hash>/ のみ。リンク先に開発用
 # リポジトリ（bluecore-dev 等）は使わない。
@@ -388,6 +402,7 @@ fi
 
 update_claude_cache_symlinks
 update_copilot_cache_symlink
+update_grok_venv_symlinks
 update_grok_plugin_root_symlink
 
 # mem.db の作成はインストーラでは行わない。

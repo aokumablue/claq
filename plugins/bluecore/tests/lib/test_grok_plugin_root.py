@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from bluecore.lib import grok_plugin_root as mod
@@ -62,6 +63,50 @@ class TestFindLatestInstalledBluecore:
     def test_missing_dir_returns_none(self, tmp_path: Path) -> None:
         """探索先が無ければ None。"""
         assert mod.find_latest_installed_bluecore(tmp_path / "nope") is None
+
+
+class TestEnsureVenvSymlinkForInstalled:
+    """ensure_venv_symlink_for_installed のテスト。"""
+
+    def test_creates_venv_link_to_shared(self, tmp_path: Path) -> None:
+        """installed bluecore-* に共有 venv への .venv を張る。"""
+        plugin = _make_installed_plugin(tmp_path)
+        shared = tmp_path / ".bluecore" / ".venv"
+        shared.mkdir(parents=True)
+        (shared / "pyvenv.cfg").write_text("home = /tmp\n", encoding="utf-8")
+        updated = mod.ensure_venv_symlink_for_installed(home=tmp_path, shared_venv=shared)
+        link = plugin / ".venv"
+        assert link in updated
+        assert link.is_symlink()
+        assert os.readlink(link) == str(shared)
+
+    def test_skips_when_already_linked(self, tmp_path: Path) -> None:
+        """既に正しい .venv があれば更新リストに含めない。"""
+        plugin = _make_installed_plugin(tmp_path)
+        shared = tmp_path / ".bluecore" / ".venv"
+        shared.mkdir(parents=True)
+        link = plugin / ".venv"
+        link.symlink_to(shared)
+        updated = mod.ensure_venv_symlink_for_installed(home=tmp_path, shared_venv=shared)
+        assert updated == []
+        assert link.is_symlink()
+
+    def test_replaces_legacy_real_venv(self, tmp_path: Path) -> None:
+        """誤って置かれた実体 venv を symlink に置換する。"""
+        plugin = _make_installed_plugin(tmp_path)
+        shared = tmp_path / ".bluecore" / ".venv"
+        shared.mkdir(parents=True)
+        legacy = plugin / ".venv"
+        legacy.mkdir()
+        (legacy / "pyvenv.cfg").write_text("home = /legacy\n", encoding="utf-8")
+        updated = mod.ensure_venv_symlink_for_installed(home=tmp_path, shared_venv=shared)
+        assert legacy in updated
+        assert legacy.is_symlink()
+        assert os.readlink(legacy) == str(shared)
+
+    def test_ignores_when_no_installed_plugins(self, tmp_path: Path) -> None:
+        """installed-plugins が無ければ空リスト。"""
+        assert mod.ensure_venv_symlink_for_installed(home=tmp_path) == []
 
 
 class TestEnsureGrokPluginRootSymlink:

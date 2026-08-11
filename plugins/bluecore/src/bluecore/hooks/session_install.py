@@ -282,11 +282,16 @@ def run(_raw_input: str) -> str:
     Raises:
         例外は発生しません。
     """
-    # Grok: ~/.grok/plugins/bluecore → installed-plugins/bluecore-<hash> のみ
+    # Grok: installed-plugins の .venv と plugins/bluecore ルート symlink を修復
     # （開発用リポジトリはリンク先にしない）
     try:
-        from bluecore.lib.grok_plugin_root import ensure_grok_plugin_root_symlink
+        from bluecore.lib.grok_plugin_root import (
+            ensure_grok_plugin_root_symlink,
+            ensure_venv_symlink_for_installed,
+        )
 
+        for venv_link in ensure_venv_symlink_for_installed():
+            print(f"[SessionInstall] Grok .venv symlink: {venv_link}", file=sys.stderr)
         linked = ensure_grok_plugin_root_symlink()
         if linked is not None:
             print(f"[SessionInstall] Grok plugin root symlink -> {linked}", file=sys.stderr)

@@ -12,6 +12,7 @@ launcher パスが前者を参照するため、インストール時と Session
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 
@@ -96,6 +97,64 @@ def find_latest_installed_bluecore(installed_dir: Path | None = None) -> Path | 
         return None
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return candidates[0]
+
+
+def ensure_venv_symlink_for_installed(
+    *,
+    home: Path | None = None,
+    shared_venv: Path | str | None = None,
+) -> list[Path]:
+    """``installed-plugins/bluecore-*`` 各ツリーに共有 venv への .venv symlink を張る。
+
+    実体 venv は常に ``~/.bluecore/.venv``（または shared_venv）1 つ。
+    各インストールディレクトリには symlink のみ置く（Claude/Copilot と同じ）。
+
+    Args:
+        home: ホーム上書き（テスト用）。
+        shared_venv: 共有 venv パス。None なら ``~/.bluecore/.venv``。
+
+    Returns:
+        新たに作成または張り替えた .venv リンクの Path リスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    base = home if home is not None else _home()
+    venv = Path(shared_venv) if shared_venv is not None else base / ".bluecore" / ".venv"
+    installed = installed_plugins_dir(base)
+    if not installed.is_dir():
+        return []
+
+    updated: list[Path] = []
+    try:
+        children = list(installed.iterdir())
+    except OSError:
+        return []
+
+    venv_str = str(venv)
+    for path in children:
+        if not path.is_dir() or not path.name.startswith("bluecore-"):
+            continue
+        if not _has_launcher(path):
+            continue
+        link = path / ".venv"
+        try:
+            if link.is_symlink():
+                # install.sh と同様: readlink 文字列一致ならスキップ
+                if os.readlink(link) == venv_str:
+                    continue
+                link.unlink()
+            elif link.exists():
+                # 誤って置かれた実体 venv は置換、それ以外は触らない
+                if (link / "pyvenv.cfg").is_file():
+                    shutil.rmtree(link)
+                else:
+                    continue
+            link.symlink_to(venv, target_is_directory=True)
+            updated.append(link)
+        except OSError:
+            continue
+    return updated
 
 
 def ensure_grok_plugin_root_symlink(
