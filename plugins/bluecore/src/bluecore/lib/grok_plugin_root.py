@@ -4,6 +4,9 @@ Grok は ``${CLAUDE_PLUGIN_ROOT}`` を ``~/.grok/plugins/<name>`` に展開す�
 実体は ``~/.grok/installed-plugins/<name>-<hash>/`` に置かれる。hooks.json の
 launcher パスが前者を参照するため、インストール時と SessionStart で
 シンボリックリンクを張って一致させる。
+
+リンク先は常に ``~/.grok/installed-plugins/bluecore-*`` のみとする。
+開発用チェックアウト（例: bluecore-dev）は一切参照しない。
 """
 
 from __future__ import annotations
@@ -15,6 +18,52 @@ from pathlib import Path
 def _home() -> Path:
     """ホームディレクトリを返す。"""
     return Path.home()
+
+
+def installed_plugins_dir(home: Path | None = None) -> Path:
+    """``~/.grok/installed-plugins`` のパスを返す。
+
+    Args:
+        home: ホームディレクトリ上書き（テスト用）。None なら Path.home()。
+
+    Returns:
+        installed-plugins ディレクトリの Path。
+    """
+    base = home if home is not None else _home()
+    return base / ".grok" / "installed-plugins"
+
+
+def is_grok_installed_plugin_root(path: Path | str) -> bool:
+    """パスが Grok の公式インストール先（installed-plugins/bluecore-*）か判定する。
+
+    Args:
+        path: 検査対象パス。
+
+    Returns:
+        installed-plugins 配下の bluecore-* ツリーなら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        resolved = Path(path).resolve()
+    except OSError:
+        return False
+    parts = resolved.parts
+    try:
+        grok_idx = parts.index(".grok")
+    except ValueError:
+        return False
+    if grok_idx + 2 >= len(parts):
+        return False
+    if parts[grok_idx + 1] != "installed-plugins":
+        return False
+    return parts[grok_idx + 2].startswith("bluecore-")
+
+
+def _has_launcher(root: Path) -> bool:
+    """プラグインルートに launcher.py があるか。"""
+    return (root / "src" / "bluecore" / "launcher.py").is_file()
 
 
 def find_latest_installed_bluecore(installed_dir: Path | None = None) -> Path | None:
@@ -29,7 +78,7 @@ def find_latest_installed_bluecore(installed_dir: Path | None = None) -> Path | 
     Raises:
         例外は発生しません。
     """
-    root = installed_dir if installed_dir is not None else _home() / ".grok" / "installed-plugins"
+    root = installed_dir if installed_dir is not None else installed_plugins_dir()
     if not root.is_dir():
         return None
     candidates: list[Path] = []
@@ -39,8 +88,7 @@ def find_latest_installed_bluecore(installed_dir: Path | None = None) -> Path | 
                 continue
             if not path.name.startswith("bluecore-"):
                 continue
-            launcher = path / "src" / "bluecore" / "launcher.py"
-            if launcher.is_file():
+            if _has_launcher(path):
                 candidates.append(path)
     except OSError:
         return None
@@ -54,13 +102,17 @@ def ensure_grok_plugin_root_symlink(
     *,
     plugin_root: Path | str | None = None,
     link_path: Path | str | None = None,
+    home: Path | None = None,
 ) -> Path | None:
-    """``~/.grok/plugins/bluecore`` を実インストール先へ symlink する。
+    """``~/.grok/plugins/bluecore`` を **installed-plugins 配下のみ** へ symlink する。
+
+    開発用リポジトリや任意パスはリンク先にしない。明示の ``plugin_root`` も
+    ``is_grok_installed_plugin_root`` を満たす場合だけ採用する。
 
     Args:
-        plugin_root: リンク先。None なら installed-plugins の最新 bluecore-*、
-            または環境の CLAUDE_PLUGIN_ROOT が installed-plugins 配下ならそれ。
+        plugin_root: 候補のリンク先。installed-plugins/bluecore-* でなければ無視。
         link_path: リンクのパス。None なら ``~/.grok/plugins/bluecore``。
+        home: ホーム上書き（テスト用）。
 
     Returns:
         作成・更新したリンク先 Path。何もしなければ None。
@@ -68,26 +120,37 @@ def ensure_grok_plugin_root_symlink(
     Raises:
         例外は発生しません（OSError は握りつぶす）。
     """
-    link = Path(link_path) if link_path is not None else _home() / ".grok" / "plugins" / "bluecore"
+    base = home if home is not None else _home()
+    link = Path(link_path) if link_path is not None else base / ".grok" / "plugins" / "bluecore"
 
     target: Path | None = None
     if plugin_root is not None:
         candidate = Path(plugin_root)
-        if (candidate / "src" / "bluecore" / "launcher.py").is_file():
-            target = candidate.resolve()
-        else:
-            # 明示指定が無効ならフォールバックせず失敗（テスト・誤設定を隠さない）
-            return None
+        if is_grok_installed_plugin_root(candidate) and _has_launcher(candidate):
+            try:
+                target = candidate.resolve()
+            except OSError:
+                target = None
+        # 開発ツリー等は黙って無視し、installed-plugins 探索へ進む
+
     if target is None:
         env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-        if env_root and "/.grok/installed-plugins/" in env_root.replace("\\", "/"):
+        if env_root and is_grok_installed_plugin_root(env_root):
             candidate = Path(env_root)
-            if (candidate / "src" / "bluecore" / "launcher.py").is_file():
-                target = candidate.resolve()
+            if _has_launcher(candidate):
+                try:
+                    target = candidate.resolve()
+                except OSError:
+                    target = None
+
     if target is None:
-        target = find_latest_installed_bluecore()
-        if target is not None:
-            target = target.resolve()
+        found = find_latest_installed_bluecore(installed_plugins_dir(base))
+        if found is not None:
+            try:
+                target = found.resolve()
+            except OSError:
+                target = None
+
     if target is None:
         return None
 
@@ -102,10 +165,9 @@ def ensure_grok_plugin_root_symlink(
             link.unlink()
         elif link.exists():
             # 既に有効なツリーなら触らない
-            if (link / "src" / "bluecore" / "launcher.py").is_file():
+            if _has_launcher(link):
                 return None
             if link.is_dir():
-                # 壊れた/空のディレクトリは置き換えない（安全側）— ファイルが無い時のみ
                 try:
                     next(link.iterdir())
                 except StopIteration:

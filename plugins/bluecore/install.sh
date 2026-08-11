@@ -273,14 +273,14 @@ update_copilot_cache_symlink() {
 }
 
 # Grok Build: ${CLAUDE_PLUGIN_ROOT} は ~/.grok/plugins/bluecore に展開されるが、
-# 実体は ~/.grok/installed-plugins/bluecore-<hash>/ にある。hooks の launcher
-# 解決のため symlink を張る。
+# 実体は ~/.grok/installed-plugins/bluecore-<hash>/ のみ。リンク先に開発用
+# リポジトリ（bluecore-dev 等）は使わない。
 update_grok_plugin_root_symlink() {
   local grok_plugins="${HOME}/.grok/plugins"
   local installed="${HOME}/.grok/installed-plugins"
   local target=""
 
-  # install.sh が installed-plugins 配下で走っている場合はそれを優先
+  # 実行中の install.sh が installed-plugins/bluecore-* 配下にある場合のみ採用
   case "${SCRIPT_DIR}" in
     *"/installed-plugins/bluecore-"*)
       if [[ -f "${SCRIPT_DIR}/src/bluecore/launcher.py" ]]; then
@@ -289,22 +289,14 @@ update_grok_plugin_root_symlink() {
       ;;
   esac
 
+  # それ以外は ~/.grok/installed-plugins/bluecore-* の最新のみ（開発ツリーは無視）
   if [[ -z "${target}" && -d "${installed}" ]]; then
-    # 更新日時が新しい bluecore-* を選ぶ
     target="$(ls -1dt "${installed}"/bluecore-* 2>/dev/null | while read -r d; do
       if [[ -f "${d}/src/bluecore/launcher.py" ]]; then
         printf '%s\n' "${d}"
         break
       fi
     done)"
-  fi
-
-  # 開発ツリーからの install（SCRIPT_DIR が repo の plugins/bluecore）
-  if [[ -z "${target}" && -f "${SCRIPT_DIR}/src/bluecore/launcher.py" ]]; then
-    # installed-plugins が無い場合は開発実体でも可（hooks 経路の保険）
-    if [[ ! -d "${installed}" ]]; then
-      target="${SCRIPT_DIR}"
-    fi
   fi
 
   [[ -n "${target}" && -d "${target}" ]] || return 0

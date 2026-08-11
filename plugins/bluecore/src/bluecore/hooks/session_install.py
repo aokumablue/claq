@@ -282,11 +282,12 @@ def run(_raw_input: str) -> str:
     Raises:
         例外は発生しません。
     """
-    # Grok: ~/.grok/plugins/bluecore → installed-plugins/bluecore-<hash>
+    # Grok: ~/.grok/plugins/bluecore → installed-plugins/bluecore-<hash> のみ
+    # （開発用リポジトリはリンク先にしない）
     try:
         from bluecore.lib.grok_plugin_root import ensure_grok_plugin_root_symlink
 
-        linked = ensure_grok_plugin_root_symlink(plugin_root=_PLUGIN_ROOT)
+        linked = ensure_grok_plugin_root_symlink()
         if linked is not None:
             print(f"[SessionInstall] Grok plugin root symlink -> {linked}", file=sys.stderr)
     except Exception as exc:  # noqa: BLE001 — セッション開始を止めない
