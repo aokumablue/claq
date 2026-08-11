@@ -1,4 +1,4 @@
-"""コーディングエージェントハーネス（Claude Code / Copilot CLI / Codex）の判定と差分吸収。
+"""コーディングエージェントハーネス（Claude / Copilot / Codex / Grok）の判定と差分吸収。
 
 判定順はコスト昇順で、Claude Code では環境変数チェック 1 回で確定する。
 すべて純 stdlib のみに依存する（venv 不在時のフォールバック実行を保証するため）。
@@ -10,16 +10,19 @@ import json
 import os
 import re
 from functools import lru_cache
+from typing import Any
 
 # 各ハーネスのツール名 → Claude Code 相当ツール名。
 #
 # Codex の apply_patch は Edit に対応する。Copilot CLI はフックイベントに
 # lowercase の runtime tool 名（write/edit/bash 等）を渡すため、大文字小文字を
 # 区別しない照合で Claude Code 表記へ正規化する。
+# shell は一部ハーネスが bash 相当として使う runtime 名。
 _TOOL_NAME_MAP = {
     "apply_patch": "Edit",
     "agent": "Agent",
     "bash": "Bash",
+    "shell": "Bash",
     "edit": "Edit",
     "glob": "Glob",
     "grep": "Grep",
@@ -43,7 +46,7 @@ def detect_harness() -> str:
         引数はありません。
 
     Returns:
-        "claude" / "codex" / "copilot" / "unknown" のいずれか。
+        "claude" / "codex" / "copilot" / "grok" / "unknown" のいずれか。
         unknown は Claude 互換形式で出力する（最も安全側）。
 
     Raises:
@@ -57,7 +60,113 @@ def detect_harness() -> str:
     plugin_root = env.get("CLAUDE_PLUGIN_ROOT", "")
     if "/.copilot/installed-plugins/" in plugin_root or any(k.startswith("COPILOT_") for k in env):
         return "copilot"
+    # Grok Build: installed-plugins/<name>-<hash> または plugins/<name>、GROK_* 環境変数
+    if (
+        "/.grok/installed-plugins/" in plugin_root
+        or "/.grok/plugins/" in plugin_root
+        or any(k.startswith("GROK_") for k in env)
+    ):
+        return "grok"
     return "unknown"
+
+
+def extract_tool_input(payload: dict[str, Any]) -> Any:
+    """フック payload から tool_input / toolArgs を正規化して返す。
+
+    Claude / VS Code 互換は ``tool_input``、Copilot camelCase は ``toolArgs``
+    （JSON 文字列のことが多い）。文字列で JSON オブジェクトに見える場合は
+    パースして dict を返す。パース不能なら元の文字列を返す。
+
+    Args:
+        payload: フック stdin を JSON として読んだ dict。
+
+    Returns:
+        正規化後の tool 入力（dict / str / その他）、キーが無ければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    for key in ("tool_input", "toolArgs", "tool_args"):
+        if key not in payload:
+            continue
+        value = payload[key]
+        if isinstance(value, str):
+            stripped = value.lstrip()
+            if stripped.startswith(("{", "[")):
+                try:
+                    return json.loads(value)
+                except (json.JSONDecodeError, TypeError):
+                    return value
+            return value
+        return value
+    return None
+
+
+def extract_bash_command(payload: dict[str, Any]) -> str:
+    """フック payload から Bash/shell の command 文字列を取り出す。
+
+    ``tool_input.command`` / ``toolArgs``（JSON 文字列含む）/ 生文字列を吸収する。
+    非 dict の tool_input に対して ``.get`` して AttributeError にならない。
+
+    Args:
+        payload: フック stdin を JSON として読んだ dict。
+
+    Returns:
+        コマンド文字列。取れなければ空文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    tool_input = extract_tool_input(payload)
+    if isinstance(tool_input, dict):
+        for key in ("command", "cmd"):
+            cmd = tool_input.get(key)
+            if isinstance(cmd, str):
+                return cmd
+        return ""
+    if isinstance(tool_input, str):
+        return tool_input
+    return ""
+
+
+def extract_tool_result_text(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """PostToolUse payload から LLM 向けテキストと置換用 dict を返す。
+
+    吸収する形:
+      - Claude: ``tool_response.stdout``
+      - Copilot camelCase: ``toolResult.textResultForLlm``
+      - VS Code: ``tool_result`` の同系フィールド
+
+    Args:
+        payload: フック stdin を JSON として読んだ dict。
+
+    Returns:
+        (テキスト, adapt_tool_output に渡す dict)。取れなければ ("", {})。
+
+    Raises:
+        例外は発生しません。
+    """
+    tool_response = payload.get("tool_response")
+    if isinstance(tool_response, dict):
+        stdout = tool_response.get("stdout")
+        if isinstance(stdout, str) and stdout.strip():
+            return stdout, tool_response
+
+    for key in ("toolResult", "tool_result"):
+        result = payload.get(key)
+        if isinstance(result, dict):
+            text = (
+                result.get("textResultForLlm")
+                or result.get("text_result_for_llm")
+                or result.get("stdout")
+            )
+            if isinstance(text, str) and text.strip():
+                merged = {**result, "stdout": text}
+                return text, merged
+        if isinstance(result, str) and result.strip():
+            return result, {"stdout": result}
+
+    return "", {}
 
 
 def normalize_tool_name(tool_name: str) -> str:

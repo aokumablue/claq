@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -47,8 +48,34 @@ class TestDetectHarness:
 
     def test_no_markers_returns_unknown(self, monkeypatch):
         """判定材料が無ければ unknown を返す。"""
+        # ホストに GROK_* / COPILOT_* が残っていても unknown になるよう除去
+        for key in list(os.environ):
+            if key.startswith(("GROK_", "COPILOT_", "CODEX_")) or key in {
+                "CLAUDECODE",
+                "PLUGIN_DATA",
+            }:
+                monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", "/home/u/dev/repo")
+        harness.detect_harness.cache_clear()
         assert harness.detect_harness() == "unknown"
+
+    def test_grok_plugin_root_path_returns_grok(self, monkeypatch):
+        """CLAUDE_PLUGIN_ROOT が ~/.grok/installed-plugins 配下なら grok を返す。"""
+        monkeypatch.setenv(
+            "CLAUDE_PLUGIN_ROOT",
+            "/Users/u/.grok/installed-plugins/bluecore-abc123",
+        )
+        assert harness.detect_harness() == "grok"
+
+    def test_grok_plugins_path_returns_grok(self, monkeypatch):
+        """CLAUDE_PLUGIN_ROOT が ~/.grok/plugins 配下なら grok を返す。"""
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", "/Users/u/.grok/plugins/bluecore")
+        assert harness.detect_harness() == "grok"
+
+    def test_grok_prefix_env_returns_grok(self, monkeypatch):
+        """GROK_ プレフィックス環境変数で grok を返す。"""
+        monkeypatch.setenv("GROK_SESSION_ID", "sess-1")
+        assert harness.detect_harness() == "grok"
 
     def test_result_is_memoized(self, monkeypatch):
         """判定結果はメモ化され環境変更後も維持される。"""
@@ -65,6 +92,10 @@ class TestNormalizeToolName:
         """Codex の apply_patch は Edit に正規化される。"""
         assert harness.normalize_tool_name("apply_patch") == "Edit"
 
+    def test_shell_maps_to_bash(self):
+        """shell runtime 名は Bash に正規化される。"""
+        assert harness.normalize_tool_name("shell") == "Bash"
+
     @pytest.mark.parametrize("name", ["Bash", "Edit", "Write", "MultiEdit", "Skill", ""])
     def test_other_names_pass_through(self, name):
         """マッピング対象外のツール名はそのまま返す。"""
@@ -76,6 +107,7 @@ class TestNormalizeToolName:
             ("write", "Write"),
             ("edit", "Edit"),
             ("bash", "Bash"),
+            ("shell", "Bash"),
             ("multiedit", "MultiEdit"),
             ("read", "Read"),
             ("view", "Read"),
@@ -89,6 +121,80 @@ class TestNormalizeToolName:
     def test_copilot_lowercase_names_normalize_to_claude_code_form(self, copilot_name, expected):
         """Copilot CLI が渡す lowercase runtime tool 名を Claude Code 表記へ正規化する。"""
         assert harness.normalize_tool_name(copilot_name) == expected
+
+
+class TestExtractBashCommand:
+    """extract_bash_command / extract_tool_input のテスト。"""
+
+    def test_tool_input_dict_command(self):
+        """Claude 形式 tool_input.command を返す。"""
+        assert harness.extract_bash_command({"tool_input": {"command": "ls -la"}}) == "ls -la"
+
+    def test_tool_args_json_string(self):
+        """Copilot camelCase toolArgs（JSON 文字列）をパースして command を返す。"""
+        payload = {"toolArgs": json.dumps({"command": "git status"})}
+        assert harness.extract_bash_command(payload) == "git status"
+
+    def test_tool_args_dict(self):
+        """toolArgs が既に dict の場合も command を返す。"""
+        assert harness.extract_bash_command({"toolArgs": {"command": "pwd"}}) == "pwd"
+
+    def test_tool_input_string_not_json(self):
+        """tool_input が非 JSON 文字列ならそのまま返す。"""
+        assert harness.extract_bash_command({"tool_input": "echo hi"}) == "echo hi"
+
+    def test_tool_input_malformed_json_object_string(self):
+        """{ で始まるが JSON 不正なら生文字列を返す。"""
+        assert harness.extract_bash_command({"tool_input": "{not-json"}) == "{not-json"
+
+    def test_tool_input_non_dict_does_not_raise(self):
+        """tool_input が list 等でも AttributeError にならず空文字。"""
+        assert harness.extract_bash_command({"tool_input": [1, 2]}) == ""
+
+    def test_cmd_alias_field(self):
+        """command が無く cmd があればそれを使う。"""
+        assert harness.extract_bash_command({"tool_input": {"cmd": "whoami"}}) == "whoami"
+
+    def test_missing_returns_empty(self):
+        """キーが無ければ空文字。"""
+        assert harness.extract_bash_command({}) == ""
+
+
+class TestExtractToolResultText:
+    """extract_tool_result_text のテスト。"""
+
+    def test_claude_tool_response_stdout(self):
+        """Claude の tool_response.stdout を返す。"""
+        text, resp = harness.extract_tool_result_text(
+            {"tool_response": {"stdout": "hello\n", "stderr": ""}}
+        )
+        assert text == "hello\n"
+        assert resp["stdout"] == "hello\n"
+
+    def test_copilot_tool_result_text(self):
+        """Copilot camelCase toolResult.textResultForLlm を返す。"""
+        text, resp = harness.extract_tool_result_text(
+            {"toolResult": {"resultType": "success", "textResultForLlm": "out"}}
+        )
+        assert text == "out"
+        assert resp["stdout"] == "out"
+
+    def test_vscode_tool_result_snake(self):
+        """VS Code tool_result.text_result_for_llm を返す。"""
+        text, _resp = harness.extract_tool_result_text(
+            {"tool_result": {"text_result_for_llm": "snake"}}
+        )
+        assert text == "snake"
+
+    def test_tool_result_raw_string(self):
+        """toolResult が生文字列でも返す。"""
+        text, resp = harness.extract_tool_result_text({"toolResult": "plain"})
+        assert text == "plain"
+        assert resp == {"stdout": "plain"}
+
+    def test_empty_when_missing(self):
+        """フィールドが無ければ空。"""
+        assert harness.extract_tool_result_text({}) == ("", {})
 
 
 class TestExtractFilePaths:
