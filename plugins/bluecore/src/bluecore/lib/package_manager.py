@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -77,13 +76,6 @@ PACKAGE_MANAGERS: dict[str, PackageManagerConfig] = {
 # 検出の優先順位
 DETECTION_PRIORITY = ["pnpm", "bun", "yarn", "npm"]
 
-# スクリプト/バイナリ名で安全な文字
-SAFE_NAME_REGEX = re.compile(r"^[@a-zA-Z0-9_./-]+$")
-
-# 引数で安全な文字
-SAFE_ARGS_REGEX = re.compile(r"^[@a-zA-Z0-9\s_./:=,'\"*+-]+$")
-
-PackageManagerName = Literal["npm", "pnpm", "yarn", "bun"]
 DetectionSource = Literal[
     "environment",
     "project-config",
@@ -352,13 +344,4 @@ def get_selection_prompt() -> str:
     message += "  - Or add a lock file to your project (e.g., pnpm-lock.yaml)\n"
 
     return message
-
-
-_WELL_KNOWN_PATTERNS: dict[str, list[str]] = {
-    "dev": ["npm run dev", "pnpm( run)? dev", "yarn dev", "bun run dev"],
-    "install": ["npm install", "pnpm install", "yarn( install)?", "bun install"],
-    "test": ["npm test", "pnpm test", "yarn test", "bun test"],
-    "build": ["npm run build", "pnpm( run)? build", "yarn build", "bun run build"],
-}
-
 
