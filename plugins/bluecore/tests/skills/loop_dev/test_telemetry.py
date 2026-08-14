@@ -59,7 +59,7 @@ def test_record_writes_jsonl_and_prints_path(
     """テレメトリを JSONL へ 1 行追記し、書き込んだパスを出力する。"""
     exit_code = telemetry.main(
         [
-            *_MIN_RECORD[:1],
+            "record",
             "--task",
             "  リファクタ   テレメトリ移送  ",
             "--result",
@@ -181,14 +181,18 @@ def _seed(data_dir: Path, *days: str) -> storage.JsonlLog:
     return log
 
 
+def _listed_tasks(capsys: pytest.CaptureFixture[str]) -> list[str]:
+    """``list`` の stdout から各レコードの task を古い順で返す。"""
+    return [json.loads(line)["task"] for line in capsys.readouterr().out.splitlines()]
+
+
 def test_list_outputs_all_records_oldest_first(
     data_dir: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """関連度打ち切り無しで全件を古い順に 1 行 1 JSON で出す。"""
     _seed(data_dir, "2026-06-01", "2026-07-01", "2026-08-01")
     assert telemetry.main(["list"]) == 0
-    tasks = [json.loads(line)["task"] for line in capsys.readouterr().out.splitlines()]
-    assert tasks == ["2026-06-01", "2026-07-01", "2026-08-01"]
+    assert _listed_tasks(capsys) == ["2026-06-01", "2026-07-01", "2026-08-01"]
 
 
 def test_list_empty_prints_nothing(data_dir: Path, repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -203,8 +207,7 @@ def test_list_filters_by_period_inclusive(
     """--since / --until はどちらもその日を含む。"""
     _seed(data_dir, "2026-05-31", "2026-06-01", "2026-06-30", "2026-07-01")
     assert telemetry.main(["list", "--since", "2026-06-01", "--until", "2026-06-30"]) == 0
-    tasks = [json.loads(line)["task"] for line in capsys.readouterr().out.splitlines()]
-    assert tasks == ["2026-06-01", "2026-06-30"]
+    assert _listed_tasks(capsys) == ["2026-06-01", "2026-06-30"]
 
 
 def test_list_since_only(data_dir: Path, repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -223,8 +226,7 @@ def test_list_drops_records_without_usable_timestamp(
     log.append({"task": "no timestamp"})
     log.append({"timestamp": "2026-06-15T00:00:00Z", "task": "ok"})
     assert telemetry.main(["list", "--since", "2026-01-01"]) == 0
-    tasks = [json.loads(line)["task"] for line in capsys.readouterr().out.splitlines()]
-    assert tasks == ["ok"]
+    assert _listed_tasks(capsys) == ["ok"]
 
 
 def test_list_keeps_records_without_timestamp_when_no_period(
@@ -242,8 +244,7 @@ def test_list_limit_keeps_newest(data_dir: Path, repo: Path, capsys: pytest.Capt
     """--limit は末尾 N 件（新しい方）を残す。"""
     _seed(data_dir, "2026-06-01", "2026-07-01", "2026-08-01")
     assert telemetry.main(["list", "--limit", "2"]) == 0
-    tasks = [json.loads(line)["task"] for line in capsys.readouterr().out.splitlines()]
-    assert tasks == ["2026-07-01", "2026-08-01"]
+    assert _listed_tasks(capsys) == ["2026-07-01", "2026-08-01"]
 
 
 @pytest.mark.parametrize("option", ["--since", "--until"])
@@ -282,7 +283,7 @@ def test_timeout_fires_and_reports(
     """ハンドラが時間内に終わらなければ打ち切って 1 を返す。"""
 
     def _hang(_args: object) -> int:
-        """アラームが発火するまで待ち続けるハンドラ。"""
+        """SIGALRM を即時送出してタイムアウト経路を踏むハンドラ。"""
         signal.raise_signal(signal.SIGALRM)
         raise AssertionError("SIGALRM で中断されるはず")  # pragma: no cover
 
