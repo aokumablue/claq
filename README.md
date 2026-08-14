@@ -64,7 +64,7 @@ claude plugin install bluecore@bluecore
 
 ---
 
-## 🚀 Commands (10)
+## 🚀 Commands (9)
 
 各コマンドの詳細はリンク先 `.md` ファイル参照。
 
@@ -448,11 +448,9 @@ flowchart LR
 ```mermaid
 flowchart LR
   classDef auto   fill:#ea580c,stroke:#c2410c,color:#fff,rx:4
-  classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
   U(["👤 git commit / merge<br/>/ rebase / push"]) --> HK(["🔗 Bash PreToolUse<br/>フック発火"]):::auto
-  HK --> SF["gitflow<br/>ブランチ戦略/コミット規約<br/>マージvsリベース判断"]:::skill
-  SF --> ADV(["💡 アドバイス/警告<br/>注入"]):::auto
+  HK --> ADV(["💡 アドバイス/警告<br/>注入"]):::auto
   ADV --> GO(["✅ git 操作実行"])
 ```
 
