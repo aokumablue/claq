@@ -337,6 +337,16 @@ def test_config_protection_remaining_dt03_rows(
         assert reasons == []
 
 
+def test_config_protection_allows_invalid_or_empty_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """不正 JSON / 空入力は保護判定せず allow する。"""
+    reasons = _spy_block(monkeypatch)
+    assert _run_protection(monkeypatch, "{not-json") == 0
+    assert _run_protection(monkeypatch, "") == 0
+    assert reasons == []
+
+
 def test_config_protection_truncation_fail_closed_via_spy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

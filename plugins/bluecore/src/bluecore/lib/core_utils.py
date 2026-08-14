@@ -106,8 +106,7 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
         path.resolve().relative_to(bluecore_dir.resolve())
     except ValueError:
         return path
-    if bluecore_dir.exists():
-        bluecore_dir.chmod(0o700)
+    bluecore_dir.chmod(0o700)
     return path
 
 
