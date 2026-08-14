@@ -324,7 +324,47 @@ class TestNotifyMacOS:
         assert any("osascript failed" in message for message in messages)
 
 
+class TestParseStopInput:
+    def test_empty_input_returns_empty_dict(self) -> None:
+        """空・空白のみの stdin は空 dict にする。"""
+        assert hook._parse_stop_input("") == {}
+        assert hook._parse_stop_input("   \n") == {}
+
+    def test_invalid_or_non_object_json_returns_empty_dict(self) -> None:
+        """不正 JSON・非 object は parse 失敗として空 dict にする。"""
+        assert hook._parse_stop_input("not-json") == {}
+        assert hook._parse_stop_input("[1]") == {}
+        assert hook._parse_stop_input("null") == {}
+        assert hook._parse_stop_input("{}") == {}
+
+
+class TestAssistantMessage:
+    def test_returns_none_when_no_usable_field(self) -> None:
+        """候補キーが無い・空・非文字列なら None を返す。"""
+        assert hook._assistant_message({}) is None
+        assert hook._assistant_message({"last_assistant_message": ""}) is None
+        assert hook._assistant_message({"last_assistant_message": "   "}) is None
+        assert hook._assistant_message({"response": 1, "lastAssistantMessage": None}) is None
+
+    def test_prefers_first_nonempty_string_key(self) -> None:
+        """定義順で最初の非空文字列を返す。"""
+        assert hook._assistant_message({"lastAssistantMessage": "alt"}) == "alt"
+        assert hook._assistant_message({"response": "body"}) == "body"
+
+
 class TestRun:
+    def test_invalid_json_notifies_with_done(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """非 object / 不正 JSON でもサマリーは Done になり通知する。"""
+        calls: list[tuple[str, str]] = []
+        monkeypatch.setattr(hook, "IS_MACOS", True)
+        monkeypatch.setattr(hook, "is_wsl", lambda: False)
+        monkeypatch.setattr(
+            hook, "notify_macos", lambda title, body, **kwargs: calls.append((title, body))  # noqa: ARG005
+        )
+
+        assert hook.run("not-json") is None
+        assert calls == [(hook.TITLE, "Done")]
+
     def test_macos_branch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls: list[tuple[str, str]] = []
         monkeypatch.setattr(hook, "IS_MACOS", True)

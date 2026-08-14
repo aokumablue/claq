@@ -4,10 +4,12 @@ Settings はハードコード既定値のみを持つランタイム設定で�
 永続化するランタイム状態を持たないことを検証する。
 """
 
+import importlib
 from pathlib import Path
 
 import pytest
 
+from bluecore.lib.constants import BASE_DIR_NAME
 from bluecore.mem.settings import Settings
 
 
@@ -78,3 +80,19 @@ class TestSettingsDefaults:
         """Settings の構築はファイルを一切作らない。"""
         Settings()
         assert list(tmp_path.iterdir()) == []
+
+
+def test_default_data_dir_uses_bluecore_data_path_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """BLUECORE_DATA_PATH があればモジュール再読込時にそれをデータディレクトリにする。"""
+    import bluecore.mem.settings as settings_mod
+
+    custom = tmp_path / "custom-data"
+    monkeypatch.setenv("BLUECORE_DATA_PATH", str(custom))
+    importlib.reload(settings_mod)
+    try:
+        assert settings_mod._DEFAULT_DATA_DIR == custom
+        assert settings_mod.Settings().data_path == custom
+    finally:
+        monkeypatch.delenv("BLUECORE_DATA_PATH", raising=False)
+        importlib.reload(settings_mod)
+        assert settings_mod._DEFAULT_DATA_DIR == Path.home() / BASE_DIR_NAME

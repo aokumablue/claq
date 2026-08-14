@@ -31,6 +31,22 @@ def test_parse_args_supports_positional_scope_and_flags(monkeypatch, tmp_path: P
     assert args["root"] == tmp_path.resolve()
 
 
+def test_option_value_without_following_token_returns_none() -> None:
+    """`--name` の直後に値が無い場合は (None, index + 2) を返す。"""
+    assert harness_audit._option_value(["--format"], 0, "--format") == (None, 2)
+    assert harness_audit._option_value(["--root"], 0, "--root") == (None, 2)
+
+
+def test_parse_args_root_flag_without_value_uses_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`--root` に値が続かないときは cwd を root にする。"""
+    monkeypatch.chdir(tmp_path)
+
+    parsed = harness_audit.parse_args(["--root"])
+
+    assert parsed["root"] == tmp_path.resolve()
+    assert parsed["format"] == "text"
+
+
 def test_detect_target_mode_recognizes_repo_markers(tmp_path: Path) -> None:
     _write_repo_markers(tmp_path)
 
