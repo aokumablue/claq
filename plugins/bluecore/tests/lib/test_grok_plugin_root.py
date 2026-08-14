@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+from unittest.mock import patch
 
 from bluecore.lib import grok_plugin_root as mod
 
@@ -38,6 +38,17 @@ class TestIsGrokInstalledPluginRoot:
         path.mkdir(parents=True)
         assert mod.is_grok_installed_plugin_root(path) is False
 
+    def test_resolve_oserror_returns_false(self, tmp_path: Path) -> None:
+        """resolve 失敗時は False。"""
+        with patch.object(Path, "resolve", side_effect=OSError()):
+            assert mod.is_grok_installed_plugin_root(tmp_path) is False
+
+    def test_rejects_grok_without_plugin_name(self, tmp_path: Path) -> None:
+        """``.grok`` だけで installed-plugins/bluecore-* が無いなら False。"""
+        grok = tmp_path / ".grok"
+        grok.mkdir()
+        assert mod.is_grok_installed_plugin_root(grok) is False
+
 
 class TestFindLatestInstalledBluecore:
     """find_latest_installed_bluecore のテスト。"""
@@ -64,49 +75,25 @@ class TestFindLatestInstalledBluecore:
         """探索先が無ければ None。"""
         assert mod.find_latest_installed_bluecore(tmp_path / "nope") is None
 
+    def test_skips_non_bluecore_and_files(self, tmp_path: Path) -> None:
+        """bluecore- 以外のディレクトリとファイルは無視する。"""
+        (tmp_path / "other").mkdir()
+        (tmp_path / "file.txt").write_text("x", encoding="utf-8")
+        assert mod.find_latest_installed_bluecore(tmp_path) is None
 
-class TestEnsureVenvSymlinkForInstalled:
-    """ensure_venv_symlink_for_installed のテスト。"""
+    def test_iterdir_oserror_returns_none(self, tmp_path: Path) -> None:
+        """iterdir が OSError なら None。"""
+        installed = tmp_path / "installed"
+        installed.mkdir()
+        orig = Path.iterdir
 
-    def test_creates_venv_link_to_shared(self, tmp_path: Path) -> None:
-        """installed bluecore-* に共有 venv への .venv を張る。"""
-        plugin = _make_installed_plugin(tmp_path)
-        shared = tmp_path / ".bluecore" / ".venv"
-        shared.mkdir(parents=True)
-        (shared / "pyvenv.cfg").write_text("home = /tmp\n", encoding="utf-8")
-        updated = mod.ensure_venv_symlink_for_installed(home=tmp_path, shared_venv=shared)
-        link = plugin / ".venv"
-        assert link in updated
-        assert link.is_symlink()
-        assert os.readlink(link) == str(shared)
+        def fake(self: Path):
+            if self == installed:
+                raise OSError()
+            return orig(self)
 
-    def test_skips_when_already_linked(self, tmp_path: Path) -> None:
-        """既に正しい .venv があれば更新リストに含めない。"""
-        plugin = _make_installed_plugin(tmp_path)
-        shared = tmp_path / ".bluecore" / ".venv"
-        shared.mkdir(parents=True)
-        link = plugin / ".venv"
-        link.symlink_to(shared)
-        updated = mod.ensure_venv_symlink_for_installed(home=tmp_path, shared_venv=shared)
-        assert updated == []
-        assert link.is_symlink()
-
-    def test_replaces_legacy_real_venv(self, tmp_path: Path) -> None:
-        """誤って置かれた実体 venv を symlink に置換する。"""
-        plugin = _make_installed_plugin(tmp_path)
-        shared = tmp_path / ".bluecore" / ".venv"
-        shared.mkdir(parents=True)
-        legacy = plugin / ".venv"
-        legacy.mkdir()
-        (legacy / "pyvenv.cfg").write_text("home = /legacy\n", encoding="utf-8")
-        updated = mod.ensure_venv_symlink_for_installed(home=tmp_path, shared_venv=shared)
-        assert legacy in updated
-        assert legacy.is_symlink()
-        assert os.readlink(legacy) == str(shared)
-
-    def test_ignores_when_no_installed_plugins(self, tmp_path: Path) -> None:
-        """installed-plugins が無ければ空リスト。"""
-        assert mod.ensure_venv_symlink_for_installed(home=tmp_path) == []
+        with patch.object(Path, "iterdir", fake):
+            assert mod.find_latest_installed_bluecore(installed) is None
 
 
 class TestEnsureGrokPluginRootSymlink:
@@ -170,3 +157,158 @@ class TestEnsureGrokPluginRootSymlink:
         link = tmp_path / ".grok" / "plugins" / "bluecore"
         assert mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link) is None
         assert not link.exists()
+
+    def test_plugin_root_resolve_oserror_falls_back(self, tmp_path: Path, monkeypatch) -> None:
+        """明示 plugin_root の resolve 失敗時は探索へ進む。"""
+        target = _make_installed_plugin(tmp_path, "bluecore-explicit")
+        real = _make_installed_plugin(tmp_path, "bluecore-real")
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+        orig = Path.resolve
+        counts: dict[str, int] = {}
+
+        def fake(self: Path, strict: bool = False):
+            key = str(self)
+            counts[key] = counts.get(key, 0) + 1
+            if target.name in self.parts and counts[key] >= 2:
+                raise OSError()
+            return orig(self, strict=strict)
+
+        with patch.object(Path, "resolve", fake):
+            result = mod.ensure_grok_plugin_root_symlink(
+                plugin_root=target, home=tmp_path, link_path=link
+            )
+        assert result == real.resolve()
+
+    def test_env_root_without_launcher_falls_back(self, tmp_path: Path, monkeypatch) -> None:
+        """CLAUDE_PLUGIN_ROOT が installed でも launcher が無いなら探索へ進む。"""
+        empty = tmp_path / ".grok" / "installed-plugins" / "bluecore-empty"
+        empty.mkdir(parents=True)
+        real = _make_installed_plugin(tmp_path, "bluecore-real")
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(empty))
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
+        assert result == real.resolve()
+
+    def test_uses_claude_plugin_root_env(self, tmp_path: Path, monkeypatch) -> None:
+        """CLAUDE_PLUGIN_ROOT が installed ならそれを使う。"""
+        target = _make_installed_plugin(tmp_path, "bluecore-env")
+        _make_installed_plugin(tmp_path, "bluecore-other")
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(target))
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
+        assert result == target.resolve()
+
+    def test_env_root_resolve_oserror_falls_back(self, tmp_path: Path, monkeypatch) -> None:
+        """環境変数パスの resolve 失敗時は installed-plugins 探索へ進む。"""
+        env_target = _make_installed_plugin(tmp_path, "bluecore-env")
+        real = _make_installed_plugin(tmp_path, "bluecore-real")
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(env_target))
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        orig = Path.resolve
+        counts: dict[str, int] = {}
+
+        def fake(self: Path, strict: bool = False):
+            key = str(self)
+            counts[key] = counts.get(key, 0) + 1
+            if env_target.name in self.parts and counts[key] >= 2:
+                raise OSError()
+            return orig(self, strict=strict)
+
+        with patch.object(Path, "resolve", fake):
+            result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
+        assert result == real.resolve()
+
+    def test_found_resolve_oserror_returns_none(self, tmp_path: Path, monkeypatch) -> None:
+        """探索結果の resolve 失敗時は None。"""
+        _make_installed_plugin(tmp_path)
+        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+        orig = Path.resolve
+
+        def fake(self: Path, strict: bool = False):
+            if self.name.startswith("bluecore-"):
+                raise OSError()
+            return orig(self, strict=strict)
+
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        with patch.object(Path, "resolve", fake):
+            assert mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link) is None
+
+    def test_replaces_unresolvable_symlink(self, tmp_path: Path) -> None:
+        """既存 symlink の resolve 失敗時は張り替える。"""
+        target = _make_installed_plugin(tmp_path)
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(tmp_path / "missing")
+        orig = Path.resolve
+
+        def fake(self: Path, strict: bool = False):
+            if self == link:
+                raise OSError()
+            return orig(self, strict=strict)
+
+        with patch.object(Path, "resolve", fake):
+            result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
+        assert result == target.resolve()
+        assert link.is_symlink()
+        assert link.resolve() == target.resolve()
+
+    def test_leaves_existing_launcher_tree(self, tmp_path: Path) -> None:
+        """リンク先に既に launcher 付き実体があれば触らない。"""
+        _make_installed_plugin(tmp_path)
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        launcher = link / "src" / "bluecore" / "launcher.py"
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        launcher.write_text("#\n", encoding="utf-8")
+        assert mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link) is None
+        assert not link.is_symlink()
+
+    def test_replaces_empty_directory(self, tmp_path: Path) -> None:
+        """空ディレクトリは削除して symlink にする。"""
+        target = _make_installed_plugin(tmp_path)
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        link.mkdir(parents=True)
+        result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
+        assert result == target.resolve()
+        assert link.is_symlink()
+
+    def test_leaves_nonempty_directory(self, tmp_path: Path) -> None:
+        """空でない実体ディレクトリは触らない。"""
+        _make_installed_plugin(tmp_path)
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        link.mkdir(parents=True)
+        (link / "readme").write_text("x", encoding="utf-8")
+        assert mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link) is None
+        assert link.is_dir() and not link.is_symlink()
+
+    def test_existing_dir_iterdir_oserror(self, tmp_path: Path) -> None:
+        """既存ディレクトリの iterdir 失敗時は触らない。"""
+        _make_installed_plugin(tmp_path)
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        link.mkdir(parents=True)
+        orig = Path.iterdir
+
+        def fake(self: Path):
+            if self == link:
+                raise OSError()
+            return orig(self)
+
+        with patch.object(Path, "iterdir", fake):
+            assert mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link) is None
+
+    def test_replaces_regular_file(self, tmp_path: Path) -> None:
+        """リンク位置の通常ファイルは置き換える。"""
+        target = _make_installed_plugin(tmp_path)
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.write_text("not a dir", encoding="utf-8")
+        result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
+        assert result == target.resolve()
+        assert link.is_symlink()
+
+    def test_symlink_oserror_returns_none(self, tmp_path: Path) -> None:
+        """symlink 作成失敗時は None。"""
+        _make_installed_plugin(tmp_path)
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        with patch.object(Path, "symlink_to", side_effect=OSError()):
+            assert mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link) is None

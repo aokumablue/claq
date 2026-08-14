@@ -33,7 +33,7 @@ user-invocable: false
 | kind | 使う場面 | 例 |
 |---|---|---|
 | `pitfall` | 踏んだ罠とその回避法 | 「pytest をパイプすると失敗が隠れる → `set -o pipefail` が要る」 |
-| `fact` | 調べて分かったプロジェクト固有の事実 | 「venv は `~/.bluecore/.venv` の 1 つだけ」 |
+| `fact` | 調べて分かったプロジェクト固有の事実 | 「開発用 venv はリポジトリ直下 `.venv` のみ。ランタイムは venv を作らない」 |
 | `howto` | 毎回同じ手順を踏む作業 | 「開発中の CLI 実行は `PYTHONPATH=plugins/bluecore/src` を付ける」 |
 | `convention` | 守るべき規約 | 「テーブル定義変更は `CREATE TABLE` を直接修正する」 |
 | `decision` | 選択とその理由（採用しなかった案を含む） | 「FTS5 を使わず Python 側でスコアリングする」 |

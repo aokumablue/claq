@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
 # install-dev.sh
-# 開発者向け依存を追加する。事前に install.sh を実行しておくこと。
+# リポジトリ直下 .venv を作り、plugins/bluecore[dev] を editable install する。
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../plugins/bluecore" && pwd)"
+REPO_ROOT=""
 SKIP_PYTHON="${BLUECORE_INSTALL_SKIP_PYTHON:-0}"
 
 usage() {
   cat <<'EOF'
 Usage: bash scripts/install-dev.sh [options]
 
-Run bash plugins/bluecore/install.sh first, then run this script.
-
 Options:
-  --repo-root PATH   bluecore package root (default: plugins/bluecore)
+  --repo-root PATH   Git repository root (default: git toplevel of this script)
   --skip-python      Skip Python package installation and venv setup
   --help             Show this help
 EOF
@@ -35,8 +33,19 @@ run_quietly() {
   fi
 }
 
-pip_install_quiet() {
-  run_quietly "${VENV_PYTHON}" -m pip install --no-input --quiet --disable-pip-version-check "$@"
+# Python 3.12+ のバイナリを探す
+find_python3() {
+  for candidate in python3.14 python3.13 python3.12 python3; do
+    if command -v "${candidate}" >/dev/null 2>&1; then
+      local ver
+      ver="$("${candidate}" -c 'import sys; print(sys.version_info.major * 100 + sys.version_info.minor)' 2>/dev/null || echo 0)"
+      if [[ "${ver}" -ge 312 ]]; then
+        echo "${candidate}"
+        return 0
+      fi
+    fi
+  done
+  return 1
 }
 
 # ---- 引数パース ----
@@ -64,8 +73,16 @@ done
 
 # ---- 変数確定（引数パース後に設定） ----
 
-VENV_DIR="${HOME}/.bluecore/.venv"
+if [[ -z "${REPO_ROOT}" ]]; then
+  REPO_ROOT="$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)"
+fi
+PLUGIN_ROOT="${REPO_ROOT}/plugins/bluecore"
+VENV_DIR="${REPO_ROOT}/.venv"
 VENV_PYTHON="${VENV_DIR}/bin/python3"
+
+pip_install_quiet() {
+  run_quietly "${VENV_PYTHON}" -m pip install --no-input --quiet --disable-pip-version-check "$@"
+}
 
 # ---- 開発者向け追加インストール ----
 
@@ -75,9 +92,37 @@ if [[ "${SKIP_PYTHON}" == "1" ]]; then
   exit 0
 fi
 
-if [[ ! -x "${VENV_PYTHON}" ]]; then
-  echo "Error: failed to find virtual environment at ${VENV_DIR}." >&2
+if ! PYTHON3="$(find_python3)"; then
+  echo "Error: Python 3.12+ is required but not found." >&2
+  echo "       Install python3.12 (e.g. brew install python@3.12) and retry." >&2
   exit 1
+fi
+
+# 旧共有 venv（~/.bluecore/.venv）への symlink は開発用実体ではないので外す
+if [[ -L "${VENV_DIR}" ]]; then
+  echo "[bluecore] Removing leftover .venv symlink at ${VENV_DIR}"
+  rm -f -- "${VENV_DIR}"
+fi
+
+if [[ ! -x "${VENV_PYTHON}" ]]; then
+  if ! "${PYTHON3}" -m venv --help >/dev/null 2>&1; then
+    echo "Error: python3-venv is not available." >&2
+    echo "       Install python3-venv manually and retry." >&2
+    exit 1
+  fi
+  echo "[bluecore] Creating Python virtual environment at ${VENV_DIR}"
+  "${PYTHON3}" -m venv "${VENV_DIR}"
+  if [[ ! -x "${VENV_PYTHON}" ]]; then
+    echo "Error: failed to create virtual environment at ${VENV_DIR}." >&2
+    exit 1
+  fi
+else
+  venv_ver="$("${VENV_PYTHON}" -c 'import sys; print(sys.version_info.major * 100 + sys.version_info.minor)' 2>/dev/null || echo 0)"
+  if [[ "${venv_ver}" -lt 312 ]]; then
+    echo "Error: ${VENV_PYTHON} is older than Python 3.12." >&2
+    echo "       Remove ${VENV_DIR} and re-run this script." >&2
+    exit 1
+  fi
 fi
 
 if ! "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
@@ -86,7 +131,7 @@ if ! "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
 fi
 
 echo "[bluecore] Installing developer-only Python extras"
-pip_install_quiet -e "${REPO_ROOT}[dev]"
+pip_install_quiet -e "${PLUGIN_ROOT}[dev]"
 
 # PATH にシムリンクを作成 (venv 外から hook が呼べるように)
 for tool in ruff vulture; do

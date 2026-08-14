@@ -3,7 +3,7 @@
 install.sh の自動実行を管理する SessionStart フック。
 
 ~/.bluecore/plugin_installed_version のバージョンと plugin.json のバージョンを比較し、
-差異がある場合のみ install.sh を実行して仮想環境を再構築する。
+差異がある場合のみ install.sh を実行する。仮想環境の再構築や .venv symlink 修復は行わない。
 """
 
 from __future__ import annotations
@@ -24,64 +24,13 @@ from bluecore.lib.subprocess_utils import run_text
 _PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 _BLUECORE_DIR = Path.home() / BASE_DIR_NAME
 _VERSION_FILE = _BLUECORE_DIR / "plugin_installed_version"
-_VENV_DIR = Path.home() / BASE_DIR_NAME / ".venv"
-# pip フルインストールと symlink 張りを許容しつつ hooks.json の timeout(300) より先に自決する
-_INSTALL_TIMEOUT = 280.0
+# hooks.json timeout 60 より先に自決する（venv/pip は行わない）
+_INSTALL_TIMEOUT = 50.0
 
 
 def _sanitize_exception(exc: BaseException) -> str:
     """例外メッセージをログ出力向けにサニタイズする。"""
     return sanitize_log_value(str(exc))
-
-
-def _should_repair_venv_symlink(plugin_root: Path) -> bool:
-    """version 一致時に .venv symlink が欠落・破損していれば True を返す。
-
-    Args:
-        plugin_root: プラグインルートディレクトリのパス。
-
-    Returns:
-        修復が必要であれば True。
-    """
-    if not _VENV_DIR.is_dir():
-        return False  # 共有 venv 自体が無ければ修復不可
-    link = plugin_root / ".venv"
-    if not link.exists() and not link.is_symlink():
-        return True  # symlink が存在しない
-    if link.is_symlink():
-        try:
-            return link.resolve() != _VENV_DIR.resolve()
-        except OSError:
-            return True  # 解決不能な破損 symlink
-    return True  # 実体ディレクトリやファイルなど予期しない種別
-
-
-def _repair_venv_symlink(plugin_root: Path) -> None:
-    """.venv symlink を共有 venv へ向け直す。
-
-    実体ディレクトリが存在する場合は誤削除を避け警告のみ出す。
-
-    Args:
-        plugin_root: プラグインルートディレクトリのパス。
-
-    Returns:
-        None: 値を返しません。
-    """
-    link = plugin_root / ".venv"
-    if link.exists() and not link.is_symlink():
-        # 実体ディレクトリ / ファイルは破壊しない
-        print(f"[SessionInstall] .venv が symlink ではないため自動修復を中止: {link}", file=sys.stderr)
-        return
-    try:
-        link.unlink(missing_ok=True)
-    except OSError as e:
-        print(f"[SessionInstall] 破損 symlink 削除失敗: {_sanitize_exception(e)}", file=sys.stderr)
-        return
-    try:
-        link.symlink_to(_VENV_DIR, target_is_directory=True)
-        print(f"[SessionInstall] .venv symlink 修復: {link} -> {_VENV_DIR}", file=sys.stderr)
-    except OSError as e:
-        print(f"[SessionInstall] symlink 作成失敗: {_sanitize_exception(e)}", file=sys.stderr)
 
 
 def _resolve_plugin_root() -> Path | None:
@@ -186,8 +135,6 @@ def _lock_phase_should_skip(plugin_root: Path, current_version: str) -> bool:
 
     if installed_version == current_version:
         print(f"[SessionInstall] 別プロセスがインストール済み: {sanitize_log_value(current_version)}", file=sys.stderr)
-        if _should_repair_venv_symlink(plugin_root):
-            _repair_venv_symlink(plugin_root)
         return True
 
     return False
@@ -270,8 +217,9 @@ def _run_install_with_lock(plugin_root: Path, current_version: str | None) -> bo
 def run(_raw_input: str) -> str:
     """install.sh の実行判定と実行を行い hookSpecificOutput の JSON を返す。
 
-    バージョン一致時は .venv symlink 修復のみ行う。
+    バージョン一致時は install.sh を実行しない。
     バージョン不一致・未インストール時は install.sh を同期実行する。
+    仮想環境の再構築や .venv symlink 修復は行わない。
 
     Args:
         _raw_input: フックへの標準入力（未使用）。
@@ -282,16 +230,10 @@ def run(_raw_input: str) -> str:
     Raises:
         例外は発生しません。
     """
-    # Grok: installed-plugins の .venv と plugins/bluecore ルート symlink を修復
-    # （開発用リポジトリはリンク先にしない）
+    # Grok: plugins/bluecore ルート symlink を修復（開発用リポジトリはリンク先にしない）
     try:
-        from bluecore.lib.grok_plugin_root import (
-            ensure_grok_plugin_root_symlink,
-            ensure_venv_symlink_for_installed,
-        )
+        from bluecore.lib.grok_plugin_root import ensure_grok_plugin_root_symlink
 
-        for venv_link in ensure_venv_symlink_for_installed():
-            print(f"[SessionInstall] Grok .venv symlink: {venv_link}", file=sys.stderr)
         linked = ensure_grok_plugin_root_symlink()
         if linked is not None:
             print(f"[SessionInstall] Grok plugin root symlink -> {linked}", file=sys.stderr)
@@ -306,8 +248,6 @@ def run(_raw_input: str) -> str:
     installed_version = _get_installed_version()
 
     if current_version is not None and installed_version == current_version:
-        if _should_repair_venv_symlink(plugin_root):
-            _repair_venv_symlink(plugin_root)
         print(f"[SessionInstall] 既にインストール済みです: {sanitize_log_value(str(current_version))}", file=sys.stderr)
         return _emit_session_start_output()
 
@@ -320,9 +260,6 @@ def run(_raw_input: str) -> str:
     success = _run_install_with_lock(plugin_root, current_version)
     if not success:
         return _emit_session_start_output()
-
-    if _should_repair_venv_symlink(plugin_root):
-        _repair_venv_symlink(plugin_root)
 
     return _emit_session_start_output()
 

@@ -76,10 +76,10 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.session_install",
-            "timeout": 300
+            "timeout": 60
           }
         ],
-        "description": "プラグイン初回/更新時の自動インストールと .venv symlink 修復（埋め込みモデル欠落時はバックグラウンド取得）"
+        "description": "プラグイン初回/更新時に install.sh を実行し settings.json と plugin_installed_version を整える"
       },
       {
         "matcher": "*",

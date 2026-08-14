@@ -37,7 +37,7 @@ collect_skill_create_inputs "${COMMITS:-200}"        # コミット規約・同�
 - **過去セッション**: `~/.bluecore/session-data/checkpoint-*.md` と git log
 - **最新 ClaudeCode トレンド**（既定ON・`--no-web` で無効）: WebSearch/WebFetch でハーネス設計のベストプラクティスを調べる。**ハード上限（検索5件・フェッチ3件）・タイムアウト付き・非ブロッキング**。失敗/オフライン時は「トレンド入力なし」と明記して続行
 
-**baseline 取得**（すべて `.venv` 有効化 + `PYTHONPATH=plugins/bluecore/src` で実行）:
+**baseline 取得**（リポジトリ直下 `.venv` を有効化（`scripts/install-dev.sh` 後は PYTHONPATH 不要））:
 
 - `python3 -m pytest -q --cov`（カバレッジは pyproject の `fail_under=100` で判定。`--cov` なしでは測定されない）
 - `ruff check plugins/bluecore/src`

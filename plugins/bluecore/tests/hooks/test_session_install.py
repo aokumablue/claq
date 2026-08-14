@@ -324,13 +324,13 @@ class TestRun:
         mock_run.assert_not_called()
         assert "install.sh" in capsys.readouterr().err
 
-    def test_install_failure_skips_venv_symlink_repair(
+    def test_install_failure_emits_session_start(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """install.sh が非ゼロ終了したとき .venv symlink 修復とモデル未取得通知はスキップされる。"""
+        """install.sh が非ゼロ終了しても SessionStart JSON を返し、モデル未取得通知は出さない。"""
         plugin_root = _make_plugin_root(tmp_path, "0.0.3")
         install_sh = plugin_root / "install.sh"
         install_sh.write_text("#!/usr/bin/env bash\n")
@@ -341,27 +341,16 @@ class TestRun:
         monkeypatch.setattr(session_install, "_PLUGIN_ROOT", plugin_root)
         monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
         monkeypatch.setattr(session_install, "_BLUECORE_DIR", tmp_path)
-        monkeypatch.setattr(session_install.Path, "home", lambda: tmp_path)
 
         fake_result = MagicMock(spec=subprocess.CompletedProcess)
         fake_result.stdout = ""
         fake_result.stderr = "install failed"
         fake_result.returncode = 1
 
-        repair_called = False
-
-        def mock_repair(_: object) -> None:
-            nonlocal repair_called
-            repair_called = True
-
-        with (
-            patch.object(session_install, "_run_install", return_value=fake_result),
-            patch.object(session_install, "_repair_venv_symlink", side_effect=mock_repair),
-        ):
+        with patch.object(session_install, "_run_install", return_value=fake_result):
             result = session_install.run("")
 
         _assert_session_start_output(result)
-        assert repair_called is False, ".venv symlink 修復が実行されてはいけない"
         err = capsys.readouterr().err
         assert "埋め込みモデルが未取得です" not in err, "モデル未取得通知が出てはいけない"
         assert "失敗" in err
@@ -400,141 +389,6 @@ class TestRun:
         _assert_session_start_output(result)
         mock_run.assert_not_called()
         assert "別プロセス" in capsys.readouterr().err
-
-
-class TestShouldRepairVenvSymlink:
-    def test_returns_false_when_shared_venv_absent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(session_install, "_VENV_DIR", tmp_path / "nonexistent")
-        assert session_install._should_repair_venv_symlink(tmp_path) is False
-
-    def test_returns_true_when_symlink_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        shared_venv = tmp_path / "shared_venv"
-        shared_venv.mkdir()
-        monkeypatch.setattr(session_install, "_VENV_DIR", shared_venv)
-        plugin_root = tmp_path / "plugin"
-        plugin_root.mkdir()
-        # .venv が存在しない
-        assert session_install._should_repair_venv_symlink(plugin_root) is True
-
-    def test_returns_false_when_correct_symlink_exists(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        shared_venv = tmp_path / "shared_venv"
-        shared_venv.mkdir()
-        monkeypatch.setattr(session_install, "_VENV_DIR", shared_venv)
-        plugin_root = tmp_path / "plugin"
-        plugin_root.mkdir()
-        (plugin_root / ".venv").symlink_to(shared_venv, target_is_directory=True)
-        assert session_install._should_repair_venv_symlink(plugin_root) is False
-
-    def test_returns_true_when_symlink_points_elsewhere(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        shared_venv = tmp_path / "shared_venv"
-        shared_venv.mkdir()
-        other = tmp_path / "other"
-        other.mkdir()
-        monkeypatch.setattr(session_install, "_VENV_DIR", shared_venv)
-        plugin_root = tmp_path / "plugin"
-        plugin_root.mkdir()
-        (plugin_root / ".venv").symlink_to(other, target_is_directory=True)
-        assert session_install._should_repair_venv_symlink(plugin_root) is True
-
-    def test_returns_true_when_real_directory_exists(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        shared_venv = tmp_path / "shared_venv"
-        shared_venv.mkdir()
-        monkeypatch.setattr(session_install, "_VENV_DIR", shared_venv)
-        plugin_root = tmp_path / "plugin"
-        plugin_root.mkdir()
-        (plugin_root / ".venv").mkdir()  # 実体ディレクトリ
-        assert session_install._should_repair_venv_symlink(plugin_root) is True
-
-
-class TestRepairVenvSymlink:
-    def test_creates_symlink_when_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        shared_venv = tmp_path / "shared_venv"
-        shared_venv.mkdir()
-        monkeypatch.setattr(session_install, "_VENV_DIR", shared_venv)
-        plugin_root = tmp_path / "plugin"
-        plugin_root.mkdir()
-
-        session_install._repair_venv_symlink(plugin_root)
-
-        link = plugin_root / ".venv"
-        assert link.is_symlink()
-        assert link.resolve() == shared_venv.resolve()
-
-    def test_replaces_broken_symlink(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        shared_venv = tmp_path / "shared_venv"
-        shared_venv.mkdir()
-        monkeypatch.setattr(session_install, "_VENV_DIR", shared_venv)
-        plugin_root = tmp_path / "plugin"
-        plugin_root.mkdir()
-        (plugin_root / ".venv").symlink_to(tmp_path / "nonexistent")  # 破損 symlink
-
-        session_install._repair_venv_symlink(plugin_root)
-
-        link = plugin_root / ".venv"
-        assert link.is_symlink()
-        assert link.resolve() == shared_venv.resolve()
-
-    def test_does_not_touch_real_directory(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        shared_venv = tmp_path / "shared_venv"
-        shared_venv.mkdir()
-        monkeypatch.setattr(session_install, "_VENV_DIR", shared_venv)
-        plugin_root = tmp_path / "plugin"
-        plugin_root.mkdir()
-        real_dir = plugin_root / ".venv"
-        real_dir.mkdir()
-
-        session_install._repair_venv_symlink(plugin_root)
-
-        assert real_dir.is_dir() and not real_dir.is_symlink()
-        assert "自動修復を中止" in capsys.readouterr().err
-
-
-class TestRepairVenvSymlinkIntegration:
-    """version 一致時の symlink 修復が run() を通じて動作することを確認する。"""
-
-    def test_run_repairs_missing_symlink_on_version_match(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        shared_venv = tmp_path / "shared_venv"
-        shared_venv.mkdir()
-        plugin_root = _make_plugin_root(tmp_path / "plugin", "1.0.0")
-        version_file = tmp_path / "plugin_installed_version"
-        version_file.write_text("1.0.0\n")
-
-        monkeypatch.setattr(session_install, "_PLUGIN_ROOT", plugin_root)
-        monkeypatch.setattr(session_install, "_VENV_DIR", shared_venv)
-        monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
-
-        result = json.loads(session_install.run(""))
-
-        assert result["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-        link = plugin_root / ".venv"
-        assert link.is_symlink()
-        assert link.resolve() == shared_venv.resolve()
-
-    def test_run_skips_repair_when_symlink_correct(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        shared_venv = tmp_path / "shared_venv"
-        shared_venv.mkdir()
-        plugin_root = _make_plugin_root(tmp_path / "plugin", "1.0.0")
-        (plugin_root / ".venv").symlink_to(shared_venv, target_is_directory=True)
-        version_file = tmp_path / "plugin_installed_version"
-        version_file.write_text("1.0.0\n")
-
-        monkeypatch.setattr(session_install, "_PLUGIN_ROOT", plugin_root)
-        monkeypatch.setattr(session_install, "_VENV_DIR", shared_venv)
-        monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
-
-        mtime_before = (plugin_root / ".venv").lstat().st_mtime
-        result = json.loads(session_install.run(""))
-
-        assert result["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-        assert (plugin_root / ".venv").lstat().st_mtime == mtime_before  # 変更されていない
 
 
 class TestMain:
@@ -583,30 +437,6 @@ def _raise(exc):
     return _inner
 
 
-def test_should_repair_venv_symlink_resolve_error(tmp_path, monkeypatch) -> None:
-    """symlink の解決に失敗したら修復対象と判定する。"""
-    link = tmp_path / ".venv"
-    link.symlink_to(tmp_path / "target")
-    monkeypatch.setattr(session_install.Path, "resolve", _raise(OSError()))
-    assert session_install._should_repair_venv_symlink(tmp_path) is True
-
-
-def test_repair_venv_symlink_unlink_error(tmp_path, monkeypatch, capsys) -> None:
-    """破損 symlink の削除失敗を警告して中断する。"""
-    link = tmp_path / ".venv"
-    link.symlink_to(tmp_path / "missing")  # 先が無い→exists False
-    monkeypatch.setattr(session_install.Path, "unlink", _raise(OSError("x")))
-    session_install._repair_venv_symlink(tmp_path)
-    assert "削除失敗" in capsys.readouterr().err
-
-
-def test_repair_venv_symlink_create_error(tmp_path, monkeypatch, capsys) -> None:
-    """symlink 作成失敗を警告する。"""
-    monkeypatch.setattr(session_install.Path, "symlink_to", _raise(OSError("y")))
-    session_install._repair_venv_symlink(tmp_path)
-    assert "作成失敗" in capsys.readouterr().err
-
-
 def test_lock_phase_version_read_error(tmp_path, monkeypatch, capsys) -> None:
     """インストール済みバージョン読込失敗ならスキップする。"""
     monkeypatch.setattr(session_install, "_get_installed_version", _raise(OSError()))
@@ -614,14 +444,10 @@ def test_lock_phase_version_read_error(tmp_path, monkeypatch, capsys) -> None:
     assert "読み込みに失敗" in capsys.readouterr().err
 
 
-def test_lock_phase_already_installed_repairs(tmp_path, monkeypatch) -> None:
-    """既に同一バージョンなら venv 修復してスキップする。"""
+def test_lock_phase_already_installed_skips_without_repair(tmp_path, monkeypatch) -> None:
+    """既に同一バージョンなら修復せずスキップする。"""
     monkeypatch.setattr(session_install, "_get_installed_version", lambda: "1.0")
-    monkeypatch.setattr(session_install, "_should_repair_venv_symlink", lambda r: True)
-    repaired: list = []
-    monkeypatch.setattr(session_install, "_repair_venv_symlink", lambda r: repaired.append(r))
     assert session_install._lock_phase_should_skip(tmp_path, "1.0") is True
-    assert repaired
 
 
 def test_run_install_subprocess_error(tmp_path, monkeypatch) -> None:
@@ -655,18 +481,57 @@ def test_run_install_with_lock_oserror(tmp_path, monkeypatch, capsys) -> None:
 
 
 def test_lock_phase_already_installed_no_repair(tmp_path, monkeypatch) -> None:
-    """同一バージョンで venv 修復不要ならそのままスキップする。"""
+    """同一バージョンならそのままスキップする。"""
     monkeypatch.setattr(session_install, "_get_installed_version", lambda: "1.0")
-    monkeypatch.setattr(session_install, "_should_repair_venv_symlink", lambda r: False)
     assert session_install._lock_phase_should_skip(tmp_path, "1.0") is True
 
 
 def test_run_success_without_repair(tmp_path, monkeypatch) -> None:
-    """インストール成功かつ venv 修復不要の経路。"""
+    """インストール成功後に追加修復せず SessionStart JSON を返す。"""
     monkeypatch.setattr(session_install, "_resolve_plugin_root", lambda: tmp_path)
     monkeypatch.setattr(session_install, "_get_plugin_version", lambda r: "2.0")
     monkeypatch.setattr(session_install, "_get_installed_version", lambda: "1.0")
     monkeypatch.setattr(session_install, "_run_install_with_lock", lambda r, v: True)
-    monkeypatch.setattr(session_install, "_should_repair_venv_symlink", lambda r: False)
     out = session_install.run("")
     assert isinstance(out, str)
+
+
+def test_run_skips_grok_log_when_symlink_unchanged(monkeypatch, capsys) -> None:
+    """Grok plugin-root が既に揃っている（戻り値 None）ときは追加ログしない。"""
+    monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+    with patch(
+        "bluecore.lib.grok_plugin_root.ensure_grok_plugin_root_symlink",
+        return_value=None,
+    ):
+        out = session_install.run("")
+    assert isinstance(out, str)
+    assert "Grok plugin root symlink" not in capsys.readouterr().err
+
+
+def test_run_logs_grok_plugin_root_symlink(tmp_path, monkeypatch, capsys) -> None:
+    """Grok plugin root symlink を張ったときはログする。"""
+    monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+    with patch(
+        "bluecore.lib.grok_plugin_root.ensure_grok_plugin_root_symlink",
+        return_value=tmp_path,
+    ):
+        out = session_install.run("")
+    assert isinstance(out, str)
+    assert "Grok plugin root symlink" in capsys.readouterr().err
+
+
+def test_run_grok_symlink_exception_is_fail_open(monkeypatch, capsys) -> None:
+    """Grok symlink 修復の例外でセッション開始を止めない。"""
+    monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+    with patch(
+        "bluecore.lib.grok_plugin_root.ensure_grok_plugin_root_symlink",
+        side_effect=OSError("x"),
+    ):
+        out = session_install.run("")
+    assert isinstance(out, str)
+    assert "Grok symlink 修復スキップ" in capsys.readouterr().err
+
+
+def test_install_timeout_below_hooks_json_limit() -> None:
+    """hooks.json timeout 60 より先に自決する。"""
+    assert session_install._INSTALL_TIMEOUT < 60

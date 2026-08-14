@@ -13,6 +13,7 @@ import bluecore.launcher as launcher
 
 
 def _create_repo_venv(tmp_path: Path) -> Path:
+    """無視されることを確認するため、仮の repo-local .venv を配置する。"""
     venv_python = tmp_path / ".venv" / "bin" / "python3"
     venv_python.parent.mkdir(parents=True, exist_ok=True)
     venv_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
@@ -20,175 +21,120 @@ def _create_repo_venv(tmp_path: Path) -> Path:
     return venv_python
 
 
-class TestRuntimePython:
-    def test_prefers_repo_venv_python(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        venv_python = _create_repo_venv(tmp_path)
-        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
-
-        python, venv_root = launcher._runtime_python()
-
-        assert python == str(venv_python)
-        assert venv_root == tmp_path / ".venv"
-
-    def test_falls_back_to_system_python_without_repo_venv(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
-
-        python, venv_root = launcher._runtime_python()
-
-        assert python == sys.executable
-        assert venv_root is None
+def _explode_if_called(*_args: object, **_kwargs: object) -> int:
+    """バージョンガード通過前にターゲット実行へ進んだら失敗させる。"""
+    raise AssertionError("target must not run")
 
 
 class TestBuildEnv:
-    def test_prepends_repo_venv_to_path(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """build_env が venv を見ず PYTHONPATH と CLAUDE_PLUGIN_ROOT だけを整えること。"""
+
+    def test_planted_venv_does_not_set_virtual_env_or_prepend_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """仮に .venv があっても VIRTUAL_ENV を設定せず PATH も前置しない。"""
         _create_repo_venv(tmp_path)
         monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
         monkeypatch.setenv("PATH", "/usr/local/bin")
         monkeypatch.delenv("PYTHONPATH", raising=False)
+        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
 
         env = launcher.build_env()
 
+        assert "VIRTUAL_ENV" not in env
+        assert env["PATH"] == "/usr/local/bin"
+        assert str(tmp_path / ".venv" / "bin") not in env["PATH"].split(os.pathsep)
         assert env["CLAUDE_PLUGIN_ROOT"] == str(tmp_path)
-        assert env["VIRTUAL_ENV"] == str(tmp_path / ".venv")
-        assert env["PATH"].split(os.pathsep)[0] == str(tmp_path / ".venv" / "bin")
+        assert env["PYTHONPATH"] == str(tmp_path / "src")
 
     def test_appends_existing_pythonpath(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """既存 PYTHONPATH は src の後ろに残す。"""
         monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
-        monkeypatch.setattr(launcher, "_runtime_python", lambda: (sys.executable, None))
         monkeypatch.setenv("PYTHONPATH", "base-path")
 
         env = launcher.build_env()
 
         assert env["PYTHONPATH"] == os.pathsep.join([str(tmp_path / "src"), "base-path"])
 
-    def test_without_path_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """PATH 未設定でも venv の PATH を構築する。"""
-        monkeypatch.setattr(launcher, "_runtime_python", lambda: ("py", tmp_path))
-        monkeypatch.delenv("PATH", raising=False)
+    def test_setdefault_claude_plugin_root(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """CLAUDE_PLUGIN_ROOT 未設定時は REPO_ROOT を入れる。"""
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
 
         env = launcher.build_env()
 
-        assert env["VIRTUAL_ENV"] == str(tmp_path)
-        assert str(tmp_path / "bin") in env["PATH"]
+        assert env["CLAUDE_PLUGIN_ROOT"] == str(tmp_path)
 
-
-class TestReexecIntoVenvIfNeeded:
-    """os.execve による venv 自己置換の判定ロジックのテスト。
-
-    venv の python3 実行ファイルは多くの場合ベースインタプリタへの symlink
-    のため、単純な実体比較（samefile）では venv 有効化の要否を誤判定する
-    （NG 回帰）。sys.prefix != sys.base_prefix を主判定に使うことを確認する。
-    """
-
-    def test_no_venv_skips_exec(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(launcher, "_runtime_python", lambda: (sys.executable, None))
-        called = []
-        monkeypatch.setattr(launcher.os, "execve", lambda *a: called.append(a))
-
-        launcher._reexec_into_venv_if_needed()
-
-        assert called == []
-
-    def test_bare_system_python_always_execs(
+    def test_preserves_existing_claude_plugin_root(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """sys.prefix == sys.base_prefix（venv 非活性）なら、venv python3 が
-        システム python への symlink であっても必ず exec する。"""
-        venv_python = _create_repo_venv(tmp_path)
-        venv_root = tmp_path / ".venv"
-        monkeypatch.setattr(launcher, "_runtime_python", lambda: (str(venv_python), venv_root))
-        monkeypatch.setattr(launcher.sys, "prefix", "/usr")
-        monkeypatch.setattr(launcher.sys, "base_prefix", "/usr")
-        # samefile が True（symlink 先が同じ実体）でも exec すべきことを保証するため、
-        # わざと同一ファイルとの比較で True を返すよう仕込む。
-        monkeypatch.setattr(launcher.os.path, "samefile", lambda a, b: True)
-        called = []
-        monkeypatch.setattr(launcher.os, "execve", lambda *a: called.append(a))
-        monkeypatch.setattr(launcher, "build_env", lambda: {"X": "1"})
+        """既に CLAUDE_PLUGIN_ROOT がある場合は上書きしない。"""
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", "/already/set")
 
-        launcher._reexec_into_venv_if_needed()
+        env = launcher.build_env()
 
-        assert len(called) == 1
-        assert called[0][0] == str(venv_python)
+        assert env["CLAUDE_PLUGIN_ROOT"] == "/already/set"
 
-    def test_already_in_matching_venv_skips_exec(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    def test_without_path_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """PATH 未設定でも VIRTUAL_ENV を付けず動作する。"""
+        _create_repo_venv(tmp_path)
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        monkeypatch.delenv("PATH", raising=False)
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+
+        env = launcher.build_env()
+
+        assert "VIRTUAL_ENV" not in env
+        assert "PATH" not in env
+        assert env["PYTHONPATH"] == str(tmp_path / "src")
+        assert env["CLAUDE_PLUGIN_ROOT"] == str(tmp_path)
+
+
+class TestUnsupportedPythonExitCode:
+    """Python 3.12 未満の fail-open 判定。"""
+
+    def test_returns_none_on_312(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """3.12.0 なら None を返す。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
+
+        assert launcher._unsupported_python_exit_code() is None
+
+    def test_returns_zero_on_39_and_writes_stderr(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        venv_python = _create_repo_venv(tmp_path)
-        venv_root = tmp_path / ".venv"
-        monkeypatch.setattr(launcher, "_runtime_python", lambda: (str(venv_python), venv_root))
-        monkeypatch.setattr(launcher.sys, "prefix", str(venv_root))
-        monkeypatch.setattr(launcher.sys, "base_prefix", "/usr")
-        monkeypatch.setattr(launcher.os.path, "samefile", lambda a, b: True)
-        called = []
-        monkeypatch.setattr(launcher.os, "execve", lambda *a: called.append(a))
+        """3.9.6 なら stderr に実バージョンを書いて 0 を返す。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 9, 6))
 
-        launcher._reexec_into_venv_if_needed()
+        assert launcher._unsupported_python_exit_code() == 0
+        assert capsys.readouterr().err == (
+            "ERROR: bluecore requires Python 3.12+; `python3` is 3.9.6. "
+            "Point `python3` on PATH at 3.12+ (bluecore does not create a venv).\n"
+        )
 
-        assert called == []
-
-    def test_in_different_venv_still_execs(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    def test_returns_zero_on_311_and_writes_stderr(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        venv_python = _create_repo_venv(tmp_path)
-        venv_root = tmp_path / ".venv"
-        monkeypatch.setattr(launcher, "_runtime_python", lambda: (str(venv_python), venv_root))
-        monkeypatch.setattr(launcher.sys, "prefix", "/some/other/venv")
-        monkeypatch.setattr(launcher.sys, "base_prefix", "/usr")
-        monkeypatch.setattr(launcher.os.path, "samefile", lambda a, b: False)
-        called = []
-        monkeypatch.setattr(launcher.os, "execve", lambda *a: called.append(a))
-        monkeypatch.setattr(launcher, "build_env", lambda: {})
+        """3.11.9 なら stderr に実バージョンを書いて 0 を返す。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 11, 9))
 
-        launcher._reexec_into_venv_if_needed()
-
-        assert len(called) == 1
-
-    def test_samefile_oserror_falls_through_to_exec(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        venv_python = _create_repo_venv(tmp_path)
-        venv_root = tmp_path / ".venv"
-        monkeypatch.setattr(launcher, "_runtime_python", lambda: (str(venv_python), venv_root))
-        monkeypatch.setattr(launcher.sys, "prefix", str(venv_root))
-        monkeypatch.setattr(launcher.sys, "base_prefix", "/usr")
-
-        def fail_samefile(a, b):  # noqa: ANN001
-            raise OSError("boom")
-
-        monkeypatch.setattr(launcher.os.path, "samefile", fail_samefile)
-        called = []
-        monkeypatch.setattr(launcher.os, "execve", lambda *a: called.append(a))
-        monkeypatch.setattr(launcher, "build_env", lambda: {})
-
-        launcher._reexec_into_venv_if_needed()
-
-        assert len(called) == 1
-
-    def test_execve_oserror_is_swallowed(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        venv_python = _create_repo_venv(tmp_path)
-        venv_root = tmp_path / ".venv"
-        monkeypatch.setattr(launcher, "_runtime_python", lambda: (str(venv_python), venv_root))
-        monkeypatch.setattr(launcher.sys, "prefix", "/usr")
-        monkeypatch.setattr(launcher.sys, "base_prefix", "/usr")
-        monkeypatch.setattr(launcher, "build_env", lambda: {})
-
-        def fail_execve(*a):
-            raise OSError("exec failed")
-
-        monkeypatch.setattr(launcher.os, "execve", fail_execve)
-
-        # 例外を送出せず戻ってくることを確認する（fail-open）。
-        launcher._reexec_into_venv_if_needed()
+        assert launcher._unsupported_python_exit_code() == 0
+        assert capsys.readouterr().err == (
+            "ERROR: bluecore requires Python 3.12+; `python3` is 3.11.9. "
+            "Point `python3` on PATH at 3.12+ (bluecore does not create a venv).\n"
+        )
 
 
 class TestRunModuleInProcess:
+    """runpy によるインプロセス実行の終了コード変換。"""
+
     def test_system_exit_zero_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SystemExit(0) は終了コード 0 にする。"""
         monkeypatch.setattr(sys, "argv", ["placeholder"])
 
-        def fake_run_module(target, run_name=None, alter_sys=None):  # noqa: ANN001
+        def fake_run_module(target: str, run_name: str | None = None, alter_sys: bool | None = None) -> None:
             raise SystemExit(0)
 
         monkeypatch.setattr(launcher.runpy, "run_module", fake_run_module)
@@ -196,6 +142,7 @@ class TestRunModuleInProcess:
         assert launcher._run_module_in_process("bluecore.hooks.block_no_verify", []) == 0
 
     def test_system_exit_nonzero_returns_code(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SystemExit(非 0 整数) はそのコードを返す。"""
         monkeypatch.setattr(sys, "argv", ["placeholder"])
         monkeypatch.setattr(
             launcher.runpy, "run_module", lambda *a, **k: (_ for _ in ()).throw(SystemExit(2))
@@ -204,6 +151,7 @@ class TestRunModuleInProcess:
         assert launcher._run_module_in_process("target", []) == 2
 
     def test_system_exit_none_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SystemExit() は終了コード 0 にする。"""
         monkeypatch.setattr(sys, "argv", ["placeholder"])
         monkeypatch.setattr(
             launcher.runpy, "run_module", lambda *a, **k: (_ for _ in ()).throw(SystemExit())
@@ -214,6 +162,7 @@ class TestRunModuleInProcess:
     def test_system_exit_with_string_message_returns_one(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        """SystemExit(文字列) は stderr に書いて 1 を返す。"""
         monkeypatch.setattr(sys, "argv", ["placeholder"])
         monkeypatch.setattr(
             launcher.runpy, "run_module", lambda *a, **k: (_ for _ in ()).throw(SystemExit("bad"))
@@ -225,6 +174,7 @@ class TestRunModuleInProcess:
     def test_generic_exception_returns_one(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        """想定外例外は ERROR 行を書いて 1 を返す。"""
         monkeypatch.setattr(sys, "argv", ["placeholder"])
         monkeypatch.setattr(
             launcher.runpy, "run_module", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
@@ -236,16 +186,18 @@ class TestRunModuleInProcess:
     def test_normal_completion_without_system_exit_returns_zero(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """SystemExit なしの正常終了は 0 を返す。"""
         monkeypatch.setattr(sys, "argv", ["placeholder"])
         monkeypatch.setattr(launcher.runpy, "run_module", lambda *a, **k: None)
 
         assert launcher._run_module_in_process("target", []) == 0
 
     def test_sets_argv_from_target_and_args(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """sys.argv を target と引数で置き換えて run_module する。"""
         monkeypatch.setattr(sys, "argv", ["placeholder"])
-        captured = {}
+        captured: dict[str, object] = {}
 
-        def fake_run_module(target, run_name=None, alter_sys=None):  # noqa: ANN001
+        def fake_run_module(target: str, run_name: str | None = None, alter_sys: bool | None = None) -> None:
             captured["argv"] = list(sys.argv)
             captured["run_name"] = run_name
             captured["alter_sys"] = alter_sys
@@ -260,24 +212,27 @@ class TestRunModuleInProcess:
 
 
 class TestResolveModuleCommand:
+    """detach 用コマンドリストの構築。"""
+
     def test_builds_module_invocation(self) -> None:
+        """引数付きの python -m コマンドを返す。"""
         cmd = launcher._resolve_module_command("bluecore.hooks.config_protection", ["a", "b"])
         assert cmd == [sys.executable, "-m", "bluecore.hooks.config_protection", "a", "b"]
 
     def test_builds_module_invocation_without_args(self) -> None:
+        """引数なしならモジュール名だけを付ける。"""
         cmd = launcher._resolve_module_command("bluecore.hooks.session_start", [])
         assert cmd == [sys.executable, "-m", "bluecore.hooks.session_start"]
 
 
 class TestMain:
-    def _quiet_reexec(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """テストでは実際の execve を発火させない。"""
-        monkeypatch.setattr(launcher, "_reexec_into_venv_if_needed", lambda: None)
+    """main() の引数処理・detach・バージョンガード。"""
 
     def test_no_args_prints_usage(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        self._quiet_reexec(monkeypatch)
+        """引数なしは usage を出して 1。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
 
         assert launcher.main([]) == 1
         assert "Usage: python3" in capsys.readouterr().err
@@ -285,16 +240,18 @@ class TestMain:
     def test_bg_without_target_prints_usage(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        self._quiet_reexec(monkeypatch)
+        """--bg だけの指定は usage を出して 1。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
 
         assert launcher.main(["--bg"]) == 1
         assert "Usage: python3" in capsys.readouterr().err
 
     def test_normal_invocation_runs_in_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._quiet_reexec(monkeypatch)
-        captured = {}
+        """通常起動はインプロセス実行する。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
+        captured: dict[str, object] = {}
 
-        def fake_run_in_process(target, target_args):  # noqa: ANN001
+        def fake_run_in_process(target: str, target_args: list[str]) -> int:
             captured["target"] = target
             captured["args"] = target_args
             return 0
@@ -306,15 +263,17 @@ class TestMain:
 
     def test_bg_on_claude_runs_in_process_without_detach(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Claude はホスト側で非同期実行するため、--bg でも detach せずインプロセス実行する。"""
-        self._quiet_reexec(monkeypatch)
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
         monkeypatch.setattr("bluecore.lib.harness.detect_harness", lambda: "claude")
 
-        detach_called = []
-        monkeypatch.setattr("bluecore.hooks.hook_common.detach_process", lambda *a, **k: detach_called.append(a) or True)
+        detach_called: list[object] = []
+        monkeypatch.setattr(
+            "bluecore.hooks.hook_common.detach_process", lambda *a, **k: detach_called.append(a) or True
+        )
 
-        captured = {}
+        captured: dict[str, object] = {}
 
-        def fake_run_in_process(target, args):  # noqa: ANN001
+        def fake_run_in_process(target: str, args: list[str]) -> int:
             captured["target"] = target
             return 0
 
@@ -325,13 +284,14 @@ class TestMain:
         assert captured["target"] == "bluecore.mem.cli"
 
     def test_bg_on_non_claude_detaches_and_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._quiet_reexec(monkeypatch)
+        """非 Claude の --bg は detach して 0 を返す。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
         monkeypatch.setattr("bluecore.lib.harness.detect_harness", lambda: "codex")
         monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "{}")
 
-        captured = {}
+        captured: dict[str, object] = {}
 
-        def fake_detach(cmd, raw, *, env=None):  # noqa: ANN001
+        def fake_detach(cmd: list[str], raw: str, *, env: dict[str, str] | None = None) -> bool:
             captured["cmd"] = cmd
             captured["raw"] = raw
             return True
@@ -339,7 +299,7 @@ class TestMain:
         monkeypatch.setattr("bluecore.hooks.hook_common.detach_process", fake_detach)
         monkeypatch.setattr(launcher, "build_env", lambda: {})
 
-        run_in_process_called = []
+        run_in_process_called: list[object] = []
         monkeypatch.setattr(
             launcher, "_run_module_in_process", lambda *a: run_in_process_called.append(a)
         )
@@ -352,7 +312,8 @@ class TestMain:
     def test_bg_on_non_claude_detach_failure_still_returns_zero(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        self._quiet_reexec(monkeypatch)
+        """detach 失敗でも 0 を返し、stderr にエラーを書く。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
         monkeypatch.setattr("bluecore.lib.harness.detect_harness", lambda: "codex")
         monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "")
         monkeypatch.setattr("bluecore.hooks.hook_common.detach_process", lambda *a, **k: False)
@@ -363,7 +324,7 @@ class TestMain:
 
     def test_inserts_src_dir_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """src ディレクトリが sys.path に無ければ挿入する。"""
-        self._quiet_reexec(monkeypatch)
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
         src = str(launcher.REPO_ROOT / "src")
         monkeypatch.setattr(sys, "path", [p for p in sys.path if p != src])
         monkeypatch.setattr(launcher, "_run_module_in_process", lambda target, args: 0)
@@ -372,18 +333,51 @@ class TestMain:
         assert src in sys.path
 
     def test_entrypoint_returns_usage_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # runpy.run_module は launcher モジュールを "__main__" として再実行するため、
-        # 既存の launcher オブジェクトへの monkeypatch は effective ではない。
-        # os.execve をグローバルに封じることで、テスト環境のプロセスが本当に
-        # 自己置換されてしまう事故を防ぐ（_reexec_into_venv_if_needed は OSError
-        # を握りつぶして続行する設計のため安全に空振りできる）。
-        def blocked_execve(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-            raise OSError("execve blocked in test")
-
-        monkeypatch.setattr(os, "execve", blocked_execve)
+        """``python3 -m bluecore.launcher`` 相当は引数なしで usage 終了する。"""
         monkeypatch.setattr(sys, "argv", ["launcher.py"])
 
         with pytest.raises(SystemExit) as excinfo:
             runpy.run_module("bluecore.launcher", run_name="__main__")
 
         assert excinfo.value.code == 1
+
+    def test_old_python_39_returns_zero_without_running(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """3.9.6 ではターゲットを実行せず 0 を返す。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 9, 6))
+        monkeypatch.setattr(launcher, "_run_module_in_process", _explode_if_called)
+
+        assert launcher.main(["bluecore.mem.cli", "context"]) == 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "3.12" in captured.err
+        assert "3.9.6" in captured.err
+
+    def test_old_python_311_returns_zero_without_running(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """3.11.9 ではターゲットを実行せず 0 を返す。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 11, 9))
+        monkeypatch.setattr(launcher, "_run_module_in_process", _explode_if_called)
+
+        assert launcher.main(["bluecore.mem.cli", "context"]) == 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "3.12" in captured.err
+        assert "3.11.9" in captured.err
+
+    def test_python_312_runs_module_in_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """3.12.0 なら与えられたターゲットをインプロセス実行する。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
+        captured: dict[str, object] = {}
+
+        def fake_run_in_process(target: str, target_args: list[str]) -> int:
+            captured["target"] = target
+            captured["args"] = target_args
+            return 0
+
+        monkeypatch.setattr(launcher, "_run_module_in_process", fake_run_in_process)
+
+        assert launcher.main(["bluecore.mem.cli", "context"]) == 0
+        assert captured == {"target": "bluecore.mem.cli", "args": ["context"]}
