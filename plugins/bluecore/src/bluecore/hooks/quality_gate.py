@@ -20,7 +20,7 @@ from typing import Any
 from bluecore.hooks.hook_common import emit_post_tool_use_output, parse_json_object, read_raw_stdin
 from bluecore.hooks.quality_gate_presets import resolve_quality_gate_config
 from bluecore.lib.core_utils import log
-from bluecore.lib.harness import extract_file_paths, normalize_tool_name
+from bluecore.lib.harness import extract_file_paths, extract_raw_tool_name, extract_tool_input, normalize_tool_name
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 
@@ -185,13 +185,13 @@ def _extract_target_file_paths(input_data: dict[str, Any]) -> list[str]:
     Raises:
         例外は発生しません。
     """
-    tool_input = input_data.get("tool_input")
+    tool_input = extract_tool_input(input_data)
     if isinstance(tool_input, dict):
         file_path = tool_input.get("file_path")
         if isinstance(file_path, str) and file_path:
             return [file_path]
 
-    tool_name = str(input_data.get("tool_name") or "")
+    tool_name = extract_raw_tool_name(input_data)
     structured_paths = extract_file_paths(tool_name, tool_input) or []
     if structured_paths:
         return structured_paths
@@ -214,8 +214,8 @@ def _extract_tool_name(input_data: dict[str, Any]) -> str:
     Raises:
         例外は発生しません。
     """
-    tool_name = input_data.get("tool_name")
-    if isinstance(tool_name, str):
+    tool_name = extract_raw_tool_name(input_data)
+    if tool_name:
         return normalize_tool_name(tool_name)
     return ""
 
