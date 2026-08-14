@@ -427,9 +427,6 @@ class TestSimpleHookEntrypoints:
         assert _run_entrypoint("bluecore.hooks.block_no_verify") == 0
 
 
-class TestSessionStartRubyLog:
-    """session_start フックが Ruby プロジェクトでログを出すことを確認するテスト。"""
-
 class TestCheckpointInjection:
     """session_start がアクティブなチェックポイントを注入するテスト。"""
 

@@ -418,10 +418,3 @@ class TestExtractFilePaths:
             "/a/b.py"
         ]
 
-
-class TestResolveSessionId:
-    """resolve_session_id のテスト。"""
-
-class TestResolveProjectDir:
-    """resolve_project_dir のテスト。"""
-

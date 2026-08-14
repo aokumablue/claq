@@ -185,12 +185,6 @@ class TestGetPackageManager:
         assert result.config is None
 
 
-class TestGetRunCommand:
-    """get_run_command 関数のテスト。"""
-
-class TestGetExecCommand:
-    """get_exec_command 関数のテスト。"""
-
 class TestSetPreferredPackageManager:
     """set_preferred_package_manager 関数のテスト。"""
 
@@ -206,9 +200,6 @@ class TestSetPreferredPackageManager:
         assert "Unknown package manager" in str(exc_info.value)
 
 
-class TestSetProjectPackageManager:
-    """set_project_package_manager 関数のテスト。"""
-
 class TestGetSelectionPrompt:
     """get_selection_prompt 関数のテスト。"""
 
@@ -221,9 +212,6 @@ class TestGetSelectionPrompt:
         assert "yarn" in result
         assert "bun" in result
 
-
-class TestGetCommandPattern:
-    """get_command_pattern 関数のテスト。"""
 
 def test_config_loading_and_detection_edge_paths(tmp_path, monkeypatch):
     config_path = tmp_path / ".claude" / "package-manager.json"

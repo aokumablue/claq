@@ -246,9 +246,6 @@ class TestFindFiles:
         assert results == []
 
 
-class TestReplaceInFile:
-    """replace_in_file 関数のテスト。"""
-
 class TestCountInFile:
     """count_in_file 関数のテスト。"""
 
@@ -265,9 +262,6 @@ class TestCountInFile:
         """ファイルがない場合は 0 を返すこと。"""
         assert count_in_file(tmp_path / "missing.txt", "foo") == 0
 
-
-class TestGrepFile:
-    """grep_file 関数のテスト。"""
 
 class TestStripAnsi:
     """strip_ansi 関数のテスト。"""
@@ -484,12 +478,6 @@ class TestRunCommandEdgeCases:
         assert "fatal" in result["output"]
 
 
-class TestGetGitModifiedFiles:
-    """get_git_modified_files テスト。"""
-
-class TestReplaceInFileEdgeCases:
-    """replace_in_file の未カバーパステスト。"""
-
 class TestCountInFileEdgeCases:
     """count_in_file の未カバーパステスト。"""
 
@@ -507,9 +495,6 @@ class TestCountInFileEdgeCases:
         result = count_in_file(f, "[invalid")
         assert result == 0
 
-
-class TestGrepFileEdgeCases:
-    """grep_file の未カバーパステスト。"""
 
 class TestFindFilesEmptyArgs:
     """find_files の空引数テスト (line 211)。"""
@@ -551,12 +536,6 @@ class TestIsGitRepo:
         with patch("bluecore.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
             assert is_git_repo() is False
 
-
-class TestReplaceInFileException:
-    """replace_in_file の Exception パス (line 510-512)。"""
-
-class TestReadStdinJsonSync:
-    """read_stdin_json_sync の基本テスト (line 299-316)。"""
 
 class TestReadStdinJsonAsync:
     """read_stdin_json の基本テスト (line 266-285)。"""
@@ -636,9 +615,6 @@ class TestReadStdinJsonAsync:
         result = asyncio.run(read_stdin_json())
         assert result == {}
 
-
-class TestReadStdinJsonSyncEdgeCases:
-    """read_stdin_json_sync の追加テスト (line 306-316)。"""
 
 class TestCommandExistsWindows:
     """command_exists の Windows 分岐テスト (line 371)。"""
