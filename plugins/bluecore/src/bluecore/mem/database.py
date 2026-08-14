@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from types import TracebackType
 
+from bluecore.lib.core_utils import ensure_private_dir
 from bluecore.mem.models import Knowledge, Repo, Session, utc_now_iso
 from bluecore.mem.schema import _SCHEMA_SQL
 
@@ -25,7 +26,7 @@ class Database:
             db_path: mem.db のパス。親ディレクトリが無ければ作成する。
         """
         path = Path(db_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(path.parent)
         _existed = path.exists()
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         if not _existed:

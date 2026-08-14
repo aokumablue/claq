@@ -119,6 +119,23 @@ class TestConnection:
             pass
         assert stat.S_IMODE(db_path.stat().st_mode) == 0o600
 
+    def test_parent_dir_under_bluecore_is_0700(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """~/.bluecore 配下に作る DB の親ディレクトリは umask 022 でも 0700。"""
+        import os
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        old_umask = os.umask(0o022)
+        try:
+            db_path = tmp_path / ".bluecore" / "mem.db"
+            with Database(db_path):
+                pass
+            assert stat.S_IMODE((tmp_path / ".bluecore").stat().st_mode) == 0o700
+        finally:
+            os.umask(old_umask)
+
     def test_existing_db_permission_untouched(self, tmp_path: Path) -> None:
         """既存 DB を開き直してもパーミッションを触らない。"""
         db_path = tmp_path / "mem.db"

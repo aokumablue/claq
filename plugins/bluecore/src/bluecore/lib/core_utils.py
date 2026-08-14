@@ -79,6 +79,38 @@ def ensure_dir(dir_path: str | Path) -> Path:
     return path
 
 
+def ensure_private_dir(dir_path: str | Path) -> Path:
+    """ディレクトリを作成し、パーミッションを 0700 に絞る。
+
+    ``dir_path`` が ``get_bluecore_dir()`` 配下なら ``~/.bluecore`` 自身も
+    0700 にする。``mkdir(parents=True)`` だけだと親が umask 022 で 0755
+    のまま残るため。既存の 0755 ディレクトリも締め直す。
+
+    Args:
+        dir_path: 作成または権限を締めるディレクトリ。
+
+    Returns:
+        対象ディレクトリの Path。
+
+    Raises:
+        OSError: 作成も chmod もできない場合。
+    """
+    path = Path(dir_path)
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        pass
+    path.chmod(0o700)
+    bluecore_dir = get_bluecore_dir()
+    try:
+        path.resolve().relative_to(bluecore_dir.resolve())
+    except ValueError:
+        return path
+    if bluecore_dir.exists():
+        bluecore_dir.chmod(0o700)
+    return path
+
+
 def get_date_string() -> str:
     """現在日付を YYYY-MM-DD 形式で取得する。"""
     return datetime.now().strftime("%Y-%m-%d")

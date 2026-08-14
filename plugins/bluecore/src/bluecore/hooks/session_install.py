@@ -17,6 +17,7 @@ from pathlib import Path
 from bluecore.hooks._install_lock import install_lock
 from bluecore.hooks.hook_common import emit_session_start_output as _emit_session_start_output
 from bluecore.lib.constants import BASE_DIR_NAME
+from bluecore.lib.core_utils import ensure_private_dir
 from bluecore.lib.sanitize import sanitize_log_value
 from bluecore.lib.subprocess_utils import run_text
 
@@ -248,8 +249,7 @@ def _run_install_with_lock(plugin_root: Path, current_version: str | None) -> bo
     Returns:
         install.sh が正常終了した場合 True。スキップ・失敗時は False。
     """
-    _BLUECORE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(_BLUECORE_DIR, 0o700)
+    ensure_private_dir(_BLUECORE_DIR)
     lock_path = _BLUECORE_DIR / "install.lock"
     try:
         with install_lock(lock_path):

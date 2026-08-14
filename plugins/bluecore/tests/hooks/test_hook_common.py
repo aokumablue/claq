@@ -302,7 +302,8 @@ class TestDetachProcess:
     ) -> None:
         from bluecore.hooks import hook_common
 
-        monkeypatch.setattr(hook_common.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
         captured = {}
         written_stdin_content = {}
 
@@ -336,7 +337,8 @@ class TestDetachProcess:
     ) -> None:
         from bluecore.hooks import hook_common
 
-        monkeypatch.setattr(hook_common.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
 
         def fail_named_temp_file(*args, **kwargs):  # noqa: ANN002, ANN003
             raise OSError("disk full")
@@ -350,7 +352,8 @@ class TestDetachProcess:
     ) -> None:
         from bluecore.hooks import hook_common
 
-        monkeypatch.setattr(hook_common.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
 
         def fail_popen(*args, **kwargs):  # noqa: ANN002, ANN003
             raise OSError("spawn failed")
@@ -366,7 +369,8 @@ class TestDetachProcess:
         """一時ファイルの unlink 失敗（既に削除済み等）でも起動成功を維持する。"""
         from bluecore.hooks import hook_common
 
-        monkeypatch.setattr(hook_common.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
         monkeypatch.setattr(hook_common.subprocess, "Popen", lambda *a, **k: None)
 
         def fail_unlink(path):  # noqa: ANN001
@@ -375,6 +379,43 @@ class TestDetachProcess:
         monkeypatch.setattr(hook_common.os, "unlink", fail_unlink)
 
         assert detach_process(["true"], "raw") is True
+
+    def test_creates_bluecore_dir_as_0700_under_umask_022(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """umask 022 でも ~/.bluecore を 0700 で作る。"""
+        import os
+        import stat
+
+        from bluecore.hooks import hook_common
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        monkeypatch.setattr(hook_common.subprocess, "Popen", lambda *a, **k: None)
+        old_umask = os.umask(0o022)
+        try:
+            assert detach_process(["true"], "raw") is True
+            mode = stat.S_IMODE((tmp_path / ".bluecore").stat().st_mode)
+            assert mode == 0o700
+        finally:
+            os.umask(old_umask)
+
+    def test_tightens_existing_0755_bluecore_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """既存 0755 の ~/.bluecore を 0700 に締め直す。"""
+        import stat
+
+        from bluecore.hooks import hook_common
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        monkeypatch.setattr(hook_common.subprocess, "Popen", lambda *a, **k: None)
+        bluecore = tmp_path / ".bluecore"
+        bluecore.mkdir(mode=0o755)
+        bluecore.chmod(0o755)
+        assert detach_process(["true"], "raw") is True
+        assert stat.S_IMODE(bluecore.stat().st_mode) == 0o700
 
 
 def _pid_alive(pid: int) -> bool:

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from bluecore.hooks.output_adapter import adapt_context_output, emit_block
+from bluecore.lib.core_utils import ensure_private_dir, get_bluecore_dir
 
 MAX_STDIN_BYTES = 1024 * 1024
 
@@ -300,8 +301,7 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
         例外は発生しません。
     """
     try:
-        private_dir = Path.home() / ".bluecore"
-        private_dir.mkdir(parents=True, exist_ok=True)
+        private_dir = ensure_private_dir(get_bluecore_dir())
         tmp = tempfile.NamedTemporaryFile(
             mode="w+", encoding="utf-8", suffix=".stdin", dir=private_dir, delete=False
         )

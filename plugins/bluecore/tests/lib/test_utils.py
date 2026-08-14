@@ -13,6 +13,7 @@ from bluecore.lib.core_utils import (
     command_exists,
     count_in_file,
     ensure_dir,
+    ensure_private_dir,
     find_files,
     get_bluecore_dir,
     get_claude_dir,
@@ -107,6 +108,63 @@ class TestEnsureDir:
         result = ensure_dir(existing)
         assert result == existing
         assert existing.exists()
+
+
+class TestEnsurePrivateDir:
+    """ensure_private_dir の 0700 作成と既存締め直し。"""
+
+    def test_creates_0700_and_tightens_bluecore_parent(self, tmp_path: Path, monkeypatch) -> None:
+        """umask 022 でも対象と ~/.bluecore を 0700 にする。"""
+        import stat
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        old_umask = os.umask(0o022)
+        try:
+            target = tmp_path / ".bluecore" / "nested"
+            result = ensure_private_dir(target)
+            assert result == target
+            assert stat.S_IMODE(target.stat().st_mode) == 0o700
+            assert stat.S_IMODE((tmp_path / ".bluecore").stat().st_mode) == 0o700
+        finally:
+            os.umask(old_umask)
+
+    def test_tightens_existing_0755(self, tmp_path: Path, monkeypatch) -> None:
+        """既存 0755 ディレクトリを 0700 に締め直す。"""
+        import stat
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        bluecore = tmp_path / ".bluecore"
+        bluecore.mkdir(mode=0o755)
+        bluecore.chmod(0o755)
+        ensure_private_dir(bluecore)
+        assert stat.S_IMODE(bluecore.stat().st_mode) == 0o700
+
+    def test_outside_bluecore_does_not_chmod_bluecore(self, tmp_path: Path, monkeypatch) -> None:
+        """~/.bluecore 配下でなければ親の .bluecore は触らない。"""
+        import stat
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        bluecore = tmp_path / ".bluecore"
+        bluecore.mkdir(mode=0o755)
+        bluecore.chmod(0o755)
+        other = tmp_path / "other"
+        ensure_private_dir(other)
+        assert stat.S_IMODE(other.stat().st_mode) == 0o700
+        assert stat.S_IMODE(bluecore.stat().st_mode) == 0o755
+
+    def test_file_exists_error_is_swallowed(self, tmp_path: Path) -> None:
+        """mkdir が FileExistsError でも chmod まで進む。"""
+        import stat
+
+        target = tmp_path / "existing"
+        target.mkdir()
+        with patch.object(Path, "mkdir", side_effect=FileExistsError):
+            result = ensure_private_dir(target)
+        assert result == target
+        assert stat.S_IMODE(target.stat().st_mode) == 0o700
 
 
 class TestDateTimeFunctions:
