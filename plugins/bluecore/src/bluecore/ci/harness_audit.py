@@ -58,6 +58,27 @@ def normalize_scope(scope: str | None) -> str:
     return value
 
 
+def _option_value(args: list[str], index: int, name: str) -> tuple[str | None, int]:
+    """`--name VALUE` または `--name=VALUE` の値と次インデックスを返す。
+
+    スペース区切りで次引数が無い場合は値を None とし、インデックスは +2 する。
+
+    Args:
+        args: 全引数のリスト。
+        index: `name` または `name=` 形式の引数のインデックス。
+        name: フラグ名（例: ``--format``）。
+
+    Returns:
+        (オプション値, 次に処理すべきインデックス) のタプル。
+    """
+    arg = args[index]
+    if arg.startswith(f"{name}="):
+        return arg.split("=", 1)[1], index + 1
+    if index + 1 < len(args):
+        return args[index + 1], index + 2
+    return None, index + 2
+
+
 def _apply_arg(parsed: dict[str, Any], args: list[str], index: int) -> int:
     """単一の CLI 引数を解釈して parsed を更新し、次のインデックスを返す。
 
@@ -78,29 +99,20 @@ def _apply_arg(parsed: dict[str, Any], args: list[str], index: int) -> int:
         parsed["help"] = True
         return index + 1
 
-    if arg == "--format":
-        parsed["format"] = (args[index + 1] if index + 1 < len(args) else "").lower()
-        return index + 2
+    if arg == "--format" or arg.startswith("--format="):
+        value, next_index = _option_value(args, index, "--format")
+        parsed["format"] = (value or "").lower()
+        return next_index
 
-    if arg.startswith("--format="):
-        parsed["format"] = arg.split("=", 1)[1].lower()
-        return index + 1
+    if arg == "--scope" or arg.startswith("--scope="):
+        value, next_index = _option_value(args, index, "--scope")
+        parsed["scope"] = normalize_scope(value)
+        return next_index
 
-    if arg == "--scope":
-        parsed["scope"] = normalize_scope(args[index + 1] if index + 1 < len(args) else None)
-        return index + 2
-
-    if arg.startswith("--scope="):
-        parsed["scope"] = normalize_scope(arg.split("=", 1)[1])
-        return index + 1
-
-    if arg == "--root":
-        parsed["root"] = Path(args[index + 1] if index + 1 < len(args) else os.getcwd()).resolve()
-        return index + 2
-
-    if arg.startswith("--root="):
-        parsed["root"] = Path(arg.split("=", 1)[1] or os.getcwd()).resolve()
-        return index + 1
+    if arg == "--root" or arg.startswith("--root="):
+        value, next_index = _option_value(args, index, "--root")
+        parsed["root"] = Path(value or os.getcwd()).resolve()
+        return next_index
 
     if arg.startswith("-"):
         raise ValueError(f"Unknown argument: {arg}")
@@ -363,12 +375,7 @@ def _consumer_security_guardrails_checks(ctx: _GuardrailsCtx) -> list[dict[str, 
     """consumer モードの Security Guardrails カテゴリのチェック定義を返す。
 
     Args:
-        root_dir: 監査対象のルートディレクトリ
-        gitignore: .gitignore の生テキスト
-        project_hooks: .claude/settings.json の生テキスト
-        security_path: 表示用のセキュリティ設定パス
-        hosting_label: Git ホスティングサービスの表示ラベル
-        security_pass: セキュリティポリシーが存在するかの判定結果
+        ctx: gitignore・フック設定・ホスティング表示に使うコンテキスト。
 
     Returns:
         Security Guardrails チェック辞書のリスト
@@ -391,6 +398,25 @@ def _consumer_security_guardrails_checks(ctx: _GuardrailsCtx) -> list[dict[str, 
     ]
 
 
+def _consumer_hosting_layout(root_dir: str | Path, hosting_service: str) -> tuple[str, str, bool]:
+    """consumer 向けの CI パス・セキュリティパス・CI 有無を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ。
+        hosting_service: 正規化済みの Git ホスティングサービス名。
+
+    Returns:
+        (ci_path, security_path, ci_pass) のタプル。
+    """
+    if hosting_service == "gitlab":
+        return ".gitlab-ci.yml", ".gitlab-ci.yml", file_exists(root_dir, ".gitlab-ci.yml")
+    return (
+        ".github/workflows/",
+        "SECURITY.md",
+        has_file_with_extension(root_dir, ".github/workflows", [".yml", ".yaml"]),
+    )
+
+
 def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github") -> list[dict[str, Any]]:
     """consumer project 向けのチェック定義を返す。"""
     package_json = safe_parse_json(safe_read(root_dir, "package.json"))
@@ -402,13 +428,7 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
     plugin_install = find_plugin_install(root_dir)
     hosting_service = normalize_git_hosting_service(git_hosting_service)
     hosting_label = get_git_hosting_service_label(hosting_service)
-    ci_path = ".gitlab-ci.yml" if hosting_service == "gitlab" else ".github/workflows/"
-    security_path = ".gitlab-ci.yml" if hosting_service == "gitlab" else "SECURITY.md"
-    ci_pass = (
-        file_exists(root_dir, ".gitlab-ci.yml")
-        if hosting_service == "gitlab"
-        else has_file_with_extension(root_dir, ".github/workflows", [".yml", ".yaml"])
-    )
+    ci_path, security_path, ci_pass = _consumer_hosting_layout(root_dir, hosting_service)
     security_pass = _consumer_security_status(root_dir, hosting_service)
 
     return [

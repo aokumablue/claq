@@ -165,11 +165,9 @@ def _validate_command_file(
     content_no_code_blocks = re.sub(r"```[\s\S]*?```", "", content)
     name = file_path.name
     has_errors = _check_command_references(name, content_no_code_blocks, valid_commands)
-    if _check_agent_references(name, content_no_code_blocks, valid_agents):
-        has_errors = True
+    has_errors |= _check_agent_references(name, content_no_code_blocks, valid_agents)
     warn_count = _check_skill_references(name, content_no_code_blocks, valid_skills)
-    if _check_workflow_references(name, content_no_code_blocks, valid_agents):
-        has_errors = True
+    has_errors |= _check_workflow_references(name, content_no_code_blocks, valid_agents)
     return has_errors, warn_count
 
 
@@ -213,12 +211,12 @@ def _build_valid_name_sets(
         (files, valid_commands, valid_agents, valid_skills) のタプル
     """
     files = _list_markdown_files(commands_path)
-    valid_commands = {f.stem for f in files}
-    valid_agents = (
-        {f.stem for f in _list_markdown_files(agents_path)} if agents_path.exists() else set()
-    )
+    valid_commands = {path.stem for path in files}
+    valid_agents = {path.stem for path in _list_markdown_files(agents_path)}
     valid_skills = (
-        {e.name for e in skills_path.iterdir() if e.is_dir()} if skills_path.exists() else set()
+        {entry.name for entry in skills_path.iterdir() if entry.is_dir()}
+        if skills_path.exists()
+        else set()
     )
     return files, valid_commands, valid_agents, valid_skills
 
@@ -253,8 +251,7 @@ def validate_commands(
     warn_count = 0
     for file_path in files:
         file_errors, file_warns = _validate_command_file(file_path, valid_commands, valid_agents, valid_skills)
-        if file_errors:
-            has_errors = True
+        has_errors |= file_errors
         warn_count += file_warns
     if has_errors:
         return 1

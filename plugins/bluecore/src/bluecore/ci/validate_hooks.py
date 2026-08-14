@@ -224,12 +224,11 @@ def _validate_matcher(event_type: str, index: int, matcher: Any) -> bool:
 
     has_errors = False
     matcher_value = matcher.get("matcher")
-    if "matcher" not in matcher and event_type not in EVENTS_WITHOUT_MATCHER:
-        emit_error(f"{event_type}[{index}] は 'matcher' フィールドが不足しています")
-        has_errors = True
-    elif "matcher" in matcher and not (
-        is_non_empty_string(matcher_value) or isinstance(matcher_value, (dict, list))
-    ):
+    if "matcher" not in matcher:
+        if event_type not in EVENTS_WITHOUT_MATCHER:
+            emit_error(f"{event_type}[{index}] は 'matcher' フィールドが不足しています")
+            has_errors = True
+    elif not (is_non_empty_string(matcher_value) or isinstance(matcher_value, (dict, list))):
         emit_error(f"{event_type}[{index}] の 'matcher' フィールドが無効です")
         has_errors = True
 
@@ -268,13 +267,10 @@ def _validate_event(event_type: str, matchers: Any) -> tuple[bool, int]:
     has_errors = False
     total_matchers = 0
     for index, matcher in enumerate(matchers):
-        if not isinstance(matcher, dict):
-            _validate_matcher(event_type, index, matcher)
-            has_errors = True
-            continue
         if _validate_matcher(event_type, index, matcher):
             has_errors = True
-        total_matchers += 1
+        if isinstance(matcher, dict):
+            total_matchers += 1
     return has_errors, total_matchers
 
 

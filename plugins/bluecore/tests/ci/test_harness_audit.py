@@ -9,6 +9,17 @@ import pytest
 import bluecore.ci.harness_audit as harness_audit
 
 
+def _write_repo_markers(root: Path, *, include_harness: bool = True) -> None:
+    """repo モード判定に必要なマーカーファイルを作成する。"""
+    (root / ".claude-plugin").mkdir(exist_ok=True)
+    (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+    (root / "agents").mkdir(exist_ok=True)
+    (root / "skills").mkdir(exist_ok=True)
+    if include_harness:
+        (root / "src" / "bluecore" / "ci").mkdir(parents=True, exist_ok=True)
+        (root / "src" / "bluecore" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
+
+
 def test_parse_args_supports_positional_scope_and_flags(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
@@ -21,45 +32,27 @@ def test_parse_args_supports_positional_scope_and_flags(monkeypatch, tmp_path: P
 
 
 def test_detect_target_mode_recognizes_repo_markers(tmp_path: Path) -> None:
-    (tmp_path / ".claude-plugin").mkdir()
-    (tmp_path / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "agents").mkdir()
-    (tmp_path / "skills").mkdir()
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "bluecore").mkdir()
-    (tmp_path / "src" / "bluecore" / "ci").mkdir()
-    (tmp_path / "src" / "bluecore" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
+    _write_repo_markers(tmp_path)
 
     assert harness_audit.detect_target_mode(tmp_path) == "repo"
 
 
 def test_detect_target_mode_requires_python_harness_marker(tmp_path: Path) -> None:
     """Python 実装への移行後は harness_audit.py が HARNESS_MARKERS として必要。"""
-    (tmp_path / ".claude-plugin").mkdir()
-    (tmp_path / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "agents").mkdir()
-    (tmp_path / "skills").mkdir()
+    _write_repo_markers(tmp_path, include_harness=False)
     # JS マーカーのみでは repo と判定されない
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "harness-audit.js").write_text("", encoding="utf-8")
     assert harness_audit.detect_target_mode(tmp_path) == "consumer"
 
     # Python マーカーがあれば repo と判定される
-    (tmp_path / "src" / "bluecore" / "ci").mkdir(parents=True)
-    (tmp_path / "src" / "bluecore" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
+    _write_repo_markers(tmp_path, include_harness=True)
     assert harness_audit.detect_target_mode(tmp_path) == "repo"
 
 
 def test_build_report_defaults_to_repo_mode_with_repo_markers(tmp_path: Path) -> None:
-    (tmp_path / ".claude-plugin").mkdir()
-    (tmp_path / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "agents").mkdir()
-    (tmp_path / "skills").mkdir()
+    _write_repo_markers(tmp_path)
     (tmp_path / "commands").mkdir()
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "bluecore").mkdir()
-    (tmp_path / "src" / "bluecore" / "ci").mkdir()
-    (tmp_path / "src" / "bluecore" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
 
     report = harness_audit.build_report("repo", root_dir=tmp_path)
 
