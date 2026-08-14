@@ -115,6 +115,24 @@ def _make_loop_cfg(tmp_path: Path, *, max_iterations: int = 3, holdout: float = 
     )
 
 
+def _query_cfg(project_root: Path, *, model: str | None = None, timeout: int = 5) -> SingleQueryConfig:
+    """テスト用 SingleQueryConfig を生成する。"""
+    return SingleQueryConfig(timeout=timeout, project_root=str(project_root), model=model)
+
+
+def _patch_query_io(
+    monkeypatch: pytest.MonkeyPatch,
+    process: object,
+    chunks: list[bytes],
+) -> None:
+    """run_single_query の uuid / Popen / select / os.read をテスト用に差し替える。"""
+    read_calls = iter(chunks)
+    monkeypatch.setattr(run_eval.uuid, "uuid4", lambda: SimpleNamespace(hex="12345678abcdef"))
+    monkeypatch.setattr(run_eval.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
+    monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
+
+
 def test_find_project_root_prefers_claude_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     current = tmp_path / "work" / "nested"
     current.mkdir(parents=True)
@@ -162,14 +180,9 @@ def test_run_single_query_triggers_on_stream_event(tmp_path: Path, monkeypatch: 
         ).encode("utf-8"),
     ]
     process = _FakeProcess()
-    read_calls = iter([b"".join(chunks), b""])
+    _patch_query_io(monkeypatch, process, [b"".join(chunks), b""])
 
-    monkeypatch.setattr(run_eval.uuid, "uuid4", lambda: SimpleNamespace(hex="12345678abcdef"))
-    monkeypatch.setattr(run_eval.subprocess, "Popen", lambda *args, **kwargs: process)
-    monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
-    monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
-
-    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
+    result = run_eval.run_single_query("query", "alpha", "skill description", _query_cfg(project_root))
 
     assert result is True
     assert process.killed is True
@@ -199,14 +212,9 @@ def test_run_single_query_fallback_assistant_message(tmp_path: Path, monkeypatch
         + "\n"
     ).encode("utf-8")
     process = _FakeProcess()
-    read_calls = iter([chunk, b""])
+    _patch_query_io(monkeypatch, process, [chunk, b""])
 
-    monkeypatch.setattr(run_eval.uuid, "uuid4", lambda: SimpleNamespace(hex="12345678abcdef"))
-    monkeypatch.setattr(run_eval.subprocess, "Popen", lambda *args, **kwargs: process)
-    monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
-    monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
-
-    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
+    result = run_eval.run_single_query("query", "alpha", "skill description", _query_cfg(project_root))
 
     assert result is True
 
@@ -216,14 +224,9 @@ def test_run_single_query_result_event_returns_false(tmp_path: Path, monkeypatch
     project_root.mkdir()
     chunk = (json.dumps({"type": "result"}) + "\n").encode("utf-8")
     process = _FakeProcess()
-    read_calls = iter([chunk, b""])
+    _patch_query_io(monkeypatch, process, [chunk, b""])
 
-    monkeypatch.setattr(run_eval.uuid, "uuid4", lambda: SimpleNamespace(hex="12345678abcdef"))
-    monkeypatch.setattr(run_eval.subprocess, "Popen", lambda *args, **kwargs: process)
-    monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
-    monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
-
-    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
+    result = run_eval.run_single_query("query", "alpha", "skill description", _query_cfg(project_root))
 
     assert result is False
 
@@ -257,12 +260,10 @@ def test_run_single_query_uses_model_and_rejects_unknown_tool(tmp_path: Path, mo
         ]
     )
 
-    monkeypatch.setattr(run_eval.uuid, "uuid4", lambda: SimpleNamespace(hex="12345678abcdef"))
+    _patch_query_io(monkeypatch, process, list(read_calls))
     monkeypatch.setattr(run_eval.subprocess, "Popen", lambda cmd, **kwargs: captured_cmds.append(cmd) or process)
-    monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
-    monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model="sonnet"))
+    result = run_eval.run_single_query("query", "alpha", "skill description", _query_cfg(project_root, model="sonnet"))
 
     assert result is False
     assert "--model" in captured_cmds[0]
@@ -283,12 +284,9 @@ def test_run_single_query_skips_invalid_json_and_message_stop(tmp_path: Path, mo
         ]
     )
 
-    monkeypatch.setattr(run_eval.uuid, "uuid4", lambda: SimpleNamespace(hex="12345678abcdef"))
-    monkeypatch.setattr(run_eval.subprocess, "Popen", lambda *args, **kwargs: process)
-    monkeypatch.setattr(run_eval.select, "select", lambda r, w, x, timeout=0: (r, [], []))
-    monkeypatch.setattr(run_eval.os, "read", lambda fd, size: next(read_calls))
+    _patch_query_io(monkeypatch, process, list(read_calls))
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
+    result = run_eval.run_single_query("query", "alpha", "skill description", _query_cfg(project_root))
 
     assert result is False
 
@@ -301,7 +299,7 @@ def test_run_single_query_returns_remaining_output_when_process_already_exited(t
     monkeypatch.setattr(run_eval.uuid, "uuid4", lambda: SimpleNamespace(hex="12345678abcdef"))
     monkeypatch.setattr(run_eval.subprocess, "Popen", lambda *args, **kwargs: process)
 
-    result = run_eval.run_single_query("query", "alpha", "skill description", SingleQueryConfig(timeout=5, project_root=str(project_root), model=None))
+    result = run_eval.run_single_query("query", "alpha", "skill description", _query_cfg(project_root))
 
     assert result is False
     assert process.killed is False

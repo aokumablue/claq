@@ -72,6 +72,23 @@ def _build_prompt_suffix(skill_content: str) -> str:
 新しい説明文以外は出力しないでください。<new_description> タグの中だけに入れて返してください。"""
 
 
+def _parse_new_description(text: str) -> str:
+    """LLM 応答から <new_description> 本文を取り出す。タグが無ければ全文を使う。"""
+    match = re.search(r"<new_description>(.*?)</new_description>", text, re.DOTALL)
+    raw = match.group(1) if match else text
+    return raw.strip().strip('"')
+
+
+def _format_trigger_failures(title: str, rows: list[dict]) -> str:
+    """失敗クエリ一覧をプロンプト用テキストにして返す。空なら空文字。"""
+    if not rows:
+        return ""
+    lines = [title]
+    for row in rows:
+        lines.append(f'  - "{row["query"]}"（{row["triggers"]}/{row["runs"]} 回トリガー）')
+    return "\n".join(lines) + "\n\n"
+
+
 def _build_improve_prompt(ctx: ImproveContext) -> str:
     """説明文改善用プロンプトを組み立てて返す。"""
     failed_triggers = [r for r in ctx.eval_results["results"] if r["should_trigger"] and not r["pass"]]
@@ -89,16 +106,8 @@ def _build_improve_prompt(ctx: ImproveContext) -> str:
         f'現在の説明:\n<current_description>\n"{ctx.current_description}"\n</current_description>\n\n'
         f"現在のスコア ({scores_summary}):\n<scores_summary>\n"
     )
-    if failed_triggers:
-        prompt += "トリガー漏れ（本来トリガーすべきだった）:\n"
-        for r in failed_triggers:
-            prompt += f'  - "{r["query"]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
-        prompt += "\n"
-    if false_triggers:
-        prompt += "誤トリガー（トリガーすべきでなかった）:\n"
-        for r in false_triggers:
-            prompt += f'  - "{r["query"]}"（{r["triggers"]}/{r["runs"]} 回トリガー）\n'
-        prompt += "\n"
+    prompt += _format_trigger_failures("トリガー漏れ（本来トリガーすべきだった）:", failed_triggers)
+    prompt += _format_trigger_failures("誤トリガー（トリガーすべきでなかった）:", false_triggers)
     if ctx.history:
         prompt += _format_history_section(ctx.history)
     return prompt + _build_prompt_suffix(ctx.skill_content)
@@ -109,10 +118,10 @@ def _format_history_section(history: list[dict]) -> str:
     text = "過去の試行（これらは繰り返さず、構造を変えてください）:\n\n"
     for h in history:
         train_s = f"{h.get('train_passed', h.get('passed', 0))}/{h.get('train_total', h.get('total', 0))}"
-        test_s = (
-            f"{h.get('test_passed', '?')}/{h.get('test_total', '?')}" if h.get("test_passed") is not None else None
-        )
-        score_str = f"train={train_s}" + (f", test={test_s}" if test_s else "")
+        if h.get("test_passed") is not None:
+            score_str = f"train={train_s}, test={h.get('test_passed', '?')}/{h.get('test_total', '?')}"
+        else:
+            score_str = f"train={train_s}"
         text += f"<attempt {score_str}>\n"
         text += f'説明: "{h["description"]}"\n'
         if "results" in h:
@@ -147,8 +156,7 @@ def _shorten_description_if_needed(
         "the new description in <new_description> tags."
     )
     shorten_text = _call_claude(shorten_prompt, model)
-    match = re.search(r"<new_description>(.*?)</new_description>", shorten_text, re.DOTALL)
-    shortened = match.group(1).strip().strip('"') if match else shorten_text.strip().strip('"')
+    shortened = _parse_new_description(shorten_text)
 
     transcript["rewrite_prompt"] = shorten_prompt
     transcript["rewrite_response"] = shorten_text
@@ -166,9 +174,7 @@ def improve_description(
     """eval 結果に基づいて Claude に説明文の改善を依頼する。"""
     prompt = _build_improve_prompt(ctx)
     text = _call_claude(prompt, model)
-
-    match = re.search(r"<new_description>(.*?)</new_description>", text, re.DOTALL)
-    description = match.group(1).strip().strip('"') if match else text.strip().strip('"')
+    description = _parse_new_description(text)
 
     transcript: dict = {
         "iteration": iteration,

@@ -60,6 +60,16 @@ def build_permission_args(binary: str, tools: list[str]) -> list[str]:
 
 
 def _map_tools(tools: list[str], mapping: dict[str, str], *, ignore_unmapped: bool = False) -> list[str]:
+    """Claude ツール名を copilot 名へ順に写し、重複を除いて返す。
+
+    Args:
+        tools: Claude 側のツール名リスト。
+        mapping: Claude 名 → copilot 名。
+        ignore_unmapped: True なら未登録ツールを黙って飛ばす。False なら ValueError。
+
+    Returns:
+        出現順を保った copilot ツール名。
+    """
     mapped: list[str] = []
     for tool in tools:
         if tool not in mapping:
@@ -97,7 +107,9 @@ def run_cli(
     """
     binary = detect_cli_binary()
     cmd = [binary, *args]
-    env = {k: v for k, v in os.environ.items() if not (strip_claudecode_env and k == "CLAUDECODE")}
+    env = dict(os.environ)
+    if strip_claudecode_env:
+        env.pop("CLAUDECODE", None)
     return subprocess.run(
         cmd,
         input=stdin_input,

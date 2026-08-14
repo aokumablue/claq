@@ -8,10 +8,16 @@
   | 3 | 未設定     | False       | "claude" |
 
 デシジョンテーブル (build_tools_args):
-  | # | binary   | tools          | 期待値                                |
-  |---|---------|----------------|--------------------------------------|
-  | 1 | "claude" | ["Read","Write"] | ["--allowedTools", "Read,Write"]    |
-  | 2 | "copilot"| ["Read","Write"] | ["--allow-tool","Read","--allow-tool","Write"] |
+  | # | binary   | tools            | 期待値                                      |
+  |---|---------|------------------|--------------------------------------------|
+  | 1 | "claude" | ["Read","Write"] | ["--allowedTools", "Read,Write"]            |
+  | 2 | "copilot"| ["Read","Write"] | ["--available-tools", "view", "edit"]       |
+
+デシジョンテーブル (build_permission_args):
+  | # | binary   | tools            | 期待値                          |
+  |---|---------|------------------|-------------------------------|
+  | 1 | "claude" | ["Read","Write"] | []                            |
+  | 2 | "copilot"| ["Write","Bash"] | ["--allow-tool", "write", "shell"] |
 
 デシジョンテーブル (build_output_format_args):
   | # | binary   | fmt          | 期待値                            |

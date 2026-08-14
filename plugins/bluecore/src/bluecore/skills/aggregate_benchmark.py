@@ -108,22 +108,21 @@ def _load_timing(run_dir: Path) -> dict:
 def _extract_run_result(run_dir: Path, eval_id: int | str, grading: dict) -> dict:
     """grading.json と timing.json から run 結果辞書を構築して返す。"""
     run_number = _parse_run_number(run_dir)
+    summary = grading.get("summary", {})
+    metrics = grading.get("execution_metrics", {})
+    timing_data = _load_timing(run_dir)
     result = {
         "eval_id": eval_id,
         "run_number": run_number,
-        "pass_rate": grading.get("summary", {}).get("pass_rate", 0.0),
-        "passed": grading.get("summary", {}).get("passed", 0),
-        "failed": grading.get("summary", {}).get("failed", 0),
-        "total": grading.get("summary", {}).get("total", 0),
+        "pass_rate": summary.get("pass_rate", 0.0),
+        "passed": summary.get("passed", 0),
+        "failed": summary.get("failed", 0),
+        "total": summary.get("total", 0),
+        "time_seconds": timing_data["total_duration_seconds"],
+        "tokens": timing_data["total_tokens"],
+        "tool_calls": metrics.get("total_tool_calls", 0),
+        "errors": metrics.get("errors_encountered", 0),
     }
-
-    timing_data = _load_timing(run_dir)
-    result["time_seconds"] = timing_data["total_duration_seconds"]
-    result["tokens"] = timing_data["total_tokens"]
-
-    metrics = grading.get("execution_metrics", {})
-    result["tool_calls"] = metrics.get("total_tool_calls", 0)
-    result["errors"] = metrics.get("errors_encountered", 0)
 
     raw_expectations = grading.get("expectations", [])
     for exp in raw_expectations:
@@ -145,9 +144,7 @@ def _extract_run_result(run_dir: Path, eval_id: int | str, grading: dict) -> dic
 
 def _load_config_results(config_dir: Path, eval_id: int | str, results: dict[str, list]) -> None:
     """config ディレクトリ配下の run を走査して results に追記する。"""
-    config = config_dir.name
-    if config not in results:
-        results[config] = []
+    runs = results.setdefault(config_dir.name, [])
 
     for run_dir in sorted(config_dir.glob("run-*")):
         _parse_run_number(run_dir)  # run-N 形式でなければここで fail-loud に停止する
@@ -161,7 +158,7 @@ def _load_config_results(config_dir: Path, eval_id: int | str, results: dict[str
         except json.JSONDecodeError as e:
             print(f"警告: {grading_file} の JSON が不正です: {e}")
             continue
-        results[config].append(_extract_run_result(run_dir, eval_id, grading))
+        runs.append(_extract_run_result(run_dir, eval_id, grading))
 
 
 def load_run_results(benchmark_dir: Path) -> dict:
@@ -220,13 +217,8 @@ def aggregate_results(results: dict) -> dict:
             "tokens": calculate_stats(tokens),
         }
 
-    # 最初の 2 つの config 間で delta を計算する
-    if len(configs) >= 2:
-        primary = run_summary.get(configs[0], {})
-        baseline = run_summary.get(configs[1], {})
-    else:
-        primary = run_summary.get(configs[0], {}) if configs else {}
-        baseline = {}
+    primary = run_summary.get(configs[0], {}) if configs else {}
+    baseline = run_summary.get(configs[1], {}) if len(configs) >= 2 else {}
 
     delta_pass_rate = primary.get("pass_rate", {}).get("mean", 0) - baseline.get("pass_rate", {}).get("mean", 0)
     delta_time = primary.get("time_seconds", {}).get("mean", 0) - baseline.get("time_seconds", {}).get("mean", 0)
@@ -271,7 +263,7 @@ def generate_benchmark(benchmark_dir: Path, skill_name: str = "", skill_path: st
             )
 
     # results から eval ID を決定する
-    eval_ids = sorted({r["eval_id"] for config in results.values() for r in config})
+    eval_ids = sorted({run["eval_id"] for runs_for_config in results.values() for run in runs_for_config})
 
     benchmark = {
         "metadata": {
@@ -291,6 +283,13 @@ def generate_benchmark(benchmark_dir: Path, skill_name: str = "", skill_path: st
     return benchmark
 
 
+def _format_mean_stddev(stats: dict, *, scale: float = 1.0, digits: int = 0, unit: str = "") -> str:
+    """mean ± stddev を指定スケール・桁数・単位で整形する。"""
+    mean = stats.get("mean", 0) * scale
+    stddev = stats.get("stddev", 0) * scale
+    return f"{mean:.{digits}f}{unit} ± {stddev:.{digits}f}{unit}"
+
+
 def _append_summary_table_rows(
     lines: list[str],
     a_summary: dict,
@@ -301,17 +300,17 @@ def _append_summary_table_rows(
     a_pr = a_summary.get("pass_rate", {})
     b_pr = b_summary.get("pass_rate", {})
     lines.append(
-        f"| 合格率 | {a_pr.get('mean', 0) * 100:.0f}% ± {a_pr.get('stddev', 0) * 100:.0f}% | {b_pr.get('mean', 0) * 100:.0f}% ± {b_pr.get('stddev', 0) * 100:.0f}% | {delta.get('pass_rate', '—')} |"
+        f"| 合格率 | {_format_mean_stddev(a_pr, scale=100, unit='%')} | {_format_mean_stddev(b_pr, scale=100, unit='%')} | {delta.get('pass_rate', '—')} |"
     )
     a_time = a_summary.get("time_seconds", {})
     b_time = b_summary.get("time_seconds", {})
     lines.append(
-        f"| 時間 | {a_time.get('mean', 0):.1f}s ± {a_time.get('stddev', 0):.1f}s | {b_time.get('mean', 0):.1f}s ± {b_time.get('stddev', 0):.1f}s | {delta.get('time_seconds', '—')}s |"
+        f"| 時間 | {_format_mean_stddev(a_time, digits=1, unit='s')} | {_format_mean_stddev(b_time, digits=1, unit='s')} | {delta.get('time_seconds', '—')}s |"
     )
     a_tokens = a_summary.get("tokens", {})
     b_tokens = b_summary.get("tokens", {})
     lines.append(
-        f"| トークン | {a_tokens.get('mean', 0):.0f} ± {a_tokens.get('stddev', 0):.0f} | {b_tokens.get('mean', 0):.0f} ± {b_tokens.get('stddev', 0):.0f} | {delta.get('tokens', '—')} |"
+        f"| トークン | {_format_mean_stddev(a_tokens)} | {_format_mean_stddev(b_tokens)} | {delta.get('tokens', '—')} |"
     )
 
 
@@ -370,29 +369,24 @@ def main():
         print(f"ディレクトリが見つかりません: {args.benchmark_dir}")
         sys.exit(1)
 
-    # benchmark を生成する
     try:
         benchmark = generate_benchmark(args.benchmark_dir, args.skill_name, args.skill_path)
     except ValueError as error:
         print(f"入力が不正です:\n{error}")
         sys.exit(1)
 
-    # 出力先を決める
     output_json = args.output or (args.benchmark_dir / "benchmark.json")
     output_md = output_json.with_suffix(".md")
 
-    # benchmark.json を書き出す
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(benchmark, f, indent=2)
     print(f"生成しました: {output_json}")
 
-    # benchmark.md を書き出す
     markdown = generate_markdown(benchmark)
     with open(output_md, "w", encoding="utf-8") as f:
         f.write(markdown)
     print(f"生成しました: {output_md}")
 
-    # サマリーを表示する
     run_summary = benchmark["run_summary"]
     configs = [k for k in run_summary if k != "delta"]
     delta = run_summary.get("delta", {})

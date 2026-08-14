@@ -21,7 +21,7 @@ from .quick_validate import validate_skill
 EXCLUDE_DIRS = {"__pycache__", "node_modules"}
 EXCLUDE_GLOBS = {"*.pyc"}
 EXCLUDE_FILES = {".DS_Store"}
-# Directories excluded only at the skill root (not when nested deeper).
+# スキル直下のみ除外するディレクトリ（入れ子の同名ディレクトリは残す）。
 ROOT_EXCLUDE_DIRS = {"evals"}
 
 
@@ -71,7 +71,7 @@ def _create_skill_zip(skill_path: Path, skill_filename: Path) -> Path | None:
         return None
 
 
-def package_skill(skill_path, output_dir=None):
+def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) -> Path | None:
     """
     スキルフォルダを .skill ファイルとしてまとめる。
 

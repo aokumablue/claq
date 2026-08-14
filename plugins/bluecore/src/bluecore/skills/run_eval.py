@@ -105,8 +105,11 @@ def _process_stream_event(
 
 
 def _process_event_line(
-    line: str, clean_name: str,
-    pending_ref: list, accumulated_ref: list, triggered: list[bool],
+    line: str,
+    clean_name: str,
+    pending_ref: list,
+    accumulated_ref: list,
+    triggered: list[bool],
 ) -> bool | None:
     """1 行の JSON イベントを処理し、確定したトリガー結果または None を返す。"""
     try:
@@ -203,7 +206,8 @@ def run_single_query(
     try:
         _write_command_file(command_file, skill_name, skill_description)
         cmd = _build_query_cmd(binary, query, query_cfg.model)
-        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        env = dict(os.environ)
+        env.pop("CLAUDECODE", None)
 
         process = subprocess.Popen(
             cmd,
@@ -257,13 +261,12 @@ def _collect_futures(
             item, _ = future_to_info[future]
             query = item["query"]
             query_items[query] = item
-            if query not in query_triggers:
-                query_triggers[query] = []
+            triggers = query_triggers.setdefault(query, [])
             try:
-                query_triggers[query].append(future.result())
+                triggers.append(future.result())
             except Exception as e:
                 print(f"警告: クエリに失敗しました: {e}", file=sys.stderr)
-                query_triggers[query].append(False)
+                triggers.append(False)
 
     return query_triggers, query_items
 
@@ -291,7 +294,10 @@ def run_eval(
         item = query_items[query]
         trigger_rate = sum(triggers) / len(triggers)
         should_trigger = item["should_trigger"]
-        did_pass = trigger_rate >= eval_cfg.trigger_threshold if should_trigger else trigger_rate < eval_cfg.trigger_threshold
+        if should_trigger:
+            did_pass = trigger_rate >= eval_cfg.trigger_threshold
+        else:
+            did_pass = trigger_rate < eval_cfg.trigger_threshold
         results.append(
             {
                 "query": query,
