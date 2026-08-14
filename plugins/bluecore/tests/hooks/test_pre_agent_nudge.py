@@ -239,6 +239,154 @@ class TestExploreTableRegression:
         assert "bluecore:explorer" in pre_agent_nudge.EXPLORE_TABLE
 
 
+def _assert_table_output(stdout: list[str], *, expected_agent: str) -> None:
+    """対応表出力の PreToolUse JSON 契約を検証する。
+
+    Args:
+        stdout: write_stdout に渡された行。
+        expected_agent: additionalContext に含まれるべきエージェント名。
+    """
+    assert len(stdout) == 1
+    parsed = json.loads(stdout[0])
+    hook = parsed["hookSpecificOutput"]
+    assert hook["hookEventName"] == "PreToolUse"
+    ctx = hook["additionalContext"]
+    assert ctx
+    assert expected_agent in ctx
+    assert parsed.get("permissionDecision") != "deny"
+
+
+class TestPreAgentNudgePayloadContracts:
+    """DT-02: extract_tool_input 経由の agent_type / ネイティブ payload。"""
+
+    def test_pre_agent_nudge_emits_agent_table_for_tool_input_agent_type(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R-01: snake_case tool_input.agent_type=general-purpose で AGENT_TABLE。"""
+        payload = json.dumps({
+            "tool_name": "Agent",
+            "tool_input": {"agent_type": "general-purpose"},
+        })
+        stdout, _ = _capture_io(monkeypatch, payload)
+        assert pre_agent_nudge.main() == 0
+        _assert_table_output(stdout, expected_agent="bluecore:executor")
+
+    def test_pre_agent_nudge_emits_agent_table_for_native_camel_case_payload(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R-02: native toolName/toolArgs.agent_type=general-purpose で AGENT_TABLE。"""
+        payload = json.dumps({
+            "toolName": "agent",
+            "toolArgs": {"agent_type": "general-purpose"},
+        })
+        stdout, _ = _capture_io(monkeypatch, payload)
+        assert pre_agent_nudge.main() == 0
+        _assert_table_output(stdout, expected_agent="bluecore:executor")
+
+    def test_pre_agent_nudge_emits_explore_table_for_agent_type(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """snake_case / native の agent_type=Explore で EXPLORE_TABLE。"""
+        snake = json.dumps({
+            "tool_name": "Agent",
+            "tool_input": {"agent_type": "Explore"},
+        })
+        stdout, _ = _capture_io(monkeypatch, snake)
+        assert pre_agent_nudge.main() == 0
+        _assert_table_output(stdout, expected_agent="bluecore:explorer")
+
+        native = json.dumps({
+            "toolName": "agent",
+            "toolArgs": {"agent_type": "Explore"},
+        })
+        stdout, _ = _capture_io(monkeypatch, native)
+        assert pre_agent_nudge.main() == 0
+        _assert_table_output(stdout, expected_agent="bluecore:explorer")
+
+    def test_pre_agent_nudge_accepts_native_tool_args_json_string(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """native toolArgs が JSON 文字列でも AGENT_TABLE を出す。"""
+        payload = json.dumps({
+            "toolName": "agent",
+            "toolArgs": json.dumps({"agent_type": "general-purpose"}),
+        })
+        stdout, _ = _capture_io(monkeypatch, payload)
+        assert pre_agent_nudge.main() == 0
+        _assert_table_output(stdout, expected_agent="bluecore:executor")
+
+    def test_pre_agent_nudge_prefers_subagent_type_when_both_keys_exist(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """同一 dict 内では subagent_type を agent_type より優先する。"""
+        payload = json.dumps({
+            "tool_name": "Agent",
+            "tool_input": {
+                "subagent_type": "Explore",
+                "agent_type": "general-purpose",
+            },
+        })
+        stdout, _ = _capture_io(monkeypatch, payload)
+        assert pre_agent_nudge.main() == 0
+        _assert_table_output(stdout, expected_agent="bluecore:explorer")
+        assert "bluecore:executor" not in json.loads(stdout[0])["hookSpecificOutput"]["additionalContext"]
+
+    def test_pre_agent_nudge_ignores_unknown_agent_type(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """未知の agent_type は無出力・exit 0。"""
+        payload = json.dumps({
+            "toolName": "agent",
+            "toolArgs": {"agent_type": "custom-agent"},
+        })
+        stdout, _ = _capture_io(monkeypatch, payload)
+        assert pre_agent_nudge.main() == 0
+        assert stdout == []
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            json.dumps({"tool_args": {"agent_type": "general-purpose"}}),
+            json.dumps({
+                "tool_name": "Agent",
+                "tool_input": {"subagent_type": "Explore"},
+                "toolArgs": {"agent_type": "general-purpose"},
+            }),
+            json.dumps({"toolName": "agent", "toolArgs": {}}),
+            json.dumps({"toolName": "agent", "toolArgs": "not-a-dict"}),
+            "{not-json",
+            "",
+            json.dumps({
+                "toolName": "agent",
+                "toolArgs": {"agent_type": "General-Purpose"},
+            }),
+            json.dumps({"toolName": "agent", "toolArgs": {"agent_type": "explore"}}),
+        ],
+        ids=[
+            "dt02-7-tool_args-agent-table",
+            "dt02-9-canonical-tool_input-wins",
+            "dt02-11-missing-agent-type",
+            "dt02-12-non-dict-toolargs",
+            "dt02-13-invalid-json",
+            "dt02-13-empty",
+            "dt02-14-general-purpose-wrong-case",
+            "dt02-14-explore-wrong-case",
+        ],
+    )
+    def test_pre_agent_nudge_remaining_dt02_rows(
+        self, monkeypatch: pytest.MonkeyPatch, payload: str
+    ) -> None:
+        """DT-02 残行: tool_args 吸収、混在優先、未知・不正・大文字小文字。"""
+        stdout, _ = _capture_io(monkeypatch, payload)
+        assert pre_agent_nudge.main() == 0
+        if "tool_args" in payload and "general-purpose" in payload and "tool_input" not in payload:
+            _assert_table_output(stdout, expected_agent="bluecore:executor")
+        elif '"subagent_type": "Explore"' in payload and "toolArgs" in payload:
+            _assert_table_output(stdout, expected_agent="bluecore:explorer")
+        else:
+            assert stdout == []
+
+
 def test_main_entrypoint_exits_0(monkeypatch: pytest.MonkeyPatch) -> None:
     """__main__ として実行したとき SystemExit(0) で終了する。"""
     from bluecore.hooks import hook_common

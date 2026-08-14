@@ -29,7 +29,7 @@ no-op になるが、その手前で Python プロセスが 1 つ起動する分
   block_no_verify / pre_bash_commit_quality は ``tool_input.command`` を読むが
   BashOutput の tool_input に command は無いため空文字列となり no-op。
   よって落として挙動は変わらない。
-- ``TaskStop``: pre_agent_nudge は ``tool_input.subagent_type`` のみを見るため
+- ``TaskStop``: pre_agent_nudge は ``subagent_type`` / ``agent_type`` を見るため
   no-op。よって落として挙動は変わらない。
 
 ``"*"`` matcher は Claude Code / Copilot CLI ともに正規表現ではなく
@@ -63,7 +63,7 @@ TOOL_GATED_HOOKS: dict[str, frozenset[str]] = {
     # _WRITE_TOOL_NAMES == {edit, write, multiedit}
     "bluecore.hooks.config_protection": frozenset({"Edit", "Write", "MultiEdit"}),
     "bluecore.hooks.quality_gate": frozenset({"Edit", "Write", "MultiEdit"}),
-    # tool_input.subagent_type を読むサブエージェント起動フック
+    # tool_input の subagent_type / agent_type を読むサブエージェント起動フック
     "bluecore.hooks.pre_agent_nudge": frozenset({"Agent"}),
 }
 
