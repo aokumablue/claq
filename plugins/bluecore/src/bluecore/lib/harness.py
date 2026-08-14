@@ -90,15 +90,15 @@ def extract_tool_input(payload: dict[str, Any]) -> Any:
         if key not in payload:
             continue
         value = payload[key]
-        if isinstance(value, str):
-            stripped = value.lstrip()
-            if stripped.startswith(("{", "[")):
-                try:
-                    return json.loads(value)
-                except (json.JSONDecodeError, TypeError):
-                    return value
+        if not isinstance(value, str):
             return value
-        return value
+        stripped = value.lstrip()
+        if not stripped.startswith(("{", "[")):
+            return value
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return value
     return None
 
 
@@ -226,20 +226,18 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
         patch_text = tool_input.get("input")
         return patch_text if isinstance(patch_text, str) else None
 
-    if isinstance(tool_input, str):
-        stripped = tool_input.lstrip()
-        if stripped.startswith("{"):
-            try:
-                parsed = json.loads(tool_input)
-            except (json.JSONDecodeError, TypeError):
-                pass
-            else:
-                patch_text = parsed.get("input")
-                if isinstance(patch_text, str):
-                    return patch_text
-        return tool_input
+    if not isinstance(tool_input, str):
+        return None
 
-    return None
+    stripped = tool_input.lstrip()
+    if not stripped.startswith("{"):
+        return tool_input
+    try:
+        parsed = json.loads(tool_input)
+    except (json.JSONDecodeError, TypeError):
+        return tool_input
+    patch_text = parsed.get("input")
+    return patch_text if isinstance(patch_text, str) else tool_input
 
 
 def _has_patch_markers(patch_text: str) -> bool:

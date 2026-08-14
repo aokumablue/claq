@@ -29,8 +29,6 @@ def detect_project(project_root: str | Path) -> ProjectInfo:
     root = Path(project_root).resolve()
     languages = detect_languages(root)
     frameworks = detect_frameworks(root, languages)
-
-    # 主要言語を決定（最も多い言語、または最初に検出された言語）
     primary = languages[0] if languages else None
 
     return ProjectInfo(
@@ -41,17 +39,24 @@ def detect_project(project_root: str | Path) -> ProjectInfo:
     )
 
 
-def _get_js_test_command(root: Path) -> str | None:
-    """package.json の scripts からテストコマンドを推定する。"""
+def _package_scripts(root: Path) -> dict[str, object] | None:
+    """package.json の scripts オブジェクトを返す。無ければ None。"""
     package_json = root / "package.json"
     if not package_json.exists():
         return None
     scripts = _read_json_file(package_json).get("scripts")
-    if isinstance(scripts, dict):
-        if "test" in scripts:
-            return "npm test"
-        if "tests" in scripts:
-            return "npm run tests"
+    return scripts if isinstance(scripts, dict) else None
+
+
+def _get_js_test_command(root: Path) -> str | None:
+    """package.json の scripts からテストコマンドを推定する。"""
+    scripts = _package_scripts(root)
+    if scripts is None:
+        return None
+    if "test" in scripts:
+        return "npm test"
+    if "tests" in scripts:
+        return "npm run tests"
     return None
 
 
@@ -129,13 +134,9 @@ def get_build_command(project_root: str | Path) -> str | None:
     """
     root = Path(project_root)
 
-    # package.json の scripts を確認
-    package_json = root / "package.json"
-    if package_json.exists():
-        data = _read_json_file(package_json)
-        scripts = data.get("scripts")
-        if isinstance(scripts, dict) and "build" in scripts:
-            return "npm run build"
+    scripts = _package_scripts(root)
+    if scripts is not None and "build" in scripts:
+        return "npm run build"
 
     # Go
     if (root / "go.mod").exists():

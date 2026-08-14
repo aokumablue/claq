@@ -44,6 +44,29 @@ def _read_text_file(path: Path) -> str:
         return ""
 
 
+def _file_contains_any(path: Path, deps: list[str], *, ignore_case: bool = False) -> bool:
+    """ファイルが存在し、deps のいずれかを含むか確認する。"""
+    if not path.exists():
+        return False
+    content = _read_text_file(path)
+    if ignore_case:
+        content = content.lower()
+        return any(dep.lower() in content for dep in deps)
+    return any(dep in content for dep in deps)
+
+
+def _json_section_keys_contain_any(path: Path, section_keys: list[str], deps: list[str]) -> bool:
+    """JSON の指定セクションキー集合に deps のいずれかが含まれるか確認する。"""
+    if not path.exists():
+        return False
+    data = _read_json_file(path)
+    all_deps: set[str] = set()
+    for key in section_keys:
+        if key in data and isinstance(data[key], dict):
+            all_deps.update(data[key].keys())
+    return any(dep in all_deps for dep in deps)
+
+
 def _check_package_json_deps(root: Path, deps: list[str]) -> bool:
     """package.json に指定依存関係のいずれかが含まれるか確認する。
 
@@ -57,18 +80,11 @@ def _check_package_json_deps(root: Path, deps: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    package_json = root / "package.json"
-    if not package_json.exists():
-        return False
-
-    data = _read_json_file(package_json)
-    all_deps: set[str] = set()
-
-    for key in ["dependencies", "devDependencies", "peerDependencies"]:
-        if key in data and isinstance(data[key], dict):
-            all_deps.update(data[key].keys())
-
-    return any(dep in all_deps for dep in deps)
+    return _json_section_keys_contain_any(
+        root / "package.json",
+        ["dependencies", "devDependencies", "peerDependencies"],
+        deps,
+    )
 
 
 def _check_requirements_deps(root: Path, deps: list[str]) -> bool:
@@ -84,28 +100,10 @@ def _check_requirements_deps(root: Path, deps: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    # requirements.txt を確認
-    requirements = root / "requirements.txt"
-    if requirements.exists():
-        content = _read_text_file(requirements).lower()
-        if any(dep.lower() in content for dep in deps):
-            return True
-
-    # pyproject.toml を確認
-    pyproject = root / "pyproject.toml"
-    if pyproject.exists():
-        content = _read_text_file(pyproject).lower()
-        if any(dep.lower() in content for dep in deps):
-            return True
-
-    # Pipfile を確認
-    pipfile = root / "Pipfile"
-    if pipfile.exists():
-        content = _read_text_file(pipfile).lower()
-        if any(dep.lower() in content for dep in deps):
-            return True
-
-    return False
+    return any(
+        _file_contains_any(root / name, deps, ignore_case=True)
+        for name in ("requirements.txt", "pyproject.toml", "Pipfile")
+    )
 
 
 def _check_cargo_toml_deps(root: Path, deps: list[str]) -> bool:
@@ -121,12 +119,7 @@ def _check_cargo_toml_deps(root: Path, deps: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    cargo = root / "Cargo.toml"
-    if not cargo.exists():
-        return False
-
-    content = _read_text_file(cargo)
-    return any(dep in content for dep in deps)
+    return _file_contains_any(root / "Cargo.toml", deps)
 
 
 def _check_go_mod_deps(root: Path, deps: list[str]) -> bool:
@@ -142,12 +135,7 @@ def _check_go_mod_deps(root: Path, deps: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    go_mod = root / "go.mod"
-    if not go_mod.exists():
-        return False
-
-    content = _read_text_file(go_mod)
-    return any(dep in content for dep in deps)
+    return _file_contains_any(root / "go.mod", deps)
 
 
 def _check_gemfile_deps(root: Path, deps: list[str]) -> bool:
@@ -163,12 +151,7 @@ def _check_gemfile_deps(root: Path, deps: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    gemfile = root / "Gemfile"
-    if not gemfile.exists():
-        return False
-
-    content = _read_text_file(gemfile)
-    return any(dep in content for dep in deps)
+    return _file_contains_any(root / "Gemfile", deps)
 
 
 def _is_rails_app(root: Path) -> bool:
@@ -207,18 +190,7 @@ def _check_composer_json_deps(root: Path, deps: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    composer = root / "composer.json"
-    if not composer.exists():
-        return False
-
-    data = _read_json_file(composer)
-    all_deps: set[str] = set()
-
-    for key in ["require", "require-dev"]:
-        if key in data and isinstance(data[key], dict):
-            all_deps.update(data[key].keys())
-
-    return any(dep in all_deps for dep in deps)
+    return _json_section_keys_contain_any(root / "composer.json", ["require", "require-dev"], deps)
 
 
 def _check_pubspec_deps(root: Path, deps: list[str]) -> bool:
@@ -234,12 +206,7 @@ def _check_pubspec_deps(root: Path, deps: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    pubspec = root / "pubspec.yaml"
-    if not pubspec.exists():
-        return False
-
-    content = _read_text_file(pubspec)
-    return any(dep in content for dep in deps)
+    return _file_contains_any(root / "pubspec.yaml", deps)
 
 
 def _check_pom_xml_deps(root: Path, deps: list[str]) -> bool:
@@ -255,12 +222,7 @@ def _check_pom_xml_deps(root: Path, deps: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    pom = root / "pom.xml"
-    if not pom.exists():
-        return False
-
-    content = _read_text_file(pom)
-    return any(dep in content for dep in deps)
+    return _file_contains_any(root / "pom.xml", deps)
 
 
 def _check_gradle_deps(root: Path, deps: list[str]) -> bool:
@@ -276,14 +238,7 @@ def _check_gradle_deps(root: Path, deps: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    for gradle_file in ["build.gradle", "build.gradle.kts"]:
-        gradle = root / gradle_file
-        if gradle.exists():
-            content = _read_text_file(gradle)
-            if any(dep in content for dep in deps):
-                return True
-
-    return False
+    return any(_file_contains_any(root / name, deps) for name in ("build.gradle", "build.gradle.kts"))
 
 
 def _check_csproj_deps(root: Path, deps: list[str]) -> bool:
@@ -300,10 +255,8 @@ def _check_csproj_deps(root: Path, deps: list[str]) -> bool:
         例外は発生しません。
     """
     for csproj in root.glob("*.csproj"):
-        content = _read_text_file(csproj)
-        if any(dep in content for dep in deps):
+        if any(dep in _read_text_file(csproj) for dep in deps):
             return True
-
     return False
 
 
@@ -323,18 +276,19 @@ def _check_file_contents(root: Path, patterns: list[dict[str, str]]) -> bool:
     for pattern_spec in patterns:
         file_pattern = pattern_spec.get("file", "")
         search_pattern = pattern_spec.get("pattern", "")
-
         if "*" in file_pattern:
-            for file_path in root.glob(file_pattern):
-                if file_path.is_file():
-                    content = _read_text_file(file_path)
-                    if search_pattern in content:
-                        return True
-        else:
-            file_path = root / file_pattern
-            if file_path.exists():
-                content = _read_text_file(file_path)
-                if search_pattern in content:
-                    return True
+            if _any_glob_file_contains(root, file_pattern, search_pattern):
+                return True
+            continue
+        file_path = root / file_pattern
+        if file_path.exists() and search_pattern in _read_text_file(file_path):
+            return True
+    return False
 
+
+def _any_glob_file_contains(root: Path, file_pattern: str, search_pattern: str) -> bool:
+    """グロブにマッチする通常ファイルのいずれかが search_pattern を含むか。"""
+    for file_path in root.glob(file_pattern):
+        if file_path.is_file() and search_pattern in _read_text_file(file_path):
+            return True
     return False

@@ -54,9 +54,7 @@ def is_grok_installed_plugin_root(path: Path | str) -> bool:
         grok_idx = parts.index(".grok")
     except ValueError:
         return False
-    if grok_idx + 2 >= len(parts):
-        return False
-    if parts[grok_idx + 1] != "installed-plugins":
+    if grok_idx + 2 >= len(parts) or parts[grok_idx + 1] != "installed-plugins":
         return False
     return parts[grok_idx + 2].startswith("bluecore-")
 
@@ -64,6 +62,22 @@ def is_grok_installed_plugin_root(path: Path | str) -> bool:
 def _has_launcher(root: Path) -> bool:
     """プラグインルートに launcher.py があるか。"""
     return (root / "src" / "bluecore" / "launcher.py").is_file()
+
+
+def _safe_resolve(path: Path) -> Path | None:
+    """``path.resolve()`` を試み、失敗したら None を返す。"""
+    try:
+        return path.resolve()
+    except OSError:
+        return None
+
+
+def _installed_target(path: Path | str) -> Path | None:
+    """installed-plugins/bluecore-* かつ launcher があるなら resolve した Path。"""
+    candidate = Path(path)
+    if not is_grok_installed_plugin_root(candidate) or not _has_launcher(candidate):
+        return None
+    return _safe_resolve(candidate)
 
 
 def find_latest_installed_bluecore(installed_dir: Path | None = None) -> Path | None:
@@ -123,37 +137,46 @@ def ensure_grok_plugin_root_symlink(
     base = home if home is not None else _home()
     link = Path(link_path) if link_path is not None else base / ".grok" / "plugins" / "bluecore"
 
-    target: Path | None = None
-    if plugin_root is not None:
-        candidate = Path(plugin_root)
-        if is_grok_installed_plugin_root(candidate) and _has_launcher(candidate):
-            try:
-                target = candidate.resolve()
-            except OSError:
-                target = None
-        # 開発ツリー等は黙って無視し、installed-plugins 探索へ進む
-
-    if target is None:
-        env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-        if env_root and is_grok_installed_plugin_root(env_root):
-            candidate = Path(env_root)
-            if _has_launcher(candidate):
-                try:
-                    target = candidate.resolve()
-                except OSError:
-                    target = None
-
-    if target is None:
-        found = find_latest_installed_bluecore(installed_plugins_dir(base))
-        if found is not None:
-            try:
-                target = found.resolve()
-            except OSError:
-                target = None
-
+    target = _resolve_symlink_target(plugin_root, base)
     if target is None:
         return None
+    return _ensure_symlink(link, target)
 
+
+def _resolve_symlink_target(plugin_root: Path | str | None, home: Path) -> Path | None:
+    """リンク先を plugin_root → 環境変数 → 最新インストールの順で解決する。"""
+    if plugin_root is not None:
+        target = _installed_target(plugin_root)
+        if target is not None:
+            return target
+    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if env_root:
+        target = _installed_target(env_root)
+        if target is not None:
+            return target
+    found = find_latest_installed_bluecore(installed_plugins_dir(home))
+    if found is None:
+        return None
+    return _safe_resolve(found)
+
+
+def _remove_empty_or_file(link: Path) -> bool:
+    """空ディレクトリまたは通常ファイルを削除する。触ってはいけないなら False。"""
+    if not link.is_dir():
+        link.unlink()
+        return True
+    try:
+        next(link.iterdir())
+    except StopIteration:
+        link.rmdir()
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _ensure_symlink(link: Path, target: Path) -> Path | None:
+    """``link`` を ``target`` へ張り、結果の Path または何もしない/失敗時の None を返す。"""
     try:
         link.parent.mkdir(parents=True, exist_ok=True)
         if link.is_symlink():
@@ -164,20 +187,8 @@ def ensure_grok_plugin_root_symlink(
                 pass
             link.unlink()
         elif link.exists():
-            # 既に有効なツリーなら触らない
-            if _has_launcher(link):
+            if _has_launcher(link) or not _remove_empty_or_file(link):
                 return None
-            if link.is_dir():
-                try:
-                    next(link.iterdir())
-                except StopIteration:
-                    link.rmdir()
-                except OSError:
-                    return None
-                else:
-                    return None
-            else:
-                link.unlink()
         link.symlink_to(target, target_is_directory=True)
         return target
     except OSError:

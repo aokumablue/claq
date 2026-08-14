@@ -17,7 +17,6 @@ from typing import Any
 
 from bluecore.lib.constants import BASE_DIR_NAME
 
-# プラットフォーム検出
 IS_WINDOWS = platform.system() == "Windows"
 IS_MACOS = platform.system() == "Darwin"
 IS_LINUX = platform.system() == "Linux"
@@ -71,11 +70,7 @@ def ensure_dir(dir_path: str | Path) -> Path:
         OSError: ディレクトリを作成できない場合（例: 権限不足）
     """
     path = Path(dir_path)
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except FileExistsError:
-        # 他プロセスとの競合によるレースコンディションは許容
-        pass
+    _mkdir_exist_ok(path)
     return path
 
 
@@ -96,10 +91,7 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
         OSError: 作成も chmod もできない場合。
     """
     path = Path(dir_path)
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except FileExistsError:
-        pass
+    _mkdir_exist_ok(path)
     path.chmod(0o700)
     bluecore_dir = get_bluecore_dir()
     try:
@@ -137,6 +129,14 @@ def get_project_name() -> str | None:
     return cwd.name if cwd.name else None
 
 
+def _mkdir_exist_ok(path: Path) -> None:
+    """親ごとディレクトリを作る。他プロセスとの競合による FileExistsError は無視する。"""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        pass
+
+
 def _glob_to_regex(pattern: str) -> re.Pattern[str]:
     """グロブパターンを正規表現オブジェクトに変換する。"""
     regex_pattern = re.escape(pattern).replace(r"\*", ".*").replace(r"\?", ".")
@@ -149,6 +149,35 @@ def _is_within_max_age(mtime_ms: float, max_age: float) -> bool:
 
     age_in_days = (time.time() * 1000 - mtime_ms) / (1000 * 60 * 60 * 24)
     return age_in_days <= max_age
+
+
+def _append_if_fresh(entry: Path, max_age: float | None, results: list[dict[str, Any]]) -> None:
+    """stat できたファイルを max_age 条件付きで results に追加する。"""
+    try:
+        mtime = entry.stat().st_mtime * 1000  # JS と同様にミリ秒へ変換
+    except OSError:
+        return
+    if max_age is not None and not _is_within_max_age(mtime, max_age):
+        return
+    results.append({"path": str(entry), "mtime": mtime})
+
+
+def _collect_matching_files(
+    current_dir: Path,
+    regex: re.Pattern[str],
+    max_age: float | None,
+    recursive: bool,
+    results: list[dict[str, Any]],
+) -> None:
+    """ディレクトリを走査し、条件に合致するファイルを results に追加する。"""
+    try:
+        for entry in current_dir.iterdir():
+            if entry.is_file() and regex.match(entry.name):
+                _append_if_fresh(entry, max_age, results)
+            elif entry.is_dir() and recursive:
+                _collect_matching_files(entry, regex, max_age, recursive, results)
+    except PermissionError:
+        pass
 
 
 def find_files(
@@ -177,27 +206,8 @@ def find_files(
     if not dir_path.exists():
         return []
 
-    regex = _glob_to_regex(pattern)
     results: list[dict[str, Any]] = []
-
-    def search_dir(current_dir: Path) -> None:
-        """ディレクトリを走査し、条件に合致するファイルを results に追加する。"""
-        try:
-            for entry in current_dir.iterdir():
-                if entry.is_file() and regex.match(entry.name):
-                    try:
-                        mtime = entry.stat().st_mtime * 1000  # JS と同様にミリ秒へ変換
-                        if max_age is not None and not _is_within_max_age(mtime, max_age):
-                            continue
-                        results.append({"path": str(entry), "mtime": mtime})
-                    except OSError:
-                        continue  # iterdir と stat の間でファイルが削除された
-                elif entry.is_dir() and recursive:
-                    search_dir(entry)
-        except PermissionError:
-            pass  # 権限エラーは無視
-
-    search_dir(dir_path)
+    _collect_matching_files(dir_path, _glob_to_regex(pattern), max_age, recursive, results)
     results.sort(key=lambda x: x["mtime"], reverse=True)
     return results
 
@@ -224,9 +234,9 @@ async def read_stdin_json(*, timeout_ms: int = 5000, max_size: int = 1024 * 1024
         loop = asyncio.get_running_loop()
         data = await asyncio.wait_for(loop.run_in_executor(None, lambda: sys.stdin.read(max_size)), timeout=timeout_ms / 1000)
 
-        if data.strip():
-            return json.loads(data)
-        return {}
+        if not data.strip():
+            return {}
+        return json.loads(data)
     except (TimeoutError, json.JSONDecodeError, OSError):
         return {}
 
@@ -277,23 +287,16 @@ def command_exists(cmd: str) -> bool:
     Returns:
         コマンドが存在すれば True、そうでなければ False
     """
-    # コマンド名を検証
     if not re.match(r"^[a-zA-Z0-9_.-]+$", cmd):
         return False
 
+    lookup = "where" if IS_WINDOWS else "which"
     try:
-        if IS_WINDOWS:
-            result = subprocess.run(
-                ["where", cmd],
-                capture_output=True,
-                check=False,
-            )
-        else:
-            result = subprocess.run(
-                ["which", cmd],
-                capture_output=True,
-                check=False,
-            )
+        result = subprocess.run(
+            [lookup, cmd],
+            capture_output=True,
+            check=False,
+        )
         return result.returncode == 0
     except OSError:
         return False
@@ -391,7 +394,6 @@ def strip_ansi(text: str) -> str:
     """
     if not isinstance(text, str):
         return ""
-    # 各種 ANSI エスケープシーケンスに一致させる
     return re.sub(
         r"\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|\([A-Z]|[A-Z])",
         "",
