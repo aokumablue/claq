@@ -160,6 +160,99 @@ class TestExtractBashCommand:
         assert harness.extract_bash_command({}) == ""
 
 
+class TestExtractToolInput:
+    """DT-01: extract_tool_input のコンテナ優先順位と JSON デコード。"""
+
+    def test_extract_tool_input_accepts_tool_args_dict(self) -> None:
+        """toolArgs / tool_args が dict ならそのまま返す。"""
+        expected = {"file_path": "sample.py"}
+        assert harness.extract_tool_input({"toolArgs": expected}) == expected
+        assert harness.extract_tool_input({"tool_args": expected}) == expected
+
+    def test_extract_tool_input_decodes_tool_args_json_object(self) -> None:
+        """toolArgs が JSON オブジェクト文字列なら dict に decode する。"""
+        payload = {"toolArgs": json.dumps({"file_path": "sample.py"})}
+        assert harness.extract_tool_input(payload) == {"file_path": "sample.py"}
+
+    def test_extract_tool_input_preserves_malformed_json_string(self) -> None:
+        """不正 JSON 文字列は例外を出さず元の文字列を返す。"""
+        assert harness.extract_tool_input({"toolArgs": "{bad"}) == "{bad"
+
+    def test_extract_tool_input_prefers_tool_input_over_tool_args(self) -> None:
+        """tool_input と toolArgs が両方あるときは tool_input を優先する。"""
+        payload = {
+            "tool_input": {"file_path": "canonical.py"},
+            "toolArgs": {"file_path": "native.py"},
+        }
+        assert harness.extract_tool_input(payload) == {"file_path": "canonical.py"}
+
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            ({"tool_input": {"file_path": "sample.py"}}, {"file_path": "sample.py"}),
+            ({"toolArgs": '["raw"]'}, ["raw"]),
+            ({"toolArgs": "raw command"}, "raw command"),
+            (
+                {"tool_input": None, "toolArgs": {"file_path": "sample.py"}},
+                None,
+            ),
+            ({}, None),
+            ({"toolArgs": None}, None),
+            ({"toolArgs": [1, 2]}, [1, 2]),
+            ({"toolArgs": 3}, 3),
+        ],
+        ids=[
+            "dt01-1-tool_input-dict",
+            "dt01-5-json-array-string",
+            "dt01-7-plain-string",
+            "dt01-9-tool_input-none-wins",
+            "dt01-10-missing",
+            "dt01-11-none",
+            "dt01-11-list",
+            "dt01-11-number",
+        ],
+    )
+    def test_extract_tool_input_remaining_dt01_rows(
+        self, payload: dict, expected: object
+    ) -> None:
+        """DT-01 の残行（存在優先・非 object JSON・型保持）を固定する。"""
+        assert harness.extract_tool_input(payload) == expected
+
+
+class TestExtractRawToolName:
+    """DT-01: extract_raw_tool_name は normalize 前の生文字列を返す。"""
+
+    def test_extract_raw_tool_name_accepts_snake_and_camel_case_fields(self) -> None:
+        """tool_name と toolName の有効な文字列を吸収し、正規化はしない。"""
+        assert harness.extract_raw_tool_name({"tool_name": "Edit"}) == "Edit"
+        assert harness.extract_raw_tool_name({"toolName": "edit"}) == "edit"
+
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            ({"tool_name": "Write", "toolName": "edit"}, "Write"),
+            ({"tool_name": 123, "toolName": "edit"}, "edit"),
+            ({"toolName": 123}, ""),
+            ({}, ""),
+            ({"tool_name": "", "toolName": "edit"}, "edit"),
+            ({"tool_name": "", "toolName": ""}, ""),
+        ],
+        ids=[
+            "dt01-raw-3-prefer-tool_name",
+            "dt01-raw-4-nonstring-fallback",
+            "dt01-raw-5-toolname-nonstring",
+            "dt01-raw-6-missing",
+            "empty-tool_name-falls-through",
+            "both-empty",
+        ],
+    )
+    def test_extract_raw_tool_name_remaining_dt01_rows(
+        self, payload: dict, expected: str
+    ) -> None:
+        """空文字は無効、非文字列は fallback、両方なしは空文字。"""
+        assert harness.extract_raw_tool_name(payload) == expected
+
+
 class TestExtractToolResultText:
     """extract_tool_result_text のテスト。"""
 

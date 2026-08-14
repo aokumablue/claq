@@ -102,6 +102,30 @@ def extract_tool_input(payload: dict[str, Any]) -> Any:
     return None
 
 
+def extract_raw_tool_name(payload: dict[str, Any]) -> str:
+    """フック payload から正規化前の生ツール名を返す。
+
+    非空の ``tool_name`` を優先し、無ければ非空の ``toolName`` を使う。
+    空文字・非文字列は無効として次候補へ倒す。どちらも無効なら空文字。
+
+    Args:
+        payload: フック stdin を JSON として読んだ dict。
+
+    Returns:
+        ``normalize_tool_name()`` 適用前の生文字列。取れなければ ``""``。
+
+    Raises:
+        例外は発生しません。
+    """
+    tool_name = payload.get("tool_name")
+    if isinstance(tool_name, str) and tool_name:
+        return tool_name
+    camel_name = payload.get("toolName")
+    if isinstance(camel_name, str) and camel_name:
+        return camel_name
+    return ""
+
+
 def extract_bash_command(payload: dict[str, Any]) -> str:
     """フック payload から Bash/shell の command 文字列を取り出す。
 
