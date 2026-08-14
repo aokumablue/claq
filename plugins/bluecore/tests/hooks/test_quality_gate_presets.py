@@ -8,8 +8,29 @@ from typing import Any
 import pytest
 
 from bluecore.hooks import quality_gate_presets
-from bluecore.hooks.quality_gate_presets import QUALITY_GATE_PRESETS, resolve_quality_gate_config
+from bluecore.hooks.quality_gate_presets import QUALITY_GATE_PRESETS, _select_language, resolve_quality_gate_config
 from bluecore.lib.project_detect import ProjectInfo
+
+
+def _project_info(
+    root: Path,
+    *,
+    primary: str | None,
+    languages: list[str] | None = None,
+) -> ProjectInfo:
+    """テスト用の ProjectInfo を組み立てる。"""
+    resolved_languages = languages if languages is not None else ([primary] if primary else [])
+    return ProjectInfo(root=root, languages=resolved_languages, frameworks=[], primary_language=primary)
+
+
+def _stub_detect(monkeypatch: pytest.MonkeyPatch, info: ProjectInfo) -> None:
+    """detect_project を固定の ProjectInfo を返すように差し替える。"""
+    monkeypatch.setattr(quality_gate_presets, "detect_project", lambda _root: info)
+
+
+def _allow_all_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PATH 上のツール有無判定を常に True にする。"""
+    monkeypatch.setattr(quality_gate_presets, "_has_executable", lambda _argv: True)
 
 
 @pytest.mark.parametrize(
@@ -29,11 +50,8 @@ def test_resolve_uses_primary_language_preset(
     language: str,
     expected_extensions: list[str],
 ) -> None:
-    def fake_detect(_root: Any) -> ProjectInfo:
-        return ProjectInfo(root=tmp_path, languages=[language], frameworks=[], primary_language=language)
-
-    monkeypatch.setattr(quality_gate_presets, "detect_project", fake_detect)
-    monkeypatch.setattr(quality_gate_presets, "_has_executable", lambda _argv: True)
+    _stub_detect(monkeypatch, _project_info(tmp_path, primary=language))
+    _allow_all_tools(monkeypatch)
 
     config = resolve_quality_gate_config(tmp_path)
     rules = config["actions"]["post-edit"]["rules"]
@@ -45,10 +63,7 @@ def test_resolve_uses_primary_language_preset(
 def test_resolve_returns_empty_rules_when_language_unknown(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fake_detect(_root: Any) -> ProjectInfo:
-        return ProjectInfo(root=tmp_path, languages=[], frameworks=[], primary_language=None)
-
-    monkeypatch.setattr(quality_gate_presets, "detect_project", fake_detect)
+    _stub_detect(monkeypatch, _project_info(tmp_path, primary=None))
 
     config = resolve_quality_gate_config(tmp_path)
     assert config == {"actions": {"post-edit": {"rules": []}}}
@@ -57,16 +72,11 @@ def test_resolve_returns_empty_rules_when_language_unknown(
 def test_resolve_falls_back_to_supported_language(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fake_detect(_root: Any) -> ProjectInfo:
-        return ProjectInfo(
-            root=tmp_path,
-            languages=["brainfuck", "ruby"],
-            frameworks=[],
-            primary_language="brainfuck",
-        )
-
-    monkeypatch.setattr(quality_gate_presets, "detect_project", fake_detect)
-    monkeypatch.setattr(quality_gate_presets, "_has_executable", lambda _argv: True)
+    _stub_detect(
+        monkeypatch,
+        _project_info(tmp_path, primary="brainfuck", languages=["brainfuck", "ruby"]),
+    )
+    _allow_all_tools(monkeypatch)
 
     config = resolve_quality_gate_config(tmp_path)
     rules = config["actions"]["post-edit"]["rules"]
@@ -77,11 +87,8 @@ def test_resolve_falls_back_to_supported_language(
 def test_resolve_uses_repo_root_when_src_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fake_detect(_root: Any) -> ProjectInfo:
-        return ProjectInfo(root=tmp_path, languages=["python"], frameworks=[], primary_language="python")
-
-    monkeypatch.setattr(quality_gate_presets, "detect_project", fake_detect)
-    monkeypatch.setattr(quality_gate_presets, "_has_executable", lambda _argv: True)
+    _stub_detect(monkeypatch, _project_info(tmp_path, primary="python"))
+    _allow_all_tools(monkeypatch)
 
     config = resolve_quality_gate_config(tmp_path)
     rules = config["actions"]["post-edit"]["rules"]
@@ -91,10 +98,7 @@ def test_resolve_uses_repo_root_when_src_missing(
 def test_resolve_skips_steps_when_tools_not_installed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fake_detect(_root: Any) -> ProjectInfo:
-        return ProjectInfo(root=tmp_path, languages=["python"], frameworks=[], primary_language="python")
-
-    monkeypatch.setattr(quality_gate_presets, "detect_project", fake_detect)
+    _stub_detect(monkeypatch, _project_info(tmp_path, primary="python"))
     monkeypatch.setattr(quality_gate_presets, "_has_executable", lambda _argv: False)
 
     config = resolve_quality_gate_config(tmp_path)
@@ -118,15 +122,12 @@ def test_resolve_skips_invalid_bash_entries_and_empty_executable_list(
 ) -> None:
     (tmp_path / "src").mkdir()
 
-    def fake_detect(_root: Any) -> ProjectInfo:
-        return ProjectInfo(root=tmp_path, languages=["python"], frameworks=[], primary_language="python")
-
-    monkeypatch.setattr(quality_gate_presets, "detect_project", fake_detect)
+    _stub_detect(monkeypatch, _project_info(tmp_path, primary="python"))
     assert quality_gate_presets._has_executable([]) is False
     # shutil.which による実判定（見つかる/見つからない双方の分岐）を直接確認する。
     assert quality_gate_presets._has_executable(["python3"]) is True
     assert quality_gate_presets._has_executable(["definitely-not-a-real-command-xyz"]) is False
-    monkeypatch.setattr(quality_gate_presets, "_has_executable", lambda _argv: True)
+    _allow_all_tools(monkeypatch)
     monkeypatch.setitem(
         quality_gate_presets.QUALITY_GATE_PRESETS,
         "python",
@@ -150,12 +151,8 @@ def test_resolve_uses_file_path_for_python(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """file_path を指定すると ruff の対象が単一ファイルになること。"""
-
-    def fake_detect(_root: Any) -> ProjectInfo:
-        return ProjectInfo(root=tmp_path, languages=["python"], frameworks=[], primary_language="python")
-
-    monkeypatch.setattr(quality_gate_presets, "detect_project", fake_detect)
-    monkeypatch.setattr(quality_gate_presets, "_has_executable", lambda _argv: True)
+    _stub_detect(monkeypatch, _project_info(tmp_path, primary="python"))
+    _allow_all_tools(monkeypatch)
 
     fp = "/path/to/module.py"
     config = resolve_quality_gate_config(tmp_path, file_path=fp)
@@ -168,12 +165,8 @@ def test_resolve_ignores_file_path_for_non_python_extension(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """file_path が .py でない場合は既存の target に戻ること。"""
-
-    def fake_detect(_root: Any) -> ProjectInfo:
-        return ProjectInfo(root=tmp_path, languages=["python"], frameworks=[], primary_language="python")
-
-    monkeypatch.setattr(quality_gate_presets, "detect_project", fake_detect)
-    monkeypatch.setattr(quality_gate_presets, "_has_executable", lambda _argv: True)
+    _stub_detect(monkeypatch, _project_info(tmp_path, primary="python"))
+    _allow_all_tools(monkeypatch)
 
     config = resolve_quality_gate_config(tmp_path, file_path="/path/to/file.txt")
     rules = config["actions"]["post-edit"]["rules"]
@@ -185,12 +178,8 @@ def test_resolve_file_path_none_uses_default_target(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """file_path=None の場合は既存の target を使うこと（後方互換）。"""
-
-    def fake_detect(_root: Any) -> ProjectInfo:
-        return ProjectInfo(root=tmp_path, languages=["python"], frameworks=[], primary_language="python")
-
-    monkeypatch.setattr(quality_gate_presets, "detect_project", fake_detect)
-    monkeypatch.setattr(quality_gate_presets, "_has_executable", lambda _argv: True)
+    _stub_detect(monkeypatch, _project_info(tmp_path, primary="python"))
+    _allow_all_tools(monkeypatch)
 
     config_default = resolve_quality_gate_config(tmp_path)
     config_none = resolve_quality_gate_config(tmp_path, file_path=None)
@@ -209,8 +198,6 @@ def test_preset_table_uses_list_of_argvs() -> None:
 def test_select_language_non_list_languages() -> None:
     """languages が list でなければ primary_language のみ採用する。"""
     from types import SimpleNamespace
-
-    from bluecore.hooks.quality_gate_presets import _select_language
 
     info = SimpleNamespace(primary_language="python", languages="notalist")
     assert _select_language(info) == "python"

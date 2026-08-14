@@ -20,6 +20,8 @@ from pathlib import Path
 
 _BINARY_SNIFF_SIZE = 8192  # 8KB
 _SECRET_SCAN_MAX_BYTES = 1024 * 1024  # 1MB
+_LINTABLE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
+_MINIFIED_SUFFIXES = (".min.js", ".min.css")
 _SECRET_SCAN_EXCLUDED_FILENAMES = {
     "package-lock.json",
     "yarn.lock",
@@ -29,6 +31,12 @@ _SECRET_SCAN_EXCLUDED_FILENAMES = {
     "uv.lock",
     "Pipfile.lock",
 }
+_SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"sk-[a-zA-Z0-9]{20,}", "OpenAI API key"),
+    (r"ghp_[a-zA-Z0-9]{36}", "GitHub PAT"),
+    (r"AKIA[A-Z0-9]{16}", "AWS Access Key"),
+    (r"api[_-]?key\s*[=:]\s*['\"][^'\"]+['\"]", "API key"),
+)
 
 
 def _is_binary_content(content: str) -> bool:
@@ -77,8 +85,7 @@ def get_staged_file_content(file_path: str) -> str | None:
         )
         if result.returncode != 0:
             return None
-        raw: bytes = result.stdout
-        return raw.decode("utf-8", errors="replace")
+        return result.stdout.decode("utf-8", errors="replace")
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
@@ -140,8 +147,7 @@ def should_lint_file(file_path: str) -> bool:
     Raises:
         例外は発生しません。
     """
-    checkable_extensions = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
-    return Path(file_path).suffix in checkable_extensions
+    return Path(file_path).suffix in _LINTABLE_SUFFIXES
 
 
 def should_scan_secrets(file_path: str) -> bool:
@@ -169,9 +175,7 @@ def should_scan_secrets(file_path: str) -> bool:
     name = Path(file_path).name
     if name in _SECRET_SCAN_EXCLUDED_FILENAMES:
         return False
-    if name.endswith(".min.js") or name.endswith(".min.css"):
-        return False
-    return True
+    return not name.endswith(_MINIFIED_SUFFIXES)
 
 
 def _scan_lint_issues(lines: list[str]) -> list[dict]:
@@ -261,13 +265,6 @@ def _scan_secret_issues(content: str, lines: list[str]) -> list[dict]:
     Raises:
         例外は発生しません。
     """
-    secret_patterns = [
-        (r"sk-[a-zA-Z0-9]{20,}", "OpenAI API key"),
-        (r"ghp_[a-zA-Z0-9]{36}", "GitHub PAT"),
-        (r"AKIA[A-Z0-9]{16}", "AWS Access Key"),
-        (r"api[_-]?key\s*[=:]\s*['\"][^'\"]+['\"]", "API key"),
-    ]
-
     # 大容量ファイルは全面放棄せず、先頭 _SECRET_SCAN_MAX_BYTES バイトに
     # 切り詰めてスキャンを継続する（水増しによる回避を防ぐ）。切り詰めが
     # 発生しない場合は呼び出し側で分割済みの lines をそのまま使う。
@@ -281,7 +278,7 @@ def _scan_secret_issues(content: str, lines: list[str]) -> list[dict]:
     issues = []
     for index, line in enumerate(scan_lines):
         line_num = index + 1
-        for pattern, name in secret_patterns:
+        for pattern, name in _SECRET_PATTERNS:
             if re.search(pattern, line, re.IGNORECASE):
                 issues.append(
                     {
