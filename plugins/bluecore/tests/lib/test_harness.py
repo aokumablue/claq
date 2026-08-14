@@ -14,15 +14,37 @@ class TestDetectHarness:
     """detect_harness のテスト。"""
 
     def test_claudecode_env_returns_claude(self, monkeypatch):
-        """CLAUDECODE 設定時は claude を返す。"""
+        """CLAUDECODE のみ設定時（非 Claude 系マーカーが一切無い）は claude を返す。"""
+        for key in list(os.environ):
+            if key.startswith("GROK_"):
+                monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("CLAUDECODE", "1")
         assert harness.detect_harness() == "claude"
 
-    def test_claudecode_takes_precedence(self, monkeypatch):
-        """CLAUDECODE は他の判定材料より優先される。"""
+    def test_claudecode_does_not_override_codex_marker(self, monkeypatch):
+        """CLAUDECODE と codex マーカーが共存する場合、codex 判定を優先する
+        （ネストされた実行等で CLAUDECODE が誤って混入しても、非 Claude 系
+        マーカーを最優先する回帰防止）。"""
         monkeypatch.setenv("CLAUDECODE", "1")
         monkeypatch.setenv("PLUGIN_DATA", "/tmp/plugin-data")
-        assert harness.detect_harness() == "claude"
+        assert harness.detect_harness() == "codex"
+
+    def test_claudecode_with_grok_marker_returns_grok(self, monkeypatch):
+        """CLAUDECODE と GROK マーカーが共存する場合、grok を優先する
+        （Grok 実機で CLAUDECODE=1 + GROK_AGENT=1 が誤って claude と判定
+        されていた回帰の防止。受け入れ基準）。"""
+        for key in list(os.environ):
+            if key.startswith("GROK_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.setenv("GROK_AGENT", "1")
+        assert harness.detect_harness() == "grok"
+
+    def test_claudecode_with_copilot_marker_returns_copilot(self, monkeypatch):
+        """CLAUDECODE と COPILOT マーカーが共存する場合、copilot を優先する。"""
+        monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.setenv("COPILOT_AGENT_PROMPT", "do something")
+        assert harness.detect_harness() == "copilot"
 
     def test_plugin_data_returns_codex(self, monkeypatch):
         """PLUGIN_DATA 設定時は codex を返す。"""

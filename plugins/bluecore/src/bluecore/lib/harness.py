@@ -1,6 +1,9 @@
 """コーディングエージェントハーネス（Claude / Copilot / Codex / Grok）の判定と差分吸収。
 
-判定順はコスト昇順で、Claude Code では環境変数チェック 1 回で確定する。
+判定順は非 Claude 系マーカー（Codex → Copilot → Grok）を先に評価し、
+いずれにも該当しない場合にのみ CLAUDECODE を見て Claude と判定する。
+ネストされた実行等で CLAUDECODE が他ハーネスのマーカーと共存していても、
+非 Claude 系マーカーを優先することで誤判定を防ぐ。
 すべて純 stdlib のみに依存する（venv 不在時のフォールバック実行を保証するため）。
 """
 
@@ -52,8 +55,6 @@ def detect_harness() -> str:
     Raises:
         例外は発生しません。
     """
-    if os.environ.get("CLAUDECODE"):
-        return "claude"
     env = os.environ
     if "PLUGIN_DATA" in env or any(k.startswith("CODEX_") for k in env):
         return "codex"
@@ -67,6 +68,11 @@ def detect_harness() -> str:
         or any(k.startswith("GROK_") for k in env)
     ):
         return "grok"
+    # 非 Claude 系マーカーがどれにも該当しない場合のみ CLAUDECODE を見る。
+    # ネストされた実行等で CLAUDECODE と他ハーネスのマーカーが共存していても
+    # 非 Claude 系判定を優先するため、この位置で最後に評価する。
+    if env.get("CLAUDECODE"):
+        return "claude"
     return "unknown"
 
 
