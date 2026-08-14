@@ -6,6 +6,21 @@ import platform
 import shutil
 import subprocess
 
+_WINDOWS_SYSTEM_PREFIXES = ("MINGW", "MSYS", "CYGWIN")
+"""Windows 互換環境として扱う ``platform.system()`` の接頭辞。"""
+
+_WINDOWS_IDLE_PS = (
+    "try { "
+    "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO p); "
+    "[StructLayout(LayoutKind.Sequential)] public struct LASTINPUTINFO { public uint cbSize; public int dwTime; }' "
+    "-Name WinAPI -Namespace PInvoke; "
+    "$l = New-Object PInvoke.WinAPI+LASTINPUTINFO; $l.cbSize = 8; "
+    "[PInvoke.WinAPI]::GetLastInputInfo([ref]$l) | Out-Null; "
+    "[int][Math]::Max(0, [long]([Environment]::TickCount - [long]$l.dwTime) / 1000) "
+    "} catch { 0 }"
+)
+"""GetLastInputInfo からアイドル秒数を返す PowerShell ワンライナー。"""
+
 
 def _get_idle_seconds_darwin() -> int:
     """macOS の ioreg から HIDIdleTime を取得してアイドル秒数を返す。"""
@@ -38,19 +53,9 @@ def _get_idle_seconds_linux() -> int:
 
 def _get_idle_seconds_windows() -> int:
     """Windows の GetLastInputInfo API からアイドル秒数を返す。"""
-    _PS_CMD = (
-        "try { "
-        "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO p); "
-        "[StructLayout(LayoutKind.Sequential)] public struct LASTINPUTINFO { public uint cbSize; public int dwTime; }' "
-        "-Name WinAPI -Namespace PInvoke; "
-        "$l = New-Object PInvoke.WinAPI+LASTINPUTINFO; $l.cbSize = 8; "
-        "[PInvoke.WinAPI]::GetLastInputInfo([ref]$l) | Out-Null; "
-        "[int][Math]::Max(0, [long]([Environment]::TickCount - [long]$l.dwTime) / 1000) "
-        "} catch { 0 }"
-    )
     try:
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _PS_CMD],
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _WINDOWS_IDLE_PS],
             capture_output=True,
             text=True,
             check=False,
@@ -70,6 +75,6 @@ def _get_idle_seconds() -> int:
         return _get_idle_seconds_darwin()
     if system == "Linux":
         return _get_idle_seconds_linux()
-    if system.startswith("MINGW") or system.startswith("MSYS") or system.startswith("CYGWIN"):
+    if system.startswith(_WINDOWS_SYSTEM_PREFIXES):
         return _get_idle_seconds_windows()
     return 0

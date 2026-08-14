@@ -28,6 +28,7 @@ from bluecore.skills.learn.storage import (
 
 _DEFAULT_SIGNAL_EVERY_N = 20
 _DEFAULT_SKIP_PATHS = ("observer-sessions", ".claude-mem")
+_TOOL_PAYLOAD_LIMIT = 5000
 _SECRET_RE = re.compile(
     r"(?i)(api[_-]?key|token|secret|password|authorization|credentials?|auth)"
     r"""(["'\s:=]+)"""
@@ -123,11 +124,17 @@ def _resolve_target(stdin_data: dict) -> ObservationTarget:
     return resolve_observation_target(cwd or None)
 
 
+def _redact_secret_match(match: re.Match[str]) -> str:
+    """シークレット値だけを [REDACTED] にした置換文字列を返す。"""
+    prefix = match.group(3) or ""
+    return f"{match.group(1)}{match.group(2)}{prefix}[REDACTED]"
+
+
 def _scrub_secret_text(value: str | None) -> str | None:
     """テキスト中のシークレット値を [REDACTED] に置換する。"""
     if value is None:
         return None
-    return _SECRET_RE.sub(lambda match: match.group(1) + match.group(2) + (match.group(3) or "") + "[REDACTED]", str(value))
+    return _SECRET_RE.sub(_redact_secret_match, str(value))
 
 
 def _parse_input(raw: str) -> dict | None:
@@ -146,10 +153,16 @@ def _parse_input(raw: str) -> dict | None:
         return {"parsed": False, "error": str(error)}
 
 
+def _tool_payload_text(value: object) -> str:
+    """ツール入出力を観測用に JSON/文字列化し、上限文字数で切り詰める。"""
+    text = json.dumps(value) if isinstance(value, dict) else str(value)
+    return text[:_TOOL_PAYLOAD_LIMIT]
+
+
 def _build_observation(stdin_data: dict, phase: str, target: ObservationTarget) -> dict:
     """フック入力から 1 件分の観測レコードを構築する。
 
-    入力・出力は 5000 文字で切り詰め、シークレットを除去して格納する。
+    入力・出力は ``_TOOL_PAYLOAD_LIMIT`` 文字で切り詰め、シークレットを除去して格納する。
     """
     event = "tool_start" if phase == "pre" else "tool_complete"
     tool_name = normalize_tool_name(str(stdin_data.get("tool_name", stdin_data.get("tool", "unknown"))))
@@ -158,15 +171,8 @@ def _build_observation(stdin_data: dict, phase: str, target: ObservationTarget) 
     if tool_output is None:
         tool_output = stdin_data.get("tool_output", stdin_data.get("output", ""))
 
-    if isinstance(tool_input, dict):
-        tool_input_str = json.dumps(tool_input)[:5000]
-    else:
-        tool_input_str = str(tool_input)[:5000]
-
-    if isinstance(tool_output, dict):
-        tool_output_str = json.dumps(tool_output)[:5000]
-    else:
-        tool_output_str = str(tool_output)[:5000]
+    tool_input_str = _tool_payload_text(tool_input)
+    tool_output_str = _tool_payload_text(tool_output)
 
     observation = {
         "timestamp": _now_utc(),
@@ -182,16 +188,36 @@ def _build_observation(stdin_data: dict, phase: str, target: ObservationTarget) 
     return observation
 
 
+def _safe_unlink(path: Path) -> None:
+    """ファイルを削除する。存在しない・削除失敗時は何もしない。"""
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def _read_pid_file(pid_file: Path) -> int | None:
+    """PID ファイルから PID を読む。無い・不正なら None。不正内容はファイルを消す。"""
+    if not pid_file.exists():
+        return None
+    try:
+        return int(pid_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        _safe_unlink(pid_file)
+        return None
+
+
+def _observer_pid_files(target: ObservationTarget) -> list[Path]:
+    """リポジトリ側と共通データディレクトリの observer PID ファイル候補を返す。"""
+    return [target.storage_dir / ".observer.pid", _data_dir() / ".observer.pid"]
+
+
 def _start_observer_if_needed(target: ObservationTarget) -> None:
     """オブザーバーが未起動なら子プロセスとして起動する。
 
     PID ファイルで稼働中のプロセスがあれば何もしない。
     """
-    pid_files = [
-        target.storage_dir / ".observer.pid",
-        _data_dir() / ".observer.pid",
-    ]
-    if any(_pid_is_running(path) for path in pid_files):
+    if any(_pid_is_running(path) for path in _observer_pid_files(target)):
         return
 
     env = os.environ.copy()
@@ -218,33 +244,18 @@ def _pid_is_running(pid_file: Path) -> bool:
 
     不正・未稼働の場合は PID ファイルを削除して ``False`` を返す。
     """
-    if not pid_file.exists():
+    pid = _read_pid_file(pid_file)
+    if pid is None:
         return False
-
-    try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-        return False
-
     if pid <= 1:
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
+        _safe_unlink(pid_file)
         return False
 
     try:
         os.kill(pid, 0)
         return True
     except OSError:
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
+        _safe_unlink(pid_file)
         return False
 
 
@@ -257,11 +268,9 @@ def _should_signal_now(target: ObservationTarget, signal_every_n: int) -> bool:
         counter = 0
 
     counter += 1
-    if counter >= signal_every_n:
+    should = counter >= signal_every_n
+    if should:
         counter = 0
-        should = True
-    else:
-        should = False
 
     try:
         counter_file.write_text(str(counter), encoding="utf-8")
@@ -271,29 +280,16 @@ def _should_signal_now(target: ObservationTarget, signal_every_n: int) -> bool:
     return should
 
 
-def _send_sigusr1_to_pid_file(pid_file: Path, signaled: set) -> None:
+def _send_sigusr1_to_pid_file(pid_file: Path, signaled: set[int]) -> None:
     """PID ファイルのプロセスが有効なら SIGUSR1 を送る。"""
-    if not pid_file.exists():
-        return
-    try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-        return
-
-    if pid in signaled or pid <= 1:
+    pid = _read_pid_file(pid_file)
+    if pid is None or pid in signaled or pid <= 1:
         return
 
     try:
         os.kill(pid, 0)
     except OSError:
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
+        _safe_unlink(pid_file)
         return
 
     try:
@@ -316,7 +312,7 @@ def _signal_observers(target: ObservationTarget) -> None:
         return
 
     signaled: set[int] = set()
-    for pid_file in [target.storage_dir / ".observer.pid", _data_dir() / ".observer.pid"]:
+    for pid_file in _observer_pid_files(target):
         _send_sigusr1_to_pid_file(pid_file, signaled)
 
 
