@@ -11,7 +11,7 @@ effort: high
 ## 入力契約
 
 - 基本入力は**生の baseline JSON**（`harness_audit --format json` の完全出力）
-- baseline JSON が渡されない単体起動時のみ、変更前に自分で1回だけ採取する
+- baseline JSON が無い場合は直ちに **FAIL** する。自ら採取して補完しない（`/harness` が baseline を収集する）
 - 要約テキストや概算スコアから baseline を再構成してはいけない
 - `baseline_report` で包んだり `top_actions` を別オブジェクトへ複製したりしない。`top_actions` は生の監査レポートのフィールドを使う
 
@@ -43,7 +43,7 @@ effort: high
 
 ## ワークフロー
 
-1. 呼び出し元（/harness ステップ3）から渡されるベースライン JSON とトップ3アクションを入力とする（単体起動時のみ `bluecore_run bluecore.ci.harness_audit <scope> --format json` で自己収集）
+1. 呼び出し元（/harness ステップ3）から渡されるベースライン JSON とトップ3アクションを入力とする。欠ければ直ちに **FAIL**
 2. トップ3レバレッジエリア特定（フック・評価・ルーティング・コンテキスト・安全性）
 3. 最小限・元に戻せる設定変更提案
 4. 変更適用・検証 — 変更後に `bluecore_run bluecore.ci.harness_audit <scope> --format json` を再実行し、ベースライン JSON との差分でスコア変化を証跡提示する。証拠なしにスコア改善を主張しない

@@ -32,3 +32,18 @@ def test_relative_md_references_resolve() -> None:
             if not target.is_file():
                 broken.append(f"{md_file.relative_to(_ROOT)}: `{match.group(1)}`")
     assert broken == [], "解決できない md 参照:\n" + "\n".join(broken)
+
+
+def test_dead_code_cleaner_and_harness_tuner_have_missing_input_fail_contract() -> None:
+    """入力不足時に即 FAIL する契約が 2 エージェント定義に明示されていること。"""
+    cleaner = (_ROOT / "agents" / "dead-code-cleaner.md").read_text(encoding="utf-8")
+    tuner = (_ROOT / "agents" / "harness-tuner.md").read_text(encoding="utf-8")
+
+    assert "FAIL" in cleaner
+    assert "対象パスまたは diff" in cleaner
+    assert "リポジトリ全体の探索は行わない" in cleaner
+
+    assert "FAIL" in tuner
+    assert "baseline JSON が無い場合は直ちに **FAIL**" in tuner
+    assert "自分で1回だけ採取" not in tuner
+    assert "自己収集" not in tuner
