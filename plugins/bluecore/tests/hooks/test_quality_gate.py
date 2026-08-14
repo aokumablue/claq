@@ -938,6 +938,23 @@ def test_quality_gate_runs_pathless_rules_once_for_multi_file_patch(
     assert rules == [("a.py", True), ("b.py", False)]
 
 
+def test_quality_gate_rule_matches_skips_blank_extensions() -> None:
+    """空の拡張子は無視し、残りの拡張子で照合する。"""
+    rule = {"extensions": ["", ".py"]}
+    assert quality_gate._rule_matches(rule, {"tool_name": "Edit", "file_path": "a.py"}, "a.py")
+    assert not quality_gate._rule_matches(rule, {"tool_name": "Edit", "file_path": "a.txt"}, "a.txt")
+
+
+def test_quality_gate_build_step_command_module_with_non_list_args() -> None:
+    """module 指定時に args が list でなくても -m コマンドを返す。"""
+    command = quality_gate._build_step_command(
+        {"module": "pkg.tool", "args": "not-a-list"},
+        {"HOME": "/home/tester"},
+        set(),
+    )
+    assert command == [sys.executable, "-m", "pkg.tool"]
+
+
 def test_quality_gate_rule_matches_native_tool_name_filter() -> None:
     """_rule_matches は native toolName を tool_names=['edit'] と照合する。"""
     rule = {"tool_names": ["edit"]}

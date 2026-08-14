@@ -118,6 +118,19 @@ def test_find_plugin_install_and_build_report_variants(tmp_path: Path, monkeypat
     assert consumer_report["checks"]
 
 
+def test_find_plugin_install_without_home_still_searches_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HOME が空でも root_dir 配下の plugin.json を探す。"""
+    monkeypatch.setenv("HOME", "")
+    local_install = (
+        tmp_path / ".claude" / "plugins" / "everything-claude-code" / ".claude-plugin" / "plugin.json"
+    )
+    local_install.parent.mkdir(parents=True, exist_ok=True)
+    local_install.write_text("{}", encoding="utf-8")
+    assert harness_audit.find_plugin_install(tmp_path) == str(local_install)
+
+
 def test_summarize_category_scores_and_print_text(capsys: pytest.CaptureFixture[str]) -> None:
     checks = [
         {"category": "Tool Coverage", "points": 2, "pass": True},

@@ -159,6 +159,11 @@ class TestExtractBashCommand:
         """キーが無ければ空文字。"""
         assert harness.extract_bash_command({}) == ""
 
+    def test_tool_input_dict_without_string_command(self):
+        """tool_input が dict でも command/cmd が無い・非文字列なら空文字。"""
+        assert harness.extract_bash_command({"tool_input": {}}) == ""
+        assert harness.extract_bash_command({"tool_input": {"command": 1}}) == ""
+
 
 class TestExtractToolInput:
     """DT-01: extract_tool_input のコンテナ優先順位と JSON デコード。"""
@@ -288,6 +293,12 @@ class TestExtractToolResultText:
     def test_empty_when_missing(self):
         """フィールドが無ければ空。"""
         assert harness.extract_tool_result_text({}) == ("", {})
+
+    def test_tool_result_dict_without_usable_text(self):
+        """toolResult が dict でも text が空/非文字列なら空を返す。"""
+        assert harness.extract_tool_result_text({"toolResult": {}}) == ("", {})
+        assert harness.extract_tool_result_text({"toolResult": {"stdout": ""}}) == ("", {})
+        assert harness.extract_tool_result_text({"toolResult": {"stdout": 1}}) == ("", {})
 
 
 class TestExtractFilePaths:

@@ -117,6 +117,21 @@ class TestSessionStartHookContract:
         _assert_session_start_json(result)
         assert "Grok symlink 修復スキップ" in capsys.readouterr().err
 
+    def test_grok_symlink_none_skips_log(self, monkeypatch, tmp_path: Path, capsys) -> None:
+        """Grok symlink が None ならログせず SessionStart JSON を返す。"""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("BLUECORE_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "bluecore.lib.grok_plugin_root.ensure_grok_plugin_root_symlink",
+            lambda: None,
+        )
+        result = session_start.run("")
+        _assert_session_start_json(result)
+        err = capsys.readouterr().err
+        assert "Grok plugin root symlink" not in err
+        assert "Grok symlink 修復スキップ" not in err
+
 def _pi(languages=None, frameworks=None, primary=None):
     from types import SimpleNamespace
     return SimpleNamespace(languages=languages or [], frameworks=frameworks or [], primary_language=primary)
