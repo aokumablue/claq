@@ -3,11 +3,19 @@
 追記・ローテーション・アーカイブ purge は storage.JsonlLog の責務であり、
 その検証は test_storage.py にある（ここでは委譲の結線だけを見る）。
 
-対象: _now_utc / _read_raw_stdin / _resolve_python_cmd / _data_dir /
+対象: _now_utc / _resolve_python_cmd / _data_dir /
 _is_disabled / _should_skip_automation / _resolve_target / _scrub_secret_text /
 _parse_input / _build_observation / _start_observer_if_needed / _pid_is_running /
 _should_signal_now / _send_sigusr1_to_pid_file / _signal_observers /
-_write_parse_error / _handle_parse_error / _record_and_signal / main
+_write_parse_error / _handle_parse_error / _record_and_signal / _run / main
+
+stdin 読み込みは独自実装を持たず ``hook_common.read_raw_stdin()`` に統一している
+（TTY 判定・2 秒タイムアウト・1MiB 上限は hook_common 側のテストで検証済み）。
+main() は本体を _run() に委譲し、いかなる例外も catch-all で 0 に落とす
+（`*` matcher で全ツール呼び出し毎に発火する PreToolUse フックのため、
+非ゼロ終了＝ツールブロックを避ける）。ここでは main() が空 stdin・タイムアウト・
+壊れた/切り詰められた JSON・記録処理中の DB/ファイル I/O 例外のいずれでも
+終了コード 0 を返すことを検証する。
 
 subprocess・os.kill・signal・リポジトリ解決を全モック、Path I/O は tmp_path、
 データディレクトリは ``settings._DEFAULT_DATA_DIR`` の差し替えで隔離する。
@@ -15,7 +23,6 @@ subprocess・os.kill・signal・リポジトリ解決を全モック、Path I/O 
 
 from __future__ import annotations
 
-import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +30,7 @@ from unittest import mock
 
 import pytest
 
+import bluecore.hooks.hook_common as hook_common
 import bluecore.mem.settings as settings_mod
 from bluecore.skills.learn import observe
 from bluecore.skills.learn.storage import ObservationTarget
@@ -56,12 +64,6 @@ def target(tmp_path: Path) -> ObservationTarget:
 def test_now_utc_z_suffix() -> None:
     """UTC ISO8601 を Z 終端で返す。"""
     assert observe._now_utc().endswith("Z")
-
-
-def test_read_raw_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
-    """標準入力を UTF-8 復号して返す。"""
-    monkeypatch.setattr(observe.sys, "stdin", SimpleNamespace(buffer=io.BytesIO(b"hi")))
-    assert observe._read_raw_stdin() == "hi"
 
 
 def test_resolve_python_cmd_executable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -558,20 +560,20 @@ def test_record_and_signal_disabled(target: ObservationTarget, monkeypatch: pyte
 
 def test_main_empty_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     """空入力なら 0 を返す。"""
-    monkeypatch.setattr(observe, "_read_raw_stdin", lambda: "")
+    monkeypatch.setattr(observe, "read_raw_stdin", lambda: "")
     assert observe.main([]) == 0
 
 
 def test_main_parse_none(monkeypatch: pytest.MonkeyPatch) -> None:
     """_parse_input が None を返すケースで 0 を返す。"""
-    monkeypatch.setattr(observe, "_read_raw_stdin", lambda: "x")
+    monkeypatch.setattr(observe, "read_raw_stdin", lambda: "x")
     monkeypatch.setattr(observe, "_parse_input", lambda raw: None)
     assert observe.main([]) == 0
 
 
 def test_main_parse_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """解析エラー dict なら parse_error 処理へ。"""
-    monkeypatch.setattr(observe, "_read_raw_stdin", lambda: "{ broken")
+    monkeypatch.setattr(observe, "read_raw_stdin", lambda: "{ broken")
     handled = []
     monkeypatch.setattr(observe, "_handle_parse_error", lambda d, r: handled.append(r))
     assert observe.main(["pre"]) == 0
@@ -580,7 +582,7 @@ def test_main_parse_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_main_skip(monkeypatch: pytest.MonkeyPatch) -> None:
     """スキップ判定なら記録せず 0 を返す。"""
-    monkeypatch.setattr(observe, "_read_raw_stdin", lambda: '{"tool_name": "Bash"}')
+    monkeypatch.setattr(observe, "read_raw_stdin", lambda: '{"tool_name": "Bash"}')
     monkeypatch.setattr(observe, "_should_skip_automation", lambda d: True)
     recorded = []
     monkeypatch.setattr(observe, "_record_and_signal", lambda d, p: recorded.append(d))
@@ -591,9 +593,64 @@ def test_main_skip(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_main_records(monkeypatch: pytest.MonkeyPatch) -> None:
     """通常入力は HOOK_PHASE を尊重して記録する。"""
     monkeypatch.setenv("HOOK_PHASE", "post")
-    monkeypatch.setattr(observe, "_read_raw_stdin", lambda: '{"tool_name": "Bash"}')
+    monkeypatch.setattr(observe, "read_raw_stdin", lambda: '{"tool_name": "Bash"}')
     monkeypatch.setattr(observe, "_should_skip_automation", lambda d: False)
     recorded = []
     monkeypatch.setattr(observe, "_record_and_signal", lambda d, p: recorded.append((d, p)))
     assert observe.main([]) == 0
     assert recorded and recorded[0][1] == "post"
+
+
+def test_main_truncated_json_exits_zero(
+    target: ObservationTarget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """1MiB 上限などで途中切断された JSON でも main は例外なく 0 を返す。
+
+    ``read_raw_stdin`` はモックせず、切り詰められた生文字列だけを差し替えて
+    ``_parse_input`` の JSONDecodeError 経路を実際に通す。parse_error レコードが
+    ディスクへ書かれることも合わせて確認する。
+    """
+    truncated = '{"tool_name": "Bash", "tool_input": {"command": "ls -la /very/long/path/cut'
+    monkeypatch.setattr(observe, "read_raw_stdin", lambda: truncated)
+    monkeypatch.setattr(observe, "_resolve_target", lambda d: target)
+    assert observe.main(["pre"]) == 0
+    record = json.loads(target.observations_file.read_text(encoding="utf-8").strip())
+    assert record["event"] == "parse_error"
+
+
+def test_main_stdin_timeout_exits_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """stdin の最初のバイト到着が select タイムアウトしても main は 0 を返す。
+
+    observe.read_raw_stdin はモックせず、hook_common._stdin_ready が参照する
+    sys.stdin / select.select だけを差し替えて、統一後の共通実装が
+    実際にタイムアウト経路を通っても例外を出さないことを検証する。
+    """
+    monkeypatch.setattr(hook_common.sys, "stdin", SimpleNamespace(isatty=lambda: False))
+    monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: ([], [], []))
+    assert observe.main([]) == 0
+
+
+def test_main_swallows_exception_in_parse_error_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """解析エラー処理中に DB/ファイル I/O 例外が起きても main は 0 を返す。
+
+    ``_handle_parse_error`` はリポジトリ解決（DB アクセス）・ディレクトリ作成・
+    JSONL 追記と、いずれも observe.py 側では未ガードの I/O を行う。``*`` matcher
+    で全ツール呼び出しごとに発火する以上、ここで例外が漏れると PreToolUse の
+    非ゼロ終了＝ツールブロックになってしまうため、main() の catch-all で
+    確実に 0 へ落ちることを検証する。
+    """
+    monkeypatch.setattr(observe, "read_raw_stdin", lambda: "{ broken")
+    monkeypatch.setattr(observe, "_resolve_target", mock.Mock(side_effect=OSError("db unavailable")))
+    assert observe.main(["pre"]) == 0
+
+
+def test_main_swallows_exception_in_record_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """正常な JSON でも記録処理中の例外で main が非 0 になってはいけない。
+
+    ``_record_and_signal`` 配下も同様に未ガードの I/O・DB アクセスを行う。
+    正常ペイロード経路でも catch-all が効くことを確認する。
+    """
+    monkeypatch.setattr(observe, "read_raw_stdin", lambda: '{"tool_name": "Bash"}')
+    monkeypatch.setattr(observe, "_should_skip_automation", lambda d: False)
+    monkeypatch.setattr(observe, "_record_and_signal", mock.Mock(side_effect=RuntimeError("boom")))
+    assert observe.main([]) == 0

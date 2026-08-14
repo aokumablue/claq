@@ -17,6 +17,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from bluecore.hooks.hook_common import read_raw_stdin
 from bluecore.lib.harness import normalize_tool_name
 from bluecore.mem.settings import Settings
 from bluecore.skills.learn.storage import (
@@ -40,11 +41,6 @@ _SECRET_RE = re.compile(
 def _now_utc() -> str:
     """現在時刻を Z 終端の UTC ISO8601 文字列で返す。"""
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _read_raw_stdin() -> str:
-    """標準入力を生のまま読み、UTF-8 として復号した文字列を返す。"""
-    return sys.stdin.buffer.read().decode("utf-8", errors="replace")
 
 
 def _resolve_python_cmd() -> str:
@@ -348,21 +344,18 @@ def _record_and_signal(stdin_data: dict, phase: str) -> None:
         _signal_observers(target)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """観測フックのエントリポイント。
-
-    標準入力からフックペイロードを読み、観測レコードを記録して
-    オブザーバーの起動・シグナル送出を行う。
+def _run(argv: list[str] | None) -> int:
+    """観測フック本体。標準入力を読み、観測レコードを記録してオブザーバーへ通知する。
 
     Returns:
-        プロセス終了コード（常に 0）。
+        常に 0。
     """
     args = list(sys.argv[1:] if argv is None else argv)
     phase = os.environ.get("HOOK_PHASE", "post")
     if args and args[0] in {"pre", "post"}:
         phase = args[0]
 
-    raw = _read_raw_stdin()
+    raw = read_raw_stdin()
     if not raw:
         return 0
 
@@ -379,6 +372,24 @@ def main(argv: list[str] | None = None) -> int:
 
     _record_and_signal(stdin_data, phase)
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """観測フックのエントリポイント。
+
+    標準入力からフックペイロードを読み、観測レコードを記録して
+    オブザーバーの起動・シグナル送出を行う。``*`` matcher で全ツール呼び出し毎に
+    発火するため、リポジトリ解決・DB アクセス・ファイル I/O のいずれで例外が
+    起きても握りつぶす。PreToolUse の非ゼロ終了コードはツール実行のブロックとして
+    扱われるため、観測の失敗でユーザーのツール実行を止めてはならない。
+
+    Returns:
+        プロセス終了コード（常に 0）。
+    """
+    try:
+        return _run(argv)
+    except Exception:  # noqa: BLE001 - 観測失敗でツール実行をブロックしない
+        return 0
 
 
 if __name__ == "__main__":  # pragma: no cover
