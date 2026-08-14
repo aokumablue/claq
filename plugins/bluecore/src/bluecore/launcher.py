@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+_USAGE = "Usage: python3 src/bluecore/launcher.py [--bg] <module> [args...]"
 
 
 def build_env() -> dict[str, str]:
@@ -150,17 +151,11 @@ def main(argv: list[str] | None = None) -> int:
     from bluecore.lib.harness import detect_harness
 
     args = list(sys.argv[1:] if argv is None else argv)
-    if not args:
-        print("Usage: python3 src/bluecore/launcher.py [--bg] <module> [args...]", file=sys.stderr)
-        return 1
-
-    background = False
-    if args[0] == "--bg":
-        background = True
+    background = bool(args) and args[0] == "--bg"
+    if background:
         args = args[1:]
-
     if not args:
-        print("Usage: python3 src/bluecore/launcher.py [--bg] <module> [args...]", file=sys.stderr)
+        print(_USAGE, file=sys.stderr)
         return 1
 
     target, target_args = args[0], args[1:]

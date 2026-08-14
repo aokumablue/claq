@@ -11,6 +11,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 SOURCE_SCRIPT = ROOT / "scripts" / "version-up.sh"
+_VERSION_FILES = (
+    Path("plugins/bluecore/pyproject.toml"),
+    Path("plugins/bluecore/.claude-plugin/plugin.json"),
+    Path(".claude-plugin/marketplace.json"),
+    Path("plugins/bluecore/src/bluecore/mem/__init__.py"),
+)
 
 
 def run_script(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -28,55 +34,47 @@ def run_script(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[
 def prepare_repo(tmp_path: Path) -> Path:
     """最小構成のリポジトリを用意する。"""
     repo_root = tmp_path / "repo"
-    (repo_root / "scripts").mkdir(parents=True)
-    (repo_root / "plugins" / "bluecore" / ".claude-plugin").mkdir(parents=True)
-    (repo_root / "plugins" / "bluecore" / "src" / "bluecore" / "mem").mkdir(parents=True)
-    (repo_root / ".claude-plugin").mkdir(parents=True)
+    script_dest = repo_root / "scripts" / "version-up.sh"
+    script_dest.parent.mkdir(parents=True)
+    shutil.copy2(SOURCE_SCRIPT, script_dest)
+    script_dest.chmod(0o755)
 
-    shutil.copy2(SOURCE_SCRIPT, repo_root / "scripts" / "version-up.sh")
-    (repo_root / "scripts" / "version-up.sh").chmod(0o755)
-
-    shutil.copy2(ROOT / "plugins" / "bluecore" / "pyproject.toml", repo_root / "plugins" / "bluecore" / "pyproject.toml")
-    shutil.copy2(
-        ROOT / "plugins" / "bluecore" / ".claude-plugin" / "plugin.json",
-        repo_root / "plugins" / "bluecore" / ".claude-plugin" / "plugin.json",
-    )
-    shutil.copy2(
-        ROOT / ".claude-plugin" / "marketplace.json",
-        repo_root / ".claude-plugin" / "marketplace.json",
-    )
-    shutil.copy2(
-        ROOT / "plugins" / "bluecore" / "src" / "bluecore" / "mem" / "__init__.py",
-        repo_root / "plugins" / "bluecore" / "src" / "bluecore" / "mem" / "__init__.py",
-    )
+    for rel in _VERSION_FILES:
+        dest = repo_root / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / rel, dest)
 
     return repo_root
 
 
 def read_versions(repo_root: Path) -> tuple[str, str, str, str]:
     """4つのバージョン値を読む。"""
-    return (
-        tomllib.loads((repo_root / "plugins" / "bluecore" / "pyproject.toml").read_text(encoding="utf-8"))["project"][
-            "version"
-        ],
-        json.loads((repo_root / "plugins" / "bluecore" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))[
-            "version"
-        ],
-        json.loads((repo_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))["plugins"][0][
-            "version"
-        ],
-        (repo_root / "plugins" / "bluecore" / "src" / "bluecore" / "mem" / "__init__.py")
-        .read_text(encoding="utf-8")
-        .split('__version__ = "', 1)[1]
-        .split('"', 1)[0],
+    pyproject = tomllib.loads((repo_root / "plugins" / "bluecore" / "pyproject.toml").read_text(encoding="utf-8"))
+    plugin = json.loads((repo_root / "plugins" / "bluecore" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    marketplace = json.loads((repo_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+    init_text = (repo_root / "plugins" / "bluecore" / "src" / "bluecore" / "mem" / "__init__.py").read_text(
+        encoding="utf-8"
     )
+    mem_version = init_text.split('__version__ = "', 1)[1].split('"', 1)[0]
+    return (
+        pyproject["project"]["version"],
+        plugin["version"],
+        marketplace["plugins"][0]["version"],
+        mem_version,
+    )
+
+
+def _next_patch(version: str) -> str:
+    """パッチ番号を 1 つ進めた X.Y.Z を返す。"""
+    major_minor, patch = version.rsplit(".", 1)
+    return f"{major_minor}.{int(patch) + 1}"
 
 
 def test_bump_version_updates_all_targets(tmp_path: Path) -> None:
     """4箇所のバージョンを同時に更新できること。"""
     repo_root = prepare_repo(tmp_path)
     current = read_versions(repo_root)[0]
-    next_version = f"{current.rsplit('.', 1)[0]}.{int(current.rsplit('.', 1)[1]) + 1}"
+    next_version = _next_patch(current)
 
     result = run_script(repo_root, ["--version", next_version])
 
@@ -101,7 +99,7 @@ def test_bump_version_rejects_preexisting_version_drift(tmp_path: Path) -> None:
     """事前に version が不一致なら更新せず失敗すること。"""
     repo_root = prepare_repo(tmp_path)
     current = read_versions(repo_root)[0]
-    next_version = f"{current.rsplit('.', 1)[0]}.{int(current.rsplit('.', 1)[1]) + 1}"
+    next_version = _next_patch(current)
     plugin_json = repo_root / "plugins" / "bluecore" / ".claude-plugin" / "plugin.json"
     plugin_json.write_text(plugin_json.read_text(encoding="utf-8").replace(f'"{current}"', '"0.0.99"', 1), encoding="utf-8")
 
