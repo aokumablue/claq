@@ -14,10 +14,7 @@ from bluecore.redux.loader import FilterCase, builtin_filter_paths, load_builtin
 from bluecore.redux.loader import _parse_toml as parse_toml
 
 # 全組込フィルタ定義を name → spec で集約
-_SPECS = {}
-for _path in builtin_filter_paths():
-    for _spec in parse_toml(_path)[0]:
-        _SPECS[_spec.name] = _spec
+_SPECS = {spec.name: spec for path in builtin_filter_paths() for spec in parse_toml(path)[0]}
 
 _CASES = load_builtin_cases()
 
