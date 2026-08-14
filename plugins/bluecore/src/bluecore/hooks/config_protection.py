@@ -35,6 +35,12 @@ from bluecore.lib.harness import (
 # 正規化後に小文字化した値をこの集合と比較する。
 _WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
 
+# ハーネスごとの入力コンテナキー。存在するキーを順に走査する。
+_INPUT_CONTAINER_KEYS = ("tool_input", "toolArgs", "tool_args")
+
+# apply_patch のパッチがパース不能なときの fail-closed 理由。
+_UNPARSEABLE_PATCH_MESSAGE = "BLOCKED: Could not determine target files from patch input."
+
 PROTECTED_FILES = {
     ".eslintrc",
     ".eslintrc.js",
@@ -114,6 +120,54 @@ def _paths_from_container(tool_name: str, container: Any) -> list[str] | None:
     return file_paths
 
 
+def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
+    """1 つの入力コンテナが保護対象ならブロック理由を返す。
+
+    Args:
+        tool_name: 正規化前の生ツール名。
+        container: extract_tool_input 相当の 1 コンテナ値。
+
+    Returns:
+        ブロック理由。保護対象でなければ None。パッチ判定不能時は
+        fail-closed メッセージ。
+
+    Raises:
+        例外は発生しません。
+    """
+    file_paths = _paths_from_container(tool_name, container)
+    if file_paths is None:
+        return _UNPARSEABLE_PATCH_MESSAGE
+    for file_path in file_paths:
+        file_name = basename(file_path)
+        if file_name in PROTECTED_FILES:
+            return blocked_message_for_file(file_name)
+    return None
+
+
+def _block_reason(data: dict[str, Any]) -> str | None:
+    """書込み系入力が保護対象ならブロック理由を返す。
+
+    Args:
+        data: フック stdin の dict。
+
+    Returns:
+        ブロック理由。対象外・保護対象なしなら None。
+
+    Raises:
+        例外は発生しません。
+    """
+    tool_name = extract_raw_tool_name(data)
+    if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES:
+        return None
+    for key in _INPUT_CONTAINER_KEYS:
+        if key not in data:
+            continue
+        reason = _block_reason_for_container(tool_name, extract_tool_input({key: data[key]}))
+        if reason:
+            return reason
+    return None
+
+
 def _truncation_blocked_message(max_bytes: int) -> str:
     """入力切り捨て時のブロック理由メッセージを生成する。
 
@@ -154,23 +208,9 @@ def main() -> int:
         return emit_block_output(_truncation_blocked_message(MAX_STDIN_BYTES))
 
     data = parse_json_object(raw)
-    if data:
-        tool_name = extract_raw_tool_name(data)
-        if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES:
-            return 0
-        for key in ("tool_input", "toolArgs", "tool_args"):
-            if key not in data:
-                continue
-            container = extract_tool_input({key: data[key]})
-            file_paths = _paths_from_container(tool_name, container)
-            if file_paths is None:
-                # apply_patch のパッチがパース不能: 保護対象か判定できないため fail-closed
-                return emit_block_output("BLOCKED: Could not determine target files from patch input.")
-            for file_path in file_paths:
-                file_name = basename(file_path)
-                if file_name in PROTECTED_FILES:
-                    return emit_block_output(blocked_message_for_file(file_name))
-
+    reason = _block_reason(data) if data else None
+    if reason:
+        return emit_block_output(reason)
     return 0
 
 

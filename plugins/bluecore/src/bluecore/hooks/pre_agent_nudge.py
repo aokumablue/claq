@@ -37,6 +37,12 @@ EXPLORE_TABLE: str = (
     "file:line 付き証拠ベース報告）。該当しなければ Explore のままでよい"
 )
 
+# subagent_type / agent_type の値 → 注入する対応表。
+_TABLE_BY_KIND: dict[str, str] = {
+    "general-purpose": AGENT_TABLE,
+    "Explore": EXPLORE_TABLE,
+}
+
 
 def main() -> int:
     """general-purpose / Explore エージェント起動を検知して対応表を提示する。
@@ -61,13 +67,9 @@ def main() -> int:
 
     subagent_type = str(tool_input.get("subagent_type") or "")
     agent_type = str(tool_input.get("agent_type") or "")
-    kind = subagent_type or agent_type
-    if kind == "general-purpose":
-        write_stdout(adapt_pre_tool_use_context_output(AGENT_TABLE))
-        return 0
-    if kind == "Explore":
-        write_stdout(adapt_pre_tool_use_context_output(EXPLORE_TABLE))
-        return 0
+    table = _TABLE_BY_KIND.get(subagent_type or agent_type)
+    if table:
+        write_stdout(adapt_pre_tool_use_context_output(table))
     return 0
 
 

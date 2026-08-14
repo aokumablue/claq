@@ -89,6 +89,7 @@ def _expand_text(value: str, env: dict[str, str], allowed_names: set[str] | None
     Args:
         value: 展開対象の文字列です。
         env: 参照に使う環境変数です。
+        allowed_names: 展開を許可する変数名。None なら既定の許可リスト。
 
     Returns:
         展開後の文字列を返します。
@@ -99,13 +100,11 @@ def _expand_text(value: str, env: dict[str, str], allowed_names: set[str] | None
     if not value:
         return value
 
+    allowed = _ALLOWED_EXPANSION_VARS if allowed_names is None else allowed_names
+
     def replace(match: re.Match[str]) -> str:
         """マッチした変数参照を許可リストに従って環境変数値へ置換する。"""
         name = match.group(1)
-        if allowed_names is None:
-            allowed = _ALLOWED_EXPANSION_VARS
-        else:
-            allowed = allowed_names
         if name not in allowed:
             return match.group(0)
         return env.get(name, os.environ.get(name, match.group(0)))
@@ -215,9 +214,7 @@ def _extract_tool_name(input_data: dict[str, Any]) -> str:
         例外は発生しません。
     """
     tool_name = extract_raw_tool_name(input_data)
-    if tool_name:
-        return normalize_tool_name(tool_name)
-    return ""
+    return normalize_tool_name(tool_name) if tool_name else ""
 
 
 def _is_write_tool(input_data: dict[str, Any]) -> bool:
@@ -256,8 +253,11 @@ def _rule_matches(rule: dict[str, Any], input_data: dict[str, Any], file_path: s
     if extensions is not None:
         if not file_path:
             return False
-
-        allowed = {_normalize_extension(ext) for ext in extensions if _normalize_extension(ext)}
+        allowed = set()
+        for ext in extensions:
+            normalized = _normalize_extension(ext)
+            if normalized:
+                allowed.add(normalized)
         if Path(file_path).suffix.lower() not in allowed:
             return False
 
@@ -280,6 +280,7 @@ def _build_step_command(
     Args:
         step: 設定された step です。
         env: 展開に使う環境変数です。
+        allowed_names: 展開を許可する変数名。
 
     Returns:
         subprocess に渡すコマンド列、または不正な場合は None を返します。
@@ -290,11 +291,13 @@ def _build_step_command(
     module = step.get("module")
     if isinstance(module, str) and module.strip():
         args = step.get("args", [])
-        extra_args = (
-            [_expand_text(str(arg), env, allowed_names=allowed_names) for arg in args if isinstance(arg, str)]
-            if isinstance(args, list)
-            else []
-        )
+        extra_args: list[str] = []
+        if isinstance(args, list):
+            extra_args = [
+                _expand_text(str(arg), env, allowed_names=allowed_names)
+                for arg in args
+                if isinstance(arg, str)
+            ]
         return [sys.executable, "-m", module.strip(), *extra_args]
 
     argv = step.get("argv")
@@ -314,6 +317,7 @@ def _build_step_env(
     Args:
         step: 設定された step です。
         base_env: 基本環境です。
+        allowed_names: 展開を許可する変数名。
 
     Returns:
         step 用に拡張した環境変数を返します。
@@ -343,6 +347,7 @@ def _build_step_cwd(
         step: 設定された step です。
         default_cwd: 省略時に使う作業ディレクトリです。
         env: 展開に使う環境変数です。
+        allowed_names: 展開を許可する変数名。
 
     Returns:
         解決済みの作業ディレクトリを返します。

@@ -45,6 +45,36 @@ from bluecore.lib.harness import extract_bash_command
 
 _SHELL_SEPARATORS = {"&&", "||", ";", "|"}
 
+_CONVENTIONAL_COMMIT = re.compile(
+    r"^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?:\s*.+"
+)
+
+
+def _git_name_only(git_args: list[str]) -> list[str]:
+    """`git ... --name-only` の出力を非空行リストにする。
+
+    Args:
+        git_args: subprocess に渡す git コマンド列。
+
+    Returns:
+        ファイルパスのリスト。失敗時は空リスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        result = subprocess.run(
+            git_args,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        return [f for f in result.stdout.strip().split("\n") if f]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+
 
 def get_staged_files() -> list[str]:
     """ステージング済みファイルの一覧を取得します。
@@ -58,24 +88,14 @@ def get_staged_files() -> list[str]:
     Raises:
         例外は発生しません。
     """
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            return []
-        return [f for f in result.stdout.strip().split("\n") if f]
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return []
+    return _git_name_only(["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"])
 
 
 def get_unstaged_modified_files() -> list[str]:
     """`git commit -a` 相当で追加取り込む作業ツリーの変更ファイル一覧を取得します。
 
     `git diff HEAD --name-only --diff-filter=ACMR` の結果を返します。
+    HEAD が無い（初回コミット）等で git が失敗した場合は空リストです。
 
     Returns:
         変更されている作業ツリーファイルパスのリストを返します。
@@ -86,19 +106,7 @@ def get_unstaged_modified_files() -> list[str]:
     Raises:
         例外は発生しません。
     """
-    try:
-        result = subprocess.run(
-            ["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            # HEAD が存在しない（初回コミット）等の場合は非ブロッキングで空リスト
-            return []
-        return [f for f in result.stdout.strip().split("\n") if f]
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return []
+    return _git_name_only(["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"])
 
 
 def _resolve_repo_root() -> Path | None:
@@ -158,14 +166,12 @@ def _find_git_commit_args(tokens: list[str]) -> list[str] | None:
     for i, token in enumerate(tokens):
         if token != "git":
             continue
-        j = i + 1
-        while j < len(tokens):
-            tok = tokens[j]
+        rest_start = i + 1
+        for offset, tok in enumerate(tokens[rest_start:]):
             if tok == "commit":
-                return _collect_args_until_separator(tokens, j + 1)
+                return _collect_args_until_separator(tokens, rest_start + offset + 1)
             if tok in _SHELL_SEPARATORS:
                 break
-            j += 1
     return None
 
 
@@ -186,10 +192,10 @@ def _collect_args_until_separator(tokens: list[str], start: int) -> list[str]:
         例外は発生しません。
     """
     args: list[str] = []
-    k = start
-    while k < len(tokens) and tokens[k] not in _SHELL_SEPARATORS:
-        args.append(tokens[k])
-        k += 1
+    for tok in tokens[start:]:
+        if tok in _SHELL_SEPARATORS:
+            break
+        args.append(tok)
     return args
 
 
@@ -272,6 +278,73 @@ def _is_commit_all_flag(commit_args: list[str]) -> bool:
     return False
 
 
+def _message_issue(kind: str, message: str, suggestion: str) -> dict:
+    """コミットメッセージの問題 1 件を表す辞書を作る。
+
+    Args:
+        kind: 問題種別（format / length / capitalization / punctuation）。
+        message: 問題の説明。
+        suggestion: 修正提案。
+
+    Returns:
+        type / message / suggestion を持つ辞書。
+
+    Raises:
+        例外は発生しません。
+    """
+    return {"type": kind, "message": message, "suggestion": suggestion}
+
+
+def _commit_message_issues(message: str) -> list[dict]:
+    """コミットメッセージ本文の形式問題を列挙する。
+
+    Args:
+        message: 抽出済みのコミットメッセージ本文。
+
+    Returns:
+        問題辞書のリスト。問題がなければ空リスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    issues: list[dict] = []
+    if not _CONVENTIONAL_COMMIT.match(message):
+        issues.append(
+            _message_issue(
+                "format",
+                "Commit message does not follow conventional commit format",
+                'Use format: type(scope): description (e.g., "feat(auth): add login flow")',
+            )
+        )
+    if len(message) > 72:
+        issues.append(
+            _message_issue(
+                "length",
+                f"Commit message too long ({len(message)} chars, max 72)",
+                "Keep the first line under 72 characters",
+            )
+        )
+    if _CONVENTIONAL_COMMIT.match(message):
+        after_colon = message.split(":", 1)[1] if ":" in message else ""
+        if after_colon and re.match(r"^[A-Z]", after_colon.strip()):
+            issues.append(
+                _message_issue(
+                    "capitalization",
+                    "Subject should start with lowercase after type",
+                    "Use lowercase for the first letter of the subject",
+                )
+            )
+    if message.endswith("."):
+        issues.append(
+            _message_issue(
+                "punctuation",
+                "Commit message should not end with a period",
+                "Remove the trailing period",
+            )
+        )
+    return issues
+
+
 def validate_commit_message(command: str) -> dict | None:
     """コミットメッセージの形式を検証します。
 
@@ -284,58 +357,26 @@ def validate_commit_message(command: str) -> dict | None:
     Raises:
         例外は発生しません。
     """
-    # コマンドからコミットメッセージを抽出
     message_match = re.search(r"(?:-m|--message)[=\s]+[\"']?([^\"']+)[\"']?", command)
     if not message_match:
         return None
-
     message = message_match.group(1)
-    issues = []
+    return {"message": message, "issues": _commit_message_issues(message)}
 
-    # コンベンショナルコミット形式をチェック
-    conventional_commit = re.compile(r"^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?:\s*.+")
-    if not conventional_commit.match(message):
-        issues.append(
-            {
-                "type": "format",
-                "message": "Commit message does not follow conventional commit format",
-                "suggestion": 'Use format: type(scope): description (e.g., "feat(auth): add login flow")',
-            }
-        )
 
-    # メッセージの長さをチェック
-    if len(message) > 72:
-        issues.append(
-            {
-                "type": "length",
-                "message": f"Commit message too long ({len(message)} chars, max 72)",
-                "suggestion": "Keep the first line under 72 characters",
-            }
-        )
+def _scan_targets(files: list[str]) -> list[str]:
+    """lint または secret スキャン対象のファイルだけを残す。
 
-    # 先頭の小文字をチェック（規約）
-    if conventional_commit.match(message):
-        after_colon = message.split(":", 1)[1] if ":" in message else ""
-        if after_colon and re.match(r"^[A-Z]", after_colon.strip()):
-            issues.append(
-                {
-                    "type": "capitalization",
-                    "message": "Subject should start with lowercase after type",
-                    "suggestion": "Use lowercase for the first letter of the subject",
-                }
-            )
+    Args:
+        files: 候補ファイルパス。
 
-    # 末尾のピリオドをチェック
-    if message.endswith("."):
-        issues.append(
-            {
-                "type": "punctuation",
-                "message": "Commit message should not end with a period",
-                "suggestion": "Remove the trailing period",
-            }
-        )
+    Returns:
+        スキャン対象のファイルパス。
 
-    return {"message": message, "issues": issues}
+    Raises:
+        例外は発生しません。
+    """
+    return [f for f in files if should_lint_file(f) or should_scan_secrets(f)]
 
 
 def _partition_commit_all_files(
@@ -577,8 +618,8 @@ def evaluate(raw_input: str) -> dict:
 
         log(f"[Hook] Checking {len(all_files)} staged file(s)...")
 
-        index_targets = [f for f in index_files if should_lint_file(f) or should_scan_secrets(f)]
-        worktree_targets = [f for f in worktree_files if should_lint_file(f) or should_scan_secrets(f)]
+        index_targets = _scan_targets(index_files)
+        worktree_targets = _scan_targets(worktree_files)
 
         total_issues, error_count, warning_count, info_count = _count_file_issues(index_targets)
         total_issues, error_count, warning_count, info_count = _collect_worktree_issues(

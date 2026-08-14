@@ -122,15 +122,20 @@ def _pi(languages=None, frameworks=None, primary=None):
     return SimpleNamespace(languages=languages or [], frameworks=frameworks or [], primary_language=primary)
 
 
-def test_collect_project_context_package_json_and_coverage(monkeypatch, tmp_path) -> None:
-    """パッケージマネージャ未検出+package.json有+coverage hint有の経路。"""
+def _stub_project_context(monkeypatch, tmp_path, *, pm_name=None, pm_source="", coverage=""):
+    """_collect_project_context の外部依存を固定する。"""
     from types import SimpleNamespace
 
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source=""))
-    monkeypatch.setattr(session_start, "get_selection_prompt", lambda: "select")
+    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=pm_name, source=pm_source))
     monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
-    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "- cov 100%")
+    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: coverage)
     monkeypatch.chdir(tmp_path)
+
+
+def test_collect_project_context_package_json_and_coverage(monkeypatch, tmp_path) -> None:
+    """パッケージマネージャ未検出+package.json有+coverage hint有の経路。"""
+    _stub_project_context(monkeypatch, tmp_path, coverage="- cov 100%")
+    monkeypatch.setattr(session_start, "get_selection_prompt", lambda: "select")
     (tmp_path / "package.json").write_text("{}", encoding="utf-8")
     parts = session_start._collect_project_context(_pi(languages=["typescript"]))
     assert any("coverage_hint" in p for p in parts)
@@ -138,51 +143,27 @@ def test_collect_project_context_package_json_and_coverage(monkeypatch, tmp_path
 
 def test_collect_project_context_ruby(monkeypatch, tmp_path) -> None:
     """pm未検出+package.json無+ruby言語の経路。"""
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source=""))
-    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
-    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "")
-    monkeypatch.chdir(tmp_path)
+    _stub_project_context(monkeypatch, tmp_path)
     session_start._collect_project_context(_pi(languages=["ruby"], frameworks=["rails"]))
 
 
 def test_collect_project_context_other_language(monkeypatch, tmp_path) -> None:
     """pm未検出+package.json無+ruby以外の言語の経路。"""
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source=""))
-    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
-    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "")
-    monkeypatch.chdir(tmp_path)
+    _stub_project_context(monkeypatch, tmp_path)
     session_start._collect_project_context(_pi(languages=["go"]))
 
 
 def test_collect_project_context_frameworks_only(monkeypatch, tmp_path) -> None:
     """言語が空でフレームワークのみでもプロジェクト情報を出力する。"""
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name="npm", source="x"))
-    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
-    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "")
-    monkeypatch.chdir(tmp_path)
-
+    _stub_project_context(monkeypatch, tmp_path, pm_name="npm", pm_source="x")
     parts = session_start._collect_project_context(_pi(languages=[], frameworks=["rails"]))
-
     assert any("Project type" in p for p in parts)
     assert any("rails" in p for p in parts)
 
 
 def test_collect_project_context_languages_only(monkeypatch, tmp_path) -> None:
     """言語ありフレームワークなしでも Project type を出力する。"""
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name="pip", source="x"))
-    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
-    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "")
-    monkeypatch.chdir(tmp_path)
-
+    _stub_project_context(monkeypatch, tmp_path, pm_name="pip", pm_source="x")
     parts = session_start._collect_project_context(_pi(languages=["python"], frameworks=[]))
-
     assert any("Project type" in p for p in parts)
     assert any("python" in p for p in parts)
