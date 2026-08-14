@@ -155,6 +155,7 @@ class _LintGroup:
     count: int = 0
     files: list[str] = field(default_factory=list)
     first_msg: str = ""
+    _seen_files: set[str] = field(default_factory=set, repr=False, compare=False)
 
 
 def _fmt_files(files: list[str], max_show: int = 3) -> str:
@@ -195,13 +196,19 @@ def _add_lint_hit(
     msg: str,
     file: str,
 ) -> None:
-    """ルール別グループに 1 ヒットを加算し、未登録ファイルを追記する。"""
+    """ルール別グループに 1 ヒットを加算し、未登録ファイルを追記する。
+
+    ファイルの新規判定は ``_seen_files``（set）で行う。``files`` リストの
+    ``in`` は同一ルールのユニークファイル数 n に対して O(n) になり、
+    ``ruff check`` のような大量診断で O(n^2) になる。
+    """
     group = groups.get(rule)
     if group is None:
         group = _LintGroup(rule=rule, severity=severity, first_msg=msg)
         groups[rule] = group
     group.count += 1
-    if file not in group.files:
+    if file not in group._seen_files:
+        group._seen_files.add(file)
         group.files.append(file)
 
 
