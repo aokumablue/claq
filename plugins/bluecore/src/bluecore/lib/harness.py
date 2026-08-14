@@ -35,6 +35,15 @@ _TOOL_NAME_MAP = {
     "task": "Agent",
     "view": "Read",
     "write": "Write",
+    # Grok の runtime tool 名。read_file/list_dir は書き込み系ゲート
+    # （config_protection/quality_gate の _WRITE_TOOL_NAMES、redux_filter の
+    # "Bash" 比較）のいずれも対象外だが、observe.py の観測レコード
+    # （tool フィールド）がハーネス横断で正規化名を記録するために正規化する。
+    "search_replace": "Edit",
+    "run_terminal_command": "Bash",
+    "spawn_subagent": "Agent",
+    "read_file": "Read",
+    "list_dir": "Glob",
 }
 
 # 構造化パッチテキストのファイル操作マーカー（Codex apply_patch 形式）
@@ -204,7 +213,9 @@ def normalize_tool_name(tool_name: str) -> str:
 
     Codex の apply_patch は Edit に対応する。Copilot CLI はフックイベントに
     lowercase の runtime tool 名（write/edit/bash 等）を渡すため、大文字小文字を
-    区別しない照合で Claude Code 表記へ正規化する。Claude Code に apply_patch
+    区別しない照合で Claude Code 表記へ正規化する。Grok は search_replace /
+    run_terminal_command / spawn_subagent / read_file / list_dir という
+    固有名を使うため、同様に Claude Code 表記へ正規化する。Claude Code に apply_patch
     というツールは存在せず、Claude Code 自身のツール名は既に正規形のため、
     ハーネス判定なしの無条件マッピングで安全。
 

@@ -144,6 +144,20 @@ class TestNormalizeToolName:
         """Copilot CLI が渡す lowercase runtime tool 名を Claude Code 表記へ正規化する。"""
         assert harness.normalize_tool_name(copilot_name) == expected
 
+    @pytest.mark.parametrize(
+        ("grok_name", "expected"),
+        [
+            ("search_replace", "Edit"),
+            ("run_terminal_command", "Bash"),
+            ("spawn_subagent", "Agent"),
+            ("read_file", "Read"),
+            ("list_dir", "Glob"),
+        ],
+    )
+    def test_grok_names_normalize_to_claude_code_form(self, grok_name, expected):
+        """Grok 固有の runtime tool 名を Claude Code 表記へ正規化する（H-04）。"""
+        assert harness.normalize_tool_name(grok_name) == expected
+
 
 class TestExtractBashCommand:
     """extract_bash_command / extract_tool_input のテスト。"""
