@@ -300,10 +300,10 @@ def _repo_quality_gates_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "category": "Quality Gates",
             "points": 2,
             "scopes": ["repo"],
-            "path": "src/bluecore/hooks/session_install.py",
-            "description": "インストール状態チェック用ドクタースクリプトが存在する",
-            "pass": file_exists(root_dir, "src/bluecore/hooks/session_install.py"),
-            "fix": "Add src/bluecore/hooks/session_install.py for install-state integrity checks.",
+            "path": "src/bluecore/hooks/session_start.py",
+            "description": "SessionStart フックが存在する",
+            "pass": file_exists(root_dir, "src/bluecore/hooks/session_start.py"),
+            "fix": "Add src/bluecore/hooks/session_start.py for the SessionStart hook.",
         },
     ]
 

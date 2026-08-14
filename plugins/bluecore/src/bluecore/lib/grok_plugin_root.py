@@ -2,7 +2,7 @@
 
 Grok は ``${CLAUDE_PLUGIN_ROOT}`` を ``~/.grok/plugins/<name>`` に展開するが、
 実体は ``~/.grok/installed-plugins/<name>-<hash>/`` に置かれる。hooks.json の
-launcher パスが前者を参照するため、インストール時と SessionStart で
+launcher パスが前者を参照するため、SessionStart で
 シンボリックリンクを張って一致させる。
 
 リンク先は常に ``~/.grok/installed-plugins/bluecore-*`` のみとする。

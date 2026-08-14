@@ -99,7 +99,9 @@ def _collect_project_context(project_info: ProjectInfo) -> list[str]:
 
 
 def run(_raw_input: str) -> str:
-    """セッション開始フックを実行し hookSpecificOutput の JSON を返す
+    """セッション開始フックを実行し hookSpecificOutput の JSON を返す。
+
+    Grok plugin-root symlink を fail-open で修復してからコンテキストを収集する。
 
     Args:
         _raw_input: フックの生 stdin。本フックでは内容を参照しない。
@@ -107,6 +109,15 @@ def run(_raw_input: str) -> str:
     Returns:
         additionalContext を含む hookSpecificOutput を格納した JSON 文字列。
     """
+    try:
+        from bluecore.lib.grok_plugin_root import ensure_grok_plugin_root_symlink
+
+        linked = ensure_grok_plugin_root_symlink()
+        if linked is not None:
+            log(f"[SessionStart] Grok plugin root symlink -> {linked}")
+    except Exception as exc:  # noqa: BLE001 — セッション開始を止めない
+        _log_sanitized_exception("[SessionStart] Grok symlink 修復スキップ", exc)
+
     learned_dir = get_learned_skills_dir()
     sessions_dir = get_sessions_dir()
     ensure_dir(sessions_dir)

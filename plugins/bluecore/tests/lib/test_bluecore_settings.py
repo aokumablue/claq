@@ -1,4 +1,4 @@
-"""settings.json の共通ローダーと coverage ヒント抽出のテスト。"""
+"""CLAUDE.md からの coverage ヒント抽出のテスト。"""
 
 from __future__ import annotations
 
@@ -71,8 +71,4 @@ def test_extract_coverage_hint_lines_returns_multiple_matching_lines(tmp_path: P
     assert "カバレッジ80%以上を維持" in result
     assert "Coverage check: enabled" in result
     assert "その他の設定" not in result
-
-
-class TestLoadSettingsEdgeCases:
-    """load_settings のエラーパス・境界値テスト"""
 

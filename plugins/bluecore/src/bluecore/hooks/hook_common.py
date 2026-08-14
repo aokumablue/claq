@@ -199,7 +199,7 @@ def basename(path: str) -> str:
 # timeout で kill されないため、自前の watchdog で自決させる。
 #
 # この値は hooks.json の timeout とは無関係に決める。detach 後の子はハーネスの
-# 管轄外であり、hooks.json の値（最大は session_install の 60 秒だが、これは
+# 管轄外であり、hooks.json の値（最大は mem.cli context の 60 秒だが、これは
 # detach しない同期エントリ）と紐付ける論拠がないため。
 #
 # detach 対象（launcher --bg: learn.observe / session_end / desktop_notify /

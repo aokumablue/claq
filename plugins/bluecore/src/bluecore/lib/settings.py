@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""
-プラグイン全体の settings.json を読み込むユーティリティ。
+"""CLAUDE.md からカバレッジヒント行を抽出する。
 
-hooks / mem のセクションを、共通の読み取り方法で扱います。
-project.coverage は CLAUDE.md から抽出したヒント行を Claude が解釈します。
+settings.json は読み込まない。project.coverage は CLAUDE.md の該当行を
+そのまま Claude のコンテキストへ渡し、AI 側で目標率を解釈させる。
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
-
-PLUGIN_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_SETTINGS_PATH = PLUGIN_ROOT / "settings.json"
 
 # 「カバレッジ」または「coverage」を含む行にマッチ
 _COVERAGE_LINE_RE = re.compile(r"^.*(?:カバレッジ|coverage).*$", re.IGNORECASE | re.MULTILINE)

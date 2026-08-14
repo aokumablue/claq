@@ -11,9 +11,8 @@ import json
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest.mock import MagicMock
 
-from bluecore.hooks import session_install, session_start
+from bluecore.hooks import session_start
 
 
 def _assert_session_start_json(output: str) -> dict:
@@ -80,42 +79,6 @@ class TestMemCliContextContract:
         _assert_session_start_json(stdout)
 
 
-class TestSessionInstallContract:
-    def test_install_sh_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        plugin_json = tmp_path / ".claude-plugin" / "plugin.json"
-        plugin_json.parent.mkdir()
-        plugin_json.write_text(json.dumps({"version": "0.0.99"}))
-        version_file = tmp_path / "plugin_installed_version"
-        version_file.write_text("0.0.1\n")
-
-        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(tmp_path))
-        monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setattr(session_install, "_BLUECORE_DIR", tmp_path)
-
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-        mock_result.stderr = "install failed"
-
-        import subprocess
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
-
-        result = session_install.run("")
-        _assert_session_start_json(result)
-        assert version_file.read_text() == "0.0.1\n"
-
-    def test_main_exception_emits_session_start(self, monkeypatch) -> None:
-        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-        monkeypatch.setattr(session_install, "run", lambda _: (_ for _ in ()).throw(RuntimeError("crash")))
-
-        buf_out = io.StringIO()
-        buf_err = io.StringIO()
-        with redirect_stdout(buf_out), redirect_stderr(buf_err):
-            code = session_install.main()
-        assert code == 0
-        _assert_session_start_json(buf_out.getvalue())
-
-
 class TestSessionStartHookContract:
     def test_run_exception_emits_session_start_from_main(self, monkeypatch) -> None:
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
@@ -127,6 +90,32 @@ class TestSessionStartHookContract:
             code = session_start.main()
         assert code == 0
         _assert_session_start_json(buf_out.getvalue())
+
+    def test_grok_symlink_success_logs(self, monkeypatch, tmp_path: Path, capsys) -> None:
+        """Grok symlink 成功時はログし、SessionStart JSON を返す。"""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("BLUECORE_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "bluecore.lib.grok_plugin_root.ensure_grok_plugin_root_symlink",
+            lambda: tmp_path / "installed",
+        )
+        result = session_start.run("")
+        _assert_session_start_json(result)
+        assert "Grok plugin root symlink" in capsys.readouterr().err
+
+    def test_grok_symlink_exception_is_fail_open(self, monkeypatch, tmp_path: Path, capsys) -> None:
+        """Grok symlink 例外は fail-open で SessionStart JSON を返す。"""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("BLUECORE_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "bluecore.lib.grok_plugin_root.ensure_grok_plugin_root_symlink",
+            lambda: (_ for _ in ()).throw(OSError("x")),
+        )
+        result = session_start.run("")
+        _assert_session_start_json(result)
+        assert "Grok symlink 修復スキップ" in capsys.readouterr().err
 
 def _pi(languages=None, frameworks=None, primary=None):
     from types import SimpleNamespace

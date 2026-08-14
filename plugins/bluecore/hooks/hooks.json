@@ -75,17 +75,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.session_install",
-            "timeout": 60
-          }
-        ],
-        "description": "プラグイン初回/更新時に install.sh を実行し settings.json と plugin_installed_version を整える"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli context",
             "timeout": 60
           }

@@ -11,7 +11,7 @@
 
 - Python は `python3` を使う
 - 変更後はリポジトリ直下の `.venv` を有効化して `python3 -m pytest -q` と `ruff check plugins/bluecore/src` が成功することを確認（警告なし）
-- ランタイムは venv を作らない。`install.sh` は settings.json の初期化・残り .venv の削除・Grok plugin-root symlink・version stamp のみ行う
+- ランタイムは venv を作らない
 - 開発用 venv は `bluecore-dev/.venv` のみで、`scripts/install-dev.sh` が作成する
 - 新規 hook・外部呼び出し（DB/ネットワーク/DL）は非ブロッキング + ハードタイムアウト必須
 - pytest をパイプする際は `set -o pipefail` 必須
