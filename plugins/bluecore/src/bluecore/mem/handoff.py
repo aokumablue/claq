@@ -182,6 +182,22 @@ def _parse_entry(line: str) -> dict[str, Any] | None:
     return entry if isinstance(entry, dict) else None
 
 
+def _text_content(raw: object) -> str:
+    """ユーザー発話の content をプレーンテキストへ畳む。
+
+    Args:
+        raw: 文字列本文、または ``{"text": ...}`` ブロックのリスト。
+
+    Returns:
+        連結した本文。文字列でもブロック列でもなければ空文字列。
+    """
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, list):
+        return " ".join(str(part.get("text", "")) for part in raw if isinstance(part, dict))
+    return ""
+
+
 def _user_message(entry: dict[str, Any]) -> str:
     """エントリがユーザー発話ならその本文を 1 行へ圧縮して返す。
 
@@ -201,12 +217,8 @@ def _user_message(entry: dict[str, Any]) -> str:
     if "user" not in (entry.get("type"), entry.get("role"), message.get("role")):
         return ""
 
-    raw = message.get("content") or entry.get("content")
-    if isinstance(raw, str):
-        text = raw
-    elif isinstance(raw, list):
-        text = " ".join(str(part.get("text", "")) for part in raw if isinstance(part, dict))
-    else:
+    text = _text_content(message.get("content") or entry.get("content"))
+    if not text:
         return ""
     return compact_line(redact(strip_tags(strip_ansi(text))), _USER_MESSAGE_CHAR_LIMIT)
 

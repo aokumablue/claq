@@ -31,13 +31,9 @@ def strip_tags(text: str) -> str:
     if not text:
         return text
 
-    result = text
     for pattern in _PATTERNS:
-        # ReDoS保護: パターンごとに最大回数チェック
-        if len(pattern.findall(result)) > _MAX_TAG_COUNT:
+        if len(pattern.findall(text)) > _MAX_TAG_COUNT:
             continue
-        result = pattern.sub("", result)
+        text = pattern.sub("", text)
 
-    # 連続空行を1つに
-    result = re.sub(r"\n{3,}", "\n\n", result)
-    return result.strip()
+    return re.sub(r"\n{3,}", "\n\n", text).strip()

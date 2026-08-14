@@ -25,6 +25,11 @@ def _user(text: str) -> dict:
     return {"type": "user", "message": {"role": "user", "content": text}}
 
 
+def _from_transcript(tmp_path: Path, entries: list[dict | str]) -> str:
+    """entries をトランスクリプトにして build_handoff する。"""
+    return build_handoff({"transcript_path": _write_transcript(tmp_path, entries)})
+
+
 class TestExplicitHandoff:
     """stdin JSON の handoff キー（エージェントの明示指定）。"""
 
@@ -79,7 +84,7 @@ class TestTranscriptSummary:
         """ユーザー依頼は直近 3 件だけ載せる。"""
         entries = [_user(f"依頼{index}") for index in range(5)]
 
-        result = build_handoff({"transcript_path": _write_transcript(tmp_path, entries)})
+        result = _from_transcript(tmp_path, entries)
 
         assert result == "直近の依頼:\n- 依頼2\n- 依頼3\n- 依頼4"
 
@@ -101,7 +106,7 @@ class TestTranscriptSummary:
             {"type": "tool_use", "tool_name": "Write", "tool_input": {"file_path": "src/new.py"}},
         ]
 
-        result = build_handoff({"transcript_path": _write_transcript(tmp_path, entries)})
+        result = _from_transcript(tmp_path, entries)
 
         assert result == (
             "直近の依頼:\n- cli を直して\n"
@@ -115,7 +120,7 @@ class TestTranscriptSummary:
             {"type": "tool_use", "tool_name": "Edit", "tool_input": {"file_path": "src/cli.py"}},
         ]
 
-        result = build_handoff({"transcript_path": _write_transcript(tmp_path, entries)})
+        result = _from_transcript(tmp_path, entries)
 
         assert result == "変更ファイル: src/cli.py\n使用ツール: Edit"
 
@@ -123,7 +128,7 @@ class TestTranscriptSummary:
         """ユーザー発話に貼られたシークレットは圧縮前に除去する。"""
         entries = [_user("鍵は password=hunter2hunter2 で通る")]
 
-        result = build_handoff({"transcript_path": _write_transcript(tmp_path, entries)})
+        result = _from_transcript(tmp_path, entries)
 
         assert result == "直近の依頼:\n- 鍵は [REDACTED] で通る"
 
@@ -139,7 +144,7 @@ class TestTranscriptSummary:
             {"type": "tool_use", "tool_name": "Write", "tool_input": {"file_path": "docs/mem.md"}},
         ]
 
-        result = build_handoff({"transcript_path": _write_transcript(tmp_path, entries)})
+        result = _from_transcript(tmp_path, entries)
 
         assert "変更ファイル: …/bluecore/mem/handoff.py, docs/mem.md" in result
         assert "REDACTED" not in result
@@ -152,7 +157,7 @@ class TestTranscriptSummary:
             {"type": "tool_use", "tool_name": "apply_patch", "tool_input": patch},
         ]
 
-        result = build_handoff({"transcript_path": _write_transcript(tmp_path, entries)})
+        result = _from_transcript(tmp_path, entries)
 
         assert "変更ファイル: src/a.py" in result
         assert "使用ツール: Edit" in result
@@ -161,13 +166,13 @@ class TestTranscriptSummary:
         """ユーザー依頼も変更ファイルも無ければツール名だけでは記録しない。"""
         entries = [{"type": "tool_use", "tool_name": "Read", "tool_input": {"file_path": "a.py"}}]
 
-        assert build_handoff({"transcript_path": _write_transcript(tmp_path, entries)}) == ""
+        assert _from_transcript(tmp_path, entries) == ""
 
     def test_unnamed_tool_entry_is_ignored(self, tmp_path: Path) -> None:
         """ツール名が空の tool_use エントリは無視する。"""
         entries = [_user("依頼"), {"type": "tool_use", "tool_name": "", "name": ""}]
 
-        assert build_handoff({"transcript_path": _write_transcript(tmp_path, entries)}) == "直近の依頼:\n- 依頼"
+        assert _from_transcript(tmp_path, entries) == "直近の依頼:\n- 依頼"
 
     @pytest.mark.parametrize(
         "line",
@@ -178,7 +183,7 @@ class TestTranscriptSummary:
         """空行・不正 JSON・非オブジェクト行は読み飛ばす。"""
         entries: list[dict | str] = [line, _user("依頼")]
 
-        assert build_handoff({"transcript_path": _write_transcript(tmp_path, entries)}) == "直近の依頼:\n- 依頼"
+        assert _from_transcript(tmp_path, entries) == "直近の依頼:\n- 依頼"
 
     @pytest.mark.parametrize(
         "entry",
@@ -191,7 +196,7 @@ class TestTranscriptSummary:
     )
     def test_accepts_alternative_user_entry_shapes(self, tmp_path: Path, entry: dict) -> None:
         """ハーネスごとに異なるユーザーエントリの形を吸収する。"""
-        assert build_handoff({"transcript_path": _write_transcript(tmp_path, [entry])}) == "直近の依頼:\n- 依頼"
+        assert _from_transcript(tmp_path, [entry]) == "直近の依頼:\n- 依頼"
 
     @pytest.mark.parametrize(
         "entry",
@@ -205,13 +210,13 @@ class TestTranscriptSummary:
     )
     def test_non_user_text_is_not_collected(self, tmp_path: Path, entry: dict) -> None:
         """ユーザー発話でない、または本文を取り出せないエントリは載せない。"""
-        assert build_handoff({"transcript_path": _write_transcript(tmp_path, [entry])}) == ""
+        assert _from_transcript(tmp_path, [entry]) == ""
 
     def test_strips_ansi_and_injected_memory_tags(self, tmp_path: Path) -> None:
         """ANSI エスケープと注入済み記憶タグは本文から落とす。"""
         text = "\x1b[31m<bluecore-memory>\n## 共通知識\n- [fact] 古い記憶\n</bluecore-memory>\x1b[0m 次の作業"
 
-        result = build_handoff({"transcript_path": _write_transcript(tmp_path, [_user(text)])})
+        result = _from_transcript(tmp_path, [_user(text)])
 
         assert result == "直近の依頼:\n- 次の作業"
 
@@ -222,7 +227,7 @@ class TestTranscriptSummary:
         monkeypatch.setattr(handoff_mod, "TRANSCRIPT_MAX_BYTES", 120)
         entries = [_user("先頭の依頼"), _user("末尾の依頼")]
 
-        result = build_handoff({"transcript_path": _write_transcript(tmp_path, entries)})
+        result = _from_transcript(tmp_path, entries)
 
         assert result == "直近の依頼:\n- 末尾の依頼"
 
@@ -234,6 +239,6 @@ class TestTranscriptSummary:
         monkeypatch.setattr(handoff_mod.time, "monotonic", lambda: next(clock))
         entries = [_user("1 行目"), _user("2 行目")]
 
-        result = build_handoff({"transcript_path": _write_transcript(tmp_path, entries)})
+        result = _from_transcript(tmp_path, entries)
 
         assert result == "直近の依頼:\n- 1 行目"

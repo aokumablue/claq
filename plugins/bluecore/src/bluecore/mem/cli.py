@@ -32,6 +32,7 @@ from typing import Any
 
 from bluecore.hooks.hook_common import print_session_start_output
 from bluecore.lib.harness import detect_harness
+from bluecore.mem import logger as mem_logger
 from bluecore.mem.database import Database
 from bluecore.mem.handoff import build_handoff
 from bluecore.mem.knowledge_input import (
@@ -42,7 +43,6 @@ from bluecore.mem.knowledge_input import (
     parse_knowledge_payload,
     validate_choice,
 )
-from bluecore.mem.logger import get as _get_logger
 from bluecore.mem.models import Knowledge, Repo, Session, utc_now_iso
 from bluecore.mem.repo_identity import resolve_repo
 from bluecore.mem.settings import (
@@ -53,7 +53,7 @@ from bluecore.mem.settings import (
     Settings,
 )
 
-log = _get_logger("CLI")
+log = mem_logger.get("CLI")
 
 # SessionStart フックで JSON 出力が必須なコマンドの集合。
 # main() のフォールバック保証とエラー時の早期 return に使用する。
@@ -150,21 +150,19 @@ def _parse_options(argv: list[str]) -> CommandArgs:
     flags: set[str] = set()
     values: dict[str, str] = {}
 
-    index = 0
-    while index < len(argv):
-        token = argv[index]
+    tokens = iter(argv)
+    for token in tokens:
         if token in _VALUE_OPTIONS:
-            index += 1
-            if index >= len(argv):
+            value = next(tokens, None)
+            if value is None:
                 raise CommandError(f"オプション {token} に値がありません")
-            values[token] = argv[index]
+            values[token] = value
         elif token in _BOOL_FLAGS:
             flags.add(token)
         elif token.startswith("-"):
             raise CommandError(f"不明なオプション: {token}")
         else:
             positionals.append(token)
-        index += 1
 
     return CommandArgs(positionals=tuple(positionals), flags=frozenset(flags), values=values)
 
@@ -222,10 +220,8 @@ def _load_settings_or_raise() -> Settings:
     Raises:
         Exception: logger 初期化に失敗した場合。
     """
-    import bluecore.mem.logger as _logger_mod
-
     settings = Settings()
-    _logger_mod.setup(settings.log_dir, settings.log_level)
+    mem_logger.setup(settings.log_dir, settings.log_level)
     return settings
 
 
@@ -274,12 +270,12 @@ def main() -> int:
         print(HELP_TEXT)
         return 0
 
+    command = sys.argv[1]
+    session_start = command in _SESSION_START_COMMANDS
     additional_context = ""
-    # SESSION_START コマンドは設定ロード失敗でも exit_code=0 を維持する。
+    # SessionStart は設定ロード失敗でも exit_code=0 を維持する。
     # フックが非 0 を返すとセッション全体がエラー扱いになるため。
     exit_code = 0
-    command = sys.argv[1]
-    _silent = command in _SESSION_START_COMMANDS
     try:
         args = _parse_args_and_stdin(sys.argv[2:])
         settings = _load_settings_or_raise()
@@ -287,12 +283,12 @@ def main() -> int:
         print(str(e), file=sys.stderr)
         exit_code = 1
     except Exception as e:
-        if not _silent:
+        if not session_start:
             print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
             exit_code = 1
     else:
         try:
-            if _silent:
+            if session_start:
                 additional_context = _run_session_start_command(command, settings, args) or ""
             else:
                 exit_code = _run_normal_command(command, settings, args)
@@ -304,7 +300,7 @@ def main() -> int:
             print(f"コマンド {command} 失敗: {e}", file=sys.stderr)
             exit_code = 1
     finally:
-        if _silent:
+        if session_start:
             print_session_start_output(additional_context)
 
     return exit_code
@@ -313,7 +309,7 @@ def main() -> int:
 # --- DB の作り直し ---
 
 
-def _handle_init(settings: Settings) -> None:
+def _handle_init(settings: Settings, _args: CommandArgs) -> None:
     """init コマンド: 既存 DB を削除して空の DB を作り直す。
 
     通常運用で DB を作るのは ``Database`` のコンストラクタ（親ディレクトリ作成 +
@@ -322,6 +318,7 @@ def _handle_init(settings: Settings) -> None:
 
     Args:
         settings: mem 設定。
+        _args: 未使用。他コマンドとハンドラ署名を揃える。
     """
     _remove_db_artifacts(settings.db_path)
     with Database(settings.db_path):
@@ -454,6 +451,16 @@ def _fit_budget(lines: list[str], budget: int) -> list[str]:
     return kept
 
 
+def _summary_line(row: Knowledge) -> str:
+    """list / search の 1 行（body なし）。"""
+    return f"- [{row.kind}] {row.title} ({row.key})"
+
+
+def _session_uid(payload: dict[str, Any]) -> str:
+    """フック JSON から session_id を取り出す。無ければ空文字。"""
+    return str(payload.get("session_id") or "").strip()
+
+
 # --- 知識 CRUD ---
 
 
@@ -521,16 +528,53 @@ def _collect_list_rows(
         raise _reject_bad_input(e) from e
     limit = _coerce_limit(args.values.get("--limit"), default_limit)
 
-    rows: list[Knowledge] = []
-    with Database(settings.db_path) as db:
-        if not only_global:
-            repo = resolve_repo(None, db)
-            rows.extend(db.list_knowledge(scope="repo", repo_id=repo.id, status=status))
-        if not only_repo:
-            rows.extend(db.list_knowledge(scope="global", status=status))
-
+    rows = _load_scoped_knowledge(
+        settings, include_repo=not only_global, include_global=not only_repo, status=status
+    )
     if kind is not None:
         rows = [row for row in rows if row.kind == kind]
+    return _take_rows(rows, rank=rank, limit=limit)
+
+
+def _load_scoped_knowledge(
+    settings: Settings,
+    *,
+    include_repo: bool,
+    include_global: bool,
+    status: str,
+) -> list[Knowledge]:
+    """指定スコープの知識カードを DB から集める。
+
+    Args:
+        settings: mem 設定。
+        include_repo: cwd の repo スコープを含めるなら True。
+        include_global: global スコープを含めるなら True。
+        status: 絞り込む status。
+
+    Returns:
+        条件に一致する Knowledge のリスト。
+    """
+    rows: list[Knowledge] = []
+    with Database(settings.db_path) as db:
+        if include_repo:
+            repo = resolve_repo(None, db)
+            rows.extend(db.list_knowledge(scope="repo", repo_id=repo.id, status=status))
+        if include_global:
+            rows.extend(db.list_knowledge(scope="global", status=status))
+    return rows
+
+
+def _take_rows(rows: list[Knowledge], *, rank: _Ranker | None, limit: int) -> list[Knowledge]:
+    """知識カードを更新順またはスコア順に並べて *limit* 件返す。
+
+    Args:
+        rows: 整列前の知識カード。
+        rank: 各行のスコアを返す関数。None なら更新の新しい順。
+        limit: 返す件数の上限。
+
+    Returns:
+        整列して *limit* 件で切った Knowledge のリスト。
+    """
     if rank is None:
         rows.sort(key=lambda row: (row.updated_at, row.id or 0), reverse=True)
         return rows[:limit]
@@ -562,7 +606,7 @@ def _emit_rows(rows: list[Knowledge], args: CommandArgs, budget: int) -> None:
         print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         return
 
-    for line in _fit_budget([f"- [{row.kind}] {row.title} ({row.key})" for row in rows], budget):
+    for line in _fit_budget([_summary_line(row) for row in rows], budget):
         print(line)
 
 
@@ -624,9 +668,17 @@ def _match_score(row: Knowledge, terms: tuple[str, ...]) -> float:
         "domain": (row.domain or "").lower(),
         "body": row.body.lower(),
     }
-    return sum(
-        weight for term in terms for field_name, weight in _SEARCH_FIELD_WEIGHTS if term in haystacks[field_name]
-    )
+    score = 0.0
+    for term in terms:
+        for field_name, weight in _SEARCH_FIELD_WEIGHTS:
+            if term in haystacks[field_name]:
+                score += weight
+    return score
+
+
+def _scaled_factor(value: float) -> float:
+    """0.0〜1.0 を ``_SEARCH_MULTIPLIER_FLOOR``〜1.0 へ線形写像する。"""
+    return _SEARCH_MULTIPLIER_FLOOR + (1.0 - _SEARCH_MULTIPLIER_FLOOR) * value
 
 
 def _recency_factor(updated_at: str, now: datetime) -> float:
@@ -641,7 +693,7 @@ def _recency_factor(updated_at: str, now: datetime) -> float:
     """
     age_days = max((now - datetime.fromisoformat(updated_at)).total_seconds(), 0.0) / 86400.0
     decay = 1.0 / (1.0 + age_days / _SEARCH_RECENCY_SCALE_DAYS)
-    return _SEARCH_MULTIPLIER_FLOOR + (1.0 - _SEARCH_MULTIPLIER_FLOOR) * decay
+    return _scaled_factor(decay)
 
 
 def _score_knowledge(row: Knowledge, terms: tuple[str, ...], now: datetime) -> float:
@@ -662,8 +714,7 @@ def _score_knowledge(row: Knowledge, terms: tuple[str, ...], now: datetime) -> f
     matched = _match_score(row, terms)
     if matched == 0.0:
         return 0.0
-    confidence = _SEARCH_MULTIPLIER_FLOOR + (1.0 - _SEARCH_MULTIPLIER_FLOOR) * row.confidence
-    return matched * confidence * _recency_factor(row.updated_at, now)
+    return matched * _scaled_factor(row.confidence) * _recency_factor(row.updated_at, now)
 
 
 def _handle_search(settings: Settings, args: CommandArgs) -> None:
@@ -845,7 +896,7 @@ def _record_session(db: Database, repo: Repo, payload: dict[str, Any]) -> None:
         repo: 解決済みのリポジトリ。
         payload: フックが stdin へ渡した JSON。
     """
-    session_uid = str(payload.get("session_id") or "").strip()
+    session_uid = _session_uid(payload)
     if not session_uid:
         return
     db.start_session(Session(session_uid=session_uid, repo_id=repo.id, harness=detect_harness()))
@@ -925,7 +976,7 @@ def _record_handoff(settings: Settings, payload: dict[str, Any]) -> None:
         settings: mem 設定。
         payload: SessionEnd フックが stdin へ渡した JSON。
     """
-    session_uid = str(payload.get("session_id") or "").strip()
+    session_uid = _session_uid(payload)
     if not session_uid:
         return
 
@@ -969,7 +1020,7 @@ def _handle_handoff(settings: Settings, args: CommandArgs) -> None:
 
 
 _COMMAND_HANDLERS: dict[str, _CommandHandler] = {
-    "init": lambda settings, args: _handle_init(settings),
+    "init": _handle_init,
     "context": _handle_context,
     "handoff": _handle_handoff,
     "learn": _handle_learn,

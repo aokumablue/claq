@@ -64,6 +64,15 @@ def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
         return db.upsert_knowledge(Knowledge(**fields))
 
 
+def _always_raise(message: str):
+    """呼び出されると必ず RuntimeError を送出するスタブを返す。"""
+
+    def _stub(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError(message)
+
+    return _stub
+
+
 class TestSessionStartContract:
     """SessionStart フック経路（context）の出力契約。"""
 
@@ -80,9 +89,7 @@ class TestSessionStartContract:
 
     def test_swallows_db_failure(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """コンテキスト組み立てが失敗してもフックを壊さず JSON を返す。"""
-        monkeypatch.setattr(
-            cli, "_build_context", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db broken"))
-        )
+        monkeypatch.setattr(cli, "_build_context", _always_raise("db broken"))
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert exit_code == 0
         assert stderr == ""
@@ -92,9 +99,7 @@ class TestSessionStartContract:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """設定ロード失敗でも exit_code=0 と JSON 出力を維持する。"""
-        monkeypatch.setattr(
-            cli, "_load_settings_or_raise", lambda: (_ for _ in ()).throw(RuntimeError("設定失敗"))
-        )
+        monkeypatch.setattr(cli, "_load_settings_or_raise", _always_raise("設定失敗"))
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert exit_code == 0
         assert stderr == ""
@@ -104,9 +109,7 @@ class TestSessionStartContract:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """ハンドラ例外時も JSON を出しつつ exit_code=1 を返す。"""
-        monkeypatch.setattr(
-            cli, "_run_session_start_command", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom"))
-        )
+        monkeypatch.setattr(cli, "_run_session_start_command", _always_raise("boom"))
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert exit_code == 1
         assert "boom" in stderr
@@ -231,18 +234,14 @@ class TestNormalCommandFailures:
 
     def test_settings_failure_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """設定ロード失敗は exit_code=1 と stderr 出力。"""
-        monkeypatch.setattr(
-            cli, "_load_settings_or_raise", lambda: (_ for _ in ()).throw(RuntimeError("設定失敗"))
-        )
+        monkeypatch.setattr(cli, "_load_settings_or_raise", _always_raise("設定失敗"))
         _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["init"])
         assert exit_code == 1
         assert "設定/ログ初期化失敗" in stderr
 
     def test_handler_exception_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """ハンドラ例外は exit_code=1 と stderr 出力。"""
-        monkeypatch.setattr(
-            cli, "_run_normal_command", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("init failure"))
-        )
+        monkeypatch.setattr(cli, "_run_normal_command", _always_raise("init failure"))
         _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["init"])
         assert exit_code == 1
         assert "init failure" in stderr
@@ -1040,9 +1039,7 @@ class TestContext:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """組み立てに失敗してもフックを壊さず注入ゼロに倒す。"""
-        monkeypatch.setattr(
-            cli, "_build_context", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db broken"))
-        )
+        monkeypatch.setattr(cli, "_build_context", _always_raise("db broken"))
         assert self._inject(monkeypatch, tmp_path) == ""
 
 
@@ -1135,9 +1132,7 @@ class TestHandoff:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """記録に失敗してもフックを壊さず終了コード 0 を保つ。"""
-        monkeypatch.setattr(
-            cli, "_record_handoff", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db broken"))
-        )
+        monkeypatch.setattr(cli, "_record_handoff", _always_raise("db broken"))
 
         self._run(monkeypatch, tmp_path, {"session_id": "s1", "handoff": "引き継ぎ"})
 

@@ -6,6 +6,12 @@ from pathlib import Path
 import bluecore.mem.logger as logger
 
 
+def _flush() -> None:
+    """bluecore.mem ロガーの全ハンドラを flush する。"""
+    for handler in logging.getLogger("bluecore.mem").handlers:
+        handler.flush()
+
+
 class TestLogger:
     """ロガーのテスト"""
 
@@ -53,9 +59,7 @@ class TestLogger:
         logger.setup(tmp_path, level="info")
         log = logger.get("TEST")
         log.info("test message 12345")
-        # バッファを flush
-        for h in logging.getLogger("bluecore.mem").handlers:
-            h.flush()
+        _flush()
         log_file = list(tmp_path.glob("mem-*.log"))[0]
         content = log_file.read_text()
         assert "test message 12345" in content
@@ -80,8 +84,7 @@ class TestLogger:
         logger.setup(tmp_path, level="info")
         log = logger.get("TEST")
         log.info("token=sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-        for h in logging.getLogger("bluecore.mem").handlers:
-            h.flush()
+        _flush()
         log_file = list(tmp_path.glob("mem-*.log"))[0]
         content = log_file.read_text()
         assert "[REDACTED]" in content

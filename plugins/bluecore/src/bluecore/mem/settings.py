@@ -8,7 +8,10 @@ from pathlib import Path
 
 from bluecore.lib.constants import BASE_DIR_NAME
 
-_DEFAULT_DATA_DIR = Path(os.environ["BLUECORE_DATA_PATH"]) if "BLUECORE_DATA_PATH" in os.environ else Path.home() / BASE_DIR_NAME
+if "BLUECORE_DATA_PATH" in os.environ:
+    _DEFAULT_DATA_DIR = Path(os.environ["BLUECORE_DATA_PATH"])
+else:
+    _DEFAULT_DATA_DIR = Path.home() / BASE_DIR_NAME
 
 # --- context 注入の予算 ---
 
