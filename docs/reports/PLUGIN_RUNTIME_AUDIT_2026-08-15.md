@@ -28,14 +28,14 @@
 訂正対象ではなく、別途修正済み（本ファイル以外のコミット履歴を参照）。
 
 - **F-01「Claude Code で agent が runtime discovery されず `Agents (0)` になる」は誤り。**
-  本追記を行っているセッション（Claude Code）で `bluecore:` プレフィックスの agent が
-  16 件すべて discovery・利用可能であることを実測済み（`architect` / `bench-analyzer` /
-  `comparator` / `dead-code-cleaner` / `executor` / `explorer` / `grader` /
-  `harness-tuner` / `perf-optimizer` / `planner` / `refactor-orchestrator` /
-  `reviewer` / `security-auditor` / `session-observer` / `simplifier` /
-  `tdd-writer`）。`plugin.json` の `agents` 配列も 16 件を正しく列挙している。監査時に
-  観測された `Agents (0)` は `claude plugin details` コマンドの表示上の問題であり、
-  agent 委譲そのものが機能しないという実害ではなかった。
+  監査時点（agent 定義 16 件）と同じ状態の Claude Code セッションで、
+  `bluecore:` プレフィックスの agent が全件 discovery・利用可能であることを
+  本対応の初期段階で実測済み。`plugin.json` の `agents` 配列も監査時点の 16 件を
+  正しく列挙していた。監査時に観測された `Agents (0)` は `claude plugin details`
+  コマンドの表示上の問題であり、agent 委譲そのものが機能しないという実害ではなかった。
+  （本対応の Phase 2-3 で `session-observer` を廃止したため、現在の agent 定義は
+  15 件。件数の変動はこの後続の最小化リファクタによるもので、F-01 の訂正結論とは
+  無関係）。
 - **F-19 の `name is the tool allowlist+ "rg"` という文字列は、リポジトリ内のプロンプト・
   エージェント定義のいずれにも存在しない。** grep による全文検索で `allowlist` という
   語自体が本リポジトリのソース・プロンプトに一切出現しないことを確認済み。この事象は
