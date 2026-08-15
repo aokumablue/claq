@@ -56,6 +56,42 @@ printf '%s\\n' "$(bluecore_plugin_root)"
 '''
 
 
+def _print_plugin_root_script_relative_source_then_cd(cd_to: Path) -> str:
+    """相対パスで helper を source した後に別ディレクトリへ cd してから呼び出す。
+
+    _REPO_ROOT で相対パス "plugins/bluecore/runtime/bluecore-helpers.sh" を
+    source し、CLAUDE_PLUGIN_ROOT を unset した状態で cd_to へ cd してから
+    bluecore_plugin_root を呼ぶ。fix 前のコードは BASH_SOURCE[0] を
+    bluecore_plugin_root 呼び出し時に相対パスのまま dirname 解決していたため、
+    source 後に cd すると cwd 起点で解決が壊れる（bash でも zsh でも）。
+    fix 後のコードは source 時点でファイル先頭スコープの
+    `_BLUECORE_HELPERS_DIR` を絶対パスへ解決済みのため、この cd の影響を受けない。
+    """
+    return f'''
+set -euo pipefail
+cd "{_REPO_ROOT}"
+unset CLAUDE_PLUGIN_ROOT
+source "plugins/bluecore/runtime/bluecore-helpers.sh"
+cd "{cd_to}"
+printf '%s\\n' "$(bluecore_plugin_root)"
+'''
+
+
+def test_bluecore_plugin_root_relative_source_then_cd_survives_under_bash(tmp_path: Path) -> None:
+    """bash: 相対パスで source した後に別ディレクトリへ cd しても正しい plugin root を返す。"""
+    result = _run_bash(_print_plugin_root_script_relative_source_then_cd(tmp_path))
+
+    assert result.stdout.strip() == str(_PLUGIN_ROOT)
+
+
+@_skip_without_zsh
+def test_bluecore_plugin_root_relative_source_then_cd_survives_under_zsh(tmp_path: Path) -> None:
+    """zsh: 相対パスで source した後に別ディレクトリへ cd しても正しい plugin root を返す。"""
+    result = _run_zsh(_print_plugin_root_script_relative_source_then_cd(tmp_path))
+
+    assert result.stdout.strip() == str(_PLUGIN_ROOT)
+
+
 def test_bluecore_run_bg_returns_pid(tmp_path: Path) -> None:
     """bluecore_run_bg が数値 PID を返し、そのプロセスが実在すること。"""
     fake_bin = tmp_path / "bin"
