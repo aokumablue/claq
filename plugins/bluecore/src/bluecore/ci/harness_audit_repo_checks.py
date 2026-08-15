@@ -98,9 +98,8 @@ def _has_memory_lifecycle_hooks(root_dir: str | Path) -> bool:
     """実際に使用されるメモリ永続化ライフサイクル定義が hooks.json にあるかを返す。
 
     ディレクトリの存在だけでなく、``hooks/hooks.json`` を実際にパースし、
-    ``SessionStart``/``Stop``/``SessionEnd`` の各イベントが実在のメモリ
-    永続化コマンド（``bluecore.mem.cli context``、``bluecore.hooks.session_start``、
-    ``bluecore.hooks.session_end``、``bluecore.mem.cli handoff``）を
+    ``SessionStart``/``SessionEnd`` の各イベントが実在のメモリ永続化コマンド
+    （``bluecore.mem.cli context``、``bluecore.mem.cli handoff``）を
     起動していることを確認する。
 
     Args:
@@ -116,8 +115,6 @@ def _has_memory_lifecycle_hooks(root_dir: str | Path) -> bool:
     hooks = hooks_config["hooks"]
     required_commands = (
         ("SessionStart", (("bluecore.mem.cli", "context"),)),
-        ("SessionStart", (("bluecore.hooks.session_start",),)),
-        ("Stop", (("bluecore.hooks.session_end",),)),
         ("SessionEnd", (("bluecore.mem.cli", "handoff"),)),
     )
     return all(
@@ -297,16 +294,6 @@ def _repo_quality_gates_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "pass": file_exists(root_dir, "tests/hooks/test_hook_edge_cases.py"),
             "fix": "Add tests/hooks/test_hook_edge_cases.py for hook behavior validation.",
         },
-        {
-            "id": "quality-doctor-script",
-            "category": "Quality Gates",
-            "points": 2,
-            "scopes": ["repo"],
-            "path": "src/bluecore/hooks/session_start.py",
-            "description": "SessionStart フックが存在する",
-            "pass": file_exists(root_dir, "src/bluecore/hooks/session_start.py"),
-            "fix": "Add src/bluecore/hooks/session_start.py for the SessionStart hook.",
-        },
     ]
 
 
@@ -331,20 +318,18 @@ def _repo_memory_persistence_checks(root_dir: str | Path) -> list[dict[str, Any]
             "path": "hooks/hooks.json",
             "description": "実際に使用されるメモリ永続化ライフサイクル定義が hooks/hooks.json に存在する",
             "pass": _has_memory_lifecycle_hooks(root_dir),
-            "fix": "Wire real memory lifecycle commands (bluecore.mem.cli context/handoff, "
-            "bluecore.hooks.session_start/session_end) into hooks/hooks.json's "
-            "SessionStart/Stop/SessionEnd events.",
+            "fix": "Wire real memory lifecycle commands (bluecore.mem.cli context/handoff) into "
+            "hooks/hooks.json's SessionStart/SessionEnd events.",
         },
         {
             "id": "memory-session-hooks",
             "category": "Memory Persistence",
             "points": 4,
             "scopes": ["repo", "hooks"],
-            "path": "src/bluecore/hooks/session_start.py",
-            "description": "セッション開始・終了時の永続化モジュールが存在する",
-            "pass": file_exists(root_dir, "src/bluecore/hooks/session_start.py")
-            and file_exists(root_dir, "src/bluecore/hooks/session_end.py"),
-            "fix": "Implement src/bluecore/hooks/session_start.py and src/bluecore/hooks/session_end.py.",
+            "path": "src/bluecore/mem/cli.py",
+            "description": "セッション永続化を担う mem CLI 実装が存在する",
+            "pass": file_exists(root_dir, "src/bluecore/mem/cli.py"),
+            "fix": "Implement src/bluecore/mem/cli.py for session persistence (context/handoff commands).",
         },
         {
             "id": "memory-learning-skill",

@@ -33,7 +33,7 @@ _TOOL_NAME_MAP = {
     "view": "Read",
     "write": "Write",
     # Grok の runtime tool 名。read_file/list_dir は書き込み系ゲート
-    # （config_protection/quality_gate の _WRITE_TOOL_NAMES）の対象外だが、
+    # （config_protection の _WRITE_TOOL_NAMES）の対象外だが、
     # observe.py の観測レコード（tool フィールド）がハーネス横断で
     # 正規化名を記録するために正規化する。
     "search_replace": "Edit",

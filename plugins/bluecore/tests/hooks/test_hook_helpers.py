@@ -21,9 +21,6 @@ from bluecore.hooks import (
 from bluecore.hooks import (
     session_end as session_end,
 )
-from bluecore.hooks import (
-    session_start as session_start,
-)
 from bluecore.hooks.hook_common import is_truthy
 
 
@@ -171,41 +168,9 @@ def test_config_protection_entrypoint_passthrough(monkeypatch: pytest.MonkeyPatc
     assert excinfo.value.code == 0
 
 
-def test_session_start_main_sanitizes_exception_logs(monkeypatch: pytest.MonkeyPatch) -> None:
-    logs: list[str] = []
-    monkeypatch.setattr(session_start, "read_raw_stdin", lambda: "raw")
-    monkeypatch.setattr(session_start, "run", lambda raw: (_ for _ in ()).throw(RuntimeError("boom\nbad\x1b[31m")))
-    monkeypatch.setattr(session_start, "log", logs.append)
-
-    stdout = io.StringIO()
-    stderr = io.StringIO()
-    with redirect_stdout(stdout), redirect_stderr(stderr):
-        assert session_start.main() == 0
-
-    assert stdout.getvalue().strip().startswith("{")
-    assert any("[SessionStart] Error" in message for message in logs)
-    assert any("[SessionStart] Error" in message and "\n" not in message and "\x1b" not in message for message in logs)
-
-
 def test_hook_common_is_truthy_handles_falsey_values() -> None:
     assert is_truthy(None) is False
     assert is_truthy("") is False
     assert is_truthy("0") is False
     assert is_truthy(" no ") is False
-
-
-def test_session_start_main_success_and_entrypoint(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr(session_start, "read_raw_stdin", lambda: "raw")
-    monkeypatch.setattr(session_start, "run", lambda raw: raw + "-out")
-
-    assert session_start.main() == 0
-    assert capsys.readouterr().out == "raw-out"
-
-    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-    monkeypatch.setattr(sys, "argv", ["session_start.py"])
-
-    with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("bluecore.hooks.session_start", run_name="__main__")
-
-    assert excinfo.value.code == 0
 

@@ -227,8 +227,8 @@ class TestResolveModuleCommand:
 
     def test_builds_module_invocation_without_args(self) -> None:
         """引数なしならモジュール名だけを付ける。"""
-        cmd = launcher._resolve_module_command("bluecore.hooks.session_start", [])
-        assert cmd == [sys.executable, "-m", "bluecore.hooks.session_start"]
+        cmd = launcher._resolve_module_command("bluecore.mem.cli", [])
+        assert cmd == [sys.executable, "-m", "bluecore.mem.cli"]
 
 
 class TestMain:

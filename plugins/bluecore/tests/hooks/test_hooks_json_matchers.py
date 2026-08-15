@@ -13,18 +13,17 @@ matcher は Claude Code / Copilot CLI ともに**正規表現**として評価�
 - ``Edit`` は ``NotebookEdit`` に、``Bash`` は ``BashOutput`` に部分一致する
 
 いずれもフック内のツール名ガード（`config_protection._WRITE_TOOL_NAMES` /
-`quality_gate._WRITE_TOOL_NAMES` / block_no_verify・pre_bash_commit_quality の
-"Bash" 比較）で最終的には no-op になるが、その手前で Python プロセスが
-1 つ起動する分だけ無駄になる。
+block_no_verify・pre_bash_commit_quality の "Bash" 比較）で最終的には
+no-op になるが、その手前で Python プロセスが 1 つ起動する分だけ無駄になる。
 そのため全ての tool-gated matcher を ``^(...)$`` でアンカーする。
 
 アンカー化で落ちる名前と、その根拠:
 
 - ``NotebookEdit``: `normalize_tool_name` は "NotebookEdit" を "NotebookEdit" の
   ままにする（`_TOOL_NAME_MAP` の "notebookedit" → "NotebookEdit"）。
-  config_protection / quality_gate の `_WRITE_TOOL_NAMES` は
-  {edit, write, multiedit} で "notebookedit" を含まないため、従来も必ず
-  no-op だった。よって matcher から落として挙動は変わらない。
+  config_protection の `_WRITE_TOOL_NAMES` は {edit, write, multiedit} で
+  "notebookedit" を含まないため、従来も必ず no-op だった。よって matcher
+  から落として挙動は変わらない。
 - ``BashOutput``: `normalize_tool_name("BashOutput")` は "Bash" にならない。
   block_no_verify / pre_bash_commit_quality は ``tool_input.command`` を読むが
   BashOutput の tool_input に command は無いため空文字列となり no-op。
@@ -60,7 +59,6 @@ TOOL_GATED_HOOKS: dict[str, frozenset[str]] = {
     "bluecore.hooks.pre_bash_commit_quality": frozenset({"Bash"}),
     # _WRITE_TOOL_NAMES == {edit, write, multiedit}
     "bluecore.hooks.config_protection": frozenset({"Edit", "Write", "MultiEdit"}),
-    "bluecore.hooks.quality_gate": frozenset({"Edit", "Write", "MultiEdit"}),
     # tool_input の subagent_type / agent_type を読むサブエージェント起動フック
     "bluecore.hooks.pre_agent_nudge": frozenset({"Agent"}),
 }

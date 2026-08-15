@@ -9,95 +9,12 @@ import subprocess
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
 from bluecore.hooks import commit_quality_scanner as commit_quality_scanner
 from bluecore.hooks import pre_bash_commit_quality as pre_bash_commit_quality
-from bluecore.hooks import session_start as session_start
-
-
-def test_session_start_run_injects_checkpoint_and_project_context(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    learned_dir = tmp_path / "learned"
-    sessions_dir = tmp_path / "sessions"
-    learned_dir.mkdir()
-    sessions_dir.mkdir()
-
-    checkpoint = sessions_dir / "checkpoint-2026-01-01-repo.md"
-    checkpoint.write_text("---\ncompleted: false\n---\n\x1b[31m進行中の作業\x1b[0m", encoding="utf-8")
-
-    logs: list[str] = []
-
-    def fake_find_files(dir_path: Path, pattern: str, max_age: int = 7) -> list[dict[str, object]]:
-        if pattern == "checkpoint-*.md" and dir_path == sessions_dir:
-            return [{"path": str(checkpoint), "mtime": 200.0}]
-        if pattern == "*.md" and dir_path == learned_dir:
-            return [{"path": str(learned_dir / "skill.md"), "mtime": 1.0}]
-        return []
-
-    monkeypatch.setattr(session_start, "ensure_dir", lambda path: None)
-    monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: learned_dir)
-    monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
-    monkeypatch.setattr(session_start, "find_files", fake_find_files)
-    monkeypatch.setattr(session_start, "read_file", lambda path: checkpoint.read_text(encoding="utf-8"))
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name="npm", source="auto"))
-    monkeypatch.setattr(
-        session_start,
-        "detect_project",
-        lambda cwd: SimpleNamespace(languages=["python"], frameworks=["pytest"], primary_language="python"),
-    )
-    monkeypatch.setattr(session_start, "log", logs.append)
-
-    payload = json.loads(session_start.run(""))
-    additional_context = payload["hookSpecificOutput"]["additionalContext"]
-
-    assert "Active checkpoint:" in additional_context
-    assert "進行中の作業" in additional_context
-    assert "\x1b[" not in additional_context
-    assert "Project type:" in additional_context
-    assert "Previous session summary:" not in additional_context
-    assert any("learned skill(s) available" in message for message in logs)
-    assert any("Package manager: npm" in message for message in logs)
-
-
-def test_session_start_run_emits_empty_context_and_prompts_for_pm(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    logs: list[str] = []
-    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
-
-    monkeypatch.setattr(session_start, "ensure_dir", lambda path: None)
-    monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: tmp_path / "learned")
-    monkeypatch.setattr(session_start, "get_sessions_dir", lambda: tmp_path / "sessions")
-    monkeypatch.setattr(session_start, "find_files", lambda dir_path, pattern, max_age=7: [])
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source="auto"))
-    monkeypatch.setattr(session_start, "get_selection_prompt", lambda: "SELECT A PACKAGE MANAGER")
-    monkeypatch.setattr(session_start.Path, "cwd", lambda: tmp_path)
-    monkeypatch.setattr(
-        session_start,
-        "detect_project",
-        lambda cwd: SimpleNamespace(languages=[], frameworks=[], primary_language=None),
-    )
-    monkeypatch.setattr(session_start, "log", logs.append)
-
-    payload = json.loads(session_start.run(""))
-
-    assert payload["hookSpecificOutput"]["additionalContext"] == ""
-    assert any("SELECT A PACKAGE MANAGER" in message for message in logs)
-    assert any("No specific project type detected" in message for message in logs)
-
-
-def test_session_start_main_logs_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    logs: list[str] = []
-    monkeypatch.setattr(session_start, "read_raw_stdin", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-    monkeypatch.setattr(session_start, "log", logs.append)
-
-    assert session_start.main() == 0
-    assert any("Error: boom" in message for message in logs)
 
 
 def test_pre_bash_commit_quality_detects_file_issues_and_commit_message_rules(

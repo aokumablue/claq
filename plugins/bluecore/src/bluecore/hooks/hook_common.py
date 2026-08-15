@@ -228,7 +228,7 @@ _DETACH_KILL_AFTER_SECONDS = 30
 # start_new_session=True で新しいセッション（= 新しいプロセスグループ）の
 # リーダーにし、os.killpg で子と孫をまとめて回収する。Popen.terminate()/kill()
 # は直接の子 1 プロセスにしか届かず、子が起動した孫（desktop_notify の
-# osascript / PowerShell、quality_gate の lint ステップ）が無期限に残留する。
+# osascript / PowerShell 等）が無期限に残留する。
 #
 # watchdog 自身が SIGTERM を受けた場合も、そのまま終了すると孫が残るため、
 # ハンドラで子グループへ SIGTERM を cascade し、猶予後に SIGKILL してから
@@ -241,8 +241,8 @@ _DETACH_KILL_AFTER_SECONDS = 30
 #   - watchdog を消すと、detach 済みの子と孫を kill する主体が消滅する。子は
 #     ハーネス timeout の管轄外なので、ハングした子と孫が無制限に残留する。
 #   - 子プロセス内の `signal.alarm` では代替できない。alarm は自プロセスにしか
-#     届かず、子が起動した孫（desktop_notify の osascript / PowerShell、
-#     quality_gate の lint ステップ）を回収できないため等価ではない。
+#     届かず、子が起動した孫（desktop_notify の osascript / PowerShell 等）を
+#     回収できないため等価ではない。
 #   - watchdog は sys.executable の `-c` 実行で、対象モジュールを import せず
 #     待つだけなので、追加コストは Python インタプリタ起動 1 回分に留まる。
 # すなわち「毎回 1 プロセス分の起動コスト」と「孫プロセスの無制限残留を防ぐ

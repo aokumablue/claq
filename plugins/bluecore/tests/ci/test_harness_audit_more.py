@@ -258,26 +258,28 @@ def test_get_consumer_checks_accepts_dict_package_json(tmp_path: Path) -> None:
 
 
 def test_get_repo_checks_python_structure_checks_pass_on_real_repo() -> None:
-    """JS 前提から Python 構造ベースへ書き換えた8チェックが実リポジトリで pass すること。
+    """JS 前提から Python 構造ベースへ書き換えたチェック群が実リポジトリで pass すること。
 
     ハーネス監査は元々 Node.js 実装(everything-claude-code)のルーブリックを
-    引き継いでいたため、tool-hooks-impl-count 等8件が scripts/hooks/*.js の
-    ような JS 専用パスを前提にしていた。本リポジトリは Python 実装のため
-    該当チェックは常に false-negative になっていた。実際の Python 構造
+    引き継いでいたため、対象チェックが scripts/hooks/*.js のような JS 専用
+    パスを前提にしていた。本リポジトリは Python 実装のため該当チェックは
+    常に false-negative になっていた。実際の Python 構造
     （src/bluecore/hooks/ 等）を対象にした変換後、実リポジトリに対して
     pass=True になることを確認する。
+
+    tool-hooks-impl-count（最低12モジュール）・eval-tests-presence（最低60
+    テストファイル）は、bluecore 自身が過剰処理を廃止し src/tests を意図的に
+    最小化したため、本テストの対象から除外している（「多いほど良い」という
+    前提自体が本リファクタの方針と矛盾するため）。
     """
     plugin_root = Path(__file__).resolve().parents[2]
     checks = {check["id"]: check for check in get_repo_checks(plugin_root)}
 
     python_structure_check_ids = [
-        "tool-hooks-impl-count",
         "quality-test-runner",
         "quality-ci-validations",
         "quality-hook-tests",
-        "quality-doctor-script",
         "memory-session-hooks",
-        "eval-tests-presence",
     ]
     for check_id in python_structure_check_ids:
         assert checks[check_id]["pass"] is True, f"{check_id} should pass on the real repo structure"

@@ -423,9 +423,9 @@ class TestWatchdogKillsProcessGroup:
     """_WATCHDOG_SCRIPT が孫プロセスまで実プロセスで確実に殺すことのテスト。
 
     Popen.terminate()/kill() は直接の子 1 プロセスにしか届かず、子が起動した
-    孫（desktop_notify の osascript / PowerShell、quality_gate の lint ステップ）
-    が残留する退行があったため、argv 一致アサートではなく実際にプロセスを
-    起動して wall-clock で検証する。
+    孫（desktop_notify の osascript / PowerShell 等）が残留する退行があった
+    ため、argv 一致アサートではなく実際にプロセスを起動して wall-clock で
+    検証する。
     """
 
     def _spawn_watchdog(
