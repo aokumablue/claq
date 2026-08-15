@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _HELPER = _REPO_ROOT / "plugins" / "bluecore" / "runtime" / "bluecore-helpers.sh"
 _PLUGIN_ROOT = _REPO_ROOT / "plugins" / "bluecore"
+
+_ZSH_AVAILABLE = shutil.which("zsh") is not None
+_skip_without_zsh = pytest.mark.skipif(
+    not _ZSH_AVAILABLE, reason="zsh が PATH 上に見つからないため zsh 依存テストをスキップする。"
+)
 
 
 def _run_bash(script: str, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -22,12 +30,28 @@ def _run_bash(script: str, *, env: dict[str, str] | None = None) -> subprocess.C
     )
 
 
-def _print_plugin_root_script(*, unset_env: bool = False) -> str:
-    """helper を source して bluecore_plugin_root を 1 行出す。"""
+def _run_zsh(script: str, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    """zsh -c でスクリプトを実行する（~/.zshrc を読み込まずマシン非依存にする）。"""
+    return subprocess.run(
+        ["zsh", "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def _print_plugin_root_script(*, unset_env: bool = False, cd_to: Path | None = None) -> str:
+    """helper を source して bluecore_plugin_root を 1 行出す。
+
+    cd_to を渡すと、source する前にそのディレクトリへ cd してから実行する。
+    リポジトリ外の cwd でも結果が変わらないことを検証するために使う。
+    """
     unset = "unset CLAUDE_PLUGIN_ROOT\n" if unset_env else ""
+    cd = f'cd "{cd_to}"\n' if cd_to is not None else ""
     return f'''
 set -euo pipefail
-{unset}source "{_HELPER}"
+{cd}{unset}source "{_HELPER}"
 printf '%s\\n' "$(bluecore_plugin_root)"
 '''
 
@@ -76,5 +100,23 @@ def test_bluecore_plugin_root_uses_file_location_fallback_with_env() -> None:
 def test_bluecore_plugin_root_uses_file_location_fallback_without_env() -> None:
     """シェル内で CLAUDE_PLUGIN_ROOT を unset した場合もファイル位置にフォールバックする。"""
     result = _run_bash(_print_plugin_root_script(unset_env=True))
+
+    assert result.stdout.strip() == str(_PLUGIN_ROOT)
+
+
+@_skip_without_zsh
+def test_bluecore_plugin_root_uses_file_location_fallback_with_env_under_zsh(tmp_path: Path) -> None:
+    """zsh: 親環境から CLAUDE_PLUGIN_ROOT を除いても、リポジトリ外の cwd でファイル位置に解決する。"""
+    env = dict(os.environ)
+    env.pop("CLAUDE_PLUGIN_ROOT", None)
+    result = _run_zsh(_print_plugin_root_script(cd_to=tmp_path), env=env)
+
+    assert result.stdout.strip() == str(_PLUGIN_ROOT)
+
+
+@_skip_without_zsh
+def test_bluecore_plugin_root_uses_file_location_fallback_without_env_under_zsh(tmp_path: Path) -> None:
+    """zsh: シェル内で CLAUDE_PLUGIN_ROOT を unset しても、リポジトリ外の cwd でファイル位置に解決する。"""
+    result = _run_zsh(_print_plugin_root_script(unset_env=True, cd_to=tmp_path))
 
     assert result.stdout.strip() == str(_PLUGIN_ROOT)

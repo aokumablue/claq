@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Shared helper functions for command docs.
 
+# Capture this file's own directory at source time, at file top level (not
+# inside a function). Under bash, BASH_SOURCE[0] is the sourced file; under
+# zsh, a function's $0 is the function name (not the file), but at top level
+# of a sourced script $0 is the sourced file itself. Resolving this eagerly
+# with `cd ... && pwd` also means the value stays correct even if the caller
+# later cd's elsewhere before calling bluecore_plugin_root.
+_BLUECORE_HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
 # Resolve the plugin root from CLAUDE_PLUGIN_ROOT first, then this file's
 # location. The helpers are usually sourced from command snippets.
 bluecore_plugin_root() {
@@ -9,9 +17,7 @@ bluecore_plugin_root() {
     return 0
   fi
 
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  printf '%s\n' "$(cd "${script_dir}/.." && pwd)"
+  printf '%s\n' "$(cd "${_BLUECORE_HELPERS_DIR}/.." && pwd)"
 }
 
 # Run a bluecore module or script through the repository launcher.
