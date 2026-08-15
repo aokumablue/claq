@@ -70,32 +70,6 @@
         "description": "永続メモリから共通知識・リポジトリ知識・前回の引き継ぎを <bluecore-memory> として注入する（DB が無ければ作成）"
       }
     ],
-    "Stop": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.hooks.session_end",
-            "async": true,
-            "timeout": 10
-          }
-        ],
-        "description": "各応答後もセッション状態を保持する（停止時にはtranscript_pathが保持される）"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.hooks.desktop_notify",
-            "async": true,
-            "timeout": 5
-          }
-        ],
-        "description": "応答完了時にタスクサマリー付きデスクトップ通知を送信します（macOS: osascript、WSL: PowerShell + BurntToast）"
-      }
-    ],
     "SessionEnd": [
       {
         "matcher": "*",

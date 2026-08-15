@@ -1024,15 +1024,6 @@ def test_collect_args_until_separator_stops_at_shell_operator() -> None:
     assert pbcq._collect_args_until_separator(["&&", "echo"], 0) == []
 
 
-def test_iter_assistant_tool_uses_non_list_content() -> None:
-    """assistant の message.content が list でなければ空リストを返す。"""
-    from bluecore.hooks import session_end
-
-    assert session_end._iter_assistant_tool_uses({"type": "assistant", "message": {"content": "plain text"}}) == []
-    assert session_end._iter_assistant_tool_uses({"type": "assistant", "message": {}}) == []
-    assert session_end._iter_assistant_tool_uses({"type": "assistant"}) == []
-
-
 def test_find_file_issues_minified_js_lints_but_skips_secret_scan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

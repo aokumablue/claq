@@ -104,42 +104,6 @@ json.dump({k: v for k, v in payload.items() if v}, sys.stdout, ensure_ascii=Fals
 ' | bluecore_run bluecore.mem.cli learn
 }
 
-# Append one loop-dev iteration telemetry record to the JSONL raw log.
-#
-# Telemetry is a raw log, NOT knowledge: it never goes into the `knowledge`
-# table. `bluecore_mem_learn` stays knowledge-only — use it for the lessons
-# learned during a run, and this function for the run's own metrics. The
-# records land in ~/.bluecore/repos/<repo-id>/loop-dev.jsonl next to the learn
-# observation log, and rotate/purge on the same 10MB / 30-day policy.
-#
-# Usage:
-#   bluecore_loop_telemetry --task "<one line>" \
-#                           --result converged|not-converged|circuit-break|stopped \
-#                           --iterations <n> [--max-iterations <n>] \
-#                           [--blockers <n>] [--flakes <n>] \
-#                           [--commit <hash>]... [--note "<text>"]
-#
-# --task, --result and --iterations are required; the rest default to 0 / 2.
-# --commit may be repeated once per commit produced by the run.
-#
-# The record path is resolved through the `repos` ledger (SQLite), so the CLI
-# arms a hard timeout (5s) on itself and drops the record rather than stalling
-# the caller. On success it prints the JSONL path it wrote to.
-bluecore_loop_telemetry() {
-  bluecore_run bluecore.skills.loop_dev.telemetry record "$@"
-}
-
-# Read loop-dev iteration telemetry back as JSONL (archives included).
-#
-# Usage:
-#   bluecore_loop_telemetry_list [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--limit <n>]
-#
-# Prints every matching record, oldest first, one JSON object per line. There
-# is no relevance cutoff, so callers get an exact count rather than a sample.
-bluecore_loop_telemetry_list() {
-  bluecore_run bluecore.skills.loop_dev.telemetry list "$@"
-}
-
 # Collect the repeated inputs used by /skill-gen.
 collect_skill_create_inputs() {
   local commits="${1:-200}"

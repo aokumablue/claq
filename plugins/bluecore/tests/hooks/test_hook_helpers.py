@@ -18,9 +18,6 @@ import pytest
 from bluecore.hooks import (
     config_protection as config_protection,
 )
-from bluecore.hooks import (
-    session_end as session_end,
-)
 from bluecore.hooks.hook_common import is_truthy
 
 
@@ -131,29 +128,6 @@ def test_config_protection_blocks_legacy_file_field(monkeypatch: pytest.MonkeyPa
     )
     assert code == 2
     assert "Modifying biome.json is not allowed" in stderr
-
-
-def test_session_end_extracts_summary(tmp_path: Path) -> None:
-    transcript = tmp_path / "transcript.jsonl"
-    lines = [
-        {"type": "user", "content": "Fix docs"},
-        {
-            "type": "assistant",
-            "message": {
-                "content": [
-                    {"type": "tool_use", "name": "Edit", "input": {"file_path": "README.md"}},
-                    {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
-                ]
-            },
-        },
-        {"type": "tool_use", "tool_name": "Write", "tool_input": {"file_path": "docs/notes.md"}},
-        {"type": "user", "message": {"content": [{"text": "Add tests"}]}},
-    ]
-    transcript.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
-
-    summary = session_end.extract_session_summary(str(transcript))
-
-    assert summary == {"filesModified": ["README.md", "docs/notes.md"], "totalMessages": 2}
 
 
 def test_config_protection_entrypoint_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:

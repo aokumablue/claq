@@ -135,20 +135,4 @@ Assumptions: {仮決定事項 or "-"}
 
 search: `mem search` — クエリ例 `loop-dev iteration blocker converge {task キーワード}`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
 
-record（2 種類あり、口が違う。混同しないこと）:
-
-1. **反復テレメトリ（生ログ → JSONL）** — 収束したかどうかにかかわらず、1 実行につき 1 件を発行する。loop-audit skill の一次データソース。
-
-   テレメトリは**知識ではなく生ログ**なので `knowledge` テーブルには入れない（人間可読の学びではなく、SessionStart への低トークン注入にも使えず、`status='pending'`＝昇格待ちの知識候補の枠を埋めて昇格作業を選り分け作業に変えてしまう）。書き込み先は learn の観測ログと同じ `~/.bluecore/repos/<repo-id>/loop-dev.jsonl`。**`bluecore_mem_learn` でテレメトリを書かないこと。**
-
-   ```bash
-   source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
-   bluecore_loop_telemetry --task "{task}" \
-     --result "{converged|not-converged|circuit-break|stopped}" \
-     --iterations {n} --max-iterations 2 \
-     --blockers {n} --flakes {n} --commit {hash}
-   ```
-
-   `--result` は反復履歴の 4 値と同一語彙（それ以外の値はコマンドが弾く）。コミットが複数あれば `--commit` を繰り返す。成功すると書き込んだ JSONL のパスを 1 行出力する。
-
-2. **学び（知識 → DB）** — 実装中に踏んだ罠・判明した事実は別カードとして `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」。テレメトリと同じ記録に混ぜない。
+record: **学び（知識 → DB）** — 実装中に踏んだ罠・判明した事実は `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」。反復の収束状況そのもの（生ログ）は知識カードに混ぜない — 収束状況は checkpoint の `## 反復履歴` が単一情報源（`../checkpoint/SKILL.md` 参照）。
