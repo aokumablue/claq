@@ -14,7 +14,7 @@ class TestRedact:
         "name, text, should_redact",
         [
             # Anthropic API キー
-            ("anthropic_key", "key=sk-ant-api03-abcdefghijklmnopqrst1234567890ABCDEFGHIJKLMNO", True),
+            ("anthropic_key", "key=" + "sk-ant-" + "api03-abcdefghijklmnopqrst1234567890ABCDEFGHIJKLMNO", True),
             # OpenAI API キー
             ("openai_key", "token = " + "sk-" + "abcdefghijklmnopqrstuvwxyz1234567890ABCD", True),
             # Slack Bot トークン

@@ -76,6 +76,23 @@ def test_find_file_issues_secret_detection_not_bypassed_by_nosec(monkeypatch: py
     assert issues[0]["severity"] == "error"
 
 
+def test_find_file_issues_detects_anthropic_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`sk-ant-...` 形式（ハイフン区切り）の Anthropic API キーも検出される。
+
+    OpenAI 形式用パターン `sk-[a-zA-Z0-9]{20,}` は `sk-` 直後にハイフンを含む
+    Anthropic 形式（`sk-ant-api03-...`）とは不一致だったため、専用パターンで
+    検出する回帰。
+    """
+    content = "sk-" + "ant-" + "abcdefghijklmnopqrstuvwxyz0123456789"
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
+
+    issues = commit_quality_scanner.find_file_issues("src/app.py")
+
+    assert len(issues) == 1
+    assert issues[0]["type"] == "secret"
+    assert issues[0]["severity"] == "error"
+
+
 def test_find_file_issues_console_log_still_suppressed_by_nosec(monkeypatch: pytest.MonkeyPatch) -> None:
     """secret を含まない行では従来どおり console.log が nosec で抑制されること。"""  # nosec
     content = 'console.log("debug")  # nosec'

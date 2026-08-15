@@ -3,7 +3,7 @@
 
 `pre_bash_commit_quality` フックのスキャナ層です。ファイル内容の取得
 （INDEX / 作業ツリー）、lint 対象・シークレットスキャン対象の判定、
-バイナリ判定、そして実際の問題検出（console.log / debugger / TODO /
+バイナリ判定、そして実際の問題検出（ログ出力呼び出し / デバッガ文 / TODO /
 シークレット）を担います。`git commit` の検出やコミットメッセージ検証
 といったエントリ側のロジックは `pre_bash_commit_quality` に残ります。
 
@@ -33,6 +33,7 @@ _SECRET_SCAN_EXCLUDED_FILENAMES = {
 }
 _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"sk-[a-zA-Z0-9]{20,}", "OpenAI API key"),
+    (r"sk-ant-[a-zA-Z0-9_-]{20,}", "Anthropic API key"),
     (r"ghp_[a-zA-Z0-9]{36}", "GitHub PAT"),
     (r"AKIA[A-Z0-9]{16}", "AWS Access Key"),
     (r"api[_-]?key\s*[=:]\s*['\"][^'\"]+['\"]", "API key"),
@@ -136,7 +137,7 @@ def get_worktree_file_content(repo_root: Path, file_path: str) -> str | None:
 
 
 def should_lint_file(file_path: str) -> bool:
-    """console.log / デバッガ文 / TODO の lint チェック対象かどうかを判定します。
+    """ログ出力呼び出し / デバッガ文 / TODO の lint チェック対象かどうかを判定します。
 
     Args:
         file_path: 判定対象のファイルパスです。
@@ -179,10 +180,10 @@ def should_scan_secrets(file_path: str) -> bool:
 
 
 def _scan_lint_issues(lines: list[str]) -> list[dict]:
-    """ファイル内容から console.log / debugger / Issue 参照なし TODO を検出します。
+    """ファイル内容からログ出力呼び出し / デバッガ文 / Issue 参照なし TODO を検出します。
 
     `# nosec` を含む行は検出器自身のテストフィクスチャ等、意図的に
-    パターンを含む行とみなして console.log / debugger / TODO チェックを
+    パターンを含む行とみなしてログ出力呼び出し / デバッガ文 / TODO チェックを
     抑制します（シークレット検出は別関数で `# nosec` の対象外です）。
 
     Args:
@@ -200,7 +201,7 @@ def _scan_lint_issues(lines: list[str]) -> list[dict]:
         line_num = index + 1
 
         # 抑制マーカー付き行（検出器自身のテストフィクスチャ等、意図的に
-        # パターンを含む行）は console.log/debugger/todo をスキップする。
+        # パターンを含む行）はログ出力呼び出し/デバッガ文/todo をスキップする。
         if "# nosec" in line:
             continue
 
@@ -301,7 +302,7 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
     コミットされる未ステージ変更ファイルは作業ツリーの内容がコミット対象と
     なるため、`repo_root` 経由で読む必要があります。
 
-    lint チェック（console.log / debugger / TODO）は `should_lint_file` が
+    lint チェック（ログ出力呼び出し / デバッガ文 / TODO）は `should_lint_file` が
     True、かつバイナリでない（先頭 `_BINARY_SNIFF_SIZE` 文字に NUL を含まない）
     ファイルのみ対象です。
 
@@ -313,7 +314,7 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
     スキャンを継続します（末尾側のみに存在するシークレットは検出できません
     が、水増しによる全面回避は防げます）。
 
-    `# nosec` を含む行は console.log / debugger / TODO チェックを抑制します
+    `# nosec` を含む行はログ出力呼び出し / デバッガ文 / TODO チェックを抑制します
     （検出器自身のテストフィクスチャ等、意図的にパターンを含む行のため）。
     シークレット検出は `# nosec` の対象外です。
 

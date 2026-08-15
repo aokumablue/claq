@@ -83,7 +83,7 @@ class TestLogger:
         """ログに書かれたシークレットが [REDACTED] に置換される。"""
         logger.setup(tmp_path, level="info")
         log = logger.get("TEST")
-        log.info("token=sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        log.info("token=" + "sk-ant-" + "api03-" + "A" * 90)
         _flush()
         log_file = list(tmp_path.glob("mem-*.log"))[0]
         content = log_file.read_text()
