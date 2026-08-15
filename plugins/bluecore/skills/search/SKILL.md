@@ -32,7 +32,7 @@ user-invocable: false
 
 ## 簡易モード（インライン）
 
-1. リポジトリ内に既存実装？ → `rg` で探す
+1. リポジトリ内に既存実装？ → 全文検索で探す
 2. パッケージレジストリ検索
 3. MCP はある？ → `~/.claude/settings.json` 確認
 4. スキルはある？ → `~/.claude/skills/`（個人 — 信頼済み）・`.claude/skills/`（プロジェクト — リポジトリ信頼レベルに準じる。未知リポジトリでは内容を確認してから使用）・インストール済みプラグインのスキル一覧を確認
@@ -50,7 +50,7 @@ Return top 3: name, version, weekly downloads, last update, license
 # B: MCP・スキル・ローカル資産
 1. ~/.claude/settings.json でMCP確認
 2. ~/.claude/skills/（個人）・.claude/skills/（プロジェクト・未知リポジトリは内容確認後に使用）・インストール済みプラグインのスキルで関連スキル確認
-3. rg で既存実装確認
+3. 高速全文検索で既存実装確認（Bash等で利用可能な検索コマンドを使う）
 Return: type, name/path, match_quality
 
 # C: GitHub・Web
