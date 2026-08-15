@@ -1,6 +1,6 @@
 #!/bin/sh
 # Grok Build TUI 用: ~/.grok/plugins/bluecore を ~/.grok/installed-plugins/bluecore-<hash>
-# （このスクリプトが置かれているインストール実体）へ symlink する。
+# （Grok CLI のインストール実体）へ symlink する。
 #
 # Grok は hooks.json の ${CLAUDE_PLUGIN_ROOT} を常に ~/.grok/plugins/<name> に
 # 展開するが、CLI インストール実体は ~/.grok/installed-plugins/<name>-<hash>/
@@ -13,15 +13,35 @@
 # インストールされている場合に、無関係なセッション開始のたびに Grok 側の
 # 設定を無断で書き換える副作用を避けるため）。
 #
-# 使い方:
+# このスクリプトは自身の配置場所（$0）には依存せず、常に
+# ~/.grok/installed-plugins/bluecore-* を直接探索して実体を見つける。
+# そのため `curl ... | sh` のようにパイプ経由で実行され $0 が bash/sh に
+# なる場合でも正しく動く（ダウンロードと同時実行が可能）。
+#
+# 使い方（ローカル実行）:
 #   sh ~/.grok/installed-plugins/bluecore-*/scripts/link_grok_plugin.sh
 # 実行ビットが立っていれば直接実行も可:
 #   ~/.grok/installed-plugins/bluecore-*/scripts/link_grok_plugin.sh
+# 配布スクリプトのダウンロードと同時実行も可（$0 に依存しないため成立する）:
+#   curl -fsSL <配布スクリプトのURL> | sh
+#   curl -fsSL <配布スクリプトのURL> | bash
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+INSTALLED_DIR="$HOME/.grok/installed-plugins"
 
-PYTHONPATH="$ROOT/src" python3 -c '
+SRC_DIR=""
+for candidate in "$INSTALLED_DIR"/bluecore-*; do
+    if [ -f "$candidate/src/bluecore/lib/grok_plugin_root.py" ]; then
+        SRC_DIR="$candidate/src"
+        break
+    fi
+done
+
+if [ -z "$SRC_DIR" ]; then
+    echo "no installed bluecore-* found under ~/.grok/installed-plugins"
+    exit 0
+fi
+
+PYTHONPATH="$SRC_DIR" python3 -c '
 from bluecore.lib.grok_plugin_root import ensure_grok_plugin_root_symlink
 
 result = ensure_grok_plugin_root_symlink()

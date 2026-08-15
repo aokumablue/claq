@@ -24,11 +24,16 @@ def _run_script(home: Path) -> subprocess.CompletedProcess[str]:
 
 
 def _make_installed_plugin(home: Path, name: str = "bluecore-abc123") -> Path:
-    """``home/.grok/installed-plugins/<name>`` に launcher 付きツリーを作る。"""
+    """``home/.grok/installed-plugins/<name>`` に実ソース一式付きツリーを作る。
+
+    link_grok_plugin.sh は ``src/bluecore/lib/grok_plugin_root.py`` の実在を
+    見て ``PYTHONPATH`` を組み立てるため、import 可能な実体が要る。
+    リポジトリの実 src を symlink して賄う（重複コピーはしない）。
+    """
     root = home / ".grok" / "installed-plugins" / name
-    launcher = root / "src" / "bluecore" / "launcher.py"
-    launcher.parent.mkdir(parents=True, exist_ok=True)
-    launcher.write_text("# test\n", encoding="utf-8")
+    root.mkdir(parents=True, exist_ok=True)
+    real_src = _REPO_ROOT / "plugins" / "bluecore" / "src"
+    (root / "src").symlink_to(real_src, target_is_directory=True)
     return root
 
 
