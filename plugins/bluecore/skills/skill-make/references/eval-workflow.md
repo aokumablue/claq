@@ -73,11 +73,7 @@ Execute this task:
 
 2. **ベンチマークに集約する**
 
-```bash
-PYTHONPATH=src python -m bluecore.skills.aggregate_benchmark <workspace>/iteration-N --skill-name <name>
-```
-
-これで `benchmark.json` と `benchmark.md` が作られる。各構成の通過率・時間・トークン数が平均±標準偏差と差分付きでまとまる。手で `benchmark.json` を作る場合は `schemas.md`（同階層）のビューアー用スキーマを参照。`with_skill` を `without_skill` の前に並べる。
+各 `grading.json` / `timing.json` を読み、`schemas.md`（同階層）のビューアー用スキーマに従って `benchmark.json` を作る。各構成の通過率・時間・トークン数を平均±標準偏差と差分付きでまとめる。`with_skill` を `without_skill` の前に並べる。
 
 3. **分析を入れる**
    - `benchmark.json` と各 `grading.json` を直接読んで分析する

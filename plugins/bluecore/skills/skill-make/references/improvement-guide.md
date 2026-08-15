@@ -62,27 +62,17 @@ SKILL.md 前置きの `description` は Claude がスキルを呼ぶかを左右
 ]
 ```
 
-### 2. 最適化ループを回す
+### 2. 候補を手動で反復評価する
 
-`run_loop` が eval セットを train 60% / holdout test 40% に分けて反復改善し、`best_description` を test スコアで選ぶ。現セッションを動かす model ID を渡す。
-
-```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
-bluecore_run bluecore.skills.run_loop --eval-set <path-to-trigger-eval.json> --skill-path <path-to-skill> --model <model-id-powering-this-session> --max-iterations 5 --verbose
-```
+eval セットを train 60% / holdout test 40% に手動で分け、description の候補案ごとに train 側で `should_trigger` 判定精度を確認し、holdout 側で過適合していないかを検証する。収束判断の考え方は `skill-tune`（Step 7 の hold-out 過適合チェック）に準拠する。
 
 ### 3. 結果を反映する
 
-JSONの `best_description` を取り出し、SKILL.mdのfrontmatterを更新。
+holdout スコアが最も良かった description を採用し、SKILL.mdのfrontmatterを更新。
 
 ## パッケージ化して渡す（`present_files` がある場合のみ）
 
-`present_files` ツールにアクセスできるか確認。使えないなら飛ばす。
-
-```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
-bluecore_run bluecore.skills.package_skill <path/to/skill-folder>
-```
+`present_files` ツールにアクセスできるか確認。使えないなら飛ばす。使える場合は `present_files` へスキルディレクトリを直接渡す（zip 化が必要な形式なら、除外パターン（`.git`・`__pycache__`・`node_modules` 等）を手動で除きながら zip アーカイブを作る）。
 
 ## 環境別の注意
 
