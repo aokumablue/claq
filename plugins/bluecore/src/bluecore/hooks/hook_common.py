@@ -210,8 +210,8 @@ def basename(path: str) -> str:
 # 管轄外であり、hooks.json の値（最大は mem.cli context の 60 秒だが、これは
 # detach しない同期エントリ）と紐付ける論拠がないため。
 #
-# detach 対象（launcher --bg: learn.observe / session_end / desktop_notify /
-# mem.cli handoff）はいずれも正常系ではローカル I/O 数秒で終わる。したがって
+# detach 対象（launcher --bg: session_end / desktop_notify / mem.cli handoff）
+# はいずれも正常系ではローカル I/O 数秒で終わる。したがって
 # 上限は「正常系を絶対に切らない」ことを優先した安全網の閾値であり、
 # 10 分走り続けていれば確実に異常（ハング・暴走）と断定できる 600 秒を採る。
 DETACH_TIMEOUT_SECONDS = 600
@@ -234,10 +234,10 @@ _DETACH_KILL_AFTER_SECONDS = 30
 # ハンドラで子グループへ SIGTERM を cascade し、猶予後に SIGKILL してから
 # 抜ける（ハンドラ内で proc.wait() を再入させないよう time.sleep で待つ）。
 #
-# コスト: detach 1 回につき watchdog + 対象の 2 プロセスが起動する。hooks.json の
-# `--bg bluecore.skills.learn.observe pre` は matcher "*" で全ツールコールに発火
-# するため、非 Claude ハーネスではツールコールごとにこの 2 プロセスを払う。これは
-# 意図的なコストであり、削減目的で watchdog を外してはならない:
+# コスト: detach 1 回につき watchdog + 対象の 2 プロセスが起動する。現在の --bg
+# 対象（Stop の session_end/desktop_notify、SessionEnd の mem.cli handoff）は
+# セッション終了系イベントでのみ発火するため、ツールコールごとの頻度ではない。
+# それでも意図的なコストであり、削減目的で watchdog を外してはならない:
 #   - watchdog を消すと、detach 済みの子と孫を kill する主体が消滅する。子は
 #     ハーネス timeout の管轄外なので、ハングした子と孫が無制限に残留する。
 #   - 子プロセス内の `signal.alarm` では代替できない。alarm は自プロセスにしか

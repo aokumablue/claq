@@ -34,18 +34,6 @@
         "description": "linter/formatterの設定ファイルへの変更をブロックします。エージェントが設定を弱めるのではなく、コードを修正するように導きます。"
       },
       {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.skills.learn.observe pre",
-            "async": true,
-            "timeout": 10
-          }
-        ],
-        "description": "キャプチャツールの使用状況を観察して継続的な学習に役立てる"
-      },
-      {
         "matcher": "^(Task|task|Agent|agent|spawn_subagent)$",
         "hooks": [
           {

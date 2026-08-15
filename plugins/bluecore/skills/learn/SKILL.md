@@ -88,12 +88,6 @@ bluecore_run bluecore.mem.cli show pytest-needs-pipefail   # body を読む唯�
 `search` / `list` が返すのは `- [kind] title (key)` の 1 行だけで `body` は含まない。
 本文が要る key だけを 1 件ずつ `show` に渡す二段構えにする（注入トークンの節約）。
 
-## 自動抽出（observer）
-
-`bluecore.skills.learn.observer` が観測ログ（`~/.bluecore/repos/<repo-id>/observations.jsonl`）を
-Haiku に読ませ、知識候補を `status='pending'` / `source='observer'` で書き込む。
-`pending` は注入されないため、人間が `/instinct` でレビューして `promote` するまでセッションには現れない。
-
 ## 陳腐化した知識の扱い
 
 削除ではなく `mem forget <key>` で `archived` にする。
