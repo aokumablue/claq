@@ -312,3 +312,12 @@ class TestEnsureGrokPluginRootSymlink:
         link = tmp_path / ".grok" / "plugins" / "bluecore"
         with patch.object(Path, "symlink_to", side_effect=OSError()):
             assert mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link) is None
+
+    def test_home_omitted_uses_path_home(self, tmp_path: Path, monkeypatch) -> None:
+        """home 未指定時は Path.home()（$HOME）を使う（link_grok_plugin.sh からの実呼び出し経路）。"""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+        target = _make_installed_plugin(tmp_path)
+        link = tmp_path / ".grok" / "plugins" / "bluecore"
+        result = mod.ensure_grok_plugin_root_symlink(link_path=link)
+        assert result == target.resolve()

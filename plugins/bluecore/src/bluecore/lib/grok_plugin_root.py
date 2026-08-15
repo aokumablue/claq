@@ -2,8 +2,12 @@
 
 Grok は ``${CLAUDE_PLUGIN_ROOT}`` を ``~/.grok/plugins/<name>`` に展開するが、
 実体は ``~/.grok/installed-plugins/<name>-<hash>/`` に置かれる。hooks.json の
-launcher パスが前者を参照するため、SessionStart で
-シンボリックリンクを張って一致させる。
+launcher パスが前者を参照するため、両者を一致させるにはシンボリックリンクが
+必要になる。SessionStart からの自動修復は行わない（同一マシンに Claude/
+Copilot と Grok が同居する環境で、Claude 側セッション開始のたびに Grok 側の
+symlink を無断で書き換える副作用があるため）。ユーザーが
+``scripts/link_grok_plugin.sh`` を手動実行したときに、本モジュールの
+``ensure_grok_plugin_root_symlink`` が呼ばれてリンクを張る。
 
 リンク先は常に ``~/.grok/installed-plugins/bluecore-*`` のみとする。
 開発用チェックアウト（例: bluecore-dev）は一切参照しない。
