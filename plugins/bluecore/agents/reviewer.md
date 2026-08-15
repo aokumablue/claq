@@ -2,6 +2,7 @@
 name: reviewer
 description: コードレビュー専門。品質/セキュリティ/保守性を能動的にレビュー。コード変更直後に必須使用。
 effort: xhigh
+tools: Read, Grep, Glob, Bash
 ---
 
 # コードレビュアー
