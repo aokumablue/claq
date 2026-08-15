@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from bluecore.hooks.hook_common import (
     MAX_STDIN_BYTES,
     basename,
@@ -20,13 +22,24 @@ from bluecore.hooks.hook_common import (
     parse_json_object,
     read_raw_stdin_with_truncation,
 )
-from bluecore.lib.harness import extract_file_paths, normalize_tool_name
+from bluecore.lib.harness import (
+    extract_file_paths,
+    extract_raw_tool_name,
+    extract_tool_input,
+    normalize_tool_name,
+)
 
 # matcher が "*"（全ツール）のため、書込み系ツールのみを対象にする早期 return に使う。
 # normalize_tool_name() が Codex の apply_patch を "Edit" に、Copilot CLI の
 # lowercase tool_name（write/edit/multiedit）を Claude Code 表記へ正規化するため、
 # 正規化後に小文字化した値をこの集合と比較する。
 _WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
+
+# ハーネスごとの入力コンテナキー。存在するキーを順に走査する。
+_INPUT_CONTAINER_KEYS = ("tool_input", "toolArgs", "tool_args")
+
+# apply_patch のパッチがパース不能なときの fail-closed 理由。
+_UNPARSEABLE_PATCH_MESSAGE = "BLOCKED: Could not determine target files from patch input."
 
 PROTECTED_FILES = {
     ".eslintrc",
@@ -84,6 +97,77 @@ def blocked_message_for_file(file_name: str) -> str:
     )
 
 
+def _paths_from_container(tool_name: str, container: Any) -> list[str] | None:
+    """1 つの入力コンテナから対象パスを取り出す。
+
+    構造化パッチが判定不能なら None（呼び出し側は fail-closed）。
+    file_path が無く dict なら旧 ``file`` キーを補完する。
+
+    Args:
+        tool_name: 正規化前の生ツール名。
+        container: extract_tool_input 相当の 1 コンテナ値。
+
+    Returns:
+        パス一覧。パッチ判定不能時は None。
+    """
+    file_paths = extract_file_paths(tool_name, container)
+    if file_paths is None:
+        return None
+    if not file_paths and isinstance(container, dict):
+        legacy = str(container.get("file") or "")
+        if legacy:
+            return [legacy]
+    return file_paths
+
+
+def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
+    """1 つの入力コンテナが保護対象ならブロック理由を返す。
+
+    Args:
+        tool_name: 正規化前の生ツール名。
+        container: extract_tool_input 相当の 1 コンテナ値。
+
+    Returns:
+        ブロック理由。保護対象でなければ None。パッチ判定不能時は
+        fail-closed メッセージ。
+
+    Raises:
+        例外は発生しません。
+    """
+    file_paths = _paths_from_container(tool_name, container)
+    if file_paths is None:
+        return _UNPARSEABLE_PATCH_MESSAGE
+    for file_path in file_paths:
+        file_name = basename(file_path)
+        if file_name in PROTECTED_FILES:
+            return blocked_message_for_file(file_name)
+    return None
+
+
+def _block_reason(data: dict[str, Any]) -> str | None:
+    """書込み系入力が保護対象ならブロック理由を返す。
+
+    Args:
+        data: フック stdin の dict。
+
+    Returns:
+        ブロック理由。対象外・保護対象なしなら None。
+
+    Raises:
+        例外は発生しません。
+    """
+    tool_name = extract_raw_tool_name(data)
+    if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES:
+        return None
+    for key in _INPUT_CONTAINER_KEYS:
+        if key not in data:
+            continue
+        reason = _block_reason_for_container(tool_name, extract_tool_input({key: data[key]}))
+        if reason:
+            return reason
+    return None
+
+
 def _truncation_blocked_message(max_bytes: int) -> str:
     """入力切り捨て時のブロック理由メッセージを生成する。
 
@@ -124,25 +208,9 @@ def main() -> int:
         return emit_block_output(_truncation_blocked_message(MAX_STDIN_BYTES))
 
     data = parse_json_object(raw)
-    if data:
-        tool_name = str(data.get("tool_name") or "")
-        if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES:
-            return 0
-        tool_input = data.get("tool_input")
-        file_paths = extract_file_paths(tool_name, tool_input)
-        if file_paths is None:
-            # apply_patch のパッチがパース不能: 保護対象か判定できないため fail-closed
-            return emit_block_output("BLOCKED: Could not determine target files from patch input.")
-        if not file_paths and isinstance(tool_input, dict):
-            # 旧形式の file フィールドのみ持つ入力を補完する
-            legacy = str(tool_input.get("file") or "")
-            if legacy:
-                file_paths = [legacy]
-        for file_path in file_paths:
-            file_name = basename(file_path)
-            if file_name in PROTECTED_FILES:
-                return emit_block_output(blocked_message_for_file(file_name))
-
+    reason = _block_reason(data) if data else None
+    if reason:
+        return emit_block_output(reason)
     return 0
 
 

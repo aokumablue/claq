@@ -14,15 +14,37 @@ class TestDetectHarness:
     """detect_harness のテスト。"""
 
     def test_claudecode_env_returns_claude(self, monkeypatch):
-        """CLAUDECODE 設定時は claude を返す。"""
+        """CLAUDECODE のみ設定時（非 Claude 系マーカーが一切無い）は claude を返す。"""
+        for key in list(os.environ):
+            if key.startswith("GROK_"):
+                monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("CLAUDECODE", "1")
         assert harness.detect_harness() == "claude"
 
-    def test_claudecode_takes_precedence(self, monkeypatch):
-        """CLAUDECODE は他の判定材料より優先される。"""
+    def test_claudecode_does_not_override_codex_marker(self, monkeypatch):
+        """CLAUDECODE と codex マーカーが共存する場合、codex 判定を優先する
+        （ネストされた実行等で CLAUDECODE が誤って混入しても、非 Claude 系
+        マーカーを最優先する回帰防止）。"""
         monkeypatch.setenv("CLAUDECODE", "1")
         monkeypatch.setenv("PLUGIN_DATA", "/tmp/plugin-data")
-        assert harness.detect_harness() == "claude"
+        assert harness.detect_harness() == "codex"
+
+    def test_claudecode_with_grok_marker_returns_grok(self, monkeypatch):
+        """CLAUDECODE と GROK マーカーが共存する場合、grok を優先する
+        （Grok 実機で CLAUDECODE=1 + GROK_AGENT=1 が誤って claude と判定
+        されていた回帰の防止。受け入れ基準）。"""
+        for key in list(os.environ):
+            if key.startswith("GROK_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.setenv("GROK_AGENT", "1")
+        assert harness.detect_harness() == "grok"
+
+    def test_claudecode_with_copilot_marker_returns_copilot(self, monkeypatch):
+        """CLAUDECODE と COPILOT マーカーが共存する場合、copilot を優先する。"""
+        monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.setenv("COPILOT_AGENT_PROMPT", "do something")
+        assert harness.detect_harness() == "copilot"
 
     def test_plugin_data_returns_codex(self, monkeypatch):
         """PLUGIN_DATA 設定時は codex を返す。"""
@@ -122,6 +144,20 @@ class TestNormalizeToolName:
         """Copilot CLI が渡す lowercase runtime tool 名を Claude Code 表記へ正規化する。"""
         assert harness.normalize_tool_name(copilot_name) == expected
 
+    @pytest.mark.parametrize(
+        ("grok_name", "expected"),
+        [
+            ("search_replace", "Edit"),
+            ("run_terminal_command", "Bash"),
+            ("spawn_subagent", "Agent"),
+            ("read_file", "Read"),
+            ("list_dir", "Glob"),
+        ],
+    )
+    def test_grok_names_normalize_to_claude_code_form(self, grok_name, expected):
+        """Grok 固有の runtime tool 名を Claude Code 表記へ正規化する（H-04）。"""
+        assert harness.normalize_tool_name(grok_name) == expected
+
 
 class TestExtractBashCommand:
     """extract_bash_command / extract_tool_input のテスト。"""
@@ -159,6 +195,104 @@ class TestExtractBashCommand:
         """キーが無ければ空文字。"""
         assert harness.extract_bash_command({}) == ""
 
+    def test_tool_input_dict_without_string_command(self):
+        """tool_input が dict でも command/cmd が無い・非文字列なら空文字。"""
+        assert harness.extract_bash_command({"tool_input": {}}) == ""
+        assert harness.extract_bash_command({"tool_input": {"command": 1}}) == ""
+
+
+class TestExtractToolInput:
+    """DT-01: extract_tool_input のコンテナ優先順位と JSON デコード。"""
+
+    def test_extract_tool_input_accepts_tool_args_dict(self) -> None:
+        """toolArgs / tool_args が dict ならそのまま返す。"""
+        expected = {"file_path": "sample.py"}
+        assert harness.extract_tool_input({"toolArgs": expected}) == expected
+        assert harness.extract_tool_input({"tool_args": expected}) == expected
+
+    def test_extract_tool_input_decodes_tool_args_json_object(self) -> None:
+        """toolArgs が JSON オブジェクト文字列なら dict に decode する。"""
+        payload = {"toolArgs": json.dumps({"file_path": "sample.py"})}
+        assert harness.extract_tool_input(payload) == {"file_path": "sample.py"}
+
+    def test_extract_tool_input_preserves_malformed_json_string(self) -> None:
+        """不正 JSON 文字列は例外を出さず元の文字列を返す。"""
+        assert harness.extract_tool_input({"toolArgs": "{bad"}) == "{bad"
+
+    def test_extract_tool_input_prefers_tool_input_over_tool_args(self) -> None:
+        """tool_input と toolArgs が両方あるときは tool_input を優先する。"""
+        payload = {
+            "tool_input": {"file_path": "canonical.py"},
+            "toolArgs": {"file_path": "native.py"},
+        }
+        assert harness.extract_tool_input(payload) == {"file_path": "canonical.py"}
+
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            ({"tool_input": {"file_path": "sample.py"}}, {"file_path": "sample.py"}),
+            ({"toolArgs": '["raw"]'}, ["raw"]),
+            ({"toolArgs": "raw command"}, "raw command"),
+            (
+                {"tool_input": None, "toolArgs": {"file_path": "sample.py"}},
+                None,
+            ),
+            ({}, None),
+            ({"toolArgs": None}, None),
+            ({"toolArgs": [1, 2]}, [1, 2]),
+            ({"toolArgs": 3}, 3),
+        ],
+        ids=[
+            "dt01-1-tool_input-dict",
+            "dt01-5-json-array-string",
+            "dt01-7-plain-string",
+            "dt01-9-tool_input-none-wins",
+            "dt01-10-missing",
+            "dt01-11-none",
+            "dt01-11-list",
+            "dt01-11-number",
+        ],
+    )
+    def test_extract_tool_input_remaining_dt01_rows(
+        self, payload: dict, expected: object
+    ) -> None:
+        """DT-01 の残行（存在優先・非 object JSON・型保持）を固定する。"""
+        assert harness.extract_tool_input(payload) == expected
+
+
+class TestExtractRawToolName:
+    """DT-01: extract_raw_tool_name は normalize 前の生文字列を返す。"""
+
+    def test_extract_raw_tool_name_accepts_snake_and_camel_case_fields(self) -> None:
+        """tool_name と toolName の有効な文字列を吸収し、正規化はしない。"""
+        assert harness.extract_raw_tool_name({"tool_name": "Edit"}) == "Edit"
+        assert harness.extract_raw_tool_name({"toolName": "edit"}) == "edit"
+
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            ({"tool_name": "Write", "toolName": "edit"}, "Write"),
+            ({"tool_name": 123, "toolName": "edit"}, "edit"),
+            ({"toolName": 123}, ""),
+            ({}, ""),
+            ({"tool_name": "", "toolName": "edit"}, "edit"),
+            ({"tool_name": "", "toolName": ""}, ""),
+        ],
+        ids=[
+            "dt01-raw-3-prefer-tool_name",
+            "dt01-raw-4-nonstring-fallback",
+            "dt01-raw-5-toolname-nonstring",
+            "dt01-raw-6-missing",
+            "empty-tool_name-falls-through",
+            "both-empty",
+        ],
+    )
+    def test_extract_raw_tool_name_remaining_dt01_rows(
+        self, payload: dict, expected: str
+    ) -> None:
+        """空文字は無効、非文字列は fallback、両方なしは空文字。"""
+        assert harness.extract_raw_tool_name(payload) == expected
+
 
 class TestExtractToolResultText:
     """extract_tool_result_text のテスト。"""
@@ -195,6 +329,12 @@ class TestExtractToolResultText:
     def test_empty_when_missing(self):
         """フィールドが無ければ空。"""
         assert harness.extract_tool_result_text({}) == ("", {})
+
+    def test_tool_result_dict_without_usable_text(self):
+        """toolResult が dict でも text が空/非文字列なら空を返す。"""
+        assert harness.extract_tool_result_text({"toolResult": {}}) == ("", {})
+        assert harness.extract_tool_result_text({"toolResult": {"stdout": ""}}) == ("", {})
+        assert harness.extract_tool_result_text({"toolResult": {"stdout": 1}}) == ("", {})
 
 
 class TestExtractFilePaths:
@@ -324,11 +464,4 @@ class TestExtractFilePaths:
         assert harness.extract_file_paths("unknown-harness-tool", {"file_path": "/a/b.py"}) == [
             "/a/b.py"
         ]
-
-
-class TestResolveSessionId:
-    """resolve_session_id のテスト。"""
-
-class TestResolveProjectDir:
-    """resolve_project_dir のテスト。"""
 

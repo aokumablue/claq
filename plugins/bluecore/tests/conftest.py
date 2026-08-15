@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
+import os
 import runpy
 import sys
+from collections.abc import Iterator
 from functools import wraps
 from pathlib import Path
 
@@ -26,7 +28,7 @@ def _fresh_runpy_module(monkeypatch: pytest.MonkeyPatch) -> None:
     original_run_module = runpy.run_module
 
     @wraps(original_run_module)
-    def run_module(module_name: str, *args, **kwargs):
+    def run_module(module_name: str, *args: object, **kwargs: object) -> object:
         sys.modules.pop(module_name, None)
         return original_run_module(module_name, *args, **kwargs)
 
@@ -34,15 +36,13 @@ def _fresh_runpy_module(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clear_harness_detection_cache(monkeypatch: pytest.MonkeyPatch):
+def _clear_harness_detection_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """各テストの前後でハーネス判定環境変数とメモ化キャッシュをクリアする。
 
     ハーネス判定は環境変数を見るため、実行環境の CLAUDECODE / CODEX_* /
     COPILOT_* / PLUGIN_DATA が漏れ込むと判定結果が変わる。デフォルトを
     "unknown" に固定し、ハーネス別テストは monkeypatch.setenv で上書きする。
     """
-    import os
-
     from bluecore.lib.harness import detect_harness
 
     for key in list(os.environ):

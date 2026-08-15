@@ -427,9 +427,6 @@ class TestSimpleHookEntrypoints:
         assert _run_entrypoint("bluecore.hooks.block_no_verify") == 0
 
 
-class TestSessionStartRubyLog:
-    """session_start フックが Ruby プロジェクトでログを出すことを確認するテスト。"""
-
 class TestCheckpointInjection:
     """session_start がアクティブなチェックポイントを注入するテスト。"""
 
@@ -448,6 +445,42 @@ class TestCheckpointInjection:
         monkeypatch.setattr(session_start, "ensure_dir", lambda _: None)
         monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda _: None)
 
+    def _patch_checkpoint_lookup(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        checkpoint: Path,
+    ) -> None:
+        """checkpoint 探索と本文読込を固定する。
+
+        Args:
+            monkeypatch: pytest の monkeypatch フィクスチャ。
+            tmp_path: テスト用一時ディレクトリ。
+            checkpoint: 注入対象の checkpoint ファイル。
+        """
+        from bluecore.hooks import session_start
+
+        sessions_dir = checkpoint.parent
+        self._make_session_start_base_patches(monkeypatch, tmp_path)
+        monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
+        monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: tmp_path / "learned")
+        monkeypatch.setattr(
+            session_start,
+            "find_files",
+            lambda path, pattern, **kw: (
+                [{"path": str(checkpoint), "mtime": 9999}] if "checkpoint-" in pattern else []
+            ),
+        )
+        monkeypatch.setattr(
+            session_start,
+            "read_file",
+            lambda p: checkpoint.read_text(encoding="utf-8") if str(p) == str(checkpoint) else "",
+        )
+
+    def _checkpoint_context(self, output: str) -> str:
+        """SessionStart 出力から additionalContext を取り出す。"""
+        return json.loads(output)["hookSpecificOutput"]["additionalContext"]
+
     def test_active_checkpoint_is_injected(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """completed: false のチェックポイントが additionalContext に注入されること。"""
         from bluecore.hooks import session_start
@@ -459,18 +492,9 @@ class TestCheckpointInjection:
             "---\ntask: test\ncompleted: false\n---\n\n## 目標\nテスト中\n",
             encoding="utf-8",
         )
+        self._patch_checkpoint_lookup(monkeypatch, tmp_path, checkpoint)
 
-        self._make_session_start_base_patches(monkeypatch, tmp_path)
-        monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: tmp_path / "learned")
-        monkeypatch.setattr(session_start, "find_files", lambda path, pattern, **kw: (
-            [{"path": str(checkpoint), "mtime": 9999}] if "checkpoint-" in pattern else []
-        ))
-        monkeypatch.setattr(session_start, "read_file", lambda p: checkpoint.read_text(encoding="utf-8") if str(p) == str(checkpoint) else "")
-
-        output = session_start.run("{}")
-        payload = json.loads(output)
-        context = payload["hookSpecificOutput"]["additionalContext"]
+        context = self._checkpoint_context(session_start.run("{}"))
         assert "Active checkpoint:" in context
 
     def test_active_checkpoint_is_capped_at_500_chars(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -484,18 +508,9 @@ class TestCheckpointInjection:
             "---\ntask: test\ncompleted: false\n---\n\n## 目標\n" + "ながいほんぶん " * 200 + "\n",
             encoding="utf-8",
         )
+        self._patch_checkpoint_lookup(monkeypatch, tmp_path, checkpoint)
 
-        self._make_session_start_base_patches(monkeypatch, tmp_path)
-        monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: tmp_path / "learned")
-        monkeypatch.setattr(session_start, "find_files", lambda path, pattern, **kw: (
-            [{"path": str(checkpoint), "mtime": 9999}] if "checkpoint-" in pattern else []
-        ))
-        monkeypatch.setattr(session_start, "read_file", lambda p: checkpoint.read_text(encoding="utf-8") if str(p) == str(checkpoint) else "")
-
-        output = session_start.run("{}")
-        payload = json.loads(output)
-        context = payload["hookSpecificOutput"]["additionalContext"]
+        context = self._checkpoint_context(session_start.run("{}"))
         marker = "Active checkpoint:\n"
         assert marker in context
         injected = context.split(marker, 1)[1].split("\n\n", 1)[0]
@@ -512,18 +527,9 @@ class TestCheckpointInjection:
             "---\ntask: done\ncompleted: true\n---\n\n## 目標\n完了済み\n",
             encoding="utf-8",
         )
+        self._patch_checkpoint_lookup(monkeypatch, tmp_path, checkpoint)
 
-        self._make_session_start_base_patches(monkeypatch, tmp_path)
-        monkeypatch.setattr(session_start, "get_sessions_dir", lambda: sessions_dir)
-        monkeypatch.setattr(session_start, "get_learned_skills_dir", lambda: tmp_path / "learned")
-        monkeypatch.setattr(session_start, "find_files", lambda path, pattern, **kw: (
-            [{"path": str(checkpoint), "mtime": 9999}] if "checkpoint-" in pattern else []
-        ))
-        monkeypatch.setattr(session_start, "read_file", lambda p: checkpoint.read_text(encoding="utf-8") if str(p) == str(checkpoint) else "")
-
-        output = session_start.run("{}")
-        payload = json.loads(output)
-        context = payload["hookSpecificOutput"]["additionalContext"]
+        context = self._checkpoint_context(session_start.run("{}"))
         assert "Active checkpoint:" not in context
 
 

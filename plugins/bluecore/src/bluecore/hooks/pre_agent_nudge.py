@@ -1,19 +1,28 @@
-"""general-purpose / Explore サブエージェント起動時に専門エージェント対応表を提示します。
+"""general-purpose / Explore エージェント起動時に専門エージェント対応表を提示します。
 
 トリガー: PreToolUse (Task|Agent)
-入力: subagent_type を含む tool_input JSON
+入力: extract_tool_input() が返す dict 内の subagent_type または agent_type
 出力:
-    - subagent_type == "general-purpose" のとき hookSpecificOutput に AGENT_TABLE を注入
-    - subagent_type == "Explore" のとき hookSpecificOutput に EXPLORE_TABLE を注入
+    - Grok（detect_harness() == "grok"）上で 種別 が explore（小文字）/
+      general-purpose / plan のいずれかのとき hookSpecificOutput に
+      GROK_MESSAGE を注入する。Grok の spawn_subagent が受理する型は
+      explore/general-purpose/plan の 3 つのみで bluecore 専門エージェント型は
+      存在しない（実機で "Unknown subagent type" エラーを確認済み）ため、Claude 用
+      AGENT_TABLE/EXPLORE_TABLE とは異なる文面を使う。
+    - それ以外のハーネスでは種別 == "general-purpose" のとき AGENT_TABLE、
+      種別 == "Explore" のとき EXPLORE_TABLE を注入する（Claude Code の
+      挙動は本分岐追加前と完全に同一）。
 終了: 0（いかなる場合もブロックしない）
 
-上記 2 種以外の subagent_type、tool_input 欠落・非 dict 時は無出力で 0 を返す。
+同一 dict 内では subagent_type を優先し、Copilot の agent_type はフォールバック
+として扱う。上記に該当しない種別、入力欠落・非 dict 時は無出力で 0 を返す。
 """
 
 from __future__ import annotations
 
 from bluecore.hooks.hook_common import parse_json_object, read_raw_stdin, write_stdout
 from bluecore.hooks.output_adapter import adapt_pre_tool_use_context_output
+from bluecore.lib.harness import detect_harness, extract_tool_input
 
 AGENT_TABLE: str = """\
 [bluecore] general-purpose の代わりに専門エージェントが使える場合は subagent_type を差し替えること（該当なしなら general-purpose のままでよい）:
@@ -35,9 +44,23 @@ EXPLORE_TABLE: str = (
     "file:line 付き証拠ベース報告）。該当しなければ Explore のままでよい"
 )
 
+# subagent_type / agent_type の値 → 注入する対応表（Claude Code / Copilot 用）。
+_TABLE_BY_KIND: dict[str, str] = {
+    "general-purpose": AGENT_TABLE,
+    "Explore": EXPLORE_TABLE,
+}
+
+# Grok の spawn_subagent が受理する型（実機で確認済み）。bluecore 専門エージェント型は含まれない。
+_GROK_SUBAGENT_TYPES: frozenset[str] = frozenset({"explore", "general-purpose", "plan"})
+
+GROK_MESSAGE: str = (
+    "[bluecore] このホストに bluecore 専門エージェント型は無い。explore / plan / general-purpose を使い、"
+    "必要なら agents/<name>.md を Read してプロンプト先頭に貼ること。"
+)
+
 
 def main() -> int:
-    """general-purpose / Explore サブエージェント起動を検知して対応表を提示する。
+    """general-purpose / Explore エージェント起動を検知して対応表を提示する。
 
     Args:
         引数はありません（標準入力から読み取る）。
@@ -53,17 +76,21 @@ def main() -> int:
     if data is None:
         return 0
 
-    tool_input = data.get("tool_input")
+    tool_input = extract_tool_input(data)
     if not isinstance(tool_input, dict):
         return 0
 
     subagent_type = str(tool_input.get("subagent_type") or "")
-    if subagent_type == "general-purpose":
-        write_stdout(adapt_pre_tool_use_context_output(AGENT_TABLE))
-        return 0
-    if subagent_type == "Explore":
-        write_stdout(adapt_pre_tool_use_context_output(EXPLORE_TABLE))
-        return 0
+    agent_type = str(tool_input.get("agent_type") or "")
+    kind = subagent_type or agent_type
+
+    if detect_harness() == "grok":
+        table = GROK_MESSAGE if kind in _GROK_SUBAGENT_TYPES else None
+    else:
+        table = _TABLE_BY_KIND.get(kind)
+
+    if table:
+        write_stdout(adapt_pre_tool_use_context_output(table))
     return 0
 
 

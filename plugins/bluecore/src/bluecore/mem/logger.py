@@ -28,6 +28,25 @@ _initialized = False
 _lock = threading.Lock()
 
 
+def _file_handler(log_dir: Path) -> logging.Handler:
+    """日次ログファイルへ書く FileHandler を作る。"""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.chmod(0o700)
+    log_path = log_dir / f"mem-{datetime.now():%Y-%m-%d}.log"
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    log_path.chmod(0o600)
+    handler.setFormatter(_FORMATTER)
+    return handler
+
+
+def _stderr_handler() -> logging.Handler:
+    """WARNING 以上を stderr へ出す Handler を作る。"""
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(logging.WARNING)
+    handler.setFormatter(_FORMATTER)
+    return handler
+
+
 def setup(log_dir: Path, level: str = "info") -> None:
     """ロガーを初期化する。アプリケーション起動時に1度だけ呼ぶ。"""
     global _initialized
@@ -36,23 +55,11 @@ def setup(log_dir: Path, level: str = "info") -> None:
             return
         _initialized = True
 
+    # ハンドラ追加はロック外。2 度目以降の setup は _initialized で弾く。
     root = logging.getLogger("bluecore.mem")
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
-
-    # ファイルハンドラ
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_dir.chmod(0o700)
-    log_path = log_dir / f"mem-{datetime.now():%Y-%m-%d}.log"
-    fh = logging.FileHandler(log_path, encoding="utf-8")
-    log_path.chmod(0o600)
-    fh.setFormatter(_FORMATTER)
-    root.addHandler(fh)
-
-    # stderr ハンドラ（WARNINGなど）
-    sh = logging.StreamHandler(sys.stderr)
-    sh.setLevel(logging.WARNING)
-    sh.setFormatter(_FORMATTER)
-    root.addHandler(sh)
+    root.addHandler(_file_handler(log_dir))
+    root.addHandler(_stderr_handler())
 
 
 def reset() -> None:

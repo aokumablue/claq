@@ -70,21 +70,15 @@ def normalize_git_hosting_service(value: Any, default: str = GITHUB) -> str:
         return normalized
 
     fallback = str(default or "").strip().lower()
-    if fallback in VALID_GIT_HOSTING_SERVICES:
-        if normalized:
-            warnings.warn(
-                f"Invalid git-hosting-service '{value}', falling back to '{fallback}'",
-                UserWarning,
-                stacklevel=2,
-            )
-        return fallback
+    if fallback not in VALID_GIT_HOSTING_SERVICES:
+        fallback = GITHUB
     if normalized:
         warnings.warn(
-            f"Invalid git-hosting-service '{value}', falling back to '{GITHUB}'",
+            f"Invalid git-hosting-service '{value}', falling back to '{fallback}'",
             UserWarning,
             stacklevel=2,
         )
-    return GITHUB
+    return fallback
 
 
 def detect_git_hosting_service(cwd: str | Path | None = None, default: str = GITHUB) -> str:
@@ -126,34 +120,39 @@ def detect_git_hosting_service(cwd: str | Path | None = None, default: str = GIT
     return normalize_git_hosting_service(default)
 
 
+def _lookup_service(table: dict[str, str], service: str) -> str:
+    """正規化した service で table を引き、未知なら GitHub の値を返す。"""
+    return table.get(normalize_git_hosting_service(service), table[GITHUB])
+
+
 def get_git_hosting_service_label(service: str) -> str:
     """hosting service の表示名を返す。"""
-    return SERVICE_LABELS.get(normalize_git_hosting_service(service), SERVICE_LABELS[GITHUB])
+    return _lookup_service(SERVICE_LABELS, service)
 
 
 def get_git_hosting_cli_name(service: str) -> str:
     """hosting service で使う CLI 名を返す。"""
-    return SERVICE_CLI_NAMES.get(normalize_git_hosting_service(service), SERVICE_CLI_NAMES[GITHUB])
+    return _lookup_service(SERVICE_CLI_NAMES, service)
 
 
 def get_git_hosting_item_label(service: str) -> str:
     """Pull Request / Merge Request の名称を返す。"""
-    return SERVICE_ITEM_LABELS.get(normalize_git_hosting_service(service), SERVICE_ITEM_LABELS[GITHUB])
+    return _lookup_service(SERVICE_ITEM_LABELS, service)
 
 
 def get_git_hosting_item_short_label(service: str) -> str:
     """PR / MR の短縮表記を返す。"""
-    return SERVICE_ITEM_SHORT_LABELS.get(normalize_git_hosting_service(service), SERVICE_ITEM_SHORT_LABELS[GITHUB])
+    return _lookup_service(SERVICE_ITEM_SHORT_LABELS, service)
 
 
 def get_git_hosting_create_command(service: str) -> str:
     """作成コマンドを返す。"""
-    return SERVICE_CREATE_COMMANDS.get(normalize_git_hosting_service(service), SERVICE_CREATE_COMMANDS[GITHUB])
+    return _lookup_service(SERVICE_CREATE_COMMANDS, service)
 
 
 def get_git_hosting_review_command(service: str) -> str:
     """レビュー用コマンドを返す。"""
-    return SERVICE_REVIEW_COMMANDS.get(normalize_git_hosting_service(service), SERVICE_REVIEW_COMMANDS[GITHUB])
+    return _lookup_service(SERVICE_REVIEW_COMMANDS, service)
 
 
 def build_git_hosting_item_url(service: str, repo: str, number: str) -> str:

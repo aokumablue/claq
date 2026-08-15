@@ -2,10 +2,11 @@
 """bluecore フックのインプロセスランチャー。
 
 Claude Code 等のハーネスから `python3 launcher.py [--bg] <module> [args...]`
-の形で起動される。repo-local venv が見つかれば os.execve で自己置換した
-うえで、対象モジュールをサブプロセスを spawn せず runpy でインプロセス
-実行する。stdin はターゲット自身が `hook_common.read_raw_stdin()` 等で
-直接読む（launcher は代読しない）。
+の形で起動される。PATH 上の `python3` をそのまま使い、対象モジュールを
+サブプロセスを spawn せず runpy でインプロセス実行する。Python 3.12 未満
+では hook を実行せず stderr に理由を書いて 0 で終了する（fail-open）。
+venv への自己置換は行わない。stdin はターゲット自身が
+`hook_common.read_raw_stdin()` 等で直接読む（launcher は代読しない）。
 """
 
 from __future__ import annotations
@@ -16,41 +17,21 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-_LAUNCHER_PATH = str(REPO_ROOT / "src" / "bluecore" / "launcher.py")
-
-
-def _runtime_python() -> tuple[str, Path | None]:
-    """実行に使う repo-local venv の Python を解決します。
-
-    Args:
-        なし
-
-    Returns:
-        (python 実行ファイルのパス文字列, venv ルート) のタプル。
-        repo-local venv が見つからなければ (sys.executable, None) を返す。
-
-    Raises:
-        例外は発生しません。
-    """
-    for candidate in (
-        REPO_ROOT / ".venv" / "bin" / "python3",
-        REPO_ROOT / ".venv" / "bin" / "python",
-    ):
-        if candidate.exists() and os.access(candidate, os.X_OK):
-            return str(candidate), candidate.parent.parent
-
-    return sys.executable, None
+_USAGE = "Usage: python3 src/bluecore/launcher.py [--bg] <module> [args...]"
 
 
 def build_env() -> dict[str, str]:
-    """子プロセス/execve 用の環境変数を構築します。
+    """子プロセス用の環境変数を構築します。
+
+    repo-local `.venv` の有無は見ない。VIRTUAL_ENV の付与や venv/bin の
+    PATH 前置は行わない。
 
     Args:
         なし
 
     Returns:
-        PYTHONPATH、プラグインルート、必要なら repo-local venv の PATH が
-        設定された環境変数の辞書を返します。
+        CLAUDE_PLUGIN_ROOT（未設定時のみ REPO_ROOT）と、REPO_ROOT/src を
+        先頭に置いた PYTHONPATH を含む環境変数の辞書。
 
     Raises:
         例外は発生しません。
@@ -63,69 +44,30 @@ def build_env() -> dict[str, str]:
     if pythonpath:
         paths.append(pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(paths)
-
-    _, venv_root = _runtime_python()
-    if venv_root is not None:
-        venv_bin = str(venv_root / "bin")
-        path = env.get("PATH")
-        paths = [venv_bin]
-        if path:
-            paths.append(path)
-        env["PATH"] = os.pathsep.join(paths)
-        env["VIRTUAL_ENV"] = str(venv_root)
-
     return env
 
 
-def _reexec_into_venv_if_needed() -> None:
-    """repo-local venv の Python へ os.execve で自己置換します。
-
-    venv が見つからない場合（初回インストール前）はシステム Python の
-    まま続行します（fail-open）。os.execve はプロセスイメージを置換する
-    だけで fork しないため、成功時にプロセス数は増えません。
-
-    venv の python3 実行ファイルは多くの場合ベースインタプリタへの
-    symlink（コピーではない）であり、``os.path.samefile(sys.executable,
-    venv_python)`` は symlink 先の実体が同じというだけで True になって
-    しまう。Python の venv 有効化は「起動に使われたパス」に隣接する
-    pyvenv.cfg の有無で決まる（``sys.prefix``）ため、実体比較ではなく
-    ``sys.prefix != sys.base_prefix``（何らかの venv が有効か）で判定し、
-    有効な venv がある場合のみ、その prefix が対象 venv と一致するかを
-    実体比較で確認する。system python 実行時（多くのフック起動はこちら）
-    は必ず exec する。bluecore はランタイム依存ゼロで、本体も main() の
-    ``sys.path.insert`` で解決するため、site-packages を取り込むことが
-    目的ではない。exec の目的は Python バージョンの保証にある。venv は
-    install.sh の find_python3 が選んだ Python 3.12+ で作られており、
-    ハーネスが起動する system python はこれを下回りうる（例: macOS 標準の
-    /usr/bin/python3 は 3.9 で ``from datetime import UTC`` に失敗する）。
+def _unsupported_python_exit_code() -> int | None:
+    """Python 3.12 未満なら fail-open の終了コード 0 を返します。
 
     Args:
         なし
 
     Returns:
-        None（execve に成功すると戻らない。venv 不在・既に対象 venv 上・
-        execve 失敗時のみ戻る）
+        3.12 以上なら None。未満なら stderr に 1 行理由を書いて 0。
 
     Raises:
         例外は発生しません。
     """
-    venv_python, venv_root = _runtime_python()
-    if venv_root is None:
-        return
-
-    if sys.prefix != sys.base_prefix:
-        # 既に何らかの venv が有効。対象 venv と一致するなら re-exec 不要。
-        try:
-            if os.path.samefile(sys.prefix, venv_root):
-                return
-        except OSError:
-            pass
-
-    try:
-        os.execve(venv_python, [venv_python, _LAUNCHER_PATH, *sys.argv[1:]], build_env())
-    except OSError:
-        # exec 失敗時は現行インタプリタで続行する（fail-open）。
-        return
+    # PATH 上の python3 はパッケージ requires-python より古いことがある。
+    if sys.version_info >= (3, 12):  # noqa: UP036
+        return None
+    version = ".".join(str(part) for part in sys.version_info[:3])
+    sys.stderr.write(
+        f"ERROR: bluecore requires Python 3.12+; `python3` is {version}. "
+        "Point `python3` on PATH at 3.12+ (bluecore does not create a venv).\n"
+    )
+    return 0
 
 
 def _run_module_in_process(target: str, target_args: list[str]) -> int:
@@ -185,16 +127,21 @@ def _resolve_module_command(target: str, target_args: list[str]) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     """ランチャーのメインエントリポイントです。
 
+    Python 3.12 未満では hook_common / harness を import せず 0 を返します。
+
     Args:
         argv: コマンドライン引数のリストです。
 
     Returns:
         ターゲットの終了コード、またはエラー時は 1 を返します。
+        Python 3.12 未満では 0 を返します（fail-open）。
 
     Raises:
         例外は発生しません。
     """
-    _reexec_into_venv_if_needed()
+    unsupported = _unsupported_python_exit_code()
+    if unsupported is not None:
+        return unsupported
 
     src_dir = str(REPO_ROOT / "src")
     if src_dir not in sys.path:
@@ -204,17 +151,11 @@ def main(argv: list[str] | None = None) -> int:
     from bluecore.lib.harness import detect_harness
 
     args = list(sys.argv[1:] if argv is None else argv)
-    if not args:
-        print("Usage: python3 src/bluecore/launcher.py [--bg] <module> [args...]", file=sys.stderr)
-        return 1
-
-    background = False
-    if args[0] == "--bg":
-        background = True
+    background = bool(args) and args[0] == "--bg"
+    if background:
         args = args[1:]
-
     if not args:
-        print("Usage: python3 src/bluecore/launcher.py [--bg] <module> [args...]", file=sys.stderr)
+        print(_USAGE, file=sys.stderr)
         return 1
 
     target, target_args = args[0], args[1:]

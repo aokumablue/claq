@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from types import TracebackType
 
+from bluecore.lib.core_utils import ensure_private_dir
 from bluecore.mem.models import Knowledge, Repo, Session, utc_now_iso
 from bluecore.mem.schema import _SCHEMA_SQL
 
@@ -25,16 +26,19 @@ class Database:
             db_path: mem.db のパス。親ディレクトリが無ければ作成する。
         """
         path = Path(db_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _existed = path.exists()
+        ensure_private_dir(path.parent)
+        existed = path.exists()
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
-        if not _existed:
+        if not existed:
             path.chmod(0o600)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
-        self.conn.execute("PRAGMA temp_store = MEMORY")
-        self.conn.execute("PRAGMA mmap_size = 268435456")
-        self.conn.execute("PRAGMA cache_size = -64000")
+        for pragma in (
+            "PRAGMA temp_store = MEMORY",
+            "PRAGMA mmap_size = 268435456",
+            "PRAGMA cache_size = -64000",
+        ):
+            self.conn.execute(pragma)
 
     def _init_schema(self) -> None:
         """repos → sessions → knowledge の順にスキーマを作成する。"""
@@ -68,6 +72,34 @@ class Database:
         """
         self.close()
 
+    def _returning(self, sql: str, params: tuple[object, ...]) -> sqlite3.Row:
+        """変更系 SQL を実行してコミットし、RETURNING の先頭行を返す。
+
+        Args:
+            sql: ``RETURNING *`` を含む SQL。
+            params: プレースホルダに渡す値。
+
+        Returns:
+            先頭の ``sqlite3.Row``。
+        """
+        row = self.conn.execute(sql, params).fetchone()
+        self.conn.commit()
+        return row
+
+    def _updated(self, sql: str, params: tuple[object, ...]) -> bool:
+        """UPDATE を実行してコミットし、1 行以上更新できたかを返す。
+
+        Args:
+            sql: UPDATE 文。
+            params: プレースホルダに渡す値。
+
+        Returns:
+            対象行があれば True、無ければ False。
+        """
+        cursor = self.conn.execute(sql, params)
+        self.conn.commit()
+        return cursor.rowcount > 0
+
     # --- repos ---
 
     def upsert_repo(self, repo: Repo) -> Repo:
@@ -82,7 +114,7 @@ class Database:
         Returns:
             DB に格納された最新状態の Repo。
         """
-        row = self.conn.execute(
+        row = self._returning(
             """INSERT INTO repos
                  (id, identity_key, root_path, remote_url, first_seen_at, last_seen_at)
                VALUES (?, ?, ?, ?, ?, ?)
@@ -99,8 +131,7 @@ class Database:
                 repo.first_seen_at,
                 repo.last_seen_at,
             ),
-        ).fetchone()
-        self.conn.commit()
+        )
         return Repo.from_row(row)
 
     def list_repos(self) -> list[Repo]:
@@ -110,7 +141,7 @@ class Database:
             Repo のリスト。1 件も無ければ空リスト。
         """
         rows = self.conn.execute("SELECT * FROM repos ORDER BY last_seen_at DESC, id").fetchall()
-        return [Repo.from_row(r) for r in rows]
+        return [Repo.from_row(row) for row in rows]
 
     # --- knowledge ---
 
@@ -126,7 +157,7 @@ class Database:
         Returns:
             DB に格納された最新状態の Knowledge。
         """
-        row = self.conn.execute(
+        row = self._returning(
             """INSERT INTO knowledge
                  (key, scope, repo_id, kind, title, body, domain, confidence,
                   status, source, source_ref, session_id, superseded_by,
@@ -163,8 +194,7 @@ class Database:
                 knowledge.created_at,
                 knowledge.updated_at,
             ),
-        ).fetchone()
-        self.conn.commit()
+        )
         return Knowledge.from_row(row)
 
     def get_knowledge_by_key(self, key: str, repo_id: str | None = None) -> Knowledge | None:
@@ -201,21 +231,16 @@ class Database:
         """
         clauses: list[str] = []
         params: list[str] = []
-        if scope is not None:
-            clauses.append("scope = ?")
-            params.append(scope)
-        if repo_id is not None:
-            clauses.append("repo_id = ?")
-            params.append(repo_id)
-        if status is not None:
-            clauses.append("status = ?")
-            params.append(status)
+        for column, value in (("scope", scope), ("repo_id", repo_id), ("status", status)):
+            if value is not None:
+                clauses.append(f"{column} = ?")
+                params.append(value)
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.conn.execute(
             f"SELECT * FROM knowledge{where} ORDER BY updated_at DESC, id DESC",
             params,
         ).fetchall()
-        return [Knowledge.from_row(r) for r in rows]
+        return [Knowledge.from_row(row) for row in rows]
 
     def set_knowledge_status(self, knowledge_id: int, status: str, updated_at: str | None = None) -> bool:
         """知識カードの status を更新する。
@@ -228,12 +253,10 @@ class Database:
         Returns:
             対象行が存在して更新できた場合 True、該当なしなら False。
         """
-        cur = self.conn.execute(
+        return self._updated(
             "UPDATE knowledge SET status = ?, updated_at = ? WHERE id = ?",
             (status, updated_at or utc_now_iso(), knowledge_id),
         )
-        self.conn.commit()
-        return cur.rowcount > 0
 
     # --- sessions ---
 
@@ -249,7 +272,7 @@ class Database:
         Returns:
             DB に格納された最新状態の Session。
         """
-        row = self.conn.execute(
+        row = self._returning(
             """INSERT INTO sessions
                  (session_uid, repo_id, harness, handoff, started_at, ended_at)
                VALUES (?, ?, ?, ?, ?, ?)
@@ -264,8 +287,7 @@ class Database:
                 session.started_at,
                 session.ended_at,
             ),
-        ).fetchone()
-        self.conn.commit()
+        )
         return Session.from_row(row)
 
     def finish_session(self, session_uid: str, handoff: str, ended_at: str | None = None) -> bool:
@@ -279,12 +301,10 @@ class Database:
         Returns:
             対象セッションが存在して更新できた場合 True、該当なしなら False。
         """
-        cur = self.conn.execute(
+        return self._updated(
             "UPDATE sessions SET handoff = ?, ended_at = ? WHERE session_uid = ?",
             (handoff, ended_at or utc_now_iso(), session_uid),
         )
-        self.conn.commit()
-        return cur.rowcount > 0
 
     def get_latest_session(self, repo_id: str) -> Session | None:
         """引き継ぎを持つ最新セッションを 1 件返す。

@@ -9,6 +9,12 @@ from pathlib import Path
 import pytest
 
 import bluecore.ci.harness_audit as harness_audit
+from bluecore.ci.harness_audit_repo_checks import (
+    _event_has_matching_command,
+    _has_memory_lifecycle_hooks,
+    _hook_command_argv,
+    get_repo_checks,
+)
 
 
 def test_parse_args_and_normalize_scope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -110,6 +116,19 @@ def test_find_plugin_install_and_build_report_variants(tmp_path: Path, monkeypat
     consumer_report = harness_audit.build_report("repo", root_dir=consumer_root, target_mode="consumer")
     assert consumer_report["target_mode"] == "consumer"
     assert consumer_report["checks"]
+
+
+def test_find_plugin_install_without_home_still_searches_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HOME が空でも root_dir 配下の plugin.json を探す。"""
+    monkeypatch.setenv("HOME", "")
+    local_install = (
+        tmp_path / ".claude" / "plugins" / "everything-claude-code" / ".claude-plugin" / "plugin.json"
+    )
+    local_install.parent.mkdir(parents=True, exist_ok=True)
+    local_install.write_text("{}", encoding="utf-8")
+    assert harness_audit.find_plugin_install(tmp_path) == str(local_install)
 
 
 def test_summarize_category_scores_and_print_text(capsys: pytest.CaptureFixture[str]) -> None:
@@ -248,8 +267,6 @@ def test_get_repo_checks_python_structure_checks_pass_on_real_repo() -> None:
     （src/bluecore/hooks/ 等）を対象にした変換後、実リポジトリに対して
     pass=True になることを確認する。
     """
-    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
-
     plugin_root = Path(__file__).resolve().parents[2]
     checks = {check["id"]: check for check in get_repo_checks(plugin_root)}
 
@@ -281,8 +298,6 @@ def test_memory_hooks_lifecycle_check_fails_when_hooks_json_missing(tmp_path: Pa
     だけで合格していたため、hooks.json の中身が空・欠落していても満点扱いに
     なる誤判定があった。
     """
-    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
-
     checks = {check["id"]: check for check in get_repo_checks(tmp_path)}
 
     assert "memory-hooks-lifecycle" in checks
@@ -305,8 +320,6 @@ def test_memory_hooks_lifecycle_check_fails_when_dir_exists_but_commands_are_sta
         },
     )
 
-    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
-
     checks = {check["id"]: check for check in get_repo_checks(tmp_path)}
 
     assert checks["memory-hooks-lifecycle"]["pass"] is False
@@ -315,8 +328,6 @@ def test_memory_hooks_lifecycle_check_fails_when_dir_exists_but_commands_are_sta
 def test_memory_hooks_lifecycle_check_fails_when_hooks_value_not_dict(tmp_path: Path) -> None:
     (tmp_path / "hooks").mkdir()
     (tmp_path / "hooks" / "hooks.json").write_text(json.dumps({"hooks": ["not", "a", "dict"]}), encoding="utf-8")
-
-    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
 
     checks = {check["id"]: check for check in get_repo_checks(tmp_path)}
 
@@ -343,8 +354,6 @@ def test_memory_hooks_lifecycle_check_fails_when_only_partial_lifecycle_present(
             ],
         },
     )
-
-    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
 
     checks = {check["id"]: check for check in get_repo_checks(tmp_path)}
 
@@ -413,8 +422,6 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
         },
     )
 
-    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
-
     checks = {check["id"]: check for check in get_repo_checks(tmp_path)}
 
     assert checks["memory-hooks-lifecycle"]["pass"] is True
@@ -423,8 +430,6 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
 
 def test_memory_hooks_lifecycle_check_passes_on_real_repo_hooks_json() -> None:
     """実リポジトリの hooks/hooks.json に対して合格することを確認する。"""
-    from bluecore.ci.harness_audit_repo_checks import get_repo_checks
-
     plugin_root = Path(__file__).resolve().parents[2]
     checks = {check["id"]: check for check in get_repo_checks(plugin_root)}
 
@@ -433,8 +438,6 @@ def test_memory_hooks_lifecycle_check_passes_on_real_repo_hooks_json() -> None:
 
 def test_hook_command_argv_covers_parse_edge_cases() -> None:
     """_hook_command_argv の分岐（不正引用符・トークン不足・起動形式不一致等）を網羅する。"""
-    from bluecore.ci.harness_audit_repo_checks import _hook_command_argv
-
     assert _hook_command_argv('python3 "unterminated') is None
     assert _hook_command_argv("python3 launcher.py") is None
     assert _hook_command_argv("node launcher.py a b") is None
@@ -447,8 +450,6 @@ def test_hook_command_argv_covers_parse_edge_cases() -> None:
 
 def test_event_has_matching_command_covers_branches() -> None:
     """_event_has_matching_command の全分岐（型不正・不一致・一致）を網羅する。"""
-    from bluecore.ci.harness_audit_repo_checks import _event_has_matching_command
-
     patterns = (("bluecore.mem.cli", "session:mem:setup"),)
 
     assert _event_has_matching_command("not-a-list", patterns) is False
@@ -476,8 +477,6 @@ def test_event_has_matching_command_covers_branches() -> None:
 
 def test_has_memory_lifecycle_hooks_returns_false_on_malformed_json(tmp_path: Path) -> None:
     """_has_memory_lifecycle_hooks が不正 JSON・hooks 欠落時に False を返すことを確認する。"""
-    from bluecore.ci.harness_audit_repo_checks import _has_memory_lifecycle_hooks
-
     (tmp_path / "hooks").mkdir()
     (tmp_path / "hooks" / "hooks.json").write_text("not-json", encoding="utf-8")
     assert _has_memory_lifecycle_hooks(tmp_path) is False

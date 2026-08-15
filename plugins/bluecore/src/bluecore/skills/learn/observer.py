@@ -359,9 +359,9 @@ def _guardian_allows(repo_root: Path, log_file: Path) -> bool:
     if not _check_active_hours(active_start, active_end, log_file):
         return False
 
-    repo_root = _resolve_repo_root(repo_root)
+    resolved_root = _resolve_repo_root(repo_root)
 
-    if not _check_cooldown(repo_root, interval, last_run_log, log_file):
+    if not _check_cooldown(resolved_root, interval, last_run_log, log_file):
         return False
 
     if max_idle > 0:
@@ -494,7 +494,8 @@ def _store_knowledge_candidates(stdout: str, target: ObservationTarget, log_file
             for block in blocks:
                 try:
                     draft = _parse_candidate(block, source_ref)
-                    db.upsert_knowledge(draft.to_knowledge(repo_id if draft.scope == "repo" else None))
+                    scoped_repo = repo_id if draft.scope == "repo" else None
+                    db.upsert_knowledge(draft.to_knowledge(scoped_repo))
                     saved += 1
                 except (KnowledgeInputError, sqlite3.Error) as error:
                     _append_log(log_file, f"Observer candidate rejected: {error}")
@@ -510,8 +511,10 @@ def _prepare_analysis_file(observations_file: Path, observer_tmp_dir: Path) -> P
     analysis_file = observer_tmp_dir / f"bluecore-observer-analysis-{os.getpid()}-{int(time.time())}.jsonl"
     try:
         lines = observations_file.read_text(encoding="utf-8").splitlines()
-        recent_lines = lines[-int(os.environ.get("BLUECORE_OBSERVER_MAX_ANALYSIS_LINES", "500")):]
-        analysis_file.write_text("\n".join(recent_lines) + ("\n" if recent_lines else ""), encoding="utf-8")
+        max_lines = int(os.environ.get("BLUECORE_OBSERVER_MAX_ANALYSIS_LINES", "500"))
+        recent_lines = lines[-max_lines:]
+        trailing_newline = "\n" if recent_lines else ""
+        analysis_file.write_text("\n".join(recent_lines) + trailing_newline, encoding="utf-8")
         return analysis_file
     except OSError:
         return None
@@ -603,7 +606,9 @@ def _analyze_observations(target: ObservationTarget, config: ObserverConfig) -> 
 
     _append_log(config.log_file, f"Analyzing {obs_count} observations for repository {target.repo_id}...")
 
-    if os.environ.get("CLV2_IS_WINDOWS", "false") == "true" and os.environ.get("BLUECORE_OBSERVER_ALLOW_WINDOWS", "false") != "true":
+    on_windows = os.environ.get("CLV2_IS_WINDOWS", "false") == "true"
+    allow_windows = os.environ.get("BLUECORE_OBSERVER_ALLOW_WINDOWS", "false") == "true"
+    if on_windows and not allow_windows:
         _append_log(config.log_file, "Skipping claude analysis on Windows due to known non-interactive hang issue (#295). Set BLUECORE_OBSERVER_ALLOW_WINDOWS=true to override.")
         return
 
@@ -713,7 +718,12 @@ def _spawn_observer_process(storage_dir: Path, log_file: Path, env: dict) -> int
     """
     try:
         with log_file.open("a", encoding="utf-8") as log_handle:
-            proc_kwargs: dict[str, object] = {"cwd": str(storage_dir), "env": env, "stdout": log_handle, "stderr": subprocess.STDOUT}
+            proc_kwargs: dict[str, object] = {
+                "cwd": str(storage_dir),
+                "env": env,
+                "stdout": log_handle,
+                "stderr": subprocess.STDOUT,
+            }
             if os.name == "nt":
                 proc_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             else:
@@ -801,7 +811,10 @@ def _stop_observer(target: ObservationTarget) -> int:
 
 
 def _parse_main_args(argv: list[str]) -> tuple[str, bool]:
-    """CLI 引数を解析してアクションと reset フラグを返す。不正な引数があれば (None, False) を返す。"""
+    """CLI 引数を解析してアクションと reset フラグを返す。
+
+    不正な引数があれば空アクション ``("", False)`` を返す。
+    """
     action = "start"
     reset = False
     for arg in argv:

@@ -798,3 +798,211 @@ def test_quality_gate_run_lints_every_file_in_multi_file_patch(
     assert linted == ["src/x.py", "src/y.ts"]
     # 拡張子ルールはファイルごと、extensions なしルールは初回のみ実行される
     assert executed == [["lint"], ["project-wide"], ["lint"]]
+
+
+def test_quality_gate_extracts_file_path_from_native_camel_case_payload() -> None:
+    """R-04: native toolName/toolArgs.file_path から対象パスを取り出す。"""
+    data = {"toolName": "edit", "toolArgs": {"file_path": "sample.py"}}
+    assert quality_gate._extract_target_file_paths(data) == ["sample.py"]
+
+
+def test_quality_gate_does_not_treat_legacy_file_as_target_path() -> None:
+    """quality_gate は旧 file キーを対象パスにしない。"""
+    data = {"tool_name": "Edit", "tool_input": {"file": "sample.py"}}
+    assert quality_gate._extract_target_file_paths(data) == []
+
+
+def test_quality_gate_extracts_all_patch_paths_from_native_tool_args() -> None:
+    """native toolArgs の構造化パッチから Add/Update/Delete を marker 順に返す。"""
+    patch = (
+        "*** Begin Patch\n"
+        "*** Add File: new.py\n"
+        "+x = 1\n"
+        "*** Update File: mod.py\n"
+        "@@\n"
+        "*** Delete File: old.py\n"
+        "*** End Patch"
+    )
+    data = {"toolName": "apply_patch", "toolArgs": {"input": patch}}
+    assert quality_gate._extract_target_file_paths(data) == ["new.py", "mod.py", "old.py"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (
+            {"tool_name": "Edit", "tool_input": {"file_path": "sample.py"}},
+            ["sample.py"],
+        ),
+        (
+            {"tool_name": "Edit", "tool_args": {"file_path": "sample.py"}},
+            ["sample.py"],
+        ),
+        (
+            {"toolName": "edit", "toolArgs": json.dumps({"file_path": "sample.py"})},
+            ["sample.py"],
+        ),
+        (
+            {"toolName": "apply_patch", "toolArgs": {"input": "*** Update File: a.py\n@@\n-a\n+b\n"}},
+            ["a.py"],
+        ),
+        (
+            {"tool_name": "Edit", "file_path": "sample.py"},
+            ["sample.py"],
+        ),
+        (
+            {"toolName": "edit", "toolArgs": {}},
+            [],
+        ),
+        (
+            {"toolName": "bash", "toolArgs": {"file_path": "sample.py"}},
+            ["sample.py"],
+        ),
+    ],
+    ids=[
+        "dt04-1-snake",
+        "dt04-3-tool_args",
+        "dt04-4-json-string",
+        "dt04-5-single-patch",
+        "dt04-7-top-level-file_path",
+        "dt04-9-no-path",
+        "dt04-10-bash-still-extracts",
+    ],
+)
+def test_quality_gate_extracts_remaining_dt04_rows(payload: dict, expected: list[str]) -> None:
+    """DT-04 残行: tool_args・JSON 文字列・トップレベル fallback・bash。"""
+    assert quality_gate._extract_target_file_paths(payload) == expected
+
+
+def _spy_quality_gate_run(monkeypatch: pytest.MonkeyPatch) -> tuple[list[str | None], list[tuple[str, bool]]]:
+    """load_config と _run_configured_rules を spy して呼び出し履歴を返す。
+
+    Args:
+        monkeypatch: pytest の monkeypatch フィクスチャ。
+
+    Returns:
+        (load_config に渡った file_path, (file_path, run_pathless) のリスト)。
+    """
+    loaded: list[str | None] = []
+    rules: list[tuple[str, bool]] = []
+
+    def fake_load(*, file_path: str | None = None) -> dict[str, Any]:
+        """load_config の呼び出しを記録する。"""
+        loaded.append(file_path)
+        return {"actions": {}}
+
+    def fake_rules(
+        action: str,
+        raw_input: str,
+        input_data: dict[str, Any],
+        config: dict[str, Any],
+        file_path: str = "",
+        run_pathless: bool = True,
+    ) -> list[Any]:
+        """_run_configured_rules の呼び出しを記録する。"""
+        rules.append((file_path, run_pathless))
+        return []
+
+    monkeypatch.setattr(quality_gate, "load_config", fake_load)
+    monkeypatch.setattr(quality_gate, "_run_configured_rules", fake_rules)
+    return loaded, rules
+
+
+def test_quality_gate_run_applies_rules_to_native_camel_case_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R-05: native camelCase の sample.py 編集で rule が起動する。"""
+    loaded, rules = _spy_quality_gate_run(monkeypatch)
+    raw = json.dumps({"toolName": "edit", "toolArgs": {"file_path": "sample.py"}})
+    assert quality_gate.run(raw) == []
+    assert loaded == ["sample.py"]
+    assert rules == [("sample.py", True)]
+
+
+def test_quality_gate_runs_pathless_rules_once_for_multi_file_patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """複数ファイルパッチでは run_pathless が True のあと False。"""
+    loaded, rules = _spy_quality_gate_run(monkeypatch)
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: a.py\n"
+        "@@\n-a\n+b\n"
+        "*** Add File: b.py\n"
+        "+x\n"
+        "*** End Patch"
+    )
+    raw = json.dumps({"toolName": "apply_patch", "toolArgs": {"input": patch}})
+    quality_gate.run(raw)
+    assert loaded == ["a.py", "b.py"]
+    assert rules == [("a.py", True), ("b.py", False)]
+
+
+def test_quality_gate_rule_matches_skips_blank_extensions() -> None:
+    """空の拡張子は無視し、残りの拡張子で照合する。"""
+    rule = {"extensions": ["", ".py"]}
+    assert quality_gate._rule_matches(rule, {"tool_name": "Edit", "file_path": "a.py"}, "a.py")
+    assert not quality_gate._rule_matches(rule, {"tool_name": "Edit", "file_path": "a.txt"}, "a.txt")
+
+
+def test_quality_gate_build_step_command_module_with_non_list_args() -> None:
+    """module 指定時に args が list でなくても -m コマンドを返す。"""
+    command = quality_gate._build_step_command(
+        {"module": "pkg.tool", "args": "not-a-list"},
+        {"HOME": "/home/tester"},
+        set(),
+    )
+    assert command == [sys.executable, "-m", "pkg.tool"]
+
+
+def test_quality_gate_rule_matches_native_tool_name_filter() -> None:
+    """_rule_matches は native toolName を tool_names=['edit'] と照合する。"""
+    rule = {"tool_names": ["edit"]}
+    assert quality_gate._rule_matches(
+        rule, {"toolName": "edit", "toolArgs": {"file_path": "sample.py"}}, "sample.py"
+    )
+    assert not quality_gate._rule_matches(
+        rule, {"toolName": "bash", "toolArgs": {"file_path": "sample.py"}}, "sample.py"
+    )
+
+
+def test_quality_gate_run_remaining_dt05_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DT-05 残行: snake_case、JSON 文字列、bash 対象外、パスなし、toolName 不正。"""
+    loaded, rules = _spy_quality_gate_run(monkeypatch)
+
+    quality_gate.run(json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "sample.py"}}))
+    assert loaded == ["sample.py"]
+    assert rules == [("sample.py", True)]
+
+    loaded.clear()
+    rules.clear()
+    quality_gate.run(
+        json.dumps({"toolName": "edit", "toolArgs": json.dumps({"file_path": "sample.py"})})
+    )
+    assert loaded == ["sample.py"]
+    assert rules == [("sample.py", True)]
+
+    loaded.clear()
+    rules.clear()
+    assert quality_gate.run(
+        json.dumps({"toolName": "bash", "toolArgs": {"file_path": "sample.py"}})
+    ) == []
+    assert loaded == []
+    assert rules == []
+
+    loaded.clear()
+    rules.clear()
+    quality_gate.run(json.dumps({"toolName": "edit", "toolArgs": {}}))
+    assert loaded == [None]
+    assert rules == [("", True)]
+
+    loaded.clear()
+    rules.clear()
+    assert quality_gate.run(
+        json.dumps({"toolName": 123, "toolArgs": {"file_path": "sample.py"}})
+    ) == []
+    assert quality_gate.run(
+        json.dumps({"toolArgs": {"file_path": "sample.py"}})
+    ) == []
+    assert loaded == []
+    assert rules == []

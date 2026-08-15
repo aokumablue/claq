@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -77,13 +76,6 @@ PACKAGE_MANAGERS: dict[str, PackageManagerConfig] = {
 # 検出の優先順位
 DETECTION_PRIORITY = ["pnpm", "bun", "yarn", "npm"]
 
-# スクリプト/バイナリ名で安全な文字
-SAFE_NAME_REGEX = re.compile(r"^[@a-zA-Z0-9_./-]+$")
-
-# 引数で安全な文字
-SAFE_ARGS_REGEX = re.compile(r"^[@a-zA-Z0-9\s_./:=,'\"*+-]+$")
-
-PackageManagerName = Literal["npm", "pnpm", "yarn", "bun"]
 DetectionSource = Literal[
     "environment",
     "project-config",
@@ -102,6 +94,16 @@ class PackageManagerResult:
     name: str | None
     config: PackageManagerConfig | None
     source: DetectionSource
+
+
+def _as_project_dir(project_dir: str | Path | None) -> Path:
+    """プロジェクトディレクトリを Path にする。None なら cwd。"""
+    return Path.cwd() if project_dir is None else Path(project_dir)
+
+
+def _pm_result(name: str, source: DetectionSource) -> PackageManagerResult:
+    """既知のパッケージマネージャー名から検出結果を組み立てる。"""
+    return PackageManagerResult(name=name, config=PACKAGE_MANAGERS[name], source=source)
 
 
 def get_config_path() -> Path:
@@ -131,15 +133,13 @@ def load_config() -> dict[str, Any] | None:
     Raises:
         例外は発生しません。
     """
-    config_path = get_config_path()
-    content = read_file(config_path)
-
-    if content:
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            return None
-    return None
+    content = read_file(get_config_path())
+    if not content:
+        return None
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        return None
 
 
 def save_config(config: dict[str, Any]) -> None:
@@ -170,18 +170,10 @@ def detect_from_lock_file(project_dir: str | Path | None = None) -> str | None:
     Raises:
         例外は発生しません。
     """
-    if project_dir is None:
-        project_dir = Path.cwd()
-    else:
-        project_dir = Path(project_dir)
-
+    root = _as_project_dir(project_dir)
     for pm_name in DETECTION_PRIORITY:
-        pm = PACKAGE_MANAGERS[pm_name]
-        lock_file_path = project_dir / pm.lock_file
-
-        if lock_file_path.exists():
+        if (root / PACKAGE_MANAGERS[pm_name].lock_file).exists():
             return pm_name
-
     return None
 
 
@@ -197,25 +189,19 @@ def detect_from_package_json(project_dir: str | Path | None = None) -> str | Non
     Raises:
         例外は発生しません。
     """
-    if project_dir is None:
-        project_dir = Path.cwd()
-    else:
-        project_dir = Path(project_dir)
-
-    package_json_path = project_dir / "package.json"
-    content = read_file(package_json_path)
-
-    if content:
-        try:
-            pkg = json.loads(content)
-            if pkg.get("packageManager"):
-                # 形式: "pnpm@8.6.0" または単に "pnpm"
-                pm_name = pkg["packageManager"].split("@")[0]
-                if pm_name in PACKAGE_MANAGERS:
-                    return pm_name
-        except json.JSONDecodeError:
-            pass
-
+    content = read_file(_as_project_dir(project_dir) / "package.json")
+    if not content:
+        return None
+    try:
+        pkg = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    raw = pkg.get("packageManager")
+    if not raw:
+        return None
+    pm_name = raw.split("@")[0]
+    if pm_name in PACKAGE_MANAGERS:
+        return pm_name
     return None
 
 
@@ -223,7 +209,7 @@ def _detect_from_env() -> PackageManagerResult | None:
     """環境変数 CLAUDE_PACKAGE_MANAGER からパッケージマネージャーを検出する。"""
     env_pm = os.environ.get("CLAUDE_PACKAGE_MANAGER")
     if env_pm and env_pm in PACKAGE_MANAGERS:
-        return PackageManagerResult(name=env_pm, config=PACKAGE_MANAGERS[env_pm], source="environment")
+        return _pm_result(env_pm, "environment")
     return None
 
 
@@ -237,7 +223,7 @@ def _detect_from_project_config(project_dir: Path) -> PackageManagerResult | Non
         config = json.loads(project_config_content)
         pm_name = config.get("packageManager")
         if pm_name and pm_name in PACKAGE_MANAGERS:
-            return PackageManagerResult(name=pm_name, config=PACKAGE_MANAGERS[pm_name], source="project-config")
+            return _pm_result(pm_name, "project-config")
     except json.JSONDecodeError:
         pass
     return None
@@ -246,10 +232,11 @@ def _detect_from_project_config(project_dir: Path) -> PackageManagerResult | Non
 def _detect_from_global_config() -> PackageManagerResult | None:
     """グローバルユーザー設定からパッケージマネージャーを検出する。"""
     global_config = load_config()
-    if global_config:
-        pm_name = global_config.get("packageManager")
-        if pm_name and pm_name in PACKAGE_MANAGERS:
-            return PackageManagerResult(name=pm_name, config=PACKAGE_MANAGERS[pm_name], source="global-config")
+    if not global_config:
+        return None
+    pm_name = global_config.get("packageManager")
+    if pm_name and pm_name in PACKAGE_MANAGERS:
+        return _pm_result(pm_name, "global-config")
     return None
 
 
@@ -276,26 +263,23 @@ def get_package_manager(
     Raises:
         例外は発生しません。
     """
-    if project_dir is None:
-        project_dir = Path.cwd()
-    else:
-        project_dir = Path(project_dir)
+    root = _as_project_dir(project_dir)
 
     result = _detect_from_env()
     if result:
         return result
 
-    result = _detect_from_project_config(project_dir)
+    result = _detect_from_project_config(root)
     if result:
         return result
 
-    from_package_json = detect_from_package_json(project_dir)
+    from_package_json = detect_from_package_json(root)
     if from_package_json:
-        return PackageManagerResult(name=from_package_json, config=PACKAGE_MANAGERS[from_package_json], source="package.json")
+        return _pm_result(from_package_json, "package.json")
 
-    from_lock_file = detect_from_lock_file(project_dir)
+    from_lock_file = detect_from_lock_file(root)
     if from_lock_file:
-        return PackageManagerResult(name=from_lock_file, config=PACKAGE_MANAGERS[from_lock_file], source="lock-file")
+        return _pm_result(from_lock_file, "lock-file")
 
     result = _detect_from_global_config()
     if result:
@@ -343,22 +327,13 @@ def get_selection_prompt() -> str:
     Raises:
         例外は発生しません。
     """
-    message = "[PackageManager] Node.js project detected but no package manager preference found.\n"
-    message += "Supported package managers: " + ", ".join(PACKAGE_MANAGERS.keys()) + "\n"
-    message += "\nTo set your preferred package manager:\n"
-    message += "  - Global: Set CLAUDE_PACKAGE_MANAGER environment variable\n"
-    message += '  - Or add to ~/.bluecore/package-manager.json: {"packageManager": "pnpm"}\n'
-    message += '  - Or add to package.json: {"packageManager": "pnpm@8"}\n'
-    message += "  - Or add a lock file to your project (e.g., pnpm-lock.yaml)\n"
-
-    return message
-
-
-_WELL_KNOWN_PATTERNS: dict[str, list[str]] = {
-    "dev": ["npm run dev", "pnpm( run)? dev", "yarn dev", "bun run dev"],
-    "install": ["npm install", "pnpm install", "yarn( install)?", "bun install"],
-    "test": ["npm test", "pnpm test", "yarn test", "bun test"],
-    "build": ["npm run build", "pnpm( run)? build", "yarn build", "bun run build"],
-}
-
+    return (
+        "[PackageManager] Node.js project detected but no package manager preference found.\n"
+        "Supported package managers: " + ", ".join(PACKAGE_MANAGERS.keys()) + "\n"
+        "\nTo set your preferred package manager:\n"
+        "  - Global: Set CLAUDE_PACKAGE_MANAGER environment variable\n"
+        '  - Or add to ~/.bluecore/package-manager.json: {"packageManager": "pnpm"}\n'
+        '  - Or add to package.json: {"packageManager": "pnpm@8"}\n'
+        "  - Or add a lock file to your project (e.g., pnpm-lock.yaml)\n"
+    )
 

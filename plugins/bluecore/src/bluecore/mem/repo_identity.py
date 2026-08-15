@@ -145,7 +145,9 @@ def normalize_remote_url(remote_url: str | None) -> str | None:
         authority, _, path = rest.partition("/")
         return _join_host_path(authority, path, strip_port=True)
 
-    colon, slash = raw.find(":"), raw.find("/")
+    colon = raw.find(":")
+    slash = raw.find("/")
+    # scp 形式（git@host:owner/repo）は、最初のコロンがスラッシュより前に来る。
     if colon != -1 and (slash == -1 or colon < slash):
         authority, _, path = raw.partition(":")
         return _join_host_path(authority, path, strip_port=False)

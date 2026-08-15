@@ -99,7 +99,7 @@ def _collect_project_context(project_info: ProjectInfo) -> list[str]:
 
 
 def run(_raw_input: str) -> str:
-    """セッション開始フックを実行し hookSpecificOutput の JSON を返す
+    """セッション開始フックを実行し hookSpecificOutput の JSON を返す。
 
     Args:
         _raw_input: フックの生 stdin。本フックでは内容を参照しない。

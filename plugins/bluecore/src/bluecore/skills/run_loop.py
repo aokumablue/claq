@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ._eval_config import EvalConfig
-from .improve_description import improve_description
+from .improve_description import ImproveContext, improve_description
 from .run_eval import find_project_root, run_eval
 from .utils import parse_skill_md
 
@@ -139,20 +139,12 @@ class LoopOutcome:
 def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
     """eval セットを should_trigger で層化して train / test に分割する。"""
     random.seed(seed)
-
-    # should_trigger で分ける
     trigger = [e for e in eval_set if e["should_trigger"]]
     no_trigger = [e for e in eval_set if not e["should_trigger"]]
-
-    # 各グループをシャッフルする
     random.shuffle(trigger)
     random.shuffle(no_trigger)
-
-    # 分割点を計算する
     n_trigger_test = max(1, int(len(trigger) * holdout))
     n_no_trigger_test = max(1, int(len(no_trigger) * holdout))
-
-    # 分割する
     test_set = trigger[:n_trigger_test] + no_trigger[:n_no_trigger_test]
     train_set = trigger[n_trigger_test:] + no_trigger[n_no_trigger_test:]
 
@@ -186,6 +178,13 @@ def _print_eval_stats(label: str, results: list[dict], elapsed: float) -> None:
         )
 
 
+def _summarize_results(result_list: list[dict]) -> dict:
+    """合格/不合格/件数のサマリー辞書を返す。"""
+    passed = sum(1 for r in result_list if r["pass"])
+    total = len(result_list)
+    return {"passed": passed, "failed": total - passed, "total": total}
+
+
 def _split_eval_results(
     all_results: dict,
     train_set: list[dict],
@@ -196,15 +195,11 @@ def _split_eval_results(
     train_result_list = [r for r in all_results["results"] if r["query"] in train_queries_set]
     test_result_list = [r for r in all_results["results"] if r["query"] not in train_queries_set]
 
-    train_passed = sum(1 for r in train_result_list if r["pass"])
-    train_total = len(train_result_list)
-    train_summary = {"passed": train_passed, "failed": train_total - train_passed, "total": train_total}
+    train_summary = _summarize_results(train_result_list)
     train_results = {"results": train_result_list, "summary": train_summary}
 
     if test_set:
-        test_passed = sum(1 for r in test_result_list if r["pass"])
-        test_total = len(test_result_list)
-        test_summary: dict | None = {"passed": test_passed, "failed": test_total - test_passed, "total": test_total}
+        test_summary: dict | None = _summarize_results(test_result_list)
         test_results: dict | None = {"results": test_result_list, "summary": test_summary}
     else:
         test_results = None
@@ -267,7 +262,6 @@ def _run_improve(
     if loop_cfg.verbose:
         print("\n説明を改善しています...", file=sys.stderr)
     t0 = time.time()
-    from .improve_description import ImproveContext
     new_desc = improve_description(
         ImproveContext(
             skill_name=skill_ctx.name,

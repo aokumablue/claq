@@ -16,6 +16,18 @@ from bluecore.ci import (
 )
 
 
+def _raise_oserror_on_read(monkeypatch: pytest.MonkeyPatch, broken_file: Path) -> None:
+    """指定パスの Path.read_text だけ OSError にする。"""
+    original_read_text = Path.read_text
+
+    def fake_read_text(self: Path, *args, **kwargs):  # noqa: ANN001
+        if self == broken_file:
+            raise OSError("boom")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fake_read_text)
+
+
 def test_validate_skills_handles_missing_dir_and_success(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     missing = tmp_path / "missing-skills"
     assert validate_skills.validate_skills(missing) == 0
@@ -52,15 +64,7 @@ def test_validate_skills_reports_empty_and_read_errors(tmp_path: Path, monkeypat
     (empty_dir / "SKILL.md").write_text("", encoding="utf-8")
     broken_file = broken_dir / "SKILL.md"
     broken_file.write_text("broken", encoding="utf-8")
-
-    original_read_text = Path.read_text
-
-    def fake_read_text(self: Path, *args, **kwargs):  # noqa: ANN001
-        if self == broken_file:
-            raise OSError("boom")
-        return original_read_text(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", fake_read_text)
+    _raise_oserror_on_read(monkeypatch, broken_file)
 
     assert validate_skills.validate_skills(skills_dir) == 1
     stderr = capsys.readouterr().err
@@ -77,15 +81,7 @@ def test_validate_agents_handles_valid_bom_crlf_and_errors(
     (agents_dir / "missing_frontmatter.md").write_text("plain text", encoding="utf-8")
     broken_file = agents_dir / "broken.md"
     broken_file.write_text("---\nmodel: sonnet\n---\n", encoding="utf-8")
-
-    original_read_text = Path.read_text
-
-    def fake_read_text(self: Path, *args, **kwargs):  # noqa: ANN001
-        if self == broken_file:
-            raise OSError("boom")
-        return original_read_text(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", fake_read_text)
+    _raise_oserror_on_read(monkeypatch, broken_file)
 
     assert validate_agents.validate_agents(agents_dir) == 1
     stderr = capsys.readouterr().err
@@ -166,15 +162,7 @@ def test_validate_commands_reports_errors_and_io_failures(tmp_path: Path, monkey
     broken_file = commands_dir / "broken.md"
     broken_file.write_text("Broken command.\n", encoding="utf-8")
     (agents_dir / "existing.md").write_text("Agent.\n", encoding="utf-8")
-
-    original_read_text = Path.read_text
-
-    def fake_read_text(self: Path, *args, **kwargs):  # noqa: ANN001
-        if self == broken_file:
-            raise OSError("boom")
-        return original_read_text(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", fake_read_text)
+    _raise_oserror_on_read(monkeypatch, broken_file)
     (commands_dir / "bad.md").write_text(
         "Use `/missing` and agents/missing.md.\n"
         "existing -> missing\n",

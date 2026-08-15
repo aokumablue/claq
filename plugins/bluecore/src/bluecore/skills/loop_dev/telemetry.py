@@ -173,7 +173,9 @@ def _in_period(record: dict, since: str | None, until: str | None) -> bool:
         return False
     if since is not None and day < since:
         return False
-    return not (until is not None and day > until)
+    if until is not None and day > until:
+        return False
+    return True
 
 
 def _handle_list(args: argparse.Namespace) -> int:

@@ -1,6 +1,9 @@
 """コーディングエージェントハーネス（Claude / Copilot / Codex / Grok）の判定と差分吸収。
 
-判定順はコスト昇順で、Claude Code では環境変数チェック 1 回で確定する。
+判定順は非 Claude 系マーカー（Codex → Copilot → Grok）を先に評価し、
+いずれにも該当しない場合にのみ CLAUDECODE を見て Claude と判定する。
+ネストされた実行等で CLAUDECODE が他ハーネスのマーカーと共存していても、
+非 Claude 系マーカーを優先することで誤判定を防ぐ。
 すべて純 stdlib のみに依存する（venv 不在時のフォールバック実行を保証するため）。
 """
 
@@ -32,6 +35,15 @@ _TOOL_NAME_MAP = {
     "task": "Agent",
     "view": "Read",
     "write": "Write",
+    # Grok の runtime tool 名。read_file/list_dir は書き込み系ゲート
+    # （config_protection/quality_gate の _WRITE_TOOL_NAMES、redux_filter の
+    # "Bash" 比較）のいずれも対象外だが、observe.py の観測レコード
+    # （tool フィールド）がハーネス横断で正規化名を記録するために正規化する。
+    "search_replace": "Edit",
+    "run_terminal_command": "Bash",
+    "spawn_subagent": "Agent",
+    "read_file": "Read",
+    "list_dir": "Glob",
 }
 
 # 構造化パッチテキストのファイル操作マーカー（Codex apply_patch 形式）
@@ -52,8 +64,6 @@ def detect_harness() -> str:
     Raises:
         例外は発生しません。
     """
-    if os.environ.get("CLAUDECODE"):
-        return "claude"
     env = os.environ
     if "PLUGIN_DATA" in env or any(k.startswith("CODEX_") for k in env):
         return "codex"
@@ -67,6 +77,11 @@ def detect_harness() -> str:
         or any(k.startswith("GROK_") for k in env)
     ):
         return "grok"
+    # 非 Claude 系マーカーがどれにも該当しない場合のみ CLAUDECODE を見る。
+    # ネストされた実行等で CLAUDECODE と他ハーネスのマーカーが共存していても
+    # 非 Claude 系判定を優先するため、この位置で最後に評価する。
+    if env.get("CLAUDECODE"):
+        return "claude"
     return "unknown"
 
 
@@ -90,16 +105,40 @@ def extract_tool_input(payload: dict[str, Any]) -> Any:
         if key not in payload:
             continue
         value = payload[key]
-        if isinstance(value, str):
-            stripped = value.lstrip()
-            if stripped.startswith(("{", "[")):
-                try:
-                    return json.loads(value)
-                except (json.JSONDecodeError, TypeError):
-                    return value
+        if not isinstance(value, str):
             return value
-        return value
+        stripped = value.lstrip()
+        if not stripped.startswith(("{", "[")):
+            return value
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return value
     return None
+
+
+def extract_raw_tool_name(payload: dict[str, Any]) -> str:
+    """フック payload から正規化前の生ツール名を返す。
+
+    非空の ``tool_name`` を優先し、無ければ非空の ``toolName`` を使う。
+    空文字・非文字列は無効として次候補へ倒す。どちらも無効なら空文字。
+
+    Args:
+        payload: フック stdin を JSON として読んだ dict。
+
+    Returns:
+        ``normalize_tool_name()`` 適用前の生文字列。取れなければ ``""``。
+
+    Raises:
+        例外は発生しません。
+    """
+    tool_name = payload.get("tool_name")
+    if isinstance(tool_name, str) and tool_name:
+        return tool_name
+    camel_name = payload.get("toolName")
+    if isinstance(camel_name, str) and camel_name:
+        return camel_name
+    return ""
 
 
 def extract_bash_command(payload: dict[str, Any]) -> str:
@@ -174,7 +213,9 @@ def normalize_tool_name(tool_name: str) -> str:
 
     Codex の apply_patch は Edit に対応する。Copilot CLI はフックイベントに
     lowercase の runtime tool 名（write/edit/bash 等）を渡すため、大文字小文字を
-    区別しない照合で Claude Code 表記へ正規化する。Claude Code に apply_patch
+    区別しない照合で Claude Code 表記へ正規化する。Grok は search_replace /
+    run_terminal_command / spawn_subagent / read_file / list_dir という
+    固有名を使うため、同様に Claude Code 表記へ正規化する。Claude Code に apply_patch
     というツールは存在せず、Claude Code 自身のツール名は既に正規形のため、
     ハーネス判定なしの無条件マッピングで安全。
 
@@ -202,20 +243,18 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
         patch_text = tool_input.get("input")
         return patch_text if isinstance(patch_text, str) else None
 
-    if isinstance(tool_input, str):
-        stripped = tool_input.lstrip()
-        if stripped.startswith("{"):
-            try:
-                parsed = json.loads(tool_input)
-            except (json.JSONDecodeError, TypeError):
-                pass
-            else:
-                patch_text = parsed.get("input")
-                if isinstance(patch_text, str):
-                    return patch_text
-        return tool_input
+    if not isinstance(tool_input, str):
+        return None
 
-    return None
+    stripped = tool_input.lstrip()
+    if not stripped.startswith("{"):
+        return tool_input
+    try:
+        parsed = json.loads(tool_input)
+    except (json.JSONDecodeError, TypeError):
+        return tool_input
+    patch_text = parsed.get("input")
+    return patch_text if isinstance(patch_text, str) else tool_input
 
 
 def _has_patch_markers(patch_text: str) -> bool:

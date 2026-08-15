@@ -134,7 +134,7 @@ def _validate_frontmatter_keys(frontmatter: dict) -> tuple[bool, str]:
     return True, "スキルは有効です"
 
 
-def validate_skill(skill_path):
+def validate_skill(skill_path: str | Path) -> tuple[bool, str]:
     """スキルの基本的な妥当性を検証する。"""
     skill_path = Path(skill_path)
     skill_md = skill_path / "SKILL.md"
@@ -143,10 +143,10 @@ def validate_skill(skill_path):
 
     content = skill_md.read_text(encoding="utf-8")
     ok, error_msg, frontmatter = _parse_frontmatter(content)
-    if not ok:
+    if not ok or frontmatter is None:
         return False, error_msg
 
-    return _validate_frontmatter_keys(frontmatter)  # type: ignore[arg-type]
+    return _validate_frontmatter_keys(frontmatter)
 
 
 if __name__ == "__main__":

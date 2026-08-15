@@ -106,6 +106,32 @@ def coerce_confidence(value: Any) -> float:
     return confidence
 
 
+def _payload_choice(
+    payload: dict[str, Any],
+    name: str,
+    allowed: frozenset[str],
+    *,
+    default: str = "",
+    override: str | None = None,
+) -> str:
+    """ペイロード（または上書き値）から列挙値を取り出して検証する。
+
+    Args:
+        payload: 知識カードを表す dict。
+        name: 項目名。ペイロードのキーとエラーメッセージに使う。
+        allowed: 許可される値の集合。
+        default: ペイロードに値が無いときの既定値。
+        override: ペイロードより優先する値。observer の固定値に使う。
+
+    Returns:
+        検証を通った列挙値。
+
+    Raises:
+        KnowledgeInputError: 値が *allowed* に含まれない場合。
+    """
+    return validate_choice(name, override or str(payload.get(name) or default), allowed)
+
+
 def generate_key(title: str, kind: str) -> str:
     """title から知識カードの key スラッグを生成する。
 
@@ -221,10 +247,10 @@ def parse_knowledge_payload(
     if not title:
         raise KnowledgeInputError("learn: title は必須です")
 
-    kind = validate_choice("kind", str(payload.get("kind") or ""), KINDS)
-    scope = validate_choice("scope", str(payload.get("scope") or "repo"), SCOPES)
-    source = validate_choice("source", source_override or str(payload.get("source") or "agent"), SOURCES)
-    status = validate_choice("status", status_override or str(payload.get("status") or "active"), STATUSES)
+    kind = _payload_choice(payload, "kind", KINDS)
+    scope = _payload_choice(payload, "scope", SCOPES, default="repo")
+    source = _payload_choice(payload, "source", SOURCES, default="agent", override=source_override)
+    status = _payload_choice(payload, "status", STATUSES, default="active", override=status_override)
 
     return KnowledgeDraft(
         key=str(payload.get("key") or "").strip() or generate_key(title, kind),

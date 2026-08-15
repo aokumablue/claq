@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -32,8 +32,15 @@ def read_text(root_dir: str | Path, relative_path: str) -> str:
     return Path(root_dir, relative_path).read_text(encoding="utf-8")
 
 
-def _walk_dir(root_path: Path):
-    """ディレクトリ以下のエントリを再帰的に走査して順次返す。"""
+def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
+    """ディレクトリ以下のファイルエントリを再帰走査して返す。
+
+    Args:
+        root_path: 走査を開始するディレクトリ。
+
+    Yields:
+        シンボリックリンクを辿らないファイルエントリ。
+    """
     stack = [root_path]
     while stack:
         current = stack.pop()
@@ -131,19 +138,26 @@ def _has_gitlab_security_scanning(root_dir: str | Path) -> bool:
     return any(re.search(pattern, content) for pattern in patterns)
 
 
-def find_plugin_install(root_dir: str | Path) -> str | None:
-    """ECC のインストール先を探す。"""
-    home_dir = os.environ.get("HOME", "")
-    candidates = [
-        Path(root_dir) / ".claude" / "plugins" / "everything-claude-code" / ".claude-plugin" / "plugin.json",
-        Path(root_dir) / ".claude" / "plugins" / "everything-claude-code" / "plugin.json",
-        Path(home_dir) / ".claude" / "plugins" / "everything-claude-code" / ".claude-plugin" / "plugin.json"
-        if home_dir
-        else None,
-        Path(home_dir) / ".claude" / "plugins" / "everything-claude-code" / "plugin.json" if home_dir else None,
-    ]
+_PLUGIN_JSON_RELATIVES = (
+    Path(".claude") / "plugins" / "everything-claude-code" / ".claude-plugin" / "plugin.json",
+    Path(".claude") / "plugins" / "everything-claude-code" / "plugin.json",
+)
 
-    for candidate in candidates:
-        if candidate is not None and candidate.exists():
-            return str(candidate)
+
+def find_plugin_install(root_dir: str | Path) -> str | None:
+    """ECC のインストール先を探す。
+
+    リポジトリ直下を先に、``HOME`` があればその配下を続けて探す。
+    各ルートでは ``.claude-plugin/plugin.json`` を先に見る。
+    """
+    search_roots = [Path(root_dir)]
+    home_dir = os.environ.get("HOME", "")
+    if home_dir:
+        search_roots.append(Path(home_dir))
+
+    for search_root in search_roots:
+        for relative in _PLUGIN_JSON_RELATIVES:
+            candidate = search_root / relative
+            if candidate.exists():
+                return str(candidate)
     return None

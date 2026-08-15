@@ -43,17 +43,17 @@ effort: xhigh
    - Why: 呼び出し側で件数を制御するため
    - Verify: `mem search --help` に `--limit`（既定 10）が表示される
    - Dependencies: なし / 複雑度: 低 / Risk: Low / Mitigation: 既定値の既存テストで回帰確認
-2. **search 関数へ伝播** (plugins/bluecore/src/bluecore/mem/search.py)
-   - Action: `search()` に `limit` パラメータを追加し SQL の LIMIT に反映
+2. **`_take_rows` 相当のロジックへ反映** (plugins/bluecore/src/bluecore/mem/cli.py)
+   - Action: 同ファイル内の結果整形処理に `limit` パラメータを反映
    - Why: CLI 引数を実クエリへ接続するため
    - Verify: `search(limit=3)` が 3 件のみ返す（ステップ3のテストで確認）
    - Dependencies: ステップ1 / 複雑度: 低 / Risk: Low / Mitigation: 既存呼び出しを既定値で維持
 
 ## Phase 2: テスト
-3. **ユニットテスト追加** (tests/mem/test_search.py)
+3. **ユニットテスト追加** (tests/mem/test_cli.py)
    - Action: limit 指定 / 既定 / 0 件境界のテストを追加
    - Why: カバレッジ 100% 維持
-   - Verify: `pytest -q tests/mem/test_search.py` が exit 0
+   - Verify: `pytest -q tests/mem/test_cli.py` が exit 0
    - Dependencies: ステップ2 / 複雑度: 中 / Risk: Low / Mitigation: 境界値をテストする
 
 ## テスト戦略

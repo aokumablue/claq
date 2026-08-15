@@ -127,7 +127,11 @@ class JsonlLog:
         """1 日 1 回、``ARCHIVE_RETENTION_SECONDS`` より古いアーカイブを削除する。"""
         marker = self.purge_marker
         try:
-            stale = not marker.exists() or (datetime.now(UTC).timestamp() - marker.stat().st_mtime) > PURGE_INTERVAL_SECONDS
+            if not marker.exists():
+                stale = True
+            else:
+                age = datetime.now(UTC).timestamp() - marker.stat().st_mtime
+                stale = age > PURGE_INTERVAL_SECONDS
         except OSError:
             stale = True
 
@@ -289,4 +293,4 @@ def ensure_storage_dirs(target: ObservationTarget) -> None:
     Args:
         target: 作成対象の保存先。
     """
-    target.archive_dir.mkdir(parents=True, exist_ok=True)
+    target.observations_log.ensure_dirs()

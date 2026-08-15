@@ -2,8 +2,12 @@
 
 Grok は ``${CLAUDE_PLUGIN_ROOT}`` を ``~/.grok/plugins/<name>`` に展開するが、
 実体は ``~/.grok/installed-plugins/<name>-<hash>/`` に置かれる。hooks.json の
-launcher パスが前者を参照するため、インストール時と SessionStart で
-シンボリックリンクを張って一致させる。
+launcher パスが前者を参照するため、両者を一致させるにはシンボリックリンクが
+必要になる。SessionStart からの自動修復は行わない（同一マシンに Claude/
+Copilot と Grok が同居する環境で、Claude 側セッション開始のたびに Grok 側の
+symlink を無断で書き換える副作用があるため）。ユーザーが
+``scripts/grok.sh`` を手動実行したときに、本モジュールの
+``ensure_grok_plugin_root_symlink`` が呼ばれてリンクを張る。
 
 リンク先は常に ``~/.grok/installed-plugins/bluecore-*`` のみとする。
 開発用チェックアウト（例: bluecore-dev）は一切参照しない。
@@ -12,7 +16,6 @@ launcher パスが前者を参照するため、インストール時と Session
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 
 
@@ -55,9 +58,7 @@ def is_grok_installed_plugin_root(path: Path | str) -> bool:
         grok_idx = parts.index(".grok")
     except ValueError:
         return False
-    if grok_idx + 2 >= len(parts):
-        return False
-    if parts[grok_idx + 1] != "installed-plugins":
+    if grok_idx + 2 >= len(parts) or parts[grok_idx + 1] != "installed-plugins":
         return False
     return parts[grok_idx + 2].startswith("bluecore-")
 
@@ -65,6 +66,22 @@ def is_grok_installed_plugin_root(path: Path | str) -> bool:
 def _has_launcher(root: Path) -> bool:
     """プラグインルートに launcher.py があるか。"""
     return (root / "src" / "bluecore" / "launcher.py").is_file()
+
+
+def _safe_resolve(path: Path) -> Path | None:
+    """``path.resolve()`` を試み、失敗したら None を返す。"""
+    try:
+        return path.resolve()
+    except OSError:
+        return None
+
+
+def _installed_target(path: Path | str) -> Path | None:
+    """installed-plugins/bluecore-* かつ launcher があるなら resolve した Path。"""
+    candidate = Path(path)
+    if not is_grok_installed_plugin_root(candidate) or not _has_launcher(candidate):
+        return None
+    return _safe_resolve(candidate)
 
 
 def find_latest_installed_bluecore(installed_dir: Path | None = None) -> Path | None:
@@ -99,64 +116,6 @@ def find_latest_installed_bluecore(installed_dir: Path | None = None) -> Path | 
     return candidates[0]
 
 
-def ensure_venv_symlink_for_installed(
-    *,
-    home: Path | None = None,
-    shared_venv: Path | str | None = None,
-) -> list[Path]:
-    """``installed-plugins/bluecore-*`` 各ツリーに共有 venv への .venv symlink を張る。
-
-    実体 venv は常に ``~/.bluecore/.venv``（または shared_venv）1 つ。
-    各インストールディレクトリには symlink のみ置く（Claude/Copilot と同じ）。
-
-    Args:
-        home: ホーム上書き（テスト用）。
-        shared_venv: 共有 venv パス。None なら ``~/.bluecore/.venv``。
-
-    Returns:
-        新たに作成または張り替えた .venv リンクの Path リスト。
-
-    Raises:
-        例外は発生しません。
-    """
-    base = home if home is not None else _home()
-    venv = Path(shared_venv) if shared_venv is not None else base / ".bluecore" / ".venv"
-    installed = installed_plugins_dir(base)
-    if not installed.is_dir():
-        return []
-
-    updated: list[Path] = []
-    try:
-        children = list(installed.iterdir())
-    except OSError:
-        return []
-
-    venv_str = str(venv)
-    for path in children:
-        if not path.is_dir() or not path.name.startswith("bluecore-"):
-            continue
-        if not _has_launcher(path):
-            continue
-        link = path / ".venv"
-        try:
-            if link.is_symlink():
-                # install.sh と同様: readlink 文字列一致ならスキップ
-                if os.readlink(link) == venv_str:
-                    continue
-                link.unlink()
-            elif link.exists():
-                # 誤って置かれた実体 venv は置換、それ以外は触らない
-                if (link / "pyvenv.cfg").is_file():
-                    shutil.rmtree(link)
-                else:
-                    continue
-            link.symlink_to(venv, target_is_directory=True)
-            updated.append(link)
-        except OSError:
-            continue
-    return updated
-
-
 def ensure_grok_plugin_root_symlink(
     *,
     plugin_root: Path | str | None = None,
@@ -182,37 +141,46 @@ def ensure_grok_plugin_root_symlink(
     base = home if home is not None else _home()
     link = Path(link_path) if link_path is not None else base / ".grok" / "plugins" / "bluecore"
 
-    target: Path | None = None
-    if plugin_root is not None:
-        candidate = Path(plugin_root)
-        if is_grok_installed_plugin_root(candidate) and _has_launcher(candidate):
-            try:
-                target = candidate.resolve()
-            except OSError:
-                target = None
-        # 開発ツリー等は黙って無視し、installed-plugins 探索へ進む
-
-    if target is None:
-        env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-        if env_root and is_grok_installed_plugin_root(env_root):
-            candidate = Path(env_root)
-            if _has_launcher(candidate):
-                try:
-                    target = candidate.resolve()
-                except OSError:
-                    target = None
-
-    if target is None:
-        found = find_latest_installed_bluecore(installed_plugins_dir(base))
-        if found is not None:
-            try:
-                target = found.resolve()
-            except OSError:
-                target = None
-
+    target = _resolve_symlink_target(plugin_root, base)
     if target is None:
         return None
+    return _ensure_symlink(link, target)
 
+
+def _resolve_symlink_target(plugin_root: Path | str | None, home: Path) -> Path | None:
+    """リンク先を plugin_root → 環境変数 → 最新インストールの順で解決する。"""
+    if plugin_root is not None:
+        target = _installed_target(plugin_root)
+        if target is not None:
+            return target
+    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if env_root:
+        target = _installed_target(env_root)
+        if target is not None:
+            return target
+    found = find_latest_installed_bluecore(installed_plugins_dir(home))
+    if found is None:
+        return None
+    return _safe_resolve(found)
+
+
+def _remove_empty_or_file(link: Path) -> bool:
+    """空ディレクトリまたは通常ファイルを削除する。触ってはいけないなら False。"""
+    if not link.is_dir():
+        link.unlink()
+        return True
+    try:
+        next(link.iterdir())
+    except StopIteration:
+        link.rmdir()
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _ensure_symlink(link: Path, target: Path) -> Path | None:
+    """``link`` を ``target`` へ張り、結果の Path または何もしない/失敗時の None を返す。"""
     try:
         link.parent.mkdir(parents=True, exist_ok=True)
         if link.is_symlink():
@@ -223,20 +191,8 @@ def ensure_grok_plugin_root_symlink(
                 pass
             link.unlink()
         elif link.exists():
-            # 既に有効なツリーなら触らない
-            if _has_launcher(link):
+            if _has_launcher(link) or not _remove_empty_or_file(link):
                 return None
-            if link.is_dir():
-                try:
-                    next(link.iterdir())
-                except StopIteration:
-                    link.rmdir()
-                except OSError:
-                    return None
-                else:
-                    return None
-            else:
-                link.unlink()
         link.symlink_to(target, target_is_directory=True)
         return target
     except OSError:

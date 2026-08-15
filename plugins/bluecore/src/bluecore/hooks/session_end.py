@@ -53,6 +53,25 @@ _FILE_LIST_LIMIT = 30
 """checkpoint に載せる変更ファイルの件数。"""
 
 
+def _content_as_text(raw_content: object) -> str | None:
+    """トランスクリプト content フィールドをプレーンテキストにする。
+
+    Args:
+        raw_content: message.content または entry.content。
+
+    Returns:
+        文字列化した本文。str/list 以外は None。
+
+    Raises:
+        例外は発生しません。
+    """
+    if isinstance(raw_content, str):
+        return raw_content
+    if isinstance(raw_content, list):
+        return " ".join(str(c.get("text", "")) if isinstance(c, dict) else "" for c in raw_content)
+    return None
+
+
 def _collect_user_message(entry: dict) -> str:
     """トランスクリプトエントリからユーザーメッセージ本文を抽出する。
 
@@ -66,12 +85,8 @@ def _collect_user_message(entry: dict) -> str:
     message = message if isinstance(message, dict) else {}
     if "user" not in (entry.get("type"), entry.get("role"), message.get("role")):
         return ""
-    raw_content = message.get("content") or entry.get("content")
-    if isinstance(raw_content, str):
-        text = raw_content
-    elif isinstance(raw_content, list):
-        text = " ".join(str(c.get("text", "")) if isinstance(c, dict) else "" for c in raw_content)
-    else:
+    text = _content_as_text(message.get("content") or entry.get("content"))
+    if text is None:
         return ""
     return compact_line(strip_ansi(text).strip(), _USER_MESSAGE_CHAR_LIMIT)
 
@@ -93,6 +108,26 @@ def _record_modified_files(tool_name: str, tool_input: object, files_modified: s
     files_modified.update(paths or [])
 
 
+def _iter_assistant_tool_uses(entry: dict) -> list[dict]:
+    """assistant エントリ内の tool_use ブロックを返す。
+
+    Args:
+        entry: トランスクリプトの 1 エントリ。
+
+    Returns:
+        tool_use ブロックのリスト。該当しなければ空リスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    if entry.get("type") != "assistant":
+        return []
+    content = entry.get("message", {}).get("content")
+    if not isinstance(content, list):
+        return []
+    return [block for block in content if isinstance(block, dict) and block.get("type") == "tool_use"]
+
+
 def _collect_modified_files(entry: dict, files_modified: set) -> None:
     """直接の tool_use エントリと assistant ブロックの両方からファイルパスを集める。
 
@@ -105,10 +140,8 @@ def _collect_modified_files(entry: dict, files_modified: set) -> None:
         tool_input = entry.get("tool_input") or entry.get("input") or {}
         _record_modified_files(tool_name, tool_input, files_modified)
 
-    if entry.get("type") == "assistant" and isinstance(entry.get("message", {}).get("content"), list):
-        for block in entry["message"]["content"]:
-            if isinstance(block, dict) and block.get("type") == "tool_use":
-                _record_modified_files(block.get("name", ""), block.get("input") or {}, files_modified)
+    for block in _iter_assistant_tool_uses(entry):
+        _record_modified_files(block.get("name", ""), block.get("input") or {}, files_modified)
 
 
 def extract_session_summary(transcript_path: str) -> dict | None:
@@ -168,6 +201,31 @@ def get_session_metadata() -> dict:
     }
 
 
+def _new_checkpoint_body(project: str, files_section: str, context_hint: str) -> str:
+    """新規 checkpoint マークダウン本文を組み立てる。
+
+    Args:
+        project: プロジェクト名（task frontmatter に最大 20 文字）。
+        files_section: 変更済みファイルの箇条書き。
+        context_hint: 再開コンテキスト行。
+
+    Returns:
+        checkpoint ファイルの全文。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        f"---\ntask: {project[:20]}\ncompleted: false\n---\n\n"
+        f"## 目標\n(セッション継続のための自動チェックポイント)\n\n"
+        f"## 完了済みステップ\n- (セッション終了時点まで)\n\n"
+        f"## 進行中\n- [ ] 次のステップを確認してください\n\n"
+        f"## 残りステップ\n- [ ] (次セッションで確認)\n\n"
+        f"## 変更済みファイル\n{files_section}\n\n"
+        f"## 再開コンテキスト\n{context_hint}\n"
+    )
+
+
 def _auto_save_checkpoint(summary: dict, metadata: dict, sessions_dir: Path) -> None:
     """メッセージ数が閾値を超えた場合にチェックポイントを自動保存する。
 
@@ -205,16 +263,7 @@ def _auto_save_checkpoint(summary: dict, metadata: dict, sessions_dir: Path) -> 
         write_file(checkpoint_path, updated)
         log(f"[SessionEnd] Updated auto-checkpoint: {checkpoint_path}")
     else:
-        content = (
-            f"---\ntask: {project[:20]}\ncompleted: false\n---\n\n"
-            f"## 目標\n(セッション継続のための自動チェックポイント)\n\n"
-            f"## 完了済みステップ\n- (セッション終了時点まで)\n\n"
-            f"## 進行中\n- [ ] 次のステップを確認してください\n\n"
-            f"## 残りステップ\n- [ ] (次セッションで確認)\n\n"
-            f"## 変更済みファイル\n{files_section}\n\n"
-            f"## 再開コンテキスト\n{context_hint}\n"
-        )
-        write_file(checkpoint_path, content)
+        write_file(checkpoint_path, _new_checkpoint_body(project, files_section, context_hint))
         log(f"[SessionEnd] Created auto-checkpoint: {checkpoint_path}")
 
 

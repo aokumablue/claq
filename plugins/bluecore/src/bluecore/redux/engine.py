@@ -77,24 +77,27 @@ class ReduxFilterSpec:
 # ---------------------------------------------------------------------------
 
 
+def _apply_substitutes(line: str, rules: list[SubstituteRule]) -> str:
+    """1 行に置換ルールを順に連鎖適用する。"""
+    for rule in rules:
+        line = rule.pattern.sub(rule.replacement, line)
+    return line
+
+
 def _stage_substitute(lines: list[str], rules: list[SubstituteRule]) -> list[str]:
     """各行に置換ルールを連鎖適用する。"""
-    out: list[str] = []
-    for line in lines:
-        for rule in rules:
-            line = rule.pattern.sub(rule.replacement, line)
-        out.append(line)
-    return out
+    return [_apply_substitutes(line, rules) for line in lines]
 
 
 def _stage_short_circuit(lines: list[str], rules: list[ShortCircuitRule]) -> str | None:
     """出力全体マッチで短絡。一致した最初のルールの message を返す。無ければ None。"""
     blob = "\n".join(lines)
     for rule in rules:
-        if rule.pattern.search(blob):
-            if rule.unless is not None and rule.unless.search(blob):
-                continue
-            return rule.message
+        if not rule.pattern.search(blob):
+            continue
+        if rule.unless is not None and rule.unless.search(blob):
+            continue
+        return rule.message
     return None
 
 
@@ -111,21 +114,29 @@ def _stage_line_filter(
     return lines
 
 
+def _omit_notice(omitted: int) -> str:
+    """省略した行数を示すプレースホルダ行を返す。"""
+    return f"... ({omitted} 行省略)"
+
+
 def _stage_head_tail(lines: list[str], head: int | None, tail: int | None) -> list[str]:
     """先頭 head 行・末尾 tail 行を保持し、超過分を省略メッセージに置換する。"""
     total = len(lines)
     if head is not None and tail is not None:
-        if total > head + tail:
-            return [*lines[:head], f"... ({total - head - tail} 行省略)", *lines[total - tail :]]
-        return lines
+        omitted = total - head - tail
+        if omitted <= 0:
+            return lines
+        return [*lines[:head], _omit_notice(omitted), *lines[total - tail :]]
     if head is not None:
-        if total > head:
-            return [*lines[:head], f"... ({total - head} 行省略)"]
-        return lines
+        omitted = total - head
+        if omitted <= 0:
+            return lines
+        return [*lines[:head], _omit_notice(omitted)]
     if tail is not None:
-        if total > tail:
-            return [f"... ({total - tail} 行省略)", *lines[total - tail :]]
-        return lines
+        omitted = total - tail
+        if omitted <= 0:
+            return lines
+        return [_omit_notice(omitted), *lines[total - tail :]]
     return lines
 
 
@@ -166,9 +177,10 @@ def apply_spec(spec: ReduxFilterSpec, output: str, config: ReduxConfig | None = 
 
     lines = _stage_head_tail(lines, spec.head_lines, spec.tail_lines)
 
-    if spec.limit_lines is not None and len(lines) > spec.limit_lines:
-        truncated = len(lines) - spec.limit_lines
-        lines = [*lines[: spec.limit_lines], f"... ({truncated} 行切り捨て)"]
+    limit = spec.limit_lines
+    if limit is not None and len(lines) > limit:
+        truncated = len(lines) - limit
+        lines = [*lines[:limit], f"... ({truncated} 行切り捨て)"]
 
     text = "\n".join(lines)
 
@@ -220,9 +232,7 @@ class ReduxEngine:
             圧縮後テキスト。無効・空入力・無一致時は元の output。
         """
         cfg = config or ReduxConfig()
-        if not cfg.enabled:
-            return output
-        if not output or not output.strip():
+        if not cfg.enabled or not output.strip():
             return output
         spec = select_filter(command, self._specs)
         if spec is None:

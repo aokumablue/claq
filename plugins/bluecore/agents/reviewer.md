@@ -61,7 +61,7 @@ Confidence 80-100 のみ報告。80未満 → 黙殺。
 
 末尾の `Blockers: {n}` 集計行は必須（呼び出し元の反復ループ（loop-dev）が blocker ゼロ判定を機械的に読むため）。指摘ゼロの分類は見出しごと省略可だが、集計行は `Blockers: 0` でも必ず出力する。
 
-**承認基準:** Approve = CRITICAL/HIGH なし / Warning = HIGHのみ / Block = CRITICALあり
+**承認基準:** Approve = CRITICAL/HIGH なし / Block = CRITICALまたはHIGHあり
 
 ## 一次検証（verify_mode: reexecute 指定時のみ）
 

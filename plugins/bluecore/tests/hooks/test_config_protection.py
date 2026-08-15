@@ -133,3 +133,226 @@ def test_main_blocks_on_truncated_input(
 
     assert config_protection.main() == 2
     assert "BLOCKED: Hook input exceeded" in capsys.readouterr().err
+
+
+def _spy_block(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """emit_block_output を spy し、理由文字列のリストを返す。
+
+    Args:
+        monkeypatch: pytest の monkeypatch フィクスチャ。
+
+    Returns:
+        emit_block_output に渡された reason の蓄積リスト。
+    """
+    reasons: list[str] = []
+
+    def _spy(reason: str) -> int:
+        """ブロック理由を記録し、Claude 相当の終了コード 2 を返す。"""
+        reasons.append(reason)
+        return 2
+
+    monkeypatch.setattr(config_protection, "emit_block_output", _spy)
+    return reasons
+
+
+def _run_protection(monkeypatch: pytest.MonkeyPatch, payload: dict | str, *, truncated: bool = False) -> int:
+    """stdin を差し替えて config_protection.main を実行する。
+
+    Args:
+        monkeypatch: pytest の monkeypatch フィクスチャ。
+        payload: JSON にできる dict、または生文字列。
+        truncated: 切り捨てフラグ。
+
+    Returns:
+        main() の終了コード。
+    """
+    raw = payload if isinstance(payload, str) else json.dumps(payload)
+    monkeypatch.setattr(
+        config_protection,
+        "read_raw_stdin_with_truncation",
+        lambda: (raw, truncated),
+    )
+    return config_protection.main()
+
+
+def test_config_protection_blocks_protected_file_from_native_camel_case_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R-03: native toolName=edit / toolArgs.file_path=ruff.toml を deny する。"""
+    reasons = _spy_block(monkeypatch)
+    rc = _run_protection(
+        monkeypatch,
+        {"toolName": "edit", "toolArgs": {"file_path": "ruff.toml"}},
+    )
+    assert rc == 2
+    assert len(reasons) == 1
+    assert "ruff.toml" in reasons[0]
+
+
+def test_config_protection_blocks_legacy_file_from_native_tool_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """native toolArgs の旧 file キーでも保護ファイルを deny する。"""
+    reasons = _spy_block(monkeypatch)
+    rc = _run_protection(
+        monkeypatch,
+        {"toolName": "edit", "toolArgs": {"file": "ruff.toml"}},
+    )
+    assert rc == 2
+    assert len(reasons) == 1
+    assert "ruff.toml" in reasons[0]
+
+
+def test_config_protection_denies_conflicting_payload_when_any_target_is_protected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """混在 payload は、いずれかのコンテナが保護対象なら deny する。"""
+    reasons = _spy_block(monkeypatch)
+    rc = _run_protection(
+        monkeypatch,
+        {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "src/sample.py"},
+            "toolName": "edit",
+            "toolArgs": {"file_path": "ruff.toml"},
+        },
+    )
+    assert rc == 2
+    assert len(reasons) == 1
+    assert "ruff.toml" in reasons[0]
+
+    reasons.clear()
+    rc = _run_protection(
+        monkeypatch,
+        {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "ruff.toml"},
+            "toolName": "edit",
+            "toolArgs": {"file_path": "src/sample.py"},
+        },
+    )
+    assert rc == 2
+    assert len(reasons) == 1
+    assert "ruff.toml" in reasons[0]
+
+
+def test_config_protection_allows_unprotected_native_camel_case_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """native camelCase の非保護パスは allow（block 未呼び出し）。"""
+    reasons = _spy_block(monkeypatch)
+    rc = _run_protection(
+        monkeypatch,
+        {"toolName": "multiedit", "toolArgs": {"file_path": "src/sample.py"}},
+    )
+    assert rc == 0
+    assert reasons == []
+
+
+@pytest.mark.parametrize(
+    ("payload", "expect_block", "reason_snippet"),
+    [
+        (
+            {"tool_name": "Edit", "tool_input": {"file_path": "ruff.toml"}},
+            True,
+            "ruff.toml",
+        ),
+        (
+            {"toolName": "edit", "toolArgs": json.dumps({"file_path": "ruff.toml"})},
+            True,
+            "ruff.toml",
+        ),
+        (
+            {"tool_name": "Write", "tool_args": {"file_path": ".eslintrc"}},
+            True,
+            ".eslintrc",
+        ),
+        (
+            {"toolName": "edit", "toolArgs": {"file_path": "src/ruff.toml"}},
+            True,
+            "ruff.toml",
+        ),
+        (
+            {"toolName": "bash", "toolArgs": {"file_path": "ruff.toml"}},
+            False,
+            None,
+        ),
+        (
+            {"toolName": "edit", "toolArgs": {}},
+            False,
+            None,
+        ),
+        (
+            {"toolName": "apply_patch", "toolArgs": {"input": "garbage"}},
+            True,
+            "Could not determine target files",
+        ),
+        (
+            {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "src/a.py"},
+                "toolArgs": {"file_path": "src/b.py"},
+            },
+            False,
+            None,
+        ),
+        (
+            {
+                "tool_name": "Edit",
+                "tool_input": None,
+                "toolArgs": {"file_path": "ruff.toml"},
+            },
+            True,
+            "ruff.toml",
+        ),
+    ],
+    ids=[
+        "dt03-1-snake-ruff",
+        "dt03-3-toolargs-json-string",
+        "dt03-4-tool_args-eslintrc",
+        "dt03-7-basename",
+        "dt03-8-non-write-bash",
+        "dt03-9-no-path-key",
+        "dt03-10-apply-patch-fail-closed",
+        "dt03-13-both-unprotected",
+        "dt03-14-tool-input-none-still-scans",
+    ],
+)
+def test_config_protection_remaining_dt03_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict,
+    expect_block: bool,
+    reason_snippet: str | None,
+) -> None:
+    """DT-03 残行: JSON 文字列・tool_args・basename・非書込み・fail-closed。"""
+    reasons = _spy_block(monkeypatch)
+    rc = _run_protection(monkeypatch, payload)
+    if expect_block:
+        assert rc == 2
+        assert len(reasons) == 1
+        assert reason_snippet is not None
+        assert reason_snippet in reasons[0]
+    else:
+        assert rc == 0
+        assert reasons == []
+
+
+def test_config_protection_allows_invalid_or_empty_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """不正 JSON / 空入力は保護判定せず allow する。"""
+    reasons = _spy_block(monkeypatch)
+    assert _run_protection(monkeypatch, "{not-json") == 0
+    assert _run_protection(monkeypatch, "") == 0
+    assert reasons == []
+
+
+def test_config_protection_truncation_fail_closed_via_spy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DT-03 #11: 切り捨て入力は fail-closed で block する。"""
+    reasons = _spy_block(monkeypatch)
+    rc = _run_protection(monkeypatch, "{not-even-json", truncated=True)
+    assert rc == 2
+    assert len(reasons) == 1
+    assert "Hook input exceeded" in reasons[0]

@@ -231,6 +231,45 @@ def notify_macos(title: str, body: str, *, timeout: float = DEFAULT_NOTIFICATION
         log(f"[DesktopNotify] osascript failed: {e}")
 
 
+def _parse_stop_input(raw_input: str) -> dict:
+    """Stop フックの stdin JSON を dict にする。
+
+    Args:
+        raw_input: 生の stdin。
+
+    Returns:
+        パースできた dict。空・不正は空 dict。
+
+    Raises:
+        例外は発生しません。
+    """
+    stripped = raw_input.strip()
+    if not stripped:
+        return {}
+    return parse_json_object(stripped) or {}
+
+
+def _log_windows_notify_result(result: dict) -> None:
+    """Windows 通知の失敗理由をログに残す。成功時は何もしない。
+
+    Args:
+        result: notify_windows の戻り値（success / reason）。
+
+    Returns:
+        なし。
+
+    Raises:
+        例外は発生しません。
+    """
+    reason = result.get("reason")
+    if not reason:
+        return
+    if "burnttoast" in reason.lower():
+        log("[DesktopNotify] Tip: Install BurntToast module to enable notifications")
+        return
+    log(f"[DesktopNotify] Notification failed: {reason}")
+
+
 def _assistant_message(input_data: dict) -> str | None:
     """Stop 系 payload からアシスタント最終メッセージ候補を取り出す。
 
@@ -275,8 +314,7 @@ def run(raw_input: str) -> None:
         例外は発生しません。
     """
     try:
-        input_data = (parse_json_object(raw_input.strip()) if raw_input.strip() else None) or {}
-        summary = extract_summary(_assistant_message(input_data))
+        summary = extract_summary(_assistant_message(_parse_stop_input(raw_input)))
         deadline = time.monotonic() + _notification_timeout()
 
         if IS_MACOS:
@@ -285,17 +323,13 @@ def run(raw_input: str) -> None:
                 notify_macos(TITLE, summary, timeout=timeout)
         elif is_wsl():
             ps = find_powershell(deadline)
-            if ps:
-                timeout = _remaining_timeout(deadline)
-                if timeout <= 0:
-                    return
-                result = notify_windows(ps, TITLE, summary, timeout=timeout)
-                if result.get("reason") and "burnttoast" in result["reason"].lower():
-                    log("[DesktopNotify] Tip: Install BurntToast module to enable notifications")
-                elif result.get("reason"):
-                    log(f"[DesktopNotify] Notification failed: {result['reason']}")
-            else:
+            if not ps:
                 log("[DesktopNotify] Tip: Install BurntToast module in PowerShell for notifications")
+                return
+            timeout = _remaining_timeout(deadline)
+            if timeout <= 0:
+                return
+            _log_windows_notify_result(notify_windows(ps, TITLE, summary, timeout=timeout))
     except Exception as err:
         log(f"[DesktopNotify] Error: {err}")
 

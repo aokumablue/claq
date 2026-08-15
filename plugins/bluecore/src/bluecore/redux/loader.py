@@ -77,14 +77,17 @@ def _build_spec(name: str, d: dict[str, Any], *, trusted: bool = True) -> ReduxF
     """
     if not trusted:
         _check_pattern_lengths(name, d)
-    substitute = [SubstituteRule(re.compile(r["pattern"]), r["replacement"]) for r in d.get("substitute", [])]
+    substitute = [
+        SubstituteRule(re.compile(rule["pattern"]), rule["replacement"])
+        for rule in d.get("substitute", [])
+    ]
     short_circuit = [
         ShortCircuitRule(
-            re.compile(r["pattern"]),
-            r["message"],
-            re.compile(r["unless"]) if "unless" in r else None,
+            re.compile(rule["pattern"]),
+            rule["message"],
+            re.compile(rule["unless"]) if "unless" in rule else None,
         )
-        for r in d.get("short_circuit", [])
+        for rule in d.get("short_circuit", [])
     ]
     drop_lines = [re.compile(p) for p in d.get("drop_lines", [])]
     keep_lines = [re.compile(p) for p in d.get("keep_lines", [])]
@@ -130,10 +133,11 @@ def _parse_toml(path: Path, *, trusted: bool = True) -> tuple[list[ReduxFilterSp
         raise ValueError(f"{path.name}: schema_version {version!r} は非対応（{_SCHEMA_VERSION} が必須）")
 
     specs = [_build_spec(name, spec_dict, trusted=trusted) for name, spec_dict in data.get("filters", {}).items()]
-    cases: list[FilterCase] = []
-    for filter_name, case_list in data.get("cases", {}).items():
-        for case in case_list:
-            cases.append(FilterCase(filter_name, case["name"], case["input"], case["expected"]))
+    cases = [
+        FilterCase(filter_name, case["name"], case["input"], case["expected"])
+        for filter_name, case_list in data.get("cases", {}).items()
+        for case in case_list
+    ]
     return specs, cases
 
 
@@ -153,6 +157,7 @@ def builtin_filter_paths() -> list[Path]:
         paths.append(default_path)
     return paths
 
+
 def load_builtin_cases() -> list[FilterCase]:
     """組込フィルタの全インラインテストケースを返す。
 
@@ -164,6 +169,7 @@ def load_builtin_cases() -> list[FilterCase]:
         _, file_cases = _parse_toml(path)
         cases.extend(file_cases)
     return cases
+
 
 def load_filter_specs() -> list[ReduxFilterSpec]:
     """ユーザー定義 → 組込の順でフィルタ定義を統合して返す。

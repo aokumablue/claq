@@ -32,7 +32,7 @@ loop-dev の実行履歴（checkpoint 反復履歴 + git log）を全件走査�
 # 開発リポジトリ（bluecore-dev 直下）
 PYTHONPATH=plugins/bluecore/src python3 -m bluecore.skills.loop_dev.telemetry list
 
-# 配布ランタイム（~/.bluecore/.venv 有効化済み）
+# 配布ランタイムは PATH の python3（venv なし）
 python3 -m bluecore.skills.loop_dev.telemetry list
 
 # 期間で絞る（--since / --until はどちらもその日を含む）

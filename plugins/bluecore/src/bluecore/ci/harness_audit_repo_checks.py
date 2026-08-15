@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,29 @@ def _hook_command_argv(command: str) -> tuple[str, ...] | None:
     return argv
 
 
+def _iter_hook_commands(event_hooks: Any) -> Iterator[str]:
+    """イベント配下の command 文字列を順に返す。
+
+    matcher が辞書でない、hooks が配列でない、command が文字列でない
+    エントリは飛ばす。event_hooks 自体が配列でなければ何も返さない。
+
+    Args:
+        event_hooks: hooks.json の特定イベントに紐づく matcher エントリ配列
+
+    Yields:
+        フック定義の command 文字列。
+    """
+    if not isinstance(event_hooks, list):
+        return
+
+    for matcher in event_hooks:
+        if not isinstance(matcher, dict) or not isinstance(matcher.get("hooks"), list):
+            continue
+        for hook in matcher["hooks"]:
+            if isinstance(hook, dict) and isinstance(hook.get("command"), str):
+                yield hook["command"]
+
+
 def _event_has_matching_command(
     event_hooks: Any, argv_patterns: tuple[tuple[str, ...], ...]
 ) -> bool:
@@ -61,21 +85,12 @@ def _event_has_matching_command(
     Returns:
         いずれかのフックコマンドがいずれかのパターンに前方一致すれば True
     """
-    if not isinstance(event_hooks, list):
-        return False
-
-    for matcher in event_hooks:
-        if not isinstance(matcher, dict) or not isinstance(matcher.get("hooks"), list):
+    for command in _iter_hook_commands(event_hooks):
+        launcher_argv = _hook_command_argv(command)
+        if launcher_argv is None:
             continue
-        for hook in matcher["hooks"]:
-            command = hook.get("command") if isinstance(hook, dict) else None
-            if not isinstance(command, str):
-                continue
-            launcher_argv = _hook_command_argv(command)
-            if launcher_argv is None:
-                continue
-            if any(launcher_argv[: len(pattern)] == pattern for pattern in argv_patterns):
-                return True
+        if any(launcher_argv[: len(pattern)] == pattern for pattern in argv_patterns):
+            return True
     return False
 
 
@@ -99,23 +114,15 @@ def _has_memory_lifecycle_hooks(root_dir: str | Path) -> bool:
         return False
 
     hooks = hooks_config["hooks"]
-    return (
-        _event_has_matching_command(
-            hooks.get("SessionStart", []),
-            (("bluecore.mem.cli", "context"),),
-        )
-        and _event_has_matching_command(
-            hooks.get("SessionStart", []),
-            (("bluecore.hooks.session_start",),),
-        )
-        and _event_has_matching_command(
-            hooks.get("Stop", []),
-            (("bluecore.hooks.session_end",),),
-        )
-        and _event_has_matching_command(
-            hooks.get("SessionEnd", []),
-            (("bluecore.mem.cli", "handoff"),),
-        )
+    required_commands = (
+        ("SessionStart", (("bluecore.mem.cli", "context"),)),
+        ("SessionStart", (("bluecore.hooks.session_start",),)),
+        ("Stop", (("bluecore.hooks.session_end",),)),
+        ("SessionEnd", (("bluecore.mem.cli", "handoff"),)),
+    )
+    return all(
+        _event_has_matching_command(hooks.get(event, []), patterns)
+        for event, patterns in required_commands
     )
 
 
@@ -300,10 +307,10 @@ def _repo_quality_gates_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "category": "Quality Gates",
             "points": 2,
             "scopes": ["repo"],
-            "path": "src/bluecore/hooks/session_install.py",
-            "description": "インストール状態チェック用ドクタースクリプトが存在する",
-            "pass": file_exists(root_dir, "src/bluecore/hooks/session_install.py"),
-            "fix": "Add src/bluecore/hooks/session_install.py for install-state integrity checks.",
+            "path": "src/bluecore/hooks/session_start.py",
+            "description": "SessionStart フックが存在する",
+            "pass": file_exists(root_dir, "src/bluecore/hooks/session_start.py"),
+            "fix": "Add src/bluecore/hooks/session_start.py for the SessionStart hook.",
         },
     ]
 

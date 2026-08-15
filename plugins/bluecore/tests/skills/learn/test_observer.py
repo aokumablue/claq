@@ -30,7 +30,7 @@ import pytest
 import bluecore.mem.settings as settings_mod
 from bluecore.mem.database import Database
 from bluecore.mem.knowledge_input import KnowledgeInputError
-from bluecore.mem.models import Knowledge
+from bluecore.mem.models import Knowledge, Repo
 from bluecore.skills.learn import observer
 from bluecore.skills.learn.storage import ObservationTarget
 
@@ -338,7 +338,7 @@ def test_log_tail_oserror(tmp_path: Path) -> None:
 def test_count_pending_knowledge_counts_repo_and_global(data_dir: Path) -> None:
     """このリポジトリと global の pending だけを数える。"""
     with Database(data_dir / "mem.db") as db:
-        db.upsert_repo(observer.resolve_repo.__globals__["Repo"](id="proj", identity_key="k", root_path="/p"))
+        db.upsert_repo(Repo(id="proj", identity_key="k", root_path="/p"))
         db.upsert_knowledge(
             Knowledge(key="a", scope="repo", repo_id="proj", kind="fact", title="a", source="observer", status="pending")
         )

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from bluecore.hooks.output_adapter import adapt_context_output, emit_block
+from bluecore.lib.core_utils import ensure_private_dir, get_bluecore_dir
 
 MAX_STDIN_BYTES = 1024 * 1024
 
@@ -53,6 +54,28 @@ def _stdin_ready() -> bool:
     return True
 
 
+def _read_stdin_bytes(max_bytes: int) -> bytes:
+    """stdin から最大 `max_bytes` 分をバイト列として読みます。
+
+    `.buffer` がある場合はバイト単位で読みます。無い場合（io.StringIO 等）は
+    文字数で読んだあと UTF-8 に再エンコードします。文字数 read ではバイト
+    上限を最大 4 倍超過しうるため、呼び出し側でバイト換算の切り詰めを行います。
+
+    Args:
+        max_bytes: 読み取る最大バイト数（buffer 無し時は最大文字数）です。
+
+    Returns:
+        読み取ったバイト列を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    stdin_buffer = getattr(sys.stdin, "buffer", None)
+    if stdin_buffer is not None:
+        return stdin_buffer.read(max_bytes)
+    return sys.stdin.read(max_bytes).encode("utf-8", errors="replace")
+
+
 def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
     """標準入力から生のテキストをバイト単位の上限つきで読み取ります。
 
@@ -71,14 +94,7 @@ def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
     """
     if not _stdin_ready():
         return ""
-    stdin_buffer = getattr(sys.stdin, "buffer", None)
-    if stdin_buffer is not None:
-        raw_bytes = stdin_buffer.read(max_bytes)
-    else:
-        # io.StringIO など .buffer を持たない stdin を想定した分岐。
-        # 文字数 read ではバイト上限を最大 4 倍超過しうるためバイト換算で切り詰める。
-        raw_bytes = sys.stdin.read(max_bytes).encode("utf-8", errors="replace")
-    return raw_bytes[:max_bytes].decode("utf-8", errors="replace")
+    return _read_stdin_bytes(max_bytes)[:max_bytes].decode("utf-8", errors="replace")
 
 
 def read_raw_stdin_with_truncation(max_bytes: int = MAX_STDIN_BYTES) -> tuple[str, bool]:
@@ -99,14 +115,7 @@ def read_raw_stdin_with_truncation(max_bytes: int = MAX_STDIN_BYTES) -> tuple[st
     """
     if not _stdin_ready():
         return "", False
-    stdin_buffer = getattr(sys.stdin, "buffer", None)
-    if stdin_buffer is not None:
-        raw_bytes = stdin_buffer.read(max_bytes + 1)
-    else:
-        # io.StringIO など .buffer を持たない stdin を想定したフォールバック。
-        # バイト上限を大きく超える無制限 read を避けるため、最大 +1 文字だけ読む。
-        raw_text = sys.stdin.read(max_bytes + 1)
-        raw_bytes = raw_text.encode("utf-8", errors="replace")
+    raw_bytes = _read_stdin_bytes(max_bytes + 1)
     truncated = len(raw_bytes) > max_bytes
     if truncated:
         raw_bytes = raw_bytes[:max_bytes]
@@ -198,7 +207,7 @@ def basename(path: str) -> str:
 # timeout で kill されないため、自前の watchdog で自決させる。
 #
 # この値は hooks.json の timeout とは無関係に決める。detach 後の子はハーネスの
-# 管轄外であり、hooks.json の値（最大は session_install の 300 秒だが、これは
+# 管轄外であり、hooks.json の値（最大は mem.cli context の 60 秒だが、これは
 # detach しない同期エントリ）と紐付ける論拠がないため。
 #
 # detach 対象（launcher --bg: learn.observe / session_end / desktop_notify /
@@ -275,6 +284,28 @@ except subprocess.TimeoutExpired:
 """
 
 
+def _watchdog_argv(cmd: list[str]) -> list[str]:
+    """detach 対象を watchdog 付きで起動する argv を組み立てます。
+
+    Args:
+        cmd: 監視対象のコマンドリストです。
+
+    Returns:
+        `sys.executable -c _WATCHDOG_SCRIPT` で対象を包んだ argv を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    return [
+        sys.executable,
+        "-c",
+        _WATCHDOG_SCRIPT,
+        str(DETACH_TIMEOUT_SECONDS),
+        str(_DETACH_KILL_AFTER_SECONDS),
+        *cmd,
+    ]
+
+
 def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None = None) -> bool:
     """コマンドを detached（新セッション）で起動し stdin を一時ファイル経由で渡す。
 
@@ -300,8 +331,7 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
         例外は発生しません。
     """
     try:
-        private_dir = Path.home() / ".bluecore"
-        private_dir.mkdir(parents=True, exist_ok=True)
+        private_dir = ensure_private_dir(get_bluecore_dir())
         tmp = tempfile.NamedTemporaryFile(
             mode="w+", encoding="utf-8", suffix=".stdin", dir=private_dir, delete=False
         )
@@ -312,14 +342,7 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
         tmp.flush()
         tmp.seek(0)
         subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                _WATCHDOG_SCRIPT,
-                str(DETACH_TIMEOUT_SECONDS),
-                str(_DETACH_KILL_AFTER_SECONDS),
-                *cmd,
-            ],
+            _watchdog_argv(cmd),
             stdin=tmp,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

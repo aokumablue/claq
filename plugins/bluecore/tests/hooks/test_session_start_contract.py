@@ -11,9 +11,8 @@ import json
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest.mock import MagicMock
 
-from bluecore.hooks import session_install, session_start
+from bluecore.hooks import session_start
 
 
 def _assert_session_start_json(output: str) -> dict:
@@ -80,42 +79,6 @@ class TestMemCliContextContract:
         _assert_session_start_json(stdout)
 
 
-class TestSessionInstallContract:
-    def test_install_sh_failure_emits_session_start(self, monkeypatch, tmp_path: Path) -> None:
-        plugin_json = tmp_path / ".claude-plugin" / "plugin.json"
-        plugin_json.parent.mkdir()
-        plugin_json.write_text(json.dumps({"version": "0.0.99"}))
-        version_file = tmp_path / "plugin_installed_version"
-        version_file.write_text("0.0.1\n")
-
-        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(tmp_path))
-        monkeypatch.setattr(session_install, "_VERSION_FILE", version_file)
-        monkeypatch.setattr(session_install, "_BLUECORE_DIR", tmp_path)
-
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-        mock_result.stderr = "install failed"
-
-        import subprocess
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
-
-        result = session_install.run("")
-        _assert_session_start_json(result)
-        assert version_file.read_text() == "0.0.1\n"
-
-    def test_main_exception_emits_session_start(self, monkeypatch) -> None:
-        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-        monkeypatch.setattr(session_install, "run", lambda _: (_ for _ in ()).throw(RuntimeError("crash")))
-
-        buf_out = io.StringIO()
-        buf_err = io.StringIO()
-        with redirect_stdout(buf_out), redirect_stderr(buf_err):
-            code = session_install.main()
-        assert code == 0
-        _assert_session_start_json(buf_out.getvalue())
-
-
 class TestSessionStartHookContract:
     def test_run_exception_emits_session_start_from_main(self, monkeypatch) -> None:
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
@@ -128,20 +91,26 @@ class TestSessionStartHookContract:
         assert code == 0
         _assert_session_start_json(buf_out.getvalue())
 
+
 def _pi(languages=None, frameworks=None, primary=None):
     from types import SimpleNamespace
     return SimpleNamespace(languages=languages or [], frameworks=frameworks or [], primary_language=primary)
 
 
-def test_collect_project_context_package_json_and_coverage(monkeypatch, tmp_path) -> None:
-    """パッケージマネージャ未検出+package.json有+coverage hint有の経路。"""
+def _stub_project_context(monkeypatch, tmp_path, *, pm_name=None, pm_source="", coverage=""):
+    """_collect_project_context の外部依存を固定する。"""
     from types import SimpleNamespace
 
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source=""))
-    monkeypatch.setattr(session_start, "get_selection_prompt", lambda: "select")
+    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=pm_name, source=pm_source))
     monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
-    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "- cov 100%")
+    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: coverage)
     monkeypatch.chdir(tmp_path)
+
+
+def test_collect_project_context_package_json_and_coverage(monkeypatch, tmp_path) -> None:
+    """パッケージマネージャ未検出+package.json有+coverage hint有の経路。"""
+    _stub_project_context(monkeypatch, tmp_path, coverage="- cov 100%")
+    monkeypatch.setattr(session_start, "get_selection_prompt", lambda: "select")
     (tmp_path / "package.json").write_text("{}", encoding="utf-8")
     parts = session_start._collect_project_context(_pi(languages=["typescript"]))
     assert any("coverage_hint" in p for p in parts)
@@ -149,51 +118,27 @@ def test_collect_project_context_package_json_and_coverage(monkeypatch, tmp_path
 
 def test_collect_project_context_ruby(monkeypatch, tmp_path) -> None:
     """pm未検出+package.json無+ruby言語の経路。"""
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source=""))
-    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
-    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "")
-    monkeypatch.chdir(tmp_path)
+    _stub_project_context(monkeypatch, tmp_path)
     session_start._collect_project_context(_pi(languages=["ruby"], frameworks=["rails"]))
 
 
 def test_collect_project_context_other_language(monkeypatch, tmp_path) -> None:
     """pm未検出+package.json無+ruby以外の言語の経路。"""
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name=None, source=""))
-    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
-    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "")
-    monkeypatch.chdir(tmp_path)
+    _stub_project_context(monkeypatch, tmp_path)
     session_start._collect_project_context(_pi(languages=["go"]))
 
 
 def test_collect_project_context_frameworks_only(monkeypatch, tmp_path) -> None:
     """言語が空でフレームワークのみでもプロジェクト情報を出力する。"""
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name="npm", source="x"))
-    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
-    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "")
-    monkeypatch.chdir(tmp_path)
-
+    _stub_project_context(monkeypatch, tmp_path, pm_name="npm", pm_source="x")
     parts = session_start._collect_project_context(_pi(languages=[], frameworks=["rails"]))
-
     assert any("Project type" in p for p in parts)
     assert any("rails" in p for p in parts)
 
 
 def test_collect_project_context_languages_only(monkeypatch, tmp_path) -> None:
     """言語ありフレームワークなしでも Project type を出力する。"""
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(session_start, "get_package_manager", lambda: SimpleNamespace(name="pip", source="x"))
-    monkeypatch.setattr(session_start, "log", lambda *a, **k: None)
-    monkeypatch.setattr(session_start, "extract_coverage_hint_lines", lambda p: "")
-    monkeypatch.chdir(tmp_path)
-
+    _stub_project_context(monkeypatch, tmp_path, pm_name="pip", pm_source="x")
     parts = session_start._collect_project_context(_pi(languages=["python"], frameworks=[]))
-
     assert any("Project type" in p for p in parts)
     assert any("python" in p for p in parts)

@@ -11,6 +11,8 @@ import pytest
 from bluecore.mem.database import Database
 from bluecore.mem.models import Knowledge, Repo, Session, utc_now_iso
 
+_TS = "2026-01-01T00:00:00+00:00"
+
 
 @pytest.fixture
 def db(tmp_path: Path) -> Database:
@@ -27,21 +29,21 @@ def _repo(repo_id: str = "bluecore-dev", identity_key: str = "git@github.com:x/b
         identity_key=identity_key,
         root_path="/Users/x/dev/bluecore-dev",
         remote_url="git@github.com:x/bluecore.git",
-        first_seen_at="2026-01-01T00:00:00+00:00",
-        last_seen_at="2026-01-01T00:00:00+00:00",
+        first_seen_at=_TS,
+        last_seen_at=_TS,
     )
 
 
 def _knowledge(key: str = "use-python3", **overrides: object) -> Knowledge:
     """テスト用 Knowledge を組み立てる。"""
-    params: dict = {
+    params: dict[str, object] = {
         "key": key,
         "scope": "global",
         "kind": "convention",
         "title": "Python は python3 コマンドで実行する",
         "source": "human",
-        "created_at": "2026-01-01T00:00:00+00:00",
-        "updated_at": "2026-01-01T00:00:00+00:00",
+        "created_at": _TS,
+        "updated_at": _TS,
     }
     params.update(overrides)
     return Knowledge(**params)
@@ -119,6 +121,23 @@ class TestConnection:
             pass
         assert stat.S_IMODE(db_path.stat().st_mode) == 0o600
 
+    def test_parent_dir_under_bluecore_is_0700(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """~/.bluecore 配下に作る DB の親ディレクトリは umask 022 でも 0700。"""
+        import os
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        old_umask = os.umask(0o022)
+        try:
+            db_path = tmp_path / ".bluecore" / "mem.db"
+            with Database(db_path):
+                pass
+            assert stat.S_IMODE((tmp_path / ".bluecore").stat().st_mode) == 0o700
+        finally:
+            os.umask(old_umask)
+
     def test_existing_db_permission_untouched(self, tmp_path: Path) -> None:
         """既存 DB を開き直してもパーミッションを触らない。"""
         db_path = tmp_path / "mem.db"
@@ -150,7 +169,7 @@ class TestRepos:
         stored = db.upsert_repo(_repo())
         assert stored.id == "bluecore-dev"
         assert stored.identity_key == "git@github.com:x/bluecore.git"
-        assert stored.first_seen_at == "2026-01-01T00:00:00+00:00"
+        assert stored.first_seen_at == _TS
 
     def test_upsert_resolves_conflict_by_identity_key(self, db: Database) -> None:
         """identity_key が一致すれば id と first_seen_at を保持して観測情報のみ更新する。"""
@@ -165,7 +184,7 @@ class TestRepos:
         )
         stored = db.upsert_repo(moved)
         assert stored.id == "bluecore-dev"
-        assert stored.first_seen_at == "2026-01-01T00:00:00+00:00"
+        assert stored.first_seen_at == _TS
         assert stored.root_path == "/Users/x/worktrees/feature"
         assert stored.remote_url is None
         assert stored.last_seen_at == "2026-06-01T00:00:00+00:00"
@@ -177,7 +196,7 @@ class TestRepos:
         newer = _repo("new", "key-new")
         newer.last_seen_at = "2026-07-01T00:00:00+00:00"
         db.upsert_repo(newer)
-        assert [r.id for r in db.list_repos()] == ["new", "old"]
+        assert [repo.id for repo in db.list_repos()] == ["new", "old"]
 
     def test_list_repos_empty(self, db: Database) -> None:
         """1 件も無ければ空リスト。"""
@@ -208,7 +227,7 @@ class TestKnowledge:
             )
         )
         assert second.id == first.id
-        assert second.created_at == "2026-01-01T00:00:00+00:00"
+        assert second.created_at == _TS
         assert second.updated_at == "2026-02-02T00:00:00+00:00"
         assert second.confidence == 0.9
         assert len(db.list_knowledge()) == 1
@@ -280,9 +299,9 @@ class TestKnowledge:
 
     def test_list_without_filters_returns_all(self, db: Database) -> None:
         """絞り込み無しは全件を更新の新しい順で返す。"""
-        db.upsert_knowledge(_knowledge("a", updated_at="2026-01-01T00:00:00+00:00"))
+        db.upsert_knowledge(_knowledge("a", updated_at=_TS))
         db.upsert_knowledge(_knowledge("b", updated_at="2026-03-01T00:00:00+00:00"))
-        assert [k.key for k in db.list_knowledge()] == ["b", "a"]
+        assert [row.key for row in db.list_knowledge()] == ["b", "a"]
 
     def test_list_with_all_filters(self, db: Database) -> None:
         """scope・repo_id・status のすべてで絞り込む。"""
@@ -295,7 +314,7 @@ class TestKnowledge:
             _knowledge("wrong-status", scope="repo", repo_id="bluecore-dev", status="archived")
         )
         rows = db.list_knowledge(scope="repo", repo_id="bluecore-dev", status="active")
-        assert [k.key for k in rows] == ["hit"]
+        assert [row.key for row in rows] == ["hit"]
 
     def test_set_status_updates_row(self, db: Database) -> None:
         """status と updated_at を更新して True を返す。"""
@@ -310,7 +329,7 @@ class TestKnowledge:
         stored = db.upsert_knowledge(_knowledge())
         assert db.set_knowledge_status(stored.id, "pending") is True
         after = db.get_knowledge_by_key("use-python3")
-        assert after.updated_at > "2026-01-01T00:00:00+00:00"
+        assert after.updated_at > _TS
 
     def test_set_status_returns_false_when_missing(self, db: Database) -> None:
         """該当行が無ければ False。"""
@@ -324,7 +343,7 @@ class TestSessions:
         """セッションを開始登録して id を採番する。"""
         db.upsert_repo(_repo())
         stored = db.start_session(
-            Session(session_uid="uid-1", repo_id="bluecore-dev", harness="claude", started_at="2026-01-01T00:00:00+00:00")
+            Session(session_uid="uid-1", repo_id="bluecore-dev", harness="claude", started_at=_TS)
         )
         assert stored.id is not None
         assert stored.harness == "claude"
@@ -335,7 +354,7 @@ class TestSessions:
         """同一 session_uid の再入は started_at を保持し harness だけ更新する。"""
         db.upsert_repo(_repo())
         first = db.start_session(
-            Session(session_uid="uid-1", repo_id="bluecore-dev", started_at="2026-01-01T00:00:00+00:00")
+            Session(session_uid="uid-1", repo_id="bluecore-dev", started_at=_TS)
         )
         second = db.start_session(
             Session(
@@ -346,7 +365,7 @@ class TestSessions:
             )
         )
         assert second.id == first.id
-        assert second.started_at == "2026-01-01T00:00:00+00:00"
+        assert second.started_at == _TS
         assert second.harness == "codex"
 
     def test_start_session_requires_existing_repo(self, db: Database) -> None:
@@ -380,14 +399,14 @@ class TestSessions:
         """handoff が空のセッションは対象外。"""
         db.upsert_repo(_repo())
         db.start_session(
-            Session(session_uid="uid-1", repo_id="bluecore-dev", started_at="2026-01-01T00:00:00+00:00")
+            Session(session_uid="uid-1", repo_id="bluecore-dev", started_at=_TS)
         )
         assert db.get_latest_session("bluecore-dev") is None
 
     def test_get_latest_session_returns_newest_with_handoff(self, db: Database) -> None:
         """引き継ぎを持つ中で最新の 1 件を返す。"""
         db.upsert_repo(_repo())
-        for uid, started in (("uid-1", "2026-01-01T00:00:00+00:00"), ("uid-2", "2026-02-01T00:00:00+00:00")):
+        for uid, started in (("uid-1", _TS), ("uid-2", "2026-02-01T00:00:00+00:00")):
             db.start_session(Session(session_uid=uid, repo_id="bluecore-dev", started_at=started))
             db.finish_session(uid, f"handoff for {uid}")
         latest = db.get_latest_session("bluecore-dev")

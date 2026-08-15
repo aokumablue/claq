@@ -62,6 +62,15 @@ def _select_language(info: Any) -> str | None:
     """検出結果から採用する言語を決める。
 
     primary_language が未対応でも、languages に対応言語があればそれを採用する。
+
+    Args:
+        info: `detect_project()` の戻り値（primary_language / languages を持つ）。
+
+    Returns:
+        QUALITY_GATE_PRESETS に存在する言語名。該当がなければ None。
+
+    Raises:
+        例外は発生しません。
     """
     candidates: list[str] = []
     primary = getattr(info, "primary_language", None)
@@ -84,7 +93,18 @@ def _select_language(info: Any) -> str | None:
 
 
 def _select_target_path(root: Path, preferred: str = "src") -> str:
-    """存在する場合は preferred、無ければカレントを対象にする。"""
+    """存在する場合は preferred、無ければカレントを対象にする。
+
+    Args:
+        root: プロジェクトルート。
+        preferred: 優先する相対ディレクトリ名。
+
+    Returns:
+        使う対象パス（preferred または "."）。
+
+    Raises:
+        例外は発生しません。
+    """
     return preferred if (root / preferred).exists() else "."
 
 
@@ -104,12 +124,23 @@ def _resolve_argv(argv: list[str], language: str, target: str, file_path: str | 
         最終引数を置換済みのコマンドリスト。
     """
     resolved = list(argv)
-    if language == "python" and resolved[0] == "ruff" and len(resolved) >= 3 and resolved[1] == "check":
+    is_ruff_check = (
+        language == "python"
+        and resolved[0] == "ruff"
+        and len(resolved) >= 3
+        and resolved[1] == "check"
+    )
+    is_eslint = language in {"javascript", "typescript"} and resolved[:3] == [
+        "npx",
+        "--no-install",
+        "eslint",
+    ]
+    if is_ruff_check:
         if file_path and str(file_path).endswith((".py", ".pyi")):
             resolved[-1] = str(file_path)
         else:
             resolved[-1] = target
-    elif language in {"javascript", "typescript"} and resolved[:3] == ["npx", "--no-install", "eslint"]:
+    elif is_eslint:
         resolved[-1] = target
     return resolved
 

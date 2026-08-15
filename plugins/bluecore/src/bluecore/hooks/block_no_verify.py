@@ -313,6 +313,26 @@ def parse_git_segment(segment: list[str]) -> GitInvocation:
     return GitInvocation(subcommand=subcommand, flags=flags, subcommand_certain=certain)
 
 
+def _is_bypass_invocation(invocation: GitInvocation) -> bool:
+    """解析済み git 起動がフックバイパスかを判定する。
+
+    Args:
+        invocation: git 起動トークン以降の解析結果。
+
+    Returns:
+        ``--no-verify``、``git commit`` の ``-n``、またはサブコマンド未確定時の
+        ``-n`` なら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    if _BYPASS_LONG_FLAG in invocation.flags:
+        return True
+    if _BYPASS_SHORT_FLAG not in invocation.flags:
+        return False
+    return invocation.subcommand == "commit" or not invocation.subcommand_certain
+
+
 def has_bypass_flag(command: str) -> bool:
     """コマンド文字列に git フックバイパスフラグが含まれるかを判定する。
 
@@ -335,12 +355,7 @@ def has_bypass_flag(command: str) -> bool:
         for index, token in enumerate(segment):
             if not is_git_invocation(token):
                 continue
-            invocation = parse_git_segment(segment[index:])
-            if _BYPASS_LONG_FLAG in invocation.flags:
-                return True
-            if _BYPASS_SHORT_FLAG in invocation.flags and (
-                invocation.subcommand == "commit" or not invocation.subcommand_certain
-            ):
+            if _is_bypass_invocation(parse_git_segment(segment[index:])):
                 return True
     return False
 

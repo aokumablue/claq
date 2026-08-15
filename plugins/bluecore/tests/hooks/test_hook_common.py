@@ -8,6 +8,7 @@ import io
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -16,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from bluecore.hooks import hook_common
 from bluecore.hooks.hook_common import (
     detach_process,
     emit_post_tool_use_output,
@@ -149,7 +151,7 @@ class _FakeStdin:
         raise AssertionError("バイト読みでは text read を使わない")
 
 
-def _patch_select_ready(monkeypatch: pytest.MonkeyPatch, hook_common) -> None:  # noqa: ANN001
+def _patch_select_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     """select を常に ready 扱いへ差し替える（フェイク stdin は実 fd を持たないため）。"""
     monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: (r, [], []))
 
@@ -158,8 +160,6 @@ class TestStdinReady:
     """_stdin_ready の TTY/タイムアウトガードのテスト（旧 launcher._read_stdin 相当）。"""
 
     def test_tty_returns_false_without_calling_select(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from bluecore.hooks import hook_common
-
         monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload", tty=True))
 
         def fail_select(*args):  # noqa: ANN002
@@ -170,10 +170,8 @@ class TestStdinReady:
         assert hook_common._stdin_ready() is False
 
     def test_ready_pipe_returns_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from bluecore.hooks import hook_common
-
         monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload"))
-        _patch_select_ready(monkeypatch, hook_common)
+        _patch_select_ready(monkeypatch)
 
         assert hook_common._stdin_ready() is True
 
@@ -181,8 +179,6 @@ class TestStdinReady:
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """select タイムアウト時は stderr 警告のうえ False を返す（NG-B1 回帰）。"""
-        from bluecore.hooks import hook_common
-
         monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload"))
         monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: ([], [], []))
 
@@ -195,10 +191,8 @@ class TestReadRawStdin:
 
     def test_limits_by_bytes_not_chars_with_buffer(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """buffer 付き stdin はバイト単位で読み取りを制限する。"""
-        from bluecore.hooks import hook_common
-
         monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("あ" * 10))
-        _patch_select_ready(monkeypatch, hook_common)
+        _patch_select_ready(monkeypatch)
 
         result = hook_common.read_raw_stdin(max_bytes=10)
 
@@ -207,10 +201,8 @@ class TestReadRawStdin:
 
     def test_text_stdin_is_byte_truncated(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """buffer を持たない stdin（io.StringIO 等）もバイト換算で切り捨てる。"""
-        from bluecore.hooks import hook_common
-
         monkeypatch.setattr(hook_common.sys, "stdin", io.StringIO("あ" * 10))
-        _patch_select_ready(monkeypatch, hook_common)
+        _patch_select_ready(monkeypatch)
 
         result = hook_common.read_raw_stdin(max_bytes=10)
 
@@ -219,23 +211,17 @@ class TestReadRawStdin:
 
     def test_small_input_passes_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """制限未満の入力はそのまま返る。"""
-        from bluecore.hooks import hook_common
-
         monkeypatch.setattr(hook_common.sys, "stdin", io.StringIO("hello"))
-        _patch_select_ready(monkeypatch, hook_common)
+        _patch_select_ready(monkeypatch)
 
         assert hook_common.read_raw_stdin() == "hello"
 
     def test_tty_returns_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from bluecore.hooks import hook_common
-
         monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload", tty=True))
 
         assert hook_common.read_raw_stdin() == ""
 
     def test_select_timeout_returns_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from bluecore.hooks import hook_common
-
         fake_stdin = _FakeStdin("payload")
         monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
         monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: ([], [], []))
@@ -248,10 +234,8 @@ class TestReadRawStdinWithTruncation:
     """read_raw_stdin_with_truncation の切り捨て判定・stdin ガードのテスト。"""
 
     def test_no_truncation_when_within_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from bluecore.hooks import hook_common
-
         monkeypatch.setattr(hook_common.sys, "stdin", io.StringIO("short"))
-        _patch_select_ready(monkeypatch, hook_common)
+        _patch_select_ready(monkeypatch)
 
         text, truncated = hook_common.read_raw_stdin_with_truncation()
 
@@ -259,10 +243,8 @@ class TestReadRawStdinWithTruncation:
         assert truncated is False
 
     def test_truncates_when_exceeding_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from bluecore.hooks import hook_common
-
         monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("a" * 20))
-        _patch_select_ready(monkeypatch, hook_common)
+        _patch_select_ready(monkeypatch)
 
         text, truncated = hook_common.read_raw_stdin_with_truncation(max_bytes=10)
 
@@ -270,8 +252,6 @@ class TestReadRawStdinWithTruncation:
         assert truncated is True
 
     def test_tty_returns_empty_and_not_truncated(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from bluecore.hooks import hook_common
-
         monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload", tty=True))
 
         text, truncated = hook_common.read_raw_stdin_with_truncation()
@@ -280,8 +260,6 @@ class TestReadRawStdinWithTruncation:
         assert truncated is False
 
     def test_select_timeout_returns_empty_and_not_truncated(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from bluecore.hooks import hook_common
-
         monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload"))
         monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: ([], [], []))
 
@@ -300,9 +278,8 @@ class TestDetachProcess:
     def test_launches_detached_process_and_cleans_up_tmp_file(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        from bluecore.hooks import hook_common
-
-        monkeypatch.setattr(hook_common.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
         captured = {}
         written_stdin_content = {}
 
@@ -334,9 +311,8 @@ class TestDetachProcess:
     def test_tempfile_creation_failure_returns_false(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        from bluecore.hooks import hook_common
-
-        monkeypatch.setattr(hook_common.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
 
         def fail_named_temp_file(*args, **kwargs):  # noqa: ANN002, ANN003
             raise OSError("disk full")
@@ -348,9 +324,8 @@ class TestDetachProcess:
     def test_popen_failure_returns_false_and_cleans_up(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        from bluecore.hooks import hook_common
-
-        monkeypatch.setattr(hook_common.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
 
         def fail_popen(*args, **kwargs):  # noqa: ANN002, ANN003
             raise OSError("spawn failed")
@@ -364,9 +339,8 @@ class TestDetachProcess:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """一時ファイルの unlink 失敗（既に削除済み等）でも起動成功を維持する。"""
-        from bluecore.hooks import hook_common
-
-        monkeypatch.setattr(hook_common.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
         monkeypatch.setattr(hook_common.subprocess, "Popen", lambda *a, **k: None)
 
         def fail_unlink(path):  # noqa: ANN001
@@ -375,6 +349,34 @@ class TestDetachProcess:
         monkeypatch.setattr(hook_common.os, "unlink", fail_unlink)
 
         assert detach_process(["true"], "raw") is True
+
+    def test_creates_bluecore_dir_as_0700_under_umask_022(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """umask 022 でも ~/.bluecore を 0700 で作る。"""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        monkeypatch.setattr(hook_common.subprocess, "Popen", lambda *a, **k: None)
+        old_umask = os.umask(0o022)
+        try:
+            assert detach_process(["true"], "raw") is True
+            mode = stat.S_IMODE((tmp_path / ".bluecore").stat().st_mode)
+            assert mode == 0o700
+        finally:
+            os.umask(old_umask)
+
+    def test_tightens_existing_0755_bluecore_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """既存 0755 の ~/.bluecore を 0700 に締め直す。"""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        monkeypatch.setattr(hook_common.subprocess, "Popen", lambda *a, **k: None)
+        bluecore = tmp_path / ".bluecore"
+        bluecore.mkdir(mode=0o755)
+        bluecore.chmod(0o755)
+        assert detach_process(["true"], "raw") is True
+        assert stat.S_IMODE(bluecore.stat().st_mode) == 0o700
 
 
 def _pid_alive(pid: int) -> bool:
@@ -451,8 +453,6 @@ class TestWatchdogKillsProcessGroup:
         Raises:
             AssertionError: 孫の PID ファイルが期限内に作られない場合。
         """
-        from bluecore.hooks import hook_common
-
         marker = tmp_path / "grandchild-marker"
         pid_file = tmp_path / "grandchild-pid"
         guard = "import signal;signal.signal(signal.SIGTERM, signal.SIG_IGN);" if ignore_sigterm else ""

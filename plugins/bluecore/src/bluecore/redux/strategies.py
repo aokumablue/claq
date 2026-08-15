@@ -113,14 +113,14 @@ def dedup_lines(text: str, threshold: int = 3) -> str:
     for line in lines:
         key = _normalize_for_dedup(line)
         count = key_counts[key]
-        if count >= threshold:
-            if key not in emitted:
-                emitted.add(key)
-                result.append(line)
-                result.append(f"[×{count}] [同一パターン {count} 件を折りたたみ]: {key}")
-            # 2件目以降は出力しない
-        else:
+        if count < threshold:
             result.append(line)
+            continue
+        if key in emitted:
+            continue
+        emitted.add(key)
+        result.append(line)
+        result.append(f"[×{count}] [同一パターン {count} 件を折りたたみ]: {key}")
 
     return "\n".join(result)
 
@@ -155,16 +155,16 @@ class _LintGroup:
     count: int = 0
     files: list[str] = field(default_factory=list)
     first_msg: str = ""
+    _seen_files: set[str] = field(default_factory=set, repr=False, compare=False)
 
 
 def _fmt_files(files: list[str], max_show: int = 3) -> str:
     """ファイル一覧を短縮して返す。"""
-    shown = files[:max_show]
+    shown = ", ".join(files[:max_show])
     rest = len(files) - max_show
-    result = ", ".join(shown)
-    if rest > 0:
-        result += f" (+{rest}ファイル)"
-    return result
+    if rest <= 0:
+        return shown
+    return f"{shown} (+{rest}ファイル)"
 
 
 def _split_eslint_rest(rest: str) -> tuple[str, str] | None:
@@ -188,6 +188,30 @@ def _split_eslint_rest(rest: str) -> tuple[str, str] | None:
     return msg, rule
 
 
+def _add_lint_hit(
+    groups: dict[str, _LintGroup],
+    rule: str,
+    *,
+    severity: str,
+    msg: str,
+    file: str,
+) -> None:
+    """ルール別グループに 1 ヒットを加算し、未登録ファイルを追記する。
+
+    ファイルの新規判定は ``_seen_files``（set）で行う。``files`` リストの
+    ``in`` は同一ルールのユニークファイル数 n に対して O(n) になり、
+    ``ruff check`` のような大量診断で O(n^2) になる。
+    """
+    group = groups.get(rule)
+    if group is None:
+        group = _LintGroup(rule=rule, severity=severity, first_msg=msg)
+        groups[rule] = group
+    group.count += 1
+    if file not in group._seen_files:
+        group._seen_files.add(file)
+        group.files.append(file)
+
+
 def _classify_lint_lines(
     lines: list[str],
 ) -> tuple[dict[str, _LintGroup], dict[str, _LintGroup], dict[str, list[str]], set[int]]:
@@ -200,25 +224,26 @@ def _classify_lint_lines(
     for i, line in enumerate(lines):
         head = _ESLINT_HEAD.match(line)
         parsed = _split_eslint_rest(head.group("rest")) if head else None
-        if head and parsed is not None:
+        if head is not None and parsed is not None:
             msg, rule = parsed
-            if rule not in eslint_groups:
-                eslint_groups[rule] = _LintGroup(rule=rule, severity=head.group("severity"), first_msg=msg)
-            eslint_groups[rule].count += 1
-            f = head.group("file")
-            if f not in eslint_groups[rule].files:
-                eslint_groups[rule].files.append(f)
+            _add_lint_hit(
+                eslint_groups,
+                rule,
+                severity=head.group("severity"),
+                msg=msg,
+                file=head.group("file"),
+            )
             grouped_indices.add(i)
             continue
         m = _RUFF_LINE.match(line)
         if m:
-            code = m.group("code")
-            if code not in ruff_groups:
-                ruff_groups[code] = _LintGroup(rule=code, severity="error", first_msg=m.group("msg"))
-            ruff_groups[code].count += 1
-            f = m.group("file")
-            if f not in ruff_groups[code].files:
-                ruff_groups[code].files.append(f)
+            _add_lint_hit(
+                ruff_groups,
+                m.group("code"),
+                severity="error",
+                msg=m.group("msg"),
+                file=m.group("file"),
+            )
             grouped_indices.add(i)
             continue
         m = _PYTEST_FAIL.match(line)
