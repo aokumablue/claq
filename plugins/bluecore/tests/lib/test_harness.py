@@ -207,6 +207,14 @@ class TestExtractToolResultText:
         assert text == "hello\n"
         assert resp["stdout"] == "hello\n"
 
+    def test_tool_response_with_blank_stdout_falls_through_to_tool_result(self):
+        """tool_response が dict でも stdout が空/空白なら toolResult へフォールバックする。"""
+        text, resp = harness.extract_tool_result_text(
+            {"tool_response": {"stdout": "   "}, "toolResult": {"textResultForLlm": "fallback"}}
+        )
+        assert text == "fallback"
+        assert resp["stdout"] == "fallback"
+
     def test_copilot_tool_result_text(self):
         """Copilot camelCase toolResult.textResultForLlm を返す。"""
         text, resp = harness.extract_tool_result_text(

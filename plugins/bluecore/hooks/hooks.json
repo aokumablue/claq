@@ -94,17 +94,6 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "^(Bash|bash|shell|run_terminal_command)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.redux_filter",
-            "timeout": 10
-          }
-        ],
-        "description": "redux: Bash 出力をコマンド別フィルタで圧縮（無一致時は汎用戦略でトークン削減）"
-      },
-      {
         "matcher": "^(Edit|Write|MultiEdit|edit|write|multiedit|apply_patch|search_replace)$",
         "hooks": [
           {

@@ -74,8 +74,8 @@ def test_build_report_defaults_to_repo_mode_with_repo_markers(tmp_path: Path) ->
 
     assert report["target_mode"] == "repo"
     assert report["overall_score"] == 0
-    assert report["max_score"] == 70
-    assert len(report["checks"]) == 26
+    assert report["max_score"] == 67
+    assert len(report["checks"]) == 25
     assert report["categories"]["Tool Coverage"]["max"] == 10
     assert report["top_actions"][0]["path"] == "hooks/hooks.json"
 

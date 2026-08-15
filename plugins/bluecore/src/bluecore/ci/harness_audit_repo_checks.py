@@ -196,7 +196,12 @@ def _repo_tool_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 
 def _repo_context_compact_checks(root_dir: str | Path) -> list[dict[str, Any]]:
-    """Context Efficiency のコンパクト関連チェック2件を返す。"""
+    """Context Efficiency のコンパクト関連チェック1件を返す。
+
+    自動 Bash 出力圧縮フック（旧 redux_filter）は、非可逆な行折りたたみが
+    ソースコードを構文的に破壊する correctness hazard と判明したため、
+    推奨チェックから撤去した（bluecore 自身が本パターンを廃止済み）。
+    """
     return [
         {
             "id": "context-strategic-compact",
@@ -207,16 +212,6 @@ def _repo_context_compact_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "description": "コンテキスト最大圧縮 output-style が存在する（LLMレスポンス・ファイルの原始人口調圧縮）",
             "pass": file_exists(root_dir, "output-styles/slim.md"),
             "fix": "Add output-styles/slim.md for maximum context compression.",
-        },
-        {
-            "id": "context-suggest-compact-hook",
-            "category": "Context Efficiency",
-            "points": 3,
-            "scopes": ["repo", "hooks"],
-            "path": "src/bluecore/hooks/redux_filter.py",
-            "description": "コンテキスト圧縮を自動実行するフックが存在する（Bash 出力をコマンド別フィルタで圧縮しトークン消費を削減）",
-            "pass": file_exists(root_dir, "src/bluecore/hooks/redux_filter.py"),
-            "fix": "Implement src/bluecore/hooks/redux_filter.py for automatic context compression.",
         },
     ]
 

@@ -272,7 +272,6 @@ def test_get_repo_checks_python_structure_checks_pass_on_real_repo() -> None:
 
     python_structure_check_ids = [
         "tool-hooks-impl-count",
-        "context-suggest-compact-hook",
         "quality-test-runner",
         "quality-ci-validations",
         "quality-hook-tests",

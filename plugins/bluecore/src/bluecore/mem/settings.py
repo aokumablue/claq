@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from bluecore.lib.constants import BASE_DIR_NAME
@@ -32,21 +32,6 @@ CONTEXT_ITEM_CHAR_LIMIT = 200
 
 
 @dataclass
-class ReduxSettings:
-    """redux コマンド別トークン圧縮の設定（すべてハードコード既定値）"""
-
-    enabled: bool = True
-    smart_filter_enabled: bool = True
-    group_lint_enabled: bool = True
-    dedup_enabled: bool = True
-    smart_truncate_enabled: bool = True
-    max_output_len: int = 3000
-    head_lines: int = 30
-    tail_lines: int = 30
-    dedup_threshold: int = 3
-
-
-@dataclass
 class Settings:
     """mem のローカルランタイム設定。
 
@@ -54,7 +39,6 @@ class Settings:
     """
 
     log_level: str = "info"
-    redux: ReduxSettings = field(default_factory=ReduxSettings)
 
     # --- 導出プロパティ ---
 
