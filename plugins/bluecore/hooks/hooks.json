@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.block_no_verify"
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" bluecore.hooks.block_no_verify"
           }
         ],
         "description": "git hook-bypassフラグをブロックして、pre-commit、commit-msg、pre-pushフックがスキップされないように保護します。"
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.pre_bash_commit_quality"
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" bluecore.hooks.pre_bash_commit_quality"
           }
         ],
         "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.config_protection",
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" bluecore.hooks.config_protection",
             "timeout": 5
           }
         ],
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.skills.learn.observe pre",
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" --bg bluecore.skills.learn.observe pre",
             "async": true,
             "timeout": 10
           }
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.pre_agent_nudge",
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" bluecore.hooks.pre_agent_nudge",
             "timeout": 5
           }
         ],
@@ -63,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.pre_compact"
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" bluecore.hooks.pre_compact"
           }
         ],
         "description": "コンテキストの圧縮前に状態を保存します"
@@ -75,7 +75,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli context",
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" bluecore.mem.cli context",
             "timeout": 60
           }
         ],
@@ -86,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.session_start"
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" bluecore.hooks.session_start"
           }
         ],
         "description": "新しいセッションで以前のコンテキストを読み込み、パッケージマネージャを検出する"
@@ -98,7 +98,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.redux_filter",
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" bluecore.hooks.redux_filter",
             "timeout": 10
           }
         ],
@@ -109,7 +109,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.quality_gate post-edit",
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" bluecore.hooks.quality_gate post-edit",
             "timeout": 15
           }
         ],
@@ -122,7 +122,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.hooks.session_end",
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" --bg bluecore.hooks.session_end",
             "async": true,
             "timeout": 10
           }
@@ -134,7 +134,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.hooks.desktop_notify",
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" --bg bluecore.hooks.desktop_notify",
             "async": true,
             "timeout": 5
           }
@@ -148,7 +148,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" --bg bluecore.mem.cli handoff",
+            "command": "L=\"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\"; [ -f \"$L\" ] || L=$(ls -t \"$HOME\"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1); [ -n \"$L\" ] && [ -f \"$L\" ] || exit 0; exec python3 \"$L\" --bg bluecore.mem.cli handoff",
             "async": true,
             "timeout": 10
           }

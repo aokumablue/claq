@@ -15,14 +15,18 @@ from bluecore.ci.harness_audit_utils import (
     safe_read,
 )
 
-_LAUNCHER_INTERPRETERS = {"python", "python3"}
+# hooks.json の command は Grok Build TUI 対応ラッパー形式（
+# `$CLAUDE_PLUGIN_ROOT` 優先 → `~/.grok/installed-plugins/bluecore-*` へ
+# fallback → 未検出なら exit 0）で統一されている。実際に launcher.py を
+# 起動する行は必ずこのマーカーで終わるため、そこ以降だけを引数列として扱う。
+_EXEC_MARKER = 'exec python3 "$L"'
 
 
 def _hook_command_argv(command: str) -> tuple[str, ...] | None:
-    """hooks.json 内のコマンド文字列から launcher.py 起動後の引数列を返す。
+    """hooks.json 内のラッパー command 文字列から launcher.py 起動後の引数列を返す。
 
-    ``python``/``python3`` で ``launcher.py`` (または ``*/launcher.py``) を
-    起動する形式でなければ ``None`` を返す。先頭の ``--bg``（非 Claude
+    ``exec python3 "$L" <args...>``（Grok Build TUI 対応ラッパーの最終行）
+    という形式でなければ ``None`` を返す。先頭の ``--bg``（非 Claude
     ハーネス向け detach フラグ）はコマンドの実体ではないため取り除く。
 
     Args:
@@ -32,22 +36,20 @@ def _hook_command_argv(command: str) -> tuple[str, ...] | None:
         launcher.py 起動後の引数トークンのタプル（--bg 除去済み）。
         形式に合致しなければ None
     """
+    marker_index = command.find(_EXEC_MARKER)
+    if marker_index == -1:
+        return None
+
     try:
-        command_tokens = shlex.split(command)
+        argv = tuple(shlex.split(command[marker_index + len(_EXEC_MARKER) :]))
     except ValueError:
         return None
 
-    if len(command_tokens) < 3 or command_tokens[0] not in _LAUNCHER_INTERPRETERS:
+    if not argv:
         return None
-
-    launcher = command_tokens[1]
-    if launcher != "launcher.py" and not launcher.endswith("/launcher.py"):
-        return None
-
-    argv = tuple(command_tokens[2:])
-    if argv and argv[0] == "--bg":
+    if argv[0] == "--bg":
         argv = argv[1:]
-    return argv
+    return argv or None
 
 
 def _iter_hook_commands(event_hooks: Any) -> Iterator[str]:

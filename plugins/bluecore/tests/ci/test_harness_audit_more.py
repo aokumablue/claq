@@ -313,7 +313,14 @@ def test_memory_hooks_lifecycle_check_fails_when_dir_exists_but_commands_are_sta
         tmp_path,
         {
             "SessionStart": [
-                {"hooks": [{"type": "command", "command": "python3 launcher.py bluecore.hooks.unrelated"}]}
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": 'exec python3 "$L" bluecore.hooks.unrelated',
+                        }
+                    ]
+                }
             ],
             "Stop": [],
             "SessionEnd": [],
@@ -344,10 +351,7 @@ def test_memory_hooks_lifecycle_check_fails_when_only_partial_lifecycle_present(
                     "hooks": [
                         {
                             "type": "command",
-                            "command": (
-                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                "bluecore.mem.cli context"
-                            ),
+                            "command": 'exec python3 "$L" bluecore.mem.cli context',
                         }
                     ]
                 }
@@ -374,10 +378,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                     "hooks": [
                         {
                             "type": "command",
-                            "command": (
-                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                "bluecore.mem.cli context"
-                            ),
+                            "command": 'exec python3 "$L" bluecore.mem.cli context',
                         }
                     ]
                 },
@@ -385,10 +386,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                     "hooks": [
                         {
                             "type": "command",
-                            "command": (
-                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                "bluecore.hooks.session_start"
-                            ),
+                            "command": 'exec python3 "$L" bluecore.hooks.session_start',
                         }
                     ]
                 },
@@ -398,10 +396,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                     "hooks": [
                         {
                             "type": "command",
-                            "command": (
-                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                "--bg bluecore.hooks.session_end"
-                            ),
+                            "command": 'exec python3 "$L" --bg bluecore.hooks.session_end',
                         }
                     ]
                 }
@@ -411,10 +406,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                     "hooks": [
                         {
                             "type": "command",
-                            "command": (
-                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" '
-                                "--bg bluecore.mem.cli handoff"
-                            ),
+                            "command": 'exec python3 "$L" --bg bluecore.mem.cli handoff',
                         }
                     ]
                 }
@@ -437,15 +429,19 @@ def test_memory_hooks_lifecycle_check_passes_on_real_repo_hooks_json() -> None:
 
 
 def test_hook_command_argv_covers_parse_edge_cases() -> None:
-    """_hook_command_argv の分岐（不正引用符・トークン不足・起動形式不一致等）を網羅する。"""
-    assert _hook_command_argv('python3 "unterminated') is None
-    assert _hook_command_argv("python3 launcher.py") is None
-    assert _hook_command_argv("node launcher.py a b") is None
-    assert _hook_command_argv("python3 other.py a b") is None
-    assert _hook_command_argv("python3 launcher.py a b") == ("a", "b")
-    assert _hook_command_argv('python3 "${ROOT}/launcher.py" a b') == ("a", "b")
+    """_hook_command_argv の分岐（マーカー欠落・不正引用符・引数無し等）を網羅する。"""
+    assert _hook_command_argv("python3 launcher.py a b") is None  # 旧来の直接呼び出し形は非対応
+    assert _hook_command_argv('exec python3 "unterminated') is None  # マーカー自体が無い
+    assert _hook_command_argv('exec python3 "$L" "unterminated') is None  # マーカー後の引用符不正
+    assert _hook_command_argv('exec python3 "$L"') is None
+    assert _hook_command_argv('exec python3 "$L" a b') == ("a", "b")
+    assert (
+        _hook_command_argv('L="${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py"; exec python3 "$L" a b')
+        == ("a", "b")
+    )
     # 先頭の --bg（非 Claude ハーネス向け detach フラグ）は実体でないため除去する
-    assert _hook_command_argv("python3 launcher.py --bg a b") == ("a", "b")
+    assert _hook_command_argv('exec python3 "$L" --bg a b') == ("a", "b")
+    assert _hook_command_argv('exec python3 "$L" --bg') is None
 
 
 def test_event_has_matching_command_covers_branches() -> None:
@@ -458,17 +454,17 @@ def test_event_has_matching_command_covers_branches() -> None:
     assert _event_has_matching_command([{"hooks": "not-a-list"}], patterns) is False
     assert _event_has_matching_command([{"hooks": ["not-a-dict"]}], patterns) is False
     assert _event_has_matching_command([{"hooks": [{"command": 123}]}], patterns) is False
-    assert _event_has_matching_command([{"hooks": [{"command": "python3 launcher.py"}]}], patterns) is False
+    assert _event_has_matching_command([{"hooks": [{"command": 'exec python3 "$L"'}]}], patterns) is False
     assert (
         _event_has_matching_command(
-            [{"hooks": [{"command": "python3 launcher.py bluecore.mem.cli other:action"}]}],
+            [{"hooks": [{"command": 'exec python3 "$L" bluecore.mem.cli other:action'}]}],
             patterns,
         )
         is False
     )
     assert (
         _event_has_matching_command(
-            [{"hooks": [{"command": "python3 launcher.py bluecore.mem.cli session:mem:setup"}]}],
+            [{"hooks": [{"command": 'exec python3 "$L" bluecore.mem.cli session:mem:setup'}]}],
             patterns,
         )
         is True

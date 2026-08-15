@@ -169,6 +169,11 @@ def test_validate_hooks_reports_invalid_matcher_and_entrypoint(
 def _repo_hook_argv() -> list[list[str]]:
     """実際の hooks.json の command フックを launcher 以降の argv へ分解して返す。
 
+    command は Grok Build TUI 対応ラッパー形式（``$CLAUDE_PLUGIN_ROOT`` 優先
+    → ``~/.grok/installed-plugins/bluecore-*`` へ fallback → 未検出なら
+    exit 0）で統一されており、実際に launcher.py を起動する行は必ず
+    ``exec python3 "$L"`` で終わる。そこ以降だけを argv として切り出す。
+
     Returns:
         ``--bg`` を取り除いた argv のリスト（先頭がモジュール名）。
     """
@@ -183,11 +188,11 @@ def _repo_hook_argv() -> list[list[str]]:
         if hook.get("type") == "command"
     ]
 
+    exec_marker = 'exec python3 "$L"'
     argvs: list[list[str]] = []
     for command in commands:
-        parts = shlex.split(command)
-        launcher_index = next(i for i, part in enumerate(parts) if part.endswith("launcher.py"))
-        argv = parts[launcher_index + 1 :]
+        marker_index = command.index(exec_marker)
+        argv = shlex.split(command[marker_index + len(exec_marker) :])
         argvs.append(argv[1:] if argv and argv[0] == "--bg" else argv)
     return argvs
 
