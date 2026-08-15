@@ -36,15 +36,12 @@ def _fresh_runpy_module(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clear_harness_detection_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """各テストの前後でハーネス判定環境変数とメモ化キャッシュをクリアする。
+def _clear_host_marker_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """各テスト前後で host マーカー環境変数をクリアし、テスト間の漏れ込みを防ぐ。
 
-    ハーネス判定は環境変数を見るため、実行環境の CLAUDECODE / CODEX_* /
-    COPILOT_* / PLUGIN_DATA が漏れ込むと判定結果が変わる。デフォルトを
-    "unknown" に固定し、ハーネス別テストは monkeypatch.setenv で上書きする。
+    実行環境の CLAUDECODE / CODEX_* / COPILOT_* / PLUGIN_DATA が漏れ込むと
+    env 依存のテスト（cli_runner の CLI バイナリ判定等）の結果が変わる。
     """
-    from bluecore.lib.harness import detect_harness
-
     for key in list(os.environ):
         if key.startswith(("CODEX_", "COPILOT_")) or key in {
             "CLAUDECODE",
@@ -54,6 +51,4 @@ def _clear_harness_detection_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[
             "CLAUDE_PROJECT_DIR",
         }:
             monkeypatch.delenv(key, raising=False)
-    detect_harness.cache_clear()
     yield
-    detect_harness.cache_clear()

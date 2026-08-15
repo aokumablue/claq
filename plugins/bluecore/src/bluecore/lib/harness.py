@@ -1,18 +1,15 @@
-"""コーディングエージェントハーネス（Claude / Copilot / Codex / Grok）の判定と差分吸収。
+"""コーディングエージェントハーネスの入力形式差分を吸収する汎用パーサ。
 
-判定順は非 Claude 系マーカー（Codex → Copilot → Grok）を先に評価し、
-いずれにも該当しない場合にのみ CLAUDECODE を見て Claude と判定する。
-ネストされた実行等で CLAUDECODE が他ハーネスのマーカーと共存していても、
-非 Claude 系マーカーを優先することで誤判定を防ぐ。
-すべて純 stdlib のみに依存する（venv 不在時のフォールバック実行を保証するため）。
+host 判定は一切行わない。フィールド名の union を無条件に受理する寛容パーサ
+のみを提供する（tool_input / toolArgs、tool_name / toolName 等の複数命名を
+同一の意味へ正規化する）。すべて純 stdlib のみに依存する（venv 不在時の
+フォールバック実行を保証するため）。
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
-from functools import lru_cache
 from typing import Any
 
 # 各ハーネスのツール名 → Claude Code 相当ツール名。
@@ -48,41 +45,6 @@ _TOOL_NAME_MAP = {
 
 # 構造化パッチテキストのファイル操作マーカー（Codex apply_patch 形式）
 _PATCH_FILE_MARKERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ")
-
-
-@lru_cache(maxsize=1)
-def detect_harness() -> str:
-    """実行中のコーディングエージェントハーネスを判定する。
-
-    Args:
-        引数はありません。
-
-    Returns:
-        "claude" / "codex" / "copilot" / "grok" / "unknown" のいずれか。
-        unknown は Claude 互換形式で出力する（最も安全側）。
-
-    Raises:
-        例外は発生しません。
-    """
-    env = os.environ
-    if "PLUGIN_DATA" in env or any(k.startswith("CODEX_") for k in env):
-        return "codex"
-    plugin_root = env.get("CLAUDE_PLUGIN_ROOT", "")
-    if "/.copilot/installed-plugins/" in plugin_root or any(k.startswith("COPILOT_") for k in env):
-        return "copilot"
-    # Grok Build: installed-plugins/<name>-<hash> または plugins/<name>、GROK_* 環境変数
-    if (
-        "/.grok/installed-plugins/" in plugin_root
-        or "/.grok/plugins/" in plugin_root
-        or any(k.startswith("GROK_") for k in env)
-    ):
-        return "grok"
-    # 非 Claude 系マーカーがどれにも該当しない場合のみ CLAUDECODE を見る。
-    # ネストされた実行等で CLAUDECODE と他ハーネスのマーカーが共存していても
-    # 非 Claude 系判定を優先するため、この位置で最後に評価する。
-    if env.get("CLAUDECODE"):
-        return "claude"
-    return "unknown"
 
 
 def extract_tool_input(payload: dict[str, Any]) -> Any:

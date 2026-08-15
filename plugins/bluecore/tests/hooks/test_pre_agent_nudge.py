@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import runpy
-from unittest.mock import patch
 
 import pytest
 
@@ -149,23 +148,6 @@ class TestPreAgentNudgeNoOutput:
         assert stdout == []
 
 
-class TestPreAgentNudgeCopilot:
-    """Copilot 環境下での出力形式テスト（現仮説: Claude 形式と同一）。"""
-
-    def test_copilot_emits_hook_specific_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Copilot 環境でも hookSpecificOutput 形式を返す（第一仮説）。"""
-        payload = json.dumps({
-            "tool_name": "Agent",
-            "tool_input": {"subagent_type": "general-purpose"},
-        })
-        stdout, _ = _capture_io(monkeypatch, payload)
-        with patch("bluecore.hooks.output_adapter.detect_harness", return_value="copilot"):
-            result = pre_agent_nudge.main()
-        assert result == 0
-        parsed = json.loads(stdout[0])
-        assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
-
-
 class TestAgentTableRegression:
     """AGENT_TABLE 退行防止テスト。"""
 
@@ -240,7 +222,7 @@ class TestExploreTableRegression:
 
 
 class TestPreAgentNudgeClaudeUnchanged:
-    """H-04/A-01 対応で Grok 分岐を追加しても Claude 側の出力が 1 バイトも変わらないことの固定回帰テスト。"""
+    """Claude Code 環境での出力が AGENT_TABLE と完全一致することの固定回帰テスト。"""
 
     def test_claudecode_general_purpose_output_matches_agent_table_exactly(
         self, monkeypatch: pytest.MonkeyPatch
@@ -256,84 +238,6 @@ class TestPreAgentNudgeClaudeUnchanged:
         parsed = json.loads(stdout[0])
         ctx = parsed["hookSpecificOutput"]["additionalContext"]
         assert ctx == pre_agent_nudge.AGENT_TABLE
-
-
-class TestPreAgentNudgeGrok:
-    """Grok（spawn_subagent）向け分岐テスト。
-
-    Grok の spawn_subagent が受理する型は explore（小文字）/ general-purpose /
-    plan の 3 つのみで bluecore 専門エージェント型は存在しない（実機で
-    "Unknown subagent type" エラーを確認済み）。conftest.py の共通フィクスチャが
-    CLAUDE_PLUGIN_ROOT を delenv するため、GROK_* 環境変数を明示的に
-    setenv して判定させる（plugin_root パスパターンには頼らない）。
-    """
-
-    def test_grok_general_purpose_message_has_no_bluecore_type(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """GROK_AGENT=1 環境で subagent_type=general-purpose の出力に bluecore: を含まない。"""
-        monkeypatch.setenv("GROK_AGENT", "1")
-        payload = json.dumps({
-            "tool_name": "Agent",
-            "tool_input": {"subagent_type": "general-purpose"},
-        })
-        stdout, _ = _capture_io(monkeypatch, payload)
-        assert pre_agent_nudge.main() == 0
-        parsed = json.loads(stdout[0])
-        ctx = parsed["hookSpecificOutput"]["additionalContext"]
-        assert "bluecore:" not in ctx
-        assert ctx == pre_agent_nudge.GROK_MESSAGE
-
-    def test_grok_lowercase_explore_message_has_no_bluecore_type(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """GROK_AGENT=1 環境で subagent_type=explore（小文字）の出力に bluecore: を含まない。"""
-        monkeypatch.setenv("GROK_AGENT", "1")
-        payload = json.dumps({
-            "tool_name": "Agent",
-            "tool_input": {"subagent_type": "explore"},
-        })
-        stdout, _ = _capture_io(monkeypatch, payload)
-        assert pre_agent_nudge.main() == 0
-        parsed = json.loads(stdout[0])
-        ctx = parsed["hookSpecificOutput"]["additionalContext"]
-        assert "bluecore:" not in ctx
-        assert ctx == pre_agent_nudge.GROK_MESSAGE
-
-    def test_grok_plan_message_has_no_bluecore_type(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """GROK_AGENT=1 環境で subagent_type=plan の出力に bluecore: を含まない。"""
-        monkeypatch.setenv("GROK_AGENT", "1")
-        payload = json.dumps({
-            "tool_name": "Agent",
-            "tool_input": {"subagent_type": "plan"},
-        })
-        stdout, _ = _capture_io(monkeypatch, payload)
-        assert pre_agent_nudge.main() == 0
-        parsed = json.loads(stdout[0])
-        ctx = parsed["hookSpecificOutput"]["additionalContext"]
-        assert "bluecore:" not in ctx
-
-    def test_grok_uppercase_explore_no_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """GROK_AGENT=1 環境で大文字 Explore は Grok の受理型に含まれないため無出力。"""
-        monkeypatch.setenv("GROK_AGENT", "1")
-        payload = json.dumps({
-            "tool_name": "Agent",
-            "tool_input": {"subagent_type": "Explore"},
-        })
-        stdout, _ = _capture_io(monkeypatch, payload)
-        assert pre_agent_nudge.main() == 0
-        assert stdout == []
-
-    def test_grok_unknown_subagent_type_no_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """GROK_AGENT=1 環境で未知の subagent_type は無出力。"""
-        monkeypatch.setenv("GROK_AGENT", "1")
-        payload = json.dumps({
-            "tool_name": "Agent",
-            "tool_input": {"subagent_type": "bluecore:reviewer"},
-        })
-        stdout, _ = _capture_io(monkeypatch, payload)
-        assert pre_agent_nudge.main() == 0
-        assert stdout == []
 
 
 def _assert_table_output(stdout: list[str], *, expected_agent: str) -> None:

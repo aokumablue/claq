@@ -256,23 +256,8 @@ class TestMain:
         assert launcher.main(["bluecore.hooks.config_protection", "extra"]) == 0
         assert captured == {"target": "bluecore.hooks.config_protection", "args": ["extra"]}
 
-    def test_bg_on_claude_runs_in_process_without_detach(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Claude はホスト側で非同期実行するため、--bg でも detach せずインプロセス実行する。"""
-        monkeypatch.setattr("bluecore.lib.harness.detect_harness", lambda: "claude")
-
-        detach_called: list[object] = []
-        monkeypatch.setattr(
-            "bluecore.hooks.hook_common.detach_process", lambda *a, **k: detach_called.append(a) or True
-        )
-        captured = _stub_run_in_process(monkeypatch)
-
-        assert launcher.main(["--bg", "bluecore.mem.cli", "observe"]) == 0
-        assert detach_called == []
-        assert captured["target"] == "bluecore.mem.cli"
-
-    def test_bg_on_non_claude_detaches_and_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """非 Claude の --bg は detach して 0 を返す。"""
-        monkeypatch.setattr("bluecore.lib.harness.detect_harness", lambda: "codex")
+    def test_bg_always_detaches_and_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--bg は host に関わらず常に detach して 0 を返す。"""
         monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "{}")
 
         captured: dict[str, object] = {}
@@ -290,21 +275,20 @@ class TestMain:
             launcher, "_run_module_in_process", lambda *a: run_in_process_called.append(a)
         )
 
-        assert launcher.main(["--bg", "bluecore.mem.cli", "session-end"]) == 0
+        assert launcher.main(["--bg", "bluecore.mem.cli", "handoff"]) == 0
         assert run_in_process_called == []
-        assert captured["cmd"] == [sys.executable, "-m", "bluecore.mem.cli", "session-end"]
+        assert captured["cmd"] == [sys.executable, "-m", "bluecore.mem.cli", "handoff"]
         assert captured["raw"] == "{}"
 
-    def test_bg_on_non_claude_detach_failure_still_returns_zero(
+    def test_bg_detach_failure_still_returns_zero(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """detach 失敗でも 0 を返し、stderr にエラーを書く。"""
-        monkeypatch.setattr("bluecore.lib.harness.detect_harness", lambda: "codex")
         monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "")
         monkeypatch.setattr("bluecore.hooks.hook_common.detach_process", lambda *a, **k: False)
         monkeypatch.setattr(launcher, "build_env", lambda: {})
 
-        assert launcher.main(["--bg", "bluecore.hooks.session_end"]) == 0
+        assert launcher.main(["--bg", "bluecore.mem.cli", "handoff"]) == 0
         assert "Error detaching" in capsys.readouterr().err
 
     def test_inserts_src_dir_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:

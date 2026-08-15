@@ -84,11 +84,11 @@ class TestEmitUserPromptSubmitOutput:
         assert inner["hookEventName"] == "UserPromptSubmit"
         assert inner["additionalContext"] == additional_context
 
-    def test_no_top_level_event_name(self) -> None:
-        """トップレベル hookEventName 形式（旧バグ）に戻っていないこと。"""
+    def test_merged_output_has_top_level_additional_context_but_no_event_name(self) -> None:
+        """合併出力はトップレベル additionalContext を持つが hookEventName は持たない。"""
         payload = json.loads(emit_user_prompt_submit_output("ctx"))
         assert "hookEventName" not in payload
-        assert "additionalContext" not in payload
+        assert payload["additionalContext"] == "ctx"
 
     def test_unicode_not_escaped(self) -> None:
         assert "日本語" in emit_user_prompt_submit_output("日本語")

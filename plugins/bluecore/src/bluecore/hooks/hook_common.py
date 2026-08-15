@@ -361,11 +361,11 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
 
 
 def emit_block_output(reason: str) -> int:
-    """ツール実行ブロックをハーネス別プロトコルで stdout/stderr に書き出す。
+    """ツール実行ブロックを host 非依存の合併出力で stdout/stderr に書き出す。
 
     ツール実行をブロックするフックは終了コードを直接返さず、このヘルパの
-    戻り値を返すこと（Claude/Codex: stderr + exit 2、Copilot: deny JSON +
-    exit 0 へ変換される）。
+    戻り値を返すこと（stderr への理由書き出し + stdout への deny JSON を
+    同時に出し、exit code は常に 2 を返す）。
 
     Args:
         reason: ブロック理由（ユーザー / エージェントに提示される）。
@@ -377,15 +377,13 @@ def emit_block_output(reason: str) -> int:
         例外は発生しません。
     """
     exit_code, deny_out, reason_err = emit_block(reason)
-    if deny_out:
-        write_stdout(deny_out)
-    if reason_err:
-        write_stderr(reason_err + "\n")
+    write_stdout(deny_out)
+    write_stderr(reason_err + "\n")
     return exit_code
 
 
 def _emit_hook_specific_output(event_name: str, additional_context: str) -> str:
-    """コンテキスト注入出力を実行中ハーネスのプロトコルで返す。
+    """コンテキスト注入出力を host 非依存の合併 JSON で返す。
 
     Args:
         event_name: hookEventName に設定するイベント名。
@@ -403,16 +401,15 @@ def _emit_hook_specific_output(event_name: str, additional_context: str) -> str:
 def emit_session_start_output(additional_context: str = "") -> str:
     """SessionStart 用のフック出力 JSON 文字列を返す。
 
-    ハーネスに応じたフォーマットを output_adapter 経由で選択する。
+    host 非依存の合併出力を output_adapter 経由で生成する。
     stdout への書き込みは行わない純粋関数として使う。
 
     Args:
         additional_context: コンテキストに注入する追加文字列。
 
     Returns:
-        ハーネス別フォーマットの JSON 文字列。
-        Claude Code: hookSpecificOutput ラッパー形式。
-        Copilot CLI: {"additionalContext": "..."} トップレベル形式。
+        additionalContext（トップレベル）と hookSpecificOutput を同時に
+        含む合併 JSON 文字列。
 
     Raises:
         例外は発生しません。

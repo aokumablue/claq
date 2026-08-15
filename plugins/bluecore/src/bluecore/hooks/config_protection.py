@@ -2,9 +2,9 @@
 
 トリガー: pre:edit, pre:write
 入力: 変更されるファイルパスを含むJSON
-出力: 保護されたファイルが変更される場合はハーネス別プロトコルでブロック
-終了: 0 (許可) または 2 (ブロック。Copilot は emit_block_output により
-      exit 0 + permissionDecision: deny の JSON へ変換される)
+出力: 保護されたファイルが変更される場合は host 非依存の合併出力でブロック
+終了: 0 (許可) または 2 (ブロック。emit_block_output が stderr の理由と
+      stdout の permissionDecision: deny JSON を同時に出す)
 
 入力切り捨て時のブロックは本モジュール自身が判定する（launcher はインプロ
 セスで直接ターゲットを実行するだけで stdin を代読しないため）。ファイル名

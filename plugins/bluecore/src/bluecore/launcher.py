@@ -106,7 +106,7 @@ def _run_module_in_process(target: str, target_args: list[str]) -> int:
 
 
 def _resolve_module_command(target: str, target_args: list[str]) -> list[str]:
-    """detach（--bg かつ非 Claude ハーネス）起動用のコマンドリストを構築します。
+    """detach（--bg 起動）用のコマンドリストを構築します。
 
     hooks.json / bluecore-helpers.sh のターゲットはすべて dotted module
     name であることを確認済みのため、`-m` 起動のみをサポートする。
@@ -148,7 +148,6 @@ def main(argv: list[str] | None = None) -> int:
         sys.path.insert(0, src_dir)
 
     from bluecore.hooks.hook_common import detach_process, read_raw_stdin, write_stderr
-    from bluecore.lib.harness import detect_harness
 
     args = list(sys.argv[1:] if argv is None else argv)
     background = bool(args) and args[0] == "--bg"
@@ -160,10 +159,9 @@ def main(argv: list[str] | None = None) -> int:
 
     target, target_args = args[0], args[1:]
 
-    if background and detect_harness() != "claude":
-        # Claude Code はホスト側で非同期実行するためインプロセス実行のまま
-        # 進めてよい。Codex 等 async 未サポートのハーネスでは detach して
-        # 即 0 を返す（フックがセッションを同期ブロックしないようにする）。
+    if background:
+        # --bg は host に関わらず常に detach する（同一処理を host 非依存で
+        # 実現するため）。呼び出し側フックを同期ブロックしない。
         raw = read_raw_stdin()
         launched = detach_process(_resolve_module_command(target, target_args), raw, env=build_env())
         if not launched:

@@ -454,7 +454,9 @@ def test_pre_bash_commit_quality_run_wrapper_and_main_success(monkeypatch: pytes
     with redirect_stdout(stdout):
         assert pre_bash_commit_quality.main() == 2
 
-    assert stdout.getvalue() == ""
+    # ブロック時は stdout に permissionDecision: deny の合併 JSON を出す。
+    deny = json.loads(stdout.getvalue())
+    assert deny["permissionDecision"] == "deny"
 
 
 def test_pre_bash_commit_quality_evaluate_handles_commit_branches(

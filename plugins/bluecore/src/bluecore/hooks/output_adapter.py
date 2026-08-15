@@ -1,227 +1,93 @@
-"""フック出力をハーネス別プロトコルへ変換するアダプタ。
+"""フック出力を host 非依存の合併 JSON へ変換するアダプタ。
 
-Claude Code / unknown では変換ゼロ（現行の hookSpecificOutput 形式と exit code 2
-ブロックをそのまま使う）。Copilot CLI / Codex では各ハーネスのプロトコル差を
-ここで一元的に吸収する。変換はデータ駆動のマッピングテーブルで定義し、
-実機検証の結果に応じてテーブルのエントリ差し替えのみで対応できる構造とする。
-
-Copilot CLI での動作:
-  - SessionStart 出力ハンドラ: c?.additionalContext を TOP LEVEL から直接読む
-  - UserPromptSubmit 出力ハンドラ: l.additionalContext を TOP LEVEL から直接読む
-  - Claude Code 形式の hookSpecificOutput ラッパーは SessionStart/UserPromptSubmit では
-    無視される（preToolUse の _vsCodeCompat ブランチのみで参照される）
-  → Copilot CLI は {"additionalContext": "..."} をトップレベルで出力する必要がある
+host 分岐は行わない。各 host が自分の読むキーだけを拾える形で、複数プロトコル
+分の出力を同一 JSON に無条件で同梱する（合併出力）。Claude Code は
+``hookSpecificOutput``、Copilot CLI は ``additionalContext`` / ``modifiedResult``
+をトップレベルで読む。未知キーは無視される前提とし、実機未検証の host
+（Codex / Grok）に対しても同じ merged JSON を出力する。
 """
 
 from __future__ import annotations
 
 import json
 
-from bluecore.lib.harness import detect_harness
 
-
-def _claude_context_output(event_name: str, additional_context: str) -> str:
-    """Claude Code の hookSpecificOutput 形式 JSON を返す。
+def adapt_context_output(event_name: str, additional_context: str) -> str:
+    """コンテキスト注入出力を host 非依存の合併 JSON として生成する。
 
     Args:
         event_name: hookEventName に設定するイベント名。
         additional_context: コンテキストに注入する追加文字列。
 
     Returns:
-        hookSpecificOutput を含む JSON 文字列。
+        additionalContext（トップレベル）と hookSpecificOutput を同時に
+        含む合併 JSON 文字列。
 
     Raises:
         例外は発生しません。
     """
     return json.dumps(
         {
+            "additionalContext": additional_context,
             "hookSpecificOutput": {
                 "hookEventName": event_name,
                 "additionalContext": additional_context,
-            }
+            },
         },
         ensure_ascii=False,
     )
 
 
-def _copilot_context_output(event_name: str, additional_context: str) -> str:
-    """Copilot CLI の additionalContext 形式 JSON を返す。
-
-    Copilot CLI は SessionStart / UserPromptSubmit フックの出力から
-    additionalContext をトップレベルで直接読む。Claude Code 形式の
-    hookSpecificOutput ラッパーは これらのイベントでは無視される。
-
-    Args:
-        event_name: 未使用（Copilot CLI は hookEventName を参照しない）。
-        additional_context: コンテキストに注入する追加文字列。
-
-    Returns:
-        {"additionalContext": "..."} 形式の JSON 文字列。
-
-    Raises:
-        例外は発生しません。
-    """
-    return json.dumps(
-        {"additionalContext": additional_context},
-        ensure_ascii=False,
-    )
-
-
-# ハーネス → コンテキスト注入出力ビルダーのマッピング。
-# Copilot CLI は additionalContext をトップレベルで読む（実機検証済み）。
-# Codex は未検証のため Claude 形式を維持。
-_CONTEXT_OUTPUT_BUILDERS = {
-    "claude": _claude_context_output,
-    "codex": _claude_context_output,
-    "copilot": _copilot_context_output,
-    # Grok Build は Claude 互換プラグイン形式（hookSpecificOutput）を解釈する
-    "grok": _claude_context_output,
-    "unknown": _claude_context_output,
-}
-
-
-
-def adapt_context_output(event_name: str, additional_context: str) -> str:
-    """コンテキスト注入出力を実行中ハーネスのプロトコルに合わせて生成する。
-
-    Args:
-        event_name: hookEventName に設定するイベント名。
-        additional_context: コンテキストに注入する追加文字列。
-
-    Returns:
-        ハーネスのプロトコルに適合した JSON 文字列。
-
-    Raises:
-        例外は発生しません。
-    """
-    # 将来のハーネス追加でテーブル更新が漏れても KeyError にせず Claude 形式へ倒す
-    builder = _CONTEXT_OUTPUT_BUILDERS.get(detect_harness(), _claude_context_output)
-    return builder(event_name, additional_context)
-
-
-# PreToolUse ハーネス → コンテキスト注入出力ビルダーのマッピング。
-# Copilot CLI は preToolUse の _vsCodeCompat ブランチで hookSpecificOutput を参照する
-# （SessionStart/UserPromptSubmit とは異なり、トップレベル形式は無視される）。
-# 実機検証後に copilot エントリのみ差し替え可能なデータ駆動構造にしてある。
-_PRE_TOOL_USE_OUTPUT_BUILDERS = {
-    "claude": _claude_context_output,
-    "codex": _claude_context_output,
-    "copilot": _claude_context_output,
-    "grok": _claude_context_output,
-    "unknown": _claude_context_output,
-}
-
-
 def adapt_pre_tool_use_context_output(additional_context: str) -> str:
-    """PreToolUse コンテキスト注入出力を実行中ハーネスのプロトコルに合わせて生成する。
-
-    全ハーネスで Claude 形式（hookSpecificOutput ラッパー）を返す第一仮説。
-    Copilot CLI は preToolUse の _vsCodeCompat ブランチで hookSpecificOutput を
-    参照するため（SessionStart/UserPromptSubmit とは異なる）、copilot も
-    Claude 形式が正しい（実機検証後に copilot エントリのみ差し替え可）。
+    """PreToolUse コンテキスト注入出力を host 非依存の合併 JSON として生成する。
 
     Args:
         additional_context: コンテキストに注入する追加文字列。
 
     Returns:
-        ハーネスのプロトコルに適合した JSON 文字列。
+        adapt_context_output と同形の合併 JSON 文字列。
 
     Raises:
         例外は発生しません。
     """
-    builder = _PRE_TOOL_USE_OUTPUT_BUILDERS.get(detect_harness(), _claude_context_output)
-    return builder("PreToolUse", additional_context)
+    return adapt_context_output("PreToolUse", additional_context)
 
 
-def _claude_tool_output(reduced_stdout: str, tool_response: dict) -> str:
-    """Claude Code の updatedToolOutput 形式 JSON を返す。
+def adapt_tool_output(reduced_stdout: str, tool_response: dict) -> str:
+    """PostToolUse のツール出力差し替えを host 非依存の合併 JSON として生成する。
 
-    ``updatedToolOutput`` は元のツール出力と同じ形（stdout/stderr/interrupted/
-    isImage…）を保つ必要があり、形が合わないと Claude Code 側で破棄され元出力が
-    使われる。そのため stdout のみを差し替え、他のキーは元のまま引き継ぐ。
+    Claude Code は ``hookSpecificOutput.updatedToolOutput``（元の shape を
+    保ったまま stdout のみ差し替え）、Copilot CLI は ``modifiedResult``
+    （テキスト 1 本での全置換）を読む。両方を同時に出力する。
 
     Args:
         reduced_stdout: 圧縮後の stdout テキスト。
         tool_response: 元のツール出力オブジェクト。
 
     Returns:
-        hookSpecificOutput.updatedToolOutput を含む JSON 文字列。
+        modifiedResult と hookSpecificOutput.updatedToolOutput を同時に
+        含む合併 JSON 文字列。
 
     Raises:
         例外は発生しません。
     """
     return json.dumps(
         {
+            "modifiedResult": {"resultType": "success", "textResultForLlm": reduced_stdout},
             "hookSpecificOutput": {
                 "hookEventName": "PostToolUse",
                 "updatedToolOutput": {**tool_response, "stdout": reduced_stdout},
-            }
+            },
         },
         ensure_ascii=False,
     )
 
 
-def _copilot_tool_output(reduced_stdout: str, tool_response: dict) -> str:
-    """Copilot CLI の modifiedResult 形式 JSON を返す。
-
-    Copilot CLI の postToolUse は Claude Code の updatedToolOutput を解釈せず、
-    ``modifiedResult`` でツール出力をまるごと差し替える。テキスト 1 本しか
-    渡せないため、stdout 以外のキー（stderr/interrupted…）は表現できない。
-
-    Args:
-        reduced_stdout: 圧縮後の stdout テキスト。
-        tool_response: 未使用（Copilot CLI は元のツール出力 shape を参照しない）。
-
-    Returns:
-        {"modifiedResult": {...}} 形式の JSON 文字列。
-
-    Raises:
-        例外は発生しません。
-    """
-    return json.dumps(
-        {"modifiedResult": {"resultType": "success", "textResultForLlm": reduced_stdout}},
-        ensure_ascii=False,
-    )
-
-
-# PostToolUse ハーネス → ツール出力差し替えビルダーのマッピング。
-# Copilot CLI は modifiedResult 契約でツール出力を上書きする（実機検証済み）。
-# Codex は未検証のため Claude 形式を維持。
-_TOOL_OUTPUT_BUILDERS = {
-    "claude": _claude_tool_output,
-    "codex": _claude_tool_output,
-    "copilot": _copilot_tool_output,
-    "grok": _claude_tool_output,
-    "unknown": _claude_tool_output,
-}
-
-
-def adapt_tool_output(reduced_stdout: str, tool_response: dict) -> str:
-    """PostToolUse のツール出力差し替えを実行中ハーネスのプロトコルで生成する。
-
-    Args:
-        reduced_stdout: 圧縮後の stdout テキスト。
-        tool_response: 元のツール出力オブジェクト。
-
-    Returns:
-        ハーネスのプロトコルに適合した JSON 文字列。
-
-    Raises:
-        例外は発生しません。
-    """
-    # 将来のハーネス追加でテーブル更新が漏れても KeyError にせず Claude 形式へ倒す
-    builder = _TOOL_OUTPUT_BUILDERS.get(detect_harness(), _claude_tool_output)
-    return builder(reduced_stdout, tool_response)
-
-
 def emit_block(reason: str) -> tuple[int, str, str]:
-    """ツール実行ブロックの出力をハーネス別に組み立てる。
+    """ツール実行ブロックの出力を host 非依存の合併形式で組み立てる。
 
-    Claude Code / Codex / Grok は exit code 2 + stderr でブロックする
-    （command preToolUse の非ゼロ終了は fail-closed）。
-    Copilot CLI は permissionDecision を stdout JSON で返す契約のため、
-    ``permissionDecision: deny`` の stdout JSON + exit code 0 へ変換する
-    （公式: 非ゼロでも deny だが、decision JSON の方が理由を確実に伝える）。
+    exit code 2（Claude Code / Codex 系が読む fail-closed シグナル）と、
+    stdout の permissionDecision JSON（Copilot CLI が読む契約）を同時に返す。
 
     Args:
         reason: ブロック理由（ユーザー / エージェントに提示される）。
@@ -233,10 +99,8 @@ def emit_block(reason: str) -> tuple[int, str, str]:
     Raises:
         例外は発生しません。
     """
-    if detect_harness() == "copilot":
-        payload = json.dumps(
-            {"permissionDecision": "deny", "permissionDecisionReason": reason},
-            ensure_ascii=False,
-        )
-        return 0, payload, ""
-    return 2, "", reason
+    payload = json.dumps(
+        {"permissionDecision": "deny", "permissionDecisionReason": reason},
+        ensure_ascii=False,
+    )
+    return 2, payload, reason

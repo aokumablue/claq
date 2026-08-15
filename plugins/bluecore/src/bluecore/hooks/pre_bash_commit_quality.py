@@ -655,12 +655,11 @@ def run(raw_input: str) -> dict:
 def main() -> int:
     """スクリプト実行時に入力を読み取り、品質チェックを行います。
 
-    ブロック時（exitCode == 2）は emit_block_output でハーネス別プロトコルに
-    変換する（Claude/Codex: stderr + exit 2、Copilot: deny JSON + exit 0）。
+    ブロック時（exitCode == 2）は emit_block_output で host 非依存の合併出力
+    （stderr の理由 + stdout の permissionDecision: deny JSON、exit 2）に変換する。
 
     Returns:
-        コミットを許可する場合は 0、ブロックする場合は 2（Copilot では
-        emit_block_output により 0）を返します。
+        コミットを許可する場合は 0、ブロックする場合は 2 を返します。
 
     Args:
         引数はありません。

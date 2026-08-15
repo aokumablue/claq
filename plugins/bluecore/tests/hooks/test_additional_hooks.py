@@ -156,7 +156,8 @@ class TestBlockNoVerify:
 
         assert block_no_verify.main() == expected_code
         captured = capsys.readouterr()
-        assert captured.out == ""
+        # ブロック時のみ stdout に permissionDecision: deny の合併 JSON を出す。
+        assert bool(captured.out) is blocked
         assert bool(captured.err) is blocked
 
     @pytest.mark.parametrize("command", _BYPASS_COMMANDS)
@@ -244,24 +245,16 @@ class TestBlockNoVerify:
         )
 
         assert completed.returncode == expected_code
-        assert completed.stdout == ""
+        assert bool(completed.stdout) is (expected_code != 0)
         assert bool(completed.stderr) is (expected_code != 0)
 
-    def test_blocked_on_copilot_emits_deny_json(
+    def test_blocked_emits_deny_json_alongside_exit_2(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Copilot では deny JSON + exit 0 でブロックする。"""
-        from bluecore.lib import harness
-
-        monkeypatch.delenv("CLAUDECODE", raising=False)
-        monkeypatch.setenv("COPILOT_AGENT_PROMPT", "x")
-        harness.detect_harness.cache_clear()
+        """ブロック時は host に関わらず stdout の deny JSON + exit 2 を同時に出す。"""
         payload = json.dumps({"tool_input": {"command": "git commit --no-verify"}})
         monkeypatch.setattr(block_no_verify, "read_raw_stdin", lambda: payload)
-        try:
-            assert block_no_verify.main() == 0
-        finally:
-            harness.detect_harness.cache_clear()
+        assert block_no_verify.main() == 2
         deny = json.loads(capsys.readouterr().out)
         assert deny["permissionDecision"] == "deny"
 

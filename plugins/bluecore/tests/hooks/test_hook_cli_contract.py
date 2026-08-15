@@ -82,8 +82,8 @@ def _assert_agent_table(stdout: str) -> None:
 
 
 def _assert_denied_ruff(result: subprocess.CompletedProcess[str]) -> None:
-    """config_protection が ruff.toml を deny JSON・exit 0 で返したことを検証する。"""
-    assert result.returncode == 0
+    """config_protection が ruff.toml を deny JSON・exit 2 で返したことを検証する。"""
+    assert result.returncode == 2
     parsed = json.loads(result.stdout)
     assert parsed["permissionDecision"] == "deny"
     assert "ruff.toml" in parsed["permissionDecisionReason"]
@@ -123,7 +123,7 @@ def test_launcher_pre_agent_nudge_accepts_native_camel_case(tmp_path: Path) -> N
 
 
 def test_launcher_config_protection_denies_snake_case_payload(tmp_path: Path) -> None:
-    """DT-06 #4: snake_case の ruff.toml 編集は Copilot deny JSON・exit 0。"""
+    """DT-06 #4: snake_case の ruff.toml 編集は deny JSON・exit 2。"""
     result = _run_launcher(
         "bluecore.hooks.config_protection",
         {"tool_name": "Edit", "tool_input": {"file_path": "ruff.toml"}},

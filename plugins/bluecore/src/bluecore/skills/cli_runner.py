@@ -1,7 +1,7 @@
 """LLM CLI（claude / copilot）の実行環境を抽象化するヘルパー。
 
 環境判定:
-  ハーネスが claude（lib.harness.detect_harness）→ "claude"
+  CLAUDECODE 環境変数あり → "claude"
   それ以外で copilot が PATH に存在 → "copilot"
   フォールバック → "claude"
 """
@@ -11,8 +11,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-
-from bluecore.lib.harness import detect_harness
 
 _COPILOT_TOOL_NAMES = {
     "Read": "view",
@@ -32,7 +30,7 @@ _COPILOT_PERMISSION_NAMES = {
 
 def detect_cli_binary() -> str:
     """実行環境に応じて使用する LLM CLI バイナリ名を返す。"""
-    if detect_harness() == "claude":
+    if os.environ.get("CLAUDECODE"):
         return "claude"
     if shutil.which("copilot"):
         return "copilot"

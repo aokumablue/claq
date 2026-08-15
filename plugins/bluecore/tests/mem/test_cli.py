@@ -1005,14 +1005,13 @@ class TestContext:
         assert self._inject(monkeypatch, tmp_path) == ""
 
     def test_records_session_row(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """hook の session_id で sessions 行を作り harness を記録する。"""
-        monkeypatch.setattr(cli, "detect_harness", lambda: "claude")
+        """hook の session_id で sessions 行を作る（harness は既定値 unknown）。"""
         self._inject(monkeypatch, tmp_path, {"session_id": "abc-123"})
 
         with Database(tmp_path / "mem.db") as db:
             row = db.conn.execute("SELECT * FROM sessions").fetchone()
         assert row is not None
-        assert (row["session_uid"], row["harness"], row["handoff"]) == ("abc-123", "claude", "")
+        assert (row["session_uid"], row["harness"], row["handoff"]) == ("abc-123", "unknown", "")
         assert row["repo_id"] == _repo_id(tmp_path)
 
     def test_missing_session_id_records_no_row(
@@ -1077,13 +1076,11 @@ class TestHandoff:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """SessionStart 未実行でも行を新設し started_at は ended_at と同値にする。"""
-        monkeypatch.setattr(cli, "detect_harness", lambda: "codex")
-
         self._run(monkeypatch, tmp_path, {"session_id": "orphan", "handoff": "引き継ぎ"})
 
         rows = self._sessions(tmp_path)
         assert len(rows) == 1
-        assert (rows[0]["session_uid"], rows[0]["harness"]) == ("orphan", "codex")
+        assert (rows[0]["session_uid"], rows[0]["harness"]) == ("orphan", "unknown")
         assert rows[0]["started_at"] == rows[0]["ended_at"]
         assert rows[0]["repo_id"] == _repo_id(tmp_path)
 

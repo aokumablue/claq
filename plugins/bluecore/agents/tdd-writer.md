@@ -30,7 +30,7 @@ RED → GREEN → REFACTOR → REPEAT
 ```python
 def test_slugify_spaces_replaced_with_hyphen():
     """空白がハイフン 1 個に変換されること。"""
-    from bluecore.text import slugify
+    from myproject.text import slugify
 
     assert slugify("hello world") == "hello-world"
 ```

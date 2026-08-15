@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import Any
 
 from bluecore.hooks.hook_common import print_session_start_output
-from bluecore.lib.harness import detect_harness
 from bluecore.mem import logger as mem_logger
 from bluecore.mem.database import Database
 from bluecore.mem.handoff import build_handoff
@@ -899,7 +898,7 @@ def _record_session(db: Database, repo: Repo, payload: dict[str, Any]) -> None:
     session_uid = _session_uid(payload)
     if not session_uid:
         return
-    db.start_session(Session(session_uid=session_uid, repo_id=repo.id, harness=detect_harness()))
+    db.start_session(Session(session_uid=session_uid, repo_id=repo.id))
 
 
 def _build_context(settings: Settings, args: CommandArgs) -> str:
@@ -993,7 +992,6 @@ def _record_handoff(settings: Settings, payload: dict[str, Any]) -> None:
             Session(
                 session_uid=session_uid,
                 repo_id=repo.id,
-                harness=detect_harness(),
                 handoff=handoff,
                 started_at=now,
                 ended_at=now,

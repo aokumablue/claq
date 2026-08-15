@@ -65,7 +65,8 @@ def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch
     )
     assert code == 2
     assert "Modifying eslint.config.js is not allowed" in stderr
-    assert stdout == ""
+    deny = json.loads(stdout)
+    assert deny["permissionDecision"] == "deny"
 
 
 def test_config_protection_allows_model_json(monkeypatch: pytest.MonkeyPatch) -> None:
