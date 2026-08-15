@@ -12,6 +12,7 @@ import select
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,16 @@ MAX_STDIN_BYTES = 1024 * 1024
 # launcher がインプロセス実行になったことで、この guard は各フックが
 # 自分で stdin を読む read_raw_stdin* の先頭に置く（旧: launcher._read_stdin）。
 STDIN_FIRST_BYTE_TIMEOUT = 2.0
+
+# _read_stdin_bytes のチャンク読み取りループ全体に許す壁時計予算（秒）。
+# _stdin_ready の最初のバイト到着待ち（STDIN_FIRST_BYTE_TIMEOUT）とは別予算で、
+# _read_stdin_bytes が呼ばれた時点から計測する。hooks の stdin ペイロードは
+# Claude Code から渡される KB オーダーの JSON であり、5 秒は正常系では絶対に
+# 触れない余裕であって、正常系を制約する値ではない。
+STDIN_READ_DEADLINE_SECONDS = 5.0
+
+# 1 回の read 呼び出しで要求する最大バイト数（チャンクサイズ）。
+STDIN_CHUNK_BYTES = 65536
 
 
 def _stdin_ready() -> bool:
@@ -57,23 +68,69 @@ def _stdin_ready() -> bool:
 def _read_stdin_bytes(max_bytes: int) -> bytes:
     """stdin から最大 `max_bytes` 分をバイト列として読みます。
 
-    `.buffer` がある場合はバイト単位で読みます。無い場合（io.StringIO 等）は
-    文字数で読んだあと UTF-8 に再エンコードします。文字数 read ではバイト
-    上限を最大 4 倍超過しうるため、呼び出し側でバイト換算の切り詰めを行います。
+    `.buffer` がある場合は STDIN_CHUNK_BYTES 単位のチャンクをループで読み
+    継ぎます。各チャンクは `.read()` ではなく `.read1()` で読みます。
+    `.read(n)` は `n` バイト届くか EOF まで待ち続けるため、書き手が
+    チャンクサイズ未満のデータを送って途中で止まった場合、1 回の
+    `.read()` 呼び出し自体がデッドラインの外側で無期限ブロックしえます。
+    `.read1()` は下層の 1 回の raw read で得られた分だけを即座に返すため、
+    実際に読めたバイト数に関わらず必ずループへ制御が戻り、デッドライン
+    判定が機能します（`sys.stdin.buffer` は `io.BufferedReader` であり
+    `.read1()` を常に持ちます。`.read1()` を持たないオブジェクトは
+    `fileno()` も持たない/使えないことが多く、その場合は本関数に到達する
+    前に `_stdin_ready()` の `select.select` が例外化するため、`.buffer`
+    はあるが `.read1()` は無いという状態を想定したフォールバックは実際
+    には到達不能であり、意図的に持たせていません）。ループ全体には
+    `_read_stdin_bytes` 呼び出し開始時点
+    から STDIN_READ_DEADLINE_SECONDS 秒の壁時計予算があり、各チャンクの前に
+    `select` で次データの到着を待ちます。予算切れ・select 非 ready の
+    いずれでも、その時点まで集めた部分データを打ち切って返します（stderr
+    に警告）。低速/ハングした書き手が `max_bytes` に満たないデータしか
+    送らず接続も閉じない場合の無期限ブロックを防ぐためです。書き手が
+    正常にパイプを閉じた場合（EOF）は警告なしで打ち切ります。
+    `.buffer` が無い場合（io.StringIO 等）は文字数で読んだあと UTF-8 に
+    再エンコードします。文字数 read ではバイト上限を最大 4 倍超過しうる
+    ため、呼び出し側でバイト換算の切り詰めを行います。
 
     Args:
         max_bytes: 読み取る最大バイト数（buffer 無し時は最大文字数）です。
 
     Returns:
-        読み取ったバイト列を返します。
+        読み取ったバイト列を返します。デッドライン超過・select 非 ready・
+        EOF のいずれで打ち切られた場合も、その時点までの部分データを
+        返します。
 
     Raises:
         例外は発生しません。
     """
     stdin_buffer = getattr(sys.stdin, "buffer", None)
-    if stdin_buffer is not None:
-        return stdin_buffer.read(max_bytes)
-    return sys.stdin.read(max_bytes).encode("utf-8", errors="replace")
+    if stdin_buffer is None:
+        return sys.stdin.read(max_bytes).encode("utf-8", errors="replace")
+
+    collected = b""
+    deadline = time.monotonic() + STDIN_READ_DEADLINE_SECONDS
+    while len(collected) < max_bytes:
+        remaining_time = deadline - time.monotonic()
+        if remaining_time <= 0:
+            write_stderr(
+                "WARNING: stdin 読み取りが上限時間に達したため、"
+                "受信済みの部分データで打ち切ります（stdin の書き手が"
+                "応答しない可能性）\n"
+            )
+            break
+        ready, _, _ = select.select([sys.stdin], [], [], remaining_time)
+        if not ready:
+            write_stderr(
+                "WARNING: stdin の続きが届かないため、受信済みの部分データで"
+                "打ち切ります（stdin リダイレクト漏れの可能性）\n"
+            )
+            break
+        chunk_size = min(STDIN_CHUNK_BYTES, max_bytes - len(collected))
+        chunk = stdin_buffer.read1(chunk_size)
+        if chunk == b"":
+            break
+        collected += chunk
+    return collected
 
 
 def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:

@@ -392,7 +392,10 @@ def test_main_entrypoint_exits_0(monkeypatch: pytest.MonkeyPatch) -> None:
     """__main__ として実行したとき SystemExit(0) で終了する。"""
     from bluecore.hooks import hook_common
 
-    monkeypatch.setattr("sys.stdin.buffer.read", lambda n: b"")
+    # pytest がキャプチャする stdin（DontReadFromInput）は `.read1()` を
+    # 持たないため raising=False で新規属性として生やす。本番の
+    # `sys.stdin.buffer`（io.BufferedReader）は常に `.read1()` を持つ。
+    monkeypatch.setattr("sys.stdin.buffer.read1", lambda n: b"", raising=False)
     # pytest がキャプチャする stdin は実 fd を持たないため、
     # read_raw_stdin 内の select.select（_stdin_ready）を素通りさせる。
     monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: (r, [], []))

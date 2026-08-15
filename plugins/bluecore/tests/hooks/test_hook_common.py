@@ -132,7 +132,7 @@ class _FakeBuffer:
     def __init__(self, data: bytes) -> None:
         self._data = data
 
-    def read(self, n: int = -1) -> bytes:
+    def read1(self, n: int = -1) -> bytes:
         return self._data[:n] if n >= 0 else self._data
 
 
@@ -228,6 +228,256 @@ class TestReadRawStdin:
 
         assert hook_common.read_raw_stdin() == ""
         assert fake_stdin.read_called is False
+
+
+class _QueueBuffer:
+    """複数回の `.read1(n)` 呼び出しへ順番にバイト列を返すフェイク buffer。
+
+    `_FakeBuffer` と異なり、同じデータを毎回先頭から返すのではなく
+    キューを 1 件ずつ消費する。実 BufferedReader が複数回の read1 で
+    少しずつデータを返す（あるいは EOF で b"" を返す）挙動を模す。
+    キューが尽きたあとは常に b""（EOF）を返す。
+    """
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        """フェイク buffer を構築する。
+
+        Args:
+            chunks: `.read1(n)` 呼び出しごとに順に返すバイト列のリスト。
+
+        Returns:
+            なし
+
+        Raises:
+            例外は発生しません。
+        """
+        self._chunks = list(chunks)
+
+    def read1(self, n: int = -1) -> bytes:
+        """キューの先頭チャンクから最大 `n` バイトを返す。尽きていれば EOF（b""）。
+
+        `n` バイト未満のキューであれば先頭チャンクをそのまま返して消費する。
+        `n` バイト以上あれば先頭 `n` バイトだけを返し、残りは次回呼び出し用に
+        キューの先頭へ戻す（実 `read1()` が要求量を超えて返さない挙動を模す）。
+        呼び出し側の `min(STDIN_CHUNK_BYTES, max_bytes - len(collected))` の
+        境界計算が壊れていれば、要求量を超えたバイト列を返してしまい検知できる。
+
+        Args:
+            n: 呼び出し側が要求する最大バイト数。負値なら無制限。
+
+        Returns:
+            キューの次のバイト列（最大 `n` バイト）、または尽きていれば b"" を返す。
+
+        Raises:
+            例外は発生しません。
+        """
+        if not self._chunks:
+            return b""
+        chunk = self._chunks[0]
+        if n < 0 or n >= len(chunk):
+            self._chunks.pop(0)
+            return chunk
+        self._chunks[0] = chunk[n:]
+        return chunk[:n]
+
+
+class _QueueStdin:
+    """`.buffer` に `_QueueBuffer` を持つフェイク stdin。isatty は常に False。"""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        """フェイク stdin を構築する。
+
+        Args:
+            chunks: `.buffer.read1(n)` が順に返すバイト列のリスト。
+
+        Returns:
+            なし
+
+        Raises:
+            例外は発生しません。
+        """
+        self.buffer = _QueueBuffer(chunks)
+
+    def isatty(self) -> bool:
+        """常に非 TTY（パイプ接続）を表す False を返す。
+
+        Args:
+            なし
+
+        Returns:
+            False
+        """
+        return False
+
+
+class _CountingSelect:
+    """`select.select` の呼び出し回数を数えつつ常に ready を返す差し替え関数。"""
+
+    def __init__(self) -> None:
+        """呼び出し回数カウンタを 0 で初期化する。"""
+        self.call_count = 0
+
+    def __call__(self, rlist, wlist, xlist, timeout):  # noqa: ANN001
+        """呼び出し回数を記録し、常に rlist を ready として返す。
+
+        Args:
+            rlist: 監視対象の読み取り fd リスト。
+            wlist: 監視対象の書き込み fd リスト（未使用）。
+            xlist: 監視対象の例外 fd リスト（未使用）。
+            timeout: select のタイムアウト秒数（未使用）。
+
+        Returns:
+            (rlist, [], []) を返す（常に ready）。
+        """
+        self.call_count += 1
+        return rlist, [], []
+
+
+def _make_stateful_monotonic(values: list[float]):  # noqa: ANN201
+    """`time.monotonic` の差し替え関数を作る。
+
+    values を順に返し、尽きたあとは最後の値を返し続ける（無限ループでの
+    StopIteration/IndexError を避けるため）。
+
+    Args:
+        values: 呼び出し順に返す時刻値のリスト。
+
+    Returns:
+        呼び出すたびに次の時刻値を返す callable。
+
+    Raises:
+        例外は発生しません。
+    """
+    iterator = iter(values)
+    last = {"value": values[-1]}
+
+    def _monotonic() -> float:
+        value = next(iterator, None)
+        if value is None:
+            return last["value"]
+        last["value"] = value
+        return value
+
+    return _monotonic
+
+
+class TestReadStdinBytesChunkedDeadline:
+    """`_read_stdin_bytes` のチャンクループ・デッドライン挙動のテスト。
+
+    NG-B2 回帰防止: `.buffer.read(max_bytes)` 1 回きりの旧実装（および
+    `.read1()` を使わず `.read()` でチャンク読みするだけの中間実装）は、書き手が
+    `max_bytes` に満たないデータしか送らず接続も閉じない場合に無期限へ
+    ブロックしていた。新実装は STDIN_CHUNK_BYTES 単位のループと
+    STDIN_READ_DEADLINE_SECONDS の壁時計予算で打ち切る。
+    """
+
+    def test_multi_chunk_read_reassembles_full_bytes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """小さい STDIN_CHUNK_BYTES でも複数チャンクを結合して全データを返す。"""
+        monkeypatch.setattr(hook_common, "STDIN_CHUNK_BYTES", 4)
+        fake_stdin = _QueueStdin([b"abcd", b"efgh", b"ij"])
+        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
+        counting_select = _CountingSelect()
+        monkeypatch.setattr(hook_common.select, "select", counting_select)
+
+        result = hook_common._read_stdin_bytes(10)
+
+        assert result == b"abcdefghij"
+        assert counting_select.call_count > 1
+
+    def test_chunk_request_size_respects_max_bytes_boundary(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """各 read1 呼び出しの要求量は `min(STDIN_CHUNK_BYTES, max_bytes - len(collected))` を厳守する。
+
+        `_QueueBuffer` は要求された `n` を実際に守ってスライスするため、
+        呼び出し側が `min` の境界計算を誤る（例えば `max` と取り違える）と、
+        2 周目のチャンク読みが真の残り予算より多いバイト数を要求してしまう。
+        1 周目はキューの先頭チャンク（2 バイト）が要求量より短いため
+        `min`/`max` どちらでも同じ 2 バイトしか返らないが、2 周目に十分な
+        データ（8 バイト）が残っているため、`min` を使わないと
+        `max_bytes` を超えるバイト列を集めてしまう。この非対称な配置に
+        よって `min` と `max` の取り違えを判別可能にしている
+        （STDIN_CHUNK_BYTES=4・max_bytes=5・1 周目 "ab"・2 周目以降
+        "cdefghij" という配置で、`min` なら 2 周目要求量は
+        `min(4, 5-2)=3` だが `max` なら `max(4, 5-2)=4` になり
+        `max_bytes` を 1 バイト超過する）。
+        """
+        monkeypatch.setattr(hook_common, "STDIN_CHUNK_BYTES", 4)
+        fake_stdin = _QueueStdin([b"ab", b"cdefghij"])
+        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
+        _patch_select_ready(monkeypatch)
+
+        result = hook_common._read_stdin_bytes(5)
+
+        assert result == b"abcde"
+        assert len(result) <= 5
+
+    def test_single_chunk_fast_path_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """全データが 1 回のチャンク読みで収まる場合、旧実装と同じ結果を返す。"""
+        fake_stdin = _QueueStdin([b"hello"])
+        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
+        _patch_select_ready(monkeypatch)
+
+        result = hook_common._read_stdin_bytes(10)
+
+        assert result == b"hello"
+
+    def test_eof_before_max_bytes_returns_partial_data_without_warning(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """書き手が max_bytes 未満で接続を閉じた（EOF）場合、警告なしで部分データを返す。"""
+        fake_stdin = _QueueStdin([b"abc"])
+        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
+        _patch_select_ready(monkeypatch)
+
+        result = hook_common._read_stdin_bytes(10)
+
+        assert result == b"abc"
+        assert capsys.readouterr().err == ""
+
+    def test_deadline_exceeded_returns_partial_data_and_warns(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """壁時計予算を超えたら、部分データを返しつつ stderr に警告を出す（実時間待機なし）。"""
+        fake_stdin = _QueueStdin([b"abc"])
+        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
+        _patch_select_ready(monkeypatch)
+        # 呼び出し順: [0] deadline 算出, [1] 1 周目 remaining_time（正）,
+        # [2] 2 周目 remaining_time（deadline 超過）。
+        monkeypatch.setattr(
+            hook_common.time, "monotonic", _make_stateful_monotonic([0.0, 0.1, 100.0])
+        )
+
+        # time.monotonic 自体を差し替えているため、実経過時間の計測には
+        # 差し替えていない perf_counter を使う（monotonic を使うと自分の
+        # 呼び出しがフェイクのキューを消費してしまい測定が壊れる）。
+        started = time.perf_counter()
+        result = hook_common._read_stdin_bytes(10)
+        elapsed = time.perf_counter() - started
+
+        assert result == b"abc"
+        assert elapsed < 1.0
+        assert "上限時間に達した" in capsys.readouterr().err
+
+    def test_select_not_ready_mid_read_returns_partial_data_and_warns(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """1 バイト目以降の select が非 ready になったら部分データを返し警告を出す。"""
+        fake_stdin = _QueueStdin([b"abc"])
+        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
+        call_count = {"n": 0}
+
+        def flaky_select(rlist, wlist, xlist, timeout):  # noqa: ANN001
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return rlist, [], []
+            return [], [], []
+
+        monkeypatch.setattr(hook_common.select, "select", flaky_select)
+
+        result = hook_common._read_stdin_bytes(10)
+
+        assert result == b"abc"
+        assert "リダイレクト漏れ" in capsys.readouterr().err
+        assert call_count["n"] == 2
 
 
 class TestReadRawStdinWithTruncation:
