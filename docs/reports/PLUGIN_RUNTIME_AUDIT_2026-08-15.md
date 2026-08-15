@@ -21,6 +21,34 @@
 
 監査中に見つけた問題は修正していない。本ファイルだけを監査結果として追加した。
 
+## 訂正節（2026-08-16 追記）
+
+本監査の残存指摘（F-02〜F-18）への対応を進める過程で、監査結論のうち以下 3 点が
+事実誤認であることが判明したため訂正する。F-03〜F-10 の実害があった指摘自体は
+訂正対象ではなく、別途修正済み（本ファイル以外のコミット履歴を参照）。
+
+- **F-01「Claude Code で agent が runtime discovery されず `Agents (0)` になる」は誤り。**
+  本追記を行っているセッション（Claude Code）で `bluecore:` プレフィックスの agent が
+  16 件すべて discovery・利用可能であることを実測済み（`architect` / `bench-analyzer` /
+  `comparator` / `dead-code-cleaner` / `executor` / `explorer` / `grader` /
+  `harness-tuner` / `perf-optimizer` / `planner` / `refactor-orchestrator` /
+  `reviewer` / `security-auditor` / `session-observer` / `simplifier` /
+  `tdd-writer`）。`plugin.json` の `agents` 配列も 16 件を正しく列挙している。監査時に
+  観測された `Agents (0)` は `claude plugin details` コマンドの表示上の問題であり、
+  agent 委譲そのものが機能しないという実害ではなかった。
+- **F-19 の `name is the tool allowlist+ "rg"` という文字列は、リポジトリ内のプロンプト・
+  エージェント定義のいずれにも存在しない。** grep による全文検索で `allowlist` という
+  語自体が本リポジトリのソース・プロンプトに一切出現しないことを確認済み。この事象は
+  plugin 側のコードに起因するものではなく、実行環境（host）側の tool-call
+  serializer に起因する事象と判断し、plugin の特定ファイルへの帰属を取り下げる。
+- **「リポジトリに追跡済み pytest テストは存在しない」という監査の前提は誤り。** 監査は
+  `.venv` を有効化しないまま実行されており、その状態では `pytest` が `ModuleNotFoundError`
+  等で早期に終了しテストが 0 件と誤認された。`.venv` を有効化した状態では監査時点で
+  2380 件のテストが collect・実行可能であり（本追記時点では後続のリファクタで
+  モジュール削除が進み件数は変動している）、「テストなし」「回帰検証不能」という
+  レポート全体の結論の前提そのものが環境構築ミスによるものだった。今後の再監査では
+  必ず `.venv` を有効化した状態で実行すること。
+
 ## 主要な問題一覧
 
 | ID | 重大度 | 分類 | 概要 | 再現 |
