@@ -50,13 +50,13 @@ command: /refactor
 
 デッドコード削除。各ファイル適用ごとにテスト実行→失敗時は `git checkout -- <file>` で単ファイルリバートして継続。
 
-`--mode=clean` 指定時はステップ3を実行後、ステップ7 final gate（テスト/lint 再実行）で終了。
+`--mode=clean` 指定時はステップ3を実行後、ステップ5（perf）を飛ばしステップ6（review + secure）→ステップ7 final gate で終了。CRITICAL/HIGH ブロック判定は部分モードでも省略しない。
 
 ## ステップ4: simplify（並列, `refactor-orchestrator` → `bluecore:simplifier`）
 
 グループ化して**同時起動**。可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
 
-`--mode=simplify` 指定時はステップ4を実行後、ステップ7 final gate（テスト/lint 再実行）で終了。
+`--mode=simplify` 指定時はステップ4を実行後、ステップ5（perf）を飛ばしステップ6（review + secure）→ステップ7 final gate で終了。CRITICAL/HIGH ブロック判定は部分モードでも省略しない。
 
 ## ステップ5: perf（`refactor-orchestrator` → `bluecore:perf-optimizer`）
 
@@ -76,7 +76,7 @@ simplify 全グループ完了後に開始。不要計算・重複I/O・N+1・�
 3. 失敗変更はファイル単位リバートし再検証
 4. 全通過のみ完了
 
-`--mode=clean/simplify`（部分モード）時のステップ7はテスト/lint 再実行のみを指す。CRITICAL/HIGH ブロック判定（項目2、ステップ6 review 由来）は部分モードではステップ6をスキップし判定データが無いため適用外。
+`--mode=clean/simplify`（部分モード）時もステップ6（review + secure）は省略せず実行する（ステップ3/4/5 → ステップ7 の流れ全体モードとの違いは、飛ばすのがステップ5（perf）のみである点）。CRITICAL/HIGH ブロック判定（項目2）はステップ6の結果を用いて部分モードでも全体モードと同様に適用する。
 
 CRITICAL/HIGH blocker 検出時またはテスト/lint 失敗時は `loop-dev` skill を起動（入力: `task` = blocker 修正タスク（final gate の CRITICAL/HIGH 指摘一覧の解消） / `approved_plan` = blocker 一覧で plan 縮退 / `task_type` = `refactor-fix`）。loop-dev 停止時（2 反復で未収束）はファイル単位リバート方針に従い、未解消分を要約に記載。
 
