@@ -490,19 +490,30 @@ Claude Code（このリポジトリ自体、bluecore-dev）上で本報告書の
 | H-03 | `detect_harness()` が `CLAUDECODE` を最優先で見るため、ネストされた実行等で `GROK_*` と共存すると `"claude"` に誤判定 | 修正済み（コミット `7ffa184`）。codex→copilot→grokの非Claude系マーカー判定を先に評価し、いずれにも該当しない場合のみ `CLAUDECODE` を見るよう対称化。`CLAUDECODE` 単独時は必ず `"claude"` を返す不変条件をテストで固定（`launcher.py` の detach 分岐が `!= "claude"` をゲートに使うため、ここが崩れるとClaudeの `--bg` フックが誤ってdetachされる） |
 | H-04 | `_TOOL_NAME_MAP` と `hooks.json` の matcher に Grok固有ツール名（`search_replace`/`run_terminal_command`/`spawn_subagent`等）が無く、保護フックが発火しない | 修正済み（コミット `7ee29b0`）。5つの別名をマップに追加、matcher 6箇所（Bash系3・Edit/Write系2・Agent系1）に反映。**未検証の既知の不確実性**: matcher一致によりフック自体は発火するようになったが、`config_protection`/`quality_gate` の `extract_file_paths` は `tool_input.file_path` のみを見て、`block_no_verify`/`pre_bash_commit_quality` の `extract_bash_command` は `tool_input.command`/`cmd` のみを見る。Grokの `search_replace`/`run_terminal_command` が実際にこのキー名でペイロードを渡すかは実機未確認（報告書の実測はいずれも `Write`/`file_path` 形式のみで、Grok固有ツール名でのペイロード形式は記録されていない） |
 | A-01 | Grokに `bluecore:*` subagent typeが無く、`pre_agent_nudge` の対応表が使えない型を勧める | 修正済み（H-04と同一コミット）。`spawn_subagent`→Agent のマップ追加でこのフックがGrok上でも発火するようになったため、同時に `detect_harness()=="grok"` 分岐を追加し、`explore`(小文字)/`general-purpose`/`plan` の3型に対して `bluecore専門エージェント型は無い、agents/<name>.mdをReadしてプロンプトに貼れ` という文面に差し替えた。Claude/Copilot側の `AGENT_TABLE`/`EXPLORE_TABLE` 出力は無変更（固定回帰テストで保証） |
-| H-00 | Grokの `${CLAUDE_PLUGIN_ROOT}` 展開先とCLIインストール実体が異なり、symlink無しでは launcher が ENOENT → 全フック偽deny | 対応中。詳細は次節 |
-| L-01 | `observer.py` が `claude --model haiku` 固定でGrok専用環境ではpending知識が生まれない | 未着手 |
+| H-00 | Grokの `${CLAUDE_PLUGIN_ROOT}` 展開先とCLIインストール実体が異なり、symlink無しでは launcher が ENOENT → 全フック偽deny | 修正済み（コミット `d55b467`）。詳細は次節 |
+| L-01 | `observer.py` が `claude --model haiku` 固定でGrok専用環境ではpending知識が生まれない | **対応不要**。`shutil.which("claude") is None` での skip + ログ記録が `observer.py:615-616` に既に実装済みで、報告書のG-6提案（未導入なら解析しない）を既に満たしている。文言をGrok向けに書き換えるのは churn、SessionStartの `additionalContext` へのGrok専用メッセージ追加は新機能でありYAGNI（かつ非Grok環境でclaude CLIが無い全セッションでノイズになる） |
 
-### H-00 シンボリックリンク自動化の検討
+### H-00 シンボリックリンク自動化（実装済み・コミット `d55b467`）
 
-**結論: 実装する方向。ただし「symlink作成ロジックを新規に書く」のではなく、既存の `ensure_grok_plugin_root_symlink()`（`grok_plugin_root.py`、SessionStartで実行済み・テスト済み）が実行される前提を満たすことが本質。**
+**結論: 実装した。「symlink作成ロジックを新規に書く」のではなく、既存の `ensure_grok_plugin_root_symlink()`（`grok_plugin_root.py`、変更無し）が実行される前提を満たす方向で解決した。**
 
 鶏卵構造の再確認: Grokは hooks.json の command（`python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" ...`）をそのまま解釈し、`${CLAUDE_PLUGIN_ROOT}` を `~/.grok/plugins/bluecore` に展開する。CLIインストール実体は `~/.grok/installed-plugins/bluecore-<hash>/`。symlinkが無い初回、このパスに `launcher.py` が存在せず、Python自体が起動できず ENOENT → exit 2 → 全PreToolUseが偽deny。symlinkを作る `ensure_grok_plugin_root_symlink()` はSessionStartフック（`session_start.py`）から呼ばれるが、そのSessionStart自体も同じ壊れたパス経由でしか起動できないため、初回は永久に到達しない。
 
-したがって修正は「launcherが起動できる前に、hooks.jsonのcommand文字列自体でパスを解決する」以外に無い。実装方針:
-- hooks.json の13行のcommandを、シェルワンライナー（`$CLAUDE_PLUGIN_ROOT/src/bluecore/launcher.py` があればそれを`exec`、無ければ `~/.grok/installed-plugins/bluecore-*` のうち最新(mtime)を探して`exec`、どちらも無ければ `exit 0`）に置き換える
-- Claude Code環境では `$CLAUDE_PLUGIN_ROOT` が実体そのものなので1行目の分岐で確定し、挙動はバイト単位で不変
-- 一度 launcher に到達すれば、既存の `ensure_grok_plugin_root_symlink()` がSessionStartで symlink を張り、以降は `$CLAUDE_PLUGIN_ROOT/src/bluecore/launcher.py` が直接見つかるようになる（symlink経由）
-- 解決失敗は必ず `exit 0`（`exit 2` にすると今と同じ偽deny）
-- ブロック系フック（`block_no_verify`/`config_protection`等）は `exit 2` で deny する契約のため、シェルラッパーは launcher の終了コードをそのまま親プロセスに伝播させる必要がある（`exec` を使い、サブシェル経由で終了コードが握りつぶされないことを実装後に実測で確認する）
-- リンク先は `~/.grok/installed-plugins/bluecore-*` のみ。開発リポジトリ（bluecore-dev）は絶対にリンク先にしない（`grok_plugin_root.py` の既存方針を踏襲）
+**実装内容**: hooks.json 全13エントリの command を以下のシェルラッパーに書き換えた。
+```sh
+L="${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py"
+[ -f "$L" ] || L=$(ls -t "$HOME"/.grok/installed-plugins/bluecore-*/src/bluecore/launcher.py 2>/dev/null | head -n1)
+[ -n "$L" ] && [ -f "$L" ] || exit 0
+exec python3 "$L" <元の引数（--bg含む場合は位置を保持）>
+```
+- Claude Code環境では `$CLAUDE_PLUGIN_ROOT` が実体そのものなので1行目で確定し、挙動はバイト単位で不変（実測で確認）
+- 一度 launcher に到達すれば、既存の `ensure_grok_plugin_root_symlink()` がSessionStartで symlink を張り、以降は正規パスで直接見つかる
+- 解決失敗は必ず `exit 0`（手動実測・pytest両方で確認）
+- `exec` を使うことで `block_no_verify`/`config_protection` 等の `exit 2` ブロック契約を維持（ダミーlauncherに `sys.exit(2)` させ、ラッパー経由でも `exit=2` が伝播することを独立に2回実測して確認）
+- リンク先は `~/.grok/installed-plugins/bluecore-*` のみ。開発リポジトリ（bluecore-dev）は参照しない（`grok_plugin_root.py` の既存方針のまま）
+
+**付随修正**: `harness_audit_repo_checks.py` の `_hook_command_argv`（CI監査の `memory-hooks-lifecycle` チェックが使う）が `command_tokens[0] in {"python","python3"}` という旧形式前提の解析だったため、ラッパー化で静かに全滅することをpytest失敗で検出し、`exec python3 "$L"` マーカー基準の解析に修正した。テストファイル2点（`test_harness_audit_more.py`/`test_validate_hooks_additional.py`）のフィクスチャも同様に更新。
+
+**既知の未検証事項（残存）**:
+- テスト・手動検証はいずれも `sh` 経由。zshでは `bluecore-*` にマッチが無い場合グロブ展開失敗の `nomatch` 警告がstderrに出ることを確認したが、`exit 0` という結果自体には影響しない（ノイズのみ、実害なし）。ホストごとに実際に使われるシェルを網羅検証してはいない
+- Grok実機での最終確認（実際に `grok plugin install` → symlink無し → 初回セッションでフックが偽denyしないこと）は未実施。ローカルでの模擬実験（偽HOME・偽launcher）による検証に留まる
