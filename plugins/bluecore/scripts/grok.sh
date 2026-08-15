@@ -19,9 +19,9 @@
 # なる場合でも正しく動く（ダウンロードと同時実行が可能）。
 #
 # 使い方（ローカル実行）:
-#   sh ~/.grok/installed-plugins/bluecore-*/scripts/link_grok_plugin.sh
+#   sh ~/.grok/installed-plugins/bluecore-*/scripts/grok.sh
 # 実行ビットが立っていれば直接実行も可:
-#   ~/.grok/installed-plugins/bluecore-*/scripts/link_grok_plugin.sh
+#   ~/.grok/installed-plugins/bluecore-*/scripts/grok.sh
 # 配布スクリプトのダウンロードと同時実行も可（$0 に依存しないため成立する）:
 #   curl -fsSL <配布スクリプトのURL> | sh
 #   curl -fsSL <配布スクリプトのURL> | bash

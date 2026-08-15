@@ -1,4 +1,4 @@
-"""link_grok_plugin.sh のテスト。"""
+"""grok.sh のテスト。"""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ import subprocess
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_SCRIPT = _REPO_ROOT / "plugins" / "bluecore" / "scripts" / "link_grok_plugin.sh"
+_SCRIPT = _REPO_ROOT / "plugins" / "bluecore" / "scripts" / "grok.sh"
 
 
 def _run_script(home: Path) -> subprocess.CompletedProcess[str]:
-    """``sh link_grok_plugin.sh`` を偽 ``$HOME`` で実行する。"""
+    """``sh grok.sh`` を偽 ``$HOME`` で実行する。"""
     env = {**os.environ, "HOME": str(home)}
     env.pop("CLAUDE_PLUGIN_ROOT", None)
     return subprocess.run(
@@ -26,7 +26,7 @@ def _run_script(home: Path) -> subprocess.CompletedProcess[str]:
 def _make_installed_plugin(home: Path, name: str = "bluecore-abc123") -> Path:
     """``home/.grok/installed-plugins/<name>`` に実ソース一式付きツリーを作る。
 
-    link_grok_plugin.sh は ``src/bluecore/lib/grok_plugin_root.py`` の実在を
+    grok.sh は ``src/bluecore/lib/grok_plugin_root.py`` の実在を
     見て ``PYTHONPATH`` を組み立てるため、import 可能な実体が要る。
     リポジトリの実 src を symlink して賄う（重複コピーはしない）。
     """
