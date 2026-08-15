@@ -336,27 +336,6 @@ class TestEnsureDirRaceCondition:
         assert isinstance(result, Path)
 
 
-class TestGetGitRepoName:
-    """get_git_repo_name / get_project_name テスト。"""
-
-    def test_returns_none_when_not_git_repo(self, tmp_path: Path, monkeypatch):
-        """git リポジトリでない場合 None を返すこと。"""
-        from bluecore.lib.core_utils import get_git_repo_name
-
-        monkeypatch.chdir(tmp_path)
-        # git rev-parse 失敗 → None
-        with patch("bluecore.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
-            assert get_git_repo_name() is None
-
-    def test_project_name_falls_back_to_cwd_name(self, tmp_path: Path, monkeypatch):
-        """git リポジトリでない場合、カレントディレクトリ名を返すこと。"""
-        from bluecore.lib.core_utils import get_project_name
-
-        monkeypatch.chdir(tmp_path)
-        with patch("bluecore.lib.core_utils.run_command", return_value={"success": False, "output": ""}):
-            result = get_project_name()
-        assert result == tmp_path.name
-
 class TestFindFilesEdgeCases:
     """find_files の未カバーパステスト。"""
 

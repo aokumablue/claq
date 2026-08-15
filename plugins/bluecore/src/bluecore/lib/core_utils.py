@@ -112,23 +112,6 @@ def get_datetime_string() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def get_git_repo_name() -> str | None:
-    """git リポジトリ名を取得する。"""
-    result = run_command("git rev-parse --show-toplevel")
-    if not result["success"]:
-        return None
-    return Path(result["output"]).name
-
-
-def get_project_name() -> str | None:
-    """git リポジトリまたは現在ディレクトリからプロジェクト名を取得する。"""
-    repo_name = get_git_repo_name()
-    if repo_name:
-        return repo_name
-    cwd = Path.cwd()
-    return cwd.name if cwd.name else None
-
-
 def _mkdir_exist_ok(path: Path) -> None:
     """親ごとディレクトリを作る。他プロセスとの競合による FileExistsError は無視する。"""
     try:

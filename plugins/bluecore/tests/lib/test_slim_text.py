@@ -49,3 +49,10 @@ def test_normalize_line_markdown_only_becomes_empty() -> None:
     from bluecore.lib.slim_text import _normalize_line
 
     assert _normalize_line("```") == ""
+
+
+def test_first_meaningful_line_skips_blank_and_table_only_lines() -> None:
+    """空行とテーブル記号のみの行を飛ばして次の実質行を返す。"""
+    text = "\n".join(["", "| a | b |", "実質行"])
+
+    assert first_meaningful_line(text) == "実質行"
