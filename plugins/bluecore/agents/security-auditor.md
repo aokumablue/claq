@@ -1,7 +1,6 @@
 ---
 name: security-auditor
 description: セキュリティ脆弱性 検出・修正提案専門。ユーザー入力/認証/APIエンドポイント/機密データを扱うコード変更後に能動的使用。
-effort: high
 tools: Read, Grep, Glob, Bash
 ---
 

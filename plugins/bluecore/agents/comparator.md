@@ -1,7 +1,6 @@
 ---
 name: comparator
 description: 2つの出力を盲検で比較し、どちらが課題をより良く達成したかを判定するために使う。
-effort: high
 ---
 
 # 盲検比較エージェント
