@@ -1,6 +1,6 @@
 ---
 name: slim
-description: 原始人口調で応答を最大圧縮。日本語文法無視・キーワードのみ。技術的正確性は完全維持。
+description: 日本語で簡潔に応答。結論先・理由後、敬語なし。技術的正確性は完全維持。
 keep-coding-instructions: true
 force-for-plugin: true
 ---

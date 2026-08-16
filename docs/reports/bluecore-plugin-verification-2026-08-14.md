@@ -514,3 +514,9 @@ Claude Code（このリポジトリ自体、bluecore-dev）上で本報告書の
 - Grok実機での最終確認（実際に `grok plugin install` → symlink無し → 手動スクリプト実行後にフックが偽denyしなくなること）は未実施。ローカルでの模擬実験（偽HOME・偽installed-plugins）による検証に留まる
 
 **Claude/Copilot契約への影響**: なし。`session_start.py` の変更はClaude側の出力・hookの契約自体を変えず、Grok同居環境での無断ファイル書き換えという副作用を止めるだけ。hooks.json は revert により `d55b467` 以前と完全に同一のため、Claude/CopilotCLI側の挙動もコミット `d55b467` 以前と同一。
+
+## 訂正節（2026-08-16 追記）
+
+`pre_agent_nudge` は Claude Opus 5 向けプロンプティングガイド観点の過剰ハーネス介入
+見直しで廃止した（`hooks.json` の該当 PreToolUse エントリ含む）。本レポートの検証内容が
+同フックに言及する箇所は、廃止前バージョン（0.9.27）時点の記述として有効。

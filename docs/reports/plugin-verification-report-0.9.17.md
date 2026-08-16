@@ -592,3 +592,9 @@ bluecore プラグイン(0.9.17) の全 agents/commands/skills/hooks 起動検�
 ### 11.4 item11 決定: mem stats 対象ストアは両方
 
 `/dashboard` の既存パターン（個人データは SQLite に常時収集、PostgreSQL は `mem.sync.enabled` 設定時のみチームデータも収集）を踏襲し、`mem stats` も個人ストア（常時）・チーム PostgreSQL（設定時のみ）の両方を対象とする。実装は別タスクとする。
+
+## 訂正節（2026-08-16 追記）
+
+58 行目の `pre_agent_nudge`（Task general-purpose 起動時の対応表提示）は Claude Opus 5
+向けプロンプティングガイド観点の過剰ハーネス介入見直しで廃止した。本レポート検証時点
+（0.9.17）の動作記述として有効だが、現在のリポジトリには該当フック・テストは存在しない。

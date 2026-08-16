@@ -437,3 +437,11 @@ PYTHONPATH=src python3 -m pytest -q \
 3. 設定保護では、混在 payload のどちらかが保護対象なら deny する。品質 gate と agent nudge は二重処理を避けるため `tool_input` 優先を維持する。
 4. 既存の未知 agent type の無出力、hook の常時 exit 0、protected file の fail-closed、apply_patch の既存抽出仕様を維持する。コード、docstring、型注釈の `subagent_type` 専用表現も実装後の実契約に合わせる。
 5. GREEN 後に実際の Copilot CLI から、`Agent` の `agent_type`、設定ファイル編集、品質 gate の3操作を再実行し、単体テストだけでなく監査時の症状が解消したことを確認する。
+
+## 訂正節（2026-08-16 追記）
+
+本監査が検証対象とした `pre_agent_nudge`（DT-02 のエージェント種別判定、F-01/F-02 の
+`agent_type` 分岐を含む）は、Claude Opus 5 向けプロンプティングガイド
+（https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5）
+の観点による過剰ハーネス介入の見直しで廃止した。本監査時点（0.9.24）での動作記述は
+当時の事実として有効だが、現在のリポジトリには該当フック・テストは存在しない。

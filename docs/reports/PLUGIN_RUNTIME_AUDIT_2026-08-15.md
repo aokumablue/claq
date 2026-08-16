@@ -48,6 +48,14 @@
   モジュール削除が進み件数は変動している）、「テストなし」「回帰検証不能」という
   レポート全体の結論の前提そのものが環境構築ミスによるものだった。今後の再監査では
   必ず `.venv` を有効化した状態で実行すること。
+- **`pre_agent_nudge`（592 行目の表に記載）は 2026-08-16 のリファクタで廃止した。**
+  Claude Opus 5 向けプロンプティングガイド
+  （https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5）
+  の観点で、Explore/general-purpose 起動のたびに対応表を注入する本フックは
+  自己申告済みの効果薄（注入文自体に「該当しなければ Explore のままでよい」と
+  明記）であり、廃止した。本監査時点の記述（Claude/Copilot/Grok payload 分岐が
+  正常動作すること）はフックが存在した当時の事実として有効だが、現在のリポジトリには
+  該当フック・テストは存在しない。
 
 ## 主要な問題一覧
 
