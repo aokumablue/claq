@@ -1,7 +1,7 @@
 ---
 name: perf-optimizer
 description: パフォーマンス分析・最適化専門。ボトルネック特定・アルゴリズム/DB/メモリ/バンドル最適化。可読性のみの整理は simplifier 担当。性能懸念・ボトルネック調査時に能動的使用。
-effort: xhigh
+effort: high
 ---
 
 # パフォーマンス最適化
@@ -69,7 +69,7 @@ effort: xhigh
 
 ## 出力形式
 
-最適化結果を executor 準拠の構造で提示し、各変更に before→after の実測値を添える:
+最適化結果を次の構造で提示し、各変更に before→after の実測値を添える:
 
 ```
 ## 変更内容

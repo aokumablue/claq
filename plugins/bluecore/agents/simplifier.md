@@ -1,7 +1,7 @@
 ---
 name: simplifier
 description: 変更済みコード単純化・整理。機能保持しつつ明確性・一貫性・保守性向上。コード変更直後に自律発火。
-effort: xhigh
+effort: high
 ---
 
 # コード単純化
