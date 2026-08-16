@@ -308,7 +308,6 @@ class TestSimpleHookEntrypoints:
     [
         "block_no_verify",
         "config_protection",
-        "pre_agent_nudge",
     ],
 )
 def test_empty_input_passthrough(monkeypatch: pytest.MonkeyPatch, module_name: str) -> None:

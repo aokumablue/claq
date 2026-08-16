@@ -48,7 +48,7 @@ def _run_launcher(hook: str, payload: dict, tmp_home: Path) -> subprocess.Comple
     """リポジトリ内 launcher で hook モジュールを実行する。
 
     Args:
-        hook: dotted module name（例: bluecore.hooks.pre_agent_nudge）。
+        hook: dotted module name（例: bluecore.hooks.config_protection）。
         payload: stdin に渡す JSON オブジェクト。
         tmp_home: 一時 HOME。
 
@@ -66,21 +66,6 @@ def _run_launcher(hook: str, payload: dict, tmp_home: Path) -> subprocess.Comple
     )
 
 
-def _assert_agent_table(stdout: str) -> None:
-    """pre_agent_nudge の AGENT_TABLE 契約を検証する。
-
-    Args:
-        stdout: launcher の標準出力。
-    """
-    parsed = json.loads(stdout)
-    hook = parsed["hookSpecificOutput"]
-    assert hook["hookEventName"] == "PreToolUse"
-    ctx = hook["additionalContext"]
-    assert ctx
-    assert "bluecore:executor" in ctx
-    assert parsed.get("permissionDecision") != "deny"
-
-
 def _assert_denied_ruff(result: subprocess.CompletedProcess[str]) -> None:
     """config_protection が ruff.toml を deny JSON・exit 2 で返したことを検証する。"""
     assert result.returncode == 2
@@ -89,41 +74,8 @@ def _assert_denied_ruff(result: subprocess.CompletedProcess[str]) -> None:
     assert "ruff.toml" in parsed["permissionDecisionReason"]
 
 
-def test_launcher_pre_agent_nudge_accepts_subagent_type(tmp_path: Path) -> None:
-    """DT-06 #1: subagent_type=general-purpose で AGENT_TABLE。"""
-    result = _run_launcher(
-        "bluecore.hooks.pre_agent_nudge",
-        {"tool_name": "Agent", "tool_input": {"subagent_type": "general-purpose"}},
-        tmp_path,
-    )
-    assert result.returncode == 0
-    _assert_agent_table(result.stdout)
-
-
-def test_launcher_pre_agent_nudge_accepts_actual_copilot_agent_payload(tmp_path: Path) -> None:
-    """DT-06 #2: 実 Copilot の tool_input.agent_type で AGENT_TABLE。"""
-    result = _run_launcher(
-        "bluecore.hooks.pre_agent_nudge",
-        {"tool_name": "Agent", "tool_input": {"agent_type": "general-purpose"}},
-        tmp_path,
-    )
-    assert result.returncode == 0
-    _assert_agent_table(result.stdout)
-
-
-def test_launcher_pre_agent_nudge_accepts_native_camel_case(tmp_path: Path) -> None:
-    """DT-06 #3: native toolName/toolArgs.agent_type で AGENT_TABLE。"""
-    result = _run_launcher(
-        "bluecore.hooks.pre_agent_nudge",
-        {"toolName": "agent", "toolArgs": {"agent_type": "general-purpose"}},
-        tmp_path,
-    )
-    assert result.returncode == 0
-    _assert_agent_table(result.stdout)
-
-
 def test_launcher_config_protection_denies_snake_case_payload(tmp_path: Path) -> None:
-    """DT-06 #4: snake_case の ruff.toml 編集は deny JSON・exit 2。"""
+    """DT-06 #1: snake_case の ruff.toml 編集は deny JSON・exit 2。"""
     result = _run_launcher(
         "bluecore.hooks.config_protection",
         {"tool_name": "Edit", "tool_input": {"file_path": "ruff.toml"}},
@@ -133,7 +85,7 @@ def test_launcher_config_protection_denies_snake_case_payload(tmp_path: Path) ->
 
 
 def test_launcher_config_protection_denies_native_camel_case_payload(tmp_path: Path) -> None:
-    """DT-06 #5: native camelCase の ruff.toml 編集も同じ deny。"""
+    """DT-06 #2: native camelCase の ruff.toml 編集も同じ deny。"""
     result = _run_launcher(
         "bluecore.hooks.config_protection",
         {"toolName": "edit", "toolArgs": {"file_path": "ruff.toml"}},
@@ -143,7 +95,7 @@ def test_launcher_config_protection_denies_native_camel_case_payload(tmp_path: P
 
 
 def test_launcher_config_protection_allows_unprotected_native_file(tmp_path: Path) -> None:
-    """DT-06 #6: native camelCase の sample.py は deny なし。"""
+    """DT-06 #3: native camelCase の sample.py は deny なし。"""
     result = _run_launcher(
         "bluecore.hooks.config_protection",
         {"toolName": "edit", "toolArgs": {"file_path": "sample.py"}},
