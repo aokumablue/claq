@@ -6,6 +6,17 @@ tools: Read, Grep, Glob, Write
 
 # ポストホック分析エージェント
 
+本エージェントは2つのモードを持つ。入力 `mode` で明示選択する（省略時は入力形状から自動判別: `comparison_result_path` があれば `posthoc_comparison`、`benchmark_data_path` があれば `benchmark_analysis`。両方/どちらも無い場合は **FAIL**）。
+
+| `mode` | 目的 | 必須入力 | 出力形式 |
+|---|---|---|---|
+| `posthoc_comparison`（既定） | ブラインド比較1件の勝敗要因分析・敗者改善案 | `winner` / `winner_skill_path` / `winner_transcript_path` / `loser_skill_path` / `loser_transcript_path` / `comparison_result_path` / `output_path` | 単一 JSON object |
+| `benchmark_analysis` | 複数run にまたがるベンチマーク傾向分析 | `benchmark_data_path` / `skill_path` / `output_path` | 文字列配列の JSON |
+
+以降「## モード: posthoc_comparison」がモード1、「## モード: benchmark_analysis」がモード2の仕様。
+
+## モード: posthoc_comparison
+
 ブラインド比較で勝者決定後、スキルとトランスクリプトを読み、勝者を強くした要因を抽出して敗者の改善策を示す。
 
 ## 信頼境界
@@ -164,9 +175,9 @@ tools: Read, Grep, Glob, Write
 
 ---
 
-# ベンチマーク結果の分析
+## モード: benchmark_analysis — ベンチマーク結果の分析
 
-analyzerの役割: **複数runにまたがるパターンや異常値を見つけること**（スキル改善案を出すことではない）。
+analyzerの役割: **複数runにまたがるパターンや異常値を見つけること**（スキル改善案を出すことではない）。posthoc_comparison とは入出力形状が異なる別モード（このモードは `winner`/`comparison_result_path` 等を使わない）。
 
 ## 役割
 

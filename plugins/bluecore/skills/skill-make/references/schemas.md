@@ -307,7 +307,7 @@ blind comparatorの出力。`<grading-dir>/comparison-N.json` に置く。
       "content": {
         "correctness": 5,
         "completeness": 5,
-        "accuracy": 4
+        "validity": 4
       },
       "structure": {
         "organization": 4,
@@ -322,7 +322,7 @@ blind comparatorの出力。`<grading-dir>/comparison-N.json` に置く。
       "content": {
         "correctness": 3,
         "completeness": 2,
-        "accuracy": 3
+        "validity": 3
       },
       "structure": {
         "organization": 3,

@@ -32,10 +32,10 @@ A と B の種類・構造・内容を把握する（ディレクトリなら中
 
 タスクに合わせて、次の2軸のルーブリックを作る。
 
-**内容ルーブリック（1〜5）**
-- 正確性: 1=大きな誤りあり / 3=小さな誤りあり / 5=完全に正しい
-- 完全性: 1=重要要素が抜けている / 3=ほぼ揃っている / 5=必要要素がすべてある
-- 妥当性: 1=大きな不整合あり / 3=軽微な不整合あり / 5=全体として妥当
+**内容ルーブリック（1〜5、JSON キーは括弧内）**
+- 正確性 (`correctness`): 1=大きな誤りあり / 3=小さな誤りあり / 5=完全に正しい
+- 完全性 (`completeness`): 1=重要要素が抜けている / 3=ほぼ揃っている / 5=必要要素がすべてある
+- 妥当性 (`validity`): 1=大きな不整合あり / 3=軽微な不整合あり / 5=全体として妥当
 
 **構造ルーブリック（1〜5）**
 - 構成: 1=ばらばら / 3=そこそこ整理されている / 5=明快で論理的
@@ -56,11 +56,11 @@ A/Bそれぞれについて:
 
 ### 6. 勝者を決める
 
-次の順で比較:
+次の順で決定的に判定する:
 
-1. **主判定**: ルーブリックの総合スコア
-2. **副判定**: 期待値の通過率（ある場合）
-3. **タイブレーク**: 本当に同点ならTIE
+1. **主判定**: `rubric` の `overall_score`（総合スコア）を比較。A/B で差があればその時点で勝者確定
+2. **タイブレーク1**: 主判定が同点 かつ `expectations` がある場合、`expectation_results.{A,B}.pass_rate` を比較。差があればその時点で勝者確定
+3. **タイブレーク2**: 上記すべてが同点（`expectations` が無い場合を含む）なら `winner: "TIE"`
 
 基本的にはどちらかが少しでも良いはず→安易に引き分けにしない。
 
@@ -88,7 +88,7 @@ A/Bそれぞれについて:
       "content": {
         "correctness": 5,
         "completeness": 5,
-        "accuracy": 4
+        "validity": 4
       },
       "structure": {
         "organization": 4,
@@ -103,7 +103,7 @@ A/Bそれぞれについて:
       "content": {
         "correctness": 3,
         "completeness": 2,
-        "accuracy": 3
+        "validity": 3
       },
       "structure": {
         "organization": 3,
@@ -139,6 +139,18 @@ A/Bそれぞれについて:
         {"text": "Contains signature", "passed": false},
         {"text": "Readable text", "passed": true}
       ]
+    },
+    "B": {
+      "passed": 2,
+      "total": 5,
+      "pass_rate": 0.40,
+      "details": [
+        {"text": "Output includes name", "passed": true},
+        {"text": "Output includes date", "passed": false},
+        {"text": "Format is PDF", "passed": true},
+        {"text": "Contains signature", "passed": false},
+        {"text": "Readable text", "passed": false}
+      ]
     }
   }
 }
@@ -151,7 +163,7 @@ A/Bそれぞれについて:
 - **winner**: `A`/`B`/`TIE`
 - **reasoning**: 勝者を選んだ理由（または引き分けの理由）
 - **rubric**: 出力ごとのルーブリック評価
-  - **content**: 内容面の採点（正確性/完全性/妥当性）
+  - **content**: 内容面の採点（正確性=`correctness` / 完全性=`completeness` / 妥当性=`validity`）
   - **structure**: 構造面の採点（構成/形式/使いやすさ）
   - **content_score**: 内容面の平均（1〜5）
   - **structure_score**: 構造面の平均（1〜5）
