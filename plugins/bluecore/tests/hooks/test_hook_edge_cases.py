@@ -221,6 +221,80 @@ def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(
     assert "console.log" not in types  # nosec
 
 
+def test_find_file_issues_secret_scan_exception_is_reported_as_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """secret scanner が例外を投げても issue が消えず、error として報告される（F-06a 対応）。
+
+    以前は find_file_issues 全体を覆う `except Exception: pass` が例外を
+    握り潰しており、secret scanner の内部バグでも commit を許可していた
+    （false negative のコストが高い secret 検出が最も危険な形で fail-open
+    していた）。lint 側の結果は例外の影響を受けず生存することも確認する。
+    """
+    content = 'console.log("hi")'  # nosec
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
+    monkeypatch.setattr(
+        commit_quality_scanner,
+        "_scan_secret_issues",
+        mock.Mock(side_effect=RuntimeError("boom")),
+    )
+
+    issues = commit_quality_scanner.find_file_issues("src/app.js")
+
+    types = {issue["type"] for issue in issues}
+    assert "console.log" in types  # lint 側は secret scanner の例外の影響を受けない  # nosec
+    scan_errors = [issue for issue in issues if issue["type"] == "scan_error"]
+    assert len(scan_errors) == 1
+    assert scan_errors[0]["severity"] == "error"
+    assert "src/app.js" in scan_errors[0]["message"]
+    assert "RuntimeError" in scan_errors[0]["message"]
+
+
+def test_find_file_issues_lint_scan_exception_is_reported_as_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """lint scanner の例外は warning として報告し、secret 側は生存する。
+
+    lint と secret で severity を非対称にする（lint は false negative の
+    コストが secret ほど高くないため warning に留め、commit をブロックしない）。
+    """
+    content = "api" + "_key" + ' = "abc123"'  # nosec
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
+    monkeypatch.setattr(
+        commit_quality_scanner,
+        "_scan_lint_issues",
+        mock.Mock(side_effect=ValueError("boom")),
+    )
+
+    issues = commit_quality_scanner.find_file_issues("src/app.js")
+
+    types = {issue["type"] for issue in issues}
+    assert "secret" in types
+    scan_errors = [issue for issue in issues if issue["type"] == "scan_error"]
+    assert len(scan_errors) == 1
+    assert scan_errors[0]["severity"] == "warning"
+    assert "ValueError" in scan_errors[0]["message"]
+
+
+def test_find_file_issues_scan_target_detection_exception_is_reported_as_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """走査対象判定自体（_is_binary_content 等）が例外を投げても検査不能を報告する。"""
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: "content")
+    monkeypatch.setattr(
+        commit_quality_scanner,
+        "_is_binary_content",
+        mock.Mock(side_effect=OSError("boom")),
+    )
+
+    issues = commit_quality_scanner.find_file_issues("src/app.js")
+
+    assert len(issues) == 1
+    assert issues[0]["type"] == "scan_error"
+    assert issues[0]["severity"] == "error"
+    assert "OSError" in issues[0]["message"]
+
+
 def test_evaluate_scans_non_lint_extension_files_for_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     """evaluate() が lint 非対象拡張子（.env 等）もステージ済みファイルの走査対象に含めること。"""
     monkeypatch.setattr(
@@ -355,8 +429,20 @@ def test_get_staged_file_content_replaces_invalid_utf8_without_raising(
 
 
 def test_pre_bash_commit_quality_finds_parser_and_reading_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ファイル読み取り自体が例外を投げても、握り潰さず scan_error として報告する（F-06a 対応）。
+
+    get_staged_file_content は自前で例外を握り潰し None を返す契約だが、
+    find_file_issues 側でもその契約破りに備えたガードを持つ。以前は
+    ここも含めて find_file_issues 全体を覆う except Exception: pass が
+    無条件に [] を返しており、検査したのか・対象外だったのかが区別
+    できなかった。
+    """
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: (_ for _ in ()).throw(RuntimeError("boom")))
-    assert commit_quality_scanner.find_file_issues("src/app.js") == []
+    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    assert len(issues) == 1
+    assert issues[0]["type"] == "scan_error"
+    assert issues[0]["severity"] == "error"
+    assert "RuntimeError" in issues[0]["message"]
 
     long_message = "git commit -m \"bad message with no conventional format and a very long subject line that keeps going.\""
     parsed = pre_bash_commit_quality.validate_commit_message(long_message)

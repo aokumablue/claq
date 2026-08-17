@@ -18,6 +18,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from bluecore.lib.core_utils import log
+
 _BINARY_SNIFF_SIZE = 8192  # 8KB
 _SECRET_SCAN_MAX_BYTES = 1024 * 1024  # 1MB
 _LINTABLE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
@@ -318,6 +320,14 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
     （検出器自身のテストフィクスチャ等、意図的にパターンを含む行のため）。
     シークレット検出は `# nosec` の対象外です。
 
+    ファイル読み取り・走査対象判定・lint・secret の各段階はそれぞれ独立した
+    例外ガードを持ちます。いずれかで想定外の例外が起きた場合は検査不能を
+    示す `scan_error` issue を積んで呼び出し元へ返します（secret scanner
+    とファイル読み取りの失敗は error severity。false negative のコストが
+    lint より高いため、検査不能をブロック側へ倒します。lint scanner の
+    失敗は warning に留めます）。黙って issue が消える（＝検査したのに
+    問題なしと区別が付かない）ことはありません。
+
     Args:
         file_path: 調査対象のファイルパスです。
         repo_root: 指定すると作業ツリーから読みます（`git commit -a` の
@@ -336,26 +346,67 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
             if repo_root is not None
             else get_staged_file_content(file_path)
         )
-        if content is None:
-            return issues
+    except Exception as err:
+        # get_staged_file_content / get_worktree_file_content は自前で
+        # 例外を握り潰し読めなければ None を返す契約だが、その契約が
+        # 破られた場合でも find_file_issues 自体の「例外を発生させない」
+        # 契約を守るため、ここでもガードして scan_error を返す。
+        issues.append(_scan_error_issue(file_path, "ファイル読み取り", err, severity="error"))
+        return issues
+    if content is None:
+        return issues
 
+    try:
         is_binary = _is_binary_content(content)
         do_lint = should_lint_file(file_path) and not is_binary
         do_secrets = should_scan_secrets(file_path)
+    except Exception as err:
+        issues.append(_scan_error_issue(file_path, "scan target 判定", err, severity="error"))
+        return issues
 
-        if not do_lint and not do_secrets:
-            return issues
+    if not do_lint and not do_secrets:
+        return issues
 
-        # lint / secret 双方が対象の場合、content.split("\n") の重複計算を
-        # 避けるため一度だけ分割して共有する。
-        lines = content.split("\n")
-        if do_lint:
+    # lint / secret 双方が対象の場合、content.split("\n") の重複計算を
+    # 避けるため一度だけ分割して共有する。
+    lines = content.split("\n")
+    if do_lint:
+        try:
             issues.extend(_scan_lint_issues(lines))
-        if do_secrets:
+        except Exception as err:
+            issues.append(_scan_error_issue(file_path, "lint scan", err, severity="warning"))
+    if do_secrets:
+        try:
             issues.extend(_scan_secret_issues(content, lines))
-
-    except Exception:
-        # ファイルが読めない場合はスキップ
-        pass
+        except Exception as err:
+            issues.append(_scan_error_issue(file_path, "secret scan", err, severity="error"))
 
     return issues
+
+
+def _scan_error_issue(file_path: str, stage: str, err: Exception, *, severity: str) -> dict:
+    """scanner 内部例外を issue 化する。
+
+    例外メッセージ自体（ファイル内容の断片を含みうる）は出力に含めず、
+    型名だけを記録する（秘密情報の二次漏洩を避けるため）。
+
+    Args:
+        file_path: 対象ファイルのパス。
+        stage: 失敗した処理段階の説明（ログ用）。
+        err: 捕捉した例外。
+        severity: ``"error"``（ブロック対象）または ``"warning"``。
+
+    Returns:
+        issue 辞書。
+
+    Raises:
+        例外は発生しません。
+    """
+    error_type = type(err).__name__
+    log(f"[Hook] scan_error: {file_path} の{stage}に失敗しました（{error_type}）")
+    return {
+        "type": "scan_error",
+        "message": f"{file_path}: {stage}に失敗したため検査できませんでした（{error_type}）",
+        "line": 0,
+        "severity": severity,
+    }
