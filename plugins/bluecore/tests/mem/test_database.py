@@ -138,15 +138,20 @@ class TestConnection:
         finally:
             os.umask(old_umask)
 
-    def test_existing_db_permission_untouched(self, tmp_path: Path) -> None:
-        """既存 DB を開き直してもパーミッションを触らない。"""
+    def test_existing_db_permission_is_corrected(self, tmp_path: Path) -> None:
+        """既存 DB が 0600 以外なら開き直すたびに 0600 へ補正する（F-08）。
+
+        以前は新規作成時にしか chmod せず、既存 DB は 0644 のまま
+        放置していた。他ユーザーが読めるファイルを残さないよう、
+        接続のたびに mode を検証・補正する。
+        """
         db_path = tmp_path / "mem.db"
         with Database(db_path):
             pass
         db_path.chmod(0o644)
         with Database(db_path):
             pass
-        assert stat.S_IMODE(db_path.stat().st_mode) == 0o644
+        assert stat.S_IMODE(db_path.stat().st_mode) == 0o600
 
     def test_context_manager_closes_connection(self, tmp_path: Path) -> None:
         """with を抜けると接続が閉じている。"""

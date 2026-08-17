@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
 from pathlib import Path
 from types import TracebackType
 
@@ -20,16 +22,32 @@ class Database:
     def __init__(self, db_path: str | Path) -> None:
         """DB へ接続し、スキーマ初期化と最適化 PRAGMA を適用する。
 
-        DB ファイルを新規作成した場合のみパーミッションを 0600 に絞る。
+        新規作成時は ``os.open`` の O_CREAT|O_EXCL で最初から 0600 で
+        作る（sqlite3.connect に作らせて後から chmod すると、作成直後
+        から chmod までの間だけ他ユーザーに読めるファイルが存在する
+        窓ができるため）。既存 DB（他ツールが作った・過去バージョンが
+        作った等で 0600 以外の mode を持つ場合を含む）も、接続のたびに
+        mode を検証して補正する（F-08 対応。以前は新規作成時にしか
+        補正しておらず、既存の 0644 DB は開き直しても放置されていた）。
+
+        WAL/SHM sidecar は本メソッドの時点ではまだ存在しない（SQLite が
+        WAL モードで最初の書き込み時に遅延作成するため、ここで chmod
+        しても no-op）。親ディレクトリは ``ensure_private_dir`` が
+        無条件に 0700 へ揃えるため、sidecar が 0644 でも他ユーザーから
+        到達できない。
 
         Args:
             db_path: mem.db のパス。親ディレクトリが無ければ作成する。
         """
         path = Path(db_path)
         ensure_private_dir(path.parent)
-        existed = path.exists()
+        try:
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL, 0o600)
+            os.close(fd)
+        except FileExistsError:
+            pass
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
-        if not existed:
+        if stat.S_IMODE(path.stat().st_mode) != 0o600:
             path.chmod(0o600)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
