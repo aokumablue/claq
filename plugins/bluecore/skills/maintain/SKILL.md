@@ -104,4 +104,4 @@ bluecore_mem_learn --key <slug> --kind pitfall --scope repo --domain harness \
 - `--scope=<path>`: 対象上書き（既定 `plugins/bluecore/{commands,skills,agents,hooks}`）
 - `--commits=<n>`: 入力収集のコミット数（既定 200）
 - `--no-web`: web トレンド調査を無効化
-- `--dry-run`: ステップ1-2のみ（audit + レビュー報告）で編集しない（ステップ7の `mem learn` も行わない）
+- `--dry-run`: ステップ1-2のみ（audit + レビュー報告）で編集しない（ステップ7の `bluecore_mem_learn` も行わない）

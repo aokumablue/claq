@@ -85,6 +85,6 @@ ComponentName: 入力型 → 出力型
 ## 永続メモリ
 
 `<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
-search: `mem search` — クエリ例 `architecture design ADR decision` / `pattern {pattern_name} implementation`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+search: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提）— クエリ例 `architecture design ADR decision` / `pattern {pattern_name} implementation`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
 record: **自分では書かない**。学びの候補は呼び出し元へ報告し、記録は呼び出し元コマンドの「学びの記録」ステップに任せる（本エージェントの成果は final gate でリバートされうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: アーキテクチャパターン / ADR履歴 / トレードオフ分析

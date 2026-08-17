@@ -11,7 +11,7 @@ command: /instinct
 `knowledge` テーブルに蓄積された **知識カード** の棚卸しを扱う。
 知識モデル・kind の使い分け・記録基準は `../skills/learn/SKILL.md` が正。
 
-中心となるワークフローは **昇格**: `mem learn --status pending` や observer が入れた候補は
+中心となるワークフローは **昇格**: `bluecore_run bluecore.mem.cli learn --status pending` で入れた候補は
 `status='pending'` のままで SessionStart に注入されない。人間がここでレビューして
 `promote` した知識だけが `status='active'` になり、以後の全セッションへ注入される。
 
@@ -22,7 +22,7 @@ command: /instinct
 ## 永続メモリ
 
 - 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
-- 参照: `mem search`（クエリ例 `{棚卸し対象の domain}` / `{key}`）→ 本文が要る key だけ `mem show <key>`
+- 参照: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提。クエリ例 `{棚卸し対象の domain}` / `{key}`）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
 - 記録: 本コマンド自身の実行結果は記録しない（棚卸しはセッション限りの作業でありノイズになる）。記録基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## ステップ1: サブコマンド確定

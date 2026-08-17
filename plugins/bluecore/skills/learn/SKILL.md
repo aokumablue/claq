@@ -22,11 +22,11 @@ user-invocable: false
 | `scope` | `repo`（このリポジトリ限定）/ `global`（どのリポジトリでも成り立つ） |
 | `kind` | `convention` / `decision` / `pitfall` / `howto` / `fact` / `preference` |
 | `title` | 1 行要約。**`list` / `search` / 注入で見えるのはここだけ** |
-| `body` | 本文。`mem show <key>` でしか読めない |
+| `body` | 本文。`bluecore_run bluecore.mem.cli show <key>` でしか読めない |
 | `domain` | 分類語（`testing` / `build` / `sqlite` など） |
 | `confidence` | 0.0〜1.0。確からしさ |
 | `status` | `active`（注入対象）/ `pending`（人間の昇格待ち）/ `archived` |
-| `source` | `agent`（エージェントが `mem learn`）/ `observer`（自動抽出）/ `human` |
+| `source` | `agent`（エージェントが `bluecore_run bluecore.mem.cli learn`）/ `observer`（自動抽出）/ `human` |
 
 ## kind の使い分け
 
@@ -56,9 +56,9 @@ user-invocable: false
 - 作業ログ — 何をしたかの記録。学びではないので `handoff`（SessionEnd で自動）に任せる
 - 一般的なプログラミング知識 — モデルが既に知っていること
 - 未検証の推測 — 確かめていない仮説。確かめてから記録する
-- 既存カードと同じ内容 — `mem search` で先に確認し、あるなら同じ `key` で更新する
+- 既存カードと同じ内容 — `bluecore_run bluecore.mem.cli search "..."` で先に確認し、あるなら同じ `key` で更新する
 
-**迷ったら `scope: repo`** — global を汚染するより、後で `mem promote` できる repo 側に置くほうが安全。
+**迷ったら `scope: repo`** — global を汚染するより、後で `bluecore_run bluecore.mem.cli promote <key>` できる repo 側に置くほうが安全。
 
 ## スコープ判定
 
@@ -90,8 +90,8 @@ bluecore_run bluecore.mem.cli show pytest-needs-pipefail   # body を読む唯�
 
 ## 陳腐化した知識の扱い
 
-削除ではなく `mem forget <key>` で `archived` にする。
-置き換えた場合は `mem forget <old-key> --superseded-by <new-key>` で置換関係を残す。
+削除ではなく `bluecore_run bluecore.mem.cli forget <key>` で `archived` にする。
+置き換えた場合は `bluecore_run bluecore.mem.cli forget <old-key> --superseded-by <new-key>` で置換関係を残す。
 
 ## 入力安全
 
@@ -102,6 +102,6 @@ bluecore_run bluecore.mem.cli show pytest-needs-pipefail   # body を読む唯�
 
 `<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` のみ）。
 
-search: `knowledge {domain}` / `{key}` — 返るのは title 1 行だけ。本文が要る key だけ `mem show <key>`
+search: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提）— クエリ例 `knowledge {domain}` / `{key}`。返るのは title 1 行だけ。本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
 record: 上記「記録する / しない」に従い、再利用可能な学びだけ `bluecore_mem_learn` で登録する
 参照: 既存カードとの重複 / スコープ判定 / 陳腐化した知識の archive

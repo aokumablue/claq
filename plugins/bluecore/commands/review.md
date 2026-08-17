@@ -15,7 +15,7 @@ command: /review
 ## 永続メモリ
 
 - 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
-- 参照: `mem search`（クエリ例 `review violation security` / `{変更ファイル名}`）→ 本文が要る key だけ `mem show <key>`。既存カードと同じ違反が再発していれば警告レベルを1段階上げ「繰り返し違反」とマーク
+- 参照: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提。クエリ例 `review violation security` / `{変更ファイル名}`）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`。既存カードと同じ違反が再発していれば警告レベルを1段階上げ「繰り返し違反」とマーク
 - 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## skill 起動メカニズム
@@ -84,7 +84,7 @@ command: /review
 
 | 見つけたもの | kind | title に書くこと |
 |---|---|---|
-| 同種の指摘が 2 回目以降（`mem search` で既存カードを確認） | `convention` | 明文化されていなかった守るべきルール |
+| 同種の指摘が 2 回目以降（`bluecore_run bluecore.mem.cli search "..."` で既存カードを確認） | `convention` | 明文化されていなかった守るべきルール |
 | レビューで見つけた、他所にも潜んでいそうな危険パターン | `pitfall` | 「X の書き方は Y の理由で危険」という回避条件 |
 | 「これは意図的にこうしている」と判明した既存設計 | `decision` | 選択と理由（次のレビューで誤指摘しないため） |
 
