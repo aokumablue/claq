@@ -73,7 +73,7 @@ Improveモードでのバージョン推移を記録。ワークスペースの�
 
 ## grading.json
 
-graderエージェントの出力。`<run-dir>/grading.json` に置く。
+graderエージェントの出力。入力 `grading_path`（例: `<run-dir>/grading.json`）へ保存する。
 
 ```json
 {
@@ -90,10 +90,10 @@ graderエージェントの出力。`<run-dir>/grading.json` に置く。
     }
   ],
   "summary": {
-    "passed": 2,
+    "passed": 1,
     "failed": 1,
-    "total": 3,
-    "pass_rate": 0.67
+    "total": 2,
+    "pass_rate": 0.5
   },
   "execution_metrics": {
     "tool_calls": {

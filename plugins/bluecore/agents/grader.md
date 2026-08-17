@@ -15,6 +15,8 @@ tools: Read, Grep, Glob, Write
 - **expectations**: 判定する期待値のリスト（文字列）
 - **transcript_path**: 実行トランスクリプト（Markdown）のパス
 - **outputs_dir**: 実行で生成された出力ファイルのディレクトリ
+- **grading_path**: 判定結果 JSON の保存先パス。`{outputs_dir}/../grading.json` のような暗黙の親ディレクトリ参照を grader 自身が組み立てない — 呼び出し元が明示的に渡す
+- **grader_duration_seconds**（任意）: grader の所要時間。grader 自身は時計を持たないため呼び出し元 wrapper が計測して渡す（未提供なら `timing.grader_duration_seconds` は省略）
 
 ## 手順
 
@@ -75,7 +77,7 @@ grading後に、eval改善の余地が明確なら指摘。
 
 ### 8. grading結果を書く
 
-結果を `{outputs_dir}/../grading.json` に保存（出力形式の `execution_metrics` / `timing` を含む完全な JSON）。
+結果を入力 `grading_path` に保存（出力形式の `execution_metrics` / `timing` を含む完全な JSON）。
 
 ## 判定基準
 
@@ -112,10 +114,10 @@ grading後に、eval改善の余地が明確なら指摘。
     }
   ],
   "summary": {
-    "passed": 2,
+    "passed": 1,
     "failed": 1,
-    "total": 3,
-    "pass_rate": 0.67
+    "total": 2,
+    "pass_rate": 0.5
   },
   "execution_metrics": {
     "tool_calls": {
@@ -174,14 +176,14 @@ grading後に、eval改善の余地が明確なら指摘。
   - **text**: 元の期待値テキスト
   - **passed**: trueなら通過
   - **evidence**: 判定の根拠になる引用
-- **summary**: 集計情報（passed/failed/total/pass_rate）
+- **summary**: 集計情報（passed/failed/total/pass_rate）。契約: `total == len(expectations)`・`passed + failed == total`・`pass_rate = round(passed / total, 2)`（`total == 0` は入力契約違反として扱い grader は起動しない）
 - **execution_metrics**: executorの `metrics.json` からコピーした情報
   - **output_chars**: 出力ファイルの総文字数（トークンの代理ではなく、ベンチマークの tokens には使わない）
   - **transcript_chars**: トランスクリプトの文字数
-- **timing**: grader が記録する executor/grader 所要時間集計
-  - **executor_duration_seconds**: executorサブエージェントの実行時間
-  - **grader_duration_seconds**: graderの実行時間
-  - **total_duration_seconds**: 両者を含む経過時間（合計以上）
+- **timing**: executor/grader 所要時間集計。grader は自身の時計を持たないため、いずれも**呼び出し元 wrapper が計測して入力として渡した値をそのまま転記する**（grader の自己申告値ではない）
+  - **executor_duration_seconds**: executorサブエージェントの実行時間（呼び出し元提供）
+  - **grader_duration_seconds**: graderの実行時間（入力 `grader_duration_seconds` をそのまま転記。未提供ならフィールド省略）
+  - **total_duration_seconds**: 両者を含む経過時間（合計以上、呼び出し元提供）
 - **claims**: 抽出して検証した主張
   - **claim**: 検証対象の文
   - **type**: `factual` / `process` / `quality`
