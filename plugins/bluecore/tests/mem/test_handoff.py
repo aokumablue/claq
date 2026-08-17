@@ -93,6 +93,44 @@ class TestTranscriptSummary:
         """トランスクリプトが存在しなければ空文字列。"""
         assert build_handoff({"transcript_path": str(tmp_path / "missing.jsonl")}) == ""
 
+    def test_symlink_transcript_is_rejected(self, tmp_path: Path) -> None:
+        """symlink 経由のトランスクリプトは読まない（F-08a 対応）。
+
+        is_file() は symlink を辿ってしまうため、symlink → 任意の
+        readable file を指させることで transcript_path の性質検証を
+        すり抜けられてはならない。
+        """
+        target = _write_transcript(tmp_path, [_user("狙われたファイル")])
+        link = tmp_path / "transcript_link.jsonl"
+        link.symlink_to(target)
+
+        assert build_handoff({"transcript_path": str(link)}) == ""
+
+    def test_transcript_stat_failure_is_treated_as_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """is_file() 通過後に stat() が失敗した場合も空文字列（race 耐性）。"""
+        path = _write_transcript(tmp_path, [_user("消えたファイル")])
+        original_stat = Path.stat
+
+        def _flaky_stat(self: Path, *args: object, **kwargs: object) -> object:
+            if str(self) == path:
+                raise OSError("vanished")
+            return original_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", _flaky_stat)
+
+        assert build_handoff({"transcript_path": path}) == ""
+
+    def test_transcript_owned_by_another_user_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """所有者が実行ユーザーと異なるトランスクリプトは読まない（F-08a 対応）。"""
+        path = _write_transcript(tmp_path, [_user("他ユーザーの依頼")])
+        monkeypatch.setattr(handoff_mod.os, "getuid", lambda: -1)
+
+        assert build_handoff({"transcript_path": path}) == ""
+
     def test_keeps_only_the_last_three_user_messages(self, tmp_path: Path) -> None:
         """ユーザー依頼は直近 3 件だけ載せる。"""
         entries = [_user(f"依頼{index}") for index in range(5)]

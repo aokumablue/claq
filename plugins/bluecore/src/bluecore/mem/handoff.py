@@ -17,6 +17,7 @@ DB に読み出されないデータを溜めない。
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -98,14 +99,29 @@ def _truncate(text: str) -> str:
 def _summarize_transcript(transcript_path: str) -> str:
     """トランスクリプトを走査して引き継ぎ要約を組み立てる。
 
+    ``transcript_path`` は SessionEnd payload の host 供給値であり、
+    Claude Code は ``~/.claude/projects/...``、Copilot CLI は
+    ``~/.copilot/...`` と host ごとに置き場所が異なる。allowed-root で
+    封じ込めるとどちらかの host で壊れるため、host 非依存の性質検査
+    （symlink 拒否・通常ファイル・所有者一致）で防御する（F-08a 対応）。
+
     Args:
         transcript_path: フックが渡した JSONL トランスクリプトのパス。
 
     Returns:
-        要約の散文。パスが読めない・材料が無い場合は空文字列。
+        要約の散文。パスが読めない・シンボリックリンク・所有者不一致・
+        材料が無い場合は空文字列。
     """
     path = Path(transcript_path)
+    if path.is_symlink():
+        return ""
     if not path.is_file():
+        return ""
+    try:
+        owner_uid = path.stat().st_uid
+    except OSError:
+        return ""
+    if owner_uid != os.getuid():
         return ""
     messages, files, tools = _scan(_read_tail(path), time.monotonic() + TRANSCRIPT_TIMEOUT_SEC)
     return _compose(messages, files, tools)
