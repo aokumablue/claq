@@ -38,6 +38,7 @@ user-invocable: false
 
 ## 手順
 
+0. **worktree clean 前提チェック** — 手順1で確定する `git checkout -- {file}` は index/HEAD からの復元のため、**処理開始前から存在した未コミット編集も区別なく破棄する**。対象ファイルについて `git status --porcelain -- {scope_files}` を実行し、非空（未コミット変更あり）なら `git diff -- {scope_files}` を rollback 対象外の場所へ baseline patch として保存してから手順1へ進む。保存できない場合（書き込み不可・diff 取得失敗等）は該当ファイルを revert 対象にせず Skip Rules（`required_action=manual_review`）へ回す（fail-safe）。clean な対象ファイルはそのまま手順1へ進む
 1. 変更対象列挙→各ファイルの tracked/untracked を `git ls-files` で判定してから復旧コマンドを確定（tracked=`git checkout -- {file}` / untracked（新規作成）=`rm {file}`）。`git ls-files` 不一致だけで untracked 確定しない — 対象パスを canonicalize し、リポジトリルート配下の相対パスで `..` を含まないことを検証する。満たさないパス（`..`・絶対パス・リポジトリ外）は SAFE/CAUTION 判定せず `rm` を生成せず、Skip Rules（`required_action=manual_review`）へ回す（fail-safe）
 2. 高リスク境界を `CAUTION` タグ付け
 3. ファイルごとに検証コマンドを紐付け
@@ -66,11 +67,12 @@ Skip Rules:
 ## ルール
 
 - 復旧単位は**ファイル単位**（循環依存グループのみ一括）
+- `git checkout -- {file}` を確定する前に対象が worktree clean であることを確認する（手順0）。処理開始前から存在した未コミット編集を巻き込んで破棄しない
 - 復旧コマンドは tracked=`git checkout -- {file}` / untracked（新規作成）=`rm {file}`。`git ls-files` で判定してから確定。untracked と判定しても、canonicalize してリポジトリルート配下の相対パス（`..` 非含有）でなければ `rm` を生成せず Skip Rules（`required_action=manual_review`）に回す（範囲外パスの不可逆削除を防ぐ）
 - 不確実な変更は `Skip Rules` に `required_action={manual_review|extra_test|keep}` で記録。循環依存で一括 revert が必要なグループも `Skip Rules` に記録するが、これは確定的な復旧対象のため `required_action=bulk_revert` で区別する
 - 機能変更禁止（WHAT不変）
 
 ## 永続メモリ
 
-search: `mem search` — クエリ例 `refactor rollback blueprint {file_path}` / `revert failure pattern`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+search: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提）— クエリ例 `refactor rollback blueprint {file_path}` / `revert failure pattern`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
 record: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

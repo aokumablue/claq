@@ -39,6 +39,7 @@ command: /refactor
 - `CAUTION` ファイルは自動適用せず最終要約に記録
 - `Skip Rules` は `{file, reason, required_action}` で出力し処理対象から除外
 - `deps_order` はトポロジカル順で解決し、復旧時は逆順で適用
+- ステップ3以降で使う `git checkout -- <file>` は index/HEAD 復元のため処理開始前の未コミット編集も区別なく破棄する。この前提チェック（`git status --porcelain` によるworktree clean 確認・非cleanなら baseline patch 退避）は `refactor-rollback` 手順0で行うため、本ステップの `refactor-rollback` 起動は省略しない
 
 ## ステップ2: baseline
 
