@@ -519,6 +519,30 @@ class TestReadRawStdinWithTruncation:
         assert truncated is False
 
 
+class TestParseJsonObject:
+    """parse_json_object の直接テスト。
+
+    block_no_verify / config_protection は F-01/F-02 対応で raw が空の
+    場合に parse_json_object を呼ばず早期 return するようになったため、
+    空・空白のみ入力を渡す経路をここで直接固定する。
+    """
+
+    def test_empty_string_returns_none(self) -> None:
+        assert hook_common.parse_json_object("") is None
+
+    def test_whitespace_only_returns_none(self) -> None:
+        assert hook_common.parse_json_object("   \n\t  ") is None
+
+    def test_invalid_json_returns_none(self) -> None:
+        assert hook_common.parse_json_object("{not-json") is None
+
+    def test_valid_json_object_is_parsed(self) -> None:
+        assert hook_common.parse_json_object('{"a": 1}') == {"a": 1}
+
+    def test_valid_json_non_object_returns_none(self) -> None:
+        assert hook_common.parse_json_object("[1, 2, 3]") is None
+
+
 class TestDetachProcess:
     """detach_process の一時ファイル経由 stdin 引き渡し・エラー処理のテスト。
 

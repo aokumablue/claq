@@ -337,14 +337,25 @@ def test_config_protection_remaining_dt03_rows(
         assert reasons == []
 
 
-def test_config_protection_allows_invalid_or_empty_json(
+def test_config_protection_allows_empty_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """不正 JSON / 空入力は保護判定せず allow する。"""
+    """空入力（tty・stdin 未接続等）は保護判定せず allow する。"""
     reasons = _spy_block(monkeypatch)
-    assert _run_protection(monkeypatch, "{not-json") == 0
     assert _run_protection(monkeypatch, "") == 0
     assert reasons == []
+
+
+def test_config_protection_blocks_unparseable_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """matcher が書込み系ツールに限定するため、非空だが不正な JSON は
+    保護対象ファイルかどうか判定できず fail-closed で block する（F-02）。
+    """
+    reasons = _spy_block(monkeypatch)
+    assert _run_protection(monkeypatch, "{not-json") == 2
+    assert len(reasons) == 1
+    assert "Could not parse hook input" in reasons[0]
 
 
 def test_config_protection_truncation_fail_closed_via_spy(

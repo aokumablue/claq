@@ -189,6 +189,14 @@ def _truncation_blocked_message(max_bytes: int) -> str:
     )
 
 
+_UNPARSEABLE_INPUT_MESSAGE = (
+    "BLOCKED: Could not parse hook input for pre:config-protection. "
+    "This hook only runs for write-tool calls (Edit/Write/MultiEdit), so a "
+    "non-empty payload that fails to parse as JSON cannot be verified as "
+    "safe. Refusing rather than allowing an unverifiable write through."
+)
+
+
 def main() -> int:
     """設定ファイルの編集を検知してブロックする。
 
@@ -207,8 +215,19 @@ def main() -> int:
         # 切り捨てられたペイロードで保護判定をすり抜けさせない（fail-closed）。
         return emit_block_output(_truncation_blocked_message(MAX_STDIN_BYTES))
 
+    if not raw:
+        # matcher が書込み系ツールに限定しているため、空入力は tty・stdin
+        # 未接続など呼び出し自体が想定外の経路。ここは従来通り非ブロッキング。
+        return 0
+
     data = parse_json_object(raw)
-    reason = _block_reason(data) if data else None
+    if data is None:
+        # matcher により書込み系ツール呼び出しであることは確定している。
+        # 非空 stdin が JSON として読めない場合、保護対象ファイルかどうかを
+        # 判定できないため fail-closed にする（F-02 対応）。
+        return emit_block_output(_UNPARSEABLE_INPUT_MESSAGE)
+
+    reason = _block_reason(data)
     if reason:
         return emit_block_output(reason)
     return 0

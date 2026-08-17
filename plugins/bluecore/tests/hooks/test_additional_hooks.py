@@ -151,7 +151,7 @@ class TestBlockNoVerify:
         blocked: bool,
     ) -> None:
         payload = json.dumps({"tool_input": {"command": command}})
-        monkeypatch.setattr(block_no_verify, "read_raw_stdin", lambda: payload)
+        monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False))
 
         assert block_no_verify.main() == expected_code
         captured = capsys.readouterr()
@@ -247,15 +247,78 @@ class TestBlockNoVerify:
         assert bool(completed.stdout) is (expected_code != 0)
         assert bool(completed.stderr) is (expected_code != 0)
 
+    def test_oversized_payload_is_fail_closed_end_to_end(self) -> None:
+        """1 MiB を超える実 stdin ペイロードは launcher 経由でも deny する（監査の再現手順そのもの）。"""
+        payload = json.dumps(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "git commit --no-verify"},
+                "filler": "x" * (1024 * 1024 + 100),
+            }
+        )
+        src_root = Path(block_no_verify.__file__).resolve().parents[2]
+        completed = subprocess.run(
+            [sys.executable, "-m", "bluecore.hooks.block_no_verify"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            check=False,
+            env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(src_root), "CLAUDECODE": "1"},
+        )
+
+        assert completed.returncode == 2
+        assert "BLOCKED" in completed.stderr
+
     def test_blocked_emits_deny_json_alongside_exit_2(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """ブロック時は host に関わらず stdout の deny JSON + exit 2 を同時に出す。"""
         payload = json.dumps({"tool_input": {"command": "git commit --no-verify"}})
-        monkeypatch.setattr(block_no_verify, "read_raw_stdin", lambda: payload)
+        monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False))
         assert block_no_verify.main() == 2
         deny = json.loads(capsys.readouterr().out)
         assert deny["permissionDecision"] == "deny"
+
+    def test_truncated_input_is_fail_closed(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """1 MiB 超で切り捨てられた入力は判定不能として deny する（F-01 回帰）。
+
+        切り捨て後の JSON は不完全になりうるため、切り捨てフラグそのものを
+        deny の根拠にする（切り捨て後の中身がたまたま parse できても信用しない）。
+        """
+        monkeypatch.setattr(
+            block_no_verify, "read_raw_stdin_with_truncation", lambda: ("{not-even-json", True)
+        )
+
+        assert block_no_verify.main() == 2
+        err = capsys.readouterr().err
+        assert "BLOCKED" in err
+        assert "exceeded" in err
+
+    def test_unparseable_json_is_fail_closed(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """非空だが JSON として読めない入力は判定不能として deny する（F-01 回帰）。"""
+        monkeypatch.setattr(
+            block_no_verify, "read_raw_stdin_with_truncation", lambda: ("{not-json", False)
+        )
+
+        assert block_no_verify.main() == 2
+        assert "could not parse hook input" in capsys.readouterr().err
+
+    def test_missing_tool_input_is_fail_closed(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """JSON は妥当だが tool_input 系キーが無い場合も deny する（F-01 回帰）。"""
+        monkeypatch.setattr(
+            block_no_verify,
+            "read_raw_stdin_with_truncation",
+            lambda: (json.dumps({"unrelated": "payload"}), False),
+        )
+
+        assert block_no_verify.main() == 2
+        assert "no recognizable tool_input" in capsys.readouterr().err
 
 
 class TestPreCompact:
@@ -296,8 +359,8 @@ class TestPreCompact:
 class TestSimpleHookEntrypoints:
     def test_block_no_verify_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "bluecore.hooks.hook_common.read_raw_stdin",
-            lambda: json.dumps({"tool_input": {"command": "git status"}}),
+            "bluecore.hooks.hook_common.read_raw_stdin_with_truncation",
+            lambda: (json.dumps({"tool_input": {"command": "git status"}}), False),
         )
 
         assert _run_entrypoint("bluecore.hooks.block_no_verify") == 0

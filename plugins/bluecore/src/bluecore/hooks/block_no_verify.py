@@ -62,8 +62,13 @@ from __future__ import annotations
 import shlex
 from typing import NamedTuple
 
-from bluecore.hooks.hook_common import emit_block_output, parse_json_object, read_raw_stdin
-from bluecore.lib.harness import extract_bash_command
+from bluecore.hooks.hook_common import (
+    MAX_STDIN_BYTES,
+    emit_block_output,
+    parse_json_object,
+    read_raw_stdin_with_truncation,
+)
+from bluecore.lib.harness import extract_bash_command, extract_tool_input
 
 # コマンド全体をセグメントに割るシェル区切りトークン。
 _SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
@@ -360,8 +365,32 @@ def has_bypass_flag(command: str) -> bool:
     return False
 
 
+_TRUNCATED_INPUT_MESSAGE = (
+    f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for pre:block-no-verify. "
+    "Refusing to evaluate a possibly-truncated bash command for hook bypass flags. "
+    "Retry with a smaller command."
+)
+
+_UNPARSEABLE_INPUT_MESSAGE = (
+    "[Hook] BLOCKED: could not parse hook input for pre:block-no-verify. "
+    "A non-empty payload that fails to parse as JSON cannot be checked for "
+    "git hook bypass flags. Refusing rather than allowing an unverifiable "
+    "command through."
+)
+
+_MISSING_FIELDS_MESSAGE = (
+    "[Hook] BLOCKED: hook input for pre:block-no-verify has no recognizable "
+    "tool_input (tool_input|toolArgs|tool_args). Cannot verify the bash "
+    "command is free of git hook bypass flags."
+)
+
+
 def main() -> int:
     """git コマンドでフックバイパスフラグの使用をブロックする。
+
+    入力が壊れている（切り捨て・不正 JSON・必須フィールド欠落）場合は
+    判定不能として fail-closed でブロックする。空入力（tty・stdin 未接続）
+    だけは従来通り非ブロッキングで許可する（F-01 対応）。
 
     Args:
         引数はありません（標準入力から読み取る）。
@@ -372,13 +401,23 @@ def main() -> int:
     Raises:
         例外は発生しません。
     """
-    raw = read_raw_stdin()
-    data = parse_json_object(raw)
+    raw, truncated = read_raw_stdin_with_truncation()
+    if truncated:
+        return emit_block_output(_TRUNCATED_INPUT_MESSAGE)
 
-    if data:
-        command = extract_bash_command(data)
-        if has_bypass_flag(command):
-            return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
+    if not raw:
+        return 0
+
+    data = parse_json_object(raw)
+    if data is None:
+        return emit_block_output(_UNPARSEABLE_INPUT_MESSAGE)
+
+    if extract_tool_input(data) is None:
+        return emit_block_output(_MISSING_FIELDS_MESSAGE)
+
+    command = extract_bash_command(data)
+    if has_bypass_flag(command):
+        return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
 
     return 0
 
