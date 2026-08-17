@@ -39,7 +39,7 @@ bluecore は、Claude Code の作業を「最初の計画からレビューま�
 |---|---|---|---|
 | **Command** | ユーザーが明示的に呼ぶ | `/<name> [args]` | `/plan`, `/review`, `/feat-dev` |
 | **Agent** | 内部から委譲される専門家 | コマンド / skill から `Task` ツール経由で `subagent_type` 指定起動 | `reviewer`, `architect`, `tdd-writer` |
-| **Skill** | 条件発火 or 委譲先の知識モジュール | description マッチで Claude Code が自動起動 / fork コンテキストで委譲 | `grillme`, `tdd`, `skill-make` |
+| **Skill** | 条件発火 or 委譲先の知識モジュール | description マッチで Claude Code が自動起動 / fork コンテキストで委譲 | `grillme`, `learn`, `skill-make` |
 | **Knowledge** | 蓄積された知識カード（罠・規約・手順・事実） | SessionStart で `<bluecore-memory>` として自動注入（`status='active'` のみ） | `/instinct` で棚卸し・昇格 |
 | **Hook** | ツール実行時に自動発火するスクリプト | `hooks.json` 登録 → Claude Code が呼ぶ | PreToolUse, SessionStart, SessionEnd |
 
@@ -125,7 +125,7 @@ flowchart LR
   subgraph featdev["⚙️ feat-dev 内部（7ステップ）"]
     direction TB
     SG1["grillme"]:::skill -.-> AE
-    AE["🔍 explorer × 3<br/>並列探索"]:::agent --> SG2["grillme<br/>質問確定"]:::skill
+    AE["🔍 Explore<br/>既存構造探索（大規模時のみ並列）"]:::agent --> SG2["grillme<br/>質問確定"]:::skill
     SG2 --> AA["🏗️ architect<br/>決定モード"]:::agent
     AA & APO["⚡ perf-optimizer"]:::agent --> AT["🧪 tdd-writer<br/>RED→GREEN"]:::agent
     AT --> AR["✅ reviewer"]:::agent
@@ -169,7 +169,7 @@ flowchart LR
     SG["grillme"]:::skill --> REPRO["再現テスト確立"]
     REPRO --> ROOT["原因分析"]
     ROOT --> FIX["最小修正"]
-    FIX --> ST["tdd"]:::skill
+    FIX --> ST["loop-dev"]:::skill
     ST --> AT["🧪 tdd-writer"]:::agent
     AT --> AR["✅ reviewer"]:::agent
     AT --> ASEC["🛡️ security-auditor"]:::agent
@@ -367,40 +367,44 @@ flowchart LR
 
 ---
 
-### WF-8: 学習サイクル（自動バックグラウンド）
+### WF-8: 知識蓄積サイクル
+
+各コマンド末尾の「学びの記録」ステップ（`/review` `/refactor` `/bugfix` `maintain` 等）で
+agent/skill が明示的に `bluecore_mem_learn` を呼ぶことで知識カードが増える。自動バックグラウンド観測（旧
+session-observer）は廃止済み — 定期実行や無操作での自動蓄積はない。
 
 ```mermaid
 flowchart TD
   classDef cmd    fill:#2563eb,stroke:#1e40af,color:#fff,rx:6
-  classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
   classDef auto   fill:#ea580c,stroke:#c2410c,color:#fff,rx:4
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
   classDef store  fill:#374151,stroke:#1f2937,color:#fff,rx:4
 
   SS(["🌅 SessionStart"]) --> MC(["📥 mem context<br/>bluecore-memory 注入"]):::auto
 
-  subgraph session["💻 セッション中"]
+  subgraph session["💻 セッション中（各コマンド最終ステップで明示実行）"]
     direction LR
     SAD["adr<br/>アーキ決定記録"]:::skill
-    CW["学びの記録<br/>bluecore_mem_learn"]:::cmd
-    AO["👁️ session-observer<br/>5分毎観測"]:::agent
+    CW["学びの記録<br/>bluecore_mem_learn（既定 status=active）"]:::cmd
+    CA["/instinct learn --status pending<br/>人間が手動登録（任意）"]:::cmd
   end
 
   CW --> KA[("knowledge<br/>status=active")]:::store
   KA --> MC
 
   SE(["🌙 SessionEnd"]) --> SLE["mem handoff<br/>引き継ぎ記録"]:::auto
-  AO --> PK[("knowledge<br/>status=pending")]:::store
+  CA --> PK[("knowledge<br/>status=pending")]:::store
   PK --> CI["/instinct promote<br/>昇格レビュー"]:::cmd
+  CI --> KA
 ```
 
-**トリガー**: 自動（ユーザー操作不要）
-**期待効果**: セッション中の知識が知識カードとして蓄積。observer が入れた候補は `status='pending'` で注入されないため、ユーザーは `/instinct` で昇格レビューだけ実行
+**トリガー**: 各コマンドの「学びの記録」ステップ（agent/skill が明示的に判断・実行。ユーザー操作は不要だがコマンド実行が前提）
+**期待効果**: 再利用可能な学び（罠・規約・決定）が知識カードとして蓄積し次セッション以降へ自動注入。`--status pending` で手動登録した候補だけ `/instinct` で昇格レビューが要る
 
-**実行例**: ユーザー操作不要。週次で `/instinct list --status pending` → 採用分だけ `/instinct promote <key>` を実行する程度
+**実行例**: 通常操作不要（各コマンドが完了時に自動判断）。手動登録した pending 分だけ週次で `/instinct list --status pending` → 採用分を `/instinct promote <key>`
 
 **難度**: ★☆☆☆☆ (自動)
-**想定所要時間**: バックグラウンド常時
+**想定所要時間**: 各コマンド実行時に数秒（記録が該当する場合のみ）
 
 ---
 
@@ -514,7 +518,7 @@ flowchart TB
 
   subgraph internal["⚙️ Internal Layer"]
     direction LR
-    AGT["Agents (16)<br/>reviewer / architect / tdd-writer ..."]:::agent
+    AGT["Agents (13)<br/>reviewer / architect / tdd-writer ..."]:::agent
     SKL["Skills (13, all fork)<br/>grillme / learn / secure ..."]:::skill
   end
 

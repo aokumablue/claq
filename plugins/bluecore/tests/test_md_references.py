@@ -49,6 +49,41 @@ def test_dead_code_cleaner_and_harness_tuner_have_missing_input_fail_contract() 
     assert "自己収集" not in tuner
 
 
+def test_readme_command_table_matches_filesystem() -> None:
+    """README の Commands 表リンクが `commands/*.md` の実体と過不足なく一致すること。
+
+    リンク切れだけでなく、ファイルは存在するのに表から抜けている（在庫ドリフト）も検出する。
+    """
+    readme = (_ROOT.parent.parent / "README.md").read_text(encoding="utf-8")
+    linked = set(re.findall(r"\]\(plugins/bluecore/commands/([a-z-]+\.md)\)", readme))
+    actual = {p.name for p in (_ROOT / "commands").glob("*.md")}
+    assert linked == actual, f"README Commands 表と実体の差分: リンクのみ={linked - actual} 実体のみ={actual - linked}"
+
+
+def test_readme_agent_skill_command_counts_match_filesystem() -> None:
+    """README 内 `Agents (N)` / `Skills (N` / `Commands (N)` の件数表記が実体と一致すること。
+
+    README.md v0.9.30 時点では `Agents (16)`（実 13）のような在庫ドリフトが
+    起きていた。表記が複数箇所にあってもすべて実数と一致することを確認する。
+    """
+    readme = (_ROOT.parent.parent / "README.md").read_text(encoding="utf-8")
+    counts = {
+        "agents": len(list((_ROOT / "agents").glob("*.md"))),
+        "skills": len([p for p in (_ROOT / "skills").iterdir() if p.is_dir()]),
+        "commands": len(list((_ROOT / "commands").glob("*.md"))),
+    }
+
+    for label, pattern, key in (
+        ("Agents", r"Agents \((\d+)\)", "agents"),
+        ("Skills", r"Skills \((\d+)", "skills"),
+        ("Commands", r"Commands \((\d+)\)", "commands"),
+    ):
+        matches = re.findall(pattern, readme)
+        assert matches, f"README に `{label} (N)` 表記が見つからない"
+        for n in matches:
+            assert int(n) == counts[key], f"README の {label} 件数表記 {n} が実体 {counts[key]} と不一致"
+
+
 def test_security_auditor_has_no_bash_access() -> None:
     """security-auditor は tools frontmatter で Bash を持たない（F-05 対応）。
 
