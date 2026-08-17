@@ -37,14 +37,22 @@ def test_option_value_without_following_token_returns_none() -> None:
     assert harness_audit._option_value(["--root"], 0, "--root") == (None, 2)
 
 
-def test_parse_args_root_flag_without_value_uses_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """`--root` に値が続かないときは cwd を root にする。"""
+def test_parse_args_root_flag_without_value_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`--root` に値が続かない場合は cwd へ黙って落とさずエラーにする（N-04 対応）。
+
+    以前は空値で cwd にフォールバックしており、意図しない root を
+    監査していることに気付けなかった。
+    """
     monkeypatch.chdir(tmp_path)
 
-    parsed = harness_audit.parse_args(["--root"])
+    with pytest.raises(ValueError, match="--root requires a non-empty path value"):
+        harness_audit.parse_args(["--root"])
 
-    assert parsed["root"] == tmp_path.resolve()
-    assert parsed["format"] == "text"
+
+def test_parse_args_root_flag_with_empty_value_raises() -> None:
+    """`--root=`（空文字値）も同様にエラーにする。"""
+    with pytest.raises(ValueError, match="--root requires a non-empty path value"):
+        harness_audit.parse_args(["--root="])
 
 
 def test_detect_target_mode_recognizes_repo_markers(tmp_path: Path) -> None:
@@ -64,6 +72,41 @@ def test_detect_target_mode_requires_python_harness_marker(tmp_path: Path) -> No
     # Python マーカーがあれば repo と判定される
     _write_repo_markers(tmp_path, include_harness=True)
     assert harness_audit.detect_target_mode(tmp_path) == "repo"
+
+
+def test_parse_args_target_kind_accepts_repo_and_consumer() -> None:
+    assert harness_audit.parse_args(["--target-kind", "repo"])["target_kind"] == "repo"
+    assert harness_audit.parse_args(["--target-kind=consumer"])["target_kind"] == "consumer"
+
+
+def test_parse_args_target_kind_rejects_unknown_value() -> None:
+    with pytest.raises(ValueError, match="Invalid target-kind"):
+        harness_audit.parse_args(["--target-kind", "provider"])
+
+
+def test_parse_args_target_kind_defaults_to_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert harness_audit.parse_args([])["target_kind"] is None
+
+
+def test_build_report_target_kind_matching_auto_detection_succeeds(tmp_path: Path) -> None:
+    """明示 target_kind が自動判定と一致すれば通常どおり動作する。"""
+    _write_repo_markers(tmp_path)
+    (tmp_path / "commands").mkdir()
+
+    report = harness_audit.build_report("repo", root_dir=tmp_path, target_mode="repo")
+
+    assert report["target_mode"] == "repo"
+
+
+def test_build_report_target_kind_mismatch_raises(tmp_path: Path) -> None:
+    """明示 target_kind が自動判定と食い違えば FAIL する（F-04 対応）。
+
+    consumer 判定になる root（provider の agents/skills が無い）を
+    誤って --target-kind repo で監査しようとした場合の再現。
+    """
+    with pytest.raises(ValueError, match="does not match the auto-detected mode"):
+        harness_audit.build_report("repo", root_dir=tmp_path, target_mode="repo")
 
 
 def test_build_report_defaults_to_repo_mode_with_repo_markers(tmp_path: Path) -> None:

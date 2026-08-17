@@ -48,6 +48,7 @@ CATEGORIES = [
 
 VALID_SCOPES = {"repo", "hooks", "skills", "commands", "agents"}
 VALID_FORMATS = {"text", "json"}
+VALID_TARGET_KINDS = {"repo", "consumer"}
 
 
 def normalize_scope(scope: str | None) -> str:
@@ -111,7 +112,20 @@ def _apply_arg(parsed: dict[str, Any], args: list[str], index: int) -> int:
 
     if arg == "--root" or arg.startswith("--root="):
         value, next_index = _option_value(args, index, "--root")
-        parsed["root"] = Path(value or os.getcwd()).resolve()
+        if not value:
+            # 値なしで cwd へ黙って落とすと、意図しない root で監査して
+            # いることに気付けない（N-04）。--root を指定した以上は
+            # 明示的な値を要求する。
+            raise ValueError("--root requires a non-empty path value")
+        parsed["root"] = Path(value).resolve()
+        return next_index
+
+    if arg == "--target-kind" or arg.startswith("--target-kind="):
+        value, next_index = _option_value(args, index, "--target-kind")
+        normalized = (value or "").lower()
+        if normalized not in VALID_TARGET_KINDS:
+            raise ValueError(f"Invalid target-kind: {value}. Use repo or consumer.")
+        parsed["target_kind"] = normalized
         return next_index
 
     if arg.startswith("-"):
@@ -129,6 +143,7 @@ def parse_args(argv: Sequence[str] | None = None) -> dict[str, Any]:
         "format": "text",
         "help": False,
         "root": Path(os.getcwd()).resolve(),
+        "target_kind": None,
     }
 
     index = 0
@@ -460,9 +475,34 @@ def summarize_category_scores(checks: list[dict[str, Any]]) -> dict[str, dict[st
 
 
 def build_report(scope: str, root_dir: str | Path | None = None, target_mode: str | None = None) -> dict[str, Any]:
-    """監査レポートを組み立てる。"""
+    """監査レポートを組み立てる。
+
+    `target_mode` を明示した場合、自動判定（`detect_target_mode`）と
+    不一致なら ValueError を送出する（F-04 対応）。`--root` を指定せず
+    誤った作業ルートを監査していた場合、明示指定と自動判定の食い違いで
+    気付けるようにするため、黙って明示値を信用しない。
+
+    Args:
+        scope: 監査スコープ。
+        root_dir: 監査対象のルート。None なら cwd。
+        target_mode: ``"repo"`` / ``"consumer"`` を明示する場合に指定する。
+            None なら自動判定に任せる。
+
+    Returns:
+        監査レポートの辞書。
+
+    Raises:
+        ValueError: 明示した target_mode が自動判定と食い違う場合。
+    """
     resolved_root = Path(root_dir or os.getcwd()).resolve()
-    resolved_mode = target_mode or detect_target_mode(resolved_root)
+    detected_mode = detect_target_mode(resolved_root)
+    if target_mode is not None and target_mode != detected_mode:
+        raise ValueError(
+            f"--target-kind {target_mode} does not match the auto-detected mode "
+            f"({detected_mode}) for root {resolved_root}. Pass the correct root, "
+            "or omit --target-kind to use auto-detection."
+        )
+    resolved_mode = target_mode or detected_mode
     hosting_service = detect_git_hosting_service(resolved_root)
     checks_source = (
         get_repo_checks(resolved_root)
@@ -540,10 +580,13 @@ def show_help(exit_code: int = 0) -> None:
     print(
         """
 Usage: python3 "${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py" bluecore.ci.harness_audit [scope] [--scope <repo|hooks|skills|commands|agents>] [--format <text|json>]
-       [--root <path>]
+       [--root <path>] [--target-kind <repo|consumer>]
 
 Deterministic harness audit based on explicit file/rule checks.
 Audits the current working directory by default and auto-detects repo vs consumer-project mode.
+--target-kind asserts the expected mode; the audit fails if it disagrees with auto-detection
+(catches auditing the wrong root, e.g. a plugin provider repo without --root pointing at the
+provider directory).
 """
     )
     raise SystemExit(exit_code)
@@ -557,7 +600,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args["help"]:
             show_help(0)
 
-        report = build_report(args["scope"], root_dir=args["root"])
+        report = build_report(args["scope"], root_dir=args["root"], target_mode=args["target_kind"])
 
         if args["format"] == "json":
             print(json.dumps(report, indent=2, ensure_ascii=False))
