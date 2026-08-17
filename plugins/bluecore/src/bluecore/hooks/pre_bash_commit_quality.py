@@ -511,7 +511,6 @@ def _finalize_result(
             )
             return {"output": raw_input, "exitCode": 2, "reason": reason}
         log("\n[Hook] WARNING: Warnings found. Consider fixing them, but commit is allowed.")
-        log("[Hook] To bypass these checks, use: git commit --no-verify")
     else:
         log("\n[Hook] PASS: All checks passed!")
 
