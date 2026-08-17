@@ -35,7 +35,10 @@ def _run_cli(
     monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "argv", ["python", *argv])
-    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(stdin_payload or {})))
+    # _read_stdin_json は hook_common.read_raw_stdin() 経由（tty 判定・
+    # select による deadline を内包）。その機構自体は test_hook_common.py が
+    # 検証済みのため、ここでは境界を直接差し替えて stdin 内容だけを渡す。
+    monkeypatch.setattr(cli, "read_raw_stdin", lambda: json.dumps(stdin_payload or {}))
 
     stdout = io.StringIO()
     stderr = io.StringIO()
@@ -174,39 +177,45 @@ class TestArgvAndStdin:
         _stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["nonexistent"])
         assert exit_code == 2
 
-    def test_tty_stdin_is_not_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """stdin が tty なら読み取らず空 dict を返す。"""
-        monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-        assert cli._parse_args_and_stdin([]).stdin_data == {}
-
     @pytest.mark.parametrize("raw", ["", "   ", "[1, 2]", "{ broken"])
     def test_unusable_stdin_yields_empty_dict(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
-        """空・非 dict・不正 JSON はすべて空 dict に落とす。"""
-        monkeypatch.setattr(sys, "stdin", io.StringIO(raw))
+        """read_raw_stdin() の戻りが空・非 dict・不正 JSON ならすべて空 dict に落とす。
+
+        空文字列は tty・stdin 未接続・deadline 到達のいずれでも
+        hook_common.read_raw_stdin() が返す値。個々の原因ごとの分岐は
+        hook_common 側（test_hook_common.py）が検証済みのため、ここでは
+        _read_stdin_json がその戻り値をどう扱うかだけを見る。
+        """
+        monkeypatch.setattr(cli, "read_raw_stdin", lambda: raw)
         assert cli._read_stdin_json() == {}
 
     def test_valid_stdin_is_parsed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """dict の JSON はそのまま返る。"""
-        monkeypatch.setattr(sys, "stdin", io.StringIO('{"cwd": "/tmp"}'))
+        monkeypatch.setattr(cli, "read_raw_stdin", lambda: '{"cwd": "/tmp"}')
         assert cli._read_stdin_json() == {"cwd": "/tmp"}
 
-    def test_stdin_os_error_is_logged(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """stdin の読み取りが OSError でも空 dict に落とす。"""
+    def test_read_stdin_json_delegates_to_bounded_reader(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_read_stdin_json は sys.stdin を直接読まず read_raw_stdin() に委譲する（F-03 回帰）。
 
-        class _BrokenStdin:
-            def isatty(self) -> bool:
-                return False
+        旧実装の sys.stdin.read() は EOF まで無期限ブロックしえた
+        （context は launcher の in-process 実行で host の実 pipe を直接
+        読むため実害があった）。read_raw_stdin() は最初のバイト到着
+        （2 秒）と読み取り全体（5 秒）の両方に上限を持つ bounded reader
+        で、閉じない stdin でも有限時間で（空文字列を含む）値を返す。
+        """
+        calls: list[int] = []
 
-            def read(self) -> str:
-                raise OSError("stdin gone")
+        def _bounded_reader() -> str:
+            calls.append(1)
+            return '{"probe": true}'
 
-        monkeypatch.setattr(sys, "stdin", _BrokenStdin())
-        assert cli._read_stdin_json() == {}
+        monkeypatch.setattr(cli, "read_raw_stdin", _bounded_reader)
+        assert cli._read_stdin_json() == {"probe": True}
+        assert calls == [1]
 
     def test_positionals_flags_and_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """位置引数・真偽フラグ・値付きオプションを分離する。"""
-        monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+        monkeypatch.setattr(cli, "read_raw_stdin", lambda: "")
         args = cli._parse_args_and_stdin(["pipefail", "--global", "--limit", "5"])
         assert args.positionals == ("pipefail",)
         assert args.flags == frozenset({"--global"})

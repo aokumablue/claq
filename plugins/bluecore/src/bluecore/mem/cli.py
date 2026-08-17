@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from bluecore.hooks.hook_common import print_session_start_output
+from bluecore.hooks.hook_common import print_session_start_output, read_raw_stdin
 from bluecore.mem import logger as mem_logger
 from bluecore.mem.database import Database
 from bluecore.mem.handoff import build_handoff
@@ -170,16 +170,17 @@ def _parse_options(argv: list[str]) -> CommandArgs:
 def _read_stdin_json() -> dict[str, Any]:
     """stdin から JSON オブジェクトを読み取る。
 
+    hook_common.read_raw_stdin() を使う。tty 判定に加え、最初のバイト
+    到着（2 秒）と読み取り全体（5 秒）の両方に上限を持つ。``context`` は
+    launcher の in-process 実行で host の実 pipe を直接読むため、書き手が
+    pipe を閉じないまま部分送信で止まった場合に旧実装（sys.stdin.read()）
+    は EOF まで無期限ブロックしていた（F-03 対応）。
+
     Returns:
-        読み取った dict。stdin が tty・空・非 dict・不正 JSON なら空 dict。
+        読み取った dict。stdin が tty・空・上限到達・非 dict・不正 JSON
+        なら空 dict。
     """
-    if sys.stdin.isatty():
-        return {}
-    try:
-        raw = sys.stdin.read()
-    except OSError as e:
-        log.warning("stdin 読み取り失敗: %s", e)
-        return {}
+    raw = read_raw_stdin()
     if not raw.strip():
         return {}
     try:
