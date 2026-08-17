@@ -46,7 +46,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 1. 呼び出し元（/harness ステップ3）から渡されるベースライン JSON とトップ3アクションを入力とする。欠ければ直ちに **FAIL**
 2. トップ3レバレッジエリア特定（フック・評価・ルーティング・コンテキスト・安全性）
 3. 最小限・元に戻せる設定変更提案
-4. 変更適用・検証 — 変更後に `bluecore_run bluecore.ci.harness_audit <scope> --format json` を再実行し、ベースライン JSON との差分でスコア変化を証跡提示する。証拠なしにスコア改善を主張しない
+4. 変更適用・検証 — 変更後に `bluecore_run bluecore.ci.harness_audit <scope> --format json --root <root_dir> --target-kind <target_mode>` を再実行し、ベースライン JSON との差分でスコア変化を証跡提示する。`root_dir` / `target_mode` はベースライン JSON の同名フィールドの値をそのまま使う（root/target-kind が違えばスケールの異なるスコアを比較することになる）。証拠なしにスコア改善を主張しない
 5. 変更前後の差分報告
 
 ## 制約

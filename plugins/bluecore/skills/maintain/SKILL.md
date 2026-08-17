@@ -42,7 +42,7 @@ collect_skill_create_inputs "${COMMITS:-200}"        # コミット規約・同�
 - `python3 -m pytest -q --cov`（カバレッジは pyproject の `fail_under=100` で判定。`--cov` なしでは測定されない）
 - `ruff check plugins/bluecore/src`
 - `python3 -m bluecore.ci.validate_skills`（`validate_commands` / `validate_agents` / `validate_hooks` も同形式で4つ全て実行）
-- `python3 -m bluecore.ci.harness_audit repo --format json`（audit の scope は `repo|hooks|skills|commands|agents` のキーワード。本スキルの `--scope` 引数＝パスとは別物でパス指定不可）
+- `python3 -m bluecore.ci.harness_audit repo --root plugins/bluecore --target-kind repo --format json`（audit の scope は `repo|hooks|skills|commands|agents` のキーワード。本スキルの `--scope` 引数＝パスとは別物でパス指定不可）。`--root` 省略時はリポジトリ直下（marketplace レイアウトの workspace root）が対象になり、provider 側の 24 checks を一切見ない consumer 判定へ誤って倒れる（F-04）。`--target-kind repo` は自動判定との食い違いを FAIL で検出する
 
 既存失敗を記録し新規失敗判定の基準にする。
 

@@ -24,19 +24,21 @@ command: /harness
 /harness
 /harness --audit-only       # スコアカード出力のみ
 /harness skills --format json
-/harness --scope hooks --root /path/to/repo
+/harness --scope hooks --root /path/to/repo --target-kind repo
 ```
 
 `scope` は位置引数でも `--scope` でも指定可。既定値は `repo`。
+
+`--root` は監査対象ルートを明示するために必須（省略時は cwd を自動判定し、marketplace レイアウトの provider リポジトリ直下では consumer と誤判定されるため）。`--target-kind repo|consumer` も必須で、自動判定と食い違えば FAIL する（誤った root を監査したまま気付かず進むことを防ぐ）。
 
 ## ステップ1: ベースライン取得
 
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
-bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> [--root <path>]
+bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path> --target-kind <repo|consumer>
 ```
 
-スコアカードを出力。`--audit-only` は /harness レベルの制御フラグであり `bluecore_run` へ渡さない。指定時はここで終了。
+スコアカードを出力。`--audit-only` は /harness レベルの制御フラグであり `bluecore_run` へ渡さない。指定時はここで終了。`--root` / `--target-kind` はステップ4のベースライン比較まで同一値を保持する。
 
 スコアリングはこのスクリプトのみを根拠とし、手動採点は行わない。
 
@@ -60,10 +62,10 @@ harness-tuner は:
 
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
-bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> [--root <path>]
+bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path> --target-kind <repo|consumer>
 ```
 
-ステップ1と同条件で再採点。
+ステップ1と同一の `--root` / `--target-kind` で再採点（異なる root・スケールのスコアを比較しない）。
 
 ## ステップ5: 差分要約
 
@@ -78,7 +80,7 @@ bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> [--root <pat
 
 ## 出力仕様
 
-1. ベースライン `overall_score` と `max_score`（`repo` では70）
+1. ベースライン `overall_score` と `max_score`（`repo` では65）
 2. カテゴリ別スコアと指摘
 3. 失敗チェックと正確なファイルパス
 4. 上位3件のアクション（`top_actions`）と harness-tuner 適用内容
@@ -90,5 +92,6 @@ bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> [--root <pat
 - 位置 #1: `[scope]` = `repo|hooks|skills|commands|agents`（既定: `repo`）
 - `--scope=<scope>`: 位置引数の別名（互換維持）
 - `--format=text|json`（既定: `text`）
-- `--root=<path>`: ルートディレクトリ指定
+- `--root=<path>`: 監査対象ルート（必須。省略時の自動 cwd 判定は誤判定しうる）
+- `--target-kind=repo|consumer`: 期待する判定モードの明示（必須。自動判定と食い違えば FAIL）
 - `--audit-only`: ステップ1のみで終了（/harness レベルの制御フラグ。`bluecore_run` へ渡さない）
