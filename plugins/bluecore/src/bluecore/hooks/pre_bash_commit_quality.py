@@ -240,21 +240,6 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     return False, []
 
 
-def _is_amend_commit(commit_args: list[str]) -> bool:
-    """commit 引数トークンに `--amend` が含まれるかを判定します。
-
-    Args:
-        commit_args: `git commit` 呼び出しの引数トークン列です。
-
-    Returns:
-        `--amend` が含まれるなら True を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    return "--amend" in commit_args
-
-
 def _is_commit_all_flag(commit_args: list[str]) -> bool:
     """commit 引数トークンに `-a`/`--all`（結合短形式含む）が含まれるかを判定します。
 
@@ -601,10 +586,6 @@ def evaluate(raw_input: str) -> dict:
         # git commit コマンドの場合のみ実行（トークン化して堅牢に判定）
         is_commit, commit_args = _is_git_commit_command(command)
         if not is_commit:
-            return {"output": raw_input, "exitCode": 0}
-
-        # --amend の場合はチェックをスキップ（ブロックを避けるため）
-        if _is_amend_commit(commit_args):
             return {"output": raw_input, "exitCode": 0}
 
         # ステージングされたファイルを取得（-a/--all の場合は未ステージの変更も加える。

@@ -414,13 +414,6 @@ def test_pre_bash_commit_quality_evaluate_handles_commit_branches(
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "parse_json_object",
-        lambda raw: {"tool_input": {"command": "git commit --amend -m 'feat(core): add'"}},
-    )
-    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
-
-    monkeypatch.setattr(
-        pre_bash_commit_quality,
-        "parse_json_object",
         lambda raw: {"tool_input": {"command": "git commit -m 'feat(core): add'"}},
     )
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: [])
@@ -584,7 +577,7 @@ def test_apply_commit_message_issues_without_suggestion(monkeypatch) -> None:
 
 
 # ─────────────────────────────────────────────
-# _is_git_commit_command / _is_amend_commit / _is_commit_all_flag（トークン化）
+# _is_git_commit_command / _is_commit_all_flag（トークン化）
 # ─────────────────────────────────────────────
 
 
@@ -698,14 +691,6 @@ def test_is_git_commit_command_regex_fallback_true_when_tokens_miss_it() -> None
     assert args == []
 
 
-def test_is_amend_commit_detects_token() -> None:
-    """--amend トークンが引数中にあれば True を返すこと。"""
-    import bluecore.hooks.pre_bash_commit_quality as pbcq
-
-    assert pbcq._is_amend_commit(["--amend", "-m", "x"]) is True
-    assert pbcq._is_amend_commit(["-m", "x"]) is False
-
-
 def test_is_commit_all_flag_detects_short_long_and_combined() -> None:
     """-a / --all / -am のような結合短形式を検出すること。"""
     import bluecore.hooks.pre_bash_commit_quality as pbcq
@@ -717,19 +702,53 @@ def test_is_commit_all_flag_detects_short_long_and_combined() -> None:
     assert pbcq._is_commit_all_flag(["--amend", "-m", "x"]) is False
 
 
-def test_evaluate_commit_amend_skipped_with_messy_spacing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """連続空白を含む --amend コマンドでも従来どおりスキップされること。"""
+def test_evaluate_commit_amend_with_nothing_staged_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--amend --no-edit` で staged が空なら検査対象ゼロで通過する（正常系。gap ではない）。
+
+    連続空白を含む --amend コマンドでも commit 検出が成立することも併せて確認。
+    """
+    logs: list[str] = []
+    monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "parse_json_object",
-        lambda raw: {"tool_input": {"command": "git   commit  --amend -m 'feat(core): add'"}},
+        lambda raw: {"tool_input": {"command": "git   commit  --amend --no-edit"}},
     )
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: [])
+
+    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+    assert any("No staged files found" in message for message in logs)
+
+
+def test_evaluate_commit_amend_scans_staged_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--amend` は HEAD のファイル一覧を巻き込まず、staged 集合だけを検査する（F-06 対応）。
+
+    以前は --amend を検出した時点で lint/secret/message 検証を無条件スキップして
+    おり、amend でこっそり secret を混入させても検査を通過できていた
+    （F-01 とは別の fail-open）。
+    """
     monkeypatch.setattr(
         pre_bash_commit_quality,
-        "get_staged_files",
-        lambda: (_ for _ in ()).throw(AssertionError("should not be called")),
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git commit --amend -m 'feat(core): add'"}},
     )
-    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: ["src/staged.py"])
+    monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
+    monkeypatch.setattr(pre_bash_commit_quality, "should_scan_secrets", lambda path: False)
+
+    seen: list[str] = []
+
+    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None) -> list[dict]:
+        seen.append(path)
+        return [{"type": "secret", "severity": "error", "message": "hardcoded secret detected", "line": 1}]
+
+    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", _fake_find_file_issues)
+
+    result = pre_bash_commit_quality.evaluate("payload")
+
+    # staged 集合は検査され、amend であることを理由にブロックが回避されない。
+    assert seen == ["src/staged.py"]
+    assert result["exitCode"] == 2
 
 
 def test_evaluate_commit_dash_a_unions_unstaged_modified_files(monkeypatch: pytest.MonkeyPatch) -> None:
