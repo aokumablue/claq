@@ -53,6 +53,14 @@ def _validate_agent_file(file_path: Path) -> bool:
         emit_error(f"{file_path.name} - フロントマターがありません")
         return True
 
+    if not frontmatter.get("tools"):
+        # tools 未宣言だとエージェントはツール制限なしで起動し、Write/Bash 等
+        # 実際には想定していない書き込み権限まで暗黙に継承する。宣言を
+        # 必須にすることで、権限が本文の記述と食い違っていないかレビュー
+        # できる場所（frontmatter）に強制的に載せる。
+        emit_error(f"{file_path.name} - tools が宣言されていません（暗黙の全権継承を防ぐため必須）")
+        return True
+
     return False
 
 

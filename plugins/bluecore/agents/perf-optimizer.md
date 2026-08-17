@@ -1,6 +1,7 @@
 ---
 name: perf-optimizer
 description: パフォーマンス分析・最適化専門。ボトルネック特定・アルゴリズム/DB/メモリ/バンドル最適化。可読性のみの整理は simplifier 担当。性能懸念・ボトルネック調査時に能動的使用。
+tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
 # パフォーマンス最適化

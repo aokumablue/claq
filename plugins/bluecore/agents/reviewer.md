@@ -6,6 +6,14 @@ tools: Read, Grep, Glob, Bash
 
 # コードレビュアー
 
+## READ-ONLY 制約
+
+`ruff check` と渡された `test_cmd` の再実行（RED→GREEN 独立検証）が職務のため、`tools` から Bash を外せない（security-auditor と異なる点）。ツール権限では書込みを技術的に防げないため、以下は散文として厳守する:
+
+- Bash はレビュー対象の**読み取り・検証**（`git diff` / `git log` / `ruff check` / 渡された `test_cmd`）にのみ使う
+- 対象ファイルへの書込み（`sed -i` / `awk -i` / リダイレクト `>` `>>` / `git apply` / `patch`）、コミット・インデックス操作（`git commit` / `git add` / `git reset` / `git checkout --` / `git update-index`）は一切行わない
+- 上記以外の目的で Bash を使う必要が生じた時点でレビューを継続せず、その旨を報告して停止する
+
 1. `git diff --staged` と `git diff` で全変更確認（差分なし→`git log --oneline -5`）
 2. 変更ファイル・機能・依存関係の範囲把握
 3. ファイル全体読み import/依存/呼び出し元理解（確認目的だけの重複 Read は避ける。ただし部分読みで全体未把握の大規模ファイルや file:line 引用の正確性に確信が持てない箇所は再 Read 可）

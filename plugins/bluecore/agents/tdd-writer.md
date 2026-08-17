@@ -1,6 +1,7 @@
 ---
 name: tdd-writer
 description: テストファースト強制 TDD専門。新機能/バグ修正/リファクタリング時に積極使用。RED→GREEN→REFACTORでカバレッジ達成。
+tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
 # TDD専門家

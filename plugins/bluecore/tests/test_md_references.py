@@ -47,3 +47,20 @@ def test_dead_code_cleaner_and_harness_tuner_have_missing_input_fail_contract() 
     assert "baseline JSON が無い場合は直ちに **FAIL**" in tuner
     assert "自分で1回だけ採取" not in tuner
     assert "自己収集" not in tuner
+
+
+def test_security_auditor_has_no_bash_access() -> None:
+    """security-auditor は tools frontmatter で Bash を持たない（F-05 対応）。
+
+    reviewer は ruff check / test_cmd 再実行が職務で Bash を保持するが、
+    security-auditor の 10 項目チェックリストは Read/Grep/Glob だけで
+    完結し、本文も「コマンド実行はしない」と宣言している。frontmatter
+    の tools からも Bash を外し、権限として技術的に強制する。
+    """
+    frontmatter = (_ROOT / "agents" / "security-auditor.md").read_text(encoding="utf-8").split("---")[1]
+    tools_line = next(line for line in frontmatter.splitlines() if line.strip().startswith("tools:"))
+    declared_tools = {tool.strip() for tool in tools_line.split(":", 1)[1].split(",")}
+
+    assert "Bash" not in declared_tools
+    assert "Edit" not in declared_tools
+    assert "Write" not in declared_tools
