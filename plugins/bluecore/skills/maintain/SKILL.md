@@ -104,4 +104,4 @@ bluecore_mem_learn --key <slug> --kind pitfall --scope repo --domain harness \
 - `--scope=<path>`: 対象上書き（既定 `plugins/bluecore/{commands,skills,agents,hooks}`）
 - `--commits=<n>`: 入力収集のコミット数（既定 200）
 - `--no-web`: web トレンド調査を無効化
-- `--dry-run`: ステップ1-2のみ（audit + レビュー報告）で編集しない（ステップ7の `bluecore_mem_learn` も行わない）
+- `--dry-run`: ステップ1-2（audit + レビュー報告）の後、ステップ3以降を実行せずここで停止する。実効範囲はこの「ステップ3に進まない」ことのみ — ステップ4で委譲する `tdd-writer` 等の agent 自体に read-only/dry-run モードがあるわけではなく、maintain 側がそこへ到達しないことで結果的に無編集になる。停止するため、ステップ4の編集はもちろんステップ7の `bluecore_mem_learn` も行われない

@@ -25,6 +25,7 @@ tools: Read, Grep, Glob, Bash, Task
    - 失敗ファイルは Blueprint に従ってファイル単位リバート
 3. **simplify（並列）**
    - 依存の薄いグループを同時実行（上限4）
+   - 起動直前にグループ間のファイル重複を確認する: `refactor-prep` の `groups` は本来ファイル排他前提だが、委譲直前に実際の対象ファイル集合を突き合わせ、重複があれば該当グループを同時起動せず直列化する（同一ファイルへの並列編集は片方の変更が失われるリスク）
    - `simplifier` を並列起動
 4. **perf**
    - simplify 全グループが完了してから開始
@@ -34,6 +35,7 @@ tools: Read, Grep, Glob, Bash, Task
 6. **final gate**
    - テスト/linters 再実行
    - CRITICAL/HIGH が残る場合は BLOCK
+   - `Final Gate: PASS` の導出規則: clean/simplify/perf/review+secure の全 stage が「完了」（スキップ・未実行・リバートのまま放置ではない）かつ CRITICAL/HIGH が 0 件のときのみ PASS。いずれか1 stage でも未完了・全ファイルリバートで実質ゼロ変更・CRITICAL/HIGH 残存のいずれかに該当すれば `BLOCKED`
 
 ## 安全チェック
 
