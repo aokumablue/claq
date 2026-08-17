@@ -1,13 +1,16 @@
-"""知識カード入力の検証 — ``mem learn`` と observer が共有する唯一の入口。
+"""知識カード入力の検証 — ``mem learn`` が使う唯一の入口。
 
 ``knowledge`` テーブルの CHECK 制約（``kind`` 6 値 / ``scope`` 2 値 /
 ``status`` 3 値 / ``source`` 3 値 / ``confidence`` 0.0〜1.0）を、DB へ到達する
-前に Python 側で強制する。入力経路は 2 つある:
+前に Python 側で強制する。現在の入力経路は ``mem learn``（stdin の JSON。
+人間・エージェントが明示的に書く）の1つのみ。
 
-* ``mem learn`` — stdin の JSON（人間・エージェントが書く）。
-* observer — Haiku が観測ログから抽出した候補 JSON。
+``source`` の許容値 ``observer`` は、観測ログから自動抽出して投入していた
+session-observer エージェント（206585c で削除済み）の名残。既存 DB の
+CHECK 制約との互換のため ``SOURCES``／schema からは削除していないが、
+これを自動で書き込む経路は現在存在しない。
 
-どちらも同じ検証を通す。片方だけ緩い経路が生まれると、CHECK 制約違反が
+検証を素通しする経路が生まれると、CHECK 制約違反が
 ``sqlite3.IntegrityError`` として遅れて表面化し、どのフィールドが悪いのか
 利用者に伝わらなくなる。
 
@@ -121,7 +124,7 @@ def _payload_choice(
         name: 項目名。ペイロードのキーとエラーメッセージに使う。
         allowed: 許可される値の集合。
         default: ペイロードに値が無いときの既定値。
-        override: ペイロードより優先する値。observer の固定値に使う。
+        override: ペイロードより優先する値。CLI フラグ（例: ``--status``）の固定値に使う。
 
     Returns:
         検証を通った列挙値。
@@ -226,16 +229,13 @@ def parse_knowledge_payload(
     payload: dict[str, Any],
     *,
     status_override: str | None = None,
-    source_override: str | None = None,
 ) -> KnowledgeDraft:
     """JSON ペイロードを検証済みの ``KnowledgeDraft`` へ変換する。
 
     Args:
         payload: 知識カードを表す dict。
         status_override: ペイロードの ``status`` より優先する値。
-            observer は ``pending`` を固定で渡す。
-        source_override: ペイロードの ``source`` より優先する値。
-            observer は ``observer`` を固定で渡し、出所の詐称を防ぐ。
+            CLI の ``--status`` フラグに使う。
 
     Returns:
         全項目が CHECK 制約を満たす KnowledgeDraft。
@@ -249,7 +249,7 @@ def parse_knowledge_payload(
 
     kind = _payload_choice(payload, "kind", KINDS)
     scope = _payload_choice(payload, "scope", SCOPES, default="repo")
-    source = _payload_choice(payload, "source", SOURCES, default="agent", override=source_override)
+    source = _payload_choice(payload, "source", SOURCES, default="agent")
     status = _payload_choice(payload, "status", STATUSES, default="active", override=status_override)
 
     return KnowledgeDraft(

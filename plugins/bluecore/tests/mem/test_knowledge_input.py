@@ -89,14 +89,13 @@ class TestParseKnowledgePayload:
             source_ref=None,
         )
 
-    def test_overrides_win_over_payload(self) -> None:
-        """status / source の上書きはペイロードより強い。"""
+    def test_status_override_wins_over_payload(self) -> None:
+        """status の上書き（CLI --status）はペイロードより強い。"""
         draft = parse_knowledge_payload(
             {"kind": "fact", "title": "t", "status": "active", "source": "human"},
             status_override="pending",
-            source_override="observer",
         )
-        assert (draft.status, draft.source) == ("pending", "observer")
+        assert (draft.status, draft.source) == ("pending", "human")
 
     def test_explicit_key_and_fields_are_kept(self) -> None:
         """明示された key と任意項目はそのまま残る。"""

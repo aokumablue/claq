@@ -914,7 +914,7 @@ def _build_context(settings: Settings, args: CommandArgs) -> str:
 
     共通知識（``scope='global'``）・リポジトリ知識（``scope='repo'``）・
     前回の引き継ぎの 3 節を、いずれも ``status='active'`` に限って集める
-    （``pending`` は observer の下書きでノイズになるため注入しない）。
+    （``pending`` は人間の昇格レビュー前の下書きでノイズになるため注入しない）。
 
     Args:
         settings: mem 設定。

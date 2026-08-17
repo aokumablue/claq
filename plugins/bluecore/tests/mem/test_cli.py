@@ -299,10 +299,14 @@ class TestLearn:
         assert (found.scope, found.repo_id, found.domain) == ("global", None, "testing")
         assert (found.confidence, found.source, found.source_ref) == (0.9, "human", "CLAUDE.md")
 
-    def test_observer_can_store_pending_via_flag(
+    def test_status_pending_flag_accepts_source_observer_value(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """--status pending で観測由来の下書きを積める。"""
+        """`--status pending` は `source: observer`（schema 互換のため残る許容値）でも積める。
+
+        observer による自動投入経路そのものは 206585c で削除済み。ここでは
+        `source` の CHECK 制約許容値としての `observer` が引き続き通ることのみ検証する。
+        """
         payload = {"scope": "global", "kind": "fact", "title": "observed", "source": "observer"}
         _stdout, _stderr, exit_code = _run_cli(
             monkeypatch, tmp_path, ["learn", "--status", "pending"], payload
