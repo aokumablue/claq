@@ -74,7 +74,7 @@ def build_handoff(payload: dict[str, Any]) -> str:
         引き継ぎ本文。組み立てる材料が無ければ空文字列。
     """
     explicit = str(payload.get("handoff") or "").strip()
-    text = redact(explicit) if explicit else _summarize_transcript(str(payload.get("transcript_path") or ""))
+    text = strip_tags(redact(explicit)) if explicit else _summarize_transcript(str(payload.get("transcript_path") or ""))
     if not text:
         return ""
     return _truncate(text)

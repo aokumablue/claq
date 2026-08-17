@@ -51,6 +51,7 @@ from bluecore.mem.settings import (
     CONTEXT_REPO_CHAR_BUDGET,
     Settings,
 )
+from bluecore.mem.tag_stripping import strip_tags
 
 log = mem_logger.get("CLI")
 
@@ -825,6 +826,8 @@ def _format_injected_item(row: Knowledge) -> str:
     既定は ``- [kind] title`` のみ。``body`` を足しても 1 行が
     ``CONTEXT_ITEM_CHAR_LIMIT`` 文字に収まる場合だけ ``—`` で続ける。
     長い body を抱えたカードが 1 件で節の予算を食い潰すのを防ぐ。
+    title / body は ``<bluecore-memory>`` 等の信頼境界タグを偽装できる
+    ため、注入前に ``strip_tags`` で無害化する。
 
     Args:
         row: 注入対象の知識カード。
@@ -832,8 +835,9 @@ def _format_injected_item(row: Knowledge) -> str:
     Returns:
         整形済みの 1 行（改行を含まない）。
     """
-    head = f"- [{row.kind}] {row.title}"
-    body = row.body.strip()
+    title = strip_tags(row.title)
+    head = f"- [{row.kind}] {title}"
+    body = strip_tags(row.body.strip())
     if not body:
         return head
     combined = f"{head} — {body}"
@@ -864,6 +868,9 @@ def _knowledge_section(heading: str, rows: list[Knowledge], budget: int) -> str:
 def _handoff_section(db: Database, repo_id: str) -> str:
     """直近セッションの引き継ぎを ``前回の続き`` 節へ組み立てる。
 
+    handoff 本文は ``<bluecore-memory>`` 等の信頼境界タグを偽装できるため、
+    注入前に ``strip_tags`` で無害化する。
+
     Args:
         db: 参照する mem データベース。
         repo_id: 対象リポジトリの ``repos.id``。
@@ -874,7 +881,7 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     session = db.get_latest_session(repo_id)
     if session is None:
         return ""
-    handoff = session.handoff.strip()
+    handoff = strip_tags(session.handoff.strip())
     if not handoff:
         return ""
     if len(handoff) > CONTEXT_HANDOFF_CHAR_BUDGET:
