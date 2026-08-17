@@ -32,41 +32,41 @@ tools: Read, Grep, Glob
 ## 計画出力例
 
 ```md
-# 実施計画: mem search に --limit オプション追加
+# 実施計画: mem search に --days オプション追加（更新日フィルタ）
 
 ## 概要
-検索結果件数を CLI から制御可能にする。既定値 10 は維持。
+検索結果を直近 N 日以内に更新された知識カードへ絞り込めるようにする。既定は無指定（フィルタなし）。
 
 ## Phase 1: オプション追加
 1. **引数定義追加** (plugins/bluecore/src/bluecore/mem/cli.py)
-   - Action: search サブコマンドに `--limit` int 引数を追加（既定 10）
-   - Why: 呼び出し側で件数を制御するため
-   - Verify: `mem search --help` に `--limit`（既定 10）が表示される
-   - Dependencies: なし / 複雑度: 低 / Risk: Low / Mitigation: 既定値の既存テストで回帰確認
-2. **`_take_rows` 相当のロジックへ反映** (plugins/bluecore/src/bluecore/mem/cli.py)
-   - Action: 同ファイル内の結果整形処理に `limit` パラメータを反映
+   - Action: `_VALUE_OPTIONS` に `--days` を追加し `search` サブコマンドで受理する
+   - Why: 呼び出し側で更新日フィルタを指定できるようにするため
+   - Verify: `bluecore_run bluecore.mem.cli search "test" --days 30` が `CommandError` にならず実行できる
+   - Dependencies: なし / 複雑度: 低 / Risk: Low / Mitigation: 未指定時は既存の全件対象と同じ挙動を維持
+2. **フィルタロジックの実装** (plugins/bluecore/src/bluecore/mem/cli.py)
+   - Action: `_take_rows` 相当の結果整形処理の前段で `updated_at` が `--days` 日以内の行のみに絞る
    - Why: CLI 引数を実クエリへ接続するため
-   - Verify: `search(limit=3)` が 3 件のみ返す（ステップ3のテストで確認）
-   - Dependencies: ステップ1 / 複雑度: 低 / Risk: Low / Mitigation: 既存呼び出しを既定値で維持
+   - Verify: `search(days=1)` が1日以内更新分のみ返す（ステップ3のテストで確認）
+   - Dependencies: ステップ1 / 複雑度: 中 / Risk: Low / Mitigation: 境界値（ちょうど N 日前）をテストする
 
 ## Phase 2: テスト
-3. **ユニットテスト追加** (tests/mem/test_cli.py)
-   - Action: limit 指定 / 既定 / 0 件境界のテストを追加
+3. **ユニットテスト追加** (plugins/bluecore/tests/mem/test_cli.py)
+   - Action: days 指定 / 未指定 / 境界値（ちょうど N 日前）のテストを追加
    - Why: カバレッジ 100% 維持
-   - Verify: `pytest -q tests/mem/test_cli.py` が exit 0
+   - Verify: `cd plugins/bluecore && python3 -m pytest -q tests/mem/test_cli.py` が exit 0
    - Dependencies: ステップ2 / 複雑度: 中 / Risk: Low / Mitigation: 境界値をテストする
 
 ## テスト戦略
-`pytest -q` 全体 + 境界値（limit=0 / 1 / 既定超）
+`python3 -m pytest -q` 全体 + 境界値（days=0 / 1 / 未指定）
 
 ## リスクと緩和策
-- Risk: 既定値の挙動変更 / Mitigation: 既存呼び出しを既定値で維持し、境界値をテストする
+- Risk: 未指定時の既存挙動変更 / Mitigation: `--days` 未指定なら現行と同じ全件対象を維持し、その回帰をテストする
 
 ## 成功条件
-`--limit 3` で 3 件のみ返る / 既存呼び出しの挙動不変 / カバレッジ 100%
+`--days 1` で1日以内更新分のみ返る / `--days` 未指定時の挙動不変 / カバレッジ 100%
 
 ## Assumptions
-- 既定値 10 は現行仕様のまま変更しない前提（変更要望は未確認）
+- `updated_at` は既存スキーマに存在する前提（`mem/schema.py` 未確認、Phase 1着手前に要確認）
 ```
 
 ## 品質基準
@@ -101,6 +101,6 @@ tools: Read, Grep, Glob
 ## 永続メモリ
 
 `<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
-search: `mem search` — クエリ例 `plan implementation {feature_keywords}` / `risk blocker issue plan`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `mem show <key>` に渡す
+search: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提）— クエリ例 `plan implementation {feature_keywords}` / `risk blocker issue plan`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
 record: **自分では書かない**。学びの候補は呼び出し元へ報告し、記録は呼び出し元コマンドの「学びの記録」ステップに任せる（本エージェントの成果は final gate でリバートされうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: 類似計画 / リスクパターン / 見積もり精度
