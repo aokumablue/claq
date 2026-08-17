@@ -543,6 +543,34 @@ class TestParseJsonObject:
         assert hook_common.parse_json_object("[1, 2, 3]") is None
 
 
+class TestDetachLogPath:
+    """_detach_log_path のテスト。"""
+
+    def test_returns_dated_path_under_bluecore_logs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+
+        path = hook_common._detach_log_path()
+
+        assert path is not None
+        assert path.parent == tmp_path / ".bluecore" / "logs"
+        assert path.name.startswith("bg-") and path.name.endswith(".log")
+
+    def test_returns_none_when_log_dir_cannot_be_created(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ログディレクトリを作れない場合は None（呼び出し元は DEVNULL へ倒す）。"""
+        monkeypatch.setattr(
+            hook_common,
+            "ensure_private_dir",
+            lambda path: (_ for _ in ()).throw(OSError("disk full")),
+        )
+
+        assert hook_common._detach_log_path() is None
+
+
 class TestDetachProcess:
     """detach_process の一時ファイル経由 stdin 引き渡し・エラー処理のテスト。
 
@@ -576,11 +604,54 @@ class TestDetachProcess:
             str(hook_common._DETACH_KILL_AFTER_SECONDS),
         ]
         assert captured["cmd"][5:] == ["python3", "-m", "bluecore.mem.cli", "observe"]
-        assert captured["env"] == {"X": "1"}
+        assert captured["env"]["X"] == "1"
+        # 呼び出し元の env はそのまま維持しつつ、対象プロセスの stdout/stderr を
+        # DEVNULL の代わりに追記させるログパスが差し込まれること（F-18 対応）。
+        log_path = Path(captured["env"]["BLUECORE_BG_LOG_PATH"])
+        assert log_path.parent == tmp_path / ".bluecore" / "logs"
+        assert log_path.name.startswith("bg-") and log_path.name.endswith(".log")
         assert captured["start_new_session"] is True
         assert written_stdin_content["text"] == "raw-payload"
         # 起動直後に unlink 済みで、ディレクトリにファイルが残らないこと。
         assert list((tmp_path / ".bluecore").glob("*.stdin")) == []
+
+    def test_env_none_still_gets_log_path_injected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """env=None（親環境継承）でもログパスは差し込まれること。"""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        captured = {}
+
+        class _FakePopen:
+            def __init__(self, cmd, *, stdin=None, stdout=None, stderr=None, env=None, start_new_session=None):  # noqa: ANN001
+                captured["env"] = env
+                stdin.seek(0)
+
+        monkeypatch.setattr(hook_common.subprocess, "Popen", _FakePopen)
+
+        assert detach_process(["true"], "raw") is True
+        assert "BLUECORE_BG_LOG_PATH" in captured["env"]
+
+    def test_log_dir_creation_failure_falls_back_to_devnull(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """ログディレクトリを作れなくても detach 自体は継続する（best-effort）。"""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        captured = {}
+
+        class _FakePopen:
+            def __init__(self, cmd, *, stdin=None, stdout=None, stderr=None, env=None, start_new_session=None):  # noqa: ANN001
+                captured["env"] = env
+                stdin.seek(0)
+
+        monkeypatch.setattr(hook_common.subprocess, "Popen", _FakePopen)
+        monkeypatch.setattr(hook_common, "_detach_log_path", lambda: None)
+
+        assert detach_process(["true"], "raw", env={"X": "1"}) is True
+        assert captured["env"] == {"X": "1"}
+        assert "BLUECORE_BG_LOG_PATH" not in captured["env"]
 
     def test_tempfile_creation_failure_returns_false(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

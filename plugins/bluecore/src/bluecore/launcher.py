@@ -11,6 +11,7 @@ venv への自己置換は行わない。stdin はターゲット自身が
 
 from __future__ import annotations
 
+import json
 import os
 import runpy
 import sys
@@ -50,11 +51,19 @@ def build_env() -> dict[str, str]:
 def _unsupported_python_exit_code() -> int | None:
     """Python 3.12 未満なら fail-open の終了コード 0 を返します。
 
+    fail-open 自体は維持する（exit 2 にすると全 Edit/Bash が拒否され
+    セッションが即死し、守るべき対象より被害が大きいため）。ただし
+    「保護 hook が静かに無効化されている」事実を見落とさせないよう、
+    人間可読の行に加えて grep 可能な構造化 JSON も stderr へ書く
+    （bluecore 自体のモジュールは Python 3.12+ 前提の構文を使いうるため、
+    この時点ではまだ import できず、stdout は host ごとに hook 種別で
+    契約が異なるため触らない。stderr のみで完結させる）。
+
     Args:
         なし
 
     Returns:
-        3.12 以上なら None。未満なら stderr に 1 行理由を書いて 0。
+        3.12 以上なら None。未満なら stderr に理由を書いて 0。
 
     Raises:
         例外は発生しません。
@@ -66,6 +75,17 @@ def _unsupported_python_exit_code() -> int | None:
     sys.stderr.write(
         f"ERROR: bluecore requires Python 3.12+; `python3` is {version}. "
         "Point `python3` on PATH at 3.12+ (bluecore does not create a venv).\n"
+    )
+    sys.stderr.write(
+        json.dumps(
+            {
+                "bluecoreProtectionDisabled": True,
+                "reason": "unsupported_python_version",
+                "detectedVersion": version,
+                "requiredVersion": "3.12+",
+            }
+        )
+        + "\n"
     )
     return 0
 

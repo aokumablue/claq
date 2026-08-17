@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import runpy
 import sys
@@ -134,15 +135,24 @@ class TestUnsupportedPythonExitCode:
         capsys: pytest.CaptureFixture[str],
         version: tuple[int, int, int],
     ) -> None:
-        """3.12 未満なら stderr に実バージョンを書いて 0 を返す。"""
+        """3.12 未満なら stderr に実バージョンと構造化 JSON を書いて 0 を返す（F-07 対応）。"""
         monkeypatch.setattr(launcher.sys, "version_info", version)
         displayed = ".".join(str(part) for part in version)
 
         assert launcher._unsupported_python_exit_code() == 0
-        assert capsys.readouterr().err == (
+        err = capsys.readouterr().err
+        lines = err.splitlines()
+        assert lines[0] == (
             f"ERROR: bluecore requires Python 3.12+; `python3` is {displayed}. "
-            "Point `python3` on PATH at 3.12+ (bluecore does not create a venv).\n"
+            "Point `python3` on PATH at 3.12+ (bluecore does not create a venv)."
         )
+        payload = json.loads(lines[1])
+        assert payload == {
+            "bluecoreProtectionDisabled": True,
+            "reason": "unsupported_python_version",
+            "detectedVersion": displayed,
+            "requiredVersion": "3.12+",
+        }
 
 
 class TestRunModuleInProcess:

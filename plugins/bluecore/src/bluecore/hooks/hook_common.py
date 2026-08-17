@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -308,11 +309,13 @@ _WATCHDOG_SCRIPT = """
 import os, signal, subprocess, sys, time
 
 timeout, kill_after = float(sys.argv[1]), float(sys.argv[2])
+log_path = os.environ.get("BLUECORE_BG_LOG_PATH")
+log_file = open(log_path, "ab") if log_path else subprocess.DEVNULL
 proc = subprocess.Popen(
     sys.argv[3:],
     stdin=sys.stdin,
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL,
+    stdout=log_file,
+    stderr=log_file,
     start_new_session=True,
 )
 
@@ -363,6 +366,33 @@ def _watchdog_argv(cmd: list[str]) -> list[str]:
     ]
 
 
+def _detach_log_path() -> Path | None:
+    """detach した子プロセスの stdout/stderr を追記するログファイルのパスを返す。
+
+    以前は DEVNULL に捨てており、detach 対象（--bg 起動）の import 失敗
+    等の出力が完全に消えていた（起動受付成功と処理完了・成功の区別が
+    付かない一因。F-18）。日付ごとに 1 ファイルへ追記する
+    （mem/logger.py の `mem-YYYY-MM-DD.log` と同じ命名規則）。
+    best-effort の diagnostics であり、ログディレクトリを作れない場合は
+    None を返して detach 自体は継続させる（ログが取れないことを理由に
+    起動を諦めない）。
+
+    Args:
+        なし
+
+    Returns:
+        `~/.bluecore/logs/bg-YYYY-MM-DD.log` の Path。作成失敗時は None。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        log_dir = ensure_private_dir(get_bluecore_dir() / "logs")
+    except OSError:
+        return None
+    return log_dir / f"bg-{datetime.now():%Y-%m-%d}.log"
+
+
 def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None = None) -> bool:
     """コマンドを detached（新セッション）で起動し stdin を一時ファイル経由で渡す。
 
@@ -375,6 +405,14 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
     ラップして DETACH_TIMEOUT_SECONDS で SIGTERM、さらに猶予後 SIGKILL を送り、
     暴走プロセスの無期限残留を防ぐ。シグナルは子のプロセスグループへ送るため、
     子が起動した孫プロセスもまとめて回収される。
+
+    対象の stdout/stderr は `BLUECORE_BG_LOG_PATH` 環境変数で
+    _WATCHDOG_SCRIPT へ log ファイルパスを渡し、そこへ追記させる
+    （`_detach_log_path` が None を返した場合のみ DEVNULL にフォールバック
+    する）。起動受付の成否（この関数の戻り値）と、対象プロセスの実行結果
+    は依然として別概念であり、後者を呼び出し元へ同期的に返す契約は無い
+    （best-effort の非同期処理という host 契約は変えない）。診断が必要な
+    場合は log ファイルを参照する。
 
     Args:
         cmd: subprocess に渡すコマンドリスト。
@@ -398,12 +436,16 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
         tmp.write(raw_stdin)
         tmp.flush()
         tmp.seek(0)
+        child_env = dict(env) if env is not None else dict(os.environ)
+        log_path = _detach_log_path()
+        if log_path is not None:
+            child_env["BLUECORE_BG_LOG_PATH"] = str(log_path)
         subprocess.Popen(
             _watchdog_argv(cmd),
             stdin=tmp,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            env=env,
+            env=child_env,
             start_new_session=True,
         )
         return True
