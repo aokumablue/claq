@@ -40,6 +40,8 @@ A-01〜A-07 の全 7 件と、§6.2（detached child 失敗通知）・§6.4（h
 | §6.4 | `handoff.py` | 所有者一致の任意 regular file を host root 制約なしに読んでおり、ユーザーが書ける任意ファイルを prompt injection の入力にできる余地があった。既存の性質検査（symlink 拒否・regular file・所有者一致）を残した上で、既知 host root（`~/.claude/projects`、`~/.copilot`、`~/.codex`）の allowlist 包含チェックを後段に追加。`BLUECORE_TRANSCRIPT_ROOTS`（コロン区切り）で未知 host にも拡張可能。root 外は要約を諦めて空文字列を返し、handoff は明示テキスト・構造化事実で継続する（壊れずに劣化） | `cb60242` |
 | §7 未確認 | `grader.md` / `bench-analyzer.md` / `harness.md` / `reviewer.md` | frontmatter の `tools` はパス単位の制約を表現できないため、`grader`/`bench-analyzer` の書込み先を `grading_path`/`output_path` 配下に散文で限定。`/harness` は step3 の harness-tuner 適用を無条件委譲していたため、`--apply` を明示しない限り top3 提示で停止するよう分離（`--audit-only` とは独立の承認境界）。`reviewer.md` には write-capable Bash を維持する理由（§6.3 の技術的強制を採らない根拠）を追記 | `08b58d0` |
 | §7-3 代替 | `test_validate_hooks.py` | 実 install/update + host 登録の smoke test はスコープを大きく超えるため実施せず、代わりに `hooks.json` が PreToolUse（block_no_verify/pre_bash_commit_quality/bash_config_protection/config_protection）・PreCompact・SessionStart・SessionEnd の全経路を宣言していることと、全 hook エントリが `timeout` を持つことを静的検証するテストを追加。`PreCompact` の `timeout` 未指定を 10 秒で補った | `846e3d6` |
+| scope 追加 | `test_hook_edge_cases.py` | `test_repo_wide_self_scan_has_zero_secret_issues` に本報告書自身を含めて `pytest -q` を実行した結果を反映（5 節参照） | `c934ff2` |
+| release | version 4 ファイル・本報告書 | v0.9.32 → v0.9.33 | `be950fe` |
 
 ## 4. 直さない判断
 
@@ -93,7 +95,7 @@ ruff check src
 version 4 ファイル（`.claude-plugin/plugin.json`、`.claude-plugin/marketplace.json`、`plugins/bluecore/pyproject.toml`、`plugins/bluecore/src/bluecore/mem/__init__.py`、`scripts/version-up.sh` 経由で 0.9.32 → 0.9.33）
 
 **テスト**（新規分岐と同一コミットで追加。`fail_under=100` のため）:
-`plugins/bluecore/tests/hooks/{test_pre_bash_commit_quality(新規),test_additional_hooks,test_hook_edge_cases,test_hook_common,test_bash_config_protection(新規),test_hooks_json_matchers,test_config_protection_conditional}.py`、
+`plugins/bluecore/tests/hooks/{test_pre_bash_commit_quality(新規),test_additional_hooks,test_hook_edge_cases(secret検出分岐＋self-scanアローリスト),test_hook_common,test_bash_config_protection(新規),test_hooks_json_matchers,test_config_protection_conditional}.py`、
 `plugins/bluecore/tests/mem/{test_repo_identity,test_knowledge_input,test_cli,test_handoff}.py`、
 `plugins/bluecore/tests/ci/test_validate_hooks.py`
 
