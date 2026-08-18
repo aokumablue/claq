@@ -44,17 +44,34 @@ git 起動トークンの探索:
     になりません。加えて値を取るオプション（``-m`` / ``-F`` など）の
     値トークンはフラグ走査から除外します。
 
-非目標（原理的に検出不能なため検出しません）:
+``core.hooksPath`` オーバーライド:
+    ``git -c core.hooksPath=/dev/null commit`` / ``git -ccore.hooksPath=x commit``
+    / ``git --config-env=core.hooksPath=VAR commit`` は、``--no-verify`` を使わずに
+    git 自身のフック（`.git/hooks/pre-commit` 等）を丸ごと無効化できるため、
+    ``--no-verify`` と同様にブロックします（A-07 対応）。config key の大小文字は
+    区別せず判定します（git の config key 名は大小文字を区別しないため）。
+
+``sh -c`` ラッパー（1 段のみ）:
+    ``sh -c 'git commit --no-verify'`` のように既知シェル（``sh``/``bash``/
+    ``zsh``/``dash``）の ``-c`` へ渡された文字列引数は、1 段だけ再帰的に
+    同じ判定へ通します。2 段以上のネスト（``sh -c "sh -c 'git commit -n'"``）
+    や ``eval``・任意ラッパースクリプトへは再帰しません（A-07 対応。深い
+    再帰はコンテキスト消費と誤検知リスクの両方が増えるため、1 段に限定する
+    設計判断です）。
+
+非目標（原理的に検出不能、または意図的に対象外とするため検出しません）:
     - シェルエイリアス・シェル関数経由の呼び出し（``alias g=git`` の ``g``、
       ``commit() { git commit --no-verify; }`` の ``commit``）
     - ``git $(echo commit) --no-verify`` のようなコマンド置換・変数展開
       （``$VAR`` / ``$(...)`` / バッククォート）を経由した組み立て
     - ``git`` 以外の名前を持つラッパースクリプト（``mygit`` / ``./deploy.sh``）
       の内部で行われる git 呼び出し
-    - ``sh -c '...'`` / ``eval`` に渡す文字列の再帰的な解釈
+    - ``eval`` に渡す文字列の解釈、および ``sh -c`` の 2 段以上のネスト
     POSIX シェルのセマンティクス全体を模倣することは不可能であり、本フックは
     「うっかりバイパス」の抑止であって敵対的回避への防壁ではありません。
-    git 自体が大文字小文字を区別するため、トークン比較も区別します。
+    git 自体が大文字小文字を区別するため、トークン比較も区別します
+    （``core.hooksPath`` の config key を除く。git config key は大小文字を
+    区別しないため）。
 """
 
 from __future__ import annotations
@@ -142,6 +159,13 @@ _BYPASS_LONG_FLAG = "--no-verify"
 # ``git commit`` でのみ ``--no-verify`` の別名になる short フラグ。
 _BYPASS_SHORT_FLAG = "-n"
 
+# ``-c`` / ``--config-env`` の値が指す config key。git の config key 名は
+# 大小文字を区別しないため、比較は小文字化した上で行います（A-07 対応）。
+_HOOKS_PATH_CONFIG_KEY = "core.hookspath"
+
+# ``sh -c`` 再帰の対象とする既知シェル実行ファイル（basename 判定）。
+_SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash"})
+
 
 class GitInvocation(NamedTuple):
     """git 起動トークン以降を解析した結果。
@@ -152,11 +176,15 @@ class GitInvocation(NamedTuple):
         subcommand_certain: サブコマンドの解決結果を信用してよいか。未知の
             グローバルオプションが値を取る可能性で解決位置がずれ得る場合は
             False になり、``-n`` 判定を fail-closed に倒す材料になります。
+        config_values: ``-c`` / ``--config-env`` に渡された値文字列
+            （``key=value`` 形式）のリスト。``core.hooksPath`` オーバーライド
+            検出に使います。
     """
 
     subcommand: str | None
     flags: list[str]
     subcommand_certain: bool
+    config_values: list[str]
 
 
 def is_git_invocation(token: str) -> bool:
@@ -178,7 +206,7 @@ def is_git_invocation(token: str) -> bool:
     return token.rsplit("/", 1)[-1] == "git"
 
 
-def _consume_short_cluster(token: str, flags: list[str]) -> tuple[int, bool]:
+def _consume_short_cluster(token: str, flags: list[str]) -> tuple[int, bool, str | None]:
     """short オプションのクラスタを 1 文字ずつフラグへ展開する。
 
     ``-am`` のように複数の short オプションが結合したトークンを扱います。
@@ -190,8 +218,11 @@ def _consume_short_cluster(token: str, flags: list[str]) -> tuple[int, bool]:
 
     Returns:
         (値として追加で消費すべき後続トークン数（0 または 1）,
-        git グローバルオプションとして未知の文字を含むか) のタプル。
-        後者はサブコマンド未解決時のみ意味を持ちます。
+        git グローバルオプションとして未知の文字を含むか,
+        ``-c`` が結合形（``-ccore.hooksPath=x``）で値を持つ場合はその値文字列、
+        それ以外は None) の 3 要素タプル。値が次トークンにある場合
+        （非結合形の ``-c``）は None を返し、呼び出し側が
+        ``flags[-1] == "-c"`` を見て次トークンを取得します。
 
     Raises:
         例外は発生しません。
@@ -202,13 +233,16 @@ def _consume_short_cluster(token: str, flags: list[str]) -> tuple[int, bool]:
         flags.append(f"-{char}")
         if char in _OPTIONAL_VALUE_SHORT_OPTIONS:
             if index < last_index:
-                return 0, unknown
+                return 0, unknown, None
             continue
         if char in _VALUE_SHORT_OPTIONS:
-            return (0 if index < last_index else 1), unknown
+            if index < last_index:
+                config_value = token[index + 1 :] if char == "c" else None
+                return 0, unknown, config_value
+            return 1, unknown, None
         if char not in _BOOLEAN_GLOBAL_SHORT_OPTIONS:
             unknown = True
-    return 0, unknown
+    return 0, unknown, None
 
 
 def parse_git_segment(segment: list[str]) -> GitInvocation:
@@ -222,7 +256,9 @@ def parse_git_segment(segment: list[str]) -> GitInvocation:
 
     サブコマンド解決前に既知でないグローバルオプションが現れた場合、それが
     値を取るかどうかを判定できずサブコマンド位置がずれるため
-    ``subcommand_certain=False`` を返します。
+    ``subcommand_certain=False`` を返します。``-c`` / ``--config-env`` に
+    渡された値は `GitInvocation.config_values` に集約します
+    （``core.hooksPath`` オーバーライド検出用、A-07 対応）。
 
     Args:
         segment: 先頭要素が ``git`` 起動トークンであるトークンリスト。
@@ -236,6 +272,7 @@ def parse_git_segment(segment: list[str]) -> GitInvocation:
     """
     subcommand: str | None = None
     flags: list[str] = []
+    config_values: list[str] = []
     certain = True
     index = 1
     while index < len(segment):
@@ -248,19 +285,48 @@ def parse_git_segment(segment: list[str]) -> GitInvocation:
             flags.append(name)
             if "=" not in token:
                 if name in _VALUE_LONG_OPTIONS:
+                    if name == "--config-env" and index < len(segment):
+                        config_values.append(segment[index])
                     index += 1
                 elif subcommand is None and name not in _BOOLEAN_GLOBAL_LONG_OPTIONS:
                     certain = False
+            elif name == "--config-env":
+                config_values.append(token.split("=", 1)[1])
             continue
         if token.startswith("-") and len(token) > 1:
-            consumed, unknown = _consume_short_cluster(token, flags)
+            consumed, unknown, config_value = _consume_short_cluster(token, flags)
+            if config_value is None and consumed == 1 and flags[-1] == "-c" and index < len(segment):
+                config_value = segment[index]
+            if config_value is not None:
+                config_values.append(config_value)
             index += consumed
             if unknown and subcommand is None:
                 certain = False
             continue
         if subcommand is None:
             subcommand = token
-    return GitInvocation(subcommand=subcommand, flags=flags, subcommand_certain=certain)
+    return GitInvocation(
+        subcommand=subcommand, flags=flags, subcommand_certain=certain, config_values=config_values
+    )
+
+
+def _is_hooks_path_override(config_values: list[str]) -> bool:
+    """``-c``/``--config-env`` の値に ``core.hooksPath`` オーバーライドが含まれるかを判定する。
+
+    Args:
+        config_values: `GitInvocation.config_values`。
+
+    Returns:
+        ``core.hooksPath``（大小文字不問）を上書きする値があれば True。
+
+    Raises:
+        例外は発生しません。
+    """
+    for value in config_values:
+        key = value.split("=", 1)[0].strip().lower()
+        if key == _HOOKS_PATH_CONFIG_KEY:
+            return True
+    return False
 
 
 def _is_bypass_invocation(invocation: GitInvocation) -> bool:
@@ -270,33 +336,70 @@ def _is_bypass_invocation(invocation: GitInvocation) -> bool:
         invocation: git 起動トークン以降の解析結果。
 
     Returns:
-        ``--no-verify``、``git commit`` の ``-n``、またはサブコマンド未確定時の
-        ``-n`` なら True。
+        ``--no-verify``、``core.hooksPath`` オーバーライド、``git commit`` の
+        ``-n``、またはサブコマンド未確定時の ``-n`` なら True。
 
     Raises:
         例外は発生しません。
     """
     if _BYPASS_LONG_FLAG in invocation.flags:
         return True
+    if _is_hooks_path_override(invocation.config_values):
+        return True
     if _BYPASS_SHORT_FLAG not in invocation.flags:
         return False
     return invocation.subcommand == "commit" or not invocation.subcommand_certain
 
 
-def has_bypass_flag(command: str) -> bool:
+def _extract_shell_wrapper_command(segment: list[str]) -> str | None:
+    """セグメント内の既知シェル ``-c`` 呼び出しから、ラップされた文字列コマンドを取り出す。
+
+    ``sh -c 'git commit --no-verify'`` のように basename が
+    `_SHELL_WRAPPER_EXECUTABLES` のいずれかであるトークンを探し、続く
+    トークンに ``-c`` があれば、その次のトークン（シェルへ渡す文字列
+    コマンド）を返します（A-07 対応。1 段の再帰にのみ使う）。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        ラップされた文字列コマンド。見つからなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    for i, token in enumerate(segment):
+        basename = token.rsplit("/", 1)[-1]
+        if basename not in _SHELL_WRAPPER_EXECUTABLES:
+            continue
+        for offset, tok in enumerate(segment[i + 1 :]):
+            if tok != "-c":
+                continue
+            remaining = segment[i + 1 + offset + 1 :]
+            return remaining[0] if remaining else None
+    return None
+
+
+def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
     """コマンド文字列に git フックバイパスフラグが含まれるかを判定する。
 
     セグメント先頭に限らず全トークンから git 起動トークンを探し、見つかった
     位置以降を `parse_git_segment` で解析します（``sudo git commit -n`` や
     ``/usr/bin/git commit --no-verify`` を捕捉するため）。1 セグメントに
-    複数の git 起動があれば全て検査します。
+    複数の git 起動があれば全て検査します。加えて、``sh``/``bash``/``zsh``/
+    ``dash`` の ``-c`` に渡された文字列引数へ 1 段だけ再帰します
+    （``sh -c 'git commit --no-verify'`` を検出するため、A-07 対応。
+    ``_recursed`` は内部再帰用の引数で外部から指定しません）。
 
     Args:
         command: 検査対象のシェルコマンド文字列。
+        _recursed: 内部再帰用フラグ。True の場合、これ以上 ``sh -c`` へは
+            再帰しません（2 段以上のネストは非目標）。
 
     Returns:
-        ``--no-verify``（サブコマンド不問）、``git commit`` の ``-n``、または
-        サブコマンドを確定できない状態での ``-n`` を検出したら True。
+        ``--no-verify``（サブコマンド不問）、``core.hooksPath`` オーバーライド、
+        ``git commit`` の ``-n``、またはサブコマンドを確定できない状態での
+        ``-n`` を検出したら True。
 
     Raises:
         例外は発生しません。
@@ -306,6 +409,10 @@ def has_bypass_flag(command: str) -> bool:
             if not is_git_invocation(token):
                 continue
             if _is_bypass_invocation(parse_git_segment(segment[index:])):
+                return True
+        if not _recursed:
+            wrapper_command = _extract_shell_wrapper_command(segment)
+            if wrapper_command is not None and has_bypass_flag(wrapper_command, _recursed=True):
                 return True
     return False
 

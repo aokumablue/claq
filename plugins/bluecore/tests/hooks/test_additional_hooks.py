@@ -58,6 +58,18 @@ _BYPASS_COMMANDS = [
     "git commit -an -m x",
     "git commit -u -n",
     "git commit -F - -n",
+    # core.hooksPath オーバーライド（--no-verify を使わずに git 自身の
+    # フックを無効化できるため、単独でもブロックする。A-07）
+    "git -c core.hooksPath=/dev/null commit",
+    "git -ccore.hooksPath=/dev/null commit",
+    "git -c CORE.HOOKSPATH=/dev/null commit",
+    "git --config-env=core.hooksPath=MYVAR commit",
+    "git --config-env core.hooksPath=MYVAR commit",
+    # sh -c ラッパー 1 段（A-07）
+    f"sh -c 'git commit {NV}'",
+    f"bash -c 'git commit {NV}'",
+    # -c より前に他オプションが挟まっても -c を探し続ける
+    f"sh -x -c 'git commit {NV}'",
     # 未知のグローバルオプションで subcommand 解決がずれる形は fail-closed
     f"git --future-option value commit {NV}",
     "git --future-option value commit -n",
@@ -94,6 +106,12 @@ _ALLOWED_COMMANDS = [
     "grep -rn git .",
     "ls -n /usr/bin/git",
     "xargs -n 2 git status",
+    # core.hooksPath 以外の -c/--config-env は対象外
+    "git -c user.name=x commit -m y",
+    # sh -c の 2 段以上のネストは非目標（1 段のみ再帰）
+    f"sh -c \"sh -c 'git commit {NV}'\"",
+    # -c を伴わないシェル起動はラッパー対象外
+    "sh script.sh",
     # その他
     "git status",
     "git rebase --continue",
