@@ -22,6 +22,7 @@ commands/skills/agents/hooks を周期的にレビューし、実害を修正し
 - 主対象: `plugins/bluecore/{commands,skills,agents,hooks}`（引数 `--scope` で上書き）
 - 指摘が指す実装ファイル（`src/bluecore/hooks/` 等）への修正も許可
 - 非目標: `rules/` のメンテ／スケジューラ内蔵／auto-push／RLS 級の新機能実装（検出時は `/plan` 提示に留める）
+- **対象 surfaces が存在しない場合は PASS 扱いにしない**: `--scope` 省略時は cwd がリポジトリルート（`plugins/bluecore/` が cwd から辿れる）である前提。対象パスが 1 つも存在しない場合、「メンテ対象なし・問題なし」と報告せず `BLOCKED: 対象 surfaces が見つかりません（cwd={現在の cwd}、想定パス={解決したパス}）。--scope で対象ディレクトリを明示してください` として停止する。consumer fixture から相対パス前提のまま起動すると、installed plugin 自体のメンテを「対象なし」と誤認しうるため（cwd をどちらに合わせるかは呼び出し側の責務であり、本スキルは沈黙で PASS を返さない）
 
 ## ステップ1: 準備・入力収集（READ-ONLY）
 

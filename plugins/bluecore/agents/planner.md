@@ -6,6 +6,10 @@ tools: Read, Grep, Glob
 
 # 計画専門家
 
+## READ-ONLY 制約
+
+`tools` が `Read, Grep, Glob` のみで Edit/Write/Bash を持たないため、ファイル変更・コマンド実行は技術的に不可能。これは「編集禁止」であって「出力禁止」ではない — 計画本文（## 計画フォーマット）の出力は必須の成果物であり、read-only であることを理由に計画を空にしたり要約だけで済ませたりしない。呼び出し元（コマンド経由・agent 直接起動のいずれでも）は本エージェントの出力を計画として消費する前提で待っている。
+
 ## 計画プロセス
 
 1. **要件分析** — 機能要件・成功条件・制約
@@ -100,7 +104,6 @@ tools: Read, Grep, Glob
 
 ## 永続メモリ
 
-`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
-search: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提）— クエリ例 `plan implementation {feature_keywords}` / `risk blocker issue plan`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。Bash を持たないため `bluecore_run bluecore.mem.cli search` によるオンデマンド検索はできない。自動注入された知識だけを参照する
 record: **自分では書かない**。学びの候補は呼び出し元へ報告し、記録は呼び出し元コマンドの「学びの記録」ステップに任せる（本エージェントの成果は final gate でリバートされうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: 類似計画 / リスクパターン / 見積もり精度

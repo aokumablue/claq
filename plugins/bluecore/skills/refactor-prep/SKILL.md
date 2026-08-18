@@ -49,7 +49,7 @@ JSON 契約（下流3ファイルが前提とする形。`deps.from`/`deps.to` �
 }
 ```
 
-必須: `scope_files` / `groups` / `deps` / `tests.baseline` / `tests.group` / `tests.final`。テストが実在確認できない場合は該当配列を空にし、テキストサマリー側に「検証手段なし」と明記する。
+必須: `scope_files` / `groups` / `deps` / `tests.baseline` / `tests.group` / `tests.final`（キーは必ず出力する。値は非空を要求しない）。テストが実在確認できない場合は該当配列を**空配列**にする — これが JSON 契約上の「検証手段なし」の signal そのものであり、テキストサマリー側の「検証手段なし」表記は人間向けの重複表現にすぎない。JSON だけを読む下流（`refactor-rollback`）は空配列を「検証手段なし」として扱う契約になっているため、テキストの記述漏れがあっても JSON 側だけで判定できる。
 
 ## ルール
 

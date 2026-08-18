@@ -95,6 +95,15 @@ grading後に、eval改善の余地が明確なら指摘。
 
 **迷ったら**: 通す側が証明責任を負う。
 
+## 出力契約
+
+- 最終出力は **`grading_path` へ保存する単一の JSON object 1個のみ**。前置きテキスト・Markdown 見出し・コードフェンス・複数 JSON の連続出力は禁止
+- 保存後、書いた JSON を読み直して次の不変条件を自己検証する。満たさない場合は `grading_path` を書き直してから完了報告する:
+  - `summary.total == len(expectations)`
+  - `summary.passed + summary.failed == summary.total`
+  - `summary.pass_rate == round(summary.passed / summary.total, 2)`
+- `expectations` と `summary` は grader 自身の判定契約であり、`comparator` の `expectation_results.A`/`.B` 形式とは無関係。両者を混同しない（呼び出し元・下流が同じ実行から両方を期待することはない）
+
 ## 出力形式
 
 次の構造の JSON を出力します。
