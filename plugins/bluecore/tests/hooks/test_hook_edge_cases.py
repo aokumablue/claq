@@ -376,7 +376,14 @@ def test_should_scan_secrets_includes_non_lint_extensions(file_path: str) -> Non
 
 
 def test_pre_bash_commit_quality_helpers_return_success_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(command: list[str], *, capture_output: bool, check: bool, text: bool = False):
+    def fake_run(
+        command: list[str],
+        *,
+        capture_output: bool,
+        check: bool,
+        text: bool = False,
+        timeout: float | None = None,
+    ):
         if command[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(command, 0, stdout="src/app.py\nsrc/tool.ts\n", stderr="")
         if command[:2] == ["git", "show"]:
@@ -992,7 +999,14 @@ def test_evaluate_commit_without_dash_a_reads_index_when_worktree_diverges(
 def test_get_unstaged_modified_files_returns_success_output(monkeypatch: pytest.MonkeyPatch) -> None:
     """`git diff HEAD` の成功出力からファイル一覧を返すこと。"""
 
-    def fake_run(command: list[str], *, capture_output: bool, text: bool, check: bool):
+    def fake_run(
+        command: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+        timeout: float | None = None,
+    ):
         assert command == ["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"]
         return subprocess.CompletedProcess(command, 0, stdout="src/a.py\nsrc/b.py\n", stderr="")
 

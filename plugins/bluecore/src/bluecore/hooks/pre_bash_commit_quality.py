@@ -68,11 +68,12 @@ def _git_name_only(git_args: list[str]) -> list[str]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=5,
         )
         if result.returncode != 0:
             return []
         return [f for f in result.stdout.strip().split("\n") if f]
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         return []
 
 

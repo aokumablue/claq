@@ -85,11 +85,12 @@ def get_staged_file_content(file_path: str) -> str | None:
             ["git", "show", f":{file_path}"],
             capture_output=True,
             check=False,
+            timeout=5,
         )
         if result.returncode != 0:
             return None
         return result.stdout.decode("utf-8", errors="replace")
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         return None
 
 
