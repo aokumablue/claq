@@ -30,6 +30,7 @@ command: /skill-gen
 for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
           "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
           "$HOME/.claude/plugins/bluecore" \
+          "$(ls -d "$HOME"/.claude/plugins/cache/bluecore/bluecore/*/ 2>/dev/null | sort -V | tail -1)" \
           "$HOME"/.grok/installed-plugins/bluecore-*; do
   [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
 done
@@ -63,6 +64,7 @@ SKILL.md に落とし込めなかったものを知識カードとして登録�
 for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
           "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
           "$HOME/.claude/plugins/bluecore" \
+          "$(ls -d "$HOME"/.claude/plugins/cache/bluecore/bluecore/*/ 2>/dev/null | sort -V | tail -1)" \
           "$HOME"/.grok/installed-plugins/bluecore-*; do
   [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
 done
