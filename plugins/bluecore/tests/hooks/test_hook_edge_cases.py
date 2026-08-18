@@ -461,7 +461,9 @@ def test_pre_bash_commit_quality_finds_parser_and_reading_errors(monkeypatch: py
 def test_pre_bash_commit_quality_run_wrapper_and_main_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert pre_bash_commit_quality.run("payload") == pre_bash_commit_quality.evaluate("payload")
 
-    monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "payload")
+    monkeypatch.setattr(
+        "bluecore.hooks.hook_common.read_raw_stdin_with_truncation", lambda: ("payload", False)
+    )
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "evaluate",
@@ -920,14 +922,14 @@ def test_evaluate_confirmed_commit_scan_exception_is_blocked(monkeypatch: pytest
 
 
 def test_main_logs_on_stdin_read_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """read_raw_stdin 自体が例外を投げても main() は無言にならずログを出す（R-01b）。"""
+    """read_raw_stdin_with_truncation 自体が例外を投げても main() は無言にならずログを出す（R-01b）。"""
     logs: list[str] = []
     monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
 
-    def _boom() -> str:
+    def _boom() -> tuple[str, bool]:
         raise OSError("stdin broken")
 
-    monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", _boom)
+    monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin_with_truncation", _boom)
 
     assert pre_bash_commit_quality.main() == 0
     assert any("stdin broken" in message for message in logs)

@@ -40,7 +40,7 @@ from bluecore.hooks.commit_quality_scanner import (
     should_lint_file,
     should_scan_secrets,
 )
-from bluecore.hooks.hook_common import parse_json_object, split_segments, tokenize
+from bluecore.hooks.hook_common import MAX_STDIN_BYTES, parse_json_object, split_segments, tokenize
 from bluecore.lib.core_utils import log
 from bluecore.lib.harness import extract_bash_command
 
@@ -87,6 +87,15 @@ _REPO_ROOT_UNAVAILABLE_MESSAGE = (
     "[Hook] BLOCKED: could not resolve the repo root to scan worktree changes "
     "for a confirmed `git commit -a` call (git itself failed or timed out). "
     "Refusing to allow an unverifiable commit through."
+)
+
+# stdin が MAX_STDIN_BYTES を超えて切り捨てられた場合の deny 理由。切り捨て後の
+# JSON は不完全になりうる（commit かどうかの判定自体が信用できない）ため、
+# block_no_verify / config_protection と同じく fail-closed にする（A-05 相当対応）。
+_TRUNCATED_INPUT_MESSAGE = (
+    f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for pre:bash-commit-quality. "
+    "Refusing to evaluate a possibly-truncated payload for a git commit quality scan. "
+    "Retry with a smaller command."
 )
 
 
@@ -759,6 +768,20 @@ def main() -> int:
     ブロック時（exitCode == 2）は emit_block_output で host 非依存の合併出力
     （stderr の理由 + stdout の permissionDecision: deny JSON、exit 2）に変換する。
 
+    fail-open/fail-closed の境界は「commit と確定したか」で分けます
+    （A-05 相当対応）:
+
+    - stdin 読み取り自体の例外、または 1 MiB 超の truncation は commit か
+      どうか判定不能。truncation は fail-closed（block_no_verify /
+      config_protection と同じ 4 段構成に揃える）、読み取り例外は従来通り
+      fail-open（commit と無関係な Bash 呼び出し全体を巻き込まないため）。
+    - `evaluate()` 自体は例外を投げない契約だが、防御的に例外時は
+      commit 確定前として fail-open のまま扱う。
+    - `evaluate()` が exitCode=2（commit と確定しブロック判定済み）を返した
+      後、`emit_block_output` 自体が失敗した場合は fail-closed（exit 2）。
+      commit であることは既に確定しているため、出力層の失敗を理由に
+      検査未完了のコミットを通さない。
+
     Returns:
         コミットを許可する場合は 0、ブロックする場合は 2 を返します。
 
@@ -768,21 +791,38 @@ def main() -> int:
     Raises:
         例外は発生しません。
     """
-    from bluecore.hooks.hook_common import emit_block_output, read_raw_stdin
+    from bluecore.hooks.hook_common import emit_block_output, read_raw_stdin_with_truncation
 
     try:
-        raw = read_raw_stdin()
-        result = evaluate(raw)
-        if result["exitCode"] == 2:
-            return emit_block_output(result["reason"])
-        return result["exitCode"]
+        raw, truncated = read_raw_stdin_with_truncation()
     except Exception as err:
-        # read_raw_stdin / emit_block_output 自体が失敗した場合。evaluate()
-        # は例外を投げない契約のためここに到達するのは入出力層のみ。
-        # raw 入力が確保できていないため commit 判定自体ができず
-        # fail-open にせざるを得ないが、無言にはしない。
+        # commit 確定前（stdin 読み取り自体）の例外は非ブロッキング。
         log(f"[Hook] Error: {err}")
         return 0
+
+    if truncated:
+        try:
+            return emit_block_output(_TRUNCATED_INPUT_MESSAGE)
+        except Exception as err:
+            log(f"[Hook] Error: {err}")
+            return 2
+
+    try:
+        result = evaluate(raw)
+    except Exception as err:
+        # evaluate() は例外を投げない契約だが、防御的に commit 確定前の
+        # 例外と同様に fail-open で扱う。
+        log(f"[Hook] Error: {err}")
+        return 0
+
+    if result["exitCode"] == 2:
+        try:
+            return emit_block_output(result["reason"])
+        except Exception as err:
+            # commit と確定した後の出力層失敗は fail-closed。
+            log(f"[Hook] Error: {err}")
+            return 2
+    return result["exitCode"]
 
 
 if __name__ == "__main__":
