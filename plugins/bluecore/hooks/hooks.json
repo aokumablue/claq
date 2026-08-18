@@ -7,7 +7,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.block_no_verify"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.block_no_verify",
+            "timeout": 5
           }
         ],
         "description": "git hook-bypassフラグをブロックして、pre-commit、commit-msg、pre-pushフックがスキップされないように保護します。"
@@ -17,7 +18,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.pre_bash_commit_quality"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.pre_bash_commit_quality",
+            "timeout": 30
           }
         ],
         "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"

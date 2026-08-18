@@ -79,6 +79,17 @@ _STAGED_FILES_UNAVAILABLE_MESSAGE = (
     "an unverifiable commit through."
 )
 
+# `git commit -a` で未ステージ変更を作業ツリーから読む必要があるのに、
+# repo root（`git rev-parse --show-toplevel`）自体が git 失敗・timeout で
+# 解決できなかった場合の deny 理由。get_staged_files() の None（R-01）と
+# 対称の fail-closed 扱いにする — 実際にコミットされる未ステージ変更を
+# 一切検査できないまま「問題なし」を返さないため。
+_REPO_ROOT_UNAVAILABLE_MESSAGE = (
+    "[Hook] BLOCKED: could not resolve the repo root to scan worktree changes "
+    "for a confirmed `git commit -a` call (git itself failed or timed out). "
+    "Refusing to allow an unverifiable commit through."
+)
+
 
 def _git_name_only(git_args: list[str]) -> list[str] | None:
     """`git ... --name-only` の出力を非空行リストにする。
@@ -598,14 +609,20 @@ def _collect_worktree_issues(
     error_count: int,
     warning_count: int,
     info_count: int,
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int, int] | None:
     """`git commit -a` の作業ツリー対象ファイルの問題数を集計に加算します。
 
     リポジトリルートを解決し、作業ツリー（`repo_root` 経由）から各ファイルを
     読んで `_count_file_issues` で集計し、既存のカウントに加算した結果を
-    返します。作業ツリー対象が無い、または repo root が解決できない場合は
-    非ブロッキングで作業ツリー分をスキップし、入力のカウントをそのまま
-    返します。
+    返します。作業ツリー対象が無ければ非ブロッキングで入力のカウントを
+    そのまま返します。
+
+    作業ツリー対象があるのに repo root が解決できない場合（git 自体の
+    失敗・timeout）は None を返し、呼び出し側で fail-closed として扱わせ
+    ます。`-a`/`--all` で実際にコミットされる未ステージ変更ファイルの
+    内容を一切検査できないまま「問題なし」を返すのは、`get_staged_files`
+    が git 失敗時に None を返すのと同じ理由で非ブロッキングにできません
+    （R-01 で修正した staged 側の fail-open と対称にするため）。
 
     Args:
         worktree_targets: 作業ツリーから読むチェック対象ファイルパスです。
@@ -616,7 +633,7 @@ def _collect_worktree_issues(
 
     Returns:
         (total_issues, error_count, warning_count, info_count) の更新後
-        タプルを返します。
+        タプル。repo root が必要なのに解決できなければ None。
 
     Raises:
         例外は発生しません。
@@ -626,8 +643,7 @@ def _collect_worktree_issues(
 
     repo_root = _resolve_repo_root()
     if repo_root is None:
-        # repo root が解決できない場合は非ブロッキングで作業ツリー分をスキップする
-        return total_issues, error_count, warning_count, info_count
+        return None
 
     wt_total, wt_error, wt_warning, wt_info = _count_file_issues(worktree_targets, repo_root=repo_root)
     return (
@@ -677,9 +693,13 @@ def _evaluate_confirmed_commit(raw_input: str, command: str, commit_args: list[s
         worktree_targets = _scan_targets(worktree_files)
 
         total_issues, error_count, warning_count, info_count = _count_file_issues(index_targets)
-        total_issues, error_count, warning_count, info_count = _collect_worktree_issues(
+        worktree_result = _collect_worktree_issues(
             worktree_targets, total_issues, error_count, warning_count, info_count
         )
+        if worktree_result is None:
+            log("[Hook] ERROR: could not resolve repo root for `git commit -a` worktree scan.")
+            return {"output": raw_input, "exitCode": 2, "reason": _REPO_ROOT_UNAVAILABLE_MESSAGE}
+        total_issues, error_count, warning_count, info_count = worktree_result
 
         total_issues, warning_count = _apply_commit_message_issues(command, total_issues, warning_count)
 

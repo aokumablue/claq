@@ -1013,10 +1013,17 @@ def test_evaluate_commit_dash_a_unions_unstaged_modified_files(monkeypatch: pyte
     assert dict(seen) == {"src/staged.py": None, "src/unstaged.py": dummy_repo_root}
 
 
-def test_evaluate_commit_dash_a_worktree_skipped_when_repo_root_unresolvable(
+def test_evaluate_commit_dash_a_worktree_blocked_when_repo_root_unresolvable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """repo root が解決できない場合、-a の未ステージ分は非ブロッキングでスキップされること。"""
+    """repo root が解決できない場合、-a の未ステージ分は fail-closed で deny されること。
+
+    `-a` で実際にコミットされる未ステージ変更を一切検査できないまま
+    「問題なし」を返すと、R-01 で塞いだ get_staged_files() の fail-open と
+    同じ穴が worktree 側に残る。staged 側と対称に fail-closed にする。
+    """
+    logs: list[str] = []
+    monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "parse_json_object",
@@ -1038,8 +1045,13 @@ def test_evaluate_commit_dash_a_worktree_skipped_when_repo_root_unresolvable(
     monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", _fake_find_file_issues)
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
 
-    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+    result = pre_bash_commit_quality.evaluate("payload")
+
+    assert result["exitCode"] == 2
+    assert "reason" in result
+    # index 側は検査済みだが worktree 側（未ステージ分）には repo root 解決前に到達しない
     assert seen == ["src/staged.py"]
+    assert any("could not resolve repo root" in message for message in logs)
 
 
 def test_evaluate_commit_without_dash_a_ignores_unstaged_modified_files(
