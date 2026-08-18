@@ -6,7 +6,7 @@
 
 前提の確認: 監査報告は公開リポジトリ `6a40bd2`（本リポジトリの `8837d79` = v0.9.31）を対象にしている。`git diff 8837d79..HEAD -- plugins/bluecore/` は着手前時点で空であり、全指摘は着手時点の現行コードにそのまま該当していた（陳腐化なし）。
 
-コミット: `c80dd10`〜`a188cc5`（7 コミット、フェーズ順）
+コミット: `a4b0c8f`〜`2eead19`（本文完成まで9コミット）＋ レビュー指摘対応 `55054ae`
 
 ---
 
@@ -16,10 +16,11 @@
 
 対象: `plugins/bluecore/src/bluecore/hooks/pre_bash_commit_quality.py`, `commit_quality_scanner.py`
 
-- **subprocess タイムアウト欠落**（監査 6.1 と同一根）: `_git_name_only`（`pre_bash_commit_quality.py`）と `get_staged_file_content`（`commit_quality_scanner.py`）の `subprocess.run` に `timeout` が無かった。`_resolve_repo_root` に既にあった 5 秒を基準に統一した。
+- **subprocess タイムアウト欠落**（監査 6.1 と同一根）: `_git_name_only`（`pre_bash_commit_quality.py`）と `get_staged_file_content`（`commit_quality_scanner.py`）の `subprocess.run` に `timeout` が無かった。`_resolve_repo_root` に既にあった 5 秒を基準に統一した。あわせて `hooks.json` の `block_no_verify`（timeout 5）・`pre_bash_commit_quality`（timeout 30）自体にも `timeout` キーを追加した（レビュー指摘で追加対応、`55054ae`）。`config_protection` は同じ PreToolUse イベントで `timeout: 5` を既に本番稼働させており、host が hook timeout を deny 扱いにするという証跡は無い（そうであれば `config_protection` が既に全書込みブロックの latent hazard になっているはずだが、そうなっていない）。個々の subprocess は本節の対応で既に上限が付いているため、このホストレベル timeout は多重防御であり、これが無いと無期限停止するという意味での安全上の欠落ではない。
 - **R-01a（malformed JSON の fail-open）**: 同じ PreToolUse イベントで `config_protection.py` は parse 不能 JSON を exit 2 にする一方、本フックは exit 0 で素通ししていた。ただし単純に対称化はしなかった — `config_protection` の matcher は書込みツール限定だが本フックの matcher は `Bash|shell|run_terminal_command` 全体であり、malformed JSON というだけで一律 deny すると commit と無関係な全 Bash 呼び出しを塞ぐ。加えて `read_raw_stdin()` は 1MiB 超の無警告切り詰めや 5 秒デッドライン超過で部分データを返す経路があり、長い heredoc を含む正当な Bash 呼び出しが「parse 不能」に化けうる。そこで、parse 不能時は既存の regex フォールバック `\bgit\s+commit\b`（JSON を経由せず raw 文字列に直接効く）で commit 判定を試み、commit と判定できた場合のみ deny、それ以外は exit 0 + ログとした。
 - **R-01b（裸の except による無言 fail-open）**: `evaluate()`/`main()` の `except Exception` が commit 確定後の例外もログなしで exit 0 にしていた。`_evaluate_confirmed_commit()` に分離し、commit と確定した入力に対する例外は fail-closed（exit 2 + 理由）にした。commit 確定前（JSON 抽出・判定段階）の例外は従来どおり非ブロッキングだが、ログは必ず出すようにした（`main()` の裸 except も同様）。
 - **`get_staged_files()` の fail-open**: git 自体の失敗・timeout と「ステージ 0 件（`--allow-empty` 等の正常系）」を同じ `[]` に潰していた。`_git_name_only` の戻り値を `None`（git 失敗）と `[]`（確認済み 0 件）に区別し、`None` の場合は fail-closed にした。`get_unstaged_modified_files()`（HEAD 不在＝初回コミットの正常系失敗）は契約を変えず `[]` のまま維持。
+- **`_collect_worktree_issues()` の非対称（レビュー指摘で追加対応、`55054ae`）**: 上記 `get_staged_files()` の fail-open を塞いだ後、`git commit -a` の未ステージ変更を作業ツリーから読む際に `_resolve_repo_root()` が git 失敗/timeout で `None` を返すケースだけが非ブロッキングスキップのまま残っていた（同じ commit 経路で staged 側は fail-closed・worktree 側は fail-open という非対称）。`_collect_worktree_issues()` が repo root 解決不能時に `None` を返すよう変更し、呼び出し側で `get_staged_files()` と同じ fail-closed 扱いにした。
 - **R-01c 残余**: `find_file_issues()` の `content is None`（ファイル読み取り不能・symlink/traversal 拒否）を空 issue（無言許可）ではなく `scan_error`（severity=error）にした。既存の `scan_error` 機構自体は既に実装済みだった（1.7 節参照）。
 - `_count_file_issues()` に防御的アクセス（`.get()`）を追加し、未知 severity を安全側の error 扱いにした（従来は total にのみ計上され error/warning/info いずれにも入らず見逃されていた）。
 
@@ -74,7 +75,7 @@ key は redact 前の生 title から生成するようにした（`generate_key
 
 対象: `hook_common.py`, `output_adapter.py`, `lib/harness.py`, `lib/subprocess_utils.py`
 
-`hooks.json` に PostToolUse/UserPromptSubmit の matcher は存在せず、`emit_post_tool_use_output`/`emit_user_prompt_submit_output`/`adapt_tool_output`/`extract_tool_result_text`/`check_output_text` の呼び出し元はテストのみだった（監査報告 6.3 と同一の指摘に加え、`emit_user_prompt_submit_output` と `check_output_text` は監査報告に記載が無いが調査で同種のデッドコードと判明したため合わせて削除）。テストごと削除し、カバレッジ 100% を維持した（コードとテストを対にして消したためカバレッジ稼ぎではない）。
+`hooks.json` に PostToolUse/UserPromptSubmit の matcher は存在せず、`emit_post_tool_use_output`/`emit_user_prompt_submit_output`/`adapt_tool_output`/`extract_tool_result_text`/`check_output_text` の呼び出し元はテストのみだった（監査報告 6.3 と同一の指摘に加え、`emit_user_prompt_submit_output` と `check_output_text` は監査報告に記載が無いが調査で同種のデッドコードと判明したため合わせて削除）。テストごと削除し、カバレッジ 100% を維持した（コードとテストを対にして消したためカバレッジ稼ぎではない）。あわせて `tests/redux/`（`__pycache__` のみで git 管理外のディレクトリ）を削除した — git 差分には現れない。
 
 ### 1.7 前提の明文化（`a188cc5`）
 
@@ -101,7 +102,9 @@ key は redact 前の生 title から生成するようにした（`generate_key
 
 **判定: 誤検知（設計判断）**。allowed-root allowlist が無いのは `handoff.py:104-127` に明記された意図的判断: Claude Code は `~/.claude/projects/...`、Copilot CLI は `~/.copilot/...` と host ごとに transcript の置き場所が異なり、allowed-root で封じ込めるとどちらかの host で壊れるため、host 非依存の性質検査（symlink 拒否・通常ファイルのみ・所有者一致）で防御している（F-08a 対応）。
 
-また監査報告の「ユーザー文を信頼境界なしで次セッションへ渡す」という記述も事実誤認: `handoff.py:239` は既に `compact_line(redact(strip_tags(strip_ansi(text))), 200)` を適用しており、ANSI 除去・タグ除去・secret redaction を経てから DB に入る。攻撃者が所有者一致の任意ファイルを home 配下に書ける状況を仮定するなら、transcript 経由の injection より直接的な攻撃経路（他の設定ファイル改ざん等）が既に成立しており、この経路だけを塞ぐ実益は薄い。
+また監査報告の「ユーザー文を信頼境界なしで次セッションへ渡す」という記述も事実誤認: `handoff.py:239` は既に `compact_line(redact(strip_tags(strip_ansi(text))), 200)` を適用しており、ANSI 除去・タグ除去・secret redaction を経てから DB に入る。
+
+（以下は一次資料に基づかない評価であり事実ではなく判断として付記する: 所有者一致の任意ファイルを home 配下に書ける攻撃者を仮定した場合、transcript 経由の injection より直接的な攻撃経路が既に成立している可能性が高く、この経路だけを追加で塞ぐ優先度は本作業のスコープでは低いと判断した。）
 
 ### 2.5 R-06 — reviewer の read-only が技術的に強制されない
 
@@ -138,6 +141,7 @@ key は redact 前の生 title から生成するようにした（`generate_key
 | R-01a | pre_bash_commit_quality.py | 実欠陥 | 修正（`c80dd10`/`65ed80d`） |
 | R-01b | 同上 | 実欠陥 | 修正 |
 | R-01c | commit_quality_scanner.py | 一部誤検知（機構は実装済み）・残余は実欠陥 | 残余のみ修正 |
+| R-01（隣接）| `_collect_worktree_issues` の repo_root 解決不能 | 実欠陥（レビューで発見） | 修正（`55054ae`） |
 | R-02 | launcher.py | 設計判断 | 現状維持＋CLAUDE.md明文化（`a188cc5`） |
 | R-03 | launcher.py / hook_common.py | 誤検知（実装済み） | 無変更 |
 | R-04 | knowledge_input.py | 実欠陥（redaction）／設計判断（status） | redaction のみ修正（`e474a0b`） |
@@ -149,7 +153,7 @@ key は redact 前の生 title から生成するようにした（`generate_key
 | R-10 | refactor-rollback/prep SKILL.md | 実欠陥 | 修正（`a3cff53`） |
 | R-11 | planner.md | 誤検知（契約不在）／実質原因は実欠陥 | 実質原因のみ修正（`a3cff53`） |
 | R-12 | pre_bash_commit_quality.py | 実欠陥 | 修正（`43c94ee`） |
-| 6.1 | pre_bash_commit_quality.py / commit_quality_scanner.py | 実欠陥 | 修正（`c80dd10`） |
+| 6.1 | pre_bash_commit_quality.py / commit_quality_scanner.py / hooks.json | 実欠陥 | 修正（`c80dd10`, `55054ae`） |
 | 6.2 | hook_common.py | 対応OS明示で決着 | 文書化（`a188cc5`） |
 | 6.3 | hook_common.py / output_adapter.py / harness.py / subprocess_utils.py | 実欠陥（デッドコード） | 削除（`a4b0c8f`） |
 | 6.4 | hooks.json 配布 | 検証手段の話・欠陥ではない | 無変更 |
@@ -163,7 +167,7 @@ key は redact 前の生 title から生成するようにした（`generate_key
 
 ## 4. 検証
 
-全 7 フェーズで以下を実行し、警告なしで成功したことを確認済み:
+全フェーズ（修正→検証→コミットのサイクル）＋ advisor レビュー後の追加修正で、以下を都度実行し警告なしで成功したことを確認済み（最終状態）:
 
 ```bash
 source .venv/bin/activate
