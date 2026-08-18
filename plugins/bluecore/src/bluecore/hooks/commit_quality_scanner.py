@@ -7,21 +7,38 @@
 シークレット）を担います。`git commit` の検出やコミットメッセージ検証
 といったエントリ側のロジックは `pre_bash_commit_quality` に残ります。
 
-シークレット検出はバイナリ判定（lint 抑制のみに使用）や nosec、
-ファイルサイズに関わらず可能な限り実行します（大容量ファイルは
-先頭 `_SECRET_SCAN_MAX_BYTES` バイトに切り詰めて継続します）。
+シークレット検出はテキストファイルであれば nosec・ファイルサイズに関わらず
+全体を走査します（サイズによる打ち切りは行いません。A-02 対応）。バイナリ
+判定されたファイルは secret scan 自体をスキップし、severity `warning` の
+痕跡 issue を残します（severity `error` にはしません。deny は画像 commit を
+ブロックし、ユーザーの明示要件に反するため）。走査量に上限を設けないと
+`pre_bash_commit_quality` の hook timeout（30秒）に達し、host がフックを
+キャンセルして続行する（fail-open）ため commit 全体の secret scan が無検査に
+なりうる、という 1MiB cap より悪いリスクがあります。そのため実時間バジェット
+（`_SECRET_SCAN_TIME_BUDGET_SECONDS`）を設け、超過したテキストファイルは
+`scan_error`（severity `error`、fail-closed）として扱います。
 """
 
 from __future__ import annotations
 
 import re
 import subprocess
+import time
 from pathlib import Path
 
 from bluecore.lib.core_utils import log
 
 _BINARY_SNIFF_SIZE = 8192  # 8KB
-_SECRET_SCAN_MAX_BYTES = 1024 * 1024  # 1MB
+
+# secret scan 1 回あたりに許す実時間予算（秒）。pre_bash_commit_quality の
+# hooks.json timeout（30秒）より十分小さく取り、予算超過を scan_error
+# （fail-closed）として検知してからホスト側 timeout に達しないようにする。
+_SECRET_SCAN_TIME_BUDGET_SECONDS = 10.0
+
+# 予算チェックの頻度（行数）。毎行 time.monotonic() を呼ぶコストを避けつつ、
+# 予算超過を実用上十分な精度で検知する。
+_SECRET_SCAN_BUDGET_CHECK_INTERVAL = 2000
+
 _LINTABLE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
 _MINIFIED_SUFFIXES = (".min.js", ".min.css")
 _SECRET_SCAN_EXCLUDED_FILENAMES = {
@@ -40,6 +57,33 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"AKIA[A-Z0-9]{16}", "AWS Access Key"),
     (r"api[_-]?key\s*[=:]\s*['\"][^'\"]+['\"]", "API key"),
 )
+
+
+def _monotonic() -> float:
+    """`time.monotonic()` を返す間接呼び出し。
+
+    secret scan の実時間バジェット判定に使う時刻取得をテストから
+    決定的に差し替え可能にするための間接層です（`time.monotonic()` を
+    直接呼ぶとテストがスリープに依存し flaky になるため）。
+
+    Args:
+        なし
+
+    Returns:
+        単調増加する時刻（秒）。
+
+    Raises:
+        例外は発生しません。
+    """
+    return time.monotonic()
+
+
+class SecretScanBudgetExceeded(Exception):
+    """secret scan が実時間予算を超過したことを表す例外。
+
+    `find_file_issues` の既存の例外ガード（`scan_error`、severity `error`、
+    fail-closed）にそのまま乗せるための専用例外です。
+    """
 
 
 def _is_binary_content(content: str) -> bool:
@@ -163,9 +207,9 @@ def should_scan_secrets(file_path: str) -> bool:
     - パッケージマネージャのロックファイル（内容が長大かつ生成物のため）
     - 圧縮・生成物（`*.min.js` / `*.min.css`）
 
-    ファイルサイズ（1MB 超）による扱いは除外ではなく、実際に取得した内容を
-    `_SECRET_SCAN_MAX_BYTES` まで切り詰めてスキャンを継続します
-    （呼び出し側 `find_file_issues` が行います）。
+    ファイルサイズによる除外は行いません。テキストファイルは全体を走査し、
+    バイナリ判定されたファイルのみ `find_file_issues` 側で secret scan 自体を
+    スキップします（severity `warning` の痕跡を残す。A-02 対応）。
 
     Args:
         file_path: 判定対象のファイルパスです。
@@ -248,39 +292,38 @@ def _scan_lint_issues(lines: list[str]) -> list[dict]:
 def _scan_secret_issues(content: str, lines: list[str]) -> list[dict]:
     """ファイル内容からハードコードされたシークレットを検出します。
 
-    バイナリ判定・`# nosec`・ファイルサイズに関わらず常に実行します
-    （NUL バイトを1つ混ぜるだけで検査を回避できるバイパスや、大容量化に
-    よる全面スキップを防ぐためです）。`_SECRET_SCAN_MAX_BYTES` を超える
-    場合は全体を放棄せず、先頭 `_SECRET_SCAN_MAX_BYTES` バイトに切り詰めて
-    スキャンを継続します（末尾側のみに存在するシークレットは検出できません
-    が、水増しによる全面回避は防げます）。
+    呼び出し元（`find_file_issues`）はバイナリ判定されたファイルではこの
+    関数を呼びません。テキストファイルは `# nosec`・ファイルサイズに関わらず
+    全体を走査します（サイズによる打ち切りは行いません。A-02 対応。1MiB 境界
+    より後ろに置かれた secret も検出します）。
+
+    走査量に上限を設けないと `pre_bash_commit_quality` の hook timeout に
+    達しうるため、実時間バジェット（`_SECRET_SCAN_TIME_BUDGET_SECONDS`）を
+    `_SECRET_SCAN_BUDGET_CHECK_INTERVAL` 行ごとに確認します。超過した場合は
+    `SecretScanBudgetExceeded` を送出し、呼び出し元の既存の例外ガードで
+    `scan_error`（severity `error`、fail-closed）として扱われます。
 
     Args:
-        content: 検査対象のデコード済みファイル内容です（バイト長判定・
-            切り詰めに使用します）。
-        lines: `content` を改行で分割済みの行リストです。切り詰めが
-            発生しない（大多数の）場合はこれを再利用し、`content.split`
-            の再計算を避けます（呼び出し側 `find_file_issues` が
-            lint スキャンと共有する分割結果です）。
+        content: 検査対象のデコード済みファイル内容です（未使用ですが、
+            呼び出し側とのインターフェース共有のため引数として残します）。
+        lines: `content` を改行で分割済みの行リストです（呼び出し側
+            `find_file_issues` が lint スキャンと共有する分割結果です）。
 
     Returns:
         検出したシークレット問題の辞書リストを返します。
 
     Raises:
-        例外は発生しません。
+        SecretScanBudgetExceeded: 実時間バジェットを超過した場合。
     """
-    # 大容量ファイルは全面放棄せず、先頭 _SECRET_SCAN_MAX_BYTES バイトに
-    # 切り詰めてスキャンを継続する（水増しによる回避を防ぐ）。切り詰めが
-    # 発生しない場合は呼び出し側で分割済みの lines をそのまま使う。
-    raw_bytes = content.encode("utf-8")
-    if len(raw_bytes) > _SECRET_SCAN_MAX_BYTES:
-        secret_scan_text = raw_bytes[:_SECRET_SCAN_MAX_BYTES].decode("utf-8", errors="ignore")
-        scan_lines = secret_scan_text.split("\n")
-    else:
-        scan_lines = lines
+    deadline = _monotonic() + _SECRET_SCAN_TIME_BUDGET_SECONDS
 
     issues = []
-    for index, line in enumerate(scan_lines):
+    for index, line in enumerate(lines):
+        if index % _SECRET_SCAN_BUDGET_CHECK_INTERVAL == 0 and _monotonic() > deadline:
+            raise SecretScanBudgetExceeded(
+                f"secret scan exceeded {_SECRET_SCAN_TIME_BUDGET_SECONDS}s time budget "
+                f"at line {index + 1}"
+            )
         line_num = index + 1
         for pattern, name in _SECRET_PATTERNS:
             if re.search(pattern, line, re.IGNORECASE):
@@ -309,13 +352,15 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
     True、かつバイナリでない（先頭 `_BINARY_SNIFF_SIZE` 文字に NUL を含まない）
     ファイルのみ対象です。
 
-    シークレット検出は `should_scan_secrets` が True のファイルであれば、
-    バイナリ判定・`# nosec`・ファイルサイズに関わらず常に実行します
-    （NUL バイトを1つ混ぜるだけで検査を回避できるバイパスや、大容量化に
-    よる全面スキップを防ぐためです）。`_SECRET_SCAN_MAX_BYTES` を超える
-    場合は全体を放棄せず、先頭 `_SECRET_SCAN_MAX_BYTES` バイトに切り詰めて
-    スキャンを継続します（末尾側のみに存在するシークレットは検出できません
-    が、水増しによる全面回避は防げます）。
+    シークレット検出は `should_scan_secrets` が True のテキストファイルであれば
+    `# nosec`・ファイルサイズに関わらず全体を走査します（A-02 対応。サイズに
+    よる打ち切りはありません）。バイナリ判定されたファイルのみ secret scan
+    自体をスキップし、severity `warning` の痕跡 issue（`secret_scan_skipped`）
+    を残します（severity `error` にはしません。画像等の commit を一律ブロック
+    するとユーザーの明示要件に反するため）。NUL バイトを1つ混ぜてバイナリ
+    判定させる回避は理屈上残りますが、ファイル単位で warning の痕跡が残るため、
+    走査量無制限による hook timeout（→ host がフックをキャンセルして続行する
+    fail-open で commit 全体が無検査になる）より影響は小さいトレードオフです。
 
     `# nosec` を含む行はログ出力呼び出し / デバッガ文 / TODO チェックを抑制します
     （検出器自身のテストフィクスチャ等、意図的にパターンを含む行のため）。
@@ -392,12 +437,40 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
         except Exception as err:
             issues.append(_scan_error_issue(file_path, "lint scan", err, severity="warning"))
     if do_secrets:
-        try:
-            issues.extend(_scan_secret_issues(content, lines))
-        except Exception as err:
-            issues.append(_scan_error_issue(file_path, "secret scan", err, severity="error"))
+        if is_binary:
+            issues.append(_binary_secret_scan_skipped_issue(file_path))
+        else:
+            try:
+                issues.extend(_scan_secret_issues(content, lines))
+            except Exception as err:
+                issues.append(_scan_error_issue(file_path, "secret scan", err, severity="error"))
 
     return issues
+
+
+def _binary_secret_scan_skipped_issue(file_path: str) -> dict:
+    """バイナリ判定されたファイルで secret scan をスキップした痕跡を返します。
+
+    severity は `warning` に留めます（`error` にすると画像等のバイナリ commit
+    を一律ブロックしてしまい、ユーザーの明示要件に反するため）。無言で
+    スキップするのではなく issue として残すことで、NUL バイト混入による
+    回避があってもファイル単位の痕跡は残ります（A-02 対応）。
+
+    Args:
+        file_path: 対象ファイルのパス。
+
+    Returns:
+        severity `warning` の issue 辞書。
+
+    Raises:
+        例外は発生しません。
+    """
+    return {
+        "type": "secret_scan_skipped",
+        "message": f"{file_path}: バイナリと判定されたため secret scan をスキップしました",
+        "line": 0,
+        "severity": "warning",
+    }
 
 
 def _scan_error_issue(file_path: str, stage: str, err: Exception, *, severity: str) -> dict:

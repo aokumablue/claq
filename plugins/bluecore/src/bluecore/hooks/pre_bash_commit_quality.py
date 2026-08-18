@@ -16,9 +16,10 @@ commit 検出は `hook_common.tokenize`/`split_segments`（`block_no_verify` と
 必要があります）。ステージ済みファイルは従来どおり INDEX
 （`git show :path`）から読みます。
 
-シークレット検出はバイナリ判定（lint 抑制のみに使用）や nosec、
-ファイルサイズに関わらず可能な限り実行します（大容量ファイルは
-先頭 `_SECRET_SCAN_MAX_BYTES` バイトに切り詰めて継続します）。
+シークレット検出はテキストファイルであれば nosec・ファイルサイズに関わらず
+全体を走査します（サイズによる打ち切りはありません）。バイナリ判定された
+ファイルは lint 抑制に加え secret scan もスキップし、severity `warning` の
+痕跡を残します（詳細は `commit_quality_scanner` のモジュール docstring）。
 
 非目標: ラッパースクリプトやシェルエイリアス経由の `git commit` 呼び出し検出、
 `git commit <pathspec>` で明示指定された未ステージファイルの取り込み

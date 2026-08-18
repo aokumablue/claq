@@ -158,14 +158,13 @@ def test_find_file_issues_skips_secret_scan_for_lock_files(monkeypatch: pytest.M
     assert commit_quality_scanner.find_file_issues("package-lock.json") == []
 
 
-def test_find_file_issues_oversized_files_truncate_secret_scan_not_skip(
+def test_find_file_issues_oversized_files_detect_secret_past_old_1mib_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """1MB を超えるファイルは secret スキャンを全面放棄せず、先頭
-    _SECRET_SCAN_MAX_BYTES バイトに切り詰めて継続すること（水増しによる
-    全面回避の防止）。境界を超えた末尾側の secret はこの実装では検出でき
-    ない（切り詰めの仕様上の限界）ため、lint（ログ出力チェック）は継続
-    検出されることも合わせて確認する。"""  # nosec
+    """1MiB を超える位置に置かれた secret も検出されること（A-02 対応: サイズ
+    による打ち切りを廃止したため、旧 1MiB cap の後ろにある secret も見逃さない）。
+    lint（ログ出力チェック）はサイズに関わらず継続することも合わせて確認する。
+    """  # nosec
     padding = "x" * (1024 * 1024 + 1)
     content = padding + "\n" + 'console.log("hi")' + "\n" + "api" + "_key" + ' = "abc123"'  # nosec
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
@@ -173,8 +172,8 @@ def test_find_file_issues_oversized_files_truncate_secret_scan_not_skip(
     issues = commit_quality_scanner.find_file_issues("src/app.js")
 
     types = {issue["type"] for issue in issues}
-    # 切り詰め境界より後ろにある secret は検出できない（仕様上の限界）
-    assert "secret" not in types
+    # 旧 1MiB cap は廃止済み。境界より後ろの secret も検出される。
+    assert "secret" in types
     # lint はサイズに関わらず継続する
     assert "console.log" in types  # nosec
 
@@ -182,8 +181,7 @@ def test_find_file_issues_oversized_files_truncate_secret_scan_not_skip(
 def test_find_file_issues_oversized_files_scan_prefix_for_secrets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """1MB 超のファイルでも、切り詰め境界より前（先頭側）にある secret は
-    検出されること（全面スキップではなく先頭側スキャン継続の確認）。"""
+    """1MB 超のファイルでも、先頭側にある secret は検出されること。"""
     secret_line = "api" + "_key" + ' = "abc123"'
     padding = "x" * (1024 * 1024 + 1)
     content = secret_line + "\n" + padding
@@ -205,20 +203,49 @@ def test_find_file_issues_secret_scan_applies_under_size_limit(monkeypatch: pyte
     assert any(issue["type"] == "secret" for issue in issues)
 
 
-def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(
+def test_find_file_issues_binary_file_skips_lint_and_secret_scan_with_warning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """バイナリ判定（先頭に NUL を含む）は lint 抑制のみに用い、secret 検出は
-    継続すること（NUL バイトを1つ混ぜるだけで secret 検査を回避できてしまう
-    抜け道の回帰防止）。"""
+    """バイナリ判定（先頭に NUL を含む）は lint を抑制し、secret scan もスキップ
+    するが、無言にはせず severity warning の痕跡（secret_scan_skipped）を残す
+    こと（A-02 対応。NUL バイトを1つ混ぜるだけの secret 検査回避は理屈上残るが、
+    痕跡は残る）。"""
     content = "\0binary preamble\n" + 'console.log("hi")\n' + "api" + "_key" + ' = "abc123"'  # nosec
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
     issues = commit_quality_scanner.find_file_issues("weird.js")
 
     types = {issue["type"] for issue in issues}
-    assert "secret" in types
+    assert "secret" not in types
     assert "console.log" not in types  # nosec
+    skipped = [issue for issue in issues if issue["type"] == "secret_scan_skipped"]
+    assert len(skipped) == 1
+    assert skipped[0]["severity"] == "warning"
+
+
+def test_scan_secret_issues_raises_on_time_budget_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """secret scan の実時間バジェット超過は例外として送出され、
+    find_file_issues 側で scan_error（severity error、fail-closed）になること。"""
+    calls = iter([0.0, 1_000.0])
+    monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: next(calls))
+
+    with pytest.raises(commit_quality_scanner.SecretScanBudgetExceeded):
+        commit_quality_scanner._scan_secret_issues("line one", ["line one"])
+
+
+def test_find_file_issues_secret_scan_budget_exceeded_is_scan_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """find_file_issues 経由でも時間バジェット超過は scan_error（error）として報告される。"""
+    calls = iter([0.0, 1_000.0])
+    monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: next(calls))
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: "some text")
+
+    issues = commit_quality_scanner.find_file_issues("src/app.js")
+
+    scan_errors = [issue for issue in issues if issue["type"] == "scan_error"]
+    assert len(scan_errors) == 1
+    assert scan_errors[0]["severity"] == "error"
 
 
 def test_find_file_issues_secret_scan_exception_is_reported_as_error(
