@@ -59,7 +59,6 @@ git 起動トークンの探索:
 
 from __future__ import annotations
 
-import shlex
 from typing import NamedTuple
 
 from bluecore.hooks.hook_common import (
@@ -67,11 +66,10 @@ from bluecore.hooks.hook_common import (
     emit_block_output,
     parse_json_object,
     read_raw_stdin_with_truncation,
+    split_segments,
+    tokenize,
 )
 from bluecore.lib.harness import extract_bash_command, extract_tool_input
-
-# コマンド全体をセグメントに割るシェル区切りトークン。
-_SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
 
 # 値を別トークンとして必ず取る long オプション（git グローバル + commit/push）。
 # 値が ``=`` で結合されている場合は次トークンを消費しません。
@@ -159,59 +157,6 @@ class GitInvocation(NamedTuple):
     subcommand: str | None
     flags: list[str]
     subcommand_certain: bool
-
-
-def tokenize(command: str) -> list[str]:
-    """シェルコマンドを区切り記号込みのトークン列へ分割する。
-
-    ``shlex`` を ``punctuation_chars=True`` で使い、``git add -A&&git commit``
-    のように空白なしで連結された区切り記号も独立トークンにします。クォート
-    不整合で ``ValueError`` になる入力は空白分割へフォールバックします
-    （クォートが閉じていない入力ではクォート内容もフラグとして走査され、
-    ブロック側＝fail-closed に倒れます）。
-
-    Args:
-        command: 対象のシェルコマンド文字列。
-
-    Returns:
-        トークンのリスト。
-
-    Raises:
-        例外は発生しません。
-    """
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    try:
-        return list(lexer)
-    except ValueError:
-        return command.split()
-
-
-def split_segments(tokens: list[str]) -> list[list[str]]:
-    """トークン列をシェル区切りごとのセグメントへ分割する。
-
-    Args:
-        tokens: `tokenize` が返したトークン列。
-
-    Returns:
-        区切りトークンを含まないセグメント（トークンリスト）のリスト。
-        空セグメントは除外します。
-
-    Raises:
-        例外は発生しません。
-    """
-    segments: list[list[str]] = []
-    current: list[str] = []
-    for token in tokens:
-        if token in _SHELL_SEPARATORS:
-            if current:
-                segments.append(current)
-            current = []
-            continue
-        current.append(token)
-    if current:
-        segments.append(current)
-    return segments
 
 
 def is_git_invocation(token: str) -> bool:

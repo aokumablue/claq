@@ -5,9 +5,11 @@
 pre:bash で `git commit` を検出したときだけ、lint や簡易静的チェックを実行します。
 問題が見つかった場合はコミットを止め、それ以外は入力をそのまま通過させます。
 
-commit 検出は `shlex` によるトークン化を用い、`git` グローバルオプション
+commit 検出は `hook_common.tokenize`/`split_segments`（`block_no_verify` と
+共有する区切り記号対応トークナイザ）を用い、`git` グローバルオプション
 （値の有無・既知/未知を問わずすべて読み飛ばします）や連続空白・改行・
-`&&`/`;`/`|` 区切りの複合コマンドを考慮します。`git commit -a`/`--all`/
+`&&`/`||`/`;`/`|`/`&`/`(`/`)` 区切りの複合コマンドを、区切り文字がトークンへ
+密着していても正しくセグメント分割した上で考慮します。`git commit -a`/`--all`/
 結合短形式（例: `-am`）を検出した場合は、未ステージ変更ファイルを
 **作業ツリーから**読んでスキャン対象へ加えます（`git commit -a` は
 作業ツリーの内容をコミットするため、INDEX ではなく作業ツリーを読む
@@ -30,7 +32,6 @@ commit 検出は `shlex` によるトークン化を用い、`git` グローバ�
 from __future__ import annotations
 
 import re
-import shlex
 import subprocess
 from pathlib import Path
 
@@ -39,11 +40,9 @@ from bluecore.hooks.commit_quality_scanner import (
     should_lint_file,
     should_scan_secrets,
 )
-from bluecore.hooks.hook_common import parse_json_object
+from bluecore.hooks.hook_common import parse_json_object, split_segments, tokenize
 from bluecore.lib.core_utils import log
 from bluecore.lib.harness import extract_bash_command
-
-_SHELL_SEPARATORS = {"&&", "||", ";", "|"}
 
 _CONVENTIONAL_COMMIT = re.compile(
     r"^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?:\s*.+"
@@ -220,21 +219,22 @@ def _is_git_executable_token(token: str) -> bool:
     return name == "git"
 
 
-def _find_git_commit_args(tokens: list[str]) -> list[str] | None:
-    """トークン列内の `git commit` 呼び出しを探し、commit 直後の引数トークンを返します。
+def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
+    """1 セグメント（シェル区切りを含まないトークン列）内の `git commit` 呼び出しを探します。
 
     `git` トークン（`_is_git_executable_token` で絶対パス・`.exe`・大小を
     正規化して判定）の後は、既知/未知を問わずグローバルオプション・その値
     トークンを区別せず単純に読み飛ばし、`commit` サブコマンドに到達するかを
     判定します（allowlist に無い `--exec-path <path>` / `--super-prefix <path>`
     等の値トークンで走査が打ち切られ検出漏れになる問題を避けるため、過剰
-    検出側に倒しています）。`&&`/`;`/`|` 等のシェル区切りトークンに達した
-    場合はその `git` 呼び出しは commit ではないとみなし、次の `git` トークン
-    を探します。見つかった場合、`commit` 以降シェル区切りトークンが現れる
-    までを引数リストとして返します。
+    検出側に倒しています）。セグメントは呼び出し元（`hook_common.split_segments`）
+    が既に `&&`/`;`/`|`/`&`/`(`/`)` で分割済みのため、本関数はセグメント内に
+    区切りトークンが存在しない前提で走査します（A-01 対応: `status;echo` の
+    ようにシェル区切りがトークンに密着した非 commit コマンドを、区切り前に
+    セグメントを分けることで取り逃さないようにします）。
 
     Args:
-        tokens: `shlex` 等でトークン化されたコマンド列です。
+        segment: `hook_common.tokenize` + `split_segments` で得た 1 セグメント分のトークン列です。
 
     Returns:
         commit 呼び出しの引数トークンリスト。見つからなければ None を返します。
@@ -242,53 +242,30 @@ def _find_git_commit_args(tokens: list[str]) -> list[str] | None:
     Raises:
         例外は発生しません。
     """
-    for i, token in enumerate(tokens):
+    for i, token in enumerate(segment):
         if not _is_git_executable_token(token):
             continue
-        rest_start = i + 1
-        for offset, tok in enumerate(tokens[rest_start:]):
+        rest = segment[i + 1 :]
+        for offset, tok in enumerate(rest):
             if tok == "commit":
-                return _collect_args_until_separator(tokens, rest_start + offset + 1)
-            if tok in _SHELL_SEPARATORS:
-                break
+                return rest[offset + 1 :]
     return None
-
-
-def _collect_args_until_separator(tokens: list[str], start: int) -> list[str]:
-    """`start` からシェル区切りトークンが現れるまでの引数トークンを収集します。
-
-    `git commit` の直後（`start`）から `&&`/`;`/`|` 等のシェル区切りに達する
-    直前までを commit 引数として返します。
-
-    Args:
-        tokens: `shlex` 等でトークン化されたコマンド列です。
-        start: 収集を開始するインデックス（`commit` トークンの次）です。
-
-    Returns:
-        収集した引数トークンのリストを返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    args: list[str] = []
-    for tok in tokens[start:]:
-        if tok in _SHELL_SEPARATORS:
-            break
-        args.append(tok)
-    return args
 
 
 def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     """コマンド文字列が `git commit` 呼び出しかを判定し、commit 引数トークンを返します。
 
-    `shlex.split` でトークン化し、`git` → グローバルオプション → `commit`
-    の並びを検出します。連続空白・改行・`&&`/`;`/`|` 区切りの複合コマンドは
-    トークン走査で自然に扱えます。
+    `hook_common.tokenize`（区切り記号を独立トークン化する `shlex`）でトークン化し、
+    `hook_common.split_segments` で `&&`/`||`/`;`/`|`/`&`/`(`/`)` ごとのセグメントに
+    分割してから、セグメントごとに `git` → グローバルオプション → `commit` の並びを
+    探します。セグメント分割により、``git status;echo commit`` のように区切り文字が
+    トークンへ密着した非 commit コマンドを誤って commit と判定しません
+    （`block_no_verify.has_bypass_flag` と同じトークナイザを共有する A-01 対応）。
 
-    `shlex.split` がクォート不整合（heredoc 等）で `ValueError` を送出した
-    場合は、空白による簡易分割へフォールバックしてトークン走査を継続し、
-    それでも判定できなければ `re.search(r"\\bgit\\s+commit\\b", command)` で
-    最終判定します。過剰検出側に倒すフェイルセーフ設計です。
+    トークン化がクォート不整合（heredoc 等）で空白分割へフォールバックした場合や、
+    それでも commit 判定できなかった場合は `re.search(r"\\bgit\\s+commit\\b", command)`
+    で最終判定します。過剰検出側に倒すフェイルセーフ設計です（`echo "git commit"` は
+    安全側の誤検出として許容する）。
 
     非目標: シェル展開・変数分割経由（`git $(echo commit)` / `git${IFS}commit`
     等）で `git` と `commit` が生文字列上で隣接しない形の検出。POSIX シェル
@@ -305,14 +282,11 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     Raises:
         例外は発生しません。
     """
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        tokens = command.split()
-
-    commit_args = _find_git_commit_args(tokens)
-    if commit_args is not None:
-        return True, commit_args
+    segments = split_segments(tokenize(command))
+    for segment in segments:
+        commit_args = _find_git_commit_args_in_segment(segment)
+        if commit_args is not None:
+            return True, commit_args
 
     if re.search(r"\bgit\s+commit\b", command):
         return True, []

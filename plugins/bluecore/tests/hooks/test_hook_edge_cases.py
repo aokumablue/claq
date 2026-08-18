@@ -817,7 +817,7 @@ def test_is_git_commit_command_exe_token_walk_not_regex_fallback() -> None:
     """`git.exe commit` はトークン走査自体で捕まる（regex フォールバック頼みではない）。"""
     import bluecore.hooks.pre_bash_commit_quality as pbcq
 
-    args = pbcq._find_git_commit_args(["git.exe", "commit", "-m", "x"])
+    args = pbcq._find_git_commit_args_in_segment(["git.exe", "commit", "-m", "x"])
     assert args == ["-m", "x"]
 
 
@@ -1290,7 +1290,8 @@ def test_get_worktree_file_content_rejects_symlinked_intermediate_directory(tmp_
 
 def test_find_git_commit_args_stops_at_separator_before_commit() -> None:
     """git の直後にシェル区切りが現れた場合、その git 呼び出しは commit と
-    みなさないこと（オプション読み飛ばしのループが区切りで打ち切られる分岐）。
+    みなさないこと（区切り記号でセグメントが分かれ、`commit` が別セグメントに
+    孤立するため見つからない分岐）。
     """
     import bluecore.hooks.pre_bash_commit_quality as pbcq
 
@@ -1299,15 +1300,21 @@ def test_find_git_commit_args_stops_at_separator_before_commit() -> None:
     assert args == []
 
 
-def test_collect_args_until_separator_stops_at_shell_operator() -> None:
-    """`git commit` 後の引数収集は `&&` / `;` / `|` で打ち切る。"""
+def test_git_commit_args_stop_at_shell_operator() -> None:
+    """`git commit` 後の引数収集は `&&` / `;` / `|` 等のセグメント境界で打ち切る。"""
     import bluecore.hooks.pre_bash_commit_quality as pbcq
 
     is_commit, args = pbcq._is_git_commit_command("git commit -m x && echo hi")
     assert is_commit is True
     assert args == ["-m", "x"]
-    assert pbcq._collect_args_until_separator(["-m", "x", ";", "true"], 0) == ["-m", "x"]
-    assert pbcq._collect_args_until_separator(["&&", "echo"], 0) == []
+
+    is_commit, args = pbcq._is_git_commit_command("git commit -m x ; true")
+    assert is_commit is True
+    assert args == ["-m", "x"]
+
+    is_commit, args = pbcq._is_git_commit_command("&& echo hi")
+    assert is_commit is False
+    assert args == []
 
 
 def test_find_file_issues_minified_js_lints_but_skips_secret_scan(

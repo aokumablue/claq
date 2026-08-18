@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import select
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,65 @@ from bluecore.hooks.output_adapter import adapt_context_output, emit_block
 from bluecore.lib.core_utils import ensure_private_dir, get_bluecore_dir
 
 MAX_STDIN_BYTES = 1024 * 1024
+
+# コマンド全体をセグメントに割るシェル区切りトークン。`block_no_verify` と
+# `pre_bash_commit_quality` が共に shell 区切り文字密着トークン（例:
+# ``status;echo``）を誤って 1 トークンとして扱わないよう、この定数と
+# `tokenize`/`split_segments` を共有ヘルパとして 1 箇所に持つ（A-01 対応）。
+_SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
+
+
+def tokenize(command: str) -> list[str]:
+    """シェルコマンドを区切り記号込みのトークン列へ分割する。
+
+    ``shlex`` を ``punctuation_chars=True`` で使い、``git add -A&&git commit``
+    のように空白なしで連結された区切り記号も独立トークンにします。クォート
+    不整合で ``ValueError`` になる入力は空白分割へフォールバックします
+    （クォートが閉じていない入力ではクォート内容もフラグとして走査され、
+    ブロック側＝fail-closed に倒れます）。
+
+    Args:
+        command: 対象のシェルコマンド文字列。
+
+    Returns:
+        トークンのリスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError:
+        return command.split()
+
+
+def split_segments(tokens: list[str]) -> list[list[str]]:
+    """トークン列をシェル区切りごとのセグメントへ分割する。
+
+    Args:
+        tokens: `tokenize` が返したトークン列。
+
+    Returns:
+        区切りトークンを含まないセグメント（トークンリスト）のリスト。
+        空セグメントは除外します。
+
+    Raises:
+        例外は発生しません。
+    """
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token in _SHELL_SEPARATORS:
+            if current:
+                segments.append(current)
+            current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
 
 # hooks は Claude Code が spawn 直後に stdin へ JSON を書き込むため、
 # 最初のバイト到着まで 2 秒あれば十分な余裕がある。
