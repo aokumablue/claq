@@ -49,15 +49,50 @@ _CONVENTIONAL_COMMIT = re.compile(
     r"^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?:\s*.+"
 )
 
+# raw stdin が JSON として壊れているが、生文字列上に git commit らしき
+# パターンが見える場合の deny 理由。JSON を経由せず raw_input に直接
+# 正規表現を当てる（_is_git_commit_command の regex フォールバックと同じ
+# パターン）。このフックの matcher は Bash 全体（commit と無関係な呼び出し
+# も含む）なので、malformed JSON というだけで一律 deny すると commit と
+# 無関係な Bash 呼び出しまで巻き込む。commit と判定できた場合のみ deny する。
+_MALFORMED_COMMIT_MESSAGE = (
+    "[Hook] BLOCKED: hook input could not be parsed as JSON, but the raw "
+    "command text matches `git commit`. Refusing to allow an unverifiable "
+    "commit through rather than silently skipping the quality scan."
+)
 
-def _git_name_only(git_args: list[str]) -> list[str]:
+# commit と判定済みの入力に対して、判定後の処理中に想定外の例外が
+# 発生した場合の deny 理由。ここに到達する時点で「commit である」ことは
+# 確定しているため、検査未完了のまま通すのではなく fail-closed にする。
+_SCAN_FAILURE_MESSAGE = (
+    "[Hook] BLOCKED: the commit quality scan failed unexpectedly for a "
+    "confirmed `git commit` call. Refusing to allow an unverifiable commit "
+    "through."
+)
+
+# get_staged_files() が git 自体の失敗・timeout で None を返した場合の
+# deny 理由。「ステージ済みファイル 0 件」（正常系。--allow-empty 等）とは
+# 区別する（0 件は exitCode=0 のまま）。
+_STAGED_FILES_UNAVAILABLE_MESSAGE = (
+    "[Hook] BLOCKED: could not determine staged files for a confirmed "
+    "`git commit` call (git itself failed or timed out). Refusing to allow "
+    "an unverifiable commit through."
+)
+
+
+def _git_name_only(git_args: list[str]) -> list[str] | None:
     """`git ... --name-only` の出力を非空行リストにする。
+
+    「git は成功したがファイル 0 件」（`None` ではなく `[]`）と「git 自体が
+    失敗・timeout した」（`None`）を区別する。両者を同じ `[]` に潰すと、
+    呼び出し側が「対象ファイルなし」と「検査不能」を見分けられず、後者を
+    無言で見逃す（R-01 残余）。
 
     Args:
         git_args: subprocess に渡す git コマンド列。
 
     Returns:
-        ファイルパスのリスト。失敗時は空リスト。
+        ファイルパスのリスト。git 自体の失敗・timeout 時は None。
 
     Raises:
         例外は発生しません。
@@ -71,17 +106,18 @@ def _git_name_only(git_args: list[str]) -> list[str]:
             timeout=5,
         )
         if result.returncode != 0:
-            return []
+            return None
         return [f for f in result.stdout.strip().split("\n") if f]
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-        return []
+        return None
 
 
-def get_staged_files() -> list[str]:
+def get_staged_files() -> list[str] | None:
     """ステージング済みファイルの一覧を取得します。
 
     Returns:
-        ステージングされたファイルパスのリストを返します。
+        ステージングされたファイルパスのリストを返します。git 自体の
+        失敗・timeout で取得できない場合は None（「0 件」とは区別する）。
 
     Args:
         引数はありません。
@@ -96,7 +132,9 @@ def get_unstaged_modified_files() -> list[str]:
     """`git commit -a` 相当で追加取り込む作業ツリーの変更ファイル一覧を取得します。
 
     `git diff HEAD --name-only --diff-filter=ACMR` の結果を返します。
-    HEAD が無い（初回コミット）等で git が失敗した場合は空リストです。
+    HEAD が無い（初回コミット）等で git が失敗した場合は空リストです
+    （初回コミットは正常系のため、ここは `get_staged_files` と異なり
+    失敗を fail-closed にしません）。
 
     Returns:
         変更されている作業ツリーファイルパスのリストを返します。
@@ -107,7 +145,8 @@ def get_unstaged_modified_files() -> list[str]:
     Raises:
         例外は発生しません。
     """
-    return _git_name_only(["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"])
+    result = _git_name_only(["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"])
+    return result if result is not None else []
 
 
 def _resolve_repo_root() -> Path | None:
@@ -425,15 +464,22 @@ def _count_file_issues(files_to_check: list[str], repo_root: Path | None = None)
             continue
         log(f"\n[FILE] {file_path}")
         for issue in file_issues:
-            label = severity_label.get(issue["severity"], "INFO")
-            log(f"  {label} Line {issue['line']}: {issue['message']}")
+            # issue は find_file_issues の内部契約（dict にキー欠落なし）に
+            # 依存せず .get() で防御する。未知 severity は「検査したが
+            # 分類できない」ことを示すため、見逃す（黙って info/合計のみ加算）
+            # のではなく安全側の error 扱いにする。
+            severity = issue.get("severity")
+            label = severity_label.get(severity, "INFO")
+            log(f"  {label} Line {issue.get('line', 0)}: {issue.get('message', '')}")
             total_issues += 1
-            if issue["severity"] == "error":
+            if severity == "error":
                 error_count += 1
-            elif issue["severity"] == "warning":
+            elif severity == "warning":
                 warning_count += 1
-            elif issue["severity"] == "info":
+            elif severity == "info":
                 info_count += 1
+            else:
+                error_count += 1
 
     return total_issues, error_count, warning_count, info_count
 
@@ -564,11 +610,18 @@ def _collect_worktree_issues(
     )
 
 
-def evaluate(raw_input: str) -> dict:
-    """入力を評価し、出力内容と終了コードを返します。
+def _evaluate_confirmed_commit(raw_input: str, command: str, commit_args: list[str]) -> dict:
+    """`git commit` と判定済みの入力を検査し、結果を返します。
+
+    ここに到達した時点で「これは commit である」ことは確定しているため、
+    処理中に想定外の例外が起きても exitCode=0（非ブロッキング）へは
+    倒さない。検査未完了のまま通すのは「検査したが問題なし」と区別が
+    付かなくなり、品質・secret 検査を無言で迂回できてしまうため。
 
     Args:
         raw_input: フックに渡された生の入力文字列です。
+        command: `git commit` を含む bash コマンド文字列です。
+        commit_args: commit 呼び出しの引数トークン列です。
 
     Returns:
         output と exitCode を含む辞書を返します。
@@ -577,20 +630,13 @@ def evaluate(raw_input: str) -> dict:
         例外は発生しません。
     """
     try:
-        input_data = parse_json_object(raw_input)
-        if not input_data:
-            return {"output": raw_input, "exitCode": 0}
-
-        command = extract_bash_command(input_data)
-
-        # git commit コマンドの場合のみ実行（トークン化して堅牢に判定）
-        is_commit, commit_args = _is_git_commit_command(command)
-        if not is_commit:
-            return {"output": raw_input, "exitCode": 0}
-
         # ステージングされたファイルを取得（-a/--all の場合は未ステージの変更も加える。
         # -a の未ステージ分は作業ツリーの内容がコミットされるため作業ツリーから読む）
         staged_files = get_staged_files()
+        if staged_files is None:
+            log("[Hook] ERROR: could not determine staged files (git itself failed or timed out).")
+            return {"output": raw_input, "exitCode": 2, "reason": _STAGED_FILES_UNAVAILABLE_MESSAGE}
+
         index_files, worktree_files = _partition_commit_all_files(staged_files, commit_args)
         all_files = sorted(set(index_files) | set(worktree_files))
         if not all_files:
@@ -613,7 +659,59 @@ def evaluate(raw_input: str) -> dict:
 
     except Exception as err:
         log(f"[Hook] Error: {err}")
-        # エラー時はノンブロッキング
+        log("[Hook] BLOCKED: quality scan failed for a confirmed git commit; refusing an unverifiable commit.")
+        return {"output": raw_input, "exitCode": 2, "reason": _SCAN_FAILURE_MESSAGE}
+
+
+def evaluate(raw_input: str) -> dict:
+    """入力を評価し、出力内容と終了コードを返します。
+
+    JSON が壊れている・commit と無関係な Bash 呼び出しは非ブロッキング
+    （exitCode=0）。JSON が壊れていても raw 文字列上に `git commit` が
+    見える場合は deny する（malformed JSON を理由に品質・secret 検査を
+    迂回させないため）。`git commit` と確定した入力は
+    `_evaluate_confirmed_commit` に委譲し、以降は fail-closed で扱う。
+
+    Args:
+        raw_input: フックに渡された生の入力文字列です。
+
+    Returns:
+        output と exitCode を含む辞書を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        input_data = parse_json_object(raw_input)
+        if input_data is None:
+            # 空/空白入力、または JSON として壊れている。matcher が Bash 全体
+            # （commit と無関係な呼び出しも含む）のため、malformed というだけで
+            # 一律 deny すると無関係な Bash 呼び出しまで巻き込む。raw 文字列上に
+            # `git commit` が見える場合のみ deny する。
+            if raw_input.strip() and re.search(r"\bgit\s+commit\b", raw_input):
+                log("[Hook] ERROR: malformed JSON input, but raw command text matches `git commit`.")
+                return {"output": raw_input, "exitCode": 2, "reason": _MALFORMED_COMMIT_MESSAGE}
+            if raw_input.strip():
+                log("[Hook] WARNING: could not parse hook input as JSON; not a git commit, passing through.")
+            return {"output": raw_input, "exitCode": 0}
+
+        if not input_data:
+            return {"output": raw_input, "exitCode": 0}
+
+        command = extract_bash_command(input_data)
+
+        # git commit コマンドの場合のみ実行（トークン化して堅牢に判定）
+        is_commit, commit_args = _is_git_commit_command(command)
+        if not is_commit:
+            return {"output": raw_input, "exitCode": 0}
+
+        return _evaluate_confirmed_commit(raw_input, command, commit_args)
+
+    except Exception as err:
+        log(f"[Hook] Error: {err}")
+        # commit と確定する前の例外（JSON 抽出・コマンド判定段階）は
+        # 非ブロッキング。判定済みの例外は _evaluate_confirmed_commit 側で
+        # fail-closed にする。
 
     return {"output": raw_input, "exitCode": 0}
 
@@ -656,7 +754,12 @@ def main() -> int:
         if result["exitCode"] == 2:
             return emit_block_output(result["reason"])
         return result["exitCode"]
-    except Exception:
+    except Exception as err:
+        # read_raw_stdin / emit_block_output 自体が失敗した場合。evaluate()
+        # は例外を投げない契約のためここに到達するのは入出力層のみ。
+        # raw 入力が確保できていないため commit 判定自体ができず
+        # fail-open にせざるを得ないが、無言にはしない。
+        log(f"[Hook] Error: {err}")
         return 0
 
 

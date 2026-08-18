@@ -355,6 +355,21 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
         issues.append(_scan_error_issue(file_path, "ファイル読み取り", err, severity="error"))
         return issues
     if content is None:
+        # get_staged_file_content / get_worktree_file_content の正常系の
+        # エラー経路（git 非0終了・OSError・repo_root 外への symlink/traversal
+        # 拒否）はいずれも None を返す契約。ここで黙って空 issue を返すと
+        # 「スキャンして問題なし」と「検査不能」が区別できず、対象ファイル
+        # は無検査のままコミットが通ってしまう。scan_error（error）として
+        # 積み、_finalize_result 側でブロック対象にする。
+        log(f"[Hook] scan_error: {file_path} の内容取得に失敗しました（読み取り不能または取得拒否）")
+        issues.append(
+            {
+                "type": "scan_error",
+                "message": f"{file_path}: 内容を取得できなかったため検査できませんでした",
+                "line": 0,
+                "severity": "error",
+            }
+        )
         return issues
 
     try:

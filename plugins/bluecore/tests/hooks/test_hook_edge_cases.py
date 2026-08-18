@@ -331,7 +331,8 @@ def test_pre_bash_commit_quality_helpers_handle_subprocess_errors(monkeypatch: p
         lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, stdout="", stderr=""),
     )
 
-    assert pre_bash_commit_quality.get_staged_files() == []
+    # git 自体が非0終了した場合は「0 件」ではなく None（検査不能）を返す
+    assert pre_bash_commit_quality.get_staged_files() is None
     assert commit_quality_scanner.get_staged_file_content("src/app.js") is None
     assert commit_quality_scanner.should_lint_file("src/app.py")
     assert not commit_quality_scanner.should_lint_file("src/app.txt")
@@ -607,9 +608,14 @@ def test_pre_bash_commit_quality_helpers_and_pass_branch(monkeypatch: pytest.Mon
         lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("missing")),
     )
 
-    assert pre_bash_commit_quality.get_staged_files() == []
+    assert pre_bash_commit_quality.get_staged_files() is None
     assert commit_quality_scanner.get_staged_file_content("src/app.js") is None
-    assert commit_quality_scanner.find_file_issues("src/app.js") == []
+    # content 取得不能（None）は「検査したが問題なし」ではなく scan_error
+    # として積まれ、severity=error でブロック対象になる
+    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    assert len(issues) == 1
+    assert issues[0]["type"] == "scan_error"
+    assert issues[0]["severity"] == "error"
 
     logs: list[str] = []
     monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
@@ -648,7 +654,7 @@ def test_validate_commit_message_lowercase_no_period() -> None:
 
 
 def test_count_file_issues_unknown_severity(monkeypatch) -> None:
-    """未知の severity は error/warning/info いずれにも加算しない。"""
+    """未知の severity は安全側に倒し error として加算する（黙って見逃さない）。"""
     import bluecore.hooks.pre_bash_commit_quality as pbcq
 
     monkeypatch.setattr(
@@ -656,7 +662,7 @@ def test_count_file_issues_unknown_severity(monkeypatch) -> None:
     )
     monkeypatch.setattr(pbcq, "log", lambda *a, **k: None)
     total, err, warn, info = pbcq._count_file_issues(["f.py"])
-    assert (total, err, warn, info) == (1, 0, 0, 0)
+    assert (total, err, warn, info) == (1, 1, 0, 0)
 
 
 def test_apply_commit_message_issues_without_suggestion(monkeypatch) -> None:
@@ -793,6 +799,107 @@ def test_is_commit_all_flag_detects_short_long_and_combined() -> None:
     assert pbcq._is_commit_all_flag(["-am", "x"]) is True
     assert pbcq._is_commit_all_flag(["-m", "x"]) is False
     assert pbcq._is_commit_all_flag(["--amend", "-m", "x"]) is False
+
+
+def test_evaluate_malformed_json_with_commit_text_is_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """JSON が壊れていても raw 文字列上に `git commit` が見えれば deny する（R-01a）。
+
+    matcher が Bash 全体（commit と無関係な呼び出しも含む）のため、
+    malformed というだけで一律 deny すると commit と無関係な Bash 呼び出し
+    まで巻き込む。raw 文字列に commit が見える場合のみブロックする。
+    """
+    logs: list[str] = []
+    monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
+
+    raw = '{"tool_input": {"command": "git commit -m \'feat: x\'"'  # 閉じ括弧欠落で壊れた JSON
+    result = pre_bash_commit_quality.evaluate(raw)
+
+    assert result["exitCode"] == 2
+    assert "reason" in result
+    assert any("git commit" in message for message in logs)
+
+
+def test_evaluate_malformed_json_without_commit_text_passes_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JSON が壊れていて commit とも無関係なら非ブロッキングで通過する。"""
+    logs: list[str] = []
+    monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
+
+    result = pre_bash_commit_quality.evaluate("not-json")
+
+    assert result == {"output": "not-json", "exitCode": 0}
+    assert any("could not parse hook input" in message for message in logs)
+
+
+def test_evaluate_empty_input_passes_through_silently(monkeypatch: pytest.MonkeyPatch) -> None:
+    """空/空白入力は従来どおりログ無しで非ブロッキング。"""
+    logs: list[str] = []
+    monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
+
+    assert pre_bash_commit_quality.evaluate("") == {"output": "", "exitCode": 0}
+    assert logs == []
+
+
+def test_evaluate_valid_empty_json_object_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    """壊れてはいないが空の JSON（`{}`）は commit 情報が取れず非ブロッキング。"""
+    assert pre_bash_commit_quality.evaluate("{}") == {"output": "{}", "exitCode": 0}
+
+
+def test_evaluate_confirmed_commit_staged_files_unavailable_is_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """get_staged_files が None（git 失敗/timeout）を返すと deny する（0 件とは区別）。"""
+    logs: list[str] = []
+    monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git commit -m 'feat: x'"}},
+    )
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: None)
+
+    result = pre_bash_commit_quality.evaluate("payload")
+
+    assert result["exitCode"] == 2
+    assert "reason" in result
+    assert any("could not determine staged files" in message for message in logs)
+
+
+def test_evaluate_confirmed_commit_scan_exception_is_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """commit と確定した後の想定外例外は fail-open ではなく fail-closed にする（R-01b）。"""
+    logs: list[str] = []
+    monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git commit -m 'feat: x'"}},
+    )
+
+    def _boom() -> list[str]:
+        raise RuntimeError("unexpected scanner crash")
+
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", _boom)
+
+    result = pre_bash_commit_quality.evaluate("payload")
+
+    assert result["exitCode"] == 2
+    assert "reason" in result
+    assert any("unexpected scanner crash" in message for message in logs)
+
+
+def test_main_logs_on_stdin_read_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """read_raw_stdin 自体が例外を投げても main() は無言にならずログを出す（R-01b）。"""
+    logs: list[str] = []
+    monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
+
+    def _boom() -> str:
+        raise OSError("stdin broken")
+
+    monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", _boom)
+
+    assert pre_bash_commit_quality.main() == 0
+    assert any("stdin broken" in message for message in logs)
 
 
 def test_evaluate_commit_amend_with_nothing_staged_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
