@@ -114,6 +114,50 @@ def _join_host_path(authority: str, path: str, *, strip_port: bool) -> str | Non
     return f"{host}/{cleaned}"
 
 
+def _strip_userinfo(remote_url: str) -> str:
+    """remote URL の authority 部から userinfo（``user:token@``）だけを除去する。
+
+    `_join_host_path` が identity_key を組み立てる際に使う
+    ``authority.rpartition("@")[2]`` と同じロジックを、scheme・パス・大小文字
+    を保ったまま remote_url 全体に適用する小関数です。DB へ保存する
+    ``repos.remote_url`` に credential 付き authority
+    （``https://user:token@github.com/o/r``）がそのまま残っていた問題
+    （§7-4 対応）を解消します。
+
+    ``https://user:token@github.com/o/r`` → ``https://github.com/o/r``。
+    scp 形式（``git@host:owner/repo``）にも同じロジックを一貫して適用し
+    ``host:owner/repo`` にします（``git@`` は SSH の固定ユーザー名で秘密は
+    含みませんが、identity_key 側の扱いと一貫させます）。
+
+    Args:
+        remote_url: 生の remote URL（strip 済み・非空を想定）。
+
+    Returns:
+        userinfo を除去した remote URL。authority に ``@`` が無い場合は
+        元の文字列をそのまま返す。
+
+    Raises:
+        例外は発生しません。
+    """
+    scheme_match = _SCHEME_RE.match(remote_url)
+    if scheme_match:
+        scheme_token, rest = scheme_match.group(1), scheme_match.group(2)
+        authority, sep, path = rest.partition("/")
+        host = authority.rpartition("@")[2]
+        return f"{scheme_token}://{host}{sep}{path}"
+
+    colon = remote_url.find(":")
+    slash = remote_url.find("/")
+    # scp 形式（user@host:owner/repo）は、最初のコロンがスラッシュより前に来る。
+    # normalize_remote_url の scp 判定条件と同一にする。
+    if colon != -1 and (slash == -1 or colon < slash):
+        authority, sep, path = remote_url.partition(":")
+        host = authority.rpartition("@")[2]
+        return f"{host}{sep}{path}"
+
+    return remote_url
+
+
 def normalize_remote_url(remote_url: str | None) -> str | None:
     """remote URL を表記ゆれを吸収した正体キーへ正規化する。
 
@@ -162,7 +206,8 @@ class RepoIdentity:
     Attributes:
         identity_key: 正規化 remote URL。remote が無ければ repo root 絶対パス。
         root_path: シンボリックリンク解決済みの絶対パス（worktree は本体へ寄せる）。
-        remote_url: 生の remote URL。remote が無い・使えない場合は None。
+        remote_url: userinfo（`user:token@`）除去済みの remote URL。remote が
+            無い・使えない場合は None（§7-4 対応。`_strip_userinfo` 適用済み）。
     """
 
     identity_key: str
@@ -210,20 +255,30 @@ def detect_repo_identity(cwd: str | Path | None = None) -> RepoIdentity:
 
     remote が取得でき正規化にも成功した場合のみ remote 由来の identity_key を使う。
     それ以外は repo root の絶対パスを identity_key とし、remote_url は None にする
-    （使えない remote を台帳に残さない）。
+    （使えない remote を台帳に残さない）。保存する remote_url は
+    `_strip_userinfo` で userinfo（`user:token@`）を除去した後の文字列にする
+    （§7-4 対応。identity_key の正規化とは独立に、DB へそのまま保存される
+    生の remote_url にも credential 除去を適用する）。
 
     Args:
         cwd: 起点ディレクトリ。None なら現在の作業ディレクトリ。
 
     Returns:
         確定した RepoIdentity。
+
+    Raises:
+        例外は発生しません。
     """
     root_path = find_repo_root(cwd)
     remote_url = read_remote_url(root_path)
     normalized = normalize_remote_url(remote_url)
     if normalized is None:
         return RepoIdentity(identity_key=root_path, root_path=root_path, remote_url=None)
-    return RepoIdentity(identity_key=normalized, root_path=root_path, remote_url=remote_url)
+    # normalize_remote_url は remote_url が falsy なら必ず None を返す契約
+    # （`if not remote_url: return None`）。ここに到達した時点で remote_url
+    # は truthy な文字列であることが保証される。
+    sanitized_remote_url = _strip_userinfo(remote_url)
+    return RepoIdentity(identity_key=normalized, root_path=root_path, remote_url=sanitized_remote_url)
 
 
 def slugify(name: str) -> str:

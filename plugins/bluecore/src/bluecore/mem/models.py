@@ -29,7 +29,8 @@ class Repo:
         id: 人間可読スラッグ（例 ``bluecore-dev``）。
         identity_key: 正規化 remote URL、無ければ repo root 絶対パス。
         root_path: 最後に観測した絶対パス。
-        remote_url: 生の remote URL（無ければ None）。
+        remote_url: userinfo（`user:token@`）除去済みの remote URL（無ければ
+            None。§7-4 対応、`repo_identity._strip_userinfo` を参照）。
         first_seen_at: 初回観測時刻（ISO8601）。
         last_seen_at: 最終観測時刻（ISO8601）。
     """

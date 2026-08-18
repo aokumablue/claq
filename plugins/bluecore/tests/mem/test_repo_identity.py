@@ -143,6 +143,41 @@ class TestNormalizeRemoteUrl:
         assert normalize_remote_url(raw) is None
 
 
+class TestStripUserinfo:
+    """`_strip_userinfo`（§7-4: remote_url からの credential 除去）の表駆動テスト。"""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            # https + credential（監査で確認された実害の再現）
+            (
+                "https://user:token@github.com/o/r.git",
+                "https://github.com/o/r.git",
+            ),
+            (
+                "https://user:ghp_abcdefghijklmnopqrstuvwxyz012345@github.com/o/r",
+                "https://github.com/o/r",
+            ),
+            # https + credential なし（scheme あり、@ なし authority）
+            ("https://github.com/o/r.git", "https://github.com/o/r.git"),
+            # ssh scheme + userinfo
+            ("ssh://git@github.com/o/r.git", "ssh://github.com/o/r.git"),
+            ("ssh://git@github.com:22/o/r.git", "ssh://github.com:22/o/r.git"),
+            # scp 形式（固定ユーザー名 git@ も一貫して除去する）
+            ("git@github.com:o/r.git", "github.com:o/r.git"),
+            ("github.com:o/r.git", "github.com:o/r.git"),
+            # ローカルパス（@ を含まないためそのまま）
+            ("/srv/git/repo.git", "/srv/git/repo.git"),
+            (
+                "file:///srv/git/repo.git",
+                "file:///srv/git/repo.git",
+            ),
+        ],
+    )
+    def test_strips_userinfo(self, raw: str, expected: str) -> None:
+        assert repo_identity._strip_userinfo(raw) == expected
+
+
 class TestSlugify:
     """スラッグ化のテスト。"""
 
@@ -270,12 +305,27 @@ class TestDetectRepoIdentity:
     """identity_key 確定のテスト。"""
 
     def test_uses_normalized_remote(self, tmp_path: Path) -> None:
-        """remote があれば正規化 remote が identity_key になる。"""
+        """remote があれば正規化 remote が identity_key になる。remote_url は
+        userinfo（scp 形式の固定ユーザー名 ``git@``）を除去した値になる
+        （§7-4 対応）。"""
         root = _make_repo(tmp_path / "main", remote="git@github.com:aokumablue/bluecore-dev.git")
         identity = detect_repo_identity(root)
         assert identity.identity_key == "github.com/aokumablue/bluecore-dev"
-        assert identity.remote_url == "git@github.com:aokumablue/bluecore-dev.git"
+        assert identity.remote_url == "github.com:aokumablue/bluecore-dev.git"
         assert identity.root_path == os.path.realpath(root)
+
+    def test_strips_credential_userinfo_from_remote_url(self, tmp_path: Path) -> None:
+        """https の `user:token@` credential は identity_key だけでなく
+        remote_url からも除去される（§7-4 対応、監査で確認された実害）。"""
+        root = _make_repo(
+            tmp_path / "main",
+            remote="https://user:ghp_abcdefghijklmnopqrstuvwxyz012345@github.com/o/r.git",
+        )
+        identity = detect_repo_identity(root)
+        assert identity.identity_key == "github.com/o/r"
+        assert identity.remote_url == "https://github.com/o/r.git"
+        assert "ghp_" not in identity.remote_url
+        assert "user" not in identity.remote_url
 
     def test_falls_back_to_root_path_without_remote(self, tmp_path: Path) -> None:
         """remote が無ければ repo root の絶対パスが identity_key になる。"""
@@ -322,7 +372,7 @@ class TestResolveRepo:
         repo = resolve_repo(root, db)
         assert repo.id == "bluecore-dev"
         assert repo.identity_key == "github.com/aokumablue/bluecore-dev"
-        assert repo.remote_url == "git@github.com:aokumablue/bluecore-dev.git"
+        assert repo.remote_url == "github.com:aokumablue/bluecore-dev.git"
         assert repo.root_path == os.path.realpath(root)
 
     def test_reresolve_keeps_id_and_first_seen(self, tmp_path: Path, db: Database) -> None:

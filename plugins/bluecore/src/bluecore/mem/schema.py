@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS repos (
   id            TEXT PRIMARY KEY,          -- 'bluecore-dev'（同名衝突時のみ '-2' を付す）
   identity_key  TEXT NOT NULL UNIQUE,      -- 正規化 remote URL、無ければ repo root 絶対パス
   root_path     TEXT NOT NULL,             -- 最後に観測した絶対パス（worktree でも本体に寄せる）
-  remote_url    TEXT,                      -- 生の remote（無ければ NULL）
+  remote_url    TEXT,                      -- userinfo除去済みremote（無ければNULL。§7-4）
   first_seen_at TEXT NOT NULL,             -- ISO8601
   last_seen_at  TEXT NOT NULL
 );
