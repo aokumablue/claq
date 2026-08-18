@@ -17,6 +17,11 @@
 - pytest をパイプする際は `set -o pipefail` 必須
 - 開発中コードの CLI/モジュール実行に `PYTHONPATH=plugins/bluecore/src` は不要 — editable install が venv の `bluecore` をこのリポジトリの `plugins/bluecore/src` へ向ける。`.venv/lib/*/site-packages/_editable_impl_bluecore.pth` がプラグインキャッシュを指していたら `install-dev.sh` を再実行して直す
 
+## ランタイム前提
+
+- 対応 `python3` は 3.12 以上。`launcher.py` は 3.12 未満を検出すると保護フック（`block_no_verify` / `pre_bash_commit_quality` / `config_protection`）を stderr へ警告した上で **exit 0（fail-open）** にする。これは意図的な設計判断（`launcher.py:52-58` に理由を明記）— ランタイムは venv も install.sh も持たないため（[[runtime-no-venv]]）インストール時に対応 Python を検証する経路が無く、fail-closed（exit 2）にすると `hooks.json` が呼ぶ PATH 上の裸 `python3` を直す手段（Bash）ごとセッション内から塞がれ復旧不能になる。stderr の `bluecoreProtectionDisabled` 警告を監視しない環境では保護無効化を見落とすため、対応 Python の確保は利用者側の責務とする
+- 対応 OS は macOS / Linux。`hooks/hook_common.py` の stdin 読み取りガードは `select.select` を使用しており、Windows の通常 console stdin では機能しない可能性がある（Windows 未対応）
+
 ## データモデルの前提
 
 - 永続化は `~/.bluecore/mem.db`（SQLite）単独。チーム共有ストア（旧 PostgreSQL 同期）は全廃済み — 各メンバーのメモリは自身の SQLite に閉じる
