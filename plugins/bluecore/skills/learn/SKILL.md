@@ -21,7 +21,7 @@ user-invocable: false
 | `key` | 一意な識別子（kebab-case スラッグ）。同じ key への `learn` は更新になる |
 | `scope` | `repo`（このリポジトリ限定）/ `global`（どのリポジトリでも成り立つ） |
 | `kind` | `convention` / `decision` / `pitfall` / `howto` / `fact` / `preference` |
-| `title` | 1 行要約。**`list` / `search` / 注入で見えるのはここだけ** |
+| `title` | 1 行要約。**`list` / `search` で見えるのはここだけ**（SessionStart 注入は `title` + `body` を結合して 200 文字以内に収まる場合のみ `body` も一緒に出す） |
 | `body` | 本文。`bluecore_run bluecore.mem.cli show <key>` でしか読めない |
 | `domain` | 分類語（`testing` / `build` / `sqlite` など） |
 | `confidence` | 0.0〜1.0。確からしさ |
@@ -75,8 +75,9 @@ bluecore_mem_learn --key pytest-needs-pipefail --kind pitfall --scope repo \
   --body "パイプ先の exit code だけが \$? に載るため、set -o pipefail が無いと pytest の失敗が握り潰されて緑に見える。"
 ```
 
-`--status pending` を付けると人間が `/instinct promote` で昇格させるまで注入されない。
-確信が持てない知識はこちらで登録する。
+`bluecore_mem_learn` は `--source` を持たず常に `source=agent` になり、既定 `status` は
+`pending`（A-03: agent 由来カードは `/instinct promote` で人間が昇格させるまで注入されない）。
+確信が持てる知識で即座に注入対象へ入れたい場合のみ `--status active` を明示する。
 
 ## 参照する
 

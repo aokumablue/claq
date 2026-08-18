@@ -120,7 +120,12 @@ class Knowledge:
         body: why / how の補足。空でよい。
         domain: ``testing`` ``git`` ``build`` 等。任意。
         confidence: 0.0〜1.0 の確信度。
-        status: ``active`` / ``pending`` / ``archived``。
+        status: ``active`` / ``pending`` / ``archived``。既定値 ``active`` は
+            dataclass の形式上の初期値に過ぎず、実際の既定は
+            ``knowledge_input.parse_knowledge_payload`` が ``source`` に応じて
+            決める（``human`` は ``active``、``agent``/``observer`` は
+            ``pending``）。``KnowledgeDraft.to_knowledge`` は常にこの解決済み
+            値を渡すため、この dataclass 初期値が実際に使われることはない。
         source_ref: 出所の自由記述（ファイルパス等）。
         session_id: 出所セッションの ``sessions.id``。
         superseded_by: この行を置き換えた ``knowledge.id``。
@@ -138,7 +143,7 @@ class Knowledge:
     body: str = ""
     domain: str | None = None
     confidence: float = 0.5
-    status: str = "active"
+    status: str = "active"  # 実際の既定は knowledge_input.py 参照（未使用）。
     source_ref: str | None = None
     session_id: int | None = None
     superseded_by: int | None = None

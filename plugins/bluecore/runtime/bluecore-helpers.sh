@@ -48,9 +48,12 @@ bluecore_run_bg() {
 # --kind and --title are required; everything else has a default.
 #   kind    : convention | decision | pitfall | howto | fact | preference
 #   scope   : repo (default) | global
-#   status  : active (default, injected at SessionStart) | pending (needs
-#             a human to run `/instinct promote` before it is injected) |
-#             archived (superseded/retired; never injected)
+#   status  : default depends on source, not a fixed value (A-03). This
+#             helper has no --source flag, so every card it records has
+#             source=agent, whose default status is pending (needs a human
+#             to run `/instinct promote` before it is injected at
+#             SessionStart). Pass --status active explicitly to opt out.
+#             Other values: archived (superseded/retired; never injected).
 #   key     : defaults to a slug derived from the title, so re-recording the
 #             same title updates that card instead of piling up duplicates.
 #

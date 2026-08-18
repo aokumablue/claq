@@ -286,7 +286,17 @@ def parse_knowledge_payload(
     kind = _payload_choice(payload, "kind", KINDS)
     scope = _payload_choice(payload, "scope", SCOPES, default="repo")
     source = _payload_choice(payload, "source", SOURCES, default="agent")
-    status = _payload_choice(payload, "status", STATUSES, default="active", override=status_override)
+    # status の既定値は source に応じて分岐する（A-03 対応）。human が明示的に
+    # 書いたカードは active（従来どおり SessionStart 注入対象）、
+    # agent/observer 由来（`bluecore_mem_learn` 経由を含む）は pending
+    # （`/instinct promote` で人間が昇格させるまで注入されない）。
+    # `_payload_choice` の解決順（override or payload[name] or default）は
+    # 変えないため、ペイロードの明示 `status` や CLI の `--status` は
+    # 引き続きこの既定値より優先される。
+    status_default = "active" if source == "human" else "pending"
+    status = _payload_choice(
+        payload, "status", STATUSES, default=status_default, override=status_override
+    )
 
     raw_key = str(payload.get("key") or "").strip()
     # 明示 key もシークレット断片を持ち込みうるため、生成 key と同じく

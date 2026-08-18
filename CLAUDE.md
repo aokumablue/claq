@@ -26,7 +26,7 @@
 
 - 永続化は `~/.bluecore/mem.db`（SQLite）単独。チーム共有ストア（旧 PostgreSQL 同期）は全廃済み — 各メンバーのメモリは自身の SQLite に閉じる
 - テーブルは `repos` / `knowledge` / `sessions` の 3 つだけ（`mem/schema.py`）。リポジトリ識別は `repos.id`（人間可読スラッグ）の 1 系統で、別台帳ファイルは持たない
-- 記憶の単位は **知識カード**（`knowledge` の 1 行）。`kind` は `convention` / `decision` / `pitfall` / `howto` / `fact` / `preference` の 6 値、`scope` は `global` / `repo`。SessionStart に注入されるのは `status='active'` のみで、`pending` は人間が `/instinct promote` で昇格させるまで注入されない
+- 記憶の単位は **知識カード**（`knowledge` の 1 行）。`kind` は `convention` / `decision` / `pitfall` / `howto` / `fact` / `preference` の 6 値、`scope` は `global` / `repo`。SessionStart に注入されるのは `status='active'` のみで、`pending` は人間が `/instinct promote` で昇格させるまで注入されない。`status` の既定値は `source` に依存する（A-03）: `source=human` は `active`、`source=agent`/`observer`（`bluecore_mem_learn` 経由のカードは常にこれ）は `pending` — つまり agent 由来カードは `--status active` を明示しない限り `/instinct promote` を経ないと注入されない
 - 検索は埋め込みベクトルも FTS5 も使わない。知識カードは数百件オーダーに収まるため、全件をロードして Python 側でスコアリングする（`mem/cli.py`）。静的埋め込みテーブル・`bluecore.model_build`・numpy・sqlite-vec はいずれも全廃済み
 - ランタイム依存はゼロ（標準ライブラリのみ）。frontmatter 解析は `lib/frontmatter.py` の自前パーサで、依存ゼロは `tests/lib/test_runtime_dependencies.py` が機械的に保証する
 - 出力トークンの最小化が設計原則。`list` / `search` は `- [kind] title (key)` の 1 行だけを返し、`body` を返すのは `mem show <key>` だけ。0 件なら 1 文字も出力しない

@@ -268,7 +268,11 @@ class TestLearn:
     def test_stores_repo_scoped_card_with_generated_key(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """scope 省略時は repo スコープで登録し、1 行だけ出力する。"""
+        """scope 省略時は repo スコープで登録し、1 行だけ出力する。
+
+        source 省略時は既定 agent であり、A-03 対応で status 既定は pending
+        （`/instinct promote` を経ないと SessionStart に注入されない）。
+        """
         payload = {"kind": "howto", "title": "run pytest with pipefail", "body": "why"}
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], payload)
         assert (stderr, exit_code) == ("", 0)
@@ -277,7 +281,7 @@ class TestLearn:
         with Database(tmp_path / "mem.db") as db:
             rows = db.list_knowledge()
         assert len(rows) == 1
-        assert (rows[0].scope, rows[0].status, rows[0].source) == ("repo", "active", "agent")
+        assert (rows[0].scope, rows[0].status, rows[0].source) == ("repo", "pending", "agent")
         assert rows[0].repo_id is not None
         assert rows[0].body == "why"
 

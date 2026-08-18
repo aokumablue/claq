@@ -390,21 +390,23 @@ flowchart TD
   subgraph session["💻 セッション中（各コマンド最終ステップで明示実行）"]
     direction LR
     SAD["adr<br/>アーキ決定記録"]:::skill
-    CW["学びの記録<br/>bluecore_mem_learn（既定 status=active）"]:::cmd
+    CW["学びの記録<br/>bluecore_mem_learn（source=agent、既定 status=pending, A-03）"]:::cmd
+    CWA["bluecore_mem_learn --status active<br/>確信度が高い場合のみ明示（任意）"]:::cmd
     CA["/instinct learn --status pending<br/>人間が手動登録（任意）"]:::cmd
   end
 
-  CW --> KA[("knowledge<br/>status=active")]:::store
+  CWA --> KA[("knowledge<br/>status=active")]:::store
   KA --> MC
 
   SE(["🌙 SessionEnd"]) --> SLE["mem handoff<br/>引き継ぎ記録"]:::auto
-  CA --> PK[("knowledge<br/>status=pending")]:::store
+  CW --> PK[("knowledge<br/>status=pending")]:::store
+  CA --> PK
   PK --> CI["/instinct promote<br/>昇格レビュー"]:::cmd
   CI --> KA
 ```
 
 **トリガー**: 各コマンドの「学びの記録」ステップ（agent/skill が明示的に判断・実行。ユーザー操作は不要だがコマンド実行が前提）
-**期待効果**: 再利用可能な学び（罠・規約・決定）が知識カードとして蓄積し次セッション以降へ自動注入。`--status pending` で手動登録した候補だけ `/instinct` で昇格レビューが要る
+**期待効果**: 再利用可能な学び（罠・規約・決定）が知識カードとして蓄積し次セッション以降へ自動注入。agent 由来カード（`bluecore_mem_learn` 既定）は `status=pending` で登録され、`/instinct` での昇格レビューを経て初めて注入される（A-03: 確信度が高く即時注入したい場合のみ `--status active` を明示）
 
 **実行例**: 通常操作不要（各コマンドが完了時に自動判断）。手動登録した pending 分だけ週次で `/instinct list --status pending` → 採用分を `/instinct promote <key>`
 

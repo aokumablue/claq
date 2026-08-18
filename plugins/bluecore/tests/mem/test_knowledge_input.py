@@ -81,7 +81,7 @@ class TestParseKnowledgePayload:
     """ペイロード全体の検証。"""
 
     def test_minimal_payload_fills_defaults(self) -> None:
-        """必須項目だけの入力は既定値で埋まる。"""
+        """必須項目だけの入力は既定値で埋まる（source 既定 agent → status 既定 pending、A-03）。"""
         draft = parse_knowledge_payload({"kind": "howto", "title": "run pytest with pipefail"})
         assert draft == KnowledgeDraft(
             key="run-pytest-with-pipefail",
@@ -91,7 +91,7 @@ class TestParseKnowledgePayload:
             body="",
             domain=None,
             confidence=DEFAULT_CONFIDENCE,
-            status="active",
+            status="pending",
             source="agent",
             source_ref=None,
         )
@@ -103,6 +103,31 @@ class TestParseKnowledgePayload:
             status_override="pending",
         )
         assert (draft.status, draft.source) == ("pending", "human")
+
+    def test_human_source_defaults_status_active(self) -> None:
+        """source=human は status 既定 active（従来どおり SessionStart 注入対象）。"""
+        draft = parse_knowledge_payload({"kind": "fact", "title": "t", "source": "human"})
+        assert draft.status == "active"
+
+    @pytest.mark.parametrize("source", ["agent", "observer"])
+    def test_agent_and_observer_source_defaults_status_pending(self, source: str) -> None:
+        """source=agent/observer は status 既定 pending（A-03: /instinct promote 必須）。"""
+        draft = parse_knowledge_payload({"kind": "fact", "title": "t", "source": source})
+        assert draft.status == "pending"
+
+    def test_explicit_pending_status_kept_for_human_source(self) -> None:
+        """ペイロードの明示 status はソース既定より優先される。"""
+        draft = parse_knowledge_payload(
+            {"kind": "fact", "title": "t", "source": "human", "status": "pending"}
+        )
+        assert draft.status == "pending"
+
+    def test_explicit_active_status_kept_for_agent_source(self) -> None:
+        """明示 `--status active` 相当（ペイロード指定）は agent 由来でも active を維持する。"""
+        draft = parse_knowledge_payload(
+            {"kind": "fact", "title": "t", "source": "agent", "status": "active"}
+        )
+        assert draft.status == "active"
 
     def test_explicit_key_and_fields_are_kept(self) -> None:
         """明示された key と任意項目はそのまま残る。"""
