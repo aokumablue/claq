@@ -103,21 +103,31 @@ STDIN_CHUNK_BYTES = 65536
 def _stdin_ready() -> bool:
     """stdin が TTY でなく、最初のバイトが時間内に届くかを判定します。
 
+    `sys.stdin` が None（detach された子プロセス等）の場合や、
+    `isatty()`/`select.select` が OSError/ValueError を投げる場合も
+    「入力なし」として扱い、例外を外へ伝播させません
+    （A-01: docstring の「例外は発生しません」を実装で保証する）。
+
     Args:
         なし
 
     Returns:
-        読み取りを続行してよければ True。TTY 接続時、または
-        STDIN_FIRST_BYTE_TIMEOUT 秒以内に最初のバイトが到着しない場合は
-        False（後者は stderr に警告を出す）。
+        読み取りを続行してよければ True。stdin が None、TTY 接続時、
+        STDIN_FIRST_BYTE_TIMEOUT 秒以内に最初のバイトが到着しない場合、
+        または syscall が例外化した場合は False（select 非 ready の
+        場合のみ stderr に警告を出す）。
 
     Raises:
         例外は発生しません。
     """
-    if sys.stdin.isatty():
+    if sys.stdin is None:
         return False
-
-    ready, _, _ = select.select([sys.stdin], [], [], STDIN_FIRST_BYTE_TIMEOUT)
+    try:
+        if sys.stdin.isatty():
+            return False
+        ready, _, _ = select.select([sys.stdin], [], [], STDIN_FIRST_BYTE_TIMEOUT)
+    except (OSError, ValueError, AttributeError):
+        return False
     if not ready:
         write_stderr(
             "WARNING: stdin から入力が届かないため空入力で続行します（stdin リダイレクト漏れの可能性）\n"
@@ -138,10 +148,13 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
     実際に読めたバイト数に関わらず必ずループへ制御が戻り、デッドライン
     判定が機能します（`sys.stdin.buffer` は `io.BufferedReader` であり
     `.read1()` を常に持ちます。`.read1()` を持たないオブジェクトは
-    `fileno()` も持たない/使えないことが多く、その場合は本関数に到達する
-    前に `_stdin_ready()` の `select.select` が例外化するため、`.buffer`
-    はあるが `.read1()` は無いという状態を想定したフォールバックは実際
-    には到達不能であり、意図的に持たせていません）。ループ全体には
+    `fileno()` も持たない/使えないことが多く、`select.select` が
+    OSError/ValueError を投げうる状態です。本関数はループ内の
+    `select.select` と `.read1()`/`.read()` の両方を
+    (OSError, ValueError) で捕捉し、その時点までの部分データ（空の
+    場合を含む）を返します（A-01: `_stdin_ready` 通過後でも下層の
+    fd がその後閉じられる等の競合で例外化しうるため、二重の防御と
+    して本関数側でも捕捉します）。ループ全体には
     `_read_stdin_bytes` 呼び出し開始時点
     から STDIN_READ_DEADLINE_SECONDS 秒の壁時計予算があり、各チャンクの前に
     `select` で次データの到着を待ちます。予算切れ・select 非 ready の
@@ -158,15 +171,18 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
 
     Returns:
         読み取ったバイト列を返します。デッドライン超過・select 非 ready・
-        EOF のいずれで打ち切られた場合も、その時点までの部分データを
-        返します。
+        EOF・syscall 例外のいずれで打ち切られた場合も、その時点までの
+        部分データを返します。
 
     Raises:
         例外は発生しません。
     """
     stdin_buffer = getattr(sys.stdin, "buffer", None)
     if stdin_buffer is None:
-        return sys.stdin.read(max_bytes).encode("utf-8", errors="replace")
+        try:
+            return sys.stdin.read(max_bytes).encode("utf-8", errors="replace")
+        except (OSError, ValueError):
+            return b""
 
     collected = b""
     deadline = time.monotonic() + STDIN_READ_DEADLINE_SECONDS
@@ -179,7 +195,10 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
                 "応答しない可能性）\n"
             )
             break
-        ready, _, _ = select.select([sys.stdin], [], [], remaining_time)
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], remaining_time)
+        except (OSError, ValueError):
+            break
         if not ready:
             write_stderr(
                 "WARNING: stdin の続きが届かないため、受信済みの部分データで"
@@ -187,7 +206,10 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
             )
             break
         chunk_size = min(STDIN_CHUNK_BYTES, max_bytes - len(collected))
-        chunk = stdin_buffer.read1(chunk_size)
+        try:
+            chunk = stdin_buffer.read1(chunk_size)
+        except (OSError, ValueError):
+            break
         if chunk == b"":
             break
         collected += chunk

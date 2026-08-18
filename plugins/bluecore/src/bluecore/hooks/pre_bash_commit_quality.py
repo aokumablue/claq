@@ -772,10 +772,11 @@ def main() -> int:
     fail-open/fail-closed の境界は「commit と確定したか」で分けます
     （A-05 相当対応）:
 
-    - stdin 読み取り自体の例外、または 1 MiB 超の truncation は commit か
-      どうか判定不能。truncation は fail-closed（block_no_verify /
-      config_protection と同じ 4 段構成に揃える）、読み取り例外は従来通り
-      fail-open（commit と無関係な Bash 呼び出し全体を巻き込まないため）。
+    - `read_raw_stdin_with_truncation` は syscall 例外を内部で捕捉し
+      「入力なし」に正規化する契約（A-01 対応、`hook_common` 参照）の
+      ため、本関数に到達する時点で例外は発生しません。1 MiB 超の
+      truncation は commit かどうか判定不能なため fail-closed
+      （block_no_verify / config_protection と同じ 4 段構成に揃える）。
     - `evaluate()` 自体は例外を投げない契約だが、防御的に例外時は
       commit 確定前として fail-open のまま扱う。
     - `evaluate()` が exitCode=2（commit と確定しブロック判定済み）を返した
@@ -794,12 +795,7 @@ def main() -> int:
     """
     from bluecore.hooks.hook_common import emit_block_output, read_raw_stdin_with_truncation
 
-    try:
-        raw, truncated = read_raw_stdin_with_truncation()
-    except Exception as err:
-        # commit 確定前（stdin 読み取り自体）の例外は非ブロッキング。
-        log(f"[Hook] Error: {err}")
-        return 0
+    raw, truncated = read_raw_stdin_with_truncation()
 
     if truncated:
         try:

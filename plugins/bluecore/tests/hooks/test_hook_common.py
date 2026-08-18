@@ -140,6 +140,45 @@ class TestStdinReady:
         assert hook_common._stdin_ready() is False
         assert "リダイレクト漏れ" in capsys.readouterr().err
 
+    def test_stdin_none_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """detach された子プロセス等で sys.stdin が None の場合は False（A-01）。"""
+        monkeypatch.setattr(hook_common.sys, "stdin", None)
+
+        assert hook_common._stdin_ready() is False
+
+    def test_isatty_oserror_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """isatty() が OSError を投げても例外を伝播せず False を返す（A-01）。"""
+
+        class _RaisingStdin:
+            def isatty(self) -> bool:
+                raise OSError("bad fd")
+
+        monkeypatch.setattr(hook_common.sys, "stdin", _RaisingStdin())
+
+        assert hook_common._stdin_ready() is False
+
+    def test_select_value_error_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """select.select が ValueError を投げても例外を伝播せず False を返す（A-01）。"""
+        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload"))
+
+        def _raise(*args):  # noqa: ANN002
+            raise ValueError("negative fd")
+
+        monkeypatch.setattr(hook_common.select, "select", _raise)
+
+        assert hook_common._stdin_ready() is False
+
+    def test_select_attribute_error_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """select.select が AttributeError を投げても例外を伝播せず False を返す（A-01）。"""
+        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload"))
+
+        def _raise(*args):  # noqa: ANN002
+            raise AttributeError("no fileno")
+
+        monkeypatch.setattr(hook_common.select, "select", _raise)
+
+        assert hook_common._stdin_ready() is False
+
 
 class TestReadRawStdin:
     """read_raw_stdin のバイト単位制限・stdin ガードのテスト。"""
@@ -433,6 +472,66 @@ class TestReadStdinBytesChunkedDeadline:
         assert result == b"abc"
         assert "リダイレクト漏れ" in capsys.readouterr().err
         assert call_count["n"] == 2
+
+    def test_select_oserror_mid_read_returns_partial_data(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ループ内 select.select が OSError を投げても部分データで打ち切る（A-01）。"""
+        fake_stdin = _QueueStdin([b"abc"])
+        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
+        call_count = {"n": 0}
+
+        def flaky_select(rlist, wlist, xlist, timeout):  # noqa: ANN001
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return rlist, [], []
+            raise OSError("bad fd")
+
+        monkeypatch.setattr(hook_common.select, "select", flaky_select)
+
+        result = hook_common._read_stdin_bytes(10)
+
+        assert result == b"abc"
+
+    def test_read1_valueerror_returns_partial_data(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """read1() が ValueError（closed file 等）を投げても部分データで打ち切る（A-01）。"""
+
+        class _RaisingBuffer:
+            def __init__(self, first: bytes) -> None:
+                self._first = first
+                self._served_first = False
+
+            def read1(self, n: int = -1) -> bytes:
+                if not self._served_first:
+                    self._served_first = True
+                    return self._first
+                raise ValueError("I/O operation on closed file")
+
+        class _RaisingStdin:
+            def __init__(self, buffer: _RaisingBuffer) -> None:
+                self.buffer = buffer
+
+        monkeypatch.setattr(hook_common.sys, "stdin", _RaisingStdin(_RaisingBuffer(b"abc")))
+        _patch_select_ready(monkeypatch)
+
+        result = hook_common._read_stdin_bytes(10)
+
+        assert result == b"abc"
+
+    def test_no_buffer_read_oserror_returns_empty_bytes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """buffer なし stdin（io.StringIO 等）の read() が OSError を投げても空バイト列を返す（A-01）。"""
+
+        class _RaisingTextStdin:
+            def read(self, n: int = -1) -> str:
+                raise OSError("bad fd")
+
+        monkeypatch.setattr(hook_common.sys, "stdin", _RaisingTextStdin())
+
+        result = hook_common._read_stdin_bytes(10)
+
+        assert result == b""
 
 
 class TestReadRawStdinWithTruncation:

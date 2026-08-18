@@ -63,18 +63,6 @@ class TestMainStdinBoundary:
         assert "BLOCKED" in err
         assert "exceeded" in err
 
-    def test_stdin_read_exception_before_commit_confirmed_is_fail_open(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """commit 確定前（stdin 読み取り自体）の例外は非ブロッキング（従来通り）。"""
-
-        def _raise() -> tuple[str, bool]:
-            raise RuntimeError("stdin failure")
-
-        monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin_with_truncation", _raise)
-
-        assert pbcq.main() == 0
-
     def test_evaluate_exception_is_fail_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """`evaluate()` は例外を投げない契約だが、防御的に例外時も fail-open で扱う。"""
         payload = json.dumps({"tool_input": {"command": "git commit -m x"}})

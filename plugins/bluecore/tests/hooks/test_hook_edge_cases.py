@@ -948,20 +948,6 @@ def test_evaluate_confirmed_commit_scan_exception_is_blocked(monkeypatch: pytest
     assert any("unexpected scanner crash" in message for message in logs)
 
 
-def test_main_logs_on_stdin_read_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """read_raw_stdin_with_truncation 自体が例外を投げても main() は無言にならずログを出す（R-01b）。"""
-    logs: list[str] = []
-    monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
-
-    def _boom() -> tuple[str, bool]:
-        raise OSError("stdin broken")
-
-    monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin_with_truncation", _boom)
-
-    assert pre_bash_commit_quality.main() == 0
-    assert any("stdin broken" in message for message in logs)
-
-
 def test_evaluate_commit_amend_with_nothing_staged_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     """`--amend --no-edit` で staged が空なら検査対象ゼロで通過する（正常系。gap ではない）。
 
