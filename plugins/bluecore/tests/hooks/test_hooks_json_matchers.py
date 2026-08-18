@@ -55,6 +55,9 @@ TOOL_GATED_HOOKS: dict[str, frozenset[str]] = {
     # tool_input.command を読む（command が無いツールでは no-op）
     "bluecore.hooks.block_no_verify": frozenset({"Bash"}),
     "bluecore.hooks.pre_bash_commit_quality": frozenset({"Bash"}),
+    # _BASH_TOOL_NAMES == {bash}（正規化後 "Bash"）。config_protection の
+    # Edit/Write/MultiEdit 限定を補完する Bash 経由の直接書き換え検知（A-06）。
+    "bluecore.hooks.bash_config_protection": frozenset({"Bash"}),
     # _WRITE_TOOL_NAMES == {edit, write, multiedit}
     "bluecore.hooks.config_protection": frozenset({"Edit", "Write", "MultiEdit"}),
 }

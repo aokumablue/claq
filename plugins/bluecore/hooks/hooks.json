@@ -25,6 +25,17 @@
         "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"
       },
       {
+        "matcher": "^(Bash|bash|shell|run_terminal_command)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.bash_config_protection",
+            "timeout": 5
+          }
+        ],
+        "description": "Bashのリダイレクト/tee/sed -iによるlinter/formatter設定ファイルへの直接書き換えをブロックします（config_protectionのEdit/Write限定を補完）。"
+      },
+      {
         "matcher": "^(Edit|Write|MultiEdit|edit|write|multiedit|apply_patch|search_replace)$",
         "hooks": [
           {
