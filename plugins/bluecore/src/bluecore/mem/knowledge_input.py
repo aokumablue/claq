@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from bluecore.mem.models import Knowledge, utc_now_iso
+from bluecore.mem.redaction import redact_knowledge_text
 from bluecore.mem.repo_identity import slugify
 
 KINDS: frozenset[str] = frozenset({"convention", "decision", "pitfall", "howto", "fact", "preference"})
@@ -232,6 +233,14 @@ def parse_knowledge_payload(
 ) -> KnowledgeDraft:
     """JSON ペイロードを検証済みの ``KnowledgeDraft`` へ変換する。
 
+    ``title`` / ``body`` / ``source_ref`` は DB へ書く前に
+    ``redact_knowledge_text`` で既知プレフィックス系シークレットを
+    マスクする（agent/外部入力由来の未検証データが SessionStart context
+    へそのまま昇格するのを防ぐ）。key は redaction 前の生 title から
+    生成する（redact 後の title から生成すると、シークレットを含む
+    2 枚のカードがどちらも ``kind-<hash>`` 由来の同じ key に衝突しうる上、
+    ``show <key>`` で引けなくなるため）。
+
     Args:
         payload: 知識カードを表す dict。
         status_override: ペイロードの ``status`` より優先する値。
@@ -252,15 +261,18 @@ def parse_knowledge_payload(
     source = _payload_choice(payload, "source", SOURCES, default="agent")
     status = _payload_choice(payload, "status", STATUSES, default="active", override=status_override)
 
+    key = str(payload.get("key") or "").strip() or generate_key(title, kind)
+    source_ref = optional_str(payload.get("source_ref"))
+
     return KnowledgeDraft(
-        key=str(payload.get("key") or "").strip() or generate_key(title, kind),
+        key=key,
         scope=scope,
         kind=kind,
-        title=title,
-        body=str(payload.get("body") or ""),
+        title=redact_knowledge_text(title),
+        body=redact_knowledge_text(str(payload.get("body") or "")),
         domain=optional_str(payload.get("domain")),
         confidence=coerce_confidence(payload.get("confidence")),
         status=status,
         source=source,
-        source_ref=optional_str(payload.get("source_ref")),
+        source_ref=redact_knowledge_text(source_ref) if source_ref else None,
     )

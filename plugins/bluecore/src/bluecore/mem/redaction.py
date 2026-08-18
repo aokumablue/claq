@@ -50,3 +50,37 @@ def redact(text: str) -> str:
     for _, pattern in _PATTERNS:
         text = pattern.sub(_PLACEHOLDER, text)
     return text
+
+
+# knowledge カード（title/body/source_ref）向けの縮小版パターン。
+# hex_secret（32 桁以上の16進）と base64_long（40 文字超の base64）は
+# 汎用エントロピー検出であり、knowledge 本文に正当に現れる完全な
+# commit SHA・長い識別子を丸ごと [REDACTED] に潰してしまう
+# （handoff.py がファイルパスへの redact 適用を避けているのと同じ理由:
+# 「40 文字超のパスを丸ごと潰す」既知の危険を knowledge にも継承しない）。
+# 既知プレフィックス・キーワード系パターンのみを残す。
+_KNOWLEDGE_EXCLUDED_PATTERN_NAMES = frozenset({"hex_secret", "base64_long"})
+_KNOWLEDGE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (name, pattern) for name, pattern in _PATTERNS if name not in _KNOWLEDGE_EXCLUDED_PATTERN_NAMES
+]
+
+
+def redact_knowledge_text(text: str) -> str:
+    """knowledge カードの title/body/source_ref 向けの縮小版 redact を適用する。
+
+    汎用エントロピーパターン（32 桁 hex・40 文字超 base64）を除いた、
+    既知プレフィックス・キーワード系パターン（JWT / 各種 API キー /
+    bearer / password 代入 / email / private IPv4）のみを適用する。
+
+    Args:
+        text: 検査対象テキスト。
+
+    Returns:
+        既知プレフィックス系シークレットを [REDACTED] に置換した文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    for _, pattern in _KNOWLEDGE_PATTERNS:
+        text = pattern.sub(_PLACEHOLDER, text)
+    return text

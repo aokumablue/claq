@@ -2,7 +2,7 @@
 
 import pytest
 
-from bluecore.mem.redaction import redact
+from bluecore.mem.redaction import redact, redact_knowledge_text
 
 _PLACEHOLDER = "[REDACTED]"
 
@@ -98,3 +98,43 @@ class TestRedact:
         """コードのファイルパスや変数名はマスクされない"""
         code = "def authenticate(user_id: str) -> bool:\n    return db.lookup(user_id)"
         assert redact(code) == code
+
+
+class TestRedactKnowledgeText:
+    """redact_knowledge_text() — knowledge カード向け縮小版（hex_secret/base64_long 除外）"""
+
+    def test_known_prefix_secrets_still_redacted(self) -> None:
+        """既知プレフィックス系（password 代入等）は通常版と同様にマスクされる。"""
+        result = redact_knowledge_text("password=mysecretpassword123")
+        assert _PLACEHOLDER in result
+        assert "mysecretpassword123" not in result
+
+    def test_github_pat_still_redacted(self) -> None:
+        result = redact_knowledge_text("ghp_" + "abcdefghijklmnopqrstuvwxyz123456ABCD")
+        assert _PLACEHOLDER in result
+
+    def test_email_still_redacted(self) -> None:
+        result = redact_knowledge_text("contact: user@example.com")
+        assert _PLACEHOLDER in result
+
+    def test_hex_secret_not_redacted(self) -> None:
+        """32 文字以上の16進文字列（commit SHA 等）は knowledge 用途では保持する。
+
+        password_assign 等のキーワード付きパターンに誤って引っかからないよう、
+        "token:"/"secret:" 等のキーワードを含まない素の16進文字列を使う。
+        """
+        text = "see commit deadbeef0123456789abcdef01234567 for details"
+        assert redact_knowledge_text(text) == text
+
+    def test_base64_long_not_redacted(self) -> None:
+        """40 文字超の base64 様文字列も knowledge 用途では保持する。"""
+        text = "PsmIacDP/C7LZ/t/GVR8rx8Sl0yQ/Wh8Mzwm6Zy/ww4="
+        assert redact_knowledge_text(text) == text
+
+    def test_full_commit_sha_preserved(self) -> None:
+        sha = "a" * 40
+        text = f"see commit {sha}"
+        assert redact_knowledge_text(text) == text
+
+    def test_empty_string(self) -> None:
+        assert redact_knowledge_text("") == ""

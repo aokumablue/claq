@@ -135,6 +135,80 @@ class TestParseKnowledgePayload:
             parse_knowledge_payload(payload)
 
 
+class TestSecretRedaction:
+    """parse_knowledge_payload の title/body/source_ref redaction（R-04）。
+
+    注意: シークレット様のリテラルは文字列連結で組み立てる。
+    commit_quality_scanner の自己スキャン（test_repo_wide_self_scan_
+    has_zero_secret_issues）が本テストファイル自体を secret として
+    検出しないようにするため（test_redaction.py の既存パターンと同じ回避）。
+    """
+
+    _GITHUB_PAT = "ghp_" + "1234567890abcdef1234567890abcdef1234"
+    _ANTHROPIC_KEY = "sk-ant-" + "abcdefghijklmnopqrstuvwxyz0123456789"
+
+    def test_secret_in_body_is_redacted(self) -> None:
+        """body に含まれる既知プレフィックス系シークレットはマスクされる。"""
+        draft = parse_knowledge_payload(
+            {
+                "kind": "pitfall",
+                "title": "secret probe",
+                "body": f"credential {self._GITHUB_PAT}",
+            }
+        )
+        assert "ghp_" not in draft.body
+        assert "[REDACTED]" in draft.body
+
+    def test_secret_in_source_ref_is_redacted(self) -> None:
+        """source_ref も title/body と同様に検査対象。"""
+        draft = parse_knowledge_payload(
+            {
+                "kind": "fact",
+                "title": "token leak",
+                "source_ref": f"token={self._ANTHROPIC_KEY}",
+            }
+        )
+        assert "sk-ant-" not in (draft.source_ref or "")
+        assert "[REDACTED]" in (draft.source_ref or "")
+
+    def test_key_is_stable_regardless_of_secret_in_body(self) -> None:
+        """body に secret が有る/無いで key が変わらない（key は生 title から生成）。"""
+        without_secret = parse_knowledge_payload({"kind": "fact", "title": "same title", "body": "plain"})
+        with_secret = parse_knowledge_payload(
+            {
+                "kind": "fact",
+                "title": "same title",
+                "body": f"credential {self._GITHUB_PAT}",
+            }
+        )
+        assert without_secret.key == with_secret.key
+
+    def test_key_generation_uses_raw_title_even_when_title_itself_is_a_secret(self) -> None:
+        """title 自体がシークレット様の文字列でも、key は redact 前の生 title から決定的に生成される。"""
+        payload = {"kind": "fact", "title": "token=hunter2hunter2hunter2secret!!"}
+        draft = parse_knowledge_payload(dict(payload))
+        # 同じ生 title からは常に同じ key が出る（redact 後の title 由来だと
+        # プレースホルダ経由で衝突しうる）。
+        assert draft.key == generate_key(payload["title"], "fact")
+
+    def test_commit_sha_in_body_is_not_redacted(self) -> None:
+        """40 文字の commit SHA のような長い16進/base64様文字列は汎用エントロピー
+
+        パターン（hex_secret/base64_long）の対象外のため保持される
+        （handoff.py がパスへの redact 適用を避けているのと同じ理由）。
+        """
+        sha = "a" * 40  # 40 桁の16進文字列（commit SHA 相当）
+        draft = parse_knowledge_payload({"kind": "fact", "title": "commit ref", "body": f"see commit {sha}"})
+        assert sha in draft.body
+        assert "[REDACTED]" not in draft.body
+
+    def test_email_in_body_is_still_redacted(self) -> None:
+        """縮小版でも既知パターン（email 等）は従来どおり適用される。"""
+        draft = parse_knowledge_payload({"kind": "fact", "title": "contact", "body": "reach me at a@example.com"})
+        assert "a@example.com" not in draft.body
+        assert "[REDACTED]" in draft.body
+
+
 class TestToKnowledge:
     """KnowledgeDraft から Knowledge への変換。"""
 

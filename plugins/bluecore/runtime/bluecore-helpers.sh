@@ -42,14 +42,15 @@ bluecore_run_bg() {
 #   bluecore_mem_learn --kind <kind> --title "<one line>" \
 #                      [--body "<why/how>"] [--key <slug>] \
 #                      [--scope repo|global] [--domain <tag>] \
-#                      [--confidence 0.0-1.0] [--status active|pending] \
+#                      [--confidence 0.0-1.0] [--status active|pending|archived] \
 #                      [--source-ref <path-or-url>]
 #
 # --kind and --title are required; everything else has a default.
 #   kind    : convention | decision | pitfall | howto | fact | preference
 #   scope   : repo (default) | global
 #   status  : active (default, injected at SessionStart) | pending (needs
-#             a human to run `/instinct promote` before it is injected)
+#             a human to run `/instinct promote` before it is injected) |
+#             archived (superseded/retired; never injected)
 #   key     : defaults to a slug derived from the title, so re-recording the
 #             same title updates that card instead of piling up duplicates.
 #
