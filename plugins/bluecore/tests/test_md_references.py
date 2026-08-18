@@ -84,6 +84,29 @@ def test_readme_agent_skill_command_counts_match_filesystem() -> None:
             assert int(n) == counts[key], f"README の {label} 件数表記 {n} が実体 {counts[key]} と不一致"
 
 
+def test_helper_source_snippet_has_no_bare_or_naive_fallback() -> None:
+    """agents/skills/commands の md が CLAUDE_PLUGIN_ROOT をフォールバック無しで参照していないこと（A-07）。
+
+    Copilot の agent shell では ``CLAUDE_PLUGIN_ROOT`` が未設定のため、
+    フォールバック無しの ``source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"``
+    は失敗する。単純な ``${CLAUDE_PLUGIN_ROOT:-<固定path>}`` 形の 1 候補
+    フォールバックも、host ごとのインストール先の違い（Grok はハッシュ付き
+    ディレクトリ）を無視して誤ったコピーを黙って source しうるため禁止する。
+    候補探索付きの形（複数候補を ``[ -f ... ]`` で確認してから source する）
+    を要求する程度の緩さで固定しすぎない。
+    """
+    bare_re = re.compile(r'source\s+"\$\{CLAUDE_PLUGIN_ROOT\}/runtime/bluecore-helpers\.sh"')
+    naive_fallback_re = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT:-[^}]*\}/runtime/bluecore-helpers\.sh")
+    violations: list[str] = []
+    for md_file in _iter_md_files():
+        text = md_file.read_text(encoding="utf-8")
+        if bare_re.search(text):
+            violations.append(f"{md_file.relative_to(_ROOT)}: フォールバック無しの bare CLAUDE_PLUGIN_ROOT 参照")
+        if naive_fallback_re.search(text):
+            violations.append(f"{md_file.relative_to(_ROOT)}: 単純な ${{CLAUDE_PLUGIN_ROOT:-<固定path>}} フォールバック")
+    assert violations == [], "\n".join(violations)
+
+
 def test_security_auditor_has_no_bash_access() -> None:
     """security-auditor は tools frontmatter で Bash を持たない（F-05 対応）。
 

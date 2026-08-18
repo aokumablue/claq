@@ -100,7 +100,12 @@ command: /review
 - **一般的なセキュリティ知識** — OWASP Top 10 の一般論
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
+          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
+          "$HOME/.claude/plugins/bluecore" \
+          "$HOME"/.grok/installed-plugins/bluecore-*; do
+  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
+done
 bluecore_mem_learn --kind convention --scope repo --domain <domain> \
   --title "<守るべきルールを 1 行で>" \
   --body "<なぜそのルールが要るか / 違反したときに何が起きるか>"

@@ -91,7 +91,12 @@ hooks / `src/bluecore/hooks/` を対象に含む回は**両ハーネス互換（
 今回のメンテで判明した **ハーネス定義の勘所・繰り返し違反** を知識カードとして登録する（作業ログは登録しない）:
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
+          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
+          "$HOME/.claude/plugins/bluecore" \
+          "$HOME"/.grok/installed-plugins/bluecore-*; do
+  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
+done
 bluecore_mem_learn --key <slug> --kind pitfall --scope repo --domain harness \
   --title "<1 行要約>" --body "<根拠と回避法>"
 ```

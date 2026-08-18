@@ -104,7 +104,12 @@ CRITICAL/HIGH blocker 検出時またはテスト/lint 失敗時は `loop-dev` s
 - **一般的なリファクタ知識** — 「長い関数は分割する」など
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
+          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
+          "$HOME/.claude/plugins/bluecore" \
+          "$HOME"/.grok/installed-plugins/bluecore-*; do
+  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
+done
 bluecore_mem_learn --kind fact --scope repo --domain <domain> \
   --title "<構造上の事実を 1 行で>" \
   --body "<根拠と、次に触るときの注意>"

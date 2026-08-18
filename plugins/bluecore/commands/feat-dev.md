@@ -72,7 +72,12 @@ loop-dev から収束 or 停止報告を受領して次段階へ。
 - **そのセッション限りの事情** — 「今回はテストデータを手で用意した」
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
+          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
+          "$HOME/.claude/plugins/bluecore" \
+          "$HOME"/.grok/installed-plugins/bluecore-*; do
+  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
+done
 bluecore_mem_learn --kind fact --scope repo --domain <domain> \
   --title "<分かった結論を 1 行で>" \
   --body "<根拠と、次に同じ領域を触るときの入口>"

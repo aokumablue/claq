@@ -35,7 +35,12 @@ command: /harness
 ## ステップ1: ベースライン取得
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
+          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
+          "$HOME/.claude/plugins/bluecore" \
+          "$HOME"/.grok/installed-plugins/bluecore-*; do
+  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
+done
 bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path> --target-kind <repo|consumer>
 ```
 
@@ -64,7 +69,12 @@ harness-tuner は:
 ## ステップ4: 改善後スコア（`--apply` 指定時のみ）
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
+          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
+          "$HOME/.claude/plugins/bluecore" \
+          "$HOME"/.grok/installed-plugins/bluecore-*; do
+  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
+done
 bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path> --target-kind <repo|consumer>
 ```
 

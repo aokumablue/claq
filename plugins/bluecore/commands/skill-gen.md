@@ -27,7 +27,12 @@ command: /skill-gen
 ## ステップ1: 入力候補収集
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
+          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
+          "$HOME/.claude/plugins/bluecore" \
+          "$HOME"/.grok/installed-plugins/bluecore-*; do
+  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
+done
 collect_skill_create_inputs "${COMMITS:-200}"
 ```
 
@@ -55,7 +60,12 @@ collect_skill_create_inputs "${COMMITS:-200}"
 SKILL.md に落とし込めなかったものを知識カードとして登録する。
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
+          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
+          "$HOME/.claude/plugins/bluecore" \
+          "$HOME"/.grok/installed-plugins/bluecore-*; do
+  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
+done
 bluecore_mem_learn --key <slug> --kind convention --scope repo --status pending \
   --title "<1 行要約>" --domain <domain> --body "<根拠>"
 ```

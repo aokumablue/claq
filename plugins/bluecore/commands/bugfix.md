@@ -69,7 +69,12 @@ loop-dev から収束 or 停止報告を受領して記録へ進む。
 - **一般的なプログラミング知識** — off-by-one、null チェック漏れなど
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
+for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
+          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
+          "$HOME/.claude/plugins/bluecore" \
+          "$HOME"/.grok/installed-plugins/bluecore-*; do
+  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
+done
 bluecore_mem_learn --kind pitfall --scope repo --domain <domain> \
   --title "<回避条件を 1 行で>" \
   --body "<根本原因と、次に踏まないための具体策>"
