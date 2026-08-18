@@ -51,32 +51,6 @@ class TestAdaptPreToolUseContextOutput:
         assert parsed["hookSpecificOutput"]["additionalContext"] == "ctx"
 
 
-class TestAdaptToolOutput:
-    """adapt_tool_output のテスト（PostToolUse のツール出力差し替え）。"""
-
-    _TOOL_RESPONSE = {"stdout": "raw", "stderr": "err", "interrupted": False, "isImage": False, "exitCode": 0}
-
-    def test_emits_merged_modified_result_and_updated_tool_output(self):
-        """modifiedResult と hookSpecificOutput.updatedToolOutput を同時に出す。"""
-        result = output_adapter.adapt_tool_output("reduced", self._TOOL_RESPONSE)
-        parsed = json.loads(result)
-        assert parsed["modifiedResult"] == {"resultType": "success", "textResultForLlm": "reduced"}
-        assert parsed["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
-        # stdout だけが差し替わり、他のキーは output shape 維持のため保持される
-        assert parsed["hookSpecificOutput"]["updatedToolOutput"] == {**self._TOOL_RESPONSE, "stdout": "reduced"}
-
-    def test_does_not_mutate_original_tool_response(self):
-        """元の tool_response を破壊しない（同一 dict を後段で再利用できる）。"""
-        original = dict(self._TOOL_RESPONSE)
-        output_adapter.adapt_tool_output("reduced", original)
-        assert original == self._TOOL_RESPONSE
-
-    def test_non_ascii_is_not_escaped(self):
-        """日本語を含む出力が \\uXXXX へエスケープされない。"""
-        result = output_adapter.adapt_tool_output("圧縮済み", self._TOOL_RESPONSE)
-        assert "圧縮済み" in result
-
-
 class TestEmitBlock:
     """emit_block のテスト。"""
 

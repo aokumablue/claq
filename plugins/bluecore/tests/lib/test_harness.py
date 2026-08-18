@@ -196,57 +196,6 @@ class TestExtractRawToolName:
         assert harness.extract_raw_tool_name(payload) == expected
 
 
-class TestExtractToolResultText:
-    """extract_tool_result_text のテスト。"""
-
-    def test_claude_tool_response_stdout(self):
-        """Claude の tool_response.stdout を返す。"""
-        text, resp = harness.extract_tool_result_text(
-            {"tool_response": {"stdout": "hello\n", "stderr": ""}}
-        )
-        assert text == "hello\n"
-        assert resp["stdout"] == "hello\n"
-
-    def test_tool_response_with_blank_stdout_falls_through_to_tool_result(self):
-        """tool_response が dict でも stdout が空/空白なら toolResult へフォールバックする。"""
-        text, resp = harness.extract_tool_result_text(
-            {"tool_response": {"stdout": "   "}, "toolResult": {"textResultForLlm": "fallback"}}
-        )
-        assert text == "fallback"
-        assert resp["stdout"] == "fallback"
-
-    def test_copilot_tool_result_text(self):
-        """Copilot camelCase toolResult.textResultForLlm を返す。"""
-        text, resp = harness.extract_tool_result_text(
-            {"toolResult": {"resultType": "success", "textResultForLlm": "out"}}
-        )
-        assert text == "out"
-        assert resp["stdout"] == "out"
-
-    def test_vscode_tool_result_snake(self):
-        """VS Code tool_result.text_result_for_llm を返す。"""
-        text, _resp = harness.extract_tool_result_text(
-            {"tool_result": {"text_result_for_llm": "snake"}}
-        )
-        assert text == "snake"
-
-    def test_tool_result_raw_string(self):
-        """toolResult が生文字列でも返す。"""
-        text, resp = harness.extract_tool_result_text({"toolResult": "plain"})
-        assert text == "plain"
-        assert resp == {"stdout": "plain"}
-
-    def test_empty_when_missing(self):
-        """フィールドが無ければ空。"""
-        assert harness.extract_tool_result_text({}) == ("", {})
-
-    def test_tool_result_dict_without_usable_text(self):
-        """toolResult が dict でも text が空/非文字列なら空を返す。"""
-        assert harness.extract_tool_result_text({"toolResult": {}}) == ("", {})
-        assert harness.extract_tool_result_text({"toolResult": {"stdout": ""}}) == ("", {})
-        assert harness.extract_tool_result_text({"toolResult": {"stdout": 1}}) == ("", {})
-
-
 class TestExtractFilePaths:
     """extract_file_paths のテスト。"""
 

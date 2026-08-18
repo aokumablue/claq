@@ -40,23 +40,3 @@ def run_text(
         "env": env,
     }
     return subprocess.run(cmd, **run_kwargs)
-
-
-def check_output_text(cmd: list[str], *, timeout: float = 5.0) -> str:
-    """UTF-8 text モードで subprocess.check_output を実行する。
-
-    Args:
-        cmd: 実行コマンド。
-        timeout: タイムアウト秒数。
-
-    Returns:
-        標準出力文字列。
-    """
-    return subprocess.check_output(
-        cmd,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        stderr=subprocess.DEVNULL,
-        timeout=timeout,
-    )

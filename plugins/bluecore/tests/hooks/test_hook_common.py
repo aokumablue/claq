@@ -1,4 +1,4 @@
-"""hook_common のフック出力ヘルパー（SessionStart/UserPromptSubmit/PostToolUse）と
+"""hook_common のフック出力ヘルパー（SessionStart）と
 stdin 読み取りガード（TTY/タイムアウト/バイト上限）のテスト。
 """
 
@@ -20,9 +20,7 @@ import pytest
 from bluecore.hooks import hook_common
 from bluecore.hooks.hook_common import (
     detach_process,
-    emit_post_tool_use_output,
     emit_session_start_output,
-    emit_user_prompt_submit_output,
     print_session_start_output,
 )
 
@@ -65,50 +63,6 @@ class TestEmitSessionStartOutput:
     def test_no_trailing_newline(self) -> None:
         result = emit_session_start_output()
         assert not result.endswith("\n")
-
-
-class TestEmitUserPromptSubmitOutput:
-    @pytest.mark.parametrize(
-        "additional_context",
-        [
-            "simple context",
-            "改行\n含む\nテキスト",
-            "unicode: 日本語テスト 🐍",
-            "<mem-context>関連メモリ</mem-context>",
-        ],
-        ids=["simple", "newlines", "unicode", "mem-context"],
-    )
-    def test_returns_valid_json(self, additional_context: str) -> None:
-        payload = json.loads(emit_user_prompt_submit_output(additional_context))
-        inner = payload["hookSpecificOutput"]
-        assert inner["hookEventName"] == "UserPromptSubmit"
-        assert inner["additionalContext"] == additional_context
-
-    def test_merged_output_has_top_level_additional_context_but_no_event_name(self) -> None:
-        """合併出力はトップレベル additionalContext を持つが hookEventName は持たない。"""
-        payload = json.loads(emit_user_prompt_submit_output("ctx"))
-        assert "hookEventName" not in payload
-        assert payload["additionalContext"] == "ctx"
-
-    def test_unicode_not_escaped(self) -> None:
-        assert "日本語" in emit_user_prompt_submit_output("日本語")
-
-
-class TestEmitPostToolUseOutput:
-    @pytest.mark.parametrize(
-        "additional_context",
-        [
-            "simple context",
-            "改行\n含む\nテキスト",
-            "unicode: 日本語テスト 🐍",
-        ],
-        ids=["simple", "newlines", "unicode"],
-    )
-    def test_returns_valid_json(self, additional_context: str) -> None:
-        payload = json.loads(emit_post_tool_use_output(additional_context))
-        inner = payload["hookSpecificOutput"]
-        assert inner["hookEventName"] == "PostToolUse"
-        assert inner["additionalContext"] == additional_context
 
 
 class TestPrintSessionStartOutput:

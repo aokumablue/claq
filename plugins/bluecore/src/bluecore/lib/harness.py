@@ -130,46 +130,6 @@ def extract_bash_command(payload: dict[str, Any]) -> str:
     return ""
 
 
-def extract_tool_result_text(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """PostToolUse payload から LLM 向けテキストと置換用 dict を返す。
-
-    吸収する形:
-      - Claude: ``tool_response.stdout``
-      - Copilot camelCase: ``toolResult.textResultForLlm``
-      - VS Code: ``tool_result`` の同系フィールド
-
-    Args:
-        payload: フック stdin を JSON として読んだ dict。
-
-    Returns:
-        (テキスト, adapt_tool_output に渡す dict)。取れなければ ("", {})。
-
-    Raises:
-        例外は発生しません。
-    """
-    tool_response = payload.get("tool_response")
-    if isinstance(tool_response, dict):
-        stdout = tool_response.get("stdout")
-        if isinstance(stdout, str) and stdout.strip():
-            return stdout, tool_response
-
-    for key in ("toolResult", "tool_result"):
-        result = payload.get(key)
-        if isinstance(result, dict):
-            text = (
-                result.get("textResultForLlm")
-                or result.get("text_result_for_llm")
-                or result.get("stdout")
-            )
-            if isinstance(text, str) and text.strip():
-                merged = {**result, "stdout": text}
-                return text, merged
-        if isinstance(result, str) and result.strip():
-            return result, {"stdout": result}
-
-    return "", {}
-
-
 def normalize_tool_name(tool_name: str) -> str:
     """ハーネス固有のツール名を Claude Code 相当のツール名へ正規化する。
 

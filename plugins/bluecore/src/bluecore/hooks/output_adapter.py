@@ -53,36 +53,6 @@ def adapt_pre_tool_use_context_output(additional_context: str) -> str:
     return adapt_context_output("PreToolUse", additional_context)
 
 
-def adapt_tool_output(reduced_stdout: str, tool_response: dict) -> str:
-    """PostToolUse のツール出力差し替えを host 非依存の合併 JSON として生成する。
-
-    Claude Code は ``hookSpecificOutput.updatedToolOutput``（元の shape を
-    保ったまま stdout のみ差し替え）、Copilot CLI は ``modifiedResult``
-    （テキスト 1 本での全置換）を読む。両方を同時に出力する。
-
-    Args:
-        reduced_stdout: 圧縮後の stdout テキスト。
-        tool_response: 元のツール出力オブジェクト。
-
-    Returns:
-        modifiedResult と hookSpecificOutput.updatedToolOutput を同時に
-        含む合併 JSON 文字列。
-
-    Raises:
-        例外は発生しません。
-    """
-    return json.dumps(
-        {
-            "modifiedResult": {"resultType": "success", "textResultForLlm": reduced_stdout},
-            "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
-                "updatedToolOutput": {**tool_response, "stdout": reduced_stdout},
-            },
-        },
-        ensure_ascii=False,
-    )
-
-
 def emit_block(reason: str) -> tuple[int, str, str]:
     """ツール実行ブロックの出力を host 非依存の合併形式で組み立てる。
 

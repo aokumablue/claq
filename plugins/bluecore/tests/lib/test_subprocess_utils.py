@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
-from bluecore.lib.subprocess_utils import check_output_text, run_text
+from bluecore.lib.subprocess_utils import run_text
 
 
 def test_run_text_enforces_text_encoding_and_env(monkeypatch) -> None:
@@ -31,27 +31,6 @@ def test_run_text_enforces_text_encoding_and_env(monkeypatch) -> None:
     assert kwargs["timeout"] == 1.5
     assert kwargs["env"]["BASE_ENV"] == "1"
     assert kwargs["env"]["EXTRA_ENV"] == "2"
-
-
-def test_check_output_text_enforces_text_encoding(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_check_output(cmd, **kwargs):  # noqa: ANN001
-        captured["cmd"] = cmd
-        captured["kwargs"] = kwargs
-        return "output"
-
-    monkeypatch.setattr(subprocess, "check_output", fake_check_output)
-
-    result = check_output_text(["git", "status"], timeout=3.0)
-
-    assert result == "output"
-    kwargs = captured["kwargs"]
-    assert kwargs["text"] is True
-    assert kwargs["encoding"] == "utf-8"
-    assert kwargs["errors"] == "replace"
-    assert kwargs["stderr"] == subprocess.DEVNULL
-    assert kwargs["timeout"] == 3.0
 
 
 def test_run_text_without_extra_env() -> None:
