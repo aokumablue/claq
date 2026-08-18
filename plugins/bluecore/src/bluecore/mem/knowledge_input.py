@@ -136,27 +136,51 @@ def _payload_choice(
     return validate_choice(name, override or str(payload.get(name) or default), allowed)
 
 
-def generate_key(title: str, kind: str) -> str:
+def generate_key(raw_title: str, kind: str) -> str:
     """title から知識カードの key スラッグを生成する。
 
-    ASCII 英数字を 1 文字でも含む title は ``slugify`` で kebab-case 化する。
-    日本語まじりでも ``pytest をパイプする際は set -o pipefail が必須`` →
-    ``pytest-set-o-pipefail`` のように識別子として読める形に落ちる。
-    ASCII 英数字を全く含まない title はスラッグ化すると空になるため、
-    ``kind`` と title の SHA-1 先頭 8 桁で決定的な key を作る
-    （同じ title の再投入が同じ key に落ちて重複行を作らない）。
+    key は **redact 後** の title から生成します（A-03 対応）。redact 前の
+    生 title から生成すると、シークレットを含む title の断片が
+    ``learned:`` 標準出力・``show <key>`` の入力履歴・ログへそのまま残る
+    ためです（title/body 自体は redact 済みでも key 経由で漏れる）。
+
+    ASCII 英数字を 1 文字でも含む redact 後 title は ``slugify`` で
+    kebab-case 化します。``Keep [REDACTED] out of titles`` のような角括弧
+    混じりの文字列も、``slugify`` の非英数字置換で安定したスラッグ
+    （``keep-redacted-out-of-titles``）に落ちます。ASCII 英数字を全く
+    含まない redact 後 title はスラッグ化すると空になるため、``kind`` と
+    redact 後 title の SHA-1 先頭 8 桁で決定的な key を作ります。
+
+    redaction が title を書き換えた場合（＝シークレットを含んでいた場合）
+    のみ、生 title の SHA-1 先頭 8 桁を key の末尾に付します。これは
+    redact 後に同一の title へ潰れる 2 枚のカード（例:
+    ``Keep sk-aaa... safe`` と ``Keep sk-bbb... safe`` はどちらも
+    ``Keep [REDACTED] safe`` になる）が同じ key へ衝突するのを避けるため
+    です。切り詰めた SHA-1 は一方向ハッシュであり生 title（＝シークレット
+    本体）を復元できないため、これ自体が新たな漏えい経路にはなりません。
+    同じ生 title を 2 度 learn した場合はハッシュも同じになるため同一 key
+    に落ち、upsert され重複行は作られません。
 
     Args:
-        title: 知識カードの 1 行タイトル。
+        raw_title: 知識カードの 1 行タイトル（redact 前）。
         kind: 知識の種別。ハッシュ由来 key の接頭辞に使う。
 
     Returns:
         ``[a-z0-9-]`` のみからなる key。
+
+    Raises:
+        例外は発生しません。
     """
-    if _ASCII_ALNUM_RE.search(title):
-        return slugify(title)
-    digest = hashlib.sha1(title.encode("utf-8")).hexdigest()[:_KEY_HASH_LENGTH]
-    return f"{kind}-{digest}"
+    redacted_title = redact_knowledge_text(raw_title)
+    if _ASCII_ALNUM_RE.search(redacted_title):
+        base = slugify(redacted_title)
+    else:
+        digest = hashlib.sha1(redacted_title.encode("utf-8")).hexdigest()[:_KEY_HASH_LENGTH]
+        base = f"{kind}-{digest}"
+    if redacted_title == raw_title:
+        return base
+    collision_guard = hashlib.sha1(raw_title.encode("utf-8")).hexdigest()[:_KEY_HASH_LENGTH]
+    return f"{base}-{collision_guard}"
 
 
 @dataclass(frozen=True)
@@ -233,13 +257,16 @@ def parse_knowledge_payload(
 ) -> KnowledgeDraft:
     """JSON ペイロードを検証済みの ``KnowledgeDraft`` へ変換する。
 
-    ``title`` / ``body`` / ``source_ref`` は DB へ書く前に
+    ``title`` / ``body`` / ``source_ref`` / ``domain`` は DB へ書く前に
     ``redact_knowledge_text`` で既知プレフィックス系シークレットを
     マスクする（agent/外部入力由来の未検証データが SessionStart context
-    へそのまま昇格するのを防ぐ）。key は redaction 前の生 title から
-    生成する（redact 後の title から生成すると、シークレットを含む
-    2 枚のカードがどちらも ``kind-<hash>`` 由来の同じ key に衝突しうる上、
-    ``show <key>`` で引けなくなるため）。
+    へそのまま昇格するのを防ぐ）。key は **redact 後**の title から
+    `generate_key` で生成する（A-03 対応。redact 前の生 title から生成する
+    と、title/body 自体は redact 済みでも key・``learned:`` 標準出力・
+    ``show <key>`` の入力履歴経由でシークレットが残ってしまうため）。
+    ペイロードが ``key`` を明示指定した場合も、生の値をそのまま使わず
+    redact + slugify を通してから使う（同じ理由。明示 key だけが検証・
+    redaction を素通りする穴になっていた）。
 
     Args:
         payload: 知識カードを表す dict。
@@ -261,8 +288,13 @@ def parse_knowledge_payload(
     source = _payload_choice(payload, "source", SOURCES, default="agent")
     status = _payload_choice(payload, "status", STATUSES, default="active", override=status_override)
 
-    key = str(payload.get("key") or "").strip() or generate_key(title, kind)
+    raw_key = str(payload.get("key") or "").strip()
+    # 明示 key もシークレット断片を持ち込みうるため、生成 key と同じく
+    # redact してから slugify を通す（A-03 対応。ここが素通りする穴だった）。
+    key = slugify(redact_knowledge_text(raw_key)) if raw_key else generate_key(title, kind)
+
     source_ref = optional_str(payload.get("source_ref"))
+    domain = optional_str(payload.get("domain"))
 
     return KnowledgeDraft(
         key=key,
@@ -270,7 +302,7 @@ def parse_knowledge_payload(
         kind=kind,
         title=redact_knowledge_text(title),
         body=redact_knowledge_text(str(payload.get("body") or "")),
-        domain=optional_str(payload.get("domain")),
+        domain=redact_knowledge_text(domain) if domain else None,
         confidence=coerce_confidence(payload.get("confidence")),
         status=status,
         source=source,

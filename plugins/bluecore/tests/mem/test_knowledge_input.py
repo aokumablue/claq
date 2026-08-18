@@ -31,6 +31,13 @@ class TestGenerateKey:
         assert len(key) == len("decision-") + 8
         assert key == generate_key("テーブル定義変更は移行不要", "decision")
 
+    def test_bracketed_redacted_title_yields_stable_slug(self) -> None:
+        """redact 後の title に残る角括弧混じりの `[REDACTED]` も安定した
+        スラッグ（redacted を含む形）に落ちる（A-03 の確認事項）。"""
+        key = generate_key("Keep [REDACTED] out of titles", "pitfall")
+        assert "redacted" in key
+        assert key == generate_key("Keep [REDACTED] out of titles", "pitfall")
+
 
 class TestScalarHelpers:
     """列挙値・確信度・任意文字列の変換。"""
@@ -183,13 +190,45 @@ class TestSecretRedaction:
         )
         assert without_secret.key == with_secret.key
 
-    def test_key_generation_uses_raw_title_even_when_title_itself_is_a_secret(self) -> None:
-        """title 自体がシークレット様の文字列でも、key は redact 前の生 title から決定的に生成される。"""
+    def test_key_generation_uses_redacted_title_when_title_itself_is_a_secret(self) -> None:
+        """title 自体がシークレット様の文字列でも、key は redact 後の title から
+        生成され、生のシークレット断片を含まない（A-03 対応）。"""
         payload = {"kind": "fact", "title": "token=hunter2hunter2hunter2secret!!"}
         draft = parse_knowledge_payload(dict(payload))
-        # 同じ生 title からは常に同じ key が出る（redact 後の title 由来だと
-        # プレースホルダ経由で衝突しうる）。
+        assert "hunter2" not in draft.key
         assert draft.key == generate_key(payload["title"], "fact")
+
+    def test_same_secret_title_learned_twice_yields_same_key(self) -> None:
+        """同じ secret 入り title を 2 度 learn しても同一 key に落ちる
+        （upsert され重複カードを作らない。A-03 の確認事項）。"""
+        payload = {"kind": "pitfall", "title": f"Keep {self._GITHUB_PAT} out of titles"}
+        first = parse_knowledge_payload(dict(payload))
+        second = parse_knowledge_payload(dict(payload))
+        assert first.key == second.key
+        assert "ghp_" not in first.key
+
+    def test_different_secrets_with_same_surrounding_text_get_different_keys(self) -> None:
+        """redact 後に同一テキストへ潰れる 2 枚（異なる secret）は、生 title 由来の
+        衝突回避サフィックスで別々の key になる（A-03: key 衝突による情報混同の防止）。"""
+        other_pat = "ghp_" + "9876543210fedcba9876543210fedcba9876"
+        draft_a = parse_knowledge_payload({"kind": "pitfall", "title": f"Keep {self._GITHUB_PAT} safe"})
+        draft_b = parse_knowledge_payload({"kind": "pitfall", "title": f"Keep {other_pat} safe"})
+        assert draft_a.key != draft_b.key
+        assert "ghp_" not in draft_a.key
+        assert "ghp_" not in draft_b.key
+
+    def test_explicit_key_with_secret_is_redacted(self) -> None:
+        """payload の明示 ``key`` もシークレット断片を素通りさせない（A-03 対応）。"""
+        draft = parse_knowledge_payload({"kind": "fact", "title": "t", "key": self._GITHUB_PAT})
+        assert "ghp_" not in draft.key
+
+    def test_domain_is_redacted(self) -> None:
+        """domain もシークレットを持ち込みうるため redact する（A-03 対応）。"""
+        draft = parse_knowledge_payload(
+            {"kind": "fact", "title": "t", "domain": f"leak {self._ANTHROPIC_KEY}"}
+        )
+        assert "sk-ant-" not in (draft.domain or "")
+        assert "[REDACTED]" in (draft.domain or "")
 
     def test_commit_sha_in_body_is_not_redacted(self) -> None:
         """40 文字の commit SHA のような長い16進/base64様文字列は汎用エントロピー
