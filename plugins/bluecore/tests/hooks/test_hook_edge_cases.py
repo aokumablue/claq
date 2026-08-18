@@ -1013,7 +1013,7 @@ def test_evaluate_commit_dash_a_unions_unstaged_modified_files(monkeypatch: pyte
     monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
 
     dummy_repo_root = Path("/dummy/repo")
-    monkeypatch.setattr(pre_bash_commit_quality, "_resolve_repo_root", lambda: dummy_repo_root)
+    monkeypatch.setattr(pre_bash_commit_quality, "resolve_repo_root", lambda: dummy_repo_root)
 
     seen: list[tuple[str, Path | None]] = []
 
@@ -1049,7 +1049,7 @@ def test_evaluate_commit_dash_a_worktree_blocked_when_repo_root_unresolvable(
         pre_bash_commit_quality, "get_unstaged_modified_files", lambda: ["src/unstaged.py"]
     )
     monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
-    monkeypatch.setattr(pre_bash_commit_quality, "_resolve_repo_root", lambda: None)
+    monkeypatch.setattr(pre_bash_commit_quality, "resolve_repo_root", lambda: None)
 
     seen: list[str] = []
 
@@ -1197,46 +1197,6 @@ def test_get_unstaged_modified_files_returns_empty_on_oserror(monkeypatch: pytes
         lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("missing")),
     )
     assert pre_bash_commit_quality.get_unstaged_modified_files() == []
-
-
-def test_resolve_repo_root_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """git rev-parse が失敗（returncode != 0）した場合は None を返すこと。"""
-    monkeypatch.setattr(
-        pre_bash_commit_quality.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 128, stdout="", stderr="fatal"),
-    )
-    assert pre_bash_commit_quality._resolve_repo_root() is None
-
-
-def test_resolve_repo_root_returns_none_on_empty_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    """git rev-parse の出力が空の場合は None を返すこと。"""
-    monkeypatch.setattr(
-        pre_bash_commit_quality.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
-    )
-    assert pre_bash_commit_quality._resolve_repo_root() is None
-
-
-def test_resolve_repo_root_returns_none_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """git rev-parse がタイムアウトした場合は非ブロッキングで None を返すこと。"""
-    monkeypatch.setattr(
-        pre_bash_commit_quality.subprocess,
-        "run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired(cmd="git", timeout=5)),
-    )
-    assert pre_bash_commit_quality._resolve_repo_root() is None
-
-
-def test_resolve_repo_root_returns_path_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    """git rev-parse が成功すればそのパスを返すこと。"""
-    monkeypatch.setattr(
-        pre_bash_commit_quality.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="/repo/root\n", stderr=""),
-    )
-    assert pre_bash_commit_quality._resolve_repo_root() == Path("/repo/root")
 
 
 def test_get_worktree_file_content_returns_none_on_oserror(tmp_path: Path) -> None:

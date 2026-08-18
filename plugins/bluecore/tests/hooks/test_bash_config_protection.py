@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +12,18 @@ from bluecore.hooks import bash_config_protection
 
 def _bash_payload(command: str) -> str:
     return json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
+@pytest.fixture(autouse=True)
+def _fixed_repo_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """`find_protected_write` の repo スコープ判定（A-06）を tmp_path 配下に固定する。
+
+    実行環境の git リポジトリに依存せず、cwd と `resolve_repo_root` の両方を
+    同一の一時ディレクトリに揃えることでテストを決定的にする。
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: tmp_path)
+    return tmp_path
 
 
 class TestFindProtectedWrite:
@@ -30,7 +43,19 @@ class TestFindProtectedWrite:
             "sed -i.bak 's/a/b/' setup.cfg",
             "cat <<'EOF' > pyproject.toml\nx\nEOF",
             "true && printf x > pyproject.toml",
-            "printf x > /tmp/repo/pyproject.toml",
+            # A-02: 拡張したリダイレクト演算子。
+            "echo x &> pyproject.toml",
+            "echo x >| pyproject.toml",
+            "echo x 1> pyproject.toml",
+            "echo x 2>> pyproject.toml",
+            # A-02: 書き込み先が引数位置に明示されるコマンド群。
+            "cp src.py pyproject.toml",
+            "mv src.py pyproject.toml",
+            "install -m 644 src.py pyproject.toml",
+            "ln -f /dev/null pyproject.toml",
+            "dd if=/dev/zero of=pyproject.toml",
+            "perl -i -pe s/a/b/ pyproject.toml",
+            "perl -0pi -e 1 pyproject.toml",
         ],
     )
     def test_detects_protected_write(self, command: str) -> None:
@@ -47,10 +72,74 @@ class TestFindProtectedWrite:
             "tee",
             "sed -i",
             "",
+            # A-02 非目標: 引数末尾ではない/force なしの書き込み経路。
+            "ln /dev/null pyproject.toml",
         ],
     )
     def test_allows_non_write(self, command: str) -> None:
         assert bash_config_protection.find_protected_write(command) is None
+
+    def test_allows_protected_basename_outside_repo_root(self) -> None:
+        """A-06 回帰防止: リポジトリ外の同名ファイルへの書き込みは allow する。"""
+        assert (
+            bash_config_protection.find_protected_write(
+                "printf x > /definitely-outside-the-repo/pyproject.toml"
+            )
+            is None
+        )
+
+    def test_allows_when_repo_root_undetermined(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A-06: リポジトリルートが決定できない場合は allow する（deny に倒さない）。"""
+        monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: None)
+
+        assert bash_config_protection.find_protected_write("printf x > pyproject.toml") is None
+
+    def test_resolve_repo_root_not_called_without_write_hit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """保護対象 basename が出現しない大多数の呼び出しでは resolve_repo_root を呼ばない。"""
+        called = {"n": 0}
+
+        def _tracking_resolve() -> Path:
+            called["n"] += 1
+            return Path("/repo")
+
+        monkeypatch.setattr(bash_config_protection, "resolve_repo_root", _tracking_resolve)
+
+        assert bash_config_protection.find_protected_write("ls -la && echo hello") is None
+        assert called["n"] == 0
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # perl: -i フラグなし（in-place ではない）。
+            "perl -pe s/a/b/ pyproject.toml",
+            # perl: -i フラグはあるが対象が保護対象でない。
+            "perl -i -pe s/a/b/ notes.txt",
+            # cp/mv/install: 非オプション引数が無い（書き込み先が確定しない）。
+            "cp -v",
+            "mv --",
+            # ln -f: 非オプション引数が無い。
+            "ln -f",
+            # dd of=: 出力先が保護対象でない。
+            "dd if=/dev/zero of=notes.txt",
+        ],
+    )
+    def test_extended_detector_edge_cases_allow(self, command: str) -> None:
+        """拡張検出（perl/cp/mv/ln/dd）の non-match 分岐（in-place 無し・引数無し・非保護対象）。"""
+        assert bash_config_protection.find_protected_write(command) is None
+
+    def test_within_repo_root_returns_false_on_resolve_oserror(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """cwd/repo_root の resolve() が OSError を投げても deny せず False を返す（可用性優先）。"""
+
+        def _raising_cwd() -> Path:
+            raise OSError("cwd unavailable")
+
+        monkeypatch.setattr(bash_config_protection.Path, "cwd", classmethod(lambda cls: _raising_cwd()))
+
+        assert bash_config_protection._within_repo_root("pyproject.toml", Path("/repo")) is False
 
 
 class TestMain:

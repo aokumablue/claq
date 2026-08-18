@@ -23,20 +23,34 @@ Bash コマンド文字列に対して適用する。
     `hook_common.tokenize`/`split_segments`（block_no_verify と共有するトーク
     ナイザ）でセグメント分割し、各セグメント内で保護対象ファイルの basename
     が**書き込み先トークンとして現れた場合のみ** deny する:
-        - `>` / `>>` リダイレクト先
+        - `>` / `>>` / `&>` / `>|` リダイレクト先（`1>`/`2>`/`1>>`/`2>>` は
+          `1`/`2` が別トークンになり `>`/`>>` に一致するため追加検出不要）
         - `tee` の出力先引数
-        - `sed -i` の対象引数（in-place 編集）
+        - `sed -i` / `perl -i`（`-0pi` 等の結合短形式含む）の対象引数（in-place 編集）
+        - `cp`/`mv`/`install` の最終引数、`ln -f` の最終引数、`dd of=<path>`
+    さらに、書き込み先ヒットがあった場合のみ `hook_common.resolve_repo_root`
+    （`git rev-parse --show-toplevel`、プロセス内 1 回キャッシュ）でリポジトリ
+    ルートを解決し、書き込み先を cwd 基準で解決したうえで**そのルート配下に
+    ある場合のみ** deny する（A-06: basename だけの判定は別リポジトリ・別
+    ディレクトリの同名ファイルを誤検出していた）。**リポジトリルートが決定
+    できない場合は allow**（決定不能を deny に倒すと A-06 の false positive が
+    残るため）。
     「検査不能なら deny」には倒さない（可用性が死ぬ）。JSON が壊れている場合
     のみ、`pre_bash_commit_quality.evaluate()` と同じ姿勢（生テキストに保護対象
-    basename + 書き込み指示が両方見えるときだけ deny、それ以外は 0）を採る。
+    basename + 書き込み指示が両方見えるときだけ deny、それ以外は 0。この
+    フォールバックはトークン化された経路を持たないため repo スコープ判定は
+    適用されない）を採る。
 
-非目標: `cp`/`mv`/`install` 等の他コマンド経由の書き込み、`$(...)`・変数展開・
-    パイプ越しの間接書き込み、シェルエイリアス・ラッパースクリプト経由の
-    呼び出し。POSIX シェルの完全解釈は行わず、うっかり書き換えの抑止であって
-    敵対的回避への防壁ではない（`block_no_verify` と同じ設計判断）。
+非目標: `python -c`/`eval`/任意スクリプト経由の間接書き込み、`$(...)`・変数
+    展開・パイプ越しの間接書き込み、シェルエイリアス・ラッパースクリプト
+    経由の呼び出し。POSIX シェルの完全解釈は行わず、うっかり書き換えの抑止
+    であって敵対的回避への防壁ではない（`block_no_verify` と同じ設計判断。
+    詳細は `docs/adr/0002-*.md`）。
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from bluecore.hooks.config_protection import (
     CONDITIONALLY_PROTECTED_FILES,
@@ -49,6 +63,7 @@ from bluecore.hooks.hook_common import (
     emit_block_output,
     parse_json_object,
     read_raw_stdin_with_truncation,
+    resolve_repo_root,
     split_segments,
     tokenize,
 )
@@ -59,8 +74,14 @@ from bluecore.lib.harness import extract_bash_command, extract_raw_tool_name, no
 _BASH_TOOL_NAMES = frozenset({"bash"})
 
 # リダイレクト演算子。`hook_common.tokenize` は shlex の既定 punctuation_chars
-# （``();<>|&``）を使うため、``>`` / ``>>`` は密着していても独立トークンになる。
-_REDIRECT_OPERATORS = frozenset({">", ">>"})
+# （``();<>|&``）を使うため、``>`` / ``>>`` / ``&>`` / ``>|`` は密着していても
+# 独立トークンになる。``1>``/``2>``/``1>>``/``2>>`` は数字が別トークンに
+# 分かれ ``>``/``>>`` そのものに一致するため、ここへ追加する必要はない
+# （数字プレフィックス自体を明示しているのは意図の記録目的）。
+_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>"})
+
+# 最終引数が書き込み先になるコマンド群（A-02）。
+_LAST_ARG_WRITE_COMMANDS = frozenset({"cp", "mv", "install"})
 
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES | CONDITIONALLY_PROTECTED_FILES
 
@@ -82,27 +103,27 @@ def _protected_basename(token: str) -> str | None:
 
 
 def _redirect_target(segment: list[str]) -> str | None:
-    """セグメント内の `>` / `>>` リダイレクト先が保護対象ならその basename を返す。
+    """セグメント内の `>` 系リダイレクト先が保護対象ならその生トークンを返す。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        保護対象ファイル名。該当しなければ None。
+        書き込み先の生トークン（パス文字列）。該当しなければ None。
 
     Raises:
         例外は発生しません。
     """
     for index, token in enumerate(segment):
         if token in _REDIRECT_OPERATORS and index + 1 < len(segment):
-            found = _protected_basename(segment[index + 1])
-            if found:
-                return found
+            candidate = segment[index + 1]
+            if _protected_basename(candidate):
+                return candidate
     return None
 
 
 def _tee_target(segment: list[str]) -> str | None:
-    """セグメント内の `tee` の出力先引数が保護対象ならその basename を返す。
+    """セグメント内の `tee` の出力先引数が保護対象ならその生トークンを返す。
 
     `-a`（追記）等のオプショントークンは読み飛ばし、非オプション引数を
     出力先候補として検査する。
@@ -111,7 +132,7 @@ def _tee_target(segment: list[str]) -> str | None:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        保護対象ファイル名。該当しなければ None。
+        書き込み先の生トークン（パス文字列）。該当しなければ None。
 
     Raises:
         例外は発生しません。
@@ -124,20 +145,19 @@ def _tee_target(segment: list[str]) -> str | None:
     for token in segment[tee_index + 1 :]:
         if token.startswith("-"):
             continue
-        found = _protected_basename(token)
-        if found:
-            return found
+        if _protected_basename(token):
+            return token
     return None
 
 
 def _sed_inplace_target(segment: list[str]) -> str | None:
-    """セグメント内の `sed -i`（in-place 編集）の対象引数が保護対象ならその basename を返す。
+    """セグメント内の `sed -i`（in-place 編集）の対象引数が保護対象ならその生トークンを返す。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        保護対象ファイル名。該当しなければ None。
+        書き込み先の生トークン（パス文字列）。該当しなければ None。
 
     Raises:
         例外は発生しません。
@@ -149,29 +169,174 @@ def _sed_inplace_target(segment: list[str]) -> str | None:
     if not has_inplace:
         return None
     for token in segment:
-        found = _protected_basename(token)
-        if found:
-            return found
+        if _protected_basename(token):
+            return token
     return None
 
 
-def _write_target_in_segment(segment: list[str]) -> str | None:
-    """セグメント内の書き込み先（リダイレクト/tee/sed -i）が保護対象ならその basename を返す。
+def _perl_inplace_target(segment: list[str]) -> str | None:
+    """セグメント内の `perl -i`（`-0pi` 等の結合短形式含む）の対象引数が保護対象ならその生トークンを返す。
+
+    perl の in-place 編集フラグは `-i` 単独、または `-0pi`/`-pi.bak` の
+    ように他の短形式オプションと結合できる。結合位置は問わず、`-` 始まりの
+    単一ダッシュ・トークンに小文字 `i` が含まれるかで判定する
+    （`sed -i` と同じ「敵対的回避への防壁ではない」設計判断）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        保護対象ファイル名。該当しなければ None。
+        書き込み先の生トークン（パス文字列）。該当しなければ None。
 
     Raises:
         例外は発生しません。
     """
-    return _redirect_target(segment) or _tee_target(segment) or _sed_inplace_target(segment)
+    has_perl = any(token.rsplit("/", 1)[-1] == "perl" for token in segment)
+    if not has_perl:
+        return None
+    has_inplace = any(
+        token.startswith("-") and not token.startswith("--") and "i" in token for token in segment
+    )
+    if not has_inplace:
+        return None
+    for token in segment:
+        if _protected_basename(token):
+            return token
+    return None
+
+
+def _last_arg_write_target(segment: list[str]) -> str | None:
+    """`cp`/`mv`/`install` の最終（非オプション）引数が保護対象ならその生トークンを返す。
+
+    これらのコマンドは複数ソースを取りうるが、書き込み先は常に末尾の
+    非オプション引数（`cp a b c dest` の `dest`）である。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        書き込み先の生トークン（パス文字列）。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    if not segment or segment[0].rsplit("/", 1)[-1] not in _LAST_ARG_WRITE_COMMANDS:
+        return None
+    non_option_tokens = [token for token in segment[1:] if not token.startswith("-")]
+    if not non_option_tokens:
+        return None
+    candidate = non_option_tokens[-1]
+    return candidate if _protected_basename(candidate) else None
+
+
+def _ln_force_target(segment: list[str]) -> str | None:
+    """`ln -f` の最終（非オプション）引数が保護対象ならその生トークンを返す。
+
+    `-f` なしの `ln` はリンク先が既存の場合エラーで停止するため、無言の
+    上書きリスクがある `-f` 付きの呼び出しのみを対象にする。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        書き込み先の生トークン（パス文字列）。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    if not segment or segment[0].rsplit("/", 1)[-1] != "ln":
+        return None
+    has_force = any(
+        token.startswith("-") and not token.startswith("--") and "f" in token
+        for token in segment[1:]
+    )
+    if not has_force:
+        return None
+    non_option_tokens = [token for token in segment[1:] if not token.startswith("-")]
+    if not non_option_tokens:
+        return None
+    candidate = non_option_tokens[-1]
+    return candidate if _protected_basename(candidate) else None
+
+
+def _dd_of_target(segment: list[str]) -> str | None:
+    """セグメント内の `dd of=<path>` の書き込み先が保護対象ならその生パス文字列を返す。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        書き込み先の生パス文字列（`of=` プレフィックス除去済み）。
+        該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    for token in segment:
+        if token.startswith("of="):
+            candidate = token[len("of=") :]
+            if _protected_basename(candidate):
+                return candidate
+    return None
+
+
+def _write_target_token_in_segment(segment: list[str]) -> str | None:
+    """セグメント内の書き込み先トークン（保護対象ヒット時）を返す。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        書き込み先の生トークン（パス文字列）。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        _redirect_target(segment)
+        or _tee_target(segment)
+        or _sed_inplace_target(segment)
+        or _perl_inplace_target(segment)
+        or _last_arg_write_target(segment)
+        or _ln_force_target(segment)
+        or _dd_of_target(segment)
+    )
+
+
+def _within_repo_root(token: str, repo_root: Path) -> bool:
+    """書き込み先トークンを cwd 基準で解決し、`repo_root` 配下にあるかを判定する。
+
+    `token` が絶対パスなら cwd は無視される（pathlib の `/` 演算子の挙動）。
+
+    Args:
+        token: 書き込み先の生トークン（パス文字列）。
+        repo_root: `resolve_repo_root` が返したリポジトリルート。
+
+    Returns:
+        `repo_root` 配下にあれば True。解決不能・配下外なら False。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        resolved = (Path.cwd() / token).resolve()
+        root = repo_root.resolve()
+    except (OSError, RuntimeError):
+        return False
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def find_protected_write(command: str) -> str | None:
     """コマンド文字列内に保護対象ファイルへの書き込みがあればその basename を返す。
+
+    書き込み先ヒットがあった場合のみ `resolve_repo_root` を呼び、書き込み先が
+    現在のリポジトリルート配下にある場合のみ deny する（A-06）。リポジトリ
+    ルートが決定できない場合は allow（決定不能を deny に倒すと false
+    positive が残るため）。
 
     Args:
         command: 検査対象のシェルコマンド文字列。
@@ -183,9 +348,14 @@ def find_protected_write(command: str) -> str | None:
         例外は発生しません。
     """
     for segment in split_segments(tokenize(command)):
-        found = _write_target_in_segment(segment)
-        if found:
-            return found
+        token = _write_target_token_in_segment(segment)
+        if token is None:
+            continue
+        repo_root = resolve_repo_root()
+        if repo_root is None:
+            return None
+        if _within_repo_root(token, repo_root):
+            return basename(token)
     return None
 
 

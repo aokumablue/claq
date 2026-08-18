@@ -41,7 +41,13 @@ from bluecore.hooks.commit_quality_scanner import (
     should_lint_file,
     should_scan_secrets,
 )
-from bluecore.hooks.hook_common import MAX_STDIN_BYTES, parse_json_object, split_segments, tokenize
+from bluecore.hooks.hook_common import (
+    MAX_STDIN_BYTES,
+    parse_json_object,
+    resolve_repo_root,
+    split_segments,
+    tokenize,
+)
 from bluecore.lib.core_utils import log
 from bluecore.lib.harness import extract_bash_command
 
@@ -167,39 +173,6 @@ def get_unstaged_modified_files() -> list[str]:
     """
     result = _git_name_only(["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"])
     return result if result is not None else []
-
-
-def _resolve_repo_root() -> Path | None:
-    """`git rev-parse --show-toplevel` でリポジトリルートの絶対パスを解決します。
-
-    `git commit -a` の未ステージ変更を作業ツリーから読むために使います。
-    タイムアウト・失敗時は None を返し、呼び出し側で非ブロッキングに
-    フォールバック（従来どおり INDEX のみ・作業ツリー分はスキップ）
-    できるようにします。
-
-    Returns:
-        リポジトリルートの絶対パス。解決できなければ None を返します。
-
-    Args:
-        引数はありません。
-
-    Raises:
-        例外は発生しません。
-    """
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        if result.returncode != 0:
-            return None
-        top = result.stdout.strip()
-        return Path(top) if top else None
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-        return None
 
 
 def _is_git_executable_token(token: str) -> bool:
@@ -625,7 +598,7 @@ def _collect_worktree_issues(
     if not worktree_targets:
         return total_issues, error_count, warning_count, info_count
 
-    repo_root = _resolve_repo_root()
+    repo_root = resolve_repo_root()
     if repo_root is None:
         return None
 

@@ -534,6 +534,81 @@ class TestReadStdinBytesChunkedDeadline:
         assert result == b""
 
 
+class TestResolveRepoRoot:
+    """`resolve_repo_root`（A-06 共有ヘルパー）の解決・プロセス内キャッシュのテスト。
+
+    `resolve_repo_root` は `functools.lru_cache` を持つため、各テストの
+    前後で `cache_clear()` してテスト間の漏れ込みを防ぐ。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self) -> None:
+        hook_common.resolve_repo_root.cache_clear()
+        yield
+        hook_common.resolve_repo_root.cache_clear()
+
+    def test_returns_none_on_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """git rev-parse が失敗（returncode != 0）した場合は None を返すこと。"""
+        monkeypatch.setattr(
+            hook_common.subprocess,
+            "run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 128, stdout="", stderr="fatal"),
+        )
+        assert hook_common.resolve_repo_root() is None
+
+    def test_returns_none_on_empty_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """git rev-parse の出力が空の場合は None を返すこと。"""
+        monkeypatch.setattr(
+            hook_common.subprocess,
+            "run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+        assert hook_common.resolve_repo_root() is None
+
+    def test_returns_none_on_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """git rev-parse がタイムアウトした場合は非ブロッキングで None を返すこと。"""
+        monkeypatch.setattr(
+            hook_common.subprocess,
+            "run",
+            lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired(cmd="git", timeout=5)),
+        )
+        assert hook_common.resolve_repo_root() is None
+
+    def test_returns_none_on_file_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """git 実行ファイル自体が無い場合も非ブロッキングで None を返すこと。"""
+        monkeypatch.setattr(
+            hook_common.subprocess,
+            "run",
+            lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("no git")),
+        )
+        assert hook_common.resolve_repo_root() is None
+
+    def test_returns_path_on_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """git rev-parse が成功すればそのパスを返すこと。"""
+        monkeypatch.setattr(
+            hook_common.subprocess,
+            "run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="/repo/root\n", stderr=""),
+        )
+        assert hook_common.resolve_repo_root() == Path("/repo/root")
+
+    def test_caches_within_process_calls_git_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """同一プロセス内では git rev-parse を最大 1 回しか実行しない。"""
+        call_count = {"n": 0}
+
+        def _fake_run(*args, **kwargs):  # noqa: ANN002, ANN003
+            call_count["n"] += 1
+            return subprocess.CompletedProcess(args[0], 0, stdout="/repo/root\n", stderr="")
+
+        monkeypatch.setattr(hook_common.subprocess, "run", _fake_run)
+
+        first = hook_common.resolve_repo_root()
+        second = hook_common.resolve_repo_root()
+
+        assert first == second == Path("/repo/root")
+        assert call_count["n"] == 1
+
+
 class TestReadRawStdinWithTruncation:
     """read_raw_stdin_with_truncation の切り捨て判定・stdin ガードのテスト。"""
 

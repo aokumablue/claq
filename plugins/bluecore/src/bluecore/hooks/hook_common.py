@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import select
@@ -81,6 +82,49 @@ def split_segments(tokens: list[str]) -> list[list[str]]:
     if current:
         segments.append(current)
     return segments
+
+
+@functools.lru_cache(maxsize=1)
+def resolve_repo_root() -> Path | None:
+    """`git rev-parse --show-toplevel` でリポジトリルートの絶対パスを解決しキャッシュする。
+
+    `bash_config_protection`（A-06: 保護対象パスがリポジトリ配下かの判定）と
+    `pre_bash_commit_quality`（`git commit -a` の未ステージ変更を作業ツリーから
+    読むため）が共有する。呼び出し側は「保護対象 basename のヒットがあった
+    場合にのみ」呼ぶことを前提にしており（`git ls-files` 等が出現しない
+    大多数の Bash 呼び出しでは subprocess を起動しない）、`lru_cache` で
+    同一プロセス内では最大 1 回だけ実際に `git` を実行する（セグメントや
+    呼び出し箇所ごとに再起動しない）。テストでキャッシュを跨がせない場合は
+    `resolve_repo_root.cache_clear()` を呼ぶこと。
+
+    タイムアウト・失敗時は None を返し、呼び出し側で非ブロッキングに
+    フォールバック（deny を避ける、または INDEX のみ検査に留める）
+    できるようにする。
+
+    Args:
+        引数はありません。
+
+    Returns:
+        リポジトリルートの絶対パス。解決できなければ None を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        top = result.stdout.strip()
+        return Path(top) if top else None
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
 
 # hooks は Claude Code が spawn 直後に stdin へ JSON を書き込むため、
 # 最初のバイト到着まで 2 秒あれば十分な余裕がある。
