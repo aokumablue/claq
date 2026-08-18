@@ -21,8 +21,9 @@ command: /harness
 ## 使い方
 
 ```bash
-/harness
+/harness                    # ベースライン取得→トップ3提示までで停止（apply しない）
 /harness --audit-only       # スコアカード出力のみ
+/harness --apply            # トップ3を確認なしで harness-tuner に適用させる
 /harness skills --format json
 /harness --scope hooks --root /path/to/repo --target-kind repo
 ```
@@ -49,7 +50,9 @@ bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path
 
 `top_actions[]` から最も効果が高い3件を抽出。各アクションは `checks[]` の失敗チェックに紐付く正確なファイルパス付き。
 
-## ステップ3: harness-tuner による改善適用
+**apply 承認境界**: `--audit-only` は監査のみで完全に分離済みだが、`--audit-only` を指定しない既定の呼び出しでも、ここから先（ステップ3の変更適用）は無条件委譲しない。`--apply` が明示されていなければ、トップ3アクション（提案内容・対象ファイル・想定効果）をここで提示してユーザーに提示するだけで停止する（ステップ3〜5は実行しない）。`--apply` が明示されている場合のみステップ3へ進む。人間の承認を経ずに harness-tuner へ変更適用を委譲しない。
+
+## ステップ3: harness-tuner による改善適用（`--apply` 指定時のみ）
 
 `bluecore:harness-tuner` を起動。ベースラインJSONとトップ3アクションを渡し、信頼性・コスト・スループット最適化を委譲。
 
@@ -58,7 +61,7 @@ harness-tuner は:
 - 元に戻せる設定変更のみを適用
 - 適用前後の影響範囲を要約
 
-## ステップ4: 改善後スコア
+## ステップ4: 改善後スコア（`--apply` 指定時のみ）
 
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"
@@ -67,7 +70,7 @@ bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path
 
 ステップ1と同一の `--root` / `--target-kind` で再採点（異なる root・スケールのスコアを比較しない）。
 
-## ステップ5: 差分要約
+## ステップ5: 差分要約（`--apply` 指定時のみ）
 
 変更前後の差分・カテゴリ別スコア変化・harness-tuner が適用した変更内容を出力。
 
@@ -83,9 +86,10 @@ bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path
 1. ベースライン `overall_score` と `max_score`（`repo` では65）
 2. カテゴリ別スコアと指摘
 3. 失敗チェックと正確なファイルパス
-4. 上位3件のアクション（`top_actions`）と harness-tuner 適用内容
-5. 改善後スコアカード（`--audit-only` 以外）
-6. 変更前後の差分サマリー
+4. 上位3件のアクション（`top_actions`）。`--apply` 未指定ならここで停止し、harness-tuner 適用内容は出さない
+5. （`--apply` 指定時）harness-tuner 適用内容
+6. （`--apply` 指定時）改善後スコアカード
+7. （`--apply` 指定時）変更前後の差分サマリー
 
 ## 引数
 
@@ -95,3 +99,4 @@ bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path
 - `--root=<path>`: 監査対象ルート（必須。省略時の自動 cwd 判定は誤判定しうる）
 - `--target-kind=repo|consumer`: 期待する判定モードの明示（必須。自動判定と食い違えば FAIL）
 - `--audit-only`: ステップ1のみで終了（/harness レベルの制御フラグ。`bluecore_run` へ渡さない）
+- `--apply`: トップ3アクションの harness-tuner への適用（ステップ3〜5）を実行する。未指定時はステップ2で停止し、人間の承認を待つ（`--audit-only` とは独立。`--audit-only` はステップ1のみで停止しトップ3提示すら行わない、より早い停止点）
