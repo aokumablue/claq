@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from bluecore.lib.core_utils import strip_ansi
+from bluecore.lib.core_utils import get_home_dir, strip_ansi
 from bluecore.lib.harness import extract_file_paths, normalize_tool_name
 from bluecore.lib.slim_text import compact_line
 from bluecore.mem.logger import get as _get_logger
@@ -37,6 +37,77 @@ TRANSCRIPT_TIMEOUT_SEC = 2.0
 
 TRANSCRIPT_MAX_BYTES = 2 * 1024 * 1024
 """トランスクリプトから読む末尾バイト数の上限。直近の作業ほど引き継ぎ価値が高い。"""
+
+_TRANSCRIPT_ROOTS_ENV = "BLUECORE_TRANSCRIPT_ROOTS"
+"""追加の trusted transcript root をコロン区切りで指定する環境変数（§6.4 対応）。"""
+
+
+def _default_trusted_transcript_roots() -> tuple[Path, ...]:
+    """既知 host の transcript root を返す。
+
+    ``plugins/bluecore/src`` 配下に host 検出コード（``COPILOT_*`` /
+    ``CLAUDECODE`` / ``CODEX_*`` 等の環境変数参照）は一切存在しない
+    （host 非依存の性質検査のみで防御する設計方針のため）。そのため
+    「実行中の host を判定してそこから root を導出する」実装は取れず、
+    既知 host の transcript 格納規約を静的な allowlist として列挙する。
+
+    Args:
+        なし
+
+    Returns:
+        既知 host の transcript root 絶対パスのタプル（存在確認はしない）。
+
+    Raises:
+        例外は発生しません。
+    """
+    home = get_home_dir()
+    return (
+        home / ".claude" / "projects",
+        home / ".copilot",
+        home / ".codex",
+    )
+
+
+def _trusted_transcript_roots() -> tuple[Path, ...]:
+    """trusted transcript root 一覧（既知 host + 環境変数追加分）を返す。
+
+    ``BLUECORE_TRANSCRIPT_ROOTS``（``os.pathsep`` 区切り）で追加・拡張できる
+    （未知 host では transcript 要約が失われるトレードオフを、利用者が
+    自分の host の root を教えることで解消できるようにする。§6.4 対応）。
+
+    Args:
+        なし
+
+    Returns:
+        trusted root 絶対パスのタプル。
+
+    Raises:
+        例外は発生しません。
+    """
+    roots = list(_default_trusted_transcript_roots())
+    extra = os.environ.get(_TRANSCRIPT_ROOTS_ENV, "")
+    for raw in extra.split(os.pathsep):
+        stripped = raw.strip()
+        if stripped:
+            roots.append(Path(stripped).expanduser())
+    return tuple(roots)
+
+
+def _is_under_trusted_root(resolved_path: Path) -> bool:
+    """解決済み絶対パスが trusted transcript root のいずれか配下かを判定する。
+
+    Args:
+        resolved_path: ``Path.resolve()`` 済みの絶対パス。
+
+    Returns:
+        既知 host の trusted root 配下、または環境変数で追加された root
+        配下なら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    return any(resolved_path.is_relative_to(root.resolve()) for root in _trusted_transcript_roots())
+
 
 _USER_MESSAGE_COUNT = 3
 """引き継ぎに載せる直近ユーザー依頼の件数。"""
@@ -101,16 +172,22 @@ def _summarize_transcript(transcript_path: str) -> str:
 
     ``transcript_path`` は SessionEnd payload の host 供給値であり、
     Claude Code は ``~/.claude/projects/...``、Copilot CLI は
-    ``~/.copilot/...`` と host ごとに置き場所が異なる。allowed-root で
-    封じ込めるとどちらかの host で壊れるため、host 非依存の性質検査
-    （symlink 拒否・通常ファイル・所有者一致）で防御する（F-08a 対応）。
+    ``~/.copilot/...`` と host ごとに置き場所が異なる。まず host 非依存の
+    性質検査（symlink 拒否・通常ファイル・所有者一致）で防御し（F-08a
+    対応）、その後段に既知 host transcript root の allowlist 包含チェックを
+    追加する（``_trusted_transcript_roots``。§6.4 対応）。所有者一致の
+    任意 regular file を無条件で読むと、ユーザーが書ける任意ファイルを
+    prompt injection の入力にできてしまうため、性質検査だけでは不十分
+    という監査指摘に対応する。allowlist 外なら要約を諦めて空文字列を返す
+    （handoff は明示テキスト・構造化事実で継続するため、壊れずに劣化する。
+    トレードオフ: 未知 host では transcript 要約が失われる）。
 
     Args:
         transcript_path: フックが渡した JSONL トランスクリプトのパス。
 
     Returns:
         要約の散文。パスが読めない・シンボリックリンク・所有者不一致・
-        材料が無い場合は空文字列。
+        trusted root 外・材料が無い場合は空文字列。
     """
     path = Path(transcript_path)
     if path.is_symlink():
@@ -122,6 +199,12 @@ def _summarize_transcript(transcript_path: str) -> str:
     except OSError:
         return ""
     if owner_uid != os.getuid():
+        return ""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return ""
+    if not _is_under_trusted_root(resolved):
         return ""
     messages, files, tools = _scan(_read_tail(path), time.monotonic() + TRANSCRIPT_TIMEOUT_SEC)
     return _compose(messages, files, tools)

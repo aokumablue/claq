@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,18 @@ import pytest
 from bluecore.mem import handoff as handoff_mod
 from bluecore.mem.handoff import build_handoff
 from bluecore.mem.settings import CONTEXT_HANDOFF_CHAR_BUDGET
+
+
+@pytest.fixture(autouse=True)
+def _trust_tmp_path_as_transcript_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """既定では tmp_path を trusted transcript root として扱う（§6.4 allowlist対応）。
+
+    本ファイルの大半のテストは要約ロジック自体を検証する目的で tmp_path 配下に
+    transcript を書くため、allowlist を tmp_path まで拡張し従来どおり動かす。
+    allowlist 自体の検証は `TestTrustedTranscriptRoots` に切り出し、そちらは
+    このデフォルトを明示的に上書き・解除する。
+    """
+    monkeypatch.setenv("BLUECORE_TRANSCRIPT_ROOTS", str(tmp_path))
 
 
 def _write_transcript(tmp_path: Path, entries: list[dict | str]) -> str:
@@ -128,6 +141,22 @@ class TestTranscriptSummary:
         """所有者が実行ユーザーと異なるトランスクリプトは読まない（F-08a 対応）。"""
         path = _write_transcript(tmp_path, [_user("他ユーザーの依頼")])
         monkeypatch.setattr(handoff_mod.os, "getuid", lambda: -1)
+
+        assert build_handoff({"transcript_path": path}) == ""
+
+    def test_transcript_resolve_failure_is_treated_as_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """allowlist 判定用の resolve() 自体が失敗した場合も安全側（空文字列）に倒す。"""
+        path = _write_transcript(tmp_path, [_user("依頼")])
+        original_resolve = Path.resolve
+
+        def _boom(self: Path, *args: object, **kwargs: object) -> Path:
+            if self == Path(path):
+                raise OSError("resolve failed")
+            return original_resolve(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", _boom)
 
         assert build_handoff({"transcript_path": path}) == ""
 
@@ -293,3 +322,56 @@ class TestTranscriptSummary:
         result = _from_transcript(tmp_path, entries)
 
         assert result == "直近の依頼:\n- 1 行目"
+
+
+class TestTrustedTranscriptRoots:
+    """§6.4: 既知 host transcript root の allowlist + BLUECORE_TRANSCRIPT_ROOTS 拡張。"""
+
+    def test_transcript_outside_known_roots_is_rejected_without_env_override(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """allowlist 外の任意ファイルは、性質検査（symlink/所有者）を通っても要約されない。"""
+        monkeypatch.delenv("BLUECORE_TRANSCRIPT_ROOTS", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path / "unrelated-home"))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        path = _write_transcript(tmp_path, [_user("依頼")])
+
+        assert build_handoff({"transcript_path": path}) == ""
+
+    @pytest.mark.parametrize("subdir", [(".claude", "projects"), (".copilot",), (".codex",)])
+    def test_transcript_under_default_host_root_is_trusted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, subdir: tuple[str, ...]
+    ) -> None:
+        """既知 host（Claude Code / Copilot CLI / Codex）の既定 root 配下は要約される。"""
+        monkeypatch.delenv("BLUECORE_TRANSCRIPT_ROOTS", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        project_dir = tmp_path.joinpath(*subdir)
+        project_dir.mkdir(parents=True)
+        path = project_dir / "transcript.jsonl"
+        path.write_text(json.dumps({"type": "user", "message": {"role": "user", "content": "依頼"}}) + "\n", encoding="utf-8")
+
+        assert build_handoff({"transcript_path": str(path)}) == "直近の依頼:\n- 依頼"
+
+    def test_env_var_extends_roots_with_pathsep_separated_list(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """BLUECORE_TRANSCRIPT_ROOTS で未知 host の root を追加できる。"""
+        monkeypatch.setenv("HOME", str(tmp_path / "unrelated-home"))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        root_a = tmp_path / "root_a"
+        root_b = tmp_path / "root_b"
+        root_a.mkdir()
+        root_b.mkdir()
+        monkeypatch.setenv("BLUECORE_TRANSCRIPT_ROOTS", f"{root_a}{os.pathsep}{root_b}")
+        path = root_b / "transcript.jsonl"
+        path.write_text(json.dumps({"type": "user", "message": {"role": "user", "content": "依頼"}}) + "\n", encoding="utf-8")
+
+        assert build_handoff({"transcript_path": str(path)}) == "直近の依頼:\n- 依頼"
+
+    def test_env_var_blank_entries_are_ignored(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """空要素（連続区切りや前後空白）は root として登録しない。"""
+        monkeypatch.setenv("BLUECORE_TRANSCRIPT_ROOTS", f"  {os.pathsep}{tmp_path}{os.pathsep} ")
+        path = _write_transcript(tmp_path, [_user("依頼")])
+
+        assert build_handoff({"transcript_path": path}) == "直近の依頼:\n- 依頼"
