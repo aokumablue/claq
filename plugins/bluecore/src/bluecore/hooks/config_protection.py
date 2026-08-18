@@ -92,8 +92,18 @@ CONDITIONALLY_PROTECTED_FILES = {
 }
 
 # セクション見出しの照合パターン（前方一致）。[tool.ruff.lint] のような
-# サブセクションも拾うため prefix 一致にする。
-_LINT_SECTION_HEADERS = ("[tool.ruff", "[tool.coverage", "[tool.pytest", "[flake8]", "[mypy]", "[pycodestyle]")
+# サブセクションも拾うため prefix 一致にする。`[testenv` は tox.ini の
+# `[testenv]` / `[testenv:py312]` 等のサブ環境セクションを両方カバーする
+# （A-04 対応）。
+_LINT_SECTION_HEADERS = (
+    "[tool.ruff",
+    "[tool.coverage",
+    "[tool.pytest",
+    "[flake8]",
+    "[mypy]",
+    "[pycodestyle]",
+    "[testenv",
+)
 
 # セクション見出しを伴わない値行編集（例: `fail_under = 100` → `80`）を
 # 拾うためのキー照合。見出しの外形だけを見ると、既存 pyproject.toml の
@@ -106,6 +116,15 @@ _LINT_KEY_PATTERN = re.compile(
 
 # package.json は TOML/INI ではないため専用のキー照合にする。
 _PACKAGE_JSON_LINT_KEYS = ("eslintConfig", "prettier")
+
+# tox.ini の実行コマンドキー。`_LINT_KEYS` へ追加しない理由: `commands` は
+# tox.ini 以外（例: pyproject.toml の正当な設定）にも現れうる汎用的な語で
+# あり、グローバル追加すると無関係な変更まで deny してしまう。そのため
+# tox.ini 限定分岐として独立させる（A-04 対応、package.json の特例と同じ形）。
+_TOX_COMMAND_KEYS = ("commands", "commands_pre", "commands_post")
+_TOX_COMMAND_KEY_PATTERN = re.compile(
+    r"(?m)^\s*(" + "|".join(re.escape(key) for key in _TOX_COMMAND_KEYS) + r")\s*="
+)
 
 
 def blocked_message_for_file(file_name: str) -> str:
@@ -267,9 +286,12 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
 def _text_has_lint_signal(text: str, file_name: str) -> bool:
     """テキストに lint/format/coverage 関連のセクション見出しやキーが含まれるか判定する（副判定）。
 
-    package.json は TOML/INI ではないため専用のキー照合を使う。それ以外は
-    セクション見出しの部分一致、または見出しを伴わない値行編集を拾うための
-    キー行照合（`ignore = [...]` 等）で判定する。
+    package.json は TOML/INI ではないため専用のキー照合を使う。tox.ini は
+    `commands`/`commands_pre`/`commands_post` の実行コマンド変更を専用照合で
+    拾う（A-04 対応。見出しを伴わない値行編集で `[testenv]` がスニペットに
+    含まれない場合でも検出するため）。それ以外は共通のセクション見出しの
+    部分一致、または見出しを伴わない値行編集を拾うためのキー行照合
+    （`ignore = [...]` 等）で判定する。
 
     Args:
         text: 検査対象テキスト。
@@ -283,6 +305,8 @@ def _text_has_lint_signal(text: str, file_name: str) -> bool:
     """
     if file_name == "package.json":
         return any(key in text for key in _PACKAGE_JSON_LINT_KEYS)
+    if file_name == "tox.ini" and _TOX_COMMAND_KEY_PATTERN.search(text):
+        return True
     if any(header in text for header in _LINT_SECTION_HEADERS):
         return True
     return bool(_LINT_KEY_PATTERN.search(text))

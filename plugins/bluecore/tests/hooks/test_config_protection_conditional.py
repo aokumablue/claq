@@ -180,6 +180,132 @@ class TestEdit:
         assert code == 2
 
 
+class TestToxIni:
+    """A-04: tox.ini の `[testenv]`/`[testenv:*]` の commands 系キー検出。"""
+
+    def test_blocks_write_with_testenv_commands(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        code = _run(
+            monkeypatch,
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "tox.ini", "content": "[testenv]\ncommands = pytest --no-cov\n"},
+            },
+        )
+        assert code == 2
+
+    def test_blocks_named_subenvironment_via_prefix_match(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`[testenv:py312]` のようなサブ環境見出しも前方一致で拾う。"""
+        code = _run(
+            monkeypatch,
+            {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": "tox.ini",
+                    "content": "[testenv:py312]\ncommands = pytest --no-cov\n",
+                },
+            },
+        )
+        assert code == 2
+
+    def test_allows_version_or_description_only_edit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """正当な非コマンド編集（description 等）は許可する。"""
+        code = _run(
+            monkeypatch,
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "tox.ini", "content": "[tox]\ndescription = 'ci'\n"},
+            },
+        )
+        assert code == 0
+
+    def test_blocks_commands_pre_and_commands_post(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in ("commands_pre", "commands_post"):
+            code = _run(
+                monkeypatch,
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "tox.ini", "content": f"[testenv]\n{key} = echo ok\n"},
+                },
+            )
+            assert code == 2, key
+
+    def test_blocks_commands_value_line_without_header_via_key_match(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """見出しを含まない値行編集（`commands = ...` のみ）も tox.ini 専用キー照合で拾う。"""
+        code = _run(
+            monkeypatch,
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": "tox.ini",
+                    "old_string": "commands = pytest",
+                    "new_string": "commands = pytest --no-cov",
+                },
+            },
+        )
+        assert code == 2
+
+    def test_pyproject_toml_commands_key_is_not_blocked_globally(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """tox.ini 限定分岐のため、他ファイルの `commands` という語自体は誤検出しない。"""
+        code = _run(
+            monkeypatch,
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": "pyproject.toml",
+                    "old_string": 'description = "old commands here"',
+                    "new_string": 'description = "new commands here"',
+                },
+            },
+        )
+        assert code == 0
+
+    def test_blocks_when_old_string_resolves_to_testenv_section_on_disk(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """見出しがスニペットに現れなくても、ディスク上の現在の内容から `[testenv:*]` 所属を解決する（主判定）。"""
+        monkeypatch.chdir(tmp_path)
+        target = tmp_path / "tox.ini"
+        target.write_text(
+            "[tox]\nenvlist = py312\n\n[testenv:py312]\ncommands = pytest\nsome_new_key = 1\n",
+            encoding="utf-8",
+        )
+        code = _run(
+            monkeypatch,
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": "tox.ini",
+                    "old_string": "some_new_key = 1",
+                    "new_string": "some_new_key = 2",
+                },
+            },
+        )
+        assert code == 2
+
+    def test_allows_when_old_string_resolves_to_non_testenv_section_on_disk(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        target = tmp_path / "tox.ini"
+        target.write_text("[tox]\nenvlist = py312\ndescription = 'old'\n", encoding="utf-8")
+        code = _run(
+            monkeypatch,
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": "tox.ini",
+                    "old_string": "description = 'old'",
+                    "new_string": "description = 'new'",
+                },
+            },
+        )
+        assert code == 0
+
+
 class TestMultiEdit:
     def test_blocks_when_any_edit_touches_lint_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         code = _run(
