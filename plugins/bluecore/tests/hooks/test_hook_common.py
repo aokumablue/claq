@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from contextlib import redirect_stdout
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -523,6 +524,86 @@ class TestDetachLogPath:
         )
 
         assert hook_common._detach_log_path() is None
+
+
+class TestReadTailBytes:
+    """_read_tail_bytes のテスト。"""
+
+    def test_reads_full_content_when_within_limit(self, tmp_path: Path) -> None:
+        target = tmp_path / "small.log"
+        target.write_text("hello\n", encoding="utf-8")
+        assert hook_common._read_tail_bytes(target, 4096) == "hello\n"
+
+    def test_reads_only_tail_when_exceeding_limit(self, tmp_path: Path) -> None:
+        target = tmp_path / "big.log"
+        target.write_bytes(b"A" * 100 + b"TAIL")
+        assert hook_common._read_tail_bytes(target, 4) == "TAIL"
+
+    def test_missing_file_returns_empty_string(self, tmp_path: Path) -> None:
+        assert hook_common._read_tail_bytes(tmp_path / "missing.log", 4096) == ""
+
+
+class TestRecentBgFailureNotice:
+    """recent_bg_failure_notice のテスト（§6.2 対応）。"""
+
+    def _log_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        log_dir = tmp_path / ".bluecore" / "logs"
+        log_dir.mkdir(parents=True)
+        return log_dir
+
+    def test_no_log_dir_returns_empty_string(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BLUECORE_HOME", raising=False)
+        assert hook_common.recent_bg_failure_notice() == ""
+
+    def test_empty_log_file_returns_empty_string(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """正常系（対象プロセスが何も出力しない）はログが空になり通知なし。"""
+        log_dir = self._log_dir(monkeypatch, tmp_path)
+        today = datetime.now().strftime("%Y-%m-%d")
+        (log_dir / f"bg-{today}.log").write_text("", encoding="utf-8")
+        assert hook_common.recent_bg_failure_notice() == ""
+
+    def test_todays_log_with_content_returns_one_line_notice(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        log_dir = self._log_dir(monkeypatch, tmp_path)
+        today = datetime.now().strftime("%Y-%m-%d")
+        (log_dir / f"bg-{today}.log").write_text(
+            "Traceback (most recent call last):\nModuleNotFoundError: No module named 'x'\n",
+            encoding="utf-8",
+        )
+
+        notice = hook_common.recent_bg_failure_notice()
+
+        assert notice != ""
+        assert notice.count("\n") == 0
+        assert "ModuleNotFoundError" in notice
+        assert f"bg-{today}.log" in notice
+
+    def test_falls_back_to_yesterdays_log_when_today_missing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        log_dir = self._log_dir(monkeypatch, tmp_path)
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        (log_dir / f"bg-{yesterday}.log").write_text("boom\n", encoding="utf-8")
+
+        notice = hook_common.recent_bg_failure_notice()
+
+        assert "boom" in notice
+        assert f"bg-{yesterday}.log" in notice
+
+    def test_ignores_logs_older_than_two_days(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        log_dir = self._log_dir(monkeypatch, tmp_path)
+        old = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+        (log_dir / f"bg-{old}.log").write_text("ancient failure\n", encoding="utf-8")
+
+        assert hook_common.recent_bg_failure_notice() == ""
 
 
 class TestDetachProcess:

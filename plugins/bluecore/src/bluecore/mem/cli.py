@@ -30,7 +30,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from bluecore.hooks.hook_common import print_session_start_output, read_raw_stdin
+from bluecore.hooks.hook_common import (
+    print_session_start_output,
+    read_raw_stdin,
+    recent_bg_failure_notice,
+)
 from bluecore.mem import logger as mem_logger
 from bluecore.mem.database import Database
 from bluecore.mem.handoff import build_handoff
@@ -891,6 +895,21 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     return f"## 前回の続き ({stamp})\n{handoff}"
 
 
+def _bg_failure_section() -> str:
+    """前回セッションの detach 起動（``--bg``）失敗痕跡があれば 1 行の節にする（§6.2 対応）。
+
+    Returns:
+        痕跡があれば見出し付き 1 行の節。無ければ空文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    notice = recent_bg_failure_notice()
+    if not notice:
+        return ""
+    return f"## 前回セッションの通知\n{notice}"
+
+
 def _record_session(db: Database, repo: Repo, payload: dict[str, Any]) -> None:
     """ハーネスの session_id で ``sessions`` に開始行を作る。
 
@@ -915,6 +934,8 @@ def _build_context(settings: Settings, args: CommandArgs) -> str:
     共通知識（``scope='global'``）・リポジトリ知識（``scope='repo'``）・
     前回の引き継ぎの 3 節を、いずれも ``status='active'`` に限って集める
     （``pending`` は人間の昇格レビュー前の下書きでノイズになるため注入しない）。
+    加えて、前回セッションの detach 起動（``--bg``）に失敗痕跡があれば
+    4 節目として 1 行だけ追加する（§6.2 対応、`_bg_failure_section`）。
 
     Args:
         settings: mem 設定。
@@ -939,6 +960,7 @@ def _build_context(settings: Settings, args: CommandArgs) -> str:
                 CONTEXT_REPO_CHAR_BUDGET,
             ),
             _handoff_section(db, repo.id),
+            _bg_failure_section(),
         ]
 
     body = "\n\n".join(section for section in sections if section)

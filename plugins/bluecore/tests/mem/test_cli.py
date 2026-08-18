@@ -28,6 +28,8 @@ def _run_cli(
     tmp_path: Path,
     argv: list[str],
     stdin_payload: dict | None = None,
+    *,
+    bg_failure_notice: str = "",
 ) -> tuple[str, str, int]:
     """データディレクトリと cwd を tmp_path に差し替えて cli.main() を実行する。"""
     import bluecore.mem.settings as settings_mod
@@ -39,6 +41,10 @@ def _run_cli(
     # select による deadline を内包）。その機構自体は test_hook_common.py が
     # 検証済みのため、ここでは境界を直接差し替えて stdin 内容だけを渡す。
     monkeypatch.setattr(cli, "read_raw_stdin", lambda: json.dumps(stdin_payload or {}))
+    # 実環境の ~/.bluecore/logs/bg-*.log の内容にテスト結果が左右されない
+    # よう、既定では detach 失敗痕跡なしに固定する（§6.2 のテストは
+    # bg_failure_notice 引数で明示的に上書きする）。
+    monkeypatch.setattr(cli, "recent_bg_failure_notice", lambda: bg_failure_notice)
 
     stdout = io.StringIO()
     stderr = io.StringIO()
@@ -853,10 +859,16 @@ class TestContext:
 
     @staticmethod
     def _inject(
-        monkeypatch: pytest.MonkeyPatch, tmp_path: Path, payload: dict | None = None
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        payload: dict | None = None,
+        *,
+        bg_failure_notice: str = "",
     ) -> str:
         """context を実行し、注入される additionalContext を取り出す。"""
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"], payload or {})
+        stdout, stderr, exit_code = _run_cli(
+            monkeypatch, tmp_path, ["context"], payload or {}, bg_failure_notice=bg_failure_notice
+        )
         assert (stderr, exit_code) == ("", 0)
         return json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
 
@@ -873,6 +885,29 @@ class TestContext:
         fields.update(overrides)
         with Database(tmp_path / "mem.db") as db:
             db.start_session(Session(**fields))
+
+    def test_bg_failure_notice_is_appended_as_fourth_section(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """detach 失敗痕跡があれば節として 1 行だけ追加される（§6.2 対応）。"""
+        _seed(tmp_path, scope="global", key="k", title="t")
+
+        injected = self._inject(
+            monkeypatch, tmp_path, bg_failure_notice="bg-2026-08-18.log で失敗の痕跡"
+        )
+
+        assert "## 前回セッションの通知" in injected
+        assert "bg-2026-08-18.log で失敗の痕跡" in injected
+
+    def test_no_bg_failure_notice_omits_fourth_section(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """失敗痕跡が無ければ節ごと出さない（既定の _run_cli スタブ、出力トークン最小化の確認）。"""
+        _seed(tmp_path, scope="global", key="k", title="t")
+
+        injected = self._inject(monkeypatch, tmp_path)
+
+        assert "前回セッションの通知" not in injected
 
     def test_no_knowledge_injects_nothing(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

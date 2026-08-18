@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -517,6 +517,75 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
             os.unlink(tmp.name)
         except OSError:
             pass
+
+
+# 前回セッション detach 失敗通知（recent_bg_failure_notice）の 1 ファイル
+# あたり読み取り上限バイト数。1 行提示できれば十分なため小さく取る。
+_BG_FAILURE_TAIL_MAX_BYTES = 4096
+
+
+def _read_tail_bytes(path: Path, max_bytes: int) -> str:
+    """ファイル末尾を上限バイトまで読む（seek-from-end）。
+
+    `mem.handoff._read_tail` と同じ末尾限定パターンです。読めない場合は
+    空文字列を返します（呼び出し元を落とさない）。
+
+    Args:
+        path: 読み取り対象のファイル。
+        max_bytes: 末尾から読む最大バイト数。
+
+    Returns:
+        デコード済みの末尾テキスト。読めなければ空文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, 2)
+            stream.seek(max(0, stream.tell() - max_bytes))
+            return stream.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def recent_bg_failure_notice() -> str:
+    """前回セッションの detach 起動（``--bg``）に失敗の痕跡があれば 1 行の通知を返す。
+
+    `detach_process` の戻り値は「起動受付」であり「処理成功」ではないため
+    （docstring 参照）、detach した子の失敗は呼び出し元へ同期的に伝わらない
+    （§6.2 対応）。そこで次回 SessionStart の ``mem context`` で、前回の
+    `_detach_log_path` が書いたログファイル（``bg-YYYY-MM-DD.log``。
+    正常系では対象プロセスが何も出力しないため中身は空のはず）に内容が
+    あれば「起動受付後に何かが起きた」痕跡とみなし、末尾 1 行だけ提示する。
+    失敗時のみ出力するため「出力トークン最小化」原則と両立する。
+
+    読み取り範囲は当日＋前日の 2 ファイルまでに限定し、各ファイルは末尾
+    `_BG_FAILURE_TAIL_MAX_BYTES` バイトまでしか読まない（SessionStart の
+    hooks.json timeout 60 秒に対する境界を持たせるため）。
+
+    Args:
+        なし
+
+    Returns:
+        失敗の痕跡があれば人間可読の 1 行。無ければ空文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    log_dir = get_bluecore_dir() / "logs"
+    today = datetime.now()
+    for offset in (0, 1):
+        day = today - timedelta(days=offset)
+        path = log_dir / f"bg-{day:%Y-%m-%d}.log"
+        if not path.is_file():
+            continue
+        tail = _read_tail_bytes(path, _BG_FAILURE_TAIL_MAX_BYTES).strip()
+        if not tail:
+            continue
+        last_line = tail.splitlines()[-1]
+        return f"前回のバックグラウンド起動でエラーの痕跡があります（{path.name}）: {last_line}"
+    return ""
 
 
 def emit_block_output(reason: str) -> int:
