@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from bluecore.ci.ci_common import REPO_ROOT
 from bluecore.ci.validate_hooks import validate_hooks
+
+REPO_HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.json"
 
 
 def write_json(path: Path, value: object) -> None:
@@ -88,3 +91,56 @@ def test_validate_hooks_accepts_inline_js_strings(tmp_path, capsys):
 
     assert result == 0
     assert "1 個のフックマッチャーを検証しました" in captured.out
+
+
+class TestRepoHooksJsonStaticChecks:
+    """実リポジトリの hooks/hooks.json に対する静的検証（Phase 6）。
+
+    §7-3（実 install/update + host 登録の smoke test）は本タスクのスコープを
+    大きく超えるため実施しない。代わりに、hooks.json 自体が全経路を宣言し、
+    かつ全エントリが timeout を持つことを静的に検証する。
+    """
+
+    _REQUIRED_PRE_TOOL_USE_MODULES = (
+        "bluecore.hooks.block_no_verify",
+        "bluecore.hooks.pre_bash_commit_quality",
+        "bluecore.hooks.bash_config_protection",
+        "bluecore.hooks.config_protection",
+    )
+    _REQUIRED_EVENTS = ("PreToolUse", "PreCompact", "SessionStart", "SessionEnd")
+
+    @staticmethod
+    def _load_hooks() -> dict:
+        return json.loads(REPO_HOOKS_JSON.read_text(encoding="utf-8"))["hooks"]
+
+    def test_declares_valid_schema(self, capsys) -> None:
+        """既存の validate_hooks（構造検証）も実 hooks.json に対して通ること。"""
+        assert validate_hooks(REPO_HOOKS_JSON) == 0
+        assert "検証しました" in capsys.readouterr().out
+
+    def test_declares_all_required_events(self) -> None:
+        hooks = self._load_hooks()
+        missing = [event for event in self._REQUIRED_EVENTS if event not in hooks or not hooks[event]]
+        assert missing == []
+
+    def test_pre_tool_use_declares_all_required_modules(self) -> None:
+        hooks = self._load_hooks()
+        commands = " ".join(
+            str(hook.get("command", ""))
+            for entry in hooks.get("PreToolUse", [])
+            for hook in entry.get("hooks", [])
+        )
+        missing = [module for module in self._REQUIRED_PRE_TOOL_USE_MODULES if module not in commands]
+        assert missing == []
+
+    def test_every_hook_entry_has_a_timeout(self) -> None:
+        """全イベントの全 hook エントリが timeout を持つこと（現状 PreCompact のみ未指定だった）。"""
+        hooks = self._load_hooks()
+        missing_timeout = [
+            (event, hook.get("command"))
+            for event, entries in hooks.items()
+            for entry in entries
+            for hook in entry.get("hooks", [])
+            if "timeout" not in hook
+        ]
+        assert missing_timeout == []

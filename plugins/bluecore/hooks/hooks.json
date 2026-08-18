@@ -53,7 +53,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.pre_compact"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.hooks.pre_compact",
+            "timeout": 10
           }
         ],
         "description": "コンテキストの圧縮前に状態を保存します"
