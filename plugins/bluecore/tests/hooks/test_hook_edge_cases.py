@@ -790,6 +790,37 @@ def test_is_git_commit_command_regex_fallback_true_when_tokens_miss_it() -> None
     assert args == []
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git.exe commit -m 'feat: x'",
+        "/usr/bin/git commit -m 'feat: x'",
+        "GIT commit -m 'feat: x'",
+        "Git.EXE commit -m 'feat: x'",
+        "'C:\\Program Files\\Git\\bin\\git.exe' commit -m 'feat: x'",
+    ],
+)
+def test_is_git_commit_command_detects_exe_and_absolute_path_tokens(command: str) -> None:
+    """basename 化により `.exe`・絶対パス・大文字表記の git 実行ファイルもトークン走査で検出する（R-12）。
+
+    以前は `token != "git"` の完全一致だったため、`/usr/bin/git` は regex
+    フォールバックにのみ救われ、`git.exe` は `.exe` が `\\s` を破るため
+    regex フォールバックからもすり抜けていた。
+    """
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    is_commit, _args = pbcq._is_git_commit_command(command)
+    assert is_commit is True
+
+
+def test_is_git_commit_command_exe_token_walk_not_regex_fallback() -> None:
+    """`git.exe commit` はトークン走査自体で捕まる（regex フォールバック頼みではない）。"""
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    args = pbcq._find_git_commit_args(["git.exe", "commit", "-m", "x"])
+    assert args == ["-m", "x"]
+
+
 def test_is_commit_all_flag_detects_short_long_and_combined() -> None:
     """-a / --all / -am のような結合短形式を検出すること。"""
     import bluecore.hooks.pre_bash_commit_quality as pbcq

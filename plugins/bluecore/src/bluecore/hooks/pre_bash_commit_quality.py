@@ -182,10 +182,38 @@ def _resolve_repo_root() -> Path | None:
         return None
 
 
+def _is_git_executable_token(token: str) -> bool:
+    """トークンが git 実行ファイルを指すかを判定します（basename 化・大小無視・.exe 許容）。
+
+    `/usr/bin/git`（絶対パス）・`git.exe`（Windows）・
+    `C:\\Program Files\\Git\\bin\\git.exe`（Windows 絶対パス）・`GIT`（大文字）を
+    いずれも同一視します。basename 化せず完全一致だけで判定すると、絶対パス
+    や `.exe` サフィックスを持つ実行ファイル指定が素通りしていました
+    （`git-git-subcommand` の知見にある「shlex トークン走査で最初の
+    非オプション語を取る」方式の延長で、実行ファイル名の表記ゆれも
+    正規化します）。
+
+    Args:
+        token: `shlex` 等でトークン化された1トークンです。
+
+    Returns:
+        git 実行ファイルとみなせるなら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    basename = token.replace("\\", "/").rsplit("/", 1)[-1]
+    name = basename.lower()
+    if name.endswith(".exe"):
+        name = name[: -len(".exe")]
+    return name == "git"
+
+
 def _find_git_commit_args(tokens: list[str]) -> list[str] | None:
     """トークン列内の `git commit` 呼び出しを探し、commit 直後の引数トークンを返します。
 
-    `git` トークンの後は、既知/未知を問わずグローバルオプション・その値
+    `git` トークン（`_is_git_executable_token` で絶対パス・`.exe`・大小を
+    正規化して判定）の後は、既知/未知を問わずグローバルオプション・その値
     トークンを区別せず単純に読み飛ばし、`commit` サブコマンドに到達するかを
     判定します（allowlist に無い `--exec-path <path>` / `--super-prefix <path>`
     等の値トークンで走査が打ち切られ検出漏れになる問題を避けるため、過剰
@@ -204,7 +232,7 @@ def _find_git_commit_args(tokens: list[str]) -> list[str] | None:
         例外は発生しません。
     """
     for i, token in enumerate(tokens):
-        if token != "git":
+        if not _is_git_executable_token(token):
             continue
         rest_start = i + 1
         for offset, tok in enumerate(tokens[rest_start:]):
