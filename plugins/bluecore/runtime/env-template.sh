@@ -124,9 +124,9 @@ fi
 
 if [ -z "$_bluecore_env_root" ] || [ ! -f "$_bluecore_env_root/runtime/bluecore-helpers.sh" ]; then
   printf '%s\n' "bluecore: could not resolve the plugin root (no matching ~/.bluecore/roots pointer, or multiple hosts are recorded and none is this process's ancestor). Run any bluecore-backed command once through this host first so it can record its root." >&2
-  unset _bluecore_env_root
+  unset _bluecore_env_root _bluecore_env_pointer _bluecore_env_line
   return 127 2>/dev/null || exit 127
 fi
 
 . "$_bluecore_env_root/runtime/bluecore-helpers.sh"
-unset _bluecore_env_root
+unset _bluecore_env_root _bluecore_env_pointer _bluecore_env_line

@@ -683,6 +683,26 @@ class TestEnvShRealExecution:
         assert result.returncode == 0, result.stderr
         assert "ran:marker" in result.stdout
 
+    def test_no_internal_variables_leak_into_caller_shell(self, tmp_path: Path, _isolate_home: Path) -> None:
+        """source 後、resolver 内部の一時変数（root path を保持しうるものを含む）が
+        呼び出し元シェルに残らないこと。bootstrap 行は ``.`` で呼び出し元シェルに
+        直接効くため、内部変数を unset し忘れると md 側のセッションを汚染する。
+        """
+        _install_env_sh(_isolate_home)
+        pointer_root = _make_plugin_root(tmp_path / "pointer-root")
+        _write_pointer(_isolate_home / BASE_DIR_NAME / "roots", os.getpid(), pointer_root)
+
+        script = (
+            '. "$HOME/.bluecore/env.sh" || exit 127\n'
+            'bluecore_run marker\n'
+            'printf \'leak=[%s][%s][%s]\\n\' '
+            '"${_bluecore_env_root:-U}" "${_bluecore_env_pointer:-U}" "${_bluecore_env_line:-U}"\n'
+        )
+        result = _run_env_sh(_isolate_home, script=script)
+
+        assert result.returncode == 0, result.stderr
+        assert "leak=[U][U][U]" in result.stdout
+
     def test_gc_removed_dead_pointer_then_resolver_exits_127(self, tmp_path: Path, _isolate_home: Path) -> None:
         """GC が不在 PID のポインタを消した後、resolver がそれを 127 として扱うこと。
 
