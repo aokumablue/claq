@@ -281,16 +281,39 @@ class TestPidIsAlive:
 class TestGcRoots:
     """_gc_roots / _gc_one の削除判定のテスト。"""
 
-    def test_non_digit_names_are_removed(self, tmp_path: Path) -> None:
-        """旧形式（<pid>.sh・latest・latest.sh）は無条件で削除する。"""
+    def test_non_digit_names_past_grace_are_removed(self, tmp_path: Path) -> None:
+        """旧形式（<pid>.sh・latest・latest.sh）は猶予後に削除する。"""
         roots_dir = tmp_path / "roots"
         roots_dir.mkdir()
+        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
         for name in ("999999.sh", "latest", "latest.sh"):
-            (roots_dir / name).write_text("/old\n", encoding="utf-8")
+            entry = roots_dir / name
+            entry.write_text("/old\n", encoding="utf-8")
+            os.utime(entry, (old, old))
 
         mod._gc_roots(roots_dir)
 
         assert list(roots_dir.iterdir()) == []
+
+    def test_fresh_non_digit_temp_file_survives_gc(self, tmp_path: Path) -> None:
+        """M-01: 別 writer が rename 直前に作った一時ファイルを race で消さない。
+
+        レポートの再現コマンドは ``env.sh.tmp.12345`` を手作業で ``roots/``
+        直下に置くが、実際の ``env.sh`` の一時ファイルは ``bluecore_dir``
+        直下に作られ ``roots/`` には現れない（``_gc_roots`` は
+        ``roots_dir.iterdir()`` しか見ない）。実際に発生しうるのは
+        ``<pid>.tmp.<writer_pid>`` 形式だが、「非数字名」という判定規則は
+        両方に等しく適用されるため、レポートと同じファイル名でも検証する。
+        """
+        roots_dir = tmp_path / "roots"
+        roots_dir.mkdir()
+        for name in ("env.sh.tmp.12345", "555555.tmp.666666"):
+            (roots_dir / name).write_text("x\n", encoding="utf-8")
+
+        mod._gc_roots(roots_dir)
+
+        assert (roots_dir / "env.sh.tmp.12345").exists()
+        assert (roots_dir / "555555.tmp.666666").exists()
 
     def test_alive_fresh_pid_is_kept(self, tmp_path: Path) -> None:
         roots_dir = tmp_path / "roots"
@@ -406,11 +429,14 @@ class TestGcThrottle:
         bluecore_dir.mkdir()
         roots_dir = bluecore_dir / "roots"
         roots_dir.mkdir()
-        (roots_dir / "latest").write_text("/old\n", encoding="utf-8")
+        legacy = roots_dir / "latest"
+        legacy.write_text("/old\n", encoding="utf-8")
+        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
+        os.utime(legacy, (old, old))
 
         mod._maybe_run_gc(bluecore_dir, roots_dir, keep_pid=None)
 
-        assert not (roots_dir / "latest").exists()
+        assert not legacy.exists()
         assert (bluecore_dir / mod._GC_STAMP_FILENAME).exists()
 
     def test_gc_skipped_when_stamp_is_fresh(self, tmp_path: Path) -> None:
@@ -432,13 +458,16 @@ class TestGcThrottle:
         roots_dir.mkdir()
         stamp = bluecore_dir / mod._GC_STAMP_FILENAME
         stamp.touch()
-        old = time.time() - mod._GC_THROTTLE_SECONDS - 60
-        os.utime(stamp, (old, old))
-        (roots_dir / "latest").write_text("/old\n", encoding="utf-8")
+        stamp_old = time.time() - mod._GC_THROTTLE_SECONDS - 60
+        os.utime(stamp, (stamp_old, stamp_old))
+        legacy = roots_dir / "latest"
+        legacy.write_text("/old\n", encoding="utf-8")
+        legacy_old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
+        os.utime(legacy, (legacy_old, legacy_old))
 
         mod._maybe_run_gc(bluecore_dir, roots_dir, keep_pid=None)
 
-        assert not (roots_dir / "latest").exists()
+        assert not legacy.exists()
 
     def test_stamp_stat_failure_is_treated_as_absent(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

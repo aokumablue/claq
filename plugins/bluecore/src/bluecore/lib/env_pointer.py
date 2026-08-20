@@ -373,7 +373,16 @@ def _gc_one(entry: Path, now: float) -> None:
         OSError: stat/unlink に失敗した場合（呼び出し元で無視される）。
     """
     if not entry.name.isdigit():
-        entry.unlink()
+        # 旧形式ポインタ（`<pid>.sh`・`latest`・`latest.sh`）だけでなく、
+        # 別 writer が `os.replace()` 直前に作った
+        # `<pid>.tmp.<writer_pid>` 一時ファイル（`_atomic_write_text` が
+        # `roots/` 内に作る）もこの分岐に落ちる。即削除すると、その
+        # writer の rename 前に消してしまう race がある（M-01）。実際の
+        # 一時ファイル寿命はミリ秒オーダーなので、`_DEAD_PID_GRACE_SECONDS`
+        # を過ぎてから削除しても実害は無く、race window を閉じられる。
+        mtime = entry.stat().st_mtime
+        if mtime < now - _DEAD_PID_GRACE_SECONDS:
+            entry.unlink()
         return
 
     pid = int(entry.name)
