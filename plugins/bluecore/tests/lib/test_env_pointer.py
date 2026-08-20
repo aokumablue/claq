@@ -568,6 +568,43 @@ class TestEnvShRealExecution:
         assert result.returncode == 127
         assert "could not resolve" in result.stderr
 
+    def test_stale_conflicting_pointer_is_ignored_by_recency_window(self, tmp_path: Path, _isolate_home: Path) -> None:
+        """別ホストの古いポインタは鮮度ウィンドウ外なら候補に数えず、対立させない。
+
+        GC の throttle は 1 時間だが、tier 2 の合意判定はそれとは独立に
+        直近 5 分だけを見る。使われなくなったホストのポインタが GC される
+        までの最大 1 時間、単独稼働中の別ホストを道連れに 127 へ落とす
+        ことを防ぐ（advisor 指摘の cross-host false-conflict window）。
+        """
+        _install_env_sh(_isolate_home)
+        stale_root = _make_plugin_root(tmp_path / "stale-other-host-root")
+        fresh_root = _make_plugin_root(tmp_path / "fresh-root")
+        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
+        stale_entry = roots_dir / "555555"
+        _write_pointer(roots_dir, 555555, stale_root)
+        old = time.time() - 10 * 60
+        os.utime(stale_entry, (old, old))
+        _write_pointer(roots_dir, 666666, fresh_root)
+
+        result = _run_env_sh(_isolate_home)
+
+        assert result.returncode == 0, result.stderr
+        assert "ran:marker" in result.stdout
+
+    def test_only_stale_candidates_present_exits_127(self, tmp_path: Path, _isolate_home: Path) -> None:
+        """鮮度ウィンドウ外のポインタしか無ければ、それだけでは解決しない。"""
+        _install_env_sh(_isolate_home)
+        stale_root = _make_plugin_root(tmp_path / "stale-root")
+        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
+        stale_entry = roots_dir / "555555"
+        _write_pointer(roots_dir, 555555, stale_root)
+        old = time.time() - 10 * 60
+        os.utime(stale_entry, (old, old))
+
+        result = _run_env_sh(_isolate_home)
+
+        assert result.returncode == 127
+
     def test_exits_127_when_no_candidates(self, _isolate_home: Path) -> None:
         _install_env_sh(_isolate_home)
 

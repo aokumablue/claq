@@ -20,18 +20,23 @@
 #      covers hosts that wrap hook launches in one or more intermediate
 #      shells before reaching the shell that runs this bootstrap line.
 #   2. If none of the above match: collect every valid pointer under
-#      roots/ and use it only if they all agree on the same root path.
-#      This is deliberately "do all valid candidates agree" rather than
-#      "is there exactly one file" — a single host can legitimately
-#      accumulate several roots/<pid> entries that all point at the same
-#      install (e.g. if the launcher's own PPID is a short-lived wrapper
-#      shell rather than the host process itself, every hook invocation
-#      records a different, quickly-dead PID, but they all agree on the
-#      root). Genuinely different hosts/installs almost never agree on the
+#      roots/ written in the last _BLUECORE_RECENT_MINUTES minutes, and use
+#      it only if they all agree on the same root path. This is
+#      deliberately "do all *recent* candidates agree" rather than "is
+#      there exactly one file" — a single host can legitimately accumulate
+#      several roots/<pid> entries that all point at the same install
+#      (e.g. if the launcher's own PPID is a short-lived wrapper shell
+#      rather than the host process itself, every hook invocation records
+#      a different, quickly-dead PID, but they all agree on the root).
+#      Genuinely different hosts/installs almost never agree on the
 #      literal path, so a disagreement is a reliable "don't guess" signal.
-#      Zero valid pointers, or two that disagree, is ambiguous and this
-#      exits 127 rather than guessing (R-05: a blind "most recent" fallback
-#      can pick another host's install when multiple hosts run
+#      The recency filter exists so that a host that was used once and then
+#      sat idle doesn't keep another, currently-idle host's machine dark
+#      for the full hourly GC cycle — only pointers from hosts active in
+#      roughly the same window as "now" are asked to agree.
+#      Zero valid recent pointers, or two that disagree, is ambiguous and
+#      this exits 127 rather than guessing (R-05: a blind "most recent"
+#      fallback can pick another host's install when multiple hosts run
 #      concurrently).
 #
 # If nothing resolves, this prints a message to stderr and returns/exits 127
@@ -39,6 +44,7 @@
 # running `bluecore_run: command not found` a moment later.
 
 _bluecore_env_root=""
+_BLUECORE_RECENT_MINUTES=5
 
 _bluecore_read_root_pointer() {
   # $1: pointer file path. Prints the single line it contains if the file is
@@ -77,6 +83,12 @@ if [ -z "$_bluecore_env_root" ] && [ -d "$HOME/.bluecore/roots" ]; then
     case "$(basename "$_bluecore_entry")" in
       '' | *[!0-9]*) continue ;;
     esac
+    # -maxdepth 0 evaluates only this one path (no descent — it is a file,
+    # not a directory); empty output means it is older than the window or
+    # no longer exists. find is used instead of stat because stat's format
+    # flag differs between BSD (macOS, -f) and GNU (Linux, -c) coreutils,
+    # while -mmin/-maxdepth are portable across both (verified).
+    [ -n "$(find "$_bluecore_entry" -maxdepth 0 -mmin "-$_BLUECORE_RECENT_MINUTES" 2>/dev/null)" ] || continue
     _bluecore_candidate="$(_bluecore_read_root_pointer "$_bluecore_entry")"
     [ -n "$_bluecore_candidate" ] || continue
     if [ -z "$_bluecore_agreed_root" ]; then
