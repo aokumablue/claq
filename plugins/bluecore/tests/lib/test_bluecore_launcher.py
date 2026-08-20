@@ -19,10 +19,11 @@ def _isolate_bluecore_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
     """main() 経由の write_env_pointer が実 HOME の ~/.bluecore を汚さないようにする。
 
     main() は全 hook 起動で ~/.bluecore/env.sh 等を書き出す（M-02 対応）。
-    get_home_dir() は BLUECORE_HOME を最優先で見るため、これだけ設定すれば
-    このファイル内の main() 呼び出しはすべて tmp_path 配下へ書く。
+    env_pointer の state dir は ``$HOME`` 固定（``BLUECORE_HOME`` は見ない。R-04 —
+    md の bootstrap 行 `. "$HOME/.bluecore/env.sh"` が固定住所であるべきという
+    契約に writer 側を合わせた）なので、隔離は ``HOME`` を差し替えて行う。
     """
-    monkeypatch.setenv("BLUECORE_HOME", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
 
 
 def _create_repo_venv(tmp_path: Path) -> Path:

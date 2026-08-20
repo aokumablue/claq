@@ -128,7 +128,7 @@ def test_bluecore_run_bash_fences_bootstrap_in_same_block() -> None:
 
 
 def test_mem_learn_invocations_pass_no_status_or_source_flag() -> None:
-    """``bluecore_mem_learn`` 呼び出しは ``--status``/``--source`` を渡さないこと（H-01 対応）。
+    r"""``bluecore_mem_learn`` 呼び出しは ``--status``/``--source`` を渡さないこと（H-01 対応）。
 
     `runtime/bluecore-helpers.sh` の `bluecore_mem_learn` は `--status`/`--source`
     の option parsing を持たない（未知オプションで exit 2）。md がこれらを渡す
