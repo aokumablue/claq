@@ -145,6 +145,26 @@ class TestWriteEnvPointer:
         monkeypatch.setattr(mod, "_warned_this_process", True)
         mod._warn_once("reason")  # 何も起きないことを確認（早期 return）
 
+    def test_just_written_pointer_survives_gc_even_if_ppid_looks_dead(
+        self, tmp_path: Path, _isolate_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """launcher の親が使い捨て中間 shell だった場合の自壊を防ぐ回帰テスト。
+
+        ``os.getppid()`` が指すプロセスが既に居ない（かつ猶予も切れている）
+        状況を強制しても、同じ呼び出しで書いたポインタ自身は GC が消さない
+        こと（``_gc_roots`` の ``keep_pid`` 除外が実際に効くこと）を、
+        ``write_env_pointer`` 経由の統合シナリオとして確認する。
+        """
+        monkeypatch.setattr(mod, "_pid_is_alive", lambda _pid: False)
+        monkeypatch.setattr(mod, "_DEAD_PID_GRACE_SECONDS", 0)
+        plugin_root = _make_plugin_root(tmp_path / "plugin")
+
+        mod.write_env_pointer(plugin_root)
+
+        pid_file = _isolate_home / BASE_DIR_NAME / "roots" / str(os.getppid())
+        assert pid_file.exists()
+        assert pid_file.read_text(encoding="utf-8") == f"{plugin_root}\n"
+
 
 class TestStateHome:
     """_state_home のフォールバック分岐のテスト。"""
@@ -322,6 +342,26 @@ class TestGcRoots:
 
         assert not entry.exists()
 
+    def test_keep_pid_survives_even_if_dead_and_past_grace(self, tmp_path: Path) -> None:
+        """keep_pid に一致するエントリは、他の削除条件をすべて満たしても残る。
+
+        launcher の親プロセス（``os.getppid()``）が使い捨ての中間 shell を指す
+        場合、書いたばかりのポインタが同じ GC 呼び出しの中で「PID 不在かつ
+        猶予切れ」に見えて自壊しうる。そうならないことを確認する。
+        """
+        roots_dir = tmp_path / "roots"
+        roots_dir.mkdir()
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        entry = roots_dir / str(proc.pid)
+        entry.write_text("/just-written\n", encoding="utf-8")
+        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
+        os.utime(entry, (old, old))
+
+        mod._gc_roots(roots_dir, keep_pid=proc.pid)
+
+        assert entry.exists()
+
     def test_gc_stamp_file_is_skipped(self, tmp_path: Path) -> None:
         """GC throttle 用の stamp ファイル自体は roots/ の掃除対象にしない。"""
         roots_dir = tmp_path / "roots"
@@ -368,7 +408,7 @@ class TestGcThrottle:
         roots_dir.mkdir()
         (roots_dir / "latest").write_text("/old\n", encoding="utf-8")
 
-        mod._maybe_run_gc(bluecore_dir, roots_dir)
+        mod._maybe_run_gc(bluecore_dir, roots_dir, keep_pid=None)
 
         assert not (roots_dir / "latest").exists()
         assert (bluecore_dir / mod._GC_STAMP_FILENAME).exists()
@@ -381,7 +421,7 @@ class TestGcThrottle:
         (bluecore_dir / mod._GC_STAMP_FILENAME).touch()
         (roots_dir / "latest").write_text("/old\n", encoding="utf-8")
 
-        mod._maybe_run_gc(bluecore_dir, roots_dir)
+        mod._maybe_run_gc(bluecore_dir, roots_dir, keep_pid=None)
 
         assert (roots_dir / "latest").exists()  # throttle により GC は走らない
 
@@ -396,7 +436,7 @@ class TestGcThrottle:
         os.utime(stamp, (old, old))
         (roots_dir / "latest").write_text("/old\n", encoding="utf-8")
 
-        mod._maybe_run_gc(bluecore_dir, roots_dir)
+        mod._maybe_run_gc(bluecore_dir, roots_dir, keep_pid=None)
 
         assert not (roots_dir / "latest").exists()
 
@@ -417,7 +457,7 @@ class TestGcThrottle:
 
         monkeypatch.setattr(Path, "stat", _boom_stat)
 
-        mod._maybe_run_gc(bluecore_dir, roots_dir)  # 例外を送出しないことを確認
+        mod._maybe_run_gc(bluecore_dir, roots_dir, keep_pid=None)  # 例外を送出しないことを確認
 
     def test_stamp_touch_failure_is_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         bluecore_dir = tmp_path / "bc"
@@ -430,7 +470,7 @@ class TestGcThrottle:
 
         monkeypatch.setattr(Path, "touch", _boom_touch)
 
-        mod._maybe_run_gc(bluecore_dir, roots_dir)  # GC 自体は実行される（touch 失敗は無視）
+        mod._maybe_run_gc(bluecore_dir, roots_dir, keep_pid=None)  # GC 自体は実行される（touch 失敗は無視）
 
 
 def _run_env_sh(
@@ -489,6 +529,25 @@ class TestEnvShRealExecution:
         _install_env_sh(_isolate_home)
         pointer_root = _make_plugin_root(tmp_path / "pointer-root")
         _write_pointer(_isolate_home / BASE_DIR_NAME / "roots", 987654321, pointer_root)
+
+        result = _run_env_sh(_isolate_home)
+
+        assert result.returncode == 0, result.stderr
+        assert "ran:marker" in result.stdout
+
+    def test_multiple_candidates_agreeing_on_same_root_resolve(self, tmp_path: Path, _isolate_home: Path) -> None:
+        """複数の roots/<pid> が同じ root 値なら、祖先不一致でも解決する。
+
+        単一ホストが launcher 起動のたびに異なる（使い捨ての）PID を
+        記録し続けるシナリオ（writer 側の PPID が中間 shell を指す場合）の
+        救済策。「候補がちょうど 1 本」ではなく「候補が同じ root に合意して
+        いる」ことが本質であることを、複数ファイルで確認する。
+        """
+        _install_env_sh(_isolate_home)
+        pointer_root = _make_plugin_root(tmp_path / "pointer-root")
+        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
+        for pid in (111111, 222222, 333333):
+            _write_pointer(roots_dir, pid, pointer_root)
 
         result = _run_env_sh(_isolate_home)
 
@@ -577,3 +636,44 @@ class TestEnvShRealExecution:
 
         assert result.returncode == 0, result.stderr
         assert "ran:marker" in result.stdout
+
+    def test_gc_removed_dead_pointer_then_resolver_exits_127(self, tmp_path: Path, _isolate_home: Path) -> None:
+        """GC が不在 PID のポインタを消した後、resolver がそれを 127 として扱うこと。
+
+        個々には ``TestGcRoots``（削除判定）と ``TestEnvShRealExecution``
+        （resolver の 127 分岐）で検証済みだが、両者を跨ぐ合成的な振る舞い
+        （GC が実際に消し、その結果を resolver が正しく「候補ゼロ」として
+        扱う）をここで固定する。
+        """
+        _install_env_sh(_isolate_home)
+        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
+        roots_dir.mkdir(parents=True)
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        dead_entry = roots_dir / str(proc.pid)
+        dead_entry.write_text(f"{tmp_path / 'stale-root'}\n", encoding="utf-8")
+        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
+        os.utime(dead_entry, (old, old))
+
+        mod._gc_roots(roots_dir)
+        assert not dead_entry.exists()
+
+        result = _run_env_sh(_isolate_home)
+
+        assert result.returncode == 127
+        assert "could not resolve" in result.stderr
+
+    def test_pointer_with_embedded_nul_does_not_execute_anything(self, _isolate_home: Path) -> None:
+        """writer は NUL を書かないが、resolver 側も多層防御として NUL 入りポインタで
+        コードを実行しないことを確認する（読み取り結果がどう切れても shell として
+        評価されないことが本質。R-01 の防御は format 変更そのものにあるため、
+        結果が 0/127 のどちらでも良く、実行痕跡が無いことだけを検証する）。
+        """
+        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
+        roots_dir.mkdir(parents=True)
+        (roots_dir / str(os.getpid())).write_bytes(b"printf ROOT_FILE_EXECUTED >&2\x00/tmp/x\n")
+        _install_env_sh(_isolate_home)
+
+        result = _run_env_sh(_isolate_home)
+
+        assert "ROOT_FILE_EXECUTED" not in result.stderr

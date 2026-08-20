@@ -35,8 +35,10 @@ bash tool の環境へ自身の識別変数を注入することは文書化さ�
   （``mem.db``・``logs``）側の ``get_bluecore_dir()`` 契約とは別の契約であり、
   意図的に切り離している。
 - ``roots/latest`` という「無条件で採用される」ポインタは廃止した。resolver 側
-  （``env-template.sh``）が「候補がちょうど 1 本のときだけ採用する」形に変わった
-  ため、writer は ``roots/<pid>`` を書くだけでよい。
+  （``env-template.sh``）が「``roots/`` の有効な候補が全て同じ root 値に
+  一致するときだけ採用する」形に変わったため、writer は ``roots/<pid>`` を
+  書くだけでよい（同一ホストが launcher 起動のたびに異なる短命 PID を
+  記録しても、root 値さえ一致していれば解決できる）。
 """
 
 from __future__ import annotations
@@ -231,16 +233,17 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
     bluecore_dir = _ensure_private_dir(_state_dir())
     roots_dir = _ensure_private_dir(bluecore_dir / _ROOTS_DIRNAME)
 
-    _atomic_write_text(roots_dir / str(os.getppid()), root_text + "\n")
+    own_pid = os.getppid()
+    _atomic_write_text(roots_dir / str(own_pid), root_text + "\n")
 
     template_path = plugin_root / _ENV_TEMPLATE_RELATIVE
     template_text = template_path.read_text(encoding="utf-8")
     _atomic_write_text(bluecore_dir / _ENV_FILENAME, template_text)
 
-    _maybe_run_gc(bluecore_dir, roots_dir)
+    _maybe_run_gc(bluecore_dir, roots_dir, keep_pid=own_pid)
 
 
-def _maybe_run_gc(bluecore_dir: Path, roots_dir: Path) -> None:
+def _maybe_run_gc(bluecore_dir: Path, roots_dir: Path, *, keep_pid: int | None) -> None:
     """throttle を守りつつ ``roots/`` の GC を実行する。
 
     ``roots-gc.stamp`` の mtime を見て ``_GC_THROTTLE_SECONDS`` 以内なら何もしない
@@ -250,6 +253,12 @@ def _maybe_run_gc(bluecore_dir: Path, roots_dir: Path) -> None:
     Args:
         bluecore_dir: ``$HOME/.bluecore`` の Path。
         roots_dir: ``$HOME/.bluecore/roots`` の Path。
+        keep_pid: この呼び出しで書いたばかりのポインタの PID。GC の対象から
+            無条件で除外する（``os.getppid()`` が launcher 起動のたびに
+            使い捨てられる中間 shell を指す場合、書いた直後の PID が既に
+            「不在」に見えて GC 対象になりうるため。実行中ホストが自分で
+            書いたばかりの記録を、そのホスト自身が壊すことがあってはならない）。
+            ``None`` なら除外なし。
 
     Returns:
         なし。
@@ -269,7 +278,7 @@ def _maybe_run_gc(bluecore_dir: Path, roots_dir: Path) -> None:
     except OSError:
         pass
 
-    _gc_roots(roots_dir)
+    _gc_roots(roots_dir, keep_pid=keep_pid)
 
 
 def _now() -> float:
@@ -307,7 +316,7 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
-def _gc_roots(roots_dir: Path) -> None:
+def _gc_roots(roots_dir: Path, *, keep_pid: int | None = None) -> None:
     """``roots/`` を掃除する。実行中ホストのポインタは残す。
 
     削除条件（いずれか）:
@@ -320,8 +329,13 @@ def _gc_roots(roots_dir: Path) -> None:
       ホストは全 hook 起動で mtime を更新し続けるため、これは PID 再利用と判断
       できる）。
 
+    ``keep_pid`` と一致するファイル名は、上記のどの条件に当てはまっても削除
+    しない（このプロセス自身が今まさに書いたポインタを、同じ呼び出しの中で
+    自分自身が消してしまう自己矛盾を避けるため）。
+
     Args:
         roots_dir: ``$HOME/.bluecore/roots`` の Path。
+        keep_pid: 削除対象から無条件で除外する PID。``None`` なら除外なし。
 
     Returns:
         なし。
@@ -335,8 +349,9 @@ def _gc_roots(roots_dir: Path) -> None:
     except OSError:
         return
 
+    keep_name = str(keep_pid) if keep_pid is not None else None
     for entry in entries:
-        if entry.name == _GC_STAMP_FILENAME:
+        if entry.name == _GC_STAMP_FILENAME or entry.name == keep_name:
             continue
         try:
             _gc_one(entry, now)
