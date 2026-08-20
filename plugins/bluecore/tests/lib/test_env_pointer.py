@@ -1,11 +1,11 @@
 """bluecore.lib.env_pointer のテスト。
 
-``write_env_pointer`` の Python 側ロジック（祖先チェーンの解決・poison 判定・
-GC・原子的書き込み・失敗時の握り潰しと警告）に加え、生成された ``env.sh`` を
+``write_env_pointer`` の Python 側ロジック（祖先チェーンの解決・GC・
+原子的書き込み・失敗時の握り潰しと警告）に加え、生成された ``env.sh`` を
 実際に shell で source し、祖先 walk・``lstart`` 一致判定・PID 再利用の拒否・
-poison スキップ・全滅時の 127・悪意あるポインタ内容が実行されないことを
-実挙動として検証する（``env-template.sh`` は shell ファイルのため ``--cov``
-の対象外であり、テキスト assert だけでは分岐が検証されない）。
+全滅時の 127・悪意あるポインタ内容が実行されないことを実挙動として検証する
+（``env-template.sh`` は shell ファイルのため ``--cov`` の対象外であり、
+テキスト assert だけでは分岐が検証されない）。
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ class TestWriteEnvPointer:
         assert oct(roots_dir.stat().st_mode)[-3:] == "700"
 
     def test_writes_ancestor_chain_not_just_direct_ppid(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """H-02: 直接 PPID だけでなく祖先チェーン全体にポインタを書く。"""
+        """H-02: 直接 PPID だけでなく祖先（最大 ``_MAX_ANCESTOR_DEPTH`` 段）にも書く。"""
         plugin_root = _make_plugin_root(tmp_path / "plugin")
 
         mod.write_env_pointer(plugin_root)
@@ -76,10 +76,10 @@ class TestWriteEnvPointer:
         roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
         written = {p.name for p in roots_dir.iterdir() if p.name.isdigit()}
         assert str(os.getppid()) in written
-        # テストプロセスの祖先チェーンは環境依存だが、直接 PPID 以外にも
-        # 最低 1 段は書かれているはず（pytest プロセス自体は通常 init/1
-        # 直下ではない）。
-        assert len(written) >= 2
+        # 祖先チェーンの実測段数は環境依存（pytest プロセスの親が既に
+        # init/1 の場合は 1 段で打ち切られる）だが、_MAX_ANCESTOR_DEPTH を
+        # 超えて書くことは無い。
+        assert 1 <= len(written) <= mod._MAX_ANCESTOR_DEPTH
 
     def test_overwrites_on_repeated_call(self, tmp_path: Path, _isolate_home: Path) -> None:
         """同一 root で再度呼んでも内容は変わらない（PID 再利用時に自己修復する前提）。"""
@@ -91,13 +91,15 @@ class TestWriteEnvPointer:
         pid_file = _isolate_home / BASE_DIR_NAME / "roots" / str(os.getppid())
         assert pid_file.read_text(encoding="utf-8").split("\n")[0] == str(first_root)
 
-    def test_conflicting_root_poisons_the_pointer(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """異なる root で再度呼ぶと、上書きではなく poison（空ファイル）になる（H-02）。
+    def test_conflicting_root_overwrites_the_pointer(self, tmp_path: Path, _isolate_home: Path) -> None:
+        """異なる root で再度呼ぶと単純に上書きされる（poison はしない）。
 
-        writer は複数プロセス分離のため祖先 PID にも書く。同一 PID に別の
-        root を書こうとするのは「別 host がその祖先を共有している」ことを
-        意味し、後勝ち上書きだと誤って相手の root を掴む経路が残るため、
-        双方とも使えなくする。
+        writer が祖先 PID へ書き込む範囲は host インスタンス専有の PID
+        （最大 2 段）に限られ、他 host と共有されない。同一 PID に別の
+        root が観測されるのは「同一 host がプラグインをアップグレード
+        した」ケースのみなので、上書きが正しい（旧 poison 設計は
+        advisor レビューで「共有されうる祖先が生存し続ける限り恒久化する
+        自己修復不能な失敗モード」と指摘され撤回した）。
         """
         first_root = _make_plugin_root(tmp_path / "first")
         second_root = _make_plugin_root(tmp_path / "second")
@@ -106,20 +108,7 @@ class TestWriteEnvPointer:
         mod.write_env_pointer(second_root)
 
         pid_file = _isolate_home / BASE_DIR_NAME / "roots" / str(os.getppid())
-        assert pid_file.read_text(encoding="utf-8") == ""
-
-    def test_poisoned_pointer_stays_poisoned(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """一度 poison になったポインタは、元の root で再度呼んでも復活しない。"""
-        first_root = _make_plugin_root(tmp_path / "first")
-        second_root = _make_plugin_root(tmp_path / "second")
-        mod.write_env_pointer(first_root)
-        mod.write_env_pointer(second_root)  # ここで poison になる
-        pid_file = _isolate_home / BASE_DIR_NAME / "roots" / str(os.getppid())
-        assert pid_file.read_text(encoding="utf-8") == ""
-
-        mod.write_env_pointer(first_root)  # 最初の root で再挑戦
-
-        assert pid_file.read_text(encoding="utf-8") == ""
+        assert pid_file.read_text(encoding="utf-8").split("\n")[0] == str(second_root)
 
     def test_rejects_root_containing_newline(self, tmp_path: Path, _isolate_home: Path) -> None:
         """改行を含む root は書き込まれず、既存の有効ポインタも壊されない。"""
@@ -395,43 +384,38 @@ class TestResolveAncestorChain:
         assert mod._resolve_ancestor_chain(4) == []
 
 
-class TestWriteOrPoisonPointer:
-    """_write_or_poison_pointer の分岐のテスト。"""
+class TestWriteAncestorPointer:
+    """_write_ancestor_pointer の分岐のテスト。"""
 
     def test_writes_new_pointer(self, tmp_path: Path) -> None:
         path = tmp_path / "42"
-        mod._write_or_poison_pointer(path, "/root/a", "lstart-a")
+        mod._write_ancestor_pointer(path, "/root/a", "lstart-a")
         assert path.read_text(encoding="utf-8") == "/root/a\nlstart-a\n"
 
     def test_refreshes_matching_root(self, tmp_path: Path) -> None:
         path = tmp_path / "42"
-        mod._write_or_poison_pointer(path, "/root/a", "lstart-a")
-        mod._write_or_poison_pointer(path, "/root/a", "lstart-a-updated")
+        mod._write_ancestor_pointer(path, "/root/a", "lstart-a")
+        mod._write_ancestor_pointer(path, "/root/a", "lstart-a-updated")
         assert path.read_text(encoding="utf-8") == "/root/a\nlstart-a-updated\n"
 
-    def test_conflicting_root_poisons(self, tmp_path: Path) -> None:
+    def test_conflicting_root_overwrites(self, tmp_path: Path) -> None:
+        """異なる root で再度呼ぶと単純に上書きされる（poison はしない、書き込み
+        対象 PID は host インスタンス専有のため衝突自体が起こらない前提）。"""
         path = tmp_path / "42"
-        mod._write_or_poison_pointer(path, "/root/a", "lstart-a")
-        mod._write_or_poison_pointer(path, "/root/b", "lstart-b")
-        assert path.read_text(encoding="utf-8") == ""
+        mod._write_ancestor_pointer(path, "/root/a", "lstart-a")
+        mod._write_ancestor_pointer(path, "/root/b", "lstart-b")
+        assert path.read_text(encoding="utf-8") == "/root/b\nlstart-b\n"
 
-    def test_already_poisoned_is_left_alone(self, tmp_path: Path) -> None:
+    def test_write_failure_propagates(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         path = tmp_path / "42"
-        path.write_text("", encoding="utf-8")
-        mod._write_or_poison_pointer(path, "/root/a", "lstart-a")
-        assert path.read_text(encoding="utf-8") == ""
 
-    def test_unreadable_existing_pointer_propagates(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        path = tmp_path / "42"
-        path.write_text("/root/a\nlstart-a\n", encoding="utf-8")
+        def _boom(_path: Path, _text: str) -> None:
+            raise OSError("disk full")
 
-        def _boom(self: Path, *args: object, **kwargs: object) -> str:
-            raise PermissionError("denied")
+        monkeypatch.setattr(mod, "_atomic_write_text", _boom)
 
-        monkeypatch.setattr(Path, "read_text", _boom)
-
-        with pytest.raises(PermissionError):
-            mod._write_or_poison_pointer(path, "/root/a", "lstart-a")
+        with pytest.raises(OSError, match="disk full"):
+            mod._write_ancestor_pointer(path, "/root/a", "lstart-a")
 
 
 class TestPidIsAlive:
@@ -766,28 +750,41 @@ class TestEnvShRealExecution:
         assert result.returncode == 0, result.stderr
         assert "ran:marker" in result.stdout
 
-    def test_ancestor_match_at_depth_three(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """3 段ネストした shell からでも、テストプロセス自身の祖先ポインタで解決する。
+    def test_ancestor_beyond_depth_limit_exits_127(self, tmp_path: Path, _isolate_home: Path) -> None:
+        """3 段祖先（walk 上限 2 段の外側）にしかポインタが無ければ、推測せず 127 にする。
 
-        深いネストの文字列エスケープを避けるため、各層を argv リストとして
-        組み立て、``shlex.quote`` で 1 段ずつ包む。
+        writer は host インスタンス専有の 2 段（bash tool の shell とその親）
+        にしか書かない設計（advisor レビュー、poison 廃止の裏返し）。resolver
+        の walk 上限も同じ 2 段であることをここで固定する。深いネストの文字列
+        エスケープを避けるため、各層を argv リストとして組み立て、
+        ``shlex.quote`` で 1 段ずつ包む。
         """
         _install_env_sh(_isolate_home)
         pointer_root = _make_plugin_root(tmp_path / "pointer-root")
+        # テストプロセス自身（inner から見て depth 2）にのみポインタを置く —
+        # walk 上限（depth 0/1）の外側なので解決できないはず。
         _write_pointer(_isolate_home / BASE_DIR_NAME / "roots", os.getpid(), pointer_root)
 
         script_file = tmp_path / "depth3.sh"
         script_file.write_text('. "$HOME/.bluecore/env.sh" || exit 127\nbluecore_run marker\n', encoding="utf-8")
 
+        # `; exit $?` を各層に付ける: 単一コマンドだけの `sh -c` はシェルが
+        # tail-call 最適化で自分自身を exec 置換することがあり（実機で
+        # 確認済み — `sh -c "sh -c 'ps ...'"` の ppid チェーンが 1 段
+        # 潰れる）、意図した 3 段ネストが実際には 1〜2 段にしかならない。
+        # 複数コマンドにすることで exec 置換を防ぎ、fork による本物の
+        # 3 段プロセスチェーンを作る。終了コードは `$?` で伝播する。
         inner = ["sh", str(script_file)]
-        middle = ["sh", "-c", " ".join(shlex.quote(x) for x in inner)]
-        outer = ["sh", "-c", " ".join(shlex.quote(x) for x in middle)]
+        middle_script = " ".join(shlex.quote(x) for x in inner) + "; exit $?"
+        middle = ["sh", "-c", middle_script]
+        outer_script = " ".join(shlex.quote(x) for x in middle) + "; exit $?"
+        outer = ["sh", "-c", outer_script]
         result = subprocess.run(
             outer, capture_output=True, text=True, env={"HOME": str(_isolate_home), "PATH": "/usr/bin:/bin"}
         )
 
-        assert result.returncode == 0, result.stderr
-        assert "ran:marker" in result.stdout
+        assert result.returncode == 127
+        assert "could not resolve" in result.stderr
 
     def test_pid_reuse_at_direct_ppid_falls_through_to_ancestor(self, tmp_path: Path, _isolate_home: Path) -> None:
         """直接 PPID の記録された lstart が現在値と食い違えば（PID 再利用）
@@ -809,15 +806,20 @@ class TestEnvShRealExecution:
         assert result.returncode == 0, result.stderr
         assert "ran:marker" in result.stdout
 
-    def test_poisoned_ancestor_is_skipped_and_walk_continues(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """poison（対立記録で空にされた）祖先はスキップし、さらに遠い祖先で解決する。"""
+    def test_malformed_ancestor_is_skipped_and_walk_continues(self, tmp_path: Path, _isolate_home: Path) -> None:
+        """空/不正なポインタはスキップし、さらに遠い祖先で解決する。
+
+        writer はもはや衝突検知で意図的に空ファイルを作らない（poison は
+        advisor レビューで撤回済み）が、resolver 側は防御として空・欠落
+        ポインタを不正データ扱いでスキップし続ける（read 側の余剰防御。
+        `[ -z ... ]` チェックは変更していない）。"""
         _install_env_sh(_isolate_home)
         pointer_root = _make_plugin_root(tmp_path / "pointer-root")
         roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
         # 祖先（このテストプロセス自身）に正しいポインタを置く。
         _write_pointer(roots_dir, os.getpid(), pointer_root)
 
-        # 直接 PPID（中間 sh）は自分自身を poison（空ファイル）にする。
+        # 直接 PPID（中間 sh）のポインタは空にしておく。
         script = (
             'printf "" > "$HOME/.bluecore/roots/$$"\n'
             'sh -c \'. "$HOME/.bluecore/env.sh" || exit 127; bluecore_run marker\'\n'
@@ -864,7 +866,31 @@ class TestEnvShRealExecution:
         実機で確認した。writer/resolver 双方が ``LC_ALL=C`` を明示するため、
         ambient locale の違いに関わらず一致する必要がある — これは実機で
         踏んだ回帰（writer 側の ``LC_ALL`` 指定漏れ）を固定する。
+
+        ``write_env_pointer`` は内部で常に ``LC_ALL=C`` を注入するため、単に
+        ``LANG`` を設定して解決成功を確認するだけでは、``LC_ALL`` 注入を
+        誤って外した future 回帰を検知できない（advisor レビュー指摘）。
+        先に「``LC_ALL=C`` 版と ``LANG=ja_JP.UTF-8``（``LC_ALL`` 無し）版の
+        ``ps -o lstart=`` が実際に異なる」ことを確認し、ロケール差分が
+        存在する環境でだけ本題の解決成功を assert する（差分が無い環境
+        ―― 日本語ロケール未インストール等 ―― では xfail 相当としてスキップし、
+        偽の green を防ぐ）。
         """
+        own_pid = os.getpid()
+        c_lstart = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(own_pid)],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "LC_ALL": "C"},
+        ).stdout
+        ja_env = {**os.environ, "LANG": "ja_JP.UTF-8"}
+        ja_env.pop("LC_ALL", None)
+        ja_lstart = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(own_pid)], capture_output=True, text=True, env=ja_env
+        ).stdout
+        if c_lstart == ja_lstart:
+            pytest.skip("ja_JP.UTF-8 locale not available on this host; ps -o lstart= is locale-invariant here")
+
         monkeypatch.setenv("LANG", "ja_JP.UTF-8")
         monkeypatch.delenv("LC_ALL", raising=False)
         plugin_root = _make_plugin_root(tmp_path / "plugin")

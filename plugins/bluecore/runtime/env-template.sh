@@ -15,17 +15,19 @@
 # `.`/`source`s them — it only `read`s the two lines — so no content placed in
 # a pointer file can execute, regardless of what characters it contains.
 #
-# Resolution: walk $PPID and up to 3 more process ancestors (`ps -o ppid=`).
-# For each ancestor pid, if roots/<pid> exists, has both lines, and the
-# recorded start-time line matches that pid's *current* `ps -o lstart=`
-# output byte-for-byte, use its recorded root. A mismatch means the pid was
-# reused by an unrelated process since the pointer was written — skip it.
-# An empty file means the writer found a conflicting root at that ancestor
-# (two different hosts share it, e.g. the same terminal) and poisoned it —
-# skip it too.
+# Resolution: walk $PPID and its parent (`ps -o ppid=`) — 2 pids total. Both
+# are exclusive to this host instance (the bash tool's own shell, and the
+# host binary itself), never shared with another host, so the writer
+# (env_pointer.py) only ever records here — no further ancestors. For each
+# candidate pid, if roots/<pid> exists, has both lines, and the recorded
+# start-time line matches that pid's *current* `ps -o lstart=` output
+# byte-for-byte, use its recorded root. A mismatch means the pid was reused
+# by an unrelated process since the pointer was written — skip it. An empty
+# or malformed file is treated the same way (defensive only — the writer no
+# longer produces empty files by design; see docs/adr/0008-*.md revision 3).
 #
-# There is no second-tier fallback. If no ancestor yields a verified match,
-# this exits 127 rather than guessing (docs/reports/
+# There is no second-tier fallback. If neither candidate yields a verified
+# match, this exits 127 rather than guessing (docs/reports/
 # PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md H-02: an
 # earlier design fell back to "the root every valid pointer agrees on",
 # which cannot prove the shell asking is actually that host's descendant).
@@ -35,8 +37,9 @@ _bluecore_env_root=""
 _bluecore_resolve_ancestor_pointer() {
   # $1: candidate pid. On success, prints the recorded root on stdout and
   # returns 0. Prints nothing and returns 1 if the pointer is missing,
-  # empty (poisoned), malformed, or its recorded start-time does not match
-  # the pid's current start-time (pid reuse).
+  # empty or malformed (defensive only — the writer no longer produces
+  # these), or its recorded start-time does not match the pid's current
+  # start-time (pid reuse).
   _bluecore_walk_candidate_pid="$1"
   _bluecore_walk_pointer="$HOME/.bluecore/roots/$_bluecore_walk_candidate_pid"
   if [ -L "$_bluecore_walk_pointer" ] || [ ! -f "$_bluecore_walk_pointer" ]; then
@@ -68,7 +71,7 @@ _bluecore_resolve_ancestor_pointer() {
 
 _bluecore_walk_pid="$PPID"
 _bluecore_walk_depth=0
-while [ "$_bluecore_walk_depth" -lt 4 ]; do
+while [ "$_bluecore_walk_depth" -lt 2 ]; do
   _bluecore_env_root="$(_bluecore_resolve_ancestor_pointer "$_bluecore_walk_pid")"
   [ -n "$_bluecore_env_root" ] && break
   _bluecore_walk_parent="$(ps -o ppid= -p "$_bluecore_walk_pid" 2>/dev/null | tr -d ' ')"

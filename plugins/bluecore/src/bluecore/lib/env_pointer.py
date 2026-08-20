@@ -42,27 +42,33 @@ bash tool の環境へ自身の識別変数を注入することは文書化さ�
 ユーザーから「リスクがあるとみなせる fallback は望ましくない」との明示
 指示を受け、**推測に基づく fallback を全廃**した:
 
-- writer は ``os.getppid()`` だけでなく、その**祖先チェーンを最大 4 段**
-  まで辿り、各段の PID にも同じ root を記録する
-  （``_resolve_ancestor_chain``）。1 回の ``ps -eo pid=,ppid=,lstart=``
-  でチェーンと各 PID の起動時刻（``lstart``）を同時に取得する（実測
-  10〜16ms、hook のタイムアウト予算に対して無視できるコスト）。
+- writer は ``os.getppid()`` とその親（**最大 2 段**）にのみ root を
+  記録する（``_resolve_ancestor_chain``）。1 回の
+  ``ps -eo pid=,ppid=,lstart=`` でチェーンと各 PID の起動時刻
+  （``lstart``）を同時に取得する（実測 10〜16ms、hook のタイムアウト
+  予算に対して無視できるコスト）。
 - 各ポインタは ``root\nlstart\n`` の 2 行になる。``lstart`` は
   resolver 側が「今生きているその PID は、記録時と同一のプロセスか」を
   照合するための識別子（PID は再利用されるが、同一 PID が同一
   ``lstart`` を持つのは同一プロセスの生存中に限られる）。
-- 祖先 PID に**既に別の root** が記録されていたら、上書きせず内容を
-  空にする（**poison**）。これは、同じ terminal / login shell から
-  異なる複数の host が起動され、浅い祖先 PID を共有してしまうケースの
-  対処: 後勝ち上書きだと片方が誤って相手の root を掴む可能性が残るが、
-  poison にすれば resolver はその祖先をスキップして次へ進むため、
-  「どちらか一方が誤って相手を掴む」という事象自体が起こらない。自分の
-  より近い祖先（通常は host バイナリ自体の PID）は共有されにくいため、
-  共有される深い祖先が poison になっても各 host 自身の解決能力は
-  損なわれない。
-- resolver（``env-template.sh``）は祖先チェーンの ``lstart`` が一致する
-  ポインタしか採用しない。祖先チェーンで解決できなければ、推測せず常に
-  ``exit 127`` にする（旧 tier 2「root 値合意 + 鮮度フィルタ」は削除）。
+- 深さを 2 段に絞っているのは、共有されうる祖先へ書き込むこと自体を
+  やめるため。``os.getppid()``（bash tool の shell）とその親
+  （host バイナリそのもの）は、いずれもこの host インスタンス専有の
+  PID であり、他の host インスタンスがこれらの PID を祖先として持つ
+  ことはない。より上位の祖先（login shell・terminal app 等）は同じ
+  terminal / login shell から起動された別々の host 間で共有されうるが、
+  writer はそこへ一切書き込まないため、共有祖先での衝突という事象
+  自体が構造的に発生しない（初版はこれを「poison」で事後検知していたが、
+  advisor レビューで「共有されうる祖先が生存し続ける限り poison が
+  恒久化し、その host が数日単位でブロックされうる」という自己修復
+  不能な失敗モードを指摘され、事前回避（書き込み範囲を狭める）へ設計を
+  改めた）。同一 PID に異なる root が観測されるのは「同一 host が
+  プラグインをアップグレードした」ケースのみであり、これは上書きが
+  正しい挙動なので単純に上書きする。
+- resolver（``env-template.sh``）は祖先チェーン（同じく最大 2 段）の
+  ``lstart`` が一致するポインタしか採用しない。祖先チェーンで解決
+  できなければ、推測せず常に ``exit 127`` にする（旧 tier 2「root 値
+  合意 + 鮮度フィルタ」は削除）。
 """
 
 from __future__ import annotations
@@ -79,9 +85,11 @@ _ROOTS_DIRNAME = "roots"
 _ENV_FILENAME = "env.sh"
 _ENV_TEMPLATE_RELATIVE = Path("runtime") / "env-template.sh"
 
-_MAX_ANCESTOR_DEPTH = 4
-"""writer が祖先 PID へポインタを書く最大段数。resolver 側
-（``env-template.sh`` の祖先 walk）と同じ深さに揃える。"""
+_MAX_ANCESTOR_DEPTH = 2
+"""writer が祖先 PID へポインタを書く最大段数（``os.getppid()`` とその親のみ）。
+resolver 側（``env-template.sh`` の祖先 walk）と同じ深さに揃える。この 2 段は
+host インスタンス専有の PID（bash tool の shell・host バイナリ）に限られ、
+他 host と共有されないことが設計の前提（モジュール docstring 参照）。"""
 
 _PS_TIMEOUT_SECONDS = 5
 """祖先チェーン取得用 ``ps`` 呼び出しのハードタイムアウト。"""
@@ -317,19 +325,15 @@ def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
     return chain
 
 
-def _write_or_poison_pointer(path: Path, root_text: str, lstart: str) -> None:
-    """1 つの祖先 PID のポインタを書くか、対立する記録を poison する。
+def _write_ancestor_pointer(path: Path, root_text: str, lstart: str) -> None:
+    """1 つの祖先 PID のポインタへ ``root_text``/``lstart`` を（無条件に）書く。
 
-    - ポインタが存在しない → ``root_text``/``lstart`` を書く。
-    - 既存の root が ``root_text`` と同じ → 同内容で書き直す（mtime と
-      ``lstart`` を現在値へ更新する）。
-    - 既存の root が ``root_text`` と異なり、まだ poison（空）でない →
-      内容を空にして poison する（同じ祖先 PID を共有する別 host の
-      root と衝突したため、以後どちらの root にも解決させない — H-02
-      対応。「後勝ち上書き」で誤った root を静かに掴む経路を、
-      「双方とも使わない」に変える）。
-    - 既に poison（空ファイル）→ 何もしない（そのファイル名の PID が
-      生存し続ける限り、誰にも上書きさせない）。
+    書き込み対象の PID は host インスタンス専有（モジュール docstring
+    参照）であるため、既存の記録と ``root_text`` が食い違っていても
+    「別 host との衝突」ではなく「同一 host のプラグインアップグレード」
+    でしかありえず、単純上書きが正しい。poison のような衝突検知は
+    行わない（旧設計は行っていたが、共有されない PID にしか書かない
+    設計へ改めたことで不要になった — advisor レビュー指摘）。
 
     Args:
         path: ``roots/<pid>`` のポインタパス。
@@ -341,24 +345,9 @@ def _write_or_poison_pointer(path: Path, root_text: str, lstart: str) -> None:
         なし。
 
     Raises:
-        OSError: 既存ファイルの読み取り・新規書き込みに失敗した場合
-            （``FileNotFoundError`` は正常系として内部で処理する）。
+        OSError: 書き込みに失敗した場合。
     """
-    try:
-        existing_text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        _atomic_write_text(path, f"{root_text}\n{lstart}\n")
-        return
-
-    if existing_text == "":
-        return
-
-    existing_root = existing_text.split("\n", 1)[0]
-    if existing_root == root_text:
-        _atomic_write_text(path, f"{root_text}\n{lstart}\n")
-        return
-
-    _atomic_write_text(path, "")
+    _atomic_write_text(path, f"{root_text}\n{lstart}\n")
 
 
 def _write_env_pointer_unsafe(plugin_root: Path) -> None:
@@ -387,7 +376,7 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
 
     chain = _resolve_ancestor_chain(_MAX_ANCESTOR_DEPTH)
     for pid, lstart in chain:
-        _write_or_poison_pointer(roots_dir / str(pid), root_text, lstart)
+        _write_ancestor_pointer(roots_dir / str(pid), root_text, lstart)
     written_pids = frozenset(pid for pid, _lstart in chain)
 
     template_path = plugin_root / _ENV_TEMPLATE_RELATIVE
