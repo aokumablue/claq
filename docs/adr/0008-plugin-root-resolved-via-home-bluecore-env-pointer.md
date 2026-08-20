@@ -1,6 +1,6 @@
 # ADR-0008: plugin root は `~/.bluecore/env.sh` ポインタで解決し、md にベンダ固有パスを書かない
 
-**日付**: 2026-08-20（初版）／2026-08-20 改訂 ×3  **ステータス**: accepted
+**日付**: 2026-08-20（初版）／2026-08-20 改訂 ×4  **ステータス**: accepted
 
 ## 改訂履歴（2026-08-20）
 
@@ -21,7 +21,7 @@ fallback）は「祖先であることを証明
 時刻）で個体識別し、対立する root は poison（空ファイル化）する」設計へ
 作り直した。
 
-**改訂 3（本改訂）**: 改訂 2 の実装完了後、advisor レビューで「poison は
+**改訂 3**: 改訂 2 の実装完了後、advisor レビューで「poison は
 共有されうる祖先 PID（login shell・terminal app 等）が生存し続ける限り
 恒久化し、その host インスタンスを自己修復不能なまま数日単位でブロック
 しうる」という新たな失敗モードを指摘された。対処として「共有されうる
@@ -31,6 +31,14 @@ fallback）は「祖先であることを証明
 撤去した。「決定」「結果」「リスク」節を全面差し替え、改訂 2 の設計は
 代替案として要約を残す。代替案 1〜3（初版由来、環境変数判定を採らない
 理由・ランタイム集約 install を採らない理由）は変更なし。
+
+**改訂 4（本改訂）**: v0.9.37 時点の再検証の M-02 を受け、一時ファイルを
+予測可能な `<name>.tmp.<pid>`（`O_CREAT|O_TRUNC`）から `tempfile.mkstemp`
+（prefix `<name>.tmp.`、ランダム suffix、`O_EXCL`）へ変更した。同一
+プロセス内の thread 衝突は現行 launcher に発生経路が無い。これは同一
+UID 内の precreation / symlink 追従を除く**堅牢性改善**であり、
+owner/mode 非検証（ADR-0009）は変えない。`env.sh.tmp.*` は `roots/` の
+GC では見えないため、`~/.bluecore` 直下で同じ age-gate を適用する。
 
 ## コンテキスト
 
@@ -115,8 +123,8 @@ host-dependent なロジックは Python/Shell の実装ファイルへ隔離す
    がもう poison しなくなった後も防御として残している）。**祖先
    チェーンで解決できなければ、推測せず常に `exit 127`**
    （H-02: 改訂 1 の「root 値合意 fallback」は全廃した — 下記代替案参照）。
-5. `write_env_pointer()` は `env.sh` を `<name>.tmp.<pid>` 経由の
-   `os.replace()` で原子的に書く（R-06）。GC は今回書いた祖先チェーン
+5. `write_env_pointer()` は `env.sh` を `tempfile.mkstemp`（prefix
+   `<name>.tmp.`）経由の `os.replace()` で原子的に書く（R-06）。GC は今回書いた祖先チェーン
    全体の PID 集合（`keep_pids`）を、他の削除条件を満たしても対象から
    除外する（GC が同じ呼び出しの中で「今書いたばかりの記録」を
    自壊させないため）。置き場所は `get_bluecore_dir()`（`BLUECORE_HOME`
@@ -128,7 +136,8 @@ host-dependent なロジックは Python/Shell の実装ファイルへ隔離す
    呼ぶ（SessionStart に限定しない。他の hook 起動でもポインタが更新される
    ため復旧が速い）。書き込み失敗は握り潰すが、プロセスごと 1 回だけ
    stderr へ JSON 警告を出す（無音の機能低下を防ぐ）。
-7. `write_env_pointer()` は 1 時間に 1 回だけ `roots/` の GC を実行する
+7. `write_env_pointer()` は 1 時間に 1 回だけ `roots/` と
+   `~/.bluecore/env.sh.tmp.*` の GC を実行する
    （`roots-gc.stamp` の mtime で throttle）。削除条件は「ファイル名が
    数字のみでない（旧形式の残骸・他 writer の in-flight 一時ファイルを
    含む。`_DEAD_PID_GRACE_SECONDS` による age-gate 後に削除。M-01）」
@@ -277,8 +286,11 @@ host-dependent なロジックは Python/Shell の実装ファイルへ隔離す
   群が同じ呼び出しの中で自壊する経路を防ぐ）ことを優先しつつ throttle
   付きで自動走行するため、`roots/` が無制限に蓄積しない。GC の
   「非数字名を無条件削除」規則は、他 writer の in-flight 一時ファイル
-  （`<pid>.tmp.<writer_pid>`）も削除しうる race があった（M-01）ため、
-  既存の `_DEAD_PID_GRACE_SECONDS` による age-gate を追加して閉じた。
+  （`<name>.tmp.<random>`。旧形式は `<pid>.tmp.<writer_pid>`）も削除しうる
+  race があった（M-01）ため、既存の `_DEAD_PID_GRACE_SECONDS` による
+  age-gate を追加して閉じた。`env.sh` の一時ファイルは `roots/` ではなく
+  `~/.bluecore` 直下に作られるため、同じ age-gate を prefix
+  `env.sh.tmp.` に限定してそこでも適用する。
 
 ### 否定的
 
