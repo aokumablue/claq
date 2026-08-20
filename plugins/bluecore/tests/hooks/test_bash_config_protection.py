@@ -129,6 +129,58 @@ class TestFindProtectedWrite:
         """拡張検出（perl/cp/mv/ln/dd）の non-match 分岐（in-place 無し・引数無し・非保護対象）。"""
         assert bash_config_protection.find_protected_write(command) is None
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # M-01: tee/sed/perl/dd/of= が「実行位置」ではなくただの引数文字列
+            # として現れるだけの場合は allow する（コマンド名の文字列一致だけ
+            # で deny していた過去の実装は誤検出していた）。
+            "echo tee pyproject.toml",
+            "echo of=pyproject.toml",
+            "echo sed -i pyproject.toml",
+            "echo perl -i pyproject.toml",
+            "printf 'tee pyproject.toml\\n'",
+            "grep -l 'dd of=pyproject.toml' notes.txt",
+        ],
+    )
+    def test_command_position_non_matches_allow(self, command: str) -> None:
+        """M-01: tee/sed/perl/dd が実行位置に無ければ allow する。"""
+        assert bash_config_protection.find_protected_write(command) is None
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # M-01: wrapper を挟んでも実行位置の特定は維持する（過検出防止の
+            # ための修正で既存の wrapper 検出力を落とさない）。
+            "env X=1 tee pyproject.toml",
+            "sudo tee pyproject.toml",
+            "command tee pyproject.toml",
+            "sudo -u root tee pyproject.toml",
+            "env -u FOO tee pyproject.toml",
+            "env sed -i 's/a/b/' pyproject.toml",
+            "sudo dd if=/dev/zero of=pyproject.toml",
+            # 未知の wrapper オプション（値の有無を判定できない）は 1 トークン
+            # だけ読み飛ばして実行対象の探索を続ける。
+            "sudo -n tee pyproject.toml",
+        ],
+    )
+    def test_wrapped_command_position_still_detected(self, command: str) -> None:
+        """M-01: env/sudo/command wrapper 経由でも実行位置を正しく特定して deny する。"""
+        assert bash_config_protection.find_protected_write(command) is not None
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # _command_index が実行対象を特定できない（全トークンが代入/
+            # wrapper/オプションで終わる）場合は allow する。
+            "env",
+            "FOO=bar",
+            "sudo -u",
+        ],
+    )
+    def test_command_index_unresolvable_allows(self, command: str) -> None:
+        assert bash_config_protection.find_protected_write(command) is None
+
     def test_within_repo_root_returns_false_on_resolve_oserror(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

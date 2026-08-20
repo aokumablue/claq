@@ -50,6 +50,7 @@ Bash コマンド文字列に対して適用する。
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from bluecore.hooks.config_protection import (
@@ -85,6 +86,57 @@ _REDIRECT_OPERATORS = frozenset({">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>"
 _LAST_ARG_WRITE_COMMANDS = frozenset({"cp", "mv", "install"})
 
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES | CONDITIONALLY_PROTECTED_FILES
+
+# `NAME=value` 形式の literal 環境変数代入（M-01: 実行 executable 位置の特定に使う）。
+_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+# `_command_index` が読み飛ばす実行 wrapper（basename 判定）。
+_COMMAND_POSITION_WRAPPERS = frozenset({"env", "command", "sudo"})
+
+# wrapper 自身が値を取る short オプション（`env -u NAME` / `sudo -u user`）。
+_WRAPPER_VALUE_SHORT_OPTIONS = frozenset({"-u"})
+
+
+def _command_index(segment: list[str]) -> int | None:
+    """セグメント内で実際に実行される executable トークンの index を返す（M-01）。
+
+    `tee pyproject.toml` の実行位置と `echo tee pyproject.toml` の
+    非実行位置を区別するために使う。先頭から連続する literal 環境変数代入
+    （``NAME=value``）と、``env``/``command``/``sudo`` の実行 wrapper（basename
+    判定。``-u NAME`` のような値を取る wrapper 自身のオプションは値ごと
+    読み飛ばす）を消費し、最初にそれ以外の形になったトークンの index を返す。
+
+    未知の wrapper オプション（値の有無を判定できないもの）は 1 トークンだけ
+    読み飛ばす。これは `block_no_verify` と同じ「うっかりバイパスの抑止」
+    という設計判断で、POSIX シェルの完全な引数解釈は行わない（ADR-0002）。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        実行 executable の index。segment が空、または全トークンが代入/
+        wrapper/オプションで実行対象が特定できない場合は None。
+
+    Raises:
+        例外は発生しません。
+    """
+    index = 0
+    while index < len(segment):
+        token = segment[index]
+        if _ENV_ASSIGNMENT_RE.match(token):
+            index += 1
+            continue
+        if token.rsplit("/", 1)[-1] in _COMMAND_POSITION_WRAPPERS:
+            index += 1
+            continue
+        if token in _WRAPPER_VALUE_SHORT_OPTIONS:
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return index
+    return None
 
 
 def _protected_basename(token: str) -> str | None:
@@ -133,8 +185,10 @@ def _redirect_target(segment: list[str]) -> str | None:
 def _tee_target(segment: list[str]) -> str | None:
     """セグメント内の `tee` の出力先引数が保護対象ならその生トークンを返す。
 
-    `-a`（追記）等のオプショントークンは読み飛ばし、非オプション引数を
-    出力先候補として検査する。
+    `tee` が実際に実行される位置（`_command_index`）にある場合のみ判定する
+    （M-01: ``echo tee pyproject.toml`` のように `tee` が実行されない位置に
+    現れるだけの誤検出を避けるため）。`-a`（追記）等のオプショントークンは
+    読み飛ばし、非オプション引数を出力先候補として検査する。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
@@ -145,12 +199,10 @@ def _tee_target(segment: list[str]) -> str | None:
     Raises:
         例外は発生しません。
     """
-    tee_index = next(
-        (i for i, token in enumerate(segment) if token.rsplit("/", 1)[-1] == "tee"), None
-    )
-    if tee_index is None:
+    index = _command_index(segment)
+    if index is None or segment[index].rsplit("/", 1)[-1] != "tee":
         return None
-    for token in segment[tee_index + 1 :]:
+    for token in segment[index + 1 :]:
         if token.startswith("-"):
             continue
         if _protected_basename(token):
@@ -161,6 +213,9 @@ def _tee_target(segment: list[str]) -> str | None:
 def _sed_inplace_target(segment: list[str]) -> str | None:
     """セグメント内の `sed -i`（in-place 編集）の対象引数が保護対象ならその生トークンを返す。
 
+    `sed` が実際に実行される位置（`_command_index`）にある場合のみ判定する
+    （M-01: ``echo sed -i pyproject.toml`` のような非実行位置での誤検出を避ける）。
+
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
@@ -170,13 +225,14 @@ def _sed_inplace_target(segment: list[str]) -> str | None:
     Raises:
         例外は発生しません。
     """
-    has_sed = any(token.rsplit("/", 1)[-1] == "sed" for token in segment)
-    if not has_sed:
+    index = _command_index(segment)
+    if index is None or segment[index].rsplit("/", 1)[-1] != "sed":
         return None
-    has_inplace = any(token == "-i" or token.startswith("-i") for token in segment if token.startswith("-"))
+    args = segment[index + 1 :]
+    has_inplace = any(token == "-i" or token.startswith("-i") for token in args if token.startswith("-"))
     if not has_inplace:
         return None
-    for token in segment:
+    for token in args:
         if _protected_basename(token):
             return token
     return None
@@ -188,7 +244,8 @@ def _perl_inplace_target(segment: list[str]) -> str | None:
     perl の in-place 編集フラグは `-i` 単独、または `-0pi`/`-pi.bak` の
     ように他の短形式オプションと結合できる。結合位置は問わず、`-` 始まりの
     単一ダッシュ・トークンに小文字 `i` が含まれるかで判定する
-    （`sed -i` と同じ「敵対的回避への防壁ではない」設計判断）。
+    （`sed -i` と同じ「敵対的回避への防壁ではない」設計判断）。`perl` が
+    実際に実行される位置（`_command_index`）にある場合のみ判定する（M-01）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
@@ -199,15 +256,14 @@ def _perl_inplace_target(segment: list[str]) -> str | None:
     Raises:
         例外は発生しません。
     """
-    has_perl = any(token.rsplit("/", 1)[-1] == "perl" for token in segment)
-    if not has_perl:
+    index = _command_index(segment)
+    if index is None or segment[index].rsplit("/", 1)[-1] != "perl":
         return None
-    has_inplace = any(
-        token.startswith("-") and not token.startswith("--") and "i" in token for token in segment
-    )
+    args = segment[index + 1 :]
+    has_inplace = any(token.startswith("-") and not token.startswith("--") and "i" in token for token in args)
     if not has_inplace:
         return None
-    for token in segment:
+    for token in args:
         if _protected_basename(token):
             return token
     return None
@@ -270,6 +326,10 @@ def _ln_force_target(segment: list[str]) -> str | None:
 def _dd_of_target(segment: list[str]) -> str | None:
     """セグメント内の `dd of=<path>` の書き込み先が保護対象ならその生パス文字列を返す。
 
+    `of=` トークンだけでは write command とみなさず、`dd` が実際に実行される
+    位置（`_command_index`）にある場合のみ判定する（M-01: ``echo of=pyproject.toml``
+    のような非実行位置での誤検出を避ける）。
+
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
@@ -280,7 +340,10 @@ def _dd_of_target(segment: list[str]) -> str | None:
     Raises:
         例外は発生しません。
     """
-    for token in segment:
+    index = _command_index(segment)
+    if index is None or segment[index].rsplit("/", 1)[-1] != "dd":
+        return None
+    for token in segment[index + 1 :]:
         if token.startswith("of="):
             candidate = token[len("of=") :]
             if _protected_basename(candidate):
