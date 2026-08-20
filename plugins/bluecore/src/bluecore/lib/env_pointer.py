@@ -34,17 +34,42 @@ bash tool の環境へ自身の識別変数を注入することは文書化さ�
   固定住所である必要があり、writer 側もそれに合わせる。データ永続化
   （``mem.db``・``logs``）側の ``get_bluecore_dir()`` 契約とは別の契約であり、
   意図的に切り離している。
-- ``roots/latest`` という「無条件で採用される」ポインタは廃止した。resolver 側
-  （``env-template.sh``）が「``roots/`` の有効な候補が全て同じ root 値に
-  一致するときだけ採用する」形に変わったため、writer は ``roots/<pid>`` を
-  書くだけでよい（同一ホストが launcher 起動のたびに異なる短命 PID を
-  記録しても、root 値さえ一致していれば解決できる）。
+- ``roots/latest`` という「無条件で採用される」ポインタは廃止した。
+
+``docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md``
+（H-01/H-02/M-01）を受け、さらに設計を改めた。とくに H-02
+（祖先不一致時に「root 値が一致する候補」で推測 fallback していた）は
+ユーザーから「リスクがあるとみなせる fallback は望ましくない」との明示
+指示を受け、**推測に基づく fallback を全廃**した:
+
+- writer は ``os.getppid()`` だけでなく、その**祖先チェーンを最大 4 段**
+  まで辿り、各段の PID にも同じ root を記録する
+  （``_resolve_ancestor_chain``）。1 回の ``ps -eo pid=,ppid=,lstart=``
+  でチェーンと各 PID の起動時刻（``lstart``）を同時に取得する（実測
+  10〜16ms、hook のタイムアウト予算に対して無視できるコスト）。
+- 各ポインタは ``root\nlstart\n`` の 2 行になる。``lstart`` は
+  resolver 側が「今生きているその PID は、記録時と同一のプロセスか」を
+  照合するための識別子（PID は再利用されるが、同一 PID が同一
+  ``lstart`` を持つのは同一プロセスの生存中に限られる）。
+- 祖先 PID に**既に別の root** が記録されていたら、上書きせず内容を
+  空にする（**poison**）。これは、同じ terminal / login shell から
+  異なる複数の host が起動され、浅い祖先 PID を共有してしまうケースの
+  対処: 後勝ち上書きだと片方が誤って相手の root を掴む可能性が残るが、
+  poison にすれば resolver はその祖先をスキップして次へ進むため、
+  「どちらか一方が誤って相手を掴む」という事象自体が起こらない。自分の
+  より近い祖先（通常は host バイナリ自体の PID）は共有されにくいため、
+  共有される深い祖先が poison になっても各 host 自身の解決能力は
+  損なわれない。
+- resolver（``env-template.sh``）は祖先チェーンの ``lstart`` が一致する
+  ポインタしか採用しない。祖先チェーンで解決できなければ、推測せず常に
+  ``exit 127`` にする（旧 tier 2「root 値合意 + 鮮度フィルタ」は削除）。
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -53,6 +78,13 @@ from bluecore.lib.constants import BASE_DIR_NAME
 _ROOTS_DIRNAME = "roots"
 _ENV_FILENAME = "env.sh"
 _ENV_TEMPLATE_RELATIVE = Path("runtime") / "env-template.sh"
+
+_MAX_ANCESTOR_DEPTH = 4
+"""writer が祖先 PID へポインタを書く最大段数。resolver 側
+（``env-template.sh`` の祖先 walk）と同じ深さに揃える。"""
+
+_PS_TIMEOUT_SECONDS = 5
+"""祖先チェーン取得用 ``ps`` 呼び出しのハードタイムアウト。"""
 
 _MAX_ROOT_AGE_SECONDS = 7 * 24 * 60 * 60
 """生存 PID のポインタでもこれより mtime が古ければ PID 再利用とみなし削除する。"""
@@ -210,11 +242,131 @@ def _atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
+def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
+    """``os.getppid()`` から始まる祖先チェーンと、各 PID の起動時刻を返す。
+
+    1 回の ``ps -eo pid=,ppid=,lstart=`` でプロセス表全体を取得し、
+    Python 側でチェーンを計算する（hook 起動のたびに ``ps`` を複数回
+    呼ばずに済む。全 hook 起動でこの関数が走るため、呼び出し回数は
+    最小化する）。``lstart`` は末尾の改行だけを取り除いた raw な文字列
+    のまま保持する — 内部の空白を正規化（strip 等）すると、shell 側の
+    ``$(ps -o lstart= -p <pid>)`` が返す文字列とバイト単位で一致しなく
+    なるため（実機で非正規化同士が一致することを確認済み）。
+
+    ``ps`` は ``LC_ALL=C`` を強制した環境で実行する。``lstart`` の出力は
+    ロケール依存（例: ``LANG=ja_JP.UTF-8`` では ``木  8/20 ...``、
+    ``C`` ロケールでは ``Thu Aug 20 ...``）であることを実機で確認した
+    — writer（このプロセスの ambient locale）と resolver（bootstrap を
+    実行する shell の ambient locale）が異なる環境で起動されると、
+    正規化なしでは同一プロセスなのに文字列が一致せず PID 再利用と誤判定
+    してしまう。resolver 側（``env-template.sh``）も同じく ``LC_ALL=C``
+    を明示して ``ps`` を呼ぶ。
+
+    Args:
+        max_depth: 辿る祖先の最大段数（``os.getppid()`` 自身を含む）。
+
+    Returns:
+        ``(pid, lstart)`` の近い祖先から遠い祖先の順のリスト。``ps`` の
+        起動・実行に失敗した場合は空リスト（ADR-0001 の fail-open —
+        この回はポインタを書かず、次回 hook 起動での自己修復に委ねる）。
+        チェーンは PID 0/1 に達するか、プロセス表から親を特定できなく
+        なった時点で打ち切る。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        proc = subprocess.run(
+            ["ps", "-eo", "pid=,ppid=,lstart="],
+            capture_output=True,
+            text=True,
+            timeout=_PS_TIMEOUT_SECONDS,
+            check=False,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+
+    ppid_of: dict[int, int] = {}
+    lstart_of: dict[int, str] = {}
+    for line in proc.stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+        except ValueError:
+            continue
+        ppid_of[pid] = ppid
+        lstart_of[pid] = parts[2]
+
+    chain: list[tuple[int, str]] = []
+    current = os.getppid()
+    for _ in range(max_depth):
+        lstart = lstart_of.get(current)
+        if lstart is None:
+            break
+        chain.append((current, lstart))
+        parent = ppid_of.get(current)
+        if parent is None or parent in (0, 1):
+            break
+        current = parent
+    return chain
+
+
+def _write_or_poison_pointer(path: Path, root_text: str, lstart: str) -> None:
+    """1 つの祖先 PID のポインタを書くか、対立する記録を poison する。
+
+    - ポインタが存在しない → ``root_text``/``lstart`` を書く。
+    - 既存の root が ``root_text`` と同じ → 同内容で書き直す（mtime と
+      ``lstart`` を現在値へ更新する）。
+    - 既存の root が ``root_text`` と異なり、まだ poison（空）でない →
+      内容を空にして poison する（同じ祖先 PID を共有する別 host の
+      root と衝突したため、以後どちらの root にも解決させない — H-02
+      対応。「後勝ち上書き」で誤った root を静かに掴む経路を、
+      「双方とも使わない」に変える）。
+    - 既に poison（空ファイル）→ 何もしない（そのファイル名の PID が
+      生存し続ける限り、誰にも上書きさせない）。
+
+    Args:
+        path: ``roots/<pid>`` のポインタパス。
+        root_text: 記録したい plugin root（改行/NUL を含まないことは
+            呼び出し元で検証済み）。
+        lstart: この祖先 PID 自身の起動時刻（resolver が照合する識別子）。
+
+    Returns:
+        なし。
+
+    Raises:
+        OSError: 既存ファイルの読み取り・新規書き込みに失敗した場合
+            （``FileNotFoundError`` は正常系として内部で処理する）。
+    """
+    try:
+        existing_text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        _atomic_write_text(path, f"{root_text}\n{lstart}\n")
+        return
+
+    if existing_text == "":
+        return
+
+    existing_root = existing_text.split("\n", 1)[0]
+    if existing_root == root_text:
+        _atomic_write_text(path, f"{root_text}\n{lstart}\n")
+        return
+
+    _atomic_write_text(path, "")
+
+
 def _write_env_pointer_unsafe(plugin_root: Path) -> None:
     """``write_env_pointer`` の本体。``OSError`` を送出しうる。
 
-    書き込み順は「ポインタ → ``env.sh`` → GC」。GC を最後にすることで、
-    途中で GC が失敗しても本来の目的（root の記録）は既に達成済みになる。
+    書き込み順は「祖先ポインタ群 → ``env.sh`` → GC」。GC を最後にする
+    ことで、途中で GC が失敗しても本来の目的（root の記録）は既に
+    達成済みになる。
 
     Args:
         plugin_root: このプラグインのソースルート。
@@ -233,17 +385,19 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
     bluecore_dir = _ensure_private_dir(_state_dir())
     roots_dir = _ensure_private_dir(bluecore_dir / _ROOTS_DIRNAME)
 
-    own_pid = os.getppid()
-    _atomic_write_text(roots_dir / str(own_pid), root_text + "\n")
+    chain = _resolve_ancestor_chain(_MAX_ANCESTOR_DEPTH)
+    for pid, lstart in chain:
+        _write_or_poison_pointer(roots_dir / str(pid), root_text, lstart)
+    written_pids = frozenset(pid for pid, _lstart in chain)
 
     template_path = plugin_root / _ENV_TEMPLATE_RELATIVE
     template_text = template_path.read_text(encoding="utf-8")
     _atomic_write_text(bluecore_dir / _ENV_FILENAME, template_text)
 
-    _maybe_run_gc(bluecore_dir, roots_dir, keep_pid=own_pid)
+    _maybe_run_gc(bluecore_dir, roots_dir, keep_pids=written_pids)
 
 
-def _maybe_run_gc(bluecore_dir: Path, roots_dir: Path, *, keep_pid: int | None) -> None:
+def _maybe_run_gc(bluecore_dir: Path, roots_dir: Path, *, keep_pids: frozenset[int]) -> None:
     """throttle を守りつつ ``roots/`` の GC を実行する。
 
     ``roots-gc.stamp`` の mtime を見て ``_GC_THROTTLE_SECONDS`` 以内なら何もしない
@@ -253,12 +407,11 @@ def _maybe_run_gc(bluecore_dir: Path, roots_dir: Path, *, keep_pid: int | None) 
     Args:
         bluecore_dir: ``$HOME/.bluecore`` の Path。
         roots_dir: ``$HOME/.bluecore/roots`` の Path。
-        keep_pid: この呼び出しで書いたばかりのポインタの PID。GC の対象から
-            無条件で除外する（``os.getppid()`` が launcher 起動のたびに
+        keep_pids: この呼び出しで書いた祖先チェーン全体の PID 集合。GC の
+            対象から無条件で除外する（祖先 PID が launcher 起動のたびに
             使い捨てられる中間 shell を指す場合、書いた直後の PID が既に
             「不在」に見えて GC 対象になりうるため。実行中ホストが自分で
             書いたばかりの記録を、そのホスト自身が壊すことがあってはならない）。
-            ``None`` なら除外なし。
 
     Returns:
         なし。
@@ -278,7 +431,7 @@ def _maybe_run_gc(bluecore_dir: Path, roots_dir: Path, *, keep_pid: int | None) 
     except OSError:
         pass
 
-    _gc_roots(roots_dir, keep_pid=keep_pid)
+    _gc_roots(roots_dir, keep_pids=keep_pids)
 
 
 def _now() -> float:
@@ -316,26 +469,27 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
-def _gc_roots(roots_dir: Path, *, keep_pid: int | None = None) -> None:
+def _gc_roots(roots_dir: Path, *, keep_pids: frozenset[int] = frozenset()) -> None:
     """``roots/`` を掃除する。実行中ホストのポインタは残す。
 
     削除条件（いずれか）:
 
-    - ファイル名が数字のみでない（旧形式 ``<pid>.sh``・``latest``・``latest.sh``
-      を含む）。
+    - ファイル名が数字のみでない（旧形式 ``<pid>.sh``・``latest``・``latest.sh``、
+      および他 writer の in-flight 一時ファイルを含む。``_DEAD_PID_GRACE_SECONDS``
+      による age-gate は ``_gc_one`` 側で行う）。
     - PID が既に存在せず、かつ mtime が ``_DEAD_PID_GRACE_SECONDS`` より古い
       （書き込み直後の短命プロセスは 1 サイクル猶予する）。
     - PID は存在するが mtime が ``_MAX_ROOT_AGE_SECONDS`` より古い（稼働中の
       ホストは全 hook 起動で mtime を更新し続けるため、これは PID 再利用と判断
       できる）。
 
-    ``keep_pid`` と一致するファイル名は、上記のどの条件に当てはまっても削除
-    しない（このプロセス自身が今まさに書いたポインタを、同じ呼び出しの中で
-    自分自身が消してしまう自己矛盾を避けるため）。
+    ``keep_pids`` に含まれるファイル名は、上記のどの条件に当てはまっても
+    削除しない（このプロセス自身が今まさに書いた祖先チェーン全体のポインタを、
+    同じ呼び出しの中で自分自身が消してしまう自己矛盾を避けるため）。
 
     Args:
         roots_dir: ``$HOME/.bluecore/roots`` の Path。
-        keep_pid: 削除対象から無条件で除外する PID。``None`` なら除外なし。
+        keep_pids: 削除対象から無条件で除外する PID の集合。
 
     Returns:
         なし。
@@ -349,9 +503,9 @@ def _gc_roots(roots_dir: Path, *, keep_pid: int | None = None) -> None:
     except OSError:
         return
 
-    keep_name = str(keep_pid) if keep_pid is not None else None
+    keep_names = {str(pid) for pid in keep_pids}
     for entry in entries:
-        if entry.name == _GC_STAMP_FILENAME or entry.name == keep_name:
+        if entry.name == _GC_STAMP_FILENAME or entry.name in keep_names:
             continue
         try:
             _gc_one(entry, now)
