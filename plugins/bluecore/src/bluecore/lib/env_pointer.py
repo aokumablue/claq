@@ -225,7 +225,8 @@ def _atomic_write_text(path: Path, text: str) -> None:
     同一ディレクトリに ``tempfile.mkstemp`` で ``<name>.tmp.<random>`` を
     mode 0600 で作成し、``fsync`` 後に ``os.replace()`` で公開する。
     prefix は ``<name>.tmp.`` で、名前は数字のみにならない（``roots/`` の
-    GC が非数字名として age-gate する契約）。reader は常に「書き込み前の
+    GC が非数字名として age-gate する契約）。``fdopen`` が失敗した場合は
+    mkstemp の fd を閉じてから tmp を消す。reader は常に「書き込み前の
     内容」か「書き込み後の内容」のどちらかしか見えない。
 
     Args:
@@ -244,13 +245,20 @@ def _atomic_write_text(path: Path, text: str) -> None:
         suffix="",
     )
     tmp_path = Path(tmp_name)
+    owned_fd: int | None = fd
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            owned_fd = None
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
     except OSError:
+        if owned_fd is not None:
+            try:
+                os.close(owned_fd)
+            except OSError:
+                pass
         try:
             tmp_path.unlink()
         except OSError:

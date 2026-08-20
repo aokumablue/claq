@@ -283,6 +283,59 @@ class TestAtomicWrite:
         with pytest.raises(OSError, match="replace failed"):
             mod._atomic_write_text(target, "content\n")
 
+    def test_fdopen_failure_closes_fd_and_removes_tmp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """fdopen が失敗したら mkstemp の fd を閉じ、tmp を残さない。"""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        target = workdir / "out.txt"
+        closed: list[int] = []
+        real_close = os.close
+
+        def _boom_fdopen(_fd: int, *_args: object, **_kwargs: object) -> object:
+            raise OSError("fdopen failed")
+
+        def _track_close(fd: int) -> None:
+            closed.append(fd)
+            real_close(fd)
+
+        monkeypatch.setattr(mod.os, "fdopen", _boom_fdopen)
+        monkeypatch.setattr(mod.os, "close", _track_close)
+
+        with pytest.raises(OSError, match="fdopen failed"):
+            mod._atomic_write_text(target, "content\n")
+
+        assert not target.exists()
+        assert list(workdir.iterdir()) == []
+        assert closed
+
+    def test_fdopen_failure_swallows_close_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """fdopen 失敗後の close 自体が失敗しても、元の OSError を送出する。"""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        target = workdir / "out.txt"
+
+        def _boom_fdopen(_fd: int, *_args: object, **_kwargs: object) -> object:
+            raise OSError("fdopen failed")
+
+        real_close = os.close
+
+        def _boom_close(fd: int) -> None:
+            real_close(fd)
+            raise OSError("close failed")
+
+        monkeypatch.setattr(mod.os, "fdopen", _boom_fdopen)
+        monkeypatch.setattr(mod.os, "close", _boom_close)
+
+        with pytest.raises(OSError, match="fdopen failed"):
+            mod._atomic_write_text(target, "content\n")
+
+        assert not target.exists()
+        assert list(workdir.iterdir()) == []
+
     def test_tmp_name_uses_random_suffix_not_pid(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -607,7 +660,11 @@ class TestGcRoots:
         assert not stale.exists()
 
     def test_gc_env_sh_tmp_does_not_touch_env_sh_or_mem_db(self, tmp_path: Path) -> None:
-        """プレフィックス不一致の state ファイルは env.sh tmp GC の対象外。"""
+        """プレフィックス不一致の state ファイルは env.sh tmp GC の対象外。
+
+        survivor も stale tmp と同じ古い mtime にする。新鮮なまま残すと、
+        プレフィックスを ``env.sh`` まで広げた実装でもこのテストは緑になる。
+        """
         bluecore_dir = tmp_path / "bc"
         bluecore_dir.mkdir()
         env_sh = bluecore_dir / mod._ENV_FILENAME
@@ -619,7 +676,8 @@ class TestGcRoots:
         stale = bluecore_dir / f"{mod._ENV_TMP_PREFIX}stalexxx"
         stale.write_text("orphan\n", encoding="utf-8")
         old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        os.utime(stale, (old, old))
+        for path in (env_sh, mem_db, other, stale):
+            os.utime(path, (old, old))
 
         mod._gc_env_sh_temps(bluecore_dir, time.time())
 
