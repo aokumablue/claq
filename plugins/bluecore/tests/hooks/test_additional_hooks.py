@@ -76,6 +76,32 @@ _BYPASS_COMMANDS = [
     "git -Z value commit -n",
     # shlex 失敗（未閉じクォート）は fail-closed
     f'git commit -m "unclosed {NV}',
+    # 実行ファイル表記ゆれ（H-04）: macOS 既定 APFS は大小文字を区別しないため
+    # `GIT` は実 git を起動する。Windows の `.exe` サフィックスも同一視する。
+    f"GIT commit {NV}",
+    f"Git commit {NV}",
+    f"git.exe commit {NV}",
+    f"GIT.EXE commit {NV}",
+    "GIT commit -n",
+    # literal GIT_CONFIG_* 環境変数プレフィックス（H-05）: --no-verify を
+    # 使わずに core.hooksPath を上書きし git 自身のフックを無効化する。
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp/x git commit -m x",
+    "GIT_CONFIG_KEY_0=core.hooksPath git commit -m x",
+    "GIT_CONFIG_KEY_0=CORE.HOOKSPATH git commit -m x",
+    "env GIT_CONFIG_KEY_0=core.hooksPath git commit -m x",
+    "env -i GIT_CONFIG_KEY_0=core.hooksPath git commit -m x",
+    "env -u FOO GIT_CONFIG_KEY_0=core.hooksPath git commit -m x",
+    "env -uFOO GIT_CONFIG_KEY_0=core.hooksPath git commit -m x",
+    "env --ignore-environment GIT_CONFIG_KEY_0=core.hooksPath git commit -m x",
+    "GIT_CONFIG_PARAMETERS=x git commit -m x",
+    # `git config` サブコマンド経由の core.hooksPath 書込み・削除（H-06）。
+    "git config core.hooksPath /tmp/evil-hooks",
+    "git config CORE.HOOKSPATH /tmp/evil-hooks",
+    "git config --unset core.hooksPath",
+    "git config --unset-all core.hooksPath",
+    "git config set core.hooksPath /tmp/evil-hooks",
+    "git config unset core.hooksPath",
+    "git config add core.hooksPath /tmp/evil-hooks",
 ]
 
 # 通さなければならないコマンド（誤検知の回帰防止）。
@@ -118,6 +144,21 @@ _ALLOWED_COMMANDS = [
     f"gitk {NV}",
     "",
     "git",
+    # literal 環境変数プレフィックスがあっても core.hooksPath と無関係なら allow。
+    "FOO=bar git commit -m x",
+    "env FOO git commit -m x",
+    "env GIT_CONFIG_KEY_0=user.name git commit -m x",
+    # `git config` の read-only 操作・無関係キーは allow（H-06）。
+    "git config --get core.hooksPath",
+    "git config --get-all core.hooksPath",
+    "git config --get-regexp core.hooksPath",
+    "git config --show-origin --get core.hooksPath",
+    "git config --list",
+    "git config core.hooksPath",
+    "git config get core.hooksPath",
+    "git config list",
+    "git config get user.name",
+    "git config user.name x",
 ]
 
 
@@ -238,6 +279,12 @@ class TestBlockNoVerify:
             (".git", False),
             ("git/", False),
             ("git commit --no-verify", False),
+            # 実行ファイル表記ゆれ（H-04）: 大小文字・.exe・Windows パス区切り。
+            ("GIT", True),
+            ("Git", True),
+            ("git.exe", True),
+            ("GIT.EXE", True),
+            (r"C:\Program Files\Git\bin\git.exe", True),
         ],
     )
     def test_is_git_invocation(self, token: str, expected: bool) -> None:

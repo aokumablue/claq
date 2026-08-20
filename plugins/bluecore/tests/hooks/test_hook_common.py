@@ -609,6 +609,80 @@ class TestResolveRepoRoot:
         assert call_count["n"] == 1
 
 
+class TestIsGitExecutableToken:
+    """is_git_executable_token（H-04 共有正規化。block_no_verify /
+    pre_bash_commit_quality が共に使う）のテスト。
+    """
+
+    @pytest.mark.parametrize(
+        ("token", "expected"),
+        [
+            ("git", True),
+            ("GIT", True),
+            ("Git", True),
+            ("/usr/bin/git", True),
+            ("git.exe", True),
+            ("GIT.EXE", True),
+            (r"C:\Program Files\Git\bin\git.exe", True),
+            ("gitk", False),
+            (".git", False),
+            ("git/", False),
+        ],
+    )
+    def test_normalizes_case_path_and_exe_suffix(self, token: str, expected: bool) -> None:
+        assert hook_common.is_git_executable_token(token) is expected
+
+
+class TestResolveEffectiveTarget:
+    """resolve_effective_target（H-02 共有 helper。config_protection /
+    bash_config_protection が symlink 解決に使う）のテスト。
+    """
+
+    def test_resolves_relative_path_against_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        target = tmp_path / "pyproject.toml"
+        target.write_text("", encoding="utf-8")
+
+        resolved = hook_common.resolve_effective_target("pyproject.toml")
+
+        assert resolved == target.resolve()
+
+    def test_follows_symlink_to_real_target(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        real = tmp_path / "pyproject.toml"
+        real.write_text("", encoding="utf-8")
+        alias = tmp_path / "alias-file"
+        alias.symlink_to(real)
+
+        assert hook_common.resolve_effective_target("alias-file") == real.resolve()
+
+    def test_nonexistent_path_still_resolves(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """strict=False なので存在しないパスでも例外にせず解決した Path を返す。"""
+        monkeypatch.chdir(tmp_path)
+
+        resolved = hook_common.resolve_effective_target("does-not-exist.toml")
+
+        assert resolved == tmp_path / "does-not-exist.toml"
+
+    def test_returns_none_on_os_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """壊れた・循環した symlink 等で解決不能な場合は None を返す（クラッシュさせない）。"""
+
+        def _boom(self, strict=False):  # noqa: ANN001, ANN002, ARG001
+            raise OSError("elooped")
+
+        monkeypatch.setattr(Path, "resolve", _boom)
+
+        assert hook_common.resolve_effective_target("whatever") is None
+
+    def test_returns_none_on_runtime_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _boom(self, strict=False):  # noqa: ANN001, ANN002, ARG001
+            raise RuntimeError("symlink loop")
+
+        monkeypatch.setattr(Path, "resolve", _boom)
+
+        assert hook_common.resolve_effective_target("whatever") is None
+
+
 class TestReadRawStdinWithTruncation:
     """read_raw_stdin_with_truncation の切り捨て判定・stdin ガードのテスト。"""
 

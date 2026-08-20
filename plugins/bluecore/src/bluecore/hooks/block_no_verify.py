@@ -76,11 +76,13 @@ git 起動トークンの探索:
 
 from __future__ import annotations
 
+import re
 from typing import NamedTuple
 
 from bluecore.hooks.hook_common import (
     MAX_STDIN_BYTES,
     emit_block_output,
+    is_git_executable_token,
     parse_json_object,
     read_raw_stdin_with_truncation,
     split_segments,
@@ -179,20 +181,28 @@ class GitInvocation(NamedTuple):
         config_values: ``-c`` / ``--config-env`` に渡された値文字列
             （``key=value`` 形式）のリスト。``core.hooksPath`` オーバーライド
             検出に使います。
+        subcommand_args: サブコマンド確定後に現れた非オプショントークン
+            （値トークンとして消費されたものは含まない）。``git config
+            core.hooksPath <path>`` のような位置引数形式の検出（H-06）に使う。
     """
 
     subcommand: str | None
     flags: list[str]
     subcommand_certain: bool
     config_values: list[str]
+    subcommand_args: list[str]
 
 
 def is_git_invocation(token: str) -> bool:
     """トークンが git 実行ファイルの起動かどうかを判定する。
 
-    ``git`` そのものに加え ``/usr/bin/git`` のようなパス付き起動を拾うため、
-    ``/`` で区切った最後の要素（basename）が ``git`` かどうかで判定します。
-    ``gitk`` / ``GIT_DIR=.git`` / ``git/``（ディレクトリ）は一致しません。
+    ``git`` そのものに加え ``/usr/bin/git`` のようなパス付き起動、
+    ``git.exe``（Windows）、``GIT``（大文字。macOS 既定の APFS は大小文字を
+    区別しないため ``GIT commit --no-verify`` は実 git を起動する。H-04
+    対応）を拾う。``gitk`` / ``GIT_DIR=.git`` / ``git/``（ディレクトリ）は
+    一致しない。判定は ``pre_bash_commit_quality`` と共有する
+    ``hook_common.is_git_executable_token`` に委譲し、2 箇所で正規化が
+    分岐する事態を防ぐ。
 
     Args:
         token: 検査対象のトークン。
@@ -203,7 +213,7 @@ def is_git_invocation(token: str) -> bool:
     Raises:
         例外は発生しません。
     """
-    return token.rsplit("/", 1)[-1] == "git"
+    return is_git_executable_token(token)
 
 
 def _consume_short_cluster(token: str, flags: list[str]) -> tuple[int, bool, str | None]:
@@ -258,7 +268,10 @@ def parse_git_segment(segment: list[str]) -> GitInvocation:
     値を取るかどうかを判定できずサブコマンド位置がずれるため
     ``subcommand_certain=False`` を返します。``-c`` / ``--config-env`` に
     渡された値は `GitInvocation.config_values` に集約します
-    （``core.hooksPath`` オーバーライド検出用、A-07 対応）。
+    （``core.hooksPath`` オーバーライド検出用、A-07 対応）。サブコマンド
+    確定後に現れた非オプショントークンは `GitInvocation.subcommand_args`
+    に集約します（``git config core.hooksPath <path>`` の位置引数形式検出用、
+    H-06 対応）。
 
     Args:
         segment: 先頭要素が ``git`` 起動トークンであるトークンリスト。
@@ -273,6 +286,7 @@ def parse_git_segment(segment: list[str]) -> GitInvocation:
     subcommand: str | None = None
     flags: list[str] = []
     config_values: list[str] = []
+    subcommand_args: list[str] = []
     certain = True
     index = 1
     while index < len(segment):
@@ -305,8 +319,14 @@ def parse_git_segment(segment: list[str]) -> GitInvocation:
             continue
         if subcommand is None:
             subcommand = token
+        else:
+            subcommand_args.append(token)
     return GitInvocation(
-        subcommand=subcommand, flags=flags, subcommand_certain=certain, config_values=config_values
+        subcommand=subcommand,
+        flags=flags,
+        subcommand_certain=certain,
+        config_values=config_values,
+        subcommand_args=subcommand_args,
     )
 
 
@@ -329,6 +349,165 @@ def _is_hooks_path_override(config_values: list[str]) -> bool:
     return False
 
 
+_ENV_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
+
+# GIT_CONFIG_KEY_<n> の index 部分を取り出す正規表現（H-05）。
+_GIT_CONFIG_KEY_INDEX_RE = re.compile(r"^GIT_CONFIG_KEY_\d+$")
+
+# git 自身が config 注入に使う literal 環境変数名（H-05）。値を shell-eval せず、
+# 出現した時点で deny する（中身を解釈しても安全側の判定を追加できないため）。
+_GIT_CONFIG_PARAMETERS_NAME = "GIT_CONFIG_PARAMETERS"
+
+# ``env`` の直後で消費するオプション（値を取らないもの）。
+_ENV_BOOLEAN_OPTIONS = frozenset({"-i", "--ignore-environment"})
+
+
+def _collect_literal_env_assignments(prefix_tokens: list[str]) -> dict[str, str]:
+    """git 起動トークンより前にある literal 環境変数代入を集める（H-05）。
+
+    セグメント先頭から連続する ``NAME=value`` 代入と、続く literal ``env``
+    コマンド（``-i`` / ``--ignore-environment`` / ``-u NAME`` を消費した後）
+    の ``NAME=value`` 引数を対象にする。シェルエイリアス・変数展開・
+    コマンド置換・``eval`` 経由の間接的な代入は対象外（ADR-0002 の非目標）。
+
+    Args:
+        prefix_tokens: セグメント内で git 起動トークンより前にあるトークン列。
+
+    Returns:
+        変数名から値への写像。代入が無ければ空 dict。
+
+    Raises:
+        例外は発生しません。
+    """
+    assignments: dict[str, str] = {}
+    index = 0
+    while index < len(prefix_tokens):
+        match = _ENV_ASSIGNMENT_RE.match(prefix_tokens[index])
+        if not match:
+            break
+        assignments[match.group(1)] = match.group(2)
+        index += 1
+
+    if index >= len(prefix_tokens) or prefix_tokens[index].rsplit("/", 1)[-1] != "env":
+        return assignments
+
+    index += 1
+    while index < len(prefix_tokens):
+        token = prefix_tokens[index]
+        if token in _ENV_BOOLEAN_OPTIONS:
+            index += 1
+            continue
+        if token == "-u":
+            index += 2
+            continue
+        if token.startswith("-u") and len(token) > 2:
+            index += 1
+            continue
+        match = _ENV_ASSIGNMENT_RE.match(token)
+        if not match:
+            break
+        assignments[match.group(1)] = match.group(2)
+        index += 1
+    return assignments
+
+
+def _is_literal_env_hooks_path_override(prefix_tokens: list[str]) -> bool:
+    """git 起動前の literal 環境変数代入に ``core.hooksPath`` オーバーライドがあるか判定する（H-05）。
+
+    ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_KEY_<n>`` / ``GIT_CONFIG_VALUE_<n>`` は
+    index ごとに検証し、key が ``core.hooksPath``（大小文字不問）なら value
+    の有無や ``GIT_CONFIG_COUNT`` との整合性を問わず deny する（不完全・
+    矛盾する triplet を安全とみなさない）。``GIT_CONFIG_PARAMETERS`` は git
+    自身が使う config 注入 literal であり、値を解釈せず出現時点で deny する。
+
+    Args:
+        prefix_tokens: セグメント内で git 起動トークンより前にあるトークン列。
+
+    Returns:
+        ``core.hooksPath`` を上書きしうる literal 代入があれば True。
+
+    Raises:
+        例外は発生しません。
+    """
+    assignments = _collect_literal_env_assignments(prefix_tokens)
+    if _GIT_CONFIG_PARAMETERS_NAME in assignments:
+        return True
+    for name, value in assignments.items():
+        if _GIT_CONFIG_KEY_INDEX_RE.match(name) and value.strip().lower() == _HOOKS_PATH_CONFIG_KEY:
+            return True
+    return False
+
+
+# `git config` の read-only であることが確定しているフラグ（H-06）。
+_GIT_CONFIG_READ_ONLY_FLAGS = frozenset({"--get", "--get-all", "--get-regexp", "--list", "--show-origin"})
+
+# `git config` の書込み・削除であることが確定しているフラグ（H-06）。
+_GIT_CONFIG_WRITE_FLAGS = frozenset({"--add", "--replace-all", "--unset", "--unset-all"})
+
+# git 2.46+ の `git config <op> <key>` 新構文（H-06）。
+_GIT_CONFIG_NEW_READ_OPS = frozenset({"get", "list"})
+_GIT_CONFIG_NEW_WRITE_OPS = frozenset({"set", "unset", "add"})
+
+
+def _config_args_touch_hooks_path(args: list[str]) -> bool:
+    """`git config` の位置引数に ``core.hooksPath``（大小文字不問）が含まれるか判定する。
+
+    Args:
+        args: `GitInvocation.subcommand_args`（新構文の op トークンを除いたもの）。
+
+    Returns:
+        含まれていれば True。
+
+    Raises:
+        例外は発生しません。
+    """
+    return any(arg.strip().lower() == _HOOKS_PATH_CONFIG_KEY for arg in args)
+
+
+def _is_config_hooks_path_mutation(invocation: GitInvocation) -> bool:
+    """``git config`` 呼び出しが ``core.hooksPath`` への書込み・削除操作かを判定する（H-06）。
+
+    ``-c`` / ``--config-env`` によるオーバーライド（`_is_hooks_path_override`）
+    とは別に、``git config core.hooksPath <path>`` のような通常の subcommand
+    呼び出しを検査する。読み取り専用と確定できる形（``--get`` 系、新構文の
+    ``get``/``list``、値を伴わない legacy query）だけを allow し、それ以外の
+    ``core.hooksPath`` に触れる呼び出しは deny する（ADR-0002 の
+    false-positive 優先方針）。
+
+    Args:
+        invocation: git 起動トークン以降の解析結果。
+
+    Returns:
+        書込み・削除・曖昧な操作なら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    if invocation.subcommand != "config":
+        return False
+
+    args = list(invocation.subcommand_args)
+    new_op: str | None = None
+    if args and args[0] in _GIT_CONFIG_NEW_READ_OPS | _GIT_CONFIG_NEW_WRITE_OPS:
+        new_op, args = args[0], args[1:]
+
+    if not _config_args_touch_hooks_path(args):
+        return False
+
+    if new_op is not None:
+        return new_op in _GIT_CONFIG_NEW_WRITE_OPS
+
+    flags = invocation.flags
+    if any(flag in flags for flag in _GIT_CONFIG_READ_ONLY_FLAGS):
+        return False
+    if any(flag in flags for flag in _GIT_CONFIG_WRITE_FLAGS):
+        return True
+
+    # legacy syntax: `git config core.hooksPath` （値なし = query）は allow、
+    # `git config core.hooksPath <value>` （値あり = set）は deny。
+    return len(args) >= 2
+
+
 def _is_bypass_invocation(invocation: GitInvocation) -> bool:
     """解析済み git 起動がフックバイパスかを判定する。
 
@@ -336,8 +515,10 @@ def _is_bypass_invocation(invocation: GitInvocation) -> bool:
         invocation: git 起動トークン以降の解析結果。
 
     Returns:
-        ``--no-verify``、``core.hooksPath`` オーバーライド、``git commit`` の
-        ``-n``、またはサブコマンド未確定時の ``-n`` なら True。
+        ``--no-verify``、``core.hooksPath`` オーバーライド（``-c``/
+        ``--config-env`` 経由、または ``git config`` の書込み操作経由）、
+        ``git commit`` の ``-n``、またはサブコマンド未確定時の ``-n`` なら
+        True。
 
     Raises:
         例外は発生しません。
@@ -345,6 +526,8 @@ def _is_bypass_invocation(invocation: GitInvocation) -> bool:
     if _BYPASS_LONG_FLAG in invocation.flags:
         return True
     if _is_hooks_path_override(invocation.config_values):
+        return True
+    if _is_config_hooks_path_mutation(invocation):
         return True
     if _BYPASS_SHORT_FLAG not in invocation.flags:
         return False
@@ -397,9 +580,11 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
             再帰しません（2 段以上のネストは非目標）。
 
     Returns:
-        ``--no-verify``（サブコマンド不問）、``core.hooksPath`` オーバーライド、
-        ``git commit`` の ``-n``、またはサブコマンドを確定できない状態での
-        ``-n`` を検出したら True。
+        ``--no-verify``（サブコマンド不問）、``core.hooksPath`` オーバーライド
+        （``-c``/``--config-env``、``git config`` の書込み操作、または
+        literal ``GIT_CONFIG_*`` 環境変数代入のいずれか経由）、``git commit``
+        の ``-n``、またはサブコマンドを確定できない状態での ``-n`` を
+        検出したら True。
 
     Raises:
         例外は発生しません。
@@ -409,6 +594,8 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
             if not is_git_invocation(token):
                 continue
             if _is_bypass_invocation(parse_git_segment(segment[index:])):
+                return True
+            if _is_literal_env_hooks_path_override(segment[:index]):
                 return True
         if not _recursed:
             wrapper_command = _extract_shell_wrapper_command(segment)

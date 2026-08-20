@@ -43,6 +43,7 @@ from bluecore.hooks.commit_quality_scanner import (
 )
 from bluecore.hooks.hook_common import (
     MAX_STDIN_BYTES,
+    is_git_executable_token,
     parse_json_object,
     resolve_repo_root,
     split_segments,
@@ -175,44 +176,19 @@ def get_unstaged_modified_files() -> list[str]:
     return result if result is not None else []
 
 
-def _is_git_executable_token(token: str) -> bool:
-    """トークンが git 実行ファイルを指すかを判定します（basename 化・大小無視・.exe 許容）。
-
-    `/usr/bin/git`（絶対パス）・`git.exe`（Windows）・
-    `C:\\Program Files\\Git\\bin\\git.exe`（Windows 絶対パス）・`GIT`（大文字）を
-    いずれも同一視します。basename 化せず完全一致だけで判定すると、絶対パス
-    や `.exe` サフィックスを持つ実行ファイル指定が素通りしていました
-    （`git-git-subcommand` の知見にある「shlex トークン走査で最初の
-    非オプション語を取る」方式の延長で、実行ファイル名の表記ゆれも
-    正規化します）。
-
-    Args:
-        token: `shlex` 等でトークン化された1トークンです。
-
-    Returns:
-        git 実行ファイルとみなせるなら True。
-
-    Raises:
-        例外は発生しません。
-    """
-    basename = token.replace("\\", "/").rsplit("/", 1)[-1]
-    name = basename.lower()
-    if name.endswith(".exe"):
-        name = name[: -len(".exe")]
-    return name == "git"
-
-
 def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
     """1 セグメント（シェル区切りを含まないトークン列）内の `git commit` 呼び出しを探します。
 
-    `git` トークン（`_is_git_executable_token` で絶対パス・`.exe`・大小を
-    正規化して判定）の後は、既知/未知を問わずグローバルオプション・その値
-    トークンを区別せず単純に読み飛ばし、`commit` サブコマンドに到達するかを
-    判定します（allowlist に無い `--exec-path <path>` / `--super-prefix <path>`
-    等の値トークンで走査が打ち切られ検出漏れになる問題を避けるため、過剰
-    検出側に倒しています）。セグメントは呼び出し元（`hook_common.split_segments`）
-    が既に `&&`/`;`/`|`/`&`/`(`/`)` で分割済みのため、本関数はセグメント内に
-    区切りトークンが存在しない前提で走査します（A-01 対応: `status;echo` の
+    `git` トークン（`hook_common.is_git_executable_token` で絶対パス・`.exe`・
+    大小を正規化して判定。`block_no_verify` と共有する実装で、2 箇所へ別々に
+    実装すると正規化の齟齬が再発するため一元化しています）の後は、既知/未知を
+    問わずグローバルオプション・その値トークンを区別せず単純に読み飛ばし、
+    `commit` サブコマンドに到達するかを判定します（allowlist に無い
+    `--exec-path <path>` / `--super-prefix <path>` 等の値トークンで走査が
+    打ち切られ検出漏れになる問題を避けるため、過剰検出側に倒しています）。
+    セグメントは呼び出し元（`hook_common.split_segments`）が既に
+    `&&`/`;`/`|`/`&`/`(`/`)` で分割済みのため、本関数はセグメント内に区切り
+    トークンが存在しない前提で走査します（A-01 対応: `status;echo` の
     ようにシェル区切りがトークンに密着した非 commit コマンドを、区切り前に
     セグメントを分けることで取り逃さないようにします）。
 
@@ -226,7 +202,7 @@ def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
         例外は発生しません。
     """
     for i, token in enumerate(segment):
-        if not _is_git_executable_token(token):
+        if not is_git_executable_token(token):
             continue
         rest = segment[i + 1 :]
         for offset, tok in enumerate(rest):

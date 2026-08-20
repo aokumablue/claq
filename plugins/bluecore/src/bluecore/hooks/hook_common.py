@@ -387,6 +387,57 @@ def basename(path: str) -> str:
     return Path(path).name
 
 
+def is_git_executable_token(token: str) -> bool:
+    """トークンが git 実行ファイルを指すかを判定します（basename 化・大小無視・.exe 許容）。
+
+    `/usr/bin/git`（絶対パス）・`git.exe`（Windows）・
+    `C:\\Program Files\\Git\\bin\\git.exe`（Windows 絶対パス）・`GIT`（大文字。
+    macOS 既定の APFS は大小文字を区別しないため `GIT --version` は実 git を
+    起動する）をいずれも同一視します。`block_no_verify` と
+    `pre_bash_commit_quality` の両方が使う共有実装で、2 箇所へ別々に実装すると
+    正規化の齟齬（H-04）が再発するためここへ集約します。
+
+    Args:
+        token: `shlex` 等でトークン化された1トークンです。
+
+    Returns:
+        git 実行ファイルとみなせるなら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    basename_part = token.replace("\\", "/").rsplit("/", 1)[-1]
+    name = basename_part.lower()
+    if name.endswith(".exe"):
+        name = name[: -len(".exe")]
+    return name == "git"
+
+
+def resolve_effective_target(raw_path: str) -> Path | None:
+    """cwd 基準で解決し、symlink を辿った実体 path を返します（H-02 対応）。
+
+    `config_protection` / `bash_config_protection` が basename だけで保護対象
+    判定していたため、`alias -> pyproject.toml` のような symlink 経由の
+    書き込みが判定をすり抜けていた。両モジュールがこの共有 helper で解決後の
+    実体 path を得てから basename 判定することで、判定基準を一本化する。
+
+    Args:
+        raw_path: 検査対象の生パス文字列（相対 / 絶対 / symlink いずれも可）。
+
+    Returns:
+        解決できた実体 Path。壊れた・循環した symlink 等で解決できない場合は
+        None（呼び出し側はこの場合を fail-closed/fail-open どちらに倒すか
+        自身の文脈で決める）。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        return (Path.cwd() / raw_path).resolve(strict=False)
+    except (OSError, RuntimeError):
+        return None
+
+
 # detach 起動した子の実行時間上限（秒）。start_new_session=True の子はハーネスの
 # timeout で kill されないため、自前の watchdog で自決させる。
 #
