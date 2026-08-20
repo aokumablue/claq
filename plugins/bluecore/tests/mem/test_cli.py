@@ -158,6 +158,69 @@ class TestInit:
         assert not db_path.exists()
         assert not (tmp_path / "mem.db-journal").exists()
 
+    def test_unexpected_positional_arg_is_usage_error_and_db_untouched(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """L-01 回帰防止: 未定義の位置引数は usage error にし、DB 副作用を起こさない。
+
+        修正前は `init unexpected_extra_arg` が typo を無視して exit 0 で DB を
+        再作成していた（呼出元が失敗を検知できない）。
+        """
+        db_path = tmp_path / "mem.db"
+        assert not db_path.exists()
+
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["init", "unexpected_extra_arg"])
+
+        assert exit_code == 1
+        assert stdout == ""
+        assert "init は位置引数を取りません" in stderr
+        assert not db_path.exists()
+
+
+class TestPositionalArity:
+    """dispatch 層の位置引数個数検証（L-01 対応）。"""
+
+    @pytest.mark.parametrize("command", ["init", "learn", "list", "context", "handoff"])
+    def test_zero_positional_commands_reject_extra_arg(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+    ) -> None:
+        """0 個の位置引数を取る subcommand は余分な引数を usage error にする。"""
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, [command, "unexpected"])
+
+        assert exit_code == 1
+        assert f"{command} は位置引数を取りません" in stderr
+
+    @pytest.mark.parametrize("command", ["show", "promote", "forget"])
+    def test_single_key_commands_reject_missing_key(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+    ) -> None:
+        """key 未指定は usage error にする。"""
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, [command])
+
+        assert exit_code == 1
+        assert "key を指定してください" in stderr
+
+    @pytest.mark.parametrize("command", ["show", "promote", "forget"])
+    def test_single_key_commands_reject_extra_positional(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+    ) -> None:
+        """key に続く余分な位置引数は usage error にする。"""
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, [command, "key", "extra"])
+
+        assert exit_code == 1
+        assert f"{command} は key を1つだけ指定してください" in stderr
+
+    def test_search_still_accepts_multiple_positionals(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """search は複数 positional を検索語として連結する既存契約を維持する（回帰防止）。"""
+        _seed(tmp_path, key="multi-word-hit", title="two words here")
+
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["search", "two", "words"])
+
+        assert exit_code == 0
+        assert "multi-word-hit" in stdout
+
 
 class TestArgvAndStdin:
     """引数と stdin の解釈。"""

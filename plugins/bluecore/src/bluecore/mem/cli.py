@@ -216,6 +216,42 @@ def _parse_args_and_stdin(argv: list[str]) -> CommandArgs:
     )
 
 
+# 位置引数を一切取らない subcommand（L-01 対応）。
+_ZERO_POSITIONAL_COMMANDS: frozenset[str] = frozenset({"init", "learn", "list", "context", "handoff"})
+
+# 位置引数をちょうど 1 個（key）だけ取る subcommand（L-01 対応）。
+_SINGLE_KEY_COMMANDS: frozenset[str] = frozenset({"show", "promote", "forget"})
+
+
+def _check_positional_arity(command: str, args: CommandArgs) -> None:
+    """side effect（DB オープン・再作成等）より先に位置引数の個数を検証する（L-01 対応）。
+
+    ドキュメント化されていない位置引数を黙って無視すると、typo が成功扱いに
+    なり呼出元が失敗を検知できない（例: 隔離 DB で ``init unexpected`` を
+    実行すると、usage error ではなく exit 0 で DB が再作成されていた）。
+    各 subcommand の契約: ``init``/``learn``/``list``/``context``/``handoff``
+    は 0 個、``show``/``promote``/``forget`` はちょうど 1 個。``search`` は
+    複数の positional を検索語として連結する既存契約のため対象外とする。
+
+    Args:
+        command: 実行するコマンド名。
+        args: コマンド引数と stdin JSON。
+
+    Returns:
+        なし。
+
+    Raises:
+        CommandError: 契約に反する個数の位置引数が指定された場合。
+    """
+    if command in _ZERO_POSITIONAL_COMMANDS and args.positionals:
+        raise CommandError(f"{command} は位置引数を取りません: {' '.join(args.positionals)!r}")
+    if command in _SINGLE_KEY_COMMANDS:
+        if not args.positionals:
+            raise CommandError("key を指定してください")
+        if len(args.positionals) > 1:
+            raise CommandError(f"{command} は key を1つだけ指定してください: {' '.join(args.positionals)!r}")
+
+
 def _load_settings_or_raise() -> Settings:
     """Settings と logger を初期化して返す。
 
@@ -283,6 +319,7 @@ def main() -> int:
     exit_code = 0
     try:
         args = _parse_args_and_stdin(sys.argv[2:])
+        _check_positional_arity(command, args)
         settings = _load_settings_or_raise()
     except CommandError as e:
         print(str(e), file=sys.stderr)
@@ -399,7 +436,10 @@ def _coerce_limit(value: str | None, default: int) -> int:
 
 
 def _require_key(args: CommandArgs) -> str:
-    """位置引数から key を 1 つ取り出す。
+    """位置引数から key を取り出す。
+
+    呼び出し元（show/promote/forget）は dispatch 層の `_check_positional_arity`
+    （L-01 対応）を経ているため、``args.positionals`` は必ずちょうど 1 件。
 
     Args:
         args: コマンド引数。
@@ -408,10 +448,8 @@ def _require_key(args: CommandArgs) -> str:
         指定された key。
 
     Raises:
-        CommandError: 位置引数が無い場合。
+        例外は発生しません。
     """
-    if not args.positionals:
-        raise CommandError("key を指定してください")
     return args.positionals[0]
 
 
