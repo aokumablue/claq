@@ -14,6 +14,17 @@ import pytest
 import bluecore.launcher as launcher
 
 
+@pytest.fixture(autouse=True)
+def _isolate_bluecore_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """main() 経由の write_env_pointer が実 HOME の ~/.bluecore を汚さないようにする。
+
+    main() は全 hook 起動で ~/.bluecore/env.sh 等を書き出す（M-02 対応）。
+    get_home_dir() は BLUECORE_HOME を最優先で見るため、これだけ設定すれば
+    このファイル内の main() 呼び出しはすべて tmp_path 配下へ書く。
+    """
+    monkeypatch.setenv("BLUECORE_HOME", str(tmp_path))
+
+
 def _create_repo_venv(tmp_path: Path) -> Path:
     """無視されることを確認するため、仮の repo-local .venv を配置する。"""
     venv_python = tmp_path / ".venv" / "bin" / "python3"

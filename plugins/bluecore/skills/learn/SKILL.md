@@ -68,13 +68,7 @@ user-invocable: false
 ## 記録する
 
 ```bash
-for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
-          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
-          "$HOME/.claude/plugins/bluecore" \
-          "$(ls -d "$HOME"/.claude/plugins/cache/bluecore/bluecore/*/ 2>/dev/null | sort -V | tail -1)" \
-          "$HOME"/.grok/installed-plugins/bluecore-*; do
-  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
-done
+. "$HOME/.bluecore/env.sh" || exit 127
 bluecore_mem_learn --key pytest-needs-pipefail --kind pitfall --scope repo \
   --title "pytest をパイプするときは set -o pipefail が要る" \
   --domain testing --confidence 0.8 \
@@ -88,6 +82,7 @@ bluecore_mem_learn --key pytest-needs-pipefail --kind pitfall --scope repo \
 ## 参照する
 
 ```bash
+. "$HOME/.bluecore/env.sh" || exit 127
 bluecore_run bluecore.mem.cli search "pytest 失敗"   # 上位 5 件の title だけ
 bluecore_run bluecore.mem.cli show pytest-needs-pipefail   # body を読む唯一の口
 ```
@@ -109,6 +104,6 @@ bluecore_run bluecore.mem.cli show pytest-needs-pipefail   # body を読む唯�
 
 `<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` のみ）。
 
-search: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提）— クエリ例 `knowledge {domain}` / `{key}`。返るのは title 1 行だけ。本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
+search: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提）— クエリ例 `knowledge {domain}` / `{key}`。返るのは title 1 行だけ。本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
 record: 上記「記録する / しない」に従い、再利用可能な学びだけ `bluecore_mem_learn` で登録する
 参照: 既存カードとの重複 / スコープ判定 / 陳腐化した知識の archive

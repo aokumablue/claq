@@ -84,26 +84,46 @@ def test_readme_agent_skill_command_counts_match_filesystem() -> None:
             assert int(n) == counts[key], f"README の {label} 件数表記 {n} が実体 {counts[key]} と不一致"
 
 
-def test_helper_source_snippet_has_no_bare_or_naive_fallback() -> None:
-    """agents/skills/commands の md が CLAUDE_PLUGIN_ROOT をフォールバック無しで参照していないこと（A-07）。
+_VENDOR_PATH_MARKERS = (".copilot", ".grok", "installed-plugins", "CLAUDE_PLUGIN_ROOT")
+_BASH_FENCE_RE = re.compile(r"```bash\n(.*?)```", re.DOTALL)
+_ENV_POINTER_LINE = '. "$HOME/.bluecore/env.sh"'
 
-    Copilot の agent shell では ``CLAUDE_PLUGIN_ROOT`` が未設定のため、
-    フォールバック無しの ``source "${CLAUDE_PLUGIN_ROOT}/runtime/bluecore-helpers.sh"``
-    は失敗する。単純な ``${CLAUDE_PLUGIN_ROOT:-<固定path>}`` 形の 1 候補
-    フォールバックも、host ごとのインストール先の違い（Grok はハッシュ付き
-    ディレクトリ）を無視して誤ったコピーを黙って source しうるため禁止する。
-    候補探索付きの形（複数候補を ``[ -f ... ]`` で確認してから source する）
-    を要求する程度の緩さで固定しすぎない。
+
+def test_md_surfaces_have_no_vendor_specific_paths() -> None:
+    """agents/skills/commands の md にベンダ固有パスが 1 件も出現しないこと（M-02 対応）。
+
+    ``CLAUDE_PLUGIN_ROOT`` は Bash tool の環境変数に乗らない（実測）ため、
+    plugin root の解決はもう md に書かない。``~/.bluecore/env.sh`` ポインタ
+    （``bluecore.lib.env_pointer``、全 hook 起動時に launcher が書く）だけを
+    md から参照する設計にした。``.copilot`` / ``.grok`` / ``installed-plugins`` /
+    ``CLAUDE_PLUGIN_ROOT`` が re-appear したら、この設計が崩れて元のホスト別
+    候補探索ループへ戻っている印。``src/`` の ``lib/grok_plugin_root.py`` は
+    正当にベンダパスを持つ別モジュールなので対象外（このテストの対象は
+    agents/commands/skills の md のみ）。
     """
-    bare_re = re.compile(r'source\s+"\$\{CLAUDE_PLUGIN_ROOT\}/runtime/bluecore-helpers\.sh"')
-    naive_fallback_re = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT:-[^}]*\}/runtime/bluecore-helpers\.sh")
     violations: list[str] = []
     for md_file in _iter_md_files():
         text = md_file.read_text(encoding="utf-8")
-        if bare_re.search(text):
-            violations.append(f"{md_file.relative_to(_ROOT)}: フォールバック無しの bare CLAUDE_PLUGIN_ROOT 参照")
-        if naive_fallback_re.search(text):
-            violations.append(f"{md_file.relative_to(_ROOT)}: 単純な ${{CLAUDE_PLUGIN_ROOT:-<固定path>}} フォールバック")
+        for marker in _VENDOR_PATH_MARKERS:
+            if marker in text:
+                violations.append(f"{md_file.relative_to(_ROOT)}: ベンダ固有マーカー `{marker}` を含む")
+    assert violations == [], "\n".join(violations)
+
+
+def test_bluecore_run_bash_fences_bootstrap_in_same_block() -> None:
+    """``bluecore_run``/``bluecore_mem_learn`` を呼ぶ ```bash フェンスは、同一フェンス内に
+    ``. "$HOME/.bluecore/env.sh"`` の bootstrap を持つこと（M-02 対応）。
+
+    shell 関数は Bash tool 呼び出しを跨いで継続しない。「別のコードブロックで
+    source 済み」という前提は実行時に ``bluecore_run: command not found``
+    （exit 127）になるため、呼び出しと bootstrap は必ず同一フェンスに置く。
+    """
+    violations: list[str] = []
+    for md_file in _iter_md_files():
+        text = md_file.read_text(encoding="utf-8")
+        for block in _BASH_FENCE_RE.findall(text):
+            if ("bluecore_run" in block or "bluecore_mem_learn" in block) and _ENV_POINTER_LINE not in block:
+                violations.append(f"{md_file.relative_to(_ROOT)}: bootstrap を欠く bash フェンス: {block[:80]!r}")
     assert violations == [], "\n".join(violations)
 
 

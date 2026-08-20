@@ -15,7 +15,7 @@ command: /harness
 ## 永続メモリ
 
 - 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
-- 参照: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提。クエリ例 `harness audit score` / `harness config optimization audit` (days: 90)）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
+- 参照: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提。クエリ例 `harness audit score` / `harness config optimization audit` (days: 90)）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
 - 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## 使い方
@@ -35,13 +35,7 @@ command: /harness
 ## ステップ1: ベースライン取得
 
 ```bash
-for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
-          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
-          "$HOME/.claude/plugins/bluecore" \
-          "$(ls -d "$HOME"/.claude/plugins/cache/bluecore/bluecore/*/ 2>/dev/null | sort -V | tail -1)" \
-          "$HOME"/.grok/installed-plugins/bluecore-*; do
-  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
-done
+. "$HOME/.bluecore/env.sh" || exit 127
 bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path> --target-kind <repo|consumer>
 ```
 
@@ -70,13 +64,7 @@ harness-tuner は:
 ## ステップ4: 改善後スコア（`--apply` 指定時のみ）
 
 ```bash
-for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
-          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
-          "$HOME/.claude/plugins/bluecore" \
-          "$(ls -d "$HOME"/.claude/plugins/cache/bluecore/bluecore/*/ 2>/dev/null | sort -V | tail -1)" \
-          "$HOME"/.grok/installed-plugins/bluecore-*; do
-  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
-done
+. "$HOME/.bluecore/env.sh" || exit 127
 bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path> --target-kind <repo|consumer>
 ```
 

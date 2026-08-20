@@ -17,7 +17,7 @@ command: /feat-dev
 ## 永続メモリ
 
 - 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
-- 参照: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提。クエリ例 `feat-dev workflow {feature}` / `phase blocker feature`）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
+- 参照: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提。クエリ例 `feat-dev workflow {feature}` / `phase blocker feature`）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
 - 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## skill 起動メカニズム
@@ -72,13 +72,7 @@ loop-dev から収束 or 停止報告を受領して次段階へ。
 - **そのセッション限りの事情** — 「今回はテストデータを手で用意した」
 
 ```bash
-for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
-          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
-          "$HOME/.claude/plugins/bluecore" \
-          "$(ls -d "$HOME"/.claude/plugins/cache/bluecore/bluecore/*/ 2>/dev/null | sort -V | tail -1)" \
-          "$HOME"/.grok/installed-plugins/bluecore-*; do
-  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
-done
+. "$HOME/.bluecore/env.sh" || exit 127
 bluecore_mem_learn --kind fact --scope repo --domain <domain> \
   --title "<分かった結論を 1 行で>" \
   --body "<根拠と、次に同じ領域を触るときの入口>"

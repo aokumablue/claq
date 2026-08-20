@@ -22,7 +22,7 @@ command: /instinct
 ## 永続メモリ
 
 - 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
-- 参照: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提。クエリ例 `{棚卸し対象の domain}` / `{key}`）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
+- 参照: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提。クエリ例 `{棚卸し対象の domain}` / `{key}`）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
 - 記録: 本コマンド自身の実行結果は記録しない（棚卸しはセッション限りの作業でありノイズになる）。記録基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## ステップ1: サブコマンド確定
@@ -43,13 +43,7 @@ command: /instinct
 ## ステップ2: 実行
 
 ```bash
-for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
-          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
-          "$HOME/.claude/plugins/bluecore" \
-          "$(ls -d "$HOME"/.claude/plugins/cache/bluecore/bluecore/*/ 2>/dev/null | sort -V | tail -1)" \
-          "$HOME"/.grok/installed-plugins/bluecore-*; do
-  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
-done
+. "$HOME/.bluecore/env.sh" || exit 127
 bluecore_run bluecore.mem.cli <subcommand> [args...]
 ```
 
@@ -59,6 +53,7 @@ bluecore_run bluecore.mem.cli <subcommand> [args...]
 既定は「このリポジトリ + global」「`status='active'`」「20 件」。
 
 ```bash
+. "$HOME/.bluecore/env.sh" || exit 127
 bluecore_run bluecore.mem.cli list                          # 有効な知識の棚卸し
 bluecore_run bluecore.mem.cli list --status pending         # 昇格待ちの候補（レビュー対象）
 bluecore_run bluecore.mem.cli list --global --kind pitfall  # global の罠だけ
@@ -100,6 +95,7 @@ title / key / domain / body へのヒットを重み付けし、confidence と�
 stdin の JSON から知識カードを 1 件登録する。ヘルパ経由が簡単:
 
 ```bash
+. "$HOME/.bluecore/env.sh" || exit 127
 bluecore_mem_learn --key sqlite-wal-sidecars --kind pitfall --scope repo \
   --title "WAL モードの接続は -wal/-shm を残す" \
   --domain sqlite --confidence 0.8 \

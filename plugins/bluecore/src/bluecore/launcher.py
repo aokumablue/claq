@@ -168,6 +168,12 @@ def main(argv: list[str] | None = None) -> int:
         sys.path.insert(0, src_dir)
 
     from bluecore.hooks.hook_common import detach_process, read_raw_stdin, write_stderr
+    from bluecore.lib.env_pointer import write_env_pointer
+
+    # md（agents/commands/skills）がベンダ固有パスを書かずに plugin root を
+    # 解決できるよう、全 hook 起動のたびに ~/.bluecore/env.sh ポインタを更新する
+    # （M-02 対応）。失敗しても hook 本来の処理は妨げない。
+    write_env_pointer(REPO_ROOT)
 
     args = list(sys.argv[1:] if argv is None else argv)
     background = bool(args) and args[0] == "--bg"

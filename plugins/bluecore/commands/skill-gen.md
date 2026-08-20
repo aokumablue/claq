@@ -17,7 +17,7 @@ command: /skill-gen
 ## 永続メモリ
 
 - 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
-- 参照: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提。クエリ例 `skill-gen pattern repository workflow`）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
+- 参照: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提。クエリ例 `skill-gen pattern repository workflow`）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`
 - 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## skill 起動メカニズム
@@ -27,13 +27,7 @@ command: /skill-gen
 ## ステップ1: 入力候補収集
 
 ```bash
-for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
-          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
-          "$HOME/.claude/plugins/bluecore" \
-          "$(ls -d "$HOME"/.claude/plugins/cache/bluecore/bluecore/*/ 2>/dev/null | sort -V | tail -1)" \
-          "$HOME"/.grok/installed-plugins/bluecore-*; do
-  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
-done
+. "$HOME/.bluecore/env.sh" || exit 127
 collect_skill_create_inputs "${COMMITS:-200}"
 ```
 
@@ -61,13 +55,7 @@ collect_skill_create_inputs "${COMMITS:-200}"
 SKILL.md に落とし込めなかったものを知識カードとして登録する。
 
 ```bash
-for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
-          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
-          "$HOME/.claude/plugins/bluecore" \
-          "$(ls -d "$HOME"/.claude/plugins/cache/bluecore/bluecore/*/ 2>/dev/null | sort -V | tail -1)" \
-          "$HOME"/.grok/installed-plugins/bluecore-*; do
-  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
-done
+. "$HOME/.bluecore/env.sh" || exit 127
 bluecore_mem_learn --key <slug> --kind convention --scope repo --status pending \
   --title "<1 行要約>" --domain <domain> --body "<根拠>"
 ```

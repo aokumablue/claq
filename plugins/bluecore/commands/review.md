@@ -15,7 +15,7 @@ command: /review
 ## 永続メモリ
 
 - 注入: SessionStart の `mem context` が `<bluecore-memory>` を自動投入（`status='active'` のみ）
-- 参照: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提。クエリ例 `review violation security` / `{変更ファイル名}`）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`。既存カードと同じ違反が再発していれば警告レベルを1段階上げ「繰り返し違反」とマーク
+- 参照: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提。クエリ例 `review violation security` / `{変更ファイル名}`）→ 本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>`。既存カードと同じ違反が再発していれば警告レベルを1段階上げ「繰り返し違反」とマーク
 - 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 
 ## skill 起動メカニズム
@@ -100,13 +100,7 @@ command: /review
 - **一般的なセキュリティ知識** — OWASP Top 10 の一般論
 
 ```bash
-for _r in "${CLAUDE_PLUGIN_ROOT:-}" \
-          "$HOME/.copilot/installed-plugins/bluecore/bluecore" \
-          "$HOME/.claude/plugins/bluecore" \
-          "$(ls -d "$HOME"/.claude/plugins/cache/bluecore/bluecore/*/ 2>/dev/null | sort -V | tail -1)" \
-          "$HOME"/.grok/installed-plugins/bluecore-*; do
-  [ -f "$_r/runtime/bluecore-helpers.sh" ] && { . "$_r/runtime/bluecore-helpers.sh"; break; }
-done
+. "$HOME/.bluecore/env.sh" || exit 127
 bluecore_mem_learn --kind convention --scope repo --domain <domain> \
   --title "<守るべきルールを 1 行で>" \
   --body "<なぜそのルールが要るか / 違反したときに何が起きるか>"

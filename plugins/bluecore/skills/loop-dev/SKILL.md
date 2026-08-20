@@ -133,6 +133,6 @@ Assumptions: {仮決定事項 or "-"}
 
 `<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
 
-search: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提）— クエリ例 `loop-dev iteration blocker converge {task キーワード}`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
+search: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提）— クエリ例 `loop-dev iteration blocker converge {task キーワード}`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
 
 record: **学び（知識 → DB）** — 実装中に踏んだ罠・判明した事実は `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」。反復の収束状況そのもの（生ログ）は知識カードに混ぜない — 収束状況は checkpoint の `## 反復履歴` が単一情報源（`../checkpoint/SKILL.md` 参照）。

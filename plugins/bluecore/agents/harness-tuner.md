@@ -46,7 +46,14 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 1. 呼び出し元（/harness ステップ3）から渡されるベースライン JSON とトップ3アクションを入力とする。欠ければ直ちに **FAIL**
 2. トップ3レバレッジエリア特定（フック・評価・ルーティング・コンテキスト・安全性）
 3. 最小限・元に戻せる設定変更提案
-4. 変更適用・検証 — 変更後に `bluecore_run bluecore.ci.harness_audit <scope> --format json --root <root_dir> --target-kind <target_mode>` を再実行し、ベースライン JSON との差分でスコア変化を証跡提示する。`root_dir` / `target_mode` はベースライン JSON の同名フィールドの値をそのまま使う（root/target-kind が違えばスケールの異なるスコアを比較することになる）。証拠なしにスコア改善を主張しない
+4. 変更適用・検証 — 変更後に次を実行して再監査する（`source` と呼び出しは必ず同一 Bash 呼び出しに含める。`bluecore_run` は shell 関数であり、別の Bash tool 呼び出しには引き継がれない）:
+
+   ```bash
+   . "$HOME/.bluecore/env.sh" || exit 127
+   bluecore_run bluecore.ci.harness_audit <scope> --format json --root <root_dir> --target-kind <target_mode>
+   ```
+
+   ベースライン JSON との差分でスコア変化を証跡提示する。`root_dir` / `target_mode` はベースライン JSON の同名フィールドの値をそのまま使う（root/target-kind が違えばスケールの異なるスコアを比較することになる）。証拠なしにスコア改善を主張しない
 5. 変更前後の差分報告
 
 ## 制約
@@ -70,6 +77,6 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 ## 永続メモリ
 
 `<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
-search: `bluecore_run bluecore.mem.cli search "..."`（`source .../runtime/bluecore-helpers.sh` 前提）— クエリ例 `harness config optimization audit` / `harness improvement score`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
+search: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提）— クエリ例 `harness config optimization audit` / `harness improvement score`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
 record: **自分では書かない**。学びの候補は呼び出し元へ報告し、記録は呼び出し元コマンドの「学びの記録」ステップに任せる（本エージェントの成果は final gate でリバートされうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 参照: スコア推移 / 効果的な変更 / プラットフォーム互換性
