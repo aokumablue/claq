@@ -14,6 +14,7 @@ import json
 import os
 import shlex
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -282,6 +283,100 @@ class TestAtomicWrite:
         with pytest.raises(OSError, match="replace failed"):
             mod._atomic_write_text(target, "content\n")
 
+    def test_tmp_name_uses_random_suffix_not_pid(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """一時ファイル名は ``<name>.tmp.<random>`` であり PID 固定ではない。"""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        target = workdir / "out.txt"
+        seen: list[str] = []
+        real_replace = os.replace
+
+        def _capture(src: object, dst: object) -> None:
+            seen.append(Path(str(src)).name)
+            real_replace(src, dst)
+
+        monkeypatch.setattr(mod.os, "replace", _capture)
+        mod._atomic_write_text(target, "content\n")
+
+        assert seen
+        name = seen[0]
+        prefix = f"{target.name}.tmp."
+        assert name.startswith(prefix)
+        suffix = name[len(prefix) :]
+        assert suffix
+        assert suffix != str(os.getpid())
+        assert not name.isdigit()
+
+    def test_precreated_pid_named_tmp_symlink_is_not_followed(self, tmp_path: Path) -> None:
+        """予測可能な ``<name>.tmp.<pid>`` symlink を追従して victim を壊さない。"""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        target = workdir / "out.txt"
+        victim = workdir / "victim.txt"
+        victim.write_text("untouched\n", encoding="utf-8")
+        bait = workdir / f"{target.name}.tmp.{os.getpid()}"
+        bait.symlink_to(victim)
+
+        mod._atomic_write_text(target, "new\n")
+
+        assert target.read_text(encoding="utf-8") == "new\n"
+        assert victim.read_text(encoding="utf-8") == "untouched\n"
+        assert bait.is_symlink()
+
+    def test_stale_pid_named_tmp_does_not_block_next_write(self, tmp_path: Path) -> None:
+        """旧 PID 名の stale tmp が残っていても次の write は別ファイルで成功する。"""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        target = workdir / "out.txt"
+        stale = workdir / f"{target.name}.tmp.{os.getpid()}"
+        stale.write_text("stale\n", encoding="utf-8")
+
+        mod._atomic_write_text(target, "fresh\n")
+
+        assert target.read_text(encoding="utf-8") == "fresh\n"
+        assert stale.read_text(encoding="utf-8") == "stale\n"
+
+    def test_same_process_concurrent_writes_leave_complete_file(self, tmp_path: Path) -> None:
+        """barrier 同期した複数スレッドが同じ target を書いても完全なレコードだけが残る。"""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        target = workdir / "out.txt"
+        payloads = [f"payload-{i:03d}\n" for i in range(8)]
+        barrier = threading.Barrier(len(payloads), timeout=5)
+        errors: list[BaseException] = []
+
+        def _write(text: str) -> None:
+            try:
+                barrier.wait()
+                mod._atomic_write_text(target, text)
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_write, args=(payload,)) for payload in payloads]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+        assert errors == []
+        assert target.read_text(encoding="utf-8") in payloads
+        leftovers = [path for path in workdir.iterdir() if path != target]
+        assert leftovers == []
+
+    def test_write_env_pointer_swallows_mkstemp_oserror(
+        self, tmp_path: Path, _isolate_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """mkstemp が OSError でも write_env_pointer は hook を壊さない。"""
+        plugin_root = _make_plugin_root(tmp_path / "plugin")
+
+        def _boom(*_args: object, **_kwargs: object) -> tuple[int, str]:
+            raise OSError("mkstemp failed")
+
+        monkeypatch.setattr(mod.tempfile, "mkstemp", _boom)
+        mod.write_env_pointer(plugin_root)
+
 
 class TestResolveAncestorChain:
     """_resolve_ancestor_chain の祖先探索ロジックのテスト。"""
@@ -471,22 +566,90 @@ class TestGcRoots:
     def test_fresh_non_digit_temp_file_survives_gc(self, tmp_path: Path) -> None:
         """M-01: 別 writer が rename 直前に作った一時ファイルを race で消さない。
 
-        レポートの再現コマンドは ``env.sh.tmp.12345`` を手作業で ``roots/``
-        直下に置くが、実際の ``env.sh`` の一時ファイルは ``bluecore_dir``
-        直下に作られ ``roots/`` には現れない（``_gc_roots`` は
-        ``roots_dir.iterdir()`` しか見ない）。実際に発生しうるのは
-        ``<pid>.tmp.<writer_pid>`` 形式だが、「非数字名」という判定規則は
-        両方に等しく適用されるため、レポートと同じファイル名でも検証する。
+        ``roots/`` で実際に発生しうるのは ``<name>.tmp.<random>``
+        （mkstemp）。旧 writer 残骸（``<pid>.tmp.<writer_pid>``）と、
+        レポートが ``roots/`` に置いて再現していた ``env.sh.tmp.<pid>`` も
+        非数字名として同じ age-gate 対象になる。
         """
         roots_dir = tmp_path / "roots"
         roots_dir.mkdir()
-        for name in ("env.sh.tmp.12345", "555555.tmp.666666"):
+        for name in ("env.sh.tmp.12345", "555555.tmp.666666", "555555.tmp.abcdefgh"):
             (roots_dir / name).write_text("x\n", encoding="utf-8")
 
         mod._gc_roots(roots_dir)
 
         assert (roots_dir / "env.sh.tmp.12345").exists()
         assert (roots_dir / "555555.tmp.666666").exists()
+        assert (roots_dir / "555555.tmp.abcdefgh").exists()
+
+    def test_fresh_env_sh_tmp_in_bluecore_dir_survives_gc(self, tmp_path: Path) -> None:
+        """bluecore_dir 直下の新鮮な env.sh.tmp.* は age-gate で残る。"""
+        bluecore_dir = tmp_path / "bc"
+        bluecore_dir.mkdir()
+        fresh = bluecore_dir / f"{mod._ENV_TMP_PREFIX}freshxxx"
+        fresh.write_text("in-flight\n", encoding="utf-8")
+
+        mod._gc_env_sh_temps(bluecore_dir, time.time())
+
+        assert fresh.exists()
+
+    def test_stale_env_sh_tmp_in_bluecore_dir_is_removed(self, tmp_path: Path) -> None:
+        """猶予を過ぎた env.sh.tmp.* は bluecore_dir から回収する。"""
+        bluecore_dir = tmp_path / "bc"
+        bluecore_dir.mkdir()
+        stale = bluecore_dir / f"{mod._ENV_TMP_PREFIX}stalexxx"
+        stale.write_text("orphan\n", encoding="utf-8")
+        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
+        os.utime(stale, (old, old))
+
+        mod._gc_env_sh_temps(bluecore_dir, time.time())
+
+        assert not stale.exists()
+
+    def test_gc_env_sh_tmp_does_not_touch_env_sh_or_mem_db(self, tmp_path: Path) -> None:
+        """プレフィックス不一致の state ファイルは env.sh tmp GC の対象外。"""
+        bluecore_dir = tmp_path / "bc"
+        bluecore_dir.mkdir()
+        env_sh = bluecore_dir / mod._ENV_FILENAME
+        mem_db = bluecore_dir / "mem.db"
+        other = bluecore_dir / "unrelated.txt"
+        env_sh.write_text("keep-env\n", encoding="utf-8")
+        mem_db.write_text("keep-db\n", encoding="utf-8")
+        other.write_text("keep-other\n", encoding="utf-8")
+        stale = bluecore_dir / f"{mod._ENV_TMP_PREFIX}stalexxx"
+        stale.write_text("orphan\n", encoding="utf-8")
+        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
+        os.utime(stale, (old, old))
+
+        mod._gc_env_sh_temps(bluecore_dir, time.time())
+
+        assert not stale.exists()
+        assert env_sh.read_text(encoding="utf-8") == "keep-env\n"
+        assert mem_db.read_text(encoding="utf-8") == "keep-db\n"
+        assert other.read_text(encoding="utf-8") == "keep-other\n"
+
+    def test_unlistable_bluecore_dir_is_noop_for_env_sh_tmp_gc(self, tmp_path: Path) -> None:
+        """bluecore_dir が列挙できなくても env.sh tmp GC は例外を送出しない。"""
+        mod._gc_env_sh_temps(tmp_path / "does-not-exist", time.time())
+
+    def test_env_sh_tmp_stat_failure_is_ignored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """env.sh.tmp.* の stat 失敗は無視する。"""
+        bluecore_dir = tmp_path / "bc"
+        bluecore_dir.mkdir()
+        entry = bluecore_dir / f"{mod._ENV_TMP_PREFIX}statfail"
+        entry.write_text("x\n", encoding="utf-8")
+        real_stat = Path.stat
+
+        def _boom_stat(self: Path, *args: object, **kwargs: object) -> object:
+            if self == entry:
+                raise OSError("boom")
+            return real_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", _boom_stat)
+        mod._gc_env_sh_temps(bluecore_dir, time.time())
+        assert entry.exists()
 
     def test_alive_fresh_pid_is_kept(self, tmp_path: Path) -> None:
         roots_dir = tmp_path / "roots"
@@ -606,10 +769,14 @@ class TestGcThrottle:
         legacy.write_text("/old\n", encoding="utf-8")
         old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
         os.utime(legacy, (old, old))
+        stale_env_tmp = bluecore_dir / f"{mod._ENV_TMP_PREFIX}stalexxx"
+        stale_env_tmp.write_text("orphan\n", encoding="utf-8")
+        os.utime(stale_env_tmp, (old, old))
 
         mod._maybe_run_gc(bluecore_dir, roots_dir, keep_pids=frozenset())
 
         assert not legacy.exists()
+        assert not stale_env_tmp.exists()
         assert (bluecore_dir / mod._GC_STAMP_FILENAME).exists()
 
     def test_gc_skipped_when_stamp_is_fresh(self, tmp_path: Path) -> None:
@@ -619,10 +786,15 @@ class TestGcThrottle:
         roots_dir.mkdir()
         (bluecore_dir / mod._GC_STAMP_FILENAME).touch()
         (roots_dir / "latest").write_text("/old\n", encoding="utf-8")
+        stale_env_tmp = bluecore_dir / f"{mod._ENV_TMP_PREFIX}stalexxx"
+        stale_env_tmp.write_text("orphan\n", encoding="utf-8")
+        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
+        os.utime(stale_env_tmp, (old, old))
 
         mod._maybe_run_gc(bluecore_dir, roots_dir, keep_pids=frozenset())
 
         assert (roots_dir / "latest").exists()  # throttle により GC は走らない
+        assert stale_env_tmp.exists()
 
     def test_gc_runs_when_stamp_is_stale(self, tmp_path: Path) -> None:
         bluecore_dir = tmp_path / "bc"

@@ -77,12 +77,14 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from bluecore.lib.constants import BASE_DIR_NAME
 
 _ROOTS_DIRNAME = "roots"
 _ENV_FILENAME = "env.sh"
+_ENV_TMP_PREFIX = f"{_ENV_FILENAME}.tmp."
 _ENV_TEMPLATE_RELATIVE = Path("runtime") / "env-template.sh"
 
 _MAX_ANCESTOR_DEPTH = 2
@@ -220,8 +222,10 @@ def _ensure_private_dir(path: Path) -> Path:
 def _atomic_write_text(path: Path, text: str) -> None:
     """テキストを一時ファイル経由で原子的に書き込む（partial read を防ぐ）。
 
-    同一ディレクトリに ``<name>.tmp.<pid>.<counter>`` を mode 0600 で作成し、
-    ``fsync`` 後に ``os.replace()`` で公開する。reader は常に「書き込み前の
+    同一ディレクトリに ``tempfile.mkstemp`` で ``<name>.tmp.<random>`` を
+    mode 0600 で作成し、``fsync`` 後に ``os.replace()`` で公開する。
+    prefix は ``<name>.tmp.`` で、名前は数字のみにならない（``roots/`` の
+    GC が非数字名として age-gate する契約）。reader は常に「書き込み前の
     内容」か「書き込み後の内容」のどちらかしか見えない。
 
     Args:
@@ -234,13 +238,17 @@ def _atomic_write_text(path: Path, text: str) -> None:
     Raises:
         OSError: 一時ファイルの作成・書き込み・rename に失敗した場合。
     """
-    tmp_path = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f"{path.name}.tmp.",
+        suffix="",
+    )
+    tmp_path = Path(tmp_name)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(tmp_path, path)
     except OSError:
         try:
@@ -387,7 +395,7 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
 
 
 def _maybe_run_gc(bluecore_dir: Path, roots_dir: Path, *, keep_pids: frozenset[int]) -> None:
-    """throttle を守りつつ ``roots/`` の GC を実行する。
+    """throttle を守りつつ ``roots/`` と ``env.sh.tmp.*`` の GC を実行する。
 
     ``roots-gc.stamp`` の mtime を見て ``_GC_THROTTLE_SECONDS`` 以内なら何もしない
     （全 hook 起動のたびに ``roots/`` を全走査しないため）。stamp の更新自体も
@@ -421,6 +429,7 @@ def _maybe_run_gc(bluecore_dir: Path, roots_dir: Path, *, keep_pids: frozenset[i
         pass
 
     _gc_roots(roots_dir, keep_pids=keep_pids)
+    _gc_env_sh_temps(bluecore_dir, _now())
 
 
 def _now() -> float:
@@ -518,11 +527,13 @@ def _gc_one(entry: Path, now: float) -> None:
     if not entry.name.isdigit():
         # 旧形式ポインタ（`<pid>.sh`・`latest`・`latest.sh`）だけでなく、
         # 別 writer が `os.replace()` 直前に作った
-        # `<pid>.tmp.<writer_pid>` 一時ファイル（`_atomic_write_text` が
-        # `roots/` 内に作る）もこの分岐に落ちる。即削除すると、その
-        # writer の rename 前に消してしまう race がある（M-01）。実際の
-        # 一時ファイル寿命はミリ秒オーダーなので、`_DEAD_PID_GRACE_SECONDS`
-        # を過ぎてから削除しても実害は無く、race window を閉じられる。
+        # `<name>.tmp.<random>` 一時ファイル（`tempfile.mkstemp`、prefix
+        # `<name>.tmp.`。`_atomic_write_text` が `roots/` 内に作る）もこの
+        # 分岐に落ちる。旧 writer 残骸（`<pid>.tmp.<writer_pid>`）も非数字
+        # なので同じ age-gate 対象。即削除すると、その writer の rename
+        # 前に消してしまう race がある（M-01）。実際の一時ファイル寿命は
+        # ミリ秒オーダーなので、`_DEAD_PID_GRACE_SECONDS` を過ぎてから
+        # 削除しても実害は無く、race window を閉じられる。
         mtime = entry.stat().st_mtime
         if mtime < now - _DEAD_PID_GRACE_SECONDS:
             entry.unlink()
@@ -538,3 +549,38 @@ def _gc_one(entry: Path, now: float) -> None:
 
     if mtime < now - _DEAD_PID_GRACE_SECONDS:
         entry.unlink()
+
+
+def _gc_env_sh_temps(bluecore_dir: Path, now: float) -> None:
+    """``bluecore_dir`` 直下の ``env.sh.tmp.*`` 孤児を age-gate で回収する。
+
+    ``_atomic_write_text`` は ``env.sh`` も一時ファイル経由で書くため、
+    クラッシュ孤児は ``roots/`` ではなく ``bluecore_dir`` に残る。
+    ``_gc_roots`` は ``roots/`` しか見ないので、プレフィックス
+    ``env.sh.tmp.`` に限定して同じ ``_DEAD_PID_GRACE_SECONDS`` を適用する。
+    ``mem.db`` / ``logs`` / ``env.sh`` 自体はプレフィックス不一致で対象外。
+
+    Args:
+        bluecore_dir: ``$HOME/.bluecore`` の Path。
+        now: 現在時刻（unix time）。
+
+    Returns:
+        なし。
+
+    Raises:
+        例外は発生しません（iterdir/stat/unlink 失敗は無視します）。
+    """
+    try:
+        entries = list(bluecore_dir.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if not entry.name.startswith(_ENV_TMP_PREFIX):
+            continue
+        try:
+            mtime = entry.stat().st_mtime
+            if mtime < now - _DEAD_PID_GRACE_SECONDS:
+                entry.unlink()
+        except OSError:
+            continue
+
