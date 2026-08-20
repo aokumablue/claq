@@ -141,3 +141,10 @@ host-dependent なロジックは Python/Shell の実装ファイルへ隔離す
   自体は `~/.copilot/session-state/<id>/events.jsonl` で確認済みだが、
   本ラウンドの変更適用後の実機再検証は本 ADR の範囲に含めていない
   （ADR-0005 に従い手動チェックリストで別途実施する）。
+- `resolve_effective_target`（`config_protection.py`/`bash_config_protection.py`
+  が使う symlink 解決 helper）は hook payload の `cwd` ではなく
+  `Path.cwd()`（launcher プロセス自身の working directory）基準で解決する。
+  これは `resolve_repo_root()` 等、既存の repo-root 解決ロジックがもともと
+  前提にしていた挙動を踏襲したものであり、本ラウンドで新たに導入した
+  前提ではない。hook payload が別 cwd を運んでくるケースが将来出てきた
+  場合は、この前提が暗黙のまま残っていることに注意する必要がある。

@@ -79,7 +79,7 @@ bluecore_mem_learn --kind fact --scope repo --domain <domain> \
 ```
 
 該当ゼロなら 1 件も記録しない（0 件は正しい結果）。
-確信が持てないものは `--status pending` を付け、採否は `/instinct` のレビューに委ねる。
+常に `status=pending` で登録され、採否は `/instinct` のレビューに委ねる。
 詳細基準は `../skills/learn/SKILL.md` の「記録する / しない」。
 
 ## ステップ5: サマリー

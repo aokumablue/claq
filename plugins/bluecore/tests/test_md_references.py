@@ -127,6 +127,27 @@ def test_bluecore_run_bash_fences_bootstrap_in_same_block() -> None:
     assert violations == [], "\n".join(violations)
 
 
+def test_mem_learn_invocations_pass_no_status_or_source_flag() -> None:
+    """``bluecore_mem_learn`` 呼び出しは ``--status``/``--source`` を渡さないこと（H-01 対応）。
+
+    `runtime/bluecore-helpers.sh` の `bluecore_mem_learn` は `--status`/`--source`
+    の option parsing を持たない（未知オプションで exit 2）。md がこれらを渡す
+    記述のまま残ると、記載どおりに実行したときに壊れる。バックスラッシュ
+    継続行をまたぐ呼び出しも見逃さないよう、行末 ``\`` を連結してから判定する。
+    `list`/`search` の絞り込み用 `--status`（``bluecore_run bluecore.mem.cli list
+    --status pending`` 等）は対象外 — 判定は ``bluecore_mem_learn`` を含む論理行に限る。
+    """
+    violations: list[str] = []
+    for md_file in _iter_md_files():
+        text = md_file.read_text(encoding="utf-8")
+        for block in _BASH_FENCE_RE.findall(text):
+            joined = re.sub(r"\\\n", " ", block)
+            for line in joined.splitlines():
+                if "bluecore_mem_learn" in line and ("--status" in line or "--source" in line):
+                    violations.append(f"{md_file.relative_to(_ROOT)}: {line.strip()!r}")
+    assert violations == [], "\n".join(violations)
+
+
 def test_security_auditor_has_no_bash_access() -> None:
     """security-auditor は tools frontmatter で Bash を持たない（F-05 対応）。
 

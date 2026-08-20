@@ -56,11 +56,11 @@ SKILL.md に落とし込めなかったものを知識カードとして登録�
 
 ```bash
 . "$HOME/.bluecore/env.sh" || exit 127
-bluecore_mem_learn --key <slug> --kind convention --scope repo --status pending \
+bluecore_mem_learn --key <slug> --kind convention --scope repo \
   --title "<1 行要約>" --domain <domain> --body "<根拠>"
 ```
 
-`--status pending` で登録し、採否は人間が `/instinct` でレビューして決める
+常に `status=pending` で登録され、採否は人間が `/instinct` でレビューして決める
 （自動生成の候補をそのまま注入枠に載せない）。記録基準は `../skills/learn/SKILL.md` の
 「記録する / しない」に従い、リポジトリを読めば分かることは登録しない。
 
