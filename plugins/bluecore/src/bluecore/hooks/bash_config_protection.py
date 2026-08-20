@@ -63,6 +63,7 @@ from bluecore.hooks.hook_common import (
     emit_block_output,
     parse_json_object,
     read_raw_stdin_with_truncation,
+    resolve_effective_target,
     resolve_repo_root,
     split_segments,
     tokenize,
@@ -87,7 +88,13 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES | CONDITIONALLY_PROTECTED_FILES
 
 
 def _protected_basename(token: str) -> str | None:
-    """トークンの basename が保護対象ファイル名なら返す。
+    """トークンの解決後 basename が保護対象ファイル名なら返す（H-02 対応）。
+
+    ``alias -> pyproject.toml`` のような symlink 経由の書込みは、raw token の
+    basename（``alias``）だけを見ると保護対象と判定できずすり抜けていた。
+    `resolve_effective_target` で実体 path を解決してから basename を取る。
+    解決不能（壊れた・循環した symlink 等）な場合は raw token の basename に
+    フォールバックする（`config_protection._effective_basename` と同じ理由）。
 
     Args:
         token: 検査対象のトークン（パスの可能性がある）。
@@ -98,7 +105,8 @@ def _protected_basename(token: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    name = basename(token)
+    resolved = resolve_effective_target(token)
+    name = resolved.name if resolved is not None else basename(token)
     return name if name in _ALL_PROTECTED_BASENAMES else None
 
 
@@ -304,9 +312,11 @@ def _write_target_token_in_segment(segment: list[str]) -> str | None:
 
 
 def _within_repo_root(token: str, repo_root: Path) -> bool:
-    """書き込み先トークンを cwd 基準で解決し、`repo_root` 配下にあるかを判定する。
+    """書き込み先トークンを cwd 基準・symlink 解決済みで `repo_root` 配下にあるかを判定する。
 
     `token` が絶対パスなら cwd は無視される（pathlib の `/` 演算子の挙動）。
+    symlink 解決は `_protected_basename` と同じ `resolve_effective_target` を
+    共有し、判定基準を一本化する（H-02）。
 
     Args:
         token: 書き込み先の生トークン（パス文字列）。
@@ -318,8 +328,10 @@ def _within_repo_root(token: str, repo_root: Path) -> bool:
     Raises:
         例外は発生しません。
     """
+    resolved = resolve_effective_target(token)
+    if resolved is None:
+        return False
     try:
-        resolved = (Path.cwd() / token).resolve()
         root = repo_root.resolve()
     except (OSError, RuntimeError):
         return False
@@ -342,7 +354,8 @@ def find_protected_write(command: str) -> str | None:
         command: 検査対象のシェルコマンド文字列。
 
     Returns:
-        保護対象ファイル名。該当しなければ None。
+        保護対象ファイル名（symlink 解決後の実体 basename。H-02）。該当しな
+        ければ None。
 
     Raises:
         例外は発生しません。
@@ -355,7 +368,7 @@ def find_protected_write(command: str) -> str | None:
         if repo_root is None:
             return None
         if _within_repo_root(token, repo_root):
-            return basename(token)
+            return _protected_basename(token)
     return None
 
 

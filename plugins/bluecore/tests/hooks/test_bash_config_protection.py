@@ -132,7 +132,9 @@ class TestFindProtectedWrite:
     def test_within_repo_root_returns_false_on_resolve_oserror(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """cwd/repo_root の resolve() が OSError を投げても deny せず False を返す（可用性優先）。"""
+        """cwd の resolve() が OSError を投げても deny せず False を返す（可用性優先。H-02 の
+        resolve_effective_target 経由でこの分岐に入る）。
+        """
 
         def _raising_cwd() -> Path:
             raise OSError("cwd unavailable")
@@ -140,6 +142,19 @@ class TestFindProtectedWrite:
         monkeypatch.setattr(bash_config_protection.Path, "cwd", classmethod(lambda cls: _raising_cwd()))
 
         assert bash_config_protection._within_repo_root("pyproject.toml", Path("/repo")) is False
+
+    def test_within_repo_root_returns_false_when_repo_root_resolve_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """token 側の解決は成功しても repo_root.resolve() が失敗すれば False を返す。"""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+
+        class _BoomPath(Path):
+            def resolve(self, strict: bool = False) -> Path:  # noqa: ARG002
+                raise OSError("repo root unavailable")
+
+        assert bash_config_protection._within_repo_root("pyproject.toml", _BoomPath(tmp_path)) is False
 
 
 class TestMain:

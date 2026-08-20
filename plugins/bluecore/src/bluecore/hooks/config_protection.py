@@ -23,6 +23,7 @@ from bluecore.hooks.hook_common import (
     emit_block_output,
     parse_json_object,
     read_raw_stdin_with_truncation,
+    resolve_effective_target,
 )
 from bluecore.lib.harness import (
     extract_file_paths,
@@ -125,6 +126,32 @@ _TOX_COMMAND_KEYS = ("commands", "commands_pre", "commands_post")
 _TOX_COMMAND_KEY_PATTERN = re.compile(
     r"(?m)^\s*(" + "|".join(re.escape(key) for key in _TOX_COMMAND_KEYS) + r")\s*="
 )
+
+
+def _effective_basename(file_path: str) -> str:
+    """symlink を解決した実体 basename を返す（H-02 対応）。
+
+    ``alias -> pyproject.toml`` のような symlink 経由の書込みが、raw path の
+    basename（``alias``）だけを見る判定をすり抜けていた。
+    ``resolve_effective_target`` で実体 path を解決してから basename を取り、
+    保護対象判定を実際の書込み先ファイルに対して行う。
+
+    解決不能（壊れた・循環した symlink 等）な場合は raw path 自体の
+    basename にフォールバックする（ADR-0001 の inspection-failure fail-open
+    と、直接 path 指定の保護を両立させるため。解決不能を deny に倒すと
+    symlink を一切使わない正当な編集まで巻き込む）。
+
+    Args:
+        file_path: 検査対象の生パス文字列。
+
+    Returns:
+        判定に使う basename。
+
+    Raises:
+        例外は発生しません。
+    """
+    resolved = resolve_effective_target(file_path)
+    return resolved.name if resolved is not None else basename(file_path)
 
 
 def blocked_message_for_file(file_name: str) -> str:
@@ -403,7 +430,7 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
     if file_paths is None:
         return _UNPARSEABLE_PATCH_MESSAGE
     for file_path in file_paths:
-        file_name = basename(file_path)
+        file_name = _effective_basename(file_path)
         if file_name in PROTECTED_FILES:
             return blocked_message_for_file(file_name)
         if file_name in CONDITIONALLY_PROTECTED_FILES:
