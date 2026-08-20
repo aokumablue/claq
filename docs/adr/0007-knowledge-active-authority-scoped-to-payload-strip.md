@@ -4,8 +4,8 @@
 
 ## コンテキスト
 
-`docs/reports/PLUGIN_RUNTIME_AUDIT_2026-08-19_0.9.34_VERIFICATION.md` の
-H-01 は、`mem learn`（generic CLI）の呼び出し元が JSON payload に
+v0.9.34 時点のランタイム監査レポートの H-01 は、`mem learn`（generic CLI）
+の呼び出し元が JSON payload に
 `source: "human"` / `status: "active"` と書く、または helper の
 `--status active` を指定するだけで、真正性検証なしに
 `status='active'` の知識カードを作成でき、SessionStart context への
@@ -51,7 +51,7 @@ active カードの一括隔離）は採用しない。**
 
 ## 検討した代替案
 
-### 代替案 1: レポート §8.3 の 5 項目を全面採用する
+### 代替案 1: v0.9.34 時点のランタイム監査レポート §8.3 の 5 項目を全面採用する
 
 - 長所: 「caller が active を自己承認できる」という脅威を最も広く塞げる。
   `promote` 自体も無効化すれば、host-native な承認 capability が実装

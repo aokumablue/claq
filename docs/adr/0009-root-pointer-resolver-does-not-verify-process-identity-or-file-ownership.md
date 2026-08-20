@@ -5,8 +5,7 @@
 ## 改訂履歴（2026-08-20）
 
 **改訂 1**: 初版が「実装しない」とした 2 項目のうち、**PID 開始時刻
-（`lstart`）照合は撤回し、実装した**。`docs/reports/
-PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md` の H-02
+（`lstart`）照合は撤回し、実装した**。v0.9.36 時点の再検証の H-02
 （祖先不一致時の root 値合意 fallback が別 host の root を採用しうる）に
 対し、ユーザーから「リスクがあるとみなせる fallback は望ましくない、
 完璧に対応したい」との明示指示があり、推測 fallback を排除した厳格な
@@ -14,13 +13,12 @@ PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md` の H-02
 再利用を lstart 照合で検出することが前提になるため、当初「コストが
 見合わない」としていた判断そのものを覆した。旧「1. PID 開始時刻照合を
 実装しない理由」節は撤回の記録として残し、取り消し線的な注記を付ける。
-「2. owner/mode 検証を実装しない理由」節は変更なしで、`docs/reports/
-PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md` の H-01
-再検証でも同じ結論を維持した（再検証での追加知見をこの節へ追記した）。
+「2. owner/mode 検証を実装しない理由」節は変更なしで、同じ v0.9.36 時点の
+再検証の H-01 でも同じ結論を維持した（再検証での追加知見をこの節へ
+追記した）。
 
-**改訂 2（本改訂）**: 再々検証
-`docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.37_REVERIFICATION.md`
-の H-01 が同じ owner/mode 非検証を再指摘した。追加調査で、「2. owner/mode
+**改訂 2（本改訂）**: v0.9.37 時点の再々検証の H-01 が同じ owner/mode
+非検証を再指摘した。追加調査で、「2. owner/mode
 検証を実装しない理由」節が挙げていた補助論拠の一つ——「POSIX sh に
 移植性のある `stat` フォーマットが無い」——は**owner/symlink 判定に
 限れば誤りだった**ことが判明した: `test -O`（自分所有）/`test -h`
@@ -40,8 +38,8 @@ PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md` の H-01
 
 ## コンテキスト（初版時点のもの。上記改訂履歴を参照）
 
-`docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_VERIFICATION.md`（R-01〜R-06）の
-Phase 2/3 は、次の 2 点を release gate の受入条件として求めていた。
+初回の実機検証レポート（R-01〜R-06 の指摘）の Phase 2/3 は、次の 2 点を
+release gate の受入条件として求めていた。
 
 1. pointer record に writer が観測した host PID と「process start identity」
    （プロセス開始時刻等）を保存し、resolver が実際の ancestor process と
@@ -119,8 +117,7 @@ resolver が読める入力（pointer file・その root が指すディレク�
 でしかない。攻撃者は fake root を「自分が所有する実ディレクトリ」として
 作成できるため、どんな検証を追加しても、まさに防ぎたい攻撃者がその検証を
 満たしてしまう。これは `test -O`/`-h`/`-G`（owner/symlink 判定）でも
-`stat` ベースの検証でも、`docs/reports/
-PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.37_REVERIFICATION.md` H-01 が提案する
+`stat` ベースの検証でも、v0.9.37 時点の再々検証の H-01 が提案する
 manifest/digest 方式（後述）でも変わらない——検証手段の実装コストの問題
 ではなく、**検証すべき対象が「攻撃者と正規 writer が区別できない」という
 原理的な限界**である。
@@ -160,8 +157,8 @@ symlink 検証も mode ビット検証も、実装できるかどうかに関わ
 したがって H-01 の非対応は「リスクの許容」ではなく「防御不能な対象への
 対処の見送り」である。
 
-**再検証での追加知見（`docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md`
-H-01）**: `roots/` を汚染できたとしても、影響範囲は enforcement hook には
+**再検証での追加知見（v0.9.36 時点の再検証の H-01）**: `roots/` を汚染
+できたとしても、影響範囲は enforcement hook には
 及ばない。`hooks.json` の全 7 エントリ（`block_no_verify` /
 `pre_bash_commit_quality` / `bash_config_protection` / `config_protection` /
 `pre_compact` / `mem.cli context` / `mem.cli handoff`）を実際に確認したところ、
@@ -175,14 +172,13 @@ source しない。つまり resolver（`env.sh`/`roots/`）は保護 hook の�
 helpers.sh も同じ権限で自由に作成できる）、真正性検証としては機能しない
 ——検討したが採用しなかった（本 ADR 冒頭の「決定」で述べたとおり、
 owner/mode/manifest/hash はいずれも同一ユーザー内では防御にならない）。
-`docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.37_REVERIFICATION.md`
-の H-01 再指摘（同一の manifest/digest 方式を改めて提案）でも、この結論
-（攻撃者は fake manifest/digest も同じ権限で書けるため機能しない）は
-変わらない。
+v0.9.37 時点の再々検証の H-01 再指摘（同一の manifest/digest 方式を
+改めて提案）でも、この結論（攻撃者は fake manifest/digest も同じ権限で
+書けるため機能しない）は変わらない。
 
 ## 検討した代替案
 
-### 代替案 1: レポート Phase 2/3 の受入条件をそのまま全面採用する
+### 代替案 1: 初回の実機検証レポート Phase 2/3 の受入条件をそのまま全面採用する
 
 初版時点での評価（PID 開始時刻照合を含む）。**PID 開始時刻照合は
 その後 ADR-0008 改訂 2 で採用したため、以下は owner/mode 検証にのみ

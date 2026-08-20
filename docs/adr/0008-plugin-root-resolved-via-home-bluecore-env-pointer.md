@@ -5,16 +5,15 @@
 ## 改訂履歴（2026-08-20）
 
 **改訂 1**: 初版（M-02 対応）で導入した 3 段解決
-（PATH → `roots/$PPID.sh` → `roots/latest.sh`）は、Copilot CLI 実機検証
-`docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_VERIFICATION.md`（R-01〜R-06）で
-BLOCK 判定を受けた。root cause は「どの plugin runtime を実行するか決める前に
+（PATH → `roots/$PPID.sh` → `roots/latest.sh`）は、初回の Copilot CLI 実機
+検証レポート（R-01〜R-06 の指摘）で BLOCK 判定を受けた。root cause は
+「どの plugin runtime を実行するか決める前に
 roots pointer を shell として `.`/source していたこと」（R-01/R-03）。pointer を
 データファイル化し、tier 2 を「root 値合意 + 鮮度フィルタ（二段判定）」に
 作り直した。
 
-**改訂 2**: 再検証
-`docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md` の
-H-02 が、改訂 1 の tier 2（root 値合意 fallback）は「祖先であることを証明
+**改訂 2**: v0.9.36 時点の再検証で、H-02 が、改訂 1 の tier 2（root 値合意
+fallback）は「祖先であることを証明
 できないシェルが、たまたま合意している root を採用してしまう」ことを再指摘。
 ユーザーから「リスクがあるとみなせる fallback は望ましくない、完璧に対応
 したい」との明示指示を受け、**tier 2（推測 fallback）を全廃**し、
@@ -35,8 +34,8 @@ H-02 が、改訂 1 の tier 2（root 値合意 fallback）は「祖先である
 
 ## コンテキスト
 
-`docs/reports/PLUGIN_RUNTIME_AUDIT_2026-08-19_0.9.34_VERIFICATION.md` の
-M-02 は、`bluecore_run`/`bluecore_mem_learn`（`runtime/bluecore-helpers.sh`
+v0.9.34 時点のランタイム監査レポートの M-02 指摘は、
+`bluecore_run`/`bluecore_mem_learn`（`runtime/bluecore-helpers.sh`
 の shell 関数）を参照する agents/commands/skills の md のうち、bootstrap
 （`. runtime/bluecore-helpers.sh` を実行するコード）を持たない 16 surface
 が、実行すると `bluecore_run: command not found`（exit 127）になることを
@@ -198,8 +197,8 @@ host-dependent なロジックは Python/Shell の実装ファイルへ隔離す
   （祖先 walk だけでは reader/writer の非対称性を解決できない）でも、
   複数ホストが同時稼働していなければ実用上ほぼ常に解決できた。
   実装コストが低い（writer 側の変更が不要）。
-- 短所: `docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md`
-  H-02 が指摘したとおり、「祖先であることの証明」ではなく「たまたま
+- 短所: v0.9.36 時点の再検証の H-02 が指摘したとおり、「祖先であることの
+  証明」ではなく「たまたま
   他の記録と一致すること」に基づく推測であり、当てが外れれば別 host の
   root を静かに採用してしまう。改訂 1 時点では「同一 plugin の別
   バージョンを source するだけで version skew に過ぎない」という
@@ -303,8 +302,8 @@ host-dependent なロジックは Python/Shell の実装ファイルへ隔離す
   祖先ポインタに reader の祖先 walk が届かず 127 になりうる。実測では
   Claude Code の構成（launcher の直接の親が bash tool の shell、その
   親が host バイナリそのもの）で 2 段は十分だった
-  （`docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md`
-  の検証環境と同様の構成を想定）が、他ホストでの実測は未確認。改訂 2
+  （v0.9.36 時点の再検証の検証環境と同様の構成を想定）が、他ホストでの
+  実測は未確認。改訂 2
   （深さ 4 段 + poison）と比べると「届かず 127」になりうる場面は増える
   可能性があるが、127 は自己修復可能（原因が明示的で、次回の host
   起動構成の変化やユーザーの対処で復旧する）なのに対し、poison の

@@ -4,8 +4,8 @@
 
 ## コンテキスト
 
-`docs/reports/PLUGIN_RUNTIME_AUDIT_2026-08-19_0.9.34_VERIFICATION.md` の
-H-03 は「release tree に pytest テストが無く、回帰検知を実行できない」と
+v0.9.34 時点のランタイム監査レポートの H-03 は「release tree に pytest
+テストが無く、回帰検知を実行できない」と
 指摘した。検証者は `~/.copilot/installed-plugins/bluecore/bluecore`
 （配布・インストール済みの plugin tree）で
 `cd plugins/bluecore && PYTHONPATH=src python3 -m pytest -q` を実行し、
