@@ -96,38 +96,34 @@ class TestParseKnowledgePayload:
             source_ref=None,
         )
 
-    def test_status_override_wins_over_payload(self) -> None:
-        """status の上書き（CLI --status）はペイロードより強い。"""
+    def test_explicit_default_source_and_status_are_kept(self) -> None:
+        """既定値と同じ値の明示（source=agent, status=pending）は無害なので許可する。"""
         draft = parse_knowledge_payload(
-            {"kind": "fact", "title": "t", "status": "active", "source": "human"},
-            status_override="pending",
+            {"kind": "fact", "title": "t", "source": "agent", "status": "pending"}
         )
-        assert (draft.status, draft.source) == ("pending", "human")
+        assert (draft.source, draft.status) == ("agent", "pending")
 
-    def test_human_source_defaults_status_active(self) -> None:
-        """source=human は status 既定 active（従来どおり SessionStart 注入対象）。"""
-        draft = parse_knowledge_payload({"kind": "fact", "title": "t", "source": "human"})
-        assert draft.status == "active"
+    @pytest.mark.parametrize("source", ["human", "observer"])
+    def test_non_default_source_is_rejected(self, source: str) -> None:
+        """H-01: generic learn は source=agent 固定。human/observer の自己申告は拒否する。
 
-    @pytest.mark.parametrize("source", ["agent", "observer"])
-    def test_agent_and_observer_source_defaults_status_pending(self, source: str) -> None:
-        """source=agent/observer は status 既定 pending（A-03: /instinct promote 必須）。"""
-        draft = parse_knowledge_payload({"kind": "fact", "title": "t", "source": source})
-        assert draft.status == "pending"
+        caller（agent・外部入力を処理した agent 含む）が JSON に
+        ``source: "human"`` と書くだけで人間承認を偽装できていた
+        （ADR-0007）。
+        """
+        with pytest.raises(KnowledgeInputError, match="source"):
+            parse_knowledge_payload({"kind": "fact", "title": "t", "source": source})
 
-    def test_explicit_pending_status_kept_for_human_source(self) -> None:
-        """ペイロードの明示 status はソース既定より優先される。"""
-        draft = parse_knowledge_payload(
-            {"kind": "fact", "title": "t", "source": "human", "status": "pending"}
-        )
-        assert draft.status == "pending"
+    @pytest.mark.parametrize("status", ["active", "archived"])
+    def test_non_default_status_is_rejected(self, status: str) -> None:
+        """H-01: generic learn は status=pending 固定。active/archived の自己申告は拒否する。
 
-    def test_explicit_active_status_kept_for_agent_source(self) -> None:
-        """明示 `--status active` 相当（ペイロード指定）は agent 由来でも active を維持する。"""
-        draft = parse_knowledge_payload(
-            {"kind": "fact", "title": "t", "source": "agent", "status": "active"}
-        )
-        assert draft.status == "active"
+        caller が JSON に ``status: "active"`` と書くだけで、人間承認
+        （``promote <key>``）を経ずに永続 SessionStart context への注入を
+        自己承認できていた（ADR-0007）。
+        """
+        with pytest.raises(KnowledgeInputError, match="status"):
+            parse_knowledge_payload({"kind": "fact", "title": "t", "status": status})
 
     def test_explicit_key_and_fields_are_kept(self) -> None:
         """明示された key と任意項目はそのまま残る。"""

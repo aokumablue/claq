@@ -42,27 +42,27 @@ bluecore_run_bg() {
 #   bluecore_mem_learn --kind <kind> --title "<one line>" \
 #                      [--body "<why/how>"] [--key <slug>] \
 #                      [--scope repo|global] [--domain <tag>] \
-#                      [--confidence 0.0-1.0] [--status active|pending|archived] \
+#                      [--confidence 0.0-1.0] \
 #                      [--source-ref <path-or-url>]
 #
 # --kind and --title are required; everything else has a default.
 #   kind    : convention | decision | pitfall | howto | fact | preference
 #   scope   : repo (default) | global
-#   status  : default depends on source, not a fixed value (A-03). This
-#             helper has no --source flag, so every card it records has
-#             source=agent, whose default status is pending (needs a human
-#             to run `/instinct promote` before it is injected at
-#             SessionStart). Pass --status active explicitly to opt out.
-#             Other values: archived (superseded/retired; never injected).
+#   status  : always pending. This helper has no --status/--source flag
+#             (H-01: caller-supplied source/status are not trusted as
+#             authority for the generic learn path — `mem.cli learn`
+#             itself rejects them). Every card it records has
+#             source=agent, status=pending, and needs a human to run
+#             `/instinct promote <key>` before it is injected at
+#             SessionStart.
 #   key     : defaults to a slug derived from the title, so re-recording the
 #             same title updates that card instead of piling up duplicates.
 #
 # Values are marshalled into JSON by python3, so quotes, newlines and
 # non-ASCII text in --title / --body need no shell escaping.
 bluecore_mem_learn() {
-  # zsh marks `status` (and friends) read-only, so every local is prefixed.
   local card_key="" card_kind="" card_scope="" card_title="" card_body=""
-  local card_domain="" card_confidence="" card_status="" card_source_ref=""
+  local card_domain="" card_confidence="" card_source_ref=""
 
   while [ "$#" -gt 0 ]; do
     if [ "$#" -lt 2 ]; then
@@ -77,7 +77,6 @@ bluecore_mem_learn() {
       --body) card_body="$2" ;;
       --domain) card_domain="$2" ;;
       --confidence) card_confidence="$2" ;;
-      --status) card_status="$2" ;;
       --source-ref) card_source_ref="$2" ;;
       *)
         printf 'bluecore_mem_learn: unknown option: %s\n' "$1" >&2
@@ -99,10 +98,9 @@ bluecore_mem_learn() {
   BLUECORE_LEARN_BODY="$card_body" \
   BLUECORE_LEARN_DOMAIN="$card_domain" \
   BLUECORE_LEARN_CONFIDENCE="$card_confidence" \
-  BLUECORE_LEARN_STATUS="$card_status" \
   BLUECORE_LEARN_SOURCE_REF="$card_source_ref" \
   python3 -c 'import json, os, sys
-fields = ("key", "kind", "scope", "title", "body", "domain", "confidence", "status", "source_ref")
+fields = ("key", "kind", "scope", "title", "body", "domain", "confidence", "source_ref")
 payload = {f: os.environ["BLUECORE_LEARN_" + f.upper()] for f in fields}
 json.dump({k: v for k, v in payload.items() if v}, sys.stdout, ensure_ascii=False)
 ' | bluecore_run bluecore.mem.cli learn

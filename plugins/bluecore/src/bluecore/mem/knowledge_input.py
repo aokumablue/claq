@@ -5,10 +5,16 @@
 前に Python 側で強制する。現在の入力経路は ``mem learn``（stdin の JSON。
 人間・エージェントが明示的に書く）の1つのみ。
 
-``source`` の許容値 ``observer`` は、観測ログから自動抽出して投入していた
-session-observer エージェント（206585c で削除済み）の名残。既存 DB の
-CHECK 制約との互換のため ``SOURCES``／schema からは削除していないが、
-これを自動で書き込む経路は現在存在しない。
+``source``/``status`` は generic learn の authority としては扱わない
+（H-01 対応）。``mem learn`` の呼び出し元は agent・human・agent が処理した
+外部入力のいずれもあり得て CLI 側には区別する手段が無いため、caller が
+JSON へ ``source: "human"`` や ``status: "active"`` と書くだけで、永続
+SessionStart context への注入（``status='active'``）を自己承認できていた。
+本モジュールは常に ``source="agent"`` / ``status="pending"`` を書き込み、
+payload がそれ以外の値を明示した場合は ``KnowledgeInputError`` にする
+（黙って上書きすると「指定したのに効いていない」という別の事故を招くため）。
+``status='active'`` への昇格は ``mem promote <key>`` による人間承認のみで
+行う（詳細は ``docs/adr/0007-*.md``）。
 
 検証を素通しする経路が生まれると、CHECK 制約違反が
 ``sqlite3.IntegrityError`` として遅れて表面化し、どのフィールドが悪いのか
@@ -37,10 +43,13 @@ SCOPES: frozenset[str] = frozenset({"global", "repo"})
 """``knowledge.scope`` の許容値。"""
 
 STATUSES: frozenset[str] = frozenset({"active", "pending", "archived"})
-"""``knowledge.status`` の許容値。注入されるのは ``active`` のみ。"""
+"""``knowledge.status`` の許容値。``list``/``search`` の ``--status`` 絞り込み
+フラグが参照する（generic learn からは常に ``pending`` 固定。H-01 対応）。"""
 
-SOURCES: frozenset[str] = frozenset({"agent", "observer", "human"})
-"""``knowledge.source`` の許容値。"""
+# generic learn 経路が常に書き込む固定値（H-01 対応）。payload/CLI からの
+# 上書きは authority として扱わず、非既定値は KnowledgeInputError にする。
+_FIXED_SOURCE = "agent"
+_FIXED_STATUS = "pending"
 
 DEFAULT_CONFIDENCE = 0.5
 """``confidence`` 未指定時の確信度。"""
@@ -116,16 +125,14 @@ def _payload_choice(
     allowed: frozenset[str],
     *,
     default: str = "",
-    override: str | None = None,
 ) -> str:
-    """ペイロード（または上書き値）から列挙値を取り出して検証する。
+    """ペイロードから列挙値を取り出して検証する。
 
     Args:
         payload: 知識カードを表す dict。
         name: 項目名。ペイロードのキーとエラーメッセージに使う。
         allowed: 許可される値の集合。
         default: ペイロードに値が無いときの既定値。
-        override: ペイロードより優先する値。CLI フラグ（例: ``--status``）の固定値に使う。
 
     Returns:
         検証を通った列挙値。
@@ -133,7 +140,33 @@ def _payload_choice(
     Raises:
         KnowledgeInputError: 値が *allowed* に含まれない場合。
     """
-    return validate_choice(name, override or str(payload.get(name) or default), allowed)
+    return validate_choice(name, str(payload.get(name) or default), allowed)
+
+
+def _fixed_choice(payload: dict[str, Any], name: str, fixed_value: str) -> str:
+    """generic learn 経路で常に固定値を返し、payload の非既定値を authority として拒否する（H-01 対応）。
+
+    payload が *name* を明示的に指定していて、かつその値が *fixed_value* と
+    異なる場合は ``KnowledgeInputError`` にする。未指定、または *fixed_value*
+    と同じ値の明示は許可する（既定値の明示は無害なため）。
+
+    Args:
+        payload: 知識カードを表す dict。
+        name: 項目名。ペイロードのキーとエラーメッセージに使う。
+        fixed_value: この経路が常に使う固定値。
+
+    Returns:
+        常に *fixed_value*。
+
+    Raises:
+        KnowledgeInputError: payload が *fixed_value* と異なる値を明示した場合。
+    """
+    raw = payload.get(name)
+    if raw is not None and str(raw) != fixed_value:
+        raise KnowledgeInputError(
+            f"{name} は generic learn からは指定できません（常に {fixed_value!r} 固定）: {raw!r}"
+        )
+    return fixed_value
 
 
 def generate_key(raw_title: str, kind: str) -> str:
@@ -250,11 +283,7 @@ class KnowledgeDraft:
         )
 
 
-def parse_knowledge_payload(
-    payload: dict[str, Any],
-    *,
-    status_override: str | None = None,
-) -> KnowledgeDraft:
+def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     """JSON ペイロードを検証済みの ``KnowledgeDraft`` へ変換する。
 
     ``title`` / ``body`` / ``source_ref`` / ``domain`` は DB へ書く前に
@@ -268,16 +297,18 @@ def parse_knowledge_payload(
     redact + slugify を通してから使う（同じ理由。明示 key だけが検証・
     redaction を素通りする穴になっていた）。
 
+    ``source``/``status`` は常に ``agent``/``pending`` に固定する（H-01
+    対応）。payload がそれ以外の値を明示した場合は拒否する（`_fixed_choice`）。
+
     Args:
         payload: 知識カードを表す dict。
-        status_override: ペイロードの ``status`` より優先する値。
-            CLI の ``--status`` フラグに使う。
 
     Returns:
         全項目が CHECK 制約を満たす KnowledgeDraft。
 
     Raises:
-        KnowledgeInputError: title 欠落や列挙値・数値の不正がある場合。
+        KnowledgeInputError: title 欠落、列挙値・数値の不正、または
+            ``source``/``status`` に非既定値を明示した場合。
     """
     title = str(payload.get("title") or "").strip()
     if not title:
@@ -285,18 +316,8 @@ def parse_knowledge_payload(
 
     kind = _payload_choice(payload, "kind", KINDS)
     scope = _payload_choice(payload, "scope", SCOPES, default="repo")
-    source = _payload_choice(payload, "source", SOURCES, default="agent")
-    # status の既定値は source に応じて分岐する（A-03 対応）。human が明示的に
-    # 書いたカードは active（従来どおり SessionStart 注入対象）、
-    # agent/observer 由来（`bluecore_mem_learn` 経由を含む）は pending
-    # （`/instinct promote` で人間が昇格させるまで注入されない）。
-    # `_payload_choice` の解決順（override or payload[name] or default）は
-    # 変えないため、ペイロードの明示 `status` や CLI の `--status` は
-    # 引き続きこの既定値より優先される。
-    status_default = "active" if source == "human" else "pending"
-    status = _payload_choice(
-        payload, "status", STATUSES, default=status_default, override=status_override
-    )
+    source = _fixed_choice(payload, "source", _FIXED_SOURCE)
+    status = _fixed_choice(payload, "status", _FIXED_STATUS)
 
     raw_key = str(payload.get("key") or "").strip()
     # 明示 key もシークレット断片を持ち込みうるため、生成 key と同じく

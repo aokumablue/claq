@@ -351,7 +351,7 @@ class TestLearn:
     def test_stores_global_card_with_all_fields(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """明示された全項目をそのまま保存する。"""
+        """明示された全項目をそのまま保存する（source/status は含まない。H-01: 常に固定値）。"""
         payload = {
             "key": "pipefail",
             "scope": "global",
@@ -360,7 +360,6 @@ class TestLearn:
             "body": "パイプ先の失敗を拾う",
             "domain": "testing",
             "confidence": 0.9,
-            "source": "human",
             "source_ref": "CLAUDE.md",
         }
         stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], payload)
@@ -370,25 +369,48 @@ class TestLearn:
             found = db.get_knowledge_by_key("pipefail")
         assert found is not None
         assert (found.scope, found.repo_id, found.domain) == ("global", None, "testing")
-        assert (found.confidence, found.source, found.source_ref) == (0.9, "human", "CLAUDE.md")
+        assert (found.confidence, found.source, found.source_ref) == (0.9, "agent", "CLAUDE.md")
 
-    def test_status_pending_flag_accepts_source_observer_value(
+    @pytest.mark.parametrize("source", ["human", "observer"])
+    def test_non_default_source_in_payload_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source: str
+    ) -> None:
+        """H-01 回帰防止: JSON の非既定 source（human/observer 自己申告）は usage error にする。
+
+        修正前は caller が JSON へ ``source: "human"`` と書くだけで人間承認を
+        偽装できていた（v0.9.34 監査 H-01）。
+        """
+        payload = {"scope": "global", "kind": "fact", "title": "observed", "source": source}
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], payload)
+        assert (stdout, exit_code) == ("", 1)
+        assert "source" in stderr
+        with Database(tmp_path / "mem.db") as db:
+            assert db.get_knowledge_by_key("observed") is None
+
+    def test_status_flag_on_learn_is_rejected(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """`--status pending` は `source: observer`（schema 互換のため残る許容値）でも積める。
-
-        observer による自動投入経路そのものは 206585c で削除済み。ここでは
-        `source` の CHECK 制約許容値としての `observer` が引き続き通ることのみ検証する。
-        """
-        payload = {"scope": "global", "kind": "fact", "title": "observed", "source": "observer"}
-        _stdout, _stderr, exit_code = _run_cli(
-            monkeypatch, tmp_path, ["learn", "--status", "pending"], payload
+        """H-01 回帰防止: `learn --status` は指定できない（caller の自己承認経路を塞ぐ）。"""
+        payload = {"scope": "global", "kind": "fact", "title": "observed"}
+        stdout, stderr, exit_code = _run_cli(
+            monkeypatch, tmp_path, ["learn", "--status", "active"], payload
         )
-        assert exit_code == 0
+        assert (stdout, exit_code) == ("", 1)
+        assert "learn --status は指定できません" in stderr
         with Database(tmp_path / "mem.db") as db:
-            found = db.get_knowledge_by_key("observed")
-        assert found is not None
-        assert (found.status, found.source) == ("pending", "observer")
+            assert db.get_knowledge_by_key("observed") is None
+
+    @pytest.mark.parametrize("status", ["active", "archived"])
+    def test_non_default_status_in_payload_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: str
+    ) -> None:
+        """H-01 回帰防止: JSON の非既定 status（active/archived 自己申告）は usage error にする。"""
+        payload = {"scope": "global", "kind": "fact", "title": "observed", "status": status}
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], payload)
+        assert (stdout, exit_code) == ("", 1)
+        assert "status" in stderr
+        with Database(tmp_path / "mem.db") as db:
+            assert db.get_knowledge_by_key("observed") is None
 
     def test_status_can_come_from_json(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """JSON の status も受け付ける。"""

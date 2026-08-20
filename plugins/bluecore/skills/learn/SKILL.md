@@ -75,9 +75,11 @@ bluecore_mem_learn --key pytest-needs-pipefail --kind pitfall --scope repo \
   --body "パイプ先の exit code だけが \$? に載るため、set -o pipefail が無いと pytest の失敗が握り潰されて緑に見える。"
 ```
 
-`bluecore_mem_learn` は `--source` を持たず常に `source=agent` になり、既定 `status` は
-`pending`（A-03: agent 由来カードは `/instinct promote` で人間が昇格させるまで注入されない）。
-確信が持てる知識で即座に注入対象へ入れたい場合のみ `--status active` を明示する。
+`bluecore_mem_learn`（および `mem.cli learn` そのもの）は `--source` / `--status` を
+持たず、常に `source=agent` / `status=pending` で登録される（H-01 対応: agent が
+JSON へ `source: "human"` や `status: "active"` と書いても採用されず usage error に
+なる。永続 SessionStart context への自己承認を防ぐため）。注入対象への昇格は
+`/instinct promote <key>` による人間承認のみ。
 
 ## 参照する
 

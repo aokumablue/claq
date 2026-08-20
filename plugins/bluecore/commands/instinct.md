@@ -11,8 +11,9 @@ command: /instinct
 `knowledge` テーブルに蓄積された **知識カード** の棚卸しを扱う。
 知識モデル・kind の使い分け・記録基準は `../skills/learn/SKILL.md` が正。
 
-中心となるワークフローは **昇格**: `bluecore_run bluecore.mem.cli learn --status pending` で入れた候補は
-`status='pending'` のままで SessionStart に注入されない。人間がここでレビューして
+中心となるワークフローは **昇格**: `learn` で入れた候補は常に `status='pending'` で登録され
+（H-01 対応: `source`/`status` は caller が指定しても採用されず、常に `source=agent`/
+`status=pending` に固定される）、SessionStart に注入されない。人間がここでレビューして
 `promote` した知識だけが `status='active'` になり、以後の全セッションへ注入される。
 
 ## grillme 起動（条件付き）
@@ -103,7 +104,8 @@ bluecore_mem_learn --key sqlite-wal-sidecars --kind pitfall --scope repo \
 ```
 
 同じ `key` への `learn` は上書き更新になる（重複行は作られない）。
-`--status pending` を付けると昇格待ちで登録される。
+`--status` フラグは無い（H-01: 常に `status=pending` で登録され、JSON で
+`status`/`source` を明示しても採用されず usage error になる）。
 
 ## ステップ3: 結果報告
 

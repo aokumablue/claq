@@ -252,6 +252,33 @@ def _check_positional_arity(command: str, args: CommandArgs) -> None:
             raise CommandError(f"{command} は key を1つだけ指定してください: {' '.join(args.positionals)!r}")
 
 
+def _check_learn_options(command: str, args: CommandArgs) -> None:
+    """learn は ``--status`` を受け付けない（H-01 対応）。
+
+    caller（agent・外部入力を処理した agent 含む）が ``--status active`` を
+    指定するだけで永続 SessionStart context への注入を自己承認できていた。
+    ``--status`` は ``list``/``search`` の絞り込みフラグとしては引き続き有効
+    （`_VALUE_OPTIONS` に残したまま）だが、``learn`` に渡された場合だけ拒否する。
+    黙って無視すると「指定したのに効いていない」という別の事故を招くため、
+    usage error として明示的に拒否する。
+
+    Args:
+        command: 実行するコマンド名。
+        args: コマンド引数。
+
+    Returns:
+        なし。
+
+    Raises:
+        CommandError: ``learn`` に ``--status`` が指定された場合。
+    """
+    if command == "learn" and "--status" in args.values:
+        raise CommandError(
+            "learn --status は指定できません（常に status=pending で登録されます。"
+            "有効化は `promote <key>` による人間承認のみです）"
+        )
+
+
 def _load_settings_or_raise() -> Settings:
     """Settings と logger を初期化して返す。
 
@@ -320,6 +347,7 @@ def main() -> int:
     try:
         args = _parse_args_and_stdin(sys.argv[2:])
         _check_positional_arity(command, args)
+        _check_learn_options(command, args)
         settings = _load_settings_or_raise()
     except CommandError as e:
         print(str(e), file=sys.stderr)
@@ -511,17 +539,21 @@ def _handle_learn(settings: Settings, args: CommandArgs) -> None:
     """learn コマンド: stdin の JSON から知識カードを 1 件登録する。
 
     既存の key と衝突した場合は ``upsert_knowledge`` が更新に落とす。
-    出力は ``learned: <key>`` の 1 行のみ。
+    出力は ``learned: <key>`` の 1 行のみ。``source``/``status`` は常に
+    ``agent``/``pending`` に固定される（H-01 対応。caller が JSON の
+    ``source``/``status`` を書いても authority として扱わない）。有効化
+    （``status='active'``）は ``promote <key>`` による人間承認のみ。
 
     Args:
         settings: mem 設定。
         args: コマンド引数と stdin JSON。
 
     Raises:
-        CommandError: title 欠落や列挙値・数値の不正がある場合。
+        CommandError: title 欠落や列挙値・数値の不正がある場合、または
+            ``source``/``status`` を明示指定した場合。
     """
     try:
-        draft = parse_knowledge_payload(args.stdin_data, status_override=args.values.get("--status"))
+        draft = parse_knowledge_payload(args.stdin_data)
     except KnowledgeInputError as e:
         raise _reject_bad_input(e) from e
 
