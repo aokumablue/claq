@@ -591,19 +591,28 @@ class TestEnvShRealExecution:
         assert result.returncode == 0, result.stderr
         assert "ran:marker" in result.stdout
 
-    def test_only_stale_candidates_present_exits_127(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """鮮度ウィンドウ外のポインタしか無ければ、それだけでは解決しない。"""
+    def test_single_idle_candidate_still_resolves_regardless_of_age(
+        self, tmp_path: Path, _isolate_home: Path
+    ) -> None:
+        """対立が無ければ、鮮度ウィンドウ外の唯一の候補でも解決する。
+
+        鮮度フィルタは「対立を解消するため」だけに使う（advisor 指摘）。
+        候補が 1 つしか無く誰とも対立していないなら、それがどれだけ古くても
+        単独稼働ホストの正当な記録であり、単に長時間アイドルだっただけで
+        127 にしてはならない。
+        """
         _install_env_sh(_isolate_home)
-        stale_root = _make_plugin_root(tmp_path / "stale-root")
+        idle_root = _make_plugin_root(tmp_path / "idle-root")
         roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
-        stale_entry = roots_dir / "555555"
-        _write_pointer(roots_dir, 555555, stale_root)
+        idle_entry = roots_dir / "555555"
+        _write_pointer(roots_dir, 555555, idle_root)
         old = time.time() - 10 * 60
-        os.utime(stale_entry, (old, old))
+        os.utime(idle_entry, (old, old))
 
         result = _run_env_sh(_isolate_home)
 
-        assert result.returncode == 127
+        assert result.returncode == 0, result.stderr
+        assert "ran:marker" in result.stdout
 
     def test_exits_127_when_no_candidates(self, _isolate_home: Path) -> None:
         _install_env_sh(_isolate_home)

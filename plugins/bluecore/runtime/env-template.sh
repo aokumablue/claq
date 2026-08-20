@@ -20,24 +20,27 @@
 #      covers hosts that wrap hook launches in one or more intermediate
 #      shells before reaching the shell that runs this bootstrap line.
 #   2. If none of the above match: collect every valid pointer under
-#      roots/ written in the last _BLUECORE_RECENT_MINUTES minutes, and use
-#      it only if they all agree on the same root path. This is
-#      deliberately "do all *recent* candidates agree" rather than "is
-#      there exactly one file" — a single host can legitimately accumulate
-#      several roots/<pid> entries that all point at the same install
-#      (e.g. if the launcher's own PPID is a short-lived wrapper shell
-#      rather than the host process itself, every hook invocation records
-#      a different, quickly-dead PID, but they all agree on the root).
-#      Genuinely different hosts/installs almost never agree on the
-#      literal path, so a disagreement is a reliable "don't guess" signal.
-#      The recency filter exists so that a host that was used once and then
-#      sat idle doesn't keep another, currently-idle host's machine dark
-#      for the full hourly GC cycle — only pointers from hosts active in
-#      roughly the same window as "now" are asked to agree.
-#      Zero valid recent pointers, or two that disagree, is ambiguous and
-#      this exits 127 rather than guessing (R-05: a blind "most recent"
-#      fallback can pick another host's install when multiple hosts run
-#      concurrently).
+#      roots/ and use it if they all agree on the same root path. This is
+#      deliberately "do all candidates agree" rather than "is there exactly
+#      one file" — a single host can legitimately accumulate several
+#      roots/<pid> entries that all point at the same install (e.g. if the
+#      launcher's own PPID is a short-lived wrapper shell rather than the
+#      host process itself, every hook invocation records a different,
+#      quickly-dead PID, but they all agree on the root). Age does not
+#      matter here: an idle single host must still resolve no matter how
+#      long ago its last hook fired.
+#   3. Only if step 2 finds a genuine disagreement (two different root
+#      values) does the age of each pointer matter: re-check agreement
+#      using only pointers written in the last _BLUECORE_RECENT_MINUTES
+#      minutes. A host that stopped being used should not keep a
+#      currently-active host dark for the full hourly GC cycle just
+#      because its stale pointer is still sitting in roots/; narrowing to
+#      "recently active" resolves that without ever narrowing away an idle
+#      single host's own (undisputed) pointer.
+#      Zero valid pointers, or a disagreement that persists after
+#      narrowing to the recency window, is ambiguous and this exits 127
+#      rather than guessing (R-05: a blind "most recent" fallback can pick
+#      another host's install when multiple hosts run concurrently).
 #
 # If nothing resolves, this prints a message to stderr and returns/exits 127
 # so the `|| exit 127` in the usage line above stops the caller instead of
@@ -74,33 +77,49 @@ while [ "$_bluecore_walk_depth" -lt 4 ]; do
 done
 unset _bluecore_walk_pid _bluecore_walk_depth _bluecore_walk_parent
 
-# --- tier 2: all-valid-candidates-agree fallback ---
-if [ -z "$_bluecore_env_root" ] && [ -d "$HOME/.bluecore/roots" ]; then
-  _bluecore_agreed_root=""
-  _bluecore_conflict=0
+_bluecore_scan_agreement() {
+  # $1: max age in minutes to admit a candidate, or "" for no age filter.
+  # Sets _bluecore_scan_root (the agreed root, or "" if none/disagreement)
+  # and _bluecore_scan_conflict (1 if two candidates disagreed).
+  _bluecore_scan_minutes="$1"
+  _bluecore_scan_root=""
+  _bluecore_scan_conflict=0
   for _bluecore_entry in "$HOME/.bluecore/roots"/*; do
     [ -e "$_bluecore_entry" ] || continue
     case "$(basename "$_bluecore_entry")" in
       '' | *[!0-9]*) continue ;;
     esac
-    # -maxdepth 0 evaluates only this one path (no descent — it is a file,
-    # not a directory); empty output means it is older than the window or
-    # no longer exists. find is used instead of stat because stat's format
-    # flag differs between BSD (macOS, -f) and GNU (Linux, -c) coreutils,
-    # while -mmin/-maxdepth are portable across both (verified).
-    [ -n "$(find "$_bluecore_entry" -maxdepth 0 -mmin "-$_BLUECORE_RECENT_MINUTES" 2>/dev/null)" ] || continue
+    if [ -n "$_bluecore_scan_minutes" ]; then
+      # -maxdepth 0 evaluates only this one path (no descent — it is a
+      # file, not a directory); empty output means older than the window
+      # or gone. find is used instead of stat because stat's format flag
+      # differs between BSD (macOS, -f) and GNU (Linux, -c) coreutils,
+      # while -mmin/-maxdepth are portable across both (verified).
+      [ -n "$(find "$_bluecore_entry" -maxdepth 0 -mmin "-$_bluecore_scan_minutes" 2>/dev/null)" ] || continue
+    fi
     _bluecore_candidate="$(_bluecore_read_root_pointer "$_bluecore_entry")"
     [ -n "$_bluecore_candidate" ] || continue
-    if [ -z "$_bluecore_agreed_root" ]; then
-      _bluecore_agreed_root="$_bluecore_candidate"
-    elif [ "$_bluecore_candidate" != "$_bluecore_agreed_root" ]; then
-      _bluecore_conflict=1
+    if [ -z "$_bluecore_scan_root" ]; then
+      _bluecore_scan_root="$_bluecore_candidate"
+    elif [ "$_bluecore_candidate" != "$_bluecore_scan_root" ]; then
+      _bluecore_scan_conflict=1
     fi
   done
-  if [ -n "$_bluecore_agreed_root" ] && [ "$_bluecore_conflict" -eq 0 ]; then
-    _bluecore_env_root="$_bluecore_agreed_root"
+}
+
+# --- tier 2: all-valid-candidates-agree fallback, narrowed to recent
+#     pointers only if there is an actual disagreement to resolve ---
+if [ -z "$_bluecore_env_root" ] && [ -d "$HOME/.bluecore/roots" ]; then
+  _bluecore_scan_agreement ""
+  if [ -n "$_bluecore_scan_root" ] && [ "$_bluecore_scan_conflict" -eq 0 ]; then
+    _bluecore_env_root="$_bluecore_scan_root"
+  elif [ "$_bluecore_scan_conflict" -eq 1 ]; then
+    _bluecore_scan_agreement "$_BLUECORE_RECENT_MINUTES"
+    if [ -n "$_bluecore_scan_root" ] && [ "$_bluecore_scan_conflict" -eq 0 ]; then
+      _bluecore_env_root="$_bluecore_scan_root"
+    fi
   fi
-  unset _bluecore_agreed_root _bluecore_conflict _bluecore_entry _bluecore_candidate
+  unset _bluecore_scan_root _bluecore_scan_conflict _bluecore_scan_minutes _bluecore_entry _bluecore_candidate
 fi
 
 if [ -z "$_bluecore_env_root" ] || [ ! -f "$_bluecore_env_root/runtime/bluecore-helpers.sh" ]; then
