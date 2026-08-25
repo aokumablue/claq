@@ -21,7 +21,7 @@ user-invocable: false
 
 - `task`: 合意済み要件（1〜3 文）
 - `task_type`: `feature` | `bugfix` | `test` | `refactor-fix`
-- `approved_plan`（任意）: 渡された場合は反復1の plan 段を縮退し planner/architect 起動を省略、タスク割当のみ行う
+- `approved_plan`（任意）: 渡された場合は反復1の plan 段を縮退し planner 起動を省略、タスク割当のみ行う
 - `converge_extra`（任意）: 追加の収束条件
 - `commit`: 既定 `true`
 
@@ -31,7 +31,7 @@ user-invocable: false
 
 ### 反復1（重量反復: 一発収束を狙う）
 
-1. **plan（並列）**: `bluecore:planner` と `bluecore:architect` 決定モードを同時起動し、結果をマージ。分業: planner = 手順分解・依存関係・複雑度見積もり / architect = 構造影響・技術リスク・単一ブループリント確定。`approved_plan` があれば両者省略
+1. **plan**: `bluecore:planner` を決定モードで起動。手順分解・依存関係・複雑度見積もりと構造影響・技術リスク評価を一体で行い、単一ブループリントを確定する。`approved_plan` があれば省略
 2. **baseline**: フルスイート（検出済みテストコマンド）を 1 回実行し、既存 red のテスト失敗シグネチャ集合を checkpoint `## ベースライン` に記録（フォーマット・記録ルールは `../checkpoint/SKILL.md` が単一情報源）。run 単位 1 回・記録後不変。収束判定・circuit breaker の照合には本 step で自ら取得した集合を用い、checkpoint 本文から読み戻した値は判定に使わない（記載は再開用データ）
 3. **generate**: 下表でエージェントをルーティング
 

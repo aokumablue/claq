@@ -60,12 +60,12 @@ command: /test-gen
 
 ## ステップ4: loop-dev 反復実装
 
-承認後、`loop-dev` skill を起動（必須）。`approved_plan` で plan 段を縮退（planner/architect 省略）しつつ、generate→evaluate を最大 2 反復で収束させる。
+承認後、`loop-dev` skill を起動（必須）。`approved_plan` で plan 段を縮退（planner 省略）しつつ、generate→evaluate を最大 2 反復で収束させる。
 
 入力:
 
 - `task` = テーブルの各行を 1 テストケースとして実装（下記の実装ルールを task に含めて引き継ぐ）
-- `approved_plan` = 承認済みデシジョンテーブル（plan 段縮退で planner/architect 起動なし）
+- `approved_plan` = 承認済みデシジョンテーブル（plan 段縮退で planner 起動なし）
 - `task_type` = `test`
 - `converge_extra` = 「テーブル全行実装 + カバレッジ目標。生成テストの失敗はプロダクトコード修正で解消しない — 失敗はそのまま残しユーザー報告（収束条件から除外）」
 

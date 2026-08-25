@@ -17,7 +17,6 @@
     "plugin"
   ],
   "agents": [
-    "./agents/architect.md",
     "./agents/bench-analyzer.md",
     "./agents/code-refiner.md",
     "./agents/comparator.md",

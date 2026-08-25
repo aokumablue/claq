@@ -38,7 +38,7 @@ bluecore は、Claude Code の作業を「最初の計画からレビューま�
 | 用語 | 種別 | 起動方法 | 例 |
 |---|---|---|---|
 | **Command** | ユーザーが明示的に呼ぶ | `/<name> [args]` | `/plan`, `/review`, `/feat-dev` |
-| **Agent** | 内部から委譲される専門家 | コマンド / skill から `Task` ツール経由で `subagent_type` 指定起動 | `reviewer`, `architect`, `tdd-writer` |
+| **Agent** | 内部から委譲される専門家 | コマンド / skill から `Task` ツール経由で `subagent_type` 指定起動 | `reviewer`, `planner`, `tdd-writer` |
 | **Skill** | 条件発火 or 委譲先の知識モジュール | description マッチで Claude Code が自動起動 / fork コンテキストで委譲 | `grillme`, `learn`, `skill-make` |
 | **Knowledge** | 蓄積された知識カード（罠・規約・手順・事実） | SessionStart で `<bluecore-memory>` として自動注入（`status='active'` のみ） | `/instinct` で棚卸し・昇格 |
 | **Hook** | ツール実行時に自動発火するスクリプト | `hooks.json` 登録 → Claude Code が呼ぶ | PreToolUse, SessionStart, SessionEnd |
@@ -131,7 +131,7 @@ flowchart LR
     direction TB
     SG1["grillme"]:::skill -.-> AE
     AE["🔍 Explore<br/>既存構造探索（大規模時のみ並列）"]:::agent --> SG2["grillme<br/>質問確定"]:::skill
-    SG2 --> AA["🏗️ architect<br/>決定モード"]:::agent
+    SG2 --> AA["🏗️ planner<br/>決定モード"]:::agent
     AA & APO["⚡ code-refiner<br/>mode=perf"]:::agent --> AT["🧪 tdd-writer<br/>RED→GREEN"]:::agent
     AT --> AR["✅ reviewer"]:::agent
     AT --> ASEC["🛡️ security-auditor"]:::agent
@@ -525,7 +525,7 @@ flowchart TB
 
   subgraph internal["⚙️ Internal Layer"]
     direction LR
-    AGT["Agents (11)<br/>reviewer / architect / code-refiner ..."]:::agent
+    AGT["Agents (10)<br/>reviewer / planner / code-refiner ..."]:::agent
     SKL["Skills (13, all fork)<br/>grillme / learn / secure ..."]:::skill
   end
 
