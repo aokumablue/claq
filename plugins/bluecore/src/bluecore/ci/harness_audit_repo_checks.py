@@ -192,27 +192,6 @@ def _repo_tool_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _repo_context_compact_checks(root_dir: str | Path) -> list[dict[str, Any]]:
-    """Context Efficiency のコンパクト関連チェック1件を返す。
-
-    自動 Bash 出力圧縮フック（旧 redux_filter）は、非可逆な行折りたたみが
-    ソースコードを構文的に破壊する correctness hazard と判明したため、
-    推奨チェックから撤去した（bluecore 自身が本パターンを廃止済み）。
-    """
-    return [
-        {
-            "id": "context-strategic-compact",
-            "category": "Context Efficiency",
-            "points": 3,
-            "scopes": ["repo", "skills"],
-            "path": "output-styles/slim.md",
-            "description": "コンテキスト最大圧縮 output-style が存在する（LLMレスポンス・ファイルの原始人口調圧縮）",
-            "pass": file_exists(root_dir, "output-styles/slim.md"),
-            "fix": "Add output-styles/slim.md for maximum context compression.",
-        },
-    ]
-
-
 def _repo_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Context Efficiency カテゴリのチェック定義を返す。
 
@@ -222,7 +201,7 @@ def _repo_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]
     Returns:
         Context Efficiency チェック辞書のリスト
     """
-    return _repo_context_compact_checks(root_dir) + [
+    return [
         {
             "id": "context-model-route",
             "category": "Context Efficiency",
@@ -464,16 +443,6 @@ def _repo_cost_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]]:
         例外は発生しません。
     """
     return [
-        {
-            "id": "cost-skill",
-            "category": "Cost Efficiency",
-            "points": 4,
-            "scopes": ["repo", "skills"],
-            "path": "output-styles/slim.md",
-            "description": "コスト最適化 output-style が存在する（トークン削減による予算管理）",
-            "pass": file_exists(root_dir, "output-styles/slim.md"),
-            "fix": "Add output-styles/slim.md for budget-aware routing.",
-        },
         {
             "id": "cost-doc",
             "category": "Cost Efficiency",

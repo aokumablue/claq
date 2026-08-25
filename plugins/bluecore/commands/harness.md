@@ -83,7 +83,7 @@ bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path
 
 ## 出力仕様
 
-1. ベースライン `overall_score` と `max_score`（`repo` では65）
+1. ベースライン `overall_score` と `max_score`（`repo` では58）
 2. カテゴリ別スコアと指摘
 3. 失敗チェックと正確なファイルパス
 4. 上位3件のアクション（`top_actions`）。`--apply` 未指定ならここで停止し、harness-tuner 適用内容は出さない
