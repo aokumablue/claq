@@ -148,68 +148,193 @@ def test_mem_learn_invocations_pass_no_status_or_source_flag() -> None:
     assert violations == [], "\n".join(violations)
 
 
-def test_security_auditor_has_no_bash_access() -> None:
-    """security-auditor は tools frontmatter で Bash を持たない（F-05 対応）。
+_EXPECTED_AGENT_TOOLS = {
+    "bench-analyzer": {"Read", "Grep", "Glob", "Write"},
+    "code-refiner": {"Read", "Grep", "Glob", "Edit", "Write", "Bash"},
+    "comparator": {"Read", "Grep", "Glob", "Write"},
+    "grader": {"Read", "Grep", "Glob", "Write"},
+    "harness-tuner": {"Read", "Grep", "Glob", "Edit", "Write", "Bash"},
+    "planner": {"Read", "Grep", "Glob"},
+    "reviewer": {"Read", "Grep", "Glob", "Bash"},
+    "security-auditor": {"Read", "Grep", "Glob"},
+    "tdd-writer": {"Read", "Grep", "Glob", "Edit", "Write", "Bash"},
+}
 
-    reviewer は ruff check / test_cmd 再実行が職務で Bash を保持するが、
-    security-auditor の 10 項目チェックリストは Read/Grep/Glob だけで
-    完結し、本文も「コマンド実行はしない」と宣言している。frontmatter
-    の tools からも Bash を外し、権限として技術的に強制する。
+
+def _declared_tools(agent_name: str) -> set[str]:
+    """エージェント定義の frontmatter が宣言する tools 集合を返す。
+
+    Args:
+        agent_name: 拡張子を除いたエージェント名。
+
+    Returns:
+        宣言されたツール名の集合。
     """
-    frontmatter = (_ROOT / "agents" / "security-auditor.md").read_text(encoding="utf-8").split("---")[1]
+    frontmatter = (_ROOT / "agents" / f"{agent_name}.md").read_text(encoding="utf-8").split("---")[1]
     tools_line = next(line for line in frontmatter.splitlines() if line.strip().startswith("tools:"))
-    declared_tools = {tool.strip() for tool in tools_line.split(":", 1)[1].split(",")}
+    return {tool.strip() for tool in tools_line.split(":", 1)[1].split(",")}
 
-    assert "Bash" not in declared_tools
-    assert "Edit" not in declared_tools
-    assert "Write" not in declared_tools
+
+def test_agent_tools_match_expected_exactly() -> None:
+    """9 定義の tools 宣言が期待集合と完全一致すること（F-05 / ADR-0004 / ADR-0010）。
+
+    security-auditor の read-only は「本文の約束」ではなく tools 権限による技術的
+    強制であり、reviewer との権限非対称は ADR-0004 の決定そのもの。ADR-0010 は
+    さらに「新規エージェントに Task を与えない（子が子を呼ぶ階層を作らない）」を
+    tools 権限で構造的に保証すると定めた。
+
+    以前の実装は Bash/Edit/Write の**非包含**だけを見ていたため、`Task`（Bash 持ち
+    サブエージェントへ委譲できる）や `NotebookEdit` の追加を素通りさせていた。権限
+    はレビューできる場所に固定しておく必要があるため、集合の完全一致で検査する。
+    """
+    actual = {name: _declared_tools(name) for name in _EXPECTED_AGENT_TOOLS}
+    assert actual == _EXPECTED_AGENT_TOOLS
+
+
+def test_agent_files_match_expected_tools_map() -> None:
+    """tools 期待マップが agents/*.md の実体と過不足なく対応すること。
+
+    エージェントを追加・削除したときにマップの更新を強制する（マップから漏れた
+    定義は test_agent_tools_match_expected_exactly の検査を受けない）。
+    """
+    actual = {p.stem for p in (_ROOT / "agents").glob("*.md")}
+    assert actual == set(_EXPECTED_AGENT_TOOLS)
+
+
+def test_no_agent_can_spawn_subagents() -> None:
+    """どのエージェントも Task を持たないこと（ADR-0010「子が子を呼ばない」）。"""
+    holders = [name for name in _EXPECTED_AGENT_TOOLS if "Task" in _declared_tools(name)]
+    assert holders == []
 
 
 _SECTION_REF_RE = re.compile(r"「(#+ [^」]+)」")
 _BACKTICK_SECTION_REF_RE = re.compile(r"`(#+ [^`\n。、]+)`")
-_MD_PATH_REF_RE = re.compile(r"`[^`\n]+\.md`")
+_MD_PATH_REF_RE = re.compile(r"`([^`\n]+\.md)`")
 _HEADING_RE = re.compile(r"^(#+ .+)$", re.M)
+_FENCE_RE = re.compile(r"```.*?```", re.S)
+# `#` が行コメントである言語のフェンスは見出しを持たない（`# FAIL: ...` はコメント）
+_COMMENT_HASH_FENCE_RE = re.compile(r"^```(?:bash|sh|shell|zsh|console|python|yaml|yml|terraform|toml|ini)\b")
 
 
-def _iter_same_file_section_refs(text: str) -> Iterator[str]:
-    """同一ファイル内の見出しを指す節参照を列挙する。
+def _collect_headings(text: str) -> tuple[set[str], set[str]]:
+    """見出しを「実見出し」と「コードフェンス内のテンプレート見出し」に分けて返す。
 
-    鉤括弧形式（「## 節名」）は常に同一ファイル参照。バッククォート形式
-    (``## 節名``) は他ファイルの節を指す用法と混在するため、同じ行に
-    ``.md`` パス参照が無いものだけを同一ファイル参照とみなす。
+    フェンス内の行をまとめて実見出し扱いすると、出力テンプレート由来の偽見出しが
+    dangling 参照を隠す（実測: agents/skills 全体で 64 個）。一方 code-refiner の
+    ``## 未確認・スコープ外`` のようにテンプレート内にしか存在しない節も参照される
+    ため、除外ではなく別集合として扱う。
+
+    Args:
+        text: Markdown ファイルの全文。
+
+    Returns:
+        (実見出しの集合, テンプレート見出しの集合)。
+    """
+    template: set[str] = set()
+    for match in _FENCE_RE.finditer(text):
+        block = match.group(0)
+        if _COMMENT_HASH_FENCE_RE.match(block):
+            continue
+        template |= {m.group(1).strip() for m in _HEADING_RE.finditer(block)}
+    real = {m.group(1).strip() for m in _HEADING_RE.finditer(_FENCE_RE.sub("", text))}
+    return real, template
+
+
+def _iter_section_refs(text: str) -> Iterator[tuple[str, tuple[str, ...]]]:
+    """節参照と、その解決先候補（同一行に現れる .md パスすべて）を列挙する。
+
+    鉤括弧形式（「## 節名」）とバッククォート形式（``## 節名``）の両方を拾う。
+    同じ行に ``.md`` パス参照があれば、その節は他ファイルの見出しを指しうる
+    (checkpoint → loop-dev の ``## Human Gate`` 等)。1 行が複数のファイルへ言及
+    することがある（loop-dev の record 行は learn と checkpoint の両方を挙げつつ
+    checkpoint 側の節を参照する）ため、最初の 1 件ではなく全件を候補として返す。
 
     Args:
         text: Markdown ファイルの全文。
 
     Yields:
-        同一ファイル内に実在すべき見出しテキスト。
+        (節見出しテキスト, 解決先候補の相対パスのタプル)。候補が無ければ空タプル。
     """
-    for match in _SECTION_REF_RE.finditer(text):
-        yield match.group(1).strip()
     for line in text.splitlines():
-        for match in _BACKTICK_SECTION_REF_RE.finditer(line):
-            if _MD_PATH_REF_RE.search(line[: match.start()]) or _MD_PATH_REF_RE.search(line[match.end() :]):
-                continue
-            yield match.group(1).strip()
+        targets = tuple(match.group(1) for match in _MD_PATH_REF_RE.finditer(line))
+        for pattern in (_SECTION_REF_RE, _BACKTICK_SECTION_REF_RE):
+            for match in pattern.finditer(line):
+                yield match.group(1).strip(), targets
+
+
+def _resolves(ref: str, headings: tuple[set[str], set[str]]) -> bool:
+    """節参照が実見出しまたはテンプレート見出しのいずれかに解決するか判定する。
+
+    前方一致を許すのは見出し側が長い場合のみ（``## モード: benchmark_analysis`` →
+    実見出し ``## モード: benchmark_analysis — ベンチマーク結果の分析``）。逆向きは
+    現行コーパスで 1 件も必要とされず、削除済み節への参照がたまたま別見出しの
+    先頭語を含むだけで通る検出漏れを生むため許さない。
+
+    Args:
+        ref: 参照された節見出しテキスト。
+        headings: _collect_headings の戻り値。
+
+    Returns:
+        解決すれば True。
+    """
+    return any(head == ref or head.startswith(ref) for head in headings[0] | headings[1])
 
 
 def test_intra_document_section_references_resolve() -> None:
-    """文書内の節参照が、同一ファイルの見出しとして実在すること。
+    """節参照が、同一ファイルまたは同一行で指した .md の見出しとして実在すること。
 
-    節を削除・改名したときに参照だけが残ると、モデルは存在しないルールを
-    探し、見つからないまま幻覚で補完する。実例として 5d200fc が
-    ``## 確信度ゲート`` を撤去した際、agents/reviewer.md に参照が 2 箇所
-    残った。test_relative_md_references_resolve はバッククォート付きの
-    相対 .md **ファイル**参照しか見ないため、文書内の節参照はどのテスト
-    にも掛かっていなかった。
-
-    バッククォート形式の判定基準は _iter_same_file_section_refs を参照。
+    節を削除・改名したときに参照だけが残ると、モデルは存在しないルールを探し、
+    見つからないまま幻覚で補完する。実例として 5d200fc が ``## 確信度ゲート`` を
+    撤去した際、agents/reviewer.md に参照が 2 箇所残った。
+    test_relative_md_references_resolve はバッククォート付きの相対 .md **ファイル**
+    参照しか見ないため、文書内・文書間の節参照はどのテストにも掛かっていなかった。
     """
     broken: list[str] = []
+    cache: dict[Path, tuple[set[str], set[str]]] = {}
     for md_file in _iter_md_files():
         text = md_file.read_text(encoding="utf-8")
-        headings = {m.group(1).strip() for m in _HEADING_RE.finditer(text)}
-        for ref in _iter_same_file_section_refs(text):
-            if not any(head.startswith(ref) or ref.startswith(head) for head in headings):
-                broken.append(f"{md_file.relative_to(_ROOT)}: 「{ref}」")
-    assert broken == [], "同一ファイル内に見つからない節参照:\n" + "\n".join(broken)
+        cache[md_file] = _collect_headings(text)
+        for ref, targets in _iter_section_refs(text):
+            candidates = [cache[md_file]]
+            for target in targets:
+                target_path = (md_file.parent / target).resolve()
+                if not target_path.is_file():
+                    continue  # パス自体の実在は test_relative_md_references_resolve の担当
+                if target_path not in cache:
+                    cache[target_path] = _collect_headings(target_path.read_text(encoding="utf-8"))
+                candidates.append(cache[target_path])
+            if not any(_resolves(ref, headings) for headings in candidates):
+                where = f" (候補: {', '.join(targets)})" if targets else ""
+                broken.append(f"{md_file.relative_to(_ROOT)}: 「{ref}」{where}")
+    assert broken == [], "見つからない節参照:\n" + "\n".join(broken)
+
+
+def test_section_ref_helpers_detect_and_accept() -> None:
+    """節参照ヘルパーが、壊れた参照を検出し正しい参照を通すこと。
+
+    本体テストはコーパス経由でしかヘルパーを実行しないため、正規表現を将来
+    狭めても静かに検出範囲だけが縮む。陽性・陰性を直接固定する。
+    """
+    broken_doc = "## 絞り込み基準\n\n本文（確信度ゲートは「## 確信度ゲート」に従う）\n"
+    assert [ref for ref, _ in _iter_section_refs(broken_doc)] == ["## 確信度ゲート"]
+    assert not _resolves("## 確信度ゲート", _collect_headings(broken_doc))
+
+    ok_doc = "## 原則\n\n確信度の扱いは「## 原則」に従う。\n"
+    assert _resolves("## 原則", _collect_headings(ok_doc))
+
+    # 実見出しとフェンス内テンプレート見出しを取り違えない
+    fenced = "## 出力形式\n\n```\n## 未確認・スコープ外\n```\n\n`## 未確認・スコープ外` に理由を明記する。\n"
+    real, template = _collect_headings(fenced)
+    assert "## 未確認・スコープ外" in template and "## 未確認・スコープ外" not in real
+    assert _resolves("## 未確認・スコープ外", (real, template))
+
+    # `#` が行コメントの言語フェンスは見出しを持たない
+    assert _collect_headings("```bash\n# 開発リポジトリでは repo 版を source する\n```\n")[1] == set()
+
+    # 他ファイルを指す参照は解決先ファイルとして返る
+    cross = "- Human Gate 4 点 → `../loop-dev/SKILL.md` `## Human Gate`\n"
+    assert list(_iter_section_refs(cross)) == [("## Human Gate", ("../loop-dev/SKILL.md",))]
+
+    # 1 行が複数ファイルへ言及する場合、最初の 1 件に決め打たない
+    multi = "基準は `../learn/SKILL.md`。収束状況は `## 反復履歴` が単一情報源（`../checkpoint/SKILL.md` 参照）。\n"
+    assert list(_iter_section_refs(multi)) == [("## 反復履歴", ("../learn/SKILL.md", "../checkpoint/SKILL.md"))]
