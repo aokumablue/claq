@@ -47,21 +47,21 @@ command: /refactor
 2. 既存失敗を記録し新規失敗判定に使用
 3. 基準取得不能なら実装を止め、原因解消後に再開
 
-## ステップ3: clean（`refactor-orchestrator` → `bluecore:dead-code-cleaner`）
+## ステップ3: clean（`refactor-orchestrator` → `bluecore:code-refiner`）
 
-デッドコード削除。各ファイル適用ごとにテスト実行→失敗時は `git checkout -- <file>` で単ファイルリバートして継続。
+デッドコード削除。委譲時は依頼文へ `mode: clean` を明示する（親の手順書に書いた分岐は子へ届かないため、モードは依頼文で渡す）。各ファイル適用ごとにテスト実行→失敗時は `git checkout -- <file>` で単ファイルリバートして継続。
 
 `--mode=clean` 指定時はステップ3を実行後、ステップ5（perf）を飛ばしステップ6（review + secure）→ステップ7 final gate で終了。CRITICAL/HIGH ブロック判定は部分モードでも省略しない。
 
-## ステップ4: simplify（並列, `refactor-orchestrator` → `bluecore:simplifier`）
+## ステップ4: simplify（並列, `refactor-orchestrator` → `bluecore:code-refiner`）
 
-グループ化して**同時起動**。可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
+グループ化して**同時起動**。委譲時は依頼文へ `mode: simplify` を明示する。可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
 
 `--mode=simplify` 指定時はステップ4を実行後、ステップ5（perf）を飛ばしステップ6（review + secure）→ステップ7 final gate で終了。CRITICAL/HIGH ブロック判定は部分モードでも省略しない。
 
-## ステップ5: perf（`refactor-orchestrator` → `bluecore:perf-optimizer`）
+## ステップ5: perf（`refactor-orchestrator` → `bluecore:code-refiner`）
 
-simplify 全グループ完了後に開始。不要計算・重複I/O・N+1・過剰メモリアロケーションを優先改善。変更ごとにテスト→失敗時はファイル単位リバート。
+simplify 全グループ完了後に開始。委譲時は依頼文へ `mode: perf` を明示する。不要計算・重複I/O・N+1・過剰メモリアロケーションを優先改善。計測データを渡さない運用のため、`code-refiner` は明白なアルゴリズム欠陥の修正に限定し実施内容へ「未計測」と明示する（実測を伴う最適化が必要な場合はプロファイル取得を先行させる）。変更ごとにテスト→失敗時はファイル単位リバート。
 
 ## ステップ6: review + secure（並列, `bluecore:refactor-orchestrator` から委譲）
 
@@ -127,7 +127,7 @@ Issues は `bluecore:reviewer` と `bluecore:security-auditor` の統合件数�
 - 各委譲の完了主張はテスト/lint 出力で裏取りし、証跡なき完了は未検証扱いとする
 - 機能変更禁止（WHAT不変）。挙動変更の疑義がある変更は要確認として報告
 - 安全性に疑義がある変更はスキップし最終要約に記載
-- サブエージェント委譲必須（`bluecore:refactor-orchestrator` 統括 → `bluecore:dead-code-cleaner` / `bluecore:simplifier` / `bluecore:perf-optimizer` / `bluecore:reviewer` / `bluecore:security-auditor`）
+- サブエージェント委譲必須（`bluecore:refactor-orchestrator` 統括 → `bluecore:code-refiner`（`mode` = clean / simplify / perf）/ `bluecore:reviewer` / `bluecore:security-auditor`）
 - 役割直交: `refactor-orchestrator` = ファイル単位リバート付き生成統括に限定。収束 gate の最終権限は loop-dev の evaluate
 
 ## 引数

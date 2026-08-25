@@ -6,7 +6,7 @@ tools: Read, Grep, Glob, Bash, Task
 
 # リファクタ オーケストレーター
 
-`refactor` の統括エージェント。`dead-code-cleaner` / `simplifier` / `perf-optimizer` / `reviewer` / `security-auditor` を段階的に委譲し、失敗時はファイル単位で復旧する。
+`refactor` の統括エージェント。`code-refiner`（`mode` = clean / simplify / perf）/ `reviewer` / `security-auditor` を段階的に委譲し、失敗時はファイル単位で復旧する。委譲時は依頼文へ `mode` を明示する。
 
 ## 入力
 
@@ -21,15 +21,15 @@ tools: Read, Grep, Glob, Bash, Task
    - テスト/linters を実行し基準を確定
    - 基準取得不能なら停止
 2. **clean**
-   - `dead-code-cleaner` へ委譲
+   - `code-refiner` へ委譲（`mode: clean`）
    - 失敗ファイルは Blueprint に従ってファイル単位リバート
 3. **simplify（並列）**
    - 依存の薄いグループを同時実行（上限4）
    - 起動直前にグループ間のファイル重複を確認する: `refactor-prep` の `groups` は本来ファイル排他前提だが、委譲直前に実際の対象ファイル集合を突き合わせ、重複があれば該当グループを同時起動せず直列化する（同一ファイルへの並列編集は片方の変更が失われるリスク）
-   - `simplifier` を並列起動
+   - `code-refiner` を並列起動（`mode: simplify`）
 4. **perf**
    - simplify 全グループが完了してから開始
-   - `perf-optimizer` へ委譲し、性能劣化防止 + 明確欠陥を改善
+   - `code-refiner` へ委譲し（`mode: perf`）、性能劣化防止 + 明確欠陥を改善
 5. **review + secure（並列）**
    - `reviewer` / `security-auditor` を同時起動
 6. **final gate**

@@ -132,7 +132,7 @@ flowchart LR
     SG1["grillme"]:::skill -.-> AE
     AE["🔍 Explore<br/>既存構造探索（大規模時のみ並列）"]:::agent --> SG2["grillme<br/>質問確定"]:::skill
     SG2 --> AA["🏗️ architect<br/>決定モード"]:::agent
-    AA & APO["⚡ perf-optimizer"]:::agent --> AT["🧪 tdd-writer<br/>RED→GREEN"]:::agent
+    AA & APO["⚡ code-refiner<br/>mode=perf"]:::agent --> AT["🧪 tdd-writer<br/>RED→GREEN"]:::agent
     AT --> AR["✅ reviewer"]:::agent
     AT --> ASEC["🛡️ security-auditor"]:::agent
     SS["search"]:::skill -.-> AE
@@ -213,11 +213,11 @@ flowchart LR
     SG["grillme"]:::skill --> SP["refactor-prep"]:::skill
     SP --> RB["refactor-rollback"]:::skill
     RB --> RO["🎯 refactor-orchestrator"]:::agent
-    RO --> AC["🧹 dead-code-cleaner"]:::agent
-    AC --> ASI1["✨ simplifier #1"]:::agent
-    AC --> ASI2["✨ simplifier #2"]:::agent
-    AC --> ASI3["✨ simplifier #3"]:::agent
-    ASI1 & ASI2 & ASI3 --> AP["⚡ perf-optimizer"]:::agent
+    RO --> AC["🧹 code-refiner<br/>mode=clean"]:::agent
+    AC --> ASI1["✨ code-refiner #1<br/>mode=simplify"]:::agent
+    AC --> ASI2["✨ code-refiner #2<br/>mode=simplify"]:::agent
+    AC --> ASI3["✨ code-refiner #3<br/>mode=simplify"]:::agent
+    ASI1 & ASI2 & ASI3 --> AP["⚡ code-refiner<br/>mode=perf"]:::agent
     AP --> AR["✅ reviewer"]:::agent
     AP --> AS["🛡️ security-auditor"]:::agent
     AR & AS --> GATE{{"final gate<br/>CRITICAL/HIGH残→BLOCK"}}
@@ -249,9 +249,9 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
 
   U(["✨ 単純化依頼"]) --> CREF["/refactor<br/>--mode=simplify"]:::cmd
-  CREF --> AS1["✨ simplifier #1"]:::agent
-  CREF --> AS2["✨ simplifier #2"]:::agent
-  CREF --> AS3["✨ simplifier #3"]:::agent
+  CREF --> AS1["✨ code-refiner #1<br/>mode=simplify"]:::agent
+  CREF --> AS2["✨ code-refiner #2<br/>mode=simplify"]:::agent
+  CREF --> AS3["✨ code-refiner #3<br/>mode=simplify"]:::agent
   AS1 & AS2 & AS3 --> CR["/review"]:::cmd
 ```
 
@@ -277,7 +277,7 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
 
   U(["🗑️ クリーンアップ"]) --> CREF["/refactor<br/>--mode=clean"]:::cmd
-  CREF --> AC["🧹 dead-code-cleaner"]:::agent
+  CREF --> AC["🧹 code-refiner<br/>mode=clean"]:::agent
   AC --> TEST(["✅ テスト検証<br/>ファイル単位"])
   TEST -->|失敗| REVERT(["git checkout -- file"])
   TEST -->|成功| NEXT(["次ファイルへ"])
@@ -525,7 +525,7 @@ flowchart TB
 
   subgraph internal["⚙️ Internal Layer"]
     direction LR
-    AGT["Agents (13)<br/>reviewer / architect / tdd-writer ..."]:::agent
+    AGT["Agents (11)<br/>reviewer / architect / code-refiner ..."]:::agent
     SKL["Skills (13, all fork)<br/>grillme / learn / secure ..."]:::skill
   end
 

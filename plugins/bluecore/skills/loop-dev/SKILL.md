@@ -38,9 +38,9 @@ user-invocable: false
    | 作業内容 | 担当エージェント |
    |---|---|
    | コード追加を伴う feature/bugfix/test | `bluecore:tdd-writer` |
-   | 可読性・重複整理 | `bluecore:simplifier` |
-   | 未使用コード削除 | `bluecore:dead-code-cleaner` |
-   | 性能改善 | `bluecore:perf-optimizer` |
+   | 可読性・重複整理 | `bluecore:code-refiner`（依頼文へ `mode: simplify` を明示） |
+   | 未使用コード削除 | `bluecore:code-refiner`（依頼文へ `mode: clean` を明示） |
+   | 性能改善 | `bluecore:code-refiner`（依頼文へ `mode: perf` を明示） |
 
    生成直後に自己検証必須: 検出済みテストコマンド + linter（本リポジトリなら `python3 -m pytest -q` + `ruff check plugins/bluecore/src`）を実行し、red なら evaluate に進む前に同一 generate 内で修正。自己検証で報告する PASS/FAIL は本セッションで実際に実行したツール出力のみを証跡とし、未実行の項目は未検証と明示する。Edit/Write が成功していれば確認目的の再 Read は行わない（失敗時はツールがエラーを返す）
 4. **evaluate（条件付き並列）**: `bluecore:reviewer` 必須。認証/ユーザー入力/シークレット/API エンドポイント/支払いに触れる変更のみ `bluecore:security-auditor` を並列追加

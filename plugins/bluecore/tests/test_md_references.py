@@ -34,14 +34,14 @@ def test_relative_md_references_resolve() -> None:
     assert broken == [], "解決できない md 参照:\n" + "\n".join(broken)
 
 
-def test_dead_code_cleaner_and_harness_tuner_have_missing_input_fail_contract() -> None:
+def test_code_refiner_and_harness_tuner_have_missing_input_fail_contract() -> None:
     """入力不足時に即 FAIL する契約が 2 エージェント定義に明示されていること。"""
-    cleaner = (_ROOT / "agents" / "dead-code-cleaner.md").read_text(encoding="utf-8")
+    refiner = (_ROOT / "agents" / "code-refiner.md").read_text(encoding="utf-8")
     tuner = (_ROOT / "agents" / "harness-tuner.md").read_text(encoding="utf-8")
 
-    assert "FAIL" in cleaner
-    assert "対象パスまたは diff" in cleaner
-    assert "リポジトリ全体の探索は行わない" in cleaner
+    assert "FAIL" in refiner
+    assert "対象パスまたは diff" in refiner
+    assert "リポジトリ全体の探索は行わない" in refiner
 
     assert "FAIL" in tuner
     assert "baseline JSON が無い場合は直ちに **FAIL**" in tuner
