@@ -106,6 +106,7 @@ grading後に、eval改善の余地が明確なら指摘。
   - `summary.total == len(expectations)`
   - `summary.passed + summary.failed == summary.total`
   - `summary.pass_rate == round(summary.passed / summary.total, 2)`
+  - `total == 0` は入力契約違反として扱い grader は起動しない
 - `expectations` と `summary` は grader 自身の判定契約であり、`comparator` の `expectation_results.A`/`.B` 形式とは無関係。両者を混同しない（呼び出し元・下流が同じ実行から両方を期待することはない）
 
 ## 出力形式
@@ -183,32 +184,14 @@ grading後に、eval改善の余地が明確なら指摘。
 }
 ```
 
-## フィールド説明
+## 値の制約
 
-- **expectations**: 期待値の配列
-  - **text**: 元の期待値テキスト
-  - **passed**: trueなら通過
-  - **evidence**: 判定の根拠になる引用
-- **summary**: 集計情報（passed/failed/total/pass_rate）。契約: `total == len(expectations)`・`passed + failed == total`・`pass_rate = round(passed / total, 2)`（`total == 0` は入力契約違反として扱い grader は起動しない）
-- **execution_metrics**: executorの `metrics.json` からコピーした情報
-  - **output_chars**: 出力ファイルの総文字数（トークンの代理ではなく、ベンチマークの tokens には使わない）
-  - **transcript_chars**: トランスクリプトの文字数
-- **timing**: executor/grader 所要時間集計。grader は自身の時計を持たないため、いずれも**呼び出し元 wrapper が計測して入力として渡した値をそのまま転記する**（grader の自己申告値ではない）
-  - **executor_duration_seconds**: executorサブエージェントの実行時間（呼び出し元提供）
-  - **grader_duration_seconds**: graderの実行時間（入力 `grader_duration_seconds` をそのまま転記。未提供ならフィールド省略）
-  - **total_duration_seconds**: 両者を含む経過時間（合計以上、呼び出し元提供）
-- **claims**: 抽出して検証した主張
-  - **claim**: 検証対象の文
-  - **type**: `factual` / `process` / `quality`
-  - **verified**: trueなら成立
-  - **evidence**: 根拠または反証
-- **user_notes_summary**: executorが残した問題点
-  - **uncertainties**: 不確実だった点
-  - **needs_review**: 人手確認が必要な項目
-  - **workarounds**: 想定外の回避策
-- **eval_feedback**: eval改善案（必要なときだけ）
-  - **suggestions**: 具体的な提案の配列。各要素に `reason`、必要なら `assertion` を含める
-  - **overall**: 全体コメント。何もなければ `No suggestions, evals look solid` でもよい
+- **execution_metrics**: executor の `metrics.json` からコピーする（grader が数え直した値ではない）
+  - **output_chars**: 出力ファイルの総文字数。トークンの代理ではなく、ベンチマークの tokens には使わない
+- **timing**: grader は自身の時計を持たないため、いずれも**呼び出し元 wrapper が計測して入力として渡した値をそのまま転記する**（grader の自己申告値ではない）。`grader_duration_seconds` は未提供ならフィールドごと省略。`total_duration_seconds` は両者の合計以上
+- **claims[].type**: `factual` / `process` / `quality` の 3 値
+- **eval_feedback.suggestions[]**: `reason` は必須、`assertion` は該当する期待値がある場合のみ
+- **eval_feedback.overall**: 指摘が無ければ `No suggestions, evals look solid` でよい
 
 ## 指針
 
