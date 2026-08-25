@@ -531,7 +531,7 @@ def build_report(scope: str, root_dir: str | Path | None = None, target_mode: st
         "root_dir": str(resolved_root),
         "target_mode": resolved_mode,
         "deterministic": True,
-        "rubric_version": "2026-03-30",
+        "rubric_version": "2026-08-26",
         "overall_score": overall_score,
         "max_score": max_score,
         "categories": category_scores,
