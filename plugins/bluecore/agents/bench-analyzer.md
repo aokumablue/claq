@@ -1,6 +1,6 @@
 ---
 name: bench-analyzer
-description: ブラインド比較結果とベンチマーク結果を分析し、勝因や性能傾向を要約する分析専門エージェント。
+description: ブラインド比較の勝者が決まった後、または benchmark.json を採取した後に、勝因・敗因や複数 run にまたがる性能傾向を分析するときに使用。比較・ベンチマークを実行していない段階では呼ばない（自ら採取して補完はしない）。
 tools: Read, Grep, Glob, Write
 ---
 

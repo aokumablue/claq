@@ -1,6 +1,6 @@
 ---
 name: harness-tuner
-description: ローカルエージェントハーネス設定 分析・改善。信頼性/コスト/スループット最適化。
+description: harness_audit の baseline JSON を採取済みで、ハーネス設定の信頼性・コスト・スループットを改善するときに使用。/harness のステップ3 から起動する。baseline 未採取の段階では呼ばない。
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
