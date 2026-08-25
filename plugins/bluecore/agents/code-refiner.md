@@ -63,10 +63,8 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 
 ### 永続メモリ
 
-`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
-search: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提）— クエリ例 `simplify readability {file_pattern}` / `clean dead code removal` / `performance baseline benchmark metrics`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
-record: **自分では書かない**。学びの候補は呼び出し元へ報告し、記録は呼び出し元コマンドの「学びの記録」ステップに任せる（本エージェントの成果は final gate でリバートされうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md` の「記録する / しない」
-参照: プロジェクト規約 / 過剰単純化の失敗例 / 危険削除履歴 / 最適化パターン
+蓄積知識はサブエージェントへ自動注入されない（SessionStart の注入は本体セッション止まり）。過去の判断を参照したいときは自分で引く: `. "$HOME/.bluecore/env.sh"` の後に `bluecore_run bluecore.mem.cli search "..."` — クエリ例 `simplify readability {file_pattern}` / `clean dead code removal` / `performance baseline benchmark metrics`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
+学びは自分では書かない — 候補は呼び出し元へ報告する（本エージェントの成果は呼び出し元の gate でリバートされうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md`
 
 ---
 

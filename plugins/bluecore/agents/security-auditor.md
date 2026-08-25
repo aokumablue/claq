@@ -65,9 +65,3 @@ Blockers: 2
 ```
 
 末尾は severity 別内訳 `CRITICAL: {n} / HIGH: {n}` に続けて、reviewer と同形の `Blockers: {n}`（n=CRITICAL+HIGH 件数）行も併記する（呼び出し元が両エージェントから Blockers を統一的に機械読みできるようにする）。両行とも必須で、指摘ゼロでも `CRITICAL: 0 / HIGH: 0` と `Blockers: 0` を出力する。確信度ゲートの適用規則（即時指摘パターン一致・CRITICAL 疑いの適用除外、MEDIUM/LOW への限定）は「## 原則」に従う。
-
-## 永続メモリ
-
-`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。Bash を持たないため `bluecore_run bluecore.mem.cli search` によるオンデマンド検索はできない。自動注入された知識だけを参照する
-record: **自分では書かない**。学びの候補は呼び出し元へ報告し、記録は呼び出し元コマンドの「学びの記録」ステップに任せる（本エージェントの成果は final gate でリバートされうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md` の「記録する / しない」
-参照: 脆弱性パターン / 修復履歴 / 繰り返し違反（優先度上げ）

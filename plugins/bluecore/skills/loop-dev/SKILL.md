@@ -131,7 +131,7 @@ Assumptions: {仮決定事項 or "-"}
 
 ## 永続メモリ
 
-`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。
+`<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` の知識のみ）。本 skill は `context: fork` なので注入が届くが、**委譲先のサブエージェントには届かない**（サブエージェントは会話履歴も親の注入も受け取らない）。渡したい知識がある場合は依頼文へ明記する。
 
 search: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提）— クエリ例 `loop-dev iteration blocker converge {task キーワード}`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
 
