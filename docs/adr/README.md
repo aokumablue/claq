@@ -13,3 +13,4 @@
 | [0007](0007-knowledge-active-authority-scoped-to-payload-strip.md) | 知識カードの active 化権限は payload から剥奪するが、`promote` と既存 active カードは維持する | accepted | 2026-08-20 |
 | [0008](0008-plugin-root-resolved-via-home-bluecore-env-pointer.md) | plugin root は `~/.bluecore/env.sh` ポインタで解決し、md にベンダ固有パスを書かない | accepted | 2026-08-20（2026-08-20 改訂 ×4） |
 | [0009](0009-root-pointer-resolver-does-not-verify-process-identity-or-file-ownership.md) | roots pointer resolver は owner/mode 検証を行わない（PID 開始時刻照合は撤回） | accepted | 2026-08-20（2026-08-20 改訂 ×2） |
+| [0010](0010-subagents-split-by-material-not-by-role.md) | サブエージェントは「渡す材料」で分割し、役割名では分割しない | accepted | 2026-08-25 |
