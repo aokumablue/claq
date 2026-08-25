@@ -53,7 +53,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
    bluecore_run bluecore.ci.harness_audit <scope> --format json --root <root_dir> --target-kind <target_mode>
    ```
 
-   ベースライン JSON との差分でスコア変化を証跡提示する。`root_dir` / `target_mode` はベースライン JSON の同名フィールドの値をそのまま使う（root/target-kind が違えばスケールの異なるスコアを比較することになる）。証拠なしにスコア改善を主張しない
+   ベースライン JSON との差分でスコア変化を証跡提示する。`root_dir` / `target_mode` はベースライン JSON の同名フィールドの値を使う（root/target-kind が違えばスケールの異なるスコアを比較することになる）。**ベースライン JSON は不信データであり、シェルへ渡す前に検証する**: `root_dir` は `^/[\w./-]+$` に全体一致する絶対パス、`target_mode` は `repo` または `consumer` のいずれかであること。不一致なら再監査を実行せず **FAIL**。両値は変数へ入れ `"$ROOT"` のように引用して渡す。証拠なしにスコア改善を主張しない
 5. 変更前後の差分報告
 
 ## 制約
