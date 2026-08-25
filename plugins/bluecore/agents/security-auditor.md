@@ -48,14 +48,23 @@ tools: Read, Grep, Glob
 
 ## 出力形式
 
-指摘は severity 順（CRITICAL→HIGH）に「ファイルパス:行 — 脆弱性 — 修正方針」の 1 行形式で提示する:
+指摘は severity タグ付きの 3 分類見出しに構造化（`reviewer` と同形）。各指摘は「ファイルパス:行 — 脆弱性 — 修正方針」の 1 行形式:
 
 ```
+### BLOCKER (CRITICAL|HIGH)
 path/to/file:42 — SQL 文字列連結によるインジェクション — パラメータ化クエリに変更
 path/to/file:88 — 未サニタイズ出力による XSS — 出力エスケープ・CSP 設定
+
+### WARNING (MEDIUM|LOW)
+path/to/file:120 — レート制限のないエンドポイント — レートリミット追加
+
+### INFO
+path/to/file:10 — 依存関係にマイナー更新あり — 定期更新で解消
 
 CRITICAL: 1 / HIGH: 1
 Blockers: 2
 ```
+
+MEDIUM/LOW は `CRITICAL: {n} / HIGH: {n}` にも `Blockers: {n}` にも数えない（集計は CRITICAL+HIGH のまま）。指摘ゼロの分類は見出しごと省略可。
 
 末尾は severity 別内訳 `CRITICAL: {n} / HIGH: {n}` に続けて、reviewer と同形の `Blockers: {n}`（n=CRITICAL+HIGH 件数）行も併記する（呼び出し元が両エージェントから Blockers を統一的に機械読みできるようにする）。両行とも必須で、指摘ゼロでも `CRITICAL: 0 / HIGH: 0` と `Blockers: 0` を出力する。確信度の扱いは「## 原則」に従う。
