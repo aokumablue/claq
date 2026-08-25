@@ -56,6 +56,7 @@ DEFAULT_CONFIDENCE = 0.5
 
 _ASCII_ALNUM_RE = re.compile(r"[A-Za-z0-9]")
 _KEY_HASH_LENGTH = 8
+_MIN_KEY_SLUG_LENGTH = 3
 
 
 class KnowledgeInputError(ValueError):
@@ -177,12 +178,18 @@ def generate_key(raw_title: str, kind: str) -> str:
     ``learned:`` 標準出力・``show <key>`` の入力履歴・ログへそのまま残る
     ためです（title/body 自体は redact 済みでも key 経由で漏れる）。
 
-    ASCII 英数字を 1 文字でも含む redact 後 title は ``slugify`` で
+    ASCII 英数字を十分に含む redact 後 title は ``slugify`` で
     kebab-case 化します。``Keep [REDACTED] out of titles`` のような角括弧
     混じりの文字列も、``slugify`` の非英数字置換で安定したスラッグ
-    （``keep-redacted-out-of-titles``）に落ちます。ASCII 英数字を全く
-    含まない redact 後 title はスラッグ化すると空になるため、``kind`` と
-    redact 後 title の SHA-1 先頭 8 桁で決定的な key を作ります。
+    （``keep-redacted-out-of-titles``）に落ちます。
+
+    スラッグが ``_MIN_KEY_SLUG_LENGTH`` 未満になる title は、``kind`` と
+    redact 後 title の SHA-1 先頭 8 桁で決定的な key を作ります。ASCII を
+    全く含まない title（スラッグが空）に加え、日本語 title に ASCII が
+    1〜2 文字だけ混ざる場合もこちらに倒します。``指示文書の列挙を『上記 N
+    種』と個数で参照しない`` は ``n`` に、``md の構造テストで…`` は ``md``
+    に潰れ、次に ASCII を 1〜2 文字だけ含む別の title が同じ key へ衝突して
+    **既存カードを upsert で上書きする**（＝別の知識が失われる）ためです。
 
     redaction が title を書き換えた場合（＝シークレットを含んでいた場合）
     のみ、生 title の SHA-1 先頭 8 桁を key の末尾に付します。これは
@@ -205,9 +212,8 @@ def generate_key(raw_title: str, kind: str) -> str:
         例外は発生しません。
     """
     redacted_title = redact_knowledge_text(raw_title)
-    if _ASCII_ALNUM_RE.search(redacted_title):
-        base = slugify(redacted_title)
-    else:
+    base = slugify(redacted_title) if _ASCII_ALNUM_RE.search(redacted_title) else ""
+    if len(base) < _MIN_KEY_SLUG_LENGTH:
         digest = hashlib.sha1(redacted_title.encode("utf-8")).hexdigest()[:_KEY_HASH_LENGTH]
         base = f"{kind}-{digest}"
     if redacted_title == raw_title:

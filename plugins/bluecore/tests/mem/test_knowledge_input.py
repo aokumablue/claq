@@ -24,6 +24,25 @@ class TestGenerateKey:
         """日本語まじりでも ASCII トークンだけの読める key になる。"""
         assert generate_key("pytest をパイプする際は set -o pipefail が必須", "pitfall") == "pytest-set-o-pipefail"
 
+    def test_generate_key_falls_back_to_hash_when_slug_too_short(self) -> None:
+        """ASCII が 1〜2 文字しかない title は slug ではなくハッシュ由来 key になる。
+
+        ``n`` や ``md`` のような極端に短い key は、次に ASCII を 1〜2 文字だけ
+        含む別の title と衝突し、upsert で既存カードを上書きしてしまう。
+        """
+        short_ascii = generate_key("指示文書の列挙を『上記 N 種』と個数で参照しない", "convention")
+        assert short_ascii.startswith("convention-")
+        assert len(short_ascii) == len("convention-") + 8
+
+        two_chars = generate_key("md の構造テストで見出しを収集する", "pitfall")
+        assert two_chars.startswith("pitfall-")
+
+        # 衝突しないこと（従来はどちらも "n" に潰れていた）
+        assert short_ascii != generate_key("結論は N 件に絞る", "convention")
+
+        # 3 文字以上の slug は従来どおり slug のまま
+        assert generate_key("use ci for checks", "convention") == "use-ci-for-checks"
+
     def test_pure_japanese_title_falls_back_to_hash(self) -> None:
         """ASCII 英数字を含まない title は kind + ハッシュの決定的 key になる。"""
         key = generate_key("テーブル定義変更は移行不要", "decision")
@@ -279,8 +298,9 @@ class TestToKnowledge:
 
     def test_repo_scope_binds_repo_id(self) -> None:
         """repo スコープは repo_id を持つ Knowledge になる。"""
-        knowledge = self._draft().to_knowledge("bluecore-dev")
-        assert (knowledge.scope, knowledge.repo_id, knowledge.key) == ("repo", "bluecore-dev", "t")
+        draft = self._draft()
+        knowledge = draft.to_knowledge("bluecore-dev")
+        assert (knowledge.scope, knowledge.repo_id, knowledge.key) == ("repo", "bluecore-dev", draft.key)
         assert knowledge.created_at == knowledge.updated_at
 
     def test_global_scope_leaves_repo_id_none(self) -> None:
