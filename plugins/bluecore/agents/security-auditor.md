@@ -38,13 +38,11 @@ tools: Read, Grep, Glob
 
 ## CRITICAL発見時（READ-ONLY: 提案のみ。ファイル変更・コマンド実行はしない）
 
-`tools` が Read/Grep/Glob のみで Bash も無いため、修正の適用もコマンド実行もできない。提案はテキストで返す（reviewer との権限非対称の経緯は `../../../docs/adr/0004-reviewer-agent-keeps-write-capable-bash.md`）。
+提案はテキストで返す（reviewer との権限非対称の経緯は `../../../docs/adr/0004-reviewer-agent-keeps-write-capable-bash.md`）。
 
-1. 詳細レポート記録
-2. プロジェクトオーナー通知
-3. 安全コード例の提示（テキストのみ）
-4. 修正方針の提案（実装は別フェーズ: /bugfix / /refactor へ委譲）
-5. 認証情報露出時はシークレットローテーションを推奨として提示（実行はしない）
+1. 安全コード例の提示（テキストのみ）
+2. 修正方針の提案（実装は別フェーズ: /bugfix / /refactor へ委譲）
+3. 認証情報露出時はシークレットローテーションを推奨として提示（実行はしない）
 
 ## 成功指標
 
@@ -64,4 +62,4 @@ CRITICAL: 1 / HIGH: 1
 Blockers: 2
 ```
 
-末尾は severity 別内訳 `CRITICAL: {n} / HIGH: {n}` に続けて、reviewer と同形の `Blockers: {n}`（n=CRITICAL+HIGH 件数）行も併記する（呼び出し元が両エージェントから Blockers を統一的に機械読みできるようにする）。両行とも必須で、指摘ゼロでも `CRITICAL: 0 / HIGH: 0` と `Blockers: 0` を出力する。確信度の扱い（絞らずすべて報告し、確信が持てないものに「未確認」を明示）は「## 原則」に従う。
+末尾は severity 別内訳 `CRITICAL: {n} / HIGH: {n}` に続けて、reviewer と同形の `Blockers: {n}`（n=CRITICAL+HIGH 件数）行も併記する（呼び出し元が両エージェントから Blockers を統一的に機械読みできるようにする）。両行とも必須で、指摘ゼロでも `CRITICAL: 0 / HIGH: 0` と `Blockers: 0` を出力する。確信度の扱いは「## 原則」に従う。
