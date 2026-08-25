@@ -212,8 +212,7 @@ flowchart LR
     direction TB
     SG["grillme"]:::skill --> SP["refactor-prep"]:::skill
     SP --> RB["refactor-rollback"]:::skill
-    RB --> RO["🎯 refactor-orchestrator"]:::agent
-    RO --> AC["🧹 code-refiner<br/>mode=clean"]:::agent
+    RB --> AC["🧹 code-refiner<br/>mode=clean"]:::agent
     AC --> ASI1["✨ code-refiner #1<br/>mode=simplify"]:::agent
     AC --> ASI2["✨ code-refiner #2<br/>mode=simplify"]:::agent
     AC --> ASI3["✨ code-refiner #3<br/>mode=simplify"]:::agent
@@ -525,7 +524,7 @@ flowchart TB
 
   subgraph internal["⚙️ Internal Layer"]
     direction LR
-    AGT["Agents (10)<br/>reviewer / planner / code-refiner ..."]:::agent
+    AGT["Agents (9)<br/>reviewer / planner / code-refiner ..."]:::agent
     SKL["Skills (13, all fork)<br/>grillme / learn / secure ..."]:::skill
   end
 

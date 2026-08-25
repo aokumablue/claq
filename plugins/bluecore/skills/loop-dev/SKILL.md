@@ -122,7 +122,7 @@ Assumptions: {仮決定事項 or "-"}
 
 ## Human Gate
 
-人間の確認・停止点は次の 4 つのみ（自律度パラメータは導入しない）。収束 gate の最終権限は loop-dev の evaluate — 委譲先エージェントが独自 gate を持つ場合（例: refactor-orchestrator の final gate）も loop-dev 判定を正とする。
+人間の確認・停止点は次の 4 つのみ（自律度パラメータは導入しない）。収束 gate の最終権限は loop-dev の evaluate — 呼び出し元コマンドが独自 gate を持つ場合（例: `/refactor` の final gate）も loop-dev 判定を正とする。
 
 1. 計画承認: 呼び出し元コマンドで合意済み（本 skill 内では行わない）
 2. 上限超過・circuit break: エスカレーション出力してユーザー報告・停止

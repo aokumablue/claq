@@ -23,7 +23,6 @@
     "./agents/grader.md",
     "./agents/harness-tuner.md",
     "./agents/planner.md",
-    "./agents/refactor-orchestrator.md",
     "./agents/reviewer.md",
     "./agents/security-auditor.md",
     "./agents/tdd-writer.md"

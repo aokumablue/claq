@@ -30,7 +30,6 @@ command: /refactor
 
 - `refactor-prep` skill 起動（必須）: 対象分割・依存可視化・テストセット確定
 - `refactor-rollback` skill 起動（必須）: ファイル単位リバート計画（Rollback Blueprint）生成
-- `bluecore:refactor-orchestrator` 起動（必須）: clean/simplify/perf/review の実行順・並列制御
 
 `deps.from` / `deps.to` は `groups` 配列のインデックスを指す。
 
@@ -47,23 +46,26 @@ command: /refactor
 2. 既存失敗を記録し新規失敗判定に使用
 3. 基準取得不能なら実装を止め、原因解消後に再開
 
-## ステップ3: clean（`refactor-orchestrator` → `bluecore:code-refiner`）
+## ステップ3: clean（`bluecore:code-refiner`）
 
 デッドコード削除。委譲時は依頼文へ `mode: clean` を明示する（親の手順書に書いた分岐は子へ届かないため、モードは依頼文で渡す）。各ファイル適用ごとにテスト実行→失敗時は `git checkout -- <file>` で単ファイルリバートして継続。
 
 `--mode=clean` 指定時はステップ3を実行後、ステップ5（perf）を飛ばしステップ6（review + secure）→ステップ7 final gate で終了。CRITICAL/HIGH ブロック判定は部分モードでも省略しない。
 
-## ステップ4: simplify（並列, `refactor-orchestrator` → `bluecore:code-refiner`）
+## ステップ4: simplify（並列, `bluecore:code-refiner`）
 
-グループ化して**同時起動**。委譲時は依頼文へ `mode: simplify` を明示する。可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
+グループ化して**同時起動**（上限4）。委譲時は依頼文へ `mode: simplify` を明示する。
+
+起動直前にグループ間のファイル重複を確認する: `refactor-prep` の `groups` は本来ファイル排他前提だが、委譲直前に実際の対象ファイル集合を突き合わせ、重複があれば該当グループを同時起動せず直列化する（同一ファイルへの並列編集は片方の変更が失われるリスク）。
+可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
 
 `--mode=simplify` 指定時はステップ4を実行後、ステップ5（perf）を飛ばしステップ6（review + secure）→ステップ7 final gate で終了。CRITICAL/HIGH ブロック判定は部分モードでも省略しない。
 
-## ステップ5: perf（`refactor-orchestrator` → `bluecore:code-refiner`）
+## ステップ5: perf（`bluecore:code-refiner`）
 
 simplify 全グループ完了後に開始。委譲時は依頼文へ `mode: perf` を明示する。不要計算・重複I/O・N+1・過剰メモリアロケーションを優先改善。計測データを渡さない運用のため、`code-refiner` は明白なアルゴリズム欠陥の修正に限定し実施内容へ「未計測」と明示する（実測を伴う最適化が必要な場合はプロファイル取得を先行させる）。変更ごとにテスト→失敗時はファイル単位リバート。
 
-## ステップ6: review + secure（並列, `bluecore:refactor-orchestrator` から委譲）
+## ステップ6: review + secure（並列）
 
 以下を**同時起動**し結果を統合:
 
@@ -76,6 +78,8 @@ simplify 全グループ完了後に開始。委譲時は依頼文へ `mode: per
 2. **CRITICAL または HIGH** が1件でもあればブロック
 3. 失敗変更はファイル単位リバートし再検証
 4. 全通過のみ完了
+
+`Final Gate: PASS` の導出規則: clean/simplify/perf/review+secure の全 stage が「完了」（スキップ・未実行・リバートのまま放置ではない）かつ CRITICAL/HIGH が 0 件のときのみ PASS。いずれか 1 stage でも未完了・全ファイルリバートで実質ゼロ変更・CRITICAL/HIGH 残存のいずれかに該当すれば `BLOCKED`。ただし収束 gate の最終権限は `loop-dev` の evaluate であり、本 gate はその入力を作る。
 
 `--mode=clean/simplify`（部分モード）時もステップ6（review + secure）は省略せず実行する（ステップ3/4/5 → ステップ7 の流れ全体モードとの違いは、飛ばすのがステップ5（perf）のみである点）。CRITICAL/HIGH ブロック判定（項目2）はステップ6の結果を用いて部分モードでも全体モードと同様に適用する。
 
@@ -114,7 +118,20 @@ bluecore_mem_learn --kind fact --scope repo --domain <domain> \
 
 ## ステップ9: 要約
 
-orchestrator の出力テンプレート（`../agents/refactor-orchestrator.md` 参照）をそのまま提示する。
+次のテンプレートで提示する:
+
+```text
+Unified Refactor
+──────────────────────────────
+Scope:      {n} files
+Cleaned:    {cleaned} files
+Simplified: {simplified} files
+Perf fixed: {perf_fixed} files
+Reverted:   {reverted} files
+Issues:     CRITICAL {c} / HIGH {h} / MEDIUM {m} / LOW {l}
+──────────────────────────────
+Final Gate: PASS / BLOCKED
+```
 
 Issues は `bluecore:reviewer` と `bluecore:security-auditor` の統合件数。
 末尾にステップ8で記録した key を 1 行で添える（記録が無ければ `Learned: なし`）。
@@ -127,8 +144,8 @@ Issues は `bluecore:reviewer` と `bluecore:security-auditor` の統合件数�
 - 各委譲の完了主張はテスト/lint 出力で裏取りし、証跡なき完了は未検証扱いとする
 - 機能変更禁止（WHAT不変）。挙動変更の疑義がある変更は要確認として報告
 - 安全性に疑義がある変更はスキップし最終要約に記載
-- サブエージェント委譲必須（`bluecore:refactor-orchestrator` 統括 → `bluecore:code-refiner`（`mode` = clean / simplify / perf）/ `bluecore:reviewer` / `bluecore:security-auditor`）
-- 役割直交: `refactor-orchestrator` = ファイル単位リバート付き生成統括に限定。収束 gate の最終権限は loop-dev の evaluate
+- サブエージェント委譲必須（`bluecore:code-refiner`（`mode` = clean / simplify / perf）/ `bluecore:reviewer` / `bluecore:security-auditor`）。実行順・並列制御・ファイル単位リバートは本コマンドが直接行う（束ねる作業を別エージェントへ切り出さない）
+- 収束 gate の最終権限は loop-dev の evaluate
 
 ## 引数
 
