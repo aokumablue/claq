@@ -38,7 +38,7 @@ tools: Read, Grep, Glob
 
 ## CRITICAL発見時（READ-ONLY: 提案のみ。ファイル変更・コマンド実行はしない）
 
-本エージェントは frontmatter の `tools` で Read/Grep/Glob のみに制限されており、Edit/Write 等の書き込み系ツールはもちろん Bash 自体にもアクセスできない（ツール許可機構による技術的強制。コマンド実行が一切できないため「コマンド実行はしない」は運用上の徹底ではなく権限上の事実）。
+`tools` が Read/Grep/Glob のみで Bash も無いため、修正の適用もコマンド実行もできない。提案はテキストで返す（reviewer との権限非対称の経緯は `../../../docs/adr/0004-reviewer-agent-keeps-write-capable-bash.md`）。
 
 1. 詳細レポート記録
 2. プロジェクトオーナー通知

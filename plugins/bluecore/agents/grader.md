@@ -102,7 +102,7 @@ grading後に、eval改善の余地が明確なら指摘。
 ## 出力契約
 
 - 最終出力は **`grading_path` へ保存する単一の JSON object 1個のみ**。前置きテキスト・Markdown 見出し・コードフェンス・複数 JSON の連続出力は禁止
-- 保存後、書いた JSON を読み直して次の不変条件を自己検証する。満たさない場合は `grading_path` を書き直してから完了報告する:
+- `summary` は次の不変条件を満たすこと:
   - `summary.total == len(expectations)`
   - `summary.passed + summary.failed == summary.total`
   - `summary.pass_rate == round(summary.passed / summary.total, 2)`
