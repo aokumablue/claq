@@ -6,11 +6,15 @@ Copilot の deny JSON を選ばせる。
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = PLUGIN_ROOT / "src" / "bluecore" / "launcher.py"
@@ -107,3 +111,117 @@ def test_launcher_config_protection_allows_unprotected_native_file(tmp_path: Pat
     )
     assert result.returncode == 0
     assert result.stdout == "" or "permissionDecision" not in result.stdout
+
+
+HOOKS_JSON = PLUGIN_ROOT / "hooks" / "hooks.json"
+
+# 各イベントの最小 valid payload。hooks.json 由来の全エントリを起動して
+# 「壊れずに終わる」ことだけを見る（allow/deny の正しさは個別テストの担当）。
+_MINIMAL_PAYLOADS = {
+    "PreToolUse": {"tool_name": "Bash", "tool_input": {"command": "echo ok"}},
+    "PreCompact": {"session_id": "test-session", "transcript_path": "/nonexistent/transcript.jsonl"},
+    "SessionStart": {"session_id": "test-session", "source": "startup"},
+    "SessionEnd": {"session_id": "test-session", "reason": "clear"},
+}
+
+
+def _iter_declared_commands() -> list[tuple[str, list[str], int]]:
+    """hooks.json が宣言する (イベント名, launcher 引数, timeout) を列挙する。
+
+    Returns:
+        宣言順の (event, args, timeout) タプル。args は launcher.py 以降の引数。
+    """
+    declared = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))["hooks"]
+    entries: list[tuple[str, list[str], int]] = []
+    for event, groups in declared.items():
+        for group in groups:
+            for hook in group.get("hooks", []):
+                tokens = shlex.split(hook["command"])
+                launcher_index = next(i for i, t in enumerate(tokens) if t.endswith("launcher.py"))
+                entries.append((event, tokens[launcher_index + 1 :], hook.get("timeout", 0)))
+    return entries
+
+
+@pytest.mark.parametrize(("event", "args", "timeout"), _iter_declared_commands())
+def test_declared_hook_target_is_importable(event: str, args: list[str], timeout: int) -> None:
+    """hooks.json が起動する dotted module がすべて import 可能であること。
+
+    モジュール名をテスト側にハードコードすると、hooks.json 側のリネームを
+    素通りさせる（テストは緑のまま実 hook が死ぬ）。宣言を単一情報源にする。
+    """
+    module = next(arg for arg in args if arg.startswith("bluecore."))
+    assert importlib.util.find_spec(module) is not None, f"{event}: {module} が import できない"
+    assert timeout > 0, f"{event}: timeout が宣言されていない"
+
+
+@pytest.mark.parametrize(("event", "args", "timeout"), _iter_declared_commands())
+def test_declared_hook_runs_without_traceback(
+    event: str, args: list[str], timeout: int, tmp_path: Path
+) -> None:
+    """hooks.json の全エントリが、最小 payload で例外を出さずに終了すること。
+
+    「起動したら即クラッシュする」は静的 validator では原理的に検出できず、
+    本番では保護の静かな無効化として現れる。
+    """
+    result = subprocess.run(
+        [sys.executable, str(LAUNCHER), *args],
+        input=json.dumps(_MINIMAL_PAYLOADS[event]),
+        capture_output=True,
+        text=True,
+        env=_launcher_env(tmp_path),
+        timeout=60,
+        check=False,
+    )
+    assert "Traceback" not in result.stderr, f"{event} {args}: {result.stderr[:400]}"
+    assert result.returncode in {0, 2}, f"{event} {args}: exit={result.returncode}"
+
+
+@pytest.mark.parametrize(
+    ("hook", "command", "denied"),
+    [
+        # block_no_verify: git フックのバイパス
+        ("bluecore.hooks.block_no_verify", "git commit --no-verify -m x", True),
+        ("bluecore.hooks.block_no_verify", "git commit -n -m x", True),
+        ("bluecore.hooks.block_no_verify", "git commit -m x", False),
+        ("bluecore.hooks.block_no_verify", "git log -n 5", False),
+        # bash_config_protection: リンタ設定の弱体化
+        ("bluecore.hooks.bash_config_protection", "echo x > ruff.toml", True),
+        ("bluecore.hooks.bash_config_protection", "rm .eslintrc", True),
+        ("bluecore.hooks.bash_config_protection", "sudo cp /tmp/x ruff.toml", True),
+        ("bluecore.hooks.bash_config_protection", "cat ruff.toml", False),
+        ("bluecore.hooks.bash_config_protection", "ls -la", False),
+        # pre_bash_commit_quality: commit 以外は素通り
+        ("bluecore.hooks.pre_bash_commit_quality", "ls -la", False),
+    ],
+)
+def test_bash_hook_allow_deny_matrix(hook: str, command: str, denied: bool, tmp_path: Path) -> None:
+    """Bash 系ブロック hook が、プロセス経路でも期待どおり allow/deny すること。
+
+    in-process の判定関数テストは stdin JSON → exit code → deny JSON 出力までの
+    経路を通らない。実際にホストが起動する形で往復させる。
+    """
+    result = _run_launcher(hook, {"tool_name": "Bash", "tool_input": {"command": command}}, tmp_path)
+    if denied:
+        assert result.returncode == 2, f"{command}: exit={result.returncode}"
+        assert json.loads(result.stdout)["permissionDecision"] == "deny"
+    else:
+        assert result.returncode == 0, f"{command}: exit={result.returncode} err={result.stderr[:200]}"
+
+
+def test_session_start_emits_valid_json_and_creates_db(tmp_path: Path) -> None:
+    """SessionStart が空 DB から起動して有効な JSON を出し、DB を作ること。
+
+    ここが壊れると全セッションの起動時に知識注入が静かに消える。
+    """
+    result = subprocess.run(
+        [sys.executable, str(LAUNCHER), "bluecore.mem.cli", "context"],
+        input=json.dumps(_MINIMAL_PAYLOADS["SessionStart"]),
+        capture_output=True,
+        text=True,
+        env=_launcher_env(tmp_path),
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr[:400]
+    assert json.loads(result.stdout) is not None
+    assert (tmp_path / ".bluecore" / "mem.db").is_file()
