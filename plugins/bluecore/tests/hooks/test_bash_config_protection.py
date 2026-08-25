@@ -79,6 +79,62 @@ class TestFindProtectedWrite:
     def test_allows_non_write(self, command: str) -> None:
         assert bash_config_protection.find_protected_write(command) is None
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rm pyproject.toml",
+            "rm -f pyproject.toml",
+            "rm -rf pyproject.toml",
+            "unlink pyproject.toml",
+            "shred pyproject.toml",
+            "truncate -s 0 pyproject.toml",
+            # mv は移動先だけでなく移動元も実質削除
+            "mv pyproject.toml /tmp/backup",
+            "sudo rm pyproject.toml",
+            "env rm pyproject.toml",
+        ],
+    )
+    def test_detects_protected_removal(self, command: str) -> None:
+        """削除・切り詰め・移動元も弱体化として検出する。
+
+        書き込み先トークンとしては現れないが、リンタ設定を消せばルールごと
+        無効化できるため上書きと同じ強さの弱体化にあたる。
+        """
+        assert bash_config_protection.find_protected_write(command) is not None
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # 保護対象でないファイルの削除
+            "rm notes.txt",
+            # 複製は元が残るため弱体化ではない
+            "cp pyproject.toml /tmp/backup",
+            # コマンド名だけでファイル指定が無い
+            "rm",
+            "truncate -s 0",
+        ],
+    )
+    def test_allows_non_weakening_removal(self, command: str) -> None:
+        assert bash_config_protection.find_protected_write(command) is None
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "sudo cp /tmp/x pyproject.toml",
+            "sudo install /tmp/x pyproject.toml",
+            "sudo ln -f /dev/null pyproject.toml",
+            "env cp /tmp/x pyproject.toml",
+        ],
+    )
+    def test_detects_write_through_command_wrapper(self, command: str) -> None:
+        """wrapper 経由（sudo/env/command）でも最終引数・ln -f を検出する。
+
+        tee/sed/perl/dd は `_command_index` を通していたが cp/mv/install と
+        ln -f は素の `segment[0]` を見ており、`sudo cp ... pyproject.toml` が
+        素通りしていた。
+        """
+        assert bash_config_protection.find_protected_write(command) is not None
+
     def test_allows_protected_basename_outside_repo_root(self) -> None:
         """A-06 回帰防止: リポジトリ外の同名ファイルへの書き込みは allow する。"""
         assert (

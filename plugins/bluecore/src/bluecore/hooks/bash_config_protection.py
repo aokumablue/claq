@@ -85,6 +85,12 @@ _REDIRECT_OPERATORS = frozenset({">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>"
 # 最終引数が書き込み先になるコマンド群（A-02）。
 _LAST_ARG_WRITE_COMMANDS = frozenset({"cp", "mv", "install"})
 
+# ファイルを消す／空にするコマンド群。書き込みではないが、リンタ設定を消せば
+# ルールごと無効化できるため、上書きと同じ強さの弱体化として扱う。`mv` は
+# 移動元も対象にする（`mv ruff.toml /tmp/backup` は実質削除）。`cp` の複製元は
+# 元ファイルが残るため対象にしない。
+_REMOVE_COMMANDS = frozenset({"rm", "unlink", "shred", "truncate", "mv"})
+
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES | CONDITIONALLY_PROTECTED_FILES
 
 # `NAME=value` 形式の literal 環境変数代入（M-01: 実行 executable 位置の特定に使う）。
@@ -284,13 +290,42 @@ def _last_arg_write_target(segment: list[str]) -> str | None:
     Raises:
         例外は発生しません。
     """
-    if not segment or segment[0].rsplit("/", 1)[-1] not in _LAST_ARG_WRITE_COMMANDS:
+    index = _command_index(segment)
+    if index is None or segment[index].rsplit("/", 1)[-1] not in _LAST_ARG_WRITE_COMMANDS:
         return None
-    non_option_tokens = [token for token in segment[1:] if not token.startswith("-")]
+    non_option_tokens = [token for token in segment[index + 1 :] if not token.startswith("-")]
     if not non_option_tokens:
         return None
     candidate = non_option_tokens[-1]
     return candidate if _protected_basename(candidate) else None
+
+
+def _remove_target(segment: list[str]) -> str | None:
+    """`rm`/`unlink`/`shred`/`truncate`/`mv` の引数に保護対象があればその生トークンを返す。
+
+    削除・切り詰め・移動は書き込み先トークンとして現れないが、リンタ設定を消せば
+    ルールごと無効化できるため上書きと同じ扱いにする（ADR-0002: false negative
+    より false positive を選ぶ）。`mv` は移動先を `_last_arg_write_target` が既に
+    見ているため、ここでは移動元を含む全引数を対象にする。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        保護対象の生トークン（パス文字列）。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    index = _command_index(segment)
+    if index is None or segment[index].rsplit("/", 1)[-1] not in _REMOVE_COMMANDS:
+        return None
+    for token in segment[index + 1 :]:
+        if token.startswith("-"):
+            continue
+        if _protected_basename(token):
+            return token
+    return None
 
 
 def _ln_force_target(segment: list[str]) -> str | None:
@@ -308,15 +343,16 @@ def _ln_force_target(segment: list[str]) -> str | None:
     Raises:
         例外は発生しません。
     """
-    if not segment or segment[0].rsplit("/", 1)[-1] != "ln":
+    index = _command_index(segment)
+    if index is None or segment[index].rsplit("/", 1)[-1] != "ln":
         return None
     has_force = any(
         token.startswith("-") and not token.startswith("--") and "f" in token
-        for token in segment[1:]
+        for token in segment[index + 1 :]
     )
     if not has_force:
         return None
-    non_option_tokens = [token for token in segment[1:] if not token.startswith("-")]
+    non_option_tokens = [token for token in segment[index + 1 :] if not token.startswith("-")]
     if not non_option_tokens:
         return None
     candidate = non_option_tokens[-1]
@@ -369,6 +405,7 @@ def _write_target_token_in_segment(segment: list[str]) -> str | None:
         or _sed_inplace_target(segment)
         or _perl_inplace_target(segment)
         or _last_arg_write_target(segment)
+        or _remove_target(segment)
         or _ln_force_target(segment)
         or _dd_of_target(segment)
     )
