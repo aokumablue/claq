@@ -125,5 +125,5 @@ Null/Undefined・空配列/文字列・無効型・境界値（最小/最大）�
 
 ## 永続メモリ
 
-蓄積知識はサブエージェントへ自動注入されない（SessionStart の注入は本体セッション止まり）。過去の判断を参照したいときは自分で引く: `. "$HOME/.bluecore/env.sh"` の後に `bluecore_run bluecore.mem.cli search "..."` — クエリ例 `test {feature_domain} pattern` / `bug fix regression test`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
+蓄積知識はサブエージェントへ自動注入されない（SessionStart の注入は本体セッション止まり）。過去の判断を参照したいときは自分で引く: `. "$HOME/.bluecore/env.sh"` の後に `bluecore_run bluecore.mem.cli search "..."` — クエリ例 `test pattern` / `bug fix regression test`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
 学びは自分では書かない — 候補は呼び出し元へ報告する（本エージェントの成果は呼び出し元の gate でリバートされうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md`
