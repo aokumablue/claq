@@ -29,6 +29,7 @@
 - 新規エージェントに `Task` を与えない（子が子を呼ぶ階層を作らない）
 - description には「何をするか」ではなく「**いつ呼ぶか**」（呼ばない条件を含む）を書く
 - 材料が同じで観点だけ違うものは `agents/bench-analyzer.md` の `mode` 分岐方式で 1 体にまとめる
+- 定義の**中身**に何を書き何を書かないかは [ADR-0011](0011-agent-definitions-state-behavior-not-rationale.md)
 
 本 ADR は `agents/` 配下に置かず `docs/adr/` に置く。`CLAUDE.md` は全階層の全サブエージェントが毎回読むため、エージェント定義を書くときだけ必要な基準をそこへ置くと起動回数だけコストが掛かる。
 

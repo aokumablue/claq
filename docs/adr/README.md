@@ -14,3 +14,4 @@
 | [0008](0008-plugin-root-resolved-via-home-bluecore-env-pointer.md) | plugin root は `~/.bluecore/env.sh` ポインタで解決し、md にベンダ固有パスを書かない | accepted | 2026-08-20（2026-08-20 改訂 ×4） |
 | [0009](0009-root-pointer-resolver-does-not-verify-process-identity-or-file-ownership.md) | roots pointer resolver は owner/mode 検証を行わない（PID 開始時刻照合は撤回） | accepted | 2026-08-20（2026-08-20 改訂 ×2） |
 | [0010](0010-subagents-split-by-material-not-by-role.md) | サブエージェントは「渡す材料」で分割し、役割名では分割しない | accepted | 2026-08-25 |
+| [0011](0011-agent-definitions-state-behavior-not-rationale.md) | エージェント定義には挙動を書き、論拠と再説明は書かない | accepted | 2026-08-25 |
