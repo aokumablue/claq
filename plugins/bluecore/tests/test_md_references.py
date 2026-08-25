@@ -166,11 +166,35 @@ def test_security_auditor_has_no_bash_access() -> None:
 
 
 _SECTION_REF_RE = re.compile(r"「(#+ [^」]+)」")
+_BACKTICK_SECTION_REF_RE = re.compile(r"`(#+ [^`\n。、]+)`")
+_MD_PATH_REF_RE = re.compile(r"`[^`\n]+\.md`")
 _HEADING_RE = re.compile(r"^(#+ .+)$", re.M)
 
 
+def _iter_same_file_section_refs(text: str) -> Iterator[str]:
+    """同一ファイル内の見出しを指す節参照を列挙する。
+
+    鉤括弧形式（「## 節名」）は常に同一ファイル参照。バッククォート形式
+    (``## 節名``) は他ファイルの節を指す用法と混在するため、同じ行に
+    ``.md`` パス参照が無いものだけを同一ファイル参照とみなす。
+
+    Args:
+        text: Markdown ファイルの全文。
+
+    Yields:
+        同一ファイル内に実在すべき見出しテキスト。
+    """
+    for match in _SECTION_REF_RE.finditer(text):
+        yield match.group(1).strip()
+    for line in text.splitlines():
+        for match in _BACKTICK_SECTION_REF_RE.finditer(line):
+            if _MD_PATH_REF_RE.search(line[: match.start()]) or _MD_PATH_REF_RE.search(line[match.end() :]):
+                continue
+            yield match.group(1).strip()
+
+
 def test_intra_document_section_references_resolve() -> None:
-    """「## 節名」形式の文書内参照が、同一ファイルの見出しとして実在すること。
+    """文書内の節参照が、同一ファイルの見出しとして実在すること。
 
     節を削除・改名したときに参照だけが残ると、モデルは存在しないルールを
     探し、見つからないまま幻覚で補完する。実例として 5d200fc が
@@ -179,16 +203,13 @@ def test_intra_document_section_references_resolve() -> None:
     相対 .md **ファイル**参照しか見ないため、文書内の節参照はどのテスト
     にも掛かっていなかった。
 
-    対象は鉤括弧で囲まれた形式に限る。バッククォート形式
-    (``../loop-dev/SKILL.md`` ``## Human Gate`` 等) は他ファイルの節を
-    指す用法と混在しており、同一ファイル内で解決できないため。
+    バッククォート形式の判定基準は _iter_same_file_section_refs を参照。
     """
     broken: list[str] = []
     for md_file in _iter_md_files():
         text = md_file.read_text(encoding="utf-8")
         headings = {m.group(1).strip() for m in _HEADING_RE.finditer(text)}
-        for match in _SECTION_REF_RE.finditer(text):
-            ref = match.group(1).strip()
+        for ref in _iter_same_file_section_refs(text):
             if not any(head.startswith(ref) or ref.startswith(head) for head in headings):
                 broken.append(f"{md_file.relative_to(_ROOT)}: 「{ref}」")
     assert broken == [], "同一ファイル内に見つからない節参照:\n" + "\n".join(broken)
