@@ -47,6 +47,7 @@ user-invocable: false
    - reviewer 起動時は `verify_mode: reexecute` + 失敗テストのシグネチャ（反復履歴 tests= 記録と同一）+ **baseline step で自ら検出・実行したテストコマンド**を `test_cmd` として渡し、baseline 由来である旨を明示する（generate の自己検証コマンドは渡さない。`approved_plan` から変更予定テストファイルを特定できる場合はその一覧も渡す）。generate の自己申告（「テスト通過」等の要約）は渡さない — diff とテスト結果は reviewer が一次取得（反復2 の evaluate も同様）
    - スコープガード: `approved_plan` に変更ファイル一覧を特定できる場合のみ、編集ファイルが一覧内かを照合し、逸脱は blocker 扱い（一覧のない呼び出し元では非発動）。ただしテスト基盤ファイル（テストランナー・カバレッジの設定や共有フィクスチャ。例: Python なら任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `jest.config.*`/`vitest.config.*`・`package.json` の `scripts`、共通で `Makefile` の test ターゲット・CI 設定等）の変更は一覧の有無に関わらず照合し、一覧に明示されていなければ blocker 扱い
 5. **収束判定**: change 由来 red ゼロ（`red_baseline` 記載シグネチャを除く red がゼロ）+ lint green かつ evaluate blocker（CRITICAL/HIGH）ゼロ かつ `converge_extra` 充足 → 収束
+   - **判定行の存在を収束の前提とする**: evaluate の出力に `Blockers: {n}` 行（security-auditor 併用時は両方）が実際に含まれていること。行が無い場合（エージェントが途中終了した・出力が壊れた・起動に失敗した等）は「blocker ゼロ」と解釈せず未収束として扱い、エスカレーションする — **指摘が無いことと、判定が返ってこないことは別**
    - `red_baseline` 記載の red は収束を妨げない。未収束エスカレーション時は本文で隔離報告し、収束時は出力 `Assumptions` に `pre-existing red: {n}` を付記（ボックス行は増やさない）
    - 不成立時は circuit breaker early trigger を判定（`## circuit breaker` 参照）
    - flake 判定: テスト失敗時は同一失敗テストを最大 2 回再実行し、結果が不安定なら flake と分類。flake をプロダクトコード変更で握りつぶすのは禁止。エスカレーション本文で隔離報告し、報告後は収束判定から除外可（出力ボックスに flake 行は追加しない）。`red_baseline` 記載シグネチャは flake 再実行・分類の対象外

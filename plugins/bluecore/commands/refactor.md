@@ -79,7 +79,7 @@ simplify 全グループ完了後に開始。委譲時は依頼文へ `mode: per
 3. 失敗変更はファイル単位リバートし再検証
 4. 全通過のみ完了
 
-`Final Gate: PASS` の導出規則: clean/simplify/perf/review+secure の全 stage が「完了」（スキップ・未実行・リバートのまま放置ではない）かつ CRITICAL/HIGH が 0 件のときのみ PASS。いずれか 1 stage でも未完了・全ファイルリバートで実質ゼロ変更・CRITICAL/HIGH 残存のいずれかに該当すれば `BLOCKED`。ただし収束 gate の最終権限は `loop-dev` の evaluate であり、本 gate はその入力を作る。
+`Final Gate: PASS` の導出規則: clean/simplify/perf/review+secure の全 stage が「完了」（スキップ・未実行・リバートのまま放置ではない）かつ CRITICAL/HIGH が 0 件のときのみ PASS。いずれか 1 stage でも未完了・全ファイルリバートで実質ゼロ変更・CRITICAL/HIGH 残存のいずれかに該当すれば `BLOCKED`。ステップ6 の判定は `reviewer` / `security-auditor` の出力に `Blockers: {n}` 行が実際に含まれていることを前提とする — 行が無い場合は「指摘ゼロ」ではなく「判定を取得できなかった」として `BLOCKED` にする。ただし収束 gate の最終権限は `loop-dev` の evaluate であり、本 gate はその入力を作る。
 
 `--mode=clean/simplify`（部分モード）時もステップ6（review + secure）は省略せず実行する（ステップ3/4/5 → ステップ7 の流れ全体モードとの違いは、飛ばすのがステップ5（perf）のみである点）。CRITICAL/HIGH ブロック判定（項目2）はステップ6の結果を用いて部分モードでも全体モードと同様に適用する。
 
