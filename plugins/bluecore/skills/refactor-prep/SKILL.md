@@ -18,7 +18,7 @@ user-invocable: false
 
 ## 出力
 
-テキストサマリーに加え、下流（`refactor-rollback` / `refactor` コマンド）が参照する JSON 契約を同時に渡す。フィールド名・構造は `refactor-rollback/SKILL.md` の入力契約と一致させる。
+テキストサマリーに加え、下流（`refactor-rollback` / `refactor` コマンド）が参照する JSON 契約を同時に渡す。フィールド名・構造は `../refactor-rollback/SKILL.md` の入力契約と一致させる。
 
 ```
 Refactor Preflight

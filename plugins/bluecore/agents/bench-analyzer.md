@@ -203,7 +203,7 @@ analyzerの役割: **複数runにまたがるパターンや異常値を見つ�
 - ベースライン名は fixture 全体で一方だけであり、各 `(eval_id, run_number)` に `with_skill` とそのベースラインが各1件ずつある
 - `run_summary` は実行された2構成と一致する
 
-いずれかを満たさない fixture は **FAIL**。不足キー・壊れた run・欠落設定・二重ベースライン・`run_summary` との不一致を列挙し、推測で補完しない。fixture が無い場合は依頼者に必要な採取手順（`with_skill` とベースラインを同一 eval/run 番号で実行し、`schemas.md` のスキーマに従って `benchmark.json` を作成する等）を示して **FAIL** を返すのみで、自ら生成・補完しない。
+いずれかを満たさない fixture は **FAIL**。不足キー・壊れた run・欠落設定・二重ベースライン・`run_summary` との不一致を列挙し、推測で補完しない。fixture が無い場合は依頼者に必要な採取手順（`with_skill` とベースラインを同一 eval/run 番号で実行し、`../skills/skill-make/references/schemas.md` のスキーマに従って `benchmark.json` を作成する等）を示して **FAIL** を返すのみで、自ら生成・補完しない。
 
 ## 手順
 

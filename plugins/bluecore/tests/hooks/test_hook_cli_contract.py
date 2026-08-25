@@ -19,6 +19,10 @@ _ISOLATED_ENV_KEYS = frozenset({
     "CLAUDECODE",
     "PLUGIN_DATA",
     "BLUECORE_HOME",
+    # mem のデータ位置を決めるのはこちら（src/bluecore/mem/settings.py）。
+    # BLUECORE_HOME は lib/core_utils.get_bluecore_dir() が読む別変数で、
+    # これを消しても実 ~/.bluecore への書き込みは止まらなかった。
+    "BLUECORE_DATA_PATH",
     "CLAUDE_SESSION_ID",
     "CLAUDE_PROJECT_DIR",
     "CLAUDE_PLUGIN_ROOT",

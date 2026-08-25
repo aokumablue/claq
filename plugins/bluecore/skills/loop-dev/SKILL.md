@@ -75,7 +75,7 @@ user-invocable: false
 
 ## checkpoint 連携
 
-Skill ネスト発火は使わない。checkpoint skill のフォーマット（`skills/checkpoint/SKILL.md` 参照）に従い loop-dev 自身が直接読み書きする。
+Skill ネスト発火は使わない。checkpoint skill のフォーマット（`../checkpoint/SKILL.md` 参照）に従い loop-dev 自身が直接読み書きする。
 
 - 保存先: `~/.bluecore/session-data/checkpoint-<YYYY-MM-DD>-<task-slug>.md`
 - 反復1 開始前に新規作成（`completed: false`）

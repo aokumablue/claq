@@ -7,13 +7,22 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from collections.abc import Iterator
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 _TARGET_DIRS = ("agents", "skills", "commands")
-_REF_PATTERN = re.compile(r"`((?:\.\./|references/)[^`\n]+?\.md)`")
+_REF_PATTERN = re.compile(r"`([^`\n]+\.md)`")
+# リポジトリ内パスとして解決してはいけない参照。各エントリに理由を持たせる。
+_NON_REPO_MD_REFS = {
+    "CLAUDE.md": "利用者側リポジトリのファイル",
+    "README.md": "利用者側リポジトリのファイル",
+    "docs/adr/README.md": "利用者側リポジトリのファイル",
+    "user_notes.md": "eval の run 成果物（実行時に生成）",
+    "checkpoint-2026-05-09-article-loop.md": "命名例として本文に書かれたファイル名",
+}
 
 
 def _iter_md_files() -> Iterator[Path]:
@@ -23,14 +32,25 @@ def _iter_md_files() -> Iterator[Path]:
 
 
 def test_relative_md_references_resolve() -> None:
-    """バッククォート内の相対 .md 参照がすべて実在ファイルに解決されること。"""
+    """バッククォート内の .md 参照が、記載ファイルからの相対で実在に解決されること。
+
+    実行時にこの md を読むモデルの cwd は利用者のプロジェクトであり、plugin root
+    相対も repo root 相対も解決手段を持たない。referrer 相対だけが唯一実行可能な
+    形式なので、その基準のみで検査する。
+
+    以前は ``../`` と ``references/`` 始まりだけを対象にしていたため、
+    ``skills/checkpoint/SKILL.md``（repo root 相対のつもり）や ``schemas.md``
+    （別ディレクトリのファイル）のような参照が検査を素通りしていた。
+    """
     broken: list[str] = []
     for md_file in _iter_md_files():
         text = md_file.read_text(encoding="utf-8")
         for match in _REF_PATTERN.finditer(text):
-            target = (md_file.parent / match.group(1)).resolve()
-            if not target.is_file():
-                broken.append(f"{md_file.relative_to(_ROOT)}: `{match.group(1)}`")
+            ref = match.group(1)
+            if ref.startswith("~/") or any(ch in ref for ch in "{<*") or ref in _NON_REPO_MD_REFS:
+                continue
+            if not (md_file.parent / ref).resolve().is_file():
+                broken.append(f"{md_file.relative_to(_ROOT)}: `{ref}`")
     assert broken == [], "解決できない md 参照:\n" + "\n".join(broken)
 
 
@@ -338,3 +358,42 @@ def test_section_ref_helpers_detect_and_accept() -> None:
     # 1 行が複数ファイルへ言及する場合、最初の 1 件に決め打たない
     multi = "基準は `../learn/SKILL.md`。収束状況は `## 反復履歴` が単一情報源（`../checkpoint/SKILL.md` 参照）。\n"
     assert list(_iter_section_refs(multi)) == [("## 反復履歴", ("../learn/SKILL.md", "../checkpoint/SKILL.md"))]
+
+
+_PLUGIN_REF_RE = re.compile(r"bluecore:([a-z][\w-]*)")
+_MODULE_REF_RE = re.compile(r"bluecore_run\s+(bluecore[\w.]*)")
+
+
+def test_plugin_component_references_exist() -> None:
+    """md が名指しする `bluecore:<name>` が agents/skills/commands に実在すること。
+
+    エージェント名・スキル名は文字列でしか書けず、綴りを間違えても、または
+    リネーム後に参照が残っても、実行するまで気づけない（呼び出し元は該当なし
+    として黙って別経路へ倒れる）。相対 .md パス参照と同じく構造で固定する。
+    """
+    known = (
+        {p.stem for p in (_ROOT / "agents").glob("*.md")}
+        | {p.name for p in (_ROOT / "skills").iterdir() if p.is_dir()}
+        | {p.stem for p in (_ROOT / "commands").glob("*.md")}
+    )
+    missing: list[str] = []
+    for md_file in _iter_md_files():
+        for match in _PLUGIN_REF_RE.finditer(md_file.read_text(encoding="utf-8")):
+            if match.group(1) not in known:
+                missing.append(f"{md_file.relative_to(_ROOT)}: bluecore:{match.group(1)}")
+    assert missing == [], "実在しない参照:\n" + "\n".join(sorted(set(missing)))
+
+
+def test_bluecore_run_module_references_are_importable() -> None:
+    """md が `bluecore_run` に渡す Python モジュールが import 可能であること。
+
+    hooks.json のドット区切り参照と同じく、モジュール名は Python の import 文
+    に現れないため、リネームやモジュール削除で静かに壊れる。
+    """
+    missing: list[str] = []
+    for md_file in _iter_md_files():
+        for match in _MODULE_REF_RE.finditer(md_file.read_text(encoding="utf-8")):
+            module = match.group(1)
+            if importlib.util.find_spec(module) is None:
+                missing.append(f"{md_file.relative_to(_ROOT)}: {module}")
+    assert missing == [], "import できないモジュール参照:\n" + "\n".join(sorted(set(missing)))
