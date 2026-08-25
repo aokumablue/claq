@@ -163,3 +163,32 @@ def test_security_auditor_has_no_bash_access() -> None:
     assert "Bash" not in declared_tools
     assert "Edit" not in declared_tools
     assert "Write" not in declared_tools
+
+
+_SECTION_REF_RE = re.compile(r"「(#+ [^」]+)」")
+_HEADING_RE = re.compile(r"^(#+ .+)$", re.M)
+
+
+def test_intra_document_section_references_resolve() -> None:
+    """「## 節名」形式の文書内参照が、同一ファイルの見出しとして実在すること。
+
+    節を削除・改名したときに参照だけが残ると、モデルは存在しないルールを
+    探し、見つからないまま幻覚で補完する。実例として 5d200fc が
+    ``## 確信度ゲート`` を撤去した際、agents/reviewer.md に参照が 2 箇所
+    残った。test_relative_md_references_resolve はバッククォート付きの
+    相対 .md **ファイル**参照しか見ないため、文書内の節参照はどのテスト
+    にも掛かっていなかった。
+
+    対象は鉤括弧で囲まれた形式に限る。バッククォート形式
+    (``../loop-dev/SKILL.md`` ``## Human Gate`` 等) は他ファイルの節を
+    指す用法と混在しており、同一ファイル内で解決できないため。
+    """
+    broken: list[str] = []
+    for md_file in _iter_md_files():
+        text = md_file.read_text(encoding="utf-8")
+        headings = {m.group(1).strip() for m in _HEADING_RE.finditer(text)}
+        for match in _SECTION_REF_RE.finditer(text):
+            ref = match.group(1).strip()
+            if not any(head.startswith(ref) or ref.startswith(head) for head in headings):
+                broken.append(f"{md_file.relative_to(_ROOT)}: 「{ref}」")
+    assert broken == [], "同一ファイル内に見つからない節参照:\n" + "\n".join(broken)
