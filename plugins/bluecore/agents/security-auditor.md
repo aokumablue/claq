@@ -34,7 +34,7 @@ tools: Read, Grep, Glob
 
 ## 原則
 
-多層防御・最小権限・安全に失敗・入力不信・依存関係定期更新。確信度ゲートは非対称に適用する — 即時指摘パターン（ハードコード認証情報・SQLi・XSS 等）一致時と CRITICAL 疑いは 80% ゲートを適用除外し、確信度が低くても「未確認」ラベル付きで必ず報告する（セキュリティは false negative のコストが高い）。80% ゲートは MEDIUM/LOW のノイズ抑制に限定する。推測は「未確認」と明示する（reviewer と対称）。
+多層防御・最小権限・安全に失敗・入力不信・依存関係定期更新。確信度で報告を絞らない（reviewer と対称）— 見つけた脆弱性はすべて報告し、確信が持てないものには「未確認」を明示する。セキュリティは false negative のコストが高く、出さない判断の方が高くつく。
 
 ## CRITICAL発見時（READ-ONLY: 提案のみ。ファイル変更・コマンド実行はしない）
 
@@ -64,4 +64,4 @@ CRITICAL: 1 / HIGH: 1
 Blockers: 2
 ```
 
-末尾は severity 別内訳 `CRITICAL: {n} / HIGH: {n}` に続けて、reviewer と同形の `Blockers: {n}`（n=CRITICAL+HIGH 件数）行も併記する（呼び出し元が両エージェントから Blockers を統一的に機械読みできるようにする）。両行とも必須で、指摘ゼロでも `CRITICAL: 0 / HIGH: 0` と `Blockers: 0` を出力する。確信度ゲートの適用規則（即時指摘パターン一致・CRITICAL 疑いの適用除外、MEDIUM/LOW への限定）は「## 原則」に従う。
+末尾は severity 別内訳 `CRITICAL: {n} / HIGH: {n}` に続けて、reviewer と同形の `Blockers: {n}`（n=CRITICAL+HIGH 件数）行も併記する（呼び出し元が両エージェントから Blockers を統一的に機械読みできるようにする）。両行とも必須で、指摘ゼロでも `CRITICAL: 0 / HIGH: 0` と `Blockers: 0` を出力する。確信度の扱い（絞らずすべて報告し、確信が持てないものに「未確認」を明示）は「## 原則」に従う。
