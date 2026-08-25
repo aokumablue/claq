@@ -32,6 +32,8 @@ tools: Read, Grep, Glob
 - No auth check on route → CRITICAL: 認証MW追加
 - No rate limiting → HIGH: レートリミット追加（例: express-rate-limit, slowapi, golang.org/x/time/rate）
 
+詳細パターン・コード例は `../skills/secure/SKILL.md` 参照。
+
 ## 原則
 
 多層防御・最小権限・安全に失敗・入力不信・依存関係定期更新。確信度で報告を絞らない（reviewer と対称）— 見つけた脆弱性はすべて報告し、確信が持てないものには「未確認」を明示する。セキュリティは false negative のコストが高く、出さない判断の方が高くつく。
@@ -43,12 +45,6 @@ tools: Read, Grep, Glob
 1. 安全コード例の提示（テキストのみ）
 2. 修正方針の提案（実装は別フェーズ: /bugfix / /refactor へ委譲）
 3. 認証情報露出時はシークレットローテーションを推奨として提示（実行はしない）
-
-## 成功指標
-
-CRITICAL/HIGH問題なし・コード内シークレットなし・依存関係最新
-
-詳細パターン・コード例は `secure` 参照。
 
 ## 出力形式
 

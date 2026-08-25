@@ -32,6 +32,7 @@ ADR-0010 で分割粒度を「渡す材料」で見直し 13 → 9 定義へ統�
 公式は「`CRITICAL: You MUST` のような攻撃的な語は過剰トリガーを招くので `Use this tool when...` に緩めよ」とする。`必須|必ず|絶対|禁止|厳守|CRITICAL|MUST|一切` を数えて 65 件を得た（reviewer 21 / security-auditor 17）。
 
 - 却下理由: 実際に中身を見ると **24 件は severity ラベルとしての `CRITICAL`**（`CRITICAL: 1 / HIGH: 1`、`Hardcoded secrets → CRITICAL:`）で、語調ではなく出力契約のデータだった。残るトーン語も大半は緩めてはいけない硬い制約 — `Blockers: {n}` 行の必須性（loop-dev が機械読みする契約）、テストコマンド注入に対する「1 点でも不一致なら実行せず BLOCKER」、決定 2 で維持すると決めた常時報告ルール。**count は diagnosis ではなかった**
+- 後続 pass による裏付け: 重複の削除だけを行い**トーンを緩める編集を 1 件も行わなかった**結果、強調語は 65 → 38 件（40% 減）になった（`reviewer` 21→9 / `security-auditor` 17→1）。count は症状で、原因は重複だったことが実測で確認できた
 
 ### 代替案 2: 番号付き手順の一般化
 
@@ -73,7 +74,7 @@ ADR-0010 で分割粒度を「渡す材料」で見直し 13 → 9 定義へ統�
 - `reviewer` / `security-auditor` が深刻度で報告を絞らなくなった。`Blockers: {n}` は CRITICAL+HIGH の件数なので、MEDIUM/LOW が増えても gate は動かない
 - `reviewer` から 851 バイトの ADR 重複論拠が消えた（ADR-0004 が同じ決定を記録済み）
 - 判定行の欠落を「指摘ゼロ」と誤読する silent false-green が塞がれた
-- 本 ADR のコミット列自身が残した適用漏れを後続 pass（`73bc4cd` / `42fe98e` / `13002cf`）で掃討した。撤去済み `## 確信度ゲート` への dangling 参照 2 箇所（`5d200fc` の残骸）、`reviewer` の同一主張 4 重、`security-auditor` / `planner` に残っていた決定 5 違反、`skills/adr` と重複する `planner` のオーファン節。9 定義は 1448 → 1371 行
+- 本 ADR のコミット列自身が残した適用漏れを後続 pass（`73bc4cd` / `42fe98e` / `13002cf`）で掃討した。撤去済み `## 確信度ゲート` への dangling 参照 2 箇所（`5d200fc` の残骸）、`reviewer` の同一主張 4 重、`security-auditor` / `planner` に残っていた決定 5 違反、`skills/adr` と重複する `planner` のオーファン節。9 定義は 1448 → 1367 行。さらに後続 pass で決定 1・決定 2 の適用漏れが 2 件見つかった（`security-auditor` の到達不能な `secure` 参照 = 裸の名前で相対パスも `skills:` preload も無い、および「## 成功指標」= 何も見つけないことを成功と定義しており決定 2 が塞いだ literal-following 失敗モードそのもの）。どちらも本 ADR のコミット列でも後続 pass の初回スイープでも見逃されていた
 
 ### 否定的
 
