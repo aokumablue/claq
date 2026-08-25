@@ -165,9 +165,9 @@ def _repo_tool_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "points": 2,
             "scopes": ["repo", "agents"],
             "path": "agents/",
-            "description": "最低10個のエージェント定義が存在する",
-            "pass": count_files(root_dir, "agents", ".md") >= 10,
-            "fix": "Add or restore agent definitions under agents/.",
+            "description": "エージェント定義の surface が失われていない（破損検知の下限。数は品質指標ではない — ADR-0010）",
+            "pass": count_files(root_dir, "agents", ".md") >= 5,
+            "fix": "Restore agent definitions under agents/ if the surface was emptied. Do NOT split agents to raise this count.",
         },
         {
             "id": "tool-skill-count",
