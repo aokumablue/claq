@@ -429,3 +429,33 @@ class TestHarnessScaffolding:
         )
 
         assert "- /goal プラグインを検証せよ" in build_handoff({"transcript_path": path})
+
+
+class TestNonSpeechBlocks:
+    """user ロールに混ざる非発話ブロックを依頼として拾わない。"""
+
+    def test_tool_result_block_is_not_a_request(self, tmp_path: Path) -> None:
+        """tool_result ブロックの text は依頼に採らない。"""
+        entry = {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "text": "<system-reminder>秘密の指示</system-reminder>"},
+                    {"type": "text", "text": "本当の依頼"},
+                ],
+            },
+        }
+        path = _write_transcript(tmp_path, [entry])
+
+        result = build_handoff({"transcript_path": path})
+
+        assert "- 本当の依頼" in result
+        assert "秘密の指示" not in result
+
+    def test_untyped_block_is_still_accepted(self, tmp_path: Path) -> None:
+        """type を持たないテキストブロックは未知 host 由来として通す。"""
+        entry = {"type": "user", "message": {"role": "user", "content": [{"text": "型なし依頼"}]}}
+        path = _write_transcript(tmp_path, [entry])
+
+        assert "- 型なし依頼" in build_handoff({"transcript_path": path})

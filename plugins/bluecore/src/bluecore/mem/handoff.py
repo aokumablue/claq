@@ -281,6 +281,13 @@ def _parse_entry(line: str) -> dict[str, Any] | None:
     return entry if isinstance(entry, dict) else None
 
 
+# user ロールのエントリに混ざるが、ユーザーの発話ではないブロック種別。
+# ツール結果・ツール呼び出し・画像・思考は依頼ではないため本文に採らない。
+# 未知の種別は通す（host ごとにテキストブロックの type 名が異なりうるため、
+# allowlist にすると未知 host で実依頼を落とす）。
+_NON_SPEECH_BLOCK_TYPES = frozenset({"tool_result", "tool_use", "image", "thinking"})
+
+
 def _text_content(raw: object) -> str:
     """ユーザー発話の content をプレーンテキストへ畳む。
 
@@ -289,11 +296,16 @@ def _text_content(raw: object) -> str:
 
     Returns:
         連結した本文。文字列でもブロック列でもなければ空文字列。
+        ツール結果等の非発話ブロックは除外する。
     """
     if isinstance(raw, str):
         return raw
     if isinstance(raw, list):
-        return " ".join(str(part.get("text", "")) for part in raw if isinstance(part, dict))
+        return " ".join(
+            str(part.get("text", ""))
+            for part in raw
+            if isinstance(part, dict) and part.get("type") not in _NON_SPEECH_BLOCK_TYPES
+        )
     return ""
 
 
