@@ -1313,3 +1313,52 @@ def test_mem_main_module_invokes_cli_main(monkeypatch: pytest.MonkeyPatch) -> No
         runpy.run_module("bluecore.mem.__main__", run_name="__main__")
 
     assert excinfo.value.code == 0
+
+
+class TestSubcommandOptionContract:
+    """F-22: subcommand が受理しないオプションを黙って無視しない。"""
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            (["promote", "some-key", "--global"], "--global"),
+            (["show", "some-key", "--repo"], "--repo"),
+            (["forget", "some-key", "--kind", "fact"], "--kind"),
+            (["init", "--json"], "--json"),
+        ],
+    )
+    def test_unsupported_option_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str], expected: str
+    ) -> None:
+        """未対応オプションは exit 1 で拒否し、対象の DB を触らないこと。
+
+        黙って無視していた頃は、`promote <key> --global` が repo 側のカードを
+        昇格させ、利用者が指定した global 側は pending のまま残っていた。
+        """
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, argv)
+
+        assert (stdout, exit_code) == ("", 1)
+        assert expected in stderr
+
+    def test_mutually_exclusive_scope_flags_are_rejected_on_every_subcommand(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`--global --repo` の同時指定は list/search でも拒否されること。
+
+        排他チェックが `_collect_list_rows` にしか無かったため、それを呼ばない
+        subcommand では素通りしていた。
+        """
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["list", "--global", "--repo"])
+
+        assert (stdout, exit_code) == ("", 1)
+        assert "同時に指定できません" in stderr
+
+    def test_supported_options_are_accepted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """対応済みオプションは従来どおり通ること。"""
+        _stdout, _stderr, exit_code = _run_cli(
+            monkeypatch, tmp_path, ["list", "--global", "--status", "pending", "--limit", "3"]
+        )
+
+        assert exit_code == 0

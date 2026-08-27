@@ -13,8 +13,12 @@ command: /instinct
 
 中心となるワークフローは **昇格**: `learn` で入れた候補は常に `status='pending'` で登録され
 （H-01 対応: `source`/`status` は caller が指定しても採用されず、常に `source=agent`/
-`status=pending` に固定される）、SessionStart に注入されない。人間がここでレビューして
+`status=pending` に固定される）、SessionStart に注入されない。ここでレビューして
 `promote` した知識だけが `status='active'` になり、以後の全セッションへ注入される。
+
+`promote` が人間によって実行されたことは技術的に強制されていない（同一 UID から
+`mem.db` を直接更新できるため。ADR-0007 が受容した残存リスク）。昇格は key・scope・
+source・直前 status とともに監査ログへ記録される。
 
 ## grillme 起動（条件付き）
 

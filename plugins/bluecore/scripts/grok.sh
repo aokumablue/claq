@@ -15,6 +15,9 @@
 #
 # このスクリプトは自身の配置場所（$0）には依存せず、常に
 # ~/.grok/installed-plugins/bluecore-* を直接探索して実体を見つける。
+# 複数インストールが同居する場合は mtime 最新を選ぶ（Python 側の
+# find_latest_installed_bluecore と同じ規則。両者が食い違うと、実行される
+# bootstrap コードと symlink の張り先が別バージョンになる）。
 # そのため `curl ... | sh` のようにパイプ経由で実行され $0 が bash/sh に
 # なる場合でも正しく動く（ダウンロードと同時実行が可能）。
 #
@@ -22,27 +25,39 @@
 #   curl -fsSL <配布スクリプトのURL> | sh
 #   curl -fsSL <配布スクリプトのURL> | bash
 
-INSTALLED_DIR="$HOME/.grok/installed-plugins"
+# 候補の選択規則は grok_plugin_root.find_latest_installed_bluecore と揃える
+# （mtime 最新）。以前はシェル側が glob の先頭＝辞書順を採っていたため、複数
+# インストールが同居すると「実行される bootstrap コード」と「symlink の張り先」が
+# 別バージョンになりえた（F-12）。選択は stdlib だけで済むので、PYTHONPATH を
+# 用意する前に python3 へ委ねる。
+SRC_DIR="$(python3 -c '
+import pathlib
+import sys
 
-SRC_DIR=""
-for candidate in "$INSTALLED_DIR"/bluecore-*; do
-    if [ -f "$candidate/src/bluecore/lib/grok_plugin_root.py" ]; then
-        SRC_DIR="$candidate/src"
-        break
-    fi
-done
+root = pathlib.Path.home() / ".grok" / "installed-plugins"
+candidates = [
+    path
+    for path in (root.glob("bluecore-*") if root.is_dir() else [])
+    if (path / "src" / "bluecore" / "lib" / "grok_plugin_root.py").is_file()
+]
+if not candidates:
+    sys.exit(1)
+print(max(candidates, key=lambda path: path.stat().st_mtime) / "src")
+')" || {
+    echo "no installed bluecore-* found under ~/.grok/installed-plugins" >&2
+    exit 1
+}
 
-if [ -z "$SRC_DIR" ]; then
-    echo "no installed bluecore-* found under ~/.grok/installed-plugins"
-    exit 0
-fi
-
+# 未導入・import 失敗・link 失敗はいずれも非 0 で返す。以前は「何もできなかった」
+# 場合も exit 0 だったため、呼び出し側が成功と区別できなかった（F-12）。
 PYTHONPATH="$SRC_DIR" python3 -c '
+import sys
+
 from bluecore.lib.grok_plugin_root import ensure_grok_plugin_root_symlink
 
 result = ensure_grok_plugin_root_symlink()
-if result:
-    print(f"linked -> {result}")
-else:
-    print("no installed bluecore-* found under ~/.grok/installed-plugins")
+if not result:
+    print("could not link ~/.grok/plugins/bluecore", file=sys.stderr)
+    sys.exit(1)
+print(f"linked -> {result}")
 '
