@@ -18,12 +18,13 @@ v0.9.34 時点のランタイム監査レポートの H-03 は「release tree �
 ```
 $ cd plugins/bluecore && python3 -m pytest -q --cov
 ...
-TOTAL                                            3556      0   1264      0   100%
 Required test coverage of 100.0% reached. Total coverage: 100.00%
-============================= 1473 passed in 6.97s =============================
 ```
 
-`tests/` 配下に 42 個の test file が存在し、`pyproject.toml` は
+（件数と statements 数は本 ADR へ書かない。書けば必ず陳腐化し、次の監査が
+「ADR の数値と合わない」を欠陥として報告する材料になる。実測は常に上記コマンドで取る。）
+
+`tests/` 配下に test file が存在し、`pyproject.toml` は
 `[project.optional-dependencies].dev` に `pytest>=8.0` / `pytest-cov>=4.0` /
 `ruff>=0.4` / `vulture>=2.0` を既に宣言している。coverage 設定
 （`fail_under = 100`）も存在する。つまり H-03 が指摘した「テスト基盤が
@@ -93,6 +94,19 @@ tree（このリポジトリ自身）で実施する。**
 
 - 実機再検証を行う担当者が、この設計判断（配布物にテストを含めない）を
   知らずに installed tree で pytest を実行すると、再び H-03 相当の誤検出を
-  報告しうる。本 ADR と `CLAUDE.md` の「変更後は... `.venv` を有効化して
-  `python3 -m pytest -q` ...」という手順（source tree 前提）を参照すれば
-  防げるが、参照されなければ再発する。
+  報告しうる。
+
+**このリスクは 3 回現実化した**（H-03 → v0.9.34 後の再検証 → 2026-08-26 監査の
+F-02）。3 回目の監査者は本 ADR を読んだ上でなお誤検出を報告している（`docs/` は
+配布対象から除外されないため、本 ADR は配布ツリーにも載っていた）。**散文の警告
+では止まらないことが実測で示された。**
+
+根本原因は、配布ツリーへ `pyproject.toml` をそのまま持ち出していたことにある。
+`testpaths = ["tests"]` と `fail_under = 100` が除去済みの `tests/` を指したまま
+残るため、配布ツリーで `pytest` を叩くと「coverage 0% で FAIL」という**回帰そっくり
+の派手な失敗**が出た。2026-08-27 に `scripts/publish.sh` の除外リストへ
+`plugins/bluecore/pyproject.toml` を追加し、この出力が構造的に発生しないようにした
+（配布ツリーで pyproject が果たす役割はゼロ — ランタイム依存はゼロで、
+`launcher.py` が `sys.path` へ `src/` を挿すだけであり、ホストが読むのは
+`.claude-plugin/plugin.json`）。除外リストの定義は
+`plugins/bluecore/tests/scripts/test_publish_script.py` が機械的に固定する。
