@@ -1179,24 +1179,81 @@ def test_get_unstaged_modified_files_returns_success_output(monkeypatch: pytest.
     assert pre_bash_commit_quality.get_unstaged_modified_files() == ["src/a.py", "src/b.py"]
 
 
-def test_get_unstaged_modified_files_returns_empty_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """HEAD が存在しない等で失敗した場合は空リストを返すこと（非ブロッキング）。"""
+def _fake_git(results: dict[tuple[str, ...], subprocess.CompletedProcess]):
+    """argv の先頭 3 語をキーに CompletedProcess を返す subprocess.run の差し替えを作る。"""
+
+    def fake_run(argv, *args, **kwargs):
+        return results[tuple(argv[:3])]
+
+    return fake_run
+
+
+def test_get_unstaged_modified_files_returns_empty_when_head_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """初回コミット（HEAD 不在）で diff が失敗した場合は空リストを返すこと。
+
+    HEAD が無いのは正常系なので、ここだけは fail-open のままにする。
+    """
     monkeypatch.setattr(
         pre_bash_commit_quality.subprocess,
         "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 128, stdout="", stderr="fatal"),
+        _fake_git(
+            {
+                ("git", "diff", "HEAD"): subprocess.CompletedProcess([], 128, stdout="", stderr="fatal"),
+                ("git", "rev-parse", "--verify"): subprocess.CompletedProcess([], 1, stdout="", stderr=""),
+            }
+        ),
     )
     assert pre_bash_commit_quality.get_unstaged_modified_files() == []
 
 
-def test_get_unstaged_modified_files_returns_empty_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
-    """subprocess が OSError 系例外を投げても空リストを返すこと。"""
+def test_get_unstaged_modified_files_returns_none_when_git_fails_with_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HEAD はあるのに diff が失敗した場合は None を返すこと（fail-closed）。
+
+    「対象ファイルなし」と「検査できなかった」を区別しないと、実際にコミット
+    される未ステージ変更を 1 件も検査せずに通してしまう（ADR-0001）。
+    """
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        _fake_git(
+            {
+                ("git", "diff", "HEAD"): subprocess.CompletedProcess([], 128, stdout="", stderr="fatal"),
+                ("git", "rev-parse", "--verify"): subprocess.CompletedProcess([], 0, stdout="abc123\n", stderr=""),
+            }
+        ),
+    )
+    assert pre_bash_commit_quality.get_unstaged_modified_files() is None
+
+
+def test_get_unstaged_modified_files_returns_none_when_head_check_also_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HEAD の有無自体を判定できない場合も None を返すこと。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        _fake_git(
+            {
+                ("git", "diff", "HEAD"): subprocess.CompletedProcess([], 128, stdout="", stderr="fatal"),
+                ("git", "rev-parse", "--verify"): subprocess.CompletedProcess([], 128, stdout="", stderr="fatal"),
+            }
+        ),
+    )
+    assert pre_bash_commit_quality.get_unstaged_modified_files() is None
+
+
+def test_get_unstaged_modified_files_returns_none_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
+    """subprocess が OSError 系例外を投げた場合は None を返すこと（fail-closed）。"""
     monkeypatch.setattr(
         pre_bash_commit_quality.subprocess,
         "run",
         lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("missing")),
     )
-    assert pre_bash_commit_quality.get_unstaged_modified_files() == []
+    assert pre_bash_commit_quality.get_unstaged_modified_files() is None
 
 
 def test_get_worktree_file_content_returns_none_on_oserror(tmp_path: Path) -> None:
