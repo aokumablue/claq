@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from bluecore.lib.frontmatter import FrontmatterError, parse_yaml, split_frontmatter
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -72,3 +74,22 @@ def is_non_empty_string_array(value: Any) -> bool:
         例外は発生しません。
     """
     return isinstance(value, list) and len(value) > 0 and all(is_non_empty_string(item) for item in value)
+
+
+def extract_frontmatter(content: str) -> dict[str, object] | None:
+    """先頭の --- で囲まれた frontmatter を辞書として返す。無ければ None。
+
+    解釈できない行を読み飛ばして部分結果を返す寛容モードで解析する。
+
+    Args:
+        content: Markdown ファイルの全文。
+
+    Returns:
+        frontmatter の辞書。frontmatter が無い、または辞書でない場合は None。
+    """
+    try:
+        block = split_frontmatter(content)
+    except FrontmatterError:
+        return None
+    data = parse_yaml(block, lenient=True)
+    return data if isinstance(data, dict) else None

@@ -109,18 +109,14 @@ def test_validate_hooks_rejects_top_level_array(tmp_path: Path, capsys: pytest.C
 
 def test_validate_hooks_and_main_success(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     hooks_file = tmp_path / "hooks.json"
-    write_json(
-        hooks_file,
-        {
-            "hooks": {
-                "UserPromptSubmit": [{"hooks": [{"type": "prompt", "prompt": "ok"}]}],
-                "PreToolUse": [{"matcher": "tool", "hooks": [{"type": "command", "command": "echo ok"}]}],
-            }
-        },
-    )
+    filler = [{"matcher": "*", "hooks": [{"type": "command", "command": "true", "timeout": 5}]}]
+    events: dict[str, object] = dict.fromkeys(validate_hooks.REQUIRED_EVENTS, filler)
+    events["UserPromptSubmit"] = [{"hooks": [{"type": "prompt", "prompt": "ok"}]}]
+    events["PreToolUse"] = [{"matcher": "tool", "hooks": [{"type": "command", "command": "echo ok"}]}]
+    write_json(hooks_file, {"hooks": events})
 
     assert validate_hooks.validate_hooks(hooks_file) == 0
-    assert "2 個のフックマッチャーを検証しました" in capsys.readouterr().out
+    assert "個のフックマッチャーを検証しました" in capsys.readouterr().out
     assert validate_hooks.main(["--hooks-file", str(hooks_file)]) == 0
 
 
@@ -145,14 +141,10 @@ def test_validate_hooks_reports_invalid_matcher_and_entrypoint(
     assert validate_hooks.validate_hooks(hooks_file) == 1
     assert "の 'matcher' フィールドが無効です" in capsys.readouterr().err
 
-    write_json(
-        hooks_file,
-        {
-            "hooks": {
-                "UserPromptSubmit": [{"hooks": [{"type": "prompt", "prompt": "ok"}]}],
-            }
-        },
-    )
+    filler = [{"matcher": "*", "hooks": [{"type": "command", "command": "true", "timeout": 5}]}]
+    events = dict.fromkeys(validate_hooks.REQUIRED_EVENTS, filler)
+    events["UserPromptSubmit"] = [{"hooks": [{"type": "prompt", "prompt": "ok"}]}]
+    write_json(hooks_file, {"hooks": events})
 
     monkeypatch.setattr(
         sys,

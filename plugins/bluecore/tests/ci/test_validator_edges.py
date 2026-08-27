@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import runpy
 import sys
 from pathlib import Path
@@ -30,14 +31,19 @@ def _raise_oserror_on_read(monkeypatch: pytest.MonkeyPatch, broken_file: Path) -
 
 def test_validate_skills_handles_missing_dir_and_success(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     missing = tmp_path / "missing-skills"
-    assert validate_skills.validate_skills(missing) == 0
+    # 既定では欠落を失敗として扱う（F-03）。--optional でだけスキップする。
+    assert validate_skills.validate_skills(missing) == 1
+    assert "見つかりません" in capsys.readouterr().err
+    assert validate_skills.validate_skills(missing, optional=True) == 0
     assert "検証をスキップします" in capsys.readouterr().out
 
     skills_dir = tmp_path / "skills"
     for name in ("alpha", "beta"):
         skill_dir = skills_dir / name
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+        (skill_dir / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: いつ呼ぶかの説明\n---\n\n# Skill\n", encoding="utf-8"
+    )
 
     assert validate_skills.validate_skills(skills_dir) == 0
     assert "2 個のスキルディレクトリを検証しました" in capsys.readouterr().out
@@ -91,8 +97,14 @@ def test_validate_agents_handles_valid_bom_crlf_and_errors(
     assert "ファイルの読み取りに失敗しました" in stderr
 
 
-def test_validate_agents_skips_missing_dir(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert validate_agents.validate_agents(tmp_path / "missing-agents") == 0
+def test_validate_agents_missing_dir_fails_unless_optional(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = tmp_path / "missing-agents"
+    # 既定では欠落を失敗として扱う（F-03）。--optional でだけスキップする。
+    assert validate_agents.validate_agents(missing) == 1
+    assert "見つかりません" in capsys.readouterr().err
+    assert validate_agents.validate_agents(missing, optional=True) == 0
     assert "検証をスキップします" in capsys.readouterr().out
 
 
@@ -192,7 +204,9 @@ def test_validator_main_entrypoints(
     skills_dir = tmp_path / "skills"
     skill_dir = skills_dir / "alpha"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: いつ呼ぶかの説明\n---\n\n# Skill\n", encoding="utf-8"
+    )
 
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
@@ -258,13 +272,14 @@ def test_validate_agents_accepts_quoted_model_values(tmp_path: Path) -> None:
 
 def test_validate_hooks_main_without_schema_path(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     hooks_file = tmp_path / "hooks.json"
+    matcher = {"matcher": ".", "hooks": [{"type": "command", "command": "echo hi"}]}
     hooks_file.write_text(
-        '{"SessionStart": [{"matcher": ".", "hooks": [{"type": "command", "command": "echo hi"}]}]}',
+        json.dumps(dict.fromkeys(validate_hooks.REQUIRED_EVENTS, [matcher])),
         encoding="utf-8",
     )
 
     assert validate_hooks.main(["--hooks-file", str(hooks_file)]) == 0
-    assert "1 個のフックマッチャーを検証しました" in capsys.readouterr().out
+    assert "個のフックマッチャーを検証しました" in capsys.readouterr().out
 
 
 def test_validate_agents_accepts_quoted_model_with_spaces(tmp_path: Path) -> None:

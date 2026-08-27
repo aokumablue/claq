@@ -6,9 +6,23 @@ import json
 from pathlib import Path
 
 from bluecore.ci.ci_common import REPO_ROOT
-from bluecore.ci.validate_hooks import validate_hooks
+from bluecore.ci.validate_hooks import REQUIRED_EVENTS, validate_hooks
 
 REPO_HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.json"
+
+
+def complete_hooks(**events: object) -> dict:
+    """検証対象イベント以外の必須イベントをダミーで埋めた hooks 設定を返す。
+
+    `validate_hooks` は「完成した hooks マニフェスト」を検証する契約であり、
+    必須イベント（PreToolUse / PreCompact / SessionStart / SessionEnd）が
+    揃っていなければ失敗する（F-03）。1 つのマッチャーの構造だけを見たい
+    テストでも、残りは構造的に正しいダミーで埋めて完成形にする。
+    """
+    filler = [{"matcher": "*", "hooks": [{"type": "command", "command": "true", "timeout": 5}]}]
+    filled: dict[str, object] = dict.fromkeys(REQUIRED_EVENTS, filler)
+    filled.update(events)
+    return {"hooks": filled}
 
 
 def write_json(path: Path, value: object) -> None:
@@ -16,13 +30,33 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2), encoding="utf-8")
 
 
-def test_validate_hooks_skips_when_missing(tmp_path, capsys):
-    """hooks.json がない場合はスキップされること。"""
+def test_validate_hooks_fails_when_missing(tmp_path, capsys):
+    """hooks.json が無い場合は失敗すること（F-03）。
+
+    「見つからないのでスキップします」と表示して 0 を返していた頃は、
+    宣言がまるごと失われた破損を成功として報告していた。
+    """
     result = validate_hooks(tmp_path / "hooks.json")
-    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "見つかりません" in capsys.readouterr().err
+
+
+def test_validate_hooks_skips_when_missing_and_optional(tmp_path, capsys):
+    """--optional を明示した場合だけスキップして 0 を返すこと。"""
+    result = validate_hooks(tmp_path / "hooks.json", optional=True)
 
     assert result == 0
-    assert "検証をスキップします" in captured.out
+    assert "検証をスキップします" in capsys.readouterr().out
+
+
+def test_validate_hooks_rejects_empty_hooks_object(tmp_path, capsys):
+    """`{"hooks": {}}` を「0 個検証しました」と成功扱いしないこと（F-03）。"""
+    hooks_file = tmp_path / "hooks.json"
+    write_json(hooks_file, {"hooks": {}})
+
+    assert validate_hooks(hooks_file) == 1
+    assert "必須イベントが宣言されていません" in capsys.readouterr().err
 
 
 def test_validate_hooks_rejects_invalid_json(tmp_path, capsys):
@@ -42,26 +76,18 @@ def test_validate_hooks_valid_command_hook(tmp_path, capsys):
     hooks_file = tmp_path / "hooks.json"
     write_json(
         hooks_file,
-        {
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "test",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": 'node -e "console.log(1+2)"',
-                            }
-                        ],
-                    }
-                ]
-            }
-        },
+        complete_hooks(
+            PreToolUse=[
+                {
+                    "matcher": "test",
+                    "hooks": [{"type": "command", "command": 'node -e "console.log(1+2)"'}],
+                }
+            ]
+        ),
     )
 
     assert validate_hooks(hooks_file) == 0
-    captured = capsys.readouterr()
-    assert "1 個のフックマッチャーを検証しました" in captured.out
+    assert "個のフックマッチャーを検証しました" in capsys.readouterr().out
 
 
 def test_validate_hooks_accepts_inline_js_strings(tmp_path, capsys):
@@ -69,28 +95,20 @@ def test_validate_hooks_accepts_inline_js_strings(tmp_path, capsys):
     hooks_file = tmp_path / "hooks.json"
     write_json(
         hooks_file,
-        {
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "test",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": 'node -e "function {"',
-                            }
-                        ],
-                    }
-                ]
-            }
-        },
+        complete_hooks(
+            PreToolUse=[
+                {
+                    "matcher": "test",
+                    "hooks": [{"type": "command", "command": 'node -e "function {"'}],
+                }
+            ]
+        ),
     )
 
     result = validate_hooks(hooks_file)
-    captured = capsys.readouterr()
 
     assert result == 0
-    assert "1 個のフックマッチャーを検証しました" in captured.out
+    assert "個のフックマッチャーを検証しました" in capsys.readouterr().out
 
 
 class TestRepoHooksJsonStaticChecks:
