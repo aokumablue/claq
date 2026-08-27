@@ -1,7 +1,6 @@
 ---
 name: secure
 description: 認証追加/ユーザー入力処理/シークレット管理/APIエンドポイント作成/支払い・機微情報実装時に使用。包括的セキュリティチェックリスト・パターン提供。
-context: fork
 user-invocable: false
 ---
 

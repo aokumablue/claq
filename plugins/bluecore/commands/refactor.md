@@ -14,7 +14,7 @@ command: /refactor
 
 ## skill 起動メカニズム
 
-`refactor-prep` / `refactor-rollback` / `loop-dev` は `user-invocable: false` の skill。description マッチで Claude Code が Skill ツール経由で fork 実行する。本コマンドのステップ1で「refactor-prep skill を起動」「refactor-rollback skill を起動」、ステップ7で「loop-dev skill を起動」と明示することで発火する。
+`refactor-prep` / `refactor-rollback` / `loop-dev` は `user-invocable: false` の skill。description マッチで Claude Code が Skill ツール経由で起動する。本コマンドのステップ1で「refactor-prep skill を起動」「refactor-rollback skill を起動」、ステップ7で「loop-dev skill を起動」と明示することで発火する。`refactor-prep` / `loop-dev` は `context: fork`（結果は報告として受領）、`refactor-rollback` は inline 実行で Rollback Blueprint が本セッションに直接展開される。
 
 ## ステップ1: preflight（スコープ確定 + 実行準備）
 
