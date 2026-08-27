@@ -167,6 +167,16 @@ fi
 # ── publish スナップショット構築（ローカル）──
 TMPDIR="$(mktemp -d)"
 
+# 配布ツリーから外す開発専用アーティファクト。
+# pyproject.toml を外すのは 2 つの理由による:
+#   1. testpaths=["tests"] と fail_under=100 を持つ pyproject が、tests/ を
+#      除去したツリーへ同梱されると、配布ツリーで pytest を叩いたときに
+#      「coverage 0% で FAIL」という回帰そっくりの失敗が出る。過去 3 回の
+#      実機監査がこれを「テストが消失した」と誤報告した（ADR-0006）。
+#   2. wheel は src/bluecore しか含まず plugin assets も entry point も持たない
+#      ため、配布ツリーに build 設定を残すと非機能 artifact を公開できてしまう。
+# ランタイムは launcher.py が sys.path へ src/ を挿すだけで、パッケージ
+# メタデータを一切参照しないので配布ツリーに pyproject は不要。
 echo "Cloning and filtering dev snapshot..."
 git clone --quiet --local --no-hardlinks . "${TMPDIR}/repo"
 (
@@ -174,7 +184,7 @@ git clone --quiet --local --no-hardlinks . "${TMPDIR}/repo"
   git filter-repo \
     --invert-paths \
     --path plugins/bluecore/tests/ \
-    --path plugins/bluecore/onnx/ \
+    --path plugins/bluecore/pyproject.toml \
     --path scripts/ \
     --path CLAUDE.md \
     --path conftest.py \
