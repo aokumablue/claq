@@ -4,8 +4,7 @@ description: 要件言い換え→リスク評価→段階的実装計画作成�
 command: /plan
 ---
 
-<!-- DRY: grillme 前段（発火条件〜他処理に進まない）は全コマンド共通。終了条件・永続メモリ・引数は固有 -->
-
+<!-- DRY: grillme 前段は自由記述の依頼を受けるコマンド（plan / feat-dev / bugfix / skill-gen）のみ共通。終了条件・永続メモリ・引数は固有 -->
 # 実装計画
 
 ## grillme 起動（条件付き）

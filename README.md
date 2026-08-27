@@ -219,7 +219,7 @@ flowchart LR
 
   subgraph refactor["⚙️ refactor 内部（8ステップ）"]
     direction TB
-    SG["grillme"]:::skill --> SP["refactor-prep"]:::skill
+    CREF --> SP["refactor-prep"]:::skill
     SP --> RB["refactor-rollback"]:::skill
     RB --> AC["🧹 code-refiner<br/>mode=clean"]:::agent
     AC --> ASI1["✨ code-refiner #1<br/>mode=simplify"]:::agent
@@ -489,8 +489,7 @@ flowchart TD
   classDef cmd    fill:#2563eb,stroke:#1e40af,color:#fff,rx:6
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  A(["/test-gen [path]"]) --> B["grillme<br/>設計方針確定"]:::skill
-  B --> C["スコープ確定<br/>git diff HEAD / 引数パス"]
+  A(["/test-gen [path]"]) --> C["スコープ確定<br/>git diff HEAD / 引数パス"]
   C --> D["プロジェクト検出<br/>get_test_command()"]
   D --> E["ベースライン取得<br/>カバレッジ測定"]
   E --> F["🎯 デシジョンテーブル設計<br/>関数単位・ブランチ網羅"]

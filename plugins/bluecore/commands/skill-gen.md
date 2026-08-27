@@ -4,8 +4,7 @@ description: リポジトリ固有入力収集→skill-make スキルに SKILL.m
 command: /skill-gen
 ---
 
-<!-- DRY: grillme 前段（発火条件〜他処理に進まない）は全コマンド共通。終了条件・永続メモリ・引数は固有 -->
-
+<!-- DRY: grillme 前段は自由記述の依頼を受けるコマンド（plan / feat-dev / bugfix / skill-gen）のみ共通。終了条件・永続メモリ・引数は固有 -->
 # スキル生成入力収集
 
 リポジトリ固有入力を集めて整理し、SKILL.md 生成は `skill-make` skill に、生成後の empirical 改善は `skill-tune` skill に委譲。改善の各反復で `grader` / `comparator` / `bench-analyzer` の3エージェントが評価を担う。

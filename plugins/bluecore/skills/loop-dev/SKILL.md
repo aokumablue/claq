@@ -13,9 +13,9 @@ user-invocable: false
 
 本スキルは goal-based loop であり、停止は次のいずれか成立時のみ発生する: (1) 収束条件成立（下記「収束判定」）、(2) turn cap 到達（最大 2 反復、下記手順章）、(3) circuit breaker 発火（`## circuit breaker`）。これ以外の理由（「大体直った」等の主観判断）での打ち切りは禁止。
 
-## 前提（grillme 済み入力契約）
+## 前提（要件確定済みの入力契約）
 
-再 grillme 禁止。要件は呼び出し元コマンドで合意済みであり、fork のため対話コストが高い。
+grillme 起動禁止。要件は呼び出し元コマンドで確定済みである — 自由記述の依頼を受けるコマンド（`/plan` `/feat-dev` `/bugfix` `/skill-gen`）は入口の grillme で、それ以外（`/refactor` `/test-gen` `/review`）は引数・diff・フラグから機械的に確定させている。加えて fork のため対話コストが高い。
 
 入力契約:
 
