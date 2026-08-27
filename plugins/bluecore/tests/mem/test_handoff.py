@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -495,3 +496,36 @@ class TestDuplicateRequests:
         result = build_handoff({"transcript_path": path})
 
         assert result.index("- 依頼B") < result.index("- 依頼A")
+
+
+class TestComposedBodyHasNoMarkup:
+    """組み上がった引き継ぎ本文にタグ痕跡が残らない。
+
+    元の欠陥（足場タグが「直近の依頼」として記録される）は、関数単位の
+    テストが全て緑のまま出荷された。検証していたのが局所挙動だけで、
+    build_handoff が最終的に組み上げた本文の中身を誰も見ていなかったため。
+    タグ名を列挙しない汎用アサーションなので、未知の足場タグが増えても
+    この検査自体は陳腐化しない。
+    """
+
+    def test_no_tag_markup_survives_into_handoff_body(self, tmp_path: Path) -> None:
+        """足場に埋もれた実依頼だけが残り、タグ表記は 1 つも残らない。"""
+        entries = [
+            _user("<local-command-caveat>Caveat: DO NOT respond to these messages.</local-command-caveat>"),
+            _user("READMEを更新せよ"),
+            _user("<local-command-stdout>✔ Updated bluecore.</local-command-stdout>"),
+            _user(
+                "<command-name>/plugin</command-name>\n"
+                "            <command-message>plugin</command-message>\n"
+                "            <command-args></command-args>"
+            ),
+            _user("<task-notification><task-id>abc</task-id><status>completed</status></task-notification>"),
+            _user("<system-reminder>CLAUDE.md 全文</system-reminder>"),
+        ]
+        path = _write_transcript(tmp_path, entries)
+
+        result = build_handoff({"transcript_path": path})
+
+        assert re.search(r"</?[a-zA-Z][\w:-]*[^>]*>", result) is None, result
+        assert "- READMEを更新せよ" in result
+        assert "- /plugin" in result
