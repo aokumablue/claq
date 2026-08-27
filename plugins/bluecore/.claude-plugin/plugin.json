@@ -16,17 +16,6 @@
     "workflow",
     "plugin"
   ],
-  "agents": [
-    "./agents/bench-analyzer.md",
-    "./agents/code-refiner.md",
-    "./agents/comparator.md",
-    "./agents/grader.md",
-    "./agents/harness-tuner.md",
-    "./agents/planner.md",
-    "./agents/reviewer.md",
-    "./agents/security-auditor.md",
-    "./agents/tdd-writer.md"
-  ],
   "skills": [
     "./skills/"
   ],
