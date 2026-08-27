@@ -312,3 +312,34 @@ class TestToKnowledge:
         """scope と repo_id が矛盾する組み合わせは拒否する。"""
         with pytest.raises(KnowledgeInputError, match="矛盾"):
             self._draft(scope).to_knowledge(repo_id)
+
+
+class TestExplicitKeyHashFallback:
+    """F-24: ASCII を含まない明示 key が同じ slug へ潰れて上書きし合う退行を防ぐ。"""
+
+    @staticmethod
+    def _key_for(explicit_key: str) -> str:
+        """明示 key を渡した learn payload から確定 key を取り出す。"""
+        draft = parse_knowledge_payload(
+            {"title": "タイトル", "kind": "fact", "key": explicit_key, "body": "本文"}
+        )
+        return draft.key
+
+    def test_non_ascii_explicit_keys_do_not_collide(self) -> None:
+        """異なる非 ASCII 明示 key が別々の key に落ちること。
+
+        以前は slugify の FALLBACK_SLUG により全て `repo` へ潰れ、upsert で
+        別の知識カードを黙って上書きしていた。
+        """
+        keys = [self._key_for(k) for k in ("日本語", "別", "中文キー", "한국어")]
+
+        assert len(set(keys)) == len(keys), keys
+        assert all(key != "repo" for key in keys), keys
+
+    def test_same_explicit_key_stays_stable(self) -> None:
+        """同じ明示 key からは常に同じ key が出ること（意図的な upsert を壊さない）。"""
+        assert self._key_for("日本語") == self._key_for("日本語")
+
+    def test_ascii_explicit_key_is_unchanged(self) -> None:
+        """十分な ASCII を含む明示 key はそのまま slug 化されること。"""
+        assert self._key_for("runtime-no-venv") == "runtime-no-venv"

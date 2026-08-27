@@ -91,5 +91,10 @@ if [ -z "$_bluecore_env_root" ] || [ ! -f "$_bluecore_env_root/runtime/bluecore-
   return 127 2>/dev/null || exit 127
 fi
 
+# Hand the verified root to the helpers explicitly. Without this they would have
+# to self-locate, which POSIX sh cannot do for a sourced file (see the header of
+# bluecore-helpers.sh).
+_BLUECORE_SOURCED_ROOT="$_bluecore_env_root"
+export _BLUECORE_SOURCED_ROOT
 . "$_bluecore_env_root/runtime/bluecore-helpers.sh"
 unset _bluecore_env_root
