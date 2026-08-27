@@ -42,7 +42,7 @@ command: /refactor
 
 1. `effective_scope = スコープ確定の結果 − Skip Rules の file 集合 − CAUTION の file 集合`
 2. `effective_scope` が空なら、**編集を 1 件も行わずに** `BLOCKED: effective scope が空です（Skip Rules: {file 一覧}）` として終了する。リバート不能を final gate で初めて問題化しない — その時点では変更が既に残っている
-3. 確定した `effective_scope` を、ステップ3〜5 の各委譲の依頼文へファイルパス一覧として明示的に引き渡す（`review.md` の「承認済みスコープ（対象ファイルパス）を明示的に引き渡す」と同じ形）。親の手順書に書いた除外は子へ届かないため、scope も依頼文で渡す
+3. 確定した `effective_scope` を、ステップ3〜5 の各委譲の依頼文へファイルパス一覧として明示的に引き渡す（`review.md` の「レビュー対象スコープ（対象ファイルパス）を明示的に引き渡す」と同じ形）。親の手順書に書いた除外は子へ届かないため、scope も依頼文で渡す
 - `deps_order` はトポロジカル順で解決し、復旧時は逆順で適用
 - ステップ3以降で使う `git checkout -- <file>` は index/HEAD 復元のため処理開始前の未コミット編集も区別なく破棄する。この前提チェック（`git status --porcelain` によるworktree clean 確認・非cleanなら baseline patch 退避）は `refactor-rollback` 手順0で行うため、本ステップの `refactor-rollback` 起動は省略しない
 

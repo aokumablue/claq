@@ -99,4 +99,4 @@ bluecore_run bluecore.ci.harness_audit <scope> --format <text|json> --root <path
 - `--root=<path>`: 監査対象ルート（必須。省略時の自動 cwd 判定は誤判定しうる）
 - `--target-kind=repo|consumer`: 期待する判定モードの明示（必須。自動判定と食い違えば FAIL）
 - `--audit-only`: ステップ1のみで終了（/harness レベルの制御フラグ。`bluecore_run` へ渡さない）
-- `--apply`: トップ3アクションの harness-tuner への適用（ステップ3〜5）を実行する。未指定時はステップ2で停止し、人間の承認を待つ（`--audit-only` とは独立。`--audit-only` はステップ1のみで停止しトップ3提示すら行わない、より早い停止点）
+- `--apply`: トップ3アクションの harness-tuner への適用（ステップ3〜5）を実行する。未指定時はステップ2で停止する（`--audit-only` とは独立。`--audit-only` はステップ1のみで停止しトップ3提示すら行わない、より早い停止点）。これは**引数によるスコープ指定**であって承認待ちではない — `--apply` を付ければ止まらない
