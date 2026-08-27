@@ -230,6 +230,112 @@ def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[st
     return []
 
 
+# ユーザー発話として transcript に載るが、実際にはハーネスが生成した足場で
+# あって依頼ではないタグ。中身ごと捨てる。
+#
+# - local-command-caveat: ローカルコマンド実行時の定型注意書き。「DO NOT
+#   respond to these messages」という指示文を含むため、依頼として引き継ぐと
+#   次セッションへ疑似ユーザー指示として再注入されてしまう。
+# - local-command-stdout / local-command-stderr: コマンドの出力であって依頼ではない。
+# - task-notification: サブエージェント完了通知。ユーザーの発話ではない。
+_SCAFFOLD_TAGS = (
+    "local-command-caveat",
+    "local-command-stdout",
+    "local-command-stderr",
+    "task-notification",
+)
+
+# ReDoS 保護: タグ出現回数の上限（tag_stripping._MAX_TAG_COUNT と同方針）。
+_MAX_SCAFFOLD_TAG_COUNT = 100
+
+_SCAFFOLD_BLOCK_PATTERNS = [
+    re.compile(rf"<{tag}[^>]*>.*?</{tag}>", re.DOTALL | re.IGNORECASE) for tag in _SCAFFOLD_TAGS
+]
+
+# 対を成さずに残った足場タグ。切り詰め等で片側だけが残った場合に、タグ表記
+# そのものが依頼本文として引き継がれるのを防ぐ。
+_SCAFFOLD_ORPHAN_PATTERNS = [re.compile(rf"</?{tag}[^>]*>", re.IGNORECASE) for tag in _SCAFFOLD_TAGS]
+
+# スラッシュコマンド起動の足場。`<command-name>` と `<command-args>` の中身は
+# ユーザーが実際に入力した依頼そのものなので、捨てずに `/name args` へ畳む。
+# `<command-message>` はコマンド名の再掲であり情報を持たないため捨てる。
+_COMMAND_NAME_PATTERN = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.DOTALL | re.IGNORECASE)
+_COMMAND_ARGS_PATTERN = re.compile(r"<command-args>\s*(.*?)\s*</command-args>", re.DOTALL | re.IGNORECASE)
+_COMMAND_SCAFFOLD_PATTERN = re.compile(r"</?command-(?:name|message|args)[^>]*>", re.IGNORECASE)
+
+
+def _drop_scaffold_blocks(text: str) -> str:
+    """依頼ではないハーネス足場タグを中身ごと除去する。
+
+    Args:
+        text: ユーザー発話として transcript に載っていた生テキスト。
+
+    Returns:
+        足場タグとその中身を除いたテキスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    for pattern in _SCAFFOLD_BLOCK_PATTERNS:
+        if len(pattern.findall(text)) > _MAX_SCAFFOLD_TAG_COUNT:
+            continue
+        text = pattern.sub("", text)
+    for pattern in _SCAFFOLD_ORPHAN_PATTERNS:
+        text = pattern.sub("", text)
+    return text
+
+
+def _fold_command_invocation(text: str) -> str:
+    """スラッシュコマンド起動の足場を ``/name args`` の 1 行へ畳む。
+
+    Args:
+        text: ``<command-name>`` を含みうるテキスト。
+
+    Returns:
+        コマンド起動が含まれていれば ``/name args`` 形式の文字列。含まれて
+        いなければ入力をそのまま返す。
+
+    Raises:
+        例外は発生しません。
+    """
+    name_match = _COMMAND_NAME_PATTERN.search(text)
+    if name_match is None:
+        return text
+    name = name_match.group(1).strip().lstrip("/")
+    if not name:
+        return _COMMAND_SCAFFOLD_PATTERN.sub("", text)
+    args_match = _COMMAND_ARGS_PATTERN.search(text)
+    args = args_match.group(1).strip() if args_match else ""
+    return f"/{name} {args}".strip()
+
+
+def normalize_user_message(text: str) -> str:
+    """ユーザー発話からハーネス生成の足場を落として依頼本文だけを残す。
+
+    transcript の ``user`` エントリにはユーザーの依頼だけでなく、ハーネスが
+    自分で生成した足場（ローカルコマンドの注意書き・その stdout・サブ
+    エージェント完了通知・スラッシュコマンドの起動タグ）も同じ形で載る。
+    これらを依頼として引き継ぐと、引き継ぎ本文が足場だけで埋まって実際の
+    依頼が押し出されるうえ、注意書きに含まれる指示文が次セッションへ疑似
+    ユーザー指示として再注入される。
+
+    足場のうち中身が無価値なものは丸ごと捨て、スラッシュコマンド起動だけは
+    ``/name args`` へ畳んで依頼としての情報を残す。
+
+    Args:
+        text: transcript の ``user`` エントリから取り出した生テキスト。
+
+    Returns:
+        依頼本文。足場しか含まれていなければ空文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    if not text:
+        return text
+    return _fold_command_invocation(_drop_scaffold_blocks(text)).strip()
+
+
 # セッション ID として許容する形式（ファイル名に使われるため英数・._- のみ）
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 

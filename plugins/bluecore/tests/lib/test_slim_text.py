@@ -56,3 +56,15 @@ def test_first_meaningful_line_skips_blank_and_table_only_lines() -> None:
     text = "\n".join(["", "| a | b |", "実質行"])
 
     assert first_meaningful_line(text) == "実質行"
+
+
+def test_normalize_line_whitespace_only_becomes_empty() -> None:
+    """空白のみの行は分割段階で空になる。"""
+    from bluecore.lib.slim_text import _normalize_line
+
+    assert _normalize_line("   \t \n ") == ""
+
+
+def test_compact_line_returns_empty_for_unnormalizable_text() -> None:
+    """正規化で空になるテキストは compact_line も空を返す。"""
+    assert compact_line("```", 200) == ""

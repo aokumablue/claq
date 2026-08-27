@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from bluecore.lib.core_utils import get_home_dir, strip_ansi
-from bluecore.lib.harness import extract_file_paths, normalize_tool_name
+from bluecore.lib.harness import extract_file_paths, normalize_tool_name, normalize_user_message
 from bluecore.lib.slim_text import compact_line
 from bluecore.mem.logger import get as _get_logger
 from bluecore.mem.redaction import redact
@@ -300,6 +300,11 @@ def _text_content(raw: object) -> str:
 def _user_message(entry: dict[str, Any]) -> str:
     """エントリがユーザー発話ならその本文を 1 行へ圧縮して返す。
 
+    ハーネスが生成した足場（ローカルコマンドの注意書き・その stdout・
+    サブエージェント完了通知）は ``normalize_user_message`` で落とし、
+    スラッシュコマンド起動は ``/name args`` へ畳む。落とさないと引き継ぎが
+    足場だけで埋まり、実際の依頼が押し出される。
+
     注入済みの ``<bluecore-memory>`` 等のタグは ``strip_tags`` で落とす。
     落とさないと前セッションへ注入した記憶をそのまま引き継ぎとして
     記録し直すエコーが起きる。シークレット除去は圧縮より前に掛ける
@@ -309,17 +314,18 @@ def _user_message(entry: dict[str, Any]) -> str:
         entry: トランスクリプトの 1 エントリ。
 
     Returns:
-        圧縮済みのユーザー発話。ユーザー発話でない、または中身が空なら空文字列。
+        圧縮済みのユーザー発話。ユーザー発話でない、中身が空、または
+        ハーネス足場しか含まれていなければ空文字列。
     """
     message = entry.get("message")
     message = message if isinstance(message, dict) else {}
     if "user" not in (entry.get("type"), entry.get("role"), message.get("role")):
         return ""
 
-    text = _text_content(message.get("content") or entry.get("content"))
+    text = normalize_user_message(strip_ansi(_text_content(message.get("content") or entry.get("content"))))
     if not text:
         return ""
-    return compact_line(redact(strip_tags(strip_ansi(text))), _USER_MESSAGE_CHAR_LIMIT)
+    return compact_line(redact(strip_tags(text)), _USER_MESSAGE_CHAR_LIMIT)
 
 
 def _collect_tools(entry: dict[str, Any], tools: set[str], files: set[str]) -> None:
