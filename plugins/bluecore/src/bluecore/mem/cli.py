@@ -353,8 +353,10 @@ def main() -> int:
         print(str(e), file=sys.stderr)
         exit_code = 1
     except Exception as e:
+        # SessionStart はセッション開始を止めないため exit 0 のままにするが、
+        # 沈黙させない。黙って抜けると記憶注入が失われたこと自体に気づけない。
+        print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
         if not session_start:
-            print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
             exit_code = 1
     else:
         try:

@@ -107,11 +107,15 @@ class TestSessionStartContract:
     def test_settings_failure_still_emits_session_start_json(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """設定ロード失敗でも exit_code=0 と JSON 出力を維持する。"""
+        """設定ロード失敗でも exit_code=0 と JSON 出力を維持しつつ、原因を stderr へ出す。
+
+        SessionStart はセッション開始を止めないので exit 0 のままにするが、
+        黙って抜けると記憶注入が失われたこと自体に気づけない。
+        """
         monkeypatch.setattr(cli, "_load_settings_or_raise", _always_raise("設定失敗"))
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert exit_code == 0
-        assert stderr == ""
+        assert "設定失敗" in stderr
         assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 
     def test_handler_exception_keeps_exit_code_1_but_emits_json(

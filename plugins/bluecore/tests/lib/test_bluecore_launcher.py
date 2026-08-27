@@ -302,15 +302,20 @@ class TestMain:
         assert captured["cmd"] == [sys.executable, "-m", "bluecore.mem.cli", "handoff"]
         assert captured["raw"] == "{}"
 
-    def test_bg_detach_failure_still_returns_zero(
+    def test_bg_detach_failure_returns_nonzero(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """detach 失敗でも 0 を返し、stderr にエラーを書く。"""
+        """detach の受付失敗は非 0 を返し、stderr にエラーを書く。
+
+        ADR-0003 は親の exit code を「子の起動を受け付けたか」と定義する。
+        受付そのものに失敗したのに 0 を返すと、呼び出し側は起動されていない
+        処理を受付成功と誤認する（子の処理結果は依然として非同期のまま）。
+        """
         monkeypatch.setattr("bluecore.hooks.hook_common.read_raw_stdin", lambda: "")
         monkeypatch.setattr("bluecore.hooks.hook_common.detach_process", lambda *a, **k: False)
         monkeypatch.setattr(launcher, "build_env", lambda: {})
 
-        assert launcher.main(["--bg", "bluecore.mem.cli", "handoff"]) == 0
+        assert launcher.main(["--bg", "bluecore.mem.cli", "handoff"]) == 1
         assert "Error detaching" in capsys.readouterr().err
 
     def test_inserts_src_dir_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:

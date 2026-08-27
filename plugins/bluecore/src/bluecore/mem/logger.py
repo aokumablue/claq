@@ -48,18 +48,25 @@ def _stderr_handler() -> logging.Handler:
 
 
 def setup(log_dir: Path, level: str = "info") -> None:
-    """ロガーを初期化する。アプリケーション起動時に1度だけ呼ぶ。"""
+    """ロガーを初期化する。アプリケーション起動時に1度だけ呼ぶ。
+
+    `_initialized` はハンドラの構築と追加が成功した後にだけ立てる。先に立てると、
+    `_file_handler` がディスク不調・権限エラー等で例外を投げた場合に「初期化済み
+    だがハンドラが空」という復帰不能な状態が残り、以後の `setup()` が何もせずに
+    返るようになる。
+    """
     global _initialized
     with _lock:
         if _initialized:
             return
-        _initialized = True
 
-    # ハンドラ追加はロック外。2 度目以降の setup は _initialized で弾く。
-    root = logging.getLogger("bluecore.mem")
-    root.setLevel(getattr(logging, level.upper(), logging.INFO))
-    root.addHandler(_file_handler(log_dir))
-    root.addHandler(_stderr_handler())
+        root = logging.getLogger("bluecore.mem")
+        file_handler = _file_handler(log_dir)
+        stderr_handler = _stderr_handler()
+        root.setLevel(getattr(logging, level.upper(), logging.INFO))
+        root.addHandler(file_handler)
+        root.addHandler(stderr_handler)
+        _initialized = True
 
 
 def reset() -> None:
