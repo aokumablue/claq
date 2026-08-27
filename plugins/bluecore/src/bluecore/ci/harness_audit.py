@@ -12,9 +12,6 @@ from typing import Any
 
 from bluecore.ci.harness_audit_repo_checks import get_repo_checks
 from bluecore.ci.harness_audit_utils import (
-    _command_parity_matches as _command_parity_matches,
-)
-from bluecore.ci.harness_audit_utils import (
     _has_any_file as _has_any_file,
 )
 from bluecore.ci.harness_audit_utils import (
@@ -198,10 +195,10 @@ def _consumer_tool_coverage_checks(root_dir: str | Path, plugin_install: str | N
             "category": "Tool Coverage",
             "points": 4,
             "scopes": ["repo"],
-            "path": "~/.claude/plugins/everything-claude-code/",
+            "path": "~/.claude/plugins/bluecore/",
             "description": "プラグインがインストールされている",
             "pass": bool(plugin_install),
-            "fix": "Install the ECC plugin for this user or project before auditing project-specific harness quality.",
+            "fix": "Install the bluecore plugin for this user or project before auditing project-specific harness quality.",
         },
         {
             "id": "consumer-project-overrides",
@@ -215,7 +212,7 @@ def _consumer_tool_coverage_checks(root_dir: str | Path, plugin_install: str | N
             or count_files(root_dir, ".claude/commands", ".md") > 0
             or file_exists(root_dir, ".claude/settings.json")
             or file_exists(root_dir, ".claude/hooks.json"),
-            "fix": "Add project-local .claude hooks, commands, skills, or settings that tailor ECC to this repo.",
+            "fix": "Add project-local .claude hooks, commands, skills, or settings that tailor bluecore to this repo.",
         },
     ]
 
@@ -463,15 +460,46 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
 
 
 def summarize_category_scores(checks: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
-    """カテゴリ別スコアを集計する。"""
+    """カテゴリ別スコアを集計する。
+
+    キー名で単位を明示する。以前は同じ dict の中で ``score`` が 0..10 の正規化値、
+    ``max`` が生配点という異なる単位を持っていたため、``score > max`` や
+    「カテゴリ score の合計が overall と一致しない」が正常値になり、JSON を
+    機械利用すると誤読しやすかった（F-19）。テキスト出力は元から
+    ``score/10 (earned/max pts)`` と書き分けていたので、崩れていたのは JSON だけ。
+    """
     scores: dict[str, dict[str, int]] = {}
     for category in CATEGORIES:
         in_category = [check for check in checks if check["category"] == category]
         max_points = sum(check["points"] for check in in_category)
         earned_points = sum(check["points"] for check in in_category if check["pass"])
         normalized = 0 if max_points == 0 else round((earned_points / max_points) * 10)
-        scores[category] = {"score": normalized, "earned": earned_points, "max": max_points}
+        scores[category] = {
+            "earned_points": earned_points,
+            "max_points": max_points,
+            "normalized_score": normalized,
+        }
     return scores
+
+
+def _plugin_provider_hint(root_dir: Path) -> str:
+    """root 配下に plugin 提供元ディレクトリがあれば、`--root` の指定を促す 1 文を返す。
+
+    プラグイン提供元リポジトリのルートは、それ自体はプラグインではないので
+    consumer と判定される。「repo モードで測りたいのに consumer の点数が出る」を
+    自力で解けるよう、実際に指すべきパスを提示する。
+
+    Args:
+        root_dir: 判定に使ったルートディレクトリ
+
+    Returns:
+        該当があれば案内文、無ければ空文字列
+    """
+    providers = sorted((root_dir / "plugins").glob("*/.claude-plugin/plugin.json"))
+    if not providers:
+        return ""
+    paths = " ".join(str(path.parent.parent.relative_to(root_dir)) for path in providers)
+    return f" このルートには plugin 提供元ディレクトリがあります: --root {paths}"
 
 
 def build_report(scope: str, root_dir: str | Path | None = None, target_mode: str | None = None) -> dict[str, Any]:
@@ -501,6 +529,7 @@ def build_report(scope: str, root_dir: str | Path | None = None, target_mode: st
             f"--target-kind {target_mode} does not match the auto-detected mode "
             f"({detected_mode}) for root {resolved_root}. Pass the correct root, "
             "or omit --target-kind to use auto-detection."
+            + _plugin_provider_hint(resolved_root)
         )
     resolved_mode = target_mode or detected_mode
     hosting_service = detect_git_hosting_service(resolved_root)
@@ -513,6 +542,14 @@ def build_report(scope: str, root_dir: str | Path | None = None, target_mode: st
     category_scores = summarize_category_scores(checks)
     max_score = sum(check["points"] for check in checks)
     overall_score = sum(check["points"] for check in checks if check["pass"])
+
+    # 単位を分けた以上、合計が一致することは機械的に保証できる。集計経路が
+    # 壊れたら（カテゴリの取りこぼし・二重計上）ここで落とす。
+    category_total = sum(data["earned_points"] for data in category_scores.values())
+    if category_total != overall_score:
+        raise AssertionError(
+            f"カテゴリ earned_points の合計 {category_total} が overall_score {overall_score} と一致しません"
+        )
 
     failed_checks = [check for check in checks if not check["pass"]]
     failed_checks.sort(key=lambda check: check["points"], reverse=True)
@@ -531,7 +568,7 @@ def build_report(scope: str, root_dir: str | Path | None = None, target_mode: st
         "root_dir": str(resolved_root),
         "target_mode": resolved_mode,
         "deterministic": True,
-        "rubric_version": "2026-08-26",
+        "rubric_version": "2026-08-27",
         "overall_score": overall_score,
         "max_score": max_score,
         "categories": category_scores,
@@ -560,9 +597,12 @@ def print_text(report: dict[str, Any]) -> None:
 
     for category in CATEGORIES:
         data = report["categories"][category]
-        if not data or data["max"] == 0:
+        if not data or data["max_points"] == 0:
             continue
-        print(f"- {category}: {data['score']}/10 ({data['earned']}/{data['max']} pts)")
+        print(
+            f"- {category}: {data['normalized_score']}/10 "
+            f"({data['earned_points']}/{data['max_points']} pts)"
+        )
 
     failed = [check for check in report["checks"] if not check["pass"]]
     print()

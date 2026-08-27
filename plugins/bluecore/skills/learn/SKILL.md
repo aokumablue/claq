@@ -79,7 +79,10 @@ bluecore_mem_learn --key pytest-needs-pipefail --kind pitfall --scope repo \
 持たず、常に `source=agent` / `status=pending` で登録される（H-01 対応: agent が
 JSON へ `source: "human"` や `status: "active"` と書いても採用されず usage error に
 なる。永続 SessionStart context への自己承認を防ぐため）。注入対象への昇格は
-`/instinct promote <key>` による人間承認のみ。
+`/instinct promote <key>` を通す運用とする。ただしこれは**運用上の想定であり
+技術的な強制ではない** — 同一 UID から `mem.db` を直接更新できる以上、
+`promote` が人間によって実行されたことを保証する手段は無く、Bash を持つ agent
+からも到達できる（ADR-0007 が受容した残存リスク）。昇格は監査ログへ記録される。
 
 ## 参照する
 

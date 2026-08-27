@@ -203,24 +203,48 @@ def test_find_file_issues_secret_scan_applies_under_size_limit(monkeypatch: pyte
     assert any(issue["type"] == "secret" for issue in issues)
 
 
-def test_find_file_issues_binary_file_skips_lint_and_secret_scan_with_warning(
+def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """バイナリ判定（先頭に NUL を含む）は lint を抑制し、secret scan もスキップ
-    するが、無言にはせず severity warning の痕跡（secret_scan_skipped）を残す
-    こと（A-02 対応。NUL バイトを1つ混ぜるだけの secret 検査回避は理屈上残るが、
-    痕跡は残る）。"""
+    """バイナリ判定（先頭に NUL を含む）は lint だけを抑制し、secret scan は続ける。
+
+    ADR-0013: 先頭に NUL を 1 バイト混ぜてバイナリ判定させるだけで secret 検査を
+    まるごと回避できる状態は許容しない。行分割が意味を持たないため、印字可能
+    文字列を抽出して同じパターンを当てる。
+    """
     content = "\0binary preamble\n" + 'console.log("hi")\n' + "api" + "_key" + ' = "abc123"'  # nosec
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
     issues = commit_quality_scanner.find_file_issues("weird.js")
 
-    types = {issue["type"] for issue in issues}
-    assert "secret" not in types
-    assert "console.log" not in types  # nosec
-    skipped = [issue for issue in issues if issue["type"] == "secret_scan_skipped"]
-    assert len(skipped) == 1
-    assert skipped[0]["severity"] == "warning"
+    secrets = [issue for issue in issues if issue["type"] == "secret"]
+    assert secrets, issues
+    assert secrets[0]["severity"] == "error"
+    assert "extracted binary content" in secrets[0]["message"]
+    # lint は従来どおり抑制する（バイナリを行単位で lint しても意味がない）。
+    assert "console.log" not in {issue["type"] for issue in issues}  # nosec
+    # スキップの痕跡 issue は不要になったので出さない。
+    assert "secret_scan_skipped" not in {issue["type"] for issue in issues}
+
+
+def test_find_file_issues_real_binary_is_not_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """真のバイナリ（画像等）は secret パターンに当たらず error を出さないこと。
+
+    バイナリ commit を一律ブロックしないという既存の要件を維持する。
+    """
+    png = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x00\x00\x00\x01\x00\x08\x06"
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: png)
+
+    issues = commit_quality_scanner.find_file_issues("logo.png")
+
+    assert [issue for issue in issues if issue["severity"] == "error"] == []
+
+
+def test_extract_printable_runs_splits_on_control_characters() -> None:
+    """制御文字で区切られた短すぎる断片は走査単位に含めないこと。"""
+    runs = commit_quality_scanner._extract_printable_runs("ab\x00longer-run\x01cd")
+
+    assert runs == ["longer-run"]
 
 
 def test_scan_secret_issues_raises_on_time_budget_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -805,16 +829,31 @@ def test_is_git_commit_command_returns_false_when_only_options_follow_git() -> N
     assert args == []
 
 
-def test_is_git_commit_command_regex_fallback_true_when_tokens_miss_it() -> None:
-    """トークン走査では見つからなくても、引用符内のテキスト等で `git commit` が
-    文字列として現れれば保守的に True を返すこと（過剰検出側のフェイルセーフ）。
+def test_is_git_commit_command_trusts_clean_tokenization() -> None:
+    """解析できた引用文の中の `git commit` は実行命令とみなさないこと（F-08）。
+
+    生文字列への regex を解析成功時にも当てていた頃は、`copilot -p '... git
+    commit ...'` のような引用文まで commit と判定し、無関係な Bash 呼び出しが
+    index の状態次第でブロックされた。同じ入力を `block_no_verify` は無視して
+    おり、2 つのフックが「commit とは何か」で食い違っていた。
     """
     import bluecore.hooks.pre_bash_commit_quality as pbcq
 
-    # 実際は `git status` だが、引用符内のメッセージに "git commit" という
-    # 語が偶然含まれるケース。トークン走査では検出できないため、regex
-    # フォールバックが保守的に True を返す。
     is_commit, args = pbcq._is_git_commit_command("git status -m 'please run git commit later'")
+    assert is_commit is False
+    assert args == []
+
+
+def test_is_git_commit_command_regex_fallback_applies_when_tokenization_fails() -> None:
+    """クォート不整合で解析できなかった入力にだけ regex フォールバックが効くこと。
+
+    解析できない構文に対しては ADR-0002 どおり過剰検出側へ倒す。
+    """
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    # クォート不整合で shlex が失敗し、空白分割後のトークン `"git` は git 実行
+    # ファイルとして認識されない。生文字列の regex だけが commit を見つける。
+    is_commit, args = pbcq._is_git_commit_command('echo "git commit')
     assert is_commit is True
     assert args == []
 
@@ -1179,24 +1218,81 @@ def test_get_unstaged_modified_files_returns_success_output(monkeypatch: pytest.
     assert pre_bash_commit_quality.get_unstaged_modified_files() == ["src/a.py", "src/b.py"]
 
 
-def test_get_unstaged_modified_files_returns_empty_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """HEAD が存在しない等で失敗した場合は空リストを返すこと（非ブロッキング）。"""
+def _fake_git(results: dict[tuple[str, ...], subprocess.CompletedProcess]):
+    """argv の先頭 3 語をキーに CompletedProcess を返す subprocess.run の差し替えを作る。"""
+
+    def fake_run(argv, *args, **kwargs):
+        return results[tuple(argv[:3])]
+
+    return fake_run
+
+
+def test_get_unstaged_modified_files_returns_empty_when_head_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """初回コミット（HEAD 不在）で diff が失敗した場合は空リストを返すこと。
+
+    HEAD が無いのは正常系なので、ここだけは fail-open のままにする。
+    """
     monkeypatch.setattr(
         pre_bash_commit_quality.subprocess,
         "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 128, stdout="", stderr="fatal"),
+        _fake_git(
+            {
+                ("git", "diff", "HEAD"): subprocess.CompletedProcess([], 128, stdout="", stderr="fatal"),
+                ("git", "rev-parse", "--verify"): subprocess.CompletedProcess([], 1, stdout="", stderr=""),
+            }
+        ),
     )
     assert pre_bash_commit_quality.get_unstaged_modified_files() == []
 
 
-def test_get_unstaged_modified_files_returns_empty_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
-    """subprocess が OSError 系例外を投げても空リストを返すこと。"""
+def test_get_unstaged_modified_files_returns_none_when_git_fails_with_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HEAD はあるのに diff が失敗した場合は None を返すこと（fail-closed）。
+
+    「対象ファイルなし」と「検査できなかった」を区別しないと、実際にコミット
+    される未ステージ変更を 1 件も検査せずに通してしまう（ADR-0001）。
+    """
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        _fake_git(
+            {
+                ("git", "diff", "HEAD"): subprocess.CompletedProcess([], 128, stdout="", stderr="fatal"),
+                ("git", "rev-parse", "--verify"): subprocess.CompletedProcess([], 0, stdout="abc123\n", stderr=""),
+            }
+        ),
+    )
+    assert pre_bash_commit_quality.get_unstaged_modified_files() is None
+
+
+def test_get_unstaged_modified_files_returns_none_when_head_check_also_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HEAD の有無自体を判定できない場合も None を返すこと。"""
+    monkeypatch.setattr(
+        pre_bash_commit_quality.subprocess,
+        "run",
+        _fake_git(
+            {
+                ("git", "diff", "HEAD"): subprocess.CompletedProcess([], 128, stdout="", stderr="fatal"),
+                ("git", "rev-parse", "--verify"): subprocess.CompletedProcess([], 128, stdout="", stderr="fatal"),
+            }
+        ),
+    )
+    assert pre_bash_commit_quality.get_unstaged_modified_files() is None
+
+
+def test_get_unstaged_modified_files_returns_none_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
+    """subprocess が OSError 系例外を投げた場合は None を返すこと（fail-closed）。"""
     monkeypatch.setattr(
         pre_bash_commit_quality.subprocess,
         "run",
         lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("missing")),
     )
-    assert pre_bash_commit_quality.get_unstaged_modified_files() == []
+    assert pre_bash_commit_quality.get_unstaged_modified_files() is None
 
 
 def test_get_worktree_file_content_returns_none_on_oserror(tmp_path: Path) -> None:

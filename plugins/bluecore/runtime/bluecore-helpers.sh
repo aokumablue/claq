@@ -1,22 +1,38 @@
-#!/usr/bin/env bash
-# Shared helper functions for command docs.
+#!/usr/bin/env sh
+# Shared helper functions for command docs. POSIX sh compatible: env-template.sh
+# has a `#!/usr/bin/env sh` shebang and sources this file, so anything bash-only
+# here breaks the contract on hosts where /bin/sh is dash (Linux).
 
-# Capture this file's own directory at source time, at file top level (not
-# inside a function). Under bash, BASH_SOURCE[0] is the sourced file; under
-# zsh, a function's $0 is the function name (not the file), but at top level
-# of a sourced script $0 is the sourced file itself. Resolving this eagerly
-# with `cd ... && pwd` also means the value stays correct even if the caller
-# later cd's elsewhere before calling bluecore_plugin_root.
-_BLUECORE_HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# Resolve this file's own directory at source time, at file top level (not inside
+# a function), so the value stays correct even if the caller later cd's away.
+#
+# Preferred source: env-template.sh sets _BLUECORE_SOURCED_ROOT to the root it
+# resolved from the ~/.bluecore/roots pointer before sourcing us. That is the
+# root this file actually came from, so it is the only self-consistent answer.
+#
+# Fallback: when the helpers are sourced directly (tests, manual use), locate
+# this file from the shell's own bookkeeping. POSIX sh has no equivalent of
+# BASH_SOURCE and its $0 stays the shell name when sourcing, so this branch is
+# gated on bash/zsh. The bash-only expansion is never evaluated under dash
+# (dash raises "Bad substitution" at evaluation time, not at parse time).
+if [ -n "${_BLUECORE_SOURCED_ROOT:-}" ]; then
+  _BLUECORE_HELPERS_DIR="${_BLUECORE_SOURCED_ROOT}/runtime"
+elif [ -n "${BASH_VERSION:-}${ZSH_VERSION:-}" ]; then
+  _BLUECORE_HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+else
+  printf '%s\n' "bluecore: cannot locate bluecore-helpers.sh under a POSIX sh. Source \$HOME/.bluecore/env.sh instead of this file directly." >&2
+  return 1 2>/dev/null || exit 1
+fi
 
-# Resolve the plugin root from CLAUDE_PLUGIN_ROOT first, then this file's
-# location. The helpers are usually sourced from command snippets.
+# Resolve the plugin root from the location this file was actually sourced from.
+#
+# Deliberately does NOT consult the ambient CLAUDE_PLUGIN_ROOT. The helper body
+# running here came from whichever root env.sh selected; reporting a different
+# root because an environment variable says so makes the two disagree ("the code
+# is A, but it calls itself B"). ADR-0008 claims a verified root, and an ambient
+# override would contradict that claim. Using the environment to decide *which*
+# root to source is fine; overriding the answer after the fact is not.
 bluecore_plugin_root() {
-  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-    printf '%s\n' "$CLAUDE_PLUGIN_ROOT"
-    return 0
-  fi
-
   printf '%s\n' "$(cd "${_BLUECORE_HELPERS_DIR}/.." && pwd)"
 }
 
@@ -107,12 +123,26 @@ json.dump({k: v for k, v in payload.items() if v}, sys.stdout, ensure_ascii=Fals
 }
 
 # Collect the repeated inputs used by /skill-gen.
+# Argument 1 is the number of commits to look back over (default 200); it applies
+# to both git log calls. Hardcoding the second one made the argument silently
+# half-effective, so the two sections described different ranges.
 collect_skill_create_inputs() {
   local commits="${1:-200}"
+
+  case "${commits}" in
+    ''|*[!0-9]*)
+      printf '%s\n' "collect_skill_create_inputs: commits must be a positive integer: ${commits}" >&2
+      return 2
+      ;;
+  esac
+  if [ "${commits}" -lt 1 ]; then
+    printf '%s\n' "collect_skill_create_inputs: commits must be a positive integer: ${commits}" >&2
+    return 2
+  fi
 
   printf '%s\n' "# 最近のコミットとファイル変更"
   git log --oneline -n "${commits}" --name-only --pretty=format:"%H|%s|%ad" --date=short
 
   printf '\n%s\n' "# ファイルごとのコミット頻度"
-  git log --oneline -n 200 --name-only | grep -v "^$" | grep -v "^[a-f0-9]" | sort | uniq -c | sort -rn | head -20
+  git log --oneline -n "${commits}" --name-only | grep -v "^$" | grep -v "^[a-f0-9]" | sort | uniq -c | sort -rn | head -20
 }

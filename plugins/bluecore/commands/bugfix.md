@@ -4,8 +4,7 @@ description: バグを再現→原因分析→最小修正→回帰防止→レ�
 command: /bugfix
 ---
 
-<!-- DRY: grillme 前段（発火条件〜他処理に進まない）は全コマンド共通。終了条件・永続メモリ・引数は固有 -->
-
+<!-- DRY: grillme 前段は自由記述の依頼を受けるコマンド（plan / feat-dev / bugfix / skill-gen）のみ共通。終了条件・永続メモリ・引数は固有 -->
 # バグ修正フロー
 
 ## grillme 起動（条件付き）

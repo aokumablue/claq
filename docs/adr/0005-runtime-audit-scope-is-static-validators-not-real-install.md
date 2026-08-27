@@ -1,6 +1,14 @@
 # ADR-0005: 実機ランタイム監査の検証範囲は静的 validator に限定し、実 install/update smoke test は対象外とする
 
-**日付**: 2026-08-18  **ステータス**: accepted
+**日付**: 2026-08-18  **ステータス**: superseded（費用対効果の判断のみ。[ADR-0014](0014-host-component-inventory-is-a-release-gate.md)）
+
+> **注記（2026-08-27）**: 本 ADR の「実 install/update smoke test は自動検証の対象外」という
+> 費用対効果の判断は ADR-0014 で撤回した。2026-08-26 の実機監査 F-01 で、Claude Code 上で
+> 9 エージェントが 1 体も登録されていない状態が 41 リリース見過ごされていたことが判明し、
+> それを `claude --plugin-dir ... plugin details` の 1 コマンドで検出できたため。本 ADR が
+> 却下したのは「install/update フロー全体のエミュレーション」であり、component inventory
+> だけを問い合わせる低コスト案は比較対象に入っていなかった。静的 validator に関する記述は
+> 引き続き有効。
 
 ## コンテキスト
 

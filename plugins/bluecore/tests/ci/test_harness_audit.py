@@ -116,10 +116,13 @@ def test_build_report_defaults_to_repo_mode_with_repo_markers(tmp_path: Path) ->
     report = harness_audit.build_report("repo", root_dir=tmp_path)
 
     assert report["target_mode"] == "repo"
-    assert report["overall_score"] == 0
+    # 個数 quota を「予算内に収まっているか」へ置き換えたため、surface が 1 つも
+    # 無い fixture では予算系 2 件（context-always-on-budget / cost-no-oversized-surface）
+    # が自明に通る。surface の欠落自体は tool-agent-count / tool-skill-count が見る。
+    assert report["overall_score"] == 5
     assert report["max_score"] == 58
     assert len(report["checks"]) == 22
-    assert report["categories"]["Tool Coverage"]["max"] == 10
+    assert report["categories"]["Tool Coverage"]["max_points"] == 10
     assert report["top_actions"][0]["path"] == "hooks/hooks.json"
 
 
@@ -133,8 +136,8 @@ def test_build_report_defaults_to_consumer_mode_on_empty_root(monkeypatch, tmp_p
     assert report["overall_score"] == 0
     assert report["max_score"] == 29
     assert len(report["checks"]) == 11
-    assert report["categories"]["Tool Coverage"]["max"] == 7
-    assert report["top_actions"][0]["path"] == "~/.claude/plugins/everything-claude-code/"
+    assert report["categories"]["Tool Coverage"]["max_points"] == 7
+    assert report["top_actions"][0]["path"] == "~/.claude/plugins/bluecore/"
     assert report["top_actions"][1]["path"] == "tests/"
     assert report["top_actions"][2]["path"] == ".claude/"
 

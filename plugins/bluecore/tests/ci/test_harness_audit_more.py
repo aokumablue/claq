@@ -11,6 +11,7 @@ import pytest
 import bluecore.ci.harness_audit as harness_audit
 from bluecore.ci.harness_audit_repo_checks import (
     _event_has_matching_command,
+    always_on_description_chars,
     _has_memory_lifecycle_hooks,
     _hook_command_argv,
     get_repo_checks,
@@ -65,12 +66,6 @@ def test_safe_helpers_and_counting(tmp_path: Path) -> None:
     assert harness_audit._has_any_file(tmp_path, ["missing", "dir/a.js"])
     assert not harness_audit._has_any_file(tmp_path, ["missing-a", "missing-b"])
 
-    (tmp_path / ".opencode" / "commands").mkdir(parents=True)
-    (tmp_path / "commands").mkdir()
-    (tmp_path / "commands" / "harness.md").write_text("same\n", encoding="utf-8")
-    (tmp_path / ".opencode" / "commands" / "harness.md").write_text("same\n", encoding="utf-8")
-    assert harness_audit._command_parity_matches(tmp_path)
-
     (tmp_path / ".gitlab-ci.yml").write_text("dependency_scanning:\n  stage: test\n", encoding="utf-8")
     assert harness_audit._has_gitlab_security_scanning(tmp_path)
     assert not harness_audit._has_gitlab_security_scanning(tmp_path / "missing")
@@ -79,7 +74,7 @@ def test_safe_helpers_and_counting(tmp_path: Path) -> None:
 def test_find_plugin_install_and_build_report_variants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
-    local_install = tmp_path / ".claude" / "plugins" / "everything-claude-code" / ".claude-plugin" / "plugin.json"
+    local_install = tmp_path / ".claude" / "plugins" / "bluecore" / ".claude-plugin" / "plugin.json"
     local_install.parent.mkdir(parents=True, exist_ok=True)
     local_install.write_text("{}", encoding="utf-8")
     assert harness_audit.find_plugin_install(tmp_path) == str(local_install)
@@ -92,13 +87,13 @@ def test_find_plugin_install_and_build_report_variants(tmp_path: Path, monkeypat
     (root / "skills").mkdir()
     (root / "src" / "bluecore" / "ci").mkdir(parents=True)
     (root / "src" / "bluecore" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
-    (root / "package.json").write_text(json.dumps({"name": "everything-claude-code", "scripts": {"test": "x"}}), encoding="utf-8")
+    (root / "package.json").write_text(json.dumps({"name": "bluecore", "scripts": {"test": "x"}}), encoding="utf-8")
 
     report = harness_audit.build_report("repo", root_dir=root)
     assert report["target_mode"] == "repo"
     assert report["overall_score"] >= 0
     assert report["max_score"] >= report["overall_score"]
-    assert report["categories"]["Tool Coverage"]["max"] >= 0
+    assert report["categories"]["Tool Coverage"]["max_points"] >= 0
     assert report["top_actions"]
 
     consumer_root = tmp_path / "consumer"
@@ -124,7 +119,7 @@ def test_find_plugin_install_without_home_still_searches_root(
     """HOME が空でも root_dir 配下の plugin.json を探す。"""
     monkeypatch.setenv("HOME", "")
     local_install = (
-        tmp_path / ".claude" / "plugins" / "everything-claude-code" / ".claude-plugin" / "plugin.json"
+        tmp_path / ".claude" / "plugins" / "bluecore" / ".claude-plugin" / "plugin.json"
     )
     local_install.parent.mkdir(parents=True, exist_ok=True)
     local_install.write_text("{}", encoding="utf-8")
@@ -138,8 +133,8 @@ def test_summarize_category_scores_and_print_text(capsys: pytest.CaptureFixture[
         {"category": "Security Guardrails", "points": 3, "pass": True},
     ]
     scores = harness_audit.summarize_category_scores(checks)
-    assert scores["Tool Coverage"] == {"score": 5, "earned": 2, "max": 4}
-    assert scores["Security Guardrails"] == {"score": 10, "earned": 3, "max": 3}
+    assert scores["Tool Coverage"] == {"earned_points": 2, "max_points": 4, "normalized_score": 5}
+    assert scores["Security Guardrails"] == {"earned_points": 3, "max_points": 3, "normalized_score": 10}
 
     harness_audit.print_text(
         {
@@ -190,7 +185,7 @@ def test_main_covers_json_text_and_help_paths(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     categories = {
-        category: {"score": 1, "earned": 1, "max": 1}
+        category: {"normalized_score": 1, "earned_points": 1, "max_points": 1}
         for category in harness_audit.CATEGORIES
     }
     success_report = {
@@ -232,7 +227,7 @@ def test_main_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     (root / "src" / "bluecore" / "ci").mkdir(parents=True)
     (root / "src" / "bluecore" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
     (root / "package.json").write_text(
-        json.dumps({"name": "everything-claude-code", "scripts": {"test": "x"}}),
+        json.dumps({"name": "bluecore", "scripts": {"test": "x"}}),
         encoding="utf-8",
     )
 
@@ -260,7 +255,7 @@ def test_get_consumer_checks_accepts_dict_package_json(tmp_path: Path) -> None:
 def test_get_repo_checks_python_structure_checks_pass_on_real_repo() -> None:
     """JS 前提から Python 構造ベースへ書き換えたチェック群が実リポジトリで pass すること。
 
-    ハーネス監査は元々 Node.js 実装(everything-claude-code)のルーブリックを
+    ハーネス監査は元々 Node.js 実装(bluecore)のルーブリックを
     引き継いでいたため、対象チェックが scripts/hooks/*.js のような JS 専用
     パスを前提にしていた。本リポジトリは Python 実装のため該当チェックは
     常に false-negative になっていた。実際の Python 構造
@@ -481,3 +476,51 @@ def test_has_memory_lifecycle_hooks_returns_false_on_malformed_json(tmp_path: Pa
     (tmp_path / "hooks").mkdir()
     (tmp_path / "hooks" / "hooks.json").write_text("not-json", encoding="utf-8")
     assert _has_memory_lifecycle_hooks(tmp_path) is False
+
+
+def test_summarize_self_check_detects_broken_aggregation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """カテゴリ earned_points の合計が overall_score と一致しなければ落とすこと。
+
+    単位を分けた（earned_points / max_points / normalized_score）以上、合計の
+    一致は機械的に保証できる。集計経路の取りこぼし・二重計上をここで検出する。
+    """
+    monkeypatch.setattr(
+        harness_audit,
+        "summarize_category_scores",
+        lambda checks: {category: {"earned_points": 0, "max_points": 0, "normalized_score": 0} for category in harness_audit.CATEGORIES},
+    )
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".claude-plugin").mkdir()
+    (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+    (root / "agents").mkdir()
+    (root / "skills").mkdir()
+    (root / "src" / "bluecore" / "ci").mkdir(parents=True)
+    (root / "src" / "bluecore" / "ci" / "harness_audit.py").write_text("", encoding="utf-8")
+
+    with pytest.raises(AssertionError, match="一致しません"):
+        harness_audit.build_report("repo", root_dir=root)
+
+
+def test_always_on_description_chars_skips_files_without_description(tmp_path: Path) -> None:
+    """description 行を持たない定義ファイルは加算対象にならないこと。"""
+    skills = tmp_path / "skills" / "nodesc"
+    skills.mkdir(parents=True)
+    (skills / "SKILL.md").write_text("# no frontmatter here\njust body\n", encoding="utf-8")
+
+    assert always_on_description_chars(tmp_path) == 0
+
+
+def test_target_kind_mismatch_points_at_the_plugin_provider_dir(tmp_path: Path) -> None:
+    """提供元ディレクトリがある場合、--root の指定先を案内すること。
+
+    プラグイン提供元リポジトリのルートは、それ自体はプラグインではないので
+    consumer と判定される。「repo で測りたいのに consumer の点が出る」を自力で
+    解けるよう、実際に指すべきパスを提示する。
+    """
+    provider = tmp_path / "plugins" / "demo" / ".claude-plugin"
+    provider.mkdir(parents=True)
+    (provider / "plugin.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"--root plugins/demo"):
+        harness_audit.build_report("repo", root_dir=tmp_path, target_mode="repo")

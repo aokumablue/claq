@@ -1,7 +1,7 @@
 ---
 name: grader
 description: eval 実行が完了しトランスクリプトと出力が揃った段階で、期待値の合否と根拠を判定するときに使用。skill-gen の評価工程から起動する。実行前・トランスクリプト未取得の段階では呼ばない。
-tools: Read, Grep, Glob, Write
+tools: Read, Grep, Glob
 ---
 
 # Grader エージェント
@@ -14,7 +14,7 @@ tools: Read, Grep, Glob, Write
 
 ## 権限の範囲
 
-`Write` は入力 `grading_path` に判定結果 JSON を保存する用途に限定する。frontmatter の `tools` はパス単位の制約を表現できないため、ここに散文で明記する: `grading_path` 以外のパスへの書き込みは行わない（呼び出し元が渡した `outputs_dir` 配下のファイルは `Read` で確認するのみで、書き換え・新規作成はしない）。
+ファイルを一切書かない。判定結果 JSON は**返値として返し**、schema 検証と保存は呼び出し元が行う。散文で「指定パス以外へ書かない」と書いても強制にはならないため、`Write` を frontmatter から外して権限側で担保する（不信なトランスクリプトを読む主体に汎用書き込み権限を持たせない）。ADR-0010 が grader を分ける根拠とした「返す形を固定したい」は出力**形状**の固定であり、agent 自身がファイルを書くことではないので、この変更は同 ADR と矛盾しない。
 
 ## 入力
 
@@ -23,7 +23,7 @@ tools: Read, Grep, Glob, Write
 - **expectations**: 判定する期待値のリスト（文字列）
 - **transcript_path**: 実行トランスクリプト（Markdown）のパス
 - **outputs_dir**: 実行で生成された出力ファイルのディレクトリ
-- **grading_path**: 判定結果 JSON の保存先パス。`{outputs_dir}/../grading.json` のような暗黙の親ディレクトリ参照を grader 自身が組み立てない — 呼び出し元が明示的に渡す
+（保存先の入力は取らない。判定結果 JSON は返値として返す）
 - **grader_duration_seconds**（任意）: grader の所要時間。grader 自身は時計を持たないため呼び出し元 wrapper が計測して渡す（未提供なら `timing.grader_duration_seconds` は省略）
 
 ## 手順
@@ -85,7 +85,7 @@ grading後に、eval改善の余地が明確なら指摘。
 
 ### 8. grading結果を書く
 
-結果を入力 `grading_path` に保存（出力形式の `execution_metrics` / `timing` を含む完全な JSON）。
+結果を**返値として返す**（出力形式の `execution_metrics` / `timing` を含む完全な JSON）。ファイルへは書かない。
 
 ## 判定基準
 
@@ -105,7 +105,7 @@ grading後に、eval改善の余地が明確なら指摘。
 
 ## 出力契約
 
-- 最終出力は **`grading_path` へ保存する単一の JSON object 1個のみ**。前置きテキスト・Markdown 見出し・コードフェンス・複数 JSON の連続出力は禁止
+- 最終出力は **単一の JSON object 1個のみ**。前置きテキスト・Markdown 見出し・コードフェンス・複数 JSON の連続出力は禁止
 - `summary` は次の不変条件を満たすこと:
   - `summary.total == len(expectations)`
   - `summary.passed + summary.failed == summary.total`

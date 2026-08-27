@@ -59,6 +59,13 @@ def redact(text: str) -> str:
 # （handoff.py がファイルパスへの redact 適用を避けているのと同じ理由:
 # 「40 文字超のパスを丸ごと潰す」既知の危険を knowledge にも継承しない）。
 # 既知プレフィックス・キーワード系パターンのみを残す。
+#
+# これは false negative を意図的に許容する判断である（2026-08-26 実機監査 F-23
+# で再提起され、維持と決めた）。キーワードもプレフィックスも伴わない 40 文字超の
+# 高エントロピー文字列は knowledge へそのまま保存される。知識カードは人間が読む
+# 前提の要約であり、raw credential を貼る経路自体が想定外なので、**knowledge に
+# secret を貼らないのは呼び出し側の責務**とする。汎用エントロピー検出を戻すと、
+# commit SHA・長い識別子・パスという正当な内容を日常的に潰すコストの方が大きい。
 _KNOWLEDGE_EXCLUDED_PATTERN_NAMES = frozenset({"hex_secret", "base64_long"})
 _KNOWLEDGE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (name, pattern) for name, pattern in _PATTERNS if name not in _KNOWLEDGE_EXCLUDED_PATTERN_NAMES

@@ -4,8 +4,7 @@ description: 新機能開発統括。発見→探索→loop-dev 反復実装（p
 command: /feat-dev
 ---
 
-<!-- DRY: grillme 前段（発火条件〜他処理に進まない）は全コマンド共通。終了条件・永続メモリ・引数は固有 -->
-
+<!-- DRY: grillme 前段は自由記述の依頼を受けるコマンド（plan / feat-dev / bugfix / skill-gen）のみ共通。終了条件・永続メモリ・引数は固有 -->
 # 機能開発フロー
 
 新機能を発見から納品サマリーまで直線遂行。実装は loop-dev skill に委譲する。

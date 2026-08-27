@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from bluecore.mem.database import Database
+from bluecore.mem.database import Database, DatabaseError
 from bluecore.mem.models import Knowledge, Repo, Session, utc_now_iso
 
 _TS = "2026-01-01T00:00:00+00:00"
@@ -433,3 +433,50 @@ class TestSessions:
         db.conn.execute("DELETE FROM sessions WHERE id = ?", (session.id,))
         db.conn.commit()
         assert db.get_knowledge_by_key("use-python3").session_id is None
+
+
+class TestPathValidation:
+    """F-25: 既存パスが symlink / 非 regular file なら接続前に拒否する。"""
+
+    def test_symlink_is_rejected_before_connect(self, tmp_path: Path) -> None:
+        """`mem.db -> target.db` を張られた状態で開くとリンク先を汚染しないこと。
+
+        sqlite3.connect は symlink を追うため、拒否しないとリンク先へ
+        repos/sessions/knowledge が作られ、無関係な DB を壊す。
+        """
+        target = tmp_path / "target.db"
+        target.write_text("", encoding="utf-8")
+        link = tmp_path / "mem.db"
+        link.symlink_to(target)
+
+        with pytest.raises(DatabaseError, match="symlink"):
+            Database(link)
+
+        assert target.read_text(encoding="utf-8") == ""
+
+    def test_dangling_symlink_is_rejected(self, tmp_path: Path) -> None:
+        """ぶら下がり symlink も拒否すること。
+
+        O_EXCL はぶら下がりリンクに対しても FileExistsError を投げるため、
+        生きたリンクと同じ分岐へ落ちる。
+        """
+        link = tmp_path / "mem.db"
+        link.symlink_to(tmp_path / "missing.db")
+
+        with pytest.raises(DatabaseError, match="symlink"):
+            Database(link)
+
+    def test_directory_is_rejected(self, tmp_path: Path) -> None:
+        """regular file 以外（ディレクトリ等）も拒否すること。"""
+        target = tmp_path / "mem.db"
+        target.mkdir()
+
+        with pytest.raises(DatabaseError, match="通常ファイルではありません"):
+            Database(target)
+
+    def test_regular_file_reopen_still_works(self, tmp_path: Path) -> None:
+        """通常の再オープン経路を壊していないこと。"""
+        path = tmp_path / "mem.db"
+        Database(path).close()
+
+        Database(path).close()

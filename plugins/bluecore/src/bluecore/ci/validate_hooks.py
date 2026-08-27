@@ -14,6 +14,15 @@ from bluecore.ci.ci_common import (
     read_json,
 )
 
+# 宣言が失われたら保護が丸ごと無効化されるイベント。`{"hooks": {}}` を
+# 「0 個のマッチャーを検証しました」として成功扱いしていたため、宣言の欠落を
+# 一切検出できていなかった（F-03）。
+#
+# 「最低 N 個のマッチャー」という個数条件は置かない。個数は品質指標ではなく、
+# 必要なイベントが宣言されているかどうかが実際の契約である（同じ理由で
+# harness audit の固定件数 quota も撤去した）。
+REQUIRED_EVENTS = frozenset({"PreToolUse", "PreCompact", "SessionStart", "SessionEnd"})
+
 VALID_EVENTS = [
     "SessionStart",
     "UserPromptSubmit",
@@ -276,11 +285,16 @@ def _validate_event(event_type: str, matchers: Any) -> tuple[bool, int]:
 
 def validate_hooks(
     hooks_file: str | Path = DEFAULT_HOOKS_FILE,
+    *,
+    optional: bool = False,
 ) -> int:
     """hooks.json を検証し、JS バリデータと同じメッセージを表示する。
 
     Args:
         hooks_file: 処理に渡す hooks_file の値です。
+        optional: True なら対象パスが存在しない場合に検証をスキップして 0 を返す。
+            既定の False では欠落を失敗として扱う（宣言がまるごと失われた破損を
+            成功と報告しないため。F-03）。
 
     Returns:
         処理結果を返します。
@@ -290,8 +304,11 @@ def validate_hooks(
     """
     hooks_path = Path(hooks_file)
     if not hooks_path.exists():
-        print("hooks.json が見つかりません。検証をスキップします")
-        return 0
+        if optional:
+            print("hooks.json が見つかりません。--optional 指定のため検証をスキップします")
+            return 0
+        emit_error(f"hooks.json が見つかりません: {hooks_path}")
+        return 1
 
     try:
         data = read_json(hooks_path, "hooks.json")
@@ -313,6 +330,11 @@ def validate_hooks(
             has_errors = True
         total_matchers += matched_count
 
+    missing_events = sorted(REQUIRED_EVENTS - set(hooks))
+    if missing_events:
+        emit_error(f"必須イベントが宣言されていません: {' '.join(missing_events)}")
+        has_errors = True
+
     if has_errors:
         return 1
 
@@ -333,6 +355,11 @@ def build_parser() -> argparse.ArgumentParser:
         例外は発生しません。
     """
     parser = argparse.ArgumentParser(description="Validate hooks.json")
+    parser.add_argument(
+        "--optional",
+        action="store_true",
+        help="対象パスが存在しない場合に失敗ではなくスキップする",
+    )
     parser.add_argument("--hooks-file", default=str(DEFAULT_HOOKS_FILE))
     return parser
 
@@ -350,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
         例外は発生しません。
     """
     args = build_parser().parse_args(argv)
-    return validate_hooks(args.hooks_file)
+    return validate_hooks(args.hooks_file, optional=args.optional)
 
 
 if __name__ == "__main__":

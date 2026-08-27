@@ -13,9 +13,9 @@ user-invocable: false
 
 本スキルは goal-based loop であり、停止は次のいずれか成立時のみ発生する: (1) 収束条件成立（下記「収束判定」）、(2) turn cap 到達（最大 2 反復、下記手順章）、(3) circuit breaker 発火（`## circuit breaker`）。これ以外の理由（「大体直った」等の主観判断）での打ち切りは禁止。
 
-## 前提（grillme 済み入力契約）
+## 前提（要件確定済みの入力契約）
 
-再 grillme 禁止。要件は呼び出し元コマンドで合意済みであり、fork のため対話コストが高い。
+grillme 起動禁止。要件は呼び出し元コマンドで確定済みである — 自由記述の依頼を受けるコマンド（`/plan` `/feat-dev` `/bugfix` `/skill-gen`）は入口の grillme で、それ以外（`/refactor` `/test-gen` `/review`）は引数・diff・フラグから機械的に確定させている。加えて fork のため対話コストが高い。
 
 入力契約:
 
@@ -90,6 +90,7 @@ Skill ネスト発火は使わない。checkpoint skill のフォーマット（
 - 各反復の収束判定 green 後に自動コミット（メッセージ: 変更要約 1 行 + 反復番号）
 - コミット前に対象リポジトリの CLAUDE.md / AGENTS.md / CONTRIBUTING.md のコミット禁止・ブランチ規約を確認。禁止時はコミットせず出力に「未コミット（理由）」
 - `--no-verify` 等のフックバイパス禁止
+- **`git add` と `git commit` は別々の tool call へ分ける。** `git add -A && git commit -m ...` のように 1 回の Bash 呼び出しへまとめると、commit 品質フックが実行前の index しか見られず内容を検査できないため deny される（`pre_bash_commit_quality`）。まず stage し、次の呼び出しで commit する
 - コミット失敗（品質ガード reject 等）は未収束扱いにしない（収束条件はテスト green、コミットは付帯動作）
 - `commit: false` 指定時はスキップ
 
@@ -125,9 +126,9 @@ Assumptions: {仮決定事項 or "-"}
 
 人間の確認・停止点は次の 4 つのみ（自律度パラメータは導入しない）。収束 gate の最終権限は loop-dev の evaluate — 呼び出し元コマンドが独自 gate を持つ場合（例: `/refactor` の final gate）も loop-dev 判定を正とする。
 
-1. 計画承認: 呼び出し元コマンドで合意済み（本 skill 内では行わない）
+1. 計画: 呼び出し元コマンドで確定済み（本 skill 内では計画の確認を行わない）
 2. 上限超過・circuit break: エスカレーション出力してユーザー報告・停止
-3. レート制限 90% 超: 次反復に進まず checkpoint 保存してユーザー確認
+3. レート制限 90% 超: 次反復に進まず checkpoint 保存して報告・停止（応答は待たない。再開は次セッションの人間の判断で足りる）
 4. コミット禁止規約: 対象リポジトリの規約でコミット禁止なら自動コミットせず「未コミット（理由）」を報告
 
 ## 永続メモリ

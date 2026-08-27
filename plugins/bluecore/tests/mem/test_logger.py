@@ -3,6 +3,8 @@
 import logging
 from pathlib import Path
 
+import pytest
+
 import bluecore.mem.logger as logger
 
 
@@ -89,3 +91,30 @@ class TestLogger:
         content = log_file.read_text()
         assert "[REDACTED]" in content
         assert "sk-ant-api03-" not in content
+
+    def test_setup_can_retry_after_handler_construction_failure(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """ハンドラ構築が失敗しても初期化済みフラグが立たず、次の setup で復帰できる。
+
+        `_initialized = True` を構築前に立てていた頃は、一度でも失敗すると
+        「初期化済みだがハンドラが空」という復帰不能な状態がプロセス内に残った。
+        """
+        logger.reset()
+        calls = {"n": 0}
+        real_file_handler = logger._file_handler
+
+        def flaky_file_handler(log_dir: Path):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError("disk full")
+            return real_file_handler(log_dir)
+
+        monkeypatch.setattr(logger, "_file_handler", flaky_file_handler)
+
+        with pytest.raises(OSError):
+            logger.setup(tmp_path, level="info")
+        assert logger._initialized is False
+
+        logger.setup(tmp_path, level="info")
+        assert logging.getLogger("bluecore.mem").handlers

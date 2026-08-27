@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 from bluecore.ci.harness_audit_utils import (
-    _command_parity_matches,
     count_files,
     file_exists,
     safe_parse_json,
@@ -123,6 +123,120 @@ def _has_memory_lifecycle_hooks(root_dir: str | Path) -> bool:
     )
 
 
+# 常時注入される frontmatter description の総量の上限（文字数）。description は
+# セッションごとに必ず払うコストなので、ここだけが「常時オン」の実測対象になる。
+_ALWAYS_ON_DESCRIPTION_BUDGET_CHARS = 4000
+
+# 起動ごとに全文読まれる 1 定義あたりの上限（文字数）。
+_ON_INVOKE_BUDGET_CHARS = 20000
+
+_SURFACE_GLOBS = (("skills", "SKILL.md"), ("commands", "*.md"), ("agents", "*.md"))
+
+
+def _iter_surface_files(root_dir: str | Path) -> Iterator[Path]:
+    """常時オン/起動時コストを持つ定義ファイルを列挙する。"""
+    root = Path(root_dir)
+    for directory, pattern in _SURFACE_GLOBS:
+        base = root / directory
+        if base.is_dir():
+            yield from sorted(base.rglob(pattern))
+
+
+def always_on_description_chars(root_dir: str | Path) -> int:
+    """全 surface の frontmatter ``description`` の合計文字数を返す。
+
+    「トークン最適化ドキュメントが存在するか」はハーネスの性質を何も測らない。
+    実際に毎セッション払うコストは frontmatter の ``description`` だけなので、
+    そちらを直接測る。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+
+    Returns:
+        description の合計文字数
+    """
+    total = 0
+    for path in _iter_surface_files(root_dir):
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("description:"):
+                total += len(line) - len("description:")
+                break
+    return total
+
+
+def oversized_surfaces(root_dir: str | Path) -> list[str]:
+    """起動ごとの読み込みコストが上限を超える定義ファイル名を返す。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+
+    Returns:
+        上限超過した定義の相対パス一覧
+    """
+    root = Path(root_dir)
+    return [
+        str(path.relative_to(root))
+        for path in _iter_surface_files(root_dir)
+        if len(path.read_text(encoding="utf-8", errors="replace")) > _ON_INVOKE_BUDGET_CHARS
+    ]
+
+
+def _hook_modules_resolve(root_dir: str | Path) -> bool:
+    """hooks.json が参照する bluecore フックモジュールがすべて実在するかを判定する。
+
+    「最低 N 個のモジュールがある」という個数条件は品質を測っていない。実際の
+    契約は「宣言したものが実在する」であり、こちらは破損を確実に検出できる。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+
+    Returns:
+        参照モジュールがすべて実在すれば True
+    """
+    raw = safe_read(root_dir, "hooks/hooks.json")
+    if not raw:
+        return False
+    modules = set(re.findall(r"bluecore\.hooks\.([A-Za-z_][A-Za-z0-9_]*)", raw))
+    if not modules:
+        return False
+    return all(file_exists(root_dir, f"src/bluecore/hooks/{name}.py") for name in modules)
+
+
+def _manifest_surfaces_resolve(root_dir: str | Path) -> bool:
+    """plugin.json が宣言するディレクトリがすべて実在するかを判定する。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+
+    Returns:
+        宣言された surface がすべて実在すれば True
+    """
+    manifest = safe_parse_json(safe_read(root_dir, ".claude-plugin/plugin.json"))
+    if not isinstance(manifest, dict):
+        return False
+    declared = [
+        entry
+        for key in ("skills", "commands", "agents")
+        for entry in (manifest.get(key) or [])
+        if isinstance(entry, str)
+    ]
+    if not declared:
+        return False
+    return all(file_exists(root_dir, entry.lstrip("./").rstrip("/")) for entry in declared)
+
+
+def _coverage_gate_configured(root_dir: str | Path) -> bool:
+    """カバレッジ閾値（fail_under）が設定されているかを判定する。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ
+
+    Returns:
+        閾値が設定されていれば True
+    """
+    return "fail_under" in (safe_read(root_dir, "pyproject.toml") or "")
+
+
 def _repo_tool_coverage_hooks_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """Tool Coverage のフック関連チェック2件を返す。"""
     return [
@@ -137,14 +251,14 @@ def _repo_tool_coverage_hooks_checks(root_dir: str | Path) -> list[dict[str, Any
             "fix": "Create hooks/hooks.json and define baseline hook events.",
         },
         {
-            "id": "tool-hooks-impl-count",
+            "id": "tool-hooks-manifest-consistent",
             "category": "Tool Coverage",
             "points": 2,
             "scopes": ["repo", "hooks"],
-            "path": "src/bluecore/hooks/",
-            "description": "最低12個のフック実装モジュールが存在する",
-            "pass": count_files(root_dir, "src/bluecore/hooks", ".py") >= 12,
-            "fix": "Add missing hook implementations in src/bluecore/hooks/.",
+            "path": "hooks/hooks.json",
+            "description": "hooks.json が参照する実装モジュールがすべて実在する（個数ではなく整合を見る）",
+            "pass": _hook_modules_resolve(root_dir),
+            "fix": "Fix hooks.json entries that point at modules which do not exist under src/bluecore/hooks/.",
         },
     ]
 
@@ -175,19 +289,19 @@ def _repo_tool_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "points": 2,
             "scopes": ["repo", "skills"],
             "path": "skills/",
-            "description": "最低20個のスキル定義が存在する",
-            "pass": count_files(root_dir, "skills", "SKILL.md") >= 20,
-            "fix": "Add missing skill directories with SKILL.md definitions.",
+            "description": "スキル定義の surface が失われていない（破損検知の下限。数は品質指標ではない — ADR-0010）",
+            "pass": count_files(root_dir, "skills", "SKILL.md") >= 1,
+            "fix": "Restore skill directories under skills/ if the surface was emptied. Do NOT split skills to raise this count.",
         },
         {
-            "id": "tool-command-parity",
+            "id": "tool-manifest-surface-consistent",
             "category": "Tool Coverage",
             "points": 2,
             "scopes": ["repo", "commands"],
-            "path": ".opencode/commands/harness.md",
-            "description": "ハーネス監査コマンドのプライマリと OpenCode コマンドドック間でパリティが取れている",
-            "pass": _command_parity_matches(root_dir),
-            "fix": "Sync commands/harness.md and .opencode/commands/harness.md.",
+            "path": ".claude-plugin/plugin.json",
+            "description": "manifest が宣言する surface とディスク上の実体が一致している",
+            "pass": _manifest_surfaces_resolve(root_dir),
+            "fix": "Make .claude-plugin/plugin.json declarations match the directories that actually exist.",
         },
     ]
 
@@ -213,14 +327,17 @@ def _repo_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]
             "fix": "Add plan command guidance in commands/plan.md.",
         },
         {
-            "id": "context-token-doc",
+            "id": "context-always-on-budget",
             "category": "Context Efficiency",
             "points": 2,
             "scopes": ["repo"],
-            "path": "docs/token-optimization.md",
-            "description": "トークン最適化ドキュメントが存在する",
-            "pass": file_exists(root_dir, "docs/token-optimization.md"),
-            "fix": "Add docs/token-optimization.md with concrete context-cost controls.",
+            "path": "skills/, commands/, agents/",
+            "description": (
+                "常時注入される frontmatter description の総量が予算内"
+                f"（{_ALWAYS_ON_DESCRIPTION_BUDGET_CHARS} 文字）"
+            ),
+            "pass": always_on_description_chars(root_dir) <= _ALWAYS_ON_DESCRIPTION_BUDGET_CHARS,
+            "fix": "Shorten skill/command/agent frontmatter descriptions; only they are paid on every session.",
         },
     ]
 
@@ -363,9 +480,9 @@ def _repo_eval_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "points": 2,
             "scopes": ["repo"],
             "path": "tests/",
-            "description": "最低60個のテストファイル(.py)が存在する",
-            "pass": count_files(root_dir, "tests", ".py") >= 60,
-            "fix": "Increase automated test coverage across src/bluecore modules.",
+            "description": "カバレッジゲートが設定され、テスト surface が失われていない（数は品質指標ではない）",
+            "pass": count_files(root_dir, "tests", ".py") >= 1 and _coverage_gate_configured(root_dir),
+            "fix": "Keep tests/ populated and configure a coverage threshold (fail_under) in pyproject.toml.",
         },
     ]
 
@@ -444,14 +561,17 @@ def _repo_cost_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """
     return [
         {
-            "id": "cost-doc",
+            "id": "cost-no-oversized-surface",
             "category": "Cost Efficiency",
             "points": 3,
             "scopes": ["repo"],
-            "path": "docs/token-optimization.md",
-            "description": "コスト最適化ドキュメントが存在する",
-            "pass": file_exists(root_dir, "docs/token-optimization.md"),
-            "fix": "Create docs/token-optimization.md with target settings and tradeoffs.",
+            "path": "skills/, commands/",
+            "description": (
+                "起動ごとに読まれる定義が 1 件も肥大化していない"
+                f"（各 {_ON_INVOKE_BUDGET_CHARS} 文字以内）"
+            ),
+            "pass": not oversized_surfaces(root_dir),
+            "fix": "Split or trim the oversized SKILL.md / command definitions; each is paid in full on every invocation.",
         },
         {
             "id": "cost-model-route-command",

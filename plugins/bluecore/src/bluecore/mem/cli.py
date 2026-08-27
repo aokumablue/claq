@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -222,6 +223,58 @@ _ZERO_POSITIONAL_COMMANDS: frozenset[str] = frozenset({"init", "learn", "list", 
 # 位置引数をちょうど 1 個（key）だけ取る subcommand（L-01 対応）。
 _SINGLE_KEY_COMMANDS: frozenset[str] = frozenset({"show", "promote", "forget"})
 
+# subcommand ごとに受理するオプション。`_parse_options` はグローバルな
+# `_VALUE_OPTIONS` / `_BOOL_FLAGS` しか見ないため、ここで対応表を持たないと
+# `promote <key> --global` のような未対応 flag が黙って通り、指定と異なる
+# カード（repo 優先探索の結果）を操作してしまう（F-22）。`--global` と
+# `--repo` の排他チェックも list/search からしか呼ばれていなかったため、
+# `--global --repo` の同時指定すら素通りしていた。
+_SUPPORTED_OPTIONS: dict[str, frozenset[str]] = {
+    "init": frozenset(),
+    "context": frozenset(),
+    "handoff": frozenset(),
+    "learn": frozenset(),
+    "list": frozenset({"--global", "--repo", "--status", "--kind", "--limit", "--json"}),
+    "search": frozenset({"--global", "--repo", "--status", "--kind", "--limit", "--json"}),
+    "show": frozenset(),
+    "promote": frozenset(),
+    "forget": frozenset({"--superseded-by"}),
+}
+
+# 同時に指定できないオプションの組。
+_MUTUALLY_EXCLUSIVE_OPTIONS: tuple[tuple[str, str], ...] = (("--global", "--repo"),)
+
+
+def _check_supported_options(command: str, args: CommandArgs) -> None:
+    """subcommand が受理しないオプションを、副作用より先に拒否する。
+
+    黙って無視すると、利用者の指定と異なるカードを操作したことに気づけない。
+    たとえば `promote <key> --global` は repo 側のカードを昇格させ、global 側は
+    pending のまま残っていた。
+
+    Args:
+        command: 実行するコマンド名。
+        args: コマンド引数と stdin JSON。
+
+    Returns:
+        なし。
+
+    Raises:
+        CommandError: 未対応のオプション、または排他オプションの同時指定。
+    """
+    supported = _SUPPORTED_OPTIONS.get(command)
+    if supported is None:
+        return
+
+    used = set(args.flags) | set(args.values)
+    unsupported = sorted(used - supported)
+    if unsupported:
+        raise CommandError(f"{command} は次のオプションを取りません: {' '.join(unsupported)}")
+
+    for left, right in _MUTUALLY_EXCLUSIVE_OPTIONS:
+        if left in used and right in used:
+            raise CommandError(f"{left} と {right} は同時に指定できません")
+
 
 def _check_positional_arity(command: str, args: CommandArgs) -> None:
     """side effect（DB オープン・再作成等）より先に位置引数の個数を検証する（L-01 対応）。
@@ -275,7 +328,8 @@ def _check_learn_options(command: str, args: CommandArgs) -> None:
     if command == "learn" and "--status" in args.values:
         raise CommandError(
             "learn --status は指定できません（常に status=pending で登録されます。"
-            "有効化は `promote <key>` による人間承認のみです）"
+            "有効化は `promote <key>` を通す運用です。promote は技術的に人間へ"
+            "限定されておらず、Bash を持つ agent からも到達できます）"
         )
 
 
@@ -347,14 +401,19 @@ def main() -> int:
     try:
         args = _parse_args_and_stdin(sys.argv[2:])
         _check_positional_arity(command, args)
+        # learn --status には専用の説明があるため、一般的な未対応オプション
+        # チェックより先に評価する。
         _check_learn_options(command, args)
+        _check_supported_options(command, args)
         settings = _load_settings_or_raise()
     except CommandError as e:
         print(str(e), file=sys.stderr)
         exit_code = 1
     except Exception as e:
+        # SessionStart はセッション開始を止めないため exit 0 のままにするが、
+        # 沈黙させない。黙って抜けると記憶注入が失われたこと自体に気づけない。
+        print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
         if not session_start:
-            print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
             exit_code = 1
     else:
         try:
@@ -587,12 +646,12 @@ def _collect_list_rows(
         整列して ``--limit`` 件で切った Knowledge のリスト。
 
     Raises:
-        CommandError: スコープ指定が矛盾する、または列挙値・件数が不正な場合。
+        CommandError: 列挙値・件数が不正な場合。
     """
+    # --global と --repo の排他は dispatch 層の `_check_supported_options` が
+    # 全 subcommand に対して検証する。
     only_global = "--global" in args.flags
     only_repo = "--repo" in args.flags
-    if only_global and only_repo:
-        raise CommandError("--global と --repo は同時に指定できません")
 
     try:
         status = validate_choice("status", args.values.get("--status", "active"), STATUSES)
@@ -852,6 +911,12 @@ def _handle_show(settings: Settings, args: CommandArgs) -> None:
 def _handle_promote(settings: Settings, args: CommandArgs) -> None:
     """promote コマンド: 知識カードの status を active にする。
 
+    昇格は以後の全セッションへ自動注入される状態への遷移なので、誰が・いつ・
+    どのカードを昇格させたかをログへ残す。これは境界ではなく事後追跡である。
+    ADR-0007 のとおり、promote が人間によって実行されたことを技術的に強制する
+    手段は無く（同一 UID から mem.db を直接更新できる以上、CLI をいくら固めても
+    保証にならない）、Bash を持つ agent からも到達できる。
+
     Args:
         settings: mem 設定。
         args: コマンド引数。
@@ -863,6 +928,14 @@ def _handle_promote(settings: Settings, args: CommandArgs) -> None:
     with Database(settings.db_path) as db:
         found = _find_knowledge(db, key)
         db.set_knowledge_status(found.id, "active")
+    log.info(
+        "promote: key=%s scope=%s source=%s previous_status=%s actor_uid=%s",
+        found.key,
+        found.scope,
+        found.source,
+        found.status,
+        os.getuid(),
+    )
     print(f"promoted: {key}")
 
 

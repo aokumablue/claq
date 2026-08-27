@@ -12,7 +12,7 @@ commands/skills/agents/hooks を周期的にレビューし、実害を修正し
 ## 焼き込み原則（この5つを全工程で守る）
 
 1. **注入後レビュー**: 指示文書へ条項を追加する強化は、条項自体が新たな穴を生む（パスガード欠落・確信度ゲート過剰適用・経路非対称）。強化後は必ず再レビューを通す。
-2. **工程分離**: レビューは READ-ONLY、編集は承認ゲート後。混ぜない。
+2. **工程分離**: レビュー（ステップ1-2）は READ-ONLY、編集はステップ4以降。混ぜない。
 3. **現物実証**: CRITICAL 指摘は鵜呑みにせず、サンドボックスや実行で失敗を再現してから直す。
 4. **canonical 再利用**: 新表現を発明せず tdd-writer / reviewer / feat-dev / loop-dev の既存文言を再利用（トークン増と表現ゆれを回避）。過去知見「列挙型禁止は逆効果、肯定形・原則化が正」に従う。
 5. **両ハーネス互換**: プラグインは Claude Code（主）と GitHub Copilot CLI（副）の両方で動く。ハーネス依存の入出力は `hook_common` / `output_adapter` の既存チョークポイント（`emit_block_output` / `adapt_context_output` 等）経由に一本化し、Copilot で実現不可能な機能には**フォールバック**（同等動作、不可能なら安全側の明示スキップ）を実装する。Claude Code 側の処理経路は変更しない。ハーネス判定やプロトコル分岐をフック内へ直書きした実装はレビューで指摘・是正する。
@@ -54,9 +54,9 @@ collect_skill_create_inputs "${COMMITS:-200}"        # コミット規約・同�
 
 hooks / `src/bluecore/hooks/` を対象に含む回は**両ハーネス互換（原則5）を必須観点**にする: ブロック系出力は `emit_block_output` 経由か、コンテキスト注入は `adapt_context_output` 経由か、Copilot CLI 非対応のイベント・機能にフォールバック（または安全側スキップ）があるか、Claude Code 経路への影響ゼロか。ハーネスごとの判定・出力アダプタの実態は `src/bluecore/lib/harness.py` と `src/bluecore/hooks/output_adapter.py` を根拠にする。
 
-## ステップ3: 承認ゲート（ユーザー確認 1回）
+## ステップ3: 種別分類
 
-指摘を種別分類して修正実行可否を確認する。ゲートを通すまで編集しない。baseline の既存失敗も同じ表で分類してゲートに載せる（黙って修正もスルーもしない）。ユーザーへの確認手段が使えない実行文脈では、指摘レポートを提示して**停止**する（自己承認で編集に進まない＝原則2）。
+指摘を種別分類して提示する。応答は待たず、そのままステップ4の修正へ進む。baseline の既存失敗も同じ表に載せる（黙って修正もスルーもしない）。
 
 | 種別 | 次アクション |
 |---|---|
@@ -64,7 +64,7 @@ hooks / `src/bluecore/hooks/` を対象に含む回は**両ハーネス互換（
 | 強化（条項注入・出力形式・トークン整理） | ステップ4で直接編集 |
 | 仕様変更・新機能 | `/plan` 提示に留め自動実装しない |
 
-## ステップ4: 修正（承認後・委譲）
+## ステップ4: 修正（委譲）
 
 - **バグ**: `bluecore:tdd-writer` で RED→GREEN（現物実証＝原則3）。実害脆弱性も同様。
 - **フック修正**: ハーネス依存の入出力は `hook_common` / `output_adapter` のチョークポイントへ寄せる（原則5）。新規フック・外部呼び出しは非ブロッキング + ハードタイムアウト必須（CLAUDE.md 準拠）。
@@ -80,7 +80,7 @@ hooks / `src/bluecore/hooks/` を対象に含む回は**両ハーネス互換（
 
 以下を全て満たすまでステップ4-5をループ（最大3周。満たせない場合は残指摘を明記して停止・報告）:
 
-1. `validate_{skills,commands,agents,hooks}` / `pytest --cov` / `ruff` が **baseline 非退行**（新規失敗ゼロ。baseline 既存失敗はステップ3の承認結果に従う）
+1. `validate_{skills,commands,agents,hooks}` / `pytest --cov` / `ruff` が **baseline 非退行**（新規失敗ゼロ。baseline 既存失敗はステップ3の分類に従う）
 2. 今回修正したファイルに起因する失敗ゼロ
 3. 再レビューで CRITICAL / HIGH ゼロ
 4. `harness_audit` の `overall_score` が baseline 非退行
@@ -106,4 +106,4 @@ bluecore_mem_learn --key <slug> --kind pitfall --scope repo --domain harness \
 - `--scope=<path>`: 対象上書き（既定 `plugins/bluecore/{commands,skills,agents,hooks}`）
 - `--commits=<n>`: 入力収集のコミット数（既定 200）
 - `--no-web`: web トレンド調査を無効化
-- `--dry-run`: ステップ1-2（audit + レビュー報告）の後、ステップ3以降を実行せずここで停止する。実効範囲はこの「ステップ3に進まない」ことのみ — ステップ4で委譲する `tdd-writer` 等の agent 自体に read-only/dry-run モードがあるわけではなく、maintain 側がそこへ到達しないことで結果的に無編集になる。停止するため、ステップ4の編集はもちろんステップ7の `bluecore_mem_learn` も行われない
+- `--dry-run`: ステップ1-2（audit + レビュー報告）の後、ステップ3以降を実行せずここで停止する（これは引数によるスコープ指定であり承認待ちではない）。実効範囲はこの「ステップ3に進まない」ことのみ — ステップ4で委譲する `tdd-writer` 等の agent 自体に read-only/dry-run モードがあるわけではなく、maintain 側がそこへ到達しないことで結果的に無編集になる。停止するため、ステップ4の編集はもちろんステップ7の `bluecore_mem_learn` も行われない

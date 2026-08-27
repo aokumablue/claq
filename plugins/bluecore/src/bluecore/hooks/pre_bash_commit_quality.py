@@ -43,11 +43,13 @@ from bluecore.hooks.commit_quality_scanner import (
 )
 from bluecore.hooks.hook_common import (
     MAX_STDIN_BYTES,
+    basename,
     is_git_executable_token,
     parse_json_object,
     resolve_repo_root,
     split_segments,
     tokenize,
+    tokenize_with_status,
 )
 from bluecore.lib.core_utils import log
 from bluecore.lib.harness import extract_bash_command
@@ -95,6 +97,36 @@ _REPO_ROOT_UNAVAILABLE_MESSAGE = (
     "[Hook] BLOCKED: could not resolve the repo root to scan worktree changes "
     "for a confirmed `git commit -a` call (git itself failed or timed out). "
     "Refusing to allow an unverifiable commit through."
+)
+
+# `git commit -a` の作業ツリー列挙（`git diff HEAD --name-only`）が git 自体の
+# 失敗・timeout で完了しなかった場合の deny 理由。HEAD が無い初回コミット
+# （正常系。空リストで続行）とは区別する。実際にコミットされる未ステージ変更を
+# 1 件も検査できない状態で「対象ファイルなし」を返さないため（ADR-0001）。
+_WORKTREE_FILES_UNAVAILABLE_MESSAGE = (
+    "[Hook] BLOCKED: could not enumerate worktree changes for a confirmed "
+    "`git commit -a` call (git itself failed or timed out). Refusing to allow "
+    "an unverifiable commit through."
+)
+
+# 1 回の Bash 呼び出しに複数の `git commit` が含まれる場合の deny 理由。
+# PreToolUse フックは実行前の index/worktree しか観測できないため、
+# 2 つ目以降の commit が何をコミットするかを原理的に検査できない。
+_MULTIPLE_COMMITS_MESSAGE = (
+    "[Hook] BLOCKED: this command contains more than one `git commit`. A "
+    "PreToolUse hook can only inspect the index as it is before the command "
+    "runs, so any commit after the first one cannot be scanned. Split them "
+    "into separate tool calls."
+)
+
+# commit より前のセグメントが作業ツリーまたは index を変更する場合の deny 理由。
+# 例: `printf ... > secret.py && git add secret.py && git commit -m x`。
+# 検査時点の index は空でも、実行時には secret.py が commit される。
+_MUTATION_BEFORE_COMMIT_MESSAGE = (
+    "[Hook] BLOCKED: this command modifies the worktree or the index before "
+    "the `git commit` in the same call, so the quality scan would run against "
+    "state that is not what gets committed. Run the file changes and "
+    "`git add` in a separate tool call, then commit."
 )
 
 # stdin が MAX_STDIN_BYTES を超えて切り捨てられた場合の deny 理由。切り捨て後の
@@ -155,16 +187,50 @@ def get_staged_files() -> list[str] | None:
     return _git_name_only(["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"])
 
 
-def get_unstaged_modified_files() -> list[str]:
+def _head_exists() -> bool | None:
+    """HEAD が解決可能か（＝初回コミットではないか）を判定します。
+
+    Returns:
+        HEAD があれば True、初回コミット等で無ければ False。git 自体が
+        失敗・timeout して判定できなければ None。
+
+    Args:
+        引数はありません。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode == 0:
+        return True
+    # --quiet 指定時、HEAD が単に存在しない場合の終了コードは 1。
+    # それ以外（リポジトリ外・git 内部エラー等）は「判定不能」として扱う。
+    return False if result.returncode == 1 else None
+
+
+def get_unstaged_modified_files() -> list[str] | None:
     """`git commit -a` 相当で追加取り込む作業ツリーの変更ファイル一覧を取得します。
 
     `git diff HEAD --name-only --diff-filter=ACMR` の結果を返します。
-    HEAD が無い（初回コミット）等で git が失敗した場合は空リストです
-    （初回コミットは正常系のため、ここは `get_staged_files` と異なり
-    失敗を fail-closed にしません）。
+
+    列挙に失敗したときは「HEAD が無い（初回コミット）」と「git 自体が失敗した」
+    を区別します。前者は正常系なので空リスト、後者は None を返して呼び出し元で
+    fail-closed にします。両方を空リストへ潰すと、実際にコミットされる未ステージ
+    変更を 1 件も検査できていない状態を「対象ファイルなし」と report してしまい、
+    ADR-0001 の「検査対象確定後の失敗は fail-closed」に反します。
 
     Returns:
-        変更されている作業ツリーファイルパスのリストを返します。
+        変更されている作業ツリーファイルパスのリスト。初回コミットで HEAD が
+        無い場合は空リスト。git 自体の失敗・timeout で取得できない場合は None。
 
     Args:
         引数はありません。
@@ -173,7 +239,9 @@ def get_unstaged_modified_files() -> list[str]:
         例外は発生しません。
     """
     result = _git_name_only(["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"])
-    return result if result is not None else []
+    if result is not None:
+        return result
+    return [] if _head_exists() is False else None
 
 
 def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
@@ -221,10 +289,17 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     トークンへ密着した非 commit コマンドを誤って commit と判定しません
     （`block_no_verify.has_bypass_flag` と同じトークナイザを共有する A-01 対応）。
 
-    トークン化がクォート不整合（heredoc 等）で空白分割へフォールバックした場合や、
-    それでも commit 判定できなかった場合は `re.search(r"\\bgit\\s+commit\\b", command)`
-    で最終判定します。過剰検出側に倒すフェイルセーフ設計です（`echo "git commit"` は
-    安全側の誤検出として許容する）。
+    トークン化がクォート不整合（heredoc 等）で空白分割へフォールバックした場合
+    **だけ**、`re.search(r"\\bgit\\s+commit\\b", command)` で最終判定します。
+    解析できなかった入力に対して過剰検出側へ倒すフェイルセーフです。
+
+    `shlex` が最後まで解析できた場合は、その結果を信頼して生文字列の正規表現を
+    当てません（F-08）。当てていた頃は `copilot -p 'Explain why a git commit
+    command may fail'` のような引用文まで commit と判定し、無関係な Bash 呼び出しが
+    index の状態次第でブロックされた。同じ入力を `block_no_verify` は無視して
+    おり、2 つのフックが「commit とは何か」で食い違っていた。この非対称を
+    どの ADR も正当化していない。ADR-0002 の「誤検出 > 誤通過」は解析できない
+    構文についての規定であり、解析できた構文にまで適用する根拠にはならない。
 
     非目標: シェル展開・変数分割経由（`git $(echo commit)` / `git${IFS}commit`
     等）で `git` と `commit` が生文字列上で隣接しない形の検出。POSIX シェル
@@ -241,15 +316,135 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     Raises:
         例外は発生しません。
     """
-    segments = split_segments(tokenize(command))
-    for segment in segments:
+    tokens, parsed_cleanly = tokenize_with_status(command)
+    for segment in split_segments(tokens):
         commit_args = _find_git_commit_args_in_segment(segment)
         if commit_args is not None:
             return True, commit_args
 
-    if re.search(r"\bgit\s+commit\b", command):
+    if not parsed_cleanly and re.search(r"\bgit\s+commit\b", command):
         return True, []
     return False, []
+
+
+# commit より前に実行されると検査結果を無効化する操作。ADR-0002 の
+# 「解析できないケースは誤検出を誤通過より選ぶ」に従い、判定に迷う構文は
+# 「変更あり」側へ倒す。対象は ADR-0002 が「引数位置に書き込み先が明示される
+# ＝解析できる範囲」として既に対応済みと宣言している集合に、index 操作を
+# 加えたもの。
+_INDEX_MUTATING_GIT_SUBCOMMANDS = frozenset(
+    {
+        "add",
+        "am",
+        "apply",
+        "checkout",
+        "cherry-pick",
+        "merge",
+        "mv",
+        "pull",
+        "rebase",
+        "reset",
+        "restore",
+        "revert",
+        "rm",
+        "stash",
+        "switch",
+    }
+)
+_WORKTREE_MUTATING_EXECUTABLES = frozenset(
+    {
+        "chmod",
+        "chown",
+        "cp",
+        "dd",
+        "install",
+        "ln",
+        "mkdir",
+        "mv",
+        "patch",
+        "rm",
+        "shred",
+        "tee",
+        "touch",
+        "truncate",
+        "unlink",
+    }
+)
+# `-i` を伴うときだけ書き込みになるコマンド。`-i` 無しは標準出力へ流すだけ。
+_INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl", "ed"})
+_MUTATING_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>", ">&"})
+
+
+def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
+    """1 セグメントが作業ツリーまたは git index を変更しうるかを判定します。
+
+    ADR-0002 に従い誤検出側へ倒します。ここでの誤検出のコストは「commit を
+    別の tool call へ分けてもらう」ことであり、誤通過のコスト（未検査の内容が
+    commit される）より小さいためです。
+
+    Args:
+        segment: `hook_common.split_segments` で得た 1 セグメント分のトークン列です。
+
+    Returns:
+        変更しうるなら True を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    if any(token in _MUTATING_REDIRECT_OPERATORS for token in segment):
+        return True
+
+    for i, token in enumerate(segment):
+        if is_git_executable_token(token):
+            for sub in segment[i + 1 :]:
+                if sub.startswith("-"):
+                    continue
+                return sub in _INDEX_MUTATING_GIT_SUBCOMMANDS
+            return False
+
+        name = basename(token)
+        if name in _WORKTREE_MUTATING_EXECUTABLES:
+            return True
+        if name in _INPLACE_EDIT_EXECUTABLES:
+            return any(arg == "-i" or (arg.startswith("-i") and not arg.startswith("--")) for arg in segment[i + 1 :])
+
+    return False
+
+
+def _compound_commit_risk(command: str) -> str | None:
+    """1 回の Bash 呼び出しの中で commit 内容を検査できなくする構造を検出します。
+
+    PreToolUse フックが観測できるのは「コマンド実行前」の index/worktree だけ
+    です。したがって次の 2 つは原理的に検査不能であり、ADR-0001（検査対象確定後
+    の検査不能は fail-closed）と ADR-0002（誤検出 > 誤通過）に従って deny します。
+
+    1. 複数の `git commit` — 2 つ目以降がコミットする内容は実行前状態に現れない。
+    2. commit より前のセグメントによる作業ツリー / index の変更 — 例えば
+       ``printf 'password=...' > secret.py && git add secret.py && git commit -m x``
+       は検査時点の index が空なので素通りする。
+
+    代償として ``git add . && git commit -m x`` という一般的なイディオムも塞ぎます。
+    それでも塞ぐのは、通した場合に「品質フックが commit 内容を検査している」という
+    契約自体が成立せず、フックの存在が誤った安心感になるためです。
+
+    Args:
+        command: 検査対象のコマンド文字列です。
+
+    Returns:
+        deny すべき場合はその理由文字列、問題なければ None を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    segments = split_segments(tokenize(command))
+    commit_indices = [i for i, segment in enumerate(segments) if _find_git_commit_args_in_segment(segment) is not None]
+    if not commit_indices:
+        return None
+    if len(commit_indices) > 1:
+        return _MULTIPLE_COMMITS_MESSAGE
+    if any(_segment_mutates_worktree_or_index(segment) for segment in segments[: commit_indices[0]]):
+        return _MUTATION_BEFORE_COMMIT_MESSAGE
+    return None
 
 
 def _is_commit_all_flag(commit_args: list[str]) -> bool:
@@ -378,7 +573,7 @@ def _scan_targets(files: list[str]) -> list[str]:
 
 def _partition_commit_all_files(
     staged_files: list[str], commit_args: list[str]
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str]] | None:
     """`-a`/`--all` 指定時に、INDEX から読む対象と作業ツリーから読む対象に分割します。
 
     `git commit -a` は作業ツリーの現在の内容をコミットするため、未ステージ
@@ -393,7 +588,8 @@ def _partition_commit_all_files(
 
     Returns:
         (index_files, worktree_files) のタプルです。`-a`/`--all` が無ければ
-        `worktree_files` は空リストです。
+        `worktree_files` は空リストです。`-a` 指定時に作業ツリーの列挙自体が
+        失敗した場合は None を返します（呼び出し元で fail-closed にする）。
 
     Raises:
         例外は発生しません。
@@ -401,7 +597,11 @@ def _partition_commit_all_files(
     if not _is_commit_all_flag(commit_args):
         return list(staged_files), []
 
-    worktree_files = sorted(set(get_unstaged_modified_files()))
+    unstaged = get_unstaged_modified_files()
+    if unstaged is None:
+        return None
+
+    worktree_files = sorted(set(unstaged))
     index_files = sorted(set(staged_files) - set(worktree_files))
     return index_files, worktree_files
 
@@ -614,7 +814,12 @@ def _evaluate_confirmed_commit(raw_input: str, command: str, commit_args: list[s
             log("[Hook] ERROR: could not determine staged files (git itself failed or timed out).")
             return {"output": raw_input, "exitCode": 2, "reason": _STAGED_FILES_UNAVAILABLE_MESSAGE}
 
-        index_files, worktree_files = _partition_commit_all_files(staged_files, commit_args)
+        partitioned = _partition_commit_all_files(staged_files, commit_args)
+        if partitioned is None:
+            log("[Hook] ERROR: could not enumerate worktree changes for `git commit -a`.")
+            return {"output": raw_input, "exitCode": 2, "reason": _WORKTREE_FILES_UNAVAILABLE_MESSAGE}
+
+        index_files, worktree_files = partitioned
         all_files = sorted(set(index_files) | set(worktree_files))
         if not all_files:
             log('[Hook] No staged files found. Use "git add" to stage files first.')
@@ -685,6 +890,11 @@ def evaluate(raw_input: str) -> dict:
         is_commit, commit_args = _is_git_commit_command(command)
         if not is_commit:
             return {"output": raw_input, "exitCode": 0}
+
+        compound_risk = _compound_commit_risk(command)
+        if compound_risk is not None:
+            log("[Hook] ERROR: commit content cannot be inspected before execution.")
+            return {"output": raw_input, "exitCode": 2, "reason": compound_risk}
 
         return _evaluate_confirmed_commit(raw_input, command, commit_args)
 

@@ -170,6 +170,35 @@ def _fixed_choice(payload: dict[str, Any], name: str, fixed_value: str) -> str:
     return fixed_value
 
 
+def slug_with_hash_fallback(redacted: str, prefix: str) -> str:
+    """redact 済みテキストを slug 化し、ASCII が足りなければ決定的ハッシュへ倒す。
+
+    ``slugify`` は ASCII 英数字を 1 つも含まない入力に対して共通の
+    ``FALLBACK_SLUG`` を返すため、``日本語`` と ``別`` のように異なる入力が
+    同じ key へ潰れ、upsert で既存カードを黙って上書きしてしまう。ASCII が
+    ``_MIN_KEY_SLUG_LENGTH`` 未満しか残らない入力は、``prefix`` と SHA-1
+    先頭 8 桁による決定的な key へ倒してこの衝突を避ける。
+
+    同じ入力からは常に同じ key が出るため、意図的な再 learn による upsert
+    （同じ key へ上書きして知識を更新する正規の使い方）は壊さない。
+
+    Args:
+        redacted: redact 済みのテキスト（title または明示 key）。
+        prefix: ハッシュ由来 key の接頭辞。
+
+    Returns:
+        ``[a-z0-9-]`` のみからなる slug。
+
+    Raises:
+        例外は発生しません。
+    """
+    base = slugify(redacted) if _ASCII_ALNUM_RE.search(redacted) else ""
+    if len(base) < _MIN_KEY_SLUG_LENGTH:
+        digest = hashlib.sha1(redacted.encode("utf-8")).hexdigest()[:_KEY_HASH_LENGTH]
+        return f"{prefix}-{digest}"
+    return base
+
+
 def generate_key(raw_title: str, kind: str) -> str:
     """title から知識カードの key スラッグを生成する。
 
@@ -212,10 +241,7 @@ def generate_key(raw_title: str, kind: str) -> str:
         例外は発生しません。
     """
     redacted_title = redact_knowledge_text(raw_title)
-    base = slugify(redacted_title) if _ASCII_ALNUM_RE.search(redacted_title) else ""
-    if len(base) < _MIN_KEY_SLUG_LENGTH:
-        digest = hashlib.sha1(redacted_title.encode("utf-8")).hexdigest()[:_KEY_HASH_LENGTH]
-        base = f"{kind}-{digest}"
+    base = slug_with_hash_fallback(redacted_title, kind)
     if redacted_title == raw_title:
         return base
     collision_guard = hashlib.sha1(raw_title.encode("utf-8")).hexdigest()[:_KEY_HASH_LENGTH]
@@ -328,7 +354,10 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     raw_key = str(payload.get("key") or "").strip()
     # 明示 key もシークレット断片を持ち込みうるため、生成 key と同じく
     # redact してから slugify を通す（A-03 対応。ここが素通りする穴だった）。
-    key = slugify(redact_knowledge_text(raw_key)) if raw_key else generate_key(title, kind)
+    # ハッシュ fallback も title 由来 key と同じく適用する。適用しないと
+    # `日本語` と `別` のような ASCII を含まない明示 key が同じ slug へ潰れ、
+    # upsert で別の知識を黙って上書きする（F-24）。
+    key = slug_with_hash_fallback(redact_knowledge_text(raw_key), kind) if raw_key else generate_key(title, kind)
 
     source_ref = optional_str(payload.get("source_ref"))
     domain = optional_str(payload.get("domain"))

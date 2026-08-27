@@ -53,6 +53,11 @@ class TestFindProtectedWrite:
             "mv src.py pyproject.toml",
             "install -m 644 src.py pyproject.toml",
             "ln -f /dev/null pyproject.toml",
+            # F-07: -f 無しの新規 symlink 作成も、以後その名前を読む処理を
+            # リンク先へ差し替えるため実質的な書き込み。
+            "ln -s weak.toml pyproject.toml",
+            # F-07: 長オプション形式の --force も検出する。
+            "ln --force /dev/null pyproject.toml",
             "dd if=/dev/zero of=pyproject.toml",
             "perl -i -pe s/a/b/ pyproject.toml",
             "perl -0pi -e 1 pyproject.toml",
@@ -72,8 +77,8 @@ class TestFindProtectedWrite:
             "tee",
             "sed -i",
             "",
-            # A-02 非目標: 引数末尾ではない/force なしの書き込み経路。
-            "ln /dev/null pyproject.toml",
+            # 保護対象でない名前への ln は対象外。
+            "ln -s a.txt b.txt",
         ],
     )
     def test_allows_non_write(self, command: str) -> None:
@@ -360,3 +365,29 @@ class TestMain:
         with pytest.raises(SystemExit) as excinfo:
             runpy.run_module("bluecore.hooks.bash_config_protection", run_name="__main__")
         assert excinfo.value.code == 0
+
+
+class TestMalformedFallbackCoversDestructiveVerbs:
+    """F-07: malformed JSON fallback がトークン化経路と同じ verb 集合を見ること。"""
+
+    @pytest.mark.parametrize(
+        "raw_input",
+        [
+            "{broken rm ruff.toml",
+            "{broken unlink pyproject.toml",
+            "{broken shred tox.ini",
+            "{broken ln -s x ruff.toml",
+        ],
+    )
+    def test_destructive_verbs_are_detected(self, raw_input: str) -> None:
+        """削除・リンク系の verb と保護対象名が同居したら deny 対象になること。
+
+        トークン化できる経路では `_remove_target` / `_ln_target` が既にこれらを
+        見ている。JSON の壊れ方だけで同じ入力が通ったり通らなくなったりするのは
+        境界として説明できない。
+        """
+        assert bash_config_protection._raw_text_write_risk(raw_input) is not None
+
+    def test_read_only_verb_is_not_detected(self) -> None:
+        """読むだけの verb は保護対象名が見えても deny しないこと。"""
+        assert bash_config_protection._raw_text_write_risk("{broken cat ruff.toml") is None

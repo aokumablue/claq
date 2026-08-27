@@ -40,6 +40,19 @@ UID 内の precreation / symlink 追従を除く**堅牢性改善**であり、
 owner/mode 非検証（ADR-0009）は変えない。`env.sh.tmp.*` は `roots/` の
 GC では見えないため、`~/.bluecore` 直下で同じ age-gate を適用する。
 
+**改訂 5（本改訂）**: 2026-08-26 の実機監査 F-11 を受け、`bluecore-helpers.sh`
+が ambient `CLAUDE_PLUGIN_ROOT` を pointer 由来の root より優先していた点を
+撤回した。helper 本体は env.sh が pointer から選んだ root から source されて
+いるため、返す root だけ環境変数で差し替えると「実行しているコードは A なのに
+自称は B」という自己不整合になり、本 ADR の「verified root」という主張が崩れる。
+どの root を source するかを環境から決めるのは構わないが、source 後の自己申告を
+上書きしてはならない。併せて F-26（`${BASH_SOURCE[0]:-$0}` が dash で
+`Bad substitution` になる）に対応し、env-template.sh が解決済み root を
+`_BLUECORE_SOURCED_ROOT` で helper へ明示的に引き渡す形にした。POSIX sh は
+source されたファイルの位置を自力で解決できない（`$0` はシェル名のまま）ため、
+この受け渡しが `#!/usr/bin/env sh` という env-template.sh の宣言と helper の
+実装を初めて整合させる。これは真正性の保証ではなく、自己不整合と移植性の是正である。
+
 ## コンテキスト
 
 v0.9.34 時点のランタイム監査レポートの M-02 指摘は、

@@ -5,29 +5,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from bluecore.ci.ci_common import REPO_ROOT, emit_error
-from bluecore.lib.frontmatter import FrontmatterError, parse_yaml, split_frontmatter
+from bluecore.ci.ci_common import REPO_ROOT, emit_error, extract_frontmatter
 
 DEFAULT_AGENTS_DIR = REPO_ROOT / "agents"
-
-
-def extract_frontmatter(content: str) -> dict[str, object] | None:
-    """先頭の --- で囲まれた frontmatter を辞書として返す。無ければ None。
-
-    解釈できない行を読み飛ばして部分結果を返す寛容モードで解析する。
-
-    Args:
-        content: Markdown ファイルの全文。
-
-    Returns:
-        frontmatter の辞書。frontmatter が無い、または辞書でない場合は None。
-    """
-    try:
-        block = split_frontmatter(content)
-    except FrontmatterError:
-        return None
-    data = parse_yaml(block, lenient=True)
-    return data if isinstance(data, dict) else None
 
 
 def _validate_agent_file(file_path: Path) -> bool:
@@ -64,11 +44,14 @@ def _validate_agent_file(file_path: Path) -> bool:
     return False
 
 
-def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR) -> int:
+def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR, *, optional: bool = False) -> int:
     """エージェント Markdown ファイルを検証し、JS バリデータと同じメッセージを表示する。
 
     Args:
         agents_dir: 処理に渡す agents_dir の値です。
+        optional: True なら対象パスが存在しない場合に検証をスキップして 0 を返す。
+            既定の False では欠落を失敗として扱う（宣言がまるごと失われた破損を
+            成功と報告しないため。F-03）。
 
     Returns:
         処理結果を返します。
@@ -78,8 +61,11 @@ def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR) -> int:
     """
     agents_path = Path(agents_dir)
     if not agents_path.exists():
-        print("agents ディレクトリが見つかりません。検証をスキップします")
-        return 0
+        if optional:
+            print("agents ディレクトリが見つかりません。--optional 指定のため検証をスキップします")
+            return 0
+        emit_error(f"agents ディレクトリが見つかりません: {agents_path}")
+        return 1
 
     files = [entry for entry in agents_path.iterdir() if entry.is_file() and entry.name.endswith(".md")]
     has_errors = False
@@ -108,6 +94,11 @@ def build_parser() -> argparse.ArgumentParser:
         例外は発生しません。
     """
     parser = argparse.ArgumentParser(description="Validate agent markdown files")
+    parser.add_argument(
+        "--optional",
+        action="store_true",
+        help="対象パスが存在しない場合に失敗ではなくスキップする",
+    )
     parser.add_argument("--agents-dir", default=str(DEFAULT_AGENTS_DIR))
     return parser
 
@@ -125,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         例外は発生しません。
     """
     args = build_parser().parse_args(argv)
-    return validate_agents(args.agents_dir)
+    return validate_agents(args.agents_dir, optional=args.optional)
 
 
 if __name__ == "__main__":

@@ -45,6 +45,15 @@ bluecore は、Claude Code の作業を「最初の計画からレビューま�
 
 **ざっくりまとめると**: ユーザーは Command だけを覚えれば OK。Command が内部で必要な Agent / Skill を自動で連れてきます。Knowledge と Hook はバックグラウンドで動く仕組みです。
 
+> **保護フックの保証範囲**: `block_no_verify` / `pre_bash_commit_quality` /
+> `bash_config_protection` / `config_protection` は **best-effort な事故防止**であり、
+> **敵対的な回避への防壁ではありません**（[ADR-0002](docs/adr/0002-shell-hooks-prefer-false-positive-over-false-negative.md)）。
+> シェルエイリアス・シェル関数・変数展開・コマンド置換・2 段以上の `sh -c` / `eval`・
+> `git` 以外の名前を持つラッパースクリプト経由の呼び出しは、意図的に非目標として
+> 検出しません（POSIX シェルの意味解釈は実行時環境に依存し、静的解析だけでは
+> 原理的に再現できないため）。回避を防ぐ必要がある場面では、フックではなく
+> サーバ側の検証（受信 commit の署名・テスト・policy 適合）で担保してください。
+
 ---
 
 ## クイックスタート
@@ -210,7 +219,7 @@ flowchart LR
 
   subgraph refactor["⚙️ refactor 内部（8ステップ）"]
     direction TB
-    SG["grillme"]:::skill --> SP["refactor-prep"]:::skill
+    CREF --> SP["refactor-prep"]:::skill
     SP --> RB["refactor-rollback"]:::skill
     RB --> AC["🧹 code-refiner<br/>mode=clean"]:::agent
     AC --> ASI1["✨ code-refiner #1<br/>mode=simplify"]:::agent
@@ -389,12 +398,11 @@ flowchart TD
   subgraph session["💻 セッション中（各コマンド最終ステップで明示実行）"]
     direction LR
     SAD["adr<br/>アーキ決定記録"]:::skill
-    CW["学びの記録<br/>bluecore_mem_learn（source=agent、既定 status=pending, A-03）"]:::cmd
-    CWA["bluecore_mem_learn --status active<br/>確信度が高い場合のみ明示（任意）"]:::cmd
-    CA["/instinct learn --status pending<br/>人間が手動登録（任意）"]:::cmd
+    CW["学びの記録<br/>bluecore_mem_learn（source=agent、常に status=pending, A-03）"]:::cmd
+    CA["/instinct learn<br/>人間が手動登録（任意）"]:::cmd
   end
 
-  CWA --> KA[("knowledge<br/>status=active")]:::store
+  KA[("knowledge<br/>status=active")]:::store
   KA --> MC
 
   SE(["🌙 SessionEnd"]) --> SLE["mem handoff<br/>引き継ぎ記録"]:::auto
@@ -405,7 +413,7 @@ flowchart TD
 ```
 
 **トリガー**: 各コマンドの「学びの記録」ステップ（agent/skill が明示的に判断・実行。ユーザー操作は不要だがコマンド実行が前提）
-**期待効果**: 再利用可能な学び（罠・規約・決定）が知識カードとして蓄積し次セッション以降へ自動注入。agent 由来カード（`bluecore_mem_learn` 既定）は `status=pending` で登録され、`/instinct` での昇格レビューを経て初めて注入される（A-03: 確信度が高く即時注入したい場合のみ `--status active` を明示）
+**期待効果**: 再利用可能な学び（罠・規約・決定）が知識カードとして蓄積し次セッション以降へ自動注入。agent 由来カード（`bluecore_mem_learn`）は**常に** `status=pending` で登録され、`/instinct promote <key>` を経て初めて注入される（A-03）。`learn` に `--status` は無く、helper も CLI も指定を拒否する
 
 **実行例**: 通常操作不要（各コマンドが完了時に自動判断）。手動登録した pending 分だけ週次で `/instinct list --status pending` → 採用分を `/instinct promote <key>`
 
@@ -481,14 +489,12 @@ flowchart TD
   classDef cmd    fill:#2563eb,stroke:#1e40af,color:#fff,rx:6
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  A(["/test-gen [path]"]) --> B["grillme<br/>設計方針確定"]:::skill
-  B --> C["スコープ確定<br/>git diff HEAD / 引数パス"]
+  A(["/test-gen [path]"]) --> C["スコープ確定<br/>git diff HEAD / 引数パス"]
   C --> D["プロジェクト検出<br/>get_test_command()"]
   D --> E["ベースライン取得<br/>カバレッジ測定"]
   E --> F["🎯 デシジョンテーブル設計<br/>関数単位・ブランチ網羅"]
-  F --> G{"ユーザー承認"}
-  G -- 修正依頼 --> F
-  G -- 承認 --> H["テスト実装<br/>言語慣習に従う"]
+  F --> G["テーブル提示<br/>（応答は待たない）"]
+  G --> H["テスト実装<br/>言語慣習に従う"]
   H --> I["検証<br/>test + coverage + lint"]
   I --> J{"Gate"}
   J -- PASS --> K(["✅ 要約レポート"])
@@ -541,7 +547,7 @@ flowchart TB
 **設計方針**:
 
 - ユーザーは **Commands のみ選択** すれば内部で Agents / Skills が自動連鎖
-- スキルは全て `context: fork`（内部委譲専用、ユーザー直接起動不可）に統一
+- スキルの `context: fork` は「ツール消費が報告より重く、ユーザーの応答も本文自体も親に不要」なものだけに付ける（fork は既定でバックグラウンド実行され対話・承認ゲートを持てないため）。対話/承認を伴う skill・本文や出力そのものが親の判断材料になる skill は inline。ユーザー直接起動の可否は `user-invocable` で独立に決める
 - 永続化は **SQLite（個人）** の単層。テーブルは `repos` / `knowledge` / `sessions` の 3 つだけ
 - 検索は埋め込みも FTS5 も使わず Python 側でスコアリング（ランタイム依存はゼロ、標準ライブラリのみ）
 - 知識カードを書くのは Commands の「学びの記録」ステップのみ。Agents は候補を呼び出し元へ報告する
