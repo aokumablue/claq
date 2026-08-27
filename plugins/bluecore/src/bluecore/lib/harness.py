@@ -336,7 +336,4 @@ def normalize_user_message(text: str) -> str:
     return _fold_command_invocation(_drop_scaffold_blocks(text)).strip()
 
 
-# セッション ID として許容する形式（ファイル名に使われるため英数・._- のみ）
-_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
-
 
