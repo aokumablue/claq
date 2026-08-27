@@ -1,5 +1,26 @@
 # bluecore v0.9.41 全機能実機監査報告
 
+> **査読と対応の記録（2026-08-27 追記）**
+>
+> 本レポートの全 30 件を `bluecore-dev` の HEAD で再現検証し、対応した。判定は
+> 「コード欠陥 23 件」「ADR の決定は維持（是正は文言・周辺のみ）5 件」
+> 「レポート側の誤検出 2 件」。以下、本文中の該当箇所へ個別に注記してある。
+>
+> **誤検出 2 件**:
+> - **F-02**（source tree にテストが無い）: 本ツリーの実測は `1774 passed / coverage 100% / exit 0`。
+>   本レポートの「TOTAL 3891 statements」は本ツリーの実測値と完全に一致しており、
+>   監査者は「同じ src・tests 無し」のツリー ＝ ADR-0006 が定義する**配布ツリー**で
+>   pytest を実行している。§8.6 と、これに依拠する ADR-0004 / ADR-0011 の判定も誤り。
+> - **F-17**（test-gen が人工 RED を作る）: 対象ファイルの指定が誤り。`commands/test-gen.md` に
+>   "RED" は 1 度も出現せず、むしろ逆を命じている。実体は `agents/tdd-writer.md:95` が
+>   loop-dev のルーティング経由で無条件に効くことだった（欠陥自体は実在するので修正済み）。
+>
+> **数値の訂正**: §7.2 のハーネス点数は本ツリーで再現しない。repo モードの実測は
+> `--root plugins/bluecore` 指定で **45/58**（本レポートは 40/58）。対応後は 58/58。
+>
+> **パスの訂正**: 本文中の `plugins/bluecore/hooks/*.py` / `launcher.py` /
+> `lib/` / `ci/` は、本リポジトリでは `plugins/bluecore/src/bluecore/` 配下にある。
+
 ## 1. 結論
 
 `bluecore` v0.9.41 の公開サーフェスを、GitHub Copilot CLI、Claude Code のローカルプラグインローダー、隔離fixture、launcher直呼び出しで検証した。
@@ -279,7 +300,17 @@ Claude Code 2.1.220のloaderは、validatorと公式schemaが許可するagent�
 - ADR-0010の「9 agentへ統合」はdisk上では成立する。Claudeで0 agentとなる問題は分割基準そのものへの反証ではないが、運用可能性を別release gateで保証する必要がある。
 - ADR-0011のagent定義品質以前に、定義がhostへ登録されていない。
 
-### F-02 [MEDIUM] source treeの自動テストが0件
+### F-02 [REJECTED / 誤検出] source treeの自動テストが0件
+
+> **2026-08-27 査読: 誤検出。** 本ツリーでの実測は `1774 passed / coverage 100% / exit 0`。
+> 下記「実測」の `TOTAL 3891 statements` は本ツリーの statements 数と完全に一致しており、
+> 同じ src を持ちながら `tests/` だけが無いツリー ＝ 配布ツリーで実行したことを示す。
+> ADR-0006 はこの誤検出の再発を「リスク」節で予言しており、これが 3 回目の現実化にあたる。
+> 対応は「テストの復元」ではなく再発の構造的防止 — 配布ツリーから `pyproject.toml` を
+> 除外し、`testpaths` / `fail_under` が除去済みの `tests/` を指したまま残らないようにした
+> （`scripts/publish.sh`、回帰テストは `tests/scripts/test_publish_script.py`）。
+> これは F-30（非機能 wheel）も同時に解消する。
+
 
 **対象**
 
@@ -807,7 +838,16 @@ rollback blueprintのSkip Rulesが下流agentへ渡すscopeへ反映されず、
 - plannerのtask ID、started/completed、出力schemaを必須成果物にする。
 - 未dispatchなら計画を完了扱いにしない。
 
-### F-17 [MEDIUM] test-genが正しい実装へ誤oracleを入れて人工REDを作る
+### F-17 [MEDIUM / 対象の指定が誤り] test-genが正しい実装へ誤oracleを入れて人工REDを作る
+
+> **2026-08-27 査読: 欠陥は実在するが、対象ファイルの指定が誤り。**
+> `commands/test-gen.md` に "RED" は 1 度も出現せず、同ファイルは
+> 「生成テストの失敗はプロダクトコード修正で解消しない」「テスト失敗は自動修正しない」と
+> 逆を命じている。実体は `commands/test-gen.md` → `skills/loop-dev/SKILL.md` の
+> ルーティング表（`task_type=test` → tdd-writer）→ **`agents/tdd-writer.md:95`**
+> 「RED にならないテストは書き直す（最初から通る = 何も検証していない）」が無条件に
+> 効くという連鎖だった。修正は tdd-writer 側へ characterization 経路を設ける形で行った。
+
 
 **対象**
 
@@ -1232,6 +1272,12 @@ READMEの公式配布経路はClaude marketplaceであり、pip/wheelとは書�
 
 ### 7.2 失敗した検査
 
+> **2026-08-27 査読: 本ツリーで再現しない。** source `pytest -q --cov` は
+> `1774 passed / coverage 100%` で PASS（F-02 の注記参照）。harness audit は
+> repo モードで **45/58**（`--root plugins/bluecore` が必要。リポジトリルートを
+> 指すと consumer と判定される）。失敗していた 6 件はすべて「任意の個数・成果物が
+> 存在するか」だけを見る項目であり、それ以外は全項目 PASS していた。対応後は 58/58。
+
 - source `pytest -q --cov`: 0 tests、coverage 0%、FAIL
 - harness audit repo: 40/58、FAIL
 - hooks: 12/16、FAIL
@@ -1291,6 +1337,13 @@ claude --plugin-dir plugins/bluecore plugin details bluecore@inline
 
 ### 8.6 ADR-0006
 
+> **2026-08-27 査読: 本節の判定は誤り。** 「現状は後者（source tree に tests がない）」は
+> 事実に反する。正しい判定は「決定は SUPPORTED、**リスク節が 3 回目の現実化**、
+> 陳腐化しているのは ADR 本文の件数だけ」。対応として ADR-0006 から件数を削除し
+> （書けば必ず陳腐化するため）、リスク節へ 3 回の再発と機械的対策を追記した。
+> なお本節に依拠する ADR-0004 の「根拠 test も消失」と ADR-0011 の「tests/CI 不在」も
+> 同じく誤り（`tests/test_md_references.py::test_security_auditor_has_no_bash_access` は現存）。
+
 「配布artifactからtestsを除く」と「source treeにtestsがない」は別問題である。現状は後者であり、ADRの保証値は陳腐化している。tests非同梱を認める条件として、source CI greenとartifact smoke greenを明記すべきである。
 
 ### 8.7 ADR-0007
@@ -1335,6 +1388,13 @@ slim撤去、`outputStyles`削除、repo満点65から58への変更は実装と
 ## 10. 修正優先順位
 
 ### Priority 0: release停止条件
+
+> **2026-08-27 対応済み。** 項目 2 は F-02 が誤検出のため不要（テストは元から存在する）。
+> 代わりに、配布ツリーでの誤検出が構造的に発生しないよう `publish.sh` の除外リストへ
+> `pyproject.toml` を追加した。項目 1 は `plugin.json` から `agents` を外して解消
+> （`["./agents/"]` 形式は manifest schema が `agents: Invalid input` で拒否するため
+> 採れず、auto-discovery だけが唯一ホストへ 9 体を登録できる）。項目 3 は ADR-0014 として
+> 決定し、CLI 非依存の静的ゲートを併置した。
 
 1. F-01を修正し、Claude CodeでAgents 9を確認する。
 2. source testsを復元し、0件収集をrelease failureにする。
