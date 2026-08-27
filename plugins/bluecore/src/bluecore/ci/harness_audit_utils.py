@@ -17,9 +17,6 @@ REPO_CORE_MARKERS = [
 HARNESS_MARKERS = [
     "src/bluecore/ci/harness_audit.py",
 ]
-COMMAND_PARITY_PAIRS = [
-    ("commands/harness.md", ".opencode/commands/harness.md"),
-]
 
 
 def file_exists(root_dir: str | Path, relative_path: str) -> bool:
@@ -89,16 +86,6 @@ def _has_any_file(root_dir: str | Path, relative_paths: Sequence[str]) -> bool:
     return any(file_exists(root_dir, relative_path) for relative_path in relative_paths)
 
 
-def _command_parity_matches(root_dir: str | Path) -> bool:
-    """新旧コマンド名のどちらでもパリティが取れているかを確認する。"""
-    for primary_path, parity_path in COMMAND_PARITY_PAIRS:
-        primary = safe_read(root_dir, primary_path).strip()
-        parity = safe_read(root_dir, parity_path).strip()
-        if primary and primary == parity:
-            return True
-    return False
-
-
 def has_file_with_extension(root_dir: str | Path, relative_dir: str, extensions: str | Sequence[str]) -> bool:
     """指定拡張子のファイルが 1 つでもあるかを調べる。"""
     dir_path = Path(root_dir, relative_dir)
@@ -113,11 +100,13 @@ def has_file_with_extension(root_dir: str | Path, relative_dir: str, extensions:
 
 
 def detect_target_mode(root_dir: str | Path) -> str:
-    """repo か consumer かを判定する。"""
-    package_json = safe_parse_json(safe_read(root_dir, "package.json"))
-    if isinstance(package_json, dict) and package_json.get("name") == "everything-claude-code":
-        return "repo"
+    """repo か consumer かを判定する。
 
+    判定材料はプラグイン提供元としての構造（``REPO_CORE_MARKERS`` と
+    ``HARNESS_MARKERS``）だけに置く。以前は派生元プラグイン名
+    （``package.json`` の ``name``）を見る分岐が残っており、bluecore 自身と
+    無関係な名前で repo 判定していた。
+    """
     if all(file_exists(root_dir, marker) for marker in REPO_CORE_MARKERS) and _has_any_file(root_dir, HARNESS_MARKERS):
         return "repo"
 
@@ -138,14 +127,18 @@ def _has_gitlab_security_scanning(root_dir: str | Path) -> bool:
     return any(re.search(pattern, content) for pattern in patterns)
 
 
+# consumer モードで「このプラグインが導入済みか」を見るときの探索先。
+# 派生元の名前が残っていたため、bluecore の監査が別プラグインの導入を
+# 要求していた。
+_PLUGIN_NAME = "bluecore"
 _PLUGIN_JSON_RELATIVES = (
-    Path(".claude") / "plugins" / "everything-claude-code" / ".claude-plugin" / "plugin.json",
-    Path(".claude") / "plugins" / "everything-claude-code" / "plugin.json",
+    Path(".claude") / "plugins" / _PLUGIN_NAME / ".claude-plugin" / "plugin.json",
+    Path(".claude") / "plugins" / _PLUGIN_NAME / "plugin.json",
 )
 
 
 def find_plugin_install(root_dir: str | Path) -> str | None:
-    """ECC のインストール先を探す。
+    """bluecore プラグインのインストール先を探す。
 
     リポジトリ直下を先に、``HOME`` があればその配下を続けて探す。
     各ルートでは ``.claude-plugin/plugin.json`` を先に見る。
