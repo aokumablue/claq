@@ -73,7 +73,7 @@ Improveモードでのバージョン推移を記録。ワークスペースの�
 
 ## grading.json
 
-graderエージェントの出力。入力 `grading_path`（例: `<run-dir>/grading.json`）へ保存する。
+grader エージェントの返値。呼び出し元が schema 検証のうえ `<run-dir>/grading.json` へ保存する（grader 自身はファイルを書かない）。
 
 ```json
 {

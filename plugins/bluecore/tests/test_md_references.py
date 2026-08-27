@@ -169,10 +169,10 @@ def test_mem_learn_invocations_pass_no_status_or_source_flag() -> None:
 
 
 _EXPECTED_AGENT_TOOLS = {
-    "bench-analyzer": {"Read", "Grep", "Glob", "Write"},
+    "bench-analyzer": {"Read", "Grep", "Glob"},
     "code-refiner": {"Read", "Grep", "Glob", "Edit", "Write", "Bash"},
-    "comparator": {"Read", "Grep", "Glob", "Write"},
-    "grader": {"Read", "Grep", "Glob", "Write"},
+    "comparator": {"Read", "Grep", "Glob"},
+    "grader": {"Read", "Grep", "Glob"},
     "harness-tuner": {"Read", "Grep", "Glob", "Edit", "Write", "Bash"},
     "planner": {"Read", "Grep", "Glob"},
     "reviewer": {"Read", "Grep", "Glob", "Bash"},
