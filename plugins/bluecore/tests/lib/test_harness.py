@@ -481,3 +481,19 @@ class TestCommandFoldPreservesSiblings:
         text = "<local-command-stdout>x\n実際の依頼\n<local-command-stdout>y</local-command-stdout>"
 
         assert harness._drop_scaffold_blocks(text) is None
+
+
+class TestScaffoldTagCountBoundary:
+    """足場タグ数の上限を境界で固定する。"""
+
+    def test_exactly_at_limit_is_removed_normally(self):
+        """上限ちょうど（開閉あわせて 100 タグ）なら通常どおり除去し中身の依頼を残す。"""
+        blocks = "<local-command-stdout>x</local-command-stdout>" * (harness._MAX_SCAFFOLD_TAG_COUNT // 2)
+
+        assert harness.normalize_user_message(blocks + "実際の依頼") == "実際の依頼"
+
+    def test_one_over_limit_discards_whole_message(self):
+        """上限を 1 ブロック超えたらメッセージごと破棄する。"""
+        blocks = "<local-command-stdout>x</local-command-stdout>" * (harness._MAX_SCAFFOLD_TAG_COUNT // 2 + 1)
+
+        assert harness.normalize_user_message(blocks + "実際の依頼") == ""

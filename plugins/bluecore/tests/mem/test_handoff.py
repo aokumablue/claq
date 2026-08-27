@@ -459,3 +459,39 @@ class TestNonSpeechBlocks:
         path = _write_transcript(tmp_path, [entry])
 
         assert "- 型なし依頼" in build_handoff({"transcript_path": path})
+
+
+class TestDuplicateRequests:
+    """同一依頼の繰り返しが実依頼を枠外へ押し出さない。"""
+
+    def test_repeated_command_does_not_crowd_out_real_request(self, tmp_path: Path) -> None:
+        """同じスラッシュコマンドを何度叩いても実依頼が残る。"""
+        command = (
+            "<command-name>/plugin</command-name>\n"
+            "            <command-message>plugin</command-message>\n"
+            "            <command-args></command-args>"
+        )
+        path = _write_transcript(tmp_path, [_user("mainにマージせよ"), *[_user(command)] * 5])
+
+        result = build_handoff({"transcript_path": path})
+
+        assert "- mainにマージせよ" in result
+        assert result.count("- /plugin") == 1
+
+    def test_distinct_requests_are_all_kept(self, tmp_path: Path) -> None:
+        """内容が異なる依頼は畳まれない。"""
+        path = _write_transcript(tmp_path, [_user("依頼A"), _user("依頼B"), _user("依頼C")])
+
+        result = build_handoff({"transcript_path": path})
+
+        assert "- 依頼A" in result
+        assert "- 依頼B" in result
+        assert "- 依頼C" in result
+
+    def test_duplicate_keeps_latest_position(self, tmp_path: Path) -> None:
+        """重複は最後の出現位置へ寄せる（直近の依頼としての順序を保つ）。"""
+        path = _write_transcript(tmp_path, [_user("依頼A"), _user("依頼B"), _user("依頼A")])
+
+        result = build_handoff({"transcript_path": path})
+
+        assert result.index("- 依頼B") < result.index("- 依頼A")

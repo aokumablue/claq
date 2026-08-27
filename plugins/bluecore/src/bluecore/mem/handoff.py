@@ -256,10 +256,36 @@ def _scan(text: str, deadline: float) -> tuple[list[str], list[str], list[str]]:
         _collect_tools(entry, tools, files)
 
     return (
-        messages[-_USER_MESSAGE_COUNT:],
+        _dedupe_keeping_latest(messages)[-_USER_MESSAGE_COUNT:],
         sorted(files)[:_FILE_LIST_LIMIT],
         sorted(tools)[:_TOOL_LIST_LIMIT],
     )
+
+
+def _dedupe_keeping_latest(messages: list[str]) -> list[str]:
+    """同一内容の依頼を 1 件に畳み、最後に現れた位置を残す。
+
+    引き継ぎ枠は ``_USER_MESSAGE_COUNT`` 件しかない。同じ依頼が繰り返されても
+    新しい情報は増えないのに枠だけを消費し、古い実依頼を押し出してしまう
+    （実測: `mainにマージせよ` の後に同じスラッシュコマンドを 3 回叩くと
+    実依頼が枠外へ落ちる）。重複を畳めば、繰り返し実行が何回あっても実依頼が
+    残る。位置は最後の出現に寄せる（「直近の依頼」なので新しいほうが正しい）。
+
+    Args:
+        messages: 出現順のユーザー依頼。
+
+    Returns:
+        重複を除いた出現順の依頼。
+    """
+    seen: set[str] = set()
+    kept: list[str] = []
+    for message in reversed(messages):
+        if message in seen:
+            continue
+        seen.add(message)
+        kept.append(message)
+    kept.reverse()
+    return kept
 
 
 def _parse_entry(line: str) -> dict[str, Any] | None:
