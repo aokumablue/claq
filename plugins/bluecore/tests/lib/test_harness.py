@@ -7,6 +7,7 @@ import json
 import pytest
 
 from bluecore.lib import harness
+from bluecore.mem.tag_stripping import strip_tags
 
 
 class TestNormalizeToolName:
@@ -445,3 +446,38 @@ class TestGrokCamelCaseToolInput:
 
         assert config_protection.INPUT_CONTAINER_KEYS is harness.INPUT_CONTAINER_KEYS
         assert "toolInput" in harness.INPUT_CONTAINER_KEYS
+
+
+class TestCommandFoldPreservesSiblings:
+    """コマンド起動の畳み込みが周囲のテキストを壊さない。"""
+
+    def test_sibling_text_survives_fold(self):
+        """同一メッセージ内の地の文はコマンド畳み込みで消えない。"""
+        text = "<command-name>/goal</command-name> ついでに B もやれ"
+        assert harness.normalize_user_message(text) == "/goal ついでに B もやれ"
+
+    def test_folded_command_stays_inside_injected_memory_block(self):
+        """記憶ブロック内のコマンドエコーが実依頼を押し退けない。
+
+        畳んだ結果を ``<bluecore-memory>`` の内側に留めることで、後段の
+        ``strip_tags`` がブロックごと落として実依頼だけを残せる。
+        """
+        raw = "<bluecore-memory>前回: <command-name>/plugin</command-name></bluecore-memory>\nREADME を更新せよ"
+
+        assert strip_tags(harness.normalize_user_message(raw)) == "README を更新せよ"
+
+    def test_paired_blocks_keep_text_between_them(self):
+        """正しく対になった足場ブロックの間にある依頼は残る。"""
+        text = "<local-command-stdout>a</local-command-stdout> 実際の依頼 <local-command-stdout>b</local-command-stdout>"
+
+        assert harness.normalize_user_message(text) == "実際の依頼"
+
+    def test_unpaired_open_tag_does_not_tunnel_into_next_block(self):
+        """対を成さない開始タグが後続ブロックの閉じタグまで貫通しない。
+
+        貫通すると間にある実依頼を巻き込んで消すため、孤立タグとして検出し
+        メッセージごと破棄する経路に載せる。
+        """
+        text = "<local-command-stdout>x\n実際の依頼\n<local-command-stdout>y</local-command-stdout>"
+
+        assert harness._drop_scaffold_blocks(text) is None

@@ -275,8 +275,12 @@ _ANY_SCAFFOLD_TAG_PATTERN = re.compile(
     r"</?(?:" + "|".join(_SCAFFOLD_TAGS + _COMMAND_TAGS) + r")[^>]*>", re.IGNORECASE
 )
 
+# 中身は「同種の開始タグを含まない任意の文字列」に限る。単純な `.*?` だと、
+# 対を成さない開始タグから後続の別ブロックの閉じタグまで貫通し、その間にある
+# 実依頼まで巻き込んで消してしまう（ブロック除去という宣言と実挙動がずれる）。
 _SCAFFOLD_BLOCK_PATTERNS = [
-    re.compile(rf"<{tag}[^>]*>.*?</{tag}>", re.DOTALL | re.IGNORECASE) for tag in _SCAFFOLD_TAGS
+    re.compile(rf"<{tag}[^>]*>(?:(?!<{tag})[\s\S])*?</{tag}>", re.IGNORECASE)
+    for tag in _SCAFFOLD_TAGS
 ]
 
 # ペア除去後に残った足場タグ。ハーネスは足場タグを必ず対で書き、`_read_tail` の
@@ -293,6 +297,10 @@ _SCAFFOLD_ORPHAN_PATTERNS = [re.compile(rf"</?{tag}[^>]*>", re.IGNORECASE) for t
 _COMMAND_NAME_PATTERN = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.DOTALL | re.IGNORECASE)
 _COMMAND_ARGS_PATTERN = re.compile(r"<command-args>\s*(.*?)\s*</command-args>", re.DOTALL | re.IGNORECASE)
 _COMMAND_SCAFFOLD_PATTERN = re.compile(r"</?(?:" + "|".join(_COMMAND_TAGS) + r")[^>]*>", re.IGNORECASE)
+# 畳み込みで中身ごと落とすブロック。`command-message` はコマンド名の再掲、
+# `command-args` は畳んだ文字列側へ取り込み済みのため元の位置には残さない。
+_COMMAND_MESSAGE_BLOCK_PATTERN = re.compile(r"<command-message>.*?</command-message>", re.DOTALL | re.IGNORECASE)
+_COMMAND_ARGS_BLOCK_PATTERN = re.compile(r"<command-args>.*?</command-args>", re.DOTALL | re.IGNORECASE)
 
 
 def _drop_scaffold_blocks(text: str) -> str | None:
@@ -320,7 +328,13 @@ def _drop_scaffold_blocks(text: str) -> str | None:
 
 
 def _fold_command_invocation(text: str) -> str:
-    """スラッシュコマンド起動の足場を ``/name args`` の 1 行へ畳む。
+    """スラッシュコマンド起動の足場を ``/name args`` へ畳んで元の位置へ差し込む。
+
+    メッセージ全体を ``/name args`` で置き換えてはならない。同一メッセージに
+    コマンド起動と地の文が同居する場合に地の文が消えるうえ、注入済みの
+    ``<bluecore-memory>`` ブロック内に前回の ``<command-name>`` が残っていると、
+    そのエコーが実依頼を押し退けてしまう（後段の ``strip_tags`` が記憶ブロックを
+    中身ごと落とせるよう、畳んだ結果もブロックの内側に留める必要がある）。
 
     コマンド名が取れない場合でも、残った ``command-*`` タグ自体は依頼本文では
     ないため無条件に落とす。
@@ -329,8 +343,7 @@ def _fold_command_invocation(text: str) -> str:
         text: ``<command-name>`` を含みうるテキスト。
 
     Returns:
-        コマンド起動が含まれていれば ``/name args`` 形式の文字列。含まれて
-        いなければ ``command-*`` タグだけを落としたテキスト。
+        コマンド起動部分だけを ``/name args`` に置き換えたテキスト。
 
     Raises:
         例外は発生しません。
@@ -341,7 +354,11 @@ def _fold_command_invocation(text: str) -> str:
         return _COMMAND_SCAFFOLD_PATTERN.sub("", text)
     args_match = _COMMAND_ARGS_PATTERN.search(text)
     args = args_match.group(1).strip() if args_match else ""
-    return f"/{name} {args}".strip()
+    folded = f"/{name} {args}".strip()
+    text = _COMMAND_ARGS_BLOCK_PATTERN.sub("", text, count=1)
+    text = _COMMAND_MESSAGE_BLOCK_PATTERN.sub("", text)
+    text = _COMMAND_NAME_PATTERN.sub(lambda _: folded, text, count=1)
+    return _COMMAND_SCAFFOLD_PATTERN.sub("", text)
 
 
 def normalize_user_message(text: str) -> str:
