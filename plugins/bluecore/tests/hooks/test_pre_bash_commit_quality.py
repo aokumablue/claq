@@ -11,6 +11,7 @@ import json
 
 import pytest
 
+from bluecore.hooks import block_no_verify
 from bluecore.hooks import pre_bash_commit_quality as pbcq
 
 
@@ -40,10 +41,22 @@ class TestShellSeparatorTokenization:
         is_commit, _args = pbcq._is_git_commit_command(command)
         assert is_commit is expected_is_commit
 
-    def test_regex_fallback_still_accepts_echo_git_commit(self) -> None:
-        """`echo "git commit"` は安全側の誤検出として許容する（受容事項）。"""
+    def test_quoted_git_commit_is_not_a_commit(self) -> None:
+        """解析できた引用文の `git commit` は commit と判定しないこと（F-08）。"""
         is_commit, _args = pbcq._is_git_commit_command('echo "git commit"')
-        assert is_commit is True
+        assert is_commit is False
+
+    def test_block_no_verify_and_commit_quality_agree_on_quoted_text(self) -> None:
+        """2 つのフックが「commit とは何か」で食い違わないこと。
+
+        どの ADR もこの非対称を正当化していなかった。ADR-0002 の
+        「誤検出 > 誤通過」は解析できない構文についての規定であり、解析できた
+        構文にまで適用する根拠にはならない。
+        """
+        quoted = "copilot -p 'Explain why a git commit command may fail'"
+
+        assert pbcq._is_git_commit_command(quoted)[0] is False
+        assert block_no_verify.has_bypass_flag(quoted) is False
 
 
 class TestMainStdinBoundary:

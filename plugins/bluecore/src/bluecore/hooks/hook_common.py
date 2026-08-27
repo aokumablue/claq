@@ -49,12 +49,33 @@ def tokenize(command: str) -> list[str]:
     Raises:
         例外は発生しません。
     """
+    tokens, _parsed_cleanly = tokenize_with_status(command)
+    return tokens
+
+
+def tokenize_with_status(command: str) -> tuple[list[str], bool]:
+    """`tokenize` に加えて、``shlex`` で解析し切れたかどうかを返す。
+
+    フォールバックしたかどうかを呼び出し側が知る必要があるのは、生文字列への
+    正規表現フォールバックを「解析できなかったときだけ」に限定するため。
+    解析できた入力にまで生文字列の正規表現を当てると、``echo "git commit"`` の
+    ような引用文まで実行命令と誤認する（F-08）。
+
+    Args:
+        command: 対象のシェルコマンド文字列。
+
+    Returns:
+        (トークンのリスト, ``shlex`` が最後まで解析できたか) のタプル。
+
+    Raises:
+        例外は発生しません。
+    """
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
-        return list(lexer)
+        return list(lexer), True
     except ValueError:
-        return command.split()
+        return command.split(), False
 
 
 def split_segments(tokens: list[str]) -> list[list[str]]:

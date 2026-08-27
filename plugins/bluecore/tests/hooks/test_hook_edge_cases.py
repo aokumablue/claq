@@ -829,16 +829,31 @@ def test_is_git_commit_command_returns_false_when_only_options_follow_git() -> N
     assert args == []
 
 
-def test_is_git_commit_command_regex_fallback_true_when_tokens_miss_it() -> None:
-    """トークン走査では見つからなくても、引用符内のテキスト等で `git commit` が
-    文字列として現れれば保守的に True を返すこと（過剰検出側のフェイルセーフ）。
+def test_is_git_commit_command_trusts_clean_tokenization() -> None:
+    """解析できた引用文の中の `git commit` は実行命令とみなさないこと（F-08）。
+
+    生文字列への regex を解析成功時にも当てていた頃は、`copilot -p '... git
+    commit ...'` のような引用文まで commit と判定し、無関係な Bash 呼び出しが
+    index の状態次第でブロックされた。同じ入力を `block_no_verify` は無視して
+    おり、2 つのフックが「commit とは何か」で食い違っていた。
     """
     import bluecore.hooks.pre_bash_commit_quality as pbcq
 
-    # 実際は `git status` だが、引用符内のメッセージに "git commit" という
-    # 語が偶然含まれるケース。トークン走査では検出できないため、regex
-    # フォールバックが保守的に True を返す。
     is_commit, args = pbcq._is_git_commit_command("git status -m 'please run git commit later'")
+    assert is_commit is False
+    assert args == []
+
+
+def test_is_git_commit_command_regex_fallback_applies_when_tokenization_fails() -> None:
+    """クォート不整合で解析できなかった入力にだけ regex フォールバックが効くこと。
+
+    解析できない構文に対しては ADR-0002 どおり過剰検出側へ倒す。
+    """
+    import bluecore.hooks.pre_bash_commit_quality as pbcq
+
+    # クォート不整合で shlex が失敗し、空白分割後のトークン `"git` は git 実行
+    # ファイルとして認識されない。生文字列の regex だけが commit を見つける。
+    is_commit, args = pbcq._is_git_commit_command('echo "git commit')
     assert is_commit is True
     assert args == []
 

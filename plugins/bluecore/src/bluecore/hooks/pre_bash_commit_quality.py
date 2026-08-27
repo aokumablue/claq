@@ -49,6 +49,7 @@ from bluecore.hooks.hook_common import (
     resolve_repo_root,
     split_segments,
     tokenize,
+    tokenize_with_status,
 )
 from bluecore.lib.core_utils import log
 from bluecore.lib.harness import extract_bash_command
@@ -288,10 +289,17 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     トークンへ密着した非 commit コマンドを誤って commit と判定しません
     （`block_no_verify.has_bypass_flag` と同じトークナイザを共有する A-01 対応）。
 
-    トークン化がクォート不整合（heredoc 等）で空白分割へフォールバックした場合や、
-    それでも commit 判定できなかった場合は `re.search(r"\\bgit\\s+commit\\b", command)`
-    で最終判定します。過剰検出側に倒すフェイルセーフ設計です（`echo "git commit"` は
-    安全側の誤検出として許容する）。
+    トークン化がクォート不整合（heredoc 等）で空白分割へフォールバックした場合
+    **だけ**、`re.search(r"\\bgit\\s+commit\\b", command)` で最終判定します。
+    解析できなかった入力に対して過剰検出側へ倒すフェイルセーフです。
+
+    `shlex` が最後まで解析できた場合は、その結果を信頼して生文字列の正規表現を
+    当てません（F-08）。当てていた頃は `copilot -p 'Explain why a git commit
+    command may fail'` のような引用文まで commit と判定し、無関係な Bash 呼び出しが
+    index の状態次第でブロックされた。同じ入力を `block_no_verify` は無視して
+    おり、2 つのフックが「commit とは何か」で食い違っていた。この非対称を
+    どの ADR も正当化していない。ADR-0002 の「誤検出 > 誤通過」は解析できない
+    構文についての規定であり、解析できた構文にまで適用する根拠にはならない。
 
     非目標: シェル展開・変数分割経由（`git $(echo commit)` / `git${IFS}commit`
     等）で `git` と `commit` が生文字列上で隣接しない形の検出。POSIX シェル
@@ -308,13 +316,13 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     Raises:
         例外は発生しません。
     """
-    segments = split_segments(tokenize(command))
-    for segment in segments:
+    tokens, parsed_cleanly = tokenize_with_status(command)
+    for segment in split_segments(tokens):
         commit_args = _find_git_commit_args_in_segment(segment)
         if commit_args is not None:
             return True, commit_args
 
-    if re.search(r"\bgit\s+commit\b", command):
+    if not parsed_cleanly and re.search(r"\bgit\s+commit\b", command):
         return True, []
     return False, []
 
