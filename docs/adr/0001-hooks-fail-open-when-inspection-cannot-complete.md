@@ -51,10 +51,12 @@ bluecore の保護フック（`block_no_verify` / `pre_bash_commit_quality` /
   scan_error（severity error）として deny する。ホストの hook timeout に
   達して外側から強制終了されるより、内側で先に制御された失敗にする方が
   安全に倒せる。バイナリ判定されたファイルは secret scan 自体をスキップし
-  severity warning の痕跡を残す（error にはしない — 画像等の commit を
-  一律ブロックすると明示要件に反する）。NUL バイトを混ぜて secret 混入を
-  隠すバイナリ偽装は、この skip の副作用として受容するリスクであり、
-  積極的に防ぐ設計目標ではない。
+    severity warning の痕跡を残す。**この扱いは
+    [ADR-0013](0013-binary-detection-does-not-suppress-secret-scanning.md) で
+    撤回した** — バイナリ判定は lint 抑制にのみ用い、secret 検査は印字可能
+    文字列を抽出して必ず実施する。NUL バイトを 1 つ混ぜるだけで検査を回避
+    できる状態を「受容するリスク」としていた当時の判断は、修正コストが低い
+    ことが判明したため成り立たない（詳細は ADR-0013）。
 
 ## 検討した代替案
 

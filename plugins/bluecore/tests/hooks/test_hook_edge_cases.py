@@ -203,24 +203,48 @@ def test_find_file_issues_secret_scan_applies_under_size_limit(monkeypatch: pyte
     assert any(issue["type"] == "secret" for issue in issues)
 
 
-def test_find_file_issues_binary_file_skips_lint_and_secret_scan_with_warning(
+def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """バイナリ判定（先頭に NUL を含む）は lint を抑制し、secret scan もスキップ
-    するが、無言にはせず severity warning の痕跡（secret_scan_skipped）を残す
-    こと（A-02 対応。NUL バイトを1つ混ぜるだけの secret 検査回避は理屈上残るが、
-    痕跡は残る）。"""
+    """バイナリ判定（先頭に NUL を含む）は lint だけを抑制し、secret scan は続ける。
+
+    ADR-0013: 先頭に NUL を 1 バイト混ぜてバイナリ判定させるだけで secret 検査を
+    まるごと回避できる状態は許容しない。行分割が意味を持たないため、印字可能
+    文字列を抽出して同じパターンを当てる。
+    """
     content = "\0binary preamble\n" + 'console.log("hi")\n' + "api" + "_key" + ' = "abc123"'  # nosec
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
     issues = commit_quality_scanner.find_file_issues("weird.js")
 
-    types = {issue["type"] for issue in issues}
-    assert "secret" not in types
-    assert "console.log" not in types  # nosec
-    skipped = [issue for issue in issues if issue["type"] == "secret_scan_skipped"]
-    assert len(skipped) == 1
-    assert skipped[0]["severity"] == "warning"
+    secrets = [issue for issue in issues if issue["type"] == "secret"]
+    assert secrets, issues
+    assert secrets[0]["severity"] == "error"
+    assert "extracted binary content" in secrets[0]["message"]
+    # lint は従来どおり抑制する（バイナリを行単位で lint しても意味がない）。
+    assert "console.log" not in {issue["type"] for issue in issues}  # nosec
+    # スキップの痕跡 issue は不要になったので出さない。
+    assert "secret_scan_skipped" not in {issue["type"] for issue in issues}
+
+
+def test_find_file_issues_real_binary_is_not_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """真のバイナリ（画像等）は secret パターンに当たらず error を出さないこと。
+
+    バイナリ commit を一律ブロックしないという既存の要件を維持する。
+    """
+    png = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x00\x00\x00\x01\x00\x08\x06"
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: png)
+
+    issues = commit_quality_scanner.find_file_issues("logo.png")
+
+    assert [issue for issue in issues if issue["severity"] == "error"] == []
+
+
+def test_extract_printable_runs_splits_on_control_characters() -> None:
+    """制御文字で区切られた短すぎる断片は走査単位に含めないこと。"""
+    runs = commit_quality_scanner._extract_printable_runs("ab\x00longer-run\x01cd")
+
+    assert runs == ["longer-run"]
 
 
 def test_scan_secret_issues_raises_on_time_budget_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:

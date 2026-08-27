@@ -11,8 +11,9 @@
 | [0005](0005-runtime-audit-scope-is-static-validators-not-real-install.md) | 実機ランタイム監査の検証範囲は静的 validator に限定し、実 install/update smoke test は対象外とする | accepted | 2026-08-18 |
 | [0006](0006-distributed-artifact-omits-tests-verify-in-source-tree.md) | 配布 artifact にテストを同梱せず、検証は source tree で行う | accepted | 2026-08-20 |
 | [0007](0007-knowledge-active-authority-scoped-to-payload-strip.md) | 知識カードの active 化権限は payload から剥奪するが、`promote` と既存 active カードは維持する | accepted | 2026-08-20 |
-| [0008](0008-plugin-root-resolved-via-home-bluecore-env-pointer.md) | plugin root は `~/.bluecore/env.sh` ポインタで解決し、md にベンダ固有パスを書かない | accepted | 2026-08-20（2026-08-20 改訂 ×4） |
+| [0008](0008-plugin-root-resolved-via-home-bluecore-env-pointer.md) | plugin root は `~/.bluecore/env.sh` ポインタで解決し、md にベンダ固有パスを書かない | accepted | 2026-08-20（改訂 ×5、最新 2026-08-27） |
 | [0009](0009-root-pointer-resolver-does-not-verify-process-identity-or-file-ownership.md) | roots pointer resolver は owner/mode 検証を行わない（PID 開始時刻照合は撤回） | accepted | 2026-08-20（2026-08-20 改訂 ×2） |
 | [0010](0010-subagents-split-by-material-not-by-role.md) | サブエージェントは「渡す材料」で分割し、役割名では分割しない | accepted | 2026-08-25 |
 | [0011](0011-agent-definitions-state-behavior-not-rationale.md) | エージェント定義には挙動を書き、論拠と再説明は書かない | accepted | 2026-08-25 |
 | [0012](0012-output-style-response-compression-is-abandoned.md) | LLM 応答の事後圧縮パターン（output-style `slim`）を廃止する | accepted | 2026-08-26 |
+| [0013](0013-binary-detection-does-not-suppress-secret-scanning.md) | バイナリ判定で secret 検査を止めない（ADR-0001 の受容を撤回） | accepted | 2026-08-27 |

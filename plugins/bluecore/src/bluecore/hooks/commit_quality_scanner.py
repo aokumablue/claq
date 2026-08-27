@@ -30,6 +30,13 @@ from bluecore.lib.core_utils import log
 
 _BINARY_SNIFF_SIZE = 8192  # 8KB
 
+# バイナリ判定された内容から抽出する印字可能文字列の最短長。`strings(1)` と
+# 同じ発想で、制御文字（NUL を含む）で区切られた連続を擬似的な行として扱う。
+_BINARY_STRINGS_MIN_LENGTH = 4
+_BINARY_STRINGS_RE = re.compile(
+    rf"[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]{{{_BINARY_STRINGS_MIN_LENGTH},}}"
+)
+
 # secret scan 1 回あたりに許す実時間予算（秒）。pre_bash_commit_quality の
 # hooks.json timeout（30秒）より十分小さく取り、予算超過を scan_error
 # （fail-closed）として検知してからホスト側 timeout に達しないようにする。
@@ -91,8 +98,11 @@ def _is_binary_content(content: str) -> bool:
 
     UTF-8 の NUL バイト（0x00）はデコード後も `\\x00` 文字として保持される
     ため、デコード済みテキストに対して判定できます。この判定は lint
-    チェックの抑制にのみ使用し、シークレット検出には使いません
+    チェックの抑制にのみ使用し、シークレット検出の実施可否には使いません
     （バイナリ判定を悪用して secret 検査を回避できないようにするためです）。
+    バイナリ判定された内容に対しては、行分割の代わりに
+    `_extract_printable_runs` で印字可能文字列を抽出して同じ secret パターンを
+    適用します（ADR-0013）。
 
     Args:
         content: 判定対象のデコード済み文字列です。
@@ -104,6 +114,30 @@ def _is_binary_content(content: str) -> bool:
         例外は発生しません。
     """
     return "\0" in content[:_BINARY_SNIFF_SIZE]
+
+
+def _extract_printable_runs(content: str) -> list[str]:
+    """バイナリ判定された内容から、印字可能文字の連続を擬似的な行として抽出します。
+
+    `strings(1)` と同じ発想です。NUL を含む制御文字で区切られた
+    `_BINARY_STRINGS_MIN_LENGTH` 文字以上の連続だけを返し、それぞれを 1 行と
+    みなして通常の secret パターンを適用します。
+
+    これにより「先頭に NUL を 1 バイト混ぜてバイナリ判定させ、secret 検査を
+    まるごと回避する」経路が塞がれます。真のバイナリ（画像等）は secret
+    パターンに一致する印字可能文字列を通常含まないため、一律ブロックには
+    なりません。
+
+    Args:
+        content: バイナリ判定されたデコード済み文字列です。
+
+    Returns:
+        抽出した印字可能文字列のリストを返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _BINARY_STRINGS_RE.findall(content)
 
 
 def get_staged_file_content(file_path: str) -> str | None:
@@ -289,7 +323,7 @@ def _scan_lint_issues(lines: list[str]) -> list[dict]:
     return issues
 
 
-def _scan_secret_issues(content: str, lines: list[str]) -> list[dict]:
+def _scan_secret_issues(content: str, lines: list[str], *, report_lines: bool = True) -> list[dict]:
     """ファイル内容からハードコードされたシークレットを検出します。
 
     呼び出し元（`find_file_issues`）はバイナリ判定されたファイルではこの
@@ -306,8 +340,11 @@ def _scan_secret_issues(content: str, lines: list[str]) -> list[dict]:
     Args:
         content: 検査対象のデコード済みファイル内容です（未使用ですが、
             呼び出し側とのインターフェース共有のため引数として残します）。
-        lines: `content` を改行で分割済みの行リストです（呼び出し側
-            `find_file_issues` が lint スキャンと共有する分割結果です）。
+        lines: 走査単位のリストです。テキストファイルでは `content` を改行で
+            分割済みの行リスト（呼び出し側 `find_file_issues` が lint スキャンと
+            共有する分割結果）、バイナリでは `_extract_printable_runs` の抽出結果です。
+        report_lines: 走査単位が実際の行に対応するなら True。バイナリの抽出
+            文字列は行に対応しないため False を渡し、行番号を報告しません。
 
     Returns:
         検出したシークレット問題の辞書リストを返します。
@@ -324,13 +361,14 @@ def _scan_secret_issues(content: str, lines: list[str]) -> list[dict]:
                 f"secret scan exceeded {_SECRET_SCAN_TIME_BUDGET_SECONDS}s time budget "
                 f"at line {index + 1}"
             )
-        line_num = index + 1
+        line_num = index + 1 if report_lines else 0
+        location = f"at line {line_num}" if report_lines else "in extracted binary content"
         for pattern, name in _SECRET_PATTERNS:
             if re.search(pattern, line, re.IGNORECASE):
                 issues.append(
                     {
                         "type": "secret",
-                        "message": f"Potential {name} exposed at line {line_num}",
+                        "message": f"Potential {name} exposed {location}",
                         "line": line_num,
                         "severity": "error",
                     }
@@ -352,15 +390,14 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
     True、かつバイナリでない（先頭 `_BINARY_SNIFF_SIZE` 文字に NUL を含まない）
     ファイルのみ対象です。
 
-    シークレット検出は `should_scan_secrets` が True のテキストファイルであれば
-    `# nosec`・ファイルサイズに関わらず全体を走査します（A-02 対応。サイズに
-    よる打ち切りはありません）。バイナリ判定されたファイルのみ secret scan
-    自体をスキップし、severity `warning` の痕跡 issue（`secret_scan_skipped`）
-    を残します（severity `error` にはしません。画像等の commit を一律ブロック
-    するとユーザーの明示要件に反するため）。NUL バイトを1つ混ぜてバイナリ
-    判定させる回避は理屈上残りますが、ファイル単位で warning の痕跡が残るため、
-    走査量無制限による hook timeout（→ host がフックをキャンセルして続行する
-    fail-open で commit 全体が無検査になる）より影響は小さいトレードオフです。
+    シークレット検出は `should_scan_secrets` が True であれば `# nosec`・ファイル
+    サイズ・バイナリ判定に関わらず必ず実施します（A-02 対応。サイズによる
+    打ち切りはありません）。バイナリ判定されたファイルは行分割が意味を持たない
+    ため、`_extract_printable_runs` で印字可能文字列を抽出し、それを擬似的な行と
+    して同じパターンを当てます（ADR-0013。以前は secret scan 自体をスキップして
+    おり、先頭に NUL を 1 バイト混ぜるだけで検査を回避できた）。真のバイナリ
+    （画像等）は secret パターンに一致する印字可能文字列を通常含まないため、
+    一律ブロックにはなりません。
 
     `# nosec` を含む行はログ出力呼び出し / デバッガ文 / TODO チェックを抑制します
     （検出器自身のテストフィクスチャ等、意図的にパターンを含む行のため）。
@@ -437,40 +474,16 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
         except Exception as err:
             issues.append(_scan_error_issue(file_path, "lint scan", err, severity="warning"))
     if do_secrets:
-        if is_binary:
-            issues.append(_binary_secret_scan_skipped_issue(file_path))
-        else:
-            try:
-                issues.extend(_scan_secret_issues(content, lines))
-            except Exception as err:
-                issues.append(_scan_error_issue(file_path, "secret scan", err, severity="error"))
+        # バイナリ判定でも secret scan は必ず実施する。行分割が意味を持たない
+        # ため、印字可能文字列の抽出結果を擬似的な行として同じパターンを当てる
+        # （ADR-0013: NUL 1 バイトで検査を回避できる状態を許容しない）。
+        scan_lines = _extract_printable_runs(content) if is_binary else lines
+        try:
+            issues.extend(_scan_secret_issues(content, scan_lines, report_lines=not is_binary))
+        except Exception as err:
+            issues.append(_scan_error_issue(file_path, "secret scan", err, severity="error"))
 
     return issues
-
-
-def _binary_secret_scan_skipped_issue(file_path: str) -> dict:
-    """バイナリ判定されたファイルで secret scan をスキップした痕跡を返します。
-
-    severity は `warning` に留めます（`error` にすると画像等のバイナリ commit
-    を一律ブロックしてしまい、ユーザーの明示要件に反するため）。無言で
-    スキップするのではなく issue として残すことで、NUL バイト混入による
-    回避があってもファイル単位の痕跡は残ります（A-02 対応）。
-
-    Args:
-        file_path: 対象ファイルのパス。
-
-    Returns:
-        severity `warning` の issue 辞書。
-
-    Raises:
-        例外は発生しません。
-    """
-    return {
-        "type": "secret_scan_skipped",
-        "message": f"{file_path}: バイナリと判定されたため secret scan をスキップしました",
-        "line": 0,
-        "severity": "warning",
-    }
 
 
 def _scan_error_issue(file_path: str, stage: str, err: Exception, *, severity: str) -> dict:
