@@ -88,7 +88,7 @@ from bluecore.hooks.hook_common import (
     split_segments,
     tokenize,
 )
-from bluecore.lib.harness import extract_bash_command, extract_tool_input
+from bluecore.lib.harness import INPUT_CONTAINER_KEYS, extract_bash_command, extract_tool_input
 
 # 値を別トークンとして必ず取る long オプション（git グローバル + commit/push）。
 # 値が ``=`` で結合されている場合は次トークンを消費しません。
@@ -619,7 +619,7 @@ _UNPARSEABLE_INPUT_MESSAGE = (
 
 _MISSING_FIELDS_MESSAGE = (
     "[Hook] BLOCKED: hook input for pre:block-no-verify has no recognizable "
-    "tool_input (tool_input|toolArgs|tool_args). Cannot verify the bash "
+    f"tool_input ({'|'.join(INPUT_CONTAINER_KEYS)}). Cannot verify the bash "
     "command is free of git hook bypass flags."
 )
 

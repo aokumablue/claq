@@ -26,6 +26,7 @@ from bluecore.hooks.hook_common import (
     resolve_effective_target,
 )
 from bluecore.lib.harness import (
+    INPUT_CONTAINER_KEYS,
     extract_file_paths,
     extract_raw_tool_name,
     extract_tool_input,
@@ -37,9 +38,6 @@ from bluecore.lib.harness import (
 # 正規化後の値をここで再度絞るのは、matcher の綴りが将来ズレても本体側で
 # 書込み系以外を確実に早期 return するための多重防御。
 _WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
-
-# ハーネスごとの入力コンテナキー。存在するキーを順に走査する。
-_INPUT_CONTAINER_KEYS = ("tool_input", "toolArgs", "tool_args")
 
 # apply_patch のパッチがパース不能なときの fail-closed 理由。
 _UNPARSEABLE_PATCH_MESSAGE = "BLOCKED: Could not determine target files from patch input."
@@ -455,7 +453,7 @@ def _block_reason(data: dict[str, Any]) -> str | None:
     tool_name = extract_raw_tool_name(data)
     if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES:
         return None
-    for key in _INPUT_CONTAINER_KEYS:
+    for key in INPUT_CONTAINER_KEYS:
         if key not in data:
             continue
         reason = _block_reason_for_container(tool_name, extract_tool_input({key: data[key]}))

@@ -44,15 +44,28 @@ _TOOL_NAME_MAP = {
 }
 
 # 構造化パッチテキストのファイル操作マーカー（Codex apply_patch 形式）
+# ハーネスごとの tool 入力コンテナキー。存在するキーを順に走査する。
+# hooks 側（config_protection / block_no_verify）もこの 1 か所を参照する
+# ——以前は config_protection が同じ内容を独自に持っており、Grok の
+# ``toolInput`` を足す改修が片方だけに入って取りこぼす原因になっていた。
+INPUT_CONTAINER_KEYS = ("tool_input", "toolInput", "toolArgs", "tool_args")
+
 _PATCH_FILE_MARKERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ")
 
 
 def extract_tool_input(payload: dict[str, Any]) -> Any:
-    """フック payload から tool_input / toolArgs を正規化して返す。
+    """フック payload から tool_input / toolInput / toolArgs を正規化して返す。
 
-    Claude / VS Code 互換は ``tool_input``、Copilot camelCase は ``toolArgs``
-    （JSON 文字列のことが多い）。文字列で JSON オブジェクトに見える場合は
-    パースして dict を返す。パース不能なら元の文字列を返す。
+    Claude / VS Code 互換は ``tool_input``、Grok camelCase は ``toolInput``、
+    Copilot camelCase は ``toolArgs``（JSON 文字列のことが多い）。文字列で
+    JSON オブジェクトに見える場合はパースして dict を返す。パース不能なら
+    元の文字列を返す。
+
+    ``toolInput`` を落とすと Grok の PreToolUse で tool 入力が取れず、
+    ``block_no_verify`` が「判定不能」として全 ``run_terminal_command`` を
+    exit 2 で拒否する（セッションが実質使用不能になる）。tool 名側の
+    ``extract_raw_tool_name`` は既に camelCase ``toolName`` を受理しており、
+    入力側だけ snake_case 限定なのは非対称な取りこぼしだった。
 
     Args:
         payload: フック stdin を JSON として読んだ dict。
@@ -63,7 +76,7 @@ def extract_tool_input(payload: dict[str, Any]) -> Any:
     Raises:
         例外は発生しません。
     """
-    for key in ("tool_input", "toolArgs", "tool_args"):
+    for key in INPUT_CONTAINER_KEYS:
         if key not in payload:
             continue
         value = payload[key]

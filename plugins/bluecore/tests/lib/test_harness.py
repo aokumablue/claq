@@ -419,3 +419,29 @@ class TestNormalizeUserMessage:
         """コマンド名が空なら足場タグだけ落として中身を残す。"""
         text = "<command-name></command-name><command-args>残る</command-args>"
         assert harness.normalize_user_message(text) == "残る"
+
+
+class TestGrokCamelCaseToolInput:
+    """Grok の camelCase toolInput を受理する（PreToolUse 全拒否の回帰防止）。"""
+
+    def test_tool_input_camel_case_is_accepted(self):
+        """toolInput から tool 入力を取り出せる。"""
+        payload = {"toolName": "run_terminal_command", "toolInput": {"command": "ls -la"}}
+        assert harness.extract_tool_input(payload) == {"command": "ls -la"}
+
+    def test_bash_command_from_camel_case_tool_input(self):
+        """toolInput.command が Bash コマンドとして取り出せる。"""
+        payload = {"toolName": "run_terminal_command", "toolInput": {"command": "git commit --no-verify"}}
+        assert harness.extract_bash_command(payload) == "git commit --no-verify"
+
+    def test_snake_case_still_wins_over_camel_case(self):
+        """tool_input が有る場合はそちらを優先する（既存 host の挙動を変えない）。"""
+        payload = {"tool_input": {"command": "a"}, "toolInput": {"command": "b"}}
+        assert harness.extract_bash_command(payload) == "a"
+
+    def test_input_container_keys_is_the_single_source(self):
+        """入力コンテナキーは harness の 1 か所だけで定義される。"""
+        from bluecore.hooks import config_protection
+
+        assert config_protection.INPUT_CONTAINER_KEYS is harness.INPUT_CONTAINER_KEYS
+        assert "toolInput" in harness.INPUT_CONTAINER_KEYS
