@@ -8,8 +8,7 @@
 #   bluecore_run bluecore.mem.cli learn <<'JSON'
 #   ...
 #
-# roots/<pid> files are DATA, never shell code (see
-# docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_VERIFICATION.md R-01/R-03): each
+# roots/<pid> files are DATA, never shell code (R-01/R-03): each
 # holds two lines — the absolute plugin root path, then the pid's own process
 # start time (`ps -o lstart=`) as an opaque identity token. This resolver never
 # `.`/`source`s them — it only `read`s the two lines — so no content placed in
@@ -27,8 +26,7 @@
 # longer produces empty files by design; see docs/adr/0008-*.md revision 3).
 #
 # There is no second-tier fallback. If neither candidate yields a verified
-# match, this exits 127 rather than guessing (docs/reports/
-# PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md H-02: an
+# match, this exits 127 rather than guessing (H-02: an
 # earlier design fell back to "the root every valid pointer agrees on",
 # which cannot prove the shell asking is actually that host's descendant).
 
