@@ -94,6 +94,12 @@ _REMOVE_COMMANDS = frozenset({"rm", "unlink", "shred", "truncate", "mv"})
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES | CONDITIONALLY_PROTECTED_FILES
 
 # `NAME=value` 形式の literal 環境変数代入（M-01: 実行 executable 位置の特定に使う）。
+# malformed JSON fallback で「破壊的操作の指示」とみなす部分文字列。書き込み系
+# （`>`/`tee`/`-i`）に加えて、トークン化経路が既に見ている削除・リンク系の verb を
+# 含める。部分一致なので過剰検出側に倒れるが、malformed 入力に対しては
+# ADR-0002（誤検出 > 誤通過）どおりそれでよい。
+_RAW_TEXT_RISK_INDICATORS = (">", "tee", "-i") + tuple(sorted(_REMOVE_COMMANDS)) + ("ln",)
+
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 # `_command_index` が読み飛ばす実行 wrapper（basename 判定）。
@@ -328,11 +334,13 @@ def _remove_target(segment: list[str]) -> str | None:
     return None
 
 
-def _ln_force_target(segment: list[str]) -> str | None:
-    """`ln -f` の最終（非オプション）引数が保護対象ならその生トークンを返す。
+def _ln_target(segment: list[str]) -> str | None:
+    """`ln` の最終（非オプション）引数が保護対象ならその生トークンを返す。
 
-    `-f` なしの `ln` はリンク先が既存の場合エラーで停止するため、無言の
-    上書きリスクがある `-f` 付きの呼び出しのみを対象にする。
+    `-f` の有無で区別しない。既存ファイルを置き換える `ln -f` だけでなく、
+    保護対象がまだ存在しない状態での `ln -s weak.toml ruff.toml` も、以後
+    その名前を読む処理をリンク先の内容へ差し替えるため実質的な書き込みである。
+    `-f` 付きだけを見ていた頃は、後者が素通りしていた（F-07）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
@@ -345,12 +353,6 @@ def _ln_force_target(segment: list[str]) -> str | None:
     """
     index = _command_index(segment)
     if index is None or segment[index].rsplit("/", 1)[-1] != "ln":
-        return None
-    has_force = any(
-        token.startswith("-") and not token.startswith("--") and "f" in token
-        for token in segment[index + 1 :]
-    )
-    if not has_force:
         return None
     non_option_tokens = [token for token in segment[index + 1 :] if not token.startswith("-")]
     if not non_option_tokens:
@@ -406,7 +408,7 @@ def _write_target_token_in_segment(segment: list[str]) -> str | None:
         or _perl_inplace_target(segment)
         or _last_arg_write_target(segment)
         or _remove_target(segment)
-        or _ln_force_target(segment)
+        or _ln_target(segment)
         or _dd_of_target(segment)
     )
 
@@ -476,8 +478,14 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
     """JSON が壊れている場合の fallback: 生テキストに保護対象 basename と書き込み指示が両方見えるかを判定する。
 
     `pre_bash_commit_quality.evaluate()` の malformed JSON 姿勢と同じく、
-    「壊れているというだけで deny」にはせず、保護対象ファイル名と書き込み
-    指示（`>`/`tee`/`-i`）の両方が生文字列上に見える場合のみ deny する。
+    「壊れているというだけで deny」にはせず、保護対象ファイル名と破壊的操作の
+    指示の両方が生文字列上に見える場合のみ deny する。
+
+    破壊的操作には削除・リンク系（`rm`/`unlink`/`shred`/`truncate`/`mv`/`ln`）も
+    含める。トークン化できる経路では `_remove_target` / `_ln_target` が既に
+    これらを見ているのに、malformed fallback だけが書き込み指示（`>`/`tee`/`-i`）
+    しか見ていなかった（F-07）。同じ入力が JSON の壊れ方だけで通ったり通らなく
+    なったりするのは、境界としては説明できない。
 
     Args:
         raw_input: フックへ渡された生の入力文字列。
@@ -488,7 +496,7 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    if not any(indicator in raw_input for indicator in (">", "tee", "-i")):
+    if not any(indicator in raw_input for indicator in _RAW_TEXT_RISK_INDICATORS):
         return None
     for name in sorted(_ALL_PROTECTED_BASENAMES):
         if name in raw_input:

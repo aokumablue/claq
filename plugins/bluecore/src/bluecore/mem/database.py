@@ -13,6 +13,36 @@ from bluecore.mem.models import Knowledge, Repo, Session, utc_now_iso
 from bluecore.mem.schema import _SCHEMA_SQL
 
 
+class DatabaseError(Exception):
+    """mem.db のパス検証に失敗したことを示す。"""
+
+
+def _reject_non_regular_file(path: Path) -> None:
+    """既存パスが symlink または regular file 以外なら接続前に拒否する。
+
+    ``sqlite3.connect`` は symlink を追うため、``mem.db -> other.db`` を張られた
+    状態で開くとリンク先へスキーマを作ってしまう。``lstat`` はリンク自身を見る
+    ので、追う前に検出できる。
+
+    Args:
+        path: 検証対象のパス。
+
+    Returns:
+        何も返しません。
+
+    Raises:
+        DatabaseError: symlink または regular file 以外の場合。
+    """
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode):
+        raise DatabaseError(
+            f"{path} は symlink です。mem.db を symlink 経由で開くと、"
+            "リンク先の DB へ書き込んでしまうため拒否します。"
+        )
+    if not stat.S_ISREG(info.st_mode):
+        raise DatabaseError(f"{path} は通常ファイルではありません。mem.db として開けません。")
+
+
 class Database:
     """``~/.bluecore/mem.db`` を扱う永続メモリストア。
 
@@ -36,8 +66,24 @@ class Database:
         無条件に 0700 へ揃えるため、sidecar が 0644 でも他ユーザーから
         到達できない。
 
+        既存パスは接続前に ``lstat`` で symlink と非 regular file を拒否する
+        （F-25 対応）。``O_EXCL`` はぶら下がり symlink に対しても
+        ``FileExistsError`` を投げるため、以前は生きたリンクもぶら下がりリンクも
+        同じ分岐へ落ち、``sqlite3.connect`` がリンクを追ってリンク先へ
+        ``repos``/``sessions``/``knowledge`` を作っていた。二次被害として
+        直後の ``path.stat()`` もリンクを追うため、0600 の chmod がリンク先へ
+        着弾していた。``~/.bluecore`` は 0700 に締められるので権限昇格ではないが、
+        復元事故や誤設定で無関係な DB を壊しうる完全性の問題である。
+
+        この検査は TOCTOU を完全には防がない（lstat と connect の間に差し替え
+        られる余地は残る）。同一 UID に対する真正性は ADR-0009 のとおり保証
+        対象外であり、ここで防ぐのは誤設定・復元事故による取り違えである。
+
         Args:
             db_path: mem.db のパス。親ディレクトリが無ければ作成する。
+
+        Raises:
+            DatabaseError: 既存パスが symlink または regular file 以外の場合。
         """
         path = Path(db_path)
         ensure_private_dir(path.parent)
@@ -45,7 +91,7 @@ class Database:
             fd = os.open(str(path), os.O_CREAT | os.O_EXCL, 0o600)
             os.close(fd)
         except FileExistsError:
-            pass
+            _reject_non_regular_file(path)
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         if stat.S_IMODE(path.stat().st_mode) != 0o600:
             path.chmod(0o600)
