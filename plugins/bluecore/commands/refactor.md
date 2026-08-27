@@ -37,6 +37,12 @@ command: /refactor
 
 - `CAUTION` ファイルは自動適用せず最終要約に記録
 - `Skip Rules` は `{file, reason, required_action}` で出力し処理対象から除外
+
+**effective scope の確定（precondition gate）**: `refactor-rollback` の出力を受け取った直後、ここで対象を確定する。
+
+1. `effective_scope = スコープ確定の結果 − Skip Rules の file 集合 − CAUTION の file 集合`
+2. `effective_scope` が空なら、**編集を 1 件も行わずに** `BLOCKED: effective scope が空です（Skip Rules: {file 一覧}）` として終了する。リバート不能を final gate で初めて問題化しない — その時点では変更が既に残っている
+3. 確定した `effective_scope` を、ステップ3〜5 の各委譲の依頼文へファイルパス一覧として明示的に引き渡す（`review.md` の「承認済みスコープ（対象ファイルパス）を明示的に引き渡す」と同じ形）。親の手順書に書いた除外は子へ届かないため、scope も依頼文で渡す
 - `deps_order` はトポロジカル順で解決し、復旧時は逆順で適用
 - ステップ3以降で使う `git checkout -- <file>` は index/HEAD 復元のため処理開始前の未コミット編集も区別なく破棄する。この前提チェック（`git status --porcelain` によるworktree clean 確認・非cleanなら baseline patch 退避）は `refactor-rollback` 手順0で行うため、本ステップの `refactor-rollback` 起動は省略しない
 
@@ -48,13 +54,13 @@ command: /refactor
 
 ## ステップ3: clean（`bluecore:code-refiner`）
 
-デッドコード削除。委譲時は依頼文へ `mode: clean` を明示する（親の手順書に書いた分岐は子へ届かないため、モードは依頼文で渡す）。各ファイル適用ごとにテスト実行→失敗時は `git checkout -- <file>` で単ファイルリバートして継続。
+デッドコード削除。委譲時は依頼文へ `mode: clean` と `effective_scope`（対象ファイルパス一覧）を明示する（親の手順書に書いた分岐は子へ届かないため、モードは依頼文で渡す）。各ファイル適用ごとにテスト実行→失敗時は `git checkout -- <file>` で単ファイルリバートして継続。
 
 `--mode=clean` 指定時はステップ3を実行後、ステップ5（perf）を飛ばしステップ6（review + secure）→ステップ7 final gate で終了。CRITICAL/HIGH ブロック判定は部分モードでも省略しない。
 
 ## ステップ4: simplify（並列, `bluecore:code-refiner`）
 
-グループ化して**同時起動**（上限4）。委譲時は依頼文へ `mode: simplify` を明示する。
+グループ化して**同時起動**（上限4）。委譲時は依頼文へ `mode: simplify` と `effective_scope`（対象ファイルパス一覧）を明示する。
 
 起動直前にグループ間のファイル重複を確認する: `refactor-prep` の `groups` は本来ファイル排他前提だが、委譲直前に実際の対象ファイル集合を突き合わせ、重複があれば該当グループを同時起動せず直列化する（同一ファイルへの並列編集は片方の変更が失われるリスク）。
 可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
@@ -63,7 +69,7 @@ command: /refactor
 
 ## ステップ5: perf（`bluecore:code-refiner`）
 
-simplify 全グループ完了後に開始。委譲時は依頼文へ `mode: perf` を明示する。不要計算・重複I/O・N+1・過剰メモリアロケーションを優先改善。計測データを渡さない運用のため、`code-refiner` は明白なアルゴリズム欠陥の修正に限定し実施内容へ「未計測」と明示する（実測を伴う最適化が必要な場合はプロファイル取得を先行させる）。変更ごとにテスト→失敗時はファイル単位リバート。
+simplify 全グループ完了後に開始。委譲時は依頼文へ `mode: perf` と `effective_scope`（対象ファイルパス一覧）を明示する。不要計算・重複I/O・N+1・過剰メモリアロケーションを優先改善。計測データを渡さない運用のため、`code-refiner` は明白なアルゴリズム欠陥の修正に限定し実施内容へ「未計測」と明示する（実測を伴う最適化が必要な場合はプロファイル取得を先行させる）。変更ごとにテスト→失敗時はファイル単位リバート。
 
 ## ステップ6: review + secure（並列）
 
@@ -79,7 +85,7 @@ simplify 全グループ完了後に開始。委譲時は依頼文へ `mode: per
 3. 失敗変更はファイル単位リバートし再検証
 4. 全通過のみ完了
 
-`Final Gate: PASS` の導出規則: clean/simplify/perf/review+secure の全 stage が「完了」（スキップ・未実行・リバートのまま放置ではない）かつ CRITICAL/HIGH が 0 件のときのみ PASS。いずれか 1 stage でも未完了・全ファイルリバートで実質ゼロ変更・CRITICAL/HIGH 残存のいずれかに該当すれば `BLOCKED`。ステップ6 の判定は `reviewer` / `security-auditor` の出力に `Blockers: {n}` 行が実際に含まれていることを前提とする — 行が無い場合は「指摘ゼロ」ではなく「判定を取得できなかった」として `BLOCKED` にする。ただし収束 gate の最終権限は `loop-dev` の evaluate であり、本 gate はその入力を作る。
+`Final Gate: PASS` の導出規則: clean/simplify/perf/review+secure の全 stage が「完了」（スキップ・未実行・リバートのまま放置ではない）かつ CRITICAL/HIGH が 0 件のときのみ PASS。リバート不能（Skip Rules / `revert=NOT_AVAILABLE`）はステップ1の precondition gate で既に排除済みであり、ここでは判定材料にしない — final gate で初めて問題化すると、変更が残ったまま BLOCKED になる。いずれか 1 stage でも未完了・全ファイルリバートで実質ゼロ変更・CRITICAL/HIGH 残存のいずれかに該当すれば `BLOCKED`。ステップ6 の判定は `reviewer` / `security-auditor` の出力に `Blockers: {n}` 行が実際に含まれていることを前提とする — 行が無い場合は「指摘ゼロ」ではなく「判定を取得できなかった」として `BLOCKED` にする。ただし収束 gate の最終権限は `loop-dev` の evaluate であり、本 gate はその入力を作る。
 
 `--mode=clean/simplify`（部分モード）時もステップ6（review + secure）は省略せず実行する（ステップ3/4/5 → ステップ7 の流れ全体モードとの違いは、飛ばすのがステップ5（perf）のみである点）。CRITICAL/HIGH ブロック判定（項目2）はステップ6の結果を用いて部分モードでも全体モードと同様に適用する。
 
