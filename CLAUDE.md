@@ -10,7 +10,7 @@
 ## 作業ルール
 
 - Python は `python3` を使う
-- 変更後はリポジトリ直下の `.venv` を有効化して `python3 -m pytest -q` と `ruff check plugins/bluecore/src` が成功することを確認（警告なし）。カバレッジ100%の確認は `cd plugins/bluecore && python3 -m pytest -q --cov` で行う（`pyproject.toml` の `fail_under=100` はこのディレクトリでのみ解決する。リポジトリ直下には coverage 設定が無く `--cov` を付けてもゲートが発火しないため注意）
+- 変更後はリポジトリ直下の `.venv` を有効化して `python3 -m pytest -q` と `ruff check plugins/bluecore`（src と tests の両方。tests を外すと未定義名や不要 import が無検出のまま残る） が成功することを確認（警告なし）。カバレッジ100%の確認は `cd plugins/bluecore && python3 -m pytest -q --cov` で行う（`pyproject.toml` の `fail_under=100` はこのディレクトリでのみ解決する。リポジトリ直下には coverage 設定が無く `--cov` を付けてもゲートが発火しないため注意）
 - ランタイムは venv を作らない
 - 開発用 venv は `bluecore-dev/.venv` のみで、`scripts/install-dev.sh` が作成する
 - 新規 hook・外部呼び出し（DB/ネットワーク/DL）は非ブロッキング + ハードタイムアウト必須

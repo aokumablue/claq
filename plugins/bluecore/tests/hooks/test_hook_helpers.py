@@ -11,7 +11,6 @@ import json
 import runpy
 import sys
 from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
 
 import pytest
 
