@@ -67,7 +67,7 @@ Execute this task:
 
 1. **各runをgradingする**
    - grader subagentを起動するか、本文に従ってinlineで評価
-   - 各assertionを `grading.json` に保存
+   - grader の**返値**（判定 JSON）を schema 検証のうえ `grading.json` へ保存する。保存するのは本ワークフロー側であり、grader 自身はファイルを書かない（`../../../agents/grader.md` の信頼境界）
    - `expectations` 配列は `text`/`passed`/`evidence` の3フィールドを使う（`name`/`met`/`details` などは使わない）
    - プログラム的に判定できるものはスクリプトを書く（目視より速くて再利用しやすい）
 

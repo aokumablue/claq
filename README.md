@@ -45,6 +45,15 @@ bluecore は、Claude Code の作業を「最初の計画からレビューま�
 
 **ざっくりまとめると**: ユーザーは Command だけを覚えれば OK。Command が内部で必要な Agent / Skill を自動で連れてきます。Knowledge と Hook はバックグラウンドで動く仕組みです。
 
+> **保護フックの保証範囲**: `block_no_verify` / `pre_bash_commit_quality` /
+> `bash_config_protection` / `config_protection` は **best-effort な事故防止**であり、
+> **敵対的な回避への防壁ではありません**（[ADR-0002](docs/adr/0002-shell-hooks-prefer-false-positive-over-false-negative.md)）。
+> シェルエイリアス・シェル関数・変数展開・コマンド置換・2 段以上の `sh -c` / `eval`・
+> `git` 以外の名前を持つラッパースクリプト経由の呼び出しは、意図的に非目標として
+> 検出しません（POSIX シェルの意味解釈は実行時環境に依存し、静的解析だけでは
+> 原理的に再現できないため）。回避を防ぐ必要がある場面では、フックではなく
+> サーバ側の検証（受信 commit の署名・テスト・policy 適合）で担保してください。
+
 ---
 
 ## クイックスタート
@@ -485,9 +494,8 @@ flowchart TD
   C --> D["プロジェクト検出<br/>get_test_command()"]
   D --> E["ベースライン取得<br/>カバレッジ測定"]
   E --> F["🎯 デシジョンテーブル設計<br/>関数単位・ブランチ網羅"]
-  F --> G{"ユーザー承認"}
-  G -- 修正依頼 --> F
-  G -- 承認 --> H["テスト実装<br/>言語慣習に従う"]
+  F --> G["テーブル提示<br/>（応答は待たない）"]
+  G --> H["テスト実装<br/>言語慣習に従う"]
   H --> I["検証<br/>test + coverage + lint"]
   I --> J{"Gate"}
   J -- PASS --> K(["✅ 要約レポート"])

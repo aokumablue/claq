@@ -90,6 +90,7 @@ Skill ネスト発火は使わない。checkpoint skill のフォーマット（
 - 各反復の収束判定 green 後に自動コミット（メッセージ: 変更要約 1 行 + 反復番号）
 - コミット前に対象リポジトリの CLAUDE.md / AGENTS.md / CONTRIBUTING.md のコミット禁止・ブランチ規約を確認。禁止時はコミットせず出力に「未コミット（理由）」
 - `--no-verify` 等のフックバイパス禁止
+- **`git add` と `git commit` は別々の tool call へ分ける。** `git add -A && git commit -m ...` のように 1 回の Bash 呼び出しへまとめると、commit 品質フックが実行前の index しか見られず内容を検査できないため deny される（`pre_bash_commit_quality`）。まず stage し、次の呼び出しで commit する
 - コミット失敗（品質ガード reject 等）は未収束扱いにしない（収束条件はテスト green、コミットは付帯動作）
 - `commit: false` 指定時はスキップ
 

@@ -20,7 +20,7 @@
 **分ける**
 - 見せない情報がある — `comparator` は出力の出自を渡されない（盲検）。`reviewer` は実装者の思考過程を渡されない
 - 道具の制限をかけたい — `security-auditor` は Bash を持たず、read-only がツール権限で技術的に強制される
-- 返す形を固定したい — `grader` の `grading.json` 契約
+- 返す形を固定したい — `grader` の判定 JSON 契約（固定するのは**出力の形状**であって、agent 自身がファイルを書くことではない。2026-08-27 に grader / comparator / bench-analyzer から汎用 `Write` を外し、結果は返値で返して呼び出し元が保存する形にしたが、形状契約はそのまま維持される）
 
 **判定時の注意**: 材料の比較は「何を渡されるか」だけでなく「**何を持たされないか**」まで見る。`reviewer` と `security-auditor` は表面上どちらも差分を読むが、reviewer には `test_cmd` と失敗テストシグネチャが渡され Bash で再実行できるのに対し、security-auditor は差分のみで実行手段を持たない。材料は同一ではないため統合しない。
 
