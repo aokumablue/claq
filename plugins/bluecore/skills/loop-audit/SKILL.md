@@ -19,7 +19,7 @@ loop-dev の実行履歴（checkpoint 反復履歴 + git log）を全件走査�
 ## データソース（すべて一次 — 決定論・全件走査可）
 
 1. **checkpoint 反復履歴**: `~/.bluecore/session-data/checkpoint-*.md` の `## 反復履歴` 行を Bash grep + Read で全件収集。行フォーマット・result 4 値・シグネチャ定義は `../checkpoint/SKILL.md` が単一情報源（本ファイルで再定義しない）
-2. **git log**: 反復番号付きコミット（loop-dev のコミット方針: 変更要約 1 行 + 反復番号）を `git log --oneline --grep` で抽出し、反復履歴とタスク単位で突合
+2. **git log**: `git log --oneline` を反復履歴の期間で絞って取得し、**コミットの有無**をタスク単位で突合する。反復番号は使わない — `loop-dev` のコミットメッセージは変更要約 1 行のみで、反復番号は checkpoint の反復履歴が単一の記録先だから（`../loop-dev/SKILL.md` コミット方針）。`--grep` で反復番号を拾う方式は、過去コミットにだけ番号が残るため「昔は取れて今は取れない」という時間依存の静かな劣化になる
 
 現在リポジトリのレコードだけが対象（checkpoint ファイル名にタスク slug が入るため、他プロジェクト分は目視で除外する）。
 
