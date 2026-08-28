@@ -456,3 +456,38 @@ def test_config_protection_blank_file_path(monkeypatch: pytest.MonkeyPatch) -> N
     assert config_protection.main() == 0
 
 
+class TestBlockNoVerifyScansAllContainerKeys:
+    """コンテナキーを全て走査する（先勝ちで無害な側だけ見て素通りしない）。"""
+
+    def _run(self, monkeypatch: pytest.MonkeyPatch, payload: dict) -> int:
+        raw = json.dumps(payload)
+        monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (raw, False))
+        return block_no_verify.main()
+
+    def test_bypass_in_later_container_key_is_blocked(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """先頭キーが無害でも後続キーのバイパスを検出する。
+
+        先勝ちで 1 キーだけ見る実装では、無害な tool_input と悪意ある toolInput が
+        同居する payload を素通りさせていた。ADR-0002 は本フックの検出境界を
+        「誤検出を誤通過より選ぶ」と定めており、config_protection は既に全キー走査。
+        """
+        code = self._run(
+            monkeypatch,
+            {"tool_input": {"command": "ls"}, "toolInput": {"command": "git commit --no-verify"}},
+        )
+
+        assert code == 2
+        assert "bypass" in capsys.readouterr().err
+
+    def test_all_benign_container_keys_pass(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """全キーが無害なら通す。"""
+        code = self._run(
+            monkeypatch, {"tool_input": {"command": "ls"}, "toolInput": {"command": "git status"}}
+        )
+
+        assert code == 0
+        assert capsys.readouterr().err == ""

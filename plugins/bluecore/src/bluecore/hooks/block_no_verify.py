@@ -654,9 +654,16 @@ def main() -> int:
     if extract_tool_input(data) is None:
         return emit_block_output(_MISSING_FIELDS_MESSAGE)
 
-    command = extract_bash_command(data)
-    if has_bypass_flag(command):
-        return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
+    # コンテナキーは全て走査する。先勝ちで 1 キーだけ見ると、payload が
+    # 複数のコンテナキーを持つ host で無害な側だけを検査して素通りさせうる。
+    # ADR-0002 は本フックの検出境界を「誤検出を誤通過より選ぶ」と定めており、
+    # config_protection は既に全キー走査（_container_block_reason）。単一情報源
+    # 化したのは定数だけで、走査の意味論が片側だけ緩いままだった。
+    for key in INPUT_CONTAINER_KEYS:
+        if key not in data:
+            continue
+        if has_bypass_flag(extract_bash_command({key: data[key]})):
+            return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
 
     return 0
 
