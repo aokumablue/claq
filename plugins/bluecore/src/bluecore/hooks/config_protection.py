@@ -77,7 +77,21 @@ PROTECTED_FILES = {
     ".markdownlint.yaml",
     ".markdownlint.yml",
     ".markdownlintrc",
+    # コミット前検査そのものの定義。弱めれば lint 設定を弱めるのと同じ効果を
+    # 得られるため、個別の lint 設定と同じ重みで保護する。
+    ".pre-commit-config.yaml",
+    ".pre-commit-config.yml",
 }
+
+# ディレクトリ単位で保護する path。basename だけでは判定できない
+# （``.git/hooks/pre-commit`` の basename ``pre-commit`` を一律ブロックすると
+# 無関係な同名ファイルを巻き込む）ため、実体 path の親を見る。
+#
+# ``.git/hooks/`` は git 自身のフック本体。``block_no_verify`` は
+# ``core.hooksPath`` の差し替えと ``--no-verify`` を塞いでいるが、フック
+# スクリプトを直接書き換えれば同じ結果（検査が走らない状態）になる。
+# 片側だけ塞ぐと、塞いだ経路の存在が誤った安心になる。
+_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"),)
 
 # ファイル名だけでは保護できない汎用設定ファイル。version bump・依存追加
 # 等の正当な編集が頻繁なため全面ブロックはしない。書き込み内容が
@@ -124,6 +138,32 @@ _TOX_COMMAND_KEYS = ("commands", "commands_pre", "commands_post")
 _TOX_COMMAND_KEY_PATTERN = re.compile(
     r"(?m)^\s*(" + "|".join(re.escape(key) for key in _TOX_COMMAND_KEYS) + r")\s*="
 )
+
+
+def _protected_path_segment(file_path: str) -> str | None:
+    """パスがディレクトリ単位の保護対象配下かを判定する。
+
+    symlink は `resolve_effective_target` で解決してから判定する
+    （`_effective_basename` と同じ理由。H-02）。解決不能なら生パスで判定する。
+
+    Args:
+        file_path: 検査対象の生パス文字列。
+
+    Returns:
+        該当した保護 path の表示名（``.git/hooks``）。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    resolved = resolve_effective_target(file_path)
+    parts = resolved.parts if resolved is not None else Path(file_path).parts
+    for segments in _PROTECTED_PATH_SEGMENTS:
+        width = len(segments)
+        # ファイル名自身は含めず、親ディレクトリ列だけを見る。
+        for index in range(len(parts) - width):
+            if parts[index : index + width] == segments:
+                return "/".join(segments)
+    return None
 
 
 def _effective_basename(file_path: str) -> str:
@@ -428,6 +468,9 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
     if file_paths is None:
         return _UNPARSEABLE_PATCH_MESSAGE
     for file_path in file_paths:
+        protected_segment = _protected_path_segment(file_path)
+        if protected_segment is not None:
+            return blocked_message_for_file(f"{protected_segment}/")
         file_name = _effective_basename(file_path)
         if file_name in PROTECTED_FILES:
             return blocked_message_for_file(file_name)

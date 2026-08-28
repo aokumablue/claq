@@ -69,6 +69,12 @@ user-invocable: false
   例外なく `pending` なので自分の過去のカードが 1 件も出てこない。逆に `pending` だけだと
   既に `promote` 済みの同内容カードを見落とす。どちらも「同じ知識を別 key で作り直す」に至る
 
+  **2 回引くのは重複チェックのときだけ。** 知識を読んで判断に使う「参照」は既定の
+  `active` のみで引く（このファイルの「参照する」節、各 skill の「永続メモリ」節）。
+  `pending` は人間が `/instinct promote` を通していないカードであり、判断材料に
+  混ぜると H-01 の承認ゲートを迂回して agent 自身の書込みが agent 自身の判断を
+  動かす。取りこぼしを嫌って参照側まで 2 回引きにしてはいけない
+
 **迷ったら `scope: repo`** — global を汚染するより、後で `bluecore_run bluecore.mem.cli promote <key>` できる repo 側に置くほうが安全。
 
 ## スコープ判定
