@@ -497,3 +497,25 @@ class TestScaffoldTagCountBoundary:
         blocks = "<local-command-stdout>x</local-command-stdout>" * (harness._MAX_SCAFFOLD_TAG_COUNT // 2 + 1)
 
         assert harness.normalize_user_message(blocks + "実際の依頼") == ""
+
+
+class TestCommandArgsWithRegexMetacharacters:
+    """コマンド引数の正規表現メタ文字が置換で解釈されない。
+
+    畳んだ文字列は transcript 由来（ユーザーがタイプした引数）を含むため、
+    ``re.sub`` へ文字列 repl として渡すと ``\\1`` がグループ参照として解釈され、
+    末尾バックスラッシュでは ``re.error`` が normalize_user_message を貫いて
+    SessionEnd の handoff ごと落ちる。関数 repl で渡すことで literal になる。
+    """
+
+    def test_group_reference_stays_literal(self):
+        """引数中の \\1 はグループ参照として展開されない。"""
+        text = "<command-name>/goal</command-name><command-args>\\1 を見よ</command-args>"
+
+        assert harness.normalize_user_message(text) == "/goal \\1 を見よ"
+
+    def test_trailing_backslash_does_not_raise(self):
+        """末尾バックスラッシュでも例外を送出しない。"""
+        text = "<command-name>/goal</command-name><command-args>末尾 \\</command-args>"
+
+        assert harness.normalize_user_message(text) == "/goal 末尾 \\"

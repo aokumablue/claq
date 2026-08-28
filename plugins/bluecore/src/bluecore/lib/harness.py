@@ -43,13 +43,13 @@ _TOOL_NAME_MAP = {
     "list_dir": "Glob",
 }
 
-# 構造化パッチテキストのファイル操作マーカー（Codex apply_patch 形式）
 # ハーネスごとの tool 入力コンテナキー。存在するキーを順に走査する。
 # hooks 側（config_protection / block_no_verify）もこの 1 か所を参照する
 # ——以前は config_protection が同じ内容を独自に持っており、Grok の
 # ``toolInput`` を足す改修が片方だけに入って取りこぼす原因になっていた。
 INPUT_CONTAINER_KEYS = ("tool_input", "toolInput", "toolArgs", "tool_args")
 
+# 構造化パッチテキストのファイル操作マーカー（Codex apply_patch 形式）
 _PATCH_FILE_MARKERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ")
 
 
@@ -278,6 +278,8 @@ _ANY_SCAFFOLD_TAG_PATTERN = re.compile(
 # 中身は「同種の開始タグを含まない任意の文字列」に限る。単純な `.*?` だと、
 # 対を成さない開始タグから後続の別ブロックの閉じタグまで貫通し、その間にある
 # 実依頼まで巻き込んで消してしまう（ブロック除去という宣言と実挙動がずれる）。
+# タグごとに自分自身の開始タグを否定先読みする必要があるため、他の足場タグ用
+# パターンと違い 1 本の alternation にまとめられずタグ単位のリストになる。
 _SCAFFOLD_BLOCK_PATTERNS = [
     re.compile(rf"<{tag}[^>]*>(?:(?!<{tag})[\s\S])*?</{tag}>", re.IGNORECASE)
     for tag in _SCAFFOLD_TAGS
@@ -289,7 +291,7 @@ _SCAFFOLD_BLOCK_PATTERNS = [
 # リテラルを混ぜてブロックを早期終端させた細工とみなす。best-effort な引き継ぎで
 # 断片を救う利得より、細工した文字列が「直近の依頼」として次セッションへ
 # 注入される損失のほうが大きいため、メッセージごと破棄する。
-_SCAFFOLD_ORPHAN_PATTERNS = [re.compile(rf"</?{tag}[^>]*>", re.IGNORECASE) for tag in _SCAFFOLD_TAGS]
+_SCAFFOLD_ORPHAN_PATTERN = re.compile(r"</?(?:" + "|".join(_SCAFFOLD_TAGS) + r")[^>]*>", re.IGNORECASE)
 
 # スラッシュコマンド起動の足場。`<command-name>` と `<command-args>` の中身は
 # ユーザーが実際に入力した依頼そのものなので、捨てずに `/name args` へ畳む。
@@ -322,7 +324,7 @@ def _drop_scaffold_blocks(text: str) -> str | None:
         return None
     for pattern in _SCAFFOLD_BLOCK_PATTERNS:
         text = pattern.sub("", text)
-    if any(pattern.search(text) for pattern in _SCAFFOLD_ORPHAN_PATTERNS):
+    if _SCAFFOLD_ORPHAN_PATTERN.search(text):
         return None
     return text
 
@@ -350,14 +352,16 @@ def _fold_command_invocation(text: str) -> str:
     """
     name_match = _COMMAND_NAME_PATTERN.search(text)
     name = name_match.group(1).strip().lstrip("/") if name_match else ""
-    if not name:
-        return _COMMAND_SCAFFOLD_PATTERN.sub("", text)
-    args_match = _COMMAND_ARGS_PATTERN.search(text)
-    args = args_match.group(1).strip() if args_match else ""
-    folded = f"/{name} {args}".strip()
-    text = _COMMAND_ARGS_BLOCK_PATTERN.sub("", text, count=1)
-    text = _COMMAND_MESSAGE_BLOCK_PATTERN.sub("", text)
-    text = _COMMAND_NAME_PATTERN.sub(lambda _: folded, text, count=1)
+    if name:
+        args_match = _COMMAND_ARGS_PATTERN.search(text)
+        args = args_match.group(1).strip() if args_match else ""
+        folded = f"/{name} {args}".strip()
+        text = _COMMAND_ARGS_BLOCK_PATTERN.sub("", text, count=1)
+        text = _COMMAND_MESSAGE_BLOCK_PATTERN.sub("", text)
+        # 置換は文字列ではなく関数で渡す。folded は transcript 由来の文字列を
+        # 含むため、文字列 repl だと `\1` 等がグループ参照として解釈されて引数が
+        # 壊れ、末尾バックスラッシュでは re.error が送出される。
+        text = _COMMAND_NAME_PATTERN.sub(lambda _: folded, text, count=1)
     return _COMMAND_SCAFFOLD_PATTERN.sub("", text)
 
 
