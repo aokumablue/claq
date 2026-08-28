@@ -742,7 +742,7 @@ def main() -> int:
     # コンテナキーは全て走査する。先勝ちで 1 キーだけ見ると、payload が
     # 複数のコンテナキーを持つ host で無害な側だけを検査して素通りさせうる。
     # ADR-0002 は本フックの検出境界を「誤検出を誤通過より選ぶ」と定めており、
-    # config_protection は既に全キー走査（_container_block_reason）。単一情報源
+    # config_protection は既に全キー走査（_block_reason_for_container）。単一情報源
     # 化したのは定数だけで、走査の意味論が片側だけ緩いままだった。
     for key in INPUT_CONTAINER_KEYS:
         if key not in data:

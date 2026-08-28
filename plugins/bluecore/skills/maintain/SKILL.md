@@ -35,16 +35,16 @@ collect_skill_create_inputs "${COMMITS:-200}"        # コミット規約・同�
 
 集める入力（各ソースは失敗しても本体を止めない＝ベストエフォート）:
 
-- **蓄積メモリ**: `PYTHONPATH=plugins/bluecore/src python3 -m bluecore.mem.cli search "maintain harness 勘所 違反"` で過去メンテの勘所・繰り返し違反を引く。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要るカードだけ `python3 -m bluecore.mem.cli show <key>` に渡す（0 件なら無出力）
+- **蓄積メモリ**: `python3 -m bluecore.mem.cli search "maintain harness 勘所 違反"` で過去メンテの勘所・繰り返し違反を引く（`PYTHONPATH` は不要 — editable install が venv の `bluecore` をリポジトリの `plugins/bluecore/src` へ向ける）。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要るカードだけ `python3 -m bluecore.mem.cli show <key>` に渡す（0 件なら無出力）
 - **過去セッション**: `~/.bluecore/session-data/checkpoint-*.md` と git log
 - **最新 ClaudeCode トレンド**（既定ON・`--no-web` で無効）: WebSearch/WebFetch でハーネス設計のベストプラクティスを調べる。**ハード上限（検索5件・フェッチ3件）・タイムアウト付き・非ブロッキング**。失敗/オフライン時は「トレンド入力なし」と明記して続行
 
 **baseline 取得**（リポジトリ直下 `.venv` を有効化（`scripts/install-dev.sh` 後は PYTHONPATH 不要））:
 
 - `python3 -m pytest -q --cov`（カバレッジは pyproject の `fail_under=100` で判定。`--cov` なしでは測定されない）
-- `ruff check plugins/bluecore/src`
+- `ruff check plugins/bluecore`（src と tests の両方。tests を外すと未定義名や不要 import が無検出のまま残る）
 - `python3 -m bluecore.ci.validate_skills`（`validate_commands` / `validate_agents` / `validate_hooks` も同形式で4つ全て実行）
-- `python3 -m bluecore.ci.harness_audit repo --root plugins/bluecore --target-kind repo --format json`（audit の scope は `repo|hooks|skills|commands|agents` のキーワード。本スキルの `--scope` 引数＝パスとは別物でパス指定不可）。`--root` 省略時はリポジトリ直下（marketplace レイアウトの workspace root）が対象になり、provider 側の 24 checks を一切見ない consumer 判定へ誤って倒れる（F-04）。`--target-kind repo` は自動判定との食い違いを FAIL で検出する
+- `python3 -m bluecore.ci.harness_audit repo --root plugins/bluecore --target-kind repo --format json`（audit の scope は `repo|hooks|skills|commands|agents` のキーワード。本スキルの `--scope` 引数＝パスとは別物でパス指定不可）。`--root` 省略時はリポジトリ直下（marketplace レイアウトの workspace root）が対象になり、provider 側の全 checks（現在 22 件）を一切見ない consumer 判定へ誤って倒れる（F-04）。`--target-kind repo` は自動判定との食い違いを FAIL で検出する
 
 既存失敗を記録し新規失敗判定の基準にする。
 
@@ -83,7 +83,12 @@ hooks / `src/bluecore/hooks/` を対象に含む回は**両ハーネス互換（
 1. `validate_{skills,commands,agents,hooks}` / `pytest --cov` / `ruff` が **baseline 非退行**（新規失敗ゼロ。baseline 既存失敗はステップ3の分類に従う）
 2. 今回修正したファイルに起因する失敗ゼロ
 3. 再レビューで CRITICAL / HIGH ゼロ
-4. `harness_audit` の `overall_score` が baseline 非退行
+4. `harness_audit` の `overall_score` が baseline 非退行。
+   **`Security Guardrails` は存在を測るのであって実効性を測らない** — 保護フックが
+   定義されていれば満点になり、そのフックが実際にバイパスされるかは見ない
+   （実際、本カテゴリ満点のまま `block_no_verify` の 3 経路バイパスが素通りしていた）。
+   実効性の回帰は pytest 側の block / allow コマンド一覧が担う。満点を「保護が
+   効いている」と読み替えない
 5. `scan_scaffold_drift` が exit 0（実 transcript に未知の足場タグが無い）
 
 ```bash
