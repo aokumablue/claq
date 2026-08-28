@@ -76,8 +76,11 @@ title / key / domain / body へのヒットを重み付けし、confidence と�
 
 既定の絞り込みは `list` と同じく `status='active'` で、**`pending` は出てこない**。
 `learn` で入れたカードを探すときは `--status pending` を付ける（`--status` は `list` / `search`
-どちらでも使える）。agent 由来カードは H-01 により例外なく `pending` なので、
-重複確認の検索でこれを忘れると既存カードを見落として別 key で作り直すことになる。
+どちらでも使えるが**単値のみ**で、`pending,active` のような複数指定はエラーになる）。
+
+重複確認は `pending` と `active` の 2 回引く。agent 由来カードは H-01 により例外なく
+`pending` なので既定のままでは自分の過去のカードが出てこず、逆に `pending` だけでは
+昇格済みの同内容カードを見落とす。どちらも別 key での作り直しに至る。
 
 ### promote `<key>`
 

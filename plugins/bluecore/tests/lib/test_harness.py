@@ -581,3 +581,36 @@ class TestLegitimateRequestSurvivesScaffoldRemoval:
         text = '<div class="note">見出し</div> のスタイルを直せ'
 
         assert harness.normalize_user_message(text) == text
+
+
+class TestPerInvocationFolding:
+    """コマンド畳み込みは起動単位で行う。"""
+
+    def test_second_invocation_args_do_not_move_to_the_first(self):
+        """後続の起動が持つ引数が前の起動へ付け替わらない。
+
+        記憶ブロック内に前回のコマンドエコーが残っている入力で、最初の
+        ``<command-name>`` と最初の ``<command-args>`` を無条件にペアリング
+        すると、実依頼の引数が記憶ブロックへ移動し ``strip_tags`` で
+        ブロックごと落ちて消える。
+        """
+        raw = (
+            "<bluecore-memory>前回: <command-name>/plugin</command-name></bluecore-memory>\n"
+            "<command-name>/goal</command-name>"
+            "<command-message>goal</command-message>"
+            "<command-args>API を直せ</command-args>"
+        )
+
+        assert strip_tags(harness.normalize_user_message(raw)) == "/goal API を直せ"
+
+    def test_each_invocation_keeps_its_own_args(self):
+        """起動が 2 組あってもそれぞれ自分の引数を保つ。"""
+        text = "<command-name>/a</command-name>\n<command-name>/b</command-name><command-args>xyz</command-args>"
+
+        assert harness.normalize_user_message(text) == "/a\n/b xyz"
+
+    def test_attributes_on_command_tags_are_accepted(self):
+        """属性付きの command-* タグでも名前と引数を取り出せる。"""
+        text = '<command-name id="1">/goal</command-name><command-args data="x">検証せよ</command-args>'
+
+        assert harness.normalize_user_message(text) == "/goal 検証せよ"

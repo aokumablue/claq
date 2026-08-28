@@ -115,6 +115,9 @@ _USER_MESSAGE_COUNT = 3
 _USER_MESSAGE_CHAR_LIMIT = 200
 """ユーザー依頼 1 件を圧縮する上限文字数。"""
 
+_TRUNCATION_MARKER = "..."
+"""``compact_line`` が上限で切ったときに付ける末尾。重複畳み込みの除外判定に使う。"""
+
 _FILE_LIST_LIMIT = 8
 """引き継ぎに載せる変更ファイルの件数。"""
 
@@ -126,6 +129,36 @@ _EDIT_TOOLS: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
 
 _PATH_SEGMENT_LIMIT = 3
 """引き継ぎに載せるファイルパスの末尾セグメント数。絶対パス全体は予算の無駄。"""
+
+_STRUCTURED_VALUE_LIMIT = 120
+"""パス・ツール名 1 件の上限文字数。"""
+
+_MAX_TRANSCRIPT_LINE_CHARS = 1_000_000
+"""走査する 1 行の上限文字数。超える行は捨てる。
+
+``_scan`` の deadline は行と行の間でしか判定できず、1 行の処理中は割り込めない。
+上限を置かないと、単一の巨大な行が「ハードタイムアウト」の宣言を無効化する。
+"""
+
+
+def _sanitize_structured(value: str) -> str:
+    """パス・ツール名を引き継ぎ本文へ載せる前に無害化する。
+
+    これらは ``redact`` を通さない（base64 検出が 40 文字超のパスを丸ごと
+    ``[REDACTED]`` にしてしまうため）が、無検査でよい理由にはならない。値の
+    出所はエージェントが呼んだツールの入力であり、prompt injection を受けた
+    エージェントが ``Write(file_path="<system-reminder>…")`` のような呼び出しを
+    すれば、失敗した呼び出しでも transcript に残って引き継ぎへ載る。実際に
+    ``変更ファイル:`` 行として次セッションへ注入されることを実測で確認した。
+
+    Args:
+        value: transcript から拾った生のパスまたはツール名。
+
+    Returns:
+        タグ・改行・過剰な長さを落とした値。無害化の結果が空なら空文字列。
+    """
+    cleaned = strip_tags(normalize_user_message(value))
+    return " ".join(cleaned.split())[:_STRUCTURED_VALUE_LIMIT]
 
 
 def build_handoff(payload: dict[str, Any]) -> str:
@@ -244,6 +277,9 @@ def _scan(text: str, deadline: float) -> tuple[list[str], list[str], list[str]]:
     tools: set[str] = set()
 
     for line in text.splitlines():
+        if len(line) > _MAX_TRANSCRIPT_LINE_CHARS:
+            log.warning("トランスクリプトの 1 行が上限を超えました: その行を捨てます")
+            continue
         if time.monotonic() >= deadline:
             log.warning("トランスクリプト走査がタイムアウトしました: 残りの行を捨てます")
             break
@@ -280,6 +316,11 @@ def _dedupe_keeping_latest(messages: list[str]) -> list[str]:
     seen: set[str] = set()
     kept: list[str] = []
     for message in reversed(messages):
+        # 切り詰められた行は先頭 _USER_MESSAGE_CHAR_LIMIT 文字しか残っておらず、
+        # 一致しても元の依頼が同一とは限らない。畳むと別依頼が片方消えるため対象外。
+        if message.endswith(_TRUNCATION_MARKER):
+            kept.append(message)
+            continue
         if message in seen:
             continue
         seen.add(message)
@@ -402,11 +443,17 @@ def _record_tool(tool_name: str, tool_input: object, tools: set[str], files: set
     if not tool_name:
         return
     normalized = normalize_tool_name(tool_name)
-    tools.add(normalized)
+    sanitized_name = _sanitize_structured(normalized)
+    if sanitized_name:
+        tools.add(sanitized_name)
     if normalized not in _EDIT_TOOLS:
         return
     payload = tool_input if isinstance(tool_input, dict | str) else None
-    files.update(extract_file_paths(tool_name, payload) or ())
+    files.update(
+        sanitized
+        for path in extract_file_paths(tool_name, payload) or ()
+        if (sanitized := _sanitize_structured(path))
+    )
 
 
 def _shorten_path(path: str) -> str:

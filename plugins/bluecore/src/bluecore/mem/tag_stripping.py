@@ -16,10 +16,18 @@ _TAGS = (
 # ReDoS 保護: タグ出現回数の上限
 _MAX_TAG_COUNT = 100
 
+# タグの属性部に許す最大文字数。`[^>]*` を無界にすると、`>` を 1 個も含まない
+# 入力（`"<private " * N`）で各開始位置が末尾まで走査して二次オーダーになる。
+# _MAX_TAG_COUNT はこの経路を防げない（対になったタグしか数えないうえ、判定の
+# ための findall が同じ走査コストを先払いする）。実在の属性がこの長さを超える
+# ことはなく、超えた時点でタグとして扱わない。
+_MAX_TAG_ATTR_CHARS = 512
+_TAG_ATTRS = rf"[^>]{{0,{_MAX_TAG_ATTR_CHARS}}}"
+
 # 事前コンパイル済みパターン（開始〜終了タグとその中身を除去）
 _PATTERNS = [
     re.compile(
-        rf"<{tag}[^>]*>.*?</{tag}>",
+        rf"<{tag}{_TAG_ATTRS}>.*?</{tag}>",
         re.DOTALL | re.IGNORECASE,
     )
     for tag in _TAGS
@@ -42,7 +50,7 @@ _ORPHAN_CLOSE_PATTERNS = [re.compile(rf"</{tag}\s*>", re.IGNORECASE) for tag in 
 # 固定パターンのため ReDoS リスクが無く、_MAX_TAG_COUNT ガードは不要
 # （ガード自体が発動してペア除去がスキップされた場合でも、この孤立タグ
 # 除去は独立して適用される）。
-_ORPHAN_OPEN_PATTERNS = [re.compile(rf"<{tag}[^>]*>", re.IGNORECASE) for tag in _TAGS]
+_ORPHAN_OPEN_PATTERNS = [re.compile(rf"<{tag}{_TAG_ATTRS}>", re.IGNORECASE) for tag in _TAGS]
 
 
 def strip_tags(text: str) -> str:

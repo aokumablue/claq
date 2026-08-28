@@ -269,6 +269,14 @@ _COMMAND_TAGS = ("command-name", "command-message", "command-args")
 # 破棄してしまう。属性付き（`<task-notification id="7">`）は従来どおり通す。
 _TAG_NAME_END = r"(?=[\s/>])"
 
+# タグの属性部に許す最大文字数。`[^>]*` を無界にすると、`>` を 1 個も含まない入力
+# （`"<system-reminder " * N`）で各開始位置が末尾まで走査して二次オーダーになる。
+# 実測（撤去した件数ガードでは防げていなかった経路）: 498KB で 8.8 秒、996KB で
+# 35.7 秒、2MB は 120 秒でも終わらない。SessionEnd で毎回通る経路なので有界化する。
+# 実在のタグ属性がこの長さを超えることはなく、超えた時点でタグとして扱わない。
+_MAX_TAG_ATTR_CHARS = 512
+_TAG_ATTRS = rf"[^>]{{0,{_MAX_TAG_ATTR_CHARS}}}"
+
 # 中身は「同種の開始タグを含まない任意の文字列」に限る。単純な `.*?` だと、
 # 対を成さない開始タグから後続の別ブロックの閉じタグまで貫通し、その間にある
 # 実依頼まで巻き込んで消してしまう（ブロック除去という宣言と実挙動がずれる）。
@@ -278,7 +286,7 @@ _TAG_NAME_END = r"(?=[\s/>])"
 # パターンと違い 1 本の alternation にまとめられずタグ単位のリストになる。
 _SCAFFOLD_BLOCK_PATTERNS = [
     re.compile(
-        rf"<{tag}{_TAG_NAME_END}[^>]*>(?:(?!<{tag}{_TAG_NAME_END})[\s\S])*?</{tag}\s*>",
+        rf"<{tag}{_TAG_NAME_END}{_TAG_ATTRS}>(?:(?!<{tag}{_TAG_NAME_END})[\s\S])*?</{tag}\s*>",
         re.IGNORECASE,
     )
     for tag in _SCAFFOLD_TAGS
@@ -291,7 +299,7 @@ _SCAFFOLD_BLOCK_PATTERNS = [
 # 断片を救う利得より、細工した文字列が「直近の依頼」として次セッションへ
 # 注入される損失のほうが大きいため、メッセージごと破棄する。
 _SCAFFOLD_ORPHAN_PATTERN = re.compile(
-    r"</?(?:" + "|".join(_SCAFFOLD_TAGS) + r")" + _TAG_NAME_END + r"[^>]*>", re.IGNORECASE
+    r"</?(?:" + "|".join(_SCAFFOLD_TAGS) + r")" + _TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE
 )
 
 # スラッシュコマンド起動の足場。`<command-name>` と `<command-args>` の中身は
@@ -300,21 +308,25 @@ _SCAFFOLD_ORPHAN_PATTERN = re.compile(
 # 中身に同種の開始タグを含ませない点は足場ブロックと同じ。単純な `.*?` のままだと
 # 閉じタグを伴わない `<command-name>` 8000 個で 8.5 秒かかる（実測）。
 _COMMAND_NAME_PATTERN = re.compile(
-    r"<command-name>\s*((?:(?!<command-name>)[\s\S])*?)\s*</command-name>", re.IGNORECASE
+    rf"<command-name{_TAG_NAME_END}{_TAG_ATTRS}>\s*((?:(?!<command-name{_TAG_NAME_END})[\s\S])*?)\s*</command-name\s*>",
+    re.IGNORECASE,
 )
 _COMMAND_ARGS_PATTERN = re.compile(
-    r"<command-args>\s*((?:(?!<command-args>)[\s\S])*?)\s*</command-args>", re.IGNORECASE
+    rf"<command-args{_TAG_NAME_END}{_TAG_ATTRS}>\s*((?:(?!<command-args{_TAG_NAME_END})[\s\S])*?)\s*</command-args\s*>",
+    re.IGNORECASE,
 )
 _COMMAND_SCAFFOLD_PATTERN = re.compile(
-    r"</?(?:" + "|".join(_COMMAND_TAGS) + r")" + _TAG_NAME_END + r"[^>]*>", re.IGNORECASE
+    r"</?(?:" + "|".join(_COMMAND_TAGS) + r")" + _TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE
 )
 # 畳み込みで中身ごと落とすブロック。`command-message` はコマンド名の再掲、
 # `command-args` は畳んだ文字列側へ取り込み済みのため元の位置には残さない。
 _COMMAND_MESSAGE_BLOCK_PATTERN = re.compile(
-    r"<command-message>(?:(?!<command-message>)[\s\S])*?</command-message>", re.IGNORECASE
+    rf"<command-message{_TAG_NAME_END}{_TAG_ATTRS}>(?:(?!<command-message{_TAG_NAME_END})[\s\S])*?</command-message\s*>",
+    re.IGNORECASE,
 )
 _COMMAND_ARGS_BLOCK_PATTERN = re.compile(
-    r"<command-args>(?:(?!<command-args>)[\s\S])*?</command-args>", re.IGNORECASE
+    rf"<command-args{_TAG_NAME_END}{_TAG_ATTRS}>(?:(?!<command-args{_TAG_NAME_END})[\s\S])*?</command-args\s*>",
+    re.IGNORECASE,
 )
 
 
@@ -356,6 +368,13 @@ def _fold_command_invocation(text: str) -> str:
     そのエコーが実依頼を押し退けてしまう（後段の ``strip_tags`` が記憶ブロックを
     中身ごと落とせるよう、畳んだ結果もブロックの内側に留める必要がある）。
 
+    畳み込みは**起動単位**で行う。1 メッセージに起動が 2 組あるとき、最初の
+    ``<command-name>`` と最初の ``<command-args>`` を無条件にペアリングすると、
+    後続の起動が持つ引数が前の起動へ付け替わり、その引数を含む実依頼が
+    記憶ブロックごと落ちて消える。各 ``<command-name>`` から次の
+    ``<command-name>`` の直前までを 1 起動の範囲とみなし、その範囲内でだけ
+    引数を探す。
+
     コマンド名が取れない場合でも、残った ``command-*`` タグ自体は依頼本文では
     ないため無条件に落とす。
 
@@ -363,24 +382,28 @@ def _fold_command_invocation(text: str) -> str:
         text: ``<command-name>`` を含みうるテキスト。
 
     Returns:
-        コマンド起動部分だけを ``/name args`` に置き換えたテキスト。
+        各コマンド起動部分だけを ``/name args`` に置き換えたテキスト。
 
     Raises:
         例外は発生しません。
     """
-    name_match = _COMMAND_NAME_PATTERN.search(text)
-    name = name_match.group(1).strip().lstrip("/") if name_match else ""
-    if name:
-        args_match = _COMMAND_ARGS_PATTERN.search(text)
-        args = args_match.group(1).strip() if args_match else ""
-        folded = f"/{name} {args}".strip()
-        text = _COMMAND_ARGS_BLOCK_PATTERN.sub("", text, count=1)
-        text = _COMMAND_MESSAGE_BLOCK_PATTERN.sub("", text)
-        # 置換は文字列ではなく関数で渡す。folded は transcript 由来の文字列を
-        # 含むため、文字列 repl だと `\1` 等がグループ参照として解釈されて引数が
-        # 壊れ、末尾バックスラッシュでは re.error が送出される。
-        text = _COMMAND_NAME_PATTERN.sub(lambda _: folded, text, count=1)
-    return _COMMAND_SCAFFOLD_PATTERN.sub("", text)
+    matches = list(_COMMAND_NAME_PATTERN.finditer(text))
+    if not matches:
+        return _COMMAND_SCAFFOLD_PATTERN.sub("", text)
+
+    parts: list[str] = [text[: matches[0].start()]]
+    for index, match in enumerate(matches):
+        region_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        region = text[match.end() : region_end]
+        name = match.group(1).strip().lstrip("/")
+        if name:
+            args_match = _COMMAND_ARGS_PATTERN.search(region)
+            args = args_match.group(1).strip() if args_match else ""
+            parts.append(f"/{name} {args}".strip())
+            region = _COMMAND_ARGS_BLOCK_PATTERN.sub("", region, count=1)
+            region = _COMMAND_MESSAGE_BLOCK_PATTERN.sub("", region)
+        parts.append(region)
+    return _COMMAND_SCAFFOLD_PATTERN.sub("", "".join(parts))
 
 
 def normalize_user_message(text: str) -> str:
