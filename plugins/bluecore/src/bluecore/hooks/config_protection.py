@@ -140,11 +140,20 @@ _TOX_COMMAND_KEY_PATTERN = re.compile(
 )
 
 
-def _protected_path_segment(file_path: str) -> str | None:
-    """パスがディレクトリ単位の保護対象配下かを判定する。
+def protected_path_segment(file_path: str) -> str | None:
+    """パスがディレクトリ単位の保護対象配下か、保護ディレクトリ自身かを判定する。
 
     symlink は `resolve_effective_target` で解決してから判定する
     （`_effective_basename` と同じ理由。H-02）。解決不能なら生パスで判定する。
+
+    `bash_config_protection` が Bash 経路へ同じ判定を伝播させるため公開名に
+    している（`_PROTECTED_PATH_SEGMENTS` 自体は本モジュール private のまま。
+    保護対象の定義は本モジュールを単一情報源とし、呼び出し側で
+    ``.git`` / ``hooks`` を再定義させない）。
+
+    保護ディレクトリ自身を指すパス（``.git/hooks``）も該当扱いにする。
+    ディレクトリごと消す・退避する操作は配下ファイルの書換えと同じ結果に
+    なるため、Bash 経路のディレクトリ verb（``rm -rf`` / ``mv``）を取りこぼさない。
 
     Args:
         file_path: 検査対象の生パス文字列。
@@ -159,8 +168,13 @@ def _protected_path_segment(file_path: str) -> str | None:
     parts = resolved.parts if resolved is not None else Path(file_path).parts
     for segments in _PROTECTED_PATH_SEGMENTS:
         width = len(segments)
-        # ファイル名自身は含めず、親ディレクトリ列だけを見る。
-        for index in range(len(parts) - width):
+        # 保護ディレクトリ自身（``.git/hooks``）も一致させる。当初は親ディレクトリ
+        # 列だけを見て末尾一致を除外していたが、それが正しいのは Edit/Write の
+        # ようにディレクトリを対象にできない経路だけだった。`bash_config_protection`
+        # が本判定を Bash へ伝播させたことで、``rm .git/hooks/pre-commit`` は deny
+        # なのに 1 コンポーネント短い ``rm -rf .git/hooks`` は allow という、同じ
+        # verb・同じ結果（フックが走らない状態）に対する非対称が生まれた。
+        for index in range(len(parts) - width + 1):
             if parts[index : index + width] == segments:
                 return "/".join(segments)
     return None
@@ -468,7 +482,7 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
     if file_paths is None:
         return _UNPARSEABLE_PATCH_MESSAGE
     for file_path in file_paths:
-        protected_segment = _protected_path_segment(file_path)
+        protected_segment = protected_path_segment(file_path)
         if protected_segment is not None:
             return blocked_message_for_file(f"{protected_segment}/")
         file_name = _effective_basename(file_path)
