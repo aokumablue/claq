@@ -326,7 +326,6 @@ class TestExtractFilePaths:
         ]
 
 
-
 class TestNormalizeUserMessage:
     """normalize_user_message のテスト。"""
 
