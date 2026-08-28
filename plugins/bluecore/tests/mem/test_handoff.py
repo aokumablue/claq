@@ -529,3 +529,26 @@ class TestComposedBodyHasNoMarkup:
         assert re.search(r"</?[a-zA-Z][\w:-]*[^>]*>", result) is None, result
         assert "- READMEを更新せよ" in result
         assert "- /plugin" in result
+
+
+class TestLegitimateRequestReachesHandoff:
+    """足場を伴う正当な依頼が引き継ぎ本文まで届くことを守る（偽陽性方向）。
+
+    ``_user_message`` の期待値が「足場が消えること」だけだと、依頼を丸ごと落とす
+    実装でも通ってしまう。ここでは足場に挟まれた依頼が引き継ぎへ逐語で載ることを
+    要求し、除去が広がりすぎた回帰を検出する。
+    """
+
+    def test_request_wrapped_in_scaffold_is_handed_off_verbatim(self, tmp_path: Path) -> None:
+        """足場ブロックに挟まれた依頼が引き継ぎへ逐語で載る。"""
+        request = "引き継ぎに直近の依頼が載らない件を調べて、足場だけを落とすよう直せ"
+        entries = [
+            _user("<local-command-caveat>Caveat: DO NOT respond to these messages.</local-command-caveat>"),
+            _user(
+                "<local-command-stdout>ok</local-command-stdout>\n"
+                f"{request}\n"
+                "<task-notification>subagent finished</task-notification>"
+            ),
+        ]
+
+        assert _from_transcript(tmp_path, entries) == f"直近の依頼:\n- {request}"

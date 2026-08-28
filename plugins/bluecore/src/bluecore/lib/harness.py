@@ -263,25 +263,24 @@ _SCAFFOLD_TAGS = (
 # スラッシュコマンド起動の足場タグ。中身は依頼そのものなので捨てずに畳む。
 _COMMAND_TAGS = ("command-name", "command-message", "command-args")
 
-# 1 メッセージに許容する足場タグの総数。超えたらそのメッセージ自体を破棄する
-# （fail closed）。正当なハーネス出力に足場タグが数十個並ぶことはなく、閉じタグ
-# を伴わない開始タグを大量に含む入力は `.*?` の走査を開始位置ごとに末尾まで
-# 走らせる（O(N·n)）ため、除去を諦めて中身を残す fail open にすると
-# 「除去回避」と「走査コスト爆発」の両方を同時に許すことになる。
-_MAX_SCAFFOLD_TAG_COUNT = 100
-
-# 足場タグの総数を数えるための線形パターン（`.*?` を含まないため安全に先行実行できる）。
-_ANY_SCAFFOLD_TAG_PATTERN = re.compile(
-    r"</?(?:" + "|".join(_SCAFFOLD_TAGS + _COMMAND_TAGS) + r")[^>]*>", re.IGNORECASE
-)
+# タグ名の直後に「名前の終わり」を要求する先読み。これが無いと `[^>]*` が
+# 属性を許すつもりで、タグ**名**が足場名で始まるだけの別タグ（`<system-reminders>`
+# や `<local-command-stdout-parser>`）まで一致し、無関係な依頼をメッセージごと
+# 破棄してしまう。属性付き（`<task-notification id="7">`）は従来どおり通す。
+_TAG_NAME_END = r"(?=[\s/>])"
 
 # 中身は「同種の開始タグを含まない任意の文字列」に限る。単純な `.*?` だと、
 # 対を成さない開始タグから後続の別ブロックの閉じタグまで貫通し、その間にある
 # 実依頼まで巻き込んで消してしまう（ブロック除去という宣言と実挙動がずれる）。
+# 実測では走査コストも桁違いで、閉じタグ無しの開始タグ 8000 個に対し
+# 単純 `.*?` が 4.70 秒かかるのに対し否定先読み版は 0.0012 秒で頭打ちになる。
 # タグごとに自分自身の開始タグを否定先読みする必要があるため、他の足場タグ用
 # パターンと違い 1 本の alternation にまとめられずタグ単位のリストになる。
 _SCAFFOLD_BLOCK_PATTERNS = [
-    re.compile(rf"<{tag}[^>]*>(?:(?!<{tag})[\s\S])*?</{tag}>", re.IGNORECASE)
+    re.compile(
+        rf"<{tag}{_TAG_NAME_END}[^>]*>(?:(?!<{tag}{_TAG_NAME_END})[\s\S])*?</{tag}\s*>",
+        re.IGNORECASE,
+    )
     for tag in _SCAFFOLD_TAGS
 ]
 
@@ -291,25 +290,46 @@ _SCAFFOLD_BLOCK_PATTERNS = [
 # リテラルを混ぜてブロックを早期終端させた細工とみなす。best-effort な引き継ぎで
 # 断片を救う利得より、細工した文字列が「直近の依頼」として次セッションへ
 # 注入される損失のほうが大きいため、メッセージごと破棄する。
-_SCAFFOLD_ORPHAN_PATTERN = re.compile(r"</?(?:" + "|".join(_SCAFFOLD_TAGS) + r")[^>]*>", re.IGNORECASE)
+_SCAFFOLD_ORPHAN_PATTERN = re.compile(
+    r"</?(?:" + "|".join(_SCAFFOLD_TAGS) + r")" + _TAG_NAME_END + r"[^>]*>", re.IGNORECASE
+)
 
 # スラッシュコマンド起動の足場。`<command-name>` と `<command-args>` の中身は
 # ユーザーが実際に入力した依頼そのものなので、捨てずに `/name args` へ畳む。
 # `<command-message>` はコマンド名の再掲であり情報を持たないため捨てる。
-_COMMAND_NAME_PATTERN = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.DOTALL | re.IGNORECASE)
-_COMMAND_ARGS_PATTERN = re.compile(r"<command-args>\s*(.*?)\s*</command-args>", re.DOTALL | re.IGNORECASE)
-_COMMAND_SCAFFOLD_PATTERN = re.compile(r"</?(?:" + "|".join(_COMMAND_TAGS) + r")[^>]*>", re.IGNORECASE)
+# 中身に同種の開始タグを含ませない点は足場ブロックと同じ。単純な `.*?` のままだと
+# 閉じタグを伴わない `<command-name>` 8000 個で 8.5 秒かかる（実測）。
+_COMMAND_NAME_PATTERN = re.compile(
+    r"<command-name>\s*((?:(?!<command-name>)[\s\S])*?)\s*</command-name>", re.IGNORECASE
+)
+_COMMAND_ARGS_PATTERN = re.compile(
+    r"<command-args>\s*((?:(?!<command-args>)[\s\S])*?)\s*</command-args>", re.IGNORECASE
+)
+_COMMAND_SCAFFOLD_PATTERN = re.compile(
+    r"</?(?:" + "|".join(_COMMAND_TAGS) + r")" + _TAG_NAME_END + r"[^>]*>", re.IGNORECASE
+)
 # 畳み込みで中身ごと落とすブロック。`command-message` はコマンド名の再掲、
 # `command-args` は畳んだ文字列側へ取り込み済みのため元の位置には残さない。
-_COMMAND_MESSAGE_BLOCK_PATTERN = re.compile(r"<command-message>.*?</command-message>", re.DOTALL | re.IGNORECASE)
-_COMMAND_ARGS_BLOCK_PATTERN = re.compile(r"<command-args>.*?</command-args>", re.DOTALL | re.IGNORECASE)
+_COMMAND_MESSAGE_BLOCK_PATTERN = re.compile(
+    r"<command-message>(?:(?!<command-message>)[\s\S])*?</command-message>", re.IGNORECASE
+)
+_COMMAND_ARGS_BLOCK_PATTERN = re.compile(
+    r"<command-args>(?:(?!<command-args>)[\s\S])*?</command-args>", re.IGNORECASE
+)
 
 
 def _drop_scaffold_blocks(text: str) -> str | None:
     """依頼ではないハーネス足場タグを中身ごと除去する。
 
-    足場タグが異常に多い場合と、ペア除去後に片側だけのタグが残った場合は、
-    細工された入力とみなしてメッセージ自体を破棄する（fail closed）。
+    ペア除去後に片側だけのタグが残った場合は、細工された入力とみなして
+    メッセージ自体を破棄する（fail closed）。
+
+    かつては「足場タグの総数が上限を超えたら破棄する」ガードも持っていたが、
+    その根拠だった `.*?` の O(N·n) 走査は各パターンへ否定先読みを入れたことで
+    解消済みで（閉じタグ無しの開始タグ 20000 個でも合計 0.005 秒、線形）、
+    除去回避のほうは孤立タグ検出が 1 個でも破棄するため上限に依存しない。
+    根拠を失った上限は「対になった足場ブロックを大量に含む正当な依頼」を
+    丸ごと落とす誤検知だけが残るため撤去した。
 
     Args:
         text: ユーザー発話として transcript に載っていた生テキスト。
@@ -320,8 +340,6 @@ def _drop_scaffold_blocks(text: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    if len(_ANY_SCAFFOLD_TAG_PATTERN.findall(text)) > _MAX_SCAFFOLD_TAG_COUNT:
-        return None
     for pattern in _SCAFFOLD_BLOCK_PATTERNS:
         text = pattern.sub("", text)
     if _SCAFFOLD_ORPHAN_PATTERN.search(text):
