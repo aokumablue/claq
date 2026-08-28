@@ -87,9 +87,28 @@ class TestExtractBashCommand:
         """{ で始まるが JSON 不正なら生文字列を返す。"""
         assert harness.extract_bash_command({"tool_input": "{not-json"}) == "{not-json"
 
-    def test_tool_input_non_dict_does_not_raise(self):
-        """tool_input が list 等でも AttributeError にならず空文字。"""
+    def test_tool_input_list_without_commands_is_empty(self):
+        """list の要素から command が 1 つも取れなければ空文字。"""
         assert harness.extract_bash_command({"tool_input": [1, 2]}) == ""
+
+    def test_tool_input_list_of_dicts_is_extracted(self):
+        """list 形状のコンテナも要素ごとに command を取り出す。
+
+        空文字を返すと `extract_tool_input` が list を返すため必須フィールド
+        欠落の fail-closed を素通りし、フックが静かに許可する（実測で
+        `git commit --no-verify` を list に包むと exit 0 だった）。
+        """
+        payload = {"tool_input": [{"command": "ls"}, {"command": "git commit --no-verify"}]}
+
+        assert harness.extract_bash_command(payload) == "ls\ngit commit --no-verify"
+
+    def test_tool_input_list_of_strings_is_extracted(self):
+        """要素が生文字列でも取り出す。"""
+        assert harness.extract_bash_command({"tool_input": ["git status"]}) == "git status"
+
+    def test_tool_input_nested_list_is_flattened(self):
+        """入れ子の list も再帰的に取り出す。"""
+        assert harness.extract_bash_command({"tool_input": [["git status"]]}) == "git status"
 
     def test_cmd_alias_field(self):
         """command が無く cmd があればそれを使う。"""

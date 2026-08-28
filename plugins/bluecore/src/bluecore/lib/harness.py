@@ -122,6 +122,15 @@ def extract_bash_command(payload: dict[str, Any]) -> str:
     ``tool_input.command`` / ``toolArgs``（JSON 文字列含む）/ 生文字列を吸収する。
     非 dict の tool_input に対して ``.get`` して AttributeError にならない。
 
+    list 形状（``{"tool_input": [{"command": "..."}]}`` や
+    ``{"tool_input": ["..."]}``）は要素ごとに取り出して改行で連結する。
+    ここで空文字列を返すと、``extract_tool_input`` は list を返して「必須
+    フィールド欠落」の fail-closed を素通りするため、コマンドが 1 つも無い
+    payload として静かに許可されてしまう（実測: ``git commit --no-verify``
+    を list に包むと ``block_no_verify`` が exit 0）。同じ ``extract_bash_command``
+    を使う ``config_protection`` / ``pre_bash_commit_quality`` も同型だったため、
+    フック側ではなく共有層で塞ぐ。
+
     Args:
         payload: フック stdin を JSON として読んだ dict。
 
@@ -131,7 +140,22 @@ def extract_bash_command(payload: dict[str, Any]) -> str:
     Raises:
         例外は発生しません。
     """
-    tool_input = extract_tool_input(payload)
+    return _command_from_tool_input(extract_tool_input(payload))
+
+
+def _command_from_tool_input(tool_input: Any) -> str:
+    """正規化済み tool 入力から command 文字列を取り出す。
+
+    Args:
+        tool_input: `extract_tool_input` の戻り値。
+
+    Returns:
+        コマンド文字列。取れなければ空文字列。list は要素ごとの結果を
+        改行で連結する（空要素は落とす）。
+
+    Raises:
+        例外は発生しません。
+    """
     if isinstance(tool_input, dict):
         for key in ("command", "cmd"):
             cmd = tool_input.get(key)
@@ -140,6 +164,8 @@ def extract_bash_command(payload: dict[str, Any]) -> str:
         return ""
     if isinstance(tool_input, str):
         return tool_input
+    if isinstance(tool_input, list):
+        return "\n".join(filter(None, (_command_from_tool_input(item) for item in tool_input)))
     return ""
 
 

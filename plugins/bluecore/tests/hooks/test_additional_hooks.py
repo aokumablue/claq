@@ -521,3 +521,22 @@ class TestBlockNoVerifyScansAllContainerKeys:
 
         assert code == 0
         assert capsys.readouterr().err == ""
+
+    @pytest.mark.parametrize(
+        "container",
+        [
+            [{"command": f"git commit {NV}"}],
+            [f"git commit {NV}"],
+            [{"command": "ls"}, {"command": "git commit -n"}],
+        ],
+        ids=["list-of-dicts", "list-of-strings", "bypass-in-later-element"],
+    )
+    def test_list_shaped_container_is_blocked(
+        self, monkeypatch: pytest.MonkeyPatch, container: list
+    ) -> None:
+        """list 形状のコンテナも走査する（M3: 実測で exit 0 の素通りだった）。"""
+        assert self._run(monkeypatch, {"tool_input": container}) == 2
+
+    def test_benign_list_shaped_container_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """list 形状でも無害なら通す。"""
+        assert self._run(monkeypatch, {"tool_input": [{"command": "ls"}]}) == 0
