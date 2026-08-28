@@ -223,24 +223,57 @@ def _summarize_transcript(transcript_path: str) -> str:
         trusted root 外・材料が無い場合は空文字列。
     """
     path = Path(transcript_path)
-    if path.is_symlink():
-        return ""
-    if not path.is_file():
-        return ""
-    try:
-        owner_uid = path.stat().st_uid
-    except OSError:
-        return ""
-    if owner_uid != os.getuid():
-        return ""
-    try:
-        resolved = path.resolve()
-    except OSError:
-        return ""
-    if not _is_under_trusted_root(resolved):
+    if not is_trusted_transcript(path):
         return ""
     messages, files, tools = _scan(_read_tail(path), time.monotonic() + TRANSCRIPT_TIMEOUT_SEC)
     return _compose(messages, files, tools)
+
+
+def is_trusted_transcript(path: Path) -> bool:
+    """transcript として読んでよいファイルかを判定する。
+
+    所有者一致の任意 regular file を無条件で読むと、ユーザーが書ける任意
+    ファイルを prompt injection の入力にできてしまう。host 非依存の性質検査
+    （symlink 拒否・通常ファイル・所有者一致）に加えて、既知 host の transcript
+    root allowlist 包含も要求する。
+
+    同じ判定を別モジュールで書き直すと片側だけ強化されて非対称になるため
+    （``INPUT_CONTAINER_KEYS`` で実際に起きた失敗）、走査側はこの関数を使う。
+
+    Args:
+        path: 判定対象のパス。
+
+    Returns:
+        symlink でなく、通常ファイルで、所有者が自分で、trusted root 配下なら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        owner_uid = path.stat().st_uid
+    except OSError:
+        return False
+    if owner_uid != os.getuid():
+        return False
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    return _is_under_trusted_root(resolved)
+
+
+def trusted_transcript_roots() -> tuple[Path, ...]:
+    """走査対象にしてよい transcript root 一覧を返す。
+
+    Returns:
+        既知 host の root と ``BLUECORE_TRANSCRIPT_ROOTS`` で追加された root。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _trusted_transcript_roots()
 
 
 def _read_tail(path: Path) -> str:

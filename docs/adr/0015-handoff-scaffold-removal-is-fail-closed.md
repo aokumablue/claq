@@ -97,8 +97,7 @@ user エントリにはユーザーの発話だけでなく、ハーネスが生
   素通りしていることが見つかった（本 ADR 採択と同日に追加）。
 - この陳腐化の検知手段として、実 transcript コーパスに対する回帰スキャンで
   「対を成す未知タグ」だけを警告する案がある（同走査での実測は 273 本で誤検知 0 /
-  真の漏れ 1 件検出）。本 ADR では採らなかった。採用する場合は **ADR-0016** として
-  別途記録する（本 ADR の番号を再利用しない）。
+  真の漏れ 1 件検出）。本 ADR では採らず、**ADR-0016** で採択した。
 - タグ語彙による検知は **タグを持たない足場** を原理的に見ない。実測で確認されたもの:
   `IMPORTANT: You are running in non-interactive --print mode…`、
   `Base directory for this skill:`、`Another Claude session sent a message while you were working:`。

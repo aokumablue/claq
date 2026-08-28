@@ -665,3 +665,22 @@ class TestStructuredChannelsAreSanitized:
 
         assert "system-reminder" not in result
         assert "使用ツール: Edit" in result
+
+
+class TestTranscriptTrustHelpers:
+    """走査側と共有する信頼判定の公開 API。"""
+
+    def test_trusted_roots_include_env_extension(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """BLUECORE_TRANSCRIPT_ROOTS で追加した root が含まれる。"""
+        monkeypatch.setenv("BLUECORE_TRANSCRIPT_ROOTS", str(tmp_path))
+
+        assert tmp_path in handoff_mod.trusted_transcript_roots()
+
+    def test_symlink_is_not_trusted(self, tmp_path: Path) -> None:
+        """symlink は信頼しない。"""
+        target = tmp_path / "real.jsonl"
+        target.write_text("{}\n", encoding="utf-8")
+        link = tmp_path / "link.jsonl"
+        link.symlink_to(target)
+
+        assert handoff_mod.is_trusted_transcript(link) is False

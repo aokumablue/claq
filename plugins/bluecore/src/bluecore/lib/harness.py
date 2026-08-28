@@ -267,6 +267,11 @@ _SCAFFOLD_TAGS = (
 # スラッシュコマンド起動の足場タグ。中身は依頼そのものなので捨てずに畳む。
 _COMMAND_TAGS = ("command-name", "command-message", "command-args")
 
+# 診断側（ci/scan_scaffold_drift.py）が「既知タグ」を組み立てるための公開名。
+# 値は上の定義から導出する。写経すると片方だけ更新されて誤報が出る。
+SCAFFOLD_TAGS = _SCAFFOLD_TAGS
+COMMAND_TAGS = _COMMAND_TAGS
+
 # タグ名の直後に「名前の終わり」を要求する先読み。これが無いと `[^>]*` が
 # 属性を許すつもりで、タグ**名**が足場名で始まるだけの別タグ（`<system-reminders>`
 # や `<local-command-stdout-parser>`）まで一致し、無関係な依頼をメッセージごと
