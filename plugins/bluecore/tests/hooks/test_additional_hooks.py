@@ -102,6 +102,27 @@ _BYPASS_COMMANDS = [
     "git config set core.hooksPath /tmp/evil-hooks",
     "git config unset core.hooksPath",
     "git config add core.hooksPath /tmp/evil-hooks",
+    # git が受理する long オプションの短縮形。完全一致だけを見ると素通りする。
+    "git commit --no-veri -m x",
+    "git commit --no-ver -m x",
+    "git commit --no- -m x",
+    "git commit --n -m x",
+    # config ファイルそのものを差し替える literal 環境変数。差し替え先で
+    # core.hooksPath を書けるため -c core.hooksPath= と等価。
+    "GIT_CONFIG_GLOBAL=/tmp/cfg git commit -m x",
+    "GIT_CONFIG_SYSTEM=/tmp/cfg git commit -m x",
+    "GIT_CONFIG_NOSYSTEM=1 git commit -m x",
+    "env GIT_CONFIG_GLOBAL=/tmp/cfg git commit -m x",
+    # include.path / includeIf.* は任意 config を取り込める。
+    "git -c include.path=/tmp/evil commit -m x",
+    "git -c includeIf.gitdir:/x/.path=/tmp/evil commit -m x",
+    "git --config-env=include.path=MYVAR commit",
+    "git config --global include.path /tmp/evil",
+    "GIT_CONFIG_KEY_0=include.path git commit -m x",
+    # alias.* の展開先は解釈できないため定義自体を deny する。
+    "git -c alias.ci='commit --no-verify' ci -m x",
+    "git -c ALIAS.CI='commit -n' ci",
+    "git config alias.ci 'commit --no-verify'",
 ]
 
 # 通さなければならないコマンド（誤検知の回帰防止）。
@@ -158,6 +179,15 @@ _ALLOWED_COMMANDS = [
     "git config get core.hooksPath",
     "git config list",
     "git config get user.name",
+    # 短縮形と紛らわしいが --no-verify の前置ではない commit オプション。
+    "git commit --no-edit",
+    "git commit --no-gpg-sign -m x",
+    "git commit --no-post-rewrite -m x",
+    f"git commit -m 'typo: {NV[:-2]} was meant'",
+    # 機微でない config key の read-only 操作は allow。
+    "git config --get alias.ci",
+    "git config alias.ci",
+    "git config get include.path",
     "git config user.name x",
 ]
 
