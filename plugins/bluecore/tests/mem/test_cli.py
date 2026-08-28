@@ -289,10 +289,38 @@ class TestArgvAndStdin:
     def test_positionals_flags_and_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """位置引数・真偽フラグ・値付きオプションを分離する。"""
         monkeypatch.setattr(cli, "read_raw_stdin", lambda: "")
-        args = cli._parse_args_and_stdin(["pipefail", "--global", "--limit", "5"])
+        args = cli._parse_args_and_stdin("search", ["pipefail", "--global", "--limit", "5"])
         assert args.positionals == ("pipefail",)
         assert args.flags == frozenset({"--global"})
         assert args.values == {"--limit": "5"}
+
+    @pytest.mark.parametrize("command", ["list", "search", "show", "promote", "forget", "init"])
+    def test_stdin_is_not_read_for_commands_that_do_not_use_it(
+        self, command: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """stdin を使わない subcommand では stdin を読まない。
+
+        全 subcommand で無条件に読むと、書き手が pipe を閉じない呼ばれ方で
+        `list` / `search` / `show` まで STDIN_FIRST_BYTE_TIMEOUT ぶん待たされ
+        （実測 2.10 秒）、さらに「stdin リダイレクト漏れの可能性」という
+        渡すべき stdin が無い操作には誤った警告が出ていた。
+        """
+        calls: list[int] = []
+        monkeypatch.setattr(cli, "read_raw_stdin", lambda: calls.append(1) or "")
+
+        args = cli._parse_args_and_stdin(command, [])
+
+        assert calls == []
+        assert args.stdin_data == {}
+
+    @pytest.mark.parametrize("command", ["learn", "context", "handoff"])
+    def test_stdin_is_read_for_commands_that_use_it(
+        self, command: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """stdin を使う subcommand では従来どおり読む。"""
+        monkeypatch.setattr(cli, "read_raw_stdin", lambda: '{"probe": true}')
+
+        assert cli._parse_args_and_stdin(command, []).stdin_data == {"probe": True}
 
     def test_value_option_without_value_is_error(self) -> None:
         """値付きオプションに値が無ければ CommandError。"""

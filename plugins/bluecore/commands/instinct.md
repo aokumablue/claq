@@ -74,6 +74,11 @@ title / key / domain / body へのヒットを重み付けし、confidence と�
 出力は `list` と同じ 1 行形式で `body` は含まない（既定 5 件）。
 本文が要るカードだけ key を `show` に渡す。
 
+既定の絞り込みは `list` と同じく `status='active'` で、**`pending` は出てこない**。
+`learn` で入れたカードを探すときは `--status pending` を付ける（`--status` は `list` / `search`
+どちらでも使える）。agent 由来カードは H-01 により例外なく `pending` なので、
+重複確認の検索でこれを忘れると既存カードを見落として別 key で作り直すことになる。
+
 ### promote `<key>`
 
 `status` を `active` にする。以後 SessionStart で注入される。

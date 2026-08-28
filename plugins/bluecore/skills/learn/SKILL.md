@@ -56,7 +56,10 @@ user-invocable: false
 - 作業ログ — 何をしたかの記録。学びではないので `handoff`（SessionEnd で自動）に任せる
 - 一般的なプログラミング知識 — モデルが既に知っていること
 - 未検証の推測 — 確かめていない仮説。確かめてから記録する
-- 既存カードと同じ内容 — `bluecore_run bluecore.mem.cli search "..."` で先に確認し、あるなら同じ `key` で更新する
+- 既存カードと同じ内容 — `bluecore_run bluecore.mem.cli search "..." --status pending` で先に確認し、
+  あるなら同じ `key` で更新する。`--status pending` は必須である。`search` の既定は `active` のみで、
+agent が入れたカードは H-01 により例外なく `pending` のため、既定のまま検索すると自分が過去に
+入れたカードは 1 件も出てこず、同じ知識を別 key で作り直してしまう
 
 **迷ったら `scope: repo`** — global を汚染するより、後で `bluecore_run bluecore.mem.cli promote <key>` できる repo 側に置くほうが安全。
 
