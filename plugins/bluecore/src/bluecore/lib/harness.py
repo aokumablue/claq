@@ -252,12 +252,16 @@ def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[st
 # - local-command-stdout / local-command-stderr: コマンドの出力であって依頼ではない。
 # - task-notification: サブエージェント完了通知。ユーザーの発話ではない。
 # - system-reminder: ハーネスが user ターンへ差し込む指示文・ファイル内容。
+# - agent-message: 別セッション / 別エージェントからの SendMessage 配信足場。
+#   中身は他エージェントの命令文（「〜せよ」「〜に触れるな」）であり、これを
+#   依頼として引き継ぐと次セッションへ疑似ユーザー指示として再注入される。
 _SCAFFOLD_TAGS = (
     "local-command-caveat",
     "local-command-stdout",
     "local-command-stderr",
     "task-notification",
     "system-reminder",
+    "agent-message",
 )
 
 # スラッシュコマンド起動の足場タグ。中身は依頼そのものなので捨てずに畳む。

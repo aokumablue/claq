@@ -1,5 +1,7 @@
 """tag_stripping のテスト"""
 
+import time
+
 import pytest
 
 from bluecore.mem.tag_stripping import _MAX_TAG_COUNT, strip_tags
@@ -127,3 +129,31 @@ class TestStripTags:
         assert "<private>" not in result
         assert "</private>" not in result
         assert "x" in result
+
+
+class TestStripTagsStaysLinear:
+    """信頼境界タグの除去が入力長に対して線形であることを守る。
+
+    ``_MAX_TAG_ATTR_CHARS`` による属性部の有界化はコメントでしか守られておらず、
+    挙動テストは全て緑のまま無界 ``[^>]*`` へ戻せる。``strip_tags`` は
+    SessionStart の同期フック（``mem context``）が知識カードの title/body に対して
+    毎回呼ぶため、複雑度クラスの退行はそのままセッション開始の遅延になる。
+    ``_MAX_TAG_COUNT`` はこの経路を防げない（対になったタグしか数えず、判定の
+    ``findall`` が同じ走査コストを先払いする）。
+
+    実測: ``'<private ' * 20000`` が 3.1 秒 → 0.022 秒、``* 40000`` が 12.5 秒 → 0.045 秒。
+    予算は現行値の 100 倍以上を取ってある。
+    """
+
+    _PATHOLOGICAL_REPEATS = 120_000
+    _BUDGET_SECONDS = 5.0
+
+    def test_unterminated_tag_input_completes_within_budget(self) -> None:
+        """終端の来ない開始タグが大量に並んでも予算内に完了する。"""
+        text = "<private " * self._PATHOLOGICAL_REPEATS
+
+        started = time.monotonic()
+        strip_tags(text)
+        elapsed = time.monotonic() - started
+
+        assert elapsed < self._BUDGET_SECONDS, f"{len(text)} 文字で {elapsed:.2f} 秒（複雑度クラスの退行）"

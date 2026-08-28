@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -339,7 +340,13 @@ class TestNormalizeUserMessage:
 
     @pytest.mark.parametrize(
         "tag",
-        ["local-command-caveat", "local-command-stdout", "local-command-stderr", "task-notification"],
+        [
+            "local-command-caveat",
+            "local-command-stdout",
+            "local-command-stderr",
+            "task-notification",
+            "agent-message",
+        ],
     )
     def test_scaffold_block_is_dropped_with_content(self, tag):
         """足場タグは中身ごと除去される。"""
@@ -613,3 +620,68 @@ class TestPerInvocationFolding:
         text = '<command-name id="1">/goal</command-name><command-args data="x">検証せよ</command-args>'
 
         assert harness.normalize_user_message(text) == "/goal 検証せよ"
+
+
+class TestScaffoldRemovalStaysLinear:
+    """足場除去が入力長に対して線形であることを守る。
+
+    否定先読みと ``_MAX_TAG_ATTR_CHARS`` による有界化は、コメントでしか
+    守られていなかった。挙動テストは全て緑のまま `.*?` や無界 `[^>]*` へ
+    「簡潔化」でき、SessionEnd の同期処理が数十秒に戻る。実測値:
+
+    ==================  ==========  ==========
+    入力                 二次オーダー   現行
+    ==================  ==========  ==========
+    ``'<tag ' * 30000``    8.8 秒     0.026 秒
+    ``'<tag ' * 60000``   35.7 秒     0.046 秒
+    ``'<tag ' * 120000``  >120 秒     0.094 秒
+    ==================  ==========  ==========
+
+    予算は現行値の 50 倍以上を取ってあるので、遅い環境での揺らぎでは落ちず、
+    複雑度クラスが戻ったときだけ落ちる。
+    """
+
+    # 2MB 相当（`_read_tail` が 1 行として読みうる上限規模）。
+    _PATHOLOGICAL_REPEATS = 120_000
+    _BUDGET_SECONDS = 5.0
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "<system-reminder ",  # 属性部が終端 `>` に到達しない（`[^>]*` を無界にすると二次）
+            "<local-command-stdout>",  # 閉じタグを伴わない開始タグ（`.*?` を裸にすると二次）
+        ],
+    )
+    def test_pathological_input_completes_within_budget(self, payload: str) -> None:
+        """終端の来ない入力でも予算内に完了する。"""
+        text = payload * self._PATHOLOGICAL_REPEATS
+
+        started = time.monotonic()
+        harness.normalize_user_message(text)
+        elapsed = time.monotonic() - started
+
+        assert elapsed < self._BUDGET_SECONDS, f"{len(text)} 文字で {elapsed:.2f} 秒（複雑度クラスの退行）"
+
+
+class TestAgentMessageIsNotARequest:
+    """別エージェントからの配信足場を依頼として引き継がない。"""
+
+    def test_other_agents_instructions_do_not_survive(self):
+        """agent-message の中身（他エージェントの命令文）が残らない。
+
+        実 transcript の走査で見つかった漏れ。マルチエージェントの SendMessage は
+        `<agent-message from="...">` で配送され、中身は「〜せよ」「〜に触れるな」という
+        命令文になる。これを依頼として引き継ぐと次セッションへ疑似ユーザー指示として
+        再注入される。
+        """
+        raw = (
+            "Another Claude session sent a message while you were working:\n"
+            '<agent-message from="a1f49d4ff066c77f4">\n'
+            "以下 2 点だけを修正せよ。他ファイルには触れるな。\n"
+            "</agent-message>"
+        )
+
+        result = strip_tags(harness.normalize_user_message(raw))
+
+        assert "修正せよ" not in result
+        assert "触れるな" not in result

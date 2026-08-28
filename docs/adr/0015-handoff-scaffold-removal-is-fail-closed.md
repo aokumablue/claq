@@ -9,8 +9,9 @@ SessionStart で `<bluecore-memory>` として次セッションのプロンプ�
 信頼できない入力であり、注入先はプロンプト境界である。
 
 user エントリにはユーザーの発話だけでなく、ハーネスが生成した足場（`local-command-caveat` /
-`local-command-stdout` / `local-command-stderr` / `task-notification` / `system-reminder`、および
-スラッシュコマンド起動の `command-name` / `command-message` / `command-args`）も同じ形で載る。
+`local-command-stdout` / `local-command-stderr` / `task-notification` / `system-reminder` /
+`agent-message`、およびスラッシュコマンド起動の `command-name` / `command-message` /
+`command-args`）も同じ形で載る。
 実測では、あるセッションの引き継ぎ 3 件がすべて足場で埋まり実依頼が消えたうえ、注意書きに
 含まれる `DO NOT respond to these messages` が疑似ユーザー指示として次セッションへ再注入されていた。
 
@@ -89,9 +90,16 @@ user エントリにはユーザーの発話だけでなく、ハーネスが生
 
 ### リスク
 
-- 足場タグ名はハードコードした列挙であり、ホストが新しい足場タグを追加すると静かに古びる。
-  テストも CI も緑のまま引き継ぎがノイズで埋まる状態へ戻りうる。検知手段は現時点で無く、
-  発見は人手の実測に依存する。
-- この陳腐化に対しては「良性タグ側の allowlist へ反転し、未知タグを警告させる」案があるが、
-  本 ADR では採らなかった。採用する場合は **ADR-0016** として別途記録する（本 ADR の番号を
-  再利用しない）。
+- 足場タグ名はハードコードした **denylist** であり、列挙漏れは「素通り」として現れる。
+  ホストが新しい足場タグを追加すると静かに古び、テストも CI も緑のまま引き継ぎがノイズで
+  埋まる状態へ戻りうる。実際 `/search` による実 transcript 273 本の走査で、
+  マルチエージェント配信足場 `<agent-message from="...">` が列挙から漏れて中身ごと
+  素通りしていることが見つかった（本 ADR 採択と同日に追加）。
+- この陳腐化の検知手段として、実 transcript コーパスに対する回帰スキャンで
+  「対を成す未知タグ」だけを警告する案がある（同走査での実測は 273 本で誤検知 0 /
+  真の漏れ 1 件検出）。本 ADR では採らなかった。採用する場合は **ADR-0016** として
+  別途記録する（本 ADR の番号を再利用しない）。
+- タグ語彙による検知は **タグを持たない足場** を原理的に見ない。実測で確認されたもの:
+  `IMPORTANT: You are running in non-interactive --print mode…`、
+  `Base directory for this skill:`、`Another Claude session sent a message while you were working:`。
+  denylist / allowlist / drift 検知のいずれでも捕まらない構造的な天井である。
