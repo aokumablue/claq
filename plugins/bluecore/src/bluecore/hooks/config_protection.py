@@ -230,7 +230,10 @@ def _paths_from_container(tool_name: str, container: Any) -> list[str] | None:
     """1 つの入力コンテナから対象パスを取り出す。
 
     構造化パッチが判定不能なら None（呼び出し側は fail-closed）。
-    file_path が無く dict なら旧 ``file`` キーを補完する。
+    旧 ``file`` キーの補完・list 形状・生文字列形状の展開はいずれも
+    ``extract_file_paths`` が担う。ここで dict 限定の補完を持つと、
+    list 形状（``[{"file": "ruff.toml"}]``）だけ補完が効かず保護を
+    素通りする（実測で exit 0）。共有層に寄せて分岐を二重に持たない。
 
     Args:
         tool_name: 正規化前の生ツール名。
@@ -239,14 +242,7 @@ def _paths_from_container(tool_name: str, container: Any) -> list[str] | None:
     Returns:
         パス一覧。パッチ判定不能時は None。
     """
-    file_paths = extract_file_paths(tool_name, container)
-    if file_paths is None:
-        return None
-    if not file_paths and isinstance(container, dict):
-        legacy = str(container.get("file") or "")
-        if legacy:
-            return [legacy]
-    return file_paths
+    return extract_file_paths(tool_name, container)
 
 
 def _editable_text(tool_name: str, container: Any) -> list[str] | None:

@@ -226,16 +226,25 @@ def _has_patch_markers(patch_text: str) -> bool:
 def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[str] | None:
     """ツール入力から操作対象のファイルパス一覧を抽出する。
 
-    Edit/Write/MultiEdit は file_path フィールドを使う。構造化パッチ
-    （Copilot/Codex の apply_patch 等）はパッチテキストのファイル操作
-    マーカー行をパースする。パッチかどうかは tool_name の文字列一致
-    だけに頼らず、生入力の内容（マーカー行の有無）でも判定する。
+    Edit/Write/MultiEdit は file_path フィールド（旧名 ``file`` も同義）を
+    使う。構造化パッチ（Copilot/Codex の apply_patch 等）はパッチテキストの
+    ファイル操作マーカー行をパースする。パッチかどうかは tool_name の文字列
+    一致だけに頼らず、生入力の内容（マーカー行の有無）でも判定する。
     ハーネスごとの命名差異でツール名が "apply_patch" と一致しない
     場合でも、構造化パッチの内容が検査対象から漏れないようにするため。
 
+    list 形状（``[{"file_path": "..."}]`` や ``["..."]``）と生文字列形状
+    （``"ruff.toml"``）も展開する。ここで空リストを返すと、呼び出し側
+    （``config_protection``）は「対象ファイルが 1 つも無い書き込み」として
+    静かに許可してしまう（実測: ``{"tool_input": [{"file_path": "ruff.toml"}]}``
+    と ``{"tool_input": "ruff.toml"}`` がいずれも exit 0 で保護を素通り）。
+    ``_command_from_tool_input`` が同じ取りこぼしを共有層で塞いだのと同型の
+    修正であり、フック側ではなくここで閉じる。
+
     Args:
         tool_name: フック stdin の tool_name フィールド値（正規化前）。
-        tool_input: フック stdin の tool_input フィールド値。dict / 文字列 / None。
+        tool_input: フック stdin の tool_input フィールド値。dict / list /
+            文字列 / None。
 
     Returns:
         ファイルパスのリスト。判定不能（パッチ本文と分かっているのに
@@ -256,16 +265,32 @@ def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[st
         ]
         return paths or None
 
+    if isinstance(tool_input, list):
+        paths: list[str] = []
+        for item in tool_input:
+            item_paths = extract_file_paths(tool_name, item)
+            if item_paths is None:
+                return None
+            paths.extend(item_paths)
+        if is_declared_patch_tool and not paths:
+            # apply_patch と明示されているのに対象を 1 つも取り出せない: 判定不能
+            return None
+        return paths
+
     if is_declared_patch_tool:
         # apply_patch と明示されているのにパッチ本文を取り出せない: 判定不能
         return None
 
+    if isinstance(tool_input, str):
+        return [tool_input] if tool_input else []
+
     if not isinstance(tool_input, dict):
         return []
 
-    file_path = tool_input.get("file_path")
-    if isinstance(file_path, str) and file_path:
-        return [file_path]
+    for key in ("file_path", "file"):
+        file_path = tool_input.get(key)
+        if isinstance(file_path, str) and file_path:
+            return [file_path]
     return []
 
 

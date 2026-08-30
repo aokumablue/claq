@@ -295,10 +295,55 @@ class TestExtractFilePaths:
         assert harness.extract_file_paths("apply_patch", None) is None
         assert harness.extract_file_paths("apply_patch", 123) is None
 
-    def test_non_apply_patch_non_dict_input_returns_empty(self):
-        """apply_patch 以外で tool_input が dict でない場合は空リストを返す。"""
-        assert harness.extract_file_paths("Bash", "ls -la") == []
+    def test_non_apply_patch_unsupported_input_returns_empty(self):
+        """apply_patch 以外で dict / list / 文字列のいずれでもない入力は空リスト。"""
         assert harness.extract_file_paths("Edit", None) == []
+        assert harness.extract_file_paths("Edit", 123) == []
+        assert harness.extract_file_paths("Edit", "") == []
+
+    def test_bare_string_container_is_treated_as_path(self):
+        """生文字列コンテナはパス候補として返す。
+
+        空リストを返すと config_protection が「対象 0 件」として静かに
+        許可し、``{"tool_input": "ruff.toml"}`` が保護を素通りする（実測 exit 0）。
+        """
+        assert harness.extract_file_paths("Write", "ruff.toml") == ["ruff.toml"]
+
+    def test_list_of_dicts_is_expanded(self):
+        """listdict 形状は要素ごとに展開する（保護素通りの回帰防止）。"""
+        assert harness.extract_file_paths(
+            "Write", [{"file_path": "ruff.toml"}, {"file_path": "a.py"}]
+        ) == ["ruff.toml", "a.py"]
+
+    def test_list_of_strings_is_expanded(self):
+        """liststr 形状は要素をそのままパス候補として展開する。"""
+        assert harness.extract_file_paths("Write", ["ruff.toml", "a.py"]) == [
+            "ruff.toml",
+            "a.py",
+        ]
+
+    def test_legacy_file_key_is_accepted(self):
+        """旧 ``file`` キーも file_path の別名として受理する（dict / list とも）。"""
+        assert harness.extract_file_paths("Edit", {"file": "ruff.toml"}) == ["ruff.toml"]
+        assert harness.extract_file_paths("Edit", [{"file": "ruff.toml"}]) == ["ruff.toml"]
+
+    def test_file_path_wins_over_legacy_file_key(self):
+        """file_path と file が同居する場合は file_path を優先する。"""
+        assert harness.extract_file_paths(
+            "Edit", {"file_path": "new.py", "file": "old.py"}
+        ) == ["new.py"]
+
+    def test_list_with_undeterminable_element_is_fail_closed(self):
+        """list 要素が 1 つでも判定不能なら全体を判定不能（None）にする。"""
+        assert harness.extract_file_paths("apply_patch", [{"input": "garbage"}]) is None
+
+    def test_declared_patch_tool_with_empty_list_is_fail_closed(self):
+        """apply_patch と明示された空 list は対象不明として None を返す。"""
+        assert harness.extract_file_paths("apply_patch", []) is None
+
+    def test_non_patch_tool_with_empty_list_returns_empty(self):
+        """apply_patch 以外の空 list は対象 0 件として空リストを返す。"""
+        assert harness.extract_file_paths("Write", []) == []
 
     def test_mismatched_tool_name_raw_patch_string_is_still_detected(self):
         """tool_name が "apply_patch" と一致しなくても、生入力が構造化パッチ
@@ -334,10 +379,15 @@ class TestExtractFilePaths:
         assert harness.extract_file_paths("Edit", wrapped) == ["eslint.config.js"]
 
     def test_mismatched_tool_name_without_markers_falls_back_to_normal_handling(self):
-        """tool_name 不一致かつ内容にパッチマーカーが無い文字列は、
-        通常の非パッチ入力として空リストを返す（Bash コマンド等の誤ブロック防止）。
+        """tool_name 不一致かつマーカーが無い文字列は、パッチではなくパス候補として扱う。
+
+        誤ブロックの抑止はここで候補を捨てることではなく、呼び出し側
+        （config_protection）の basename 一致と repo スコープ判定が担う。
+        ここで捨てると保護対象パスを運ぶ生文字列形状ごと素通りする。
         """
-        assert harness.extract_file_paths("edit", "echo *** not a patch ***") == []
+        assert harness.extract_file_paths("edit", "echo *** not a patch ***") == [
+            "echo *** not a patch ***"
+        ]
 
     def test_mismatched_tool_name_dict_with_file_path_prefers_file_path(self):
         """tool_name 不一致でも file_path フィールドを持つ dict は最優先で使う。"""
