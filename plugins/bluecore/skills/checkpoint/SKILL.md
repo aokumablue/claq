@@ -45,7 +45,7 @@ remaining_turns: <n|-> (任意)
 <次セッションで必要な最小限コンテキスト。500文字以内。>
 
 ## 反復履歴
-- iter{n} | blockers={[{blockerシグネチャ, ...}] or -} | tests={PASS({件数})|FAIL:{テスト失敗シグネチャ, ...}} | lint={PASS|FAIL} | scope={OK|VIOLATION} | result={converged|not-converged|circuit-break|stopped} | rootcause={1行 or -}
+- iter{n} | blockers={[{blockerシグネチャ, ...}] or -} | tests={PASS({件数})|FAIL:{テスト失敗シグネチャ, ...}} | lint={PASS|FAIL} | scope={OK|VIOLATION|-} | result={converged|not-converged|circuit-break|stopped} | rootcause={1行 or -}
 
 ## ベースライン
 - red_baseline={テスト失敗シグネチャ, ...|-}
@@ -69,6 +69,13 @@ remaining_turns: <n|-> (任意)
   しており、両者を同じ `[]` に潰すとその前提が記録側で失われる。`blockers=-` の反復は
   `result=converged` にできない
 - `result` は `converged` / `not-converged` / `circuit-break` / `stopped` の4値のみ
+- `scope` はスコープガードを**照合したときだけ** `OK` / `VIOLATION` を書く。
+  `../loop-dev/SKILL.md` のスコープガードは「`approved_plan` に変更ファイル一覧を
+  特定できる場合のみ」発動し、一覧のない呼び出し元では非発動になる。非発動の反復は
+  `-` を書く。`OK` に潰すと「照合して逸脱なし」と「照合していない」が区別できなくなり、
+  記録上は逸脱ゼロに見えたまま照合が一度も走っていない run を作れる（`blockers` の
+  `-` と `[]` を分けたのと同じ理由）。`scope=-` の反復はスコープ遵守の証跡にならない
+
 - 必ずトップレベルの `## ` 見出しで記載する。他セクション配下の `###` にすると grep ベースの走査（loop-audit 等）で見落とされるため禁止
 
 ### シグネチャ定義（単一情報源）
