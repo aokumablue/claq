@@ -23,7 +23,13 @@ from pathlib import Path
 from typing import Any
 
 from bluecore.lib.core_utils import get_home_dir, strip_ansi
-from bluecore.lib.harness import extract_file_paths, normalize_tool_name, normalize_user_message
+from bluecore.lib.harness import (
+    extract_file_paths,
+    extract_raw_tool_name,
+    extract_tool_input,
+    normalize_tool_name,
+    normalize_user_message,
+)
 from bluecore.lib.slim_text import compact_line
 from bluecore.mem.logger import get as _get_logger
 from bluecore.mem.redaction import redact
@@ -446,14 +452,24 @@ def _collect_tools(entry: dict[str, Any], tools: set[str], files: set[str]) -> N
     単独の ``tool_use`` エントリと、assistant メッセージ内の ``tool_use``
     ブロックの両方を見る（ハーネスによって形が異なるため）。
 
+    単独エントリのツール名・入力コンテナの抽出は ``lib/harness`` に委ねる。
+    ここで ``tool_name`` / ``tool_input`` だけを直接読むと camelCase
+    （``toolName`` / ``toolInput``）・``toolArgs``・JSON 文字列化コンテナを
+    取りこぼす。同じ取りこぼしはコンテナキー一覧を独自に持っていた
+    ``config_protection`` で一度起きており、共有層に寄せて再発させない。
+
+    assistant メッセージ内のブロックは Anthropic の content block スキーマ
+    （``{"type": "tool_use", "name": ..., "input": ...}``）で別物なので、
+    そちらは ``input`` を直接読む。
+
     Args:
         entry: トランスクリプトの 1 エントリ。
         tools: 使用ツール名の収集先。
         files: 変更ファイルパスの収集先。
     """
-    if entry.get("type") == "tool_use" or entry.get("tool_name"):
-        name = str(entry.get("tool_name") or entry.get("name") or "")
-        _record_tool(name, entry.get("tool_input") or entry.get("input"), tools, files)
+    raw_name = extract_raw_tool_name(entry) or str(entry.get("name") or "")
+    if entry.get("type") == "tool_use" or raw_name:
+        _record_tool(raw_name, extract_tool_input(entry) or entry.get("input"), tools, files)
 
     message = entry.get("message")
     content = message.get("content") if isinstance(message, dict) else None

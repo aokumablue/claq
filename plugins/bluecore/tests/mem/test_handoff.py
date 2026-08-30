@@ -195,6 +195,23 @@ class TestTranscriptSummary:
             "使用ツール: Bash, Edit, Write"
         )
 
+    def test_collects_tools_from_camel_case_and_toolargs_containers(self, tmp_path: Path) -> None:
+        """camelCase / toolArgs / JSON 文字列化コンテナの tool_use も収集する。
+
+        以前は ``tool_name`` / ``tool_input`` だけを直接読んでおり、Grok の
+        ``toolInput``・Copilot の ``toolArgs``（JSON 文字列で来ることが多い）を
+        取りこぼしていた。抽出を lib/harness へ寄せた回帰防止。
+        """
+        entries = [
+            {"type": "tool_use", "toolName": "Edit", "toolInput": {"file_path": "src/a.py"}},
+            {"type": "tool_use", "toolName": "write", "toolArgs": json.dumps({"file_path": "src/b.py"})},
+            {"type": "tool_use", "tool_name": "run_terminal_command", "tool_args": {"command": "ls"}},
+        ]
+
+        result = _from_transcript(tmp_path, entries)
+
+        assert result == "変更ファイル: src/a.py, src/b.py\n使用ツール: Bash, Edit, Write"
+
     def test_file_changes_without_user_messages_are_handed_off(self, tmp_path: Path) -> None:
         """ユーザー発話が無くても変更ファイルがあれば引き継ぐ。"""
         entries = [
