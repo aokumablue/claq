@@ -420,3 +420,19 @@ def test_bluecore_run_module_references_are_importable() -> None:
             if importlib.util.find_spec(module) is None:
                 missing.append(f"{md_file.relative_to(_ROOT)}: {module}")
     assert missing == [], "import できないモジュール参照:\n" + "\n".join(sorted(set(missing)))
+
+
+def test_harness_md_rubric_version_matches_audit_constant() -> None:
+    """`commands/harness.md` のルーブリック版表記が実装の定数と一致すること。
+
+    スコアはルーブリック版の中でのみ比較可能で、版が上がると過去のベースラインとは
+    比較不能になる。実装側の定数と md の散文が別々に書かれていた頃は、片方だけ
+    更新しても何も落ちず、比較不能なスコア比較が静かに通る状態だった。
+    """
+    from bluecore.ci.harness_audit import RUBRIC_VERSION
+
+    text = (_ROOT / "commands" / "harness.md").read_text(encoding="utf-8")
+    found = re.findall(r"ルーブリック版: `([^`]+)`", text)
+    assert found, "commands/harness.md に「ルーブリック版: `...`」表記が見つからない"
+    for version in found:
+        assert version == RUBRIC_VERSION, f"md のルーブリック版 {version} が実装の {RUBRIC_VERSION} と不一致"

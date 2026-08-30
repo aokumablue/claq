@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from bluecore.lib.harness import INPUT_CONTAINER_KEYS
+
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = PLUGIN_ROOT / "src" / "bluecore" / "launcher.py"
 _ISOLATED_ENV_PREFIXES = ("CODEX_", "GROK_", "COPILOT_")
@@ -225,3 +227,112 @@ def test_session_start_emits_valid_json_and_creates_db(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr[:400]
     assert json.loads(result.stdout) is not None
     assert (tmp_path / ".bluecore" / "mem.db").is_file()
+
+
+# --- PreToolUse の入力形状ゲート -------------------------------------------------
+#
+# 判定関数の in-process テストは stdin JSON → コンテナキー解決 → 形状展開 →
+# exit code までの経路を通らない。v0.9.43 は `{"tool_input": [{"file_path":
+# "ruff.toml"}]}` と `{"tool_input": "ruff.toml"}` を exit 0 で素通りさせたまま
+# リリースされたが、そのときプロセス層のテストは dict 形状しか流しておらず
+# （list 形状 0 件・生文字列形状 0 件）、`harness_audit` も修正前後のツリーを
+# 同一 58/58 と採点した（実測）。止められる層が 1 つも無かった。
+#
+# ここでコンテナキー × 形状の直積を陽性/陰性の対で流し、コミット時に落とす。
+
+_PAYLOAD_SHAPES = ("dict", "jsonstr", "listdict", "liststr", "barestr")
+
+
+def _wrap_payload(container_key: str, shape: str, field: str, value: str) -> dict:
+    """1 つのコンテナキー・形状に値を包んだ hook payload コンテナを組み立てる。
+
+    Args:
+        container_key: INPUT_CONTAINER_KEYS のいずれか。
+        shape: _PAYLOAD_SHAPES のいずれか。
+        field: フックが読むフィールド名（command / file_path）。
+        value: そのフィールドへ入れる値。
+
+    Returns:
+        コンテナキー 1 つだけを持つ dict。
+    """
+    if shape == "dict":
+        return {container_key: {field: value}}
+    if shape == "jsonstr":
+        return {container_key: json.dumps({field: value})}
+    if shape == "listdict":
+        return {container_key: [{field: value}]}
+    if shape == "liststr":
+        return {container_key: [value]}
+    return {container_key: value}
+
+
+# hook → (tool_name, フィールド名, deny されるべき値, 通るべき値)。
+# 陰性対照を必須にするのは、両極が同じ exit code を返す測定を「合格」と
+# 読ませないため（両方 0 でも両方 2 でも判別していない）。
+_SHAPE_GATED_HOOKS = {
+    "bluecore.hooks.block_no_verify": ("Bash", "command", "git commit --no-verify -m x", "git commit -m x"),
+    "bluecore.hooks.bash_config_protection": ("Bash", "command", "echo x > ruff.toml", "cat sample.py"),
+    "bluecore.hooks.config_protection": ("Write", "file_path", "ruff.toml", "sample.py"),
+}
+
+# 形状ゲートに載せない PreToolUse hook と、その理由。
+# 空の免除ではなく理由を必須にする（黙って外すと網羅の主張が嘘になる）。
+_SHAPE_GATE_EXEMPTIONS = {
+    "bluecore.hooks.pre_bash_commit_quality": (
+        "判定が staged 内容に依存し、陽性/陰性の作り分けに git fixture が要る。"
+        "形状展開は extract_bash_command 共有層で block_no_verify と同一経路のため、"
+        "同層のゲートで被覆される"
+    ),
+}
+
+
+def _pre_tool_use_modules() -> set[str]:
+    """hooks.json の PreToolUse が宣言する dotted module 名を返す。"""
+    return {
+        next(arg for arg in args if arg.startswith("bluecore."))
+        for event, args, _ in _iter_declared_commands()
+        if event == "PreToolUse"
+    }
+
+
+def test_every_pre_tool_use_hook_is_shape_gated_or_exempted() -> None:
+    """PreToolUse の全 hook が形状ゲートか、理由つき免除のどちらかに属すること。
+
+    新しい保護フックを足したときに宣言を忘れると、その hook だけ dict 形状しか
+    検証されないまま出荷される。宣言を強制して、網羅の穴を静かに作らせない。
+    """
+    declared = _pre_tool_use_modules()
+    covered = set(_SHAPE_GATED_HOOKS) | set(_SHAPE_GATE_EXEMPTIONS)
+    assert declared <= covered, f"形状ゲート未宣言の PreToolUse hook: {sorted(declared - covered)}"
+    assert covered <= declared, f"hooks.json に存在しない hook の宣言: {sorted(covered - declared)}"
+    assert all(_SHAPE_GATE_EXEMPTIONS.values()), "免除には理由が要る"
+
+
+@pytest.mark.parametrize("hook", sorted(_SHAPE_GATED_HOOKS))
+@pytest.mark.parametrize("container_key", INPUT_CONTAINER_KEYS)
+@pytest.mark.parametrize("shape", _PAYLOAD_SHAPES)
+def test_pre_tool_use_hook_discriminates_across_container_and_shape(
+    hook: str, container_key: str, shape: str, tmp_path: Path
+) -> None:
+    """全コンテナキー × 全形状で、deny されるべき payload が exit 2 になること。
+
+    同時に陰性対照が exit 0 であることも確かめる。両極が同じ exit code なら
+    その測定は判別していないので、deny 側だけを見て合格にしない。
+    """
+    tool_name, field, deny_value, allow_value = _SHAPE_GATED_HOOKS[hook]
+
+    denied = _run_launcher(
+        hook, {"tool_name": tool_name, **_wrap_payload(container_key, shape, field, deny_value)}, tmp_path
+    )
+    allowed = _run_launcher(
+        hook, {"tool_name": tool_name, **_wrap_payload(container_key, shape, field, allow_value)}, tmp_path
+    )
+
+    assert denied.returncode == 2, (
+        f"{hook} {container_key}/{shape}: deny されるべき payload が exit {denied.returncode}"
+    )
+    assert json.loads(denied.stdout)["permissionDecision"] == "deny"
+    assert allowed.returncode == 0, (
+        f"{hook} {container_key}/{shape}: 通るべき payload が exit {allowed.returncode}"
+        f" err={allowed.stderr[:200]}"
+    )

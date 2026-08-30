@@ -48,6 +48,16 @@ VALID_FORMATS = {"text", "json"}
 VALID_TARGET_KINDS = {"repo", "consumer"}
 
 
+RUBRIC_VERSION = "2026-08-27"
+"""採点ルーブリックの版。
+
+スコアはこの版の中でのみ比較可能で、版が上がった時点で過去のベースラインとは
+比較不能になる。``commands/harness.md`` が散文で同じ文字列を書いており、
+かつては両者を結ぶ検査が無かったため、片方だけ更新して「比較不能なスコア比較」が
+静かに通る状態だった。一致は tests/test_md_references.py が機械照合する。
+"""
+
+
 def normalize_scope(scope: str | None) -> str:
     """scope を正規化する。"""
     value = (scope or "repo").lower()
@@ -568,7 +578,7 @@ def build_report(scope: str, root_dir: str | Path | None = None, target_mode: st
         "root_dir": str(resolved_root),
         "target_mode": resolved_mode,
         "deterministic": True,
-        "rubric_version": "2026-08-27",
+        "rubric_version": RUBRIC_VERSION,
         "overall_score": overall_score,
         "max_score": max_score,
         "categories": category_scores,
