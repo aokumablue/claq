@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import re
 import select
 import shlex
 import subprocess
@@ -29,6 +30,167 @@ MAX_STDIN_BYTES = 1024 * 1024
 # ``status;echo``）を誤って 1 トークンとして扱わないよう、この定数と
 # `tokenize`/`split_segments` を共有ヘルパとして 1 箇所に持つ（A-01 対応）。
 _SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
+
+
+# ``sh -c`` 再帰と heredoc 本文判定で共有する既知シェル実行ファイル（basename 判定）。
+# heredoc 側だけ別集合を持つと「本文が実行されるか」の判定軸が 2 つに割れるため、
+# block_no_verify から本モジュールへ移して単一情報源にする。
+SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash"})
+
+# heredoc 演算子。``<<<``（herestring）を誤って heredoc と読まないよう、
+# 前後に ``<`` が無いことを lookbehind / lookahead の両方で要求する
+# （lookahead だけだと ``<<<EOF`` が offset 1 で再マッチする）。
+_HEREDOC_OPERATOR_RE = re.compile(
+    r"(?<!<)<<(?!<)(-?)[ \t]*"
+    r"(?:'(?P<squote>[^']*)'|\"(?P<dquote>[^\"]*)\"|\\?(?P<bare>[A-Za-z_][A-Za-z0-9_.-]*))"
+)
+
+# 演算子行がこれらで終わる場合、本文の開始位置が次行とは限らない
+# （``cat <<'EOF' |`` 改行 ``bash``）。剥がさない側へ倒す。
+_HEREDOC_CONTINUATION_SUFFIXES = ("\\", "|", "&")
+
+
+def is_shell_wrapper_token(token: str) -> bool:
+    """トークンが既知シェル実行ファイルかを basename で判定する。
+
+    Args:
+        token: 判定対象のトークン。
+
+    Returns:
+        basename が `SHELL_WRAPPER_EXECUTABLES` に属するなら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    return token.rsplit("/", 1)[-1] in SHELL_WRAPPER_EXECUTABLES
+
+
+def _heredoc_delimiters(line: str) -> list[tuple[str, bool]]:
+    """行に現れる heredoc の区切り語を出現順に返す。
+
+    Args:
+        line: 走査対象の 1 物理行。
+
+    Returns:
+        (区切り語, タブ剥がし可（``<<-``）) のリスト。無ければ空リスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    delimiters = []
+    for match in _HEREDOC_OPERATOR_RE.finditer(line):
+        # ``<<''`` の空文字列区切りを落とさないため or 連結にしない。
+        word = next(
+            value for value in (match.group("squote"), match.group("dquote"), match.group("bare")) if value is not None
+        )
+        delimiters.append((word, match.group(1) == "-"))
+    return delimiters
+
+
+def _line_keeps_heredoc_bodies(line: str) -> bool:
+    """演算子行を見て、本文を剥がさずに残すべきかを判定する。
+
+    本文が実行されうる形（シェル起動・パイプや継続で次行へ繋がる形）は
+    すべて残す側へ倒す。``bash <<'EOF'`` の本文は実際に実行されるため、
+    データとして剥がすと ADR-0002 が禁じる誤通過になる（実測で確認済み）。
+
+    Args:
+        line: heredoc 演算子を含む物理行。
+
+    Returns:
+        本文を残すなら True、剥がしてよいなら False。
+
+    Raises:
+        例外は発生しません。
+    """
+    if line.rstrip().endswith(_HEREDOC_CONTINUATION_SUFFIXES):
+        return True
+    return any(is_shell_wrapper_token(token) for token in tokenize(line))
+
+
+def _consume_heredoc_bodies(
+    lines: list[str], start: int, delimiters: list[tuple[str, bool]]
+) -> tuple[int, list[str]] | None:
+    """区切り語の本文を読み飛ばし、終端行だけを残して返す。
+
+    本文の走査中に ``<<`` を再検出しない。``<<'OUTER'`` の本文に
+    ``<<'INNER'`` が現れる形で走査が同期ずれを起こすのを防ぐ。
+
+    Args:
+        lines: コマンド全体の物理行リスト。
+        start: 本文開始行の index。
+        delimiters: 演算子行が宣言した (区切り語, タブ剥がし可) のリスト。
+
+    Returns:
+        (再開する index, 出力に残す行のリスト)。1 つでも終端行が見つからな
+        ければ None（未終端として呼び出し側が剥がすのをやめる）。
+
+    Raises:
+        例外は発生しません。
+    """
+    index = start
+    kept = []
+    for word, strip_tabs in delimiters:
+        while index < len(lines):
+            candidate = lines[index]
+            index += 1
+            if (candidate.lstrip("\t") if strip_tabs else candidate) == word:
+                kept.append(candidate)
+                break
+        else:
+            return None
+    return index, kept
+
+
+def strip_data_heredoc_bodies(command: str) -> str:
+    """heredoc の**データ**本文をコマンド文字列から取り除く。
+
+    heredoc 本文はどのシェルでもコマンドの語彙に入らないため、そのまま
+    トークン化すると散文が実行命令として読まれる（実測: ``cat > note.md
+    <<'EOF'`` の本文に ``git commit --no-verify`` と書いただけで 3 つの保護
+    フックが exit 2 になった）。ADR-0002 の「誤検出 > 誤通過」は解析できない
+    構文についての規定であり、heredoc の本文範囲は演算子・区切り語・終端行
+    だけで決まる環境非依存の構文なので、この規定は本 FP を正当化しない。
+
+    ただし本文がデータだと**静的に確定できる場合だけ**剥がす。次のいずれかに
+    当たれば剥がさず現状の挙動（＝検出側）を維持する:
+
+    1. 演算子行にシェル起動トークンがある（``bash <<'EOF'`` / ``cat <<'EOF' | bash``）
+    2. 演算子行が継続演算子で終わる（本文開始が次行とは限らない）
+    3. 終端行が見つからない（未終端）
+
+    終端行を残すため冪等（``f(f(x)) == f(x)``）。
+
+    Args:
+        command: 元のコマンド文字列。
+
+    Returns:
+        データ本文を除去した文字列。剥がせないと判断した場合は入力そのまま。
+
+    Raises:
+        例外は発生しません。
+    """
+    if "<<" not in command:
+        return command
+
+    lines = command.split("\n")
+    output = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        output.append(line)
+        index += 1
+        delimiters = _heredoc_delimiters(line)
+        if not delimiters or _line_keeps_heredoc_bodies(line):
+            continue
+        consumed = _consume_heredoc_bodies(lines, index, delimiters)
+        if consumed is None:
+            # 未終端。以降は判断材料が無いのでそのまま残す。
+            output.extend(lines[index:])
+            return "\n".join(output)
+        index, kept = consumed
+        output.extend(kept)
+    return "\n".join(output)
 
 
 def tokenize(command: str) -> list[str]:

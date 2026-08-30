@@ -21,7 +21,13 @@ commit 検出は `hook_common.tokenize`/`split_segments`（`block_no_verify` と
 ファイルは lint 抑制に加え secret scan もスキップし、severity `warning` の
 痕跡を残します（詳細は `commit_quality_scanner` のモジュール docstring）。
 
+データとして書かれた heredoc 本文は、判定へ渡す前に
+`hook_common.strip_data_heredoc_bodies` で落とします（ADR-0017）。`evaluate()` の
+ループで 1 回だけ正規化するため、下流の 3 消費者（commit 判定・compound risk 判定・
+確定後の検査）は必ず同じ文字列を見ます。本文が実行されうる形は落としません。
+
 非目標: ラッパースクリプトやシェルエイリアス経由の `git commit` 呼び出し検出、
+非シェルインタプリタ（`python3 - <<EOF`）の heredoc 本文からの間接実行、
 `git commit <pathspec>` で明示指定された未ステージファイルの取り込み
 （`-a`/`--all` を伴わない場合は対象外）、およびシェル展開・変数分割経由
 （`git $(echo commit)` / `git${IFS}commit` 等）で `git` と `commit` が
@@ -48,6 +54,7 @@ from bluecore.hooks.hook_common import (
     parse_json_object,
     resolve_repo_root,
     split_segments,
+    strip_data_heredoc_bodies,
     tokenize,
     tokenize_with_status,
 )
@@ -890,7 +897,12 @@ def evaluate(raw_input: str) -> dict:
         # （実測: 単独なら exit 2 の payload が、先頭へ通る commit を足すだけで
         # exit 0 になった）。走査層だけ全キー化しても評価層が先勝ちなら穴は残る。
         commits = []
-        for command in iter_bash_commands(input_data):
+        for raw_command in iter_bash_commands(input_data):
+            # heredoc のデータ本文はコマンドの語彙に入らないため、判定へ渡す前に
+            # 落とす。ここで 1 回だけ正規化することで、下流の 3 消費者
+            # （_is_git_commit_command / _compound_commit_risk /
+            # _evaluate_confirmed_commit）が必ず同じ文字列を見る。
+            command = strip_data_heredoc_bodies(raw_command)
             # git commit コマンドの場合のみ実行（トークン化して堅牢に判定）
             try:
                 is_commit, commit_args = _is_git_commit_command(command)

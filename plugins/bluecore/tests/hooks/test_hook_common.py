@@ -1139,3 +1139,144 @@ class TestWatchdogKillsProcessGroup:
 
         assert _wait_until_dead(grandchild_pid), "watchdog 終了後に孫が残留した"
         assert not marker.exists(), "孫プロセスが仕事を完了してしまった"
+
+
+class TestHeredocNormalization:
+    """heredoc のデータ本文をコマンド解析から外す前段パスのテスト。
+
+    heredoc 本文はどのシェルでもコマンドの語彙に入らないが、shlex は本文行も
+    通常のトークンとして返す。そのため散文が実行命令として読まれ、実測で
+    3 つの保護フックが `cat > note.md <<'EOF'` の本文に書いた語だけで exit 2
+    になった。ただし `bash <<'EOF'` では本文が実際に実行されるため、剥がして
+    よいのは本文がデータだと静的に確定できる形だけに限る。
+    """
+
+    @pytest.mark.parametrize(
+        ("token", "expected"),
+        [
+            ("sh", True),
+            ("bash", True),
+            ("/bin/zsh", True),
+            ("dash", True),
+            ("shell", False),
+            ("bashrc", False),
+            ("git", False),
+            ("", False),
+        ],
+    )
+    def test_is_shell_wrapper_token(self, token: str, expected: bool) -> None:
+        """basename 一致であって前方一致ではないこと。"""
+        assert hook_common.is_shell_wrapper_token(token) is expected
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            ("cat <<EOF", [("EOF", False)]),
+            ("cat << EOF", [("EOF", False)]),
+            ("cat <<-EOF", [("EOF", True)]),
+            ("cat <<'E O F'", [("E O F", False)]),
+            ('cat <<"EOF"', [("EOF", False)]),
+            ("cat <<\\EOF", [("EOF", False)]),
+            ("cat <<''", [("", False)]),
+            ("grep x <<< 'y'", []),
+            ("grep x <<<EOF", []),
+            ("echo hi", []),
+            ("cat <<A <<B", [("A", False), ("B", False)]),
+        ],
+    )
+    def test_heredoc_delimiters(self, line: str, expected: list) -> None:
+        """区切り語の抽出。`<<<`（herestring）は heredoc として拾わない。"""
+        assert hook_common._heredoc_delimiters(line) == expected
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            ("cat > note.md <<'EOF'", False),
+            ("tee note.md <<'EOF'", False),
+            ("bash <<'EOF'", True),
+            ("sudo bash <<'EOF'", True),
+            ("cat <<'EOF' | bash", True),
+            ("cat <<'EOF' |", True),
+            ("cat <<'EOF' &", True),
+            ("cat <<'EOF' \\", True),
+            ("echo bash <<'EOF'", True),
+        ],
+    )
+    def test_line_keeps_heredoc_bodies(self, line: str, expected: bool) -> None:
+        """本文を残す/剥がすの判定。疑わしい形はすべて残す側へ倒す。"""
+        assert hook_common._line_keeps_heredoc_bodies(line) is expected
+
+    @pytest.mark.parametrize(
+        ("label", "command", "expected"),
+        [
+            ("heredoc 無しは素通り", "echo 'git commit --no-verify'", "echo 'git commit --no-verify'"),
+            ("herestring は素通り", "grep x <<< 'git commit'", "grep x <<< 'git commit'"),
+            (
+                "データ本文は剥がす",
+                "cat > note.md <<'EOF'\ngit commit --no-verify\nEOF",
+                "cat > note.md <<'EOF'\nEOF",
+            ),
+            (
+                "未クォート区切りでも剥がす",
+                "cat <<EOF > note.md\nprintf x > pyproject.toml\nEOF",
+                "cat <<EOF > note.md\nEOF",
+            ),
+            (
+                "シェル起動なら残す",
+                "bash <<'EOF'\ngit commit --no-verify\nEOF",
+                "bash <<'EOF'\ngit commit --no-verify\nEOF",
+            ),
+            (
+                "パイプ先がシェルなら残す",
+                "cat <<'EOF' | bash\ngit commit --no-verify\nEOF",
+                "cat <<'EOF' | bash\ngit commit --no-verify\nEOF",
+            ),
+            (
+                "継続演算子で終わるなら残す",
+                "cat <<'EOF' |\ngit commit --no-verify\nEOF",
+                "cat <<'EOF' |\ngit commit --no-verify\nEOF",
+            ),
+            (
+                "未終端なら残す",
+                "cat > note.md <<'EOF'\ngit commit --no-verify",
+                "cat > note.md <<'EOF'\ngit commit --no-verify",
+            ),
+            (
+                "終端後の後続コマンドは残る",
+                "cat > n.md <<'EOF'\nprose\nEOF\ngit commit -m x",
+                "cat > n.md <<'EOF'\nEOF\ngit commit -m x",
+            ),
+            ("同一行の二重 heredoc", "cat <<A <<B\nb1\nA\nb2\nB", "cat <<A <<B\nA\nB"),
+            (
+                "本文中の <<'INNER' は再検出しない",
+                "cat > n.md <<'OUTER'\ncat <<'INNER'\nx\nINNER\nOUTER",
+                "cat > n.md <<'OUTER'\nOUTER",
+            ),
+            (
+                "<<- はタブを剥がして終端照合",
+                "cat > n.md <<-\tEOF\n\tgit commit --no-verify\n\tEOF",
+                "cat > n.md <<-\tEOF\n\t\tEOF".replace("\t\t", "\t"),
+            ),
+        ],
+    )
+    def test_strip_data_heredoc_bodies(self, label: str, command: str, expected: str) -> None:
+        """データ本文だけを落とし、実行されうる形はそのまま残す。"""
+        assert hook_common.strip_data_heredoc_bodies(command) == expected, label
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat > note.md <<'EOF'\nprose\nEOF",
+            "bash <<'EOF'\ngit commit\nEOF",
+            "cat > note.md <<'EOF'\nunterminated",
+            "echo hi",
+        ],
+    )
+    def test_strip_is_idempotent(self, command: str) -> None:
+        """終端行を残す設計により再適用しても結果が変わらない。
+
+        フックごとに適用点が異なるため、二重適用が起きても安全であることを固定する。
+        """
+        once = hook_common.strip_data_heredoc_bodies(command)
+
+        assert hook_common.strip_data_heredoc_bodies(once) == once

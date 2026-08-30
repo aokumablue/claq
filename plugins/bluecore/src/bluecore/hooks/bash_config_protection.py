@@ -22,6 +22,8 @@ Bash コマンド文字列に対して適用する。保護対象の定義は `c
     は独立した hooks.json エントリとして追加し、判定ロジックだけを分ける。
 
 判定方式:
+    `hook_common.strip_data_heredoc_bodies` でデータ heredoc の本文を落としてから
+    （ADR-0017。本文が実行されうる形は落とさない）、
     `hook_common.tokenize`/`split_segments`（block_no_verify と共有するトーク
     ナイザ）でセグメント分割し、各セグメント内で保護対象（basename 一致、
     または `.git/hooks/` のようなディレクトリ単位の保護 path 配下・保護 path 自身）
@@ -82,6 +84,7 @@ from bluecore.hooks.hook_common import (
     resolve_effective_target,
     resolve_repo_root,
     split_segments,
+    strip_data_heredoc_bodies,
     tokenize,
 )
 from bluecore.lib.harness import extract_raw_tool_name, iter_bash_commands, normalize_tool_name
@@ -545,6 +548,7 @@ def find_protected_write(command: str) -> str | None:
     Raises:
         例外は発生しません。
     """
+    command = strip_data_heredoc_bodies(command)
     for segment in split_segments(tokenize(command)):
         token = _write_target_token_in_segment(segment)
         if token is None:

@@ -37,6 +37,13 @@ git 起動トークンの探索:
     フックバイパスなので、サブコマンドの確定を待たず git 起動トークン以降に
     現れた時点でブロックします。
 
+heredoc 本文:
+    ``cat > note.md <<'EOF'`` のようにデータとして書かれた heredoc 本文は、
+    トークン化の前に ``hook_common.strip_data_heredoc_bodies`` で落とします
+    （ADR-0017）。本文が実行されうる形（演算子行のシェル起動・継続演算子・
+    未終端）は落とさず、従来どおり検出対象のまま残します。非シェルインタプリタ
+    （``python3 - <<EOF``）の本文からの間接実行は非目標です。
+
 クォート内の誤検知:
     ``shlex`` はクォート内をひとつのトークンとして保持するため、
     ``git commit -m "use -n flag"`` のメッセージ本文はフラグとして
@@ -100,9 +107,11 @@ from bluecore.hooks.hook_common import (
     MAX_STDIN_BYTES,
     emit_block_output,
     is_git_executable_token,
+    is_shell_wrapper_token,
     parse_json_object,
     read_raw_stdin_with_truncation,
     split_segments,
+    strip_data_heredoc_bodies,
     tokenize,
 )
 from bluecore.lib.harness import INPUT_CONTAINER_KEYS, extract_tool_input, iter_bash_commands
@@ -206,10 +215,6 @@ _SENSITIVE_CONFIG_KEY_PREFIXES = (
     "includeif.",
     "alias.",
 )
-
-# ``sh -c`` 再帰の対象とする既知シェル実行ファイル（basename 判定）。
-_SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash"})
-
 
 class GitInvocation(NamedTuple):
     """git 起動トークン以降を解析した結果。
@@ -623,7 +628,7 @@ def _extract_shell_wrapper_command(segment: list[str]) -> str | None:
     """セグメント内の既知シェル ``-c`` 呼び出しから、ラップされた文字列コマンドを取り出す。
 
     ``sh -c 'git commit --no-verify'`` のように basename が
-    `_SHELL_WRAPPER_EXECUTABLES` のいずれかであるトークンを探し、続く
+    `hook_common.SHELL_WRAPPER_EXECUTABLES` のいずれかであるトークンを探し、続く
     トークンに ``-c`` があれば、その次のトークン（シェルへ渡す文字列
     コマンド）を返します（A-07 対応。1 段の再帰にのみ使う）。
 
@@ -637,8 +642,7 @@ def _extract_shell_wrapper_command(segment: list[str]) -> str | None:
         例外は発生しません。
     """
     for i, token in enumerate(segment):
-        basename = token.rsplit("/", 1)[-1]
-        if basename not in _SHELL_WRAPPER_EXECUTABLES:
+        if not is_shell_wrapper_token(token):
             continue
         for offset, tok in enumerate(segment[i + 1 :]):
             if tok != "-c":
@@ -674,6 +678,10 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
     Raises:
         例外は発生しません。
     """
+    # heredoc のデータ本文はコマンドの語彙に入らないため、トークン化の前に
+    # 落とす（本文が実行されうる形は `strip_data_heredoc_bodies` が残す）。
+    # 入口で正規化するので `sh -c` の再帰先にも同じ規則が効く。
+    command = strip_data_heredoc_bodies(command)
     for segment in split_segments(tokenize(command)):
         for index, token in enumerate(segment):
             if not is_git_invocation(token):
