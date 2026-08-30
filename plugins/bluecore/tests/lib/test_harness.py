@@ -100,7 +100,17 @@ class TestIterBashCommands:
         """
         payload = {"tool_input": [{"command": "ls"}, {"command": "git commit --no-verify"}]}
 
-        assert list(harness.iter_bash_commands(payload)) == ["ls\ngit commit --no-verify"]
+        assert list(harness.iter_bash_commands(payload)) == ["ls", "git commit --no-verify"]
+
+    def test_every_field_alias_is_scanned(self):
+        """command と cmd が同居する場合は両方を返す。
+
+        先勝ちで最初の 1 つだけを返すと、無害な command を足すだけで cmd の
+        危険なコマンドが検査から外れる（実測: 4 フックすべてが exit 0）。
+        """
+        payload = {"tool_input": {"command": "echo safe", "cmd": "git commit --no-verify -m x"}}
+
+        assert list(harness.iter_bash_commands(payload)) == ["echo safe", "git commit --no-verify -m x"]
 
     def test_tool_input_list_of_strings_is_extracted(self):
         """要素が生文字列でも取り出す。"""
@@ -357,11 +367,18 @@ class TestExtractFilePaths:
         assert harness.extract_file_paths("Edit", {"file": "ruff.toml"}) == ["ruff.toml"]
         assert harness.extract_file_paths("Edit", [{"file": "ruff.toml"}]) == ["ruff.toml"]
 
-    def test_file_path_wins_over_legacy_file_key(self):
-        """file_path と file が同居する場合は file_path を優先する。"""
-        assert harness.extract_file_paths(
-            "Edit", {"file_path": "new.py", "file": "old.py"}
-        ) == ["new.py"]
+    def test_both_file_path_and_legacy_file_key_are_scanned(self):
+        """file_path と file が同居する場合は両方を検査対象にする。
+
+        先勝ちで file_path だけを返すと、無害な file_path を 1 つ足すだけで
+        file 側の保護対象パスが検査から外れる（実測: config_protection が
+        exit 0）。どちらが実際に編集されるかは実行前に確定できないため、
+        両方を保護対象として扱う。
+        """
+        assert harness.extract_file_paths("Edit", {"file_path": "new.py", "file": "old.py"}) == [
+            "new.py",
+            "old.py",
+        ]
 
     def test_list_with_undeterminable_element_is_fail_closed(self):
         """list 要素が 1 つでも判定不能なら全体を判定不能（None）にする。"""

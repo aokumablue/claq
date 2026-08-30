@@ -399,7 +399,7 @@ def test_pre_tool_use_hook_scans_every_container_key(hook: str, tmp_path: Path) 
 #
 # 上の 2 軸はコンテナ（キー・形状・多重度）だけを動かし、コンテナ**の中**で
 # フックが読むフィールド名は正規名（command / file_path）に固定している。
-# しかし共有層はどれも別名を受理する: `_command_from_tool_input` は
+# しかし共有層はどれも別名を受理する: `_commands_from_tool_input` は
 # `command` と `cmd`、`_extract_patch_text` は生パッチ文字列と `{"input": ...}`。
 # 別名側の経路だけ判定が抜けても正規名のテストは緑のままなので、独立した軸にする。
 #
@@ -663,4 +663,56 @@ def test_pre_tool_use_hook_accepts_tool_name_aliases(
     assert allowed.returncode == 0, (
         f"{hook} {name_key}={name_value}: 通るべき payload が exit {allowed.returncode}"
         f" err={allowed.stderr[:200]}"
+    )
+
+
+# フィールド「多重度」の軸。上のフィールド別名ゲートは別名を 1 つずつしか流さない
+# ため、「無害な正規フィールドと危険な別名フィールドが同居する」payload を作らない。
+# 実測では 4 フックすべてがこの形で exit 0 のまま素通りしていた（コンテナキー側で
+# 塞いだ先勝ちバイパスと同型のものが 1 階層下に残っていた）。dict の挿入順ではなく
+# 実装のタプル順が結果を決めるため、危険な側を先に置いても素通りしていた。
+#
+# hook → (tool_name, 無害フィールド, 無害値, 危険フィールド, 危険値)。
+_FIELD_MULTIPLICITY_GATED_HOOKS = {
+    "bluecore.hooks.block_no_verify": ("Bash", "command", "echo safe", "cmd", "git commit --no-verify -m x"),
+    "bluecore.hooks.bash_config_protection": ("Bash", "command", "echo safe", "cmd", "echo x > ruff.toml"),
+    "bluecore.hooks.pre_bash_commit_quality": ("Bash", "command", "echo safe", "cmd", "git add . && git commit -m x"),
+    "bluecore.hooks.config_protection": ("Write", "file_path", "sample.py", "file", "ruff.toml"),
+}
+
+
+def test_every_pre_tool_use_hook_is_field_multiplicity_gated() -> None:
+    """PreToolUse の全 hook がフィールド多重度ゲートに載っていること（免除枠なし）。"""
+    assert _pre_tool_use_modules() == set(_FIELD_MULTIPLICITY_GATED_HOOKS)
+
+
+@pytest.mark.parametrize("hook", sorted(_FIELD_MULTIPLICITY_GATED_HOOKS))
+@pytest.mark.parametrize("dangerous_first", [False, True])
+def test_pre_tool_use_hook_scans_every_field_alias(hook: str, dangerous_first: bool, tmp_path: Path) -> None:
+    """正規フィールドと別名フィールドが同居しても危険な側を deny すること。
+
+    dict の挿入順を両方向で流す。実装はタプル順で走査するため挿入順に依存しないが、
+    順序依存の実装へ戻した場合にどちらの向きでも赤くなるようにしておく。
+    """
+    tool_name, safe_field, safe_value, danger_field, danger_value = _FIELD_MULTIPLICITY_GATED_HOOKS[hook]
+    fields = (
+        {danger_field: danger_value, safe_field: safe_value}
+        if dangerous_first
+        else {safe_field: safe_value, danger_field: danger_value}
+    )
+
+    denied = _run_launcher(hook, {"tool_name": tool_name, "tool_input": fields}, tmp_path)
+    allowed = _run_launcher(
+        hook,
+        {"tool_name": tool_name, "tool_input": {safe_field: safe_value, danger_field: safe_value}},
+        tmp_path,
+    )
+
+    assert denied.returncode == 2, (
+        f"{hook}: 別名フィールドの deny 値が exit {denied.returncode} で素通りした"
+        f" (dangerous_first={dangerous_first}) err={denied.stderr[:200]}"
+    )
+    assert json.loads(denied.stdout)["permissionDecision"] == "deny"
+    assert allowed.returncode == 0, (
+        f"{hook}: 全フィールド無害の payload が exit {allowed.returncode} err={allowed.stderr[:200]}"
     )

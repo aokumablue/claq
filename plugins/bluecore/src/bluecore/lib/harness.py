@@ -151,7 +151,7 @@ def iter_bash_commands(payload: dict[str, Any]) -> Iterator[str]:
     ``.get`` して AttributeError にならない。
 
     list 形状（``{"tool_input": [{"command": "..."}]}`` や
-    ``{"tool_input": ["..."]}``）は要素ごとに取り出して改行で連結する。
+    ``{"tool_input": ["..."]}``）は要素ごとに取り出して個別に返す。
     ここを取りこぼすと、``extract_tool_input`` は list を返して「必須
     フィールド欠落」の fail-closed を素通りするため、コマンドが 1 つも無い
     payload として静かに許可されてしまう（実測: ``git commit --no-verify``
@@ -172,35 +172,40 @@ def iter_bash_commands(payload: dict[str, Any]) -> Iterator[str]:
         例外は発生しません。
     """
     for container in iter_tool_input_containers(payload):
-        command = _command_from_tool_input(container)
-        if command:
-            yield command
+        yield from _commands_from_tool_input(container)
 
 
-def _command_from_tool_input(tool_input: Any) -> str:
-    """正規化済み tool 入力から command 文字列を取り出す。
+def _commands_from_tool_input(tool_input: Any) -> list[str]:
+    """正規化済み tool 入力から command 文字列を**すべて**取り出す。
+
+    フィールド別名（``command`` / ``cmd``）は 1 つも取りこぼさず走査する。
+    先勝ちで最初に一致したキーだけを返すと、無害な ``command`` を 1 つ足す
+    だけで ``cmd`` の危険なコマンドが検査から外れる（実測: 4 フックすべてが
+    exit 0）。コンテナキー側で塞いだ先勝ちバイパスと同型のものが 1 階層下に
+    残っていた。dict の挿入順ではなくこのタプルの順序が結果を決めるため、
+    ``{"cmd": 危険, "command": 無害}`` の並びでも同じく素通りしていた。
 
     Args:
         tool_input: `extract_tool_input` の戻り値。
 
     Returns:
-        コマンド文字列。取れなければ空文字列。list は要素ごとの結果を
-        改行で連結する（空要素は落とす）。
+        非空のコマンド文字列のリスト。list 形状は要素ごとに再帰して連結する。
+        取れなければ空リスト。
 
     Raises:
         例外は発生しません。
     """
     if isinstance(tool_input, dict):
-        for key in ("command", "cmd"):
-            cmd = tool_input.get(key)
-            if isinstance(cmd, str):
-                return cmd
-        return ""
+        return [
+            command
+            for key in ("command", "cmd")
+            if isinstance(command := tool_input.get(key), str) and command
+        ]
     if isinstance(tool_input, str):
-        return tool_input
+        return [tool_input] if tool_input else []
     if isinstance(tool_input, list):
-        return "\n".join(filter(None, (_command_from_tool_input(item) for item in tool_input)))
-    return ""
+        return [command for item in tool_input for command in _commands_from_tool_input(item)]
+    return []
 
 
 def normalize_tool_name(tool_name: str) -> str:
@@ -272,7 +277,7 @@ def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[st
     （``config_protection``）は「対象ファイルが 1 つも無い書き込み」として
     静かに許可してしまう（実測: ``{"tool_input": [{"file_path": "ruff.toml"}]}``
     と ``{"tool_input": "ruff.toml"}`` がいずれも exit 0 で保護を素通り）。
-    ``_command_from_tool_input`` が同じ取りこぼしを共有層で塞いだのと同型の
+    ``_commands_from_tool_input`` が同じ取りこぼしを共有層で塞いだのと同型の
     修正であり、フック側ではなくここで閉じる。
 
     Args:
@@ -321,11 +326,15 @@ def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[st
     if not isinstance(tool_input, dict):
         return []
 
-    for key in ("file_path", "file"):
-        file_path = tool_input.get(key)
-        if isinstance(file_path, str) and file_path:
-            return [file_path]
-    return []
+    # フィールド別名は 1 つも取りこぼさず走査する。先勝ちで最初に一致した
+    # キーだけを返すと、無害な `file_path` を 1 つ足すだけで `file` の保護対象
+    # パスが検査から外れる（実測: config_protection が exit 0）。コンテナキー
+    # 側で塞いだ先勝ちバイパスと同型のものが 1 階層下に残っていた。
+    return [
+        file_path
+        for key in ("file_path", "file")
+        if isinstance(file_path := tool_input.get(key), str) and file_path
+    ]
 
 
 # ユーザー発話として transcript に載るが、実際にはハーネスが生成した足場で
