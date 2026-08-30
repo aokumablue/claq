@@ -75,15 +75,24 @@ stdin へ実 payload を流し、exit code を実測する。**payload 形状を
 
 `F` はフックが見るフィールド。`lib/harness.py` の抽出関数が実際に読む別名まで含めると、
 バイパス面は **コンテナキー × 形状 × フィールド別名 × ツール名別名の 4 軸**ある。
-16 通りで閉じるのはこのうち 2 軸だけであり、**残り 2 軸は未閉**である。閉じていない軸を
+16 通りで閉じるのはこのうち 2 軸だけであり、**多重度は代表値のみ・残り 2 軸は未閉**である。閉じていない軸を
 黙って 1 値に固定すると、その軸の退行が `Findings: HIGH 0` として記録される。
 
 | 軸 | 実装が読む値（`lib/harness.py`） | 状態 |
 |---|---|---|
 | コンテナキー | `INPUT_CONTAINER_KEYS` の 4 つ | 閉（4） |
 | 形状 | dict / jsonstr / listdict / liststr | 閉（4） |
+| **コンテナキー多重度** | 1 つの payload が複数のコンテナキーを同時に持つ形（`tool_input` と `toolArgs` 等） | **代表値のみ**（下記） |
 | フィールド別名 | Bash 系 `command` / `cmd`（`_command_from_tool_input`）、Edit/Write 系 `file_path`、Codex の apply_patch は `input` フィールドと**生パッチ文字列**（`_extract_patch_text` / `_PATCH_FILE_MARKERS`） | **未閉** |
 | ツール名別名 | `tool_name` / `toolName`（`extract_raw_tool_name`）、`_TOOL_NAME_MAP` の `run_terminal_command` → `Bash` 等 | **未閉** |
+
+**多重度軸は上の 16 通りに含まれない。** 16 通りはキーを 1 つずつしか流さないため、
+「無害なキーが先頭にあり、危険な入力が後続キーにある」payload を 1 度も作らない。
+v0.9.44 ではこの形で `bash_config_protection` / `pre_bash_commit_quality` が exit 0 の
+まま素通りしており（走査層は共有していたが消費側が先勝ちだった）、16 通りは全件緑の
+ままだった。各フックにつき最低 1 組（先頭キー = 無害 / 末尾キー = 危険）を陽性・陰性の
+対で流す。恒久ゲートは `tests/hooks/test_hook_cli_contract.py` の多重度テストにあり、
+本スキルはその再実行ではなく実 payload での再確認として流す。
 
 未閉の 2 軸は、少なくとも各フックにつき代表 1 値ずつ（`cmd` / 生パッチ / `toolName` /
 lowercase ツール名）を追加で流し、結果を「代表値のみ検査」と明記して報告する。
