@@ -83,11 +83,17 @@ def extract_tool_input(payload: dict[str, Any]) -> Any:
         value = payload[key]
         if not isinstance(value, str):
             return value
+        # 判定とパースは同じ文字列に対して行う。lstrip 後の値で「JSON らしさ」を
+        # 見ながら元の文字列をパースすると、JSON が許容しない空白（\x0c 等）を
+        # 1 文字前置しただけで「{ で始まるがパースできない」状態になり、生コマンド
+        # 文字列として扱われる。その文字列の中では危険なコマンドが JSON のダブル
+        # クォート内に入るため、トークナイザからは実行トークンに見えず素通りする
+        # （実測: block_no_verify が exit 0。正常な JSON なら exit 2）。
         stripped = value.lstrip()
         if not stripped.startswith(("{", "[")):
             return value
         try:
-            return json.loads(value)
+            return json.loads(stripped)
         except (json.JSONDecodeError, TypeError):
             return value
     return None

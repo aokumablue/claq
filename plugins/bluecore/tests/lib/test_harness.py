@@ -63,6 +63,30 @@ class TestNormalizeToolName:
         assert harness.normalize_tool_name(grok_name) == expected
 
 
+class TestJsonStringContainerNormalization:
+    """JSON 文字列コンテナの「JSON らしさ判定」と実パースを揃える。
+
+    判定を lstrip 後の文字列で行い、パースを元の文字列で行うとずれる。実測では
+    tool_input の JSON 文字列へ \x0c を 1 文字前置しただけで block_no_verify が
+    exit 0 になった（正常な JSON なら exit 2）。lstrip は JSON が許容しない空白も
+    剥がすため「{ で始まる」と判定されるが、元の文字列は json.loads が拒否し、
+    生コマンド文字列として扱われる。その文字列の中では危険なコマンドが JSON の
+    ダブルクォート内に入るため、トークナイザからは実行トークンに見えない。
+    """
+
+    @pytest.mark.parametrize("prefix", ["", " ", "\t", "\n", "\r", "\x0c", "\x0b"])
+    def test_json_string_container_is_parsed_regardless_of_leading_whitespace(self, prefix: str) -> None:
+        """先頭の空白種別によらず JSON 文字列コンテナをパースする。"""
+        payload = {"tool_input": prefix + json.dumps({"command": "git commit --no-verify"})}
+
+        assert harness.extract_tool_input(payload) == {"command": "git commit --no-verify"}
+        assert list(harness.iter_bash_commands(payload)) == ["git commit --no-verify"]
+
+    def test_unparseable_json_like_string_is_returned_as_is(self) -> None:
+        """JSON に見えてパースできない文字列は生文字列のまま返す（既存契約）。"""
+        assert harness.extract_tool_input({"tool_input": "{not-json"}) == "{not-json"
+
+
 class TestIterBashCommands:
     """iter_bash_commands / iter_tool_input_containers のテスト。"""
 
