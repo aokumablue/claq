@@ -23,6 +23,11 @@ _NON_REPO_MD_REFS = {
     "user_notes.md": "eval の run 成果物（実行時に生成）",
     "checkpoint-2026-05-09-article-loop.md": "命名例として本文に書かれたファイル名",
 }
+# bluecore リポジトリのルート基準で解決する出典表記。配布物（プラグインディレクトリ）
+# には同梱されないため referrer 相対では解決できないが、リポジトリ側では実在する
+# 必要がある（綴り間違い・ADR 削除を検出する）。
+_REPO_ROOT_MD_REF_PREFIXES = ("docs/adr/",)
+_REPO_ROOT = _ROOT.parent.parent
 
 
 def _iter_md_files() -> Iterator[Path]:
@@ -41,6 +46,14 @@ def test_relative_md_references_resolve() -> None:
     以前は ``../`` と ``references/`` 始まりだけを対象にしていたため、
     ``skills/checkpoint/SKILL.md``（repo root 相対のつもり）や ``schemas.md``
     （別ディレクトリのファイル）のような参照が検査を素通りしていた。
+
+    referrer 相対で解決しても**プラグインディレクトリの外へ抜ける参照は不合格**
+    にする。``docs/`` はリポジトリ統治文書であって配布物に含まれないため、
+    ``../../../../docs/adr/xxxx.md`` はリポジトリでは解決するのに installed build
+    では 100% 切れる（実測: v0.9.43 のインストール済みキャッシュで 5 件が dangling）。
+    リポジトリ基準で検査すると通ってしまうこの死角が、ドリフトを生き残らせていた。
+    出典として ADR を挙げたい場合は ``docs/adr/`` 始まりのリポジトリルート基準表記
+    を使う（``_REPO_ROOT_MD_REF_PREFIXES``）。
     """
     broken: list[str] = []
     for md_file in _iter_md_files():
@@ -49,8 +62,18 @@ def test_relative_md_references_resolve() -> None:
             ref = match.group(1)
             if ref.startswith("~/") or any(ch in ref for ch in "{<*") or ref in _NON_REPO_MD_REFS:
                 continue
-            if not (md_file.parent / ref).resolve().is_file():
+            if ref.startswith(_REPO_ROOT_MD_REF_PREFIXES):
+                if not (_REPO_ROOT / ref).is_file():
+                    broken.append(f"{md_file.relative_to(_ROOT)}: `{ref}`（リポジトリルート基準）")
+                continue
+            resolved = (md_file.parent / ref).resolve()
+            if not resolved.is_file():
                 broken.append(f"{md_file.relative_to(_ROOT)}: `{ref}`")
+            elif not resolved.is_relative_to(_ROOT):
+                broken.append(
+                    f"{md_file.relative_to(_ROOT)}: `{ref}` はプラグイン外へ抜ける"
+                    f"（配布物に含まれず installed build では解決しない）"
+                )
     assert broken == [], "解決できない md 参照:\n" + "\n".join(broken)
 
 

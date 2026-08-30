@@ -24,7 +24,7 @@ command: /test-gen
 
 ## ステップ2: プロジェクト検出 + ベースライン取得
 
-1. `get_test_command(project_root)` でテストコマンドを検出
+1. プロジェクトルートのマニフェストからテストコマンドを決める。`pyproject.toml` / `setup.cfg` → `python3 -m pytest -q`、`package.json` → `scripts.test`（無ければ検出失敗）、`go.mod` → `go test ./...`、`Cargo.toml` → `cargo test`。複数該当する場合は対象ファイルの拡張子で選ぶ。どれにも該当しなければ `BLOCKED: テストコマンドを検出できません（探索したマニフェスト={列挙}）` として停止する — 推測でコマンドを組み立てない
 2. 言語に応じたカバレッジコマンドを選択
 3. 未到達ブランチを記録
 4. 既存のテスト失敗は `red_baseline` として記録し、そのまま続行する（生成テストの収束判定から除外される。`../skills/loop-dev/SKILL.md` の red_baseline 機構）

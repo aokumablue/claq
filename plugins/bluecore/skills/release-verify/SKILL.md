@@ -50,7 +50,7 @@ for event, groups in d['hooks'].items():
 
 **計数単位**: `hooks {n}` は上の列挙スクリプトが出力する行数（＝ `hooks.json` の command エントリ数）で数える。`tool_input` を受け取るのはそのうち PreToolUse の分だけなので、ステップ2 の payload 形状マトリクスの対象件数は「うち N 件」と別に書く。
 
-`user-invocable: false` の skill は直接起動できないため、**委譲元コマンド経由で起動する**。対応:
+`user-invocable: false` は**ホストの Skill ツールからの直接起動を妨げない**（実測: `checkpoint` / `learn` / `loop-dev` 等をスキル名指定で起動できる。`../../commands/review.md` / `../../commands/plan.md` / `../../commands/refactor.md` も「本文で明示すれば Skill ツール経由で発火する」と書いている）。このフラグが抑止するのは人間の `/` 補完への露出であって起動そのものではない。したがって**直接起動を第一手とし**、下の対応表は「本来どの経路で呼ばれる skill か」という出自であって起動要件ではない。委譲経路そのものを測りたいときだけ委譲元コマンドを起動する。対応:
 
 - `loop-dev` ← `feat-dev` / `bugfix` / `refactor`
 - `skill-make` ← `skill-gen`
@@ -112,7 +112,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
 |---|---|
 | commands | `/<name>` として起動する（`user-invocable` の制約は無い） |
 | skills（`user-invocable: true`） | 同じく `/<name>` で直接起動する |
-| skills（`user-invocable: false`） | 直接は起動できない。ステップ1 の対応表にある委譲元コマンドを起動して経由させる |
+| skills（`user-invocable: false`） | 同じく `/<name>` で直接起動できる（フラグは `/` 補完への露出だけを抑止する）。委譲経路自体を測る回だけ、ステップ1 の対応表にある委譲元コマンドを起動して経由させる |
 | agents | Agent ツールで `subagent_type` に名前を指定して起動する。起動前提を持つ agent（`grader` はトランスクリプト、`comparator` は同一課題の 2 出力、`bench-analyzer` は決着済みの比較）は、前提を満たす実材料を用意してから呼ぶ。前提を捏造して呼ぶと「起動した」記録だけが残る |
 
 記録は 2 列に分ける:
@@ -189,7 +189,7 @@ pytest をパイプへ流すときは `set -o pipefail` 必須。`git add` と `
 
 **実行の成否と `Gate` は別軸**。上の 3 条件は本実行が完了したかを表し、`Gate` はリリース可否を表す。部分実行や修正禁止の実行で `Gate: BLOCKED` が出るのは正常終了であって、実行の失敗ではない。
 
-**未起動を「異常なし」と読み替えない。**「skip されるゲートはゲートとして機能しない」（`../../../../docs/adr/0014-host-component-inventory-is-a-release-gate.md`）。未起動は合格でも不合格でもなく**未実施**として別カウントし、出力テンプレでも独立した行にする。
+**未起動を「異常なし」と読み替えない。**「skip されるゲートはゲートとして機能しない」（bluecore リポジトリの `docs/adr/0014-host-component-inventory-is-a-release-gate.md`）。未起動は合格でも不合格でもなく**未実施**として別カウントし、出力テンプレでも独立した行にする。
 
 ## 入力安全
 

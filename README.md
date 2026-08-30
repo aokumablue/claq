@@ -490,7 +490,7 @@ flowchart TD
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
   A(["/test-gen [path]"]) --> C["スコープ確定<br/>git diff HEAD / 引数パス"]
-  C --> D["プロジェクト検出<br/>get_test_command()"]
+  C --> D["プロジェクト検出<br/>マニフェストからテストコマンド決定"]
   D --> E["ベースライン取得<br/>カバレッジ測定"]
   E --> F["🎯 デシジョンテーブル設計<br/>関数単位・ブランチ網羅"]
   F --> G["テーブル提示<br/>（応答は待たない）"]

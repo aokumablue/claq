@@ -63,7 +63,7 @@ tools: Read, Grep, Glob
 
 ## CRITICAL発見時（READ-ONLY: 提案のみ。ファイル変更・コマンド実行はしない）
 
-提案はテキストで返す（reviewer との権限非対称の経緯は `../../../docs/adr/0004-reviewer-agent-keeps-write-capable-bash.md`）。
+提案はテキストで返す（reviewer との権限非対称の経緯は bluecore リポジトリの `docs/adr/0004-reviewer-agent-keeps-write-capable-bash.md`）。
 
 1. 安全コード例の提示（テキストのみ）
 2. 修正方針の提案（実装は別フェーズ: /bugfix / /refactor へ委譲）
