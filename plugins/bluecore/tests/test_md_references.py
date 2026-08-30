@@ -436,3 +436,63 @@ def test_harness_md_rubric_version_matches_audit_constant() -> None:
     assert found, "commands/harness.md に「ルーブリック版: `...`」表記が見つからない"
     for version in found:
         assert version == RUBRIC_VERSION, f"md のルーブリック版 {version} が実装の {RUBRIC_VERSION} と不一致"
+
+
+# md が `name(...)` の呼び出し形で名指しするシンボル。実装側の関数名と md の散文は
+# 別々に書かれるため、リネームや実装取り止めで静かに壊れる。実例: commands/test-gen.md
+# が `get_test_command(project_root)` の呼び出しを指示していたが、その関数は
+# src/ にも runtime/bluecore-helpers.sh にも存在せず、手順が実行不能だった
+# （README.md の図にも同じ名前が複製されていた）。
+_MD_CALLABLE_RE = re.compile(r"`([a-z_][a-z0-9_]*)\([^`)]*\)`")
+_SHELL_FUNC_RE = re.compile(r"^([a-z_][a-z0-9_]*)\(\)", re.M)
+_PY_DEF_RE = re.compile(r"^\s*def ([a-z_][a-z0-9_]*)\(", re.M)
+_HELPERS_SH = _ROOT / "runtime" / "bluecore-helpers.sh"
+
+# 実装シンボルではない呼び出し表記と、その理由。
+_MD_CALLABLE_EXEMPTIONS = {
+    "fetch": "SSRF の説明に使う汎用の擬似コード（agents/security-auditor.md）",
+    "search": "検証手段の書き方を示す例示（agents/planner.md）",
+}
+
+
+def _defined_callables() -> set[str]:
+    """src/ の Python 関数と runtime シェルヘルパの名前を集める。"""
+    names = {m.group(1) for m in _SHELL_FUNC_RE.finditer(_HELPERS_SH.read_text(encoding="utf-8"))}
+    for py in (_ROOT / "src").rglob("*.py"):
+        names |= {m.group(1) for m in _PY_DEF_RE.finditer(py.read_text(encoding="utf-8"))}
+    return names
+
+
+def test_md_named_callables_are_defined() -> None:
+    """md が `name(...)` 形で名指しする関数が実装に存在すること。
+
+    存在しない関数の呼び出しを手順に書くと、記載どおり実行した時点で詰まる。
+    静的 validator も既存のリンクチェッカも、md 本文が名指しする**シンボル**の
+    実在は見ていなかった。
+    """
+    defined = _defined_callables()
+    missing: list[str] = []
+    for md_file in _iter_md_files():
+        for match in _MD_CALLABLE_RE.finditer(md_file.read_text(encoding="utf-8")):
+            name = match.group(1)
+            if name in defined or name in _MD_CALLABLE_EXEMPTIONS:
+                continue
+            missing.append(f"{md_file.relative_to(_ROOT)}: `{name}(...)`")
+    assert missing == [], "実装に存在しない呼び出し表記:\n" + "\n".join(sorted(set(missing)))
+    assert all(_MD_CALLABLE_EXEMPTIONS.values()), "免除には理由が要る"
+
+
+def test_md_shell_helper_invocations_are_defined() -> None:
+    """bash フェンスが呼ぶ bluecore_* / collect_* ヘルパが実在すること。
+
+    シェル関数名は Python の import に現れないため、リネームしても何も落ちず、
+    実行時に exit 127（command not found）として初めて現れる。
+    """
+    defined = {m.group(1) for m in _SHELL_FUNC_RE.finditer(_HELPERS_SH.read_text(encoding="utf-8"))}
+    missing: list[str] = []
+    for md_file in _iter_md_files():
+        for block in _BASH_FENCE_RE.findall(md_file.read_text(encoding="utf-8")):
+            for token in re.findall(r"(?<![\w./-])((?:bluecore|collect)_[a-z0-9_]+)", block):
+                if token not in defined:
+                    missing.append(f"{md_file.relative_to(_ROOT)}: {token}")
+    assert missing == [], "未定義のシェルヘルパ呼び出し:\n" + "\n".join(sorted(set(missing)))
