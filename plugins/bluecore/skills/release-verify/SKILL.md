@@ -73,7 +73,21 @@ stdin へ実 payload を流し、exit code を実測する。**payload 形状を
 | listdict | `{"K": [{"F": V}]}` |
 | liststr | `{"K": [V]}` |
 
-`F` はフックが見るフィールド（Bash 系は `command`、Edit/Write 系は `file_path`）。
+`F` はフックが見るフィールド。`lib/harness.py` の抽出関数が実際に読む別名まで含めると、
+バイパス面は **コンテナキー × 形状 × フィールド別名 × ツール名別名の 4 軸**ある。
+16 通りで閉じるのはこのうち 2 軸だけであり、**残り 2 軸は未閉**である。閉じていない軸を
+黙って 1 値に固定すると、その軸の退行が `Findings: HIGH 0` として記録される。
+
+| 軸 | 実装が読む値（`lib/harness.py`） | 状態 |
+|---|---|---|
+| コンテナキー | `INPUT_CONTAINER_KEYS` の 4 つ | 閉（4） |
+| 形状 | dict / jsonstr / listdict / liststr | 閉（4） |
+| フィールド別名 | Bash 系 `command` / `cmd`（`_command_from_tool_input`）、Edit/Write 系 `file_path`、Codex の apply_patch は `input` フィールドと**生パッチ文字列**（`_extract_patch_text` / `_PATCH_FILE_MARKERS`） | **未閉** |
+| ツール名別名 | `tool_name` / `toolName`（`extract_raw_tool_name`）、`_TOOL_NAME_MAP` の `run_terminal_command` → `Bash` 等 | **未閉** |
+
+未閉の 2 軸は、少なくとも各フックにつき代表 1 値ずつ（`cmd` / 生パッチ / `toolName` /
+lowercase ツール名）を追加で流し、結果を「代表値のみ検査」と明記して報告する。
+全件を閉じるまでは `Findings` を「全軸で 0」と読ませない。
 
 ```bash
 echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}}' \
@@ -92,12 +106,27 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
 
 ### commands / skills / agents
 
-実際に起動して出力を受ける。記録は 2 列に分ける:
+起動機構はそれぞれ別:
+
+| 種別 | 起動方法 |
+|---|---|
+| commands | `/<name>` として起動する（`user-invocable` の制約は無い） |
+| skills（`user-invocable: true`） | 同じく `/<name>` で直接起動する |
+| skills（`user-invocable: false`） | 直接は起動できない。ステップ1 の対応表にある委譲元コマンドを起動して経由させる |
+| agents | Agent ツールで `subagent_type` に名前を指定して起動する。起動前提を持つ agent（`grader` はトランスクリプト、`comparator` は同一課題の 2 出力、`bench-analyzer` は決着済みの比較）は、前提を満たす実材料を用意してから呼ぶ。前提を捏造して呼ぶと「起動した」記録だけが残る |
+
+記録は 2 列に分ける:
 
 - **起動できた**（呼び出しが成立し、応答が返った）
 - **意図どおり動いた**（出力が定義どおりの形・内容だった）
 
 前者だけで合格にしない。起動できて出力が壊れているケースは「起動済み・不合格」であり、未起動とも合格とも別扱いにする。
+
+**「意図どおり動いた」の合格条件はコンポーネントごとに未定義**（未閉の軸）。定義が無い
+まま印を付けると、返ってきたものを全部合格にできてしまう。現時点の運用は、各コンポーネントの
+定義ファイルが明示している出力契約（箱型テンプレの行・`Blockers: {n}` 行・終了コード等）を
+合格条件として引き、契約が書かれていないものは**「合格条件なし」として `Pending` へ計上する**
+（合格にも不合格にもしない）。
 
 ### 副作用の隔離
 
@@ -105,11 +134,17 @@ DB へ書く操作は、書いたものを必ず後始末する。mem の DB 位
 
 環境変数は Bash 呼び出しをまたいで持続しないため、`$(mktemp -d)` を使うと呼び出しごとに別ディレクトリになり、前の呼び出しで書いた内容を次の呼び出しで検証できない。**固定パスを掘って毎回同じ値を export する**。
 
+固定パスは**その場で決めた値ではなく毎回同じ式から導出する**（変数は次の呼び出しに残らないため）:
+
 ```bash
-# 作業ディレクトリ配下の固定パスを 1 つ決め、毎回の Bash 呼び出しで同じ値を設定する
-export BLUECORE_DATA_PATH="$WORKDIR/verify-data"
+# 毎回の Bash 呼び出しの先頭でこの 2 行を実行する。同じ式なので必ず同じパスになる
+export BLUECORE_DATA_PATH="$(git rev-parse --show-toplevel)/.release-verify-data"
 mkdir -p "$BLUECORE_DATA_PATH"
 ```
+
+この式を書き換えたり `$(mktemp -d)` へ戻したりしない。**export ごと落とすのは最悪**で、
+`mem/settings.py` は `BLUECORE_DATA_PATH` の**存在**で分岐するため、変数が消えると
+`~/.bluecore` へ着地して実 DB を汚す。検証後は `rm -rf "$BLUECORE_DATA_PATH"` で消す。
 
 隔離が効いた証跡は、実 DB（`~/.bluecore/mem.db`）の **`knowledge` / `sessions` / `repos` の行数が不変**であることで示す。**mtime を汚染の判定に使わない** — WAL のチェックポイントは読み取り専用の `search` でも本体ファイルの mtime を動かすため、mtime 変化を汚染と読むと誤検知する。逆に「読み取りだから副作用ゼロ」とも決めつけず、行数で確かめる。
 
