@@ -26,10 +26,9 @@ from bluecore.hooks.hook_common import (
     resolve_effective_target,
 )
 from bluecore.lib.harness import (
-    INPUT_CONTAINER_KEYS,
     extract_file_paths,
     extract_raw_tool_name,
-    extract_tool_input,
+    iter_tool_input_containers,
     normalize_tool_name,
 )
 
@@ -506,10 +505,10 @@ def _block_reason(data: dict[str, Any]) -> str | None:
     tool_name = extract_raw_tool_name(data)
     if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES:
         return None
-    for key in INPUT_CONTAINER_KEYS:
-        if key not in data:
-            continue
-        reason = _block_reason_for_container(tool_name, extract_tool_input({key: data[key]}))
+    # コンテナキーの全走査は iter_tool_input_containers（lib/harness.py）が
+    # 単一情報源。フック側で走査を手書きすると片側だけ緩い状態が再発する。
+    for container in iter_tool_input_containers(data):
+        reason = _block_reason_for_container(tool_name, container)
         if reason:
             return reason
     return None

@@ -280,8 +280,9 @@ _SHAPE_GATED_HOOKS = {
 _SHAPE_GATE_EXEMPTIONS = {
     "bluecore.hooks.pre_bash_commit_quality": (
         "判定が staged 内容に依存し、陽性/陰性の作り分けに git fixture が要る。"
-        "形状展開は extract_bash_command 共有層で block_no_verify と同一経路のため、"
-        "同層のゲートで被覆される"
+        "**形状軸に限り** iter_bash_commands 共有層で block_no_verify と同一経路のため"
+        "同層のゲートで被覆される。多重度軸（複数コンテナキー同時）は消費側の意味論であり"
+        "共有層では被覆されないため、下の多重度ゲートには本 hook も含める"
     ),
 }
 
@@ -335,4 +336,57 @@ def test_pre_tool_use_hook_discriminates_across_container_and_shape(
     assert allowed.returncode == 0, (
         f"{hook} {container_key}/{shape}: 通るべき payload が exit {allowed.returncode}"
         f" err={allowed.stderr[:200]}"
+    )
+
+# コンテナキー「多重度」の軸。上の形状ゲートはキーを 1 つずつしか流さないため、
+# 「無害なキーが先頭にあり、危険な入力が後続キーにある」payload を 1 度も作らない。
+# 実測では v0.9.44 の bash_config_protection / pre_bash_commit_quality がこの形で
+# exit 0 のまま素通りしており、形状ゲートは緑のままだった。走査層を共有しても
+# 消費側が先勝ちなら穴は残るので、多重度は独立した軸として全 PreToolUse hook に流す。
+#
+# hook → (tool_name, フィールド名, 後続キーへ入れる deny 値, 先頭キーへ入れる無害値)。
+_MULTIPLICITY_GATED_HOOKS = {
+    "bluecore.hooks.block_no_verify": ("Bash", "command", "git commit --no-verify -m x", "echo safe"),
+    "bluecore.hooks.bash_config_protection": ("Bash", "command", "echo x > ruff.toml", "echo safe"),
+    "bluecore.hooks.config_protection": ("Write", "file_path", "ruff.toml", "sample.py"),
+    "bluecore.hooks.pre_bash_commit_quality": ("Bash", "command", "git add . && git commit -m x", "echo safe"),
+}
+
+
+def test_every_pre_tool_use_hook_is_multiplicity_gated() -> None:
+    """PreToolUse の全 hook が多重度ゲートに載っていること（免除枠を設けない）。
+
+    形状ゲートと違い、こちらは免除を許さない。消費側の意味論はフックごとに
+    別実装であり、共有層のゲートでは被覆できないため。
+    """
+    assert _pre_tool_use_modules() == set(_MULTIPLICITY_GATED_HOOKS)
+
+
+@pytest.mark.parametrize("hook", sorted(_MULTIPLICITY_GATED_HOOKS))
+def test_pre_tool_use_hook_scans_every_container_key(hook: str, tmp_path: Path) -> None:
+    """先頭キーが無害でも、後続キーに入った危険な入力を deny すること。
+
+    陰性対照として、全キーが無害な多重コンテナ payload が exit 0 になることも
+    確かめる（全部 deny する実装でも緑になる測定を合格にしない）。
+    """
+    tool_name, field, deny_value, allow_value = _MULTIPLICITY_GATED_HOOKS[hook]
+    keys = list(INPUT_CONTAINER_KEYS)
+
+    denied = _run_launcher(
+        hook,
+        {"tool_name": tool_name, keys[0]: {field: allow_value}, keys[-1]: {field: deny_value}},
+        tmp_path,
+    )
+    allowed = _run_launcher(
+        hook,
+        {"tool_name": tool_name, keys[0]: {field: allow_value}, keys[-1]: {field: allow_value}},
+        tmp_path,
+    )
+
+    assert denied.returncode == 2, (
+        f"{hook}: 後続コンテナキーの deny 値が exit {denied.returncode} で素通りした"
+    )
+    assert json.loads(denied.stdout)["permissionDecision"] == "deny"
+    assert allowed.returncode == 0, (
+        f"{hook}: 全キー無害の payload が exit {allowed.returncode} err={allowed.stderr[:200]}"
     )

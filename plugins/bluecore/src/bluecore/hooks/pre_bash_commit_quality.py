@@ -52,7 +52,7 @@ from bluecore.hooks.hook_common import (
     tokenize_with_status,
 )
 from bluecore.lib.core_utils import log
-from bluecore.lib.harness import extract_bash_command
+from bluecore.lib.harness import iter_bash_commands
 
 _CONVENTIONAL_COMMIT = re.compile(
     r"^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?:\s*.+"
@@ -884,13 +884,33 @@ def evaluate(raw_input: str) -> dict:
         if not input_data:
             return {"output": raw_input, "exitCode": 0}
 
-        command = extract_bash_command(input_data)
+        # コンテナキーは 1 つも取りこぼさず走査し、commit を**全て**集める
+        # （iter_bash_commands）。先に判定できたコンテナの結論を返す形にすると、
+        # 先頭が「通る commit」のときに後続キーの commit が一切検査されない
+        # （実測: 単独なら exit 2 の payload が、先頭へ通る commit を足すだけで
+        # exit 0 になった）。走査層だけ全キー化しても評価層が先勝ちなら穴は残る。
+        commits = []
+        for command in iter_bash_commands(input_data):
+            # git commit コマンドの場合のみ実行（トークン化して堅牢に判定）
+            try:
+                is_commit, commit_args = _is_git_commit_command(command)
+            except Exception as err:  # noqa: BLE001 - 1 コンテナの失敗で他を落とさない
+                log(f"[Hook] Error: {err}")
+                continue
+            if is_commit:
+                commits.append((command, commit_args))
 
-        # git commit コマンドの場合のみ実行（トークン化して堅牢に判定）
-        is_commit, commit_args = _is_git_commit_command(command)
-        if not is_commit:
+        if not commits:
             return {"output": raw_input, "exitCode": 0}
 
+        # 複数コンテナに commit が散っている場合、どれが実際に実行されるかも
+        # 順序も実行前には確定できない。1 コマンド内に複数 commit がある場合
+        # （`_compound_commit_risk`）と同じ理由で検査不能として deny する。
+        if len(commits) > 1:
+            log("[Hook] ERROR: commit content cannot be inspected before execution.")
+            return {"output": raw_input, "exitCode": 2, "reason": _MULTIPLE_COMMITS_MESSAGE}
+
+        command, commit_args = commits[0]
         compound_risk = _compound_commit_risk(command)
         if compound_risk is not None:
             log("[Hook] ERROR: commit content cannot be inspected before execution.")

@@ -105,7 +105,7 @@ from bluecore.hooks.hook_common import (
     split_segments,
     tokenize,
 )
-from bluecore.lib.harness import INPUT_CONTAINER_KEYS, extract_bash_command, extract_tool_input
+from bluecore.lib.harness import INPUT_CONTAINER_KEYS, extract_tool_input, iter_bash_commands
 
 # 値を別トークンとして必ず取る long オプション（git グローバル + commit/push）。
 # 値が ``=`` で結合されている場合は次トークンを消費しません。
@@ -739,15 +739,12 @@ def main() -> int:
     if extract_tool_input(data) is None:
         return emit_block_output(_MISSING_FIELDS_MESSAGE)
 
-    # コンテナキーは全て走査する。先勝ちで 1 キーだけ見ると、payload が
-    # 複数のコンテナキーを持つ host で無害な側だけを検査して素通りさせうる。
-    # ADR-0002 は本フックの検出境界を「誤検出を誤通過より選ぶ」と定めており、
-    # config_protection は既に全キー走査（_block_reason_for_container）。単一情報源
-    # 化したのは定数だけで、走査の意味論が片側だけ緩いままだった。
-    for key in INPUT_CONTAINER_KEYS:
-        if key not in data:
-            continue
-        if has_bypass_flag(extract_bash_command({key: data[key]})):
+    # コンテナキーの全走査は iter_bash_commands（lib/harness.py）が単一情報源。
+    # 先勝ちで 1 キーだけ見ると、payload が複数のコンテナキーを持つ host で
+    # 無害な側だけを検査して素通りさせうる。ADR-0002 は本フックの検出境界を
+    # 「誤検出を誤通過より選ぶ」と定めている。
+    for command in iter_bash_commands(data):
+        if has_bypass_flag(command):
             return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
 
     return 0

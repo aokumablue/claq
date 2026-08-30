@@ -63,65 +63,95 @@ class TestNormalizeToolName:
         assert harness.normalize_tool_name(grok_name) == expected
 
 
-class TestExtractBashCommand:
-    """extract_bash_command / extract_tool_input のテスト。"""
+class TestIterBashCommands:
+    """iter_bash_commands / iter_tool_input_containers のテスト。"""
 
     def test_tool_input_dict_command(self):
         """Claude 形式 tool_input.command を返す。"""
-        assert harness.extract_bash_command({"tool_input": {"command": "ls -la"}}) == "ls -la"
+        assert list(harness.iter_bash_commands({"tool_input": {"command": "ls -la"}})) == ["ls -la"]
 
     def test_tool_args_json_string(self):
         """Copilot camelCase toolArgs（JSON 文字列）をパースして command を返す。"""
         payload = {"toolArgs": json.dumps({"command": "git status"})}
-        assert harness.extract_bash_command(payload) == "git status"
+        assert list(harness.iter_bash_commands(payload)) == ["git status"]
 
     def test_tool_args_dict(self):
         """toolArgs が既に dict の場合も command を返す。"""
-        assert harness.extract_bash_command({"toolArgs": {"command": "pwd"}}) == "pwd"
+        assert list(harness.iter_bash_commands({"toolArgs": {"command": "pwd"}})) == ["pwd"]
 
     def test_tool_input_string_not_json(self):
         """tool_input が非 JSON 文字列ならそのまま返す。"""
-        assert harness.extract_bash_command({"tool_input": "echo hi"}) == "echo hi"
+        assert list(harness.iter_bash_commands({"tool_input": "echo hi"})) == ["echo hi"]
 
     def test_tool_input_malformed_json_object_string(self):
         """{ で始まるが JSON 不正なら生文字列を返す。"""
-        assert harness.extract_bash_command({"tool_input": "{not-json"}) == "{not-json"
+        assert list(harness.iter_bash_commands({"tool_input": "{not-json"})) == ["{not-json"]
 
-    def test_tool_input_list_without_commands_is_empty(self):
-        """list の要素から command が 1 つも取れなければ空文字。"""
-        assert harness.extract_bash_command({"tool_input": [1, 2]}) == ""
+    def test_tool_input_list_without_commands_yields_nothing(self):
+        """list の要素から command が 1 つも取れなければ何も返さない。"""
+        assert list(harness.iter_bash_commands({"tool_input": [1, 2]})) == []
 
     def test_tool_input_list_of_dicts_is_extracted(self):
         """list 形状のコンテナも要素ごとに command を取り出す。
 
-        空文字を返すと `extract_tool_input` が list を返すため必須フィールド
+        取り出せないと `extract_tool_input` が list を返すため必須フィールド
         欠落の fail-closed を素通りし、フックが静かに許可する（実測で
         `git commit --no-verify` を list に包むと exit 0 だった）。
         """
         payload = {"tool_input": [{"command": "ls"}, {"command": "git commit --no-verify"}]}
 
-        assert harness.extract_bash_command(payload) == "ls\ngit commit --no-verify"
+        assert list(harness.iter_bash_commands(payload)) == ["ls\ngit commit --no-verify"]
 
     def test_tool_input_list_of_strings_is_extracted(self):
         """要素が生文字列でも取り出す。"""
-        assert harness.extract_bash_command({"tool_input": ["git status"]}) == "git status"
+        assert list(harness.iter_bash_commands({"tool_input": ["git status"]})) == ["git status"]
 
     def test_tool_input_nested_list_is_flattened(self):
         """入れ子の list も再帰的に取り出す。"""
-        assert harness.extract_bash_command({"tool_input": [["git status"]]}) == "git status"
+        assert list(harness.iter_bash_commands({"tool_input": [["git status"]]})) == ["git status"]
 
     def test_cmd_alias_field(self):
         """command が無く cmd があればそれを使う。"""
-        assert harness.extract_bash_command({"tool_input": {"cmd": "whoami"}}) == "whoami"
+        assert list(harness.iter_bash_commands({"tool_input": {"cmd": "whoami"}})) == ["whoami"]
 
-    def test_missing_returns_empty(self):
-        """キーが無ければ空文字。"""
-        assert harness.extract_bash_command({}) == ""
+    def test_missing_yields_nothing(self):
+        """キーが無ければ何も返さない。"""
+        assert list(harness.iter_bash_commands({})) == []
 
     def test_tool_input_dict_without_string_command(self):
-        """tool_input が dict でも command/cmd が無い・非文字列なら空文字。"""
-        assert harness.extract_bash_command({"tool_input": {}}) == ""
-        assert harness.extract_bash_command({"tool_input": {"command": 1}}) == ""
+        """tool_input が dict でも command/cmd が無い・非文字列なら返さない。"""
+        assert list(harness.iter_bash_commands({"tool_input": {}})) == []
+        assert list(harness.iter_bash_commands({"tool_input": {"command": 1}})) == []
+
+    def test_every_container_key_is_scanned(self):
+        """複数コンテナキーを持つ payload は全キー分の command を返す。
+
+        先勝ちで 1 キーだけ見ると、無害な側だけを検査して後続キーの危険な
+        コマンドを素通りさせる（実測: `bash_config_protection` /
+        `pre_bash_commit_quality` が exit 0 のまま通した）。
+        """
+        payload = {
+            "tool_input": {"command": "echo safe"},
+            "toolInput": {"command": "echo safe2"},
+            "toolArgs": {"command": "git commit --no-verify -m x"},
+            "tool_args": {"command": "echo safe3"},
+        }
+
+        assert list(harness.iter_bash_commands(payload)) == [
+            "echo safe",
+            "echo safe2",
+            "git commit --no-verify -m x",
+            "echo safe3",
+        ]
+
+    def test_iter_containers_yields_normalized_values(self):
+        """iter_tool_input_containers は各キーの正規化済み値を順に返す。"""
+        payload = {"tool_input": {"file_path": "a"}, "toolArgs": json.dumps({"file_path": "b"})}
+
+        assert list(harness.iter_tool_input_containers(payload)) == [
+            {"file_path": "a"},
+            {"file_path": "b"},
+        ]
 
 
 class TestExtractToolInput:
@@ -507,19 +537,25 @@ class TestGrokCamelCaseToolInput:
     def test_bash_command_from_camel_case_tool_input(self):
         """toolInput.command が Bash コマンドとして取り出せる。"""
         payload = {"toolName": "run_terminal_command", "toolInput": {"command": "git commit --no-verify"}}
-        assert harness.extract_bash_command(payload) == "git commit --no-verify"
+        assert list(harness.iter_bash_commands(payload)) == ["git commit --no-verify"]
 
-    def test_snake_case_still_wins_over_camel_case(self):
-        """tool_input が有る場合はそちらを優先する（既存 host の挙動を変えない）。"""
+    def test_snake_case_and_camel_case_are_both_scanned(self):
+        """両方のコンテナキーがある場合は宣言順で両方返す（片側だけ検査しない）。"""
         payload = {"tool_input": {"command": "a"}, "toolInput": {"command": "b"}}
-        assert harness.extract_bash_command(payload) == "a"
+        assert list(harness.iter_bash_commands(payload)) == ["a", "b"]
 
-    def test_input_container_keys_is_the_single_source(self):
-        """入力コンテナキーは harness の 1 か所だけで定義される。"""
-        from bluecore.hooks import config_protection
+    def test_container_scanning_is_the_single_source(self):
+        """コンテナキーの定義と全キー走査は harness の 1 か所だけに置く。
 
-        assert config_protection.INPUT_CONTAINER_KEYS is harness.INPUT_CONTAINER_KEYS
+        フック側が走査を手書きすると片側だけ緩い状態が再発する（実測: 走査を
+        手書きしていない 2 フックが複数コンテナキー payload を素通りさせた）。
+        """
+        from bluecore.hooks import bash_config_protection, block_no_verify, config_protection
+
         assert "toolInput" in harness.INPUT_CONTAINER_KEYS
+        assert config_protection.iter_tool_input_containers is harness.iter_tool_input_containers
+        for module in (block_no_verify, bash_config_protection):
+            assert module.iter_bash_commands is harness.iter_bash_commands
 
 
 class TestCommandFoldPreservesSiblings:

@@ -282,6 +282,28 @@ class TestMain:
         assert bash_config_protection.main() == 2
         assert "BLOCKED: Modifying pyproject.toml is not allowed." in capsys.readouterr().err
 
+    def test_main_scans_every_container_key(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """先頭キーが無害でも後続キーの保護対象書き込みをブロックする。
+
+        先勝ちで 1 キーだけ見ていた頃は、`tool_input` に無害なコマンドを置き
+        `toolArgs` に保護対象への書き込みを載せると exit 0 で素通りした（実測）。
+        """
+        payload = json.dumps(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "echo safe"},
+                "toolArgs": {"command": "printf x > pyproject.toml"},
+            }
+        )
+        monkeypatch.setattr(
+            bash_config_protection, "read_raw_stdin_with_truncation", lambda: (payload, False)
+        )
+
+        assert bash_config_protection.main() == 2
+        assert "BLOCKED: Modifying pyproject.toml is not allowed." in capsys.readouterr().err
+
     def test_main_allows_non_protected_write(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             bash_config_protection,

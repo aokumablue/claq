@@ -195,6 +195,66 @@ class TestCompoundCommitGuard:
         """`sed --in-place` 以外の長オプションを `-i` と誤認しないこと。"""
         assert pbcq._segment_mutates_worktree_or_index(["sed", "--expression", "s/a/b/", "f.py"]) is False
 
+    def test_evaluate_scans_every_container_key(self) -> None:
+        """先頭キーが無害でも後続キーの `git commit` を検査する。
+
+        先勝ちで 1 キーだけ見ていた頃は、`tool_input` に無害なコマンドを置き
+        `toolArgs` に `git commit` を載せると品質検査ごと素通りした（実測: exit 0）。
+        """
+        raw = json.dumps(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "echo safe"},
+                "toolArgs": {"command": "git add . && git commit -m x"},
+            }
+        )
+
+        result = pbcq.evaluate(raw)
+
+        assert result["exitCode"] == 2
+
+    def test_evaluate_does_not_stop_at_the_first_passing_commit(self) -> None:
+        """先頭キーが「通る commit」でも後続キーの commit を素通りさせない。
+
+        走査層だけ全キー化して評価層が先勝ちのままだと、単独なら exit 2 の
+        payload が先頭へ通る commit を足すだけで exit 0 になった（実測）。
+        複数コンテナに commit が散る形は実行順が確定できないため deny する。
+        """
+        raw = json.dumps(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "git commit -m ok"},
+                "tool_args": {"command": "git add . && git commit -m x"},
+            }
+        )
+
+        result = pbcq.evaluate(raw)
+
+        assert result["exitCode"] == 2
+        assert result["reason"] == pbcq._MULTIPLE_COMMITS_MESSAGE
+
+    def test_evaluate_skips_container_whose_commit_detection_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """1 コンテナの判定失敗で残りのコンテナを捨てない。"""
+        calls: list[str] = []
+
+        def _flaky(command: str) -> tuple[bool, list[str]]:
+            calls.append(command)
+            if command == "boom":
+                raise RuntimeError("tokenize exploded")
+            return (False, [])
+
+        monkeypatch.setattr(pbcq, "_is_git_commit_command", _flaky)
+        raw = json.dumps(
+            {"tool_name": "Bash", "tool_input": {"command": "boom"}, "tool_args": {"command": "echo ok"}}
+        )
+
+        result = pbcq.evaluate(raw)
+
+        assert result["exitCode"] == 0
+        assert calls == ["boom", "echo ok"]
+
     def test_evaluate_denies_mutation_before_commit(self) -> None:
         """evaluate() が deny 理由と exitCode 2 を返すこと。"""
         raw = json.dumps({"tool_input": {"command": "git add . && git commit -m x"}})

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from typing import Any
 
 # 各ハーネスのツール名 → Claude Code 相当ツール名。
@@ -116,31 +117,64 @@ def extract_raw_tool_name(payload: dict[str, Any]) -> str:
     return ""
 
 
-def extract_bash_command(payload: dict[str, Any]) -> str:
-    """フック payload から Bash/shell の command 文字列を取り出す。
+def iter_tool_input_containers(payload: dict[str, Any]) -> Iterator[Any]:
+    """payload に存在する全コンテナキーの正規化済み tool 入力を順に返す。
 
-    ``tool_input.command`` / ``toolArgs``（JSON 文字列含む）/ 生文字列を吸収する。
-    非 dict の tool_input に対して ``.get`` して AttributeError にならない。
-
-    list 形状（``{"tool_input": [{"command": "..."}]}`` や
-    ``{"tool_input": ["..."]}``）は要素ごとに取り出して改行で連結する。
-    ここで空文字列を返すと、``extract_tool_input`` は list を返して「必須
-    フィールド欠落」の fail-closed を素通りするため、コマンドが 1 つも無い
-    payload として静かに許可されてしまう（実測: ``git commit --no-verify``
-    を list に包むと ``block_no_verify`` が exit 0）。同じ ``extract_bash_command``
-    を使う ``config_protection`` / ``pre_bash_commit_quality`` も同型だったため、
-    フック側ではなく共有層で塞ぐ。
+    ``extract_tool_input`` は先勝ちで 1 キーだけを返す。それを単独で使うと、
+    payload が複数のコンテナキーを持つ host（``tool_input`` と ``toolArgs``
+    を同時に載せる形）で先頭の無害な側だけを検査し、後続キーに入った危険な
+    入力を素通りさせる（実測: ``bash_config_protection`` /
+    ``pre_bash_commit_quality`` が exit 0 のまま保護対象書き込みと commit を
+    通した）。走査の意味論をフック側の手書きループに委ねると片側だけ緩い
+    状態が再発するため、全キー走査は本関数を単一情報源とする。
 
     Args:
         payload: フック stdin を JSON として読んだ dict。
 
-    Returns:
-        コマンド文字列。取れなければ空文字列。
+    Yields:
+        コンテナキーごとの正規化済み tool 入力（dict / str / list など）。
 
     Raises:
         例外は発生しません。
     """
-    return _command_from_tool_input(extract_tool_input(payload))
+    for key in INPUT_CONTAINER_KEYS:
+        if key not in payload:
+            continue
+        yield extract_tool_input({key: payload[key]})
+
+
+def iter_bash_commands(payload: dict[str, Any]) -> Iterator[str]:
+    """フック payload に含まれる Bash/shell の command 文字列を全て返す。
+
+    ``tool_input.command`` / ``toolArgs``（JSON 文字列含む）/ 生文字列を吸収し、
+    コンテナキーは 1 つも取りこぼさず走査する。非 dict の tool_input に対して
+    ``.get`` して AttributeError にならない。
+
+    list 形状（``{"tool_input": [{"command": "..."}]}`` や
+    ``{"tool_input": ["..."]}``）は要素ごとに取り出して改行で連結する。
+    ここを取りこぼすと、``extract_tool_input`` は list を返して「必須
+    フィールド欠落」の fail-closed を素通りするため、コマンドが 1 つも無い
+    payload として静かに許可されてしまう（実測: ``git commit --no-verify``
+    を list に包むと ``block_no_verify`` が exit 0）。
+
+    **1 つも yield しない場合の扱いは呼び出し側の責務**。現状の 3 フックは
+    いずれも「検査対象なし」として allow する。コンテナキー自体が無い場合の
+    fail-closed は ``block_no_verify`` が ``extract_tool_input`` の None 判定で
+    別途行っており、本関数はそれを代替しない。
+
+    Args:
+        payload: フック stdin を JSON として読んだ dict。
+
+    Yields:
+        非空の command 文字列。1 つも取れなければ何も yield しない。
+
+    Raises:
+        例外は発生しません。
+    """
+    for container in iter_tool_input_containers(payload):
+        command = _command_from_tool_input(container)
+        if command:
+            yield command
 
 
 def _command_from_tool_input(tool_input: Any) -> str:

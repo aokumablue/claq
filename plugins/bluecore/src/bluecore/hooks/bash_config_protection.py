@@ -84,7 +84,7 @@ from bluecore.hooks.hook_common import (
     split_segments,
     tokenize,
 )
-from bluecore.lib.harness import extract_bash_command, extract_raw_tool_name, normalize_tool_name
+from bluecore.lib.harness import extract_raw_tool_name, iter_bash_commands, normalize_tool_name
 
 # matcher（hooks.json）は Bash 系エイリアスにアンカーされた正規表現。matcher の
 # 綴りが将来ズレても本体側で対象外ツールを確実に早期 return するための多重防御。
@@ -638,10 +638,13 @@ def main() -> int:
     if normalize_tool_name(tool_name).lower() not in _BASH_TOOL_NAMES:
         return 0
 
-    command = extract_bash_command(data)
-    found = find_protected_write(command)
-    if found:
-        return emit_block_output(blocked_message_for_file(found))
+    # コンテナキーは 1 つも取りこぼさず走査する（iter_bash_commands）。
+    # 先勝ちで 1 キーだけ見ると、無害な側だけを検査して後続キーの保護対象
+    # 書き込みを素通りさせる（実測: exit 0）。
+    for command in iter_bash_commands(data):
+        found = find_protected_write(command)
+        if found:
+            return emit_block_output(blocked_message_for_file(found))
     return 0
 
 
