@@ -6,6 +6,7 @@ Copilot の deny JSON を選ばせる。
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -16,7 +17,9 @@ from pathlib import Path
 
 import pytest
 
-from bluecore.lib.harness import INPUT_CONTAINER_KEYS
+from bluecore.hooks.bash_config_protection import _BASH_TOOL_NAMES
+from bluecore.hooks.config_protection import _WRITE_TOOL_NAMES
+from bluecore.lib.harness import INPUT_CONTAINER_KEYS, normalize_tool_name
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = PLUGIN_ROOT / "src" / "bluecore" / "launcher.py"
@@ -389,4 +392,275 @@ def test_pre_tool_use_hook_scans_every_container_key(hook: str, tmp_path: Path) 
     assert json.loads(denied.stdout)["permissionDecision"] == "deny"
     assert allowed.returncode == 0, (
         f"{hook}: 全キー無害の payload が exit {allowed.returncode} err={allowed.stderr[:200]}"
+    )
+
+
+# --- PreToolUse のフィールド別名軸 ------------------------------------------------
+#
+# 上の 2 軸はコンテナ（キー・形状・多重度）だけを動かし、コンテナ**の中**で
+# フックが読むフィールド名は正規名（command / file_path）に固定している。
+# しかし共有層はどれも別名を受理する: `_command_from_tool_input` は
+# `command` と `cmd`、`_extract_patch_text` は生パッチ文字列と `{"input": ...}`。
+# 別名側の経路だけ判定が抜けても正規名のテストは緑のままなので、独立した軸にする。
+#
+# 別名ごとにコンテナの「形」が違う（dict の別キー / 生文字列 / input dict）ため、
+# 上 2 軸のような (フィールド名, 値) の直積では表現できない。ケースごとに
+# tool_input へ入れるコンテナ値そのものを陽性/陰性の対で持つ。
+
+_APPLY_PATCH_DENY = '*** Begin Patch\n*** Update File: ruff.toml\n+ignore = ["ALL"]\n*** End Patch\n'
+_APPLY_PATCH_ALLOW = "*** Begin Patch\n*** Update File: sample.py\n+x = 1\n*** End Patch\n"
+
+# ケース id → (hook, tool_name, deny されるべきコンテナ, 通るべきコンテナ)。
+_FIELD_ALIAS_CASES = {
+    "block_no_verify/cmd": (
+        "bluecore.hooks.block_no_verify",
+        "Bash",
+        {"cmd": "git commit --no-verify -m x"},
+        {"cmd": "git commit -m x"},
+    ),
+    "bash_config_protection/cmd": (
+        "bluecore.hooks.bash_config_protection",
+        "Bash",
+        {"cmd": "echo x > ruff.toml"},
+        {"cmd": "cat sample.py"},
+    ),
+    "pre_bash_commit_quality/cmd": (
+        "bluecore.hooks.pre_bash_commit_quality",
+        "Bash",
+        {"cmd": "git add . && git commit -m x"},
+        {"cmd": "echo safe"},
+    ),
+    # apply_patch は Copilot CLI が生パッチ文字列を、他ハーネスが {"input": ...}
+    # を送る。どちらも `_extract_patch_text` が吸収する別名なので両方流す。
+    "config_protection/apply_patch-bare-string": (
+        "bluecore.hooks.config_protection",
+        "apply_patch",
+        _APPLY_PATCH_DENY,
+        _APPLY_PATCH_ALLOW,
+    ),
+    "config_protection/apply_patch-input-field": (
+        "bluecore.hooks.config_protection",
+        "apply_patch",
+        {"input": _APPLY_PATCH_DENY},
+        {"input": _APPLY_PATCH_ALLOW},
+    ),
+}
+
+
+def test_every_pre_tool_use_hook_is_field_alias_gated() -> None:
+    """PreToolUse の**全 hook**がフィールド別名軸に載っていること（免除枠を設けない）。
+
+    形状軸と違い免除を許さない。読むフィールド名はフックごとの選択であり、
+    共有層のゲートでは「そのフックが実際に別名を読むか」を被覆できないため。
+
+    強制するのはフック単位の登録であって、別名単位の網羅ではない。
+    `config_protection` の `file`（`file_path` の別名）はここに無く、
+    `tests/hooks/test_config_protection.py` と `tests/lib/test_harness.py` が
+    被覆している。
+    """
+    declared = _pre_tool_use_modules()
+    covered = {hook for hook, _, _, _ in _FIELD_ALIAS_CASES.values()}
+    assert declared <= covered, f"フィールド別名ゲート未宣言の PreToolUse hook: {sorted(declared - covered)}"
+    assert covered <= declared, f"hooks.json に存在しない hook の宣言: {sorted(covered - declared)}"
+
+
+@pytest.mark.parametrize("case_id", sorted(_FIELD_ALIAS_CASES))
+def test_pre_tool_use_hook_reads_field_aliases(case_id: str, tmp_path: Path) -> None:
+    """正規名ではなく別名フィールドに入った危険な入力も deny されること。
+
+    陰性対照として、同じ別名フィールドに無害な値を入れた payload が exit 0 に
+    なることも確かめる（別名を見た瞬間に全部 deny する実装でも緑になる測定を
+    合格にしない）。
+    """
+    hook, tool_name, deny_input, allow_input = _FIELD_ALIAS_CASES[case_id]
+
+    denied = _run_launcher(hook, {"tool_name": tool_name, "tool_input": deny_input}, tmp_path)
+    allowed = _run_launcher(hook, {"tool_name": tool_name, "tool_input": allow_input}, tmp_path)
+
+    assert denied.returncode == 2, (
+        f"{case_id}: 別名フィールドの deny 値が exit {denied.returncode} で素通りした"
+    )
+    assert json.loads(denied.stdout)["permissionDecision"] == "deny"
+    assert allowed.returncode == 0, (
+        f"{case_id}: 通るべき payload が exit {allowed.returncode} err={allowed.stderr[:200]}"
+    )
+
+
+# --- PreToolUse のツール名別名軸 --------------------------------------------------
+#
+# ここまでの軸は tool 名を常に Claude Code 表記（Bash / Write）の `tool_name` で
+# 送っている。実際のハーネスは camelCase の `toolName` キーを使い、値も
+# `run_terminal_command` / `search_replace` のような runtime 固有名や lowercase で
+# 送ってくる（`lib/harness.py` の `_TOOL_NAME_MAP`）。別名が正規化から落ちると、
+# ツール名でゲートするフックは「対象外のツール」と見なして早期 return 0 する。
+#
+# in-hook でツール名を判定するのは bash_config_protection（`_BASH_TOOL_NAMES`）と
+# config_protection（`_WRITE_TOOL_NAMES`）の 2 つだけで、block_no_verify と
+# pre_bash_commit_quality は hooks.json の matcher に委ねており本体では tool 名を
+# 一切読まない。つまり後者 2 つの本パラメタは **vacuous に緑**である
+# ——「素通りしないこと」は確かめているが、正規化が壊れても赤くならない。
+# それでも表に載せるのは、matcher 依存という前提が崩れて in-hook 判定が入った
+# 瞬間に別名を取りこぼさないための前方固定。
+#
+# ただし「前方固定」はそれ自体では成立しない。vacuous な行を別のテストが補うと
+# 注記しても、補う側の走査対象に当該フックが入る保証が無ければ、注記だけが残って
+# 歯が無い状態になる（実際 `test_declared_tool_name_aliases_normalize_into_hook_gate`
+# が走査する `_IN_HOOK_TOOL_NAME_GATES` にこの 2 つは含まれない）。そこで
+# `test_in_hook_tool_name_gate_registration_matches_implementation` が
+# 「本体で tool 名を読むフック」の集合を実装から導出し、`_IN_HOOK_TOOL_NAME_GATES`
+# との一致を強制する。matcher 依存をやめた瞬間に登録漏れが赤くなり、そこで
+# 初めて正規化の歯（下の normalize テスト）が当該フックへ及ぶ。
+#
+# hook → (フィールド名, deny されるべき値, 通るべき値, ツール名別名の一覧)。
+_BASH_TOOL_NAME_ALIASES = (
+    ("toolName", "Bash"),
+    ("tool_name", "run_terminal_command"),
+    ("tool_name", "bash"),
+)
+_WRITE_TOOL_NAME_ALIASES = (
+    ("toolName", "Write"),
+    ("tool_name", "search_replace"),
+    ("tool_name", "write"),
+)
+
+_TOOL_NAME_ALIAS_GATED_HOOKS = {
+    "bluecore.hooks.block_no_verify": (
+        "command", "git commit --no-verify -m x", "git commit -m x", _BASH_TOOL_NAME_ALIASES,
+    ),
+    "bluecore.hooks.bash_config_protection": (
+        "command", "echo x > ruff.toml", "cat sample.py", _BASH_TOOL_NAME_ALIASES,
+    ),
+    "bluecore.hooks.pre_bash_commit_quality": (
+        "command", "git add . && git commit -m x", "echo safe", _BASH_TOOL_NAME_ALIASES,
+    ),
+    "bluecore.hooks.config_protection": (
+        "file_path", "ruff.toml", "sample.py", _WRITE_TOOL_NAME_ALIASES,
+    ),
+}
+
+# 本体でツール名を判定する hook → その受理集合（実装から直接参照する）。
+# 集合をテスト側へ写経すると、実装の受理集合が狭まったときに気付けない。
+_IN_HOOK_TOOL_NAME_GATES = {
+    "bluecore.hooks.bash_config_protection": _BASH_TOOL_NAMES,
+    "bluecore.hooks.config_protection": _WRITE_TOOL_NAMES,
+}
+
+
+# 本体でツール名を読んでいることを示す `lib/harness` の symbol。現状の 4 フックは
+# ツール名をこの 2 つ経由でしか読まない（生の `payload["tool_name"]` 直読みは無い）。
+#
+# 検出は symbol 直 import に限る。`from bluecore.lib import harness` +
+# `harness.extract_raw_tool_name(...)` の形は**すり抜ける**（false negative）。
+# 現状 4 フックはいずれも直 import で、リポジトリ全体でも module import 形式の
+# 前例が無いため未対応にしている。module import が現れたら `ast.Attribute` も
+# 見る必要がある——この限界を書かずに「実装から導出」とだけ書くと、下の
+# 登録一致テストが本来より広く効いているように読める。
+_TOOL_NAME_READER_SYMBOLS = frozenset({"extract_raw_tool_name", "normalize_tool_name"})
+
+
+def _hooks_reading_tool_name_in_body() -> set[str]:
+    """PreToolUse hook のうち、本体でツール名を読むモジュールを実装から導出する。
+
+    `lib/harness` からの import を AST で見る。文字列の部分一致にすると
+    docstring 中の言及を実装と誤認するため、`ImportFrom` ノードに限定する。
+
+    Returns:
+        ツール名読み取り symbol を import している dotted module 名の集合。
+    """
+    reading: set[str] = set()
+    for module in _pre_tool_use_modules():
+        origin = importlib.util.find_spec(module).origin
+        tree = ast.parse(Path(origin).read_text(encoding="utf-8"))
+        imported = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "bluecore.lib.harness"
+            for alias in node.names
+        }
+        if imported & _TOOL_NAME_READER_SYMBOLS:
+            reading.add(module)
+    return reading
+
+
+def test_every_pre_tool_use_hook_is_tool_name_alias_gated() -> None:
+    """PreToolUse の**全 hook**がツール名別名軸に載っていること（免除枠を設けない）。
+
+    強制するのはフック単位の登録であって、別名単位の網羅ではない。各フックへ
+    流す別名は `_TOOL_NAME_MAP` の部分集合の写経で、`shell` や `multiedit` は
+    含まない（それらは `test_hooks_json_matchers.py` と `tests/lib/test_harness.py`
+    が別途被覆する）。写経が実装から乖離していないことは下の normalize テストが見る。
+    """
+    declared = _pre_tool_use_modules()
+    covered = set(_TOOL_NAME_ALIAS_GATED_HOOKS)
+    assert declared <= covered, f"ツール名別名ゲート未宣言の PreToolUse hook: {sorted(declared - covered)}"
+    assert covered <= declared, f"hooks.json に存在しない hook の宣言: {sorted(covered - declared)}"
+
+
+def test_in_hook_tool_name_gate_registration_matches_implementation() -> None:
+    """本体でツール名を読むフックの集合が `_IN_HOOK_TOOL_NAME_GATES` と一致すること。
+
+    この一致が、ツール名別名軸の 6 行（block_no_verify / pre_bash_commit_quality）を
+    vacuous なまま残す判断を支える唯一の機械的な根拠。両フックが matcher 依存を
+    やめて本体判定を持った瞬間にここが赤くなり、`_IN_HOOK_TOOL_NAME_GATES` への
+    登録——ひいては normalize テストの被覆——を強制する。逆に、受理集合の登録を
+    こっそり消して検査範囲を縮める方向も同じ assert が塞ぐ。
+    """
+    assert _hooks_reading_tool_name_in_body() == set(_IN_HOOK_TOOL_NAME_GATES), (
+        "本体でツール名を読むフックと受理集合の宣言がずれている: "
+        f"実装={sorted(_hooks_reading_tool_name_in_body())} "
+        f"宣言={sorted(_IN_HOOK_TOOL_NAME_GATES)}"
+    )
+
+
+def test_declared_tool_name_aliases_normalize_into_hook_gate() -> None:
+    """宣言した別名が、本体の受理集合へ実際に正規化されること。
+
+    別名の一覧はテスト側の写経なので、`_TOOL_NAME_MAP` から別名が落ちても
+    プロセス層テストは「対象外ツールなので exit 0」を陰性対照として緑に読み、
+    保護が消えたことを緑のまま通してしまう。正規化の対応そのものをここで
+    突き合わせて、写経が実装から乖離した時点で赤くする。
+    """
+    for hook, gate in _IN_HOOK_TOOL_NAME_GATES.items():
+        _, _, _, aliases = _TOOL_NAME_ALIAS_GATED_HOOKS[hook]
+        for name_key, name_value in aliases:
+            assert normalize_tool_name(name_value).lower() in gate, (
+                f"{hook}: {name_key}={name_value} が正規化後に {sorted(gate)} へ落ちない"
+            )
+
+
+def _tool_name_alias_cases() -> list[tuple[str, str, str]]:
+    """(hook, ツール名キー, ツール名値) の全組み合わせを宣言順に列挙する。
+
+    Returns:
+        parametrize へ渡すタプルのリスト。
+    """
+    return [
+        (hook, name_key, name_value)
+        for hook, (_, _, _, aliases) in sorted(_TOOL_NAME_ALIAS_GATED_HOOKS.items())
+        for name_key, name_value in aliases
+    ]
+
+
+@pytest.mark.parametrize(("hook", "name_key", "name_value"), _tool_name_alias_cases())
+def test_pre_tool_use_hook_accepts_tool_name_aliases(
+    hook: str, name_key: str, name_value: str, tmp_path: Path
+) -> None:
+    """ハーネス固有のツール名表記で送られても、危険な入力が deny されること。
+
+    陰性対照として同じツール名表記の無害な値が exit 0 になることも確かめる。
+    ここが両極とも 0 になるのが、別名が正規化から落ちたときの壊れ方
+    （対象外ツール扱いで早期 return）なので、陰性側だけでは判別できない。
+    """
+    field, deny_value, allow_value, _ = _TOOL_NAME_ALIAS_GATED_HOOKS[hook]
+
+    denied = _run_launcher(hook, {name_key: name_value, "tool_input": {field: deny_value}}, tmp_path)
+    allowed = _run_launcher(hook, {name_key: name_value, "tool_input": {field: allow_value}}, tmp_path)
+
+    assert denied.returncode == 2, (
+        f"{hook} {name_key}={name_value}: deny されるべき payload が exit {denied.returncode}"
+    )
+    assert json.loads(denied.stdout)["permissionDecision"] == "deny"
+    assert allowed.returncode == 0, (
+        f"{hook} {name_key}={name_value}: 通るべき payload が exit {allowed.returncode}"
+        f" err={allowed.stderr[:200]}"
     )
