@@ -24,15 +24,17 @@ user-invocable: true
 ## 永続メモリ
 
 注入: `<bluecore-memory>` 注入で起動（SessionStart の `mem context`。`status='active'` のみ）。
-参照: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提）— クエリ例 `release verify smoke {コンポーネント名}` / `bypass 実測 exit code`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す
+参照: `bluecore_run bluecore.mem.cli search "..."`（`. "$HOME/.bluecore/env.sh"` 前提）— クエリ例 `release verify smoke {コンポーネント名}` / `bypass 実測 exit code`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `bluecore_run bluecore.mem.cli show <key>` に渡す。`bluecore_run` は root ポインタ未記録の文脈では exit 127 で解決できない — そのときは `python3 -m bluecore.mem.cli search "..."` を直接叩く（手順は飛ばさない）
 記録: 再利用可能な学びだけ `bluecore_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
 
 ## ステップ1: インベントリ
 
 起動対象を機械的に列挙し、「起動したもの」と「未起動のもの」を突き合わせる表を作る。列挙を省くと取りこぼす — 実例として skill-make / skill-gen / bugfix / loop-dev が最後まで未起動のまま残った。
 
+Bash 呼び出しごとに cwd と環境変数はリセットされる。`PLUGIN_ROOT` は**絶対パス**で、各呼び出しの先頭で毎回設定し直す（相対パスは 2 回目以降壊れる）。
+
 ```bash
-PLUGIN_ROOT=plugins/bluecore   # 引数 #1 で上書き
+PLUGIN_ROOT="$(git rev-parse --show-toplevel)/plugins/bluecore"   # 引数 #1 で上書き
 ls "$PLUGIN_ROOT/commands"     # *.md が commands
 ls "$PLUGIN_ROOT/skills"       # ディレクトリ 1 つが skill
 ls "$PLUGIN_ROOT/agents"       # *.md が agent
@@ -46,6 +48,8 @@ for event, groups in d['hooks'].items():
 "
 ```
 
+**計数単位**: `hooks {n}` は上の列挙スクリプトが出力する行数（＝ `hooks.json` の command エントリ数）で数える。`tool_input` を受け取るのはそのうち PreToolUse の分だけなので、ステップ2 の payload 形状マトリクスの対象件数は「うち N 件」と別に書く。
+
 `user-invocable: false` の skill は直接起動できないため、**委譲元コマンド経由で起動する**。対応:
 
 - `loop-dev` ← `feat-dev` / `bugfix` / `refactor`
@@ -58,14 +62,33 @@ for event, groups in d['hooks'].items():
 
 ### hooks
 
-stdin へ実 payload を流し、exit code を実測する。**payload 形状を 1 つに固定しない** — `tool_input` の dict 形状だけでなく、list 形状、および camelCase を含む全コンテナキー（`lib/harness.py` の `INPUT_CONTAINER_KEYS` = `tool_input` / `toolInput` / `toolArgs` / `tool_args`）を流す。dict 形状だけのテストが緑のまま、list 形状が全フックで素通りしていた実例がある。
+stdin へ実 payload を流し、exit code を実測する。**payload 形状を 1 つに固定しない** — dict 形状だけのテストが緑のまま、list 形状が全フックで素通りしていた実例がある。
+
+流すのは **4 コンテナキー × 4 形状 = 16 通り**を各フックに対して全件。コンテナキー `K` は `lib/harness.py` の `INPUT_CONTAINER_KEYS` の 4 つすべて（`tool_input` / `toolInput` / `toolArgs` / `tool_args`。**1 つも省かない**）、形状は次の 4 つ:
+
+| 形状 | リテラル |
+|---|---|
+| dict | `{"K": {"F": V}}` |
+| jsonstr | `{"K": "{\"F\": V}"}` |
+| listdict | `{"K": [{"F": V}]}` |
+| liststr | `{"K": [V]}` |
+
+`F` はフックが見るフィールド（Bash 系は `command`、Edit/Write 系は `file_path`）。
 
 ```bash
 echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}}' \
-  | python3 "$PLUGIN_ROOT/src/bluecore/launcher.py" bluecore.hooks.block_no_verify; echo "exit=$?"
+  | python3 "$PLUGIN_ROOT/src/bluecore/launcher.py" bluecore.hooks.block_no_verify
 ```
 
-同じ入力を `toolInput` / `toolArgs`（JSON 文字列形）/ list 形状へ入れ替えて再実行し、**全形状で同じ exit code になること**を確認する。
+**終了コードの取り方**: パイプライン自体の終了コードがフックの exit code。末尾に `; echo "exit=$?"` を足すと**表示は正しいが複合コマンド全体の終了コードが `echo` の 0 になる**ため、複合の rc を記録する仕組みに載せると全フックが「exit 0 ＝ 合格」として記録される。記録するなら `rc=$?` で退避してから表示する。
+
+16 通りで**同じ exit code にならなければ、まず実装側のバイパスを疑う**（payload の作り方ではない）。形状差は不変条件ではなく、バイパスを炙り出すための検出器として流している。
+
+**陽性だけでなく陰性対照を対で流す**。フックごとに「ブロックされるべき payload」と「通るべき payload」を用意し、両者の exit code が判別できることを確認する。判別しない測定（両方 0、両方 2）は exit code の意味を持たないので無効とする。
+
+**状態依存フックは fixture を仕込んでから測る**。staged 内容や worktree 状態を見るフック（`pre_bash_commit_quality` 等）は、使い捨て git リポジトリに検出対象（`debugger` 行・秘密鍵形式の文字列など）を staged にしてから流す。**空リポジトリでの exit 0 は「素通り」の証拠にならない** — 「検査対象が 0 件だから正常に 0」と区別できない。
+
+**PreToolUse 以外のイベント**（`PreCompact` / `SessionStart` / `SessionEnd`）は `tool_input` を持たないので上の 16 通りは適用しない。代わりに各イベントの実 payload（`session_id` / `transcript_path` など）を流し、**exit code ではなく副作用そのものを検証する**。とくに `--bg`（非同期）フックの exit 0 は投げっぱなしの成功であって処理成否と無関係なので、**書いたはずのレコードを直接読んで確かめる**（例: `handoff` なら `sessions` の行数ではなく `handoff` 列の中身を SELECT する。行数は SessionStart の `context` 側でも増えるため、handoff が動いた証拠にならない）。
 
 ### commands / skills / agents
 
@@ -80,9 +103,15 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
 
 DB へ書く操作は、書いたものを必ず後始末する。mem の DB 位置を決めるのは `BLUECORE_DATA_PATH` であり `BLUECORE_HOME` ではない（`mem/settings.py`）。取り違えると実 DB（`~/.bluecore/mem.db`）を汚す。破壊的操作を実測するなら、使い捨ての作業ツリーと一時 DB を使う。
 
+環境変数は Bash 呼び出しをまたいで持続しないため、`$(mktemp -d)` を使うと呼び出しごとに別ディレクトリになり、前の呼び出しで書いた内容を次の呼び出しで検証できない。**固定パスを掘って毎回同じ値を export する**。
+
 ```bash
-export BLUECORE_DATA_PATH="$(mktemp -d)"
+# 作業ディレクトリ配下の固定パスを 1 つ決め、毎回の Bash 呼び出しで同じ値を設定する
+export BLUECORE_DATA_PATH="$WORKDIR/verify-data"
+mkdir -p "$BLUECORE_DATA_PATH"
 ```
+
+隔離が効いた証跡は、実 DB（`~/.bluecore/mem.db`）の **`knowledge` / `sessions` / `repos` の行数が不変**であることで示す。**mtime を汚染の判定に使わない** — WAL のチェックポイントは読み取り専用の `search` でも本体ファイルの mtime を動かすため、mtime 変化を汚染と読むと誤検知する。逆に「読み取りだから副作用ゼロ」とも決めつけず、行数で確かめる。
 
 ## ステップ3: 実測による裁定
 
@@ -115,11 +144,15 @@ cd plugins/bluecore && python3 -m pytest -q --cov  # fail_under=100 はこのデ
 
 pytest をパイプへ流すときは `set -o pipefail` 必須。`git add` と `git commit` は**別の Bash 呼び出しに分ける** — 同一呼び出しだと品質フックが実行前の index しか見られず deny される。
 
+**修正が禁止された実行**（調査目的・READ-ONLY）でも、この工程を飛ばさずゲート 3 つを**現状のベースライン観測**として実行し、その結果で終了条件3 を判定する。飛ばすと終了条件3 が判定不能になる。指摘は `修正` 裁定のまま未着手として計上し（下記 `Pending`）、終了条件2 は未達と報告する。
+
 ## 終了条件
 
-1. 未起動コンポーネントがゼロ
+1. **スコープ内の**未起動コンポーネントがゼロ（`--scope` 指定時はスコープ内だけで判定する）
 2. 全指摘が `修正済み` または `根拠付き NO-FIX` に分類済み
 3. ステップ5 のゲート 3 つがすべて緑
+
+**実行の成否と `Gate` は別軸**。上の 3 条件は本実行が完了したかを表し、`Gate` はリリース可否を表す。部分実行や修正禁止の実行で `Gate: BLOCKED` が出るのは正常終了であって、実行の失敗ではない。
 
 **未起動を「異常なし」と読み替えない。**「skip されるゲートはゲートとして機能しない」（`../../../../docs/adr/0014-host-component-inventory-is-a-release-gate.md`）。未起動は合格でも不合格でもなく**未実施**として別カウントし、出力テンプレでも独立した行にする。
 
@@ -139,6 +172,7 @@ Not run:    {n}（未実施。合格ではない）
 Findings:   HIGH {h} / MEDIUM {m} / LOW {l}
 Fixed:      {n}
 NO-FIX:     {n}（根拠を下に列挙）
+Pending:    {n}（修正裁定・未着手）
 Gate:       PASS / BLOCKED
 ──────────────────────────────
 NO-FIX:
@@ -146,7 +180,7 @@ NO-FIX:
 Learned:    {知識カードの key} / なし
 ```
 
-`Not run` が 1 以上なら `Gate: BLOCKED`。NO-FIX は件数だけでなく理由を 1 行ずつ添える。末尾に記録した知識カードの key を 1 行書く（記録が無ければ `Learned: なし`）。
+`Not run` が 1 以上なら `Gate: BLOCKED`。行間の恒等式は **`Findings 合計 = Fixed + NO-FIX + Pending`** — どの指摘も 3 行のいずれかに必ず入る。`Pending` が 1 以上なら終了条件2 は未達。NO-FIX は件数だけでなく理由を 1 行ずつ添える。末尾に記録した知識カードの key を 1 行書く（記録が無ければ `Learned: なし`）。
 
 ## 引数
 
