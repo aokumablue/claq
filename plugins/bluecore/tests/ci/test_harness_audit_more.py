@@ -11,9 +11,9 @@ import pytest
 import bluecore.ci.harness_audit as harness_audit
 from bluecore.ci.harness_audit_repo_checks import (
     _event_has_matching_command,
-    always_on_description_chars,
     _has_memory_lifecycle_hooks,
     _hook_command_argv,
+    always_on_description_chars,
     get_repo_checks,
 )
 

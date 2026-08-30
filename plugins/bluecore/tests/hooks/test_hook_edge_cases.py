@@ -1403,19 +1403,10 @@ def test_find_file_issues_minified_js_lints_but_skips_secret_scan(
     assert "secret" not in types
 
 
-_SELF_SCAN_KNOWN_SYNTHETIC_SECRET_HITS = frozenset(
-    {
-        # 監査再現手順として合成 secret を意図的に引用した凍結済み報告書（書き換えない方針）。
-        # ファイル単位ではなく path:line で許可し、同ファイル内の別行に将来 secret が
-        # 混入した場合は検出できるようにする。
-        "docs/reports/PLUGIN_RUNTIME_AUDIT_2026-08-18_VERIFICATION.md:190",
-    }
-)
-
 
 def test_repo_wide_self_scan_has_zero_secret_issues() -> None:
     """自リポジトリの全追跡ファイルを新ロジック（secret は原則全ファイル対象）で走査しても
-    既知の合成 secret（凍結済み監査報告書の再現手順）以外の secret 検出が0件であること。
+    secret 検出が 0 件であること。
 
     should_scan_secrets が lock ファイル・圧縮生成物以外の原則すべてのファイルを
     対象にするため、リポジトリ全体に secret パターンへ自己マッチする行が
@@ -1460,4 +1451,4 @@ def test_repo_wide_self_scan_has_zero_secret_issues() -> None:
 
         secret_hits.extend(f"{rel_path}:{issue['line']}" for issue in issues if issue["type"] == "secret")
 
-    assert set(secret_hits) - _SELF_SCAN_KNOWN_SYNTHETIC_SECRET_HITS == set()
+    assert secret_hits == []

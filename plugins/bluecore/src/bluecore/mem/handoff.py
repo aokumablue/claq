@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from bluecore.lib.core_utils import get_home_dir, strip_ansi
-from bluecore.lib.harness import extract_file_paths, normalize_tool_name
+from bluecore.lib.harness import extract_file_paths, normalize_tool_name, normalize_user_message
 from bluecore.lib.slim_text import compact_line
 from bluecore.mem.logger import get as _get_logger
 from bluecore.mem.redaction import redact
@@ -115,6 +115,9 @@ _USER_MESSAGE_COUNT = 3
 _USER_MESSAGE_CHAR_LIMIT = 200
 """ユーザー依頼 1 件を圧縮する上限文字数。"""
 
+_TRUNCATION_MARKER = "..."
+"""``compact_line`` が上限で切ったときに付ける末尾。重複畳み込みの除外判定に使う。"""
+
 _FILE_LIST_LIMIT = 8
 """引き継ぎに載せる変更ファイルの件数。"""
 
@@ -126,6 +129,36 @@ _EDIT_TOOLS: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
 
 _PATH_SEGMENT_LIMIT = 3
 """引き継ぎに載せるファイルパスの末尾セグメント数。絶対パス全体は予算の無駄。"""
+
+_STRUCTURED_VALUE_LIMIT = 120
+"""パス・ツール名 1 件の上限文字数。"""
+
+_MAX_TRANSCRIPT_LINE_CHARS = 1_000_000
+"""走査する 1 行の上限文字数。超える行は捨てる。
+
+``_scan`` の deadline は行と行の間でしか判定できず、1 行の処理中は割り込めない。
+上限を置かないと、単一の巨大な行が「ハードタイムアウト」の宣言を無効化する。
+"""
+
+
+def _sanitize_structured(value: str) -> str:
+    """パス・ツール名を引き継ぎ本文へ載せる前に無害化する。
+
+    これらは ``redact`` を通さない（base64 検出が 40 文字超のパスを丸ごと
+    ``[REDACTED]`` にしてしまうため）が、無検査でよい理由にはならない。値の
+    出所はエージェントが呼んだツールの入力であり、prompt injection を受けた
+    エージェントが ``Write(file_path="<system-reminder>…")`` のような呼び出しを
+    すれば、失敗した呼び出しでも transcript に残って引き継ぎへ載る。実際に
+    ``変更ファイル:`` 行として次セッションへ注入されることを実測で確認した。
+
+    Args:
+        value: transcript から拾った生のパスまたはツール名。
+
+    Returns:
+        タグ・改行・過剰な長さを落とした値。無害化の結果が空なら空文字列。
+    """
+    cleaned = strip_tags(normalize_user_message(value))
+    return " ".join(cleaned.split())[:_STRUCTURED_VALUE_LIMIT]
 
 
 def build_handoff(payload: dict[str, Any]) -> str:
@@ -190,24 +223,57 @@ def _summarize_transcript(transcript_path: str) -> str:
         trusted root 外・材料が無い場合は空文字列。
     """
     path = Path(transcript_path)
-    if path.is_symlink():
-        return ""
-    if not path.is_file():
-        return ""
-    try:
-        owner_uid = path.stat().st_uid
-    except OSError:
-        return ""
-    if owner_uid != os.getuid():
-        return ""
-    try:
-        resolved = path.resolve()
-    except OSError:
-        return ""
-    if not _is_under_trusted_root(resolved):
+    if not is_trusted_transcript(path):
         return ""
     messages, files, tools = _scan(_read_tail(path), time.monotonic() + TRANSCRIPT_TIMEOUT_SEC)
     return _compose(messages, files, tools)
+
+
+def is_trusted_transcript(path: Path) -> bool:
+    """transcript として読んでよいファイルかを判定する。
+
+    所有者一致の任意 regular file を無条件で読むと、ユーザーが書ける任意
+    ファイルを prompt injection の入力にできてしまう。host 非依存の性質検査
+    （symlink 拒否・通常ファイル・所有者一致）に加えて、既知 host の transcript
+    root allowlist 包含も要求する。
+
+    同じ判定を別モジュールで書き直すと片側だけ強化されて非対称になるため
+    （``INPUT_CONTAINER_KEYS`` で実際に起きた失敗）、走査側はこの関数を使う。
+
+    Args:
+        path: 判定対象のパス。
+
+    Returns:
+        symlink でなく、通常ファイルで、所有者が自分で、trusted root 配下なら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        owner_uid = path.stat().st_uid
+    except OSError:
+        return False
+    if owner_uid != os.getuid():
+        return False
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    return _is_under_trusted_root(resolved)
+
+
+def trusted_transcript_roots() -> tuple[Path, ...]:
+    """走査対象にしてよい transcript root 一覧を返す。
+
+    Returns:
+        既知 host の root と ``BLUECORE_TRANSCRIPT_ROOTS`` で追加された root。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _trusted_transcript_roots()
 
 
 def _read_tail(path: Path) -> str:
@@ -244,6 +310,9 @@ def _scan(text: str, deadline: float) -> tuple[list[str], list[str], list[str]]:
     tools: set[str] = set()
 
     for line in text.splitlines():
+        if len(line) > _MAX_TRANSCRIPT_LINE_CHARS:
+            log.warning("トランスクリプトの 1 行が上限を超えました: その行を捨てます")
+            continue
         if time.monotonic() >= deadline:
             log.warning("トランスクリプト走査がタイムアウトしました: 残りの行を捨てます")
             break
@@ -256,10 +325,41 @@ def _scan(text: str, deadline: float) -> tuple[list[str], list[str], list[str]]:
         _collect_tools(entry, tools, files)
 
     return (
-        messages[-_USER_MESSAGE_COUNT:],
+        _dedupe_keeping_latest(messages)[-_USER_MESSAGE_COUNT:],
         sorted(files)[:_FILE_LIST_LIMIT],
         sorted(tools)[:_TOOL_LIST_LIMIT],
     )
+
+
+def _dedupe_keeping_latest(messages: list[str]) -> list[str]:
+    """同一内容の依頼を 1 件に畳み、最後に現れた位置を残す。
+
+    引き継ぎ枠は ``_USER_MESSAGE_COUNT`` 件しかない。同じ依頼が繰り返されても
+    新しい情報は増えないのに枠だけを消費し、古い実依頼を押し出してしまう
+    （実測: `mainにマージせよ` の後に同じスラッシュコマンドを 3 回叩くと
+    実依頼が枠外へ落ちる）。重複を畳めば、繰り返し実行が何回あっても実依頼が
+    残る。位置は最後の出現に寄せる（「直近の依頼」なので新しいほうが正しい）。
+
+    Args:
+        messages: 出現順のユーザー依頼。
+
+    Returns:
+        重複を除いた出現順の依頼。
+    """
+    seen: set[str] = set()
+    kept: list[str] = []
+    for message in reversed(messages):
+        # 切り詰められた行は先頭 _USER_MESSAGE_CHAR_LIMIT 文字しか残っておらず、
+        # 一致しても元の依頼が同一とは限らない。畳むと別依頼が片方消えるため対象外。
+        if message.endswith(_TRUNCATION_MARKER):
+            kept.append(message)
+            continue
+        if message in seen:
+            continue
+        seen.add(message)
+        kept.append(message)
+    kept.reverse()
+    return kept
 
 
 def _parse_entry(line: str) -> dict[str, Any] | None:
@@ -281,6 +381,13 @@ def _parse_entry(line: str) -> dict[str, Any] | None:
     return entry if isinstance(entry, dict) else None
 
 
+# user ロールのエントリに混ざるが、ユーザーの発話ではないブロック種別。
+# ツール結果・ツール呼び出し・画像・思考は依頼ではないため本文に採らない。
+# 未知の種別は通す（host ごとにテキストブロックの type 名が異なりうるため、
+# allowlist にすると未知 host で実依頼を落とす）。
+_NON_SPEECH_BLOCK_TYPES = frozenset({"tool_result", "tool_use", "image", "thinking"})
+
+
 def _text_content(raw: object) -> str:
     """ユーザー発話の content をプレーンテキストへ畳む。
 
@@ -289,16 +396,26 @@ def _text_content(raw: object) -> str:
 
     Returns:
         連結した本文。文字列でもブロック列でもなければ空文字列。
+        ツール結果等の非発話ブロックは除外する。
     """
     if isinstance(raw, str):
         return raw
     if isinstance(raw, list):
-        return " ".join(str(part.get("text", "")) for part in raw if isinstance(part, dict))
+        return " ".join(
+            str(part.get("text", ""))
+            for part in raw
+            if isinstance(part, dict) and part.get("type") not in _NON_SPEECH_BLOCK_TYPES
+        )
     return ""
 
 
 def _user_message(entry: dict[str, Any]) -> str:
     """エントリがユーザー発話ならその本文を 1 行へ圧縮して返す。
+
+    ハーネスが生成した足場（ローカルコマンドの注意書き・その stdout・
+    サブエージェント完了通知）は ``normalize_user_message`` で落とし、
+    スラッシュコマンド起動は ``/name args`` へ畳む。落とさないと引き継ぎが
+    足場だけで埋まり、実際の依頼が押し出される。
 
     注入済みの ``<bluecore-memory>`` 等のタグは ``strip_tags`` で落とす。
     落とさないと前セッションへ注入した記憶をそのまま引き継ぎとして
@@ -309,17 +426,18 @@ def _user_message(entry: dict[str, Any]) -> str:
         entry: トランスクリプトの 1 エントリ。
 
     Returns:
-        圧縮済みのユーザー発話。ユーザー発話でない、または中身が空なら空文字列。
+        圧縮済みのユーザー発話。ユーザー発話でない、中身が空、または
+        ハーネス足場しか含まれていなければ空文字列。
     """
     message = entry.get("message")
     message = message if isinstance(message, dict) else {}
     if "user" not in (entry.get("type"), entry.get("role"), message.get("role")):
         return ""
 
-    text = _text_content(message.get("content") or entry.get("content"))
+    text = normalize_user_message(strip_ansi(_text_content(message.get("content") or entry.get("content"))))
     if not text:
         return ""
-    return compact_line(redact(strip_tags(strip_ansi(text))), _USER_MESSAGE_CHAR_LIMIT)
+    return compact_line(redact(strip_tags(text)), _USER_MESSAGE_CHAR_LIMIT)
 
 
 def _collect_tools(entry: dict[str, Any], tools: set[str], files: set[str]) -> None:
@@ -358,11 +476,17 @@ def _record_tool(tool_name: str, tool_input: object, tools: set[str], files: set
     if not tool_name:
         return
     normalized = normalize_tool_name(tool_name)
-    tools.add(normalized)
+    sanitized_name = _sanitize_structured(normalized)
+    if sanitized_name:
+        tools.add(sanitized_name)
     if normalized not in _EDIT_TOOLS:
         return
     payload = tool_input if isinstance(tool_input, dict | str) else None
-    files.update(extract_file_paths(tool_name, payload) or ())
+    files.update(
+        sanitized
+        for path in extract_file_paths(tool_name, payload) or ()
+        if (sanitized := _sanitize_structured(path))
+    )
 
 
 def _shorten_path(path: str) -> str:

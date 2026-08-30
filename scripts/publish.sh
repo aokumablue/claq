@@ -84,7 +84,56 @@ print(".".join(parts))
 ' "$1"
 }
 
-# pytest + ruff ゲート（venv のバイナリを直接実行）
+# ホスト component inventory ゲート（ADR-0014）。
+#
+# manifest も公式 schema も validator も「正しい」と答えるのに、ホストの
+# loader が component をまるごと登録できていない、という非互換が実際に起きた
+# （v0.9.41 の F-01: manifest の agents 宣言により 9 体全てが ENOTDIR）。
+# 静的検証では原理的に検出できないため、ツリーをホストに読ませて登録結果を
+# 1 回問い合わせる。ADR-0014 はこれをリリース条件と定めている。
+#
+# `claude` が PATH に無い環境では実行できない。その場合は警告のうえ続行する
+# （manifest 形式の退行自体は tests/test_plugin_manifest.py が常時検出する）。
+run_host_inventory_gate() {
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "WARNING: claude が PATH にありません。host component inventory ゲート（ADR-0014）を実行できません。" >&2
+    return 0
+  fi
+
+  echo "Running host component inventory gate (ADR-0014)..."
+  claude plugin validate --strict plugins/bluecore || return 1
+
+  local details expected_agents expected_surfaces
+  details="$(claude --plugin-dir plugins/bluecore plugin details bluecore@inline 2>&1)" || return 1
+
+  if grep -q "Failed to read plugin components" <<<"${details}"; then
+    echo "ERROR: ホストが component を読めていません（ADR-0014 ゲート 3）。" >&2
+    echo "${details}" >&2
+    return 1
+  fi
+
+  # ディスク上の実体数と、ホストが報告した登録数を突き合わせる。
+  # ホストは skills/ と commands/ を合算して Skills として数える。
+  expected_agents="$(find plugins/bluecore/agents -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')"
+  expected_surfaces=$((
+    $(find plugins/bluecore/skills -maxdepth 2 -name 'SKILL.md' | wc -l | tr -d ' ') +
+    $(find plugins/bluecore/commands -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
+  ))
+
+  grep -qE "Agents \(${expected_agents}\)" <<<"${details}" || {
+    echo "ERROR: Agents 登録数がディスク上の ${expected_agents} 件と一致しません（ADR-0014 ゲート 2）。" >&2
+    echo "${details}" >&2
+    return 1
+  }
+  grep -qE "Skills \(${expected_surfaces}\)" <<<"${details}" || {
+    echo "ERROR: Skills 登録数がディスク上の ${expected_surfaces} 件と一致しません（ADR-0014 ゲート 2）。" >&2
+    echo "${details}" >&2
+    return 1
+  }
+  return 0
+}
+
+# pytest + ruff + host inventory ゲート（venv のバイナリを直接実行）
 run_gate() {
   echo "Running test gate (pytest + ruff)..."
   if [[ ! -x "${VENV}/bin/python" ]]; then
@@ -92,7 +141,8 @@ run_gate() {
     return 1
   fi
   "${VENV}/bin/python" -m pytest -q || return 1
-  "${VENV}/bin/ruff" check plugins/bluecore/src || return 1
+  "${VENV}/bin/ruff" check plugins/bluecore || return 1
+  run_host_inventory_gate || return 1
   return 0
 }
 

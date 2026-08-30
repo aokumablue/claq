@@ -391,3 +391,137 @@ class TestMalformedFallbackCoversDestructiveVerbs:
     def test_read_only_verb_is_not_detected(self) -> None:
         """読むだけの verb は保護対象名が見えても deny しないこと。"""
         assert bash_config_protection._raw_text_write_risk("{broken cat ruff.toml") is None
+
+
+class TestPathProtectionPropagates:
+    """`config_protection` の path ベース保護が Bash 経路にも伝播する。
+
+    `bash_config_protection` は A-06 で「`config_protection` の Edit/Write 限定を
+    Bash 側で補完する」ために作られた。basename 集合だけを import して path
+    ベースの保護（`.git/hooks/` 配下）を取りこぼすと、同じ書込みが Write では
+    exit 2、Bash では exit 0 という非対称が生まれ、このモジュールの存在理由
+    そのものに反する。
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo x > .git/hooks/pre-commit",
+            "printf x >> .git/hooks/pre-push",
+            "sed -i 's/a/b/' .git/hooks/pre-commit",
+            "echo x | tee .git/hooks/commit-msg",
+            "rm .git/hooks/pre-commit",
+        ],
+        ids=["redirect", "append", "sed-i", "tee", "rm"],
+    )
+    def test_writes_under_git_hooks_are_blocked(self, command: str) -> None:
+        """`.git/hooks/` 配下への Bash 経由の書込み・削除をブロックする。"""
+        assert bash_config_protection.find_protected_write(command) is not None
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo x > src/hooks/pre-commit",
+            "echo x > .git/config",
+            "echo x > README.md",
+            "echo x > hooks/pre-commit",
+        ],
+        ids=["same-basename-elsewhere", "git-dir-but-not-hooks", "prose", "hooks-without-git"],
+    )
+    def test_lookalike_paths_are_allowed(self, command: str) -> None:
+        """`.git/hooks/` 配下でない同名・類似パスは通す。"""
+        assert bash_config_protection.find_protected_write(command) is None
+
+    def test_main_blocks_git_hooks_write(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """main 経路でも exit 2 になり、対象を名指しする。"""
+        monkeypatch.setattr(
+            bash_config_protection,
+            "read_raw_stdin_with_truncation",
+            lambda: (_bash_payload("echo x > .git/hooks/pre-commit"), False),
+        )
+
+        assert bash_config_protection.main() == 2
+        assert ".git/hooks/" in capsys.readouterr().err
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rm -rf .git/hooks",
+            "mv .git/hooks .git/hooks.off",
+            "ln -s /dev/null .git/hooks",
+        ],
+        ids=["rm-rf-dir", "mv-dir", "ln-over-dir"],
+    )
+    def test_protected_directory_itself_is_blocked(self, command: str) -> None:
+        """保護ディレクトリ自身を消す・退避する操作もブロックする。
+
+        配下ファイルの書換え（`rm .git/hooks/pre-commit`）は deny なのに
+        1 コンポーネント短いディレクトリ操作が allow だと、同じ verb・同じ結果
+        （フックが走らない状態）に対する非対称が残る。
+        """
+        assert bash_config_protection.find_protected_write(command) is not None
+
+
+class TestModeChangeIsBlocked:
+    """権限変更による無効化も上書きと同じ強さの弱体化として扱う。
+
+    中身を書き換えなくても実行ビットや読み取り権限を落とせば検査は無効化
+    できる。書き換え経路だけを塞ぐと、塞いだ経路の存在が誤った安心になる。
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "chmod -x .git/hooks/pre-commit",
+            "chmod 000 .eslintrc.json",
+            "chmod a-r pyproject.toml",
+            "chown nobody .git/hooks/pre-commit",
+            "chgrp nogroup .eslintrc.json",
+            "chflags uchg pyproject.toml",
+            "sudo chmod -x .git/hooks/pre-commit",
+            "chmod -R 000 .git/hooks",
+        ],
+        ids=[
+            "chmod-hook",
+            "chmod-eslintrc",
+            "chmod-pyproject",
+            "chown-hook",
+            "chgrp-eslintrc",
+            "chflags-pyproject",
+            "sudo-chmod-hook",
+            "chmod-hooks-dir",
+        ],
+    )
+    def test_mode_change_on_protected_target_is_blocked(self, command: str) -> None:
+        """保護対象への権限変更をブロックする。"""
+        assert bash_config_protection.find_protected_write(command) is not None
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "chmod +x scripts/deploy.sh",
+            "chmod 644 README.md",
+            "chmod -x src/hooks/pre-commit",
+            "chown me:me .git/config",
+            "echo chmod -x .git/hooks/pre-commit",
+        ],
+        ids=["script", "readme", "same-basename-elsewhere", "git-config", "not-executed"],
+    )
+    def test_mode_change_on_other_targets_is_allowed(self, command: str) -> None:
+        """保護対象でないパスへの権限変更は通す。"""
+        assert bash_config_protection.find_protected_write(command) is None
+
+    def test_main_blocks_chmod_on_hook(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """main 経路でも exit 2 になり、対象を名指しする。"""
+        monkeypatch.setattr(
+            bash_config_protection,
+            "read_raw_stdin_with_truncation",
+            lambda: (_bash_payload("chmod -x .git/hooks/pre-commit"), False),
+        )
+
+        assert bash_config_protection.main() == 2
+        assert ".git/hooks/" in capsys.readouterr().err

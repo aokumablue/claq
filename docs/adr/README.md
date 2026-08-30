@@ -18,3 +18,4 @@
 | [0012](0012-output-style-response-compression-is-abandoned.md) | LLM 応答の事後圧縮パターン（output-style `slim`）を廃止する | accepted | 2026-08-26 |
 | [0013](0013-binary-detection-does-not-suppress-secret-scanning.md) | バイナリ判定で secret 検査を止めない（ADR-0001 の受容を撤回） | accepted | 2026-08-27 |
 | [0014](0014-host-component-inventory-is-a-release-gate.md) | ホスト component inventory をリリースゲートにする（ADR-0005 を supersede） | accepted | 2026-08-27 |
+| [0015](0015-handoff-scaffold-removal-is-fail-closed.md) | handoff の足場タグ除去は孤立タグを細工とみなす fail closed とする | accepted | 2026-08-28 |

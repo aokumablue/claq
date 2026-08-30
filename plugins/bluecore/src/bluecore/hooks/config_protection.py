@@ -26,6 +26,7 @@ from bluecore.hooks.hook_common import (
     resolve_effective_target,
 )
 from bluecore.lib.harness import (
+    INPUT_CONTAINER_KEYS,
     extract_file_paths,
     extract_raw_tool_name,
     extract_tool_input,
@@ -37,9 +38,6 @@ from bluecore.lib.harness import (
 # 正規化後の値をここで再度絞るのは、matcher の綴りが将来ズレても本体側で
 # 書込み系以外を確実に早期 return するための多重防御。
 _WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
-
-# ハーネスごとの入力コンテナキー。存在するキーを順に走査する。
-_INPUT_CONTAINER_KEYS = ("tool_input", "toolArgs", "tool_args")
 
 # apply_patch のパッチがパース不能なときの fail-closed 理由。
 _UNPARSEABLE_PATCH_MESSAGE = "BLOCKED: Could not determine target files from patch input."
@@ -79,7 +77,21 @@ PROTECTED_FILES = {
     ".markdownlint.yaml",
     ".markdownlint.yml",
     ".markdownlintrc",
+    # コミット前検査そのものの定義。弱めれば lint 設定を弱めるのと同じ効果を
+    # 得られるため、個別の lint 設定と同じ重みで保護する。
+    ".pre-commit-config.yaml",
+    ".pre-commit-config.yml",
 }
+
+# ディレクトリ単位で保護する path。basename だけでは判定できない
+# （``.git/hooks/pre-commit`` の basename ``pre-commit`` を一律ブロックすると
+# 無関係な同名ファイルを巻き込む）ため、実体 path の親を見る。
+#
+# ``.git/hooks/`` は git 自身のフック本体。``block_no_verify`` は
+# ``core.hooksPath`` の差し替えと ``--no-verify`` を塞いでいるが、フック
+# スクリプトを直接書き換えれば同じ結果（検査が走らない状態）になる。
+# 片側だけ塞ぐと、塞いだ経路の存在が誤った安心になる。
+_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"),)
 
 # ファイル名だけでは保護できない汎用設定ファイル。version bump・依存追加
 # 等の正当な編集が頻繁なため全面ブロックはしない。書き込み内容が
@@ -126,6 +138,46 @@ _TOX_COMMAND_KEYS = ("commands", "commands_pre", "commands_post")
 _TOX_COMMAND_KEY_PATTERN = re.compile(
     r"(?m)^\s*(" + "|".join(re.escape(key) for key in _TOX_COMMAND_KEYS) + r")\s*="
 )
+
+
+def protected_path_segment(file_path: str) -> str | None:
+    """パスがディレクトリ単位の保護対象配下か、保護ディレクトリ自身かを判定する。
+
+    symlink は `resolve_effective_target` で解決してから判定する
+    （`_effective_basename` と同じ理由。H-02）。解決不能なら生パスで判定する。
+
+    `bash_config_protection` が Bash 経路へ同じ判定を伝播させるため公開名に
+    している（`_PROTECTED_PATH_SEGMENTS` 自体は本モジュール private のまま。
+    保護対象の定義は本モジュールを単一情報源とし、呼び出し側で
+    ``.git`` / ``hooks`` を再定義させない）。
+
+    保護ディレクトリ自身を指すパス（``.git/hooks``）も該当扱いにする。
+    ディレクトリごと消す・退避する操作は配下ファイルの書換えと同じ結果に
+    なるため、Bash 経路のディレクトリ verb（``rm -rf`` / ``mv``）を取りこぼさない。
+
+    Args:
+        file_path: 検査対象の生パス文字列。
+
+    Returns:
+        該当した保護 path の表示名（``.git/hooks``）。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    resolved = resolve_effective_target(file_path)
+    parts = resolved.parts if resolved is not None else Path(file_path).parts
+    for segments in _PROTECTED_PATH_SEGMENTS:
+        width = len(segments)
+        # 保護ディレクトリ自身（``.git/hooks``）も一致させる。当初は親ディレクトリ
+        # 列だけを見て末尾一致を除外していたが、それが正しいのは Edit/Write の
+        # ようにディレクトリを対象にできない経路だけだった。`bash_config_protection`
+        # が本判定を Bash へ伝播させたことで、``rm .git/hooks/pre-commit`` は deny
+        # なのに 1 コンポーネント短い ``rm -rf .git/hooks`` は allow という、同じ
+        # verb・同じ結果（フックが走らない状態）に対する非対称が生まれた。
+        for index in range(len(parts) - width + 1):
+            if parts[index : index + width] == segments:
+                return "/".join(segments)
+    return None
 
 
 def _effective_basename(file_path: str) -> str:
@@ -430,6 +482,9 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
     if file_paths is None:
         return _UNPARSEABLE_PATCH_MESSAGE
     for file_path in file_paths:
+        protected_segment = protected_path_segment(file_path)
+        if protected_segment is not None:
+            return blocked_message_for_file(f"{protected_segment}/")
         file_name = _effective_basename(file_path)
         if file_name in PROTECTED_FILES:
             return blocked_message_for_file(file_name)
@@ -455,7 +510,7 @@ def _block_reason(data: dict[str, Any]) -> str | None:
     tool_name = extract_raw_tool_name(data)
     if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES:
         return None
-    for key in _INPUT_CONTAINER_KEYS:
+    for key in INPUT_CONTAINER_KEYS:
         if key not in data:
             continue
         reason = _block_reason_for_container(tool_name, extract_tool_input({key: data[key]}))

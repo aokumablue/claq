@@ -44,12 +44,26 @@ git 起動トークンの探索:
     になりません。加えて値を取るオプション（``-m`` / ``-F`` など）の
     値トークンはフラグ走査から除外します。
 
-``core.hooksPath`` オーバーライド:
-    ``git -c core.hooksPath=/dev/null commit`` / ``git -ccore.hooksPath=x commit``
-    / ``git --config-env=core.hooksPath=VAR commit`` は、``--no-verify`` を使わずに
-    git 自身のフック（`.git/hooks/pre-commit` 等）を丸ごと無効化できるため、
-    ``--no-verify`` と同様にブロックします（A-07 対応）。config key の大小文字は
-    区別せず判定します（git の config key 名は大小文字を区別しないため）。
+long オプションの短縮形:
+    git は曖昧でない限り long オプションの**前置**を受理します
+    （``git commit --no-veri`` は実際に通る）。完全一致だけを見ると素通りする
+    ため、``--no-verify`` の前置（``--n`` 以上の長さ）を同様にブロックします。
+
+config 経由のフック無効化:
+    ``--no-verify`` を使わずに git 自身のフック（`.git/hooks/pre-commit` 等）を
+    無効化する経路をまとめてブロックします（A-07 / H-05 / H-06 とその拡張）。
+    config key の大小文字は区別せず判定します（git の config key 名は大小文字を
+    区別しないため）。
+
+    - ``-c`` / ``--config-env`` / ``git config`` の書込みで
+      ``core.hooksPath`` を差し替える
+    - 同じ経路で ``include.path`` / ``includeIf.*`` を書き、取り込んだ先で
+      ``core.hooksPath`` を書く
+    - 同じ経路で ``alias.*`` を定義し、展開先に ``--no-verify`` を隠す
+      （``git -c alias.ci='commit --no-verify' ci``）。展開結果を解釈する術が
+      無いため、alias の定義そのものを deny します
+    - ``GIT_CONFIG_PARAMETERS`` / ``GIT_CONFIG_GLOBAL`` / ``GIT_CONFIG_SYSTEM``
+      / ``GIT_CONFIG_NOSYSTEM`` / ``GIT_CONFIG_KEY_<n>`` の literal 環境変数代入
 
 ``sh -c`` ラッパー（1 段のみ）:
     ``sh -c 'git commit --no-verify'`` のように既知シェル（``sh``/``bash``/
@@ -61,7 +75,10 @@ git 起動トークンの探索:
 
 非目標（原理的に検出不能、または意図的に対象外とするため検出しません）:
     - シェルエイリアス・シェル関数経由の呼び出し（``alias g=git`` の ``g``、
-      ``commit() { git commit --no-verify; }`` の ``commit``）
+      ``commit() { git commit --no-verify; }`` の ``commit``）。コマンドラインに
+      現れないため。config の ``alias.*`` は literal に現れるので対象内
+    - ``git --git-dir=<other>`` / ``GIT_DIR=<other>``。別リポジトリを対象に
+      するだけで、そのリポジトリのフックは通常どおり走るためバイパスではない
     - ``git $(echo commit) --no-verify`` のようなコマンド置換・変数展開
       （``$VAR`` / ``$(...)`` / バッククォート）を経由した組み立て
     - ``git`` 以外の名前を持つラッパースクリプト（``mygit`` / ``./deploy.sh``）
@@ -88,7 +105,7 @@ from bluecore.hooks.hook_common import (
     split_segments,
     tokenize,
 )
-from bluecore.lib.harness import extract_bash_command, extract_tool_input
+from bluecore.lib.harness import INPUT_CONTAINER_KEYS, extract_bash_command, extract_tool_input
 
 # 値を別トークンとして必ず取る long オプション（git グローバル + commit/push）。
 # 値が ``=`` で結合されている場合は次トークンを消費しません。
@@ -158,12 +175,37 @@ _OPTIONAL_VALUE_SHORT_OPTIONS = frozenset("uS")
 # フックバイパスに直結する long フラグ。サブコマンドを問わずブロックします。
 _BYPASS_LONG_FLAG = "--no-verify"
 
+# long オプションの短縮形を受け付ける最短長。git は曖昧でない限り long
+# オプションの**前置**を受理するため（``git commit --no-veri`` は実際に通る）、
+# 完全一致だけを見ると素通りする。``--n`` / ``--no`` は git 側では曖昧で
+# エラーになるが、ここでは deny 側に倒す（ADR-0002: 誤検出 > 誤通過）。
+_MIN_ABBREVIATED_LONG_OPTION_LENGTH = 3
+
 # ``git commit`` でのみ ``--no-verify`` の別名になる short フラグ。
 _BYPASS_SHORT_FLAG = "-n"
 
 # ``-c`` / ``--config-env`` の値が指す config key。git の config key 名は
 # 大小文字を区別しないため、比較は小文字化した上で行います（A-07 対応）。
 _HOOKS_PATH_CONFIG_KEY = "core.hookspath"
+
+# フック実行を左右しうる config key の前置。いずれも小文字で比較します。
+#
+# - ``core.hookspath``: フック置き場そのものの差し替え。
+# - ``include.path`` / ``includeif.``: 任意の config ファイルを取り込める。
+#   取り込んだ先で ``core.hooksPath`` を書けるため、直接指定と等価。
+# - ``alias.``: 別名の展開先を本フックは知らない。``git -c
+#   alias.ci='commit --no-verify' ci`` は ``--no-verify`` が config **値**の
+#   中にあるためフラグ走査に掛からない。展開結果を解釈する術が無い以上、
+#   alias の定義そのものを deny する（ADR-0002 の false-positive 優先）。
+#
+# シェルエイリアス（``alias g=git``）は依然として非目標だが、それは
+# コマンドラインに現れないため。``-c alias.X=`` は literal に現れる。
+_SENSITIVE_CONFIG_KEY_PREFIXES = (
+    _HOOKS_PATH_CONFIG_KEY,
+    "include.path",
+    "includeif.",
+    "alias.",
+)
 
 # ``sh -c`` 再帰の対象とする既知シェル実行ファイル（basename 判定）。
 _SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash"})
@@ -330,23 +372,54 @@ def parse_git_segment(segment: list[str]) -> GitInvocation:
     )
 
 
-def _is_hooks_path_override(config_values: list[str]) -> bool:
-    """``-c``/``--config-env`` の値に ``core.hooksPath`` オーバーライドが含まれるかを判定する。
+def _is_no_verify_flag(flag: str) -> bool:
+    """フラグが ``--no-verify``（git が受理する短縮形を含む）かを判定する。
+
+    Args:
+        flag: ``--`` で始まるフラグ名（``=`` の左側）。
+
+    Returns:
+        ``--no-verify`` の前置で ``--n`` 以上の長さがあれば True。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        len(flag) >= _MIN_ABBREVIATED_LONG_OPTION_LENGTH
+        and len(flag) <= len(_BYPASS_LONG_FLAG)
+        and _BYPASS_LONG_FLAG.startswith(flag)
+    )
+
+
+def _is_sensitive_config_key(key: str) -> bool:
+    """config key がフック実行を左右しうるものかを判定する。
+
+    Args:
+        key: config key 名（大小文字不問）。
+
+    Returns:
+        `_SENSITIVE_CONFIG_KEY_PREFIXES` のいずれかに前方一致すれば True。
+
+    Raises:
+        例外は発生しません。
+    """
+    normalized = key.strip().lower()
+    return any(normalized.startswith(prefix) for prefix in _SENSITIVE_CONFIG_KEY_PREFIXES)
+
+
+def _is_sensitive_config_override(config_values: list[str]) -> bool:
+    """``-c``/``--config-env`` の値に機微な config key の上書きが含まれるかを判定する。
 
     Args:
         config_values: `GitInvocation.config_values`。
 
     Returns:
-        ``core.hooksPath``（大小文字不問）を上書きする値があれば True。
+        フック実行を左右しうる key（大小文字不問）を上書きする値があれば True。
 
     Raises:
         例外は発生しません。
     """
-    for value in config_values:
-        key = value.split("=", 1)[0].strip().lower()
-        if key == _HOOKS_PATH_CONFIG_KEY:
-            return True
-    return False
+    return any(_is_sensitive_config_key(value.split("=", 1)[0]) for value in config_values)
 
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
@@ -354,9 +427,21 @@ _ENV_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
 # GIT_CONFIG_KEY_<n> の index 部分を取り出す正規表現（H-05）。
 _GIT_CONFIG_KEY_INDEX_RE = re.compile(r"^GIT_CONFIG_KEY_\d+$")
 
-# git 自身が config 注入に使う literal 環境変数名（H-05）。値を shell-eval せず、
-# 出現した時点で deny する（中身を解釈しても安全側の判定を追加できないため）。
-_GIT_CONFIG_PARAMETERS_NAME = "GIT_CONFIG_PARAMETERS"
+# git 自身が config を注入・差し替えるために読む literal 環境変数名。値を
+# shell-eval せず、出現した時点で deny する（中身を解釈しても安全側の判定を
+# 追加できないため）。``GIT_CONFIG_PARAMETERS`` は H-05 で追加。
+# ``GIT_CONFIG_GLOBAL`` / ``GIT_CONFIG_SYSTEM`` は config ファイルそのものを
+# 差し替えられ、差し替え先で ``core.hooksPath`` を書けるため同じ経路。
+# ``GIT_CONFIG_NOSYSTEM`` は system config を無効化するので、system 側に
+# 置かれた保護設定を落とせる。
+_GIT_CONFIG_INJECTION_ENV_NAMES = frozenset(
+    {
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_CONFIG_NOSYSTEM",
+    }
+)
 
 # ``env`` の直後で消費するオプション（値を取らないもの）。
 _ENV_BOOLEAN_OPTIONS = frozenset({"-i", "--ignore-environment"})
@@ -430,10 +515,10 @@ def _is_literal_env_hooks_path_override(prefix_tokens: list[str]) -> bool:
         例外は発生しません。
     """
     assignments = _collect_literal_env_assignments(prefix_tokens)
-    if _GIT_CONFIG_PARAMETERS_NAME in assignments:
+    if _GIT_CONFIG_INJECTION_ENV_NAMES & assignments.keys():
         return True
     for name, value in assignments.items():
-        if _GIT_CONFIG_KEY_INDEX_RE.match(name) and value.strip().lower() == _HOOKS_PATH_CONFIG_KEY:
+        if _GIT_CONFIG_KEY_INDEX_RE.match(name) and _is_sensitive_config_key(value):
             return True
     return False
 
@@ -449,8 +534,8 @@ _GIT_CONFIG_NEW_READ_OPS = frozenset({"get", "list"})
 _GIT_CONFIG_NEW_WRITE_OPS = frozenset({"set", "unset", "add"})
 
 
-def _config_args_touch_hooks_path(args: list[str]) -> bool:
-    """`git config` の位置引数に ``core.hooksPath``（大小文字不問）が含まれるか判定する。
+def _config_args_touch_sensitive_key(args: list[str]) -> bool:
+    """`git config` の位置引数に機微な config key（大小文字不問）が含まれるか判定する。
 
     Args:
         args: `GitInvocation.subcommand_args`（新構文の op トークンを除いたもの）。
@@ -461,13 +546,13 @@ def _config_args_touch_hooks_path(args: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    return any(arg.strip().lower() == _HOOKS_PATH_CONFIG_KEY for arg in args)
+    return any(_is_sensitive_config_key(arg) for arg in args)
 
 
-def _is_config_hooks_path_mutation(invocation: GitInvocation) -> bool:
-    """``git config`` 呼び出しが ``core.hooksPath`` への書込み・削除操作かを判定する（H-06）。
+def _is_config_sensitive_key_mutation(invocation: GitInvocation) -> bool:
+    """``git config`` 呼び出しが機微な config key への書込み・削除操作かを判定する（H-06）。
 
-    ``-c`` / ``--config-env`` によるオーバーライド（`_is_hooks_path_override`）
+    ``-c`` / ``--config-env`` によるオーバーライド（`_is_sensitive_config_override`）
     とは別に、``git config core.hooksPath <path>`` のような通常の subcommand
     呼び出しを検査する。読み取り専用と確定できる形（``--get`` 系、新構文の
     ``get``/``list``、値を伴わない legacy query）だけを allow し、それ以外の
@@ -491,7 +576,7 @@ def _is_config_hooks_path_mutation(invocation: GitInvocation) -> bool:
     if args and args[0] in _GIT_CONFIG_NEW_READ_OPS | _GIT_CONFIG_NEW_WRITE_OPS:
         new_op, args = args[0], args[1:]
 
-    if not _config_args_touch_hooks_path(args):
+    if not _config_args_touch_sensitive_key(args):
         return False
 
     if new_op is not None:
@@ -523,11 +608,11 @@ def _is_bypass_invocation(invocation: GitInvocation) -> bool:
     Raises:
         例外は発生しません。
     """
-    if _BYPASS_LONG_FLAG in invocation.flags:
+    if any(_is_no_verify_flag(flag) for flag in invocation.flags):
         return True
-    if _is_hooks_path_override(invocation.config_values):
+    if _is_sensitive_config_override(invocation.config_values):
         return True
-    if _is_config_hooks_path_mutation(invocation):
+    if _is_config_sensitive_key_mutation(invocation):
         return True
     if _BYPASS_SHORT_FLAG not in invocation.flags:
         return False
@@ -619,7 +704,7 @@ _UNPARSEABLE_INPUT_MESSAGE = (
 
 _MISSING_FIELDS_MESSAGE = (
     "[Hook] BLOCKED: hook input for pre:block-no-verify has no recognizable "
-    "tool_input (tool_input|toolArgs|tool_args). Cannot verify the bash "
+    f"tool_input ({'|'.join(INPUT_CONTAINER_KEYS)}). Cannot verify the bash "
     "command is free of git hook bypass flags."
 )
 
@@ -654,9 +739,16 @@ def main() -> int:
     if extract_tool_input(data) is None:
         return emit_block_output(_MISSING_FIELDS_MESSAGE)
 
-    command = extract_bash_command(data)
-    if has_bypass_flag(command):
-        return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
+    # コンテナキーは全て走査する。先勝ちで 1 キーだけ見ると、payload が
+    # 複数のコンテナキーを持つ host で無害な側だけを検査して素通りさせうる。
+    # ADR-0002 は本フックの検出境界を「誤検出を誤通過より選ぶ」と定めており、
+    # config_protection は既に全キー走査（_block_reason_for_container）。単一情報源
+    # 化したのは定数だけで、走査の意味論が片側だけ緩いままだった。
+    for key in INPUT_CONTAINER_KEYS:
+        if key not in data:
+            continue
+        if has_bypass_flag(extract_bash_command({key: data[key]})):
+            return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
 
     return 0
 

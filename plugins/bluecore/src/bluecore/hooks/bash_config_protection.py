@@ -7,9 +7,11 @@
 
 `config_protection` は Edit/Write/MultiEdit 系 matcher にしか登録されておらず、
 `printf x > pyproject.toml` のような Bash 経由の直接書き換えを検査しない
-（監査 A-06）。本モジュールは同じ保護対象定義（`PROTECTED_FILES` /
-`CONDITIONALLY_PROTECTED_FILES`、`config_protection` から import して共有）を
-Bash コマンド文字列に対して適用する。
+（監査 A-06）。本モジュールは同じ保護対象定義（basename 集合の
+`PROTECTED_FILES` / `CONDITIONALLY_PROTECTED_FILES` と、ディレクトリ単位の
+`protected_path_segment`。いずれも `config_protection` から import して共有）を
+Bash コマンド文字列に対して適用する。保護対象の定義は `config_protection` を
+単一情報源とし、本モジュール側で再定義しない。
 
 `config_protection` を Bash matcher に相乗りさせない理由:
     `config_protection.main()` の fail 姿勢（空入力 0 / malformed JSON deny /
@@ -21,7 +23,8 @@ Bash コマンド文字列に対して適用する。
 
 判定方式:
     `hook_common.tokenize`/`split_segments`（block_no_verify と共有するトーク
-    ナイザ）でセグメント分割し、各セグメント内で保護対象ファイルの basename
+    ナイザ）でセグメント分割し、各セグメント内で保護対象（basename 一致、
+    または `.git/hooks/` のようなディレクトリ単位の保護 path 配下・保護 path 自身）
     が**書き込み先トークンとして現れた場合のみ** deny する:
         - `>` / `>>` / `&>` / `>|` リダイレクト先（`1>`/`2>`/`1>>`/`2>>` は
           `1`/`2` が別トークンになり `>`/`>>` に一致するため追加検出不要）
@@ -38,8 +41,8 @@ Bash コマンド文字列に対して適用する。
     「検査不能なら deny」には倒さない（可用性が死ぬ）。JSON が壊れている場合
     のみ、`pre_bash_commit_quality.evaluate()` と同じ姿勢（生テキストに保護対象
     basename + 書き込み指示が両方見えるときだけ deny、それ以外は 0。この
-    フォールバックはトークン化された経路を持たないため repo スコープ判定は
-    適用されない）を採る。
+    フォールバックはトークン化された経路を持たないため repo スコープ判定も
+    ディレクトリ単位の保護 path 判定も適用されない）を採る。
 
 非目標: `python -c`/`eval`/任意スクリプト経由の間接書き込み、`$(...)`・変数
     展開・パイプ越しの間接書き込み、シェルエイリアス・ラッパースクリプト
@@ -57,6 +60,7 @@ from bluecore.hooks.config_protection import (
     CONDITIONALLY_PROTECTED_FILES,
     PROTECTED_FILES,
     blocked_message_for_file,
+    protected_path_segment,
 )
 from bluecore.hooks.hook_common import (
     MAX_STDIN_BYTES,
@@ -91,6 +95,15 @@ _LAST_ARG_WRITE_COMMANDS = frozenset({"cp", "mv", "install"})
 # 元ファイルが残るため対象にしない。
 _REMOVE_COMMANDS = frozenset({"rm", "unlink", "shred", "truncate", "mv"})
 
+# ファイルの中身を変えずに検査を無効化できるコマンド群。`chmod -x
+# .git/hooks/pre-commit` は 1 コマンドでフックを実行不能にし、`chmod 000
+# .eslintrc.json` は linter を読めなくする。中身を書き換える経路だけを塞ぐと
+# 「塞いだ経路の存在が誤った安心になる」（config_protection の同趣旨コメント
+# 参照）ため、削除と同じ強さの弱体化として扱う。引数の解釈はモード文字列と
+# パスを区別せず、保護対象に一致したトークンがあれば deny する
+# （ADR-0002: 誤検出 > 誤通過）。
+_MODE_COMMANDS = frozenset({"chmod", "chown", "chgrp", "chflags"})
+
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES | CONDITIONALLY_PROTECTED_FILES
 
 # `NAME=value` 形式の literal 環境変数代入（M-01: 実行 executable 位置の特定に使う）。
@@ -98,7 +111,9 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES | CONDITIONALLY_PROTECTED_FILES
 # （`>`/`tee`/`-i`）に加えて、トークン化経路が既に見ている削除・リンク系の verb を
 # 含める。部分一致なので過剰検出側に倒れるが、malformed 入力に対しては
 # ADR-0002（誤検出 > 誤通過）どおりそれでよい。
-_RAW_TEXT_RISK_INDICATORS = (">", "tee", "-i") + tuple(sorted(_REMOVE_COMMANDS)) + ("ln",)
+_RAW_TEXT_RISK_INDICATORS = (
+    (">", "tee", "-i") + tuple(sorted(_REMOVE_COMMANDS)) + tuple(sorted(_MODE_COMMANDS)) + ("ln",)
+)
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
@@ -151,27 +166,43 @@ def _command_index(segment: list[str]) -> int | None:
     return None
 
 
-def _protected_basename(token: str) -> str | None:
-    """トークンの解決後 basename が保護対象ファイル名なら返す（H-02 対応）。
+def _protected_target(token: str) -> str | None:
+    """トークンが `config_protection` の保護対象なら、その表示名を返す。
 
+    `config_protection` は basename 集合（`PROTECTED_FILES` /
+    `CONDITIONALLY_PROTECTED_FILES`）と path 集合（`protected_path_segment`）の
+    2 系統で保護しているが、本モジュールは前者しか見ておらず、
+    ``.git/hooks/`` 配下への Bash 経由の書込み・削除が素通りしていた。Write/Edit
+    なら deny される同じ書込みが Bash なら通るという非対称は、A-06 で本モジュール
+    を作った理由（`config_protection` の Edit/Write 限定を Bash 側で補完する）
+    そのものに反するため、両系統をここで一本化する。判定の定義は
+    `config_protection` を単一情報源とし、本モジュールでは再定義しない。
+
+    basename 判定は symlink を解決してから行う（H-02 対応）。
     ``alias -> pyproject.toml`` のような symlink 経由の書込みは、raw token の
     basename（``alias``）だけを見ると保護対象と判定できずすり抜けていた。
     `resolve_effective_target` で実体 path を解決してから basename を取る。
     解決不能（壊れた・循環した symlink 等）な場合は raw token の basename に
     フォールバックする（`config_protection._effective_basename` と同じ理由）。
+    path 判定側の symlink 解決は `protected_path_segment` の既存挙動に委ねる。
 
     Args:
         token: 検査対象のトークン（パスの可能性がある）。
 
     Returns:
-        保護対象ファイル名。該当しなければ None。
+        保護対象の表示名。basename 一致ならそのファイル名、path 一致なら
+        末尾に ``/`` を付けた保護 path（例 ``.git/hooks/``）。
+        該当しなければ None。
 
     Raises:
         例外は発生しません。
     """
     resolved = resolve_effective_target(token)
     name = resolved.name if resolved is not None else basename(token)
-    return name if name in _ALL_PROTECTED_BASENAMES else None
+    if name in _ALL_PROTECTED_BASENAMES:
+        return name
+    segment = protected_path_segment(token)
+    return f"{segment}/" if segment is not None else None
 
 
 def _redirect_target(segment: list[str]) -> str | None:
@@ -189,7 +220,7 @@ def _redirect_target(segment: list[str]) -> str | None:
     for index, token in enumerate(segment):
         if token in _REDIRECT_OPERATORS and index + 1 < len(segment):
             candidate = segment[index + 1]
-            if _protected_basename(candidate):
+            if _protected_target(candidate):
                 return candidate
     return None
 
@@ -217,7 +248,7 @@ def _tee_target(segment: list[str]) -> str | None:
     for token in segment[index + 1 :]:
         if token.startswith("-"):
             continue
-        if _protected_basename(token):
+        if _protected_target(token):
             return token
     return None
 
@@ -245,7 +276,7 @@ def _sed_inplace_target(segment: list[str]) -> str | None:
     if not has_inplace:
         return None
     for token in args:
-        if _protected_basename(token):
+        if _protected_target(token):
             return token
     return None
 
@@ -276,7 +307,7 @@ def _perl_inplace_target(segment: list[str]) -> str | None:
     if not has_inplace:
         return None
     for token in args:
-        if _protected_basename(token):
+        if _protected_target(token):
             return token
     return None
 
@@ -303,7 +334,7 @@ def _last_arg_write_target(segment: list[str]) -> str | None:
     if not non_option_tokens:
         return None
     candidate = non_option_tokens[-1]
-    return candidate if _protected_basename(candidate) else None
+    return candidate if _protected_target(candidate) else None
 
 
 def _remove_target(segment: list[str]) -> str | None:
@@ -323,13 +354,52 @@ def _remove_target(segment: list[str]) -> str | None:
     Raises:
         例外は発生しません。
     """
+    return _first_protected_argument(segment, _REMOVE_COMMANDS)
+
+
+def _mode_target(segment: list[str]) -> str | None:
+    """`chmod`/`chown`/`chgrp`/`chflags` の引数に保護対象があればその生トークンを返す。
+
+    中身を書き換えなくても、実行ビットや読み取り権限を落とせば検査は無効化
+    できる（`chmod -x .git/hooks/pre-commit` / `chmod 000 .eslintrc.json`）。
+    `_remove_target` と同じ理由で上書きと同じ扱いにする。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        保護対象の生トークン（パス文字列）。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _first_protected_argument(segment, _MODE_COMMANDS)
+
+
+def _first_protected_argument(segment: list[str], commands: frozenset[str]) -> str | None:
+    """指定コマンド群の非オプション引数から最初の保護対象トークンを返す。
+
+    `_remove_target` と `_mode_target` は「コマンド名を確かめ、以降の非
+    オプション引数を順に見る」という同じ形をしており、片方だけ保護対象の
+    判定を変えると非対称が生まれる（本バグの発生経路そのもの）。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+        commands: 対象とするコマンド名（basename 比較）の集合。
+
+    Returns:
+        保護対象の生トークン（パス文字列）。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
     index = _command_index(segment)
-    if index is None or segment[index].rsplit("/", 1)[-1] not in _REMOVE_COMMANDS:
+    if index is None or segment[index].rsplit("/", 1)[-1] not in commands:
         return None
     for token in segment[index + 1 :]:
         if token.startswith("-"):
             continue
-        if _protected_basename(token):
+        if _protected_target(token):
             return token
     return None
 
@@ -358,7 +428,7 @@ def _ln_target(segment: list[str]) -> str | None:
     if not non_option_tokens:
         return None
     candidate = non_option_tokens[-1]
-    return candidate if _protected_basename(candidate) else None
+    return candidate if _protected_target(candidate) else None
 
 
 def _dd_of_target(segment: list[str]) -> str | None:
@@ -384,7 +454,7 @@ def _dd_of_target(segment: list[str]) -> str | None:
     for token in segment[index + 1 :]:
         if token.startswith("of="):
             candidate = token[len("of=") :]
-            if _protected_basename(candidate):
+            if _protected_target(candidate):
                 return candidate
     return None
 
@@ -408,6 +478,7 @@ def _write_target_token_in_segment(segment: list[str]) -> str | None:
         or _perl_inplace_target(segment)
         or _last_arg_write_target(segment)
         or _remove_target(segment)
+        or _mode_target(segment)
         or _ln_target(segment)
         or _dd_of_target(segment)
     )
@@ -417,7 +488,7 @@ def _within_repo_root(token: str, repo_root: Path) -> bool:
     """書き込み先トークンを cwd 基準・symlink 解決済みで `repo_root` 配下にあるかを判定する。
 
     `token` が絶対パスなら cwd は無視される（pathlib の `/` 演算子の挙動）。
-    symlink 解決は `_protected_basename` と同じ `resolve_effective_target` を
+    symlink 解決は `_protected_target` と同じ `resolve_effective_target` を
     共有し、判定基準を一本化する（H-02）。
 
     Args:
@@ -445,7 +516,7 @@ def _within_repo_root(token: str, repo_root: Path) -> bool:
 
 
 def find_protected_write(command: str) -> str | None:
-    """コマンド文字列内に保護対象ファイルへの書き込みがあればその basename を返す。
+    """コマンド文字列内に保護対象への書き込みがあればその表示名を返す。
 
     書き込み先ヒットがあった場合のみ `resolve_repo_root` を呼び、書き込み先が
     現在のリポジトリルート配下にある場合のみ deny する（A-06）。リポジトリ
@@ -456,8 +527,9 @@ def find_protected_write(command: str) -> str | None:
         command: 検査対象のシェルコマンド文字列。
 
     Returns:
-        保護対象ファイル名（symlink 解決後の実体 basename。H-02）。該当しな
-        ければ None。
+        `_protected_target` の表示名（symlink 解決後の実体 basename、または
+        ``.git/hooks/`` のような保護 path）。そのまま
+        `blocked_message_for_file` に渡せる。該当しなければ None。
 
     Raises:
         例外は発生しません。
@@ -470,7 +542,7 @@ def find_protected_write(command: str) -> str | None:
         if repo_root is None:
             return None
         if _within_repo_root(token, repo_root):
-            return _protected_basename(token)
+            return _protected_target(token)
     return None
 
 
@@ -486,6 +558,14 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
     これらを見ているのに、malformed fallback だけが書き込み指示（`>`/`tee`/`-i`）
     しか見ていなかった（F-07）。同じ入力が JSON の壊れ方だけで通ったり通らなく
     なったりするのは、境界としては説明できない。
+
+    ディレクトリ単位の保護 path（`protected_path_segment`）はここでは見ない。
+    理由は特異度ではなく露出の小ささである（``.git/hooks/`` は本関数が既に
+    裸の部分一致で拾っている ``pyproject.toml`` / ``package.json`` より特異度が
+    高く、「過剰 deny になるから」は本関数の既存挙動と両立しない）。JSON が
+    壊れるのはハーネス側の事故であって agent が制御できるチャネルではないため、
+    この縮退経路の攻撃面は無視できる。トークン化できる正常系は
+    `_protected_target` が両系統を見ている。
 
     Args:
         raw_input: フックへ渡された生の入力文字列。

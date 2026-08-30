@@ -39,7 +39,7 @@ bluecore は、Claude Code の作業を「最初の計画からレビューま�
 |---|---|---|---|
 | **Command** | ユーザーが明示的に呼ぶ | `/<name> [args]` | `/plan`, `/review`, `/feat-dev` |
 | **Agent** | 内部から委譲される専門家 | コマンド / skill から `Task` ツール経由で `subagent_type` 指定起動 | `reviewer`, `planner`, `tdd-writer` |
-| **Skill** | 条件発火 or 委譲先の知識モジュール | description マッチで Claude Code が自動起動 / fork コンテキストで委譲 | `grillme`, `learn`, `skill-make` |
+| **Skill** | 条件発火 or 委譲先の知識モジュール | description マッチで Claude Code が自動起動 / inline 展開 or fork 委譲（`context` で決まる） | `grillme`, `learn`, `skill-make` |
 | **Knowledge** | 蓄積された知識カード（罠・規約・手順・事実） | SessionStart で `<bluecore-memory>` として自動注入（`status='active'` のみ） | `/instinct` で棚卸し・昇格 |
 | **Hook** | ツール実行時に自動発火するスクリプト | `hooks.json` 登録 → Claude Code が呼ぶ | PreToolUse, SessionStart, SessionEnd |
 
@@ -531,7 +531,7 @@ flowchart TB
   subgraph internal["⚙️ Internal Layer"]
     direction LR
     AGT["Agents (9)<br/>reviewer / planner / code-refiner ..."]:::agent
-    SKL["Skills (13, all fork)<br/>grillme / learn / secure ..."]:::skill
+    SKL["Skills (14: fork 8 / inline 6)<br/>grillme / learn / secure ..."]:::skill
   end
 
   subgraph persistence["💾 Persistence"]

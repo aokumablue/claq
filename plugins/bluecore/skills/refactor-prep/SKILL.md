@@ -43,13 +43,15 @@ JSON 契約（下流3ファイルが前提とする形。`deps.from`/`deps.to` �
   "deps": [{"from": 1, "to": 0}],
   "tests": {
     "baseline": ["python3 -m pytest -q"],
-    "group": ["python3 -m pytest -q tests/test_a.py"],
+    "group": ["python3 -m pytest -q tests/test_a.py", "python3 -m pytest -q tests/test_b.py"],
     "final": ["python3 -m pytest -q", "ruff check plugins/bluecore/src plugins/bluecore/tests"]
   }
 }
 ```
 
 必須: `scope_files` / `groups` / `deps` / `tests.baseline` / `tests.group` / `tests.final`（キーは必ず出力する。値は非空を要求しない）。テストが実在確認できない場合は該当配列を**空配列**にする — これが JSON 契約上の「検証手段なし」の signal そのものであり、テキストサマリー側の「検証手段なし」表記は人間向けの重複表現にすぎない。JSON だけを読む下流（`refactor-rollback`）は空配列を「検証手段なし」として扱う契約になっているため、テキストの記述漏れがあっても JSON 側だけで判定できる。
+
+**`tests.group` は `groups` と添字対応する。** `tests.group[i]` は `groups[i]` を検証するコマンドであり、長さは `groups` と一致させる（`len(tests.group) == len(groups)`、または全体が空配列）。`groups[i]` にだけ検証手段が無い場合は、配列ごと空にするのではなく **`tests.group[i]` を空文字列 `""`** にする。`refactor-rollback` は添字で引いて File Rule の `verify` を決めるため（`../refactor-rollback/SKILL.md` 手順3）、長さが揃わないと「revert した対象を検証しないコマンド」を実行可能な検証として提示することになる。`0 < len(tests.group) < len(groups)` は契約違反であり、下流は不足分を `NOT_AVAILABLE` として扱う。
 
 ## ルール
 

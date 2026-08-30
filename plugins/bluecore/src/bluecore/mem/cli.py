@@ -196,14 +196,26 @@ def _read_stdin_json() -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _parse_args_and_stdin(argv: list[str]) -> CommandArgs:
-    """コマンド名より後ろの引数と stdin JSON を読み取る。
+# stdin の JSON を実際に使う subcommand。これ以外は stdin を読まない。
+#
+# 全 subcommand で無条件に読むと、書き手が pipe を閉じない呼ばれ方（他コマンドと
+# 連結された bash ブロック等）で `list` / `search` / `show` のような stdin を
+# 一切使わない操作まで STDIN_FIRST_BYTE_TIMEOUT ぶん待たされる（実測 2.10 秒）。
+# さらに「stdin リダイレクト漏れの可能性」という警告は、渡すべき stdin が
+# そもそも無いこれらの subcommand には誤りで、利用者を無い問題の調査へ誘導する。
+_STDIN_COMMANDS: frozenset[str] = frozenset({"learn", "context", "handoff"})
+
+
+def _parse_args_and_stdin(command: str, argv: list[str]) -> CommandArgs:
+    """コマンド名より後ろの引数と、必要な subcommand だけ stdin JSON を読み取る。
 
     Args:
+        command: subcommand 名。stdin を読むかどうかの判定に使う。
         argv: コマンド名を除いた引数リスト。
 
     Returns:
-        組み立てた CommandArgs。
+        組み立てた CommandArgs。``command`` が stdin を使わないなら
+        ``stdin_data`` は空 dict。
 
     Raises:
         CommandError: オプションの解析に失敗した場合。
@@ -213,7 +225,7 @@ def _parse_args_and_stdin(argv: list[str]) -> CommandArgs:
         positionals=args.positionals,
         flags=args.flags,
         values=args.values,
-        stdin_data=_read_stdin_json(),
+        stdin_data=_read_stdin_json() if command in _STDIN_COMMANDS else {},
     )
 
 
@@ -399,7 +411,7 @@ def main() -> int:
     # フックが非 0 を返すとセッション全体がエラー扱いになるため。
     exit_code = 0
     try:
-        args = _parse_args_and_stdin(sys.argv[2:])
+        args = _parse_args_and_stdin(command, sys.argv[2:])
         _check_positional_arity(command, args)
         # learn --status には専用の説明があるため、一般的な未対応オプション
         # チェックより先に評価する。

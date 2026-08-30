@@ -45,7 +45,7 @@ remaining_turns: <n|-> (任意)
 <次セッションで必要な最小限コンテキスト。500文字以内。>
 
 ## 反復履歴
-- iter{n} | blockers=[{blockerシグネチャ, ...}] | tests={PASS|FAIL:{テスト失敗シグネチャ, ...}} | lint={PASS|FAIL} | scope={OK|VIOLATION} | result={converged|not-converged|circuit-break|stopped} | rootcause={1行 or -}
+- iter{n} | blockers={[{blockerシグネチャ, ...}] or -} | tests={PASS({件数})|FAIL:{テスト失敗シグネチャ, ...}} | lint={PASS|FAIL} | scope={OK|VIOLATION} | result={converged|not-converged|circuit-break|stopped} | rootcause={1行 or -}
 
 ## ベースライン
 - red_baseline={テスト失敗シグネチャ, ...|-}
@@ -56,7 +56,18 @@ remaining_turns: <n|-> (任意)
 - 任意セクション。反復ループを実行するときのみ記録する
 - `stop_reason` / `remaining_turns` は反復ループが中断・停止した際に記録する任意フィールド。ループ対象外の一般チェックポイントや `completed: true` では `-` のまま省略可。`remaining_turns` は再開時に消費可能な残り反復数の目安値
 - 追記専用。1反復につき1行を末尾に追加し、既存行の編集・削除は禁止
-- `tests` はその反復の収束判定時点の最終状態のみを記録（反復中に自己修正した一時的な失敗は含めない）
+- `tests` はその反復の収束判定時点の最終状態のみを記録（反復中に自己修正した一時的な失敗は含めない）。
+  `PASS` は必ず件数を伴う（`PASS(1903)`）。裸の `PASS` は後から読むと「実行して緑だった」のか
+  「緑だと申告された」のか区別できず、一次シグナルとして使えない。
+  **件数はテストランナーが報告した「成功したテスト数」**（pytest の `1903 passed` の 1903）。
+  収集数でも実行数でもない — skip / xfail を含めると、テストが無効化されて減った分が
+  「増えた」ように見え、退行検知に使えなくなる。`FAIL` 側は件数を書かず失敗シグネチャを
+  列挙する（何件落ちたかより、どれが落ちたかで前反復と突合するため）
+- `blockers` は evaluate を**実行した**ときだけ `[...]` を書く。`[]` は「evaluate が走って指摘 0 件」
+  を意味する。evaluate を起動していない・判定行が返らなかった場合は `-` を書く。
+  `../loop-dev/SKILL.md` の収束判定は「指摘が無いことと、判定が返ってこないことは別」を前提に
+  しており、両者を同じ `[]` に潰すとその前提が記録側で失われる。`blockers=-` の反復は
+  `result=converged` にできない
 - `result` は `converged` / `not-converged` / `circuit-break` / `stopped` の4値のみ
 - 必ずトップレベルの `## ` 見出しで記載する。他セクション配下の `###` にすると grep ベースの走査（loop-audit 等）で見落とされるため禁止
 

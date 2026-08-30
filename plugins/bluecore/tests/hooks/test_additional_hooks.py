@@ -102,6 +102,27 @@ _BYPASS_COMMANDS = [
     "git config set core.hooksPath /tmp/evil-hooks",
     "git config unset core.hooksPath",
     "git config add core.hooksPath /tmp/evil-hooks",
+    # git が受理する long オプションの短縮形。完全一致だけを見ると素通りする。
+    "git commit --no-veri -m x",
+    "git commit --no-ver -m x",
+    "git commit --no- -m x",
+    "git commit --n -m x",
+    # config ファイルそのものを差し替える literal 環境変数。差し替え先で
+    # core.hooksPath を書けるため -c core.hooksPath= と等価。
+    "GIT_CONFIG_GLOBAL=/tmp/cfg git commit -m x",
+    "GIT_CONFIG_SYSTEM=/tmp/cfg git commit -m x",
+    "GIT_CONFIG_NOSYSTEM=1 git commit -m x",
+    "env GIT_CONFIG_GLOBAL=/tmp/cfg git commit -m x",
+    # include.path / includeIf.* は任意 config を取り込める。
+    "git -c include.path=/tmp/evil commit -m x",
+    "git -c includeIf.gitdir:/x/.path=/tmp/evil commit -m x",
+    "git --config-env=include.path=MYVAR commit",
+    "git config --global include.path /tmp/evil",
+    "GIT_CONFIG_KEY_0=include.path git commit -m x",
+    # alias.* の展開先は解釈できないため定義自体を deny する。
+    "git -c alias.ci='commit --no-verify' ci -m x",
+    "git -c ALIAS.CI='commit -n' ci",
+    "git config alias.ci 'commit --no-verify'",
 ]
 
 # 通さなければならないコマンド（誤検知の回帰防止）。
@@ -158,6 +179,15 @@ _ALLOWED_COMMANDS = [
     "git config get core.hooksPath",
     "git config list",
     "git config get user.name",
+    # 短縮形と紛らわしいが --no-verify の前置ではない commit オプション。
+    "git commit --no-edit",
+    "git commit --no-gpg-sign -m x",
+    "git commit --no-post-rewrite -m x",
+    f"git commit -m 'typo: {NV[:-2]} was meant'",
+    # 機微でない config key の read-only 操作は allow。
+    "git config --get alias.ci",
+    "git config alias.ci",
+    "git config get include.path",
     "git config user.name x",
 ]
 
@@ -456,3 +486,57 @@ def test_config_protection_blank_file_path(monkeypatch: pytest.MonkeyPatch) -> N
     assert config_protection.main() == 0
 
 
+class TestBlockNoVerifyScansAllContainerKeys:
+    """コンテナキーを全て走査する（先勝ちで無害な側だけ見て素通りしない）。"""
+
+    def _run(self, monkeypatch: pytest.MonkeyPatch, payload: dict) -> int:
+        raw = json.dumps(payload)
+        monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (raw, False))
+        return block_no_verify.main()
+
+    def test_bypass_in_later_container_key_is_blocked(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """先頭キーが無害でも後続キーのバイパスを検出する。
+
+        先勝ちで 1 キーだけ見る実装では、無害な tool_input と悪意ある toolInput が
+        同居する payload を素通りさせていた。ADR-0002 は本フックの検出境界を
+        「誤検出を誤通過より選ぶ」と定めており、config_protection は既に全キー走査。
+        """
+        code = self._run(
+            monkeypatch,
+            {"tool_input": {"command": "ls"}, "toolInput": {"command": "git commit --no-verify"}},
+        )
+
+        assert code == 2
+        assert "bypass" in capsys.readouterr().err
+
+    def test_all_benign_container_keys_pass(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """全キーが無害なら通す。"""
+        code = self._run(
+            monkeypatch, {"tool_input": {"command": "ls"}, "toolInput": {"command": "git status"}}
+        )
+
+        assert code == 0
+        assert capsys.readouterr().err == ""
+
+    @pytest.mark.parametrize(
+        "container",
+        [
+            [{"command": f"git commit {NV}"}],
+            [f"git commit {NV}"],
+            [{"command": "ls"}, {"command": "git commit -n"}],
+        ],
+        ids=["list-of-dicts", "list-of-strings", "bypass-in-later-element"],
+    )
+    def test_list_shaped_container_is_blocked(
+        self, monkeypatch: pytest.MonkeyPatch, container: list
+    ) -> None:
+        """list 形状のコンテナも走査する（M3: 実測で exit 0 の素通りだった）。"""
+        assert self._run(monkeypatch, {"tool_input": container}) == 2
+
+    def test_benign_list_shaped_container_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """list 形状でも無害なら通す。"""
+        assert self._run(monkeypatch, {"tool_input": [{"command": "ls"}]}) == 0

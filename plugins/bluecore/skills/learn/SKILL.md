@@ -56,7 +56,24 @@ user-invocable: false
 - 作業ログ — 何をしたかの記録。学びではないので `handoff`（SessionEnd で自動）に任せる
 - 一般的なプログラミング知識 — モデルが既に知っていること
 - 未検証の推測 — 確かめていない仮説。確かめてから記録する
-- 既存カードと同じ内容 — `bluecore_run bluecore.mem.cli search "..."` で先に確認し、あるなら同じ `key` で更新する
+- 既存カードと同じ内容 — `search` で先に確認し、あるなら同じ `key` で更新する。
+  `--status` は単値しか取れないため **`pending` と `active` の 2 回** 引く:
+
+  ```bash
+  . "$HOME/.bluecore/env.sh" || exit 127
+  bluecore_run bluecore.mem.cli search "..." --status pending   # 未昇格の自分のカード
+  bluecore_run bluecore.mem.cli search "..."                    # 既定 = active（昇格済み）
+  ```
+
+  片方だけでは取りこぼす。既定の `active` だけだと、agent が入れたカードは H-01 により
+  例外なく `pending` なので自分の過去のカードが 1 件も出てこない。逆に `pending` だけだと
+  既に `promote` 済みの同内容カードを見落とす。どちらも「同じ知識を別 key で作り直す」に至る
+
+  **2 回引くのは重複チェックのときだけ。** 知識を読んで判断に使う「参照」は既定の
+  `active` のみで引く（このファイルの「参照する」節、各 skill の「永続メモリ」節）。
+  `pending` は人間が `/instinct promote` を通していないカードであり、判断材料に
+  混ぜると H-01 の承認ゲートを迂回して agent 自身の書込みが agent 自身の判断を
+  動かす。取りこぼしを嫌って参照側まで 2 回引きにしてはいけない
 
 **迷ったら `scope: repo`** — global を汚染するより、後で `bluecore_run bluecore.mem.cli promote <key>` できる repo 側に置くほうが安全。
 

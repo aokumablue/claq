@@ -11,7 +11,6 @@ import json
 import runpy
 import sys
 from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
 
 import pytest
 
@@ -69,6 +68,49 @@ def test_config_protection_allows_model_json(monkeypatch: pytest.MonkeyPatch) ->
         monkeypatch,
         {"tool_name": "Write", "tool_input": {"file_path": "plugins/bluecore/model.json"}},
     )
+    assert code == 0
+    assert stderr == ""
+
+
+@pytest.mark.parametrize(
+    "file_path, expected",
+    [
+        (".pre-commit-config.yaml", ".pre-commit-config.yaml"),
+        ("/repo/.pre-commit-config.yml", ".pre-commit-config.yml"),
+        (".git/hooks/pre-commit", ".git/hooks/"),
+        ("/repo/.git/hooks/commit-msg", ".git/hooks/"),
+    ],
+)
+def test_config_protection_blocks_commit_check_definitions(
+    monkeypatch: pytest.MonkeyPatch, file_path: str, expected: str
+) -> None:
+    """コミット前検査の定義そのものを保護する（M7）。
+
+    block_no_verify は core.hooksPath の差し替えと --no-verify を塞ぐが、
+    フックスクリプトや .pre-commit-config.yaml を直接書き換えれば同じ結果
+    （検査が走らない状態）になる。片側だけ塞ぐと誤った安心になる。
+    """
+    code, _stdout, stderr = _run_config_protection(
+        monkeypatch, {"tool_name": "Write", "tool_input": {"file_path": file_path}}
+    )
+
+    assert code == 2
+    assert f"Modifying {expected} is not allowed" in stderr
+
+
+@pytest.mark.parametrize(
+    "file_path",
+    ["src/hooks/pre-commit", ".git/config", "docs/.git-hooks-notes.md", "hooks/pre-commit"],
+    ids=["same-basename-elsewhere", "git-dir-but-not-hooks", "prose", "hooks-without-git"],
+)
+def test_config_protection_allows_lookalike_paths(
+    monkeypatch: pytest.MonkeyPatch, file_path: str
+) -> None:
+    """`.git/hooks/` 配下でない同名・類似パスは通す。"""
+    code, _stdout, stderr = _run_config_protection(
+        monkeypatch, {"tool_name": "Write", "tool_input": {"file_path": file_path}}
+    )
+
     assert code == 0
     assert stderr == ""
 

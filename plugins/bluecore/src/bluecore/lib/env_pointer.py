@@ -20,8 +20,7 @@ bash tool の環境へ自身の識別変数を注入することは文書化さ�
 のは Claude Code の変数（``CLAUDECODE`` 等）のみだったため（詳細は
 ``docs/adr/0008-*.md``）。
 
-``docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_VERIFICATION.md``（R-01〜R-06）を
-受け、v0.9.35 の設計を改めた:
+R-01〜R-06 の指摘を受け、v0.9.35 の設計を改めた:
 
 - ポインタは shell script ではなく **データファイル**（絶対パス 1 行のみ）にする。
   resolver（``runtime/env-template.sh``）が ``.``/``source`` で読み込むのをやめ、
@@ -36,8 +35,7 @@ bash tool の環境へ自身の識別変数を注入することは文書化さ�
   意図的に切り離している。
 - ``roots/latest`` という「無条件で採用される」ポインタは廃止した。
 
-``docs/reports/PLUGIN_ROOT_RESOLVER_2026-08-20_V0.9.36_REVERIFICATION.md``
-（H-01/H-02/M-01）を受け、さらに設計を改めた。とくに H-02
+H-01/H-02/M-01 の指摘を受け、さらに設計を改めた。とくに H-02
 （祖先不一致時に「root 値が一致する候補」で推測 fallback していた）は
 ユーザーから「リスクがあるとみなせる fallback は望ましくない」との明示
 指示を受け、**推測に基づく fallback を全廃**した:
