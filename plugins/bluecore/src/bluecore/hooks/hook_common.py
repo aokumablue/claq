@@ -193,11 +193,65 @@ def strip_data_heredoc_bodies(command: str) -> str:
     return "\n".join(output)
 
 
+def _replace_unquoted_newlines(command: str) -> str:
+    """クォート外の改行をシェル区切り ``;`` へ置き換える。
+
+    改行はシェルにとって ``;`` と等価なコマンド区切りだが、``shlex`` は
+    whitespace として消費するため区切りトークンを出さない。その結果
+    ``split_segments`` が複数行コマンドを 1 セグメントへ融合し、セグメント
+    境界に依存する判定がすべて不発になる（実測: ``printf x > s.py`` 改行
+    ``git add s.py`` 改行 ``git commit -m x`` が exit 0。``;`` 区切りの同内容は
+    exit 2。``bash_config_protection`` も 2 行目以降の ``tee`` / ``sed -i`` /
+    ``cp`` を実行位置と認識できていなかった）。
+
+    クォート内の改行は置き換えない（``echo 'a`` 改行 ``b'`` は 1 トークンの
+    まま）。``\\`` でエスケープされた改行は行継続なので区切りにしない。
+
+    Args:
+        command: 元のコマンド文字列。
+
+    Returns:
+        クォート外の改行を ``;`` へ置き換えた文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    if "\n" not in command:
+        return command
+
+    result = []
+    quote = None
+    escaped = False
+    for char in command:
+        if escaped:
+            result.append(char)
+            escaped = False
+            continue
+        if char == "\\" and quote != "'":
+            result.append(char)
+            escaped = True
+            continue
+        if quote is not None:
+            if char == quote:
+                quote = None
+            result.append(char)
+            continue
+        if char in ("'", '"'):
+            quote = char
+            result.append(char)
+            continue
+        result.append(";" if char == "\n" else char)
+    return "".join(result)
+
+
 def tokenize(command: str) -> list[str]:
     """シェルコマンドを区切り記号込みのトークン列へ分割する。
 
     ``shlex`` を ``punctuation_chars=True`` で使い、``git add -A&&git commit``
-    のように空白なしで連結された区切り記号も独立トークンにします。クォート
+    のように空白なしで連結された区切り記号も独立トークンにします。クォート外の
+    改行は ``;`` へ正規化してから渡します（``_replace_unquoted_newlines``。
+    ``shlex`` は改行を whitespace として消費し区切りトークンを出さないため、
+    複数行コマンドが 1 セグメントへ融合していました）。クォート
     不整合で ``ValueError`` になる入力は空白分割へフォールバックします
     （クォートが閉じていない入力ではクォート内容もフラグとして走査され、
     ブロック側＝fail-closed に倒れます）。
@@ -232,12 +286,13 @@ def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     Raises:
         例外は発生しません。
     """
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    normalized = _replace_unquoted_newlines(command)
+    lexer = shlex.shlex(normalized, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
         return list(lexer), True
     except ValueError:
-        return command.split(), False
+        return normalized.split(), False
 
 
 def split_segments(tokens: list[str]) -> list[list[str]]:

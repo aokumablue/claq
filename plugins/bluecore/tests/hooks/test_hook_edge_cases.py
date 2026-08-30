@@ -742,12 +742,24 @@ def test_is_git_commit_command_detects_double_space() -> None:
     assert args == ["-m", "x"]
 
 
-def test_is_git_commit_command_detects_newline_separated() -> None:
-    """改行区切り（git\\ncommit）でも commit 検出が成立すること。"""
+def test_is_git_commit_command_treats_newline_as_a_command_separator() -> None:
+    """改行はコマンド区切りなので `git` 改行 `commit` は commit ではない。
+
+    シェルは `git` を引数なしで実行してから `commit` という別コマンドを実行する。
+    これを 1 つの `git commit` として融合させると、セグメント境界に依存する判定
+    （複数 commit・commit 前の worktree 変更）がまとめて不発になる。実測では
+    `printf x > s.py` 改行 `git add s.py` 改行 `git commit -m x` が exit 0 で通り、
+    `;` 区切りの同内容だけが exit 2 になっていた。
+    """
     import bluecore.hooks.pre_bash_commit_quality as pbcq
 
     is_commit, _args = pbcq._is_git_commit_command("git\ncommit -m x")
+    assert is_commit is False
+
+    # 各行が独立したコマンドとして読まれるため、行内で完結する commit は検出する。
+    is_commit, args = pbcq._is_git_commit_command("echo hi\ngit commit -m x")
     assert is_commit is True
+    assert args == ["-m", "x"]
 
 
 def test_is_git_commit_command_skips_global_dash_c_option() -> None:

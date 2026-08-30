@@ -1280,3 +1280,39 @@ class TestHeredocNormalization:
         once = hook_common.strip_data_heredoc_bodies(command)
 
         assert hook_common.strip_data_heredoc_bodies(once) == once
+
+
+class TestUnquotedNewlineNormalization:
+    """クォート外の改行をコマンド区切りとして扱う正規化のテスト。
+
+    改行はシェルにとって `;` と等価だが shlex は whitespace として消費するため
+    区切りトークンを出さない。実測では複数行コマンドが 1 セグメントへ融合し、
+    `printf x > s.py` 改行 `git add s.py` 改行 `git commit -m x` が exit 0 で通った
+    （`;` 区切りの同内容は exit 2）。
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "command", "expected"),
+        [
+            ("改行なしは素通り", "git commit -m x", "git commit -m x"),
+            ("クォート外の改行は ; になる", "git add .\ngit commit -m x", "git add .;git commit -m x"),
+            ("シングルクォート内の改行は保つ", "echo 'a\nb'", "echo 'a\nb'"),
+            ("ダブルクォート内の改行は保つ", 'echo "a\nb"', 'echo "a\nb"'),
+            ("クォートを閉じた後の改行は ; になる", "echo 'a'\ngit commit", "echo 'a';git commit"),
+            ("バックスラッシュ継続は区切りにしない", "git add \\\n.", "git add \\\n."),
+            ("シングルクォート内のバックスラッシュは継続にしない", "echo 'a\\'\nb", "echo 'a\\';b"),
+        ],
+    )
+    def test_replace_unquoted_newlines(self, label: str, command: str, expected: str) -> None:
+        """クォート外の改行だけを区切りへ置き換える。"""
+        assert hook_common._replace_unquoted_newlines(command) == expected, label
+
+    def test_multiline_command_splits_into_segments(self) -> None:
+        """複数行コマンドが行ごとのセグメントへ分かれること。"""
+        tokens = hook_common.tokenize("printf x > s.py\ngit add s.py\ngit commit -m m")
+
+        assert hook_common.split_segments(tokens) == [
+            ["printf", "x", ">", "s.py"],
+            ["git", "add", "s.py"],
+            ["git", "commit", "-m", "m"],
+        ]
