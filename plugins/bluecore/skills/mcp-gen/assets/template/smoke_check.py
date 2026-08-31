@@ -8,6 +8,10 @@
     .venv/bin/python3 smoke_check.py    # 単体実行（pytest 不要）
     .venv/bin/pytest smoke_check.py     # pytest からも実行できる（ファイル名の明示が必要）
 
+MRTR（確認・追加入力）を持つサーバは `elicit_round_trip()` を使って
+**承認と拒否の両分岐**を検査すること。拒否がエラーになる実装ミスは
+1 往復目だけの検査では見つからない。
+
 この検査はサーバを `sys.executable` で子プロセスとして起動する。つまり
 **この検査を動かした interpreter がそのままサーバの interpreter になる**。
 PATH 上の裸の `python3` で実行すると、検査自体は起動するのにサーバ側だけが
@@ -40,6 +44,10 @@ INVALID_ARGS: dict = {"item_id": "bad"}
 # 上記の呼び出しでモデルに届くべきメッセージの一部。
 # 素の例外を投げていると "Error executing tool <name>" しか返らず、ここで落ちる。
 INVALID_EXPECTED_MESSAGE = "item-"
+# 公開するリソースがあれば URI と本文に含まれるべき文字列を書く。
+# リソースを公開しないなら `RESOURCE_URI = ""` にする（検査は SKIP と記録される）。
+RESOURCE_URI = "config://runtime"
+RESOURCE_EXPECTED_SUBSTRING = "example-server"
 # ==== 編集ここまで ====
 
 # 2026-07-28 では各リクエストが自分でプロトコル版と capability を運ぶ。
@@ -136,6 +144,82 @@ def _request(request_id: int, method: str, params: dict | None = None) -> dict:
     }
 
 
+
+def elicit_round_trip(tool: str, arguments: dict, action: str, content: dict | None = None) -> dict:
+    """MRTR の 1 往復目と再送を**同一プロセス**で往復し、最終結果を返す。
+
+    `_exchange` は全リクエストを先に書き込むため、1 往復目の `requestState` を
+    再送へ渡せない。MRTR を検査するにはこちらを使う。
+
+    Args:
+        tool: 呼び出すツール名。
+        arguments: ツール引数。1 往復目と再送で同一のものを送る。
+        action: クライアントの応答。`accept` / `decline` / `cancel`。
+        content: `accept` のときに返す内容。
+
+    Returns:
+        再送に対する最終 result オブジェクト。
+
+    Raises:
+        AssertionError: 1 往復目が `input_required` を返さなかったとき。
+    """
+    process = subprocess.Popen(
+        [sys.executable, str(SERVER_PATH)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    try:
+        first_params = {"name": tool, "arguments": arguments}
+        process.stdin.write(json.dumps(_request(1, "tools/call", first_params)) + "\n")
+        process.stdin.flush()
+        first = json.loads(_read_line(process))["result"]
+        assert first.get("resultType") == "input_required", (
+            f"1 往復目が input_required を返しませんでした: {first}"
+        )
+        key = next(iter(first["inputRequests"]))
+
+        answer: dict = {"action": action}
+        if action == "accept":
+            answer["content"] = content or {}
+        # 再送は**別の JSON-RPC id** で送る（同じ id は仕様違反）
+        retry_params = {
+            "name": tool,
+            "arguments": arguments,
+            "inputResponses": {key: answer},
+            "requestState": first.get("requestState"),
+        }
+        process.stdin.write(json.dumps(_request(2, "tools/call", retry_params)) + "\n")
+        process.stdin.flush()
+        return json.loads(_read_line(process))["result"]
+    finally:
+        process.stdin.close()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
+def _read_line(process: subprocess.Popen) -> str:
+    """サーバの stdout から応答を 1 行読む。
+
+    Args:
+        process: 起動済みのサーバプロセス。
+
+    Returns:
+        読み取った JSON 1 行。
+
+    Raises:
+        AssertionError: 応答が来ないまま stdout が閉じたとき。
+    """
+    for line in process.stdout or []:
+        if line.strip():
+            return line
+    raise AssertionError(f"応答が返りませんでした。stderr:\n{(process.stderr.read() if process.stderr else '')[-2000:]}")
+
+
 def test_protocol_surface() -> None:
     """server/discover・tools/list・tools/call が 2026-07-28 の形で応答すること。"""
     responses = _exchange(
@@ -205,6 +289,23 @@ def test_tool_error_reaches_the_model() -> None:
     )
 
 
+def test_resource_is_served() -> None:
+    """公開したリソースが読め、キャッシュヒントが付いていること。
+
+    `resources/read` も `CacheableMethod` なので、`cache_hints` に
+    キーを書き忘れると `ttlMs=0`（毎回取り直し）のままになる。
+    ツール側だけ見ていると気づけない。
+    """
+    responses = _exchange([_request(1, "resources/read", {"uri": RESOURCE_URI})])
+    result = responses[1]["result"]
+    assert result["resultType"] == "complete", result
+    text = " ".join(block.get("text", "") for block in result.get("contents", []))
+    assert RESOURCE_EXPECTED_SUBSTRING in text, f"リソース本文が期待と違います: {text!r}"
+    assert result["ttlMs"] > 0, (
+        f"resources/read の cache_hints が未設定です: ttlMs={result['ttlMs']}"
+    )
+
+
 def main() -> int:
     """全チェックを実行し、終了コードを返す。
 
@@ -212,7 +313,13 @@ def main() -> int:
         全て通れば 0、1 つでも落ちれば 1。
     """
     failures = 0
-    for check in (test_protocol_surface, test_tool_error_reaches_the_model):
+    checks = [test_protocol_surface, test_tool_error_reaches_the_model]
+    if RESOURCE_URI:
+        checks.append(test_resource_is_served)
+    else:
+        # 「実行しなかった」を「合格」に潰さない。第三の値として記録する。
+        print("SKIP test_resource_is_served (RESOURCE_URI 未設定)", file=sys.stderr)
+    for check in checks:
         try:
             check()
         except AssertionError as error:

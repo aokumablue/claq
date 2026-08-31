@@ -48,10 +48,15 @@ mcp = MCPServer(
     log_level="INFO",
     # 既定は ttl_ms=0 / scope="private"（＝毎回取り直し）。一覧が安定しているなら
     # 明示してクライアント側キャッシュを効かせる。認可で内容が変わるなら "private"。
+    # ヒントを置ける先は 6 つ: tools/list, prompts/list, resources/list,
+    # resources/templates/list, resources/read, server/discover。
+    # 公開しない面のキーは消す。逆に公開する面のキーを書き忘れると、
+    # その応答だけ ttlMs=0 のまま（＝毎回取り直し）になる。
     cache_hints={
         "tools/list": CacheHint(ttl_ms=300_000, scope="public"),
         "prompts/list": CacheHint(ttl_ms=300_000, scope="public"),
         "resources/list": CacheHint(ttl_ms=60_000, scope="public"),
+        "resources/read": CacheHint(ttl_ms=60_000, scope="public"),
     },
 )
 

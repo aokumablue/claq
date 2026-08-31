@@ -108,7 +108,11 @@ Write ツールはいずれの場合も通るので、常に Write を使う。
 
 **`smoke_check.py` 冒頭の「ここを編集する」ブロックも必ず合わせる**
 （`HAPPY_TOOL` / `HAPPY_ARGS` / `HAPPY_EXPECTED_STRUCTURED` / `INVALID_TOOL` /
-`INVALID_ARGS`）。サンプルのツール名のままだと検証が実サーバを見なくなる。
+`INVALID_ARGS` / `INVALID_EXPECTED_MESSAGE` / `RESOURCE_URI` /
+`RESOURCE_EXPECTED_SUBSTRING`）。サンプルのツール名のままだと検証が実サーバを
+見なくなる。**要件で採用した面（tools / resources / prompts）はそれぞれ
+検査を持たせる。** リソースを公開しないなら `RESOURCE_URI = ""` にする
+（その検査は SKIP と記録される。合格には潰さない）。
 `INVALID_TOOL` / `INVALID_ARGS` には「実在するツール」×「**ツール本体まで到達して
 `ToolError` で失敗する**引数」を指定する。**`Field` の制約に引っかかる引数を選んではいけない。**
 引数検証は SDK が pydantic の読めるメッセージを返すため、`ToolError` を一度も
@@ -142,8 +146,15 @@ Write ツールはいずれの場合も通るので、常に Write を使う。
   | 文字列書式 | `Annotated[str, Field(pattern=r"^[a-z0-9-]+$")]` | `pattern` |
   | 文字列長 | `Annotated[str, Field(min_length=1, max_length=200)]` | `minLength` / `maxLength` |
 
-  ただし `INVALID_TOOL` に選ぶツールの引数へ書式制約を足すと、
+  ただし `INVALID_TOOL` に選ぶツールの引数へ書式・選択肢制約を足すと、
   `ToolError` 経路が死んで手順 4 の検査が空振りする（手順 3 冒頭の注意）。
+
+  **衝突したときは `ToolError` を優先する。** 引数を取るツールが 1 本しかなく、
+  そのツールの業務エラーが選択肢制約そのもの（単位・種別・状態名などの
+  列挙型ドメインでは常にこうなる）だと、`Literal` にした瞬間 `ToolError` が
+  1 本も無いサーバになる。その場合は `str` で受けて `ToolError` を投げ、
+  選択肢は description・専用の一覧ツール・エラー本文に列挙して補う。
+  範囲・長さの制約はこの衝突と無関係なので `Field` のまま残す。
 - **モデルに読ませたい失敗は `ToolError` で投げる**
   （`from mcp.server.mcpserver.exceptions import ToolError`）。
   **素の例外（`ValueError` など）はメッセージが伏せられ**、モデルには
@@ -153,6 +164,10 @@ Write ツールはいずれの場合も通るので、常に Write を使う。
 - **`cache_hints` を意図して設定する。** 既定は `ttl_ms=0` / `scope="private"`
   ＝ クライアントは毎回取り直す。一覧が安定しているなら値を入れる。
   認可によって内容が変わる一覧に `"public"` を付けない。
+  キーを置ける先は `tools/list` / `prompts/list` / `resources/list` /
+  `resources/templates/list` / `resources/read` / `server/discover` の 6 つ。
+  **公開する面のキーを書き忘れるとその応答だけ `ttlMs=0` に取り残される**
+  （`resources/read` の書き忘れが多い）。公開しない面のキーは消す。
 - **ログは標準 `logging` で出す。** プロトコルのログ機能（`ctx.info()` 等）は
   非推奨（SEP-2577）。`MCPServer(log_level=...)` を渡せば SDK が設定を面倒見る。
   出力先は stderr なので stdio でも安全。`print` は stdout を汚してフレームを壊す。
@@ -176,10 +191,13 @@ Write ツールはいずれの場合も通るので、常に Write を使う。
 
 ### 4. 検証する（省略不可）
 
-**venv の interpreter の絶対パスで実行する**（裸の `python3` では動かない）:
+以降このステップのコマンドは**すべて `mcp` が入った interpreter の絶対パス**で
+実行する（裸の `python3` では動かない）。以下これを `$PY` と書く。
+venv を生成先に作ったなら `<生成先>/.venv/bin/python3`、既存の venv を使うなら
+そのパス。生成先の中にあるとは限らない。
 
 ```bash
-<生成先>/.venv/bin/python3 smoke_check.py
+"$PY" smoke_check.py
 ```
 
 `smoke_check.py` はサーバを `sys.executable` で子プロセスとして起動する。
@@ -202,7 +220,7 @@ PATH 上の裸の `python3` で呼ぶと、検査自体は起動するのにサ�
 さらに、SDK が想定通りの版を指しているか確認する:
 
 ```bash
-python3 -c "import mcp.types; print(mcp.types.LATEST_PROTOCOL_VERSION)"
+"$PY" -c "import mcp.types; print(mcp.types.LATEST_PROTOCOL_VERSION)"
 ```
 
 `2026-07-28` 以外が出たら、SDK が新しい仕様へ進んでいる。
@@ -260,9 +278,15 @@ async def danger(
 
 完全な例・実測ワイヤ・`requestState` の完全性保護要件は
 `references/sdk-api-evidence.md` の「MRTR」節。
-MRTR を入れたら、`smoke_check.py` では**1 往復目が
-`resultType: "input_required"` を返すことまでを確認する**（再送の解決は
-実クライアントで確認する）。
+MRTR を入れたら、`smoke_check.py` で**最低でも**1 往復目が
+`resultType: "input_required"` を返すことを確認する。これは下限であって上限ではない。
+
+確認・同意を扱うなら、テンプレート同梱の `smoke_check.py` にある
+`elicit_round_trip` ヘルパで
+**承認と拒否の両分岐**まで検査する。拒否がエラーとして返る実装ミス
+（素の `Annotated[T, Resolve(fn)]` で受けた場合）は 1 往復目だけの検査では
+見つからない。`_exchange` は全リクエストを先に書き込むため `requestState` を
+再送へ渡せない。MRTR の往復にはこのヘルパを使うこと。
 
 ### 認証（HTTP の OAuth）
 
