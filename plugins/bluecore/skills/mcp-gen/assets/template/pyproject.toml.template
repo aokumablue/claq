@@ -13,3 +13,11 @@ example-server = "server:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# 単一モジュール構成なので明示が要る。hatchling の既定はプロジェクト名から
+# ディレクトリ（`example_server/`）を探すため、これが無いと
+# `Unable to determine which files to ship inside the wheel` で install が失敗する。
+# サーバのファイル名を変えたら only-include も合わせること。
+[tool.hatch.build.targets.wheel]
+only-include = ["server.py"]
+sources = ["."]

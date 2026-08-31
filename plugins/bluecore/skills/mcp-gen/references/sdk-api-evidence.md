@@ -66,9 +66,9 @@ MCPServer(name=None, title=None, description=None, instructions=None,
 ```
 ctx.debug/info/warning/error/log(...)    ログ（通知として流れる）
 ctx.report_progress(progress, total=None, message=None)
-ctx.elicit(message, schema) -> ElicitationResult      # MRTR
-ctx.elicit_url(message, url, elicitation_id)
-ctx.input_responses                                    # MRTR 再送時に読む
+ctx.elicit(message, schema)              # ⚠ 旧経路。下記「MRTR」を読むこと
+ctx.elicit_url(message, url, elicitation_id)           # 同上
+ctx.input_responses                                    # MRTR 再送時の生データ
 ctx.request_state                                      # MRTR の持ち回し状態
 ctx.read_resource(uri)
 ctx.notify_tools_changed() / notify_resources_changed() / notify_prompts_changed()
@@ -93,6 +93,89 @@ mcp.streamable_http_app(...) -> Starlette      # 既存 ASGI へマウントす�
 `TransportSecuritySettings()` の既定値（実測）:
 `{'enable_dns_rebinding_protection': True, 'allowed_hosts': [], 'allowed_origins': []}`
 — 保護は既定で有効だが**許可リストは空**。明示的に列挙すること。
+
+## MRTR（追加入力の要求）— `ctx.elicit` は使わない
+
+`Context.elicit` は docstring 上「ツール実行中に対話的に情報を求める」と読めるが、
+**サーバ発リクエスト（旧経路）を張る実装**であり、2026-07-28 のステートレスな
+トランスポートでは張れずに失敗する。実測:
+
+```
+{"jsonrpc":"2.0","id":1,"error":{"code":-32600,
+ "message":"Cannot send 'elicitation/create': this transport context has no
+            back-channel for server-initiated requests."}}
+```
+
+MRTR の経路は**リゾルバによる依存注入**である。ツール引数を
+`Annotated[T, Resolve(fn)]` で宣言し、`fn` が `Elicit(...)` / `Sample(...)` /
+`ListRoots()` を返す。SDK がそれを `InputRequiredResult` へ束ね、
+クライアントの再送で解決して本体を実行する。
+
+```python
+from typing import Annotated
+
+from mcp.server.mcpserver import Elicit, Resolve
+from pydantic import BaseModel
+
+
+class Confirm(BaseModel):
+    approve: bool
+
+
+def ask_confirm(target: str) -> Elicit[Confirm]:
+    """削除の確認をクライアントへ求める。リゾルバはツール引数を名前で受け取れる。"""
+    return Elicit(f"{target} を削除してよいですか", Confirm)
+
+
+@mcp.tool()
+async def danger(target: str, confirm: Annotated[Confirm, Resolve(ask_confirm)]) -> str:
+    """確認を取ってから破壊的操作を行う。"""
+    return f"deleted {target}" if confirm.approve else "cancelled"
+```
+
+- `Annotated[T, Resolve(fn)]` は素の `T` を受け取る（decline / cancel は呼び出しを中断）。
+- `Annotated[ElicitationResult[T], Resolve(fn)]` にすると accept / decline / cancel を
+  自分で分岐できる。
+- `Sample` / `ListRoots` に decline は無い。ただし **Sampling と Roots は非推奨**なので
+  新規実装では使わない。実質使うのは `Elicit` だけ。
+- クライアントが対応 capability を宣言していない場合、SDK は
+  `MissingRequiredClientCapability`（`-32021`）を返す。
+
+実測ワイヤ（1 往復目 → 再送 → 完了）:
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{
+  "resultType":"input_required",
+  "inputRequests":{"__main__:ask_confirm":{"method":"elicitation/create",
+    "params":{"message":"db を削除してよいですか","mode":"form",
+              "requestedSchema":{"type":"object",
+                "properties":{"approve":{"type":"boolean","title":"Approve"}},
+                "required":["approve"]}}}},
+  "requestState":"v1.bJldIQpdiNduk..."}}
+```
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+  "name":"danger","arguments":{"target":"db"},
+  "inputResponses":{"__main__:ask_confirm":{"action":"accept",
+                    "content":{"approve":true}}},
+  "requestState":"v1.bJldIQpdiNduk..."}}
+```
+
+```json
+{"jsonrpc":"2.0","id":2,"result":{
+  "resultType":"complete","isError":false,
+  "content":[{"type":"text","text":"deleted db"}],
+  "structuredContent":{"result":"deleted db"}}}
+```
+
+`requestState` の `v1.` 接頭辞は SDK の AEAD 保護済みブロブ
+（`AESGCMRequestStateCodec`）。仕様は `requestState` を**攻撃者制御入力**として
+扱うことを要求しており、SDK 既定の codec がその完全性保護を担う。
+自前で `requestState` を組み立てるなら、認証主体・短い TTL・元リクエストの識別子を
+保護対象ペイロードへ入れて毎回検証すること。
+
+再送は**別の JSON-RPC id** で来る。同じ id で送るのは仕様違反。
 
 ## 実測ワイヤ出力
 

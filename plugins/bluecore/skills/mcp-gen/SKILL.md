@@ -35,13 +35,26 @@ user-invocable: true
 - 公開するツール: 名前・入力・出力・副作用の有無
 - リソース / プロンプトの要否
 - トランスポート: stdio（ローカル・既定）か Streamable HTTP（リモート）
-- 認証の要否（HTTP のみ。stdio は環境変数から資格情報を取る）
+- **ツール実行の途中で利用者の入力・確認が要るか**（破壊的操作の確認など）。
+  要るなら MRTR を使う（下記「テンプレートの範囲外」）
 - 状態を跨いで保持する必要があるか（あるならハンドル設計が要る）
+- 認証の要否（HTTP のみ。stdio は環境変数から資格情報を取る）。
+  要るならテンプレートの範囲外（下記）
 
 ### 2. テンプレートを複製する
 
+テンプレートは**この SKILL.md と同じディレクトリの** `assets/template/` にある。
+スキルは配布ビルドから読み込まれることもあるため、パスを決め打ちせず実際に解決する:
+
 ```bash
-mkdir -p <生成先> && cp <skill>/assets/template/{server.py,smoke_check.py,README.md} <生成先>/
+SKILL_DIR=$(dirname "$(find "$HOME/.claude/plugins" /Users -name SKILL.md -path '*/mcp-gen/*' 2>/dev/null | head -1)")
+ls "$SKILL_DIR/assets/template/"
+```
+
+見つからなければユーザーにスキルの配置場所を聞く。解決できたら複製する:
+
+```bash
+mkdir -p <生成先> && cp "$SKILL_DIR"/assets/template/{server.py,smoke_check.py,README.md} <生成先>/
 ```
 
 `pyproject.toml.template` → `pyproject.toml` は **Write ツールで作る**。
@@ -84,11 +97,10 @@ python3 smoke_check.py
 サーバを実際に起動し、生の JSON-RPC で `server/discover` / `tools/list` /
 `tools/call` を往復して応答形を確認する。**exit code 0 を確認するまで完了報告しない。**
 
-続けて旧仕様の混入を機械確認する:
-
-```bash
-grep -rnE 'FastMCP|Mcp-Session-Id|mcp_session_id|resources/(un)?subscribe|Last-Event-ID|logging/setLevel|elicitationId|-32002|notifications/(initialized|elicitation/complete)' <生成先>
-```
+続けて旧仕様の混入を機械確認する。パターンの正本は
+`references/spec-2026-07-28.md` の「生成後に機械確認する禁止パターン（正本）」節。
+**その節の grep をそのまま実行する**（ここに複製しない。2 か所に置くと片方だけ
+更新され、検査したつもりの穴が残る）。
 
 1 件でも当たれば旧仕様が混入している。後方互換を**意図して**書いた場合のみ例外とし、
 対象プロトコル版をコメントに明記する。
@@ -108,6 +120,45 @@ python3 -c "import mcp.types; print(mcp.types.LATEST_PROTOCOL_VERSION)"
 
 `README.md` のクライアント設定 JSON を生成先の絶対パスで埋めて提示する。
 `command` は venv の `python3` の絶対パスにする。
+
+## テンプレートの範囲外（判断と理由）
+
+以下はテンプレートに**入れない**。最小構成の可読性を保つため、
+かつ動作確認が実クライアントを要して `smoke_check.py` で担保できないため。
+必要になった時点で下記の指針に従って足す。
+
+### MRTR（ツール実行中の追加入力）
+
+Sampling / Elicitation / Roots のサーバ発リクエストは廃止され、MRTR に置き換わった。
+**`ctx.elicit()` は使わない** — 旧経路の実装であり、ステートレスなトランスポートでは
+`-32600` で失敗する（実測済み）。正しい経路はリゾルバによる依存注入:
+
+```python
+def ask_confirm(target: str) -> Elicit[Confirm]:
+    """確認を求める。"""
+    return Elicit(f"{target} を削除してよいですか", Confirm)
+
+
+@mcp.tool()
+async def danger(target: str, confirm: Annotated[Confirm, Resolve(ask_confirm)]) -> str:
+    """確認を取ってから破壊的操作を行う。"""
+    ...
+```
+
+完全な例・実測ワイヤ・`requestState` の完全性保護要件は
+`references/sdk-api-evidence.md` の「MRTR」節。
+MRTR を入れたら、`smoke_check.py` では**1 往復目が
+`resultType: "input_required"` を返すことまでを確認する**（再送の解決は
+実クライアントで確認する）。
+
+### 認証（HTTP の OAuth）
+
+`MCPServer` は `auth` / `token_verifier` / `auth_server_provider` を取るが、
+認可サーバ探索・クライアント登録（動的登録は非推奨、CIMD へ移行）・
+RFC 9207 の `iss` 検証まで含む独立した subsystem であり、テンプレート化すると
+最小構成が崩れる。必要な場合は
+<https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/index>
+を読んでから設計する。stdio は認可仕様の対象外で、資格情報は環境変数から取る。
 
 ## テンプレートが実証していること
 
@@ -140,7 +191,7 @@ python3 -c "import mcp.types; print(mcp.types.LATEST_PROTOCOL_VERSION)"
 ## 参照
 
 - `references/spec-2026-07-28.md` — 削除・追加・非推奨の一覧、`_meta` 予約キー、
-  セキュリティ必須事項、禁止パターンの grep
+  セキュリティ必須事項、禁止パターン grep の**正本**
 - `references/sdk-api-evidence.md` — `mcp` 2.1.1 の実測シグネチャと実測ワイヤ JSON
 
 ## 永続メモリ
