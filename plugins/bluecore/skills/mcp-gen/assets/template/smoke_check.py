@@ -4,9 +4,14 @@
 として起動し、生の JSON-RPC を書き込んで応答を読む。SDK を経由しないので
 「SDK が正しいと言っている」ではなく「ワイヤに正しい形が出ている」を確認できる。
 
-実行方法:
-    python3 smoke_check.py        # 単体実行（pytest 不要）
-    pytest smoke_check.py         # pytest からも実行できる（ファイル名の明示が必要）
+実行方法（**venv の interpreter で実行すること**）:
+    .venv/bin/python3 smoke_check.py    # 単体実行（pytest 不要）
+    .venv/bin/pytest smoke_check.py     # pytest からも実行できる（ファイル名の明示が必要）
+
+この検査はサーバを `sys.executable` で子プロセスとして起動する。つまり
+**この検査を動かした interpreter がそのままサーバの interpreter になる**。
+PATH 上の裸の `python3` で実行すると、検査自体は起動するのにサーバ側だけが
+`ModuleNotFoundError: No module named 'mcp'` で死ぬ。
 
 ファイル名を `test_*.py` にしていないのは、置かれたリポジトリの pytest に自動収集
 されないため。収集されると `mcp` 未導入の環境で無関係に失敗する。
@@ -99,6 +104,15 @@ def _exchange(requests: list[dict]) -> dict[int, dict]:
             process.kill()
 
     stderr_tail = (process.stderr.read() if process.stderr else "")[-2000:]
+    # 最頻の失敗は「サーバ側の python に mcp が入っていない」。この検査は自分では
+    # mcp を import しないので**自分は起動でき**、死ぬのは spawn した子だけ。
+    # 素の件数だけ出すと原因が stderr の末尾に埋もれるため、先に名指しする。
+    if "ModuleNotFoundError" in stderr_tail and "mcp" in stderr_tail:
+        raise AssertionError(
+            f"サーバを起動した interpreter に mcp が入っていません: {sys.executable}\n"
+            f"venv の python で実行してください（例: .venv/bin/python3 smoke_check.py）。\n"
+            f"stderr:\n{stderr_tail}"
+        )
     assert got_all, f"応答が {len(responses)}/{len(requests)} 件しか返りませんでした。stderr:\n{stderr_tail}"
     return responses
 

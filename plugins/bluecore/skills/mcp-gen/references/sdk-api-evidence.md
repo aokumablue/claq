@@ -133,9 +133,20 @@ async def danger(target: str, confirm: Annotated[Confirm, Resolve(ask_confirm)])
     return f"deleted {target}" if confirm.approve else "cancelled"
 ```
 
-- `Annotated[T, Resolve(fn)]` は素の `T` を受け取る（decline / cancel は呼び出しを中断）。
-- `Annotated[ElicitationResult[T], Resolve(fn)]` にすると accept / decline / cancel を
-  自分で分岐できる。
+受け方は 2 通りあり、**decline / cancel 時のワイヤ出力が違う**。実測（同一サーバ・
+同一リクエストに `{"action": "decline"}` を返した場合）:
+
+| 受け方 | `isError` | `content` |
+|---|---|---|
+| `Annotated[T, Resolve(fn)]` | `true` | `Error executing tool bare: Resolver for parameter 'c' could not resolve: elicitation was decline` |
+| `Annotated[ElicitationResult[T], Resolve(fn)]` | `false` | ハンドラが返した文字列（例 `aborted (decline)`） |
+
+つまり素の `T` は「拒否＝呼び出しの失敗」という意味になる。
+**確認・同意の用途では `ElicitationResult[T]` を使う**（拒否は正常な結果であり、
+「中止しました」を戻り値で返せる必要があるため）。素の `T` が適切なのは、
+入力が取れなければ処理を続けられない場合だけ。
+`ElicitationResult` は `action`（`accept` / `decline` / `cancel`）と、
+accept のときだけ埋まる `data` を持つ。
 - `Sample` / `ListRoots` に decline は無い。ただし **Sampling と Roots は非推奨**なので
   新規実装では使わない。実質使うのは `Elicit` だけ。
 - クライアントが対応 capability を宣言していない場合、SDK は
@@ -346,3 +357,23 @@ SDK リポジトリの `examples/` のみ。
 `examples/servers/simple-streamablehttp/` は非推奨の `send_log_message` を
 （pyright の `reportDeprecated` 抑止コメント付きで）今も使っている。
 例を読むときは `deprecated/` のページと突き合わせること。
+
+
+## Streamable HTTP のヘッダ強制（実測）
+
+テンプレートを `--http` で起動し `curl` で確認（`mcp` 2.1.1）:
+
+| リクエスト | 結果 |
+|---|---|
+| `MCP-Protocol-Version` + `Mcp-Method` あり、`Mcp-Name` なしで `tools/list` | `200` |
+| ヘッダを全く付けない POST | `400` |
+| MCP エンドポイントへの `GET` | `400` |
+
+1 行目は仕様どおり（`Mcp-Name` が必須なのは `tools/call` /
+`resources/read` / `prompts/get` だけで、`tools/list` には要らない）。
+2 行目も仕様どおり（`MCP-Protocol-Version` 欠落は `400`）。
+
+3 行目は**仕様との差異**。仕様はこの版のみを実装するサーバが GET に
+`405 Method Not Allowed` を返すことを SHOULD としているが、SDK 2.1.1 は `400` を返す。
+旧クライアントの後方互換探索は `400` / `404` / `405` のいずれでも
+フォールバックへ進むため実害は無いが、`405` を期待した検査を書くと落ちる。

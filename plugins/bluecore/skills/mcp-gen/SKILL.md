@@ -70,8 +70,14 @@ find "$HOME/.claude/plugins/cache" -maxdepth 7 -type d -path '*/mcp-gen/assets/t
 `/Users` や `$HOME` 全体を find の起点にしない。**10 分経っても返らない**（実測）。
 どちらでも解決しなければユーザーにスキルの配置場所を聞く。解決できたら複製する:
 
+フックが見るのは**書き込み先のパス**なので、複製先は完全なリテラル絶対パスで書く
+（`$VAR` を含めると止まる）。複製元は変数でよい:
+
 ```bash
-mkdir -p <生成先> && cp "$SKILL_DIR"/assets/template/{server.py,smoke_check.py,README.md} <生成先>/
+mkdir -p /abs/path/to/dest
+cp "$SKILL_DIR"/assets/template/server.py /abs/path/to/dest/server.py
+cp "$SKILL_DIR"/assets/template/smoke_check.py /abs/path/to/dest/smoke_check.py
+cp "$SKILL_DIR"/assets/template/README.md /abs/path/to/dest/README.md
 ```
 
 `pyproject.toml.template` の中身を読み、`pyproject.toml` を **Write ツールで作る**
@@ -88,8 +94,17 @@ Write ツールはいずれの場合も通るので、常に Write を使う。
 
 ### 3. 編集する
 
-`server.py` の `SERVER_NAME` / `SERVER_VERSION` / `instructions` を置き換え、
-サンプルのツール・リソース・プロンプトを要件のものに差し替える。骨組みは触らない。
+**差し替える**: `SERVER_NAME` / `SERVER_VERSION` / `instructions` / `cache_hints` の
+中身、およびサンプルのツール・リソース・プロンプト（不要なものは削除してよい）。
+
+**触らない骨組み**: import 群、`MCPServer(...)` の構築そのもの、`main()` の
+トランスポート分岐、`TransportSecuritySettings`。stdio だけが要件でも `--http`
+分岐は残す（消しても動くが、後から HTTP 化するときに骨組みを再発明することになる）。
+
+**`HAPPY_TOOL` には出力が決定的なツールを選ぶ。** `smoke_check.py` は
+`structuredContent` を完全一致で比較するため、UUID や時刻や採番 ID を返すツールを
+選ぶと必ず落ちる（しかも「謎の assert 失敗」としてしか現れない）。決定的にできない
+場合は、その assert を必要な部分の比較へ書き換える。
 
 **`smoke_check.py` 冒頭の「ここを編集する」ブロックも必ず合わせる**
 （`HAPPY_TOOL` / `HAPPY_ARGS` / `HAPPY_EXPECTED_STRUCTURED` / `INVALID_TOOL` /
@@ -116,9 +131,19 @@ Write ツールはいずれの場合も通るので、常に Write を使う。
 
 守ること:
 
-- **引数の制約は `Annotated[T, Field(ge=..., le=...)]` で宣言する。**
-  `inputSchema` に `minimum` / `maximum` が載るのでモデルが呼ぶ前に範囲を知れ、
-  違反時は pydantic の検証メッセージがそのまま届く。
+- **引数の制約は型注釈で宣言する。** 目的は「制約が `inputSchema` に載って
+  モデルが呼ぶ前に分かる」ことと「違反時に pydantic の読めるメッセージが届く」こと。
+  自前の `if` 文ではどちらも得られない。形は制約の種類ごとに違う:
+
+  | 制約 | 書き方 | `inputSchema` に載るもの |
+  |---|---|---|
+  | 数値範囲 | `Annotated[int, Field(ge=1, le=100)]` | `minimum` / `maximum` |
+  | 選択肢 | `Literal["dev", "staging", "prod"]` | `enum` |
+  | 文字列書式 | `Annotated[str, Field(pattern=r"^[a-z0-9-]+$")]` | `pattern` |
+  | 文字列長 | `Annotated[str, Field(min_length=1, max_length=200)]` | `minLength` / `maxLength` |
+
+  ただし `INVALID_TOOL` に選ぶツールの引数へ書式制約を足すと、
+  `ToolError` 経路が死んで手順 4 の検査が空振りする（手順 3 冒頭の注意）。
 - **モデルに読ませたい失敗は `ToolError` で投げる**
   （`from mcp.server.mcpserver.exceptions import ToolError`）。
   **素の例外（`ValueError` など）はメッセージが伏せられ**、モデルには
@@ -141,15 +166,27 @@ Write ツールはいずれの場合も通るので、常に Write を使う。
   全インスタンス同名の `MCPServer(...)`。** 既定はプロセスごとに鍵を作るため、
   再送が別ワーカーへ届くと復号に失敗する。
 - **状態はツール引数のハンドルで持ち回す。** プロトコルにセッションは無い。
-  ハンドルは不透明・有効期限付きにし、呼び出しごとに認可を再検証する。
+  ただし「不透明・有効期限付き・呼び出しごとに認可再検証」が要るのは
+  **廃止されたセッションの代替として認可文脈を運ぶハンドル**に限る。
+  ドメイン上の識別子（ブックマーク ID、注文番号など）は普通の ID でよく、
+  一覧 API が全件返すなら推測不能性は何も守らない。取り違えると
+  「有効期限付きブックマーク」のような要件違反を作り込む。
 - **`x-mcp-header` を機微な引数に付けない。** ヘッダは中間装置から見える。
 - 全ての関数に docstring を付ける。
 
 ### 4. 検証する（省略不可）
 
+**venv の interpreter の絶対パスで実行する**（裸の `python3` では動かない）:
+
 ```bash
-python3 smoke_check.py
+<生成先>/.venv/bin/python3 smoke_check.py
 ```
+
+`smoke_check.py` はサーバを `sys.executable` で子プロセスとして起動する。
+つまり**検査を動かした interpreter がそのままサーバの interpreter になる**ため、
+venv の python で呼ぶのが回避策ではなく正しい呼び出しである。
+PATH 上の裸の `python3` で呼ぶと、検査自体は起動するのにサーバ側だけが
+`ModuleNotFoundError: No module named 'mcp'` で死ぬ。
 
 サーバを実際に起動し、生の JSON-RPC で `server/discover` / `tools/list` /
 `tools/call` を往復して応答形を確認する。**exit code 0 を確認するまで完了報告しない。**
@@ -190,6 +227,10 @@ Sampling / Elicitation / Roots のサーバ発リクエストは廃止され、M
 **`ctx.elicit()` は使わない** — 旧経路の実装であり、ステートレスなトランスポートでは
 `-32600` で失敗する（実測済み）。正しい経路はリゾルバによる依存注入:
 
+**確認用途では `ElicitationResult[T]` で受けること。** 素の `T` で受けると
+利用者が拒否したときツール呼び出し自体がエラーになり、「中止しました」を
+正常な戻り値で返せない（実測。下表）。
+
 ```python
 def ask_confirm(target: str) -> Elicit[Confirm]:
     """確認を求める。"""
@@ -197,10 +238,25 @@ def ask_confirm(target: str) -> Elicit[Confirm]:
 
 
 @mcp.tool()
-async def danger(target: str, confirm: Annotated[Confirm, Resolve(ask_confirm)]) -> str:
+async def danger(
+    target: str,
+    confirm: Annotated[ElicitationResult[Confirm], Resolve(ask_confirm)],
+) -> str:
     """確認を取ってから破壊的操作を行う。"""
-    ...
+    if confirm.action != "accept":
+        return f"中止しました（{confirm.action}）"
+    return "削除しました" if confirm.data.approve else "中止しました"
 ```
+
+`decline` を受けたときの実測差（同一サーバ・同一リクエスト）:
+
+| 受け方 | `isError` | `content` |
+|---|---|---|
+| `Annotated[T, Resolve(fn)]` | `true` | `Error executing tool ...: Resolver for parameter 'c' could not resolve: elicitation was decline` |
+| `Annotated[ElicitationResult[T], Resolve(fn)]` | `false` | `中止しました（decline）` |
+
+素の `T` が適切なのは「拒否＝呼び出しの失敗」でよい場合だけ（必須の入力を
+取得できなかった等）。確認・同意はそれに当たらない。
 
 完全な例・実測ワイヤ・`requestState` の完全性保護要件は
 `references/sdk-api-evidence.md` の「MRTR」節。
@@ -239,11 +295,11 @@ RFC 9207 の `iss` 検証まで含む独立した subsystem であり、テン�
 ## 環境の落とし穴
 
 - **`pyproject.toml` は Write ツールで作る**（Bash が通るかは生成先次第。手順 2 の表）。
-- **禁止パターン grep から `__pycache__` を除外する。** `.pyc` には docstring が
-  そのまま埋まり、しかもソースを直した後も古い文字列を保持する。
-  当たるかは grep の実装依存（macOS ではバイナリを読み飛ばすため当たらない）だが、
-  検査対象はソースでありビルド生成物ではない。正本の grep に入っている
-  `-I --exclude-dir=__pycache__` を省かない。
+- **禁止パターン grep から `__pycache__` を除外する。** 検査対象はソースであって
+  ビルド生成物ではない。`.pyc` には docstring がそのまま埋まり、ソースを直した後も
+  古い文字列を保持する。正本の grep の `-I --exclude-dir=__pycache__` を省かない。
+  なお `smoke_check.py` を**スクリプトとして実行しても `__pycache__` はできない**
+  （できるのは import したとき）。
 - **検証スクリプトを `test_*.py` / `*_test.py` と名付けない。**
   親リポジトリの pytest に自動収集され、`mcp` 未導入の環境で無関係に失敗する。
   `smoke_check.py` はそのために意図してこの名前にしてある。
