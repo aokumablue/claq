@@ -18,7 +18,7 @@ from bluecore.ci.harness_audit_utils import (
     _has_gitlab_security_scanning,
     count_files,
     detect_target_mode,
-    file_exists,
+    file_has_content,
     find_plugin_install,
     has_file_with_extension,
     safe_parse_json,
@@ -48,7 +48,7 @@ VALID_FORMATS = {"text", "json"}
 VALID_TARGET_KINDS = {"repo", "consumer"}
 
 
-RUBRIC_VERSION = "2026-08-27"
+RUBRIC_VERSION = "2026-08-31"
 """採点ルーブリックの版。
 
 スコアはこの版の中でのみ比較可能で、版が上がった時点で過去のベースラインとは
@@ -176,13 +176,13 @@ def _consumer_security_status(root_dir: str | Path, hosting_service: str) -> boo
     Raises:
         例外は発生しません。
     """
-    security_pass = file_exists(root_dir, "SECURITY.md")
+    security_pass = file_has_content(root_dir, "SECURITY.md")
     if hosting_service == "gitlab":
         return security_pass or _has_gitlab_security_scanning(root_dir)
     return (
         security_pass
-        or file_exists(root_dir, ".github/dependabot.yml")
-        or file_exists(root_dir, ".github/codeql.yml")
+        or file_has_content(root_dir, ".github/dependabot.yml")
+        or file_has_content(root_dir, ".github/codeql.yml")
     )
 
 
@@ -220,8 +220,8 @@ def _consumer_tool_coverage_checks(root_dir: str | Path, plugin_install: str | N
             "pass": count_files(root_dir, ".claude/agents", ".md") > 0
             or count_files(root_dir, ".claude/skills", "SKILL.md") > 0
             or count_files(root_dir, ".claude/commands", ".md") > 0
-            or file_exists(root_dir, ".claude/settings.json")
-            or file_exists(root_dir, ".claude/hooks.json"),
+            or file_has_content(root_dir, ".claude/settings.json")
+            or file_has_content(root_dir, ".claude/hooks.json"),
             "fix": "Add project-local .claude hooks, commands, skills, or settings that tailor bluecore to this repo.",
         },
     ]
@@ -247,9 +247,9 @@ def _consumer_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, 
             "scopes": ["repo"],
             "path": "AGENTS.md",
             "description": "プロジェクトが明示的なエージェント・命令コンテキストを持つ",
-            "pass": file_exists(root_dir, "AGENTS.md")
-            or file_exists(root_dir, "CLAUDE.md")
-            or file_exists(root_dir, ".claude/CLAUDE.md"),
+            "pass": file_has_content(root_dir, "AGENTS.md")
+            or file_has_content(root_dir, "CLAUDE.md")
+            or file_has_content(root_dir, ".claude/CLAUDE.md"),
             "fix": "Add AGENTS.md or CLAUDE.md so the harness has project-specific instructions.",
         },
         {
@@ -259,9 +259,9 @@ def _consumer_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, 
             "scopes": ["repo", "hooks"],
             "path": ".mcp.json",
             "description": "プロジェクトがローカル MCP・Claude 設定を宣言している",
-            "pass": file_exists(root_dir, ".mcp.json")
-            or file_exists(root_dir, ".claude/settings.json")
-            or file_exists(root_dir, ".claude/settings.local.json"),
+            "pass": file_has_content(root_dir, ".mcp.json")
+            or file_has_content(root_dir, ".claude/settings.json")
+            or file_has_content(root_dir, ".claude/settings.local.json"),
             "fix": "Add .mcp.json or .claude/settings.json so project-local tool configuration is explicit.",
         },
     ]
@@ -337,7 +337,7 @@ def _consumer_memory_and_eval_checks(root_dir: str | Path) -> list[dict[str, Any
             "scopes": ["repo"],
             "path": ".claude/memory.md",
             "description": "プロジェクトメモリ・恒久的なノートがチェックインされている",
-            "pass": file_exists(root_dir, ".claude/memory.md") or count_files(root_dir, "docs/adr", ".md") > 0,
+            "pass": file_has_content(root_dir, ".claude/memory.md") or count_files(root_dir, "docs/adr", ".md") > 0,
             "fix": "Add durable project memory such as .claude/memory.md or ADRs under docs/adr/.",
         },
         {
@@ -414,7 +414,7 @@ def _consumer_security_guardrails_checks(ctx: _GuardrailsCtx) -> list[dict[str, 
             "description": "プロジェクトローカルフック設定がツール・プロンプトガードを参照している",
             "pass": "PreToolUse" in ctx.project_hooks
             or "beforeSubmitPrompt" in ctx.project_hooks
-            or file_exists(ctx.root_dir, ".claude/hooks.json"),
+            or file_has_content(ctx.root_dir, ".claude/hooks.json"),
             "fix": "Add project-local hook settings or hook definitions for prompt/tool guardrails.",
         },
     ]
@@ -431,7 +431,7 @@ def _consumer_hosting_layout(root_dir: str | Path, hosting_service: str) -> tupl
         (ci_path, security_path, ci_pass) のタプル。
     """
     if hosting_service == "gitlab":
-        return ".gitlab-ci.yml", ".gitlab-ci.yml", file_exists(root_dir, ".gitlab-ci.yml")
+        return ".gitlab-ci.yml", ".gitlab-ci.yml", file_has_content(root_dir, ".gitlab-ci.yml")
     return (
         ".github/workflows/",
         "SECURITY.md",

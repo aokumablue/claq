@@ -52,7 +52,16 @@ def test_safe_helpers_and_counting(tmp_path: Path) -> None:
     (tmp_path / "dir" / "nested").mkdir()
     (tmp_path / "dir" / "nested" / "c.js").write_text("c\n", encoding="utf-8")
 
-    assert harness_audit.file_exists(tmp_path, "dir/a.js")
+    (tmp_path / "blank.txt").write_text("   \n", encoding="utf-8")
+
+    binary = tmp_path / "binary.bin"
+    binary.write_bytes(b"\xff\xfe\x00\x01")
+
+    assert harness_audit.file_has_content(tmp_path, "dir/a.js")
+    assert not harness_audit.file_has_content(tmp_path, "binary.bin")
+    assert not harness_audit.file_has_content(tmp_path, "blank.txt")
+    assert not harness_audit.file_has_content(tmp_path, "missing.txt")
+    assert not harness_audit.file_has_content(tmp_path, "dir")
     assert harness_audit.read_text(tmp_path, "dir/a.js") == "a\n"
     assert harness_audit.safe_read(tmp_path, "missing.txt") == ""
     assert harness_audit.safe_parse_json("") is None

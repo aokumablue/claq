@@ -24,6 +24,31 @@ def file_exists(root_dir: str | Path, relative_path: str) -> bool:
     return Path(root_dir, relative_path).exists()
 
 
+def file_has_content(root_dir: str | Path, relative_path: str) -> bool:
+    """相対パスが存在し、かつ中身が空でないかを確認する。
+
+    存在検査だけを合格条件にすると、ファイルを 0 バイトへ切り詰めても満点が出る
+    （実測: `tests/hooks/test_hook_edge_cases.py` を空にしても 58/58）。存在を根拠に
+    「テストがある」「ポリシーがある」と採点する以上、中身の消失は不合格でなければ
+    ならない（ADR-0014: skip されるゲートはゲートとして機能しない）。
+
+    Args:
+        root_dir: 監査対象ルート。
+        relative_path: ルートからの相対パス。
+
+    Returns:
+        ファイルが存在し、空白のみでない中身を持つなら True。
+
+    Raises:
+        例外は発生しません（読み取り失敗は False として扱う）。
+    """
+    path = Path(root_dir, relative_path)
+    try:
+        return path.is_file() and bool(path.read_text(encoding="utf-8").strip())
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 def read_text(root_dir: str | Path, relative_path: str) -> str:
     """テキストファイルを UTF-8 で読む。"""
     return Path(root_dir, relative_path).read_text(encoding="utf-8")

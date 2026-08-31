@@ -67,7 +67,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/bluecore/launcher.py\" bluecore.mem.cli context",
-            "timeout": 60
+            "timeout": 5
           }
         ],
         "description": "永続メモリから共通知識・リポジトリ知識・前回の引き継ぎを <bluecore-memory> として注入する（DB が無ければ作成）"

@@ -11,6 +11,7 @@ from typing import Any
 from bluecore.ci.harness_audit_utils import (
     count_files,
     file_exists,
+    file_has_content,
     safe_parse_json,
     safe_read,
 )
@@ -199,7 +200,7 @@ def _hook_modules_resolve(root_dir: str | Path) -> bool:
     modules = set(re.findall(r"bluecore\.hooks\.([A-Za-z_][A-Za-z0-9_]*)", raw))
     if not modules:
         return False
-    return all(file_exists(root_dir, f"src/bluecore/hooks/{name}.py") for name in modules)
+    return all(file_has_content(root_dir, f"src/bluecore/hooks/{name}.py") for name in modules)
 
 
 def _manifest_surfaces_resolve(root_dir: str | Path) -> bool:
@@ -222,6 +223,9 @@ def _manifest_surfaces_resolve(root_dir: str | Path) -> bool:
     ]
     if not declared:
         return False
+    # 宣言値は `./skills/` のようなディレクトリパス。ここだけは存在検査のままにする
+    # （ディレクトリに「中身が空でない」を要求すると常に False になる）。surface が
+    # 空になっていないかは `tool-skill-count` が SKILL.md の件数で別に見る。
     return all(file_exists(root_dir, entry.lstrip("./").rstrip("/")) for entry in declared)
 
 
@@ -247,7 +251,7 @@ def _repo_tool_coverage_hooks_checks(root_dir: str | Path) -> list[dict[str, Any
             "scopes": ["repo", "hooks"],
             "path": "hooks/hooks.json",
             "description": "フック設定ファイルが存在する",
-            "pass": file_exists(root_dir, "hooks/hooks.json"),
+            "pass": file_has_content(root_dir, "hooks/hooks.json"),
             "fix": "Create hooks/hooks.json and define baseline hook events.",
         },
         {
@@ -323,7 +327,7 @@ def _repo_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]
             "scopes": ["repo", "commands"],
             "path": "commands/plan.md",
             "description": "モデルルーティングコマンドが存在する（タスク複雑度に応じたモデル選択）",
-            "pass": file_exists(root_dir, "commands/plan.md"),
+            "pass": file_has_content(root_dir, "commands/plan.md"),
             "fix": "Add plan command guidance in commands/plan.md.",
         },
         {
@@ -387,7 +391,7 @@ def _repo_quality_gates_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "scopes": ["repo", "hooks"],
             "path": "tests/hooks/test_hook_edge_cases.py",
             "description": "フックカバレッジテストファイルが存在する",
-            "pass": file_exists(root_dir, "tests/hooks/test_hook_edge_cases.py"),
+            "pass": file_has_content(root_dir, "tests/hooks/test_hook_edge_cases.py"),
             "fix": "Add tests/hooks/test_hook_edge_cases.py for hook behavior validation.",
         },
     ]
@@ -424,7 +428,7 @@ def _repo_memory_persistence_checks(root_dir: str | Path) -> list[dict[str, Any]
             "scopes": ["repo", "hooks"],
             "path": "src/bluecore/mem/cli.py",
             "description": "セッション永続化を担う mem CLI 実装が存在する",
-            "pass": file_exists(root_dir, "src/bluecore/mem/cli.py"),
+            "pass": file_has_content(root_dir, "src/bluecore/mem/cli.py"),
             "fix": "Implement src/bluecore/mem/cli.py for session persistence (context/handoff commands).",
         },
         {
@@ -434,7 +438,7 @@ def _repo_memory_persistence_checks(root_dir: str | Path) -> list[dict[str, Any]
             "scopes": ["repo", "skills"],
             "path": "skills/learn/SKILL.md",
             "description": "継続学習スキルが存在する（セッション観測→インスティンクト作成→スキル進化）",
-            "pass": file_exists(root_dir, "skills/learn/SKILL.md"),
+            "pass": file_has_content(root_dir, "skills/learn/SKILL.md"),
             "fix": "Add skills/learn/SKILL.md for memory evolution flow.",
         },
     ]
@@ -460,7 +464,7 @@ def _repo_eval_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "scopes": ["repo", "skills"],
             "path": "commands/harness.md",
             "description": "品質監査コマンドが存在する（ハーネス監査・スキル棚卸し・遵守率測定）",
-            "pass": file_exists(root_dir, "commands/harness.md"),
+            "pass": file_has_content(root_dir, "commands/harness.md"),
             "fix": "Add commands/harness.md for quality audit evaluation.",
         },
         {
@@ -470,8 +474,8 @@ def _repo_eval_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "scopes": ["repo", "commands"],
             "path": "commands/review.md",
             "description": "検証コマンドとプランコマンドが存在する",
-            "pass": file_exists(root_dir, "commands/review.md")
-            and file_exists(root_dir, "commands/plan.md"),
+            "pass": file_has_content(root_dir, "commands/review.md")
+            and file_has_content(root_dir, "commands/plan.md"),
             "fix": "Add commands/review.md and commands/plan.md to standardize verification loops.",
         },
         {
@@ -497,7 +501,7 @@ def _repo_security_core_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "scopes": ["repo", "skills"],
             "path": "skills/secure/SKILL.md",
             "description": "セキュリティレビュースキルが存在する（認証・入力処理・シークレット管理）",
-            "pass": file_exists(root_dir, "skills/secure/SKILL.md"),
+            "pass": file_has_content(root_dir, "skills/secure/SKILL.md"),
             "fix": "Add skills/secure/SKILL.md for security checklist coverage.",
         },
         {
@@ -507,10 +511,41 @@ def _repo_security_core_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "scopes": ["repo", "agents"],
             "path": "agents/security-auditor.md",
             "description": "セキュリティレビューエージェントが存在する",
-            "pass": file_exists(root_dir, "agents/security-auditor.md"),
+            "pass": file_has_content(root_dir, "agents/security-auditor.md"),
             "fix": "Add agents/security-auditor.md for delegated security audits.",
         },
     ]
+
+
+def _declares_preflight_hook(hooks_json: str) -> bool:
+    """hooks.json が実行前ガードのエントリを実際に 1 件以上宣言しているかを判定する。
+
+    以前は生テキストへの部分文字列照合（``"PreToolUse" in hooks_json``）だった。
+    これは description の散文に語が現れるだけで合格し、``"PreToolUse": []``（空配列）
+    でも合格する。セキュリティカテゴリのチェックが「語の有無」を測っていた
+    （同カテゴリが満点のまま実バイパスが 5 件通っていた）。JSON として読める
+    構造があるのだから、エントリの実在を条件にする。
+
+    Args:
+        hooks_json: hooks/hooks.json の生テキスト。
+
+    Returns:
+        実行前ガードのイベントに 1 件以上の hook コマンドがあれば True。
+
+    Raises:
+        例外は発生しません（パース不能は False として扱う）。
+    """
+    parsed = safe_parse_json(hooks_json)
+    if not isinstance(parsed, dict):
+        return False
+    hooks = parsed.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+    return any(
+        isinstance(group, dict) and group.get("hooks")
+        for event in ("PreToolUse", "beforeSubmitPrompt")
+        for group in (hooks.get(event) or [])
+    )
 
 
 def _repo_security_guardrails_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
@@ -531,7 +566,7 @@ def _repo_security_guardrails_checks(root_dir: str | Path, hooks_json: str) -> l
             "scopes": ["repo", "hooks"],
             "path": "hooks/hooks.json",
             "description": "フックにプロンプト送信・ツール実行時のセキュリティガードが含まれている",
-            "pass": "beforeSubmitPrompt" in hooks_json or "PreToolUse" in hooks_json,
+            "pass": _declares_preflight_hook(hooks_json),
             "fix": "Add prompt/tool preflight security guards in hooks/hooks.json.",
         },
         {
@@ -541,7 +576,7 @@ def _repo_security_guardrails_checks(root_dir: str | Path, hooks_json: str) -> l
             "scopes": ["repo", "commands"],
             "path": "commands/review.md",
             "description": "セキュリティスキャンコマンドが存在する",
-            "pass": file_exists(root_dir, "commands/review.md"),
+            "pass": file_has_content(root_dir, "commands/review.md"),
             "fix": "Add commands/review.md with scan and remediation workflow.",
         },
     ]
@@ -580,7 +615,7 @@ def _repo_cost_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "scopes": ["repo", "commands"],
             "path": "commands/plan.md",
             "description": "モデルルーティングコマンドが存在する（複雑度に応じたモデル選択ポリシー）",
-            "pass": file_exists(root_dir, "commands/plan.md"),
+            "pass": file_has_content(root_dir, "commands/plan.md"),
             "fix": "Add commands/plan.md and route policies for cheap-default execution.",
         },
     ]
