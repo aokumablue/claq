@@ -75,7 +75,7 @@ stdin へ実 payload を流し、exit code を実測する。**payload 形状を
 
 `F` はフックが見るフィールド。`lib/harness.py` の抽出関数が実際に読む別名まで含めると、
 バイパス面は **コンテナキー × 形状 × フィールド別名 × ツール名別名の 4 軸**ある。
-16 通りで閉じるのはこのうち 2 軸だけであり、**多重度は代表値のみ・残り 2 軸は未閉**である。閉じていない軸を
+16 通りで閉じるのはこのうち 2 軸だけであり、**多重度は代表値のみ・別名 2 軸は一部未閉**である。閉じていない軸を
 黙って 1 値に固定すると、その軸の退行が `Findings: HIGH 0` として記録される。
 
 | 軸 | 実装が読む値（`lib/harness.py`） | 状態 |
@@ -83,8 +83,8 @@ stdin へ実 payload を流し、exit code を実測する。**payload 形状を
 | コンテナキー | `INPUT_CONTAINER_KEYS` の 4 つ | 閉（4） |
 | 形状 | dict / jsonstr / listdict / liststr | 閉（4） |
 | **コンテナキー多重度** | 1 つの payload が複数のコンテナキーを同時に持つ形（`tool_input` と `toolArgs` 等） | **代表値のみ**（下記） |
-| フィールド別名 | Bash 系 `command` / `cmd`（`_command_from_tool_input`）、Edit/Write 系 `file_path`、Codex の apply_patch は `input` フィールドと**生パッチ文字列**（`_extract_patch_text` / `_PATCH_FILE_MARKERS`） | **未閉** |
-| ツール名別名 | `tool_name` / `toolName`（`extract_raw_tool_name`）、`_TOOL_NAME_MAP` の `run_terminal_command` → `Bash` 等 | **未閉** |
+| フィールド別名 | Bash 系 `command` / `cmd`（`_commands_from_tool_input`）、Edit/Write 系 `file_path` / `file`（`extract_file_paths`）、Codex の apply_patch は `input` フィールドと**生パッチ文字列**（`_extract_patch_text` / `_PATCH_FILE_MARKERS`） | **実装と等号**（下記）／加算的な未認識形のみ未閉 |
+| ツール名別名 | payload 直下の `tool_name` / `toolName`（`extract_raw_tool_name`）、`_TOOL_NAME_MAP` の `run_terminal_command` → `Bash` 等 | キーは**実装と等号**・**値は未閉** |
 
 **多重度軸は上の 16 通りに含まれない。** 16 通りはキーを 1 つずつしか流さないため、
 「無害なキーが先頭にあり、危険な入力が後続キーにある」payload を 1 度も作らない。
@@ -94,7 +94,21 @@ v0.9.44 ではこの形で `bash_config_protection` / `pre_bash_commit_quality` 
 対で流す。恒久ゲートは `tests/hooks/test_hook_cli_contract.py` の多重度テストにあり、
 本スキルはその再実行ではなく実 payload での再確認として流す。
 
-未閉の 2 軸は、少なくとも各フックにつき代表 1 値ずつ（`cmd` / 生パッチ / `toolName` /
+**別名 2 軸は実装との等号で固定されている。** `tests/hooks/test_hook_cli_contract.py` が
+`lib/harness.py` から別名を AST で抽出し、ゲート表が実際に流す集合と**等号**で照合する
+（tool_input のフィールド別名と、payload 直下のツール名キーで 1 本ずつ）。別名一覧を
+テスト側へ写経していた頃は、実装のタプルへ 3 つ目を足しても全ゲートが緑のまま通った。
+現在は**認識形**——`.get("リテラル")` と `for key in (...)` のリテラルタプル——で別名が
+増減すれば、ゲート表を更新しない限りコミット時に赤くなる。
+
+等号が及ばないのは次の 2 つで、ここは本スキルが実 payload で流して確認する:
+
+- 認識形を残したまま**加算的**に読み足す形（`("command", "cmd", *_EXTRA)` の星付き展開、
+  `if "commandLine" in tool_input:` + 添字）は、等号が成立したまま素通りする
+- `_TOOL_NAME_MAP` の**値**側（`run_terminal_command` → `Bash` 等）は依然テスト側の写経で、
+  `test_declared_tool_name_aliases_normalize_into_hook_gate` が「宣言 ⊆ 実装」しか見ていない
+
+上記 2 つについては、少なくとも各フックにつき代表 1 値ずつ（`cmd` / 生パッチ / `toolName` /
 lowercase ツール名）を追加で流し、結果を「代表値のみ検査」と明記して報告する。
 全件を閉じるまでは `Findings` を「全軸で 0」と読ませない。
 
