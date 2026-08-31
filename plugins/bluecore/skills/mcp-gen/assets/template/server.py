@@ -12,7 +12,10 @@ import が通って起動するため誤りに気づけない）。
   - 全 result に `resultType` が付く（SDK が自動付与）。
   - `tools/list` の `ttlMs` / `cacheScope` は既定が `0` / `private` = 即時陳腐化。
     キャッシュさせたいなら `cache_hints` で明示する。
-  - stdio では stdout が JSON-RPC 専用。ログは必ず stderr（`logging`）へ出す。
+  - ログはプロトコル機能としては非推奨（SEP-2577）。標準 `logging` で stderr へ出す。
+    stdio では stdout が JSON-RPC 専用なので、そこへ書くとフレームが壊れる。
+  - モデルに読ませたいエラーは `ToolError` で投げる。素の例外はメッセージが
+    伏せられ、モデルには "Error executing tool <name>" しか届かない。
 
 実行:
     python3 server.py             # stdio
@@ -23,23 +26,26 @@ from __future__ import annotations
 
 import argparse
 import logging
+from typing import Annotated
 
 from mcp.server import CacheHint, MCPServer
-from mcp.server.mcpserver import Context
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp_types import ToolAnnotations
+from pydantic import BaseModel, Field
 
 SERVER_NAME = "example-server"
 SERVER_VERSION = "0.1.0"
 
-# stdio では stdout が JSON-RPC のフレームそのものなので、print() は禁止。
-# logging は既定で stderr へ出るため安全。
-logging.basicConfig(level=logging.INFO)
+# プロトコルのログ機能は非推奨。標準ライブラリの logging は既定で stderr へ出るため、
+# stdio の stdout（JSON-RPC フレーム）を汚さない。`print` は使わない。
 logger = logging.getLogger(__name__)
 
 mcp = MCPServer(
     SERVER_NAME,
     version=SERVER_VERSION,
     instructions="このサーバの使いどころをクライアントへ 1〜2 文で伝える。",
+    log_level="INFO",
     # 既定は ttl_ms=0 / scope="private"（＝毎回取り直し）。一覧が安定しているなら
     # 明示してクライアント側キャッシュを効かせる。認可で内容が変わるなら "private"。
     cache_hints={
@@ -50,49 +56,56 @@ mcp = MCPServer(
 )
 
 
-@mcp.tool()
-def add(a: float, b: float) -> float:
-    """2 つの数値を加算して返す。
+class Measurement(BaseModel):
+    """構造化出力の例。戻り値の型から `outputSchema` が生成される。"""
+
+    value: float = Field(description="計測値")
+    unit: str = Field(description="単位")
+
+
+@mcp.tool(
+    # クライアントは注釈を見て確認プロンプトの要否を判断する。
+    # 仕様上これは「信頼できないヒント」であり、認可の代わりにはならない。
+    annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True)
+)
+def measure(
+    # 制約は Annotated + Field で宣言する。inputSchema の minimum/maximum に載るので
+    # モデルが呼ぶ前に範囲を知れて、違反時は読めるエラーが返る。
+    # 自前の if 文 + 素の ValueError にすると、どちらの利点も失われる。
+    samples: Annotated[int, Field(ge=1, le=100, description="サンプル数。1〜100")],
+) -> Measurement:
+    """サンプル数から計測値を算出する。
 
     Args:
-        a: 加算する左辺。
-        b: 加算する右辺。
+        samples: サンプル数。1〜100。
 
     Returns:
-        `a + b` の値。戻り値の型注釈から `outputSchema` と
-        `structuredContent` が自動生成される。
+        計測値と単位。
     """
-    return a + b
+    return Measurement(value=float(samples) * 1.5, unit="ms")
 
 
-@mcp.tool()
-async def fetch_items(count: int, ctx: Context) -> list[str]:
-    """項目を `count` 件生成して返す（Context 利用例）。
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def lookup(item_id: str) -> str:
+    """項目 ID を引いて内容を返す。
 
-    引数検証に失敗したら `ValueError` を投げる。SDK がそれを
-    `isError: true` のツール実行エラーへ変換し、モデルが自己修正できる形で返す。
-    プロトコルエラー（JSON-RPC error）にはならない点が重要。
+    見つからない場合は `ToolError` を投げる。SDK がメッセージ込みで
+    `isError: true` に変換するため、モデルが読んで別の ID で再試行できる。
+    素の例外（`ValueError` など）だとメッセージが伏せられ、モデルは
+    何が悪かったのか分からないまま同じ失敗を繰り返す。
 
     Args:
-        count: 生成する件数。1〜100。
-        ctx: SDK が注入するリクエストコンテキスト。ログと進捗通知に使う。
+        item_id: 引く項目の ID。
 
     Returns:
-        生成した項目の一覧。
+        項目の内容。
 
     Raises:
-        ValueError: `count` が 1〜100 の範囲外のとき。
+        ToolError: 該当する項目が存在しないとき。
     """
-    if not 1 <= count <= 100:
-        raise ValueError(f"count は 1〜100 で指定してください（受領値: {count}）")
-
-    await ctx.info(f"{count} 件を生成します")
-    items: list[str] = []
-    for index in range(count):
-        items.append(f"item-{index}")
-        # progressToken を送ってきたクライアントにのみ届く。送ってこなければ無視される。
-        await ctx.report_progress(progress=index + 1, total=count)
-    return items
+    if not item_id.startswith("item-"):
+        raise ToolError(f"item_id は 'item-' で始まる必要があります（受領値: {item_id!r}）")
+    return f"content of {item_id}"
 
 
 @mcp.resource("config://runtime")
@@ -147,17 +160,22 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.http:
+        # トランスポート引数は run() に渡す。MCPServer() のコンストラクタには渡さない。
         mcp.run(transport="stdio")
         return
 
     # 仕様上、HTTP サーバは Origin を検証し（DNS リバインディング対策）、
     # ローカル実行ではループバックにのみバインドしなければならない。
-    # allowed_origins は実際に許可するオリジンだけを列挙する（ワイルドカードを置かない）。
+    # 既定の許可リストは空で localhost しか通らないため、実ホスト名で公開するときは
+    # 裸のホスト名とポート付きの両方を挙げる（挙げ忘れると全リクエストが 421 になる）。
+    # リバースプロキシが Host/Origin を制御しているなら
+    # enable_dns_rebinding_protection=False にする。
     security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=[f"{args.host}:{args.port}"],
+        allowed_hosts=[args.host, f"{args.host}:{args.port}"],
         allowed_origins=[f"http://{args.host}:{args.port}"],
     )
+    logger.info("starting streamable-http on %s:%s", args.host, args.port)
     mcp.run(
         transport="streamable-http",
         host=args.host,

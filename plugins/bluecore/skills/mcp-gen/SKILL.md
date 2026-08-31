@@ -19,9 +19,18 @@ user-invocable: true
 | `resources/subscribe` | 廃止。`subscriptions/listen` の opt-in |
 | サーバ発の sampling / elicitation リクエスト | 廃止。MRTR（`resultType: "input_required"`） |
 | Roots / Sampling / Logging | 非推奨。新規実装では採用しない |
+| `ctx.info()` / `ctx.log()` でログ | 非推奨（SEP-2577）。標準 `logging` で stderr へ |
+| `ctx.elicit()` で追加入力 | ステートレス下では `-32600` で失敗。MRTR のリゾルバを使う |
 
 最も危険なのは `FastMCP` である。**旧名でも import が通り、サーバは起動する**。
 クラッシュしないので誤りに気づけない。したがってゼロから書き起こしてはならない。
+
+**既存の人気サーバを写経するのも同じ罠。** 公式リファレンス実装
+`modelcontextprotocol/servers`（約 90,000★）の Python サーバは
+`mcp>=1.29.0,<2` に固定されており 2026-07-28 ではない（実測）。
+星の多さは最新仕様であることを意味しない。2.x の実例として信頼できるのは
+`modelcontextprotocol/python-sdk` の `examples/` だけで、それすら上流の
+`deprecated/` ページより遅れている（非推奨の `ctx.info()` を今も使っている）。
 
 **手順は 1 つ: `assets/template/` を複製して編集する。**
 
@@ -73,16 +82,30 @@ Bash のリダイレクト・`cp` は config 保護フックに止められる
 
 守ること:
 
-- **ツール引数は必ず検証する。** 範囲外・不正形式は `ValueError` を投げる。
-  SDK がそれを `isError: true` のツール実行エラーに変換し、モデルが自己修正できる。
-  JSON-RPC error にしてしまうと会話が復帰できない。
+- **引数の制約は `Annotated[T, Field(ge=..., le=...)]` で宣言する。**
+  `inputSchema` に `minimum` / `maximum` が載るのでモデルが呼ぶ前に範囲を知れ、
+  違反時は pydantic の検証メッセージがそのまま届く。
+- **モデルに読ませたい失敗は `ToolError` で投げる**
+  （`from mcp.server.mcpserver.exceptions import ToolError`）。
+  **素の例外（`ValueError` など）はメッセージが伏せられ**、モデルには
+  `Error executing tool <name>` しか届かない。`isError` は立つのに
+  何が悪かったのか分からず、同じ失敗を繰り返す。ツール本体から投げた
+  `MCPError` も実測では同じく伏せられる（`UnexpectedToolError` に包まれる）。
 - **`cache_hints` を意図して設定する。** 既定は `ttl_ms=0` / `scope="private"`
   ＝ クライアントは毎回取り直す。一覧が安定しているなら値を入れる。
   認可によって内容が変わる一覧に `"public"` を付けない。
-- **stdio では stdout に一切書かない。** `print` は JSON-RPC フレームを壊す。
-  ログは `logging`（stderr）へ。
+- **ログは標準 `logging` で出す。** プロトコルのログ機能（`ctx.info()` 等）は
+  非推奨（SEP-2577）。`MCPServer(log_level=...)` を渡せば SDK が設定を面倒見る。
+  出力先は stderr なので stdio でも安全。`print` は stdout を汚してフレームを壊す。
+  ログはモデルには届かない（届くのは戻り値だけ）。進捗は `ctx.report_progress()`
+  （こちらは非推奨ではない）。
 - **HTTP なら `allowed_hosts` / `allowed_origins` を列挙する。**
-  DNS リバインディング保護は既定で有効だが許可リストは空。ワイルドカードを置かない。
+  DNS リバインディング保護は既定で有効だが許可リストは空（localhost のみ）。
+  実ホスト名で公開するときは裸のホスト名とポート付きの両方を挙げる。
+  挙げ忘れると**全リクエストが `421 Misdirected Request`** になる。
+- **複数インスタンスで MRTR を使うなら `RequestStateSecurity(keys=[...])` と
+  全インスタンス同名の `MCPServer(...)`。** 既定はプロセスごとに鍵を作るため、
+  再送が別ワーカーへ届くと復号に失敗する。
 - **状態はツール引数のハンドルで持ち回す。** プロトコルにセッションは無い。
   ハンドルは不透明・有効期限付きにし、呼び出しごとに認可を再検証する。
 - **`x-mcp-header` を機微な引数に付けない。** ヘッダは中間装置から見える。
@@ -172,9 +195,10 @@ RFC 9207 の `iss` 検証まで含む独立した subsystem であり、テン�
 | `_meta.serverInfo` | ○ | |
 | `inputSchema` / `outputSchema` 生成 | ○ | |
 | `structuredContent` + テキスト併記 | ○ | |
-| 例外 → `isError: true` | ○ | |
+| 引数の型・制約の検証 | ○ | `Field` で宣言すればスキーマにも載る |
 | `ttlMs` / `cacheScope` の有用な値 | | ● |
 | `allowed_hosts` / `allowed_origins` | | ● |
+| **エラー本文をモデルへ届ける** | | ● `ToolError` で投げた場合だけ |
 
 自動の列を自前で実装しようとしていたら、それは記憶で書いている兆候である。
 

@@ -64,7 +64,7 @@ MCPServer(name=None, title=None, description=None, instructions=None,
 ## `Context` の主なメンバ（実測）
 
 ```
-ctx.debug/info/warning/error/log(...)    ログ（通知として流れる）
+ctx.debug/info/warning/error/log(...)    ⚠ 非推奨。下記「ログ」を読むこと
 ctx.report_progress(progress, total=None, message=None)
 ctx.elicit(message, schema)              # ⚠ 旧経路。下記「MRTR」を読むこと
 ctx.elicit_url(message, url, elicitation_id)           # 同上
@@ -177,6 +177,90 @@ async def danger(target: str, confirm: Annotated[Confirm, Resolve(ask_confirm)])
 
 再送は**別の JSON-RPC id** で来る。同じ id で送るのは仕様違反。
 
+## エラー設計 — 素の例外はメッセージが伏せられる
+
+実測（`mcp` 2.1.1）。**ここを間違えると `isError` は立つのにモデルが何も学べない。**
+
+| ツール本体で投げるもの | ワイヤに出る `content` | モデルは直せるか |
+|---|---|---|
+| `ToolError("count は 1..100")` | `Error executing tool t: count は 1..100` | **直せる** |
+| `ValueError("count は 1..100")` | `Error executing tool t` | 直せない（本文が消える） |
+| `RuntimeError(...)` | `Error executing tool t` | 直せない |
+| `MCPError(ErrorData(...))` | `Error executing tool t` | 直せない（`UnexpectedToolError` に包まれる） |
+
+```python
+from mcp.server.mcpserver.exceptions import ToolError
+```
+
+`mcp.server.mcpserver.exceptions` が公開する例外:
+`MCPServerError` / `ToolError` / `UnexpectedToolError` /
+`ResourceError` / `ResourceNotFoundError` / `UnexpectedResourceError`。
+
+上流ドキュメントの判断基準は「賢いモデルなら避けられた失敗か？」
+— Yes なら `ToolError`、No なら `MCPError`。ただし**ツール本体から投げた
+`MCPError` は実測では JSON-RPC error にならず本文も伏せられる**ため、
+ツール内での使い分けとしては機能していない。ツール本体では `ToolError` を使い、
+それ以外の例外は「クラッシュ（本文はサーバログのみ）」として扱うのが実態に合う。
+
+### 引数の制約は Field で宣言する（自前の if より強い）
+
+```python
+samples: Annotated[int, Field(ge=1, le=100, description="サンプル数。1〜100")]
+```
+
+実測: `inputSchema` に `"minimum": 1, "maximum": 100` が載り、違反時は
+pydantic の検証メッセージがそのままモデルへ届く（`ToolError` 相当の扱い）。
+
+```
+Error executing tool fetch: 1 validation error for fetchArguments
+count
+  Input should be greater than or equal to 1 [type=greater_than_equal, input_value=0, ...]
+```
+
+自前の `if` + 素の `ValueError` にすると、スキーマに制約が載らず（モデルが
+呼ぶ前に範囲を知れない）、メッセージも伏せられる。二重に損。
+
+## ログ — プロトコル機能は非推奨
+
+`Context` の `log` / `info` / `debug` / `warning` / `error` はすべて
+`__deprecated__` を持つ（実測）:
+
+```
+The logging capability is deprecated as of 2026-07-28 (SEP-2577).
+```
+
+置き換えは標準ライブラリ。`MCPServer(log_level="INFO")` を渡すと SDK が
+`basicConfig()` を面倒見る（既に設定済みなら触らない）。出力先は stderr。
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+logger.info("searching for %r", query)
+```
+
+ログはモデルには届かない（届くのは戻り値だけ）。運用者のためのもの。
+`ctx.report_progress()` は非推奨では**ない**ので、進捗はこちらを使う。
+
+## デプロイ時に効く設定
+
+- **`transport_security` を設定せずに実ホスト名で公開すると全リクエストが
+  `421 Misdirected Request` になる。** 既定は localhost のみ。
+  裸のホスト名とポート付きの両方を `allowed_hosts` に挙げる
+  （`["mcp.example.com", "mcp.example.com:*"]`）。`allowed_origins` は
+  ブラウザ由来のリクエストにのみ効く。リバースプロキシが Host/Origin を
+  制御しているなら `enable_dns_rebinding_protection=False`。
+- **複数インスタンスで MRTR を使うなら `RequestStateSecurity(keys=[32バイトの共有鍵])`。**
+  既定はプロセスごとに鍵を生成するため、再送が別ワーカーへ行くと復号に失敗する。
+  併せて**全インスタンスで同じサーバ名**にする（名前が封印トークンの audience になる）。
+- `subscriptions/listen` の長命ストリームは 1 レプリカに貼り付く。
+  SDK 同梱の `InMemorySubscriptionBus` は単一プロセス専用。プロセス跨ぎは
+  `SubscriptionBus` プロトコル（2 メソッド）を Redis / NATS 等で自前実装する。
+- `stateless_http=True` は**レガシー版（2025-11-25 以前）向けの逃げ道**で、
+  サーバ→クライアント機能を無効化する。2026-07-28 は元からステートレスなので
+  この版だけを相手にするなら触る必要がない。
+- SDK は `workers=` もヘルスチェック経路も TLS 設定も持たない。ASGI サーバ側で行う。
+
 ## 実測ワイヤ出力
 
 `server/discover`（クライアントは何も設定していない。SDK が自動応答する）:
@@ -232,3 +316,33 @@ stdio で生 JSON-RPC を流すとき、**リクエストを書いた直後に s
 「特定のツールだけ壊れている」ように誤読しやすい。
 全応答を受け取るまで stdin を開いたままにすること
 （`assets/template/smoke_check.py` はそう実装してある）。
+
+
+## 上流の一次資料
+
+- Python SDK ドキュメント: <https://py.sdk.modelcontextprotocol.io/>
+  （`migration/` `whats-new/` `deprecated/` `handlers/multi-round-trip/`
+  `handlers/elicitation/` `handlers/logging/` `servers/handling-errors/`
+  `run/deploy/` が特に効く）
+- SDK リポジトリ（24k★）: <https://github.com/modelcontextprotocol/python-sdk>
+  2.x で書かれた実例は `examples/mcpserver/` と `examples/servers/`。
+
+### 高スターの MCP サーバを写経してはいけない
+
+実測（2026-08-31 時点）:
+
+| リポジトリ | ★ | 実装状況 |
+|---|---|---|
+| `modelcontextprotocol/servers`（公式リファレンス） | 約 90,000 | Python 実装（`src/git` `src/fetch` `src/time`）は **`mcp>=1.29.0,<2` 固定**。2026-07-28 ではない |
+| `github/github-mcp-server` | 約 32,600 | Go |
+| `modelcontextprotocol/python-sdk` | 約 24,200 | **2.x の実例はここの `examples/` だけ** |
+
+星の多さは「最新仕様である」ことを意味しない。むしろ実績のあるサーバほど
+1.x に固定されており、写経すると旧仕様が入る。2.x の実例として信頼できるのは
+SDK リポジトリの `examples/` のみ。
+
+そのうえで **`examples/` も上流のドキュメントより遅れている**:
+`examples/mcpserver/logging_and_progress.py` は非推奨の `await ctx.info(...)` を、
+`examples/servers/simple-streamablehttp/` は非推奨の `send_log_message` を
+（pyright の `reportDeprecated` 抑止コメント付きで）今も使っている。
+例を読むときは `deprecated/` のページと突き合わせること。

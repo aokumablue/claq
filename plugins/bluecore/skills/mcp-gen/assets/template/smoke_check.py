@@ -26,12 +26,15 @@ RESPONSE_TIMEOUT_SECONDS = 30.0
 
 # ==== ここを生成したサーバに合わせて編集する ====
 # サンプルのツール名のままだと `Unknown tool` で落ちる。
-HAPPY_TOOL = "add"
-HAPPY_ARGS: dict = {"a": 2, "b": 3}
-HAPPY_EXPECTED_STRUCTURED: dict = {"result": 5.0}
-# 入力検証で必ず弾かれる引数を渡すツール（実在するツールであること）
-INVALID_TOOL = "fetch_items"
-INVALID_ARGS: dict = {"count": 0}
+HAPPY_TOOL = "measure"
+HAPPY_ARGS: dict = {"samples": 2}
+HAPPY_EXPECTED_STRUCTURED: dict = {"value": 3.0, "unit": "ms"}
+# 必ず ToolError になる引数を渡すツール（実在するツールであること）
+INVALID_TOOL = "lookup"
+INVALID_ARGS: dict = {"item_id": "bad"}
+# 上記の呼び出しでモデルに届くべきメッセージの一部。
+# 素の例外を投げていると "Error executing tool <name>" しか返らず、ここで落ちる。
+INVALID_EXPECTED_MESSAGE = "item-"
 # ==== 編集ここまで ====
 
 # 2026-07-28 では各リクエストが自分でプロトコル版と capability を運ぶ。
@@ -152,11 +155,13 @@ def test_protocol_surface() -> None:
     assert call["structuredContent"] == HAPPY_EXPECTED_STRUCTURED, call
 
 
-def test_tool_execution_error_is_not_a_protocol_error() -> None:
-    """入力検証の失敗が `isError: true` で返り、JSON-RPC error にならないこと。
+def test_tool_error_reaches_the_model() -> None:
+    """ツール実行エラーが `isError: true` で返り、**メッセージまで届く**こと。
 
-    モデルが自己修正できるのは前者だけ。ここが逆転していると、
-    引数ミスのたびに会話が復帰不能になる。
+    `isError` だけを見ても不十分。素の例外（`ValueError` など）を投げていると
+    SDK はメッセージを伏せて "Error executing tool <name>" しか返さないため、
+    `isError` は立つのにモデルは何が悪かったのか分からない。
+    モデルが自己修正できるのは `ToolError` で投げた場合だけ。
     """
     responses = _exchange(
         [
@@ -171,7 +176,12 @@ def test_tool_execution_error_is_not_a_protocol_error() -> None:
 
     message = responses[2]
     assert "error" not in message, f"プロトコルエラーになっています: {message}"
-    assert message["result"]["isError"] is True, message
+    result = message["result"]
+    assert result["isError"] is True, result
+    text = " ".join(block.get("text", "") for block in result.get("content", []))
+    assert INVALID_EXPECTED_MESSAGE in text, (
+        f"エラーメッセージがモデルに届いていません（素の例外を投げていませんか）: {text!r}"
+    )
 
 
 def main() -> int:
@@ -181,7 +191,7 @@ def main() -> int:
         全て通れば 0、1 つでも落ちれば 1。
     """
     failures = 0
-    for check in (test_protocol_surface, test_tool_execution_error_is_not_a_protocol_error):
+    for check in (test_protocol_surface, test_tool_error_reaches_the_model):
         try:
             check()
         except AssertionError as error:
