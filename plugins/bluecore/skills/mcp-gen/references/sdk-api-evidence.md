@@ -114,7 +114,7 @@ MRTR の経路は**リゾルバによる依存注入**である。ツール引�
 ```python
 from typing import Annotated
 
-from mcp.server.mcpserver import Elicit, Resolve
+from mcp.server.mcpserver import Elicit, ElicitationResult, Resolve
 from pydantic import BaseModel
 
 
@@ -140,6 +140,18 @@ async def danger(target: str, confirm: Annotated[Confirm, Resolve(ask_confirm)])
 |---|---|---|
 | `Annotated[T, Resolve(fn)]` | `true` | `Error executing tool bare: Resolver for parameter 'c' could not resolve: elicitation was decline` |
 | `Annotated[ElicitationResult[T], Resolve(fn)]` | `false` | ハンドラが返した文字列（例 `aborted (decline)`） |
+
+`ElicitationResult` の import 元は `Elicit` / `Resolve` と同じ
+`mcp.server.mcpserver`。確認用途の完全な形:
+
+```python
+@mcp.tool()
+async def danger(target: str, confirm: Annotated[ElicitationResult[Confirm], Resolve(ask_confirm)]) -> str:
+    """確認を取ってから破壊的操作を行う。"""
+    if confirm.action != "accept":
+        return f"中止しました（{confirm.action}）"
+    return "削除しました" if confirm.data.approve else "中止しました"
+```
 
 つまり素の `T` は「拒否＝呼び出しの失敗」という意味になる。
 **確認・同意の用途では `ElicitationResult[T]` を使う**（拒否は正常な結果であり、

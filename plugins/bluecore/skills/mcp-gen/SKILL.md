@@ -157,6 +157,9 @@ changelog を読み直す（等号アサートはコードに入れない。新�
 （旧経路。ステートレス下では失敗する）。正しい経路はリゾルバによる依存注入:
 
 ```python
+from mcp.server.mcpserver import Elicit, ElicitationResult, Resolve
+
+
 def ask_confirm(target: str) -> Elicit[Confirm]:
     """確認を求める。"""
     return Elicit(f"{target} を削除してよいですか", Confirm)
