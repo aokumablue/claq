@@ -179,6 +179,13 @@ def test_tool_error_reaches_the_model() -> None:
     result = message["result"]
     assert result["isError"] is True, result
     text = " ".join(block.get("text", "") for block in result.get("content", []))
+    # `INVALID_ARGS` が pydantic の引数検証で弾かれると、SDK が読めるメッセージを
+    # 返すため下の検査は通ってしまい、`ToolError` の経路を一度も通らないまま
+    # 本チェックが空振り合格する。引数検証ではなく**ツール本体まで到達して失敗する**
+    # 引数を選ぶこと（存在しない ID など、型と範囲は正しいが業務的に失敗するもの）。
+    assert "validation error" not in text, (
+        f"INVALID_ARGS が引数検証で弾かれています。ToolError の経路を通る引数にしてください: {text!r}"
+    )
     assert INVALID_EXPECTED_MESSAGE in text, (
         f"エラーメッセージがモデルに届いていません（素の例外を投げていませんか）: {text!r}"
     )

@@ -3,7 +3,10 @@ name = "example-server"
 version = "0.1.0"
 description = "MCP server (protocol 2026-07-28)"
 requires-python = ">=3.10"
-# 2.x で `FastMCP` → `MCPServer` に改名された。3.x で再度変わりうるため上限を張る。
+# 2.x でサーバクラスは `MCPServer` に改名された。旧名は import が通ったまま残って
+# いるため、古い書き方でも起動してしまい誤りに気づけない。3.x で再度変わりうるため
+# 上限を張る。（旧クラス名そのものはここに書かない — 禁止パターン grep の検査対象に
+# このファイルも入るため、書くと必ず誤検出になる。）
 # 2.1.1 は mcp_types.LATEST_PROTOCOL_VERSION == "2026-07-28" を実測確認済みの版。
 dependencies = ["mcp>=2.1.1,<3"]
 

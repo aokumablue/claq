@@ -53,22 +53,38 @@ user-invocable: true
 ### 2. テンプレートを複製する
 
 テンプレートは**この SKILL.md と同じディレクトリの** `assets/template/` にある。
-スキルは配布ビルドから読み込まれることもあるため、パスを決め打ちせず実際に解決する:
+スキル起動時に `Base directory for this skill:` として提示されるパスがそれである。
+**それをそのまま使う**（探索は要らない）:
 
 ```bash
-SKILL_DIR=$(dirname "$(find "$HOME/.claude/plugins" /Users -name SKILL.md -path '*/mcp-gen/*' 2>/dev/null | head -1)")
+SKILL_DIR=<起動時に提示されたベースディレクトリ>
 ls "$SKILL_DIR/assets/template/"
 ```
 
-見つからなければユーザーにスキルの配置場所を聞く。解決できたら複製する:
+提示が無い場合だけ、配布ビルドのキャッシュを**深さを区切って**探す:
+
+```bash
+find "$HOME/.claude/plugins/cache" -maxdepth 7 -type d -path '*/mcp-gen/assets/template' 2>/dev/null | head -1
+```
+
+`/Users` や `$HOME` 全体を find の起点にしない。**10 分経っても返らない**（実測）。
+どちらでも解決しなければユーザーにスキルの配置場所を聞く。解決できたら複製する:
 
 ```bash
 mkdir -p <生成先> && cp "$SKILL_DIR"/assets/template/{server.py,smoke_check.py,README.md} <生成先>/
 ```
 
-`pyproject.toml.template` → `pyproject.toml` は **Write ツールで作る**。
-Bash のリダイレクト・`cp` は config 保護フックに止められる
-（フックはファイル名で判定するため、生成先がリポジトリ外でも止まる）。
+`pyproject.toml.template` の中身を読み、`pyproject.toml` を **Write ツールで作る**
+（`cp` では作らない）。Bash 経由が通るかは生成先に依存し、実測では次の 3 通りに割れる:
+
+| 生成先 | Bash のリダイレクト / `cp` |
+|---|---|
+| リポジトリ配下 | **止まる**（config 保護フック） |
+| リポジトリ外・パスに変数を含む（`"$DIR/pyproject.toml"`） | **止まる**（フックはシェル展開を行わず cwd 基準で解決するため） |
+| リポジトリ外・完全リテラルの絶対パス | 通る |
+
+3 通りのうち 2 通りで止まり、しかも**どれに当たるかは書き方次第で変わる**。
+Write ツールはいずれの場合も通るので、常に Write を使う。
 
 ### 3. 編集する
 
@@ -78,7 +94,25 @@ Bash のリダイレクト・`cp` は config 保護フックに止められる
 **`smoke_check.py` 冒頭の「ここを編集する」ブロックも必ず合わせる**
 （`HAPPY_TOOL` / `HAPPY_ARGS` / `HAPPY_EXPECTED_STRUCTURED` / `INVALID_TOOL` /
 `INVALID_ARGS`）。サンプルのツール名のままだと検証が実サーバを見なくなる。
-`INVALID_TOOL` には「実在するが、渡した引数を入力検証で必ず弾くツール」を指定する。
+`INVALID_TOOL` / `INVALID_ARGS` には「実在するツール」×「**ツール本体まで到達して
+`ToolError` で失敗する**引数」を指定する。**`Field` の制約に引っかかる引数を選んではいけない。**
+引数検証は SDK が pydantic の読めるメッセージを返すため、`ToolError` を一度も
+通らないまま `test_tool_error_reaches_the_model` が合格してしまう
+（実測: `ToolError` が 1 つも無いサーバ、および業務エラーを素の
+`FileNotFoundError` で投げるサーバが、どちらも exit 0 で通った）。
+存在しない ID・ディレクトリを渡された等、**型と範囲は正しいが業務的に失敗する**
+引数を選ぶこと。
+
+**MRTR を使うなら、この「ここを編集する」ブロックの外にも手を入れる。**
+`REQUEST_META` の `clientCapabilities` に `{"elicitation": {"form": {}}}` を足し
+（足さないと `-32021 MissingRequiredClientCapability` で落ちる）、
+1 往復目が `resultType: "input_required"` を返すことを見るテスト関数を追加して
+`main()` の実行リストに載せる。ブロック内の定数だけでは足りない。
+
+**生成コードの説明文に旧 API 名を書かない。** `ctx.elicit()` を「使わない理由」
+として docstring に書くだけで、手順 4 の grep が当たる（正規表現は呼び出しと
+散文を区別しない）。触れる必要があるときは「`Context` の `elicit` メソッド」の
+ように名前を分割して書く。
 
 守ること:
 
@@ -204,7 +238,12 @@ RFC 9207 の `iss` 検証まで含む独立した subsystem であり、テン�
 
 ## 環境の落とし穴
 
-- **`pyproject.toml` は Write ツールで作る**（Bash は config 保護フックに止まる）。
+- **`pyproject.toml` は Write ツールで作る**（Bash が通るかは生成先次第。手順 2 の表）。
+- **禁止パターン grep から `__pycache__` を除外する。** `.pyc` には docstring が
+  そのまま埋まり、しかもソースを直した後も古い文字列を保持する。
+  当たるかは grep の実装依存（macOS ではバイナリを読み飛ばすため当たらない）だが、
+  検査対象はソースでありビルド生成物ではない。正本の grep に入っている
+  `-I --exclude-dir=__pycache__` を省かない。
 - **検証スクリプトを `test_*.py` / `*_test.py` と名付けない。**
   親リポジトリの pytest に自動収集され、`mcp` 未導入の環境で無関係に失敗する。
   `smoke_check.py` はそのために意図してこの名前にしてある。
