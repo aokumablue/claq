@@ -31,10 +31,38 @@ user-invocable: true
 
 起動対象を機械的に列挙し、「起動したもの」と「未起動のもの」を突き合わせる表を作る。列挙を省くと取りこぼす — 実例として skill-make / skill-gen / bugfix / loop-dev が最後まで未起動のまま残った。
 
-Bash 呼び出しごとに cwd と環境変数はリセットされる。`PLUGIN_ROOT` は**絶対パス**で、各呼び出しの先頭で毎回設定し直す（相対パスは 2 回目以降壊れる）。
+### 起動ビルドの確定（列挙より先）
+
+**1 回の実行は 2 つの root にまたがる。** 本スキルが測るのはホストが実際に起動している**配布ビルド**だが、ステップ5 の修理ゲートは tests を同梱しないビルドでは走らない（`docs/adr/0006-distributed-artifact-omits-tests-verify-in-source-tree.md`）。したがって測定 root と修理 root は別物になりうる。**列挙より先に両方を確定し、記録する。**
+
+測定 root の決め方（上から順に、解決した時点で確定）:
+
+1. 引数 #1 の明示指定
+2. `. "$HOME/.bluecore/env.sh"` を読んだ後の `bluecore_plugin_root`
+3. リポジトリ作業ツリー `$(git rev-parse --show-toplevel)/plugins/bluecore`
 
 ```bash
-PLUGIN_ROOT="$(git rev-parse --show-toplevel)/plugins/bluecore"   # 引数 #1 で上書き
+. "$HOME/.bluecore/env.sh"
+if type bluecore_plugin_root >/dev/null 2>&1; then
+  MEASURED_ROOT="$(bluecore_plugin_root)"; VIA=env-pointer
+else
+  MEASURED_ROOT="$(git rev-parse --show-toplevel)/plugins/bluecore"; VIA=repo-worktree
+fi
+GATE_ROOT="$(git rev-parse --show-toplevel)/plugins/bluecore"
+echo "measured=$MEASURED_ROOT via=$VIA gate=$GATE_ROOT"
+[ "$MEASURED_ROOT" = "$GATE_ROOT" ] && echo "same=yes" || echo "same=no"
+```
+
+**source 行をパイプへ流さない。** `. "$HOME/.bluecore/env.sh"` は解決に失敗すれば 127 を返すが、`. "$HOME/.bluecore/env.sh" | head` のようにパイプへ繋ぐと**サブシェルで実行されて helper が呼び出し元に残らない**。source 自体は成功して見えるのに `type` だけが失敗するため、解決できている文脈を「ポインタ未記録」と誤診する（実測: 同一文脈でパイプ有り＝helper 未定義、パイプ無し＝定義済み）。これは「測定が効いていない側に倒れる」典型で、ステップ3 の自己計測の疑いがそのまま当てはまる。
+
+**2 つの root が一致しないなら、リポジトリで通った修正は測定 root にまだ入っていない。** 実測 v0.9.44: 配布ビルドとリポジトリ HEAD で `lib/harness.py` と `hooks/pre_bash_commit_quality.py` が相違していた（リリース後に入ったバイパス修正が配布ビルドへ届いていない）。一致しない状態で測った指摘は、どちらの root のものかを添えない限り結論が入れ替わる。
+
+**起動経路によって実行される木が変わる。** `$PLUGIN_ROOT/src/bluecore/launcher.py` 経由の起動は launcher が自分の `src` を `sys.path` の先頭へ挿すため **PLUGIN_ROOT が指す木**を実行する。一方 `python3 -m bluecore.モジュール名` は **PLUGIN_ROOT を一切見ない** — 開発 venv では editable install 経由で**リポジトリ作業ツリー**を実行し、venv 外の素の `python3` では import 自体が失敗する（実測: `bluecore` の spec が None）。どちらにせよ配布ビルドは実行しない。**この 2 つを同じ表の中で混ぜない** — 混ぜると「配布ビルドを測った」と書いた行にリポジトリの実測値が混入する。
+
+Bash 呼び出しごとに cwd と環境変数はリセットされる。**上の `MEASURED_ROOT` も次の呼び出しには残らない** — 解決した絶対パスをレポートの `Build:` 行へ書き取り、以後は各呼び出しの先頭でその**絶対パスリテラル**を代入する（env ポインタの再解決は PPID に依存し、呼び出しごとに同じ答えを返す保証がない）。
+
+```bash
+PLUGIN_ROOT="/絶対/パス/を/リテラルで"   # Build: 行に記録した測定 root
 ls "$PLUGIN_ROOT/commands"     # *.md が commands
 ls "$PLUGIN_ROOT/skills"       # ディレクトリ 1 つが skill
 ls "$PLUGIN_ROOT/agents"       # *.md が agent
@@ -174,12 +202,15 @@ mkdir -p "$BLUECORE_DATA_PATH"
 ## ステップ3: 実測による裁定
 
 - **エージェントの自己申告は一次証跡ではない**。主張は必ず自分で再現してから採用する。同一セッションで 5 件の agent 主張が再現に失敗して却下された。
+- **再現していない主張も指摘台帳へ入れる**。エージェント主張は「再現できた → 通常の指摘」「再現を試みて失敗 → `NO-FIX`（根拠＝再現手順と観測結果）」「再現を試みていない → `Unadjudicated`」の 3 つに必ず落とす。**本表の外に別節を作って逃がさない** — 実測 v0.9.44 の実行で security-auditor の 5 件が「要裁定」という表外の節に置かれ、恒等式のどの行にも計上されないまま実行が終わった。
 - **自分の計測も疑う**。実例: 正規表現の二次オーダーを「解消済み」と誤判定したが、ベンチ入力に終端文字が含まれており攻撃形状を再現していなかった。計測が「効いていない」側に倒れていないかを、**入力長を変えて**確かめる（長さに対して時間が伸びないなら、計測が攻撃形状を作れていない可能性を先に疑う）。
 - **「存在の測定」と「実効性の測定」を混同しない**。`harness_audit` の `Security Guardrails` は保護フックの**存在**を測るのであって実効性を測らない — 同カテゴリ満点のまま `block_no_verify` の 3 経路バイパスが素通りしていた。実効性は実 payload の exit code でしか測れない。
 
 ## ステップ4: メタ認知ゲート
 
-指摘 1 件ごとに、**着手前に**「直すのが本当に正しいか」を人間と判定する。判定結果は `修正` / `NO-FIX（根拠付き）` のどちらかに必ず分類し、未分類のまま終わらせない。
+指摘 1 件ごとに、**着手前に**「直すのが本当に正しいか」を人間と判定する。判定結果は `修正` / `NO-FIX（根拠付き）` のどちらかに分類する。
+
+**裁定に到達しなかった指摘は `Unadjudicated` という第三の値で計上する。** 「未分類のまま終わらせない」と禁じるだけでは足りなかった — 実測 v0.9.44 の実行では 4 件が `未裁定` と書かれ、5 件の agent 主張が表外の節へ流れ、いずれも出力の恒等式に載らなかった。禁止語ではなく**計上先**を与える。`Unadjudicated` は合格でも不合格でもなく、終了条件2 を未達にする（`Not run` と同じ扱い）。裁定が終わっていないのに `Pending` へ入れない — `Pending` は**`修正` と裁定済みで未着手**のものだけを指す。
 
 NO-FIX の実例:
 
@@ -190,7 +221,9 @@ NO-FIX は「直さない」判定であって「見なかった」ではない�
 
 ## ステップ5: 修正サイクル
 
-指摘 1 件ずつ 修正 → 検証 → コミット。検証ゲートは 3 つすべて:
+指摘 1 件ずつ 修正 → 検証 → コミット。検証ゲートは 4 つすべて。
+
+**回帰ゲート（リポジトリ全体、3 つ）**:
 
 ```bash
 python3 -m pytest -q
@@ -198,19 +231,26 @@ ruff check plugins/bluecore                       # src と tests の両方
 cd plugins/bluecore && python3 -m pytest -q --cov  # fail_under=100 はこのディレクトリでのみ解決する
 ```
 
+**再実測ゲート（当該指摘、1 つ）**: 指摘を生んだ**その payload そのもの**を修正後にもう一度流し、陽性・陰性の対で exit code が反転したことを確認する。加えて**同じクラスの隣接軸**を 1 つ流す（先勝ちなら別の先頭キー・別の別名フィールド・allow 側と deny 側、というように「同じ壊れ方が残っている隣」を選ぶ）。
+
+上の 3 つは**回帰の検出**であって、バイパスが閉じた証拠ではない。実測 v0.9.44: F-1（コンテナキー先勝ち）の修正は 3 ゲートすべて緑で通ったが、同じ先勝ちが `pre_bash_commit_quality` の allow 経路に残っており、再実測で初めて F-2 として出た。**修正が通ったことと、バイパスが閉じたことは別の測定**。
+
+再実測はリポジトリ作業ツリーに対して行う。測定 root が配布ビルドだった場合、その指摘は**再インストールするまで測定 root では閉じていない** — `Build:` 行にそう書く。
+
 `ruff` から tests を外すと未定義名や不要 import が無検出のまま残る。カバレッジゲートはリポジトリ直下に coverage 設定が無く `--cov` を付けても発火しないため、`plugins/bluecore` へ降りて実行する。
 
 pytest をパイプへ流すときは `set -o pipefail` 必須。`git add` と `git commit` は**別の Bash 呼び出しに分ける** — 同一呼び出しだと品質フックが実行前の index しか見られず deny される。
 
-**修正が禁止された実行**（調査目的・READ-ONLY）でも、この工程を飛ばさずゲート 3 つを**現状のベースライン観測**として実行し、その結果で終了条件3 を判定する。飛ばすと終了条件3 が判定不能になる。指摘は `修正` 裁定のまま未着手として計上し（下記 `Pending`）、終了条件2 は未達と報告する。
+**修正が禁止された実行**（調査目的・READ-ONLY）でも、この工程を飛ばさず**回帰ゲート 3 つ**を**現状のベースライン観測**として実行し、その結果で終了条件3 を判定する。飛ばすと終了条件3 が判定不能になる。再実測ゲートは修正が 0 件なので対象外。指摘は `修正` 裁定のまま未着手として計上し（下記 `Pending`）、終了条件2 は未達と報告する。
 
 ## 終了条件
 
 1. **スコープ内の**未起動コンポーネントがゼロ（`--scope` 指定時はスコープ内だけで判定する）
-2. 全指摘が `修正済み` または `根拠付き NO-FIX` に分類済み
-3. ステップ5 のゲート 3 つがすべて緑
+2. 全指摘が `修正済み` または `根拠付き NO-FIX` に分類済み（`Unadjudicated` と `Pending` がともに 0）
+3. ステップ5 のゲートがすべて緑 — 回帰ゲート 3 つ、および修正 1 件ごとの再実測ゲート（修正が 0 件の実行では回帰ゲート 3 つのみ）
+4. 測定 root と修理 root が `Build:` 行に記録済み
 
-**実行の成否と `Gate` は別軸**。上の 3 条件は本実行が完了したかを表し、`Gate` はリリース可否を表す。部分実行や修正禁止の実行で `Gate: BLOCKED` が出るのは正常終了であって、実行の失敗ではない。
+**実行の成否と `Gate` は別軸**。上の 4 条件は本実行が完了したかを表し、`Gate` はリリース可否を表す。部分実行や修正禁止の実行で `Gate: BLOCKED` が出るのは正常終了であって、実行の失敗ではない。
 
 **未起動を「異常なし」と読み替えない。**「skip されるゲートはゲートとして機能しない」（bluecore リポジトリの `docs/adr/0014-host-component-inventory-is-a-release-gate.md`）。未起動は合格でも不合格でもなく**未実施**として別カウントし、出力テンプレでも独立した行にする。
 
@@ -224,13 +264,16 @@ pytest をパイプへ流すときは `set -o pipefail` 必須。`git add` と `
 Release Verify
 ──────────────────────────────
 Target:     {対象ビルド・バージョン}
+Build:      measured={測定 root の絶対パス} via={引数 / env-pointer / repo-worktree}
+            gate={修理 root の絶対パス}  same={yes / no}
 Inventory:  hooks {n} / commands {n} / skills {n} / agents {n}
 Invoked:    {n} / {total}
 Not run:    {n}（未実施。合格ではない）
 Findings:   HIGH {h} / MEDIUM {m} / LOW {l}
-Fixed:      {n}
+Fixed:      {n}（再実測ゲート済み）
 NO-FIX:     {n}（根拠を下に列挙）
 Pending:    {n}（修正裁定・未着手）
+Unadjudicated: {n}（裁定に到達せず。合格ではない）
 Gate:       PASS / BLOCKED
 ──────────────────────────────
 NO-FIX:
@@ -238,9 +281,13 @@ NO-FIX:
 Learned:    {知識カードの key} / なし
 ```
 
-`Not run` が 1 以上なら `Gate: BLOCKED`。行間の恒等式は **`Findings 合計 = Fixed + NO-FIX + Pending`** — どの指摘も 3 行のいずれかに必ず入る。`Pending` が 1 以上なら終了条件2 は未達。NO-FIX は件数だけでなく理由を 1 行ずつ添える。末尾に記録した知識カードの key を 1 行書く（記録が無ければ `Learned: なし`）。
+`Gate: BLOCKED` になる条件は 3 つで、いずれか 1 つでも該当すれば BLOCKED — **`Not run` が 1 以上 / `Unadjudicated` が 1 以上 / `Build:` の `same=no`**。行間の恒等式は **`Findings 合計 = Fixed + NO-FIX + Pending + Unadjudicated`** — どの指摘も 4 行のいずれかに必ず入る。**表外に「要裁定」節を作って恒等式から逃がさない**（エージェント主張も含む。ステップ3 参照）。`Pending` または `Unadjudicated` が 1 以上なら終了条件2 は未達。NO-FIX は件数だけでなく理由を 1 行ずつ添える。
+
+`Build:` の `same=no`（測定 root と修理 root が別）のとき、`Fixed` は**修理 root で閉じた件数**であって測定 root では未反映。この状態で `Gate: PASS` を出さない — 配布ビルドを測っておきながらリポジトリの修正結果で合格にするのが、結論が入れ替わる典型経路。
+
+末尾に記録した知識カードの key を 1 行書く（記録が無ければ `Learned: なし`）。
 
 ## 引数
 
-- 位置 #1: `[対象パス]`（省略時: リポジトリのプラグインルート `plugins/bluecore`）
+- 位置 #1: `[対象パス]` — **測定 root の明示指定**。省略時の既定値はここで決め打たず、`### 起動ビルドの確定（列挙より先）` の解決順（env ポインタ → リポジトリ作業ツリー）に従う。既定をリポジトリ作業ツリーと読むと配布ビルドを一度も測らないまま `same=yes` になり、`Build:` 行が「正しい対象を測った」と誤報する
 - `--scope=hooks|commands|skills|agents`: 部分実行（省略時: 全件）。**部分実行でも `Not run` の計上規則は変えない** — スコープ外のコンポーネントも未実施として計上し、`Not run` が 1 以上である以上 `Gate: BLOCKED` になる。部分実行は調査のための絞り込みであってリリース可否の判定ではない
