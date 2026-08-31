@@ -48,6 +48,12 @@ INVALID_EXPECTED_MESSAGE = "item-"
 # リソースを公開しないなら `RESOURCE_URI = ""` にする（検査は SKIP と記録される）。
 RESOURCE_URI = "config://runtime"
 RESOURCE_EXPECTED_SUBSTRING = "example-server"
+# 公開するプロンプトがあれば名前と引数、本文に含まれるべき文字列を書く。
+# プロンプトを公開しないなら `PROMPT_NAME = ""` にする（検査は SKIP と記録される）。
+# プロンプト引数はワイヤ上つねに文字列なので、値は str で書く。
+PROMPT_NAME = "review_request"
+PROMPT_ARGS: dict = {"target": "server.py"}
+PROMPT_EXPECTED_SUBSTRING = "server.py"
 # ==== 編集ここまで ====
 
 # 2026-07-28 では各リクエストが自分でプロトコル版と capability を運ぶ。
@@ -306,6 +312,21 @@ def test_resource_is_served() -> None:
     )
 
 
+def test_prompt_is_served() -> None:
+    """公開したプロンプトが引数を反映した本文を返すこと。
+
+    `prompts/get` は `CacheableMethod` ではないので `ttlMs` は見ない
+    （一覧の `prompts/list` にはヒントが載る）。
+    """
+    responses = _exchange([_request(1, "prompts/get", {"name": PROMPT_NAME, "arguments": PROMPT_ARGS})])
+    result = responses[1]["result"]
+    assert result["resultType"] == "complete", result
+    text = " ".join(
+        message.get("content", {}).get("text", "") for message in result.get("messages", [])
+    )
+    assert PROMPT_EXPECTED_SUBSTRING in text, f"プロンプト本文が期待と違います: {text!r}"
+
+
 def main() -> int:
     """全チェックを実行し、終了コードを返す。
 
@@ -314,11 +335,15 @@ def main() -> int:
     """
     failures = 0
     checks = [test_protocol_surface, test_tool_error_reaches_the_model]
+    # 「実行しなかった」を「合格」に潰さない。第三の値として記録する。
     if RESOURCE_URI:
         checks.append(test_resource_is_served)
     else:
-        # 「実行しなかった」を「合格」に潰さない。第三の値として記録する。
         print("SKIP test_resource_is_served (RESOURCE_URI 未設定)", file=sys.stderr)
+    if PROMPT_NAME:
+        checks.append(test_prompt_is_served)
+    else:
+        print("SKIP test_prompt_is_served (PROMPT_NAME 未設定)", file=sys.stderr)
     for check in checks:
         try:
             check()

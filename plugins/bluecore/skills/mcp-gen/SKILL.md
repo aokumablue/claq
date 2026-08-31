@@ -109,10 +109,13 @@ Write ツールはいずれの場合も通るので、常に Write を使う。
 **`smoke_check.py` 冒頭の「ここを編集する」ブロックも必ず合わせる**
 （`HAPPY_TOOL` / `HAPPY_ARGS` / `HAPPY_EXPECTED_STRUCTURED` / `INVALID_TOOL` /
 `INVALID_ARGS` / `INVALID_EXPECTED_MESSAGE` / `RESOURCE_URI` /
-`RESOURCE_EXPECTED_SUBSTRING`）。サンプルのツール名のままだと検証が実サーバを
+`RESOURCE_EXPECTED_SUBSTRING` / `PROMPT_NAME` / `PROMPT_ARGS` /
+`PROMPT_EXPECTED_SUBSTRING`）。サンプルのツール名のままだと検証が実サーバを
 見なくなる。**要件で採用した面（tools / resources / prompts）はそれぞれ
-検査を持たせる。** リソースを公開しないなら `RESOURCE_URI = ""` にする
-（その検査は SKIP と記録される。合格には潰さない）。
+検査を持たせる。** 公開しない面は `RESOURCE_URI = ""` / `PROMPT_NAME = ""`
+にする（その検査は SKIP と記録される。合格には潰さない）。
+MRTR を採用したなら `elicit_round_trip` を使う検査を自分で足す
+（テンプレートの MRTR 検査は同梱していない。ツールの形が要件ごとに違うため）。
 `INVALID_TOOL` / `INVALID_ARGS` には「実在するツール」×「**ツール本体まで到達して
 `ToolError` で失敗する**引数」を指定する。**`Field` の制約に引っかかる引数を選んではいけない。**
 引数検証は SDK が pydantic の読めるメッセージを返すため、`ToolError` を一度も

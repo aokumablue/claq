@@ -16,6 +16,13 @@ import が通って起動するため誤りに気づけない）。
     stdio では stdout が JSON-RPC 専用なので、そこへ書くとフレームが壊れる。
   - モデルに読ませたいエラーは `ToolError` で投げる。素の例外はメッセージが
     伏せられ、モデルには "Error executing tool <name>" しか届かない。
+  - ツール実行中に確認・追加入力を取るなら MRTR（`Resolve` + `Elicit`）を使う。
+    `Context` の `elicit` メソッドは旧経路で、ステートレスな transport では失敗する。
+
+この docstring の最後の行が**旧 API 名の書き方の見本**である。`Context` の
+`elicit` メソッドのように**受け手と名前を分けて書く**こと。`ctx` に続けて
+ドットとメソッド名を並べて書くと、それが説明文であっても禁止パターン検査に
+当たる（正規表現は呼び出しと散文を区別しない）。
 
 実行:
     python3 server.py             # stdio
