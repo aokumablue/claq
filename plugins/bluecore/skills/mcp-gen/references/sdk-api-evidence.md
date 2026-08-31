@@ -366,8 +366,19 @@ SDK リポジトリの `examples/` のみ。
 | リクエスト | 結果 |
 |---|---|
 | `MCP-Protocol-Version` + `Mcp-Method` あり、`Mcp-Name` なしで `tools/list` | `200` |
-| ヘッダを全く付けない POST | `400` |
+| `MCP-Protocol-Version` なしの POST | `400` `-32600` **`Bad Request: Missing session ID`** |
+| `MCP-Protocol-Version` あり・`Mcp-Method` なし | `400` `-32020` `mcp-method header does not match the request body's method` |
 | MCP エンドポイントへの `GET` | `400` |
+
+### `Missing session ID` に釣られないこと
+
+`MCP-Protocol-Version` ヘッダを付け忘れると、SDK は**旧版（セッションがあった頃）の
+経路へフォールバック**し、`Bad Request: Missing session ID` を返す。
+
+このメッセージは**この仕様に存在しない機構を名指ししている**。真に受けて
+セッション ID を付けようとすると、まさに廃止された `Mcp-Session-Id` を
+実装しにいくことになる。正しい対処は**プロトコル版ヘッダを付けること**。
+`-32600` かつ本文にセッションの語が出たら、まずヘッダの付け忘れを疑う。
 
 1 行目は仕様どおり（`Mcp-Name` が必須なのは `tools/call` /
 `resources/read` / `prompts/get` だけで、`tools/list` には要らない）。
