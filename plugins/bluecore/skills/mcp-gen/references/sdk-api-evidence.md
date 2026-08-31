@@ -147,6 +147,8 @@ async def danger(target: str, confirm: Annotated[Confirm, Resolve(ask_confirm)])
 入力が取れなければ処理を続けられない場合だけ。
 `ElicitationResult` は `action`（`accept` / `decline` / `cancel`）と、
 accept のときだけ埋まる `data` を持つ。
+- リゾルバを使うツールは `async def` でも同期 `def` でもよい（実測。同期でも
+  `input_required` → 再送 → 解決まで通る）。同期関数はスレッドプールで走る。
 - `Sample` / `ListRoots` に decline は無い。ただし **Sampling と Roots は非推奨**なので
   新規実装では使わない。実質使うのは `Elicit` だけ。
 - クライアントが対応 capability を宣言していない場合、SDK は
