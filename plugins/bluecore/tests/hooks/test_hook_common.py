@@ -1257,10 +1257,41 @@ class TestHeredocNormalization:
                 "cat > n.md <<-\tEOF\n\tgit commit --no-verify\n\tEOF",
                 "cat > n.md <<-\tEOF\n\t\tEOF".replace("\t\t", "\t"),
             ),
+            # ここから下は ADR-0017 が「未検証」「単純化されやすい」と名指しした境界。
+            # CRLF: 区切り語はクォートの内側から取るため CR を含まず（`EOF`）、行側は
+            # `EOF\r` なので一致しない。bash は逆に区切り語自体が CR を吸うため
+            # （`<<'EOF'\r` の語は `EOF\r`）実際には終端する。挙動は一致しないが、
+            # 剥がさない側は検出側であり ADR-0017 の決定 3（未終端なら剥がさない）に沿う。
+            (
+                "CRLF は区切り語と終端行が一致せず未終端側へ倒れる",
+                "cat > note.md <<'EOF'\r\ngit commit --no-verify\r\nEOF\r\n",
+                "cat > note.md <<'EOF'\r\ngit commit --no-verify\r\nEOF\r\n",
+            ),
+            (
+                "後続に空白のある終端行は終端せず本文として扱う",
+                "cat > n.md <<'EOF'\nprose\nEOF \nEOF",
+                "cat > n.md <<'EOF'\nEOF",
+            ),
+            (
+                "空白付きの行しか無ければ未終端として剥がさない",
+                "cat > n.md <<'EOF'\ngit commit --no-verify\nEOF ",
+                "cat > n.md <<'EOF'\ngit commit --no-verify\nEOF ",
+            ),
+            (
+                "継続演算子で改行し次行が bash でも残す",
+                "cat <<'EOF' |\nbash\ngit commit --no-verify\nEOF",
+                "cat <<'EOF' |\nbash\ngit commit --no-verify\nEOF",
+            ),
         ],
     )
     def test_strip_data_heredoc_bodies(self, label: str, command: str, expected: str) -> None:
-        """データ本文だけを落とし、実行されうる形はそのまま残す。"""
+        """データ本文だけを落とし、実行されうる形はそのまま残す。
+
+        末尾の境界行は ADR-0017 の「否定的」「リスク」節が名指しした未検証の境界を
+        固定する。CRLF 行は区切り語と一致せず未終端側へ、空白付きの `EOF ` は終端と
+        認めず本文として扱い（後続に厳密一致の行があればそこで終端し、無ければ
+        未終端）、継続演算子で終わる行は次行が `bash` でも本文を剥がさない。
+        """
         assert hook_common.strip_data_heredoc_bodies(command) == expected, label
 
     @pytest.mark.parametrize(
@@ -1269,6 +1300,8 @@ class TestHeredocNormalization:
             "cat > note.md <<'EOF'\nprose\nEOF",
             "bash <<'EOF'\ngit commit\nEOF",
             "cat > note.md <<'EOF'\nunterminated",
+            "cat > note.md <<'EOF'\nprose\nEOF \nEOF",
+            "cat > note.md <<'EOF'\r\nprose\r\nEOF\r\n",
             "echo hi",
         ],
     )
@@ -1301,11 +1334,38 @@ class TestUnquotedNewlineNormalization:
             ("クォートを閉じた後の改行は ; になる", "echo 'a'\ngit commit", "echo 'a';git commit"),
             ("バックスラッシュ継続は区切りにしない", "git add \\\n.", "git add \\\n."),
             ("シングルクォート内のバックスラッシュは継続にしない", "echo 'a\\'\nb", "echo 'a\\';b"),
+            ("閉じないシングルクォート内の改行は保つ", "echo 'unterminated\nrm -rf /", "echo 'unterminated\nrm -rf /"),
+            ('閉じないダブルクォート内の改行は保つ', 'echo "unterminated\nrm -rf /', 'echo "unterminated\nrm -rf /'),
         ],
     )
     def test_replace_unquoted_newlines(self, label: str, command: str, expected: str) -> None:
         """クォート外の改行だけを区切りへ置き換える。"""
         assert hook_common._replace_unquoted_newlines(command) == expected, label
+
+    @pytest.mark.parametrize(
+        ("label", "command", "expected"),
+        [
+            (
+                "シングルクォートが閉じない",
+                "echo 'unterminated\nrm -rf /",
+                (["echo", "'unterminated", "rm", "-rf", "/"], False),
+            ),
+            (
+                "ダブルクォートが閉じない",
+                'echo "unterminated\nrm -rf /',
+                (["echo", '"unterminated', "rm", "-rf", "/"], False),
+            ),
+        ],
+    )
+    def test_tokenize_with_status_unterminated_quote(self, label: str, command: str, expected: tuple) -> None:
+        """クォートが閉じない入力では改行を区切りにしないが、後続行の語は走査対象に残る。
+
+        `_replace_unquoted_newlines` は開いたクォートの内側とみなして `;` を挿さない。
+        代わりに `shlex` が `ValueError` になり空白分割へフォールバックするため、改行の
+        後ろにある語もトークンとして現れる（解析できなかった印として第 2 要素は False。
+        呼び出し側はこれを見て生文字列の正規表現へ倒す＝fail-closed 側になる）。
+        """
+        assert hook_common.tokenize_with_status(command) == expected, label
 
     def test_multiline_command_splits_into_segments(self) -> None:
         """複数行コマンドが行ごとのセグメントへ分かれること。"""

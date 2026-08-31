@@ -216,6 +216,7 @@ _SENSITIVE_CONFIG_KEY_PREFIXES = (
     "alias.",
 )
 
+
 class GitInvocation(NamedTuple):
     """git 起動トークン以降を解析した結果。
 
