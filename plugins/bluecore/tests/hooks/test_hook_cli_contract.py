@@ -454,9 +454,10 @@ def test_every_pre_tool_use_hook_is_field_alias_gated() -> None:
     共有層のゲートでは「そのフックが実際に別名を読むか」を被覆できないため。
 
     強制するのはフック単位の登録であって、別名単位の網羅ではない。
-    `config_protection` の `file`（`file_path` の別名）はここに無く、
-    `tests/hooks/test_config_protection.py` と `tests/lib/test_harness.py` が
-    被覆している。
+    `config_protection` の `file`（`file_path` の別名）はこの表に無く、下の
+    多重度ゲートが流している。「表の合計が実装の読む別名と一致する」ことは
+    `test_field_alias_gate_flows_every_alias_the_implementation_reads` が
+    実装から抽出した集合との等号で強制する。
     """
     declared = _pre_tool_use_modules()
     covered = {hook for hook, _, _, _ in _FIELD_ALIAS_CASES.values()}
@@ -558,28 +559,44 @@ _IN_HOOK_TOOL_NAME_GATES = {
 _TOOL_NAME_READER_SYMBOLS = frozenset({"extract_raw_tool_name", "normalize_tool_name"})
 
 
-def _hooks_reading_tool_name_in_body() -> set[str]:
-    """PreToolUse hook のうち、本体でツール名を読むモジュールを実装から導出する。
+def _harness_imports(module: str) -> set[str]:
+    """モジュールが `bluecore.lib.harness` から直 import している symbol 名を返す。
 
     `lib/harness` からの import を AST で見る。文字列の部分一致にすると
     docstring 中の言及を実装と誤認するため、`ImportFrom` ノードに限定する。
 
+    上のコメントに書いた module import 形式（`from bluecore.lib import harness`）の
+    false negative は本関数に由来する。ツール名読み取りの導出とフィールド別名の
+    導出が同じ限界を共有するよう、走査はここ 1 か所に閉じる（2 か所へ書くと
+    片方だけ `ast.Attribute` 対応が入って被覆範囲がずれる）。
+
+    Args:
+        module: dotted module 名（例: bluecore.hooks.config_protection）。
+
+    Returns:
+        直 import されている harness の symbol 名の集合。
+    """
+    origin = importlib.util.find_spec(module).origin
+    tree = ast.parse(Path(origin).read_text(encoding="utf-8"))
+    return {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "bluecore.lib.harness"
+        for alias in node.names
+    }
+
+
+def _hooks_reading_tool_name_in_body() -> set[str]:
+    """PreToolUse hook のうち、本体でツール名を読むモジュールを実装から導出する。
+
     Returns:
         ツール名読み取り symbol を import している dotted module 名の集合。
     """
-    reading: set[str] = set()
-    for module in _pre_tool_use_modules():
-        origin = importlib.util.find_spec(module).origin
-        tree = ast.parse(Path(origin).read_text(encoding="utf-8"))
-        imported = {
-            alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module == "bluecore.lib.harness"
-            for alias in node.names
-        }
-        if imported & _TOOL_NAME_READER_SYMBOLS:
-            reading.add(module)
-    return reading
+    return {
+        module
+        for module in _pre_tool_use_modules()
+        if _harness_imports(module) & _TOOL_NAME_READER_SYMBOLS
+    }
 
 
 def test_every_pre_tool_use_hook_is_tool_name_alias_gated() -> None:
@@ -716,3 +733,242 @@ def test_pre_tool_use_hook_scans_every_field_alias(hook: str, dangerous_first: b
     assert allowed.returncode == 0, (
         f"{hook}: 全フィールド無害の payload が exit {allowed.returncode} err={allowed.stderr[:200]}"
     )
+
+
+# --- 実装が読む別名と、ゲートが流す別名の等号照合 -----------------------------------
+#
+# ここまでの別名軸（フィールド別名 / 多重度）は、実装が読む別名名を**テスト側へ
+# 写経**している。`INPUT_CONTAINER_KEYS` はモジュール定数なので import で写経を
+# 避けられたが、フィールド別名は `_commands_from_tool_input` の
+# `for key in ("command", "cmd")` と `extract_file_paths` の
+# `for key in ("file_path", "file")` のように**関数本体のインラインリテラル**で、
+# import できない。そのためタプルへ 3 つ目の別名を足しても、上の全ゲートは緑のまま
+# 通る——新しい別名だけが 1 度も payload に載らない状態で出荷される。
+#
+# ツール名別名軸の `test_declared_tool_name_aliases_normalize_into_hook_gate` は
+# 「宣言した別名が実装の受理集合へ落ちる」方向（宣言 ⊆ 実装）しか見ておらず、
+# 実装が増えた側（実装 ⊄ 宣言）を捕まえない。ここは**等号**で照合する。
+#
+# 抽出の限界（この節が本来より広く効いていると読ませないため明記する）:
+# - seed は `_harness_imports` に依存するため module import 形式はすり抜ける
+# - 呼び出しグラフの**起点として辿る**のは harness のモジュール直下 `def` のみ
+#   （到達した関数の内側にあるネスト関数のリテラルは `ast.walk` で拾える）
+# - 呼び出しの追跡は `ast.Name` 形式の直接呼び出しのみ（動的ディスパッチは追わない）
+# - **置換的**な書き換え（タプルを別の形へ移す）は必ず赤くなるが、認識形を残したまま
+#   **加算的**に読み足す形——`("command", "cmd", *_EXTRA)` の星付き展開や
+#   `if "commandLine" in tool_input:` + 添字——は等号が成立したまま素通りする
+# - 照合の宇宙は `lib/harness.py` に閉じる。フック本体が直接読むフィールドは
+#   どちらの等号にも載らない（現状 path/command 別名を本体で読むフックは 0 件。
+#   `config_protection` の `content` / `edits` 等は別名軸ではなく内容走査軸）
+
+# dict キーとして読まれる文字列リテラルを、payload 直下のキーと tool_input の
+# フィールドに振り分ける。両バケットとも別の等号照合を持つため、免除枠は無い
+# ——どちらのバケットへ入れ違えても、いずれかの等号が赤くなる。
+_PAYLOAD_KEY_READERS = frozenset({"extract_raw_tool_name"})
+
+
+def _harness_source() -> str:
+    """`bluecore.lib.harness` のソーステキストを返す。
+
+    Returns:
+        harness モジュールのソース全文。
+    """
+    return Path(importlib.util.find_spec("bluecore.lib.harness").origin).read_text(encoding="utf-8")
+
+
+def _dict_key_literals(function: ast.FunctionDef) -> set[str]:
+    """関数本体が dict のキーとして読む文字列リテラルを集める。
+
+    2 つの形を拾う。``x.get("key")`` の定数引数と、``for key in ("a", "b")``
+    の文字列リテラルタプル（内包表記・`for` 文の双方）。後者は実装が別名を
+    走査する現行の書き方で、前者は単一キーを直接読む書き方。片方だけを見ると、
+    もう一方へ書き換えた瞬間に検査が無言で外れる。
+
+    現行 harness が使うのは内包表記の形だけで、`for` 文の側は該当箇所が無い
+    （テストファイルは coverage 計測対象外のため、この非対称は 100% ゲートに
+    現れない）。内包表記から `for` 文へ書き換えても検査が外れないための前方固定
+    として残す。
+
+    Args:
+        function: harness のモジュール直下 `def` ノード。
+
+    Returns:
+        キーとして読まれる文字列リテラルの集合。
+    """
+    keys: set[str] = set()
+    for node in ast.walk(function):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            keys.add(node.args[0].value)
+        if isinstance(node, ast.For | ast.comprehension) and isinstance(node.iter, ast.Tuple):
+            keys.update(
+                element.value
+                for element in node.iter.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            )
+    return keys
+
+
+def _key_literals_by_function(source: str, seeds: set[str]) -> dict[str, set[str]]:
+    """seed から到達する harness 関数ごとに、読む dict キーのリテラルを集める。
+
+    seed（hook が直 import した symbol）から harness 内の呼び出しを推移的に辿る。
+    hook が直接 import した関数だけを見ると、その先で読まれる別名を取りこぼす
+    （`config_protection` は `extract_file_paths` しか import しないが、実際の
+    `input` フィールドはその先の `_extract_patch_text` が読む）。
+
+    Args:
+        source: harness のソーステキスト。変異させたソースも渡せる。
+        seeds: 起点にする harness の symbol 名。
+
+    Returns:
+        関数名 → その関数が読む dict キーの集合（読まない関数は含めない）。
+    """
+    functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
+    reached: set[str] = set()
+    stack = [name for name in seeds if name in functions]
+    while stack:
+        name = stack.pop()
+        if name in reached:
+            continue
+        reached.add(name)
+        stack.extend(
+            node.func.id
+            for node in ast.walk(functions[name])
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in functions
+        )
+    return {name: keys for name in reached if (keys := _dict_key_literals(functions[name]))}
+
+
+def _implementation_field_aliases(source: str, hook: str) -> set[str]:
+    """hook が到達する実装が、tool_input のフィールドとして読む別名を返す。
+
+    Args:
+        source: harness のソーステキスト。
+        hook: dotted module 名。
+
+    Returns:
+        tool_input フィールド別名の集合。
+    """
+    return {
+        key
+        for name, keys in _key_literals_by_function(source, _harness_imports(hook)).items()
+        if name not in _PAYLOAD_KEY_READERS
+        for key in keys
+    }
+
+
+def _gate_field_aliases(hook: str) -> set[str]:
+    """ゲート表がその hook へ実際に流す tool_input フィールド名を返す。
+
+    別名表と多重度表の**実データ**から集める。ここで新しい一覧を書き起こすと
+    写経を写経で照合することになり、等号が実装との乖離を捕まえられない。
+
+    Args:
+        hook: dotted module 名。
+
+    Returns:
+        payload に載るフィールド名の集合。
+    """
+    aliases: set[str] = set()
+    for case_hook, _, deny_input, allow_input in _FIELD_ALIAS_CASES.values():
+        if case_hook != hook:
+            continue
+        for container in (deny_input, allow_input):
+            # 生パッチ文字列のケースは dict ではなくフィールド名を持たない。
+            # コンテナ「形状」軸の担当であり、フィールド別名は寄与しない。
+            if isinstance(container, dict):
+                aliases.update(container)
+    # 未登録の hook を素の KeyError で落とすと、「別名がずれている」のか
+    # 「表に載っていない」のかが例外型からしか読めない。登録漏れとして名指しする。
+    assert hook in _FIELD_MULTIPLICITY_GATED_HOOKS, f"多重度ゲート未登録の hook: {hook}"
+    _, safe_field, _, danger_field, _ = _FIELD_MULTIPLICITY_GATED_HOOKS[hook]
+    aliases.update({safe_field, danger_field})
+    return aliases
+
+
+@pytest.mark.parametrize("hook", sorted(_pre_tool_use_modules()))
+def test_field_alias_gate_flows_every_alias_the_implementation_reads(hook: str) -> None:
+    """実装が読むフィールド別名と、ゲートが流す別名が一致すること。
+
+    実装側が増えれば「載せていない別名がある」、ゲート側が増えれば「実装が
+    読まないフィールドを流していて陽性が空振りしている」。どちらの向きの乖離も
+    等号で赤くする。hook の一覧は hooks.json から取るため、新しい PreToolUse
+    hook を足すと自動でこの照合の対象になる。
+    """
+    implementation = _implementation_field_aliases(_harness_source(), hook)
+    gate = _gate_field_aliases(hook)
+
+    assert implementation == gate, (
+        f"{hook}: 実装が読むフィールド別名とゲートが流す別名がずれている: "
+        f"実装のみ={sorted(implementation - gate)} ゲートのみ={sorted(gate - implementation)}"
+    )
+
+
+def test_payload_key_reads_match_tool_name_alias_gate() -> None:
+    """実装が payload 直下から読むツール名キーと、ツール名別名軸の name_key が一致すること。
+
+    `_PAYLOAD_KEY_READERS` はフィールド別名の等号から外れる唯一のバケットなので、
+    外した先を宙に浮かせず、ここで別の等号に載せる。`extract_raw_tool_name` が
+    3 つ目のキーを読み始めたら、そのキーを流すゲート行が無い限り赤くなる。
+
+    hook 単位ではなくモジュール単位の等号にする。ツール名を本体で読むのは
+    `_IN_HOOK_TOOL_NAME_GATES` の 2 フックだけで、残る 2 フックは matcher 依存の
+    ため実装側が空集合になる（その非対称の是非は
+    `test_in_hook_tool_name_gate_registration_matches_implementation` の担当）。
+    """
+    implementation = {
+        key
+        for hook in _pre_tool_use_modules()
+        for name, keys in _key_literals_by_function(_harness_source(), _harness_imports(hook)).items()
+        if name in _PAYLOAD_KEY_READERS
+        for key in keys
+    }
+    gate = {
+        name_key
+        for _, _, _, aliases in _TOOL_NAME_ALIAS_GATED_HOOKS.values()
+        for name_key, _ in aliases
+    }
+
+    assert implementation == gate, (
+        f"実装が読む payload 直下キーとツール名別名軸の name_key がずれている: "
+        f"実装のみ={sorted(implementation - gate)} ゲートのみ={sorted(gate - implementation)}"
+    )
+
+
+# 変異テスト用。実装の別名タプルへ 3 つ目を足した状態を作る。
+_COMMAND_ALIAS_TUPLE = 'for key in ("command", "cmd")'
+_WIDENED_COMMAND_ALIAS_TUPLE = 'for key in ("command", "cmd", "commandLine")'
+
+
+def test_field_alias_gate_reddens_when_implementation_gains_an_alias() -> None:
+    """実装へ別名を 1 つ足すと、上の等号が実際に破れること。
+
+    等号テストが緑であることは、それ自体では「抽出器が動いている」証拠に
+    ならない——常に空集合を返す抽出器でも、ゲート側と噛み合わなくなるまでは
+    気付けない。実装を変異させた入力を通して、抽出結果が広がり等号が破れる
+    ことをここで実測する。上の等号の歯がどこから来ているかの唯一の機械的根拠。
+    """
+    original = _harness_source()
+    mutated = original.replace(_COMMAND_ALIAS_TUPLE, _WIDENED_COMMAND_ALIAS_TUPLE, 1)
+    assert mutated != original, (
+        f"変異が当たっていない（実装のタプル表記が変わった）: {_COMMAND_ALIAS_TUPLE!r} が見つからない"
+    )
+
+    widened = {
+        hook
+        for hook in _pre_tool_use_modules()
+        if _implementation_field_aliases(mutated, hook) != _implementation_field_aliases(original, hook)
+    }
+    assert widened, "変異した別名がどの hook の抽出結果にも現れない（抽出器が実装を読めていない）"
+
+    for hook in sorted(widened):
+        assert _implementation_field_aliases(mutated, hook) != _gate_field_aliases(hook), (
+            f"{hook}: 実装が別名を 1 つ増やしてもゲートとの等号が破れない"
+        )
