@@ -151,23 +151,37 @@ def _request(request_id: int, method: str, params: dict | None = None) -> dict:
 
 
 
-def elicit_round_trip(tool: str, arguments: dict, action: str, content: dict | None = None) -> dict:
+def elicit_round_trip(
+    tool: str,
+    arguments: dict,
+    action: str,
+    content: dict | None = None,
+    setup: list[tuple[str, dict]] | None = None,
+) -> dict:
     """MRTR の 1 往復目と再送を**同一プロセス**で往復し、最終結果を返す。
 
     `_exchange` は全リクエストを先に書き込むため、1 往復目の `requestState` を
     再送へ渡せない。MRTR を検査するにはこちらを使う。
+
+    削除系のように**承認分岐が事前状態に依存する**ツールは `setup` を使う。
+    サーバはリクエストごとに起動し直されるため、何も入っていないストアに対して
+    削除を承認しても「対象が無い」エラーになり、MRTR の配線が正しいのか
+    壊れているのかを区別できない。
 
     Args:
         tool: 呼び出すツール名。
         arguments: ツール引数。1 往復目と再送で同一のものを送る。
         action: クライアントの応答。`accept` / `decline` / `cancel`。
         content: `accept` のときに返す内容。
+        setup: MRTR 呼び出しの前に同一プロセスへ送るツール呼び出しの一覧
+            （`[(ツール名, 引数), ...]`）。事前状態を作るために使う。
 
     Returns:
         再送に対する最終 result オブジェクト。
 
     Raises:
-        AssertionError: 1 往復目が `input_required` を返さなかったとき。
+        AssertionError: 事前呼び出しが失敗した、または 1 往復目が
+            `input_required` を返さなかったとき。
     """
     process = subprocess.Popen(
         [sys.executable, str(SERVER_PATH)],
@@ -178,8 +192,19 @@ def elicit_round_trip(tool: str, arguments: dict, action: str, content: dict | N
         bufsize=1,
     )
     try:
+        next_id = 1
+        for setup_tool, setup_args in setup or []:
+            setup_call = {"name": setup_tool, "arguments": setup_args}
+            process.stdin.write(json.dumps(_request(next_id, "tools/call", setup_call)) + "\n")
+            process.stdin.flush()
+            setup_result = json.loads(_read_line(process))["result"]
+            assert setup_result.get("isError") is not True, (
+                f"事前呼び出し {setup_tool} が失敗しました: {setup_result}"
+            )
+            next_id += 1
+
         first_params = {"name": tool, "arguments": arguments}
-        process.stdin.write(json.dumps(_request(1, "tools/call", first_params)) + "\n")
+        process.stdin.write(json.dumps(_request(next_id, "tools/call", first_params)) + "\n")
         process.stdin.flush()
         first = json.loads(_read_line(process))["result"]
         assert first.get("resultType") == "input_required", (
@@ -197,7 +222,7 @@ def elicit_round_trip(tool: str, arguments: dict, action: str, content: dict | N
             "inputResponses": {key: answer},
             "requestState": first.get("requestState"),
         }
-        process.stdin.write(json.dumps(_request(2, "tools/call", retry_params)) + "\n")
+        process.stdin.write(json.dumps(_request(next_id + 1, "tools/call", retry_params)) + "\n")
         process.stdin.flush()
         return json.loads(_read_line(process))["result"]
     finally:
