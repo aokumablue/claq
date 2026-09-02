@@ -1,5 +1,5 @@
 /**
- * テーマ / 配色シードの永続と、チャートの入場アニメーションを担う。
+ * テーマ / ベースカラーの永続、サイドバーの開閉、入場アニメーションを担う。
  *
  * `<head>` で defer 読み込みする。テーマの復元だけは即時に走らせ、初回描画で
  * 白がちらつかないようにする（DOM 構築を待つのは操作の結線だけ）。
@@ -7,8 +7,8 @@
 (() => {
   "use strict";
 
-  const THEME_KEY = "md3-theme";
-  const SEED_KEY = "md3-seed";
+  const THEME_KEY = "ui-theme";
+  const BASE_KEY = "ui-base";
   const root = document.documentElement;
 
   /**
@@ -46,14 +46,14 @@
     root.dataset.theme = "dark";
   }
 
-  const savedSeed = read(SEED_KEY);
-  if (savedSeed && /^[a-z-]+$/.test(savedSeed)) {
-    root.dataset.seed = savedSeed;
+  const savedBase = read(BASE_KEY);
+  if (savedBase && /^[a-z-]+$/.test(savedBase)) {
+    root.dataset.base = savedBase;
   }
 
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
 
-  // --- 結線 -----------------------------------------------------------------
+  // --- 小物 -----------------------------------------------------------------
 
   /**
    * 押下状態のトグル群を現在値へ同期する。
@@ -68,105 +68,199 @@
   };
 
   /**
-   * スナックバーへ短いメッセージを出す。
+   * 画面右下へ短いメッセージを出す。
    * @param {string} message 表示文字列
    */
   const notify = (message) => {
-    const bar = document.querySelector(".snackbar");
-    if (!bar) return;
-    bar.textContent = message;
-    bar.dataset.open = "true";
+    const toast = document.querySelector(".toast");
+    if (!toast) return;
+    toast.textContent = message;
+    toast.hidden = false;
     window.clearTimeout(notify.timer);
     notify.timer = window.setTimeout(() => {
-      bar.dataset.open = "false";
+      toast.hidden = true;
     }, 3200);
   };
 
-  /** テーマ・シード・ツールチップ・入場アニメーションを結線する。 */
-  const boot = () => {
-    const themeButtons = document.querySelectorAll("[data-theme-value]");
-    themeButtons.forEach((button) => {
+  // --- 結線 -----------------------------------------------------------------
+
+  /** テーマ切替を結線する。 */
+  const bindTheme = () => {
+    const buttons = document.querySelectorAll("[data-theme-value]");
+    buttons.forEach((button) => {
       button.addEventListener("click", () => {
         const value = button.dataset.themeValue;
         root.dataset.theme = value;
         write(THEME_KEY, value);
-        syncPressed(themeButtons, "themeValue", value);
+        syncPressed(buttons, "themeValue", value);
         notify(value === "dark" ? "ダークモードに切り替えました" : "ライトモードに切り替えました");
       });
     });
-    syncPressed(themeButtons, "themeValue", root.dataset.theme);
+    syncPressed(buttons, "themeValue", root.dataset.theme);
+  };
 
-    const seedButtons = document.querySelectorAll("[data-seed-value]");
-    seedButtons.forEach((button) => {
+  /** ベースカラー切替を結線する。 */
+  const bindBase = () => {
+    const buttons = document.querySelectorAll("[data-base-value]");
+    buttons.forEach((button) => {
       button.addEventListener("click", () => {
-        const value = button.dataset.seedValue;
-        root.dataset.seed = value;
-        write(SEED_KEY, value);
-        syncPressed(seedButtons, "seedValue", value);
-        notify(`配色を ${button.getAttribute("aria-label") || value} に変更しました`);
+        const value = button.dataset.baseValue;
+        root.dataset.base = value;
+        write(BASE_KEY, value);
+        syncPressed(buttons, "baseValue", value);
+        notify(`配色を ${button.dataset.baseLabel || value} に変更しました`);
       });
     });
-    syncPressed(seedButtons, "seedValue", root.dataset.seed);
+    syncPressed(buttons, "baseValue", root.dataset.base);
+  };
 
-    document.querySelectorAll(".nav__item").forEach((item) => {
+  /** 狭い画面のサイドバー開閉を結線する。 */
+  const bindSidebar = () => {
+    const sidebar = document.getElementById("sidebar");
+    const opener = document.querySelector('[data-sidebar="open"]');
+    if (!sidebar || !opener) return;
+    let scrim = null;
+
+    const close = () => {
+      sidebar.dataset.open = "false";
+      opener.setAttribute("aria-expanded", "false");
+      if (scrim) {
+        scrim.remove();
+        scrim = null;
+      }
+      opener.focus();
+    };
+
+    const open = () => {
+      sidebar.dataset.open = "true";
+      opener.setAttribute("aria-expanded", "true");
+      scrim = document.createElement("div");
+      scrim.className = "sidebar__scrim";
+      scrim.addEventListener("click", close);
+      document.body.append(scrim);
+      const first = sidebar.querySelector("button");
+      if (first) first.focus();
+    };
+
+    opener.addEventListener("click", open);
+    document.querySelectorAll('[data-sidebar="close"]').forEach((button) => {
+      button.addEventListener("click", close);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && sidebar.dataset.open === "true") close();
+    });
+  };
+
+  /** ナビゲーションの現在地表示を切り替える。 */
+  const bindNav = () => {
+    const items = document.querySelectorAll(".nav-item");
+    items.forEach((item) => {
       item.addEventListener("click", () => {
-        document.querySelectorAll(".nav__item").forEach((other) => other.removeAttribute("aria-current"));
+        items.forEach((other) => other.removeAttribute("aria-current"));
         item.setAttribute("aria-current", "page");
       });
     });
-
-    const exportButton = document.querySelector('[data-action="export"]');
-    if (exportButton) {
-      exportButton.addEventListener("click", () => notify("レポートの書き出しを開始しました"));
-    }
-
-    bindTooltip();
-    revealOnScroll();
   };
 
-  /** data-tip を持つ図形にツールチップを出す。 */
-  const bindTooltip = () => {
-    const tip = document.querySelector(".tooltip");
-    if (!tip) return;
-    const show = (event) => {
-      const target = event.target.closest("[data-tip]");
-      if (!target) return;
-      const box = target.getBoundingClientRect();
-      tip.textContent = target.dataset.tip;
-      tip.style.left = `${box.left + box.width / 2}px`;
-      tip.style.top = `${Math.max(box.top - 12, 8)}px`;
-      tip.dataset.open = "true";
-    };
-    const hide = () => {
-      tip.dataset.open = "false";
-    };
-    document.addEventListener("pointerover", show);
-    document.addEventListener("pointerout", hide);
-    document.addEventListener("focusin", show);
-    document.addEventListener("focusout", hide);
+  /** `/` で検索へ飛ばす。入力中は横取りしない。 */
+  const bindSearchKey = () => {
+    const field = document.getElementById("q");
+    if (!field) return;
+    document.addEventListener("keydown", (event) => {
+      const tag = document.activeElement ? document.activeElement.tagName : "";
+      if (event.key !== "/" || tag === "INPUT" || tag === "TEXTAREA") return;
+      event.preventDefault();
+      field.focus();
+    });
   };
 
   /**
-   * 画面に入った要素へ .is-live を付け、CSS 側のアニメーションを起動する。
-   * 低減設定のときは監視せず、最初から最終状態にする。
+   * 画面に入った要素へ data-animate を付け、CSS 側の入場アニメーションを起動する。
+   *
+   * 静止状態（属性なし）が完成形なので、JS 無効・印刷・モーション低減の
+   * いずれでも中身はそのまま読める。加えて 2 つの保険を掛ける。
+   *
+   * - タブが背面のときは属性を付けない。背面ではアニメーションのタイムラインが
+   *   進まないため、付けると `from` の状態（不可視）で固まってしまう。
+   * - 走り終わったら属性を外す。fill-mode の解釈に頼らず、最終状態を
+   *   「素の状態」に戻すことで、中断しても要素が消えない。
    */
   const revealOnScroll = () => {
-    const targets = document.querySelectorAll(".reveal, .card, figure, section");
-    if (reduced.matches || !("IntersectionObserver" in window)) {
-      targets.forEach((element) => element.classList.add("is-live"));
-      return;
-    }
+    const targets = document.querySelectorAll(".reveal:not([data-animate-skip])");
+    if (reduced.matches || !("IntersectionObserver" in window)) return;
+    const pending = new Set();
+
+    const play = (element) => {
+      if (document.visibilityState === "hidden") {
+        pending.add(element);
+        return;
+      }
+      element.dataset.animate = "in";
+      window.setTimeout(() => delete element.dataset.animate, 2000);
+    };
+
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           if (!entry.isIntersecting) return;
-          entry.target.classList.add("is-live");
           observer.unobserve(entry.target);
+          play(entry.target);
         });
       },
-      { rootMargin: "0px 0px -8% 0px", threshold: 0.08 }
+      { rootMargin: "0px 0px -6% 0px", threshold: 0.08 }
     );
     targets.forEach((element) => observer.observe(element));
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") return;
+      pending.forEach(play);
+      pending.clear();
+    });
+  };
+
+  /**
+   * 指標の数値をカウントアップする。桁区切りと小数桁は元の表記を保つ。
+   *
+   * 元の文字列を最初に書き戻せる状態で持つので、途中で止まっても
+   * 最終値が壊れることはない。
+   */
+  const countUp = () => {
+    const targets = document.querySelectorAll("[data-count]");
+    if (reduced.matches) return;
+    targets.forEach((element, order) => {
+      const final = element.dataset.count;
+      const numeric = Number(final.replace(/,/g, ""));
+      if (!Number.isFinite(numeric)) return;
+      const decimals = (final.split(".")[1] || "").length;
+      const grouped = final.includes(",");
+      const duration = 900;
+      const start = performance.now() + order * 80;
+      const paint = (now) => {
+        const progress = Math.min(Math.max((now - start) / duration, 0), 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const value = numeric * eased;
+        element.textContent = grouped
+          ? value.toLocaleString("ja-JP", { maximumFractionDigits: decimals })
+          : value.toFixed(decimals);
+        if (progress < 1) {
+          window.requestAnimationFrame(paint);
+        } else {
+          element.textContent = final;
+        }
+      };
+      window.requestAnimationFrame(paint);
+    });
+  };
+
+  /** 全体を結線する。 */
+  const boot = () => {
+    bindTheme();
+    bindBase();
+    bindSidebar();
+    bindNav();
+    bindSearchKey();
+    revealOnScroll();
+    countUp();
   };
 
   if (document.readyState === "loading") {

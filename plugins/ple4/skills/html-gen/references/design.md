@@ -1,116 +1,156 @@
-# Material Design 3 のウェブ翻訳
+# shadcn/ui の静的 HTML への翻訳
 
 色の正本は `tokens.json`。ここに色コードを再掲しない。
 
 出典:
 
-- 配色システム: <https://m3.material.io/styles/color/system/overview>
-- 役割（ロール）: <https://m3.material.io/styles/color/roles>
-- タイプスケール: <https://m3.material.io/styles/typography/type-scale-tokens>
-- シェイプ: <https://m3.material.io/styles/shape/corner-radius-scale>
-- エレベーション: <https://m3.material.io/styles/elevation/tokens>
-- モーション: <https://m3.material.io/styles/motion/easing-and-duration/tokens-specs>
-- ステートレイヤー: <https://m3.material.io/foundations/interaction/states/state-layers>
-- ウィンドウクラス: <https://m3.material.io/foundations/layout/applying-layout/window-size-classes>
+- トークン定義: <https://ui.shadcn.com/docs/theming>
+- ベースカラーのレジストリ: `https://ui.shadcn.com/r/colors/{neutral,zinc,slate,stone,gray}.json`
+- コンポーネント: <https://ui.shadcn.com/docs/components>
+- ダッシュボードのブロック: <https://ui.shadcn.com/blocks>
+- タイポ・影・ブレークポイント: <https://tailwindcss.com/docs>
+- 非テキストコントラスト: <https://www.w3.org/WAI/WCAG21/Understanding/non-text-contrast.html>
 
-## MUI ではなく M3 トークンを使う理由
+## CLI ではなくトークンを写す理由
 
-Material UI（MUI）は React コンポーネントライブラリで、静的 HTML には載らない。
-Material Web（`@material/web`）は Web Components だが Google がメンテナンスモードへ
-移した。どちらも「生成した HTML を開けば動く」という要件と噛み合わない。
+shadcn/ui は「npm パッケージ」ではなく、React + Tailwind CSS + Radix UI の
+ソースを自分のリポジトリへコピーして使う配布形式をとる。したがって
+`npx shadcn add button` の出力は React コンポーネントで、静的 HTML には載らない。
+Tailwind のユーティリティも、ビルド工程なしでは解決されない。
 
-そこで **Material Design 3 の仕様そのもの**（トーナルパレット・役割・タイプスケール・
-シェイプ・エレベーション・モーション）を CSS カスタムプロパティとして実装する。
-外部 JS はゼロ、CDN は Google Fonts だけ。見た目と設計原則は M3 準拠のまま、
-配布物は 4 ファイルで完結する。
+一方で shadcn/ui の見た目を決めているのは **CSS カスタムプロパティの層**
+（`--background` `--primary` `--muted` `--border` `--ring` `--radius` `--chart-*`
+`--sidebar-*`）と、その上に載る**視覚仕様**（1px のヘアライン、抑えた影、
+`tracking-tight` の見出し、`focus-visible` のリング）である。これらは素の CSS に
+そのまま書ける。
 
-## 色はシードから計算する。hex を手で選ばない
+そこで本テンプレートは、レジストリが配る**トークンの実値**と、コンポーネントの
+**視覚仕様**を素の CSS へ写す。外部 JS はゼロ、CDN は Google Fonts だけで、
+生成した HTML はブラウザで開けばそのまま動く。
 
-M3 の核心は「1 つのシード色から 6 本のトーナルパレットを作り、役割にトーンを
-割り当てる」こと。`check_site.py` がこれを実装している。
+**React を足して「本物の shadcn にする」改修はしない。** 静的 1 枚で完結する
+という前提が崩れ、ビルド工程とパッケージ管理がスキルの成果物に入り込む。
 
-- **tone は CIE L\***。M3 の HCT でも tone は L\* なので、ここは仕様どおり。
-  トーン差がそのままコントラスト差になるため、可読性はトーン割当で保証される
-- hue / chroma は LCh(ab) 近似（CAM16 ではない）。既定 seed の生成結果は
-  M3 baseline 公表値と ΔE\*ab 6 以内に収まる（`test_indigo_seed_reproduces_the_m3_baseline_scheme`）
-- 域外の彩度は **chroma だけ**を二分探索で落とす。tone は動かさない。
-  ここで L\* を動かすとコントラスト契約が崩れる
+## 色は upstream の逐語コピー。差分は 4 点だけ
 
-パレット構成（`tokens.json` の `palette_spec`）:
+`tokens.json` の `bases` は 5 つのベースカラー（neutral / zinc / slate / stone /
+gray）× ライト/ダークを、レジストリの `cssVarsV4` から**そのまま**写したもの。
+`oklch()` の値を書き換えない。ブラウザは OKLCh をネイティブに解釈し、広色域の
+ディスプレイでは P3 で描く。検査は sRGB へ落とした最悪ケースで行う。
 
-| パレット | 色相 | 彩度 |
-|---|---|---|
-| primary | シードと同じ | max(48, シードの彩度) |
-| secondary | シードと同じ | 16 |
-| tertiary | シード +60° | 24 |
-| neutral | シードと同じ | 6 |
-| neutral-variant | シードと同じ | 8 |
-| error | 25° 固定 | 84 |
+upstream をそのまま使えない箇所だけ、規則として差分を持つ。理由は
+`tokens.json` の各項目の `reason` にも書いてある。
 
-役割 → トーンの割当は `tokens.json` の `roles`。ライト/ダークで別トーンを指す
-（例: primary は 40 / 80、surface は 98 / 6）。**ダークは色の反転ではなくトーンの
-差し替え**で、未検証の hex を新しく作らない。
+| 対象 | upstream | 差分 | 根拠 |
+|---|---|---|---|
+| `ring` / `sidebar-ring` | ライトで背景に 2.58〜2.63:1 | 色相・彩度を保ち明度だけ下げて 3:1 | フォーカスの可視性（WCAG 2.1 SC 1.4.11） |
+| `muted-foreground` | ライトで muted 面に 4.35〜4.41:1 | 同上で 4.5:1 | 本文相当の文字 |
+| `chart-1..5` | neutral/zinc/stone はグレースケール、相互 ΔE\*ab が 8 前後。ライトの chart-1 は白背景に 1.48:1 | 色相と彩度は upstream のダークセット、明度はテーマ固定値 | 系列が判別できない・描いても見えない |
+| `destructive-foreground` | v4 のレジストリに無い（React 側で `text-white` を当てる） | ライトは白、ダークは暗色 | 静的 CSS には変数が要る。ダークの destructive は明るい赤なので前景は暗色 |
 
-## 系列色（チャート）
+`border` / `input` / `sidebar-border` は 3:1 契約から**外す**。1px の
+ヘアラインでコンポーネントの状態を伝えてはおらず、SC 1.4.11 の対象ではない。
+ただし背景と同値になると面が消えるので、`decorative_roles` の
+`min_ratio` で「同化していないこと」だけ別に課す。
 
-M3 はデータ可視化のカテゴリ配色を定義していない。ここでは seed の色相を
-`series.hue_offsets`（0, 55, 120, 185, 250, 305）で回して 6 色を作る。
+差分の適用は `check_site.py` の `scheme` が行い、明度を下げるのは
+`_lower_lightness_until`。域外へ出た彩度は `fit_chroma` が二分探索で落とす
+（明度は動かさない。動かすとコントラスト契約が崩れる）。
 
-- ライトは tone 40、ダークは tone 80。カード背景に対して常に 3:1 以上
-- 塗り面用に tone 90 / 30 の `--chart-N-container` も出す
-- 隣接だけでなく**全組み合わせ**の ΔE\*ab を 20 以上に保つ
-  （`SERIES_MIN_DELTA_E`。色覚特性が異なる利用者でも隣が判別できる下限）
-- 連続量（ヒートマップ）は不透明度で薄めない。
-  `color-mix(in oklab, var(--chart-1) N%, var(--chart-1-container))` で
-  容器色→本色の連続スケールを作る。背景に溶けないうえ両テーマで成立する
+## 系列色
 
-## レイアウト: 表示領域を使い切る
+- 色相は upstream のダークセット（5 色が色相環に散る）を**両テーマ共通**で使う。
+  upstream はライトとダークで色相が入れ替わり、テーマを切り替えると同じ系列の
+  色が変わってしまう。データ可視化としては誤りなので採らない
+- 明度はライト 0.58 / ダーク 0.75 の固定。背景・カード・muted のどの面に対しても
+  3:1 以上、相互の ΔE\*ab は 20 以上（実測で 31 以上）
+- 塗り面は不透明度で薄めない。SVG のグラデーション（`stop-opacity`）か
+  `color-mix(in oklab, var(--chart-1) N%, var(--card))` で作る
+- **1 系列の棒グラフに 5 色を使わない。** 色は系列を区別するためのもので、
+  同じ指標のカテゴリ違いに色を割り当てると意味のない色分けになる
 
-固定キャンバス（1280×720 のような）は持たない。`check_site.py` が
-ブレークポイント以上の固定幅を不合格にする。
+## レイアウト
 
-- ウィンドウクラス: compact `<600` / medium `600–839` / expanded `840–1199` / large `1200+`
-- ナビゲーションは compact/medium で下部バー、expanded 以上で左レール
-- ペインは `max-width: 1920px` + `margin-inline: auto`、内側は `clamp()` のガター
+- ブレークポイントは Tailwind（sm 640 / md 768 / lg 1024 / xl 1280 / 2xl 1536）。
+  手書き CSS は 768 / 1024 / 1280 を必ず扱う
+- シェルは「サイドバー + コンテンツ」。`md` 未満ではサイドバーをオフキャンバスにし、
+  ハンバーガーとスクリムで開閉する（Esc でも閉じる）
+- ペインは `max-inline-size: var(--layout-pane-max)` + `margin-inline: auto`、
+  ガターは `clamp()`
 - グリッドのトラックは必ず `minmax(0, 1fr)`。`auto` のままだと中身の max-content
   までトラックが伸びて横スクロールが出る
-- `auto-fit` のグリッドに `grid-column: span 2` を掛けない。列が 1 本しかない
+- `auto-fit` のグリッドに `grid-column: span N` を掛けない。列が 1 本しかない
   ブレークポイントで暗黙列が content 幅で生えて、ページごと横に伸びる。
-  スパンを使うなら列数を明示する（`repeat(2, minmax(0, 1fr))`）
-- カード内の出し分けは `@container`（`container-type: inline-size`）で行う。
-  **コンテナクエリはコンテンツボックス基準**なので、パディング分を引いた値で閾値を決める
+  スパンを使うなら列数を明示する（`repeat(12, minmax(0, 1fr))`）
+- カード内の出し分けは `@container`（`container-type: inline-size`）。
+  **コンテナクエリはコンテンツボックス基準**なので、パディング分を引いた値で
+  閾値を決める
+
+## コンポーネントの作法
+
+- **カード**: `1px` の `--border`、`--radius-xl`、`--shadow-xs`。ホバーで
+  `--shadow-sm` まで。M3 のような濃い影は使わない
+- **ボタン**: 高さ 36px、`--radius-md`、`--text-sm` の `medium`。
+  primary は `--primary` 面、outline は `--border` + `--background`、
+  ghost は面なし。アイコンのみのボタンは疑似要素で当たり判定を
+  `--layout-touch-target` まで広げる（見た目は 36px のまま）
+- **フォーカス**: `:focus-visible` に `--ring` の 2px アウトライン + オフセット。
+  入力欄は `--ring` のボーダー + `--state-ring-width` の外周
+- **バッジ**: 色は良し悪し、中のアイコンは増減の向き。この 2 つを同じ軸で表すと
+  「解約率が下がった（良い）」が赤で出るような反転が起きる
+- **セグメント**: `--muted` の器に、選択中だけ `--background` + `--shadow-xs`
+- **表**: ヘッダは `--muted-foreground` の `--text-xs`、行区切りは `--border` を
+  薄めたもの。数値列は `font-variant-numeric: tabular-nums` で桁を揃える
+- **サイドバー**: `--sidebar-*` の一式を使う。本文側の `--background` を流用しない
+
+## チャートとアニメーション
+
+**静止状態が完成形。** 動きは JS が画面内で `data-animate="in"` を付けたときだけ
+起き、走り終わったら属性ごと外れる。この形にしないと次のいずれかで図が消える。
+
+- 背面タブ: アニメーションのタイムラインが進まないため、`from` の状態で固まる
+- JS 無効・印刷: 属性が付かない
+- モーション低減: `@media (prefers-reduced-motion: reduce)` で止まる
+
+したがって `.reveal { opacity: 0 }` のように静止状態を不可視にしてはならず、
+`animation-fill-mode: forwards` も使わない（`check_site.py` の
+`_validate_resting_state` が両方を機械的に落とす）。JS 側はさらに、タブが背面の
+間は属性を付けず `visibilitychange` まで待つ。
+
+動きの作り方:
+
+- **折れ線**: `stroke-dasharray` にパス長、`@keyframes` で `stroke-dashoffset` を
+  パス長 → 0。静止値は 0（＝描き切った状態）
+- **面**: `transform-box: fill-box` + `transform-origin: bottom` で `scaleY`
+- **棒**: 同上。`--i` で 55ms ずつずらす
+- **円弧（ドーナツ）**: 開始位置は SVG 属性の `stroke-dashoffset` が持つ。
+  **CSS で `stroke-dashoffset` を宣言しない** — CSS は presentation attribute より
+  優先されるため、全セグメントが 12 時から重なって描かれる。伸ばすのは
+  `stroke-dasharray` のほう（`0 円周` → `弧長 残り`）
+- **スパークライン**: `preserveAspectRatio="none"` で潰す図に
+  `stroke-dasharray` のドローは使えない。潰すとパスの実長が dasharray とずれ、
+  線が途中で切れて見える。`clip-path: inset(0 100% 0 0)` から拭う。
+  線幅だけ `vector-effect: non-scaling-stroke` で保つ
+- **強調**: `.chart:has(.bar:hover) .bar:not(:hover) { opacity: .32 }` のように
+  `:has` で兄弟を沈める。JS を足さずに系列のフォーカスが作れる
+- **数値**: カウントアップは `data-count` に最終表記を持たせ、途中で止まっても
+  最終値へ戻せるようにする。モーション低減時は動かさない
 
 ## チャートの可読性
 
-- SVG は `width: 100%` だけだと正方形の図が幅いっぱいに膨らむ。`max-height` で止める
-- 縮小すると SVG 内の文字も縮む。時系列は狭い幅で等倍のまま横スクロールさせ
-  （`.chart-scroll` + `min-width`）、加えて `@container` で user unit のフォントを上げる
+- SVG は `width: 100%` だけだと正方形の図が幅いっぱいに膨らむ。`max-block-size` で止める
+- 縮小すると SVG 内の文字も縮む。時系列は狭い幅で等倍のまま横スクロールさせる
+  （`.chart-scroll` + `min-inline-size`）
 - 棒の原点は 0（`data-origin="0"`）
 - `svg[role="img"]` に `<title>` と `<desc>`。図と同じ内容を表でも出す
-
-## モーション
-
-- イージング/デュレーションは `--md-sys-motion-*` から取る。生の秒数を書かない
-- 入場アニメーションは **`from` 側で隠して `both` で当てる**。
-  `.reveal { opacity: 0 }` + `forwards` のように「完走しないと見えない」書き方は、
-  背面タブ（タイムラインが進まない）・JS 無効・印刷で真っ白なページになる。
-  静止状態は常に読める状態にしておく
-- `@media (prefers-reduced-motion: reduce)` で animation と transition の両方を止める
-  （`check_site.py` が両方を確認する）
-
-## エレベーションとステートレイヤー
-
-- 影は `--md-sys-elevation-level0..5`。M3 では影は装飾ではなく面の高さの表現
-- 影の色は `--md-sys-color-shadow-rgb`（トーン 0 の RGB 三つ組）を通す。
-  `rgb(var(--md-sys-color-shadow-rgb) / 0.3)` の形にすると両テーマで同じ定義が使える
-- ホバー/フォーカス/プレスは `color-mix` によるステートレイヤーで表す
-  （`--md-sys-state-*-opacity`）
+- データ点に `<title>` を付ければ、追加のライブラリなしでツールチップになる
 
 ## タイポグラフィ
 
-- `--md-sys-typescale-<role>-font` は `font` ショートハンド、`-tracking` は字間
-- 見出しは brand フォント、本文・UI は plain フォント
-- ヒーローの見出しなど「効かせたい」文字だけ `clamp()` の流体サイズにする
+- スケールは Tailwind（`--text-xs` 〜 `--text-5xl` と対応する `-line`）
+- 見出しは `--tracking-tight` + `--font-weight-semibold`
+- 本文・UI は `--text-sm`。数値は `tabular-nums`
+- ヒーローの見出しなど「効かせたい」文字だけ `clamp()` の流体サイズ
 - 12px 未満は使わない（`check_site.py` が拒否する）
 
 ## ページ種別
@@ -125,5 +165,7 @@ M3 はデータ可視化のカテゴリ配色を定義していない。ここ�
 - 比較対象（前年・目標）があるか
 - 更新時点が書いてあるか
 - 色だけに頼らない区別があるか（符号・ラベル・凡例）
+- 増減の向きと良し悪しを取り違えていないか
 - ライト/ダークをボタンで選べ、再読込後も保たれるか
 - 320px から 1920px まで横スクロールが出ないか
+- アニメーションを止めても、図と数値が全部読めるか

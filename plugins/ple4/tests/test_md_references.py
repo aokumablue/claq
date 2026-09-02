@@ -459,6 +459,7 @@ _MD_CALLABLE_EXEMPTIONS = {
     "var": "CSS のカスタムプロパティ参照（skills/html-gen）",
     "clamp": "CSS の流体サイズ関数（skills/html-gen）",
     "minmax": "CSS グリッドのトラックサイズ関数（skills/html-gen）",
+    "oklch": "CSS の色関数。shadcn/ui のトークンがこの表記で配られる（skills/html-gen）",
 }
 
 

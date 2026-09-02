@@ -1,11 +1,11 @@
-"""Material Design 3 準拠を機械検査し、色トークン CSS を生成する。
+"""shadcn/ui のデザイントークン契約を機械検査し、色トークン CSS を生成する。
 
 標準ライブラリのみ。役割は 2 つある。
 
-1. **生成**: `references/tokens.json` の seed 色から M3 のトーナルパレットを
-   計算し、`tokens.css`（配色・タイポ・シェイプ・エレベーション・モーション
-   のシステムトークン）を書き出す。tone は CIE L* で、M3 の HCT と同じ定義。
-   hue / chroma は LCh(ab) 近似で、実際の可読性は下の実測が担保する。
+1. **生成**: `references/tokens.json` が持つ shadcn/ui レジストリの逐語コピーから
+   `tokens.css`（配色・タイポ・角丸・影・モーションのトークン）を書き出す。
+   upstream をそのまま並べるのが基本で、実測で可読性契約に届かない
+   `ring` / `muted-foreground` / `chart-*` だけを規則に沿って調整する。
 2. **検査**: 生成された `tokens.css` が tokens.json と一致すること、手書きの
    `styles.css` / `index.html` / `app.js` が契約（色は変数経由のみ・
    コントラスト・レスポンシブ・モーション低減・アクセシビリティ）を守ることを
@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any
 
 HEX_RE = re.compile(r"#[0-9A-Fa-f]{3,8}\b")
+#: 手書きファイルで禁じる色関数。`color-mix` と `var` だけが許される。
+COLOR_FUNCTION_RE = re.compile(r"(?<![-\w])(oklch|oklab|lch|lab|hsl|hsla|hwb|rgb|rgba|color)\s*\(", re.IGNORECASE)
 #: 色を取るプロパティだけを名指しする。`(?:-\w+)*` で広く取ると
 #: `stroke-linecap: butt` や `background-blend-mode: multiply` を色と誤認する。
 NAMED_COLOR_RE = re.compile(
@@ -38,71 +40,75 @@ NAMED_COLOR_RE = re.compile(
     r"\s*:\s*(?!var\(|#|-)([a-z][a-z0-9-]*)",
     re.IGNORECASE,
 )
+#: `oklch(L C H)` と `oklch(L C H / A%)` の両方を読む。
+OKLCH_RE = re.compile(
+    r"oklch\(\s*([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s*(?:/\s*([0-9.]+)%\s*)?\)", re.IGNORECASE
+)
 THEMES = ("light", "dark")
 PAGE_KINDS = ("dashboard", "content")
-SERIES_COUNT = 6
+#: shadcn/ui が配布する系列色の本数。upstream と同数に揃える。
+SERIES_COUNT = 5
 CHART_VARS = tuple(f"--chart-{index}" for index in range(1, SERIES_COUNT + 1))
-CHART_CONTAINER_VARS = tuple(f"--chart-{index}-container" for index in range(1, SERIES_COUNT + 1))
-#: hand-authored な CSS がテーマ非依存に持ってよい追加変数。
-GENERATED_EXTRA_VARS = ("--md-sys-color-shadow-rgb",)
 #: (前景変数, 背景変数, 最低比率)。WCAG 2.1: 文字 4.5:1 / 非文字 3:1。
+#: border 系は `decorative_roles` として別枠（tokens.json に理由がある）。
 CONTRAST_CONTRACT: tuple[tuple[str, str, float], ...] = (
-    ("--md-sys-color-on-surface", "--md-sys-color-surface", 4.5),
-    ("--md-sys-color-on-surface", "--md-sys-color-surface-container", 4.5),
-    ("--md-sys-color-on-surface", "--md-sys-color-surface-container-high", 4.5),
-    ("--md-sys-color-on-surface", "--md-sys-color-surface-container-highest", 4.5),
-    ("--md-sys-color-on-surface-variant", "--md-sys-color-surface", 4.5),
-    ("--md-sys-color-on-surface-variant", "--md-sys-color-surface-container", 4.5),
-    ("--md-sys-color-on-surface-variant", "--md-sys-color-surface-container-high", 4.5),
-    ("--md-sys-color-on-primary", "--md-sys-color-primary", 4.5),
-    ("--md-sys-color-on-primary-container", "--md-sys-color-primary-container", 4.5),
-    ("--md-sys-color-on-secondary", "--md-sys-color-secondary", 4.5),
-    ("--md-sys-color-on-secondary-container", "--md-sys-color-secondary-container", 4.5),
-    ("--md-sys-color-on-tertiary", "--md-sys-color-tertiary", 4.5),
-    ("--md-sys-color-on-tertiary-container", "--md-sys-color-tertiary-container", 4.5),
-    ("--md-sys-color-on-error", "--md-sys-color-error", 4.5),
-    ("--md-sys-color-on-error-container", "--md-sys-color-error-container", 4.5),
-    ("--md-sys-color-inverse-on-surface", "--md-sys-color-inverse-surface", 4.5),
-    ("--md-sys-color-primary", "--md-sys-color-surface", 4.5),
-    ("--md-sys-color-primary", "--md-sys-color-surface-container", 4.5),
-    ("--md-sys-color-primary", "--md-sys-color-surface-container-high", 4.5),
-    ("--md-sys-color-positive", "--md-sys-color-surface-container", 4.5),
-    ("--md-sys-color-negative", "--md-sys-color-surface-container", 4.5),
-    ("--md-sys-color-outline", "--md-sys-color-surface", 3.0),
-    ("--md-sys-color-outline", "--md-sys-color-surface-container", 3.0),
-    *((name, "--md-sys-color-surface", 3.0) for name in CHART_VARS),
-    *((name, "--md-sys-color-surface-container", 3.0) for name in CHART_VARS),
-    *((name, "--md-sys-color-surface-container-high", 3.0) for name in CHART_VARS),
+    ("--foreground", "--background", 4.5),
+    ("--foreground", "--card", 4.5),
+    ("--foreground", "--muted", 4.5),
+    ("--foreground", "--accent", 4.5),
+    ("--card-foreground", "--card", 4.5),
+    ("--popover-foreground", "--popover", 4.5),
+    ("--primary-foreground", "--primary", 4.5),
+    ("--secondary-foreground", "--secondary", 4.5),
+    ("--accent-foreground", "--accent", 4.5),
+    ("--muted-foreground", "--muted", 4.5),
+    ("--muted-foreground", "--background", 4.5),
+    ("--muted-foreground", "--card", 4.5),
+    ("--destructive-foreground", "--destructive", 4.5),
+    ("--destructive", "--background", 4.5),
+    ("--destructive", "--card", 4.5),
+    ("--primary", "--background", 4.5),
+    ("--primary", "--card", 4.5),
+    ("--sidebar-foreground", "--sidebar", 4.5),
+    ("--sidebar-accent-foreground", "--sidebar-accent", 4.5),
+    ("--sidebar-primary-foreground", "--sidebar-primary", 4.5),
+    ("--ring", "--background", 3.0),
+    ("--ring", "--card", 3.0),
+    ("--sidebar-ring", "--sidebar", 3.0),
+    *((name, "--background", 3.0) for name in CHART_VARS),
+    *((name, "--card", 3.0) for name in CHART_VARS),
+    *((name, "--muted", 3.0) for name in CHART_VARS),
 )
-#: 系列色どうしの最小知覚距離（CIE76 ΔE*ab）。色覚差でも隣が判別できる下限。
-SERIES_MIN_DELTA_E = 20.0
 #: 色ではない CSS キーワード。色プロパティの値に現れても違反にしない。
 NON_COLOR_KEYWORDS = frozenset(
     {
         "transparent", "currentcolor", "inherit", "initial", "unset", "revert", "none",
         "auto", "solid", "dashed", "dotted", "double", "groove", "ridge", "inset",
         "outset", "hidden", "thin", "medium", "thick", "linear-gradient", "url",
-        "radial-gradient", "conic-gradient", "color-mix", "rgb", "rgba", "hsl", "hsla",
-        "var", "repeat", "no-repeat", "center", "cover", "contain", "content-box",
-        "padding-box", "border-box", "collapse", "separate", "light", "dark",
-        "normal", "only", "fixed", "scroll", "local", "space", "round", "clip", "text",
+        "radial-gradient", "conic-gradient", "color-mix", "var", "repeat", "no-repeat",
+        "center", "cover", "contain", "content-box", "padding-box", "border-box",
+        "collapse", "separate", "light", "dark", "normal", "only", "fixed", "scroll",
+        "local", "space", "round", "clip", "text",
     }
 )
 #: 手書き CSS が参照していなければならない役割変数（設計の骨格）。
 REQUIRED_STYLE_VARS = (
-    "--md-sys-color-surface",
-    "--md-sys-color-on-surface",
-    "--md-sys-color-surface-container",
-    "--md-sys-color-primary",
-    "--md-sys-color-on-primary",
-    "--md-sys-color-outline-variant",
-    "--md-sys-elevation-level1",
-    "--md-sys-shape-corner-large",
-    "--md-sys-motion-easing-emphasized",
-    "--md-sys-typescale-body-medium-font",
+    "--background",
+    "--foreground",
+    "--card",
+    "--card-foreground",
+    "--muted-foreground",
+    "--primary",
+    "--primary-foreground",
+    "--border",
+    "--ring",
+    "--radius",
+    "--shadow-sm",
+    "--font-sans",
+    "--ease-out",
 )
-#: M3 のウィンドウクラス境界。全部を手書き CSS が扱っていること。
-REQUIRED_BREAKPOINTS = (600, 840, 1200)
+#: Tailwind のブレークポイント。全部を手書き CSS が扱っていること。
+REQUIRED_BREAKPOINTS = (768, 1024, 1280)
 
 
 # --- 色空間 -----------------------------------------------------------------
@@ -166,32 +172,23 @@ def hex_to_lab(hex_color: str) -> tuple[float, float, float]:
     return 116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)
 
 
-def hex_to_lch(hex_color: str) -> tuple[float, float, float]:
-    """hex を LCh(ab) へ変換する。h は度。"""
-    lightness, a_axis, b_axis = hex_to_lab(hex_color)
-    chroma = math.hypot(a_axis, b_axis)
-    hue = math.degrees(math.atan2(b_axis, a_axis)) % 360
-    return lightness, chroma, hue
+def oklch_to_linear_rgb(lightness: float, chroma: float, hue: float) -> tuple[float, float, float]:
+    """OKLCh を線形 RGB へ変換する（範囲外もそのまま返す）。
 
-
-def _lab_to_linear_rgb(lightness: float, a_axis: float, b_axis: float) -> tuple[float, float, float]:
-    """Lab を線形 RGB へ変換する（範囲外もそのまま返す）。"""
-    fy = (lightness + 16) / 116
-    fx = fy + a_axis / 500
-    fz = fy - b_axis / 200
-
-    def finv(value: float) -> float:
-        """Lab 非線形圧縮の逆変換。"""
-        cube = value**3
-        if cube > 216 / 24389:
-            return cube
-        return (116 * value - 16) / (24389 / 27)
-
-    x, y, z = (finv(v) * w for v, w in zip((fx, fy, fz), _WHITE, strict=True))
-    red = 3.2404542 * x - 1.5371385 * y - 0.4985314 * z
-    green = -0.9692660 * x + 1.8760108 * y + 0.0415560 * z
-    blue = 0.0556434 * x - 0.2040259 * y + 1.0572252 * z
-    return red, green, blue
+    OKLab の逆変換（Björn Ottosson）。CSS の `oklch()` と同じ定義なので、
+    ここで得た値はブラウザが描く色と一致する。
+    """
+    radians = math.radians(hue)
+    a_axis = chroma * math.cos(radians)
+    b_axis = chroma * math.sin(radians)
+    long_ = (lightness + 0.3963377774 * a_axis + 0.2158037573 * b_axis) ** 3
+    medium = (lightness - 0.1055613458 * a_axis - 0.0638541728 * b_axis) ** 3
+    short = (lightness - 0.0894841775 * a_axis - 1.2914855480 * b_axis) ** 3
+    return (
+        4.0767416621 * long_ - 3.3077115913 * medium + 0.2309699292 * short,
+        -1.2684380046 * long_ + 2.6097574011 * medium - 0.3413193965 * short,
+        -0.0041960863 * long_ - 0.7034186147 * medium + 1.7076147010 * short,
+    )
 
 
 def _in_gamut(channels: tuple[float, float, float]) -> bool:
@@ -199,35 +196,51 @@ def _in_gamut(channels: tuple[float, float, float]) -> bool:
     return all(-1e-4 <= channel <= 1 + 1e-4 for channel in channels)
 
 
-def lch_to_hex(lightness: float, chroma: float, hue: float) -> str:
-    """LCh(ab) を sRGB 域へ収めた hex にする。
+def fit_chroma(lightness: float, chroma: float, hue: float) -> float:
+    """sRGB 域に収まる最大の chroma を返す。明度は動かさない。
 
-    tone（= L*）は保ち、域外なら chroma だけを二分探索で落とす。M3 の HCT が
-    tone を固定して chroma を下げるのと同じ振る舞いで、これによりトーンが担う
-    コントラストの保証が壊れない。
+    明度を動かすとコントラスト契約が崩れるので、域外は彩度だけを落とす。
     """
-    lightness = min(100.0, max(0.0, lightness))
-    if lightness <= 0.0:
-        return "#000000"
-    if lightness >= 100.0:
-        return "#FFFFFF"
-    radians = math.radians(hue)
+    if _in_gamut(oklch_to_linear_rgb(lightness, chroma, hue)):
+        return chroma
+    low, high = 0.0, chroma
+    for _ in range(32):
+        mid = (low + high) / 2
+        if _in_gamut(oklch_to_linear_rgb(lightness, mid, hue)):
+            low = mid
+        else:
+            high = mid
+    return low
 
-    def at(chroma_value: float) -> tuple[float, float, float]:
-        """指定 chroma の線形 RGB を返す。"""
-        return _lab_to_linear_rgb(lightness, chroma_value * math.cos(radians), chroma_value * math.sin(radians))
 
-    if not _in_gamut(at(chroma)):
-        low, high = 0.0, chroma
-        for _ in range(24):
-            mid = (low + high) / 2
-            if _in_gamut(at(mid)):
-                low = mid
-            else:
-                high = mid
-        chroma = low
-    channels = at(chroma)
-    body = "".join(f"{round(min(1.0, max(0.0, _to_srgb(channel))) * 255):02X}" for channel in channels)
+def parse_oklch(value: str) -> tuple[float, float, float, float]:
+    """`oklch(...)` 文字列を (L, C, H, alpha) に分解する。"""
+    match = OKLCH_RE.fullmatch(value.strip())
+    if match is None:
+        raise ValueError(f"oklch() ではない: {value}")
+    alpha = float(match.group(4)) / 100 if match.group(4) else 1.0
+    return float(match.group(1)), float(match.group(2)), float(match.group(3)), alpha
+
+
+def format_oklch(lightness: float, chroma: float, hue: float) -> str:
+    """CSS へ書き出す `oklch()` 表記を返す。"""
+    return f"oklch({lightness:g} {chroma:.4g} {hue:g})"
+
+
+def oklch_to_hex(value: str, backdrop: str | None = None) -> str:
+    """`oklch()` を sRGB の hex にする。半透明なら backdrop へ合成する。
+
+    upstream のダークは border / input を `oklch(1 0 0 / 10%)` のように半透明で
+    置く。実際に見える色は下地との合成結果なので、検査もその色で行う。
+    """
+    lightness, chroma, hue, alpha = parse_oklch(value)
+    channels = oklch_to_linear_rgb(lightness, chroma, hue)
+    if alpha < 1.0:
+        if backdrop is None:
+            raise ValueError(f"半透明色の合成先が無い: {value}")
+        base = oklch_to_linear_rgb(*parse_oklch(backdrop)[:3])
+        channels = tuple(alpha * top + (1 - alpha) * under for top, under in zip(channels, base, strict=True))
+    body = "".join(f"{round(min(1.0, max(0.0, _to_srgb(min(1.0, max(0.0, channel))))) * 255):02X}" for channel in channels)
     return f"#{body}"
 
 
@@ -248,7 +261,7 @@ def delta_e(first: str, second: str) -> float:
     return math.dist(hex_to_lab(first), hex_to_lab(second))
 
 
-# --- トーナルパレットとスキーム ---------------------------------------------
+# --- スキームの解決 ----------------------------------------------------------
 
 
 def load_tokens(tokens_path: Path) -> dict[str, Any]:
@@ -267,102 +280,107 @@ def default_tokens_path(site_dir: Path) -> Path:
     raise FileNotFoundError(f"tokens.json が見つからない: {site_dir}")
 
 
-def seed_ids(tokens: dict[str, Any]) -> tuple[str, ...]:
-    """定義済み seed 識別子を宣言順で返す。"""
-    return tuple(tokens["seeds"])
+def base_ids(tokens: dict[str, Any]) -> tuple[str, ...]:
+    """定義済みのベースカラー識別子を宣言順で返す。"""
+    return tuple(tokens["bases"])
 
 
-def tonal_palettes(tokens: dict[str, Any], seed_id: str) -> dict[str, dict[int, str]]:
-    """seed から M3 の各トーナルパレットを組み立てる。
+def _lower_lightness_until(
+    value: str, backdrop_hex: str, minimum: float
+) -> str:
+    """色相と彩度を保ったまま明度だけ下げ、比率を満たす最大の明度を返す。
 
-    tone をキーにした hex を返す。primary は seed の彩度と 48 の高い方を採り、
-    seed が淡くても主色が沈まないようにする（M3 の chroma floor と同じ意図）。
+    upstream の値をできる限り残すため、条件を満たした時点で止める。
     """
-    _, seed_chroma, seed_hue = hex_to_lch(tokens["seeds"][seed_id]["hex"])
-    specs: dict[str, dict[str, Any]] = {**tokens["palette_spec"], **tokens["extra_palettes"]}
-    palettes: dict[str, dict[int, str]] = {}
-    for name, spec in specs.items():
-        hue = spec["hue"] if "hue" in spec else (seed_hue + spec.get("hue_shift", 0)) % 360
-        chroma = float(spec["chroma"])
-        if spec.get("chroma_floor"):
-            chroma = max(chroma, seed_chroma)
-        palettes[name] = {tone: lch_to_hex(float(tone), chroma, hue) for tone in _needed_tones(tokens)}
-    return palettes
+    lightness, chroma, hue, _ = parse_oklch(value)
+    while lightness > 0.0:
+        fitted = fit_chroma(lightness, chroma, hue)
+        if contrast_ratio(oklch_to_hex(format_oklch(lightness, fitted, hue)), backdrop_hex) >= minimum:
+            return format_oklch(lightness, fitted, hue)
+        lightness = round(lightness - 0.002, 3)
+    raise ValueError(f"{value} は {minimum}:1 を満たせない")
 
 
-def _needed_tones(tokens: dict[str, Any]) -> tuple[int, ...]:
-    """roles と series が要求する tone の集合を返す。"""
-    tones = {int(role[theme]) for role in tokens["roles"].values() for theme in THEMES}
+def series_colors(tokens: dict[str, Any], theme: str) -> dict[str, str]:
+    """テーマ共通の色相で、明度だけテーマに合わせた系列色を返す。
+
+    ライトとダークで色相が入れ替わらないので、テーマを切り替えても
+    同じ系列が同じ色のままになる。
+    """
     series = tokens["series"]
-    tones.update(
-        {
-            int(series["light_tone"]),
-            int(series["dark_tone"]),
-            int(series["container_light_tone"]),
-            int(series["container_dark_tone"]),
-        }
-    )
-    return tuple(sorted(tones))
-
-
-def series_colors(tokens: dict[str, Any], seed_id: str, theme: str) -> dict[str, str]:
-    """seed の色相を回して、判別可能な系列色とその容器色を返す。"""
-    _, _, seed_hue = hex_to_lch(tokens["seeds"][seed_id]["hex"])
-    series = tokens["series"]
-    tone = series["light_tone"] if theme == "light" else series["dark_tone"]
-    container_tone = series["container_light_tone"] if theme == "light" else series["container_dark_tone"]
-    chroma = float(series["chroma"])
+    lightness = series["light_lightness"] if theme == "light" else series["dark_lightness"]
     colors: dict[str, str] = {}
-    for index, offset in enumerate(series["hue_offsets"][: series["count"]], start=1):
-        hue = (seed_hue + offset) % 360
-        colors[f"--chart-{index}"] = lch_to_hex(float(tone), chroma, hue)
-        colors[f"--chart-{index}-container"] = lch_to_hex(float(container_tone), chroma, hue)
+    for index, (hue, chroma) in enumerate(
+        zip(series["hues"][: series["count"]], series["chromas"][: series["count"]], strict=True), start=1
+    ):
+        colors[f"--chart-{index}"] = format_oklch(lightness, fit_chroma(lightness, chroma, hue), hue)
     return colors
 
 
-def scheme(tokens: dict[str, Any], seed_id: str, theme: str) -> dict[str, str]:
-    """1 つの seed / テーマについて、全 CSS 色変数を解決する。"""
-    palettes = tonal_palettes(tokens, seed_id)
-    resolved = {
-        name: palettes[role["palette"]][int(role[theme])] for name, role in tokens["roles"].items()
-    }
-    resolved["--md-sys-color-surface-tint"] = resolved["--md-sys-color-primary"]
-    shadow = _norm_hex(resolved["--md-sys-color-shadow"])[1:]
-    resolved["--md-sys-color-shadow-rgb"] = " ".join(str(int(shadow[i : i + 2], 16)) for i in (0, 2, 4))
-    resolved.update(series_colors(tokens, seed_id, theme))
+def scheme(tokens: dict[str, Any], base_id: str, theme: str) -> dict[str, str]:
+    """1 つのベースカラー / テーマについて、全 CSS 色変数を解決する。"""
+    resolved = {f"--{name}": value for name, value in tokens["bases"][base_id][theme].items()}
+    for fix in tokens["contrast_fixes"]:
+        name = f'--{fix["var"]}'
+        backdrop = resolved[f'--{fix["against"]}']
+        current = oklch_to_hex(resolved[name], backdrop)
+        if contrast_ratio(current, oklch_to_hex(backdrop)) < fix["min_ratio"]:
+            resolved[name] = _lower_lightness_until(resolved[name], oklch_to_hex(backdrop), fix["min_ratio"])
+    for name, spec in tokens["derived_roles"].items():
+        resolved[f"--{name}"] = spec[theme]
+    resolved.update(series_colors(tokens, theme))
     return resolved
+
+
+def resolved_hex(tokens: dict[str, Any], base_id: str, theme: str) -> dict[str, str]:
+    """スキームを、半透明を下地へ合成した実効 hex に落とす。"""
+    raw = scheme(tokens, base_id, theme)
+    backdrops = {"--border": "--background", "--input": "--background", "--sidebar-border": "--sidebar"}
+    return {
+        name: oklch_to_hex(value, raw.get(backdrops.get(name, ""), raw["--background"]))
+        for name, value in raw.items()
+    }
 
 
 def color_var_names(tokens: dict[str, Any]) -> tuple[str, ...]:
     """生成 CSS が各ブロックへ書き出す変数名を順序付きで返す。"""
     return (
-        *tokens["roles"],
-        "--md-sys-color-surface-tint",
-        *GENERATED_EXTRA_VARS,
+        *(f"--{name}" for name in tokens["role_order"]),
+        *(f"--{name}" for name in tokens["derived_roles"]),
         *CHART_VARS,
-        *CHART_CONTAINER_VARS,
     )
 
 
-def contrast_violations(roles: dict[str, str], label: str) -> list[str]:
+def contrast_violations(tokens: dict[str, Any], base_id: str, theme: str) -> list[str]:
     """1 ブロックの配色が可読性契約を満たすか検査する。"""
+    label = f"{theme}/{base_id}"
+    colors = resolved_hex(tokens, base_id, theme)
     violations: list[str] = []
     for foreground, background, minimum in CONTRAST_CONTRACT:
-        ratio = contrast_ratio(roles[foreground], roles[background])
+        ratio = contrast_ratio(colors[foreground], colors[background])
         if ratio < minimum:
             violations.append(
                 f"{label} {foreground} と {background} のコントラストが {ratio:.2f}（下限 {minimum}）"
             )
-    series = [roles[name] for name in CHART_VARS]
+    decorative = tokens["decorative_roles"]
+    for name in decorative["vars"]:
+        backdrop = "--sidebar" if name.startswith("sidebar") else "--background"
+        ratio = contrast_ratio(colors[f"--{name}"], colors[backdrop])
+        if ratio < decorative["min_ratio"]:
+            violations.append(
+                f"{label} --{name} が {backdrop} と同化している（{ratio:.2f}、下限 {decorative['min_ratio']}）"
+            )
+    series = [colors[name] for name in CHART_VARS]
     if len(set(series)) != len(series):
         violations.append(f"{label} 系列色に重複がある")
+    minimum_distance = tokens["series"]["min_delta_e"]
     for left in range(len(series)):
         for right in range(left + 1, len(series)):
             distance = delta_e(series[left], series[right])
-            if distance < SERIES_MIN_DELTA_E:
+            if distance < minimum_distance:
                 violations.append(
                     f"{label} --chart-{left + 1} と --chart-{right + 1} の色差が "
-                    f"{distance:.1f}（下限 {SERIES_MIN_DELTA_E}）"
+                    f"{distance:.1f}（下限 {minimum_distance}）"
                 )
     return violations
 
@@ -374,14 +392,14 @@ def render_tokens_css(tokens: dict[str, Any]) -> str:
     """tokens.json から tokens.css 全文を生成する。"""
     lines = [
         "/* 自動生成。正本は tokens.json。`python3 check_site.py --write-css .` で更新する。 */",
-        "/* Material Design 3 システムトークン: 配色 / タイポ / シェイプ / エレベーション / モーション */",
+        "/* shadcn/ui のトークン: 配色 / タイポ / 角丸 / 影 / モーション */",
         "",
         ":root {",
         *_typography_lines(tokens),
         "",
-        *_shape_lines(tokens),
+        *_radius_lines(tokens),
         "",
-        *_elevation_lines(tokens),
+        *_shadow_lines(tokens),
         "",
         *_motion_lines(tokens),
         "",
@@ -389,10 +407,11 @@ def render_tokens_css(tokens: dict[str, Any]) -> str:
         "",
         *_layout_lines(tokens),
         "",
-        "  /* seed 選択 UI 用。テーマに依らず seed そのものを見せる。 */",
+        "  /* ベースカラー選択 UI 用。テーマに依らず、そのベースの色味が分かる中間トーン。 */",
+        "  /* primary（ほぼ黒）を出すと 5 つとも同じ黒い円になり選べない。 */",
         *(
-            f"  --seed-{seed_id}: {tonal_palettes(tokens, seed_id)['primary'][40]};"
-            for seed_id in seed_ids(tokens)
+            f"  --base-{base_id}: {tokens['bases'][base_id]['light']['muted-foreground']};"
+            for base_id in base_ids(tokens)
         ),
         "}",
         "",
@@ -401,10 +420,10 @@ def render_tokens_css(tokens: dict[str, Any]) -> str:
         "",
     ]
     names = color_var_names(tokens)
-    for seed_id in seed_ids(tokens):
+    for base_id in base_ids(tokens):
         for theme in THEMES:
-            resolved = scheme(tokens, seed_id, theme)
-            lines.append(f':root[data-theme="{theme}"][data-seed="{seed_id}"] {{')
+            resolved = scheme(tokens, base_id, theme)
+            lines.append(f':root[data-theme="{theme}"][data-base="{base_id}"] {{')
             lines.extend(f"  {name}: {resolved[name]};" for name in names)
             lines.append("}")
             lines.append("")
@@ -415,48 +434,61 @@ def _typography_lines(tokens: dict[str, Any]) -> list[str]:
     """タイプスケール変数を返す。"""
     typography = tokens["typography"]
     lines = [
-        f'  --md-sys-typescale-brand-font: {typography["brand_family"]};',
-        f'  --md-sys-typescale-plain-font: {typography["plain_family"]};',
-        f'  --md-sys-typescale-mono-font: {typography["mono_family"]};',
+        f'  --font-sans: {typography["sans_family"]};',
+        f'  --font-mono: {typography["mono_family"]};',
     ]
     for name, spec in typography["scale"].items():
-        family = "brand" if name.startswith(("display", "headline")) else "plain"
-        lines.append(
-            f'  --md-sys-typescale-{name}-font: {spec["weight"]} {spec["size"]}px/{spec["line"]}px '
-            f"var(--md-sys-typescale-{family}-font);"
-        )
-        lines.append(f'  --md-sys-typescale-{name}-tracking: {spec["tracking"]}px;')
+        lines.append(f'  --text-{name}: {spec["size"]}rem;')
+        lines.append(f'  --text-{name}-line: {spec["line"]}rem;')
+    lines.extend(f"  --tracking-{name}: {value}em;" for name, value in typography["tracking"].items())
+    lines.extend(f"  --font-weight-{name}: {value};" for name, value in typography["weight"].items())
     return lines
 
 
-def _shape_lines(tokens: dict[str, Any]) -> list[str]:
-    """コーナー半径変数を返す。"""
-    return [f"  --md-sys-shape-corner-{name}: {value}px;" for name, value in tokens["shape"].items()]
+def _radius_lines(tokens: dict[str, Any]) -> list[str]:
+    """角丸変数を返す。"""
+    radius = tokens["radius"]
+    lines = [f'  --radius: {radius["base_rem"]}rem;']
+    for name, delta in radius["steps"].items():
+        value = "var(--radius)" if delta == 0 else f"calc(var(--radius) {'+' if delta > 0 else '-'} {abs(delta)}px)"
+        lines.append(f"  --radius-{name}: {value};")
+    return lines
 
 
-def _elevation_lines(tokens: dict[str, Any]) -> list[str]:
-    """エレベーション（影）変数を返す。"""
-    return [f"  --md-sys-elevation-{name}: {value};" for name, value in tokens["elevation"].items()]
+def _shadow_lines(tokens: dict[str, Any]) -> list[str]:
+    """影の変数を返す。影色は黒固定で、両テーマとも同じ定義を使う。"""
+    shadow = tokens["shadow"]
+    return [
+        "  --shadow-rgb: 0 0 0;",
+        *(f"  --shadow-{name}: {value};" for name, value in shadow.items() if name != "source"),
+    ]
 
 
 def _motion_lines(tokens: dict[str, Any]) -> list[str]:
     """モーション（イージング / 時間）変数を返す。"""
     motion = tokens["motion"]
     return [
-        *(f"  --md-sys-motion-easing-{name}: {value};" for name, value in motion["easing"].items()),
-        *(f"  --md-sys-motion-duration-{name}: {value}ms;" for name, value in motion["duration"].items()),
+        *(f"  --ease-{name}: {value};" for name, value in motion["easing"].items()),
+        *(f"  --duration-{name}: {value}ms;" for name, value in motion["duration"].items()),
     ]
 
 
 def _state_lines(tokens: dict[str, Any]) -> list[str]:
-    """ステートレイヤー不透明度の変数を返す。"""
-    return [f"  --md-sys-state-{name}-opacity: {value};" for name, value in tokens["state"].items()]
+    """ステート（ホバー濃度・リング幅）の変数を返す。"""
+    return [
+        f'  --state-{name.replace("_", "-").removesuffix("-px")}: {value}{"px" if name.endswith("_px") else ""};'
+        for name, value in tokens["state"].items()
+    ]
 
 
 def _layout_lines(tokens: dict[str, Any]) -> list[str]:
     """レイアウト（ブレークポイント / ガター）変数を返す。"""
     layout = tokens["layout"]
-    return [f'  --md-ref-layout-{name.replace("_", "-")}: {value}px;' for name, value in layout.items()]
+    return [
+        f'  --layout-{name.replace("_", "-").removesuffix("-px")}: {value}px;'
+        for name, value in layout.items()
+        if name != "source"
+    ]
 
 
 def write_tokens_css(site_dir: Path, tokens: dict[str, Any]) -> Path:
@@ -486,7 +518,7 @@ class _Dom(HTMLParser):
 
 
 def validate_site(site_dir: Path, tokens: dict[str, Any] | None = None) -> list[str]:
-    """サイトが Material 3 契約を満たすかを検査し、違反メッセージを返す。"""
+    """サイトが shadcn/ui の契約を満たすかを検査し、違反メッセージを返す。"""
     if tokens is None:
         tokens = load_tokens(default_tokens_path(site_dir))
     paths = {name: site_dir / name for name in ("index.html", "styles.css", "tokens.css", "app.js")}
@@ -516,8 +548,8 @@ def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:
         violations.append("html[lang] が無い")
     if html_attrs.get("data-theme") not in THEMES:
         violations.append("html[data-theme=light|dark] が無い")
-    if html_attrs.get("data-seed") not in seed_ids(tokens):
-        violations.append("html[data-seed] が tokens.json の seed 識別子ではない")
+    if html_attrs.get("data-base") not in base_ids(tokens):
+        violations.append("html[data-base] が tokens.json のベースカラー識別子ではない")
     page_kind = html_attrs.get("data-page-kind", "dashboard")
     if page_kind not in PAGE_KINDS:
         violations.append("html[data-page-kind] は dashboard か content")
@@ -598,9 +630,9 @@ def _validate_generated_css(css: str, tokens: dict[str, Any]) -> list[str]:
     violations: list[str] = []
     if css != render_tokens_css(tokens):
         violations.append("tokens.css が tokens.json からの生成結果と一致しない（--write-css で再生成する）")
-    for seed_id in seed_ids(tokens):
+    for base_id in base_ids(tokens):
         for theme in THEMES:
-            violations.extend(contrast_violations(scheme(tokens, seed_id, theme), f"{theme}/{seed_id}"))
+            violations.extend(contrast_violations(tokens, base_id, theme))
     return violations
 
 
@@ -617,9 +649,12 @@ def _validate_styles(css: str) -> list[str]:
         violations.append("styles.css に伸縮するグリッド（minmax）が無い")
     if "clamp(" not in css:
         violations.append("styles.css に流体タイポ（clamp）が無い")
+    if ":focus-visible" not in css:
+        violations.append("styles.css に :focus-visible のリングが無い（キーボード操作が見えない）")
     if re.search(r"font-size:\s*(?:[0-9]|1[0-1])px", css):
         violations.append("12px 未満の font-size がある")
     violations.extend(_validate_reduced_motion(css))
+    violations.extend(_validate_resting_state(css))
     violations.extend(_validate_fluid_width(css))
     return violations
 
@@ -637,6 +672,24 @@ def _validate_reduced_motion(css: str) -> list[str]:
         violations.append("モーション低減ブロックが animation を止めていない")
     if "transition" not in body:
         violations.append("モーション低減ブロックが transition を止めていない")
+    return violations
+
+
+def _validate_resting_state(css: str) -> list[str]:
+    """アニメーションが完走しなくても中身が読めることを検査する。
+
+    背面タブ・JS 無効・印刷ではタイムラインが進まない。`opacity: 0` を静止状態に
+    置いて `forwards` で見せる書き方は、そのとき真っ白なページになる。
+    入場アニメーションは `@keyframes` の `from` 側で隠して `both` で当てる。
+    """
+    violations: list[str] = []
+    if re.search(r"animation-fill-mode:\s*forwards", css) or re.search(
+        r"animation:[^;}]*\bforwards\b", css
+    ):
+        violations.append("animation の fill-mode に forwards がある（静止状態が不可視になる）")
+    outside = re.sub(r"@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\}\s*)*\}", "", css, flags=re.DOTALL)
+    if re.search(r"(?<![-\w])opacity:\s*0(?:\.0+)?\s*;", outside):
+        violations.append("@keyframes の外に opacity: 0 がある（静止状態は必ず読める状態にする）")
     return violations
 
 
@@ -661,7 +714,7 @@ def _validate_js(script: str) -> list[str]:
         ("data-theme", ("dataset.theme", "data-theme")),
         ("localStorage", ("localStorage",)),
         ("aria-pressed", ("aria-pressed",)),
-        ("data-seed", ("dataset.seed", "data-seed")),
+        ("data-base", ("dataset.base", "data-base")),
         ("prefers-reduced-motion", ("prefers-reduced-motion",)),
         ("DOM 構築前の実行順", ("defer", "DOMContentLoaded")),
     )
@@ -679,14 +732,16 @@ def _validate_authored_colors(text: str) -> list[str]:
     """手書きファイルに生の色が書かれていないかを検査する。
 
     色の正本は tokens.json だけ。HTML / styles.css / app.js の色は必ず
-    `var(--md-sys-color-*)` を通す。ここを緩めるとテーマ切替が片側だけ壊れる。
+    `var(--*)` を通す。ここを緩めるとテーマ切替が片側だけ壊れる。
     """
     violations: list[str] = []
     for hex_color in sorted({match.upper() for match in HEX_RE.findall(text)}):
         violations.append(f"手書きファイルに生の hex {hex_color} がある（tokens.json 経由で参照する）")
+    for function in sorted({match.group(1).lower() for match in COLOR_FUNCTION_RE.finditer(text)}):
+        violations.append(f"手書きファイルに色関数 `{function}()` がある（var(--*) か color-mix を使う）")
     for name in sorted({match.group(1).lower() for match in NAMED_COLOR_RE.finditer(text)}):
         if name not in NON_COLOR_KEYWORDS:
-            violations.append(f"名前付き色 `{name}` は禁止（var(--md-sys-color-*) を使う）")
+            violations.append(f"名前付き色 `{name}` は禁止（var(--*) を使う）")
     return violations
 
 
@@ -695,7 +750,7 @@ def _validate_authored_colors(text: str) -> list[str]:
 
 def build_parser() -> argparse.ArgumentParser:
     """CLI パーサを構築する。"""
-    parser = argparse.ArgumentParser(description="Material Design 3 準拠検査 / トークン生成")
+    parser = argparse.ArgumentParser(description="shadcn/ui トークン契約の検査 / 生成")
     parser.add_argument("site", nargs="?", default=".", help="検査するサイトディレクトリ")
     parser.add_argument("--write-css", action="store_true", help="tokens.json から tokens.css を再生成する")
     return parser

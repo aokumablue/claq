@@ -1,376 +1,191 @@
 <!DOCTYPE html>
-<html lang="ja" data-theme="light" data-seed="indigo" data-page-kind="dashboard">
+<html lang="ja" data-theme="light" data-base="neutral" data-page-kind="dashboard">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="Material Design 3 のトークンで組んだレスポンシブなプロダクト分析ダッシュボード。">
-  <title>プロダクト分析ダッシュボード</title>
+  <meta name="description" content="shadcn/ui のデザイントークンで組んだレスポンシブな収益ダッシュボード。">
+  <title>収益ダッシュボード — Nimbus Analytics</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:opsz,wght@8..144,400..700&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500;700&display=swap">
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="styles.css">
-  <!-- 描画前に data-theme / data-seed を確定させる。body 末尾へ移すと初回に白がちらつく。 -->
+  <!-- 描画前に data-theme / data-base を確定させる。body 末尾へ移すと初回に白がちらつく。 -->
   <script src="app.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">本文へ移動</a>
 
-  <div class="app">
-    <nav class="nav" aria-label="主要セクション">
-        <button class="nav__item" type="button" aria-current="page">
-          <span class="nav__icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="4" rx="2"/><rect x="13.5" y="10.5" width="7" height="10" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/></svg></span>
-          <span>概要</span>
-        </button>
-        <button class="nav__item" type="button">
-          <span class="nav__icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.5 16.5 9 11l3.2 3.2L20.5 6"/><path d="M15.5 6h5v5"/></svg></span>
-          <span>分析</span>
-        </button>
-        <button class="nav__item" type="button">
-          <span class="nav__icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3.4"/><path d="M3 20c0-3.2 2.7-5.4 6-5.4s6 2.2 6 5.4"/><path d="M16.2 5.2a3.4 3.4 0 0 1 0 6.4"/><path d="M17.6 14.9c2.1.7 3.4 2.4 3.4 5.1"/></svg></span>
-          <span>顧客</span>
-        </button>
-        <button class="nav__item" type="button">
-          <span class="nav__icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 7h10"/><path d="M18 7h2"/><circle cx="16" cy="7" r="2"/><path d="M4 17h4"/><path d="M12 17h8"/><circle cx="10" cy="17" r="2"/></svg></span>
-          <span>設定</span>
-        </button>
-    </nav>
-
-    <header class="top-bar">
-      <div class="brand">
-        <span class="brand__mark"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13.5 3 5.5 13.5H11l-.5 7.5 8-10.5H13Z"/></svg></span>
-        <span class="brand__name">Aurora Analytics</span>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar" data-open="false" aria-label="サイドバー">
+      <div class="sidebar__head">
+        <span class="brand">
+          <span class="brand__mark"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9Z"/><path d="M12 12 4 7.5"/><path d="m12 12 8-4.5"/><path d="M12 12v9"/></svg></span>
+          <span class="brand__text">
+            <span class="brand__name">Nimbus Analytics</span>
+            <span class="brand__meta">Enterprise プラン</span>
+          </span>
+        </span>
+        <button class="btn btn--ghost btn--icon sidebar__close" type="button" data-sidebar="close"
+          aria-label="サイドバーを閉じる"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg></button>
       </div>
-      <div class="top-bar__tools">
-        <div class="seed-picker" role="group" aria-label="配色のベース色">
-          <button type="button" data-seed-value="indigo" aria-pressed="true" aria-label="Indigo の配色にする"
-            style="background: var(--seed-indigo)"></button>
-          <button type="button" data-seed-value="azure" aria-pressed="false" aria-label="Azure の配色にする"
-            style="background: var(--seed-azure)"></button>
-          <button type="button" data-seed-value="teal" aria-pressed="false" aria-label="Teal の配色にする"
-            style="background: var(--seed-teal)"></button>
-          <button type="button" data-seed-value="verdant" aria-pressed="false" aria-label="Verdant の配色にする"
-            style="background: var(--seed-verdant)"></button>
-          <button type="button" data-seed-value="amber" aria-pressed="false" aria-label="Amber の配色にする"
-            style="background: var(--seed-amber)"></button>
-          <button type="button" data-seed-value="crimson" aria-pressed="false" aria-label="Crimson の配色にする"
-            style="background: var(--seed-crimson)"></button>
-        </div>
-        <div class="segmented" role="group" aria-label="表示モード">
-          <button type="button" data-theme-value="light" aria-pressed="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M4.3 4.3l1.6 1.6M18.1 18.1l1.6 1.6M2.6 12h2.2M19.2 12h2.2M4.3 19.7l1.6-1.6M18.1 5.9l1.6-1.6"/></svg><span
-              class="theme-label">ライト</span></button>
-          <button type="button" data-theme-value="dark" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 14.2A8.4 8.4 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2Z"/></svg><span
-              class="theme-label">ダーク</span></button>
-        </div>
-        <button class="icon-button icon-button--optional" type="button" aria-label="検索"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg></button>
-        <button class="icon-button" type="button" aria-label="通知"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 9a6 6 0 0 1 12 0c0 4 1.2 5.4 2 6.4H4c.8-1 2-2.4 2-6.4Z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg></button>
-      </div>
-    </header>
 
-    <main id="main">
-      <div class="pane">
-        <section class="hero reveal" aria-labelledby="hero-h">
-          <div>
-            <p class="hero__eyebrow"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13.5 3 5.5 13.5H11l-.5 7.5 8-10.5H13Z"/></svg> 2024 年 12 月度レポート</p>
-            <h1 class="hero__title" id="hero-h">成長は 4 四半期連続で加速している</h1>
-            <p class="hero__lead">
-              主要 4 指標がすべて目標を上回った。特に有料転換率は前年同月比 +0.9pt で、
-              広告経由よりオーガニック検索からの流入が伸びを牽引している。
-            </p>
+      <nav class="sidebar__body" aria-label="主要セクション">
+        <div class="nav-group">
+          <p class="nav-group__label">ダッシュボード</p>
+          <button class="nav-item" type="button" aria-current="page"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg><span>概要</span></button><button class="nav-item" type="button"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/></svg><span>分析</span></button><button class="nav-item" type="button"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>顧客</span><span class="nav-item__count">24</span></button><button class="nav-item" type="button"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg><span>請求</span></button>
+        </div>
+        <div class="nav-group">
+          <p class="nav-group__label">設定</p>
+          <button class="nav-item" type="button"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg><span>ワークスペース</span></button>
+        </div>
+      </nav>
+
+      <div class="sidebar__foot">
+        <span class="avatar" aria-hidden="true">AK</span>
+        <span>
+          <span class="user__name">青山 桂</span>
+          <span class="user__mail">kei@nimbus.example</span>
+        </span>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="btn btn--ghost btn--icon menu-button" type="button" data-sidebar="open"
+          aria-label="サイドバーを開く" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg></button>
+        <nav class="crumbs" aria-label="現在地">
+          <span>ワークスペース</span><span aria-hidden="true">/</span><strong>収益ダッシュボード</strong>
+        </nav>
+        <div class="topbar__tools">
+          <div class="search">
+            <label class="visually-hidden" for="q">検索</label>
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="q" type="search" placeholder="顧客・請求を検索" autocomplete="off">
+            <kbd class="search__hint">/</kbd>
           </div>
-          <dl class="hero__grid">
-            <div class="hero__stat">
-              <dt>年間経常収益</dt>
-              <dd>¥1.64<span class="metric__unit"> B</span></dd>
+          <div class="base-picker" role="group" aria-label="ベースカラー">
+            <button type="button" data-base-value="neutral" data-base-label="Neutral" aria-pressed="true"
+              title="Neutral" aria-label="Neutral の配色にする" style="background: var(--base-neutral)"></button>
+            <button type="button" data-base-value="zinc" data-base-label="Zinc" aria-pressed="false"
+              title="Zinc" aria-label="Zinc の配色にする" style="background: var(--base-zinc)"></button>
+            <button type="button" data-base-value="slate" data-base-label="Slate" aria-pressed="false"
+              title="Slate" aria-label="Slate の配色にする" style="background: var(--base-slate)"></button>
+            <button type="button" data-base-value="stone" data-base-label="Stone" aria-pressed="false"
+              title="Stone" aria-label="Stone の配色にする" style="background: var(--base-stone)"></button>
+            <button type="button" data-base-value="gray" data-base-label="Gray" aria-pressed="false"
+              title="Gray" aria-label="Gray の配色にする" style="background: var(--base-gray)"></button>
+          </div>
+          <div class="segmented" role="group" aria-label="表示モード">
+            <button type="button" data-theme-value="light" aria-pressed="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.9 4.9 1.4 1.4"/><path d="m17.7 17.7 1.4 1.4"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m4.9 19.1 1.4-1.4"/><path d="m17.7 6.3 1.4-1.4"/></svg><span
+                class="theme-label">ライト</span></button>
+            <button type="button" data-theme-value="dark" aria-pressed="false"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg><span
+                class="theme-label">ダーク</span></button>
+          </div>
+          <button class="btn btn--ghost btn--icon" type="button" aria-label="通知"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 8a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg></button>
+        </div>
+      </header>
+
+      <main class="pane" id="main">
+        <div class="page-head reveal" data-animate-skip="true">
+          <div>
+            <h1>収益ダッシュボード</h1>
+            <p>2025 年 12 月時点。前年同月と比較しています。</p>
+          </div>
+          <div class="page-head__actions">
+            <div class="segmented" role="group" aria-label="集計期間">
+              <button type="button" aria-selected="false">30 日</button>
+              <button type="button" aria-selected="false">四半期</button>
+              <button type="button" aria-selected="true">12 か月</button>
             </div>
-            <div class="hero__stat">
-              <dt>純増顧客</dt>
-              <dd>+1,284</dd>
-            </div>
-            <div class="hero__stat">
-              <dt>稼働率</dt>
-              <dd>99.98<span class="metric__unit"> %</span></dd>
-            </div>
-          </dl>
-        </section>
+            <button class="btn btn--outline" type="button"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>CSV</button>
+            <button class="btn btn--primary" type="button"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v14"/><path d="M5 12h14"/></svg>レポート作成</button>
+          </div>
+        </div>
 
         <h2 class="visually-hidden">主要指標</h2>
-        <section class="metrics" aria-label="主要指標">
-        <article class="card metric reveal" data-metric="true" style="--i: 0">
-          <p class="metric__label">月間アクティブ</p>
-          <p class="metric__value"><span data-count="64,208">64,208</span><span class="metric__unit">人</span></p>
-          <div class="metric__foot">
-            <span class="chip chip--up"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 19V6"/><path d="m6.5 11.5 5.5-5.5 5.5 5.5"/></svg>+12.4%</span>
-            <span class="card__hint">前年同月比</span>
-          </div>
-          <svg class="metric__spark" role="img" viewBox="0 0 160 40" aria-hidden="true" focusable="false"><defs><linearGradient id="grad-spark-1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--chart-1)" stop-opacity="0.34"/><stop offset="100%" stop-color="var(--chart-1)" stop-opacity="0"/></linearGradient></defs><path class="area-fill" fill="url(#grad-spark-1)" d="M4 34C6.3 33.7 13.2 33 17.8 32.4C22.4 31.7 27 30.4 31.6 29.9C36.2 29.3 40.8 29.7 45.5 29.1C50.1 28.4 54.7 26.9 59.3 25.8C63.9 24.7 68.5 23.4 73.1 22.5C77.7 21.5 82.3 20.7 86.9 20C91.5 19.3 96.1 19.2 100.7 18.4C105.3 17.5 109.9 16.2 114.5 15.1C119.2 14 123.8 12.7 128.4 11.8C133 10.8 137.6 10.3 142.2 9.3C146.8 8.3 153.7 6.5 156 6L156 40L4 40Z"/><path class="series-line" style="--len: 173" stroke="var(--chart-1)" stroke-dasharray="173" stroke-width="2.5" d="M4 34C6.3 33.7 13.2 33 17.8 32.4C22.4 31.7 27 30.4 31.6 29.9C36.2 29.3 40.8 29.7 45.5 29.1C50.1 28.4 54.7 26.9 59.3 25.8C63.9 24.7 68.5 23.4 73.1 22.5C77.7 21.5 82.3 20.7 86.9 20C91.5 19.3 96.1 19.2 100.7 18.4C105.3 17.5 109.9 16.2 114.5 15.1C119.2 14 123.8 12.7 128.4 11.8C133 10.8 137.6 10.3 142.2 9.3C146.8 8.3 153.7 6.5 156 6"/><circle cx="156" cy="6" r="3.2" fill="var(--chart-1)"/></svg>
-        </article>
-        <article class="card metric reveal" data-metric="true" style="--i: 1">
-          <p class="metric__label">有料転換率</p>
-          <p class="metric__value"><span data-count="8.6">8.6</span><span class="metric__unit">%</span></p>
-          <div class="metric__foot">
-            <span class="chip chip--up"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 19V6"/><path d="m6.5 11.5 5.5-5.5 5.5 5.5"/></svg>+0.9pt</span>
-            <span class="card__hint">前年同月比</span>
-          </div>
-          <svg class="metric__spark" role="img" viewBox="0 0 160 40" aria-hidden="true" focusable="false"><defs><linearGradient id="grad-spark-2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--chart-2)" stop-opacity="0.34"/><stop offset="100%" stop-color="var(--chart-2)" stop-opacity="0"/></linearGradient></defs><path class="area-fill" fill="url(#grad-spark-2)" d="M4 34C6.3 33.7 13.2 32.1 17.8 31.9C22.4 31.8 27 33.5 31.6 33C36.2 32.4 40.8 30.4 45.5 28.8C50.1 27.3 54.7 24.8 59.3 23.6C63.9 22.4 68.5 22.4 73.1 21.6C77.7 20.7 82.3 19.3 86.9 18.4C91.5 17.6 96.1 17.2 100.7 16.4C105.3 15.5 109.9 14.1 114.5 13.3C119.2 12.4 123.8 12 128.4 11.2C133 10.3 137.6 8.9 142.2 8.1C146.8 7.2 153.7 6.3 156 6L156 40L4 40Z"/><path class="series-line" style="--len: 174" stroke="var(--chart-2)" stroke-dasharray="174" stroke-width="2.5" d="M4 34C6.3 33.7 13.2 32.1 17.8 31.9C22.4 31.8 27 33.5 31.6 33C36.2 32.4 40.8 30.4 45.5 28.8C50.1 27.3 54.7 24.8 59.3 23.6C63.9 22.4 68.5 22.4 73.1 21.6C77.7 20.7 82.3 19.3 86.9 18.4C91.5 17.6 96.1 17.2 100.7 16.4C105.3 15.5 109.9 14.1 114.5 13.3C119.2 12.4 123.8 12 128.4 11.2C133 10.3 137.6 8.9 142.2 8.1C146.8 7.2 153.7 6.3 156 6"/><circle cx="156" cy="6" r="3.2" fill="var(--chart-2)"/></svg>
-        </article>
-        <article class="card metric reveal" data-metric="true" style="--i: 2">
-          <p class="metric__label">平均応答時間</p>
-          <p class="metric__value"><span data-count="182">182</span><span class="metric__unit">ms</span></p>
-          <div class="metric__foot">
-            <span class="chip chip--down"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v13"/><path d="m6.5 12.5 5.5 5.5 5.5-5.5"/></svg>-46ms</span>
-            <span class="card__hint">前年同月比</span>
-          </div>
-          <svg class="metric__spark" role="img" viewBox="0 0 160 40" aria-hidden="true" focusable="false"><defs><linearGradient id="grad-spark-3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--chart-3)" stop-opacity="0.34"/><stop offset="100%" stop-color="var(--chart-3)" stop-opacity="0"/></linearGradient></defs><path class="area-fill" fill="url(#grad-spark-3)" d="M4 6C6.3 6.3 13.2 6.9 17.8 8C22.4 9 27 11 31.6 12.2C36.2 13.3 40.8 14.1 45.5 14.8C50.1 15.5 54.7 15.7 59.3 16.4C63.9 17.1 68.5 18.1 73.1 19C77.7 19.9 82.3 21 86.9 22C91.5 22.9 96.1 24.1 100.7 24.9C105.3 25.7 109.9 26.1 114.5 26.8C119.2 27.6 123.8 28.6 128.4 29.4C133 30.3 137.6 31 142.2 31.7C146.8 32.5 153.7 33.6 156 34L156 40L4 40Z"/><path class="series-line" style="--len: 173" stroke="var(--chart-3)" stroke-dasharray="173" stroke-width="2.5" d="M4 6C6.3 6.3 13.2 6.9 17.8 8C22.4 9 27 11 31.6 12.2C36.2 13.3 40.8 14.1 45.5 14.8C50.1 15.5 54.7 15.7 59.3 16.4C63.9 17.1 68.5 18.1 73.1 19C77.7 19.9 82.3 21 86.9 22C91.5 22.9 96.1 24.1 100.7 24.9C105.3 25.7 109.9 26.1 114.5 26.8C119.2 27.6 123.8 28.6 128.4 29.4C133 30.3 137.6 31 142.2 31.7C146.8 32.5 153.7 33.6 156 34"/><circle cx="156" cy="34" r="3.2" fill="var(--chart-3)"/></svg>
-        </article>
-        <article class="card metric reveal" data-metric="true" style="--i: 3">
-          <p class="metric__label">解約率</p>
-          <p class="metric__value"><span data-count="1.8">1.8</span><span class="metric__unit">%</span></p>
-          <div class="metric__foot">
-            <span class="chip chip--down"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v13"/><path d="m6.5 12.5 5.5 5.5 5.5-5.5"/></svg>-0.4pt</span>
-            <span class="card__hint">前年同月比</span>
-          </div>
-          <svg class="metric__spark" role="img" viewBox="0 0 160 40" aria-hidden="true" focusable="false"><defs><linearGradient id="grad-spark-4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--chart-4)" stop-opacity="0.34"/><stop offset="100%" stop-color="var(--chart-4)" stop-opacity="0"/></linearGradient></defs><path class="area-fill" fill="url(#grad-spark-4)" d="M4 6C6.3 6.6 13.2 8.9 17.8 9.5C22.4 10.1 27 8.9 31.6 9.5C36.2 10.1 40.8 11.8 45.5 13C50.1 14.2 54.7 15.3 59.3 16.5C63.9 17.7 68.5 19.4 73.1 20C77.7 20.6 82.3 19.4 86.9 20C91.5 20.6 96.1 22.3 100.7 23.5C105.3 24.7 109.9 25.8 114.5 27C119.2 28.2 123.8 29.9 128.4 30.5C133 31.1 137.6 29.9 142.2 30.5C146.8 31.1 153.7 33.4 156 34L156 40L4 40Z"/><path class="series-line" style="--len: 174" stroke="var(--chart-4)" stroke-dasharray="174" stroke-width="2.5" d="M4 6C6.3 6.6 13.2 8.9 17.8 9.5C22.4 10.1 27 8.9 31.6 9.5C36.2 10.1 40.8 11.8 45.5 13C50.1 14.2 54.7 15.3 59.3 16.5C63.9 17.7 68.5 19.4 73.1 20C77.7 20.6 82.3 19.4 86.9 20C91.5 20.6 96.1 22.3 100.7 23.5C105.3 24.7 109.9 25.8 114.5 27C119.2 28.2 123.8 29.9 128.4 30.5C133 31.1 137.6 29.9 142.2 30.5C146.8 31.1 153.7 33.4 156 34"/><circle cx="156" cy="34" r="3.2" fill="var(--chart-4)"/></svg>
-        </article>
+        <section class="grid" aria-label="主要指標">
+          <article class="card metric reveal" data-metric="true" style="--i: 0"><div class="metric__body"><p class="metric__label">月間経常収益</p><p class="metric__value"><span data-count="2.14">2.14</span><span class="metric__unit">億円</span></p><div class="metric__foot"><span class="badge badge--good"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 19V6"/><path d="m6 12 6-6 6 6"/></svg>+12.4%</span><span class="hint">前年同月比</span></div><svg class="metric__spark" role="img" viewBox="0 0 200 48" preserveAspectRatio="none" aria-label="月間経常収益の 12 か月推移"><defs><linearGradient id="sp-1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--chart-1)" stop-opacity="0.3"/><stop offset="100%" stop-color="var(--chart-1)" stop-opacity="0"/></linearGradient></defs><path class="spark-fill" fill="url(#sp-1)" d="M3.0 40.5C5.9 40.1 14.8 39.0 20.6 38.2C26.5 37.3 32.4 36.3 38.3 35.5C44.2 34.7 50.0 33.9 55.9 33.2C61.8 32.5 67.7 32.2 73.5 31.3C79.4 30.4 85.3 28.9 91.2 27.8C97.1 26.8 102.9 26.0 108.8 25.1C114.7 24.3 120.6 23.8 126.5 22.9C132.3 21.9 138.2 20.5 144.1 19.4C150.0 18.3 155.8 17.6 161.7 16.3C167.6 15.1 173.5 13.6 179.4 12.1C185.2 10.7 194.1 8.3 197.0 7.5L197.0 46L3.0 46Z"/><path class="spark-line" stroke="var(--chart-1)" stroke-width="2" d="M3.0 40.5C5.9 40.1 14.8 39.0 20.6 38.2C26.5 37.3 32.4 36.3 38.3 35.5C44.2 34.7 50.0 33.9 55.9 33.2C61.8 32.5 67.7 32.2 73.5 31.3C79.4 30.4 85.3 28.9 91.2 27.8C97.1 26.8 102.9 26.0 108.8 25.1C114.7 24.3 120.6 23.8 126.5 22.9C132.3 21.9 138.2 20.5 144.1 19.4C150.0 18.3 155.8 17.6 161.7 16.3C167.6 15.1 173.5 13.6 179.4 12.1C185.2 10.7 194.1 8.3 197.0 7.5"/><circle class="ping" cx="197.0" cy="7.5" r="3.4" fill="var(--chart-1)"/><circle class="series-dot" cx="197.0" cy="7.5" r="3" fill="var(--chart-1)"/></svg></div></article><article class="card metric reveal" data-metric="true" style="--i: 1"><div class="metric__body"><p class="metric__label">有料アカウント</p><p class="metric__value"><span data-count="8,412">8,412</span><span class="metric__unit">社</span></p><div class="metric__foot"><span class="badge badge--good"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 19V6"/><path d="m6 12 6-6 6 6"/></svg>+6.1%</span><span class="hint">前年同月比</span></div><svg class="metric__spark" role="img" viewBox="0 0 200 48" preserveAspectRatio="none" aria-label="有料アカウントの 12 か月推移"><defs><linearGradient id="sp-2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--chart-2)" stop-opacity="0.3"/><stop offset="100%" stop-color="var(--chart-2)" stop-opacity="0"/></linearGradient></defs><path class="spark-fill" fill="url(#sp-2)" d="M3.0 37.4C5.9 37.0 14.8 35.6 20.6 35.0C26.5 34.5 32.4 34.5 38.3 33.9C44.2 33.3 50.0 32.3 55.9 31.5C61.8 30.8 67.7 29.8 73.5 29.2C79.4 28.6 85.3 28.8 91.2 28.1C97.1 27.3 102.9 25.5 108.8 24.6C114.7 23.6 120.6 23.2 126.5 22.3C132.3 21.3 138.2 19.7 144.1 18.8C150.0 17.8 155.8 17.2 161.7 16.5C167.6 15.7 173.5 15.1 179.4 14.1C185.2 13.2 194.1 11.2 197.0 10.6L197.0 46L3.0 46Z"/><path class="spark-line" stroke="var(--chart-2)" stroke-width="2" d="M3.0 37.4C5.9 37.0 14.8 35.6 20.6 35.0C26.5 34.5 32.4 34.5 38.3 33.9C44.2 33.3 50.0 32.3 55.9 31.5C61.8 30.8 67.7 29.8 73.5 29.2C79.4 28.6 85.3 28.8 91.2 28.1C97.1 27.3 102.9 25.5 108.8 24.6C114.7 23.6 120.6 23.2 126.5 22.3C132.3 21.3 138.2 19.7 144.1 18.8C150.0 17.8 155.8 17.2 161.7 16.5C167.6 15.7 173.5 15.1 179.4 14.1C185.2 13.2 194.1 11.2 197.0 10.6"/><circle class="ping" cx="197.0" cy="10.6" r="3.4" fill="var(--chart-2)"/><circle class="series-dot" cx="197.0" cy="10.6" r="3" fill="var(--chart-2)"/></svg></div></article><article class="card metric reveal" data-metric="true" style="--i: 2"><div class="metric__body"><p class="metric__label">解約率</p><p class="metric__value"><span data-count="1.2">1.2</span><span class="metric__unit">%</span></p><div class="metric__foot"><span class="badge badge--good"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v13"/><path d="m6 12 6 6 6-6"/></svg>-0.4pt</span><span class="hint">前年同月比</span></div><svg class="metric__spark" role="img" viewBox="0 0 200 48" preserveAspectRatio="none" aria-label="解約率の 12 か月推移"><defs><linearGradient id="sp-3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--chart-3)" stop-opacity="0.3"/><stop offset="100%" stop-color="var(--chart-3)" stop-opacity="0"/></linearGradient></defs><path class="spark-fill" fill="url(#sp-3)" d="M3.0 14.5C5.9 14.8 14.8 16.2 20.6 16.6C26.5 16.9 32.4 16.2 38.3 16.6C44.2 16.9 50.0 18.0 55.9 18.7C61.8 19.4 67.7 20.5 73.5 20.8C79.4 21.2 85.3 20.5 91.2 20.8C97.1 21.2 102.9 22.2 108.8 22.9C114.7 23.6 120.6 24.4 126.5 25.1C132.3 25.8 138.2 26.5 144.1 27.2C150.0 27.9 155.8 28.6 161.7 29.3C167.6 30.0 173.5 30.7 179.4 31.4C185.2 32.1 194.1 33.2 197.0 33.5L197.0 46L3.0 46Z"/><path class="spark-line" stroke="var(--chart-3)" stroke-width="2" d="M3.0 14.5C5.9 14.8 14.8 16.2 20.6 16.6C26.5 16.9 32.4 16.2 38.3 16.6C44.2 16.9 50.0 18.0 55.9 18.7C61.8 19.4 67.7 20.5 73.5 20.8C79.4 21.2 85.3 20.5 91.2 20.8C97.1 21.2 102.9 22.2 108.8 22.9C114.7 23.6 120.6 24.4 126.5 25.1C132.3 25.8 138.2 26.5 144.1 27.2C150.0 27.9 155.8 28.6 161.7 29.3C167.6 30.0 173.5 30.7 179.4 31.4C185.2 32.1 194.1 33.2 197.0 33.5"/><circle class="ping" cx="197.0" cy="33.5" r="3.4" fill="var(--chart-3)"/><circle class="series-dot" cx="197.0" cy="33.5" r="3" fill="var(--chart-3)"/></svg></div></article><article class="card metric reveal" data-metric="true" style="--i: 3"><div class="metric__body"><p class="metric__label">平均対応時間</p><p class="metric__value"><span data-count="4.8">4.8</span><span class="metric__unit">時間</span></p><div class="metric__foot"><span class="badge badge--bad"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 19V6"/><path d="m6 12 6-6 6 6"/></svg>+0.6 時間</span><span class="hint">前年同月比</span></div><svg class="metric__spark" role="img" viewBox="0 0 200 48" preserveAspectRatio="none" aria-label="平均対応時間の 12 か月推移"><defs><linearGradient id="sp-4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--chart-4)" stop-opacity="0.3"/><stop offset="100%" stop-color="var(--chart-4)" stop-opacity="0"/></linearGradient></defs><path class="spark-fill" fill="url(#sp-4)" d="M3.0 31.4C5.9 31.8 14.8 33.5 20.6 33.5C26.5 33.5 32.4 32.1 38.3 31.4C44.2 30.7 50.0 29.6 55.9 29.3C61.8 28.9 67.7 29.6 73.5 29.3C79.4 28.9 85.3 27.9 91.2 27.2C97.1 26.5 102.9 25.8 108.8 25.1C114.7 24.4 120.6 23.6 126.5 22.9C132.3 22.2 138.2 21.5 144.1 20.8C150.0 20.1 155.8 19.4 161.7 18.7C167.6 18.0 173.5 17.3 179.4 16.6C185.2 15.9 194.1 14.8 197.0 14.5L197.0 46L3.0 46Z"/><path class="spark-line" stroke="var(--chart-4)" stroke-width="2" d="M3.0 31.4C5.9 31.8 14.8 33.5 20.6 33.5C26.5 33.5 32.4 32.1 38.3 31.4C44.2 30.7 50.0 29.6 55.9 29.3C61.8 28.9 67.7 29.6 73.5 29.3C79.4 28.9 85.3 27.9 91.2 27.2C97.1 26.5 102.9 25.8 108.8 25.1C114.7 24.4 120.6 23.6 126.5 22.9C132.3 22.2 138.2 21.5 144.1 20.8C150.0 20.1 155.8 19.4 161.7 18.7C167.6 18.0 173.5 17.3 179.4 16.6C185.2 15.9 194.1 14.8 197.0 14.5"/><circle class="ping" cx="197.0" cy="14.5" r="3.4" fill="var(--chart-4)"/><circle class="series-dot" cx="197.0" cy="14.5" r="3" fill="var(--chart-4)"/></svg></div></article>
         </section>
 
-        <h2 class="visually-hidden">チャート</h2>
-        <section class="charts" aria-label="チャート">
-        <figure class="card chart-figure span-wide reveal" style="--i: 0">
-          <figcaption class="card__head">
-            <div>
-              <h3 class="card__title">アクティブユーザーの推移</h3>
-              <p class="card__hint">月次・単位は千人</p>
+        <div class="grid grid--main">
+          <section class="card span-2 reveal" style="--i: 4" aria-labelledby="mrr-h">
+            <div class="card__head">
+              <div>
+                <h2 class="card__title" id="mrr-h">月間経常収益の推移</h2>
+                <p class="card__desc">本年と前年の同月を重ねています（単位: 百万円）</p>
+              </div>
+              <span class="badge badge--outline"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg>12 か月</span>
             </div>
-            <span class="chip chip--up"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 19V6"/><path d="m6.5 11.5 5.5-5.5 5.5 5.5"/></svg> 前年比 +38%</span>
-          </figcaption>
-          <div class="chart-scroll">
-          <svg role="img" viewBox="0 0 726 280" aria-labelledby="line-t line-d">
-            <title id="line-t">アクティブユーザーの推移</title>
-            <desc id="line-d">継続ユーザーは1月の30千人から12月の64千人へ、新規ユーザーは12千人から40千人へ増加した。</desc>
-            <defs>
-              <linearGradient id="grad-retained" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="var(--chart-1)" stop-opacity="0.42"/>
-                <stop offset="100%" stop-color="var(--chart-1)" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            <g class="axis"><line class="gridline" x1="62" y1="244" x2="704" y2="244"/><text class="chart-label" x="50" y="248" text-anchor="end">0</text><line class="gridline" x1="62" y1="181.7" x2="704" y2="181.7"/><text class="chart-label" x="50" y="185.7" text-anchor="end">20</text><line class="gridline" x1="62" y1="119.4" x2="704" y2="119.4"/><text class="chart-label" x="50" y="123.4" text-anchor="end">40</text><line class="gridline" x1="62" y1="57.1" x2="704" y2="57.1"/><text class="chart-label" x="50" y="61.1" text-anchor="end">60</text><text class="chart-label" x="62" y="266" text-anchor="middle">1月</text><text class="chart-label" x="178.7" y="266" text-anchor="middle">3月</text><text class="chart-label" x="295.5" y="266" text-anchor="middle">5月</text><text class="chart-label" x="412.2" y="266" text-anchor="middle">7月</text><text class="chart-label" x="528.9" y="266" text-anchor="middle">9月</text><text class="chart-label" x="645.6" y="266" text-anchor="middle">11月</text></g>
-            <path class="area-fill" fill="url(#grad-retained)" d="M62 150.6C71.7 149.5 100.9 146.9 120.4 144.3C139.8 141.7 159.3 137.1 178.7 135C198.2 132.9 217.6 134.5 237.1 131.9C256.5 129.3 276 123.6 295.5 119.4C314.9 115.3 334.4 110.6 353.8 107C373.3 103.3 392.7 100.2 412.2 97.6C431.6 95 451.1 94.5 470.5 91.4C490 88.3 509.5 83.1 528.9 78.9C548.4 74.8 567.8 70.1 587.3 66.5C606.7 62.9 626.2 60.8 645.6 57.1C665.1 53.5 694.3 46.8 704 44.7L704 244 L62 244 Z"/>
-            <path class="series-line" style="--len: 726; --i: 1" stroke="var(--chart-3)"
-              stroke-dasharray="726" d="M62 206.6C71.7 205.6 100.9 202 120.4 200.4C139.8 198.8 159.3 198.8 178.7 197.3C198.2 195.7 217.6 193.1 237.1 191.1C256.5 189 276 187.4 295.5 184.8C314.9 182.2 334.4 178.6 353.8 175.5C373.3 172.4 392.7 168.7 412.2 166.1C431.6 163.5 451.1 162.5 470.5 159.9C490 157.3 509.5 153.7 528.9 150.6C548.4 147.5 567.8 144.3 587.3 141.2C606.7 138.1 626.2 135.5 645.6 131.9C665.1 128.3 694.3 121.5 704 119.4"/>
-            <path class="series-line" style="--len: 730; --i: 0" stroke="var(--chart-1)"
-              stroke-dasharray="730" d="M62 150.6C71.7 149.5 100.9 146.9 120.4 144.3C139.8 141.7 159.3 137.1 178.7 135C198.2 132.9 217.6 134.5 237.1 131.9C256.5 129.3 276 123.6 295.5 119.4C314.9 115.3 334.4 110.6 353.8 107C373.3 103.3 392.7 100.2 412.2 97.6C431.6 95 451.1 94.5 470.5 91.4C490 88.3 509.5 83.1 528.9 78.9C548.4 74.8 567.8 70.1 587.3 66.5C606.7 62.9 626.2 60.8 645.6 57.1C665.1 53.5 694.3 46.8 704 44.7"/>
-            <circle class="series-dot" cx="62" cy="150.6" r="3.5" fill="var(--chart-1)" data-tip="1月・継続 30千人"/><circle class="series-dot" cx="120.4" cy="144.3" r="3.5" fill="var(--chart-1)" data-tip="2月・継続 32千人"/><circle class="series-dot" cx="178.7" cy="135" r="3.5" fill="var(--chart-1)" data-tip="3月・継続 35千人"/><circle class="series-dot" cx="237.1" cy="131.9" r="3.5" fill="var(--chart-1)" data-tip="4月・継続 36千人"/><circle class="series-dot" cx="295.5" cy="119.4" r="3.5" fill="var(--chart-1)" data-tip="5月・継続 40千人"/><circle class="series-dot" cx="353.8" cy="107" r="3.5" fill="var(--chart-1)" data-tip="6月・継続 44千人"/><circle class="series-dot" cx="412.2" cy="97.6" r="3.5" fill="var(--chart-1)" data-tip="7月・継続 47千人"/><circle class="series-dot" cx="470.5" cy="91.4" r="3.5" fill="var(--chart-1)" data-tip="8月・継続 49千人"/><circle class="series-dot" cx="528.9" cy="78.9" r="3.5" fill="var(--chart-1)" data-tip="9月・継続 53千人"/><circle class="series-dot" cx="587.3" cy="66.5" r="3.5" fill="var(--chart-1)" data-tip="10月・継続 57千人"/><circle class="series-dot" cx="645.6" cy="57.1" r="3.5" fill="var(--chart-1)" data-tip="11月・継続 60千人"/><circle class="series-dot" cx="704" cy="44.7" r="3.5" fill="var(--chart-1)" data-tip="12月・継続 64千人"/><circle class="series-dot" cx="62" cy="206.6" r="3.5" fill="var(--chart-3)" data-tip="1月・新規 12千人"/><circle class="series-dot" cx="120.4" cy="200.4" r="3.5" fill="var(--chart-3)" data-tip="2月・新規 14千人"/><circle class="series-dot" cx="178.7" cy="197.3" r="3.5" fill="var(--chart-3)" data-tip="3月・新規 15千人"/><circle class="series-dot" cx="237.1" cy="191.1" r="3.5" fill="var(--chart-3)" data-tip="4月・新規 17千人"/><circle class="series-dot" cx="295.5" cy="184.8" r="3.5" fill="var(--chart-3)" data-tip="5月・新規 19千人"/><circle class="series-dot" cx="353.8" cy="175.5" r="3.5" fill="var(--chart-3)" data-tip="6月・新規 22千人"/><circle class="series-dot" cx="412.2" cy="166.1" r="3.5" fill="var(--chart-3)" data-tip="7月・新規 25千人"/><circle class="series-dot" cx="470.5" cy="159.9" r="3.5" fill="var(--chart-3)" data-tip="8月・新規 27千人"/><circle class="series-dot" cx="528.9" cy="150.6" r="3.5" fill="var(--chart-3)" data-tip="9月・新規 30千人"/><circle class="series-dot" cx="587.3" cy="141.2" r="3.5" fill="var(--chart-3)" data-tip="10月・新規 33千人"/><circle class="series-dot" cx="645.6" cy="131.9" r="3.5" fill="var(--chart-3)" data-tip="11月・新規 36千人"/><circle class="series-dot" cx="704" cy="119.4" r="3.5" fill="var(--chart-3)" data-tip="12月・新規 40千人"/>
-          </svg>
-          </div>
-          <ul class="legend">
-            <li><span class="legend__swatch" style="background: var(--chart-1)"></span>継続ユーザー</li>
-            <li><span class="legend__swatch" style="background: var(--chart-3)"></span>新規ユーザー</li>
-          </ul>
-        </figure>
-        <figure class="card chart-figure reveal" style="--i: 1">
-          <figcaption class="card__head">
-            <div>
-              <h3 class="card__title">流入チャネル構成</h3>
-              <p class="card__hint">今四半期のセッション比率</p>
+            <div class="card__body">
+              <div class="chart-scroll"><svg class="chart" role="img" viewBox="0 0 720 250" preserveAspectRatio="xMidYMid meet" aria-labelledby="mrr-t mrr-d"><title id="mrr-t">月次 MRR の推移（本年と前年）</title><desc id="mrr-d">本年の MRR は 1 月の 1.28 億円から 12 月の 2.14 億円へ伸び、前年同月をすべての月で上回っている。</desc><defs><linearGradient id="area-1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--chart-1)" stop-opacity="0.26"/><stop offset="100%" stop-color="var(--chart-1)" stop-opacity="0"/></linearGradient></defs><line class="grid-line" x1="52" y1="214.0" x2="700" y2="214.0"/><text class="axis-text" x="42" y="217.5" text-anchor="end">60</text><line class="grid-line" x1="52" y1="165.0" x2="700" y2="165.0"/><text class="axis-text" x="42" y="168.5" text-anchor="end">105</text><line class="grid-line" x1="52" y1="116.0" x2="700" y2="116.0"/><text class="axis-text" x="42" y="119.5" text-anchor="end">150</text><line class="grid-line" x1="52" y1="67.0" x2="700" y2="67.0"/><text class="axis-text" x="42" y="70.5" text-anchor="end">195</text><line class="grid-line" x1="52" y1="18.0" x2="700" y2="18.0"/><text class="axis-text" x="42" y="21.5" text-anchor="end">240</text><line class="axis-line" x1="52" y1="214" x2="700" y2="214"/><text class="axis-text" x="52.0" y="234" text-anchor="middle">1月</text><text class="axis-text" x="110.9" y="234" text-anchor="middle">2月</text><text class="axis-text" x="169.8" y="234" text-anchor="middle">3月</text><text class="axis-text" x="228.7" y="234" text-anchor="middle">4月</text><text class="axis-text" x="287.6" y="234" text-anchor="middle">5月</text><text class="axis-text" x="346.5" y="234" text-anchor="middle">6月</text><text class="axis-text" x="405.5" y="234" text-anchor="middle">7月</text><text class="axis-text" x="464.4" y="234" text-anchor="middle">8月</text><text class="axis-text" x="523.3" y="234" text-anchor="middle">9月</text><text class="axis-text" x="582.2" y="234" text-anchor="middle">10月</text><text class="axis-text" x="641.1" y="234" text-anchor="middle">11月</text><text class="axis-text" x="700.0" y="234" text-anchor="middle">12月</text><path class="series-line" style="--i: 0; --len: 651" stroke="var(--chart-2)" stroke-width="1.6" stroke-dasharray="651" d="M52.0 174.8C61.8 174.3 91.3 172.8 110.9 171.5C130.5 170.3 150.2 168.8 169.8 167.2C189.5 165.5 209.1 163.4 228.7 161.7C248.4 160.1 268.0 158.6 287.6 157.4C307.3 156.1 326.9 155.7 346.5 154.1C366.2 152.5 385.8 149.6 405.5 147.6C425.1 145.6 444.7 143.8 464.4 142.1C484.0 140.5 503.6 139.6 523.3 137.8C542.9 136.0 562.5 133.4 582.2 131.2C601.8 129.1 621.5 127.1 641.1 124.7C660.7 122.4 690.2 118.4 700.0 117.1"><title>前年の月次 MRR</title></path><path class="series-area" style="--i: 1" fill="url(#area-1)" d="M52.0 140.0C61.8 138.9 91.3 135.8 110.9 133.4C130.5 131.1 150.2 128.2 169.8 125.8C189.5 123.4 209.1 121.3 228.7 119.3C248.4 117.3 268.0 116.4 287.6 113.8C307.3 111.3 326.9 106.9 346.5 104.0C366.2 101.1 385.8 98.8 405.5 96.4C425.1 94.0 444.7 92.6 464.4 89.9C484.0 87.1 503.6 83.2 523.3 80.1C542.9 77.0 562.5 74.8 582.2 71.4C601.8 67.9 621.5 63.6 641.1 59.4C660.7 55.2 690.2 48.5 700.0 46.3L700.0 214L52.0 214Z"/><path class="series-line" style="--i: 1; --len: 655" stroke="var(--chart-1)" stroke-width="2.5" stroke-dasharray="655" d="M52.0 140.0C61.8 138.9 91.3 135.8 110.9 133.4C130.5 131.1 150.2 128.2 169.8 125.8C189.5 123.4 209.1 121.3 228.7 119.3C248.4 117.3 268.0 116.4 287.6 113.8C307.3 111.3 326.9 106.9 346.5 104.0C366.2 101.1 385.8 98.8 405.5 96.4C425.1 94.0 444.7 92.6 464.4 89.9C484.0 87.1 503.6 83.2 523.3 80.1C542.9 77.0 562.5 74.8 582.2 71.4C601.8 67.9 621.5 63.6 641.1 59.4C660.7 55.2 690.2 48.5 700.0 46.3"><title>本年の月次 MRR</title></path><circle class="series-dot" style="--i: 1" cx="110.9" cy="133.4" r="3.2" fill="var(--chart-1)" stroke="var(--card)" stroke-width="1.5"><title>2月 本年 13400 万円</title></circle><circle class="series-dot" style="--i: 1" cx="228.7" cy="119.3" r="3.2" fill="var(--chart-1)" stroke="var(--card)" stroke-width="1.5"><title>4月 本年 14700 万円</title></circle><circle class="series-dot" style="--i: 1" cx="346.5" cy="104.0" r="3.2" fill="var(--chart-1)" stroke="var(--card)" stroke-width="1.5"><title>6月 本年 16100 万円</title></circle><circle class="series-dot" style="--i: 1" cx="464.4" cy="89.9" r="3.2" fill="var(--chart-1)" stroke="var(--card)" stroke-width="1.5"><title>8月 本年 17400 万円</title></circle><circle class="series-dot" style="--i: 1" cx="582.2" cy="71.4" r="3.2" fill="var(--chart-1)" stroke="var(--card)" stroke-width="1.5"><title>10月 本年 19100 万円</title></circle><circle class="series-dot" style="--i: 1" cx="700.0" cy="46.3" r="3.2" fill="var(--chart-1)" stroke="var(--card)" stroke-width="1.5"><title>12月 本年 21400 万円</title></circle><circle class="ping" cx="700.0" cy="46.3" r="5" fill="var(--chart-1)"/><circle class="series-dot" style="--i: 1" cx="700.0" cy="46.3" r="4.5" fill="var(--chart-1)" stroke="var(--card)" stroke-width="2"><title>12月 本年 21400 万円（最新）</title></circle></svg></div>
+              <div class="legend"><span class="legend__item"><span class="legend__swatch" style="background: var(--chart-1)"></span>本年<span class="legend__value">2.14 億円</span></span><span class="legend__item"><span class="legend__swatch" style="background: var(--chart-2)"></span>前年<span class="legend__value">1.49 億円</span></span></div>
             </div>
-          </figcaption>
-          <svg role="img" viewBox="0 0 260 260" aria-labelledby="donut-t donut-d">
-            <title id="donut-t">流入チャネル構成</title>
-            <desc id="donut-d">オーガニック検索42%、紹介・口コミ26%、広告18%、直接流入14%。</desc>
-            <path class="donut-arc" style="--dash: 238.9; --gap: 999; --i: 0" stroke="var(--chart-1)" d="M130 38 A92 92 0 0 1 177.7 208.7" data-tip="オーガニック検索 42%"/><path class="donut-arc" style="--dash: 146.4; --gap: 999; --i: 1" stroke="var(--chart-2)" d="M174.3 210.6 A92 92 0 0 1 48.5 172.6" data-tip="紹介・口コミ 26%"/><path class="donut-arc" style="--dash: 100.2; --gap: 999; --i: 2" stroke="var(--chart-3)" d="M46.8 169.2 A92 92 0 0 1 56.7 74.4" data-tip="広告 18%"/><path class="donut-arc" style="--dash: 77.1; --gap: 999; --i: 3" stroke="var(--chart-4)" d="M59.1 71.4 A92 92 0 0 1 126.1 38.1" data-tip="直接流入 14%"/>
-            <text class="chart-label" x="130" y="122" text-anchor="middle">総セッション</text>
-            <text class="chart-value" x="130" y="152" text-anchor="middle" font-size="30">1.84M</text>
-          </svg>
-          <ul class="legend"><li><span class="legend__swatch" style="background: var(--chart-1)"></span>オーガニック検索 42%</li><li><span class="legend__swatch" style="background: var(--chart-2)"></span>紹介・口コミ 26%</li><li><span class="legend__swatch" style="background: var(--chart-3)"></span>広告 18%</li><li><span class="legend__swatch" style="background: var(--chart-4)"></span>直接流入 14%</li></ul>
-        </figure>
-        <figure class="card chart-figure span-wide reveal" style="--i: 2">
-          <figcaption class="card__head">
-            <div>
-              <h3 class="card__title">四半期収益の内訳</h3>
-              <p class="card__hint">単位は百万円・原点は 0</p>
-            </div>
-            <span class="chip">8 四半期</span>
-          </figcaption>
-          <div class="chart-scroll">
-          <svg role="img" viewBox="0 0 726 280" data-origin="0" aria-labelledby="bar-t bar-d">
-            <title id="bar-t">四半期収益の内訳</title>
-            <desc id="bar-d">総額は23年Q1の82百万円から24年Q4の164百万円へ倍増した。原点は0。</desc>
-            <g class="axis"><line class="gridline" x1="62" y1="244" x2="704" y2="244"/><text class="chart-label" x="50" y="248" text-anchor="end">0</text><line class="gridline" x1="62" y1="179.9" x2="704" y2="179.9"/><text class="chart-label" x="50" y="183.9" text-anchor="end">50</text><line class="gridline" x1="62" y1="115.8" x2="704" y2="115.8"/><text class="chart-label" x="50" y="119.8" text-anchor="end">100</text><line class="gridline" x1="62" y1="51.6" x2="704" y2="51.6"/><text class="chart-label" x="50" y="55.6" text-anchor="end">150</text><text class="chart-label" x="102.1" y="266" text-anchor="middle">23 Q1</text><text class="chart-label" x="182.4" y="266" text-anchor="middle">23 Q2</text><text class="chart-label" x="262.6" y="266" text-anchor="middle">23 Q3</text><text class="chart-label" x="342.9" y="266" text-anchor="middle">23 Q4</text><text class="chart-label" x="423.1" y="266" text-anchor="middle">24 Q1</text><text class="chart-label" x="503.4" y="266" text-anchor="middle">24 Q2</text><text class="chart-label" x="583.6" y="266" text-anchor="middle">24 Q3</text><text class="chart-label" x="663.9" y="266" text-anchor="middle">24 Q4</text></g>
-            <rect class="bar" style="--i: 0" x="79.7" y="190.1" width="44.9" height="53.9" fill="var(--chart-1)" data-tip="23 Q1・サブスクリプション 42百万円"/><rect class="bar" style="--i: 1" x="79.7" y="156.8" width="44.9" height="33.3" fill="var(--chart-2)" data-tip="23 Q1・従量課金 26百万円"/><rect class="bar" style="--i: 2" x="79.7" y="138.8" width="44.9" height="18" fill="var(--chart-3)" data-tip="23 Q1・サポート契約 14百万円"/><rect class="bar" style="--i: 3" x="159.9" y="185" width="44.9" height="59" fill="var(--chart-1)" data-tip="23 Q2・サブスクリプション 46百万円"/><rect class="bar" style="--i: 4" x="159.9" y="149.1" width="44.9" height="35.9" fill="var(--chart-2)" data-tip="23 Q2・従量課金 28百万円"/><rect class="bar" style="--i: 5" x="159.9" y="129.9" width="44.9" height="19.2" fill="var(--chart-3)" data-tip="23 Q2・サポート契約 15百万円"/><rect class="bar" style="--i: 6" x="240.2" y="178.6" width="44.9" height="65.4" fill="var(--chart-1)" data-tip="23 Q3・サブスクリプション 51百万円"/><rect class="bar" style="--i: 7" x="240.2" y="140.1" width="44.9" height="38.5" fill="var(--chart-2)" data-tip="23 Q3・従量課金 30百万円"/><rect class="bar" style="--i: 8" x="240.2" y="118.3" width="44.9" height="21.8" fill="var(--chart-3)" data-tip="23 Q3・サポート契約 17百万円"/><rect class="bar" style="--i: 9" x="320.4" y="169.6" width="44.9" height="74.4" fill="var(--chart-1)" data-tip="23 Q4・サブスクリプション 58百万円"/><rect class="bar" style="--i: 10" x="320.4" y="127.3" width="44.9" height="42.3" fill="var(--chart-2)" data-tip="23 Q4・従量課金 33百万円"/><rect class="bar" style="--i: 11" x="320.4" y="104.2" width="44.9" height="23.1" fill="var(--chart-3)" data-tip="23 Q4・サポート契約 18百万円"/><rect class="bar" style="--i: 12" x="400.7" y="163.2" width="44.9" height="80.8" fill="var(--chart-1)" data-tip="24 Q1・サブスクリプション 63百万円"/><rect class="bar" style="--i: 13" x="400.7" y="115.8" width="44.9" height="47.4" fill="var(--chart-2)" data-tip="24 Q1・従量課金 37百万円"/><rect class="bar" style="--i: 14" x="400.7" y="88.8" width="44.9" height="26.9" fill="var(--chart-3)" data-tip="24 Q1・サポート契約 21百万円"/><rect class="bar" style="--i: 15" x="480.9" y="154.2" width="44.9" height="89.8" fill="var(--chart-1)" data-tip="24 Q2・サブスクリプション 70百万円"/><rect class="bar" style="--i: 16" x="480.9" y="102.9" width="44.9" height="51.3" fill="var(--chart-2)" data-tip="24 Q2・従量課金 40百万円"/><rect class="bar" style="--i: 17" x="480.9" y="73.4" width="44.9" height="29.5" fill="var(--chart-3)" data-tip="24 Q2・サポート契約 23百万円"/><rect class="bar" style="--i: 18" x="561.2" y="144" width="44.9" height="100" fill="var(--chart-1)" data-tip="24 Q3・サブスクリプション 78百万円"/><rect class="bar" style="--i: 19" x="561.2" y="87.6" width="44.9" height="56.4" fill="var(--chart-2)" data-tip="24 Q3・従量課金 44百万円"/><rect class="bar" style="--i: 20" x="561.2" y="54.2" width="44.9" height="33.3" fill="var(--chart-3)" data-tip="24 Q3・サポート契約 26百万円"/><rect class="bar" style="--i: 21" x="641.4" y="133.7" width="44.9" height="110.3" fill="var(--chart-1)" data-tip="24 Q4・サブスクリプション 86百万円"/><rect class="bar" style="--i: 22" x="641.4" y="70.9" width="44.9" height="62.8" fill="var(--chart-2)" data-tip="24 Q4・従量課金 49百万円"/><rect class="bar" style="--i: 23" x="641.4" y="33.7" width="44.9" height="37.2" fill="var(--chart-3)" data-tip="24 Q4・サポート契約 29百万円"/>
-            <g class="axis"><text class="chart-label" x="102.1" y="266" text-anchor="middle">23 Q1</text><text class="chart-label" x="182.4" y="266" text-anchor="middle">23 Q2</text><text class="chart-label" x="262.6" y="266" text-anchor="middle">23 Q3</text><text class="chart-label" x="342.9" y="266" text-anchor="middle">23 Q4</text><text class="chart-label" x="423.1" y="266" text-anchor="middle">24 Q1</text><text class="chart-label" x="503.4" y="266" text-anchor="middle">24 Q2</text><text class="chart-label" x="583.6" y="266" text-anchor="middle">24 Q3</text><text class="chart-label" x="663.9" y="266" text-anchor="middle">24 Q4</text></g>
-          </svg>
-          </div>
-          <ul class="legend"><li><span class="legend__swatch" style="background: var(--chart-1)"></span>サブスクリプション</li><li><span class="legend__swatch" style="background: var(--chart-2)"></span>従量課金</li><li><span class="legend__swatch" style="background: var(--chart-3)"></span>サポート契約</li></ul>
-        </figure>
-        <figure class="card chart-figure reveal" style="--i: 3">
-          <figcaption class="card__head">
-            <div>
-              <h3 class="card__title">今期目標の達成率</h3>
-              <p class="card__hint">計画比・12月10日時点</p>
-            </div>
-          </figcaption>
-          <svg role="img" viewBox="0 0 350 140" aria-labelledby="gauge-t gauge-d">
-            <title id="gauge-t">今期目標の達成率</title>
-            <desc id="gauge-d">売上92%、継続率78%、NPS64%。</desc>
-            <g data-tip="売上 達成率 92%"><circle class="gauge-track" cx="66" cy="66" r="42"/><circle class="gauge-value" cx="66" cy="66" r="42" stroke="var(--chart-1)" style="--dash: 242.8" stroke-dasharray="242.8 999" transform="rotate(-90 66 66)"/><text class="chart-value" x="66" y="72" text-anchor="middle" font-size="22">92%</text><text class="chart-label" x="66" y="128" text-anchor="middle">売上</text></g><g data-tip="継続率 達成率 78%"><circle class="gauge-track" cx="180" cy="66" r="42"/><circle class="gauge-value" cx="180" cy="66" r="42" stroke="var(--chart-2)" style="--dash: 205.8" stroke-dasharray="205.8 999" transform="rotate(-90 180 66)"/><text class="chart-value" x="180" y="72" text-anchor="middle" font-size="22">78%</text><text class="chart-label" x="180" y="128" text-anchor="middle">継続率</text></g><g data-tip="NPS 達成率 64%"><circle class="gauge-track" cx="294" cy="66" r="42"/><circle class="gauge-value" cx="294" cy="66" r="42" stroke="var(--chart-3)" style="--dash: 168.9" stroke-dasharray="168.9 999" transform="rotate(-90 294 66)"/><text class="chart-value" x="294" y="72" text-anchor="middle" font-size="22">64%</text><text class="chart-label" x="294" y="128" text-anchor="middle">NPS</text></g>
-          </svg>
-          <ul class="detail-list">
-            <li>
-              <span class="detail-list__name"><span class="legend__swatch"
-                  style="background: var(--chart-1)"></span>売上</span>
-              <span class="detail-list__value">1,512 / 1,640 百万円</span>
-            </li>
-            <li>
-              <span class="detail-list__name"><span class="legend__swatch"
-                  style="background: var(--chart-2)"></span>継続率</span>
-              <span class="detail-list__value">93.6% / 目標 96.0%</span>
-            </li>
-            <li>
-              <span class="detail-list__name"><span class="legend__swatch"
-                  style="background: var(--chart-3)"></span>NPS</span>
-              <span class="detail-list__value">+38 / 目標 +52</span>
-            </li>
-          </ul>
-        </figure>
-        <figure class="card chart-figure span-full reveal" style="--i: 4">
-          <figcaption class="card__head">
-            <div>
-              <h3 class="card__title">曜日・時間帯別の利用強度</h3>
-              <p class="card__hint">濃いほど利用が多い・直近 8 週の平均</p>
-            </div>
-            <span class="chip"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13.5 3 5.5 13.5H11l-.5 7.5 8-10.5H13Z"/></svg> ピークは平日 10 時台</span>
-          </figcaption>
-          <div class="chart-scroll">
-          <svg role="img" viewBox="0 0 660 212" aria-labelledby="heat-t heat-d">
-            <title id="heat-t">曜日・時間帯別の利用強度</title>
-            <desc id="heat-d">平日の10時台と15時台に山があり、土日は全体に低い。深夜帯は最も低い。</desc>
-            <rect class="heat-cell" style="--i: 0" x="46" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="月曜 0時・利用指数 0"/><rect class="heat-cell" style="--i: 1" x="71" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="月曜 1時・利用指数 0"/><rect class="heat-cell" style="--i: 2" x="96" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="月曜 2時・利用指数 0"/><rect class="heat-cell" style="--i: 3" x="121" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 1%, var(--chart-1-container))" data-tip="月曜 3時・利用指数 1"/><rect class="heat-cell" style="--i: 4" x="146" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 4%, var(--chart-1-container))" data-tip="月曜 4時・利用指数 4"/><rect class="heat-cell" style="--i: 5" x="171" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 10%, var(--chart-1-container))" data-tip="月曜 5時・利用指数 10"/><rect class="heat-cell" style="--i: 6" x="196" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 21%, var(--chart-1-container))" data-tip="月曜 6時・利用指数 21"/><rect class="heat-cell" style="--i: 7" x="221" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 39%, var(--chart-1-container))" data-tip="月曜 7時・利用指数 39"/><rect class="heat-cell" style="--i: 8" x="246" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 61%, var(--chart-1-container))" data-tip="月曜 8時・利用指数 61"/><rect class="heat-cell" style="--i: 9" x="271" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 81%, var(--chart-1-container))" data-tip="月曜 9時・利用指数 81"/><rect class="heat-cell" style="--i: 10" x="296" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 96%, var(--chart-1-container))" data-tip="月曜 10時・利用指数 96"/><rect class="heat-cell" style="--i: 11" x="321" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 100%, var(--chart-1-container))" data-tip="月曜 11時・利用指数 100"/><rect class="heat-cell" style="--i: 12" x="346" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 98%, var(--chart-1-container))" data-tip="月曜 12時・利用指数 98"/><rect class="heat-cell" style="--i: 13" x="371" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 93%, var(--chart-1-container))" data-tip="月曜 13時・利用指数 93"/><rect class="heat-cell" style="--i: 14" x="396" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 87%, var(--chart-1-container))" data-tip="月曜 14時・利用指数 87"/><rect class="heat-cell" style="--i: 15" x="421" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 81%, var(--chart-1-container))" data-tip="月曜 15時・利用指数 81"/><rect class="heat-cell" style="--i: 16" x="446" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 74%, var(--chart-1-container))" data-tip="月曜 16時・利用指数 74"/><rect class="heat-cell" style="--i: 17" x="471" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 66%, var(--chart-1-container))" data-tip="月曜 17時・利用指数 66"/><rect class="heat-cell" style="--i: 18" x="496" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 60%, var(--chart-1-container))" data-tip="月曜 18時・利用指数 60"/><rect class="heat-cell" style="--i: 19" x="521" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 58%, var(--chart-1-container))" data-tip="月曜 19時・利用指数 58"/><rect class="heat-cell" style="--i: 20" x="546" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 56%, var(--chart-1-container))" data-tip="月曜 20時・利用指数 56"/><rect class="heat-cell" style="--i: 21" x="571" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 52%, var(--chart-1-container))" data-tip="月曜 21時・利用指数 52"/><rect class="heat-cell" style="--i: 22" x="596" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 43%, var(--chart-1-container))" data-tip="月曜 22時・利用指数 43"/><rect class="heat-cell" style="--i: 23" x="621" y="20" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 31%, var(--chart-1-container))" data-tip="月曜 23時・利用指数 31"/><rect class="heat-cell" style="--i: 24" x="46" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="火曜 0時・利用指数 0"/><rect class="heat-cell" style="--i: 25" x="71" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="火曜 1時・利用指数 0"/><rect class="heat-cell" style="--i: 26" x="96" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="火曜 2時・利用指数 0"/><rect class="heat-cell" style="--i: 27" x="121" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 1%, var(--chart-1-container))" data-tip="火曜 3時・利用指数 1"/><rect class="heat-cell" style="--i: 28" x="146" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 4%, var(--chart-1-container))" data-tip="火曜 4時・利用指数 4"/><rect class="heat-cell" style="--i: 29" x="171" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 10%, var(--chart-1-container))" data-tip="火曜 5時・利用指数 10"/><rect class="heat-cell" style="--i: 30" x="196" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 21%, var(--chart-1-container))" data-tip="火曜 6時・利用指数 21"/><rect class="heat-cell" style="--i: 31" x="221" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 39%, var(--chart-1-container))" data-tip="火曜 7時・利用指数 39"/><rect class="heat-cell" style="--i: 32" x="246" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 61%, var(--chart-1-container))" data-tip="火曜 8時・利用指数 61"/><rect class="heat-cell" style="--i: 33" x="271" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 81%, var(--chart-1-container))" data-tip="火曜 9時・利用指数 81"/><rect class="heat-cell" style="--i: 34" x="296" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 96%, var(--chart-1-container))" data-tip="火曜 10時・利用指数 96"/><rect class="heat-cell" style="--i: 35" x="321" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 100%, var(--chart-1-container))" data-tip="火曜 11時・利用指数 100"/><rect class="heat-cell" style="--i: 36" x="346" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 98%, var(--chart-1-container))" data-tip="火曜 12時・利用指数 98"/><rect class="heat-cell" style="--i: 37" x="371" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 93%, var(--chart-1-container))" data-tip="火曜 13時・利用指数 93"/><rect class="heat-cell" style="--i: 38" x="396" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 87%, var(--chart-1-container))" data-tip="火曜 14時・利用指数 87"/><rect class="heat-cell" style="--i: 39" x="421" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 81%, var(--chart-1-container))" data-tip="火曜 15時・利用指数 81"/><rect class="heat-cell" style="--i: 40" x="446" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 74%, var(--chart-1-container))" data-tip="火曜 16時・利用指数 74"/><rect class="heat-cell" style="--i: 41" x="471" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 66%, var(--chart-1-container))" data-tip="火曜 17時・利用指数 66"/><rect class="heat-cell" style="--i: 42" x="496" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 60%, var(--chart-1-container))" data-tip="火曜 18時・利用指数 60"/><rect class="heat-cell" style="--i: 43" x="521" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 58%, var(--chart-1-container))" data-tip="火曜 19時・利用指数 58"/><rect class="heat-cell" style="--i: 44" x="546" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 56%, var(--chart-1-container))" data-tip="火曜 20時・利用指数 56"/><rect class="heat-cell" style="--i: 45" x="571" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 52%, var(--chart-1-container))" data-tip="火曜 21時・利用指数 52"/><rect class="heat-cell" style="--i: 46" x="596" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 43%, var(--chart-1-container))" data-tip="火曜 22時・利用指数 43"/><rect class="heat-cell" style="--i: 47" x="621" y="46" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 31%, var(--chart-1-container))" data-tip="火曜 23時・利用指数 31"/><rect class="heat-cell" style="--i: 48" x="46" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="水曜 0時・利用指数 0"/><rect class="heat-cell" style="--i: 49" x="71" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="水曜 1時・利用指数 0"/><rect class="heat-cell" style="--i: 50" x="96" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="水曜 2時・利用指数 0"/><rect class="heat-cell" style="--i: 51" x="121" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 1%, var(--chart-1-container))" data-tip="水曜 3時・利用指数 1"/><rect class="heat-cell" style="--i: 52" x="146" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 4%, var(--chart-1-container))" data-tip="水曜 4時・利用指数 4"/><rect class="heat-cell" style="--i: 53" x="171" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 10%, var(--chart-1-container))" data-tip="水曜 5時・利用指数 10"/><rect class="heat-cell" style="--i: 54" x="196" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 21%, var(--chart-1-container))" data-tip="水曜 6時・利用指数 21"/><rect class="heat-cell" style="--i: 55" x="221" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 39%, var(--chart-1-container))" data-tip="水曜 7時・利用指数 39"/><rect class="heat-cell" style="--i: 56" x="246" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 61%, var(--chart-1-container))" data-tip="水曜 8時・利用指数 61"/><rect class="heat-cell" style="--i: 57" x="271" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 81%, var(--chart-1-container))" data-tip="水曜 9時・利用指数 81"/><rect class="heat-cell" style="--i: 58" x="296" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 96%, var(--chart-1-container))" data-tip="水曜 10時・利用指数 96"/><rect class="heat-cell" style="--i: 59" x="321" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 100%, var(--chart-1-container))" data-tip="水曜 11時・利用指数 100"/><rect class="heat-cell" style="--i: 60" x="346" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 98%, var(--chart-1-container))" data-tip="水曜 12時・利用指数 98"/><rect class="heat-cell" style="--i: 61" x="371" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 93%, var(--chart-1-container))" data-tip="水曜 13時・利用指数 93"/><rect class="heat-cell" style="--i: 62" x="396" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 87%, var(--chart-1-container))" data-tip="水曜 14時・利用指数 87"/><rect class="heat-cell" style="--i: 63" x="421" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 81%, var(--chart-1-container))" data-tip="水曜 15時・利用指数 81"/><rect class="heat-cell" style="--i: 64" x="446" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 74%, var(--chart-1-container))" data-tip="水曜 16時・利用指数 74"/><rect class="heat-cell" style="--i: 65" x="471" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 66%, var(--chart-1-container))" data-tip="水曜 17時・利用指数 66"/><rect class="heat-cell" style="--i: 66" x="496" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 60%, var(--chart-1-container))" data-tip="水曜 18時・利用指数 60"/><rect class="heat-cell" style="--i: 67" x="521" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 58%, var(--chart-1-container))" data-tip="水曜 19時・利用指数 58"/><rect class="heat-cell" style="--i: 68" x="546" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 56%, var(--chart-1-container))" data-tip="水曜 20時・利用指数 56"/><rect class="heat-cell" style="--i: 69" x="571" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 52%, var(--chart-1-container))" data-tip="水曜 21時・利用指数 52"/><rect class="heat-cell" style="--i: 70" x="596" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 43%, var(--chart-1-container))" data-tip="水曜 22時・利用指数 43"/><rect class="heat-cell" style="--i: 71" x="621" y="72" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 31%, var(--chart-1-container))" data-tip="水曜 23時・利用指数 31"/><rect class="heat-cell" style="--i: 72" x="46" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="木曜 0時・利用指数 0"/><rect class="heat-cell" style="--i: 73" x="71" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="木曜 1時・利用指数 0"/><rect class="heat-cell" style="--i: 74" x="96" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="木曜 2時・利用指数 0"/><rect class="heat-cell" style="--i: 75" x="121" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 1%, var(--chart-1-container))" data-tip="木曜 3時・利用指数 1"/><rect class="heat-cell" style="--i: 76" x="146" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 4%, var(--chart-1-container))" data-tip="木曜 4時・利用指数 4"/><rect class="heat-cell" style="--i: 77" x="171" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 10%, var(--chart-1-container))" data-tip="木曜 5時・利用指数 10"/><rect class="heat-cell" style="--i: 78" x="196" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 21%, var(--chart-1-container))" data-tip="木曜 6時・利用指数 21"/><rect class="heat-cell" style="--i: 79" x="221" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 39%, var(--chart-1-container))" data-tip="木曜 7時・利用指数 39"/><rect class="heat-cell" style="--i: 80" x="246" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 61%, var(--chart-1-container))" data-tip="木曜 8時・利用指数 61"/><rect class="heat-cell" style="--i: 81" x="271" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 81%, var(--chart-1-container))" data-tip="木曜 9時・利用指数 81"/><rect class="heat-cell" style="--i: 82" x="296" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 96%, var(--chart-1-container))" data-tip="木曜 10時・利用指数 96"/><rect class="heat-cell" style="--i: 83" x="321" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 100%, var(--chart-1-container))" data-tip="木曜 11時・利用指数 100"/><rect class="heat-cell" style="--i: 84" x="346" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 98%, var(--chart-1-container))" data-tip="木曜 12時・利用指数 98"/><rect class="heat-cell" style="--i: 85" x="371" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 93%, var(--chart-1-container))" data-tip="木曜 13時・利用指数 93"/><rect class="heat-cell" style="--i: 86" x="396" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 87%, var(--chart-1-container))" data-tip="木曜 14時・利用指数 87"/><rect class="heat-cell" style="--i: 87" x="421" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 81%, var(--chart-1-container))" data-tip="木曜 15時・利用指数 81"/><rect class="heat-cell" style="--i: 88" x="446" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 74%, var(--chart-1-container))" data-tip="木曜 16時・利用指数 74"/><rect class="heat-cell" style="--i: 89" x="471" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 66%, var(--chart-1-container))" data-tip="木曜 17時・利用指数 66"/><rect class="heat-cell" style="--i: 90" x="496" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 60%, var(--chart-1-container))" data-tip="木曜 18時・利用指数 60"/><rect class="heat-cell" style="--i: 91" x="521" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 58%, var(--chart-1-container))" data-tip="木曜 19時・利用指数 58"/><rect class="heat-cell" style="--i: 92" x="546" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 56%, var(--chart-1-container))" data-tip="木曜 20時・利用指数 56"/><rect class="heat-cell" style="--i: 93" x="571" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 52%, var(--chart-1-container))" data-tip="木曜 21時・利用指数 52"/><rect class="heat-cell" style="--i: 94" x="596" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 43%, var(--chart-1-container))" data-tip="木曜 22時・利用指数 43"/><rect class="heat-cell" style="--i: 95" x="621" y="98" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 31%, var(--chart-1-container))" data-tip="木曜 23時・利用指数 31"/><rect class="heat-cell" style="--i: 96" x="46" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="金曜 0時・利用指数 0"/><rect class="heat-cell" style="--i: 97" x="71" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="金曜 1時・利用指数 0"/><rect class="heat-cell" style="--i: 98" x="96" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="金曜 2時・利用指数 0"/><rect class="heat-cell" style="--i: 99" x="121" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 1%, var(--chart-1-container))" data-tip="金曜 3時・利用指数 1"/><rect class="heat-cell" style="--i: 100" x="146" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 4%, var(--chart-1-container))" data-tip="金曜 4時・利用指数 4"/><rect class="heat-cell" style="--i: 101" x="171" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 10%, var(--chart-1-container))" data-tip="金曜 5時・利用指数 10"/><rect class="heat-cell" style="--i: 102" x="196" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 21%, var(--chart-1-container))" data-tip="金曜 6時・利用指数 21"/><rect class="heat-cell" style="--i: 103" x="221" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 39%, var(--chart-1-container))" data-tip="金曜 7時・利用指数 39"/><rect class="heat-cell" style="--i: 104" x="246" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 61%, var(--chart-1-container))" data-tip="金曜 8時・利用指数 61"/><rect class="heat-cell" style="--i: 105" x="271" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 81%, var(--chart-1-container))" data-tip="金曜 9時・利用指数 81"/><rect class="heat-cell" style="--i: 106" x="296" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 96%, var(--chart-1-container))" data-tip="金曜 10時・利用指数 96"/><rect class="heat-cell" style="--i: 107" x="321" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 100%, var(--chart-1-container))" data-tip="金曜 11時・利用指数 100"/><rect class="heat-cell" style="--i: 108" x="346" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 98%, var(--chart-1-container))" data-tip="金曜 12時・利用指数 98"/><rect class="heat-cell" style="--i: 109" x="371" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 93%, var(--chart-1-container))" data-tip="金曜 13時・利用指数 93"/><rect class="heat-cell" style="--i: 110" x="396" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 87%, var(--chart-1-container))" data-tip="金曜 14時・利用指数 87"/><rect class="heat-cell" style="--i: 111" x="421" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 81%, var(--chart-1-container))" data-tip="金曜 15時・利用指数 81"/><rect class="heat-cell" style="--i: 112" x="446" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 74%, var(--chart-1-container))" data-tip="金曜 16時・利用指数 74"/><rect class="heat-cell" style="--i: 113" x="471" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 66%, var(--chart-1-container))" data-tip="金曜 17時・利用指数 66"/><rect class="heat-cell" style="--i: 114" x="496" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 60%, var(--chart-1-container))" data-tip="金曜 18時・利用指数 60"/><rect class="heat-cell" style="--i: 115" x="521" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 58%, var(--chart-1-container))" data-tip="金曜 19時・利用指数 58"/><rect class="heat-cell" style="--i: 116" x="546" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 56%, var(--chart-1-container))" data-tip="金曜 20時・利用指数 56"/><rect class="heat-cell" style="--i: 117" x="571" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 52%, var(--chart-1-container))" data-tip="金曜 21時・利用指数 52"/><rect class="heat-cell" style="--i: 118" x="596" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 43%, var(--chart-1-container))" data-tip="金曜 22時・利用指数 43"/><rect class="heat-cell" style="--i: 119" x="621" y="124" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 31%, var(--chart-1-container))" data-tip="金曜 23時・利用指数 31"/><rect class="heat-cell" style="--i: 120" x="46" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="土曜 0時・利用指数 0"/><rect class="heat-cell" style="--i: 121" x="71" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="土曜 1時・利用指数 0"/><rect class="heat-cell" style="--i: 122" x="96" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="土曜 2時・利用指数 0"/><rect class="heat-cell" style="--i: 123" x="121" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 1%, var(--chart-1-container))" data-tip="土曜 3時・利用指数 1"/><rect class="heat-cell" style="--i: 124" x="146" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 2%, var(--chart-1-container))" data-tip="土曜 4時・利用指数 2"/><rect class="heat-cell" style="--i: 125" x="171" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 4%, var(--chart-1-container))" data-tip="土曜 5時・利用指数 4"/><rect class="heat-cell" style="--i: 126" x="196" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 10%, var(--chart-1-container))" data-tip="土曜 6時・利用指数 10"/><rect class="heat-cell" style="--i: 127" x="221" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 17%, var(--chart-1-container))" data-tip="土曜 7時・利用指数 17"/><rect class="heat-cell" style="--i: 128" x="246" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 27%, var(--chart-1-container))" data-tip="土曜 8時・利用指数 27"/><rect class="heat-cell" style="--i: 129" x="271" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 37%, var(--chart-1-container))" data-tip="土曜 9時・利用指数 37"/><rect class="heat-cell" style="--i: 130" x="296" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 43%, var(--chart-1-container))" data-tip="土曜 10時・利用指数 43"/><rect class="heat-cell" style="--i: 131" x="321" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 45%, var(--chart-1-container))" data-tip="土曜 11時・利用指数 45"/><rect class="heat-cell" style="--i: 132" x="346" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 44%, var(--chart-1-container))" data-tip="土曜 12時・利用指数 44"/><rect class="heat-cell" style="--i: 133" x="371" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 42%, var(--chart-1-container))" data-tip="土曜 13時・利用指数 42"/><rect class="heat-cell" style="--i: 134" x="396" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 39%, var(--chart-1-container))" data-tip="土曜 14時・利用指数 39"/><rect class="heat-cell" style="--i: 135" x="421" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 36%, var(--chart-1-container))" data-tip="土曜 15時・利用指数 36"/><rect class="heat-cell" style="--i: 136" x="446" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 33%, var(--chart-1-container))" data-tip="土曜 16時・利用指数 33"/><rect class="heat-cell" style="--i: 137" x="471" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 30%, var(--chart-1-container))" data-tip="土曜 17時・利用指数 30"/><rect class="heat-cell" style="--i: 138" x="496" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 27%, var(--chart-1-container))" data-tip="土曜 18時・利用指数 27"/><rect class="heat-cell" style="--i: 139" x="521" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 26%, var(--chart-1-container))" data-tip="土曜 19時・利用指数 26"/><rect class="heat-cell" style="--i: 140" x="546" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 25%, var(--chart-1-container))" data-tip="土曜 20時・利用指数 25"/><rect class="heat-cell" style="--i: 141" x="571" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 24%, var(--chart-1-container))" data-tip="土曜 21時・利用指数 24"/><rect class="heat-cell" style="--i: 142" x="596" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 20%, var(--chart-1-container))" data-tip="土曜 22時・利用指数 20"/><rect class="heat-cell" style="--i: 143" x="621" y="150" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 14%, var(--chart-1-container))" data-tip="土曜 23時・利用指数 14"/><rect class="heat-cell" style="--i: 144" x="46" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="日曜 0時・利用指数 0"/><rect class="heat-cell" style="--i: 145" x="71" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="日曜 1時・利用指数 0"/><rect class="heat-cell" style="--i: 146" x="96" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))" data-tip="日曜 2時・利用指数 0"/><rect class="heat-cell" style="--i: 147" x="121" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 1%, var(--chart-1-container))" data-tip="日曜 3時・利用指数 1"/><rect class="heat-cell" style="--i: 148" x="146" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 2%, var(--chart-1-container))" data-tip="日曜 4時・利用指数 2"/><rect class="heat-cell" style="--i: 149" x="171" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 4%, var(--chart-1-container))" data-tip="日曜 5時・利用指数 4"/><rect class="heat-cell" style="--i: 150" x="196" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 10%, var(--chart-1-container))" data-tip="日曜 6時・利用指数 10"/><rect class="heat-cell" style="--i: 151" x="221" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 17%, var(--chart-1-container))" data-tip="日曜 7時・利用指数 17"/><rect class="heat-cell" style="--i: 152" x="246" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 27%, var(--chart-1-container))" data-tip="日曜 8時・利用指数 27"/><rect class="heat-cell" style="--i: 153" x="271" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 37%, var(--chart-1-container))" data-tip="日曜 9時・利用指数 37"/><rect class="heat-cell" style="--i: 154" x="296" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 43%, var(--chart-1-container))" data-tip="日曜 10時・利用指数 43"/><rect class="heat-cell" style="--i: 155" x="321" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 45%, var(--chart-1-container))" data-tip="日曜 11時・利用指数 45"/><rect class="heat-cell" style="--i: 156" x="346" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 44%, var(--chart-1-container))" data-tip="日曜 12時・利用指数 44"/><rect class="heat-cell" style="--i: 157" x="371" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 42%, var(--chart-1-container))" data-tip="日曜 13時・利用指数 42"/><rect class="heat-cell" style="--i: 158" x="396" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 39%, var(--chart-1-container))" data-tip="日曜 14時・利用指数 39"/><rect class="heat-cell" style="--i: 159" x="421" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 36%, var(--chart-1-container))" data-tip="日曜 15時・利用指数 36"/><rect class="heat-cell" style="--i: 160" x="446" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 33%, var(--chart-1-container))" data-tip="日曜 16時・利用指数 33"/><rect class="heat-cell" style="--i: 161" x="471" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 30%, var(--chart-1-container))" data-tip="日曜 17時・利用指数 30"/><rect class="heat-cell" style="--i: 162" x="496" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 27%, var(--chart-1-container))" data-tip="日曜 18時・利用指数 27"/><rect class="heat-cell" style="--i: 163" x="521" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 26%, var(--chart-1-container))" data-tip="日曜 19時・利用指数 26"/><rect class="heat-cell" style="--i: 164" x="546" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 25%, var(--chart-1-container))" data-tip="日曜 20時・利用指数 25"/><rect class="heat-cell" style="--i: 165" x="571" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 24%, var(--chart-1-container))" data-tip="日曜 21時・利用指数 24"/><rect class="heat-cell" style="--i: 166" x="596" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 20%, var(--chart-1-container))" data-tip="日曜 22時・利用指数 20"/><rect class="heat-cell" style="--i: 167" x="621" y="176" width="21" height="22" fill="color-mix(in oklab, var(--chart-1) 14%, var(--chart-1-container))" data-tip="日曜 23時・利用指数 14"/>
-            <g class="axis"><text class="chart-label" x="34" y="35" text-anchor="end">月</text><text class="chart-label" x="34" y="61" text-anchor="end">火</text><text class="chart-label" x="34" y="87" text-anchor="end">水</text><text class="chart-label" x="34" y="113" text-anchor="end">木</text><text class="chart-label" x="34" y="139" text-anchor="end">金</text><text class="chart-label" x="34" y="165" text-anchor="end">土</text><text class="chart-label" x="34" y="191" text-anchor="end">日</text><text class="chart-label" x="56.5" y="200" text-anchor="middle">0</text><text class="chart-label" x="131.5" y="200" text-anchor="middle">3</text><text class="chart-label" x="206.5" y="200" text-anchor="middle">6</text><text class="chart-label" x="281.5" y="200" text-anchor="middle">9</text><text class="chart-label" x="356.5" y="200" text-anchor="middle">12</text><text class="chart-label" x="431.5" y="200" text-anchor="middle">15</text><text class="chart-label" x="506.5" y="200" text-anchor="middle">18</text><text class="chart-label" x="581.5" y="200" text-anchor="middle">21</text></g>
-          </svg>
-          </div>
-          <ul class="legend">
-            <li>少ない</li>
-            <li><span class="legend__swatch" style="background: color-mix(in oklab, var(--chart-1) 0%, var(--chart-1-container))"></span></li><li><span class="legend__swatch" style="background: color-mix(in oklab, var(--chart-1) 25%, var(--chart-1-container))"></span></li><li><span class="legend__swatch" style="background: color-mix(in oklab, var(--chart-1) 50%, var(--chart-1-container))"></span></li><li><span class="legend__swatch" style="background: color-mix(in oklab, var(--chart-1) 75%, var(--chart-1-container))"></span></li><li><span class="legend__swatch" style="background: color-mix(in oklab, var(--chart-1) 100%, var(--chart-1-container))"></span></li>
-            <li>多い</li>
-          </ul>
-        </figure>
-        </section>
+          </section>
 
-        <section class="card reveal" style="--i: 5" aria-labelledby="table-h">
-          <div class="card__head">
-            <div>
-              <h2 class="card__title" id="table-h">地域別の実績</h2>
-              <p class="card__hint">図と同じ内容を数値でも読めるようにしている</p>
+          <section class="card span-3 reveal" style="--i: 5" aria-labelledby="plan-h">
+            <div class="card__head">
+              <div>
+                <h2 class="card__title" id="plan-h">契約プランの構成</h2>
+                <p class="card__desc">契約金額ベースの内訳</p>
+              </div>
             </div>
-            <button class="icon-button" type="button" aria-label="CSV をダウンロード"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 4v10"/><path d="m8 11 4 4 4-4"/><path d="M4.5 19h15"/></svg></button>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <caption>2024 年 12 月・地域別アクティブユーザーと構成比</caption>
-              <thead>
-                <tr>
-                  <th scope="col">地域</th>
-                  <th scope="col" class="num">ユーザー数</th>
-                  <th scope="col">構成比</th>
-                  <th scope="col" class="num">前年同月比</th>
-                </tr>
-              </thead>
-              <tbody>
-              <tr>
-                <th scope="row">関東</th>
-                <td class="num">24,680</td>
-                <td>
-                  <span class="bar-cell">
-                    <span class="bar-cell__track"><span class="bar-cell__fill" style="--ratio: 1.000"></span></span>
-                    <span class="num">41.2%</span>
-                  </span>
-                </td>
-                <td class="num"><span class="chip chip--up">+14.2%</span></td>
-              </tr>
-              <tr>
-                <th scope="row">関西</th>
-                <td class="num">13,940</td>
-                <td>
-                  <span class="bar-cell">
-                    <span class="bar-cell__track"><span class="bar-cell__fill" style="--ratio: 0.566"></span></span>
-                    <span class="num">23.3%</span>
-                  </span>
-                </td>
-                <td class="num"><span class="chip chip--up">+9.8%</span></td>
-              </tr>
-              <tr>
-                <th scope="row">中部</th>
-                <td class="num">8,120</td>
-                <td>
-                  <span class="bar-cell">
-                    <span class="bar-cell__track"><span class="bar-cell__fill" style="--ratio: 0.330"></span></span>
-                    <span class="num">13.6%</span>
-                  </span>
-                </td>
-                <td class="num"><span class="chip chip--up">+6.1%</span></td>
-              </tr>
-              <tr>
-                <th scope="row">九州・沖縄</th>
-                <td class="num">5,480</td>
-                <td>
-                  <span class="bar-cell">
-                    <span class="bar-cell__track"><span class="bar-cell__fill" style="--ratio: 0.223"></span></span>
-                    <span class="num">9.2%</span>
-                  </span>
-                </td>
-                <td class="num"><span class="chip chip--up">+4.4%</span></td>
-              </tr>
-              <tr>
-                <th scope="row">東北</th>
-                <td class="num">3,910</td>
-                <td>
-                  <span class="bar-cell">
-                    <span class="bar-cell__track"><span class="bar-cell__fill" style="--ratio: 0.158"></span></span>
-                    <span class="num">6.5%</span>
-                  </span>
-                </td>
-                <td class="num"><span class="chip chip--down">-1.2%</span></td>
-              </tr>
-              <tr>
-                <th scope="row">北海道</th>
-                <td class="num">2,180</td>
-                <td>
-                  <span class="bar-cell">
-                    <span class="bar-cell__track"><span class="bar-cell__fill" style="--ratio: 0.087"></span></span>
-                    <span class="num">3.6%</span>
-                  </span>
-                </td>
-                <td class="num"><span class="chip chip--up">+2.7%</span></td>
-              </tr>
-              <tr>
-                <th scope="row">中国・四国</th>
-                <td class="num">1,898</td>
-                <td>
-                  <span class="bar-cell">
-                    <span class="bar-cell__track"><span class="bar-cell__fill" style="--ratio: 0.078"></span></span>
-                    <span class="num">3.2%</span>
-                  </span>
-                </td>
-                <td class="num"><span class="chip chip--down">-0.6%</span></td>
-              </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    </main>
+            <div class="card__body">
+              <div class="donut-wrap">
+                <svg class="chart chart--donut" role="img" viewBox="0 0 200 200" aria-labelledby="pl-t pl-d"><title id="pl-t">契約プランの構成比</title><desc id="pl-d">Enterprise が 42%、Business が 28%、Team が 19%、Starter が 11%。</desc><circle class="arc" style="--i: 0; --len: 427" cx="100" cy="100" r="68" stroke="var(--chart-1)" stroke-width="16" stroke-dasharray="175.4 251.8" stroke-dashoffset="-0.0" transform="rotate(-90 100 100)"><title>Enterprise 42%</title></circle><circle class="arc" style="--i: 1; --len: 427" cx="100" cy="100" r="68" stroke="var(--chart-2)" stroke-width="16" stroke-dasharray="115.6 311.6" stroke-dashoffset="-179.4" transform="rotate(-90 100 100)"><title>Business 28%</title></circle><circle class="arc" style="--i: 2; --len: 427" cx="100" cy="100" r="68" stroke="var(--chart-3)" stroke-width="16" stroke-dasharray="77.2 350.1" stroke-dashoffset="-299.1" transform="rotate(-90 100 100)"><title>Team 19%</title></circle><circle class="arc" style="--i: 3; --len: 427" cx="100" cy="100" r="68" stroke="var(--chart-4)" stroke-width="16" stroke-dasharray="43.0 384.3" stroke-dashoffset="-380.3" transform="rotate(-90 100 100)"><title>Starter 11%</title></circle></svg>
+                <span class="donut-center"><strong>8,412</strong><span>有料アカウント</span></span>
+              </div>
+              <div class="legend"><span class="legend__item"><span class="legend__swatch" style="background: var(--chart-1)"></span>Enterprise<span class="legend__value">42%</span></span><span class="legend__item"><span class="legend__swatch" style="background: var(--chart-2)"></span>Business<span class="legend__value">28%</span></span><span class="legend__item"><span class="legend__swatch" style="background: var(--chart-3)"></span>Team<span class="legend__value">19%</span></span><span class="legend__item"><span class="legend__swatch" style="background: var(--chart-4)"></span>Starter<span class="legend__value">11%</span></span></div>
+            </div>
+          </section>
 
-    <footer class="site-footer">
-      <div class="site-footer__inner">
-        <p>最終更新 2024-12-10 09:00 JST・出典は社内データ基盤</p>
-        <p>Material Design 3 のトークンで生成</p>
-      </div>
-    </footer>
+          <section class="card span-5 reveal" style="--i: 6" aria-labelledby="ch-h">
+            <div class="card__head">
+              <div>
+                <h2 class="card__title" id="ch-h">チャネル別の新規契約</h2>
+                <p class="card__desc">直近 90 日。棒の原点は 0</p>
+              </div>
+            </div>
+            <div class="card__body">
+              <div class="chart-scroll"><svg class="chart chart--bars" role="img" viewBox="0 0 470 196" data-origin="0" aria-labelledby="ch-t ch-d"><title id="ch-t">チャネル別の新規契約数</title><desc id="ch-d">オーガニック検索が 412 件で最多、次いで紹介が 318 件。上位 2 チャネルで全体の半分を占める。</desc><line class="grid-line" x1="34" y1="176.0" x2="456" y2="176.0"/><text class="axis-text" x="26" y="179.5" text-anchor="end">0</text><line class="grid-line" x1="34" y1="125.3" x2="456" y2="125.3"/><text class="axis-text" x="26" y="128.8" text-anchor="end">150</text><line class="grid-line" x1="34" y1="74.7" x2="456" y2="74.7"/><text class="axis-text" x="26" y="78.2" text-anchor="end">300</text><line class="grid-line" x1="34" y1="24.0" x2="456" y2="24.0"/><text class="axis-text" x="26" y="27.5" text-anchor="end">450</text><line class="axis-line" x1="34" y1="176" x2="456" y2="176"/><rect class="bar" style="--i: 0" x="49.5" y="36.8" width="39.4" height="139.2" rx="5" fill="var(--chart-1)"><title>オーガニック 412 件</title></rect><rect class="bar" style="--i: 1" x="119.8" y="68.6" width="39.4" height="107.4" rx="5" fill="var(--chart-1)"><title>紹介 318 件</title></rect><rect class="bar" style="--i: 2" x="190.1" y="86.8" width="39.4" height="89.2" rx="5" fill="var(--chart-1)"><title>広告 264 件</title></rect><rect class="bar" style="--i: 3" x="260.5" y="112.8" width="39.4" height="63.2" rx="5" fill="var(--chart-1)"><title>提携 187 件</title></rect><rect class="bar" style="--i: 4" x="330.8" y="135.1" width="39.4" height="40.9" rx="5" fill="var(--chart-1)"><title>イベント 121 件</title></rect><rect class="bar" style="--i: 5" x="401.1" y="154.4" width="39.4" height="21.6" rx="5" fill="var(--chart-1)"><title>その他 64 件</title></rect><text class="axis-text" x="69.2" y="194" text-anchor="middle">オーガニック</text><text class="axis-text" x="139.5" y="194" text-anchor="middle">紹介</text><text class="axis-text" x="209.8" y="194" text-anchor="middle">広告</text><text class="axis-text" x="280.2" y="194" text-anchor="middle">提携</text><text class="axis-text" x="350.5" y="194" text-anchor="middle">イベント</text><text class="axis-text" x="420.8" y="194" text-anchor="middle">その他</text></svg></div>
+            </div>
+            <div class="card__foot">
+              <span class="badge badge--muted">上位 2 チャネルで 51%</span>
+              <span>広告経由は前四半期比 +18%。提携は横ばい。</span>
+            </div>
+          </section>
+
+          <section class="card span-7 reveal" style="--i: 7" aria-labelledby="tbl-h">
+            <div class="card__head">
+              <div>
+                <h2 class="card__title" id="tbl-h">直近の契約</h2>
+                <p class="card__desc">金額は年換算・税抜</p>
+              </div>
+              <button class="btn btn--ghost" type="button">すべて表示</button>
+            </div>
+            <div class="card__body">
+              <div class="table-scroll">
+                <table>
+                  <caption>直近 5 件の契約と状態</caption>
+                  <thead>
+                    <tr><th scope="col">顧客</th><th scope="col">プラン</th><th scope="col">周期</th>
+                      <th scope="col" class="num">年額</th><th scope="col">状態</th></tr>
+                  </thead>
+                  <tbody><tr><th scope="row">Aurora 工業</th><td>Enterprise</td><td>年間</td><td class="num">¥24,800,000</td><td><span class="badge badge--good">更新</span></td></tr><tr><th scope="row">Kite Labs</th><td>Business</td><td>月間</td><td class="num">¥1,480,000</td><td><span class="badge badge--muted">新規</span></td></tr><tr><th scope="row">Meridian 物流</th><td>Enterprise</td><td>年間</td><td class="num">¥18,200,000</td><td><span class="badge badge--good">更新</span></td></tr><tr><th scope="row">Sora デザイン</th><td>Team</td><td>月間</td><td class="num">¥420,000</td><td><span class="badge badge--muted">拡大</span></td></tr><tr><th scope="row">北山ソフト</th><td>Business</td><td>年間</td><td class="num">¥6,900,000</td><td><span class="badge badge--bad">解約予定</span></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <footer class="foot">
+        <span>最終更新: 2025 年 12 月 31 日 09:40 JST</span>
+        <span>Nimbus Analytics — shadcn/ui のトークンで構築</span>
+      </footer>
+    </div>
   </div>
 
-  <button class="fab" type="button" data-action="export"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 4v10"/><path d="m8 11 4 4 4-4"/><path d="M4.5 19h15"/></svg>レポートを書き出す</button>
-  <div class="snackbar" role="status" aria-live="polite" data-open="false"></div>
-  <div class="tooltip" role="presentation" data-open="false"></div>
+  <div class="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

@@ -1,27 +1,29 @@
 ---
 name: html-gen
-description: Material Design 3 準拠のモダンな Web サイト／ダッシュボードを新規作成する。シード色から生成したトーナルパレット、リッチな SVG チャート、上品なアニメーション、完全レスポンシブ（320〜1920px）、ライト/ダーク切替が既定。「マテリアルデザインでサイトを」「モダンな HTML ダッシュボードを作って」「M3 でランディングページ」等で発火。既存サイトの単発修正は /bugfix。
+description: shadcn/ui のデザイントークンで、モダンな Web サイト／ダッシュボードを新規作成する。公式レジストリの配色（neutral / zinc / slate / stone / gray）、洗練された SVG チャートとアニメーション、完全レスポンシブ（320〜1920px）、ライト/ダーク切替が既定。「shadcn でサイトを」「モダンな HTML ダッシュボードを作って」「きれいなランディングページ」等で発火。既存サイトの単発修正は /bugfix。
 user-invocable: true
 ---
 
-# Material Design 3 の Web サイト
+# shadcn/ui の Web サイト
 
 ## 原則: 色を思い出しで書くな。テンプレートを複製せよ
 
 配色は `assets/template/tokens.css` に**生成済み**で、その正本は
-`references/tokens.json` のシード色。Tailwind 既定色、`#0d1117`、`#2563eb` の類を
-1 つでも手書きすると検査で落ちる（手書きファイルに生の hex があること自体が違反）。
+`references/tokens.json`（shadcn/ui レジストリの逐語コピー）。Tailwind 既定色、
+`#0d1117`、`#2563eb` の類を 1 つでも手書きすると検査で落ちる
+（手書きファイルに生の hex や `oklch()` があること自体が違反）。
 
 | やってはいけない | やる |
 |---|---|
-| hex を手で書く | `var(--md-sys-color-*)` / `var(--chart-N)` を使う |
+| hex や `oklch()` を手で書く | `var(--primary)` / `var(--chart-N)` を使う |
 | ゼロから HTML を書く | `assets/template/` を複製して中身を差し替える |
 | `tokens.css` を手で直す | `tokens.json` を直して `--write-css` で再生成する |
+| React や Tailwind CLI を足す | 素の CSS のまま（理由は `references/design.md`） |
 | トグルを後付けする | テンプレのライト/ダークボタンを残す（削除禁止） |
 | 目視だけで完了する | `check_site.py` が PASS するまで完了報告しない |
 
-設計原則・レイアウト・モーション・チャートの作法は `references/design.md`。
-**MUI（React 専用）ではなく M3 仕様を CSS トークンとして実装している**理由も同じ文書にある。
+設計原則・レイアウト・コンポーネント・チャートの作法は `references/design.md`。
+**React 版の shadcn/ui ではなくトークンを CSS へ写している**理由も同じ文書にある。
 
 ## 手順
 
@@ -30,12 +32,13 @@ user-invocable: true
 埋まらない項目があれば先に聞く。
 
 - サイト名 / 何を見せるか（指標・内訳・時系列・分布）
-- シード色: `indigo` / `azure` / `teal` / `verdant` / `amber` / `crimson`（既定 `indigo`）
+- ベースカラー: `neutral`（既定）/ `zinc` / `slate` / `stone` / `gray`
 - ページ種別: `dashboard`（既定）か `content`（記事・紹介。指標や図を必須にしない）
 - 実データかサンプルか
 
-シードを増やしたいときは `tokens.json` の `seeds` に hex を足して
-`--write-css` を回す。役割トーンは触らなくてよい（コントラストは自動で満たされる）。
+ベースカラーは shadcn/ui が配る 5 つがそのまま入っている。増やしたいときは
+`https://ui.shadcn.com/r/colors/<name>.json` の `cssVarsV4` を `tokens.json` の
+`bases` へ足して `--write-css` を回す。コントラストの調整は自動で入る。
 
 ### 2. テンプレートを複製する
 
@@ -59,7 +62,7 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 ### 3. 中身を差し替える
 
 **差し替える**: タイトル、指標の名前と数値、チャートのデータと `<desc>`、表、
-ナビゲーション項目、`html[data-seed]`（手順1で選んだシード）、
+ナビゲーション項目、`html[data-base]`（手順1で選んだベースカラー）、
 `html[data-page-kind]`。
 
 **触らない**: `tokens.css`（生成物）、`app.js`、`button[data-theme-value="light"|"dark"]`、
@@ -69,11 +72,16 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 
 チャートを増減するときの注意（詳細は `references/design.md`）:
 
-- 座標は viewBox 内の数値で持つ。系列色は `var(--chart-1..6)`、面は `var(--chart-N-container)`
-- 入場アニメーションは `@keyframes` の `from` 側で隠し、`animation-fill-mode: both`。
-  **静止状態は必ず読める状態にする**（`forwards` で最終状態を作らない）
+- 座標は viewBox 内の数値で持つ。系列色は `var(--chart-1..5)`
+- **静止状態を完成形にする**。動きは `[data-animate="in"]` の下だけに書く。
+  `opacity: 0` を静止状態に置いたり `animation-fill-mode: forwards` を使うと、
+  背面タブ・JS 無効・印刷で真っ白なページになる（検査で落ちる）
+- 円弧の開始位置は SVG 属性の `stroke-dashoffset`。**CSS で宣言しない**
+  （CSS が属性より優先され、全セグメントが重なる）
+- 潰した SVG（`preserveAspectRatio="none"`）に `stroke-dasharray` のドローを
+  使わない。`clip-path` で拭う
 - 時系列を足したら `.chart-scroll` で包む。包まないと狭い画面で軸文字が潰れる
-- `auto-fit` のグリッドに `span 2` を掛けない。列数を明示する
+- `auto-fit` のグリッドに `span` を掛けない。列数を明示する
 
 依頼が指標・内訳・時系列・分布を求めるダッシュボードなら、それぞれ 1 つ以上残す。
 
@@ -84,7 +92,7 @@ python3 /abs/path/to/dest/check_site.py /abs/path/to/dest
 ```
 
 **exit code 0（`PASS`）を確認するまで完了報告しない。** `FAIL:` が出たら
-手書きファイルに hex を足していないか、`tokens.css` を手で直していないか、
+手書きファイルに色を直書きしていないか、`tokens.css` を手で直していないか、
 トグルを消していないかを先に疑う。
 
 `check_site.py` は `tokens.json` 上の値しか見ないので、**実際に描画された姿**は
@@ -93,23 +101,26 @@ python3 /abs/path/to/dest/check_site.py /abs/path/to/dest
 1. `python3 -m http.server` で配信して開く（`file://` は localStorage が使えず
    永続を確認できない）
 2. DevTools コンソールに `e2e_contrast.js` を貼り付けて実行する。
-   6 シード × ライト/ダークの 12 ブロックを巡回し、`verdict` が `GREEN` なら受け入れ、
-   `RED` なら `failures` がそのまま是正対象
-3. 幅 320 / 390 / 834 / 1440 / 1920px で `document.documentElement.scrollWidth` が
+   5 ベースカラー × ライト/ダークの 10 ブロックを巡回し、`verdict` が `GREEN`
+   なら受け入れ、`RED` なら `failures` がそのまま是正対象
+3. 幅 320 / 390 / 768 / 1280 / 1920px で `document.documentElement.scrollWidth` が
    `clientWidth` と一致することを見る（横スクロールが出ていない証拠）
-4. 再読込してもテーマとシードが保たれ、白がちらつかないことを見る
+4. 再読込してもテーマとベースカラーが保たれ、白がちらつかないことを見る
+5. 図が描き切った状態で止まること、モーションを切っても全部読めることを見る
 
 ## 完了条件
 
 - `check_site.py` が PASS
+- `e2e_contrast.js` が GREEN
 - ライトとダークをユーザーが選べ、再読込後も保たれる
-- 手書きファイルに生の hex が 1 つも無い
+- 手書きファイルに生の色が 1 つも無い
 - 320〜1920px で横スクロールが出ない
-- モーションを切った環境（`prefers-reduced-motion`）でも中身が全部読める
+- アニメーションが走らない環境（背面タブ・JS 無効・`prefers-reduced-motion`）でも
+  図と数値が全部読める
 
 ## 永続メモリ
 
-- 参照: `ple4_run ple4.mem.cli search "material design 3 web template"`
+- 参照: `ple4_run ple4.mem.cli search "shadcn ui web template"`
   （`. "$HOME/.ple4/env.sh"` 前提）→ 本文が要る key だけ
   `ple4_run ple4.mem.cli show <key>`
 - 記録: 再利用可能な学びだけ `ple4_mem_learn`。基準は `../learn/SKILL.md`

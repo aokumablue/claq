@@ -3,13 +3,13 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "SaaS プロダクトの分析ダッシュボードを Material Design 3 準拠のモダンな Web サイトとして作ってほしい。シード色は azure。KPI、時系列、構成比、分布を含め、ライトとダークを選べるトグルを必須とし、スマホからワイドモニタまで表示領域を使い切るレスポンシブにすること。",
-      "expected_output": "assets/template を複製した index.html / styles.css / tokens.css / app.js。html[data-seed=azure]、ライト/ダークの button[data-theme-value]、check_site.py PASS。手書きファイルに生の hex を含まない。",
+      "prompt": "SaaS プロダクトの分析ダッシュボードを shadcn/ui のデザインで作ってほしい。ベースカラーは slate。KPI、時系列、構成比、分布を含め、ライトとダークを選べるトグルを必須とし、スマホからワイドモニタまで表示領域を使い切るレスポンシブにすること。",
+      "expected_output": "assets/template を複製した index.html / styles.css / tokens.css / app.js。html[data-base=slate]、ライト/ダークの button[data-theme-value]、check_site.py PASS。手書きファイルに生の色を含まない。",
       "files": [],
       "expectations": [
         "Output includes index.html with a light/dark theme toggle that both modes can be chosen from",
-        "html data-seed is azure",
-        "No raw hex colors in index.html, styles.css, or app.js (colors go through var(--md-sys-color-*))",
+        "html data-base is slate",
+        "No raw hex or oklch() colors in index.html, styles.css, or app.js (colors go through var(--*))",
         "Output includes metric cards and at least one SVG chart with origin 0 and a desc element",
         "Layout uses fluid grids with no fixed canvas width",
         "check_site.py exits 0 on the generated site"
@@ -17,26 +17,27 @@
     },
     {
       "id": 2,
-      "prompt": "お知らせ中心の紹介サイトを Material Design 3 で静的 HTML にしてほしい。ダッシュボードではなく文章が主。シードは teal。ダーク/ライト切替は必須。",
+      "prompt": "お知らせ中心の紹介サイトを shadcn/ui のトークンで静的 HTML にしてほしい。ダッシュボードではなく文章が主。ベースカラーは stone。ダーク/ライト切替は必須。",
       "expected_output": "テンプレートを複製し、カードを記事ブロックに差し替えたサイト。data-page-kind=content。トグルとトークン経由の配色は残る。check_site.py PASS。",
       "files": [],
       "expectations": [
         "html data-page-kind is content",
-        "html data-seed is teal",
+        "html data-base is stone",
         "Theme toggle for light and dark modes is present",
-        "No raw hex colors in the authored files",
+        "No raw hex or oklch() colors in the authored files",
         "check_site.py exits 0"
       ]
     },
     {
       "id": 3,
-      "prompt": "crimson のシードで、アニメーションが上品に効いたマーケティング用のダッシュボードを作って。動きを減らす設定の人にも全部読めるようにすること。",
-      "expected_output": "data-palette ではなく data-seed=crimson。入場アニメーションは from 側で隠す実装で、prefers-reduced-motion ブロックが animation と transition の両方を止める。check_site.py PASS。",
+      "prompt": "zinc のベースカラーで、チャートのアニメーションが上品に効いたマーケティング用のダッシュボードを作って。動きを減らす設定の人や、タブを裏に置いたままの人にも全部読めるようにすること。",
+      "expected_output": "data-base=zinc。入場アニメーションは data-animate が付いたときだけ走り、静止状態が完成形。prefers-reduced-motion ブロックが animation と transition の両方を止める。check_site.py PASS。",
       "files": [],
       "expectations": [
-        "html data-seed is crimson",
+        "html data-base is zinc",
         "styles.css contains a @media (prefers-reduced-motion: reduce) block stopping both animation and transition",
-        "Content is readable without any animation completing (no opacity:0 resting state that depends on animation-fill-mode forwards)",
+        "Resting state is fully visible: no opacity:0 outside @keyframes and no animation-fill-mode forwards",
+        "Chart entrance animations are scoped under a [data-animate] selector rather than running unconditionally",
         "Light and dark mode toggle exists",
         "check_site.py exits 0"
       ]

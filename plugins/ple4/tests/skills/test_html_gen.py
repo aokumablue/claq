@@ -1,9 +1,10 @@
-"""html-gen テンプレートの Material Design 3 準拠と静的サイト E2E。"""
+"""html-gen テンプレートの shadcn/ui トークン契約と静的サイト E2E。"""
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -39,7 +40,7 @@ def _load_check_site():
 
 check_site = _load_check_site()
 TOKENS = check_site.load_tokens(_TOKENS)
-SEEDS = check_site.seed_ids(TOKENS)
+BASES = check_site.base_ids(TOKENS)
 
 
 def _copy_site(tmp_path: Path, name: str = "site") -> Path:
@@ -75,7 +76,7 @@ def _append(dest: Path, filename: str, snippet: str) -> str:
 
 
 def test_template_passes_validator() -> None:
-    """同梱テンプレートは Material 3 契約検査に合格する。"""
+    """同梱テンプレートは shadcn/ui 契約検査に合格する。"""
     assert check_site.validate_site(_TEMPLATE) == []
 
 
@@ -100,12 +101,56 @@ def test_write_css_matches_committed_tokens_css(tmp_path: Path) -> None:
     ).read_text(encoding="utf-8")
 
 
-def test_generated_tokens_css_is_the_only_place_with_raw_hex() -> None:
-    """手書きの 3 ファイルは生の hex を 1 つも持たない（色の正本は tokens.json）。"""
+def test_generated_tokens_css_is_the_only_place_with_raw_color() -> None:
+    """手書きの 3 ファイルは生の色を 1 つも持たない（色の正本は tokens.json）。"""
     for filename in ("index.html", "styles.css", "app.js"):
         text = (_TEMPLATE / filename).read_text(encoding="utf-8")
         assert check_site.HEX_RE.findall(text) == [], filename
-    assert check_site.HEX_RE.findall((_TEMPLATE / "tokens.css").read_text(encoding="utf-8"))
+        assert [m.group(1) for m in check_site.COLOR_FUNCTION_RE.finditer(text)] == [], filename
+    generated = (_TEMPLATE / "tokens.css").read_text(encoding="utf-8")
+    assert check_site.COLOR_FUNCTION_RE.search(generated)
+
+
+# --- upstream への忠実性 -----------------------------------------------------
+
+
+def test_bases_are_the_five_shadcn_registry_base_colors() -> None:
+    """ベースカラーは shadcn/ui が配る 5 つと同じ顔ぶれで、既定は neutral。"""
+    assert BASES == ("neutral", "zinc", "slate", "stone", "gray")
+    assert TOKENS["default_base"] == "neutral"
+
+
+def test_neutral_tokens_are_verbatim_upstream_values() -> None:
+    """neutral の主要トークンが shadcn/ui レジストリの値そのままである。
+
+    ここが upstream との同一性のアンカー。生成器を書き換えても、この値が
+    ずれれば「shadcn/ui の配色」を名乗れなくなる。
+    """
+    light = TOKENS["bases"]["neutral"]["light"]
+    dark = TOKENS["bases"]["neutral"]["dark"]
+    assert light["background"] == "oklch(1 0 0)"
+    assert light["foreground"] == "oklch(0.145 0 0)"
+    assert light["primary"] == "oklch(0.205 0 0)"
+    assert light["border"] == "oklch(0.922 0 0)"
+    assert dark["background"] == "oklch(0.145 0 0)"
+    assert dark["card"] == "oklch(0.205 0 0)"
+    assert dark["border"] == "oklch(1 0 0 / 10%)"
+    assert TOKENS["radius"]["base_rem"] == 0.625
+
+
+def test_every_base_carries_the_full_role_set_for_both_themes() -> None:
+    """全ベースが role_order の全役割をライト/ダーク両方で持つ。"""
+    expected = set(TOKENS["role_order"])
+    for base_id in BASES:
+        for theme in check_site.THEMES:
+            assert set(TOKENS["bases"][base_id][theme]) == expected, f"{base_id}/{theme}"
+
+
+def test_series_uses_five_colors_like_upstream() -> None:
+    """系列色は upstream と同じ 5 本。"""
+    assert check_site.SERIES_COUNT == 5
+    assert TOKENS["series"]["count"] == 5
+    assert len(check_site.CHART_VARS) == 5
 
 
 # --- 色空間 -----------------------------------------------------------------
@@ -119,598 +164,823 @@ def test_norm_hex_expands_short_form() -> None:
     with pytest.raises(ValueError):
         check_site._norm_hex("blue")
     with pytest.raises(ValueError):
-        check_site._norm_hex("#GGHHII")
+        check_site._norm_hex("#12345")
 
 
 def test_contrast_ratio_matches_wcag_reference_values() -> None:
-    """既知の基準値でコントラスト計算そのものを確かめる。"""
-    assert check_site.contrast_ratio("#000000", "#FFFFFF") == pytest.approx(21.0, abs=0.01)
-    assert check_site.contrast_ratio("#FFFFFF", "#FFFFFF") == pytest.approx(1.0, abs=0.001)
-    assert check_site.contrast_ratio("#767676", "#FFFFFF") == pytest.approx(4.54, abs=0.01)
+    """既知の組み合わせで WCAG の比率を再現する。"""
+    assert check_site.contrast_ratio("#000000", "#FFFFFF") == pytest.approx(21.0, abs=1e-6)
+    assert check_site.contrast_ratio("#777777", "#FFFFFF") == pytest.approx(4.48, abs=0.01)
+    assert check_site.contrast_ratio("#FFFFFF", "#FFFFFF") == pytest.approx(1.0, abs=1e-9)
 
 
 def test_lab_conversion_matches_reference_values() -> None:
-    """白・黒・中間グレーの L* が CIE の既知値と一致する。"""
-    assert check_site.hex_to_lab("#FFFFFF")[0] == pytest.approx(100.0, abs=0.01)
-    assert check_site.hex_to_lab("#000000")[0] == pytest.approx(0.0, abs=0.01)
-    assert check_site.hex_to_lab("#777777")[0] == pytest.approx(50.03, abs=0.1)
-    assert check_site.hex_to_lab("#FFFFFF")[1] == pytest.approx(0.0, abs=0.02)
-
-
-def test_lch_round_trip_preserves_tone() -> None:
-    """LCh から作った色を読み戻すと tone（L*）が保存される。"""
-    for tone in (10, 30, 40, 60, 80, 90):
-        for hue in (0, 90, 180, 270):
-            produced = check_site.lch_to_hex(float(tone), 40.0, float(hue))
-            assert check_site.hex_to_lch(produced)[0] == pytest.approx(tone, abs=1.0)
-
-
-def test_lch_clamps_chroma_instead_of_tone_when_out_of_gamut() -> None:
-    """域外の彩度は chroma を落として収める。tone は動かさない。
-
-    tone がコントラストを担保しているので、ここで L* を動かすと契約が崩れる。
-    """
-    produced = check_site.lch_to_hex(50.0, 200.0, 140.0)
-    lightness, chroma, _ = check_site.hex_to_lch(produced)
-    assert lightness == pytest.approx(50.0, abs=1.0)
-    assert chroma < 200.0
-
-
-def test_extreme_tones_stay_in_range() -> None:
-    """tone 0 / 100 は黒と白になる。"""
-    assert check_site.lch_to_hex(0.0, 40.0, 30.0) == "#000000"
-    assert check_site.lch_to_hex(100.0, 40.0, 30.0) == "#FFFFFF"
-    assert check_site.lch_to_hex(-10.0, 40.0, 30.0) == "#000000"
+    """Lab 変換が既知の値と一致する。"""
+    lightness, a_axis, b_axis = check_site.hex_to_lab("#FFFFFF")
+    assert lightness == pytest.approx(100.0, abs=0.01)
+    assert (a_axis, b_axis) == pytest.approx((0.0, 0.0), abs=0.01)
+    assert check_site.hex_to_lab("#000000")[0] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_delta_e_is_zero_for_identical_colors() -> None:
-    """同じ色の ΔE は 0、離れた色は大きい。"""
+    """同じ色の色差はゼロ、白と黒は 100 を超える。"""
     assert check_site.delta_e("#123456", "#123456") == pytest.approx(0.0, abs=1e-9)
-    assert check_site.delta_e("#000000", "#FFFFFF") == pytest.approx(100.0, abs=0.1)
+    assert check_site.delta_e("#000000", "#FFFFFF") > 99.0
 
 
-# --- M3 との一致 ------------------------------------------------------------
+def test_parse_oklch_reads_both_forms() -> None:
+    """不透明・半透明どちらの oklch() も読み、それ以外は拒否する。"""
+    assert check_site.parse_oklch("oklch(0.5 0.1 200)") == (0.5, 0.1, 200.0, 1.0)
+    assert check_site.parse_oklch("oklch(1 0 0 / 10%)") == (1.0, 0.0, 0.0, 0.1)
+    with pytest.raises(ValueError):
+        check_site.parse_oklch("#ffffff")
 
 
-def test_indigo_seed_reproduces_the_m3_baseline_scheme() -> None:
-    """既定 seed のライト配色が M3 baseline の公表値とほぼ一致する。
+def test_oklch_matches_known_tailwind_colors() -> None:
+    """upstream の oklch が Tailwind の既知 hex へ落ちる。
 
-    HCT ではなく LCh(ab) で近似しているので完全一致はしない。ΔE*ab 6 以内
-    （並べて比べないと分からない差）に収まっていることを確認する。
+    OKLab の逆変換とガンマの両方が正しいことを、外部の既知値で確かめる。
+    ここがずれると全コントラスト測定が静かに嘘になる。
     """
-    light = check_site.scheme(TOKENS, "indigo", "light")
-    baseline = {
-        "--md-sys-color-primary": "#6750A4",
-        "--md-sys-color-on-primary": "#FFFFFF",
-        "--md-sys-color-primary-container": "#EADDFF",
-        "--md-sys-color-surface": "#FEF7FF",
-        "--md-sys-color-on-surface": "#1D1B20",
-    }
-    for name, expected in baseline.items():
-        distance = check_site.delta_e(light[name], expected)
-        assert distance <= 6.0, f"{name}: {light[name]} vs {expected} (ΔE {distance:.1f})"
+    assert check_site.oklch_to_hex("oklch(1 0 0)") == "#FFFFFF"
+    # slate-500 / slate-200 / orange-600（Tailwind v4）
+    assert check_site.oklch_to_hex("oklch(0.554 0.046 257.417)") == "#62748E"
+    assert check_site.oklch_to_hex("oklch(0.929 0.013 255.508)") == "#E2E8F0"
+    assert check_site.oklch_to_hex("oklch(0.646 0.222 41.116)") == "#F54900"
 
 
-def test_dark_scheme_flips_surface_and_text_for_every_seed() -> None:
-    """全 seed でライト/ダークが実際に反転している。"""
-    for seed_id in SEEDS:
-        light = check_site.scheme(TOKENS, seed_id, "light")
-        dark = check_site.scheme(TOKENS, seed_id, "dark")
-        assert light["--md-sys-color-surface"] != dark["--md-sys-color-surface"]
-        assert light["--md-sys-color-on-surface"] != dark["--md-sys-color-on-surface"]
-        assert check_site.relative_luminance(light["--md-sys-color-surface"]) > (
-            check_site.relative_luminance(dark["--md-sys-color-surface"])
-        )
+def test_translucent_color_is_composited_over_its_backdrop() -> None:
+    """半透明は下地へ合成した実効色になる（合成先が無ければエラー）。"""
+    over_black = check_site.oklch_to_hex("oklch(1 0 0 / 10%)", "oklch(0 0 0)")
+    over_white = check_site.oklch_to_hex("oklch(1 0 0 / 10%)", "oklch(1 0 0)")
+    assert over_white == "#FFFFFF"
+    assert over_black != over_white
+    assert check_site.relative_luminance(over_black) < 0.1
+    with pytest.raises(ValueError):
+        check_site.oklch_to_hex("oklch(1 0 0 / 10%)")
 
 
-def test_primary_chroma_floor_lifts_a_desaturated_seed() -> None:
-    """彩度の低い seed でも主色が灰色に潰れない（chroma floor）。"""
-    tokens = json.loads(_TOKENS.read_text(encoding="utf-8"))
-    tokens["seeds"]["indigo"]["hex"] = "#6E6A73"
-    palettes = check_site.tonal_palettes(tokens, "indigo")
-    assert check_site.hex_to_lch(palettes["primary"][40])[1] > 20.0
+def test_fit_chroma_clamps_chroma_and_keeps_lightness() -> None:
+    """域外の彩度だけを落とし、明度は動かさない。"""
+    hue = 264.376
+    fitted = check_site.fit_chroma(0.58, 0.4, hue)
+    assert fitted < 0.4
+    assert check_site._in_gamut(check_site.oklch_to_linear_rgb(0.58, fitted, hue))
+    assert check_site.fit_chroma(0.58, 0.02, hue) == 0.02
 
 
-def test_every_seed_has_its_own_hue() -> None:
-    """seed ごとに主色の色相が異なる（選択の意味がある）。"""
-    hues = {
-        round(check_site.hex_to_lch(check_site.scheme(TOKENS, seed_id, "light")["--md-sys-color-primary"])[2])
-        for seed_id in SEEDS
-    }
-    assert len(hues) == len(SEEDS)
+def test_format_oklch_is_reparsable() -> None:
+    """書き出した表記をそのまま読み戻せる。"""
+    text = check_site.format_oklch(0.58, 0.1234567, 264.376)
+    assert check_site.parse_oklch(text)[0] == 0.58
+
+
+def test_lower_lightness_gives_up_when_the_target_is_unreachable() -> None:
+    """どれだけ暗くしても満たせない要求は例外にする（白背景の上限は 21:1）。"""
+    with pytest.raises(ValueError):
+        check_site._lower_lightness_until("oklch(0.7 0 0)", "#FFFFFF", 25.0)
+
+
+def test_lower_lightness_returns_immediately_when_already_compliant() -> None:
+    """既に満たしている色は明度を動かさない（upstream の値をできる限り残す）。"""
+    assert check_site._lower_lightness_until("oklch(0.7 0 0)", "#000000", 4.5) == check_site.format_oklch(
+        0.7, 0.0, 0.0
+    )
+
+
+# --- スキームの解決 ---------------------------------------------------------
+
+
+def test_scheme_applies_contrast_fixes_only_where_needed() -> None:
+    """契約を満たさない役割だけ明度が下がり、満たすものは upstream のまま。"""
+    light = check_site.scheme(TOKENS, "neutral", "light")
+    dark = check_site.scheme(TOKENS, "neutral", "dark")
+    upstream_light = TOKENS["bases"]["neutral"]["light"]
+    upstream_dark = TOKENS["bases"]["neutral"]["dark"]
+
+    assert light["--ring"] != upstream_light["ring"]
+    assert check_site.parse_oklch(light["--ring"])[0] < check_site.parse_oklch(
+        upstream_light["ring"]
+    )[0]
+    assert light["--muted-foreground"] != upstream_light["muted-foreground"]
+    # ダークは upstream のままで契約を満たす。
+    assert dark["--ring"] == upstream_dark["ring"]
+    assert dark["--muted-foreground"] == upstream_dark["muted-foreground"]
+    # 触っていない役割は逐語のまま。
+    assert light["--background"] == upstream_light["background"]
+    assert light["--primary"] == upstream_light["primary"]
+    assert dark["--border"] == upstream_dark["border"]
+
+
+def test_derived_roles_are_present_in_every_scheme() -> None:
+    """レジストリに無い destructive-foreground を全ブロックが持つ。"""
+    for base_id in BASES:
+        for theme in check_site.THEMES:
+            resolved = check_site.scheme(TOKENS, base_id, theme)
+            assert resolved["--destructive-foreground"] == TOKENS["derived_roles"][
+                "destructive-foreground"
+            ][theme]
+
+
+def test_series_colors_share_hues_across_themes() -> None:
+    """系列の色相はテーマで変わらない（切り替えても同じ系列が同じ色）。"""
+    light = check_site.series_colors(TOKENS, "light")
+    dark = check_site.series_colors(TOKENS, "dark")
+    for name in check_site.CHART_VARS:
+        assert check_site.parse_oklch(light[name])[2] == check_site.parse_oklch(dark[name])[2]
+    assert check_site.parse_oklch(light["--chart-1"])[0] == TOKENS["series"]["light_lightness"]
+    assert check_site.parse_oklch(dark["--chart-1"])[0] == TOKENS["series"]["dark_lightness"]
+
+
+def test_resolved_hex_flattens_translucent_borders() -> None:
+    """半透明の border は下地に合成された hex で返る。"""
+    colors = check_site.resolved_hex(TOKENS, "neutral", "dark")
+    assert colors["--border"].startswith("#")
+    assert colors["--border"] != colors["--background"]
+
+
+def test_color_var_names_cover_roles_derived_and_charts() -> None:
+    """CSS へ書き出す変数名が役割・派生・系列を漏れなく並べる。"""
+    names = check_site.color_var_names(TOKENS)
+    assert names[0] == "--background"
+    assert "--destructive-foreground" in names
+    assert set(check_site.CHART_VARS) <= set(names)
+    assert len(names) == len(set(names))
 
 
 # --- コントラスト契約 -------------------------------------------------------
 
 
-def test_contrast_contract_holds_for_every_seed_and_theme() -> None:
-    """全 seed × ライト/ダークが WCAG の下限を満たす。"""
-    for seed_id in SEEDS:
+def test_contrast_contract_holds_for_every_base_and_theme() -> None:
+    """10 ブロック（5 ベース × 2 テーマ）すべてが可読性契約を満たす。"""
+    for base_id in BASES:
         for theme in check_site.THEMES:
-            resolved = check_site.scheme(TOKENS, seed_id, theme)
-            assert check_site.contrast_violations(resolved, f"{theme}/{seed_id}") == []
+            assert check_site.contrast_violations(TOKENS, base_id, theme) == []
 
 
-def test_contrast_contract_covers_chart_series_and_status_colors() -> None:
-    """契約が系列色・増減・主色を含む（抜けると回帰が素通りする）。"""
-    pairs = {(fg, bg) for fg, bg, _ in check_site.CONTRAST_CONTRACT}
+def test_contrast_contract_covers_charts_status_and_focus() -> None:
+    """契約表が系列色・破壊的操作・フォーカスリングを取りこぼしていない。"""
+    pairs = {(foreground, background) for foreground, background, _ in check_site.CONTRAST_CONTRACT}
     for name in check_site.CHART_VARS:
-        assert (name, "--md-sys-color-surface-container") in pairs
-    for name in (
-        "--md-sys-color-positive",
-        "--md-sys-color-negative",
-        "--md-sys-color-primary",
-        "--md-sys-color-on-surface-variant",
+        assert (name, "--card") in pairs
+        assert (name, "--background") in pairs
+    for pair in (
+        ("--muted-foreground", "--card"),
+        ("--destructive-foreground", "--destructive"),
+        ("--ring", "--background"),
+        ("--sidebar-ring", "--sidebar"),
+        ("--sidebar-foreground", "--sidebar"),
     ):
-        assert (name, "--md-sys-color-surface-container") in pairs
+        assert pair in pairs
+
+
+def test_decorative_borders_are_excluded_from_the_3_to_1_rule() -> None:
+    """ヘアラインは 3:1 契約の外。ただし背景と同化していないことは見る。"""
+    decorative = set(TOKENS["decorative_roles"]["vars"])
+    assert decorative == {"border", "input", "sidebar-border"}
+    for foreground, _, _ in check_site.CONTRAST_CONTRACT:
+        assert foreground.removeprefix("--") not in decorative
+    colors = check_site.resolved_hex(TOKENS, "neutral", "light")
+    ratio = check_site.contrast_ratio(colors["--border"], colors["--background"])
+    assert TOKENS["decorative_roles"]["min_ratio"] <= ratio < 3.0
+
+
+def test_border_that_matches_the_background_is_reported() -> None:
+    """ヘアラインが背景と同値になれば違反として出る。"""
+    broken = json.loads(_TOKENS.read_text(encoding="utf-8"))
+    broken["bases"]["neutral"]["light"]["border"] = "oklch(1 0 0)"
+    violations = check_site.contrast_violations(broken, "neutral", "light")
+    assert any("--border" in item and "同化" in item for item in violations)
 
 
 def test_sunken_chart_series_is_reported() -> None:
-    """カード背景に沈む系列色を赤くできる。"""
-    resolved = dict(check_site.scheme(TOKENS, "indigo", "dark"))
-    resolved["--chart-1"] = resolved["--md-sys-color-surface-container"]
-    violations = "\n".join(check_site.contrast_violations(resolved, "dark/indigo"))
-    assert "--chart-1" in violations
+    """カード面に沈んだ系列色は違反として出る。"""
+    broken = json.loads(_TOKENS.read_text(encoding="utf-8"))
+    broken["series"]["light_lightness"] = 0.98
+    violations = check_site.contrast_violations(broken, "neutral", "light")
+    assert any("--chart-" in item and "コントラスト" in item for item in violations)
 
 
 def test_duplicate_series_is_reported() -> None:
-    """系列色の重複を赤くできる。"""
-    resolved = dict(check_site.scheme(TOKENS, "indigo", "light"))
-    resolved["--chart-2"] = resolved["--chart-1"]
-    assert "系列色に重複" in "\n".join(check_site.contrast_violations(resolved, "light/indigo"))
+    """系列色が重複したら違反として出る。"""
+    broken = json.loads(_TOKENS.read_text(encoding="utf-8"))
+    broken["series"]["hues"] = [264.376] * 5
+    broken["series"]["chromas"] = [0.243] * 5
+    violations = check_site.contrast_violations(broken, "neutral", "light")
+    assert any("重複" in item for item in violations)
 
 
 def test_indistinguishable_series_is_reported() -> None:
-    """重複していなくても知覚差が小さい系列色は赤くできる。"""
-    resolved = dict(check_site.scheme(TOKENS, "indigo", "light"))
-    lightness, chroma, hue = check_site.hex_to_lch(resolved["--chart-1"])
-    resolved["--chart-2"] = check_site.lch_to_hex(lightness, chroma, hue + 3)
-    violations = "\n".join(check_site.contrast_violations(resolved, "light/indigo"))
-    assert "色差" in violations
+    """色差が下限を割った系列は違反として出る。"""
+    broken = json.loads(_TOKENS.read_text(encoding="utf-8"))
+    broken["series"]["hues"] = [264.376, 266.0, 268.0, 270.0, 272.0]
+    violations = check_site.contrast_violations(broken, "neutral", "light")
+    assert any("色差" in item for item in violations)
 
 
-def test_series_stay_apart_in_every_generated_scheme() -> None:
-    """生成される全スキームで系列色が互いに ΔE 下限以上離れている。"""
-    for seed_id in SEEDS:
+def test_series_stay_apart_in_every_block() -> None:
+    """全ブロックで系列色の相互距離が下限を上回る。"""
+    minimum = TOKENS["series"]["min_delta_e"]
+    for base_id in BASES:
         for theme in check_site.THEMES:
-            resolved = check_site.scheme(TOKENS, seed_id, theme)
-            series = [resolved[name] for name in check_site.CHART_VARS]
+            colors = check_site.resolved_hex(TOKENS, base_id, theme)
+            series = [colors[name] for name in check_site.CHART_VARS]
             for left in range(len(series)):
                 for right in range(left + 1, len(series)):
-                    assert check_site.delta_e(series[left], series[right]) >= (
-                        check_site.SERIES_MIN_DELTA_E
-                    )
+                    assert check_site.delta_e(series[left], series[right]) >= minimum
 
 
 def test_broken_tokens_surface_the_contrast_failure(tmp_path: Path) -> None:
-    """tokens.json 側で役割トーンを壊すと、生成 CSS 経由でも赤くなる。"""
+    """tokens.json を壊すと検査が実測で落ちる（検査が赤くなることの実証）。"""
     dest = _copy_site(tmp_path)
-    tokens = json.loads((dest / "tokens.json").read_text(encoding="utf-8"))
-    tokens["roles"]["--md-sys-color-on-surface"]["light"] = 95
-    (dest / "tokens.json").write_text(json.dumps(tokens, ensure_ascii=False), encoding="utf-8")
-    check_site.main(["--write-css", str(dest)])
+    broken = json.loads((dest / "tokens.json").read_text(encoding="utf-8"))
+    broken["bases"]["neutral"]["light"]["foreground"] = "oklch(0.97 0 0)"
+    (dest / "tokens.json").write_text(json.dumps(broken, ensure_ascii=False), encoding="utf-8")
     violations = "\n".join(check_site.validate_site(dest))
-    assert "--md-sys-color-on-surface" in violations
+    assert "--foreground" in violations and "コントラスト" in violations
 
 
-# --- 生成 CSS ---------------------------------------------------------------
+# --- tokens.css の生成 -------------------------------------------------------
 
 
-def test_tokens_css_has_a_block_for_every_seed_and_theme() -> None:
-    """seed × テーマの全ブロックが配信 CSS に揃っている。"""
+def test_tokens_css_has_a_block_for_every_base_and_theme() -> None:
+    """生成 CSS が 5 ベース × 2 テーマの全ブロックを持つ。"""
     css = (_TEMPLATE / "tokens.css").read_text(encoding="utf-8")
-    for seed_id in SEEDS:
+    for base_id in BASES:
         for theme in check_site.THEMES:
-            assert f'[data-theme="{theme}"][data-seed="{seed_id}"]' in css
+            assert f':root[data-theme="{theme}"][data-base="{base_id}"] {{' in css
 
 
-def test_tokens_css_carries_the_full_m3_token_set() -> None:
-    """配色以外のシステムトークン（タイポ / シェイプ / 影 / モーション）も出る。"""
+def test_tokens_css_carries_the_shadcn_token_set() -> None:
+    """配色以外のトークン（タイポ・角丸・影・モーション・レイアウト）も出る。"""
     css = (_TEMPLATE / "tokens.css").read_text(encoding="utf-8")
-    for needle in (
-        "--md-sys-typescale-display-large-font",
-        "--md-sys-shape-corner-extra-large",
-        "--md-sys-elevation-level3",
-        "--md-sys-motion-easing-emphasized-decelerate",
-        "--md-sys-motion-duration-long2",
-        "--md-sys-state-hover-opacity",
-        "--md-ref-layout-breakpoint-expanded-px",
-        "color-scheme: dark",
-        "color-scheme: light",
+    for name in (
+        "--font-sans",
+        "--text-sm",
+        "--text-sm-line",
+        "--tracking-tight",
+        "--font-weight-medium",
+        "--radius",
+        "--radius-xl",
+        "--shadow-xs",
+        "--shadow-sm",
+        "--ease-out",
+        "--duration-base",
+        "--state-ring-width",
+        "--layout-breakpoint-md",
+        "--layout-pane-max",
+        "--layout-touch-target",
     ):
-        assert needle in css, needle
+        assert f"  {name}:" in css, name
+    assert "--radius-lg: var(--radius);" in css
+    assert "--radius-sm: calc(var(--radius) - 4px);" in css
 
 
-def test_seed_swatch_variables_are_theme_independent() -> None:
-    """seed 選択 UI 用の色は :root にあり、テーマで動かない。"""
+def test_base_swatch_variables_are_theme_independent_and_distinct() -> None:
+    """ベース選択 UI 用の色は :root にあり、5 つが別の値になる。"""
     css = (_TEMPLATE / "tokens.css").read_text(encoding="utf-8")
-    for seed_id in SEEDS:
-        assert f"--seed-{seed_id}:" in css
-    assert css.index("--seed-indigo:") < css.index('[data-theme="light"][data-seed=')
+    head = css.split(':root[data-theme="light"]', 1)[0]
+    values = []
+    for base_id in BASES:
+        marker = f"  --base-{base_id}: "
+        assert marker in head, base_id
+        values.append(head.split(marker, 1)[1].split(";", 1)[0])
+    assert len(set(values)) == len(values)
 
 
 def test_edited_tokens_css_is_reported(tmp_path: Path) -> None:
-    """生成物を手で書き換えると不合格になる。"""
+    """tokens.css を手で直すと生成結果との不一致で落ちる。"""
     dest = _copy_site(tmp_path)
-    assert "tokens.css が tokens.json からの生成結果と一致しない" in _append(
-        dest, "tokens.css", "\n:root { --rogue: 1; }\n"
+    assert "生成結果と一致しない" in _edit(
+        dest, "tokens.css", ("--radius: 0.625rem;", "--radius: 1rem;")
     )
 
 
-# --- HTML 契約 --------------------------------------------------------------
+# --- HTML の契約 -------------------------------------------------------------
 
 
 def test_missing_theme_toggle_fails(tmp_path: Path) -> None:
-    """ライト/ダークトグルを外すと不合格になる。"""
+    """テーマトグルを消すと落ちる。"""
     dest = _copy_site(tmp_path)
-    assert "トグル" in _edit(dest, "index.html", ('data-theme-value="dark"', 'data-other="dark"'))
+    assert "トグル" in _edit(dest, "index.html", ('data-theme-value="dark"', "data-x"))
 
 
 def test_theme_toggle_needs_type_and_aria_pressed(tmp_path: Path) -> None:
-    """トグルの type と aria-pressed の欠落を検出する。"""
+    """トグルに type=button と aria-pressed が要る。"""
     dest = _copy_site(tmp_path)
     violations = _edit(dest, "index.html", ('type="button" data-theme-value', "data-theme-value"))
     assert "type=button" in violations
-    dest = _copy_site(tmp_path, "no-aria")
-    violations = _edit(dest, "index.html", ('aria-pressed="true"', 'data-x="true"'))
+    dest = _copy_site(tmp_path, "site2")
+    violations = _edit(dest, "index.html", ('aria-pressed="true"', "data-pressed"))
     assert "aria-pressed" in violations
 
 
 def test_html_landmarks_skip_link_and_viewport(tmp_path: Path) -> None:
-    """スキップリンク・ランドマーク・viewport の欠落を検出する。"""
+    """lang / ランドマーク / スキップリンク / viewport が要る。"""
     dest = _copy_site(tmp_path)
-    violations = _edit(
-        dest,
-        "index.html",
-        ('class="skip-link" href="#main"', 'class="home" href="/"'),
-        ("<header", "<div"),
-        ("</header>", "</div>"),
-        ("<main", "<div"),
-        ("</main>", "</div>"),
-        ("<footer", "<div"),
-        ("</footer>", "</div>"),
-        ("width=device-width, initial-scale=1, viewport-fit=cover", "initial-scale=1"),
-        ('<html lang="ja" data-theme="light"', "<html"),
-    )
-    assert "スキップリンク" in violations
-    assert "<header>" in violations
-    assert "<main>" in violations
-    assert "<footer>" in violations
-    assert "viewport meta" in violations
-    assert "html[lang]" in violations
-    assert "data-theme" in violations
+    assert "html[lang]" in _edit(dest, "index.html", ('<html lang="ja"', "<html lang=\"\""))
+
+    dest = _copy_site(tmp_path, "s2")
+    assert "viewport" in _edit(dest, "index.html", ('name="viewport"', 'name="vp"'))
+
+    dest = _copy_site(tmp_path, "s3")
+    assert "スキップリンク" in _edit(dest, "index.html", ('class="skip-link" href="#main"', 'class="x" href="#main2"'))
+
+    for landmark in ("header", "main", "footer"):
+        dest = _copy_site(tmp_path, f"s-{landmark}")
+        assert f"<{landmark}> が無い" in _edit(
+            dest, "index.html", (f"<{landmark} ", "<div "), (f"</{landmark}>", "</div>")
+        )
 
 
-def test_unknown_seed_is_rejected(tmp_path: Path) -> None:
-    """tokens.json に無い seed 識別子は不合格になる。"""
+def test_unknown_base_is_rejected(tmp_path: Path) -> None:
+    """tokens.json に無いベースカラーは落ちる。"""
     dest = _copy_site(tmp_path)
-    assert "data-seed" in _edit(dest, "index.html", ('data-seed="indigo"', 'data-seed="tailwind"'))
+    assert "data-base" in _edit(dest, "index.html", ('data-base="neutral"', 'data-base="mauve"'))
+
+
+def test_missing_theme_attribute_is_rejected(tmp_path: Path) -> None:
+    """data-theme が light/dark 以外なら落ちる。"""
+    dest = _copy_site(tmp_path)
+    assert "data-theme" in _edit(dest, "index.html", ('data-theme="light"', 'data-theme="auto"'))
 
 
 def test_invalid_page_kind_fails(tmp_path: Path) -> None:
-    """data-page-kind の未知値は不合格になる。"""
+    """data-page-kind は dashboard か content のみ。"""
     dest = _copy_site(tmp_path)
     assert "data-page-kind" in _edit(
-        dest, "index.html", ('data-page-kind="dashboard"', 'data-page-kind="app"')
+        dest, "index.html", ('data-page-kind="dashboard"', 'data-page-kind="blog"')
     )
 
 
 def test_stylesheet_order_is_enforced(tmp_path: Path) -> None:
-    """tokens.css より先に styles.css を読むと不合格になる。"""
+    """tokens.css → styles.css の順でなければ落ちる。"""
     dest = _copy_site(tmp_path)
-    violations = _edit(
+    assert "順で読み込まれていない" in _edit(
         dest,
         "index.html",
         ('<link rel="stylesheet" href="tokens.css">\n  <link rel="stylesheet" href="styles.css">',
          '<link rel="stylesheet" href="styles.css">\n  <link rel="stylesheet" href="tokens.css">'),
     )
-    assert "tokens.css → styles.css の順" in violations
 
 
 def test_dashboard_data_contract_failures(tmp_path: Path) -> None:
-    """指標・SVG・代替テキスト・原点・表の欠落を検出する。"""
+    """指標・原点 0・表・desc の欠落がそれぞれ違反になる。"""
     dest = _copy_site(tmp_path)
-    violations = _edit(
-        dest,
-        "index.html",
-        ('data-metric="true"', 'data-x="true"'),
-        ('class="card metric reveal"', 'class="card mtrc reveal"'),
-        ('role="img"', 'role="presentation"'),
-        ("<desc", "<span"),
-        ('data-origin="0"', ""),
-        ("<table", "<div"),
-    )
-    assert "主要指標" in violations
-    assert "svg[role=img]" in violations
-    assert "<desc>" in violations
-    assert "data-origin" in violations
-    assert "表が無い" in violations
+    assert "主要指標" in _edit(dest, "index.html", ('data-metric="true"', "data-m"), ("card metric reveal", "card reveal"))
+
+    dest = _copy_site(tmp_path, "s2")
+    assert "原点 0" in _edit(dest, "index.html", ('data-origin="0"', 'data-origin="1"'))
+
+    dest = _copy_site(tmp_path, "s3")
+    assert "表が無い" in _edit(dest, "index.html", ("<table", "<div class=\"t\""), ("</table>", "</div>"))
+
+    dest = _copy_site(tmp_path, "s4")
+    assert "<desc>" in _edit(dest, "index.html", ("<desc", "<p data-desc"), ("</desc>", "</p>"))
 
 
 def test_svg_removal_is_reported(tmp_path: Path) -> None:
-    """ダッシュボードから SVG を全部消すと不合格になる。"""
+    """SVG を消す・role=img を外すとそれぞれ違反になる。"""
     dest = _copy_site(tmp_path)
-    assert "チャート SVG が無い" in _edit(dest, "index.html", ("<svg", "<div"), ("</svg>", "</div>"))
+    assert "チャート SVG" in _edit(dest, "index.html", ("<svg", "<div"), ("</svg>", "</div>"))
+    dest = _copy_site(tmp_path, "s2")
+    assert "svg[role=img]" in _edit(dest, "index.html", ('role="img"', 'role="presentation"'))
 
 
 def test_content_page_skips_dashboard_structure(tmp_path: Path) -> None:
-    """data-page-kind=content なら偽の指標や図が無くても合格する。"""
+    """content ページには指標や図を要求しない。"""
     dest = _copy_site(tmp_path)
+    _edit(dest, "index.html", ('data-page-kind="dashboard"', 'data-page-kind="content"'))
     violations = _edit(
         dest,
         "index.html",
-        ('data-page-kind="dashboard"', 'data-page-kind="content"'),
-        ('data-metric="true"', 'data-x="true"'),
+        ("<table", '<div class="t"'),
+        ("</table>", "</div>"),
         ('data-origin="0"', ""),
     )
     assert violations == ""
 
 
 def test_script_in_body_is_reported(tmp_path: Path) -> None:
-    """app.js を body 末尾へ移すと（初回の白ちらつき）不合格になる。"""
+    """app.js を body 末尾へ移すと落ちる（初回描画で白がちらつく）。"""
     dest = _copy_site(tmp_path)
-    violations = _edit(
+    assert "白のちらつき" in _edit(
         dest,
         "index.html",
-        ('  <script src="app.js" defer></script>\n</head>', "</head>"),
-        ("</body>", '  <script src="app.js" defer></script>\n</body>'),
+        ('<script src="app.js" defer></script>', ""),
+        ("</body>", '<script src="app.js"></script></body>'),
     )
-    assert "<head> で読み込まれていない" in violations
 
 
-# --- 手書き CSS 契約 --------------------------------------------------------
+# --- CSS の契約 --------------------------------------------------------------
 
 
 def test_missing_role_variable_use_is_reported(tmp_path: Path) -> None:
-    """役割変数を使わない CSS は不合格になる。"""
+    """設計の骨格になる変数を使わなくなると落ちる。"""
     dest = _copy_site(tmp_path)
-    (dest / "styles.css").write_text("body { margin: 0; }\n", encoding="utf-8")
-    violations = "\n".join(check_site.validate_site(dest))
-    for name in check_site.REQUIRED_STYLE_VARS:
-        assert name in violations
+    assert "--ring" in _edit(dest, "styles.css", ("var(--ring)", "currentColor"))
+
+
+def test_required_style_vars_are_shadcn_roles() -> None:
+    """必須変数の一覧が shadcn/ui の役割名で構成されている。"""
+    assert "--background" in check_site.REQUIRED_STYLE_VARS
+    assert "--radius" in check_site.REQUIRED_STYLE_VARS
+    assert "--font-sans" in check_site.REQUIRED_STYLE_VARS
+    assert not any(name.startswith("--md-sys") for name in check_site.REQUIRED_STYLE_VARS)
 
 
 def test_missing_breakpoints_and_fluid_primitives(tmp_path: Path) -> None:
-    """ブレークポイント・伸縮グリッド・流体タイポの欠落を検出する。"""
+    """Tailwind のブレークポイント・minmax・clamp・focus-visible が要る。"""
     dest = _copy_site(tmp_path)
-    (dest / "styles.css").write_text("body { margin: 0; }\n", encoding="utf-8")
-    violations = "\n".join(check_site.validate_site(dest))
-    for width in check_site.REQUIRED_BREAKPOINTS:
-        assert f"{width}px のブレークポイント" in violations
-    assert "minmax" in violations
-    assert "clamp" in violations
+    assert "1024px" in _edit(dest, "styles.css", ("min-width: 1024px", "min-width: 1023px"))
+
+    dest = _copy_site(tmp_path, "s2")
+    assert "minmax" in _edit(dest, "styles.css", ("minmax(", "calc("))
+
+    dest = _copy_site(tmp_path, "s3")
+    assert "clamp" in _edit(dest, "styles.css", ("clamp(", "max("))
+
+    dest = _copy_site(tmp_path, "s4")
+    assert "focus-visible" in _edit(dest, "styles.css", (":focus-visible", ":focus-within"))
+
+
+def test_required_breakpoints_follow_tailwind() -> None:
+    """必須ブレークポイントが Tailwind の md / lg / xl である。"""
+    assert check_site.REQUIRED_BREAKPOINTS == (768, 1024, 1280)
 
 
 def test_reduced_motion_block_is_required(tmp_path: Path) -> None:
-    """モーション低減ブロックが無いと不合格になる。"""
+    """モーション低減ブロックが無いと落ちる。"""
     dest = _copy_site(tmp_path)
-    css = (dest / "styles.css").read_text(encoding="utf-8")
-    (dest / "styles.css").write_text(
-        css.replace("@media (prefers-reduced-motion: reduce) {", "@media screen {", 1), encoding="utf-8"
+    assert "prefers-reduced-motion" in _edit(
+        dest, "styles.css", ("@media (prefers-reduced-motion: reduce)", "@media (min-width: 1px)")
     )
-    assert "prefers-reduced-motion" in "\n".join(check_site.validate_site(dest))
 
 
 def test_reduced_motion_block_must_stop_both_animation_and_transition(tmp_path: Path) -> None:
-    """低減ブロックが片方しか止めないと不合格になる。"""
+    """animation か transition のどちらかしか止めないと落ちる。"""
     dest = _copy_site(tmp_path)
-    css = (dest / "styles.css").read_text(encoding="utf-8")
-    stripped = css[: css.index("@media (prefers-reduced-motion: reduce) {")]
-    (dest / "styles.css").write_text(
-        stripped + "@media (prefers-reduced-motion: reduce) {\n  .x { opacity: 1; }\n}\n",
-        encoding="utf-8",
+    assert "transition を止めていない" in _edit(
+        dest, "styles.css", ("    transition: none !important;\n", "")
     )
-    violations = "\n".join(check_site.validate_site(dest))
-    assert "animation を止めていない" in violations
-    assert "transition を止めていない" in violations
+    dest = _copy_site(tmp_path, "s2")
+    assert "animation を止めていない" in _edit(
+        dest, "styles.css", ("    animation: none !important;\n", "")
+    )
+
+
+def test_resting_state_must_stay_visible(tmp_path: Path) -> None:
+    """静止状態を不可視にする書き方は落ちる。"""
+    dest = _copy_site(tmp_path)
+    assert "forwards" in _append(dest, "styles.css", "\n.x { animation: rise 1s forwards; }\n")
+
+    dest = _copy_site(tmp_path, "s2")
+    assert "forwards" in _append(dest, "styles.css", "\n.x { animation-fill-mode: forwards; }\n")
+
+    dest = _copy_site(tmp_path, "s3")
+    assert "opacity: 0" in _append(dest, "styles.css", "\n.reveal { opacity: 0; }\n")
+
+
+def test_resting_state_allows_opacity_zero_inside_keyframes(tmp_path: Path) -> None:
+    """@keyframes の中の opacity: 0 は正しい書き方なので通す。"""
+    dest = _copy_site(tmp_path)
+    assert _append(
+        dest, "styles.css", "\n@keyframes slide {\n  from {\n    opacity: 0;\n  }\n}\n"
+    ) == ""
 
 
 def test_fixed_canvas_width_is_reported(tmp_path: Path) -> None:
-    """固定幅キャンバスは不合格になる（表示領域を使い切れない）。"""
+    """ブレークポイント以上の固定幅は落ちる。"""
     dest = _copy_site(tmp_path)
-    assert "固定幅 1280px" in _append(dest, "styles.css", "\n.canvas { width: 1280px; }\n")
+    assert "固定幅" in _append(dest, "styles.css", "\n.x { width: 1280px; }\n")
 
 
 def test_small_fixed_width_is_allowed(tmp_path: Path) -> None:
-    """アイコンやレールの実寸（ブレークポイント未満）は違反にしない。"""
+    """アイコンなどの小さな固定幅は通す。"""
     dest = _copy_site(tmp_path)
-    assert _append(dest, "styles.css", "\n.rail { width: 320px; }\n") == ""
+    assert _append(dest, "styles.css", "\n.x { width: 320px; }\n") == ""
 
 
 def test_narrow_max_width_is_reported(tmp_path: Path) -> None:
-    """広い画面を捨てる max-width は不合格になる。"""
+    """狭い max-width は広い画面を捨てるので落ちる。"""
     dest = _copy_site(tmp_path)
-    assert "広い画面を捨てている" in _append(dest, "styles.css", "\n.pane { max-width: 1100px; }\n")
+    assert "広い画面を捨てている" in _append(dest, "styles.css", "\n.x { max-width: 960px; }\n")
 
 
 def test_media_query_max_width_is_not_a_fixed_width(tmp_path: Path) -> None:
-    """メディアクエリの max-width は固定幅として誤検出しない。"""
+    """メディアクエリの max-width は固定幅ではない。"""
     dest = _copy_site(tmp_path)
-    assert _append(dest, "styles.css", "\n@media (max-width: 839px) { .x { color: inherit; } }\n") == ""
+    assert _append(dest, "styles.css", "\n@media (max-width: 500px) { .x { gap: 4px; } }\n") == ""
 
 
 def test_tiny_font_is_reported(tmp_path: Path) -> None:
-    """12px 未満の font-size は不合格になる。"""
+    """12px 未満の font-size は落ちる。"""
     dest = _copy_site(tmp_path)
-    assert "12px 未満" in _append(dest, "styles.css", "\n.fine { font-size: 10px; }\n")
+    assert "12px 未満" in _append(dest, "styles.css", "\n.x { font-size: 10px; }\n")
+    dest = _copy_site(tmp_path, "s2")
+    assert _append(dest, "styles.css", "\n.x { font-size: 12px; }\n") == ""
 
 
-# --- 色の宇宙 ---------------------------------------------------------------
+# --- 手書きの色 --------------------------------------------------------------
 
 
 def test_raw_hex_in_authored_css_is_reported(tmp_path: Path) -> None:
-    """手書き CSS に生の hex を足すと不合格になる。"""
+    """手書き CSS の hex は落ちる。"""
     dest = _copy_site(tmp_path)
-    assert "#0D1117" in _append(dest, "styles.css", "\n.rogue { color: #0D1117; }\n")
+    assert "生の hex" in _append(dest, "styles.css", "\n.x { color: #ff0000; }\n")
+
+
+def test_raw_color_function_in_authored_css_is_reported(tmp_path: Path) -> None:
+    """手書き CSS の色関数（oklch / rgb / hsl）は落ちる。"""
+    for snippet, needle in (
+        ("\n.x { color: oklch(0.5 0.1 200); }\n", "oklch()"),
+        ("\n.x { color: rgb(0 0 0); }\n", "rgb()"),
+        ("\n.x { color: hsl(200 50% 50%); }\n", "hsl()"),
+    ):
+        dest = _copy_site(tmp_path, f"s{needle[:3]}")
+        assert needle in _append(dest, "styles.css", snippet)
+
+
+def test_color_mix_and_var_are_allowed(tmp_path: Path) -> None:
+    """color-mix と var は通す（トークン経由の合成は正しい書き方）。"""
+    dest = _copy_site(tmp_path)
+    assert (
+        _append(
+            dest,
+            "styles.css",
+            "\n.x { color: color-mix(in oklab, var(--primary) 40%, transparent); }\n",
+        )
+        == ""
+    )
 
 
 def test_named_color_fails(tmp_path: Path) -> None:
-    """名前付き色は不合格になる。"""
+    """名前付き色は落ちる。"""
     dest = _copy_site(tmp_path)
-    assert "navy" in _edit(dest, "index.html", ("<body>", '<body style="color: navy">'))
+    assert "名前付き色" in _append(dest, "styles.css", "\n.x { background: teal; }\n")
 
 
 def test_hyphenated_color_property_is_not_a_blind_spot(tmp_path: Path) -> None:
-    """background-color など連結プロパティ経由の名前付き色も拒否する。"""
+    """border-top-color のようなハイフン付きプロパティも見る。"""
     dest = _copy_site(tmp_path)
-    assert "crimson" in _edit(dest, "index.html", ("<body>", '<body style="background-color: crimson">'))
+    assert "名前付き色" in _append(dest, "styles.css", "\n.x { border-top-color: navy; }\n")
 
 
 def test_svg_geometry_keywords_are_not_treated_as_colors() -> None:
-    """stroke-linecap: butt のような非色プロパティを色と誤認しない。"""
-    text = (
-        ".a { stroke-linecap: butt; stroke-linejoin: miter; }"
-        ".b { background-blend-mode: multiply; background-clip: padding-box; }"
-        ":root { color-scheme: light dark; }"
-    )
+    """stroke-linecap のような幾何プロパティを色と誤認しない。"""
+    text = "path { stroke-linecap: butt; background-blend-mode: multiply; }"
     assert check_site._validate_authored_colors(text) == []
 
 
-def test_color_functions_are_allowed(tmp_path: Path) -> None:
-    """color-mix / グラデーションは変数経由なので通す。"""
-    dest = _copy_site(tmp_path)
-    snippet = (
-        "\n.mix { background: color-mix(in oklab, var(--md-sys-color-primary) 40%, transparent); }\n"
-        ".grad { background: linear-gradient(90deg, var(--chart-1), var(--chart-2)); }\n"
-    )
-    assert _append(dest, "styles.css", snippet) == ""
-
-
-# --- JS 契約 ----------------------------------------------------------------
+# --- JS の契約 ---------------------------------------------------------------
 
 
 def test_js_contract_failures(tmp_path: Path) -> None:
-    """app.js から必須動作を削ると不合格になる。"""
-    dest = _copy_site(tmp_path)
-    (dest / "app.js").write_text("console.log('x');\n", encoding="utf-8")
-    violations = "\n".join(check_site.validate_site(dest))
-    for label in (
-        "data-theme",
-        "localStorage",
-        "aria-pressed",
-        "data-seed",
-        "prefers-reduced-motion",
-        "DOM 構築前の実行順",
-        "light/dark",
+    """テーマ・ベース・永続・低減設定の扱いが欠けると落ちる。"""
+    for old, new, needle in (
+        ("localStorage", "sessionStorage", "localStorage"),
+        ("prefers-reduced-motion", "prefers-color", "prefers-reduced-motion"),
+        ("aria-pressed", "data-pressed", "aria-pressed"),
     ):
-        assert label in violations, label
+        dest = _copy_site(tmp_path, f"s-{needle[:6]}")
+        assert needle in _edit(dest, "app.js", (old, new))
+
+
+def test_js_must_handle_the_base_attribute(tmp_path: Path) -> None:
+    """app.js が data-base を扱わなくなると落ちる。"""
+    dest = _copy_site(tmp_path)
+    assert "data-base" in _edit(dest, "app.js", ("dataset.base", "dataset.palette"), ("data-base", "data-x"))
 
 
 def test_empty_and_missing_files_are_reported(tmp_path: Path) -> None:
-    """必須ファイルの欠落と空の app.js を検出する。"""
-    dest = _copy_site(tmp_path, "empty-js")
-    (dest / "app.js").write_text("   \n", encoding="utf-8")
-    assert any("app.js が空" in item for item in check_site.validate_site(dest))
-    for filename in ("index.html", "styles.css", "tokens.css", "app.js"):
-        dest = _copy_site(tmp_path, f"no-{filename}")
-        (dest / filename).unlink()
-        assert check_site.validate_site(dest) == [f"{filename} が無い"]
+    """空の app.js と欠けたファイルはそれぞれ違反になる。"""
+    dest = _copy_site(tmp_path)
+    (dest / "app.js").write_text("", encoding="utf-8")
+    assert "app.js が空" in "\n".join(check_site.validate_site(dest))
+
+    dest = _copy_site(tmp_path, "s2")
+    (dest / "styles.css").unlink()
+    assert check_site.validate_site(dest) == ["styles.css が無い"]
 
 
 def test_theme_js_guards_localstorage_failures() -> None:
-    """localStorage が使えない環境でも例外で止まらないよう try/catch がある。"""
+    """localStorage が使えない環境でも落ちないよう try/catch で包む。"""
     script = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
     assert script.count("try {") >= 2
     assert "catch" in script
 
 
-# --- CLI / ユーティリティ ---------------------------------------------------
+def test_reveal_animation_waits_for_a_visible_tab() -> None:
+    """背面タブでは入場アニメーションを起動しない（from の状態で固まるため）。"""
+    script = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
+    assert "visibilityState" in script
+    assert "visibilitychange" in script
+
+
+# --- CLI ---------------------------------------------------------------------
 
 
 def test_cli_fail_on_broken_site(tmp_path: Path) -> None:
-    """違反があると CLI が 1 を返す。"""
+    """違反があれば CLI は exit 1 を返す。"""
     dest = _copy_site(tmp_path)
-    (dest / "index.html").unlink()
+    _edit(dest, "styles.css", ("var(--ring)", "currentColor"))
     assert check_site.main([str(dest)]) == 1
 
 
 def test_cli_errors_when_tokens_missing(tmp_path: Path) -> None:
-    """tokens.json が解決できないと exit 2。"""
+    """tokens.json が見つからなければ exit 2 を返す。"""
     empty = tmp_path / "empty"
     empty.mkdir()
     assert check_site.main([str(empty)]) == 2
 
 
 def test_default_tokens_path_resolution(tmp_path: Path) -> None:
-    """テンプレートからは references/、サイト直下からは自身の tokens.json を選ぶ。"""
-    assert check_site.default_tokens_path(_TEMPLATE) == _TOKENS
+    """サイト内の tokens.json を優先し、無ければ skill 側を辿る。"""
     dest = _copy_site(tmp_path)
     assert check_site.default_tokens_path(dest) == dest / "tokens.json"
+    (dest / "tokens.json").unlink()
+    with pytest.raises(FileNotFoundError):
+        check_site.default_tokens_path(dest)
+    assert check_site.default_tokens_path(_TEMPLATE) == _TOKENS
 
 
-# --- E2E --------------------------------------------------------------------
+def test_cli_runs_as_a_subprocess() -> None:
+    """スキルの手順どおり python3 で直接叩いても PASS する。"""
+    result = subprocess.run(
+        [sys.executable, str(_CHECK_SITE), str(_TEMPLATE)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "PASS" in result.stdout
+
+
+# --- E2E ---------------------------------------------------------------------
 
 
 def test_e2e_user_opens_static_site_and_can_choose_modes() -> None:
-    """静的ホストが返す 4 ファイルをユーザー視点で辿り、両モードと配色を確認する。"""
+    """静的サイトを開いた利用者がテーマとベースカラーを選べて、選択が残る。"""
     html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
     script = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
-    assert 'data-theme-value="light"' in html
-    assert 'data-theme-value="dark"' in html
-    assert html.count('href="tokens.css"') == 1
-    assert html.count('href="styles.css"') == 1
-    assert html.count('src="app.js"') == 1
+    for theme in check_site.THEMES:
+        assert f'data-theme-value="{theme}"' in html
+    for base_id in BASES:
+        assert f'data-base-value="{base_id}"' in html
     assert "localStorage" in script
-    completed = subprocess.run(
-        [sys.executable, str(_CHECK_SITE), str(_TEMPLATE)],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert completed.returncode == 0
-    assert "PASS" in completed.stdout
+    assert "prefers-color-scheme: dark" in script
+    assert '<script src="app.js" defer></script>' in html
 
 
 def test_e2e_browser_script_shares_the_python_thresholds() -> None:
-    """ブラウザ側の受け入れ閾値が CONTRAST_CONTRACT と食い違わない。"""
+    """ブラウザ実測スクリプトが Python 側と同じ閾値・同じペアを見る。
+
+    ペア集合は両実装から機械的に導出して双方向で突き合わせる。片側にだけ
+    役割が増えても、包含チェックでは気づけない。
+    """
     script = (_TEMPLATE / "e2e_contrast.js").read_text(encoding="utf-8")
     assert "const TEXT_MIN = 4.5;" in script
     assert "const MARK_MIN = 3.0;" in script
-    assert {minimum for _, _, minimum in check_site.CONTRAST_CONTRACT} == {4.5, 3.0}
-    for seed_id in SEEDS:
-        assert f'"{seed_id}"' in script
+    for base_id in BASES:
+        assert f'"{base_id}"' in script
+
+    minimums = {"TEXT_MIN": 4.5, "MARK_MIN": 3.0}
+    literal = {
+        (foreground, background, minimums[name])
+        for foreground, background, name in re.findall(
+            r'\["(--[\w-]+)", "(--[\w-]+)", (TEXT_MIN|MARK_MIN)\]', script
+        )
+    }
+    mapped = {
+        (chart, background, minimums[name])
+        for background, name in re.findall(
+            r'CHARTS\.map\(\(name\) => \[name, "(--[\w-]+)", (TEXT_MIN|MARK_MIN)\]\)', script
+        )
+        for chart in check_site.CHART_VARS
+    }
+    assert literal | mapped == set(check_site.CONTRAST_CONTRACT)
+
+
+def test_e2e_browser_script_reads_real_pixels() -> None:
+    """実測は canvas のピクセルで行う。
+
+    `getComputedStyle` は `oklch()` を `oklch()` のまま返すので、文字列から
+    数値を拾うと L C H を R G B と取り違えて全ペアが「ほぼ黒」になり、
+    検査が丸ごと嘘をつく。
+    """
+    script = (_TEMPLATE / "e2e_contrast.js").read_text(encoding="utf-8")
+    assert "getImageData" in script
+    assert "createElement(\"canvas\")" in script
 
 
 def test_e2e_rendered_chart_marks_stay_visible_in_both_themes() -> None:
-    """index.html が実際に参照する系列変数を解決し、両モードで沈まないことを見る。
-
-    文字列一致では `--chart-6` がカード背景と同値でも通ってしまう。ここでは
-    「その SVG が使っている変数」を列挙し、テーマごとに実際の色へ解決して比を測る。
-    """
+    """テンプレートが実際に使う系列色が、置かれる面の上で見える。"""
     html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
     used = {name for name in check_site.CHART_VARS if f"var({name})" in html}
-    assert used, "テンプレートが系列色を 1 つも使っていない"
-    for seed_id in SEEDS:
+    assert used, "テンプレートが系列色を使っていない"
+    for base_id in BASES:
         for theme in check_site.THEMES:
-            resolved = check_site.scheme(TOKENS, seed_id, theme)
+            colors = check_site.resolved_hex(TOKENS, base_id, theme)
             for name in used:
-                ratio = check_site.contrast_ratio(
-                    resolved[name], resolved["--md-sys-color-surface-container-low"]
-                    if "--md-sys-color-surface-container-low" in resolved
-                    else resolved["--md-sys-color-surface-container"]
-                )
-                assert ratio >= 3.0, f"{theme}/{seed_id} {name} が {ratio:.2f}"
+                for surface in ("--card", "--background"):
+                    ratio = check_site.contrast_ratio(colors[name], colors[surface])
+                    assert ratio >= 3.0, f"{theme}/{base_id} {name} on {surface}: {ratio:.2f}"
 
 
 def test_e2e_animation_never_hides_content_permanently() -> None:
-    """入場アニメーションは from 側で隠す。静止状態は必ず読める。
+    """アニメーションが走らなくても中身が読める書き方になっている。
 
-    `.reveal { opacity: 0 }` のように「アニメーションが完走しないと見えない」
-    書き方は、背面タブ・JS 無効・印刷で真っ白なページになる。
+    入場は JS が付ける data-animate の下だけで起き、静止状態は完成形。
     """
     css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
-    assert "forwards" not in css, "fill-mode は both（from 側で隠す）にする"
-    assert "@keyframes rise {\n  from {" in css
-    assert ".reveal {\n  opacity: 0;\n}" not in css
+    assert check_site._validate_resting_state(css) == []
+    assert '[data-animate="in"] .series-line {' in css
+    assert '[data-animate="in"] .bar {' in css
+    assert '[data-animate="in"] .arc {' in css
+    assert ".series-line {\n  fill: none;" in css
+
+
+def test_e2e_arc_offset_is_left_to_the_svg_attribute() -> None:
+    """円弧の開始位置を CSS で宣言しない。
+
+    CSS は presentation attribute より優先されるため、ここで
+    `stroke-dashoffset` を宣言すると全セグメントが 12 時から重なって描かれる。
+    """
+    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+    arc_block = css.split(".arc {", 1)[1].split("}", 1)[0]
+    assert "stroke-dashoffset" not in arc_block
+    assert "@keyframes arc-draw {" in css
+
+
+def test_e2e_squashed_sparkline_does_not_use_dash_drawing() -> None:
+    """潰した SVG のドローは dasharray ではなく clip-path で行う。
+
+    `preserveAspectRatio="none"` はパスの実長を変えるので、dasharray の
+    ドローだと線が途中で切れて見える。
+    """
+    html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
+    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+    assert 'class="metric__spark" role="img" viewBox="0 0 200 48" preserveAspectRatio="none"' in html
+    assert "stroke-dasharray" not in html.split('class="metric__spark"', 1)[1].split("</svg>", 1)[0]
+    assert '[data-animate="in"] .metric__spark {' in css
+    assert "@keyframes wipe {" in css
 
 
 def test_e2e_charts_stay_legible_on_small_screens() -> None:
-    """狭い幅ではチャートを等倍で横スクロールさせ、軸文字を潰さない。"""
-    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+    """狭い画面では図を等倍のまま横スクロールさせる。"""
     html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
-    assert ".chart-scroll" in css
-    assert "overflow-x: auto" in css
-    assert "@container" in css
-    assert html.count('class="chart-scroll"') >= 3
-    assert "max-height" in css, "図が幅いっぱいの正方形へ膨らむのを止める"
+    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+    assert html.count('class="chart-scroll"') >= 2
+    assert ".chart-scroll {\n  overflow-x: auto;" in css
+    assert "min-inline-size: 460px;" in css
+
+
+def test_e2e_metric_direction_and_sentiment_are_separate() -> None:
+    """バッジの色は良し悪し、アイコンは増減の向きで、両者を混ぜない。"""
+    html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
+    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+    assert ".badge--good {" in css and ".badge--bad {" in css
+    assert "badge--up" not in css and "badge--down" not in css
+    # 下向き矢印に good が付く指標（解約率）が実在する＝反転していない証拠。
+    good_badges = html.split('class="badge badge--good"')
+    assert any('d="M12 5v13"' in chunk.split("</span>", 1)[0] for chunk in good_badges[1:])
+
+
+def test_e2e_sidebar_collapses_on_narrow_screens() -> None:
+    """狭い画面ではサイドバーをオフキャンバスにして開閉できる。"""
+    html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
+    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+    script = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
+    assert 'data-sidebar="open"' in html and 'data-sidebar="close"' in html
+    assert 'aria-controls="sidebar"' in html
+    assert '.sidebar[data-open="true"] {' in css
+    assert "@media (min-width: 768px)" in css
+    assert 'event.key === "Escape"' in script
+
+
+# --- ドキュメント -------------------------------------------------------------
+
+
+def test_skill_and_design_docs_describe_shadcn() -> None:
+    """SKILL.md と design.md が shadcn/ui の語彙で書かれている。"""
+    skill = (_SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    design = (_SKILL_DIR / "references" / "design.md").read_text(encoding="utf-8")
+    assert "shadcn/ui" in skill and "Material Design" not in skill
+    assert "shadcn/ui" in design and "Material Design" not in design
+    assert "data-base" in skill
+    for base_id in BASES:
+        assert base_id in skill
+    # React を足す改修を将来の担当者が始めない理由が書いてある。
+    assert "React" in design
+
+
+def test_evals_reference_the_shadcn_contract() -> None:
+    """eval 群がベースカラーと静止状態の契約を検査対象にしている。"""
+    evals = json.loads((_SKILL_DIR / "evals" / "evals.json").read_text(encoding="utf-8"))
+    assert evals["skill_name"] == "html-gen"
+    text = json.dumps(evals, ensure_ascii=False)
+    assert "shadcn" in text
+    assert "data-base" in text
+    assert "Material Design" not in text
+    named = {base_id for base_id in BASES if f"data-base is {base_id}" in text}
+    assert len(named) >= 3
