@@ -63,6 +63,18 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"ghp_[a-zA-Z0-9]{36}", "GitHub PAT"),
     (r"AKIA[A-Z0-9]{16}", "AWS Access Key"),
     (r"api[_-]?key\s*[=:]\s*['\"][^'\"]+['\"]", "API key"),
+    # PEM / OpenSSH / PGP 秘密鍵ブロックのヘッダ行。鍵種別は列挙で固定し
+    # `[A-Z ]+` のような曖昧な繰り返しを使わない（曖昧な繰り返しは、
+    # 前置の 5 ハイフンに一致した後の長い大文字列で走査を二次オーダーへ
+    # 落とす）。公開物のヘッダ（CERTIFICATE / PUBLIC KEY）は
+    # "PRIVATE KEY" を含まないので一致しない。末尾デリミタを `[-]{5}` と
+    # 書くのは、この行自身が自分のパターンに一致して「本モジュールを走査
+    # すると秘密が検出される」状態になるのを避けるため
+    # （`tests/hooks/test_hook_edge_cases.py` の自己走査テストが恒久ゲート）。
+    (
+        r"-----BEGIN (?:RSA |DSA |EC |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?[-]{5}",
+        "private key",
+    ),
 )
 
 

@@ -122,6 +122,60 @@ def test_find_plugin_install_and_build_report_variants(tmp_path: Path, monkeypat
     assert consumer_report["checks"]
 
 
+def test_find_plugin_install_detects_marketplace_cache_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """マーケットプレイス配置（cache/<marketplace>/<plugin>/<version>/）を検出する。"""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    cache_root = home / ".claude" / "plugins" / "cache" / "ple4" / "ple4"
+    for version in ("0.9.47", "0.9.48"):
+        manifest = cache_root / version / ".claude-plugin" / "plugin.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text("{}", encoding="utf-8")
+
+    found = harness_audit.find_plugin_install(tmp_path)
+
+    assert found == str(cache_root / "0.9.48" / ".claude-plugin" / "plugin.json")
+
+
+def test_find_plugin_install_returns_none_without_any_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """平置きも cache 配置も無ければ None を返す。"""
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+
+    assert harness_audit.find_plugin_install(tmp_path) is None
+
+
+def test_has_python_tests_recognizes_both_pytest_conventions(tmp_path: Path) -> None:
+    """`test_*.py` と `*_test.py` の双方を検出し、通常の .py では発火しない。"""
+    assert not harness_audit.has_python_tests(tmp_path / "missing")
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    assert not harness_audit.has_python_tests(tmp_path)
+
+    (tmp_path / "src" / "test_app.py").write_text("def test_x(): pass\n", encoding="utf-8")
+    assert harness_audit.has_python_tests(tmp_path)
+
+    suffix_root = tmp_path / "suffix"
+    (suffix_root / "pkg").mkdir(parents=True)
+    (suffix_root / "pkg" / "app_test.py").write_text("def test_x(): pass\n", encoding="utf-8")
+    assert harness_audit.has_python_tests(suffix_root)
+
+
+def test_consumer_test_suite_passes_for_pytest_only_project(tmp_path: Path) -> None:
+    """JS の規約を一切持たない pytest 専用リポジトリでも consumer-test-suite が通る。"""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_app.py").write_text("def test_x(): pass\n", encoding="utf-8")
+
+    report = harness_audit.build_report("repo", root_dir=tmp_path, target_mode="consumer")
+
+    check = next(c for c in report["checks"] if c["id"] == "consumer-test-suite")
+    assert check["pass"] is True
+
+
 def test_find_plugin_install_without_home_still_searches_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

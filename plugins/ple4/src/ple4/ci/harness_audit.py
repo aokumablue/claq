@@ -21,6 +21,7 @@ from ple4.ci.harness_audit_utils import (
     file_has_content,
     find_plugin_install,
     has_file_with_extension,
+    has_python_tests,
     safe_parse_json,
     safe_read,
 )
@@ -205,7 +206,7 @@ def _consumer_tool_coverage_checks(root_dir: str | Path, plugin_install: str | N
             "category": "Tool Coverage",
             "points": 4,
             "scopes": ["repo"],
-            "path": "~/.claude/plugins/ple4/",
+            "path": "~/.claude/plugins/",
             "description": "プラグインがインストールされている",
             "pass": bool(plugin_install),
             "fix": "Install the ple4 plugin for this user or project before auditing project-specific harness quality.",
@@ -297,12 +298,19 @@ def _consumer_quality_gates_checks(
             "scopes": ["repo"],
             "path": "tests/",
             "description": "プロジェクトが自動テストのエントリポイントを持つ",
+            # 全走査を伴う判定（has_python_tests / has_file_with_extension）は
+            # 安価な判定の後ろへ置く。or の短絡により、テストを持つ
+            # リポジトリでは走査が最大 1 回で済む。
             "pass": (
                 isinstance(package_json.get("scripts"), dict) and isinstance(package_json["scripts"].get("test"), str)
             )
             or count_files(root_dir, "tests", ".test.js") > 0
+            or has_python_tests(root_dir)
             or has_file_with_extension(root_dir, ".", [".spec.js", ".spec.ts", ".test.ts"]),
-            "fix": "Add a test script or checked-in tests so harness recommendations can be verified automatically.",
+            "fix": (
+                "Add a test script or checked-in tests (package.json scripts.test, *.spec.ts, "
+                "or pytest test_*.py) so harness recommendations can be verified automatically."
+            ),
         },
         {
             "id": "consumer-ci-workflow",

@@ -137,7 +137,7 @@ def test_build_report_defaults_to_consumer_mode_on_empty_root(monkeypatch, tmp_p
     assert report["max_score"] == 29
     assert len(report["checks"]) == 11
     assert report["categories"]["Tool Coverage"]["max_points"] == 7
-    assert report["top_actions"][0]["path"] == "~/.claude/plugins/ple4/"
+    assert report["top_actions"][0]["path"] == "~/.claude/plugins/"
     assert report["top_actions"][1]["path"] == "tests/"
     assert report["top_actions"][2]["path"] == ".claude/"
 

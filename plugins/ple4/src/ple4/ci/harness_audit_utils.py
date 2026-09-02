@@ -74,6 +74,36 @@ def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
                     yield entry
 
 
+def has_python_tests(root_dir: str | Path) -> bool:
+    """pytest / unittest の命名規約に沿ったテストファイルがあるかを調べる。
+
+    拡張子だけで判定する ``has_file_with_extension`` では Python のテストを
+    拾えない。規約が接頭辞（``test_*.py``）と接尾辞（``*_test.py``）に割れて
+    おり、``.py`` で照合すると全 Python ファイルが一致してしまうためです。
+    JS/TS 規約しか見ていなかったころは、pytest だけを持つ Python
+    リポジトリが `consumer-test-suite` で 0 点になり「テストを追加せよ」と
+    助言されていました（実測: 本リポジトリは 2359 件のテストを持つ）。
+
+    Args:
+        root_dir: 走査するルートディレクトリ。
+
+    Returns:
+        テストファイルが 1 つでもあれば True。
+
+    Raises:
+        例外は発生しません。
+    """
+    dir_path = Path(root_dir)
+    if not dir_path.exists():
+        return False
+
+    for entry in _walk_dir(dir_path):
+        name = entry.name
+        if name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")):
+            return True
+    return False
+
+
 def count_files(root_dir: str | Path, relative_dir: str, extension: str | None) -> int:
     """指定ディレクトリ以下のファイル数を数える。"""
     dir_path = Path(root_dir, relative_dir)
@@ -161,12 +191,34 @@ _PLUGIN_JSON_RELATIVES = (
     Path(".claude") / "plugins" / _PLUGIN_NAME / "plugin.json",
 )
 
+# マーケットプレイス経由で導入したときの実体配置。ホストは
+# `.claude/plugins/cache/<marketplace>/<plugin>/<version>/` へ展開するため、
+# 平置きの `.claude/plugins/<plugin>/` だけを見ると正しく導入済みの環境を
+# 「未導入」と判定する（実測: `~/.claude/plugins/cache/ple4/ple4/0.9.48/`
+# へ導入済みの機で `consumer-plugin-install` が pass=false になり、
+# `top_actions` の第 1 位に「プラグインを導入せよ」という既に満たされた
+# 助言が出た）。
+_PLUGIN_CACHE_GLOB = f".claude/plugins/cache/*/{_PLUGIN_NAME}/*/.claude-plugin/plugin.json"
+
 
 def find_plugin_install(root_dir: str | Path) -> str | None:
     """ple4 プラグインのインストール先を探す。
 
-    リポジトリ直下を先に、``HOME`` があればその配下を続けて探す。
-    各ルートでは ``.claude-plugin/plugin.json`` を先に見る。
+    リポジトリ直下を先に、``HOME`` があればその配下を続けて探す。各ルートでは
+    平置きレイアウト（``.claude/plugins/ple4/``）を先に見て、見つからなければ
+    マーケットプレイス配置（``.claude/plugins/cache/<marketplace>/ple4/<version>/``）
+    を走査する。同じルートに複数版が残っている場合はパスの辞書順で最後のものを
+    返す（呼び出し側は導入有無しか見ないが、レポートへ載る値を実行ごとに
+    ぶれさせないため順序を固定する）。
+
+    Args:
+        root_dir: 監査対象のルートディレクトリ。
+
+    Returns:
+        見つかった ``plugin.json`` の絶対パス文字列。無ければ None。
+
+    Raises:
+        例外は発生しません。
     """
     search_roots = [Path(root_dir)]
     home_dir = os.environ.get("HOME", "")
@@ -178,4 +230,7 @@ def find_plugin_install(root_dir: str | Path) -> str | None:
             candidate = search_root / relative
             if candidate.exists():
                 return str(candidate)
+        cached = sorted(str(path) for path in search_root.glob(_PLUGIN_CACHE_GLOB))
+        if cached:
+            return cached[-1]
     return None

@@ -247,6 +247,73 @@ def test_extract_printable_runs_splits_on_control_characters() -> None:
     assert runs == ["longer-run"]
 
 
+_PEM_DELIMITER = "-" * 5
+
+
+def _private_key_header(kind: str) -> str:
+    """秘密鍵ブロックのヘッダ行を組み立てる。
+
+    ヘッダをソースへ直書きすると、このテストファイル自身が
+    `_SECRET_PATTERNS` に一致し、自己走査テスト
+    （`test_repo_wide_self_scan_has_zero_secret_issues`）が赤くなります。
+    リポジトリ既存の秘密フィクスチャ（`ghp_` + 残り）と同じく、
+    実行時に連結して直書きを避けます。
+
+    Args:
+        kind: `BEGIN` と末尾デリミタの間に入る鍵種別の表記。
+
+    Returns:
+        組み立てたヘッダ行。
+
+    Raises:
+        例外は発生しません。
+    """
+    return f"{_PEM_DELIMITER}BEGIN {kind}{_PEM_DELIMITER}"
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "RSA PRIVATE KEY",
+        "DSA PRIVATE KEY",
+        "EC PRIVATE KEY",
+        "OPENSSH PRIVATE KEY",
+        "ENCRYPTED PRIVATE KEY",
+        "PRIVATE KEY",
+        "PGP PRIVATE KEY BLOCK",
+    ],
+)
+def test_scan_secret_issues_detects_private_key_headers(kind: str) -> None:
+    """秘密鍵ブロックのヘッダ行は severity error の secret として検出されること。
+
+    コミットされる秘密として最も典型的なのが鍵ファイルそのものであり、
+    API キー形式だけを見ていた頃は staged の `id_rsa` が
+    「PASS: All checks passed!」で通っていました（実測）。
+    """
+    lines = ["prefix", f"  {_private_key_header(kind)}", "suffix"]
+
+    issues = commit_quality_scanner._scan_secret_issues("\n".join(lines), lines)
+
+    assert [issue["line"] for issue in issues] == [2]
+    assert issues[0]["type"] == "secret"
+    assert issues[0]["severity"] == "error"
+    assert "private key" in issues[0]["message"]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"{_PEM_DELIMITER}BEGIN CERTIFICATE{_PEM_DELIMITER}",
+        f"{_PEM_DELIMITER}BEGIN PUBLIC KEY{_PEM_DELIMITER}",
+        "BEGIN PRIVATE KEY という表記について説明する",
+        f"{_PEM_DELIMITER}BEGIN RSA PRIVATE KEY----",
+    ],
+)
+def test_scan_secret_issues_ignores_non_private_key_lines(line: str) -> None:
+    """公開物のヘッダ・散文の言及・デリミタ不足の行では発火しないこと。"""
+    assert commit_quality_scanner._scan_secret_issues(line, [line]) == []
+
+
 def test_scan_secret_issues_raises_on_time_budget_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
     """secret scan の実時間バジェット超過は例外として送出され、
     find_file_issues 側で scan_error（severity error、fail-closed）になること。"""
