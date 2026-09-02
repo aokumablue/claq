@@ -11,7 +11,7 @@
       "name": "ple4",
       "source": "./plugins/ple4",
       "description": "開発に必要な汎用プラグイン集です。エージェント、スキル、フック、コマンドをまとめて導入し、計画・実装・検証・レビューの流れを揃えます。",
-      "version": "0.9.47",
+      "version": "0.9.48",
       "homepage": "https://github.com/aokumablue/ple4",
       "repository": "https://github.com/aokumablue/ple4",
       "license": "Apache-2.0",
