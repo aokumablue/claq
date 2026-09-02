@@ -74,6 +74,10 @@ def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
                     yield entry
 
 
+_VENDOR_DIR_NAMES = frozenset({".git", ".venv", "venv", "node_modules", "vendor", "__pycache__"})
+"""テスト検出時に降りないディレクトリ名。依存ツリー同梱のテストを除くため。"""
+
+
 def has_python_tests(root_dir: str | Path) -> bool:
     """pytest / unittest の命名規約に沿ったテストファイルがあるかを調べる。
 
@@ -82,25 +86,37 @@ def has_python_tests(root_dir: str | Path) -> bool:
     おり、``.py`` で照合すると全 Python ファイルが一致してしまうためです。
     JS/TS 規約しか見ていなかったころは、pytest だけを持つ Python
     リポジトリが `consumer-test-suite` で 0 点になり「テストを追加せよ」と
-    助言されていました（実測: 本リポジトリは 2359 件のテストを持つ）。
+    助言されていました。
+
+    `_VENDOR_DIR_NAMES` を枝刈りするのは、依存ツリーへ同梱された
+    third-party のテスト（`.venv/lib/**/test_*.py` 等）を「このプロジェクトの
+    テスト」として加点しないためです。読めないディレクトリは走査から
+    落とすだけで、監査レポート全体を落とさない（`file_has_content` と
+    同じ姿勢）。
 
     Args:
         root_dir: 走査するルートディレクトリ。
 
     Returns:
-        テストファイルが 1 つでもあれば True。
+        プロジェクト自身のテストファイルが 1 つでもあれば True。
 
     Raises:
-        例外は発生しません。
+        例外は発生しません（`OSError` は該当ディレクトリのスキップとして扱う）。
     """
-    dir_path = Path(root_dir)
-    if not dir_path.exists():
-        return False
-
-    for entry in _walk_dir(dir_path):
-        name = entry.name
-        if name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")):
-            return True
+    stack = [Path(root_dir)]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name not in _VENDOR_DIR_NAMES:
+                            stack.append(Path(entry.path))
+                    elif entry.name.endswith(".py") and (
+                        entry.name.startswith("test_") or entry.name.endswith("_test.py")
+                    ):
+                        return True
+        except OSError:
+            continue
     return False
 
 
@@ -207,9 +223,10 @@ def find_plugin_install(root_dir: str | Path) -> str | None:
     リポジトリ直下を先に、``HOME`` があればその配下を続けて探す。各ルートでは
     平置きレイアウト（``.claude/plugins/ple4/``）を先に見て、見つからなければ
     マーケットプレイス配置（``.claude/plugins/cache/<marketplace>/ple4/<version>/``）
-    を走査する。同じルートに複数版が残っている場合はパスの辞書順で最後のものを
-    返す（呼び出し側は導入有無しか見ないが、レポートへ載る値を実行ごとに
-    ぶれさせないため順序を固定する）。
+    を走査する。同じルートに複数版が残っている場合はパスの**辞書順で最初**の
+    ものを返す。呼び出し側は導入有無しか見ないため、これは同じ入力に同じ答えを
+    返させるための順序固定であって、版の新旧を表さない（辞書順では
+    ``0.9.48`` より ``0.9.9`` が後ろに来る）。
 
     Args:
         root_dir: 監査対象のルートディレクトリ。
@@ -232,5 +249,5 @@ def find_plugin_install(root_dir: str | Path) -> str | None:
                 return str(candidate)
         cached = sorted(str(path) for path in search_root.glob(_PLUGIN_CACHE_GLOB))
         if cached:
-            return cached[-1]
+            return cached[0]
     return None

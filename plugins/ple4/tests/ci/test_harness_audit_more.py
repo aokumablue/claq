@@ -129,13 +129,15 @@ def test_find_plugin_install_detects_marketplace_cache_layout(
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
     cache_root = home / ".claude" / "plugins" / "cache" / "ple4" / "ple4"
-    for version in ("0.9.47", "0.9.48"):
+    for version in ("0.9.9", "0.9.48"):
         manifest = cache_root / version / ".claude-plugin" / "plugin.json"
         manifest.parent.mkdir(parents=True, exist_ok=True)
         manifest.write_text("{}", encoding="utf-8")
 
     found = harness_audit.find_plugin_install(tmp_path)
 
+    # 契約は「辞書順で最初」であって「最新版」ではない。0.9.9 と 0.9.48 を
+    # 並べると両者が分岐する（辞書順では 0.9.48 が先）。
     assert found == str(cache_root / "0.9.48" / ".claude-plugin" / "plugin.json")
 
 
@@ -146,6 +148,26 @@ def test_find_plugin_install_returns_none_without_any_layout(
     monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
 
     assert harness_audit.find_plugin_install(tmp_path) is None
+
+
+def test_has_python_tests_skips_vendor_directories(tmp_path: Path) -> None:
+    """依存ツリー同梱のテストは加点材料にしない。"""
+    vendored = tmp_path / ".venv" / "lib" / "site-packages" / "dateutil"
+    vendored.mkdir(parents=True)
+    (vendored / "test_parser.py").write_text("def test_x(): pass\n", encoding="utf-8")
+
+    assert not harness_audit.has_python_tests(tmp_path)
+
+
+def test_has_python_tests_skips_unreadable_directories(tmp_path: Path) -> None:
+    """読めないディレクトリはスキップし、例外を送出しない（docstring の契約）。"""
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    blocked.chmod(0o000)
+    try:
+        assert harness_audit.has_python_tests(tmp_path) is False
+    finally:
+        blocked.chmod(0o700)
 
 
 def test_has_python_tests_recognizes_both_pytest_conventions(tmp_path: Path) -> None:
@@ -165,8 +187,15 @@ def test_has_python_tests_recognizes_both_pytest_conventions(tmp_path: Path) -> 
     assert harness_audit.has_python_tests(suffix_root)
 
 
-def test_consumer_test_suite_passes_for_pytest_only_project(tmp_path: Path) -> None:
-    """JS の規約を一切持たない pytest 専用リポジトリでも consumer-test-suite が通る。"""
+def test_consumer_test_suite_passes_for_pytest_only_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """JS の規約を一切持たない pytest 専用リポジトリでも consumer-test-suite が通る。
+
+    HOME を tmp 配下へ固定するのは、`find_plugin_install` が実 HOME の
+    プラグイン導入状態を読んで結果が開発者の環境に依存するのを防ぐため。
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_app.py").write_text("def test_x(): pass\n", encoding="utf-8")
 

@@ -36,6 +36,7 @@ from ple4.hooks.hook_common import (
     read_raw_stdin,
     recent_bg_failure_notice,
 )
+from ple4.lib.harness import normalize_user_message
 from ple4.mem import logger as mem_logger
 from ple4.mem.database import Database
 from ple4.mem.handoff import build_handoff
@@ -1053,13 +1054,23 @@ def _handoff_section(db: Database, repo_id: str) -> str:
 def _bg_failure_section() -> str:
     """前回セッションの detach 起動（``--bg``）失敗痕跡があれば 1 行の節にする（§6.2 対応）。
 
+    通知本文はログファイルの末尾行そのままであり、``~/.ple4/logs/`` を守る
+    フックは無い。1 度書き込まれた行は次セッション以降の SessionStart で
+    注入され続けるため、隣の handoff 節（``_handoff_section`` →
+    ``handoff._summarize_transcript``）と同じ
+    ``strip_tags(normalize_user_message(...))`` の合成を通してから注入する。
+    通していなかった頃は ``</ple4-memory> IMPORTANT: ...`` の 1 行をログへ
+    追記するだけで注入枠のタグ境界を閉じ、以後の本文を指示として提示できた
+    （実測）。``strip_tags`` だけでは足場タグ（``<system-reminder>`` 等）が
+    素通りするため、両方を通す。
+
     Returns:
         痕跡があれば見出し付き 1 行の節。無ければ空文字列。
 
     Raises:
         例外は発生しません。
     """
-    notice = recent_bg_failure_notice()
+    notice = strip_tags(normalize_user_message(recent_bg_failure_notice())).strip()
     if not notice:
         return ""
     return f"## 前回セッションの通知\n{notice}"

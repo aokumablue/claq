@@ -67,10 +67,14 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     # `[A-Z ]+` のような曖昧な繰り返しを使わない（曖昧な繰り返しは、
     # 前置の 5 ハイフンに一致した後の長い大文字列で走査を二次オーダーへ
     # 落とす）。公開物のヘッダ（CERTIFICATE / PUBLIC KEY）は
-    # "PRIVATE KEY" を含まないので一致しない。末尾デリミタを `[-]{5}` と
-    # 書くのは、この行自身が自分のパターンに一致して「本モジュールを走査
-    # すると秘密が検出される」状態になるのを避けるため
-    # （`tests/hooks/test_hook_edge_cases.py` の自己走査テストが恒久ゲート）。
+    # "PRIVATE KEY" を含まないので一致しない。
+    #
+    # 鍵種別を増やすときは、この 1 本の交替へ語を足す。種別ごとに完成形の
+    # ヘッダを literal で書き並べる形にはしない —— その行自身が自分の
+    # パターンへ一致し、「本モジュールを走査すると秘密が検出される」状態に
+    # なる（実測で PGP 用の literal パターンを別行として足した際に
+    # `tests/hooks/test_hook_edge_cases.py` の自己走査テストが赤くなった）。
+    # 同じ理由で、この付近のコメントにも完成形のヘッダを書かない。
     (
         r"-----BEGIN (?:RSA |DSA |EC |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?[-]{5}",
         "private key",

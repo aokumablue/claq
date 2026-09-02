@@ -49,7 +49,7 @@ VALID_FORMATS = {"text", "json"}
 VALID_TARGET_KINDS = {"repo", "consumer"}
 
 
-RUBRIC_VERSION = "2026-08-31"
+RUBRIC_VERSION = "2026-09-03"
 """採点ルーブリックの版。
 
 スコアはこの版の中でのみ比較可能で、版が上がった時点で過去のベースラインとは
@@ -298,15 +298,17 @@ def _consumer_quality_gates_checks(
             "scopes": ["repo"],
             "path": "tests/",
             "description": "プロジェクトが自動テストのエントリポイントを持つ",
-            # 全走査を伴う判定（has_python_tests / has_file_with_extension）は
-            # 安価な判定の後ろへ置く。or の短絡により、テストを持つ
-            # リポジトリでは走査が最大 1 回で済む。
+            # 走査を伴う判定は、最初のヒットで打ち切る 2 つ
+            # （has_python_tests / has_file_with_extension）を先に置く。
+            # count_files はヒットしても数え上げを続けるため最後に回す
+            # ——先頭に置くと、テストを持つリポジトリでも tests/ を必ず
+            # 全数え上げしてから短絡することになる。
             "pass": (
                 isinstance(package_json.get("scripts"), dict) and isinstance(package_json["scripts"].get("test"), str)
             )
-            or count_files(root_dir, "tests", ".test.js") > 0
             or has_python_tests(root_dir)
-            or has_file_with_extension(root_dir, ".", [".spec.js", ".spec.ts", ".test.ts"]),
+            or has_file_with_extension(root_dir, ".", [".spec.js", ".spec.ts", ".test.ts"])
+            or count_files(root_dir, "tests", ".test.js") > 0,
             "fix": (
                 "Add a test script or checked-in tests (package.json scripts.test, *.spec.ts, "
                 "or pytest test_*.py) so harness recommendations can be verified automatically."
