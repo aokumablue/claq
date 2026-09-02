@@ -452,6 +452,13 @@ _HELPERS_SH = _ROOT / "runtime" / "ple4-helpers.sh"
 _MD_CALLABLE_EXEMPTIONS = {
     "fetch": "SSRF の説明に使う汎用の擬似コード（agents/security-auditor.md）",
     "search": "検証手段の書き方を示す例示（agents/planner.md）",
+    # CSS の組み込み関数はブラウザ側の言語仕様であって、このリポジトリの
+    # シンボルではない。リネームで壊れる対象ではないので在庫検査から外す。
+    # 逆に列挙を広げすぎると本来の drift 検出が緩むため、実際に md で使う
+    # 関数だけを名指しする（skills/html-gen）。
+    "var": "CSS のカスタムプロパティ参照（skills/html-gen）",
+    "clamp": "CSS の流体サイズ関数（skills/html-gen）",
+    "minmax": "CSS グリッドのトラックサイズ関数（skills/html-gen）",
 }
 
 

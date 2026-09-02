@@ -1,131 +1,116 @@
 /**
- * 実ブラウザでの受け入れ確認。生成サイトを HTTP で配信して開き、
- * DevTools コンソールに貼り付けて実行する（file:// は localStorage が使えず永続を確認できない）。
+ * ブラウザで実際に解決された色を巡回し、可読性契約を実測する。
  *
- * check_site.py は tokens.json 上の値を検査する。こちらは「実際に描画された色」を
- * getComputedStyle で読み、7 パレット × ライト/ダークの 14 ブロックを実測する。
- * 返り値の verdict が GREEN なら受け入れ、RED なら failures がそのまま是正対象。
- *
- * 目盛線の色で塗られた図形（ドーナツの台座・軸）は装飾なので 3:1 の対象から外す。
- * データマーク（棒・凡例・折れ線・点・ドーナツの各セグメント）だけを数える。
+ * DevTools のコンソールへ貼り付けて実行する。全 seed × ライト/ダークを順に
+ * 適用し、`getComputedStyle` が返す**描画された値**で比を測る。check_site.py は
+ * tokens.json 上の値しか見ないので、CSS の上書きやブレンドで落ちた分はここでしか
+ * 出ない。`verdict` が GREEN なら受け入れ、RED なら `failures` がそのまま是正対象。
  */
-(function () {
+(() => {
+  "use strict";
+
   const TEXT_MIN = 4.5;
   const MARK_MIN = 3.0;
-  const PALETTES = ["solid-gray", "blue", "light-blue", "cyan", "green", "orange", "red"];
+  const SEEDS = ["indigo", "azure", "teal", "verdant", "amber", "crimson"];
+  const THEMES = ["light", "dark"];
+  const CHARTS = ["--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5", "--chart-6"];
+  const PAIRS = [
+    ["--md-sys-color-on-surface", "--md-sys-color-surface", TEXT_MIN],
+    ["--md-sys-color-on-surface", "--md-sys-color-surface-container", TEXT_MIN],
+    ["--md-sys-color-on-surface-variant", "--md-sys-color-surface-container", TEXT_MIN],
+    ["--md-sys-color-on-primary", "--md-sys-color-primary", TEXT_MIN],
+    ["--md-sys-color-on-primary-container", "--md-sys-color-primary-container", TEXT_MIN],
+    ["--md-sys-color-on-secondary-container", "--md-sys-color-secondary-container", TEXT_MIN],
+    ["--md-sys-color-inverse-on-surface", "--md-sys-color-inverse-surface", TEXT_MIN],
+    ["--md-sys-color-primary", "--md-sys-color-surface-container", TEXT_MIN],
+    ["--md-sys-color-positive", "--md-sys-color-surface-container", TEXT_MIN],
+    ["--md-sys-color-negative", "--md-sys-color-surface-container", TEXT_MIN],
+    ["--md-sys-color-outline", "--md-sys-color-surface", MARK_MIN],
+    ...CHARTS.map((name) => [name, "--md-sys-color-surface-container", MARK_MIN]),
+  ];
+
+  const root = document.documentElement;
+  const original = { theme: root.dataset.theme, seed: root.dataset.seed };
 
   /**
-   * `rgb(r, g, b)` の相対輝度を返す。
-   * @param {string} rgb
-   * @returns {number}
+   * CSS の色文字列を 0-255 の RGB へ正規化する。
+   * @param {string} value `#RRGGBB` か `rgb(...)`
+   * @returns {number[]} [r, g, b]
    */
-  function luminance(rgb) {
-    const parts = rgb.match(/\d+/g).slice(0, 3).map(Number);
-    const linear = (channel) => {
-      const c = channel / 255;
-      return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-    };
-    const [r, g, b] = parts.map(linear);
+  const toRgb = (value) => {
+    const text = value.trim();
+    if (text.startsWith("#")) {
+      const body =
+        text.length === 4
+          ? text
+              .slice(1)
+              .split("")
+              .map((ch) => ch + ch)
+              .join("")
+          : text.slice(1, 7);
+      return [0, 2, 4].map((i) => parseInt(body.slice(i, i + 2), 16));
+    }
+    const parts = text.match(/[\d.]+/g) || [];
+    return parts.slice(0, 3).map(Number);
+  };
+
+  /**
+   * 相対輝度を返す。
+   * @param {string} value CSS 色
+   * @returns {number} 0〜1
+   */
+  const luminance = (value) => {
+    const [r, g, b] = toRgb(value).map((channel) => {
+      const scaled = channel / 255;
+      return scaled <= 0.04045 ? scaled / 12.92 : ((scaled + 0.055) / 1.055) ** 2.4;
+    });
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  }
+  };
 
   /**
-   * 2 色のコントラスト比を返す。
-   * @param {string} first
-   * @param {string} second
-   * @returns {number}
+   * コントラスト比を返す。
+   * @param {string} first 前景色
+   * @param {string} second 背景色
+   * @returns {number} 比率
    */
-  function ratio(first, second) {
-    const a = luminance(first);
-    const b = luminance(second);
-    const [hi, lo] = a > b ? [a, b] : [b, a];
+  const ratio = (first, second) => {
+    const [hi, lo] = [luminance(first), luminance(second)].sort((a, b) => b - a);
     return (hi + 0.05) / (lo + 0.05);
-  }
-
-  /**
-   * 要素が乗っているカードの背景色を返す。
-   * @param {Element} el
-   * @returns {string}
-   */
-  function backgroundOf(el) {
-    return getComputedStyle(el.closest(".card")).backgroundColor;
-  }
-
-  /**
-   * 図形の実効的な塗り色（fill 優先、無ければ stroke）を返す。
-   * @param {Element} el
-   * @returns {string}
-   */
-  function paintOf(el) {
-    const style = getComputedStyle(el);
-    const filled = style.fill !== "none" && style.fill !== "rgba(0, 0, 0, 0)";
-    return filled ? style.fill : style.stroke;
-  }
-
-  /**
-   * 目盛線色を解決済み rgb で返す。
-   * @returns {string}
-   */
-  function gridlineRgb() {
-    const raw = getComputedStyle(document.documentElement).getPropertyValue("--color-gridline").trim();
-    const probe = document.createElement("span");
-    probe.style.color = raw;
-    document.body.appendChild(probe);
-    const resolved = getComputedStyle(probe).color;
-    probe.remove();
-    return resolved;
-  }
-
-  /**
-   * データマークだけを集める（装飾の目盛線・台座は除く）。
-   * @returns {Element[]}
-   */
-  function dataMarks() {
-    const grid = gridlineRgb();
-    return [...document.querySelectorAll("svg rect, svg polyline, svg circle")].filter(
-      (mark) => paintOf(mark) !== grid
-    );
-  }
+  };
 
   const failures = [];
-  const blocks = [];
-  const select = document.getElementById("palette-select");
-  for (const palette of PALETTES) {
-    if (select) {
-      select.value = palette;
-      select.dispatchEvent(new Event("change"));
-    }
-    for (const theme of ["light", "dark"]) {
-      const button = document.querySelector(`[data-theme-value="${theme}"]`);
-      if (!button) {
-        failures.push(`${theme} のトグルが無い`);
-        continue;
-      }
-      button.click();
-      const marks = dataMarks();
-      let worst = Infinity;
-      for (const mark of marks) {
-        const value = ratio(paintOf(mark), backgroundOf(mark));
-        worst = Math.min(worst, value);
-        if (value < MARK_MIN) {
-          failures.push(`${palette}/${theme} マーク ${value.toFixed(2)} (${paintOf(mark)})`);
-        }
-      }
-      const texts = ".kpi, .kpi-label, .chart-title, .delta-positive, .delta-negative, td, th";
-      for (const el of document.querySelectorAll(texts)) {
-        const value = ratio(getComputedStyle(el).color, backgroundOf(el));
-        if (value < TEXT_MIN) {
-          failures.push(`${palette}/${theme} 文字 ${value.toFixed(2)} <${el.className || el.tagName}>`);
-        }
-      }
-      if (button.getAttribute("aria-pressed") !== "true") {
-        failures.push(`${palette}/${theme} aria-pressed が押下状態になっていない`);
-      }
-      if (getComputedStyle(document.documentElement).colorScheme !== theme) {
-        failures.push(`${palette}/${theme} color-scheme が data-theme に追従していない`);
-      }
-      blocks.push({ block: `${palette}/${theme}`, marks: marks.length, worst: Number(worst.toFixed(2)) });
-    }
-  }
-  return { verdict: failures.length ? "RED" : "GREEN", blocks, failures };
+  const rows = [];
+
+  SEEDS.forEach((seed) => {
+    THEMES.forEach((theme) => {
+      root.dataset.seed = seed;
+      root.dataset.theme = theme;
+      const styles = getComputedStyle(root);
+      const resolve = (name) => styles.getPropertyValue(name).trim();
+      PAIRS.forEach(([foreground, background, minimum]) => {
+        const value = ratio(resolve(foreground), resolve(background));
+        const record = {
+          block: `${theme}/${seed}`,
+          foreground,
+          background,
+          ratio: Number(value.toFixed(2)),
+          minimum,
+        };
+        rows.push(record);
+        if (value < minimum) failures.push(record);
+      });
+    });
+  });
+
+  root.dataset.theme = original.theme;
+  root.dataset.seed = original.seed;
+
+  const report = {
+    verdict: failures.length === 0 ? "GREEN" : "RED",
+    checked: rows.length,
+    failures,
+  };
+  console.table(failures.length ? failures : rows.slice(0, 12));
+  console.log(report.verdict, `${rows.length} pairs checked, ${failures.length} failed`);
+  return report;
 })();
