@@ -150,7 +150,7 @@ h4 {
   z-index: 40;
   inset: 0;
   background: color-mix(in oklab, var(--foreground) 45%, transparent);
-  animation: fade var(--duration-moderate) var(--ease-out) both;
+  animation: fade var(--duration-moderate) var(--ease-out);
 }
 
 .sidebar__head {
@@ -194,7 +194,7 @@ h4 {
 }
 
 .brand__meta {
-  color: color-mix(in oklab, var(--sidebar-foreground) 62%, transparent);
+  color: var(--muted-foreground);
   font-size: var(--text-xs);
   line-height: var(--text-xs-line);
 }
@@ -211,7 +211,7 @@ h4 {
 
 .nav-group__label {
   padding: 6px 8px;
-  color: color-mix(in oklab, var(--sidebar-foreground) 58%, transparent);
+  color: var(--muted-foreground);
   font-size: var(--text-xs);
   line-height: var(--text-xs-line);
   font-weight: var(--font-weight-medium);
@@ -228,7 +228,7 @@ h4 {
   min-block-size: 36px;
   padding: 6px 10px;
   border-radius: var(--radius-md);
-  color: color-mix(in oklab, var(--sidebar-foreground) 82%, transparent);
+  color: var(--sidebar-foreground);
   font-size: var(--text-sm);
   font-weight: var(--font-weight-medium);
   text-align: start;
@@ -759,15 +759,29 @@ h4 {
   block-size: 12px;
 }
 
-/* 色は良し悪し、中のアイコンは増減の向き。この 2 つを混ぜない。 */
+/*
+ * 色は良し悪し、中のアイコンは増減の向き。この 2 つを混ぜない。
+ * 良し悪しは面と枠で示し、文字は --foreground のまま置く。文字自体を
+ * 色混合にすると、ライトでは背景へ寄って 4.5:1 を割る。
+ */
 .badge--good {
-  background: color-mix(in oklab, var(--chart-2) 16%, var(--card));
-  color: color-mix(in oklab, var(--chart-2) 84%, var(--foreground));
+  border-color: color-mix(in oklab, var(--chart-2) 38%, transparent);
+  background: color-mix(in oklab, var(--chart-2) 14%, var(--card));
+  color: var(--foreground);
+}
+
+.badge--good svg {
+  color: var(--chart-2);
 }
 
 .badge--bad {
+  border-color: color-mix(in oklab, var(--destructive) 34%, transparent);
   background: color-mix(in oklab, var(--destructive) 14%, var(--card));
-  color: color-mix(in oklab, var(--destructive) 80%, var(--foreground));
+  color: var(--foreground);
+}
+
+.badge--bad svg {
+  color: var(--destructive);
 }
 
 .badge--outline {
@@ -1048,7 +1062,7 @@ tbody tr:last-child {
   color: var(--popover-foreground);
   font-size: var(--text-sm);
   box-shadow: var(--shadow-lg);
-  animation: toast-in var(--duration-slow) var(--ease-out) both;
+  animation: toast-in var(--duration-slow) var(--ease-out);
 }
 
 .toast[hidden] {

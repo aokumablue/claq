@@ -28,6 +28,7 @@
     ["--muted-foreground", "--muted", TEXT_MIN],
     ["--muted-foreground", "--background", TEXT_MIN],
     ["--muted-foreground", "--card", TEXT_MIN],
+    ["--muted-foreground", "--sidebar", TEXT_MIN],
     ["--destructive-foreground", "--destructive", TEXT_MIN],
     ["--destructive", "--background", TEXT_MIN],
     ["--destructive", "--card", TEXT_MIN],
@@ -46,6 +47,11 @@
 
   const root = document.documentElement;
   const original = { theme: root.dataset.theme, base: root.dataset.base };
+  // テーマを切り替えると色が 150ms かけて遷移する。その途中を読むと
+  // 「切り替え前の色」で比を測ってしまうので、測定中だけ遷移を止める。
+  const freeze = document.createElement("style");
+  freeze.textContent = "*, *::before, *::after { transition: none !important; }";
+  document.head.append(freeze);
   const probe = document.createElement("span");
   probe.style.display = "none";
   document.body.append(probe);
@@ -64,14 +70,18 @@
    * @param {string} name CSS カスタムプロパティ名
    * @returns {number[]} [r, g, b, a]
    */
-  const resolve = (name) => {
-    probe.style.color = "rgb(0, 0, 0)";
-    probe.style.color = `var(${name})`;
+  const paint = (value) => {
     ctx.clearRect(0, 0, 1, 1);
-    ctx.fillStyle = getComputedStyle(probe).color;
+    ctx.fillStyle = value;
     ctx.fillRect(0, 0, 1, 1);
     const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
     return [r, g, b, a / 255];
+  };
+
+  const resolve = (name) => {
+    probe.style.color = "rgb(0, 0, 0)";
+    probe.style.color = `var(${name})`;
+    return paint(getComputedStyle(probe).color);
   };
 
   /**
@@ -107,7 +117,67 @@
     return (hi + 0.05) / (lo + 0.05);
   };
 
+  /**
+   * 要素の実背景を返す。半透明が重なっていれば下から順に合成する。
+   * @param {Element} element 対象要素
+   * @returns {number[]} [r, g, b]
+   */
+  const backdropOf = (element) => {
+    const layers = [];
+    let node = element;
+    while (node) {
+      const background = paint(getComputedStyle(node).backgroundColor);
+      if (background[3] > 0) layers.push(background);
+      if (background[3] >= 1) break;
+      node = node.parentElement;
+    }
+    return layers.reduceRight(
+      (under, over) => flatten(over, [...under, 1]),
+      [255, 255, 255]
+    );
+  };
+
+  /**
+   * 実際に描かれた文字とその背景でコントラストを測る。
+   *
+   * PAIRS は変数どうしの比較なので、`color-mix` や不透明度で作った色は
+   * どちらの側にも現れない。ここだけが「合成した結果の文字色」を見る。
+   * @param {string} block 現在のテーマ / ベースカラー
+   * @returns {object[]} 契約を割った要素の記録
+   */
+  const measureRenderedText = (block) => {
+    const found = [];
+    document.querySelectorAll("body *").forEach((element) => {
+      if (element.closest("[aria-hidden='true']")) return;
+      const own = Array.from(element.childNodes)
+        .filter((node) => node.nodeType === 3)
+        .map((node) => node.textContent.trim())
+        .join("");
+      if (!own) return;
+      const box = element.getBoundingClientRect();
+      if (box.width < 4 || box.height < 4) return;
+      const style = getComputedStyle(element);
+      if (style.visibility === "hidden" || style.display === "none") return;
+      const size = parseFloat(style.fontSize);
+      const weight = Number(style.fontWeight) || 400;
+      const minimum = size >= 24 || (size >= 18.66 && weight >= 700) ? MARK_MIN : TEXT_MIN;
+      const back = backdropOf(element);
+      const value = ratio(flatten(paint(style.color), [...back, 1]), back);
+      if (value < minimum) {
+        found.push({
+          block,
+          selector: element.tagName.toLowerCase() + (element.className ? `.${String(element.className).split(" ")[0]}` : ""),
+          sample: own.slice(0, 18),
+          ratio: Number(value.toFixed(2)),
+          minimum,
+        });
+      }
+    });
+    return found;
+  };
+
   const failures = [];
+  const textFailures = [];
   const rows = [];
 
   BASES.forEach((base) => {
@@ -127,19 +197,27 @@
         rows.push(record);
         if (value < minimum) failures.push(record);
       });
+      textFailures.push(...measureRenderedText(`${theme}/${base}`));
     });
   });
 
   root.dataset.theme = original.theme;
   root.dataset.base = original.base;
   probe.remove();
+  freeze.remove();
 
   const report = {
-    verdict: failures.length === 0 ? "GREEN" : "RED",
+    verdict: failures.length === 0 && textFailures.length === 0 ? "GREEN" : "RED",
     checked: rows.length,
     failures,
+    textFailures,
   };
   console.table(failures.length ? failures : rows.slice(0, 12));
-  console.log(report.verdict, `${rows.length} pairs checked, ${failures.length} failed`);
+  if (textFailures.length) console.table(textFailures);
+  console.log(
+    report.verdict,
+    `${rows.length} pairs checked, ${failures.length} failed;`,
+    `rendered text: ${textFailures.length} failed`
+  );
   return report;
 })();

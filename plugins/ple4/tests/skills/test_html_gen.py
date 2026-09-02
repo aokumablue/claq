@@ -334,6 +334,48 @@ def test_contrast_contract_covers_charts_status_and_focus() -> None:
         assert pair in pairs
 
 
+def test_muted_foreground_is_checked_on_the_sidebar_surface() -> None:
+    """サイドバー面の補助テキストも契約に入っている。
+
+    面ごとに変数が分かれているので、背景・カードだけ見ていると
+    サイドバーの文字が誰にも見張られないまま出荷される。
+    """
+    pairs = {(foreground, background) for foreground, background, _ in check_site.CONTRAST_CONTRACT}
+    assert ("--muted-foreground", "--sidebar") in pairs
+    for base_id in BASES:
+        for theme in check_site.THEMES:
+            colors = check_site.resolved_hex(TOKENS, base_id, theme)
+            assert check_site.contrast_ratio(colors["--muted-foreground"], colors["--sidebar"]) >= 4.5
+
+
+def test_text_color_from_a_transparent_mix_is_reported(tmp_path: Path) -> None:
+    """文字色を透明との混合で作ると落ちる。
+
+    ライトでは前景を薄めるほど背景（白）へ寄るので、可読性契約を割る。
+    面や枠の混合は問題ないので通す。
+    """
+    dest = _copy_site(tmp_path)
+    assert "透明との color-mix" in _append(
+        dest, "styles.css", "\n.x { color: color-mix(in oklab, var(--foreground) 50%, transparent); }\n"
+    )
+    dest = _copy_site(tmp_path, "s2")
+    assert (
+        _append(
+            dest,
+            "styles.css",
+            "\n.x { background: color-mix(in oklab, var(--foreground) 8%, transparent);"
+            " border-color: color-mix(in oklab, var(--ring) 40%, transparent); }\n",
+        )
+        == ""
+    )
+
+
+def test_authored_text_colors_go_through_role_variables() -> None:
+    """テンプレート自身が文字色を透明混合で作っていない。"""
+    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+    assert not re.search(r"(?<![-\w])color:\s*color-mix\([^;}]*\btransparent\b", css)
+
+
 def test_decorative_borders_are_excluded_from_the_3_to_1_rule() -> None:
     """ヘアラインは 3:1 契約の外。ただし背景と同化していないことは見る。"""
     decorative = set(TOKENS["decorative_roles"]["vars"])
@@ -641,6 +683,31 @@ def test_resting_state_must_stay_visible(tmp_path: Path) -> None:
     assert "opacity: 0" in _append(dest, "styles.css", "\n.reveal { opacity: 0; }\n")
 
 
+def test_unscoped_fill_mode_both_is_reported(tmp_path: Path) -> None:
+    """[data-animate] の外で both / backwards を使うと落ちる。
+
+    遅延中と停止中に `from` の状態が貼り付くため、背面タブでは要素が
+    見えないまま固まる。実際にこの形で出荷しかけた。
+    """
+    dest = _copy_site(tmp_path)
+    assert "both/backwards" in _append(
+        dest, "styles.css", "\n.x { animation: rise 300ms both; }\n"
+    )
+    dest = _copy_site(tmp_path, "s2")
+    assert "both/backwards" in _append(
+        dest, "styles.css", "\n.x { animation-fill-mode: backwards; }\n"
+    )
+
+
+def test_scoped_fill_mode_both_is_allowed(tmp_path: Path) -> None:
+    """[data-animate] の下なら both を使ってよい（JS が画面内でだけ起動する）。"""
+    dest = _copy_site(tmp_path)
+    assert (
+        _append(dest, "styles.css", '\n[data-animate="in"] .x { animation: rise 300ms both; }\n')
+        == ""
+    )
+
+
 def test_resting_state_allows_opacity_zero_inside_keyframes(tmp_path: Path) -> None:
     """@keyframes の中の opacity: 0 は正しい書き方なので通す。"""
     dest = _copy_site(tmp_path)
@@ -702,13 +769,17 @@ def test_raw_color_function_in_authored_css_is_reported(tmp_path: Path) -> None:
 
 
 def test_color_mix_and_var_are_allowed(tmp_path: Path) -> None:
-    """color-mix と var は通す（トークン経由の合成は正しい書き方）。"""
+    """color-mix と var は通す（トークン経由の合成は正しい書き方）。
+
+    ただし文字色を透明と混ぜるのは別（可読性契約を割るので拒否する）。
+    """
     dest = _copy_site(tmp_path)
     assert (
         _append(
             dest,
             "styles.css",
-            "\n.x { color: color-mix(in oklab, var(--primary) 40%, transparent); }\n",
+            "\n.x { background: color-mix(in oklab, var(--primary) 40%, transparent);"
+            " color: color-mix(in oklab, var(--primary) 60%, var(--foreground)); }\n",
         )
         == ""
     )
@@ -871,6 +942,32 @@ def test_e2e_browser_script_reads_real_pixels() -> None:
     script = (_TEMPLATE / "e2e_contrast.js").read_text(encoding="utf-8")
     assert "getImageData" in script
     assert "createElement(\"canvas\")" in script
+
+
+def test_e2e_script_measures_rendered_text_not_just_variables() -> None:
+    """実測は変数ペアだけでなく、実際に描かれた文字も見る。
+
+    `color-mix` や不透明度で作った文字色はどちらの変数にも現れないので、
+    ペア表だけでは見張れない。サイドバーのラベルが 2.2:1 のまま
+    全チェック緑になった実例がある。
+    """
+    script = (_TEMPLATE / "e2e_contrast.js").read_text(encoding="utf-8")
+    assert "measureRenderedText" in script
+    assert "backdropOf" in script
+    assert "textFailures" in script
+    # 判定は両方のパスを含む。
+    assert "failures.length === 0 && textFailures.length === 0" in script
+
+
+def test_e2e_script_freezes_transitions_while_measuring() -> None:
+    """測定中は色遷移を止める。
+
+    テーマ切替の色は 150ms かけて遷移するので、止めずに読むと
+    「切り替え前の色」で比を測り、無関係な要素が大量に赤くなる。
+    """
+    script = (_TEMPLATE / "e2e_contrast.js").read_text(encoding="utf-8")
+    assert "transition: none !important" in script
+    assert "freeze.remove()" in script
 
 
 def test_e2e_rendered_chart_marks_stay_visible_in_both_themes() -> None:

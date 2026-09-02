@@ -64,6 +64,7 @@ CONTRAST_CONTRACT: tuple[tuple[str, str, float], ...] = (
     ("--muted-foreground", "--muted", 4.5),
     ("--muted-foreground", "--background", 4.5),
     ("--muted-foreground", "--card", 4.5),
+    ("--muted-foreground", "--sidebar", 4.5),
     ("--destructive-foreground", "--destructive", 4.5),
     ("--destructive", "--background", 4.5),
     ("--destructive", "--card", 4.5),
@@ -651,6 +652,13 @@ def _validate_styles(css: str) -> list[str]:
         violations.append("styles.css に流体タイポ（clamp）が無い")
     if ":focus-visible" not in css:
         violations.append("styles.css に :focus-visible のリングが無い（キーボード操作が見えない）")
+    # 文字色を透明との混合で作ると、ライトでは背景へ寄って可読性契約を割る。
+    # 面や枠の混合は問題ないので、`color:` だけを見る。
+    for match in re.finditer(r"(?<![-\w])color:\s*color-mix\([^;}]*\btransparent\b", css):
+        violations.append(
+            f"文字色を透明との color-mix で作っている: `{match.group(0)[:52]}...`"
+            "（役割変数を直接使う）"
+        )
     if re.search(r"font-size:\s*(?:[0-9]|1[0-1])px", css):
         violations.append("12px 未満の font-size がある")
     violations.extend(_validate_reduced_motion(css))
@@ -678,9 +686,14 @@ def _validate_reduced_motion(css: str) -> list[str]:
 def _validate_resting_state(css: str) -> list[str]:
     """アニメーションが完走しなくても中身が読めることを検査する。
 
-    背面タブ・JS 無効・印刷ではタイムラインが進まない。`opacity: 0` を静止状態に
-    置いて `forwards` で見せる書き方は、そのとき真っ白なページになる。
-    入場アニメーションは `@keyframes` の `from` 側で隠して `both` で当てる。
+    背面タブ・JS 無効・印刷ではタイムラインが進まない。静止状態を不可視にする
+    書き方はそのとき真っ白なページになるので、3 つとも機械的に落とす。
+
+    1. `forwards`: 完走しないと最終状態にならない
+    2. `@keyframes` の外の `opacity: 0`: 静止状態そのものが不可視
+    3. `[data-animate]` の外で `both` / `backwards`: 遅延中と停止中に `from` の
+       状態が貼り付く。JS が画面内で付ける属性の下だけに置けば、背面タブでは
+       そもそも起動しない
     """
     violations: list[str] = []
     if re.search(r"animation-fill-mode:\s*forwards", css) or re.search(
@@ -690,6 +703,15 @@ def _validate_resting_state(css: str) -> list[str]:
     outside = re.sub(r"@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\}\s*)*\}", "", css, flags=re.DOTALL)
     if re.search(r"(?<![-\w])opacity:\s*0(?:\.0+)?\s*;", outside):
         violations.append("@keyframes の外に opacity: 0 がある（静止状態は必ず読める状態にする）")
+    for selector, block in re.findall(r"([^{}]+)\{([^{}]*)\}", outside):
+        if "[data-animate" in selector:
+            continue
+        if re.search(r"animation(?:-fill-mode)?:[^;}]*\b(?:both|backwards)\b", block):
+            violations.append(
+                f"`{selector.strip().splitlines()[-1].strip()}` の animation が "
+                "[data-animate] の外で both/backwards を使っている"
+                "（背面タブで from の状態に貼り付く）"
+            )
     return violations
 
 
