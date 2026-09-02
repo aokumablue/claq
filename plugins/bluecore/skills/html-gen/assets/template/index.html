@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light" data-palette="blue" data-page-kind="dashboard" data-canvas="16x9">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>政策ダッシュボード（デジタル庁デザインテンプレート準拠）</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Sans+Mono:wght@400;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <!-- 描画前に data-theme を確定させる。body 末尾へ移すとダーク選択時に白がちらつく。 -->
+  <script src="theme.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">本文へ移動</a>
+  <div class="canvas">
+    <header class="site-header">
+      <h1 class="site-title">政策ダッシュボード</h1>
+      <div class="toolbar">
+        <label class="muted" for="filter-year">年度</label>
+        <select id="filter-year" class="filter">
+          <option>2024年度</option>
+          <option>2025年度</option>
+          <option selected>2026年度</option>
+        </select>
+        <label class="muted" for="palette-select">カラーパレット</label>
+        <select id="palette-select" class="palette-select">
+          <option value="solid-gray">Solid Gray</option>
+          <option value="blue" selected>Blue</option>
+          <option value="light-blue">Light Blue</option>
+          <option value="cyan">Cyan</option>
+          <option value="green">Green</option>
+          <option value="orange">Orange</option>
+          <option value="red">Red</option>
+        </select>
+        <div class="theme-toggle" role="group" aria-label="配色モード">
+          <button type="button" data-theme-value="light" aria-pressed="true">ホワイトモード</button>
+          <button type="button" data-theme-value="dark" aria-pressed="false">ダークモード</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="grid">
+        <article class="card card--highlight span-2" data-kpi="true">
+          <p class="kpi-label">申請件数（年度累計）</p>
+          <p class="kpi">128,430<span class="muted"> 件</span></p>
+          <p>前年度比 +6.2%（増加）</p>
+        </article>
+        <article class="card span-2" data-kpi="true">
+          <p class="kpi-label">処理日数（中央値）</p>
+          <p class="kpi">11.4<span class="muted"> 日</span></p>
+          <p>目標 10 日 / 前年度比 <span class="delta-negative">+0.8 日</span></p>
+        </article>
+        <figure class="card span-2">
+          <figcaption class="chart-title">手続の構成比（件）</figcaption>
+          <svg role="img" viewBox="0 0 200 160" aria-labelledby="donut-title donut-desc">
+            <title id="donut-title">手続の構成比</title>
+            <desc id="donut-desc">届出 48%、申請 32%、相談 20%</desc>
+            <circle cx="70" cy="80" r="48" fill="none" stroke="var(--color-gridline)" stroke-width="24"></circle>
+            <circle cx="70" cy="80" r="48" fill="none" stroke="var(--chart-1)" stroke-width="24" stroke-dasharray="144.8 301.6" stroke-dashoffset="0" transform="rotate(-90 70 80)"></circle>
+            <circle cx="70" cy="80" r="48" fill="none" stroke="var(--chart-2)" stroke-width="24" stroke-dasharray="96.5 301.6" stroke-dashoffset="-144.8" transform="rotate(-90 70 80)"></circle>
+            <circle cx="70" cy="80" r="48" fill="none" stroke="var(--chart-3)" stroke-width="24" stroke-dasharray="60.3 301.6" stroke-dashoffset="-241.3" transform="rotate(-90 70 80)"></circle>
+            <text x="70" y="76" text-anchor="middle" fill="var(--color-text)" font-size="14">全体</text>
+            <text x="70" y="94" text-anchor="middle" fill="var(--color-text)" font-size="16" font-weight="700">100%</text>
+            <rect x="130" y="44" width="10" height="10" fill="var(--chart-1)"></rect>
+            <text x="144" y="54" fill="var(--color-text)" font-size="14">届出 48%</text>
+            <rect x="130" y="68" width="10" height="10" fill="var(--chart-2)"></rect>
+            <text x="144" y="78" fill="var(--color-text)" font-size="14">申請 32%</text>
+            <rect x="130" y="92" width="10" height="10" fill="var(--chart-3)"></rect>
+            <text x="144" y="102" fill="var(--color-text)" font-size="14">相談 20%</text>
+          </svg>
+        </figure>
+
+        <figure class="card span-4">
+          <figcaption class="chart-title">年度別 申請件数の推移（件）</figcaption>
+          <svg role="img" viewBox="0 0 640 220" data-origin="0" aria-labelledby="bar-title bar-desc">
+            <title id="bar-title">年度別申請件数</title>
+            <desc id="bar-desc">2022年 8.2万、2023年 9.4万、2024年 10.7万、2025年 11.9万、2026年 12.8万。原点は 0。</desc>
+            <line x1="48" y1="16" x2="48" y2="180" stroke="var(--color-gridline)"></line>
+            <line x1="48" y1="180" x2="620" y2="180" stroke="var(--color-gridline)"></line>
+            <rect x="80" y="88" width="64" height="92" fill="var(--chart-1)"></rect>
+            <text x="112" y="82" text-anchor="middle" fill="var(--color-text)" font-size="14">8.2</text>
+            <rect x="180" y="72" width="64" height="108" fill="var(--chart-1)"></rect>
+            <text x="212" y="66" text-anchor="middle" fill="var(--color-text)" font-size="14">9.4</text>
+            <rect x="280" y="54" width="64" height="126" fill="var(--chart-1)"></rect>
+            <text x="312" y="48" text-anchor="middle" fill="var(--color-text)" font-size="14">10.7</text>
+            <rect x="380" y="38" width="64" height="142" fill="var(--chart-1)"></rect>
+            <text x="412" y="32" text-anchor="middle" fill="var(--color-text)" font-size="14">11.9</text>
+            <rect x="480" y="26" width="64" height="154" fill="var(--chart-2)"></rect>
+            <text x="512" y="20" text-anchor="middle" fill="var(--color-text)" font-size="14">12.8</text>
+            <text x="112" y="200" text-anchor="middle" fill="var(--color-text-muted)" font-size="14">2022</text>
+            <text x="212" y="200" text-anchor="middle" fill="var(--color-text-muted)" font-size="14">2023</text>
+            <text x="312" y="200" text-anchor="middle" fill="var(--color-text-muted)" font-size="14">2024</text>
+            <text x="412" y="200" text-anchor="middle" fill="var(--color-text-muted)" font-size="14">2025</text>
+            <text x="512" y="200" text-anchor="middle" fill="var(--color-text-muted)" font-size="14">2026</text>
+            <text x="40" y="184" text-anchor="end" fill="var(--color-text-muted)" font-size="14">0</text>
+          </svg>
+        </figure>
+        <figure class="card span-2">
+          <figcaption class="chart-title">月次処理件数（直近 6 か月）</figcaption>
+          <svg role="img" viewBox="0 0 280 220" aria-labelledby="line-title line-desc">
+            <title id="line-title">月次処理件数</title>
+            <desc id="line-desc">1月 1.8万、2月 1.9万、3月 2.2万、4月 2.1万、5月 2.3万、6月 2.4万</desc>
+            <polyline fill="none" stroke="var(--chart-1)" stroke-width="3" points="24,150 68,140 112,96 156,108 200,80 244,68"></polyline>
+            <g fill="var(--chart-1)" stroke="var(--color-surface)" stroke-width="2">
+              <circle cx="24" cy="150" r="4"></circle>
+              <circle cx="68" cy="140" r="4"></circle>
+              <circle cx="112" cy="96" r="4"></circle>
+              <circle cx="156" cy="108" r="4"></circle>
+              <circle cx="200" cy="80" r="4"></circle>
+              <circle cx="244" cy="68" r="4"></circle>
+            </g>
+            <text x="24" y="200" text-anchor="middle" fill="var(--color-text-muted)" font-size="14">1月</text>
+            <text x="68" y="200" text-anchor="middle" fill="var(--color-text-muted)" font-size="14">2月</text>
+            <text x="112" y="200" text-anchor="middle" fill="var(--color-text-muted)" font-size="14">3月</text>
+            <text x="156" y="200" text-anchor="middle" fill="var(--color-text-muted)" font-size="14">4月</text>
+            <text x="200" y="200" text-anchor="middle" fill="var(--color-text-muted)" font-size="14">5月</text>
+            <text x="244" y="200" text-anchor="middle" fill="var(--color-text-muted)" font-size="14">6月</text>
+          </svg>
+        </figure>
+
+        <figure class="card span-3">
+          <figcaption class="chart-title">地域別 前年比増減率（%）</figcaption>
+          <svg role="img" viewBox="0 0 420 200" data-origin="0" aria-labelledby="region-title region-desc">
+            <title id="region-title">地域別前年比</title>
+            <desc id="region-desc">北海道 +4.1、東北 +1.2、関東 +8.6、中部 +3.0、近畿 +2.4、中国四国 -0.6、九州沖縄 +5.1</desc>
+            <rect x="96" y="16" width="82" height="18" fill="var(--chart-1)"></rect>
+            <text x="90" y="30" text-anchor="end" fill="var(--color-text)" font-size="14">北海道</text>
+            <text x="184" y="30" fill="var(--color-text)" font-size="14">+4.1</text>
+            <rect x="96" y="40" width="24" height="18" fill="var(--chart-1)"></rect>
+            <text x="90" y="54" text-anchor="end" fill="var(--color-text)" font-size="14">東北</text>
+            <text x="126" y="54" fill="var(--color-text)" font-size="14">+1.2</text>
+            <rect x="96" y="64" width="172" height="18" fill="var(--chart-2)"></rect>
+            <text x="90" y="78" text-anchor="end" fill="var(--color-text)" font-size="14">関東</text>
+            <text x="274" y="78" fill="var(--color-text)" font-size="14">+8.6</text>
+            <rect x="96" y="88" width="60" height="18" fill="var(--chart-1)"></rect>
+            <text x="90" y="102" text-anchor="end" fill="var(--color-text)" font-size="14">中部</text>
+            <text x="162" y="102" fill="var(--color-text)" font-size="14">+3.0</text>
+            <rect x="96" y="112" width="48" height="18" fill="var(--chart-1)"></rect>
+            <text x="90" y="126" text-anchor="end" fill="var(--color-text)" font-size="14">近畿</text>
+            <text x="150" y="126" fill="var(--color-text)" font-size="14">+2.4</text>
+            <rect x="80" y="136" width="16" height="18" fill="var(--color-negative)"></rect>
+            <text x="74" y="150" text-anchor="end" fill="var(--color-text)" font-size="14">中国四国</text>
+            <text x="100" y="150" fill="var(--color-text)" font-size="14">-0.6</text>
+            <rect x="96" y="160" width="102" height="18" fill="var(--chart-1)"></rect>
+            <text x="90" y="174" text-anchor="end" fill="var(--color-text)" font-size="14">九州沖縄</text>
+            <text x="204" y="174" fill="var(--color-text)" font-size="14">+5.1</text>
+          </svg>
+        </figure>
+        <section class="card span-3">
+          <h2 class="chart-title">手続別 処理状況</h2>
+          <table>
+            <caption class="muted">件数と目標達成。色だけで区分しない。</caption>
+            <thead>
+              <tr>
+                <th scope="col">手続</th>
+                <th scope="col">件数</th>
+                <th scope="col">達成</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>届出</td>
+                <td>61,646</td>
+                <td><span class="delta-positive">達成</span></td>
+              </tr>
+              <tr>
+                <td>申請</td>
+                <td>41,098</td>
+                <td><span class="delta-positive">達成</span></td>
+              </tr>
+              <tr>
+                <td>相談</td>
+                <td>25,686</td>
+                <td><span class="delta-negative">未達</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <p>データ時点: 2026-06-30。出典を加工して作成。</p>
+      <p>デザイン: デジタル庁 ダッシュボードデザインの実践ガイドブックとデザインテンプレート</p>
+    </footer>
+  </div>
+</body>
+</html>

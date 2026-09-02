@@ -1,0 +1,42 @@
+{
+  "skill_name": "html-gen",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "市区町村の政策ダッシュボードWebサイトを、デジタル庁のダッシュボードデザインテンプレートに準拠して作成してほしい。カラーパレットは Blue。申請件数と処理日数のKPI、構成比、年次推移、地域比較を含め、ホワイトモードとダークモードを選べるトグルを必須とする。",
+      "expected_output": "assets/template を複製した HTML/CSS/JS。html[data-palette=blue]、ホワイト/ダークの button[data-theme-value]、check_site.py PASS。公式に無い hex を含まない。",
+      "files": [],
+      "expectations": [
+        "Output includes index.html with lang=ja",
+        "Output includes a light/dark theme toggle with both modes choosable",
+        "Output uses only official Digital Agency palette hex colors",
+        "Output includes KPI cards and at least one SVG chart with origin 0",
+        "check_site.py exits 0 on the generated site"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "お知らせ中心の紹介サイトをデジタル庁テンプレートで静的 HTML にしてほしい。ダッシュボードではなく文章が主。パレットは Solid Gray。ダーク/ホワイト切替は必須。",
+      "expected_output": "テンプレートを複製し、カードを記事ブロックに差し替えたサイト。トグルと公式色は残る。check_site.py PASS。",
+      "files": [],
+      "expectations": [
+        "Theme toggle for white and dark modes is present",
+        "html data-palette is solid-gray",
+        "No unofficial hex colors",
+        "check_site.py exits 0"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Red パレット、4:3 キャンバスで複数セクションの行政サイトを作って。ライトとダークを選べること。",
+      "expected_output": "data-palette=red。960px 幅でも公式トークン。トグル必須。check_site.py PASS。",
+      "files": [],
+      "expectations": [
+        "html data-palette is red",
+        "Light and dark mode toggle exists",
+        "Only official hex colors",
+        "check_site.py exits 0"
+      ]
+    }
+  ]
+}
