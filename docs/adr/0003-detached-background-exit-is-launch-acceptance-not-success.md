@@ -31,7 +31,7 @@
 その上で、処理結果を完全に見えなくするのではなく、次回セッションで
 観測可能にする仕組みを既に実装済みとして維持する:
 
-- `detach_process` は子の stdout/stderr を `~/.bluecore/logs/
+- `detach_process` は子の stdout/stderr を `~/.ple4/logs/
   bg-YYYY-MM-DD.log` へ追記する（`_detach_log_path`）。
 - 子は `_WATCHDOG_SCRIPT` でラップされ、`DETACH_TIMEOUT_SECONDS`（600 秒）
   でハングした場合も確実に回収される。
@@ -55,7 +55,7 @@
 
 - 長所: 呼び出し側が任意のタイミングで成功/失敗を正確に把握できる。
 - 短所: ID の永続化・状態遷移管理・ポーリング API という新しい可変状態と
-  インターフェースが増える。bluecore のデータモデルは
+  インターフェースが増える。ple4 のデータモデルは
   `repos`/`knowledge`/`sessions` の 3 テーブルのみという単純さを設計原則
   としており、非同期ジョブの状態管理を持ち込むと原則に反する。
 - 却下理由: 「次回 SessionStart で failure ログの痕跡を通知する」という

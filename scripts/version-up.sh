@@ -81,10 +81,10 @@ repo_root = Path(sys.argv[1])
 target_version = sys.argv[2]
 
 paths = {
-    "pyproject": repo_root / "plugins" / "bluecore" / "pyproject.toml",
-    "plugin_json": repo_root / "plugins" / "bluecore" / ".claude-plugin" / "plugin.json",
+    "pyproject": repo_root / "plugins" / "ple4" / "pyproject.toml",
+    "plugin_json": repo_root / "plugins" / "ple4" / ".claude-plugin" / "plugin.json",
     "marketplace": repo_root / ".claude-plugin" / "marketplace.json",
-    "version_py": repo_root / "plugins" / "bluecore" / "src" / "bluecore" / "mem" / "__init__.py",
+    "version_py": repo_root / "plugins" / "ple4" / "src" / "ple4" / "mem" / "__init__.py",
 }
 
 for path in paths.values():

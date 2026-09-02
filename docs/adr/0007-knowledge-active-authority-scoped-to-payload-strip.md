@@ -18,7 +18,7 @@ v0.9.34 時点のランタイム監査レポートの H-01 は、`mem learn`（g
 2. `mem/knowledge_input.py:parse_knowledge_payload` は payload の
    `source`/`status` を authority として扱わず、常に
    `source="agent"`/`status="pending"` に固定する。
-3. `runtime/bluecore-helpers.sh` 等から active/archived 指定・promotion を
+3. `runtime/ple4-helpers.sh` 等から active/archived 指定・promotion を
    agent が実行できると示す説明を除去する。
 4. host capability が未実装の間、`mem/cli.py:_handle_promote` を agent /
    generic CLI から使用不可にする（exit 2 で拒否するか非公開化する）。
@@ -39,7 +39,7 @@ active カードの一括隔離）は採用しない。**
 - `mem/cli.py` の `learn` サブコマンドは `--status` オプションそのものを
   拒否する（`CommandError`）。`list`/`search` の絞り込み用 `--status` は
   維持する。
-- `runtime/bluecore-helpers.sh` の `bluecore_mem_learn` から
+- `runtime/ple4-helpers.sh` の `ple4_mem_learn` から
   `--status`/`--source` の option parsing を削除し、常に
   `source=agent`/`status=pending` で登録される旨をコメントへ明記した。
 - `skills/learn/SKILL.md` / `commands/instinct.md` から「agent が active

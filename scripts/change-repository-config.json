@@ -1,16 +1,9 @@
 {
-  "from_plugin_name": "bluecore",
+  "from_plugin_name": "ple4",
   "from_author_name": "aokumablue",
-  "plugin_name": "hogeplugin",
-  "author_name": "hogename",
-  "license": "MIT",
-  "remove_authors": true,
-  "files_to_delete": [
-    "plugins/bluecore/tests/",
-    "scripts/",
-    "README.md",
-    "CLAUDE.md",
-    "conftest.py",
-    "LICENSE"
-  ]
+  "plugin_name": "ple4",
+  "author_name": "aokumablue",
+  "license": "",
+  "remove_authors": false,
+  "files_to_delete": []
 }

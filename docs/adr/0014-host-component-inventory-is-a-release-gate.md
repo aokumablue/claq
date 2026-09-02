@@ -17,20 +17,20 @@ ADR-0005 は、実 install/update フローと各ホストの hook 登録機構�
 これが 41 リリースにわたって見過ごされたのは、静的 validator も `claude plugin validate --strict` も PASS するためである。壊れていることを示す唯一の信号は、次の 1 コマンドの出力だった。
 
 ```bash
-claude --plugin-dir plugins/bluecore plugin details bluecore@inline
+claude --plugin-dir plugins/ple4 plugin details ple4@inline
 ```
 
 ## 決定
 
 **ホストの component inventory 取得をリリースゲートに含める。** 具体的には次を満たすことをリリース条件とする。
 
-1. `claude plugin validate --strict plugins/bluecore` が PASS する
-2. `claude --plugin-dir plugins/bluecore plugin details bluecore@inline` の出力に、実ディレクトリと一致する Skills / Agents 数が現れる
+1. `claude plugin validate --strict plugins/ple4` が PASS する
+2. `claude --plugin-dir plugins/ple4 plugin details ple4@inline` の出力に、実ディレクトリと一致する Skills / Agents 数が現れる
 3. debug log に `Failed to read plugin components` が 0 件である
 
 ADR-0005 が却下したのは「install/update フロー全体のエミュレーション」であり、本 ADR が要求するのは**すでにあるツリーを読ませて登録結果を 1 回問い合わせること**だけである。インストール機構の再現もハッシュ付きディレクトリの模倣も要らない。ADR-0005 の比較対象に、この低コスト案は入っていなかった。
 
-**CLI に依存しない静的ゲートも併置する。** `claude` が PATH に無い環境ではホスト確認は実行できず、skip されるゲートはゲートとして機能しない。そのため `plugins/bluecore/tests/test_plugin_manifest.py` で、manifest が `agents` を宣言していないこと（＝ auto-discovery に委ねていること）と、ディスク上に 9 体が実在することを常時検証する。
+**CLI に依存しない静的ゲートも併置する。** `claude` が PATH に無い環境ではホスト確認は実行できず、skip されるゲートはゲートとして機能しない。そのため `plugins/ple4/tests/test_plugin_manifest.py` で、manifest が `agents` を宣言していないこと（＝ auto-discovery に委ねていること）と、ディスク上に 9 体が実在することを常時検証する。
 
 ## 検討した代替案
 

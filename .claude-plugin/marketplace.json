@@ -1,5 +1,5 @@
 {
-  "name": "bluecore",
+  "name": "ple4",
   "owner": {
     "name": "aokumablue"
   },
@@ -8,12 +8,12 @@
   },
   "plugins": [
     {
-      "name": "bluecore",
-      "source": "./plugins/bluecore",
+      "name": "ple4",
+      "source": "./plugins/ple4",
       "description": "開発に必要な汎用プラグイン集です。エージェント、スキル、フック、コマンドをまとめて導入し、計画・実装・検証・レビューの流れを揃えます。",
       "version": "0.9.47",
-      "homepage": "https://github.com/aokumablue/bluecore",
-      "repository": "https://github.com/aokumablue/bluecore",
+      "homepage": "https://github.com/aokumablue/ple4",
+      "repository": "https://github.com/aokumablue/ple4",
       "license": "Apache-2.0",
       "keywords": [
         "agents",

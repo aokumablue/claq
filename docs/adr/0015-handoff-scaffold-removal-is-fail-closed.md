@@ -5,7 +5,7 @@
 ## コンテキスト
 
 SessionEnd の handoff は transcript の user エントリから「直近のユーザー依頼」を抽出し、
-SessionStart で `<bluecore-memory>` として次セッションのプロンプトへ注入する。transcript は
+SessionStart で `<ple4-memory>` として次セッションのプロンプトへ注入する。transcript は
 信頼できない入力であり、注入先はプロンプト境界である。
 
 user エントリにはユーザーの発話だけでなく、ハーネスが生成した足場（`local-command-caveat` /

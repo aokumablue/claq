@@ -4,14 +4,14 @@
 
 ## コンテキスト
 
-bluecore の保護フック（`block_no_verify` / `pre_bash_commit_quality` /
+ple4 の保護フック（`block_no_verify` / `pre_bash_commit_quality` /
 `bash_config_protection` / `config_protection`）は、Bash/Edit/Write の
 実行前に検査を行い、問題があれば exit 2 で deny する。ただし検査そのものが
 完走できない状況が複数の経路で起こりうる:
 
 - stdin が時間内に届かない、または読み取り syscall（`isatty`/`select`/
   `read1`）が失敗する（A-01）。
-- ホストの Python が 3.12 未満で、bluecore モジュール自体が import できない
+- ホストの Python が 3.12 未満で、ple4 モジュール自体が import できない
   （`launcher.py:52-58`、前ラウンド §6.1 で再提起）。
 - `pre_bash_commit_quality` の matcher は Bash 呼び出し全体（`git commit` と
   無関係な呼び出しを含む）にアンカーされており、malformed JSON が commit
@@ -96,7 +96,7 @@ bluecore の保護フック（`block_no_verify` / `pre_bash_commit_quality` /
 
 - stdin リダイレクト漏れや Python バージョン不一致が起きている間、保護
   フックは実質無効化される。利用者側がこの状態に気づく手段は stderr の
-  警告行（`bluecoreProtectionDisabled` 等）のみで、監視していない環境では
+  警告行（`ple4ProtectionDisabled` 等）のみで、監視していない環境では
   見落としうる。
 
 ### リスク

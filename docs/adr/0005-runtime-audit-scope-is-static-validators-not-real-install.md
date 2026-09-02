@@ -45,7 +45,7 @@ v0.9.32 検証 §7-3 はこの実 install/update smoke test（および host へ
   できる。
 - 短所: Claude Code / Copilot CLI / Grok それぞれのインストール機構
   （ディレクトリ構造、マーケットプレイス経由の配置、`grok_plugin_root
-  .find_latest_installed_bluecore` が扱うハッシュ付きディレクトリ等）を
+  .find_latest_installed_ple4` が扱うハッシュ付きディレクトリ等）を
   CI 環境で再現する必要があり、各ホストのバージョン更新に追従し続ける
   保守コストが継続的に発生する。ホストの内部実装（非公開の場合がある）
   に CI が依存することになり、壊れやすい。

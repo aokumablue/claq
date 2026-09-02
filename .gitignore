@@ -20,7 +20,7 @@ compose.yaml
 compose.*.yaml
 .DS_Store
 
-# ローカル実行で生成される mem ランタイム成果物（正規の置き場は ~/.bluecore/）
+# ローカル実行で生成される mem ランタイム成果物（正規の置き場は ~/.ple4/）
 mem.db
 mem.db-wal
 mem.db-shm

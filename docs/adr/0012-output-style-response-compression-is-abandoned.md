@@ -4,7 +4,7 @@
 
 ## コンテキスト
 
-`output-styles/slim.md` は「日本語で簡潔に応答。結論先・理由後、敬語なし」という応答スタイルをシステムプロンプトへ強制注入し、出力トークンを削減する仕組みだった。`plugin.json` の `outputStyles` 登録と frontmatter の `force-for-plugin: true` により、bluecore プラグイン配下の全セッションへ無条件で適用されていた。
+`output-styles/slim.md` は「日本語で簡潔に応答。結論先・理由後、敬語なし」という応答スタイルをシステムプロンプトへ強制注入し、出力トークンを削減する仕組みだった。`plugin.json` の `outputStyles` 登録と frontmatter の `force-for-plugin: true` により、ple4 プラグイン配下の全セッションへ無条件で適用されていた。
 
 このパターンは 2 世代の実装を経ている。初代は `hooks/pre_user_prompt.py`（UserPromptSubmit フックで `skills/s-slim/SKILL.md` を毎プロンプト `additionalContext` へ注入、`Settings.slim.enabled` で切り替え）で、output-style 非対応ホスト（Copilot CLI 等）にも効かせるための経路だった。`47a54c9` でフックを削除し、`43277c7` でネイティブの output-style へ移行した。
 
@@ -26,7 +26,7 @@
 
 **LLM 応答の事後圧縮を目的とする仕組みを持たない。** 具体的には次を規約とする。
 
-1. **output-style による応答圧縮を提供しない** — `output-styles/slim.md` とディレクトリを削除し、`plugin.json` の `outputStyles` 登録を外す。bluecore は output-style を配布しない
+1. **output-style による応答圧縮を提供しない** — `output-styles/slim.md` とディレクトリを削除し、`plugin.json` の `outputStyles` 登録を外す。ple4 は output-style を配布しない
 2. **ハーネス監査 rubric からも撤去する** — 他リポジトリへ同パターンを推奨しない。`context-strategic-compact`（3点）と `cost-skill`（4点）を削除し、repo モード満点は 65 → 58、チェック数は 24 → 22 になる。採点基準が変わるため `rubric_version` も `2026-08-26` へ上げる
 3. **トークン削減は出力の「量」ではなく「経路」で行う** — 既に採っている手段を正とする。`list` / `search` が `- [kind] title (key)` の 1 行だけを返し `body` は `show` でのみ返す設計、0 件なら 1 文字も出力しない設計（CLAUDE.md「出力トークンの最小化が設計原則」）。これらは**何を返すかの選択**であり、生成済みテキストへの非可逆変換ではない
 4. **応答スタイルの指定はユーザーの領分とする** — スタイルを強制したい利用者は `settings.json` の `outputStyle` で自分の選択を置く。プラグインが `force-for-plugin` で上書きしない
@@ -46,7 +46,7 @@
 `slim.md` は削除するが、`context-strategic-compact` / `cost-skill` は他リポジトリ向けの推奨として残す。
 
 - 長所: 満点とテストのアサーションを変えずに済む
-- 短所: 自リポジトリの audit が永久に fail する。さらに悪いことに、bluecore 自身が correctness hazard と判断して捨てたパターンを、他リポジトリへ 7 点分のスコアで推奨し続ける
+- 短所: 自リポジトリの audit が永久に fail する。さらに悪いことに、ple4 自身が correctness hazard と判断して捨てたパターンを、他リポジトリへ 7 点分のスコアで推奨し続ける
 - 却下理由: `redux_filter` 撤去と同一の論理がそのまま適用される。**自分が捨てたものを他人に勧めない**
 
 ### 代替案 3: Copilot CLI 向けにプロンプト注入を復活させる

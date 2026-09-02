@@ -29,7 +29,7 @@
 
 いずれにせよこれは補助論拠の部分訂正であり**主論拠は健在で決定は
 変わらない**:
-`~/.bluecore/roots/` は 0700・同一 UID 所有であり、書き込めるのは同一 OS
+`~/.ple4/roots/` は 0700・同一 UID 所有であり、書き込めるのは同一 OS
 ユーザーだけ（ADR-0002 の脅威モデルの外）。同一 UID の攻撃者は fake root を
 「自分が所有する実ディレクトリ」として作れるため、`test -O`/`-h`/`-G` は
 攻撃者自身が用意した fake root に対して全て真になる——検証を実装しても、
@@ -44,7 +44,7 @@ release gate の受入条件として求めていた。
 1. pointer record に writer が観測した host PID と「process start identity」
    （プロセス開始時刻等）を保存し、resolver が実際の ancestor process と
    照合する（PID 再利用対策）。
-2. `~/.bluecore`・`roots/`・pointer file を `lstat` で regular file /
+2. `~/.ple4`・`roots/`・pointer file を `lstat` で regular file /
    expected owner / non-group-writable / non-world-writable と検証し、
    symlink・ownership 不正・unexpected type は fail-closed とする。
 
@@ -103,11 +103,11 @@ roots pointer が「実行されるコード」から「読まれるデータ」
 （ADR-0008 改訂）、pointer file への書き込み権限を持つ攻撃者が得られるのは
 **任意コード実行ではなく、誤った root path を resolver に読ませること**
 まで縮小した。誤った root path の結果は「存在しないパスなら 127」
-「存在するが `runtime/bluecore-helpers.sh` を欠くパスなら 127」
-「別の（同一ユーザーが書き込み可能な）bluecore install を source する」
+「存在するが `runtime/ple4-helpers.sh` を欠くパスなら 127」
+「別の（同一ユーザーが書き込み可能な）ple4 install を source する」
 のいずれかであり、シェルコード注入は既に構造的に不可能になっている。
 
-`~/.bluecore` はディレクトリとして 0700（`_ensure_private_dir`）に締めて
+`~/.ple4` はディレクトリとして 0700（`_ensure_private_dir`）に締めて
 おり、同一 OS ユーザー内の他プロセスからの書き込みは元々 ADR-0002 が
 定義する脅威モデルの範囲外（同一 OS ユーザーの敵対的回避は非対象）である。
 
@@ -165,7 +165,7 @@ symlink 検証も mode ビット検証も、実装できるかどうかに関わ
 いずれも `python3 launcher.py <module>` を直接呼ぶだけで `env.sh` を
 source しない。つまり resolver（`env.sh`/`roots/`）は保護 hook の実行経路に
 一切登場せず、`roots/` の汚染で保護 hook を無効化することはできない。
-影響は md/agents/skills から呼ばれる `bluecore_run`/`bluecore_mem_learn`
+影響は md/agents/skills から呼ばれる `ple4_run`/`ple4_mem_learn`
 呼び出しの汚染（H-01 のシナリオそのもの）に限定される。同レポートは
 「manifest/hash による root の真正性検証」も提案していたが、この検証も
 同一 OS ユーザーの書き込み権限があれば偽装できるため（manifest ファイルも
@@ -223,10 +223,10 @@ v0.9.37 時点の再々検証の H-01 再指摘（同一の manifest/digest 方�
 
 ### リスク
 
-- owner/mode 検証を行わないため、`~/.bluecore` の権限が何らかの理由で
+- owner/mode 検証を行わないため、`~/.ple4` の権限が何らかの理由で
   0700 から緩んだ場合（手動変更、バックアップ復元時の権限崩れ等）、
   同一 OS ユーザー内の他プロセスが pointer を書き換えられる。これは
-  ADR-0002 の脅威モデル外だが、`~/.bluecore` の権限監視自体は
+  ADR-0002 の脅威モデル外だが、`~/.ple4` の権限監視自体は
   `_ensure_private_dir` が毎回 `chmod(0o700)` で締め直す形で緩和して
   いる（能動的な検証ではなく、書き込みのたびの再強制）。PID 再利用への
   対処（撤回して実装した `lstart` 照合の残余リスク）は ADR-0008 側に

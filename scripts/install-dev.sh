@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # install-dev.sh
-# リポジトリ直下 .venv を作り、plugins/bluecore[dev] を editable install する。
+# リポジトリ直下 .venv を作り、plugins/ple4[dev] を editable install する。
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT=""
-SKIP_PYTHON="${BLUECORE_INSTALL_SKIP_PYTHON:-0}"
+SKIP_PYTHON="${PLE4_INSTALL_SKIP_PYTHON:-0}"
 
 usage() {
   cat <<'EOF'
@@ -76,7 +76,7 @@ done
 if [[ -z "${REPO_ROOT}" ]]; then
   REPO_ROOT="$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)"
 fi
-PLUGIN_ROOT="${REPO_ROOT}/plugins/bluecore"
+PLUGIN_ROOT="${REPO_ROOT}/plugins/ple4"
 VENV_DIR="${REPO_ROOT}/.venv"
 VENV_PYTHON="${VENV_DIR}/bin/python3"
 
@@ -87,8 +87,8 @@ pip_install_quiet() {
 # ---- 開発者向け追加インストール ----
 
 if [[ "${SKIP_PYTHON}" == "1" ]]; then
-  echo "[bluecore] Developer extras skipped because --skip-python was requested"
-  echo "[bluecore] OK"
+  echo "[ple4] Developer extras skipped because --skip-python was requested"
+  echo "[ple4] OK"
   exit 0
 fi
 
@@ -98,9 +98,9 @@ if ! PYTHON3="$(find_python3)"; then
   exit 1
 fi
 
-# 旧共有 venv（~/.bluecore/.venv）への symlink は開発用実体ではないので外す
+# 旧共有 venv（~/.ple4/.venv）への symlink は開発用実体ではないので外す
 if [[ -L "${VENV_DIR}" ]]; then
-  echo "[bluecore] Removing leftover .venv symlink at ${VENV_DIR}"
+  echo "[ple4] Removing leftover .venv symlink at ${VENV_DIR}"
   rm -f -- "${VENV_DIR}"
 fi
 
@@ -110,7 +110,7 @@ if [[ ! -x "${VENV_PYTHON}" ]]; then
     echo "       Install python3-venv manually and retry." >&2
     exit 1
   fi
-  echo "[bluecore] Creating Python virtual environment at ${VENV_DIR}"
+  echo "[ple4] Creating Python virtual environment at ${VENV_DIR}"
   "${PYTHON3}" -m venv "${VENV_DIR}"
   if [[ ! -x "${VENV_PYTHON}" ]]; then
     echo "Error: failed to create virtual environment at ${VENV_DIR}." >&2
@@ -126,22 +126,22 @@ else
 fi
 
 if ! "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
-  echo "[bluecore] Bootstrapping pip via ensurepip"
+  echo "[ple4] Bootstrapping pip via ensurepip"
   run_quietly "${VENV_PYTHON}" -m ensurepip --upgrade
 fi
 
-echo "[bluecore] Installing developer-only Python extras"
+echo "[ple4] Installing developer-only Python extras"
 pip_install_quiet -e "${PLUGIN_ROOT}[dev]"
 
 # PATH にシムリンクを作成 (venv 外から hook が呼べるように)
 for tool in ruff vulture; do
   if ! command -v "${tool}" >/dev/null 2>&1; then
     if [[ -x "${VENV_DIR}/bin/${tool}" ]]; then
-      echo "[bluecore] Symlinking ${tool} -> /usr/local/bin/${tool}"
+      echo "[ple4] Symlinking ${tool} -> /usr/local/bin/${tool}"
       sudo ln -sf "${VENV_DIR}/bin/${tool}" "/usr/local/bin/${tool}" 2>/dev/null \
-        || echo "[bluecore] Warning: could not symlink ${tool} to /usr/local/bin (no sudo?). Add ${VENV_DIR}/bin to PATH." >&2
+        || echo "[ple4] Warning: could not symlink ${tool} to /usr/local/bin (no sudo?). Add ${VENV_DIR}/bin to PATH." >&2
     fi
   fi
 done
 
-echo "[bluecore] OK"
+echo "[ple4] OK"

@@ -18,7 +18,7 @@ ADR-0015 で採択した handoff の足場除去は、タグ名のハードコ�
 ## 決定
 
 実 transcript コーパスを走査し、除去処理を通した後にも残る「対を成す未知タグ」を報告する
-診断 `bluecore.ci.scan_scaffold_drift` を置く。`maintain` の final gate 項目とし、CI には
+診断 `ple4.ci.scan_scaffold_drift` を置く。`maintain` の final gate 項目とし、CI には
 組み込まない。終了コードは `0` = ドリフトなし / `1` = 検出 / `2` = 走査対象ゼロ。
 
 判定は次の 3 段で誤検知を落とす。いずれも実コーパス実測で決めた。

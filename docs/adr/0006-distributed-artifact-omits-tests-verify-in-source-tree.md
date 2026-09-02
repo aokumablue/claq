@@ -6,17 +6,17 @@
 
 v0.9.34 時点のランタイム監査レポートの H-03 は「release tree に pytest
 テストが無く、回帰検知を実行できない」と
-指摘した。検証者は `~/.copilot/installed-plugins/bluecore/bluecore`
+指摘した。検証者は `~/.copilot/installed-plugins/ple4/ple4`
 （配布・インストール済みの plugin tree）で
-`cd plugins/bluecore && PYTHONPATH=src python3 -m pytest -q` を実行し、
+`cd plugins/ple4 && PYTHONPATH=src python3 -m pytest -q` を実行し、
 「collected 0 items」で exit 5 になったことを根拠にした。
 
 同一の再検証を本作業の事前確認として **source tree**
-（`bluecore-dev` リポジトリの `plugins/bluecore`）で実施したところ、結果は
+（`ple4-dev` リポジトリの `plugins/ple4`）で実施したところ、結果は
 次のとおりだった:
 
 ```
-$ cd plugins/bluecore && python3 -m pytest -q --cov
+$ cd plugins/ple4 && python3 -m pytest -q --cov
 ...
 Required test coverage of 100.0% reached. Total coverage: 100.00%
 ```
@@ -32,7 +32,7 @@ Required test coverage of 100.0% reached. Total coverage: 100.00%
 
 検証者が pytest を実行した installed tree（`~/.copilot/installed-plugins/...`）
 には `tests/` が同梱されていない。これはプラグインのインストール処理が
-`plugins/bluecore` の配布対象サブセット（`agents/` / `commands/` / `hooks/`
+`plugins/ple4` の配布対象サブセット（`agents/` / `commands/` / `hooks/`
 （`hooks.json`）/ `runtime/` / `skills/` / `src/`）だけを配置し、開発用
 アーティファクト（`tests/`、`CLAUDE.md`、開発用 `pyproject.toml` の
 `dev` extra 等）を持ち出さない設計になっているため。これは意図的な設計
@@ -81,8 +81,8 @@ tree（このリポジトリ自身）で実施する。**
 ### 肯定的
 
 - 配布物の最小化方針を維持できる。
-- 検証手順（`cd plugins/bluecore && python3 -m pytest -q --cov`,
-  `ruff check plugins/bluecore/src`）は source tree に対して実行する、
+- 検証手順（`cd plugins/ple4 && python3 -m pytest -q --cov`,
+  `ruff check plugins/ple4/src`）は source tree に対して実行する、
   という単一の手順に統一される。
 
 ### 否定的
@@ -105,8 +105,8 @@ F-02）。3 回目の監査者は本 ADR を読んだ上でなお誤検出を報
 `testpaths = ["tests"]` と `fail_under = 100` が除去済みの `tests/` を指したまま
 残るため、配布ツリーで `pytest` を叩くと「coverage 0% で FAIL」という**回帰そっくり
 の派手な失敗**が出た。2026-08-27 に `scripts/publish.sh` の除外リストへ
-`plugins/bluecore/pyproject.toml` を追加し、この出力が構造的に発生しないようにした
+`plugins/ple4/pyproject.toml` を追加し、この出力が構造的に発生しないようにした
 （配布ツリーで pyproject が果たす役割はゼロ — ランタイム依存はゼロで、
 `launcher.py` が `sys.path` へ `src/` を挿すだけであり、ホストが読むのは
 `.claude-plugin/plugin.json`）。除外リストの定義は
-`plugins/bluecore/tests/scripts/test_publish_script.py` が機械的に固定する。
+`plugins/ple4/tests/scripts/test_publish_script.py` が機械的に固定する。
