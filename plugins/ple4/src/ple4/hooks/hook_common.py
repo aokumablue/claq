@@ -37,6 +37,24 @@ _SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
 # block_no_verify から本モジュールへ移して単一情報源にする。
 SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash"})
 
+# 実行ファイルではないが、渡されたテキストを現在のシェルで実行するビルトイン。
+# ``. /dev/stdin <<'EOF'`` / ``source /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``
+# はいずれも heredoc 本文をコマンドとして実行するため、本文をデータとして
+# 剥がすと ADR-0017 が「除去しない条件 1」で禁じている誤通過になる（実測:
+# 本文に `git commit --no-verify` を置くと exit 0 だった）。判定軸は
+# 「本文が実行されうるか」であって「実行ファイルか」ではないので、
+# `SHELL_WRAPPER_EXECUTABLES` とは別集合として持ち、両方を見る。
+_BODY_EXECUTING_BUILTINS = frozenset({".", "source", "eval"})
+
+# ``#`` を行コメントの開始として扱ってよい直前の文字。POSIX シェルは語の先頭に
+# ある ``#`` だけをコメント開始とみなす（``echo a#b`` の ``#`` は語の一部）。
+_COMMENT_PRECEDING_CHARS = frozenset(" \t\n;|&()<>")
+
+# ``-c`` を含む結合短フラグ（``bash -lc 'cmd'``）。単独の ``-c`` だけを見ていた
+# 頃は ``bash -lc`` でラッパー再帰が不発になり、保護フックが素通りしていた（実測）。
+# 長オプション（``--``）は該当しないので先頭 1 文字のハイフンに限定する。
+_SHELL_COMMAND_FLAG_RE = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
+
 # heredoc 演算子。``<<<``（herestring）を誤って heredoc と読まないよう、
 # 前後に ``<`` が無いことを lookbehind / lookahead の両方で要求する
 # （lookahead だけだと ``<<<EOF`` が offset 1 で再マッチする）。
@@ -65,6 +83,40 @@ def is_shell_wrapper_token(token: str) -> bool:
     return token.rsplit("/", 1)[-1] in SHELL_WRAPPER_EXECUTABLES
 
 
+def extract_shell_wrapper_command(segment: list[str]) -> str | None:
+    """セグメント内の既知シェル ``-c`` 呼び出しから、ラップされた文字列コマンドを取り出す。
+
+    ``sh -c 'git commit --no-verify'`` のように basename が
+    `SHELL_WRAPPER_EXECUTABLES` のいずれかであるトークンを探し、続くトークンに
+    ``-c`` を含む短フラグがあれば、その次のトークン（シェルへ渡す文字列コマンド）
+    を返す。``-c`` 単独だけを見ていた頃は ``bash -lc 'git commit --no-verify'``
+    で再帰が不発になり、素通りしていた（実測）。
+
+    `block_no_verify` と `bash_config_protection` が共有する。片方だけがラッパー
+    再帰を持つと「Write なら止まるが Bash なら通る」と同型の非対称（A-06 で
+    本モジュール群を分けた理由そのもの）が再発するため、単一情報源にする。
+    再帰の段数は呼び出し側が決める（ADR-0002: 2 段以上のネストは非目標）。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        ラップされた文字列コマンド。見つからなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    for index, token in enumerate(segment):
+        if not is_shell_wrapper_token(token):
+            continue
+        for offset, candidate in enumerate(segment[index + 1 :]):
+            if not _SHELL_COMMAND_FLAG_RE.fullmatch(candidate):
+                continue
+            remaining = segment[index + 1 + offset + 1 :]
+            return remaining[0] if remaining else None
+    return None
+
+
 def _heredoc_delimiters(line: str) -> list[tuple[str, bool]]:
     """行に現れる heredoc の区切り語を出現順に返す。
 
@@ -90,9 +142,10 @@ def _heredoc_delimiters(line: str) -> list[tuple[str, bool]]:
 def _line_keeps_heredoc_bodies(line: str) -> bool:
     """演算子行を見て、本文を剥がさずに残すべきかを判定する。
 
-    本文が実行されうる形（シェル起動・パイプや継続で次行へ繋がる形）は
-    すべて残す側へ倒す。``bash <<'EOF'`` の本文は実際に実行されるため、
-    データとして剥がすと ADR-0002 が禁じる誤通過になる（実測で確認済み）。
+    本文が実行されうる形（シェル起動・本文を実行するビルトイン・パイプや
+    継続で次行へ繋がる形）はすべて残す側へ倒す。``bash <<'EOF'`` や
+    ``. /dev/stdin <<'EOF'`` の本文は実際に実行されるため、データとして
+    剥がすと ADR-0002 が禁じる誤通過になる（実測で確認済み）。
 
     Args:
         line: heredoc 演算子を含む物理行。
@@ -105,7 +158,9 @@ def _line_keeps_heredoc_bodies(line: str) -> bool:
     """
     if line.rstrip().endswith(_HEREDOC_CONTINUATION_SUFFIXES):
         return True
-    return any(is_shell_wrapper_token(token) for token in tokenize(line))
+    return any(
+        is_shell_wrapper_token(token) or token in _BODY_EXECUTING_BUILTINS for token in tokenize(line)
+    )
 
 
 def _consume_heredoc_bodies(
@@ -155,7 +210,8 @@ def strip_data_heredoc_bodies(command: str) -> str:
     ただし本文がデータだと**静的に確定できる場合だけ**剥がす。次のいずれかに
     当たれば剥がさず現状の挙動（＝検出側）を維持する:
 
-    1. 演算子行にシェル起動トークンがある（``bash <<'EOF'`` / ``cat <<'EOF' | bash``）
+    1. 演算子行に本文を実行するトークンがある（``bash <<'EOF'`` /
+       ``cat <<'EOF' | bash`` / ``. /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``）
     2. 演算子行が継続演算子で終わる（本文開始が次行とは限らない）
     3. 終端行が見つからない（未終端）
 
@@ -191,6 +247,79 @@ def strip_data_heredoc_bodies(command: str) -> str:
         index, kept = consumed
         output.extend(kept)
     return "\n".join(output)
+
+
+def _strip_line_comments(command: str) -> str:
+    """クォート外の ``#`` 行コメントを行末まで取り除く。
+
+    ``shlex`` にコメント処理を任せると、``#`` 以降が**入力末尾まで**捨てられる。
+    `_replace_unquoted_newlines` が改行を ``;`` へ正規化した後の文字列を渡す
+    ため、``shlex`` が探すコメント終端（改行）が 1 つも残っていないからである。
+    その結果 ``git status #`` 改行 ``git commit --no-verify`` の 2 行目が丸ごと
+    未検査になり、Bash 系フックが揃って exit 0 になっていた（実測）。
+    ``echo a#b && git commit --no-verify`` も同様に素通りしていた（``shlex`` は
+    語中の ``#`` もコメント開始として扱うため）。
+
+    そこで正規化の前段でコメントを自分で落とし、``shlex`` 側のコメント処理は
+    無効化する（`tokenize_with_status`）。POSIX シェルに合わせて、語の先頭に
+    ある ``#`` だけをコメント開始とみなす（``echo a#b`` の ``#`` は語の一部）。
+    クォート内・``\\`` エスケープ後の ``#`` はコメントにしない。
+
+    クォートが閉じていない入力では「クォート内」と判定したまま末尾に達するため
+    コメントは剥がされず、検査対象として残る（fail-closed 側）。
+
+    Args:
+        command: 元のコマンド文字列。
+
+    Returns:
+        行コメントを除去した文字列。改行は保持する。
+
+    Raises:
+        例外は発生しません。
+    """
+    if "#" not in command:
+        return command
+
+    result: list[str] = []
+    quote: str | None = None
+    escaped = False
+    in_comment = False
+    previous = "\n"
+    for char in command:
+        if in_comment:
+            # コメント中。区切りとして働く行末の改行だけを残す。
+            if char == "\n":
+                in_comment = False
+                result.append(char)
+                previous = char
+            continue
+        if escaped:
+            result.append(char)
+            escaped = False
+            previous = char
+            continue
+        if char == "\\" and quote != "'":
+            result.append(char)
+            escaped = True
+            previous = char
+            continue
+        if quote is not None:
+            if char == quote:
+                quote = None
+            result.append(char)
+            previous = char
+            continue
+        if char in ("'", '"'):
+            quote = char
+            result.append(char)
+            previous = char
+            continue
+        if char == "#" and previous in _COMMENT_PRECEDING_CHARS:
+            in_comment = True
+            continue
+        result.append(char)
+        previous = char
+    return "".join(result)
 
 
 def _replace_unquoted_newlines(command: str) -> str:
@@ -286,9 +415,13 @@ def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     Raises:
         例外は発生しません。
     """
-    normalized = _replace_unquoted_newlines(command)
+    normalized = _replace_unquoted_newlines(_strip_line_comments(command))
     lexer = shlex.shlex(normalized, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    # コメントは `_strip_line_comments` が行単位で落とし済み。ここを既定
+    # （``#``）のままにすると、正規化で改行を失った文字列に対して ``#`` 以降が
+    # 入力末尾まで捨てられ、2 行目以降が未検査になる。
+    lexer.commenters = ""
     try:
         return list(lexer), True
     except ValueError:

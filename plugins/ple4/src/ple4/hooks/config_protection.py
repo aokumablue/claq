@@ -28,6 +28,7 @@ from ple4.hooks.hook_common import (
 from ple4.lib.harness import (
     extract_file_paths,
     extract_raw_tool_name,
+    is_unidentifiable_tool,
     iter_tool_input_containers,
     normalize_tool_name,
 )
@@ -39,7 +40,10 @@ from ple4.lib.harness import (
 _WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
 
 # apply_patch のパッチがパース不能なときの fail-closed 理由。
-_UNPARSEABLE_PATCH_MESSAGE = "BLOCKED: Could not determine target files from patch input."
+# 対象ファイルを確定できない入力全般に出す fail-closed の理由。構造化パッチ本文が
+# 読めない場合だけでなく、`file_path` がパスとして解釈できない値（数値・入れ子 dict）
+# の場合もここに来るため、文言を「パッチ」に限定しない。
+_UNDECIDABLE_TARGET_MESSAGE = "BLOCKED: Could not determine target files from tool input."
 
 PROTECTED_FILES = {
     ".eslintrc",
@@ -467,15 +471,15 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
         container: extract_tool_input 相当の 1 コンテナ値。
 
     Returns:
-        ブロック理由。保護対象でなければ None。パッチ判定不能時は
-        fail-closed メッセージ。
+        ブロック理由。保護対象でなければ None。対象ファイルを確定できない
+        場合は fail-closed メッセージ。
 
     Raises:
         例外は発生しません。
     """
     file_paths = _paths_from_container(tool_name, container)
     if file_paths is None:
-        return _UNPARSEABLE_PATCH_MESSAGE
+        return _UNDECIDABLE_TARGET_MESSAGE
     for file_path in file_paths:
         protected_segment = protected_path_segment(file_path)
         if protected_segment is not None:
@@ -503,7 +507,11 @@ def _block_reason(data: dict[str, Any]) -> str | None:
         例外は発生しません。
     """
     tool_name = extract_raw_tool_name(data)
-    if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES:
+    # 既知の「書き込みではないツール」だけを skip する。ツール名を特定
+    # できない payload を対象外へ倒すと保護が丸ごと無効になる（S-8）。
+    if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES and not is_unidentifiable_tool(
+        tool_name
+    ):
         return None
     # コンテナキーの全走査は iter_tool_input_containers（lib/harness.py）が
     # 単一情報源。フック側で走査を手書きすると片側だけ緩い状態が再発する。

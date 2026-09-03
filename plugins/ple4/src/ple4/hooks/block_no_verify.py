@@ -75,7 +75,9 @@ config 経由のフック無効化:
 ``sh -c`` ラッパー（1 段のみ）:
     ``sh -c 'git commit --no-verify'`` のように既知シェル（``sh``/``bash``/
     ``zsh``/``dash``）の ``-c`` へ渡された文字列引数は、1 段だけ再帰的に
-    同じ判定へ通します。2 段以上のネスト（``sh -c "sh -c 'git commit -n'"``）
+    同じ判定へ通します。``-c`` は結合短フラグ（``bash -lc 'git commit -n'``）
+    でも成立するため、``c`` を含む短フラグクラスタを同じ扱いにします。
+    2 段以上のネスト（``sh -c "sh -c 'git commit -n'"``）
     や ``eval``・任意ラッパースクリプトへは再帰しません（A-07 対応。深い
     再帰はコンテキスト消費と誤検知リスクの両方が増えるため、1 段に限定する
     設計判断です）。
@@ -106,8 +108,8 @@ from typing import NamedTuple
 from ple4.hooks.hook_common import (
     MAX_STDIN_BYTES,
     emit_block_output,
+    extract_shell_wrapper_command,
     is_git_executable_token,
-    is_shell_wrapper_token,
     parse_json_object,
     read_raw_stdin_with_truncation,
     split_segments,
@@ -625,34 +627,6 @@ def _is_bypass_invocation(invocation: GitInvocation) -> bool:
     return invocation.subcommand == "commit" or not invocation.subcommand_certain
 
 
-def _extract_shell_wrapper_command(segment: list[str]) -> str | None:
-    """セグメント内の既知シェル ``-c`` 呼び出しから、ラップされた文字列コマンドを取り出す。
-
-    ``sh -c 'git commit --no-verify'`` のように basename が
-    `hook_common.SHELL_WRAPPER_EXECUTABLES` のいずれかであるトークンを探し、続く
-    トークンに ``-c`` があれば、その次のトークン（シェルへ渡す文字列
-    コマンド）を返します（A-07 対応。1 段の再帰にのみ使う）。
-
-    Args:
-        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
-
-    Returns:
-        ラップされた文字列コマンド。見つからなければ None。
-
-    Raises:
-        例外は発生しません。
-    """
-    for i, token in enumerate(segment):
-        if not is_shell_wrapper_token(token):
-            continue
-        for offset, tok in enumerate(segment[i + 1 :]):
-            if tok != "-c":
-                continue
-            remaining = segment[i + 1 + offset + 1 :]
-            return remaining[0] if remaining else None
-    return None
-
-
 def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
     """コマンド文字列に git フックバイパスフラグが含まれるかを判定する。
 
@@ -692,7 +666,7 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
             if _is_literal_env_hooks_path_override(segment[:index]):
                 return True
         if not _recursed:
-            wrapper_command = _extract_shell_wrapper_command(segment)
+            wrapper_command = extract_shell_wrapper_command(segment)
             if wrapper_command is not None and has_bypass_flag(wrapper_command, _recursed=True):
                 return True
     return False
