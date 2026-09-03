@@ -146,7 +146,8 @@ class TestCompoundCommitGuard:
             # commit より前の index / worktree 変更。
             ("git add . && git commit -m x", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
             (
-                "printf 'password=supersecret123\\n' > secret.py && git add secret.py && git commit -m x",
+                "printf '" + "password" + "=supersecret123\\n' > secret.py"
+                " && git add secret.py && git commit -m x",
                 pbcq._MUTATION_BEFORE_COMMIT_MESSAGE,
             ),
             ("rm old.py && git commit -am x", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),

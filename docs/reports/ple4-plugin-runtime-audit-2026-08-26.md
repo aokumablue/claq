@@ -440,7 +440,7 @@ test_commit_quality_uses_only_pre_execution_first_commit_state
 
 ```bash
 git commit --allow-empty -m first && git commit -am second
-printf 'password=supersecret123\n' > secret.py \
+printf 'password=$EXAMPLE_SECRET\n' > secret.py \
   && git add secret.py \
   && git commit -m add-secret
 ```

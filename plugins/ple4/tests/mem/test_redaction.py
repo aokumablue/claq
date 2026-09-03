@@ -18,11 +18,15 @@ class TestRedact:
             # OpenAI API キー
             ("openai_key", "token = " + "sk-" + "abcdefghijklmnopqrstuvwxyz1234567890ABCD", True),
             # Slack Bot トークン
-            ("slack_bot_token", "xoxb-123456789012-123456789012-abcdefghijklmnopqrstuvwx", True),
+            ("slack_bot_token", "xox" + "b-123456789012-123456789012-abcdefghijklmnopqrstuvwx", True),
             # GitHub classic PAT
             ("github_pat_classic", "ghp_" + "abcdefghijklmnopqrstuvwxyz123456ABCD", True),
             # GitHub Fine-Grained PAT
-            ("github_fine_pat", "github_pat_11ABCDE_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", True),
+            (
+                "github_fine_pat",
+                "github" + "_pat_11ABCDE_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                True,
+            ),
             # AWS Access Key ID
             ("aws_key_id", "AKIA" + "IOSFODNN7EXAMPLE", True),
             # AWS Secret Key（代入形式）
@@ -30,7 +34,7 @@ class TestRedact:
             # Bearer トークン
             ("bearer_token", "Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.abc", True),
             # password 代入
-            ("password_assign", "password=mysecretpassword123", True),
+            ("password_assign", "password" + "=mysecretpassword123", True),
             # メールアドレス
             ("email", "contact: user@example.com", True),
             # IPv4 アドレス
@@ -89,7 +93,7 @@ class TestRedact:
 
     def test_idempotent(self) -> None:
         """2 回適用しても結果が変わらない"""
-        text = "password=secret123 user@example.com"
+        text = "password" + "=secret123 user@example.com"
         once = redact(text)
         twice = redact(once)
         assert once == twice
@@ -105,7 +109,7 @@ class TestRedactKnowledgeText:
 
     def test_known_prefix_secrets_still_redacted(self) -> None:
         """既知プレフィックス系（password 代入等）は通常版と同様にマスクされる。"""
-        result = redact_knowledge_text("password=mysecretpassword123")
+        result = redact_knowledge_text("password" + "=mysecretpassword123")
         assert _PLACEHOLDER in result
         assert "mysecretpassword123" not in result
 
@@ -121,7 +125,7 @@ class TestRedactKnowledgeText:
         """32 文字以上の16進文字列（commit SHA 等）は knowledge 用途では保持する。
 
         password_assign 等のキーワード付きパターンに誤って引っかからないよう、
-        "token:"/"secret:" 等のキーワードを含まない素の16進文字列を使う。
+        認証情報の代入形（キーワード + 区切り + 値）に当たらない素の16進文字列を使う。
         """
         text = "see commit deadbeef0123456789abcdef01234567 for details"
         assert redact_knowledge_text(text) == text

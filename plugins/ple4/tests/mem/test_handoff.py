@@ -71,7 +71,8 @@ class TestExplicitHandoff:
 
     def test_secrets_are_redacted(self) -> None:
         """明示指定の本文に含まれるシークレットは [REDACTED] に置換する。"""
-        assert build_handoff({"handoff": "接続情報は token=abcdefgh12345678 です"}) == "接続情報は [REDACTED] です"
+        secret_line = "接続情報は " + "token" + "=abcdefgh12345678 です"
+        assert build_handoff({"handoff": secret_line}) == "接続情報は [REDACTED] です"
 
     def test_oversized_text_is_truncated_at_budget(self) -> None:
         """予算を超える本文は書き込み時点で切り詰める。"""
@@ -224,7 +225,7 @@ class TestTranscriptSummary:
 
     def test_secrets_in_user_messages_are_redacted(self, tmp_path: Path) -> None:
         """ユーザー発話に貼られたシークレットは圧縮前に除去する。"""
-        entries = [_user("鍵は password=hunter2hunter2 で通る")]
+        entries = [_user("鍵は " + "password" + "=hunter2hunter2 で通る")]
 
         result = _from_transcript(tmp_path, entries)
 

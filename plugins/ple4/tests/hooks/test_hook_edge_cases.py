@@ -365,6 +365,73 @@ def test_scan_secret_issues_ignores_non_private_key_lines(line: str) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("sk-" + "proj-" + "A" * 40, "OpenAI API key"),
+        ("sk-" + "ant-" + "B" * 40, "Anthropic API key"),
+        ("gho_" + "C" * 36, "GitHub PAT"),
+        ("github" + "_pat_" + "D" * 60, "GitHub fine-grained PAT"),
+        ("xox" + "b-1234567890-" + "E" * 24, "Slack token"),
+        ("AIza" + "F" * 35, "Google API key"),
+        ("ASIA" + "G" * 16, "AWS Access Key"),
+        ("eyJ" + "abc.def.ghi", "JWT"),
+        ("API" + "_KEY=abcdef123456", "credential assignment"),
+        ("  api" + "_key: abcdef123456", "credential assignment"),
+        ("password" + "=hunter2hunter2", "credential assignment"),
+    ],
+)
+def test_scan_secret_issues_detects_vendor_formats(line: str, expected: str) -> None:
+    """`ple4.mem.redaction` が既にマスクする形式は commit 側でも検出されること。
+
+    記録時はマスクするのに commit 時は素通りする秘密が生まれないよう、
+    ベンダ prefix の集合を両者で揃えている（実測で 12 形式中 10 形式が
+    本モジュールだけ素通りしていた）。
+    """
+    issues = commit_quality_scanner._scan_secret_issues(
+        line, [line], deadline=commit_quality_scanner.new_secret_scan_deadline()
+    )
+
+    assert [issue["severity"] for issue in issues] == ["error"]
+    assert expected in issues[0]["message"]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "token = segment[index]",
+        "        token: 検査対象のトークン。",
+        'outside_secret = tmp_path / "outside_secret.txt"',
+        "const apiKey = JSON.parse(secret.SecretString).key;",
+        '"token=" + "value"',
+    ],
+)
+def test_scan_secret_issues_ignores_ordinary_code_assignments(line: str) -> None:
+    """通常のコード代入・docstring は認証情報の代入として扱わないこと。
+
+    クォートを単純に任意化すると `token = segment[index]` のような行まで
+    拾い、commit をブロックするフックとしては可用性が壊れる（実測で自
+    リポジトリの自己走査が 23 件の通常 Python 行に反応した）。
+    """
+    assert (
+        commit_quality_scanner._scan_secret_issues(
+            line, [line], deadline=commit_quality_scanner.new_secret_scan_deadline()
+        )
+        == []
+    )
+
+
+def test_scan_secret_issues_reports_anthropic_key_once() -> None:
+    """`sk-ant-` は OpenAI 形と二重計上されないこと。"""
+    line = "sk-" + "ant-" + "api03-" + "H" * 40
+
+    issues = commit_quality_scanner._scan_secret_issues(
+        line, [line], deadline=commit_quality_scanner.new_secret_scan_deadline()
+    )
+
+    assert len(issues) == 1
+
+
 def test_scan_secret_issues_raises_on_time_budget_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
     """渡された deadline を過ぎていれば例外として送出され、
     find_file_issues 側で scan_error（severity error、fail-closed）になること。"""

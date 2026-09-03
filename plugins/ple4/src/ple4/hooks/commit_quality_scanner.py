@@ -72,11 +72,46 @@ _SECRET_SCAN_EXCLUDED_FILENAMES = {
     "Pipfile.lock",
 }
 _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"sk-[a-zA-Z0-9]{20,}", "OpenAI API key"),
+    # ベンダ prefix の集合は `ple4.mem.redaction._PATTERNS` と揃える。同じ
+    # リポジトリで「記録時はマスクするが commit 時は検出しない」秘密が
+    # 生まれないようにするため（実測で 12 形式中 10 形式が本モジュールだけ
+    # 素通りしていた）。
+    #
+    # `sk-` の文字クラスに `-` を含めるのは、OpenAI の現行形式
+    # （`sk-` の後にセグメントとハイフンが続く）が旧形式のクラスでは
+    # 原理的に一致しないため。隣の Anthropic パターンは同じ位置に
+    # 既に `-` を持っており、非対称だった。
+    # `(?!ant-)` は Anthropic 形との二重計上を避けるため。文字クラスへ `-` を
+    # 入れた結果、`sk-ant-...` が両方のパターンに一致して 1 行から 2 件の
+    # issue が出ていた。
+    (r"sk-(?!ant-)[a-zA-Z0-9_-]{20,}", "OpenAI API key"),
     (r"sk-ant-[a-zA-Z0-9_-]{20,}", "Anthropic API key"),
-    (r"ghp_[a-zA-Z0-9]{36}", "GitHub PAT"),
-    (r"AKIA[A-Z0-9]{16}", "AWS Access Key"),
-    (r"api[_-]?key\s*[=:]\s*['\"][^'\"]+['\"]", "API key"),
+    (r"gh[pors]_[a-zA-Z0-9]{36,}", "GitHub PAT"),
+    (r"github_pat_[a-zA-Z0-9_]{59,}", "GitHub fine-grained PAT"),
+    (r"xox[bpoa]-[a-zA-Z0-9-]{10,}", "Slack token"),
+    (r"AIza[a-zA-Z0-9_-]{35}", "Google API key"),
+    (r"(?:AKIA|ASIA|AIDA|AROA)[A-Z0-9]{16}", "AWS Access Key"),
+    (r"eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]*", "JWT"),
+    # 認証情報の代入。クォートを必須にすると `.env` の `API_KEY=...` と
+    # YAML の `api_key: ...` が素通りするが、単にクォートを任意にすると
+    # `token = segment[index]` のような通常のコード代入まで拾ってしまう
+    # （実測: 自リポジトリの自己走査で 23 件が普通の Python 行だった）。
+    # commit をブロックするフックでこの誤検出は可用性を壊すため、
+    # 「クォート付き」「区切りの前後に空白が無い env/ini 形」「行頭キーの
+    # YAML 形」の 3 形に限定する。値の文字集合を ASCII の秘密様文字へ
+    # 絞ることで、docstring の `token: 検査対象のトークン。` も外れる。
+    (
+        r"(?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*['\"][^'\"\s]+['\"]",
+        "credential assignment",
+    ),
+    (
+        r"(?:password|passwd|secret|token|api[-_]?key)[=:][A-Za-z0-9_\-./+]{8,}",
+        "credential assignment",
+    ),
+    (
+        r"^\s*[a-z0-9_]*(?:password|passwd|secret|token|api[-_]?key)\s*:\s+[A-Za-z0-9_\-./+]{8,}\s*$",
+        "credential assignment",
+    ),
     # PEM / OpenSSH / PGP 秘密鍵ブロックのヘッダ行。鍵種別は列挙で固定し
     # `[A-Z ]+` のような曖昧な繰り返しを使わない（曖昧な繰り返しは、
     # 前置の 5 ハイフンに一致した後の長い大文字列で走査を二次オーダーへ

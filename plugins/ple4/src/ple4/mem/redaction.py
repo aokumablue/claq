@@ -16,13 +16,17 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("jwt_token", re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")),
     # Anthropic / OpenAI API キー
     ("anthropic_key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
-    ("openai_key", re.compile(r"\bsk-[A-Za-z0-9]{20,}\b")),
+    # 文字クラスに `-` を含めるのは、OpenAI の現行形式（`sk-` の後に
+    # セグメントとハイフンが続く）が旧クラスでは一致しないため。
+    ("openai_key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")),
     # Slack Bot / User トークン
     ("slack_token", re.compile(r"\bxox[bpoa]-[A-Za-z0-9-]{10,}\b")),
     # GitHub Personal Access Token (classic: ghp_ / gho_ / ghs_ / ghr_)
     ("github_token", re.compile(r"\bgh[pors]_[A-Za-z0-9]{36,}\b")),
     # GitHub Fine-Grained PAT (github_pat_)
     ("github_fine_pat", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{59,}\b")),
+    # Google API キー
+    ("google_api_key", re.compile(r"\bAIza[A-Za-z0-9_-]{35}\b")),
     # AWS Access Key ID
     ("aws_key_id", re.compile(r"\b(?:AKIA|ASIA|AIDA|AROA)[A-Z0-9]{16}\b")),
     # AWS Secret Access Key (40 文字の base64 様文字列を直前のキーワードで判定)

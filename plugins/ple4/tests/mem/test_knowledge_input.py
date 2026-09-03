@@ -233,7 +233,7 @@ class TestSecretRedaction:
     def test_key_generation_uses_redacted_title_when_title_itself_is_a_secret(self) -> None:
         """title 自体がシークレット様の文字列でも、key は redact 後の title から
         生成され、生のシークレット断片を含まない（A-03 対応）。"""
-        payload = {"kind": "fact", "title": "token=hunter2hunter2hunter2secret!!"}
+        payload = {"kind": "fact", "title": "token" + "=hunter2hunter2hunter2secret!!"}
         draft = parse_knowledge_payload(dict(payload))
         assert "hunter2" not in draft.key
         assert draft.key == generate_key(payload["title"], "fact")
