@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import itertools
 import json
 import runpy
 import subprocess
@@ -15,6 +16,22 @@ import pytest
 
 from ple4.hooks import commit_quality_scanner as commit_quality_scanner
 from ple4.hooks import pre_bash_commit_quality as pre_bash_commit_quality
+
+
+def _scan_deadline() -> float:
+    """テストから `find_file_issues` へ渡す secret scan 予算 1 本分の deadline を作る。
+
+    本番ではフック 1 回の起動につき 1 度だけ `new_secret_scan_deadline()` を呼び、
+    その 1 本を全ファイルで共有する。単発の `find_file_issues` を検査するテストは
+    ファイルごとに満額の予算で構わないため、呼び出しごとに新しい deadline を作る。
+
+    Returns:
+        `_monotonic()` 基準で走査を打ち切るべき時刻（秒）。
+
+    Raises:
+        例外は発生しません。
+    """
+    return commit_quality_scanner.new_secret_scan_deadline()
 
 
 def test_pre_bash_commit_quality_detects_file_issues_and_commit_message_rules(
@@ -32,7 +49,7 @@ def test_pre_bash_commit_quality_detects_file_issues_and_commit_message_rules(
     )
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
 
     assert {issue["type"] for issue in issues} == {"console.log", "debugger", "todo", "secret"}  # nosec
     assert [issue["line"] for issue in issues if issue["type"] == "console.log"] == [1]  # nosec
@@ -55,7 +72,7 @@ def test_find_file_issues_skips_nosec_marked_lines(monkeypatch: pytest.MonkeyPat
     )
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    issues = commit_quality_scanner.find_file_issues("src/app.py")
+    issues = commit_quality_scanner.find_file_issues("src/app.py", deadline=_scan_deadline())
 
     # デバッガ文は nosec で抑制される
     assert not any(issue["type"] == "debugger" for issue in issues)  # nosec
@@ -69,7 +86,7 @@ def test_find_file_issues_secret_detection_not_bypassed_by_nosec(monkeypatch: py
     content = "api" + "_key" + ' = "hunter2secret"  # nosec'
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    issues = commit_quality_scanner.find_file_issues("src/app.py")
+    issues = commit_quality_scanner.find_file_issues("src/app.py", deadline=_scan_deadline())
 
     assert len(issues) == 1
     assert issues[0]["type"] == "secret"
@@ -86,7 +103,7 @@ def test_find_file_issues_detects_anthropic_api_key(monkeypatch: pytest.MonkeyPa
     content = "sk-" + "ant-" + "abcdefghijklmnopqrstuvwxyz0123456789"
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    issues = commit_quality_scanner.find_file_issues("src/app.py")
+    issues = commit_quality_scanner.find_file_issues("src/app.py", deadline=_scan_deadline())
 
     assert len(issues) == 1
     assert issues[0]["type"] == "secret"
@@ -98,7 +115,7 @@ def test_find_file_issues_console_log_still_suppressed_by_nosec(monkeypatch: pyt
     content = 'console.log("debug")  # nosec'
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    assert commit_quality_scanner.find_file_issues("src/app.py") == []
+    assert commit_quality_scanner.find_file_issues("src/app.py", deadline=_scan_deadline()) == []
 
 
 def test_find_file_issues_self_check_has_zero_secret_issues(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -107,7 +124,7 @@ def test_find_file_issues_self_check_has_zero_secret_issues(monkeypatch: pytest.
     own_source = source_path.read_text(encoding="utf-8")
 
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: own_source)
-    issues = commit_quality_scanner.find_file_issues(str(source_path))
+    issues = commit_quality_scanner.find_file_issues(str(source_path), deadline=_scan_deadline())
 
     secret_issues = [issue for issue in issues if issue["type"] == "secret"]
     assert secret_issues == []
@@ -125,7 +142,7 @@ def test_find_file_issues_self_check_on_this_test_file_has_zero_issues() -> None
     own_source = this_file.read_text(encoding="utf-8")
 
     with mock.patch.object(commit_quality_scanner, "get_staged_file_content", return_value=own_source):
-        issues = commit_quality_scanner.find_file_issues(str(this_file))
+        issues = commit_quality_scanner.find_file_issues(str(this_file), deadline=_scan_deadline())
 
     assert issues == []
 
@@ -135,7 +152,7 @@ def test_find_file_issues_detects_secret_in_non_lint_extension(monkeypatch: pyte
     content = "API_" + "KEY" + '="hunter2secret"'
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    issues = commit_quality_scanner.find_file_issues(".env")
+    issues = commit_quality_scanner.find_file_issues(".env", deadline=_scan_deadline())
 
     assert [issue["type"] for issue in issues] == ["secret"]
 
@@ -147,7 +164,7 @@ def test_find_file_issues_lint_only_checks_skipped_for_non_lint_extension(
     content = 'console.log("hi")'  # nosec
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    assert commit_quality_scanner.find_file_issues(".env") == []
+    assert commit_quality_scanner.find_file_issues(".env", deadline=_scan_deadline()) == []
 
 
 def test_find_file_issues_skips_secret_scan_for_lock_files(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -155,7 +172,7 @@ def test_find_file_issues_skips_secret_scan_for_lock_files(monkeypatch: pytest.M
     content = "api" + "_key" + ' = "abc123"'
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    assert commit_quality_scanner.find_file_issues("package-lock.json") == []
+    assert commit_quality_scanner.find_file_issues("package-lock.json", deadline=_scan_deadline()) == []
 
 
 def test_find_file_issues_oversized_files_detect_secret_past_old_1mib_cap(
@@ -169,7 +186,7 @@ def test_find_file_issues_oversized_files_detect_secret_past_old_1mib_cap(
     content = padding + "\n" + 'console.log("hi")' + "\n" + "api" + "_key" + ' = "abc123"'  # nosec
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
 
     types = {issue["type"] for issue in issues}
     # 旧 1MiB cap は廃止済み。境界より後ろの secret も検出される。
@@ -187,7 +204,7 @@ def test_find_file_issues_oversized_files_scan_prefix_for_secrets(
     content = secret_line + "\n" + padding
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
 
     assert any(issue["type"] == "secret" and issue["line"] == 1 for issue in issues)
 
@@ -198,7 +215,7 @@ def test_find_file_issues_secret_scan_applies_under_size_limit(monkeypatch: pyte
     content = padding + "\n" + "api" + "_key" + ' = "abc123"'
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
 
     assert any(issue["type"] == "secret" for issue in issues)
 
@@ -215,7 +232,7 @@ def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(
     content = "\0binary preamble\n" + 'console.log("hi")\n' + "api" + "_key" + ' = "abc123"'  # nosec
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    issues = commit_quality_scanner.find_file_issues("weird.js")
+    issues = commit_quality_scanner.find_file_issues("weird.js", deadline=_scan_deadline())
 
     secrets = [issue for issue in issues if issue["type"] == "secret"]
     assert secrets, issues
@@ -235,7 +252,7 @@ def test_find_file_issues_real_binary_is_not_blocked(monkeypatch: pytest.MonkeyP
     png = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x00\x00\x00\x01\x00\x08\x06"
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: png)
 
-    issues = commit_quality_scanner.find_file_issues("logo.png")
+    issues = commit_quality_scanner.find_file_issues("logo.png", deadline=_scan_deadline())
 
     assert [issue for issue in issues if issue["severity"] == "error"] == []
 
@@ -294,7 +311,9 @@ def test_scan_secret_issues_detects_private_key_headers(kind: str) -> None:
     """
     lines = ["prefix", f"  {_private_key_header(kind)}", "suffix"]
 
-    issues = commit_quality_scanner._scan_secret_issues("\n".join(lines), lines)
+    issues = commit_quality_scanner._scan_secret_issues(
+        "\n".join(lines), lines, deadline=commit_quality_scanner.new_secret_scan_deadline()
+    )
 
     assert [issue["line"] for issue in issues] == [2]
     assert issues[0]["type"] == "secret"
@@ -321,7 +340,7 @@ def test_scan_secret_issues_detects_vendor_private_key_headers(line: str) -> Non
     PEM の 5 ハイフン交替では拾えない形なので別パターンで固定する。
     ppk は版番号を文字クラスで書くため v2 / v3 の双方に一致する。
     """
-    issues = commit_quality_scanner._scan_secret_issues(line, [line])
+    issues = commit_quality_scanner._scan_secret_issues(line, [line], deadline=commit_quality_scanner.new_secret_scan_deadline())
 
     assert [issue["severity"] for issue in issues] == ["error"]
 
@@ -338,17 +357,21 @@ def test_scan_secret_issues_detects_vendor_private_key_headers(line: str) -> Non
 )
 def test_scan_secret_issues_ignores_non_private_key_lines(line: str) -> None:
     """公開物のヘッダ・散文の言及・デリミタ不足の行では発火しないこと。"""
-    assert commit_quality_scanner._scan_secret_issues(line, [line]) == []
+    assert (
+        commit_quality_scanner._scan_secret_issues(
+            line, [line], deadline=commit_quality_scanner.new_secret_scan_deadline()
+        )
+        == []
+    )
 
 
 def test_scan_secret_issues_raises_on_time_budget_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """secret scan の実時間バジェット超過は例外として送出され、
+    """渡された deadline を過ぎていれば例外として送出され、
     find_file_issues 側で scan_error（severity error、fail-closed）になること。"""
-    calls = iter([0.0, 1_000.0])
-    monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: next(calls))
+    monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: 1_000.0)
 
     with pytest.raises(commit_quality_scanner.SecretScanBudgetExceeded):
-        commit_quality_scanner._scan_secret_issues("line one", ["line one"])
+        commit_quality_scanner._scan_secret_issues("line one", ["line one"], deadline=0.0)
 
 
 def test_find_file_issues_secret_scan_budget_exceeded_is_scan_error(
@@ -359,11 +382,95 @@ def test_find_file_issues_secret_scan_budget_exceeded_is_scan_error(
     monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: next(calls))
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: "some text")
 
-    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
 
     scan_errors = [issue for issue in issues if issue["type"] == "scan_error"]
     assert len(scan_errors) == 1
     assert scan_errors[0]["severity"] == "error"
+
+
+def test_evaluate_shares_one_secret_scan_budget_across_staged_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """secret scan の実時間予算はフック 1 回の起動全体で共有されること。
+
+    予算がファイル単位だと、1 ファイルあたり予算未満（ここでは 9 秒）で
+    済む限り何ファイルでも走査でき、staged が N 件あれば
+    N×`_SECRET_SCAN_TIME_BUDGET_SECONDS` 秒まで走ってしまう。それでは
+    `commit_quality_scanner` のモジュール docstring が主張する
+    「hook timeout（30秒）に達しない」を満たせない（実測: 1 ファイル 9 秒
+    ×5 ファイルで累積 45 秒でも予算超過は 0 件だった）。
+
+    エントリ（`evaluate`）から駆動して固定する。`find_file_issues` を
+    直接呼ぶテストでは deadline の伝播が外れても気付けないため。
+    """
+    logs: list[str] = []
+    monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
+    clock = itertools.count(0.0, 9.0)
+    monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: next(clock))
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: "some text")
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git commit -m 'feat(core): add'"}},
+    )
+    staged = [f"src/app{index}.js" for index in range(1, 6)]
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: staged)
+    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+
+    result = pre_bash_commit_quality.evaluate("payload")
+
+    # 予算 10 秒は 2 ファイル目の走査開始（累積 18 秒）で尽きるため、
+    # 2〜5 ファイル目が scan_error（severity error、fail-closed）になる。
+    assert result["exitCode"] == 2
+    exceeded = [
+        path
+        for path in staged
+        if any(path in message and "SecretScanBudgetExceeded" in message for message in logs)
+    ]
+    assert exceeded == staged[1:]
+
+
+def test_evaluate_commit_dash_a_shares_secret_scan_budget_with_worktree_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`git commit -a` の INDEX 側と作業ツリー側でも予算は 1 本を共有すること。
+
+    `_count_file_issues` はフック 1 回につき INDEX 用と作業ツリー用の 2 回
+    呼ばれるため、そこで deadline を作ると予算が 2 本になり同じ穴が半分
+    残る。作業ツリー側のファイルが INDEX 側で使い切った予算を引き継いで
+    scan_error になることを固定する。
+    """
+    logs: list[str] = []
+    monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
+    clock = itertools.count(0.0, 9.0)
+    monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: next(clock))
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: "some text")
+    monkeypatch.setattr(
+        commit_quality_scanner, "get_worktree_file_content", lambda repo_root, path: "some text"
+    )
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "parse_json_object",
+        lambda raw: {"tool_input": {"command": "git commit -am 'feat(core): add'"}},
+    )
+    monkeypatch.setattr(
+        pre_bash_commit_quality, "get_staged_files", lambda: ["src/staged1.js", "src/staged2.js"]
+    )
+    monkeypatch.setattr(
+        pre_bash_commit_quality, "get_unstaged_modified_files", lambda: ["src/unstaged.js"]
+    )
+    monkeypatch.setattr(pre_bash_commit_quality, "resolve_repo_root", lambda: Path("/dummy/repo"))
+    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+
+    result = pre_bash_commit_quality.evaluate("payload")
+
+    # INDEX 側 2 件目（累積 18 秒）で予算が尽き、作業ツリー側（累積 27 秒）も
+    # 同じ予算を見るため scan_error になる。予算が 2 本なら後者は通ってしまう。
+    assert result["exitCode"] == 2
+    assert any(
+        "src/unstaged.js" in message and "SecretScanBudgetExceeded" in message for message in logs
+    )
 
 
 def test_find_file_issues_secret_scan_exception_is_reported_as_error(
@@ -384,7 +491,7 @@ def test_find_file_issues_secret_scan_exception_is_reported_as_error(
         mock.Mock(side_effect=RuntimeError("boom")),
     )
 
-    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
 
     types = {issue["type"] for issue in issues}
     assert "console.log" in types  # lint 側は secret scanner の例外の影響を受けない  # nosec
@@ -411,7 +518,7 @@ def test_find_file_issues_lint_scan_exception_is_reported_as_warning(
         mock.Mock(side_effect=ValueError("boom")),
     )
 
-    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
 
     types = {issue["type"] for issue in issues}
     assert "secret" in types
@@ -432,7 +539,7 @@ def test_find_file_issues_scan_target_detection_exception_is_reported_as_error(
         mock.Mock(side_effect=OSError("boom")),
     )
 
-    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
 
     assert len(issues) == 1
     assert issues[0]["type"] == "scan_error"
@@ -451,7 +558,7 @@ def test_evaluate_scans_non_lint_extension_files_for_secrets(monkeypatch: pytest
 
     seen: list[str] = []
 
-    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None) -> list[dict]:
+    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None, deadline: float) -> list[dict]:
         seen.append(path)
         return []
 
@@ -591,7 +698,7 @@ def test_pre_bash_commit_quality_finds_parser_and_reading_errors(monkeypatch: py
     できなかった。
     """
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: (_ for _ in ()).throw(RuntimeError("boom")))
-    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
     assert len(issues) == 1
     assert issues[0]["type"] == "scan_error"
     assert issues[0]["severity"] == "error"
@@ -676,7 +783,7 @@ def test_pre_bash_commit_quality_blocks_on_error_and_allows_warnings(
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "find_file_issues",
-        lambda path, *, repo_root=None: [{"severity": "error", "line": 1, "message": "boom"}],
+        lambda path, *, repo_root=None, deadline: [{"severity": "error", "line": 1, "message": "boom"}],
     )
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
     assert pre_bash_commit_quality.evaluate("payload") == {
@@ -687,7 +794,7 @@ def test_pre_bash_commit_quality_blocks_on_error_and_allows_warnings(
 
     warning_logs: list[str] = []
     monkeypatch.setattr(pre_bash_commit_quality, "log", warning_logs.append)
-    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None: [])
+    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None, deadline: [])
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "validate_commit_message",
@@ -714,7 +821,7 @@ def test_pre_bash_commit_quality_counts_warning_and_info_issues(monkeypatch: pyt
     monkeypatch.setattr(
         pre_bash_commit_quality,
         "find_file_issues",
-        lambda path, *, repo_root=None: [
+        lambda path, *, repo_root=None, deadline: [
             {"severity": "warning", "line": 1, "message": "warn"},
             {"severity": "info", "line": 2, "message": "info"},
         ],
@@ -759,7 +866,7 @@ def test_pre_bash_commit_quality_helpers_and_pass_branch(monkeypatch: pytest.Mon
     assert commit_quality_scanner.get_staged_file_content("src/app.js") is None
     # content 取得不能（None）は「検査したが問題なし」ではなく scan_error
     # として積まれ、severity=error でブロック対象になる
-    issues = commit_quality_scanner.find_file_issues("src/app.js")
+    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
     assert len(issues) == 1
     assert issues[0]["type"] == "scan_error"
     assert issues[0]["severity"] == "error"
@@ -773,7 +880,7 @@ def test_pre_bash_commit_quality_helpers_and_pass_branch(monkeypatch: pytest.Mon
     )
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: ["src/app.js"])
     monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
-    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None: [])
+    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None, deadline: [])
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
 
     assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
@@ -805,10 +912,16 @@ def test_count_file_issues_unknown_severity(monkeypatch) -> None:
     import ple4.hooks.pre_bash_commit_quality as pbcq
 
     monkeypatch.setattr(
-        pbcq, "find_file_issues", lambda fp, *, repo_root=None: [{"severity": "unknown", "line": 1, "message": "x"}]
+        pbcq,
+        "find_file_issues",
+        lambda fp, *, repo_root=None, deadline: [
+            {"severity": "unknown", "line": 1, "message": "x"}
+        ],
     )
     monkeypatch.setattr(pbcq, "log", lambda *a, **k: None)
-    total, err, warn, info = pbcq._count_file_issues(["f.py"])
+    total, err, warn, info = pbcq._count_file_issues(
+        ["f.py"], deadline=commit_quality_scanner.new_secret_scan_deadline()
+    )
     assert (total, err, warn, info) == (1, 1, 0, 0)
 
 
@@ -1129,7 +1242,7 @@ def test_evaluate_commit_amend_scans_staged_files(monkeypatch: pytest.MonkeyPatc
 
     seen: list[str] = []
 
-    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None) -> list[dict]:
+    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None, deadline: float) -> list[dict]:
         seen.append(path)
         return [{"type": "secret", "severity": "error", "message": "hardcoded secret detected", "line": 1}]
 
@@ -1162,7 +1275,7 @@ def test_evaluate_commit_dash_a_unions_unstaged_modified_files(monkeypatch: pyte
 
     seen: list[tuple[str, Path | None]] = []
 
-    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None) -> list[dict]:
+    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None, deadline: float) -> list[dict]:
         seen.append((path, repo_root))
         return []
 
@@ -1198,7 +1311,7 @@ def test_evaluate_commit_dash_a_worktree_blocked_when_repo_root_unresolvable(
 
     seen: list[str] = []
 
-    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None) -> list[dict]:
+    def _fake_find_file_issues(path: str, *, repo_root: Path | None = None, deadline: float) -> list[dict]:
         seen.append(path)
         return []
 
@@ -1230,7 +1343,7 @@ def test_evaluate_commit_without_dash_a_ignores_unstaged_modified_files(
         lambda: (_ for _ in ()).throw(AssertionError("should not be called")),
     )
     monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
-    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None: [])
+    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None, deadline: [])
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
 
     assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
@@ -1502,7 +1615,7 @@ def test_find_file_issues_minified_js_lints_but_skips_secret_scan(
     content = 'console.log("hi")\n' + "api" + "_key" + ' = "abc123"'  # nosec
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
-    issues = commit_quality_scanner.find_file_issues("dist/app.min.js")
+    issues = commit_quality_scanner.find_file_issues("dist/app.min.js", deadline=_scan_deadline())
 
     types = {issue["type"] for issue in issues}
     assert "console.log" in types  # nosec
@@ -1553,7 +1666,7 @@ def test_repo_wide_self_scan_has_zero_secret_issues() -> None:
 
         content = raw.decode("utf-8", errors="replace")
         with mock.patch.object(commit_quality_scanner, "get_staged_file_content", return_value=content):
-            issues = commit_quality_scanner.find_file_issues(rel_path)
+            issues = commit_quality_scanner.find_file_issues(rel_path, deadline=_scan_deadline())
 
         secret_hits.extend(f"{rel_path}:{issue['line']}" for issue in issues if issue["type"] == "secret")
 
