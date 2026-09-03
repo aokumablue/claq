@@ -1376,3 +1376,33 @@ class TestUnquotedNewlineNormalization:
             ["git", "add", "s.py"],
             ["git", "commit", "-m", "m"],
         ]
+
+    @pytest.mark.parametrize(
+        ("label", "command", "expected"),
+        [
+            (
+                "エスケープした # は語の一部",
+                r"echo \# && git commit --no-verify",
+                ["echo", "#", "&&", "git", "commit", "--no-verify"],
+            ),
+            (
+                "シングルクォート内の \\ は literal",
+                r"echo 'a\b' # 注釈",
+                ["echo", r"a\b"],
+            ),
+            (
+                "ダブルクォート内の # はコメントにならない",
+                'echo "a # b" && git commit --no-verify',
+                ["echo", "a # b", "&&", "git", "commit", "--no-verify"],
+            ),
+        ],
+    )
+    def test_line_comment_stripping_respects_quotes_and_escapes(
+        self, label: str, command: str, expected: list[str]
+    ) -> None:
+        """`#` の読み捨ては行末までで、クォート内・エスケープ後には及ばないこと。
+
+        `shlex` のコメント処理に任せていた頃は `#` 以降が入力**末尾**まで捨てられ、
+        2 行目の `git commit --no-verify` が丸ごと未検査になっていた（実測）。
+        """
+        assert hook_common.tokenize(command) == expected, label

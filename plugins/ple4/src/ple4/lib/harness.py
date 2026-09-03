@@ -202,10 +202,17 @@ def _commands_from_tool_input(tool_input: Any) -> list[str]:
         例外は発生しません。
     """
     if isinstance(tool_input, dict):
+        # 値は文字列とは限らない。``{"command": ["bash", "-lc", "git commit
+        # --no-verify -m x"]}`` のように argv 配列で渡す host があり、文字列
+        # 以外を捨てていた頃はコマンドが 1 つも無い payload として静かに許可
+        # されていた（実測: block_no_verify が exit 0）。コンテナ側の list 形状は
+        # 既に展開しているのに、フィールド値側だけ文字列限定なのは非対称な
+        # 取りこぼしだった。要素ごとに個別のコマンド文字列として返す。
         return [
             command
             for key in ("command", "cmd")
-            if isinstance(command := tool_input.get(key), str) and command
+            if key in tool_input
+            for command in _commands_from_tool_input(tool_input[key])
         ]
     if isinstance(tool_input, str):
         return [tool_input] if tool_input else []
@@ -237,6 +244,36 @@ def normalize_tool_name(tool_name: str) -> str:
     return _TOOL_NAME_MAP.get(tool_name.lower(), tool_name)
 
 
+# 本パーサが「どのツールか特定できた」と言える正規化後の名前（小文字比較）。
+# `_TOOL_NAME_MAP` の値から導出する。写経すると片方だけ更新されて判定がずれる。
+_IDENTIFIABLE_TOOL_NAMES = frozenset(name.lower() for name in _TOOL_NAME_MAP.values())
+
+
+def is_unidentifiable_tool(tool_name: str) -> bool:
+    """ツール名が既知のどれとも一致しないかを判定する。
+
+    ツール名で検査対象を絞るフックは、名前を特定できない payload を
+    「対象外」と読み替えてはならない。``{"tool_name": 123}`` や
+    ``{"tool": "Write"}`` のように `extract_raw_tool_name` が空文字へ倒れる形、
+    あるいは host 固有の未知の名前（``mcp__fs__write``）で保護が丸ごと無効に
+    なっていた（実測: config_protection が保護対象への書き込みを exit 0）。
+
+    ツール名の照合はハーネスの matcher が既に済ませており、フック内の再照合は
+    冗長なゲートでしかない。したがって「既知の対象外ツール」だけを skip し、
+    特定できない名前は検査側へ倒す（ADR-0002: 誤検出 > 誤通過）。
+
+    Args:
+        tool_name: `extract_raw_tool_name` が返した正規化前の生ツール名。
+
+    Returns:
+        既知のツール名へ正規化できなければ True。
+
+    Raises:
+        例外は発生しません。
+    """
+    return normalize_tool_name(tool_name).lower() not in _IDENTIFIABLE_TOOL_NAMES
+
+
 def _extract_patch_text(tool_input: dict | str | None) -> str | None:
     """入力から構造化パッチ本文候補を取り出す。
 
@@ -266,6 +303,37 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
 def _has_patch_markers(patch_text: str) -> bool:
     """テキストが構造化パッチのファイル操作マーカー行を 1 つ以上含むか判定する。"""
     return any(line.startswith(marker) for line in patch_text.splitlines() for marker in _PATCH_FILE_MARKERS)
+
+
+def _path_strings(value: Any) -> list[str] | None:
+    """`file_path` / `file` フィールドの値をパス文字列のリストへ平坦化する。
+
+    値は文字列とは限らない。``{"file_path": ["ruff.toml"]}`` のように配列で
+    渡す host があり、文字列以外を捨てていた頃は「対象ファイルが 1 つも無い
+    書き込み」として静かに許可されていた（実測: config_protection が exit 0）。
+
+    Args:
+        value: `file_path` / `file` フィールドの生の値。
+
+    Returns:
+        パス文字列のリスト（空文字は除く）。文字列でも list でもない値は
+        パスとして解釈できないため None を返し、呼び出し側で fail-closed に
+        倒す（ADR-0002: 誤検出 > 誤通過）。
+
+    Raises:
+        例外は発生しません。
+    """
+    if isinstance(value, str):
+        return [value] if value else []
+    if not isinstance(value, list):
+        return None
+    paths: list[str] = []
+    for item in value:
+        nested = _path_strings(item)
+        if nested is None:
+            return None
+        paths.extend(nested)
+    return paths
 
 
 def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[str] | None:
@@ -336,11 +404,20 @@ def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[st
     # キーだけを返すと、無害な `file_path` を 1 つ足すだけで `file` の保護対象
     # パスが検査から外れる（実測: config_protection が exit 0）。コンテナキー
     # 側で塞いだ先勝ちバイパスと同型のものが 1 階層下に残っていた。
-    return [
-        file_path
-        for key in ("file_path", "file")
-        if isinstance(file_path := tool_input.get(key), str) and file_path
-    ]
+    # 値は文字列とは限らない。``{"file_path": ["ruff.toml"]}`` のように配列で
+    # 渡す host があり、文字列以外を捨てていた頃は「対象ファイルが 1 つも無い
+    # 書き込み」として静かに許可されていた（実測: config_protection が exit 0）。
+    # コンテナ側の list 形状は既に展開しているので、フィールド値側も同じ規則で
+    # 展開して非対称をなくす。判定不能（None）はそのまま伝播させ fail-closed。
+    paths = []
+    for key in ("file_path", "file"):
+        if key not in tool_input:
+            continue
+        nested = _path_strings(tool_input[key])
+        if nested is None:
+            return None
+        paths.extend(nested)
+    return paths
 
 
 # ユーザー発話として transcript に載るが、実際にはハーネスが生成した足場で

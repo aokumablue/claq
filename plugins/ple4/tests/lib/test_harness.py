@@ -292,9 +292,14 @@ class TestExtractFilePaths:
         """file_path 不在時は空リストを返す（対象ファイル無し）。"""
         assert harness.extract_file_paths("Bash", {"command": "ls"}) == []
 
-    def test_non_string_file_path_returns_empty(self):
-        """file_path が文字列以外なら空リストを返す。"""
-        assert harness.extract_file_paths("Edit", {"file_path": 123}) == []
+    def test_non_string_file_path_is_undecidable(self):
+        """file_path がパスとして解釈できない値なら判定不能（None）を返す。
+
+        空リストを返していた頃は、呼び出し側が「対象ファイルが 1 つも無い
+        書き込み」として静かに許可していた。判定できない入力は fail-closed へ
+        倒す（ADR-0002: 誤検出 > 誤通過）。
+        """
+        assert harness.extract_file_paths("Edit", {"file_path": 123}) is None
 
     def test_apply_patch_update_marker(self):
         """apply_patch の Update File マーカーをパースする。"""
@@ -831,3 +836,28 @@ class TestAgentMessageIsNotARequest:
 
         assert "修正せよ" not in result
         assert "触れるな" not in result
+
+
+class TestExtractFilePathsNestedValue:
+    """extract_file_paths のフィールド値展開（S-7）のテスト。"""
+
+    def test_list_valued_file_path_is_expanded(self):
+        """`file_path` の値が list でも対象ファイルとして取り出される。
+
+        文字列以外を捨てていた頃は「対象ファイルが 1 つも無い書き込み」として
+        config_protection が exit 0 で素通りした（実測）。
+        """
+        assert harness.extract_file_paths("Write", {"file_path": ["ruff.toml"]}) == ["ruff.toml"]
+
+    def test_empty_string_value_yields_no_path(self):
+        """空文字の `file_path` は対象ファイルとして数えない。"""
+        assert harness.extract_file_paths("Write", {"file_path": ""}) == []
+
+    @pytest.mark.parametrize("value", [123, {"nested": "ruff.toml"}, ["ruff.toml", 123]])
+    def test_undecidable_value_propagates_none(self, value):
+        """文字列でも文字列 list でもない値は判定不能として None を返す。
+
+        ここで空リストへ丸めると、呼び出し側（config_protection）は「対象
+        ファイルが 1 つも無い書き込み」として静かに許可してしまう。
+        """
+        assert harness.extract_file_paths("Write", {"file_path": value}) is None

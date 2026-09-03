@@ -79,6 +79,7 @@ from ple4.hooks.hook_common import (
     MAX_STDIN_BYTES,
     basename,
     emit_block_output,
+    extract_shell_wrapper_command,
     parse_json_object,
     read_raw_stdin_with_truncation,
     resolve_effective_target,
@@ -87,7 +88,12 @@ from ple4.hooks.hook_common import (
     strip_data_heredoc_bodies,
     tokenize,
 )
-from ple4.lib.harness import extract_raw_tool_name, iter_bash_commands, normalize_tool_name
+from ple4.lib.harness import (
+    extract_raw_tool_name,
+    is_unidentifiable_tool,
+    iter_bash_commands,
+    normalize_tool_name,
+)
 
 # matcher（hooks.json）は Bash 系エイリアスにアンカーされた正規表現。matcher の
 # 綴りが将来ズレても本体側で対象外ツールを確実に早期 return するための多重防御。
@@ -117,6 +123,18 @@ _REMOVE_COMMANDS = frozenset({"rm", "unlink", "shred", "truncate", "mv"})
 # パスを区別せず、保護対象に一致したトークンがあれば deny する
 # （ADR-0002: 誤検出 > 誤通過）。
 _MODE_COMMANDS = frozenset({"chmod", "chown", "chgrp", "chflags"})
+
+# 単一コマンドの抽出関数が実行位置判定（`_command_index`）へ渡す名前集合。
+# `_executed_command_args` の引数を集合で統一するため、1 要素でも集合で持つ。
+_TEE_COMMANDS = frozenset({"tee"})
+_SED_COMMANDS = frozenset({"sed"})
+_PERL_COMMANDS = frozenset({"perl"})
+_LN_COMMANDS = frozenset({"ln"})
+_DD_COMMANDS = frozenset({"dd"})
+
+# カレントディレクトリを移動するコマンド。これらが現れたコマンドでは、cwd 基準の
+# 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
+_DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES | CONDITIONALLY_PROTECTED_FILES
 
@@ -219,207 +237,194 @@ def _protected_target(token: str) -> str | None:
     return f"{segment}/" if segment is not None else None
 
 
-def _redirect_target(segment: list[str]) -> str | None:
-    """セグメント内の `>` 系リダイレクト先が保護対象ならその生トークンを返す。
+def _executed_command_args(segment: list[str], names: frozenset[str]) -> list[str] | None:
+    """実行位置のコマンドが `names` のいずれかなら、その引数トークン列を返す。
+
+    `tee pyproject.toml` の実行位置と `echo tee pyproject.toml` の非実行位置を
+    区別する `_command_index` の判定を、コマンド別の抽出関数が写経せずに共有する
+    ための helper（M-01 の判定軸を 1 か所に保つ）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+        names: 実行位置に来ていることを要求するコマンド名（basename 比較）の集合。
 
     Returns:
-        書き込み先の生トークン（パス文字列）。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
-    """
-    for index, token in enumerate(segment):
-        if token in _REDIRECT_OPERATORS and index + 1 < len(segment):
-            candidate = segment[index + 1]
-            if _protected_target(candidate):
-                return candidate
-    return None
-
-
-def _tee_target(segment: list[str]) -> str | None:
-    """セグメント内の `tee` の出力先引数が保護対象ならその生トークンを返す。
-
-    `tee` が実際に実行される位置（`_command_index`）にある場合のみ判定する
-    （M-01: ``echo tee pyproject.toml`` のように `tee` が実行されない位置に
-    現れるだけの誤検出を避けるため）。`-a`（追記）等のオプショントークンは
-    読み飛ばし、非オプション引数を出力先候補として検査する。
-
-    Args:
-        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
-
-    Returns:
-        書き込み先の生トークン（パス文字列）。該当しなければ None。
+        コマンド名以降の引数トークン列（オプションを含む）。実行位置のコマンドが
+        `names` に含まれない、または実行対象を特定できない場合は None。
 
     Raises:
         例外は発生しません。
     """
     index = _command_index(segment)
-    if index is None or segment[index].rsplit("/", 1)[-1] != "tee":
+    if index is None or segment[index].rsplit("/", 1)[-1] not in names:
         return None
-    for token in segment[index + 1 :]:
-        if token.startswith("-"):
-            continue
-        if _protected_target(token):
-            return token
-    return None
+    return segment[index + 1 :]
 
 
-def _sed_inplace_target(segment: list[str]) -> str | None:
-    """セグメント内の `sed -i`（in-place 編集）の対象引数が保護対象ならその生トークンを返す。
+def _non_option_args(args: list[str]) -> list[str]:
+    """引数トークン列から `-` 始まりのオプションを除いたものを返す。
 
-    `sed` が実際に実行される位置（`_command_index`）にある場合のみ判定する
-    （M-01: ``echo sed -i pyproject.toml`` のような非実行位置での誤検出を避ける）。
+    Args:
+        args: `_executed_command_args` が返した引数トークン列。
+
+    Returns:
+        オプションでない引数トークンのリスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    return [token for token in args if not token.startswith("-")]
+
+
+def _redirect_targets(segment: list[str]) -> list[str]:
+    """セグメント内の `>` 系リダイレクト先トークンをすべて返す。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        書き込み先の生トークン（パス文字列）。該当しなければ None。
+        リダイレクト先の生トークン（パス文字列）のリスト。
 
     Raises:
         例外は発生しません。
     """
-    index = _command_index(segment)
-    if index is None or segment[index].rsplit("/", 1)[-1] != "sed":
-        return None
-    args = segment[index + 1 :]
+    return [
+        segment[index + 1]
+        for index, token in enumerate(segment)
+        if token in _REDIRECT_OPERATORS and index + 1 < len(segment)
+    ]
+
+
+def _tee_targets(segment: list[str]) -> list[str]:
+    """`tee` の出力先引数をすべて返す。
+
+    `tee` が実際に実行される位置にある場合のみ判定する（M-01）。`-a`（追記）等の
+    オプショントークンは出力先ではないので除く。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        出力先の生トークンのリスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    args = _executed_command_args(segment, _TEE_COMMANDS)
+    return _non_option_args(args) if args is not None else []
+
+
+def _sed_inplace_targets(segment: list[str]) -> list[str]:
+    """`sed -i`（in-place 編集）の対象になりうる引数をすべて返す。
+
+    `sed` が実際に実行される位置にある場合のみ判定する（M-01）。スクリプト
+    引数（``s/a/b/``）も含めて返すが、保護対象かどうかの判定は呼び出し側が
+    `_protected_target` で行うため誤検出にはならない。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        in-place 編集の対象になりうる生トークンのリスト。`-i` が無ければ空。
+
+    Raises:
+        例外は発生しません。
+    """
+    args = _executed_command_args(segment, _SED_COMMANDS)
+    if args is None:
+        return []
     has_inplace = any(token == "-i" or token.startswith("-i") for token in args if token.startswith("-"))
-    if not has_inplace:
-        return None
-    for token in args:
-        if _protected_target(token):
-            return token
-    return None
+    return list(args) if has_inplace else []
 
 
-def _perl_inplace_target(segment: list[str]) -> str | None:
-    """セグメント内の `perl -i`（`-0pi` 等の結合短形式含む）の対象引数が保護対象ならその生トークンを返す。
+def _perl_inplace_targets(segment: list[str]) -> list[str]:
+    """`perl -i`（`-0pi` 等の結合短形式含む）の対象になりうる引数をすべて返す。
 
-    perl の in-place 編集フラグは `-i` 単独、または `-0pi`/`-pi.bak` の
-    ように他の短形式オプションと結合できる。結合位置は問わず、`-` 始まりの
-    単一ダッシュ・トークンに小文字 `i` が含まれるかで判定する
-    （`sed -i` と同じ「敵対的回避への防壁ではない」設計判断）。`perl` が
-    実際に実行される位置（`_command_index`）にある場合のみ判定する（M-01）。
+    perl の in-place 編集フラグは `-i` 単独、または `-0pi`/`-pi.bak` のように
+    他の短形式オプションと結合できる。結合位置は問わず、`-` 始まりの単一
+    ダッシュ・トークンに小文字 `i` が含まれるかで判定する（`sed -i` と同じ
+    「敵対的回避への防壁ではない」設計判断）。`perl` が実際に実行される位置に
+    ある場合のみ判定する（M-01）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        書き込み先の生トークン（パス文字列）。該当しなければ None。
+        in-place 編集の対象になりうる生トークンのリスト。`-i` 系が無ければ空。
 
     Raises:
         例外は発生しません。
     """
-    index = _command_index(segment)
-    if index is None or segment[index].rsplit("/", 1)[-1] != "perl":
-        return None
-    args = segment[index + 1 :]
+    args = _executed_command_args(segment, _PERL_COMMANDS)
+    if args is None:
+        return []
     has_inplace = any(token.startswith("-") and not token.startswith("--") and "i" in token for token in args)
-    if not has_inplace:
-        return None
-    for token in args:
-        if _protected_target(token):
-            return token
-    return None
+    return list(args) if has_inplace else []
 
 
-def _last_arg_write_target(segment: list[str]) -> str | None:
-    """`cp`/`mv`/`install` の最終（非オプション）引数が保護対象ならその生トークンを返す。
+def _last_arg_write_targets(segment: list[str]) -> list[str]:
+    """`cp`/`mv`/`install` の書き込み先（最終の非オプション引数）を返す。
 
-    これらのコマンドは複数ソースを取りうるが、書き込み先は常に末尾の
-    非オプション引数（`cp a b c dest` の `dest`）である。
+    これらのコマンドは複数ソースを取りうるが、書き込み先は常に末尾の非オプション
+    引数（`cp a b c dest` の `dest`）である。先行する引数は読み取り元なので
+    含めない。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        書き込み先の生トークン（パス文字列）。該当しなければ None。
+        書き込み先の生トークンを高々 1 件含むリスト。
 
     Raises:
         例外は発生しません。
     """
-    index = _command_index(segment)
-    if index is None or segment[index].rsplit("/", 1)[-1] not in _LAST_ARG_WRITE_COMMANDS:
-        return None
-    non_option_tokens = [token for token in segment[index + 1 :] if not token.startswith("-")]
-    if not non_option_tokens:
-        return None
-    candidate = non_option_tokens[-1]
-    return candidate if _protected_target(candidate) else None
+    args = _executed_command_args(segment, _LAST_ARG_WRITE_COMMANDS)
+    return _non_option_args(args)[-1:] if args is not None else []
 
 
-def _remove_target(segment: list[str]) -> str | None:
-    """`rm`/`unlink`/`shred`/`truncate`/`mv` の引数に保護対象があればその生トークンを返す。
+def _remove_targets(segment: list[str]) -> list[str]:
+    """`rm`/`unlink`/`shred`/`truncate`/`mv` の引数をすべて返す。
 
     削除・切り詰め・移動は書き込み先トークンとして現れないが、リンタ設定を消せば
     ルールごと無効化できるため上書きと同じ扱いにする（ADR-0002: false negative
-    より false positive を選ぶ）。`mv` は移動先を `_last_arg_write_target` が既に
+    より false positive を選ぶ）。`mv` は移動先を `_last_arg_write_targets` が既に
     見ているため、ここでは移動元を含む全引数を対象にする。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        保護対象の生トークン（パス文字列）。該当しなければ None。
+        非オプション引数の生トークンのリスト。
 
     Raises:
         例外は発生しません。
     """
-    return _first_protected_argument(segment, _REMOVE_COMMANDS)
+    args = _executed_command_args(segment, _REMOVE_COMMANDS)
+    return _non_option_args(args) if args is not None else []
 
 
-def _mode_target(segment: list[str]) -> str | None:
-    """`chmod`/`chown`/`chgrp`/`chflags` の引数に保護対象があればその生トークンを返す。
+def _mode_targets(segment: list[str]) -> list[str]:
+    """`chmod`/`chown`/`chgrp`/`chflags` の引数をすべて返す。
 
     中身を書き換えなくても、実行ビットや読み取り権限を落とせば検査は無効化
     できる（`chmod -x .git/hooks/pre-commit` / `chmod 000 .eslintrc.json`）。
-    `_remove_target` と同じ理由で上書きと同じ扱いにする。
+    `_remove_targets` と同じ理由で上書きと同じ扱いにする。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        保護対象の生トークン（パス文字列）。該当しなければ None。
+        非オプション引数の生トークンのリスト。
 
     Raises:
         例外は発生しません。
     """
-    return _first_protected_argument(segment, _MODE_COMMANDS)
+    args = _executed_command_args(segment, _MODE_COMMANDS)
+    return _non_option_args(args) if args is not None else []
 
 
-def _first_protected_argument(segment: list[str], commands: frozenset[str]) -> str | None:
-    """指定コマンド群の非オプション引数から最初の保護対象トークンを返す。
-
-    `_remove_target` と `_mode_target` は「コマンド名を確かめ、以降の非
-    オプション引数を順に見る」という同じ形をしており、片方だけ保護対象の
-    判定を変えると非対称が生まれる（本バグの発生経路そのもの）。
-
-    Args:
-        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
-        commands: 対象とするコマンド名（basename 比較）の集合。
-
-    Returns:
-        保護対象の生トークン（パス文字列）。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
-    """
-    index = _command_index(segment)
-    if index is None or segment[index].rsplit("/", 1)[-1] not in commands:
-        return None
-    for token in segment[index + 1 :]:
-        if token.startswith("-"):
-            continue
-        if _protected_target(token):
-            return token
-    return None
-
-
-def _ln_target(segment: list[str]) -> str | None:
-    """`ln` の最終（非オプション）引数が保護対象ならその生トークンを返す。
+def _ln_targets(segment: list[str]) -> list[str]:
+    """`ln` のリンク名（最終の非オプション引数）を返す。
 
     `-f` の有無で区別しない。既存ファイルを置き換える `ln -f` だけでなく、
     保護対象がまだ存在しない状態での `ln -s weak.toml ruff.toml` も、以後
@@ -430,72 +435,85 @@ def _ln_target(segment: list[str]) -> str | None:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        書き込み先の生トークン（パス文字列）。該当しなければ None。
+        リンク名の生トークンを高々 1 件含むリスト。
 
     Raises:
         例外は発生しません。
     """
-    index = _command_index(segment)
-    if index is None or segment[index].rsplit("/", 1)[-1] != "ln":
-        return None
-    non_option_tokens = [token for token in segment[index + 1 :] if not token.startswith("-")]
-    if not non_option_tokens:
-        return None
-    candidate = non_option_tokens[-1]
-    return candidate if _protected_target(candidate) else None
+    args = _executed_command_args(segment, _LN_COMMANDS)
+    return _non_option_args(args)[-1:] if args is not None else []
 
 
-def _dd_of_target(segment: list[str]) -> str | None:
-    """セグメント内の `dd of=<path>` の書き込み先が保護対象ならその生パス文字列を返す。
+def _dd_of_targets(segment: list[str]) -> list[str]:
+    """`dd of=<path>` の書き込み先をすべて返す。
 
     `of=` トークンだけでは write command とみなさず、`dd` が実際に実行される
-    位置（`_command_index`）にある場合のみ判定する（M-01: ``echo of=pyproject.toml``
-    のような非実行位置での誤検出を避ける）。
+    位置にある場合のみ判定する（M-01: ``echo of=pyproject.toml`` のような
+    非実行位置での誤検出を避ける）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        書き込み先の生パス文字列（`of=` プレフィックス除去済み）。
-        該当しなければ None。
+        `of=` プレフィックスを除いた書き込み先パス文字列のリスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    args = _executed_command_args(segment, _DD_COMMANDS)
+    if args is None:
+        return []
+    return [token[len("of=") :] for token in args if token.startswith("of=")]
+
+
+def _write_target_tokens_in_segment(segment: list[str]) -> list[str]:
+    """セグメント内の書き込み先候補トークンを**すべて**返す。
+
+    先勝ちで 1 件だけ返していた頃は、repo 外の囮を先頭に置くだけで後続の
+    保護対象書き込みが検査から外れた（実測: ``rm -f /tmp/ruff.toml ruff.toml``
+    が exit 0。囮なしの ``rm -f ruff.toml`` は exit 2）。保護対象かどうかと
+    repo スコープ内かどうかの判定は呼び出し側が候補ごとに行う。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        書き込み先候補の生トークン（パス文字列）のリスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    return [
+        token
+        for extract in (
+            _redirect_targets,
+            _tee_targets,
+            _sed_inplace_targets,
+            _perl_inplace_targets,
+            _last_arg_write_targets,
+            _remove_targets,
+            _mode_targets,
+            _ln_targets,
+            _dd_of_targets,
+        )
+        for token in extract(segment)
+    ]
+
+
+def _changes_working_directory(segment: list[str]) -> bool:
+    """セグメントがカレントディレクトリを移動するコマンドかを判定する。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        実行位置のコマンドが `_DIRECTORY_CHANGE_COMMANDS` に属するなら True。
 
     Raises:
         例外は発生しません。
     """
     index = _command_index(segment)
-    if index is None or segment[index].rsplit("/", 1)[-1] != "dd":
-        return None
-    for token in segment[index + 1 :]:
-        if token.startswith("of="):
-            candidate = token[len("of=") :]
-            if _protected_target(candidate):
-                return candidate
-    return None
-
-
-def _write_target_token_in_segment(segment: list[str]) -> str | None:
-    """セグメント内の書き込み先トークン（保護対象ヒット時）を返す。
-
-    Args:
-        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
-
-    Returns:
-        書き込み先の生トークン（パス文字列）。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
-    """
-    return (
-        _redirect_target(segment)
-        or _tee_target(segment)
-        or _sed_inplace_target(segment)
-        or _perl_inplace_target(segment)
-        or _last_arg_write_target(segment)
-        or _remove_target(segment)
-        or _mode_target(segment)
-        or _ln_target(segment)
-        or _dd_of_target(segment)
-    )
+    return index is not None and segment[index].rsplit("/", 1)[-1] in _DIRECTORY_CHANGE_COMMANDS
 
 
 def _within_repo_root(token: str, repo_root: Path) -> bool:
@@ -529,16 +547,29 @@ def _within_repo_root(token: str, repo_root: Path) -> bool:
     return True
 
 
-def find_protected_write(command: str) -> str | None:
+def find_protected_write(command: str, *, _recursed: bool = False) -> str | None:
     """コマンド文字列内に保護対象への書き込みがあればその表示名を返す。
 
-    書き込み先ヒットがあった場合のみ `resolve_repo_root` を呼び、書き込み先が
+    保護対象ヒットがあった場合のみ `resolve_repo_root` を呼び、書き込み先が
     現在のリポジトリルート配下にある場合のみ deny する（A-06）。リポジトリ
     ルートが決定できない場合は allow（決定不能を deny に倒すと false
     positive が残るため）。
 
+    ただしコマンドが `cd` 等でカレントディレクトリを移動する場合、cwd 基準の
+    相対パス解決は実行時の位置とずれるため repo スコープ判定を信用できない。
+    その場合は保護対象 basename のヒットをそのまま deny する
+    （実測: ``cd plugins && printf x > ../ruff.toml`` が exit 0 だった。
+    ADR-0002 のとおり、判定できない状態は誤検出側へ倒す）。`cd` を跨いだ
+    symlink 解決のずれは同じ理由で非目標。
+
+    既知シェルの ``-c`` へ渡された文字列コマンドへは 1 段だけ再帰する
+    （実測: ``bash -c 'printf x > ruff.toml'`` が exit 0 だった。`block_no_verify`
+    は同じ再帰を持っており、片方だけ持たない非対称は A-06 で本モジュールを
+    足した理由そのものに反する）。2 段以上のネストは ADR-0002 の非目標。
+
     Args:
         command: 検査対象のシェルコマンド文字列。
+        _recursed: 内部再帰用フラグ。True の場合、これ以上ラッパーへ再帰しない。
 
     Returns:
         `_protected_target` の表示名（symlink 解決後の実体 basename、または
@@ -548,16 +579,24 @@ def find_protected_write(command: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    command = strip_data_heredoc_bodies(command)
-    for segment in split_segments(tokenize(command)):
-        token = _write_target_token_in_segment(segment)
-        if token is None:
-            continue
-        repo_root = resolve_repo_root()
-        if repo_root is None:
-            return None
-        if _within_repo_root(token, repo_root):
-            return _protected_target(token)
+    segments = split_segments(tokenize(strip_data_heredoc_bodies(command)))
+    scope_certain = not any(_changes_working_directory(segment) for segment in segments)
+    for segment in segments:
+        for token in _write_target_tokens_in_segment(segment):
+            found = _protected_target(token)
+            if found is None:
+                continue
+            if not scope_certain:
+                return found
+            repo_root = resolve_repo_root()
+            if repo_root is None:
+                return None
+            if _within_repo_root(token, repo_root):
+                return found
+        if not _recursed:
+            wrapped = extract_shell_wrapper_command(segment)
+            if wrapped is not None and (found := find_protected_write(wrapped, _recursed=True)) is not None:
+                return found
     return None
 
 
@@ -639,7 +678,11 @@ def main() -> int:
         return 0
 
     tool_name = extract_raw_tool_name(data)
-    if normalize_tool_name(tool_name).lower() not in _BASH_TOOL_NAMES:
+    # 既知の「シェルではないツール」だけを skip する。ツール名を特定
+    # できない payload を対象外へ倒すと保護が丸ごと無効になる（S-8）。
+    if normalize_tool_name(tool_name).lower() not in _BASH_TOOL_NAMES and not is_unidentifiable_tool(
+        tool_name
+    ):
         return 0
 
     # コンテナキーは 1 つも取りこぼさず走査する（iter_bash_commands）。

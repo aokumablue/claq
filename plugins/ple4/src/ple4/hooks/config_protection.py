@@ -28,6 +28,7 @@ from ple4.hooks.hook_common import (
 from ple4.lib.harness import (
     extract_file_paths,
     extract_raw_tool_name,
+    is_unidentifiable_tool,
     iter_tool_input_containers,
     normalize_tool_name,
 )
@@ -503,7 +504,11 @@ def _block_reason(data: dict[str, Any]) -> str | None:
         例外は発生しません。
     """
     tool_name = extract_raw_tool_name(data)
-    if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES:
+    # 既知の「書き込みではないツール」だけを skip する。ツール名を特定
+    # できない payload を対象外へ倒すと保護が丸ごと無効になる（S-8）。
+    if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES and not is_unidentifiable_tool(
+        tool_name
+    ):
         return None
     # コンテナキーの全走査は iter_tool_input_containers（lib/harness.py）が
     # 単一情報源。フック側で走査を手書きすると片側だけ緩い状態が再発する。
