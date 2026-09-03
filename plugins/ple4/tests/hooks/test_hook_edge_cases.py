@@ -281,6 +281,8 @@ def _private_key_header(kind: str) -> str:
         "ENCRYPTED PRIVATE KEY",
         "PRIVATE KEY",
         "PGP PRIVATE KEY BLOCK",
+        "SSH2 PRIVATE KEY",
+        "SSH2 ENCRYPTED PRIVATE KEY",
     ],
 )
 def test_scan_secret_issues_detects_private_key_headers(kind: str) -> None:
@@ -300,10 +302,35 @@ def test_scan_secret_issues_detects_private_key_headers(kind: str) -> None:
     assert "private key" in issues[0]["message"]
 
 
+_SSH_COM_DELIMITER = "-" * 4
+_PPK_HEADER_PREFIX = "PuTTY-User-Key-File"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"{_SSH_COM_DELIMITER} BEGIN SSH2 PRIVATE KEY {_SSH_COM_DELIMITER}",
+        f"{_SSH_COM_DELIMITER} BEGIN SSH2 ENCRYPTED PRIVATE KEY {_SSH_COM_DELIMITER}",
+        f"{_PPK_HEADER_PREFIX}-2: ssh-rsa",
+        f"{_PPK_HEADER_PREFIX}-3: ssh-ed25519",
+    ],
+)
+def test_scan_secret_issues_detects_vendor_private_key_headers(line: str) -> None:
+    """ssh.com（4 ハイフン + 空白）と PuTTY .ppk のヘッダも検出されること。
+
+    PEM の 5 ハイフン交替では拾えない形なので別パターンで固定する。
+    ppk は版番号を文字クラスで書くため v2 / v3 の双方に一致する。
+    """
+    issues = commit_quality_scanner._scan_secret_issues(line, [line])
+
+    assert [issue["severity"] for issue in issues] == ["error"]
+
+
 @pytest.mark.parametrize(
     "line",
     [
         f"{_PEM_DELIMITER}BEGIN CERTIFICATE{_PEM_DELIMITER}",
+        f"{_PPK_HEADER_PREFIX} という形式がある",
         f"{_PEM_DELIMITER}BEGIN PUBLIC KEY{_PEM_DELIMITER}",
         "BEGIN PRIVATE KEY という表記について説明する",
         f"{_PEM_DELIMITER}BEGIN RSA PRIVATE KEY----",

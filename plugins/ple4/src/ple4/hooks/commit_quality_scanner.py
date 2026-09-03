@@ -76,9 +76,16 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     # `tests/hooks/test_hook_edge_cases.py` の自己走査テストが赤くなった）。
     # 同じ理由で、この付近のコメントにも完成形のヘッダを書かない。
     (
-        r"-----BEGIN (?:RSA |DSA |EC |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?[-]{5}",
+        r"-----BEGIN (?:RSA |DSA |EC |OPENSSH |ENCRYPTED |PGP |SSH2 |SSH2 ENCRYPTED )?"
+        r"PRIVATE KEY(?: BLOCK)?[-]{5}",
         "private key",
     ),
+    # ssh.com / Tectia 形式。デリミタが 4 ハイフンで、ヘッダ語との間に空白が入る
+    # ため上の交替では拾えない。
+    (r"[-]{4} BEGIN SSH2 (?:ENCRYPTED )?PRIVATE KEY [-]{4}", "SSH2 private key"),
+    # PuTTY の .ppk。版番号を文字クラスにするのは v3 を拾うためと、この行自身が
+    # 自分のパターンに一致しないようにするため（上のコメントと同じ理由）。
+    (r"PuTTY-User-Key-File-[0-9]", "PuTTY private key"),
 )
 
 
