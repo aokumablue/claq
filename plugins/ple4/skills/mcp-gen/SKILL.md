@@ -55,7 +55,7 @@ cp "$SKILL_DIR"/assets/template/README.md /abs/path/to/dest/README.md
 ```
 
 `pyproject.toml` は `pyproject.toml.template` の中身を読んで **Write ツールで作る**。
-Bash 経由は書き方次第で保護フックに止まる。Write は常に通る。
+Bash 経由の書き込みは `bash_config_protection` に、Write/Edit は `config_protection` に検査される。生成先が ple4 リポジトリ外なら通るが、`ignore` / `select` / `exclude` / `addopts` / `fail_under` や lint セクション見出しを含む内容は経路によらず deny される。
 
 ### 3. 編集する
 

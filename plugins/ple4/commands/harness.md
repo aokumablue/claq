@@ -1,6 +1,6 @@
 ---
 name: harness
-description: ハーネス監査→改善を一気通貫で実行。スコアカード取得→トップ3改善適用→改善後スコア報告。
+description: ハーネス監査を実行しトップ3改善案を提示する。`--apply` 指定時のみ改善適用と改善後スコア報告まで進む。
 command: /harness
 ---
 

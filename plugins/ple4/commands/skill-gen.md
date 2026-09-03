@@ -58,7 +58,7 @@ collect_skill_create_inputs "${COMMITS:-200}"
 4. **相互整合**: grader と comparator の期待値判定が食い違う場合は完了せず BLOCKED。どちらかの誤りが確定するまで採用判断に進まない
 5. **表現**: 実行していない eval を「実行済み」と書かない
 
-収束条件: 連続2回の反復で grader の新規不明瞭点ゼロ、または comparator の判定が連続2回同一勝者。ただし上記ゲートを満たさない反復は収束のカウント対象にしない。
+収束条件は `../skills/skill-tune/SKILL.md` Step 7 を単一情報源とする（本コマンドで再定義しない）。ただし上記ゲートを満たさない反復は収束のカウント対象にしない。`grader` は各反復の期待値合否（`summary.pass_rate`）を、`comparator` は勝者を供給する入力であって、収束の判定主体ではない。
 
 ## ステップ5: 知識カード生成（`--knowledge` 時のみ）
 

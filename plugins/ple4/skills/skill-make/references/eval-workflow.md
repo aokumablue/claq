@@ -73,6 +73,8 @@ Execute this task:
 
 2. **ベンチマークに集約する**
 
+comparator へ渡す前に、比較する 2 構成の出力を `<workspace>/compare-<ID>/candidate-a/` と `candidate-b/` へコピーし、A/B の割当をランダム化する。対応表は呼び出し元だけが保持する。`with_skill` / `without_skill` / `old_skill` のパスをそのまま渡すと、comparator は中身を読む前にパス文字列から provenance を知ってしまい盲検が成立しない（`../../../agents/comparator.md` の入力契約はこの形を FAIL として拒否する）。
+
 各 `grading.json` / `timing.json` を読み、`schemas.md`（同階層）のビューアー用スキーマに従って `benchmark.json` を作る。各構成の通過率・時間・トークン数を平均±標準偏差と差分付きでまとめる。`with_skill` を `without_skill` の前に並べる。
 
 3. **分析を入れる**

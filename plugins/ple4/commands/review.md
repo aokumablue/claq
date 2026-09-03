@@ -71,7 +71,7 @@ command: /review
 
 | 見つけたもの | kind | title に書くこと |
 |---|---|---|
-| 同種の指摘が 2 回目以降（`ple4_run ple4.mem.cli search "..."` で既存カードを確認） | `convention` | 明文化されていなかった守るべきルール |
+| 同種の指摘が 2 回目以降（重複確認は `ple4_run ple4.mem.cli search "..." --status pending` と `ple4_run ple4.mem.cli search "..."` の **2 回**引く。既定の `active` だけでは H-01 により自分が入れたカードが 1 件も出ない — `../skills/learn/SKILL.md` の重複確認手順） | `convention` | 明文化されていなかった守るべきルール |
 | レビューで見つけた、他所にも潜んでいそうな危険パターン | `pitfall` | 「X の書き方は Y の理由で危険」という回避条件 |
 | 「これは意図的にこうしている」と判明した既存設計 | `decision` | 選択と理由（次のレビューで誤指摘しないため） |
 
@@ -88,7 +88,7 @@ command: /review
 
 ```bash
 . "$HOME/.ple4/env.sh" || exit 127
-ple4_mem_learn --kind convention --scope repo --domain <domain> \
+ple4_mem_learn --key <既存カードと同じ slug> --kind convention --scope repo --domain <domain> \
   --title "<守るべきルールを 1 行で>" \
   --body "<なぜそのルールが要るか / 違反したときに何が起きるか>"
 ```

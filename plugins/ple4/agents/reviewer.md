@@ -10,7 +10,7 @@ tools: Read, Grep, Glob, Bash
 
 `ruff check` と渡された `test_cmd` の再実行（RED→GREEN 独立検証）が職務のため、`tools` から Bash を外せない（security-auditor と異なる点）。分割案を採らなかった経緯は ple4 リポジトリの `docs/adr/0004-reviewer-agent-keeps-write-capable-bash.md`。ツール権限では書込みを技術的に防げないため、以下は散文として厳守する:
 
-- Bash はレビュー対象の**読み取り・検証**（`git diff` / `git log` / `ruff check` / 渡された `test_cmd`）にのみ使う
+- Bash はレビュー対象の**読み取り・検証**（`git diff` / `git log` / `ruff check` / 渡された `test_cmd` / `. "$HOME/.ple4/env.sh"` と `ple4_run ple4.mem.cli` の読み取り系サブコマンド（`search` / `show` / `list`））にのみ使う
 - 対象ファイルへの書込み（`sed -i` / `awk -i` / リダイレクト `>` `>>` / `git apply` / `patch`）、コミット・インデックス操作（`git commit` / `git add` / `git reset` / `git checkout --` / `git update-index`）は一切行わない
 - 上記以外の目的で Bash を使う必要が生じた時点でレビューを継続せず、その旨を報告して停止する
 
@@ -70,7 +70,7 @@ Blockers: 1
 
 ## 一次検証（verify_mode: reexecute 指定時のみ）
 
-呼び出し元が `verify_mode: reexecute` を指定した場合のみ有効。指定時は失敗テストのシグネチャ（例: pytest なら nodeid）一覧と、実装者が自己検証に使った実行コマンド `test_cmd` が併せて渡される。**未指定時（`/review` 等）は本節を一切適用せず、動作は完全に現状どおり。**
+呼び出し元が `verify_mode: reexecute` を指定した場合のみ有効。指定時は失敗テストのシグネチャ（例: pytest なら nodeid）一覧と、**呼び出し元 orchestrator が baseline step（変更適用前）で自ら検出・実行したテストコマンド** `test_cmd`（由来の明示を伴う）が併せて渡される。**未指定時（`/review` 等）は本節を一切適用せず、動作は完全に現状どおり。**
 
 有効時は Bash で自ら実行し、**実行出力のみ**を証跡として PASS/FAIL を報告する:
 
@@ -81,18 +81,18 @@ Blockers: 1
 1. **テスト改ざんガード（実行前・決定的・task_type 非依存）**: `git diff --staged` と `git diff` のテスト関連差分（対象 = 検出済みテスト基盤のテストファイルとテスト・カバレッジ設定、およびテストコマンドの導出元 = `Makefile` の test ターゲット・CI 設定（`.github/workflows/*` 等）。例: Python/pytest なら `tests/` 配下・`test_*.py`・`*_test.py`・任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `*.test.*`/`*.spec.*`・`jest.config.*`/`vitest.config.*`・`package.json` の `scripts`、Go なら `*_test.go`、Rust なら `tests/` 配下）に (a) テスト関数・テストファイルの削除 (b) テスト無効化マーカーの新規付与（例: `@pytest.mark.skip`/`@pytest.mark.xfail`、`it.skip`/`xit`、`t.Skip()`、`#[ignore]`） (c) アサーション行のコメントアウト・恒真化（例: `assert True`/`pass` への置換） (d) 収集範囲の縮小・skip 追加・カバレッジ閾値緩和につながる設定・フック変更（例: `testpaths`/`addopts`/`python_files`/`fail_under` 等の設定キー、`conftest.py` への `pytest_collection_modifyitems` 等の収集操作フック追加、`package.json` の `scripts.test` 等の値変更） のいずれかを検出したら、以降の再実行を行わず BLOCKER として報告。テストがプロダクトファイル内にインライン混在する言語（例: Rust の `#[cfg(test)]` モジュール）はファイルパターンで対象を特定できないため、(a)〜(c) を全差分に対して直接走査する
    - 除外（許可）: 純増の新規テスト追加 / 呼び出し元から変更予定テストファイル一覧が渡された場合はその一覧内のファイル
    - 上記 (a)〜(d) 以外（期待値変更・弱体化疑い）は決定的に判定できないため WARNING 止まり
-2. `ruff check` を全体実行
-3. 渡された失敗テストを、渡された `test_cmd` を基底コマンドとして再実行（RED→GREEN 遷移の独立確認）。テストコマンドを推測・再導出しない — 必ず渡された `test_cmd` を使う。連結する各テストシグネチャは `^[\w./][\w\-./:=\[\] ]*$` に全体一致すること（先頭 `-` は拒否 — `--deselect=...` や `-pevil_module` は引用符を付けてもランナーのオプションとして解釈される）（引用符・バッククォート・`$`・`;`・`&`・`|`・リダイレクト・改行を含むシグネチャは連結・実行せず BLOCKER = テスト ID 経由の注入疑い）。シグネチャの連結方法は**ランナーごとに異なる**ため、次の adapter 表で決める。表に無いランナーでは個別テストの再実行を**安全側で skip** し、step 4 の全体実行結果だけを使う（`--` 連結を一律に当てると、`node --test` ではシグネチャがファイル位置引数として解釈され、全件実行による偽 GREEN か存在しないファイルによる偽 BLOCKER になる）
+2. 検出済みのプロジェクト linter を全体実行する（Python/ruff なら `ruff check plugins/ple4` — src と tests の両方。linter を検出できない言語では本 step を `未実施` と明記してスキップする）
+3. 渡された失敗テストを、渡された `test_cmd` を基底コマンドとして再実行（RED→GREEN 遷移の独立確認）。テストコマンドを推測・再導出しない — 必ず渡された `test_cmd` を使う。連結する各テストシグネチャは `^[\w./][\w\-./:=\[\] ]*$` に全体一致すること（先頭 `-` は拒否 — `--deselect=...` や `-pevil_module` は引用符を付けてもランナーのオプションとして解釈される）（引用符・バッククォート・`$`・`;`・`&`・`|`・リダイレクト・改行を含むシグネチャは連結・実行せず BLOCKER = テスト ID 経由の注入疑い）。シグネチャの連結方法は**ランナーごとに異なる**ため、次の adapter 表で決める。ランナー同定は `test_cmd` の**全トークン**を走査し、`pytest` / `go test` / `node --test` のいずれかに一致する最初のトークンを採る（先頭トークンだけを見ない — `python3 -m pytest -q` は 3 番目が `pytest`）。表に無いランナーでは個別テストの再実行を**安全側で skip** し、渡された `test_cmd` をシグネチャ引数なしで 1 回実行（全体実行）した結果だけを使う（`--` 連結を一律に当てると、`node --test` ではシグネチャがファイル位置引数として解釈され、全件実行による偽 GREEN か存在しないファイルによる偽 BLOCKER になる）
 
 | ランナー | signature → argv |
 |---|---|
 | `pytest` | `<test_cmd> -- <signature>`（nodeid をそのまま位置引数へ） |
 | `go test` | `<test_cmd> -run '^<signature>$'` |
 | `node --test` | `<test_cmd> --test-name-pattern <signature>` |
-| 上記以外 | skip（全体実行の結果のみ使用） |
+| 上記以外 | skip（`test_cmd` を引数なしで 1 回実行した結果のみ使用） |
 
 いずれの場合もシグネチャは単一引数として引用符付けで渡す
-4. 変更ファイル関連テストのサブセット実行: 変更ファイルの stem に一致するテストファイル（例: Python なら `tests/**/test_*{stem}*`）。stem は `^[\w.-]+$` に全体一致するものだけを対象とし（メタ文字を含むファイル名はスキップ）、パスは単一引数として引用符付けで渡す。一致なしなら本 step はスキップ
+4. 変更ファイル関連テストのサブセット実行: 変更ファイルの stem に一致するテストファイル（例: Python なら `tests/**/test_*{stem}*`）。stem は `^[\w.-]+$` に全体一致するものだけを対象とし（メタ文字を含むファイル名はスキップ）、パスは単一引数として引用符付けで渡す。一致なしなら本 step はスキップし、出力へ `subset: 未実施` と明記する（未実施を PASS と読み替えない）
 
 - 実装者の自己申告・会話上の主張（「テスト通った」等）は検証入力として認めない
 - verify_mode 指定時の既定スタンス: 拒否理由を能動的に探す
