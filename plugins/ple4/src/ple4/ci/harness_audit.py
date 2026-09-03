@@ -306,7 +306,7 @@ def _consumer_quality_gates_checks(
             "pass": (
                 isinstance(package_json.get("scripts"), dict) and isinstance(package_json["scripts"].get("test"), str)
             )
-            or has_python_tests(root_dir)
+            or has_python_tests(root_dir, minimum=1)
             or has_file_with_extension(root_dir, ".", [".spec.js", ".spec.ts", ".test.ts"])
             or count_files(root_dir, "tests", ".test.js") > 0,
             "fix": (
@@ -357,7 +357,16 @@ def _consumer_memory_and_eval_checks(root_dir: str | Path) -> list[dict[str, Any
             "scopes": ["repo"],
             "path": "evals/",
             "description": "プロジェクトが評価テストまたは複数の自動テストを持つ",
-            "pass": count_files(root_dir, "evals", None) > 0 or count_files(root_dir, "tests", ".test.js") >= 3,
+            # 「複数の自動テスト」の側が JS 規約専用だったため、pytest だけの
+            # リポジトリは `evals/` が無いと 0 点になっていた（`consumer-test-suite`
+            # と同型の欠陥）。閾値は JS 側と揃えて 3 件。判定順は
+            # `consumer-test-suite` と同じ理由で、短絡する has_python_tests を
+            # 全数え上げの count_files より前に置く。`evals/` 側を先頭に
+            # 残すのは、この判定を落とすリポジトリには `evals/` が無く即 0 が
+            # 返るため——`evals/` を持つリポジトリでは同ツリーを全数え上げする。
+            "pass": count_files(root_dir, "evals", None) > 0
+            or has_python_tests(root_dir, minimum=3)
+            or count_files(root_dir, "tests", ".test.js") >= 3,
             "fix": "Add eval fixtures or at least a few focused automated tests for critical flows.",
         },
     ]

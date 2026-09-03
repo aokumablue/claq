@@ -78,15 +78,25 @@ _VENDOR_DIR_NAMES = frozenset({".git", ".venv", "venv", "node_modules", "vendor"
 """テスト検出時に降りないディレクトリ名。依存ツリー同梱のテストを除くため。"""
 
 
-def has_python_tests(root_dir: str | Path) -> bool:
-    """pytest / unittest の命名規約に沿ったテストファイルがあるかを調べる。
+def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
+    """pytest / unittest の命名規約に沿ったテストファイルが ``minimum`` 件以上あるかを調べる。
 
     拡張子だけで判定する ``has_file_with_extension`` では Python のテストを
     拾えない。規約が接頭辞（``test_*.py``）と接尾辞（``*_test.py``）に割れて
     おり、``.py`` で照合すると全 Python ファイルが一致してしまうためです。
     JS/TS 規約しか見ていなかったころは、pytest だけを持つ Python
-    リポジトリが `consumer-test-suite` で 0 点になり「テストを追加せよ」と
-    助言されていました。
+    リポジトリが `consumer-test-suite`（1 件以上）でも
+    `consumer-eval-coverage`（複数件）でも 0 点になり「テストを追加せよ」と
+    助言されていました（実測: 2,466 件の pytest を持つ本リポジトリでも
+    `evals/` が無ければ後者が 0 点）。
+
+    ``minimum`` に既定値を置かないのは、閾値を呼び出し側に必ず宣言させる
+    ためです。既定値つきの引数は「1 件でよい」旧挙動を暗黙に温存する経路に
+    なり、閾値の異なる 2 つの検査を同じ関数へ寄せた意味を失います。
+
+    ``minimum`` 件に達した時点で打ち切るのは、`consumer-test-suite` の
+    判定順コメントが定める性能契約（テストを持つリポジトリを全数え上げ
+    しない）を数え上げ版でも守るためです。
 
     `_VENDOR_DIR_NAMES` を枝刈りするのは、依存ツリーへ同梱された
     third-party のテスト（`.venv/lib/**/test_*.py` 等）を「このプロジェクトの
@@ -96,14 +106,18 @@ def has_python_tests(root_dir: str | Path) -> bool:
 
     Args:
         root_dir: 走査するルートディレクトリ。
+        minimum: 合格に必要なテストファイルの最小件数。呼び出し側は 1 以上を渡す。
+            検証はせず、0 以下でも「0 件で True」にはならない（件数を加算した
+            後にしか閾値を見ないため）。
 
     Returns:
-        プロジェクト自身のテストファイルが 1 つでもあれば True。
+        プロジェクト自身のテストファイルが ``minimum`` 件以上あれば True。
 
     Raises:
         例外は発生しません（`OSError` は該当ディレクトリのスキップとして扱う）。
     """
     stack = [Path(root_dir)]
+    found = 0
     while stack:
         try:
             with os.scandir(stack.pop()) as entries:
@@ -114,7 +128,9 @@ def has_python_tests(root_dir: str | Path) -> bool:
                     elif entry.name.endswith(".py") and (
                         entry.name.startswith("test_") or entry.name.endswith("_test.py")
                     ):
-                        return True
+                        found += 1
+                        if found >= minimum:
+                            return True
         except OSError:
             continue
     return False

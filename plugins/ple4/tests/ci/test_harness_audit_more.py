@@ -156,7 +156,7 @@ def test_has_python_tests_skips_vendor_directories(tmp_path: Path) -> None:
     vendored.mkdir(parents=True)
     (vendored / "test_parser.py").write_text("def test_x(): pass\n", encoding="utf-8")
 
-    assert not harness_audit.has_python_tests(tmp_path)
+    assert not harness_audit.has_python_tests(tmp_path, minimum=1)
 
 
 def test_has_python_tests_skips_unreadable_directories(tmp_path: Path) -> None:
@@ -165,26 +165,45 @@ def test_has_python_tests_skips_unreadable_directories(tmp_path: Path) -> None:
     blocked.mkdir()
     blocked.chmod(0o000)
     try:
-        assert harness_audit.has_python_tests(tmp_path) is False
+        assert harness_audit.has_python_tests(tmp_path, minimum=1) is False
     finally:
         blocked.chmod(0o700)
 
 
 def test_has_python_tests_recognizes_both_pytest_conventions(tmp_path: Path) -> None:
     """`test_*.py` と `*_test.py` の双方を検出し、通常の .py では発火しない。"""
-    assert not harness_audit.has_python_tests(tmp_path / "missing")
+    assert not harness_audit.has_python_tests(tmp_path / "missing", minimum=1)
 
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
-    assert not harness_audit.has_python_tests(tmp_path)
+    assert not harness_audit.has_python_tests(tmp_path, minimum=1)
 
     (tmp_path / "src" / "test_app.py").write_text("def test_x(): pass\n", encoding="utf-8")
-    assert harness_audit.has_python_tests(tmp_path)
+    assert harness_audit.has_python_tests(tmp_path, minimum=1)
 
     suffix_root = tmp_path / "suffix"
     (suffix_root / "pkg").mkdir(parents=True)
     (suffix_root / "pkg" / "app_test.py").write_text("def test_x(): pass\n", encoding="utf-8")
-    assert harness_audit.has_python_tests(suffix_root)
+    assert harness_audit.has_python_tests(suffix_root, minimum=1)
+
+
+def test_has_python_tests_counts_until_minimum_is_reached(tmp_path: Path) -> None:
+    """件数が `minimum` に届くまでは False を返し、届いた時点で True になる。
+
+    1 件で打ち切っていた頃の挙動が既定値として残っていると、閾値 3 を要求する
+    `consumer-eval-coverage` が 1 件のリポジトリで通ってしまう。
+    """
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    for index in range(2):
+        (pkg / f"test_mod{index}.py").write_text("def test_x(): pass\n", encoding="utf-8")
+
+    assert harness_audit.has_python_tests(tmp_path, minimum=2)
+    assert not harness_audit.has_python_tests(tmp_path, minimum=3)
+
+    (pkg / "test_mod2.py").write_text("def test_x(): pass\n", encoding="utf-8")
+
+    assert harness_audit.has_python_tests(tmp_path, minimum=3)
 
 
 def test_consumer_test_suite_passes_for_pytest_only_project(
@@ -203,6 +222,59 @@ def test_consumer_test_suite_passes_for_pytest_only_project(
 
     check = next(c for c in report["checks"] if c["id"] == "consumer-test-suite")
     assert check["pass"] is True
+
+
+def _eval_coverage_pass(tmp_path: Path) -> bool:
+    """`consumer-eval-coverage` の合否だけを取り出す。"""
+    report = harness_audit.build_report("repo", root_dir=tmp_path, target_mode="consumer")
+    return next(c for c in report["checks"] if c["id"] == "consumer-eval-coverage")["pass"]
+
+
+def test_consumer_eval_coverage_uses_python_tests_at_the_js_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pytest だけのリポジトリでも JS と同じ 3 件で `consumer-eval-coverage` が通る。
+
+    「複数の自動テスト」の側が `tests/*.test.js` >= 3 しか見ていなかったため、
+    2,466 件の pytest を持つリポジトリでも `evals/` が無ければ 0 点だった。
+    閾値は JS 側と揃えてあり、2 件では通らないことまで固定する。
+
+    HOME を tmp 配下へ固定するのは、`find_plugin_install` が実 HOME の
+    プラグイン導入状態を読んで結果が開発者の環境に依存するのを防ぐため。
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    for index in range(2):
+        (tests_dir / f"test_mod{index}.py").write_text("def test_x(): pass\n", encoding="utf-8")
+
+    assert _eval_coverage_pass(tmp_path) is False
+
+    (tests_dir / "test_mod2.py").write_text("def test_x(): pass\n", encoding="utf-8")
+
+    assert _eval_coverage_pass(tmp_path) is True
+
+
+def test_consumer_eval_coverage_fails_without_tests_or_evals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """テストも `evals/` も無いリポジトリは従来どおり落ちる（判定の緩みすぎ防止）。"""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+
+    assert _eval_coverage_pass(tmp_path) is False
+
+
+def test_consumer_eval_coverage_still_passes_via_evals_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Python テストが 1 件も無くても `evals/` 経路は従来どおり通る（非退行）。"""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "evals").mkdir()
+    (tmp_path / "evals" / "case.yaml").write_text("name: case\n", encoding="utf-8")
+
+    assert _eval_coverage_pass(tmp_path) is True
 
 
 def test_find_plugin_install_without_home_still_searches_root(
