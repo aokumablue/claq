@@ -16,10 +16,10 @@ commit 検出は `hook_common.tokenize`/`split_segments`（`block_no_verify` と
 必要があります）。ステージ済みファイルは従来どおり INDEX
 （`git show :path`）から読みます。
 
-シークレット検出はテキストファイルであれば nosec・ファイルサイズに関わらず
-全体を走査します（サイズによる打ち切りはありません）。バイナリ判定された
-ファイルは lint 抑制に加え secret scan もスキップし、severity `warning` の
-痕跡を残します（詳細は `commit_quality_scanner` のモジュール docstring）。
+シークレット検出は nosec・ファイルサイズに関わらず全体を走査します
+（サイズによる打ち切りはありません）。バイナリ判定されたファイルは lint を
+抑制しますが secret scan は行い、抽出した印字可能文字列へ同じパターンを
+当てます（ADR-0013。詳細は `commit_quality_scanner` のモジュール docstring）。
 
 データとして書かれた heredoc 本文は、判定へ渡す前に
 `hook_common.strip_data_heredoc_bodies` で落とします（ADR-0017）。`evaluate()` の
