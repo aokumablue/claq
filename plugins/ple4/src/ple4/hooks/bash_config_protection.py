@@ -557,10 +557,9 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
 
     ただしコマンドが `cd` 等でカレントディレクトリを移動する場合、cwd 基準の
     相対パス解決は実行時の位置とずれるため repo スコープ判定を信用できない。
-    その場合は保護対象 basename のヒットをそのまま deny する
-    （実測: ``cd plugins && printf x > ../ruff.toml`` が exit 0 だった。
-    ADR-0002 のとおり、判定できない状態は誤検出側へ倒す）。`cd` を跨いだ
-    symlink 解決のずれは同じ理由で非目標。
+    その場合は保護対象 basename のヒットをそのまま deny する（ADR-0018。
+    実測: ``cd plugins && printf x > ../ruff.toml`` が exit 0 だった）。
+    `cd` を跨いだ symlink 解決のずれは同じ理由で非目標。
 
     既知シェルの ``-c`` へ渡された文字列コマンドへは 1 段だけ再帰する
     （実測: ``bash -c 'printf x > ruff.toml'`` が exit 0 だった。`block_no_verify`
