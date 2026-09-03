@@ -56,10 +56,11 @@ def _write(file_path: Any) -> dict[str, Any]:
 # ないので剥がしてはならない（ADR-0017 の除去しない条件 1 と同じ理由）。
 _BYPASS_HEREDOC = ". /dev/stdin <<'EOF'\n{body}\nEOF"
 _SOURCE_HEREDOC = "source /dev/stdin <<'EOF'\n{body}\nEOF"
+# なお、クォートで包んだコマンド置換（``eval "$(cat <<'EOF' ...)"``）は全体が
+# 1 トークンになるため検出できない。ADR-0002 が「コマンド置換・変数展開」を
+# 非目標として明記している範囲であり、下の block 一覧には載せない。
 _EVAL_HEREDOC = "eval $(cat <<'EOF'\n{body}\nEOF\n)"
-# クォートで包んだコマンド置換（``eval "$(cat <<'EOF' ...)"``）は 1 トークンに
-# なるため検出できない。ADR-0002 が「コマンド置換・変数展開」を非目標として
-# 明記している範囲であり、本ファイルの block 一覧には載せない。
+
 # 本文がデータのまま終わる形。ADR-0017 のとおり allow でなければならない。
 _DATA_HEREDOC = "cat > note.md <<'EOF'\n{body}\nEOF"
 
