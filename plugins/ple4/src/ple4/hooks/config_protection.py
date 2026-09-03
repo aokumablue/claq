@@ -40,7 +40,10 @@ from ple4.lib.harness import (
 _WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
 
 # apply_patch のパッチがパース不能なときの fail-closed 理由。
-_UNPARSEABLE_PATCH_MESSAGE = "BLOCKED: Could not determine target files from patch input."
+# 対象ファイルを確定できない入力全般に出す fail-closed の理由。構造化パッチ本文が
+# 読めない場合だけでなく、`file_path` がパスとして解釈できない値（数値・入れ子 dict）
+# の場合もここに来るため、文言を「パッチ」に限定しない。
+_UNDECIDABLE_TARGET_MESSAGE = "BLOCKED: Could not determine target files from tool input."
 
 PROTECTED_FILES = {
     ".eslintrc",
@@ -468,15 +471,15 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
         container: extract_tool_input 相当の 1 コンテナ値。
 
     Returns:
-        ブロック理由。保護対象でなければ None。パッチ判定不能時は
-        fail-closed メッセージ。
+        ブロック理由。保護対象でなければ None。対象ファイルを確定できない
+        場合は fail-closed メッセージ。
 
     Raises:
         例外は発生しません。
     """
     file_paths = _paths_from_container(tool_name, container)
     if file_paths is None:
-        return _UNPARSEABLE_PATCH_MESSAGE
+        return _UNDECIDABLE_TARGET_MESSAGE
     for file_path in file_paths:
         protected_segment = protected_path_segment(file_path)
         if protected_segment is not None:

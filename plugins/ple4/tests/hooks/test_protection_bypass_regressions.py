@@ -153,6 +153,28 @@ _ALLOWED_CASES = [
 ]
 
 
+# ハーネスごとの payload 形状（`lib/harness.py` の `_TOOL_NAME_MAP` /
+# `INPUT_CONTAINER_KEYS` に対応）。ツール名を特定できない payload を検査側へ倒す
+# 変更（S-8）が、Claude Code 以外のハーネスの通常操作を巻き込んでいないことを
+# 固定する。ここが緑でないと「Claude Code では動くが Copilot では全部ブロック」
+# という片側だけの退行が出荷される。
+_HARNESS_CASES = [
+    ("copilot bash 危険", "bash_config_protection", {"tool_name": "bash", "toolArgs": json.dumps({"command": _PROTECTED_WRITE})}, 2),
+    ("copilot bash 通常", "bash_config_protection", {"tool_name": "bash", "toolArgs": json.dumps({"command": "printf x > notes.txt"})}, 0),
+    ("copilot write 危険", "config_protection", {"tool_name": "write", "toolArgs": json.dumps({"file_path": "ruff.toml", "content": "x"})}, 2),
+    ("copilot read 通常", "config_protection", {"tool_name": "read", "toolArgs": json.dumps({"file_path": "ruff.toml"})}, 0),
+    ("copilot bnv 危険", "block_no_verify", {"tool_name": "bash", "toolArgs": json.dumps({"command": _NO_VERIFY})}, 2),
+    ("copilot bnv 通常", "block_no_verify", {"tool_name": "bash", "toolArgs": json.dumps({"command": "git commit -m x"})}, 0),
+    ("grok 端末 危険", "bash_config_protection", {"tool_name": "run_terminal_command", "toolInput": {"command": _PROTECTED_WRITE}}, 2),
+    ("grok 端末 通常", "bash_config_protection", {"tool_name": "run_terminal_command", "toolInput": {"command": "ls -la"}}, 0),
+    ("grok 置換 危険", "config_protection", {"tool_name": "search_replace", "toolInput": {"file_path": "ruff.toml"}}, 2),
+    ("grok 読取 通常", "config_protection", {"tool_name": "read_file", "toolInput": {"file_path": "ruff.toml"}}, 0),
+    ("grok 一覧 通常", "config_protection", {"tool_name": "list_dir", "toolInput": {"file_path": "ruff.toml"}}, 0),
+    ("codex パッチ 危険", "config_protection", {"tool_name": "apply_patch", "tool_input": {"input": "*** Update File: ruff.toml\n@@\n-a\n+b"}}, 2),
+    ("codex パッチ 通常", "config_protection", {"tool_name": "apply_patch", "tool_input": {"input": "*** Update File: notes.txt\n@@\n-a\n+b"}}, 0),
+]
+
+
 @pytest.fixture(autouse=True)
 def _repo_scope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """cwd と repo ルートを使い捨てディレクトリへ固定する。
@@ -217,3 +239,25 @@ def test_ordinary_command_is_allowed(
         monkeypatch: pytest の monkeypatch フィクスチャ。
     """
     assert _run(hook, payload, monkeypatch) == 0, label
+
+
+@pytest.mark.parametrize(
+    ("label", "hook", "payload", "expected"), _HARNESS_CASES, ids=[case[0] for case in _HARNESS_CASES]
+)
+def test_other_harness_payload_shapes(
+    label: str, hook: str, payload: dict[str, Any], expected: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claude Code 以外のハーネスの payload 形状でも判定が変わらないこと。
+
+    ツール名を特定できない payload を検査側へ倒した（S-8）ため、Copilot CLI の
+    lowercase runtime 名・Grok の固有名・Codex の apply_patch が「未知」と扱われて
+    通常操作まで塞がれていないかを、危険側と通常側の両方で固定する。
+
+    Args:
+        label: ケースの識別ラベル（失敗時の可読性のため）。
+        hook: 対象フック名。
+        payload: フックへ渡す payload。
+        expected: 期待する終了コード。
+        monkeypatch: pytest の monkeypatch フィクスチャ。
+    """
+    assert _run(hook, payload, monkeypatch) == expected, label
