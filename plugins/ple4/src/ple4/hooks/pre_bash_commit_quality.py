@@ -44,6 +44,7 @@ from pathlib import Path
 
 from ple4.hooks.commit_quality_scanner import (
     find_file_issues,
+    new_secret_scan_deadline,
     should_lint_file,
     should_scan_secrets,
 )
@@ -613,7 +614,9 @@ def _partition_commit_all_files(
     return index_files, worktree_files
 
 
-def _count_file_issues(files_to_check: list[str], repo_root: Path | None = None) -> tuple[int, int, int, int]:
+def _count_file_issues(
+    files_to_check: list[str], repo_root: Path | None = None, *, deadline: float
+) -> tuple[int, int, int, int]:
     """チェック対象ファイルの問題数を集計します。
 
     各ファイルに対して find_file_issues を呼び出し、severity 別に問題数を返します。
@@ -624,6 +627,10 @@ def _count_file_issues(files_to_check: list[str], repo_root: Path | None = None)
         repo_root: 指定すると各ファイルを作業ツリーから読みます
             （`git commit -a` の未ステージ変更用）。None なら INDEX から
             読みます。
+        deadline: secret scan の実時間予算を表す `_monotonic()` 基準の時刻です。
+            本関数はフック 1 回につき INDEX 用・作業ツリー用の 2 回呼ばれるため、
+            ここで deadline を作ると予算が 2 本になります。必ず
+            `_evaluate_confirmed_commit` が起動ごとに 1 度だけ作った値を渡します。
 
     Returns:
         (total_issues, error_count, warning_count, info_count) のタプルを返します。
@@ -638,7 +645,7 @@ def _count_file_issues(files_to_check: list[str], repo_root: Path | None = None)
     severity_label = {"error": "ERROR", "warning": "WARNING", "info": "INFO"}
 
     for file_path in files_to_check:
-        file_issues = find_file_issues(file_path, repo_root=repo_root)
+        file_issues = find_file_issues(file_path, repo_root=repo_root, deadline=deadline)
         if not file_issues:
             continue
         log(f"\n[FILE] {file_path}")
@@ -749,6 +756,8 @@ def _collect_worktree_issues(
     error_count: int,
     warning_count: int,
     info_count: int,
+    *,
+    deadline: float,
 ) -> tuple[int, int, int, int] | None:
     """`git commit -a` の作業ツリー対象ファイルの問題数を集計に加算します。
 
@@ -770,6 +779,9 @@ def _collect_worktree_issues(
         error_count: 現在のエラー数です。
         warning_count: 現在の警告数です。
         info_count: 現在の info 数です。
+        deadline: secret scan の実時間予算を表す `_monotonic()` 基準の時刻です。
+            INDEX 側の集計と同じ 1 本の予算を引き継ぐため、呼び出し元から
+            そのまま受け取って `_count_file_issues` へ渡します。
 
     Returns:
         (total_issues, error_count, warning_count, info_count) の更新後
@@ -785,7 +797,9 @@ def _collect_worktree_issues(
     if repo_root is None:
         return None
 
-    wt_total, wt_error, wt_warning, wt_info = _count_file_issues(worktree_targets, repo_root=repo_root)
+    wt_total, wt_error, wt_warning, wt_info = _count_file_issues(
+        worktree_targets, repo_root=repo_root, deadline=deadline
+    )
     return (
         total_issues + wt_total,
         error_count + wt_error,
@@ -837,9 +851,22 @@ def _evaluate_confirmed_commit(raw_input: str, command: str, commit_args: list[s
         index_targets = _scan_targets(index_files)
         worktree_targets = _scan_targets(worktree_files)
 
-        total_issues, error_count, warning_count, info_count = _count_file_issues(index_targets)
+        # secret scan の実時間予算はフック 1 回の起動につき 1 本。ここで 1 度だけ
+        # 作り、INDEX 側・作業ツリー側の双方の集計へ同じ値を渡す。ファイル単位や
+        # _count_file_issues 単位で作ると、ファイル数（あるいは 2）倍の実時間を
+        # 許してしまい hook timeout（30秒）に達しうる。
+        secret_scan_deadline = new_secret_scan_deadline()
+
+        total_issues, error_count, warning_count, info_count = _count_file_issues(
+            index_targets, deadline=secret_scan_deadline
+        )
         worktree_result = _collect_worktree_issues(
-            worktree_targets, total_issues, error_count, warning_count, info_count
+            worktree_targets,
+            total_issues,
+            error_count,
+            warning_count,
+            info_count,
+            deadline=secret_scan_deadline,
         )
         if worktree_result is None:
             log("[Hook] ERROR: could not resolve repo root for `git commit -a` worktree scan.")

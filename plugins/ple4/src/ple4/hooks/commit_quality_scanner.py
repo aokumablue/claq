@@ -9,14 +9,21 @@
 
 シークレット検出はテキストファイルであれば nosec・ファイルサイズに関わらず
 全体を走査します（サイズによる打ち切りは行いません。A-02 対応）。バイナリ
-判定されたファイルは secret scan 自体をスキップし、severity `warning` の
-痕跡 issue を残します（severity `error` にはしません。deny は画像 commit を
-ブロックし、ユーザーの明示要件に反するため）。走査量に上限を設けないと
+判定されたファイルも走査対象で、`_extract_printable_runs` が抽出した印字可能
+文字列を擬似的な行として同じパターンを当てます（ADR-0013。以前は secret scan
+自体をスキップしており、先頭に NUL を 1 バイト混ぜるだけで検査を回避できた）。
+走査量に上限を設けないと
 `pre_bash_commit_quality` の hook timeout（30秒）に達し、host がフックを
 キャンセルして続行する（fail-open）ため commit 全体の secret scan が無検査に
 なりうる、という 1MiB cap より悪いリスクがあります。そのため実時間バジェット
 （`_SECRET_SCAN_TIME_BUDGET_SECONDS`）を設け、超過したテキストファイルは
 `scan_error`（severity `error`、fail-closed）として扱います。
+
+このバジェットは**フック 1 回の起動全体で共有する 1 本の予算**です
+（`new_secret_scan_deadline` で起動ごとに 1 度だけ deadline を作り、
+`find_file_issues` 経由で `_scan_secret_issues` へ渡します）。ファイル単位に
+すると staged が N 件あるとき N 倍の実時間を許してしまい、1 ファイルあたりは
+予算内でも累積で hook timeout に達するため、上記の目的を果たせません。
 """
 
 from __future__ import annotations
@@ -37,9 +44,16 @@ _BINARY_STRINGS_RE = re.compile(
     rf"[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]{{{_BINARY_STRINGS_MIN_LENGTH},}}"
 )
 
-# secret scan 1 回あたりに許す実時間予算（秒）。pre_bash_commit_quality の
-# hooks.json timeout（30秒）より十分小さく取り、予算超過を scan_error
-# （fail-closed）として検知してからホスト側 timeout に達しないようにする。
+# フック 1 回の起動で secret scan 全体に許す実時間予算（秒）。ファイル数に
+# よらず 1 本で、pre_bash_commit_quality の hooks.json timeout（30秒）より
+# 十分小さく取り、予算超過を scan_error（fail-closed）として検知してから
+# ホスト側 timeout に達しないようにする。
+#
+# この予算が支配するのはパターン走査の実時間だけで、ファイル内容の読み取り
+# （`git show` は 1 ファイルにつき 1 回・timeout=5 秒）は課金対象外。よって
+# 「30 秒 − 10 秒 = 20 秒あれば読み取りは必ず収まる」とは言えず、ファイル数が
+# 多いコミットでは読み取り側が hook timeout を支配しうる。読み取りを同じ予算へ
+# 載せるかは本予算とは別の未対応論点。
 _SECRET_SCAN_TIME_BUDGET_SECONDS = 10.0
 
 # 予算チェックの頻度（行数）。毎行 time.monotonic() を呼ぶコストを避けつつ、
@@ -106,6 +120,25 @@ def _monotonic() -> float:
         例外は発生しません。
     """
     return time.monotonic()
+
+
+def new_secret_scan_deadline() -> float:
+    """secret scan の実時間予算 1 本分の deadline を作ります。
+
+    フック 1 回の起動につき 1 度だけ呼び、返り値を全ファイルの
+    `find_file_issues` へ渡してください。ファイルごとに呼ぶと予算が
+    ファイル数分だけ増え、累積で hook timeout に達しうる状態へ戻ります。
+
+    Args:
+        なし
+
+    Returns:
+        `_monotonic()` 基準で走査を打ち切るべき時刻（秒）。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _monotonic() + _SECRET_SCAN_TIME_BUDGET_SECONDS
 
 
 class SecretScanBudgetExceeded(Exception):
@@ -264,9 +297,9 @@ def should_scan_secrets(file_path: str) -> bool:
     - パッケージマネージャのロックファイル（内容が長大かつ生成物のため）
     - 圧縮・生成物（`*.min.js` / `*.min.css`）
 
-    ファイルサイズによる除外は行いません。テキストファイルは全体を走査し、
-    バイナリ判定されたファイルのみ `find_file_issues` 側で secret scan 自体を
-    スキップします（severity `warning` の痕跡を残す。A-02 対応）。
+    ファイルサイズによる除外は行いません（A-02 対応）。バイナリ判定による
+    除外も行いません —— バイナリは `find_file_issues` 側で印字可能文字列を
+    抽出した上で同じパターンを当てます（ADR-0013）。
 
     Args:
         file_path: 判定対象のファイルパスです。
@@ -346,19 +379,24 @@ def _scan_lint_issues(lines: list[str]) -> list[dict]:
     return issues
 
 
-def _scan_secret_issues(content: str, lines: list[str], *, report_lines: bool = True) -> list[dict]:
+def _scan_secret_issues(
+    content: str, lines: list[str], *, deadline: float, report_lines: bool = True
+) -> list[dict]:
     """ファイル内容からハードコードされたシークレットを検出します。
 
-    呼び出し元（`find_file_issues`）はバイナリ判定されたファイルではこの
-    関数を呼びません。テキストファイルは `# nosec`・ファイルサイズに関わらず
-    全体を走査します（サイズによる打ち切りは行いません。A-02 対応。1MiB 境界
-    より後ろに置かれた secret も検出します）。
+    バイナリ判定されたファイルでも呼び出し元（`find_file_issues`）はこの関数を
+    呼びます。その場合は行分割の代わりに `_extract_printable_runs` の抽出結果が
+    擬似的な行として渡されます（ADR-0013）。テキストファイルは `# nosec`・
+    ファイルサイズに関わらず全体を走査します（サイズによる打ち切りは行いません。
+    A-02 対応。1MiB 境界より後ろに置かれた secret も検出します）。
 
     走査量に上限を設けないと `pre_bash_commit_quality` の hook timeout に
-    達しうるため、実時間バジェット（`_SECRET_SCAN_TIME_BUDGET_SECONDS`）を
+    達しうるため、呼び出し元から渡された `deadline` を
     `_SECRET_SCAN_BUDGET_CHECK_INTERVAL` 行ごとに確認します。超過した場合は
     `SecretScanBudgetExceeded` を送出し、呼び出し元の既存の例外ガードで
-    `scan_error`（severity `error`、fail-closed）として扱われます。
+    `scan_error`（severity `error`、fail-closed）として扱われます。deadline を
+    この関数で作らないのは、それがファイル単位の予算になり、フック 1 回で
+    ファイル数分の実時間を許してしまうためです。
 
     Args:
         content: 検査対象のデコード済みファイル内容です（未使用ですが、
@@ -366,6 +404,8 @@ def _scan_secret_issues(content: str, lines: list[str], *, report_lines: bool = 
         lines: 走査単位のリストです。テキストファイルでは `content` を改行で
             分割済みの行リスト（呼び出し側 `find_file_issues` が lint スキャンと
             共有する分割結果）、バイナリでは `_extract_printable_runs` の抽出結果です。
+        deadline: 走査を打ち切る `_monotonic()` 基準の時刻です。フック 1 回の
+            起動全体で共有する 1 本の予算（`new_secret_scan_deadline`）を渡します。
         report_lines: 走査単位が実際の行に対応するなら True。バイナリの抽出
             文字列は行に対応しないため False を渡し、行番号を報告しません。
 
@@ -375,8 +415,6 @@ def _scan_secret_issues(content: str, lines: list[str], *, report_lines: bool = 
     Raises:
         SecretScanBudgetExceeded: 実時間バジェットを超過した場合。
     """
-    deadline = _monotonic() + _SECRET_SCAN_TIME_BUDGET_SECONDS
-
     issues = []
     for index, line in enumerate(lines):
         if index % _SECRET_SCAN_BUDGET_CHECK_INTERVAL == 0 and _monotonic() > deadline:
@@ -400,7 +438,7 @@ def _scan_secret_issues(content: str, lines: list[str], *, report_lines: bool = 
     return issues
 
 
-def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[dict]:
+def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline: float) -> list[dict]:
     """ファイル内容から代表的な問題を検出します。
 
     `repo_root` が None（既定）なら INDEX（`git show :path`、
@@ -434,10 +472,19 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
     失敗は warning に留めます）。黙って issue が消える（＝検査したのに
     問題なしと区別が付かない）ことはありません。
 
+    secret scan の実時間予算はフック 1 回の起動全体で 1 本です。呼び出し元は
+    `new_secret_scan_deadline()` を起動ごとに 1 度だけ呼び、その値を全ファイルへ
+    `deadline` として渡してください。ファイルごとに新しい deadline を作ると予算が
+    ファイル数分に増え、累積で hook timeout に達しうる状態へ戻ります。`deadline`
+    に既定値を持たせないのはこのためです —— 既定値があると、渡し忘れた呼び出し元が
+    ファイル単位予算へ静かに退行し、型・lint・テストのいずれでも検知できません。
+
     Args:
         file_path: 調査対象のファイルパスです。
         repo_root: 指定すると作業ツリーから読みます（`git commit -a` の
             未ステージ変更用）。None なら INDEX から読みます。
+        deadline: secret scan を打ち切る `_monotonic()` 基準の時刻です
+            （`new_secret_scan_deadline()` の返り値）。
 
     Returns:
         検出した問題の辞書リストを返します。
@@ -502,7 +549,9 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None) -> list[d
         # （ADR-0013: NUL 1 バイトで検査を回避できる状態を許容しない）。
         scan_lines = _extract_printable_runs(content) if is_binary else lines
         try:
-            issues.extend(_scan_secret_issues(content, scan_lines, report_lines=not is_binary))
+            issues.extend(
+                _scan_secret_issues(content, scan_lines, deadline=deadline, report_lines=not is_binary)
+            )
         except Exception as err:
             issues.append(_scan_error_issue(file_path, "secret scan", err, severity="error"))
 
