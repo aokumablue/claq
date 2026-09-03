@@ -9,6 +9,7 @@ pyproject.toml 等はファイル名だけでは保護できない（version bum
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 
@@ -399,14 +400,38 @@ class TestResolveLintSectionFromDiskUnitLevel:
         assert config_protection._resolve_lint_section_from_disk("pyproject.toml", "") is None
 
     def test_read_failure_is_undetermined(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+        """読み取りが失敗したら判定不能（読み取りは open + 上限付き read で行う）。"""
         target = tmp_path / "pyproject.toml"
         target.write_text("[project]\nname = 'x'\n", encoding="utf-8")
 
         def _boom(*args, **kwargs):
             raise OSError("permission denied")
 
-        monkeypatch.setattr("pathlib.Path.read_text", _boom)
+        monkeypatch.setattr("pathlib.Path.open", _boom)
         assert config_protection._resolve_lint_section_from_disk(str(target), "name") is None
+
+    def test_read_is_capped_at_max_stdin_bytes(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+        """読み取り量に上限があること（無制限だと hook timeout を踏んで allow へ倒れる）。"""
+        target = tmp_path / "pyproject.toml"
+        target.write_text("[tool.ruff]\nignore = ['E']\n", encoding="utf-8")
+        requested: list[int | None] = []
+        real_open = pathlib.Path.open
+
+        def _spy_open(self, *args, **kwargs):
+            handle = real_open(self, *args, **kwargs)
+            real_read = handle.read
+
+            def _read(size=None):
+                requested.append(size)
+                return real_read(size)
+
+            handle.read = _read
+            return handle
+
+        monkeypatch.setattr("pathlib.Path.open", _spy_open)
+        config_protection._resolve_lint_section_from_disk(str(target), "ignore")
+
+        assert requested == [config_protection.MAX_STDIN_BYTES]
 
     def test_snippet_before_any_section_header_is_not_lint(self, tmp_path) -> None:
         """先頭セクション見出しより前（トップレベル）に見つかった場合は lint 系ではない。"""

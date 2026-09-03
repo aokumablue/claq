@@ -349,7 +349,13 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
         path = Path(file_path)
         if not path.is_file():
             return None
-        text = path.read_text(encoding="utf-8", errors="replace")
+        # 読み取り量に上限を置く。`pyproject.toml` 等の実ファイルはエージェント
+        # 自身が任意サイズへ膨らませられるため、無制限に読むと hooks.json の
+        # timeout（5 秒）を host 側から踏まれてフックが殺され allow へ倒れる。
+        # lint セクション見出しとキーは先頭付近に現れるので、先頭 MAX_STDIN_BYTES
+        # だけで判定に足りる。
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            text = handle.read(MAX_STDIN_BYTES)
     except OSError:
         return None
     index = text.find(snippet)

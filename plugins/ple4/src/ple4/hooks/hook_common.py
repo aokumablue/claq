@@ -502,14 +502,14 @@ def resolve_repo_root() -> Path | None:
 # stdin リダイレクト漏れ（パイプ未接続のまま open）での無期限ブロックを防ぐ。
 # launcher がインプロセス実行になったことで、この guard は各フックが
 # 自分で stdin を読む read_raw_stdin* の先頭に置く（旧: launcher._read_stdin）。
-STDIN_FIRST_BYTE_TIMEOUT = 2.0
+STDIN_FIRST_BYTE_TIMEOUT = 1.0
 
 # _read_stdin_bytes のチャンク読み取りループ全体に許す壁時計予算（秒）。
 # _stdin_ready の最初のバイト到着待ち（STDIN_FIRST_BYTE_TIMEOUT）とは別予算で、
 # _read_stdin_bytes が呼ばれた時点から計測する。hooks の stdin ペイロードは
 # Claude Code から渡される KB オーダーの JSON であり、5 秒は正常系では絶対に
 # 触れない余裕であって、正常系を制約する値ではない。
-STDIN_READ_DEADLINE_SECONDS = 5.0
+STDIN_READ_DEADLINE_SECONDS = 3.0
 
 # 1 回の read 呼び出しで要求する最大バイト数（チャンクサイズ）。
 STDIN_CHUNK_BYTES = 65536

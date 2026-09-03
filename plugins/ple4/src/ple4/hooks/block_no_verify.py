@@ -455,6 +455,14 @@ _GIT_CONFIG_INJECTION_ENV_NAMES = frozenset(
 _ENV_BOOLEAN_OPTIONS = frozenset({"-i", "--ignore-environment"})
 
 
+_EXEC_WRAPPERS = frozenset({"sudo", "command"})
+"""環境変数代入の走査で読み飛ばす実行位置のラッパ名。
+
+`env` はここに含めない —— 続く節が `-i` / `-u NAME` を消費したうえで
+`env` 自身の代入引数を読むため、別扱いにする必要がある。
+"""
+
+
 def _collect_literal_env_assignments(prefix_tokens: list[str]) -> dict[str, str]:
     """git 起動トークンより前にある literal 環境変数代入を集める（H-05）。
 
@@ -474,6 +482,13 @@ def _collect_literal_env_assignments(prefix_tokens: list[str]) -> dict[str, str]
     """
     assignments: dict[str, str] = {}
     index = 0
+    # 実行位置のラッパ（`sudo git ...` / `command git ...`）を先に読み飛ばす。
+    # 飛ばさないと最初の非代入トークンで走査が終わり、`sudo NAME=v git commit`
+    # の代入が env 注入検査の対象外になる（実測: `env` 経由は exit 2、`sudo`
+    # 経由は exit 0 という非対称）。兄弟フックの
+    # `bash_config_protection._COMMAND_POSITION_WRAPPERS` と同じ集合を使う。
+    while index < len(prefix_tokens) and prefix_tokens[index].rsplit("/", 1)[-1] in _EXEC_WRAPPERS:
+        index += 1
     while index < len(prefix_tokens):
         match = _ENV_ASSIGNMENT_RE.match(prefix_tokens[index])
         if not match:
