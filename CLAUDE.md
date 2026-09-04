@@ -19,8 +19,9 @@
 
 ## ランタイム前提
 
-- 対応 `python3` は 3.12 以上。`launcher.py` は 3.12 未満を検出すると保護フック（`block_no_verify` / `pre_bash_commit_quality` / `config_protection`）を stderr へ警告した上で **exit 0（fail-open）** にする。これは意図的な設計判断（`launcher.py:52-58` に理由を明記）— ランタイムは venv も install.sh も持たないため（[[runtime-no-venv]]）インストール時に対応 Python を検証する経路が無く、fail-closed（exit 2）にすると `hooks.json` が呼ぶ PATH 上の裸 `python3` を直す手段（Bash）ごとセッション内から塞がれ復旧不能になる。stderr の `ple4ProtectionDisabled` 警告を監視しない環境では保護無効化を見落とすため、対応 Python の確保は利用者側の責務とする
-- 対応 OS は macOS / Linux。`hooks/hook_common.py` の stdin 読み取りガードは `select.select` を使用しており、Windows の通常 console stdin では機能しない可能性がある（Windows 未対応）
+- 対応 `python3` は 3.12 以上。`launcher.py` は 3.12 未満を検出すると保護フック（`block_no_verify` / `pre_bash_commit_quality` / `config_protection`）を stderr へ警告した上で **exit 0（fail-open）** にする。これは意図的な設計判断（`launcher.py:52-58` に理由を明記）— ランタイムは venv も install.sh も持たないため（[[runtime-no-venv]]）インストール時に対応 Python を検証する経路が無く、fail-closed（exit 2）にすると Python を直す手段（Bash）ごとセッション内から塞がれ復旧不能になる。stderr の `ple4ProtectionDisabled` 警告を監視しない環境では保護無効化を見落とすため、対応 Python の確保は利用者側の責務とする
+- `hooks.json` は裸の `python3` を呼ばない。全エントリが `runtime/ple4-hook`（Windows は cmd.exe が PATHEXT で解決する同名の `.cmd`）を起動し、インタプリタ解決はこの wrapper の単一責務とする。`PLE4_PYTHON` > `python3` > `python`（POSIX）／`PLE4_PYTHON` > `py -3` > `python` > `python3`（Windows。`WindowsApps` 配下の Microsoft Store alias は候補から除外）。見つからない場合は `launcher.py` と同じく stderr へ `ple4ProtectionDisabled` を出して exit 0。`runtime/ple4-helpers.sh` の `ple4_run` / `ple4_run_bg` も同じ wrapper を通す
+- 対応 OS は macOS / Linux / Windows
 
 ## データモデルの前提
 

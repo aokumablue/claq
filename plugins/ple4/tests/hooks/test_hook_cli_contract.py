@@ -23,6 +23,7 @@ from ple4.lib.harness import INPUT_CONTAINER_KEYS, normalize_tool_name
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = PLUGIN_ROOT / "src" / "ple4" / "launcher.py"
+HOOK_WRAPPER = PLUGIN_ROOT / "runtime" / "ple4-hook"
 _ISOLATED_ENV_PREFIXES = ("CODEX_", "GROK_", "COPILOT_")
 _ISOLATED_ENV_KEYS = frozenset({
     "CLAUDECODE",
@@ -131,10 +132,11 @@ _MINIMAL_PAYLOADS = {
 
 
 def _iter_declared_commands() -> list[tuple[str, list[str], int]]:
-    """hooks.json が宣言する (イベント名, launcher 引数, timeout) を列挙する。
+    """hooks.json が宣言する (イベント名, wrapper 引数, timeout) を列挙する。
 
     Returns:
-        宣言順の (event, args, timeout) タプル。args は launcher.py 以降の引数。
+        宣言順の (event, args, timeout) タプル。args は ``runtime/ple4-hook``
+        以降の引数。
     """
     declared = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))["hooks"]
     entries: list[tuple[str, list[str], int]] = []
@@ -142,8 +144,8 @@ def _iter_declared_commands() -> list[tuple[str, list[str], int]]:
         for group in groups:
             for hook in group.get("hooks", []):
                 tokens = shlex.split(hook["command"])
-                launcher_index = next(i for i, t in enumerate(tokens) if t.endswith("launcher.py"))
-                entries.append((event, tokens[launcher_index + 1 :], hook.get("timeout", 0)))
+                wrapper_index = next(i for i, t in enumerate(tokens) if t.endswith(HOOK_WRAPPER.name))
+                entries.append((event, tokens[wrapper_index + 1 :], hook.get("timeout", 0)))
     return entries
 
 

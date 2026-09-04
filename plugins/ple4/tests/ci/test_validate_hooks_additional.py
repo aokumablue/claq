@@ -159,7 +159,7 @@ def test_validate_hooks_reports_invalid_matcher_and_entrypoint(
 
 
 def _repo_hook_argv() -> list[list[str]]:
-    """実際の hooks.json の command フックを launcher 以降の argv へ分解して返す。
+    """実際の hooks.json の command フックを wrapper 以降の argv へ分解して返す。
 
     Returns:
         ``--bg`` を取り除いた argv のリスト（先頭がモジュール名）。
@@ -178,7 +178,7 @@ def _repo_hook_argv() -> list[list[str]]:
     argvs: list[list[str]] = []
     for command in commands:
         parts = shlex.split(command)
-        launcher_index = next(i for i, part in enumerate(parts) if part.endswith("launcher.py"))
+        launcher_index = next(i for i, part in enumerate(parts) if part.endswith("ple4-hook"))
         argv = parts[launcher_index + 1 :]
         argvs.append(argv[1:] if argv and argv[0] == "--bg" else argv)
     return argvs

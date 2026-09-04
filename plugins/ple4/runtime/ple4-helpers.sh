@@ -36,11 +36,17 @@ ple4_plugin_root() {
   printf '%s\n' "$(cd "${_PLE4_HELPERS_DIR}/.." && pwd)"
 }
 
-# Run a ple4 module or script through the repository launcher.
+# Run a ple4 module or script through the hook wrapper.
+#
+# The wrapper (`runtime/ple4-hook`) owns interpreter resolution for the whole
+# plugin. Calling `python3` here instead would reintroduce the failure that
+# broke every hook on Windows (a Microsoft Store alias owning the name
+# `python3`), and would make the helpers disagree with hooks.json about which
+# interpreter ple4 runs on.
 ple4_run() {
   local plugin_root
   plugin_root="$(ple4_plugin_root)"
-  python3 "${plugin_root}/src/ple4/launcher.py" "$@"
+  "${plugin_root}/runtime/ple4-hook" "$@"
 }
 
 # Run a ple4 launcher command in the background and print the PID.
@@ -48,7 +54,7 @@ ple4_run_bg() {
   local plugin_root
   plugin_root="$(ple4_plugin_root)"
 
-  nohup python3 "${plugin_root}/src/ple4/launcher.py" "$@" >/dev/null 2>&1 &
+  nohup "${plugin_root}/runtime/ple4-hook" "$@" >/dev/null 2>&1 &
   printf '%s\n' "$!"
 }
 
@@ -115,11 +121,7 @@ ple4_mem_learn() {
   PLE4_LEARN_DOMAIN="$card_domain" \
   PLE4_LEARN_CONFIDENCE="$card_confidence" \
   PLE4_LEARN_SOURCE_REF="$card_source_ref" \
-  python3 -c 'import json, os, sys
-fields = ("key", "kind", "scope", "title", "body", "domain", "confidence", "source_ref")
-payload = {f: os.environ["PLE4_LEARN_" + f.upper()] for f in fields}
-json.dump({k: v for k, v in payload.items() if v}, sys.stdout, ensure_ascii=False)
-' | ple4_run ple4.mem.cli learn
+  ple4_run ple4.mem.learn_payload | ple4_run ple4.mem.cli learn
 }
 
 # Collect the repeated inputs used by /skill-gen.

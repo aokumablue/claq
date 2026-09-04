@@ -7,8 +7,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py\" ple4.hooks.block_no_verify",
-            "timeout": 5
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.hooks.block_no_verify",
+            "timeout": 15
           }
         ],
         "description": "git hook-bypassフラグをブロックして、pre-commit、commit-msg、pre-pushフックがスキップされないように保護します。"
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py\" ple4.hooks.pre_bash_commit_quality",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.hooks.pre_bash_commit_quality",
             "timeout": 30
           }
         ],
@@ -29,8 +29,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py\" ple4.hooks.bash_config_protection",
-            "timeout": 5
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.hooks.bash_config_protection",
+            "timeout": 15
           }
         ],
         "description": "Bashのリダイレクト/tee/sed -iによるlinter/formatter設定ファイルへの直接書き換えをブロックします（config_protectionのEdit/Write限定を補完）。"
@@ -40,8 +40,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py\" ple4.hooks.config_protection",
-            "timeout": 5
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.hooks.config_protection",
+            "timeout": 15
           }
         ],
         "description": "linter/formatterの設定ファイルへの変更をブロックします。エージェントが設定を弱めるのではなく、コードを修正するように導きます。"
@@ -53,8 +53,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py\" ple4.hooks.pre_compact",
-            "timeout": 10
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.hooks.pre_compact",
+            "timeout": 15
           }
         ],
         "description": "コンテキストの圧縮前に状態を保存します"
@@ -66,8 +66,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py\" ple4.mem.cli context",
-            "timeout": 5
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.mem.cli context",
+            "timeout": 20
           }
         ],
         "description": "永続メモリから共通知識・リポジトリ知識・前回の引き継ぎを <ple4-memory> として注入する（DB が無ければ作成）"
@@ -79,7 +79,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py\" --bg ple4.mem.cli handoff",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" --bg ple4.mem.cli handoff",
             "async": true,
             "timeout": 10
           }

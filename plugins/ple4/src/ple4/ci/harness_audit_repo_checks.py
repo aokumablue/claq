@@ -16,21 +16,22 @@ from ple4.ci.harness_audit_utils import (
     safe_read,
 )
 
-_LAUNCHER_INTERPRETERS = {"python", "python3"}
+_HOOK_WRAPPER_BASENAMES = {"ple4-hook", "ple4-hook.cmd"}
 
 
 def _hook_command_argv(command: str) -> tuple[str, ...] | None:
-    """hooks.json 内のコマンド文字列から launcher.py 起動後の引数列を返す。
+    """hooks.json 内のコマンド文字列から wrapper 起動後の引数列を返す。
 
-    ``python``/``python3`` で ``launcher.py`` (または ``*/launcher.py``) を
-    起動する形式でなければ ``None`` を返す。先頭の ``--bg``（非 Claude
-    ハーネス向け detach フラグ）はコマンドの実体ではないため取り除く。
+    hooks.json の全エントリは ``runtime/ple4-hook`` （Windows では cmd.exe が
+    PATHEXT で解決する ``ple4-hook.cmd``）を起動する。裸の ``python3`` 起動
+    形式は廃止したため受け付けない。先頭の ``--bg``（非 Claude ハーネス向け
+    detach フラグ）はコマンドの実体ではないため取り除く。
 
     Args:
         command: hooks.json の ``command`` フィールドの生文字列
 
     Returns:
-        launcher.py 起動後の引数トークンのタプル（--bg 除去済み）。
+        wrapper 起動後の引数トークンのタプル（--bg 除去済み）。
         形式に合致しなければ None
     """
     try:
@@ -38,14 +39,14 @@ def _hook_command_argv(command: str) -> tuple[str, ...] | None:
     except ValueError:
         return None
 
-    if len(command_tokens) < 3 or command_tokens[0] not in _LAUNCHER_INTERPRETERS:
+    if len(command_tokens) < 2:
         return None
 
-    launcher = command_tokens[1]
-    if launcher != "launcher.py" and not launcher.endswith("/launcher.py"):
+    wrapper = command_tokens[0].replace("\\", "/").rsplit("/", 1)[-1]
+    if wrapper not in _HOOK_WRAPPER_BASENAMES:
         return None
 
-    argv = tuple(command_tokens[2:])
+    argv = tuple(command_tokens[1:])
     if argv and argv[0] == "--bg":
         argv = argv[1:]
     return argv

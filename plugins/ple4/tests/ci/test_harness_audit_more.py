@@ -473,7 +473,7 @@ def test_memory_hooks_lifecycle_check_fails_when_dir_exists_but_commands_are_sta
         tmp_path,
         {
             "SessionStart": [
-                {"hooks": [{"type": "command", "command": "python3 launcher.py ple4.hooks.unrelated"}]}
+                {"hooks": [{"type": "command", "command": "ple4-hook ple4.hooks.unrelated"}]}
             ],
             "Stop": [],
             "SessionEnd": [],
@@ -505,7 +505,7 @@ def test_memory_hooks_lifecycle_check_fails_when_only_partial_lifecycle_present(
                         {
                             "type": "command",
                             "command": (
-                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py" '
+                                '"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook" '
                                 "ple4.mem.cli context"
                             ),
                         }
@@ -535,7 +535,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                         {
                             "type": "command",
                             "command": (
-                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py" '
+                                '"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook" '
                                 "ple4.mem.cli context"
                             ),
                         }
@@ -546,7 +546,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                         {
                             "type": "command",
                             "command": (
-                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py" '
+                                '"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook" '
                                 "ple4.hooks.session_start"
                             ),
                         }
@@ -559,7 +559,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                         {
                             "type": "command",
                             "command": (
-                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py" '
+                                '"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook" '
                                 "--bg ple4.hooks.session_end"
                             ),
                         }
@@ -572,7 +572,7 @@ def test_memory_hooks_lifecycle_check_passes_with_real_lifecycle_commands(tmp_pa
                         {
                             "type": "command",
                             "command": (
-                                'python3 "${CLAUDE_PLUGIN_ROOT}/src/ple4/launcher.py" '
+                                '"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook" '
                                 "--bg ple4.mem.cli handoff"
                             ),
                         }
@@ -598,14 +598,16 @@ def test_memory_hooks_lifecycle_check_passes_on_real_repo_hooks_json() -> None:
 
 def test_hook_command_argv_covers_parse_edge_cases() -> None:
     """_hook_command_argv の分岐（不正引用符・トークン不足・起動形式不一致等）を網羅する。"""
-    assert _hook_command_argv('python3 "unterminated') is None
-    assert _hook_command_argv("python3 launcher.py") is None
-    assert _hook_command_argv("node launcher.py a b") is None
-    assert _hook_command_argv("python3 other.py a b") is None
-    assert _hook_command_argv("python3 launcher.py a b") == ("a", "b")
-    assert _hook_command_argv('python3 "${ROOT}/launcher.py" a b') == ("a", "b")
+    assert _hook_command_argv('"unterminated') is None
+    assert _hook_command_argv("ple4-hook") is None
+    assert _hook_command_argv("python3 launcher.py a b") is None
+    assert _hook_command_argv("other-hook a b") is None
+    assert _hook_command_argv("ple4-hook a b") == ("a", "b")
+    assert _hook_command_argv('"${ROOT}/runtime/ple4-hook" a b') == ("a", "b")
+    # Windows 側は cmd.exe が PATHEXT で解決する .cmd を直接書いた形式も受ける
+    assert _hook_command_argv(r'"C:\\plug\\runtime\\ple4-hook.cmd" a b') == ("a", "b")
     # 先頭の --bg（非 Claude ハーネス向け detach フラグ）は実体でないため除去する
-    assert _hook_command_argv("python3 launcher.py --bg a b") == ("a", "b")
+    assert _hook_command_argv("ple4-hook --bg a b") == ("a", "b")
 
 
 def test_event_has_matching_command_covers_branches() -> None:
@@ -618,17 +620,17 @@ def test_event_has_matching_command_covers_branches() -> None:
     assert _event_has_matching_command([{"hooks": "not-a-list"}], patterns) is False
     assert _event_has_matching_command([{"hooks": ["not-a-dict"]}], patterns) is False
     assert _event_has_matching_command([{"hooks": [{"command": 123}]}], patterns) is False
-    assert _event_has_matching_command([{"hooks": [{"command": "python3 launcher.py"}]}], patterns) is False
+    assert _event_has_matching_command([{"hooks": [{"command": "ple4-hook"}]}], patterns) is False
     assert (
         _event_has_matching_command(
-            [{"hooks": [{"command": "python3 launcher.py ple4.mem.cli other:action"}]}],
+            [{"hooks": [{"command": "ple4-hook ple4.mem.cli other:action"}]}],
             patterns,
         )
         is False
     )
     assert (
         _event_has_matching_command(
-            [{"hooks": [{"command": "python3 launcher.py ple4.mem.cli session:mem:setup"}]}],
+            [{"hooks": [{"command": "ple4-hook ple4.mem.cli session:mem:setup"}]}],
             patterns,
         )
         is True

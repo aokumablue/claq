@@ -1,0 +1,47 @@
+#!/bin/sh
+# ple4 hook launcher — POSIX side.
+#
+# hooks.json calls this file (never a bare `python3`) so that the interpreter
+# name is resolved by code we control instead of by whatever the host's ambient
+# PATH happens to bind. On Windows the very same command string resolves to the
+# sibling `ple4-hook.cmd` (cmd.exe appends PATHEXT to an extension-less path),
+# so a single hooks.json entry serves all three platforms.
+#
+# Resolution order: $PLE4_PYTHON (explicit override) -> python3 -> python.
+# `python` is probed for 3.12+ before use because on some distributions it is
+# still Python 2, which cannot even parse launcher.py. `python3` is used
+# unprobed: probing costs one extra interpreter start on every single hook
+# invocation, and launcher.py already reports an unsupported version itself.
+#
+# When nothing usable is found this exits 0 after writing a diagnostic to
+# stderr, matching launcher.py's documented fail-open policy (see CLAUDE.md
+# "ランタイム前提"): the runtime ships no venv and no installer, so a
+# fail-closed exit would block the very Bash tool needed to repair PATH and
+# would make the session unrecoverable from the inside.
+
+# `dirname` is deliberately not used: it is an external binary, and this script
+# must still resolve its own root when PATH is empty or broken — which is
+# exactly the situation the wrapper exists to diagnose. `cd`/`pwd` are builtins.
+case "$0" in
+  */*) _ple4_hook_dir=${0%/*} ;;
+  *) _ple4_hook_dir=. ;;
+esac
+_ple4_root=$(CDPATH= cd -- "$_ple4_hook_dir/.." && pwd) || exit 0
+_ple4_launcher="$_ple4_root/src/ple4/launcher.py"
+
+if [ -n "${PLE4_PYTHON:-}" ]; then
+  exec "$PLE4_PYTHON" "$_ple4_launcher" "$@"
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 "$_ple4_launcher" "$@"
+fi
+
+if command -v python >/dev/null 2>&1 &&
+  python -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1; then
+  exec python "$_ple4_launcher" "$@"
+fi
+
+printf '%s\n' "ERROR: ple4 found no usable Python 3.12+ (tried PLE4_PYTHON, python3, python). Hooks are disabled until one is on PATH; set PLE4_PYTHON to an absolute interpreter path to recover." >&2
+printf '%s\n' '{"ple4ProtectionDisabled": true, "reason": "python_not_found", "candidates": ["PLE4_PYTHON", "python3", "python"], "requiredVersion": "3.12+"}' >&2
+exit 0
