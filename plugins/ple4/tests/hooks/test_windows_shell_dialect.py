@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from ple4.hooks import bash_config_protection
-from ple4.hooks.bash_config_protection import find_protected_write
+from ple4.hooks.bash_config_protection import _raw_text_write_risk, find_protected_write
 from ple4.hooks.block_no_verify import has_bypass_flag
 from ple4.hooks.hook_common import command_dialect_variants
 
@@ -113,3 +113,12 @@ class TestPowerShellCmdlets:
     def test_read_only_cmdlet_is_not_detected(self) -> None:
         """読み取り専用の cmdlet は書き込みとみなさないこと（過剰検出の歯止め）。"""
         assert find_protected_write("Get-Content ruff.toml") is None
+
+    def test_malformed_input_fallback_also_matches_cmdlets(self) -> None:
+        """JSON が壊れている縮退経路でも長形式 cmdlet を拾うこと。
+
+        指標を小文字で持つようになったため、生テキスト側も大小を無視しないと
+        「JSON が壊れているときだけ `Remove-Item` が通る」非対称が残る。
+        """
+        assert _raw_text_write_risk("{broken Remove-Item ruff.toml") == "ruff.toml"
+        assert _raw_text_write_risk("{broken Get-Content ruff.toml") is None

@@ -669,7 +669,12 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    if not any(indicator in raw_input for indicator in _RAW_TEXT_RISK_INDICATORS):
+    # 指標は小文字で持つ（`_REMOVE_COMMANDS` 等に PowerShell の長形式 cmdlet が
+    # 入っており、生テキストには `Remove-Item` と大文字混じりで現れる）。
+    # トークン化経路の名前比較も大小無視なので、ここだけ大小を見ると
+    # 「JSON が壊れているときだけ通る」非対称が生まれる。
+    lowered = raw_input.lower()
+    if not any(indicator in lowered for indicator in _RAW_TEXT_RISK_INDICATORS):
         return None
     for name in sorted(_ALL_PROTECTED_BASENAMES):
         if name in raw_input:

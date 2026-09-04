@@ -7,6 +7,7 @@ import os
 import runpy
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -470,3 +471,60 @@ def test_non_ascii_output_survives_a_non_utf8_locale(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "検査 ✓ の知識" in result.stdout
+
+
+def test_background_child_env_forces_utf8_output() -> None:
+    """detach 子の環境に PYTHONIOENCODING=utf-8 が入ること。
+
+    子は `-m <module>` 起動で `main()` を通らないため `force_utf8_streams()` が
+    効かない。子の警告は日本語を含み bg ログへ落ちるので、非 UTF-8 ロケールでは
+    UnicodeEncodeError がログの中だけで起き、次セッションの通知に化けた 1 行と
+    して現れる。
+    """
+    assert launcher.build_env()["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_background_child_writes_non_ascii_log_under_non_utf8_locale(tmp_path: Path) -> None:
+    """非 UTF-8 ロケールでも、detach 子の日本語ログが壊れず書けること。
+
+    `--bg` 経路は実プロセスでしか再現しない。壊れた handoff payload を渡して
+    子に警告を書かせ、bg ログに UnicodeEncodeError が出ないことを見る。
+    """
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("CODEX_", "GROK_", "COPILOT_"))
+        and key not in {"CLAUDECODE", "PLE4_HOME", "CLAUDE_PLUGIN_ROOT"}
+    }
+    env.update(
+        {
+            "HOME": str(tmp_path),
+            "PLE4_DATA_PATH": str(tmp_path),
+            "LC_ALL": "C",
+            "PYTHONUTF8": "0",
+            "PYTHONCOERCECLOCALE": "0",
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(LAUNCHER_PATH), "--bg", "ple4.mem.cli", "handoff"],
+        input='{"handoff": "日本語の引き継ぎ ✓"}',
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+    # ログが出ないのが正常系なので、短い猶予だけ待って判定する。
+    deadline = time.monotonic() + 5
+    log_dir = tmp_path / ".ple4" / "logs"
+    while time.monotonic() < deadline:
+        logs = sorted(log_dir.glob("bg-*.log")) if log_dir.is_dir() else []
+        if logs and logs[-1].stat().st_size:
+            break
+        time.sleep(0.1)
+
+    for log in sorted(log_dir.glob("bg-*.log")) if log_dir.is_dir() else []:
+        assert "UnicodeEncodeError" not in log.read_text(encoding="utf-8", errors="replace")

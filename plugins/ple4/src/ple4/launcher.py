@@ -31,14 +31,20 @@ def build_env() -> dict[str, str]:
         なし
 
     Returns:
-        CLAUDE_PLUGIN_ROOT（未設定時のみ REPO_ROOT）と、REPO_ROOT/src を
-        先頭に置いた PYTHONPATH を含む環境変数の辞書。
+        CLAUDE_PLUGIN_ROOT（未設定時のみ REPO_ROOT）、PYTHONIOENCODING=utf-8、
+        REPO_ROOT/src を先頭に置いた PYTHONPATH を含む環境変数の辞書。
 
     Raises:
         例外は発生しません。
     """
     env = os.environ.copy()
     env.setdefault("CLAUDE_PLUGIN_ROOT", str(REPO_ROOT))
+    # detach した子は `-m <module>` で起動するため `main()` を通らず、
+    # `force_utf8_streams()` が効かない。子の警告（`handoff 失敗: ...` 等）は
+    # 日本語を含み、bg ログへリダイレクトされるため、非 UTF-8 ロケールでは
+    # UnicodeEncodeError が bg ログの中だけで起き、次セッションの通知に
+    # 化けた 1 行として現れる。子にも同じ UTF-8 固定を効かせる。
+    env["PYTHONIOENCODING"] = "utf-8"
 
     pythonpath = env.get("PYTHONPATH")
     paths = [str(REPO_ROOT / "src")]
