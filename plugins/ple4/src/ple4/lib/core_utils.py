@@ -5,6 +5,7 @@ Windows・macOS・Linux で動作する。
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import platform
@@ -100,6 +101,35 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
         return path
     ple4_dir.chmod(0o700)
     return path
+
+
+def actor_identity() -> str:
+    """監査ログ用の実行ユーザー識別子を返す（クロスプラットフォーム）。
+
+    ``os.getuid()`` は POSIX にしか存在せず、Windows では ``AttributeError``
+    になる。``mem promote`` は DB 更新の**後**にこれを呼んでいたため、
+    Windows では「カードは active になったのに監査ログを書けず非 0 終了」と
+    いう部分成功になりえた（release-verify 2026-09-03 の P1-005）。
+
+    ``getpass.getuser()`` は POSIX では ``LOGNAME``/``USER``/``LNAME``/
+    ``USERNAME`` と ``pwd`` を、Windows では ``USERNAME`` を見るため、
+    3 プラットフォームで同じ 1 本の実装になる。どこからも解決できない環境
+    （Python 3.13+ は ``OSError``）では ``"unknown"`` を返す — 監査ログの
+    ための識別子であって、これが取れないことを理由に本処理を失敗させない。
+
+    Args:
+        なし
+
+    Returns:
+        ユーザー名。解決できない場合は ``"unknown"``。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        return getpass.getuser()
+    except (OSError, KeyError):
+        return "unknown"
 
 
 def get_date_string() -> str:

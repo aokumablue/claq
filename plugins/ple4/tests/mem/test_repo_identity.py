@@ -143,8 +143,11 @@ class TestNormalizeRemoteUrl:
         assert normalize_remote_url(raw) is None
 
 
-class TestStripUserinfo:
-    """`_strip_userinfo`（§7-4: remote_url からの credential 除去）の表駆動テスト。"""
+class TestStripCredentials:
+    """`_strip_credentials`（remote_url からの credential 除去）の表駆動テスト。
+
+    userinfo（§7-4）に加えて query / fragment（P1-009）も落とすことを固定する。
+    """
 
     @pytest.mark.parametrize(
         ("raw", "expected"),
@@ -172,10 +175,25 @@ class TestStripUserinfo:
                 "file:///srv/git/repo.git",
                 "file:///srv/git/repo.git",
             ),
+            # query / fragment 内の token（P1-009。userinfo 除去だけでは残っていた）
+            (
+                "https://github.com/o/r?access_token=SECRET",
+                "https://github.com/o/r",
+            ),
+            (
+                "https://user:token@github.com/o/r.git?private_token=SECRET",
+                "https://github.com/o/r.git",
+            ),
+            ("https://github.com/o/r#token=SECRET", "https://github.com/o/r"),
+            # fragment が先に来る場合、その中の ? まで巻き込んで落とす
+            ("https://github.com/o/r#frag?x=SECRET", "https://github.com/o/r"),
+            ("git@github.com:o/r.git?token=SECRET", "github.com:o/r.git"),
+            ("/srv/git/repo.git?token=SECRET", "/srv/git/repo.git"),
         ],
     )
-    def test_strips_userinfo(self, raw: str, expected: str) -> None:
-        assert repo_identity._strip_userinfo(raw) == expected
+    def test_strips_credentials(self, raw: str, expected: str) -> None:
+        """userinfo・query・fragment を除いた URL だけが DB へ残ること。"""
+        assert repo_identity._strip_credentials(raw) == expected
 
 
 class TestSlugify:

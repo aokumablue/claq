@@ -23,7 +23,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -36,6 +35,7 @@ from ple4.hooks.hook_common import (
     read_raw_stdin,
     recent_bg_failure_notice,
 )
+from ple4.lib.core_utils import actor_identity
 from ple4.lib.harness import normalize_user_message
 from ple4.mem import logger as mem_logger
 from ple4.mem.database import Database
@@ -938,16 +938,20 @@ def _handle_promote(settings: Settings, args: CommandArgs) -> None:
         CommandError: key の指定が無い、または該当が無い場合。
     """
     key = _require_key(args)
+    # actor は DB 更新の前に確定させる。更新後に解決していた頃は、識別子の
+    # 取得に失敗すると「カードは active になったのに監査ログが残らず非 0 終了」
+    # という部分成功になりえた（P1-005）。
+    actor = actor_identity()
     with Database(settings.db_path) as db:
         found = _find_knowledge(db, key)
         db.set_knowledge_status(found.id, "active")
     log.info(
-        "promote: key=%s scope=%s source=%s previous_status=%s actor_uid=%s",
+        "promote: key=%s scope=%s source=%s previous_status=%s actor=%s",
         found.key,
         found.scope,
         found.source,
         found.status,
-        os.getuid(),
+        actor,
     )
     print(f"promoted: {key}")
 

@@ -694,6 +694,38 @@ class TestTranscriptTrustHelpers:
 
         assert tmp_path in handoff_mod.trusted_transcript_roots()
 
+    def test_owner_check_is_skipped_where_uid_is_meaningless(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`os.getuid` が無い環境（Windows）では所有者検査を飛ばすこと。
+
+        `st_uid` が常に 0 の環境で uid を比較しても「検査したふり」にしか
+        ならず、`os.getuid` を直接呼べば `AttributeError` で transcript が
+        一律拒否される（P1-006）。capability で分岐し、残る防御は symlink
+        拒否・通常ファイル要求・trusted root 包含。
+        """
+        monkeypatch.delattr(handoff_mod.os, "getuid", raising=False)
+        monkeypatch.setenv("PLE4_TRANSCRIPT_ROOTS", str(tmp_path))
+        path = tmp_path / "transcript.jsonl"
+        path.write_text("{}\n", encoding="utf-8")
+
+        assert handoff_mod.is_trusted_transcript(path) is True
+
+    def test_owner_check_fails_closed_when_stat_fails(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """所有者を確認できない場合は信頼しないこと。"""
+        monkeypatch.setenv("PLE4_TRANSCRIPT_ROOTS", str(tmp_path))
+        path = tmp_path / "transcript.jsonl"
+        path.write_text("{}\n", encoding="utf-8")
+
+        def _boom(self):  # noqa: ANN001, ANN202
+            raise OSError("stat failed")
+
+        monkeypatch.setattr(Path, "stat", _boom)
+
+        assert handoff_mod.is_trusted_transcript(path) is False
+
     def test_symlink_is_not_trusted(self, tmp_path: Path) -> None:
         """symlink は信頼しない。"""
         target = tmp_path / "real.jsonl"

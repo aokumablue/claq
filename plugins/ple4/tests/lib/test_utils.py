@@ -5,6 +5,9 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from ple4.lib import core_utils
 from ple4.lib.core_utils import (
     IS_LINUX,
     IS_MACOS,
@@ -165,6 +168,36 @@ class TestEnsurePrivateDir:
             result = ensure_private_dir(target)
         assert result == target
         assert stat.S_IMODE(target.stat().st_mode) == 0o700
+
+
+class TestActorIdentity:
+    """`actor_identity`（監査ログ用のユーザー識別子）のテスト。
+
+    `os.getuid()` は Windows に存在しないため、`mem promote` の監査ログは
+    POSIX 専用だった（P1-005）。`getpass.getuser()` は 3 プラットフォームで
+    同じ 1 本の実装になる。
+    """
+
+    def test_returns_resolved_user_name(self, monkeypatch):
+        """解決できたユーザー名をそのまま返すこと。"""
+        monkeypatch.setattr(core_utils.getpass, "getuser", lambda: "someone")
+
+        assert core_utils.actor_identity() == "someone"
+
+    @pytest.mark.parametrize("error", [OSError("no uid"), KeyError("no pwd entry")])
+    def test_falls_back_to_unknown(self, monkeypatch, error):
+        """識別子を解決できない環境でも例外にせず "unknown" を返すこと。
+
+        これは監査ログのための値であり、取れないことを理由に promote 自体を
+        失敗させない（部分成功を作らない）。
+        """
+
+        def _raise():
+            raise error
+
+        monkeypatch.setattr(core_utils.getpass, "getuser", _raise)
+
+        assert core_utils.actor_identity() == "unknown"
 
 
 class TestDateTimeFunctions:

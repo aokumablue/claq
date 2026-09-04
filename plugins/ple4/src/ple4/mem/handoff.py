@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -133,6 +134,9 @@ _TOOL_LIST_LIMIT = 8
 _EDIT_TOOLS: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
 """ファイルパスを収集する対象となる正規化済みツール名。"""
 
+_PATH_SEPARATOR_RE = re.compile(r"[/\\]")
+"""パス区切り（POSIX の ``/`` と Windows の ``\\``）。"""
+
 _PATH_SEGMENT_LIMIT = 3
 """引き継ぎに載せるファイルパスの末尾セグメント数。絶対パス全体は予算の無駄。"""
 
@@ -246,28 +250,57 @@ def is_trusted_transcript(path: Path) -> bool:
     同じ判定を別モジュールで書き直すと片側だけ強化されて非対称になるため
     （``INPUT_CONTAINER_KEYS`` で実際に起きた失敗）、走査側はこの関数を使う。
 
+    所有者一致の検査は POSIX の uid が意味を持つ環境でのみ行う。
+    ``os.getuid`` は Windows に存在せず、``st_uid`` も常に 0 を返すため、
+    そこで uid を比較すると「常に一致」か ``AttributeError`` のどちらかに
+    しかならない（前者は検査したふり、後者は transcript の一律拒否）。
+    プラットフォーム名では分岐せず、``os.getuid`` の有無という capability
+    で分岐する（release-verify 2026-09-03 の P1-006）。uid 比較が使えない
+    環境で残る防御は symlink 拒否・通常ファイル要求・trusted root 包含の
+    3 つで、trusted root はいずれもユーザーのホーム配下＝Windows では
+    既定でそのユーザーの ACL に閉じている。
+
     Args:
         path: 判定対象のパス。
 
     Returns:
-        symlink でなく、通常ファイルで、所有者が自分で、trusted root 配下なら True。
+        symlink でなく、通常ファイルで、（uid が意味を持つ環境では）所有者が
+        自分で、trusted root 配下なら True。
 
     Raises:
         例外は発生しません。
     """
     if path.is_symlink() or not path.is_file():
         return False
-    try:
-        owner_uid = path.stat().st_uid
-    except OSError:
-        return False
-    if owner_uid != os.getuid():
+    if not _owner_matches_current_user(path):
         return False
     try:
         resolved = path.resolve()
     except OSError:
         return False
     return _is_under_trusted_root(resolved)
+
+
+def _owner_matches_current_user(path: Path) -> bool:
+    """ファイルの所有者が現在のユーザーかを、uid が意味を持つ環境でだけ検査する。
+
+    Args:
+        path: 判定対象のパス。
+
+    Returns:
+        所有者が一致する場合、または uid による所有者判定ができない環境
+        （Windows）では True。``stat`` に失敗した場合は False。
+
+    Raises:
+        例外は発生しません。
+    """
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:
+        return True
+    try:
+        return path.stat().st_uid == getuid()
+    except OSError:
+        return False
 
 
 def trusted_transcript_roots() -> tuple[Path, ...]:
@@ -512,13 +545,20 @@ def _shorten_path(path: str) -> str:
     知りたいのは「どのファイルを触っていたか」だけで先頭のディレクトリ
     階層は不要なため。
 
+    区切りは ``/`` と ``\\`` の両方を見る。``/`` だけで分割していた頃は
+    ``C:\\Users\\<name>\\proj\\src\\app.py`` が 1 セグメント扱いになり、
+    ユーザー名を含む絶対パスがそのまま handoff と DB に残っていた
+    （release-verify 2026-09-03 の P2-014）。プラットフォーム判定はしない
+    — POSIX のパスに ``\\`` が現れることは事実上なく、両方を区切りとして
+    扱う 1 本のロジックで 3 プラットフォームを賄える。
+
     Args:
         path: トランスクリプトから拾った生のパス。
 
     Returns:
         末尾 ``_PATH_SEGMENT_LIMIT`` セグメント。省略した場合は ``…/`` を付ける。
     """
-    segments = [segment for segment in path.split("/") if segment]
+    segments = [segment for segment in _PATH_SEPARATOR_RE.split(path) if segment]
     if len(segments) <= _PATH_SEGMENT_LIMIT:
         return path
     return "…/" + "/".join(segments[-_PATH_SEGMENT_LIMIT:])

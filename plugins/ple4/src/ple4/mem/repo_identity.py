@@ -114,8 +114,8 @@ def _join_host_path(authority: str, path: str, *, strip_port: bool) -> str | Non
     return f"{host}/{cleaned}"
 
 
-def _strip_userinfo(remote_url: str) -> str:
-    """remote URL の authority 部から userinfo（``user:token@``）だけを除去する。
+def _strip_credentials(remote_url: str) -> str:
+    """remote URL から credential を運びうる部分（userinfo・query・fragment）を除去する。
 
     `_join_host_path` が identity_key を組み立てる際に使う
     ``authority.rpartition("@")[2]`` と同じロジックを、scheme・パス・大小文字
@@ -129,33 +129,63 @@ def _strip_userinfo(remote_url: str) -> str:
     ``host:owner/repo`` にします（``git@`` は SSH の固定ユーザー名で秘密は
     含みませんが、identity_key 側の扱いと一貫させます）。
 
+    userinfo に加えて **query（``?``）と fragment（``#``）も丸ごと捨てます**。
+    ``https://github.com/o/r?access_token=SECRET`` のような形は
+    userinfo の除去だけでは残り、``repos.remote_url`` として DB とログへ
+    永続化されていました（release-verify 2026-09-03 の P1-009）。git の
+    remote URL において query / fragment は取得先を特定する情報を持たない
+    ため、鍵名を列挙して redact するのではなく丸ごと落とす（列挙方式は
+    新しい鍵名を取りこぼすうえ、鍵名自体が事前に分からない）。
+
     Args:
         remote_url: 生の remote URL（strip 済み・非空を想定）。
 
     Returns:
-        userinfo を除去した remote URL。authority に ``@`` が無い場合は
-        元の文字列をそのまま返す。
+        userinfo・query・fragment を除去した remote URL。
 
     Raises:
         例外は発生しません。
     """
-    scheme_match = _SCHEME_RE.match(remote_url)
+    trimmed = _strip_query_and_fragment(remote_url)
+    scheme_match = _SCHEME_RE.match(trimmed)
     if scheme_match:
         scheme_token, rest = scheme_match.group(1), scheme_match.group(2)
         authority, sep, path = rest.partition("/")
         host = authority.rpartition("@")[2]
         return f"{scheme_token}://{host}{sep}{path}"
 
-    colon = remote_url.find(":")
-    slash = remote_url.find("/")
+    colon = trimmed.find(":")
+    slash = trimmed.find("/")
     # scp 形式（user@host:owner/repo）は、最初のコロンがスラッシュより前に来る。
     # normalize_remote_url の scp 判定条件と同一にする。
     if colon != -1 and (slash == -1 or colon < slash):
-        authority, sep, path = remote_url.partition(":")
+        authority, sep, path = trimmed.partition(":")
         host = authority.rpartition("@")[2]
         return f"{host}{sep}{path}"
 
-    return remote_url
+    return trimmed
+
+
+def _strip_query_and_fragment(remote_url: str) -> str:
+    """remote URL から最初の ``?`` / ``#`` 以降を落とす。
+
+    先に現れた方を境界にする（``...#frag?x`` のように fragment 内へ ``?`` が
+    現れる形でも取りこぼさない）。
+
+    Args:
+        remote_url: 生の remote URL。
+
+    Returns:
+        query / fragment を除いた文字列。どちらも無ければ元の文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    cut = min(
+        (index for index in (remote_url.find("?"), remote_url.find("#")) if index != -1),
+        default=-1,
+    )
+    return remote_url if cut == -1 else remote_url[:cut]
 
 
 def normalize_remote_url(remote_url: str | None) -> str | None:
@@ -207,7 +237,7 @@ class RepoIdentity:
         identity_key: 正規化 remote URL。remote が無ければ repo root 絶対パス。
         root_path: シンボリックリンク解決済みの絶対パス（worktree は本体へ寄せる）。
         remote_url: userinfo（`user:token@`）除去済みの remote URL。remote が
-            無い・使えない場合は None（§7-4 対応。`_strip_userinfo` 適用済み）。
+            無い・使えない場合は None（§7-4 対応。`_strip_credentials` 適用済み）。
     """
 
     identity_key: str
@@ -277,7 +307,7 @@ def detect_repo_identity(cwd: str | Path | None = None) -> RepoIdentity:
     # normalize_remote_url は remote_url が falsy なら必ず None を返す契約
     # （`if not remote_url: return None`）。ここに到達した時点で remote_url
     # は truthy な文字列であることが保証される。
-    sanitized_remote_url = _strip_userinfo(remote_url)
+    sanitized_remote_url = _strip_credentials(remote_url)
     return RepoIdentity(identity_key=normalized, root_path=root_path, remote_url=sanitized_remote_url)
 
 

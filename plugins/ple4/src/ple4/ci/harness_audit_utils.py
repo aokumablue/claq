@@ -9,6 +9,8 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
+from ple4.lib.core_utils import get_home_dir
+
 REPO_CORE_MARKERS = [
     ".claude-plugin/plugin.json",
     "agents",
@@ -218,9 +220,16 @@ def _has_gitlab_security_scanning(root_dir: str | Path) -> bool:
 # 派生元の名前が残っていたため、ple4 の監査が別プラグインの導入を
 # 要求していた。
 _PLUGIN_NAME = "ple4"
+# ホストごとの配置。Copilot CLI は `.copilot/installed-plugins/<plugin>/<plugin>/`
+# へ展開する（release-verify 2026-09-03 の P1-007。実インストール先の実測）。
+# `.claude` だけを見ていた頃は、導入済みの Copilot 環境で
+# `consumer-plugin-install` が pass=false になり、監査が「既に満たされた助言」を
+# 第 1 位に出していた。
 _PLUGIN_JSON_RELATIVES = (
     Path(".claude") / "plugins" / _PLUGIN_NAME / ".claude-plugin" / "plugin.json",
     Path(".claude") / "plugins" / _PLUGIN_NAME / "plugin.json",
+    Path(".copilot") / "installed-plugins" / _PLUGIN_NAME / _PLUGIN_NAME / ".claude-plugin" / "plugin.json",
+    Path(".copilot") / "installed-plugins" / _PLUGIN_NAME / _PLUGIN_NAME / "plugin.json",
 )
 
 # マーケットプレイス経由で導入したときの実体配置。ホストは
@@ -230,16 +239,22 @@ _PLUGIN_JSON_RELATIVES = (
 # へ導入済みの機で `consumer-plugin-install` が pass=false になり、
 # `top_actions` の第 1 位に「プラグインを導入せよ」という既に満たされた
 # 助言が出た）。
-_PLUGIN_CACHE_GLOB = f".claude/plugins/cache/*/{_PLUGIN_NAME}/*/.claude-plugin/plugin.json"
+_PLUGIN_CACHE_GLOBS = (
+    f".claude/plugins/cache/*/{_PLUGIN_NAME}/*/.claude-plugin/plugin.json",
+    f".copilot/installed-plugins/*/{_PLUGIN_NAME}/*/.claude-plugin/plugin.json",
+)
 
 
 def find_plugin_install(root_dir: str | Path) -> str | None:
     """ple4 プラグインのインストール先を探す。
 
-    リポジトリ直下を先に、``HOME`` があればその配下を続けて探す。各ルートでは
-    平置きレイアウト（``.claude/plugins/ple4/``）を先に見て、見つからなければ
-    マーケットプレイス配置（``.claude/plugins/cache/<marketplace>/ple4/<version>/``）
-    を走査する。同じルートに複数版が残っている場合はパスの**辞書順で最初**の
+    リポジトリ直下を先に、ホームディレクトリ配下を続けて探す。ホームの解決は
+    `core_utils.get_home_dir()` に委ねる（``HOME`` を直接読んでいた頃は、
+    ``HOME`` を持たない Windows で必ずリポジトリ直下しか見えなかった。
+    P1-007）。各ルートでは平置きレイアウト（``.claude/plugins/ple4/`` /
+    ``.copilot/installed-plugins/ple4/ple4/``）を先に見て、見つからなければ
+    マーケットプレイス配置（``<host>/.../<marketplace>/ple4/<version>/``）を
+    走査する。同じルートに複数版が残っている場合はパスの**辞書順で最初**の
     ものを返す。呼び出し側は導入有無しか見ないため、これは同じ入力に同じ答えを
     返させるための順序固定であって、版の新旧を表さない（辞書順では
     ``0.9.48`` より ``0.9.9`` が後ろに来る）。
@@ -253,17 +268,16 @@ def find_plugin_install(root_dir: str | Path) -> str | None:
     Raises:
         例外は発生しません。
     """
-    search_roots = [Path(root_dir)]
-    home_dir = os.environ.get("HOME", "")
-    if home_dir:
-        search_roots.append(Path(home_dir))
+    search_roots = [Path(root_dir), get_home_dir()]
 
     for search_root in search_roots:
         for relative in _PLUGIN_JSON_RELATIVES:
             candidate = search_root / relative
             if candidate.exists():
                 return str(candidate)
-        cached = sorted(str(path) for path in search_root.glob(_PLUGIN_CACHE_GLOB))
+        cached = sorted(
+            str(path) for glob in _PLUGIN_CACHE_GLOBS for path in search_root.glob(glob)
+        )
         if cached:
             return cached[0]
     return None
