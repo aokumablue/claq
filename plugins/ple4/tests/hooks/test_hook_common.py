@@ -11,6 +11,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta
@@ -106,131 +107,13 @@ class _FakeStdin:
         raise AssertionError("バイト読みでは text read を使わない")
 
 
-def _patch_select_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    """select を常に ready 扱いへ差し替える（フェイク stdin は実 fd を持たないため）。"""
-    monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: (r, [], []))
-
-
-class TestStdinReady:
-    """_stdin_ready の TTY/タイムアウトガードのテスト（旧 launcher._read_stdin 相当）。"""
-
-    def test_tty_returns_false_without_calling_select(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload", tty=True))
-
-        def fail_select(*args):  # noqa: ANN002
-            raise AssertionError("select must not be called for tty stdin")
-
-        monkeypatch.setattr(hook_common.select, "select", fail_select)
-
-        assert hook_common._stdin_ready() is False
-
-    def test_ready_pipe_returns_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload"))
-        _patch_select_ready(monkeypatch)
-
-        assert hook_common._stdin_ready() is True
-
-    def test_timeout_returns_false_and_warns(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """select タイムアウト時は stderr 警告のうえ False を返す（NG-B1 回帰）。"""
-        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload"))
-        monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: ([], [], []))
-
-        assert hook_common._stdin_ready() is False
-        assert "リダイレクト漏れ" in capsys.readouterr().err
-
-    def test_stdin_none_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """detach された子プロセス等で sys.stdin が None の場合は False（A-01）。"""
-        monkeypatch.setattr(hook_common.sys, "stdin", None)
-
-        assert hook_common._stdin_ready() is False
-
-    def test_isatty_oserror_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """isatty() が OSError を投げても例外を伝播せず False を返す（A-01）。"""
-
-        class _RaisingStdin:
-            def isatty(self) -> bool:
-                raise OSError("bad fd")
-
-        monkeypatch.setattr(hook_common.sys, "stdin", _RaisingStdin())
-
-        assert hook_common._stdin_ready() is False
-
-    def test_select_value_error_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """select.select が ValueError を投げても例外を伝播せず False を返す（A-01）。"""
-        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload"))
-
-        def _raise(*args):  # noqa: ANN002
-            raise ValueError("negative fd")
-
-        monkeypatch.setattr(hook_common.select, "select", _raise)
-
-        assert hook_common._stdin_ready() is False
-
-    def test_select_attribute_error_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """select.select が AttributeError を投げても例外を伝播せず False を返す（A-01）。"""
-        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload"))
-
-        def _raise(*args):  # noqa: ANN002
-            raise AttributeError("no fileno")
-
-        monkeypatch.setattr(hook_common.select, "select", _raise)
-
-        assert hook_common._stdin_ready() is False
-
-
-class TestReadRawStdin:
-    """read_raw_stdin のバイト単位制限・stdin ガードのテスト。"""
-
-    def test_limits_by_bytes_not_chars_with_buffer(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """buffer 付き stdin はバイト単位で読み取りを制限する。"""
-        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("あ" * 10))
-        _patch_select_ready(monkeypatch)
-
-        result = hook_common.read_raw_stdin(max_bytes=10)
-
-        # 10 バイト = 「あ」3 文字（9 バイト）+ 切断された 1 バイト（置換文字）
-        assert result == "あああ�"
-
-    def test_text_stdin_is_byte_truncated(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """buffer を持たない stdin（io.StringIO 等）もバイト換算で切り捨てる。"""
-        monkeypatch.setattr(hook_common.sys, "stdin", io.StringIO("あ" * 10))
-        _patch_select_ready(monkeypatch)
-
-        result = hook_common.read_raw_stdin(max_bytes=10)
-
-        assert len(result.encode("utf-8")) <= 12  # 置換文字を含む 10 バイト相当
-        assert result.startswith("あああ")
-
-    def test_small_input_passes_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """制限未満の入力はそのまま返る。"""
-        monkeypatch.setattr(hook_common.sys, "stdin", io.StringIO("hello"))
-        _patch_select_ready(monkeypatch)
-
-        assert hook_common.read_raw_stdin() == "hello"
-
-    def test_tty_returns_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload", tty=True))
-
-        assert hook_common.read_raw_stdin() == ""
-
-    def test_select_timeout_returns_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        fake_stdin = _FakeStdin("payload")
-        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
-        monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: ([], [], []))
-
-        assert hook_common.read_raw_stdin() == ""
-        assert fake_stdin.read_called is False
-
-
 class _QueueBuffer:
     """複数回の `.read1(n)` 呼び出しへ順番にバイト列を返すフェイク buffer。
 
-    `_FakeBuffer` と異なり、同じデータを毎回先頭から返すのではなく
-    キューを 1 件ずつ消費する。実 BufferedReader が複数回の read1 で
-    少しずつデータを返す（あるいは EOF で b"" を返す）挙動を模す。
-    キューが尽きたあとは常に b""（EOF）を返す。
+    `_FakeBuffer` と異なり、同じデータを毎回先頭から返すのではなくキューを
+    1 件ずつ消費する。実 BufferedReader が複数回の read1 で少しずつデータを
+    返す（あるいは EOF で b"" を返す）挙動を模す。キューが尽きたあとは常に
+    b""（EOF）を返す。
     """
 
     def __init__(self, chunks: list[bytes]) -> None:
@@ -241,29 +124,20 @@ class _QueueBuffer:
 
         Returns:
             なし
-
-        Raises:
-            例外は発生しません。
         """
         self._chunks = list(chunks)
 
     def read1(self, n: int = -1) -> bytes:
         """キューの先頭チャンクから最大 `n` バイトを返す。尽きていれば EOF（b""）。
 
-        `n` バイト未満のキューであれば先頭チャンクをそのまま返して消費する。
         `n` バイト以上あれば先頭 `n` バイトだけを返し、残りは次回呼び出し用に
         キューの先頭へ戻す（実 `read1()` が要求量を超えて返さない挙動を模す）。
-        呼び出し側の `min(STDIN_CHUNK_BYTES, max_bytes - len(collected))` の
-        境界計算が壊れていれば、要求量を超えたバイト列を返してしまい検知できる。
 
         Args:
             n: 呼び出し側が要求する最大バイト数。負値なら無制限。
 
         Returns:
-            キューの次のバイト列（最大 `n` バイト）、または尽きていれば b"" を返す。
-
-        Raises:
-            例外は発生しません。
+            キューの次のバイト列（最大 `n` バイト）、または尽きていれば b""。
         """
         if not self._chunks:
             return b""
@@ -286,17 +160,11 @@ class _QueueStdin:
 
         Returns:
             なし
-
-        Raises:
-            例外は発生しません。
         """
         self.buffer = _QueueBuffer(chunks)
 
     def isatty(self) -> bool:
         """常に非 TTY（パイプ接続）を表す False を返す。
-
-        Args:
-            なし
 
         Returns:
             False
@@ -304,197 +172,269 @@ class _QueueStdin:
         return False
 
 
-class _CountingSelect:
-    """`select.select` の呼び出し回数を数えつつ常に ready を返す差し替え関数。"""
+class _BlockingBuffer:
+    """先頭チャンクを返した後、以降の `.read1()` で永久にブロックするフェイク buffer。
 
-    def __init__(self) -> None:
-        """呼び出し回数カウンタを 0 で初期化する。"""
-        self.call_count = 0
+    書き手が payload を送り切らないまま接続も閉じない状態を模す。ワーカー
+    スレッドは daemon なので、ブロックしたまま残ってもプロセス終了は妨げない。
+    """
 
-    def __call__(self, rlist, wlist, xlist, timeout):  # noqa: ANN001
-        """呼び出し回数を記録し、常に rlist を ready として返す。
+    def __init__(self, chunks: list[bytes]) -> None:
+        """フェイク buffer を構築する。
 
         Args:
-            rlist: 監視対象の読み取り fd リスト。
-            wlist: 監視対象の書き込み fd リスト（未使用）。
-            xlist: 監視対象の例外 fd リスト（未使用）。
-            timeout: select のタイムアウト秒数（未使用）。
+            chunks: `.read1()` が順に返すバイト列。尽きた後はブロックする。
 
         Returns:
-            (rlist, [], []) を返す（常に ready）。
+            なし
         """
-        self.call_count += 1
-        return rlist, [], []
+        self._chunks = list(chunks)
+        self._blocked = threading.Event()
+
+    def read1(self, n: int = -1) -> bytes:
+        """次のチャンクを返す。尽きていれば永久にブロックする。
+
+        Args:
+            n: 要求する最大バイト数。
+
+        Returns:
+            次のチャンク（最大 `n` バイト）。
+
+        Raises:
+            例外は発生しません。
+        """
+        if not self._chunks:
+            self._blocked.wait()
+            return b""
+        chunk = self._chunks.pop(0)
+        return chunk if n < 0 or n >= len(chunk) else chunk[:n]
 
 
-def _make_stateful_monotonic(values: list[float]):  # noqa: ANN201
-    """`time.monotonic` の差し替え関数を作る。
+class _BlockingStdin:
+    """`.buffer` に `_BlockingBuffer` を持つフェイク stdin。isatty は常に False。"""
 
-    values を順に返し、尽きたあとは最後の値を返し続ける（無限ループでの
-    StopIteration/IndexError を避けるため）。
+    def __init__(self, chunks: list[bytes]) -> None:
+        """フェイク stdin を構築する。
 
-    Args:
-        values: 呼び出し順に返す時刻値のリスト。
+        Args:
+            chunks: `.buffer.read1()` が順に返すバイト列。
 
-    Returns:
-        呼び出すたびに次の時刻値を返す callable。
+        Returns:
+            なし
+        """
+        self.buffer = _BlockingBuffer(chunks)
 
-    Raises:
-        例外は発生しません。
+    def isatty(self) -> bool:
+        """常に非 TTY（パイプ接続）を表す False を返す。
+
+        Returns:
+            False
+        """
+        return False
+
+
+class TestStdinIsAbsent:
+    """`_stdin_is_absent`（読む対象があるかの判定）のテスト。
+
+    ここが True になる経路だけが「payload なし = 素通り」であり、それ以外は
+    実際に読んでみて判断する。select による readiness 判定は Windows の
+    パイプで OSError になり「入力なし」に化けていたため撤去した（P1-004）。
     """
-    iterator = iter(values)
-    last = {"value": values[-1]}
 
-    def _monotonic() -> float:
-        value = next(iterator, None)
-        if value is None:
-            return last["value"]
-        last["value"] = value
-        return value
+    def test_tty_is_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """TTY 接続（人手による直接起動）は payload なしとして扱う。"""
+        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload", tty=True))
 
-    return _monotonic
+        assert hook_common._stdin_is_absent() is True
+
+    def test_pipe_is_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """非 TTY のパイプは payload ありとして扱う。"""
+        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload"))
+
+        assert hook_common._stdin_is_absent() is False
+
+    def test_stdin_none_is_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """detach された子プロセス等で sys.stdin が None の場合は payload なし。"""
+        monkeypatch.setattr(hook_common.sys, "stdin", None)
+
+        assert hook_common._stdin_is_absent() is True
+
+    @pytest.mark.parametrize("error", [OSError("bad fd"), ValueError("closed"), AttributeError("x")])
+    def test_isatty_failure_is_not_treated_as_absent(
+        self, monkeypatch: pytest.MonkeyPatch, error: Exception
+    ) -> None:
+        """isatty() が例外化した場合は「無い」と決めつけず、読み取り側へ委ねる。
+
+        ここで True を返すと、判定不能を「payload なし = 素通り」へ倒すことに
+        なり、P1-004 と同じ fail-open を別経路で再生産する。
+        """
+
+        class _RaisingStdin:
+            def isatty(self) -> bool:
+                raise error
+
+        monkeypatch.setattr(hook_common.sys, "stdin", _RaisingStdin())
+
+        assert hook_common._stdin_is_absent() is False
+
+
+class TestReadRawStdin:
+    """read_raw_stdin のバイト単位制限・stdin ガードのテスト。"""
+
+    def test_limits_by_bytes_not_chars_with_buffer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """buffer 付き stdin はバイト単位で読み取りを制限する。"""
+        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("あ" * 10))
+
+        result = hook_common.read_raw_stdin(max_bytes=10)
+
+        # 10 バイト = 「あ」3 文字（9 バイト）+ 切断された 1 バイト（置換文字）
+        assert result == "あああ�"
+
+    def test_text_stdin_is_byte_truncated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """buffer を持たない stdin（io.StringIO 等）もバイト換算で切り捨てる。"""
+        monkeypatch.setattr(hook_common.sys, "stdin", io.StringIO("あ" * 10))
+
+        result = hook_common.read_raw_stdin(max_bytes=10)
+
+        assert len(result.encode("utf-8")) <= 12  # 置換文字を含む 10 バイト相当
+        assert result.startswith("あああ")
+
+    def test_small_input_passes_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """制限未満の入力はそのまま返る。"""
+        monkeypatch.setattr(hook_common.sys, "stdin", io.StringIO("hello"))
+
+        assert hook_common.read_raw_stdin() == "hello"
+
+    def test_tty_returns_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """TTY 接続では読まずに空文字列を返す。"""
+        fake_stdin = _FakeStdin("payload", tty=True)
+        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
+
+        assert hook_common.read_raw_stdin() == ""
+
+    def test_unavailable_stdin_returns_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """読み取り不能でも空文字列を返す（非保護経路は fail-open のまま）。
+
+        保護 hook 側は `read_raw_stdin_with_truncation` の
+        `StdinUnavailableError` を捕捉して deny に倒す（ADR-0019）。両者を
+        同じ関数にしないのは、launcher の `--bg` 中継や `mem context` には
+        「読めなかった」ときに採れる別の行動が無いため。
+        """
+        monkeypatch.setattr(hook_common, "STDIN_FIRST_BYTE_TIMEOUT", 0.05)
+        monkeypatch.setattr(hook_common.sys, "stdin", _BlockingStdin([]))
+
+        assert hook_common.read_raw_stdin() == ""
 
 
 class TestReadStdinBytesChunkedDeadline:
     """`_read_stdin_bytes` のチャンクループ・デッドライン挙動のテスト。
 
-    NG-B2 回帰防止: `.buffer.read(max_bytes)` 1 回きりの旧実装（および
-    `.read1()` を使わず `.read()` でチャンク読みするだけの中間実装）は、書き手が
+    NG-B2 回帰防止: `.buffer.read(max_bytes)` 1 回きりの旧実装は、書き手が
     `max_bytes` に満たないデータしか送らず接続も閉じない場合に無期限へ
-    ブロックしていた。新実装は STDIN_CHUNK_BYTES 単位のループと
-    STDIN_READ_DEADLINE_SECONDS の壁時計予算で打ち切る。
+    ブロックしていた。現行実装はブロッキング read をワーカースレッドへ隔離し、
+    本スレッドは queue のタイムアウトで打ち切る（select は使わない）。
     """
 
     def test_multi_chunk_read_reassembles_full_bytes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """小さい STDIN_CHUNK_BYTES でも複数チャンクを結合して全データを返す。"""
         monkeypatch.setattr(hook_common, "STDIN_CHUNK_BYTES", 4)
-        fake_stdin = _QueueStdin([b"abcd", b"efgh", b"ij"])
-        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
-        counting_select = _CountingSelect()
-        monkeypatch.setattr(hook_common.select, "select", counting_select)
+        monkeypatch.setattr(hook_common.sys, "stdin", _QueueStdin([b"abcd", b"efgh", b"ij"]))
 
-        result = hook_common._read_stdin_bytes(10)
+        assert hook_common._read_stdin_bytes(10) == b"abcdefghij"
 
-        assert result == b"abcdefghij"
-        assert counting_select.call_count > 1
-
-    def test_chunk_request_size_respects_max_bytes_boundary(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """各 read1 呼び出しの要求量は `min(STDIN_CHUNK_BYTES, max_bytes - len(collected))` を厳守する。
+    def test_chunk_request_size_respects_max_bytes_boundary(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """各 read1 の要求量が `min(STDIN_CHUNK_BYTES, max_bytes - collected)` を厳守する。
 
         `_QueueBuffer` は要求された `n` を実際に守ってスライスするため、
-        呼び出し側が `min` の境界計算を誤る（例えば `max` と取り違える）と、
-        2 周目のチャンク読みが真の残り予算より多いバイト数を要求してしまう。
-        1 周目はキューの先頭チャンク（2 バイト）が要求量より短いため
-        `min`/`max` どちらでも同じ 2 バイトしか返らないが、2 周目に十分な
-        データ（8 バイト）が残っているため、`min` を使わないと
-        `max_bytes` を超えるバイト列を集めてしまう。この非対称な配置に
-        よって `min` と `max` の取り違えを判別可能にしている
-        （STDIN_CHUNK_BYTES=4・max_bytes=5・1 周目 "ab"・2 周目以降
-        "cdefghij" という配置で、`min` なら 2 周目要求量は
-        `min(4, 5-2)=3` だが `max` なら `max(4, 5-2)=4` になり
-        `max_bytes` を 1 バイト超過する）。
+        呼び出し側が `min` を `max` と取り違えると 2 周目で `max_bytes` を
+        超えるバイト列を集めてしまい、ここで検出できる。
         """
         monkeypatch.setattr(hook_common, "STDIN_CHUNK_BYTES", 4)
-        fake_stdin = _QueueStdin([b"ab", b"cdefghij"])
-        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
-        _patch_select_ready(monkeypatch)
+        monkeypatch.setattr(hook_common.sys, "stdin", _QueueStdin([b"ab", b"cdefghij"]))
 
         result = hook_common._read_stdin_bytes(5)
 
         assert result == b"abcde"
-        assert len(result) <= 5
 
-    def test_single_chunk_fast_path_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """全データが 1 回のチャンク読みで収まる場合、旧実装と同じ結果を返す。"""
-        fake_stdin = _QueueStdin([b"hello"])
-        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
-        _patch_select_ready(monkeypatch)
+    def test_single_chunk_fast_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """全データが 1 回のチャンク読みで収まる場合もそのまま返す。"""
+        monkeypatch.setattr(hook_common.sys, "stdin", _QueueStdin([b"hello"]))
 
-        result = hook_common._read_stdin_bytes(10)
-
-        assert result == b"hello"
+        assert hook_common._read_stdin_bytes(10) == b"hello"
 
     def test_eof_before_max_bytes_returns_partial_data_without_warning(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """書き手が max_bytes 未満で接続を閉じた（EOF）場合、警告なしで部分データを返す。"""
-        fake_stdin = _QueueStdin([b"abc"])
-        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
-        _patch_select_ready(monkeypatch)
+        monkeypatch.setattr(hook_common.sys, "stdin", _QueueStdin([b"abc"]))
 
         result = hook_common._read_stdin_bytes(10)
 
         assert result == b"abc"
         assert capsys.readouterr().err == ""
 
-    def test_deadline_exceeded_returns_partial_data_and_warns(
+    def test_stalled_writer_after_first_chunk_returns_partial_and_warns(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """壁時計予算を超えたら、部分データを返しつつ stderr に警告を出す（実時間待機なし）。"""
-        fake_stdin = _QueueStdin([b"abc"])
-        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
-        _patch_select_ready(monkeypatch)
-        # 呼び出し順: [0] deadline 算出, [1] 1 周目 remaining_time（正）,
-        # [2] 2 周目 remaining_time（deadline 超過）。
-        monkeypatch.setattr(
-            hook_common.time, "monotonic", _make_stateful_monotonic([0.0, 0.1, 100.0])
-        )
+        """1 チャンク受信後に書き手が止まったら、予算切れで部分データを返し警告する。"""
+        monkeypatch.setattr(hook_common, "STDIN_READ_DEADLINE_SECONDS", 0.05)
+        monkeypatch.setattr(hook_common.sys, "stdin", _BlockingStdin([b"abc"]))
 
-        # time.monotonic 自体を差し替えているため、実経過時間の計測には
-        # 差し替えていない perf_counter を使う（monotonic を使うと自分の
-        # 呼び出しがフェイクのキューを消費してしまい測定が壊れる）。
         started = time.perf_counter()
         result = hook_common._read_stdin_bytes(10)
         elapsed = time.perf_counter() - started
 
         assert result == b"abc"
-        assert elapsed < 1.0
+        assert elapsed < 5.0
         assert "上限時間に達した" in capsys.readouterr().err
 
-    def test_select_not_ready_mid_read_returns_partial_data_and_warns(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    def test_first_byte_timeout_raises_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """最初のバイトが届かないまま予算切れになったら例外を送出する。
+
+        旧実装はここで空文字列を返しており、保護 hook が payload を 1 バイトも
+        読まないまま許可側へ抜けていた（P1-004 の fail-open）。
+        """
+        monkeypatch.setattr(hook_common, "STDIN_FIRST_BYTE_TIMEOUT", 0.05)
+        monkeypatch.setattr(hook_common.sys, "stdin", _BlockingStdin([]))
+
+        with pytest.raises(hook_common.StdinUnavailableError):
+            hook_common._read_stdin_bytes(10)
+
+    @pytest.mark.parametrize("error", [OSError("bad fd"), ValueError("closed file")])
+    def test_read1_failure_before_any_data_raises_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch, error: Exception
     ) -> None:
-        """1 バイト目以降の select が非 ready になったら部分データを返し警告を出す。"""
-        fake_stdin = _QueueStdin([b"abc"])
-        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
-        call_count = {"n": 0}
+        """1 バイトも読めていない状態での read1 例外は「読めなかった」として送出する。
 
-        def flaky_select(rlist, wlist, xlist, timeout):  # noqa: ANN001
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                return rlist, [], []
-            return [], [], []
+        Windows の通常パイプで select が OSError になっていた経路と同型で、
+        ここを空文字列へ正規化すると allow と deny が同じ exit 0 になる。
+        """
 
-        monkeypatch.setattr(hook_common.select, "select", flaky_select)
+        class _RaisingBuffer:
+            def read1(self, n: int = -1) -> bytes:
+                raise error
 
-        result = hook_common._read_stdin_bytes(10)
+        class _RaisingStdin:
+            buffer = _RaisingBuffer()
 
-        assert result == b"abc"
-        assert "リダイレクト漏れ" in capsys.readouterr().err
-        assert call_count["n"] == 2
+            def isatty(self) -> bool:
+                return False
 
-    def test_select_oserror_mid_read_returns_partial_data(
+        monkeypatch.setattr(hook_common.sys, "stdin", _RaisingStdin())
+
+        with pytest.raises(hook_common.StdinUnavailableError):
+            hook_common._read_stdin_bytes(10)
+
+    def test_read1_failure_after_partial_data_returns_partial(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ループ内 select.select が OSError を投げても部分データで打ち切る（A-01）。"""
-        fake_stdin = _QueueStdin([b"abc"])
-        monkeypatch.setattr(hook_common.sys, "stdin", fake_stdin)
-        call_count = {"n": 0}
+        """部分データを受け取った後の read1 例外は、その部分データで打ち切る。
 
-        def flaky_select(rlist, wlist, xlist, timeout):  # noqa: ANN001
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                return rlist, [], []
-            raise OSError("bad fd")
-
-        monkeypatch.setattr(hook_common.select, "select", flaky_select)
-
-        result = hook_common._read_stdin_bytes(10)
-
-        assert result == b"abc"
-
-    def test_read1_valueerror_returns_partial_data(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """read1() が ValueError（closed file 等）を投げても部分データで打ち切る（A-01）。"""
+        壊れた JSON として後段の `parse_json_object` が None を返し、保護 hook は
+        そこで fail-closed に倒す（判定は 1 箇所に集約する）。
+        """
 
         class _RaisingBuffer:
             def __init__(self, first: bytes) -> None:
@@ -511,17 +451,17 @@ class TestReadStdinBytesChunkedDeadline:
             def __init__(self, buffer: _RaisingBuffer) -> None:
                 self.buffer = buffer
 
+            def isatty(self) -> bool:
+                return False
+
         monkeypatch.setattr(hook_common.sys, "stdin", _RaisingStdin(_RaisingBuffer(b"abc")))
-        _patch_select_ready(monkeypatch)
 
-        result = hook_common._read_stdin_bytes(10)
+        assert hook_common._read_stdin_bytes(10) == b"abc"
 
-        assert result == b"abc"
-
-    def test_no_buffer_read_oserror_returns_empty_bytes(
+    def test_no_buffer_read_failure_raises_unavailable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """buffer なし stdin（io.StringIO 等）の read() が OSError を投げても空バイト列を返す（A-01）。"""
+        """buffer なし stdin の read() が失敗した場合も「読めなかった」として送出する。"""
 
         class _RaisingTextStdin:
             def read(self, n: int = -1) -> str:
@@ -529,9 +469,20 @@ class TestReadStdinBytesChunkedDeadline:
 
         monkeypatch.setattr(hook_common.sys, "stdin", _RaisingTextStdin())
 
-        result = hook_common._read_stdin_bytes(10)
+        with pytest.raises(hook_common.StdinUnavailableError):
+            hook_common._read_stdin_bytes(10)
 
-        assert result == b""
+
+class TestStdinUnreadableMessage:
+    """`stdin_unreadable_message` の文面契約。"""
+
+    def test_message_names_the_hook_and_reason(self) -> None:
+        """hook 名と理由の両方が deny 理由に載ること（診断可能性）。"""
+        message = hook_common.stdin_unreadable_message("pre:block-no-verify", "boom")
+
+        assert "pre:block-no-verify" in message
+        assert "boom" in message
+        assert "BLOCKED" in message
 
 
 class TestResolveRepoRoot:
@@ -687,8 +638,8 @@ class TestReadRawStdinWithTruncation:
     """read_raw_stdin_with_truncation の切り捨て判定・stdin ガードのテスト。"""
 
     def test_no_truncation_when_within_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """上限内の入力はそのまま、切り捨てフラグは False。"""
         monkeypatch.setattr(hook_common.sys, "stdin", io.StringIO("short"))
-        _patch_select_ready(monkeypatch)
 
         text, truncated = hook_common.read_raw_stdin_with_truncation()
 
@@ -696,8 +647,8 @@ class TestReadRawStdinWithTruncation:
         assert truncated is False
 
     def test_truncates_when_exceeding_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """上限超過の入力は切り捨てたうえでフラグを立てる。"""
         monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("a" * 20))
-        _patch_select_ready(monkeypatch)
 
         text, truncated = hook_common.read_raw_stdin_with_truncation(max_bytes=10)
 
@@ -705,6 +656,7 @@ class TestReadRawStdinWithTruncation:
         assert truncated is True
 
     def test_tty_returns_empty_and_not_truncated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """TTY 接続は payload なしとして空文字列を返す（例外にしない）。"""
         monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload", tty=True))
 
         text, truncated = hook_common.read_raw_stdin_with_truncation()
@@ -712,14 +664,15 @@ class TestReadRawStdinWithTruncation:
         assert text == ""
         assert truncated is False
 
-    def test_select_timeout_returns_empty_and_not_truncated(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(hook_common.sys, "stdin", _FakeStdin("payload"))
-        monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: ([], [], []))
+    def test_unreadable_stdin_raises_for_protection_hooks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """読み取り不能は例外にする（保護 hook が deny へ倒せるようにする）。"""
+        monkeypatch.setattr(hook_common, "STDIN_FIRST_BYTE_TIMEOUT", 0.05)
+        monkeypatch.setattr(hook_common.sys, "stdin", _BlockingStdin([]))
 
-        text, truncated = hook_common.read_raw_stdin_with_truncation()
-
-        assert text == ""
-        assert truncated is False
+        with pytest.raises(hook_common.StdinUnavailableError):
+            hook_common.read_raw_stdin_with_truncation()
 
 
 class TestParseJsonObject:

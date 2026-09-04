@@ -20,18 +20,6 @@ from ple4.hooks import (
 from ple4.hooks.hook_common import is_truthy
 
 
-def _patch_stdin_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    """hook_common.read_raw_stdin* が使う select を常に ready 扱いにする。
-
-    io.StringIO は実 fd を持たないため、select.select をそのまま通すと
-    io.UnsupportedOperation で落ちる（_stdin_ready の TTY/タイムアウト
-    ガードは launcher._read_stdin から移設済み）。
-    """
-    from ple4.hooks import hook_common
-
-    monkeypatch.setattr(hook_common.select, "select", lambda r, w, x, t: (r, [], []))
-
-
 def _run_config_protection(monkeypatch: pytest.MonkeyPatch, payload: dict) -> tuple[int, str, str]:
     """stdin を差し替えて config_protection.main を実行する。
 
@@ -42,7 +30,6 @@ def _run_config_protection(monkeypatch: pytest.MonkeyPatch, payload: dict) -> tu
     Returns:
         (終了コード, stdout, stderr) のタプル。
     """
-    _patch_stdin_ready(monkeypatch)
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
     stderr = io.StringIO()
     stdout = io.StringIO()
@@ -173,7 +160,6 @@ def test_config_protection_blocks_legacy_file_field(monkeypatch: pytest.MonkeyPa
 
 
 def test_config_protection_entrypoint_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_stdin_ready(monkeypatch)
     payload = json.dumps({"tool_input": {"file_path": "README.md"}})
     monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
     monkeypatch.setattr(sys, "argv", ["config_protection.py"])

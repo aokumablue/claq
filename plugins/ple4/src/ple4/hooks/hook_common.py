@@ -9,12 +9,13 @@ from __future__ import annotations
 import functools
 import json
 import os
+import queue
 import re
-import select
 import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -497,17 +498,32 @@ def resolve_repo_root() -> Path | None:
         return None
 
 
+class StdinUnavailableError(RuntimeError):
+    """stdin に payload があるはずなのに読み取れなかったことを表す例外。
+
+    「payload が無い」（tty 起動・stdin 未接続・即 EOF）とは区別する。前者は
+    ホストがそもそも入力を渡していない状態で、保護 hook が検査すべき対象自体
+    が存在しない。後者は「入力はあるはずなのに取り出せなかった」状態であり、
+    保護 hook が判定不能のまま許可へ倒すと、まさに守るべきコマンドが素通り
+    する（実測: Windows で ``select.select`` が ``OSError`` になり、
+    ``git commit --no-verify`` と ``git status`` が揃って exit 0 になった。
+    release-verify 2026-09-03 の P1-004）。呼び出し側にこの 2 つを取り違え
+    させないため、後者だけを例外として区別する（詳細は
+    ``docs/adr/0019-*.md``）。
+    """
+
+
 # hooks は Claude Code が spawn 直後に stdin へ JSON を書き込むため、
 # 最初のバイト到着まで 2 秒あれば十分な余裕がある。
 # stdin リダイレクト漏れ（パイプ未接続のまま open）での無期限ブロックを防ぐ。
 # launcher がインプロセス実行になったことで、この guard は各フックが
 # 自分で stdin を読む read_raw_stdin* の先頭に置く（旧: launcher._read_stdin）。
-STDIN_FIRST_BYTE_TIMEOUT = 1.0
+STDIN_FIRST_BYTE_TIMEOUT = 2.0
 
 # _read_stdin_bytes のチャンク読み取りループ全体に許す壁時計予算（秒）。
-# _stdin_ready の最初のバイト到着待ち（STDIN_FIRST_BYTE_TIMEOUT）とは別予算で、
-# _read_stdin_bytes が呼ばれた時点から計測する。hooks の stdin ペイロードは
-# Claude Code から渡される KB オーダーの JSON であり、5 秒は正常系では絶対に
+# 最初のバイト到着待ち（STDIN_FIRST_BYTE_TIMEOUT）とは別予算で、最初の
+# チャンクを受け取った時点から計測する。hooks の stdin ペイロードは
+# Claude Code から渡される KB オーダーの JSON であり、3 秒は正常系では絶対に
 # 触れない余裕であって、正常系を制約する値ではない。
 STDIN_READ_DEADLINE_SECONDS = 3.0
 
@@ -515,166 +531,218 @@ STDIN_READ_DEADLINE_SECONDS = 3.0
 STDIN_CHUNK_BYTES = 65536
 
 
-def _stdin_ready() -> bool:
-    """stdin が TTY でなく、最初のバイトが時間内に届くかを判定します。
+def _stdin_is_absent() -> bool:
+    """stdin がそもそも存在しない（読む対象が無い）かを判定します。
 
-    `sys.stdin` が None（detach された子プロセス等）の場合や、
-    `isatty()`/`select.select` が OSError/ValueError を投げる場合も
-    「入力なし」として扱い、例外を外へ伝播させません
-    （A-01: docstring の「例外は発生しません」を実装で保証する）。
+    ``sys.stdin`` が None（detach された子プロセス等）か、TTY に繋がって
+    いる（人手による直接起動）場合を「payload なし」として扱います。
+    ``isatty()`` が例外化する場合は「判定できない」ため False を返し、
+    実際の読み取り側（`_read_stdin_bytes`）に判断を委ねます。
 
     Args:
         なし
 
     Returns:
-        読み取りを続行してよければ True。stdin が None、TTY 接続時、
-        STDIN_FIRST_BYTE_TIMEOUT 秒以内に最初のバイトが到着しない場合、
-        または syscall が例外化した場合は False（select 非 ready の
-        場合のみ stderr に警告を出す）。
+        読む対象が無いと確定できれば True。
 
     Raises:
         例外は発生しません。
     """
     if sys.stdin is None:
-        return False
+        return True
     try:
-        if sys.stdin.isatty():
-            return False
-        ready, _, _ = select.select([sys.stdin], [], [], STDIN_FIRST_BYTE_TIMEOUT)
+        return bool(sys.stdin.isatty())
     except (OSError, ValueError, AttributeError):
         return False
-    if not ready:
-        write_stderr(
-            "WARNING: stdin から入力が届かないため空入力で続行します（stdin リダイレクト漏れの可能性）\n"
-        )
-        return False
-    return True
+
+
+def _pump_stdin(stdin_buffer: Any, max_bytes: int, sink: queue.Queue) -> None:
+    """stdin をチャンク単位で読み、結果を `sink` へ流す（ワーカースレッド本体）。
+
+    ``select.select`` は使いません。Windows では select が socket にしか
+    使えず、通常のパイプに対して ``OSError`` を投げます。その例外を
+    「入力なし」と読み替えていたため、保護 hook が payload を 1 バイトも
+    読まずに許可側へ抜けていました（P1-004）。ブロッキング read を
+    ワーカースレッドへ隔離し、呼び出し側が queue のタイムアウトで待つ形に
+    すると、readiness 判定に OS 固有 API が要らなくなり、3 プラットフォーム
+    で同一のロジックになります。
+
+    各チャンクは ``.read()`` ではなく ``.read1()`` で読みます。``.read(n)``
+    は ``n`` バイト届くか EOF まで待ち続けるため、書き手が途中で止まると
+    デッドライン判定の外側でブロックし続けます。
+
+    Args:
+        stdin_buffer: 読み取り対象のバイナリストリーム。
+        max_bytes: 読み取る最大バイト数。
+        sink: ``("data", bytes)`` / ``("error", Exception)`` を受け取るキュー。
+
+    Returns:
+        なし
+
+    Raises:
+        例外は発生しません（読み取り例外は sink へ載せます）。
+    """
+    collected = 0
+    try:
+        while collected < max_bytes:
+            chunk = stdin_buffer.read1(min(STDIN_CHUNK_BYTES, max_bytes - collected))
+            sink.put(("data", chunk))
+            if not chunk:
+                return
+            collected += len(chunk)
+    except (OSError, ValueError, AttributeError) as exc:
+        # AttributeError は `.buffer` があるのに `.read1` を持たない stdin
+        # （pytest の DontReadFromInput 等）。読めない点は OSError と同じなので
+        # 同じ扱いにする。ここで捕らえないとワーカースレッド内で例外が消える。
+        sink.put(("error", exc))
 
 
 def _read_stdin_bytes(max_bytes: int) -> bytes:
     """stdin から最大 `max_bytes` 分をバイト列として読みます。
 
-    `.buffer` がある場合は STDIN_CHUNK_BYTES 単位のチャンクをループで読み
-    継ぎます。各チャンクは `.read()` ではなく `.read1()` で読みます。
-    `.read(n)` は `n` バイト届くか EOF まで待ち続けるため、書き手が
-    チャンクサイズ未満のデータを送って途中で止まった場合、1 回の
-    `.read()` 呼び出し自体がデッドラインの外側で無期限ブロックしえます。
-    `.read1()` は下層の 1 回の raw read で得られた分だけを即座に返すため、
-    実際に読めたバイト数に関わらず必ずループへ制御が戻り、デッドライン
-    判定が機能します（`sys.stdin.buffer` は `io.BufferedReader` であり
-    `.read1()` を常に持ちます。`.read1()` を持たないオブジェクトは
-    `fileno()` も持たない/使えないことが多く、`select.select` が
-    OSError/ValueError を投げうる状態です。本関数はループ内の
-    `select.select` と `.read1()`/`.read()` の両方を
-    (OSError, ValueError) で捕捉し、その時点までの部分データ（空の
-    場合を含む）を返します（A-01: `_stdin_ready` 通過後でも下層の
-    fd がその後閉じられる等の競合で例外化しうるため、二重の防御と
-    して本関数側でも捕捉します）。ループ全体には
-    `_read_stdin_bytes` 呼び出し開始時点
-    から STDIN_READ_DEADLINE_SECONDS 秒の壁時計予算があり、各チャンクの前に
-    `select` で次データの到着を待ちます。予算切れ・select 非 ready の
-    いずれでも、その時点まで集めた部分データを打ち切って返します（stderr
-    に警告）。低速/ハングした書き手が `max_bytes` に満たないデータしか
-    送らず接続も閉じない場合の無期限ブロックを防ぐためです。書き手が
-    正常にパイプを閉じた場合（EOF）は警告なしで打ち切ります。
-    `.buffer` が無い場合（io.StringIO 等）は文字数で読んだあと UTF-8 に
+    ``.buffer`` があればワーカースレッド（`_pump_stdin`）へブロッキング
+    read を隔離し、本スレッドは queue のタイムアウトで待ちます。最初の
+    チャンクは STDIN_FIRST_BYTE_TIMEOUT 秒、以降はそこから
+    STDIN_READ_DEADLINE_SECONDS 秒の予算で待ちます。ワーカーは daemon
+    なので、待ち切れずに残ってもプロセス終了を妨げません。
+
+    ``.buffer`` が無い場合（io.StringIO 等）は文字数で読んだあと UTF-8 に
     再エンコードします。文字数 read ではバイト上限を最大 4 倍超過しうる
     ため、呼び出し側でバイト換算の切り詰めを行います。
 
     Args:
-        max_bytes: 読み取る最大バイト数（buffer 無し時は最大文字数）です。
+        max_bytes: 読み取る最大バイト数です（buffer 無し時は最大文字数）。
 
     Returns:
-        読み取ったバイト列を返します。デッドライン超過・select 非 ready・
-        EOF・syscall 例外のいずれで打ち切られた場合も、その時点までの
-        部分データを返します。
+        読み取ったバイト列。1 バイト以上受け取った後にデッドライン超過・
+        読み取り例外・EOF で打ち切った場合は、その時点までの部分データを
+        返します（壊れた JSON として後段が fail-closed に倒します）。
 
     Raises:
-        例外は発生しません。
+        StdinUnavailableError: 1 バイトも受け取れないまま、読み取りが例外化
+            したか最初のバイトが時間内に届かなかった場合。
     """
     stdin_buffer = getattr(sys.stdin, "buffer", None)
     if stdin_buffer is None:
         try:
             return sys.stdin.read(max_bytes).encode("utf-8", errors="replace")
-        except (OSError, ValueError):
-            return b""
+        except (OSError, ValueError, AttributeError) as exc:
+            raise StdinUnavailableError(f"stdin の読み取りに失敗しました: {exc}") from exc
+
+    sink: queue.Queue = queue.Queue()
+    threading.Thread(
+        target=_pump_stdin, args=(stdin_buffer, max_bytes, sink), daemon=True
+    ).start()
 
     collected = b""
-    deadline = time.monotonic() + STDIN_READ_DEADLINE_SECONDS
+    deadline: float | None = None
     while len(collected) < max_bytes:
-        remaining_time = deadline - time.monotonic()
-        if remaining_time <= 0:
+        timeout = (
+            STDIN_FIRST_BYTE_TIMEOUT if deadline is None else max(0.0, deadline - time.monotonic())
+        )
+        try:
+            kind, payload = sink.get(timeout=timeout)
+        except queue.Empty:
+            if not collected:
+                raise StdinUnavailableError(
+                    "stdin の最初のバイトが "
+                    f"{STDIN_FIRST_BYTE_TIMEOUT} 秒以内に届きませんでした"
+                ) from None
             write_stderr(
                 "WARNING: stdin 読み取りが上限時間に達したため、"
                 "受信済みの部分データで打ち切ります（stdin の書き手が"
                 "応答しない可能性）\n"
             )
             break
-        try:
-            ready, _, _ = select.select([sys.stdin], [], [], remaining_time)
-        except (OSError, ValueError):
+        if kind == "error":
+            if not collected:
+                raise StdinUnavailableError(f"stdin の読み取りに失敗しました: {payload}")
             break
-        if not ready:
-            write_stderr(
-                "WARNING: stdin の続きが届かないため、受信済みの部分データで"
-                "打ち切ります（stdin リダイレクト漏れの可能性）\n"
-            )
+        if payload == b"":
             break
-        chunk_size = min(STDIN_CHUNK_BYTES, max_bytes - len(collected))
-        try:
-            chunk = stdin_buffer.read1(chunk_size)
-        except (OSError, ValueError):
-            break
-        if chunk == b"":
-            break
-        collected += chunk
+        collected += payload
+        if deadline is None:
+            deadline = time.monotonic() + STDIN_READ_DEADLINE_SECONDS
     return collected
 
 
 def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
     """標準入力から生のテキストをバイト単位の上限つきで読み取ります。
 
-    TTY 接続時、または最初のバイトが STDIN_FIRST_BYTE_TIMEOUT 秒以内に
-    届かない場合は空文字列を返します（stdin リダイレクト漏れでの無期限
-    ブロックを防ぐ）。
+    読み取れなかった場合も空文字列を返します。非保護経路（launcher の
+    ``--bg`` 中継・``mem.cli`` の payload 読み取り）専用で、これらは
+    「入力が無い」と「読めない」を区別しても採れる別の行動が無いためです
+    （どちらでも記録すべき材料が無い）。保護 hook は
+    `read_raw_stdin_with_truncation` を使い、`StdinUnavailableError` を
+    自分で捕捉して fail-closed に倒すこと。
 
     Args:
         max_bytes: 読み取る最大バイト数です。
 
     Returns:
-        読み取られた文字列（max_bytes バイトで切り捨て済み）を返します。
+        読み取られた文字列（max_bytes バイトで切り捨て済み）。読む対象が
+        無い場合・読み取れなかった場合は空文字列。
 
     Raises:
         例外は発生しません。
     """
-    if not _stdin_ready():
+    if _stdin_is_absent():
         return ""
-    return _read_stdin_bytes(max_bytes)[:max_bytes].decode("utf-8", errors="replace")
+    try:
+        raw_bytes = _read_stdin_bytes(max_bytes)
+    except StdinUnavailableError:
+        return ""
+    return raw_bytes[:max_bytes].decode("utf-8", errors="replace")
 
 
 def read_raw_stdin_with_truncation(max_bytes: int = MAX_STDIN_BYTES) -> tuple[str, bool]:
-    """標準入力を読み取り、切り捨ての有無を返します。
+    """標準入力を読み取り、切り捨ての有無を返します（保護 hook 用）。
 
-    TTY 接続時、または最初のバイトが STDIN_FIRST_BYTE_TIMEOUT 秒以内に
-    届かない場合は ("", False) を返します（stdin リダイレクト漏れでの
-    無期限ブロックを防ぐ）。
+    読む対象が無い場合（tty 起動・``sys.stdin`` が None・即 EOF）は
+    ``("", False)`` を返します。読み取り自体に失敗した場合は
+    `StdinUnavailableError` を送出します — 呼び出し側の保護 hook は
+    これを捕捉して deny に倒すこと（ADR-0019）。
 
     Args:
         max_bytes: 読み取る最大バイト数です。
 
     Returns:
-        読み取った文字列と、切り捨てが発生したかどうかのタプルを返します。
+        読み取った文字列と、切り捨てが発生したかどうかのタプル。
 
     Raises:
-        例外は発生しません。
+        StdinUnavailableError: payload があるはずなのに読み取れなかった場合。
     """
-    if not _stdin_ready():
+    if _stdin_is_absent():
         return "", False
     raw_bytes = _read_stdin_bytes(max_bytes + 1)
     truncated = len(raw_bytes) > max_bytes
     if truncated:
         raw_bytes = raw_bytes[:max_bytes]
     return raw_bytes.decode("utf-8", errors="replace"), truncated
+
+
+def stdin_unreadable_message(hook_name: str, reason: object) -> str:
+    """stdin 読み取り不能時の deny 理由を組み立てます。
+
+    4 つの保護 hook が同じ文面を使うための単一情報源です。片方だけ文面や
+    方針がずれると「Write なら止まるが Bash なら通る」型の非対称が再発
+    します。
+
+    Args:
+        hook_name: 呼び出し元 hook の識別名。
+        reason: 読み取りに失敗した理由（`StdinUnavailableError`）。
+
+    Returns:
+        deny 理由の文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        f"[Hook] BLOCKED: {hook_name} could not read its stdin payload ({reason}). "
+        "The tool call cannot be verified, so it is refused rather than allowed "
+        "through unchecked."
+    )
 
 
 def parse_json_object(raw: str) -> dict[str, Any] | None:

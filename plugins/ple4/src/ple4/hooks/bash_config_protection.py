@@ -77,6 +77,7 @@ from ple4.hooks.config_protection import (
 )
 from ple4.hooks.hook_common import (
     MAX_STDIN_BYTES,
+    StdinUnavailableError,
     basename,
     emit_block_output,
     extract_shell_wrapper_command,
@@ -85,6 +86,7 @@ from ple4.hooks.hook_common import (
     resolve_effective_target,
     resolve_repo_root,
     split_segments,
+    stdin_unreadable_message,
     strip_data_heredoc_bodies,
     tokenize,
 )
@@ -662,7 +664,10 @@ def main() -> int:
     Raises:
         例外は発生しません。
     """
-    raw, truncated = read_raw_stdin_with_truncation()
+    try:
+        raw, truncated = read_raw_stdin_with_truncation()
+    except StdinUnavailableError as exc:
+        return emit_block_output(stdin_unreadable_message("pre:bash-config-protection", exc))
     if truncated:
         return emit_block_output(_TRUNCATED_INPUT_MESSAGE)
 

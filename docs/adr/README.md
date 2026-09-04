@@ -22,3 +22,4 @@
 | [0016](0016-scaffold-drift-detection-is-a-fail-open-diagnostic.md) | 足場タグ denylist の陳腐化は実コーパス走査で検知する（fail open の診断） | accepted | 2026-08-29 |
 | [0017](0017-heredoc-data-body-is-not-command-text.md) | heredoc のデータ本文はコマンド列として解析しない | accepted | 2026-08-31 |
 | [0018](0018-directory-change-makes-repo-scope-untrustworthy.md) | `cd` を含むコマンドでは repo スコープ判定を信用せず deny する | accepted | 2026-09-03 |
+| [0019](0019-protection-hooks-fail-closed-when-stdin-cannot-be-read.md) | 保護フックは stdin を「読めなかった」場合に fail-closed する | accepted | 2026-09-04 |

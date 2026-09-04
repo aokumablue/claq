@@ -19,11 +19,13 @@ from typing import Any
 
 from ple4.hooks.hook_common import (
     MAX_STDIN_BYTES,
+    StdinUnavailableError,
     basename,
     emit_block_output,
     parse_json_object,
     read_raw_stdin_with_truncation,
     resolve_effective_target,
+    stdin_unreadable_message,
 )
 from ple4.lib.harness import (
     extract_file_paths,
@@ -571,7 +573,10 @@ def main() -> int:
     Raises:
         例外は発生しません。
     """
-    raw, truncated = read_raw_stdin_with_truncation()
+    try:
+        raw, truncated = read_raw_stdin_with_truncation()
+    except StdinUnavailableError as exc:
+        return emit_block_output(stdin_unreadable_message("pre:config-protection", exc))
     if truncated:
         # 切り捨てられたペイロードで保護判定をすり抜けさせない（fail-closed）。
         return emit_block_output(_truncation_blocked_message(MAX_STDIN_BYTES))

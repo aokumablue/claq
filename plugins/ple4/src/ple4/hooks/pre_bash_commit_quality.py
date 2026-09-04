@@ -990,10 +990,12 @@ def main() -> int:
     fail-open/fail-closed の境界は「commit と確定したか」で分けます
     （A-05 相当対応）:
 
-    - `read_raw_stdin_with_truncation` は syscall 例外を内部で捕捉し
-      「入力なし」に正規化する契約（A-01 対応、`hook_common` 参照）の
-      ため、本関数に到達する時点で例外は発生しません。1 MiB 超の
-      truncation は commit かどうか判定不能なため fail-closed
+    - `read_raw_stdin_with_truncation` が `StdinUnavailableError` を送出した
+      場合（payload はあるはずなのに読めなかった）は fail-closed。commit か
+      どうかを判定する材料そのものが得られていないため、他の 3 保護 hook と
+      同じ deny に倒す（ADR-0019）。読む対象が無い場合（tty 起動・stdin 未
+      接続・即 EOF）は例外にならず空文字列として届き、従来どおり素通りする。
+      1 MiB 超の truncation は commit かどうか判定不能なため fail-closed
       （block_no_verify / config_protection と同じ 4 段構成に揃える）。
     - `evaluate()` 自体は例外を投げない契約だが、防御的に例外時は
       commit 確定前として fail-open のまま扱う。
@@ -1011,9 +1013,21 @@ def main() -> int:
     Raises:
         例外は発生しません。
     """
-    from ple4.hooks.hook_common import emit_block_output, read_raw_stdin_with_truncation
+    from ple4.hooks.hook_common import (
+        StdinUnavailableError,
+        emit_block_output,
+        read_raw_stdin_with_truncation,
+        stdin_unreadable_message,
+    )
 
-    raw, truncated = read_raw_stdin_with_truncation()
+    try:
+        raw, truncated = read_raw_stdin_with_truncation()
+    except StdinUnavailableError as exc:
+        try:
+            return emit_block_output(stdin_unreadable_message("pre:bash-commit-quality", exc))
+        except Exception as err:
+            log(f"[Hook] Error: {err}")
+            return 2
 
     if truncated:
         try:

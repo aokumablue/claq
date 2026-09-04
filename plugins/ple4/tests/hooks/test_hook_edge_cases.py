@@ -15,6 +15,7 @@ from unittest import mock
 import pytest
 
 from ple4.hooks import commit_quality_scanner as commit_quality_scanner
+from ple4.hooks import hook_common as hook_common
 from ple4.hooks import pre_bash_commit_quality as pre_bash_commit_quality
 
 
@@ -908,13 +909,39 @@ def test_pre_bash_commit_quality_evaluate_logs_and_recovers_from_parser_errors(m
     assert any("Error: boom" in message for message in logs)
 
 
-def test_pre_bash_commit_quality_main_handles_reader_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pre_bash_commit_quality_main_denies_when_stdin_unreadable(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """stdin を読めなかった場合は commit 判定不能として deny する（ADR-0019）。
+
+    以前は「読めない」を「入力なし」へ正規化して exit 0 にしていたため、
+    Windows のパイプで allow と deny が同じ exit 0 になっていた（P1-004）。
+    """
     monkeypatch.setattr(
-        "ple4.hooks.hook_common.read_raw_stdin",
-        lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+        "ple4.hooks.hook_common.read_raw_stdin_with_truncation",
+        lambda: (_ for _ in ()).throw(hook_common.StdinUnavailableError("boom")),
     )
 
-    assert pre_bash_commit_quality.main() == 0
+    assert pre_bash_commit_quality.main() == 2
+    captured = capsys.readouterr()
+    assert "pre:bash-commit-quality" in captured.err
+    assert json.loads(captured.out)["permissionDecision"] == "deny"
+
+
+def test_pre_bash_commit_quality_main_denies_when_emit_fails_on_unreadable_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """deny 出力自体が失敗しても exit 2 を保つ（出力層の失敗で素通りさせない）。"""
+    monkeypatch.setattr(
+        "ple4.hooks.hook_common.read_raw_stdin_with_truncation",
+        lambda: (_ for _ in ()).throw(hook_common.StdinUnavailableError("boom")),
+    )
+    monkeypatch.setattr(
+        "ple4.hooks.hook_common.emit_block_output",
+        lambda reason: (_ for _ in ()).throw(RuntimeError("no stdout")),
+    )
+
+    assert pre_bash_commit_quality.main() == 2
 
 
 def test_pre_bash_commit_quality_helpers_and_pass_branch(monkeypatch: pytest.MonkeyPatch) -> None:
