@@ -83,12 +83,6 @@ from ple4.lib.constants import BASE_DIR_NAME
 _ROOTS_DIRNAME = "roots"
 _ENV_FILENAME = "env.sh"
 _ENV_TMP_PREFIX = f"{_ENV_FILENAME}.tmp."
-_DETACH_STDIN_SUFFIX = ".stdin"
-"""`hook_common.detach_process` が子へ渡す stdin 一時ファイルの拡張子。
-POSIX では起動直後に unlink されるが、Windows は開いているファイルを削除
-できないため（子が継承ハンドルを保持している）unlink が失敗し、`~/.ple4`
-へ 1 セッション終了につき 1 個ずつ孤児が積み上がる。ここで age-gate 付きの
-回収対象に含める。"""
 _ENV_TEMPLATE_RELATIVE = Path("runtime") / "env-template.sh"
 
 _MAX_ANCESTOR_DEPTH = 2
@@ -597,38 +591,19 @@ def _gc_one(entry: Path, now: float) -> None:
         entry.unlink()
 
 
-def _is_collectable_temp(name: str) -> bool:
-    """``ple4_dir`` 直下のファイル名が一時ファイル回収の対象かを返す。
-
-    対象は 2 種類:
-
-    - ``env.sh.tmp.*`` — ``_atomic_write_text`` が ``env.sh`` を書くときの
-      中間ファイル。クラッシュすると残る。
-    - ``*.stdin`` — ``hook_common.detach_process`` が子へ stdin を渡すための
-      一時ファイル。POSIX は起動直後に unlink するが、Windows は開いている
-      ファイルを削除できないため必ず残る。
-
-    ``mem.db`` / ``logs`` / ``env.sh`` 自体はどちらにも一致しない。
-
-    Args:
-        name: 判定対象のファイル名。
-
-    Returns:
-        回収対象なら True。
-
-    Raises:
-        例外は発生しません。
-    """
-    return name.startswith(_ENV_TMP_PREFIX) or name.endswith(_DETACH_STDIN_SUFFIX)
-
-
 def _gc_stale_temp_files(ple4_dir: Path, now: float) -> None:
-    """``ple4_dir`` 直下の一時ファイル孤児を age-gate で回収する。
+    """``ple4_dir`` 直下の ``env.sh.tmp.*`` 孤児を age-gate で回収する。
 
-    ``_gc_roots`` は ``roots/`` しか見ないため、``ple4_dir`` 直下に残る孤児は
-    ここで拾う。``_DEAD_PID_GRACE_SECONDS``（1 時間）を過ぎたものだけを消す
-    ので、書き込み中のファイルや実行中の detach（上限 600 秒）が握っている
-    ファイルを取り上げることはない。
+    ``_atomic_write_text`` が ``env.sh`` を書くときの中間ファイルは、クラッシュ
+    すると ``roots/`` ではなく ``ple4_dir`` 直下に残る。``_gc_roots`` は
+    ``roots/`` しか見ないため、ここで拾う。``_DEAD_PID_GRACE_SECONDS``（1 時間）
+    を過ぎたものだけを消すので、書き込み中のファイルを取り上げることはない。
+
+    detach の stdin 一時ファイル（``*.stdin``）はここでは扱わない。生成側の
+    `hook_common.detach_process` は ``get_ple4_dir()``（``PLE4_HOME`` を見る）
+    配下に作るのに対し、本モジュールは ``$HOME`` 固定の別契約であり
+    （モジュール docstring の R-04）、走査先が食い違う。回収は生成側に置く
+    （`hook_common.gc_detach_stdin_orphans`）。
 
     Args:
         ple4_dir: ``$HOME/.ple4`` の Path。
@@ -645,7 +620,7 @@ def _gc_stale_temp_files(ple4_dir: Path, now: float) -> None:
     except OSError:
         return
     for entry in entries:
-        if not _is_collectable_temp(entry.name):
+        if not entry.name.startswith(_ENV_TMP_PREFIX):
             continue
         try:
             mtime = entry.stat().st_mtime

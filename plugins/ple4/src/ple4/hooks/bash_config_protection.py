@@ -198,7 +198,7 @@ def _command_index(segment: list[str]) -> int | None:
         if _ENV_ASSIGNMENT_RE.match(token):
             index += 1
             continue
-        if token.rsplit("/", 1)[-1] in _COMMAND_POSITION_WRAPPERS:
+        if _command_name(token) in _COMMAND_POSITION_WRAPPERS:
             index += 1
             continue
         if token in _WRAPPER_VALUE_SHORT_OPTIONS:
@@ -250,6 +250,31 @@ def _protected_target(token: str) -> str | None:
     return f"{segment}/" if segment is not None else None
 
 
+def _command_name(token: str) -> str:
+    """実行トークンを比較用の名前（basename・小文字）へ正規化する。
+
+    大小を無視するのは、PowerShell（Windows のシェルツール）が cmdlet 名を
+    大小無視で解決し、macOS 既定の APFS も大小を区別しないため
+    （`is_git_executable_token` が同じ理由で lower している）。Linux では
+    `RM` が `rm` に一致する誤検出側へ倒れるが、ADR-0002 の範囲内。
+
+    正規化をこの 1 関数へ集約するのは、名前比較が 3 箇所（実行コマンド判定・
+    wrapper 読み飛ばし・cd 判定）にあり、片方だけ大小無視にすると
+    「`CD ..; rm ruff.toml` だけ repo スコープ判定へ落ちる」型の非対称が
+    生まれるため（実測）。
+
+    Args:
+        token: 実行位置のトークン。
+
+    Returns:
+        basename を小文字化した名前。
+
+    Raises:
+        例外は発生しません。
+    """
+    return token.rsplit("/", 1)[-1].lower()
+
+
 def _executed_command_args(segment: list[str], names: frozenset[str]) -> list[str] | None:
     """実行位置のコマンドが `names` のいずれかなら、その引数トークン列を返す。
 
@@ -269,14 +294,7 @@ def _executed_command_args(segment: list[str], names: frozenset[str]) -> list[st
         例外は発生しません。
     """
     index = _command_index(segment)
-    if index is None:
-        return None
-    # 大小を無視する。PowerShell（Windows のシェルツール）は cmdlet 名を
-    # 大小無視で解決し、macOS 既定の APFS も大小を区別しない
-    # （`is_git_executable_token` が同じ理由で lower している）。
-    # Linux では `RM` が `rm` に一致する誤検出側へ倒れるが、ADR-0002 の
-    # 「誤検出 > 誤通過」の範囲内。
-    if segment[index].rsplit("/", 1)[-1].lower() not in names:
+    if index is None or _command_name(segment[index]) not in names:
         return None
     return segment[index + 1 :]
 
@@ -533,7 +551,7 @@ def _changes_working_directory(segment: list[str]) -> bool:
         例外は発生しません。
     """
     index = _command_index(segment)
-    return index is not None and segment[index].rsplit("/", 1)[-1] in _DIRECTORY_CHANGE_COMMANDS
+    return index is not None and _command_name(segment[index]) in _DIRECTORY_CHANGE_COMMANDS
 
 
 def _within_repo_root(token: str, repo_root: Path) -> bool:
@@ -598,7 +616,11 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
     Raises:
         例外は発生しません。
     """
-    for variant in command_dialect_variants(command):
+    # heredoc のデータ本文はコマンドの語彙に入らないため、方言展開の前に 1 回だけ
+    # 落とす（`block_no_verify` と同じ順序。片方が方言ごとに剥がす形だと、同じ
+    # 入力でも hook によって解析対象が変わる非対称が生まれる）。
+    stripped = strip_data_heredoc_bodies(command)
+    for variant in command_dialect_variants(stripped):
         found = _find_protected_write_in_dialect(variant, _recursed=_recursed)
         if found is not None:
             return found
@@ -609,7 +631,8 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
     """1 つのシェル方言の読み方で保護対象書き込みを探す。
 
     Args:
-        command: `command_dialect_variants` が返した 1 通りの読み方。
+        command: `command_dialect_variants` が返した 1 通りの読み方
+            （heredoc のデータ本文は呼び出し元で除去済み）。
         _recursed: ラッパー再帰済みかどうか。
 
     Returns:
@@ -618,7 +641,7 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
     Raises:
         例外は発生しません。
     """
-    segments = split_segments(tokenize(strip_data_heredoc_bodies(command)))
+    segments = split_segments(tokenize(command))
     scope_certain = not any(_changes_working_directory(segment) for segment in segments)
     for segment in segments:
         for token in _write_target_tokens_in_segment(segment):
@@ -677,7 +700,7 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
     if not any(indicator in lowered for indicator in _RAW_TEXT_RISK_INDICATORS):
         return None
     for name in sorted(_ALL_PROTECTED_BASENAMES):
-        if name in raw_input:
+        if name.lower() in lowered:
             return name
     return None
 

@@ -375,7 +375,12 @@ class TestForceUtf8Streams:
     """
 
     def test_reconfigures_both_streams_to_utf8(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """stdout / stderr の両方を UTF-8・errors=replace へ変えること。"""
+        """stdout / stderr の両方を UTF-8 にし、errors は用途別に分けること。
+
+        stderr は Python 既定の `backslashreplace` を保つ。`replace` にすると
+        surrogateescape 由来の不正 UTF-8 ファイル名が ``\\udcXX`` から `?` に落ち、
+        診断情報が消える。stdout は host が読むデータなので `replace`。
+        """
         calls: list[tuple[str, dict]] = []
 
         class _Stream:
@@ -392,7 +397,7 @@ class TestForceUtf8Streams:
 
         assert calls == [
             ("stdout", {"encoding": "utf-8", "errors": "replace"}),
-            ("stderr", {"encoding": "utf-8", "errors": "replace"}),
+            ("stderr", {"encoding": "utf-8", "errors": "backslashreplace"}),
         ]
 
     def test_stream_without_reconfigure_is_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -481,7 +486,9 @@ def test_background_child_env_forces_utf8_output() -> None:
     UnicodeEncodeError がログの中だけで起き、次セッションの通知に化けた 1 行と
     して現れる。
     """
-    assert launcher.build_env()["PYTHONIOENCODING"] == "utf-8"
+    # errors も明示する。既定の `strict` だとサロゲートを含む文字列で子だけが
+    # UnicodeEncodeError になり、親（force_utf8_streams）と非対称になる。
+    assert launcher.build_env()["PYTHONIOENCODING"] == "utf-8:replace"
 
 
 def test_background_child_writes_non_ascii_log_under_non_utf8_locale(tmp_path: Path) -> None:

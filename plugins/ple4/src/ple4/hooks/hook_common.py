@@ -374,6 +374,15 @@ def _replace_unquoted_newlines(command: str) -> str:
     return "".join(result)
 
 
+# Windows 読みへ変換するバックスラッシュ。直後が空白（``\\ `` は POSIX の
+# エスケープ空白）と ``/``（``\\/`` は sed スクリプト等の POSIX エスケープ）の
+# ものは除く。Windows のパス区切りは直後に必ずパス構成文字が来るため、この 2 つを
+# 外しても Windows 側の検出力は落ちない。除外しないと ``rm my\\ ruff.toml`` が
+# ``my/`` + ``ruff.toml`` の 2 トークンへ割れ、POSIX では 1 トークンの非保護
+# ファイル名だったものが保護対象として deny される（実測）。
+_WINDOWS_SEPARATOR_BACKSLASH_RE = re.compile(r"\\(?=[^\s/])")
+
+
 def command_dialect_variants(command: str) -> tuple[str, ...]:
     """1 つのコマンド文字列を、2 つのシェル方言の読み方へ展開する。
 
@@ -391,10 +400,18 @@ def command_dialect_variants(command: str) -> tuple[str, ...]:
     「誤検出を誤通過より選ぶ」と定めており、この非対称はその規定の
     範囲内である。
 
-    変換は ``\\`` → ``/`` の 1 種類だけに絞る。POSIX 側で
-    ``touch my\\ file`` のようなエスケープを含むコマンドは
-    ``my/ file`` と読まれるが、basename は変わらず（``file``）、
-    保護対象名と一致しない限り新たな deny は生まれない。
+    変換は「直後が空白でも ``/`` でもないバックスラッシュ」だけを ``/`` に
+    置き換える（`_WINDOWS_SEPARATOR_BACKSLASH_RE`）。除外の理由は、この変換が
+    **basename を変えるだけでなくトークン境界を作り替える**ためである:
+    ``rm my\\ ruff.toml`` は POSIX では 1 トークン ``my ruff.toml``（非保護）
+    だが、無条件変換だと ``my/`` と ``ruff.toml`` に割れて deny になる。
+    ``\\`` の直後が空白または ``/`` の形は Windows のパス区切りには現れない
+    ため、除外しても Windows 側の検出力は落ちない。
+
+    それでも残る誤検出はある（例: sed スクリプト内の ``\\.git`` が
+    ``/.git`` になり ``.git/hooks/`` 判定に触れる）。これは ADR-0002 が
+    受容する側の誤りであり、`tests/hooks/test_windows_shell_dialect.py` に
+    characterization test として固定してある。
 
     `block_no_verify` と `bash_config_protection` が共有する。「何をパス区切りと
     みなすか」を 2 箇所へ別々に実装すると、片方だけ強化される非対称
@@ -404,14 +421,15 @@ def command_dialect_variants(command: str) -> tuple[str, ...]:
         command: 検査対象のコマンド文字列。
 
     Returns:
-        検査すべき読み方のタプル。``\\`` を含まなければ元の 1 つだけ。
+        検査すべき読み方のタプル。Windows 読みが元と同じなら 1 つだけ。
 
     Raises:
         例外は発生しません。
     """
-    if "\\" not in command:
+    windows_reading = _WINDOWS_SEPARATOR_BACKSLASH_RE.sub("/", command)
+    if windows_reading == command:
         return (command,)
-    return (command, command.replace("\\", "/"))
+    return (command, windows_reading)
 
 
 def tokenize(command: str) -> list[str]:
@@ -1137,10 +1155,57 @@ def _detach_log_path() -> Path | None:
     return log_dir / f"bg-{datetime.now():%Y-%m-%d}.log"
 
 
+_DETACH_STDIN_SUFFIX = ".stdin"
+"""detach 用 stdin 一時ファイルの拡張子。"""
+
+_DETACH_STDIN_GRACE_SECONDS = 60 * 60
+"""この秒数より古い ``*.stdin`` 孤児だけを回収する（実行中の detach を奪わない）。
+detach の実行上限は DETACH_TIMEOUT_SECONDS（600 秒）なので、1 時間は十分な余裕。"""
+
+
+def gc_detach_stdin_orphans() -> None:
+    """``~/.ple4`` 直下に残った detach 用 stdin 一時ファイルを age-gate で回収する。
+
+    POSIX では `detach_process` が起動直後に unlink するため孤児は生じない。
+    Windows は「開いているファイルを削除できない」ため（子が継承ハンドルを
+    保持している）unlink が必ず失敗し、SessionEnd ごとに 1 個ずつ積み上がる
+    （release-verify 2026-09-03 の再レビュー W4）。
+
+    回収を生成側と同じモジュールへ置くのは、走査先を生成側と同じ
+    ``get_ple4_dir()``（``PLE4_HOME`` を見る）に揃えるため。``env_pointer`` の
+    GC は ``$HOME`` 固定の別契約であり、そちらに置くと ``PLE4_HOME`` を使う
+    環境で「作る場所と掃除する場所が違う」ことになる。
+
+    Args:
+        なし
+
+    Returns:
+        なし
+
+    Raises:
+        例外は発生しません（iterdir/stat/unlink の失敗は無視します）。
+    """
+    cutoff = time.time() - _DETACH_STDIN_GRACE_SECONDS
+    try:
+        entries = list(get_ple4_dir().iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if not entry.name.endswith(_DETACH_STDIN_SUFFIX):
+            continue
+        try:
+            if entry.stat().st_mtime < cutoff:
+                entry.unlink()
+        except OSError:
+            continue
+
+
 def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None = None) -> bool:
     """コマンドを detached（新セッション）で起動し stdin を一時ファイル経由で渡す。
 
-    親プロセスの終了に影響されず子を走らせ続けるために使う。一時ファイルは
+    親プロセスの終了に影響されず子を走らせ続けるために使う。起動のたびに
+    `gc_detach_stdin_orphans` で過去の孤児（Windows では unlink できず必ず
+    残る）を掃除してから作る。一時ファイルは
     world-writable な /tmp を避けて ~/.ple4 配下に作成し、close→reopen の
     TOCTOU 窓を作らないよう同一 fd を seek(0) して子へ継承する。起動直後に
     unlink する（継承済み fd は有効なまま）。
@@ -1170,6 +1235,7 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
     Raises:
         例外は発生しません。
     """
+    gc_detach_stdin_orphans()
     try:
         private_dir = ensure_private_dir(get_ple4_dir())
         tmp = tempfile.NamedTemporaryFile(

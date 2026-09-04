@@ -77,13 +77,43 @@ class TestWindowsPathSeparators:
         """
         assert has_bypass_flag(r"C:\Git\bin\git.exe commit --no-verify -m x") is True
 
-    def test_posix_escape_does_not_become_a_false_positive(self) -> None:
-        """POSIX のエスケープ（`my\\ file.txt`）が新たな deny を生まないこと。
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # エスケープ空白。無条件変換だと `my/` + `ruff.toml` に割れて deny になる。
+            r"rm my\ ruff.toml",
+            r"cp src.toml my\ ruff.toml",
+            # sed スクリプト内の `\.` `\/`。無条件変換だと `.git/hooks/` を踏む。
+            r"sed -i 's/\.git\/hooks\/pre-commit//' notes.md",
+            # コミットメッセージ中のエスケープ空白（`--no-verify` が語として独立しない）。
+            r"git commit -m fix\ --no-verify",
+        ],
+    )
+    def test_posix_escapes_do_not_become_false_positives(self, command: str) -> None:
+        """POSIX のエスケープが新たな deny を生まないこと。
 
-        Windows 読みでは `my/ file.txt` になるが basename は `file.txt` で、
-        保護対象名ではないため検出されない。
+        方言変換は basename を変えるだけでなく**トークン境界を作り替える**。
+        無条件に ``\\`` を ``/`` へ置くと、POSIX で 1 トークンだったものが 2 つに割れ、
+        非保護のファイル名から保護名が現れる（実測）。``\\`` の直後が空白・``/`` の
+        ものを変換対象から外すことでこれを塞いでいる。ここが緑でなくなったら、
+        macOS/Linux の正当なコマンドが拒否されている。
+
+        検証の verb は必ず書き込み語彙に入っているものを使う（`touch` のように
+        語彙外の verb を使うと、方言ロジックが何を返しても None になり
+        テストが空回りする）。
         """
-        assert find_protected_write(r"touch my\ file.txt") is None
+        assert find_protected_write(command) is None
+        assert has_bypass_flag(command) is False
+
+    def test_remaining_false_positive_is_pinned(self) -> None:
+        """残る誤検出を characterization test として固定する。
+
+        ``\\`` の直後がパス構成文字なら Windows 読みを試すので、POSIX で
+        「エスケープされた特殊文字」だったものが区切りに化ける場合がある。
+        ADR-0002 が受容する側（誤検出）の誤りであり、意図した挙動として固定する。
+        ここが赤くなったら、変換規則を変えた影響が誤検出の範囲に及んでいる。
+        """
+        assert find_protected_write(r"rm a\.eslintrc") == ".eslintrc"
 
 
 class TestPowerShellCmdlets:
@@ -122,3 +152,26 @@ class TestPowerShellCmdlets:
         """
         assert _raw_text_write_risk("{broken Remove-Item ruff.toml") == "ruff.toml"
         assert _raw_text_write_risk("{broken Get-Content ruff.toml") is None
+
+
+class TestCommandNameNormalization:
+    """実行位置のコマンド名比較が 3 箇所すべてで揃っていること。
+
+    `_executed_command_args` だけ大小無視にすると、`CD ..; rm ruff.toml` が
+    ADR-0018 の無条件 deny 分岐へ落ちず repo スコープ判定側へ回る（誤通過）。
+    正規化を 1 関数へ集約したことを、比較箇所ごとに固定する。
+    """
+
+    def test_directory_change_is_case_insensitive(self) -> None:
+        """`cd` 判定（ADR-0018 の分岐）が大小を見ないこと。"""
+        assert bash_config_protection._changes_working_directory(["CD", ".."]) is True
+        assert bash_config_protection._changes_working_directory(["cd", ".."]) is True
+
+    def test_command_position_wrapper_is_case_insensitive(self) -> None:
+        """`sudo` 等の wrapper 読み飛ばしが大小を見ないこと。"""
+        assert bash_config_protection._command_index(["SUDO", "rm", "x"]) == 1
+
+    def test_raw_text_fallback_matches_protected_name_case_insensitively(self) -> None:
+        """縮退経路で保護名も大小無視で照合すること（macOS/Windows は大小同一視）。"""
+        assert _raw_text_write_risk("{broken rm RUFF.TOML") == "ruff.toml"
+        assert _raw_text_write_risk("{broken cat RUFF.TOML") is None

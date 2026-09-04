@@ -31,7 +31,7 @@ def build_env() -> dict[str, str]:
         なし
 
     Returns:
-        CLAUDE_PLUGIN_ROOT（未設定時のみ REPO_ROOT）、PYTHONIOENCODING=utf-8、
+        CLAUDE_PLUGIN_ROOT（未設定時のみ REPO_ROOT）、PYTHONIOENCODING=utf-8:replace、
         REPO_ROOT/src を先頭に置いた PYTHONPATH を含む環境変数の辞書。
 
     Raises:
@@ -44,7 +44,10 @@ def build_env() -> dict[str, str]:
     # 日本語を含み、bg ログへリダイレクトされるため、非 UTF-8 ロケールでは
     # UnicodeEncodeError が bg ログの中だけで起き、次セッションの通知に
     # 化けた 1 行として現れる。子にも同じ UTF-8 固定を効かせる。
-    env["PYTHONIOENCODING"] = "utf-8"
+    # 親（`force_utf8_streams`）と同じく errors を明示する。既定の ``strict``
+    # だと、surrogateescape 由来のサロゲートを含む文字列で子だけが
+    # ``UnicodeEncodeError`` になり、親子で非対称になる。
+    env["PYTHONIOENCODING"] = "utf-8:replace"
 
     pythonpath = env.get("PYTHONPATH")
     paths = [str(REPO_ROOT / "src")]
@@ -79,12 +82,16 @@ def force_utf8_streams() -> None:
     Raises:
         例外は発生しません。
     """
-    for stream in (sys.stdout, sys.stderr):
+    # stderr の errors は Python 既定の ``backslashreplace`` を保つ。``replace``
+    # にすると、surrogateescape で読まれた不正 UTF-8 のファイル名が ``\udcXX``
+    # から ``?`` に落ち、診断に必要な情報が消える（stdout は host が読む
+    # データなので ``replace`` でよい）。
+    for stream, errors in ((sys.stdout, "replace"), (sys.stderr, "backslashreplace")):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:
             continue
         try:
-            reconfigure(encoding="utf-8", errors="replace")
+            reconfigure(encoding="utf-8", errors=errors)
         except (OSError, ValueError):
             pass
 

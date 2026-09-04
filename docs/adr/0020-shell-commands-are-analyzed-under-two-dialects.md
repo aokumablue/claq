@@ -31,8 +31,9 @@ hook の入力にシェル種別は載っていない。`tool_name` は `Bash` /
 **保護フックは、コマンド文字列を「POSIX 読み」と「Windows 読み」の 2 通りで
 解析し、どちらかが検出したら deny する。**
 
-- 変換は `\` → `/` の 1 種類だけ（`hook_common.command_dialect_variants`）。
-- `\` を含まないコマンドは読み方が 1 通りしか無く、追加の解析はしない。
+- 変換は「直後が空白でも `/` でもないバックスラッシュ」を `/` へ置き換える
+  1 種類だけ（`hook_common.command_dialect_variants`）。
+- Windows 読みが元と同じになるコマンドは、追加の解析をしない。
 - 変換関数は `hook_common` に 1 つだけ置き、`block_no_verify` と
   `bash_config_protection` が共有する。
 
@@ -47,18 +48,28 @@ cmdlet に解決されるため既に効いていたが、長形式で書かれ�
 - **ADR-0002 の範囲内。** 同 ADR は「解析できない構文については誤検出を
   誤通過より選ぶ」と定める。方言が確定できない以上、片方だけで解析するのは
   「解析できていない」ことを allow へ倒すのと同じである。
-- **誤検出のコストが小さいことを実測で確認した。** 2 方言解析を入れた状態で
-  既存の全テスト（2520 件）が緑のままだった。新たに deny 側へ倒れるのは
-  「POSIX のエスケープを含み、かつその Windows 読みの basename が保護対象名
-  と一致し、かつ書き込み位置にある」場合に限られる（例:
-  `touch my\ file.txt` は basename が `file.txt` なので検出されない）。
+- **誤検出のコストを実測し、主要な発生源を塞いだ。** 当初は `\` を無条件に
+  `/` へ置き換えていたが、この変換は basename を変えるだけでなく
+  **トークン境界を作り替える**。実測で 3 件の誤検出が出た:
+  `rm my\ ruff.toml`（POSIX では 1 トークン `my ruff.toml` なのに `my/` +
+  `ruff.toml` へ割れる）、`sed -i 's/\.git\/hooks\/pre-commit//' notes.md`
+  （`.git/hooks/` 判定に触れる）、`git commit -m fix\ --no-verify`
+  （`--no-verify` が独立トークンになる）。`\` の直後が空白または `/` の形は
+  Windows のパス区切りには現れないため、この 2 つを変換対象から外すことで
+  3 件とも解消し、Windows 側の検出力は落ちない（`rm .\ruff.toml` /
+  `C:\Git\bin\git.exe commit --no-verify` はいずれも検出を維持）。
+  それでも残る誤検出（例 `rm a\.eslintrc`）は ADR-0002 が受容する側であり、
+  characterization test として固定してある。
 - **プラットフォーム分岐ではない。** 実行中の OS を見て挙動を変えるのでは
   なく、入力を 2 通りに読む。macOS/Linux でも同じコードパスが走り、テストも
   そこで両方の読み方を踏める（Windows 専用の未検証分岐を作らない）。
 - **大小無視は既存の判断の踏襲。** `is_git_executable_token` は「macOS 既定の
   APFS が大小を区別しない」ことを理由に既に lower している。PowerShell の
   cmdlet 解決も大小無視なので、同じ扱いに揃えた。Linux では `RM` が `rm` に
-  一致する誤検出側へ倒れるが、これも ADR-0002 の範囲内。
+  一致する誤検出側へ倒れるが、これも ADR-0002 の範囲内。正規化は
+  `_command_name` の 1 関数へ集約する — 実行コマンド判定だけを大小無視にして
+  wrapper 読み飛ばしと `cd` 判定を残すと、`CD ..; rm ruff.toml` が ADR-0018 の
+  無条件 deny 分岐へ落ちず**誤通過**する（実測）。
 
 ## 検討した代替案
 
@@ -93,6 +104,10 @@ cmdlet に解決されるため既に効いていたが、長形式で書かれ�
 - `hook_common.command_dialect_variants()` を追加。`block_no_verify` は
   `_has_bypass_flag_in_dialect`、`bash_config_protection` は
   `_find_protected_write_in_dialect` へ本体を移し、入口で方言を回す。
-- `bash_config_protection._executed_command_args` の名前比較が大小無視になった。
+- `bash_config_protection` の名前比較 3 箇所（実行コマンド判定・wrapper 読み
+  飛ばし・`cd` 判定）と、縮退経路 `_raw_text_write_risk` の保護名照合が
+  すべて大小無視になった。
+- heredoc のデータ本文除去は、両フックとも「方言展開の前に 1 回」へ揃えた
+  （片方が方言ごとに剥がす形だと、同じ入力でもフックによって解析対象が変わる）。
 - Windows 実機での検証は未実施。方言変換自体は macOS のテストで両側を踏める
   （Windows 固有の分岐を持たない設計にしたのはこのため）。

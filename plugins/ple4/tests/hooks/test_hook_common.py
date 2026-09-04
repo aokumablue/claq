@@ -866,6 +866,72 @@ class TestRecentBgFailureNotice:
         assert hook_common.recent_bg_failure_notice() == ""
 
 
+class TestGcDetachStdinOrphans:
+    """`gc_detach_stdin_orphans`（detach 用 stdin 一時ファイルの回収）のテスト。
+
+    POSIX では起動直後に unlink されるため孤児は生じないが、Windows は開いて
+    いるファイルを削除できず SessionEnd ごとに 1 個ずつ積み上がる（W4）。
+    回収は生成側と同じ `get_ple4_dir()` 基準で行う。
+    """
+
+    def test_stale_orphan_is_removed(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """猶予を過ぎた `*.stdin` 孤児を回収すること。"""
+        monkeypatch.setattr(hook_common, "get_ple4_dir", lambda: tmp_path)
+        stale = tmp_path / "tmpstale.stdin"
+        stale.write_text("payload", encoding="utf-8")
+        old = time.time() - hook_common._DETACH_STDIN_GRACE_SECONDS - 60
+        os.utime(stale, (old, old))
+
+        hook_common.gc_detach_stdin_orphans()
+
+        assert not stale.exists()
+
+    def test_fresh_orphan_and_other_files_survive(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """実行中の detach が握るファイルと、拡張子が違うファイルは残すこと。"""
+        monkeypatch.setattr(hook_common, "get_ple4_dir", lambda: tmp_path)
+        fresh = tmp_path / "tmpfresh.stdin"
+        other = tmp_path / "mem.db"
+        fresh.write_text("payload", encoding="utf-8")
+        other.write_text("db", encoding="utf-8")
+        old = time.time() - hook_common._DETACH_STDIN_GRACE_SECONDS - 60
+        os.utime(other, (old, old))
+
+        hook_common.gc_detach_stdin_orphans()
+
+        assert fresh.exists()
+        assert other.exists()
+
+    def test_missing_directory_is_noop(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """ディレクトリが無くても例外を送出しないこと。"""
+        monkeypatch.setattr(hook_common, "get_ple4_dir", lambda: tmp_path / "missing")
+
+        hook_common.gc_detach_stdin_orphans()
+
+    def test_stat_failure_is_ignored(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """個々のエントリの stat 失敗は無視して走査を続けること。"""
+        monkeypatch.setattr(hook_common, "get_ple4_dir", lambda: tmp_path)
+        entry = tmp_path / "tmpfail.stdin"
+        entry.write_text("payload", encoding="utf-8")
+        real_stat = Path.stat
+
+        def _boom(self: Path, *args: object, **kwargs: object) -> object:
+            if self == entry:
+                raise OSError("boom")
+            return real_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", _boom)
+
+        hook_common.gc_detach_stdin_orphans()
+
+        assert entry.exists()
+
+
 class TestDetachedSpawnKwargs:
     """`detached_spawn_kwargs`（プロセスグループ分離）のプラットフォーム契約。
 

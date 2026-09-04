@@ -707,35 +707,6 @@ class TestGcRoots:
         assert mem_db.read_text(encoding="utf-8") == "keep-db\n"
         assert other.read_text(encoding="utf-8") == "keep-other\n"
 
-    def test_fresh_detach_stdin_temp_survives_gc(self, tmp_path: Path) -> None:
-        """実行中の detach が握っている .stdin 一時ファイルは残ること。"""
-        ple4_dir = tmp_path / "bc"
-        ple4_dir.mkdir()
-        fresh = ple4_dir / f"tmpabc123{mod._DETACH_STDIN_SUFFIX}"
-        fresh.write_text("payload\n", encoding="utf-8")
-
-        mod._gc_stale_temp_files(ple4_dir, time.time())
-
-        assert fresh.exists()
-
-    def test_stale_detach_stdin_temp_is_removed(self, tmp_path: Path) -> None:
-        """猶予を過ぎた .stdin 一時ファイルを回収すること。
-
-        POSIX では `detach_process` が起動直後に unlink するが、Windows は
-        開いているファイルを削除できないため（子が継承ハンドルを保持する）
-        セッション終了ごとに 1 個ずつ孤児が積み上がる。
-        """
-        ple4_dir = tmp_path / "bc"
-        ple4_dir.mkdir()
-        stale = ple4_dir / f"tmpstale00{mod._DETACH_STDIN_SUFFIX}"
-        stale.write_text("payload\n", encoding="utf-8")
-        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        os.utime(stale, (old, old))
-
-        mod._gc_stale_temp_files(ple4_dir, time.time())
-
-        assert not stale.exists()
-
     def test_unlistable_ple4_dir_is_noop_for_env_sh_tmp_gc(self, tmp_path: Path) -> None:
         """ple4_dir が列挙できなくても env.sh tmp GC は例外を送出しない。"""
         mod._gc_stale_temp_files(tmp_path / "does-not-exist", time.time())
