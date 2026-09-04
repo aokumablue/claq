@@ -11,8 +11,24 @@ rem Store "App execution alias" stubs that own the names python.exe/python3.exe
 rem without shipping an interpreter. Invoking one prints
 rem "Python was not found" and exits 9009, which is exactly how every ple4 hook
 rem failed on Windows (release-verify 2026-09-03). The `py` launcher is tried
-rem first because it is installed to %WINDIR% by the official installer, is
-rem never shadowed by a Store alias, and selects the newest Python 3.
+rem first because it is installed to %WINDIR% by the official installer and
+rem selects the newest Python 3.
+rem
+rem Structural rules this file must keep (a regression test asserts them):
+rem
+rem 1. No interpreter is launched inside a parenthesized block, and the exit
+rem    is a BARE `exit /b`. cmd expands %VAR% inside `if (...)` blocks at PARSE
+rem    time, so `... & exit /b %ERRORLEVEL%` there returns the errorlevel from
+rem    BEFORE the interpreter ran -- a deny (exit 2) would have been reported to
+rem    the host as 0, silently allowing every blocked tool call on Windows.
+rem    Bare `exit /b` leaves the current errorlevel untouched.
+rem 2. The WindowsApps filter lives in the `where` pipeline, never in a
+rem    per-iteration `echo ... | findstr` inside the for-block: after a for
+rem    variable is expanded, the resulting line is re-parsed, so a real install
+rem    path such as C:\Program Files (x86)\... would break the block.
+rem 3. The findstr pattern must not end with a backslash immediately before the
+rem    closing quote. findstr is parsed by the C runtime, where \" is an escaped
+rem    quote -- `/c:"\WindowsApps\"` would silently never match.
 rem
 rem When nothing usable is found this exits 0 after writing a diagnostic to
 rem stderr, matching launcher.py's documented fail-open policy (CLAUDE.md
@@ -22,21 +38,19 @@ rem needed to repair PATH and leave the session unrecoverable.
 setlocal EnableExtensions DisableDelayedExpansion
 set "PLE4_ROOT=%~dp0.."
 set "PLE4_LAUNCHER=%PLE4_ROOT%\src\ple4\launcher.py"
-
-if defined PLE4_PYTHON (
-  "%PLE4_PYTHON%" "%PLE4_LAUNCHER%" %*
-  exit /b %ERRORLEVEL%
-)
-
 set "PLE4_PY="
-for /f "delims=" %%P in ('where py 2^>nul') do if not defined PLE4_PY set "PLE4_PY=%%P"
-if defined PLE4_PY (
-  "%PLE4_PY%" -3 "%PLE4_LAUNCHER%" %*
-  exit /b %ERRORLEVEL%
-)
+set "PLE4_PYARGS="
+
+if defined PLE4_PYTHON set "PLE4_PY=%PLE4_PYTHON%"
+if defined PLE4_PY goto :ple4_exec
+
+call :ple4_pick py
+if defined PLE4_PY set "PLE4_PYARGS=-3"
+if defined PLE4_PY goto :ple4_exec
 
 call :ple4_pick python
 if defined PLE4_PY goto :ple4_exec
+
 call :ple4_pick python3
 if defined PLE4_PY goto :ple4_exec
 
@@ -45,13 +59,9 @@ if defined PLE4_PY goto :ple4_exec
 exit /b 0
 
 :ple4_exec
-"%PLE4_PY%" "%PLE4_LAUNCHER%" %*
-exit /b %ERRORLEVEL%
+"%PLE4_PY%" %PLE4_PYARGS% "%PLE4_LAUNCHER%" %*
+exit /b
 
 :ple4_pick
-for /f "delims=" %%P in ('where %1 2^>nul') do (
-  if not defined PLE4_PY (
-    echo.%%P| findstr /i /c:"\WindowsApps\" >nul || set "PLE4_PY=%%P"
-  )
-)
+for /f "delims=" %%P in ('where %1 2^>nul ^| findstr /i /v /c:"\WindowsApps"') do if not defined PLE4_PY set "PLE4_PY=%%P"
 exit /b 0

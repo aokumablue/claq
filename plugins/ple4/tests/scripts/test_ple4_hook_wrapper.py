@@ -154,6 +154,19 @@ def test_wrapper_reports_when_no_interpreter_exists(tmp_path: Path) -> None:
     assert diagnostic["requiredVersion"] == "3.12+"
 
 
+def _cmd_lines() -> list[str]:
+    """Windows wrapper の実行行（コメント・空行を除く）を返す。
+
+    Returns:
+        `rem` コメントと空行を落とした行のリスト。
+    """
+    return [
+        line.strip()
+        for line in _WRAPPER_CMD.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().lower().startswith("rem ")
+    ]
+
+
 def test_windows_wrapper_shares_the_posix_contract() -> None:
     """Windows 版 .cmd が POSIX 版と同じ解決順・同じ fail-open を宣言していること。
 
@@ -163,11 +176,58 @@ def test_windows_wrapper_shares_the_posix_contract() -> None:
     text = _WRAPPER_CMD.read_text(encoding="utf-8")
 
     assert "%PLE4_PYTHON%" in text
-    assert "where py" in text
-    assert ":ple4_pick python\n" in text
-    assert ":ple4_pick python3\n" in text
-    # Store alias（実体を持たない python.exe / python3.exe）を候補から外す。
-    assert 'findstr /i /c:"\\WindowsApps\\"' in text
+    assert "call :ple4_pick py\n" in text
+    assert "call :ple4_pick python\n" in text
+    assert "call :ple4_pick python3\n" in text
     assert '"%PLE4_LAUNCHER%"' in text
     assert _PROTECTION_DISABLED_KEY in text
     assert "exit /b 0" in text
+
+
+def test_windows_wrapper_never_expands_errorlevel_after_running_python() -> None:
+    """`exit /b %ERRORLEVEL%` を持たないこと（cmd の parse 時展開で deny が消える）。
+
+    cmd は `if (...)` ブロック内の `%VAR%` を**パース時**に展開する。
+    ブロック内で python を起動して `exit /b %ERRORLEVEL%` と書くと、返るのは
+    起動**前**の errorlevel になる。保護 hook の exit 2 が 0 として host へ
+    報告され、Windows でだけ全ブロックが素通りする（P1-004 と同じ失敗クラス）。
+    素の `exit /b` は現在の errorlevel を保つ。
+    """
+    # コメントは対象外（この落とし穴の説明そのものが本文に書いてある）。
+    lines = _cmd_lines()
+
+    assert not any("ERRORLEVEL" in line.upper() for line in lines)
+    # インタプリタ起動行の直後は素の `exit /b`。
+    exec_index = next(i for i, line in enumerate(lines) if line.startswith('"%PLE4_PY%"'))
+    assert lines[exec_index + 1] == "exit /b"
+
+
+def test_windows_wrapper_launches_python_outside_any_block() -> None:
+    """インタプリタ起動行がカッコブロックの中に無いこと。
+
+    ブロック内で起動すると %ERRORLEVEL% の parse 時展開に戻ってしまうため、
+    「ブロックを使わない」こと自体を契約として固定する。
+    """
+    depth = 0
+    for line in _cmd_lines():
+        if line.startswith('"%PLE4_PY%"') or line.startswith('"%PLE4_PYTHON%"'):
+            assert depth == 0, f"インタプリタ起動がブロック内にある: {line}"
+        depth += line.count("(") - line.count(")")
+
+
+def test_windows_wrapper_filters_store_alias_inside_the_where_pipeline() -> None:
+    """WindowsApps 除外を `where` のパイプライン側で行うこと。
+
+    for 変数は展開後に再パースされるため、`echo %%P| findstr ...` 形式だと
+    `C:\\Program Files (x86)\\...` のようなカッコ入りの実在パスでブロックが
+    壊れる。あわせて findstr のパターンが閉じ引用符直前でバックスラッシュを
+    終端しないことも見る（C ランタイムが `\\"` を引用符のエスケープとして
+    読み、パターンが永久に一致しなくなるため）。
+    """
+    lines = _cmd_lines()
+    pick = next(line for line in lines if line.startswith("for /f") and "where %1" in line)
+
+    assert "^| findstr /i /v /c:" in pick
+    assert '"\\WindowsApps"' in pick
+    assert '\\"' not in pick
+    assert "echo" not in pick

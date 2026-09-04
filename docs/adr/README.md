@@ -23,3 +23,4 @@
 | [0017](0017-heredoc-data-body-is-not-command-text.md) | heredoc のデータ本文はコマンド列として解析しない | accepted | 2026-08-31 |
 | [0018](0018-directory-change-makes-repo-scope-untrustworthy.md) | `cd` を含むコマンドでは repo スコープ判定を信用せず deny する | accepted | 2026-09-03 |
 | [0019](0019-protection-hooks-fail-closed-when-stdin-cannot-be-read.md) | 保護フックは stdin を「読めなかった」場合に fail-closed する | accepted | 2026-09-04 |
+| [0020](0020-shell-commands-are-analyzed-under-two-dialects.md) | シェル保護フックは 1 つのコマンド文字列を 2 つのシェル方言で解析する | accepted | 2026-09-04 |

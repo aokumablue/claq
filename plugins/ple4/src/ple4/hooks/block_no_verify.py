@@ -108,6 +108,7 @@ from typing import NamedTuple
 from ple4.hooks.hook_common import (
     MAX_STDIN_BYTES,
     StdinUnavailableError,
+    command_dialect_variants,
     emit_block_output,
     extract_shell_wrapper_command,
     is_git_executable_token,
@@ -674,6 +675,22 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
     # 落とす（本文が実行されうる形は `strip_data_heredoc_bodies` が残す）。
     # 入口で正規化するので `sh -c` の再帰先にも同じ規則が効く。
     command = strip_data_heredoc_bodies(command)
+    return any(_has_bypass_flag_in_dialect(variant, _recursed=_recursed) for variant in command_dialect_variants(command))
+
+
+def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool) -> bool:
+    """1 つのシェル方言の読み方で `has_bypass_flag` の判定を行う。
+
+    Args:
+        command: `command_dialect_variants` が返した 1 通りの読み方。
+        _recursed: ラッパー再帰済みかどうか。
+
+    Returns:
+        バイパスフラグを検出したら True。
+
+    Raises:
+        例外は発生しません。
+    """
     for segment in split_segments(tokenize(command)):
         for index, token in enumerate(segment):
             if not is_git_invocation(token):

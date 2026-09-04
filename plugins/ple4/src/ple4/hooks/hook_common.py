@@ -374,6 +374,46 @@ def _replace_unquoted_newlines(command: str) -> str:
     return "".join(result)
 
 
+def command_dialect_variants(command: str) -> tuple[str, ...]:
+    """1 つのコマンド文字列を、2 つのシェル方言の読み方へ展開する。
+
+    ``tokenize`` は ``shlex(posix=True)`` を使うため、クォート外の ``\\`` を
+    「次の 1 文字をエスケープする記号」として消費する。POSIX シェルでは
+    正しいが、Windows の実行シェル（PowerShell / cmd）では ``\\`` は
+    ただのパス区切りである。その結果 ``rm .\\ruff.toml`` は
+    ``['rm', '.ruff.toml']`` に、``C:\\Git\\git.exe commit --no-verify`` は
+    ``['C:Gitgit.exe', ...]`` になり、保護 hook が basename も git 起動も
+    見失う（実測。release-verify 2026-09-03 の再レビュー）。
+
+    どちらの方言で解釈されるかは実行前には決められない（hook の入力に
+    シェル種別は載らない）。そこで**両方の読み方で検査し、どちらかが
+    引っ掛かれば deny する**。ADR-0002 は保護 hook の検出境界を
+    「誤検出を誤通過より選ぶ」と定めており、この非対称はその規定の
+    範囲内である。
+
+    変換は ``\\`` → ``/`` の 1 種類だけに絞る。POSIX 側で
+    ``touch my\\ file`` のようなエスケープを含むコマンドは
+    ``my/ file`` と読まれるが、basename は変わらず（``file``）、
+    保護対象名と一致しない限り新たな deny は生まれない。
+
+    `block_no_verify` と `bash_config_protection` が共有する。「何をパス区切りと
+    みなすか」を 2 箇所へ別々に実装すると、片方だけ強化される非対称
+    （``INPUT_CONTAINER_KEYS`` で実際に起きた失敗）を再生産するため。
+
+    Args:
+        command: 検査対象のコマンド文字列。
+
+    Returns:
+        検査すべき読み方のタプル。``\\`` を含まなければ元の 1 つだけ。
+
+    Raises:
+        例外は発生しません。
+    """
+    if "\\" not in command:
+        return (command,)
+    return (command, command.replace("\\", "/"))
+
+
 def tokenize(command: str) -> list[str]:
     """シェルコマンドを区切り記号込みのトークン列へ分割する。
 

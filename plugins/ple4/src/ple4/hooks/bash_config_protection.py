@@ -79,6 +79,7 @@ from ple4.hooks.hook_common import (
     MAX_STDIN_BYTES,
     StdinUnavailableError,
     basename,
+    command_dialect_variants,
     emit_block_output,
     extract_shell_wrapper_command,
     parse_json_object,
@@ -109,13 +110,19 @@ _BASH_TOOL_NAMES = frozenset({"bash"})
 _REDIRECT_OPERATORS = frozenset({">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>"})
 
 # 最終引数が書き込み先になるコマンド群（A-02）。
-_LAST_ARG_WRITE_COMMANDS = frozenset({"cp", "mv", "install"})
+# 末尾引数が書き込み先になるコマンド。PowerShell の長形式 cmdlet を併記するのは、
+# Windows のシェルツールが PowerShell だからである（`cp`/`mv`/`rm` は
+# PowerShell の別名として同じ cmdlet に解決されるので既に効くが、長形式で
+# 書かれると語彙から外れていた。release-verify 2026-09-03 の再レビュー）。
+_LAST_ARG_WRITE_COMMANDS = frozenset({"cp", "mv", "install", "copy-item", "move-item"})
 
 # ファイルを消す／空にするコマンド群。書き込みではないが、リンタ設定を消せば
 # ルールごと無効化できるため、上書きと同じ強さの弱体化として扱う。`mv` は
 # 移動元も対象にする（`mv ruff.toml /tmp/backup` は実質削除）。`cp` の複製元は
 # 元ファイルが残るため対象にしない。
-_REMOVE_COMMANDS = frozenset({"rm", "unlink", "shred", "truncate", "mv"})
+_REMOVE_COMMANDS = frozenset(
+    {"rm", "unlink", "shred", "truncate", "mv", "remove-item", "move-item", "clear-content"}
+)
 
 # ファイルの中身を変えずに検査を無効化できるコマンド群。`chmod -x
 # .git/hooks/pre-commit` は 1 コマンドでフックを実行不能にし、`chmod 000
@@ -128,7 +135,11 @@ _MODE_COMMANDS = frozenset({"chmod", "chown", "chgrp", "chflags"})
 
 # 単一コマンドの抽出関数が実行位置判定（`_command_index`）へ渡す名前集合。
 # `_executed_command_args` の引数を集合で統一するため、1 要素でも集合で持つ。
-_TEE_COMMANDS = frozenset({"tee"})
+# 非オプション引数がすべて書き込み先になるコマンド。`tee` と、同じ形をとる
+# PowerShell の書き込み系 cmdlet。
+_TEE_COMMANDS = frozenset(
+    {"tee", "set-content", "add-content", "out-file", "new-item"}
+)
 _SED_COMMANDS = frozenset({"sed"})
 _PERL_COMMANDS = frozenset({"perl"})
 _LN_COMMANDS = frozenset({"ln"})
@@ -258,7 +269,14 @@ def _executed_command_args(segment: list[str], names: frozenset[str]) -> list[st
         例外は発生しません。
     """
     index = _command_index(segment)
-    if index is None or segment[index].rsplit("/", 1)[-1] not in names:
+    if index is None:
+        return None
+    # 大小を無視する。PowerShell（Windows のシェルツール）は cmdlet 名を
+    # 大小無視で解決し、macOS 既定の APFS も大小を区別しない
+    # （`is_git_executable_token` が同じ理由で lower している）。
+    # Linux では `RM` が `rm` に一致する誤検出側へ倒れるが、ADR-0002 の
+    # 「誤検出 > 誤通過」の範囲内。
+    if segment[index].rsplit("/", 1)[-1].lower() not in names:
         return None
     return segment[index + 1 :]
 
@@ -576,6 +594,26 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
         `_protected_target` の表示名（symlink 解決後の実体 basename、または
         ``.git/hooks/`` のような保護 path）。そのまま
         `blocked_message_for_file` に渡せる。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    for variant in command_dialect_variants(command):
+        found = _find_protected_write_in_dialect(variant, _recursed=_recursed)
+        if found is not None:
+            return found
+    return None
+
+
+def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | None:
+    """1 つのシェル方言の読み方で保護対象書き込みを探す。
+
+    Args:
+        command: `command_dialect_variants` が返した 1 通りの読み方。
+        _recursed: ラッパー再帰済みかどうか。
+
+    Returns:
+        保護対象の表示名。該当しなければ None。
 
     Raises:
         例外は発生しません。

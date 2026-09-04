@@ -83,6 +83,12 @@ from ple4.lib.constants import BASE_DIR_NAME
 _ROOTS_DIRNAME = "roots"
 _ENV_FILENAME = "env.sh"
 _ENV_TMP_PREFIX = f"{_ENV_FILENAME}.tmp."
+_DETACH_STDIN_SUFFIX = ".stdin"
+"""`hook_common.detach_process` が子へ渡す stdin 一時ファイルの拡張子。
+POSIX では起動直後に unlink されるが、Windows は開いているファイルを削除
+できないため（子が継承ハンドルを保持している）unlink が失敗し、`~/.ple4`
+へ 1 セッション終了につき 1 個ずつ孤児が積み上がる。ここで age-gate 付きの
+回収対象に含める。"""
 _ENV_TEMPLATE_RELATIVE = Path("runtime") / "env-template.sh"
 
 _MAX_ANCESTOR_DEPTH = 2
@@ -428,7 +434,7 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
 
 
 def _maybe_run_gc(ple4_dir: Path, roots_dir: Path, *, keep_pids: frozenset[int]) -> None:
-    """throttle を守りつつ ``roots/`` と ``env.sh.tmp.*`` の GC を実行する。
+    """throttle を守りつつ ``roots/`` と ``ple4_dir`` 直下の一時ファイルの GC を実行する。
 
     ``roots-gc.stamp`` の mtime を見て ``_GC_THROTTLE_SECONDS`` 以内なら何もしない
     （全 hook 起動のたびに ``roots/`` を全走査しないため）。stamp の更新自体も
@@ -462,7 +468,7 @@ def _maybe_run_gc(ple4_dir: Path, roots_dir: Path, *, keep_pids: frozenset[int])
         pass
 
     _gc_roots(roots_dir, keep_pids=keep_pids)
-    _gc_env_sh_temps(ple4_dir, _now())
+    _gc_stale_temp_files(ple4_dir, _now())
 
 
 def _now() -> float:
@@ -584,14 +590,38 @@ def _gc_one(entry: Path, now: float) -> None:
         entry.unlink()
 
 
-def _gc_env_sh_temps(ple4_dir: Path, now: float) -> None:
-    """``ple4_dir`` 直下の ``env.sh.tmp.*`` 孤児を age-gate で回収する。
+def _is_collectable_temp(name: str) -> bool:
+    """``ple4_dir`` 直下のファイル名が一時ファイル回収の対象かを返す。
 
-    ``_atomic_write_text`` は ``env.sh`` も一時ファイル経由で書くため、
-    クラッシュ孤児は ``roots/`` ではなく ``ple4_dir`` に残る。
-    ``_gc_roots`` は ``roots/`` しか見ないので、プレフィックス
-    ``env.sh.tmp.`` に限定して同じ ``_DEAD_PID_GRACE_SECONDS`` を適用する。
-    ``mem.db`` / ``logs`` / ``env.sh`` 自体はプレフィックス不一致で対象外。
+    対象は 2 種類:
+
+    - ``env.sh.tmp.*`` — ``_atomic_write_text`` が ``env.sh`` を書くときの
+      中間ファイル。クラッシュすると残る。
+    - ``*.stdin`` — ``hook_common.detach_process`` が子へ stdin を渡すための
+      一時ファイル。POSIX は起動直後に unlink するが、Windows は開いている
+      ファイルを削除できないため必ず残る。
+
+    ``mem.db`` / ``logs`` / ``env.sh`` 自体はどちらにも一致しない。
+
+    Args:
+        name: 判定対象のファイル名。
+
+    Returns:
+        回収対象なら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    return name.startswith(_ENV_TMP_PREFIX) or name.endswith(_DETACH_STDIN_SUFFIX)
+
+
+def _gc_stale_temp_files(ple4_dir: Path, now: float) -> None:
+    """``ple4_dir`` 直下の一時ファイル孤児を age-gate で回収する。
+
+    ``_gc_roots`` は ``roots/`` しか見ないため、``ple4_dir`` 直下に残る孤児は
+    ここで拾う。``_DEAD_PID_GRACE_SECONDS``（1 時間）を過ぎたものだけを消す
+    ので、書き込み中のファイルや実行中の detach（上限 600 秒）が握っている
+    ファイルを取り上げることはない。
 
     Args:
         ple4_dir: ``$HOME/.ple4`` の Path。
@@ -608,7 +638,7 @@ def _gc_env_sh_temps(ple4_dir: Path, now: float) -> None:
     except OSError:
         return
     for entry in entries:
-        if not entry.name.startswith(_ENV_TMP_PREFIX):
+        if not _is_collectable_temp(entry.name):
             continue
         try:
             mtime = entry.stat().st_mtime
