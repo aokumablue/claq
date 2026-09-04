@@ -576,3 +576,103 @@ allow/deny同一結果は、このWindows stdin fail-open経路と整合する�
 - 検証Gate: **BLOCKED**
 - 理由: フック起動障害の直接原因は特定したが、フックを復元した状態での
   launcher・全payload・timeoutの再実測と、Windows用起動修正の適用は未実施
+
+---
+
+## 11. 対応結果（2026-09-04）
+
+本節は §5 の 17 件すべてに対する裁定と、実施した修正・検証状態を記録する。
+検証は macOS（Python 3.14.7）でのみ実施した。**Windows 実機での再検証は
+未実施**であり、各行の「検証」列がその区別を持つ。
+
+凡例:
+
+- **T** = macOS 上の自動テストで表明（`pytest` で回帰固定済み）
+- **S** = macOS 上で実プロセスを起動して実測（スモーク）
+- **U** = Windows 実機で未検証（設計・静的根拠のみ）
+
+### 11.1 裁定一覧
+
+| ID | 裁定 | 対応内容 / NO-FIX の根拠 | 検証 |
+|---|---|---|---|
+| P0-001 | 修正 | hooks.json の全 7 エントリを `runtime/ple4-hook`（Windows は同名 `.cmd`）経由へ変更。インタプリタ解決を wrapper の単一責務に集約 | T+S / Windows は **U** |
+| P1-002 | 修正 | 同上。Windows 側は `WindowsApps` 配下の Store alias を候補から除外し、`py -3` を優先 | T / Windows は **U** |
+| P1-003 | 修正（設計変更） | `env.sh` resolver は祖先 PID と `ps -o lstart=` の照合に依存し Windows では原理的に解決不能。md を 2 通り書かず、SessionStart の `mem context` が解決済み plugin root と読み替え方（`ple4_run` / `ple4_mem_learn` 両方）を 1 節だけ注入する | T |
+| P1-004 | 修正 | `select.select` を撤去し、ブロッキング read を daemon スレッドへ隔離（3 OS 共通の 1 実装）。「入力が無い」と「読めなかった」を分離し、後者は保護 hook 4 つが deny。ADR-0019 に記録 | T+S |
+| P1-005 | 修正 | `os.getuid()` を `core_utils.actor_identity()` へ置換し、DB 更新の**前**に確定。部分成功の窓を閉じた | T |
+| P1-006 | 修正 | 所有者判定を `os.getuid` の有無という capability で分岐。uid が無効な環境では symlink 拒否・通常ファイル要求・trusted root 包含で守る | T |
+| P1-007 | 修正 | `HOME` 直読みを `get_home_dir()`（`PLE4_HOME`/`HOME`/`USERPROFILE`/`Path.home`）へ。Copilot の実配置 `.copilot/installed-plugins/ple4/ple4/` を探索対象に追加 | T+S |
+| P1-008 | **NO-FIX** | `%USERPROFILE%` 配下は既定でそのユーザー（と SYSTEM/Administrators）に限定されており、ADR-0002 の脅威モデル（同一 OS ユーザーの敵対的回避は非対象）に対し POSIX の 0700 と同水準。Administrators が読める点は POSIX の root と対応する。`icacls` / ctypes 依存を増やして得られる差が無い。根拠は `core_utils.ensure_private_dir` と CLAUDE.md へ記載 | — |
+| P1-009 | 修正 | `_strip_userinfo` → `_strip_credentials`。userinfo に加えて query / fragment を丸ごと破棄（鍵名の列挙では新しい鍵名を取りこぼすため） | T |
+| P1-010 | **NO-FIX（誤検出）** | 既に実装済み。`_handoff_section` は `strip_tags` を通し `CONTEXT_HANDOFF_CHAR_BUDGET` で切っている（`mem/cli.py`）。ADR-0015 / ADR-0016 が扱う領域 | T（既存） |
+| P1-011 | **NO-FIX（誤検出）** | 既に実装済み。`_bg_failure_section` は `strip_tags(normalize_user_message(...))` を通し、末尾 1 行・4KB 上限に限定している | T（既存） |
+| P1-012 | **NO-FIX** | ADR-0007 が明示的に受容した残存リスク。同一 UID から `mem.db` を直接更新できる以上、CLI をいくら固めても人間実行の保証にはならない。`_handle_promote` の docstring にも記載済み | — |
+| P1-013 | 修正 | `detached_spawn_kwargs()` を追加（POSIX: `start_new_session` / Windows: `CREATE_NEW_PROCESS_GROUP｜DETACHED_PROCESS`）。watchdog の停止処理を `stop_child(hard)` へ集約し `os.killpg` の有無で分岐。Windows で孫を回収しない差は受容し、根拠（`--bg` 対象の孫は git のみで、git 側にもハードタイムアウトがある）をコードへ明記 | T / Windows は **U** |
+| P2-014 | 修正 | `_shorten_path` が `/` と `\` の両方を区切りとして扱う | T |
+| P1-015 | **NO-FIX** | `review.md` の設計そのもの。READ-ONLY 制約はステップ 1〜3（レビュー工程）に限定され、ステップ 4 の自律修正は意図された挙動。とくに `commands/review.md:62` は仕様変更だけを除外し **「これは承認待ちではなくスコープ制限」** と明記しており、承認ゲートを検討したうえで採らない判断が既に記録されている | — |
+| P2-016 | 修正 | 実装が正しく docstring が誤り。`modifiedResult` の記述を削除し、実測していない host 契約を推測でキーに足さない方針を明記 | T（既存の出力テスト） |
+| P1-017 | **NO-FIX** | CLAUDE.md「ランタイム前提」と `launcher.py:52-58` が記録済みの意図的判断。fail-closed にすると Python を直す手段（Bash）ごとセッション内から塞がれ復旧不能になる。`ple4ProtectionDisabled` を stderr へ出して無音の無効化は避けている。wrapper 側の「Python が 1 つも見つからない」経路も同じポリシーに揃えた | T |
+
+### 11.2 §9.4 ケース C（timeout 時の fail-open）
+
+ホストが hook の timeout を `allowing the tool call to proceed` に変換する
+挙動はプラグイン側から変えられない。踏みにくくする方向で対応した。
+
+- 保護 hook の timeout を 5 → 15 秒、`pre_compact` を 10 → 15 秒、
+  `mem.cli context` を 5 → 20 秒へ引き上げ（Windows の wrapper +
+  インタプリタ起動を吸収する）
+- `STDIN_FIRST_BYTE_TIMEOUT` を 1.0 → 2.0 秒
+
+### 11.3 検証中に判明した新規不具合（レポート外）
+
+| 現象 | 対応 | 検証 |
+|---|---|---|
+| 開いたまま何も書かれない stdin を渡すと、deny 出力の直後に `Fatal Python error: _enter_buffered_busy` で abort し終了コードが 2 でなくなる（P1-004 の修正で導入した daemon スレッドが `BufferedReader` のロックを保持したままブロックするため） | 実 fd がある場合は `os.read()` で読むよう変更（Python レベルのロックを握らない）。プロセス終了時にしか現れないため実プロセスの回帰テストを追加 | T+S |
+| `ple4_mem_learn` の marshal 経路（`python3 -c` → `ple4.mem.learn_payload`）に経路テストが無かった | 隔離 DB へ実際に 1 件書き、引用符・パイプ・非 ASCII が素通ること、`source=agent`/`status=pending` であることを bash と dash の両方で表明 | T |
+
+### 11.4 §9.9 受入条件表の再測定
+
+| 確認対象 | 合格条件 | macOS 実測 | Windows |
+|---|---|---|---|
+| Python 解決 | alias ではなく実体の 3.12+ が起動する | 合格（`PLE4_PYTHON` / `python3` / `python`(3.12+ 検証) の順で解決） | **U** |
+| launcher | stderr に解決エラーが無く対象 module まで到達する | 合格 | **U** |
+| allow payload | `git status` が許可される | 合格（exit 0、出力なし） | **U** |
+| deny payload | `git commit --no-verify` が非 0 または deny JSON | 合格（exit 2 + `permissionDecision: deny`） | **U** |
+| 入力異常 | 空入力・壊れた JSON・pipe 読取例外を許可側へ倒さない | 読取例外／到着なしは deny（実測）。**壊れた JSON は従来どおり deny。ただし「payload が無い」（tty・stdin 未接続・即 EOF）は素通りのまま**（ADR-0019 の判断。payload を渡さない host を全面拒否すると復旧不能になるため） | **U** |
+| timeout | 保護対象を `allowing the tool call to proceed` にしない | ホスト側挙動のため不可。11.2 の緩和のみ | **U** |
+
+### 11.5 残る「未検証だが全体が依存する」前提
+
+**cmd.exe が、引用符付き・拡張子なし・区切り混在のパス
+（`"C:\Users\...\ple4\ple4/runtime/ple4-hook"`）を PATHEXT で
+`ple4-hook.cmd` へ解決すること。** hooks.json は 1 エントリにつき 1 つの
+コマンド文字列しか持てず、3 OS で正しい裸のインタプリタ名は存在しないため、
+この解決に賭けている（POSIX 側は拡張子なしファイルを直接 exec するので
+確実。この非対称のため、拡張子なしを hooks.json に書く方が
+`.cmd` を書くより POSIX 側で安全と判断した）。
+
+**この前提が誤っていた場合の症状は、修正前とバイト単位で同一**
+（`Denied by preToolUse hook from "ple4@ple4" (hook errored)`）になる。
+「修正が効かなかった」ではなく「この 1 つの前提が外れた」と切り分けられる
+よう、復旧手順を明記する:
+
+1. `hooks.json` の 7 エントリのパスを `.../runtime/ple4-hook` から
+   `.../runtime/ple4-hook.cmd` へ変える。
+2. その場合 POSIX 側も同じ名前を exec することになるため、
+   `runtime/ple4-hook.cmd` を POSIX からも実行できる形（sh/batch
+   ポリグロット、実行ビット付き）にするか、host ごとに別 `hooks.json` を
+   配布する必要がある。
+3. 切り分けだけなら、Windows で `PLE4_PYTHON` に実体 Python の絶対パスを
+   設定しても解決しない（wrapper 自体が起動していないため）。
+   ホストのプロセスログに `'...ple4-hook' is not recognized` 系の
+   stderr が出ていれば、この前提が外れたと確定できる。
+
+### 11.6 成果物
+
+| 項目 | 内容 |
+|---|---|
+| コミット | `872ac87` / `c875903` / `1509c6a` / `11655bc` / `fd43487` / `6e0599f` / `81143e9` |
+| 新規 ADR | ADR-0019（保護フックは stdin を「読めなかった」場合に fail-closed する） |
+| 新規配布物 | `runtime/ple4-hook`（100755）・`runtime/ple4-hook.cmd`。publish は git filter-repo の除外方式なので自動的に配布ツリーへ載り、実行ビットも保持される |
+| テスト | 2515 件成功、`ruff check plugins/ple4` 警告なし、カバレッジ 100% |
+| 判定 | **macOS/Linux: 回帰なし。Windows: 実機再検証待ち（11.5 の前提を最初に確認すること）** |
