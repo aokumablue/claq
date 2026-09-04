@@ -892,21 +892,35 @@ DETACH_TIMEOUT_SECONDS = 600
 # SIGTERM を無視して詰まったプロセスを SIGKILL で確実に回収するまでの猶予（秒）。
 _DETACH_KILL_AFTER_SECONDS = 30
 
-# detach した子を DETACH_TIMEOUT_SECONDS で SIGTERM、応答なければ
-# _DETACH_KILL_AFTER_SECONDS 後に SIGKILL する watchdog。coreutils の
-# `timeout`/`gtimeout` は BSD/macOS に標準で存在せず（--kill-after は GNU 固有）、
-# ランタイム依存ゼロの方針にも反するため、既に起動に使っている sys.executable
-# 自身で実装し外部コマンドへの依存をなくす。
+# detach した子を DETACH_TIMEOUT_SECONDS で穏当に停止（POSIX: SIGTERM、
+# Windows: TerminateProcess 相当）し、応答が無ければ _DETACH_KILL_AFTER_SECONDS
+# 後に強制終了する watchdog。coreutils の `timeout`/`gtimeout` は BSD/macOS に
+# 標準で存在せず（--kill-after は GNU 固有）、ランタイム依存ゼロの方針にも
+# 反するため、既に起動に使っている sys.executable 自身で実装し外部コマンドへの
+# 依存をなくす。
 #
-# シグナルは GNU timeout と同様に「プロセスグループ」へ送る。子を
+# POSIX では停止シグナルを「プロセスグループ」へ送る。子を
 # start_new_session=True で新しいセッション（= 新しいプロセスグループ）の
 # リーダーにし、os.killpg で子と孫をまとめて回収する。Popen.terminate()/kill()
-# は直接の子 1 プロセスにしか届かず、子が孫プロセスを起動する構成になった
-# 場合でも無期限残留を防げるよう、汎用的にプロセスグループ全体を回収する。
+# は直接の子 1 プロセスにしか届かないため、孫プロセスの無期限残留を防げない。
+#
+# Windows には killpg / SIGKILL が無い（`os.killpg` 不在、`signal.SIGKILL`
+# 未定義、`start_new_session` は ValueError）。ここは Windows 用の分岐を置く
+# （release-verify 2026-09-03 の P1-013）。分岐はプラットフォーム名ではなく
+# `hasattr(os, "killpg")` という capability で行い、Windows では
+# CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS で起動して
+# Popen.terminate()/kill() で回収する。
+#
+# 受容する差: Windows では孫プロセスが回収されない（Job Object を使えば
+# 回収できるが、ctypes で書く 100 行超が macOS/Linux では 1 行も実行されず
+# 検証もできない）。現在の --bg 対象は SessionEnd の `mem.cli handoff` の
+# 1 つで、その孫は `git` 呼び出しのみ。git 側にも GIT_TIMEOUT_SECONDS の
+# ハードタイムアウトがあり、無期限残留は起きない。対象が孫を長時間持つ
+# 処理へ広がった時点で Job Object を再検討する。
 #
 # watchdog 自身が SIGTERM を受けた場合も、そのまま終了すると孫が残るため、
-# ハンドラで子グループへ SIGTERM を cascade し、猶予後に SIGKILL してから
-# 抜ける（ハンドラ内で proc.wait() を再入させないよう time.sleep で待つ）。
+# ハンドラで子へ停止を cascade し、猶予後に強制終了してから抜ける
+# （ハンドラ内で proc.wait() を再入させないよう time.sleep で待つ）。
 #
 # コスト: detach 1 回につき watchdog + 対象の 2 プロセスが起動する。現在の --bg
 # 対象（SessionEnd の mem.cli handoff）はセッション終了イベントでのみ発火する
@@ -916,7 +930,7 @@ _DETACH_KILL_AFTER_SECONDS = 30
 #     ハーネス timeout の管轄外なので、ハングした子と孫が無制限に残留する。
 #   - 子プロセス内の `signal.alarm` では代替できない。alarm は自プロセスにしか
 #     届かず、子が孫プロセスを起動する構成になった場合に回収できないため
-#     等価ではない。
+#     等価ではない。Windows には alarm 自体が無い。
 #   - watchdog は sys.executable の `-c` 実行で、対象モジュールを import せず
 #     待つだけなので、追加コストは Python インタプリタ起動 1 回分に留まる。
 # すなわち「毎回 1 プロセス分の起動コスト」と「孫プロセスの無制限残留を防ぐ
@@ -927,37 +941,77 @@ import os, signal, subprocess, sys, time
 timeout, kill_after = float(sys.argv[1]), float(sys.argv[2])
 log_path = os.environ.get("PLE4_BG_LOG_PATH")
 log_file = open(log_path, "ab") if log_path else subprocess.DEVNULL
+has_process_groups = hasattr(os, "killpg")
+if has_process_groups:
+    spawn_kwargs = {"start_new_session": True}
+else:
+    spawn_kwargs = {
+        "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        | getattr(subprocess, "DETACHED_PROCESS", 0)
+    }
 proc = subprocess.Popen(
     sys.argv[3:],
     stdin=sys.stdin,
     stdout=log_file,
     stderr=log_file,
-    start_new_session=True,
+    **spawn_kwargs,
 )
 
-def signal_group(sig):
+def stop_child(hard):
     try:
-        os.killpg(os.getpgid(proc.pid), sig)
+        if has_process_groups:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL if hard else signal.SIGTERM)
+        elif hard:
+            proc.kill()
+        else:
+            proc.terminate()
     except (ProcessLookupError, OSError):
         pass
 
 def cascade(signum, frame):
-    signal_group(signal.SIGTERM)
+    stop_child(False)
     time.sleep(kill_after)
-    signal_group(signal.SIGKILL)
+    stop_child(True)
     os._exit(128 + signum)
 
 signal.signal(signal.SIGTERM, cascade)
 try:
     proc.wait(timeout=timeout)
 except subprocess.TimeoutExpired:
-    signal_group(signal.SIGTERM)
+    stop_child(False)
     try:
         proc.wait(timeout=kill_after)
     except subprocess.TimeoutExpired:
-        signal_group(signal.SIGKILL)
+        stop_child(True)
         proc.wait()
 """
+
+
+def detached_spawn_kwargs() -> dict[str, Any]:
+    """親から独立したプロセスグループで子を起動するための Popen 引数を返す。
+
+    POSIX は ``start_new_session=True``、Windows は
+    ``CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`` が同じ意図を表す
+    （``start_new_session`` を Windows で渡すと ``ValueError`` になり、
+    SessionEnd の handoff hook がそこで落ちていた。P1-013）。分岐は
+    プラットフォーム名ではなく ``os.setsid`` の有無という capability で
+    行う。
+
+    Args:
+        なし
+
+    Returns:
+        ``subprocess.Popen`` へ展開する追加キーワード引数。
+
+    Raises:
+        例外は発生しません。
+    """
+    if hasattr(os, "setsid"):
+        return {"start_new_session": True}
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        | getattr(subprocess, "DETACHED_PROCESS", 0)
+    }
 
 
 def _watchdog_argv(cmd: list[str]) -> list[str]:
@@ -1018,9 +1072,10 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
     unlink する（継承済み fd は有効なまま）。
 
     detach 後の子はハーネスの timeout の管轄外になるため、_WATCHDOG_SCRIPT で
-    ラップして DETACH_TIMEOUT_SECONDS で SIGTERM、さらに猶予後 SIGKILL を送り、
-    暴走プロセスの無期限残留を防ぐ。シグナルは子のプロセスグループへ送るため、
-    子が起動した孫プロセスもまとめて回収される。
+    ラップして DETACH_TIMEOUT_SECONDS で穏当に停止、さらに猶予後に強制終了し、
+    暴走プロセスの無期限残留を防ぐ。POSIX では停止シグナルを子のプロセス
+    グループへ送るため、子が起動した孫プロセスもまとめて回収される
+    （Windows は直接の子のみ。理由は `_WATCHDOG_SCRIPT` のコメント参照）。
 
     対象の stdout/stderr は `PLE4_BG_LOG_PATH` 環境変数で
     _WATCHDOG_SCRIPT へ log ファイルパスを渡し、そこへ追記させる
@@ -1062,7 +1117,7 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=child_env,
-            start_new_session=True,
+            **detached_spawn_kwargs(),
         )
         return True
     except OSError:

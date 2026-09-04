@@ -807,6 +807,29 @@ class TestRecentBgFailureNotice:
         assert hook_common.recent_bg_failure_notice() == ""
 
 
+class TestDetachedSpawnKwargs:
+    """`detached_spawn_kwargs`（プロセスグループ分離）のプラットフォーム契約。
+
+    `start_new_session=True` は Windows で `ValueError` になり、SessionEnd の
+    handoff hook がそこで落ちていた（P1-013）。プラットフォーム名ではなく
+    `os.setsid` の有無という capability で分岐することを固定する。
+    """
+
+    def test_posix_uses_new_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`os.setsid` がある環境では start_new_session を使うこと。"""
+        monkeypatch.setattr(hook_common.os, "setsid", lambda: None, raising=False)
+
+        assert hook_common.detached_spawn_kwargs() == {"start_new_session": True}
+
+    def test_windows_uses_creation_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`os.setsid` が無い環境では creationflags でプロセスグループを分けること。"""
+        monkeypatch.delattr(hook_common.os, "setsid", raising=False)
+        monkeypatch.setattr(hook_common.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200, raising=False)
+        monkeypatch.setattr(hook_common.subprocess, "DETACHED_PROCESS", 0x8, raising=False)
+
+        assert hook_common.detached_spawn_kwargs() == {"creationflags": 0x208}
+
+
 class TestDetachProcess:
     """detach_process の一時ファイル経由 stdin 引き渡し・エラー処理のテスト。
 
