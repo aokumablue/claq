@@ -625,10 +625,23 @@ allow/deny同一結果は、このWindows stdin fail-open経路と整合する�
 
 ### 11.3 検証中に判明した新規不具合（レポート外）
 
-| 現象 | 対応 | 検証 |
-|---|---|---|
-| 開いたまま何も書かれない stdin を渡すと、deny 出力の直後に `Fatal Python error: _enter_buffered_busy` で abort し終了コードが 2 でなくなる（P1-004 の修正で導入した daemon スレッドが `BufferedReader` のロックを保持したままブロックするため） | 実 fd がある場合は `os.read()` で読むよう変更（Python レベルのロックを握らない）。プロセス終了時にしか現れないため実プロセスの回帰テストを追加 | T+S |
-| `ple4_mem_learn` の marshal 経路（`python3 -c` → `ple4.mem.learn_payload`）に経路テストが無かった | 隔離 DB へ実際に 1 件書き、引用符・パイプ・非 ASCII が素通ること、`source=agent`/`status=pending` であることを bash と dash の両方で表明 | T |
+v0.9.50 公開後に 3 OS 横断で hook 経路を再レビューし、下表を追加で検出・修正した。
+
+| ID | 現象 | 対応 | 検証 |
+|---|---|---|---|
+| N-01 | 開いたまま何も書かれない stdin を渡すと、deny 出力の直後に `Fatal Python error: _enter_buffered_busy` で abort し終了コードが 2 でなくなる（P1-004 の修正で導入した daemon スレッドが `BufferedReader` のロックを保持したままブロックするため） | 実 fd がある場合は `os.read()` で読む（Python レベルのロックを握らない）。プロセス終了時にしか現れないため実プロセスの回帰テストを追加 | T+S |
+| N-02 | `ple4_mem_learn` の marshal 経路（`python3 -c` → `ple4.mem.learn_payload`）に経路テストが無かった | 隔離 DB へ実際に 1 件書き、引用符・パイプ・非 ASCII が素通ること、`source=agent`/`status=pending` であることを bash と dash の両方で表明 | T |
+| **W1** | **`ple4-hook.cmd` が `if defined ... ( python ... & exit /b %ERRORLEVEL% )` の形だった。cmd はカッコブロック内の `%VAR%` を*パース時*に展開するため、返るのは python 起動*前*の errorlevel になる。保護 hook の exit 2 が 0 として host へ報告され、Windows では全 deny が allow になる** | ブロックを廃して `goto` + 素の `exit /b` へ再構成。「起動行がブロック外」「`%ERRORLEVEL%` を持たない」ことを構造テストで固定 | T / Windows は **U** |
+| W2 | WindowsApps 除外を `echo %%P｜findstr` で行っていた。for 変数は展開後に再パースされるため `C:\Program Files (x86)\...` のようなカッコ入り実在パスでブロックが壊れる | 除外を `where` のパイプライン側へ移動 | T / Windows は **U** |
+| W3 | findstr のパターンが `"\WindowsApps\"` と閉じ引用符直前でバックスラッシュ終端していた。findstr は C ランタイム解析で `\"` を引用符のエスケープとして読むため、除外が永久に不発になる | `"\WindowsApps"` へ | T / Windows は **U** |
+| W4 | `detach_process` の stdin 一時ファイルは Windows では unlink できず（子が継承ハンドルを保持）、`~/.ple4` にセッションごと 1 個ずつ孤児が残る | env_pointer の GC を `*.stdin` にも広げた（猶予 1 時間の age-gate） | T |
+| W5 | `shlex(posix=True)` がクォート外の `\` をエスケープとして消費するため、`rm .\.eslintrc` は `['rm', '..eslintrc']`、`C:\Git\bin\git.exe commit --no-verify` は `['C:Gitbingit.exe', ...]` に潰れ、保護対象 basename も git 起動も見失う | コマンド文字列を POSIX 読みと Windows 読みの 2 方言で解析し、どちらかが検出したら deny（ADR-0020）。既存 2520 件は全て緑のまま | T |
+| W6 | PowerShell の長形式 cmdlet（`Remove-Item` / `Set-Content` / `Out-File` / `Add-Content` / `New-Item` / `Copy-Item` / `Move-Item` / `Clear-Content`）が書き込み語彙に無かった（`rm`/`cp`/`mv` は PowerShell の別名なので既に効いていた） | 語彙へ追加し、実行位置コマンド名の比較を大小無視に。malformed JSON の縮退経路でも同じ扱いになるよう生テキスト照合も小文字化 | T |
+| **N-03** | **stdout がパイプかつ UTF-8 モード無効のとき、Python はロケール由来のエンコーディングを使う。Windows の既定コードページ（日本語環境なら cp932）や `LC_ALL=C` の Linux では、注入コンテキストや deny 理由の日本語が `UnicodeEncodeError` になり、フックは注入も deny もできないまま exit 1 で落ちる** | launcher が起動直後に stdout/stderr を UTF-8（errors=replace）へ固定。`--bg` の子は `main()` を通らないため `build_env()` に `PYTHONIOENCODING=utf-8` も追加 | T+S（`PYTHONUTF8=0 LC_ALL=C` で実測・再現・修正確認） |
+| N-04 | 祖先ポインタ方式が成立しない OS でも毎 hook `ps` を spawn していた（MSYS 由来の `ps.exe` が PATH にあると別 PID 空間の値を書きうる） | `ancestor_pointers_supported()` が偽なら `ps` を呼ばない | T |
+
+`pre_bash_commit_quality` / `commit_quality_scanner` の subprocess は全て `git` の
+argv 直呼びで、`sh -c` もハードコード絶対パスも無いことを確認した（対応不要）。
 
 ### 11.4 §9.9 受入条件表の再測定
 
@@ -671,8 +684,23 @@ allow/deny同一結果は、このWindows stdin fail-open経路と整合する�
 
 | 項目 | 内容 |
 |---|---|
-| コミット | `872ac87` / `c875903` / `1509c6a` / `11655bc` / `fd43487` / `6e0599f` / `81143e9` |
-| 新規 ADR | ADR-0019（保護フックは stdin を「読めなかった」場合に fail-closed する） |
+| コミット | v0.9.50 まで: `872ac87` / `c875903` / `1509c6a` / `11655bc` / `fd43487` / `6e0599f` / `81143e9`。再レビュー分: `71b33a1`（W1〜W6） / `1e34db8`（N-03・N-04） / `753e24f`（detach 子の UTF-8・縮退経路の大小無視） |
+| 新規 ADR | ADR-0019（保護フックは stdin を「読めなかった」場合に fail-closed する）・ADR-0020（シェル保護フックは 1 つのコマンド文字列を 2 つのシェル方言で解析する） |
 | 新規配布物 | `runtime/ple4-hook`（100755）・`runtime/ple4-hook.cmd`。publish は git filter-repo の除外方式なので自動的に配布ツリーへ載り、実行ビットも保持される |
-| テスト | 2515 件成功、`ruff check plugins/ple4` 警告なし、カバレッジ 100% |
+| テスト | 2546 件成功、`ruff check plugins/ple4` 警告なし、カバレッジ 100% |
 | 判定 | **macOS/Linux: 回帰なし。Windows: 実機再検証待ち（11.5 の前提を最初に確認すること）** |
+
+### 11.7 公開済み v0.9.50 の位置づけ（訂正）
+
+v0.9.50 を公開したあとの再レビューで **W1** を検出した。したがって v0.9.50 の
+状態は「Windows 未検証」ではなく、**特定の形で Windows において壊れている**:
+
+- `ple4-hook.cmd` が python の終了コードではなく起動前の errorlevel を返すため、
+  **保護 hook の deny（exit 2）が全て allow（0）として host へ報告される**。
+  `block_no_verify` / `config_protection` / `bash_config_protection` /
+  `pre_bash_commit_quality` の 4 つが Windows で無効化される。
+- macOS / Linux は影響を受けない（`.cmd` は実行されない）。
+- SessionStart の記憶注入・handoff など、deny を返さない hook は v0.9.50 でも
+  意図どおり動く（N-03 の非 UTF-8 ロケール条件を除く）。
+
+v0.9.50 を Windows で導入した環境は、W1・N-03 を含む次版へ更新すること。
