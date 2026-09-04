@@ -51,6 +51,7 @@ from ple4.hooks.commit_quality_scanner import (
 from ple4.hooks.hook_common import (
     MAX_STDIN_BYTES,
     basename,
+    command_dialect_variants,
     is_git_executable_token,
     parse_json_object,
     resolve_repo_root,
@@ -284,6 +285,33 @@ def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
         for offset, tok in enumerate(rest):
             if tok == "commit":
                 return rest[offset + 1 :]
+    return None
+
+
+def _detect_git_commit(command: str) -> tuple[str, list[str]] | None:
+    """2 つのシェル方言の読み方で `git commit` 起動を探す。
+
+    `block_no_verify` / `bash_config_protection` と同じ
+    `command_dialect_variants` を使う。POSIX 読みだけを見ていた頃は、
+    Windows の絶対パス起動（``C:\\Git\\bin\\git.exe commit -m x``）が
+    `shlex(posix=True)` で ``C:Gitbingit.exe`` に潰れ、commit と認識できず
+    品質ゲートが丸ごと素通りしていた（`block_no_verify` では検出される
+    のに本フックだけ通る非対称。ADR-0020）。
+
+    Args:
+        command: 検査対象のコマンド文字列（heredoc 本文は除去済み）。
+
+    Returns:
+        commit を検出した読み方と、その commit 引数のタプル。
+        どちらの読み方でも commit でなければ None。
+
+    Raises:
+        例外は発生しません（`_is_git_commit_command` の契約に従う）。
+    """
+    for variant in command_dialect_variants(command):
+        is_commit, commit_args = _is_git_commit_command(variant)
+        if is_commit:
+            return variant, commit_args
     return None
 
 
@@ -932,12 +960,12 @@ def evaluate(raw_input: str) -> dict:
             command = strip_data_heredoc_bodies(raw_command)
             # git commit コマンドの場合のみ実行（トークン化して堅牢に判定）
             try:
-                is_commit, commit_args = _is_git_commit_command(command)
+                detected = _detect_git_commit(command)
             except Exception as err:  # noqa: BLE001 - 1 コンテナの失敗で他を落とさない
                 log(f"[Hook] Error: {err}")
                 continue
-            if is_commit:
-                commits.append((command, commit_args))
+            if detected is not None:
+                commits.append(detected)
 
         if not commits:
             return {"output": raw_input, "exitCode": 0}

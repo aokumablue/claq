@@ -114,14 +114,33 @@ _REDIRECT_OPERATORS = frozenset({">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>"
 # Windows のシェルツールが PowerShell だからである（`cp`/`mv`/`rm` は
 # PowerShell の別名として同じ cmdlet に解決されるので既に効くが、長形式で
 # 書かれると語彙から外れていた。release-verify 2026-09-03 の再レビュー）。
-_LAST_ARG_WRITE_COMMANDS = frozenset({"cp", "mv", "install", "copy-item", "move-item"})
+_LAST_ARG_WRITE_COMMANDS = frozenset(
+    {"cp", "mv", "install", "copy-item", "move-item", "copy", "move", "cpi", "mi"}
+)
 
 # ファイルを消す／空にするコマンド群。書き込みではないが、リンタ設定を消せば
 # ルールごと無効化できるため、上書きと同じ強さの弱体化として扱う。`mv` は
 # 移動元も対象にする（`mv ruff.toml /tmp/backup` は実質削除）。`cp` の複製元は
 # 元ファイルが残るため対象にしない。
 _REMOVE_COMMANDS = frozenset(
-    {"rm", "unlink", "shred", "truncate", "mv", "remove-item", "move-item", "clear-content"}
+    {
+        "rm",
+        "unlink",
+        "shred",
+        "truncate",
+        "mv",
+        # PowerShell / cmd の長形式と別名（`del` / `erase` / `rd` は cmd 組み込み、
+        # `ri` / `mi` / `clc` は PowerShell の既定エイリアス）。
+        "remove-item",
+        "move-item",
+        "clear-content",
+        "del",
+        "erase",
+        "rd",
+        "ri",
+        "mi",
+        "clc",
+    }
 )
 
 # ファイルの中身を変えずに検査を無効化できるコマンド群。`chmod -x
@@ -138,7 +157,7 @@ _MODE_COMMANDS = frozenset({"chmod", "chown", "chgrp", "chflags"})
 # 非オプション引数がすべて書き込み先になるコマンド。`tee` と、同じ形をとる
 # PowerShell の書き込み系 cmdlet。
 _TEE_COMMANDS = frozenset(
-    {"tee", "set-content", "add-content", "out-file", "new-item"}
+    {"tee", "set-content", "add-content", "out-file", "new-item", "sc", "ac", "ni"}
 )
 _SED_COMMANDS = frozenset({"sed"})
 _PERL_COMMANDS = frozenset({"perl"})
@@ -266,13 +285,18 @@ def _command_name(token: str) -> str:
     Args:
         token: 実行位置のトークン。
 
+    ``.exe`` も落とす。`is_git_executable_token`（`hook_common`）は既に落として
+    おり、揃えないと ``git.exe commit --no-verify`` は捕まるのに
+    ``rm.exe ruff.toml`` は語彙から外れる、という非対称になる。
+
     Returns:
-        basename を小文字化した名前。
+        basename を小文字化し、``.exe`` を除いた名前。
 
     Raises:
         例外は発生しません。
     """
-    return token.rsplit("/", 1)[-1].lower()
+    name = token.rsplit("/", 1)[-1].lower()
+    return name[: -len(".exe")] if name.endswith(".exe") else name
 
 
 def _executed_command_args(segment: list[str], names: frozenset[str]) -> list[str] | None:

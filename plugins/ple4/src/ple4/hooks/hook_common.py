@@ -374,13 +374,19 @@ def _replace_unquoted_newlines(command: str) -> str:
     return "".join(result)
 
 
-# Windows 読みへ変換するバックスラッシュ。直後が空白（``\\ `` は POSIX の
-# エスケープ空白）と ``/``（``\\/`` は sed スクリプト等の POSIX エスケープ）の
-# ものは除く。Windows のパス区切りは直後に必ずパス構成文字が来るため、この 2 つを
-# 外しても Windows 側の検出力は落ちない。除外しないと ``rm my\\ ruff.toml`` が
-# ``my/`` + ``ruff.toml`` の 2 トークンへ割れ、POSIX では 1 トークンの非保護
-# ファイル名だったものが保護対象として deny される（実測）。
+# Windows 読みでパス区切りへ変換するバックスラッシュ。直後が空白と ``/`` の
+# ものは除く（下 2 つの正規表現がそれぞれ別扱いする）。
 _WINDOWS_SEPARATOR_BACKSLASH_RE = re.compile(r"\\(?=[^\s/])")
+
+# Windows 読みで**除去**するバックスラッシュ（直後が空白）。POSIX では
+# ``rm my\\ ruff.toml`` は 1 トークン ``my ruff.toml`` だが、エスケープを持たない
+# PowerShell / cmd では ``my\\`` と ``ruff.toml`` の 2 引数であり、``ruff.toml`` が
+# 実際に削除される。``git commit -m fix\\ --no-verify`` も同様に ``--no-verify``
+# が独立した引数になり、フックがバイパスされる。したがってこの形は
+# 「POSIX の誤検出」ではなく「Windows の真陽性」であり、検出side へ倒す
+# （ADR-0002: 誤検出 > 誤通過）。``/`` へ置換するのではなく除去するのは、
+# 実在しない ``my/`` のようなパスを作らないため。
+_WINDOWS_ESCAPED_SPACE_RE = re.compile(r"\\(?=[ \t])")
 
 
 def command_dialect_variants(command: str) -> tuple[str, ...]:
@@ -400,18 +406,22 @@ def command_dialect_variants(command: str) -> tuple[str, ...]:
     「誤検出を誤通過より選ぶ」と定めており、この非対称はその規定の
     範囲内である。
 
-    変換は「直後が空白でも ``/`` でもないバックスラッシュ」だけを ``/`` に
-    置き換える（`_WINDOWS_SEPARATOR_BACKSLASH_RE`）。除外の理由は、この変換が
-    **basename を変えるだけでなくトークン境界を作り替える**ためである:
-    ``rm my\\ ruff.toml`` は POSIX では 1 トークン ``my ruff.toml``（非保護）
-    だが、無条件変換だと ``my/`` と ``ruff.toml`` に割れて deny になる。
-    ``\\`` の直後が空白または ``/`` の形は Windows のパス区切りには現れない
-    ため、除外しても Windows 側の検出力は落ちない。
+    Windows 読みの作り方は、``\\`` の直後の文字で 3 通りに分ける:
 
-    それでも残る誤検出はある（例: sed スクリプト内の ``\\.git`` が
-    ``/.git`` になり ``.git/hooks/`` 判定に触れる）。これは ADR-0002 が
-    受容する側の誤りであり、`tests/hooks/test_windows_shell_dialect.py` に
-    characterization test として固定してある。
+    - **パス構成文字** → ``/`` へ置換（``.\\ruff.toml`` → ``./ruff.toml``）。
+    - **空白 / タブ** → ``\\`` を除去（``my\\ ruff.toml`` → ``my ruff.toml``）。
+      PowerShell / cmd に単語結合のエスケープは無いので、この形は Windows では
+      2 引数であり ``ruff.toml`` が実際に書き込み対象になる。POSIX 読みでは
+      1 トークンの非保護ファイル名なので両立しないが、ADR-0002 に従い検出側へ
+      倒す。``/`` へ置換せず除去するのは、実在しない ``my/`` を作らないため。
+    - **``/``** → 変換しない。``\\/`` は sed スクリプト等の POSIX エスケープで、
+      Windows のパス区切りには現れない。POSIX 読みでも Windows 読みでも ``/`` は
+      区切りのまま残るので、除外しても検出力は落ちない
+      （``sed -i 's/\\.git\\/hooks\\/pre-commit//' notes.md`` の誤検出はこれで消える）。
+
+    残る誤検出はある（例: ``rm a\\.eslintrc``）。これは ADR-0002 が受容する側の
+    誤りであり、`tests/hooks/test_windows_shell_dialect.py` に characterization
+    test として固定してある。
 
     `block_no_verify` と `bash_config_protection` が共有する。「何をパス区切りと
     みなすか」を 2 箇所へ別々に実装すると、片方だけ強化される非対称
@@ -426,7 +436,9 @@ def command_dialect_variants(command: str) -> tuple[str, ...]:
     Raises:
         例外は発生しません。
     """
-    windows_reading = _WINDOWS_SEPARATOR_BACKSLASH_RE.sub("/", command)
+    windows_reading = _WINDOWS_ESCAPED_SPACE_RE.sub(
+        "", _WINDOWS_SEPARATOR_BACKSLASH_RE.sub("/", command)
+    )
     if windows_reading == command:
         return (command,)
     return (command, windows_reading)

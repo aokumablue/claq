@@ -44,9 +44,12 @@ def build_env() -> dict[str, str]:
     # 日本語を含み、bg ログへリダイレクトされるため、非 UTF-8 ロケールでは
     # UnicodeEncodeError が bg ログの中だけで起き、次セッションの通知に
     # 化けた 1 行として現れる。子にも同じ UTF-8 固定を効かせる。
-    # 親（`force_utf8_streams`）と同じく errors を明示する。既定の ``strict``
-    # だと、surrogateescape 由来のサロゲートを含む文字列で子だけが
-    # ``UnicodeEncodeError`` になり、親子で非対称になる。
+    # errors を明示する。既定の ``strict`` だと、surrogateescape 由来の
+    # サロゲートを含む文字列で子だけが ``UnicodeEncodeError`` になる。
+    # ``PYTHONIOENCODING`` は stdout/stderr を分けられないため、子の stderr は
+    # 親（`force_utf8_streams` が ``backslashreplace`` を保つ）と異なり
+    # ``replace`` になる。子の出力は bg ログへ落ちる診断であり、
+    # 「読める形で残る」ことを優先する。
     env["PYTHONIOENCODING"] = "utf-8:replace"
 
     pythonpath = env.get("PYTHONPATH")

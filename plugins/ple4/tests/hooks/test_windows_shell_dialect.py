@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from ple4.hooks import bash_config_protection
+from ple4.hooks import bash_config_protection, pre_bash_commit_quality
 from ple4.hooks.bash_config_protection import _raw_text_write_risk, find_protected_write
 from ple4.hooks.block_no_verify import has_bypass_flag
 from ple4.hooks.hook_common import command_dialect_variants
@@ -80,23 +80,15 @@ class TestWindowsPathSeparators:
     @pytest.mark.parametrize(
         "command",
         [
-            # エスケープ空白。無条件変換だと `my/` + `ruff.toml` に割れて deny になる。
-            r"rm my\ ruff.toml",
-            r"cp src.toml my\ ruff.toml",
-            # sed スクリプト内の `\.` `\/`。無条件変換だと `.git/hooks/` を踏む。
+            # sed スクリプト内の `\.` `\/`。`\/` は Windows のパス区切りに現れず、
+            # POSIX 読みでも Windows 読みでも `/` は区切りのまま残る。
             r"sed -i 's/\.git\/hooks\/pre-commit//' notes.md",
-            # コミットメッセージ中のエスケープ空白（`--no-verify` が語として独立しない）。
-            r"git commit -m fix\ --no-verify",
+            # クォート内のエスケープ空白は 1 トークンのままなので割れない。
+            'rm "my\\\\ ruff.toml"',
         ],
     )
     def test_posix_escapes_do_not_become_false_positives(self, command: str) -> None:
-        """POSIX のエスケープが新たな deny を生まないこと。
-
-        方言変換は basename を変えるだけでなく**トークン境界を作り替える**。
-        無条件に ``\\`` を ``/`` へ置くと、POSIX で 1 トークンだったものが 2 つに割れ、
-        非保護のファイル名から保護名が現れる（実測）。``\\`` の直後が空白・``/`` の
-        ものを変換対象から外すことでこれを塞いでいる。ここが緑でなくなったら、
-        macOS/Linux の正当なコマンドが拒否されている。
+        """Windows 読みで意味が変わらない POSIX エスケープが deny を生まないこと。
 
         検証の verb は必ず書き込み語彙に入っているものを使う（`touch` のように
         語彙外の verb を使うと、方言ロジックが何を返しても None になり
@@ -104,6 +96,33 @@ class TestWindowsPathSeparators:
         """
         assert find_protected_write(command) is None
         assert has_bypass_flag(command) is False
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            # PowerShell / cmd にはエスケープが無く、`my\` と `ruff.toml` は
+            # 別引数になる。Remove-Item の -Path は String[] なので ruff.toml が
+            # 実際に消える — POSIX 読みの「1 トークンの非保護ファイル名」とは
+            # 両立しないが、ADR-0002 に従い検出側へ倒す。
+            (r"rm my\ ruff.toml", "ruff.toml"),
+            (r"cp src.toml my\ ruff.toml", "ruff.toml"),
+        ],
+    )
+    def test_escaped_space_is_detected_as_a_windows_write(
+        self, command: str, expected: str
+    ) -> None:
+        """エスケープ空白は Windows では引数の区切りなので、書き込みとして検出すること。"""
+        assert find_protected_write(command) == expected
+
+    def test_escaped_space_before_bypass_flag_is_detected(self) -> None:
+        """``fix\\ --no-verify`` は Windows では ``--no-verify`` が独立引数になる。
+
+        POSIX ではコミットメッセージの一部だが、エスケープを持たないシェルでは
+        git が実際にフラグとして受け取り pre-commit / commit-msg が走らない。
+        """
+        assert has_bypass_flag(r"git commit -m fix\ --no-verify") is True
+        # クォートされていれば POSIX でも Windows でも 1 引数なので検出しない。
+        assert has_bypass_flag("git commit -m 'fix --no-verify'") is False
 
     def test_remaining_false_positive_is_pinned(self) -> None:
         """残る誤検出を characterization test として固定する。
@@ -175,3 +194,50 @@ class TestCommandNameNormalization:
         """縮退経路で保護名も大小無視で照合すること（macOS/Windows は大小同一視）。"""
         assert _raw_text_write_risk("{broken rm RUFF.TOML") == "ruff.toml"
         assert _raw_text_write_risk("{broken cat RUFF.TOML") is None
+
+
+class TestWindowsExecutableNames:
+    """Windows の実行ファイル名・別名が語彙から外れないこと。"""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # `.exe` 付き。`is_git_executable_token` は既に落としているので揃える。
+            "rm.exe ruff.toml",
+            # cmd 組み込み / PowerShell の既定エイリアス。
+            "del ruff.toml",
+            "erase ruff.toml",
+            "ri ruff.toml",
+            "clc ruff.toml",
+            "copy other.toml ruff.toml",
+            "move other.toml ruff.toml",
+            "sc ruff.toml -Value x",
+            "ni ruff.toml",
+        ],
+    )
+    def test_windows_write_names_are_detected(self, command: str) -> None:
+        """Windows 側の実行名でも保護対象書き込みを検出すること。"""
+        assert find_protected_write(command) == "ruff.toml"
+
+
+class TestCommitQualityDialect:
+    """`pre_bash_commit_quality` も 2 方言で commit を探すこと。
+
+    ここだけ POSIX 読み 1 本だと、``C:\\Git\\bin\\git.exe commit -m x`` が
+    `block_no_verify` では検出されるのに品質ゲートだけ素通りする非対称になる。
+    """
+
+    def test_windows_absolute_git_path_is_recognized_as_commit(self) -> None:
+        """Windows の絶対パス起動でも commit と認識すること。"""
+        detected = pre_bash_commit_quality._detect_git_commit(r"C:\Git\bin\git.exe commit -m x")
+
+        assert detected is not None
+        assert detected[1] == ["-m", "x"]
+
+    def test_plain_commit_is_recognized(self) -> None:
+        """通常の POSIX 起動も従来どおり検出すること。"""
+        assert pre_bash_commit_quality._detect_git_commit("git commit -m x") is not None
+
+    def test_non_commit_is_not_recognized(self) -> None:
+        """commit でないコマンドは検出しないこと。"""
+        assert pre_bash_commit_quality._detect_git_commit("ls -la") is None
