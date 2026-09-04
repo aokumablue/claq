@@ -25,7 +25,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
   "deterministic": true,
   "rubric_version": "2026-09-03",
   "overall_score": 50,
-  "max_score": 70,
+  "max_score": 58,
   "categories": {},
   "checks": [],
   "top_actions": [

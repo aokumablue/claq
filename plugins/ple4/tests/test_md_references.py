@@ -504,3 +504,33 @@ def test_md_shell_helper_invocations_are_defined() -> None:
                 if token not in defined:
                     missing.append(f"{md_file.relative_to(_ROOT)}: {token}")
     assert missing == [], "未定義のシェルヘルパ呼び出し:\n" + "\n".join(sorted(set(missing)))
+
+
+def test_harness_tuner_schema_example_matches_real_max_score() -> None:
+    """harness-tuner.md の baseline スキーマ例の `max_score` が実装と一致すること。
+
+    この値はエージェントが「満点いくつの尺度か」を読み取る唯一の手がかりで、
+    ずれると改善幅の見積もりが黙って狂う（実測: md は 70、実装は 58 だった）。
+    実装側は check の points 合計なので、check を足すたびに変わる。md へ数値を
+    書いた以上、機械で突き合わせる。
+    """
+    import json
+    import subprocess
+    import sys
+
+    schema = json.loads(
+        re.search(
+            r"```json\n(\{.*?\})\n```",
+            (_ROOT / "agents" / "harness-tuner.md").read_text(encoding="utf-8"),
+            re.DOTALL,
+        ).group(1)
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "ple4.ci.harness_audit", "repo", "--format", "json", "--root", str(_ROOT)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
+    )
+
+    assert schema["max_score"] == json.loads(result.stdout)["max_score"]
