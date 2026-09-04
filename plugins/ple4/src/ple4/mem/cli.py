@@ -35,7 +35,8 @@ from ple4.hooks.hook_common import (
     read_raw_stdin,
     recent_bg_failure_notice,
 )
-from ple4.lib.core_utils import actor_identity
+from ple4.lib.core_utils import actor_identity, get_plugin_root
+from ple4.lib.env_pointer import ancestor_pointers_supported
 from ple4.lib.harness import normalize_user_message
 from ple4.mem import logger as mem_logger
 from ple4.mem.database import Database
@@ -1080,6 +1081,40 @@ def _bg_failure_section() -> str:
     return f"## 前回セッションの通知\n{notice}"
 
 
+def _shell_bootstrap_section() -> str:
+    """`$HOME/.ple4/env.sh` が使えない OS で、その読み替え方を 1 節で示す。
+
+    md（agents/commands/skills）の bash fence は
+    ``. "$HOME/.ple4/env.sh"`` → ``ple4_run <module> ...`` という形を取る。
+    この resolver は祖先 PID と起動時刻の照合（ADR-0008 改訂 2）に依存し、
+    Windows では ``ps`` が無いため原理的に解決できない
+    （`env_pointer.ancestor_pointers_supported`）。md を全部 2 通り書くと
+    プロンプトが倍になるため、代わりに「その場で解決済みの plugin root」を
+    SessionStart で 1 度だけ渡す。plugin root は今まさにこの hook を起動した
+    host 自身のものなので、ポインタ方式より曖昧さが無い。
+
+    出力トークン最小化の原則に従い、必要な OS でのみ、必要な 2 行だけを出す。
+
+    Args:
+        なし
+
+    Returns:
+        読み替え方の節。POSIX では空文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    if ancestor_pointers_supported():
+        return ""
+    wrapper = get_plugin_root() / "runtime" / "ple4-hook.cmd"
+    return (
+        "## ple4 の呼び出し\n"
+        'この OS では `. "$HOME/.ple4/env.sh"` は解決できない。md 中の '
+        "`ple4_run <module> ...` は "
+        f'`"{wrapper}" <module> ...`（PowerShell では先頭に `&`）へ読み替える。'
+    )
+
+
 def _record_session(db: Database, repo: Repo, payload: dict[str, Any]) -> None:
     """ハーネスの session_id で ``sessions`` に開始行を作る。
 
@@ -1131,6 +1166,7 @@ def _build_context(settings: Settings, args: CommandArgs) -> str:
             ),
             _handoff_section(db, repo.id),
             _bg_failure_section(),
+            _shell_bootstrap_section(),
         ]
 
     body = "\n\n".join(section for section in sections if section)

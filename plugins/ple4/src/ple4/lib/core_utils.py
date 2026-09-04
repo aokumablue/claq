@@ -37,6 +37,25 @@ def get_home_dir() -> Path:
         return Path.cwd()
 
 
+def get_plugin_root() -> Path:
+    """このプラグインのソースルート（``<root>/src/ple4/lib`` の 3 つ上）を返す。
+
+    ``CLAUDE_PLUGIN_ROOT`` は Bash tool の環境変数に乗らない（ADR-0008）ため、
+    md 側からは参照できない。一方、hook プロセスの中では自分自身のファイル位置
+    から確実に導ける。``launcher.REPO_ROOT`` と同じ値になる。
+
+    Args:
+        なし
+
+    Returns:
+        プラグインルートの絶対パス。
+
+    Raises:
+        例外は発生しません。
+    """
+    return Path(__file__).resolve().parents[3]
+
+
 def get_claude_dir() -> Path:
     """Claude の設定ディレクトリを取得する。"""
     return get_home_dir() / ".claude"
@@ -81,6 +100,15 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
     ``dir_path`` が ``get_ple4_dir()`` 配下なら ``~/.ple4`` 自身も
     0700 にする。``mkdir(parents=True)`` だけだと親が umask 022 で 0755
     のまま残るため。既存の 0755 ディレクトリも締め直す。
+
+    Windows では ``chmod`` が読み取り専用属性しか動かさず、DACL は変わらない
+    （release-verify 2026-09-03 の P1-008）。ここで ``icacls`` や
+    ``SetNamedSecurityInfo`` を呼ぶことはしない: ``%USERPROFILE%`` 配下は
+    既定でそのユーザー（と SYSTEM / Administrators）だけに許可されており、
+    ADR-0002 が定める脅威モデル（同一 OS ユーザーの敵対的回避は非対象）に
+    対しては POSIX の 0700 と同水準になる。Administrators が読める点は、
+    POSIX で root が 0700 を読めるのと対応する。外部プロセス起動または
+    ctypes 依存を増やして得られる差が無いため、実装しない。
 
     Args:
         dir_path: 作成または権限を締めるディレクトリ。

@@ -109,6 +109,33 @@ _GC_STAMP_FILENAME = "roots-gc.stamp"
 _warned_this_process = False
 
 
+def ancestor_pointers_supported() -> bool:
+    """祖先 PID ポインタ方式が成立する OS かを返す。
+
+    この方式は writer（``ps -eo pid=,ppid=,lstart=``）と resolver
+    （POSIX sh + ``ps -o lstart=``）の両方に依存する。Windows には ``ps`` が
+    無く、Git Bash が同梱する ``ps`` は ``-o`` 書式を持たないうえ MSYS の
+    別 PID 空間を返すため、writer が記録した Windows PID と照合できない
+    （release-verify 2026-09-03 の P1-003）。したがって Windows では
+    ``$HOME/.ple4/env.sh`` は原理的に解決できず、md の bootstrap 行の
+    代わりに `runtime/ple4-hook` を直接呼ぶ必要がある。SessionStart の
+    ``mem context`` はこの関数で判定して、その読み替え方をその場で提示する。
+
+    プラットフォーム名ではなく ``os.setsid`` の有無（POSIX プロセス
+    セッション API の有無）を probe にする。
+
+    Args:
+        なし
+
+    Returns:
+        POSIX（祖先ポインタ方式が使える）なら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    return hasattr(os, "setsid")
+
+
 def write_env_pointer(plugin_root: Path) -> None:
     """plugin root を ``~/.ple4`` 配下のポインタへ書き出す。
 

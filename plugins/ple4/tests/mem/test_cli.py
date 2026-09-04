@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from ple4.lib.core_utils import get_plugin_root
 from ple4.mem import cli
 from ple4.mem.database import Database
 from ple4.mem.models import Knowledge, Repo, Session
@@ -1067,6 +1068,33 @@ class TestContext:
         injected = self._inject(monkeypatch, tmp_path)
 
         assert "前回セッションの通知" not in injected
+
+    def test_shell_bootstrap_section_is_omitted_on_posix(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """env.sh が解決できる OS では読み替えの節を出さない（出力トークン最小化）。"""
+        _seed(tmp_path, scope="global", key="k", title="t")
+
+        injected = self._inject(monkeypatch, tmp_path)
+
+        assert "ple4 の呼び出し" not in injected
+
+    def test_shell_bootstrap_section_names_the_wrapper_where_env_sh_cannot_resolve(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """env.sh が原理的に解決できない OS では wrapper の絶対パスを渡すこと。
+
+        md の bash fence を 2 通り書く代わりに、その場で解決済みの plugin root を
+        SessionStart で 1 度だけ渡す（P1-003）。root は今この hook を起動した
+        host 自身のものなので、祖先 PID ポインタより曖昧さが無い。
+        """
+        _seed(tmp_path, scope="global", key="k", title="t")
+        monkeypatch.setattr(cli, "ancestor_pointers_supported", lambda: False)
+
+        injected = self._inject(monkeypatch, tmp_path)
+
+        assert "## ple4 の呼び出し" in injected
+        assert str(get_plugin_root() / "runtime" / "ple4-hook.cmd") in injected
 
     def test_no_knowledge_injects_nothing(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
