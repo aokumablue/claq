@@ -20,6 +20,10 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -115,3 +119,52 @@ def test_absent_stdin_still_passes_through(
     _patch_reader(monkeypatch, reader_module, lambda: ("", False))
 
     assert importlib.import_module(hook_module).main() == 0
+
+
+_PLUGIN_ROOT = Path(__file__).resolve().parents[2]
+_LAUNCHER = _PLUGIN_ROOT / "src" / "ple4" / "launcher.py"
+
+
+def test_stalled_stdin_exits_cleanly_in_a_real_process(tmp_path: Path) -> None:
+    """開いたまま何も書かれない stdin でも、abort せず exit 2 で終わること。
+
+    読み取りワーカーを daemon スレッドへ隔離した当初、ワーカーは
+    `BufferedReader.read1()` の中で BufferedReader のロックを握ったまま
+    ブロックしていた。本スレッドがタイムアウトで deny を出して戻ると、
+    インタプリタ終了時の stdin 後始末がそのロックを取れず
+    `Fatal Python error: _enter_buffered_busy` で abort し、終了コードが 2 で
+    なくなっていた（実測）。この失敗はプロセス終了時にしか現れないため、
+    実プロセスで確認する。
+    """
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("CODEX_", "GROK_", "COPILOT_"))
+        and key not in {"CLAUDECODE", "PLE4_HOME", "PLE4_DATA_PATH", "CLAUDE_PLUGIN_ROOT"}
+    }
+    env["HOME"] = str(tmp_path)
+
+    process = subprocess.Popen(
+        [sys.executable, str(_LAUNCHER), "ple4.hooks.block_no_verify"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    # stdin は開いたまま何も書かない（`communicate()` は即座に閉じてしまい、
+    # 子は EOF＝payload なしとして素通りするため、この失敗を再現できない）。
+    try:
+        process.wait(timeout=60)
+        stdout = process.stdout.read()
+        stderr = process.stderr.read()
+    finally:
+        if process.poll() is None:  # pragma: no cover - タイムアウト時の後始末
+            process.kill()
+        process.stdin.close()
+        process.stdout.close()
+        process.stderr.close()
+
+    assert "Fatal Python error" not in stderr, stderr
+    assert process.returncode == 2, (process.returncode, stderr)
+    assert json.loads(stdout)["permissionDecision"] == "deny"

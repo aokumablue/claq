@@ -473,6 +473,65 @@ class TestReadStdinBytesChunkedDeadline:
             hook_common._read_stdin_bytes(10)
 
 
+class TestStdinChunkReader:
+    """`_stdin_chunk_reader`（実 fd かバッファ API かの選択）のテスト。
+
+    実 fd があるときに `BufferedReader.read1()` を使うと、書き手が止まった
+    まま本スレッドが先へ進んだ場合に、インタプリタ終了時の stdin 後始末が
+    ワーカーの握るロックを取れず `Fatal Python error: _enter_buffered_busy`
+    で abort する（実測）。`os.read()` は Python レベルのロックを握らない。
+    """
+
+    def test_real_fd_is_read_without_buffer_lock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """実 fd を持つ stdin は os.read 経由で読むこと。"""
+        read_fd, write_fd = os.pipe()
+        os.write(write_fd, b"payload")
+        os.close(write_fd)
+
+        class _FdStdin:
+            def __init__(self, fd: int) -> None:
+                self.buffer = self
+                self._fd = fd
+
+            def fileno(self) -> int:
+                return self._fd
+
+            def isatty(self) -> bool:
+                return False
+
+            def read1(self, n: int = -1) -> bytes:
+                raise AssertionError("実 fd がある場合は read1 を使わない")
+
+        monkeypatch.setattr(hook_common.sys, "stdin", _FdStdin(read_fd))
+        try:
+            assert hook_common._read_stdin_bytes(100) == b"payload"
+        finally:
+            os.close(read_fd)
+
+    def test_missing_fileno_falls_back_to_read1(self) -> None:
+        """fileno を持たないオブジェクトは read1 で読むこと。"""
+        buffer = _QueueBuffer([b"abc"])
+
+        # bound method は同一性ではなく等価性で比較する。
+        assert hook_common._stdin_chunk_reader(buffer) == buffer.read1
+
+    @pytest.mark.parametrize("error", [OSError("no fd"), ValueError("closed")])
+    def test_failing_fileno_falls_back_to_read1(self, error: Exception) -> None:
+        """fileno() が例外化するオブジェクトも read1 で読むこと。"""
+
+        class _NoFdBuffer:
+            def fileno(self) -> int:
+                raise error
+
+            def read1(self, n: int = -1) -> bytes:
+                return b""
+
+        buffer = _NoFdBuffer()
+
+        # bound method は同一性ではなく等価性で比較する。
+        assert hook_common._stdin_chunk_reader(buffer) == buffer.read1
+
+
 class TestStdinUnreadableMessage:
     """`stdin_unreadable_message` の文面契約。"""
 

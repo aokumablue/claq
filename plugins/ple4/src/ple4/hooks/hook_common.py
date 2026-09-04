@@ -556,7 +556,41 @@ def _stdin_is_absent() -> bool:
         return False
 
 
-def _pump_stdin(stdin_buffer: Any, max_bytes: int, sink: queue.Queue) -> None:
+def _stdin_chunk_reader(stdin_buffer: Any) -> Any:
+    """ワーカースレッドが使う「n バイト読む」関数を選ぶ。
+
+    実 fd があるときは ``BufferedReader.read1()`` ではなく ``os.read()`` を
+    使う。``read1()`` は BufferedReader のロックを保持したままブロックする
+    ため、書き手が止まったまま本スレッドがタイムアウトで先に進むと、
+    インタプリタ終了時の stdin 後始末がそのロックを取れず
+    ``Fatal Python error: _enter_buffered_busy`` でプロセスが abort する
+    （実測: 開いたまま何も書かれないパイプを渡すと、deny 出力の直後に abort し
+    exit code が 2 ではなくなった）。``os.read()`` は Python レベルのロックを
+    握らないので、ブロックしたワーカーが残っても終了処理を妨げない。
+
+    fd を持たないオブジェクト（テストのフェイク・io.BytesIO 等）では
+    ``read1()`` へ落とす。
+
+    Args:
+        stdin_buffer: 読み取り対象のバイナリストリーム。
+
+    Returns:
+        ``reader(n) -> bytes`` の callable。
+
+    Raises:
+        例外は発生しません。
+    """
+    fileno = getattr(stdin_buffer, "fileno", None)
+    if fileno is None:
+        return stdin_buffer.read1
+    try:
+        fd = fileno()
+    except (OSError, ValueError):
+        return stdin_buffer.read1
+    return lambda size: os.read(fd, size)
+
+
+def _pump_stdin(reader: Any, max_bytes: int, sink: queue.Queue) -> None:
     """stdin をチャンク単位で読み、結果を `sink` へ流す（ワーカースレッド本体）。
 
     ``select.select`` は使いません。Windows では select が socket にしか
@@ -572,7 +606,7 @@ def _pump_stdin(stdin_buffer: Any, max_bytes: int, sink: queue.Queue) -> None:
     デッドライン判定の外側でブロックし続けます。
 
     Args:
-        stdin_buffer: 読み取り対象のバイナリストリーム。
+        reader: ``reader(n) -> bytes`` の読み取り関数（`_stdin_chunk_reader`）。
         max_bytes: 読み取る最大バイト数。
         sink: ``("data", bytes)`` / ``("error", Exception)`` を受け取るキュー。
 
@@ -585,7 +619,7 @@ def _pump_stdin(stdin_buffer: Any, max_bytes: int, sink: queue.Queue) -> None:
     collected = 0
     try:
         while collected < max_bytes:
-            chunk = stdin_buffer.read1(min(STDIN_CHUNK_BYTES, max_bytes - collected))
+            chunk = reader(min(STDIN_CHUNK_BYTES, max_bytes - collected))
             sink.put(("data", chunk))
             if not chunk:
                 return
@@ -631,7 +665,7 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
 
     sink: queue.Queue = queue.Queue()
     threading.Thread(
-        target=_pump_stdin, args=(stdin_buffer, max_bytes, sink), daemon=True
+        target=_pump_stdin, args=(_stdin_chunk_reader(stdin_buffer), max_bytes, sink), daemon=True
     ).start()
 
     collected = b""
