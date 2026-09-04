@@ -1110,8 +1110,11 @@ def _shell_bootstrap_section() -> str:
     return (
         "## ple4 の呼び出し\n"
         'この OS では `. "$HOME/.ple4/env.sh"` は解決できない。md 中の '
-        "`ple4_run <module> ...` は "
-        f'`"{wrapper}" <module> ...`（PowerShell では先頭に `&`）へ読み替える。'
+        f'`ple4_run <module> ...` は `"{wrapper}" <module> ...`'
+        "（PowerShell では先頭に `&`）へ、"
+        f'`ple4_mem_learn ...` は `PLE4_LEARN_KIND=... PLE4_LEARN_TITLE=... "{wrapper}" '
+        f'ple4.mem.learn_payload` の JSON を `"{wrapper}" ple4.mem.cli learn` の '
+        "stdin へ渡す形へ読み替える。"
     )
 
 

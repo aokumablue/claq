@@ -60,6 +60,14 @@ class Database:
         mode を検証して補正する（F-08 対応。以前は新規作成時にしか
         補正しておらず、既存の 0644 DB は開き直しても放置されていた）。
 
+        この mode 補正は POSIX でのみ収束する。Windows の ``chmod`` は
+        読み取り専用属性しか動かさず ``st_mode`` は 0o666 のままなので、
+        検証は毎回不一致となり ``chmod`` が空振りする（害は無く、読み取り
+        専用属性の解除だけが起きる）。Windows でのアクセス制御を
+        ``%USERPROFILE%`` の既定 ACL に委ねる判断とその理由は
+        `core_utils.ensure_private_dir` の docstring に集約してある
+        （release-verify 2026-09-03 の P1-008）。
+
         WAL/SHM sidecar は本メソッドの時点ではまだ存在しない（SQLite が
         WAL モードで最初の書き込み時に遅延作成するため、ここで chmod
         しても no-op）。親ディレクトリは ``ensure_private_dir`` が

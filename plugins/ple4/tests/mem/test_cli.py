@@ -1095,6 +1095,10 @@ class TestContext:
 
         assert "## ple4 の呼び出し" in injected
         assert str(get_plugin_root() / "runtime" / "ple4-hook.cmd") in injected
+        # 最も使用頻度の高い helper を取りこぼすと /learn と /instinct が丸ごと
+        # 暗くなるため、`ple4_mem_learn` の読み替えも必ず載せる。
+        assert "ple4_mem_learn" in injected
+        assert "ple4.mem.learn_payload" in injected
 
     def test_no_knowledge_injects_nothing(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

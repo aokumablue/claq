@@ -177,6 +177,86 @@ def test_helpers_load_under_posix_dash(tmp_path: Path) -> None:
     assert result.stdout.strip() == str(handed_over)
 
 
+def _mem_learn_script(title: str, body: str) -> str:
+    """helper を source して `ple4_mem_learn` を 1 回呼ぶスクリプトを組み立てる。
+
+    値はシングルクォートで囲んで渡す（シェル側の展開を通さず、helper が
+    JSON へ marshal する経路だけを見るため）。``_PLE4_SOURCED_ROOT`` は
+    env-template.sh が本番で渡すのと同じ値を明示する（POSIX sh には
+    ``BASH_SOURCE`` 相当が無く、これが無いと helper 自身が自己位置を
+    解決できずに読み込みを中止する契約になっている）。
+
+    Args:
+        title: 記録するカードのタイトル。
+        body: 記録するカードの本文。
+
+    Returns:
+        シェルへ渡すスクリプト文字列。
+    """
+    return "\n".join(
+        [
+            f'_PLE4_SOURCED_ROOT="{_PLUGIN_ROOT}"',
+            "export _PLE4_SOURCED_ROOT",
+            f'. "{_HELPER}"',
+            f"ple4_mem_learn --kind fact --scope global --title '{title}' --body '{body}'",
+        ]
+    )
+
+
+def _learned_card(data_dir: Path) -> object:
+    """隔離 DB から最初の知識カードを 1 件返す。
+
+    Args:
+        data_dir: `PLE4_DATA_PATH` に渡したディレクトリ。
+
+    Returns:
+        取得した Knowledge 行。無ければ None。
+    """
+    from ple4.mem.database import Database
+
+    with Database(data_dir / "mem.db") as db:
+        rows = db.list_knowledge(scope="global", status="pending")
+    return rows[0] if rows else None
+
+
+@pytest.mark.parametrize("shell", ["bash", *(["dash"] if shutil.which("dash") else [])])
+def test_ple4_mem_learn_records_a_pending_agent_card(
+    tmp_path: Path, shell: str
+) -> None:
+    """`ple4_mem_learn` が隔離 DB へ pending / agent のカードを 1 件書くこと。
+
+    marshal を `python3 -c` から `ple4_run ple4.mem.learn_payload` へ移したため、
+    この経路は「helper 内の環境変数付きシェル関数呼び出し」と「wrapper 2 回の
+    パイプ」の 2 つが同時に変わっている。値の引用符・改行・非 ASCII を
+    エスケープなしで通せることが marshal を挟む理由そのものなので、
+    それらを含む本文で検証する。dash が入っていればそちらでも同じ契約を見る。
+    """
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    env = dict(os.environ)
+    env["HOME"] = str(tmp_path)
+    env["PLE4_DATA_PATH"] = str(data_dir)
+    title = '引用符 "quoted" と非 ASCII ✓ を含むタイトル'
+    body = "パイプ | と & と ; と改行を含む本文"
+
+    result = subprocess.run(
+        [shell, "-c", _mem_learn_script(title, body)],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+        timeout=60,
+    )
+
+    assert result.stderr == ""
+    card = _learned_card(data_dir)
+    assert card is not None
+    assert card.title == title
+    assert card.body == body
+    # ADR-0007 / H-01: helper 経由のカードは例外なく agent / pending。
+    assert (card.source, card.status) == ("agent", "pending")
+
+
 @pytest.mark.parametrize("bad", ["abc", "0", "-1", "3.5"])
 def test_collect_skill_create_inputs_rejects_non_positive_commits(bad: str) -> None:
     """commits 引数が正整数でなければ exit 2 で拒否すること。"""
