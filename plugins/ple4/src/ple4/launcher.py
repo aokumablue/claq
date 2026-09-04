@@ -48,6 +48,41 @@ def build_env() -> dict[str, str]:
     return env
 
 
+def force_utf8_streams() -> None:
+    """stdout / stderr を UTF-8 へ固定します。
+
+    フックの出力（SessionStart の注入コンテキスト、deny 理由、警告）は日本語を
+    含む。Python は stdout がパイプのとき、UTF-8 モードが無効ならロケール由来の
+    エンコーディングを使う — Windows の既定コードページ（日本語環境なら cp932）
+    や、``LC_ALL=C`` の Linux では ASCII になる。その状態で非 ASCII を書くと
+    ``UnicodeEncodeError`` になり、フックは注入も deny もできないまま exit 1 で
+    落ちる（実測: ``PYTHONUTF8=0 LC_ALL=C`` で ``mem.cli context`` が
+    ``'ascii' codec can't encode characters`` で失敗）。
+
+    ホスト（Node 系 CLI）はフックのパイプを UTF-8 として読むため、UTF-8 固定が
+    正しい出力である。プラットフォーム分岐ではなく、3 OS 共通で同じ 1 本の
+    処理として行う。``reconfigure`` を持たないストリーム（テストの差し替え等）は
+    そのままにする。
+
+    Args:
+        なし
+
+    Returns:
+        なし
+
+    Raises:
+        例外は発生しません。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
 def _unsupported_python_exit_code() -> int | None:
     """Python 3.12 未満なら fail-open の終了コード 0 を返します。
 
@@ -159,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
     Raises:
         例外は発生しません。
     """
+    force_utf8_streams()
+
     unsupported = _unsupported_python_exit_code()
     if unsupported is not None:
         return unsupported

@@ -421,7 +421,14 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
     ple4_dir = _ensure_private_dir(_state_dir())
     roots_dir = _ensure_private_dir(ple4_dir / _ROOTS_DIRNAME)
 
-    chain = _resolve_ancestor_chain(_MAX_ANCESTOR_DEPTH)
+    # 祖先ポインタ方式が成立しない OS（Windows）では `ps` を呼ばない。
+    # 呼んでも FileNotFoundError で空チェーンになるだけだが、全 hook 起動ごとの
+    # 無駄な spawn になるうえ、MSYS/Cygwin 由来の `ps.exe` が PATH にあると
+    # 別 PID 空間の値を拾って無意味なポインタを書きうる。
+    if ancestor_pointers_supported():
+        chain = _resolve_ancestor_chain(_MAX_ANCESTOR_DEPTH)
+    else:
+        chain = []
     for pid, lstart in chain:
         _write_ancestor_pointer(roots_dir / str(pid), root_text, lstart)
     written_pids = frozenset(pid for pid, _lstart in chain)

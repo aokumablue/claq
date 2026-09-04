@@ -68,6 +68,27 @@ class TestWriteEnvPointer:
         assert oct(ple4_dir.stat().st_mode)[-3:] == "700"
         assert oct(roots_dir.stat().st_mode)[-3:] == "700"
 
+    def test_skips_ancestor_scan_where_pointers_cannot_resolve(
+        self, tmp_path: Path, _isolate_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """祖先ポインタ方式が成立しない OS では `ps` を呼ばず、env.sh だけ書くこと。
+
+        Windows には `ps` が無く、呼んでも空チェーンになるだけだが、全 hook 起動
+        ごとの無駄な spawn になる。さらに MSYS/Cygwin 由来の `ps.exe` が PATH に
+        あると別 PID 空間の値を拾い、無意味なポインタを書きうる。
+        """
+        called: list[int] = []
+        monkeypatch.setattr(mod, "ancestor_pointers_supported", lambda: False)
+        monkeypatch.setattr(mod, "_resolve_ancestor_chain", lambda depth: called.append(depth) or [])
+        plugin_root = _make_plugin_root(tmp_path / "plugin")
+
+        mod.write_env_pointer(plugin_root)
+
+        ple4_dir = _isolate_home / BASE_DIR_NAME
+        assert called == []
+        assert [p.name for p in (ple4_dir / "roots").iterdir() if p.name.isdigit()] == []
+        assert (ple4_dir / "env.sh").is_file()
+
     def test_writes_ancestor_chain_not_just_direct_ppid(self, tmp_path: Path, _isolate_home: Path) -> None:
         """H-02: 直接 PPID だけでなく祖先（最大 ``_MAX_ANCESTOR_DEPTH`` 段）にも書く。"""
         plugin_root = _make_plugin_root(tmp_path / "plugin")

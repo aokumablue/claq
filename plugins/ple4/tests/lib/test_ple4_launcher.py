@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import runpy
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -12,6 +13,8 @@ from pathlib import Path
 import pytest
 
 import ple4.launcher as launcher
+
+LAUNCHER_PATH = Path(launcher.__file__).resolve()
 
 
 @pytest.fixture(autouse=True)
@@ -359,3 +362,111 @@ class TestMain:
 
         assert launcher.main(["ple4.mem.cli", "context"]) == 0
         assert captured == {"target": "ple4.mem.cli", "args": ["context"]}
+
+
+class TestForceUtf8Streams:
+    """`force_utf8_streams`（出力エンコーディングの固定）のテスト。
+
+    stdout がパイプかつ UTF-8 モード無効のとき、Python はロケール由来の
+    エンコーディングを使う（Windows の既定コードページ、`LC_ALL=C` の Linux では
+    ASCII）。その状態で日本語を書くと UnicodeEncodeError になり、フックは注入も
+    deny もできないまま exit 1 で落ちる。
+    """
+
+    def test_reconfigures_both_streams_to_utf8(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """stdout / stderr の両方を UTF-8・errors=replace へ変えること。"""
+        calls: list[tuple[str, dict]] = []
+
+        class _Stream:
+            def __init__(self, name: str) -> None:
+                self._name = name
+
+            def reconfigure(self, **kwargs: object) -> None:
+                calls.append((self._name, dict(kwargs)))
+
+        monkeypatch.setattr(launcher.sys, "stdout", _Stream("stdout"))
+        monkeypatch.setattr(launcher.sys, "stderr", _Stream("stderr"))
+
+        launcher.force_utf8_streams()
+
+        assert calls == [
+            ("stdout", {"encoding": "utf-8", "errors": "replace"}),
+            ("stderr", {"encoding": "utf-8", "errors": "replace"}),
+        ]
+
+    def test_stream_without_reconfigure_is_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`reconfigure` を持たないストリーム（テストの差し替え等）でも落ちないこと。"""
+        monkeypatch.setattr(launcher.sys, "stdout", object())
+        monkeypatch.setattr(launcher.sys, "stderr", object())
+
+        launcher.force_utf8_streams()
+
+    @pytest.mark.parametrize("error", [OSError("bad fd"), ValueError("detached")])
+    def test_reconfigure_failure_is_ignored(
+        self, monkeypatch: pytest.MonkeyPatch, error: Exception
+    ) -> None:
+        """reconfigure 自体が失敗しても、フック本来の処理を止めないこと。"""
+
+        class _Failing:
+            def reconfigure(self, **kwargs: object) -> None:
+                raise error
+
+        monkeypatch.setattr(launcher.sys, "stdout", _Failing())
+        monkeypatch.setattr(launcher.sys, "stderr", _Failing())
+
+        launcher.force_utf8_streams()
+
+
+def test_non_ascii_output_survives_a_non_utf8_locale(tmp_path: Path) -> None:
+    """UTF-8 でないロケールでも、非 ASCII を含む注入が壊れず exit 0 で返ること。
+
+    実プロセスでしか再現しない（本テストプロセスの stdout は既に UTF-8）。
+    `PYTHONUTF8=0` と `LC_ALL=C` は、Windows の既定コードページ環境を
+    POSIX 側で近似したもの。
+    """
+    from ple4.mem.database import Database
+    from ple4.mem.models import Knowledge, utc_now_iso
+
+    with Database(tmp_path / "mem.db") as db:
+        db.upsert_knowledge(
+            Knowledge(
+                key="k",
+                kind="fact",
+                scope="global",
+                title="検査 ✓ の知識",
+                body="b",
+                status="active",
+                source="human",
+                created_at=utc_now_iso(),
+                updated_at=utc_now_iso(),
+            )
+        )
+
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("CODEX_", "GROK_", "COPILOT_"))
+        and key not in {"CLAUDECODE", "PLE4_HOME", "CLAUDE_PLUGIN_ROOT"}
+    }
+    env.update(
+        {
+            "HOME": str(tmp_path),
+            "PLE4_DATA_PATH": str(tmp_path),
+            "LC_ALL": "C",
+            "PYTHONUTF8": "0",
+            "PYTHONCOERCECLOCALE": "0",
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(LAUNCHER_PATH), "ple4.mem.cli", "context"],
+        input=json.dumps({"session_id": "s", "source": "startup"}),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "検査 ✓ の知識" in result.stdout
