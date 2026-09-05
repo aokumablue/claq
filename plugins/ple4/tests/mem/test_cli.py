@@ -549,6 +549,146 @@ class TestLearn:
         assert expected in stderr
 
 
+class TestPromotedCardIsImmutableToLearn:
+    """H-3 回帰防止: 人間の承認が再 learn で黙って取り消されないこと。
+
+    修正前は ``upsert_knowledge`` の ``ON CONFLICT`` が
+    ``status = excluded.status`` で無条件に上書きしていた。learn は H-01 により
+    常に ``pending`` を書くため、``learn -> promote -> 同じ key で再 learn`` を
+    通すと **人間の承認が取り消されて注入対象から外れ**、本文まで差し替わって
+    いた。しかも「同じ違反の 2 回目は既存カードと同じ key で更新する」は本
+    リポジトリの規定ワークフローだったため、「人間が承認済み」かつ「再発する
+    ほど重要」という最も価値の高いカードだけが狙い撃ちで壊れていた。
+
+    この遷移を固定するテストは修正前には 1 件も無かった。
+    """
+
+    _PAYLOAD = {
+        "key": "h3-card",
+        "scope": "global",
+        "kind": "pitfall",
+        "title": "元のタイトル",
+        "body": "人間が承認した本文",
+    }
+
+    def _learn_then_promote(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """learn -> promote を通して active カードを 1 枚作る。"""
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], self._PAYLOAD)
+        assert (stdout, exit_code) == ("learned: h3-card\n", 0)
+
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["promote", "h3-card"])
+        assert (stdout, exit_code) == ("promoted: h3-card\n", 0)
+
+        with Database(tmp_path / "mem.db") as db:
+            found = db.get_knowledge_by_key("h3-card")
+        assert found is not None
+        assert found.status == "active"
+
+    def test_relearn_of_active_card_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """active カードへの再 learn は usage error になり、行は一切変わらない。"""
+        self._learn_then_promote(monkeypatch, tmp_path)
+
+        updated = {**self._PAYLOAD, "title": "書き換えたタイトル", "body": "agent が書いた本文"}
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], updated)
+
+        assert (stdout, exit_code) == ("", 1)
+        assert "既に active" in stderr
+
+        with Database(tmp_path / "mem.db") as db:
+            found = db.get_knowledge_by_key("h3-card")
+        assert found is not None
+        # 承認が取り消されていないこと、本文が差し替わっていないこと。
+        assert found.status == "active"
+        assert found.title == "元のタイトル"
+        assert found.body == "人間が承認した本文"
+
+    def test_rejection_message_steers_away_from_duplicate_keys(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """拒否メッセージが「別 key で作り直すな」を明示すること。
+
+        ここが曖昧だと、agent は別 key で作り直して重複カードを量産する
+        （この経路が防ごうとしていた事故そのもの）。
+        """
+        self._learn_then_promote(monkeypatch, tmp_path)
+
+        _stdout, stderr, _exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], self._PAYLOAD)
+
+        assert "別の key で作り直さないでください" in stderr
+
+    def test_active_card_stays_injected_after_rejected_relearn(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """拒否後も SessionStart 注入（status='active' の list）に載り続けること。
+
+        H-3 の実害は「注入対象から静かに外れる」ことなので、status 列だけでなく
+        注入経路の既定絞り込みで実際に引けることまで確認する。
+        """
+        self._learn_then_promote(monkeypatch, tmp_path)
+        _run_cli(monkeypatch, tmp_path, ["learn"], self._PAYLOAD)
+
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["list"])
+
+        assert exit_code == 0
+        assert "元のタイトル" in stdout
+
+    @pytest.mark.parametrize("status", ["pending", "archived"])
+    def test_non_active_cards_remain_updatable(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: str
+    ) -> None:
+        """active 以外は従来どおり再 learn で更新できること。
+
+        拒否対象を active に絞る根拠の固定。pending は昇格前の下書きであり、
+        archived への再 learn は pending へ戻すだけで注入はされないため、
+        どちらも人間の承認を奪わない。
+        """
+        _run_cli(monkeypatch, tmp_path, ["learn"], self._PAYLOAD)
+        with Database(tmp_path / "mem.db") as db:
+            found = db.get_knowledge_by_key("h3-card")
+            assert found is not None
+            db.set_knowledge_status(found.id, status)
+
+        updated = {**self._PAYLOAD, "title": "更新後タイトル"}
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], updated)
+
+        assert (stdout, exit_code) == ("learned: h3-card\n", 0)
+        with Database(tmp_path / "mem.db") as db:
+            found = db.get_knowledge_by_key("h3-card")
+        assert found is not None
+        assert found.title == "更新後タイトル"
+        assert found.status == "pending"
+
+    def test_repo_scoped_active_card_is_also_protected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """repo スコープでも同じ保護が効くこと（key 照合に repo_id を含める）。"""
+        payload = {**self._PAYLOAD, "scope": "repo"}
+        _run_cli(monkeypatch, tmp_path, ["learn"], payload)
+        _run_cli(monkeypatch, tmp_path, ["promote", "h3-card"])
+
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], payload)
+
+        assert exit_code == 1
+        assert "既に active" in stderr
+
+    def test_same_key_in_other_scope_is_unaffected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """global の active カードが repo スコープの同名 key を巻き添えにしないこと。
+
+        両スコープは式インデックス ``(COALESCE(repo_id,''), key)`` で別行になる。
+        照合が repo_id を無視していると、無関係なカードまで拒否してしまう。
+        """
+        self._learn_then_promote(monkeypatch, tmp_path)
+
+        repo_payload = {**self._PAYLOAD, "scope": "repo", "title": "repo 側のカード"}
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], repo_payload)
+
+        assert (stdout, exit_code) == ("learned: h3-card\n", 0)
+
+
 class TestList:
     """list コマンド。"""
 

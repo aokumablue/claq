@@ -223,6 +223,16 @@ class Database:
         衝突解決は式インデックス ``(COALESCE(repo_id,''), key)`` で行う。
         既存行の ``id`` と ``created_at`` は保持する。
 
+        ``status`` は衝突時も ``excluded.status`` で上書きする。**これは意図的で
+        あり、ここへ「既存 status を維持する」ガードを足してはならない** ——
+        ``cli._handle_forget`` が ``archived`` を書き込むのに本メソッドを使って
+        おり、維持ガードを入れると forget が黙って効かなくなる。
+
+        「人間が promote した active カードを agent の再 learn が pending へ
+        戻す」問題（H-3）は、本メソッドではなく ``cli._handle_learn`` で塞ぐ。
+        DB 層は汎用の upsert のままにし、誰の書込みを拒むかという判断は
+        経路ごとに持たせる。
+
         Args:
             knowledge: 登録したい知識カード。
 
