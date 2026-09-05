@@ -130,7 +130,16 @@ def test_readme_agent_skill_command_counts_match_filesystem() -> None:
 
 
 _VENDOR_PATH_MARKERS = (".copilot", ".grok", "installed-plugins", "CLAUDE_PLUGIN_ROOT")
-_BASH_FENCE_RE = re.compile(r"```bash\n(.*?)```", re.DOTALL)
+
+# シェルコマンドを載せるフェンスの言語表記。```bash だけを対象にしていた頃は、
+# 同じ内容を ```sh / ```shell / ```console で書いた瞬間に、このファイルの
+# シェル系検査 3 件（bootstrap 同梱・--status/--source 禁止・呼び出し可能シンボル
+# 在庫）が無言でスキップされていた。現コーパスは 34 件すべて ```bash なので
+# 実害は出ていないが、語彙を広げないと「書き方を変えるだけで検査が消える」
+# 状態が残る。`_COMMENT_HASH_FENCE_RE` が既に列挙していた語彙へ揃え、
+# 両者が同じ定数を共有することでこの取りこぼしが再発しないようにする。
+_SHELL_FENCE_LANGS = ("bash", "sh", "shell", "zsh", "console")
+_BASH_FENCE_RE = re.compile(rf"```(?:{'|'.join(_SHELL_FENCE_LANGS)})\n(.*?)```", re.DOTALL)
 _ENV_POINTER_LINE = '. "$HOME/.ple4/env.sh"'
 
 
@@ -257,8 +266,12 @@ _BACKTICK_SECTION_REF_RE = re.compile(r"`(#+ [^`\n。、]+)`")
 _MD_PATH_REF_RE = re.compile(r"`([^`\n]+\.md)`")
 _HEADING_RE = re.compile(r"^(#+ .+)$", re.M)
 _FENCE_RE = re.compile(r"```.*?```", re.S)
-# `#` が行コメントである言語のフェンスは見出しを持たない（`# FAIL: ...` はコメント）
-_COMMENT_HASH_FENCE_RE = re.compile(r"^```(?:bash|sh|shell|zsh|console|python|yaml|yml|terraform|toml|ini)\b")
+# `#` が行コメントである言語のフェンスは見出しを持たない（`# FAIL: ...` はコメント）。
+# シェル系は `_SHELL_FENCE_LANGS` を単一情報源として共有する（片側だけ語彙が
+# 増える食い違いを構造的に防ぐ）。
+_COMMENT_HASH_FENCE_RE = re.compile(
+    r"^```(?:" + "|".join((*_SHELL_FENCE_LANGS, "python", "yaml", "yml", "terraform", "toml", "ini")) + r")\b"
+)
 
 
 def _collect_headings(text: str) -> tuple[set[str], set[str]]:
@@ -386,7 +399,18 @@ def test_section_ref_helpers_detect_and_accept() -> None:
 
 
 _PLUGIN_REF_RE = re.compile(r"ple4:([a-z][\w-]*)")
-_MODULE_REF_RE = re.compile(r"ple4_run\s+(ple4[\w.]*)")
+
+# md が名指しする Python モジュールの参照形。`ple4_run <module>` だけを見ていた
+# 頃は、md に実在する `python3 -m ple4.X` 形（skills/maintain/SKILL.md と
+# skills/release-verify/SKILL.md の計 5 箇所）が import 可能性検査を素通りし、
+# `ple4.ci.validate_skills` をリネームしても md が dangling のまま緑だった。
+#
+# モジュール名の各要素を ASCII の Python 識別子に限る理由: `\w` は既定で Unicode
+# 対応なので、`[\w.]*` 系のパターンは散文の `python3 -m ple4.モジュール名`
+# （skills/release-verify/SKILL.md）まで拾って偽 RED を出す（実測:
+# `re.search(r"ple4[\w.]*\w", "ple4.モジュール名")` はマッチする）。さらに
+# ドット付き要素を 1 個以上必須にすることで、その散文はどの位置でもマッチしない。
+_MODULE_REF_RE = re.compile(r"(?:ple4_run|python3 -m)\s+(ple4(?:\.[A-Za-z_][A-Za-z0-9_]*)+)")
 
 
 def test_plugin_component_references_exist() -> None:
