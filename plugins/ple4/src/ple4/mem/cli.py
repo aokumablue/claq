@@ -409,8 +409,16 @@ def main() -> int:
     command = sys.argv[1]
     session_start = command in _SESSION_START_COMMANDS
     additional_context = ""
-    # SessionStart は設定ロード失敗でも exit_code=0 を維持する。
-    # フックが非 0 を返すとセッション全体がエラー扱いになるため。
+    # SessionStart はどの失敗経路でも exit 0 を維持する。フックが非 0 を返すと
+    # セッション全体がエラー扱いになるため、`Returns:` に書いた契約はこの 1 本の
+    # 値で表現し、失敗を捕まえる 4 箇所すべてがこれを使う。以前は
+    # `if not session_start` を持つのが設定ロード失敗の 1 箇所だけで、
+    # CommandError 経路と実行時例外経路は無条件に 1 を立てていた（＝契約が
+    # 3 箇所で破れていた）。片方だけ直すと非対称が残るので 1 本に集約する。
+    #
+    # 失敗しても沈黙はさせない。stderr への出力はどの経路でも行う —— 黙って
+    # 抜けると記憶注入が失われたこと自体に気づけないため。
+    failure_exit_code = 0 if session_start else 1
     exit_code = 0
     try:
         args = _parse_args_and_stdin(command, sys.argv[2:])
@@ -422,13 +430,10 @@ def main() -> int:
         settings = _load_settings_or_raise()
     except CommandError as e:
         print(str(e), file=sys.stderr)
-        exit_code = 1
+        exit_code = failure_exit_code
     except Exception as e:
-        # SessionStart はセッション開始を止めないため exit 0 のままにするが、
-        # 沈黙させない。黙って抜けると記憶注入が失われたこと自体に気づけない。
         print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
-        if not session_start:
-            exit_code = 1
+        exit_code = failure_exit_code
     else:
         try:
             if session_start:
@@ -437,11 +442,11 @@ def main() -> int:
                 exit_code = _run_normal_command(command, settings, args)
         except CommandError as e:
             print(str(e), file=sys.stderr)
-            exit_code = 1
+            exit_code = failure_exit_code
         except Exception as e:
             log.error("コマンド %s 失敗: %s", command, e)
             print(f"コマンド {command} 失敗: {e}", file=sys.stderr)
-            exit_code = 1
+            exit_code = failure_exit_code
     finally:
         if session_start:
             print_session_start_output(additional_context)

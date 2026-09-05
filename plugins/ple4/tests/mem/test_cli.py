@@ -119,15 +119,59 @@ class TestSessionStartContract:
         assert "設定失敗" in stderr
         assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 
-    def test_handler_exception_keeps_exit_code_1_but_emits_json(
+    def test_handler_exception_keeps_exit_code_0_but_emits_json(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """ハンドラ例外時も JSON を出しつつ exit_code=1 を返す。"""
+        """ハンドラ例外時も JSON を出しつつ exit_code=0 を維持する。
+
+        以前はこの経路だけ exit_code=1 を返しており、`main()` の docstring が
+        宣言する「SessionStart コマンドは失敗しても 0 を維持する」契約を
+        破っていた。非 0 を返すとセッション全体がエラー扱いになるうえ、
+        `finally` が正しい SessionStart JSON を出し切っており原因も stderr へ
+        出ているため、非 0 にして得られるものが無い。
+        """
         monkeypatch.setattr(cli, "_run_session_start_command", _always_raise("boom"))
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
-        assert exit_code == 1
+        assert exit_code == 0
         assert "boom" in stderr
         assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+
+    def test_command_error_in_handler_keeps_exit_code_0(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """ハンドラが CommandError を投げても exit_code=0 と JSON 出力を維持する。"""
+
+        def _raise_command_error(*_args: object, **_kwargs: object) -> None:
+            raise cli.CommandError("bad handler input")
+
+        monkeypatch.setattr(cli, "_run_session_start_command", _raise_command_error)
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
+        assert exit_code == 0
+        assert "bad handler input" in stderr
+        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+
+    def test_argument_error_keeps_exit_code_0(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """引数解析段の CommandError でも exit_code=0 と JSON 出力を維持する。
+
+        `hooks.json` の argv は固定なので実運用では到達しないが、契約は
+        「SessionStart はどの失敗経路でも 0」であり経路ごとの例外を作らない。
+        """
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context", "--unknown-option"])
+        assert exit_code == 0
+        assert stderr != ""
+        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+
+    def test_normal_command_still_fails_with_exit_code_1(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """SessionStart 以外は従来どおり失敗を exit_code=1 で報告する。
+
+        `failure_exit_code` の集約が「全部 0 にする」変更になっていないことの
+        退行防止。
+        """
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["show", "no-such-key"])
+        assert exit_code == 1
+        assert stderr != ""
 
 
 class TestInit:
@@ -185,7 +229,7 @@ class TestInit:
 class TestPositionalArity:
     """dispatch 層の位置引数個数検証（L-01 対応）。"""
 
-    @pytest.mark.parametrize("command", ["init", "learn", "list", "context", "handoff"])
+    @pytest.mark.parametrize("command", ["init", "learn", "list", "handoff"])
     def test_zero_positional_commands_reject_extra_arg(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
     ) -> None:
@@ -194,6 +238,19 @@ class TestPositionalArity:
 
         assert exit_code == 1
         assert f"{command} は位置引数を取りません" in stderr
+
+    def test_context_reports_extra_arg_without_failing_the_hook(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`context` も usage error を stderr へ出すが exit_code は 0 に留める。
+
+        `context` は唯一の SessionStart コマンドで、非 0 を返すとセッション全体が
+        エラー扱いになる。検出（stderr）と終了コードは別物として扱う。
+        """
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context", "unexpected"])
+
+        assert exit_code == 0
+        assert "context は位置引数を取りません" in stderr
 
     @pytest.mark.parametrize("command", ["show", "promote", "forget"])
     def test_single_key_commands_reject_missing_key(
