@@ -1938,3 +1938,67 @@ class TestJwtPatternIsLinear:
         embedded = "abc" + "eyJ" + "hbGci.x.y"
 
         assert re.search(self._jwt_pattern(), embedded, re.IGNORECASE) is None
+
+
+class TestScanBudgetAccumulatorScope:
+    """`_ScanBudget` の積算はインスタンス単位、deadline だけが共有であること。
+
+    共有されるのは `deadline` で、走査済みバイト数の積算はスキャナ呼び出し
+    ごとにリセットされる。これは仕様であり、実時間の上界を与えているのが
+    積算間隔ではなく共有 deadline の方だから成立する。ここを取り違えると
+    「`_SCAN_BUDGET_CHECK_BYTES` がファイルを跨いで効く」と誤読される。
+
+    既存の共有予算テストは fake clock が 1 サンプルあたり 9 秒進むため、
+    積算がどう振る舞っても最初のサンプルで deadline を割ってしまい、この
+    差を判別できない。ここでは時刻を進めない clock で「何回読まれたか」
+    だけを数えて固定する。
+    """
+
+    def _count_clock_reads(self, monkeypatch: pytest.MonkeyPatch, lines: list[str]) -> int:
+        """deadline に余裕がある状態で `_monotonic()` の呼び出し回数を数える。"""
+        reads = 0
+
+        def clock() -> float:
+            nonlocal reads
+            reads += 1
+            return 0.0
+
+        monkeypatch.setattr(commit_quality_scanner, "_monotonic", clock)
+        commit_quality_scanner._scan_secret_issues(
+            "\n".join(lines), lines, deadline=1_000.0
+        )
+        return reads
+
+    def test_small_input_samples_clock_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """閾値に満たない入力では走査開始時の 1 回だけ時刻を読む。"""
+        assert self._count_clock_reads(monkeypatch, ["short line"] * 50) == 1
+
+    def test_large_input_samples_clock_repeatedly(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """1 ファイルの中で閾値を跨げば繰り返し確認する（旧「行数」基準との差）。
+
+        改行の無い 1 行でも、パターン数ぶんの走査バイトが積算されるため
+        複数回の確認が起きる。
+        """
+        huge_single_line = "a" * (4 * commit_quality_scanner._SCAN_BUDGET_CHECK_BYTES)
+
+        reads = self._count_clock_reads(monkeypatch, [huge_single_line])
+
+        assert reads > 1
+
+    def test_every_call_re_arms_the_initial_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """呼び出しごとに必ず開始時の 1 回が入ること（＝積算を持ち越さない）。
+
+        これが共有 deadline を効かせている当の性質。積算がファイルを跨いで
+        持ち越されるなら、閾値に満たない 2 回目の呼び出しは時刻を 1 度も
+        読まず、その回のファイルは deadline 超過を検知できない。
+        """
+        small = ["short line"] * 50
+
+        first = self._count_clock_reads(monkeypatch, small)
+        second = self._count_clock_reads(monkeypatch, small)
+
+        assert (first, second) == (1, 1)
