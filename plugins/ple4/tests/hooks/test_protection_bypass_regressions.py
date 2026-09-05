@@ -537,18 +537,22 @@ def test_folded_protected_sets_cover_every_declared_name() -> None:
     判定は `*_FOLDED` 側でのみ行われるため、畳み込みが一部を落としても宣言側の
     見た目は正しいまま保護だけが消える。件数の一致まで見て、畳み込みが余計な
     名前を増やしていないことも同時に固定する。
+
+    期待値は実装側の集合ではなく層2 の `_EXPECTED_*` から組み立てる。実装の集合
+    から実装と同じ式で作ると「畳み込みがまったく別の入力から作られている」場合
+    しか捕まえられず、宣言側と畳み込み側が揃って壊れた場合に緑のまま通る。
     """
     from ple4.hooks.hook_common import normalize_protected_name
 
-    for declared, folded in (
-        (config_protection.PROTECTED_FILES, config_protection.PROTECTED_FILES_FOLDED),
+    for expected, folded in (
+        (_EXPECTED_PROTECTED_FILES, config_protection.PROTECTED_FILES_FOLDED),
         (
-            config_protection.CONDITIONALLY_PROTECTED_FILES,
+            _EXPECTED_CONDITIONALLY_PROTECTED_FILES,
             config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED,
         ),
     ):
-        assert folded == frozenset(normalize_protected_name(name) for name in declared)
-        assert len(folded) == len(declared)
+        assert folded == frozenset(normalize_protected_name(name) for name in expected)
+        assert len(folded) == len(expected)
 
 
 @pytest.mark.parametrize("name", sorted(_EXPECTED_PROTECTED_FILES))
