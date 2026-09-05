@@ -49,7 +49,11 @@ CREATE TABLE IF NOT EXISTS knowledge (
   body          TEXT NOT NULL DEFAULT '',  -- why / how の補足。空でよい
   domain        TEXT,                      -- 'testing' 'git' 'build' 等。任意
   confidence    REAL NOT NULL DEFAULT 0.5 CHECK (confidence BETWEEN 0 AND 1),
-  status        TEXT NOT NULL DEFAULT 'active'
+  -- 既定は 'pending'（＝注入されない側）。H-01「agent 由来カードは人間の
+  -- promote を経なければ注入されない」を支えるのが Python 検証 1 層だけだと、
+  -- status を省略する経路が 1 本増えた瞬間に破れる。現状そんな経路は無いが、
+  -- 多層防御として最も危険な値を既定に据えない（省略時は fail-safe 側へ倒す）。
+  status        TEXT NOT NULL DEFAULT 'pending'
                   CHECK (status IN ('active','pending','archived')),
   source        TEXT NOT NULL CHECK (source IN ('agent','observer','human')),
   source_ref    TEXT,                      -- 出所の自由記述（ファイルパス等）

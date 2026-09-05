@@ -68,6 +68,9 @@ def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
         "kind": "fact",
         "title": "seeded title",
         "source": "agent",
+        # status は必須引数（既定値なし）。list/search の既定絞り込みが 'active'
+        # なので、ヘルパの既定も 'active' に置いて従来の意味を保つ。
+        "status": "active",
     }
     fields.update(overrides)
     with Database(tmp_path / "mem.db") as db:
@@ -705,6 +708,7 @@ class TestScoring:
             "kind": "fact",
             "title": "title",
             "source": "agent",
+            "status": "active",
             "updated_at": self._NOW.isoformat(),
         }
         fields.update(overrides)
