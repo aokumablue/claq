@@ -218,6 +218,13 @@ _BLOCKED_CASES = [
     ("M-8 ex で保護 config", "bash_config_protection", _bash("ex .eslintrc")),
     ("M-8 sponge で保護 config", "bash_config_protection", _bash("echo x | sponge ruff.toml")),
     ("M-8 wrapper 越しの ed", "bash_config_protection", _bash("timeout 5 ed ruff.toml")),
+    # M-9: `touch` は内容を変えないが、保護対象を**空で新規作成**できる。空の
+    # `.eslintrc` は ESLint の上位カスケード探索を止めるため実質的な無効化になる。
+    # 修正前は保護対象 36 ファイル全てで allow だった（実測 exit 0）。
+    ("M-9 touch で保護 config", "bash_config_protection", _bash("touch ruff.toml")),
+    ("M-9 touch の大小混在", "bash_config_protection", _bash("touch .Eslintrc")),
+    ("M-9 touch の値付きオプション", "bash_config_protection", _bash("touch -t 202601010000 ruff.toml")),
+    ("M-9 wrapper 越しの touch", "bash_config_protection", _bash("timeout 5 touch ruff.toml")),
     # 陽性対照（修正前から exit 2。fail-closed 化で失われていないこと）。
     ("対照 コメント無しの 2 行目", "block_no_verify", _bash(f"git status\n{_NO_VERIFY}")),
     ("対照 bash -c", "block_no_verify", _bash(f"bash -c '{_NO_VERIFY}'")),
@@ -282,6 +289,12 @@ _ALLOWED_CASES = [
     ("M-8 対 保護対象でない ed", "bash_config_protection", _bash("ed app.py")),
     ("M-8 対 非実行位置の ed", "bash_config_protection", _bash("echo ed ruff.toml")),
     ("M-8 対 保護対象の読み取り（ex 名の別語）", "bash_config_protection", _bash("grep -rn ex ruff.toml")),
+    # M-9: `touch` を書込み verb にしても、保護対象でないファイル・repo 外・
+    # 非実行位置は allow のまま。「全部ブロックする」実装をここで落とす。
+    ("M-9 対 touch app.py", "bash_config_protection", _bash("touch app.py")),
+    ("M-9 対 touch README.md", "bash_config_protection", _bash("touch README.md")),
+    ("M-9 対 repo 外の touch", "bash_config_protection", _bash("touch /tmp/ruff.toml")),
+    ("M-9 対 非実行位置の touch", "bash_config_protection", _bash("echo touch ruff.toml")),
 ]
 
 
@@ -598,11 +611,15 @@ def test_every_protected_file_is_denied_on_write(name: str, monkeypatch: pytest.
 def test_every_protected_file_is_denied_on_bash_write(
     name: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`PROTECTED_FILES` の全要素が Bash 経路（リダイレクトと削除）で deny されること（層1）。
+    """`PROTECTED_FILES` の全要素が Bash 経路（リダイレクト・削除・作成）で deny されること（層1）。
 
     Write だけを見ると、`config_protection` にしか載っていない名前を
     `bash_config_protection` が取りこぼしていても気付けない。両フックが同じ
     語彙を共有していることを要素ごとに実測する。
+
+    `touch` を含めるのは M-9 の指摘（保護対象 36 ファイル**全て**で allow だった）を
+    サンプルではなく全数で固定するため。空ファイルの新規作成は内容を書き換えないが、
+    linter の上位カスケード探索を止めるので上書きと同じ弱体化にあたる。
 
     Args:
         name: 保護対象のファイル名。
@@ -610,6 +627,7 @@ def test_every_protected_file_is_denied_on_bash_write(
     """
     assert _run("bash_config_protection", _bash(f"printf x > {name}"), monkeypatch) == 2
     assert _run("bash_config_protection", _bash(f"rm {name}"), monkeypatch) == 2
+    assert _run("bash_config_protection", _bash(f"touch {name}"), monkeypatch) == 2
 
 
 @pytest.mark.parametrize("name", sorted(_EXPECTED_PROTECTED_FILES))

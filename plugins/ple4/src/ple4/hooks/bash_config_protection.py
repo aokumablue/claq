@@ -40,6 +40,8 @@ Write は塞がるのに ``rm Ruff.toml`` は通る非対称が生まれる）�
           非曖昧な短縮（`--i`）を含む
         - `ed`/`red`/`ex`/`sponge`（`hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES`）
           の引数。フラグ無しで書き換えるためフラグ判定の側では表現できない
+        - `touch` の引数。内容は変えられないが、保護対象を**空で新規作成**すると
+          linter の上位カスケード探索が止まり、実質的に設定の無効化になる
         - `cp`/`mv`/`install` の最終引数、`ln -f` の最終引数、`dd of=<path>`
     さらに、書き込み先ヒットがあった場合のみ `hook_common.resolve_repo_root`
     （`git rev-parse --show-toplevel`、プロセス内 1 回キャッシュ）でリポジトリ
@@ -180,6 +182,17 @@ _INPLACE_EDIT_COMMANDS = frozenset({"sed", "perl"})
 _LN_COMMANDS = frozenset({"ln"})
 _DD_COMMANDS = frozenset({"dd"})
 
+# 存在しないファイルを空で新規作成するコマンド（M-9）。内容を書き換えられなくても、
+# **保護対象の名前を空で置くだけで検査を無効化できる**: 多くの linter は設定ファイルを
+# 見つけた時点で上位ディレクトリの探索を打ち切るため（ESLint の cascade、
+# ``.eslintrc`` が典型）、空の設定を置くことは「上位のルール一式を無効化する」ことに
+# 等しい。`touch` はどの語彙集合にも入っておらず、保護対象 36 ファイル全てで
+# allow だった（実測 exit 0）。
+#
+# PowerShell の ``New-Item`` は同じ効果を持つが、既に `_TEE_COMMANDS`
+# （非オプション引数がすべて書き込み先）に載っているのでここへは重複させない。
+_TOUCH_COMMANDS = frozenset({"touch"})
+
 # カレントディレクトリを移動するコマンド。これらが現れたコマンドでは、cwd 基準の
 # 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
 _DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
@@ -191,8 +204,18 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILE
 # （`>`/`tee`/`-i`）に加えて、トークン化経路が既に見ている削除・リンク系の verb を
 # 含める。部分一致なので過剰検出側に倒れるが、malformed 入力に対しては
 # ADR-0002（誤検出 > 誤通過）どおりそれでよい。
+#
+# `ALWAYS_MUTATING_EDIT_EXECUTABLES`（`ed` / `ex` / `red`）はここへ入れない。
+# 判定が部分一致なので 2〜3 文字の名前は ``used`` ``next`` ``required`` のような
+# 通常の語へ一致し、指標としての情報量が消える（保護対象 basename が見えている
+# 入力はほぼ常に deny になり、この tuple 自体が意味を失う）。`touch` は語として
+# 十分に長く、この問題を起こさないので含める。
 _RAW_TEXT_RISK_INDICATORS = (
-    (">", "tee", "-i") + tuple(sorted(_REMOVE_COMMANDS)) + tuple(sorted(_MODE_COMMANDS)) + ("ln",)
+    (">", "tee", "-i")
+    + tuple(sorted(_REMOVE_COMMANDS))
+    + tuple(sorted(_MODE_COMMANDS))
+    + tuple(sorted(_TOUCH_COMMANDS))
+    + ("ln",)
 )
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -471,6 +494,33 @@ def _always_mutating_edit_targets(segment: list[str]) -> list[str]:
     return _non_option_args(args) if args is not None else []
 
 
+def _touch_targets(segment: list[str]) -> list[str]:
+    """`touch` の対象引数をすべて返す。
+
+    内容は書き換えられないが、保護対象の名前を**空で新規作成**できる。空の
+    ``.eslintrc`` は ESLint の上位カスケード探索をそこで打ち切らせるため、実質的な
+    lint 設定の無効化になる（M-9）。
+
+    値を取るオプション（``-t <stamp>`` / ``-d <date>`` / ``-r <ref>``）の値は
+    `_non_option_args` を素通りして候補に混じる。``touch -r ruff.toml app.py`` は
+    読み取り参照でしかない `ruff.toml` を候補として deny するが、これは
+    `_remove_targets` / `_mode_targets` と同じ姿勢であり ADR-0002（誤検出 >
+    誤通過）の範囲内。オプションごとの arity 表を持ち込むと、`touch` の
+    実装差（BSD / GNU / busybox）ごとに表が割れて取りこぼしが生まれる。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        作成・更新対象になりうる非オプション引数の生トークンのリスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    args = _executed_command_args(segment, _TOUCH_COMMANDS)
+    return _non_option_args(args) if args is not None else []
+
+
 def _last_arg_write_targets(segment: list[str]) -> list[str]:
     """`cp`/`mv`/`install` の書き込み先（最終の非オプション引数）を返す。
 
@@ -599,6 +649,7 @@ def _write_target_tokens_in_segment(segment: list[str]) -> list[str]:
             _tee_targets,
             _inplace_edit_targets,
             _always_mutating_edit_targets,
+            _touch_targets,
             _last_arg_write_targets,
             _remove_targets,
             _mode_targets,
