@@ -48,7 +48,11 @@ _WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
 # の場合もここに来るため、文言を「パッチ」に限定しない。
 _UNDECIDABLE_TARGET_MESSAGE = "BLOCKED: Could not determine target files from tool input."
 
-PROTECTED_FILES = {
+# frozenset で持つ。判定に使うのは下の `*_FOLDED`（import 時に 1 回だけ畳んだ
+# 複製）であり、実行時にこちらへ追加しても保護は増えない。可変のままだと
+# その食い違いが黙って通る — このコミットが塞いでいる「片側だけ更新された」
+# 型の穴そのものなので、変更を AttributeError で落ちる形にしておく。
+PROTECTED_FILES = frozenset({
     ".eslintrc",
     ".eslintrc.js",
     ".eslintrc.cjs",
@@ -87,7 +91,7 @@ PROTECTED_FILES = {
     # 得られるため、個別の lint 設定と同じ重みで保護する。
     ".pre-commit-config.yaml",
     ".pre-commit-config.yml",
-}
+})
 
 # ディレクトリ単位で保護する path。basename だけでは判定できない
 # （``.git/hooks/pre-commit`` の basename ``pre-commit`` を一律ブロックすると
@@ -110,12 +114,12 @@ _PROTECTED_PATH_SEGMENTS_FOLDED = tuple(
 # 等の正当な編集が頻繁なため全面ブロックはしない。書き込み内容が
 # lint/format/coverage 設定を弱めうる場合のみ _conditional_block_reason
 # でブロックする（R-07）。
-CONDITIONALLY_PROTECTED_FILES = {
+CONDITIONALLY_PROTECTED_FILES = frozenset({
     "pyproject.toml",
     "setup.cfg",
     "tox.ini",
     "package.json",
-}
+})
 
 # 上 2 集合の大小無視の照合用複製。判定は必ずこちらを使い、生の集合は「保護
 # 対象は何か」の宣言と表示専用に残す（`bash_config_protection` も畳み済みの

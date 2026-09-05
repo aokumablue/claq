@@ -736,15 +736,18 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    # 指標は小文字で持つ（`_REMOVE_COMMANDS` 等に PowerShell の長形式 cmdlet が
+    # 指標は畳んだ形で持つ（`_REMOVE_COMMANDS` 等に PowerShell の長形式 cmdlet が
     # 入っており、生テキストには `Remove-Item` と大文字混じりで現れる）。
     # トークン化経路の名前比較も大小無視なので、ここだけ大小を見ると
-    # 「JSON が壊れているときだけ通る」非対称が生まれる。
-    lowered = raw_input.lower()
+    # 「JSON が壊れているときだけ通る」非対称が生まれる。case 演算は
+    # `normalize_protected_name` / `normalize_executable_name` と同じ casefold で
+    # 揃える（片方だけ lower にすると、畳み方の違いが新しい非対称になる）。
+    lowered = raw_input.casefold()
     if not any(indicator in lowered for indicator in _RAW_TEXT_RISK_INDICATORS):
         return None
+    # `_ALL_PROTECTED_BASENAMES` は既に畳み済みなので、ここで再度畳まない。
     for name in sorted(_ALL_PROTECTED_BASENAMES):
-        if name.lower() in lowered:
+        if name in lowered:
             return name
     return None
 
