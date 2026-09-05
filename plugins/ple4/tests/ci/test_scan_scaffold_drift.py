@@ -165,6 +165,48 @@ class TestScan:
         """読めないファイルは飛ばす。"""
         assert scanner.scan([tmp_path / "missing.jsonl"]) == {}
 
+    @pytest.mark.parametrize(
+        "companion",
+        [
+            "<system-まあreminder>y</system-まあreminder>",
+            "sk-" + "ant-<private>api03-" + "A" * 40,
+        ],
+        ids=["forged-scaffold", "tag-split-secret"],
+    )
+    def test_unknown_tag_survives_a_message_that_trips_sanitization(
+        self, tmp_path: Path, companion: str
+    ) -> None:
+        """無害化が fail closed に倒れるメッセージでも未知タグを見落とさない。
+
+        走査は除去（``drop_known_tag_blocks``）だけを通し、無害化
+        （``strip_tags``）は通さない。無害化は細工を検出すると ``&`` と ``<`` を
+        全て倒す／本文を ``[REDACTED]`` へ倒すため、そのメッセージ内の未知タグが
+        1 つも見えなくなる（実測）。診断が最も見たいのはその種のメッセージで、
+        ここで見落とすと ADR-0016 の「素通り」がそのまま残る。
+        """
+        path = _write_transcript(tmp_path, "e.jsonl", ["<peer-broadcast>x</peer-broadcast> " + companion])
+
+        assert "peer-broadcast" in scanner.scan([path])
+
+    def test_only_tags_outside_a_removed_block_are_reported(self, tmp_path: Path) -> None:
+        """中身ごと落としたブロックの内側タグは数えず、外側だけを数える。
+
+        ブロック内外で同じタグ名を使い、除去が中身へ効いていることを外側の
+        検出と対にして押さえる。「メッセージ全体が空になったから 0 件」でも
+        通ってしまう形にしない。
+        """
+        inside = _write_transcript(
+            tmp_path, "f.jsonl", ["<ple4-memory><peer-broadcast>x</peer-broadcast></ple4-memory>"]
+        )
+        both = _write_transcript(
+            tmp_path,
+            "g.jsonl",
+            ["<ple4-memory><peer-broadcast>x</peer-broadcast></ple4-memory> <other-leak>y</other-leak>"],
+        )
+
+        assert scanner.scan([inside]) == {}
+        assert set(scanner.scan([both])) == {"other-leak"}
+
 
 class TestMain:
     """終了コード契約。"""

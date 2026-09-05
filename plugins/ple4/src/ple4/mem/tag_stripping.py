@@ -89,6 +89,10 @@ _TAGS = (
 )
 
 # 診断側（ci/scan_scaffold_drift.py）が「既知タグ」を組み立てるための公開名。
+# これは**ブロック除去**の語彙であり、escape の語彙（`_NEUTRALIZE_TAGS`）とは
+# 別物で、後者のほうが広い。診断側が知りたいのは「中身ごと落としたブロック」の
+# 名前なのでこちらを渡す。escape の語彙へ名前を足しても診断側の既知集合は
+# `SCAFFOLD_TAGS` / `COMMAND_TAGS` 経由で揃うため、ここへ写す必要は無い。
 STRIPPED_TAGS = _TAGS
 
 # 入れ子ブロック除去の最大反復回数。否定先読みは同種の開始タグを跨がないため、
@@ -192,18 +196,26 @@ _REDACTION_MARKER = "[REDACTED]"
 _BLANK_LINES = re.compile(r"\n{3,}")
 
 
-def _drop_paired_blocks(text: str) -> str:
+def drop_known_tag_blocks(text: str) -> str:
     """開始・終了が対になった対象タグを中身ごと除去する。
 
     入れ子は内側から 1 段ずつ落ちるため、タグごとに変化が無くなるまで
     ``_MAX_NESTING_PASSES`` を上限に反復する。上限超過分が残っても
     ``strip_tags`` 後段のエスケープが無害化する。
 
+    公開しているのは診断側（``ci/scan_scaffold_drift``）のためである。あちらが
+    欲しいのは「中身ごと落としたブロックの内側タグを未知タグとして数えない」
+    ことだけで、無害化は要らない。``strip_tags`` をそのまま呼ばせると、細工を
+    検出して ``&`` と ``<`` を全て倒した本文・``[REDACTED]`` へ倒した本文では
+    未知タグが 1 つも見えなくなる（実測）。ドリフト診断が最も見たいのは
+    まさにその種のメッセージなので、除去だけを切り出して渡す。
+
     Args:
         text: 除去前のテキスト。
 
     Returns:
-        対になったブロックを中身ごと除いたテキスト。
+        対になったブロックを中身ごと除いたテキスト。**無害化はしていない** —
+        出力・永続化・注入へ回すなら ``strip_tags`` を使うこと。
 
     Raises:
         例外は発生しません。
@@ -335,8 +347,10 @@ def _forges_tag_after_deletion(text: str) -> bool:
     渡せない。
 
     削除するものが無ければ両辺が同じ文字列になるため、数える前に False を
-    返す（``_hides_secret_behind_tags`` と同じ早期脱出。1MB の入力で 0.5 秒が
-    0.05 秒になる）。
+    返す（``_hides_secret_behind_tags`` と同じ早期脱出）。こちらの節約は
+    ミリ秒未満で、``strip_tags`` の実測コストを支配しているのは判定用複製の
+    ``_ERASE_PATTERN`` である。それでも置くのは、脱出条件が同じ形だと
+    「検査は入力に対象が在るときだけ走る」と 1 つの規則で読めるため。
 
     Args:
         text: ``strip_tags`` が返そうとしている無害化済みテキスト。
@@ -388,7 +402,7 @@ def strip_tags(text: str) -> str:
     if not text:
         return text
 
-    dropped = _drop_paired_blocks(text)
+    dropped = drop_known_tag_blocks(text)
     neutralized = _collapse_blank_lines(_neutralize(dropped))
     if _hides_secret_behind_tags(neutralized):
         return _REDACTION_MARKER

@@ -13,6 +13,12 @@
 内側タグ（``<status>`` ``<task-id>`` ``<usage>`` 等）まで「未知」として並び、
 本当の漏れが埋もれる。ここで知りたいのは「除去を通り抜けて残ったもの」だけ。
 
+通すのは**除去だけ**で、無害化（``strip_tags``）は通さない。無害化は細工を
+検出すると ``&`` と ``<`` を全て倒す、あるいは本文を ``[REDACTED]`` へ倒すため、
+そのメッセージ内の未知タグが 1 つも見えなくなる（実測）。ドリフト診断が最も
+見たいのはまさにその種のメッセージであり、ここで見落とすと ADR-0016 の
+「素通り」がそのまま残る。
+
 **判定は「対を成す未知タグ」に限る。** ユーザーの依頼本文には
 ``<key>`` ``<yyyy-mm-dd>`` ``<path>`` のようなプレースホルダが裸で現れるが、
 ハーネスが生成する足場は必ず開始と終了が対になっている。実 transcript 273 本での
@@ -45,7 +51,7 @@ from pathlib import Path
 
 from ple4.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, normalize_user_message
 from ple4.mem.handoff import TRANSCRIPT_MAX_BYTES, is_trusted_transcript, trusted_transcript_roots
-from ple4.mem.tag_stripping import STRIPPED_TAGS, strip_tags
+from ple4.mem.tag_stripping import STRIPPED_TAGS, drop_known_tag_blocks
 
 # 依頼本文に現れても足場ではないタグ。ここが古びると「誤検知 1 件」として
 # 現れ、語を 1 つ足せば解消する。denylist の陳腐化（無言の素通り）と保守量は
@@ -222,7 +228,7 @@ def scan(paths: Iterable[Path]) -> Counter[str]:
             continue
         names: set[str] = set()
         for text in _user_texts(raw):
-            cleaned = strip_code_spans(strip_tags(normalize_user_message(text)))
+            cleaned = strip_code_spans(drop_known_tag_blocks(normalize_user_message(text)))
             names |= find_paired_unknown_tags(cleaned, known)
         counts.update(names)
     return counts

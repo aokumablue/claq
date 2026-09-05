@@ -296,13 +296,17 @@ class TestOversizedAttributesAreNeutralized:
 
 
 class TestEraseKnownTags:
-    """判定専用の複製（``_erase_known_tags``）はタグ表記を消して中身を繋ぐ。
+    """判定専用の複製（``_erase_known_tags``）は**タグ表記だけ**を消す。
 
     ``strip_tags`` が孤立タグを escape へ倒したことで、タグで分断された秘密は
-    1 本へ戻らず ``redact`` に一致しなくなった。この関数は「タグが無ければ何が
-    見えたか」を調べるためだけに使い、結果は出力へ回さない。判定は
+    1 本へ戻らず ``redact`` に一致しなくなった。この関数は「タグ表記が無ければ
+    何が見えたか」を調べるためだけに使い、結果は出力へ回さない。判定は
     ``strip_tags`` が返そうとしている出力に対して行うため、生の ``<`` と
     escape 済みの ``&lt;`` の両方を消す。
+
+    ブロックの**中身**は消さない（それは ``drop_known_tag_blocks`` の役目で、
+    呼び出し時点で既に済んでいる）。この関数が繋ぐのはタグ表記で分断された
+    文字列だけである。
     """
 
     @pytest.mark.parametrize(
@@ -317,8 +321,8 @@ class TestEraseKnownTags:
         ],
         ids=["orphan-open", "escaped-orphan-open", "paired", "attributed-close", "long-attribute", "no-tags"],
     )
-    def test_tags_are_removed_and_content_rejoins(self, text: str, expected: str) -> None:
-        """タグ表記が消え、分断されていた文字列が 1 本へ戻る。"""
+    def test_tag_notation_is_removed_and_split_text_rejoins(self, text: str, expected: str) -> None:
+        """タグ表記が消え、それで分断されていた文字列が 1 本へ戻る。"""
         assert _erase_known_tags(text) == expected
 
     def test_attribute_does_not_cross_a_newline(self) -> None:
