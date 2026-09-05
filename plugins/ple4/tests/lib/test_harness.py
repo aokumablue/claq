@@ -86,6 +86,25 @@ class TestJsonStringContainerNormalization:
         """JSON に見えてパースできない文字列は生文字列のまま返す（既存契約）。"""
         assert harness.extract_tool_input({"tool_input": "{not-json"}) == "{not-json"
 
+    @pytest.mark.parametrize("prefix", ["", " ", "\t", "\n", "\r", "\x0c", "\x0b"])
+    def test_patch_container_is_parsed_regardless_of_leading_whitespace(self, prefix: str) -> None:
+        """パッチ本文コンテナでも判定とパースの文字列を揃える（M-1）。
+
+        `extract_tool_input` は同じ罠を潰していたのに `_extract_patch_text` だけ
+        `lstrip` 前の文字列をパースしていた。`\\x0c` を 1 文字前置しただけで
+        `apply_patch` 以外のツール名では生の JSON 文字列がそのままパス候補になり、
+        本来の対象 `.git/hooks/pre-commit` が候補から消えていた（実測）。
+        """
+        patch = "*** Begin Patch\n*** Update File: .git/hooks/pre-commit\n*** End Patch"
+        tool_input = prefix + json.dumps({"input": patch})
+
+        assert harness.extract_file_paths("str_replace_editor", tool_input) == [".git/hooks/pre-commit"]
+        assert harness.extract_file_paths("apply_patch", tool_input) == [".git/hooks/pre-commit"]
+
+    def test_unparseable_patch_container_falls_back_to_raw_string(self) -> None:
+        """パッチ本文コンテナも、パース不能なら生文字列のまま返す（既存契約）。"""
+        assert harness.extract_file_paths("str_replace_editor", "{not-json") == ["{not-json"]
+
 
 class TestIterBashCommands:
     """iter_bash_commands / iter_tool_input_containers のテスト。"""

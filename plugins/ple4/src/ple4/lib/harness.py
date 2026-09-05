@@ -297,6 +297,15 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
     ような dict で渡ることがあるため、両方を吸収する。JSON 文字列化された
     dict が来た場合も input フィールドを復元する。ツール名に関わらず、
     渡された入力の「形」だけから候補テキストを取り出す（判定は呼び出し側）。
+
+    判定とパースは同じ文字列（``lstrip`` 後）に対して行う。``extract_tool_input``
+    と同じ非対称がここにも残っていた: ``lstrip()`` 後の値で ``{`` 始まりを見て、
+    パースには**元の文字列**を渡していた。``\\x0c`` / ``\\x0b`` は Python の空白
+    だが JSON の空白ではないため、1 文字前置するだけで「``{`` で始まると判定
+    されたのにパースは失敗する」状態になり、patch 本文ではなく生の JSON 文字列
+    がそのままパス候補として返る（実測: ``apply_patch`` 以外のツール名で
+    ``extract_file_paths`` が ``['\\x0c{"input": ...}']`` を返し、本来の対象
+    ``.git/hooks/pre-commit`` が候補から消える）。
     """
     if isinstance(tool_input, dict):
         patch_text = tool_input.get("input")
@@ -309,7 +318,7 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
     if not stripped.startswith("{"):
         return tool_input
     try:
-        parsed = json.loads(tool_input)
+        parsed = json.loads(stripped)
     except JSON_PARSE_FAILURES:
         return tool_input
     patch_text = parsed.get("input")
