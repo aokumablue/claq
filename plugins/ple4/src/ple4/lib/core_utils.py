@@ -6,21 +6,13 @@ Windows・macOS・Linux で動作する。
 from __future__ import annotations
 
 import getpass
-import json
 import os
-import platform
 import re
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from ple4.lib.constants import BASE_DIR_NAME
-
-IS_WINDOWS = platform.system() == "Windows"
-IS_MACOS = platform.system() == "Darwin"
-IS_LINUX = platform.system() == "Linux"
 
 SESSION_DATA_DIR_NAME = "session-data"
 
@@ -56,11 +48,6 @@ def get_plugin_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def get_claude_dir() -> Path:
-    """Claude の設定ディレクトリを取得する。"""
-    return get_home_dir() / ".claude"
-
-
 def get_ple4_dir() -> Path:
     """ple4 の保存ディレクトリを取得する。"""
     return get_home_dir() / BASE_DIR_NAME
@@ -69,11 +56,6 @@ def get_ple4_dir() -> Path:
 def get_sessions_dir() -> Path:
     """セッションディレクトリを取得する。"""
     return get_ple4_dir() / SESSION_DATA_DIR_NAME
-
-
-def get_learned_skills_dir() -> Path:
-    """学習済みスキルのディレクトリを取得する。"""
-    return get_claude_dir() / "skills" / "learned"
 
 
 def ensure_dir(dir_path: str | Path) -> Path:
@@ -160,11 +142,6 @@ def actor_identity() -> str:
         return "unknown"
 
 
-def get_date_string() -> str:
-    """現在日付を YYYY-MM-DD 形式で取得する。"""
-    return datetime.now().strftime("%Y-%m-%d")
-
-
 def get_datetime_string() -> str:
     """現在日時を YYYY-MM-DD HH:MM:SS 形式で取得する。"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -178,136 +155,9 @@ def _mkdir_exist_ok(path: Path) -> None:
         pass
 
 
-def _glob_to_regex(pattern: str) -> re.Pattern[str]:
-    """グロブパターンを正規表現オブジェクトに変換する。"""
-    regex_pattern = re.escape(pattern).replace(r"\*", ".*").replace(r"\?", ".")
-    return re.compile(f"^{regex_pattern}$")
-
-
-def _is_within_max_age(mtime_ms: float, max_age: float) -> bool:
-    """mtime（ミリ秒）が max_age 日以内かどうかを判定する。"""
-    import time
-
-    age_in_days = (time.time() * 1000 - mtime_ms) / (1000 * 60 * 60 * 24)
-    return age_in_days <= max_age
-
-
-def _append_if_fresh(entry: Path, max_age: float | None, results: list[dict[str, Any]]) -> None:
-    """stat できたファイルを max_age 条件付きで results に追加する。"""
-    try:
-        mtime = entry.stat().st_mtime * 1000  # JS と同様にミリ秒へ変換
-    except OSError:
-        return
-    if max_age is not None and not _is_within_max_age(mtime, max_age):
-        return
-    results.append({"path": str(entry), "mtime": mtime})
-
-
-def _collect_matching_files(
-    current_dir: Path,
-    regex: re.Pattern[str],
-    max_age: float | None,
-    recursive: bool,
-    results: list[dict[str, Any]],
-) -> None:
-    """ディレクトリを走査し、条件に合致するファイルを results に追加する。"""
-    try:
-        for entry in current_dir.iterdir():
-            if entry.is_file() and regex.match(entry.name):
-                _append_if_fresh(entry, max_age, results)
-            elif entry.is_dir() and recursive:
-                _collect_matching_files(entry, regex, max_age, recursive, results)
-    except PermissionError:
-        pass
-
-
-def find_files(
-    directory: str | Path,
-    pattern: str,
-    *,
-    max_age: float | None = None,
-    recursive: bool = False,
-) -> list[dict[str, Any]]:
-    """
-    ディレクトリ内でパターンに一致するファイルを探す。
-
-    Args:
-        directory: 検索対象ディレクトリ
-        pattern: ファイルパターン（例: "*.tmp", "*.md"）
-        max_age: ファイルの最大経過日数（None は無制限）
-        recursive: サブディレクトリも検索するか
-
-    Returns:
-        'path' と 'mtime' を持つ辞書のリスト（新しい順）
-    """
-    if not directory or not pattern:
-        return []
-
-    dir_path = Path(directory)
-    if not dir_path.exists():
-        return []
-
-    results: list[dict[str, Any]] = []
-    _collect_matching_files(dir_path, _glob_to_regex(pattern), max_age, recursive, results)
-    results.sort(key=lambda x: x["mtime"], reverse=True)
-    return results
-
-
-async def read_stdin_json(*, timeout_ms: int = 5000, max_size: int = 1024 * 1024) -> dict[str, Any]:
-    """
-    stdin から JSON を読み込む（フック入力用）。
-
-    Args:
-        timeout_ms: タイムアウト（ミリ秒、デフォルト: 5000）
-        max_size: 入力サイズ上限（バイト）
-
-    Returns:
-        解析済みJSONオブジェクト。stdin が空または不正なら空辞書
-    """
-    import asyncio
-
-    try:
-        # stdin に読み取り可能なデータがあるか確認
-        if sys.stdin.isatty():
-            return {}
-
-        # run_in_executor は Future を返すので、タイムアウト時に coroutine を残さない。
-        loop = asyncio.get_running_loop()
-        data = await asyncio.wait_for(loop.run_in_executor(None, lambda: sys.stdin.read(max_size)), timeout=timeout_ms / 1000)
-
-        if not data.strip():
-            return {}
-        return json.loads(data)
-    except (TimeoutError, json.JSONDecodeError, OSError):
-        return {}
-
-
 def log(message: str) -> None:
     """stderr にログを出力する。"""
     print(message, file=sys.stderr)
-
-
-def output(data: Any) -> None:
-    """stdout に出力する（Claude に返される）。"""
-    if isinstance(data, (dict, list)):
-        print(json.dumps(data))
-    else:
-        print(data)
-
-
-def read_file(file_path: str | Path) -> str | None:
-    """テキストファイルを安全に読み込む。"""
-    try:
-        return Path(file_path).read_text(encoding="utf-8")
-    except OSError:
-        return None
-
-
-def write_file(file_path: str | Path, content: str) -> None:
-    """テキストファイルを書き込む。"""
-    path = Path(file_path)
-    ensure_dir(path.parent)
-    path.write_text(content, encoding="utf-8")
 
 
 def append_file(file_path: str | Path, content: str) -> None:
@@ -316,105 +166,6 @@ def append_file(file_path: str | Path, content: str) -> None:
     ensure_dir(path.parent)
     with path.open("a", encoding="utf-8") as f:
         f.write(content)
-
-
-def command_exists(cmd: str) -> bool:
-    """
-    PATH 上にコマンドが存在するか確認する。
-
-    Args:
-        cmd: 確認するコマンド名（英数字・ハイフン・アンダースコア・ドットのみ）
-
-    Returns:
-        コマンドが存在すれば True、そうでなければ False
-    """
-    if not re.match(r"^[a-zA-Z0-9_.-]+$", cmd):
-        return False
-
-    lookup = "where" if IS_WINDOWS else "which"
-    try:
-        result = subprocess.run(
-            [lookup, cmd],
-            capture_output=True,
-            check=False,
-        )
-        return result.returncode == 0
-    except OSError:
-        return False
-
-
-# 安全なコマンド接頭辞の許可リスト
-_ALLOWED_COMMAND_PREFIXES = ("git", "node", "npx", "which", "where")
-
-
-def run_command(cmd: str | list[str], **kwargs: Any) -> dict[str, Any]:
-    """
-    コマンドを実行して出力を返す。
-
-    Args:
-        cmd: 実行するコマンド（文字列または引数リスト。信頼済み/ハードコード済みであるべき）
-        **kwargs: subprocess.run に渡す追加引数
-
-    Returns:
-        'success'（bool）と'output'（str）を持つ辞書
-    """
-    if isinstance(cmd, str):
-        # シェルのメタ文字を拒否（shell=False でも引数経由での注入を防ぐ）
-        if re.search(r"[;|&\n`$]", cmd):
-            return {"success": False, "output": "runCommand blocked: shell metacharacters not allowed"}
-        cmd_list = cmd.split()
-    else:
-        cmd_list = list(cmd)
-
-    if not cmd_list:
-        return {"success": False, "output": "runCommand error: empty command"}
-
-    if cmd_list[0] not in _ALLOWED_COMMAND_PREFIXES:
-        return {"success": False, "output": "runCommand blocked: unrecognized command"}
-
-    try:
-        result = subprocess.run(
-            cmd_list,
-            shell=False,
-            capture_output=True,
-            text=True,
-            **kwargs,
-        )
-        if result.returncode == 0:
-            return {"success": True, "output": result.stdout.strip()}
-        return {"success": False, "output": result.stderr or result.stdout}
-    except OSError as e:
-        return {"success": False, "output": str(e)}
-
-
-def is_git_repo() -> bool:
-    """現在ディレクトリが git リポジトリか確認する。"""
-    return run_command("git rev-parse --git-dir")["success"]
-
-
-def count_in_file(file_path: str | Path, pattern: str | re.Pattern[str]) -> int:
-    """
-    ファイル内のパターン出現回数を数える。
-
-    Args:
-        file_path: 対象ファイルのパス
-        pattern: カウント対象パターン
-
-    Returns:
-        一致件数
-    """
-    content = read_file(file_path)
-    if content is None:
-        return 0
-
-    try:
-        if isinstance(pattern, re.Pattern):
-            matches = pattern.findall(content)
-        else:
-            matches = re.findall(pattern, content)
-        return len(matches)
-    except re.error:
-        return 0
 
 
 def strip_ansi(text: str) -> str:
