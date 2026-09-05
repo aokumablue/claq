@@ -63,6 +63,7 @@ from ple4.hooks.hook_common import (
 )
 from ple4.lib.core_utils import log
 from ple4.lib.harness import iter_bash_commands
+from ple4.lib.subprocess_utils import run_text
 
 _CONVENTIONAL_COMMIT = re.compile(
     r"^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?:\s*.+"
@@ -157,6 +158,33 @@ def _git_name_only(git_args: list[str]) -> list[str] | None:
     呼び出し側が「対象ファイルなし」と「検査不能」を見分けられず、後者を
     無言で見逃す（R-01 残余）。
 
+    subprocess は `subprocess_utils.run_text` 経由で呼ぶ。`text=True` だけで
+    encoding を指定しないと locale 依存のデコードになり、**ステージ済み
+    ファイル名**に非 ASCII バイトが含まれる場合（日本語ファイル名は珍しくない）
+    に `UnicodeDecodeError` が下の except を貫通して本 docstring の
+    「例外は発生しません」が破れる。origin URL のような限られた入力と違い
+    ファイル名は利用者が日常的に作るため、発火確率はこちらの方が高い。
+    `run_text` は `encoding="utf-8", errors="replace"` を集約済み。
+
+    発火条件は `core.quotePath=false`。git の既定（`true`）は非 ASCII パスを
+    `"\350\250\255…"` の 8 進エスケープへ潰して出力するため ASCII に収まるが、
+    日本語ファイル名を `git status` で読める形にするため `quotePath=false` を
+    global 設定に入れる運用は珍しくない。その環境で `LC_ALL=C` だと git が
+    生の UTF-8 バイトを返し、旧実装は `UnicodeDecodeError` を送出していた
+    （実測で再現・修正後の解消を確認済み）。
+
+    `errors="replace"` はデコード不能なバイトを置換文字へ潰すため、その
+    ファイル名は `git show :path` で引けず内容を読めない。それでも例外で
+    フック全体を落とすより良い —— 落とせば commit は無検査のまま通る
+    （fail-open）のに対し、置換された 1 件はスキャン対象から外れるだけで、
+    残りのステージ済みファイルは従来どおり検査されるため。
+
+    except タプルからは `CalledProcessError` を外す。`check=False` で呼ぶ限り
+    送出されない死んだ分岐だった。代わりに `OSError` を捕まえる —— 従来の
+    `FileNotFoundError` は `OSError` の部分集合に過ぎず、`PermissionError` や
+    実行形式不正（`OSError`）で git を起動できない場合を取りこぼしていた。
+    `TimeoutExpired` は `OSError` の部分集合ではないため個別に残す。
+
     Args:
         git_args: subprocess に渡す git コマンド列。
 
@@ -167,17 +195,11 @@ def _git_name_only(git_args: list[str]) -> list[str] | None:
         例外は発生しません。
     """
     try:
-        result = subprocess.run(
-            git_args,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
+        result = run_text(git_args, timeout=5)
         if result.returncode != 0:
             return None
         return [f for f in result.stdout.strip().split("\n") if f]
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
         return None
 
 
@@ -200,6 +222,13 @@ def get_staged_files() -> list[str] | None:
 def _head_exists() -> bool | None:
     """HEAD が解決可能か（＝初回コミットではないか）を判定します。
 
+    `_git_name_only` と同じ理由で `subprocess_utils.run_text` 経由にし、
+    except タプルも揃える（理由は `_git_name_only` の docstring）。本関数が
+    読むのは returncode だけだが、`text=True` は stderr もデコードするため、
+    非 UTF-8 ロケールで git が翻訳済みエラーメッセージを出すと同じ
+    `UnicodeDecodeError` 貫通が起きる。同一ファイル内で片方だけ直すと、
+    次に触る人がどちらが正なのか判断できなくなるため揃える。
+
     Returns:
         HEAD があれば True、初回コミット等で無ければ False。git 自体が
         失敗・timeout して判定できなければ None。
@@ -211,14 +240,8 @@ def _head_exists() -> bool | None:
         例外は発生しません。
     """
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        result = run_text(["git", "rev-parse", "--verify", "--quiet", "HEAD"], timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
         return None
     if result.returncode == 0:
         return True

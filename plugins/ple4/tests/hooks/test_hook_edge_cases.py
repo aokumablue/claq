@@ -704,15 +704,11 @@ def test_should_scan_secrets_includes_non_lint_extensions(file_path: str) -> Non
 
 
 def test_pre_bash_commit_quality_helpers_return_success_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(
-        command: list[str],
-        *,
-        capture_output: bool,
-        check: bool,
-        text: bool = False,
-        timeout: float | None = None,
-    ):
+    def fake_run(command: list[str], **kwargs: object):
+        # `get_staged_files` は `subprocess_utils.run_text` 経由になったため
+        # `encoding` / `errors` / `env` / `input` も渡ってくる（**kwargs で受ける）。
         if command[:2] == ["git", "diff"]:
+            assert kwargs["encoding"] == "utf-8"
             return subprocess.CompletedProcess(command, 0, stdout="src/app.py\nsrc/tool.ts\n", stderr="")
         if command[:2] == ["git", "show"]:
             # get_staged_file_content はバイナリ判定のため text=True を付けずに bytes で取得する
@@ -1523,15 +1519,13 @@ def test_evaluate_commit_without_dash_a_reads_index_when_worktree_diverges(
 def test_get_unstaged_modified_files_returns_success_output(monkeypatch: pytest.MonkeyPatch) -> None:
     """`git diff HEAD` の成功出力からファイル一覧を返すこと。"""
 
-    def fake_run(
-        command: list[str],
-        *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
-        timeout: float | None = None,
-    ):
+    def fake_run(command: list[str], **kwargs: object):
         assert command == ["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"]
+        # `_git_name_only` は `subprocess_utils.run_text` 経由で呼ぶため、
+        # `encoding` / `errors` / `env` / `input` も渡ってくる。個別に受けると
+        # 呼び出し側の引数が増えるたびにテストが壊れるので **kwargs で受ける。
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
         return subprocess.CompletedProcess(command, 0, stdout="src/a.py\nsrc/b.py\n", stderr="")
 
     monkeypatch.setattr(pre_bash_commit_quality.subprocess, "run", fake_run)
