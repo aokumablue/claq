@@ -201,6 +201,23 @@ _BLOCKED_CASES = [
         "pre_bash_commit_quality",
         _bash("perl -0pi -e s/a/b/ app.py && git commit -m 'fix: x'"),
     ),
+    # M-8: フラグ無しでファイルを書き換えるエディタ。`ed` はフラグを要求する
+    # `_INPLACE_EDIT_EXECUTABLES` に置かれていたため、``ed app.py && git commit``
+    # が mutation-before-commit ガードを素通りしていた（実測 exit 0）。
+    ("M-8 ed の commit 前編集", "pre_bash_commit_quality", _bash("ed app.py && git commit -m 'fix: x'")),
+    ("M-8 ex の commit 前編集", "pre_bash_commit_quality", _bash("ex app.py && git commit -m 'fix: x'")),
+    ("M-8 red の commit 前編集", "pre_bash_commit_quality", _bash("red app.py && git commit -m 'fix: x'")),
+    (
+        "M-8 sponge の commit 前編集",
+        "pre_bash_commit_quality",
+        _bash("echo x | sponge app.py && git commit -m 'fix: x'"),
+    ),
+    ("M-8 ED 大文字", "pre_bash_commit_quality", _bash("ED app.py && git commit -m 'fix: x'")),
+    # 同じ語彙の穴は保護 config 側にも開いていた（``ed ruff.toml`` が exit 0）。
+    ("M-8 ed で保護 config", "bash_config_protection", _bash("ed ruff.toml")),
+    ("M-8 ex で保護 config", "bash_config_protection", _bash("ex .eslintrc")),
+    ("M-8 sponge で保護 config", "bash_config_protection", _bash("echo x | sponge ruff.toml")),
+    ("M-8 wrapper 越しの ed", "bash_config_protection", _bash("timeout 5 ed ruff.toml")),
     # 陽性対照（修正前から exit 2。fail-closed 化で失われていないこと）。
     ("対照 コメント無しの 2 行目", "block_no_verify", _bash(f"git status\n{_NO_VERIFY}")),
     ("対照 bash -c", "block_no_verify", _bash(f"bash -c '{_NO_VERIFY}'")),
@@ -254,6 +271,17 @@ _ALLOWED_CASES = [
         _bash("sed --expression s/a/b/ app.py && git commit -m 'fix: x'"),
     ),
     ("H-6 対 commit 無しの mutation", "pre_bash_commit_quality", _bash("CP /tmp/evil.py app.py")),
+    # M-8: 常時 mutation 分類を足しても、非実行位置の言及・保護対象でない引数・
+    # フラグを要求する側の語彙（`sed` は `-i` 無しなら標準出力）は allow のまま。
+    ("M-8 対 commit 無しの ed", "pre_bash_commit_quality", _bash("ed app.py")),
+    (
+        "M-8 対 in-place でない sed",
+        "pre_bash_commit_quality",
+        _bash("sed s/a/b/ app.py && git commit -m 'fix: x'"),
+    ),
+    ("M-8 対 保護対象でない ed", "bash_config_protection", _bash("ed app.py")),
+    ("M-8 対 非実行位置の ed", "bash_config_protection", _bash("echo ed ruff.toml")),
+    ("M-8 対 保護対象の読み取り（ex 名の別語）", "bash_config_protection", _bash("grep -rn ex ruff.toml")),
 ]
 
 

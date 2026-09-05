@@ -1127,6 +1127,34 @@ def is_git_executable_token(token: str) -> bool:
     return normalize_executable_name(token) == "git"
 
 
+# **フラグの有無に関わらず**引数のファイルを書き換えるエディタ／フィルタ
+# （M-8）。`is_inplace_edit_flag` が扱う `sed` / `perl` とは分類が違う。
+#
+# なぜ別分類が要るのか:
+#     `ed` は `_INPLACE_EDIT_EXECUTABLES`（フラグを要求する集合）に置かれて
+#     いたため、``ed app.py && git commit -am x`` が
+#     `pre_bash_commit_quality` の mutation-before-commit ガードを素通り
+#     していた（実測 exit 0。`sed -i` 版は exit 2）。`ed` に in-place フラグは
+#     無く、``ed FILE`` は編集コマンドを stdin から読んでその場で書き戻す。
+#     「フラグが立っていれば書き込み」という軸ではこの形を表現できない。
+#
+# 語彙の基準は「フラグ 1 つ無しでも名前を挙げたファイルを書き換えうるか」:
+#     - ``ed`` / ``red``（制限版 ed）/ ``ex``（vi の行エディタモード）:
+#       いずれも POSIX の行エディタで、``w`` コマンドで引数のファイルへ
+#       書き戻す。
+#     - ``sponge``（moreutils）: stdin を吸ってから引数のファイルへ書く。
+#       フラグは `-a`（追記）だけで、無指定が上書きにあたる。
+#     `vi` / `vim` / `nvim` は含めない — 無フラグでは書き込まず（対話編集を
+#     開始するだけ）、書き込ませるには `-c wq` が要るのでフラグ側の分類になる。
+#     どちらの分類にも属さないものを片方へ寄せると、その語彙の意味が濁る。
+#
+# `bash_config_protection`（保護対象への書き込み）と `pre_bash_commit_quality`
+# （commit 前の作業ツリー変更）が共有する。`is_inplace_edit_flag` /
+# `SHELL_WRAPPER_EXECUTABLES` と同じ理由で単一情報源にする — 判定軸が兄弟ごとに
+# 割れると、片方だけ 1 世代ずれた語彙を持って静かなバイパスになる（H-6）。
+ALWAYS_MUTATING_EDIT_EXECUTABLES = frozenset({"ed", "red", "ex", "sponge"})
+
+
 # sed の GNU 長形式 in-place フラグ。GNU getopt は曖昧でない限り長形式の短縮を
 # 受け付け、sed の長形式で `--i` から始まるのは `--in-place` だけなので、
 # ``sed --i s/x/y/ ruff.toml`` も実際に in-place 編集になる。したがって

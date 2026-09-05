@@ -49,6 +49,7 @@ from ple4.hooks.commit_quality_scanner import (
     should_scan_secrets,
 )
 from ple4.hooks.hook_common import (
+    ALWAYS_MUTATING_EDIT_EXECUTABLES,
     MAX_STDIN_BYTES,
     command_dialect_variants,
     is_git_executable_token,
@@ -431,7 +432,10 @@ _WORKTREE_MUTATING_EXECUTABLES = frozenset(
     }
 )
 # `-i` を伴うときだけ書き込みになるコマンド。`-i` 無しは標準出力へ流すだけ。
-_INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl", "ed"})
+# **フラグ無しでも書き込むコマンドはここへ置かない** — `ed` を置いていた頃は
+# ``ed app.py && git commit -am x`` がフラグ判定に落ちて allow になっていた
+# （M-8。実測 exit 0）。その分類は `hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES`。
+_INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl"})
 _MUTATING_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>", ">&"})
 
 
@@ -469,7 +473,7 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
         # 不発になっていた（H-6）。scan は変更前の作業ツリーを読むので、
         # 取りこぼしはそのまま「未検査の内容が commit される」ことを意味する。
         name = normalize_executable_name(token)
-        if name in _WORKTREE_MUTATING_EXECUTABLES:
+        if name in _WORKTREE_MUTATING_EXECUTABLES or name in ALWAYS_MUTATING_EDIT_EXECUTABLES:
             return True
         if name in _INPLACE_EDIT_EXECUTABLES:
             return any(is_inplace_edit_flag(arg) for arg in segment[i + 1 :])

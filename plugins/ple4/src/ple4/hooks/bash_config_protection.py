@@ -38,6 +38,8 @@ Write は塞がるのに ``rm Ruff.toml`` は通る非対称が生まれる）�
           `hook_common.is_inplace_edit_flag` が単一情報源で、`-i` 単独・
           `-0pi` 等の結合短形式・GNU 長形式 `--in-place[=SUFFIX]` とその
           非曖昧な短縮（`--i`）を含む
+        - `ed`/`red`/`ex`/`sponge`（`hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES`）
+          の引数。フラグ無しで書き換えるためフラグ判定の側では表現できない
         - `cp`/`mv`/`install` の最終引数、`ln -f` の最終引数、`dd of=<path>`
     さらに、書き込み先ヒットがあった場合のみ `hook_common.resolve_repo_root`
     （`git rev-parse --show-toplevel`、プロセス内 1 回キャッシュ）でリポジトリ
@@ -82,6 +84,7 @@ from ple4.hooks.config_protection import (
     protected_path_segment,
 )
 from ple4.hooks.hook_common import (
+    ALWAYS_MUTATING_EDIT_EXECUTABLES,
     MAX_STDIN_BYTES,
     StdinUnavailableError,
     basename,
@@ -168,9 +171,11 @@ _MODE_COMMANDS = frozenset({"chmod", "chown", "chgrp", "chflags"})
 _TEE_COMMANDS = frozenset(
     {"tee", "set-content", "add-content", "out-file", "new-item", "sc", "ac", "ni"}
 )
-# in-place 編集で書き込みになるコマンド。フラグ判定は `is_inplace_edit_flag`
-# （`hook_common`）が単一情報源で、`sed` と `perl` を別関数に分けていた頃の
-# 「sed は `-i` 前方一致 / perl は `i` の包含」という食い違いはここで消える。
+# in-place 編集で**フラグを伴うときだけ**書き込みになるコマンド。フラグ判定は
+# `is_inplace_edit_flag`（`hook_common`）が単一情報源で、`sed` と `perl` を別関数に
+# 分けていた頃の「sed は `-i` 前方一致 / perl は `i` の包含」という食い違いは
+# ここで消える。フラグ無しでも書き込むエディタは
+# `ALWAYS_MUTATING_EDIT_EXECUTABLES` の側（M-8）。
 _INPLACE_EDIT_COMMANDS = frozenset({"sed", "perl"})
 _LN_COMMANDS = frozenset({"ln"})
 _DD_COMMANDS = frozenset({"dd"})
@@ -445,6 +450,27 @@ def _inplace_edit_targets(segment: list[str]) -> list[str]:
     return list(args) if any(is_inplace_edit_flag(token) for token in args) else []
 
 
+def _always_mutating_edit_targets(segment: list[str]) -> list[str]:
+    """`ed`/`red`/`ex`/`sponge` の編集対象になりうる引数をすべて返す。
+
+    これらはフラグを 1 つも伴わずに引数のファイルを書き換えるため、
+    `_inplace_edit_targets` のフラグ判定に掛けると常に空になる。実測では
+    ``ed ruff.toml`` が exit 0 で素通りしていた（M-8）。語彙の根拠は
+    `hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES` を単一情報源とする。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        編集対象になりうる非オプション引数の生トークンのリスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    args = _executed_command_args(segment, ALWAYS_MUTATING_EDIT_EXECUTABLES)
+    return _non_option_args(args) if args is not None else []
+
+
 def _last_arg_write_targets(segment: list[str]) -> list[str]:
     """`cp`/`mv`/`install` の書き込み先（最終の非オプション引数）を返す。
 
@@ -572,6 +598,7 @@ def _write_target_tokens_in_segment(segment: list[str]) -> list[str]:
             _redirect_targets,
             _tee_targets,
             _inplace_edit_targets,
+            _always_mutating_edit_targets,
             _last_arg_write_targets,
             _remove_targets,
             _mode_targets,
