@@ -154,11 +154,18 @@ def always_on_description_chars(root_dir: str | Path) -> int:
     そちらを直接測る。
 
     測定は frontmatter をパースした結果の値に対して行う。``description:`` で
-    始まる行を 1 行だけ数えていた頃は、YAML のブロックスカラー（``description: >``
-    に続く 200 行）が **2 文字** として計上され、実測 14,290 文字の常時注入
-    description を抱えたまま `context-always-on-budget`（予算 4,000 文字）が
-    満点になった。行ではなく値を測れば、折り返しの書き方に関わらず実コストに
-    比例する。
+    始まる行を 1 行だけ数えていた頃は、YAML のブロックスカラー
+    （``description: >`` に続く折り返し行）の中身が丸ごと計上から漏れ、
+    ``description: >`` の行そのものが残す 2 文字しか加算されなかった。
+    どれだけ長い description を折り返しで書いても
+    `context-always-on-budget`（予算 4,000 文字）を通過できたということで、
+    行ではなく値を測れば折り返しの書き方に依らず実コストに比例する。
+
+    本リポジトリはブロックスカラーの description を 1 件も持たないため、この
+    穴が実害として顕在化してはいなかった（実測: surface 35 ファイルで旧算法
+    3,672 文字 / 新算法 3,637 文字。どちらも予算内で合否は変わらない）。
+    合否が入力に応じて反転することは
+    `tests/ci/test_harness_audit_score_pairs.py` の対の fixture が固定する。
 
     Args:
         root_dir: 監査対象のルートディレクトリ
@@ -266,7 +273,9 @@ def _coverage_gate_configured(root_dir: str | Path) -> bool:
         ``[tool.coverage.report].fail_under`` が数値かつ 1 以上なら True
 
     Raises:
-        例外は発生しません（TOML として読めない場合は False として扱う）。
+        UnicodeDecodeError: ``pyproject.toml`` が UTF-8 で読めない場合。
+            `safe_read` は `OSError` しか捕捉しないため素通りする。TOML として
+            読めないだけの場合（`tomllib.TOMLDecodeError`）は False として扱う。
     """
     try:
         threshold: Any = tomllib.loads(safe_read(root_dir, "pyproject.toml"))

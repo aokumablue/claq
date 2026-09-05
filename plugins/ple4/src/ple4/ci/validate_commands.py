@@ -35,10 +35,17 @@ _COMMAND_REFERENCE_PATTERN = re.compile(r"`/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\s[^`]*
 """バッククォートで囲まれたコマンド参照。名前の後に引数が続く形も捕捉する。
 
 閉じバッククォートが名前の直後に来る形だけを見ていた頃は、引数付きの参照が
-検証をすり抜けた（実測: 同じ行の ``/does-not-exist arg`` は素通りし
-``/also-missing`` だけがエラーになる）。本リポジトリにも未検証の実例が
-``/instinct promote`` 系で 3 件あった。引数部は ``\\s`` 始まりに限るので、
+検証をすり抜けた（実測: 同じ行に置いた ``/does-not-exist arg`` は素通りし
+``/also-missing`` だけがエラーになる）。引数部は ``\\s`` 始まりに限るので、
 ``/usr/bin/env`` のようなパスは従来どおり一致しない。
+
+本パターンの適用先は ``commands/*.md`` だけで（`validate_commands` が
+`_list_markdown_files` に渡すのは commands ディレクトリのみ）、現時点の
+``commands/*.md`` に引数付きの参照は 1 件も無い。つまりこの修正で新たに
+検証対象へ入った参照は今のところゼロで、効果は将来書かれる引数付き参照を
+素通りさせないことにある。``agents/`` ``skills/`` の md にある引数付き参照
+（``/instinct promote`` 系 3 件）は本バリデータの走査範囲外のままで、
+それらは別途 `validate_agents` / `validate_skills` の管轄。
 """
 
 
