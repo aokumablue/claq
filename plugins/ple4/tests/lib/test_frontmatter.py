@@ -18,6 +18,18 @@ def _nested_mapping(levels: int) -> str:
     return "\n".join(" " * level + "k:" for level in range(levels))
 
 
+def _nested_dict(levels: int) -> dict[str, object]:
+    """levels 段だけネストした ``{"k": {...}}`` を組み立てる。
+
+    深さ上限（``_MAX_DEPTH`` = 32）超過時に寛容モードが返す部分結果の期待値を、
+    31 段の dict リテラルを書かずに表現するためのヘルパー。
+    """
+    result: dict[str, object] = {}
+    for _ in range(levels):
+        result = {"k": result}
+    return result
+
+
 # --------------------------------------------------------------------------
 # split_frontmatter
 # --------------------------------------------------------------------------
@@ -48,9 +60,40 @@ def test_split_frontmatter_normalizes_lone_cr() -> None:
     assert split_frontmatter("---\ra: 1\r---\rbody") == "a: 1"
 
 
-def test_split_frontmatter_allows_surrounding_spaces_on_fence() -> None:
-    """フェンス行の前後空白は許容する。"""
-    assert split_frontmatter("---  \nname: x\n  ---\n") == "name: x"
+def test_split_frontmatter_allows_trailing_spaces_on_fence() -> None:
+    """フェンス行の**行末**空白は許容する（列 0 から始まっていれば良い）。"""
+    assert split_frontmatter("---  \nname: x\n---  \n") == "name: x"
+
+
+def test_split_frontmatter_does_not_treat_indented_dashes_as_fence() -> None:
+    """インデント付き ``---`` は本文であり frontmatter を切らない（H-13）。
+
+    旧実装は ``strip()`` 一致でフェンスを探しており列 0 を要求しなかったため、
+    frontmatter の内側に現れたインデント付き ``---`` で切ってしまっていた。
+    ここが「切らない」ことを確認できないと、下の
+    :func:`test_split_frontmatter_keeps_indented_dashes_inside_block_scalar`
+    が守っている挙動を実装側でいつでも壊せる。
+    """
+    with pytest.raises(UnterminatedFrontmatterError):
+        split_frontmatter("---\nname: x\n  ---\n")
+
+
+def test_split_frontmatter_keeps_indented_dashes_inside_block_scalar() -> None:
+    """ブロックスカラー内の ``---`` で frontmatter が途中終了しないこと（H-13）。
+
+    実測（旧実装）: この入力は ``  ---`` で切られ
+    ``extract_frontmatter`` が ``{'description': ''}`` を返し、``name`` と
+    ``tools`` が本文へ落ちていた。frontmatter を読む側（validate_agents 等）から
+    見ると必須キーが黙って消える形になる。
+    """
+    content = "---\ndescription: |\n  ---\nname: x\ntools: Read\n---\nbody\n"
+
+    assert split_frontmatter(content) == "description: |\n  ---\nname: x\ntools: Read"
+    assert parse_yaml(split_frontmatter(content)) == {
+        "description": "---\n",
+        "name": "x",
+        "tools": "Read",
+    }
 
 
 def test_split_frontmatter_rejects_missing_start_fence() -> None:
@@ -569,50 +612,82 @@ def test_block_scalar_tab_indent_raises() -> None:
 # --------------------------------------------------------------------------
 
 
+# 解釈できない構文（厳格モードは FrontmatterError、寛容モードは部分結果）と、
+# 寛容モードが返すべき値の対。値まで固定するのは、寛容モードの「どこまで捨てたか」が
+# 変わったことを検出するため（旧テストは例外の有無しか見ておらず、下 2 件の無警告
+# データ損失が緑のまま通っていた）。
+#
+# 末尾 2 件は「YAML としては妥当なのに黙って値が失われる」形なので特記する:
+#   * multi-line-block-sequence: キーと同インデントのブロックシーケンスは YAML 1.2 で
+#     妥当だが本パーサは非対応で、寛容モードでは値ごと落ちて {'tools': None} になる。
+#     リストが消えたことは呼び出し側からは分からない。
+#   * multi-document: モジュール docstring が複数ドキュメントを非サポートと明記して
+#     いるとおり厳格モードは弾くが、寛容モードでは `---` がコロン無しの行として
+#     読み飛ばされ、2 つのドキュメントが 1 つの dict へ合流する。
 _ERROR_INPUTS = [
-    pytest.param("name: [", id="E1-unterminated-flow"),
-    pytest.param("a: 'x", id="E2-unterminated-quote"),
-    pytest.param(r'a: "x\q"', id="E3-unknown-escape"),
-    pytest.param("\ta: 1", id="E4-tab-indent-root"),
-    pytest.param("a: 1\n\tb: 2", id="E4-tab-indent-entry"),
-    pytest.param("a: b\n\tc", id="E4-tab-indent-continuation"),
-    pytest.param("a:\n\tb: 1", id="E4-tab-indent-block-value"),
-    pytest.param("a: [1]\n  b: 2", id="E5-unexpected-indent"),
-    pytest.param("a:\n  b: 1\n c: 2", id="E5-bad-dedent"),
-    pytest.param("  a: 1\nb: 2", id="E5-shallower-than-root"),
-    pytest.param("a: 1\nnocolon", id="E6-missing-colon"),
-    pytest.param("a: foo: bar", id="E7-colon-in-plain"),
-    pytest.param("a: foo:", id="E7-trailing-colon-in-plain"),
-    pytest.param("a: 1\na: 2", id="E8-duplicate-key"),
-    pytest.param(_nested_mapping(33), id="E9-depth-block"),
-    pytest.param("a: " + "[" * 33 + "]" * 33, id="E9-depth-flow"),
-    pytest.param("a: &anchor", id="E10-anchor"),
-    pytest.param("a: *alias", id="E10-alias"),
-    pytest.param("a: !!str x", id="E10-tag"),
-    pytest.param("&anchor: 1", id="E10-anchor-key"),
-    pytest.param("? a\n: b", id="E11-complex-key"),
-    pytest.param("a: 1\n? b\n: c", id="E11-complex-key-entry"),
-    pytest.param("a: |2\n  x", id="E12-explicit-indent-indicator"),
-    pytest.param("a: [1] junk", id="E13-trailing-token-flow"),
-    pytest.param('a: "x" junk', id="E13-trailing-token-quote"),
-    pytest.param("'a' b: 1", id="E13-trailing-token-key"),
-    pytest.param("- a\nb: 1", id="sequence-entry-without-dash"),
-    pytest.param("- [1]\n   - b", id="sequence-entry-bad-indent"),
-    pytest.param('"abc', id="unterminated-quote-in-key-scan"),
+    pytest.param('name: [', {}, id='E1-unterminated-flow'),
+    pytest.param("a: 'x", {}, id='E2-unterminated-quote'),
+    pytest.param(r'a: "x\q"', {}, id='E3-unknown-escape'),
+    pytest.param('\ta: 1', None, id='E4-tab-indent-root'),
+    pytest.param('a: 1\n\tb: 2', {}, id='E4-tab-indent-entry'),
+    pytest.param('a: b\n\tc', {}, id='E4-tab-indent-continuation'),
+    pytest.param('a:\n\tb: 1', {}, id='E4-tab-indent-block-value'),
+    pytest.param('a: [1]\n  b: 2', {'a': [1]}, id='E5-unexpected-indent'),
+    pytest.param('a:\n  b: 1\n c: 2', {'a': {'b': 1}}, id='E5-bad-dedent'),
+    pytest.param('  a: 1\nb: 2', {'a': 1}, id='E5-shallower-than-root'),
+    pytest.param('a: 1\nnocolon', {'a': 1}, id='E6-missing-colon'),
+    pytest.param('a: foo: bar', {}, id='E7-colon-in-plain'),
+    pytest.param('a: foo:', {}, id='E7-trailing-colon-in-plain'),
+    pytest.param('a: 1\na: 2', {'a': 1}, id='E8-duplicate-key'),
+    pytest.param(_nested_mapping(33), _nested_dict(31), id='E9-depth-block'),
+    pytest.param("a: " + "[" * 33 + "]" * 33, {}, id='E9-depth-flow'),
+    pytest.param('a: &anchor', {}, id='E10-anchor'),
+    pytest.param('a: *alias', {}, id='E10-alias'),
+    pytest.param('a: !!str x', {}, id='E10-tag'),
+    pytest.param('&anchor: 1', {}, id='E10-anchor-key'),
+    pytest.param('? a\n: b', {'': 'b'}, id='E11-complex-key'),
+    pytest.param('a: 1\n? b\n: c', {'a': 1, '': 'c'}, id='E11-complex-key-entry'),
+    pytest.param('a: |2\n  x', {}, id='E12-explicit-indent-indicator'),
+    pytest.param('a: [1] junk', {}, id='E13-trailing-token-flow'),
+    pytest.param('a: "x" junk', {}, id='E13-trailing-token-quote'),
+    pytest.param("'a' b: 1", {}, id='E13-trailing-token-key'),
+    pytest.param('- a\nb: 1', ['a'], id='sequence-entry-without-dash'),
+    pytest.param('- [1]\n   - b', [[1]], id='sequence-entry-bad-indent'),
+    pytest.param('"abc', None, id='unterminated-quote-in-key-scan'),
+    pytest.param('tools:\n- Read\n- Write', {'tools': None}, id='multi-line-block-sequence'),
+    pytest.param('a: 1\n---\nb: 2', {'a': 1, 'b': 2}, id='multi-document'),
 ]
 
 
-@pytest.mark.parametrize("text", _ERROR_INPUTS)
-def test_strict_mode_raises_frontmatter_error(text: str) -> None:
-    """厳格モードでは解釈できない構文をすべて FrontmatterError にする。"""
+@pytest.mark.parametrize(("text", "lenient_expected"), _ERROR_INPUTS)
+def test_strict_mode_raises_frontmatter_error(text: str, lenient_expected: object) -> None:
+    """厳格モードでは解釈できない構文をすべて FrontmatterError にする。
+
+    Args:
+        text: 解釈できない構文を含む入力。
+        lenient_expected: 寛容モード側の期待値（本テストでは未使用。表を
+            1 つに保つため同じ parametrize を共有している）。
+    """
+    del lenient_expected
     with pytest.raises(FrontmatterError):
         parse_yaml(text)
 
 
-@pytest.mark.parametrize("text", _ERROR_INPUTS)
-def test_lenient_mode_never_raises(text: str) -> None:
-    """寛容モードでは E 群のどの入力でも例外を送出しない。"""
-    parse_yaml(text, lenient=True)
+@pytest.mark.parametrize(("text", "lenient_expected"), _ERROR_INPUTS)
+def test_lenient_mode_returns_declared_partial_result(text: str, lenient_expected: object) -> None:
+    """寛容モードが例外を送出せず、宣言どおりの部分結果を返すこと。
+
+    旧実装（``test_lenient_mode_never_raises``）は結果値を一切表明しておらず、
+    「例外さえ出なければ何を返してもよい」状態だった。そのため寛容モードの
+    無警告データ損失（``tools:`` 直下のブロックシーケンス消失・複数ドキュメントの
+    合流。表の下方 2 件）が緑のまま通っていた。捨てた範囲が変われば赤くなる
+    ように、入力ごとの戻り値を表として固定する。
+
+    Args:
+        text: 解釈できない構文を含む入力。
+        lenient_expected: 寛容モードが返すべき部分結果。
+    """
+    assert parse_yaml(text, lenient=True) == lenient_expected
 
 
 @pytest.mark.parametrize(
