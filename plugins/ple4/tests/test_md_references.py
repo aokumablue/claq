@@ -12,6 +12,8 @@ import re
 from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[1]
 _TARGET_DIRS = ("agents", "skills", "commands")
 _REF_PATTERN = re.compile(r"`([^`\n]+\.md)`")
@@ -422,8 +424,19 @@ def test_ple4_run_module_references_are_importable() -> None:
     assert missing == [], "import できないモジュール参照:\n" + "\n".join(sorted(set(missing)))
 
 
-def test_harness_md_rubric_version_matches_audit_constant() -> None:
-    """`commands/harness.md` のルーブリック版表記が実装の定数と一致すること。
+# ルーブリック版を書き写している md と、そこから版を取り出す正規表現。
+# 実装の定数を含めて 3 箇所が同じ文字列を持つ。`commands/harness.md` しか
+# 照合していなかった頃は `agents/harness-tuner.md` のサンプル JSON が取り残され、
+# 版を上げても古い版のスコアと比較する助言が出せる状態だった。
+_RUBRIC_VERSION_SITES = (
+    (Path("commands") / "harness.md", re.compile(r"ルーブリック版: `([^`]+)`")),
+    (Path("agents") / "harness-tuner.md", re.compile(r'"rubric_version":\s*"([^"]+)"')),
+)
+
+
+@pytest.mark.parametrize(("relative_path", "pattern"), _RUBRIC_VERSION_SITES)
+def test_md_rubric_version_matches_audit_constant(relative_path: Path, pattern: re.Pattern[str]) -> None:
+    """ルーブリック版を書き写している md がすべて実装の定数と一致すること。
 
     スコアはルーブリック版の中でのみ比較可能で、版が上がると過去のベースラインとは
     比較不能になる。実装側の定数と md の散文が別々に書かれていた頃は、片方だけ
@@ -431,11 +444,32 @@ def test_harness_md_rubric_version_matches_audit_constant() -> None:
     """
     from ple4.ci.harness_audit import RUBRIC_VERSION
 
-    text = (_ROOT / "commands" / "harness.md").read_text(encoding="utf-8")
-    found = re.findall(r"ルーブリック版: `([^`]+)`", text)
-    assert found, "commands/harness.md に「ルーブリック版: `...`」表記が見つからない"
+    text = (_ROOT / relative_path).read_text(encoding="utf-8")
+    found = pattern.findall(text)
+    assert found, f"{relative_path} にルーブリック版の表記が見つからない（{pattern.pattern}）"
     for version in found:
-        assert version == RUBRIC_VERSION, f"md のルーブリック版 {version} が実装の {RUBRIC_VERSION} と不一致"
+        assert version == RUBRIC_VERSION, (
+            f"{relative_path} のルーブリック版 {version} が実装の {RUBRIC_VERSION} と不一致"
+        )
+
+
+def test_no_stale_rubric_version_strings_remain() -> None:
+    """定義済みの照合箇所以外に、実装と食い違う版文字列が残っていないこと。
+
+    照合箇所を列挙する方式は、新しい書き写し先が増えたときに取りこぼす。
+    md 全体を走査して「日付形式の rubric 版らしき文字列」が実装と一致することも
+    併せて固定し、`_RUBRIC_VERSION_SITES` の更新漏れ自体を検出する。
+    """
+    from ple4.ci.harness_audit import RUBRIC_VERSION
+
+    version_pattern = re.compile(r'(?:ルーブリック版: `|"rubric_version":\s*")(\d{4}-\d{2}-\d{2})')
+    stale = [
+        f"{md_file.relative_to(_ROOT)}: {version}"
+        for md_file in _iter_md_files()
+        for version in version_pattern.findall(md_file.read_text(encoding="utf-8"))
+        if version != RUBRIC_VERSION
+    ]
+    assert stale == [], "実装の RUBRIC_VERSION と食い違う版表記:\n" + "\n".join(sorted(stale))
 
 
 # md が `name(...)` の呼び出し形で名指しするシンボル。実装側の関数名と md の散文は

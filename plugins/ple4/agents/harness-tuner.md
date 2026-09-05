@@ -23,7 +23,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
   "root_dir": "/abs/path/to/repo",
   "target_mode": "repo",
   "deterministic": true,
-  "rubric_version": "2026-09-03",
+  "rubric_version": "2026-09-06",
   "overall_score": 50,
   "max_score": 58,
   "categories": {},

@@ -56,28 +56,47 @@ def read_text(root_dir: str | Path, relative_path: str) -> str:
     return Path(root_dir, relative_path).read_text(encoding="utf-8")
 
 
+_VENDOR_DIR_NAMES = frozenset({".git", ".venv", "venv", "node_modules", "vendor", "__pycache__"})
+"""ファイル走査で降りないディレクトリ名。依存ツリー同梱のファイルを除くため。"""
+
+
 def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
     """ディレクトリ以下のファイルエントリを再帰走査して返す。
+
+    `_VENDOR_DIR_NAMES` を枝刈りするのは、依存ツリーへ同梱された third-party の
+    ファイルを「このプロジェクトのもの」として採点に数えないためです。枝刈りが
+    `has_python_tests` のインライン走査にしか無かった頃は、`node_modules/dep/a.spec.js`
+    を 1 個置いただけのツリーが `has_file_with_extension` 経由で
+    `consumer-test-suite`（4pts）をプロジェクト自身のテスト 0 件で満点通過した
+    （実測）。同じ ``pass`` 式に並ぶ 2 つの述語で枝刈りの有無が割れていたので、
+    走査の共通経路である本関数へ寄せる。
+
+    `OSError` をディレクトリ単位で握り潰すのも同じ理由で共通化してある。読めない
+    ディレクトリは走査から落とすだけで、監査レポート全体を落とさない
+    （`file_has_content` と同じ姿勢）。
 
     Args:
         root_path: 走査を開始するディレクトリ。
 
     Yields:
-        シンボリックリンクを辿らないファイルエントリ。
+        シンボリックリンクを辿らず、ベンダーディレクトリを除いたファイルエントリ。
+
+    Raises:
+        例外は発生しません（`OSError` は該当ディレクトリのスキップとして扱う）。
     """
     stack = [root_path]
     while stack:
         current = stack.pop()
-        with os.scandir(current) as entries:
-            for entry in entries:
-                if entry.is_dir(follow_symlinks=False):
-                    stack.append(Path(entry.path))
-                else:
-                    yield entry
-
-
-_VENDOR_DIR_NAMES = frozenset({".git", ".venv", "venv", "node_modules", "vendor", "__pycache__"})
-"""テスト検出時に降りないディレクトリ名。依存ツリー同梱のテストを除くため。"""
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name not in _VENDOR_DIR_NAMES:
+                            stack.append(Path(entry.path))
+                    else:
+                        yield entry
+        except OSError:
+            continue
 
 
 def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
@@ -100,11 +119,9 @@ def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
     判定順コメントが定める性能契約（テストを持つリポジトリを全数え上げ
     しない）を数え上げ版でも守るためです。
 
-    `_VENDOR_DIR_NAMES` を枝刈りするのは、依存ツリーへ同梱された
-    third-party のテスト（`.venv/lib/**/test_*.py` 等）を「このプロジェクトの
-    テスト」として加点しないためです。読めないディレクトリは走査から
-    落とすだけで、監査レポート全体を落とさない（`file_has_content` と
-    同じ姿勢）。
+    ベンダーディレクトリの枝刈り（`.venv/lib/**/test_*.py` 等を「このプロジェクトの
+    テスト」として加点しない）と読めないディレクトリのスキップは `_walk_dir` に
+    集約してある。
 
     Args:
         root_dir: 走査するルートディレクトリ。
@@ -118,23 +135,14 @@ def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
     Raises:
         例外は発生しません（`OSError` は該当ディレクトリのスキップとして扱う）。
     """
-    stack = [Path(root_dir)]
     found = 0
-    while stack:
-        try:
-            with os.scandir(stack.pop()) as entries:
-                for entry in entries:
-                    if entry.is_dir(follow_symlinks=False):
-                        if entry.name not in _VENDOR_DIR_NAMES:
-                            stack.append(Path(entry.path))
-                    elif entry.name.endswith(".py") and (
-                        entry.name.startswith("test_") or entry.name.endswith("_test.py")
-                    ):
-                        found += 1
-                        if found >= minimum:
-                            return True
-        except OSError:
-            continue
+    for entry in _walk_dir(Path(root_dir)):
+        if entry.name.endswith(".py") and (
+            entry.name.startswith("test_") or entry.name.endswith("_test.py")
+        ):
+            found += 1
+            if found >= minimum:
+                return True
     return False
 
 
