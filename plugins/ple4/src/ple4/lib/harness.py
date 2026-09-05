@@ -53,6 +53,22 @@ INPUT_CONTAINER_KEYS = ("tool_input", "toolInput", "toolArgs", "tool_args")
 # 構造化パッチテキストのファイル操作マーカー（Codex apply_patch 形式）
 _PATCH_FILE_MARKERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ")
 
+# ``json.loads`` が「この文字列は JSON として読めない」ことを示すために送出しうる
+# 例外。本モジュールと ``hook_common.parse_json_object`` の JSON パースは全て
+# この 1 タプルで受ける（片側だけ塞ぐと、同型の穴が別の呼び出し箇所に残る）。
+# ``INPUT_CONTAINER_KEYS`` と同じ理由で公開名にしている —— 走査・パースの
+# 意味論をフック側の手書きに委ねると片側だけ緩い状態が再発する。
+#
+# ``RecursionError`` を含めるのは必須。CPython の JSON デコーダは再帰下降で、
+# 深くネストした配列/オブジェクトに対して ``JSONDecodeError`` ではなく
+# ``RecursionError`` を送出する。これを取りこぼすと保護フックが**例外で異常終了**
+# し、PreToolUse の exit 1（= non-blocking error。ツールはそのまま実行される）
+# へ倒れる —— つまり fail-open になる。実測: 深さ 200000 の入れ子を JSON 文字列値
+# の内側に置いた 400KB の payload（``MAX_STDIN_BYTES`` = 1MiB の内側）で
+# ``block_no_verify`` が exit 1。パース失敗として扱えば生文字列が返り、以降の
+# トークナイザ検査（fail-closed 側）に載る。
+JSON_PARSE_FAILURES = (json.JSONDecodeError, TypeError, RecursionError)
+
 
 def extract_tool_input(payload: dict[str, Any]) -> Any:
     """フック payload から tool_input / toolInput / toolArgs を正規化して返す。
@@ -94,7 +110,7 @@ def extract_tool_input(payload: dict[str, Any]) -> Any:
             return value
         try:
             return json.loads(stripped)
-        except (json.JSONDecodeError, TypeError):
+        except JSON_PARSE_FAILURES:
             return value
     return None
 
@@ -294,7 +310,7 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
         return tool_input
     try:
         parsed = json.loads(tool_input)
-    except (json.JSONDecodeError, TypeError):
+    except JSON_PARSE_FAILURES:
         return tool_input
     patch_text = parsed.get("input")
     return patch_text if isinstance(patch_text, str) else tool_input

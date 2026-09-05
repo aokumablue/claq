@@ -23,6 +23,7 @@ from typing import Any
 
 from ple4.hooks.output_adapter import adapt_context_output, emit_block
 from ple4.lib.core_utils import ensure_private_dir, get_ple4_dir
+from ple4.lib.harness import JSON_PARSE_FAILURES
 
 MAX_STDIN_BYTES = 1024 * 1024
 
@@ -947,6 +948,13 @@ def stdin_unreadable_message(hook_name: str, reason: object) -> str:
 def parse_json_object(raw: str) -> dict[str, Any] | None:
     """JSON 文字列を辞書としてパースします。
 
+    パース不能は ``JSON_PARSE_FAILURES``（`ple4.lib.harness`）で一括して受けます。
+    ここで ``json.JSONDecodeError`` だけを捕まえると、深くネストした配列/オブジェクト
+    に対して CPython の再帰下降デコーダが送出する ``RecursionError`` が貫通し、
+    呼び出し元の保護フックが例外で異常終了して PreToolUse の exit 1
+    （non-blocking error = ツールはそのまま実行される）へ倒れます。本関数の None は
+    呼び出し元で「判定不能 → deny」として扱われる fail-closed 側の値です。
+
     Args:
         raw: パース対象の JSON 文字列です。
 
@@ -960,7 +968,7 @@ def parse_json_object(raw: str) -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError:
+    except JSON_PARSE_FAILURES:
         return None
     return data if isinstance(data, dict) else None
 

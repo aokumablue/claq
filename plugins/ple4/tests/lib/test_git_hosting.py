@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+from ple4.lib import git_hosting
 from ple4.lib.git_hosting import (
+    _remote_host,
     build_git_hosting_item_url,
     detect_git_hosting_service,
     extract_git_hosting_item_details,
@@ -165,3 +169,109 @@ def test_normalize_empty_value_with_valid_default() -> None:
     from ple4.lib.git_hosting import normalize_git_hosting_service
 
     assert normalize_git_hosting_service("", default="github") == "github"
+
+
+class TestRemoteHostExtraction:
+    """origin URL からホスト部だけを取り出す（INFO: URL 全体の部分一致をやめる）。"""
+
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            ("https://github.com/owner/repo.git", "github.com"),
+            ("http://gitlab.example.com/g/r.git", "gitlab.example.com"),
+            ("ssh://git@gitlab.example.com:2222/g/r.git", "gitlab.example.com"),
+            ("https://user:pw@gitlab.example.com/g/r.git", "gitlab.example.com"),
+            ("ssh://git@[::1]:22/g/r.git", "[::1]"),
+            # scp 形式（scheme が無いので専用パターンが要る）
+            ("git@gitlab.example.com:group/repo.git", "gitlab.example.com"),
+            ("gitlab.example.com:group/repo.git", "gitlab.example.com"),
+            # ホストを特定できない形
+            ("/srv/git/gitlab/repo.git", ""),
+            ("../relative/repo.git", ""),
+            ("", ""),
+        ],
+    )
+    def test_host_is_extracted(self, url: str, expected: str) -> None:
+        assert _remote_host(url) == expected
+
+
+@pytest.mark.parametrize(
+    ("remote_url", "expected"),
+    [
+        # INFO の本体: リポジトリ名に他方の名前を含んでも誤判定しない
+        ("https://github.com/acme/gitlab-migration.git", "github"),
+        ("https://gitlab.com/acme/github-mirror.git", "gitlab"),
+        # scp 形式の自前 GitLab（urlsplit だけで済ませると host が取れず既定へ落ちる）
+        ("git@gitlab.example.com:group/repo.git", "gitlab"),
+        ("ssh://git@gitlab.example.com:2222/group/repo.git", "gitlab"),
+        # ホストを取り出せない形は default（ローカルパスは hosting service ではない）
+        ("/srv/git/gitlab/repo.git", "github"),
+    ],
+)
+def test_detect_git_hosting_service_uses_host_only(
+    monkeypatch: pytest.MonkeyPatch, remote_url: str, expected: str
+) -> None:
+    """判定は URL 全体ではなくホスト部で行うこと。"""
+    monkeypatch.setattr(
+        git_hosting,
+        "run_text",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, remote_url + "\n", ""),
+    )
+
+    assert detect_git_hosting_service() == expected
+
+
+def test_detect_git_hosting_service_survives_non_ascii_remote_url(tmp_path: Path) -> None:
+    """非 ASCII を含む origin URL でも例外を出さないこと（H-19a）。
+
+    `text=True` に encoding 指定が無いと locale 依存のデコードになり、
+    `LC_ALL=C`（preferred encoding = US-ASCII）環境で `UnicodeDecodeError` が
+    `except (OSError, SubprocessError)` を貫通して docstring の
+    「例外は発生しません」が破れる。実測条件は `launcher.force_utf8_streams` の
+    docstring が記録している `PYTHONUTF8=0 LC_ALL=C`。
+
+    **子プロセスとして起動する必要がある。** `locale.getpreferredencoding()` は
+    インタプリタ起動時に確定するため、実行中の pytest で `monkeypatch.setenv`
+    しても再現せず、テストが素通りする（実測: 素通りした）。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+    # 日本語グループ名を持つ自前 GitLab の remote
+    subprocess.run(
+        ["git", "-C", str(repo), "remote", "add", "origin", "https://gitlab.example.com/開発/repo.git"],
+        check=True,
+        capture_output=True,
+    )
+    script = (
+        "import locale, sys\n"
+        "assert locale.getpreferredencoding(False).lower() in ('us-ascii', 'ascii'), "
+        "locale.getpreferredencoding(False)\n"
+        "from ple4.lib.git_hosting import detect_git_hosting_service\n"
+        f"sys.stdout.write(detect_git_hosting_service(cwd={str(repo)!r}))\n"
+    )
+    env = {
+        **os.environ,
+        "PYTHONUTF8": "0",
+        "PYTHONCOERCECLOCALE": "0",
+        "LC_ALL": "C",
+        "LANG": "C",
+    }
+
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, env=env, timeout=30
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "gitlab"
+
+
+def test_detect_git_hosting_service_routes_through_run_text() -> None:
+    """`subprocess.run` 直呼びへ戻っていないこと。
+
+    encoding 指定を集約した `run_text` を迂回する経路を残すと、
+    「どちらが正しい呼び方か」が分岐して次の追加でまた迂回側が選ばれる。
+    """
+    source = Path(git_hosting.__file__).read_text(encoding="utf-8")
+
+    assert "subprocess.run(" not in source

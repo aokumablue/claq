@@ -79,6 +79,7 @@ import tempfile
 from pathlib import Path
 
 from ple4.lib.constants import BASE_DIR_NAME
+from ple4.lib.subprocess_utils import run_text
 
 _ROOTS_DIRNAME = "roots"
 _ENV_FILENAME = "env.sh"
@@ -311,6 +312,13 @@ def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
     してしまう。resolver 側（``env-template.sh``）も同じく ``LC_ALL=C``
     を明示して ``ps`` を呼ぶ。
 
+    subprocess は ``subprocess_utils.run_text`` 経由で呼ぶ。``text=True`` だけで
+    encoding を指定しないと locale 依存のデコードになり、``UnicodeDecodeError``
+    が下の except を貫通して本 docstring の「例外は発生しません」が破れる。
+    ここは子へ ``LC_ALL=C`` を強制していて ``ps`` の出力が ASCII になるため実害は
+    低いが、encoding 指定を集約した ``run_text`` を迂回する経路自体を残さない
+    （残すと「どちらが正しい呼び方か」が分岐し、次の追加でまた迂回側が選ばれる）。
+
     Args:
         max_depth: 辿る祖先の最大段数（``os.getppid()`` 自身を含む）。
 
@@ -325,13 +333,10 @@ def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
         例外は発生しません。
     """
     try:
-        proc = subprocess.run(
+        proc = run_text(
             ["ps", "-eo", "pid=,ppid=,lstart="],
-            capture_output=True,
-            text=True,
             timeout=_PS_TIMEOUT_SECONDS,
-            check=False,
-            env={**os.environ, "LC_ALL": "C"},
+            extra_env={"LC_ALL": "C"},
         )
     except (OSError, subprocess.SubprocessError):
         return []

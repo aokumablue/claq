@@ -24,6 +24,13 @@
 `find_file_issues` 経由で `_scan_secret_issues` へ渡します）。ファイル単位に
 すると staged が N 件あるとき N 倍の実時間を許してしまい、1 ファイルあたりは
 予算内でも累積で hook timeout に達するため、上記の目的を果たせません。
+
+同じ 1 本の予算に **lint scan（`_scan_lint_issues`）も載せます**。lint は
+`find_file_issues` が secret より先に呼ぶため、lint 側が予算の外にあると
+「secret scan に入る前に hook timeout へ達する」経路が開いたままになり、
+上記の目的が原理的に達成できません。予算の確認間隔は走査済みバイト数で数え
+（`_SCAN_BUDGET_CHECK_BYTES`）、行数では数えません —— 改行の無い巨大 1 行の
+ファイルは行数が 1 なので、行数基準では走査開始前の 1 回しか確認されません。
 """
 
 from __future__ import annotations
@@ -56,9 +63,21 @@ _BINARY_STRINGS_RE = re.compile(
 # 載せるかは本予算とは別の未対応論点。
 _SECRET_SCAN_TIME_BUDGET_SECONDS = 10.0
 
-# 予算チェックの頻度（行数）。毎行 time.monotonic() を呼ぶコストを避けつつ、
-# 予算超過を実用上十分な精度で検知する。
-_SECRET_SCAN_BUDGET_CHECK_INTERVAL = 2000
+# 予算チェックの間隔（走査済みバイト数）。毎回 `_monotonic()` を呼ぶコストを
+# 避けつつ、予算超過を実用上十分な精度で検知する。
+#
+# 「行数」基準（2000 行ごと）にしてはならない。改行の無い巨大 1 行のファイルは
+# 行数が 1 なので index 0 の 1 回、つまり**走査開始前**にしか確認されず、
+# バジェットが原理的に効かなかった。走査の実コストは行数ではなくバイト数に
+# 比例するため、間隔もバイト数で数える。
+_SCAN_BUDGET_CHECK_BYTES = 256 * 1024
+
+# 1 行あたりの上限長は設けない（＝長い行を打ち切らない）。打ち切ると、上限より
+# 後ろに secret を置いた 1 行を作るだけで検査を回避できる新しいバイパスになる。
+# 代わりに予算確認を「行 × パターン」の粒度で行い（`_ScanBudget.check`）、
+# 予算超過を検知してから実際に走査を止めるまでの超過量を「1 パターン × 1 行の
+# 1 回の線形走査」に抑える。全パターンが線形であること（JWT の lookbehind と
+# 所有量指定子）がこの上界の前提。
 
 _LINTABLE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
 _MINIFIED_SUFFIXES = (".min.js", ".min.css")
@@ -91,7 +110,21 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"xox[bpoa]-[a-zA-Z0-9-]{10,}", "Slack token"),
     (r"AIza[a-zA-Z0-9_-]{35}", "Google API key"),
     (r"(?:AKIA|ASIA|AIDA|AROA)[A-Z0-9]{16}", "AWS Access Key"),
-    (r"eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]*", "JWT"),
+    # `eyJ` の直前に base64url 文字が無いことを要求する（lookbehind）。これが無いと
+    # `eyJeyJeyJ…` のような入力で 3 バイトごとに開始位置が立ち、そのたびに
+    # `[a-zA-Z0-9_-]+` が残り全体を貪欲に取ってから後退するため、走査が二次
+    # オーダーへ落ちる（実測: 24,000 文字で 0.50s。1MiB へ外挿すると 15 分超で、
+    # pre_bash_commit_quality の hook timeout 30 秒を桁で超える）。lookbehind が
+    # 付くと開始位置の直前は必ず非 base64url 文字になり、各開始位置が走査する
+    # 文字クラス連鎖どうしが重ならないため全体が線形になる。
+    # 併せて量指定子を所有的（`++` / `*+`）にして後退そのものを禁じる。直後の
+    # `\.` は文字クラスと素なので貪欲一致は元から `.` の手前で止まり、一致する
+    # 文字列の集合は変わらない。
+    # 代償として `abceyJhbGci…` のように base64url 文字へ続く `eyJ` は一致
+    # しなくなる。JWT はトークンであり実物は区切りの直後に現れるため、これは
+    # 意図した絞り込み —— 下の PEM パターンで「曖昧な繰り返しは走査を二次
+    # オーダーへ落とすので使わない」とした判断と同じ方針を適用したもの。
+    (r"(?<![a-zA-Z0-9_-])eyJ[a-zA-Z0-9_-]++\.[a-zA-Z0-9_-]++\.[a-zA-Z0-9_-]*+", "JWT"),
     # 認証情報の代入。クォートを必須にすると `.env` の `API_KEY=...` と
     # YAML の `api_key: ...` が素通りするが、単にクォートを任意にすると
     # `token = segment[index]` のような通常のコード代入まで拾ってしまう
@@ -177,11 +210,57 @@ def new_secret_scan_deadline() -> float:
 
 
 class SecretScanBudgetExceeded(Exception):
-    """secret scan が実時間予算を超過したことを表す例外。
+    """走査が実時間予算を超過したことを表す例外。
 
     `find_file_issues` の既存の例外ガード（`scan_error`、severity `error`、
     fail-closed）にそのまま乗せるための専用例外です。
+
+    予算は secret scan 専用ではなく lint scan とも共有する 1 本ですが、名前は
+    `new_secret_scan_deadline` と対で据え置いています（予算の実体は当初から
+    「フック 1 回の起動全体で共有する 1 本」で変わっておらず、改名は
+    `pre_bash_commit_quality` 側への波及だけを生んで意味を足さないため）。
     """
+
+
+class _ScanBudget:
+    """走査の実時間予算を「走査済みバイト数」間隔で確認するガードです。
+
+    `check()` は呼ばれるたびに走査済みバイト数を積み、`_SCAN_BUDGET_CHECK_BYTES`
+    を跨いだときだけ `_monotonic()` を読みます。初期残量を 0 にしてあるため、
+    最初の `check()` は必ず時刻を読みます（＝各スキャナの走査開始時点で必ず
+    1 回確認する。フック 1 回で共有する予算がファイル境界ごとに効きます）。
+    """
+
+    def __init__(self, deadline: float) -> None:
+        """予算ガードを生成します。
+
+        Args:
+            deadline: 走査を打ち切る `_monotonic()` 基準の時刻です。
+        """
+        self._deadline = deadline
+        self._remaining = 0
+
+    def check(self, scanned_bytes: int, where: str) -> None:
+        """走査済みバイト数を積み、間隔を跨いだら予算を確認します。
+
+        Args:
+            scanned_bytes: 直前の走査で消費したバイト数です。
+            where: 超過時のメッセージに載せる位置情報です。
+
+        Returns:
+            なし
+
+        Raises:
+            SecretScanBudgetExceeded: 実時間バジェットを超過した場合。
+        """
+        self._remaining -= scanned_bytes
+        if self._remaining > 0:
+            return
+        self._remaining = _SCAN_BUDGET_CHECK_BYTES
+        if _monotonic() > self._deadline:
+            raise SecretScanBudgetExceeded(
+                f"scan exceeded {_SECRET_SCAN_TIME_BUDGET_SECONDS}s time budget at {where}"
+            )
 
 
 def _is_binary_content(content: str) -> bool:
@@ -351,26 +430,37 @@ def should_scan_secrets(file_path: str) -> bool:
     return not name.endswith(_MINIFIED_SUFFIXES)
 
 
-def _scan_lint_issues(lines: list[str]) -> list[dict]:
+def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
     """ファイル内容からログ出力呼び出し / デバッガ文 / Issue 参照なし TODO を検出します。
 
     `# nosec` を含む行は検出器自身のテストフィクスチャ等、意図的に
     パターンを含む行とみなしてログ出力呼び出し / デバッガ文 / TODO チェックを
     抑制します（シークレット検出は別関数で `# nosec` の対象外です）。
 
+    secret scan と**同じ 1 本の実時間予算**に載せます。`deadline` を受け取らず
+    時間検査を持たない状態では、`find_file_issues` が本関数を secret より先に
+    呼ぶ（＝予算の外側で任意時間を消費できる）ため、モジュール docstring が
+    掲げた目的（ホスト側 timeout に達して fail-open で commit 全体が無検査に
+    なるのを防ぐ）が原理的に達成できませんでした。`deadline` に既定値を
+    持たせないのは `find_file_issues` と同じ理由です。
+
     Args:
         lines: 検査対象のデコード済みファイル内容を改行で分割した行リストです
             （呼び出し側 `find_file_issues` が一度だけ分割して渡します）。
+        deadline: 走査を打ち切る `_monotonic()` 基準の時刻です。フック 1 回の
+            起動全体で共有する 1 本の予算（`new_secret_scan_deadline`）を渡します。
 
     Returns:
         検出した lint 問題の辞書リストを返します。
 
     Raises:
-        例外は発生しません。
+        SecretScanBudgetExceeded: 実時間バジェットを超過した場合。
     """
     issues = []
+    budget = _ScanBudget(deadline)
     for index, line in enumerate(lines):
         line_num = index + 1
+        budget.check(len(line), f"line {line_num}")
 
         # 抑制マーカー付き行（検出器自身のテストフィクスチャ等、意図的に
         # パターンを含む行）はログ出力呼び出し/デバッガ文/todo をスキップする。
@@ -426,8 +516,11 @@ def _scan_secret_issues(
     A-02 対応。1MiB 境界より後ろに置かれた secret も検出します）。
 
     走査量に上限を設けないと `pre_bash_commit_quality` の hook timeout に
-    達しうるため、呼び出し元から渡された `deadline` を
-    `_SECRET_SCAN_BUDGET_CHECK_INTERVAL` 行ごとに確認します。超過した場合は
+    達しうるため、呼び出し元から渡された `deadline` を `_ScanBudget` 経由で
+    `_SCAN_BUDGET_CHECK_BYTES` バイトごとに確認します。確認の粒度は
+    「行 × パターン」です —— 行数基準（旧 `index % 2000`）だと、改行の無い
+    巨大 1 行のファイルでは index 0 の 1 回、つまり走査開始前にしか確認されず、
+    予算が原理的に効きませんでした。超過した場合は
     `SecretScanBudgetExceeded` を送出し、呼び出し元の既存の例外ガードで
     `scan_error`（severity `error`、fail-closed）として扱われます。deadline を
     この関数で作らないのは、それがファイル単位の予算になり、フック 1 回で
@@ -451,15 +544,14 @@ def _scan_secret_issues(
         SecretScanBudgetExceeded: 実時間バジェットを超過した場合。
     """
     issues = []
+    budget = _ScanBudget(deadline)
     for index, line in enumerate(lines):
-        if index % _SECRET_SCAN_BUDGET_CHECK_INTERVAL == 0 and _monotonic() > deadline:
-            raise SecretScanBudgetExceeded(
-                f"secret scan exceeded {_SECRET_SCAN_TIME_BUDGET_SECONDS}s time budget "
-                f"at line {index + 1}"
-            )
         line_num = index + 1 if report_lines else 0
         location = f"at line {line_num}" if report_lines else "in extracted binary content"
         for pattern, name in _SECRET_PATTERNS:
+            # 予算確認は「行 × パターン」の粒度。行単位だと改行の無い巨大 1 行で
+            # 走査開始前の 1 回しか確認されない。
+            budget.check(len(line), f"line {index + 1}")
             if re.search(pattern, line, re.IGNORECASE):
                 issues.append(
                     {
@@ -506,6 +598,11 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
     lint より高いため、検査不能をブロック側へ倒します。lint scanner の
     失敗は warning に留めます）。黙って issue が消える（＝検査したのに
     問題なしと区別が付かない）ことはありません。
+
+    実時間予算は lint scan と secret scan で共有する 1 本です。lint 側で予算が
+    尽きた場合は `scan_error`（severity `error`、fail-closed）を積んで secret scan
+    を回さずに返します（予算が尽きた状態で続行してもホスト側 timeout を踏むだけ
+    のため）。lint scanner のそれ以外の例外は従来どおり warning に留めます。
 
     secret scan の実時間予算はフック 1 回の起動全体で 1 本です。呼び出し元は
     `new_secret_scan_deadline()` を起動ごとに 1 度だけ呼び、その値を全ファイルへ
@@ -575,7 +672,15 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
     lines = content.split("\n")
     if do_lint:
         try:
-            issues.extend(_scan_lint_issues(lines))
+            issues.extend(_scan_lint_issues(lines, deadline=deadline))
+        except SecretScanBudgetExceeded as err:
+            # 予算超過だけは lint でも error（fail-closed）。予算はフック 1 回で
+            # 共有の 1 本なので、ここで尽きている＝この後 secret scan を回しても
+            # ホスト側 timeout を踏むだけであり、走査せずに検査不能として返す。
+            # 通常の lint 例外（下の warning）と同じ扱いにすると、予算切れが
+            # commit をブロックしない severity へ落ちてしまう。
+            issues.append(_scan_error_issue(file_path, "lint scan", err, severity="error"))
+            return issues
         except Exception as err:
             issues.append(_scan_error_issue(file_path, "lint scan", err, severity="warning"))
     if do_secrets:

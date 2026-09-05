@@ -1299,3 +1299,18 @@ class TestEnvShRealExecution:
         result = _run_env_sh(_isolate_home)
 
         assert "ROOT_FILE_EXECUTED" not in result.stderr
+
+
+def test_ps_call_routes_through_run_text() -> None:
+    """`ps` 呼び出しが `subprocess.run` 直呼びへ戻っていないこと（H-19a）。
+
+    `text=True` だけで encoding を指定しないと locale 依存のデコードになり、
+    `UnicodeDecodeError` が `except (OSError, SubprocessError)` を貫通して
+    docstring の「例外は発生しません」が破れる。ここは子へ `LC_ALL=C` を
+    強制していて `ps` の出力が ASCII になるため実害は低いが、encoding 指定を
+    集約した `run_text` を迂回する経路自体を残さない（残すと「どちらが正しい
+    呼び方か」が分岐し、次の追加でまた迂回側が選ばれる）。
+    """
+    source = Path(mod.__file__).read_text(encoding="utf-8")
+
+    assert "subprocess.run(" not in source

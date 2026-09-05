@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -321,3 +322,66 @@ class TestEnsureGrokPluginRootSymlink:
         link = tmp_path / ".grok" / "plugins" / "ple4"
         result = mod.ensure_grok_plugin_root_symlink(link_path=link)
         assert result == target.resolve()
+
+
+class TestFindLatestSurvivesStatRace:
+    """列挙と stat の間で候補が消えても例外を出さないこと（H-19b）。
+
+    `iterdir()` は try 内だが `candidates.sort(key=lambda p: p.stat().st_mtime)`
+    は try の外にあった。Grok が同時にプラグインを更新して古い
+    `~/.grok/installed-plugins/ple4-<hash>` を消すと `FileNotFoundError` が
+    `find_latest_installed_ple4`（「例外は発生しません」）→
+    `_resolve_symlink_target` → `ensure_grok_plugin_root_symlink`
+    （「OSError は握りつぶす」）を貫通し、`scripts/grok.sh` が traceback で
+    異常終了していた。
+    """
+
+    @staticmethod
+    def _stat_raising_for(victim: Path):
+        """``victim`` の stat だけ FileNotFoundError にするパッチ関数を返す。"""
+        original = Path.stat
+
+        def fake(self: Path, *args: object, **kwargs: object):
+            if self == victim:
+                raise FileNotFoundError(2, "No such file or directory", str(victim))
+            return original(self, *args, **kwargs)
+
+        return fake
+
+    def test_vanished_candidate_is_excluded(self, tmp_path: Path) -> None:
+        """stat に失敗した候補は除外し、残りから最新を返すこと。"""
+        installed = tmp_path / ".grok" / "installed-plugins"
+        survivor = _make_installed_plugin(tmp_path, "ple4-survivor")
+        vanished = _make_installed_plugin(tmp_path, "ple4-vanished")
+        # 消える側を新しくして、除外されなければそちらが選ばれる状況にする。
+        os.utime(survivor, (1_000, 1_000))
+        os.utime(vanished, (2_000, 2_000))
+
+        with patch.object(Path, "stat", self._stat_raising_for(vanished)):
+            found = mod.find_latest_installed_ple4(installed)
+
+        assert found == survivor
+
+    def test_all_candidates_vanished_returns_none(self, tmp_path: Path) -> None:
+        """全候補の stat が失敗しても None を返す（IndexError にしない）。"""
+        installed = tmp_path / ".grok" / "installed-plugins"
+        only = _make_installed_plugin(tmp_path, "ple4-only")
+
+        with patch.object(Path, "stat", self._stat_raising_for(only)):
+            assert mod.find_latest_installed_ple4(installed) is None
+
+    def test_symlink_helper_does_not_propagate_stat_error(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """貫通経路の入口（`ensure_grok_plugin_root_symlink`）でも例外にならないこと。
+
+        `scripts/grok.sh` が呼ぶのはこちら。ここが traceback で落ちていた。
+        """
+        # 実環境の CLAUDE_PLUGIN_ROOT が installed-plugins を指していると
+        # `_resolve_symlink_target` が探索前に解決してしまい、判定がぶれる。
+        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+        only = _make_installed_plugin(tmp_path, "ple4-only")
+        link = tmp_path / ".grok" / "plugins" / "ple4"
+
+        with patch.object(Path, "stat", self._stat_raising_for(only)):
+            assert mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link) is None

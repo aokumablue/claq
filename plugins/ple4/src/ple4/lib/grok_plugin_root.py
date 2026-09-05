@@ -84,14 +84,41 @@ def _installed_target(path: Path | str) -> Path | None:
     return _safe_resolve(candidate)
 
 
+def _mtime_or_none(path: Path) -> float | None:
+    """``path`` の mtime を返し、stat に失敗したら None を返す。
+
+    Args:
+        path: mtime を取りたいパス。
+
+    Returns:
+        mtime（秒）。stat に失敗すれば None。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
 def find_latest_installed_ple4(installed_dir: Path | None = None) -> Path | None:
     """``~/.grok/installed-plugins/ple4-*`` のうち最新のディレクトリを返す。
+
+    mtime の取得は候補ごとに ``_mtime_or_none`` で行い、失敗した候補は除外する。
+    列挙と stat の間には隙間があり（TOCTOU）、Grok が同時にプラグインを更新して
+    古い ``ple4-<hash>`` を消すと ``FileNotFoundError`` が起きる。以前は
+    ``candidates.sort(key=lambda p: p.stat().st_mtime)`` が try の外にあったため、
+    それが本関数（「例外は発生しません」）→ ``_resolve_symlink_target`` →
+    ``ensure_grok_plugin_root_symlink``（「OSError は握りつぶす」）を貫通し、
+    ``scripts/grok.sh`` が traceback で異常終了していた。
 
     Args:
         installed_dir: 探索先。None なら ``~/.grok/installed-plugins``。
 
     Returns:
-        launcher.py を含む最新ディレクトリ。無ければ None。
+        launcher.py を含む最新ディレクトリ。無ければ None
+        （全候補の stat が失敗した場合も None）。
 
     Raises:
         例外は発生しません。
@@ -99,21 +126,26 @@ def find_latest_installed_ple4(installed_dir: Path | None = None) -> Path | None
     root = installed_dir if installed_dir is not None else installed_plugins_dir()
     if not root.is_dir():
         return None
-    candidates: list[Path] = []
+    candidates: list[tuple[float, Path]] = []
     try:
         for path in root.iterdir():
             if not path.is_dir():
                 continue
             if not path.name.startswith("ple4-"):
                 continue
-            if _has_launcher(path):
-                candidates.append(path)
+            if not _has_launcher(path):
+                continue
+            mtime = _mtime_or_none(path)
+            if mtime is None:
+                continue
+            candidates.append((mtime, path))
     except OSError:
         return None
     if not candidates:
         return None
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return candidates[0]
+    # 同 mtime のときは iterdir の順（＝旧 sort(reverse=True) の安定性）を保つため
+    # max の「最初の最大要素を返す」性質に委ね、Path 同士を比較させない。
+    return max(candidates, key=lambda item: item[0])[1]
 
 
 def ensure_grok_plugin_root_symlink(

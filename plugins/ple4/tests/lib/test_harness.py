@@ -929,3 +929,44 @@ class TestExtractFilePathsNestedValue:
         ファイルが 1 つも無い書き込み」として静かに許可してしまう。
         """
         assert harness.extract_file_paths("Write", {"file_path": value}) is None
+
+
+class TestDeepNestingIsParseFailureNotCrash:
+    """深いネストの JSON が例外で貫通しないこと（H-2）。
+
+    CPython の JSON デコーダは再帰下降で、深くネストした配列/オブジェクトに
+    対して `JSONDecodeError` ではなく `RecursionError` を送出する。これを
+    取りこぼすと保護フックが例外で異常終了し、PreToolUse の exit 1
+    （non-blocking error = ツールはそのまま実行される）へ倒れる。
+    """
+
+    @staticmethod
+    def _deep_json_text(depth: int = 200_000) -> str:
+        """`json.loads` が RecursionError を送出する深さの JSON テキストを作る。"""
+        return "[" * depth + "]" * depth
+
+    def test_recursion_error_is_in_parse_failure_tuple(self):
+        """RecursionError が JSON パース失敗として扱われる集合に入っている。"""
+        assert RecursionError in harness.JSON_PARSE_FAILURES
+
+    def test_deep_nesting_actually_raises_recursion_error(self):
+        """前提の実測: この入力は json.loads が RecursionError を投げる。
+
+        これが成り立たなくなった（CPython が反復パーサへ変わった等）場合、
+        以下の 2 テストは何も守らなくなるため前提自体を固定する。
+        """
+        with pytest.raises(RecursionError):
+            json.loads(self._deep_json_text())
+
+    def test_extract_tool_input_returns_raw_string(self):
+        """深いネストのコンテナ文字列はパース失敗として生文字列で返る。"""
+        text = self._deep_json_text()
+        assert harness.extract_tool_input({"toolArgs": text}) == text
+
+    def test_extract_patch_text_returns_raw_string(self):
+        """同型の json.loads を持つ `_extract_patch_text` も貫通しない。
+
+        片側だけ塞ぐと同じ穴が別の呼び出し箇所に残るため対で固定する。
+        """
+        text = "{" + self._deep_json_text() + "}"
+        assert harness._extract_patch_text(text) == text

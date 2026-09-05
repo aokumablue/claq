@@ -12,6 +12,8 @@ import warnings
 from pathlib import Path
 from typing import Any
 
+from ple4.lib.subprocess_utils import run_text
+
 GITHUB = "github"
 GITLAB = "gitlab"
 VALID_GIT_HOSTING_SERVICES = frozenset({GITHUB, GITLAB})
@@ -81,11 +83,58 @@ def normalize_git_hosting_service(value: Any, default: str = GITHUB) -> str:
     return fallback
 
 
+# origin URL からホスト部だけを取り出すためのパターン。
+#
+# 1 本目: `scheme://[user@]host[:port]/path`（http/https/ssh/git）。IPv6 リテラルの
+# `[::1]` も 1 つのホストとして拾う。
+# 2 本目: scp 形式 `[user@]host:path`（`git@gitlab.example.com:group/repo.git`）。
+# scheme が無いためこちらを別に持つ必要がある —— urlsplit だけで済ませると
+# 自前ホストの SSH remote が軒並みホスト無しになり、既定値へ落ちる。
+# `:` の直後が `/` の場合は scheme 付き URL なので 1 本目に譲る。
+_URL_HOST_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://(?:[^/@]*@)?(\[[^\]]+\]|[^/:?#]+)")
+_SCP_HOST_PATTERN = re.compile(r"^(?:[^/@]*@)?([^/:]+):(?!/)")
+
+
+def _remote_host(url: str) -> str:
+    """remote URL からホスト部を小文字で取り出す。
+
+    ホストを特定できない形（ローカルパス等）では空文字を返す。
+
+    Args:
+        url: `git remote get-url origin` が返した URL。
+
+    Returns:
+        小文字化したホスト部。取り出せなければ空文字。
+
+    Raises:
+        例外は発生しません。
+    """
+    stripped = url.strip()
+    for pattern in (_URL_HOST_PATTERN, _SCP_HOST_PATTERN):
+        match = pattern.match(stripped)
+        if match:
+            return match.group(1).lower()
+    return ""
+
+
 def detect_git_hosting_service(cwd: str | Path | None = None, default: str = GITHUB) -> str:
     """`git remote get-url origin` の URL から hosting service を推測する。
 
-    URL に `gitlab` を含めば gitlab、それ以外（github.com, 他）は github フォールバック。
+    判定は **URL 全体ではなくホスト部だけ**で行う。URL 全体の部分一致にすると
+    `https://github.com/acme/gitlab-migration.git` のようにリポジトリ名へ他方の
+    名前を含むだけで誤判定し、`gh pr create` の代わりに `glab mr create` を
+    案内してしまう（先に評価される `gitlab` 側が勝つため）。
+    ホスト部に `gitlab` を含めば gitlab、`github` を含めば github、
+    どちらでもない・ホストを取り出せない（ローカルパス等）なら default。
     git コマンド失敗時も default を返す。
+
+    subprocess は `subprocess_utils.run_text` 経由で呼ぶ。`text=True` だけで
+    encoding を指定しないと locale 依存のデコードになり、`LC_ALL=C`
+    （preferred encoding = US-ASCII）環境で origin URL に非 ASCII バイトが
+    含まれる場合（自前 GitLab の日本語グループ名、IDN ホスト）に
+    `UnicodeDecodeError` が下の except を貫通して本 docstring の
+    「例外は発生しません」が破れる。`run_text` は `encoding="utf-8",
+    errors="replace"` を集約済み。
 
     Args:
         cwd: 判定対象の作業ディレクトリ。省略時は現在のディレクトリです。
@@ -99,23 +148,17 @@ def detect_git_hosting_service(cwd: str | Path | None = None, default: str = GIT
     """
     check_dir = str(cwd) if cwd is not None else "."
     try:
-        result = subprocess.run(
-            ["git", "-C", check_dir, "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
+        result = run_text(["git", "-C", check_dir, "remote", "get-url", "origin"], timeout=5)
     except (OSError, subprocess.SubprocessError):
         return normalize_git_hosting_service(default)
 
     if result.returncode != 0:
         return normalize_git_hosting_service(default)
 
-    url = result.stdout.strip().lower()
-    if "gitlab" in url:
+    host = _remote_host(result.stdout)
+    if "gitlab" in host:
         return GITLAB
-    if "github" in url:
+    if "github" in host:
         return GITHUB
     return normalize_git_hosting_service(default)
 
