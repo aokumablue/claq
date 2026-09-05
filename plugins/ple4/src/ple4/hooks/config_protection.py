@@ -22,6 +22,7 @@ from ple4.hooks.hook_common import (
     StdinUnavailableError,
     basename,
     emit_block_output,
+    normalize_protected_name,
     parse_json_object,
     read_raw_stdin_with_truncation,
     resolve_effective_target,
@@ -98,6 +99,13 @@ PROTECTED_FILES = {
 # 片側だけ塞ぐと、塞いだ経路の存在が誤った安心になる。
 _PROTECTED_PATH_SEGMENTS = ((".git", "hooks"),)
 
+# 大小無視で比較するための畳み済み複製。`.GIT/HOOKS` は APFS / NTFS では
+# `.git/hooks` そのものを指すため、素の比較では保護 path が素通りする（C-2）。
+# 表示名には畳む前の綴りを使うので、両者を対で持つ。
+_PROTECTED_PATH_SEGMENTS_FOLDED = tuple(
+    tuple(normalize_protected_name(part) for part in segments) for segments in _PROTECTED_PATH_SEGMENTS
+)
+
 # ファイル名だけでは保護できない汎用設定ファイル。version bump・依存追加
 # 等の正当な編集が頻繁なため全面ブロックはしない。書き込み内容が
 # lint/format/coverage 設定を弱めうる場合のみ _conditional_block_reason
@@ -108,6 +116,14 @@ CONDITIONALLY_PROTECTED_FILES = {
     "tox.ini",
     "package.json",
 }
+
+# 上 2 集合の大小無視の照合用複製。判定は必ずこちらを使い、生の集合は「保護
+# 対象は何か」の宣言と表示専用に残す（`bash_config_protection` も畳み済みの
+# 側を import して、両フックの判定軸を 1 本に保つ）。
+PROTECTED_FILES_FOLDED = frozenset(normalize_protected_name(name) for name in PROTECTED_FILES)
+CONDITIONALLY_PROTECTED_FILES_FOLDED = frozenset(
+    normalize_protected_name(name) for name in CONDITIONALLY_PROTECTED_FILES
+)
 
 # セクション見出しの照合パターン（前方一致）。[tool.ruff.lint] のような
 # サブセクションも拾うため prefix 一致にする。`[testenv` は tox.ini の
@@ -171,7 +187,11 @@ def protected_path_segment(file_path: str) -> str | None:
     """
     resolved = resolve_effective_target(file_path)
     parts = resolved.parts if resolved is not None else Path(file_path).parts
-    for segments in _PROTECTED_PATH_SEGMENTS:
+    # 比較は畳んだ側だけで行い、返す表示名は畳む前の綴りを使う（C-2）。
+    folded_parts = tuple(normalize_protected_name(part) for part in parts)
+    for segments, folded_segments in zip(
+        _PROTECTED_PATH_SEGMENTS, _PROTECTED_PATH_SEGMENTS_FOLDED, strict=True
+    ):
         width = len(segments)
         # 保護ディレクトリ自身（``.git/hooks``）も一致させる。当初は親ディレクトリ
         # 列だけを見て末尾一致を除外していたが、それが正しいのは Edit/Write の
@@ -179,8 +199,8 @@ def protected_path_segment(file_path: str) -> str | None:
         # が本判定を Bash へ伝播させたことで、``rm .git/hooks/pre-commit`` は deny
         # なのに 1 コンポーネント短い ``rm -rf .git/hooks`` は allow という、同じ
         # verb・同じ結果（フックが走らない状態）に対する非対称が生まれた。
-        for index in range(len(parts) - width + 1):
-            if parts[index : index + width] == segments:
+        for index in range(len(folded_parts) - width + 1):
+            if folded_parts[index : index + width] == folded_segments:
                 return "/".join(segments)
     return None
 
@@ -389,9 +409,13 @@ def _text_has_lint_signal(text: str, file_name: str) -> bool:
     Raises:
         例外は発生しません。
     """
-    if file_name == "package.json":
+    # ファイル別分岐も畳んだ名前で選ぶ。basename 側だけ大小無視にすると、
+    # ``Package.json`` が条件付き保護には入るのに package.json 専用のキー照合
+    # （`eslintConfig`）へ落ちず共通照合で素通りする、という半開きが残る（C-2）。
+    folded_name = normalize_protected_name(file_name)
+    if folded_name == "package.json":
         return any(key in text for key in _PACKAGE_JSON_LINT_KEYS)
-    if file_name == "tox.ini" and _TOX_COMMAND_KEY_PATTERN.search(text):
+    if folded_name == "tox.ini" and _TOX_COMMAND_KEY_PATTERN.search(text):
         return True
     if any(header in text for header in _LINT_SECTION_HEADERS):
         return True
@@ -493,9 +517,12 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
         if protected_segment is not None:
             return blocked_message_for_file(f"{protected_segment}/")
         file_name = _effective_basename(file_path)
-        if file_name in PROTECTED_FILES:
+        # 判定は畳んだ名前、メッセージは観測した綴り（利用者が書いた通りの名前が
+        # 出ないと、なぜ止まったのかが読み取れなくなる）。
+        folded_name = normalize_protected_name(file_name)
+        if folded_name in PROTECTED_FILES_FOLDED:
             return blocked_message_for_file(file_name)
-        if file_name in CONDITIONALLY_PROTECTED_FILES:
+        if folded_name in CONDITIONALLY_PROTECTED_FILES_FOLDED:
             reason = _conditional_block_reason(tool_name, container, file_path, file_name)
             if reason:
                 return reason

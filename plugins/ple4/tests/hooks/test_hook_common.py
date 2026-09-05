@@ -643,6 +643,103 @@ class TestIsGitExecutableToken:
         assert hook_common.is_git_executable_token(token) is expected
 
 
+class TestNormalizeExecutableName:
+    """normalize_executable_name（H-6 共有正規化）のテスト。
+
+    `is_git_executable_token` / `bash_config_protection` の実行名照合 /
+    `pre_bash_commit_quality` の mutation 語彙が同じ規則を使うことを固定する。
+    片方だけ `.exe` を落とす・片方だけ大小を区別する状態が繰り返し出荷された。
+    """
+
+    @pytest.mark.parametrize(
+        ("token", "expected"),
+        [
+            ("cp", "cp"),
+            ("CP", "cp"),
+            ("Rm", "rm"),
+            ("TEE", "tee"),
+            ("cp.exe", "cp"),
+            ("RM.EXE", "rm"),
+            ("/usr/bin/rm", "rm"),
+            # クォートで守られた Windows 絶対パスは POSIX トークン化を `\` 付きで
+            # 生き延びるため、`\` も区切りとして扱う必要がある。
+            (r"C:\bin\rm.exe", "rm"),
+            ("Remove-Item", "remove-item"),
+            ("", ""),
+        ],
+    )
+    def test_folds_case_separators_and_exe(self, token: str, expected: str) -> None:
+        assert hook_common.normalize_executable_name(token) == expected
+
+
+class TestNormalizeProtectedName:
+    """normalize_protected_name（C-2 共有正規化）のテスト。
+
+    実行名側と**同じ case 演算**を使うこと、および `.exe` は落とさないこと
+    （保護対象は設定ファイルであり `ruff.toml.exe` を同一視する根拠が無い）を
+    固定する。
+    """
+
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            ("ruff.toml", "ruff.toml"),
+            ("Ruff.toml", "ruff.toml"),
+            ("RUFF.TOML", "ruff.toml"),
+            ("sub/dir/PyProject.toml", "pyproject.toml"),
+            (r"sub\dir\Package.json", "package.json"),
+            (".GIT", ".git"),
+            # 実行名と違い `.exe` は保持する。
+            ("ruff.toml.exe", "ruff.toml.exe"),
+        ],
+    )
+    def test_folds_case_and_separators(self, path: str, expected: str) -> None:
+        assert hook_common.normalize_protected_name(path) == expected
+
+
+class TestIsInplaceEditFlag:
+    """is_inplace_edit_flag（H-5 共有述語）のテスト。
+
+    `bash_config_protection`（保護対象への in-place 書き込み）と
+    `pre_bash_commit_quality`（commit 前の作業ツリー変更）が同じ語彙を使うことを
+    固定する。後者は `not arg.startswith("--")` で長形式を明示的に除外しており、
+    `sed --in-place ... && git commit -am x` で両ガードが同時に不発だった。
+    """
+
+    @pytest.mark.parametrize(
+        ("token", "expected"),
+        [
+            # 短形式（結合位置を問わない）。
+            ("-i", True),
+            ("-i.bak", True),
+            ("-0pi", True),
+            ("-ni", True),
+            ("-pi", True),
+            # GNU 長形式と、getopt が受け付ける非曖昧な短縮。
+            ("--in-place", True),
+            ("--in-place=.bak", True),
+            ("--in-pl", True),
+            ("--i", True),
+            # 別の長形式は `in-place` のプレフィックスではない。
+            ("--expression", False),
+            ("--silent", False),
+            ("--include", False),
+            # 区切りの `--` は名前部分が空なので in-place ではない。
+            ("--", False),
+            ("--=x", False),
+            # 単独の `-` と非オプション。
+            ("-", False),
+            ("-n", False),
+            ("-E", False),
+            ("s/a/b/", False),
+            ("ruff.toml", False),
+            ("", False),
+        ],
+    )
+    def test_classifies_short_and_long_forms(self, token: str, expected: bool) -> None:
+        assert hook_common.is_inplace_edit_flag(token) is expected
+
+
 class TestResolveEffectiveTarget:
     """resolve_effective_target（H-02 共有 helper。config_protection /
     bash_config_protection が symlink 解決に使う）のテスト。

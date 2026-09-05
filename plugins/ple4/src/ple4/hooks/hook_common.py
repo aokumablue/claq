@@ -1025,15 +1025,87 @@ def basename(path: str) -> str:
     return Path(path).name
 
 
-def is_git_executable_token(token: str) -> bool:
-    """トークンが git 実行ファイルを指すかを判定します（basename 化・大小無視・.exe 許容）。
+def _basename_any_separator(path: str) -> str:
+    """`/` と `\\` の**両方**を区切りとみなして basename を取り出します。
+
+    `basename`（`Path(path).name`）は POSIX ホストでは `\\` を区切りとみなさない
+    ため、クォートで守られた Windows 絶対パス（``"C:\\bin\\rm.exe" ruff.toml``）が
+    `shlex(posix=True)` を通っても `\\` を保ったまま 1 トークンで残り、名前照合が
+    パス全体と比較されて外れます。`command_dialect_variants` は**クォート外**の
+    `\\` しか `/` へ読み替えないため、この経路は方言展開では閉じません。
+
+    Args:
+        path: パスまたは実行トークンの文字列です。
+
+    Returns:
+        両方の区切りで切り出した末尾要素を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    return path.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def normalize_executable_name(token: str) -> str:
+    """実行トークンを比較用の名前（basename 化・大小無視・`.exe` 除去）へ正規化します。
 
     `/usr/bin/git`（絶対パス）・`git.exe`（Windows）・
-    `C:\\Program Files\\Git\\bin\\git.exe`（Windows 絶対パス）・`GIT`（大文字。
-    macOS 既定の APFS は大小文字を区別しないため `GIT --version` は実 git を
-    起動する）をいずれも同一視します。`block_no_verify` と
-    `pre_bash_commit_quality` の両方が使う共有実装で、2 箇所へ別々に実装すると
-    正規化の齟齬（H-04）が再発するためここへ集約します。
+    `C:\\Program Files\\Git\\bin\\git.exe`（Windows 絶対パス）・`GIT`（大文字）を
+    いずれも `git` へ畳みます。大小を無視するのは、macOS 既定の APFS と Windows の
+    NTFS が既定で大小を区別せず（``CP foo bar`` は実 `cp` を起動し、``RM`` は実 `rm`
+    を起動する）、PowerShell が cmdlet 名を大小無視で解決するためです。Linux では
+    `RM` が `rm` に一致する誤検出側へ倒れますが、ADR-0002 の範囲内です。
+
+    保護 hook の実行名照合は**この 1 関数だけ**を通します。かつて
+    `is_git_executable_token`（`hook_common`）・`bash_config_protection._command_name`・
+    `pre_bash_commit_quality._segment_mutates_worktree_or_index` が同じ正規化を
+    別々に持ち、大小無視と `.exe` 除去が兄弟ごとに 1 世代ずつずれた結果、
+    ``git.exe commit --no-verify`` は捕まるのに ``CP evil.py app.py && git commit``
+    や ``rm.exe ruff.toml`` は語彙から外れる非対称が出荷されました（H-04 / H-6）。
+
+    Args:
+        token: `shlex` 等でトークン化された 1 トークンです。
+
+    Returns:
+        basename を大小無視へ畳み、末尾の `.exe` を除いた名前を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    name = _basename_any_separator(token).casefold()
+    return name[: -len(".exe")] if name.endswith(".exe") else name
+
+
+def normalize_protected_name(path: str) -> str:
+    """保護対象ファイル名の照合用に basename を大小無視へ畳みます。
+
+    `normalize_executable_name` と**同じ case 演算（`casefold`）と同じ basename
+    規則**を使います。片方を `lower` / もう片方を `casefold` にすると、閉じたはず
+    の非対称（実行名は大小無視なのにファイル名は大小区別、の逆）をそのまま
+    再生産するためです。実行名と違い `.exe` は落としません — 保護対象は設定
+    ファイルであり、`ruff.toml.exe` を `ruff.toml` と同一視する根拠が無いためです。
+
+    `Path.resolve()` は APFS / NTFS で綴りを実体の大小へ正規化しないため、
+    解決後の basename を素で比較すると ``Write Ruff.toml`` が実体 ``ruff.toml``
+    へ着地するのに保護判定は外れます（C-2。実測で exit 0）。
+
+    Args:
+        path: 検査対象のパス文字列、またはファイル名です。
+
+    Returns:
+        大小無視へ畳んだ basename を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _basename_any_separator(path).casefold()
+
+
+def is_git_executable_token(token: str) -> bool:
+    """トークンが git 実行ファイルを指すかを判定します。
+
+    正規化は `normalize_executable_name` へ委譲します（`block_no_verify` /
+    `pre_bash_commit_quality` / `bash_config_protection` で共有する単一情報源）。
 
     Args:
         token: `shlex` 等でトークン化された1トークンです。
@@ -1044,11 +1116,52 @@ def is_git_executable_token(token: str) -> bool:
     Raises:
         例外は発生しません。
     """
-    basename_part = token.replace("\\", "/").rsplit("/", 1)[-1]
-    name = basename_part.lower()
-    if name.endswith(".exe"):
-        name = name[: -len(".exe")]
-    return name == "git"
+    return normalize_executable_name(token) == "git"
+
+
+# sed の GNU 長形式 in-place フラグ。GNU getopt は曖昧でない限り長形式の短縮を
+# 受け付け、sed の長形式で `--i` から始まるのは `--in-place` だけなので、
+# ``sed --i s/x/y/ ruff.toml`` も実際に in-place 編集になる。したがって
+# 「`in-place` の非空プレフィックス」を一致条件にする（`--in-place=.bak` の
+# サフィックス指定も名前部分だけを見て拾う）。
+_LONG_INPLACE_OPTION_NAME = "in-place"
+
+
+def is_inplace_edit_flag(token: str) -> bool:
+    """トークンが in-place 編集フラグ（`sed -i` / `perl -0pi` / `sed --in-place`）かを判定します。
+
+    単一ダッシュの短形式は**結合位置を問わず** `i` を含むかで判定します
+    （`-i` / `-i.bak` / `-0pi` / `-ni` はいずれも in-place）。`sed` 側だけが
+    `-i` 前方一致で、`perl` 側だけが `i` の包含判定という食い違いがあったため、
+    両者の和集合をこの 1 関数へ集約します。
+
+    長形式は `_LONG_INPLACE_OPTION_NAME` の非空プレフィックスに限ります。
+    区切りの `--` は名前部分が空になるため in-place とみなしません
+    （``sed -- s/x/y/ ruff.toml`` は標準出力へ流すだけで書き込まない）。
+    `--expression` のような別の長形式も、`in-place` のプレフィックスでは
+    ないので一致しません。
+
+    `bash_config_protection`（保護対象への in-place 書き込み）と
+    `pre_bash_commit_quality`（commit 前の作業ツリー変更）が共有します。
+    後者は `not arg.startswith("--")` で長形式を**明示的に**除外していたため、
+    ``sed --in-place ... && git commit -am x`` で両方のガードが同時に不発に
+    なっていました（H-5）。
+
+    Args:
+        token: 引数トークン列の 1 トークンです。
+
+    Returns:
+        in-place 編集を指示するフラグなら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    if not token.startswith("-") or token == "-":
+        return False
+    if token.startswith("--"):
+        name = token[2:].split("=", 1)[0]
+        return bool(name) and _LONG_INPLACE_OPTION_NAME.startswith(name)
+    return "i" in token[1:]
 
 
 def resolve_effective_target(raw_path: str) -> Path | None:

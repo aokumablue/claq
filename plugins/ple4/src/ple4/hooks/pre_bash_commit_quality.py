@@ -50,9 +50,10 @@ from ple4.hooks.commit_quality_scanner import (
 )
 from ple4.hooks.hook_common import (
     MAX_STDIN_BYTES,
-    basename,
     command_dialect_variants,
     is_git_executable_token,
+    is_inplace_edit_flag,
+    normalize_executable_name,
     parse_json_object,
     resolve_repo_root,
     split_segments,
@@ -438,11 +439,17 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
                 return sub in _INDEX_MUTATING_GIT_SUBCOMMANDS
             return False
 
-        name = basename(token)
+        # 実行名の正規化は `is_git_executable_token` と同じ共有 helper へ通す。
+        # ここだけ素の basename（大小区別・`.exe` 残し）で照合していたため、
+        # APFS で実 `cp` を起動する ``CP evil.py app.py && git commit`` や
+        # Windows の ``cp.exe`` / ``TEE`` が語彙から外れ、mutation ガードが
+        # 不発になっていた（H-6）。scan は変更前の作業ツリーを読むので、
+        # 取りこぼしはそのまま「未検査の内容が commit される」ことを意味する。
+        name = normalize_executable_name(token)
         if name in _WORKTREE_MUTATING_EXECUTABLES:
             return True
         if name in _INPLACE_EDIT_EXECUTABLES:
-            return any(arg == "-i" or (arg.startswith("-i") and not arg.startswith("--")) for arg in segment[i + 1 :])
+            return any(is_inplace_edit_flag(arg) for arg in segment[i + 1 :])
 
     return False
 

@@ -18,13 +18,20 @@ from typing import Any
 
 import pytest
 
-from ple4.hooks import bash_config_protection, block_no_verify, config_protection
+from ple4.hooks import (
+    bash_config_protection,
+    block_no_verify,
+    config_protection,
+    hook_common,
+    pre_bash_commit_quality,
+)
 
 # 検査対象フック名 → main() を持つモジュール。
 _HOOKS = {
     "block_no_verify": block_no_verify,
     "bash_config_protection": bash_config_protection,
     "config_protection": config_protection,
+    "pre_bash_commit_quality": pre_bash_commit_quality,
 }
 
 
@@ -50,6 +57,22 @@ def _write(file_path: Any) -> dict[str, Any]:
         フック stdin へ渡す payload dict。
     """
     return {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": "x"}}
+
+
+def _write_content(file_path: str, content: str) -> dict[str, Any]:
+    """内容を指定した Write ツール呼び出しの payload を組み立てる。
+
+    条件付き保護（`CONDITIONALLY_PROTECTED_FILES`）は書き込み内容に lint 兆候が
+    無ければ allow なので、`_write` の固定内容では検査軸を動かせない。
+
+    Args:
+        file_path: `file_path` フィールドに載せる値。
+        content: `content` フィールドに載せる書き込み内容。
+
+    Returns:
+        フック stdin へ渡す payload dict。
+    """
+    return {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": content}}
 
 
 # heredoc 本文を実行するシンク。演算子行にこれらが現れる場合、本文はデータでは
@@ -127,6 +150,57 @@ _BLOCKED_CASES = [
         "bash_config_protection",
         {"tool_input": {"command": _PROTECTED_WRITE}},
     ),
+    # C-2: 保護対象の照合が大小を区別しない（APFS / NTFS は既定で大小無視なので
+    # `Ruff.toml` への書込みは実体 `ruff.toml` に当たる）。
+    ("C-2 Write 大文字混在", "config_protection", _write("Ruff.toml")),
+    ("C-2 Write 全大文字", "config_protection", _write("RUFF.TOML")),
+    ("C-2 rm 大文字混在", "bash_config_protection", _bash("rm Ruff.toml")),
+    ("C-2 リダイレクト先が大文字", "bash_config_protection", _bash("printf x > RUFF.TOML")),
+    ("C-2 保護 path の大文字", "config_protection", _write(".Git/Hooks/pre-commit")),
+    ("C-2 保護 path の大文字（Bash）", "bash_config_protection", _bash("rm .GIT/HOOKS/pre-commit")),
+    (
+        "C-2 条件付き保護の大文字",
+        "config_protection",
+        _write_content("PyProject.toml", "[tool.ruff]\nignore = ['E501']"),
+    ),
+    (
+        "C-2 package.json 専用照合の大文字",
+        "config_protection",
+        _write_content("Package.json", '{"eslintConfig": {}}'),
+    ),
+    ("C-2 tox.ini 専用照合の大文字", "config_protection", _write_content("TOX.ini", "commands = true")),
+    # H-5: sed の GNU 長形式（短縮形を含む）と実行 wrapper。
+    ("H-5 sed --in-place", "bash_config_protection", _bash("sed --in-place s/x/y/ ruff.toml")),
+    ("H-5 sed --in-place=.bak", "bash_config_protection", _bash("sed --in-place=.bak s/x/y/ ruff.toml")),
+    ("H-5 sed 長形式の短縮 --i", "bash_config_protection", _bash("sed --i s/x/y/ ruff.toml")),
+    ("H-5 sed -ni 結合短形式", "bash_config_protection", _bash("sed -ni s/x/y/ ruff.toml")),
+    ("H-5 timeout wrapper", "bash_config_protection", _bash("timeout 5 rm ruff.toml")),
+    ("H-5 timeout 単位付き秒数", "bash_config_protection", _bash("timeout 1.5s rm ruff.toml")),
+    ("H-5 nohup wrapper", "bash_config_protection", _bash("nohup rm ruff.toml")),
+    ("H-5 nice wrapper", "bash_config_protection", _bash("nice rm ruff.toml")),
+    ("H-5 nice -n の数値", "bash_config_protection", _bash("nice -n 10 rm ruff.toml")),
+    ("H-5 stdbuf wrapper", "bash_config_protection", _bash("stdbuf -o0 rm ruff.toml")),
+    ("H-5 wrapper 多重", "bash_config_protection", _bash("nohup nice timeout 5 rm ruff.toml")),
+    # H-6: commit 前 mutation ガードの語彙が兄弟の正規化から取り残されていた。
+    # scan は変更前の作業ツリーを読むため、取りこぼしは未検査コミットになる。
+    (
+        "H-6 大文字の cp",
+        "pre_bash_commit_quality",
+        _bash("CP /tmp/evil.py app.py && git commit -m 'fix: x'"),
+    ),
+    ("H-6 cp.exe", "pre_bash_commit_quality", _bash("cp.exe /tmp/evil.py app.py && git commit -m 'fix: x'")),
+    ("H-6 大文字の rm", "pre_bash_commit_quality", _bash("Rm old.py && git commit -m 'fix: x'")),
+    ("H-6 大文字の tee", "pre_bash_commit_quality", _bash("echo x | TEE app.py && git commit -m 'fix: x'")),
+    (
+        "H-6 sed 長形式の in-place",
+        "pre_bash_commit_quality",
+        _bash("sed --in-place s/a/b/ app.py && git commit -m 'fix: x'"),
+    ),
+    (
+        "H-6 perl の結合短形式",
+        "pre_bash_commit_quality",
+        _bash("perl -0pi -e s/a/b/ app.py && git commit -m 'fix: x'"),
+    ),
     # 陽性対照（修正前から exit 2。fail-closed 化で失われていないこと）。
     ("対照 コメント無しの 2 行目", "block_no_verify", _bash(f"git status\n{_NO_VERIFY}")),
     ("対照 bash -c", "block_no_verify", _bash(f"bash -c '{_NO_VERIFY}'")),
@@ -151,6 +225,35 @@ _ALLOWED_CASES = [
     ("Read は書き込みではない", "config_protection", {"tool_name": "Read", "tool_input": {"file_path": "ruff.toml"}}),
     ("Grep は書き込みではない", "config_protection", {"tool_name": "Grep", "tool_input": {"file_path": "ruff.toml"}}),
     ("保護対象でない Write", "config_protection", _write("notes.txt")),
+    # --- 上の block 追加と対になる陰性対照 ---
+    # C-2: 大小無視は「保護対象の綴り違い」だけに効き、無関係なファイルは巻き込まない。
+    ("C-2 対 大文字混在の無関係 Write", "config_protection", _write("App.py")),
+    ("C-2 対 大文字混在の無関係 rm", "bash_config_protection", _bash("rm App.py")),
+    ("C-2 対 名前が似た別ファイル", "config_protection", _write("Ruff.toml.bak")),
+    (
+        "C-2 対 条件付き保護の非 lint 変更",
+        "config_protection",
+        _write_content("PyProject.toml", '[project]\nversion = "1.2.3"'),
+    ),
+    # H-5: in-place でない sed と、実行位置に無い wrapper 語は allow のまま。
+    ("H-5 対 sed --expression", "bash_config_protection", _bash("sed --expression s/x/y/ app.py")),
+    ("H-5 対 保護対象への非 in-place sed", "bash_config_protection", _bash("sed --expression s/x/y/ ruff.toml")),
+    # 区切りの `--` は長形式ではないので in-place ではない（名前部分が空）。
+    ("H-5 対 区切りの --", "bash_config_protection", _bash("sed -- s/x/y/ ruff.toml")),
+    # M-01: wrapper 語彙を足しても、非実行位置の言及は実行位置にならない。
+    ("H-5 対 echo tee 言及", "bash_config_protection", _bash("echo tee pyproject.toml")),
+    ("H-5 対 echo の中の wrapper 列", "bash_config_protection", _bash("echo timeout 5 rm ruff.toml")),
+    # wrapper の先が読み取り専用なら書き込み先は現れない。
+    ("H-5 対 timeout 経由の cat", "bash_config_protection", _bash("timeout 5 cat ruff.toml")),
+    # H-6: 正規化を足しても、変更しないコマンドは mutation とみなさない。
+    ("H-6 対 大文字の cat", "pre_bash_commit_quality", _bash("Cat app.py && git commit -m 'fix: x'")),
+    ("H-6 対 単独 commit", "pre_bash_commit_quality", _bash("git commit -m 'fix: x'")),
+    (
+        "H-6 対 in-place でない sed",
+        "pre_bash_commit_quality",
+        _bash("sed --expression s/a/b/ app.py && git commit -m 'fix: x'"),
+    ),
+    ("H-6 対 commit 無しの mutation", "pre_bash_commit_quality", _bash("CP /tmp/evil.py app.py")),
 ]
 
 
@@ -193,6 +296,12 @@ def _repo_scope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     (tmp_path / "sub").mkdir()
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: tmp_path)
+    # `pre_bash_commit_quality` は staged files を git へ問い合わせる。使い捨て
+    # ディレクトリは git リポジトリではないため、素のままだと「staged を特定
+    # できない」の fail-closed で全ケースが exit 2 になり、mutation ガードの
+    # 判定軸がまったく効いていなくても表が緑になる。空 staged を与えて、
+    # `_compound_commit_risk` の結論だけが exit code に出る状態にする。
+    monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: [])
     return tmp_path
 
 
@@ -207,8 +316,21 @@ def _run(hook: str, payload: dict[str, Any], monkeypatch: pytest.MonkeyPatch) ->
     Returns:
         main() の終了コード。
     """
+
+    def _read() -> tuple[str, bool]:
+        """stdin 読み取りの差し替え実装。
+
+        Returns:
+            (payload の JSON 文字列, 切り捨て無し) のタプル。
+        """
+        return json.dumps(payload), False
+
     module = _HOOKS[hook]
-    monkeypatch.setattr(module, "read_raw_stdin_with_truncation", lambda: (json.dumps(payload), False))
+    # `pre_bash_commit_quality.main()` は `hook_common` から関数内 import する
+    # ため、モジュール束縛の差し替えだけでは効かない。両方を差し替える。
+    monkeypatch.setattr(hook_common, "read_raw_stdin_with_truncation", _read)
+    if hasattr(module, "read_raw_stdin_with_truncation"):
+        monkeypatch.setattr(module, "read_raw_stdin_with_truncation", _read)
     return module.main()
 
 
