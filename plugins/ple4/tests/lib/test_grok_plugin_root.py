@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from ple4.lib import grok_plugin_root as mod
 
 
@@ -54,18 +56,26 @@ class TestIsGrokInstalledPluginRoot:
 class TestFindLatestInstalledPle4:
     """find_latest_installed_ple4 のテスト。"""
 
-    def test_returns_newest_with_launcher(self, tmp_path: Path) -> None:
-        """launcher を持つ最新 ple4-* を返す。"""
+    @pytest.mark.parametrize("newer_name", ["ple4-a", "ple4-b"])
+    def test_returns_newest_with_launcher(self, tmp_path: Path, newer_name: str) -> None:
+        """mtime が最も新しい ple4-* を返す（名前順・列挙順では決まらない）。
+
+        両候補とも ``ple4-`` 接頭辞と launcher を持つので、``startswith`` を見る
+        だけでは「最新を選ぶ」という契約は検査できない。``os.utime`` で mtime を
+        明確に分け、どちらを新しくしても対応する側が返ることを表として固定する
+        （片側だけだと「常に片方を返す」実装が素通りする）。
+        """
         installed = tmp_path / "installed"
-        old = installed / "ple4-old"
-        new = installed / "ple4-new"
-        for root in (old, new):
+        roots = {name: installed / name for name in ("ple4-a", "ple4-b")}
+        for root in roots.values():
             launcher = root / "src" / "ple4" / "launcher.py"
             launcher.parent.mkdir(parents=True, exist_ok=True)
             launcher.write_text("#\n", encoding="utf-8")
-        found = mod.find_latest_installed_ple4(installed)
-        assert found is not None
-        assert found.name.startswith("ple4-")
+        for name, root in roots.items():
+            stamp = 2_000_000_000.0 if name == newer_name else 1_000_000_000.0
+            os.utime(root, (stamp, stamp))
+
+        assert mod.find_latest_installed_ple4(installed) == roots[newer_name]
 
     def test_skips_without_launcher(self, tmp_path: Path) -> None:
         """launcher が無いディレクトリは無視する。"""

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
+import re
 import shutil
 import subprocess
 import tomllib
@@ -11,6 +13,56 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 SOURCE_SCRIPT = ROOT / "scripts" / "version-up.sh"
+
+# version-up.sh に埋め込まれた Python heredoc（`<<'PY'` … `PY`）の抽出パターン。
+_PY_HEREDOC_RE = re.compile(r"(?m)^python3 - .*<<'PY'\n(.*?)\n^PY$", re.DOTALL)
+
+
+def _extract_script_version_targets() -> frozenset[Path]:
+    """version-up.sh が更新するファイルのリポジトリ相対パスを機械抽出する。
+
+    埋め込み Python の ``paths = {...}`` を ``ast`` で読み、各値
+    （``repo_root / "a" / "b"`` という ``/`` 連鎖）から文字列リテラルを
+    取り出して相対パスへ組み立てる。
+
+    手で複製したリストと突き合わせるためのもので、抽出側がスクリプト本体を
+    直接読むため定義がずれた瞬間に食い違いが露見する。
+
+    Returns:
+        更新対象のリポジトリ相対パス集合。
+
+    Raises:
+        AssertionError: heredoc または ``paths`` 代入を見つけられない場合。
+    """
+    match = _PY_HEREDOC_RE.search(SOURCE_SCRIPT.read_text(encoding="utf-8"))
+    assert match is not None, "version-up.sh の Python heredoc を抽出できない"
+    targets: set[Path] = set()
+    found_assignment = False
+    for node in ast.walk(ast.parse(match.group(1))):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "paths" for t in node.targets):
+            continue
+        assert isinstance(node.value, ast.Dict), "paths が dict リテラルではない"
+        found_assignment = True
+        for value in node.value.values:
+            parts: list[str] = []
+            current: ast.expr = value
+            while isinstance(current, ast.BinOp) and isinstance(current.op, ast.Div):
+                assert isinstance(current.right, ast.Constant), "パス片が文字列リテラルではない"
+                parts.append(current.right.value)
+                current = current.left
+            assert isinstance(current, ast.Name) and current.id == "repo_root", (
+                "パスが repo_root 起点ではない"
+            )
+            targets.add(Path(*reversed(parts)))
+    assert found_assignment, "version-up.sh に paths = {...} が見つからない"
+    return frozenset(targets)
+
+
+# `read_versions` がフォーマット別（toml / json / json 入れ子 / Python 定数）に
+# 読むため、順序と対応関係を持つタプルとして保持する。スクリプト側の定義との
+# 一致は `test_version_files_match_script_targets` が機械的に強制する。
 _VERSION_FILES = (
     Path("plugins/ple4/pyproject.toml"),
     Path("plugins/ple4/.claude-plugin/plugin.json"),
@@ -68,6 +120,18 @@ def _next_patch(version: str) -> str:
     """パッチ番号を 1 つ進めた X.Y.Z を返す。"""
     major_minor, patch = version.rsplit(".", 1)
     return f"{major_minor}.{int(patch) + 1}"
+
+
+def test_version_files_match_script_targets() -> None:
+    """テストの更新対象リストが version-up.sh の定義と完全一致すること。
+
+    片側だけ増えると、増えた側のファイルが「一度も bump されない」まま緑で
+    通り続ける。抽出器そのものが空を返して表明が空振りする事故を防ぐため、
+    件数の下限も同時に確認する。
+    """
+    extracted = _extract_script_version_targets()
+    assert len(extracted) >= 4, f"抽出結果が少なすぎる（抽出器の破損を疑う）: {extracted}"
+    assert set(_VERSION_FILES) == extracted
 
 
 def test_bump_version_updates_all_targets(tmp_path: Path) -> None:

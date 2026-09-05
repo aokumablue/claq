@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _PUBLISH_SH = _REPO_ROOT / "scripts" / "publish.sh"
 # 配布ツリーへ持ち出してはいけないパスと、その理由。
@@ -57,16 +59,29 @@ def test_publish_does_not_exclude_paths_that_no_longer_exist() -> None:
     assert not stale, f"実在しないパスが除外リストに残っている: {stale}"
 
 
-def test_distributed_pyproject_is_the_only_carrier_of_test_config() -> None:
-    """`testpaths` / `fail_under` が、配布除外される pyproject.toml にしか無いこと。
+# 配布ツリーの pytest を「回帰そっくりに失敗」させうる設定キー。
+#
+# `testpaths` だけを走査していた頃は、``setup.cfg`` に
+# ``[coverage:report] fail_under = 100`` だけを置けば本テストが緑のまま通った
+# （かつ setup.cfg は publish.sh の除外 5 件に含まれない）。docstring が
+# 「両方を守る」と宣言しながら片方しか見ていない状態だったため、宣言側では
+# なく走査側をキーの列挙へ揃える。`addopts` も同じ経路で
+# ``--cov`` / ``--cov-fail-under`` を持ち込めるため含める。
+_TEST_CONFIG_KEYS = ("testpaths", "fail_under", "addopts")
+
+
+@pytest.mark.parametrize("key", _TEST_CONFIG_KEYS)
+def test_distributed_pyproject_is_the_only_carrier_of_test_config(key: str) -> None:
+    """テスト設定キーが、配布除外される pyproject.toml にしか無いこと。
 
     別ファイル（setup.cfg / tox.ini / pytest.ini 等）へ同じ設定が移ると、
-    除外リストを 1 つ足しただけでは誤検出の再発を防げなくなる。
+    除外リストを 1 つ足しただけでは誤検出の再発を防げなくなる。キーごとに
+    独立ケースとして回し、1 キーの漏れが他キーの一致に紛れないようにする。
     """
     plugin_root = _REPO_ROOT / "plugins" / "ple4"
-    carriers = [
+    carriers = sorted(
         path.relative_to(_REPO_ROOT).as_posix()
         for path in plugin_root.glob("*")
-        if path.is_file() and ("testpaths" in path.read_text(encoding="utf-8", errors="ignore"))
-    ]
+        if path.is_file() and (key in path.read_text(encoding="utf-8", errors="ignore"))
+    )
     assert carriers == ["plugins/ple4/pyproject.toml"]
