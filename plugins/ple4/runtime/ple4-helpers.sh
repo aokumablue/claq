@@ -49,15 +49,6 @@ ple4_run() {
   "${plugin_root}/runtime/ple4-hook" "$@"
 }
 
-# Run a ple4 launcher command in the background and print the PID.
-ple4_run_bg() {
-  local plugin_root
-  plugin_root="$(ple4_plugin_root)"
-
-  nohup "${plugin_root}/runtime/ple4-hook" "$@" >/dev/null 2>&1 &
-  printf '%s\n' "$!"
-}
-
 # Record one knowledge card in the mem database (`mem learn`).
 #
 # Usage:
@@ -146,5 +137,12 @@ collect_skill_create_inputs() {
   git log --oneline -n "${commits}" --name-only --pretty=format:"%H|%s|%ad" --date=short
 
   printf '\n%s\n' "# ファイルごとのコミット頻度"
-  git log --oneline -n "${commits}" --name-only | grep -v "^$" | grep -v "^[a-f0-9]" | sort | uniq -c | sort -rn | head -20
+  # 空の `--pretty=format:` でコミット見出しを最初から出力しない。
+  # 以前は `--oneline` で見出しを出してから `grep -v "^[a-f0-9]"` で短縮 SHA を
+  # 落としていたが、これは 16 進数字で始まる**実在パスも巻き添えにする**。
+  # 実測で agents/ commands/ docs/ conftest.py が消え、plugins/ scripts/ は
+  # 残るため欠落に気づけず、/skill-gen が「agents/commands はほとんど触られて
+  # いない」という誤った頻度表を受け取っていた。出力しないものは選り分ける
+  # 必要も無いので、残すフィルタは空行除去だけでよい。
+  git log -n "${commits}" --name-only --pretty=format: | grep -v "^$" | sort | uniq -c | sort -rn | head -20
 }

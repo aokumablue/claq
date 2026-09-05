@@ -133,14 +133,17 @@ fi
 echo "[ple4] Installing developer-only Python extras"
 pip_install_quiet -e "${PLUGIN_ROOT}[dev]"
 
-# PATH にシムリンクを作成 (venv 外から hook が呼べるように)
+# 開発ツールは venv の中だけに置く。
+#
+# 以前はここで /usr/local/bin/{ruff,vulture} へ symlink を張っていたが、
+# リポジトリローカルの開発インストーラがシステム全体を書き換えるのは行き過ぎで、
+# しかも張り先が checkout 固有の ${REPO_ROOT}/.venv/bin/* なので checkout を
+# 消すと ruff がシステム全体で dangling symlink になる（change-repository.sh の
+# 後始末もこの symlink を回収しない）。sudo も非対話環境ではパスワード待ちで
+# 止まる。案内だけ出して、解決は venv の有効化に委ねる。
 for tool in ruff vulture; do
   if ! command -v "${tool}" >/dev/null 2>&1; then
-    if [[ -x "${VENV_DIR}/bin/${tool}" ]]; then
-      echo "[ple4] Symlinking ${tool} -> /usr/local/bin/${tool}"
-      sudo ln -sf "${VENV_DIR}/bin/${tool}" "/usr/local/bin/${tool}" 2>/dev/null \
-        || echo "[ple4] Warning: could not symlink ${tool} to /usr/local/bin (no sudo?). Add ${VENV_DIR}/bin to PATH." >&2
-    fi
+    echo "[ple4] ${tool} is available inside the venv only. Run 'source ${VENV_DIR}/bin/activate' (or add ${VENV_DIR}/bin to PATH) before invoking it."
   fi
 done
 

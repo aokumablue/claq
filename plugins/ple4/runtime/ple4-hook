@@ -26,8 +26,26 @@ case "$0" in
   */*) _ple4_hook_dir=${0%/*} ;;
   *) _ple4_hook_dir=. ;;
 esac
-_ple4_root=$(CDPATH= cd -- "$_ple4_hook_dir/.." && pwd) || exit 0
+# `cd` が失敗してもここでは抜けない。root が解決できなければ launcher も
+# 見つからず、下の存在検査が診断付きの fail-open で終わらせる。以前はこの行で
+# 無言の exit 0 をしており、保護が無効化されたことが誰にも観測できなかった。
+_ple4_root=$(CDPATH= cd -- "$_ple4_hook_dir/.." && pwd)
 _ple4_launcher="$_ple4_root/src/ple4/launcher.py"
+
+# インタプリタ選択より **前** に launcher の存在を確かめる。3 つの exec 経路は
+# どれも同じファイルを渡すため、ここを通さないと不在時に全経路が同じ形で壊れる。
+#
+# `python3 <存在しないファイル>` は **exit 2** を返す。PreToolUse の「exit 2 =
+# deny」契約により、不完全インストール・Grok の hash symlink 切れ・root 解決の
+# 失敗はいずれも「4 つの保護 hook が全ツール呼び出しを偽 deny する」という形に
+# 化けていた。これは上に書いた fail-open ポリシーの真逆であり、しかも復旧手段の
+# Bash ごと塞ぐためセッション内から直せない。読めない launcher も python 側は
+# 同じ exit 2 になるので、存在と可読性を一度に見る。
+if [ ! -f "$_ple4_launcher" ] || [ ! -r "$_ple4_launcher" ]; then
+  printf '%s\n' "ERROR: ple4 launcher is missing or unreadable at $_ple4_launcher. Hooks are disabled until the plugin install is repaired (reinstall the plugin; on Grok re-run scripts/grok.sh to relink the hashed install directory)." >&2
+  printf '%s%s%s\n' '{"ple4ProtectionDisabled": true, "reason": "launcher_not_found", "launcher": "' "$_ple4_launcher" '"}' >&2
+  exit 0
+fi
 
 if [ -n "${PLE4_PYTHON:-}" ]; then
   exec "$PLE4_PYTHON" "$_ple4_launcher" "$@"
