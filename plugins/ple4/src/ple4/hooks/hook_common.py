@@ -118,26 +118,111 @@ def extract_shell_wrapper_command(segment: list[str]) -> str | None:
     return None
 
 
-def _heredoc_delimiters(line: str) -> list[tuple[str, bool]]:
-    """行に現れる heredoc の区切り語を出現順に返す。
+def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], str | None]:
+    """heredoc 演算子になりうる ``<`` の位置と、行末のクォート状態を返す。
+
+    コメント内・クォート内・``\\`` エスケープ後の ``<`` は heredoc を開始しない。
+    これらを演算子として採ると、実際には**実行される**後続行が「本文」として
+    捨てられる（実測: ``# <<EOF`` 改行 ``git commit --no-verify`` 改行 ``EOF`` で
+    保護フック 3 種が揃って exit 0 になった）。ADR-0017 が本文剥がしを正当化した
+    前提「本文範囲は演算子・区切り語・終端行だけで決まる」は、そもそも heredoc が
+    開始しないこの形では成立しない。
+
+    クォート状態は行をまたぐため（シェルのクォートは改行を含む）、呼び出し元が
+    **非本文行だけ**を鎖のように繋いで渡す。heredoc 本文行・終端行はシェルの
+    語彙ではないので状態を更新してはならない — 本文中の ``#`` や閉じない
+    アポストロフィ（``don't``）で以降の解析が壊れる。
+
+    ``\\`` エスケープは行内で完結させる。行末の ``\\`` が消費するのは改行自体
+    （行継続）であり、次行の先頭文字ではないため、状態として持ち越さない。
+
+    コメント判定は `_strip_line_comments` と同じ POSIX 規則（語の先頭にある
+    ``#`` だけ）で、`_COMMENT_PRECEDING_CHARS` を共有する。前段で
+    `_strip_line_comments` を単純適用する形は採れない — heredoc 本文中の ``#``
+    や閉じないアポストロフィまで巻き込んで壊すため。
 
     Args:
-        line: 走査対象の 1 物理行。
+        line: 走査対象の 1 物理行（非本文行）。
+        quote: 直前の非本文行から持ち越した未閉鎖クォート文字。無ければ None。
 
     Returns:
-        (区切り語, タブ剥がし可（``<<-``）) のリスト。無ければ空リスト。
+        (演算子候補となる ``<`` の位置リスト, 行末時点の未閉鎖クォート文字)。
 
     Raises:
         例外は発生しません。
     """
+    offsets: list[int] = []
+    escaped = False
+    in_comment = False
+    previous = "\n"
+    for index, char in enumerate(line):
+        if in_comment:
+            continue
+        if escaped:
+            escaped = False
+            previous = char
+            continue
+        if char == "\\" and quote != "'":
+            escaped = True
+            previous = char
+            continue
+        if quote is not None:
+            if char == quote:
+                quote = None
+            previous = char
+            continue
+        if char in ("'", '"'):
+            quote = char
+            previous = char
+            continue
+        if char == "#" and previous in _COMMENT_PRECEDING_CHARS:
+            in_comment = True
+            continue
+        if char == "<":
+            offsets.append(index)
+        previous = char
+    return offsets, quote
+
+
+def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, bool]], str | None]:
+    """行に現れる heredoc の区切り語を出現順に返し、行末のクォート状態も返す。
+
+    照合は `_operator_start_offsets` が返した位置からのみ行う。生の行へ
+    `finditer` を当てていた頃は、コメント内・クォート内の ``<<`` を演算子と
+    誤認していた。位置を絞ってから `re.Pattern.match` するため lookbehind
+    （``(?<!<)``）は従来どおり手前の文字を見られる。
+
+    採用した照合は `finditer` と同じく非重複にする（`consumed_to` で
+    直前の照合範囲内の候補を飛ばす）。位置ごとに独立して照合すると、
+    クォート内の ``<<`` を跨いだ重複照合が新たな区切り語を生み、本文を
+    余計に剥がす＝誤通過側へ倒れうるため。
+
+    Args:
+        line: 走査対象の 1 物理行（非本文行）。
+        quote: 直前の非本文行から持ち越した未閉鎖クォート文字。無ければ None。
+
+    Returns:
+        ((区切り語, タブ剥がし可（``<<-``）) のリスト, 行末時点の未閉鎖クォート文字)。
+
+    Raises:
+        例外は発生しません。
+    """
+    offsets, next_quote = _operator_start_offsets(line, quote)
     delimiters = []
-    for match in _HEREDOC_OPERATOR_RE.finditer(line):
+    consumed_to = 0
+    for offset in offsets:
+        if offset < consumed_to:
+            continue
+        match = _HEREDOC_OPERATOR_RE.match(line, offset)
+        if match is None:
+            continue
         # ``<<''`` の空文字列区切りを落とさないため or 連結にしない。
         word = next(
             value for value in (match.group("squote"), match.group("dquote"), match.group("bare")) if value is not None
         )
         delimiters.append((word, match.group(1) == "-"))
-    return delimiters
+        consumed_to = match.end()
+    return delimiters, next_quote
 
 
 def _line_keeps_heredoc_bodies(line: str) -> bool:
@@ -215,6 +300,14 @@ def strip_data_heredoc_bodies(command: str) -> str:
        ``cat <<'EOF' | bash`` / ``. /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``）
     2. 演算子行が継続演算子で終わる（本文開始が次行とは限らない）
     3. 終端行が見つからない（未終端）
+    4. ``<<`` がそもそも heredoc 演算子ではない（コメント内・クォート内・
+       ``\\`` エスケープ後）。この場合 heredoc は開始せず、後続行は**実行される
+       コマンド**なので、本文として剥がすと保護フックが素通りする（実測:
+       ``# <<EOF`` 改行 ``git commit --no-verify`` 改行 ``EOF`` で 3 フックが
+       揃って exit 0）。ADR-0017 の前提「本文範囲は演算子・区切り語・終端行だけ
+       で決まる」はここでは成立しない。判定は `_operator_start_offsets` が持つ
+       クォート／コメント状態で行い、状態は**非本文行だけ**を鎖にして更新する
+       （本文行・終端行はシェルの語彙ではないため）。
 
     終端行を残すため冪等（``f(f(x)) == f(x)``）。
 
@@ -233,11 +326,13 @@ def strip_data_heredoc_bodies(command: str) -> str:
     lines = command.split("\n")
     output = []
     index = 0
+    # 非本文行だけを繋いだクォート状態。本文行・終端行では更新しない。
+    quote: str | None = None
     while index < len(lines):
         line = lines[index]
         output.append(line)
         index += 1
-        delimiters = _heredoc_delimiters(line)
+        delimiters, quote = _heredoc_delimiters(line, quote)
         if not delimiters or _line_keeps_heredoc_bodies(line):
             continue
         consumed = _consume_heredoc_bodies(lines, index, delimiters)

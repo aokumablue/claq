@@ -1283,11 +1283,93 @@ class TestHeredocNormalization:
             ("grep x <<<EOF", []),
             ("echo hi", []),
             ("cat <<A <<B", [("A", False), ("B", False)]),
+            # 「幻の演算子」: heredoc を開始しない `<<` を演算子として採らない。
+            # 採ると後続の**実行される**行が本文として捨てられ、保護フックが
+            # 素通りする（実測。C-1）。
+            ("# <<EOF", []),
+            ("  # <<EOF", []),
+            ("cat x # <<EOF", []),
+            ('echo "<<EOF"', []),
+            ("echo '<<EOF'", []),
+            (r"echo \<<EOF", []),
+            # 陰性対照: 演算子として採るべき形を巻き込んで消していないこと。
+            ("echo a#b <<EOF", [("EOF", False)]),
+            ("cat <<EOF # note", [("EOF", False)]),
+            ("cat <<EOF > out.md", [("EOF", False)]),
+            ("echo '#' && cat <<EOF", [("EOF", False)]),
         ],
     )
     def test_heredoc_delimiters(self, line: str, expected: list) -> None:
-        """区切り語の抽出。`<<<`（herestring）は heredoc として拾わない。"""
-        assert hook_common._heredoc_delimiters(line) == expected
+        """区切り語の抽出。`<<<`（herestring）とコメント内・クォート内は拾わない。"""
+        assert hook_common._heredoc_delimiters(line, None) == (expected, None)
+
+    @pytest.mark.parametrize(
+        ("label", "line", "quote", "expected"),
+        [
+            (
+                "開いたダブルクォートの内側は演算子にしない",
+                "still quoted <<EOF",
+                '"',
+                ([], '"'),
+            ),
+            (
+                "行内でクォートが閉じれば以降は演算子",
+                'end" && cat <<EOF',
+                '"',
+                ([("EOF", False)], None),
+            ),
+            (
+                "開いたシングルクォート内の \\ は literal（エスケープしない）",
+                r"a\' <<EOF",
+                "'",
+                ([("EOF", False)], None),
+            ),
+            (
+                "開いたダブルクォート内の \\ は次の 1 文字を消費する",
+                r'a\" <<EOF',
+                '"',
+                ([], '"'),
+            ),
+            (
+                "閉じないクォートは次行へ持ち越す",
+                'echo "open',
+                None,
+                ([], '"'),
+            ),
+            (
+                "開いたクォート内の # はコメントにならない",
+                "a # b\" && cat <<EOF",
+                '"',
+                ([("EOF", False)], None),
+            ),
+        ],
+    )
+    def test_heredoc_delimiters_carries_quote_state(
+        self, label: str, line: str, quote: str | None, expected: tuple
+    ) -> None:
+        """クォート状態は行をまたいで持ち越される（シェルのクォートは改行を含む）。"""
+        assert hook_common._heredoc_delimiters(line, quote) == expected, label
+
+    @pytest.mark.parametrize(
+        ("label", "line", "expected"),
+        [
+            ("演算子にならない < は候補のまま照合で落ちる", "a < b", ([2], [])),
+            ("herestring は候補 3 つすべてが照合で落ちる", "x <<<y", ([2, 3, 4], [])),
+            ("同一演算子の 2 文字目は照合済み範囲として飛ばす", "cat <<A", ([4, 5], [("A", False)])),
+            ("行末の \\ は次行へ持ち越さない", "cat <<A \\", ([4, 5], [("A", False)])),
+        ],
+    )
+    def test_operator_start_offsets(self, label: str, line: str, expected: tuple) -> None:
+        """候補位置の抽出と、そこからの非重複照合。
+
+        候補が挙がっても `_HEREDOC_OPERATOR_RE` が一致しなければ区切り語にならない。
+        1 つの演算子の 2 文字目（`<<A` の 2 つ目の `<`）は直前の照合範囲内なので
+        `finditer` と同じく飛ばす。
+        """
+        offsets, quote = hook_common._operator_start_offsets(line, None)
+
+        assert (offsets, quote) == (expected[0], None), label
+        assert hook_common._heredoc_delimiters(line, None) == (expected[1], None), label
 
     @pytest.mark.parametrize(
         ("line", "expected"),
@@ -1383,6 +1465,49 @@ class TestHeredocNormalization:
                 "cat <<'EOF' |\nbash\ngit commit --no-verify\nEOF",
                 "cat <<'EOF' |\nbash\ngit commit --no-verify\nEOF",
             ),
+            # C-1「幻の演算子」。heredoc が開始しない `<<` を演算子として採ると、
+            # 実行される後続行が本文として消え、保護フック 3 種が同時に素通りする。
+            (
+                "コメント内の << では本文を剥がさない",
+                "# <<EOF\ngit commit --no-verify -m x\nEOF",
+                "# <<EOF\ngit commit --no-verify -m x\nEOF",
+            ),
+            (
+                "ダブルクォート内の << では本文を剥がさない",
+                'echo "<<EOF"\ngit commit --no-verify -m x\nEOF',
+                'echo "<<EOF"\ngit commit --no-verify -m x\nEOF',
+            ),
+            (
+                "シングルクォート内の << では本文を剥がさない",
+                "echo '<<EOF'\ngit commit --no-verify -m x\nEOF",
+                "echo '<<EOF'\ngit commit --no-verify -m x\nEOF",
+            ),
+            (
+                "エスケープされた << では本文を剥がさない",
+                "echo \\<<EOF\ngit commit --no-verify -m x\nEOF",
+                "echo \\<<EOF\ngit commit --no-verify -m x\nEOF",
+            ),
+            (
+                "行をまたいで開いたクォート内の << も演算子にしない",
+                'echo "open\n<<EOF\ngit commit --no-verify\nEOF',
+                'echo "open\n<<EOF\ngit commit --no-verify\nEOF',
+            ),
+            # 陰性対照: 状態追跡が本物の heredoc の本文剥がしを壊していないこと。
+            (
+                "演算子行の行末コメントは本文剥がしを妨げない",
+                "cat > n.md <<'EOF' # note\ngit commit --no-verify\nEOF",
+                "cat > n.md <<'EOF' # note\nEOF",
+            ),
+            (
+                "本文の # とアポストロフィは状態を持ち越さない",
+                "cat > n.md <<'EOF'\ndon't # note\nEOF\ngit commit --no-verify",
+                "cat > n.md <<'EOF'\nEOF\ngit commit --no-verify",
+            ),
+            (
+                "終端行が引用符を含んでも状態を持ち越さない",
+                "cat > n.md <<\"E'F\"\nprose\nE'F\ngit commit --no-verify",
+                "cat > n.md <<\"E'F\"\nE'F\ngit commit --no-verify",
+            ),
         ],
     )
     def test_strip_data_heredoc_bodies(self, label: str, command: str, expected: str) -> None:
@@ -1404,6 +1529,9 @@ class TestHeredocNormalization:
             "cat > note.md <<'EOF'\nprose\nEOF \nEOF",
             "cat > note.md <<'EOF'\r\nprose\r\nEOF\r\n",
             "echo hi",
+            "# <<EOF\ngit commit --no-verify\nEOF",
+            'echo "<<EOF"\ngit commit --no-verify\nEOF',
+            "cat > n.md <<'EOF'\ndon't # note\nEOF\ngit commit --no-verify",
         ],
     )
     def test_strip_is_idempotent(self, command: str) -> None:
