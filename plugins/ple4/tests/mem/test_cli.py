@@ -1059,6 +1059,25 @@ class TestContext:
         assert "--no-verify を使え" not in injected
         assert "exit 1" in injected
 
+    def test_knowledge_card_hiding_a_secret_behind_a_tag_is_not_injected_raw(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """タグで分断された鍵を持つカードは注入前に倒れる。
+
+        ここは ``strip_tags`` が最後の関門になる経路である。
+        ``_format_injected_item`` は ``strip_tags`` の後に ``redact`` を掛けず、
+        書き込み時の ``redact_knowledge_text`` も分断された鍵は 1 本の文字列に
+        見えないため素通りさせる（実測）。倒さなければ未マスクの鍵が以後の全
+        SessionStart へ注入され続ける。
+        """
+        tail = "api03-" + "A" * 40
+        _seed(tmp_path, scope="global", key="k", title="t", body="sk-" + "ant-" + "<private>" + tail)
+
+        injected = self._inject(monkeypatch, tmp_path)
+
+        assert tail not in injected
+        assert "[REDACTED]" in injected
+
     def test_no_bg_failure_notice_omits_fourth_section(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

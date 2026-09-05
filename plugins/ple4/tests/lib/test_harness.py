@@ -807,6 +807,40 @@ class TestOrphanDetectionIgnoresAttributeLimit:
         assert harness.normalize_user_message(text) == text
 
 
+class TestOrphanDetectionReachesTheEndOfString:
+    """文字列の終端で終わる足場タグも孤立タグとして破棄される。
+
+    除去側の「名前の終わり」（``_TAG_NAME_END``）は名前の後ろに 1 文字を要求する。
+    破棄判定がこれを共有していた頃は、発話が足場タグ名で終わる入力
+    （``payload["handoff"] = "作業完了 <system-reminder"``）がブロック除去にも
+    孤立検出にも一致せず、ADR-0015 の fail closed に穴が残っていた（実測）。
+    明示 handoff 経路は他の要因なしで単独成立する。
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "作業完了 <system-reminder",
+            "作業完了 </system-reminder",
+            "<agent-message",
+            "作業完了 <system-reminder\n",
+        ],
+        ids=["open-at-end", "close-at-end", "only-tag", "trailing-newline"],
+    )
+    def test_scaffold_tag_at_end_of_string_is_discarded(self, text: str) -> None:
+        """終端で終わる足場タグはメッセージごと破棄される。"""
+        assert harness.normalize_user_message(text) == ""
+
+    @pytest.mark.parametrize(
+        "text",
+        ["作業完了 <system-reminders", "作業完了 <system-remind", "a < b の比較"],
+        ids=["longer-name", "shorter-name", "bare-lt"],
+    )
+    def test_similar_text_at_end_of_string_survives(self, text: str) -> None:
+        """名前が一致しない終端は破棄しない（偽陽性方向）。"""
+        assert harness.normalize_user_message(text) == text
+
+
 class TestScaffoldRemovalStaysLinear:
     """足場除去が入力長に対して線形であることを守る。
 

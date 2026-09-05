@@ -35,6 +35,35 @@ _COMPACTION_REPLACEMENTS = (
 )
 
 
+def remove_filler_phrases(value: str) -> str:
+    """埋め草表現を位置に関わらず削除する。
+
+    本モジュールの変換のうち、**行の途中から文字を消す唯一の処理**である。
+    ``_LEADING_PHRASES`` は行頭のみ、``_COMPACTION_REPLACEMENTS`` は別語句を
+    挿入するため前後の文字が隣接せず、空白の畳み込みは空白 1 個を必ず残し、
+    末尾の記号除去は端だけを見る。つまり「削除で前後が接着する」経路はここ
+    しか無い。
+
+    公開しているのは ``mem/tag_stripping`` がこの接着を検査するためである。
+    無害化（escape）の後段でこの削除が走ると ``<system-まあreminder>`` が
+    ``<system-reminder>`` へ組み上がり、escape を最後に置いた不変条件が
+    パイプライン単位で破れる。検査側が同じ語彙を写経すると片方だけ更新されて
+    静かに破れるため、語彙ではなく関数を共有する。
+
+    Args:
+        value: 削除前のテキスト。
+
+    Returns:
+        埋め草表現を取り除いたテキスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    for phrase in _FILLER_PHRASES:
+        value = value.replace(phrase, "")
+    return value
+
+
 def _strip_markdown_prefix(line: str) -> str:
     """見出しや箇条書きの先頭記号を落とす。"""
     stripped = line.lstrip()
@@ -106,8 +135,7 @@ def _normalize_line(text: str) -> str:
         if value.startswith(phrase):
             value = value[len(phrase) :].lstrip()
 
-    for phrase in _FILLER_PHRASES:
-        value = value.replace(phrase, "")
+    value = remove_filler_phrases(value)
 
     for source, target in _COMPACTION_REPLACEMENTS:
         value = value.replace(source, target)

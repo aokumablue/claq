@@ -37,14 +37,46 @@
     名前の終わりを要求せず、境界マーカーの偽装に使えそうな ``<`` を広く倒す。
     最後の防壁は広く、破壊的な処理は狭く、という非対称は意図的である。
 
-なお ``<system-reminder>`` 等のハーネス足場タグは本モジュールの語彙ではない
-（``lib/harness.normalize_user_message`` が中身を捨てるべき別規則として扱う。
-ADR-0015 代替案 3）。両者を 1 つの関数へ寄せない。
+パイプライン単位で不変条件を守る 2 つの検査
+    「エスケープを最後に置く」は本モジュールの中でしか成立しない。呼び出し側の
+    後段に別の変換が控えていると、同じ穴がモジュールの外側で開く。単体では
+    見えないため、``strip_tags`` は返す直前に 2 つの検査を通す。
+
+    1. **シークレットのタグ分断**（``_hides_secret_behind_tags``）: escape は
+       文字を消さないため、``sk-ant-<private>api03-…`` は 1 本の鍵へ戻らず
+       ``redact`` のパターンに一致しない（``&`` が文字クラスの外にある）。
+       「鍵を書くとき ``sk-ant-`` の直後へ ``<private>`` を 1 個入れろ」と
+       指示するだけで redaction を回避できてしまう。判定専用の複製
+       （``_erase_known_tags``。出力へは決して回さない）を使い、**マスクと
+       タグ除去が可換か**を調べる。可換でなければタグが秘密を隠しているので
+       本文ごと ``[REDACTED]`` へ倒す。マスク個数の比較では足りない —
+       出力側が別のパターンで 1 個マスクされていると個数が釣り合い、鍵が
+       分断されたまま素通りする（属性 512 文字超のペアタグで実測）。
+    2. **削除変換によるタグの再鍛造**（``_forges_tag_after_deletion``）:
+       後段の ``slim_text.remove_filler_phrases`` は ``まあ`` ``ちなみに`` 等を
+       位置に関わらず削除するため、escape 済みの本文からタグを組み上げ直せる。
+       実測: ``<system-まあreminder>`` は本モジュールのどの語彙にも一致せず
+       素通りし、圧縮後に生きた ``<system-reminder>`` になる。削除後の複製で
+       無害化対象が**増える**なら、``&`` と ``<`` を 1 つ残らず倒して返す。
+       倒した後は削除で ``<`` も ``&lt;`` も作れないため、この 1 手で閉じる
+       （反復は要らない = fail open の余地が無い）。
+
+なお ``<system-reminder>`` 等のハーネス足場タグを**中身ごと除去する**規則は今も
+本モジュールの管轄外である（``lib/harness.normalize_user_message`` が担う。
+ADR-0015 代替案 3）。escape の語彙にだけ足場タグを含めるのは、ADR-0015 が
+却下した「2 つの規則の合流」に当たらないため — 却下理由は「中身を残すべき用途と
+捨てるべき用途が同じ関数に同居する」ことであり、escape はどちらの用途でも中身を
+残すのでこの衝突が起きない。実際に注入側（``mem/cli._handoff_section``）は
+``strip_tags`` しか掛けず、足場タグを倒す手段が他に無い。
 """
 
 from __future__ import annotations
 
 import re
+
+from ple4.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS
+from ple4.lib.slim_text import remove_filler_phrases
+from ple4.mem.redaction import redact
 
 # 無害化対象タグ（大文字小文字区別なし）。正規表現へ literal として埋めるため、
 # 正規表現メタ文字を含まない名前だけを置く。
@@ -116,18 +148,45 @@ _PAIR_PATTERNS = [
 
 # 判定専用の「既知タグを除去する」パターン。属性は改行と `<` を跨がせない
 # （跨がせると判定用複製の側で本文を巻き込み、誤った fail closed を招く）。
+# escape 済みの表記（`&lt;private>`）も対象にする — 判定は `strip_tags` が
+# 返そうとしている**出力**に対して行うため、生の `<` はそもそも残っていない。
 _ERASE_PATTERN = re.compile(
-    r"</?(?:" + "|".join(_TAGS) + r")" + _TAG_NAME_END + r"[^<>\n]{0,1024}>",
+    r"(?:<|&lt;)/?(?:" + "|".join(_TAGS) + r")" + _TAG_NAME_END + r"[^<>\n]{0,1024}>",
     re.IGNORECASE,
 )
+
+# escape 対象のタグ語彙。ペア除去（`_TAGS`）より広く、ハーネス足場タグと
+# スラッシュコマンド起動タグを含める。**`_PAIR_PATTERNS` は決してこの語彙へ
+# 広げない** — 中身を捨てる規則は `lib/harness` の管轄で、合流は ADR-0015 が
+# 却下している。escape はどちらの用途でも中身を残すため衝突しない。
+# 値は各定義モジュールから導出する（写経すると片方だけ更新されて穴が開く）。
+_NEUTRALIZE_TAGS = (*_TAGS, *SCAFFOLD_TAGS, *COMMAND_TAGS)
 
 # 既知タグ名（開始・終了の両方）の直前にある `<` を捉える先読み。属性も `>` も
 # 見ないため、属性の長さ・閉じ括弧の有無に関わらず必ず一致する。先読みは固定幅の
 # 選択肢なので走査は入力長に対して線形。
-_NEUTRALIZE_PATTERN = re.compile(r"<(?=/?(?:" + "|".join(_TAGS) + r"))", re.IGNORECASE)
+_NEUTRALIZE_PATTERN = re.compile(r"<(?=/?(?:" + "|".join(_NEUTRALIZE_TAGS) + r"))", re.IGNORECASE)
+
+# `<` を表す HTML 実体参照の先頭 `&`。`<` の escape より**前**に倒すことで、
+# 無害化を単射に保つ。倒さないと、悪意ある `</ple4-memory>` の出力と、良性の
+# 本文が literal で書いた `&lt;/ple4-memory>` の出力がバイト同一になり、将来
+# どこかで実体参照の復号が入った瞬間に後者の見た目をした前者が生きたタグへ戻る。
+# `&lt` の大小は HTML5 が定義する `&lt;` と `&LT;` の 2 通りだけで、`&Lt;` は
+# 実体参照ではない（`html.unescape` も復号しない）ため語彙に入れない。
+# この置換も文字を消さないので no-deletion 性質と 1 パス完全性は保たれる。
+_ENTITY_LT_PATTERN = re.compile(r"&(?=lt;|LT;|#0*60;|#[xX]0*3[cC];)")
 
 # `<` の置換先。文字を消さずにタグとしての機能だけを奪う。
 _NEUTRALIZED_LT = "&lt;"
+
+# `&` の置換先。実体参照の先頭としての機能だけを奪う。
+_NEUTRALIZED_AMP = "&amp;"
+
+# 検査が細工を検出したときに返す本文。`redaction._PLACEHOLDER` と同じ文字列だが、
+# 依存の向きを増やさないためここで持つ（`mem/handoff.py` も同じ理由で自前に持つ）。
+# 空文字列にはしない — 呼び出し側の `redact` を通しても `[REDACTED]` が残ることが、
+# 「秘密が入っていたが倒した」という事実を下流へ伝える唯一の手段になる。
+_REDACTION_MARKER = "[REDACTED]"
 
 # 3 行以上の空行を 2 行へ詰めるパターン。
 _BLANK_LINES = re.compile(r"\n{3,}")
@@ -158,6 +217,142 @@ def _drop_paired_blocks(text: str) -> str:
     return text
 
 
+def _collapse_blank_lines(text: str) -> str:
+    """3 行以上の空行を 2 行へ詰め、前後の空白を落とす。
+
+    削除ではあるが、空行は 2 行残るため前後の文字が接着することはない
+    （タグの再鍛造経路にならない）。
+
+    Args:
+        text: 整形前のテキスト。
+
+    Returns:
+        空行を詰めて前後を strip したテキスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _BLANK_LINES.sub("\n\n", text).strip()
+
+
+def _neutralize(text: str) -> str:
+    """実体参照の ``&`` とタグの ``<`` を、この順で倒す。
+
+    順序は入れ替えられない。``<`` を先に倒すと自分で書いた ``&lt;`` の ``&`` を
+    次の段が ``&amp;lt;`` へ二重エスケープしてしまう。
+
+    Args:
+        text: 無害化前のテキスト。
+
+    Returns:
+        既知タグ名の直前に生の ``<`` を持たず、``<`` を表す実体参照も倒した
+        テキスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _NEUTRALIZE_PATTERN.sub(_NEUTRALIZED_LT, _ENTITY_LT_PATTERN.sub(_NEUTRALIZED_AMP, text))
+
+
+def _neutralization_targets(text: str) -> int:
+    """無害化対象（倒すべき ``&`` と ``<``）の個数を数える。
+
+    削除変換がタグを組み上げ直していないかの判定に使う。埋め草表現は
+    非 ASCII なのでタグ名や実体参照の一部にはならず、削除は対象を**増やす**
+    ことしかできない。したがって個数の増加は「削除で新しい無害化対象が
+    生まれた」ことと同値になる。
+
+    Args:
+        text: 判定対象のテキスト。
+
+    Returns:
+        両パターンの一致数の合計。
+
+    Raises:
+        例外は発生しません。
+    """
+    return len(_ENTITY_LT_PATTERN.findall(text)) + len(_NEUTRALIZE_PATTERN.findall(text))
+
+
+def _erase_known_tags(text: str) -> str:
+    """既知タグの表記を**除去**した判定専用の複製を返す。
+
+    **戻り値を出力・永続化・注入へ回してはならない。** 除去は消した箇所の前後を
+    接着して新しい生きたタグを作るため（モジュール docstring の C-3）、この関数の
+    結果は「もしタグが書かれていなければ何が見えたか」を調べるためだけに使う。
+
+    Args:
+        text: 判定対象のテキスト（生の ``<`` でも escape 済みの ``&lt;`` でもよい）。
+
+    Returns:
+        既知タグの表記を取り除いたテキスト。**出力には使わないこと。**
+
+    Raises:
+        例外は発生しません。
+    """
+    return _ERASE_PATTERN.sub("", text)
+
+
+def _hides_secret_behind_tags(text: str) -> bool:
+    """タグ表記が秘密を分断して ``redact`` から隠していないかを判定する。
+
+    ``redact`` とタグ除去が**可換か**を見る。可換であれば、タグを外しても
+    新しく見えるものは無い。可換でなければ、タグ表記が秘密の途中に割り込んで
+    ``redact`` のパターンを分断している。
+
+    マスクの個数比較では足りない。属性 512 文字超のペアタグで分断した鍵は、
+    出力側でも属性そのものが ``base64_long`` で 1 個マスクされるため個数が
+    釣り合い、鍵が分断されたまま素通りする（実測）。個数ではなく結果そのものを
+    突き合わせる。
+
+    消すタグが 1 つも無ければ両辺は同じ式になるため、``redact`` を走らせずに
+    False を返す。``redact`` は 16 本の正規表現を通す重い処理で、``strip_tags``
+    は SessionStart の同期フックが知識カードごとに呼ぶ。タグを含まない入力が
+    大多数であり、そこへ 2 パス増やすと 1MB の入力で 1.2 秒（早期脱出後は
+    0.03 秒）かかる。
+
+    Args:
+        text: ``strip_tags`` が返そうとしている無害化済みテキスト。
+
+    Returns:
+        タグ除去とマスクが可換でなければ True。
+
+    Raises:
+        例外は発生しません。
+    """
+    erased = _erase_known_tags(text)
+    if erased == text:
+        return False
+    return _erase_known_tags(redact(text)) != redact(erased)
+
+
+def _forges_tag_after_deletion(text: str) -> bool:
+    """後段の削除変換がタグ・実体参照を組み上げ直せるかを判定する。
+
+    ``slim_text.remove_filler_phrases`` は本パイプラインで唯一「行の途中から
+    文字を消す」変換であり、escape の後段に置かれる（``mem/handoff`` の
+    ``compact_line``）。削除で無害化対象が増えるなら、出力はそのままでは
+    渡せない。
+
+    削除するものが無ければ両辺が同じ文字列になるため、数える前に False を
+    返す（``_hides_secret_behind_tags`` と同じ早期脱出。1MB の入力で 0.5 秒が
+    0.05 秒になる）。
+
+    Args:
+        text: ``strip_tags`` が返そうとしている無害化済みテキスト。
+
+    Returns:
+        埋め草削除で無害化対象が増えるなら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    deleted = remove_filler_phrases(text)
+    if deleted == text:
+        return False
+    return _neutralization_targets(deleted) > _neutralization_targets(text)
+
+
 def strip_tags(text: str) -> str:
     """信頼境界タグを無害化し、連続空行を詰める。
 
@@ -168,12 +363,24 @@ def strip_tags(text: str) -> str:
     しまう経路（``'<<private>/ple4-memory>'`` → ``'</ple4-memory>'``）を
     構造的に塞ぐ。理由の詳細はモジュール docstring を参照。
 
+    返す直前に 2 つの検査を通し、いずれかが立てば fail closed に倒す。
+
+    - 秘密がタグで分断されている: 本文ごと ``[REDACTED]`` にする。断片を救う
+      利得より、未マスクの鍵が ``sessions.handoff`` へ永続化され、あるいは
+      知識カードとして以後の全 SessionStart へ注入される損失のほうが大きい
+      （``mem/cli._format_injected_item`` は ``strip_tags`` の後に ``redact``
+      を掛けない。書き込み時の ``redact_knowledge_text`` も分断された鍵は
+      見えないため、ここが最後の関門になる）。
+    - 後段の削除変換でタグを組み上げ直せる: ``&`` と ``<`` を 1 つ残らず倒す。
+      文字は消えないので本文は失われない。
+
     Args:
         text: 無害化前のテキスト。
 
     Returns:
         既知タグ名の直前に生の ``<`` を含まないテキスト。前後の空白と
-        3 行以上の空行は詰める。
+        3 行以上の空行は詰める。細工を検出した場合は ``[REDACTED]``、または
+        ``&`` と ``<`` を全て倒した本文。
 
     Raises:
         例外は発生しません。
@@ -181,32 +388,10 @@ def strip_tags(text: str) -> str:
     if not text:
         return text
 
-    neutralized = _NEUTRALIZE_PATTERN.sub(_NEUTRALIZED_LT, _drop_paired_blocks(text))
-    return _BLANK_LINES.sub("\n\n", neutralized).strip()
-
-
-def erase_known_tags(text: str) -> str:
-    """既知タグを**除去**した判定専用の複製を返す。
-
-    **戻り値を出力・永続化・注入へ回してはならない。** 除去は消した箇所の前後を
-    接着して新しい生きたタグを作るため（モジュール docstring の C-3）、この関数の
-    結果は「もし攻撃者がタグで分断していなければ何が見えたか」を調べるためだけに
-    使う。
-
-    用途は 1 つ、``redact`` の再結合前提の担保である。``strip_tags`` が孤立タグを
-    escape へ倒したことで、``sk-ant-<private>api03-…`` のようにタグで分断された
-    秘密は 1 本の文字列へ戻らず ``redact`` のパターンに一致しなくなった（実測。
-    ペアになったブロックだけは ``_drop_paired_blocks`` が今も再結合する）。
-    呼び出し側はこの複製にも ``redact`` を掛け、出力側より多くマスクされたら
-    「タグで秘密を分断する細工」とみなして fail closed に倒す。
-
-    Args:
-        text: 判定対象のテキスト。
-
-    Returns:
-        既知タグの表記を取り除いたテキスト。**出力には使わないこと。**
-
-    Raises:
-        例外は発生しません。
-    """
-    return _ERASE_PATTERN.sub("", _drop_paired_blocks(text))
+    dropped = _drop_paired_blocks(text)
+    neutralized = _collapse_blank_lines(_neutralize(dropped))
+    if _hides_secret_behind_tags(neutralized):
+        return _REDACTION_MARKER
+    if _forges_tag_after_deletion(neutralized):
+        return _collapse_blank_lines(dropped.replace("&", _NEUTRALIZED_AMP).replace("<", _NEUTRALIZED_LT))
+    return neutralized

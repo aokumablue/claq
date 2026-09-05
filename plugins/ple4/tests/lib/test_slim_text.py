@@ -2,7 +2,36 @@
 
 from __future__ import annotations
 
-from ple4.lib.slim_text import compact_line, first_meaningful_line
+import pytest
+
+from ple4.lib.slim_text import compact_line, first_meaningful_line, remove_filler_phrases
+
+
+class TestRemoveFillerPhrases:
+    """埋め草削除は「行の途中から文字を消す唯一の処理」である。
+
+    この性質に ``mem/tag_stripping`` の再鍛造検査が乗っている。ここに新しい
+    削除を足すと、escape 済みの本文からタグを組み上げ直す経路が復活する
+    （``<system-まあreminder>`` → ``<system-reminder>``）。
+    """
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("まあ そうする", " そうする"),
+            ("<system-まあreminder>", "<system-reminder>"),
+            ("えーとちなみに一応とりあえず基本的にざっくり言うと", ""),
+            ("削るものが無い", "削るものが無い"),
+        ],
+        ids=["leading", "mid-token", "every-phrase", "no-op"],
+    )
+    def test_phrases_are_removed_regardless_of_position(self, text: str, expected: str) -> None:
+        """埋め草は位置に関わらず消える。"""
+        assert remove_filler_phrases(text) == expected
+
+    def test_no_other_transformation_is_applied(self) -> None:
+        """空白の畳み込みや語句の言い換えはしない（削除だけを担う）。"""
+        assert remove_filler_phrases("  a   b  ") == "  a   b  "
 
 
 def test_first_meaningful_line_skips_markdown_noise() -> None:
