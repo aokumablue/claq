@@ -83,6 +83,13 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
     0700 にする。``mkdir(parents=True)`` だけだと親が umask 022 で 0755
     のまま残るため。既存の 0755 ディレクトリも締め直す。
 
+    **作成そのものを 0700 で行う**（``_mkdir_private_exist_ok``）。作成と
+    ``chmod`` を分けると、その間 ``~/.ple4`` は umask 既定（通常 0755）で
+    他 OS ユーザーから ``opendir`` できる。POSIX の権限検査はディレクトリを
+    open した時点でしか行われないため、この窓の間に取得された fd は後続の
+    ``chmod`` では失効しない。``chmod`` は「既に 0755 で存在するディレクトリ
+    を締め直す」是正用として残す。
+
     Windows では ``chmod`` が読み取り専用属性しか動かさず、DACL は変わらない
     （release-verify 2026-09-03 の P1-008）。ここで ``icacls`` や
     ``SetNamedSecurityInfo`` を呼ぶことはしない: ``%USERPROFILE%`` 配下は
@@ -102,7 +109,7 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
         OSError: 作成も chmod もできない場合。
     """
     path = Path(dir_path)
-    _mkdir_exist_ok(path)
+    _mkdir_private_exist_ok(path)
     path.chmod(0o700)
     ple4_dir = get_ple4_dir()
     try:
@@ -153,6 +160,37 @@ def _mkdir_exist_ok(path: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)
     except FileExistsError:
         pass
+
+
+def _mkdir_private_exist_ok(path: Path) -> None:
+    """欠けている祖先ごと、ディレクトリを最初から 0700 で作る。
+
+    ``mkdir(mode=0o700, parents=True)`` では**親に mode が適用されない** —
+    pathlib は欠けている親を既定モード（umask 適用後は通常 0755）で作る仕様で、
+    ``mode`` は末端にしか効かない（実測: umask 022 で ``a/b`` を作ると
+    ``a`` が 0755、``b`` が 0700）。呼び出しの大半は ``~/.ple4/<name>`` の形
+    なので、末端だけ 0700 にしても ``~/.ple4`` 自身に窓が残る。そこが
+    ``mem.db`` を持つディレクトリなので、根から順に 0700 で作る。
+
+    既存のディレクトリに対しては ``exist_ok=True`` が no-op になるだけで
+    ``chmod`` はしない（``/`` や ``$HOME`` を 0700 にはしない）。0700 は
+    group/other のビットを 1 つも立てないため、``mode & ~umask`` はどの
+    umask でも 0700 のまま — umask による緩みは起きない。
+
+    Args:
+        path: 作成するディレクトリ。
+
+    Returns:
+        なし。
+
+    Raises:
+        OSError: 作成に失敗した場合（``FileExistsError`` は競合として無視）。
+    """
+    for target in (*reversed(path.parents), path):
+        try:
+            target.mkdir(mode=0o700, exist_ok=True)
+        except FileExistsError:
+            pass
 
 
 def log(message: str) -> None:

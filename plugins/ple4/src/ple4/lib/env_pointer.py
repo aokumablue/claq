@@ -231,6 +231,14 @@ def _ensure_private_dir(path: Path) -> Path:
     「ple4_dir 配下かどうか」を判定するため、``$HOME`` 固定の本モジュールでは
     そのまま流用できない。ロジックを複製せず、必要な最小限だけをここに持つ。
 
+    作成そのものを 0700 で行い、根から順に祖先も 0700 で作る。作成と
+    ``chmod`` を分けると、その窓の間 ``~/.ple4`` を他 OS ユーザーが
+    ``opendir`` でき、POSIX の権限検査は open 時のみなので窓内で取得された
+    fd は後続の ``chmod`` で失効しない。``mkdir(mode=..., parents=True)`` は
+    **親に mode を適用しない**（pathlib の仕様。親は既定モードで作られる）
+    ため、``parents=True`` ではなく祖先を 1 段ずつ作る。``chmod`` は既に
+    0755 で存在するディレクトリの是正用として残す。
+
     Args:
         path: 作成・権限設定するディレクトリ。
 
@@ -240,7 +248,8 @@ def _ensure_private_dir(path: Path) -> Path:
     Raises:
         OSError: 作成・chmod に失敗した場合。
     """
-    path.mkdir(parents=True, exist_ok=True)
+    for target in (*reversed(path.parents), path):
+        target.mkdir(mode=0o700, exist_ok=True)
     path.chmod(0o700)
     return path
 
