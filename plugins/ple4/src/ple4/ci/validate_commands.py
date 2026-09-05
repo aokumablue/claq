@@ -43,9 +43,11 @@ _COMMAND_REFERENCE_PATTERN = re.compile(r"`/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\s[^`]*
 `_list_markdown_files` に渡すのは commands ディレクトリのみ）、現時点の
 ``commands/*.md`` に引数付きの参照は 1 件も無い。つまりこの修正で新たに
 検証対象へ入った参照は今のところゼロで、効果は将来書かれる引数付き参照を
-素通りさせないことにある。``agents/`` ``skills/`` の md にある引数付き参照
-（``/instinct promote`` 系 3 件）は本バリデータの走査範囲外のままで、
-それらは別途 `validate_agents` / `validate_skills` の管轄。
+素通りさせないことにある。``agents/`` ``skills/`` の md にある参照（``/instinct promote`` 系 3 件:
+``agents/security-auditor.md`` と ``skills/learn/SKILL.md``）は本バリデータの
+走査範囲外のままである。``validate_agents`` / ``validate_skills`` にも
+``/command`` 参照の検査経路は無い（grep で確認済み）ため、それらは現時点で
+どのバリデータからも検証されていない。走査範囲を広げるかは別途の判断。
 """
 
 

@@ -61,8 +61,10 @@ class TestContextAlwaysOnBudget:
     """`context-always-on-budget`（2pts）は description を行ではなく値で測る。
 
     ``description:`` の行を 1 行だけ数えていた頃は、YAML のブロックスカラーが
-    2 文字として計上され、実測 14,290 文字の常時注入 description が予算 4,000 を
-    余裕で満たしているように見えた。
+    2 文字として計上され、実際には数千〜数万文字の常時注入 description でも
+    予算 4,000 を満たしているように見えた。下の fixture がその形を再現する。
+    （本リポジトリ自身にブロックスカラー description は無く、旧算法 3,672 /
+    新算法 3,637 で合否は変わらなかった。穴は実在するが未顕在だった。）
     """
 
     def test_short_description_passes(self, tmp_path: Path) -> None:
