@@ -8,7 +8,10 @@ requires-python = ">=3.10"
 # 上限を張る。（旧クラス名そのものはここに書かない — 禁止パターン grep の検査対象に
 # このファイルも入るため、書くと必ず誤検出になる。）
 # 2.1.1 は mcp_types.LATEST_PROTOCOL_VERSION == "2026-07-28" を実測確認済みの版。
-dependencies = ["mcp>=2.1.1,<3"]
+# `server.py` は `mcp_types` を直接 import する。`mcp` の推移依存でもあるが、
+# 直接 import する以上は直接依存として宣言する（上流が vendoring した時点で
+# 無警告に壊れるのを防ぐ）。
+dependencies = ["mcp>=2.1.1,<3", "mcp-types"]
 
 [project.scripts]
 example-server = "server:main"

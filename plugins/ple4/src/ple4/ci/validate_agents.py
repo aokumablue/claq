@@ -11,7 +11,9 @@ DEFAULT_AGENTS_DIR = REPO_ROOT / "agents"
 
 
 def _validate_agent_file(file_path: Path) -> bool:
-    """単一のエージェント Markdown ファイルに frontmatter があるか検証する。
+    """単一のエージェント Markdown ファイルの frontmatter を検証する。
+
+    `name` / `description` / `tools` の 3 項目を必須とする。
 
     Args:
         file_path: 検証するエージェントファイルのパス
@@ -32,6 +34,15 @@ def _validate_agent_file(file_path: Path) -> bool:
     if frontmatter is None:
         emit_error(f"{file_path.name} - フロントマターがありません")
         return True
+
+    for key in ("name", "description"):
+        if not frontmatter.get(key):
+            # description は ADR-0010 が dispatch の要と定めた項目で、欠けると
+            # ホストがこのエージェントを選ぶ手がかりを失う。skills 側の
+            # validate_skills は同じ 2 項目を必須にしており、agents だけ
+            # 未検証だと「宣言が消えたのに緑」が agents 側でのみ起きる。
+            emit_error(f"{file_path.name} - {key} が宣言されていません")
+            return True
 
     if not frontmatter.get("tools"):
         # tools 未宣言だとエージェントはツール制限なしで起動し、Write/Bash 等

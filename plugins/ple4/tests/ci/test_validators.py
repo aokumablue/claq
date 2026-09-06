@@ -18,7 +18,8 @@ def test_validate_agents_accepts_valid_agent(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
     (agents_dir / "planner.md").write_text(
-        "---\nmodel: sonnet\ntools: Read\n---\n# Planner\n", encoding="utf-8"
+        "---\nname: planner\ndescription: d\nmodel: sonnet\ntools: Read\n---\n# Planner\n",
+        encoding="utf-8",
     )
 
     assert validate_agents.validate_agents(agents_dir) == 0

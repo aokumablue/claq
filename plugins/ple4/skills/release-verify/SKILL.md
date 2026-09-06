@@ -66,9 +66,9 @@ PLUGIN_ROOT="/絶対/パス/を/リテラルで"   # Build: 行に記録した�
 ls "$PLUGIN_ROOT/commands"     # *.md が commands
 ls "$PLUGIN_ROOT/skills"       # ディレクトリ 1 つが skill
 ls "$PLUGIN_ROOT/agents"       # *.md が agent
-python3 -c "
-import json
-d = json.load(open('$PLUGIN_ROOT/hooks/hooks.json'))
+PLUGIN_ROOT="$PLUGIN_ROOT" python3 -c "
+import json, os
+d = json.load(open(os.path.join(os.environ['PLUGIN_ROOT'], 'hooks', 'hooks.json')))
 for event, groups in d['hooks'].items():
     for group in groups:
         for hook in group['hooks']:

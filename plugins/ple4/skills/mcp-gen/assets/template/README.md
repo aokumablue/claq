@@ -12,10 +12,15 @@
 uv venv && source .venv/bin/activate && uv pip install -e .
 ```
 
+以降のコマンドは**すべて `mcp` が入った interpreter の絶対パス**（以下 `$PY`）で実行する。
+`smoke_check.py` はサーバを `sys.executable` で起動するため、裸の `python3` で呼ぶと
+サーバ側だけが `ModuleNotFoundError` で死ぬ。venv の有効化はシェル呼び出しをまたいで
+持続しないので、有効化に頼らず絶対パスで指す。
+
 ## 検証
 
 ```bash
-python3 smoke_check.py
+"$PY" smoke_check.py
 ```
 
 サーバを実際に起動し、生の JSON-RPC で `server/discover` / `tools/list` /
@@ -25,11 +30,11 @@ python3 smoke_check.py
 ## 起動
 
 ```bash
-python3 server.py
+"$PY" server.py
 ```
 
 ```bash
-python3 server.py --http
+"$PY" server.py --http
 ```
 
 stdio が既定。`--http` で Streamable HTTP（`http://127.0.0.1:8000/mcp`）。

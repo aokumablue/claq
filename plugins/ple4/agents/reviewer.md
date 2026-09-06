@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: コードレビュー専門。品質/セキュリティ/保守性を能動的にレビュー。コード変更直後に必須使用。
+description: コードレビュー専門。品質・設計・保守性をコード変更直後にレビューする。脆弱性の詳細判定だけが目的なら呼ばない（`security-auditor` の担当。並列起動時は CRITICAL セキュリティを二重報告しない）。変更が 1 件も無い段階では呼ばない。
 tools: Read, Grep, Glob, Bash
 ---
 

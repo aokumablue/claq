@@ -84,7 +84,8 @@ def test_validate_agents_handles_valid_bom_crlf_and_errors(
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
     (agents_dir / "planner.md").write_text(
-        "\ufeff---\r\nmodel: sonnet\r\ntools: Read\r\n---\r\n# Planner\r\n", encoding="utf-8"
+        "\ufeff---\r\nname: planner\r\ndescription: d\r\nmodel: sonnet\r\ntools: Read\r\n---\r\n# Planner\r\n",
+        encoding="utf-8",
     )
     (agents_dir / "missing_frontmatter.md").write_text("plain text", encoding="utf-8")
     broken_file = agents_dir / "broken.md"
@@ -95,6 +96,26 @@ def test_validate_agents_handles_valid_bom_crlf_and_errors(
     stderr = capsys.readouterr().err
     assert "フロントマターがありません" in stderr
     assert "ファイルの読み取りに失敗しました" in stderr
+
+
+@pytest.mark.parametrize("missing_key", ["name", "description"])
+def test_validate_agents_requires_name_and_description(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], missing_key: str
+) -> None:
+    """name / description の欠落を失敗として検出すること。
+
+    validate_skills は同じ 2 項目を必須にしており、agents 側だけ未検証だと
+    「dispatch の手がかりが消えたのに緑」が agents でのみ起きる（ADR-0010）。
+    """
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    frontmatter = {"name": "agent", "description": "d"}
+    del frontmatter[missing_key]
+    body = "".join(f"{key}: {value}\n" for key, value in frontmatter.items())
+    (agents_dir / "partial.md").write_text(f"---\n{body}tools: Read\n---\n# Partial\n", encoding="utf-8")
+
+    assert validate_agents.validate_agents(agents_dir) == 1
+    assert f"{missing_key} が宣言されていません" in capsys.readouterr().err
 
 
 def test_validate_agents_missing_dir_fails_unless_optional(
@@ -112,7 +133,8 @@ def test_validate_agents_accepts_valid_bom_crlf_file(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
     (agents_dir / "planner.md").write_text(
-        "\ufeff---\r\nmodel: opus\r\ntools: Read\r\n---\r\n# Planner\r\n", encoding="utf-8"
+        "\ufeff---\r\nname: planner\r\ndescription: d\r\nmodel: opus\r\ntools: Read\r\n---\r\n# Planner\r\n",
+        encoding="utf-8",
     )
 
     assert validate_agents.validate_agents(agents_dir) == 0
@@ -123,10 +145,11 @@ def test_validate_agents_allows_missing_model_and_inherit(tmp_path: Path) -> Non
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
     (agents_dir / "no_model.md").write_text(
-        "---\nname: agent\ntools: Read\n---\n# No model\n", encoding="utf-8"
+        "---\nname: agent\ndescription: d\ntools: Read\n---\n# No model\n", encoding="utf-8"
     )
     (agents_dir / "inherit_model.md").write_text(
-        "---\nmodel: inherit\ntools: Read\n---\n# Inherit\n", encoding="utf-8"
+        "---\nname: inherit-agent\ndescription: d\nmodel: inherit\ntools: Read\n---\n# Inherit\n",
+        encoding="utf-8",
     )
 
     assert validate_agents.validate_agents(agents_dir) == 0
@@ -252,7 +275,9 @@ def test_validator_main_entrypoints(
 
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "alpha.md").write_text("---\nmodel: sonnet\ntools: Read\n---\n", encoding="utf-8")
+    (agents_dir / "alpha.md").write_text(
+        "---\nname: alpha\ndescription: d\nmodel: sonnet\ntools: Read\n---\n", encoding="utf-8"
+    )
 
     commands_dir = tmp_path / "commands"
     commands_dir.mkdir()
@@ -306,8 +331,12 @@ def test_validator_main_entrypoints(
 def test_validate_agents_accepts_quoted_model_values(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "double.md").write_text('---\nmodel: "sonnet"\ntools: Read\n---\n', encoding="utf-8")
-    (agents_dir / "single.md").write_text("---\nmodel: 'opus'\ntools: Read\n---\n", encoding="utf-8")
+    (agents_dir / "double.md").write_text(
+        '---\nname: double\ndescription: d\nmodel: "sonnet"\ntools: Read\n---\n', encoding="utf-8"
+    )
+    (agents_dir / "single.md").write_text(
+        "---\nname: single\ndescription: d\nmodel: 'opus'\ntools: Read\n---\n", encoding="utf-8"
+    )
 
     assert validate_agents.validate_agents(agents_dir) == 0
 
@@ -327,9 +356,15 @@ def test_validate_hooks_main_without_schema_path(tmp_path: Path, capsys: pytest.
 def test_validate_agents_accepts_quoted_model_with_spaces(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "leading.md").write_text('---\nmodel: " sonnet"\ntools: Read\n---\n', encoding="utf-8")
-    (agents_dir / "trailing.md").write_text('---\nmodel: "opus "\ntools: Read\n---\n', encoding="utf-8")
-    (agents_dir / "both.md").write_text("---\nmodel: ' haiku '\ntools: Read\n---\n", encoding="utf-8")
+    (agents_dir / "leading.md").write_text(
+        '---\nname: leading\ndescription: d\nmodel: " sonnet"\ntools: Read\n---\n', encoding="utf-8"
+    )
+    (agents_dir / "trailing.md").write_text(
+        '---\nname: trailing\ndescription: d\nmodel: "opus "\ntools: Read\n---\n', encoding="utf-8"
+    )
+    (agents_dir / "both.md").write_text(
+        "---\nname: both\ndescription: d\nmodel: ' haiku '\ntools: Read\n---\n", encoding="utf-8"
+    )
 
     assert validate_agents.validate_agents(agents_dir) == 0
 

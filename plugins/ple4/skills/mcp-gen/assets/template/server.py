@@ -168,6 +168,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=f"{SERVER_NAME} MCP server")
     parser.add_argument("--http", action="store_true", help="Streamable HTTP で起動する（既定は stdio）")
     parser.add_argument("--host", default="127.0.0.1", help="HTTP バインド先（既定はループバックのみ）")
+    parser.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="ループバック以外へのバインドを許可する（DNS リバインディング検査が実質無効になる）",
+    )
     parser.add_argument("--port", type=int, default=8000, help="HTTP ポート")
     args = parser.parse_args()
 
@@ -178,6 +183,10 @@ def main() -> None:
 
     # 仕様上、HTTP サーバは Origin を検証し（DNS リバインディング対策）、
     # ローカル実行ではループバックにのみバインドしなければならない。
+    # 許可リストは args.host から導出するため、非ループバックへ広げた瞬間に
+    # 「バインド先と同じ値を照合する」形になり検査が実質無効化する。明示フラグを要求する。
+    if args.host not in ("127.0.0.1", "::1", "localhost") and not args.allow_remote:
+        parser.error(f"--host {args.host} は非ループバック。--allow-remote を明示すること")
     # 既定の許可リストは空で localhost しか通らないため、実ホスト名で公開するときは
     # 裸のホスト名とポート付きの両方を挙げる（挙げ忘れると全リクエストが 421 になる）。
     # リバースプロキシが Host/Origin を制御しているなら
