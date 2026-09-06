@@ -588,9 +588,14 @@ def test_both_wrappers_use_the_same_diagnostic_reasons() -> None:
     """両 OS で共通の失敗理由が同じ文字列で出ること。
 
     「片方だけ塞ぐ」再発（本レビューで 5 回）を機械的に止めるための対称性
-    ガード。散文のレビューより強い。`path_not_absolute` は POSIX 専用で、
-    その非対称は .cmd の KNOWN RESIDUAL に理由付きで明記してある（cmd で
-    PATH を走査するには遅延展開が要り、`!` を含むパスを壊すため採らない）。
+    ガード。散文のレビューより強い。
+
+    PATH 由来の穴は両 OS で塞いであるが、**塞ぎ方が違うので理由文字列も違う**:
+    POSIX は PATH の非絶対要素を除去して続行する（`path_not_absolute`）。cmd は
+    除去に per-entry ループ＝遅延展開が要り、`!` を含む Windows パスを壊すため
+    採れないので、零長要素を**検出して** fail-open する（`path_has_empty_entry`）。
+    残る非対称（cmd 側は非空の相対要素を捕まえられない）は .cmd の
+    KNOWN RESIDUAL に理由付きで明記してある。
     """
     posix = _WRAPPER.read_text(encoding="utf-8")
     windows = _WRAPPER_CMD.read_text(encoding="utf-8")
@@ -598,8 +603,12 @@ def test_both_wrappers_use_the_same_diagnostic_reasons() -> None:
     for reason in ("launcher_not_found", "python_not_found", "ple4_python_not_absolute"):
         assert reason in posix, reason
         assert reason in windows, reason
+    # PATH 由来の穴は両側に手当てがあること（片側だけ無防備にしない）。
     assert "path_not_absolute" in posix
+    assert "path_has_empty_entry" in windows
+    # 残る非対称と、この環境で実行検証できない旨が明記されていること。
     assert "KNOWN RESIDUAL" in windows
+    assert "UNVERIFIED FROM THIS HOST" in windows
 
 
 def test_windows_wrapper_checks_the_launcher_before_choosing_an_interpreter() -> None:
@@ -626,6 +635,68 @@ def test_windows_wrapper_checks_the_launcher_before_choosing_an_interpreter() ->
     # 診断行より後ろに素の exit /b 0 があり、deny(2) に化けないこと。
     diag = next(i for i, line in enumerate(lines) if "launcher_not_found" in line)
     assert "exit /b 0" in lines[diag + 1 :]
+
+
+def test_windows_wrapper_detects_empty_path_entries() -> None:
+    """PATH の空要素を検出して fail-open へ倒す分岐があること（形の検査）。
+
+    cmd.exe は零長の PATH 要素（``;;``・先頭 ``;``・末尾 ``;``）を**現在
+    ディレクトリ**として解決する。フックはプロジェクトルートを cwd に起動するので、
+    構造ルール 4 の ``where "$PATH:..."`` を使っていても、PATH 自身が相対
+    ディレクトリを名指ししていれば cwd の python.exe に届いてしまう。
+
+    **このテストは形だけを固定する。** darwin から cmd.exe を実行できないため、
+    検出が実際に発火することは観測できていない。固定しているのは
+    「検査が存在し、既定は未設定で、一致したときだけ立ち、立ったら
+    ``:ple4_path_unsafe`` へ飛ぶ」という構造であって、振る舞いの検証ではない。
+
+    構造が重要なのは失敗の向きを縛るため: 検査行が壊れて解釈できなくても
+    ``PLE4_PATH_RISK`` は未設定のまま残り、解決は従来どおり進む。壊れた検査が
+    「Windows で保護が無効」へ倒れることはない。
+    """
+    lines = _cmd_lines()
+    reset = next(i for i, line in enumerate(lines) if line == 'set "PLE4_PATH_RISK="')
+    branch = next(i for i, line in enumerate(lines) if line == "if defined PLE4_PATH_RISK goto :ple4_path_unsafe")
+    first_pick = next(i for i, line in enumerate(lines) if line.startswith("call :ple4_pick"))
+    override = next(i for i, line in enumerate(lines) if line == "if defined PLE4_PYTHON goto :ple4_override")
+
+    # 既定は未設定 → 一致したときだけ立つ → 立ったら分岐、の順であること。
+    assert reset < branch < first_pick
+    # 絶対パス override は回復経路なので、PATH 検査より前に分岐していること。
+    assert override < reset
+
+    setters = [line for line in lines[reset + 1 : branch] if line.endswith('set "PLE4_PATH_RISK=1"')]
+    # `;;` の置換比較と、先頭・末尾の substring 検査で 3 本。
+    assert len(setters) == 3
+    assert all(line.startswith("if ") for line in setters)
+    assert any("PLE4_PATH_PROBE" in line for line in setters)
+    assert any('"%PATH:~0,1%|"==";|"' in line for line in setters)
+    assert any('"%PATH:~-1%|"==";|"' in line for line in setters)
+
+    # 反復も遅延展開も使わないこと（`!` を含む Windows パスを壊さないため）。
+    probe = next(line for line in lines[reset : branch] if line.startswith('set "PLE4_PATH_PROBE='))
+    assert probe == 'set "PLE4_PATH_PROBE=%PATH:;;=;@;%"'
+    assert not any(line.lstrip().lower().startswith("for ") for line in lines[reset:branch])
+    assert "EnableDelayedExpansion" not in "\n".join(lines)
+
+
+def test_windows_wrapper_path_diagnostic_fails_open() -> None:
+    """PATH 検査の診断が deny(2) ではなく exit 0 で終わること。
+
+    PreToolUse の 2 は deny なので、ここで非 0 を返すと PATH の直し方
+    （Bash / Edit）ごとセッション内から塞がって復旧不能になる。他の
+    fail-open 経路と同じ形であることを固定する。
+    """
+    lines = _cmd_lines()
+    label = next(i for i, line in enumerate(lines) if line == ":ple4_path_unsafe")
+    diag = next(i for i, line in enumerate(lines) if "path_has_empty_entry" in line)
+
+    assert label < diag
+    assert "exit /b 0" in lines[diag + 1 : diag + 3]
+    # 構造ルール 6: 診断 JSON にパスを埋め込まない。
+    assert "%PATH%" not in lines[diag]
+    # 回復手段（絶対パスの PLE4_PYTHON）を人間可読行で案内していること。
+    assert any("PLE4_PYTHON" in line for line in lines[label:diag])
 
 
 def test_windows_wrapper_requires_an_absolute_ple4_python() -> None:

@@ -70,15 +70,29 @@ rem    arbitrary Windows path valid JSON (a `"` in the path still breaks it),
 rem    and the POSIX side drops the path for the same reason, so both platforms
 rem    keep paths on the human-readable line only.
 rem
-rem KNOWN RESIDUAL (POSIX-only fix): the POSIX wrapper strips PATH entries that
-rem are not absolute paths, because a zero-length PATH element means "current
-rem directory" and hooks run with the project root as cwd. cmd has the same
-rem `;;` case, but filtering PATH here would require iterating its entries,
-rem which needs delayed expansion -- deliberately disabled below because `!` is
-rem legal in Windows paths and delayed expansion would corrupt them. Rule 4
-rem already keeps the search out of cwd for the common case; closing the
-rem empty-element case is left open rather than shipping an unverifiable
-rem PATH-rewriting loop (cmd.exe cannot be executed from the darwin dev host).
+rem 7. PATH is CHECKED for empty entries, never rewritten. A zero-length PATH
+rem    element (`;;`, or a leading/trailing `;`) means "current directory", and
+rem    hooks run with the project root as cwd, so `where "$PATH:..."` would
+rem    still reach a python.exe committed to the repository -- rule 4 keeps the
+rem    search out of cwd only while PATH itself names no relative directory.
+rem    Detecting the empty-entry shape needs no iteration: a `%PATH:;;=...%`
+rem    substitution plus two substring tests, every expansion inside quotes.
+rem    REWRITING PATH would need a per-entry loop and therefore delayed
+rem    expansion, which stays disabled because `!` is legal in Windows paths.
+rem    On detection the wrapper fails open with a diagnostic and requires an
+rem    absolute PLE4_PYTHON, mirroring what the POSIX side does when PATH holds
+rem    no absolute entry at all.
+rem
+rem    KNOWN RESIDUAL: a NON-EMPTY relative entry (`PATH=foo;C:\Windows`) is
+rem    still not caught. That case does need the per-entry loop, so it stays
+rem    open; the POSIX side strips it because a POSIX shell can iterate PATH
+rem    without the `!` hazard.
+rem
+rem    UNVERIFIED FROM THIS HOST: cmd.exe cannot run on darwin, so the positive
+rem    path (that the check actually fires) has never been observed. The check
+rem    is written so a malformed test leaves PLE4_PATH_RISK unset and resolution
+rem    proceeds exactly as before -- a broken check degrades to the previous
+rem    behaviour, never to "protection off on Windows".
 rem
 rem When nothing usable is found this exits 0 after writing a diagnostic to
 rem stderr, matching launcher.py's documented fail-open policy (CLAUDE.md
@@ -103,6 +117,16 @@ type "%PLE4_LAUNCHER%" >nul 2>&1
 if errorlevel 1 goto :ple4_no_launcher
 
 if defined PLE4_PYTHON goto :ple4_override
+
+rem Rule 7. Every expansion is inside double quotes, so a PATH holding `&` or
+rem `^` is never re-parsed as a command. If any line here fails to parse,
+rem PLE4_PATH_RISK stays unset and resolution proceeds exactly as before.
+set "PLE4_PATH_RISK="
+set "PLE4_PATH_PROBE=%PATH:;;=;@;%"
+if not "%PLE4_PATH_PROBE%|"=="%PATH%|" set "PLE4_PATH_RISK=1"
+if "%PATH:~0,1%|"==";|" set "PLE4_PATH_RISK=1"
+if "%PATH:~-1%|"==";|" set "PLE4_PATH_RISK=1"
+if defined PLE4_PATH_RISK goto :ple4_path_unsafe
 
 call :ple4_pick py -3
 if defined PLE4_PY goto :ple4_exec
@@ -138,6 +162,11 @@ exit /b 0
 :ple4_override_ok
 set "PLE4_PY=%PLE4_PYTHON%"
 goto :ple4_exec
+
+:ple4_path_unsafe
+>&2 echo ERROR: PATH contains an empty entry (";;" or a leading/trailing ";"), which cmd.exe resolves as the CURRENT DIRECTORY. Hooks run with the project root as cwd, so an interpreter committed to the repository could be adopted and handed the hook's stdin. Hooks are disabled until PATH is fixed; set PLE4_PYTHON to an absolute interpreter path to recover.
+>&2 echo {"ple4ProtectionDisabled": true, "reason": "path_has_empty_entry"}
+exit /b 0
 
 :ple4_no_launcher
 >&2 echo ERROR: ple4 launcher is missing or unreadable at "%PLE4_LAUNCHER%". Hooks are disabled until the plugin install is repaired (reinstall the plugin).
