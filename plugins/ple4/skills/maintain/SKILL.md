@@ -35,7 +35,7 @@ collect_skill_create_inputs "${COMMITS:-200}"        # コミット規約・同�
 
 集める入力（各ソースは失敗しても本体を止めない＝ベストエフォート）:
 
-- **蓄積メモリ**: `python3 -m ple4.mem.cli search "maintain harness 勘所 違反"` と `python3 -m ple4.mem.cli search "maintain harness 勘所 違反" --status pending` の**両方**を引く（`PYTHONPATH` は不要 — editable install が venv の `ple4` をリポジトリの `plugins/ple4/src` へ向ける）。`--status` 省略時は `active` だけが返るが、H-01 によりステップ7の `ple4_mem_learn` が書くカードは例外なく `pending` で入る。active だけを引くと、**本スキル自身が前回残した知見が構造的に 1 件も返らない**（実測: 無指定 0 件、`--status pending` 8 件）。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要るカードだけ `python3 -m ple4.mem.cli show <key>` に渡す（0 件なら無出力）
+- **蓄積メモリ**: `python3 -m ple4.mem.cli search "maintain harness 勘所 違反"` と `python3 -m ple4.mem.cli search "maintain harness 勘所 違反" --status pending` の**両方**を引く（`PYTHONPATH` は不要 — editable install が venv の `ple4` をリポジトリの `plugins/ple4/src` へ向ける）。`--status` 省略時は `active` だけが返るが、H-01 によりステップ7の `ple4_mem_learn` が書くカードは例外なく `pending` で入る。active だけを引くと、**本スキル自身が前回残した知見が構造的に 1 件も返らない**。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要るカードだけ `python3 -m ple4.mem.cli show <key>` に渡す（0 件なら無出力）
 - **過去セッション**: `~/.ple4/session-data/checkpoint-*.md` と git log
 - **最新 ClaudeCode トレンド**（既定ON・`--no-web` で無効）: WebSearch/WebFetch でハーネス設計のベストプラクティスを調べる。**ハード上限（検索5件・フェッチ3件）・タイムアウト付き・非ブロッキング**。失敗/オフライン時は「トレンド入力なし」と明記して続行
 
