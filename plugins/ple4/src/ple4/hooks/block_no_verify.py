@@ -115,9 +115,11 @@ import re
 from typing import NamedTuple
 
 from ple4.hooks.hook_common import (
+    MAX_COMMAND_TOKENS,
     MAX_STDIN_BYTES,
     StdinUnavailableError,
     command_dialect_variants,
+    command_exceeds_token_budget,
     emit_block_output,
     extract_shell_wrapper_command,
     is_git_executable_token,
@@ -715,6 +717,12 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool) -> bool:
     return False
 
 
+_TOKEN_BUDGET_MESSAGE = (
+    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_TOKENS} shell tokens for pre:block-no-verify. "
+    "A command this large cannot be inspected within the hook timeout, and an un-inspected "
+    "command must not be allowed. Split it into smaller commands."
+)
+
 _TRUNCATED_INPUT_MESSAGE = (
     f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for pre:block-no-verify. "
     "Refusing to evaluate a possibly-truncated bash command for hook bypass flags. "
@@ -773,6 +781,11 @@ def main() -> int:
     # 無害な側だけを検査して素通りさせうる。ADR-0002 は本フックの検出境界を
     # 「誤検出を誤通過より選ぶ」と定めている。
     for command in iter_bash_commands(data):
+        # 走査は git トークン数に対し O(N^2)。上限超過をそのまま走らせると
+        # hooks.json の timeout を超えて host に kill され、silent fail-open
+        # （＝バイパス成功）になる。検査しきれない入力は通さず止める。
+        if command_exceeds_token_budget(command):
+            return emit_block_output(_TOKEN_BUDGET_MESSAGE)
         if has_bypass_flag(command):
             return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
 

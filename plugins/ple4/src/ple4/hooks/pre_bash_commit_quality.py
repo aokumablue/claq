@@ -50,8 +50,10 @@ from ple4.hooks.commit_quality_scanner import (
 )
 from ple4.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
+    MAX_COMMAND_TOKENS,
     MAX_STDIN_BYTES,
     command_dialect_variants,
+    command_exceeds_token_budget,
     is_git_executable_token,
     is_inplace_edit_flag,
     normalize_executable_name,
@@ -144,6 +146,12 @@ _MUTATION_BEFORE_COMMIT_MESSAGE = (
 # stdin が MAX_STDIN_BYTES を超えて切り捨てられた場合の deny 理由。切り捨て後の
 # JSON は不完全になりうる（commit かどうかの判定自体が信用できない）ため、
 # block_no_verify / config_protection と同じく fail-closed にする（A-05 相当対応）。
+_TOKEN_BUDGET_MESSAGE = (
+    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_TOKENS} shell tokens for pre:bash-commit-quality. "
+    "A command this large cannot be inspected within the hook timeout, and an un-inspected "
+    "commit must not be allowed. Split it into smaller commands."
+)
+
 _TRUNCATED_INPUT_MESSAGE = (
     f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for pre:bash-commit-quality. "
     "Refusing to evaluate a possibly-truncated payload for a git commit quality scan. "
@@ -998,6 +1006,10 @@ def evaluate(raw_input: str) -> dict:
             # （_is_git_commit_command / _compound_commit_risk /
             # _evaluate_confirmed_commit）が必ず同じ文字列を見る。
             command = strip_data_heredoc_bodies(raw_command)
+            # 判定はトークン数に対し非線形。上限超過を走らせると timeout 超過で
+            # host に kill され、commit 前の検査が丸ごと飛ぶ（silent fail-open）。
+            if command_exceeds_token_budget(command):
+                return {"output": raw_input, "exitCode": 2, "reason": _TOKEN_BUDGET_MESSAGE}
             # git commit コマンドの場合のみ実行（トークン化して堅牢に判定）
             try:
                 detected = _detect_git_commit(command)

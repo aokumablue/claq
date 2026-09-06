@@ -27,6 +27,28 @@ from ple4.lib.harness import JSON_PARSE_FAILURES
 
 MAX_STDIN_BYTES = 1024 * 1024
 
+# 1 コマンドに許すシェルトークン数の上限。
+#
+# `block_no_verify` は git トークンごとに残りセグメントを再走査するため
+# O(N^2) で、実測（2026-09-07・darwin）では次のようになった:
+#
+#     git×4,000  (16KB)   0.42s
+#     git×12,000 (48KB)   3.75s
+#     git×20,000 (80KB)  10.59s
+#     git×24,000 (96KB) 15.23s ← hooks.json の timeout（15秒）を超過
+#
+# 96KB は `MAX_STDIN_BYTES` の 9.2% でしかなく、stdin 上限の fail-closed では
+# 止まらない。host が kill した hook は exit code を返さないため、これは
+# **silent fail-open = 保護の完全なバイパス**になる（`pre_bash_commit_quality`
+# も同じ入力で 12.39s / timeout 30s と同じ軌道にある）。
+#
+# 上限超過は「検査しきれなかったので通す」ではなく BLOCKED で返す。
+# 同じ扱いを stdin 上限超過に対して既に採っており（`_TRUNCATED_INPUT_MESSAGE`）、
+# ADR-0002 が本フック群の検出境界を「誤検出を誤通過より選ぶ」と定めている。
+# 実測 8,000 トークンで 1.66 秒なので 5,000 は timeout に対し 20 倍以上の余裕が
+# あり、正当なシェルコマンドがこの規模になることは実務上ない。
+MAX_COMMAND_TOKENS = 5000
+
 # コマンド全体をセグメントに割るシェル区切りトークン。`block_no_verify` と
 # `pre_bash_commit_quality` が共に shell 区切り文字密着トークン（例:
 # ``status;echo``）を誤って 1 トークンとして扱わないよう、この定数と
@@ -628,6 +650,25 @@ def tokenize(command: str) -> list[str]:
     """
     tokens, _parsed_cleanly = tokenize_with_status(command)
     return tokens
+
+
+def command_exceeds_token_budget(command: str) -> bool:
+    """コマンドのトークン数が検査予算（`MAX_COMMAND_TOKENS`）を超えるか判定する。
+
+    超過したコマンドは走査に timeout を超える時間がかかり、host に kill されて
+    silent fail-open になる。呼び出し元は True を受けたら走査せず BLOCKED を
+    返すこと（理由は `MAX_COMMAND_TOKENS` のコメント）。
+
+    Args:
+        command: 検査対象のシェルコマンド文字列。
+
+    Returns:
+        トークン数が上限を超えるなら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    return len(tokenize(command)) > MAX_COMMAND_TOKENS
 
 
 def tokenize_with_status(command: str) -> tuple[list[str], bool]:

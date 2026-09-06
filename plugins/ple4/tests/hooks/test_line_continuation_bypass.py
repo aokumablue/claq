@@ -175,3 +175,77 @@ def test_untrusted_excerpt_is_sanitized_and_capped() -> None:
     long_excerpt = _sanitize_untrusted_excerpt("a" * (_UNTRUSTED_EXCERPT_MAX_CHARS + 50))
     assert len(long_excerpt) == _UNTRUSTED_EXCERPT_MAX_CHARS + 1
     assert long_excerpt.endswith("…")
+
+
+def test_oversized_command_is_blocked_instead_of_timing_out() -> None:
+    """検査予算を超えるコマンドが走査されず BLOCKED になること。
+
+    `block_no_verify` の走査は git トークン数に対し O(N^2) で、実測
+    （2026-09-07・darwin）では 24,000 トークン（96KB = `MAX_STDIN_BYTES` の
+    9.2%）で 15.23 秒かかり hooks.json の timeout（15秒）を超えた。host に
+    kill された hook は exit code を返さないため、これは **silent fail-open =
+    保護の完全なバイパス**だった（`pre_bash_commit_quality` も同じ入力で
+    12.39 秒 / timeout 30 秒と同じ軌道にあった）。
+
+    修正後は走査前に予算で弾くため、同じ入力が 0.1 秒未満で exit 2 になる。
+    """
+    import time
+
+    from ple4.hooks.hook_common import MAX_COMMAND_TOKENS
+
+    command = "git " * (MAX_COMMAND_TOKENS * 5) + "&& git commit --no-verify -m x"
+    for module in ("block_no_verify", "pre_bash_commit_quality"):
+        started = time.perf_counter()
+        assert _run_hook(module, command) == 2, module
+        assert time.perf_counter() - started < 5.0, f"{module} が走査へ落ちている"
+
+
+def test_command_at_token_budget_is_still_inspected() -> None:
+    """予算内のコマンドは従来どおり中身で判定されること（予算が過剰に効かない）。"""
+    from ple4.hooks.hook_common import MAX_COMMAND_TOKENS, command_exceeds_token_budget
+
+    within = "git status " * 100
+    assert command_exceeds_token_budget(within) is False
+    assert command_exceeds_token_budget("git " * (MAX_COMMAND_TOKENS + 1)) is True
+
+
+def test_block_no_verify_main_blocks_oversized_command_in_process(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`block_no_verify.main` が予算超過を走査前に BLOCKED にすること（in-process）。"""
+    from ple4.hooks import block_no_verify
+
+    payload = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": "git " * 8 + "commit --no-verify"}}
+    )
+    monkeypatch.setattr(block_no_verify, "MAX_COMMAND_TOKENS", 3)
+    monkeypatch.setattr(
+        block_no_verify, "command_exceeds_token_budget", lambda command: len(command.split()) > 3
+    )
+    monkeypatch.setattr(
+        block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False)
+    )
+
+    assert block_no_verify.main() == 2
+    assert "exceeds" in capsys.readouterr().err
+
+
+def test_pre_bash_commit_quality_evaluate_blocks_oversized_command_in_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`pre_bash_commit_quality.evaluate` が予算超過を走査前に BLOCKED にすること。"""
+    from ple4.hooks import pre_bash_commit_quality
+
+    monkeypatch.setattr(
+        pre_bash_commit_quality,
+        "command_exceeds_token_budget",
+        lambda command: len(command.split()) > 3,
+    )
+    payload = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": "git commit -m 'fix: a b c d'"}}
+    )
+
+    result = pre_bash_commit_quality.evaluate(payload)
+
+    assert result["exitCode"] == 2
+    assert "exceeds" in result["reason"]
