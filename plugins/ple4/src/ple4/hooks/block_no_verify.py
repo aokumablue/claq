@@ -25,6 +25,15 @@ git 起動トークンの探索:
     検査します。解析は git 起動トークン以降のみを対象とするので、
     ``grep -rn git .`` のように ``-n`` が git より前にある形は誤検知しません。
 
+    兄弟の ``bash_config_protection`` は逆に wrapper の allowlist
+    （``_COMMAND_POSITION_WRAPPERS``）を持ちます。**この非対称は意図的**で、
+    どちらか一方が未修正なのではありません。本モジュールが要るのは「git が
+    起動されるか」だけで実行位置を必要としないため名前集合を持たずに済み、
+    あちらは ``tee pyproject.toml`` と ``echo tee pyproject.toml`` を分けるために
+    実行位置の特定が必須で、名前集合が原理的に不可避になります。根拠と代替案の
+    実測は `docs/adr/0021-command-position-detection-uses-a-wrapper-allowlist.md`
+    にあります（本モジュールへ allowlist を導入する案は代替案 3 として却下済み）。
+
 ``-n`` の扱い:
     ``-n`` は ``git commit`` では ``--no-verify`` の別名ですが、``git push``
     では ``--dry-run`` の別名でありフックバイパスではありません。そのため

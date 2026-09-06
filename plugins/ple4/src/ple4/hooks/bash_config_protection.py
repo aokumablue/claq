@@ -222,27 +222,18 @@ _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 # `_command_index` が読み飛ばす実行 wrapper（`normalize_executable_name` で判定）。
 #
-# なぜホワイトリストなのか（`block_no_verify` と方針が割れている点の記録）:
-#     `block_no_verify` は「ラッパー名のホワイトリストは将来のラッパーを取りこぼす」
-#     として全トークンから git 起動を探す方式を採る。本モジュールはそれを転用
-#     できない。M-01 が要求するのは**実行位置の特定**であり、``tee pyproject.toml``
-#     （deny）と ``echo tee pyproject.toml``（allow）は構文上まったく同じ
-#     「語 → 語 → パス」だからである。両者を分けるのは `echo` と `timeout` の
-#     意味論であって構文ではない。したがってここでは何らかの名前集合が原理的に
-#     不可避で、選べるのは「wrapper を列挙する」か「データを取るコマンドを列挙して
-#     残り全部を wrapper とみなす」かの 2 択になる。
+# ホワイトリストである理由と、`block_no_verify` が全トークン走査を採る理由の非対称は
+# **意図的な設計判断**であり `docs/adr/0021-command-position-detection-uses-a-wrapper-allowlist.md`
+# に記録した（代替案の実測を含む）。要旨だけ再掲すると: 本モジュールは M-01 のため
+# **実行位置の特定**が必要で、``tee pyproject.toml``（deny）と
+# ``echo tee pyproject.toml``（allow）は構文上同じ「語 → 語 → パス」なので何らかの
+# 名前集合が原理的に不可避になる。`block_no_verify` は実行位置を必要としないため
+# 名前集合を持たずに済む。この集合を消して全トークン走査へ揃える変更は、ADR-0021 の
+# 代替案 1 として却下済みである。
 #
-#     後者（fail-closed 側）は ADR-0002 の姿勢に合うが、実測で通らない:
-#     `pushd`/`cd` まで wrapper として読み飛ばしてしまい、
-#     ``pushd sub && printf x > ../ruff.toml`` で `_changes_working_directory` が
-#     False になり repo スコープ判定が復活して allow へ倒れる（H-11 の退行）。
-#     さらに ``grep -rn tee ruff.toml`` のような読み取り専用コマンドまで deny する。
-#     Bash matcher は最も広く、可用性の代償が最も大きい経路なので、
-#     「有界な取りこぼし」を「無界な誤検出」より選ぶ。
-#
-#     結果としてこの集合は部分緩和であり、未知の wrapper（``chrt`` 相当の新顔）は
-#     取りこぼす。それは承知のうえの境界で、`_command_index` の numeric positional
-#     消費（下記）だけが唯一の一般化である。
+# 結果としてこの集合は部分緩和であり、未知の wrapper（``chrt`` 相当の新顔）は
+# 取りこぼす。それは承知のうえの境界で、`_command_index` の numeric positional
+# 消費（下記）だけが唯一の一般化である。
 _COMMAND_POSITION_WRAPPERS = frozenset(
     {
         "env",
