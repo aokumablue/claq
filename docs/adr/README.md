@@ -25,3 +25,4 @@
 | [0019](0019-protection-hooks-fail-closed-when-stdin-cannot-be-read.md) | 保護フックは stdin を「読めなかった」場合に fail-closed する | accepted | 2026-09-04 |
 | [0020](0020-shell-commands-are-analyzed-under-two-dialects.md) | シェル保護フックは 1 つのコマンド文字列を 2 つのシェル方言で解析する | accepted | 2026-09-04 |
 | [0021](0021-command-position-detection-uses-a-wrapper-allowlist.md) | 実行位置の特定は wrapper allowlist で行い、git 起動の探索は全トークン走査のままにする | accepted | 2026-09-06 |
+| [0022](0022-versioned-external-standards-carry-their-version-in-the-heading.md) | 外部の版付き標準を定義へ列挙するときは版を見出しへ書く | accepted | 2026-09-06 |
