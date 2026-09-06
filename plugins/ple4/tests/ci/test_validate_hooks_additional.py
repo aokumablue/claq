@@ -190,6 +190,33 @@ def test_repo_hook_modules_are_importable() -> None:
         assert importlib.util.find_spec(argv[0]) is not None, f"モジュールが存在しません: {argv[0]}"
 
 
+def test_every_repo_hook_entry_launches_the_ple4_hook_wrapper() -> None:
+    """hooks.json の全エントリが `runtime/ple4-hook` を起動すること。
+
+    CLAUDE.md は「`hooks.json` は裸の `python3` を呼ばない。全エントリが
+    `runtime/ple4-hook` を起動し、インタプリタ解決はこの wrapper の単一責務」と
+    規定する。これまでこの規則を守っていたのは `_repo_hook_argv` の `next(...)`
+    が StopIteration になる副作用だけで、assert もメッセージも無く、
+    `ple4-hook` で終わる任意のパスを受理していた。
+    """
+    repo_root = Path(__file__).resolve().parents[4]
+    hooks = json.loads((repo_root / "plugins/ple4/hooks/hooks.json").read_text(encoding="utf-8"))
+    commands = [
+        hook.get("command", "")
+        for event_hooks in hooks["hooks"].values()
+        for matcher in event_hooks
+        for hook in matcher.get("hooks", [])
+        if hook.get("type") == "command"
+    ]
+
+    assert commands, "hooks.json に command フックがありません"
+    for command in commands:
+        launcher = shlex.split(command)[0]
+        assert launcher == "${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook", (
+            f"wrapper 以外を起動しています: {launcher!r}"
+        )
+
+
 def test_repo_hook_modules_propagate_exit_code_via_system_exit() -> None:
     """hooks.json が起動する全モジュールが `main()` の戻り値を SystemExit で伝えること。
 

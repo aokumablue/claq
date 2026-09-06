@@ -765,7 +765,11 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
                 return found
             repo_root = resolve_repo_root()
             if repo_root is None:
-                return None
+                # 「決定不能なら allow」は意図された fail-open（A-06）だが、
+                # それはこの書込み先 1 つについての判断である。`return` にすると
+                # 同一コマンドの残りの書込み先候補と `sh -c` 再帰まで捨てて
+                # しまい、文書化されていない範囲まで allow が広がる。
+                continue
             if _within_repo_root(token, repo_root):
                 return found
         if not _recursed:

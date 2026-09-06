@@ -327,6 +327,23 @@ def test_wrapper_uses_ple4_python_override(tmp_path: Path) -> None:
     assert json.loads(result.stdout) == {"kind": "fact", "title": "wrapper reached the module"}
 
 
+def test_wrapper_prefers_python3_over_python_when_both_exist(tmp_path: Path) -> None:
+    """両方が PATH にあるとき `python3` が勝つこと（CLAUDE.md 規定の順序）。
+
+    既存の 2 件はそれぞれ片方だけを stub するため、実装の順序を入れ替えても
+    どちらも緑のままだった。順序そのものを踏む対照がここまで無かった。
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(bin_dir / "python3", 'printf "PY3-WON\\n"\nexit 0')
+    _write_stub(bin_dir / "python", 'printf "PY-WON\\n"\nexit 0')
+
+    result = _run_wrapper("ple4.hooks.pre_compact", env=_isolated_env(tmp_path, path_dirs=[bin_dir]))
+
+    assert "PY3-WON" in result.stdout, result.stdout
+    assert "PY-WON" not in result.stdout
+
+
 def test_wrapper_prefers_python3_on_path(tmp_path: Path) -> None:
     """PLE4_PYTHON が無ければ PATH 上の python3 を版の検査なしで使う。
 
@@ -576,9 +593,13 @@ def test_windows_wrapper_shares_the_posix_contract() -> None:
     text = _WRAPPER_CMD.read_text(encoding="utf-8")
 
     assert "%PLE4_PYTHON%" in text
-    assert "call :ple4_pick py -3\n" in text
-    assert "call :ple4_pick python\n" in text
-    assert "call :ple4_pick python3\n" in text
+    # 存在だけでなく**順序**を固定する。CLAUDE.md は Windows 側の解決順を
+    # `PLE4_PYTHON` > `py -3` > `python` > `python3` と規定しており、
+    # 存在検査だけでは `python` と `python3` を入れ替えても緑のままになる。
+    picks = ["call :ple4_pick py -3\n", "call :ple4_pick python\n", "call :ple4_pick python3\n"]
+    indexes = [text.find(pick) for pick in picks]
+    assert all(index != -1 for index in indexes), picks
+    assert indexes == sorted(indexes), f"インタプリタ解決順が CLAUDE.md 規定と違う: {indexes}"
     assert '"%PLE4_LAUNCHER%"' in text
     assert _PROTECTION_DISABLED_KEY in text
     assert "exit /b 0" in text
@@ -662,7 +683,12 @@ def test_windows_wrapper_detects_empty_path_entries() -> None:
 
     # 既定は未設定 → 一致したときだけ立つ → 立ったら分岐、の順であること。
     assert reset < branch < first_pick
-    # 絶対パス override は回復経路なので、PATH 検査より前に分岐していること。
+    # PLE4_PYTHON の分岐が PATH 検査より前にあることを **residual として** 固定する。
+    # POSIX 側は逆順（PATH 検査が先）で、絶対パスの PLE4_PYTHON でも回復しない —
+    # launcher とその子プロセス（git を含む）は汚染された PATH で解決を続けるため、
+    # PLE4_PYTHON はそれを直さないからである。順序を揃えるのが正しい変更だが、
+    # 開発ホストから cmd.exe を実行できず、壊れた並べ替えは Windows で保護を黙って
+    # 無効化する。`ple4-hook.cmd` の KNOWN RESIDUAL と docs/adr/0024-*.md を参照。
     assert override < reset
 
     setters = [line for line in lines[reset + 1 : branch] if line.endswith('set "PLE4_PATH_RISK=1"')]

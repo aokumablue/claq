@@ -83,6 +83,16 @@ rem    On detection the wrapper fails open with a diagnostic and requires an
 rem    absolute PLE4_PYTHON, mirroring what the POSIX side does when PATH holds
 rem    no absolute entry at all.
 rem
+rem    KNOWN RESIDUAL: `if defined PLE4_PYTHON goto :ple4_override` runs BEFORE
+rem    this PATH check, so an absolute PLE4_PYTHON skips it entirely. The POSIX
+rem    side is the opposite (PATH first), and refuses even with an absolute
+rem    PLE4_PYTHON — because the launcher and every subprocess it spawns (git
+rem    included) still resolve through the poisoned PATH, which PLE4_PYTHON does
+rem    not fix. Reordering here is the right change, but cmd.exe cannot be run
+rem    from the development host, and a broken reorder silently disables
+rem    protection on Windows. Left as a documented residual rather than an
+rem    unverified edit. See docs/adr/0024-*.md.
+rem
 rem    KNOWN RESIDUAL: a NON-EMPTY relative entry (`PATH=foo;C:\Windows`) is
 rem    still not caught. That case does need the per-entry loop, so it stays
 rem    open; the POSIX side strips it because a POSIX shell can iterate PATH
