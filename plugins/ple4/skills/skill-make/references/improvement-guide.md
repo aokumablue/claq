@@ -70,21 +70,3 @@ eval セットを train 60% / holdout test 40% に手動で分け、description 
 
 holdout スコアが最も良かった description を採用し、SKILL.mdのfrontmatterを更新。
 
-## パッケージ化して渡す（`present_files` がある場合のみ）
-
-`present_files` ツールにアクセスできるか確認。使えないなら飛ばす。使える場合は `present_files` へスキルディレクトリを直接渡す（zip 化が必要な形式なら、除外パターン（`.git`・`__pycache__`・`node_modules` 等）を手動で除きながら zip アーカイブを作る）。
-
-## 環境別の注意
-
-### Claude.ai
-
-- subagentがないので並列実行はせず1件ずつ進める
-- baseline比較に依存する定量ベンチマークは省略し、定性的フィードバックを重視
-- 説明文最適化（eval スクリプト使用）は飛ばす
-- 盲検比較は飛ばす
-- 既存スキル更新時は元の名前を保持し、`/tmp/` にコピーしてから編集
-
-### Cowork
-
-- subagentは使えるので基本フローはそのまま
-- 既存スキル更新時はClaude.aiのセクションの手順に従う

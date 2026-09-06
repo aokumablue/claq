@@ -79,7 +79,7 @@ comparator へ渡す前に、比較する 2 構成の出力を `<workspace>/comp
 
 3. **分析を入れる**
    - `benchmark.json` と各 `grading.json` を直接読んで分析する
-   - `../../../agents/bench-analyzer.md` の「ベンチマーク結果の分析」セクションを参照
+   - `../../../agents/bench-analyzer.md` の `## モード: benchmark_analysis — ベンチマーク結果の分析` を参照
    - 例: 常に通るだけで差が出ないassertions・ばらつきが大きいeval・時間/トークンのトレードオフ
 
 ## 5. 分析結果をもとに改善する

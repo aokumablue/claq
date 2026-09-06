@@ -35,14 +35,14 @@ user-invocable: false
 skill-name/
 ├── SKILL.md (必須) — YAML frontmatter + Markdown 指示文
 └── Bundled Resources (任意)
-    ├── src/ple4/skills/ — 決定的・反復処理用 Python モジュール
+    ├── scripts/ — 決定的・反復処理用スクリプト
     ├── references/ — 必要に応じて読む文書
     └── assets/ — テンプレートや画像
 ```
 
 ### 書き方のポイント
 
-- `description`: いつトリガーされるか・何をするか。Claudeはスキルを使い渋るのでやや強めに書く
+- `description`: 何をするか・**いつ呼ぶか**・**いつ呼ばないか**を具体語で書く（近いスキルとの境界を 1 句添える）。トーンを強めるのではなく、トリガー語と除外条件で精度を上げる
 - SKILL.md は 500 行未満
 - 長くなるなら `references/` に分割
 - 命令形を基本にし、なぜその指示が大事かを説明する

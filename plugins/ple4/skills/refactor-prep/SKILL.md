@@ -44,7 +44,7 @@ JSON 契約（下流3ファイルが前提とする形。`deps.from`/`deps.to` �
   "tests": {
     "baseline": ["python3 -m pytest -q"],
     "group": ["python3 -m pytest -q tests/test_a.py", "python3 -m pytest -q tests/test_b.py"],
-    "final": ["python3 -m pytest -q", "ruff check plugins/ple4/src plugins/ple4/tests"]
+    "final": ["python3 -m pytest -q", "<プロジェクトの linter コマンド>"]
   }
 }
 ```

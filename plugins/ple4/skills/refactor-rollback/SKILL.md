@@ -18,22 +18,12 @@ user-invocable: false
 - `refactor-prep` のグループ/依存関係/テストセット
 - 高リスク境界（公開API・外部I/O・永続化境界）
 
-`refactor-prep` 入力契約:
+`refactor-prep` 入力契約: **形状の単一情報源は `../refactor-prep/SKILL.md` の出力契約**（ここに複製しない — 二重記載は片方だけ更新されても何も落ちないため静かにずれる）。
 
-```json
-{
-  "scope_files": ["path/a.py", "path/b.py"],
-  "groups": [["path/a.py"], ["path/b.py"]],
-  "deps": [{"from": 1, "to": 0}],
-  "tests": {
-    "baseline": ["python3 -m pytest -q"],
-    "group": ["python3 -m pytest -q tests/test_a.py", "python3 -m pytest -q tests/test_b.py"],
-    "final": ["python3 -m pytest -q", "ruff check plugins/ple4/src plugins/ple4/tests"]
-  }
-}
-```
+本スキルが依存するのは、その契約のうち次の 2 点だけである:
 
-必須: `scope_files` / `groups` / `deps` / `tests.baseline` / `tests.group` / `tests.final`（キーとして必須。値の非空までは要求しない — `refactor-prep` はテストが実在確認できないカテゴリを空配列で明示的に返す契約であり、空配列は「検証手段なし」という正当な値。手順3で NOT_AVAILABLE として扱う）
+- `scope_files` / `groups` / `deps` / `tests.baseline` / `tests.group` / `tests.final` はキーとして必ず存在する（値の非空は要求されない）
+- **空配列は「検証手段なし」という正当な値**であり、欠損ではない。手順3で `NOT_AVAILABLE` として扱う
 
 ## 手順
 

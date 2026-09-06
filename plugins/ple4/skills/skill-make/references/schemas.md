@@ -1,5 +1,15 @@
 # JSONスキーマ
 
+## 目次
+
+- evals.json
+- grading.json
+- metrics.json
+- timing.json
+- benchmark.json
+- comparison.json
+- analysis.json
+
 `skill-make` が使う JSON スキーマ定義。
 
 ---
@@ -35,39 +45,6 @@ skillのeval定義。スキルディレクトリ内の `evals/evals.json` に置
 - `evals[].files`: 入力ファイルの相対パス（任意）
 - `evals[].expectations`: 検証可能な期待値の配列
 
----
-
-## history.json
-
-Improveモードでのバージョン推移を記録。ワークスペースのルートに置く。
-
-```json
-{
-  "started_at": "2026-01-15T10:30:00Z",
-  "skill_name": "pdf",
-  "current_best": "v2",
-  "iterations": [
-    {
-      "version": "v0",
-      "parent": null,
-      "expectation_pass_rate": 0.65,
-      "grading_result": "baseline",
-      "is_current_best": false
-    }
-  ]
-}
-```
-
-**フィールド**
-
-- `started_at`: 改善開始時刻のISOタイムスタンプ
-- `skill_name`: 改善対象のスキル名
-- `current_best`: 現時点の最良バージョン
-- `iterations[].version`: バージョンID（`v0`/`v1`/...）
-- `iterations[].parent`: 由来元のバージョン
-- `iterations[].expectation_pass_rate`: gradingの通過率
-- `iterations[].grading_result`: `baseline` / `won` / `lost` / `tie`
-- `iterations[].is_current_best`: 現在の最良版かどうか
 
 ---
 
@@ -146,6 +123,13 @@ grader エージェントの返値。呼び出し元が schema 検証のうえ `
 - `claims`: 出力から抽出して検証した主張
 - `user_notes_summary`: executorが残した注意点
 - `eval_feedback`: 必要があれば付けるeval改善案
+
+**不変条件**（`../../../agents/grader.md` の出力契約。検証はこの 4 点を満たすかで行う）:
+
+- `summary.total == len(expectations)`
+- `summary.passed + summary.failed == summary.total`
+- `summary.pass_rate == round(summary.passed / summary.total, 2)`
+- `total == 0`（`expectations` が空）は判定不能。PASS ではなく **FAIL** として扱う
 
 ---
 
@@ -282,11 +266,12 @@ Benchmarkモードの出力。`benchmarks/<timestamp>/benchmark.json` に置く�
 - `runs[]`: 個々の実行結果
   - `eval_id`: 数値ID
   - `eval_name`: 人間向けのeval名（viewerでは見出しに使う）
-  - `configuration`: 必ず `"with_skill"` か `"without_skill"`
+  - `configuration`: `"with_skill"` か、比較ベースラインの `"without_skill"` / `"old_skill"`（既存スキル改善パスは `old_skill` を出力する）。ベースライン名は fixture 全体で一方だけに揃える
   - `run_number`: 実行番号（1, 2, 3...）
   - `result`: `pass_rate`/`passed`/`total`/`time_seconds`/`tokens`/`errors` を含む
+  - `expectations`: 期待値ごとの判定。**欠けると `bench-analyzer` が FAIL する**
 - `run_summary`: 構成ごとの統計
-  - `with_skill` / `without_skill`: それぞれ `pass_rate`/`time_seconds`/`tokens` の `mean` と `stddev`
+  - `with_skill` と使用したベースライン（`without_skill` または `old_skill`）: それぞれ `pass_rate`/`time_seconds`/`tokens` の `mean` と `stddev`
   - `delta`: `"+0.50"` などの差分文字列
 - `notes`: 分析メモ
 
@@ -296,7 +281,7 @@ Benchmarkモードの出力。`benchmarks/<timestamp>/benchmark.json` に置く�
 
 ## comparison.json
 
-blind comparatorの出力。`<grading-dir>/comparison-N.json` に置く。
+comparator エージェントの返値。呼び出し元が schema 検証のうえ `<grading-dir>/comparison-N.json` へ保存する（comparator 自身はファイルを書かない）。
 
 ```json
 {
@@ -371,7 +356,7 @@ blind comparatorの出力。`<grading-dir>/comparison-N.json` に置く。
 
 ## analysis.json
 
-post-hoc analyzerの出力。`<grading-dir>/analysis.json` に置く。
+bench-analyzer エージェントの返値。呼び出し元が schema 検証のうえ `<grading-dir>/analysis.json` へ保存する（bench-analyzer 自身はファイルを書かない）。
 
 ```json
 {
