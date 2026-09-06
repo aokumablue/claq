@@ -26,3 +26,4 @@
 | [0020](0020-shell-commands-are-analyzed-under-two-dialects.md) | シェル保護フックは 1 つのコマンド文字列を 2 つのシェル方言で解析する | accepted | 2026-09-04 |
 | [0021](0021-command-position-detection-uses-a-wrapper-allowlist.md) | 実行位置の特定は wrapper allowlist で行い、git 起動の探索は全トークン走査のままにする | accepted | 2026-09-06 |
 | [0022](0022-versioned-external-standards-carry-their-version-in-the-heading.md) | 外部の版付き標準を定義へ列挙するときは版を見出しへ書く | accepted | 2026-09-06 |
+| [0023](0023-version-pins-are-kept-only-when-a-drift-detector-exists.md) | 定義へ書く固定値は「陳腐化の検知器があるか」で残す / 外す | accepted | 2026-09-07 |
