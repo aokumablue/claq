@@ -460,11 +460,17 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
 
     for i, token in enumerate(segment):
         if is_git_executable_token(token):
-            for sub in segment[i + 1 :]:
-                if sub.startswith("-"):
-                    continue
-                return sub in _INDEX_MUTATING_GIT_SUBCOMMANDS
-            return False
+            # 「最初の非 `-` トークン」で決めると、値を別トークンに取る
+            # グローバルオプション（`-C .` / `-c a=b` / `--git-dir .git` /
+            # `--work-tree .`）1 個でその**値**がサブコマンドと読まれ、
+            # ガードが不発になる（実測 2026-09-07: `git -C . add x && git commit`
+            # が exit 0 で通った）。兄弟の `_find_git_commit_args_in_segment` は
+            # 同じ状況を全トークン走査で解いており、非対称を正当化する ADR は無い。
+            # 早期 return も外す — git トークンで打ち切ると、同一セグメント内の
+            # 後続の書込み実行ファイルまで見ずに False を返していた。
+            if any(sub in _INDEX_MUTATING_GIT_SUBCOMMANDS for sub in segment[i + 1 :]):
+                return True
+            continue
 
         # 実行名の正規化は `is_git_executable_token` と同じ共有 helper へ通す。
         # ここだけ素の basename（大小区別・`.exe` 残し）で照合していたため、

@@ -419,6 +419,71 @@ def _strip_line_comments(command: str) -> str:
     return "".join(result)
 
 
+def _strip_line_continuations(command: str) -> str:
+    """クォート外・二重クォート内の行継続（``\\`` + 改行）を除去する。
+
+    シェルは ``\\`` と改行の**両方**を消して行を連結するが、
+    ``_replace_unquoted_newlines`` / ``_strip_line_comments`` はエスケープ済みの
+    1 文字をそのまま出力するため両方が残る。残ったまま ``shlex(posix=True)`` へ
+    渡すと、whitespace 状態の ``\\`` が escape 状態へ遷移して改行を**次トークンの
+    先頭文字**として吸収し、継続行が 0 桁目から始まるときにその先頭語が丸ごと
+    別トークンへ化ける。
+
+    実測（2026-09-07）で 4 経路の誤通過を確認した — ``git commit \\`` + 改行 +
+    ``--no-verify`` / 同 ``-n`` が `block_no_verify` を、``git \\`` + 改行 +
+    ``commit`` が `pre_bash_commit_quality` の commit 判定を、
+    ``printf x >\\`` + 改行 + ``ruff.toml`` が `bash_config_protection` の
+    リダイレクト先判定を、いずれも exit 0 で素通りさせた。継続行がインデント
+    されている形では ``\n`` が単独トークンとして切れるため検出は維持されており、
+    **「継続行が 0 桁目から始まるか」だけで保護の有無が反転**していた。
+
+    単一クォート内では行継続は成立しない（``\\`` も改行もリテラル）ので触らない。
+
+    `_strip_line_comments` の**後**に適用すること。前に置くと
+    ``# foo \\`` + 改行 + ``git commit --no-verify`` が 1 行のコメントへ畳まれ、
+    2 行目が丸ごと消えて新しい誤通過を作る（シェルはコメント中の ``\\`` を
+    行継続として扱わない）。
+
+    Args:
+        command: 検査対象のコマンド文字列。
+
+    Returns:
+        行継続を連結した文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    if "\\\n" not in command:
+        return command
+
+    result: list[str] = []
+    quote: str | None = None
+    index = 0
+    length = len(command)
+    while index < length:
+        char = command[index]
+        if char == "\\" and quote != "'" and index + 1 < length:
+            following = command[index + 1]
+            if following == "\n":
+                index += 2
+                continue
+            result.append(char)
+            result.append(following)
+            index += 2
+            continue
+        if quote is not None:
+            if char == quote:
+                quote = None
+            result.append(char)
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+        result.append(char)
+        index += 1
+    return "".join(result)
+
+
 def _replace_unquoted_newlines(command: str) -> str:
     """クォート外の改行をシェル区切り ``;`` へ置き換える。
 
@@ -582,7 +647,7 @@ def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     Raises:
         例外は発生しません。
     """
-    normalized = _replace_unquoted_newlines(_strip_line_comments(command))
+    normalized = _replace_unquoted_newlines(_strip_line_continuations(_strip_line_comments(command)))
     lexer = shlex.shlex(normalized, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     # コメントは `_strip_line_comments` が行単位で落とし済み。ここを既定

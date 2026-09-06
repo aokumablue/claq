@@ -41,6 +41,12 @@ import time
 from pathlib import Path
 
 from ple4.lib.core_utils import log
+from ple4.mem.tag_stripping import strip_tags
+
+# deny 出力へ載せる不信データ（ステージされたファイルの行内容）の最大文字数。
+# stderr は `output_adapter.emit_block` の docstring どおりモデルへ提示される
+# チャネルなので、長さ無制限の抜粋はコンテキストを丸ごと押し出せる。
+_UNTRUSTED_EXCERPT_MAX_CHARS = 200
 
 _BINARY_SNIFF_SIZE = 8192  # 8KB
 
@@ -443,6 +449,30 @@ def should_scan_secrets(file_path: str) -> bool:
     return not name.endswith(_MINIFIED_SUFFIXES)
 
 
+def _sanitize_untrusted_excerpt(text: str) -> str:
+    """ファイル由来の抜粋を deny 出力へ載せる前に無害化する。
+
+    この抜粋は検査対象ファイルの本文であり、攻撃者が内容を選べる。deny 時に
+    stderr 経由でモデルのコンテキストへ入るため、囲いを偽装するタグ
+    （``</ple4-memory>`` など）を `strip_tags` で倒し、長さにも上限を置く。
+    `mem/cli` の注入経路と `hook_common.recent_bg_failure_notice` は既に
+    `strip_tags` を通しており、PreToolUse の deny 経路だけが素通りしていた。
+
+    Args:
+        text: ファイル本文から切り出した抜粋。
+
+    Returns:
+        タグを無害化し上限で切り詰めた抜粋。
+
+    Raises:
+        例外は発生しません。
+    """
+    sanitized = strip_tags(text.strip()).strip()
+    if len(sanitized) > _UNTRUSTED_EXCERPT_MAX_CHARS:
+        return sanitized[:_UNTRUSTED_EXCERPT_MAX_CHARS] + "…"
+    return sanitized
+
+
 def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
     """ファイル内容からログ出力呼び出し / デバッガ文 / Issue 参照なし TODO を検出します。
 
@@ -508,7 +538,16 @@ def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
             issues.append(
                 {
                     "type": "todo",
-                    "message": f'TODO/FIXME without issue reference at line {line_num}: "{todo_match.group(2).strip()}"',
+                    # 行内容はステージされたファイル由来 = 不信データで、この
+                    # メッセージは deny 時に stderr 経由でモデルのコンテキストへ
+                    # 入る（`output_adapter.emit_block` の docstring 参照）。
+                    # 囲いを偽装するタグを倒し、長さにも上限を置く。
+                    # `_scan_error_issue` が例外メッセージを型名だけへ落として
+                    # いるのと同じ方針。
+                    "message": (
+                        f"TODO/FIXME without issue reference at line {line_num}: "
+                        f'"{_sanitize_untrusted_excerpt(todo_match.group(2))}"'
+                    ),
                     "line": line_num,
                     "severity": "info",
                 }
