@@ -24,3 +24,4 @@
 | [0018](0018-directory-change-makes-repo-scope-untrustworthy.md) | `cd` を含むコマンドでは repo スコープ判定を信用せず deny する | accepted | 2026-09-03 |
 | [0019](0019-protection-hooks-fail-closed-when-stdin-cannot-be-read.md) | 保護フックは stdin を「読めなかった」場合に fail-closed する | accepted | 2026-09-04 |
 | [0020](0020-shell-commands-are-analyzed-under-two-dialects.md) | シェル保護フックは 1 つのコマンド文字列を 2 つのシェル方言で解析する | accepted | 2026-09-04 |
+| [0021](0021-command-position-detection-uses-a-wrapper-allowlist.md) | 実行位置の特定は wrapper allowlist で行い、git 起動の探索は全トークン走査のままにする | accepted | 2026-09-06 |

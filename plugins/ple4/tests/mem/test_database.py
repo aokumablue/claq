@@ -42,6 +42,9 @@ def _knowledge(key: str = "use-python3", **overrides: object) -> Knowledge:
         "kind": "convention",
         "title": "Python は python3 コマンドで実行する",
         "source": "human",
+        # status は必須引数（既定値なし）。DB 層のテストは注入対象の挙動を見る
+        # ものが多いため、ヘルパの既定は 'active' に置いて従来の意味を保つ。
+        "status": "active",
         "created_at": _TS,
         "updated_at": _TS,
     }
@@ -96,6 +99,27 @@ class TestSchema:
         """source の許容値外は CHECK 制約で弾かれる。"""
         with pytest.raises(sqlite3.IntegrityError):
             db.upsert_knowledge(_knowledge(source="oracle"))
+
+    def test_status_column_defaults_to_pending(self, db: Database) -> None:
+        """status を省略した INSERT は 'pending'（注入されない側）に落ちる。
+
+        H-01「agent 由来カードは人間の promote を経なければ注入されない」を
+        支えるのが Python 検証 1 層だけだと、status を省略する経路が 1 本増えた
+        瞬間に破れる。永続層の既定を fail-safe 側に据えて多層防御にする。
+
+        本番経路は status を必ず明示するため、この既定に到達するのは直 SQL の
+        みである。ゆえに検証も直 SQL で行う。
+        """
+        db.conn.execute(
+            """INSERT INTO knowledge
+                 (key, scope, kind, title, source, created_at, updated_at)
+               VALUES ('no-status', 'global', 'fact', 'status 省略', 'agent', ?, ?)""",
+            (_TS, _TS),
+        )
+        db.conn.commit()
+
+        row = db.conn.execute("SELECT status FROM knowledge WHERE key = 'no-status'").fetchone()
+        assert row["status"] == "pending"
 
     def test_confidence_range_enforced(self, db: Database) -> None:
         """confidence は 0〜1 の範囲外を弾く。"""

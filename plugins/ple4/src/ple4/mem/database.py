@@ -206,6 +206,29 @@ class Database:
         )
         return Repo.from_row(row)
 
+    def relink_repo_identity(self, repo_id: str, identity_key: str) -> bool:
+        """既存リポジトリ行を新しい ``identity_key`` へ載せ替える。
+
+        remote の追加・変更・削除で ``identity_key`` が変わっても、同一
+        リポジトリなら ``repos.id`` を引き継ぐために使う。``upsert_repo`` では
+        代用できない —— 旧 ``id`` と新 ``identity_key`` の組で INSERT すると、
+        ``ON CONFLICT(identity_key)`` は識別子違いで発火せず、``id``
+        （TEXT PRIMARY KEY）側の衝突が ``IntegrityError`` になるため。先に
+        ``identity_key`` を書き換えておけば、後続の ``upsert_repo`` が
+        ``identity_key`` 衝突として正しく UPDATE へ落ちる。
+
+        Args:
+            repo_id: 載せ替える既存行の ``repos.id``。
+            identity_key: 新しい正体キー。
+
+        Returns:
+            対象行が存在して更新できた場合 True、該当なしなら False。
+        """
+        return self._updated(
+            "UPDATE repos SET identity_key = ? WHERE id = ?",
+            (identity_key, repo_id),
+        )
+
     def list_repos(self) -> list[Repo]:
         """登録済みリポジトリを最終観測の新しい順に返す。
 
@@ -222,6 +245,16 @@ class Database:
 
         衝突解決は式インデックス ``(COALESCE(repo_id,''), key)`` で行う。
         既存行の ``id`` と ``created_at`` は保持する。
+
+        ``status`` は衝突時も ``excluded.status`` で上書きする。**これは意図的で
+        あり、ここへ「既存 status を維持する」ガードを足してはならない** ——
+        ``cli._handle_forget`` が ``archived`` を書き込むのに本メソッドを使って
+        おり、維持ガードを入れると forget が黙って効かなくなる。
+
+        「人間が promote した active カードを agent の再 learn が pending へ
+        戻す」問題（H-3）は、本メソッドではなく ``cli._handle_learn`` で塞ぐ。
+        DB 層は汎用の upsert のままにし、誰の書込みを拒むかという判断は
+        経路ごとに持たせる。
 
         Args:
             knowledge: 登録したい知識カード。

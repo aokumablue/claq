@@ -10,7 +10,7 @@ import pytest
 
 from ple4.mem import repo_identity
 from ple4.mem.database import Database
-from ple4.mem.models import Repo
+from ple4.mem.models import Knowledge, Repo
 from ple4.mem.repo_identity import (
     FALLBACK_SLUG,
     MAX_SLUG_LENGTH,
@@ -429,6 +429,108 @@ class TestResolveRepo:
         second_root = _make_repo(tmp_path / "two" / "app")
         assert resolve_repo(first_root, db).id == "app"
         assert resolve_repo(second_root, db).id == "app-2"
+
+    def test_adding_remote_keeps_repo_id_and_knowledge(self, tmp_path: Path, db: Database) -> None:
+        """remote 追加で identity_key が変わっても id を引き継ぎ、知識が到達可能なままであること。
+
+        修正前は remote 無しで登録済みのリポジトリに ``git remote add origin``
+        すると identity_key が repo root パスから ``github.com/o/r`` へ変わり、
+        別リポジトリ扱いで ``-2`` 付きの新 id を採番していた。その結果、旧 id
+        配下の ``scope='repo'`` 知識が全件 SessionStart 注入から静かに消えていた
+        （DB には残るが到達不能）。
+
+        id 一致だけでは不十分なので、知識が実際に引けるところまで確認する。
+        """
+        root = _make_repo(tmp_path / "app")
+        before = resolve_repo(root, db)
+        db.upsert_knowledge(
+            Knowledge(
+                key="repo-card",
+                scope="repo",
+                repo_id=before.id,
+                kind="fact",
+                title="repo スコープの知識",
+                source="human",
+                status="active",
+            )
+        )
+
+        _git("remote", "add", "origin", "git@github.com:owner/app.git", cwd=root)
+        after = resolve_repo(root, db)
+
+        assert after.id == before.id
+        assert after.identity_key == "github.com/owner/app"
+        assert len(db.list_repos()) == 1
+        # 到達可能性そのものを確認する（id 一致だけでは実害の解消を示せない）。
+        reachable = db.list_knowledge(scope="repo", repo_id=after.id, status="active")
+        assert [row.key for row in reachable] == ["repo-card"]
+
+    def test_changing_and_removing_remote_keeps_repo_id(self, tmp_path: Path, db: Database) -> None:
+        """remote の変更・削除でも id を引き継ぐこと。
+
+        ホスティング移行（GitHub -> GitLab）や remote 削除でも identity_key は
+        変わるため、追加と同じ経路で救う必要がある。
+        """
+        root = _make_repo(tmp_path / "app", remote="git@github.com:owner/app.git")
+        first = resolve_repo(root, db)
+
+        _git("remote", "set-url", "origin", "git@gitlab.com:owner/app.git", cwd=root)
+        moved = resolve_repo(root, db)
+
+        _git("remote", "remove", "origin", cwd=root)
+        removed = resolve_repo(root, db)
+
+        assert moved.id == first.id
+        assert removed.id == first.id
+        assert moved.identity_key == "gitlab.com/owner/app"
+        assert removed.identity_key == os.path.realpath(root)
+        assert len(db.list_repos()) == 1
+
+    def test_identity_migration_does_not_merge_distinct_repos(self, tmp_path: Path, db: Database) -> None:
+        """root_path が違うリポジトリは remote 追加後も別行のままであること。
+
+        移行判定が root_path 一致に限定されており、無関係なリポジトリを
+        巻き込まないことの固定。
+        """
+        first_root = _make_repo(tmp_path / "one" / "app")
+        second_root = _make_repo(tmp_path / "two" / "app")
+        first = resolve_repo(first_root, db)
+        second = resolve_repo(second_root, db)
+
+        _git("remote", "add", "origin", "git@github.com:one/app.git", cwd=first_root)
+        migrated = resolve_repo(first_root, db)
+
+        assert migrated.id == first.id
+        assert resolve_repo(second_root, db).id == second.id
+        assert len(db.list_repos()) == 2
+
+    def test_existing_identity_key_wins_over_path_match(self, tmp_path: Path, db: Database) -> None:
+        """目的の identity_key を持つ行があれば、そちらの id を返すこと。
+
+        判定順（identity_key 一致を先に見る）の固定。逆順だと
+        ``UNIQUE(identity_key)`` 違反へ到達しうる。
+        """
+        root = _make_repo(tmp_path / "app")
+        path_row = resolve_repo(root, db)
+        # 同じ root_path を持つ別行を、目的の identity_key で先に登録しておく。
+        db.upsert_repo(
+            Repo(
+                id="preexisting",
+                identity_key="github.com/owner/app",
+                root_path=os.path.realpath(root),
+            )
+        )
+
+        _git("remote", "add", "origin", "git@github.com:owner/app.git", cwd=root)
+        resolved = resolve_repo(root, db)
+
+        assert resolved.id == "preexisting"
+        assert resolved.id != path_row.id
+        assert len(db.list_repos()) == 2
+
+    def test_relink_repo_identity_reports_missing_row(self, db: Database) -> None:
+        """存在しない id の載せ替えは False を返すこと。"""
+        assert db.relink_repo_identity("no-such-repo", "github.com/o/r") is False
 
     def test_allocate_reuses_existing_id_for_known_identity(self, db: Database) -> None:
         """登録済み identity_key にはその id をそのまま返す。"""

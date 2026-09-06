@@ -49,13 +49,15 @@ VALID_FORMATS = {"text", "json"}
 VALID_TARGET_KINDS = {"repo", "consumer"}
 
 
-RUBRIC_VERSION = "2026-09-03"
+RUBRIC_VERSION = "2026-09-06"
 """採点ルーブリックの版。
 
 スコアはこの版の中でのみ比較可能で、版が上がった時点で過去のベースラインとは
-比較不能になる。``commands/harness.md`` が散文で同じ文字列を書いており、
-かつては両者を結ぶ検査が無かったため、片方だけ更新して「比較不能なスコア比較」が
-静かに通る状態だった。一致は tests/test_md_references.py が機械照合する。
+比較不能になる。同じ文字列を ``commands/harness.md`` の散文と
+``agents/harness-tuner.md`` のサンプル JSON が書いており、かつては前者しか
+機械照合されていなかったため、片方だけ更新して「比較不能なスコア比較」が
+静かに通る状態だった。3 箇所すべての一致を tests/test_md_references.py が
+機械照合する。
 """
 
 
@@ -67,10 +69,14 @@ def normalize_scope(scope: str | None) -> str:
     return value
 
 
-def _option_value(args: list[str], index: int, name: str) -> tuple[str | None, int]:
+def _option_value(args: list[str], index: int, name: str) -> tuple[str, int]:
     """`--name VALUE` または `--name=VALUE` の値と次インデックスを返す。
 
-    スペース区切りで次引数が無い場合は値を None とし、インデックスは +2 する。
+    値が無い・空文字・``-`` 始まり（＝次のフラグを値として食っている）の 3 つを
+    まとめてエラーにする（N-04）。呼び出し側ごとに書くのではなく取得の唯一の
+    経路である本関数へ置くのは、フラグを増やすたびにガードを書き忘れる余地を
+    残さないため。実測で ``--root --help`` は ``root=<cwd>/--help`` かつ
+    ``help=False`` になり、``--scope``（値なし）は黙って ``repo`` へ落ちていた。
 
     Args:
         args: 全引数のリスト。
@@ -79,13 +85,18 @@ def _option_value(args: list[str], index: int, name: str) -> tuple[str | None, i
 
     Returns:
         (オプション値, 次に処理すべきインデックス) のタプル。
+
+    Raises:
+        ValueError: 値が無い、空文字、または ``-`` 始まりの場合。
     """
     arg = args[index]
     if arg.startswith(f"{name}="):
-        return arg.split("=", 1)[1], index + 1
-    if index + 1 < len(args):
-        return args[index + 1], index + 2
-    return None, index + 2
+        value, next_index = arg.split("=", 1)[1], index + 1
+    else:
+        value, next_index = (args[index + 1] if index + 1 < len(args) else ""), index + 2
+    if not value or value.startswith("-"):
+        raise ValueError(f"{name} requires a non-empty value that is not another flag")
+    return value, next_index
 
 
 def _apply_arg(parsed: dict[str, Any], args: list[str], index: int) -> int:
@@ -110,7 +121,7 @@ def _apply_arg(parsed: dict[str, Any], args: list[str], index: int) -> int:
 
     if arg == "--format" or arg.startswith("--format="):
         value, next_index = _option_value(args, index, "--format")
-        parsed["format"] = (value or "").lower()
+        parsed["format"] = value.lower()
         return next_index
 
     if arg == "--scope" or arg.startswith("--scope="):
@@ -120,17 +131,12 @@ def _apply_arg(parsed: dict[str, Any], args: list[str], index: int) -> int:
 
     if arg == "--root" or arg.startswith("--root="):
         value, next_index = _option_value(args, index, "--root")
-        if not value:
-            # 値なしで cwd へ黙って落とすと、意図しない root で監査して
-            # いることに気付けない（N-04）。--root を指定した以上は
-            # 明示的な値を要求する。
-            raise ValueError("--root requires a non-empty path value")
         parsed["root"] = Path(value).resolve()
         return next_index
 
     if arg == "--target-kind" or arg.startswith("--target-kind="):
         value, next_index = _option_value(args, index, "--target-kind")
-        normalized = (value or "").lower()
+        normalized = value.lower()
         if normalized not in VALID_TARGET_KINDS:
             raise ValueError(f"Invalid target-kind: {value}. Use repo or consumer.")
         parsed["target_kind"] = normalized

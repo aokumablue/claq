@@ -31,6 +31,26 @@ def _list_markdown_files(directory: Path) -> list[Path]:
     return [entry for entry in directory.iterdir() if entry.is_file() and entry.name.endswith(".md")]
 
 
+_COMMAND_REFERENCE_PATTERN = re.compile(r"`/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\s[^`]*)?`")
+"""バッククォートで囲まれたコマンド参照。名前の後に引数が続く形も捕捉する。
+
+閉じバッククォートが名前の直後に来る形だけを見ていた頃は、引数付きの参照が
+検証をすり抜けた（実測: 同じ行に置いた ``/does-not-exist arg`` は素通りし
+``/also-missing`` だけがエラーになる）。引数部は ``\\s`` 始まりに限るので、
+``/usr/bin/env`` のようなパスは従来どおり一致しない。
+
+本パターンの適用先は ``commands/*.md`` だけで（`validate_commands` が
+`_list_markdown_files` に渡すのは commands ディレクトリのみ）、現時点の
+``commands/*.md`` に引数付きの参照は 1 件も無い。つまりこの修正で新たに
+検証対象へ入った参照は今のところゼロで、効果は将来書かれる引数付き参照を
+素通りさせないことにある。``agents/`` ``skills/`` の md にある参照（``/instinct promote`` 系 3 件:
+``agents/security-auditor.md`` と ``skills/learn/SKILL.md``）は本バリデータの
+走査範囲外のままである。``validate_agents`` / ``validate_skills`` にも
+``/command`` 参照の検査経路は無い（grep で確認済み）ため、それらは現時点で
+どのバリデータからも検証されていない。走査範囲を広げるかは別途の判断。
+"""
+
+
 def _check_command_references(file_name: str, content: str, valid_commands: set[str]) -> bool:
     """`/command` 形式のコマンド参照が実在するか検証する。
 
@@ -49,7 +69,7 @@ def _check_command_references(file_name: str, content: str, valid_commands: set[
     for line in content.splitlines():
         if re.search(r"creates:|would create:", line, re.I):
             continue
-        for match in re.finditer(r"`/([a-z0-9]+(?:-[a-z0-9]+)*)`", line):
+        for match in _COMMAND_REFERENCE_PATTERN.finditer(line):
             ref_name = match.group(1)
             if ref_name not in valid_commands:
                 emit_error(f"{file_name} - 存在しないコマンド /{ref_name} を参照しています")
@@ -226,6 +246,8 @@ def validate_commands(
     commands_dir: str | Path = DEFAULT_COMMANDS_DIR,
     agents_dir: str | Path = DEFAULT_AGENTS_DIR,
     skills_dir: str | Path = DEFAULT_SKILLS_DIR,
+    *,
+    optional: bool = False,
 ) -> int:
     """コマンド Markdown ファイルを検証し、JS バリデータと同じメッセージを表示する。
 
@@ -234,6 +256,11 @@ def validate_commands(
         commands_dir: 処理に渡す commands_dir の値です。
         agents_dir: 処理に渡す agents_dir の値です。
         skills_dir: 処理に渡す skills_dir の値です。
+        optional: True なら対象パスが存在しない場合に検証をスキップして 0 を返す。
+            既定の False では欠落を失敗として扱う（F-03）。hooks / skills / agents の
+            3 バリデータは同じ kwarg を持つのに commands だけが無条件スキップで、
+            ``commands/`` を消す・改名するだけで相互参照検証チェーン全体が
+            「成功」を報告していた（実測 exit=0）。
 
     Returns:
         処理結果を返します。
@@ -242,8 +269,11 @@ def validate_commands(
         root_dir, commands_dir, agents_dir, skills_dir
     )
     if not commands_path.exists():
-        print("commands ディレクトリが見つかりません。検証をスキップします")
-        return 0
+        if optional:
+            print("commands ディレクトリが見つかりません。--optional 指定のため検証をスキップします")
+            return 0
+        emit_error(f"commands ディレクトリが見つかりません: {commands_path}")
+        return 1
     files, valid_commands, valid_agents, valid_skills = _build_valid_name_sets(
         commands_path, agents_path, skills_path
     )
@@ -275,6 +305,11 @@ def build_parser() -> argparse.ArgumentParser:
         例外は発生しません。
     """
     parser = argparse.ArgumentParser(description="Validate command markdown files")
+    parser.add_argument(
+        "--optional",
+        action="store_true",
+        help="対象パスが存在しない場合に失敗ではなくスキップする",
+    )
     parser.add_argument("--root-dir", default=str(DEFAULT_ROOT_DIR))
     parser.add_argument("--commands-dir", default=str(DEFAULT_COMMANDS_DIR))
     parser.add_argument("--agents-dir", default=str(DEFAULT_AGENTS_DIR))
@@ -295,7 +330,9 @@ def main(argv: list[str] | None = None) -> int:
         例外は発生しません。
     """
     args = build_parser().parse_args(argv)
-    return validate_commands(args.root_dir, args.commands_dir, args.agents_dir, args.skills_dir)
+    return validate_commands(
+        args.root_dir, args.commands_dir, args.agents_dir, args.skills_dir, optional=args.optional
+    )
 
 
 if __name__ == "__main__":

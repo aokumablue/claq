@@ -22,6 +22,7 @@ from ple4.hooks.hook_common import (
     StdinUnavailableError,
     basename,
     emit_block_output,
+    normalize_protected_name,
     parse_json_object,
     read_raw_stdin_with_truncation,
     resolve_effective_target,
@@ -47,7 +48,11 @@ _WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
 # の場合もここに来るため、文言を「パッチ」に限定しない。
 _UNDECIDABLE_TARGET_MESSAGE = "BLOCKED: Could not determine target files from tool input."
 
-PROTECTED_FILES = {
+# frozenset で持つ。判定に使うのは下の `*_FOLDED`（import 時に 1 回だけ畳んだ
+# 複製）であり、実行時にこちらへ追加しても保護は増えない。可変のままだと
+# その食い違いが黙って通る — このコミットが塞いでいる「片側だけ更新された」
+# 型の穴そのものなので、変更を AttributeError で落ちる形にしておく。
+PROTECTED_FILES = frozenset({
     ".eslintrc",
     ".eslintrc.js",
     ".eslintrc.cjs",
@@ -86,7 +91,7 @@ PROTECTED_FILES = {
     # 得られるため、個別の lint 設定と同じ重みで保護する。
     ".pre-commit-config.yaml",
     ".pre-commit-config.yml",
-}
+})
 
 # ディレクトリ単位で保護する path。basename だけでは判定できない
 # （``.git/hooks/pre-commit`` の basename ``pre-commit`` を一律ブロックすると
@@ -98,16 +103,31 @@ PROTECTED_FILES = {
 # 片側だけ塞ぐと、塞いだ経路の存在が誤った安心になる。
 _PROTECTED_PATH_SEGMENTS = ((".git", "hooks"),)
 
+# 大小無視で比較するための畳み済み複製。`.GIT/HOOKS` は APFS / NTFS では
+# `.git/hooks` そのものを指すため、素の比較では保護 path が素通りする（C-2）。
+# 表示名には畳む前の綴りを使うので、両者を対で持つ。
+_PROTECTED_PATH_SEGMENTS_FOLDED = tuple(
+    tuple(normalize_protected_name(part) for part in segments) for segments in _PROTECTED_PATH_SEGMENTS
+)
+
 # ファイル名だけでは保護できない汎用設定ファイル。version bump・依存追加
 # 等の正当な編集が頻繁なため全面ブロックはしない。書き込み内容が
 # lint/format/coverage 設定を弱めうる場合のみ _conditional_block_reason
 # でブロックする（R-07）。
-CONDITIONALLY_PROTECTED_FILES = {
+CONDITIONALLY_PROTECTED_FILES = frozenset({
     "pyproject.toml",
     "setup.cfg",
     "tox.ini",
     "package.json",
-}
+})
+
+# 上 2 集合の大小無視の照合用複製。判定は必ずこちらを使い、生の集合は「保護
+# 対象は何か」の宣言と表示専用に残す（`bash_config_protection` も畳み済みの
+# 側を import して、両フックの判定軸を 1 本に保つ）。
+PROTECTED_FILES_FOLDED = frozenset(normalize_protected_name(name) for name in PROTECTED_FILES)
+CONDITIONALLY_PROTECTED_FILES_FOLDED = frozenset(
+    normalize_protected_name(name) for name in CONDITIONALLY_PROTECTED_FILES
+)
 
 # セクション見出しの照合パターン（前方一致）。[tool.ruff.lint] のような
 # サブセクションも拾うため prefix 一致にする。`[testenv` は tox.ini の
@@ -127,9 +147,16 @@ _LINT_SECTION_HEADERS = (
 # 拾うためのキー照合。見出しの外形だけを見ると、既存 pyproject.toml の
 # 値行への Edit（見出しが old_string/new_string に含まれない）を素通り
 # させてしまうため、キー単体でも検出する。
+#
+# 行頭の空白は ``[ \t]`` に限る。``\s`` は改行を含むため、``(?m)^`` の各行頭から
+# 残りの空白全体を貪欲に取ってから 1 文字ずつ後退する —— 「行頭の数 × 残り空白長」
+# で二次オーダーになる（実測: 改行だけの入力で N=5,000 → 0.105s、N=20,000 →
+# 1.619s、N=50,000 → 10.187s）。config_protection の hooks.json timeout は 15 秒
+# なので約 60,000 バイトの改行だけで超過し、host にフックを殺されれば allow へ
+# 倒れる＝保護そのものが無効化される。行頭キーの判定に改行は不要。
 _LINT_KEYS = ("ignore", "select", "per-file-ignores", "exclude", "fail_under", "addopts")
 _LINT_KEY_PATTERN = re.compile(
-    r"(?m)^\s*(" + "|".join(re.escape(key) for key in _LINT_KEYS) + r")\s*="
+    r"(?m)^[ \t]*(" + "|".join(re.escape(key) for key in _LINT_KEYS) + r")[ \t]*="
 )
 
 # package.json は TOML/INI ではないため専用のキー照合にする。
@@ -139,10 +166,26 @@ _PACKAGE_JSON_LINT_KEYS = ("eslintConfig", "prettier")
 # tox.ini 以外（例: pyproject.toml の正当な設定）にも現れうる汎用的な語で
 # あり、グローバル追加すると無関係な変更まで deny してしまう。そのため
 # tox.ini 限定分岐として独立させる（A-04 対応、package.json の特例と同じ形）。
+# 行頭空白を ``[ \t]`` に絞る理由は `_LINT_KEY_PATTERN` と同じ（同型の二次オーダー
+# 後退。片側だけ直すと同じ穴が残る）。
 _TOX_COMMAND_KEYS = ("commands", "commands_pre", "commands_post")
 _TOX_COMMAND_KEY_PATTERN = re.compile(
-    r"(?m)^\s*(" + "|".join(re.escape(key) for key in _TOX_COMMAND_KEYS) + r")\s*="
+    r"(?m)^[ \t]*(" + "|".join(re.escape(key) for key in _TOX_COMMAND_KEYS) + r")[ \t]*="
 )
+
+# `_text_has_lint_signal` が 1 回の判定で走査するテキストの上限バイト数。
+#
+# 上のパターンを線形化した後も、判定に投入されるテキスト長そのものは agent 側が
+# `MAX_STDIN_BYTES`（1MiB）まで自由に膨らませられる。将来パターンを足したときに
+# 同型の後退が再発しても保護が無効化されないよう、走査量に独立した天井を置く。
+#
+# 超過時は「判定不能」ではなく **True（＝ブロック）** を返す fail-closed とする。
+# 打ち切って走査を続ける（truncate）形にすると、上限より後ろに lint キーを置く
+# だけで条件付き保護を素通りできる新しいバイパスを自分で作ることになる。
+# 条件付き保護対象は pyproject.toml / setup.cfg / tox.ini / package.json の 4 つ
+# だけで、そこへ 256KiB を超える単一書き込みを行う正当な操作は無いため、
+# fail-closed 側の誤ブロックコストは実質ゼロ。
+_LINT_SIGNAL_MAX_TEXT_BYTES = 256 * 1024
 
 
 def protected_path_segment(file_path: str) -> str | None:
@@ -171,7 +214,11 @@ def protected_path_segment(file_path: str) -> str | None:
     """
     resolved = resolve_effective_target(file_path)
     parts = resolved.parts if resolved is not None else Path(file_path).parts
-    for segments in _PROTECTED_PATH_SEGMENTS:
+    # 比較は畳んだ側だけで行い、返す表示名は畳む前の綴りを使う（C-2）。
+    folded_parts = tuple(normalize_protected_name(part) for part in parts)
+    for segments, folded_segments in zip(
+        _PROTECTED_PATH_SEGMENTS, _PROTECTED_PATH_SEGMENTS_FOLDED, strict=True
+    ):
         width = len(segments)
         # 保護ディレクトリ自身（``.git/hooks``）も一致させる。当初は親ディレクトリ
         # 列だけを見て末尾一致を除外していたが、それが正しいのは Edit/Write の
@@ -179,8 +226,8 @@ def protected_path_segment(file_path: str) -> str | None:
         # が本判定を Bash へ伝播させたことで、``rm .git/hooks/pre-commit`` は deny
         # なのに 1 コンポーネント短い ``rm -rf .git/hooks`` は allow という、同じ
         # verb・同じ結果（フックが走らない状態）に対する非対称が生まれた。
-        for index in range(len(parts) - width + 1):
-            if parts[index : index + width] == segments:
+        for index in range(len(folded_parts) - width + 1):
+            if folded_parts[index : index + width] == folded_segments:
                 return "/".join(segments)
     return None
 
@@ -379,19 +426,29 @@ def _text_has_lint_signal(text: str, file_name: str) -> bool:
     部分一致、または見出しを伴わない値行編集を拾うためのキー行照合
     （`ignore = [...]` 等）で判定する。
 
+    `_LINT_SIGNAL_MAX_TEXT_BYTES` を超えるテキストは走査せず True（ブロック）を
+    返す。走査量の天井は fail-closed 側へ倒す —— 打ち切って走査を続けると、上限
+    より後ろに lint キーを置くだけで素通りできるバイパスになる。
+
     Args:
         text: 検査対象テキスト。
         file_name: 判定対象のファイル名（basename）。
 
     Returns:
-        lint/format/coverage 設定を弱めうる兆候があれば True。
+        lint/format/coverage 設定を弱めうる兆候があれば True。上限超過も True。
 
     Raises:
         例外は発生しません。
     """
-    if file_name == "package.json":
+    if len(text) > _LINT_SIGNAL_MAX_TEXT_BYTES:
+        return True
+    # ファイル別分岐も畳んだ名前で選ぶ。basename 側だけ大小無視にすると、
+    # ``Package.json`` が条件付き保護には入るのに package.json 専用のキー照合
+    # （`eslintConfig`）へ落ちず共通照合で素通りする、という半開きが残る（C-2）。
+    folded_name = normalize_protected_name(file_name)
+    if folded_name == "package.json":
         return any(key in text for key in _PACKAGE_JSON_LINT_KEYS)
-    if file_name == "tox.ini" and _TOX_COMMAND_KEY_PATTERN.search(text):
+    if folded_name == "tox.ini" and _TOX_COMMAND_KEY_PATTERN.search(text):
         return True
     if any(header in text for header in _LINT_SECTION_HEADERS):
         return True
@@ -493,9 +550,12 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
         if protected_segment is not None:
             return blocked_message_for_file(f"{protected_segment}/")
         file_name = _effective_basename(file_path)
-        if file_name in PROTECTED_FILES:
+        # 判定は畳んだ名前、メッセージは観測した綴り（利用者が書いた通りの名前が
+        # 出ないと、なぜ止まったのかが読み取れなくなる）。
+        folded_name = normalize_protected_name(file_name)
+        if folded_name in PROTECTED_FILES_FOLDED:
             return blocked_message_for_file(file_name)
-        if file_name in CONDITIONALLY_PROTECTED_FILES:
+        if folded_name in CONDITIONALLY_PROTECTED_FILES_FOLDED:
             reason = _conditional_block_reason(tool_name, container, file_path, file_name)
             if reason:
                 return reason
@@ -523,6 +583,14 @@ def _block_reason(data: dict[str, Any]) -> str | None:
         return None
     # コンテナキーの全走査は iter_tool_input_containers（lib/harness.py）が
     # 単一情報源。フック側で走査を手書きすると片側だけ緩い状態が再発する。
+    #
+    # 最初の理由で return する（先勝ち）のは意図した短絡。
+    # `_block_reason_for_container` の非 None の戻り値は**すべて deny**
+    # （判定不能時の `_UNDECIDABLE_TARGET_MESSAGE` を含む）なので、残りの
+    # コンテナを評価しても結論は deny のまま変わらない。
+    # 「`tool_input` を重くすると `toolArgs` が評価されない」という観測は
+    # 短絡ではなく _LINT_KEY_PATTERN の二次オーダー後退が host timeout を
+    # 踏んでフックごと殺されていたことの症状であり、そちらを直して塞ぐ。
     for container in iter_tool_input_containers(data):
         reason = _block_reason_for_container(tool_name, container)
         if reason:

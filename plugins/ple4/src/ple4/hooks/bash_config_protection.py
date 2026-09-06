@@ -7,11 +7,14 @@
 
 `config_protection` は Edit/Write/MultiEdit 系 matcher にしか登録されておらず、
 `printf x > pyproject.toml` のような Bash 経由の直接書き換えを検査しない
-（監査 A-06）。本モジュールは同じ保護対象定義（basename 集合の
-`PROTECTED_FILES` / `CONDITIONALLY_PROTECTED_FILES` と、ディレクトリ単位の
-`protected_path_segment`。いずれも `config_protection` から import して共有）を
+（監査 A-06）。本モジュールは同じ保護対象定義（大小無視で畳んだ basename 集合の
+`PROTECTED_FILES_FOLDED` / `CONDITIONALLY_PROTECTED_FILES_FOLDED` と、ディレクトリ
+単位の `protected_path_segment`。いずれも `config_protection` から import して共有）を
 Bash コマンド文字列に対して適用する。保護対象の定義は `config_protection` を
-単一情報源とし、本モジュール側で再定義しない。
+単一情報源とし、本モジュール側で再定義しない。畳んだ側を import するのは、
+`config_protection` が Write を deny する綴り（``Ruff.toml``）と本モジュールが
+Bash を deny する綴りを必ず一致させるため（C-2: 片側だけ大小無視にすると、
+Write は塞がるのに ``rm Ruff.toml`` は通る非対称が生まれる）。
 
 `config_protection` を Bash matcher に相乗りさせない理由:
     `config_protection.main()` の fail 姿勢（空入力 0 / malformed JSON deny /
@@ -31,7 +34,14 @@ Bash コマンド文字列に対して適用する。保護対象の定義は `c
         - `>` / `>>` / `&>` / `>|` リダイレクト先（`1>`/`2>`/`1>>`/`2>>` は
           `1`/`2` が別トークンになり `>`/`>>` に一致するため追加検出不要）
         - `tee` の出力先引数
-        - `sed -i` / `perl -i`（`-0pi` 等の結合短形式含む）の対象引数（in-place 編集）
+        - `sed` / `perl` の in-place 編集の対象引数。フラグ語彙は
+          `hook_common.is_inplace_edit_flag` が単一情報源で、`-i` 単独・
+          `-0pi` 等の結合短形式・GNU 長形式 `--in-place[=SUFFIX]` とその
+          非曖昧な短縮（`--i`）を含む
+        - `ed`/`red`/`ex`/`sponge`（`hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES`）
+          の引数。フラグ無しで書き換えるためフラグ判定の側では表現できない
+        - `touch` の引数。内容は変えられないが、保護対象を**空で新規作成**すると
+          linter の上位カスケード探索が止まり、実質的に設定の無効化になる
         - `cp`/`mv`/`install` の最終引数、`ln -f` の最終引数、`dd of=<path>`
     さらに、書き込み先ヒットがあった場合のみ `hook_common.resolve_repo_root`
     （`git rev-parse --show-toplevel`、プロセス内 1 回キャッシュ）でリポジトリ
@@ -70,18 +80,22 @@ import re
 from pathlib import Path
 
 from ple4.hooks.config_protection import (
-    CONDITIONALLY_PROTECTED_FILES,
-    PROTECTED_FILES,
+    CONDITIONALLY_PROTECTED_FILES_FOLDED,
+    PROTECTED_FILES_FOLDED,
     blocked_message_for_file,
     protected_path_segment,
 )
 from ple4.hooks.hook_common import (
+    ALWAYS_MUTATING_EDIT_EXECUTABLES,
     MAX_STDIN_BYTES,
     StdinUnavailableError,
     basename,
     command_dialect_variants,
     emit_block_output,
     extract_shell_wrapper_command,
+    is_inplace_edit_flag,
+    normalize_executable_name,
+    normalize_protected_name,
     parse_json_object,
     read_raw_stdin_with_truncation,
     resolve_effective_target,
@@ -159,33 +173,96 @@ _MODE_COMMANDS = frozenset({"chmod", "chown", "chgrp", "chflags"})
 _TEE_COMMANDS = frozenset(
     {"tee", "set-content", "add-content", "out-file", "new-item", "sc", "ac", "ni"}
 )
-_SED_COMMANDS = frozenset({"sed"})
-_PERL_COMMANDS = frozenset({"perl"})
+# in-place 編集で**フラグを伴うときだけ**書き込みになるコマンド。フラグ判定は
+# `is_inplace_edit_flag`（`hook_common`）が単一情報源で、`sed` と `perl` を別関数に
+# 分けていた頃の「sed は `-i` 前方一致 / perl は `i` の包含」という食い違いは
+# ここで消える。フラグ無しでも書き込むエディタは
+# `ALWAYS_MUTATING_EDIT_EXECUTABLES` の側（M-8）。
+_INPLACE_EDIT_COMMANDS = frozenset({"sed", "perl"})
 _LN_COMMANDS = frozenset({"ln"})
 _DD_COMMANDS = frozenset({"dd"})
+
+# 存在しないファイルを空で新規作成するコマンド（M-9）。内容を書き換えられなくても、
+# **保護対象の名前を空で置くだけで検査を無効化できる**: 多くの linter は設定ファイルを
+# 見つけた時点で上位ディレクトリの探索を打ち切るため（ESLint の cascade、
+# ``.eslintrc`` が典型）、空の設定を置くことは「上位のルール一式を無効化する」ことに
+# 等しい。`touch` はどの語彙集合にも入っておらず、保護対象 36 ファイル全てで
+# allow だった（実測 exit 0）。
+#
+# PowerShell の ``New-Item`` は同じ効果を持つが、既に `_TEE_COMMANDS`
+# （非オプション引数がすべて書き込み先）に載っているのでここへは重複させない。
+_TOUCH_COMMANDS = frozenset({"touch"})
 
 # カレントディレクトリを移動するコマンド。これらが現れたコマンドでは、cwd 基準の
 # 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
 _DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 
-_ALL_PROTECTED_BASENAMES = PROTECTED_FILES | CONDITIONALLY_PROTECTED_FILES
+_ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILES_FOLDED
 
 # `NAME=value` 形式の literal 環境変数代入（M-01: 実行 executable 位置の特定に使う）。
 # malformed JSON fallback で「破壊的操作の指示」とみなす部分文字列。書き込み系
 # （`>`/`tee`/`-i`）に加えて、トークン化経路が既に見ている削除・リンク系の verb を
 # 含める。部分一致なので過剰検出側に倒れるが、malformed 入力に対しては
 # ADR-0002（誤検出 > 誤通過）どおりそれでよい。
+#
+# `ALWAYS_MUTATING_EDIT_EXECUTABLES`（`ed` / `ex` / `red`）はここへ入れない。
+# 判定が部分一致なので 2〜3 文字の名前は ``used`` ``next`` ``required`` のような
+# 通常の語へ一致し、指標としての情報量が消える（保護対象 basename が見えている
+# 入力はほぼ常に deny になり、この tuple 自体が意味を失う）。`touch` は語として
+# 十分に長く、この問題を起こさないので含める。
 _RAW_TEXT_RISK_INDICATORS = (
-    (">", "tee", "-i") + tuple(sorted(_REMOVE_COMMANDS)) + tuple(sorted(_MODE_COMMANDS)) + ("ln",)
+    (">", "tee", "-i")
+    + tuple(sorted(_REMOVE_COMMANDS))
+    + tuple(sorted(_MODE_COMMANDS))
+    + tuple(sorted(_TOUCH_COMMANDS))
+    + ("ln",)
 )
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
-# `_command_index` が読み飛ばす実行 wrapper（basename 判定）。
-_COMMAND_POSITION_WRAPPERS = frozenset({"env", "command", "sudo"})
+# `_command_index` が読み飛ばす実行 wrapper（`normalize_executable_name` で判定）。
+#
+# ホワイトリストである理由と、`block_no_verify` が全トークン走査を採る理由の非対称は
+# **意図的な設計判断**であり `docs/adr/0021-command-position-detection-uses-a-wrapper-allowlist.md`
+# に記録した（代替案の実測を含む）。要旨だけ再掲すると: 本モジュールは M-01 のため
+# **実行位置の特定**が必要で、``tee pyproject.toml``（deny）と
+# ``echo tee pyproject.toml``（allow）は構文上同じ「語 → 語 → パス」なので何らかの
+# 名前集合が原理的に不可避になる。`block_no_verify` は実行位置を必要としないため
+# 名前集合を持たずに済む。この集合を消して全トークン走査へ揃える変更は、ADR-0021 の
+# 代替案 1 として却下済みである。
+#
+# 結果としてこの集合は部分緩和であり、未知の wrapper（``chrt`` 相当の新顔）は
+# 取りこぼす。それは承知のうえの境界で、`_command_index` の numeric positional
+# 消費（下記）だけが唯一の一般化である。
+_COMMAND_POSITION_WRAPPERS = frozenset(
+    {
+        "env",
+        "command",
+        "sudo",
+        "doas",
+        "nohup",
+        "nice",
+        "ionice",
+        "setsid",
+        "stdbuf",
+        "xargs",
+        "time",
+        "timeout",
+        "chrt",
+        "taskset",
+    }
+)
 
 # wrapper 自身が値を取る short オプション（`env -u NAME` / `sudo -u user`）。
 _WRAPPER_VALUE_SHORT_OPTIONS = frozenset({"-u"})
+
+# wrapper がコマンド名より前に取る positional 引数（``timeout 5 rm`` の秒数、
+# ``nice -n 5 rm`` のレベル、``chrt 99 rm`` の優先度、``taskset 0x3 rm`` のマスク）。
+# いずれも数字で始まり、実行ファイル名が数字で始まることはまず無いので、
+# **wrapper を 1 つ以上通過したあとに限り** 数字始まりの非オプション語を
+# wrapper 自身の値として読み飛ばす。これが無いと ``timeout 5 rm ruff.toml`` の
+# 実行位置が `5` に着地し、wrapper を語彙へ足しても deny に届かない。
+_WRAPPER_POSITIONAL_VALUE_RE = re.compile(r"^[0-9]")
 
 
 def _command_index(segment: list[str]) -> int | None:
@@ -193,9 +270,15 @@ def _command_index(segment: list[str]) -> int | None:
 
     `tee pyproject.toml` の実行位置と `echo tee pyproject.toml` の
     非実行位置を区別するために使う。先頭から連続する literal 環境変数代入
-    （``NAME=value``）と、``env``/``command``/``sudo`` の実行 wrapper（basename
-    判定。``-u NAME`` のような値を取る wrapper 自身のオプションは値ごと
-    読み飛ばす）を消費し、最初にそれ以外の形になったトークンの index を返す。
+    （``NAME=value``）と、`_COMMAND_POSITION_WRAPPERS` の実行 wrapper
+    （`normalize_executable_name` 判定。``-u NAME`` のような値を取る wrapper
+    自身のオプションは値ごと読み飛ばす）を消費し、最初にそれ以外の形になった
+    トークンの index を返す。
+
+    wrapper を 1 つ以上通過したあとは、数字で始まる非オプション語を wrapper
+    自身の positional 値として読み飛ばす（``timeout 5 rm`` の ``5``）。
+    wrapper 通過前には適用しないので、``5foo ruff.toml`` のような通常コマンドの
+    実行位置はずれない。
 
     未知の wrapper オプション（値の有無を判定できないもの）は 1 トークンだけ
     読み飛ばす。これは `block_no_verify` と同じ「うっかりバイパスの抑止」
@@ -212,18 +295,23 @@ def _command_index(segment: list[str]) -> int | None:
         例外は発生しません。
     """
     index = 0
+    seen_wrapper = False
     while index < len(segment):
         token = segment[index]
         if _ENV_ASSIGNMENT_RE.match(token):
             index += 1
             continue
-        if _command_name(token) in _COMMAND_POSITION_WRAPPERS:
+        if normalize_executable_name(token) in _COMMAND_POSITION_WRAPPERS:
+            seen_wrapper = True
             index += 1
             continue
         if token in _WRAPPER_VALUE_SHORT_OPTIONS:
             index += 2
             continue
         if token.startswith("-"):
+            index += 1
+            continue
+        if seen_wrapper and _WRAPPER_POSITIONAL_VALUE_RE.match(token):
             index += 1
             continue
         return index
@@ -263,40 +351,13 @@ def _protected_target(token: str) -> str | None:
     """
     resolved = resolve_effective_target(token)
     name = resolved.name if resolved is not None else basename(token)
-    if name in _ALL_PROTECTED_BASENAMES:
+    # 判定は畳んだ名前で行い、返す表示名は観測した綴りのままにする（C-2）。
+    # `Path.resolve()` は APFS / NTFS で綴りを実体の大小へ直さないため、素の
+    # 比較では ``rm Ruff.toml`` が実体 ``ruff.toml`` を消すのに素通りしていた。
+    if normalize_protected_name(name) in _ALL_PROTECTED_BASENAMES:
         return name
     segment = protected_path_segment(token)
     return f"{segment}/" if segment is not None else None
-
-
-def _command_name(token: str) -> str:
-    """実行トークンを比較用の名前（basename・小文字）へ正規化する。
-
-    大小を無視するのは、PowerShell（Windows のシェルツール）が cmdlet 名を
-    大小無視で解決し、macOS 既定の APFS も大小を区別しないため
-    （`is_git_executable_token` が同じ理由で lower している）。Linux では
-    `RM` が `rm` に一致する誤検出側へ倒れるが、ADR-0002 の範囲内。
-
-    正規化をこの 1 関数へ集約するのは、名前比較が 3 箇所（実行コマンド判定・
-    wrapper 読み飛ばし・cd 判定）にあり、片方だけ大小無視にすると
-    「`CD ..; rm ruff.toml` だけ repo スコープ判定へ落ちる」型の非対称が
-    生まれるため（実測）。
-
-    Args:
-        token: 実行位置のトークン。
-
-    ``.exe`` も落とす。`is_git_executable_token`（`hook_common`）は既に落として
-    おり、揃えないと ``git.exe commit --no-verify`` は捕まるのに
-    ``rm.exe ruff.toml`` は語彙から外れる、という非対称になる。
-
-    Returns:
-        basename を小文字化し、``.exe`` を除いた名前。
-
-    Raises:
-        例外は発生しません。
-    """
-    name = token.rsplit("/", 1)[-1].lower()
-    return name[: -len(".exe")] if name.endswith(".exe") else name
 
 
 def _executed_command_args(segment: list[str], names: frozenset[str]) -> list[str] | None:
@@ -318,7 +379,7 @@ def _executed_command_args(segment: list[str], names: frozenset[str]) -> list[st
         例外は発生しません。
     """
     index = _command_index(segment)
-    if index is None or _command_name(segment[index]) not in names:
+    if index is None or normalize_executable_name(segment[index]) not in names:
         return None
     return segment[index + 1 :]
 
@@ -376,52 +437,79 @@ def _tee_targets(segment: list[str]) -> list[str]:
     return _non_option_args(args) if args is not None else []
 
 
-def _sed_inplace_targets(segment: list[str]) -> list[str]:
-    """`sed -i`（in-place 編集）の対象になりうる引数をすべて返す。
+def _inplace_edit_targets(segment: list[str]) -> list[str]:
+    """`sed` / `perl` の in-place 編集の対象になりうる引数をすべて返す。
 
-    `sed` が実際に実行される位置にある場合のみ判定する（M-01）。スクリプト
-    引数（``s/a/b/``）も含めて返すが、保護対象かどうかの判定は呼び出し側が
-    `_protected_target` で行うため誤検出にはならない。
+    対象コマンドが実際に実行される位置にある場合のみ判定する（M-01）。
+    スクリプト引数（``s/a/b/``）も含めて返すが、保護対象かどうかの判定は
+    呼び出し側が `_protected_target` で行うため誤検出にはならない。
 
-    Args:
-        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
-
-    Returns:
-        in-place 編集の対象になりうる生トークンのリスト。`-i` が無ければ空。
-
-    Raises:
-        例外は発生しません。
-    """
-    args = _executed_command_args(segment, _SED_COMMANDS)
-    if args is None:
-        return []
-    has_inplace = any(token == "-i" or token.startswith("-i") for token in args if token.startswith("-"))
-    return list(args) if has_inplace else []
-
-
-def _perl_inplace_targets(segment: list[str]) -> list[str]:
-    """`perl -i`（`-0pi` 等の結合短形式含む）の対象になりうる引数をすべて返す。
-
-    perl の in-place 編集フラグは `-i` 単独、または `-0pi`/`-pi.bak` のように
-    他の短形式オプションと結合できる。結合位置は問わず、`-` 始まりの単一
-    ダッシュ・トークンに小文字 `i` が含まれるかで判定する（`sed -i` と同じ
-    「敵対的回避への防壁ではない」設計判断）。`perl` が実際に実行される位置に
-    ある場合のみ判定する（M-01）。
+    フラグ判定は `hook_common.is_inplace_edit_flag` に委ねる。sed 用と perl 用を
+    別関数に分けていた頃は sed 側だけが GNU 長形式を知らず、
+    ``sed --in-place s/x/y/ ruff.toml`` が素通りしていた（H-5。実測で exit 0）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        in-place 編集の対象になりうる生トークンのリスト。`-i` 系が無ければ空。
+        in-place 編集の対象になりうる生トークンのリスト。in-place フラグが
+        無ければ空。
 
     Raises:
         例外は発生しません。
     """
-    args = _executed_command_args(segment, _PERL_COMMANDS)
+    args = _executed_command_args(segment, _INPLACE_EDIT_COMMANDS)
     if args is None:
         return []
-    has_inplace = any(token.startswith("-") and not token.startswith("--") and "i" in token for token in args)
-    return list(args) if has_inplace else []
+    return list(args) if any(is_inplace_edit_flag(token) for token in args) else []
+
+
+def _always_mutating_edit_targets(segment: list[str]) -> list[str]:
+    """`ed`/`red`/`ex`/`sponge` の編集対象になりうる引数をすべて返す。
+
+    これらはフラグを 1 つも伴わずに引数のファイルを書き換えるため、
+    `_inplace_edit_targets` のフラグ判定に掛けると常に空になる。実測では
+    ``ed ruff.toml`` が exit 0 で素通りしていた（M-8）。語彙の根拠は
+    `hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES` を単一情報源とする。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        編集対象になりうる非オプション引数の生トークンのリスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    args = _executed_command_args(segment, ALWAYS_MUTATING_EDIT_EXECUTABLES)
+    return _non_option_args(args) if args is not None else []
+
+
+def _touch_targets(segment: list[str]) -> list[str]:
+    """`touch` の対象引数をすべて返す。
+
+    内容は書き換えられないが、保護対象の名前を**空で新規作成**できる。空の
+    ``.eslintrc`` は ESLint の上位カスケード探索をそこで打ち切らせるため、実質的な
+    lint 設定の無効化になる（M-9）。
+
+    値を取るオプション（``-t <stamp>`` / ``-d <date>`` / ``-r <ref>``）の値は
+    `_non_option_args` を素通りして候補に混じる。``touch -r ruff.toml app.py`` は
+    読み取り参照でしかない `ruff.toml` を候補として deny するが、これは
+    `_remove_targets` / `_mode_targets` と同じ姿勢であり ADR-0002（誤検出 >
+    誤通過）の範囲内。オプションごとの arity 表を持ち込むと、`touch` の
+    実装差（BSD / GNU / busybox）ごとに表が割れて取りこぼしが生まれる。
+
+    Args:
+        segment: 区切りトークンを含まない 1 セグメント分のトークン列。
+
+    Returns:
+        作成・更新対象になりうる非オプション引数の生トークンのリスト。
+
+    Raises:
+        例外は発生しません。
+    """
+    args = _executed_command_args(segment, _TOUCH_COMMANDS)
+    return _non_option_args(args) if args is not None else []
 
 
 def _last_arg_write_targets(segment: list[str]) -> list[str]:
@@ -550,8 +638,9 @@ def _write_target_tokens_in_segment(segment: list[str]) -> list[str]:
         for extract in (
             _redirect_targets,
             _tee_targets,
-            _sed_inplace_targets,
-            _perl_inplace_targets,
+            _inplace_edit_targets,
+            _always_mutating_edit_targets,
+            _touch_targets,
             _last_arg_write_targets,
             _remove_targets,
             _mode_targets,
@@ -575,7 +664,7 @@ def _changes_working_directory(segment: list[str]) -> bool:
         例外は発生しません。
     """
     index = _command_index(segment)
-    return index is not None and _command_name(segment[index]) in _DIRECTORY_CHANGE_COMMANDS
+    return index is not None and normalize_executable_name(segment[index]) in _DIRECTORY_CHANGE_COMMANDS
 
 
 def _within_repo_root(token: str, repo_root: Path) -> bool:
@@ -716,15 +805,18 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    # 指標は小文字で持つ（`_REMOVE_COMMANDS` 等に PowerShell の長形式 cmdlet が
+    # 指標は畳んだ形で持つ（`_REMOVE_COMMANDS` 等に PowerShell の長形式 cmdlet が
     # 入っており、生テキストには `Remove-Item` と大文字混じりで現れる）。
     # トークン化経路の名前比較も大小無視なので、ここだけ大小を見ると
-    # 「JSON が壊れているときだけ通る」非対称が生まれる。
-    lowered = raw_input.lower()
+    # 「JSON が壊れているときだけ通る」非対称が生まれる。case 演算は
+    # `normalize_protected_name` / `normalize_executable_name` と同じ casefold で
+    # 揃える（片方だけ lower にすると、畳み方の違いが新しい非対称になる）。
+    lowered = raw_input.casefold()
     if not any(indicator in lowered for indicator in _RAW_TEXT_RISK_INDICATORS):
         return None
+    # `_ALL_PROTECTED_BASENAMES` は既に畳み済みなので、ここで再度畳まない。
     for name in sorted(_ALL_PROTECTED_BASENAMES):
-        if name.lower() in lowered:
+        if name in lowered:
             return name
     return None
 

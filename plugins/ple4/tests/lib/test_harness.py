@@ -86,6 +86,25 @@ class TestJsonStringContainerNormalization:
         """JSON に見えてパースできない文字列は生文字列のまま返す（既存契約）。"""
         assert harness.extract_tool_input({"tool_input": "{not-json"}) == "{not-json"
 
+    @pytest.mark.parametrize("prefix", ["", " ", "\t", "\n", "\r", "\x0c", "\x0b"])
+    def test_patch_container_is_parsed_regardless_of_leading_whitespace(self, prefix: str) -> None:
+        """パッチ本文コンテナでも判定とパースの文字列を揃える（M-1）。
+
+        `extract_tool_input` は同じ罠を潰していたのに `_extract_patch_text` だけ
+        `lstrip` 前の文字列をパースしていた。`\\x0c` を 1 文字前置しただけで
+        `apply_patch` 以外のツール名では生の JSON 文字列がそのままパス候補になり、
+        本来の対象 `.git/hooks/pre-commit` が候補から消えていた（実測）。
+        """
+        patch = "*** Begin Patch\n*** Update File: .git/hooks/pre-commit\n*** End Patch"
+        tool_input = prefix + json.dumps({"input": patch})
+
+        assert harness.extract_file_paths("str_replace_editor", tool_input) == [".git/hooks/pre-commit"]
+        assert harness.extract_file_paths("apply_patch", tool_input) == [".git/hooks/pre-commit"]
+
+    def test_unparseable_patch_container_falls_back_to_raw_string(self) -> None:
+        """パッチ本文コンテナも、パース不能なら生文字列のまま返す（既存契約）。"""
+        assert harness.extract_file_paths("str_replace_editor", "{not-json") == ["{not-json"]
+
 
 class TestIterBashCommands:
     """iter_bash_commands / iter_tool_input_containers のテスト。"""
@@ -773,6 +792,74 @@ class TestPerInvocationFolding:
         assert harness.normalize_user_message(text) == "/goal 検証せよ"
 
 
+class TestOrphanDetectionIgnoresAttributeLimit:
+    """孤立足場タグの検出は属性長の上限に依存しない。
+
+    除去パターンと破棄判定が同じ ``_MAX_TAG_ATTR_CHARS`` を共有していた頃は、
+    上限を超えた入力で**両方が同時に外れた** — ブロック除去に一致せず、
+    孤立タグ検出にも一致せず、ADR-0015 が宣言する「孤立タグ 1 個で破棄」が
+    発火しないまま素通りした（実測: 属性 513 文字の ``<system-reminder …>``）。
+    除去できなかったものほど破棄すべきなのに、失敗の向きが逆だった。
+    """
+
+    @pytest.mark.parametrize("attr_length", [0, 1, 511, 512, 513, 5000])
+    def test_orphan_open_tag_is_discarded_at_any_attribute_length(self, attr_length: int) -> None:
+        """属性長に関わらず孤立開始タグはメッセージごと破棄される。"""
+        text = "実依頼 <system-reminder " + "A" * attr_length + "> 続き"
+
+        assert harness.normalize_user_message(text) == ""
+
+    def test_unterminated_long_attribute_block_is_discarded(self) -> None:
+        """属性が長すぎて除去できなかったブロックは破棄側へ倒れる。"""
+        text = "<system-reminder " + "A" * 600 + ">中身</system-reminder>"
+
+        assert harness._drop_scaffold_blocks(text) is None
+
+    def test_prose_naming_a_longer_tag_still_survives(self) -> None:
+        """名前が足場名で始まるだけの別タグは巻き込まない（偽陽性方向）。
+
+        破棄判定から `>` の要求を外したため、名前の終わりの先読みだけが
+        誤検知を防いでいる。この保護が消えると正当な依頼が黙って落ちる。
+        """
+        text = "<system-reminders>自作ツールの出力</system-reminders> を解析するコードを書け"
+
+        assert harness.normalize_user_message(text) == text
+
+
+class TestOrphanDetectionReachesTheEndOfString:
+    """文字列の終端で終わる足場タグも孤立タグとして破棄される。
+
+    除去側の「名前の終わり」（``_TAG_NAME_END``）は名前の後ろに 1 文字を要求する。
+    破棄判定がこれを共有していた頃は、発話が足場タグ名で終わる入力
+    （``payload["handoff"] = "作業完了 <system-reminder"``）がブロック除去にも
+    孤立検出にも一致せず、ADR-0015 の fail closed に穴が残っていた（実測）。
+    明示 handoff 経路は他の要因なしで単独成立する。
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "作業完了 <system-reminder",
+            "作業完了 </system-reminder",
+            "<agent-message",
+            "作業完了 <system-reminder\n",
+        ],
+        ids=["open-at-end", "close-at-end", "only-tag", "trailing-newline"],
+    )
+    def test_scaffold_tag_at_end_of_string_is_discarded(self, text: str) -> None:
+        """終端で終わる足場タグはメッセージごと破棄される。"""
+        assert harness.normalize_user_message(text) == ""
+
+    @pytest.mark.parametrize(
+        "text",
+        ["作業完了 <system-reminders", "作業完了 <system-remind", "a < b の比較"],
+        ids=["longer-name", "shorter-name", "bare-lt"],
+    )
+    def test_similar_text_at_end_of_string_survives(self, text: str) -> None:
+        """名前が一致しない終端は破棄しない（偽陽性方向）。"""
+        assert harness.normalize_user_message(text) == text
+
+
 class TestScaffoldRemovalStaysLinear:
     """足場除去が入力長に対して線形であることを守る。
 
@@ -861,3 +948,44 @@ class TestExtractFilePathsNestedValue:
         ファイルが 1 つも無い書き込み」として静かに許可してしまう。
         """
         assert harness.extract_file_paths("Write", {"file_path": value}) is None
+
+
+class TestDeepNestingIsParseFailureNotCrash:
+    """深いネストの JSON が例外で貫通しないこと（H-2）。
+
+    CPython の JSON デコーダは再帰下降で、深くネストした配列/オブジェクトに
+    対して `JSONDecodeError` ではなく `RecursionError` を送出する。これを
+    取りこぼすと保護フックが例外で異常終了し、PreToolUse の exit 1
+    （non-blocking error = ツールはそのまま実行される）へ倒れる。
+    """
+
+    @staticmethod
+    def _deep_json_text(depth: int = 200_000) -> str:
+        """`json.loads` が RecursionError を送出する深さの JSON テキストを作る。"""
+        return "[" * depth + "]" * depth
+
+    def test_recursion_error_is_in_parse_failure_tuple(self):
+        """RecursionError が JSON パース失敗として扱われる集合に入っている。"""
+        assert RecursionError in harness.JSON_PARSE_FAILURES
+
+    def test_deep_nesting_actually_raises_recursion_error(self):
+        """前提の実測: この入力は json.loads が RecursionError を投げる。
+
+        これが成り立たなくなった（CPython が反復パーサへ変わった等）場合、
+        以下の 2 テストは何も守らなくなるため前提自体を固定する。
+        """
+        with pytest.raises(RecursionError):
+            json.loads(self._deep_json_text())
+
+    def test_extract_tool_input_returns_raw_string(self):
+        """深いネストのコンテナ文字列はパース失敗として生文字列で返る。"""
+        text = self._deep_json_text()
+        assert harness.extract_tool_input({"toolArgs": text}) == text
+
+    def test_extract_patch_text_returns_raw_string(self):
+        """同型の json.loads を持つ `_extract_patch_text` も貫通しない。
+
+        片側だけ塞ぐと同じ穴が別の呼び出し箇所に残るため対で固定する。
+        """
+        text = "{" + self._deep_json_text() + "}"
+        assert harness._extract_patch_text(text) == text

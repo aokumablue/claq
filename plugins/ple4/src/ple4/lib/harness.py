@@ -53,6 +53,22 @@ INPUT_CONTAINER_KEYS = ("tool_input", "toolInput", "toolArgs", "tool_args")
 # 構造化パッチテキストのファイル操作マーカー（Codex apply_patch 形式）
 _PATCH_FILE_MARKERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ")
 
+# ``json.loads`` が「この文字列は JSON として読めない」ことを示すために送出しうる
+# 例外。本モジュールと ``hook_common.parse_json_object`` の JSON パースは全て
+# この 1 タプルで受ける（片側だけ塞ぐと、同型の穴が別の呼び出し箇所に残る）。
+# ``INPUT_CONTAINER_KEYS`` と同じ理由で公開名にしている —— 走査・パースの
+# 意味論をフック側の手書きに委ねると片側だけ緩い状態が再発する。
+#
+# ``RecursionError`` を含めるのは必須。CPython の JSON デコーダは再帰下降で、
+# 深くネストした配列/オブジェクトに対して ``JSONDecodeError`` ではなく
+# ``RecursionError`` を送出する。これを取りこぼすと保護フックが**例外で異常終了**
+# し、PreToolUse の exit 1（= non-blocking error。ツールはそのまま実行される）
+# へ倒れる —— つまり fail-open になる。実測: 深さ 200000 の入れ子を JSON 文字列値
+# の内側に置いた 400KB の payload（``MAX_STDIN_BYTES`` = 1MiB の内側）で
+# ``block_no_verify`` が exit 1。パース失敗として扱えば生文字列が返り、以降の
+# トークナイザ検査（fail-closed 側）に載る。
+JSON_PARSE_FAILURES = (json.JSONDecodeError, TypeError, RecursionError)
+
 
 def extract_tool_input(payload: dict[str, Any]) -> Any:
     """フック payload から tool_input / toolInput / toolArgs を正規化して返す。
@@ -94,7 +110,7 @@ def extract_tool_input(payload: dict[str, Any]) -> Any:
             return value
         try:
             return json.loads(stripped)
-        except (json.JSONDecodeError, TypeError):
+        except JSON_PARSE_FAILURES:
             return value
     return None
 
@@ -281,6 +297,15 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
     ような dict で渡ることがあるため、両方を吸収する。JSON 文字列化された
     dict が来た場合も input フィールドを復元する。ツール名に関わらず、
     渡された入力の「形」だけから候補テキストを取り出す（判定は呼び出し側）。
+
+    判定とパースは同じ文字列（``lstrip`` 後）に対して行う。``extract_tool_input``
+    と同じ非対称がここにも残っていた: ``lstrip()`` 後の値で ``{`` 始まりを見て、
+    パースには**元の文字列**を渡していた。``\\x0c`` / ``\\x0b`` は Python の空白
+    だが JSON の空白ではないため、1 文字前置するだけで「``{`` で始まると判定
+    されたのにパースは失敗する」状態になり、patch 本文ではなく生の JSON 文字列
+    がそのままパス候補として返る（実測: ``apply_patch`` 以外のツール名で
+    ``extract_file_paths`` が ``['\\x0c{"input": ...}']`` を返し、本来の対象
+    ``.git/hooks/pre-commit`` が候補から消える）。
     """
     if isinstance(tool_input, dict):
         patch_text = tool_input.get("input")
@@ -293,8 +318,8 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
     if not stripped.startswith("{"):
         return tool_input
     try:
-        parsed = json.loads(tool_input)
-    except (json.JSONDecodeError, TypeError):
+        parsed = json.loads(stripped)
+    except JSON_PARSE_FAILURES:
         return tool_input
     patch_text = parsed.get("input")
     return patch_text if isinstance(patch_text, str) else tool_input
@@ -455,11 +480,30 @@ COMMAND_TAGS = _COMMAND_TAGS
 # 破棄してしまう。属性付き（`<task-notification id="7">`）は従来どおり通す。
 _TAG_NAME_END = r"(?=[\s/>])"
 
+# 孤立タグ検出専用の「名前の終わり」。除去側（`_TAG_NAME_END`）と違い**文字列の
+# 終端も名前の終わりとみなす**。除去側の先読みは名前の後ろに 1 文字を要求するため、
+# 発話が足場タグ名で終わる入力（`"作業完了 <system-reminder"`）はブロック除去にも
+# 孤立検出にも一致せず、ADR-0015 の fail closed が発火しないまま素通りしていた
+# （実測。明示 handoff 経路は他の要因なしで単独成立する）。
+#
+# 共有定数側を広げてはならない。除去パターンで `$` を許すと `<system-reminder` の
+# ように閉じない開始タグが「名前の終わり」を満たしてしまい、消す側の精度要求
+# （`<system-reminders>` を巻き込まない）と噛み合わない。広げてよいのは
+# 「破棄するかどうか」だけを決める本パターンに限る。
+_ORPHAN_NAME_END = r"(?=[\s/>]|$)"
+
 # タグの属性部に許す最大文字数。`[^>]*` を無界にすると、`>` を 1 個も含まない入力
 # （`"<system-reminder " * N`）で各開始位置が末尾まで走査して二次オーダーになる。
 # 実測（撤去した件数ガードでは防げていなかった経路）: 498KB で 8.8 秒、996KB で
 # 35.7 秒、2MB は 120 秒でも終わらない。SessionEnd で毎回通る経路なので有界化する。
 # 実在のタグ属性がこの長さを超えることはなく、超えた時点でタグとして扱わない。
+#
+# **この上限は複雑度のための装置であって、安全性の境界ではない。** 上限超過を
+# 「タグではない」と読むと ADR-0015 が宣言した fail closed に穴が開くため、
+# 破棄判定を担う `_SCAFFOLD_ORPHAN_PATTERN` はこの上限を使わない（属性
+# 513 文字の `<system-reminder …>` がブロック除去にも孤立タグ検出にも一致せず
+# 素通りしていた）。上限を使うのは除去パターンだけで、超過して除去できなかった
+# ブロックは孤立タグとして検出され、メッセージごと破棄される。
 _MAX_TAG_ATTR_CHARS = 512
 _TAG_ATTRS = rf"[^>]{{0,{_MAX_TAG_ATTR_CHARS}}}"
 
@@ -484,8 +528,20 @@ _SCAFFOLD_BLOCK_PATTERNS = [
 # リテラルを混ぜてブロックを早期終端させた細工とみなす。best-effort な引き継ぎで
 # 断片を救う利得より、細工した文字列が「直近の依頼」として次セッションへ
 # 注入される損失のほうが大きいため、メッセージごと破棄する。
+#
+# 属性部（`_TAG_ATTRS`）と閉じ括弧は**要求しない**。要求していた頃は、属性が
+# 512 文字を超える `<system-reminder …>` がブロック除去にも本検出にも一致せず、
+# 「孤立タグ 1 個で破棄」が発火しないまま素通りしていた（実測）。除去できなかった
+# ものほど破棄すべきなのに、除去と破棄が同じ上限を共有していたため両方が同時に
+# 外れる構造だった。足場名＋名前の終わりが残っている時点で、対にならなかった
+# 足場タグか細工されたタグのどちらかであり、いずれも破棄が正しい。先読みも
+# 選択肢も固定幅なので走査は入力長に対して線形。
+#
+# 名前の終わりも除去側とは別定義（`_ORPHAN_NAME_END`）を使い、文字列の終端を
+# 含める。除去側の定義を使っていた頃は `"作業完了 <system-reminder"` のように
+# 足場タグ名で終わる入力が除去にも破棄にも一致しなかった（実測）。
 _SCAFFOLD_ORPHAN_PATTERN = re.compile(
-    r"</?(?:" + "|".join(_SCAFFOLD_TAGS) + r")" + _TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE
+    r"</?(?:" + "|".join(_SCAFFOLD_TAGS) + r")" + _ORPHAN_NAME_END, re.IGNORECASE
 )
 
 # スラッシュコマンド起動の足場。`<command-name>` と `<command-args>` の中身は

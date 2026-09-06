@@ -11,7 +11,8 @@
 # `python` is probed for 3.12+ before use because on some distributions it is
 # still Python 2, which cannot even parse launcher.py. `python3` is used
 # unprobed: probing costs one extra interpreter start on every single hook
-# invocation, and launcher.py already reports an unsupported version itself.
+# invocation, and launcher.py already reports an unsupported version itself
+# (`unsupported_python_version`), so the fallthrough is still a ple4 diagnostic.
 #
 # When nothing usable is found this exits 0 after writing a diagnostic to
 # stderr, matching launcher.py's documented fail-open policy (see CLAUDE.md
@@ -26,22 +27,120 @@ case "$0" in
   */*) _ple4_hook_dir=${0%/*} ;;
   *) _ple4_hook_dir=. ;;
 esac
-_ple4_root=$(CDPATH= cd -- "$_ple4_hook_dir/.." && pwd) || exit 0
+# `cd` が失敗してもここでは抜けない。root が解決できなければ launcher も
+# 見つからず、下の存在検査が診断付きの fail-open で終わらせる。以前はこの行で
+# 無言の exit 0 をしており、保護が無効化されたことが誰にも観測できなかった。
+_ple4_root=$(CDPATH= cd -- "$_ple4_hook_dir/.." && pwd)
 _ple4_launcher="$_ple4_root/src/ple4/launcher.py"
 
+# インタプリタ選択より **前** に launcher の存在を確かめる。3 つの exec 経路は
+# どれも同じファイルを渡すため、ここを通さないと不在時に全経路が同じ形で壊れる。
+#
+# `python3 <存在しないファイル>` は **exit 2** を返す。PreToolUse の「exit 2 =
+# deny」契約により、不完全インストール・Grok の hash symlink 切れ・root 解決の
+# 失敗はいずれも「4 つの保護 hook が全ツール呼び出しを偽 deny する」という形に
+# 化けていた。これは上に書いた fail-open ポリシーの真逆であり、しかも復旧手段の
+# Bash ごと塞ぐためセッション内から直せない。読めない launcher も python 側は
+# 同じ exit 2 になるので、存在と可読性を一度に見る。
+#
+# 診断 JSON にパスは載せない。POSIX のパスは `"`・`\`・改行を含んでよく、その
+# まま連結すると JSON が壊れる（改行なら偽の構造化行を 1 本注入できる）。
+# 移植可能なエスケープ手段が無い（`${var//}` は bash 専用で dash では構文エラー、
+# `sed` は外部バイナリで、PATH が壊れているというまさにこの診断の状況では
+# 呼べない）ため、パスは人間可読行だけに載せる。
+if [ ! -f "$_ple4_launcher" ] || [ ! -r "$_ple4_launcher" ]; then
+  printf '%s\n' "ERROR: ple4 launcher is missing or unreadable at $_ple4_launcher. Hooks are disabled until the plugin install is repaired (reinstall the plugin; on Grok re-run scripts/grok.sh to relink the hashed install directory)." >&2
+  printf '%s\n' '{"ple4ProtectionDisabled": true, "reason": "launcher_not_found"}' >&2
+  exit 0
+fi
+
+# PATH から**絶対パス以外のエントリを全て落とす**。
+#
+# POSIX は PATH の長さ 0 の要素（先頭 `:`、末尾 `:`、連続 `::`）と `.` を
+# 「カレントディレクトリ」と定めている。hook は cwd=プロジェクトルートで
+# 起動するため、リポジトリが同梱した `./python3` が `command -v` と `exec` の
+# 両方に採用され、**ツール入力 JSON を stdin ごと受け取り exit code も支配する**
+# 偽インタプリタになる（= 保護の完全な乗っ取り）。実測で再現済み。
+#
+# 「`command -v` の結果が `/` 始まりか検査する」だけでは塞がらない。この
+# wrapper の shebang は `#!/bin/sh` で、macOS の /bin/sh は POSIX モードの
+# bash 3.2 —— POSIX が `command -v` に絶対パスを要求するため、cwd 由来の候補にも
+# `$PWD` を前置して `/private/tmp/.../reproA/./python3` を返す。つまり検査は
+# 通ってしまう（実測。dash と zsh は相対名を返すので検査が効き、シェル依存で
+# 穴が開くか塞がるかが変わる）。PATH 自体を洗う方がシェル非依存に閉じる。
+#
+# 洗った PATH は **export する**。hook 本体（hook_common.py・
+# commit_quality_scanner.py）は `subprocess.run(["git", ...])` で git を名前
+# 解決しており、execvp も空要素を cwd として扱う。元の PATH に戻すと
+# `./python3` を塞いだ端から `./git` で同じ乗っ取りが成立する。wrapper の
+# 責務をここだけ「インタプリタを解決する」から「信頼できる PATH の下で
+# 解決する」へ意図的に広げている。
+_ple4_path=
+_ple4_rest=${PATH:-}
+while [ -n "$_ple4_rest" ]; do
+  case "$_ple4_rest" in
+    *:*)
+      _ple4_entry=${_ple4_rest%%:*}
+      _ple4_rest=${_ple4_rest#*:}
+      ;;
+    *)
+      _ple4_entry=$_ple4_rest
+      _ple4_rest=
+      ;;
+  esac
+  case "$_ple4_entry" in
+    /*) _ple4_path=${_ple4_path:+$_ple4_path:}$_ple4_entry ;;
+  esac
+done
+
+# 絶対エントリが 1 つも無い PATH の下では、PLE4_PYTHON が絶対パスでも hook を
+# 起動しない。起動すれば hook 自身の `git` 解決が cwd に落ちるため、攻撃者は
+# 「保護のバイパス」ではなく「hook 権限での任意コード実行」を得る。fail-open
+# （バイパス）の方が明確に軽い被害なので、こちらへ倒す。
+if [ -z "$_ple4_path" ]; then
+  printf '%s\n' "ERROR: ple4 refuses to run with a PATH that has no absolute entries (empty elements, '.' and relative directories all resolve to the current directory, which hooks do not control). Hooks are disabled until PATH lists absolute directories." >&2
+  printf '%s\n' '{"ple4ProtectionDisabled": true, "reason": "path_not_absolute"}' >&2
+  exit 0
+fi
+PATH=$_ple4_path
+export PATH
+
+# PLE4_PYTHON は絶対パスのみ受け付ける。相対名は cwd に落ちうるうえ、POSIX 側
+# では実測で `PLE4_PYTHON=./python3` が乗っ取りに成立した。PATH 探索へ**落とさ
+# ない**のも意図的で、明示的な override が黙って別のインタプリタに化けるのは
+# 「指定した物が動いた」という利用者の前提を破るため。Windows 側（.cmd）も
+# 同じ検査を持つ（cmd.exe は常に cwd を先に見るため、あちらは相対名でも成立する）。
 if [ -n "${PLE4_PYTHON:-}" ]; then
-  exec "$PLE4_PYTHON" "$_ple4_launcher" "$@"
+  case "$PLE4_PYTHON" in
+    /*) exec "$PLE4_PYTHON" "$_ple4_launcher" "$@" ;;
+  esac
+  printf '%s\n' "ERROR: PLE4_PYTHON must be an absolute interpreter path; got '$PLE4_PYTHON'. Hooks are disabled until it is fixed (a relative name can resolve to a binary in the current directory)." >&2
+  printf '%s\n' '{"ple4ProtectionDisabled": true, "reason": "ple4_python_not_absolute"}' >&2
+  exit 0
 fi
 
-if command -v python3 >/dev/null 2>&1; then
-  exec python3 "$_ple4_launcher" "$@"
-fi
+# 解決した絶対パスをそのまま exec する（名前で exec し直すと PATH 探索が
+# 2 度走り、probe した実体と exec する実体がずれうる）。`/` 始まりの検査は
+# PATH 洗浄に次ぐ 2 枚目の層で、`command -v` が関数・ビルトインを裸の名前で
+# 返した場合に exec 失敗ではなく fail-open へ倒すために残す。
+_ple4_python3=$(command -v python3 2>/dev/null) || _ple4_python3=
+case "$_ple4_python3" in
+  /*) exec "$_ple4_python3" "$_ple4_launcher" "$@" ;;
+esac
 
-if command -v python >/dev/null 2>&1 &&
-  python -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1; then
-  exec python "$_ple4_launcher" "$@"
-fi
+# probe は stdin を明示的に閉じる。`python -c` は現状コード側で読まないので
+# 実害は無いが、それは実装の振る舞いへの依存であって構造上の保証ではない。
+# hook の stdin にはツール入力 JSON が載っており、probe に食われると本体が
+# 空の payload を読むことになる。exec 行には付けない（本体は stdin を読む）。
+_ple4_python=$(command -v python 2>/dev/null) || _ple4_python=
+case "$_ple4_python" in
+  /*)
+    if "$_ple4_python" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' </dev/null >/dev/null 2>&1; then
+      exec "$_ple4_python" "$_ple4_launcher" "$@"
+    fi
+    ;;
+esac
 
-printf '%s\n' "ERROR: ple4 found no usable Python 3.12+ (tried PLE4_PYTHON, python3, python). Hooks are disabled until one is on PATH; set PLE4_PYTHON to an absolute interpreter path to recover." >&2
+printf '%s\n' "ERROR: ple4 found no usable Python 3.12+ (tried PLE4_PYTHON, python3, python; PATH entries that are not absolute paths are ignored). Hooks are disabled until one is on PATH; set PLE4_PYTHON to an absolute interpreter path to recover." >&2
 printf '%s\n' '{"ple4ProtectionDisabled": true, "reason": "python_not_found", "candidates": ["PLE4_PYTHON", "python3", "python"], "requiredVersion": "3.12+"}' >&2
 exit 0

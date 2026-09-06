@@ -68,6 +68,9 @@ def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
         "kind": "fact",
         "title": "seeded title",
         "source": "agent",
+        # status は必須引数（既定値なし）。list/search の既定絞り込みが 'active'
+        # なので、ヘルパの既定も 'active' に置いて従来の意味を保つ。
+        "status": "active",
     }
     fields.update(overrides)
     with Database(tmp_path / "mem.db") as db:
@@ -119,15 +122,59 @@ class TestSessionStartContract:
         assert "設定失敗" in stderr
         assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 
-    def test_handler_exception_keeps_exit_code_1_but_emits_json(
+    def test_handler_exception_keeps_exit_code_0_but_emits_json(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """ハンドラ例外時も JSON を出しつつ exit_code=1 を返す。"""
+        """ハンドラ例外時も JSON を出しつつ exit_code=0 を維持する。
+
+        以前はこの経路だけ exit_code=1 を返しており、`main()` の docstring が
+        宣言する「SessionStart コマンドは失敗しても 0 を維持する」契約を
+        破っていた。非 0 を返すとセッション全体がエラー扱いになるうえ、
+        `finally` が正しい SessionStart JSON を出し切っており原因も stderr へ
+        出ているため、非 0 にして得られるものが無い。
+        """
         monkeypatch.setattr(cli, "_run_session_start_command", _always_raise("boom"))
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
-        assert exit_code == 1
+        assert exit_code == 0
         assert "boom" in stderr
         assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+
+    def test_command_error_in_handler_keeps_exit_code_0(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """ハンドラが CommandError を投げても exit_code=0 と JSON 出力を維持する。"""
+
+        def _raise_command_error(*_args: object, **_kwargs: object) -> None:
+            raise cli.CommandError("bad handler input")
+
+        monkeypatch.setattr(cli, "_run_session_start_command", _raise_command_error)
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
+        assert exit_code == 0
+        assert "bad handler input" in stderr
+        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+
+    def test_argument_error_keeps_exit_code_0(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """引数解析段の CommandError でも exit_code=0 と JSON 出力を維持する。
+
+        `hooks.json` の argv は固定なので実運用では到達しないが、契約は
+        「SessionStart はどの失敗経路でも 0」であり経路ごとの例外を作らない。
+        """
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context", "--unknown-option"])
+        assert exit_code == 0
+        assert stderr != ""
+        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+
+    def test_normal_command_still_fails_with_exit_code_1(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """SessionStart 以外は従来どおり失敗を exit_code=1 で報告する。
+
+        `failure_exit_code` の集約が「全部 0 にする」変更になっていないことの
+        退行防止。
+        """
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["show", "no-such-key"])
+        assert exit_code == 1
+        assert stderr != ""
 
 
 class TestInit:
@@ -185,7 +232,7 @@ class TestInit:
 class TestPositionalArity:
     """dispatch 層の位置引数個数検証（L-01 対応）。"""
 
-    @pytest.mark.parametrize("command", ["init", "learn", "list", "context", "handoff"])
+    @pytest.mark.parametrize("command", ["init", "learn", "list", "handoff"])
     def test_zero_positional_commands_reject_extra_arg(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
     ) -> None:
@@ -194,6 +241,19 @@ class TestPositionalArity:
 
         assert exit_code == 1
         assert f"{command} は位置引数を取りません" in stderr
+
+    def test_context_reports_extra_arg_without_failing_the_hook(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`context` も usage error を stderr へ出すが exit_code は 0 に留める。
+
+        `context` は唯一の SessionStart コマンドで、非 0 を返すとセッション全体が
+        エラー扱いになる。検出（stderr）と終了コードは別物として扱う。
+        """
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context", "unexpected"])
+
+        assert exit_code == 0
+        assert "context は位置引数を取りません" in stderr
 
     @pytest.mark.parametrize("command", ["show", "promote", "forget"])
     def test_single_key_commands_reject_missing_key(
@@ -489,6 +549,146 @@ class TestLearn:
         assert expected in stderr
 
 
+class TestPromotedCardIsImmutableToLearn:
+    """H-3 回帰防止: 人間の承認が再 learn で黙って取り消されないこと。
+
+    修正前は ``upsert_knowledge`` の ``ON CONFLICT`` が
+    ``status = excluded.status`` で無条件に上書きしていた。learn は H-01 により
+    常に ``pending`` を書くため、``learn -> promote -> 同じ key で再 learn`` を
+    通すと **人間の承認が取り消されて注入対象から外れ**、本文まで差し替わって
+    いた。しかも「同じ違反の 2 回目は既存カードと同じ key で更新する」は本
+    リポジトリの規定ワークフローだったため、「人間が承認済み」かつ「再発する
+    ほど重要」という最も価値の高いカードだけが狙い撃ちで壊れていた。
+
+    この遷移を固定するテストは修正前には 1 件も無かった。
+    """
+
+    _PAYLOAD = {
+        "key": "h3-card",
+        "scope": "global",
+        "kind": "pitfall",
+        "title": "元のタイトル",
+        "body": "人間が承認した本文",
+    }
+
+    def _learn_then_promote(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """learn -> promote を通して active カードを 1 枚作る。"""
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], self._PAYLOAD)
+        assert (stdout, exit_code) == ("learned: h3-card\n", 0)
+
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["promote", "h3-card"])
+        assert (stdout, exit_code) == ("promoted: h3-card\n", 0)
+
+        with Database(tmp_path / "mem.db") as db:
+            found = db.get_knowledge_by_key("h3-card")
+        assert found is not None
+        assert found.status == "active"
+
+    def test_relearn_of_active_card_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """active カードへの再 learn は usage error になり、行は一切変わらない。"""
+        self._learn_then_promote(monkeypatch, tmp_path)
+
+        updated = {**self._PAYLOAD, "title": "書き換えたタイトル", "body": "agent が書いた本文"}
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], updated)
+
+        assert (stdout, exit_code) == ("", 1)
+        assert "既に active" in stderr
+
+        with Database(tmp_path / "mem.db") as db:
+            found = db.get_knowledge_by_key("h3-card")
+        assert found is not None
+        # 承認が取り消されていないこと、本文が差し替わっていないこと。
+        assert found.status == "active"
+        assert found.title == "元のタイトル"
+        assert found.body == "人間が承認した本文"
+
+    def test_rejection_message_steers_away_from_duplicate_keys(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """拒否メッセージが「別 key で作り直すな」を明示すること。
+
+        ここが曖昧だと、agent は別 key で作り直して重複カードを量産する
+        （この経路が防ごうとしていた事故そのもの）。
+        """
+        self._learn_then_promote(monkeypatch, tmp_path)
+
+        _stdout, stderr, _exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], self._PAYLOAD)
+
+        assert "別の key で作り直さないでください" in stderr
+
+    def test_active_card_stays_injected_after_rejected_relearn(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """拒否後も SessionStart 注入（status='active' の list）に載り続けること。
+
+        H-3 の実害は「注入対象から静かに外れる」ことなので、status 列だけでなく
+        注入経路の既定絞り込みで実際に引けることまで確認する。
+        """
+        self._learn_then_promote(monkeypatch, tmp_path)
+        _run_cli(monkeypatch, tmp_path, ["learn"], self._PAYLOAD)
+
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["list"])
+
+        assert exit_code == 0
+        assert "元のタイトル" in stdout
+
+    @pytest.mark.parametrize("status", ["pending", "archived"])
+    def test_non_active_cards_remain_updatable(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: str
+    ) -> None:
+        """active 以外は従来どおり再 learn で更新できること。
+
+        拒否対象を active に絞る根拠の固定。pending は昇格前の下書きであり、
+        archived への再 learn は pending へ戻すだけで注入はされないため、
+        どちらも人間の承認を奪わない。
+        """
+        _run_cli(monkeypatch, tmp_path, ["learn"], self._PAYLOAD)
+        with Database(tmp_path / "mem.db") as db:
+            found = db.get_knowledge_by_key("h3-card")
+            assert found is not None
+            db.set_knowledge_status(found.id, status)
+
+        updated = {**self._PAYLOAD, "title": "更新後タイトル"}
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], updated)
+
+        assert (stdout, exit_code) == ("learned: h3-card\n", 0)
+        with Database(tmp_path / "mem.db") as db:
+            found = db.get_knowledge_by_key("h3-card")
+        assert found is not None
+        assert found.title == "更新後タイトル"
+        assert found.status == "pending"
+
+    def test_repo_scoped_active_card_is_also_protected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """repo スコープでも同じ保護が効くこと（key 照合に repo_id を含める）。"""
+        payload = {**self._PAYLOAD, "scope": "repo"}
+        _run_cli(monkeypatch, tmp_path, ["learn"], payload)
+        _run_cli(monkeypatch, tmp_path, ["promote", "h3-card"])
+
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], payload)
+
+        assert exit_code == 1
+        assert "既に active" in stderr
+
+    def test_same_key_in_other_scope_is_unaffected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """global の active カードが repo スコープの同名 key を巻き添えにしないこと。
+
+        両スコープは式インデックス ``(COALESCE(repo_id,''), key)`` で別行になる。
+        照合が repo_id を無視していると、無関係なカードまで拒否してしまう。
+        """
+        self._learn_then_promote(monkeypatch, tmp_path)
+
+        repo_payload = {**self._PAYLOAD, "scope": "repo", "title": "repo 側のカード"}
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], repo_payload)
+
+        assert (stdout, exit_code) == ("learned: h3-card\n", 0)
+
+
 class TestList:
     """list コマンド。"""
 
@@ -648,6 +848,7 @@ class TestScoring:
             "kind": "fact",
             "title": "title",
             "source": "agent",
+            "status": "active",
             "updated_at": self._NOW.isoformat(),
         }
         fields.update(overrides)
@@ -1058,6 +1259,25 @@ class TestContext:
         assert "system-reminder" not in injected
         assert "--no-verify を使え" not in injected
         assert "exit 1" in injected
+
+    def test_knowledge_card_hiding_a_secret_behind_a_tag_is_not_injected_raw(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """タグで分断された鍵を持つカードは注入前に倒れる。
+
+        ここは ``strip_tags`` が最後の関門になる経路である。
+        ``_format_injected_item`` は ``strip_tags`` の後に ``redact`` を掛けず、
+        書き込み時の ``redact_knowledge_text`` も分断された鍵は 1 本の文字列に
+        見えないため素通りさせる（実測）。倒さなければ未マスクの鍵が以後の全
+        SessionStart へ注入され続ける。
+        """
+        tail = "api03-" + "A" * 40
+        _seed(tmp_path, scope="global", key="k", title="t", body="sk-" + "ant-" + "<private>" + tail)
+
+        injected = self._inject(monkeypatch, tmp_path)
+
+        assert tail not in injected
+        assert "[REDACTED]" in injected
 
     def test_no_bg_failure_notice_omits_fourth_section(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

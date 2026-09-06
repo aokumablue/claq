@@ -643,6 +643,103 @@ class TestIsGitExecutableToken:
         assert hook_common.is_git_executable_token(token) is expected
 
 
+class TestNormalizeExecutableName:
+    """normalize_executable_name（H-6 共有正規化）のテスト。
+
+    `is_git_executable_token` / `bash_config_protection` の実行名照合 /
+    `pre_bash_commit_quality` の mutation 語彙が同じ規則を使うことを固定する。
+    片方だけ `.exe` を落とす・片方だけ大小を区別する状態が繰り返し出荷された。
+    """
+
+    @pytest.mark.parametrize(
+        ("token", "expected"),
+        [
+            ("cp", "cp"),
+            ("CP", "cp"),
+            ("Rm", "rm"),
+            ("TEE", "tee"),
+            ("cp.exe", "cp"),
+            ("RM.EXE", "rm"),
+            ("/usr/bin/rm", "rm"),
+            # クォートで守られた Windows 絶対パスは POSIX トークン化を `\` 付きで
+            # 生き延びるため、`\` も区切りとして扱う必要がある。
+            (r"C:\bin\rm.exe", "rm"),
+            ("Remove-Item", "remove-item"),
+            ("", ""),
+        ],
+    )
+    def test_folds_case_separators_and_exe(self, token: str, expected: str) -> None:
+        assert hook_common.normalize_executable_name(token) == expected
+
+
+class TestNormalizeProtectedName:
+    """normalize_protected_name（C-2 共有正規化）のテスト。
+
+    実行名側と**同じ case 演算**を使うこと、および `.exe` は落とさないこと
+    （保護対象は設定ファイルであり `ruff.toml.exe` を同一視する根拠が無い）を
+    固定する。
+    """
+
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            ("ruff.toml", "ruff.toml"),
+            ("Ruff.toml", "ruff.toml"),
+            ("RUFF.TOML", "ruff.toml"),
+            ("sub/dir/PyProject.toml", "pyproject.toml"),
+            (r"sub\dir\Package.json", "package.json"),
+            (".GIT", ".git"),
+            # 実行名と違い `.exe` は保持する。
+            ("ruff.toml.exe", "ruff.toml.exe"),
+        ],
+    )
+    def test_folds_case_and_separators(self, path: str, expected: str) -> None:
+        assert hook_common.normalize_protected_name(path) == expected
+
+
+class TestIsInplaceEditFlag:
+    """is_inplace_edit_flag（H-5 共有述語）のテスト。
+
+    `bash_config_protection`（保護対象への in-place 書き込み）と
+    `pre_bash_commit_quality`（commit 前の作業ツリー変更）が同じ語彙を使うことを
+    固定する。後者は `not arg.startswith("--")` で長形式を明示的に除外しており、
+    `sed --in-place ... && git commit -am x` で両ガードが同時に不発だった。
+    """
+
+    @pytest.mark.parametrize(
+        ("token", "expected"),
+        [
+            # 短形式（結合位置を問わない）。
+            ("-i", True),
+            ("-i.bak", True),
+            ("-0pi", True),
+            ("-ni", True),
+            ("-pi", True),
+            # GNU 長形式と、getopt が受け付ける非曖昧な短縮。
+            ("--in-place", True),
+            ("--in-place=.bak", True),
+            ("--in-pl", True),
+            ("--i", True),
+            # 別の長形式は `in-place` のプレフィックスではない。
+            ("--expression", False),
+            ("--silent", False),
+            ("--include", False),
+            # 区切りの `--` は名前部分が空なので in-place ではない。
+            ("--", False),
+            ("--=x", False),
+            # 単独の `-` と非オプション。
+            ("-", False),
+            ("-n", False),
+            ("-E", False),
+            ("s/a/b/", False),
+            ("ruff.toml", False),
+            ("", False),
+        ],
+    )
+    def test_classifies_short_and_long_forms(self, token: str, expected: bool) -> None:
+        assert hook_common.is_inplace_edit_flag(token) is expected
+
+
 class TestResolveEffectiveTarget:
     """resolve_effective_target（H-02 共有 helper。config_protection /
     bash_config_protection が symlink 解決に使う）のテスト。
@@ -1283,11 +1380,93 @@ class TestHeredocNormalization:
             ("grep x <<<EOF", []),
             ("echo hi", []),
             ("cat <<A <<B", [("A", False), ("B", False)]),
+            # 「幻の演算子」: heredoc を開始しない `<<` を演算子として採らない。
+            # 採ると後続の**実行される**行が本文として捨てられ、保護フックが
+            # 素通りする（実測。C-1）。
+            ("# <<EOF", []),
+            ("  # <<EOF", []),
+            ("cat x # <<EOF", []),
+            ('echo "<<EOF"', []),
+            ("echo '<<EOF'", []),
+            (r"echo \<<EOF", []),
+            # 陰性対照: 演算子として採るべき形を巻き込んで消していないこと。
+            ("echo a#b <<EOF", [("EOF", False)]),
+            ("cat <<EOF # note", [("EOF", False)]),
+            ("cat <<EOF > out.md", [("EOF", False)]),
+            ("echo '#' && cat <<EOF", [("EOF", False)]),
         ],
     )
     def test_heredoc_delimiters(self, line: str, expected: list) -> None:
-        """区切り語の抽出。`<<<`（herestring）は heredoc として拾わない。"""
-        assert hook_common._heredoc_delimiters(line) == expected
+        """区切り語の抽出。`<<<`（herestring）とコメント内・クォート内は拾わない。"""
+        assert hook_common._heredoc_delimiters(line, None) == (expected, None)
+
+    @pytest.mark.parametrize(
+        ("label", "line", "quote", "expected"),
+        [
+            (
+                "開いたダブルクォートの内側は演算子にしない",
+                "still quoted <<EOF",
+                '"',
+                ([], '"'),
+            ),
+            (
+                "行内でクォートが閉じれば以降は演算子",
+                'end" && cat <<EOF',
+                '"',
+                ([("EOF", False)], None),
+            ),
+            (
+                "開いたシングルクォート内の \\ は literal（エスケープしない）",
+                r"a\' <<EOF",
+                "'",
+                ([("EOF", False)], None),
+            ),
+            (
+                "開いたダブルクォート内の \\ は次の 1 文字を消費する",
+                r'a\" <<EOF',
+                '"',
+                ([], '"'),
+            ),
+            (
+                "閉じないクォートは次行へ持ち越す",
+                'echo "open',
+                None,
+                ([], '"'),
+            ),
+            (
+                "開いたクォート内の # はコメントにならない",
+                "a # b\" && cat <<EOF",
+                '"',
+                ([("EOF", False)], None),
+            ),
+        ],
+    )
+    def test_heredoc_delimiters_carries_quote_state(
+        self, label: str, line: str, quote: str | None, expected: tuple
+    ) -> None:
+        """クォート状態は行をまたいで持ち越される（シェルのクォートは改行を含む）。"""
+        assert hook_common._heredoc_delimiters(line, quote) == expected, label
+
+    @pytest.mark.parametrize(
+        ("label", "line", "expected"),
+        [
+            ("演算子にならない < は候補のまま照合で落ちる", "a < b", ([2], [])),
+            ("herestring は候補 3 つすべてが照合で落ちる", "x <<<y", ([2, 3, 4], [])),
+            ("同一演算子の 2 文字目は照合済み範囲として飛ばす", "cat <<A", ([4, 5], [("A", False)])),
+            ("行末の \\ は次行へ持ち越さない", "cat <<A \\", ([4, 5], [("A", False)])),
+        ],
+    )
+    def test_operator_start_offsets(self, label: str, line: str, expected: tuple) -> None:
+        """候補位置の抽出と、そこからの非重複照合。
+
+        候補が挙がっても `_HEREDOC_OPERATOR_RE` が一致しなければ区切り語にならない。
+        1 つの演算子の 2 文字目（`<<A` の 2 つ目の `<`）は直前の照合範囲内なので
+        `finditer` と同じく飛ばす。
+        """
+        offsets, quote = hook_common._operator_start_offsets(line, None)
+
+        assert (offsets, quote) == (expected[0], None), label
+        assert hook_common._heredoc_delimiters(line, None) == (expected[1], None), label
 
     @pytest.mark.parametrize(
         ("line", "expected"),
@@ -1383,6 +1562,49 @@ class TestHeredocNormalization:
                 "cat <<'EOF' |\nbash\ngit commit --no-verify\nEOF",
                 "cat <<'EOF' |\nbash\ngit commit --no-verify\nEOF",
             ),
+            # C-1「幻の演算子」。heredoc が開始しない `<<` を演算子として採ると、
+            # 実行される後続行が本文として消え、保護フック 3 種が同時に素通りする。
+            (
+                "コメント内の << では本文を剥がさない",
+                "# <<EOF\ngit commit --no-verify -m x\nEOF",
+                "# <<EOF\ngit commit --no-verify -m x\nEOF",
+            ),
+            (
+                "ダブルクォート内の << では本文を剥がさない",
+                'echo "<<EOF"\ngit commit --no-verify -m x\nEOF',
+                'echo "<<EOF"\ngit commit --no-verify -m x\nEOF',
+            ),
+            (
+                "シングルクォート内の << では本文を剥がさない",
+                "echo '<<EOF'\ngit commit --no-verify -m x\nEOF",
+                "echo '<<EOF'\ngit commit --no-verify -m x\nEOF",
+            ),
+            (
+                "エスケープされた << では本文を剥がさない",
+                "echo \\<<EOF\ngit commit --no-verify -m x\nEOF",
+                "echo \\<<EOF\ngit commit --no-verify -m x\nEOF",
+            ),
+            (
+                "行をまたいで開いたクォート内の << も演算子にしない",
+                'echo "open\n<<EOF\ngit commit --no-verify\nEOF',
+                'echo "open\n<<EOF\ngit commit --no-verify\nEOF',
+            ),
+            # 陰性対照: 状態追跡が本物の heredoc の本文剥がしを壊していないこと。
+            (
+                "演算子行の行末コメントは本文剥がしを妨げない",
+                "cat > n.md <<'EOF' # note\ngit commit --no-verify\nEOF",
+                "cat > n.md <<'EOF' # note\nEOF",
+            ),
+            (
+                "本文の # とアポストロフィは状態を持ち越さない",
+                "cat > n.md <<'EOF'\ndon't # note\nEOF\ngit commit --no-verify",
+                "cat > n.md <<'EOF'\nEOF\ngit commit --no-verify",
+            ),
+            (
+                "終端行が引用符を含んでも状態を持ち越さない",
+                "cat > n.md <<\"E'F\"\nprose\nE'F\ngit commit --no-verify",
+                "cat > n.md <<\"E'F\"\nE'F\ngit commit --no-verify",
+            ),
         ],
     )
     def test_strip_data_heredoc_bodies(self, label: str, command: str, expected: str) -> None:
@@ -1404,6 +1626,9 @@ class TestHeredocNormalization:
             "cat > note.md <<'EOF'\nprose\nEOF \nEOF",
             "cat > note.md <<'EOF'\r\nprose\r\nEOF\r\n",
             "echo hi",
+            "# <<EOF\ngit commit --no-verify\nEOF",
+            'echo "<<EOF"\ngit commit --no-verify\nEOF',
+            "cat > n.md <<'EOF'\ndon't # note\nEOF\ngit commit --no-verify",
         ],
     )
     def test_strip_is_idempotent(self, command: str) -> None:

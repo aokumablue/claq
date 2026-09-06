@@ -162,10 +162,52 @@ def test_validate_commands_covers_warnings_and_success(tmp_path: Path, capsys: p
     assert "1 件の警告" in stdout
 
 
-def test_validate_commands_skips_missing_dir(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_validate_commands_fails_on_missing_dir(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`commands/` が無い場合は既定で失敗すること（F-03）。
+
+    以前は無条件スキップで exit 0 だったため、``commands/`` を消す・改名する
+    だけで相互参照検証チェーン全体が「成功」を報告できた。
+    """
     root = tmp_path
-    assert validate_commands.validate_commands(root, root / "commands", root / "agents", root / "skills") == 0
-    assert "検証をスキップします" in capsys.readouterr().out
+    assert validate_commands.validate_commands(root, root / "commands", root / "agents", root / "skills") == 1
+    assert "commands ディレクトリが見つかりません" in capsys.readouterr().err
+
+
+def test_validate_commands_skips_missing_dir_when_optional(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`optional=True` を明示したときだけスキップして 0 を返すこと。"""
+    root = tmp_path
+    assert (
+        validate_commands.validate_commands(
+            root, root / "commands", root / "agents", root / "skills", optional=True
+        )
+        == 0
+    )
+    assert "--optional 指定のため検証をスキップします" in capsys.readouterr().out
+
+
+def test_validate_commands_main_accepts_optional_flag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """CLI からも `--optional` でスキップできること。"""
+    assert (
+        validate_commands.main(
+            [
+                "--optional",
+                "--root-dir",
+                str(tmp_path),
+                "--commands-dir",
+                str(tmp_path / "commands"),
+                "--agents-dir",
+                str(tmp_path / "agents"),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+            ]
+        )
+        == 0
+    )
+    assert "--optional 指定のため検証をスキップします" in capsys.readouterr().out
 
 
 def test_validate_commands_reports_errors_and_io_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

@@ -8,6 +8,7 @@ fail-open・fail-closed 境界分割（A-05 相当）に関する分岐は本フ
 from __future__ import annotations
 
 import json
+import subprocess
 
 import pytest
 
@@ -280,3 +281,81 @@ class TestWorktreeEnumerationFailClosed:
         result = pbcq.evaluate(raw)
         assert result["exitCode"] == 2
         assert result["reason"] == pbcq._WORKTREE_FILES_UNAVAILABLE_MESSAGE
+
+
+class TestStagedFileNameDecoding:
+    """非 ASCII のステージ済みファイル名を例外なく扱えること。
+
+    `_git_name_only` が `text=True` だけで encoding を指定していなかった頃、
+    デコードは locale 依存だった。`LC_ALL=C`（preferred encoding = US-ASCII）の
+    環境で日本語ファイル名を stage すると `UnicodeDecodeError` が except タプル
+    （`CalledProcessError` / `FileNotFoundError` / `TimeoutExpired`）を貫通し、
+    docstring の「例外は発生しません」が破れてフック全体が落ちていた。
+    ファイル名は利用者が日常的に作るため、origin URL 由来の同種欠陥より
+    発火確率が高い。
+    """
+
+    def test_non_ascii_staged_file_names_survive_c_locale(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """US-ASCII ロケールでも日本語ファイル名を復元して返すこと。"""
+        monkeypatch.setenv("LC_ALL", "C")
+        monkeypatch.setenv("LANG", "C")
+        raw = "src/設定ファイル.py\nsrc/plain.py\n".encode()
+
+        def fake_run(command: list[str], **kwargs: object):
+            encoding = kwargs["encoding"]
+            assert isinstance(encoding, str)
+            errors = kwargs["errors"]
+            assert isinstance(errors, str)
+            return subprocess.CompletedProcess(command, 0, stdout=raw.decode(encoding, errors), stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        assert pbcq.get_staged_files() == ["src/設定ファイル.py", "src/plain.py"]
+
+    def test_undecodable_bytes_do_not_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """UTF-8 として不正なバイト列でも例外にせず走査を続けること。
+
+        `errors="replace"` でそのファイル名は置換文字へ潰れ内容を読めなくなるが、
+        例外でフックごと落ちて commit が無検査で通る（fail-open）よりは、
+        残りのファイルを従来どおり検査できる方が良いという判断。
+        """
+        raw = b"src/\xff\xfe-broken.py\nsrc/plain.py\n"
+
+        def fake_run(command: list[str], **kwargs: object):
+            encoding = kwargs["encoding"]
+            assert isinstance(encoding, str)
+            errors = kwargs["errors"]
+            assert isinstance(errors, str)
+            return subprocess.CompletedProcess(command, 0, stdout=raw.decode(encoding, errors), stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        staged = pbcq.get_staged_files()
+
+        assert staged is not None
+        assert len(staged) == 2
+        assert staged[1] == "src/plain.py"
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            PermissionError("git is not executable"),
+            OSError("exec format error"),
+        ],
+    )
+    def test_os_errors_are_caught_as_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch, error: Exception
+    ) -> None:
+        """git を起動できない OSError 系は None（検査不能）に落ちること。
+
+        従来の except タプルは `FileNotFoundError` しか持たず、`PermissionError`
+        や実行形式不正は貫通していた。
+        """
+
+        def fake_run(command: list[str], **kwargs: object):
+            raise error
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        assert pbcq.get_staged_files() is None
+        assert pbcq._head_exists() is None

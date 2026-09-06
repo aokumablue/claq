@@ -23,6 +23,7 @@ from typing import Any
 
 from ple4.hooks.output_adapter import adapt_context_output, emit_block
 from ple4.lib.core_utils import ensure_private_dir, get_ple4_dir
+from ple4.lib.harness import JSON_PARSE_FAILURES
 
 MAX_STDIN_BYTES = 1024 * 1024
 
@@ -118,26 +119,111 @@ def extract_shell_wrapper_command(segment: list[str]) -> str | None:
     return None
 
 
-def _heredoc_delimiters(line: str) -> list[tuple[str, bool]]:
-    """行に現れる heredoc の区切り語を出現順に返す。
+def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], str | None]:
+    """heredoc 演算子になりうる ``<`` の位置と、行末のクォート状態を返す。
+
+    コメント内・クォート内・``\\`` エスケープ後の ``<`` は heredoc を開始しない。
+    これらを演算子として採ると、実際には**実行される**後続行が「本文」として
+    捨てられる（実測: ``# <<EOF`` 改行 ``git commit --no-verify`` 改行 ``EOF`` で
+    保護フック 3 種が揃って exit 0 になった）。ADR-0017 が本文剥がしを正当化した
+    前提「本文範囲は演算子・区切り語・終端行だけで決まる」は、そもそも heredoc が
+    開始しないこの形では成立しない。
+
+    クォート状態は行をまたぐため（シェルのクォートは改行を含む）、呼び出し元が
+    **非本文行だけ**を鎖のように繋いで渡す。heredoc 本文行・終端行はシェルの
+    語彙ではないので状態を更新してはならない — 本文中の ``#`` や閉じない
+    アポストロフィ（``don't``）で以降の解析が壊れる。
+
+    ``\\`` エスケープは行内で完結させる。行末の ``\\`` が消費するのは改行自体
+    （行継続）であり、次行の先頭文字ではないため、状態として持ち越さない。
+
+    コメント判定は `_strip_line_comments` と同じ POSIX 規則（語の先頭にある
+    ``#`` だけ）で、`_COMMENT_PRECEDING_CHARS` を共有する。前段で
+    `_strip_line_comments` を単純適用する形は採れない — heredoc 本文中の ``#``
+    や閉じないアポストロフィまで巻き込んで壊すため。
 
     Args:
-        line: 走査対象の 1 物理行。
+        line: 走査対象の 1 物理行（非本文行）。
+        quote: 直前の非本文行から持ち越した未閉鎖クォート文字。無ければ None。
 
     Returns:
-        (区切り語, タブ剥がし可（``<<-``）) のリスト。無ければ空リスト。
+        (演算子候補となる ``<`` の位置リスト, 行末時点の未閉鎖クォート文字)。
 
     Raises:
         例外は発生しません。
     """
+    offsets: list[int] = []
+    escaped = False
+    in_comment = False
+    previous = "\n"
+    for index, char in enumerate(line):
+        if in_comment:
+            continue
+        if escaped:
+            escaped = False
+            previous = char
+            continue
+        if char == "\\" and quote != "'":
+            escaped = True
+            previous = char
+            continue
+        if quote is not None:
+            if char == quote:
+                quote = None
+            previous = char
+            continue
+        if char in ("'", '"'):
+            quote = char
+            previous = char
+            continue
+        if char == "#" and previous in _COMMENT_PRECEDING_CHARS:
+            in_comment = True
+            continue
+        if char == "<":
+            offsets.append(index)
+        previous = char
+    return offsets, quote
+
+
+def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, bool]], str | None]:
+    """行に現れる heredoc の区切り語を出現順に返し、行末のクォート状態も返す。
+
+    照合は `_operator_start_offsets` が返した位置からのみ行う。生の行へ
+    `finditer` を当てていた頃は、コメント内・クォート内の ``<<`` を演算子と
+    誤認していた。位置を絞ってから `re.Pattern.match` するため lookbehind
+    （``(?<!<)``）は従来どおり手前の文字を見られる。
+
+    採用した照合は `finditer` と同じく非重複にする（`consumed_to` で
+    直前の照合範囲内の候補を飛ばす）。位置ごとに独立して照合すると、
+    クォート内の ``<<`` を跨いだ重複照合が新たな区切り語を生み、本文を
+    余計に剥がす＝誤通過側へ倒れうるため。
+
+    Args:
+        line: 走査対象の 1 物理行（非本文行）。
+        quote: 直前の非本文行から持ち越した未閉鎖クォート文字。無ければ None。
+
+    Returns:
+        ((区切り語, タブ剥がし可（``<<-``）) のリスト, 行末時点の未閉鎖クォート文字)。
+
+    Raises:
+        例外は発生しません。
+    """
+    offsets, next_quote = _operator_start_offsets(line, quote)
     delimiters = []
-    for match in _HEREDOC_OPERATOR_RE.finditer(line):
+    consumed_to = 0
+    for offset in offsets:
+        if offset < consumed_to:
+            continue
+        match = _HEREDOC_OPERATOR_RE.match(line, offset)
+        if match is None:
+            continue
         # ``<<''`` の空文字列区切りを落とさないため or 連結にしない。
         word = next(
             value for value in (match.group("squote"), match.group("dquote"), match.group("bare")) if value is not None
         )
         delimiters.append((word, match.group(1) == "-"))
-    return delimiters
+        consumed_to = match.end()
+    return delimiters, next_quote
 
 
 def _line_keeps_heredoc_bodies(line: str) -> bool:
@@ -215,6 +301,14 @@ def strip_data_heredoc_bodies(command: str) -> str:
        ``cat <<'EOF' | bash`` / ``. /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``）
     2. 演算子行が継続演算子で終わる（本文開始が次行とは限らない）
     3. 終端行が見つからない（未終端）
+    4. ``<<`` がそもそも heredoc 演算子ではない（コメント内・クォート内・
+       ``\\`` エスケープ後）。この場合 heredoc は開始せず、後続行は**実行される
+       コマンド**なので、本文として剥がすと保護フックが素通りする（実測:
+       ``# <<EOF`` 改行 ``git commit --no-verify`` 改行 ``EOF`` で 3 フックが
+       揃って exit 0）。ADR-0017 の前提「本文範囲は演算子・区切り語・終端行だけ
+       で決まる」はここでは成立しない。判定は `_operator_start_offsets` が持つ
+       クォート／コメント状態で行い、状態は**非本文行だけ**を鎖にして更新する
+       （本文行・終端行はシェルの語彙ではないため）。
 
     終端行を残すため冪等（``f(f(x)) == f(x)``）。
 
@@ -233,11 +327,13 @@ def strip_data_heredoc_bodies(command: str) -> str:
     lines = command.split("\n")
     output = []
     index = 0
+    # 非本文行だけを繋いだクォート状態。本文行・終端行では更新しない。
+    quote: str | None = None
     while index < len(lines):
         line = lines[index]
         output.append(line)
         index += 1
-        delimiters = _heredoc_delimiters(line)
+        delimiters, quote = _heredoc_delimiters(line, quote)
         if not delimiters or _line_keeps_heredoc_bodies(line):
             continue
         consumed = _consume_heredoc_bodies(lines, index, delimiters)
@@ -852,6 +948,13 @@ def stdin_unreadable_message(hook_name: str, reason: object) -> str:
 def parse_json_object(raw: str) -> dict[str, Any] | None:
     """JSON 文字列を辞書としてパースします。
 
+    パース不能は ``JSON_PARSE_FAILURES``（`ple4.lib.harness`）で一括して受けます。
+    ここで ``json.JSONDecodeError`` だけを捕まえると、深くネストした配列/オブジェクト
+    に対して CPython の再帰下降デコーダが送出する ``RecursionError`` が貫通し、
+    呼び出し元の保護フックが例外で異常終了して PreToolUse の exit 1
+    （non-blocking error = ツールはそのまま実行される）へ倒れます。本関数の None は
+    呼び出し元で「判定不能 → deny」として扱われる fail-closed 側の値です。
+
     Args:
         raw: パース対象の JSON 文字列です。
 
@@ -865,7 +968,7 @@ def parse_json_object(raw: str) -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError:
+    except JSON_PARSE_FAILURES:
         return None
     return data if isinstance(data, dict) else None
 
@@ -930,15 +1033,87 @@ def basename(path: str) -> str:
     return Path(path).name
 
 
-def is_git_executable_token(token: str) -> bool:
-    """トークンが git 実行ファイルを指すかを判定します（basename 化・大小無視・.exe 許容）。
+def _basename_any_separator(path: str) -> str:
+    """`/` と `\\` の**両方**を区切りとみなして basename を取り出します。
+
+    `basename`（`Path(path).name`）は POSIX ホストでは `\\` を区切りとみなさない
+    ため、クォートで守られた Windows 絶対パス（``"C:\\bin\\rm.exe" ruff.toml``）が
+    `shlex(posix=True)` を通っても `\\` を保ったまま 1 トークンで残り、名前照合が
+    パス全体と比較されて外れます。`command_dialect_variants` は**クォート外**の
+    `\\` しか `/` へ読み替えないため、この経路は方言展開では閉じません。
+
+    Args:
+        path: パスまたは実行トークンの文字列です。
+
+    Returns:
+        両方の区切りで切り出した末尾要素を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    return path.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def normalize_executable_name(token: str) -> str:
+    """実行トークンを比較用の名前（basename 化・大小無視・`.exe` 除去）へ正規化します。
 
     `/usr/bin/git`（絶対パス）・`git.exe`（Windows）・
-    `C:\\Program Files\\Git\\bin\\git.exe`（Windows 絶対パス）・`GIT`（大文字。
-    macOS 既定の APFS は大小文字を区別しないため `GIT --version` は実 git を
-    起動する）をいずれも同一視します。`block_no_verify` と
-    `pre_bash_commit_quality` の両方が使う共有実装で、2 箇所へ別々に実装すると
-    正規化の齟齬（H-04）が再発するためここへ集約します。
+    `C:\\Program Files\\Git\\bin\\git.exe`（Windows 絶対パス）・`GIT`（大文字）を
+    いずれも `git` へ畳みます。大小を無視するのは、macOS 既定の APFS と Windows の
+    NTFS が既定で大小を区別せず（``CP foo bar`` は実 `cp` を起動し、``RM`` は実 `rm`
+    を起動する）、PowerShell が cmdlet 名を大小無視で解決するためです。Linux では
+    `RM` が `rm` に一致する誤検出側へ倒れますが、ADR-0002 の範囲内です。
+
+    保護 hook の実行名照合は**この 1 関数だけ**を通します。かつて
+    `is_git_executable_token`（`hook_common`）・`bash_config_protection._command_name`・
+    `pre_bash_commit_quality._segment_mutates_worktree_or_index` が同じ正規化を
+    別々に持ち、大小無視と `.exe` 除去が兄弟ごとに 1 世代ずつずれた結果、
+    ``git.exe commit --no-verify`` は捕まるのに ``CP evil.py app.py && git commit``
+    や ``rm.exe ruff.toml`` は語彙から外れる非対称が出荷されました（H-04 / H-6）。
+
+    Args:
+        token: `shlex` 等でトークン化された 1 トークンです。
+
+    Returns:
+        basename を大小無視へ畳み、末尾の `.exe` を除いた名前を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    name = _basename_any_separator(token).casefold()
+    return name[: -len(".exe")] if name.endswith(".exe") else name
+
+
+def normalize_protected_name(path: str) -> str:
+    """保護対象ファイル名の照合用に basename を大小無視へ畳みます。
+
+    `normalize_executable_name` と**同じ case 演算（`casefold`）と同じ basename
+    規則**を使います。片方を `lower` / もう片方を `casefold` にすると、閉じたはず
+    の非対称（実行名は大小無視なのにファイル名は大小区別、の逆）をそのまま
+    再生産するためです。実行名と違い `.exe` は落としません — 保護対象は設定
+    ファイルであり、`ruff.toml.exe` を `ruff.toml` と同一視する根拠が無いためです。
+
+    `Path.resolve()` は APFS / NTFS で綴りを実体の大小へ正規化しないため、
+    解決後の basename を素で比較すると ``Write Ruff.toml`` が実体 ``ruff.toml``
+    へ着地するのに保護判定は外れます（C-2。実測で exit 0）。
+
+    Args:
+        path: 検査対象のパス文字列、またはファイル名です。
+
+    Returns:
+        大小無視へ畳んだ basename を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _basename_any_separator(path).casefold()
+
+
+def is_git_executable_token(token: str) -> bool:
+    """トークンが git 実行ファイルを指すかを判定します。
+
+    正規化は `normalize_executable_name` へ委譲します（`block_no_verify` /
+    `pre_bash_commit_quality` / `bash_config_protection` で共有する単一情報源）。
 
     Args:
         token: `shlex` 等でトークン化された1トークンです。
@@ -949,11 +1124,80 @@ def is_git_executable_token(token: str) -> bool:
     Raises:
         例外は発生しません。
     """
-    basename_part = token.replace("\\", "/").rsplit("/", 1)[-1]
-    name = basename_part.lower()
-    if name.endswith(".exe"):
-        name = name[: -len(".exe")]
-    return name == "git"
+    return normalize_executable_name(token) == "git"
+
+
+# **フラグの有無に関わらず**引数のファイルを書き換えるエディタ／フィルタ
+# （M-8）。`is_inplace_edit_flag` が扱う `sed` / `perl` とは分類が違う。
+#
+# なぜ別分類が要るのか:
+#     `ed` は `_INPLACE_EDIT_EXECUTABLES`（フラグを要求する集合）に置かれて
+#     いたため、``ed app.py && git commit -am x`` が
+#     `pre_bash_commit_quality` の mutation-before-commit ガードを素通り
+#     していた（実測 exit 0。`sed -i` 版は exit 2）。`ed` に in-place フラグは
+#     無く、``ed FILE`` は編集コマンドを stdin から読んでその場で書き戻す。
+#     「フラグが立っていれば書き込み」という軸ではこの形を表現できない。
+#
+# 語彙の基準は「フラグ 1 つ無しでも名前を挙げたファイルを書き換えうるか」:
+#     - ``ed`` / ``red``（制限版 ed）/ ``ex``（vi の行エディタモード）:
+#       いずれも POSIX の行エディタで、``w`` コマンドで引数のファイルへ
+#       書き戻す。
+#     - ``sponge``（moreutils）: stdin を吸ってから引数のファイルへ書く。
+#       フラグは `-a`（追記）だけで、無指定が上書きにあたる。
+#     `vi` / `vim` / `nvim` は含めない — 無フラグでは書き込まず（対話編集を
+#     開始するだけ）、書き込ませるには `-c wq` が要るのでフラグ側の分類になる。
+#     どちらの分類にも属さないものを片方へ寄せると、その語彙の意味が濁る。
+#
+# `bash_config_protection`（保護対象への書き込み）と `pre_bash_commit_quality`
+# （commit 前の作業ツリー変更）が共有する。`is_inplace_edit_flag` /
+# `SHELL_WRAPPER_EXECUTABLES` と同じ理由で単一情報源にする — 判定軸が兄弟ごとに
+# 割れると、片方だけ 1 世代ずれた語彙を持って静かなバイパスになる（H-6）。
+ALWAYS_MUTATING_EDIT_EXECUTABLES = frozenset({"ed", "red", "ex", "sponge"})
+
+
+# sed の GNU 長形式 in-place フラグ。GNU getopt は曖昧でない限り長形式の短縮を
+# 受け付け、sed の長形式で `--i` から始まるのは `--in-place` だけなので、
+# ``sed --i s/x/y/ ruff.toml`` も実際に in-place 編集になる。したがって
+# 「`in-place` の非空プレフィックス」を一致条件にする（`--in-place=.bak` の
+# サフィックス指定も名前部分だけを見て拾う）。
+_LONG_INPLACE_OPTION_NAME = "in-place"
+
+
+def is_inplace_edit_flag(token: str) -> bool:
+    """トークンが in-place 編集フラグ（`sed -i` / `perl -0pi` / `sed --in-place`）かを判定します。
+
+    単一ダッシュの短形式は**結合位置を問わず** `i` を含むかで判定します
+    （`-i` / `-i.bak` / `-0pi` / `-ni` はいずれも in-place）。`sed` 側だけが
+    `-i` 前方一致で、`perl` 側だけが `i` の包含判定という食い違いがあったため、
+    両者の和集合をこの 1 関数へ集約します。
+
+    長形式は `_LONG_INPLACE_OPTION_NAME` の非空プレフィックスに限ります。
+    区切りの `--` は名前部分が空になるため in-place とみなしません
+    （``sed -- s/x/y/ ruff.toml`` は標準出力へ流すだけで書き込まない）。
+    `--expression` のような別の長形式も、`in-place` のプレフィックスでは
+    ないので一致しません。
+
+    `bash_config_protection`（保護対象への in-place 書き込み）と
+    `pre_bash_commit_quality`（commit 前の作業ツリー変更）が共有します。
+    後者は `not arg.startswith("--")` で長形式を**明示的に**除外していたため、
+    ``sed --in-place ... && git commit -am x`` で両方のガードが同時に不発に
+    なっていました（H-5）。
+
+    Args:
+        token: 引数トークン列の 1 トークンです。
+
+    Returns:
+        in-place 編集を指示するフラグなら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    if not token.startswith("-") or token == "-":
+        return False
+    if token.startswith("--"):
+        name = token[2:].split("=", 1)[0]
+        return bool(name) and _LONG_INPLACE_OPTION_NAME.startswith(name)
+    return "i" in token[1:]
 
 
 def resolve_effective_target(raw_path: str) -> Path | None:

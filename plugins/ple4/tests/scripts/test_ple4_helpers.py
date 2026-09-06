@@ -92,28 +92,19 @@ def test_ple4_plugin_root_relative_source_then_cd_survives_under_zsh(tmp_path: P
     assert result.stdout.strip() == str(_PLUGIN_ROOT)
 
 
-def test_ple4_run_bg_returns_pid(tmp_path: Path) -> None:
-    """ple4_run_bg が数値 PID を返し、そのプロセスが実在すること。"""
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    python3 = fake_bin / "python3"
-    python3.write_text("#!/usr/bin/env bash\nsleep 5\n", encoding="utf-8")
-    python3.chmod(0o755)
+def test_helpers_expose_no_unwatchdogged_background_runner() -> None:
+    """ハードタイムアウトを持たない background runner を再導入しないこと（H-17）。
 
-    env = {**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"}
-    script = f'''
-set -euo pipefail
-source "{_HELPER}"
-pid="$(ple4_run_bg demo.command --flag)"
-case "$pid" in
-  (*[!0-9]*|"") exit 1 ;;
-esac
-kill -0 "$pid"
-kill "$pid"
-wait "$pid" 2>/dev/null || true
-'''
+    `ple4_run_bg` は `nohup ... &` だけで、CLAUDE.md が新規の外部呼び出しに
+    義務付けるハードタイムアウトを持たなかった（`--bg` 経由の
+    `hook_common.detach_process` が使う watchdog を通らないため、mem.db の
+    ロック待ちに入ると無期限に残留する）。本番の呼び出し元はゼロだったので、
+    「古いコードは必ず削除する」に従い関数ごと落とした。
+    """
+    text = _HELPER.read_text(encoding="utf-8")
 
-    _run_bash(script, env=env)
+    assert "ple4_run_bg" not in text
+    assert "nohup" not in text
 
 
 def _print_root_with_handover(root: Path) -> str:
@@ -175,6 +166,88 @@ def test_helpers_load_under_posix_dash(tmp_path: Path) -> None:
 
     assert result.stderr == ""
     assert result.stdout.strip() == str(handed_over)
+
+
+_STALE_ROOT_SHELLS = ["bash", *(["dash"] if shutil.which("dash") else []), *(["zsh"] if _ZSH_AVAILABLE else [])]
+
+
+def _stale_root_script(root: Path, call: str) -> str:
+    """存在しない root を handover して `call` を 1 回呼ぶスクリプトを返す。
+
+    プラグイン更新でバージョン付きキャッシュディレクトリが差し替えられた後、
+    既に env.sh を source 済みのシェルが残っている状況を再現する。
+
+    Args:
+        root: 実在しない plugin root。
+        call: source 後に呼ぶコマンド行。
+
+    Returns:
+        シェルへ渡すスクリプト文字列。
+    """
+    return "\n".join(
+        [
+            "set -eu",
+            f'_PLE4_SOURCED_ROOT="{root}"',
+            f'. "{_HELPER}"',
+            call,
+            "printf 'UNREACHABLE\\n'",
+        ]
+    )
+
+
+@pytest.mark.parametrize("shell", _STALE_ROOT_SHELLS)
+def test_ple4_plugin_root_fails_loudly_when_the_sourced_root_is_gone(shell: str, tmp_path: Path) -> None:
+    """stale root では空文字を返さず、理由を stderr へ出して非ゼロで返すこと（M-5）。
+
+    旧実装は `cd` の失敗を検査せず空文字を返し、終了ステータスも 0 だった。
+    その結果 `ple4_run` が ``"/runtime/ple4-hook"``（root が空のまま連結された
+    絶対パス）を実行しようとし、プラグイン更新後のシェルでは以後すべての
+    `ple4_run` が原因と無関係なエラーになっていた。
+
+    Args:
+        shell: 実行するシェル名。
+        tmp_path: pytest の一時ディレクトリ。
+    """
+    gone = tmp_path / "gone"
+    result = subprocess.run(
+        [shell, "-c", _stale_root_script(gone, "ple4_plugin_root")],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert result.stdout.strip() == ""
+    assert str(gone / "runtime") in result.stderr
+    assert "UNREACHABLE" not in result.stdout
+
+
+@pytest.mark.parametrize("shell", _STALE_ROOT_SHELLS)
+def test_ple4_run_does_not_execute_a_root_relative_path_when_root_is_gone(
+    shell: str, tmp_path: Path
+) -> None:
+    """stale root では `ple4_run` が root 相対パスの実行へ進まないこと（M-5）。
+
+    「解決できなかった」ことを stale root の名前で伝えるのが目的なので、
+    ``/runtime/ple4-hook`` という誤ったパスに言及するエラーが出ていないことを
+    合わせて固定する。これが出るなら空文字の連結が復活している。
+
+    Args:
+        shell: 実行するシェル名。
+        tmp_path: pytest の一時ディレクトリ。
+    """
+    gone = tmp_path / "gone"
+    result = subprocess.run(
+        [shell, "-c", _stale_root_script(gone, "ple4_run ple4.mem.cli list")],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert "/runtime/ple4-hook" not in result.stderr
+    assert str(gone / "runtime") in result.stderr
+    assert "UNREACHABLE" not in result.stdout
 
 
 def _mem_learn_script(title: str, body: str) -> str:
@@ -296,6 +369,100 @@ def test_collect_skill_create_inputs_applies_commits_to_both_git_log_calls(tmp_p
     recorded = calls.read_text(encoding="utf-8").splitlines()
     assert len(recorded) == 2
     assert all("-n 7" in line for line in recorded), recorded
+
+
+_FREQUENCY_HEADER = "# ファイルごとのコミット頻度"
+
+
+def _synthetic_repo(tmp_path: Path, paths: list[str]) -> Path:
+    """指定パスを 1 コミットだけ含む合成 git リポジトリを作る。
+
+    外側のリポジトリ設定・ユーザ設定を引き込まないよう、identity は
+    コマンド単位の `-c` で与える。
+
+    Args:
+        tmp_path: 作成先の親ディレクトリ。
+        paths: リポジトリ内に作るファイルの相対パス。
+
+    Returns:
+        作成したリポジトリのルート。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    identity = ["-c", "user.email=t@example.com", "-c", "user.name=t"]
+    subprocess.run(
+        ["git", "-c", "init.defaultBranch=main", "init", "-q", str(repo)],
+        check=True,
+        capture_output=True,
+    )
+    for rel in paths:
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", *identity, "commit", "-q", "-m", "seed"], cwd=repo, check=True, capture_output=True
+    )
+    return repo
+
+
+def test_collect_skill_create_inputs_keeps_paths_that_start_with_hex_characters(
+    tmp_path: Path,
+) -> None:
+    """頻度表が `a-f` / `0-9` 始まりのパスを落とさないこと（H-16）。
+
+    短縮 SHA 行を落とす目的の `grep -v "^[a-f0-9]"` は、**16 進数字で始まる
+    全パス**も落としていた。実測で `agents/` `commands/` `docs/` `conftest.py`
+    が消え、`plugins/` `scripts/` は残るため欠落に気づけない。/skill-gen は
+    「agents/commands はほとんど触られていない」という誤った頻度表を受け取る。
+
+    先頭セクション（1 回目の git log）にも同じパスが出るため、判定は
+    頻度セクション側だけに限定する。ここを全出力で見ると、バグを残したまま
+    通ってしまう。
+    """
+    kept = "plugins/keep.py"
+    dropped = ["agents/reviewer.md", "commands/review.md", "docs/guide.md", "conftest.py"]
+    repo = _synthetic_repo(tmp_path, [*dropped, kept])
+
+    result = subprocess.run(
+        ["bash", "-c", "\n".join([f'. "{_HELPER}"', "collect_skill_create_inputs 5"])],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+
+    assert _FREQUENCY_HEADER in result.stdout
+    frequency_section = result.stdout.split(_FREQUENCY_HEADER, 1)[1]
+    assert kept in frequency_section
+    for path in dropped:
+        assert path in frequency_section, f"頻度表から落ちている: {path}"
+
+
+def test_collect_skill_create_inputs_omits_commit_headers_from_the_frequency_table(
+    tmp_path: Path,
+) -> None:
+    """頻度表にコミット見出し行が混ざらないこと。
+
+    SHA 行を grep で落とすのをやめ、空 `--pretty=format:` で最初から出力
+    しない方式へ変えたため、「実データを削らない」と対になるこちら側も固定する。
+    """
+    repo = _synthetic_repo(tmp_path, ["plugins/keep.py"])
+
+    result = subprocess.run(
+        ["bash", "-c", "\n".join([f'. "{_HELPER}"', "collect_skill_create_inputs 5"])],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+
+    frequency_section = result.stdout.split(_FREQUENCY_HEADER, 1)[1]
+    assert "seed" not in frequency_section
+    counted = [line.split(maxsplit=1)[1] for line in frequency_section.splitlines() if line.strip()]
+    assert counted == ["plugins/keep.py"]
 
 
 def test_ple4_plugin_root_uses_file_location_fallback_with_env() -> None:

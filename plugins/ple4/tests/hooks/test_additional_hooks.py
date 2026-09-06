@@ -540,3 +540,67 @@ class TestBlockNoVerifyScansAllContainerKeys:
     def test_benign_list_shaped_container_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """list 形状でも無害なら通す。"""
         assert self._run(monkeypatch, {"tool_input": [{"command": "ls"}]}) == 0
+
+
+class TestDeepNestingDoesNotFailOpen:
+    """深いネストの payload で保護フックが exit 1 へ倒れないこと（H-2）。
+
+    PreToolUse の契約は 2=deny / 0=allow / **1=non-blocking error**。1 は
+    「フックが壊れた」を意味し、host はツールをそのまま実行する。つまり
+    exit 1 は fail-open であり、保護フックにとって最も避けるべき終了コード。
+
+    修正前の実測: 深さ 200,000 の入れ子を JSON 文字列値の内側に置いた
+    400KB の payload（`MAX_STDIN_BYTES` = 1MiB の内側）で、`extract_tool_input`
+    の `json.loads` が送出した `RecursionError` が except を貫通し
+    `block_no_verify` が exit 1。
+    """
+
+    _DEPTH = 200_000
+
+    def _run(self, monkeypatch: pytest.MonkeyPatch, payload: str) -> int:
+        """block_no_verify.main() を実行し終了コードを返す。"""
+        monkeypatch.setattr(
+            block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False)
+        )
+        return block_no_verify.main()
+
+    def test_nesting_inside_json_string_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """入れ子を JSON 文字列値の内側に置いた形。
+
+        外側の `parse_json_object` は正常に dict を返し、`extract_tool_input`
+        内側の `json.loads` だけが `RecursionError` を送出する経路。
+        """
+        nested = "[" * self._DEPTH + "]" * self._DEPTH
+        payload = json.dumps(
+            {"tool_name": "Bash", "tool_input": {"command": "echo hi"}, "toolArgs": nested}
+        )
+        assert len(payload) > 400_000
+
+        exit_code = self._run(monkeypatch, payload)
+
+        # 非ブロッキングエラー（fail-open）ではないこと。
+        assert exit_code != 1
+        assert exit_code in (0, 2)
+
+    def test_nesting_in_outer_payload_is_denied(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """入れ子を payload 本体に置いた形は fail-closed（deny）になること。
+
+        こちらは外側の `parse_json_object` が `RecursionError` を受ける経路。
+        パース不能 = 判定不能なので deny が正しい。
+        """
+        nested = "[" * self._DEPTH + "]" * self._DEPTH
+        payload = '{"tool_name":"Bash","tool_input":' + nested + "}"
+
+        assert self._run(monkeypatch, payload) == 2
+
+    def test_nested_payload_carrying_bypass_flag_is_not_fail_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """バイパスフラグを載せた深いネスト payload でも exit 1 にならないこと。"""
+        nested = "[" * self._DEPTH + "]" * self._DEPTH
+        payload = json.dumps(
+            {"tool_name": "Bash", "tool_input": {"command": f"git commit {NV} -m x"}, "toolArgs": nested}
+        )
+
+        # tool_input 側の実コマンドが検査され deny される（toolArgs は生文字列に倒れる）。
+        assert self._run(monkeypatch, payload) == 2

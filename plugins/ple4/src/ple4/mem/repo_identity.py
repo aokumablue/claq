@@ -344,10 +344,37 @@ def base_slug(identity: RepoIdentity) -> str:
 
 
 def allocate_repo_slug(identity: RepoIdentity, db: Database) -> str:
-    """既存 ``repos`` 行を見てスラッグの衝突を回避する。
+    """既存 ``repos`` 行を見て ``repos.id`` を決める。
 
-    同じ ``identity_key`` が登録済みならその ``id`` をそのまま再利用する。
-    別リポジトリが同じスラッグを占有している場合のみ ``-2`` ``-3`` … を付す。
+    決定順は次の 3 段。
+
+    1. ``identity_key`` 一致 — その ``id`` をそのまま再利用する。
+    2. ``identity_key`` 不一致でも ``root_path`` 一致 — 同一リポジトリの
+       **identity 移行**とみなし、既存行を新しい ``identity_key`` へ載せ替えて
+       ``id`` を引き継ぐ。
+    3. どちらも無い — 新規スラッグを採番し、別リポジトリが同じスラッグを
+       占有している場合のみ ``-2`` ``-3`` … を付す。
+
+    2 が無いと、remote 無しで登録済みのリポジトリに後から
+    ``git remote add origin`` した瞬間に ``identity_key`` が repo root パスから
+    ``github.com/o/r`` へ変わり、別リポジトリとして ``-2`` 付きの新 ``id`` を
+    採番してしまう。その結果、旧 ``id`` 配下の ``scope='repo'`` 知識が
+    **全件 SessionStart 注入から静かに消える**（DB には残るが到達不能。
+    実測で再現済み）。remote の変更（GitHub から GitLab への移行等）や削除でも
+    同じことが起きる。
+
+    判定順は重要で、1 を先に見ることで ``UNIQUE(identity_key)`` 違反を
+    到達不能にしている。目的の ``identity_key`` を既に持つ行があれば 1 で
+    返ってしまい、2 の載せ替えには来ないため。
+
+    受容するトレードオフ: 同じパスへ別プロジェクトを clone し直した場合、
+    ``root_path`` 一致だけを見る本判定は 2 つを同一リポジトリとして繋いでしまい、
+    旧プロジェクトの知識が新プロジェクトへ引き継がれる。両者を区別する手段は
+    無く（区別できるのは identity_key だけで、それが変わったことこそが本件の
+    前提）、頻度は「remote を後から足す」より低い一方、被害は「無関係な知識が
+    混じる」に留まり、塞がない場合の「知識が全件到達不能になる」より軽い。
+    ``root_path`` は ``find_repo_root`` が解決した絶対パス（リポジトリ外では
+    cwd 自身）なので、無関係なディレクトリ同士が衝突することはない。
 
     Args:
         identity: 確定済みの正体情報。
@@ -357,10 +384,17 @@ def allocate_repo_slug(identity: RepoIdentity, db: Database) -> str:
         このリポジトリに割り当てる ``repos.id``。
     """
     taken: set[str] = set()
+    path_match: Repo | None = None
     for repo in db.list_repos():
         if repo.identity_key == identity.identity_key:
             return repo.id
+        if path_match is None and repo.root_path == identity.root_path:
+            path_match = repo
         taken.add(repo.id)
+
+    if path_match is not None:
+        db.relink_repo_identity(path_match.id, identity.identity_key)
+        return path_match.id
 
     base = base_slug(identity)
     candidate = base

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from ple4.mem.knowledge_input import (
     DEFAULT_CONFIDENCE,
     KINDS,
+    SCOPES,
+    STATUSES,
     KnowledgeDraft,
     KnowledgeInputError,
     coerce_confidence,
@@ -15,6 +19,7 @@ from ple4.mem.knowledge_input import (
     parse_knowledge_payload,
     validate_choice,
 )
+from ple4.mem.schema import _SCHEMA_SQL
 
 
 class TestGenerateKey:
@@ -343,3 +348,114 @@ class TestExplicitKeyHashFallback:
     def test_ascii_explicit_key_is_unchanged(self) -> None:
         """十分な ASCII を含む明示 key はそのまま slug 化されること。"""
         assert self._key_for("runtime-no-venv") == "runtime-no-venv"
+
+
+# --------------------------------------------------------------------------
+# 列挙値と SQL CHECK 句の突き合わせ（H-21）
+#
+# 従来は「許可値 1 つが通る・別の 1 つが弾かれる」サンプル検査しかなく、集合の
+# 完全一致も `schema.py` の CHECK 句との一致も見ていなかった。実測: `KINDS` へ
+# "insight" を足すと全テストが緑のまま `learn` が受理し、INSERT 時に sqlite の
+# CHECK で IntegrityError になる（Python 層と DB 層の食い違いが実行時まで露見
+# しない）。
+#
+# CHECK 句を正規表現で読み取るのではなく、実スキーマからインメモリ DB を作って
+# 値ごとに INSERT を試す。SQL の書き方が変わっても判定がずれないうえ、これ自体が
+# 「どの値が通り、どの値が弾かれるか」の block/allow 表になる。
+# --------------------------------------------------------------------------
+
+# 各列挙の期待内容。ここを通さずに実装側だけ増やせないようにする関門。
+_EXPECTED_KINDS = frozenset({"convention", "decision", "pitfall", "howto", "fact", "preference"})
+_EXPECTED_SCOPES = frozenset({"global", "repo"})
+_EXPECTED_STATUSES = frozenset({"active", "pending", "archived"})
+
+# 「増やされそうだが許可されていない」値。allow 側だけの表では、一律で受理する
+# 実装が緑になってしまうため、非メンバーを同じ表に載せる。
+_REJECTED_KINDS = frozenset({"insight", "rumor", "note", "convention2", ""})
+_REJECTED_SCOPES = frozenset({"team", "org", "local", "Global", ""})
+_REJECTED_STATUSES = frozenset({"draft", "promoted", "deleted", "Active", ""})
+
+
+def _schema_connection() -> sqlite3.Connection:
+    """実スキーマを適用したインメモリ DB を返す（repo 行を 1 件だけ用意する）。"""
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(_SCHEMA_SQL)
+    conn.execute(
+        "INSERT INTO repos (id, identity_key, root_path, first_seen_at, last_seen_at)"
+        " VALUES ('demo', 'demo-key', '/demo', 't0', 't0')"
+    )
+    return conn
+
+
+def _insert_accepted(conn: sqlite3.Connection, *, kind: str, scope: str, status: str) -> bool:
+    """1 行 INSERT を試し、CHECK 句に受理されたかを返す。
+
+    ``scope`` は ``repo_id`` との整合も CHECK されるため、``global`` のときだけ
+    ``repo_id`` を NULL にする。
+
+    Args:
+        conn: スキーマ適用済みの接続。
+        kind: 検査する kind 値。
+        scope: 検査する scope 値。
+        status: 検査する status 値。
+
+    Returns:
+        受理されたら True、CHECK 違反で弾かれたら False。
+    """
+    try:
+        conn.execute(
+            "INSERT INTO knowledge (key, scope, repo_id, kind, title, status, source,"
+            " created_at, updated_at) VALUES (?, ?, ?, ?, 't', ?, 'agent', 't0', 't0')",
+            (f"{kind}|{scope}|{status}", scope, None if scope == "global" else "demo", kind, status),
+        )
+    except sqlite3.IntegrityError:
+        return False
+    return True
+
+
+def test_enum_sets_are_exactly_as_declared() -> None:
+    """kind 6 値 / scope 2 値 / status 3 値が完全一致で固定されていること。
+
+    下の DB 突き合わせは Python 側の集合を入力にするため、値を増減させても
+    それ自体では赤くならない（増えた値が DB でも通れば両者は一致する）。
+    語彙の増減を意識的な変更に限定する関門はこちら。
+    """
+    assert KINDS == _EXPECTED_KINDS
+    assert SCOPES == _EXPECTED_SCOPES
+    assert STATUSES == _EXPECTED_STATUSES
+
+
+@pytest.mark.parametrize(
+    ("column", "allowed", "rejected"),
+    [
+        ("kind", _EXPECTED_KINDS, _REJECTED_KINDS),
+        ("scope", _EXPECTED_SCOPES, _REJECTED_SCOPES),
+        ("status", _EXPECTED_STATUSES, _REJECTED_STATUSES),
+    ],
+)
+def test_python_enum_matches_sql_check_clause(
+    column: str, allowed: frozenset[str], rejected: frozenset[str]
+) -> None:
+    """Python の列挙値と `schema.py` の CHECK 句が過不足なく一致すること。
+
+    Python 側だけに値を足すと `learn` が受理して INSERT で IntegrityError に
+    なり、DB 側だけに足すと Python 検証が先に弾いて到達不能な値になる。
+    候補プール（許可値 + 非メンバー）を全件 INSERT して、DB が受理する集合が
+    Python の集合と完全一致することを表として固定する。
+
+    Args:
+        column: 検査対象の列名。
+        allowed: Python 側で許可されている値。
+        rejected: 許可されていない対照値。
+    """
+    defaults = {"kind": "fact", "scope": "global", "status": "pending"}
+    conn = _schema_connection()
+    try:
+        db_accepted = {
+            value
+            for value in allowed | rejected
+            if _insert_accepted(conn, **{**defaults, column: value})
+        }
+    finally:
+        conn.close()
+    assert db_accepted == allowed

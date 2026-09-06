@@ -118,6 +118,19 @@ class CommandError(Exception):
     """
 
 
+# 人間が promote 済みのカードへ再 learn したときの拒否理由（H-3 対応）。
+# 「失敗」ではなく「その知識は既に有効なので何もしなくてよい」と読めるよう、
+# 次に取るべき行動まで書く。ここを曖昧にすると、agent が別 key で作り直して
+# 重複カードを量産する（この経路が防ごうとしていた事故そのもの）。
+_ACTIVE_CARD_IS_IMMUTABLE_MESSAGE = (
+    "learn: {key} は既に active（人間が promote 済み）です。"
+    "agent からの更新は受け付けません —— 更新できてしまうと、人間が承認した内容と"
+    "違うものが注入され続けるためです。この知識は既に SessionStart へ注入されている"
+    "ので、記録としては完了しています。**別の key で作り直さないでください**"
+    "（重複カードになります）。本文を変えたい場合は人間へ依頼してください。"
+)
+
+
 @dataclass(frozen=True)
 class CommandArgs:
     """コマンド名より後ろの引数と stdin JSON をまとめた入力。
@@ -409,8 +422,16 @@ def main() -> int:
     command = sys.argv[1]
     session_start = command in _SESSION_START_COMMANDS
     additional_context = ""
-    # SessionStart は設定ロード失敗でも exit_code=0 を維持する。
-    # フックが非 0 を返すとセッション全体がエラー扱いになるため。
+    # SessionStart はどの失敗経路でも exit 0 を維持する。フックが非 0 を返すと
+    # セッション全体がエラー扱いになるため、`Returns:` に書いた契約はこの 1 本の
+    # 値で表現し、失敗を捕まえる 4 箇所すべてがこれを使う。以前は
+    # `if not session_start` を持つのが設定ロード失敗の 1 箇所だけで、
+    # CommandError 経路と実行時例外経路は無条件に 1 を立てていた（＝契約が
+    # 3 箇所で破れていた）。片方だけ直すと非対称が残るので 1 本に集約する。
+    #
+    # 失敗しても沈黙はさせない。stderr への出力はどの経路でも行う —— 黙って
+    # 抜けると記憶注入が失われたこと自体に気づけないため。
+    failure_exit_code = 0 if session_start else 1
     exit_code = 0
     try:
         args = _parse_args_and_stdin(command, sys.argv[2:])
@@ -422,13 +443,10 @@ def main() -> int:
         settings = _load_settings_or_raise()
     except CommandError as e:
         print(str(e), file=sys.stderr)
-        exit_code = 1
+        exit_code = failure_exit_code
     except Exception as e:
-        # SessionStart はセッション開始を止めないため exit 0 のままにするが、
-        # 沈黙させない。黙って抜けると記憶注入が失われたこと自体に気づけない。
         print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
-        if not session_start:
-            exit_code = 1
+        exit_code = failure_exit_code
     else:
         try:
             if session_start:
@@ -437,11 +455,11 @@ def main() -> int:
                 exit_code = _run_normal_command(command, settings, args)
         except CommandError as e:
             print(str(e), file=sys.stderr)
-            exit_code = 1
+            exit_code = failure_exit_code
         except Exception as e:
             log.error("コマンド %s 失敗: %s", command, e)
             print(f"コマンド {command} 失敗: {e}", file=sys.stderr)
-            exit_code = 1
+            exit_code = failure_exit_code
     finally:
         if session_start:
             print_session_start_output(additional_context)
@@ -611,19 +629,39 @@ def _session_uid(payload: dict[str, Any]) -> str:
 def _handle_learn(settings: Settings, args: CommandArgs) -> None:
     """learn コマンド: stdin の JSON から知識カードを 1 件登録する。
 
-    既存の key と衝突した場合は ``upsert_knowledge`` が更新に落とす。
-    出力は ``learned: <key>`` の 1 行のみ。``source``/``status`` は常に
+    既存の key と衝突した場合は ``upsert_knowledge`` が更新に落とす。ただし
+    既存行が ``status='active'`` のときは更新せず usage error にする（H-3 対応。
+    後述）。出力は ``learned: <key>`` の 1 行のみ。``source``/``status`` は常に
     ``agent``/``pending`` に固定される（H-01 対応。caller が JSON の
     ``source``/``status`` を書いても authority として扱わない）。有効化
     （``status='active'``）は ``promote <key>`` による人間承認のみ。
+
+    **active カードは learn 経路から不変にする**（H-3）。以前は ``upsert`` の
+    ``ON CONFLICT`` が ``status = excluded.status`` で無条件に上書きしていたため、
+    人間が ``promote`` したカードと同じ key へ再 learn すると、learn が常に
+    ``pending`` を書く（H-01）都合で **人間の承認が黙って取り消され**、以後
+    SessionStart へ注入されなくなっていた。しかも本文まで差し替わるため、
+    「人間が承認済み」かつ「再発するほど重要」という最も価値の高いカードだけが
+    狙い撃ちで注入対象から外れる。
+
+    拒否（案 a）を選び、既存 status を維持する更新（案 b）は採らない。案 b は
+    「agent が active カードの本文を書き換えられる」＝人間が承認した内容と違う
+    ものが注入され続ける、という H-01 と同じ穴を別の口で開けるため。案 a なら
+    「active カードは agent の書込みに対して不変」という 1 行の不変条件になり、
+    H-01 の設計思想（agent 由来の書込みは自動で有効化されない）と整合する。
+
+    ``archived`` と ``pending`` は従来どおり更新できる。``archived`` への再 learn は
+    ``pending`` へ戻すだけで注入はされず、人間が再度 ``promote`` を通す余地を
+    残す方が「人間が決める」方針に合う。
 
     Args:
         settings: mem 設定。
         args: コマンド引数と stdin JSON。
 
     Raises:
-        CommandError: title 欠落や列挙値・数値の不正がある場合、または
-            ``source``/``status`` を明示指定した場合。
+        CommandError: title 欠落や列挙値・数値の不正がある場合、
+            ``source``/``status`` を明示指定した場合、または同じ key の
+            既存カードが既に ``active`` の場合。
     """
     try:
         draft = parse_knowledge_payload(args.stdin_data)
@@ -632,6 +670,9 @@ def _handle_learn(settings: Settings, args: CommandArgs) -> None:
 
     with Database(settings.db_path) as db:
         repo_id = resolve_repo(None, db).id if draft.scope == "repo" else None
+        existing = db.get_knowledge_by_key(draft.key, repo_id)
+        if existing is not None and existing.status == "active":
+            raise CommandError(_ACTIVE_CARD_IS_IMMUTABLE_MESSAGE.format(key=draft.key))
         db.upsert_knowledge(draft.to_knowledge(repo_id))
     print(f"learned: {draft.key}")
 

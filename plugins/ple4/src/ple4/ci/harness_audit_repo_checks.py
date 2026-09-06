@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import re
 import shlex
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from ple4.ci.ci_common import extract_frontmatter
 from ple4.ci.harness_audit_utils import (
     count_files,
     file_exists,
@@ -151,18 +153,33 @@ def always_on_description_chars(root_dir: str | Path) -> int:
     実際に毎セッション払うコストは frontmatter の ``description`` だけなので、
     そちらを直接測る。
 
+    測定は frontmatter をパースした結果の値に対して行う。``description:`` で
+    始まる行を 1 行だけ数えていた頃は、YAML のブロックスカラー
+    （``description: >`` に続く折り返し行）の中身が丸ごと計上から漏れ、
+    ``description: >`` の行そのものが残す 2 文字しか加算されなかった。
+    どれだけ長い description を折り返しで書いても
+    `context-always-on-budget`（予算 4,000 文字）を通過できたということで、
+    行ではなく値を測れば折り返しの書き方に依らず実コストに比例する。
+
+    本リポジトリはブロックスカラーの description を 1 件も持たないため、この
+    穴が実害として顕在化してはいなかった（実測: surface 35 ファイルで旧算法
+    3,672 文字 / 新算法 3,637 文字。どちらも予算内で合否は変わらない）。
+    合否が入力に応じて反転することは
+    `tests/ci/test_harness_audit_score_pairs.py` の対の fixture が固定する。
+
     Args:
         root_dir: 監査対象のルートディレクトリ
 
     Returns:
-        description の合計文字数
+        description の合計文字数。frontmatter が無い・``description`` が文字列で
+        ないファイルは 0 として扱う。
     """
     total = 0
     for path in _iter_surface_files(root_dir):
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith("description:"):
-                total += len(line) - len("description:")
-                break
+        frontmatter = extract_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
+        description = frontmatter.get("description") if frontmatter else None
+        if isinstance(description, str):
+            total += len(description)
     return total
 
 
@@ -230,16 +247,47 @@ def _manifest_surfaces_resolve(root_dir: str | Path) -> bool:
     return all(file_exists(root_dir, entry.lstrip("./").rstrip("/")) for entry in declared)
 
 
+_COVERAGE_GATE_MINIMUM = 1
+"""ゲートとして機能するとみなす ``fail_under`` の下限。"""
+
+_COVERAGE_GATE_KEY_PATH = ("tool", "coverage", "report", "fail_under")
+"""pyproject.toml 内でカバレッジ閾値へ至るキー列。"""
+
+
 def _coverage_gate_configured(root_dir: str | Path) -> bool:
-    """カバレッジ閾値（fail_under）が設定されているかを判定する。
+    """カバレッジ閾値（fail_under）がゲートとして機能する値で設定されているかを判定する。
+
+    以前は ``"fail_under" in pyproject.toml`` の部分文字列照合だった。実測で
+    ``fail_under = 0``（何も落とさない）も ``# fail_under = 100 (disabled)``
+    （コメントアウト）も True を返し、`eval-tests-presence`（2pts）がゲート無効の
+    ままで満点になった。ADR-0014 の「skip されるゲートはゲートとして機能しない」
+    と同じく、宣言の字面ではなく有効な値を条件にする。
+
+    ``bool`` を明示的に弾くのは ``isinstance(True, int)`` が True になるため。
+    ``fail_under = true`` は TOML としては通るが閾値ではない。
 
     Args:
         root_dir: 監査対象のルートディレクトリ
 
     Returns:
-        閾値が設定されていれば True
+        ``[tool.coverage.report].fail_under`` が数値かつ 1 以上なら True
+
+    Raises:
+        UnicodeDecodeError: ``pyproject.toml`` が UTF-8 で読めない場合。
+            `safe_read` は `OSError` しか捕捉しないため素通りする。TOML として
+            読めないだけの場合（`tomllib.TOMLDecodeError`）は False として扱う。
     """
-    return "fail_under" in (safe_read(root_dir, "pyproject.toml") or "")
+    try:
+        threshold: Any = tomllib.loads(safe_read(root_dir, "pyproject.toml"))
+    except tomllib.TOMLDecodeError:
+        return False
+    for key in _COVERAGE_GATE_KEY_PATH:
+        if not isinstance(threshold, dict):
+            return False
+        threshold = threshold.get(key)
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+        return False
+    return threshold >= _COVERAGE_GATE_MINIMUM
 
 
 def _repo_tool_coverage_hooks_checks(root_dir: str | Path) -> list[dict[str, Any]]:
@@ -518,20 +566,40 @@ def _repo_security_core_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _declares_preflight_hook(hooks_json: str) -> bool:
-    """hooks.json が実行前ガードのエントリを実際に 1 件以上宣言しているかを判定する。
+_PREFLIGHT_EVENTS = ("PreToolUse", "beforeSubmitPrompt")
+"""実行前ガードが載りうるフックイベント。"""
 
-    以前は生テキストへの部分文字列照合（``"PreToolUse" in hooks_json``）だった。
-    これは description の散文に語が現れるだけで合格し、``"PreToolUse": []``（空配列）
-    でも合格する。セキュリティカテゴリのチェックが「語の有無」を測っていた
-    （同カテゴリが満点のまま実バイパスが 5 件通っていた）。JSON として読める
-    構造があるのだから、エントリの実在を条件にする。
+_PREFLIGHT_GUARD_ARGV_PATTERNS = (
+    ("ple4.hooks.block_no_verify",),
+    ("ple4.hooks.pre_bash_commit_quality",),
+    ("ple4.hooks.bash_config_protection",),
+    ("ple4.hooks.config_protection",),
+)
+"""実行前ガードとして数える wrapper 起動後の引数列。"""
+
+
+def _declares_preflight_hook(hooks_json: str) -> bool:
+    """hooks.json が実行前ガードのモジュールを実際に起動しているかを判定する。
+
+    元は生テキストへの部分文字列照合（``"PreToolUse" in hooks_json``）で、
+    description の散文に語が現れるだけで合格した。次に「エントリが 1 件以上
+    ある」へ厳格化したが、これも起動されるコマンドの中身を見ないため、実測で
+    何もしない ``{"type": "command", "command": "true"}`` が True を返し、
+    `security-prompt-hook`（2pts）が保護ゼロで満点になった。
+
+    同じファイルの `_event_has_matching_command` が argv 照合を既に実装しており、
+    `_has_memory_lifecycle_hooks` はそちらを使っている。セキュリティ側だけ
+    「有無」に留まる非対称を解消し、実ガードモジュールの起動を要求する。
+
+    イベント間は ``any`` で結ぶ。本チェックの契約は「実行前ガードが含まれている」
+    であり、両イベントの同時宣言ではない（``all`` にすると、ガードが片方の
+    イベントへ寄っただけで満点を失う）。
 
     Args:
         hooks_json: hooks/hooks.json の生テキスト。
 
     Returns:
-        実行前ガードのイベントに 1 件以上の hook コマンドがあれば True。
+        実行前ガードのイベントが実ガードモジュールを起動していれば True。
 
     Raises:
         例外は発生しません（パース不能は False として扱う）。
@@ -543,9 +611,8 @@ def _declares_preflight_hook(hooks_json: str) -> bool:
     if not isinstance(hooks, dict):
         return False
     return any(
-        isinstance(group, dict) and group.get("hooks")
-        for event in ("PreToolUse", "beforeSubmitPrompt")
-        for group in (hooks.get(event) or [])
+        _event_has_matching_command(hooks.get(event), _PREFLIGHT_GUARD_ARGV_PATTERNS)
+        for event in _PREFLIGHT_EVENTS
     )
 
 

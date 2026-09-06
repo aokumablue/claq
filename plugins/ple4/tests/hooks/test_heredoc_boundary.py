@@ -41,6 +41,37 @@ _HOOK_BODIES = {
     "ple4.hooks.bash_config_protection": "printf x > ruff.toml",
 }
 
+# 「幻の演算子」（C-1）。`<<` がコメント内・クォート内・`\` エスケープ後にあると
+# heredoc は開始せず、続く行は**実行されるコマンド**である。それを本文として
+# 捨てていた頃は 3 フックが揃って exit 0 になった（実測）。
+#
+# deny 側だけを並べても意味がない — 「heredoc 本文を一切剥がさない」実装でも
+# 全行が緑になるため。剥がすべき形（本物の heredoc）を allow 側の対照として
+# 同じ表へ置き、両側で挟む。
+_PHANTOM_OPERATOR_CASES = (
+    ("コメント内の <<", "# <<EOF\n{body}\nEOF", 2),
+    # 行頭以外のコメントは `ls -a` にする。`ls .` だと `.` が
+    # `_BODY_EXECUTING_BUILTINS` に当たって修正前でも deny になり、この行が
+    # 何も固定しなくなる（実測で確認）。
+    ("行頭以外のコメント内の <<", "ls -a # <<EOF\n{body}\nEOF", 2),
+    ("ダブルクォート内の <<", 'echo "<<EOF"\n{body}\nEOF', 2),
+    ("シングルクォート内の <<", "echo '<<EOF'\n{body}\nEOF", 2),
+    ("エスケープされた <<", "echo \\<<EOF\n{body}\nEOF", 2),
+    ("行をまたいで開いたクォート内の <<", 'echo "open\n<<EOF\n{body}\nEOF', 2),
+    ("本文の # とアポストロフィが状態を汚さない", "cat > note.md <<'EOF'\ndon't # note\nEOF\n{body}", 2),
+    # ここから allow 側の対照（本物の heredoc の本文は保護対象ではない）。
+    ("本物の heredoc", "cat > note.md <<'EOF'\n{body}\nEOF", 0),
+    ("本文に << を含む本物の heredoc", "cat > note.md <<'OUTER'\n{body}\n<<INNER\nOUTER", 0),
+    ("行末コメント付きの本物の heredoc", "cat > note.md <<'EOF' # note\n{body}\nEOF", 0),
+)
+
+# 幻の演算子の表を流す 3 フックと、それぞれが deny すべき本文。
+_PHANTOM_HOOK_BODIES = {
+    "ple4.hooks.block_no_verify": "git commit --no-verify -m x",
+    "ple4.hooks.bash_config_protection": "printf x > ruff.toml",
+    "ple4.hooks.pre_bash_commit_quality": "git add . && git commit -m x",
+}
+
 
 def _run(hook: str, command: str, tmp_home: Path, cwd: Path) -> subprocess.CompletedProcess[str]:
     """リポジトリ内 launcher で hook を実行する。
@@ -129,3 +160,22 @@ def test_commit_quality_still_scans_executed_heredoc_body(operator_line: str, tm
     result = _run("ple4.hooks.pre_bash_commit_quality", command, tmp_path, repo)
 
     assert result.returncode == 2
+
+
+@pytest.mark.parametrize("hook", sorted(_PHANTOM_HOOK_BODIES))
+@pytest.mark.parametrize(("label", "template", "expected"), _PHANTOM_OPERATOR_CASES)
+def test_phantom_heredoc_operator(
+    hook: str, label: str, template: str, expected: int, tmp_path: Path, repo: Path
+) -> None:
+    """heredoc を開始しない `<<` で後続行が本文として捨てられないこと。
+
+    deny 側（幻の演算子）と allow 側（本物の heredoc）を同じ表で挟む。片側だけ
+    だと「常に剥がす」実装と「常に剥がさない」実装のどちらかが緑で通る。
+    """
+    command = template.format(body=_PHANTOM_HOOK_BODIES[hook])
+
+    result = _run(hook, command, tmp_path, repo)
+
+    assert result.returncode == expected, (
+        f"{hook}: {label} が exit {result.returncode}（期待 {expected}） err={result.stderr[:200]}"
+    )

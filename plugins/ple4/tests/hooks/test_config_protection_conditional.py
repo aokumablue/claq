@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import time
 
 import pytest
 
@@ -458,3 +459,95 @@ class TestUnknownTool:
             },
         )
         assert code == 2
+
+
+class TestLintKeyPatternIsLinear:
+    """行頭キー照合が入力長に対して線形であること（H-7a）。
+
+    修正前の `(?m)^\\s*(...)\\s*=` は `\\s` が改行を含むため、**一致しない**
+    空白主体テキストに対して「各行頭 × 残り空白長」で後退し二次オーダーに
+    なっていた（実測: 改行だけの入力で N=5,000 → 0.105s、N=20,000 → 1.619s、
+    N=50,000 → 10.187s）。config_protection の hooks.json timeout は 15 秒
+    なので約 60,000 バイトの改行だけで超過し、host にフックを殺されれば
+    allow へ倒れる＝保護そのものが無効化される。
+
+    判定は入力 2 サイズ間の比ではなく**絶対的な壁時計の上限**で行う。比の
+    アサートは小さい N ではノイズ支配で他マシンで flake するため。
+    """
+
+    # 修正後は 200,000 改行で 0.01 秒未満。修正前は同じ入力で 100 秒超に
+    # なるため、200 倍以上の余裕を取っても二次オーダーへの回帰は必ず捕まる。
+    _CEILING_SECONDS = 2.0
+    _SIZE = 200_000
+
+    @pytest.mark.parametrize(
+        "pattern_name", ["_LINT_KEY_PATTERN", "_TOX_COMMAND_KEY_PATTERN"]
+    )
+    def test_whitespace_only_input_returns_quickly(self, pattern_name: str) -> None:
+        """改行だけの入力（最悪ケース）が上限時間内に一致なしで返る。"""
+        pattern = getattr(config_protection, pattern_name)
+        text = "\n" * self._SIZE
+
+        started = time.monotonic()
+        match = pattern.search(text)
+        elapsed = time.monotonic() - started
+
+        assert match is None
+        assert elapsed < self._CEILING_SECONDS, (
+            f"{pattern_name} took {elapsed:.3f}s for {self._SIZE} newlines "
+            f"(二次オーダーへ回帰した疑い)"
+        )
+
+    def test_mixed_indent_input_returns_quickly(self) -> None:
+        """行頭インデント付きの非一致テキストでも線形であること。"""
+        text = ("    \t" * 20 + "\n") * 4_000
+
+        started = time.monotonic()
+        match = config_protection._LINT_KEY_PATTERN.search(text)
+        elapsed = time.monotonic() - started
+
+        assert match is None
+        assert elapsed < self._CEILING_SECONDS
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("ignore = []", True),
+            ("  fail_under = 80", True),
+            ("\tselect = [\"E\"]", True),
+            ("addopts\t=\t-q", True),
+            ("nothing = 1", False),
+        ],
+    )
+    def test_detection_is_preserved(self, text: str, expected: bool) -> None:
+        """行頭空白を `[ \\t]` へ絞っても行頭キーの検出は変わらないこと。
+
+        TOML / INI ともキーと `=` は同じ行に無ければならないため、改行を
+        跨ぐ形を落としても正当な設定行の取りこぼしは生じない。
+        """
+        assert bool(config_protection._LINT_KEY_PATTERN.search(text)) is expected
+
+
+class TestLintSignalTextLengthCap:
+    """`_text_has_lint_signal` の走査量上限（H-7a）。"""
+
+    def test_over_cap_text_blocks_fail_closed(self) -> None:
+        """上限超過のテキストは走査せず True（ブロック）を返す。
+
+        打ち切って走査を続ける（truncate）形にすると、上限より後ろに lint
+        キーを置くだけで条件付き保護を素通りできる新しいバイパスになるため、
+        fail-closed 側へ倒す。
+        """
+        text = "x" * (config_protection._LINT_SIGNAL_MAX_TEXT_BYTES + 1)
+
+        assert config_protection._text_has_lint_signal(text, "pyproject.toml") is True
+
+    def test_large_but_harmless_text_under_cap_is_not_blocked(self) -> None:
+        """上限内の大きな非 lint テキストは従来どおり False（陰性対照）。
+
+        上限を入れたことで「大きいだけの正当な書き込み」まで deny へ倒れて
+        いないことを固定する。
+        """
+        text = "x" * (config_protection._LINT_SIGNAL_MAX_TEXT_BYTES - 1)
+
+        assert config_protection._text_has_lint_signal(text, "pyproject.toml") is False

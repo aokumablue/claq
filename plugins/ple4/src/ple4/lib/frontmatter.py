@@ -75,8 +75,22 @@ def split_frontmatter(content: str) -> str:
     """Markdown 本文から frontmatter の生テキストを切り出して返す。
 
     BOM を除去し CRLF / CR を LF へ正規化したうえで、先頭の ``---`` 行と次に現れる
-    ``---`` 行の間を返す。フェンスは ``strip()`` した結果が厳密に ``---`` である行だけを
-    認め、``---extra`` のような行はフェンスとみなさない。
+    ``---`` 行の間を返す。フェンスは **列 0 から始まり** ``---`` だけからなる行に限る。
+    ``---extra`` のような行はフェンスとみなさない。
+
+    行頭にインデントのある ``---`` をフェンスとみなさない理由（H-13）:
+        以前は ``strip()`` 一致で探していたため列 0 を要求せず、frontmatter の
+        内側に現れたインデント付き ``---`` を終了フェンスとして誤認していた。
+        実測: ``---\\ndescription: |\\n  ---\\nname: x\\ntools: Read\\n---`` は
+        ブロックスカラーの中身である ``  ---`` で切られ、``description`` が空文字列に
+        なったうえ ``name`` と ``tools`` が本文へ落ちていた。ブロックスカラー・
+        ブロックシーケンス・ネストしたマッピングの値はいずれもインデントされる
+        ため、インデント付き ``---`` は原理的に frontmatter の**中身**であって
+        区切りではない。
+
+    行末の空白は従来どおり許容する。フェンス行が列 0 から始まっている限り末尾の
+    空白はエディタ上で不可視であり、これを拒否しても防げる誤認は無い（誤認の
+    原因は行頭側にしか無い）。
 
     Args:
         content: Markdown ファイル全体のテキスト。
@@ -90,10 +104,10 @@ def split_frontmatter(content: str) -> str:
     """
     normalized = content.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     lines = normalized.split("\n")
-    if lines[0].strip() != _FENCE:
+    if lines[0].rstrip() != _FENCE:
         raise MissingFrontmatterError("frontmatter の開始 --- がありません")
     for index, line in enumerate(lines[1:], start=1):
-        if line.strip() == _FENCE:
+        if line.rstrip() == _FENCE:
             return "\n".join(lines[1:index])
     raise UnterminatedFrontmatterError("frontmatter の終了 --- がありません")
 

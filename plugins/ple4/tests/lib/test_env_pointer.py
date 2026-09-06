@@ -90,7 +90,16 @@ class TestWriteEnvPointer:
         assert (ple4_dir / "env.sh").is_file()
 
     def test_writes_ancestor_chain_not_just_direct_ppid(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """H-02: 直接 PPID だけでなく祖先（最大 ``_MAX_ANCESTOR_DEPTH`` 段）にも書く。"""
+        """H-02: 直接 PPID だけでなく祖先にも書く（実チェーンでの下限確認）。
+
+        実測段数は環境依存（pytest プロセスの親が既に init/1 なら 1 段で
+        打ち切られる）ので、ここでは「直接 PPID が必ず書かれる」ことと
+        「``_MAX_ANCESTOR_DEPTH`` を超えない」ことだけを実チェーンで見る。
+        「2 段目も確かに書かれる」ことは合成チェーンを与える
+        :meth:`test_writes_every_pid_in_the_resolved_ancestor_chain` が担う
+        （旧実装はここで ``1 <= len(written)`` を許していたため、
+        ``_MAX_ANCESTOR_DEPTH = 1`` や ``chain[:1]`` への退行が緑のまま通った）。
+        """
         plugin_root = _make_plugin_root(tmp_path / "plugin")
 
         mod.write_env_pointer(plugin_root)
@@ -98,10 +107,48 @@ class TestWriteEnvPointer:
         roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
         written = {p.name for p in roots_dir.iterdir() if p.name.isdigit()}
         assert str(os.getppid()) in written
-        # 祖先チェーンの実測段数は環境依存（pytest プロセスの親が既に
-        # init/1 の場合は 1 段で打ち切られる）だが、_MAX_ANCESTOR_DEPTH を
-        # 超えて書くことは無い。
-        assert 1 <= len(written) <= mod._MAX_ANCESTOR_DEPTH
+        assert len(written) <= mod._MAX_ANCESTOR_DEPTH
+
+    def test_max_ancestor_depth_is_more_than_the_direct_parent(self) -> None:
+        """``_MAX_ANCESTOR_DEPTH`` が 2 以上に保たれていること。
+
+        H-02 の目的は「直接 PPID だけでは足りない」ことなので、この定数が 1 に
+        戻ると仕様そのものが消える。実チェーンの段数は環境依存で下限を表明
+        できないため、定数側を固定して退行を止める。
+        """
+        assert mod._MAX_ANCESTOR_DEPTH == 2
+
+    def test_writes_every_pid_in_the_resolved_ancestor_chain(
+        self, tmp_path: Path, _isolate_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """解決したチェーンの全要素が、正しい内容で ``roots/<pid>`` に書かれること。
+
+        実環境のチェーンは段数が保証されないため、合成した 2 要素チェーンを与えて
+        「2 件とも書かれる」ことを表明する。件数ではなくファイル名の集合と各
+        ファイルの中身まで見る —— ``chain[:1]`` への退行は件数だけでも捕まるが、
+        同じ pid を 2 回書く実装は件数では捕まらない。
+
+        探索段数として ``_MAX_ANCESTOR_DEPTH`` そのものが渡されることも同時に
+        確認する（リテラルを渡す実装だと定数を 1 に下げても検出できない）。
+        """
+        chain = [(4242, "Mon Jan  1 00:00:00 2035"), (4243, "Tue Jan  2 00:00:00 2035")]
+        depths: list[int] = []
+
+        def _fake_chain(depth: int) -> list[tuple[int, str]]:
+            """探索段数を記録して合成チェーンを返す。"""
+            depths.append(depth)
+            return list(chain)
+
+        monkeypatch.setattr(mod, "_resolve_ancestor_chain", _fake_chain)
+        plugin_root = _make_plugin_root(tmp_path / "plugin")
+
+        mod.write_env_pointer(plugin_root)
+
+        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
+        assert depths == [mod._MAX_ANCESTOR_DEPTH]
+        assert {p.name for p in roots_dir.iterdir() if p.name.isdigit()} == {"4242", "4243"}
+        for pid, lstart in chain:
+            assert (roots_dir / str(pid)).read_text(encoding="utf-8") == f"{plugin_root}\n{lstart}\n"
 
     def test_overwrites_on_repeated_call(self, tmp_path: Path, _isolate_home: Path) -> None:
         """同一 root で再度呼んでも内容は変わらない（PID 再利用時に自己修復する前提）。"""
@@ -450,6 +497,115 @@ class TestAtomicWrite:
 
         monkeypatch.setattr(mod.tempfile, "mkstemp", _boom)
         mod.write_env_pointer(plugin_root)
+
+
+class TestWriteTextIfChanged:
+    """_write_text_if_changed（M-3）の分岐と、それが env.sh 経路へ効くことのテスト。"""
+
+    def test_missing_file_is_written(self, tmp_path: Path) -> None:
+        """未作成なら書く。"""
+        target = tmp_path / "env.sh"
+        assert mod._write_text_if_changed(target, "body\n") is True
+        assert target.read_text(encoding="utf-8") == "body\n"
+
+    def test_identical_content_skips_the_write(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """内容が一致していれば `_atomic_write_text` を呼ばない。
+
+        「書いた結果が同じ」ではなく「書きに行っていない」ことを見る。前者は
+        無条件書き込みでも成立するため、fsync を省いた証拠にならない。
+        """
+        target = tmp_path / "env.sh"
+        target.write_text("body\n", encoding="utf-8")
+
+        def _fail(_path: Path, _text: str) -> None:
+            """呼ばれてはいけない書き込み。"""
+            raise AssertionError("同一内容で書き込みが走った")
+
+        monkeypatch.setattr(mod, "_atomic_write_text", _fail)
+        assert mod._write_text_if_changed(target, "body\n") is False
+
+    def test_different_content_is_rewritten(self, tmp_path: Path) -> None:
+        """内容が違えば書き直す。"""
+        target = tmp_path / "env.sh"
+        target.write_text("old\n", encoding="utf-8")
+        assert mod._write_text_if_changed(target, "new\n") is True
+        assert target.read_text(encoding="utf-8") == "new\n"
+
+    def test_non_utf8_existing_file_is_rewritten(self, tmp_path: Path) -> None:
+        """非 UTF-8 の既存ファイルでも例外を出さず書き直す。
+
+        比較を `read_text` で行うと `UnicodeDecodeError`（`ValueError` 系）に
+        なり、`write_env_pointer` の `OSError` ハンドラを素通りしてフックごと
+        落ちる。バイト比較であることをここで固定する。
+        """
+        target = tmp_path / "env.sh"
+        target.write_bytes(b"\xff\xfe not utf-8\n")
+        assert mod._write_text_if_changed(target, "body\n") is True
+        assert target.read_text(encoding="utf-8") == "body\n"
+
+    def test_unreadable_file_falls_through_to_write(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """読み取りに失敗したら「一致していない」として書きに行く。"""
+        target = tmp_path / "env.sh"
+        target.write_text("body\n", encoding="utf-8")
+
+        def _boom(_self: Path) -> bytes:
+            """読み取り不能を模す。"""
+            raise OSError("unreadable")
+
+        monkeypatch.setattr(Path, "read_bytes", _boom)
+        assert mod._write_text_if_changed(target, "body\n") is True
+
+    def test_symlink_with_identical_content_is_replaced(self, tmp_path: Path) -> None:
+        """内容が一致していても symlink なら実体ファイルへ戻す。
+
+        `os.replace` による無条件書き込みには「`env.sh` が別の場所へ向けられて
+        いたら実体へ戻す」自己修復が付随していた。内容一致だけで省くとこの性質が
+        静かに失われるため、symlink は比較の前に除外する。
+        """
+        real = tmp_path / "elsewhere.sh"
+        real.write_text("body\n", encoding="utf-8")
+        target = tmp_path / "env.sh"
+        target.symlink_to(real)
+
+        assert mod._write_text_if_changed(target, "body\n") is True
+        assert not target.is_symlink()
+        assert target.read_text(encoding="utf-8") == "body\n"
+
+    def test_second_write_env_pointer_call_does_not_touch_env_sh(
+        self, tmp_path: Path, _isolate_home: Path
+    ) -> None:
+        """2 回目以降の `write_env_pointer` は env.sh を書き直さない（M-3 の受領証）。
+
+        PreToolUse は全ツール呼び出しで発火するため、内容が変わらない env.sh の
+        書き直しは 1 呼び出しあたり回避可能な fsync 1 本になる。inode と mtime が
+        据え置きであることで「書いていない」ことを示す。祖先ポインタ側は GC が
+        mtime を見るので、この省略の対象外であることも同時に固定する。
+        """
+        plugin_root = _make_plugin_root(tmp_path / "plugin")
+        mod.write_env_pointer(plugin_root)
+        env_sh = _isolate_home / BASE_DIR_NAME / mod._ENV_FILENAME
+        before = env_sh.stat()
+
+        os.utime(env_sh, (before.st_atime - 100, before.st_mtime - 100))
+        stale = env_sh.stat()
+        mod.write_env_pointer(plugin_root)
+
+        after = env_sh.stat()
+        assert (after.st_ino, after.st_mtime) == (stale.st_ino, stale.st_mtime)
+        assert env_sh.read_text(encoding="utf-8") == _ENV_TEMPLATE.read_text(encoding="utf-8")
+
+    def test_changed_template_is_written_on_the_next_call(
+        self, tmp_path: Path, _isolate_home: Path
+    ) -> None:
+        """テンプレートが変われば（プラグイン更新）次の呼び出しで反映されること。"""
+        plugin_root = _make_plugin_root(tmp_path / "plugin")
+        mod.write_env_pointer(plugin_root)
+        env_sh = _isolate_home / BASE_DIR_NAME / mod._ENV_FILENAME
+
+        (plugin_root / "runtime" / "env-template.sh").write_text("# v2\n", encoding="utf-8")
+        mod.write_env_pointer(plugin_root)
+
+        assert env_sh.read_text(encoding="utf-8") == "# v2\n"
 
 
 class TestResolveAncestorChain:
@@ -1193,13 +1349,34 @@ class TestEnvShRealExecution:
         assert "ran:marker" in result.stdout
 
     def test_symlink_pointer_is_rejected(self, tmp_path: Path, _isolate_home: Path) -> None:
+        """symlink であること**だけ**を理由に拒否されること（``[ -L ... ] ||`` ガード）。
+
+        旧実装は symlink 先の中身を 1 行（root のみ・lstart 行なし）にしていた
+        ため、``env-template.sh`` の ``-L`` ガードを削除しても後段の空 lstart
+        チェックが 127 を返し、緑のまま通った —— つまり resolver 15 件のどの
+        テストも「有効な 2 行を持つ symlink」を置いておらず、``-L`` ガードは
+        一度も実行されていなかった。
+
+        ここでは symlink 先を通常ファイルとして置けば解決できる内容
+        （``root\\n<自 PID の実 lstart>\\n``）にし、同じ内容を通常ファイルとして
+        置いた場合は解決できることを陽性対照として先に確認する。両者の差は
+        symlink かどうかだけなので、127 の理由が ``-L`` ガードに特定される。
+        """
         _install_env_sh(_isolate_home)
         pointer_root = _make_plugin_root(tmp_path / "pointer-root")
-        real_pointer = tmp_path / "real-pointer"
-        real_pointer.write_text(f"{pointer_root}\n", encoding="utf-8")
         roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
-        roots_dir.mkdir()
-        (roots_dir / str(os.getpid())).symlink_to(real_pointer)
+        pointer_path = roots_dir / str(os.getpid())
+
+        # 陽性対照: まったく同じ内容を通常ファイルとして置けば解決できる。
+        _write_pointer(roots_dir, os.getpid(), pointer_root)
+        valid_content = pointer_path.read_text(encoding="utf-8")
+        assert _run_env_sh(_isolate_home).returncode == 0
+
+        # 本題: 内容は同一のまま、実体を symlink に差し替える。
+        real_pointer = tmp_path / "real-pointer"
+        real_pointer.write_text(valid_content, encoding="utf-8")
+        pointer_path.unlink()
+        pointer_path.symlink_to(real_pointer)
 
         result = _run_env_sh(_isolate_home)
 
@@ -1299,3 +1476,18 @@ class TestEnvShRealExecution:
         result = _run_env_sh(_isolate_home)
 
         assert "ROOT_FILE_EXECUTED" not in result.stderr
+
+
+def test_ps_call_routes_through_run_text() -> None:
+    """`ps` 呼び出しが `subprocess.run` 直呼びへ戻っていないこと（H-19a）。
+
+    `text=True` だけで encoding を指定しないと locale 依存のデコードになり、
+    `UnicodeDecodeError` が `except (OSError, SubprocessError)` を貫通して
+    docstring の「例外は発生しません」が破れる。ここは子へ `LC_ALL=C` を
+    強制していて `ps` の出力が ASCII になるため実害は低いが、encoding 指定を
+    集約した `run_text` を迂回する経路自体を残さない（残すと「どちらが正しい
+    呼び方か」が分岐し、次の追加でまた迂回側が選ばれる）。
+    """
+    source = Path(mod.__file__).read_text(encoding="utf-8")
+
+    assert "subprocess.run(" not in source

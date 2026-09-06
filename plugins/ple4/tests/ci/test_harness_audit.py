@@ -31,10 +31,17 @@ def test_parse_args_supports_positional_scope_and_flags(monkeypatch, tmp_path: P
     assert args["root"] == tmp_path.resolve()
 
 
-def test_option_value_without_following_token_returns_none() -> None:
-    """`--name` の直後に値が無い場合は (None, index + 2) を返す。"""
-    assert harness_audit._option_value(["--format"], 0, "--format") == (None, 2)
-    assert harness_audit._option_value(["--root"], 0, "--root") == (None, 2)
+def test_option_value_returns_value_and_next_index() -> None:
+    """スペース区切り・`=` 区切りの双方で値と次インデックスを返す。"""
+    assert harness_audit._option_value(["--format", "json"], 0, "--format") == ("json", 2)
+    assert harness_audit._option_value(["--format=json"], 0, "--format") == ("json", 1)
+
+
+@pytest.mark.parametrize("args", [["--format"], ["--root"], ["--scope"], ["--target-kind"]])
+def test_option_value_without_following_token_raises(args: list[str]) -> None:
+    """`--name` の直後に値が無い場合はフラグ名を挙げてエラーにする。"""
+    with pytest.raises(ValueError, match=f"{args[0]} requires a non-empty value"):
+        harness_audit._option_value(args, 0, args[0])
 
 
 def test_parse_args_root_flag_without_value_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -45,14 +52,39 @@ def test_parse_args_root_flag_without_value_raises(monkeypatch: pytest.MonkeyPat
     """
     monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(ValueError, match="--root requires a non-empty path value"):
+    with pytest.raises(ValueError, match="--root requires a non-empty value"):
         harness_audit.parse_args(["--root"])
 
 
 def test_parse_args_root_flag_with_empty_value_raises() -> None:
     """`--root=`（空文字値）も同様にエラーにする。"""
-    with pytest.raises(ValueError, match="--root requires a non-empty path value"):
+    with pytest.raises(ValueError, match="--root requires a non-empty value"):
         harness_audit.parse_args(["--root="])
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--root", "--help"],
+        ["--scope", "--format"],
+        ["--target-kind", "--help"],
+        ["--format", "--help"],
+    ],
+)
+def test_parse_args_rejects_flag_shaped_option_value(args: list[str]) -> None:
+    """後続フラグを値として食う形は拒否する（N-04）。
+
+    実測で ``--root --help`` は ``root=<cwd>/--help`` かつ ``help=False`` になり、
+    ``--help`` を書いたのにヘルプが出ないまま存在しない root を監査していた。
+    """
+    with pytest.raises(ValueError, match=f"{args[0]} requires a non-empty value"):
+        harness_audit.parse_args(args)
+
+
+def test_parse_args_scope_without_value_does_not_fall_back_to_repo() -> None:
+    """`--scope`（値なし）が黙って既定の repo へ落ちないこと。"""
+    with pytest.raises(ValueError, match="--scope requires a non-empty value"):
+        harness_audit.parse_args(["--scope"])
 
 
 def test_detect_target_mode_recognizes_repo_markers(tmp_path: Path) -> None:

@@ -79,6 +79,7 @@ import tempfile
 from pathlib import Path
 
 from ple4.lib.constants import BASE_DIR_NAME
+from ple4.lib.subprocess_utils import run_text
 
 _ROOTS_DIRNAME = "roots"
 _ENV_FILENAME = "env.sh"
@@ -230,6 +231,14 @@ def _ensure_private_dir(path: Path) -> Path:
     「ple4_dir 配下かどうか」を判定するため、``$HOME`` 固定の本モジュールでは
     そのまま流用できない。ロジックを複製せず、必要な最小限だけをここに持つ。
 
+    作成そのものを 0700 で行い、根から順に祖先も 0700 で作る。作成と
+    ``chmod`` を分けると、その窓の間 ``~/.ple4`` を他 OS ユーザーが
+    ``opendir`` でき、POSIX の権限検査は open 時のみなので窓内で取得された
+    fd は後続の ``chmod`` で失効しない。``mkdir(mode=..., parents=True)`` は
+    **親に mode を適用しない**（pathlib の仕様。親は既定モードで作られる）
+    ため、``parents=True`` ではなく祖先を 1 段ずつ作る。``chmod`` は既に
+    0755 で存在するディレクトリの是正用として残す。
+
     Args:
         path: 作成・権限設定するディレクトリ。
 
@@ -239,7 +248,8 @@ def _ensure_private_dir(path: Path) -> Path:
     Raises:
         OSError: 作成・chmod に失敗した場合。
     """
-    path.mkdir(parents=True, exist_ok=True)
+    for target in (*reversed(path.parents), path):
+        target.mkdir(mode=0o700, exist_ok=True)
     path.chmod(0o700)
     return path
 
@@ -291,6 +301,50 @@ def _atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
+def _write_text_if_changed(path: Path, text: str) -> bool:
+    """内容が既に一致していれば書き込みを丸ごと省く（M-3）。
+
+    ``env.sh`` はリポジトリ内テンプレートの verbatim コピーで、同じプラグイン
+    バージョンが動いている間は内容が変わらない。それでも `_atomic_write_text`
+    を毎回呼ぶと、mkstemp + write + **fsync** + rename が走る。この書き込みは
+    PreToolUse フック（`launcher` 経由）が**全ツール呼び出しで**行うため、
+    ネットワーク HOME や暗号化 FS では 1 ツール呼び出しあたり回避可能な fsync
+    1 本がそのまま体感の遅延になる。
+
+    ``roots/<pid>`` の祖先ポインタは同じ扱いにしない。GC が mtime で鮮度を
+    判定する（`_gc_one`）ため、内容が同じでも書き直して mtime を進める必要が
+    ある。省けるのは mtime に意味の無い ``env.sh`` だけである。
+
+    比較はバイト列で行う。``read_text`` は非 UTF-8 の既存ファイルで
+    ``UnicodeDecodeError``（``ValueError`` 系）を送出し、これは
+    `write_env_pointer` の ``OSError`` ハンドラを素通りしてフックを落とす。
+
+    symlink は内容が一致していても書き直す。``os.replace`` は symlink を通常
+    ファイルへ置き換えるので、現行の無条件書き込みには「``env.sh`` が別の場所へ
+    向けられていたら実体へ戻す」という自己修復が付随している。内容一致だけで
+    省くとその性質が静かに失われる。
+
+    Args:
+        path: 書き込み先。
+        text: 書き込む内容。
+
+    Returns:
+        実際に書き込んだなら True、内容一致で省いたなら False。
+
+    Raises:
+        OSError: 書き込みに失敗した場合（読み取り失敗は書き込みへ倒すので
+            送出しない）。
+    """
+    try:
+        if not path.is_symlink() and path.read_bytes() == text.encode("utf-8"):
+            return False
+    except OSError:
+        # 未作成・読み取り不能。いずれも「一致していない」として書きに行く。
+        pass
+    _atomic_write_text(path, text)
+    return True
+
+
 def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
     """``os.getppid()`` から始まる祖先チェーンと、各 PID の起動時刻を返す。
 
@@ -311,6 +365,13 @@ def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
     してしまう。resolver 側（``env-template.sh``）も同じく ``LC_ALL=C``
     を明示して ``ps`` を呼ぶ。
 
+    subprocess は ``subprocess_utils.run_text`` 経由で呼ぶ。``text=True`` だけで
+    encoding を指定しないと locale 依存のデコードになり、``UnicodeDecodeError``
+    が下の except を貫通して本 docstring の「例外は発生しません」が破れる。
+    ここは子へ ``LC_ALL=C`` を強制していて ``ps`` の出力が ASCII になるため実害は
+    低いが、encoding 指定を集約した ``run_text`` を迂回する経路自体を残さない
+    （残すと「どちらが正しい呼び方か」が分岐し、次の追加でまた迂回側が選ばれる）。
+
     Args:
         max_depth: 辿る祖先の最大段数（``os.getppid()`` 自身を含む）。
 
@@ -325,13 +386,10 @@ def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
         例外は発生しません。
     """
     try:
-        proc = subprocess.run(
+        proc = run_text(
             ["ps", "-eo", "pid=,ppid=,lstart="],
-            capture_output=True,
-            text=True,
             timeout=_PS_TIMEOUT_SECONDS,
-            check=False,
-            env={**os.environ, "LC_ALL": "C"},
+            extra_env={"LC_ALL": "C"},
         )
     except (OSError, subprocess.SubprocessError):
         return []
@@ -398,6 +456,10 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
     ことで、途中で GC が失敗しても本来の目的（root の記録）は既に
     達成済みになる。
 
+    ``env.sh`` は内容が既存と一致していれば書き込みごと省く
+    （`_write_text_if_changed`。M-3）。祖先ポインタ側は GC が mtime を
+    見るため常に書く。
+
     Args:
         plugin_root: このプラグインのソースルート。
 
@@ -429,7 +491,7 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
 
     template_path = plugin_root / _ENV_TEMPLATE_RELATIVE
     template_text = template_path.read_text(encoding="utf-8")
-    _atomic_write_text(ple4_dir / _ENV_FILENAME, template_text)
+    _write_text_if_changed(ple4_dir / _ENV_FILENAME, template_text)
 
     _maybe_run_gc(ple4_dir, roots_dir, keep_pids=written_pids)
 

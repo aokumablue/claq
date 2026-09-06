@@ -5,9 +5,11 @@ from __future__ import annotations
 import io
 import itertools
 import json
+import re
 import runpy
 import subprocess
 import sys
+import time
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -471,6 +473,9 @@ def test_evaluate_shares_one_secret_scan_budget_across_staged_files(
 
     エントリ（`evaluate`）から駆動して固定する。`find_file_issues` を
     直接呼ぶテストでは deadline の伝播が外れても気付けないため。
+
+    予算は lint scan とも共有する 1 本なので、1 ファイルあたりの時刻取得は
+    lint / secret の 2 回になる。
     """
     logs: list[str] = []
     monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
@@ -488,15 +493,17 @@ def test_evaluate_shares_one_secret_scan_budget_across_staged_files(
 
     result = pre_bash_commit_quality.evaluate("payload")
 
-    # 予算 10 秒は 2 ファイル目の走査開始（累積 18 秒）で尽きるため、
-    # 2〜5 ファイル目が scan_error（severity error、fail-closed）になる。
+    # 予算 10 秒は 1 ファイル目の secret scan（累積 18 秒）で尽き、以降は
+    # 2〜5 ファイル目の lint scan が同じ 1 本の予算を見て即 scan_error になる。
+    # 全件が scan_error（severity error、fail-closed）。
+    # 予算がファイル単位なら 1 件も超過しない（1 ファイルあたり 9 秒 < 10 秒）。
     assert result["exitCode"] == 2
     exceeded = [
         path
         for path in staged
         if any(path in message and "SecretScanBudgetExceeded" in message for message in logs)
     ]
-    assert exceeded == staged[1:]
+    assert exceeded == staged
 
 
 def test_evaluate_commit_dash_a_shares_secret_scan_budget_with_worktree_files(
@@ -697,15 +704,11 @@ def test_should_scan_secrets_includes_non_lint_extensions(file_path: str) -> Non
 
 
 def test_pre_bash_commit_quality_helpers_return_success_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(
-        command: list[str],
-        *,
-        capture_output: bool,
-        check: bool,
-        text: bool = False,
-        timeout: float | None = None,
-    ):
+    def fake_run(command: list[str], **kwargs: object):
+        # `get_staged_files` は `subprocess_utils.run_text` 経由になったため
+        # `encoding` / `errors` / `env` / `input` も渡ってくる（**kwargs で受ける）。
         if command[:2] == ["git", "diff"]:
+            assert kwargs["encoding"] == "utf-8"
             return subprocess.CompletedProcess(command, 0, stdout="src/app.py\nsrc/tool.ts\n", stderr="")
         if command[:2] == ["git", "show"]:
             # get_staged_file_content はバイナリ判定のため text=True を付けずに bytes で取得する
@@ -1516,15 +1519,13 @@ def test_evaluate_commit_without_dash_a_reads_index_when_worktree_diverges(
 def test_get_unstaged_modified_files_returns_success_output(monkeypatch: pytest.MonkeyPatch) -> None:
     """`git diff HEAD` の成功出力からファイル一覧を返すこと。"""
 
-    def fake_run(
-        command: list[str],
-        *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
-        timeout: float | None = None,
-    ):
+    def fake_run(command: list[str], **kwargs: object):
         assert command == ["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"]
+        # `_git_name_only` は `subprocess_utils.run_text` 経由で呼ぶため、
+        # `encoding` / `errors` / `env` / `input` も渡ってくる。個別に受けると
+        # 呼び出し側の引数が増えるたびにテストが壊れるので **kwargs で受ける。
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
         return subprocess.CompletedProcess(command, 0, stdout="src/a.py\nsrc/b.py\n", stderr="")
 
     monkeypatch.setattr(pre_bash_commit_quality.subprocess, "run", fake_run)
@@ -1765,3 +1766,233 @@ def test_repo_wide_self_scan_has_zero_secret_issues() -> None:
         secret_hits.extend(f"{rel_path}:{issue['line']}" for issue in issues if issue["type"] == "secret")
 
     assert secret_hits == []
+
+
+class TestScanBudgetCoversHugeSingleLine:
+    """実時間バジェットが「改行の無い巨大 1 行」にも効くこと（H-7b）。
+
+    修正前の穴は 2 つ。
+    (a) `_scan_lint_issues` が `deadline` を受け取らず時間検査を一切持たず、
+        しかも `find_file_issues` が secret より**先**に呼ぶため、バジェットが
+        原理的に効かない区間があった。
+    (b) 被覆側の `_scan_secret_issues` も `index % 2000` でしか確認しないため、
+        行数が 2000 未満のファイル（＝巨大 1 行）は index 0 の 1 回、つまり
+        **走査開始前**にしか確認されなかった。
+
+    時刻は `_monotonic` の注入で決定的に与える（実時間に依存させると flaky）。
+    """
+
+    # 改行の無い 1MB 級の 1 行。行数は 1 なので旧「行数」基準では
+    # 走査開始前の 1 回しか予算確認が起きない。
+    _HUGE_LINE = "a" * (1024 * 1024)
+
+    def test_lint_scan_raises_when_budget_already_exhausted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """lint scanner も同じ 1 本の予算に載っていること。"""
+        monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: 1_000.0)
+
+        with pytest.raises(commit_quality_scanner.SecretScanBudgetExceeded):
+            commit_quality_scanner._scan_lint_issues([self._HUGE_LINE], deadline=0.0)
+
+    def test_secret_scan_raises_on_huge_single_line(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """行数 1 でも予算確認が走ること（旧「行数」基準では素通りしていた）。"""
+        monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: 1_000.0)
+
+        with pytest.raises(commit_quality_scanner.SecretScanBudgetExceeded):
+            commit_quality_scanner._scan_secret_issues(
+                self._HUGE_LINE, [self._HUGE_LINE], deadline=0.0
+            )
+
+    def test_find_file_issues_returns_scan_error_within_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """巨大 1 行でも deadline が効き、fail-closed の scan_error で戻ること。"""
+        monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: 1_000.0)
+        monkeypatch.setattr(
+            commit_quality_scanner, "get_staged_file_content", lambda path: self._HUGE_LINE
+        )
+
+        issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=0.0)
+
+        scan_errors = [issue for issue in issues if issue["type"] == "scan_error"]
+        assert len(scan_errors) == 1
+        assert scan_errors[0]["severity"] == "error"
+        assert "SecretScanBudgetExceeded" in scan_errors[0]["message"]
+
+    def test_lint_budget_exhaustion_skips_secret_scan(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """lint 側で予算が尽きたら secret scan は回さず error で返すこと。
+
+        予算はフック 1 回で共有の 1 本なので、尽きた状態で続行しても
+        ホスト側 timeout を踏むだけ。通常の lint 例外（warning）と同じ
+        severity へ落とすと、予算切れが commit をブロックしなくなる。
+        """
+        monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: 1_000.0)
+        # secret が実際に走れば検出されるはずの内容を置く。
+        content = "api" + "_key" + ' = "abc123"'  # nosec
+        monkeypatch.setattr(
+            commit_quality_scanner, "get_staged_file_content", lambda path: content
+        )
+        called: list[str] = []
+        monkeypatch.setattr(
+            commit_quality_scanner,
+            "_scan_secret_issues",
+            lambda *args, **kwargs: called.append("secret") or [],
+        )
+
+        issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=0.0)
+
+        assert called == []
+        assert [issue["severity"] for issue in issues] == ["error"]
+        assert "lint scan" in issues[0]["message"]
+
+    def test_ordinary_lint_exception_stays_warning(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """予算超過**以外**の lint 例外は従来どおり warning のままであること。"""
+        content = "api" + "_key" + ' = "abc123"'  # nosec
+        monkeypatch.setattr(
+            commit_quality_scanner, "get_staged_file_content", lambda path: content
+        )
+        monkeypatch.setattr(
+            commit_quality_scanner,
+            "_scan_lint_issues",
+            mock.Mock(side_effect=ValueError("boom")),
+        )
+
+        issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
+
+        scan_errors = [issue for issue in issues if issue["type"] == "scan_error"]
+        assert [issue["severity"] for issue in scan_errors] == ["warning"]
+        # secret 側は生存している（早期 return していない）。
+        assert any(issue["type"] == "secret" for issue in issues)
+
+
+class TestJwtPatternIsLinear:
+    """JWT パターンが入力長に対して線形であること（H-7b）。
+
+    修正前の `eyJ[a-zA-Z0-9_-]+\\.` は `eyJeyJeyJ…` に対して 3 バイトごとに
+    開始位置が立ち、そのたびに残り全体を貪欲に取ってから後退するため二次
+    オーダーだった（実測: 24,000 文字で 0.50s。1MiB へ外挿すると 15 分超で、
+    `pre_bash_commit_quality` の hook timeout 30 秒を桁で超える）。
+    """
+
+    _CEILING_SECONDS = 2.0
+
+    @staticmethod
+    def _jwt_pattern() -> str:
+        """`_SECRET_PATTERNS` から JWT パターンを引く。"""
+        return next(
+            pattern for pattern, name in commit_quality_scanner._SECRET_PATTERNS if name == "JWT"
+        )
+
+    def test_adversarial_repeat_returns_quickly(self) -> None:
+        """`eyJ` の反復（最悪ケース）が上限時間内に返る。"""
+        text = "eyJ" * 400_000
+
+        started = time.monotonic()
+        match = re.search(self._jwt_pattern(), text, re.IGNORECASE)
+        elapsed = time.monotonic() - started
+
+        assert match is None
+        assert elapsed < self._CEILING_SECONDS, (
+            f"JWT pattern took {elapsed:.3f}s (二次オーダーへ回帰した疑い)"
+        )
+
+    # フィクスチャは `eyJ` の直後で必ず連結して組み立てる。完成形を literal で
+    # 書くとこのテストファイル自身が JWT パターンへ一致し、自己走査テスト
+    # （`test_repo_wide_self_scan_has_zero_secret_issues`）が赤くなる。
+    # PEM パターンのコメントが述べている制約と同じもの。
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "eyJ" + "abc.def.ghi",
+            "Authorization: Bearer " + "eyJ" + "hbGciOiJSUzI1NiJ9." + "eyJ" + "zdWIiOiIxIn0.sig",
+            'token = "' + "eyJ" + 'a.b.c"',
+        ],
+    )
+    def test_real_jwt_is_still_detected(self, line: str) -> None:
+        """実物の JWT は従来どおり検出されること。"""
+        issues = commit_quality_scanner._scan_secret_issues(
+            line, [line], deadline=_scan_deadline()
+        )
+
+        assert any(issue["type"] == "secret" for issue in issues)
+
+    def test_jwt_embedded_in_longer_token_run_is_not_matched(self) -> None:
+        """base64url 文字に続く `eyJ` は一致しない（意図した絞り込み）。
+
+        線形化のための lookbehind の代償。JWT はトークンであり実物は区切りの
+        直後に現れるため、この絞り込みは受け入れる。
+        """
+        embedded = "abc" + "eyJ" + "hbGci.x.y"
+
+        assert re.search(self._jwt_pattern(), embedded, re.IGNORECASE) is None
+
+
+class TestScanBudgetAccumulatorScope:
+    """`_ScanBudget` の積算はインスタンス単位、deadline だけが共有であること。
+
+    共有されるのは `deadline` で、走査済みバイト数の積算はスキャナ呼び出し
+    ごとにリセットされる。これは仕様であり、実時間の上界を与えているのが
+    積算間隔ではなく共有 deadline の方だから成立する。ここを取り違えると
+    「`_SCAN_BUDGET_CHECK_BYTES` がファイルを跨いで効く」と誤読される。
+
+    既存の共有予算テストは fake clock が 1 サンプルあたり 9 秒進むため、
+    積算がどう振る舞っても最初のサンプルで deadline を割ってしまい、この
+    差を判別できない。ここでは時刻を進めない clock で「何回読まれたか」
+    だけを数えて固定する。
+    """
+
+    def _count_clock_reads(self, monkeypatch: pytest.MonkeyPatch, lines: list[str]) -> int:
+        """deadline に余裕がある状態で `_monotonic()` の呼び出し回数を数える。"""
+        reads = 0
+
+        def clock() -> float:
+            nonlocal reads
+            reads += 1
+            return 0.0
+
+        monkeypatch.setattr(commit_quality_scanner, "_monotonic", clock)
+        commit_quality_scanner._scan_secret_issues(
+            "\n".join(lines), lines, deadline=1_000.0
+        )
+        return reads
+
+    def test_small_input_samples_clock_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """閾値に満たない入力では走査開始時の 1 回だけ時刻を読む。"""
+        assert self._count_clock_reads(monkeypatch, ["short line"] * 50) == 1
+
+    def test_large_input_samples_clock_repeatedly(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """1 ファイルの中で閾値を跨げば繰り返し確認する（旧「行数」基準との差）。
+
+        改行の無い 1 行でも、パターン数ぶんの走査バイトが積算されるため
+        複数回の確認が起きる。
+        """
+        huge_single_line = "a" * (4 * commit_quality_scanner._SCAN_BUDGET_CHECK_BYTES)
+
+        reads = self._count_clock_reads(monkeypatch, [huge_single_line])
+
+        assert reads > 1
+
+    def test_every_call_re_arms_the_initial_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """呼び出しごとに必ず開始時の 1 回が入ること（＝積算を持ち越さない）。
+
+        これが共有 deadline を効かせている当の性質。積算がファイルを跨いで
+        持ち越されるなら、閾値に満たない 2 回目の呼び出しは時刻を 1 度も
+        読まず、その回のファイルは deadline 超過を検知できない。
+        """
+        small = ["short line"] * 50
+
+        first = self._count_clock_reads(monkeypatch, small)
+        second = self._count_clock_reads(monkeypatch, small)
+
+        assert (first, second) == (1, 1)

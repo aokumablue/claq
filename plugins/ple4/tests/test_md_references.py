@@ -12,6 +12,8 @@ import re
 from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[1]
 _TARGET_DIRS = ("agents", "skills", "commands")
 _REF_PATTERN = re.compile(r"`([^`\n]+\.md)`")
@@ -128,7 +130,16 @@ def test_readme_agent_skill_command_counts_match_filesystem() -> None:
 
 
 _VENDOR_PATH_MARKERS = (".copilot", ".grok", "installed-plugins", "CLAUDE_PLUGIN_ROOT")
-_BASH_FENCE_RE = re.compile(r"```bash\n(.*?)```", re.DOTALL)
+
+# シェルコマンドを載せるフェンスの言語表記。```bash だけを対象にしていた頃は、
+# 同じ内容を ```sh / ```shell / ```console で書いた瞬間に、このファイルの
+# シェル系検査 3 件（bootstrap 同梱・--status/--source 禁止・呼び出し可能シンボル
+# 在庫）が無言でスキップされていた。現コーパスは 34 件すべて ```bash なので
+# 実害は出ていないが、語彙を広げないと「書き方を変えるだけで検査が消える」
+# 状態が残る。`_COMMENT_HASH_FENCE_RE` が既に列挙していた語彙へ揃え、
+# 両者が同じ定数を共有することでこの取りこぼしが再発しないようにする。
+_SHELL_FENCE_LANGS = ("bash", "sh", "shell", "zsh", "console")
+_BASH_FENCE_RE = re.compile(rf"```(?:{'|'.join(_SHELL_FENCE_LANGS)})\n(.*?)```", re.DOTALL)
 _ENV_POINTER_LINE = '. "$HOME/.ple4/env.sh"'
 
 
@@ -255,8 +266,12 @@ _BACKTICK_SECTION_REF_RE = re.compile(r"`(#+ [^`\n。、]+)`")
 _MD_PATH_REF_RE = re.compile(r"`([^`\n]+\.md)`")
 _HEADING_RE = re.compile(r"^(#+ .+)$", re.M)
 _FENCE_RE = re.compile(r"```.*?```", re.S)
-# `#` が行コメントである言語のフェンスは見出しを持たない（`# FAIL: ...` はコメント）
-_COMMENT_HASH_FENCE_RE = re.compile(r"^```(?:bash|sh|shell|zsh|console|python|yaml|yml|terraform|toml|ini)\b")
+# `#` が行コメントである言語のフェンスは見出しを持たない（`# FAIL: ...` はコメント）。
+# シェル系は `_SHELL_FENCE_LANGS` を単一情報源として共有する（片側だけ語彙が
+# 増える食い違いを構造的に防ぐ）。
+_COMMENT_HASH_FENCE_RE = re.compile(
+    r"^```(?:" + "|".join((*_SHELL_FENCE_LANGS, "python", "yaml", "yml", "terraform", "toml", "ini")) + r")\b"
+)
 
 
 def _collect_headings(text: str) -> tuple[set[str], set[str]]:
@@ -384,7 +399,18 @@ def test_section_ref_helpers_detect_and_accept() -> None:
 
 
 _PLUGIN_REF_RE = re.compile(r"ple4:([a-z][\w-]*)")
-_MODULE_REF_RE = re.compile(r"ple4_run\s+(ple4[\w.]*)")
+
+# md が名指しする Python モジュールの参照形。`ple4_run <module>` だけを見ていた
+# 頃は、md に実在する `python3 -m ple4.X` 形（skills/maintain/SKILL.md と
+# skills/release-verify/SKILL.md の計 5 箇所）が import 可能性検査を素通りし、
+# `ple4.ci.validate_skills` をリネームしても md が dangling のまま緑だった。
+#
+# モジュール名の各要素を ASCII の Python 識別子に限る理由: `\w` は既定で Unicode
+# 対応なので、`[\w.]*` 系のパターンは散文の `python3 -m ple4.モジュール名`
+# （skills/release-verify/SKILL.md）まで拾って偽 RED を出す（実測:
+# `re.search(r"ple4[\w.]*\w", "ple4.モジュール名")` はマッチする）。さらに
+# ドット付き要素を 1 個以上必須にすることで、その散文はどの位置でもマッチしない。
+_MODULE_REF_RE = re.compile(r"(?:ple4_run|python3 -m)\s+(ple4(?:\.[A-Za-z_][A-Za-z0-9_]*)+)")
 
 
 def test_plugin_component_references_exist() -> None:
@@ -422,8 +448,19 @@ def test_ple4_run_module_references_are_importable() -> None:
     assert missing == [], "import できないモジュール参照:\n" + "\n".join(sorted(set(missing)))
 
 
-def test_harness_md_rubric_version_matches_audit_constant() -> None:
-    """`commands/harness.md` のルーブリック版表記が実装の定数と一致すること。
+# ルーブリック版を書き写している md と、そこから版を取り出す正規表現。
+# 実装の定数を含めて 3 箇所が同じ文字列を持つ。`commands/harness.md` しか
+# 照合していなかった頃は `agents/harness-tuner.md` のサンプル JSON が取り残され、
+# 版を上げても古い版のスコアと比較する助言が出せる状態だった。
+_RUBRIC_VERSION_SITES = (
+    (Path("commands") / "harness.md", re.compile(r"ルーブリック版: `([^`]+)`")),
+    (Path("agents") / "harness-tuner.md", re.compile(r'"rubric_version":\s*"([^"]+)"')),
+)
+
+
+@pytest.mark.parametrize(("relative_path", "pattern"), _RUBRIC_VERSION_SITES)
+def test_md_rubric_version_matches_audit_constant(relative_path: Path, pattern: re.Pattern[str]) -> None:
+    """ルーブリック版を書き写している md がすべて実装の定数と一致すること。
 
     スコアはルーブリック版の中でのみ比較可能で、版が上がると過去のベースラインとは
     比較不能になる。実装側の定数と md の散文が別々に書かれていた頃は、片方だけ
@@ -431,11 +468,32 @@ def test_harness_md_rubric_version_matches_audit_constant() -> None:
     """
     from ple4.ci.harness_audit import RUBRIC_VERSION
 
-    text = (_ROOT / "commands" / "harness.md").read_text(encoding="utf-8")
-    found = re.findall(r"ルーブリック版: `([^`]+)`", text)
-    assert found, "commands/harness.md に「ルーブリック版: `...`」表記が見つからない"
+    text = (_ROOT / relative_path).read_text(encoding="utf-8")
+    found = pattern.findall(text)
+    assert found, f"{relative_path} にルーブリック版の表記が見つからない（{pattern.pattern}）"
     for version in found:
-        assert version == RUBRIC_VERSION, f"md のルーブリック版 {version} が実装の {RUBRIC_VERSION} と不一致"
+        assert version == RUBRIC_VERSION, (
+            f"{relative_path} のルーブリック版 {version} が実装の {RUBRIC_VERSION} と不一致"
+        )
+
+
+def test_no_stale_rubric_version_strings_remain() -> None:
+    """定義済みの照合箇所以外に、実装と食い違う版文字列が残っていないこと。
+
+    照合箇所を列挙する方式は、新しい書き写し先が増えたときに取りこぼす。
+    md 全体を走査して「日付形式の rubric 版らしき文字列」が実装と一致することも
+    併せて固定し、`_RUBRIC_VERSION_SITES` の更新漏れ自体を検出する。
+    """
+    from ple4.ci.harness_audit import RUBRIC_VERSION
+
+    version_pattern = re.compile(r'(?:ルーブリック版: `|"rubric_version":\s*")(\d{4}-\d{2}-\d{2})')
+    stale = [
+        f"{md_file.relative_to(_ROOT)}: {version}"
+        for md_file in _iter_md_files()
+        for version in version_pattern.findall(md_file.read_text(encoding="utf-8"))
+        if version != RUBRIC_VERSION
+    ]
+    assert stale == [], "実装の RUBRIC_VERSION と食い違う版表記:\n" + "\n".join(sorted(stale))
 
 
 # md が `name(...)` の呼び出し形で名指しするシンボル。実装側の関数名と md の散文は
