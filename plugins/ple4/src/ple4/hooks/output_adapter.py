@@ -45,20 +45,6 @@ def adapt_context_output(event_name: str, additional_context: str) -> str:
     )
 
 
-def adapt_pre_tool_use_context_output(additional_context: str) -> str:
-    """PreToolUse コンテキスト注入出力を host 非依存の合併 JSON として生成する。
-
-    Args:
-        additional_context: コンテキストに注入する追加文字列。
-
-    Returns:
-        adapt_context_output と同形の合併 JSON 文字列。
-
-    Raises:
-        例外は発生しません。
-    """
-    return adapt_context_output("PreToolUse", additional_context)
-
 
 def emit_block(reason: str) -> tuple[int, str, str]:
     """ツール実行ブロックの出力を host 非依存の合併形式で組み立てる。

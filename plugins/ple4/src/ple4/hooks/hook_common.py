@@ -1089,7 +1089,10 @@ def write_stdout(text: str) -> None:
         なし
 
     Raises:
-        例外は発生しません。
+        OSError: パイプが閉じている場合（BrokenPipeError を含む）。
+        UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
+
+    deny の判定を落とさないため、`emit_block_output` はこれらを内側で捕まえる。
     """
     sys.stdout.write(text)
 
@@ -1104,7 +1107,10 @@ def write_stderr(text: str) -> None:
         なし
 
     Raises:
-        例外は発生しません。
+        OSError: パイプが閉じている場合（BrokenPipeError を含む）。
+        UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
+
+    deny の判定を落とさないため、`emit_block_output` はこれらを内側で捕まえる。
     """
     sys.stderr.write(text)
 
@@ -1203,16 +1209,25 @@ def normalize_protected_name(path: str) -> str:
     解決後の basename を素で比較すると ``Write Ruff.toml`` が実体 ``ruff.toml``
     へ着地するのに保護判定は外れます（C-2。実測で exit 0）。
 
+    あわせて Win32 のファイル名正準化を畳みます。Windows は末尾のドットと
+    空白を切り捨て、``:`` 以降を代替データストリーム名として扱うため、
+    ``ruff.toml.`` / ``ruff.toml`` +空白 / ``ruff.toml:x`` はいずれも実体
+    ``ruff.toml`` を指しますが、素の basename 比較では保護判定から外れます。
+    `normalize_executable_name` は ``.exe`` 除去という Windows 固有の畳み込みを
+    既に持っており、保護対象名の側だけ持たないのは非対称でした。
+
     Args:
         path: 検査対象のパス文字列、またはファイル名です。
 
     Returns:
-        大小無視へ畳んだ basename を返します。
+        大小無視・Win32 正準化へ畳んだ basename を返します。
 
     Raises:
         例外は発生しません。
     """
-    return _basename_any_separator(path).casefold()
+    name = _basename_any_separator(path)
+    name = name.split(":", 1)[0]
+    return name.rstrip(". \t").casefold()
 
 
 def is_git_executable_token(token: str) -> bool:
@@ -1335,7 +1350,7 @@ def resolve_effective_target(raw_path: str) -> Path | None:
 # timeout で kill されないため、自前の watchdog で自決させる。
 #
 # この値は hooks.json の timeout とは無関係に決める。detach 後の子はハーネスの
-# 管轄外であり、hooks.json の値（最大は mem.cli context の 60 秒だが、これは
+# 管轄外であり、hooks.json の値（最大は pre_bash_commit_quality の 30 秒だが、これは
 # detach しない同期エントリ）と紐付ける論拠がないため。
 #
 # detach 対象（launcher --bg: mem.cli handoff）は正常系ではローカル I/O 数秒で
@@ -1675,7 +1690,7 @@ def recent_bg_failure_notice() -> str:
 
     読み取り範囲は当日＋前日の 2 ファイルまでに限定し、各ファイルは末尾
     `_BG_FAILURE_TAIL_MAX_BYTES` バイトまでしか読まない（SessionStart の
-    hooks.json timeout 60 秒に対する境界を持たせるため）。
+    hooks.json の SessionStart timeout 20 秒に対する境界を持たせるため）。
 
     Args:
         なし
@@ -1714,12 +1729,31 @@ def emit_block_output(reason: str) -> int:
     Returns:
         フックが返すべき終了コード。
 
+    出力層が失敗しても deny の終了コードは返します。`write_stdout` /
+    `write_stderr` は `sys.stdout.write` を呼ぶため BrokenPipeError・OSError・
+    UnicodeEncodeError を送出しうる（両関数の docstring の「例外は発生しません」は
+    事実に反していた）。例外がここを抜けると `main()` の外まで伝播して exit 1 に
+    なり、**PreToolUse の契約では exit 1 は non-blocking error ＝ ツールは実行
+    される** — つまり deny が黙って allow へ反転する。現実的な誘因は host が
+    パイプを閉じたときの BrokenPipeError で、これは host の timeout と同時に
+    起きるため、最も守りたい局面でちょうど外れる。
+
+    `pre_bash_commit_quality` は各呼び出し側で同じ guard を持っていたが、
+    残る 3 フックには無く ADR-0001 が成果に挙げる「4 フックが同じ exit 契約に
+    揃う」がこの経路で成立していなかった。呼び出し側 12 箇所へ複製するのでは
+    なく、出力の唯一の口である本関数の内側へ集約する。
+
     Raises:
         例外は発生しません。
     """
     exit_code, deny_out, reason_err = emit_block(reason)
-    write_stdout(deny_out)
-    write_stderr(reason_err + "\n")
+    try:
+        write_stdout(deny_out)
+        write_stderr(reason_err + "\n")
+    except Exception:
+        # 出力に失敗しても deny は維持する。ここで握り潰すのは「理由を
+        # 伝えられなかった」ことだけで、判定そのものは exit code が運ぶ。
+        pass
     return exit_code
 
 

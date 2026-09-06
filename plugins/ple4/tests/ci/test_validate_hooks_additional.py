@@ -190,6 +190,38 @@ def test_repo_hook_modules_are_importable() -> None:
         assert importlib.util.find_spec(argv[0]) is not None, f"モジュールが存在しません: {argv[0]}"
 
 
+def test_repo_hook_modules_propagate_exit_code_via_system_exit() -> None:
+    """hooks.json が起動する全モジュールが `main()` の戻り値を SystemExit で伝えること。
+
+    `launcher.py` の `_run_module_in_process` は `SystemExit` を捕まえてその
+    `code` を返し、例外が上がらなければ `0` を返す。したがって `__main__` が
+    `main()` を素で呼ぶモジュールでは、`main()` が 2（deny）を返しても launcher は
+    0（allow）を返す — PreToolUse の「exit 2 = deny」契約が黙って壊れる。
+
+    `launcher.py` は「全フックは SystemExit 経由で終了することを確認済み」と
+    書いているが、その確認は一度きりの目視で検知器が無かった。ADR-0011 決定6 /
+    ADR-0023 が対象とする「宣言はあるが CI で実測されない契約」にあたる。
+    """
+    import ast
+
+    for argv in _repo_hook_argv():
+        module = argv[0]
+        spec = importlib.util.find_spec(module)
+        assert spec is not None and spec.origin, module
+        tree = ast.parse(Path(spec.origin).read_text(encoding="utf-8"))
+        main_blocks = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.If)
+            and ast.dump(node.test).find("__main__") != -1
+        ]
+        assert main_blocks, f"{module} に __main__ ブロックがありません"
+        source = "\n".join(ast.unparse(stmt) for block in main_blocks for stmt in block.body)
+        assert "SystemExit(main())" in source or "sys.exit(main())" in source, (
+            f"{module} の __main__ が main() の戻り値を SystemExit で伝えていません: {source!r}"
+        )
+
+
 def test_repo_mem_cli_hooks_split_target_and_args() -> None:
     """実際の hooks.json の ple4.mem.cli 呼び出しが、launcher 直後に
     モジュール名・サブコマンドの順で並び、かつサブコマンドが CLI に実在する

@@ -70,7 +70,9 @@ _ple4_resolve_ancestor_pointer() {
 _ple4_walk_pid="$PPID"
 _ple4_walk_depth=0
 while [ "$_ple4_walk_depth" -lt 2 ]; do
-  _ple4_env_root="$(_ple4_resolve_ancestor_pointer "$_ple4_walk_pid")"
+  # `set -e` 下で 1 候補目のミス（正常経路）が silent exit にならないよう守る。
+  # `runtime/ple4-helpers.sh` が同一パターンで既に採っている形。
+  _ple4_env_root="$(_ple4_resolve_ancestor_pointer "$_ple4_walk_pid")" || _ple4_env_root=""
   [ -n "$_ple4_env_root" ] && break
   _ple4_walk_parent="$(ps -o ppid= -p "$_ple4_walk_pid" 2>/dev/null | tr -d ' ')"
   case "$_ple4_walk_parent" in

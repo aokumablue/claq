@@ -143,15 +143,18 @@ _MUTATION_BEFORE_COMMIT_MESSAGE = (
     "`git add` in a separate tool call, then commit."
 )
 
-# stdin が MAX_STDIN_BYTES を超えて切り捨てられた場合の deny 理由。切り捨て後の
-# JSON は不完全になりうる（commit かどうかの判定自体が信用できない）ため、
-# block_no_verify / config_protection と同じく fail-closed にする（A-05 相当対応）。
+# 走査コストが hooks.json の timeout を超える入力の deny 理由。理由は
+# `hook_common.MAX_COMMAND_TOKENS` のコメントを参照（host が kill した hook は
+# exit code を返さないため、走らせること自体が silent fail-open になる）。
 _TOKEN_BUDGET_MESSAGE = (
     f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_TOKENS} shell tokens for pre:bash-commit-quality. "
     "A command this large cannot be inspected within the hook timeout, and an un-inspected "
     "commit must not be allowed. Split it into smaller commands."
 )
 
+# stdin が MAX_STDIN_BYTES を超えて切り捨てられた場合の deny 理由。切り捨て後の
+# JSON は不完全になりうる（commit かどうかの判定自体が信用できない）ため、
+# block_no_verify / config_protection と同じく fail-closed にする（A-05 相当対応）。
 _TRUNCATED_INPUT_MESSAGE = (
     f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for pre:bash-commit-quality. "
     "Refusing to evaluate a possibly-truncated payload for a git commit quality scan. "

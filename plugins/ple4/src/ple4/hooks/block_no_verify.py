@@ -712,7 +712,16 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool) -> bool:
                 return True
         if not _recursed:
             wrapper_command = extract_shell_wrapper_command(segment)
-            if wrapper_command is not None and has_bypass_flag(wrapper_command, _recursed=True):
+            if wrapper_command is None:
+                continue
+            # `sh -c '<巨大なコマンド>'` は外側が数トークンしか無いため main() の
+            # 予算検査を通過する。再帰先を無予算で走らせると timeout 超過 →
+            # host が kill → silent fail-open になるので、境界でも同じ上限を当てる。
+            # 上限超過は True（＝BLOCK）へ倒す — 検査しきれない入力を通さない
+            # 方針は main() 側と同じで、ADR-0002 の「誤検出を誤通過より選ぶ」に従う。
+            if command_exceeds_token_budget(wrapper_command):
+                return True
+            if has_bypass_flag(wrapper_command, _recursed=True):
                 return True
     return False
 

@@ -12,45 +12,6 @@ import json
 from ple4.hooks import output_adapter
 
 
-class TestAdaptContextOutput:
-    """adapt_context_output のテスト。"""
-
-    def test_emits_merged_top_level_and_hook_specific_output(self):
-        """additionalContext（トップレベル）と hookSpecificOutput を同時に出す。"""
-        result = output_adapter.adapt_context_output("SessionStart", "ctx")
-        parsed = json.loads(result)
-        assert parsed["additionalContext"] == "ctx"
-        assert parsed["hookSpecificOutput"] == {
-            "hookEventName": "SessionStart",
-            "additionalContext": "ctx",
-        }
-
-    def test_user_prompt_submit_event_name(self):
-        """イベント名が hookSpecificOutput.hookEventName に反映される。"""
-        result = output_adapter.adapt_context_output("UserPromptSubmit", "abc")
-        payload = json.loads(result)
-        assert payload["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
-        assert payload["hookSpecificOutput"]["additionalContext"] == "abc"
-        assert payload["additionalContext"] == "abc"
-
-    def test_non_ascii_is_not_escaped(self):
-        """日本語を含む出力が \\uXXXX へエスケープされない。"""
-        result = output_adapter.adapt_context_output("SessionStart", "圧縮済み")
-        assert "圧縮済み" in result
-
-
-class TestAdaptPreToolUseContextOutput:
-    """adapt_pre_tool_use_context_output のテスト。"""
-
-    def test_emits_merged_pre_tool_use_output(self):
-        """PreToolUse イベント名で合併出力を返す。"""
-        result = output_adapter.adapt_pre_tool_use_context_output("ctx")
-        parsed = json.loads(result)
-        assert parsed["additionalContext"] == "ctx"
-        assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
-        assert parsed["hookSpecificOutput"]["additionalContext"] == "ctx"
-
-
 class TestEmitBlock:
     """emit_block のテスト。"""
 

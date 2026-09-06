@@ -249,3 +249,61 @@ def test_pre_bash_commit_quality_evaluate_blocks_oversized_command_in_process(
 
     assert result["exitCode"] == 2
     assert "exceeds" in result["reason"]
+
+
+def test_token_budget_covers_the_sh_c_recursion_boundary() -> None:
+    """`sh -c '<巨大なコマンド>'` でも予算が効くこと。
+
+    予算検査を entry loop（`main()`）だけに置くと、外側が数トークンしか無い
+    ネスト payload は通過し、再帰先が無予算で走る。実測（2026-09-07）では
+    `sh -c '<git×24000 && git commit --no-verify -m x>'` が **16.23 秒**かかり
+    hooks.json の timeout（15秒）を超えていた — 修正が塞いだはずの silent
+    fail-open がネスト経由でそのまま残っていた。1 段の `sh -c` は ADR-0002 が
+    対応範囲と明記した経路である。
+    """
+    import time
+
+    from ple4.hooks.hook_common import MAX_COMMAND_TOKENS
+
+    inner = "git " * (MAX_COMMAND_TOKENS * 5) + "&& git commit --no-verify -m x"
+    started = time.perf_counter()
+    assert _run_hook("block_no_verify", f"sh -c '{inner}'") == 2
+    assert time.perf_counter() - started < 5.0, "再帰先が無予算で走査へ落ちている"
+
+    # 予算内のネストは従来どおり中身で判定される（予算が過剰に効かない）。
+    assert _run_hook("block_no_verify", "sh -c 'git commit --no-verify -m x'") == 2
+    assert _run_hook("block_no_verify", "sh -c 'git commit -m x'") == 0
+
+
+@pytest.mark.parametrize(
+    "failure", [BrokenPipeError("pipe"), OSError("closed"), ValueError("encode")]
+)
+def test_emit_block_output_keeps_deny_when_output_fails(failure: Exception) -> None:
+    """出力層が例外化しても deny(2) を維持すること。
+
+    `write_stdout` は `sys.stdout.write` を呼ぶため BrokenPipeError 等を送出
+    しうる。例外が `main()` の外まで抜けると exit 1 になり、PreToolUse の契約
+    では **exit 1 = non-blocking error ＝ ツールは実行される** — deny が黙って
+    allow へ反転する。現実的な誘因は host がパイプを閉じたときの
+    BrokenPipeError で、host の timeout と同時に起きるため最も守りたい局面で
+    ちょうど外れていた。
+    """
+    from unittest import mock
+
+    from ple4.hooks.hook_common import emit_block_output
+
+    with mock.patch("ple4.hooks.hook_common.write_stdout", side_effect=failure):
+        assert emit_block_output("[Hook] BLOCKED: test") == 2
+
+
+def test_sh_c_budget_guard_blocks_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """再帰境界の予算ガードが in-process でも BLOCK 側へ倒れること。"""
+    from ple4.hooks import block_no_verify
+
+    monkeypatch.setattr(
+        block_no_verify, "command_exceeds_token_budget", lambda command: "PAYLOAD" in command
+    )
+
+    assert block_no_verify.has_bypass_flag("sh -c 'PAYLOAD echo ok'") is True
+    # 予算内のネストは中身で判定される（ガードが過剰に効かない）。
+    assert block_no_verify.has_bypass_flag("sh -c 'echo ok'") is False
