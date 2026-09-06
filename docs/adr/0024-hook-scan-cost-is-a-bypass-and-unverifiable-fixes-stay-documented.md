@@ -101,16 +101,54 @@ launcher とその子プロセス（`git` を含む）は汚染された PATH �
 
 ### 代替案 5: `config_protection` の保護対象へ `hooks.json` とホストの `settings.json` を加える
 
-保護フック自身の設定は保護対象外で、1 回の Edit で 4 フットすべてを無効化でき、
-`PLE4_PYTHON` の注入点にもなる。linter 設定を守る理由（設定を弱めて指摘を消させない）は
-そのままフック設定にも当てはまる。
+**当初は「`/harness --apply` と両立しない」として却下したが、精査の結果その判断が誤りで
+あることが分かったため採択へ改めた（2026-09-07、利用者の承認済み）。**
 
-- 長所: 自分自身を無効化できるガードはガードではない、という原則に素直。
-- 短所: `/harness --apply` は `hooks.json` / `settings.json` の編集を職務としており
-  （`harness-tuner` の出力先そのもの）、保護すると成立しなくなる。逃げ道を設ければ
-  その逃げ道が新しい注入点になる。
-- 却下理由: 保護と `/harness` のどちらを採るかは要件判断であって、レビューの裁量を
-  超える。**本 ADR 時点で最も価値の高い未対応項目**として記録し、判断を仰ぐ。
+保護フック自身の設定は保護対象外で、1 回の Edit で PreToolUse ガード 4 種すべてを
+無効化できる。`config_protection` の脅威モデルは「エージェントが、自分の作業を通すために
+ガードレール側を緩める」であり（ブロックメッセージが明言している）、同じ動機で最も効く
+緩め方が対象外だった。`.git/hooks` を保護対象へ加えた理由（「片側だけ塞ぐと、塞いだ
+経路の存在が誤った安心になる」）がそのまま当てはまる。
+
+却下時の理由「`/harness --apply` の編集先そのものなので保護すると成立しない」は、
+実装を読み直すと**粗すぎた**:
+
+- `config_protection` の判定は **basename 一致**であり、`"hooks.json"` を素で足すと
+  プラグイン自身の `plugins/ple4/hooks/hooks.json` と consumer の `.claude/hooks.json`
+  を区別できない。「両立しない」ように見えたのはこの basename 衝突が原因で、
+  `.git/hooks` 用に既にある**パス連続一致**（`_PROTECTED_PATH_SEGMENTS`）を使えば分離できる
+- `harness_audit` が provider モードで `hooks/hooks.json` を指す check は 5 件すべてが
+  存在・整合チェックで、fix は**追加**であって弱化ではない
+- consumer モードで `.claude/settings.json` を指すのは 2 件だけで、fix は初回セットアップ
+  1 回きりの行動
+
+さらに、実装直前の再検討で**当初案のもう 1 つの欠陥**が見つかった。`settings.json` の
+条件を「`env` キーを触る場合」にすると、`update-config` skill の中心的な仕事
+（`set DEBUG=true`）と `.vscode/settings.json` の `terminal.integrated.env.*` を巻き込む。
+守れるものが増えないのに頻繁な正当作業を壊すため、条件を **`PLE4_PYTHON` の出現そのものと
+`hooks` / `enabledPlugins` / `disabledPlugins` の 3 キーだけ**に絞った。
+
+採択した実装:
+
+1. `plugins/ple4/hooks/hooks.json` を**パス連続一致**（`("hooks", "hooks.json")`）で
+   無条件保護する。consumer の `.claude/hooks.json`（親が `.claude`）には当たらない
+2. `settings.json` / `settings.local.json` を**条件付き保護**へ加え、`PLE4_PYTHON` の出現・
+   `hooks` / `enabledPlugins` / `disabledPlugins` のときだけ deny する。とくに
+   `PLE4_PYTHON` は `runtime/ple4-hook` が exec するため、保護の無効化ではなく
+   **全ツール呼び出しでの任意コード実行**の入口である
+3. ブロックメッセージの「正当な変更ならフックを一時的に無効化せよ」を
+   「必要ならユーザーに依頼せよ。フックを自分で無効化するな」へ改める。
+   **止めた直後に「代わりに検査ごと止めていい」と言えば、止めた意味が消える。**
+   加えて 1 を入れるとこの指示は循環する（無効化先が保護対象になる）
+
+残るコスト: `/harness --apply` の `consumer-hook-guardrails` fix（初回セットアップ 1 回）と、
+ple4 自身の開発で `hooks.json` を触る作業が deny される。どちらも deny メッセージが
+「ユーザーに依頼せよ」と案内する。
+
+**この保護は決定的ではない。** `python3 -c "open('.claude/settings.json','w').write(...)"` は
+書込み先がリダイレクトでも既知エディタでもないため、おそらく素通りする。守っているのは
+`config_protection` が元から守っている層 —— 素直なエージェントが近道を取る経路と、
+低コストな注入 —— であって、決意した攻撃者ではない。
 
 ### 代替案 6: `_ScanBudget` を「走査単位数」でも積算する
 
@@ -166,6 +204,10 @@ Windows の `CreateProcess`（`lpApplicationName=NULL`）は PATH より先に�
 - 決定 1 の fail-closed は、5,000 トークンを超える正当なコマンドを拒む。実務上そのような
   コマンドは無いと判断したが、生成されたスクリプトを 1 行で流す使い方があれば衝突する。
   その場合は上限値を上げるのではなく、コマンドを分割する側を正とする。
-- 代替案 5（フック自身の設定の保護）を見送ったため、**1 回の Edit で全フックを無効化
-  できる状態は残っている**。これは既知の未対応項目であり、`/harness --apply` との
-  両立方針が決まるまで開いたままになる。
+- 代替案 5 の採択により、`/harness --apply` の consumer 向け fix 1 件と、ple4 自身の
+  開発での `hooks.json` 編集が deny される。どちらも「ユーザーに依頼する」へ倒れるので
+  復旧不能ではないが、摩擦は増える。
+- 代替案 5 の保護は素直なエージェントの近道と低コストな注入にしか効かない。Python の
+  `open()` 経由の書き込みなど、書込み先がトークンとして現れない経路は素通りする。
+  **「hooks.json は守られている」と読むのは誤りで、正しくは「Edit/Write と Bash の
+  リダイレクト経路では守られている」である。**

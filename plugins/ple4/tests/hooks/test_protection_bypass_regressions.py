@@ -502,6 +502,11 @@ _EXPECTED_CONDITIONALLY_PROTECTED_FILES = frozenset({
     "setup.cfg",
     "tox.ini",
     "package.json",
+    # ホスト設定。保護フックを止めるキーだけを条件にする（`env` 全般ではない —
+    # `update-config` skill の `DEBUG=true` や `.vscode/settings.json` の
+    # `terminal.integrated.env.*` を巻き込むため）。
+    "settings.json",
+    "settings.local.json",
 })
 
 # `bash_config_protection._DIRECTORY_CHANGE_COMMANDS` の期待内容（層2）。
@@ -546,6 +551,14 @@ _CONDITIONAL_SIGNALS = {
     "setup.cfg": ("[flake8]\nignore = E501\n", "[metadata]\nname = x\n"),
     "tox.ini": ("[testenv]\ncommands = pytest\n", "[tox]\nenvlist = py312\n"),
     "package.json": ('{"eslintConfig": {"rules": {}}}', '{"name": "x", "version": "1.0.0"}'),
+    "settings.json": (
+        '{"env": {"PLE4_PYTHON": "/tmp/evil"}}',
+        '{"env": {"DEBUG": "true"}, "permissions": {"allow": ["Bash(npm:*)"]}}',
+    ),
+    "settings.local.json": (
+        '{"disabledPlugins": ["ple4"]}',
+        '{"terminal.integrated.env.osx": {"FOO": "1"}}',
+    ),
 }
 
 
@@ -793,7 +806,7 @@ _EXPECTED_MODE_COMMANDS = frozenset({"chflags", "chgrp", "chmod", "chown"})
 _EXPECTED_TOUCH_COMMANDS = frozenset({"touch"})
 
 # `config_protection._PROTECTED_PATH_SEGMENTS` の期待内容（層2）。
-_EXPECTED_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"),)
+_EXPECTED_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), ("hooks", "hooks.json"))
 
 
 def _folded(names: frozenset[str]) -> frozenset[str]:
@@ -955,6 +968,16 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "config_protection.PROTECTED_FILES_FOLDED": _folded(_EXPECTED_PROTECTED_FILES),
     "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": _folded(
         _EXPECTED_CONDITIONALLY_PROTECTED_FILES
+    ),
+    # ホスト設定で保護フックを止められるキー。`env` 全般を条件にすると
+    # `update-config` skill の `DEBUG=true` や `.vscode/settings.json` の
+    # `terminal.integrated.env.*` を巻き込むため、`PLE4_PYTHON` の出現そのものと
+    # 保護を外せる 3 キーだけに絞る。
+    "config_protection._SETTINGS_GUARD_KEYS": (
+        "PLE4_PYTHON",
+        '"hooks"',
+        '"enabledPlugins"',
+        '"disabledPlugins"',
     ),
     "config_protection._PROTECTED_PATH_SEGMENTS": _EXPECTED_PROTECTED_PATH_SEGMENTS,
     "config_protection._PROTECTED_PATH_SEGMENTS_FOLDED": tuple(
@@ -1297,6 +1320,7 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
     "config_protection._PROTECTED_PATH_SEGMENTS_FOLDED": "_BLOCKED_CASES の C-2 保護 path の大文字（Bash）",
     "config_protection._LINT_SECTION_HEADERS": "test_every_lint_section_header_is_detected",
     "config_protection._LINT_KEYS": "test_every_lint_key_is_detected",
+    "config_protection._SETTINGS_GUARD_KEYS": "test_every_conditionally_protected_file_denies_only_lint_signals の settings.json / settings.local.json",
 }
 
 # 層1 を持たない語彙と、その理由。

@@ -529,7 +529,7 @@ class TestLintKeyPatternIsLinear:
 
 
 class TestLintSignalTextLengthCap:
-    """`_text_has_lint_signal` の走査量上限（H-7a）。"""
+    """`_text_has_protected_signal` の走査量上限（H-7a）。"""
 
     def test_over_cap_text_blocks_fail_closed(self) -> None:
         """上限超過のテキストは走査せず True（ブロック）を返す。
@@ -540,7 +540,7 @@ class TestLintSignalTextLengthCap:
         """
         text = "x" * (config_protection._LINT_SIGNAL_MAX_TEXT_BYTES + 1)
 
-        assert config_protection._text_has_lint_signal(text, "pyproject.toml") is True
+        assert config_protection._text_has_protected_signal(text, "pyproject.toml") is True
 
     def test_large_but_harmless_text_under_cap_is_not_blocked(self) -> None:
         """上限内の大きな非 lint テキストは従来どおり False（陰性対照）。
@@ -550,4 +550,4 @@ class TestLintSignalTextLengthCap:
         """
         text = "x" * (config_protection._LINT_SIGNAL_MAX_TEXT_BYTES - 1)
 
-        assert config_protection._text_has_lint_signal(text, "pyproject.toml") is False
+        assert config_protection._text_has_protected_signal(text, "pyproject.toml") is False

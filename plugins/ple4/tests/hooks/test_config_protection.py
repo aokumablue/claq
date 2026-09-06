@@ -367,3 +367,79 @@ def test_config_protection_truncation_fail_closed_via_spy(
     assert rc == 2
     assert len(reasons) == 1
     assert "Hook input exceeded" in reasons[0]
+
+
+def _run_hook(payload: dict, monkeypatch: pytest.MonkeyPatch) -> int:
+    """payload を stdin として `config_protection.main()` を回し exit code を返す。
+
+    Args:
+        payload: フックへ渡す stdin の dict。
+        monkeypatch: pytest の monkeypatch フィクスチャ。
+
+    Returns:
+        フックの exit code（2 = deny）。
+
+    Raises:
+        例外は発生しません。
+    """
+    monkeypatch.setattr(
+        config_protection, "read_raw_stdin_with_truncation", lambda: (json.dumps(payload), False)
+    )
+    return config_protection.main()
+
+
+class TestProtectionHookOwnConfig:
+    """保護フック自身の設定を守る判定（ADR-0024 代替案5 の採択分）。
+
+    `config_protection` は lint 設定を「エージェントが自分の作業を通すために
+    ガードレール側を緩める」経路として守る。同じ動機で最も効く緩め方
+    — 保護フックの登録そのものを消す — が対象外だった。
+    """
+
+    @pytest.mark.parametrize(
+        ("file_path", "expected"),
+        [
+            # プラグイン自身の登録元。1 回の Edit で PreToolUse ガード 4 種を消せる。
+            ("/repo/plugins/ple4/hooks/hooks.json", 2),
+            # 配布物はプラグインキャッシュ配下に置かれる。同じ形で当たること。
+            ("/home/u/.claude/plugins/cache/ple4/ple4/0.9.54/hooks/hooks.json", 2),
+            # **消してはいけない陰性対照**: consumer 側の `.claude/hooks.json` は
+            # `/harness --apply` が正当に書き込む先。basename `hooks.json` で
+            # 判定すると巻き込むため、パス連続一致（`hooks/hooks.json`）で守る。
+            ("/repo/.claude/hooks.json", 0),
+            # `hooks/` 配下でもファイル名が違えば対象外（テストや実装ファイル）。
+            ("/repo/tests/hooks/test_hook_common.py", 0),
+        ],
+    )
+    def test_plugin_hook_manifest_is_protected_by_path_not_basename(
+        self, file_path: str, expected: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """プラグインの hooks.json だけを守り、consumer 側は通すこと。"""
+        payload = {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": "{}"}}
+        assert _run_hook(payload, monkeypatch) == expected
+
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            # 保護の無効化ではなく、全ツール呼び出しでの任意コード実行になる。
+            ('{"env": {"PLE4_PYTHON": "/tmp/evil"}}', 2),
+            ('{"hooks": {"PreToolUse": []}}', 2),
+            ('{"disabledPlugins": ["ple4"]}', 2),
+            ('{"enabledPlugins": []}', 2),
+            # **消してはいけない陰性対照**: `env` キー全般を条件にすると
+            # `update-config` skill の中心的な仕事（`DEBUG=true`）と
+            # `.vscode/settings.json` の `terminal.integrated.env.*` を巻き込む。
+            ('{"env": {"DEBUG": "true"}}', 0),
+            ('{"permissions": {"allow": ["Bash(npm:*)"]}}', 0),
+            ('{"terminal.integrated.env.osx": {"FOO": "1"}}', 0),
+        ],
+    )
+    def test_host_settings_block_only_guard_disabling_keys(
+        self, content: str, expected: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ホスト設定は保護を外せるキーのときだけ deny すること。"""
+        payload = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/repo/.claude/settings.json", "content": content},
+        }
+        assert _run_hook(payload, monkeypatch) == expected

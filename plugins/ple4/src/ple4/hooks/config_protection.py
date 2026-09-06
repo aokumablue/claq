@@ -101,7 +101,16 @@ PROTECTED_FILES = frozenset({
 # ``core.hooksPath`` の差し替えと ``--no-verify`` を塞いでいるが、フック
 # スクリプトを直接書き換えれば同じ結果（検査が走らない状態）になる。
 # 片側だけ塞ぐと、塞いだ経路の存在が誤った安心になる。
-_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"),)
+# ``hooks/hooks.json`` はこのプラグイン自身の PreToolUse ガード 4 種の登録元で、
+# 1 回の Edit で全部を無効化できる。lint 設定を守って**その lint 検査を登録して
+# いるファイル**を放置するのは、`.git/hooks` を保護対象に加えた理由（「片側だけ
+# 塞ぐと、塞いだ経路の存在が誤った安心になる」）がそのまま当てはまる。
+#
+# basename ``hooks.json`` では判定しない。consumer 側の ``.claude/hooks.json``
+# は `/harness --apply` が正当に書き込む先で、basename 一致だと巻き込む。
+# パス連続一致なら ``plugins/ple4/hooks/hooks.json`` とプラグインキャッシュ配下
+# （``~/.claude/plugins/cache/.../hooks/hooks.json``）だけに当たる。
+_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), ("hooks", "hooks.json"))
 
 # 大小無視で比較するための畳み済み複製。`.GIT/HOOKS` は APFS / NTFS では
 # `.git/hooks` そのものを指すため、素の比較では保護 path が素通りする（C-2）。
@@ -119,6 +128,17 @@ CONDITIONALLY_PROTECTED_FILES = frozenset({
     "setup.cfg",
     "tox.ini",
     "package.json",
+    # ホスト設定。保護フックを止める手段を 3 つ持つ（`env` の `PLE4_PYTHON`、
+    # `hooks` の差し替え、プラグインの無効化）。とくに `PLE4_PYTHON` は
+    # `runtime/ple4-hook` が exec するため、保護の無効化ではなく**全ツール
+    # 呼び出しでの任意コード実行**になる。
+    #
+    # 全面保護にはしない。`update-config` skill の中心的な仕事は `env` への
+    # `DEBUG=true` や `permissions` の追加であり、`.vscode/settings.json` も
+    # 同じ basename で `terminal.integrated.env.*` を持つ。`env` キー全般を
+    # 条件にすると正当作業を壊すだけで守れるものが増えない。
+    "settings.json",
+    "settings.local.json",
 })
 
 # 上 2 集合の大小無視の照合用複製。判定は必ずこちらを使い、生の集合は「保護
@@ -159,6 +179,12 @@ _LINT_KEY_PATTERN = re.compile(
     r"(?m)^[ \t]*(" + "|".join(re.escape(key) for key in _LINT_KEYS) + r")[ \t]*="
 )
 
+# ホスト設定（settings.json / settings.local.json）で保護を外せるキー。
+# `env` 全般ではなく `PLE4_PYTHON` の出現そのものを見る（上の理由）。
+# `hooks` は PreToolUse ガードの差し替え、`enabledPlugins` / `disabledPlugins` は
+# プラグインごとの無効化に対応する。
+_SETTINGS_GUARD_KEYS = ("PLE4_PYTHON", '"hooks"', '"enabledPlugins"', '"disabledPlugins"')
+
 # package.json は TOML/INI ではないため専用のキー照合にする。
 _PACKAGE_JSON_LINT_KEYS = ("eslintConfig", "prettier")
 
@@ -173,7 +199,7 @@ _TOX_COMMAND_KEY_PATTERN = re.compile(
     r"(?m)^[ \t]*(" + "|".join(re.escape(key) for key in _TOX_COMMAND_KEYS) + r")[ \t]*="
 )
 
-# `_text_has_lint_signal` が 1 回の判定で走査するテキストの上限バイト数。
+# `_text_has_protected_signal` が 1 回の判定で走査するテキストの上限バイト数。
 #
 # 上のパターンを線形化した後も、判定に投入されるテキスト長そのものは agent 側が
 # `MAX_STDIN_BYTES`（1MiB）まで自由に膨らませられる。将来パターンを足したときに
@@ -273,8 +299,8 @@ def blocked_message_for_file(file_name: str) -> str:
     return (
         f"BLOCKED: Modifying {file_name} is not allowed. "
         "Fix the source code to satisfy linter/formatter rules instead of "
-        "weakening the config. If this is a legitimate config change, "
-        "disable the config-protection hook temporarily."
+        "weakening the config. If this change is genuinely necessary, "
+        "ask the user to make it — do not disable the protection hook yourself."
     )
 
 
@@ -378,7 +404,7 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
     ない）でも、ディスク上の現在の内容から実際の所属セクションを解決する
     （二段構えの主判定。R-07）。Write の content は新規内容そのものが
     ディスクにまだ無いため、多くの場合ここでは判定不能（None）になり、
-    副判定（`_text_has_lint_signal`）が本命として効く。
+    副判定（`_text_has_protected_signal`）が本命として効く。
 
     Args:
         file_path: 対象ファイルパス。
@@ -416,8 +442,12 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
     return any(header.startswith(candidate) for candidate in _LINT_SECTION_HEADERS)
 
 
-def _text_has_lint_signal(text: str, file_name: str) -> bool:
-    """テキストに lint/format/coverage 関連のセクション見出しやキーが含まれるか判定する（副判定）。
+def _text_has_protected_signal(text: str, file_name: str) -> bool:
+    """テキストに保護対象を弱めうる兆候が含まれるか判定する（副判定）。
+
+    ホスト設定（settings.json / settings.local.json）は保護フックを止める
+    キー（`PLE4_PYTHON` / `hooks` / `enabledPlugins` / `disabledPlugins`）を、
+    それ以外は lint/format/coverage の設定を弱めうる兆候を見る。
 
     package.json は TOML/INI ではないため専用のキー照合を使う。tox.ini は
     `commands`/`commands_pre`/`commands_post` の実行コマンド変更を専用照合で
@@ -446,6 +476,8 @@ def _text_has_lint_signal(text: str, file_name: str) -> bool:
     # ``Package.json`` が条件付き保護には入るのに package.json 専用のキー照合
     # （`eslintConfig`）へ落ちず共通照合で素通りする、という半開きが残る（C-2）。
     folded_name = normalize_protected_name(file_name)
+    if folded_name in ("settings.json", "settings.local.json"):
+        return any(key in text for key in _SETTINGS_GUARD_KEYS)
     if folded_name == "package.json":
         return any(key in text for key in _PACKAGE_JSON_LINT_KEYS)
     if folded_name == "tox.ini" and _TOX_COMMAND_KEY_PATTERN.search(text):
@@ -468,10 +500,12 @@ def _conditional_blocked_message(file_name: str) -> str:
         例外は発生しません。
     """
     return (
-        f"BLOCKED: The change to {file_name} appears to touch a lint/format/coverage "
-        "configuration section or key. Fix the source code to satisfy linter/formatter "
-        "rules instead of weakening the config. If this is a legitimate config change, "
-        "disable the config-protection hook temporarily."
+        f"BLOCKED: The change to {file_name} appears to touch a protected setting "
+        "(a lint/format/coverage section or key, or a host setting that can disable the "
+        "protection hooks: PLE4_PYTHON, hooks, enabledPlugins/disabledPlugins). "
+        "Fix the source code to satisfy the rules instead of weakening the config. "
+        "If this change is genuinely necessary, ask the user to make it — "
+        "do not disable the protection hook yourself."
     )
 
 
@@ -523,7 +557,7 @@ def _conditional_block_reason(tool_name: str, container: Any, file_path: str, fi
         if _resolve_lint_section_from_disk(file_path, snippet) is True:
             return _conditional_blocked_message(file_name)
 
-    if _text_has_lint_signal("\n".join(snippets), file_name):
+    if _text_has_protected_signal("\n".join(snippets), file_name):
         return _conditional_blocked_message(file_name)
     return None
 
