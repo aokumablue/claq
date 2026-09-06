@@ -98,7 +98,7 @@ circuit-breaker シグネチャの定義は本ファイルが単一情報源。l
 
 ### 保存（新規）
 1. 上記フォーマットでファイル作成
-2. `slug` はタスク名をケバブケース変換（例: `checkpoint-2026-05-09-article-loop.md`）
+2. `slug` はタスク名をケバブケース変換（例: `checkpoint-<YYYY-MM-DD>-article-loop.md`）
 3. `completed: false` で保存
 
 ### 更新（各反復後）

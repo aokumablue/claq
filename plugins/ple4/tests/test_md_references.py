@@ -23,7 +23,6 @@ _NON_REPO_MD_REFS = {
     "README.md": "利用者側リポジトリのファイル",
     "docs/adr/README.md": "利用者側リポジトリのファイル",
     "user_notes.md": "eval の run 成果物（実行時に生成）",
-    "checkpoint-2026-05-09-article-loop.md": "命名例として本文に書かれたファイル名",
 }
 # ple4 リポジトリのルート基準で解決する出典表記。配布物（プラグインディレクトリ）
 # には同梱されないため referrer 相対では解決できないが、リポジトリ側では実在する
@@ -592,3 +591,33 @@ def test_harness_tuner_schema_example_matches_real_max_score() -> None:
     )
 
     assert schema["max_score"] == json.loads(result.stdout)["max_score"]
+
+
+def test_md_max_score_mentions_match_real_audit() -> None:
+    """md が散文へ書き写した `max_score` が実装の実測値と一致すること。
+
+    `harness-tuner.md` の JSON 例だけを照合していた頃、`commands/harness.md` の
+    「`max_score`（`repo` では58）」は素通りしていた。`max_score` は check の
+    points 合計なので check を足すたびに変わり、ずれると満点尺度が黙って狂う。
+    ADR-0011 決定 6（定義に書いた検証規則は CI で実測する）の適用。
+    """
+    import json
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-m", "ple4.ci.harness_audit", "repo", "--format", "json", "--root", str(_ROOT)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
+    )
+    real = json.loads(result.stdout)["max_score"]
+    pattern = re.compile(r"`repo` では(\d+)")
+    stale = [
+        f"{md_file.relative_to(_ROOT)}: {value}"
+        for md_file in _iter_md_files()
+        for value in pattern.findall(md_file.read_text(encoding="utf-8"))
+        if int(value) != real
+    ]
+    assert stale == [], f"実装の max_score={real} と食い違う満点表記:\n" + "\n".join(sorted(stale))

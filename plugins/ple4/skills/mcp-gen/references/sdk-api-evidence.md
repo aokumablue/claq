@@ -1,6 +1,6 @@
 # Python SDK `mcp` の実 API と実測ワイヤ形式
 
-採取条件: `mcp==2.1.1`（PyPI 最新）/ Python 3.14 / stdio トランスポート。
+採取条件: `mcp==2.1.1` / Python 3.14 / stdio トランスポート（2026-08-31 時点で PyPI 最新）。
 以下は**ドキュメントの引用ではなく実際に走らせて得た出力**である。
 SDK を更新したら再採取して差分を見ること。
 
@@ -349,18 +349,18 @@ stdio で生 JSON-RPC を流すとき、**リクエストを書いた直後に s
   （`migration/` `whats-new/` `deprecated/` `handlers/multi-round-trip/`
   `handlers/elicitation/` `handlers/logging/` `servers/handling-errors/`
   `run/deploy/` が特に効く）
-- SDK リポジトリ（24k★）: <https://github.com/modelcontextprotocol/python-sdk>
+- SDK リポジトリ: <https://github.com/modelcontextprotocol/python-sdk>
   2.x で書かれた実例は `examples/mcpserver/` と `examples/servers/`。
 
 ### 高スターの MCP サーバを写経してはいけない
 
 実測（2026-08-31 時点）:
 
-| リポジトリ | ★ | 実装状況 |
-|---|---|---|
-| `modelcontextprotocol/servers`（公式リファレンス） | 約 90,000 | Python 実装（`src/git` `src/fetch` `src/time`）は **`mcp>=1.29.0,<2` 固定**。2026-07-28 ではない |
-| `github/github-mcp-server` | 約 32,600 | Go |
-| `modelcontextprotocol/python-sdk` | 約 24,200 | **2.x の実例はここの `examples/` だけ** |
+| リポジトリ | 実装状況 |
+|---|---|
+| `modelcontextprotocol/servers`（公式リファレンス。スター数は SDK リポジトリより桁違いに多い） | Python 実装（`src/git` `src/fetch` `src/time`）は **`mcp>=1.29.0,<2` 固定**。2026-07-28 ではない |
+| `github/github-mcp-server` | Go |
+| `modelcontextprotocol/python-sdk` | **2.x の実例はここの `examples/` だけ** |
 
 星の多さは「最新仕様である」ことを意味しない。むしろ実績のあるサーバほど
 1.x に固定されており、写経すると旧仕様が入る。2.x の実例として信頼できるのは

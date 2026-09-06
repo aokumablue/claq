@@ -1,6 +1,6 @@
 # JSONスキーマ
 
-skill-masterが使うJSONスキーマ定義。
+`skill-make` が使う JSON スキーマ定義。
 
 ---
 
@@ -215,7 +215,7 @@ Benchmarkモードの出力。`benchmarks/<timestamp>/benchmark.json` に置く�
   "metadata": {
     "skill_name": "pdf",
     "skill_path": "/path/to/pdf",
-    "executor_model": "claude-sonnet-5",
+    "executor_model": "executor-model",
     "analyzer_model": "most-capable-model",
     "timestamp": "2026-01-15T10:30:00Z",
     "evals_run": [1, 2, 3],
