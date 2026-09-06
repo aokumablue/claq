@@ -301,6 +301,50 @@ def _atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
+def _write_text_if_changed(path: Path, text: str) -> bool:
+    """内容が既に一致していれば書き込みを丸ごと省く（M-3）。
+
+    ``env.sh`` はリポジトリ内テンプレートの verbatim コピーで、同じプラグイン
+    バージョンが動いている間は内容が変わらない。それでも `_atomic_write_text`
+    を毎回呼ぶと、mkstemp + write + **fsync** + rename が走る。この書き込みは
+    PreToolUse フック（`launcher` 経由）が**全ツール呼び出しで**行うため、
+    ネットワーク HOME や暗号化 FS では 1 ツール呼び出しあたり回避可能な fsync
+    1 本がそのまま体感の遅延になる。
+
+    ``roots/<pid>`` の祖先ポインタは同じ扱いにしない。GC が mtime で鮮度を
+    判定する（`_gc_one`）ため、内容が同じでも書き直して mtime を進める必要が
+    ある。省けるのは mtime に意味の無い ``env.sh`` だけである。
+
+    比較はバイト列で行う。``read_text`` は非 UTF-8 の既存ファイルで
+    ``UnicodeDecodeError``（``ValueError`` 系）を送出し、これは
+    `write_env_pointer` の ``OSError`` ハンドラを素通りしてフックを落とす。
+
+    symlink は内容が一致していても書き直す。``os.replace`` は symlink を通常
+    ファイルへ置き換えるので、現行の無条件書き込みには「``env.sh`` が別の場所へ
+    向けられていたら実体へ戻す」という自己修復が付随している。内容一致だけで
+    省くとその性質が静かに失われる。
+
+    Args:
+        path: 書き込み先。
+        text: 書き込む内容。
+
+    Returns:
+        実際に書き込んだなら True、内容一致で省いたなら False。
+
+    Raises:
+        OSError: 書き込みに失敗した場合（読み取り失敗は書き込みへ倒すので
+            送出しない）。
+    """
+    try:
+        if not path.is_symlink() and path.read_bytes() == text.encode("utf-8"):
+            return False
+    except OSError:
+        # 未作成・読み取り不能。いずれも「一致していない」として書きに行く。
+        pass
+    _atomic_write_text(path, text)
+    return True
+
+
 def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
     """``os.getppid()`` から始まる祖先チェーンと、各 PID の起動時刻を返す。
 
@@ -412,6 +456,10 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
     ことで、途中で GC が失敗しても本来の目的（root の記録）は既に
     達成済みになる。
 
+    ``env.sh`` は内容が既存と一致していれば書き込みごと省く
+    （`_write_text_if_changed`。M-3）。祖先ポインタ側は GC が mtime を
+    見るため常に書く。
+
     Args:
         plugin_root: このプラグインのソースルート。
 
@@ -443,7 +491,7 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
 
     template_path = plugin_root / _ENV_TEMPLATE_RELATIVE
     template_text = template_path.read_text(encoding="utf-8")
-    _atomic_write_text(ple4_dir / _ENV_FILENAME, template_text)
+    _write_text_if_changed(ple4_dir / _ENV_FILENAME, template_text)
 
     _maybe_run_gc(ple4_dir, roots_dir, keep_pids=written_pids)
 

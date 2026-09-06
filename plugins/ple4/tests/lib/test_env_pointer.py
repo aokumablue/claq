@@ -499,6 +499,115 @@ class TestAtomicWrite:
         mod.write_env_pointer(plugin_root)
 
 
+class TestWriteTextIfChanged:
+    """_write_text_if_changed（M-3）の分岐と、それが env.sh 経路へ効くことのテスト。"""
+
+    def test_missing_file_is_written(self, tmp_path: Path) -> None:
+        """未作成なら書く。"""
+        target = tmp_path / "env.sh"
+        assert mod._write_text_if_changed(target, "body\n") is True
+        assert target.read_text(encoding="utf-8") == "body\n"
+
+    def test_identical_content_skips_the_write(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """内容が一致していれば `_atomic_write_text` を呼ばない。
+
+        「書いた結果が同じ」ではなく「書きに行っていない」ことを見る。前者は
+        無条件書き込みでも成立するため、fsync を省いた証拠にならない。
+        """
+        target = tmp_path / "env.sh"
+        target.write_text("body\n", encoding="utf-8")
+
+        def _fail(_path: Path, _text: str) -> None:
+            """呼ばれてはいけない書き込み。"""
+            raise AssertionError("同一内容で書き込みが走った")
+
+        monkeypatch.setattr(mod, "_atomic_write_text", _fail)
+        assert mod._write_text_if_changed(target, "body\n") is False
+
+    def test_different_content_is_rewritten(self, tmp_path: Path) -> None:
+        """内容が違えば書き直す。"""
+        target = tmp_path / "env.sh"
+        target.write_text("old\n", encoding="utf-8")
+        assert mod._write_text_if_changed(target, "new\n") is True
+        assert target.read_text(encoding="utf-8") == "new\n"
+
+    def test_non_utf8_existing_file_is_rewritten(self, tmp_path: Path) -> None:
+        """非 UTF-8 の既存ファイルでも例外を出さず書き直す。
+
+        比較を `read_text` で行うと `UnicodeDecodeError`（`ValueError` 系）に
+        なり、`write_env_pointer` の `OSError` ハンドラを素通りしてフックごと
+        落ちる。バイト比較であることをここで固定する。
+        """
+        target = tmp_path / "env.sh"
+        target.write_bytes(b"\xff\xfe not utf-8\n")
+        assert mod._write_text_if_changed(target, "body\n") is True
+        assert target.read_text(encoding="utf-8") == "body\n"
+
+    def test_unreadable_file_falls_through_to_write(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """読み取りに失敗したら「一致していない」として書きに行く。"""
+        target = tmp_path / "env.sh"
+        target.write_text("body\n", encoding="utf-8")
+
+        def _boom(_self: Path) -> bytes:
+            """読み取り不能を模す。"""
+            raise OSError("unreadable")
+
+        monkeypatch.setattr(Path, "read_bytes", _boom)
+        assert mod._write_text_if_changed(target, "body\n") is True
+
+    def test_symlink_with_identical_content_is_replaced(self, tmp_path: Path) -> None:
+        """内容が一致していても symlink なら実体ファイルへ戻す。
+
+        `os.replace` による無条件書き込みには「`env.sh` が別の場所へ向けられて
+        いたら実体へ戻す」自己修復が付随していた。内容一致だけで省くとこの性質が
+        静かに失われるため、symlink は比較の前に除外する。
+        """
+        real = tmp_path / "elsewhere.sh"
+        real.write_text("body\n", encoding="utf-8")
+        target = tmp_path / "env.sh"
+        target.symlink_to(real)
+
+        assert mod._write_text_if_changed(target, "body\n") is True
+        assert not target.is_symlink()
+        assert target.read_text(encoding="utf-8") == "body\n"
+
+    def test_second_write_env_pointer_call_does_not_touch_env_sh(
+        self, tmp_path: Path, _isolate_home: Path
+    ) -> None:
+        """2 回目以降の `write_env_pointer` は env.sh を書き直さない（M-3 の受領証）。
+
+        PreToolUse は全ツール呼び出しで発火するため、内容が変わらない env.sh の
+        書き直しは 1 呼び出しあたり回避可能な fsync 1 本になる。inode と mtime が
+        据え置きであることで「書いていない」ことを示す。祖先ポインタ側は GC が
+        mtime を見るので、この省略の対象外であることも同時に固定する。
+        """
+        plugin_root = _make_plugin_root(tmp_path / "plugin")
+        mod.write_env_pointer(plugin_root)
+        env_sh = _isolate_home / BASE_DIR_NAME / mod._ENV_FILENAME
+        before = env_sh.stat()
+
+        os.utime(env_sh, (before.st_atime - 100, before.st_mtime - 100))
+        stale = env_sh.stat()
+        mod.write_env_pointer(plugin_root)
+
+        after = env_sh.stat()
+        assert (after.st_ino, after.st_mtime) == (stale.st_ino, stale.st_mtime)
+        assert env_sh.read_text(encoding="utf-8") == _ENV_TEMPLATE.read_text(encoding="utf-8")
+
+    def test_changed_template_is_written_on_the_next_call(
+        self, tmp_path: Path, _isolate_home: Path
+    ) -> None:
+        """テンプレートが変われば（プラグイン更新）次の呼び出しで反映されること。"""
+        plugin_root = _make_plugin_root(tmp_path / "plugin")
+        mod.write_env_pointer(plugin_root)
+        env_sh = _isolate_home / BASE_DIR_NAME / mod._ENV_FILENAME
+
+        (plugin_root / "runtime" / "env-template.sh").write_text("# v2\n", encoding="utf-8")
+        mod.write_env_pointer(plugin_root)
+
+        assert env_sh.read_text(encoding="utf-8") == "# v2\n"
+
+
 class TestResolveAncestorChain:
     """_resolve_ancestor_chain の祖先探索ロジックのテスト。"""
 
