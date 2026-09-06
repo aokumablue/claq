@@ -34,7 +34,7 @@ user-invocable: false
 |---|---|---|
 | `pitfall` | 踏んだ罠とその回避法 | 「pytest をパイプすると失敗が隠れる → `set -o pipefail` が要る」 |
 | `fact` | 調べて分かったプロジェクト固有の事実 | 「開発用 venv はリポジトリ直下 `.venv` のみ。ランタイムは venv を作らない」 |
-| `howto` | 毎回同じ手順を踏む作業 | 「開発中の CLI 実行は `PYTHONPATH=plugins/ple4/src` を付ける」 |
+| `howto` | 毎回同じ手順を踏む作業 | 「hook の再現は stdin に JSON を流す」 |
 | `convention` | 守るべき規約 | 「テーブル定義変更は `CREATE TABLE` を直接修正する」 |
 | `decision` | 選択とその理由（採用しなかった案を含む） | 「FTS5 を使わず Python 側でスコアリングする」 |
 | `preference` | 好みの表明（正解が 1 つに決まらないもの） | 「要約は結論先行で書く」 |
