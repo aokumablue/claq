@@ -43,7 +43,7 @@ grillme 起動禁止。要件は呼び出し元コマンドで確定済みであ
    | 性能改善 | `ple4:code-refiner`（依頼文へ `mode: perf` を明示） |
 
    生成直後に自己検証必須: 検出済みテストコマンド + linter（本リポジトリなら `python3 -m pytest -q` + `ruff check plugins/ple4`（src と tests の両方））を実行し、red なら evaluate に進む前に同一 generate 内で修正。自己検証で報告する PASS/FAIL は本セッションで実際に実行したツール出力のみを証跡とし、未実行の項目は未検証と明示する。Edit/Write が成功していれば確認目的の再 Read は行わない（失敗時はツールがエラーを返す）
-4. **evaluate（条件付き並列）**: `ple4:reviewer` 必須。認証/ユーザー入力/シークレット/API エンドポイント/支払いに触れる変更のみ `ple4:security-auditor` を並列追加
+4. **evaluate（条件付き並列）**: `ple4:reviewer` 必須。認証/ユーザー入力/シークレット/API エンドポイント/支払い、および**外部由来の文字列をプロンプト・エージェントへ渡す実装**（信頼境界・サブエージェント権限・恒久メモリへの書込み）に触れる変更のみ `ple4:security-auditor` を並列追加
    - reviewer 起動時は `verify_mode: reexecute` + 失敗テストのシグネチャ（反復履歴 tests= 記録と同一）+ **baseline step で自ら検出・実行したテストコマンド**を `test_cmd` として渡し、baseline 由来である旨を明示する。あわせて **run 開始時点（反復1 の baseline step 実行前）のコミット SHA を `baseline_sha` として渡す** — 反復ごとに green コミットするため、reviewer が `HEAD` を信頼アンカーにすると反復2 以降は実装者の変更を含んでしまう（generate の自己検証コマンドは渡さない。`approved_plan` から変更予定テストファイルを特定できる場合はその一覧も渡す）。generate の自己申告（「テスト通過」等の要約）は渡さない — diff とテスト結果は reviewer が一次取得（反復2 の evaluate も同様）
    - スコープガード: `approved_plan` に変更ファイル一覧を特定できる場合のみ、編集ファイルが一覧内かを照合し、逸脱は blocker 扱い（一覧のない呼び出し元では非発動）。ただしテスト基盤ファイル（テストランナー・カバレッジの設定や共有フィクスチャ。例: Python なら任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `jest.config.*`/`vitest.config.*`・`package.json` の `scripts`、共通で `Makefile` の test ターゲット・CI 設定等）の変更は一覧の有無に関わらず照合し、一覧に明示されていなければ blocker 扱い
 5. **収束判定**: change 由来 red ゼロ（`red_baseline` 記載シグネチャを除く red がゼロ）+ lint green かつ evaluate blocker（CRITICAL/HIGH）ゼロ かつ `converge_extra` 充足 → 収束

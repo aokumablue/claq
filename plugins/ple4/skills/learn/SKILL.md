@@ -86,6 +86,8 @@ user-invocable: false
 
 ## 記録する
 
+**登録前に、`title` / `body` / `key` からシークレット様文字列（`sk-` `ghp_` `AKIA` 接頭辞・JWT 形式・長い Base64 等）を `***REDACTED***` にマスクする**（`../checkpoint/SKILL.md` と同じ規則）。知識カードは昇格後 SessionStart で毎回注入されるため、混入するとコードを直した後も残り続ける。危険パターンを `pitfall` として残すときは、実際の値ではなく**形と回避条件**を書く。
+
 ```bash
 . "$HOME/.ple4/env.sh" || exit 127
 ple4_mem_learn --key pytest-needs-pipefail --kind pitfall --scope repo \

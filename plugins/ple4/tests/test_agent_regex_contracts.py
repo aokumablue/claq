@@ -90,6 +90,9 @@ def test_reviewer_test_cmd_shape_regex(command: str, accepted: bool) -> None:
         ("--deselect=tests/x.py::test_fail", False),
         ("-pevil_module", False),
         ("-k not_this", False),
+        # 内部空白の後の `-`（先頭だけを見ると素通りする形）
+        ("tests/x.py::test_a -pevil_module", False),
+        ("tests/x.py::test_a --deselect=tests/y.py::test_b", False),
         # シェルメタ文字
         ("tests/x.py; rm -rf /", False),
         ("tests/x.py$(evil)", False),
@@ -97,7 +100,12 @@ def test_reviewer_test_cmd_shape_regex(command: str, accepted: bool) -> None:
     ],
 )
 def test_reviewer_signature_regex(signature: str, accepted: bool) -> None:
-    """テストシグネチャ検証が、先頭 `-` のオプション注入を拒むこと。"""
+    """テストシグネチャ検証が、`-` 始まりトークンのオプション注入を拒むこと。
+
+    先頭位置だけでなく内部空白の後も拒否する。旧規則は文字クラスへ空白を含めて
+    いたため `tests/x.py::test_a -pevil_module` が通過し、定義本文の散文が主張する
+    不変条件が成立していなかった。
+    """
     pattern = _find_regex("reviewer", r"[\w./][")
     assert bool(pattern.fullmatch(signature)) is accepted
 
