@@ -32,8 +32,24 @@ fi
 # is A, but it calls itself B"). ADR-0008 claims a verified root, and an ambient
 # override would contradict that claim. Using the environment to decide *which*
 # root to source is fine; overriding the answer after the fact is not.
+#
+# The `cd` is checked. It fails when the directory this file was sourced from no
+# longer exists -- the normal case is a plugin upgrade replacing the versioned
+# cache directory while a shell that already sourced env.sh keeps running. The
+# old body printed an empty line and returned 0 there, so `ple4_run` went on to
+# execute "/runtime/ple4-hook" and every later call failed with an error that
+# named neither the stale root nor the upgrade. Report the actual cause once and
+# return non-zero (127: the resolved command is not there).
 ple4_plugin_root() {
-  printf '%s\n' "$(cd "${_PLE4_HELPERS_DIR}/.." && pwd)"
+  local plugin_root
+  # `|| plugin_root=""` keeps the failure out of `set -e`'s hands so the message
+  # below is what the caller sees, instead of a silent exit at this line.
+  plugin_root="$(cd "${_PLE4_HELPERS_DIR}/.." 2>/dev/null && pwd)" || plugin_root=""
+  if [ -z "${plugin_root}" ]; then
+    printf '%s\n' "ple4: stale plugin root: ${_PLE4_HELPERS_DIR} is gone (plugin upgraded?). Start a new shell, or re-source \$HOME/.ple4/env.sh." >&2
+    return 127
+  fi
+  printf '%s\n' "${plugin_root}"
 }
 
 # Run a ple4 module or script through the hook wrapper.
@@ -43,9 +59,13 @@ ple4_plugin_root() {
 # broke every hook on Windows (a Microsoft Store alias owning the name
 # `python3`), and would make the helpers disagree with hooks.json about which
 # interpreter ple4 runs on.
+# Root 解決の失敗はそのまま伝播させる（`ple4_plugin_root` が理由を stderr へ
+# 出し済みなので、ここで重ねて出さない）。`local` と代入を分けているのは、
+# `local x="$(...)"` にすると `local` の終了ステータスが代入側を覆い隠して
+# `||` が発火しなくなるため。
 ple4_run() {
   local plugin_root
-  plugin_root="$(ple4_plugin_root)"
+  plugin_root="$(ple4_plugin_root)" || return 127
   "${plugin_root}/runtime/ple4-hook" "$@"
 }
 

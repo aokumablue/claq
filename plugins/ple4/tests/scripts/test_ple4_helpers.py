@@ -168,6 +168,88 @@ def test_helpers_load_under_posix_dash(tmp_path: Path) -> None:
     assert result.stdout.strip() == str(handed_over)
 
 
+_STALE_ROOT_SHELLS = ["bash", *(["dash"] if shutil.which("dash") else []), *(["zsh"] if _ZSH_AVAILABLE else [])]
+
+
+def _stale_root_script(root: Path, call: str) -> str:
+    """存在しない root を handover して `call` を 1 回呼ぶスクリプトを返す。
+
+    プラグイン更新でバージョン付きキャッシュディレクトリが差し替えられた後、
+    既に env.sh を source 済みのシェルが残っている状況を再現する。
+
+    Args:
+        root: 実在しない plugin root。
+        call: source 後に呼ぶコマンド行。
+
+    Returns:
+        シェルへ渡すスクリプト文字列。
+    """
+    return "\n".join(
+        [
+            "set -eu",
+            f'_PLE4_SOURCED_ROOT="{root}"',
+            f'. "{_HELPER}"',
+            call,
+            "printf 'UNREACHABLE\\n'",
+        ]
+    )
+
+
+@pytest.mark.parametrize("shell", _STALE_ROOT_SHELLS)
+def test_ple4_plugin_root_fails_loudly_when_the_sourced_root_is_gone(shell: str, tmp_path: Path) -> None:
+    """stale root では空文字を返さず、理由を stderr へ出して非ゼロで返すこと（M-5）。
+
+    旧実装は `cd` の失敗を検査せず空文字を返し、終了ステータスも 0 だった。
+    その結果 `ple4_run` が ``"/runtime/ple4-hook"``（root が空のまま連結された
+    絶対パス）を実行しようとし、プラグイン更新後のシェルでは以後すべての
+    `ple4_run` が原因と無関係なエラーになっていた。
+
+    Args:
+        shell: 実行するシェル名。
+        tmp_path: pytest の一時ディレクトリ。
+    """
+    gone = tmp_path / "gone"
+    result = subprocess.run(
+        [shell, "-c", _stale_root_script(gone, "ple4_plugin_root")],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert result.stdout.strip() == ""
+    assert str(gone / "runtime") in result.stderr
+    assert "UNREACHABLE" not in result.stdout
+
+
+@pytest.mark.parametrize("shell", _STALE_ROOT_SHELLS)
+def test_ple4_run_does_not_execute_a_root_relative_path_when_root_is_gone(
+    shell: str, tmp_path: Path
+) -> None:
+    """stale root では `ple4_run` が root 相対パスの実行へ進まないこと（M-5）。
+
+    「解決できなかった」ことを stale root の名前で伝えるのが目的なので、
+    ``/runtime/ple4-hook`` という誤ったパスに言及するエラーが出ていないことを
+    合わせて固定する。これが出るなら空文字の連結が復活している。
+
+    Args:
+        shell: 実行するシェル名。
+        tmp_path: pytest の一時ディレクトリ。
+    """
+    gone = tmp_path / "gone"
+    result = subprocess.run(
+        [shell, "-c", _stale_root_script(gone, "ple4_run ple4.mem.cli list")],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert "/runtime/ple4-hook" not in result.stderr
+    assert str(gone / "runtime") in result.stderr
+    assert "UNREACHABLE" not in result.stdout
+
+
 def _mem_learn_script(title: str, body: str) -> str:
     """helper を source して `ple4_mem_learn` を 1 回呼ぶスクリプトを組み立てる。
 
