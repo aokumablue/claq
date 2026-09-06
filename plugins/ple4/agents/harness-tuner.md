@@ -64,7 +64,6 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 - 脆弱シェルクォーティング導入禁止
 - エディタ間互換性維持
 - 予測値は `estimated` と明記し **measured** と混同しない。実測は再実行した baseline/after JSON がある場合のみ
-- OpenCode 系指摘は、その repo / platform が `.opencode/commands/*` を実際に管理対象としている場合だけ修正候補にする
 - メモリ永続化系指摘は、現在の scope で実際に使われている hooks / modules に照合し、旧パス名だけを根拠に欠落扱いしない
 
 ## 出力

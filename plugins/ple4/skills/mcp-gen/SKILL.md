@@ -42,16 +42,16 @@ user-invocable: true
 
 テンプレートは**スキル起動時に提示されるベースディレクトリ**の `assets/template/`
 にある。提示が無いときだけ `find "$HOME/.claude/plugins/cache" -maxdepth 7 -type d
--path '*/mcp-gen/assets/template'` で探す。**`/Users` や `$HOME` 全体を起点にしない**
+-path '*/mcp-gen/assets/template'`（このフォールバックは Claude Code のキャッシュ配置に固有。他ホストではベースディレクトリの提示が必須） で探す。**`/Users` や `$HOME` 全体を起点にしない**
 （返ってこない）。
 
 複製先は**完全なリテラル絶対パス**で書く（`$VAR` を含めると保護フックに止められる）。
 
 ```bash
 mkdir -p /abs/path/to/dest
-cp "$SKILL_DIR"/assets/template/server.py /abs/path/to/dest/server.py
-cp "$SKILL_DIR"/assets/template/smoke_check.py /abs/path/to/dest/smoke_check.py
-cp "$SKILL_DIR"/assets/template/README.md /abs/path/to/dest/README.md
+cp /abs/skill/mcp-gen/assets/template/server.py /abs/path/to/dest/server.py
+cp /abs/skill/mcp-gen/assets/template/smoke_check.py /abs/path/to/dest/smoke_check.py
+cp /abs/skill/mcp-gen/assets/template/README.md /abs/path/to/dest/README.md
 ```
 
 `pyproject.toml` は `pyproject.toml.template` の中身を読んで **Write ツールで作る**。

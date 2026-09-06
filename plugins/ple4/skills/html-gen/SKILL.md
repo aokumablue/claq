@@ -44,7 +44,7 @@ user-invocable: true
 
 テンプレートは**スキル起動時に提示されるベースディレクトリ**の `assets/template/`
 にある。提示が無いときだけ `find "$HOME/.claude/plugins/cache" -maxdepth 7 -type d
--path '*/html-gen/assets/template'` で探す。**`/Users` や `$HOME` 全体を起点にしない**。
+-path '*/html-gen/assets/template'`（このフォールバックは Claude Code のキャッシュ配置に固有。他ホストではベースディレクトリの提示が必須） で探す。**`/Users` や `$HOME` 全体を起点にしない**。
 
 複製先は**完全なリテラル絶対パス**で書く（`$VAR` を含めると保護フックに止められる）。
 
