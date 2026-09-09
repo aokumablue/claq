@@ -345,7 +345,12 @@ def test_validate_hooks_main_without_schema_path(tmp_path: Path, capsys: pytest.
     hooks_file = tmp_path / "hooks.json"
     matcher = {"matcher": ".", "hooks": [{"type": "command", "command": "echo hi"}]}
     hooks_file.write_text(
-        json.dumps(dict.fromkeys(validate_hooks.REQUIRED_EVENTS, [matcher])),
+        json.dumps(
+            {
+                "version": validate_hooks.REQUIRED_HOOKS_VERSION,
+                "hooks": dict.fromkeys(validate_hooks.REQUIRED_EVENTS, [matcher]),
+            }
+        ),
         encoding="utf-8",
     )
 

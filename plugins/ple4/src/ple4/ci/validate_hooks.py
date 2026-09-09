@@ -50,24 +50,6 @@ EVENTS_WITHOUT_MATCHER = {"UserPromptSubmit", "Notification", "Stop", "SubagentS
 DEFAULT_HOOKS_FILE = REPO_ROOT / "hooks" / "hooks.json"
 
 
-def _select_hooks_container(data: Any) -> Any:
-    """JS の `data.hooks || data` の挙動を再現する。
-
-    Args:
-        data: パース済みのフック設定（dict 想定）。
-
-    Returns:
-        data が dict で truthy な "hooks" キーを持てばその値、
-        そうでなければ data 自身を返す。
-    """
-    if isinstance(data, dict) and "hooks" in data:
-        hooks_value = data["hooks"]
-        if hooks_value is None or hooks_value is False or hooks_value == "" or hooks_value == 0:
-            return data
-        return hooks_value
-    return data
-
-
 def _validate_hook_type_and_timeout(hook: dict, label: str) -> bool:
     """フックの 'type' と 'timeout' フィールドを検証する。
 
@@ -215,6 +197,14 @@ def validate_hook_entry(hook: Any, label: str) -> bool:
         emit_error(f"{label} では 'async' は command フックでのみサポートされています")
         has_errors = True
 
+    # `powershell` は command フックの Windows 側の別表現であり、http / prompt
+    # フックには実行経路が無い。`async` と同じく明示的に拒否する。ここが無いと
+    # 非 command フックに付いた `powershell` が無診断で捨てられ、Windows だけ
+    # 静かに動かない — 本フィールドが解消した障害と同じ形が 1 階層下に残る。
+    if "powershell" in hook:
+        emit_error(f"{label} では 'powershell' は command フックでのみサポートされています")
+        has_errors = True
+
     if hook_type == "http":
         return _validate_http_hook(hook, label) or has_errors
 
@@ -337,10 +327,9 @@ def validate_hooks(
         emit_error(f"hooks.json の 'version' は {REQUIRED_HOOKS_VERSION} である必要があります")
         return 1
 
-    hooks = _select_hooks_container(data)
-
+    hooks = data.get("hooks")
     if not isinstance(hooks, dict):
-        emit_error("hooks.json はオブジェクトまたは配列である必要があります")
+        emit_error("hooks.json の 'hooks' はイベント名をキーとするオブジェクトである必要があります")
         return 1
 
     has_errors = False

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 
 from ple4.ci.ci_common import REPO_ROOT
-from ple4.ci.validate_hooks import REQUIRED_EVENTS, validate_hooks
+from ple4.ci.validate_hooks import REQUIRED_EVENTS, REQUIRED_HOOKS_VERSION, validate_hooks
 
 REPO_HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.json"
 
@@ -22,7 +23,7 @@ def complete_hooks(**events: object) -> dict:
     filler = [{"matcher": "*", "hooks": [{"type": "command", "command": "true", "timeout": 5}]}]
     filled: dict[str, object] = dict.fromkeys(REQUIRED_EVENTS, filler)
     filled.update(events)
-    return {"hooks": filled}
+    return {"version": REQUIRED_HOOKS_VERSION, "hooks": filled}
 
 
 def write_json(path: Path, value: object) -> None:
@@ -53,7 +54,7 @@ def test_validate_hooks_skips_when_missing_and_optional(tmp_path, capsys):
 def test_validate_hooks_rejects_empty_hooks_object(tmp_path, capsys):
     """`{"hooks": {}}` を「0 個検証しました」と成功扱いしないこと（F-03）。"""
     hooks_file = tmp_path / "hooks.json"
-    write_json(hooks_file, {"hooks": {}})
+    write_json(hooks_file, {"version": REQUIRED_HOOKS_VERSION, "hooks": {}})
 
     assert validate_hooks(hooks_file) == 1
     assert "必須イベントが宣言されていません" in capsys.readouterr().err
@@ -162,3 +163,75 @@ class TestRepoHooksJsonStaticChecks:
             if "timeout" not in hook
         ]
         assert missing_timeout == []
+
+    def test_declares_the_required_top_level_version(self) -> None:
+        """hooks.json が `version: 1` を宣言していること（commit 4066923）。"""
+        document = json.loads(REPO_HOOKS_JSON.read_text(encoding="utf-8"))
+        assert document.get("version") == REQUIRED_HOOKS_VERSION
+
+
+class TestRepoHooksJsonPowerShellParity:
+    """実 hooks.json の POSIX / PowerShell 起動行の対応を検証する（commit 4066923）。
+
+    Windows ホストは `powershell` を優先し、無ければ `command` をそのまま
+    cmd/PowerShell へ渡そうとして落ちる。したがって「`powershell` が在ること」
+    と「POSIX 側と同じモジュール・同じ引数を起動すること」は別々の契約であり、
+    後者が崩れると Windows だけ別のフックが走る（あるいは何も走らない）。
+    """
+
+    _POSIX_LAUNCHER = "${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook"
+    _WINDOWS_LAUNCHER = "${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook.cmd"
+
+    @staticmethod
+    def _command_hooks() -> list[tuple[str, dict]]:
+        """実 hooks.json の全 command フックを (イベント名, フック) で返す。
+
+        Returns:
+            `type` が `command` のフックエントリと、その所属イベント名の組。
+        """
+        document = json.loads(REPO_HOOKS_JSON.read_text(encoding="utf-8"))
+        return [
+            (event, hook)
+            for event, entries in document["hooks"].items()
+            for entry in entries
+            for hook in entry.get("hooks", [])
+            if hook.get("type") == "command"
+        ]
+
+    def test_every_command_hook_declares_a_powershell_sibling(self) -> None:
+        """全 command フックが `powershell` を持つこと。"""
+        missing = [event for event, hook in self._command_hooks() if "powershell" not in hook]
+        assert missing == [], f"powershell が無い command フック: {missing}"
+
+    def test_every_powershell_line_invokes_the_windows_wrapper(self) -> None:
+        """`powershell` が call 演算子で `runtime/ple4-hook.cmd` を起動すること。
+
+        PowerShell では引用符付きパスを裸で書くと文字列リテラルとして評価され、
+        何も実行されずに成功扱いになる。先頭の `&` はその静かな失敗の検知器。
+        """
+        for event, hook in self._command_hooks():
+            parts = shlex.split(hook["powershell"])
+            assert parts[0] == "&", f"{event}: call 演算子がありません: {hook['powershell']!r}"
+            assert parts[1] == self._WINDOWS_LAUNCHER, (
+                f"{event}: wrapper 以外を起動しています: {parts[1]!r}"
+            )
+
+    def test_powershell_and_command_launch_the_same_module_and_args(self) -> None:
+        """`powershell` と `command` が同一のモジュール・引数を起動すること。
+
+        `--bg` のようなランチャーフラグも含めて完全一致を求める。片側にだけ
+        付いていると、SessionEnd の handoff が Windows でだけブロッキングに
+        なるといった OS 依存の挙動差が無診断で入り込む。
+        """
+        for event, hook in self._command_hooks():
+            posix_parts = shlex.split(hook["command"])
+            windows_parts = shlex.split(hook["powershell"])
+            assert posix_parts[0] == self._POSIX_LAUNCHER, event
+            assert windows_parts[2:] == posix_parts[1:], (
+                f"{event}: 引数が一致しません: "
+                f"powershell={windows_parts[2:]} command={posix_parts[1:]}"
+            )
+
+    def test_windows_wrapper_file_exists(self) -> None:
+        """`powershell` が起動する `runtime/ple4-hook.cmd` が実在すること。"""
+        assert (REPO_ROOT / "runtime" / "ple4-hook.cmd").is_file()

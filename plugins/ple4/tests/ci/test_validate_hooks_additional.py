@@ -19,14 +19,7 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2), encoding="utf-8")
 
 
-def test_select_hooks_container_and_validate_hook_entry_errors(capsys: pytest.CaptureFixture[str]) -> None:
-    assert validate_hooks._select_hooks_container({"hooks": []}) == []
-    original = {"hooks": None, "other": 1}
-    assert validate_hooks._select_hooks_container(original) is original
-    assert validate_hooks._select_hooks_container([]) == []
-    assert validate_hooks._select_hooks_container({"hooks": False}) == {"hooks": False}
-    assert validate_hooks._select_hooks_container({"hooks": 0}) == {"hooks": 0}
-
+def test_validate_hook_entry_errors(capsys: pytest.CaptureFixture[str]) -> None:
     assert validate_hooks.validate_hook_entry("bad", "label") is True
     stderr = capsys.readouterr().err
     assert "label は 'type' フィールドが不足しているか無効です" in stderr
@@ -74,6 +67,7 @@ def test_validate_hooks_reports_top_level_and_event_errors(tmp_path: Path, capsy
     write_json(
         hooks_file,
         {
+            "version": validate_hooks.REQUIRED_HOOKS_VERSION,
             "hooks": {
                 "PreToolUse": [{"matcher": {"kind": "x"}, "hooks": [{"type": "command", "command": 1}]}],
                 "PermissionRequest": [{"hooks": []}],
@@ -100,11 +94,12 @@ def test_validate_hooks_reports_top_level_and_event_errors(tmp_path: Path, capsy
 
 
 def test_validate_hooks_rejects_top_level_array(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """トップレベルが配列なら version 検査より前に弾かれること。"""
     hooks_file = tmp_path / "hooks.json"
     write_json(hooks_file, [])
 
     assert validate_hooks.validate_hooks(hooks_file) == 1
-    assert "hooks.json はオブジェクトまたは配列である必要があります" in capsys.readouterr().err
+    assert "hooks.json はオブジェクトである必要があります" in capsys.readouterr().err
 
 
 def test_validate_hooks_and_main_success(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -113,7 +108,7 @@ def test_validate_hooks_and_main_success(tmp_path: Path, capsys: pytest.CaptureF
     events: dict[str, object] = dict.fromkeys(validate_hooks.REQUIRED_EVENTS, filler)
     events["UserPromptSubmit"] = [{"hooks": [{"type": "prompt", "prompt": "ok"}]}]
     events["PreToolUse"] = [{"matcher": "tool", "hooks": [{"type": "command", "command": "echo ok"}]}]
-    write_json(hooks_file, {"hooks": events})
+    write_json(hooks_file, {"version": validate_hooks.REQUIRED_HOOKS_VERSION, "hooks": events})
 
     assert validate_hooks.validate_hooks(hooks_file) == 0
     assert "個のフックマッチャーを検証しました" in capsys.readouterr().out
@@ -127,6 +122,7 @@ def test_validate_hooks_reports_invalid_matcher_and_entrypoint(
     write_json(
         hooks_file,
         {
+            "version": validate_hooks.REQUIRED_HOOKS_VERSION,
             "hooks": {
                 "PreToolUse": [
                     {
@@ -144,7 +140,7 @@ def test_validate_hooks_reports_invalid_matcher_and_entrypoint(
     filler = [{"matcher": "*", "hooks": [{"type": "command", "command": "true", "timeout": 5}]}]
     events = dict.fromkeys(validate_hooks.REQUIRED_EVENTS, filler)
     events["UserPromptSubmit"] = [{"hooks": [{"type": "prompt", "prompt": "ok"}]}]
-    write_json(hooks_file, {"hooks": events})
+    write_json(hooks_file, {"version": validate_hooks.REQUIRED_HOOKS_VERSION, "hooks": events})
 
     monkeypatch.setattr(
         sys,
@@ -267,3 +263,157 @@ def test_validate_http_hook_without_optional_fields() -> None:
     from ple4.ci.validate_hooks import _validate_http_hook
 
     assert _validate_http_hook({"url": "https://example.com"}, "test-hook") is False
+
+
+# ---------------------------------------------------------------------------
+# commit 4066923（Windows PowerShell 対応）が導入した契約
+# ---------------------------------------------------------------------------
+
+
+def _complete_events() -> dict[str, object]:
+    """必須イベントを構造的に正しいダミーで埋めた hooks コンテナを返す。
+
+    Returns:
+        REQUIRED_EVENTS を全て含む、イベント名 -> マッチャー配列の辞書。
+    """
+    filler = [{"matcher": "*", "hooks": [{"type": "command", "command": "true", "timeout": 5}]}]
+    return dict.fromkeys(validate_hooks.REQUIRED_EVENTS, filler)
+
+
+@pytest.mark.parametrize(
+    "version_field",
+    [
+        pytest.param({}, id="missing"),
+        pytest.param({"version": "1"}, id="str"),
+        pytest.param({"version": 1.0}, id="float"),
+        pytest.param({"version": True}, id="bool-true"),
+        pytest.param({"version": 0}, id="zero"),
+        pytest.param({"version": 2}, id="other-int"),
+        pytest.param({"version": None}, id="null"),
+    ],
+)
+def test_validate_hooks_rejects_non_conforming_version(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], version_field: dict
+) -> None:
+    """`version` が正確に int の 1 でなければ、他が完全でも失敗すること。
+
+    `True == 1` が成り立つ Python では `version: true` が素通りする。実装が
+    `isinstance(version, bool)` を先に見ているのはこのためで、bool-true の行が
+    そのガードを検査する唯一のケースになる。
+    """
+    hooks_file = tmp_path / "hooks.json"
+    write_json(hooks_file, {**version_field, "hooks": _complete_events()})
+
+    assert validate_hooks.validate_hooks(hooks_file) == 1
+    assert "hooks.json の 'version' は 1 である必要があります" in capsys.readouterr().err
+
+
+def test_validate_hooks_accepts_version_one(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`version: 1` を持つ完成形は通ること。"""
+    hooks_file = tmp_path / "hooks.json"
+    write_json(hooks_file, {"version": 1, "hooks": _complete_events()})
+
+    assert validate_hooks.validate_hooks(hooks_file) == 0
+    assert "個のフックマッチャーを検証しました" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "hooks_value",
+    [
+        pytest.param(None, id="missing"),
+        pytest.param([], id="array"),
+        pytest.param("x", id="str"),
+    ],
+)
+def test_validate_hooks_requires_hooks_object(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], hooks_value: object
+) -> None:
+    """`hooks` キーがイベント辞書でなければ失敗すること。
+
+    かつては `data.hooks || data` 相当のフォールバックがあり、`hooks` を省いた
+    「裸のイベント辞書」も受理していた。`version` を必須にした時点でこの形は
+    表現不能（`version` がイベント名として検査される）になったため撤去済み。
+    """
+    hooks_file = tmp_path / "hooks.json"
+    document: dict[str, object] = {"version": validate_hooks.REQUIRED_HOOKS_VERSION}
+    if hooks_value is not None:
+        document["hooks"] = hooks_value
+    write_json(hooks_file, document)
+
+    assert validate_hooks.validate_hooks(hooks_file) == 1
+    assert "'hooks' はイベント名をキーとするオブジェクトである必要があります" in capsys.readouterr().err
+
+
+def test_validate_hooks_rejects_bare_event_map(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`hooks` ラッパー無しのイベント辞書は受理しないこと。
+
+    JS バリデータ互換のフォールバックを撤去したことの検知器。復活させると
+    `$schema` や `version` がイベント名として検査され、診断が意味を失う。
+    """
+    hooks_file = tmp_path / "hooks.json"
+    write_json(hooks_file, {"version": validate_hooks.REQUIRED_HOOKS_VERSION, **_complete_events()})
+
+    assert validate_hooks.validate_hooks(hooks_file) == 1
+    assert "'hooks' はイベント名をキーとするオブジェクトである必要があります" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "powershell",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("   ", id="blank"),
+        pytest.param(123, id="int"),
+        pytest.param(None, id="null"),
+        pytest.param(True, id="bool"),
+        pytest.param(["& x"], id="array"),
+    ],
+)
+def test_validate_command_hook_rejects_non_string_powershell(
+    capsys: pytest.CaptureFixture[str], powershell: object
+) -> None:
+    """command フックの `powershell` は空でない文字列に限ること。
+
+    `command` と違い配列形式は受理しない（ホストは PowerShell へ 1 本の
+    文字列として渡すため）。空値や数値を許すと POSIX 用 `command` へ
+    フォールバックせず、Windows で全ツール呼び出しが hook error になる。
+    """
+    hook = {"type": "command", "command": "echo ok", "powershell": powershell}
+
+    assert validate_hooks.validate_hook_entry(hook, "label") is True
+    assert "label の 'powershell' は空でない文字列である必要があります" in capsys.readouterr().err
+
+
+def test_validate_command_hook_accepts_valid_powershell() -> None:
+    """有効な `powershell` を持つ command フックは通ること。"""
+    hook = {
+        "type": "command",
+        "command": '"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook" ple4.hooks.pre_compact',
+        "powershell": '& "${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook.cmd" ple4.hooks.pre_compact',
+    }
+
+    assert validate_hooks.validate_hook_entry(hook, "label") is False
+
+
+def test_validate_command_hook_without_powershell_key_is_valid() -> None:
+    """`powershell` キーが無い command フックは従来どおり通ること。"""
+    assert validate_hooks.validate_hook_entry({"type": "command", "command": "echo ok"}, "label") is False
+
+
+@pytest.mark.parametrize(
+    "hook",
+    [
+        pytest.param({"type": "http", "url": "https://example.com"}, id="http"),
+        pytest.param({"type": "prompt", "prompt": "ok"}, id="prompt"),
+    ],
+)
+def test_powershell_is_rejected_on_non_command_hooks(
+    capsys: pytest.CaptureFixture[str], hook: dict
+) -> None:
+    """非 command フックに付いた `powershell` は診断付きで拒否されること。
+
+    `async` と同じ扱い。ここが無いと http / prompt フックの `powershell` は
+    無診断で捨てられ、Windows だけ静かに動かない — 本フィールドが解消した
+    障害と同じ形が 1 階層下に残る。
+    """
+    assert validate_hooks.validate_hook_entry({**hook, "powershell": "& x"}, "label") is True
+    assert "label では 'powershell' は command フックでのみサポートされています" in capsys.readouterr().err
