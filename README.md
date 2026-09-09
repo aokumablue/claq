@@ -47,7 +47,7 @@ ple4 は、Claude Code の作業を「最初の計画からレビューまで」
 
 > **保護フックの保証範囲**: `block_no_verify` / `pre_bash_commit_quality` /
 > `bash_config_protection` / `config_protection` は **best-effort な事故防止**であり、
-> **敵対的な回避への防壁ではありません**（[ADR-0002](docs/adr/0002-shell-hooks-prefer-false-positive-over-false-negative.md)）。
+> **敵対的な回避への防壁ではありません**（[ADR-0002](docs/adr/02-shell-analysis-boundary.md)）。
 > シェルエイリアス・シェル関数・変数展開・コマンド置換・2 段以上の `sh -c` / `eval`・
 > `git` 以外の名前を持つラッパースクリプト経由の呼び出しは、意図的に非目標として
 > 検出しません（POSIX シェルの意味解釈は実行時環境に依存し、静的解析だけでは

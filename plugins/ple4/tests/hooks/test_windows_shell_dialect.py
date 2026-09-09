@@ -11,7 +11,7 @@ Windows ホストのシェルツールは PowerShell であり、次の 2 点で
    無かった。
 
 いずれも「Windows では保護 hook が素通りする」という同じ帰結になるため、
-1 ファイルで並べて固定する。`docs/adr/0020-*.md` を参照。
+1 ファイルで並べて固定する。`docs/adr/02-shell-analysis-boundary.md` を参照。
 """
 
 from __future__ import annotations

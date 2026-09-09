@@ -781,7 +781,7 @@ class StdinUnavailableError(RuntimeError):
     ``git commit --no-verify`` と ``git status`` が揃って exit 0 になった。
     release-verify 2026-09-03 の P1-004）。呼び出し側にこの 2 つを取り違え
     させないため、後者だけを例外として区別する（詳細は
-    ``docs/adr/0019-*.md``）。
+    ``docs/adr/01-hook-failure-direction.md``）。
     """
 
 

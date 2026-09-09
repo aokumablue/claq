@@ -31,7 +31,7 @@ git 起動トークンの探索:
     起動されるか」だけで実行位置を必要としないため名前集合を持たずに済み、
     あちらは ``tee pyproject.toml`` と ``echo tee pyproject.toml`` を分けるために
     実行位置の特定が必須で、名前集合が原理的に不可避になります。根拠と代替案の
-    実測は `docs/adr/0021-command-position-detection-uses-a-wrapper-allowlist.md`
+    実測は `docs/adr/02-shell-analysis-boundary.md`
     にあります（本モジュールへ allowlist を導入する案は代替案 3 として却下済み）。
 
 ``-n`` の扱い:

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # ple4 plugin root resolver — installed to $HOME/.ple4/env.sh verbatim by
 # ple4.lib.env_pointer.write_env_pointer(). Contains no vendor-specific paths;
-# do not hardcode host names here (see docs/adr/0008-*.md for why).
+# do not hardcode host names here (see docs/adr/03-plugin-root-resolution.md for why).
 #
 # Usage (in agents/commands/skills):
 #   . "$HOME/.ple4/env.sh" || exit 127
@@ -23,7 +23,7 @@
 # byte-for-byte, use its recorded root. A mismatch means the pid was reused
 # by an unrelated process since the pointer was written — skip it. An empty
 # or malformed file is treated the same way (defensive only — the writer no
-# longer produces empty files by design; see docs/adr/0008-*.md revision 3).
+# longer produces empty files by design; see docs/adr/03-plugin-root-resolution.md revision 3).
 #
 # There is no second-tier fallback. If neither candidate yields a verified
 # match, this exits 127 rather than guessing (H-02: an

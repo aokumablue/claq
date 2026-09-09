@@ -195,7 +195,7 @@ def status(user):
 
 ### Web フロント特化（Core Web Vitals 2024-03 改訂 / Lighthouse 10 以降）
 
-版を見出しへ書く理由は ple4 リポジトリの `docs/adr/0022-versioned-external-standards-carry-their-version-in-the-heading.md`。
+版を見出しへ書く理由は ple4 リポジトリの `docs/adr/06-staleness-detection.md`。
 
 - 大 vendor バンドル → ツリーシェイキング・軽量代替 / 重複コード → 共有モジュール抽出
 - イベントリスナー未解除 → 破棄時に解除 / タイマー未クリア → clearInterval・clearTimeout / 購読解除忘れ → unsubscribe 必須

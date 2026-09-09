@@ -71,7 +71,7 @@ Write は塞がるのに ``rm Ruff.toml`` は通る非対称が生まれる）�
     展開・パイプ越しの間接書き込み、シェルエイリアス・ラッパースクリプト
     経由の呼び出し。POSIX シェルの完全解釈は行わず、うっかり書き換えの抑止
     であって敵対的回避への防壁ではない（`block_no_verify` と同じ設計判断。
-    詳細は `docs/adr/0002-*.md`）。
+    詳細は `docs/adr/02-shell-analysis-boundary.md`）。
 """
 
 from __future__ import annotations
@@ -223,7 +223,7 @@ _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # `_command_index` が読み飛ばす実行 wrapper（`normalize_executable_name` で判定）。
 #
 # ホワイトリストである理由と、`block_no_verify` が全トークン走査を採る理由の非対称は
-# **意図的な設計判断**であり `docs/adr/0021-command-position-detection-uses-a-wrapper-allowlist.md`
+# **意図的な設計判断**であり `docs/adr/02-shell-analysis-boundary.md`
 # に記録した（代替案の実測を含む）。要旨だけ再掲すると: 本モジュールは M-01 のため
 # **実行位置の特定**が必要で、``tee pyproject.toml``（deny）と
 # ``echo tee pyproject.toml``（allow）は構文上同じ「語 → 語 → パス」なので何らかの

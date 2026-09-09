@@ -18,7 +18,7 @@ Python 側の ``os.getppid()`` と shell 側の ``$PPID`` は一致する（実�
 環境変数によるホスト判定（``COPILOT_*`` 等）は採らない。Copilot CLI / Grok CLI が
 bash tool の環境へ自身の識別変数を注入することは文書化されておらず、確認できた
 のは Claude Code の変数（``CLAUDECODE`` 等）のみだったため（詳細は
-``docs/adr/0008-*.md``）。
+``docs/adr/03-plugin-root-resolution.md``）。
 
 R-01〜R-06 の指摘を受け、v0.9.35 の設計を改めた:
 

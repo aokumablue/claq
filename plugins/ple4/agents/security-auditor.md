@@ -10,7 +10,7 @@ tools: Read, Grep, Glob
 
 ## OWASP Top 10:2025
 
-本節は網羅性の担保として意図的に置いている（削除案の棄却は ple4 リポジトリの `docs/adr/0011-agent-definitions-state-behavior-not-rationale.md` 代替案 5、版を見出しへ書く理由は `docs/adr/0022-versioned-external-standards-carry-their-version-in-the-heading.md`）。
+本節は網羅性の担保として意図的に置いている（削除案の棄却は ple4 リポジトリの `docs/adr/05-definition-and-subagent-design.md` 代替案 5、版を見出しへ書く理由は `docs/adr/06-staleness-detection.md`）。
 
 1. A01 Broken Access Control: 全ルート認可確認・CORS 設定・SSRF（2025 で本分類へ統合）
 2. A02 Security Misconfiguration: デフォルト認証変更・本番 debug 無効・セキュリティヘッダー・XXE（外部実体無効化）
@@ -79,7 +79,7 @@ fail-open が**意図された設計**である場合（ADR が明示的に受�
 
 ## CRITICAL発見時（READ-ONLY: 提案のみ。ファイル変更・コマンド実行はしない）
 
-提案はテキストで返す（reviewer との権限非対称の経緯は ple4 リポジトリの `docs/adr/0004-reviewer-agent-keeps-write-capable-bash.md`）。
+提案はテキストで返す（reviewer との権限非対称の経緯は ple4 リポジトリの `docs/adr/05-definition-and-subagent-design.md`）。
 
 1. 安全コード例の提示（テキストのみ）
 2. 修正方針の提案（実装は別フェーズ: /bugfix / /refactor へ委譲）

@@ -4,7 +4,7 @@ Windows の通常パイプでは ``select.select`` が ``OSError`` になり、�
 それを「入力なし」へ正規化していた。その結果 ``git status`` と
 ``git commit --no-verify`` が揃って exit 0 になり、保護 hook が 1 バイトも
 検査しないまま素通りしていた（release-verify 2026-09-03 の P1-004。
-`docs/adr/0019-protection-hooks-fail-closed-when-stdin-cannot-be-read.md`）。
+`docs/adr/01-hook-failure-direction.md`）。
 
 「読む対象が無い」（tty 起動・stdin 未接続・即 EOF）と「読めなかった」を
 区別するのが修正の核心なので、両方をこの 1 ファイルで並べて固定する。

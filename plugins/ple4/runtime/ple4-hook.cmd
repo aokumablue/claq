@@ -91,7 +91,7 @@ rem    included) still resolve through the poisoned PATH, which PLE4_PYTHON does
 rem    not fix. Reordering here is the right change, but cmd.exe cannot be run
 rem    from the development host, and a broken reorder silently disables
 rem    protection on Windows. Left as a documented residual rather than an
-rem    unverified edit. See docs/adr/0024-*.md.
+rem    unverified edit. See docs/adr/01-hook-failure-direction.md.
 rem
 rem    KNOWN RESIDUAL: a NON-EMPTY relative entry (`PATH=foo;C:\Windows`) is
 rem    still not caught. That case does need the per-entry loop, so it stays
