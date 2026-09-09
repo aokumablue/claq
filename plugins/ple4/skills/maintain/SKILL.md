@@ -1,6 +1,6 @@
 ---
 name: maintain
-description: ハーネス（commands/skills/agents/hooks）の定期メンテを一気通貫で実施する。レビュー→実害修正→強化→再レビュー→指摘修正→記録まで1回の実行で完了。「ハーネスをメンテ」「commands/skills/agents/hooks を定期メンテ／見直し／強化」「定期メンテとしてプラグイン全体をレビューして直す」「エージェント定義を最新トレンドでブラッシュアップ」等で発火。単発の1ファイル修正は /review /bugfix /refactor、audit スコア改善のみは /harness を使う（定義文書のレビュー・修正まで踏み込むなら本スキル）。
+description: ハーネス（commands/skills/agents/hooks）の定期メンテを一気通貫で実施する。レビュー→修正→強化→再レビュー→記録まで1回で完了。「ハーネスをメンテ」「commands/skills/agents/hooks を定期メンテ／見直し／強化」「定期メンテとしてプラグイン全体をレビューして直す」「エージェント定義を最新トレンドでブラッシュアップ」等で発火。単発の1ファイル修正は /review /bugfix /refactor、audit スコア改善のみは /harness を使う。
 context: fork
 user-invocable: true
 ---
