@@ -1,5 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "version": 1,
   "hooks": {
     "PreToolUse": [
       {
@@ -8,6 +9,7 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.hooks.block_no_verify",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook.cmd\" ple4.hooks.block_no_verify",
             "timeout": 15
           }
         ],
@@ -19,6 +21,7 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.hooks.pre_bash_commit_quality",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook.cmd\" ple4.hooks.pre_bash_commit_quality",
             "timeout": 30
           }
         ],
@@ -30,6 +33,7 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.hooks.bash_config_protection",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook.cmd\" ple4.hooks.bash_config_protection",
             "timeout": 15
           }
         ],
@@ -41,6 +45,7 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.hooks.config_protection",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook.cmd\" ple4.hooks.config_protection",
             "timeout": 15
           }
         ],
@@ -54,6 +59,7 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.hooks.pre_compact",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook.cmd\" ple4.hooks.pre_compact",
             "timeout": 15
           }
         ],
@@ -67,6 +73,7 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" ple4.mem.cli context",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook.cmd\" ple4.mem.cli context",
             "timeout": 20
           }
         ],
@@ -80,6 +87,7 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook\" --bg ple4.mem.cli handoff",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/ple4-hook.cmd\" --bg ple4.mem.cli handoff",
             "async": true,
             "timeout": 10
           }

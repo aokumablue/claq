@@ -22,6 +22,7 @@ from ple4.ci.ci_common import (
 # 必要なイベントが宣言されているかどうかが実際の契約である（同じ理由で
 # harness audit の固定件数 quota も撤去した）。
 REQUIRED_EVENTS = frozenset({"PreToolUse", "PreCompact", "SessionStart", "SessionEnd"})
+REQUIRED_HOOKS_VERSION = 1
 
 VALID_EVENTS = [
     "SessionStart",
@@ -120,6 +121,13 @@ def _validate_command_hook(hook: dict, label: str) -> bool:
     if not is_non_empty_string(command) and not is_non_empty_string_array(command):
         emit_error(f"{label} は 'command' フィールドが不足しているか無効です")
         has_errors = True
+
+    # Copilot CLI は Windows で `powershell` を優先する。空値や数値を許すと
+    # POSIX 用 command へフォールバックせず、全ツール呼び出しが hook error になる。
+    if "powershell" in hook and not is_non_empty_string(hook.get("powershell")):
+        emit_error(f"{label} の 'powershell' は空でない文字列である必要があります")
+        has_errors = True
+
     return has_errors
 
 
@@ -314,6 +322,19 @@ def validate_hooks(
         data = read_json(hooks_path, "hooks.json")
     except ValueError as error:
         emit_error(str(error))
+        return 1
+
+    if not isinstance(data, dict):
+        emit_error("hooks.json はオブジェクトである必要があります")
+        return 1
+
+    version = data.get("version")
+    if (
+        isinstance(version, bool)
+        or not isinstance(version, int)
+        or version != REQUIRED_HOOKS_VERSION
+    ):
+        emit_error(f"hooks.json の 'version' は {REQUIRED_HOOKS_VERSION} である必要があります")
         return 1
 
     hooks = _select_hooks_container(data)
