@@ -22,7 +22,8 @@ root ディレクトリも helper も manifest も digest も、すべて攻撃�
 ものへの非対応は「リスクの許容」ではなく「防御不能な対象への対処の見送り」である。
 
 **`roots/` の汚染は enforcement hook には及ばない。** `hooks.json` の全エントリは
-`python3 launcher.py <module>` を直接呼ぶだけで `env.sh` を source しない。resolver は保護 hook の
+`runtime/ple4-hook`（PowerShell ホストでは同エントリの `powershell` が `runtime/ple4-hook.cmd`）を
+呼ぶだけで `env.sh` を source しない。resolver は保護 hook の
 実行経路に一切登場せず、汚染で保護 hook を無効化することはできない。影響は md/agents/skills から
 呼ばれる `ple4_run` / `ple4_mem_learn` の汚染に限定される。
 

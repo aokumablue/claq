@@ -24,10 +24,16 @@ _HOOK_WRAPPER_BASENAMES = {"ple4-hook", "ple4-hook.cmd"}
 def _hook_command_argv(command: str) -> tuple[str, ...] | None:
     """hooks.json 内のコマンド文字列から wrapper 起動後の引数列を返す。
 
-    hooks.json の全エントリは ``runtime/ple4-hook`` （Windows では cmd.exe が
-    PATHEXT で解決する ``ple4-hook.cmd``）を起動する。裸の ``python3`` 起動
+    hooks.json の全エントリは ``runtime/ple4-hook`` （cmd.exe ホストでは PATHEXT
+    が同名の ``ple4-hook.cmd`` へ解決する）を起動する。裸の ``python3`` 起動
     形式は廃止したため受け付けない。先頭の ``--bg``（非 Claude ハーネス向け
     detach フラグ）はコマンドの実体ではないため取り除く。
+
+    受け取るのは ``command`` フィールドのみで、同じエントリの ``powershell``
+    （PowerShell ホスト向けに ``ple4-hook.cmd`` を明示的に名指す行）は対象外。
+    ``powershell`` は call 演算子 ``&`` で始まり wrapper が先頭に来ないため、
+    渡しても None になる。両フィールドのモジュール・引数一致は
+    ``tests/ci/test_validate_hooks.py`` のパリティ検査が担当する。
 
     Args:
         command: hooks.json の ``command`` フィールドの生文字列

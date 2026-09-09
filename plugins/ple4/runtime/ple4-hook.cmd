@@ -1,9 +1,13 @@
 @echo off
 rem ple4 hook launcher -- Windows side.
 rem
-rem hooks.json names the extension-less sibling "ple4-hook"; cmd.exe appends
-rem PATHEXT to an explicitly pathed command, so this .cmd is what actually runs
-rem on Windows while POSIX hosts exec the sh script of the same base name.
+rem This file is reached by two distinct routes on Windows, and both are live.
+rem hooks.json's `command` names the extension-less sibling "ple4-hook"; cmd.exe
+rem appends PATHEXT to an explicitly pathed command, so this .cmd is what runs
+rem on a cmd.exe host while POSIX hosts exec the sh script of the same base name.
+rem Hosts that prefer PowerShell get no PATHEXT treatment, so the same hooks.json
+rem entry also declares a `powershell` field that names this .cmd explicitly via
+rem the call operator: & "...\runtime\ple4-hook.cmd" <module> <args...>.
 rem
 rem Resolution order: %PLE4_PYTHON% -> py -3 -> python -> python3.
 rem Candidates found under ...\WindowsApps\ are skipped: those are Microsoft

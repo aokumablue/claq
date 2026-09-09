@@ -3,9 +3,11 @@
 #
 # hooks.json calls this file (never a bare `python3`) so that the interpreter
 # name is resolved by code we control instead of by whatever the host's ambient
-# PATH happens to bind. On Windows the very same command string resolves to the
-# sibling `ple4-hook.cmd` (cmd.exe appends PATHEXT to an extension-less path),
-# so a single hooks.json entry serves all three platforms.
+# PATH happens to bind. On a cmd.exe host the very same command string resolves
+# to the sibling `ple4-hook.cmd` (cmd.exe appends PATHEXT to an extension-less
+# path). Hosts that prefer PowerShell do not, so each hooks.json entry also
+# carries a `powershell` field naming `ple4-hook.cmd` explicitly; both fields
+# must launch the same module with the same arguments.
 #
 # Resolution order: $PLE4_PYTHON (explicit override) -> python3 -> python.
 # `python` is probed for 3.12+ before use because on some distributions it is

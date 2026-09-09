@@ -190,8 +190,11 @@ def test_every_repo_hook_entry_launches_the_ple4_hook_wrapper() -> None:
     """hooks.json の全エントリが `runtime/ple4-hook` を起動すること。
 
     CLAUDE.md は「`hooks.json` は裸の `python3` を呼ばない。全エントリが
-    `runtime/ple4-hook` を起動し、インタプリタ解決はこの wrapper の単一責務」と
-    規定する。これまでこの規則を守っていたのは `_repo_hook_argv` の `next(...)`
+    `runtime/ple4-hook`（`command` 経由の Windows は cmd.exe が PATHEXT で解決
+    する同名の `.cmd`。PowerShell ホスト向けの明示宣言は次項）を起動し、
+    インタプリタ解決はこの wrapper の単一責務」と規定する。ここが見るのは
+    `command` 側で、`powershell` 側の起動対象は
+    `TestRepoHooksJsonPowerShellParity` が別途照合する。これまでこの規則を守っていたのは `_repo_hook_argv` の `next(...)`
     が StopIteration になる副作用だけで、assert もメッセージも無く、
     `ple4-hook` で終わる任意のパスを受理していた。
     """

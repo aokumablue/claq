@@ -73,10 +73,11 @@ for event, groups in d['hooks'].items():
     for group in groups:
         for hook in group['hooks']:
             print(event, group.get('matcher', '*'), hook['command'])
+            print('   powershell:', hook.get('powershell', '(未宣言)'))
 "
 ```
 
-**計数単位**: `hooks {n}` は上の列挙スクリプトが出力する行数（＝ `hooks.json` の command エントリ数）で数える。`tool_input` を受け取るのはそのうち PreToolUse の分だけなので、ステップ2 の payload 形状マトリクスの対象件数は「うち N 件」と別に書く。
+**計数単位**: `hooks {n}` は上の列挙スクリプトが出力する**フックエントリ数**（`powershell:` の続き行は数えない）で数える。1 エントリは POSIX 用 `command` と PowerShell 用 `powershell` の 2 行を持ち、**どちらが実行されるかはホストが決める** — cmd.exe ホストは `command` を PATHEXT で `.cmd` へ解決し、PowerShell を優先するホスト（Copilot CLI）は `powershell` を実行する。Windows ホストで測るときは、自分が起動したのがどちらの行かをレポートに明記する（`(未宣言)` が出たエントリはそのホストで無起動になりうる）。`tool_input` を受け取るのはそのうち PreToolUse の分だけなので、ステップ2 の payload 形状マトリクスの対象件数は「うち N 件」と別に書く。
 
 `user-invocable: false` は**ホストの Skill ツールからの直接起動を妨げない**（実測: `checkpoint` / `learn` / `loop-dev` 等をスキル名指定で起動できる。`../../commands/review.md` / `../../commands/plan.md` / `../../commands/refactor.md` も「本文で明示すれば Skill ツール経由で発火する」と書いている）。このフラグが抑止するのは人間の `/` 補完への露出であって起動そのものではない。したがって**直接起動を第一手とし**、下の対応表は「本来どの経路で呼ばれる skill か」という出自であって起動要件ではない。委譲経路そのものを測りたいときだけ委譲元コマンドを起動する。対応:
 
