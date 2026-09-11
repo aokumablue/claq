@@ -1,7 +1,8 @@
 ---
 name: quick-debug
-description: 人間が再現とログ採取を担う往復切り分けモード。修正は当てず、仮説を落とす観測だけを計装として適用して結果を求める。「ログは私が貼る」「原因だけ切り分けて」と明示された時だけ発火。修正まで通しなら /bugfix。
+description: 人間が再現とログ採取を担う往復切り分けモード。修正は当てず、仮説を落とす観測だけを計装として適用して結果を求める。修正まで通しなら /bugfix。
 user-invocable: true
+disable-model-invocation: true
 ---
 
 # 即時ハンドオフ切り分け

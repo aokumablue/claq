@@ -1,7 +1,8 @@
 ---
 name: quick-test
-description: 人間がテストを実行する往復モード。テストコードだけ書き、期待する色（RED/GREEN）と変異手順を添えて返す。「テストは私が走らせる」「テストコードだけ書いて」と明示された時だけ発火。通常のテスト作成は /test-gen。
+description: 人間がテストを実行する往復モード。テストコードだけ書き、期待する色（RED/GREEN）と変異手順を添えて返す。通常のテスト作成は /test-gen。
 user-invocable: true
+disable-model-invocation: true
 ---
 
 # 即時ハンドオフテスト実装

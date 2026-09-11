@@ -1,7 +1,8 @@
 ---
 name: quick-review
-description: 人間が実行を担う往復レビューモード。差分だけ読み、静的に確定した指摘だけ最小修正で適用して返す。「軽くレビューして」「ざっと見て」と明示された時だけ発火。網羅レポートが要るなら /review。
+description: 人間が実行を担う往復レビューモード。差分だけ読み、静的に確定した指摘だけ最小修正で適用して返す。網羅レポートが要るなら /review。
 user-invocable: true
+disable-model-invocation: true
 ---
 
 # 即時ハンドオフレビュー
