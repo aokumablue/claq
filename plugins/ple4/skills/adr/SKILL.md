@@ -21,7 +21,7 @@ user-invocable: false
 **日付**: YYYY-MM-DD  **ステータス**: proposed | accepted | deprecated | superseded by ADR-NNNN
 
 ### コンテキスト
-[状況・制約・関与する力を 2-5 文]
+[状況・制約・せめぎ合う要求を 2-5 文]
 
 ### 決定
 [決定 1-3 文]

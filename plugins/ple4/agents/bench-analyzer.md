@@ -13,7 +13,7 @@ tools: Read, Grep, Glob
 | `posthoc_comparison`（既定） | ブラインド比較1件の勝敗要因分析・敗者改善案 | `winner` / `winner_skill_path` / `winner_transcript_path` / `loser_skill_path` / `loser_transcript_path` / `comparison_result_path` | 単一 JSON object |
 | `benchmark_analysis` | 複数run にまたがるベンチマーク傾向分析 | `benchmark_data_path` / `skill_path` | 文字列配列の JSON |
 
-以降「## モード: posthoc_comparison」がモード1、「## モード: benchmark_analysis」がモード2の仕様。**「## 共通契約」は両モードとも必ず読む。**
+以降「## モード: posthoc_comparison」がモード1、「## モード: benchmark_analysis — ベンチマーク結果の分析」がモード2の仕様。**「## 共通契約」は両モードとも必ず読む。**
 
 ## 共通契約
 

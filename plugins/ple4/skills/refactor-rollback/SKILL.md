@@ -73,7 +73,7 @@ Skip Rules:
 - `git checkout -- {file}` を確定する前に対象が worktree clean であることを確認する（手順0）。処理開始前から存在した未コミット編集を巻き込んで破棄しない
 - 復旧コマンドは tracked=`git checkout -- {file}` / untracked（新規作成）=`rm {file}`。`git ls-files` で判定してから確定。untracked と判定しても、canonicalize してリポジトリルート配下の相対パス（`..` 非含有）でなければ `rm` を生成せず Skip Rules（`required_action=manual_review`）に回す（範囲外パスの不可逆削除を防ぐ）
 - 不確実な変更は `Skip Rules` に `required_action={manual_review|extra_test|keep}` で記録。循環依存で一括 revert が必要なグループも `Skip Rules` に記録するが、これは確定的な復旧対象のため `required_action=bulk_revert` で区別する
-- `tests.group` が空（`refactor-prep` の「検証手段なし」判定）なら `verify="NOT_AVAILABLE"` を実行可能なコマンドであるかのように偽装しない。File Rules から除外せず Skip Rules にも `required_action=manual_review` で記録する
+- `tests.group` が空（`refactor-prep` の「検証手段なし」判定）なら `verify="NOT_AVAILABLE"` とし、代わりに実行可能なコマンドを書かない。File Rules から除外せず Skip Rules にも `required_action=manual_review` で記録する
 - 機能変更禁止（WHAT不変）
 
 ## 永続メモリ
