@@ -35,7 +35,7 @@ def _run_cli(
     """データディレクトリと cwd を tmp_path に差し替えて cli.main() を実行する。"""
     import ple4.mem.settings as settings_mod
 
-    monkeypatch.setattr(settings_mod, "_DEFAULT_DATA_DIR", tmp_path)
+    monkeypatch.setattr(settings_mod, "_default_data_dir", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "argv", ["python", *argv])
     # _read_stdin_json は hook_common.read_raw_stdin() 経由（tty 判定・

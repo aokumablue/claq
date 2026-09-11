@@ -52,6 +52,19 @@ _FIXED_SOURCE = "agent"
 _FIXED_STATUS = "pending"
 
 DEFAULT_CONFIDENCE = 0.5
+
+#: title / body に許すバイト数の上限。
+#:
+#: 注入側は `strip_tags` を**全長**に対して走らせてから 200 文字判定で捨てるため、
+#: 巨大な body は SessionStart（同期フック）の遅延に直結する。
+#:
+#: **先に切り詰めてはならない。** `handoff._sanitize_compact` が明記するとおり、
+#: `redact` より先に切るとシークレットが分断され、断片がマスクされずに残る。
+#: よって入口で受け付けない側で塞ぐ。知識カードは人間が読む要約なので、この上限が
+#: 正当な入力を落とすことは実務上ない。
+MAX_TITLE_BYTES = 4 * 1024
+MAX_BODY_BYTES = 64 * 1024
+
 """``confidence`` 未指定時の確信度。"""
 
 _ASCII_ALNUM_RE = re.compile(r"[A-Za-z0-9]")
@@ -315,6 +328,39 @@ class KnowledgeDraft:
         )
 
 
+def _reject_oversized(text: str, field: str, limit: int) -> None:
+    """文字列が上限バイト数を超えていたら ``KnowledgeInputError`` を送出する。
+
+    Args:
+        text: 検査対象
+        field: エラーメッセージへ出すフィールド名
+        limit: 許すバイト数
+
+    Raises:
+        KnowledgeInputError: 上限を超えた場合。
+    """
+    size = len(text.encode("utf-8", "surrogatepass"))
+    if size > limit:
+        raise KnowledgeInputError(f"learn: {field} が大きすぎます（{size:,} バイト > {limit:,}）")
+
+
+def _checked_body(payload: dict[str, Any]) -> str:
+    """body を取り出し、上限バイト数を超えていないことを確かめて返す。
+
+    Args:
+        payload: learn の入力
+
+    Returns:
+        検査を通った body 文字列
+
+    Raises:
+        KnowledgeInputError: 上限を超えた場合。
+    """
+    body = str(payload.get("body") or "")
+    _reject_oversized(body, "body", MAX_BODY_BYTES)
+    return body
+
+
 def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     """JSON ペイロードを検証済みの ``KnowledgeDraft`` へ変換する。
 
@@ -346,6 +392,7 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     # `- [kind] title` の 1 行として描かれる契約なので、改行が残ると 1 枚のカードが
     # 複数行に割れ、偽の知識カード行を注入枠の内側に作れる（実測済み）。
     title = " ".join(str(payload.get("title") or "").split())
+    _reject_oversized(title, "title", MAX_TITLE_BYTES)
     if not title:
         raise KnowledgeInputError("learn: title は必須です")
 
@@ -370,7 +417,7 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
         scope=scope,
         kind=kind,
         title=redact_knowledge_text(title),
-        body=redact_knowledge_text(str(payload.get("body") or "")),
+        body=redact_knowledge_text(_checked_body(payload)),
         domain=redact_knowledge_text(domain) if domain else None,
         confidence=coerce_confidence(payload.get("confidence")),
         status=status,

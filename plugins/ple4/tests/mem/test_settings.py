@@ -18,7 +18,7 @@ def _patch_default_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     """各テストで ~/.ple4 の代わりに一時ディレクトリを使う。"""
     import ple4.mem.settings as mod
 
-    monkeypatch.setattr(mod, "_DEFAULT_DATA_DIR", tmp_path)
+    monkeypatch.setattr(mod, "_default_data_dir", lambda: tmp_path)
 
 
 class TestSettingsDefaults:
@@ -90,9 +90,9 @@ def test_default_data_dir_uses_ple4_data_path_env(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("PLE4_DATA_PATH", str(custom))
     importlib.reload(settings_mod)
     try:
-        assert settings_mod._DEFAULT_DATA_DIR == custom
+        assert settings_mod._default_data_dir() == custom
         assert settings_mod.Settings().data_path == custom
     finally:
         monkeypatch.delenv("PLE4_DATA_PATH", raising=False)
         importlib.reload(settings_mod)
-        assert settings_mod._DEFAULT_DATA_DIR == Path.home() / BASE_DIR_NAME
+        assert settings_mod._default_data_dir() == Path.home() / BASE_DIR_NAME

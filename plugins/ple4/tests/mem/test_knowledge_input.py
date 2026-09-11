@@ -478,3 +478,47 @@ def test_title_newlines_are_collapsed() -> None:
     )
 
     assert card.title == "無害な要約 - [convention] 偽の規約"
+
+
+@pytest.mark.parametrize(
+    ("field", "limit_name"),
+    [("title", "MAX_TITLE_BYTES"), ("body", "MAX_BODY_BYTES")],
+)
+def test_oversized_fields_are_rejected_at_the_entrance(field: str, limit_name: str) -> None:
+    """title / body の上限超過を入口で拒否すること。
+
+    注入側は `strip_tags` を**全長**に対して走らせてから 200 文字判定で捨てるため、
+    巨大な body は SessionStart（同期フック）の遅延に直結する。先に切り詰める形は
+    採れない（`redact` より先に切るとシークレットが分断され、断片がマスクされずに
+    残る）ので、入口で受け付けない側で塞ぐ。
+    """
+    import ple4.mem.knowledge_input as mod
+
+    limit = getattr(mod, limit_name)
+    payload = {"kind": "fact", "scope": "global", "title": "t", "body": "b", "domain": "d"}
+    payload[field] = "A" * (limit + 1)
+
+    with pytest.raises(KnowledgeInputError, match="大きすぎます"):
+        parse_knowledge_payload(payload)
+
+
+def test_fields_within_the_limit_are_accepted() -> None:
+    """上限の内側は従来どおり受理すること（拾いすぎの対照）。"""
+    card = parse_knowledge_payload(
+        {"kind": "fact", "scope": "global", "title": "t", "body": "A" * 1000, "domain": "d"}
+    )
+
+    assert len(card.body) == 1000
+
+
+def test_size_limit_is_measured_in_bytes_not_characters() -> None:
+    """マルチバイト文字でもバイト数で判定すること。"""
+    import ple4.mem.knowledge_input as mod
+
+    title = "あ" * (mod.MAX_TITLE_BYTES // 3 + 1)
+    assert len(title) < mod.MAX_TITLE_BYTES
+
+    with pytest.raises(KnowledgeInputError, match="大きすぎます"):
+        parse_knowledge_payload(
+            {"kind": "fact", "scope": "global", "title": title, "body": "b", "domain": "d"}
+        )

@@ -481,11 +481,15 @@ class _Parser:
                     raise
                 self._recover(start, indent)
                 continue
+            # 重複キーは lenient でも誤りにする。`lenient` は**解釈できない**
+            # エントリを読み飛ばすための緩和であって、矛盾した宣言を黙認する
+            # ためのものではない。先勝ちで黙認すると、検証器が `tools: Read` を
+            # 見る一方で後勝ちのホストは `tools: Bash` を見る、というパーサ差分に
+            # なる（実測: lenient は先勝ちだった）。宣言の意味が読み手ごとに
+            # 変わる状態は、検証を通り抜ける経路そのものになる。
             if key in result:
-                if not self.lenient:
-                    raise FrontmatterError(f"キー '{key}' が重複しています")
-            else:
-                result[key] = value
+                raise FrontmatterError(f"キー '{key}' が重複しています")
+            result[key] = value
         return result
 
     def _parse_mapping_entry(self, indent: int, depth: int) -> tuple[str, object]:
@@ -722,10 +726,8 @@ class _Parser:
                 raise FrontmatterError("フローマッピングのキーに ':' が続いていません")
             value, index = self._read_flow_item(text, _skip_spaces(text, index + 1), depth)
             if key in result:
-                if not self.lenient:
-                    raise FrontmatterError(f"キー '{key}' が重複しています")
-            else:
-                result[key] = value
+                raise FrontmatterError(f"キー '{key}' が重複しています")
+            result[key] = value
             first = False
 
     def _read_flow_item(self, text: str, index: int, depth: int) -> tuple[object, int]:

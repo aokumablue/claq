@@ -7,11 +7,27 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ple4.lib.constants import BASE_DIR_NAME
+from ple4.lib.core_utils import get_home_dir
 
-if "PLE4_DATA_PATH" in os.environ:
-    _DEFAULT_DATA_DIR = Path(os.environ["PLE4_DATA_PATH"])
-else:
-    _DEFAULT_DATA_DIR = Path.home() / BASE_DIR_NAME
+
+def _default_data_dir() -> Path:
+    """mem のデータディレクトリ既定値を返す。
+
+    `Path.home()` を直接見ていた頃は、`PLE4_HOME` を設定しても DB だけが本物の
+    `~/.ple4` を掴んでいた（transcript の trusted root は `get_home_dir()` 経由で
+    移るのに DB は移らない、という非対称）。隔離したつもりのテストが利用者の
+    実データへ書く事故になるため、`core_utils.get_home_dir()` へ揃える。
+
+    import 時ではなく呼び出し時に評価する。import 時に固定すると、プロセス内で
+    環境変数を差し替えても効かない。
+
+    Returns:
+        データディレクトリのパス
+    """
+    override = os.environ.get("PLE4_DATA_PATH")
+    if override:
+        return Path(override)
+    return get_home_dir() / BASE_DIR_NAME
 
 # --- context 注入の予算 ---
 
@@ -45,7 +61,7 @@ class Settings:
     @property
     def data_path(self) -> Path:
         """データディレクトリ（~/.ple4）を返す。"""
-        return _DEFAULT_DATA_DIR
+        return _default_data_dir()
 
     @property
     def db_path(self) -> Path:

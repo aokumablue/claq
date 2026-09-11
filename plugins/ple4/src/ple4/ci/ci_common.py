@@ -79,7 +79,10 @@ def is_non_empty_string_array(value: Any) -> bool:
 def extract_frontmatter(content: str) -> dict[str, object] | None:
     """先頭の --- で囲まれた frontmatter を辞書として返す。無ければ None。
 
-    解釈できない行を読み飛ばして部分結果を返す寛容モードで解析する。
+    解釈できない行を読み飛ばして部分結果を返す寛容モードで解析する。ただし
+    **重複キーは寛容モードでも誤り**として扱い、None（＝不合格）を返す。先勝ちで
+    黙認すると、検証器が `tools: Read` を見る一方で後勝ちのホストは `tools: Bash`
+    を見る、というパーサ差分になる。
 
     Args:
         content: Markdown ファイルの全文。
@@ -91,5 +94,7 @@ def extract_frontmatter(content: str) -> dict[str, object] | None:
         block = split_frontmatter(content)
     except FrontmatterError:
         return None
+    # 重複キーは `parse_yaml` が寛容モードでも None（またはキーを落とした dict）
+    # にして返すので、ここで捕捉すべき例外は無い。
     data = parse_yaml(block, lenient=True)
     return data if isinstance(data, dict) else None

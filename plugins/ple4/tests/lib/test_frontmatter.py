@@ -638,7 +638,8 @@ _ERROR_INPUTS = [
     pytest.param('a: 1\nnocolon', {'a': 1}, id='E6-missing-colon'),
     pytest.param('a: foo: bar', {}, id='E7-colon-in-plain'),
     pytest.param('a: foo:', {}, id='E7-trailing-colon-in-plain'),
-    pytest.param('a: 1\na: 2', {'a': 1}, id='E8-duplicate-key'),
+    # 重複キーは寛容モードでも不合格（先勝ちで黙認するとパーサ差分になる）。
+    pytest.param('a: 1\na: 2', None, id='E8-duplicate-key'),
     pytest.param(_nested_mapping(33), _nested_dict(31), id='E9-depth-block'),
     pytest.param("a: " + "[" * 33 + "]" * 33, {}, id='E9-depth-flow'),
     pytest.param('a: &anchor', {}, id='E10-anchor'),
@@ -719,14 +720,24 @@ def test_lenient_skips_failed_entry_and_its_deeper_lines() -> None:
     assert parse_yaml(text, lenient=True) == {"name": "x", "kind": "y"}
 
 
-def test_lenient_keeps_first_duplicate_key() -> None:
-    """重複キーは先勝ちで黙認する。"""
-    assert parse_yaml("a: 1\na: 2", lenient=True) == {"a": 1}
+def test_lenient_still_rejects_duplicate_keys() -> None:
+    """重複キーは寛容モードでも誤りにする。
+
+    `lenient` は**解釈できない**エントリを読み飛ばすための緩和であって、矛盾した
+    宣言を黙認するためのものではない。先勝ちで黙認していた頃は、検証器が
+    `tools: Read` を見る一方で後勝ちのホストは `tools: Bash` を見る、という
+    パーサ差分になり、検証を通り抜ける経路そのものになっていた。
+    """
+    # 最上位の解析失敗は None になる契約（`test_lenient_returns_none_when_root_fails`）。
+    # 呼び出し側（`ci_common.extract_frontmatter`）はこれを不合格として扱う。
+    assert parse_yaml("a: 1\na: 2", lenient=True) is None
 
 
-def test_lenient_keeps_first_duplicate_key_in_flow_mapping() -> None:
-    """フローマッピングの重複キーも先勝ちで黙認する。"""
-    assert parse_yaml("a: {k: 1, k: 2}", lenient=True) == {"a": {"k": 1}}
+def test_lenient_still_rejects_duplicate_keys_in_flow_mapping() -> None:
+    """フローマッピングの重複キーも寛容モードで誤りにする。"""
+    # フロー側は該当エントリごと読み飛ばされるので、キー `a` が丸ごと消える。
+    # 誤った値を持ったまま通すより安全な向き（必須キーの欠落として不合格になる）。
+    assert parse_yaml("a: {k: 1, k: 2}", lenient=True) == {}
 
 
 def test_lenient_returns_none_when_root_fails() -> None:
