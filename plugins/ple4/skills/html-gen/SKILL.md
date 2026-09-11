@@ -1,6 +1,6 @@
 ---
 name: html-gen
-description: shadcn/ui のデザイントークンで、モダンな Web サイト／ダッシュボードを新規作成する。配色（neutral / zinc / slate / stone / gray）、SVG チャートとアニメーション、レスポンシブ（320〜1920px）、ライト/ダーク切替が既定。「shadcn でサイトを」「モダンな HTML ダッシュボードを作って」「きれいなランディングページ」等で発火。既存サイトの単発修正は /bugfix。
+description: shadcn/ui のデザイントークンで、モダンな Web サイト／ダッシュボードを新規作成する。配色（neutral / zinc / slate / stone / gray）、SVG チャートとアニメーション、レスポンシブ（320〜1920px）、ライト/ダーク切替が既定。「shadcn でサイトを」「モダンな HTML ダッシュボードを作って」等で発火。既存サイトの単発修正は /bugfix。
 user-invocable: true
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: release-verify
-description: リリース前検証・配布ビルドのスモークを実起動で行う。全 skills/commands/agents/hooks の exit code と出力を実測し、指摘ごとに人間と修正の要否を裁定する。「リリース前検証」「プラグイン再インストール後の動作確認」「インストール済みビルドを実際に呼んで確認」「未起動コンポーネントを潰す」等で発火。定義ファイルを読んでのレビュー・drift 修正だけなら /maintain、脆弱性レビューなら /secure、loop-dev の収束品質を履歴から集計するなら /loop-audit を使う。
+description: リリース前検証・配布ビルドのスモークを実起動で行う。全 skills/commands/agents/hooks の exit code と出力を実測し、指摘ごとに人間と修正の要否を裁定する。「リリース前検証」「インストール済みビルドを実際に呼んで確認」等で発火。定義ファイルを読むだけのレビュー・drift 修正なら /maintain、脆弱性レビューなら /secure、収束品質の集計なら /loop-audit。
 user-invocable: true
 ---
 
