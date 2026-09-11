@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -610,12 +611,18 @@ class TestNonSpeechBlocks:
         assert "- 本当の依頼" in result
         assert "秘密の指示" not in result
 
-    def test_untyped_block_is_still_accepted(self, tmp_path: Path) -> None:
-        """type を持たないテキストブロックは未知 host 由来として通す。"""
+    def test_untyped_block_is_rejected(self, tmp_path: Path) -> None:
+        """type を持たないテキストブロックは本文へ採らない。
+
+        以前は「未知 host 由来として通す」設計だったが、その向きだと外部由来の
+        テキストが人間の承認ゲートを通らずに恒久注入へ届く（実測で到達を確認）。
+        allowlist へ反転した。実トランスクリプト 40 ファイルの実測では type 無し
+        ブロックは 0 件で、この変更による実依頼の損失は無い。
+        """
         entry = {"type": "user", "message": {"role": "user", "content": [{"text": "型なし依頼"}]}}
         path = _write_transcript(tmp_path, [entry])
 
-        assert "- 型なし依頼" in build_handoff({"transcript_path": path})
+        assert "型なし依頼" not in build_handoff({"transcript_path": path})
 
 
 class TestDuplicateRequests:
@@ -872,3 +879,50 @@ class TestTranscriptTrustHelpers:
         link.symlink_to(target)
 
         assert handoff_mod.is_trusted_transcript(link) is False
+
+
+class TestSpeechBlockAllowlist:
+    """transcript のブロック種別は allowlist で選ぶ（denylist から反転）。
+
+    denylist だった頃は「知らない種別＝通す」だったため、transcript に載る外部
+    由来テキスト（ツール出力・ファイル内容・web 取得結果）が**人間の承認ゲートを
+    通らずに恒久注入へ届いて**いた。handoff は `promote` を通らないので、ここが
+    唯一の防壁になる。
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "block"),
+        [
+            ("未知の type", {"type": "function_result", "text": "攻撃文字列"}),
+            ("未知の type 2", {"type": "tool_output", "text": "攻撃文字列"}),
+            ("type キー無し", {"text": "攻撃文字列"}),
+            ("既知の非発話", {"type": "tool_result", "text": "攻撃文字列"}),
+            ("dict ですらない", "攻撃文字列"),
+        ],
+    )
+    def test_non_speech_blocks_are_dropped(self, label: str, block: object) -> None:
+        """発話 allowlist に無いブロックは本文へ採らないこと。"""
+        assert handoff_mod._text_content([block]) == "", label
+
+    def test_speech_blocks_survive(self) -> None:
+        """正当なユーザー発話は残ること（過検出の対照）。
+
+        実トランスクリプト 40 ファイルの実測では `text` 3 件・生文字列 75 件で、
+        未知種別と type 無しは 0 件だった。allowlist による損失は実測ゼロ。
+        """
+        assert handoff_mod._text_content([{"type": "text", "text": "認証のバグを直して"}]) == "認証のバグを直して"
+        assert handoff_mod._text_content("レビューして") == "レビューして"
+
+    def test_unknown_block_type_is_logged_for_drift(self, caplog: pytest.LogCaptureFixture) -> None:
+        """未知の種別を落としたときだけ記録すること。
+
+        allowlist の失敗（未知 host の発話の取りこぼし）を、黙った劣化ではなく
+        診断できる状態にするための仕掛け。想定内の非発話は記録しない。
+        """
+        with caplog.at_level(logging.INFO, logger="ple4.mem.HANDOFF"):
+            handoff_mod._text_content([{"type": "function_result", "text": "x"}])
+            handoff_mod._text_content([{"type": "tool_result", "text": "x"}])
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("function_result" in m for m in messages)
+        assert not any("tool_result" in m for m in messages)

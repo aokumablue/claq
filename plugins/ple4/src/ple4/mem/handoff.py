@@ -502,10 +502,36 @@ def _parse_entry(line: str) -> dict[str, Any] | None:
     return entry if isinstance(entry, dict) else None
 
 
-# user ロールのエントリに混ざるが、ユーザーの発話ではないブロック種別。
-# ツール結果・ツール呼び出し・画像・思考は依頼ではないため本文に採らない。
-# 未知の種別は通す（host ごとにテキストブロックの type 名が異なりうるため、
-# allowlist にすると未知 host で実依頼を落とす）。
+# ユーザー発話として本文に採ってよいブロック種別（allowlist）。
+#
+# ここは **denylist から allowlist へ反転した**。以前は既知の非発話種別だけを
+# 除外し未知の種別は通していたが、その向きだと「知らない種別＝通す」なので、
+# transcript に載る外部由来テキスト（ツール出力・ファイル内容・web 取得結果）が
+# **人間の承認ゲートを一切通らずに恒久注入へ届く**。handoff は `promote` を
+# 通らないため、ここが唯一の防壁である。実測で 3 形が注入まで到達した:
+#
+#     {"type": "function_result", "text": ...}   → 注入された
+#     {"type": "tool_output",     "text": ...}   → 注入された
+#     {"text": ...}（type キー無し）              → 注入された
+#
+# 反転を選んだ根拠は、両方向の失敗のコストが非対称なこと。allowlist が外すと
+# 「引き継ぎが薄くなる」＝**見えて直せる**劣化で済むが、denylist が漏らすと
+# 「攻撃者が書いた文字列が依頼として注入される」＝**黙って通る**。ADR-0002 の
+# 「誤検出 > 誤通過」と `schema.py` の「最も危険な値を既定に据えない」も同じ向き。
+#
+# 旧コメントは「host ごとに type 名が異なりうるので allowlist は実依頼を落とす」
+# と危惧していた。実測（実トランスクリプト 40 ファイル）ではその損失はゼロ:
+#
+#     tool_result 359 / content が生文字列 75 / text 3 / 未知 0 / type 無し 0
+#
+# 生文字列の content は別経路（`isinstance(raw, str)`）で拾うため、この allowlist
+# が実際に選別しているのは `text` と `tool_result` だけである。
+_SPEECH_BLOCK_TYPES = frozenset({"text"})
+
+# 発話でないと**分かっている**種別。allowlist から外れた種別のうちこれに載る物は
+# 想定内の除外なので黙って落とす。載っていない種別を落としたときだけ記録して、
+# 「未知 host の発話を取りこぼしている」状態を観測可能にする（allowlist の失敗を
+# 見える劣化に留めるための仕掛け）。
 _NON_SPEECH_BLOCK_TYPES = frozenset({"tool_result", "tool_use", "image", "thinking"})
 
 
@@ -522,12 +548,33 @@ def _text_content(raw: object) -> str:
     if isinstance(raw, str):
         return raw
     if isinstance(raw, list):
-        return " ".join(
-            str(part.get("text", ""))
-            for part in raw
-            if isinstance(part, dict) and part.get("type") not in _NON_SPEECH_BLOCK_TYPES
-        )
+        return " ".join(str(part.get("text", "")) for part in raw if _is_speech_block(part))
     return ""
+
+
+def _is_speech_block(part: object) -> bool:
+    """content ブロックがユーザー発話として採ってよいものか判定する。
+
+    allowlist 判定。未知の種別は**採らない**（理由は `_SPEECH_BLOCK_TYPES`）。
+    想定外の種別を落としたときだけ記録し、未知 host の発話を取りこぼしている
+    状態を観測できるようにする。
+
+    Args:
+        part: content 配列の要素。
+
+    Returns:
+        発話ブロックなら True。
+    """
+    if not isinstance(part, dict):
+        return False
+    block_type = part.get("type")
+    if block_type in _SPEECH_BLOCK_TYPES:
+        return True
+    if block_type not in _NON_SPEECH_BLOCK_TYPES:
+        log.info(
+            "transcript の未知ブロック種別を発話として採らなかった: %r", block_type
+        )
+    return False
 
 
 def _user_message(entry: dict[str, Any]) -> str:
