@@ -531,7 +531,7 @@ flowchart TB
   subgraph internal["⚙️ Internal Layer"]
     direction LR
     AGT["Agents (9)<br/>reviewer / planner / code-refiner ..."]:::agent
-    SKL["Skills (19: fork 8 / inline 11)<br/>grillme / learn / secure ..."]:::skill
+    SKL["Skills (21: fork 8 / inline 13)<br/>grillme / learn / secure ..."]:::skill
   end
 
   subgraph persistence["💾 Persistence"]
