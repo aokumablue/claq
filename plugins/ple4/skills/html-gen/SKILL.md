@@ -23,6 +23,7 @@ user-invocable: true
 | 目視だけで完了する | `check_site.py` が PASS するまで完了報告しない |
 
 設計原則・レイアウト・コンポーネント・チャートの作法は `references/design.md`。
+チャート種別ごとの骨格と寸法は `references/chart-forms.md`。
 **React 版の shadcn/ui ではなくトークンを CSS へ写している**理由も同じ文書にある。
 
 ## 手順
@@ -87,6 +88,8 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 | 9 | 意味のある分類が 8 以上で省けない | 表 |
 
 時間は必ず横軸へ置く。縦横の向きは見た目の好みで決めない。
+**選んだ種別の SVG 骨格・viewBox 幅の上限・余白の取り方は `references/chart-forms.md`。**
+種別を決めても骨格が無ければ毎回違う書き方になるので、必ず写して使う。
 
 **軸の無いグラフは出荷しない。** 直交軸チャートには目盛りラベルと目盛り線を
 最低 3 本ずつ（通常 5〜7 本）置き、刻みは 1・2・5 の倍数にする。検査が落とす。

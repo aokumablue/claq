@@ -827,6 +827,20 @@ h4 {
   max-block-size: clamp(280px, 40vh, 520px);
 }
 
+/* 横棒は分類が増えるほど縦に伸びる。高さは分類数で決まるので上限を緩める。 */
+.chart--hbars {
+  max-block-size: clamp(320px, 58vh, 760px);
+}
+
+/* 100% 積み上げは 1 本なので低い。高さを与えすぎると帯が間延びする。 */
+.chart--stack {
+  max-block-size: clamp(150px, 22vh, 260px);
+}
+
+.chart--scatter {
+  max-block-size: clamp(300px, 44vh, 580px);
+}
+
 .axis-line {
   stroke: var(--border);
   stroke-width: 1;
@@ -911,8 +925,59 @@ h4 {
   animation-delay: calc(var(--i, 0) * 110ms);
 }
 
+/* 横棒は左の基線から伸びる。縦棒の transform-origin: bottom と対になる。 */
+.bar--h {
+  transform-box: fill-box;
+  transform-origin: left;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+
+/* 積み上げの区切りは面の色の 2px の隙間が作る。枠線を描かない。 */
+.seg {
+  transform-box: fill-box;
+  transform-origin: left;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+
+/* 散布図の点。面の色の 2px のリングで、重なっても輪郭が残る。 */
+.point {
+  transition:
+    r var(--duration-base) var(--ease-out),
+    opacity var(--duration-base) var(--ease-out);
+}
+
+.chart .point:hover {
+  r: 9;
+}
+
+/* 棒の先に置く値。目盛りと同じ文字トークンで、系列色は使わない。 */
+.bar-value {
+  fill: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 軸そのものの名前。目盛り値より 1 段弱く。 */
+.axis-title {
+  fill: var(--muted-foreground);
+  opacity: 0.85;
+}
+
+[data-animate="in"] .bar--h,
+[data-animate="in"] .seg {
+  animation: grow-x var(--duration-slow) var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+
+[data-animate="in"] .point {
+  animation: pop var(--duration-slow) var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
 /* 図の中でホバー中の系列だけを残し、他を沈める。JS を使わない強調。 */
 .chart:has(.bar:hover) .bar:not(:hover),
+.chart:has(.bar--h:hover) .bar--h:not(:hover),
+.chart:has(.seg:hover) .seg:not(:hover),
+.chart:has(.point:hover) .point:not(:hover),
 .chart:has(.arc:hover) .arc:not(:hover) {
   opacity: 0.32;
 }
@@ -1112,6 +1177,12 @@ tbody tr:last-child {
 @keyframes wipe {
   from {
     clip-path: inset(0 100% 0 0);
+  }
+}
+
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
   }
 }
 
