@@ -84,6 +84,39 @@ class TestContextAlwaysOnBudget:
 
         assert _repo_check_pass(tmp_path, "context-always-on-budget") is False
 
+    def test_slash_only_description_is_not_counted(self, tmp_path: Path) -> None:
+        """``disable-model-invocation: true`` の超過 description は計上しないこと。
+
+        この宣言はモデルの自動発火を止めると同時に description をモデルの
+        コンテキストから外すため、毎セッション払うコストがゼロになる。計上すると
+        払っていないコストで予算を圧迫し、スラッシュ起動専用の skill を足すたびに
+        他の surface の description を削る羽目になる。上の不合格 fixture と
+        同じ長さの description を使い、差が宣言 1 行だけであることを固定する。
+        """
+        folded = "\n".join(f"  {'あ' * 80}" for _ in range(60))
+        _write_skill(
+            tmp_path,
+            "huge",
+            f"name: huge\ndisable-model-invocation: true\ndescription: >\n{folded}",
+        )
+
+        assert _repo_check_pass(tmp_path, "context-always-on-budget") is True
+
+
+def test_real_repo_passes_every_repo_check() -> None:
+    """本リポジトリが自身の repo 監査を全項目通過すること。
+
+    これが無かった頃、監査の不合格は ``max_score`` を読むためだけに監査を
+    ``check=True`` で起動していた `tests/test_md_references.py` の 2 件へ
+    ``CalledProcessError`` として現れていた。どちらのテスト名にも不合格の原因を
+    示す語が無く、辿るには監査を手で起動して failing check を探すしかなかった。
+    不合格はここで、**落ちた check の id を名指しして**報告する。
+    """
+    plugin_root = Path(__file__).resolve().parents[2]
+    failing = sorted(check["id"] for check in get_repo_checks(plugin_root) if not check["pass"])
+
+    assert failing == [], f"repo 監査の不合格 check: {failing}"
+
 
 class TestCoverageGateConfigured:
     """`eval-tests-presence`（2pts）はカバレッジ閾値の有効値を要求する。

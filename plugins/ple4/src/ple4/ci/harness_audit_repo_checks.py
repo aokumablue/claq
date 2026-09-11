@@ -173,17 +173,26 @@ def always_on_description_chars(root_dir: str | Path) -> int:
     合否が入力に応じて反転することは
     `tests/ci/test_harness_audit_score_pairs.py` の対の fixture が固定する。
 
+    ``disable-model-invocation: true`` の surface は**計上しない**。この宣言は
+    モデルによる自動発火を止めると同時に description をモデルのコンテキストから
+    外すので、毎セッション払うコストがゼロになる。計上すると、払っていない
+    コストで予算を圧迫して他の surface の description を削らせることになり、
+    予算の意味が逆転する。スラッシュ起動専用の skill を足すたびに always-on
+    予算が減る状態は、この関数が測っているつもりの量とは別物である。
+
     Args:
         root_dir: 監査対象のルートディレクトリ
 
     Returns:
         description の合計文字数。frontmatter が無い・``description`` が文字列で
-        ないファイルは 0 として扱う。
+        ない・``disable-model-invocation: true`` のファイルは 0 として扱う。
     """
     total = 0
     for path in _iter_surface_files(root_dir):
         frontmatter = extract_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
-        description = frontmatter.get("description") if frontmatter else None
+        if not frontmatter or frontmatter.get("disable-model-invocation") is True:
+            continue
+        description = frontmatter.get("description")
         if isinstance(description, str):
             total += len(description)
     return total

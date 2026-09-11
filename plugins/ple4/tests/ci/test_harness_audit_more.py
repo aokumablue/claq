@@ -669,12 +669,42 @@ def test_summarize_self_check_detects_broken_aggregation(monkeypatch: pytest.Mon
 
 
 def test_always_on_description_chars_skips_files_without_description(tmp_path: Path) -> None:
-    """description 行を持たない定義ファイルは加算対象にならないこと。"""
-    skills = tmp_path / "skills" / "nodesc"
-    skills.mkdir(parents=True)
-    (skills / "SKILL.md").write_text("# no frontmatter here\njust body\n", encoding="utf-8")
+    """description を持たない定義ファイルは加算対象にならないこと。
+
+    frontmatter が無い場合と、frontmatter はあるが ``description`` が無い場合の
+    両方を置く。前者だけだと「frontmatter が読めなければ 0」の分岐しか通らず、
+    ``description`` が文字列でない経路が未検査のまま残る。
+    """
+    nofm = tmp_path / "skills" / "nodesc"
+    nofm.mkdir(parents=True)
+    (nofm / "SKILL.md").write_text("# no frontmatter here\njust body\n", encoding="utf-8")
+
+    nokey = tmp_path / "skills" / "nokey"
+    nokey.mkdir(parents=True)
+    (nokey / "SKILL.md").write_text("---\nname: nokey\n---\n\n本文\n", encoding="utf-8")
 
     assert always_on_description_chars(tmp_path) == 0
+
+
+def test_always_on_description_chars_skips_slash_only_surfaces(tmp_path: Path) -> None:
+    """``disable-model-invocation: true`` の surface は加算対象にならないこと。
+
+    同じ description を宣言の有無だけ変えて 2 度測り、差が宣言 1 行に由来する
+    ことを固定する。
+    """
+    counted = tmp_path / "counted" / "skills" / "a"
+    counted.mkdir(parents=True)
+    (counted / "SKILL.md").write_text("---\nname: a\ndescription: あいうえお\n---\n", encoding="utf-8")
+
+    skipped = tmp_path / "skipped" / "skills" / "a"
+    skipped.mkdir(parents=True)
+    (skipped / "SKILL.md").write_text(
+        "---\nname: a\ndescription: あいうえお\ndisable-model-invocation: true\n---\n",
+        encoding="utf-8",
+    )
+
+    assert always_on_description_chars(tmp_path / "counted") == 5
+    assert always_on_description_chars(tmp_path / "skipped") == 0
 
 
 def test_target_kind_mismatch_points_at_the_plugin_provider_dir(tmp_path: Path) -> None:

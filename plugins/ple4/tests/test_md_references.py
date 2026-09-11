@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -563,6 +565,32 @@ def test_md_shell_helper_invocations_are_defined() -> None:
     assert missing == [], "未定義のシェルヘルパ呼び出し:\n" + "\n".join(sorted(set(missing)))
 
 
+def _run_repo_audit() -> subprocess.CompletedProcess[str]:
+    """repo 監査を起動し、stdout が JSON として読める状態で返す。
+
+    ``check=True`` は使わない。監査は「check が 1 件でも不合格」でも exit 1 を
+    返すため、``max_score``（不合格でも必ず出力される値）を読むだけのテストが
+    無関係な不合格に巻き込まれて ``CalledProcessError`` で落ちていた。テスト名は
+    どちらも `max_score` を名乗るので、原因が監査の不合格だと分からなかった。
+    監査全体の合否は `tests/ci/test_harness_audit_score_pairs.py` の
+    ``test_real_repo_passes_every_repo_check`` が check id を名指しで見る。
+
+    Returns:
+        完了したプロセス。stdout に監査レポートの JSON を含む。
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "ple4.ci.harness_audit", "repo", "--format", "json", "--root", str(_ROOT)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.stdout.strip(), (
+        f"監査が JSON を出力しなかった（exit={result.returncode}）: {result.stderr.strip()}"
+    )
+    return result
+
+
 def test_harness_tuner_schema_example_matches_real_max_score() -> None:
     """harness-tuner.md の baseline スキーマ例の `max_score` が実装と一致すること。
 
@@ -572,8 +600,6 @@ def test_harness_tuner_schema_example_matches_real_max_score() -> None:
     書いた以上、機械で突き合わせる。
     """
     import json
-    import subprocess
-    import sys
 
     schema = json.loads(
         re.search(
@@ -582,13 +608,7 @@ def test_harness_tuner_schema_example_matches_real_max_score() -> None:
             re.DOTALL,
         ).group(1)
     )
-    result = subprocess.run(
-        [sys.executable, "-m", "ple4.ci.harness_audit", "repo", "--format", "json", "--root", str(_ROOT)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=True,
-    )
+    result = _run_repo_audit()
 
     assert schema["max_score"] == json.loads(result.stdout)["max_score"]
 
@@ -602,16 +622,8 @@ def test_md_max_score_mentions_match_real_audit() -> None:
     ADR-0011 決定 6（定義に書いた検証規則は CI で実測する）の適用。
     """
     import json
-    import subprocess
-    import sys
 
-    result = subprocess.run(
-        [sys.executable, "-m", "ple4.ci.harness_audit", "repo", "--format", "json", "--root", str(_ROOT)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=True,
-    )
+    result = _run_repo_audit()
     real = json.loads(result.stdout)["max_score"]
     pattern = re.compile(r"`repo` では(\d+)")
     stale = [
