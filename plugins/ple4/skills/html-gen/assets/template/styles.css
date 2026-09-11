@@ -811,18 +811,20 @@ h4 {
   inline-size: 100%;
   min-inline-size: 460px;
   block-size: auto;
-  max-block-size: 320px;
+  min-block-size: 240px;
+  max-block-size: clamp(320px, 46vh, 620px);
   overflow: visible;
 }
 
 .chart--donut {
   min-inline-size: 0;
-  max-block-size: 220px;
+  min-block-size: 180px;
+  max-block-size: clamp(200px, 26vh, 340px);
 }
 
 .chart--bars {
   min-inline-size: 360px;
-  max-block-size: 260px;
+  max-block-size: clamp(280px, 40vh, 520px);
 }
 
 .axis-line {
@@ -833,7 +835,6 @@ h4 {
 .grid-line {
   stroke: color-mix(in oklab, var(--border) 70%, transparent);
   stroke-width: 1;
-  stroke-dasharray: 3 4;
 }
 
 .axis-text {
@@ -1215,9 +1216,6 @@ tbody tr:last-child {
     display: inline-flex;
   }
 
-  .chart {
-    max-block-size: 340px;
-  }
 }
 
 @media (min-width: 1280px) {

@@ -1081,3 +1081,84 @@ def test_evals_reference_the_shadcn_contract() -> None:
     assert "Material Design" not in text
     named = {base_id for base_id in BASES if f"data-base is {base_id}" in text}
     assert len(named) >= 3
+
+
+def test_chart_axis_removal_is_reported(tmp_path: Path) -> None:
+    """目盛りラベル・目盛り線を消すとそれぞれ違反になる。
+
+    テンプレート同梱のチャートは正しい軸を持つが、モデルが新しく書いた図から
+    軸が落ちても検知器が無い間は全項目が合格していた。両方向を固定する。
+    """
+    dest = _copy_site(tmp_path)
+    assert "目盛りラベル" in _edit(dest, "index.html", ('class="axis-text"', 'class="ax"'))
+
+    dest = _copy_site(tmp_path, "s2")
+    assert "目盛り線" in _edit(dest, "index.html", ('class="grid-line"', 'class="gl"'))
+
+
+def test_cartesian_chart_detection_excludes_radial_and_stretched() -> None:
+    """直交軸の判定がマークの種類で行われること。
+
+    ドーナツは角度で、スパークラインは潰した面で符号化するので直交軸を持たない。
+    class 名ではなくマークで判定するため、命名を変えても判定は動かない。
+    """
+    assert check_site._is_cartesian_chart('<svg><rect class="bar" /></svg>') is True
+    assert check_site._is_cartesian_chart('<svg><path class="series-line" /></svg>') is True
+    assert check_site._is_cartesian_chart('<svg><circle class="arc" /></svg>') is False
+    assert (
+        check_site._is_cartesian_chart(
+            '<svg preserveAspectRatio="none"><path class="series-area" /></svg>'
+        )
+        is False
+    )
+
+
+def test_stretched_svg_with_text_is_reported() -> None:
+    """潰し描画の SVG が文字を持つと違反になる（縦横独立に伸びて歪む）。"""
+    stretched = '<svg preserveAspectRatio="none"><text>1月</text></svg>'
+    assert check_site._validate_stretched_svg_text(stretched) != []
+    assert check_site._validate_stretched_svg_text('<svg preserveAspectRatio="none"></svg>') == []
+
+
+def test_chart_form_rules_are_enforced() -> None:
+    """数えれば決まる種別規則 3 つがそれぞれ違反になる。"""
+    donut = "<svg>" + '<circle class="arc" />' * 6 + "</svg>"
+    assert "ドーナツ" in "\n".join(check_site._validate_chart_form(donut))
+
+    single = '<svg><rect class="bar" width="10" height="50" /></svg>'
+    assert "棒 1 本" in "\n".join(check_site._validate_chart_form(single))
+
+    many = "<svg>" + '<rect class="bar" width="10" height="50" />' * 8 + "</svg>"
+    assert "縦棒" in "\n".join(check_site._validate_chart_form(many))
+
+    wide = "<svg>" + '<rect class="bar" width="50" height="10" />' * 8 + "</svg>"
+    assert check_site._validate_chart_form(wide) == []
+
+
+def test_bar_orientation_is_read_from_dimensions() -> None:
+    """棒の向きは class 名ではなく寸法で判定される。"""
+    assert check_site._is_vertical_bar('<rect class="bar" width="10" height="50" />') is True
+    assert check_site._is_vertical_bar('<rect class="bar" width="50" height="10" />') is False
+    assert check_site._is_vertical_bar('<rect class="bar" />') is False
+
+
+def test_fixed_chart_height_is_reported(tmp_path: Path) -> None:
+    """チャート高さの固定 px 上限が違反になる。
+
+    `_validate_fluid_width` が横方向で禁じているのと同じ誤りを縦方向でも落とす。
+    ビューポートに追従する式（clamp / vh）は通る。
+    """
+    dest = _copy_site(tmp_path)
+    assert "max-block-size" in _edit(
+        dest, "styles.css", ("max-block-size: clamp(320px, 46vh, 620px)", "max-block-size: 320px")
+    )
+    assert check_site._validate_fluid_height("a{max-block-size: clamp(320px, 46vh, 620px);}") == []
+    assert check_site._validate_fluid_height("a{max-block-size: 60vh;}") == []
+
+
+def test_dashed_gridline_is_reported(tmp_path: Path) -> None:
+    """破線の目盛り線が違反になる（破線は予測・しきい値の記法）。"""
+    dest = _copy_site(tmp_path)
+    assert "破線" in _edit(
+        dest, "styles.css", ("  stroke-width: 1;\n}\n\n.axis-text", "  stroke-width: 1;\n  stroke-dasharray: 3 4;\n}\n\n.axis-text")
+    )

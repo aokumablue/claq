@@ -597,6 +597,173 @@ def _validate_stylesheets(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
     return []
 
 
+#: 直交軸チャート 1 枚に要求する目盛りラベルと目盛り線の最小本数。
+#: 2 本は範囲の両端を述べるだけで、間隔（1 目盛りがいくらか）を伝えない。
+#: 下限・上限・内側 1 本の 3 本で初めて尺度になる。一般的な推奨は 5〜12 本なので
+#: これは目標値ではなく床である。
+_MIN_AXIS_TICKS = 3
+
+#: 直交軸を持つと判定するマークの class。棒・折れ線・面はいずれも値を軸上の
+#: 位置で符号化するため、軸が無ければ数値を読めない。`arc`（ドーナツ）は角度で
+#: 符号化するので直交軸を持たず、`spark-*` は後述の潰し判定で除外される。
+_CARTESIAN_MARK_CLASSES = ("bar", "series-line", "series-area")
+
+
+def _iter_svg_blocks(html: str) -> list[str]:
+    """HTML 中の ``<svg>...</svg>`` を 1 枚ずつ取り出す。
+
+    このテンプレートの SVG は入れ子にならないため、最短一致で切り出せる。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        ``<svg`` から ``</svg>`` までを含む文字列の一覧
+    """
+    return re.findall(r"<svg\b.*?</svg>", html, re.DOTALL)
+
+
+def _is_cartesian_chart(svg: str) -> bool:
+    """その SVG が直交軸で値を符号化しているかを返す。
+
+    class 名ではなくマークの種類で判定する。「ドーナツだから除外」のような
+    名前による除外は、次に書かれるチャートが同じ class を継がなかった時点で
+    破れるため。
+
+    Args:
+        svg: ``<svg>`` 1 枚分の文字列
+
+    Returns:
+        棒・折れ線・面のいずれかを含み、かつ潰し描画でなければ True
+    """
+    if 'preserveAspectRatio="none"' in svg:
+        return False
+    return any(f'class="{name}' in svg for name in _CARTESIAN_MARK_CLASSES)
+
+
+def _validate_chart_axes(html: str) -> list[str]:
+    """直交軸チャートが目盛りを持つことを検査する。
+
+    テンプレート同梱のチャートは正しい軸を持っていたが、モデルが新しく書いた
+    チャートから軸が丸ごと落ちても、この検知器が無い間は全項目が合格していた。
+    「図はあるが数値が読めない」は、図が無いのと同じかそれより悪い（読めた気に
+    させる分だけ悪い）。散文で禁じるだけでは残るので機械的に落とす。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    violations: list[str] = []
+    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
+        if not _is_cartesian_chart(svg):
+            continue
+        ticks = svg.count('class="axis-text')
+        grids = svg.count('class="grid-line')
+        if ticks < _MIN_AXIS_TICKS:
+            violations.append(
+                f"{index} 枚目の直交軸チャートの目盛りラベルが {ticks} 個"
+                f"（{_MIN_AXIS_TICKS} 個以上。軸の数値が無いと図から値を読めない）"
+            )
+        if grids < _MIN_AXIS_TICKS:
+            violations.append(
+                f"{index} 枚目の直交軸チャートの目盛り線が {grids} 本"
+                f"（{_MIN_AXIS_TICKS} 本以上。値の尺度が無いと大小しか分からない）"
+            )
+    return violations
+
+
+#: ドーナツに載せてよい分類の上限。角度と面積の比較は長さの比較より精度が落ちる
+#: ため、3〜5 分類で差が大きいときにだけ成立する。6 以上は積み上げ横棒へ倒す。
+_MAX_DONUT_SEGMENTS = 5
+
+#: 縦棒に載せてよい分類の上限。これを超えるとラベルを回転させるか省略すること
+#: になり、どちらも読む速度を落とす。横棒（降順）へ倒す。
+_MAX_VERTICAL_BARS = 7
+
+
+def _validate_chart_form(html: str) -> list[str]:
+    """グラフ種別の選定規則のうち、数えれば決まるものを検査する。
+
+    種別の選定は本来データの意味に依るので全部は機械化できない。ここで見るのは
+    **データを見なくても数えるだけで違反と分かる 3 つ**に限る。この 3 つは
+    `references/design.md`「グラフ種別の選定」の表で最も破られやすい行でもある。
+
+    意味に依る行（時系列を折れ線にするか縦棒にするか等）は散文の側が持つ。
+    ここで無理に推測すると、正しいチャートを誤って落とす。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    violations: list[str] = []
+    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
+        arcs = svg.count('class="arc')
+        if arcs > _MAX_DONUT_SEGMENTS:
+            violations.append(
+                f"{index} 枚目のドーナツが {arcs} 分類"
+                f"（{_MAX_DONUT_SEGMENTS} 以下。超えるなら 100% 積み上げ横棒にする）"
+            )
+        bars = re.findall(r'<rect class="bar[^>]*>', svg)
+        if len(bars) == 1:
+            violations.append(
+                f"{index} 枚目が棒 1 本のグラフ（値が 1 つなら指標カードにする）"
+            )
+        vertical = [bar for bar in bars if _is_vertical_bar(bar)]
+        if len(vertical) > _MAX_VERTICAL_BARS:
+            violations.append(
+                f"{index} 枚目の縦棒が {len(vertical)} 分類"
+                f"（{_MAX_VERTICAL_BARS} 以下。超えるならラベルが読める横棒にする）"
+            )
+    return violations
+
+
+def _is_vertical_bar(rect: str) -> bool:
+    """``<rect class="bar">`` が縦棒かを返す。
+
+    向きは class 名ではなく寸法で判定する。縦棒は高さが幅より大きく、横棒は
+    その逆になる。class 名で判定すると、命名を変えただけで検査が素通りする。
+
+    Args:
+        rect: ``<rect class="bar" ...>`` 1 個分の文字列
+
+    Returns:
+        高さが幅より大きければ True。どちらかが読めなければ False
+    """
+    width = re.search(r'\bwidth="([\d.]+)"', rect)
+    height = re.search(r'\bheight="([\d.]+)"', rect)
+    if not width or not height:
+        return False
+    return float(height.group(1)) > float(width.group(1))
+
+
+def _validate_stretched_svg_text(html: str) -> list[str]:
+    """潰し描画の SVG に文字を置いていないことを検査する。
+
+    ``preserveAspectRatio="none"`` は viewBox を縦横独立に引き伸ばすため、
+    中の ``<text>`` も一緒に歪む（MDN: 縦横比を保たない指定は文字を引き伸ばす）。
+    スパークラインのように文字を持たない図でだけ使ってよい指定であり、軸ラベルを
+    持つチャートに使うと目盛りが読めない形に潰れる。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    violations: list[str] = []
+    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
+        if 'preserveAspectRatio="none"' in svg and "<text" in svg:
+            violations.append(
+                f"{index} 枚目の SVG が preserveAspectRatio=\"none\" のまま <text> を持つ"
+                "（縦横独立に伸びるため文字が歪む）"
+            )
+    return violations
+
+
 def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> list[str]:
     """ダッシュボードのデータ表現契約を検査する。"""
     violations: list[str] = []
@@ -613,6 +780,9 @@ def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> li
         violations.append("棒グラフの原点 0（data-origin=0）が無い")
     if "<table" not in html:
         violations.append("表が無い（図を読めない利用者への同等手段）")
+    violations.extend(_validate_chart_axes(html))
+    violations.extend(_validate_stretched_svg_text(html))
+    violations.extend(_validate_chart_form(html))
     return violations
 
 
@@ -664,6 +834,8 @@ def _validate_styles(css: str) -> list[str]:
     violations.extend(_validate_reduced_motion(css))
     violations.extend(_validate_resting_state(css))
     violations.extend(_validate_fluid_width(css))
+    violations.extend(_validate_fluid_height(css))
+    violations.extend(_validate_chart_chrome(css))
     return violations
 
 
@@ -724,6 +896,60 @@ def _validate_fluid_width(css: str) -> list[str]:
     for match in re.finditer(r"(?<![(\w])max-width:\s*(\d{3,})px", css):
         if int(match.group(1)) < 1600:
             violations.append(f"max-width {match.group(1)}px が広い画面を捨てている")
+    return violations
+
+
+def _validate_fluid_height(css: str) -> list[str]:
+    """チャートの高さを固定 px で頭打ちにしていないことを検査する。
+
+    `_validate_fluid_width` が横方向で禁じているのと同じ誤りが、縦方向では
+    見逃されていた。``block-size: auto`` の SVG は viewBox の比率どおりに伸びる
+    ので、そこへ固定 px の上限を掛けると広い画面ほど
+    ``preserveAspectRatio`` のレターボックスで**図だけが小さく残る**。
+    「大きな画面なのにグラフが極端に小さい」の正体がこれである。
+
+    上限そのものは要る（超ワイドで 900px 超の図になっても読みやすくはない）。
+    禁じるのは上限が**ビューポートに追従しない**ことなので、``clamp()`` /
+    ``vh`` / ``%`` を含む式は通す。
+
+    Args:
+        css: 検査対象の CSS 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    violations: list[str] = []
+    for match in re.finditer(r"max-block-size:\s*([^;}]+)", css):
+        value = match.group(1).strip()
+        if re.fullmatch(r"\d+px", value):
+            violations.append(
+                f"max-block-size: {value} が固定（ビューポートに追従しないため"
+                "広い画面で図だけが小さく残る。clamp() / vh を使う）"
+            )
+    return violations
+
+
+def _validate_chart_chrome(css: str) -> list[str]:
+    """目盛り線が実線のヘアラインであることを検査する。
+
+    破線のグリッドは「予測値」「しきい値」を意味する記法として読まれるため、
+    ただの目盛りに使うと意味を足してしまい、線の本数ぶんノイズが増える。
+    目盛り線と軸線は面から 1 段だけ外した色の実線 1px にする。
+
+    Args:
+        css: 検査対象の CSS 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    violations: list[str] = []
+    for selector in (".grid-line", ".axis-line"):
+        block = re.search(rf"{re.escape(selector)}\s*\{{(.*?)\}}", css, re.DOTALL)
+        if block and "stroke-dasharray" in block.group(1):
+            violations.append(
+                f"{selector} が破線（stroke-dasharray）"
+                "（破線は予測・しきい値の記法。目盛りは実線のヘアラインにする）"
+            )
     return violations
 
 
