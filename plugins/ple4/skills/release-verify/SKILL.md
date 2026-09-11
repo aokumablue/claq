@@ -57,7 +57,7 @@ echo "measured=$MEASURED_ROOT via=$VIA gate=$GATE_ROOT"
 
 **2 つの root が一致しないなら、リポジトリで通った修正は測定 root にまだ入っていない。** 実例として、配布ビルドとリポジトリ HEAD で `lib/harness.py` と `hooks/pre_bash_commit_quality.py` が相違していた（リリース後に入ったバイパス修正が配布ビルドへ届いていない）。一致しない状態で測った指摘は、どちらの root のものかを添えない限り結論が入れ替わる。
 
-**起動経路によって実行される木が変わる。** `$PLUGIN_ROOT/src/ple4/launcher.py` 経由の起動は launcher が自分の `src` を `sys.path` の先頭へ挿すため **PLUGIN_ROOT が指す木**を実行する。一方 `python3 -m ple4.モジュール名` は **PLUGIN_ROOT を一切見ない** — 開発 venv では editable install 経由で**リポジトリ作業ツリー**を実行し、venv 外の素の `python3` では import 自体が失敗する（実測: `ple4` の spec が None）。どちらにせよ配布ビルドは実行しない。**この 2 つを同じ表の中で混ぜない** — 混ぜると「配布ビルドを測った」と書いた行にリポジトリの実測値が混入する。
+**起動経路によって実行される木が変わる。** `$PLUGIN_ROOT/src/ple4/launcher.py` 経由の起動は launcher が自分の `src` を `sys.path` の先頭へ挿すため **PLUGIN_ROOT が指す木**を実行する。一方 `python3 -m ple4.モジュール名` は **PLUGIN_ROOT を一切見ない** — 開発 venv では editable install 経由で**リポジトリ作業ツリー**を実行し、venv 外の素の `python3` では import 自体が失敗する（実測: `ple4` の spec が None）。どちらの経路でも配布ビルドは実行されない。**この 2 つを同じ表の中で混ぜない** — 混ぜると「配布ビルドを測った」と書いた行にリポジトリの実測値が混入する。
 
 Bash 呼び出しごとに cwd と環境変数はリセットされる。**上の `MEASURED_ROOT` も次の呼び出しには残らない** — 解決した絶対パスをレポートの `Build:` 行へ書き取り、以後は各呼び出しの先頭でその**絶対パスリテラル**を代入する（env ポインタの再解決は PPID に依存し、呼び出しごとに同じ答えを返す保証がない）。
 
@@ -164,7 +164,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
 |---|---|
 | commands | `/<name>` として起動する（`user-invocable` の制約は無い） |
 | skills（`user-invocable: true`） | 同じく `/<name>` で直接起動する |
-| skills（`user-invocable: false`） | 同じく `/<name>` で直接起動できる（フラグは `/` 補完への露出だけを抑止する）。委譲経路自体を測る回だけ、ステップ1 の対応表にある委譲元コマンドを起動して経由させる |
+| skills（`user-invocable: false`） | Skill ツールへスキル名を指定して起動する（`/` 補完には出ないが Skill ツール経由は妨げられない）。委譲経路自体を測る回だけ、ステップ1 の対応表にある委譲元コマンドを起動して経由させる |
 | agents | Agent ツールで `subagent_type` に名前を指定して起動する。起動前提を持つ agent（`grader` はトランスクリプト、`comparator` は同一課題の 2 出力、`bench-analyzer` は決着済みの比較）は、前提を満たす実材料を用意してから呼ぶ。前提を捏造して呼ぶと「起動した」記録だけが残る |
 
 記録は 2 列に分ける:

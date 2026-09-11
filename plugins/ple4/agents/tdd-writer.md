@@ -14,7 +14,7 @@ RED → GREEN → REFACTOR → REPEAT
 
 - 各 GREEN 到達ごとに検証を通してコミット可能な状態にし、1 サイクル 1 論理変更で進める
 - 合否報告はテスト実行の出力を証跡とし、実行していないテストの成否は報告しない
-- timeout/subprocess 実装にも例外なく RED → GREEN → REFACTOR を適用する。タイムアウト分岐・正常終了・非ゼロ終了・例外・後始末を別々に RED で再現してから最小実装に進む
+- timeout/subprocess 実装も RED → GREEN → REFACTOR の対象から外さない（下の characterization だけが適用除外）。タイムアウト分岐・正常終了・非ゼロ終了・例外・後始末を別々に RED で再現してから最小実装に進む
 
 ### 例外: 既存の正しい実装へテストを足す場合（characterization）
 

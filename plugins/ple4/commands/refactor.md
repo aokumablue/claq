@@ -50,7 +50,7 @@ command: /refactor
 
 デッドコード削除。委譲時は依頼文へ `mode: clean` と `effective_scope`（対象ファイルパス一覧）を明示する（親の手順書に書いた分岐は子へ届かないため、モードは依頼文で渡す）。各ファイル適用ごとにテスト実行→失敗時は `git checkout -- <file>` で単ファイルリバートして継続。
 
-`--mode=clean` 指定時はステップ3を実行後、ステップ5（perf）を飛ばしステップ6（review + secure）→ステップ7 final gate で終了。CRITICAL/HIGH ブロック判定は部分モードでも省略しない。
+`--mode=clean` 指定時はステップ3を実行後、ステップ4（simplify）とステップ5（perf）を飛ばしステップ6（review + secure）→ステップ7 final gate で終了。CRITICAL/HIGH ブロック判定は部分モードでも省略しない。
 
 ## ステップ4: simplify（並列, `ple4:code-refiner`）
 

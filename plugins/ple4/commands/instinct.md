@@ -122,7 +122,7 @@ ple4_mem_learn --key sqlite-wal-sidecars --kind pitfall --scope repo \
   --body "close 時に自動削除されない SQLite ビルドがあるため、DB 再作成後は明示的に unlink する。"
 ```
 
-同じ `key` への `learn` は上書き更新になる（重複行は作られない）。
+同じ `key` への `learn` は上書き更新になる（重複行は作られない）。ただし既存カードが `active` なら更新されず usage error になる。
 `--status` フラグは無い（H-01: 常に `status=pending` で登録され、JSON で
 `status`/`source` を明示しても採用されず usage error になる）。
 

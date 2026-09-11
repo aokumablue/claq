@@ -6,7 +6,7 @@ tools: Read, Grep, Glob
 
 # ポストホック分析エージェント
 
-本エージェントは2つのモードを持つ。入力 `mode` で明示選択する（省略時は入力形状から自動判別: `comparison_result_path` があれば `posthoc_comparison`、`benchmark_data_path` があれば `benchmark_analysis`。両方/どちらも無い場合は **FAIL**）。
+本エージェントは2つのモードを持つ。入力 `mode` で明示選択する（省略時は入力形状から自動判別: `comparison_result_path` があれば `posthoc_comparison`、`benchmark_data_path` があれば `benchmark_analysis`。両方が渡された場合とどちらも渡されない場合は **FAIL**）。
 
 | `mode` | 目的 | 必須入力 | 出力形式 |
 |---|---|---|---|

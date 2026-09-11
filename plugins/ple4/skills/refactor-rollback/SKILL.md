@@ -8,7 +8,7 @@ user-invocable: false
 
 ## 発動タイミング
 
-- `/refactor` preflight・複数ファイルにまたがる変更・並列サブエージェント実行前
+- `refactor-prep` の出力を受けた後の `/refactor` preflight（複数ファイルにまたがる変更・並列サブエージェント実行の前）
 
 失敗時に迷わず復旧できるよう、**ファイル単位**の Rollback Blueprint を事前に固定する。
 
