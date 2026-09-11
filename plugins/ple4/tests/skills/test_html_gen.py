@@ -1213,3 +1213,55 @@ def test_chart_without_scroll_wrapper_is_reported() -> None:
     assert check_site._validate_chart_scroll_wrapper('<div><svg class="chart">') != []
     assert check_site._validate_chart_scroll_wrapper('<div class="chart-scroll"><svg class="chart">') == []
     assert check_site._validate_chart_scroll_wrapper('<div><svg class="chart chart--donut">') == []
+
+
+def test_scatter_and_stack_marks_are_checked_for_axes() -> None:
+    """散布点・積み上げ区画も直交軸として軸検査の対象になること。
+
+    `chart-forms.md` へ散布図と 100% 積み上げ横棒を足したとき、マーク class の
+    一覧へ `point` / `seg` を足し忘れ、その 2 形だけが軸ゼロでも素通りしていた。
+    形の語彙を広げて検知器を広げないと、新しい形だけが無検査になる。
+    """
+    scatter = '<svg class="chart chart--scatter" viewBox="0 0 720 380"><circle class="point" r="6"/></svg>'
+    stack = '<svg class="chart chart--stack" viewBox="0 0 720 128"><rect class="seg" width="100"/></svg>'
+    hbar = '<svg class="chart chart--hbars" viewBox="0 0 720 422"><rect class="bar--h" width="500"/></svg>'
+    for name, svg in (("散布図", scatter), ("積み上げ", stack), ("横棒", hbar)):
+        assert check_site._is_cartesian_chart(svg) is True, name
+        assert len(check_site._validate_chart_axes(svg)) == 2, name
+
+
+def test_tick_steps_must_be_nice_numbers() -> None:
+    """目盛りの刻みが 1・2・5 の倍数でなければ違反になること。
+
+    テンプレート自身が刻み 45 と 150（最大値を本数で割った端数）で出荷されていた。
+    散文の規則だけでは守られない。
+    """
+    def svg(*labels: str) -> str:
+        cells = "".join(f'<text class="axis-text" x="10" y="10">{label}</text>' for label in labels)
+        return f"<svg>{cells}</svg>"
+
+    assert check_site._validate_tick_steps(svg("0", "150", "300", "450")) != []
+    assert check_site._validate_tick_steps(svg("60", "105", "150")) != []
+    assert check_site._validate_tick_steps(svg("0", "100", "200", "300")) == []
+    assert check_site._validate_tick_steps(svg("0", "2,000", "4,000")) == []
+    assert check_site._validate_tick_steps(svg("0", "5", "10")) == []
+    # 不等間隔
+    assert "等間隔" in "\n".join(check_site._validate_tick_steps(svg("0", "100", "400")))
+    # 分類ラベルは数値として読めないので対象外。目盛り 1 本以下も対象外
+    assert check_site._validate_tick_steps(svg("1月", "2月", "3月")) == []
+    assert check_site._validate_tick_steps(svg("100")) == []
+
+
+def test_nice_step_rejects_non_decade_mantissas() -> None:
+    """刻みの仮数判定が 1・2・5（と 10）だけを通すこと。"""
+    assert check_site._is_nice_step(0.5) is True
+    assert check_site._is_nice_step(20) is True
+    assert check_site._is_nice_step(45) is False
+    assert check_site._is_nice_step(25) is False
+    assert check_site._is_nice_step(0) is False
+
+
+def test_template_charts_use_nice_tick_steps() -> None:
+    """テンプレート同梱の図が刻み規則を満たすこと（模写元が規則を破らない）。"""
+    html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
+    assert check_site._validate_tick_steps(html) == []

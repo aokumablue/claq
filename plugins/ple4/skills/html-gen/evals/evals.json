@@ -11,7 +11,12 @@
         "html data-base is slate",
         "No raw hex or oklch() colors in index.html, styles.css, or app.js (colors go through var(--*))",
         "Output includes metric cards and at least one SVG chart with origin 0 and a desc element",
-        "Layout uses fluid grids with no fixed canvas width",
+        "Every cartesian chart (bar, line, area, scatter, stacked) carries at least 3 axis tick labels and 3 gridlines",
+        "Axis tick steps are multiples of 1, 2 or 5 times a power of ten (never 45, 150 or similar remainders)",
+        "Axis text stays at least 12px once the viewBox scale is applied (declared size x min-inline-size / viewBox width)",
+        "Chart height caps are viewport-relative (clamp/vh), never a fixed px max-block-size",
+        "Gridlines are solid hairlines, not dashed",
+        "Layout uses fluid grids with no fixed canvas width and no horizontal page scroll from 320px to 1920px",
         "check_site.py exits 0 on the generated site"
       ]
     },
@@ -40,6 +45,20 @@
         "Chart entrance animations are scoped under a [data-animate] selector rather than running unconditionally",
         "Light and dark mode toggle exists",
         "check_site.py exits 0"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "店舗別の売上ダッシュボードを shadcn/ui のデザインで作ってほしい。データは (a) 店舗 11 件の月間売上（店舗名は「神奈川県横浜港北店」のように 9 文字前後）、(b) 商品カテゴリ 6 件の売上構成比（1 時点）、(c) 四半期 4 時点の売上推移、(d) 広告費と売上の相関（12 地点）。ベースカラーは slate。",
+      "expected_output": "assets/template を複製し、データの形に応じて種別を選定した index.html / styles.css / tokens.css / app.js。check_site.py PASS。",
+      "files": [],
+      "expectations": [
+        "The 11 stores with long labels are drawn as a horizontal bar chart sorted descending (rule 7), not a vertical bar chart",
+        "The 6 categories at one point in time are drawn as a 100% stacked horizontal bar (rule 6), not a donut or pie",
+        "The 4 quarterly points are drawn as vertical columns (rule 4), not a line chart",
+        "The advertising-spend vs revenue pairs are drawn as a scatter plot (rule 2) with both axes named",
+        "Every chart is wrapped in a .chart-scroll container except the donut",
+        "check_site.py exits 0 on the generated site"
       ]
     }
   ]

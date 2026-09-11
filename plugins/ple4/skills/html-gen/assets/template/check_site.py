@@ -605,10 +605,16 @@ def _validate_stylesheets(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
 #: これは目標値ではなく床である。
 _MIN_AXIS_TICKS = 3
 
-#: 直交軸を持つと判定するマークの class。棒・折れ線・面はいずれも値を軸上の
-#: 位置で符号化するため、軸が無ければ数値を読めない。`arc`（ドーナツ）は角度で
-#: 符号化するので直交軸を持たず、`spark-*` は後述の潰し判定で除外される。
-_CARTESIAN_MARK_CLASSES = ("bar", "series-line", "series-area")
+#: 直交軸を持つと判定するマークの class。棒・折れ線・面・散布点・積み上げ区画は
+#: いずれも値を軸上の**位置**で符号化するため、軸が無ければ数値を読めない。
+#: `arc`（ドーナツ）は角度で符号化するので直交軸を持たず、`spark-*` は後述の
+#: 潰し判定で除外される。
+#:
+#: **種別を増やしたらここも増やす。** `chart-forms.md` へ散布図と 100% 積み上げ
+#: 横棒を足したとき `point` / `seg` の追加を忘れ、その 2 形だけが軸ゼロでも
+#: 素通りしていた。形の語彙を広げて検知器を広げないと、新しい形だけが無検査になる。
+#: `bar--h` は `class="bar` の前方一致で既に入る。
+_CARTESIAN_MARK_CLASSES = ("bar", "series-line", "series-area", "point", "seg")
 
 
 def _iter_svg_blocks(html: str) -> list[str]:
@@ -773,6 +779,64 @@ def _validate_chart_scroll_wrapper(html: str) -> list[str]:
     return violations
 
 
+#: 目盛りの刻みとして許す仮数。1・2・5 に 10 の冪を掛けた値だけが「読める」刻みで、
+#: 45 や 150 のような端数は最大値を本数で割った結果であって読み手の役に立たない。
+_NICE_TICK_MANTISSAS = (1.0, 2.0, 5.0, 10.0)
+
+
+def _is_nice_step(step: float) -> bool:
+    """目盛りの刻みが 1・2・5 × 10 の冪かを返す。
+
+    Args:
+        step: 隣り合う目盛りの差
+
+    Returns:
+        1・2・5（または 10）に 10 の冪を掛けた値であれば True
+    """
+    if step <= 0:
+        return False
+    exponent = math.floor(math.log10(step))
+    mantissa = round(step / 10**exponent, 6)
+    return mantissa in _NICE_TICK_MANTISSAS
+
+
+def _validate_tick_steps(html: str) -> list[str]:
+    """値の目盛りが等間隔で、かつ 1・2・5 の刻みであることを検査する。
+
+    `references/design.md`「軸と目盛り」の刻み規則。散文へ書いただけでは守られず、
+    テンプレート自身が刻み 45 と 150（最大値を本数で割った端数）で出荷されていた。
+    読み手は 0 / 45 / 90 から「1 目盛りいくら」を即座に取れない。
+
+    数字だけのラベルを値の目盛りとみなす。「1月」「Q1」のような分類ラベルは
+    数値として解釈できないので自然に外れる。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    violations: list[str] = []
+    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
+        labels = re.findall(r'<text class="axis-text"[^>]*>([^<]+)</text>', svg)
+        values = sorted(
+            float(label.replace(",", "")) for label in labels if re.fullmatch(r"[\d,]+", label)
+        )
+        if len(values) < 2:
+            continue
+        steps = {round(values[i + 1] - values[i], 6) for i in range(len(values) - 1)}
+        if len(steps) > 1:
+            violations.append(f"{index} 枚目の目盛りが等間隔でない（刻み {sorted(steps)}）")
+            continue
+        step = steps.pop()
+        if not _is_nice_step(step):
+            violations.append(
+                f"{index} 枚目の目盛りの刻みが {step:g}"
+                "（1・2・5 の倍数にする。最大値を本数で割った端数は読み手が使えない）"
+            )
+    return violations
+
+
 def _validate_chart_form(html: str) -> list[str]:
     """グラフ種別の選定規則のうち、数えれば決まるものを検査する。
 
@@ -873,6 +937,7 @@ def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> li
     violations.extend(_validate_chart_axes(html))
     violations.extend(_validate_stretched_svg_text(html))
     violations.extend(_validate_chart_form(html))
+    violations.extend(_validate_tick_steps(html))
     return violations
 
 

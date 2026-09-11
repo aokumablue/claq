@@ -832,8 +832,10 @@ h4 {
   max-block-size: clamp(320px, 58vh, 760px);
 }
 
-/* 100% 積み上げは 1 本なので低い。高さを与えすぎると帯が間延びする。 */
+/* 100% 積み上げは 1 本なので低い。`.chart` の min-block-size をそのまま継ぐと
+   自然高さ（viewBox 比）の倍以上の箱になり、半分以上がレターボックスになる。 */
 .chart--stack {
+  min-block-size: 120px;
   max-block-size: clamp(150px, 22vh, 260px);
 }
 
