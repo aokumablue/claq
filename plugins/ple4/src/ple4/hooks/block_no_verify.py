@@ -119,7 +119,7 @@ from ple4.hooks.hook_common import (
     MAX_STDIN_BYTES,
     StdinUnavailableError,
     command_dialect_variants,
-    command_exceeds_token_budget,
+    command_exceeds_scan_budget,
     emit_block_output,
     extract_shell_wrapper_command,
     is_git_executable_token,
@@ -465,25 +465,32 @@ _GIT_CONFIG_INJECTION_ENV_NAMES = frozenset(
     }
 )
 
-# ``env`` の直後で消費するオプション（値を取らないもの）。
-_ENV_BOOLEAN_OPTIONS = frozenset({"-i", "--ignore-environment"})
-
-
-_EXEC_WRAPPERS = frozenset({"sudo", "command"})
-"""環境変数代入の走査で読み飛ばす実行位置のラッパ名。
-
-`env` はここに含めない —— 続く節が `-i` / `-u NAME` を消費したうえで
-`env` 自身の代入引数を読むため、別扱いにする必要がある。
-"""
-
-
 def _collect_literal_env_assignments(prefix_tokens: list[str]) -> dict[str, str]:
     """git 起動トークンより前にある literal 環境変数代入を集める（H-05）。
 
-    セグメント先頭から連続する ``NAME=value`` 代入と、続く literal ``env``
-    コマンド（``-i`` / ``--ignore-environment`` / ``-u NAME`` を消費した後）
-    の ``NAME=value`` 引数を対象にする。シェルエイリアス・変数展開・
-    コマンド置換・``eval`` 経由の間接的な代入は対象外（ADR-0002 の非目標）。
+    **前置トークンを全部走査する。** 以前は「先頭から連続する代入」＋「既知の
+    ラッパ 2 個（`sudo` / `command`）」＋「`env` の既知オプション 3 個」だけを
+    読み飛ばす形だったため、知らないラッパやオプションに当たった時点で走査が
+    終わり、その先の代入が検査対象から外れていた。実測で素通りした形:
+
+        env -v GIT_CONFIG_GLOBAL=/tmp/e git commit -m x       # exit 0 だった
+        env -C /tmp GIT_CONFIG_GLOBAL=/tmp/e git commit -m x  # exit 0 だった
+        command -p env GIT_CONFIG_GLOBAL=/tmp/e git commit    # exit 0 だった
+        sudo -E GIT_CONFIG_GLOBAL=/tmp/e git commit -m x      # exit 0 だった
+        nohup env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x    # exit 0 だった
+
+    ラッパ名とそのオプションを列挙して追随する設計は、列挙が漏れた瞬間に
+    **素通り側へ倒れる**。前置は定義上 git 起動より前なので、そこに現れる
+    ``NAME=value`` は実質すべて環境変数代入であり、列挙に依存せず拾える。
+    ADR-0002 の「誤検出 > 誤通過」に沿って、拾いすぎる側へ倒す。
+
+    拾いすぎの実害は無い。代入名が危険なもの（``GIT_CONFIG_*`` など）に一致した
+    ときだけ deny するので、無関係な ``a=b`` を拾っても何も起きない。git の
+    オプション（``--author=Foo``）は識別子で始まらないため
+    ``_ENV_ASSIGNMENT_RE`` に一致しない。
+
+    シェルエイリアス・変数展開・コマンド置換・``eval`` 経由の間接的な代入は
+    対象外（ADR-0002 の非目標）。
 
     Args:
         prefix_tokens: セグメント内で git 起動トークンより前にあるトークン列。
@@ -495,41 +502,10 @@ def _collect_literal_env_assignments(prefix_tokens: list[str]) -> dict[str, str]
         例外は発生しません。
     """
     assignments: dict[str, str] = {}
-    index = 0
-    # 実行位置のラッパ（`sudo git ...` / `command git ...`）を先に読み飛ばす。
-    # 飛ばさないと最初の非代入トークンで走査が終わり、`sudo NAME=v git commit`
-    # の代入が env 注入検査の対象外になる（実測: `env` 経由は exit 2、`sudo`
-    # 経由は exit 0 という非対称）。兄弟フックの
-    # `bash_config_protection._COMMAND_POSITION_WRAPPERS` と同じ集合を使う。
-    while index < len(prefix_tokens) and prefix_tokens[index].rsplit("/", 1)[-1] in _EXEC_WRAPPERS:
-        index += 1
-    while index < len(prefix_tokens):
-        match = _ENV_ASSIGNMENT_RE.match(prefix_tokens[index])
-        if not match:
-            break
-        assignments[match.group(1)] = match.group(2)
-        index += 1
-
-    if index >= len(prefix_tokens) or prefix_tokens[index].rsplit("/", 1)[-1] != "env":
-        return assignments
-
-    index += 1
-    while index < len(prefix_tokens):
-        token = prefix_tokens[index]
-        if token in _ENV_BOOLEAN_OPTIONS:
-            index += 1
-            continue
-        if token == "-u":
-            index += 2
-            continue
-        if token.startswith("-u") and len(token) > 2:
-            index += 1
-            continue
+    for token in prefix_tokens:
         match = _ENV_ASSIGNMENT_RE.match(token)
-        if not match:
-            break
-        assignments[match.group(1)] = match.group(2)
-        index += 1
+        if match:
+            assignments[match.group(1)] = match.group(2)
     return assignments
 
 
@@ -719,7 +695,7 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool) -> bool:
             # host が kill → silent fail-open になるので、境界でも同じ上限を当てる。
             # 上限超過は True（＝BLOCK）へ倒す — 検査しきれない入力を通さない
             # 方針は main() 側と同じで、ADR-0002 の「誤検出を誤通過より選ぶ」に従う。
-            if command_exceeds_token_budget(wrapper_command):
+            if command_exceeds_scan_budget(wrapper_command):
                 return True
             if has_bypass_flag(wrapper_command, _recursed=True):
                 return True
@@ -793,7 +769,7 @@ def main() -> int:
         # 走査は git トークン数に対し O(N^2)。上限超過をそのまま走らせると
         # hooks.json の timeout を超えて host に kill され、silent fail-open
         # （＝バイパス成功）になる。検査しきれない入力は通さず止める。
-        if command_exceeds_token_budget(command):
+        if command_exceeds_scan_budget(command):
             return emit_block_output(_TOKEN_BUDGET_MESSAGE)
         if has_bypass_flag(command):
             return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")

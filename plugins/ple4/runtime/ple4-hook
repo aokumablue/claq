@@ -114,7 +114,18 @@ export PATH
 # 同じ検査を持つ（cmd.exe は常に cwd を先に見るため、あちらは相対名でも成立する）。
 if [ -n "${PLE4_PYTHON:-}" ]; then
   case "$PLE4_PYTHON" in
-    /*) exec "$PLE4_PYTHON" "$_ple4_launcher" "$@" ;;
+    /*)
+      # 絶対パスでも実体が無い／実行できないことがある。そのまま exec すると
+      # シェルが exit 126/127 を返し、`ple4ProtectionDisabled` マーカーも出ない。
+      # 保護は落ちているのに grep 対象の痕跡が残らず、監視から不可視になる。
+      # 他の無効化経路と同じ形（stderr へマーカー + exit 0）へ揃える。
+      if [ -x "$PLE4_PYTHON" ]; then
+        exec "$PLE4_PYTHON" "$_ple4_launcher" "$@"
+      fi
+      printf '%s\n' "ERROR: PLE4_PYTHON='$PLE4_PYTHON' is not an executable file. Hooks are disabled until it is fixed." >&2
+      printf '%s\n' '{"ple4ProtectionDisabled": true, "reason": "ple4_python_not_executable"}' >&2
+      exit 0
+      ;;
   esac
   printf '%s\n' "ERROR: PLE4_PYTHON must be an absolute interpreter path; got '$PLE4_PYTHON'. Hooks are disabled until it is fixed (a relative name can resolve to a binary in the current directory)." >&2
   printf '%s\n' '{"ple4ProtectionDisabled": true, "reason": "ple4_python_not_absolute"}' >&2

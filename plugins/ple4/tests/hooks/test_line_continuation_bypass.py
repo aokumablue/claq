@@ -202,11 +202,11 @@ def test_oversized_command_is_blocked_instead_of_timing_out() -> None:
 
 def test_command_at_token_budget_is_still_inspected() -> None:
     """予算内のコマンドは従来どおり中身で判定されること（予算が過剰に効かない）。"""
-    from ple4.hooks.hook_common import MAX_COMMAND_TOKENS, command_exceeds_token_budget
+    from ple4.hooks.hook_common import MAX_COMMAND_TOKENS, command_exceeds_scan_budget
 
     within = "git status " * 100
-    assert command_exceeds_token_budget(within) is False
-    assert command_exceeds_token_budget("git " * (MAX_COMMAND_TOKENS + 1)) is True
+    assert command_exceeds_scan_budget(within) is False
+    assert command_exceeds_scan_budget("git " * (MAX_COMMAND_TOKENS + 1)) is True
 
 
 def test_block_no_verify_main_blocks_oversized_command_in_process(
@@ -220,7 +220,7 @@ def test_block_no_verify_main_blocks_oversized_command_in_process(
     )
     monkeypatch.setattr(block_no_verify, "MAX_COMMAND_TOKENS", 3)
     monkeypatch.setattr(
-        block_no_verify, "command_exceeds_token_budget", lambda command: len(command.split()) > 3
+        block_no_verify, "command_exceeds_scan_budget", lambda command: len(command.split()) > 3
     )
     monkeypatch.setattr(
         block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False)
@@ -238,7 +238,7 @@ def test_pre_bash_commit_quality_evaluate_blocks_oversized_command_in_process(
 
     monkeypatch.setattr(
         pre_bash_commit_quality,
-        "command_exceeds_token_budget",
+        "command_exceeds_scan_budget",
         lambda command: len(command.split()) > 3,
     )
     payload = json.dumps(
@@ -301,7 +301,7 @@ def test_sh_c_budget_guard_blocks_in_process(monkeypatch: pytest.MonkeyPatch) ->
     from ple4.hooks import block_no_verify
 
     monkeypatch.setattr(
-        block_no_verify, "command_exceeds_token_budget", lambda command: "PAYLOAD" in command
+        block_no_verify, "command_exceeds_scan_budget", lambda command: "PAYLOAD" in command
     )
 
     assert block_no_verify.has_bypass_flag("sh -c 'PAYLOAD echo ok'") is True

@@ -53,7 +53,7 @@ from ple4.hooks.hook_common import (
     MAX_COMMAND_TOKENS,
     MAX_STDIN_BYTES,
     command_dialect_variants,
-    command_exceeds_token_budget,
+    command_exceeds_scan_budget,
     is_git_executable_token,
     is_inplace_edit_flag,
     normalize_executable_name,
@@ -1011,7 +1011,7 @@ def evaluate(raw_input: str) -> dict:
             command = strip_data_heredoc_bodies(raw_command)
             # 判定はトークン数に対し非線形。上限超過を走らせると timeout 超過で
             # host に kill され、commit 前の検査が丸ごと飛ぶ（silent fail-open）。
-            if command_exceeds_token_budget(command):
+            if command_exceeds_scan_budget(command):
                 return {"output": raw_input, "exitCode": 2, "reason": _TOKEN_BUDGET_MESSAGE}
             # git commit コマンドの場合のみ実行（トークン化して堅牢に判定）
             try:

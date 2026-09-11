@@ -49,6 +49,28 @@ MAX_STDIN_BYTES = 1024 * 1024
 # あり、正当なシェルコマンドがこの規模になることは実務上ない。
 MAX_COMMAND_TOKENS = 5000
 
+# 1 コマンドに許すバイト数の上限。
+#
+# `MAX_COMMAND_TOKENS` はトークン**数**しか縛らないが、走査コストを決めるのは
+# `shlex` の**バイト数**である。単一の巨大トークンはトークン数 2 のまま予算を
+# 素通りする。実測（2026-09-12・darwin、`echo <N>` を実経路で起動）:
+#
+#     125KB  0.41s
+#     250KB  1.03s
+#     500KB  3.38s
+#     1MB   12.71s ← hooks.json の timeout（15秒）に対し余裕 15%
+#     1MB（deny 経路）12.65s
+#
+# 2 倍ごとに約 4 倍＝バイト数の二次。1MB は `MAX_STDIN_BYTES` の内側なので
+# stdin 上限では止まらず、host が kill した hook は exit code を返さないため
+# **silent fail-open = 保護の完全なバイパス**になる。トークン予算を足した時点で
+# 塞いだつもりだった穴が、次元違いのまま残っていた。
+#
+# 64KB は実測 0.2 秒未満で timeout に対し 75 倍以上の余裕がある。トークン予算
+# 5,000 に収まる正当なコマンドは平均 8 バイト/トークンでも 40KB 程度なので、
+# この上限が正当な入力を落とすことは実務上ない。
+MAX_COMMAND_BYTES = 64 * 1024
+
 # コマンド全体をセグメントに割るシェル区切りトークン。`block_no_verify` と
 # `pre_bash_commit_quality` が共に shell 区切り文字密着トークン（例:
 # ``status;echo``）を誤って 1 トークンとして扱わないよう、この定数と
@@ -652,22 +674,27 @@ def tokenize(command: str) -> list[str]:
     return tokens
 
 
-def command_exceeds_token_budget(command: str) -> bool:
-    """コマンドのトークン数が検査予算（`MAX_COMMAND_TOKENS`）を超えるか判定する。
+def command_exceeds_scan_budget(command: str) -> bool:
+    """コマンドが検査予算（バイト数・トークン数）を超えるか判定する。
 
     超過したコマンドは走査に timeout を超える時間がかかり、host に kill されて
     silent fail-open になる。呼び出し元は True を受けたら走査せず BLOCKED を
-    返すこと（理由は `MAX_COMMAND_TOKENS` のコメント）。
+    返すこと（理由は `MAX_COMMAND_TOKENS` / `MAX_COMMAND_BYTES` のコメント）。
+
+    **バイト数を先に見る。** `tokenize` 自身が走査コストの本体（バイト数の二次）
+    なので、トークン数を数えるために `tokenize` を呼んだ時点で手遅れになる。
 
     Args:
         command: 検査対象のシェルコマンド文字列。
 
     Returns:
-        トークン数が上限を超えるなら True。
+        バイト数またはトークン数が上限を超えるなら True。
 
     Raises:
         例外は発生しません。
     """
+    if len(command.encode("utf-8", "surrogatepass")) > MAX_COMMAND_BYTES:
+        return True
     return len(tokenize(command)) > MAX_COMMAND_TOKENS
 
 

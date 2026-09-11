@@ -171,7 +171,16 @@ def _run_module_in_process(target: str, target_args: list[str]) -> int:
         sys.stderr.write(str(exc.code) + "\n")
         return 1
     except Exception as exc:  # noqa: BLE001 - フックは常に終了コードを返す契約にする
+        # exit 1 は PreToolUse の契約で「non-blocking error = ツールは実行される」。
+        # つまり保護フックの deny が黙って allow へ反転する。exit 2 へ倒さないのは、
+        # 全入力で raise するバグを踏んだとき Bash ごと塞がって復旧手段を失うため
+        # （`launcher.py` 冒頭の fail-open と同じ理由）。代わりに、他の無効化経路と
+        # 同じ `ple4ProtectionDisabled` マーカーを出して**保護喪失を可視化**する。
         sys.stderr.write(f"ERROR: {target}: {exc}\n")
+        sys.stderr.write(
+            '{"ple4ProtectionDisabled": true, "reason": "hook_raised", '
+            f'"module": "{target}"}}\n'
+        )
         return 1
     return 0
 

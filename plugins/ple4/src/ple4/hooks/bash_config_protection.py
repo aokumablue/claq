@@ -178,7 +178,10 @@ _TEE_COMMANDS = frozenset(
 # 分けていた頃の「sed は `-i` 前方一致 / perl は `i` の包含」という食い違いは
 # ここで消える。フラグ無しでも書き込むエディタは
 # `ALWAYS_MUTATING_EDIT_EXECUTABLES` の側（M-8）。
-_INPLACE_EDIT_COMMANDS = frozenset({"sed", "perl"})
+# `ruby -pi -e ""` は `perl -pi` と同一セマンティクスの in-place 編集で、
+# `-pi` を持つ以上 perl と同じ分類に属する（実測で素通りしていた）。
+# `python3 -c` のような任意インタプリタは非目標宣言済みで、ここには入れない。
+_INPLACE_EDIT_COMMANDS = frozenset({"sed", "perl", "ruby"})
 _LN_COMMANDS = frozenset({"ln"})
 _DD_COMMANDS = frozenset({"dd"})
 

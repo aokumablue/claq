@@ -842,7 +842,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "bash_config_protection._TEE_COMMANDS": frozenset(
         {"ac", "add-content", "new-item", "ni", "out-file", "sc", "set-content", "tee"}
     ),
-    "bash_config_protection._INPLACE_EDIT_COMMANDS": frozenset({"perl", "sed"}),
+    "bash_config_protection._INPLACE_EDIT_COMMANDS": frozenset({"perl", "ruby", "sed"}),
     "bash_config_protection._LN_COMMANDS": frozenset({"ln"}),
     "bash_config_protection._DD_COMMANDS": frozenset({"dd"}),
     "bash_config_protection._TOUCH_COMMANDS": _EXPECTED_TOUCH_COMMANDS,
@@ -939,8 +939,11 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "GIT_CONFIG_SYSTEM",
         }
     ),
-    "block_no_verify._ENV_BOOLEAN_OPTIONS": frozenset({"-i", "--ignore-environment"}),
-    "block_no_verify._EXEC_WRAPPERS": frozenset({"command", "sudo"}),
+    # `_ENV_BOOLEAN_OPTIONS` と `_EXEC_WRAPPERS` は撤去した。ラッパ名とその
+    # オプションを列挙して読み飛ばす設計は、列挙が漏れた瞬間に**素通り側へ倒れる**
+    # （実測: `env -v` / `env -C` / `command -p` / `sudo -E` / `nohup env` の 5 形が
+    # exit 0 だった）。前置トークンを全部走査する形へ変えたので、この 2 つの語彙は
+    # もう存在しない。語彙を持たない実装は語彙の陳腐化で壊れない。
     "block_no_verify._GIT_CONFIG_READ_ONLY_FLAGS": frozenset(
         {"--get", "--get-all", "--get-regexp", "--list", "--show-origin"}
     ),
@@ -1228,18 +1231,6 @@ _VOCABULARY_DENY_ALLOW_CASES = (
     # --- block_no_verify の config 注入経路 ---
     ("block_no_verify._SENSITIVE_CONFIG_KEY_PREFIXES", "block_no_verify", "git -c {item}=x commit -m y", "git -c user.name=x commit -m y"),
     ("block_no_verify._GIT_CONFIG_INJECTION_ENV_NAMES", "block_no_verify", "{item}=x git commit -m y", "SOME_VAR=x git commit -m y"),
-    (
-        "block_no_verify._ENV_BOOLEAN_OPTIONS",
-        "block_no_verify",
-        "env {item} GIT_CONFIG_PARAMETERS=x git commit -m y",
-        "env {item} SOME_VAR=x git commit -m y",
-    ),
-    (
-        "block_no_verify._EXEC_WRAPPERS",
-        "block_no_verify",
-        "{item} GIT_CONFIG_PARAMETERS=x git commit -m y",
-        "{item} SOME_VAR=x git commit -m y",
-    ),
     ("block_no_verify._GIT_CONFIG_WRITE_FLAGS", "block_no_verify", "git config {item} core.hooksPath x", "git config {item} user.name x"),
     ("block_no_verify._GIT_CONFIG_NEW_WRITE_OPS", "block_no_verify", "git config {item} core.hooksPath x", "git config {item} user.name x"),
     # --- commit 前 mutation ガード ---
@@ -1580,3 +1571,80 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
         | set(_VOCABULARY_LAYER1_ABSENT)
     )
     assert declared == set(_EXPECTED_VOCABULARIES)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
+        "env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
+        "env -v GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
+        "env -C /tmp GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
+        "command -p env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
+        "sudo -E GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
+        "nohup env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
+        "timeout 5 env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
+        "env -v GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp git commit -m x",
+    ],
+)
+def test_env_injection_is_denied_through_any_wrapper(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """前置にラッパやオプションが何個あっても env 注入を deny すること。
+
+    ラッパ名とそのオプションを列挙して読み飛ばす設計だった頃、列挙に無い形は
+    走査が途中で止まって素通りしていた（実測: 下 5 形が exit 0）。列挙を捨てて
+    前置トークンを全部走査する形にした回帰防止。
+    """
+    assert _run("block_no_verify", _bash(command), monkeypatch) == 2
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git commit -m "a=b"',
+        "git commit --author=Foo -m x",
+        "env SOME_VAR=x git commit -m y",
+    ],
+)
+def test_benign_assignments_stay_allowed(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """危険でない代入・git のオプションは通り続けること（拾いすぎの対照）。
+
+    前置を全部走査しても、deny するのは危険な変数名に一致したときだけ。
+    git のオプション（`--author=Foo`）は識別子で始まらないので代入に一致しない。
+    """
+    assert _run("block_no_verify", _bash(command), monkeypatch) == 0
+
+
+def test_huge_single_token_is_blocked_before_tokenizing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """巨大な単一トークンがトークン予算を素通りせず BLOCK されること。
+
+    `MAX_COMMAND_TOKENS` はトークン**数**しか縛らないが、走査コストは `shlex` の
+    **バイト数**の二次で決まる。1MB の単一トークンはトークン数 2 なので予算を
+    素通りし、実測 12.71 秒（timeout 15 秒に対し余裕 15%）かかっていた。host が
+    kill した hook は exit code を返さないため silent fail-open になる。
+    """
+    from ple4.hooks.hook_common import MAX_COMMAND_BYTES, command_exceeds_scan_budget
+
+    huge = "echo " + "A" * (MAX_COMMAND_BYTES + 1)
+
+    assert command_exceeds_scan_budget(huge) is True
+    assert _run("block_no_verify", _bash(huge), monkeypatch) == 2
+    # 上限の内側は従来どおり通る（拾いすぎの対照）
+    assert command_exceeds_scan_budget("echo " + "A" * 1000) is False
+
+
+def test_scan_budget_is_measured_in_bytes_not_characters() -> None:
+    """マルチバイト文字でもバイト数で判定すること。
+
+    文字数で数えると、日本語 1 文字 = 3 バイトの入力が上限の 3 倍まで通り、
+    走査コストは 9 倍になる。
+    """
+    from ple4.hooks.hook_common import MAX_COMMAND_BYTES, command_exceeds_scan_budget
+
+    multibyte = "あ" * (MAX_COMMAND_BYTES // 3 + 1)
+
+    assert len(multibyte) < MAX_COMMAND_BYTES
+    assert command_exceeds_scan_budget(multibyte) is True
