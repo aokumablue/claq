@@ -1029,7 +1029,10 @@ def test_e2e_charts_stay_legible_on_small_screens() -> None:
     css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
     assert html.count('class="chart-scroll"') >= 2
     assert ".chart-scroll {\n  overflow-x: auto;" in css
-    assert "min-inline-size: 460px;" in css
+    # 具体的な px は固定しない。値の妥当性は `_validate_axis_text_scale` が
+    # viewBox 幅との比で判定するので、ここは「下限が宣言されている」ことだけ見る
+    # （ADR-0023: 検知器のある固定値は二重に書かない）。
+    assert re.search(r"\.chart \{[^}]*min-inline-size:\s*\d+px", css, re.DOTALL)
 
 
 def test_e2e_metric_direction_and_sentiment_are_separate() -> None:
@@ -1160,5 +1163,53 @@ def test_dashed_gridline_is_reported(tmp_path: Path) -> None:
     """破線の目盛り線が違反になる（破線は予測・しきい値の記法）。"""
     dest = _copy_site(tmp_path)
     assert "破線" in _edit(
-        dest, "styles.css", ("  stroke-width: 1;\n}\n\n.axis-text", "  stroke-width: 1;\n  stroke-dasharray: 3 4;\n}\n\n.axis-text")
+        dest, "styles.css", ("  stroke-width: 1;\n}\n\n/* viewBox", "  stroke-width: 1;\n  stroke-dasharray: 3 4;\n}\n\n/* viewBox")
     )
+
+
+def test_axis_text_rendered_size_is_enforced(tmp_path: Path) -> None:
+    """目盛り文字が描画時に 12px を割る組み合わせが違反になる。
+
+    SVG の文字は viewBox の倍率で縮むため、`font-size: 12px` の宣言でも実際には
+    12px を割る。ブラウザ実測 7.7px を静的計算が再現することを固定する。
+    """
+    dest = _copy_site(tmp_path)
+    report = _edit(dest, "styles.css", ("font-size: 15px", "font-size: 12px"))
+    assert "目盛り文字" in report
+    assert "10.0px" in report
+
+
+def test_axis_text_scale_needs_a_declared_font_size() -> None:
+    """`.axis-text` の font-size が読めなければ違反として報告されること。"""
+    assert check_site._validate_axis_text_scale("<svg>axis-text</svg>", "") != []
+
+
+def test_css_length_returns_none_for_missing_declarations() -> None:
+    """セレクタもプロパティも無ければ None を返すこと。"""
+    assert check_site._css_length("", ".chart", "min-inline-size") is None
+    assert check_site._css_length(".chart{color:red}", ".chart", "min-inline-size") is None
+
+
+def test_axis_text_scale_skips_charts_without_measurable_geometry() -> None:
+    """viewBox・class・最小幅のどれかが無い SVG は計算対象にならないこと。"""
+    css = ".axis-text{font-size:15px}.chart{min-inline-size:600px}"
+    assert check_site._validate_axis_text_scale('<svg class="chart">axis-text</svg>', css) == []
+    assert check_site._validate_axis_text_scale('<svg viewBox="0 0 720 250">axis-text</svg>', css) == []
+    assert check_site._validate_axis_text_scale("<svg>no ticks</svg>", css) == []
+    assert (
+        check_site._validate_axis_text_scale(
+            '<svg class="chart" viewBox="0 0 720 250">axis-text</svg>', ".axis-text{font-size:15px}"
+        )
+        == []
+    )
+
+
+def test_chart_without_scroll_wrapper_is_reported() -> None:
+    """最小幅を持つチャートが .chart-scroll の外にあると違反になる。
+
+    器が無いと SVG がページごと横へはみ出す（実測: 幅 1269px の画面で文書幅
+    1422px）。ドーナツは最小幅を持たないので対象外。
+    """
+    assert check_site._validate_chart_scroll_wrapper('<div><svg class="chart">') != []
+    assert check_site._validate_chart_scroll_wrapper('<div class="chart-scroll"><svg class="chart">') == []
+    assert check_site._validate_chart_scroll_wrapper('<div><svg class="chart chart--donut">') == []

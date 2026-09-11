@@ -809,7 +809,7 @@ h4 {
 
 .chart {
   inline-size: 100%;
-  min-inline-size: 460px;
+  min-inline-size: 600px;
   block-size: auto;
   min-block-size: 240px;
   max-block-size: clamp(320px, 46vh, 620px);
@@ -823,7 +823,7 @@ h4 {
 }
 
 .chart--bars {
-  min-inline-size: 360px;
+  min-inline-size: 380px;
   max-block-size: clamp(280px, 40vh, 520px);
 }
 
@@ -837,10 +837,12 @@ h4 {
   stroke-width: 1;
 }
 
+/* viewBox 座標系の単位。SVG が最小幅で描かれたとき 12px を割らない値にする
+   （`_validate_axis_text_scale` が実効サイズを計算して落とす）。 */
 .axis-text {
   fill: var(--muted-foreground);
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 15px;
   font-variant-numeric: tabular-nums;
 }
 

@@ -535,6 +535,7 @@ def validate_site(site_dir: Path, tokens: dict[str, Any] | None = None) -> list[
     violations.extend(_validate_styles(styles))
     violations.extend(_validate_js(script))
     violations.extend(_validate_authored_colors(html + styles + script))
+    violations.extend(_validate_axis_text_scale(html, styles))
     return violations
 
 
@@ -570,6 +571,7 @@ def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:
     violations.extend(_validate_stylesheets(tags))
     if page_kind == "dashboard":
         violations.extend(_validate_dashboard(html, tags))
+        violations.extend(_validate_chart_scroll_wrapper(html))
     if not _script_runs_before_body(tags):
         violations.append("app.js が <head> で読み込まれていない（ダーク選択時に白のちらつきが出る）")
     return violations
@@ -681,6 +683,94 @@ _MAX_DONUT_SEGMENTS = 5
 #: 縦棒に載せてよい分類の上限。これを超えるとラベルを回転させるか省略すること
 #: になり、どちらも読む速度を落とす。横棒（降順）へ倒す。
 _MAX_VERTICAL_BARS = 7
+
+
+#: SVG 内の目盛り文字が画面上で満たすべき最小サイズ（px）。手書き CSS の
+#: `font-size` には 12px 未満を禁じる検査が既にあるが、SVG の文字は viewBox の
+#: 倍率で一緒に縮むため、宣言が 12px でも描画は 12px を割りうる。
+_MIN_RENDERED_AXIS_PX = 12.0
+
+
+def _css_length(css: str, selector: str, prop: str) -> float | None:
+    """セレクタ 1 個の宣言から px 長さを取り出す。見つからなければ None。"""
+    block = re.search(rf"(?<![-\w]){re.escape(selector)}\s*\{{(.*?)\}}", css, re.DOTALL)
+    if not block:
+        return None
+    found = re.search(rf"{prop}:\s*([\d.]+)px", block.group(1))
+    return float(found.group(1)) if found else None
+
+
+def _validate_axis_text_scale(html: str, css: str) -> list[str]:
+    """目盛り文字が**描画されたとき**に 12px を割らないことを検査する。
+
+    SVG の文字は viewBox 座標で書かれるので、SVG が幅 W で描かれるとき実効
+    サイズは `宣言サイズ × W / viewBox幅` になる。W の下限は CSS の
+    `min-inline-size` で静的に決まるため、最悪ケースをここで計算できる。
+
+    この穴があった間、`.axis-text` は 12px 宣言のまま実測 7.7px で描かれていた。
+    「目盛りはあるのに数値が読めない」の正体であり、CSS の宣言だけを見る
+    `_validate_styles` の 12px 検査は素通りする。
+
+    Args:
+        html: 検査対象の HTML 文字列
+        css: 手書き CSS の文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    declared = _css_length(css, ".axis-text", "font-size")
+    if declared is None:
+        return [".axis-text の font-size が読み取れない（目盛り文字の実効サイズを保証できない）"]
+    violations: list[str] = []
+    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
+        if "axis-text" not in svg:
+            continue
+        box = re.search(r'viewBox="0 0 ([\d.]+) [\d.]+"', svg)
+        classes = re.search(r'class="([^"]*)"', svg)
+        if not box or not classes:
+            continue
+        modifiers = [f".{name}" for name in classes.group(1).split() if name.startswith("chart--")]
+        floor = next(
+            (value for value in (_css_length(css, name, "min-inline-size") for name in modifiers) if value),
+            _css_length(css, ".chart", "min-inline-size"),
+        )
+        if not floor:
+            continue
+        rendered = declared * floor / float(box.group(1))
+        if rendered < _MIN_RENDERED_AXIS_PX:
+            violations.append(
+                f"{index} 枚目の目盛り文字が最小幅で {rendered:.1f}px に縮む"
+                f"（{_MIN_RENDERED_AXIS_PX:.0f}px 以上。viewBox 幅 {box.group(1)} に対し"
+                f"最小描画幅 {floor:.0f}px。font-size を上げるか viewBox を狭める）"
+            )
+    return violations
+
+
+def _validate_chart_scroll_wrapper(html: str) -> list[str]:
+    """最小幅を持つチャートが横スクロール用の器に入っていることを検査する。
+
+    `.chart` は `min-inline-size` で潰れを防いでいる。この下限がカード幅を超えた
+    とき、器が無いと SVG がページごと横へはみ出す（実測: 幅 1269px の画面で
+    文書幅が 1422px になった）。器があれば、はみ出しはカードの中の横スクロールに
+    閉じる。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    violations: list[str] = []
+    for match in re.finditer(r'(.{0,80})<svg class="(chart[^"]*)"', html, re.DOTALL):
+        classes = match.group(2)
+        if "chart--donut" in classes:
+            continue
+        if "chart-scroll" not in match.group(1):
+            violations.append(
+                f'<svg class="{classes}"> が .chart-scroll の中に無い'
+                "（最小幅がカードを超えるとページごと横へはみ出す）"
+            )
+    return violations
 
 
 def _validate_chart_form(html: str) -> list[str]:
