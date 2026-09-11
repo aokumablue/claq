@@ -1280,3 +1280,20 @@ def test_every_role_img_svg_has_title_and_desc() -> None:
         if 'role="img"' in svg and ("<title" not in svg or "<desc" not in svg)
     ]
     assert bare == [], f"title/desc を欠く role=img の SVG: {bare}"
+
+
+def test_stacked_bar_in_the_donut_slot_is_reported() -> None:
+    """積み上げ横棒をドーナツ用の狭い枠へ置いたら違反になること。
+
+    `.chart--donut` だけが最小幅を持たないので検査の対象外になる。横長の
+    `.chart--stack` が同じ枠（`.donut-wrap` はスクロールコンテナではない）に
+    入ると、最小幅 600px が 265px のカードを溢れてページごと横へ伸びる。
+    免除がクラス名ではなく「最小幅を持つか」で決まっていることを固定する。
+    """
+    assert check_site._validate_chart_scroll_wrapper(
+        '<div class="donut-wrap"><svg class="chart chart--stack">'
+    ) != []
+    # .chart-scroll の中なら、溢れはカード内の横スクロールに閉じるので通す
+    assert check_site._validate_chart_scroll_wrapper(
+        '<div class="chart-scroll"><svg class="chart chart--stack">'
+    ) == []
