@@ -118,3 +118,38 @@ class TestLogger:
 
         logger.setup(tmp_path, level="info")
         assert logging.getLogger("ple4.mem").handlers
+
+
+@pytest.mark.skipif(not hasattr(Path, "chmod"), reason="POSIX の mode を持たない環境")
+def test_setup_closes_the_parent_directory_too(tmp_path: Path) -> None:
+    """ログ用ディレクトリの**親**まで 0700 で閉じること。
+
+    `mkdir(parents=True)` は mode を親へ適用しない。ロガーは
+    `_load_settings_or_raise()` の中でどの ``Database()`` よりも先に走るため、
+    DB を開かずに終わる経路（``mem list --kind bogus``）では `~/.ple4` を最初に
+    作るのがロガーになる。実測ではそこが ``drwxr-xr-x``（0755）のまま残り、
+    CLAUDE.md が定める「`~/.ple4` の 0700」を割っていた。
+    """
+    logger.reset()
+    root = tmp_path / "ple4-root"
+    logger.setup(root / "logs", level="info")
+
+    assert root.stat().st_mode & 0o777 == 0o700
+    assert (root / "logs").stat().st_mode & 0o777 == 0o700
+    logs = list((root / "logs").glob("mem-*.log"))
+    assert logs and logs[0].stat().st_mode & 0o777 == 0o600
+
+
+def test_setup_reuses_an_existing_log_file(tmp_path: Path) -> None:
+    """同日の 2 回目以降、既存のログファイルをそのまま使うこと（mode も維持）。"""
+    logs = tmp_path / "logs"
+    logger.reset()
+    logger.setup(logs, level="info")
+    existing = sorted(logs.glob("mem-*.log"))
+    assert existing
+
+    logger.reset()
+    logger.setup(logs, level="info")
+
+    assert sorted(logs.glob("mem-*.log")) == existing
+    assert existing[0].stat().st_mode & 0o777 == 0o600

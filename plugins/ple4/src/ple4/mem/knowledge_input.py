@@ -342,7 +342,10 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
         KnowledgeInputError: title 欠落、列挙値・数値の不正、または
             ``source``/``status`` に非既定値を明示した場合。
     """
-    title = str(payload.get("title") or "").strip()
+    # `.strip()` は前後しか落とさず、内部の改行は DB へ入る。title は注入時に
+    # `- [kind] title` の 1 行として描かれる契約なので、改行が残ると 1 枚のカードが
+    # 複数行に割れ、偽の知識カード行を注入枠の内側に作れる（実測済み）。
+    title = " ".join(str(payload.get("title") or "").split())
     if not title:
         raise KnowledgeInputError("learn: title は必須です")
 

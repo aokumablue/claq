@@ -52,6 +52,7 @@ ALLOWED_TOP_LEVEL_MODULES = frozenset({
     "__future__",
     "argparse",
     "collections",
+    "contextlib",
     "dataclasses",
     "datetime",
     "functools",

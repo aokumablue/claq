@@ -1027,6 +1027,51 @@ def _handle_forget(settings: Settings, args: CommandArgs) -> None:
 # --- SessionStart への知識注入 ---
 
 
+def _one_line(text: str) -> str:
+    """連続する空白と改行を 1 個の空白へ畳み、1 行にする。
+
+    注入枠の中で「1 行」として描かれる文字列は、改行が残ると 1 件が複数行へ割れて
+    偽の項目を増やせる。描画側で畳むことで、DB に既に入っている行も守る。
+
+    Args:
+        text: 畳む対象の文字列
+
+    Returns:
+        改行を含まない 1 行
+    """
+    return " ".join(text.split())
+
+
+#: 引き継ぎ本文の行頭で無害化する構造マーカー。注入枠は `## 見出し` と
+#: `- [kind] タイトル` で組み立てられているため、引き継ぎ側がこの 2 つを行頭へ
+#: 置けると、人間の承認（promote）を通った知識と見分けの付かない節や項目を
+#: 捏造できる。引き継ぎは promote を通らないので、ここが唯一の防壁になる。
+_HANDOFF_STRUCTURE_MARKERS = ("#", "- [")
+
+
+def _neutralize_handoff_structure(text: str) -> str:
+    """引き継ぎ本文が注入枠の構造を偽装するのを防ぐ。
+
+    行頭の `#`（見出し）と `- [`（知識カード行）だけを対象にし、全角へ寄せずに
+    空白 1 個で字下げする。本文は散文なので改行と通常の箇条書き `- ` は残す
+    （正当な引き継ぎがそれらを使う）。
+
+    Args:
+        text: 引き継ぎ本文
+
+    Returns:
+        行頭の構造マーカーを無害化した本文
+    """
+    lines = []
+    for line in text.split("\n"):
+        stripped = line.lstrip()
+        if stripped.startswith(_HANDOFF_STRUCTURE_MARKERS):
+            lines.append(f" {stripped}")
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def _format_injected_item(row: Knowledge) -> str:
     """知識カード 1 件を注入用の 1 行へ整形する。
 
@@ -1042,9 +1087,11 @@ def _format_injected_item(row: Knowledge) -> str:
     Returns:
         整形済みの 1 行（改行を含まない）。
     """
-    title = strip_tags(row.title)
+    # 入口で畳んでいても、既に DB にある行や将来の別経路を信用しない。返り値が
+    # 「改行を含まない 1 行」であることは、この関数が自分で保証する。
+    title = _one_line(strip_tags(row.title))
     head = f"- [{row.kind}] {title}"
-    body = strip_tags(row.body.strip())
+    body = _one_line(strip_tags(row.body.strip()))
     if not body:
         return head
     combined = f"{head} — {body}"
@@ -1088,7 +1135,7 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     session = db.get_latest_session(repo_id)
     if session is None:
         return ""
-    handoff = strip_tags(session.handoff.strip())
+    handoff = _neutralize_handoff_structure(strip_tags(session.handoff.strip()))
     if not handoff:
         return ""
     if len(handoff) > CONTEXT_HANDOFF_CHAR_BUDGET:
