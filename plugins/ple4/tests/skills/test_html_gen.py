@@ -1265,3 +1265,18 @@ def test_template_charts_use_nice_tick_steps() -> None:
     """テンプレート同梱の図が刻み規則を満たすこと（模写元が規則を破らない）。"""
     html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
     assert check_site._validate_tick_steps(html) == []
+
+
+def test_every_role_img_svg_has_title_and_desc() -> None:
+    """`svg[role="img"]` が例外なく `<title>`/`<desc>` を持つこと。
+
+    スパークライン 4 枚は `aria-label` だけで出荷されていた。design.md は
+    `svg[role="img"]` 全てに両方を求めているので、模写元が破っていると散文が効かない。
+    """
+    html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
+    bare = [
+        svg[:90]
+        for svg in check_site._iter_svg_blocks(html)
+        if 'role="img"' in svg and ("<title" not in svg or "<desc" not in svg)
+    ]
+    assert bare == [], f"title/desc を欠く role=img の SVG: {bare}"
