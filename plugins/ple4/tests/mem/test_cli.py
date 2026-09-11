@@ -1633,6 +1633,19 @@ def test_mem_main_module_invokes_cli_main(monkeypatch: pytest.MonkeyPatch) -> No
     assert excinfo.value.code == 0
 
 
+def test_mem_main_module_does_not_run_on_plain_import() -> None:
+    """import しただけでは CLI が走らないこと（``__name__`` ガード）。
+
+    ガードが無かった頃は ``pkgutil.walk_packages`` のようにパッケージを走査する
+    道具がこのモジュールを import した瞬間に CLI が走り、``sys.exit`` の
+    ``SystemExit`` が走査側へ飛んでいた（実測: 46 モジュールの走査が中断する）。
+    ``python -m`` 経路は上のテストが押さえているので、ここは走らない側を固定する。
+    """
+    module = runpy.run_module("ple4.mem.__main__", run_name="ple4.mem.__main__")
+
+    assert module["__name__"] == "ple4.mem.__main__"
+
+
 class TestSubcommandOptionContract:
     """F-22: subcommand が受理しないオプションを黙って無視しない。"""
 

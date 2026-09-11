@@ -74,6 +74,75 @@ def test_validate_skills_accepts_skill_directory(tmp_path: Path) -> None:
     assert validate_skills.validate_skills(skills_dir) == 0
 
 
+def _write_skill(skills_dir: Path, frontmatter: str) -> Path:
+    """検証用の SKILL.md を 1 つ書き出す。"""
+    skill_dir = skills_dir / "planner"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(f"---\n{frontmatter}\n---\n\n# Planner\n", encoding="utf-8")
+    return skill_dir
+
+
+@pytest.mark.parametrize(
+    ("label", "value"),
+    [("引用符付き", '"true"'), ("yes", "yes"), ("数値", "1")],
+)
+def test_validate_skills_rejects_non_boolean_flags(tmp_path: Path, label: str, value: str) -> None:
+    """真偽値フィールドが bool でなければ不合格になること。
+
+    自前パーサは `"true"` を str、`1` を int として読む。ホストは真の bool しか
+    見ないので、これらは**宣言したつもりで効かない**。`disable-model-invocation`
+    が効かなければ、スラッシュ起動専用にしたはずの skill が自動発火へ戻る。
+    """
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, f"name: planner\ndescription: 説明\ndisable-model-invocation: {value}")
+
+    assert validate_skills.validate_skills(skills_dir) == 1, label
+
+
+def test_validate_skills_rejects_underscore_misspelling(tmp_path: Path) -> None:
+    """ハイフンをアンダースコアに取り違えた綴りが不合格になること。
+
+    自前パーサは綴り違いを「別のキー」として黙って受理するため、宣言は丸ごと
+    無視される。効かない宣言は、宣言が無いのと同じかそれより悪い。
+    """
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, "name: planner\ndescription: 説明\ndisable_model_invocation: true")
+
+    assert validate_skills.validate_skills(skills_dir) == 1
+
+
+def test_validate_skills_accepts_real_booleans(tmp_path: Path) -> None:
+    """引用符なしの true / false は通ること（正しい書き方を落とさない）。"""
+    skills_dir = tmp_path / "skills"
+    _write_skill(
+        skills_dir,
+        "name: planner\ndescription: 説明\nuser-invocable: true\ndisable-model-invocation: false",
+    )
+
+    assert validate_skills.validate_skills(skills_dir) == 0
+
+
+def test_quick_skills_stay_slash_only() -> None:
+    """quick 系が `disable-model-invocation: true` を宣言し続けること。
+
+    この宣言が落ちると skill は黙って自動発火へ戻る。人間が実行を担うと決めた
+    ときだけ入るモードなので、モデルの推測で入ってはならない。型検査は上の
+    テストが持つので、ここは**宣言が実在すること**だけを見る。
+    """
+    from ple4.ci.ci_common import extract_frontmatter
+
+    skills = Path(__file__).resolve().parents[2] / "skills"
+    quick = sorted(p for p in skills.glob("quick-*/SKILL.md"))
+    assert len(quick) >= 5, f"quick 系が {len(quick)} 件しか見つからない"
+    lapsed = [
+        p.parent.name
+        for p in quick
+        if (extract_frontmatter(p.read_text(encoding="utf-8")) or {}).get("disable-model-invocation")
+        is not True
+    ]
+    assert lapsed == [], f"自動発火へ戻っている quick 系: {lapsed}"
+
+
 def test_extract_frontmatter_skips_lines_without_colon() -> None:
     """コロンが無い frontmatter 行はスキップする。"""
     from ple4.ci.validate_agents import extract_frontmatter

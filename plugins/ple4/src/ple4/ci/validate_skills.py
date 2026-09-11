@@ -13,6 +13,44 @@ DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
 # できず、`description` が無いと「いつ呼ぶか」を判断できない。
 _REQUIRED_FRONTMATTER_FIELDS = ("name", "description")
 
+# 真偽値でなければ意味を成さない frontmatter フィールド。ホストは真の bool しか
+# 見ないので、`"true"`（引用符付き）/ `yes` / `1` は**宣言したつもりで効かない**。
+# 自前パーサはそれらを str / int として読むため、型を見ない限り素通りする。
+# 実害: `disable-model-invocation` が効かなければ、スラッシュ起動専用にしたはずの
+# skill がモデルの推測で自動発火する。`user-invocable` も同じ形で裏返る。
+_BOOLEAN_FRONTMATTER_FIELDS = ("user-invocable", "disable-model-invocation")
+
+# 綴りを間違えても自前パーサは「別のキー」として黙って受理する。ハイフンと
+# アンダースコアの取り違えが唯一現実的な誤りなので、その形だけを名指しで拒否する。
+_KNOWN_FRONTMATTER_FIELDS = frozenset(
+    {"name", "description", "context", *_BOOLEAN_FRONTMATTER_FIELDS}
+)
+
+
+def _frontmatter_field_errors(label: str, frontmatter: dict[str, object]) -> list[str]:
+    """真偽値フィールドの型と、ハイフン／アンダースコアの綴り違いを検査する。
+
+    Args:
+        label: エラーメッセージへ出す対象名
+        frontmatter: 解析済みの frontmatter
+
+    Returns:
+        エラーメッセージの一覧（違反が無ければ空）
+    """
+    errors: list[str] = []
+    for key in frontmatter:
+        swapped = key.replace("_", "-")
+        if swapped != key and swapped in _KNOWN_FRONTMATTER_FIELDS:
+            errors.append(f"{label} - frontmatter の {key} は {swapped} の綴り違い（黙って無視される）")
+    for field in _BOOLEAN_FRONTMATTER_FIELDS:
+        if field in frontmatter and not isinstance(frontmatter[field], bool):
+            value = frontmatter[field]
+            errors.append(
+                f"{label} - frontmatter の {field} が真偽値でない（{value!r}）。"
+                "引用符なしの true / false で書く（文字列や数値はホストに効かない）"
+            )
+    return errors
+
 
 def validate_skills(skills_dir: str | Path = DEFAULT_SKILLS_DIR, *, optional: bool = False) -> int:
     """スキルディレクトリを検証し、JS バリデータと同じメッセージを表示する。
@@ -74,6 +112,13 @@ def validate_skills(skills_dir: str | Path = DEFAULT_SKILLS_DIR, *, optional: bo
         missing = [field for field in _REQUIRED_FRONTMATTER_FIELDS if not frontmatter.get(field)]
         if missing:
             emit_error(f"{directory.name}/SKILL.md - frontmatter に {' '.join(missing)} がありません")
+            has_errors = True
+            continue
+
+        field_errors = _frontmatter_field_errors(f"{directory.name}/SKILL.md", frontmatter)
+        if field_errors:
+            for message in field_errors:
+                emit_error(message)
             has_errors = True
             continue
 
