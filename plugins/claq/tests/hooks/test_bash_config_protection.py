@@ -149,6 +149,26 @@ class TestFindProtectedWrite:
             is None
         )
 
+    def test_allows_protected_basename_outside_repo_root_via_tilde(
+        self, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`~` 展開後にリポジトリ外へ解決される同名ファイルは allow する。
+
+        `_expand_leading_tilde`（2026-09-12 HIGH-1 対応）が無いと ``~`` は
+        cwd 相対の文字通りのフォルダ名として扱われ、cwd がリポジトリ配下
+        にある限り ``<repo_root>/~/outside/pyproject.toml`` という構造に
+        なって `_within_repo_root` が誤って True を返し deny していた
+        （false positive）。展開後は実際の home 配下に解決されるため、
+        home がリポジトリ外にあればこの回帰は起きない。
+        """
+        home = tmp_path_factory.mktemp("home")
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.delenv("CLAQ_HOME", raising=False)
+        assert (
+            bash_config_protection.find_protected_write("printf x > ~/outside/pyproject.toml")
+            is None
+        )
+
     def test_allows_when_repo_root_undetermined(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A-06: リポジトリルートが決定できない場合は allow する（deny に倒さない）。"""
         monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: None)
@@ -547,3 +567,133 @@ class TestModeChangeIsBlocked:
 
         assert bash_config_protection.main() == 2
         assert ".git/hooks/" in capsys.readouterr().err
+
+
+class TestHomeLogDirectoryProtection:
+    """``~/.claq/logs/`` への Bash 経由の書込みを保護する（2026-09-12 HIGH-1 対応）。
+
+    `recent_bg_failure_notice` が当日・前日のログ末尾行を無条件で次回
+    SessionStart の `<claq-memory>` へ注入するため、このディレクトリへの
+    自由な追記はプロンプト注入の永続化経路になる。`TestPathProtectionPropagates`
+    （`.git/hooks/` の伝播）をモデルにする。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fixed_home(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+    ) -> Path:
+        """`~` の展開先を、autouse の repo_root（tmp_path）と非nestedな別ディレクトリに固定する。
+
+        home を repo_root の下に置くと、`~/.claq/logs/...` が cwd 起点の相対解決で
+        たまたまリポジトリ配下に着地し、repo スコープ判定を素通りしてしまう
+        旧来の事故的な挙動でも本テストが緑になってしまう（本当の修正を検証した
+        ことにならない）。home は repo_root と兄弟ディレクトリにして両者を
+        確実に分離する。
+        """
+        home = tmp_path_factory.mktemp("home")
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.delenv("CLAQ_HOME", raising=False)
+        return home
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo x >> ~/.claq/logs/bg-2026-09-12.log",
+            "printf x > ~/.claq/logs/bg-2026-09-12.log",
+            "tee -a ~/.claq/logs/bg-2026-09-12.log <<< x",
+            "sed -i 's/a/b/' ~/.claq/logs/bg-2026-09-12.log",
+            "rm ~/.claq/logs/bg-2026-09-12.log",
+            "rm -rf ~/.claq/logs",
+            "mv ~/.claq/logs ~/.claq/logs.bak",
+        ],
+        ids=[
+            "tilde-redirect",
+            "tilde-truncate",
+            "tilde-tee",
+            "tilde-sed-i",
+            "tilde-rm",
+            "tilde-rmrf-dir",
+            "tilde-mv-dir",
+        ],
+    )
+    def test_tilde_form_is_blocked(self, command: str) -> None:
+        assert bash_config_protection.find_protected_write(command) is not None
+
+    def test_absolute_form_is_blocked(
+        self, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """絶対パス直書き（`~` を介さない）でも deny すること。
+
+        タブル展開だけでは絶対パス直書き型を捕まえられない（そもそも `~` を
+        含まないため tilde 展開は無関係）。構造一致（`_find_home_log_directory_match`）
+        が repo スコープ判定より前で効いていることを、この形で確認する。
+        """
+        home = tmp_path_factory.mktemp("home")
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.delenv("CLAQ_HOME", raising=False)
+        command = f"echo x >> {home}/.claq/logs/bg-2026-09-12.log"
+        assert bash_config_protection.find_protected_write(command) is not None
+
+    def test_relative_after_cd_is_blocked(self) -> None:
+        """`cd` を挟んだ相対パスも deny する。
+
+        `_find_home_log_directory_match` は cwd 基準で解決した path への構造的
+        一致であり、`scope_certain`（`cd` 等での repo スコープ判定の可否）より
+        前で無条件に効くため、`cd` を挟んでいても捕まる。
+        """
+        assert (
+            bash_config_protection.find_protected_write("cd ~ && echo x >> .claq/logs/bg-2026-09-12.log")
+            is not None
+        )
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo x > logs/bg-1.log",
+            "echo x > ~/.claq/mem.db",
+            "echo x > ~/.claq/session-data/x.md",
+            "echo x > ~/.config/claq/logs/x.log",
+        ],
+        ids=["repo-local-logs", "claq-mem-db", "claq-session-data", "config-claq-logs-lookalike"],
+    )
+    def test_lookalike_or_other_home_paths_are_allowed(self, command: str) -> None:
+        assert bash_config_protection.find_protected_write(command) is None
+
+    def test_main_blocks_home_log_write(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(
+            bash_config_protection,
+            "read_raw_stdin_with_truncation",
+            lambda: (_bash_payload("echo x >> ~/.claq/logs/bg-2026-09-12.log"), False),
+        )
+        assert bash_config_protection.main() == 2
+        err = capsys.readouterr().err
+        assert "~/.claq/logs" in err
+        assert "prompt-injection" in err
+
+    def test_find_home_log_directory_match_no_match_on_plain_relative_path(self) -> None:
+        assert bash_config_protection._find_home_log_directory_match("app.py") is None
+
+    def test_find_home_log_directory_match_matches_absolute_path(
+        self, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path_factory.mktemp("home")
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.delenv("CLAQ_HOME", raising=False)
+
+        result = bash_config_protection._find_home_log_directory_match(
+            f"{home}/.claq/logs/bg-1.log"
+        )
+
+        assert result == "~/.claq/logs"
+
+    def test_find_home_log_directory_match_falls_back_to_raw_token_when_unresolvable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`resolve_effective_target` が None を返す場合も生トークンで判定できること。"""
+        monkeypatch.setattr(bash_config_protection, "resolve_effective_target", lambda _t: None)
+
+        result = bash_config_protection._find_home_log_directory_match(".claq/logs/bg-1.log")
+
+        assert result == "~/.claq/logs"

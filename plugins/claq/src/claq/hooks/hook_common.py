@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from claq.hooks.output_adapter import adapt_context_output, emit_block
-from claq.lib.core_utils import ensure_private_dir, get_claq_dir
+from claq.lib.core_utils import ensure_private_dir, get_claq_dir, get_home_dir
 from claq.lib.harness import JSON_PARSE_FAILURES
 
 MAX_STDIN_BYTES = 1024 * 1024
@@ -1348,6 +1348,34 @@ def is_inplace_edit_flag(token: str) -> bool:
     return "i" in token[1:]
 
 
+def _expand_leading_tilde(raw_path: str) -> str:
+    """先頭の ``~`` をホームディレクトリへ展開する（シェルのチルダ展開に相当）。
+
+    シェルは行頭の（クォートされていない）``~`` を実行前に ``$HOME`` へ展開する
+    ため、フックがこれを展開しないまま `Path.cwd() / raw_path` へ渡すと、``~``
+    はカレントディレクトリ配下の文字通りのフォルダ名として扱われ、
+    ``~/.claq/logs/x`` が実際のホーム配下ではなく別の場所を指してしまう。
+
+    展開先はテスト・実行環境の双方で `get_home_dir()`（``CLAQ_HOME`` /
+    ``HOME`` / ``USERPROFILE`` の優先順）と揃える。``~otheruser`` のような
+    他ユーザー指定形式は展開しない（標準ライブラリに対応 API が無く、
+    docs/adr/shell-analysis-boundary.md の「うっかりバイパスの抑止」の対象範囲外）。
+
+    Args:
+        raw_path: 検査対象の生パス文字列。
+
+    Returns:
+        先頭が ``~`` または ``~/`` ならホームディレクトリへ展開した文字列。
+        それ以外はそのまま返す。
+
+    Raises:
+        例外は発生しません。
+    """
+    if raw_path == "~" or raw_path.startswith("~/"):
+        return str(get_home_dir()) + raw_path[1:]
+    return raw_path
+
+
 def resolve_effective_target(raw_path: str) -> Path | None:
     """cwd 基準で解決し、symlink を辿った実体 path を返します（H-02 対応）。
 
@@ -1355,6 +1383,8 @@ def resolve_effective_target(raw_path: str) -> Path | None:
     判定していたため、`alias -> pyproject.toml` のような symlink 経由の
     書き込みが判定をすり抜けていた。両モジュールがこの共有 helper で解決後の
     実体 path を得てから basename 判定することで、判定基準を一本化する。
+
+    先頭の ``~`` は `_expand_leading_tilde` でホームディレクトリへ展開してから解決する。
 
     Args:
         raw_path: 検査対象の生パス文字列（相対 / 絶対 / symlink いずれも可）。
@@ -1368,7 +1398,7 @@ def resolve_effective_target(raw_path: str) -> Path | None:
         例外は発生しません。
     """
     try:
-        return (Path.cwd() / raw_path).resolve(strict=False)
+        return (Path.cwd() / _expand_leading_tilde(raw_path)).resolve(strict=False)
     except (OSError, RuntimeError):
         return None
 

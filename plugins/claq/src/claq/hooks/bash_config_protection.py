@@ -202,6 +202,68 @@ _DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILES_FOLDED
 
+# ~/.claq/logs/ 配下（bg 失敗ログ）をディレクトリ構造で保護する
+# （2026-09-12 リポジトリレビュー HIGH-1: `recent_bg_failure_notice` が当日・
+# 前日のログ末尾行を無条件で次回 SessionStart の <claq-memory> へ注入するため、
+# このディレクトリへの自由な追記はプロンプト注入の永続化経路になる）。
+#
+# `config_protection._PROTECTED_PATH_SEGMENTS`（``.git/hooks`` 等）とは
+# あえて別枠にし、アルゴリズムだけ同じ構造的一致にする。今回の修正は
+# 「Bash からの直接追記の拒否」だけを範囲とすると明示されており、共有
+# `_PROTECTED_PATH_SEGMENTS` へ足すと `config_protection`（Edit/Write）の
+# 挙動まで変わって宣言された範囲を超えるため、本モジュール内に閉じる。
+_HOME_LOG_PATH_SEGMENTS = ((".claq", "logs"),)
+
+
+def _find_home_log_directory_match(token: str) -> str | None:
+    """トークンが ``~/.claq/logs/`` のディレクトリ構造に一致するか、その
+    ディレクトリ自身を指すかを判定する。
+
+    symlink は `resolve_effective_target` で解決してから判定する（H-02 と
+    同じ理由）。比較は畳んだ側（`normalize_protected_name`）で行う（C-2 と
+    同じ理由: ``Path.resolve()`` は APFS / NTFS で綴りを実体の大小へ正規化
+    しないため）。`config_protection.protected_path_segment` と同じ構造的
+    一致アルゴリズムだが、対象集合が本モジュール固有（`_HOME_LOG_PATH_SEGMENTS`）
+    なので独立して持つ（理由は `_HOME_LOG_PATH_SEGMENTS` のコメント参照）。
+
+    呼び出し側（`_find_protected_write_in_dialect`）はこの一致を、
+    `bash_config_protection` のリポジトリスコープ判定（A-06、
+    `resolve_repo_root` / `_within_repo_root`）を適用せず即座に deny する
+    印として使うこと。``~/.claq/logs/`` はどのリポジトリで作業していても
+    同一の固定位置を指すため、「別リポジトリの同名ファイルを誤検出しない
+    ための」repo スコープ判定の前提がそもそも成立しない。
+
+    **実際に解決先が home 配下であることまでは検証しない**（意図的）。
+    `resolve_effective_target` が解決できないトークン（壊れた symlink 等）
+    では `Path(token).parts` にフォールバックし、`cd` を挟んだ相対パス
+    （`test_relative_after_cd_is_blocked`）ではプロセス cwd 基準の解決結果
+    に対する構造一致でしか判定できない。したがって理論上はリポジトリ内に
+    偶然 ``.claq/logs`` という並びのディレクトリがあると誤って deny しうる
+    （false positive）が、A-06 と同じ「決定不能なら安全側」の方針であり、
+    悪用経路にはならない誤検出側の広さなので許容する。
+
+    Args:
+        token: 検査対象の生トークン（パスの可能性がある）。``~`` は
+            `resolve_effective_target` が内部で展開する。
+
+    Returns:
+        一致すれば ``"~/.claq/logs"``。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    resolved = resolve_effective_target(token)
+    parts = resolved.parts if resolved is not None else Path(token).parts
+    folded_parts = tuple(normalize_protected_name(part) for part in parts)
+    for segments in _HOME_LOG_PATH_SEGMENTS:
+        folded_segments = tuple(normalize_protected_name(part) for part in segments)
+        width = len(folded_segments)
+        for index in range(len(folded_parts) - width + 1):
+            if folded_parts[index : index + width] == folded_segments:
+                return "~/" + "/".join(segments)
+    return None
+
+
 # `NAME=value` 形式の literal 環境変数代入（M-01: 実行 executable 位置の特定に使う）。
 # malformed JSON fallback で「破壊的操作の指示」とみなす部分文字列。書き込み系
 # （`>`/`tee`/`-i`）に加えて、トークン化経路が既に見ている削除・リンク系の verb を
@@ -747,6 +809,9 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
 def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | None:
     """1 つのシェル方言の読み方で保護対象書き込みを探す。
 
+    ``~/.claq/logs/`` への一致（`_find_home_log_directory_match`）は repo スコープ
+    判定より前で、無条件に deny する（理由は同関数の docstring 参照）。
+
     Args:
         command: `command_dialect_variants` が返した 1 通りの読み方
             （heredoc のデータ本文は呼び出し元で除去済み）。
@@ -762,6 +827,9 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
     scope_certain = not any(_changes_working_directory(segment) for segment in segments)
     for segment in segments:
         for token in _write_target_tokens_in_segment(segment):
+            home_log_hit = _find_home_log_directory_match(token)
+            if home_log_hit is not None:
+                return home_log_hit
             found = _protected_target(token)
             if found is None:
                 continue
@@ -842,8 +910,37 @@ _MALFORMED_INPUT_MESSAGE = (
 )
 
 
+def _blocked_home_log_message(display_name: str) -> str:
+    """``~/.claq/logs/`` への Bash 経由の書込みブロック時の理由メッセージを生成する。
+
+    `blocked_message_for_file` はリンタ設定向けの文言で、ログディレクトリの
+    保護理由（プロンプト注入の永続化経路を塞ぐこと）には適合しないため、
+    専用の文言を持つ（2026-09-12 リポジトリレビュー HIGH-1）。
+
+    Args:
+        display_name: ブロックされたパスの表示名。
+
+    Returns:
+        ブロック理由の文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        f"[Hook] BLOCKED: Writing to {display_name} via Bash is not allowed. "
+        "This directory's content is read back into every future session's "
+        "context, so free-form writes here are a prompt-injection persistence "
+        "vector. If this write is genuinely necessary, ask the user to make it — "
+        "do not disable the protection hook yourself."
+    )
+
+
 def main() -> int:
     """Bash コマンドによる保護対象設定ファイルへの直接書き込みを検知してブロックする。
+
+    `find_protected_write` のヒットが ``~/.claq/logs`` のような home-log
+    表示名（``"~/"`` 始まり）なら `_blocked_home_log_message` の専用文言を、
+    それ以外は `blocked_message_for_file` のリンタ設定向け文言を使う。
 
     Args:
         引数はありません（標準入力から読み取る）。
@@ -885,7 +982,12 @@ def main() -> int:
     for command in iter_bash_commands(data):
         found = find_protected_write(command)
         if found:
-            return emit_block_output(blocked_message_for_file(found))
+            message = (
+                _blocked_home_log_message(found)
+                if found.startswith("~/")
+                else blocked_message_for_file(found)
+            )
+            return emit_block_output(message)
     return 0
 
 

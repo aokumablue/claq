@@ -789,6 +789,50 @@ class TestResolveEffectiveTarget:
 
         assert hook_common.resolve_effective_target("whatever") is None
 
+    def test_expands_leading_tilde_before_resolving(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """シェルの `~` 展開に合わせ、``~/...`` はホーム基準で解決すること。
+
+        `Path.cwd() / raw_path` はそのままでは ``~`` を展開せず、
+        ``<cwd>/~/.claq/logs/x`` のようなカレントディレクトリ配下の
+        リテラルなフォルダ名として扱ってしまう（H-01）。
+        """
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("CLAQ_HOME", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        resolved = hook_common.resolve_effective_target("~/.claq/logs/bg-1.log")
+
+        assert resolved == (tmp_path / ".claq" / "logs" / "bg-1.log").resolve()
+
+
+class TestExpandLeadingTilde:
+    """`_expand_leading_tilde`（シェルのチルダ展開相当）のテスト。"""
+
+    def test_bare_tilde_expands_to_home_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("CLAQ_HOME", raising=False)
+
+        assert hook_common._expand_leading_tilde("~") == str(tmp_path)
+
+    def test_tilde_slash_prefix_expands_to_home_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("CLAQ_HOME", raising=False)
+
+        assert hook_common._expand_leading_tilde("~/.claq/logs/x") == str(tmp_path) + "/.claq/logs/x"
+
+    def test_path_without_leading_tilde_is_unchanged(self) -> None:
+        assert hook_common._expand_leading_tilde("plugins/claq/pyproject.toml") == "plugins/claq/pyproject.toml"
+
+    def test_other_user_tilde_is_not_expanded(self) -> None:
+        """``~otheruser`` 形式は展開しない（標準ライブラリに対応 API が無いための既定範囲外）。"""
+        assert hook_common._expand_leading_tilde("~otheruser/x") == "~otheruser/x"
+
 
 class TestReadRawStdinWithTruncation:
     """read_raw_stdin_with_truncation の切り捨て判定・stdin ガードのテスト。"""

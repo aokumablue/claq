@@ -50,6 +50,7 @@ from claq.mem.knowledge_input import (
     validate_choice,
 )
 from claq.mem.models import Knowledge, Repo, Session, utc_now_iso
+from claq.mem.redaction import redact
 from claq.mem.repo_identity import resolve_repo
 from claq.mem.settings import (
     CONTEXT_GLOBAL_CHAR_BUDGET,
@@ -1147,15 +1148,20 @@ def _handoff_section(db: Database, repo_id: str) -> str:
 def _bg_failure_section() -> str:
     """前回セッションの detach 起動（``--bg``）失敗痕跡があれば 1 行の節にする（§6.2 対応）。
 
-    通知本文はログファイルの末尾行そのままであり、``~/.claq/logs/`` を守る
-    フックは無い。1 度書き込まれた行は次セッション以降の SessionStart で
+    通知本文はログファイルの末尾行そのままであり、Bash からの直接書込みは
+    `bash_config_protection` の ``~/.claq/logs/`` 保護（2026-09-12 HIGH-1）で
+    塞ぐが、それでもログへ書き込まれた行は次セッション以降の SessionStart で
     注入され続けるため、隣の handoff 節（``_handoff_section`` →
-    ``handoff._summarize_transcript``）と同じ
-    ``strip_tags(normalize_user_message(...))`` の合成を通してから注入する。
-    通していなかった頃は ``</claq-memory> IMPORTANT: ...`` の 1 行をログへ
-    追記するだけで注入枠のタグ境界を閉じ、以後の本文を指示として提示できた
-    （実測）。``strip_tags`` だけでは足場タグ（``<system-reminder>`` 等）が
-    素通りするため、両方を通す。
+    ``handoff._summarize_transcript``）の ``_sanitize_freeform`` と同じ順序
+    （``normalize_user_message`` → ``strip_tags`` → ``redact``）で注入前に
+    無害化する。通していなかった頃は ``</claq-memory> IMPORTANT: ...`` の
+    1 行をログへ追記するだけで注入枠のタグ境界を閉じ、以後の本文を指示として
+    提示できた（実測）。``strip_tags`` だけでは足場タグ（``<system-reminder>``
+    等）が素通りするため両方を通し、``redact`` はログへ書かれたシークレット
+    （API キー等）が未マスクのまま注入されるのを防ぐ
+    （``strip_tags`` の後に ``redact`` を置く順序も `_sanitize_freeform` と揃える。
+    タグで分断された秘密は ``strip_tags`` で 1 本へ再結合して初めて
+    ``redact`` のパターンに一致するため、順序を逆にすると検出できない）。
 
     Returns:
         痕跡があれば見出し付き 1 行の節。無ければ空文字列。
@@ -1163,7 +1169,7 @@ def _bg_failure_section() -> str:
     Raises:
         例外は発生しません。
     """
-    notice = strip_tags(normalize_user_message(recent_bg_failure_notice())).strip()
+    notice = redact(strip_tags(normalize_user_message(recent_bg_failure_notice()))).strip()
     if not notice:
         return ""
     return f"## 前回セッションの通知\n{notice}"

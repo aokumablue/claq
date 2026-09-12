@@ -866,6 +866,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
         }
     ),
     "bash_config_protection._WRAPPER_VALUE_SHORT_OPTIONS": frozenset({"-u"}),
+    "bash_config_protection._HOME_LOG_PATH_SEGMENTS": ((".claq", "logs"),),
     # 派生: 保護 basename の和集合。
     "bash_config_protection._ALL_PROTECTED_BASENAMES": (
         _folded(_EXPECTED_PROTECTED_FILES) | _folded(_EXPECTED_CONDITIONALLY_PROTECTED_FILES)
@@ -1304,6 +1305,7 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
     "bash_config_protection._BASH_TOOL_NAMES": "_HARNESS_CASES の copilot bash 危険 / 通常",
     "bash_config_protection._ALL_PROTECTED_BASENAMES": "test_every_protected_file_is_denied_on_bash_write",
     "bash_config_protection._DIRECTORY_CHANGE_COMMANDS": "test_every_directory_change_command_forces_unconditional_deny",
+    "bash_config_protection._HOME_LOG_PATH_SEGMENTS": "test_tilde_form_is_blocked / test_absolute_form_is_blocked / test_relative_after_cd_is_blocked (TestHomeLogDirectoryProtection)",
     "config_protection.PROTECTED_FILES": "test_every_protected_file_is_denied_on_write",
     "config_protection.CONDITIONALLY_PROTECTED_FILES": "test_every_conditionally_protected_file_denies_only_lint_signals",
     "config_protection.PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
