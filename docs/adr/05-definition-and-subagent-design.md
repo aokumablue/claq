@@ -202,7 +202,7 @@ perf-optimizer 担当」のような相互ディスクレーマが三角形状�
 ADR-0010 で分割粒度を見直し 13 → 9 定義へ統合した後、残る 9 定義（計 1448 行）の**中身**を Anthropic 公式の
 サブエージェント仕様とプロンプティング指針に照らして点検した。点検で 2 つの実害が見つかった。
 
-1. **事実誤認**: 6 定義が「`<ple4-memory>` 注入で起動（SessionStart の `mem context`）」と書いていたが、サブ
+1. **事実誤認**: 6 定義が「`<claq-memory>` 注入で起動（SessionStart の `mem context`）」と書いていたが、サブ
    エージェントには届かない（共通原則を参照）。呼び出し元も渡していなかった。同じ文が `skills/learn`
    `skills/loop-dev`（`context: fork` は全継承）`commands/feat-dev.md` にもあるが、そちらは本体セッションで動く
    ため正しい — agents へのコピペで前提が壊れていた
@@ -216,7 +216,7 @@ ADR-0010 で分割粒度を見直し 13 → 9 定義へ統合した後、残る 
 
 1. **自動注入されるものを前提にしない** — サブエージェントが起動時に受け取るものは共通原則の 6 種のみ。それ以外
    （会話履歴・親の注入・過去の検索結果）を前提に書かない。知識 DB を引くのは Bash を持つエージェントが自分で
-   `ple4_run ple4.mem.cli search` を叩く経路だけ。Bash が無いエージェントにはメモリ経路が無いので、必要なら
+   `claq_run claq.mem.cli search` を叩く経路だけ。Bash が無いエージェントにはメモリ経路が無いので、必要なら
    呼び出し元が依頼文へ載せる
 2. **深刻度・確信度で報告を絞らせない** — 見つけたものはすべて出させ、確信が持てないものに「未確認」ラベルを
    付ける。ノイズ削減は重複統合とスタイル除外で行う。安全性の担保は `Blockers: {n}`（CRITICAL+HIGH 件数）という
@@ -232,7 +232,7 @@ ADR-0010 で分割粒度を見直し 13 → 9 定義へ統合した後、残る 
    前の関門を定義本文へ書いたら、その本文からリテラルを抽出して実入力で検査するテストを併せて置く。プロンプト
    文書の契約は誰も実行しないため、書き間違えても気づけない（本 ADR 後の pass で、`reviewer` の形状検証が
    `CLAUDE.md` 規定の正規コマンド `. .venv/bin/activate && ...` を拒否しつつ `source ../../../evil/activate` を
-   通す状態のまま放置されていたことが判明した）。実装は `plugins/ple4/tests/test_agent_regex_contracts.py`
+   通す状態のまま放置されていたことが判明した）。実装は `plugins/claq/tests/test_agent_regex_contracts.py`
 
 **判定行の欠落は「指摘ゼロ」ではない**（本 ADR の点検中に見つかった別の欠陥への対処）。`loop-dev` の収束条件と
 `/refactor` の final gate は、`Blockers: {n}` 行が出力に実際に含まれていることを前提とする。行が無い場合（途中
@@ -348,7 +348,7 @@ ADR-0010 で分割粒度を見直し 13 → 9 定義へ統合した後、残る 
 
 `output-styles/slim.md` は「日本語で簡潔に応答。結論先・理由後、敬語なし」という応答スタイルをシステムプロンプトへ
 強制注入し、出力トークンを削減する仕組みだった。`plugin.json` の `outputStyles` 登録と frontmatter の
-`force-for-plugin: true` により、ple4 プラグイン配下の全セッションへ無条件で適用されていた。
+`force-for-plugin: true` により、claq プラグイン配下の全セッションへ無条件で適用されていた。
 
 このパターンは 2 世代の実装を経ている。初代は `hooks/pre_user_prompt.py`（UserPromptSubmit フックで
 `skills/s-slim/SKILL.md` を毎プロンプト `additionalContext` へ注入）で、output-style 非対応ホストにも効かせる
@@ -379,7 +379,7 @@ ADR-0010 で分割粒度を見直し 13 → 9 定義へ統合した後、残る 
 **LLM 応答の事後圧縮を目的とする仕組みを持たない。** 具体的には次を規約とする。
 
 1. **output-style による応答圧縮を提供しない** — `output-styles/slim.md` とディレクトリを削除し、`plugin.json` の
-   `outputStyles` 登録を外す。ple4 は output-style を配布しない
+   `outputStyles` 登録を外す。claq は output-style を配布しない
 2. **ハーネス監査 rubric からも撤去する** — 他リポジトリへ同パターンを推奨しない。`context-strategic-compact`
    （3 点）と `cost-skill`（4 点）を削除し、repo モード満点は 65 → 58、チェック数は 24 → 22 になる。採点基準が
    変わるため `rubric_version` も `2026-08-26` へ上げる
@@ -404,7 +404,7 @@ ADR-0010 で分割粒度を見直し 13 → 9 定義へ統合した後、残る 
 #### 代替案 2: rubric チェックだけ残す
 
 - 長所: 満点とテストのアサーションを変えずに済む
-- 短所: 自リポジトリの audit が永久に fail する。さらに悪いことに、ple4 自身が correctness hazard と判断して捨てた
+- 短所: 自リポジトリの audit が永久に fail する。さらに悪いことに、claq 自身が correctness hazard と判断して捨てた
   パターンを、他リポジトリへ 7 点分のスコアで推奨し続ける
 - 却下理由: `redux_filter` 撤去と同一の論理がそのまま適用される。**自分が捨てたものを他人に勧めない**
 

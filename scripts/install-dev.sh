@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # install-dev.sh
-# リポジトリ直下 .venv を作り、plugins/ple4[dev] を editable install する。
+# リポジトリ直下 .venv を作り、plugins/claq[dev] を editable install する。
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT=""
-SKIP_PYTHON="${PLE4_INSTALL_SKIP_PYTHON:-0}"
+SKIP_PYTHON="${CLAQ_INSTALL_SKIP_PYTHON:-0}"
 
 usage() {
   cat <<'EOF'
@@ -53,7 +53,7 @@ run_quietly() {
 # PATH の分割に配列を使わないのは、macOS の system bash が 3.2 で、そこでは
 # `set -u` 下の `"${arr[@]}"` が**空配列で unbound variable になる**ため
 # （実測）。`#!/usr/bin/env bash` は既定でその 3.2 に解決するので、PATH が空の
-# 環境でインストーラごと落ちる。runtime/ple4-hook と同じ while ループで割る。
+# 環境でインストーラごと落ちる。runtime/claq-hook と同じ while ループで割る。
 warn_stale_tool_symlinks() {
   local rest="${PATH}"
   local entry tool candidate target
@@ -71,9 +71,9 @@ warn_stale_tool_symlinks() {
       [[ -L "${candidate}" ]] || continue
       target="$(readlink -- "${candidate}")"
       [[ "${target}" == */.venv/bin/* ]] || continue
-      echo "[ple4] WARNING: ${candidate} is a leftover symlink into a checkout venv (-> ${target})."
-      echo "[ple4]          An older install-dev.sh created it. It exposes a user-writable path under a system-wide name, shadows the venv copy, and dangles once that checkout is removed."
-      echo "[ple4]          Remove it manually (sudo is required, so this script will not do it): sudo rm -- '${candidate}'"
+      echo "[claq] WARNING: ${candidate} is a leftover symlink into a checkout venv (-> ${target})."
+      echo "[claq]          An older install-dev.sh created it. It exposes a user-writable path under a system-wide name, shadows the venv copy, and dangles once that checkout is removed."
+      echo "[claq]          Remove it manually (sudo is required, so this script will not do it): sudo rm -- '${candidate}'"
     done
   done
 }
@@ -121,7 +121,7 @@ done
 if [[ -z "${REPO_ROOT}" ]]; then
   REPO_ROOT="$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)"
 fi
-PLUGIN_ROOT="${REPO_ROOT}/plugins/ple4"
+PLUGIN_ROOT="${REPO_ROOT}/plugins/claq"
 VENV_DIR="${REPO_ROOT}/.venv"
 VENV_PYTHON="${VENV_DIR}/bin/python3"
 
@@ -137,8 +137,8 @@ pip_install_quiet() {
 warn_stale_tool_symlinks
 
 if [[ "${SKIP_PYTHON}" == "1" ]]; then
-  echo "[ple4] Developer extras skipped because --skip-python was requested"
-  echo "[ple4] OK"
+  echo "[claq] Developer extras skipped because --skip-python was requested"
+  echo "[claq] OK"
   exit 0
 fi
 
@@ -148,9 +148,9 @@ if ! PYTHON3="$(find_python3)"; then
   exit 1
 fi
 
-# 旧共有 venv（~/.ple4/.venv）への symlink は開発用実体ではないので外す
+# 旧共有 venv（~/.claq/.venv）への symlink は開発用実体ではないので外す
 if [[ -L "${VENV_DIR}" ]]; then
-  echo "[ple4] Removing leftover .venv symlink at ${VENV_DIR}"
+  echo "[claq] Removing leftover .venv symlink at ${VENV_DIR}"
   rm -f -- "${VENV_DIR}"
 fi
 
@@ -160,7 +160,7 @@ if [[ ! -x "${VENV_PYTHON}" ]]; then
     echo "       Install python3-venv manually and retry." >&2
     exit 1
   fi
-  echo "[ple4] Creating Python virtual environment at ${VENV_DIR}"
+  echo "[claq] Creating Python virtual environment at ${VENV_DIR}"
   "${PYTHON3}" -m venv "${VENV_DIR}"
   if [[ ! -x "${VENV_PYTHON}" ]]; then
     echo "Error: failed to create virtual environment at ${VENV_DIR}." >&2
@@ -176,11 +176,11 @@ else
 fi
 
 if ! "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
-  echo "[ple4] Bootstrapping pip via ensurepip"
+  echo "[claq] Bootstrapping pip via ensurepip"
   run_quietly "${VENV_PYTHON}" -m ensurepip --upgrade
 fi
 
-echo "[ple4] Installing developer-only Python extras"
+echo "[claq] Installing developer-only Python extras"
 pip_install_quiet -e "${PLUGIN_ROOT}[dev]"
 
 # 開発ツールは venv の中だけに置く。
@@ -197,8 +197,8 @@ pip_install_quiet -e "${PLUGIN_ROOT}[dev]"
 # symlink がある機械では抑止される——だからこそ回収案内を別経路にしてある。
 for tool in ruff vulture; do
   if ! command -v "${tool}" >/dev/null 2>&1; then
-    echo "[ple4] ${tool} is available inside the venv only. Run 'source ${VENV_DIR}/bin/activate' (or add ${VENV_DIR}/bin to PATH) before invoking it."
+    echo "[claq] ${tool} is available inside the venv only. Run 'source ${VENV_DIR}/bin/activate' (or add ${VENV_DIR}/bin to PATH) before invoking it."
   fi
 done
 
-echo "[ple4] OK"
+echo "[claq] OK"

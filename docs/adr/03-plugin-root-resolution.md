@@ -5,7 +5,7 @@ md からベンダ固有パスを排除したまま、どの plugin install を�
 
 | ADR | 決定 | 日付 | ステータス |
 |---|---|---|---|
-| [ADR-0008](#adr-0008-plugin-root-は-ple4envsh-ポインタで解決しmd-にベンダ固有パスを書かない) | plugin root は `~/.ple4/env.sh` ポインタで解決。祖先 PID + `lstart` を鍵にし、推測 fallback は持たない | 2026-08-20（改訂 ×5） | accepted |
+| [ADR-0008](#adr-0008-plugin-root-は-claqenvsh-ポインタで解決しmd-にベンダ固有パスを書かない) | plugin root は `~/.claq/env.sh` ポインタで解決。祖先 PID + `lstart` を鍵にし、推測 fallback は持たない | 2026-08-20（改訂 ×5） | accepted |
 | [ADR-0009](#adr-0009-roots-pointer-resolver-は-ownermode-検証を行わない) | pointer file の owner/mode 検証は実装しない。PID 開始時刻照合は撤回して実装した | 2026-08-20（改訂 ×2） | accepted |
 
 ## 共通原則
@@ -22,14 +22,14 @@ root ディレクトリも helper も manifest も digest も、すべて攻撃�
 ものへの非対応は「リスクの許容」ではなく「防御不能な対象への対処の見送り」である。
 
 **`roots/` の汚染は enforcement hook には及ばない。** `hooks.json` の全エントリは
-`runtime/ple4-hook`（PowerShell ホストでは同エントリの `powershell` が `runtime/ple4-hook.cmd`）を
+`runtime/claq-hook`（PowerShell ホストでは同エントリの `powershell` が `runtime/claq-hook.cmd`）を
 呼ぶだけで `env.sh` を source しない。resolver は保護 hook の
 実行経路に一切登場せず、汚染で保護 hook を無効化することはできない。影響は md/agents/skills から
-呼ばれる `ple4_run` / `ple4_mem_learn` の汚染に限定される。
+呼ばれる `claq_run` / `claq_mem_learn` の汚染に限定される。
 
 ---
 
-## ADR-0008: plugin root は `~/.ple4/env.sh` ポインタで解決し、md にベンダ固有パスを書かない
+## ADR-0008: plugin root は `~/.claq/env.sh` ポインタで解決し、md にベンダ固有パスを書かない
 
 **日付**: 2026-08-20（初版）／改訂 ×5（最新 2026-08-27）  **ステータス**: accepted
 
@@ -57,20 +57,20 @@ terminal app 等）が生存し続ける限り恒久化し、その host イン�
 した。同一プロセス内の thread 衝突は現行 launcher に発生経路が無い。これは同一 UID 内の precreation /
 symlink 追従を除く**堅牢性改善**であり、owner/mode 非検証（ADR-0009）は変えない。
 
-**改訂 5**: 2026-08-26 の実機監査 F-11 を受け、`ple4-helpers.sh` が ambient `CLAUDE_PLUGIN_ROOT` を
+**改訂 5**: 2026-08-26 の実機監査 F-11 を受け、`claq-helpers.sh` が ambient `CLAUDE_PLUGIN_ROOT` を
 pointer 由来の root より優先していた点を撤回した。helper 本体は env.sh が pointer から選んだ root から
 source されているため、返す root だけ環境変数で差し替えると「実行しているコードは A なのに自称は B」
 という自己不整合になり、本 ADR の「verified root」という主張が崩れる。どの root を source するかを
 環境から決めるのは構わないが、source 後の自己申告を上書きしてはならない。併せて F-26
 （`${BASH_SOURCE[0]:-$0}` が dash で `Bad substitution` になる）に対応し、env-template.sh が解決済み
-root を `_PLE4_SOURCED_ROOT` で helper へ明示的に引き渡す形にした。POSIX sh は source されたファイルの
+root を `_CLAQ_SOURCED_ROOT` で helper へ明示的に引き渡す形にした。POSIX sh は source されたファイルの
 位置を自力で解決できない（`$0` はシェル名のまま）ため、この受け渡しが `#!/usr/bin/env sh` という宣言と
 helper の実装を初めて整合させる。これは真正性の保証ではなく、自己不整合と移植性の是正である。
 
 ### コンテキスト
 
-v0.9.34 のランタイム監査 M-02 は、`ple4_run` / `ple4_mem_learn` を参照する agents/commands/skills の
-md のうち、bootstrap を持たない 16 surface が `ple4_run: command not found`（exit 127）になることを
+v0.9.34 のランタイム監査 M-02 は、`claq_run` / `claq_mem_learn` を参照する agents/commands/skills の
+md のうち、bootstrap を持たない 16 surface が `claq_run: command not found`（exit 127）になることを
 指摘した。加えてユーザー要件として、`.claude` / `.copilot` / `.grok` 等のベンダ固有インストールパスを
 md から排除し、host-dependent なロジックを実装ファイルへ隔離することが求められた。
 
@@ -87,7 +87,7 @@ md から排除し、host-dependent なロジックを実装ファイルへ隔�
 
 ### 決定
 
-**plugin root の解決を `~/.ple4/env.sh`（launcher が全 hook 起動時に書き出す固定住所）へ一元化し、
+**plugin root の解決を `~/.claq/env.sh`（launcher が全 hook 起動時に書き出す固定住所）へ一元化し、
 md にはベンダ名を一切書かない。ホストの判別は環境変数ではなく祖先プロセスの `PID` + `lstart`
 （起動時刻）を鍵にする。roots pointer は shell コードではなく単なるデータ（root + lstart の 2 行）
 として扱う。祖先で解決できない場合に推測する fallback は持たない。writer が書き込む祖先の範囲は
@@ -108,29 +108,29 @@ host インスタンス専有の PID（最大 2 段）に限定し、他 host �
    ない。したがって同一 PID に別の root が観測されるのは「同一 host がプラグインをアップグレードした」
    ケースのみであり、上書きが正しい挙動なので単純に上書きする（poison のような衝突検知は行わない）
 4. `runtime/env-template.sh` は自分の `$PPID` とその親（**最大 2 段**）を `ps -o ppid=` で辿り、各段で
-   `_ple4_resolve_ancestor_pointer` を呼ぶ: pointer が 2 行とも揃っていて、かつ
+   `_claq_resolve_ancestor_pointer` を呼ぶ: pointer が 2 行とも揃っていて、かつ
    `LC_ALL=C ps -o lstart= -p <pid>` で得た**現在の** lstart が記録値と一致する場合のみ採用する。空・
    欠落・不一致（PID 再利用）はスキップして次の祖先へ進む。**祖先チェーンで解決できなければ、推測せず
    常に `exit 127`**
 5. `write_env_pointer()` は `env.sh` を `tempfile.mkstemp` 経由の `os.replace()` で原子的に書く（R-06）。
    GC は今回書いた祖先チェーン全体の PID 集合（`keep_pids`）を他の削除条件を満たしても除外する。置き
-   場所は `get_ple4_dir()` ではなく **`$HOME` 固定**（md の bootstrap 行が `$HOME` 固定である以上、
-   writer 側もそれに合わせる契約とし、`PLE4_HOME` はデータ永続化側の契約と意図的に切り離した。R-04）
+   場所は `get_claq_dir()` ではなく **`$HOME` 固定**（md の bootstrap 行が `$HOME` 固定である以上、
+   writer 側もそれに合わせる契約とし、`CLAQ_HOME` はデータ永続化側の契約と意図的に切り離した。R-04）
 6. `launcher.py:main()` が全 hook 起動のたびに `write_env_pointer()` を呼ぶ（SessionStart に限定
    しない。復旧が速い）。書き込み失敗は握り潰すが、プロセスごと 1 回だけ stderr へ JSON 警告を出す
-7. `write_env_pointer()` は 1 時間に 1 回だけ `roots/` と `~/.ple4/env.sh.tmp.*` の GC を実行する。
+7. `write_env_pointer()` は 1 時間に 1 回だけ `roots/` と `~/.claq/env.sh.tmp.*` の GC を実行する。
    削除条件は「ファイル名が数字のみでない（`_DEAD_PID_GRACE_SECONDS` による age-gate 後に削除。M-01）」
    「PID が既に無く、書き込み直後の猶予（1 時間）を過ぎている」「PID は生存しているが mtime が 7 日を
    超えている」のいずれか。生存 PID かつ TTL 内のポインタは誤って削除しない
 8. `LC_ALL=C` を writer・resolver 双方で明示する。`ps -o lstart=` の出力はロケール依存
    （`LANG=ja_JP.UTF-8` では `木  8/20 ...`、`C` では `Thu Aug 20 ...`）であることを実装中に実機で
    発見した。正規化しないと ambient locale が異なる環境で常に PID 再利用と誤判定してしまう
-9. agents/commands/skills の md は `. "$HOME/.ple4/env.sh" || exit 127` の 1 行だけを書く。ベンダ固有
+9. agents/commands/skills の md は `. "$HOME/.claq/env.sh" || exit 127` の 1 行だけを書く。ベンダ固有
    パスの候補探索ループ（11 箇所）は全廃した
 
 ### 検討した代替案
 
-#### 代替案 1: 単一ファイル `~/.ple4/env.sh` に root を直接埋め込む
+#### 代替案 1: 単一ファイル `~/.claq/env.sh` に root を直接埋め込む
 
 - 長所: 実装が単純（ポインタ 1 本）
 - 短所: 別ターミナルで Claude Code と Copilot を並行起動すると、後に SessionStart が走ったほうの root が
@@ -145,7 +145,7 @@ host インスタンス専有の PID（最大 2 段）に限定し、他 host �
 - 却下理由: 実測・文書で裏付けが取れない前提に設計を依存させるべきではない。PPID は実測で確認できた
   確実な信号であり、かつベンダ名を一切要求しない
 
-#### 代替案 3: ランタイム実装を `~/.ple4` へ集約インストールする
+#### 代替案 3: ランタイム実装を `~/.claq` へ集約インストールする
 
 - 長所: 実装がホスト間で完全に共有され、md からベンダパスを排除する目的は達成できる
 - 短所: 新しいインストール機構（`curl | bash` の配布、または SessionStart による自己複製）が必要になり、
@@ -212,7 +212,7 @@ host インスタンス専有の PID（最大 2 段）に限定し、他 host �
   ポインタに reader の祖先 walk が届かず 127 になりうる。実測では Claude Code の構成で 2 段は十分だったが、
   他ホストでの実測は未確認。127 は自己修復可能なのに対し poison の恒久化は自己修復不能だったため、この
   trade-off は意図的に受け入れた（代替案 5 参照）
-- Copilot CLI での実機動作（`~/.ple4/roots/` が実際に生成され、1 行 bootstrap が動くか）は、SessionStart
+- Copilot CLI での実機動作（`~/.claq/roots/` が実際に生成され、1 行 bootstrap が動くか）は、SessionStart
   hook の発火自体は確認済みだが本改訂の実機再検証は範囲に含めていない（[ADR-0005](07-verification-scope-release-gates.md)
   に従い手動チェックリストで別途実施する）
 - `resolve_effective_target`（`config_protection.py` / `bash_config_protection.py` が使う symlink 解決
@@ -249,7 +249,7 @@ H-02 に対しユーザーから「リスクがあるとみなせる fallback �
 
 1. pointer record に writer が観測した host PID と「process start identity」を保存し、resolver が実際の
    ancestor process と照合する（PID 再利用対策）
-2. `~/.ple4` ・`roots/` ・pointer file を `lstat` で regular file / expected owner / non-group-writable /
+2. `~/.claq` ・`roots/` ・pointer file を `lstat` で regular file / expected owner / non-group-writable /
    non-world-writable と検証し、symlink・ownership 不正・unexpected type は fail-closed とする
 
 ADR-0008（改訂）で roots pointer は shell script からデータファイルへ変更済みであり、R-01/R-03 は構造的に
@@ -287,11 +287,11 @@ ADR-0008（改訂）で roots pointer は shell script からデータファイ�
 
 roots pointer が「実行されるコード」から「読まれるデータ」に変わったことで、pointer file への書き込み権限を
 持つ攻撃者が得られるのは**任意コード実行ではなく、誤った root path を resolver に読ませること**まで縮小した。
-誤った root path の結果は「存在しないパスなら 127」「`runtime/ple4-helpers.sh` を欠くパスなら 127」「別の
-（同一ユーザーが書き込み可能な）ple4 install を source する」のいずれかであり、シェルコード注入は既に構造的に
+誤った root path の結果は「存在しないパスなら 127」「`runtime/claq-helpers.sh` を欠くパスなら 127」「別の
+（同一ユーザーが書き込み可能な）claq install を source する」のいずれかであり、シェルコード注入は既に構造的に
 不可能になっている。
 
-`~/.ple4` はディレクトリとして 0700（`_ensure_private_dir`）に締めており、同一 OS ユーザー内の他プロセスから
+`~/.claq` はディレクトリとして 0700（`_ensure_private_dir`）に締めており、同一 OS ユーザー内の他プロセスから
 の書き込みは元々脅威モデルの範囲外である。
 
 **実装しない理由の核心は移植性ではなく実効性にある**（共通原則を参照）: resolver が読める入力は、すべて同一
@@ -342,7 +342,7 @@ writer が区別できない」という原理的な限界**である。
 
 **否定的** — なし（owner/mode は意図的な非対応。PID 開始時刻照合は撤回済み）。
 
-**リスク** — owner/mode 検証を行わないため、`~/.ple4` の権限が何らかの理由で 0700 から緩んだ場合（手動変更、
+**リスク** — owner/mode 検証を行わないため、`~/.claq` の権限が何らかの理由で 0700 から緩んだ場合（手動変更、
 バックアップ復元時の権限崩れ）、同一 OS ユーザー内の他プロセスが pointer を書き換えられる。これは脅威モデル外
 だが、`_ensure_private_dir` が毎回 `chmod(0o700)` で締め直す形で緩和している（能動的な検証ではなく、書き込みの
 たびの再強制）。

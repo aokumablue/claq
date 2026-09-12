@@ -31,7 +31,7 @@
 | 0005 | 実機ランタイム監査の検証範囲は静的 validator に限定する | superseded by ADR-0014（費用対効果の判断のみ） | 2026-08-18 | [07](07-verification-scope-release-gates.md) |
 | 0006 | 配布 artifact にテストを同梱せず、検証は source tree で行う | accepted | 2026-08-20 | [07](07-verification-scope-release-gates.md) |
 | 0007 | 知識カードの active 化権限は payload から剥奪するが、`promote` と既存 active カードは維持する | accepted | 2026-08-20 | [04](04-untrusted-input-prompt-boundary.md) |
-| 0008 | plugin root は `~/.ple4/env.sh` ポインタで解決し、md にベンダ固有パスを書かない | accepted | 2026-08-20（改訂 ×5、最新 2026-08-27） | [03](03-plugin-root-resolution.md) |
+| 0008 | plugin root は `~/.claq/env.sh` ポインタで解決し、md にベンダ固有パスを書かない | accepted | 2026-08-20（改訂 ×5、最新 2026-08-27） | [03](03-plugin-root-resolution.md) |
 | 0009 | roots pointer resolver は owner/mode 検証を行わない（PID 開始時刻照合は撤回） | accepted | 2026-08-20（改訂 ×2） | [03](03-plugin-root-resolution.md) |
 | 0010 | サブエージェントは「渡す材料」で分割し、役割名では分割しない | accepted | 2026-08-25 | [05](05-definition-and-subagent-design.md) |
 | 0011 | エージェント定義には挙動を書き、論拠と再説明は書かない | accepted | 2026-08-25 | [05](05-definition-and-subagent-design.md) |

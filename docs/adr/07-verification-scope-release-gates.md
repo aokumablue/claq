@@ -62,7 +62,7 @@ CI に組み込む自動化の対象からは外す。
 
 - 長所: `hooks.json` の宣言が実際にホストへ反映されることまで自動検証できる
 - 短所: Claude Code / Copilot CLI / Grok それぞれのインストール機構（ディレクトリ構造、マーケットプレイス経由の
-  配置、`grok_plugin_root.find_latest_installed_ple4` が扱うハッシュ付きディレクトリ等）を CI 環境で再現する必要が
+  配置、`grok_plugin_root.find_latest_installed_claq` が扱うハッシュ付きディレクトリ等）を CI 環境で再現する必要が
   あり、各ホストのバージョン更新に追従し続ける保守コストが継続的に発生する。ホストの内部実装（非公開の場合が
   ある）に CI が依存することになり、壊れやすい
 - 却下理由: スコープと保守コストが本プロジェクトの検証範囲を大きく超える。静的 validator で得られる保証と、実
@@ -96,14 +96,14 @@ CI に組み込む自動化の対象からは外す。
 ### コンテキスト
 
 v0.9.34 時点のランタイム監査レポートの H-03 は「release tree に pytest テストが無く、回帰検知を実行できない」と
-指摘した。検証者は `~/.copilot/installed-plugins/ple4/ple4`（インストール済みの plugin tree）で
-`cd plugins/ple4 && PYTHONPATH=src python3 -m pytest -q` を実行し、「collected 0 items」で exit 5 になったことを
+指摘した。検証者は `~/.copilot/installed-plugins/claq/claq`（インストール済みの plugin tree）で
+`cd plugins/claq && PYTHONPATH=src python3 -m pytest -q` を実行し、「collected 0 items」で exit 5 になったことを
 根拠にした。
 
-同一の再検証を **source tree**（`ple4-dev` リポジトリの `plugins/ple4`）で実施したところ:
+同一の再検証を **source tree**（`claq-dev` リポジトリの `plugins/claq`）で実施したところ:
 
 ```
-$ cd plugins/ple4 && python3 -m pytest -q --cov
+$ cd plugins/claq && python3 -m pytest -q --cov
 ...
 Required test coverage of 100.0% reached. Total coverage: 100.00%
 ```
@@ -149,8 +149,8 @@ Required test coverage of 100.0% reached. Total coverage: 100.00%
 
 ### 結果
 
-**肯定的** — 配布物の最小化方針を維持できる。検証手順（`cd plugins/ple4 && python3 -m pytest -q --cov`、
-`ruff check plugins/ple4/src`）は source tree に対して実行する、という単一の手順に統一される。
+**肯定的** — 配布物の最小化方針を維持できる。検証手順（`cd plugins/claq && python3 -m pytest -q --cov`、
+`ruff check plugins/claq/src`）は source tree に対して実行する、という単一の手順に統一される。
 
 **否定的** — installed tree だけを見て pytest を実行すると「テストが無い」ように見え、今回のような誤検出が今後も
 起こりうる。
@@ -165,9 +165,9 @@ Required test coverage of 100.0% reached. Total coverage: 100.00%
 > 根本原因は、配布ツリーへ `pyproject.toml` をそのまま持ち出していたことにある。`testpaths = ["tests"]` と
 > `fail_under = 100` が除去済みの `tests/` を指したまま残るため、配布ツリーで `pytest` を叩くと「coverage 0% で
 > FAIL」という**回帰そっくりの派手な失敗**が出た。2026-08-27 に `scripts/publish.sh` の除外リストへ
-> `plugins/ple4/pyproject.toml` を追加し、この出力が構造的に発生しないようにした（配布ツリーで pyproject が果たす
+> `plugins/claq/pyproject.toml` を追加し、この出力が構造的に発生しないようにした（配布ツリーで pyproject が果たす
 > 役割はゼロ — ランタイム依存はゼロで、`launcher.py` が `sys.path` へ `src/` を挿すだけであり、ホストが読むのは
-> `.claude-plugin/plugin.json`）。除外リストの定義は `plugins/ple4/tests/scripts/test_publish_script.py` が機械的に
+> `.claude-plugin/plugin.json`）。除外リストの定義は `plugins/claq/tests/scripts/test_publish_script.py` が機械的に
 > 固定する。
 
 ---
@@ -193,15 +193,15 @@ ADR-0005 は、実 install/update フローと各ホストの hook 登録機構�
 である。壊れていることを示す唯一の信号は、次の 1 コマンドの出力だった。
 
 ```bash
-claude --plugin-dir plugins/ple4 plugin details ple4@inline
+claude --plugin-dir plugins/claq plugin details claq@inline
 ```
 
 ### 決定
 
 **ホストの component inventory 取得をリリースゲートに含める。** 具体的には次を満たすことをリリース条件とする。
 
-1. `claude plugin validate --strict plugins/ple4` が PASS する
-2. `claude --plugin-dir plugins/ple4 plugin details ple4@inline` の出力に、実ディレクトリと一致する Skills /
+1. `claude plugin validate --strict plugins/claq` が PASS する
+2. `claude --plugin-dir plugins/claq plugin details claq@inline` の出力に、実ディレクトリと一致する Skills /
    Agents 数が現れる
 3. debug log に `Failed to read plugin components` が 0 件である
 
@@ -210,7 +210,7 @@ ADR-0005 が却下したのは「install/update フロー全体のエミュレ�
 模倣も要らない。
 
 **CLI に依存しない静的ゲートも併置する。** `claude` が PATH に無い環境ではホスト確認は実行できず、skip される
-ゲートはゲートとして機能しない。そのため `plugins/ple4/tests/test_plugin_manifest.py` で、manifest が `agents` を
+ゲートはゲートとして機能しない。そのため `plugins/claq/tests/test_plugin_manifest.py` で、manifest が `agents` を
 宣言していないこと（＝ auto-discovery に委ねていること）と、ディスク上に 9 体が実在することを常時検証する。
 
 ### 検討した代替案

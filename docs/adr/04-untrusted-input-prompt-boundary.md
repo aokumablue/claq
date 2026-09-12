@@ -46,7 +46,7 @@ v0.9.34 のランタイム監査 H-01 は、`mem learn`（generic CLI）の呼�
 1. `mem/cli.py:_handle_learn` から `--status` を削除し、指定時は `UsageError`（exit 2）にする
 2. `parse_knowledge_payload` は payload の `source`/`status` を authority として扱わず、常に
    `source="agent"` / `status="pending"` に固定する
-3. `runtime/ple4-helpers.sh` 等から active/archived 指定・promotion を agent が実行できると示す説明を除去する
+3. `runtime/claq-helpers.sh` 等から active/archived 指定・promotion を agent が実行できると示す説明を除去する
 4. host capability が未実装の間、`_handle_promote` を agent / generic CLI から使用不可にする
 5. provenance を遡及判定できない既存の全 `active` カードを、backup / report の上で `pending` へ quarantine する
 
@@ -61,7 +61,7 @@ v0.9.34 のランタイム監査 H-01 は、`mem learn`（generic CLI）の呼�
   payload がそれ以外の値を明示した場合は `KnowledgeInputError` にする
 - `mem/cli.py` の `learn` サブコマンドは `--status` オプションそのものを拒否する（`CommandError`）。
   `list`/`search` の絞り込み用 `--status` は維持する
-- `ple4_mem_learn` から `--status`/`--source` の option parsing を削除し、常に `source=agent` /
+- `claq_mem_learn` から `--status`/`--source` の option parsing を削除し、常に `source=agent` /
   `status=pending` で登録される旨をコメントへ明記した
 - `skills/learn/SKILL.md` / `commands/instinct.md` から「agent が active 化できる」という記述を削除し、
   昇格は `mem promote <key>`（人間が実行するコマンド）だけである旨に統一した
@@ -129,7 +129,7 @@ JSON `{"source":"human","status":"active"}` や `learn --status active` は exit
 ### コンテキスト
 
 SessionEnd の handoff は transcript の user エントリから「直近のユーザー依頼」を抽出し、SessionStart で
-`<ple4-memory>` として次セッションのプロンプトへ注入する。transcript は信頼できない入力であり、注入先は
+`<claq-memory>` として次セッションのプロンプトへ注入する。transcript は信頼できない入力であり、注入先は
 プロンプト境界である。
 
 user エントリにはユーザーの発話だけでなく、ハーネスが生成した足場（`local-command-caveat` /

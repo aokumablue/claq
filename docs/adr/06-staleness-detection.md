@@ -55,7 +55,7 @@ ADR-0022 と ADR-0023 が同じ言葉で受容している。
 ### 決定
 
 実 transcript コーパスを走査し、除去処理を通した後にも残る「対を成す未知タグ」を報告する診断
-`ple4.ci.scan_scaffold_drift` を置く。`maintain` の final gate 項目とし、CI には組み込まない。終了コードは
+`claq.ci.scan_scaffold_drift` を置く。`maintain` の final gate 項目とし、CI には組み込まない。終了コードは
 `0` = ドリフトなし / `1` = 検出 / `2` = 走査対象ゼロ。
 
 判定は次の 3 段で誤検知を落とす。いずれも実コーパス実測で決めた。
@@ -360,7 +360,7 @@ Write を外した 3 定義（`comparator` / `grader` / `bench-analyzer`）が�
 - 却下理由: [ADR-0011](05-definition-and-subagent-design.md)「否定的」節が同種の重複を「サブエージェントはコンテキストを
   共有しないため原理的に消せない」として既に受容済み。同じ判断を繰り返す
 
-#### 代替案 8: テンプレート探索のフォールバックを `ple4_plugin_root` 経由へ寄せる
+#### 代替案 8: テンプレート探索のフォールバックを `claq_plugin_root` 経由へ寄せる
 
 `mcp-gen` / `html-gen` が `$HOME/.claude/plugins/cache` をホスト固定パスとして直書きしており、
 `test_md_surfaces_have_no_vendor_specific_paths` は他ベンダのパスだけ禁じて自ベンダを許す非対称になっている。

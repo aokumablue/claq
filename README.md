@@ -1,17 +1,17 @@
-# ple4
+# claq
 
 Claude Code 向けの汎用プラグイン集です。エージェント、スキル、コマンド、フック、永続メモリをひとまとめに導入し、計画・実装・検証・レビューの流れを揃えます。
 
 ## これは何か
 
-ple4 は、Claude Code の作業を「最初の計画からレビューまで」通して支えるプラグインです。
+claq は、Claude Code の作業を「最初の計画からレビューまで」通して支えるプラグインです。
 ユーザープロジェクトの言語ランタイムに依存せず、必要なときだけ個別のツールやコマンドを使います。
 
 ---
 
 ## 想定読者
 
-本 README は **ple4 プラグインを Claude Code に導入する開発者** 向けです。
+本 README は **claq プラグインを Claude Code に導入する開発者** 向けです。
 
 - Claude Code 自体の基本操作（プロンプト送信、ファイル編集の許可など）は前提とします。
 - Claude Code がまだの場合は、まず公式の Claude Code を導入してから本プラグインを使ってください。
@@ -27,20 +27,20 @@ ple4 は、Claude Code の作業を「最初の計画からレビューまで」
 | Skills | ワークフローや運用知識を段階的に案内 |
 | Commands | 定番作業をすぐ呼び出し |
 | Hooks | ツール実行の前後に自動チェックや記録を実行 |
-| Memory | 知識カードと引き継ぎを SQLite（`~/.ple4/mem.db`）に保持 |
+| Memory | 知識カードと引き継ぎを SQLite（`~/.claq/mem.db`）に保持 |
 
 ---
 
 ## 用語
 
-5つの要素を理解すれば ple4 の全フローが追えます。
+5つの要素を理解すれば claq の全フローが追えます。
 
 | 用語 | 種別 | 起動方法 | 例 |
 |---|---|---|---|
 | **Command** | ユーザーが明示的に呼ぶ | `/<name> [args]` | `/plan`, `/review`, `/feat-dev` |
 | **Agent** | 内部から委譲される専門家 | コマンド / skill から `Task` ツール経由で `subagent_type` 指定起動 | `reviewer`, `planner`, `tdd-writer` |
 | **Skill** | 条件発火 or 委譲先の知識モジュール | description マッチで Claude Code が自動起動 / inline 展開 or fork 委譲（`context` で決まる） | `grillme`, `learn`, `skill-make` |
-| **Knowledge** | 蓄積された知識カード（罠・規約・手順・事実） | SessionStart で `<ple4-memory>` として自動注入（`status='active'` のみ） | `/instinct` で棚卸し・昇格 |
+| **Knowledge** | 蓄積された知識カード（罠・規約・手順・事実） | SessionStart で `<claq-memory>` として自動注入（`status='active'` のみ） | `/instinct` で棚卸し・昇格 |
 | **Hook** | ツール実行時に自動発火するスクリプト | `hooks.json` 登録 → Claude Code が呼ぶ | PreToolUse, SessionStart, SessionEnd |
 
 **ざっくりまとめると**: ユーザーは Command だけを覚えれば OK。Command が内部で必要な Agent / Skill を自動で連れてきます。Knowledge と Hook はバックグラウンドで動く仕組みです。
@@ -66,8 +66,8 @@ ple4 は、Claude Code の作業を「最初の計画からレビューまで」
 ### プラグインマーケットプレイス
 
 ```bash
-claude plugin marketplace add aokumablue/ple4
-claude plugin install ple4@ple4
+claude plugin marketplace add aokumablue/claq
+claude plugin install claq@claq
 ```
 
 インストール後、まず試すなら:
@@ -84,21 +84,21 @@ claude plugin install ple4@ple4
 
 | コマンド | 用途 | 引数 | 一言説明 |
 |---|---|---|---|
-| [`/plan`](plugins/ple4/commands/plan.md) | 実装前計画 | `[要件説明]` | 要件言い換え→リスク評価→段階的計画。コード前にユーザー確認 |
-| [`/feat-dev`](plugins/ple4/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見→探索→質問→設計→実装→レビュー の7段階一気通貫 |
-| [`/bugfix`](plugins/ple4/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 再現→原因分析→最小修正→回帰防止→レビュー の一気通貫 |
-| [`/refactor`](plugins/ple4/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | clean→simplify→perf→review の安全な自動連鎖。`--mode` で部分実行 |
-| [`/review`](plugins/ple4/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。**READ-ONLY 厳守**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース） |
-| [`/harness`](plugins/ple4/commands/harness.md) | 品質管理 | `[scope] [--audit-only] [--format=text\|json]` | スコア取得→harness-tuner で改善→再採点 |
-| [`/skill-gen`](plugins/ple4/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--output=path] [--knowledge]` | 入力収集→skill-make→skill-tune→grader/comparator/bench-analyzer 評価 |
-| [`/instinct`](plugins/ple4/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
-| [`/test-gen`](plugins/ple4/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→承認→実装。言語非依存 |
+| [`/plan`](plugins/claq/commands/plan.md) | 実装前計画 | `[要件説明]` | 要件言い換え→リスク評価→段階的計画。コード前にユーザー確認 |
+| [`/feat-dev`](plugins/claq/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見→探索→質問→設計→実装→レビュー の7段階一気通貫 |
+| [`/bugfix`](plugins/claq/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 再現→原因分析→最小修正→回帰防止→レビュー の一気通貫 |
+| [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | clean→simplify→perf→review の安全な自動連鎖。`--mode` で部分実行 |
+| [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。**READ-ONLY 厳守**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース） |
+| [`/harness`](plugins/claq/commands/harness.md) | 品質管理 | `[scope] [--audit-only] [--format=text\|json]` | スコア取得→harness-tuner で改善→再採点 |
+| [`/skill-gen`](plugins/claq/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--output=path] [--knowledge]` | 入力収集→skill-make→skill-tune→grader/comparator/bench-analyzer 評価 |
+| [`/instinct`](plugins/claq/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
+| [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→承認→実装。言語非依存 |
 
 ---
 
 ## 🧭 Workflows
 
-ple4 が「どの場面でどう動くか」を 11 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。
+claq が「どの場面でどう動くか」を 11 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。
 
 ### 凡例
 
@@ -383,7 +383,7 @@ flowchart LR
 ### WF-8: 知識蓄積サイクル
 
 各コマンド末尾の「学びの記録」ステップ（`/review` `/refactor` `/bugfix` `maintain` 等）で
-agent/skill が明示的に `ple4_mem_learn` を呼ぶことで知識カードが増える。自動バックグラウンド観測（旧
+agent/skill が明示的に `claq_mem_learn` を呼ぶことで知識カードが増える。自動バックグラウンド観測（旧
 session-observer）は廃止済み — 定期実行や無操作での自動蓄積はない。
 
 ```mermaid
@@ -393,12 +393,12 @@ flowchart TD
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
   classDef store  fill:#374151,stroke:#1f2937,color:#fff,rx:4
 
-  SS(["🌅 SessionStart"]) --> MC(["📥 mem context<br/>ple4-memory 注入"]):::auto
+  SS(["🌅 SessionStart"]) --> MC(["📥 mem context<br/>claq-memory 注入"]):::auto
 
   subgraph session["💻 セッション中（各コマンド最終ステップで明示実行）"]
     direction LR
     SAD["adr<br/>アーキ決定記録"]:::skill
-    CW["学びの記録<br/>ple4_mem_learn（source=agent、常に status=pending, A-03）"]:::cmd
+    CW["学びの記録<br/>claq_mem_learn（source=agent、常に status=pending, A-03）"]:::cmd
     CA["/instinct learn<br/>人間が手動登録（任意）"]:::cmd
   end
 
@@ -413,7 +413,7 @@ flowchart TD
 ```
 
 **トリガー**: 各コマンドの「学びの記録」ステップ（agent/skill が明示的に判断・実行。ユーザー操作は不要だがコマンド実行が前提）
-**期待効果**: 再利用可能な学び（罠・規約・決定）が知識カードとして蓄積し次セッション以降へ自動注入。agent 由来カード（`ple4_mem_learn`）は**常に** `status=pending` で登録され、`/instinct promote <key>` を経て初めて注入される（A-03）。`learn` に `--status` は無く、helper も CLI も指定を拒否する
+**期待効果**: 再利用可能な学び（罠・規約・決定）が知識カードとして蓄積し次セッション以降へ自動注入。agent 由来カード（`claq_mem_learn`）は**常に** `status=pending` で登録され、`/instinct promote <key>` を経て初めて注入される（A-03）。`learn` に `--status` は無く、helper も CLI も指定を拒否する
 
 **実行例**: 通常操作不要（各コマンドが完了時に自動判断）。手動登録した pending 分だけ週次で `/instinct list --status pending` → 採用分を `/instinct promote <key>`
 
@@ -535,7 +535,7 @@ flowchart TB
   end
 
   subgraph persistence["💾 Persistence"]
-    DB[("~/.ple4/mem.db<br/>SQLite")]:::store
+    DB[("~/.claq/mem.db<br/>SQLite")]:::store
   end
 
   CMD --> AGT
@@ -552,4 +552,4 @@ flowchart TB
 - 検索は埋め込みも FTS5 も使わず Python 側でスコアリング（ランタイム依存はゼロ、標準ライブラリのみ）
 - 知識カードを書くのは Commands の「学びの記録」ステップのみ。Agents は候補を呼び出し元へ報告する
 
-各コマンドの詳細仕様は [`plugins/ple4/commands/`](plugins/ple4/commands/) 配下を参照。
+各コマンドの詳細仕様は [`plugins/claq/commands/`](plugins/claq/commands/) 配下を参照。

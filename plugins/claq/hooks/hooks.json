@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "version": 1,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|bash|shell|run_terminal_command)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook\" claq.hooks.block_no_verify",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.hooks.block_no_verify",
+            "timeout": 15
+          }
+        ],
+        "description": "git hook-bypassフラグをブロックして、pre-commit、commit-msg、pre-pushフックがスキップされないように保護します。"
+      },
+      {
+        "matcher": "^(Bash|bash|shell|run_terminal_command)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook\" claq.hooks.pre_bash_commit_quality",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.hooks.pre_bash_commit_quality",
+            "timeout": 30
+          }
+        ],
+        "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"
+      },
+      {
+        "matcher": "^(Bash|bash|shell|run_terminal_command)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook\" claq.hooks.bash_config_protection",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.hooks.bash_config_protection",
+            "timeout": 15
+          }
+        ],
+        "description": "Bashのリダイレクト/tee/sed -iによるlinter/formatter設定ファイルへの直接書き換えをブロックします（config_protectionのEdit/Write限定を補完）。"
+      },
+      {
+        "matcher": "^(Edit|Write|MultiEdit|edit|write|multiedit|apply_patch|search_replace)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook\" claq.hooks.config_protection",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.hooks.config_protection",
+            "timeout": 15
+          }
+        ],
+        "description": "linter/formatterの設定ファイルへの変更をブロックします。エージェントが設定を弱めるのではなく、コードを修正するように導きます。"
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook\" claq.hooks.pre_compact",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.hooks.pre_compact",
+            "timeout": 15
+          }
+        ],
+        "description": "コンテキストの圧縮前に状態を保存します"
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook\" claq.mem.cli context",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.mem.cli context",
+            "timeout": 20
+          }
+        ],
+        "description": "永続メモリから共通知識・リポジトリ知識・前回の引き継ぎを <claq-memory> として注入する（DB が無ければ作成）"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook\" --bg claq.mem.cli handoff",
+            "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" --bg claq.mem.cli handoff",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "セッション終了時に次セッションへの引き継ぎを sessions.handoff へ記録する（非ブロッキング）"
+      }
+    ]
+  }
+}

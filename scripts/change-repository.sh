@@ -2,10 +2,13 @@
 # リポジトリ全体のプラグイン名・作者名を一括置換するスクリプト（直接書き換え）。
 #
 # 設計方針:
-#   - 置換対象に除外リストを持たない。.git / .venv / 生成キャッシュ / バイナリ以外は
-#     拡張子を問わず全ファイルを走査する（拡張子アローリストは置換漏れの温床のため廃止）。
+#   - 置換対象に拡張子アローリストを持たない。.git / .venv / 生成キャッシュ / バイナリ以外は
+#     拡張子を問わず全ファイルを走査する。
+#   - 生成キャッシュ（__pycache__ / .pytest_cache / .ruff_cache / .mypy_cache / .coverage）は
+#     バイナリのため内容置換せず削除する。刈り込んだまま検証すると
+#     __pycache__/test_<旧名>_*.pyc を「残留なし」と偽報告する。
 #   - 大文字小文字は「一致した綴りに合わせて」変換する（全小文字・全大文字・混在を個別に列挙しない）。
-#   - 検証（Step 5）は置換パスとは独立に列挙し直し、内容とパス名の両方を検査する。
+#   - 検証（Step 5）は .git / .venv 以外を置換パスとは独立に列挙し直し、内容とパス名の両方を検査する。
 #
 # 使用法: ./scripts/change-repository.sh [--dry-run]
 # 依存: bash 3.2+, python3 3.12+（jq 不要）
@@ -61,6 +64,7 @@ cat > "${WORKER}" <<'PYEOF'
     rename   パス名（ファイル・ディレクトリ）を改名する
     replace  ファイル内容を置換する
     meta     license / authors のメタデータを書き換える
+    purge    生成キャッシュを削除する
     verify   旧名の残留を内容とパス名の両面から検査する
 """
 
@@ -75,7 +79,7 @@ import sys
 from glob import glob
 from pathlib import Path
 
-# 走査から外すディレクトリ。生成物・VCS メタデータのみで、リポジトリの原本は含めない。
+# 置換・改名から外すディレクトリ。生成物・VCS メタデータのみで、リポジトリの原本は含めない。
 EXCLUDED_DIR_NAMES = {
     ".git",
     "__pycache__",
@@ -89,6 +93,15 @@ EXCLUDED_DIR_NAMES = {
     ".vscode",
 }
 
+# 内容置換せず削除する生成キャッシュ。
+GENERATED_PURGE_DIR_NAMES = {
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+}
+GENERATED_PURGE_FILE_NAMES = {".coverage"}
+
 # 前方一致で除外するディレクトリ名（.venv / .venv313 などの派生を含む）。
 EXCLUDED_DIR_PREFIXES = (".venv",)
 
@@ -96,28 +109,37 @@ EXCLUDED_DIR_PREFIXES = (".venv",)
 EXCLUDED_DIR_SUFFIXES = (".egg-info",)
 
 
-def is_excluded_dir(name: str) -> bool:
-    """走査対象から外すディレクトリ名かどうかを返す。"""
-    if name in EXCLUDED_DIR_NAMES:
+def is_vcs_or_env_dir(name: str) -> bool:
+    """検証からも外すディレクトリ（VCS と仮想環境）かどうかを返す。"""
+    if name == ".git":
         return True
     if name.startswith(EXCLUDED_DIR_PREFIXES):
         return True
     return name.endswith(EXCLUDED_DIR_SUFFIXES)
 
 
-def walk(root: Path, topdown: bool = True):
+def is_replace_excluded_dir(name: str) -> bool:
+    """内容置換・パス改名から外すディレクトリ名かどうかを返す。"""
+    if is_vcs_or_env_dir(name):
+        return True
+    return name in EXCLUDED_DIR_NAMES
+
+
+def walk(root: Path, topdown: bool = True, *, skip=None):
     """除外ディレクトリを刈り込みながらリポジトリを走査する。
 
     os.walk は topdown=False のとき dirnames の書き換えによる刈り込みが効かない
     （降りきってから返すため）。両方向で確実に刈り込むため自前で再帰する。
     """
+    if skip is None:
+        skip = is_replace_excluded_dir
     dirnames: list[str] = []
     filenames: list[str] = []
     try:
         with os.scandir(root) as entries:
             for entry in entries:
                 if entry.is_dir(follow_symlinks=False):
-                    if not is_excluded_dir(entry.name):
+                    if not skip(entry.name):
                         dirnames.append(entry.name)
                 else:
                     filenames.append(entry.name)
@@ -126,14 +148,14 @@ def walk(root: Path, topdown: bool = True):
     if topdown:
         yield root, dirnames, filenames
     for name in list(dirnames):
-        yield from walk(root / name, topdown=topdown)
+        yield from walk(root / name, topdown=topdown, skip=skip)
     if not topdown:
         yield root, dirnames, filenames
 
 
-def iter_files(root: Path):
+def iter_files(root: Path, *, skip=None):
     """走査対象の全ファイルパスを列挙する（拡張子で絞り込まない）。"""
-    for dirpath, _dirnames, filenames in walk(root):
+    for dirpath, _dirnames, filenames in walk(root, skip=skip):
         for name in filenames:
             yield dirpath / name
 
@@ -325,11 +347,37 @@ def cmd_meta(root: Path, plugin_name: str, license_name: str, remove_authors: bo
         print("  ※ marketplace.json の owner は仕様上必須のため削除しません")
 
 
+def cmd_purge_generated(root: Path, dry_run: bool) -> int:
+    """内容置換できない生成キャッシュを削除する。
+
+    __pycache__ のファイル名（test_<旧名>_*.pyc）や .coverage のパス文字列は
+    置換対象外のまま残る。生成物なので捨てて再生成させる。
+    """
+    removed = 0
+    for dirpath, _dirnames, filenames in walk(root, topdown=False, skip=is_vcs_or_env_dir):
+        for name in filenames:
+            if name not in GENERATED_PURGE_FILE_NAMES:
+                continue
+            path = dirpath / name
+            if not dry_run:
+                path.unlink(missing_ok=True)
+            print(f"  削除: {path.relative_to(root)}")
+            removed += 1
+        if dirpath == root or dirpath.name not in GENERATED_PURGE_DIR_NAMES:
+            continue
+        if not dry_run:
+            shutil.rmtree(dirpath, ignore_errors=True)
+        print(f"  削除: {dirpath.relative_to(root)}")
+        removed += 1
+    return removed
+
+
 def cmd_verify(root: Path, olds: list[str]) -> int:
     """旧名の残留を内容とパス名の両面から検査する。
 
     置換パスとは独立にリポジトリを列挙し直す。検査対象を置換対象と同じ絞り込みで
-    導くと「絞り込み漏れが原因の残留」を検査自身が見逃すため。
+    導くと「絞り込み漏れが原因の残留」を検査自身が見逃すため、パス名は
+    .git / .venv 以外を見る。
     """
     needles = [old for old in olds if old]
     if not needles:
@@ -338,7 +386,7 @@ def cmd_verify(root: Path, olds: list[str]) -> int:
     hits = 0
 
     path_hits: list[str] = []
-    for dirpath, dirnames, filenames in walk(root):
+    for dirpath, dirnames, filenames in walk(root, skip=is_vcs_or_env_dir):
         for name in sorted(dirnames) + sorted(filenames):
             if any(p.search(name) for p in patterns):
                 path_hits.append(str((dirpath / name).relative_to(root)))
@@ -346,7 +394,7 @@ def cmd_verify(root: Path, olds: list[str]) -> int:
         print(f"  [パス名] {rel}")
         hits += 1
 
-    for path in sorted(iter_files(root)):
+    for path in sorted(iter_files(root, skip=is_vcs_or_env_dir)):
         text = read_text(path)
         if text is None:
             continue
@@ -402,6 +450,11 @@ def main() -> int:
             bool(cfg.get("remove_authors")),
             dry_run,
         )
+        return 0
+    if command == "purge":
+        count = cmd_purge_generated(root, dry_run)
+        if count == 0:
+            print("  削除対象なし")
         return 0
     if command == "verify":
         olds = [cfg["from_plugin_name"]]
@@ -511,6 +564,10 @@ if [[ -z "${LICENSE_NAME}" && "${REMOVE_AUTHORS}" != "true" ]]; then
 else
   run_worker meta "${DRY_FLAG}"
 fi
+
+echo ""
+echo "Step 4.5: 生成キャッシュを削除中..."
+run_worker purge "${DRY_FLAG}"
 
 echo ""
 echo "Step 5: 残留チェック（内容 + パス名を独立に再列挙）..."

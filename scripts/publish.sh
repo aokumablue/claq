@@ -1,5 +1,5 @@
 #!/bin/bash
-# ple4（ユーザー向け公開リポジトリ）へ dev スナップショットを線形履歴で公開する。
+# claq（ユーザー向け公開リポジトリ）へ dev スナップショットを線形履歴で公開する。
 #
 # 使い方:
 #   ./scripts/publish.sh [--no-push]
@@ -19,8 +19,8 @@
 # 再実行しても版が飛ばず安全に再開できる。
 set -euo pipefail
 
-PUBLISH_REMOTE="${PLE4_PUBLISH_REMOTE:-$HOME/dev/ple4}"
-VENV="${PLE4_VENV:-}"
+PUBLISH_REMOTE="${CLAQ_PUBLISH_REMOTE:-$HOME/dev/claq}"
+VENV="${CLAQ_VENV:-}"
 NO_PUSH=false
 TMPDIR=""
 BOOTSTRAP=false
@@ -56,15 +56,15 @@ trap 'if [[ -n "${TMPDIR}" ]]; then rm -rf "${TMPDIR}"; fi' EXIT
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
-# gate 用 venv 既定は repo ローカル .venv（PLE4_VENV で上書き可）
+# gate 用 venv 既定は repo ローカル .venv（CLAQ_VENV で上書き可）
 : "${VENV:=${REPO_ROOT}/.venv}"
 
-PLUGIN_JSON="plugins/ple4/.claude-plugin/plugin.json"
+PLUGIN_JSON="plugins/claq/.claude-plugin/plugin.json"
 VERSION_FILES=(
-  "plugins/ple4/pyproject.toml"
+  "plugins/claq/pyproject.toml"
   "${PLUGIN_JSON}"
   ".claude-plugin/marketplace.json"
-  "plugins/ple4/src/ple4/mem/__init__.py"
+  "plugins/claq/src/claq/mem/__init__.py"
 )
 
 # プラグイン版を JSON から読む（引数: plugin.json のパス）
@@ -101,10 +101,10 @@ run_host_inventory_gate() {
   fi
 
   echo "Running host component inventory gate (ADR-0014)..."
-  claude plugin validate --strict plugins/ple4 || return 1
+  claude plugin validate --strict plugins/claq || return 1
 
   local details expected_agents expected_surfaces
-  details="$(claude --plugin-dir plugins/ple4 plugin details ple4@inline 2>&1)" || return 1
+  details="$(claude --plugin-dir plugins/claq plugin details claq@inline 2>&1)" || return 1
 
   if grep -q "Failed to read plugin components" <<<"${details}"; then
     echo "ERROR: ホストが component を読めていません（ADR-0014 ゲート 3）。" >&2
@@ -114,10 +114,10 @@ run_host_inventory_gate() {
 
   # ディスク上の実体数と、ホストが報告した登録数を突き合わせる。
   # ホストは skills/ と commands/ を合算して Skills として数える。
-  expected_agents="$(find plugins/ple4/agents -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')"
+  expected_agents="$(find plugins/claq/agents -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')"
   expected_surfaces=$((
-    $(find plugins/ple4/skills -maxdepth 2 -name 'SKILL.md' | wc -l | tr -d ' ') +
-    $(find plugins/ple4/commands -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
+    $(find plugins/claq/skills -maxdepth 2 -name 'SKILL.md' | wc -l | tr -d ' ') +
+    $(find plugins/claq/commands -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
   ))
 
   grep -qE "Agents \(${expected_agents}\)" <<<"${details}" || {
@@ -141,7 +141,7 @@ run_gate() {
     return 1
   fi
   "${VENV}/bin/python" -m pytest -q || return 1
-  "${VENV}/bin/ruff" check plugins/ple4 || return 1
+  "${VENV}/bin/ruff" check plugins/claq || return 1
   run_host_inventory_gate || return 1
   return 0
 }
@@ -223,7 +223,7 @@ TMPDIR="$(mktemp -d)"
 #      除去したツリーへ同梱されると、配布ツリーで pytest を叩いたときに
 #      「coverage 0% で FAIL」という回帰そっくりの失敗が出る。過去 3 回の
 #      実機監査がこれを「テストが消失した」と誤報告した（ADR-0006）。
-#   2. wheel は src/ple4 しか含まず plugin assets も entry point も持たない
+#   2. wheel は src/claq しか含まず plugin assets も entry point も持たない
 #      ため、配布ツリーに build 設定を残すと非機能 artifact を公開できてしまう。
 # ランタイムは launcher.py が sys.path へ src/ を挿すだけで、パッケージ
 # メタデータを一切参照しないので配布ツリーに pyproject は不要。
@@ -233,8 +233,8 @@ git clone --quiet --local --no-hardlinks . "${TMPDIR}/repo"
   cd "${TMPDIR}/repo"
   git filter-repo \
     --invert-paths \
-    --path plugins/ple4/tests/ \
-    --path plugins/ple4/pyproject.toml \
+    --path plugins/claq/tests/ \
+    --path plugins/claq/pyproject.toml \
     --path scripts/ \
     --path CLAUDE.md \
     --path conftest.py \

@@ -48,7 +48,7 @@ fail-open の窓を敵対的に使われる残余リスクは受容する。
 そのものが完走できない経路が複数ある。
 
 - stdin が時間内に届かない、または読み取り syscall が失敗する（A-01）
-- ホストの Python が 3.12 未満で ple4 モジュールが import できない（`launcher.py:52-58`）
+- ホストの Python が 3.12 未満で claq モジュールが import できない（`launcher.py:52-58`）
 - `pre_bash_commit_quality` の matcher は Bash 呼び出し全体にアンカーされており、
   malformed JSON が commit と無関係な呼び出しにも届く
 - secret scanner がホストの hook timeout に達しうる規模のファイルを走査している
@@ -112,7 +112,7 @@ fail-closed（exit 2）にする。
 （exit 0 と exit 2 の混在）が解消した。復旧不能な自己ロックのリスクが残らない。
 
 **否定的** — stdin リダイレクト漏れや Python バージョン不一致が起きている間、保護フックは
-実質無効化される。利用者が気づく手段は stderr の `ple4ProtectionDisabled` 警告のみで、
+実質無効化される。利用者が気づく手段は stderr の `claqProtectionDisabled` 警告のみで、
 監視していない環境では見落としうる。
 
 **リスク** — fail-open の窓が敵対的に使われた場合（意図的に stdin を閉じる、意図的に古い
@@ -144,7 +144,7 @@ Python を PATH に置く）、保護は機能しない。共通原則の脅威�
 
 その上で処理結果を完全に見えなくはせず、次回セッションで観測可能にする:
 
-- `detach_process` は子の stdout/stderr を `~/.ple4/logs/bg-YYYY-MM-DD.log` へ追記する
+- `detach_process` は子の stdout/stderr を `~/.claq/logs/bg-YYYY-MM-DD.log` へ追記する
 - 子は `_WATCHDOG_SCRIPT` でラップされ、`DETACH_TIMEOUT_SECONDS`（600 秒）でハングしても
   確実に回収される
 - 次回 SessionStart の `mem context` で `recent_bg_failure_notice()` が前回ログを検査し、
@@ -190,7 +190,7 @@ Python を PATH に置く）、保護は機能しない。共通原則の脅威�
 
 ### コンテキスト
 
-Windows 実機検証（`docs/reports/ple4-release-verify-windows-2026-09-03.md` P1-004）で、
+Windows 実機検証（`docs/reports/claq-release-verify-windows-2026-09-03.md` P1-004）で、
 実体の Python 3.14.7 から `launcher.py` を直接起動し、リダイレクトした stdin へ UTF-8 JSON
 を渡した結果:
 
@@ -323,11 +323,11 @@ Windows 検証レポートの受入条件表は「空入力、壊れた JSON、W
 「環境が壊れている」ケースを想定していたが、ここで起きているのは**入力が検査時間を支配し、
 攻撃者が timeout を任意に誘発できる**ケースである。
 
-一方、Windows 側には**実測できない**非対称が残っている。`ple4-hook.cmd` は
-`if defined PLE4_PYTHON goto :ple4_override` を PATH 検査より前に置くため、絶対パスの
-`PLE4_PYTHON` を設定すると PATH 検査が丸ごと飛ぶ。POSIX 側は逆順で、絶対パスの
-`PLE4_PYTHON` でも `path_not_absolute` から回復しない。POSIX 側が正しい — launcher とその
-子プロセス（`git` を含む）は汚染された PATH で解決を続けるのであって、`PLE4_PYTHON` は
+一方、Windows 側には**実測できない**非対称が残っている。`claq-hook.cmd` は
+`if defined CLAQ_PYTHON goto :claq_override` を PATH 検査より前に置くため、絶対パスの
+`CLAQ_PYTHON` を設定すると PATH 検査が丸ごと飛ぶ。POSIX 側は逆順で、絶対パスの
+`CLAQ_PYTHON` でも `path_not_absolute` から回復しない。POSIX 側が正しい — launcher とその
+子プロセス（`git` を含む）は汚染された PATH で解決を続けるのであって、`CLAQ_PYTHON` は
 それを直さないからである。しかし cmd.exe は開発ホスト（darwin）で実行できない。
 
 ### 決定
@@ -345,7 +345,7 @@ Windows 検証レポートの受入条件表は「空入力、壊れた JSON、W
    なので、`write_stdout` の BrokenPipeError が deny を allow へ反転させる。誘因（host が
    パイプを閉じる）は host の timeout と同時に起きるため、最も守りたい局面でちょうど外れて
    いた
-4. **実測できない修正は、適用せず残存として書く。** `ple4-hook.cmd` の検査順は POSIX 側へ
+4. **実測できない修正は、適用せず残存として書く。** `claq-hook.cmd` の検査順は POSIX 側へ
    揃えるのが正しいが、cmd.exe を開発ホストから実行できず、壊れた並べ替えは Windows で保護を
    黙って無効化する。`KNOWN RESIDUAL` として `.cmd` 本文とテストのコメント両方へ書き、
    `CLAUDE.md` にも非対称を明記する（`feedback-cross-platform-common-logic-first` の
@@ -378,7 +378,7 @@ Windows 検証レポートの受入条件表は「空入力、壊れた JSON、W
   しないガードは、いずれ「効いている」と誤認される
 - 却下理由: 揃えるのではなく、**線形なので不要**である理由をコードのコメントとして残した
 
-#### 代替案 4: `ple4-hook.cmd` の検査順を POSIX 側へ揃える
+#### 代替案 4: `claq-hook.cmd` の検査順を POSIX 側へ揃える
 
 - 長所: 非対称が消え、汚染された PATH で子プロセスが動く経路が塞がる
 - 短所: cmd.exe を darwin から実行できない。静的なテキスト検査しか通せず、壊れた並べ替えは
@@ -401,7 +401,7 @@ Windows 検証レポートの受入条件表は「空入力、壊れた JSON、W
 読み直すと**粗すぎた**:
 
 - `config_protection` の判定は**basename 一致**であり、`"hooks.json"` を素で足すとプラグイン
-  自身の `plugins/ple4/hooks/hooks.json` と consumer の `.claude/hooks.json` を区別できない。
+  自身の `plugins/claq/hooks/hooks.json` と consumer の `.claude/hooks.json` を区別できない。
   「両立しない」ように見えたのはこの basename 衝突が原因で、`.git/hooks` 用に既にある
   **パス連続一致**（`_PROTECTED_PATH_SEGMENTS`）を使えば分離できる
 - `harness_audit` が provider モードで `hooks/hooks.json` を指す check は 5 件すべてが存在・
@@ -412,23 +412,23 @@ Windows 検証レポートの受入条件表は「空入力、壊れた JSON、W
 さらに実装直前の再検討で**当初案のもう 1 つの欠陥**が見つかった。`settings.json` の条件を
 「`env` キーを触る場合」にすると、`update-config` skill の中心的な仕事（`set DEBUG=true`）と
 `.vscode/settings.json` の `terminal.integrated.env.*` を巻き込む。守れるものが増えないのに
-頻繁な正当作業を壊すため、条件を **`PLE4_PYTHON` の出現そのものと `hooks` /
+頻繁な正当作業を壊すため、条件を **`CLAQ_PYTHON` の出現そのものと `hooks` /
 `enabledPlugins` / `disabledPlugins` の 3 キーだけ**に絞った。
 
 採択した実装:
 
-1. `plugins/ple4/hooks/hooks.json` を**パス連続一致**（`("hooks", "hooks.json")`）で無条件
+1. `plugins/claq/hooks/hooks.json` を**パス連続一致**（`("hooks", "hooks.json")`）で無条件
    保護する。consumer の `.claude/hooks.json`（親が `.claude`）には当たらない
-2. `settings.json` / `settings.local.json` を**条件付き保護**へ加え、`PLE4_PYTHON` の出現・
-   `hooks` / `enabledPlugins` / `disabledPlugins` のときだけ deny する。とくに `PLE4_PYTHON`
-   は `runtime/ple4-hook` が exec するため、保護の無効化ではなく**全ツール呼び出しでの任意
+2. `settings.json` / `settings.local.json` を**条件付き保護**へ加え、`CLAQ_PYTHON` の出現・
+   `hooks` / `enabledPlugins` / `disabledPlugins` のときだけ deny する。とくに `CLAQ_PYTHON`
+   は `runtime/claq-hook` が exec するため、保護の無効化ではなく**全ツール呼び出しでの任意
    コード実行**の入口である
 3. ブロックメッセージの「正当な変更ならフックを一時的に無効化せよ」を「必要ならユーザーに
    依頼せよ。フックを自分で無効化するな」へ改める。**止めた直後に「代わりに検査ごと止めて
    いい」と言えば、止めた意味が消える。** 加えて 1 を入れるとこの指示は循環する
 
 残るコスト: `/harness --apply` の `consumer-hook-guardrails` fix（初回セットアップ 1 回）と、
-ple4 自身の開発で `hooks.json` を触る作業が deny される。どちらも deny メッセージが
+claq 自身の開発で `hooks.json` を触る作業が deny される。どちらも deny メッセージが
 「ユーザーに依頼せよ」と案内する。
 
 **この保護は決定的ではない。** `python3 -c "open('.claude/settings.json','w').write(...)"` は
@@ -473,7 +473,7 @@ Windows の `CreateProcess`（`lpApplicationName=NULL`）は PATH より先に�
   される範囲（環境の故障）とされない範囲（入力が誘発する検査不能）が分かれた
 - `launcher.py` の「全フックは SystemExit 経由で終了する」不変条件に検知器が付いた
   （[ADR-0011 決定 6](05-definition-and-subagent-design.md) / [ADR-0023](06-staleness-detection.md) の適用）
-- `CLAUDE.md` に `ple4_python_not_absolute` / `path_has_empty_entry` / `path_not_absolute` の
+- `CLAUDE.md` に `claq_python_not_absolute` / `path_has_empty_entry` / `path_not_absolute` の
   3 理由コードと、POSIX / Windows の検査順の非対称が明記された
 
 **否定的**
@@ -487,7 +487,7 @@ Windows の `CreateProcess`（`lpApplicationName=NULL`）は PATH より先に�
 - 決定 1 の fail-closed は、5,000 トークンを超える正当なコマンドを拒む。実務上そのような
   コマンドは無いと判断したが、生成されたスクリプトを 1 行で流す使い方があれば衝突する。その
   場合は上限値を上げるのではなく、コマンドを分割する側を正とする
-- 代替案 5 の採択により、`/harness --apply` の consumer 向け fix 1 件と、ple4 自身の開発での
+- 代替案 5 の採択により、`/harness --apply` の consumer 向け fix 1 件と、claq 自身の開発での
   `hooks.json` 編集が deny される。どちらも「ユーザーに依頼する」へ倒れるので復旧不能では
   ないが、摩擦は増える
 - 代替案 5 の保護は素直なエージェントの近道と低コストな注入にしか効かない。**「hooks.json は

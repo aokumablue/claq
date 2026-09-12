@@ -1,0 +1,537 @@
+"""launcher モジュール（インプロセス実行版）のテスト。"""
+
+from __future__ import annotations
+
+import json
+import os
+import runpy
+import subprocess
+import sys
+import time
+from collections.abc import Callable
+from pathlib import Path
+
+import pytest
+
+import claq.launcher as launcher
+
+LAUNCHER_PATH = Path(launcher.__file__).resolve()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_claq_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """main() 経由の write_env_pointer が実 HOME の ~/.claq を汚さないようにする。
+
+    main() は全 hook 起動で ~/.claq/env.sh 等を書き出す（M-02 対応）。
+    env_pointer の state dir は ``$HOME`` 固定（``CLAQ_HOME`` は見ない。R-04 —
+    md の bootstrap 行 `. "$HOME/.claq/env.sh"` が固定住所であるべきという
+    契約に writer 側を合わせた）なので、隔離は ``HOME`` を差し替えて行う。
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
+def _create_repo_venv(tmp_path: Path) -> Path:
+    """無視されることを確認するため、仮の repo-local .venv を配置する。"""
+    venv_python = tmp_path / ".venv" / "bin" / "python3"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    venv_python.chmod(0o755)
+    return venv_python
+
+
+def _explode_if_called(*_args: object, **_kwargs: object) -> int:
+    """バージョンガード通過前にターゲット実行へ進んだら失敗させる。"""
+    raise AssertionError("target must not run")
+
+
+def _raise_from_run_module(exc: BaseException) -> Callable[..., None]:
+    """runpy.run_module の代わりに例外を送出するスタブを返す。"""
+
+    def fake_run_module(
+        _target: str, run_name: str | None = None, alter_sys: bool | None = None
+    ) -> None:
+        raise exc
+
+    return fake_run_module
+
+
+def _stub_run_in_process(monkeypatch: pytest.MonkeyPatch, returncode: int = 0) -> dict[str, object]:
+    """_run_module_in_process を呼び出し記録用スタブに差し替える。"""
+    captured: dict[str, object] = {}
+
+    def fake_run_in_process(target: str, target_args: list[str]) -> int:
+        captured["target"] = target
+        captured["args"] = target_args
+        return returncode
+
+    monkeypatch.setattr(launcher, "_run_module_in_process", fake_run_in_process)
+    return captured
+
+
+class TestBuildEnv:
+    """build_env が venv を見ず PYTHONPATH と CLAUDE_PLUGIN_ROOT だけを整えること。"""
+
+    def test_planted_venv_does_not_set_virtual_env_or_prepend_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """仮に .venv があっても VIRTUAL_ENV を設定せず PATH も前置しない。"""
+        _create_repo_venv(tmp_path)
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.setenv("PATH", "/usr/local/bin")
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+
+        env = launcher.build_env()
+
+        assert "VIRTUAL_ENV" not in env
+        assert env["PATH"] == "/usr/local/bin"
+        assert str(tmp_path / ".venv" / "bin") not in env["PATH"].split(os.pathsep)
+        assert env["CLAUDE_PLUGIN_ROOT"] == str(tmp_path)
+        assert env["PYTHONPATH"] == str(tmp_path / "src")
+
+    def test_appends_existing_pythonpath(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """既存 PYTHONPATH は src の後ろに残す。"""
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        monkeypatch.setenv("PYTHONPATH", "base-path")
+
+        env = launcher.build_env()
+
+        assert env["PYTHONPATH"] == os.pathsep.join([str(tmp_path / "src"), "base-path"])
+
+    def test_setdefault_claude_plugin_root(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """CLAUDE_PLUGIN_ROOT 未設定時は REPO_ROOT を入れる。"""
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+
+        env = launcher.build_env()
+
+        assert env["CLAUDE_PLUGIN_ROOT"] == str(tmp_path)
+
+    def test_preserves_existing_claude_plugin_root(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """既に CLAUDE_PLUGIN_ROOT がある場合は上書きしない。"""
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", "/already/set")
+
+        env = launcher.build_env()
+
+        assert env["CLAUDE_PLUGIN_ROOT"] == "/already/set"
+
+    def test_without_path_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """PATH 未設定でも VIRTUAL_ENV を付けず動作する。"""
+        _create_repo_venv(tmp_path)
+        monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+        monkeypatch.delenv("PATH", raising=False)
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+
+        env = launcher.build_env()
+
+        assert "VIRTUAL_ENV" not in env
+        assert "PATH" not in env
+        assert env["PYTHONPATH"] == str(tmp_path / "src")
+        assert env["CLAUDE_PLUGIN_ROOT"] == str(tmp_path)
+
+
+class TestUnsupportedPythonExitCode:
+    """Python 3.12 未満の fail-open 判定。"""
+
+    def test_returns_none_on_312(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """3.12.0 なら None を返す。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
+
+        assert launcher._unsupported_python_exit_code() is None
+
+    @pytest.mark.parametrize("version", [(3, 9, 6), (3, 11, 9)])
+    def test_returns_zero_on_old_python_and_writes_stderr(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        version: tuple[int, int, int],
+    ) -> None:
+        """3.12 未満なら stderr に実バージョンと構造化 JSON を書いて 0 を返す（F-07 対応）。"""
+        monkeypatch.setattr(launcher.sys, "version_info", version)
+        displayed = ".".join(str(part) for part in version)
+
+        assert launcher._unsupported_python_exit_code() == 0
+        err = capsys.readouterr().err
+        lines = err.splitlines()
+        assert lines[0] == (
+            f"ERROR: claq requires Python 3.12+; `python3` is {displayed}. "
+            "Point `python3` on PATH at 3.12+ (claq does not create a venv)."
+        )
+        payload = json.loads(lines[1])
+        assert payload == {
+            "claqProtectionDisabled": True,
+            "reason": "unsupported_python_version",
+            "detectedVersion": displayed,
+            "requiredVersion": "3.12+",
+        }
+
+
+class TestRunModuleInProcess:
+    """runpy によるインプロセス実行の終了コード変換。"""
+
+    def test_system_exit_zero_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SystemExit(0) は終了コード 0 にする。"""
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        monkeypatch.setattr(launcher.runpy, "run_module", _raise_from_run_module(SystemExit(0)))
+
+        assert launcher._run_module_in_process("claq.hooks.block_no_verify", []) == 0
+
+    def test_system_exit_nonzero_returns_code(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SystemExit(非 0 整数) はそのコードを返す。"""
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        monkeypatch.setattr(launcher.runpy, "run_module", _raise_from_run_module(SystemExit(2)))
+
+        assert launcher._run_module_in_process("target", []) == 2
+
+    def test_system_exit_none_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SystemExit() は終了コード 0 にする。"""
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        monkeypatch.setattr(launcher.runpy, "run_module", _raise_from_run_module(SystemExit()))
+
+        assert launcher._run_module_in_process("target", []) == 0
+
+    def test_system_exit_with_string_message_returns_one(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """SystemExit(文字列) は stderr に書いて 1 を返す。"""
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        monkeypatch.setattr(launcher.runpy, "run_module", _raise_from_run_module(SystemExit("bad")))
+
+        assert launcher._run_module_in_process("target", []) == 1
+        assert "bad" in capsys.readouterr().err
+
+    def test_generic_exception_returns_one(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """想定外例外は ERROR 行を書いて 1 を返す。"""
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        monkeypatch.setattr(launcher.runpy, "run_module", _raise_from_run_module(RuntimeError("boom")))
+
+        assert launcher._run_module_in_process("target", []) == 1
+        assert "ERROR: target: boom" in capsys.readouterr().err
+
+    def test_normal_completion_without_system_exit_returns_zero(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """SystemExit なしの正常終了は 0 を返す。"""
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        monkeypatch.setattr(launcher.runpy, "run_module", lambda *_a, **_k: None)
+
+        assert launcher._run_module_in_process("target", []) == 0
+
+    def test_sets_argv_from_target_and_args(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """sys.argv を target と引数で置き換えて run_module する。"""
+        monkeypatch.setattr(sys, "argv", ["placeholder"])
+        captured: dict[str, object] = {}
+
+        def fake_run_module(target: str, run_name: str | None = None, alter_sys: bool | None = None) -> None:
+            captured["argv"] = list(sys.argv)
+            captured["run_name"] = run_name
+            captured["alter_sys"] = alter_sys
+
+        monkeypatch.setattr(launcher.runpy, "run_module", fake_run_module)
+
+        launcher._run_module_in_process("claq.mem.cli", ["setup"])
+
+        assert captured["argv"] == ["claq.mem.cli", "setup"]
+        assert captured["run_name"] == "__main__"
+        assert captured["alter_sys"] is True
+
+
+class TestResolveModuleCommand:
+    """detach 用コマンドリストの構築。"""
+
+    def test_builds_module_invocation(self) -> None:
+        """引数付きの python -m コマンドを返す。"""
+        cmd = launcher._resolve_module_command("claq.hooks.config_protection", ["a", "b"])
+        assert cmd == [sys.executable, "-m", "claq.hooks.config_protection", "a", "b"]
+
+    def test_builds_module_invocation_without_args(self) -> None:
+        """引数なしならモジュール名だけを付ける。"""
+        cmd = launcher._resolve_module_command("claq.mem.cli", [])
+        assert cmd == [sys.executable, "-m", "claq.mem.cli"]
+
+
+class TestMain:
+    """main() の引数処理・detach・バージョンガード。"""
+
+    @pytest.fixture(autouse=True)
+    def _assume_python_312(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """main の 3.12 ガードを通過させる。古い版のテストは上書きする。"""
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
+
+    def test_no_args_prints_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """引数なしは usage を出して 1。"""
+        assert launcher.main([]) == 1
+        assert "Usage: python3" in capsys.readouterr().err
+
+    def test_bg_without_target_prints_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--bg だけの指定は usage を出して 1。"""
+        assert launcher.main(["--bg"]) == 1
+        assert "Usage: python3" in capsys.readouterr().err
+
+    def test_normal_invocation_runs_in_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """通常起動はインプロセス実行する。"""
+        captured = _stub_run_in_process(monkeypatch)
+
+        assert launcher.main(["claq.hooks.config_protection", "extra"]) == 0
+        assert captured == {"target": "claq.hooks.config_protection", "args": ["extra"]}
+
+    def test_bg_always_detaches_and_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--bg は host に関わらず常に detach して 0 を返す。"""
+        monkeypatch.setattr("claq.hooks.hook_common.read_raw_stdin", lambda: "{}")
+
+        captured: dict[str, object] = {}
+
+        def fake_detach(cmd: list[str], raw: str, *, env: dict[str, str] | None = None) -> bool:
+            captured["cmd"] = cmd
+            captured["raw"] = raw
+            return True
+
+        monkeypatch.setattr("claq.hooks.hook_common.detach_process", fake_detach)
+        monkeypatch.setattr(launcher, "build_env", lambda: {})
+
+        run_in_process_called: list[object] = []
+        monkeypatch.setattr(
+            launcher, "_run_module_in_process", lambda *a: run_in_process_called.append(a)
+        )
+
+        assert launcher.main(["--bg", "claq.mem.cli", "handoff"]) == 0
+        assert run_in_process_called == []
+        assert captured["cmd"] == [sys.executable, "-m", "claq.mem.cli", "handoff"]
+        assert captured["raw"] == "{}"
+
+    def test_bg_detach_failure_returns_nonzero(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """detach の受付失敗は非 0 を返し、stderr にエラーを書く。
+
+        ADR-0003 は親の exit code を「子の起動を受け付けたか」と定義する。
+        受付そのものに失敗したのに 0 を返すと、呼び出し側は起動されていない
+        処理を受付成功と誤認する（子の処理結果は依然として非同期のまま）。
+        """
+        monkeypatch.setattr("claq.hooks.hook_common.read_raw_stdin", lambda: "")
+        monkeypatch.setattr("claq.hooks.hook_common.detach_process", lambda *a, **k: False)
+        monkeypatch.setattr(launcher, "build_env", lambda: {})
+
+        assert launcher.main(["--bg", "claq.mem.cli", "handoff"]) == 1
+        assert "Error detaching" in capsys.readouterr().err
+
+    def test_inserts_src_dir_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """src ディレクトリが sys.path に無ければ挿入する。"""
+        src = str(launcher.REPO_ROOT / "src")
+        monkeypatch.setattr(sys, "path", [p for p in sys.path if p != src])
+        _stub_run_in_process(monkeypatch)
+
+        assert launcher.main(["some.target"]) == 0
+        assert src in sys.path
+
+    def test_entrypoint_returns_usage_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``python3 -m claq.launcher`` 相当は引数なしで usage 終了する。"""
+        monkeypatch.setattr(sys, "argv", ["launcher.py"])
+
+        with pytest.raises(SystemExit) as excinfo:
+            runpy.run_module("claq.launcher", run_name="__main__")
+
+        assert excinfo.value.code == 1
+
+    @pytest.mark.parametrize("version", [(3, 9, 6), (3, 11, 9)])
+    def test_old_python_returns_zero_without_running(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        version: tuple[int, int, int],
+    ) -> None:
+        """3.12 未満ではターゲットを実行せず 0 を返す。"""
+        monkeypatch.setattr(launcher.sys, "version_info", version)
+        monkeypatch.setattr(launcher, "_run_module_in_process", _explode_if_called)
+
+        assert launcher.main(["claq.mem.cli", "context"]) == 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "3.12" in captured.err
+        assert ".".join(str(part) for part in version) in captured.err
+
+    def test_python_312_runs_module_in_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """3.12.0 なら与えられたターゲットをインプロセス実行する。"""
+        captured = _stub_run_in_process(monkeypatch)
+
+        assert launcher.main(["claq.mem.cli", "context"]) == 0
+        assert captured == {"target": "claq.mem.cli", "args": ["context"]}
+
+
+class TestForceUtf8Streams:
+    """`force_utf8_streams`（出力エンコーディングの固定）のテスト。
+
+    stdout がパイプかつ UTF-8 モード無効のとき、Python はロケール由来の
+    エンコーディングを使う（Windows の既定コードページ、`LC_ALL=C` の Linux では
+    ASCII）。その状態で日本語を書くと UnicodeEncodeError になり、フックは注入も
+    deny もできないまま exit 1 で落ちる。
+    """
+
+    def test_reconfigures_both_streams_to_utf8(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """stdout / stderr の両方を UTF-8 にし、errors は用途別に分けること。
+
+        stderr は Python 既定の `backslashreplace` を保つ。`replace` にすると
+        surrogateescape 由来の不正 UTF-8 ファイル名が ``\\udcXX`` から `?` に落ち、
+        診断情報が消える。stdout は host が読むデータなので `replace`。
+        """
+        calls: list[tuple[str, dict]] = []
+
+        class _Stream:
+            def __init__(self, name: str) -> None:
+                self._name = name
+
+            def reconfigure(self, **kwargs: object) -> None:
+                calls.append((self._name, dict(kwargs)))
+
+        monkeypatch.setattr(launcher.sys, "stdout", _Stream("stdout"))
+        monkeypatch.setattr(launcher.sys, "stderr", _Stream("stderr"))
+
+        launcher.force_utf8_streams()
+
+        assert calls == [
+            ("stdout", {"encoding": "utf-8", "errors": "replace"}),
+            ("stderr", {"encoding": "utf-8", "errors": "backslashreplace"}),
+        ]
+
+    def test_stream_without_reconfigure_is_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`reconfigure` を持たないストリーム（テストの差し替え等）でも落ちないこと。"""
+        monkeypatch.setattr(launcher.sys, "stdout", object())
+        monkeypatch.setattr(launcher.sys, "stderr", object())
+
+        launcher.force_utf8_streams()
+
+    @pytest.mark.parametrize("error", [OSError("bad fd"), ValueError("detached")])
+    def test_reconfigure_failure_is_ignored(
+        self, monkeypatch: pytest.MonkeyPatch, error: Exception
+    ) -> None:
+        """reconfigure 自体が失敗しても、フック本来の処理を止めないこと。"""
+
+        class _Failing:
+            def reconfigure(self, **kwargs: object) -> None:
+                raise error
+
+        monkeypatch.setattr(launcher.sys, "stdout", _Failing())
+        monkeypatch.setattr(launcher.sys, "stderr", _Failing())
+
+        launcher.force_utf8_streams()
+
+
+def test_non_ascii_output_survives_a_non_utf8_locale(tmp_path: Path) -> None:
+    """UTF-8 でないロケールでも、非 ASCII を含む注入が壊れず exit 0 で返ること。
+
+    実プロセスでしか再現しない（本テストプロセスの stdout は既に UTF-8）。
+    `PYTHONUTF8=0` と `LC_ALL=C` は、Windows の既定コードページ環境を
+    POSIX 側で近似したもの。
+    """
+    from claq.mem.database import Database
+    from claq.mem.models import Knowledge, utc_now_iso
+
+    with Database(tmp_path / "mem.db") as db:
+        db.upsert_knowledge(
+            Knowledge(
+                key="k",
+                kind="fact",
+                scope="global",
+                title="検査 ✓ の知識",
+                body="b",
+                status="active",
+                source="human",
+                created_at=utc_now_iso(),
+                updated_at=utc_now_iso(),
+            )
+        )
+
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("CODEX_", "GROK_", "COPILOT_"))
+        and key not in {"CLAUDECODE", "CLAQ_HOME", "CLAUDE_PLUGIN_ROOT"}
+    }
+    env.update(
+        {
+            "HOME": str(tmp_path),
+            "CLAQ_DATA_PATH": str(tmp_path),
+            "LC_ALL": "C",
+            "PYTHONUTF8": "0",
+            "PYTHONCOERCECLOCALE": "0",
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(LAUNCHER_PATH), "claq.mem.cli", "context"],
+        input=json.dumps({"session_id": "s", "source": "startup"}),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "検査 ✓ の知識" in result.stdout
+
+
+def test_background_child_env_forces_utf8_output() -> None:
+    """detach 子の環境に PYTHONIOENCODING=utf-8 が入ること。
+
+    子は `-m <module>` 起動で `main()` を通らないため `force_utf8_streams()` が
+    効かない。子の警告は日本語を含み bg ログへ落ちるので、非 UTF-8 ロケールでは
+    UnicodeEncodeError がログの中だけで起き、次セッションの通知に化けた 1 行と
+    して現れる。
+    """
+    # errors も明示する。既定の `strict` だとサロゲートを含む文字列で子だけが
+    # UnicodeEncodeError になり、親（force_utf8_streams）と非対称になる。
+    assert launcher.build_env()["PYTHONIOENCODING"] == "utf-8:replace"
+
+
+def test_background_child_writes_non_ascii_log_under_non_utf8_locale(tmp_path: Path) -> None:
+    """非 UTF-8 ロケールでも、detach 子の日本語ログが壊れず書けること。
+
+    `--bg` 経路は実プロセスでしか再現しない。壊れた handoff payload を渡して
+    子に警告を書かせ、bg ログに UnicodeEncodeError が出ないことを見る。
+    """
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("CODEX_", "GROK_", "COPILOT_"))
+        and key not in {"CLAUDECODE", "CLAQ_HOME", "CLAUDE_PLUGIN_ROOT"}
+    }
+    env.update(
+        {
+            "HOME": str(tmp_path),
+            "CLAQ_DATA_PATH": str(tmp_path),
+            "LC_ALL": "C",
+            "PYTHONUTF8": "0",
+            "PYTHONCOERCECLOCALE": "0",
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(LAUNCHER_PATH), "--bg", "claq.mem.cli", "handoff"],
+        input='{"handoff": "日本語の引き継ぎ ✓"}',
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+    # ログが出ないのが正常系なので、短い猶予だけ待って判定する。
+    deadline = time.monotonic() + 5
+    log_dir = tmp_path / ".claq" / "logs"
+    while time.monotonic() < deadline:
+        logs = sorted(log_dir.glob("bg-*.log")) if log_dir.is_dir() else []
+        if logs and logs[-1].stat().st_size:
+            break
+        time.sleep(0.1)
+
+    for log in sorted(log_dir.glob("bg-*.log")) if log_dir.is_dir() else []:
+        assert "UnicodeEncodeError" not in log.read_text(encoding="utf-8", errors="replace")
