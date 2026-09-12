@@ -204,6 +204,29 @@ mkdir -p "$CLAQ_DATA_PATH"
 
 ## ステップ3: 実測による裁定
 
+### scan_scaffold_drift（足場タグ denylist 陳腐化検知）
+
+`ci/scan_scaffold_drift.py` は denylist 陳腐化（`lib/harness.py` の `_SCAFFOLD_TAGS` から
+漏れた新規足場タグを実 transcript から検知する）の唯一の補償策で、コーパスが利用者
+ローカルの未サニタイズ transcript であるため CI（pytest）には組み込めない。本ステップで
+明示的に呼び出し、新しいホストが未知の足場タグを追加した場合の自動検知を担保する。
+上の hooks / commands / skills / agents のインベントリとは別単位（単発のスキャンであり
+コンポーネント数に加えない）。
+
+```bash
+. "$HOME/.claq/env.sh" || exit 127
+claq_run claq.ci.scan_scaffold_drift
+```
+
+`0`（ドリフトなし）は追加対応不要。`1`（未知の足場タグ検出）は実 transcript による
+一次証跡なので通常の指摘としてステップ3の裁定パイプラインへ載せる — 3 択トリアージ
+（ホスト足場 → `lib/harness.py`、依頼本文の良性 HTML タグ → `BENIGN_TAGS`、どちらでも
+ない → コードスパン除去の穴）は `../maintain/SKILL.md` `## ステップ6: final gate` に従い、
+ここでは再定義しない。`2`（走査対象ゼロ）は合格ではなく未実施で、コンポーネント単位の
+`Not run` とは別カウントとして `Scaffold-Drift: NOT-RUN` を出力に必ず載せる（省略しない）。
+`127`（`claq_run` が root ポインタ未記録で解決に失敗）も合格ではなく未実施で、`2` と同じ
+`Scaffold-Drift: NOT-RUN` に含める（原因の違いは出力上区別しない）。
+
 - **エージェントの自己申告は一次証跡ではない**。主張は必ず自分で再現してから採用する。同一セッションで 5 件の agent 主張が再現に失敗して却下された。
 - **再現していない主張も指摘台帳へ入れる**。エージェント主張は「再現できた → 通常の指摘」「再現を試みて失敗 → `NO-FIX`（根拠＝再現手順と観測結果）」「再現を試みていない → `Unadjudicated`」の 3 つに必ず落とす。**本表の外に別節を作って逃がさない** — security-auditor の 5 件が「要裁定」という表外の節に置かれ、恒等式のどの行にも計上されないまま実行が終わった。
 - **一次証跡が無い指摘に severity を付けない**。自分で再現していない項目は `unrated` として数え、**エージェントが申告した severity を転記しない** — 転記は「自己申告を証跡として採用する」ことそのもので、上の 1 行目に反する。severity が付くのは自分の実測で立った指摘だけ。
@@ -256,6 +279,8 @@ pytest をパイプへ流すときは `set -o pipefail` 必須。`git add` と `
 3. ステップ5 のゲートがすべて緑 — 回帰ゲート 3 つ、および修正 1 件ごとの再実測ゲート **(a) 元 payload の陽性・陰性の反転 (b) 隣接軸 1 本、の両方**（修正が 0 件の実行では回帰ゲート 3 つのみ）。(b) が未記録の修正が 1 件でもあれば本条件は未達
 4. 測定 root と修理 root が `Build:` 行に記録済み
 
+`Scaffold-Drift` の `NOT-RUN` は上記 1〜4 のどれにも算入しない — コンポーネント単位の未起動でも指摘でもなく、出力への明記のみを義務づける独立行。
+
 **実行の成否と `Gate` は別軸**。上の 4 条件は本実行が完了したかを表し、`Gate` はリリース可否を表す。部分実行や修正禁止の実行で `Gate: BLOCKED` が出るのは正常終了であって、実行の失敗ではない。
 
 **未起動を「異常なし」と読み替えない。**「skip されるゲートはゲートとして機能しない」（claq リポジトリの `docs/adr/verification-scope-release-gates.md`）。未起動は合格でも不合格でもなく**未実施**として別カウントし、出力テンプレでも独立した行にする。
@@ -276,6 +301,7 @@ Inventory:  hooks {n} / commands {n} / skills {n} / agents {n}
 Invoked:    {n} / {total}
 Not run:    {n}（未実施。合格ではない）
 Unspecified: {n}（起動したが出力契約が無く合否判定不能。コンポーネント単位）
+Scaffold-Drift: PASS(exit0) / DRIFT(exit1) / NOT-RUN(exit2 or 127)
 Findings:   HIGH {h} / MEDIUM {m} / LOW {l} / unrated {u} = {合計}
 Fixed:      {n}（再実測ゲート済み）
 NO-FIX:     {n}（根拠を下に列挙）
@@ -289,6 +315,8 @@ Learned:    {知識カードの key} / なし
 ```
 
 `Gate: BLOCKED` になる条件は 3 つで、いずれか 1 つでも該当すれば BLOCKED — **`Not run` が 1 以上 / `Unadjudicated` が 1 以上 / `Build:` の `same=no`**。行間の恒等式は **`Findings 合計 = Fixed + NO-FIX + Pending + Unadjudicated`** — どの指摘も 4 行のいずれかに必ず入る。**表外に「要裁定」節を作って恒等式から逃がさない**（エージェント主張も含む。ステップ3 参照）。
+
+`Scaffold-Drift` の `DRIFT` / `NOT-RUN` はこの 3 条件に加えない — `DRIFT`（exit 1）は通常の指摘として上の恒等式に入るので `Pending`/`Unadjudicated` 経由で既に BLOCKED 判定へ効く。`NOT-RUN`（exit 2 または 127）はコンポーネント単位の `Not run` とは別カウントであり、出力への明記を必須にする一方、単独では `Gate: BLOCKED` を発火させない（コーパスが手元に無いホストや root ポインタ未記録のホストで常時 BLOCKED になるのを避けるため）。
 
 **恒等式の母集合は `Findings` 行の母集合**であり、単位は**指摘**。再現していない指摘は severity を持たないので `unrated` に数え、`= {合計}` は 4 スロットすべての和を書く（`HIGH + MEDIUM + LOW` だけでは `unrated` の分が落ちて恒等式が閉じない）。コンポーネント単位の数（`Invoked` / `Not run` / `Unspecified`）はこの恒等式に**入れない**。`Pending` または `Unadjudicated` が 1 以上なら終了条件2 は未達。NO-FIX は件数だけでなく理由を 1 行ずつ添える。
 
