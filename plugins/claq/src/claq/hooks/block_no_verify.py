@@ -31,7 +31,7 @@ git 起動トークンの探索:
     起動されるか」だけで実行位置を必要としないため名前集合を持たずに済み、
     あちらは ``tee pyproject.toml`` と ``echo tee pyproject.toml`` を分けるために
     実行位置の特定が必須で、名前集合が原理的に不可避になります。根拠と代替案の
-    実測は `docs/adr/02-shell-analysis-boundary.md`
+    実測は `docs/adr/shell-analysis-boundary.md`
     にあります（本モジュールへ allowlist を導入する案は代替案 3 として却下済み）。
 
 ``-n`` の扱い:
@@ -49,7 +49,7 @@ git 起動トークンの探索:
 heredoc 本文:
     ``cat > note.md <<'EOF'`` のようにデータとして書かれた heredoc 本文は、
     トークン化の前に ``hook_common.strip_data_heredoc_bodies`` で落とします
-    （ADR-0017）。本文が実行されうる形（演算子行のシェル起動・継続演算子・
+    （docs/adr/shell-analysis-boundary.md）。本文が実行されうる形（演算子行のシェル起動・継続演算子・
     未終端）は落とさず、従来どおり検出対象のまま残します。非シェルインタプリタ
     （``python3 - <<EOF``）の本文からの間接実行は非目標です。
 
@@ -203,7 +203,7 @@ _BYPASS_LONG_FLAG = "--no-verify"
 # long オプションの短縮形を受け付ける最短長。git は曖昧でない限り long
 # オプションの**前置**を受理するため（``git commit --no-veri`` は実際に通る）、
 # 完全一致だけを見ると素通りする。``--n`` / ``--no`` は git 側では曖昧で
-# エラーになるが、ここでは deny 側に倒す（ADR-0002: 誤検出 > 誤通過）。
+# エラーになるが、ここでは deny 側に倒す（docs/adr/shell-analysis-boundary.md: 誤検出 > 誤通過）。
 _MIN_ABBREVIATED_LONG_OPTION_LENGTH = 3
 
 # ``git commit`` でのみ ``--no-verify`` の別名になる short フラグ。
@@ -221,7 +221,7 @@ _HOOKS_PATH_CONFIG_KEY = "core.hookspath"
 # - ``alias.``: 別名の展開先を本フックは知らない。``git -c
 #   alias.ci='commit --no-verify' ci`` は ``--no-verify`` が config **値**の
 #   中にあるためフラグ走査に掛からない。展開結果を解釈する術が無い以上、
-#   alias の定義そのものを deny する（ADR-0002 の false-positive 優先）。
+#   alias の定義そのものを deny する（docs/adr/shell-analysis-boundary.md の false-positive 優先）。
 #
 # シェルエイリアス（``alias g=git``）は依然として非目標だが、それは
 # コマンドラインに現れないため。``-c alias.X=`` は literal に現れる。
@@ -482,7 +482,7 @@ def _collect_literal_env_assignments(prefix_tokens: list[str]) -> dict[str, str]
     ラッパ名とそのオプションを列挙して追随する設計は、列挙が漏れた瞬間に
     **素通り側へ倒れる**。前置は定義上 git 起動より前なので、そこに現れる
     ``NAME=value`` は実質すべて環境変数代入であり、列挙に依存せず拾える。
-    ADR-0002 の「誤検出 > 誤通過」に沿って、拾いすぎる側へ倒す。
+    docs/adr/shell-analysis-boundary.md の「誤検出 > 誤通過」に沿って、拾いすぎる側へ倒す。
 
     拾いすぎの実害は無い。代入名が危険なもの（``GIT_CONFIG_*`` など）に一致した
     ときだけ deny するので、無関係な ``a=b`` を拾っても何も起きない。git の
@@ -490,7 +490,7 @@ def _collect_literal_env_assignments(prefix_tokens: list[str]) -> dict[str, str]
     ``_ENV_ASSIGNMENT_RE`` に一致しない。
 
     シェルエイリアス・変数展開・コマンド置換・``eval`` 経由の間接的な代入は
-    対象外（ADR-0002 の非目標）。
+    対象外（docs/adr/shell-analysis-boundary.md の非目標）。
 
     Args:
         prefix_tokens: セグメント内で git 起動トークンより前にあるトークン列。
@@ -569,7 +569,7 @@ def _is_config_sensitive_key_mutation(invocation: GitInvocation) -> bool:
     とは別に、``git config core.hooksPath <path>`` のような通常の subcommand
     呼び出しを検査する。読み取り専用と確定できる形（``--get`` 系、新構文の
     ``get``/``list``、値を伴わない legacy query）だけを allow し、それ以外の
-    ``core.hooksPath`` に触れる呼び出しは deny する（ADR-0002 の
+    ``core.hooksPath`` に触れる呼び出しは deny する（docs/adr/shell-analysis-boundary.md の
     false-positive 優先方針）。
 
     Args:
@@ -694,7 +694,7 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool) -> bool:
             # 予算検査を通過する。再帰先を無予算で走らせると timeout 超過 →
             # host が kill → silent fail-open になるので、境界でも同じ上限を当てる。
             # 上限超過は True（＝BLOCK）へ倒す — 検査しきれない入力を通さない
-            # 方針は main() 側と同じで、ADR-0002 の「誤検出を誤通過より選ぶ」に従う。
+            # 方針は main() 側と同じで、docs/adr/shell-analysis-boundary.md の「誤検出を誤通過より選ぶ」に従う。
             if command_exceeds_scan_budget(wrapper_command):
                 return True
             if has_bypass_flag(wrapper_command, _recursed=True):
@@ -763,7 +763,7 @@ def main() -> int:
 
     # コンテナキーの全走査は iter_bash_commands（lib/harness.py）が単一情報源。
     # 先勝ちで 1 キーだけ見ると、payload が複数のコンテナキーを持つ host で
-    # 無害な側だけを検査して素通りさせうる。ADR-0002 は本フックの検出境界を
+    # 無害な側だけを検査して素通りさせうる。docs/adr/shell-analysis-boundary.md は本フックの検出境界を
     # 「誤検出を誤通過より選ぶ」と定めている。
     for command in iter_bash_commands(data):
         # 走査は git トークン数に対し O(N^2)。上限超過をそのまま走らせると

@@ -316,7 +316,7 @@ class TestReadRawStdin:
         """読み取り不能でも空文字列を返す（非保護経路は fail-open のまま）。
 
         保護 hook 側は `read_raw_stdin_with_truncation` の
-        `StdinUnavailableError` を捕捉して deny に倒す（ADR-0019）。両者を
+        `StdinUnavailableError` を捕捉して deny に倒す（docs/adr/hook-failure-direction.md）。両者を
         同じ関数にしないのは、launcher の `--bg` 中継や `mem context` には
         「読めなかった」ときに採れる別の行動が無いため。
         """
@@ -1537,11 +1537,11 @@ class TestHeredocNormalization:
                 "cat > n.md <<-\tEOF\n\tgit commit --no-verify\n\tEOF",
                 "cat > n.md <<-\tEOF\n\t\tEOF".replace("\t\t", "\t"),
             ),
-            # ここから下は ADR-0017 が「未検証」「単純化されやすい」と名指しした境界。
+            # ここから下は docs/adr/shell-analysis-boundary.md が「未検証」「単純化されやすい」と名指しした境界。
             # CRLF: 区切り語はクォートの内側から取るため CR を含まず（`EOF`）、行側は
             # `EOF\r` なので一致しない。bash は逆に区切り語自体が CR を吸うため
             # （`<<'EOF'\r` の語は `EOF\r`）実際には終端する。挙動は一致しないが、
-            # 剥がさない側は検出側であり ADR-0017 の決定 3（未終端なら剥がさない）に沿う。
+            # 剥がさない側は検出側であり docs/adr/shell-analysis-boundary.md の「未終端なら剥がさない」に沿う。
             (
                 "CRLF は区切り語と終端行が一致せず未終端側へ倒れる",
                 "cat > note.md <<'EOF'\r\ngit commit --no-verify\r\nEOF\r\n",
@@ -1610,7 +1610,7 @@ class TestHeredocNormalization:
     def test_strip_data_heredoc_bodies(self, label: str, command: str, expected: str) -> None:
         """データ本文だけを落とし、実行されうる形はそのまま残す。
 
-        末尾の境界行は ADR-0017 の「否定的」「リスク」節が名指しした未検証の境界を
+        末尾の境界行は docs/adr/shell-analysis-boundary.md が未検証と名指しした境界を
         固定する。CRLF 行は区切り語と一致せず未終端側へ、空白付きの `EOF ` は終端と
         認めず本文として扱い（後続に厳密一致の行があればそこで終端し、無ければ
         未終端）、継続演算子で終わる行は次行が `bash` でも本文を剥がさない。

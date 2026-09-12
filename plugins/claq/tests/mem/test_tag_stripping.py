@@ -232,12 +232,12 @@ class TestCloseTagAttributesDoNotSwallowProse:
 
     def test_unpaired_close_tag_does_not_delete_following_lines(self) -> None:
         """別行の `>` が終端に使われて散文が消えることはない。"""
-        text = "注入テキストは <private> で開き、</private で閉じ忘れると危険。\n参考: docs/adr/0015 -> 対策済み。"
+        text = "注入テキストは <private> で開き、</private で閉じ忘れると危険。\n参考: docs/notes -> 対策済み。"
 
         result = strip_tags(text)
 
         assert "閉じ忘れると危険" in result
-        assert "参考: docs/adr/0015 -> 対策済み。" in result
+        assert "参考: docs/notes -> 対策済み。" in result
         assert "<private>" not in result
 
     def test_unpaired_close_tag_does_not_delete_same_line_prose(self) -> None:
@@ -479,7 +479,7 @@ class TestScaffoldTagsAreNeutralizedButNotRemoved:
 
     注入側 ``mem/cli._handoff_section`` は ``strip_tags`` しか掛けないため、
     語彙に無い足場タグは ``<claq-memory>`` ブロックの内側へ生のまま入る。
-    中身ごと除去する規則（``lib/harness``）との合流は ADR-0015 が却下している
+    中身ごと除去する規則（``lib/harness``）との合流は docs/adr/untrusted-input-prompt-boundary.md が却下している
     が、却下理由は「中身を残すべき用途と捨てるべき用途の同居」であり、escape は
     どちらの用途でも中身を残すためこの衝突が起きない。
     """

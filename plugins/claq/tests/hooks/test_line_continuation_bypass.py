@@ -258,7 +258,7 @@ def test_token_budget_covers_the_sh_c_recursion_boundary() -> None:
     ネスト payload は通過し、再帰先が無予算で走る。実測（2026-09-07）では
     `sh -c '<git×24000 && git commit --no-verify -m x>'` が **16.23 秒**かかり
     hooks.json の timeout（15秒）を超えていた — 修正が塞いだはずの silent
-    fail-open がネスト経由でそのまま残っていた。1 段の `sh -c` は ADR-0002 が
+    fail-open がネスト経由でそのまま残っていた。1 段の `sh -c` は docs/adr/shell-analysis-boundary.md が
     対応範囲と明記した経路である。
     """
     import time

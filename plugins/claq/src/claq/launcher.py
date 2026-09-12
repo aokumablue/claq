@@ -253,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
         raw = read_raw_stdin()
         launched = detach_process(_resolve_module_command(target, target_args), raw, env=build_env())
         if not launched:
-            # ADR-0003: 親の exit code は「子の起動を受け付けたか」を表す。
+            # docs/adr/hook-failure-direction.md: 親の exit code は「子の起動を受け付けたか」を表す。
             # 受付そのものに失敗した以上、成功を返すと呼び出し側は起動されて
             # いない処理を受付成功と誤認する（子の処理結果は依然として非同期）。
             write_stderr(f"[Hook] Error detaching {target}\n")

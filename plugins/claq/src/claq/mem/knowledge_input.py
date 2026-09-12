@@ -14,7 +14,7 @@ SessionStart context への注入（``status='active'``）を自己承認でき�
 payload がそれ以外の値を明示した場合は ``KnowledgeInputError`` にする
 （黙って上書きすると「指定したのに効いていない」という別の事故を招くため）。
 ``status='active'`` への昇格は ``mem promote <key>`` による人間承認のみで
-行う（詳細は ``docs/adr/04-untrusted-input-prompt-boundary.md``）。
+行う（詳細は ``docs/adr/untrusted-input-prompt-boundary.md``）。
 
 検証を素通しする経路が生まれると、CHECK 制約違反が
 ``sqlite3.IntegrityError`` として遅れて表面化し、どのフィールドが悪いのか

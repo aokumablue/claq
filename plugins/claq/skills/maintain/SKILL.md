@@ -21,7 +21,7 @@ commands/skills/agents/hooks を周期的にレビューし、実害を修正し
 
 - 主対象: `plugins/claq/{commands,skills,agents,hooks}`（引数 `--scope` で上書き）
 - 指摘が指す実装ファイル（`src/claq/hooks/` 等）への修正も許可
-- `agents/` を触る場合は分割粒度の基準に従う: 2 体に渡す材料がほぼ同じなら統合し、役割名では分割しない。判定基準・例外（盲検・ツール権限・出力契約）は claq リポジトリの `docs/adr/05-definition-and-subagent-design.md` を参照（配布物には含まれない）。定義の中身に何を書き何を書かないか（自動注入を前提にしない・深刻度で報告を絞らせない・論拠は ADR へ・棄却済みの改善案）は claq リポジトリの `docs/adr/05-definition-and-subagent-design.md`
+- `agents/` を触る場合は分割粒度の基準に従う: 2 体に渡す材料がほぼ同じなら統合し、役割名では分割しない。判定基準・例外（盲検・ツール権限・出力契約）は claq リポジトリの `docs/adr/definition-and-subagent-design.md` を参照（配布物には含まれない）。定義の中身に何を書き何を書かないか（自動注入を前提にしない・深刻度で報告を絞らせない・論拠は ADR へ・棄却済みの改善案）は claq リポジトリの `docs/adr/definition-and-subagent-design.md`
 - 非目標: `rules/` のメンテ／スケジューラ内蔵／auto-push／RLS 級の新機能実装（検出時は `/plan` 提示に留める）
 - **対象 surfaces が存在しない場合は PASS 扱いにしない**: `--scope` 省略時は cwd がリポジトリルート（`plugins/claq/` が cwd から辿れる）である前提。対象パスが 1 つも存在しない場合、「メンテ対象なし・問題なし」と報告せず `BLOCKED: 対象 surfaces が見つかりません（cwd={現在の cwd}、想定パス={解決したパス}）。--scope で対象ディレクトリを明示してください` として停止する。consumer fixture から相対パス前提のまま起動すると、installed plugin 自体のメンテを「対象なし」と誤認しうるため（cwd をどちらに合わせるかは呼び出し側の責務であり、本スキルは沈黙で PASS を返さない）
 
@@ -118,7 +118,7 @@ claq_run claq.ci.scan_scaffold_drift
    落ちるはずなので、落ちないなら除去側の穴。タグ名を足して黙らせない
 
 **`2` は合格ではなく「未実施」**として扱う（走査できなかったことを「異常なし」と
-読み替えない。ADR-0014 の「skip されるゲートはゲートとして機能しない」と同じ理由）。
+読み替えない。docs/adr/verification-scope-release-gates.md の「skip されるゲートはゲートとして機能しない」と同じ理由）。
 この検査は pytest に置けない — コーパスは各利用者のローカルにしか無く、コミット
 できないため CI では常に `2` になり、`0` と区別されないまま形骸化する。
 

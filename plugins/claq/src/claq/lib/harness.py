@@ -276,7 +276,7 @@ def is_unidentifiable_tool(tool_name: str) -> bool:
 
     ツール名の照合はハーネスの matcher が既に済ませており、フック内の再照合は
     冗長なゲートでしかない。したがって「既知の対象外ツール」だけを skip し、
-    特定できない名前は検査側へ倒す（ADR-0002: 誤検出 > 誤通過）。
+    特定できない名前は検査側へ倒す（docs/adr/shell-analysis-boundary.md: 誤検出 > 誤通過）。
 
     Args:
         tool_name: `extract_raw_tool_name` が返した正規化前の生ツール名。
@@ -343,7 +343,7 @@ def _path_strings(value: Any) -> list[str] | None:
     Returns:
         パス文字列のリスト（空文字は除く）。文字列でも list でもない値は
         パスとして解釈できないため None を返し、呼び出し側で fail-closed に
-        倒す（ADR-0002: 誤検出 > 誤通過）。
+        倒す（docs/adr/shell-analysis-boundary.md: 誤検出 > 誤通過）。
 
     Raises:
         例外は発生しません。
@@ -483,7 +483,7 @@ _TAG_NAME_END = r"(?=[\s/>])"
 # 孤立タグ検出専用の「名前の終わり」。除去側（`_TAG_NAME_END`）と違い**文字列の
 # 終端も名前の終わりとみなす**。除去側の先読みは名前の後ろに 1 文字を要求するため、
 # 発話が足場タグ名で終わる入力（`"作業完了 <system-reminder"`）はブロック除去にも
-# 孤立検出にも一致せず、ADR-0015 の fail closed が発火しないまま素通りしていた
+# 孤立検出にも一致せず、docs/adr/untrusted-input-prompt-boundary.md の fail closed が発火しないまま素通りしていた
 # （実測。明示 handoff 経路は他の要因なしで単独成立する）。
 #
 # 共有定数側を広げてはならない。除去パターンで `$` を許すと `<system-reminder` の
@@ -499,7 +499,7 @@ _ORPHAN_NAME_END = r"(?=[\s/>]|$)"
 # 実在のタグ属性がこの長さを超えることはなく、超えた時点でタグとして扱わない。
 #
 # **この上限は複雑度のための装置であって、安全性の境界ではない。** 上限超過を
-# 「タグではない」と読むと ADR-0015 が宣言した fail closed に穴が開くため、
+# 「タグではない」と読むと docs/adr/untrusted-input-prompt-boundary.md が宣言した fail closed に穴が開くため、
 # 破棄判定を担う `_SCAFFOLD_ORPHAN_PATTERN` はこの上限を使わない（属性
 # 513 文字の `<system-reminder …>` がブロック除去にも孤立タグ検出にも一致せず
 # 素通りしていた）。上限を使うのは除去パターンだけで、超過して除去できなかった

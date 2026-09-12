@@ -316,7 +316,7 @@ class TestExtractFilePaths:
 
         空リストを返していた頃は、呼び出し側が「対象ファイルが 1 つも無い
         書き込み」として静かに許可していた。判定できない入力は fail-closed へ
-        倒す（ADR-0002: 誤検出 > 誤通過）。
+        倒す（docs/adr/shell-analysis-boundary.md: 誤検出 > 誤通過）。
         """
         assert harness.extract_file_paths("Edit", {"file_path": 123}) is None
 
@@ -797,7 +797,7 @@ class TestOrphanDetectionIgnoresAttributeLimit:
 
     除去パターンと破棄判定が同じ ``_MAX_TAG_ATTR_CHARS`` を共有していた頃は、
     上限を超えた入力で**両方が同時に外れた** — ブロック除去に一致せず、
-    孤立タグ検出にも一致せず、ADR-0015 が宣言する「孤立タグ 1 個で破棄」が
+    孤立タグ検出にも一致せず、docs/adr/untrusted-input-prompt-boundary.md が宣言する「孤立タグ 1 個で破棄」が
     発火しないまま素通りした（実測: 属性 513 文字の ``<system-reminder …>``）。
     除去できなかったものほど破棄すべきなのに、失敗の向きが逆だった。
     """
@@ -832,7 +832,7 @@ class TestOrphanDetectionReachesTheEndOfString:
     除去側の「名前の終わり」（``_TAG_NAME_END``）は名前の後ろに 1 文字を要求する。
     破棄判定がこれを共有していた頃は、発話が足場タグ名で終わる入力
     （``payload["handoff"] = "作業完了 <system-reminder"``）がブロック除去にも
-    孤立検出にも一致せず、ADR-0015 の fail closed に穴が残っていた（実測）。
+    孤立検出にも一致せず、docs/adr/untrusted-input-prompt-boundary.md の fail closed に穴が残っていた（実測）。
     明示 handoff 経路は他の要因なしで単独成立する。
     """
 

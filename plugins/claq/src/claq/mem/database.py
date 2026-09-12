@@ -84,7 +84,7 @@ class Database:
         復元事故や誤設定で無関係な DB を壊しうる完全性の問題である。
 
         この検査は TOCTOU を完全には防がない（lstat と connect の間に差し替え
-        られる余地は残る）。同一 UID に対する真正性は ADR-0009 のとおり保証
+        られる余地は残る）。同一 UID に対する真正性は docs/adr/plugin-root-resolution.md のとおり保証
         対象外であり、ここで防ぐのは誤設定・復元事故による取り違えである。
 
         Args:

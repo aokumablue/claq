@@ -103,7 +103,7 @@ JSON へ `source: "human"` や `status: "active"` と書いても採用されず
 `/instinct promote <key>` を通す運用とする。ただしこれは**運用上の想定であり
 技術的な強制ではない** — 同一 UID から `mem.db` を直接更新できる以上、
 `promote` が人間によって実行されたことを保証する手段は無く、Bash を持つ agent
-からも到達できる（ADR-0007 が受容した残存リスク）。昇格は監査ログへ記録される。
+からも到達できる（docs/adr/untrusted-input-prompt-boundary.md が受容した残存リスク）。昇格は監査ログへ記録される。
 
 ## active カードは更新できない
 

@@ -598,15 +598,15 @@ allow/deny同一結果は、このWindows stdin fail-open経路と整合する�
 | P0-001 | 修正 | hooks.json の全 7 エントリを `runtime/claq-hook`（Windows は同名 `.cmd`）経由へ変更。インタプリタ解決を wrapper の単一責務に集約 | T+S / Windows は **U** |
 | P1-002 | 修正 | 同上。Windows 側は `WindowsApps` 配下の Store alias を候補から除外し、`py -3` を優先 | T / Windows は **U** |
 | P1-003 | 修正（設計変更） | `env.sh` resolver は祖先 PID と `ps -o lstart=` の照合に依存し Windows では原理的に解決不能。md を 2 通り書かず、SessionStart の `mem context` が解決済み plugin root と読み替え方（`claq_run` / `claq_mem_learn` 両方）を 1 節だけ注入する | T |
-| P1-004 | 修正 | `select.select` を撤去し、ブロッキング read を daemon スレッドへ隔離（3 OS 共通の 1 実装）。「入力が無い」と「読めなかった」を分離し、後者は保護 hook 4 つが deny。ADR-0019 に記録 | T+S |
+| P1-004 | 修正 | `select.select` を撤去し、ブロッキング read を daemon スレッドへ隔離（3 OS 共通の 1 実装）。「入力が無い」と「読めなかった」を分離し、後者は保護 hook 4 つが deny。保護フックの失敗方向 に記録 | T+S |
 | P1-005 | 修正 | `os.getuid()` を `core_utils.actor_identity()` へ置換し、DB 更新の**前**に確定。部分成功の窓を閉じた | T |
 | P1-006 | 修正 | 所有者判定を `os.getuid` の有無という capability で分岐。uid が無効な環境では symlink 拒否・通常ファイル要求・trusted root 包含で守る | T |
 | P1-007 | 修正 | `HOME` 直読みを `get_home_dir()`（`CLAQ_HOME`/`HOME`/`USERPROFILE`/`Path.home`）へ。Copilot の実配置 `.copilot/installed-plugins/claq/claq/` を探索対象に追加 | T+S |
-| P1-008 | **NO-FIX** | `%USERPROFILE%` 配下は既定でそのユーザー（と SYSTEM/Administrators）に限定されており、ADR-0002 の脅威モデル（同一 OS ユーザーの敵対的回避は非対象）に対し POSIX の 0700 と同水準。Administrators が読める点は POSIX の root と対応する。`icacls` / ctypes 依存を増やして得られる差が無い。根拠は `core_utils.ensure_private_dir` と CLAUDE.md へ記載 | — |
+| P1-008 | **NO-FIX** | `%USERPROFILE%` 配下は既定でそのユーザー（と SYSTEM/Administrators）に限定されており、シェルコマンド解析の境界 の脅威モデル（同一 OS ユーザーの敵対的回避は非対象）に対し POSIX の 0700 と同水準。Administrators が読める点は POSIX の root と対応する。`icacls` / ctypes 依存を増やして得られる差が無い。根拠は `core_utils.ensure_private_dir` と CLAUDE.md へ記載 | — |
 | P1-009 | 修正 | `_strip_userinfo` → `_strip_credentials`。userinfo に加えて query / fragment を丸ごと破棄（鍵名の列挙では新しい鍵名を取りこぼすため） | T |
-| P1-010 | **NO-FIX（誤検出）** | 既に実装済み。`_handoff_section` は `strip_tags` を通し `CONTEXT_HANDOFF_CHAR_BUDGET` で切っている（`mem/cli.py`）。ADR-0015 / ADR-0016 が扱う領域 | T（既存） |
+| P1-010 | **NO-FIX（誤検出）** | 既に実装済み。`_handoff_section` は `strip_tags` を通し `CONTEXT_HANDOFF_CHAR_BUDGET` で切っている（`mem/cli.py`）。信頼できない入力とプロンプト境界 / 陳腐化の検知 が扱う領域 | T（既存） |
 | P1-011 | **NO-FIX（誤検出）** | 既に実装済み。`_bg_failure_section` は `strip_tags(normalize_user_message(...))` を通し、末尾 1 行・4KB 上限に限定している | T（既存） |
-| P1-012 | **NO-FIX** | ADR-0007 が明示的に受容した残存リスク。同一 UID から `mem.db` を直接更新できる以上、CLI をいくら固めても人間実行の保証にはならない。`_handle_promote` の docstring にも記載済み | — |
+| P1-012 | **NO-FIX** | 信頼できない入力とプロンプト境界 が明示的に受容した残存リスク。同一 UID から `mem.db` を直接更新できる以上、CLI をいくら固めても人間実行の保証にはならない。`_handle_promote` の docstring にも記載済み | — |
 | P1-013 | 修正 | `detached_spawn_kwargs()` を追加（POSIX: `start_new_session` / Windows: `CREATE_NEW_PROCESS_GROUP｜DETACHED_PROCESS`）。watchdog の停止処理を `stop_child(hard)` へ集約し `os.killpg` の有無で分岐。Windows で孫を回収しない差は受容し、根拠（`--bg` 対象の孫は git のみで、git 側にもハードタイムアウトがある）をコードへ明記 | T / Windows は **U** |
 | P2-014 | 修正 | `_shorten_path` が `/` と `\` の両方を区切りとして扱う | T |
 | P1-015 | **NO-FIX** | `review.md` の設計そのもの。READ-ONLY 制約はステップ 1〜3（レビュー工程）に限定され、ステップ 4 の自律修正は意図された挙動。とくに `commands/review.md:62` は仕様変更だけを除外し **「これは承認待ちではなくスコープ制限」** と明記しており、承認ゲートを検討したうえで採らない判断が既に記録されている | — |
@@ -635,7 +635,7 @@ v0.9.50 公開後に 3 OS 横断で hook 経路を再レビューし、下表を
 | W2 | WindowsApps 除外を `echo %%P｜findstr` で行っていた。for 変数は展開後に再パースされるため `C:\Program Files (x86)\...` のようなカッコ入り実在パスでブロックが壊れる | 除外を `where` のパイプライン側へ移動 | T / Windows は **U** |
 | W3 | findstr のパターンが `"\WindowsApps\"` と閉じ引用符直前でバックスラッシュ終端していた。findstr は C ランタイム解析で `\"` を引用符のエスケープとして読むため、除外が永久に不発になる | `"\WindowsApps"` へ | T / Windows は **U** |
 | W4 | `detach_process` の stdin 一時ファイルは Windows では unlink できず（子が継承ハンドルを保持）、`~/.claq` にセッションごと 1 個ずつ孤児が残る | env_pointer の GC を `*.stdin` にも広げた（猶予 1 時間の age-gate） | T |
-| W5 | `shlex(posix=True)` がクォート外の `\` をエスケープとして消費するため、`rm .\.eslintrc` は `['rm', '..eslintrc']`、`C:\Git\bin\git.exe commit --no-verify` は `['C:Gitbingit.exe', ...]` に潰れ、保護対象 basename も git 起動も見失う | コマンド文字列を POSIX 読みと Windows 読みの 2 方言で解析し、どちらかが検出したら deny（ADR-0020）。既存 2520 件は全て緑のまま | T |
+| W5 | `shlex(posix=True)` がクォート外の `\` をエスケープとして消費するため、`rm .\.eslintrc` は `['rm', '..eslintrc']`、`C:\Git\bin\git.exe commit --no-verify` は `['C:Gitbingit.exe', ...]` に潰れ、保護対象 basename も git 起動も見失う | コマンド文字列を POSIX 読みと Windows 読みの 2 方言で解析し、どちらかが検出したら deny（シェルコマンド解析の境界）。既存 2520 件は全て緑のまま | T |
 | W6 | PowerShell の長形式 cmdlet（`Remove-Item` / `Set-Content` / `Out-File` / `Add-Content` / `New-Item` / `Copy-Item` / `Move-Item` / `Clear-Content`）が書き込み語彙に無かった（`rm`/`cp`/`mv` は PowerShell の別名なので既に効いていた） | 語彙へ追加し、実行位置コマンド名の比較を大小無視に。malformed JSON の縮退経路でも同じ扱いになるよう生テキスト照合も小文字化 | T |
 | **N-03** | **stdout がパイプかつ UTF-8 モード無効のとき、Python はロケール由来のエンコーディングを使う。Windows の既定コードページ（日本語環境なら cp932）や `LC_ALL=C` の Linux では、注入コンテキストや deny 理由の日本語が `UnicodeEncodeError` になり、フックは注入も deny もできないまま exit 1 で落ちる** | launcher が起動直後に stdout/stderr を UTF-8（errors=replace）へ固定。`--bg` の子は `main()` を通らないため `build_env()` に `PYTHONIOENCODING=utf-8` も追加 | T+S（`PYTHONUTF8=0 LC_ALL=C` で実測・再現・修正確認） |
 | N-04 | 祖先ポインタ方式が成立しない OS でも毎 hook `ps` を spawn していた（MSYS 由来の `ps.exe` が PATH にあると別 PID 空間の値を書きうる） | `ancestor_pointers_supported()` が偽なら `ps` を呼ばない | T |
@@ -651,7 +651,7 @@ argv 直呼びで、`sh -c` もハードコード絶対パスも無いことを�
 | launcher | stderr に解決エラーが無く対象 module まで到達する | 合格 | **U** |
 | allow payload | `git status` が許可される | 合格（exit 0、出力なし） | **U** |
 | deny payload | `git commit --no-verify` が非 0 または deny JSON | 合格（exit 2 + `permissionDecision: deny`） | **U** |
-| 入力異常 | 空入力・壊れた JSON・pipe 読取例外を許可側へ倒さない | 読取例外／到着なしは deny（実測）。**壊れた JSON は従来どおり deny。ただし「payload が無い」（tty・stdin 未接続・即 EOF）は素通りのまま**（ADR-0019 の判断。payload を渡さない host を全面拒否すると復旧不能になるため） | **U** |
+| 入力異常 | 空入力・壊れた JSON・pipe 読取例外を許可側へ倒さない | 読取例外／到着なしは deny（実測）。**壊れた JSON は従来どおり deny。ただし「payload が無い」（tty・stdin 未接続・即 EOF）は素通りのまま**（保護フックの失敗方向 の判断。payload を渡さない host を全面拒否すると復旧不能になるため） | **U** |
 | timeout | 保護対象を `allowing the tool call to proceed` にしない | ホスト側挙動のため不可。11.2 の緩和のみ | **U** |
 
 ### 11.5 残る「未検証だが全体が依存する」前提
@@ -685,7 +685,7 @@ argv 直呼びで、`sh -c` もハードコード絶対パスも無いことを�
 | 項目 | 内容 |
 |---|---|
 | コミット | v0.9.50 まで: `872ac87` / `c875903` / `1509c6a` / `11655bc` / `fd43487` / `6e0599f` / `81143e9`。再レビュー分: `71b33a1`（W1〜W6） / `1e34db8`（N-03・N-04） / `753e24f`（detach 子の UTF-8・縮退経路の大小無視） |
-| 新規 ADR | ADR-0019（保護フックは stdin を「読めなかった」場合に fail-closed する）・ADR-0020（シェル保護フックは 1 つのコマンド文字列を 2 つのシェル方言で解析する） |
+| 新規 ADR | 保護フックの失敗方向（保護フックは stdin を「読めなかった」場合に fail-closed する）・シェルコマンド解析の境界（シェル保護フックは 1 つのコマンド文字列を 2 つのシェル方言で解析する） |
 | 新規配布物 | `runtime/claq-hook`（100755）・`runtime/claq-hook.cmd`。publish は git filter-repo の除外方式なので自動的に配布ツリーへ載り、実行ビットも保持される |
 | テスト | 2546 件成功、`ruff check plugins/claq` 警告なし、カバレッジ 100% |
 | 判定 | **macOS/Linux: 回帰なし。Windows: 実機再検証待ち（11.5 の前提を最初に確認すること）** |

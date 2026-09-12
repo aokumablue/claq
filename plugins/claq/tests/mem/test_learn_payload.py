@@ -4,7 +4,7 @@
   - 全フィールドあり     → 全キーを含む JSON
   - 一部が空文字列       → そのキーを落とす（learn 側の既定値を活かす）
   - すべて未設定         → 空の JSON オブジェクト
-  - source/status を設定 → 無視する（ADR-0007: 呼び出し元に権限が無い）
+  - source/status を設定 → 無視する（docs/adr/untrusted-input-prompt-boundary.md: 呼び出し元に権限が無い）
 """
 
 from __future__ import annotations

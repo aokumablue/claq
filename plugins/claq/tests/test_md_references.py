@@ -231,10 +231,10 @@ def _declared_tools(agent_name: str) -> set[str]:
 
 
 def test_agent_tools_match_expected_exactly() -> None:
-    """9 定義の tools 宣言が期待集合と完全一致すること（F-05 / ADR-0004 / ADR-0010）。
+    """9 定義の tools 宣言が期待集合と完全一致すること（F-05 / docs/adr/definition-and-subagent-design.md）。
 
     security-auditor の read-only は「本文の約束」ではなく tools 権限による技術的
-    強制であり、reviewer との権限非対称は ADR-0004 の決定そのもの。ADR-0010 は
+    強制であり、reviewer との権限非対称は docs/adr/definition-and-subagent-design.md の決定そのもの。同ファイルは
     さらに「新規エージェントに Task を与えない（子が子を呼ぶ階層を作らない）」を
     tools 権限で構造的に保証すると定めた。
 
@@ -257,7 +257,7 @@ def test_agent_files_match_expected_tools_map() -> None:
 
 
 def test_no_agent_can_spawn_subagents() -> None:
-    """どのエージェントも Task を持たないこと（ADR-0010「子が子を呼ばない」）。"""
+    """どのエージェントも Task を持たないこと（docs/adr/definition-and-subagent-design.md「子が子を呼ばない」）。"""
     holders = [name for name in _EXPECTED_AGENT_TOOLS if "Task" in _declared_tools(name)]
     assert holders == []
 
@@ -619,7 +619,7 @@ def test_md_max_score_mentions_match_real_audit() -> None:
     `harness-tuner.md` の JSON 例だけを照合していた頃、`commands/harness.md` の
     「`max_score`（`repo` では58）」は素通りしていた。`max_score` は check の
     points 合計なので check を足すたびに変わり、ずれると満点尺度が黙って狂う。
-    ADR-0011 決定 6（定義に書いた検証規則は CI で実測する）の適用。
+    docs/adr/definition-and-subagent-design.md 決定 6（定義に書いた検証規則は CI で実測する）の適用。
     """
     import json
 

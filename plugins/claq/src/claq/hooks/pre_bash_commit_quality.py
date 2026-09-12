@@ -19,10 +19,10 @@ commit 検出は `hook_common.tokenize`/`split_segments`（`block_no_verify` と
 シークレット検出は nosec・ファイルサイズに関わらず全体を走査します
 （サイズによる打ち切りはありません）。バイナリ判定されたファイルは lint を
 抑制しますが secret scan は行い、抽出した印字可能文字列へ同じパターンを
-当てます（ADR-0013。詳細は `commit_quality_scanner` のモジュール docstring）。
+当てます（docs/adr/shell-analysis-boundary.md。詳細は `commit_quality_scanner` のモジュール docstring）。
 
 データとして書かれた heredoc 本文は、判定へ渡す前に
-`hook_common.strip_data_heredoc_bodies` で落とします（ADR-0017）。`evaluate()` の
+`hook_common.strip_data_heredoc_bodies` で落とします（docs/adr/shell-analysis-boundary.md）。`evaluate()` の
 ループで 1 回だけ正規化するため、下流の 3 消費者（commit 判定・compound risk 判定・
 確定後の検査）は必ず同じ文字列を見ます。本文が実行されうる形は落としません。
 
@@ -116,7 +116,7 @@ _REPO_ROOT_UNAVAILABLE_MESSAGE = (
 # `git commit -a` の作業ツリー列挙（`git diff HEAD --name-only`）が git 自体の
 # 失敗・timeout で完了しなかった場合の deny 理由。HEAD が無い初回コミット
 # （正常系。空リストで続行）とは区別する。実際にコミットされる未ステージ変更を
-# 1 件も検査できない状態で「対象ファイルなし」を返さないため（ADR-0001）。
+# 1 件も検査できない状態で「対象ファイルなし」を返さないため（docs/adr/hook-failure-direction.md）。
 _WORKTREE_FILES_UNAVAILABLE_MESSAGE = (
     "[Hook] BLOCKED: could not enumerate worktree changes for a confirmed "
     "`git commit -a` call (git itself failed or timed out). Refusing to allow "
@@ -271,7 +271,7 @@ def get_unstaged_modified_files() -> list[str] | None:
     を区別します。前者は正常系なので空リスト、後者は None を返して呼び出し元で
     fail-closed にします。両方を空リストへ潰すと、実際にコミットされる未ステージ
     変更を 1 件も検査できていない状態を「対象ファイルなし」と report してしまい、
-    ADR-0001 の「検査対象確定後の失敗は fail-closed」に反します。
+    docs/adr/hook-failure-direction.md の「検査対象確定後の失敗は fail-closed」に反します。
 
     Returns:
         変更されている作業ツリーファイルパスのリスト。初回コミットで HEAD が
@@ -332,7 +332,7 @@ def _detect_git_commit(command: str) -> tuple[str, list[str]] | None:
     Windows の絶対パス起動（``C:\\Git\\bin\\git.exe commit -m x``）が
     `shlex(posix=True)` で ``C:Gitbingit.exe`` に潰れ、commit と認識できず
     品質ゲートが丸ごと素通りしていた（`block_no_verify` では検出される
-    のに本フックだけ通る非対称。ADR-0020）。
+    のに本フックだけ通る非対称。docs/adr/shell-analysis-boundary.md）。
 
     Args:
         command: 検査対象のコマンド文字列（heredoc 本文は除去済み）。
@@ -370,7 +370,7 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     command may fail'` のような引用文まで commit と判定し、無関係な Bash 呼び出しが
     index の状態次第でブロックされた。同じ入力を `block_no_verify` は無視して
     おり、2 つのフックが「commit とは何か」で食い違っていた。この非対称を
-    どの ADR も正当化していない。ADR-0002 の「誤検出 > 誤通過」は解析できない
+    どの ADR も正当化していない。docs/adr/shell-analysis-boundary.md の「誤検出 > 誤通過」は解析できない
     構文についての規定であり、解析できた構文にまで適用する根拠にはならない。
 
     非目標: シェル展開・変数分割経由（`git $(echo commit)` / `git${IFS}commit`
@@ -399,9 +399,9 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     return False, []
 
 
-# commit より前に実行されると検査結果を無効化する操作。ADR-0002 の
+# commit より前に実行されると検査結果を無効化する操作。docs/adr/shell-analysis-boundary.md の
 # 「解析できないケースは誤検出を誤通過より選ぶ」に従い、判定に迷う構文は
-# 「変更あり」側へ倒す。対象は ADR-0002 が「引数位置に書き込み先が明示される
+# 「変更あり」側へ倒す。対象は docs/adr/shell-analysis-boundary.md が「引数位置に書き込み先が明示される
 # ＝解析できる範囲」として既に対応済みと宣言している集合に、index 操作を
 # 加えたもの。
 _INDEX_MUTATING_GIT_SUBCOMMANDS = frozenset(
@@ -453,7 +453,7 @@ _MUTATING_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", ">|", "1>", "2>", "1>
 def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
     """1 セグメントが作業ツリーまたは git index を変更しうるかを判定します。
 
-    ADR-0002 に従い誤検出側へ倒します。ここでの誤検出のコストは「commit を
+    docs/adr/shell-analysis-boundary.md に従い誤検出側へ倒します。ここでの誤検出のコストは「commit を
     別の tool call へ分けてもらう」ことであり、誤通過のコスト（未検査の内容が
     commit される）より小さいためです。
 
@@ -502,8 +502,8 @@ def _compound_commit_risk(command: str) -> str | None:
     """1 回の Bash 呼び出しの中で commit 内容を検査できなくする構造を検出します。
 
     PreToolUse フックが観測できるのは「コマンド実行前」の index/worktree だけ
-    です。したがって次の 2 つは原理的に検査不能であり、ADR-0001（検査対象確定後
-    の検査不能は fail-closed）と ADR-0002（誤検出 > 誤通過）に従って deny します。
+    です。したがって次の 2 つは原理的に検査不能であり、docs/adr/hook-failure-direction.md（検査対象確定後
+    の検査不能は fail-closed）と docs/adr/shell-analysis-boundary.md（誤検出 > 誤通過）に従って deny します。
 
     1. 複数の `git commit` — 2 つ目以降がコミットする内容は実行前状態に現れない。
     2. commit より前のセグメントによる作業ツリー / index の変更 — 例えば
@@ -1076,7 +1076,7 @@ def main() -> int:
     - `read_raw_stdin_with_truncation` が `StdinUnavailableError` を送出した
       場合（payload はあるはずなのに読めなかった）は fail-closed。commit か
       どうかを判定する材料そのものが得られていないため、他の 3 保護 hook と
-      同じ deny に倒す（ADR-0019）。読む対象が無い場合（tty 起動・stdin 未
+      同じ deny に倒す（docs/adr/hook-failure-direction.md）。読む対象が無い場合（tty 起動・stdin 未
       接続・即 EOF）は例外にならず空文字列として届き、従来どおり素通りする。
       1 MiB 超の truncation は commit かどうか判定不能なため fail-closed
       （block_no_verify / config_protection と同じ 4 段構成に揃える）。

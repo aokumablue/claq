@@ -968,7 +968,7 @@ def _handle_promote(settings: Settings, args: CommandArgs) -> None:
 
     昇格は以後の全セッションへ自動注入される状態への遷移なので、誰が・いつ・
     どのカードを昇格させたかをログへ残す。これは境界ではなく事後追跡である。
-    ADR-0007 のとおり、promote が人間によって実行されたことを技術的に強制する
+    docs/adr/untrusted-input-prompt-boundary.md のとおり、promote が人間によって実行されたことを技術的に強制する
     手段は無く（同一 UID から mem.db を直接更新できる以上、CLI をいくら固めても
     保証にならない）、Bash を持つ agent からも到達できる。
 
@@ -1174,7 +1174,7 @@ def _shell_bootstrap_section() -> str:
 
     md（agents/commands/skills）の bash fence は
     ``. "$HOME/.claq/env.sh"`` → ``claq_run <module> ...`` という形を取る。
-    この resolver は祖先 PID と起動時刻の照合（ADR-0008 改訂 2）に依存し、
+    この resolver は祖先 PID と起動時刻の照合（docs/adr/plugin-root-resolution.md）に依存し、
     Windows では ``ps`` が無いため原理的に解決できない
     （`env_pointer.ancestor_pointers_supported`）。md を全部 2 通り書くと
     プロンプトが倍になるため、代わりに「その場で解決済みの plugin root」を

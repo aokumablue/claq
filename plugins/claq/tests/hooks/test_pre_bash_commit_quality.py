@@ -50,7 +50,7 @@ class TestShellSeparatorTokenization:
     def test_block_no_verify_and_commit_quality_agree_on_quoted_text(self) -> None:
         """2 つのフックが「commit とは何か」で食い違わないこと。
 
-        どの ADR もこの非対称を正当化していなかった。ADR-0002 の
+        どの ADR もこの非対称を正当化していなかった。docs/adr/shell-analysis-boundary.md の
         「誤検出 > 誤通過」は解析できない構文についての規定であり、解析できた
         構文にまで適用する根拠にはならない。
         """

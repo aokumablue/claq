@@ -32,7 +32,7 @@ def get_home_dir() -> Path:
 def get_plugin_root() -> Path:
     """このプラグインのソースルート（``<root>/src/claq/lib`` の 3 つ上）を返す。
 
-    ``CLAUDE_PLUGIN_ROOT`` は Bash tool の環境変数に乗らない（ADR-0008）ため、
+    ``CLAUDE_PLUGIN_ROOT`` は Bash tool の環境変数に乗らない（docs/adr/plugin-root-resolution.md）ため、
     md 側からは参照できない。一方、hook プロセスの中では自分自身のファイル位置
     から確実に導ける。``launcher.REPO_ROOT`` と同じ値になる。
 
@@ -94,7 +94,7 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
     （release-verify 2026-09-03 の P1-008）。ここで ``icacls`` や
     ``SetNamedSecurityInfo`` を呼ぶことはしない: ``%USERPROFILE%`` 配下は
     既定でそのユーザー（と SYSTEM / Administrators）だけに許可されており、
-    ADR-0002 が定める脅威モデル（同一 OS ユーザーの敵対的回避は非対象）に
+    docs/adr/shell-analysis-boundary.md が定める脅威モデル（同一 OS ユーザーの敵対的回避は非対象）に
     対しては POSIX の 0700 と同水準になる。Administrators が読める点は、
     POSIX で root が 0700 を読めるのと対応する。外部プロセス起動または
     ctypes 依存を増やして得られる差が無いため、実装しない。

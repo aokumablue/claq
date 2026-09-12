@@ -189,7 +189,7 @@ def _adapter_table() -> dict[str, str]:
 def test_reviewer_declares_runner_specific_signature_adapters() -> None:
     """adapter 表が各ランナー固有の選択フラグを指定していること。
 
-    ADR-0011 決定 6: 定義本文へ書いた検証規則は CI で実測する。この表は「誰も
+    docs/adr/definition-and-subagent-design.md 決定 6: 定義本文へ書いた検証規則は CI で実測する。この表は「誰も
     実行しないプロンプト文書の契約」の典型で、書き間違えても気づけない。
     """
     rows = _adapter_table()

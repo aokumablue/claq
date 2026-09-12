@@ -18,7 +18,7 @@ Python 側の ``os.getppid()`` と shell 側の ``$PPID`` は一致する（実�
 環境変数によるホスト判定（``COPILOT_*`` 等）は採らない。Copilot CLI / Grok CLI が
 bash tool の環境へ自身の識別変数を注入することは文書化されておらず、確認できた
 のは Claude Code の変数（``CLAUDECODE`` 等）のみだったため（詳細は
-``docs/adr/03-plugin-root-resolution.md``）。
+``docs/adr/plugin-root-resolution.md``）。
 
 R-01〜R-06 の指摘を受け、v0.9.35 の設計を改めた:
 
@@ -377,7 +377,7 @@ def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
 
     Returns:
         ``(pid, lstart)`` の近い祖先から遠い祖先の順のリスト。``ps`` の
-        起動・実行に失敗した場合は空リスト（ADR-0001 の fail-open —
+        起動・実行に失敗した場合は空リスト（docs/adr/hook-failure-direction.md の fail-open —
         この回はポインタを書かず、次回 hook 起動での自己修復に委ねる）。
         チェーンは PID 0/1 に達するか、プロセス表から親を特定できなく
         なった時点で打ち切る。

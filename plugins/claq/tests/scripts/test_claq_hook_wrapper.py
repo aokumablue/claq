@@ -688,7 +688,7 @@ def test_windows_wrapper_detects_empty_path_entries() -> None:
     # launcher とその子プロセス（git を含む）は汚染された PATH で解決を続けるため、
     # CLAQ_PYTHON はそれを直さないからである。順序を揃えるのが正しい変更だが、
     # 開発ホストから cmd.exe を実行できず、壊れた並べ替えは Windows で保護を黙って
-    # 無効化する。`claq-hook.cmd` の KNOWN RESIDUAL と docs/adr/01-hook-failure-direction.md を参照。
+    # 無効化する。`claq-hook.cmd` の KNOWN RESIDUAL と docs/adr/hook-failure-direction.md を参照。
     assert override < reset
 
     setters = [line for line in lines[reset + 1 : branch] if line.endswith('set "CLAQ_PATH_RISK=1"')]

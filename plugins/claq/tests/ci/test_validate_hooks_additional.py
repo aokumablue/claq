@@ -225,8 +225,8 @@ def test_repo_hook_modules_propagate_exit_code_via_system_exit() -> None:
     0（allow）を返す — PreToolUse の「exit 2 = deny」契約が黙って壊れる。
 
     `launcher.py` は「全フックは SystemExit 経由で終了することを確認済み」と
-    書いているが、その確認は一度きりの目視で検知器が無かった。ADR-0011 決定6 /
-    ADR-0023 が対象とする「宣言はあるが CI で実測されない契約」にあたる。
+    書いているが、その確認は一度きりの目視で検知器が無かった。docs/adr/definition-and-subagent-design.md 決定6 /
+    docs/adr/staleness-detection.md が対象とする「宣言はあるが CI で実測されない契約」にあたる。
     """
     import ast
 

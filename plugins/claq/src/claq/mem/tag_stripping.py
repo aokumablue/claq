@@ -63,11 +63,11 @@
 
 なお ``<system-reminder>`` 等のハーネス足場タグを**中身ごと除去する**規則は今も
 本モジュールの管轄外である（``lib/harness.normalize_user_message`` が担う。
-ADR-0015 代替案 3）。escape の語彙にだけ足場タグを含めるのは、ADR-0015 が
-却下した「2 つの規則の合流」に当たらないため — 却下理由は「中身を残すべき用途と
-捨てるべき用途が同じ関数に同居する」ことであり、escape はどちらの用途でも中身を
-残すのでこの衝突が起きない。実際に注入側（``mem/cli._handoff_section``）は
-``strip_tags`` しか掛けず、足場タグを倒す手段が他に無い。
+docs/adr/untrusted-input-prompt-boundary.md が「中身を残すべき用途と捨てるべき用途を
+同じ関数に同居させない」と定めている）。escape の語彙にだけ足場タグを含めるのはこの
+合流に当たらない — escape はどちらの用途でも中身を残すのでこの衝突が起きない。実際に
+注入側（``mem/cli._handoff_section``）は ``strip_tags`` しか掛けず、足場タグを倒す
+手段が他に無い。
 """
 
 from __future__ import annotations
@@ -161,7 +161,7 @@ _ERASE_PATTERN = re.compile(
 
 # escape 対象のタグ語彙。ペア除去（`_TAGS`）より広く、ハーネス足場タグと
 # スラッシュコマンド起動タグを含める。**`_PAIR_PATTERNS` は決してこの語彙へ
-# 広げない** — 中身を捨てる規則は `lib/harness` の管轄で、合流は ADR-0015 が
+# 広げない** — 中身を捨てる規則は `lib/harness` の管轄で、合流は docs/adr/untrusted-input-prompt-boundary.md が
 # 却下している。escape はどちらの用途でも中身を残すため衝突しない。
 # 値は各定義モジュールから導出する（写経すると片方だけ更新されて穴が開く）。
 _NEUTRALIZE_TAGS = (*_TAGS, *SCAFFOLD_TAGS, *COMMAND_TAGS)

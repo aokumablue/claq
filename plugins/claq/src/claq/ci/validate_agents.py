@@ -37,7 +37,7 @@ def _validate_agent_file(file_path: Path) -> bool:
 
     for key in ("name", "description"):
         if not frontmatter.get(key):
-            # description は ADR-0010 が dispatch の要と定めた項目で、欠けると
+            # description は docs/adr/definition-and-subagent-design.md が dispatch の要と定めた項目で、欠けると
             # ホストがこのエージェントを選ぶ手がかりを失う。skills 側の
             # validate_skills は同じ 2 項目を必須にしており、agents だけ
             # 未検証だと「宣言が消えたのに緑」が agents 側でのみ起きる。

@@ -9,8 +9,8 @@
 > **誤検出 2 件**:
 > - **F-02**（source tree にテストが無い）: 本ツリーの実測は `1774 passed / coverage 100% / exit 0`。
 >   本レポートの「TOTAL 3891 statements」は本ツリーの実測値と完全に一致しており、
->   監査者は「同じ src・tests 無し」のツリー ＝ ADR-0006 が定義する**配布ツリー**で
->   pytest を実行している。§8.6 と、これに依拠する ADR-0004 / ADR-0011 の判定も誤り。
+>   監査者は「同じ src・tests 無し」のツリー ＝ 検証範囲とリリースゲート が定義する**配布ツリー**で
+>   pytest を実行している。§8.6 と、これに依拠する 定義文書とサブエージェントの設計 / 定義文書とサブエージェントの設計 の判定も誤り。
 > - **F-17**（test-gen が人工 RED を作る）: 対象ファイルの指定が誤り。`commands/test-gen.md` に
 >   "RED" は 1 度も出現せず、むしろ逆を命じている。実体は `agents/tdd-writer.md:95` が
 >   loop-dev のルーティング経由で無条件に効くことだった（欠陥自体は実在するので修正済み）。
@@ -30,15 +30,15 @@
 - agents: 9/9 を起動し、主要モードも実行
 - hooks: 7/7 matcher の基本経路を実行し、4個のPreToolUse hookはsafe/block/malformed/truncated入力でも実行
 - runtime: launcher、memory、validator、harness audit、shell helper、Grok resolver、wheel buildを実行
-- ADR: `docs/adr/0001` から `0012` まで全件を実装・実測・工学原則で再評価
+- ADR: `docs/adr/` の現行決定を実装・実測・工学原則で再評価
 
 最重要の結論は次のとおりである。
 
 1. **Claude Code 2.1.220 では9個のagentが1個も登録されない。** `claude plugin validate --strict` は成功するが、`plugin details` は `Agents (0)` を返し、debug logには9件の `ENOTDIR` が出る。READMEが第一対象とするClaude Code上で、agent依存workflowは成立しない。
-2. **source treeにテストが存在しない。** `pytest -q --cov` は0件、coverage 0%で失敗する。ADR-0006の「42 test files、1473 tests、100% coverage」は現HEADと明確に矛盾する。
+2. **source treeにテストが存在しない。** `pytest -q --cov` は0件、coverage 0%で失敗する。検証範囲とリリースゲートの「42 test files、1473 tests、100% coverage」は現HEADと明確に矛盾する。
 3. **保護hookは回避可能である。** `eval`、二重`sh -c`、複合commandの後続commit、同一Bash内で検査後に生成・stageするcommit、symlink作成で通常tool入力からの回避を再現した。NUL混入はhook評価経路をexit 0へできることをfixtureで確認した。malformed payload中の`rm`はhook単体のfail-openを再現したが、host上で攻撃者がmalformed JSONを生成してcommand実行へ到達できるかは未確認である。
 4. **評価系agentの結果を信頼できないケースがある。** comparatorはprompt injection fixture 5回中2回でA/Bの内容を逆帰属し、劣る出力を勝者にした。skill-genではcandidate labelとartifactの対応付けが崩れ、graderとの整合確認もないまま、空transcriptを含む評価を完了扱いにした。
-5. **ADRは部分的な実装一致を設計妥当性と混同している。** ADR-0006、0011には現在の実測と直接矛盾する保証がある。ADR-0005は決定どおり静的検証へ限定されているが、低コストhost smokeの有効性により費用対効果の判断根拠が弱い。ADR-0007、0009、0010、0012も決定自体の実装を確認できた一方、残存リスクや未計測効果を実証済み保証のように読ませない注意が必要である。
+5. **ADRは部分的な実装一致を設計妥当性と混同している。** 配布物に tests を同梱しない決定と、定義には挙動だけを書く決定には、現在の実測と直接矛盾する保証がある。検証範囲とリリースゲートは決定どおり静的検証へ限定されているが、低コストhost smokeの有効性により費用対効果の判断根拠が弱い。信頼できない入力とプロンプト境界、plugin root の解決、定義文書とサブエージェントの設計、応答の事後圧縮を持たないも決定自体の実装を確認できた一方、残存リスクや未計測効果を実証済み保証のように読ませない注意が必要である。
 
 本監査では、22件の欠陥characterizationと3件の対照・契約確認からなる計25 testを作成し、現HEADで25件すべてPASSさせた。さらにClaude Code agent登録、Node test runner、command/skill workflowで独立した不具合を再現した。
 
@@ -83,7 +83,7 @@
 
 ### 3.1 監査上の脅威モデル
 
-ADR-0002はshell hookを「うっかり事故の抑止」とし、敵対的な同一UID回避をsecurity boundaryの対象外にしている。本監査はその決定を前提化せず、次を区別して評価した。
+シェルコマンド解析の境界はshell hookを「うっかり事故の抑止」とし、敵対的な同一UID回避をsecurity boundaryの対象外にしている。本監査はその決定を前提化せず、次を区別して評価した。
 
 - prompt injectionまたは誤ったagent判断から、通常のBash tool入力として明示的guardを迂回できる場合は、guardが保護を標榜する範囲のHIGH候補とする。
 - 同一UIDで任意ファイルを書けることだけを前提とし、既存のBash権限を超える影響を示さない場合は、権限昇格とせずMEDIUM以下のintegrity/design riskとする。
@@ -296,16 +296,16 @@ Claude Code 2.1.220のloaderは、validatorと公式schemaが許可するagent�
 
 **ADR**
 
-- ADR-0005の静的validator限定という決定には一致するが、「host smoke testはコストに見合わない」という費用対効果の判断は、ローカル1コマンドで中核機能停止を検出できた事実により再検討が必要である。
-- ADR-0010の「9 agentへ統合」はdisk上では成立する。Claudeで0 agentとなる問題は分割基準そのものへの反証ではないが、運用可能性を別release gateで保証する必要がある。
-- ADR-0011のagent定義品質以前に、定義がhostへ登録されていない。
+- 検証範囲とリリースゲートの静的validator限定という決定には一致するが、「host smoke testはコストに見合わない」という費用対効果の判断は、ローカル1コマンドで中核機能停止を検出できた事実により再検討が必要である。
+- 定義文書とサブエージェントの設計の「9 agentへ統合」はdisk上では成立する。Claudeで0 agentとなる問題は分割基準そのものへの反証ではないが、運用可能性を別release gateで保証する必要がある。
+- 定義文書とサブエージェントの設計のagent定義品質以前に、定義がhostへ登録されていない。
 
 ### F-02 [REJECTED / 誤検出] source treeの自動テストが0件
 
 > **2026-08-27 査読: 誤検出。** 本ツリーでの実測は `1774 passed / coverage 100% / exit 0`。
 > 下記「実測」の `TOTAL 3891 statements` は本ツリーの statements 数と完全に一致しており、
 > 同じ src を持ちながら `tests/` だけが無いツリー ＝ 配布ツリーで実行したことを示す。
-> ADR-0006 はこの誤検出の再発を「リスク」節で予言しており、これが 3 回目の現実化にあたる。
+> 検証範囲とリリースゲート はこの誤検出の再発を「リスク」節で予言しており、これが 3 回目の現実化にあたる。
 > 対応は「テストの復元」ではなく再発の構造的防止 — 配布ツリーから `pyproject.toml` を
 > 除外し、`testpaths` / `fail_under` が除去済みの `tests/` を指したまま残らないようにした
 > （`scripts/publish.sh`、回帰テストは `tests/scripts/test_publish_script.py`）。
@@ -316,7 +316,7 @@ Claude Code 2.1.220のloaderは、validatorと公式schemaが許可するagent�
 
 - `plugins/claq/pyproject.toml`
 - 欠落している`plugins/claq/tests/`
-- ADR-0006
+- 検証範囲とリリースゲート
 
 **再現**
 
@@ -340,8 +340,8 @@ FAIL Required test coverage of 100.0% not reached
 **影響**
 
 - hook、memory、validator、launcherの回帰をrelease前に検出できない。
-- ADR-0004、0011が保証根拠として参照するtest fileも存在しない。
-- ADR-0006の1473 tests/100%という記録が現HEADを誤って保証している。
+- 定義文書とサブエージェントの設計が保証根拠として参照するtest fileも存在しない。
+- 検証範囲とリリースゲートの1473 tests/100%という記録が現HEADを誤って保証している。
 
 **修正案**
 
@@ -565,7 +565,7 @@ token解析でcommitを見つけられない場合、生文字列全体へ
 **対象**
 
 - `launcher.py:192-195`
-- ADR-0003
+- 保護フックの失敗方向
 
 **再現test**
 
@@ -592,7 +592,7 @@ SessionEnd handoff等が起動すらされていないのに、hostは受付成�
 
 - `launcher.py:51-90`
 - README対応環境
-- ADR-0001
+- 保護フックの失敗方向
 
 **再現test**
 
@@ -621,7 +621,7 @@ READMEに記載済みであり隠れた実装バグではない。ただし、�
 - `runtime/env-template.sh`
 - `runtime/claq-helpers.sh:10-18`
 - `lib/env_pointer.py`
-- ADR-0008、0009
+- plugin root の解決
 
 **実測**
 
@@ -645,7 +645,7 @@ READMEに記載済みであり隠れた実装バグではない。ただし、�
 
 同一UIDでpointerとfake helperの双方を書ける主体は、後続helper呼び出しでsourceされるcodeを選択できる。ただし、このfixtureは権限昇格、保護hook無効化、別UIDからの侵害を示していない。対象主体は既に同一UIDでファイル作成とBash実行が可能であるため、確認できた影響は永続的なcode-selectionとroot取り違えであり、HIGHの任意コード実行脆弱性とは評価しない。
 
-ADR-0009が述べるとおり、owner/mode/local manifest hashは同一UID攻撃者がfake rootと一緒に偽造でき、真正性の根拠にはならない。一方、LLM agentを同一UID脅威モデルから除外する製品判断が妥当か、また運用上の誤設定・権限崩れをどこまで防御するかは別途明示が必要である。
+plugin root の解決が述べるとおり、owner/mode/local manifest hashは同一UID攻撃者がfake rootと一緒に偽造でき、真正性の根拠にはならない。一方、LLM agentを同一UID脅威モデルから除外する製品判断が妥当か、また運用上の誤設定・権限崩れをどこまで防御するかは別途明示が必要である。
 
 **修正案**
 
@@ -997,7 +997,7 @@ Readinessは仕様どおり工程の存在だけを採点し、結果品質を�
 **対象**
 
 - `mem/cli.py:_handle_promote`
-- ADR-0007
+- 信頼できない入力とプロンプト境界
 
 **実測**
 
@@ -1005,7 +1005,7 @@ generic learnが`source=agent/status=pending`へ固定される点は正しく�
 
 **影響**
 
-agentが作成した知識を自らactive化し、将来のSessionStartへ自動注入できる。単発の同一UID書込みではなく、以後のagent contextへ自動的に入る永続的なtrust crossingである。これはADR-0007が明示的に受容した残存リスクであり実装逸脱ではないが、受容判断そのものは再検討すべきである。CLIや文書の「人間承認のみ」という表現は技術的保証ではなく、現実にはagentから到達可能である。
+agentが作成した知識を自らactive化し、将来のSessionStartへ自動注入できる。単発の同一UID書込みではなく、以後のagent contextへ自動的に入る永続的なtrust crossingである。これは信頼できない入力とプロンプト境界が明示的に受容した残存リスクであり実装逸脱ではないが、受容判断そのものは再検討すべきである。CLIや文書の「人間承認のみ」という表現は技術的保証ではなく、現実にはagentから到達可能である。
 
 **修正案**
 
@@ -1207,7 +1207,7 @@ log --oneline -n 200 --name-only
 **対象**
 
 - `README.md:393,408`
-- ADR-0007
+- 信頼できない入力とプロンプト境界
 - `runtime/claq-helpers.sh`
 - `mem/cli.py`
 
@@ -1294,38 +1294,38 @@ READMEの公式配布経路はClaude marketplaceであり、pip/wheelとは書�
 
 `SUPPORTED`は「狭い決定がコードに反映されている」という意味であり、妥当性を保証しない。
 
-| ADR | 分類 | 結論 |
+| 決定 | 分類 | 結論 |
 |---|---|---|
-| 0001 | SUPPORTED / CONTRADICTED / QUESTIONABLE | fail-open方針は実装済みだが、対象確定後の列挙失敗やNUL偽装までallowし、境界規則が崩れている |
-| 0002 | SUPPORTED / CONTRADICTED / QUESTIONABLE | tokenizer方針は実装済みだが、false positive優先と敵対的false negative受容が自己矛盾 |
-| 0003 | CONTRADICTED / QUESTIONABLE | 子の結果を待たない点は一致するが、起動受付失敗までexit 0 |
-| 0004 | SUPPORTED / STALE / QUESTIONABLE | reviewerのBash保持は一致。最小権限を過小評価し、根拠testも消失 |
-| 0005 | SUPPORTED / QUESTIONABLE | 静的validator限定という決定は実装どおりだが、Claude Agents 0により費用対効果の判断根拠が弱い |
-| 0006 | SUPPORTED / CONTRADICTED / STALE | tests非同梱は設定どおりだが、source tests自体が消失。1473 tests/100%は現HEADと矛盾 |
-| 0007 | SUPPORTED / QUESTIONABLE | payload active化防止と既知のpromote残存リスクはADRどおり。human-only表現は技術保証でなく、scope等は別欠陥 |
-| 0008 | SUPPORTED / CONTRADICTED / QUESTIONABLE | pointer構造は実装済み。helper真正性、ambient override、POSIX互換性、Grok選択が不成立 |
-| 0009 | SUPPORTED / QUESTIONABLE | owner/mode/hashで同一UIDを認証できない判断は妥当。残るcode-selectionとLLM agentの扱いは製品脅威モデルとして要明示 |
-| 0010 | SUPPORTED / QUESTIONABLE / UNTESTABLE | 13→9統合と材料基準は実装済み。Claude登録・plan dispatchは別契約の欠陥で、統合効果は未計測 |
-| 0011 | SUPPORTED / CONTRADICTED / STALE / QUESTIONABLE | 行動契約は一部改善したが、tests/CI不在、comparator/skill-gen/runtime登録で破綻 |
-| 0012 | SUPPORTED / UNTESTABLE | slim撤去と58点化は実装済み。安全性・token効果は未計測で、F-19のaudit schema不具合は別論点 |
+| 検査対象確定前は fail-open | SUPPORTED / CONTRADICTED / QUESTIONABLE | fail-open方針は実装済みだが、対象確定後の列挙失敗やNUL偽装までallowし、境界規則が崩れている |
+| 誤検出を誤通過より選ぶ | SUPPORTED / CONTRADICTED / QUESTIONABLE | tokenizer方針は実装済みだが、false positive優先と敵対的false negative受容が自己矛盾 |
+| `--bg` の親 exit は起動受付 | CONTRADICTED / QUESTIONABLE | 子の結果を待たない点は一致するが、起動受付失敗までexit 0 |
+| reviewer は Bash を保持する | SUPPORTED / STALE / QUESTIONABLE | reviewerのBash保持は一致。最小権限を過小評価し、根拠testも消失 |
+| CI は静的 validator に限定 | SUPPORTED / QUESTIONABLE | 静的validator限定という決定は実装どおりだが、Claude Agents 0により費用対効果の判断根拠が弱い |
+| 配布物に tests を同梱しない | SUPPORTED / CONTRADICTED / STALE | tests非同梱は設定どおりだが、source tests自体が消失。1473 tests/100%は現HEADと矛盾 |
+| active 化権限を payload から剥奪 | SUPPORTED / QUESTIONABLE | payload active化防止と既知のpromote残存リスクはADRどおり。human-only表現は技術保証でなく、scope等は別欠陥 |
+| plugin root は env.sh で解決 | SUPPORTED / CONTRADICTED / QUESTIONABLE | pointer構造は実装済み。helper真正性、ambient override、POSIX互換性、Grok選択が不成立 |
+| owner/mode 検証は行わない | SUPPORTED / QUESTIONABLE | owner/mode/hashで同一UIDを認証できない判断は妥当。残るcode-selectionとLLM agentの扱いは製品脅威モデルとして要明示 |
+| サブエージェントは材料で分割 | SUPPORTED / QUESTIONABLE / UNTESTABLE | 13→9統合と材料基準は実装済み。Claude登録・plan dispatchは別契約の欠陥で、統合効果は未計測 |
+| 定義には挙動だけを書く | SUPPORTED / CONTRADICTED / STALE / QUESTIONABLE | 行動契約は一部改善したが、tests/CI不在、comparator/skill-gen/runtime登録で破綻 |
+| 応答の事後圧縮を持たない | SUPPORTED / UNTESTABLE | slim撤去と58点化は実装済み。安全性・token効果は未計測で、F-19のaudit schema不具合は別論点 |
 
-### 8.1 ADR-0001
+### 8.1 保護フックの失敗方向
 
 「検査対象確定前はfail-open、確定後はfail-closed」という二分法は、対象列挙失敗、repo root不明、binary判定、古いPythonを一意に分類できない。実装はcommit対象確定後のgit失敗やNUL混入もallowする。security enforcementとadvisory hookを分離すべきである。
 
-### 8.2 ADR-0002
+### 8.2 シェルコマンド解析の境界
 
 題名はfalse positive優先だが、本文は`eval`、多段shell、変数展開等のfalse negativeを明示受容する。実測では引用promptを拒否するfalse positiveと、実行可能なbypassを通すfalse negativeが同時に存在した。誤検出率・見逃し率・対象構文集合をfixtureで管理すべきである。
 
-### 8.3 ADR-0003
+### 8.3 保護フックの失敗方向
 
 「親exitは起動受付成否」という整理は妥当だが、実装は受付拒否でも0である。ADRの決定と実装が直接矛盾する。子のexit codeを同期返却する必要はないが、受付失敗とresult fileは必要である。
 
-### 8.4 ADR-0004
+### 8.4 定義文書とサブエージェントの設計
 
 reviewerがtestを独立再実行する要件は妥当である。しかし「Bashを残すしかない」は偽の二択であり、固定argvのtest runner、read-only mount、network禁止等を十分検討していない。ADRが参照する権限testも現ツリーから消失している。
 
-### 8.5 ADR-0005
+### 8.5 検証範囲とリリースゲート
 
 静的validatorへ限定しhost smokeを自動化しないという決定は実装どおりであり、決定への直接矛盾ではない。ただし、ADRは実install/update全体の再現コストを中心に比較しており、component inventoryだけを確認する低コスト案を十分評価していない。今回、次のローカルsmokeで第一対象hostの致命的登録障害を検出した。
 
@@ -1335,38 +1335,38 @@ claude --plugin-dir plugins/claq plugin details claq@inline
 
 完全なinstall emulationをしなくても、component inventoryとdebug logをrelease gateにできる。Agents 0を長期間見逃した実害に照らすと、ADRの費用対効果評価は再検討が必要である。
 
-### 8.6 ADR-0006
+### 8.6 検証範囲とリリースゲート
 
 > **2026-08-27 査読: 本節の判定は誤り。** 「現状は後者（source tree に tests がない）」は
 > 事実に反する。正しい判定は「決定は SUPPORTED、**リスク節が 3 回目の現実化**、
-> 陳腐化しているのは ADR 本文の件数だけ」。対応として ADR-0006 から件数を削除し
+> 陳腐化しているのは ADR 本文の件数だけ」。対応として 検証範囲とリリースゲート から件数を削除し
 > （書けば必ず陳腐化するため）、リスク節へ 3 回の再発と機械的対策を追記した。
-> なお本節に依拠する ADR-0004 の「根拠 test も消失」と ADR-0011 の「tests/CI 不在」も
+> なお本節に依拠する 定義文書とサブエージェントの設計 の「根拠 test も消失」と 定義文書とサブエージェントの設計 の「tests/CI 不在」も
 > 同じく誤り（`tests/test_md_references.py::test_security_auditor_has_no_bash_access` は現存）。
 
 「配布artifactからtestsを除く」と「source treeにtestsがない」は別問題である。現状は後者であり、ADRの保証値は陳腐化している。tests非同梱を認める条件として、source CI greenとartifact smoke greenを明記すべきである。
 
-### 8.7 ADR-0007
+### 8.7 信頼できない入力とプロンプト境界
 
 generic payloadから`active`を剥奪した狭い対策は有効である。`promote`をagentも実行でき、human approvalを技術的に強制できない点も、ADRは残存リスクとして明示的に受容している。このため実装との矛盾ではない。ただし「人間承認のみ」という表現は運用上の想定に留まり、保証ではない。scope flagのsilent ignore、redaction policy、DB symlink、key衝突はこの決定の反証ではなく、memory subsystemの別欠陥として扱うべきである。
 
-### 8.8 ADR-0008
+### 8.8 plugin root の解決
 
 pointer fileをshell codeとしてsourceしないことは正しい。しかしpointerが選んだroot配下のhelperをsourceする以上、pointerは間接的なcode selectionである。ambient `CLAUDE_PLUGIN_ROOT`が検証済みrootより優先される点も、ADRの「verified root」主張を崩す。
 
-### 8.9 ADR-0009
+### 8.9 plugin root の解決
 
 同一UID攻撃者はfake root、helper、local manifest/hashを同時に作れるため、owner/mode/hashだけでは真正性を保証できないというADRの主論拠は正しい。今回のfixtureもcode-selectionを確認したが、権限昇格や保護hook無効化は示していない。一方、owner/type/symlink検査は別UID、権限崩れ、誤設定へのdefense-in-depthにはなる。また、Bashを持つLLM agentを同一UID脅威モデルから除外し続けるかは技術的必然ではなく製品判断であり、保証範囲を明示すべきである。真正性を要求するなら同一UIDが書き換えられない外部trust anchorまたはsandboxが必要になる。
 
-### 8.10 ADR-0010
+### 8.10 定義文書とサブエージェントの設計
 
 13→9統合と「渡す材料」で分ける基準はdisk上の定義へ反映されており、Claude Code上のAgents 0や`/plan`の未dispatchはこのADRの決定違反ではなく、manifest/runtimeとorchestrationの別欠陥である。一方、agent数削減、token削減、成功率改善の因果は測定されていない。分割基準には材料差だけでなく、独立検証、failure containment、権限差、出力schemaも併記すべきである。
 
-### 8.11 ADR-0011
+### 8.11 定義文書とサブエージェントの設計
 
 散文へ「必須」「盲検」「完全なJSON」と書くことと、runtime contractを強制することは別である。comparatorのA/B逆帰属、skill-genのartifact mapping破綻、planner未dispatch、test-genの人工REDは、散文契約だけでは不足することを示す。JSON Schema、artifact hash、dispatch receipt、provenanceを機械検証すべきである。
 
-### 8.12 ADR-0012
+### 8.12 定義文書とサブエージェントの設計
 
 slim撤去、`outputStyles`削除、repo満点65から58への変更は実装と一致する。過去5回の破損修正は撤去判断の定性的根拠になるが、ADR自身が認めるとおりtoken増減と同一タスクA/Bは未計測であり、その効果はUNTESTABLEのままである。F-19の正規化点と生配点の混在、OpenCode、20 skills、60 tests等のrubric問題はharness audit全体の別欠陥であり、slim撤去決定への反証ではない。
 
@@ -1393,7 +1393,7 @@ slim撤去、`outputStyles`削除、repo満点65から58への変更は実装と
 > 代わりに、配布ツリーでの誤検出が構造的に発生しないよう `publish.sh` の除外リストへ
 > `pyproject.toml` を追加した。項目 1 は `plugin.json` から `agents` を外して解消
 > （`["./agents/"]` 形式は manifest schema が `agents: Invalid input` で拒否するため
-> 採れず、auto-discovery だけが唯一ホストへ 9 体を登録できる）。項目 3 は ADR-0014 として
+> 採れず、auto-discovery だけが唯一ホストへ 9 体を登録できる）。項目 3 は 検証範囲とリリースゲート として
 > 決定し、CLI 非依存の静的ゲートを併置した。
 
 1. F-01を修正し、Claude CodeでAgents 9を確認する。

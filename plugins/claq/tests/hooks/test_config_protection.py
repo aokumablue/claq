@@ -389,7 +389,7 @@ def _run_hook(payload: dict, monkeypatch: pytest.MonkeyPatch) -> int:
 
 
 class TestProtectionHookOwnConfig:
-    """保護フック自身の設定を守る判定（ADR-0024 代替案5 の採択分）。
+    """保護フック自身の設定を守る判定（docs/adr/hook-failure-direction.md が定める `config_protection` の対象）。
 
     `config_protection` は lint 設定を「エージェントが自分の作業を通すために
     ガードレール側を緩める」経路として守る。同じ動機で最も効く緩め方

@@ -10,7 +10,7 @@ tools: Read, Grep, Glob
 
 ## OWASP Top 10:2025
 
-本節は網羅性の担保として意図的に置いている（削除案の棄却は claq リポジトリの `docs/adr/05-definition-and-subagent-design.md` 代替案 5、版を見出しへ書く理由は `docs/adr/06-staleness-detection.md`）。
+本節は網羅性の担保として意図的に置いている（列挙削減を棄却した判断は claq リポジトリの `docs/adr/definition-and-subagent-design.md`、版を見出しへ書く理由は `docs/adr/staleness-detection.md`）。
 
 1. A01 Broken Access Control: 全ルート認可確認・CORS 設定・SSRF（2025 で本分類へ統合）
 2. A02 Security Misconfiguration: デフォルト認証変更・本番 debug 無効・セキュリティヘッダー・XXE（外部実体無効化）
@@ -73,7 +73,7 @@ tools: Read, Grep, Glob
 
   `未計測` を severity へ丸めてはならない。severity は影響の大きさを表す軸であって、
   確からしさを表す軸ではない。両者を 1 つの数字へ潰すと、**測れば重大だったかもしれない
-  指摘が低優先として黙って消える**。ADR-0004 により `tools` に Bash が無いのは意図した
+  指摘が低優先として黙って消える**。docs/adr/definition-and-subagent-design.md により `tools` に Bash が無いのは意図した
   設計であり、測れないことは欠陥ではなくこの agent の構造上の帰結である。**測る手段を
   持つのは親**なので、親が「まず何を測るべきか」を判断できる形で返すことが職務にあたる。
 
@@ -97,7 +97,7 @@ fail-open が**意図された設計**である場合（ADR が明示的に受�
 
 ## CRITICAL発見時（READ-ONLY: 提案のみ。ファイル変更・コマンド実行はしない）
 
-提案はテキストで返す（reviewer との権限非対称の経緯は claq リポジトリの `docs/adr/05-definition-and-subagent-design.md`）。
+提案はテキストで返す（reviewer との権限非対称の経緯は claq リポジトリの `docs/adr/definition-and-subagent-design.md`）。
 
 1. 安全コード例の提示（テキストのみ）
 2. 修正方針の提案（実装は別フェーズ: /bugfix / /refactor へ委譲）

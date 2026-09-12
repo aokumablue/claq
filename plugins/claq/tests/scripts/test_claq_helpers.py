@@ -124,7 +124,7 @@ def test_claq_plugin_root_ignores_ambient_claude_plugin_root(tmp_path: Path) -> 
 
     helper 本体は env.sh が pointer から選んだ root から source されている。
     返す root だけ環境変数で差し替えると「実行しているコードは A なのに自称は B」
-    という自己不整合になり、ADR-0008 の verified root という主張が崩れる。
+    という自己不整合になり、docs/adr/plugin-root-resolution.md の verified root という主張が崩れる。
     どの root を source するかを環境から決めるのは構わないが、source 後の
     自己申告を上書きしてはならない。
     """
@@ -326,7 +326,7 @@ def test_claq_mem_learn_records_a_pending_agent_card(
     assert card is not None
     assert card.title == title
     assert card.body == body
-    # ADR-0007 / H-01: helper 経由のカードは例外なく agent / pending。
+    # docs/adr/untrusted-input-prompt-boundary.md / H-01: helper 経由のカードは例外なく agent / pending。
     assert (card.source, card.status) == ("agent", "pending")
 
 

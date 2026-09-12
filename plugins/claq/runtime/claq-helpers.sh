@@ -29,7 +29,7 @@ fi
 # Deliberately does NOT consult the ambient CLAUDE_PLUGIN_ROOT. The helper body
 # running here came from whichever root env.sh selected; reporting a different
 # root because an environment variable says so makes the two disagree ("the code
-# is A, but it calls itself B"). ADR-0008 claims a verified root, and an ambient
+# is A, but it calls itself B"). docs/adr/plugin-root-resolution.md claims a verified root, and an ambient
 # override would contradict that claim. Using the environment to decide *which*
 # root to source is fine; overriding the answer after the fact is not.
 #

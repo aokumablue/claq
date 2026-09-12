@@ -267,7 +267,7 @@ def _effective_basename(file_path: str) -> str:
     保護対象判定を実際の書込み先ファイルに対して行う。
 
     解決不能（壊れた・循環した symlink 等）な場合は raw path 自体の
-    basename にフォールバックする（ADR-0001 の inspection-failure fail-open
+    basename にフォールバックする（docs/adr/hook-failure-direction.md の inspection-failure fail-open
     と、直接 path 指定の保護を両立させるため。解決不能を deny に倒すと
     symlink を一切使わない正当な編集まで巻き込む）。
 

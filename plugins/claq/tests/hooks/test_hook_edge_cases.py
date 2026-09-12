@@ -228,7 +228,7 @@ def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(
 ) -> None:
     """バイナリ判定（先頭に NUL を含む）は lint だけを抑制し、secret scan は続ける。
 
-    ADR-0013: 先頭に NUL を 1 バイト混ぜてバイナリ判定させるだけで secret 検査を
+    docs/adr/shell-analysis-boundary.md: 先頭に NUL を 1 バイト混ぜてバイナリ判定させるだけで secret 検査を
     まるごと回避できる状態は許容しない。行分割が意味を持たないため、印字可能
     文字列を抽出して同じパターンを当てる。
     """
@@ -915,7 +915,7 @@ def test_pre_bash_commit_quality_evaluate_logs_and_recovers_from_parser_errors(m
 def test_pre_bash_commit_quality_main_denies_when_stdin_unreadable(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """stdin を読めなかった場合は commit 判定不能として deny する（ADR-0019）。
+    """stdin を読めなかった場合は commit 判定不能として deny する（docs/adr/hook-failure-direction.md）。
 
     以前は「読めない」を「入力なし」へ正規化して exit 0 にしていたため、
     Windows のパイプで allow と deny が同じ exit 0 になっていた（P1-004）。
@@ -1163,7 +1163,7 @@ def test_is_git_commit_command_trusts_clean_tokenization() -> None:
 def test_is_git_commit_command_regex_fallback_applies_when_tokenization_fails() -> None:
     """クォート不整合で解析できなかった入力にだけ regex フォールバックが効くこと。
 
-    解析できない構文に対しては ADR-0002 どおり過剰検出側へ倒す。
+    解析できない構文に対しては docs/adr/shell-analysis-boundary.md どおり過剰検出側へ倒す。
     """
     import claq.hooks.pre_bash_commit_quality as pbcq
 
@@ -1567,7 +1567,7 @@ def test_get_unstaged_modified_files_returns_none_when_git_fails_with_head(
     """HEAD はあるのに diff が失敗した場合は None を返すこと（fail-closed）。
 
     「対象ファイルなし」と「検査できなかった」を区別しないと、実際にコミット
-    される未ステージ変更を 1 件も検査せずに通してしまう（ADR-0001）。
+    される未ステージ変更を 1 件も検査せずに通してしまう（docs/adr/hook-failure-direction.md）。
     """
     monkeypatch.setattr(
         pre_bash_commit_quality.subprocess,

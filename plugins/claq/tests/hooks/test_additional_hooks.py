@@ -500,7 +500,7 @@ class TestBlockNoVerifyScansAllContainerKeys:
         """先頭キーが無害でも後続キーのバイパスを検出する。
 
         先勝ちで 1 キーだけ見る実装では、無害な tool_input と悪意ある toolInput が
-        同居する payload を素通りさせていた。ADR-0002 は本フックの検出境界を
+        同居する payload を素通りさせていた。docs/adr/shell-analysis-boundary.md は本フックの検出境界を
         「誤検出を誤通過より選ぶ」と定めており、config_protection は既に全キー走査。
         """
         code = self._run(

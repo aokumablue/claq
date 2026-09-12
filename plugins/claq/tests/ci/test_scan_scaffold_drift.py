@@ -182,7 +182,7 @@ class TestScan:
         （``strip_tags``）は通さない。無害化は細工を検出すると ``&`` と ``<`` を
         全て倒す／本文を ``[REDACTED]`` へ倒すため、そのメッセージ内の未知タグが
         1 つも見えなくなる（実測）。診断が最も見たいのはその種のメッセージで、
-        ここで見落とすと ADR-0016 の「素通り」がそのまま残る。
+        ここで見落とすと docs/adr/staleness-detection.md の「素通り」がそのまま残る。
         """
         path = _write_transcript(tmp_path, "e.jsonl", ["<peer-broadcast>x</peer-broadcast> " + companion])
 

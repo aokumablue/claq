@@ -1031,7 +1031,7 @@ def test_e2e_charts_stay_legible_on_small_screens() -> None:
     assert ".chart-scroll {\n  overflow-x: auto;" in css
     # 具体的な px は固定しない。値の妥当性は `_validate_axis_text_scale` が
     # viewBox 幅との比で判定するので、ここは「下限が宣言されている」ことだけ見る
-    # （ADR-0023: 検知器のある固定値は二重に書かない）。
+    # （docs/adr/staleness-detection.md: 検知器のある固定値は二重に書かない）。
     assert re.search(r"\.chart \{[^}]*min-inline-size:\s*\d+px", css, re.DOTALL)
 
 

@@ -12,7 +12,7 @@
 値は ``CLAQ_LEARN_<FIELD>`` 環境変数で受け取る（引数に載せるとシェルの
 語分割・展開を再び通ることになるため）。空文字列のフィールドは出力しない
 （`mem.cli learn` 側の既定値を活かす）。``source``/``status`` は扱わない
-——ADR-0007 のとおり呼び出し元にこの 2 つを指定する権限は無い。
+——docs/adr/untrusted-input-prompt-boundary.md のとおり呼び出し元にこの 2 つを指定する権限は無い。
 """
 
 from __future__ import annotations

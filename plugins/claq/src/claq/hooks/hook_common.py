@@ -44,7 +44,7 @@ MAX_STDIN_BYTES = 1024 * 1024
 #
 # 上限超過は「検査しきれなかったので通す」ではなく BLOCKED で返す。
 # 同じ扱いを stdin 上限超過に対して既に採っており（`_TRUNCATED_INPUT_MESSAGE`）、
-# ADR-0002 が本フック群の検出境界を「誤検出を誤通過より選ぶ」と定めている。
+# docs/adr/shell-analysis-boundary.md が本フック群の検出境界を「誤検出を誤通過より選ぶ」と定めている。
 # 実測 8,000 トークンで 1.66 秒なので 5,000 は timeout に対し 20 倍以上の余裕が
 # あり、正当なシェルコマンドがこの規模になることは実務上ない。
 MAX_COMMAND_TOKENS = 5000
@@ -86,7 +86,7 @@ SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash"})
 # 実行ファイルではないが、渡されたテキストを現在のシェルで実行するビルトイン。
 # ``. /dev/stdin <<'EOF'`` / ``source /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``
 # はいずれも heredoc 本文をコマンドとして実行するため、本文をデータとして
-# 剥がすと ADR-0017 が「除去しない条件 1」で禁じている誤通過になる（実測:
+# 剥がすと docs/adr/shell-analysis-boundary.md が「除去しない条件 1」で禁じている誤通過になる（実測:
 # 本文に `git commit --no-verify` を置くと exit 0 だった）。判定軸は
 # 「本文が実行されうるか」であって「実行ファイルか」ではないので、
 # `SHELL_WRAPPER_EXECUTABLES` とは別集合として持ち、両方を見る。
@@ -141,7 +141,7 @@ def extract_shell_wrapper_command(segment: list[str]) -> str | None:
     `block_no_verify` と `bash_config_protection` が共有する。片方だけがラッパー
     再帰を持つと「Write なら止まるが Bash なら通る」と同型の非対称（A-06 で
     本モジュール群を分けた理由そのもの）が再発するため、単一情報源にする。
-    再帰の段数は呼び出し側が決める（ADR-0002: 2 段以上のネストは非目標）。
+    再帰の段数は呼び出し側が決める（docs/adr/shell-analysis-boundary.md: 2 段以上のネストは非目標）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
@@ -169,7 +169,7 @@ def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], st
     コメント内・クォート内・``\\`` エスケープ後の ``<`` は heredoc を開始しない。
     これらを演算子として採ると、実際には**実行される**後続行が「本文」として
     捨てられる（実測: ``# <<EOF`` 改行 ``git commit --no-verify`` 改行 ``EOF`` で
-    保護フック 3 種が揃って exit 0 になった）。ADR-0017 が本文剥がしを正当化した
+    保護フック 3 種が揃って exit 0 になった）。docs/adr/shell-analysis-boundary.md が本文剥がしを正当化した
     前提「本文範囲は演算子・区切り語・終端行だけで決まる」は、そもそも heredoc が
     開始しないこの形では成立しない。
 
@@ -276,7 +276,7 @@ def _line_keeps_heredoc_bodies(line: str) -> bool:
     本文が実行されうる形（シェル起動・本文を実行するビルトイン・パイプや
     継続で次行へ繋がる形）はすべて残す側へ倒す。``bash <<'EOF'`` や
     ``. /dev/stdin <<'EOF'`` の本文は実際に実行されるため、データとして
-    剥がすと ADR-0002 が禁じる誤通過になる（実測で確認済み）。
+    剥がすと docs/adr/shell-analysis-boundary.md が禁じる誤通過になる（実測で確認済み）。
 
     Args:
         line: heredoc 演算子を含む物理行。
@@ -334,7 +334,7 @@ def strip_data_heredoc_bodies(command: str) -> str:
     heredoc 本文はどのシェルでもコマンドの語彙に入らないため、そのまま
     トークン化すると散文が実行命令として読まれる（実測: ``cat > note.md
     <<'EOF'`` の本文に ``git commit --no-verify`` と書いただけで 3 つの保護
-    フックが exit 2 になった）。ADR-0002 の「誤検出 > 誤通過」は解析できない
+    フックが exit 2 になった）。docs/adr/shell-analysis-boundary.md の「誤検出 > 誤通過」は解析できない
     構文についての規定であり、heredoc の本文範囲は演算子・区切り語・終端行
     だけで決まる環境非依存の構文なので、この規定は本 FP を正当化しない。
 
@@ -349,7 +349,7 @@ def strip_data_heredoc_bodies(command: str) -> str:
        ``\\`` エスケープ後）。この場合 heredoc は開始せず、後続行は**実行される
        コマンド**なので、本文として剥がすと保護フックが素通りする（実測:
        ``# <<EOF`` 改行 ``git commit --no-verify`` 改行 ``EOF`` で 3 フックが
-       揃って exit 0）。ADR-0017 の前提「本文範囲は演算子・区切り語・終端行だけ
+       揃って exit 0）。docs/adr/shell-analysis-boundary.md の前提「本文範囲は演算子・区切り語・終端行だけ
        で決まる」はここでは成立しない。判定は `_operator_start_offsets` が持つ
        クォート／コメント状態で行い、状態は**非本文行だけ**を鎖にして更新する
        （本文行・終端行はシェルの語彙ではないため）。
@@ -589,7 +589,7 @@ _WINDOWS_SEPARATOR_BACKSLASH_RE = re.compile(r"\\(?=[^\s/])")
 # 実際に削除される。``git commit -m fix\\ --no-verify`` も同様に ``--no-verify``
 # が独立した引数になり、フックがバイパスされる。したがってこの形は
 # 「POSIX の誤検出」ではなく「Windows の真陽性」であり、検出side へ倒す
-# （ADR-0002: 誤検出 > 誤通過）。``/`` へ置換するのではなく除去するのは、
+# （docs/adr/shell-analysis-boundary.md: 誤検出 > 誤通過）。``/`` へ置換するのではなく除去するのは、
 # 実在しない ``my/`` のようなパスを作らないため。
 _WINDOWS_ESCAPED_SPACE_RE = re.compile(r"\\(?=[ \t])")
 
@@ -607,7 +607,7 @@ def command_dialect_variants(command: str) -> tuple[str, ...]:
 
     どちらの方言で解釈されるかは実行前には決められない（hook の入力に
     シェル種別は載らない）。そこで**両方の読み方で検査し、どちらかが
-    引っ掛かれば deny する**。ADR-0002 は保護 hook の検出境界を
+    引っ掛かれば deny する**。docs/adr/shell-analysis-boundary.md は保護 hook の検出境界を
     「誤検出を誤通過より選ぶ」と定めており、この非対称はその規定の
     範囲内である。
 
@@ -617,14 +617,14 @@ def command_dialect_variants(command: str) -> tuple[str, ...]:
     - **空白 / タブ** → ``\\`` を除去（``my\\ ruff.toml`` → ``my ruff.toml``）。
       PowerShell / cmd に単語結合のエスケープは無いので、この形は Windows では
       2 引数であり ``ruff.toml`` が実際に書き込み対象になる。POSIX 読みでは
-      1 トークンの非保護ファイル名なので両立しないが、ADR-0002 に従い検出側へ
+      1 トークンの非保護ファイル名なので両立しないが、docs/adr/shell-analysis-boundary.md に従い検出側へ
       倒す。``/`` へ置換せず除去するのは、実在しない ``my/`` を作らないため。
     - **``/``** → 変換しない。``\\/`` は sed スクリプト等の POSIX エスケープで、
       Windows のパス区切りには現れない。POSIX 読みでも Windows 読みでも ``/`` は
       区切りのまま残るので、除外しても検出力は落ちない
       （``sed -i 's/\\.git\\/hooks\\/pre-commit//' notes.md`` の誤検出はこれで消える）。
 
-    残る誤検出はある（例: ``rm a\\.eslintrc``）。これは ADR-0002 が受容する側の
+    残る誤検出はある（例: ``rm a\\.eslintrc``）。これは docs/adr/shell-analysis-boundary.md が受容する側の
     誤りであり、`tests/hooks/test_windows_shell_dialect.py` に characterization
     test として固定してある。
 
@@ -808,7 +808,7 @@ class StdinUnavailableError(RuntimeError):
     ``git commit --no-verify`` と ``git status`` が揃って exit 0 になった。
     release-verify 2026-09-03 の P1-004）。呼び出し側にこの 2 つを取り違え
     させないため、後者だけを例外として区別する（詳細は
-    ``docs/adr/01-hook-failure-direction.md``）。
+    ``docs/adr/hook-failure-direction.md``）。
     """
 
 
@@ -1034,7 +1034,7 @@ def read_raw_stdin_with_truncation(max_bytes: int = MAX_STDIN_BYTES) -> tuple[st
     読む対象が無い場合（tty 起動・``sys.stdin`` が None・即 EOF）は
     ``("", False)`` を返します。読み取り自体に失敗した場合は
     `StdinUnavailableError` を送出します — 呼び出し側の保護 hook は
-    これを捕捉して deny に倒すこと（ADR-0019）。
+    これを捕捉して deny に倒すこと（docs/adr/hook-failure-direction.md）。
 
     Args:
         max_bytes: 読み取る最大バイト数です。
@@ -1201,7 +1201,7 @@ def normalize_executable_name(token: str) -> str:
     いずれも `git` へ畳みます。大小を無視するのは、macOS 既定の APFS と Windows の
     NTFS が既定で大小を区別せず（``CP foo bar`` は実 `cp` を起動し、``RM`` は実 `rm`
     を起動する）、PowerShell が cmdlet 名を大小無視で解決するためです。Linux では
-    `RM` が `rm` に一致する誤検出側へ倒れますが、ADR-0002 の範囲内です。
+    `RM` が `rm` に一致する誤検出側へ倒れますが、docs/adr/shell-analysis-boundary.md の範囲内です。
 
     保護 hook の実行名照合は**この 1 関数だけ**を通します。かつて
     `is_git_executable_token`（`hook_common`）・`bash_config_protection._command_name`・
@@ -1766,7 +1766,7 @@ def emit_block_output(reason: str) -> int:
     起きるため、最も守りたい局面でちょうど外れる。
 
     `pre_bash_commit_quality` は各呼び出し側で同じ guard を持っていたが、
-    残る 3 フックには無く ADR-0001 が成果に挙げる「4 フックが同じ exit 契約に
+    残る 3 フックには無く docs/adr/hook-failure-direction.md が成果に挙げる「4 フックが同じ exit 契約に
     揃う」がこの経路で成立していなかった。呼び出し側 12 箇所へ複製するのでは
     なく、出力の唯一の口である本関数の内側へ集約する。
 

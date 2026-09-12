@@ -10,7 +10,7 @@
 シークレット検出はテキストファイルであれば nosec・ファイルサイズに関わらず
 全体を走査します（サイズによる打ち切りは行いません。A-02 対応）。バイナリ
 判定されたファイルも走査対象で、`_extract_printable_runs` が抽出した印字可能
-文字列を擬似的な行として同じパターンを当てます（ADR-0013。以前は secret scan
+文字列を擬似的な行として同じパターンを当てます（docs/adr/shell-analysis-boundary.md。以前は secret scan
 自体をスキップしており、先頭に NUL を 1 バイト混ぜるだけで検査を回避できた）。
 走査量に上限を設けないと
 `pre_bash_commit_quality` の hook timeout（30秒）に達し、host がフックを
@@ -291,7 +291,7 @@ def _is_binary_content(content: str) -> bool:
     （バイナリ判定を悪用して secret 検査を回避できないようにするためです）。
     バイナリ判定された内容に対しては、行分割の代わりに
     `_extract_printable_runs` で印字可能文字列を抽出して同じ secret パターンを
-    適用します（ADR-0013）。
+    適用します（docs/adr/shell-analysis-boundary.md）。
 
     Args:
         content: 判定対象のデコード済み文字列です。
@@ -432,7 +432,7 @@ def should_scan_secrets(file_path: str) -> bool:
 
     ファイルサイズによる除外は行いません（A-02 対応）。バイナリ判定による
     除外も行いません —— バイナリは `find_file_issues` 側で印字可能文字列を
-    抽出した上で同じパターンを当てます（ADR-0013）。
+    抽出した上で同じパターンを当てます（docs/adr/shell-analysis-boundary.md）。
 
     Args:
         file_path: 判定対象のファイルパスです。
@@ -563,7 +563,7 @@ def _scan_secret_issues(
 
     バイナリ判定されたファイルでも呼び出し元（`find_file_issues`）はこの関数を
     呼びます。その場合は行分割の代わりに `_extract_printable_runs` の抽出結果が
-    擬似的な行として渡されます（ADR-0013）。テキストファイルは `# nosec`・
+    擬似的な行として渡されます（docs/adr/shell-analysis-boundary.md）。テキストファイルは `# nosec`・
     ファイルサイズに関わらず全体を走査します（サイズによる打ち切りは行いません。
     A-02 対応。1MiB 境界より後ろに置かれた secret も検出します）。
 
@@ -634,7 +634,7 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
     サイズ・バイナリ判定に関わらず必ず実施します（A-02 対応。サイズによる
     打ち切りはありません）。バイナリ判定されたファイルは行分割が意味を持たない
     ため、`_extract_printable_runs` で印字可能文字列を抽出し、それを擬似的な行と
-    して同じパターンを当てます（ADR-0013。以前は secret scan 自体をスキップして
+    して同じパターンを当てます（docs/adr/shell-analysis-boundary.md。以前は secret scan 自体をスキップして
     おり、先頭に NUL を 1 バイト混ぜるだけで検査を回避できた）。真のバイナリ
     （画像等）は secret パターンに一致する印字可能文字列を通常含まないため、
     一律ブロックにはなりません。
@@ -738,7 +738,7 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
     if do_secrets:
         # バイナリ判定でも secret scan は必ず実施する。行分割が意味を持たない
         # ため、印字可能文字列の抽出結果を擬似的な行として同じパターンを当てる
-        # （ADR-0013: NUL 1 バイトで検査を回避できる状態を許容しない）。
+        # （docs/adr/shell-analysis-boundary.md: NUL 1 バイトで検査を回避できる状態を許容しない）。
         scan_lines = _extract_printable_runs(content) if is_binary else lines
         try:
             issues.extend(

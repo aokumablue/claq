@@ -82,15 +82,15 @@ def _write_content(file_path: str, content: str) -> dict[str, Any]:
 
 
 # heredoc 本文を実行するシンク。演算子行にこれらが現れる場合、本文はデータでは
-# ないので剥がしてはならない（ADR-0017 の除去しない条件 1 と同じ理由）。
+# ないので剥がしてはならない（docs/adr/shell-analysis-boundary.md の除去しない条件 1 と同じ理由）。
 _BYPASS_HEREDOC = ". /dev/stdin <<'EOF'\n{body}\nEOF"
 _SOURCE_HEREDOC = "source /dev/stdin <<'EOF'\n{body}\nEOF"
 # なお、クォートで包んだコマンド置換（``eval "$(cat <<'EOF' ...)"``）は全体が
-# 1 トークンになるため検出できない。ADR-0002 が「コマンド置換・変数展開」を
+# 1 トークンになるため検出できない。docs/adr/shell-analysis-boundary.md が「コマンド置換・変数展開」を
 # 非目標として明記している範囲であり、下の block 一覧には載せない。
 _EVAL_HEREDOC = "eval $(cat <<'EOF'\n{body}\nEOF\n)"
 
-# 本文がデータのまま終わる形。ADR-0017 のとおり allow でなければならない。
+# 本文がデータのまま終わる形。docs/adr/shell-analysis-boundary.md のとおり allow でなければならない。
 _DATA_HEREDOC = "cat > note.md <<'EOF'\n{body}\nEOF"
 
 _NO_VERIFY = "git commit --no-verify -m x"
@@ -700,7 +700,7 @@ def test_every_directory_change_command_forces_unconditional_deny(
 ) -> None:
     """`_DIRECTORY_CHANGE_COMMANDS` の全要素が repo スコープ判定を放棄させること（層1）。
 
-    ADR-0018: cwd を動かすコマンドがあると相対パス解決が実行時の位置とずれるため、
+    docs/adr/shell-analysis-boundary.md: cwd を動かすコマンドがあると相対パス解決が実行時の位置とずれるため、
     repo スコープを信用せず保護対象 basename のヒットをそのまま deny する。
 
     判別には **repo ルート外**を指す書き込み先を使う。repo 内のパスは
@@ -1488,7 +1488,7 @@ def test_every_mutating_redirect_operator_marks_the_segment(operator: str) -> No
 def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     """`_HEREDOC_CONTINUATION_SUFFIXES` の全要素が本文の剥がしを止めること（層1・単体）。
 
-    ADR-0017 の「除去しない条件 2」。継続演算子で終わる演算子行は本文の開始位置が
+    docs/adr/shell-analysis-boundary.md の「除去しない条件 2」。継続演算子で終わる演算子行は本文の開始位置が
     次行とは限らないため、剥がさず検出側へ倒す。
 
     フックへ流す形は使えない。``\\`` で終わる行は `shlex` が改行ごとエスケープして

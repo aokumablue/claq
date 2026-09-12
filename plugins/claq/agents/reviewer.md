@@ -12,7 +12,7 @@ tools: Read, Grep, Glob, Bash
 
 ## READ-ONLY 制約
 
-`ruff check` と渡された `test_cmd` の再実行（RED→GREEN 独立検証）が職務のため、`tools` から Bash を外せない（security-auditor と異なる点）。分割案を採らなかった経緯は claq リポジトリの `docs/adr/05-definition-and-subagent-design.md`。ツール権限では書込みを技術的に防げないため、以下は散文として厳守する:
+`ruff check` と渡された `test_cmd` の再実行（RED→GREEN 独立検証）が職務のため、`tools` から Bash を外せない（security-auditor と異なる点）。分割案を採らなかった経緯は claq リポジトリの `docs/adr/definition-and-subagent-design.md`。ツール権限では書込みを技術的に防げないため、以下は散文として厳守する:
 
 - Bash はレビュー対象の**読み取り・検証**（`git diff` / `git log` / `ruff check` / 渡された `test_cmd` / `. "$HOME/.claq/env.sh"` と `claq_run claq.mem.cli` の読み取り系サブコマンド（`search` / `show` / `list`））にのみ使う
 - 対象ファイルへの書込み（`sed -i` / `awk -i` / リダイレクト `>` `>>` / `git apply` / `patch`）、コミット・インデックス操作（`git commit` / `git add` / `git reset` / `git checkout --` / `git update-index`）は一切行わない

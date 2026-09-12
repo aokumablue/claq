@@ -133,7 +133,7 @@ class TestParseKnowledgePayload:
 
         caller（agent・外部入力を処理した agent 含む）が JSON に
         ``source: "human"`` と書くだけで人間承認を偽装できていた
-        （ADR-0007）。
+        （docs/adr/untrusted-input-prompt-boundary.md）。
         """
         with pytest.raises(KnowledgeInputError, match="source"):
             parse_knowledge_payload({"kind": "fact", "title": "t", "source": source})
@@ -144,7 +144,7 @@ class TestParseKnowledgePayload:
 
         caller が JSON に ``status: "active"`` と書くだけで、人間承認
         （``promote <key>``）を経ずに永続 SessionStart context への注入を
-        自己承認できていた（ADR-0007）。
+        自己承認できていた（docs/adr/untrusted-input-prompt-boundary.md）。
         """
         with pytest.raises(KnowledgeInputError, match="status"):
             parse_knowledge_payload({"kind": "fact", "title": "t", "status": status})

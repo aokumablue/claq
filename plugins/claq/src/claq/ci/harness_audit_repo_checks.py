@@ -275,7 +275,7 @@ def _coverage_gate_configured(root_dir: str | Path) -> bool:
     以前は ``"fail_under" in pyproject.toml`` の部分文字列照合だった。実測で
     ``fail_under = 0``（何も落とさない）も ``# fail_under = 100 (disabled)``
     （コメントアウト）も True を返し、`eval-tests-presence`（2pts）がゲート無効の
-    ままで満点になった。ADR-0014 の「skip されるゲートはゲートとして機能しない」
+    ままで満点になった。docs/adr/verification-scope-release-gates.md の「skip されるゲートはゲートとして機能しない」
     と同じく、宣言の字面ではなく有効な値を条件にする。
 
     ``bool`` を明示的に弾くのは ``isinstance(True, int)`` が True になるため。
@@ -347,7 +347,7 @@ def _repo_tool_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "points": 2,
             "scopes": ["repo", "agents"],
             "path": "agents/",
-            "description": "エージェント定義の surface が失われていない（破損検知の下限。数は品質指標ではない — ADR-0010）",
+            "description": "エージェント定義の surface が失われていない（破損検知の下限。数は品質指標ではない — docs/adr/definition-and-subagent-design.md）",
             "pass": count_files(root_dir, "agents", ".md") >= 5,
             "fix": "Restore agent definitions under agents/ if the surface was emptied. Do NOT split agents to raise this count.",
         },
@@ -357,7 +357,7 @@ def _repo_tool_coverage_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             "points": 2,
             "scopes": ["repo", "skills"],
             "path": "skills/",
-            "description": "スキル定義の surface が失われていない（破損検知の下限。数は品質指標ではない — ADR-0010）",
+            "description": "スキル定義の surface が失われていない（破損検知の下限。数は品質指標ではない — docs/adr/definition-and-subagent-design.md）",
             "pass": count_files(root_dir, "skills", "SKILL.md") >= 1,
             "fix": "Restore skill directories under skills/ if the surface was emptied. Do NOT split skills to raise this count.",
         },

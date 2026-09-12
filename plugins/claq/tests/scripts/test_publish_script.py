@@ -1,7 +1,7 @@
 """`scripts/publish.sh` の配布除外リストが開発専用アーティファクトを網羅することを検証する。
 
 配布ツリーへ「除去済みパスを指す設定ファイル」が残ると、実機監査が誤検出を
-起こす。実際 ADR-0006 の「リスク」節が予言したとおり、``tests/`` を除去しつつ
+起こす。実際 docs/adr/verification-scope-release-gates.md が警告する形で、``tests/`` を除去しつつ
 ``testpaths=["tests"]`` と ``fail_under=100`` を持つ ``pyproject.toml`` を
 同梱していたため、配布ツリーでの ``pytest`` が「coverage 0% で FAIL」という
 回帰そっくりの出力を返し、3 ラウンド続けて「テストが消失した」と誤報告された。
@@ -21,7 +21,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 _PUBLISH_SH = _REPO_ROOT / "scripts" / "publish.sh"
 # 配布ツリーへ持ち出してはいけないパスと、その理由。
 _REQUIRED_EXCLUSIONS = {
-    "plugins/claq/tests/": "開発専用。配布物を最小化する（ADR-0006）",
+    "plugins/claq/tests/": "開発専用。配布物を最小化する（docs/adr/verification-scope-release-gates.md）",
     "plugins/claq/pyproject.toml": (
         "除去済みの tests/ を testpaths/fail_under が指すため、"
         "配布ツリーでの pytest が回帰そっくりに失敗する。"

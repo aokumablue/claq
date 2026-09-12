@@ -11,7 +11,7 @@ Windows ホストのシェルツールは PowerShell であり、次の 2 点で
    無かった。
 
 いずれも「Windows では保護 hook が素通りする」という同じ帰結になるため、
-1 ファイルで並べて固定する。`docs/adr/02-shell-analysis-boundary.md` を参照。
+1 ファイルで並べて固定する。`docs/adr/shell-analysis-boundary.md` を参照。
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ class TestWindowsPathSeparators:
             # PowerShell / cmd にはエスケープが無く、`my\` と `ruff.toml` は
             # 別引数になる。Remove-Item の -Path は String[] なので ruff.toml が
             # 実際に消える — POSIX 読みの「1 トークンの非保護ファイル名」とは
-            # 両立しないが、ADR-0002 に従い検出側へ倒す。
+            # 両立しないが、docs/adr/shell-analysis-boundary.md に従い検出側へ倒す。
             (r"rm my\ ruff.toml", "ruff.toml"),
             (r"cp src.toml my\ ruff.toml", "ruff.toml"),
         ],
@@ -129,7 +129,7 @@ class TestWindowsPathSeparators:
 
         ``\\`` の直後がパス構成文字なら Windows 読みを試すので、POSIX で
         「エスケープされた特殊文字」だったものが区切りに化ける場合がある。
-        ADR-0002 が受容する側（誤検出）の誤りであり、意図した挙動として固定する。
+        docs/adr/shell-analysis-boundary.md が受容する側（誤検出）の誤りであり、意図した挙動として固定する。
         ここが赤くなったら、変換規則を変えた影響が誤検出の範囲に及んでいる。
         """
         assert find_protected_write(r"rm a\.eslintrc") == ".eslintrc"
@@ -177,12 +177,12 @@ class TestCommandNameNormalization:
     """実行位置のコマンド名比較が 3 箇所すべてで揃っていること。
 
     `_executed_command_args` だけ大小無視にすると、`CD ..; rm ruff.toml` が
-    ADR-0018 の無条件 deny 分岐へ落ちず repo スコープ判定側へ回る（誤通過）。
+    docs/adr/shell-analysis-boundary.md の無条件 deny 分岐へ落ちず repo スコープ判定側へ回る（誤通過）。
     正規化を 1 関数へ集約したことを、比較箇所ごとに固定する。
     """
 
     def test_directory_change_is_case_insensitive(self) -> None:
-        """`cd` 判定（ADR-0018 の分岐）が大小を見ないこと。"""
+        """`cd` 判定（docs/adr/shell-analysis-boundary.md の分岐）が大小を見ないこと。"""
         assert bash_config_protection._changes_working_directory(["CD", ".."]) is True
         assert bash_config_protection._changes_working_directory(["cd", ".."]) is True
 

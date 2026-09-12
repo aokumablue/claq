@@ -311,7 +311,7 @@ class TestMain:
     ) -> None:
         """detach の受付失敗は非 0 を返し、stderr にエラーを書く。
 
-        ADR-0003 は親の exit code を「子の起動を受け付けたか」と定義する。
+        docs/adr/hook-failure-direction.md は親の exit code を「子の起動を受け付けたか」と定義する。
         受付そのものに失敗したのに 0 を返すと、呼び出し側は起動されていない
         処理を受付成功と誤認する（子の処理結果は依然として非同期のまま）。
         """

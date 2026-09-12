@@ -166,7 +166,7 @@ def _sanitize_freeform(text: str) -> str:
     （実測）。同じ非対称は ``INPUT_CONTAINER_KEYS`` でも起きているため、
     合成そのものを 1 箇所に閉じる。
 
-    - ``normalize_user_message`` が先: ADR-0015 の足場除去は生の足場タグを
+    - ``normalize_user_message`` が先: docs/adr/untrusted-input-prompt-boundary.md の足場除去は生の足場タグを
       前提にしており、他の処理が先に走ると足場の形が崩れて検出できない。
     - ``strip_tags`` が ``redact`` より先: タグで分断された秘密は、タグを
       除いて 1 本へ戻して初めて ``redact`` のパターンに一致する。
@@ -516,7 +516,7 @@ def _parse_entry(line: str) -> dict[str, Any] | None:
 #
 # 反転を選んだ根拠は、両方向の失敗のコストが非対称なこと。allowlist が外すと
 # 「引き継ぎが薄くなる」＝**見えて直せる**劣化で済むが、denylist が漏らすと
-# 「攻撃者が書いた文字列が依頼として注入される」＝**黙って通る**。ADR-0002 の
+# 「攻撃者が書いた文字列が依頼として注入される」＝**黙って通る**。docs/adr/shell-analysis-boundary.md の
 # 「誤検出 > 誤通過」と `schema.py` の「最も危険な値を既定に据えない」も同じ向き。
 #
 # 旧コメントは「host ごとに type 名が異なりうるので allowlist は実依頼を落とす」

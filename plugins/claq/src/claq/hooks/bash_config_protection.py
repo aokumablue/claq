@@ -26,7 +26,7 @@ Write は塞がるのに ``rm Ruff.toml`` は通る非対称が生まれる）�
 
 判定方式:
     `hook_common.strip_data_heredoc_bodies` でデータ heredoc の本文を落としてから
-    （ADR-0017。本文が実行されうる形は落とさない）、
+    （docs/adr/shell-analysis-boundary.md。本文が実行されうる形は落とさない）、
     `hook_common.tokenize`/`split_segments`（block_no_verify と共有するトーク
     ナイザ）でセグメント分割し、各セグメント内で保護対象（basename 一致、
     または `.git/hooks/` のようなディレクトリ単位の保護 path 配下・保護 path 自身）
@@ -71,7 +71,7 @@ Write は塞がるのに ``rm Ruff.toml`` は通る非対称が生まれる）�
     展開・パイプ越しの間接書き込み、シェルエイリアス・ラッパースクリプト
     経由の呼び出し。POSIX シェルの完全解釈は行わず、うっかり書き換えの抑止
     であって敵対的回避への防壁ではない（`block_no_verify` と同じ設計判断。
-    詳細は `docs/adr/02-shell-analysis-boundary.md`）。
+    詳細は `docs/adr/shell-analysis-boundary.md`）。
 """
 
 from __future__ import annotations
@@ -163,7 +163,7 @@ _REMOVE_COMMANDS = frozenset(
 # 「塞いだ経路の存在が誤った安心になる」（config_protection の同趣旨コメント
 # 参照）ため、削除と同じ強さの弱体化として扱う。引数の解釈はモード文字列と
 # パスを区別せず、保護対象に一致したトークンがあれば deny する
-# （ADR-0002: 誤検出 > 誤通過）。
+# （docs/adr/shell-analysis-boundary.md: 誤検出 > 誤通過）。
 _MODE_COMMANDS = frozenset({"chmod", "chown", "chgrp", "chflags"})
 
 # 単一コマンドの抽出関数が実行位置判定（`_command_index`）へ渡す名前集合。
@@ -206,7 +206,7 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILE
 # malformed JSON fallback で「破壊的操作の指示」とみなす部分文字列。書き込み系
 # （`>`/`tee`/`-i`）に加えて、トークン化経路が既に見ている削除・リンク系の verb を
 # 含める。部分一致なので過剰検出側に倒れるが、malformed 入力に対しては
-# ADR-0002（誤検出 > 誤通過）どおりそれでよい。
+# docs/adr/shell-analysis-boundary.md（誤検出 > 誤通過）どおりそれでよい。
 #
 # `ALWAYS_MUTATING_EDIT_EXECUTABLES`（`ed` / `ex` / `red`）はここへ入れない。
 # 判定が部分一致なので 2〜3 文字の名前は ``used`` ``next`` ``required`` のような
@@ -226,13 +226,14 @@ _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # `_command_index` が読み飛ばす実行 wrapper（`normalize_executable_name` で判定）。
 #
 # ホワイトリストである理由と、`block_no_verify` が全トークン走査を採る理由の非対称は
-# **意図的な設計判断**であり `docs/adr/02-shell-analysis-boundary.md`
-# に記録した（代替案の実測を含む）。要旨だけ再掲すると: 本モジュールは M-01 のため
+# **意図的な設計判断**であり `docs/adr/shell-analysis-boundary.md`
+# に記録した。要旨だけ再掲すると: 本モジュールは M-01 のため
 # **実行位置の特定**が必要で、``tee pyproject.toml``（deny）と
 # ``echo tee pyproject.toml``（allow）は構文上同じ「語 → 語 → パス」なので何らかの
 # 名前集合が原理的に不可避になる。`block_no_verify` は実行位置を必要としないため
-# 名前集合を持たずに済む。この集合を消して全トークン走査へ揃える変更は、ADR-0021 の
-# 代替案 1 として却下済みである。
+# 名前集合を持たずに済む。この集合を消して全トークン走査へ揃える変更は、
+# 実行位置の情報がそもそも生まれなくなるため docs/adr/shell-analysis-boundary.md が
+# 却下済みである。
 #
 # 結果としてこの集合は部分緩和であり、未知の wrapper（``chrt`` 相当の新顔）は
 # 取りこぼす。それは承知のうえの境界で、`_command_index` の numeric positional
@@ -285,7 +286,7 @@ def _command_index(segment: list[str]) -> int | None:
 
     未知の wrapper オプション（値の有無を判定できないもの）は 1 トークンだけ
     読み飛ばす。これは `block_no_verify` と同じ「うっかりバイパスの抑止」
-    という設計判断で、POSIX シェルの完全な引数解釈は行わない（ADR-0002）。
+    という設計判断で、POSIX シェルの完全な引数解釈は行わない（docs/adr/shell-analysis-boundary.md）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
@@ -498,7 +499,7 @@ def _touch_targets(segment: list[str]) -> list[str]:
     値を取るオプション（``-t <stamp>`` / ``-d <date>`` / ``-r <ref>``）の値は
     `_non_option_args` を素通りして候補に混じる。``touch -r ruff.toml app.py`` は
     読み取り参照でしかない `ruff.toml` を候補として deny するが、これは
-    `_remove_targets` / `_mode_targets` と同じ姿勢であり ADR-0002（誤検出 >
+    `_remove_targets` / `_mode_targets` と同じ姿勢であり docs/adr/shell-analysis-boundary.md（誤検出 >
     誤通過）の範囲内。オプションごとの arity 表を持ち込むと、`touch` の
     実装差（BSD / GNU / busybox）ごとに表が割れて取りこぼしが生まれる。
 
@@ -539,7 +540,7 @@ def _remove_targets(segment: list[str]) -> list[str]:
     """`rm`/`unlink`/`shred`/`truncate`/`mv` の引数をすべて返す。
 
     削除・切り詰め・移動は書き込み先トークンとして現れないが、リンタ設定を消せば
-    ルールごと無効化できるため上書きと同じ扱いにする（ADR-0002: false negative
+    ルールごと無効化できるため上書きと同じ扱いにする（docs/adr/shell-analysis-boundary.md: false negative
     より false positive を選ぶ）。`mv` は移動先を `_last_arg_write_targets` が既に
     見ているため、ここでは移動元を含む全引数を対象にする。
 
@@ -711,14 +712,14 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
 
     ただしコマンドが `cd` 等でカレントディレクトリを移動する場合、cwd 基準の
     相対パス解決は実行時の位置とずれるため repo スコープ判定を信用できない。
-    その場合は保護対象 basename のヒットをそのまま deny する（ADR-0018。
+    その場合は保護対象 basename のヒットをそのまま deny する（docs/adr/shell-analysis-boundary.md。
     実測: ``cd plugins && printf x > ../ruff.toml`` が exit 0 だった）。
     `cd` を跨いだ symlink 解決のずれは同じ理由で非目標。
 
     既知シェルの ``-c`` へ渡された文字列コマンドへは 1 段だけ再帰する
     （実測: ``bash -c 'printf x > ruff.toml'`` が exit 0 だった。`block_no_verify`
     は同じ再帰を持っており、片方だけ持たない非対称は A-06 で本モジュールを
-    足した理由そのものに反する）。2 段以上のネストは ADR-0002 の非目標。
+    足した理由そのものに反する）。2 段以上のネストは docs/adr/shell-analysis-boundary.md の非目標。
 
     Args:
         command: 検査対象のシェルコマンド文字列。

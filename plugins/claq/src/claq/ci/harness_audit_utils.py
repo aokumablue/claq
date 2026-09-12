@@ -32,7 +32,7 @@ def file_has_content(root_dir: str | Path, relative_path: str) -> bool:
     存在検査だけを合格条件にすると、ファイルを 0 バイトへ切り詰めても満点が出る
     （実測: `tests/hooks/test_hook_edge_cases.py` を空にしても 58/58）。存在を根拠に
     「テストがある」「ポリシーがある」と採点する以上、中身の消失は不合格でなければ
-    ならない（ADR-0014: skip されるゲートはゲートとして機能しない）。
+    ならない（docs/adr/verification-scope-release-gates.md: skip されるゲートはゲートとして機能しない）。
 
     Args:
         root_dir: 監査対象ルート。

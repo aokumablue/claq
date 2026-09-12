@@ -15,7 +15,7 @@ command: /instinct
 `promote` した知識だけが `status='active'` になり、以後の全セッションへ注入される。
 
 `promote` が人間によって実行されたことは技術的に強制されていない（同一 UID から
-`mem.db` を直接更新できるため。ADR-0007 が受容した残存リスク）。昇格は key・scope・
+`mem.db` を直接更新できるため。docs/adr/untrusted-input-prompt-boundary.md が受容した残存リスク）。昇格は key・scope・
 source・直前 status とともに監査ログへ記録される。
 
 ## 永続メモリ

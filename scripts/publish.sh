@@ -84,30 +84,30 @@ print(".".join(parts))
 ' "$1"
 }
 
-# ホスト component inventory ゲート（ADR-0014）。
+# ホスト component inventory ゲート（docs/adr/verification-scope-release-gates.md）。
 #
 # manifest も公式 schema も validator も「正しい」と答えるのに、ホストの
 # loader が component をまるごと登録できていない、という非互換が実際に起きた
 # （v0.9.41 の F-01: manifest の agents 宣言により 9 体全てが ENOTDIR）。
 # 静的検証では原理的に検出できないため、ツリーをホストに読ませて登録結果を
-# 1 回問い合わせる。ADR-0014 はこれをリリース条件と定めている。
+# 1 回問い合わせる。docs/adr/verification-scope-release-gates.md はこれをリリース条件と定めている。
 #
 # `claude` が PATH に無い環境では実行できない。その場合は警告のうえ続行する
 # （manifest 形式の退行自体は tests/test_plugin_manifest.py が常時検出する）。
 run_host_inventory_gate() {
   if ! command -v claude >/dev/null 2>&1; then
-    echo "WARNING: claude が PATH にありません。host component inventory ゲート（ADR-0014）を実行できません。" >&2
+    echo "WARNING: claude が PATH にありません。host component inventory ゲート（docs/adr/verification-scope-release-gates.md）を実行できません。" >&2
     return 0
   fi
 
-  echo "Running host component inventory gate (ADR-0014)..."
+  echo "Running host component inventory gate (docs/adr/verification-scope-release-gates.md)..."
   claude plugin validate --strict plugins/claq || return 1
 
   local details expected_agents expected_surfaces
   details="$(claude --plugin-dir plugins/claq plugin details claq@inline 2>&1)" || return 1
 
   if grep -q "Failed to read plugin components" <<<"${details}"; then
-    echo "ERROR: ホストが component を読めていません（ADR-0014 ゲート 3）。" >&2
+    echo "ERROR: ホストが component を読めていません（docs/adr/verification-scope-release-gates.md ゲート 3）。" >&2
     echo "${details}" >&2
     return 1
   fi
@@ -121,12 +121,12 @@ run_host_inventory_gate() {
   ))
 
   grep -qE "Agents \(${expected_agents}\)" <<<"${details}" || {
-    echo "ERROR: Agents 登録数がディスク上の ${expected_agents} 件と一致しません（ADR-0014 ゲート 2）。" >&2
+    echo "ERROR: Agents 登録数がディスク上の ${expected_agents} 件と一致しません（docs/adr/verification-scope-release-gates.md ゲート 2）。" >&2
     echo "${details}" >&2
     return 1
   }
   grep -qE "Skills \(${expected_surfaces}\)" <<<"${details}" || {
-    echo "ERROR: Skills 登録数がディスク上の ${expected_surfaces} 件と一致しません（ADR-0014 ゲート 2）。" >&2
+    echo "ERROR: Skills 登録数がディスク上の ${expected_surfaces} 件と一致しません（docs/adr/verification-scope-release-gates.md ゲート 2）。" >&2
     echo "${details}" >&2
     return 1
   }
@@ -222,7 +222,7 @@ TMPDIR="$(mktemp -d)"
 #   1. testpaths=["tests"] と fail_under=100 を持つ pyproject が、tests/ を
 #      除去したツリーへ同梱されると、配布ツリーで pytest を叩いたときに
 #      「coverage 0% で FAIL」という回帰そっくりの失敗が出る。過去 3 回の
-#      実機監査がこれを「テストが消失した」と誤報告した（ADR-0006）。
+#      実機監査がこれを「テストが消失した」と誤報告した（docs/adr/verification-scope-release-gates.md）。
 #   2. wheel は src/claq しか含まず plugin assets も entry point も持たない
 #      ため、配布ツリーに build 設定を残すと非機能 artifact を公開できてしまう。
 # ランタイムは launcher.py が sys.path へ src/ を挿すだけで、パッケージ

@@ -105,7 +105,7 @@ def test_validate_agents_requires_name_and_description(
     """name / description の欠落を失敗として検出すること。
 
     validate_skills は同じ 2 項目を必須にしており、agents 側だけ未検証だと
-    「dispatch の手がかりが消えたのに緑」が agents でのみ起きる（ADR-0010）。
+    「dispatch の手がかりが消えたのに緑」が agents でのみ起きる（docs/adr/definition-and-subagent-design.md）。
     """
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
