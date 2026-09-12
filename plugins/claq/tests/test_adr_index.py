@@ -1,12 +1,7 @@
 """``docs/adr/`` のトピックファイル構成とインデックスの整合を検証する構造テスト。
 
-1 決定 = 1 ファイルだった頃は、ファイル名（``0001-*.md``）そのものが番号の一意性と実在を
-保証していた。トピックごとの 1 ファイルへ集約した結果その不変条件はファイルシステムから
-消え、``README.md`` の散文と ``skills/adr/SKILL.md`` のワークフローだけが残った。検知器の
-無い規約は黙って壊れる（ADR-0023 決定 1 / ADR-0011 決定 6）ため、ここで機械照合する。
-
-``ADR-NNNN`` はテストの docstring・エージェント定義・``CLAUDE.md`` から参照される識別子で
-あり、重複・欠落・誤った所在は参照先の喪失に直結する。
+ファイル名は役割ごとの slug（連番なし）。README のトピック表とディスク上の
+ファイルがずれても、検知器が無ければ黙って壊れる。
 """
 
 from __future__ import annotations
@@ -15,79 +10,73 @@ import re
 from pathlib import Path
 
 _ADR_DIR = Path(__file__).resolve().parents[3] / "docs" / "adr"
-_TOPIC_RE = re.compile(r"^\d{2}-[a-z0-9-]+\.md$")
-_SECTION_RE = re.compile(r"^## ADR-(\d{4}):", re.MULTILINE)
-_INDEX_ROW_RE = re.compile(r"^\| (\d{4}) \|.*\[\d{2}\]\((\d{2}-[a-z0-9-]+\.md)\) \|$", re.MULTILINE)
+_TOPIC_RE = re.compile(r"^[a-z][a-z0-9-]+\.md$")
+_EXCLUDED_TOPIC_NAMES = {"readme.md", "template.md"}
+_SERIAL_RE = re.compile(r"ADR-\d{4}")
 
 
 def _topic_files() -> list[Path]:
-    """``NN-<slug>.md`` 形式のトピックファイルを名前順で返す。"""
-    return sorted(p for p in _ADR_DIR.glob("*.md") if _TOPIC_RE.match(p.name))
-
-
-def _sections_by_number() -> dict[str, list[str]]:
-    """``ADR-NNNN`` 番号から、その節を含むトピックファイル名のリストを返す。"""
-    found: dict[str, list[str]] = {}
-    for path in _topic_files():
-        for number in _SECTION_RE.findall(path.read_text(encoding="utf-8")):
-            found.setdefault(number, []).append(path.name)
-    return found
-
-
-def _index_rows() -> dict[str, str]:
-    """README の「ADR 一覧」から ``ADR-NNNN`` → トピックファイル名の対応を返す。"""
-    readme = (_ADR_DIR / "README.md").read_text(encoding="utf-8")
-    return dict(_INDEX_ROW_RE.findall(readme))
-
-
-def test_adr_numbers_are_unique_across_topic_files() -> None:
-    """同じ ``ADR-NNNN`` 節が 2 箇所に存在しないこと。
-
-    1 ファイル 1 決定なら重複はファイル名の衝突として現れたが、集約後は 2 つのトピック
-    ファイルが同じ番号を名乗っても何も起きない。参照側はどちらが正か判断できなくなる。
-    """
-    duplicated = {num: files for num, files in _sections_by_number().items() if len(files) > 1}
-    assert duplicated == {}, f"番号が重複している ADR: {duplicated}"
-
-
-def test_adr_numbers_have_no_gaps() -> None:
-    """採番が 0001 から連続していること（欠番は削除された決定の痕跡）。"""
-    numbers = sorted(int(n) for n in _sections_by_number())
-    assert numbers, "ADR 節が 1 つも見つからない"
-    assert numbers == list(range(1, numbers[-1] + 1)), f"欠番がある: {numbers}"
-
-
-def test_readme_index_matches_topic_file_sections() -> None:
-    """README の「ADR 一覧」と、ディスク上の ``ADR-NNNN`` 節が過不足なく一致すること。
-
-    節だけ足して README を更新しない（新しい決定が索引から見えない）、README の行だけ残って
-    節が消えている（参照が空を指す）のどちらも検出する。
-    """
-    on_disk = set(_sections_by_number())
-    in_index = set(_index_rows())
-    assert on_disk == in_index, (
-        f"README のみ={sorted(in_index - on_disk)} / トピックファイルのみ={sorted(on_disk - in_index)}"
+    """``<slug>.md`` 形式のトピックファイルを名前順で返す。"""
+    return sorted(
+        p for p in _ADR_DIR.glob("*.md") if _TOPIC_RE.match(p.name) and p.name.lower() not in _EXCLUDED_TOPIC_NAMES
     )
-
-
-def test_readme_index_points_at_the_file_that_holds_the_section() -> None:
-    """README 各行のファイルリンクが、その ``ADR-NNNN`` 節を実際に含むファイルを指すこと。
-
-    節をトピック間で移動したのに索引を直し忘れると、リンクは切れずに別のトピックへ着地する
-    （リンク切れ検査では捕まらない）。
-    """
-    sections = _sections_by_number()
-    mismatched = {
-        number: (linked, sections[number][0])
-        for number, linked in _index_rows().items()
-        if number in sections and linked != sections[number][0]
-    }
-    assert mismatched == {}, f"索引のリンク先が節の所在と食い違う {{番号: (索引, 実体)}}: {mismatched}"
 
 
 def test_topic_table_lists_every_topic_file() -> None:
     """README の「トピック」表が、ディスク上のトピックファイルを過不足なく挙げること。"""
     readme = (_ADR_DIR / "README.md").read_text(encoding="utf-8")
-    listed = set(re.findall(r"^\| \[(\d{2}-[a-z0-9-]+\.md)\]\(", readme, re.MULTILINE))
+    listed = set(re.findall(r"^\| \[([a-z0-9-]+\.md)\]\(", readme, re.MULTILINE))
     actual = {p.name for p in _topic_files()}
     assert listed == actual, f"トピック表のみ={sorted(listed - actual)} / 実体のみ={sorted(actual - listed)}"
+
+
+def test_topic_files_have_common_principles_and_a_decision_section() -> None:
+    """各トピックファイルが「共通原則」と、それ以外の決定節を持つこと。"""
+    missing: list[str] = []
+    for path in _topic_files():
+        headings = re.findall(r"^## (.+)$", path.read_text(encoding="utf-8"), re.MULTILINE)
+        if "共通原則" not in headings:
+            missing.append(f"{path.name}: 「共通原則」が無い")
+        if len([h for h in headings if h != "共通原則"]) < 1:
+            missing.append(f"{path.name}: 決定節が無い")
+    assert missing == [], "トピックファイルの見出し不足:\n" + "\n".join(missing)
+
+
+def test_topic_files_are_self_contained() -> None:
+    """各トピックファイルの本文が、他のトピックファイル名へ言及しないこと。
+
+    整理の過程でトピックを分割・統合するたびに他ファイルへの言及が追従を要ることになり、
+    今回のような整理でまさにそれが古びた。1 ファイルで完結させ、追従対象を無くす。
+    """
+    names = {p.name for p in _topic_files()}
+    violations: list[str] = []
+    for path in _topic_files():
+        text = path.read_text(encoding="utf-8")
+        for other in names - {path.name}:
+            if other in text:
+                violations.append(f"{path.name}: 他トピック `{other}` へ言及している")
+    assert violations == [], "トピック間参照が残っている:\n" + "\n".join(violations)
+
+
+_SKIP_DIR_NAMES = {".git", ".venv", "__pycache__", "node_modules"}
+_SCAN_SUFFIXES = {".md", ".py", ".sh", ".cmd", ".json", ".toml", ".txt", ".yml", ".yaml"}
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_repo_does_not_use_adr_serial_ids() -> None:
+    """採番 ID をリポジトリへ残さないこと。参照はトピックファイル名で行う。"""
+    hits: list[str] = []
+    for path in _REPO_ROOT.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in _SCAN_SUFFIXES:
+            continue
+        if any(part in _SKIP_DIR_NAMES for part in path.parts):
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except UnicodeDecodeError:
+            continue
+        for i, line in enumerate(lines, 1):
+            if _SERIAL_RE.search(line):
+                rel = path.relative_to(_REPO_ROOT)
+                hits.append(f"{rel}:{i}: {line.strip()}")
+    assert hits == [], "採番 ID が残っている:\n" + "\n".join(hits)
