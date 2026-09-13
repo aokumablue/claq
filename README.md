@@ -60,7 +60,7 @@ claq は、Claude Code の作業を「最初の計画からレビューまで」
 
 ### 対応環境
 
-- OS: macOS / Linux（Windows は未対応。フックの stdin 読み取りが `select.select` に依存しており、Windows の通常 console stdin では機能しない可能性があるため）
+- OS: macOS / Linux / Windows（PowerShell 経由）
 - `python3` 3.12 以上（PATH 上で解決できること。ランタイムは venv を作らない）。3.12 未満では保護フックが警告付きで無効化される
 
 ### プラグインマーケットプレイス
