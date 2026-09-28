@@ -71,7 +71,7 @@ Execute this task:
 
 2. ベンチマークに集約する
    - 各 `grading.json` / `timing.json` を読み、`schemas.md`（同じ階層）のビューアー用スキーマに従って `benchmark.json` を作る。各構成の通過率・時間・トークン数を平均 ± 標準偏差と差分付きでまとめ、`with_skill` を `without_skill` の前に並べる
-   - comparator へ渡すときは、比べる 2 構成の出力を `<workspace>/compare-<ID>/candidate-a/` と `candidate-b/` へコピーし、A/B の割り当てをランダムにする。対応表は呼び出し元だけが持つ。`with_skill` / `without_skill` / `old_skill` のパスをそのまま渡すと、パス文字列から出自が分かって盲検が成立しない（`../../../agents/comparator.md` はこの形を FAIL として拒否する）
+   - comparator へ渡すときは、比べる 2 構成の出力を `<workspace>/compare-<ID>/candidate-a/` と `candidate-b/` へコピーし、A/B の割り当てをランダムにする。対応表は呼び出し元だけが持つ。`with_skill` / `without_skill` / `old_skill` のパスをそのまま渡すと、パス文字列から出自が分かって盲検が成立しない（`../../../agents/comparator.md` はこの形を FAIL として拒否する）。comparator の判定は助言として扱い、機械判定できる期待値は deterministic なアサーションで先に確定させ、skill の採用を勝敗だけで決めない（勝たせる指示を埋め込んだ候補には判定ごと曲げられうる）
 
 3. 分析を入れる
    - `benchmark.json` と各 `grading.json` を直接読んで分析する
