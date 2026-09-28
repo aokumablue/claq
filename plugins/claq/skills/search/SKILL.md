@@ -50,14 +50,14 @@ user-invocable: false
 
 ## 完全モード（エージェント並列）
 
-3 エージェントを同時に起動し、全結果をまとめてから判定マトリクスを当てる。
+B（ローカル資産）は数回の確認で終わるので自分で調べる。A（レジストリ）と C（GitHub・Web）は候補の比較が要るときに 2 エージェントを同時に起動して委ね、全結果をまとめてから判定マトリクスを当てる（数手で終わる調べ物まで委譲すると、コストと時間だけが増える）。
 
 ```text
 # A: パッケージレジストリ
 Search npm/PyPI for: [DESCRIPTION]. Language: [LANG]
 Return top 3: name, version, weekly downloads, last update, license
 
-# B: MCP・スキル・ローカル資産
+# B: MCP・スキル・ローカル資産（委譲せず自分で確認する）
 1. ~/.claude/settings.json でMCP確認
 2. ~/.claude/skills/（個人）・.claude/skills/（プロジェクト・未知リポジトリは内容確認後に使用）・インストール済みプラグインのスキルで関連スキル確認
 3. 高速全文検索で既存実装確認（Bash等で利用可能な検索コマンドを使う）
