@@ -7,18 +7,18 @@ user-invocable: false
 
 # リファクタ事前準備
 
-`refactor` 実行前に対象分割・依存関係・検証テストを固定し手戻りを減らす。
+`refactor` の実行前に、対象の分割・依存関係・検証テストを固定して手戻りを減らす。
 
 ## 手順
 
-1. **対象確定**（優先順）: 渡されたスコープリスト → 引数パス（ディレクトリ=配下全ファイル/ファイル=そのファイル） → `git diff --name-only HEAD`
-2. **分割**: 同時変更が必要な塊でグループ化。依存が薄いグループを先行処理
-3. **依存可視化**: import/参照関係確認→グループ間依存順明示。循環・高リスク境界（公開API・外部I/O）を先に記録
-4. **テストセット確定**: baseline（全体）・グループ単位・final gate（テスト+lint）
+1. 対象の確定（優先順）: 渡されたスコープリスト → 引数パス（ディレクトリ = 配下の全ファイル / ファイル = そのファイル）→ `git diff --name-only HEAD`
+2. 分割: 同時に変える必要がある塊でグループにする。依存の薄いグループを先に処理する
+3. 依存の可視化: import・参照関係を確かめ、グループ間の依存順を明示する。循環と高リスクの境界（公開 API・外部 I/O）は先に記録する
+4. テストセットの確定: baseline（全体）・グループ単位・final gate（テスト + lint）
 
 ## 出力
 
-テキストサマリーに加え、下流（`refactor-rollback` / `refactor` コマンド）が参照する JSON 契約を同時に渡す。フィールド名・構造は `../refactor-rollback/SKILL.md` の入力契約と一致させる。
+テキストのサマリーと、下流（`refactor-rollback` と `refactor` コマンド）が読む JSON 契約を両方返す。
 
 ```
 Refactor Preflight
@@ -34,7 +34,7 @@ Test Set:
 ──────────────────────────────
 ```
 
-JSON 契約（下流3ファイルが前提とする形。`deps.from`/`deps.to` は `groups` 配列のインデックス）:
+JSON 契約（`deps.from` / `deps.to` は `groups` 配列のインデックス）:
 
 ```json
 {
@@ -49,18 +49,18 @@ JSON 契約（下流3ファイルが前提とする形。`deps.from`/`deps.to` �
 }
 ```
 
-必須: `scope_files` / `groups` / `deps` / `tests.baseline` / `tests.group` / `tests.final`（キーは必ず出力する。値は非空を要求しない）。baseline / group / final のカテゴリ全体で実在確認できない場合に限り、該当配列を**空配列**にする — これが JSON 契約上の「検証手段なし」の signal そのものであり、テキストサマリー側の「検証手段なし」表記は人間向けの重複表現にすぎない。JSON だけを読む下流（`refactor-rollback`）は空配列を「検証手段なし」として扱う契約になっているため、テキストの記述漏れがあっても JSON 側だけで判定できる。
-
-**`tests.group` は `groups` と添字対応する。** `tests.group[i]` は `groups[i]` を検証するコマンドであり、長さは `groups` と一致させる（`len(tests.group) == len(groups)`、または全体が空配列）。`groups[i]` にだけ検証手段が無い場合は、配列ごと空にするのではなく **`tests.group[i]` を空文字列 `""`** にする。`refactor-rollback` は添字で引いて File Rule の `verify` を決めるため（`../refactor-rollback/SKILL.md` 手順3）、長さが揃わないと「revert した対象を検証しないコマンド」を実行可能な検証として提示することになる。`0 < len(tests.group) < len(groups)` は契約違反であり、下流は不足分を `NOT_AVAILABLE` として扱う。
+- `scope_files` / `groups` / `deps` / `tests.baseline` / `tests.group` / `tests.final` のキーは必ず出す（値は空でもよい）
+- baseline / group / final のカテゴリ全体で実在するコマンドを確認できなければ、その配列を空にする。空配列が JSON 契約上の「検証手段なし」で、JSON だけを読む `refactor-rollback` はそれで判定する（テキスト側の「検証手段なし」は人間向けの表記）
+- `tests.group[i]` は `groups[i]` を検証するコマンドで、`len(tests.group) == len(groups)`（または全体が空配列）にする。`groups[i]` にだけ検証手段が無ければ、配列ごと空にせず `tests.group[i]` を空文字列 `""` にする。`refactor-rollback` は添字で引いて各ファイルの `verify` を決めるため、長さがずれると、リバートした対象を検証しないコマンドを検証として提示することになる。`0 < len(tests.group) < len(groups)` は契約違反で、下流は不足分を `NOT_AVAILABLE` として扱う
 
 ## ルール
 
-- 既存テスト/lintのみ使用
-- 依存不明は単独グループ化
-- 公開APIを含む変更は最終グループ
-- baseline/group/final に載せるコマンドは実在確認（テストファイル・ランナー設定を Grep/Read で確認）してから出力。確認できないコマンドは Test Set に載せず『検証手段なし』と明記
+- 既存のテスト/lint だけを使う
+- 依存が不明なファイルは単独のグループにする
+- 公開 API を含む変更は最後のグループにする
+- Test Set に載せるコマンドは、テストファイルとランナー設定を Grep/Read で確かめてから出す。確かめられないコマンドは載せず「検証手段なし」と書く
 
 ## 永続メモリ
 
-search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `refactor preflight scope split dependency testset`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
-record: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
+- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `refactor preflight scope split dependency testset`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
+- record: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
