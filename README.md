@@ -109,7 +109,7 @@ claude plugin install claq@claq
 | [`learn`](plugins/claq/skills/learn/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 知識カード蓄積 | セッションから再利用可能な知識カードを抽出し knowledge テーブルへ蓄積 |
 | [`loop-audit`](plugins/claq/skills/loop-audit/SKILL.md) | 自動発火 + `/loop-audit` | fork | ループ収束品質診断 | loop-dev 開発サイクルの収束品質を履歴から集計しスコア化 |
 | [`loop-dev`](plugins/claq/skills/loop-dev/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 実装ループ本体 | plan→generate→evaluate を最大2反復で収束させる実装ループ（feat-dev/bugfix/refactor 等専用） |
-| [`maintain`](plugins/claq/skills/maintain/SKILL.md) | 自動発火 + `/maintain` | fork | ハーネス定期メンテ | commands/skills/agents/hooks のレビュー→修正→強化→再レビュー→記録を1回で完遂 |
+| [`maintain`](plugins/claq/skills/maintain/SKILL.md) | 自動発火 + `/maintain` | fork | ハーネス定期メンテ | commands/skills/agents/hooks のレビュー→修正→強化→検証→記録を1回で完遂 |
 | [`mcp-gen`](plugins/claq/skills/mcp-gen/SKILL.md) | 自動発火 + `/mcp-gen` | inline | MCP サーバ生成 | 検証済みテンプレートを複製して MCP サーバを新規構築 |
 | [`quick-code`](plugins/claq/skills/quick-code/SKILL.md) | `/quick-code`（自動発火なし） | inline | 往復実装 | 人間が実行とテストを担う往復実装モード。自分ではテスト・ビルドを走らせない |
 | [`quick-debug`](plugins/claq/skills/quick-debug/SKILL.md) | `/quick-debug`（自動発火なし） | inline | 往復切り分け | 人間が再現とログ採取を担う往復切り分けモード。修正は当てず観測だけを入れる |
@@ -470,13 +470,12 @@ flowchart LR
 
   U(["🛠️ ハーネス定期メンテ依頼"]) --> CM["/maintain"]:::skill
 
-  subgraph maintain["⚙️ maintain 内部（7ステップ）"]
+  subgraph maintain["⚙️ maintain 内部（6ステップ）"]
     direction TB
     IN["入力収集<br/>baseline取得（pytest/ruff/audit）"] --> RV["✅ reviewer<br/>🛡️ security-auditor 並列レビュー"]:::agent
     RV --> CLS["種別分類<br/>バグ/強化/仕様変更"]
     CLS --> FIX["🧪 tdd-writer 修正<br/>or 直接編集"]:::agent
-    FIX --> RV2["再レビュー<br/>reviewer & security-auditor"]:::agent
-    RV2 --> GATE{{"final gate<br/>非退行 + CRITICAL/HIGH ゼロ"}}
+    FIX --> GATE{{"final gate<br/>pytest/ruff/validator/audit 非退行"}}
     GATE -->|未達・3周まで| FIX
     GATE -->|達成| REC["記録<br/>claq_mem_learn"]
   end
@@ -485,7 +484,7 @@ flowchart LR
 ```
 
 **トリガー**: 「ハーネスをメンテ」「プラグイン全体を見直して直す」等
-**期待効果**: レビュー→修正→強化→再レビュー→記録を1回で完遂。単発の1ファイル修正は `/review` `/bugfix` `/refactor`、audit スコア改善のみなら `/harness` と使い分ける
+**期待効果**: レビュー→修正→強化→検証→記録を1回で完遂。単発の1ファイル修正は `/review` `/bugfix` `/refactor`、audit スコア改善のみなら `/harness` と使い分ける
 
 **実行例**:
 

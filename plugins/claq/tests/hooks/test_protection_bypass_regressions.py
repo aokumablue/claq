@@ -3,7 +3,7 @@
 release-verify v0.9.48 の実起動で、`Security Guardrails` が満点のまま
 `block_no_verify` / `bash_config_protection` / `config_protection` の 7 経路が
 素通りしていた。`harness_audit` はフックの**存在**を測るだけで実効性を測らない
-（`skills/maintain/SKILL.md` のステップ6 が明記）ため、実効性の回帰はこのファイルの
+（`skills/maintain/SKILL.md` のステップ5 が明記）ため、実効性の回帰はこのファイルの
 block / allow 一覧が担う。
 
 `allow` 側を同じ表に置くのは、fail-closed へ寄せた判定が通常操作を巻き込んでいない

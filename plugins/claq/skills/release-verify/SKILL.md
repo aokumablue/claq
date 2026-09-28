@@ -151,7 +151,7 @@ claq_run claq.ci.scan_scaffold_drift
 ```
 
 - `0`（ドリフトなし）: 対応不要
-- `1`（未知の足場タグ検出）: 実 transcript による一次証跡なので、通常の指摘として裁定に載せる。3 択の振り分け（ホスト足場 → `lib/harness.py`、依頼本文の良性 HTML タグ → `BENIGN_TAGS`、どちらでもない → コードスパン除去の穴）は `../maintain/SKILL.md` `## ステップ6: final gate` に従う
+- `1`（未知の足場タグ検出）: 実 transcript による一次証跡なので、通常の指摘として裁定に載せる。3 択の振り分け（ホスト足場 → `lib/harness.py`、依頼本文の良性 HTML タグ → `BENIGN_TAGS`、どちらでもない → コードスパン除去の穴）は `../maintain/SKILL.md` `## ステップ5: final gate` に従う
 - `2`（走査対象ゼロ）と `127`（`claq_run` が root ポインタ未記録で解決できない）: 合格ではなく未実施。コンポーネント単位の `Not run` とは別に数え、出力に `Scaffold-Drift: NOT-RUN` を必ず書く
 
 ### 裁定の規則
