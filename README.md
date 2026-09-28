@@ -102,9 +102,9 @@ claude plugin install claq@claq
 
 | Skill | 起動方法 | 実行形態 | 用途 | 一言説明 |
 |---|---|---|---|---|
-| [`adr`](plugins/claq/skills/adr/SKILL.md) | 自動発火 / 内部委譲のみ | inline | アーキ決定記録 | セッション中のアーキテクチャ決定を自動検出し、現在有効な判断基準として記録 |
+| [`adr`](plugins/claq/skills/adr/SKILL.md) | 自動発火 / 内部委譲のみ | inline | アーキ決定記録 | 明示の依頼か重要な選択の確定時に、アーキテクチャ決定を現在有効な判断基準として記録（暗黙の決定は提案のみ・書き込みは承認後） |
 | [`checkpoint`](plugins/claq/skills/checkpoint/SKILL.md) | 自動発火 / 内部委譲のみ | inline | 反復ループの中断復旧 | 長い反復ループの進捗をディスクに保存し、中断後の再開を高速化 |
-| [`grillme`](plugins/claq/skills/grillme/SKILL.md) | 自動発火 + `/grillme` | inline | 要件のすり合わせ | 共通理解まで徹底質問し、意思決定ツリーの各分岐を解決 |
+| [`grillme`](plugins/claq/skills/grillme/SKILL.md) | 自動発火 + `/grillme` | inline | 要件のすり合わせ | 要件が曖昧なときに共通理解まで質問し、意思決定ツリーの各分岐を解決 |
 | [`html-gen`](plugins/claq/skills/html-gen/SKILL.md) | 自動発火 + `/html-gen` | inline | サイト/ダッシュボード生成 | shadcn/ui のデザイントークンでモダンな Web サイト・ダッシュボードを新規作成 |
 | [`learn`](plugins/claq/skills/learn/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 知識カード蓄積 | セッションから再利用可能な知識カードを抽出し knowledge テーブルへ蓄積 |
 | [`loop-audit`](plugins/claq/skills/loop-audit/SKILL.md) | 自動発火 + `/loop-audit` | fork | ループ収束品質診断 | loop-dev 開発サイクルの収束品質を履歴から集計しスコア化 |
@@ -119,7 +119,7 @@ claude plugin install claq@claq
 | [`refactor-prep`](plugins/claq/skills/refactor-prep/SKILL.md) | 自動発火 / 内部委譲のみ | fork | リファクタ事前準備 | 対象分割・依存可視化・実行前テストセットを最小コストで確定（`refactor` 専用） |
 | [`refactor-rollback`](plugins/claq/skills/refactor-rollback/SKILL.md) | 自動発火 / 内部委譲のみ | inline | ロールバック計画 | refactor-prep の出力を受けてファイル単位ロールバック計画を確定し失敗時の復旧を高速化 |
 | [`release-verify`](plugins/claq/skills/release-verify/SKILL.md) | 自動発火 + `/release-verify` | inline | リリース前実起動検証 | 配布ビルドへ実 payload を流し exit code と出力を実測して裁定する |
-| [`search`](plugins/claq/skills/search/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 既存解決策探索 | 実装前にツール/ライブラリ/パターンを並列調査してからカスタムコード作成へ進む |
+| [`search`](plugins/claq/skills/search/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 既存解決策探索 | 新機能・新しい依存・新しい抽象化の前に、既存実装・ライブラリ・MCP・スキルを調べて採用／拡張／自作を決める |
 | [`secure`](plugins/claq/skills/secure/SKILL.md) | 自動発火 + `/secure` | inline | セキュリティチェックリスト | 認証・決済・秘匿情報・LLM/エージェント連携実装時の包括的セキュリティチェックリストとパターン提供 |
 | [`skill-make`](plugins/claq/skills/skill-make/SKILL.md) | 自動発火 / 内部委譲のみ | fork | スキル生成本体 | 新スキル生成/eval実行/ベンチマーク分析/説明文最適化（`skill-gen` 専用委譲先） |
 | [`skill-tune`](plugins/claq/skills/skill-tune/SKILL.md) | 自動発火 + `/skill-tune` | fork | スキル改善反復 | 自己申告と指示側メトリクスの両面評価→最小修正→再評価を収束まで繰り返す |
