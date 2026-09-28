@@ -16,6 +16,10 @@ commands/skills/agents/hooks をレビューし、実害を直し、指示文書
 3. 既存の文言を再利用する: 新しい表現を発明せず、tdd-writer / reviewer / feat-dev / loop-dev の既存の文言を使う（トークンと表現の揺れを増やさないため）。禁止事項を列挙するより、肯定形の原則で書く
 4. 両ハーネス互換: プラグインは Claude Code（主）と GitHub Copilot CLI（副）の両方で動く。ハーネスに依存する入出力は `hook_common` / `output_adapter` の既存の関門（`emit_block_output` / `adapt_context_output` 等）に集め、Copilot で実現できない機能には同等の代替（無理なら安全側に倒した明示的なスキップ）を実装する。Claude Code 側の処理経路は変えない。ハーネスの判定やプロトコルの分岐をフック内に直書きした実装は、レビューで指摘して直す
 
+## 停止点
+
+止まるのは次のときだけ: 対象 surfaces が見つからない（`BLOCKED`）、`--dry-run` でステップ2 を終えた、final gate を 3 周で満たせない、ステップ6 を終えた。途中経過の報告・次の手順の予告・続行してよいかの確認で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返る）。進捗のメモは次のツール呼び出しと同じ応答に書く。
+
 ## スコープ
 
 - 主対象: `plugins/claq/{commands,skills,agents,hooks}`（`--scope` で上書き）。指摘が指す実装ファイル（`src/claq/hooks/` 等）の修正も含む

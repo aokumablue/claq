@@ -10,6 +10,10 @@ user-invocable: true
 
 drift の判定は `../maintain/SKILL.md`、脆弱性の観点は `../secure/SKILL.md` に従い、ここで定義し直さない。
 
+## 停止点
+
+ユーザーに問うのはステップ4 の裁定だけ。インベントリ・実起動・再実測・修正サイクルの途中では、報告だけして応答を終えない（途中の報告は次のツール呼び出しと同じ応答に書く）。
+
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `release verify smoke {コンポーネント名}` / `bypass 実測 exit code`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`。root ポインタが未記録の文脈では `claq_run` が exit 127 で解決できないので、そのときは `python3 -m claq.mem.cli search "..."` を直接叩く（手順は飛ばさない）

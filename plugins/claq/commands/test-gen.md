@@ -6,6 +6,10 @@ command: /test-gen
 
 # テストコード生成フロー
 
+## 停止点
+
+止まるのは、ステップ2 の `BLOCKED`（テストコマンドを検出できない）と、外部ライブラリの追加の確認だけ。それ以外のステップの区切りでは報告だけして応答を終えず、ステップ5 の要約まで進む（途中の報告は次のツール呼び出しと同じ応答に書く）。
+
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `test test-gen coverage decision-table {対象ファイルパス}`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`

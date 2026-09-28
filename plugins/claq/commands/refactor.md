@@ -6,6 +6,10 @@ command: /refactor
 
 # 統合リファクタリング
 
+## 停止点
+
+止まるのは、ステップ1 の `BLOCKED`（effective scope が空）と、ステップ2 で基準を取れないときだけ。それ以外のステップの区切りでは報告だけして応答を終えず、ステップ9 の要約まで進む（途中の報告は次のツール呼び出しと同じ応答に書く）。
+
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`

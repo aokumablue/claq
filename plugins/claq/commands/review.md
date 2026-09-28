@@ -6,6 +6,10 @@ command: /review
 
 # コードレビュー
 
+## 停止点
+
+止まるのは、ステップ4 の途中失敗（loop-dev 未収束・テスト赤）のときだけ。レポートや分類を示した後も応答を待たず、ステップ5 まで進む（途中の報告は次のツール呼び出しと同じ応答に書く）。
+
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `review violation security` / `{変更ファイル名}`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`。既存カードと同じ違反が再発していれば、警告レベルを 1 段上げて「繰り返し違反」と書く
