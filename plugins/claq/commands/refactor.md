@@ -8,89 +8,72 @@ command: /refactor
 
 ## 永続メモリ
 
-- 注入: SessionStart の `mem context` が `<claq-memory>` を自動投入（`status='active'` のみ）
-- 参照: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提。クエリ例 `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`
-- 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
-
-## skill 起動メカニズム
-
-`refactor-prep` / `refactor-rollback` / `loop-dev` は `user-invocable: false` の skill。description マッチで Claude Code が Skill ツール経由で起動する。本コマンドのステップ1で「refactor-prep skill を起動」「refactor-rollback skill を起動」、ステップ7で「loop-dev skill を起動」と明示することで発火する。`refactor-prep` / `loop-dev` は `context: fork`（結果は報告として受領）、`refactor-rollback` は inline 実行で Rollback Blueprint が本セッションに直接展開される。
+- 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`
+- 記録: ステップ8 の基準で `claq_mem_learn` を使う
 
 ## ステップ1: preflight（スコープ確定 + 実行準備）
 
-スコープ確定（優先順）: 引数パス（ディレクトリ=配下全ファイル/ファイル=そのファイル） → `git diff --name-only HEAD`
+スコープは次の優先順で決める: 引数パス（ディレクトリ = 配下の全ファイル / ファイル = そのファイル）→ `git diff --name-only HEAD`。
 
-着手前に実行:
+着手前に Skill ツールで次の 2 つを起動する。どちらも省かない。
 
-- `refactor-prep` skill 起動（必須）: 対象分割・依存可視化・テストセット確定
-- `refactor-rollback` skill 起動（必須）: ファイル単位リバート計画（Rollback Blueprint）生成
+- `refactor-prep` skill: 対象分割・依存可視化・テストセットを確定する（fork 実行。結果は報告で受け取る）
+- `refactor-rollback` skill: ファイル単位のリバート計画（Rollback Blueprint）を作る（inline 実行で本セッションに展開される）。ステップ3 以降の `git checkout -- <file>` は処理開始前の未コミット編集も区別なく破棄するため、その退避（worktree clean の確認と baseline patch の保存）もここで行われる
 
-`deps.from` / `deps.to` は `groups` 配列のインデックスを指す。
+`deps.from` / `deps.to` は `groups` 配列のインデックスを指す。`deps_order` はトポロジカル順に解決し、復旧時は逆順で適用する。`refactor-rollback` が `CAUTION` としたファイルは自動適用せず最終要約に記録し、`Skip Rules`（`{file, reason, required_action}`）のファイルは処理対象から外す。
 
-`refactor-rollback` 運用規約:
-
-- `CAUTION` ファイルは自動適用せず最終要約に記録
-- `Skip Rules` は `{file, reason, required_action}` で出力し処理対象から除外
-
-**effective scope の確定（precondition gate）**: `refactor-rollback` の出力を受け取った直後、ここで対象を確定する。
+`refactor-rollback` の出力を受け取った直後に、実効スコープを確定する（precondition gate）。
 
 1. `effective_scope = スコープ確定の結果 − Skip Rules の file 集合 − CAUTION の file 集合`
-2. `effective_scope` が空なら、**編集を 1 件も行わずに** `BLOCKED: effective scope が空です（Skip Rules: {file 一覧}）` として終了する。リバート不能を final gate で初めて問題化しない — その時点では変更が既に残っている
-3. 確定した `effective_scope` を、ステップ3〜5 の各委譲の依頼文へファイルパス一覧として明示的に引き渡す（`review.md` の「レビュー対象スコープ（対象ファイルパス）を明示的に引き渡す」と同じ形）。親の手順書に書いた除外は子へ届かないため、scope も依頼文で渡す
-- `deps_order` はトポロジカル順で解決し、復旧時は逆順で適用
-- ステップ3以降で使う `git checkout -- <file>` は index/HEAD 復元のため処理開始前の未コミット編集も区別なく破棄する。この前提チェック（`git status --porcelain` によるworktree clean 確認・非cleanなら baseline patch 退避）は `refactor-rollback` 手順0で行うため、本ステップの `refactor-rollback` 起動は省略しない
+2. `effective_scope` が空なら、1 件も編集せずに `BLOCKED: effective scope が空です（Skip Rules: {file 一覧}）` として終える（リバートできない問題を final gate まで持ち越すと、変更が残ったまま止まるため）
+3. ステップ3〜5 の各委譲の依頼文へ、`effective_scope` をファイルパス一覧として明示して渡す（この手順書に書いた除外は子エージェントへ届かないため）
 
 ## ステップ2: baseline
 
-1. テスト・linter を実行し基準を取得
-2. 既存失敗を記録し新規失敗判定に使用
-3. 基準取得不能なら実装を止め、原因解消後に再開
+1. テスト・linter を実行して基準を取る
+2. 既存の失敗を記録し、新規失敗の判定に使う
+3. 基準を取れなければ実装を止め、原因を解消してから再開する
 
 ## ステップ3: clean（`claq:code-refiner`）
 
-デッドコード削除。委譲時は依頼文へ `mode: clean` と `effective_scope`（対象ファイルパス一覧）を明示する（親の手順書に書いた分岐は子へ届かないため、モードは依頼文で渡す）。各ファイル適用ごとにテスト実行→失敗時は `git checkout -- <file>` で単ファイルリバートして継続。
-
-`--mode=clean` 指定時はステップ3を実行後、ステップ4（simplify）とステップ5（perf）を飛ばしステップ6（review + secure）→ステップ7 final gate で終了。CRITICAL/HIGH ブロック判定は部分モードでも省略しない。
+デッドコードを削除する。依頼文に `mode: clean` と `effective_scope` を明示する（モードも依頼文で渡さないと子へ届かない）。ファイルを 1 つ適用するごとにテストし、失敗したら `git checkout -- <file>` でそのファイルだけ戻して続ける。
 
 ## ステップ4: simplify（並列, `claq:code-refiner`）
 
-グループ化して**同時起動**（上限4）。委譲時は依頼文へ `mode: simplify` と `effective_scope`（対象ファイルパス一覧）を明示する。
-
-起動直前にグループ間のファイル重複を確認する: `refactor-prep` の `groups` は本来ファイル排他前提だが、委譲直前に実際の対象ファイル集合を突き合わせ、重複があれば該当グループを同時起動せず直列化する（同一ファイルへの並列編集は片方の変更が失われるリスク）。
-可読性・一貫性・保守性を改善（機能保持前提）。グループ完了ごとにテスト→失敗時はファイル単位リバート。
-
-`--mode=simplify` 指定時はステップ4を実行後、ステップ5（perf）を飛ばしステップ6（review + secure）→ステップ7 final gate で終了。CRITICAL/HIGH ブロック判定は部分モードでも省略しない。
+グループ単位で同時に起動する（上限 4）。依頼文に `mode: simplify` と `effective_scope` を明示する。起動の直前に各グループの対象ファイル集合を突き合わせ、重複があるグループは同時に起動せず直列にする（同じファイルを並列に編集すると片方の変更が失われるため）。機能を保ったまま可読性・一貫性・保守性を改善し、グループが終わるごとにテストし、失敗したらファイル単位で戻す。
 
 ## ステップ5: perf（`claq:code-refiner`）
 
-simplify 全グループ完了後に開始。委譲時は依頼文へ `mode: perf` と `effective_scope`（対象ファイルパス一覧）を明示する。不要計算・重複I/O・N+1・過剰メモリアロケーションを優先改善。計測データを渡さない運用のため、`code-refiner` は明白なアルゴリズム欠陥の修正に限定し実施内容へ「未計測」と明示する（実測を伴う最適化が必要な場合はプロファイル取得を先行させる）。変更ごとにテスト→失敗時はファイル単位リバート。
+simplify の全グループが終わってから始める。依頼文に `mode: perf` と `effective_scope` を明示する。計測データは渡さないので、code-refiner は明白なアルゴリズム欠陥（不要計算・重複 I/O・N+1・過剰なメモリアロケーション）の修正に限り、実施内容に「未計測」と書く（実測を伴う最適化が要るならプロファイル取得を先に行う）。変更ごとにテストし、失敗したらファイル単位で戻す。
 
 ## ステップ6: review + secure（並列）
 
-以下を**同時起動**し結果を統合:
+`claq:reviewer`（品質・設計・保守性）と `claq:security-auditor`（セキュリティ・脆弱性）を同時に起動し、結果を統合する。
 
-- `claq:reviewer`: 品質・設計・保守性
-- `claq:security-auditor`: セキュリティ・脆弱性
+## 部分モード
+
+`--mode=clean` はステップ3 → 6 → 7、`--mode=simplify` はステップ4 → 6 → 7 だけを実行する。部分モードでもステップ6 と CRITICAL/HIGH のブロック判定は省かない。
 
 ## ステップ7: final gate
 
-1. テストと linter を再実行
-2. **CRITICAL または HIGH** が1件でもあればブロック
-3. 失敗変更はファイル単位リバートし再検証
-4. 全通過のみ完了
+1. テストと linter を再実行する
+2. CRITICAL または HIGH が 1 件でもあればブロックする
+3. 失敗した変更はファイル単位で戻して再検証する
+4. すべて通ったときだけ完了にする
 
-`Final Gate: PASS` の導出規則: **当該モードの実行対象 stage**（全体モード = clean/simplify/perf/review+secure、`--mode=clean` = clean/review+secure、`--mode=simplify` = simplify/review+secure）が全て「完了」（スキップ・未実行・リバートのまま放置ではない）かつ CRITICAL/HIGH が 0 件のときのみ PASS。リバート不能（Skip Rules / `revert=NOT_AVAILABLE`）はステップ1の precondition gate で既に排除済みであり、ここでは判定材料にしない — final gate で初めて問題化すると、変更が残ったまま BLOCKED になる。いずれか 1 stage でも未完了・全ファイルリバートで実質ゼロ変更・CRITICAL/HIGH 残存のいずれかに該当すれば `BLOCKED`。ステップ6 の判定は `reviewer` / `security-auditor` の出力に `Blockers: {n}` 行が実際に含まれていることを前提とする — 行が無い場合は「指摘ゼロ」ではなく「判定を取得できなかった」として `BLOCKED` にする。ただし収束 gate の最終権限は `loop-dev` の evaluate であり、本 gate はその入力を作る。
+`Final Gate: PASS` になるのは次をすべて満たすときだけで、1 つでも欠ければ `BLOCKED`。
 
-`--mode=clean/simplify`（部分モード）時もステップ6（review + secure）は省略せず実行する（全体モードとの違いは、実行対象 stage が当該モードの担当 stage + review+secure に限られる点。`--mode=clean` はステップ4（simplify）も、`--mode=simplify` はステップ3（clean）も通らない）。CRITICAL/HIGH ブロック判定（項目2）はステップ6の結果を用いて部分モードでも全体モードと同様に適用する。
+- 実行対象の stage（全体 = clean/simplify/perf/review+secure、`--mode=clean` = clean/review+secure、`--mode=simplify` = simplify/review+secure）がすべて完了している。スキップ・未実行・リバートしたままの放置は完了ではなく、全ファイルがリバートされて実質変更ゼロになった stage も未完了とする
+- CRITICAL/HIGH が 0 件
+- ステップ6 の `reviewer` / `security-auditor` の出力に `Blockers: {n}` 行が実際にある。無ければ「指摘ゼロ」ではなく「判定を取れなかった」として `BLOCKED` にする
 
-CRITICAL/HIGH blocker 検出時またはテスト/lint 失敗時は `loop-dev` skill を起動（入力: `task` = blocker 修正タスク（final gate の CRITICAL/HIGH 指摘一覧の解消） / `approved_plan` = blocker 一覧で plan 縮退 / `task_type` = `refactor-fix`）。loop-dev 停止時（2 反復で未収束）はファイル単位リバート方針に従い、未解消分を要約に記載。
+リバートできないファイル（Skip Rules / `revert=NOT_AVAILABLE`）はステップ1 の precondition gate で除外済みなので、ここでは判定材料にしない。収束 gate の最終権限は `loop-dev` の evaluate にあり、本 gate はその入力を作る。
 
-## ステップ8: 学びの記録（必須実行・記録は該当時のみ）
+CRITICAL/HIGH の blocker、またはテスト/lint の失敗が出たら、Skill ツールで `loop-dev` skill を起動する（`task` = final gate の CRITICAL/HIGH 指摘の解消 / `approved_plan` = blocker 一覧（plan 段を縮退） / `task_type` = `refactor-fix`）。loop-dev が 2 反復で収束しなければ、ファイル単位のリバート方針に従い、未解消分を要約に書く。
 
-ファイル単位リバートが発生した変更と、ステップ1の依存可視化で分かった構造は
-次のリファクタでも効く。要約の前にここで残す。
+## ステップ8: 学びの記録（毎回実行・記録は該当時のみ）
 
-記録する:
+ファイル単位のリバートが起きた変更と、ステップ1 の依存可視化で分かった構造は、次のリファクタでも効く。要約の前に残す。
 
 | 見つけたもの | kind | title に書くこと |
 |---|---|---|
@@ -100,12 +83,7 @@ CRITICAL/HIGH blocker 検出時またはテスト/lint 失敗時は `loop-dev` s
 | 合意された、明文化されていないコーディング規約 | `convention` | 守るべきルール |
 | 採用した設計と却下した案 | `decision` | 選択と理由 |
 
-記録しない:
-
-- **リポジトリを読めば分かること** — ディレクトリ構成、公開 API、型定義
-- **作業ログ** — 削除ファイル一覧・件数・スコア。要約に書けば足りる
-- **そのセッション限りの妥協** — 「今回は時間の都合で perf を飛ばした」
-- **一般的なリファクタ知識** — 「長い関数は分割する」など
+記録しないもの: リポジトリを読めば分かること、作業ログ（削除ファイル一覧・件数・スコアは要約に書けば足りる）、そのセッション限りの妥協、一般的なリファクタ知識。
 
 ```bash
 . "$HOME/.claq/env.sh" || exit 127
@@ -114,11 +92,11 @@ claq_mem_learn --kind fact --scope repo --domain <domain> \
   --body "<根拠と、次に触るときの注意>"
 ```
 
-該当ゼロなら 1 件も記録しない（0 件は正しい結果）。詳細基準は `../skills/learn/SKILL.md` の「記録する / しない」。
+該当が無ければ 1 件も記録しない（0 件は正しい結果）。詳細基準は `../skills/learn/SKILL.md` の「記録する / しない」。
 
 ## ステップ9: 要約
 
-次のテンプレートで提示する:
+次のテンプレートで示す。Issues は `claq:reviewer` と `claq:security-auditor` の統合件数。末尾にステップ8 で記録した key を 1 行で添える（記録が無ければ `Learned: なし`）。
 
 ```text
 Unified Refactor
@@ -133,21 +111,17 @@ Issues:     CRITICAL {c} / HIGH {h} / MEDIUM {m} / LOW {l}
 Final Gate: PASS / BLOCKED
 ```
 
-Issues は `claq:reviewer` と `claq:security-auditor` の統合件数。
-末尾にステップ8で記録した key を 1 行で添える（記録が無ければ `Learned: なし`）。
-
 ## ルール
 
-- 既定スコープは変更差分。パス/ディレクトリ指定で任意ファイルにも対応
-- 失敗時は必ずファイル単位リバート
-- CRITICAL/HIGH が残る状態では承認・コミットしない
-- 各委譲の完了主張はテスト/lint 出力で裏取りし、証跡なき完了は未検証扱いとする
-- 機能変更禁止（WHAT不変）。挙動変更の疑義がある変更は要確認として報告
-- 安全性に疑義がある変更はスキップし最終要約に記載
-- サブエージェント委譲必須（`claq:code-refiner`（`mode` = clean / simplify / perf）/ `claq:reviewer` / `claq:security-auditor`）。実行順・並列制御・ファイル単位リバートは本コマンドが直接行う（束ねる作業を別エージェントへ切り出さない）
-- 収束 gate の最終権限は loop-dev の evaluate
+- 既定スコープは変更差分。パス/ディレクトリ指定で任意のファイルにも使える
+- 失敗したらファイル単位でリバートする
+- CRITICAL/HIGH が残っている状態では承認・コミットしない
+- 各委譲の完了の主張はテスト/lint の出力で裏を取り、証跡の無い完了は未検証として扱う
+- 機能を変えない（WHAT 不変）。挙動が変わる疑いのある変更は要確認として報告する
+- 安全性に疑いがある変更は飛ばし、最終要約に書く
+- 作業は `claq:code-refiner`（`mode` = clean / simplify / perf）・`claq:reviewer`・`claq:security-auditor` に委譲する。実行順・並列制御・ファイル単位のリバートは本コマンドが直接行う
 
 ## 引数
 
 - 位置 #1: `[ファイルパス or ディレクトリ]`（省略時: 変更差分）
-- `--mode=clean|simplify`: 部分モード指定（省略時: clean→simplify→perf→review 全段階実行）
+- `--mode=clean|simplify`: 部分モード（省略時: clean → simplify → perf → review の全段階）
