@@ -13,13 +13,13 @@ user-invocable: true
 `#0d1117`、`#2563eb` の類を 1 つでも手書きすると検査で落ちる
 （手書きファイルに生の hex や `oklch()` があること自体が違反）。
 
-| やってはいけない | やる |
+| 避ける | 代わりに |
 |---|---|
 | hex や `oklch()` を手で書く | `var(--primary)` / `var(--chart-N)` を使う |
 | ゼロから HTML を書く | `assets/template/` を複製して中身を差し替える |
 | `tokens.css` を手で直す | `tokens.json` を直して `--write-css` で再生成する |
 | React や Tailwind CLI を足す | 素の CSS のまま（理由は `references/design.md`） |
-| トグルを後付けする | テンプレのライト/ダークボタンを残す（削除禁止） |
+| トグルを後付けする | テンプレのライト/ダークボタンを残す |
 | 目視だけで完了する | `check_site.py` が PASS するまで完了報告しない |
 
 設計原則・レイアウト・コンポーネント・チャートの作法は `references/design.md`。
@@ -45,9 +45,11 @@ React 版の shadcn/ui ではなくトークンを CSS へ写している理由�
 
 ### 2. テンプレートを複製する
 
-テンプレートはスキル起動時に提示されるベースディレクトリの `assets/template/`
-にある。提示が無いときだけ `find "$HOME/.claude/plugins/cache" -maxdepth 7 -type d
--path '*/html-gen/assets/template'`（このフォールバックは Claude Code のキャッシュ配置に固有。他ホストではベースディレクトリの提示が必須）で探す。`/Users` や `$HOME` 全体を起点にしない。
+テンプレートはスキル起動時に提示されるベースディレクトリの `assets/template/` にある。提示が無いときだけ次で探す（Claude Code のキャッシュ配置に固有のフォールバックで、他ホストではベースディレクトリの提示が必須）。`/Users` や `$HOME` 全体を起点にしない（返ってこない）。
+
+```bash
+find "$HOME/.claude/plugins/cache" -maxdepth 7 -type d -path '*/html-gen/assets/template'
+```
 
 複製先は完全なリテラル絶対パスで書く（`$VAR` を含めると保護フックに止められる）。
 

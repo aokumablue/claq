@@ -14,7 +14,7 @@ user-invocable: true
 最悪なのは、旧仕様でも import が通りサーバが起動すること。クラッシュしない
 ので誤りに気づけない。ゼロから書かず、写経もせず、`assets/template/` を複製する。
 
-| 旧（書いてはいけない） | 2026-07-28 |
+| 旧仕様（書かない） | 2026-07-28 |
 |---|---|
 | `FastMCP` | `MCPServer`（旧名も import は通る。最も危険） |
 | `initialize` ハンドシェイク | 廃止。各リクエストの `_meta` が版と capability を運ぶ |
@@ -42,10 +42,11 @@ user-invocable: true
 
 ### 2. テンプレートを複製する
 
-テンプレートはスキル起動時に提示されるベースディレクトリの `assets/template/`
-にある。提示が無いときだけ `find "$HOME/.claude/plugins/cache" -maxdepth 7 -type d
--path '*/mcp-gen/assets/template'`（このフォールバックは Claude Code のキャッシュ配置に固有。他ホストではベースディレクトリの提示が必須）で探す。`/Users` や `$HOME` 全体を起点にしない
-（返ってこない）。
+テンプレートはスキル起動時に提示されるベースディレクトリの `assets/template/` にある。提示が無いときだけ次で探す（Claude Code のキャッシュ配置に固有のフォールバックで、他ホストではベースディレクトリの提示が必須）。`/Users` や `$HOME` 全体を起点にしない（返ってこない）。
+
+```bash
+find "$HOME/.claude/plugins/cache" -maxdepth 7 -type d -path '*/mcp-gen/assets/template'
+```
 
 複製先は完全なリテラル絶対パスで書く（`$VAR` を含めると保護フックに止められる）。
 
