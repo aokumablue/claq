@@ -66,7 +66,7 @@ for event, groups in d['hooks'].items():
 "
 ```
 
-計数の単位: `hooks {n}` は上のスクリプトが出力するフックエントリの数（`powershell:` の続き行は数えない）。1 エントリは POSIX 用の `command` と PowerShell 用の `powershell` の 2 行を持ち、どちらを実行するかはホストが決める（cmd.exe のホストは `command` を PATHEXT で `.cmd` へ解決し、PowerShell を優先するホスト（Copilot CLI）は `powershell` を実行する）。Windows のホストで測るときは、どちらの行を起動したかをレポートに書く（`(未宣言)` のエントリはそのホストで起動しないことがある）。`tool_input` を受け取るのは PreToolUse の分だけなので、ステップ2 の payload 形状マトリクスの対象件数は「うち N 件」と別に書く。
+計数の単位: `hooks {n}` は上のスクリプトが出力するフックエントリの数（`powershell:` の続き行は数えない）。1 エントリは POSIX 用の `command` と PowerShell 用の `powershell` の 2 行を持ち、どちらを実行するかはホストが決める。cmd.exe のホストは `command` を PATHEXT で `.cmd` へ解決し、Copilot CLI のように PowerShell を優先するホストは `powershell` を実行する。Windows のホストで測るときは、どちらの行を起動したかをレポートに書く（`(未宣言)` のエントリはそのホストで起動しないことがある）。`tool_input` を受け取るのは PreToolUse の分だけなので、ステップ2 の payload 形状マトリクスの対象件数は「うち N 件」と別に書く。
 
 `user-invocable: false` はホストの Skill ツールからの直接起動を妨げない（`/` 補完に出なくなるだけ）。そのため skill は直接起動を第一手とし、委譲の経路そのものを測りたいときだけ委譲元のコマンドを起動する。委譲元:
 

@@ -46,7 +46,9 @@ baseline を取る（リポジトリ直下の `.venv` を有効化する）。
 - `python3 -m pytest -q`（全体）と `cd plugins/claq && python3 -m pytest -q --cov`（カバレッジ）。`fail_under=100` は `plugins/claq` を cwd にしたときだけ効く（リポジトリ直下には coverage 設定が無く、100% 未満でも exit 0 になる）
 - `ruff check plugins/claq`（src と tests の両方。tests を外すと未定義名や不要な import が残る）
 - `python3 -m claq.ci.validate_skills`（`validate_commands` / `validate_agents` / `validate_hooks` も同じ形で 4 つすべて）
-- `python3 -m claq.ci.harness_audit repo --root plugins/claq --target-kind repo --format json`（audit の scope は `repo|hooks|skills|commands|agents` のキーワードで、本スキルの `--scope`（パス）とは別物。`--root` を省くとリポジトリ直下が対象になり consumer と誤判定され、provider 側の checks を見なくなる。`--target-kind repo` は自動判定との食い違いを FAIL で検出する）
+- `python3 -m claq.ci.harness_audit repo --root plugins/claq --target-kind repo --format json`
+  - audit の scope は `repo|hooks|skills|commands|agents` のキーワードで、本スキルの `--scope`（パス）とは別物
+  - `--root` を省くとリポジトリ直下が対象になって consumer と誤判定され、provider 側の checks を見なくなる。`--target-kind repo` は自動判定との食い違いを FAIL で検出する
 
 既存の失敗を記録し、新しい失敗の判定基準にする。
 

@@ -22,7 +22,7 @@ user-invocable: false
 ## 手順
 
 0. worktree clean の確認: 手順1 で決める `git checkout -- {file}` は index/HEAD から戻すため、処理開始前からあった未コミットの編集も区別なく捨てる。対象について `git status --porcelain -- {scope_files}` を実行し、未コミットの変更があれば `git diff -- {scope_files}` をリバート対象外の場所へ baseline patch として保存してから進む。保存できなければ（書き込み不可・diff 取得失敗等）そのファイルはリバート対象にせず、Skip Rules（`required_action=manual_review`）へ回す
-1. 復旧コマンドの確定: 各ファイルが tracked か untracked かを `git ls-files` で判定する（tracked = `git checkout -- {file}` / untracked（新規作成）= `rm {file}`）。untracked と判定しても、パスを canonicalize してリポジトリルート配下の相対パス（`..` を含まない）であることを確かめ、満たさないもの（`..`・絶対パス・リポジトリ外）には `rm` を生成せず、SAFE/CAUTION も付けずに Skip Rules（`required_action=manual_review`）へ回す（範囲外パスの不可逆な削除を防ぐため）
+1. 復旧コマンドの確定: 各ファイルが tracked か untracked かを `git ls-files` で判定する。tracked なら `git checkout -- {file}`、新規作成の untracked なら `rm {file}`。untracked と判定しても、パスを canonicalize してリポジトリルート配下の `..` を含まない相対パスであることを確かめる。満たさないパス（`..`・絶対パス・リポジトリ外）には `rm` を生成せず、SAFE/CAUTION も付けずに Skip Rules（`required_action=manual_review`）へ回す（範囲外パスの不可逆な削除を防ぐため）
 2. CAUTION の判定: 公開 API・外部 I/O・永続化の境界を含む、または依存グループをまたぐファイルに `CAUTION` を付ける
 3. 検証コマンドの紐付け: 各ファイルの `verify` には、そのファイルが属する `groups[i]` と同じ添字の `tests.group[i]` を使う（同じグループのファイルは同じコマンドを共有する。`tests.group[0]` を全ファイルへ割り当てるような選び方はしない）。`tests.group` が空配列、`tests.group[i]` が空文字列、または添字が範囲外なら、`verify` は `NOT_AVAILABLE` にし、File Rules に残したうえで Skip Rules にも `required_action=manual_review` で記録する。実行できない検証を実行できるかのように出力しない。`tests.baseline` / `tests.final` は Blueprint 全体の前後で使うもので、個々の File Rule には割り当てない
 4. 復旧順序: `deps` をトポロジカル順に解決し、リバートは依存の逆順で行う。循環依存（refactor-prep が記録しうる）は、循環に属する全ファイルを 1 グループとして一括でリバートし、Skip Rules に cyclic-dependency を `required_action=bulk_revert` で記録する（手動判断が要る不確実なケースとは区別する）

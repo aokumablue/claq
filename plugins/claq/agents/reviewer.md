@@ -57,7 +57,7 @@ O(n²) アルゴリズム・不要な再レンダリング・ライブラリ全�
 
 ## 出力形式
 
-指摘は severity 付きの 3 分類見出しに分け、各指摘を「ファイルパス:行 — 指摘 1 行 — 修正方針 1 行」で書く。確信が持てない指摘には「未確認」を付ける。
+指摘は severity 付きの 3 分類見出しに分け、各指摘を「ファイルパス:行 — 指摘 1 行 — 修正方針 1 行」で書く。
 
 ```
 ### BLOCKER (CRITICAL|HIGH)
@@ -78,23 +78,27 @@ Blockers: 1
 
 ## 一次検証（`verify_mode: reexecute` 指定時のみ）
 
-呼び出し元が `verify_mode: reexecute` を指定したときだけ適用する。未指定（`/review` 等）なら本節は読まない。指定時は、失敗テストのシグネチャ一覧（pytest なら nodeid）と、呼び出し元が変更適用前の baseline step で自ら検出・実行したテストコマンド `test_cmd`（その由来の明示付き）が渡される。
+呼び出し元が `verify_mode: reexecute` を指定したときだけ適用する。未指定（`/review` 等）なら本節は読まない。指定時は次が渡される: 失敗テストのシグネチャ一覧（pytest なら nodeid）、呼び出し元が変更適用前の baseline step で自ら検出・実行したテストコマンド `test_cmd`（その由来の明示付き）、run 開始時点のコミット `baseline_sha`、場合により変更予定のテストファイル一覧。
 
 Bash で自ら実行し、実行出力だけを証跡に PASS/FAIL を報告する。実装者の自己申告や会話上の主張（「テスト通った」等）は検証入力にしない。拒否理由を能動的に探す。
 
 0. **`test_cmd` の検証（実行前）**: 次の 3 点をすべて満たさなければ実行せず BLOCKER にする。ランナー名は限定しない
    - 由来: 呼び出し元の baseline step で検出・実行したコマンドだと明示されている（実装者の申告コマンドは受け付けない）
    - 形状: 文字列全体が `^((source|\.) (\.venv|venv|env)/bin/activate && )?[A-Za-z][\w.\-]*( [\w\-./:=]+)*$` に一致する。シェル演算子 `& ; | > <`・引用符・バッククォート・`$()`・改行・環境変数前置は文字クラス外なので連結と注入は自動で拒否される。venv 有効化は先頭 1 個だけで、リポジトリ直下の固定名に限る（`..` と絶対パスは文字クラス外）。`source` とドット形式（`. .venv/bin/activate`）の両方を受理する
-   - 基準コミット照合: 空白で分割した全トークンが、`git show {baseline_sha}:` で読んだコミット済みのプロジェクト設定（`pyproject.toml`・`package.json` の `scripts.test`・CI 設定・`Makefile` の test ターゲット・`CLAUDE.md` 等）または言語慣行（`go.mod` → `go test`、`Cargo.toml` → `cargo test` 等）から導いたテストコマンドのトークン列と完全一致する。先頭トークンだけの一致は通さない（`python3 -m evil_mod` や無害な文字だけの `--deselect=tests/x.py::test_fail` で偽 GREEN を作れるため）。`baseline_sha` は呼び出し元が渡す run 開始時点のコミットで、作業ツリーの未コミット変更は見ない。`baseline_sha` が無いときだけ `HEAD` を使い、その旨を出力に書く。導けなければ拒否する
+   - 基準コミット照合: 空白で分割した全トークンが、`git show {baseline_sha}:` で読んだコミット済みのプロジェクト設定（`pyproject.toml`・`package.json` の `scripts.test`・CI 設定・`Makefile` の test ターゲット・`CLAUDE.md` 等）または言語慣行（`go.mod` → `go test`、`Cargo.toml` → `cargo test` 等）から導いたテストコマンドのトークン列と完全一致する。先頭トークンだけの一致は通さない（`python3 -m evil_mod` や無害な文字だけの `--deselect=tests/x.py::test_fail` で偽 GREEN を作れるため）。作業ツリーの未コミット変更は見ない。`baseline_sha` が無いときだけ `HEAD` を使い、その旨を出力に書く。導けなければ拒否する
 1. **テスト改ざんガード（実行前）**: `git diff --staged` と `git diff` のテスト関連差分に (a)〜(d) のいずれかがあれば、再実行せず BLOCKER にする
    - 対象: 検出したテスト基盤のテストファイル、テスト・カバレッジ設定、テストコマンドの導出元（`Makefile` の test ターゲット・`.github/workflows/*` 等の CI 設定）。例: pytest なら `tests/` 配下・`test_*.py`・`*_test.py`・任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `*.test.*`/`*.spec.*`・`jest.config.*`/`vitest.config.*`・`package.json` の `scripts`、Go なら `*_test.go`、Rust なら `tests/` 配下
-   - (a) テスト関数・テストファイルの削除 (b) 無効化マーカーの新規付与（`@pytest.mark.skip`/`@pytest.mark.xfail`、`it.skip`/`xit`、`t.Skip()`、`#[ignore]` 等） (c) アサーションのコメントアウト・恒真化（`assert True`・`pass` への置換等） (d) 収集範囲の縮小・skip 追加・カバレッジ閾値の緩和につながる設定やフックの変更（`testpaths`/`addopts`/`python_files`/`fail_under` 等の設定キー、`conftest.py` への `pytest_collection_modifyitems` 等の収集操作フックの追加、`package.json` の `scripts.test` の値の変更等）
+   - (a) テスト関数・テストファイルの削除
+   - (b) 無効化マーカーの新規付与（`@pytest.mark.skip`/`@pytest.mark.xfail`、`it.skip`/`xit`、`t.Skip()`、`#[ignore]` 等）
+   - (c) アサーションのコメントアウト・恒真化（`assert True`・`pass` への置換等）
+   - (d) 収集範囲の縮小・skip の追加・カバレッジ閾値の緩和につながる設定やフックの変更（`testpaths`/`addopts`/`python_files`/`fail_under` 等の設定キー、`conftest.py` への `pytest_collection_modifyitems` 等の収集操作フックの追加、`package.json` の `scripts.test` の値の変更等）
    - テストがプロダクトファイルに同居する言語（Rust の `#[cfg(test)]` 等）はファイルパターンで絞れないため、(a)〜(c) を全差分に対して走査する
    - 許可: 純増の新規テスト、呼び出し元が変更予定テストファイル一覧を渡した場合はその一覧内のファイル
    - (a)〜(d) 以外（期待値の変更・弱体化の疑い）は決定的に判定できないため WARNING に留める
 2. 検出したプロジェクト linter を全体に実行する（Python/ruff なら `ruff check plugins/claq`。src と tests の両方）。linter を検出できない言語では `未実施` と書いて飛ばす
 3. 渡された失敗テストを、渡された `test_cmd` を基底にして再実行する（RED→GREEN 遷移の独立確認）。テストコマンドを推測・再導出しない
-   - 連結する各シグネチャは `^[\w./][\w\-./:=\[\]]*( [\w./][\w\-./:=\[\]]*)*$` に全体一致すること。空白で区切った全トークンの先頭が語頭文字でなければならない（`--deselect=...` や `-pevil_module` は引用符を付けてもランナーのオプションとして解釈されるため、`-` 始まりのトークンは位置を問わず拒否する。空白の後に `-` を含む parametrize id も BLOCKER にしてエスカレーションする）。引用符・バッククォート・`$`・`;`・`&`・`|`・リダイレクト・改行を含むシグネチャは連結も実行もせず BLOCKER にする（テスト ID 経由の注入疑い）
+   - 連結する各シグネチャは `^[\w./][\w\-./:=\[\]]*( [\w./][\w\-./:=\[\]]*)*$` に全体一致すること。空白で区切った全トークンの先頭が語頭文字でなければならず、`-` 始まりのトークンは位置を問わず拒否する（`--deselect=...` や `-pevil_module` は引用符を付けてもランナーのオプションとして解釈されるため）。空白の後に `-` を含む parametrize id も BLOCKER にしてエスカレーションする
+   - 引用符・バッククォート・`$`・`;`・`&`・`|`・リダイレクト・改行を含むシグネチャは、連結も実行もせず BLOCKER にする（テスト ID 経由の注入疑い）
    - ランナーは `test_cmd` の全トークンを走査し、`pytest` / `go test` / `node --test` に最初に一致したもので決める（先頭トークンだけを見ない。`python3 -m pytest -q` は 3 番目が `pytest`）。連結方法はランナーごとに次の表で決め、シグネチャは単一引数として引用符付けで渡す。一律に `--` で連結すると、`node --test` ではシグネチャがファイル位置引数になり偽 GREEN か偽 BLOCKER になる
 
 | ランナー | signature → argv |

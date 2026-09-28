@@ -73,7 +73,13 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 
 リバートできないファイル（Skip Rules / `revert=NOT_AVAILABLE`）はステップ1 の precondition gate で除外済みなので、ここでは判定材料にしない。収束 gate の最終権限は `loop-dev` の evaluate にあり、本 gate はその入力を作る。
 
-CRITICAL/HIGH の blocker、またはテスト/lint の失敗が出たら、Skill ツールで `loop-dev` skill を起動する（`task` = final gate の CRITICAL/HIGH 指摘の解消 / `approved_plan` = blocker 一覧（plan 段を縮退） / `task_type` = `refactor-fix`）。loop-dev が 2 反復で収束しなければ、ファイル単位のリバート方針に従い、未解消分を要約に書く。
+CRITICAL/HIGH の blocker、またはテスト/lint の失敗が出たら、Skill ツールで `loop-dev` skill を起動する。入力:
+
+- `task` = final gate の CRITICAL/HIGH 指摘の解消
+- `approved_plan` = blocker 一覧（plan 段を縮退させる）
+- `task_type` = `refactor-fix`
+
+loop-dev が 2 反復で収束しなければ、ファイル単位のリバート方針に従い、未解消分を要約に書く。
 
 ## ステップ8: 学びの記録（毎回実行・記録は該当時のみ）
 
@@ -117,9 +123,6 @@ Final Gate: PASS / BLOCKED
 
 ## ルール
 
-- 既定スコープは変更差分。パス/ディレクトリ指定で任意のファイルにも使える
-- 失敗したらファイル単位でリバートする
-- CRITICAL/HIGH が残っている状態では承認・コミットしない
 - 各委譲の完了の主張はテスト/lint の出力で裏を取り、証跡の無い完了は未検証として扱う
 - 機能を変えない（WHAT 不変）。挙動が変わる疑いのある変更は要確認として報告する
 - 安全性に疑いがある変更は飛ばし、最終要約に書く
