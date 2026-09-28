@@ -6,12 +6,6 @@ user-invocable: false
 
 # チェックポイント
 
-## 発動タイミング
-
-- 10 ステップ以上の反復ループを始める前
-- 「途中から再開したい」「チェックポイントを作って」
-- レート制限による中断が予想されるセッション
-
 ## 保存先
 
 `~/.claq/session-data/checkpoint-<YYYY-MM-DD>-<slug>.md`
