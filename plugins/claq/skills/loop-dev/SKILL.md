@@ -43,7 +43,7 @@ user-invocable: false
    | 性能改善 | `claq:code-refiner`（依頼文へ `mode: perf` を明示） |
 
    生成の直後に、検出したテストコマンドと linter（本リポジトリなら `python3 -m pytest -q` と `ruff check plugins/claq`。src と tests の両方）を実行し、red なら evaluate へ進む前に同じ generate の中で直す。報告する PASS/FAIL は本セッションで実際に実行したツール出力だけを根拠にし、未実行の項目は未検証と書く。Edit/Write が成功していれば確認のための再 Read はしない（失敗時はツールがエラーを返す）
-4. evaluate: `claq:reviewer` を必ず起動する。認証/ユーザー入力/シークレット/API エンドポイント/支払い、および外部由来の文字列をプロンプト・エージェントへ渡す実装（信頼境界・サブエージェント権限・恒久メモリへの書込み）に触れる変更のときだけ、`claq:security-auditor` を並列に加える
+4. evaluate: `claq:reviewer` を必ず起動する。認証/ユーザー入力/シークレット/API エンドポイント/支払い、および外部由来の文字列をプロンプト・エージェントへ渡す実装（信頼境界・サブエージェント権限・恒久メモリへの書込み）に触れる変更のときだけ、`claq:security-auditor` を並列に加え、reviewer の依頼文に並列であることを書く
    - reviewer には `verify_mode: reexecute`、失敗テストのシグネチャ（反復履歴の tests= と同じもの）、baseline step で自ら検出・実行したテストコマンドを `test_cmd` として渡し、baseline 由来であることを明示する。run 開始時点（反復1 の baseline step より前）のコミット SHA も `baseline_sha` として渡す（反復ごとに green コミットするため、`HEAD` を基準にすると反復2 以降は実装者の変更を含んでしまう）。`approved_plan` から変更予定のテストファイルが分かればその一覧も渡す。generate の自己検証コマンドや「テスト通過」等の自己申告は渡さない（diff とテスト結果は reviewer が自分で取る。反復2 も同じ）
    - スコープガード: `approved_plan` に変更ファイル一覧があるときだけ、編集したファイルが一覧内かを照合し、逸脱は blocker にする（一覧の無い呼び出し元では照合しない）。ただしテスト基盤ファイル（テストランナー・カバレッジの設定や共有フィクスチャ。Python なら任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `jest.config.*`/`vitest.config.*`・`package.json` の `scripts`、共通で `Makefile` の test ターゲット・CI 設定等）の変更は一覧の有無に関わらず照合し、一覧に無ければ blocker にする
 5. 収束判定: change 由来の red がゼロ（`red_baseline` のシグネチャを除く）かつ lint green かつ evaluate の blocker（CRITICAL/HIGH）ゼロかつ `converge_extra` を満たせば収束
@@ -58,7 +58,7 @@ user-invocable: false
 1. plan は省き、反復1 の evaluate の blocker をそのまま修正タスクにする
 2. generate: 各 blocker を直す前に根本原因を 1 行で書く（反復履歴の rootcause に記録する。対症療法のパッチは当てない）。blocker の箇所だけを直し（新機能の追加・リファクタの拡大はしない）、自己検証する
 3. circuit breaker の判定: 自己検証の結果を反復1 のシグネチャと照合する（`## circuit breaker`）。hard trigger なら evaluate を飛ばす
-4. evaluate: reviewer を再実行する。前回の blocker が解消したかの確認だけに限り、新しい指摘を掘り起こさない
+4. evaluate: reviewer を再実行する。依頼文に前回の blocker 一覧を渡し、その解消と反復2 の差分が持ち込んだ問題だけを見させる（反復1 で指摘されなかった既存コードの問題は掘り起こさない）
 5. 収束判定 → checkpoint 更新 → green コミット
 
 ### 上限超過時
@@ -116,7 +116,6 @@ Assumptions: {仮決定事項 or "-"}
 
 - 3 反復目に入らない（「あと少しで直る」と判断しても上限を守る）
 - 後方互換フォールバックは置かず、古いコードは削除する
-- generate の委譲先エージェントがさらに Agent へ委譲するのは 1 段まで（多層のネストはコンテキストを消費し収束を遅らせる）
 - テストコマンドは反復1 の baseline step で確定したものを全反復で使い、反復ごとに導き直さない（`test_cmd` を baseline step 由来に限る規則と揃える）
 
 ## Human Gate

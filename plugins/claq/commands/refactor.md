@@ -52,7 +52,7 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 
 ## ステップ6: review + secure（並列）
 
-`claq:reviewer`（品質・設計・保守性）と `claq:security-auditor`（セキュリティ・脆弱性）を同時に起動し、結果を統合する。
+`claq:reviewer`（品質・設計・保守性）と `claq:security-auditor`（セキュリティ・脆弱性）を同時に起動し、結果を統合する。両方の依頼文に `effective_scope` を書き、reviewer の依頼文には security-auditor と並列であることも書く。
 
 ## 部分モード
 
