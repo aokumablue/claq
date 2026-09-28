@@ -41,7 +41,7 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --targ
 
 `top_actions[]` から効果の高い 3 件を選ぶ。各アクションには `checks[]` の失敗チェックに紐付く正確なファイルパスが付いている。
 
-`--apply` が指定されていなければ、トップ3（提案内容・対象ファイル・想定効果）を提示してここで終える。ステップ3〜5 は実行せず、harness-tuner へ変更の適用を委ねない。`--apply` の明示がこの先へ進む承認にあたる。
+`--apply` が指定されていなければ、トップ3（提案内容・対象ファイル・想定効果）を提示してここで終える（harness-tuner へ適用を委ねない）。`--apply` の明示がこの先へ進む承認にあたる。
 
 ## ステップ3: harness-tuner による改善適用（`--apply` 指定時のみ）
 
@@ -65,14 +65,13 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --targ
 - 測定できる効果を持つ小さな変更を優先する
 - クロスプラットフォームの動作を保ち、脆弱なシェルクォーティングを持ち込まない
 - `checks[]` と `top_actions[]` にある正確なファイルパスを残す
-- スクリプトの出力をそのまま使い、手で採点し直さない
 
 ## 出力仕様
 
 1. ベースライン `overall_score` と `max_score`（`repo` では58）
 2. カテゴリ別スコアと指摘
 3. 失敗チェックと正確なファイルパス
-4. 上位3件のアクション（`top_actions`）。`--apply` が無ければここで終える
+4. 上位3件のアクション（`top_actions`）
 5. （`--apply` 指定時）harness-tuner が適用した内容
 6. （`--apply` 指定時）改善後スコアカード
 7. （`--apply` 指定時）変更前後の差分サマリー
@@ -85,4 +84,4 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --targ
 - `--root=<path>`: 監査対象ルート（必須）
 - `--target-kind=repo|consumer`: 期待する判定モード（必須。自動判定と食い違えば FAIL）
 - `--audit-only`: ステップ1 だけで終える（トップ3も出さない）。/harness の制御フラグで `claq_run` へは渡さない
-- `--apply`: トップ3を harness-tuner に適用させる（ステップ3〜5）。無ければステップ2 で終える。引数によるスコープ指定であって承認待ちではないので、`--apply` があれば途中で止まらない
+- `--apply`: トップ3を harness-tuner に適用させる（ステップ3〜5）。引数によるスコープ指定であって承認待ちではないので、`--apply` があれば途中で止まらない
