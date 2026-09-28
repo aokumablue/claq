@@ -6,9 +6,9 @@ user-invocable: true
 
 # shadcn/ui の Web サイト
 
-## 原則: 色を思い出しで書くな。テンプレートを複製せよ
+## 原則: 色はテンプレートから複製し、記憶で書かない
 
-配色は `assets/template/tokens.css` に**生成済み**で、その正本は
+配色は `assets/template/tokens.css` に生成済みで、その正本は
 `references/tokens.json`（shadcn/ui レジストリの逐語コピー）。Tailwind 既定色、
 `#0d1117`、`#2563eb` の類を 1 つでも手書きすると検査で落ちる
 （手書きファイルに生の hex や `oklch()` があること自体が違反）。
@@ -24,7 +24,7 @@ user-invocable: true
 
 設計原則・レイアウト・コンポーネント・チャートの作法は `references/design.md`。
 チャート種別ごとの骨格と寸法は `references/chart-forms.md`。
-**React 版の shadcn/ui ではなくトークンを CSS へ写している**理由も同じ文書にある。
+React 版の shadcn/ui ではなくトークンを CSS へ写している理由も同じ文書にある。
 
 ## 手順
 
@@ -45,11 +45,11 @@ user-invocable: true
 
 ### 2. テンプレートを複製する
 
-テンプレートは**スキル起動時に提示されるベースディレクトリ**の `assets/template/`
+テンプレートはスキル起動時に提示されるベースディレクトリの `assets/template/`
 にある。提示が無いときだけ `find "$HOME/.claude/plugins/cache" -maxdepth 7 -type d
--path '*/html-gen/assets/template'`（このフォールバックは Claude Code のキャッシュ配置に固有。他ホストではベースディレクトリの提示が必須） で探す。**`/Users` や `$HOME` 全体を起点にしない**。
+-path '*/html-gen/assets/template'`（このフォールバックは Claude Code のキャッシュ配置に固有。他ホストではベースディレクトリの提示が必須）で探す。`/Users` や `$HOME` 全体を起点にしない。
 
-複製先は**完全なリテラル絶対パス**で書く（`$VAR` を含めると保護フックに止められる）。
+複製先は完全なリテラル絶対パスで書く（`$VAR` を含めると保護フックに止められる）。
 
 ```bash
 mkdir -p /abs/path/to/dest
@@ -64,16 +64,16 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 
 ### 3. 中身を差し替える
 
-**差し替える**: タイトル、指標の名前と数値、チャートのデータと `<desc>`、表、
+差し替える: タイトル、指標の名前と数値、チャートのデータと `<desc>`、表、
 ナビゲーション項目、`html[data-base]`（手順1で選んだベースカラー）、
 `html[data-page-kind]`。
 
-**触らない**: `tokens.css`（生成物）、`app.js`、`button[data-theme-value="light"|"dark"]`、
+触らない: `tokens.css`（生成物）、`app.js`、`button[data-theme-value="light"|"dark"]`、
 `<head>` の `app.js` 読み込み位置（body 末尾へ移すと初回に白がちらつく）、
 `.chart-scroll` ラッパ、`@media (prefers-reduced-motion: reduce)` ブロック、
 `svg[role="img"]` の `<title>`/`<desc>`、`data-origin="0"`。
 
-**グラフ種別は上から順に当て、最初に当たった行で確定する**（詳細と根拠は
+グラフ種別は上から順に当て、最初に当たった行で確定する（詳細と根拠は
 `references/design.md`「グラフ種別の選定」）。迷って選び直さない。種別が回ごとに
 揺れる原因は知識不足ではなく、同点のときの決め手が無いことである。
 
@@ -90,22 +90,22 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 | 9 | 意味のある分類が 8 以上で省けない | 表 |
 
 時間は必ず横軸へ置く。縦横の向きは見た目の好みで決めない。
-**選んだ種別の SVG 骨格・viewBox 幅の上限・余白の取り方は `references/chart-forms.md`。**
+選んだ種別の SVG 骨格・viewBox 幅の上限・余白の取り方は `references/chart-forms.md`。
 種別を決めても骨格が無ければ毎回違う書き方になるので、必ず写して使う。
 
-**軸の無いグラフは出荷しない。** 直交軸チャートには目盛りラベルと目盛り線を
+軸の無いグラフは出荷しない。直交軸チャートには目盛りラベルと目盛り線を
 最低 3 本ずつ（通常 5〜7 本）置き、刻みは 1・2・5 の倍数にする。検査が落とす。
 
 チャートを増減するときの注意（詳細は `references/design.md`）:
 
 - 座標は viewBox 内の数値で持つ。系列色は `var(--chart-1..5)`
-- **viewBox の縦横比がそのまま図の縦横比になる。** 高さの上限に固定 px を書かない
+- viewBox の縦横比がそのまま図の縦横比になる。高さの上限に固定 px を書かない
   （広い画面でレターボックスが働き図だけ小さく残る）。`clamp(320px, 46vh, 620px)`
 - x 軸のラベル帯とy 軸の目盛り幅を viewBox の内側に取る（下 20px / 左 40〜55px）
-- **静止状態を完成形にする**。動きは `[data-animate="in"]` の下だけに書く。
+- 静止状態を完成形にする。動きは `[data-animate="in"]` の下だけに書く。
   `opacity: 0` を静止状態に置いたり `animation-fill-mode: forwards` を使うと、
   背面タブ・JS 無効・印刷で真っ白なページになる（検査で落ちる）
-- 円弧の開始位置は SVG 属性の `stroke-dashoffset`。**CSS で宣言しない**
+- 円弧の開始位置は SVG 属性の `stroke-dashoffset`。CSS で宣言しない
   （CSS が属性より優先され、全セグメントが重なる）
 - 潰した SVG（`preserveAspectRatio="none"`）に `stroke-dasharray` のドローを
   使わない。`clip-path` で拭う
@@ -120,11 +120,11 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 python3 /abs/path/to/dest/check_site.py /abs/path/to/dest
 ```
 
-**exit code 0（`PASS`）を確認するまで完了報告しない。** `FAIL:` が出たら
+exit code 0（`PASS`）を確認するまで完了報告しない。`FAIL:` が出たら
 手書きファイルに色を直書きしていないか、`tokens.css` を手で直していないか、
 トグルを消していないかを先に疑う。
 
-`check_site.py` は `tokens.json` 上の値しか見ないので、**実際に描画された姿**は
+`check_site.py` は `tokens.json` 上の値しか見ないので、実際に描画された姿は
 ブラウザでも確かめる。
 
 1. `python3 -m http.server` で配信して開く（`file://` は localStorage が使えず
