@@ -73,6 +73,8 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 `.chart-scroll` ラッパ、`@media (prefers-reduced-motion: reduce)` ブロック、
 `svg[role="img"]` の `<title>`/`<desc>`、`data-origin="0"`。
 
+足さない（依頼で求められない限り）: 見出しの一部の語だけを斜体にする強調、`01` `02` `03` のような番号付きのセクションラベル、等幅フォントの見出し・ラベル（テンプレートのキーボード表示は除く）、クリーム色・オフホワイトの背景（背景は `var(--background)` のまま）、ピル形のボタン（ボタンは `--radius-md`）。どれもテンプレートの外から持ち込まれやすい意匠で、shadcn/ui の見た目から外れる。
+
 グラフ種別は上から順に当て、最初に当たった行で確定する（詳細と根拠は
 `references/design.md`「グラフ種別の選定」）。迷って選び直さない。種別が回ごとに
 揺れる原因は知識不足ではなく、同点のときの決め手が無いことである。
