@@ -9,6 +9,8 @@ user-invocable: true
 
 loop-dev の実行履歴（checkpoint の反復履歴 + git log）を全件走査し、収束品質の指標と 3 つのスコア（process_readiness / outcome_health / observation_coverage）と改善提案を出す。対象は実行履歴の集計で、プロンプトの文言の診断は skill-tune の担当。
 
+止まるのは、レポートを出したとき（履歴ゼロ件の報告を含む）だけ。それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返るため）。
+
 ## データソース（すべて一次情報。決定論的に全件走査する）
 
 1. checkpoint の反復履歴: `~/.claq/session-data/checkpoint-*.md` の `## 反復履歴` の行を Bash の grep と Read で全件集める。行の形式・result の 4 値・シグネチャの定義は `../checkpoint/SKILL.md` に従う（ここで定義し直さない）
