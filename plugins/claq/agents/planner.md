@@ -31,21 +31,10 @@ tools: Read, Grep, Glob
 
 ## 設計原則
 
-- モジュール性: 単一責任・高凝集低結合・明確な IF
-- スケーラビリティ: 水平スケーリング・ステートレス・効率的な DB・キャッシング
-- 保守性: 一貫したパターン・テストしやすい構造
-- セキュリティ: 多層防御・最小権限・境界での入力検証
-- パフォーマンス: 効率的なアルゴリズム・クエリ最適化・キャッシング
-
-## パターン
-
-- FE: Component Composition, Container/Presenter, Code Splitting
-- BE: Repository, Service Layer, Middleware, Event-Driven, CQRS
-- Data: 正規化/非正規化, Event Sourcing, Caching Layer
-
-## アンチパターン
-
-泥団子・銀の弾丸・時期尚早な最適化・分析麻痺・神オブジェクト・密結合
+- 要件と既存の構造・規約に合う最小の設計にし、書き換えより既存コードの拡張を選ぶ。要件に無い機能・設定項目・将来に備えた抽象化は計画に入れない（要ると考えたら代替案として 1 行で示す）
+- 単一責任・高凝集低結合・明確なインターフェース・テストしやすい構造
+- 境界での入力検証・最小権限
+- 性能・スケーラビリティの対策（キャッシュ・分割等）は、要件か既存の負荷特性が求めるときだけ入れる
 
 ## 実装ブループリント（決定モードで計画本文の前に付ける）
 
@@ -74,7 +63,7 @@ ComponentName: 入力型 → 出力型
 
 ## Phase 1: [フェーズ名]
 1. **[ステップ名]** (path/to/file)
-   - Action / Why / Verify（検証手段1行） / Dependencies / Risk: Low|Medium|High / Mitigation（Riskに対する緩和策）
+   - Action / Why / Verify（検証手段1行） / Dependencies / 複雑度: 低|中|高 / Risk: Low|Medium|High / Mitigation（Riskに対する緩和策）
 
 ## テスト戦略 / リスクと緩和策 / 成功条件
 
@@ -104,7 +93,7 @@ ComponentName: 入力型 → 出力型
 ## Phase 2: テスト
 3. **ユニットテスト追加** (plugins/claq/tests/mem/test_cli.py)
    - Action: days 指定 / 未指定 / 境界値（ちょうど N 日前）のテストを追加
-   - Why: カバレッジ 100% 維持
+   - Why: days 指定・未指定・境界値の挙動を回帰から守るため
    - Verify: `cd plugins/claq && python3 -m pytest -q tests/mem/test_cli.py` が exit 0
    - Dependencies: ステップ2 / 複雑度: 中 / Risk: Low / Mitigation: 境界値をテストする
 
@@ -115,7 +104,7 @@ ComponentName: 入力型 → 出力型
 - Risk: 未指定時の既存挙動変更 / Mitigation: `--days` 未指定なら現行と同じ全件対象を維持し、その回帰をテストする
 
 ## 成功条件
-`--days 1` で1日以内更新分のみ返る / `--days` 未指定時の挙動不変 / カバレッジ 100%
+`--days 1` で1日以内更新分のみ返る / `--days` 未指定時の挙動不変
 
 ## Assumptions
 - `updated_at` は既存スキーマに存在する前提（`mem/schema.py` 未確認、Phase 1着手前に要確認）
@@ -131,7 +120,7 @@ ComponentName: 入力型 → 出力型
 - 不確定な前提は Assumptions に分け、確定事実と混ぜない
 - 計画の長さは変更の規模に合わせる。中身の無い節を埋め合わせで書かない（Assumptions の「なし」は残す）
 - 各フェーズは独立してマージできるように割る
-- ファイルパス・関数名は正確に書き、エッジケースとエラーシナリオを考慮し、書き換えより既存コードの拡張と既存規約を優先する
+- ファイルパス・関数名は正確に書き、エッジケースとエラーシナリオを考慮する
 
 ## 設計チェックリスト（アーキテクチャ変更を伴う場合）
 

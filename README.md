@@ -119,7 +119,7 @@ claude plugin install claq@claq
 | [`refactor-prep`](plugins/claq/skills/refactor-prep/SKILL.md) | 自動発火 / 内部委譲のみ | fork | リファクタ事前準備 | 対象分割・依存可視化・実行前テストセットを最小コストで確定（`refactor` 専用） |
 | [`refactor-rollback`](plugins/claq/skills/refactor-rollback/SKILL.md) | 自動発火 / 内部委譲のみ | inline | ロールバック計画 | refactor-prep の出力を受けてファイル単位ロールバック計画を確定し失敗時の復旧を高速化 |
 | [`release-verify`](plugins/claq/skills/release-verify/SKILL.md) | 自動発火 + `/release-verify` | inline | リリース前実起動検証 | 配布ビルドへ実 payload を流し exit code と出力を実測して裁定する |
-| [`search`](plugins/claq/skills/search/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 既存解決策探索 | 新機能・新しい依存・新しい抽象化の前に、既存実装・ライブラリ・MCP・スキルを調べて採用／拡張／自作を決める |
+| [`search`](plugins/claq/skills/search/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 既存解決策探索 | 新機能・新しい依存・新しい抽象化の前に、既存実装・ライブラリ・MCP・スキルを調べて採用／拡張／自作を決め、採用なら導入まで行う |
 | [`secure`](plugins/claq/skills/secure/SKILL.md) | 自動発火 + `/secure` | inline | セキュリティチェックリスト | 認証・決済・秘匿情報・LLM/エージェント連携実装時の包括的セキュリティチェックリストとパターン提供 |
 | [`skill-make`](plugins/claq/skills/skill-make/SKILL.md) | 自動発火 / 内部委譲のみ | fork | スキル生成本体 | 新スキル生成/eval実行/ベンチマーク分析/説明文最適化（`skill-gen` 専用委譲先） |
 | [`skill-tune`](plugins/claq/skills/skill-tune/SKILL.md) | 自動発火 + `/skill-tune` | fork | スキル改善反復 | 自己申告と指示側メトリクスの両面評価→最小修正→再評価を収束まで繰り返す |

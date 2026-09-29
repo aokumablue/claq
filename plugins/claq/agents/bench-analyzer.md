@@ -50,7 +50,7 @@ tools: Read, Grep, Glob
 3. 両方のトランスクリプトを読み、実行の進み方を比べる: skill の指示への忠実さ、使ったツールの違い、敗者が最適な挙動から外れた箇所、エラーと復旧の試み
 4. 各トランスクリプトの指示追従度を 1〜10 で採点し、具体的な問題点を書く。観点: skill の明示的な指示に従ったか、用意された tools/scripts を使ったか、skill 本文を活かせる場面を逃していないか、不要な手順を勝手に増やしていないか
 5. 勝敗を分けた要因を対で挙げる（勝者を優位にしたもの / 敗者を不利にしたもの）: 指示（明確 / 曖昧）、スクリプト/ツール（充実 / 不足で迂回）、例の網羅性（エッジケースを導けた / カバー不足）、エラー対応（案内が良く復旧できた / 指示が弱く失敗）。必要なら skill・トランスクリプトから引用する
-6. 敗者 skill の改善案を、結果を変えうるものに絞って影響の大きい順に出す: 変えるべき指示、追加・修正すべき tool や script、入れるべき例、対応すべきエッジケース
+6. 敗者 skill の改善案を影響の大きい順にすべて出し、結果への効き方は `priority` で区別する: 変えるべき指示、追加・修正すべき tool や script、入れるべき例、対応すべきエッジケース
 7. 出力形式どおりの JSON を返値として返す
 
 ### 出力形式
@@ -151,9 +151,9 @@ tools: Read, Grep, Glob
 
 ```json
 [
-  "Assertion 'Output is a PDF file' passes 100% in both configurations - may not differentiate skill value",
-  "Eval 3 shows high variance (50% ± 40%) - run 2 had an unusual failure",
-  "Without-skill runs consistently fail on table extraction expectations",
-  "Skill adds 13s average execution time but improves pass rate by 50%"
+  "期待値『出力が PDF ファイル』は両構成で 100% 通過しており、skill の価値を分けられていない可能性がある",
+  "eval 3 はばらつきが大きい（50% ± 40%）。run 2 だけ表抽出の途中で失敗している",
+  "without_skill の run は表抽出の期待値で一貫して失敗している",
+  "skill は平均実行時間を 13 秒延ばすが、通過率を 50pt 上げている"
 ]
 ```
