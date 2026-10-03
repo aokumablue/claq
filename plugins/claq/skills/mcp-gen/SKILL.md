@@ -56,6 +56,7 @@ cp /abs/skill/mcp-gen/assets/template/server.py /abs/path/to/dest/server.py
 cp /abs/skill/mcp-gen/assets/template/smoke_check.py /abs/path/to/dest/smoke_check.py
 cp /abs/skill/mcp-gen/assets/template/README.md /abs/path/to/dest/README.md
 cp /abs/skill/mcp-gen/assets/template/guard.py /abs/path/to/dest/guard.py
+cp /abs/skill/mcp-gen/assets/template/transport.py /abs/path/to/dest/transport.py
 cp /abs/skill/mcp-gen/assets/template/smoke_config.py /abs/path/to/dest/smoke_config.py
 ```
 

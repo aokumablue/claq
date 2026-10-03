@@ -26,6 +26,7 @@ import が通って起動するため誤りに気づけない）。
   - 引数は平坦に並べ、制約と例は `Annotated` + `Field` で宣言する。入れ子のモデルを
     引数にしない（`$defs` / `$ref` が公開スキーマに出る）。
   - `guard.install(mcp)` を外さない。未知の引数の拒否と公開スキーマの整形を担う。
+  - 起動は `transport.run(mcp)` に任せる。HTTP の安全設定はそちらに集めてある。
 
 この docstring の要点の最後の行が**旧 API 名の書き方の見本**である。`Context` の
 `elicit` メソッドのように**受け手と名前を分けて書く**こと。`ctx` に続けて
@@ -39,16 +40,15 @@ import が通って起動するため誤りに気づけない）。
 
 from __future__ import annotations
 
-import argparse
 import logging
 from typing import Annotated
 
 from guard import install as install_guard
 from mcp.server import CacheHint, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, Field
+from transport import run
 
 SERVER_NAME = "example-server"
 SERVER_VERSION = "0.1.0"
@@ -193,50 +193,8 @@ def review_request(target: str) -> str:
 
 
 def main() -> None:
-    """トランスポートを選んでサーバを起動する。
-
-    Raises:
-        例外は発生しません。
-    """
-    parser = argparse.ArgumentParser(description=f"{SERVER_NAME} MCP server")
-    parser.add_argument("--http", action="store_true", help="Streamable HTTP で起動する（既定は stdio）")
-    parser.add_argument("--host", default="127.0.0.1", help="HTTP バインド先（既定はループバックのみ）")
-    parser.add_argument(
-        "--allow-remote",
-        action="store_true",
-        help="ループバック以外へのバインドを許可する（DNS リバインディング検査が実質無効になる）",
-    )
-    parser.add_argument("--port", type=int, default=8000, help="HTTP ポート")
-    args = parser.parse_args()
-
-    if not args.http:
-        # トランスポート引数は run() に渡す。MCPServer() のコンストラクタには渡さない。
-        mcp.run(transport="stdio")
-        return
-
-    # 仕様上、HTTP サーバは Origin を検証し（DNS リバインディング対策）、
-    # ローカル実行ではループバックにのみバインドしなければならない。
-    # 許可リストは args.host から導出するため、非ループバックへ広げた瞬間に
-    # 「バインド先と同じ値を照合する」形になり検査が実質無効化する。明示フラグを要求する。
-    if args.host not in ("127.0.0.1", "::1", "localhost") and not args.allow_remote:
-        parser.error(f"--host {args.host} は非ループバック。--allow-remote を明示すること")
-    # 既定の許可リストは空で localhost しか通らないため、実ホスト名で公開するときは
-    # 裸のホスト名とポート付きの両方を挙げる（挙げ忘れると全リクエストが 421 になる）。
-    # リバースプロキシが Host/Origin を制御しているなら
-    # enable_dns_rebinding_protection=False にする。
-    security = TransportSecuritySettings(
-        enable_dns_rebinding_protection=True,
-        allowed_hosts=[args.host, f"{args.host}:{args.port}"],
-        allowed_origins=[f"http://{args.host}:{args.port}"],
-    )
-    logger.info("starting streamable-http on %s:%s", args.host, args.port)
-    mcp.run(
-        transport="streamable-http",
-        host=args.host,
-        port=args.port,
-        streamable_http_path="/mcp",
-        transport_security=security,
-    )
+    """トランスポートを選んでサーバを起動する（安全設定は transport.py に集めてある）。"""
+    run(mcp)
 
 
 if __name__ == "__main__":

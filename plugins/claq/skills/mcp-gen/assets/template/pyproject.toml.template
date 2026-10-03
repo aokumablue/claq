@@ -2,7 +2,7 @@
 name = "example-server"
 version = "0.1.0"
 description = "MCP server (protocol 2026-07-28)"
-requires-python = ">=3.10"
+requires-python = ">=3.12"  # 型引数の構文（PEP 695）を使う
 # 2.x でサーバクラスは `MCPServer` に改名された。旧名は import が通ったまま残って
 # いるため、古い書き方でも起動してしまい誤りに気づけない。3.x で再度変わりうるため
 # 上限を張る。（旧クラス名そのものはここに書かない — 禁止パターン grep の検査対象に
@@ -27,5 +27,5 @@ build-backend = "hatchling.build"
 # サーバのファイルを足したら only-include にも足すこと（上流 API ファサードを
 # 重ねたなら "adapters.py" と "facade" を足す）。
 [tool.hatch.build.targets.wheel]
-only-include = ["server.py", "guard.py"]
+only-include = ["server.py", "guard.py", "transport.py"]
 sources = ["."]
