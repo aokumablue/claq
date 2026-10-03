@@ -7,11 +7,12 @@ requires-python = ">=3.10"
 # いるため、古い書き方でも起動してしまい誤りに気づけない。3.x で再度変わりうるため
 # 上限を張る。（旧クラス名そのものはここに書かない — 禁止パターン grep の検査対象に
 # このファイルも入るため、書くと必ず誤検出になる。）
-# 2.1.1 は mcp_types.LATEST_PROTOCOL_VERSION == "2026-07-28" を実測確認済みの版。
+# 2.3.0 は LATEST_PROTOCOL_VERSION == "2026-07-28" と、guard.py が頼る middleware の
+# 挙動を実測確認済みの版。
 # `server.py` は `mcp_types` を直接 import する。`mcp` の推移依存でもあるが、
 # 直接 import する以上は直接依存として宣言する（上流が vendoring した時点で
 # 無警告に壊れるのを防ぐ）。
-dependencies = ["mcp>=2.1.1,<3", "mcp-types"]
+dependencies = ["mcp>=2.3.0,<3", "mcp-types"]
 
 [project.scripts]
 example-server = "server:main"
@@ -23,7 +24,8 @@ build-backend = "hatchling.build"
 # 単一モジュール構成なので明示が要る。hatchling の既定はプロジェクト名から
 # ディレクトリ（`example_server/`）を探すため、これが無いと
 # `Unable to determine which files to ship inside the wheel` で install が失敗する。
-# サーバのファイル名を変えたら only-include も合わせること。
+# サーバのファイルを足したら only-include にも足すこと（上流 API ファサードを
+# 重ねたなら "adapters.py" と "facade" を足す）。
 [tool.hatch.build.targets.wheel]
-only-include = ["server.py"]
+only-include = ["server.py", "guard.py"]
 sources = ["."]

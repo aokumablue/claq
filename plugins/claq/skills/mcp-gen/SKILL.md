@@ -55,6 +55,8 @@ mkdir -p /abs/path/to/dest
 cp /abs/skill/mcp-gen/assets/template/server.py /abs/path/to/dest/server.py
 cp /abs/skill/mcp-gen/assets/template/smoke_check.py /abs/path/to/dest/smoke_check.py
 cp /abs/skill/mcp-gen/assets/template/README.md /abs/path/to/dest/README.md
+cp /abs/skill/mcp-gen/assets/template/guard.py /abs/path/to/dest/guard.py
+cp /abs/skill/mcp-gen/assets/template/smoke_config.py /abs/path/to/dest/smoke_config.py
 ```
 
 `pyproject.toml` は `pyproject.toml.template` の中身を読んで Write ツールで作る。
@@ -68,12 +70,10 @@ Bash 経由の書き込みは `bash_config_protection` に、Write/Edit は `con
 触らない: import 群、`MCPServer(...)` の構築、`main()` のトランスポート分岐、
 `TransportSecuritySettings`。stdio だけの要件でも `--http` 分岐は残す。
 
-#### `smoke_check.py` の「ここを編集する」ブロックも必ず合わせる
+#### `smoke_config.py` も必ず合わせる
 
-`HAPPY_TOOL` / `HAPPY_ARGS` / `HAPPY_EXPECTED_STRUCTURED` / `INVALID_TOOL` /
-`INVALID_ARGS` / `INVALID_EXPECTED_MESSAGE` / `RESOURCE_URI` /
-`RESOURCE_EXPECTED_SUBSTRING` / `PROMPT_NAME` / `PROMPT_ARGS` /
-`PROMPT_EXPECTED_SUBSTRING`。サンプルのままだと検証が実サーバを見なくなる。
+検査の対象（ツール名・引数・期待値・上限）はすべて `smoke_config.py` にある。
+`smoke_check.py` は編集しない。サンプルのままだと検証が実サーバを見なくなる。
 
 - 採用した面（tools / resources / prompts）はそれぞれ検査を持たせる。
   公開しない面は `RESOURCE_URI = ""` / `PROMPT_NAME = ""`（SKIP として記録される。
