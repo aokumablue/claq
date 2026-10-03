@@ -11,8 +11,8 @@
     .venv/bin/python3 smoke_check.py    # 単体実行（pytest 不要）
     .venv/bin/pytest smoke_check.py     # pytest からも実行できる（ファイル名の明示が必要）
 
-MRTR（確認・追加入力）を持つサーバは `elicit_round_trip()` を使って
-**承認と拒否の両分岐**を検査すること。拒否がエラーになる実装ミスは
+MRTR（確認・追加入力）を持つサーバは `smoke_config.MRTR_CASES` に
+**承認と拒否の両分岐**を書く。拒否がエラーになる実装ミスは
 1 往復目だけの検査では見つからない。
 
 この検査はサーバを `sys.executable` で子プロセスとして起動する。つまり
@@ -50,10 +50,11 @@ FORBIDDEN_INPUT_SCHEMA_KEYS = ("anyOf", "oneOf", "allOf", "$ref", "$defs", "titl
 
 # 2026-07-28 では各リクエストが自分でプロトコル版と capability を運ぶ。
 # `initialize` ハンドシェイクは存在しないので、いきなり本題のリクエストを送る。
+# MRTR を使うサーバは smoke_config.CLIENT_CAPABILITIES に elicitation を宣言する。
 REQUEST_META = {
     "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
     "io.modelcontextprotocol/clientInfo": {"name": "smoke-check", "version": "1.0.0"},
-    "io.modelcontextprotocol/clientCapabilities": {},
+    "io.modelcontextprotocol/clientCapabilities": config.CLIENT_CAPABILITIES,
 }
 
 
@@ -487,6 +488,17 @@ def test_unknown_field_gets_suggestion() -> None:
     assert config.FIELDS_EXPECTED_SUGGESTION in _text(result), result
 
 
+def test_mrtr_round_trips() -> None:
+    """MRTR の各ケースで、再送の最終結果が期待どおりであること（承認と拒否の両分岐）。"""
+    for case in config.MRTR_CASES:
+        result = elicit_round_trip(
+            case["tool"], case["arguments"], case["action"], case.get("content"), case.get("setup")
+        )
+        label = f"{case['tool']} / {case['action']}"
+        assert result.get("isError") is case["expected_is_error"], f"{label}: {result}"
+        assert case["expected_text"] in _text(result), f"{label}: {result}"
+
+
 def main() -> int:
     """全チェックを実行し、終了コードを返す。
 
@@ -507,6 +519,7 @@ def main() -> int:
         (config.PROMPT_NAME, test_prompt_is_served, "PROMPT_NAME"),
         (config.PAGED_TOOL, test_paging_round_trip, "PAGED_TOOL"),
         (config.FIELDS_TOOL, test_unknown_field_gets_suggestion, "FIELDS_TOOL"),
+        (config.MRTR_CASES, test_mrtr_round_trips, "MRTR_CASES"),
     )
     for enabled, check, setting in optional:
         if enabled:

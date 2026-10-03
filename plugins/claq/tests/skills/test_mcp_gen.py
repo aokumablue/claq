@@ -203,7 +203,7 @@ class TestRejection:
 
 
 class _FakeServer:
-    """guard.install が使う最小限のサーバ面。"""
+    """install_guard が使う最小限のサーバ面。"""
 
     def __init__(self) -> None:
         """登録済みのツールを 1 つ持つ。"""
@@ -223,7 +223,7 @@ class TestInstalledGuard:
     def _run(guard: types.ModuleType, method: str, params: Any, result: Any) -> tuple[Any, list[Any]]:
         """middleware を 1 回通し、結果と後続の呼び出し記録を返す。"""
         server = _FakeServer()
-        guard.install(server)
+        guard.install_guard(server)
         calls: list[Any] = []
 
         async def call_next(ctx: Any) -> Any:

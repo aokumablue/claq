@@ -519,13 +519,18 @@ _MD_CALLABLE_EXEMPTIONS = {
     "clamp": "CSS の流体サイズ関数（skills/html-gen）",
     "minmax": "CSS グリッドのトラックサイズ関数（skills/html-gen）",
     "oklch": "CSS の色関数。shadcn/ui のトークンがこの表記で配られる（skills/html-gen）",
+    "model_dump": "pydantic の API。SDK の実測記録が SDK 内部の呼び方を引用する（skills/mcp-gen）",
 }
 
 
 def _defined_callables() -> set[str]:
-    """src/ の Python 関数と runtime シェルヘルパの名前を集める。"""
+    """src/ とスキルのスケルトン（skills/*/assets）の Python 関数と、runtime シェルヘルパの名前を集める。
+
+    スケルトンは生成先へ複製される実装であり、スキル本文はその関数を名指しする。
+    """
     names = {m.group(1) for m in _SHELL_FUNC_RE.finditer(_HELPERS_SH.read_text(encoding="utf-8"))}
-    for py in (_ROOT / "src").rglob("*.py"):
+    sources = [*(_ROOT / "src").rglob("*.py"), *(_ROOT / "skills").glob("*/assets/**/*.py")]
+    for py in sources:
         names |= {m.group(1) for m in _PY_DEF_RE.finditer(py.read_text(encoding="utf-8"))}
     return names
 

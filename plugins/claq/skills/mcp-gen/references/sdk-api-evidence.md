@@ -2,6 +2,7 @@
 
 ## 目次
 
+- 2.3.0 で採取した項目（スケルトンの guard.py が頼る挙動）
 - import の実体
 - MCPServer.__init__ の主な引数（実測シグネチャ）
 - デコレータ
@@ -18,6 +19,8 @@
 - Streamable HTTP のヘッダ強制（実測）
 
 採取条件: `mcp==2.1.1` / Python 3.14 / stdio トランスポート（2026-08-31 時点で PyPI 最新）。
+次節だけは `mcp==2.3.0`（2026-10-02 公開）で採取した。2.1.1 の時点のスケルトンは、
+2.3.0 でも smoke_check の全項目に合格した（版を上げても壊れていないことの確認）。
 以下は**ドキュメントの引用ではなく実際に走らせて得た出力**である。
 SDK を更新したら再採取して差分を見ること。
 
@@ -28,6 +31,24 @@ mcp のランタイム依存: anyio, httpx2, jsonschema, mcp-types, opentelemetr
                       starlette, typing-extensions, typing-inspection, uvicorn
 requires-python: >=3.10
 ```
+
+## 2.3.0 で採取した項目（スケルトンの guard.py が頼る挙動）
+
+`mcp_types.LATEST_PROTOCOL_VERSION == "2026-07-28"`、`mcp-types==2.3.0` に依存、
+`Requires-Python: >=3.10`。
+
+| 項目 | 実測 | スケルトンの対処 |
+|---|---|---|
+| ツールの説明 | `@mcp.tool()` だけだと docstring の全文（`Args:` / `Returns:` / 実装の注記）が `description` になる。`@mcp.tool(description=...)` を渡せばそれだけになる | `description=` で書く。smoke が docstring の節見出しの漏れを落とす |
+| 未知の引数 | 黙って捨てられ、既定値で実行されて `isError: false` が返る（`stauts` と綴りを誤ると `status` の既定値で検索した結果が成功として返った）。引数モデルは pydantic の既定（`extra="ignore"`） | guard が `tools/call` の入口で拒否する |
+| 公開する inputSchema | root に `additionalProperties` が無い。`X \| None` は `anyOf: [X, {"type": "null"}]`、全ての項目に `title`、入れ子のモデル引数は `$defs` と `$ref` になる | guard が root を閉じ、`anyOf` と `title` を外す。入れ子のモデル引数は使わない |
+| 入れ子のモデルの未知のキー | モデルに `ConfigDict(extra="forbid")` を付ければ `additionalProperties: false` が出て、違反の文面（`Extra inputs are not permitted`）がモデルへ届く | 入れ子のモデル引数を使わないので不要 |
+| text の写し | `pydantic_core.to_json(result, indent=2)`。日本語はエスケープされない | guard が詰めた JSON に置き換える |
+| 構造化出力 | `model_dump(mode="json", by_alias=True)`。None の項目は `null` で出る。`Field(exclude_if=lambda v: v is None)` を付ければ出ず、outputSchema は変わらない | 値が無い項目と空の一覧に `exclude_if` を付ける |
+| middleware | `MCPServer.middleware`（暫定の API。2.x の minor で形が変わりうる）。`ctx.method` と検証前の `ctx.params` を読める。`tools/list` と `tools/call` の結果は dict（camelCase のキー）で届く。middleware が dict を返すとそのまま送られる（`resultType` は自分で入れる） | guard はこの形に依存する。版を上げたら smoke で確かめる |
+| 公開中のツール | `await mcp.list_tools()` が `name` / `input_schema` を持つツール定義を返す（公開 API） | guard が許される引数名をここから得る |
+| エラーの文面 | `ToolError` は文面が届き、`ValueError` は伏せられる（2.1.1 と同じ） | 変更なし |
+| MRTR | リゾルバ（`Resolve` + `Elicit`）と `ElicitationResult` で、承認と拒否の両分岐が 2.1.1 と同じ形で通る。guard は再送（`inputResponses` 付き）を妨げない | smoke_config の `MRTR_CASES` で検査する |
 
 ## import の実体
 
@@ -347,6 +368,8 @@ logger.info("searching for %r", query)
 | `inputSchema` / `outputSchema` 生成 | 自動 | 型注釈から |
 | `structuredContent` + テキスト併記 | 自動 | 後方互換のミラーも SDK が出す |
 | 例外 → `isError: true` 変換 | 自動 | `ValueError` 等がツール実行エラーになる |
+| 未知の引数の拒否 | **しない** | 黙って捨てる。guard.py が拒否する |
+| 公開 inputSchema の root を閉じる | **しない** | guard.py が閉じる |
 | `ttlMs` / `cacheScope` の**有用な値** | **手動** | 既定は `0` / `private` ＝ 即時陳腐化 |
 | `allowed_hosts` / `allowed_origins` | **手動** | 既定は空リスト |
 

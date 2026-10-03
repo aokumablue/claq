@@ -41,7 +41,7 @@ from facade.cursor import CursorCodec, query_fingerprint
 from facade.errors import FacadeError
 from facade.shaping import compact_json, fit_items, project
 from facade.upstream import CircuitBreaker, UpstreamError, call_with_retry, fan_out, model_message
-from guard import install as install_guard
+from guard import install_guard
 from mcp.server import CacheHint, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations

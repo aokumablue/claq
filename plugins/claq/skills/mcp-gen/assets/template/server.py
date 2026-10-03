@@ -25,7 +25,7 @@ import が通って起動するため誤りに気づけない）。
   - ツール名は `<resource>_<verb>`（英小文字・数字・`_`）。
   - 引数は平坦に並べ、制約と例は `Annotated` + `Field` で宣言する。入れ子のモデルを
     引数にしない（`$defs` / `$ref` が公開スキーマに出る）。
-  - `guard.install(mcp)` を外さない。未知の引数の拒否と公開スキーマの整形を担う。
+  - `install_guard(mcp)` を外さない。未知の引数の拒否と公開スキーマの整形を担う。
   - 起動は `transport.run(mcp)` に任せる。HTTP の安全設定はそちらに集めてある。
 
 この docstring の要点の最後の行が**旧 API 名の書き方の見本**である。`Context` の
@@ -43,7 +43,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from guard import install as install_guard
+from guard import install_guard
 from mcp.server import CacheHint, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations

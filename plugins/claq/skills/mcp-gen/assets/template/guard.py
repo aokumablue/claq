@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from mcp.server import MCPServer
 
 
-def install(server: MCPServer) -> None:
+def install_guard(server: MCPServer) -> None:
     """ガードを middleware の末尾に登録する。
 
     Args:

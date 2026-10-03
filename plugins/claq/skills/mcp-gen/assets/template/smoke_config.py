@@ -42,3 +42,12 @@ CURSOR_ERROR_SUBSTRING = "cursor"
 FIELDS_TOOL = ""
 FIELDS_BAD_ARGS: dict = {}
 FIELDS_EXPECTED_SUGGESTION = ""
+
+# MRTR（実行中の確認・追加入力）を使うサーバだけが設定する。
+# CLIENT_CAPABILITIES には {"elicitation": {"form": {}}} を入れる（無いと -32021 で落ちる）。
+# MRTR_CASES には承認と拒否の両分岐を書く。各ケースのキー:
+#   tool / arguments / action（accept・decline・cancel）/ content（accept のとき返す値）/
+#   setup（先に同じプロセスへ送る呼び出し [(ツール名, 引数), ...]）/
+#   expected_is_error（再送の結果の isError）/ expected_text（結果の text に含まれる文字列）
+CLIENT_CAPABILITIES: dict = {}
+MRTR_CASES: list = []
