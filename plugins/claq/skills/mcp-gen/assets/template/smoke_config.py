@@ -5,6 +5,7 @@
 """
 
 # 出力が決定的なツール。毎回新しい子プロセスで同じ順に呼んで同じ値が返ること。
+# 戻り値をモデルにしたツールを選ぶ（`-> str` は text が生の文字列になり、写しの検査に落ちる）。
 # UUID・現在時刻・乱数を含む結果は落ちる。
 HAPPY_TOOL = "measurements_compute"
 HAPPY_ARGS: dict = {"samples": 2}

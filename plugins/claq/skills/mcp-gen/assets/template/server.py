@@ -92,6 +92,13 @@ class Measurement(BaseModel):
     unit: str = Field(description="単位")
 
 
+class Item(BaseModel):
+    """項目。`-> str` で返すと text が生の文字列になり、structuredContent の写しにならない。"""
+
+    item_id: str = Field(description="項目 ID")
+    content: str = Field(description="項目の内容")
+
+
 @mcp.tool(
     description=(
         "サンプル数から計測値を算出して返す。\n"
@@ -125,13 +132,14 @@ def measurements_compute(
     description=(
         "項目 ID で 1 件の内容を返す。\n"
         "使う場面: 項目 ID が分かっているとき。\n"
-        "主な引数: item_id = 'item-' で始まる ID。"
+        "主な引数: item_id = 'item-' で始まる ID。\n"
+        "応答: item_id と content。"
     ),
     annotations=READ_ONLY,
 )
 def items_get(
     item_id: Annotated[str, Field(min_length=1, max_length=100, description="'item-' で始まる項目 ID", examples=["item-1"])],
-) -> str:
+) -> Item:
     """項目 ID を引いて内容を返す。
 
     見つからない場合は `ToolError` を投げる。SDK がメッセージ込みで
@@ -150,7 +158,7 @@ def items_get(
     """
     if not item_id.startswith("item-"):
         raise ToolError(f"item_id は 'item-' で始まる必要があります（受領値: {item_id!r}）。正しい ID で呼び直してください。")
-    return f"content of {item_id}"
+    return Item(item_id=item_id, content=f"content of {item_id}")
 
 
 @mcp.resource("config://runtime")

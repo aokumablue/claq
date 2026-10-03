@@ -5,7 +5,9 @@
 
 - 改ざん・期限切れ・別の主体・別の検索条件のカーソルは `FacadeError` で拒否する
   （ハンドルを持っていることを認証とみなさない）。
-- 署名はするが暗号化はしない。位置（`position`）に機微な値を入れない。
+- 署名はするが暗号化はしない。主体はそのまま入れず、鍵付きの要約にして封じる
+  （カーソルはモデルの文脈に載るため、利用者 ID やメールアドレスを出さない）。
+  位置（`position`）にも機微な値を入れない。
 """
 
 from __future__ import annotations
@@ -103,6 +105,17 @@ class CursorCodec:
         """
         return _encode(hmac.new(self._secret, body.encode("ascii"), hashlib.sha256).digest())
 
+    def _principal_digest(self, principal: str) -> str:
+        """主体を、鍵付きの要約にする（カーソルから主体を読み取らせない）。
+
+        Args:
+            principal: 呼び出しの主体。
+
+        Returns:
+            符号化済みの要約。
+        """
+        return _encode(hmac.new(self._secret, b"sub:" + principal.encode("utf-8"), hashlib.sha256).digest()[:16])
+
     def issue(self, *, principal: str, fingerprint: str, position: Mapping[str, Any]) -> str:
         """続きの位置を封じたカーソルを発行する。
 
@@ -116,7 +129,7 @@ class CursorCodec:
         """
         payload = {
             "v": _VERSION,
-            "sub": principal,
+            "sub": self._principal_digest(principal),
             "q": fingerprint,
             "pos": dict(position),
             "exp": int(self._clock()) + self._ttl_seconds,
@@ -152,6 +165,6 @@ class CursorCodec:
         if payload.get("exp", 0) < self._clock():
             raise FacadeError(f"cursor の有効期限が切れています。{_RESTART}")
         # 主体の違いと条件の違いは区別しない（他の主体のカーソルかどうかを漏らさない）
-        if payload.get("sub") != principal or payload.get("q") != fingerprint:
+        if payload.get("sub") != self._principal_digest(principal) or payload.get("q") != fingerprint:
             raise FacadeError(f"この cursor は今回の検索条件には使えません。{_RESTART}")
         return payload["pos"]

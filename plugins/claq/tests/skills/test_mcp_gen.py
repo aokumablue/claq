@@ -115,6 +115,11 @@ class TestNormalizeInputSchema:
             "additionalProperties": False,
         }
 
+    def test_keeps_non_null_default(self, guard: types.ModuleType) -> None:
+        """省略可能な引数でも、null 以外の既定値は残す。"""
+        schema = {"type": "object", "properties": {"unit": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": "ms"}}}
+        assert guard.normalize_input_schema(schema)["properties"]["unit"] == {"type": "string", "default": "ms"}
+
     def test_keeps_argument_named_title(self, guard: types.ModuleType) -> None:
         """`title` という名前の引数は消さない（消すのは注釈としての `title` だけ）。"""
         schema = {"type": "object", "properties": {"title": {"type": "string", "title": "Title"}}}
@@ -395,6 +400,14 @@ class TestCursor:
         codec = facade.cursor.CursorCodec(_SECRET)
         token = codec.issue(principal="alice", fingerprint="q1", position={"page": "o:3", "skip": 1})
         assert codec.open(token, principal="alice", fingerprint="q1") == {"page": "o:3", "skip": 1}
+
+    def test_does_not_expose_principal(self, facade: types.SimpleNamespace) -> None:
+        """カーソルを復号しても、主体そのものは読み取れない（モデルの文脈に載るため）。"""
+        codec = facade.cursor.CursorCodec(_SECRET)
+        token = codec.issue(principal="alice@example.com", fingerprint="q1", position={"page": "o:3"})
+        body = facade.cursor._decode(token.partition(".")[0]).decode("utf-8")
+        assert "alice" not in body
+        assert "o:3" in body
 
     def test_works_across_codecs_with_same_secret(self, facade: types.SimpleNamespace) -> None:
         """鍵が同じなら、別のインスタンスでも検証できる（状態を持たない）。"""
