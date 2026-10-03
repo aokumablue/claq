@@ -34,8 +34,40 @@ import sys
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import smoke_config as config
+
+# smoke_config.py で設定できる名前。HAPPY_* は必須で、残りは省略すると既定値になる
+# （使わない検査の設定は書かない。知らない名前は test_settings_are_known が落とす）。
+REQUIRED_SETTINGS = ("HAPPY_TOOL", "HAPPY_ARGS", "HAPPY_EXPECTED_STRUCTURED")
+OPTIONAL_SETTINGS: dict[str, Any] = {
+    "INVALID_TOOL": "",
+    "INVALID_ARGS": {},
+    "INVALID_EXPECTED_MESSAGE": "",
+    "RESOURCE_URI": "",
+    "RESOURCE_EXPECTED_SUBSTRING": "",
+    "PROMPT_NAME": "",
+    "PROMPT_ARGS": {},
+    "PROMPT_EXPECTED_SUBSTRING": "",
+    "READ_ONLY_SERVER": True,
+    "MAX_TOOLS": 10,
+    "MAX_TOOL_NAME_LENGTH": 40,
+    "MAX_RESULT_CHARS": 20_000,
+    "PAGED_TOOL": "",
+    "PAGED_ARGS": {},
+    "PAGED_CHANGED_ARGS": {},
+    "PAGED_ENV": {},
+    "CURSOR_ERROR_SUBSTRING": "cursor",
+    "FIELDS_TOOL": "",
+    "FIELDS_BAD_ARGS": {},
+    "FIELDS_EXPECTED_SUGGESTION": "",
+    "CLIENT_CAPABILITIES": {},
+    "MRTR_CASES": [],
+}
+DEFINED_SETTINGS = {name: value for name, value in vars(config).items() if name.isupper()}
+cfg = SimpleNamespace(**{**OPTIONAL_SETTINGS, **DEFINED_SETTINGS})
 
 SERVER_PATH = Path(__file__).with_name("server.py")
 PROTOCOL_VERSION = "2026-07-28"
@@ -47,14 +79,26 @@ TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 DOCSTRING_SECTION_PATTERN = re.compile(r"^\s*(Args|Returns|Raises|Yields):\s*$", re.MULTILINE)
 # 公開する inputSchema に残してはいけないキー（ガードが外す・入れ子のモデルを使わない）
 FORBIDDEN_INPUT_SCHEMA_KEYS = ("anyOf", "oneOf", "allOf", "$ref", "$defs", "title")
+# 旧仕様の API 名・機構（正本）。生成先のファイルに 1 件でも当たれば旧仕様が混入している。
+# 各パターンの意味は、生成に使った mcp-gen スキルの references/spec-2026-07-28.md にある。
+FORBIDDEN_PATTERN = re.compile(
+    r"FastMCP|Mcp-Session-Id|mcp_session_id|resources/(un)?subscribe|Last-Event-ID|logging/setLevel"
+    r"|elicitationId|-32002|notifications/(initialized|elicitation/complete)|ctx\.elicit(_url)?\("
+    r"|ctx\.(log|info|debug|warning|error)\(|send_log_message\(|create_message\(|list_roots\("
+)
+# 生成先の外から来たファイル（仮想環境・依存・キャッシュ）は見ない。SDK 自身が旧名を含むため。
+SKIPPED_DIRS = frozenset(
+    {"__pycache__", ".venv", "venv", "site-packages", ".git", "node_modules", ".pytest_cache", ".ruff_cache",
+     ".mypy_cache", "build", "dist"}
+)
 
 # 2026-07-28 では各リクエストが自分でプロトコル版と capability を運ぶ。
 # `initialize` ハンドシェイクは存在しないので、いきなり本題のリクエストを送る。
-# MRTR を使うサーバは smoke_config.CLIENT_CAPABILITIES に elicitation を宣言する。
+# MRTR を使うサーバは smoke_config.py の CLIENT_CAPABILITIES に elicitation を宣言する。
 REQUEST_META = {
     "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
     "io.modelcontextprotocol/clientInfo": {"name": "smoke-check", "version": "1.0.0"},
-    "io.modelcontextprotocol/clientCapabilities": config.CLIENT_CAPABILITIES,
+    "io.modelcontextprotocol/clientCapabilities": cfg.CLIENT_CAPABILITIES,
 }
 
 
@@ -302,7 +346,7 @@ def test_protocol_surface() -> None:
         [
             _request(1, "server/discover"),
             _request(2, "tools/list"),
-            _call(3, config.HAPPY_TOOL, config.HAPPY_ARGS),
+            _call(3, cfg.HAPPY_TOOL, cfg.HAPPY_ARGS),
             _request(4, "tools/list"),
         ]
     )
@@ -318,8 +362,9 @@ def test_protocol_surface() -> None:
     assert tools["tools"], "ツールが 1 つも公開されていません"
     published = [tool["name"] for tool in tools["tools"]]
     # 編集し忘れを「未知ツール」として素通りさせず、ここで名指しで落とす
-    assert config.HAPPY_TOOL in published, f"{config.HAPPY_TOOL} が未公開です。公開中: {sorted(published)}"
-    assert config.INVALID_TOOL in published, f"{config.INVALID_TOOL} が未公開です。公開中: {sorted(published)}"
+    assert cfg.HAPPY_TOOL in published, f"{cfg.HAPPY_TOOL} が未公開です。公開中: {sorted(published)}"
+    if cfg.INVALID_TOOL:
+        assert cfg.INVALID_TOOL in published, f"{cfg.INVALID_TOOL} が未公開です。公開中: {sorted(published)}"
     # ttlMs=0（既定）のままだとクライアントは毎回取り直す。意図した値か確認する
     assert tools["ttlMs"] > 0, f"cache_hints が効いていません: ttlMs={tools['ttlMs']}"
     assert tools["cacheScope"] in {"public", "private"}, tools
@@ -330,19 +375,19 @@ def test_protocol_surface() -> None:
     call = responses[3]["result"]
     assert call["resultType"] == "complete", call
     assert call.get("isError") is not True, call
-    assert call["structuredContent"] == config.HAPPY_EXPECTED_STRUCTURED, call
+    assert call["structuredContent"] == cfg.HAPPY_EXPECTED_STRUCTURED, call
 
 
 def test_tool_definitions_follow_design() -> None:
     """公開するツール定義が設計規則（名前・説明・スキーマ・注釈・数）に従うこと。"""
     tools = _exchange([_request(1, "tools/list")])[1]["result"]["tools"]
-    assert len(tools) <= config.MAX_TOOLS, (
-        f"ツールが {len(tools)} 個あります（上限 {config.MAX_TOOLS}）。ツールセットに分けてください"
+    assert len(tools) <= cfg.MAX_TOOLS, (
+        f"ツールが {len(tools)} 個あります（上限 {cfg.MAX_TOOLS}）。ツールセットに分けてください"
     )
     for tool in tools:
         name = tool["name"]
         assert TOOL_NAME_PATTERN.match(name), f"{name}: ツール名は英小文字・数字・_ だけで書く"
-        assert len(name) <= config.MAX_TOOL_NAME_LENGTH, f"{name}: ツール名が長すぎます"
+        assert len(name) <= cfg.MAX_TOOL_NAME_LENGTH, f"{name}: ツール名が長すぎます"
         description = tool.get("description") or ""
         assert description.strip(), f"{name}: description が空です"
         assert not DOCSTRING_SECTION_PATTERN.search(description), (
@@ -354,7 +399,7 @@ def test_tool_definitions_follow_design() -> None:
         leaked = sorted(set(_walk_keys(schema)) & set(FORBIDDEN_INPUT_SCHEMA_KEYS))
         assert not leaked, f"{name}: inputSchema に {leaked} が残っています（入れ子のモデル引数を平坦にする）"
         annotations = tool.get("annotations") or {}
-        if config.READ_ONLY_SERVER:
+        if cfg.READ_ONLY_SERVER:
             assert annotations.get("readOnlyHint") is True, f"{name}: readOnlyHint=True を付けてください"
         if annotations.get("readOnlyHint") is True:
             misplaced = sorted({"idempotentHint", "destructiveHint"} & set(annotations))
@@ -363,18 +408,18 @@ def test_tool_definitions_follow_design() -> None:
 
 def test_unknown_argument_is_rejected() -> None:
     """未知の引数が黙って捨てられず、`isError` で名指しされること。"""
-    arguments = {**config.HAPPY_ARGS, UNKNOWN_ARGUMENT: 1}
-    result = _exchange([_call(1, config.HAPPY_TOOL, arguments)])[1]["result"]
+    arguments = {**cfg.HAPPY_ARGS, UNKNOWN_ARGUMENT: 1}
+    result = _exchange([_call(1, cfg.HAPPY_TOOL, arguments)])[1]["result"]
     assert result.get("isError") is True, f"未知の引数が受け付けられました（guard 未登録）: {result}"
     assert UNKNOWN_ARGUMENT in _text(result), result
 
 
 def test_text_mirrors_structured_content() -> None:
     """text が structuredContent と同じ内容の詰めた JSON で、予算内に収まること。"""
-    result = _exchange([_call(1, config.HAPPY_TOOL, config.HAPPY_ARGS)])[1]["result"]
+    result = _exchange([_call(1, cfg.HAPPY_TOOL, cfg.HAPPY_ARGS)])[1]["result"]
     expected = json.dumps(result["structuredContent"], ensure_ascii=False, separators=(",", ":"))
     assert _text(result) == expected, f"text が structuredContent の詰めた JSON ではありません: {_text(result)!r}"
-    assert len(expected) <= config.MAX_RESULT_CHARS, f"結果が {len(expected)} 文字あります（上限 {config.MAX_RESULT_CHARS}）"
+    assert len(expected) <= cfg.MAX_RESULT_CHARS, f"結果が {len(expected)} 文字あります（上限 {cfg.MAX_RESULT_CHARS}）"
 
 
 def test_tool_error_reaches_the_model() -> None:
@@ -388,13 +433,13 @@ def test_tool_error_reaches_the_model() -> None:
     responses = _exchange(
         [
             _request(1, "tools/list"),
-            _call(2, config.INVALID_TOOL, config.INVALID_ARGS),
+            _call(2, cfg.INVALID_TOOL, cfg.INVALID_ARGS),
         ]
     )
     published = {tool["name"] for tool in responses[1]["result"]["tools"]}
     # 未知ツールも `isError: true` を返すため、実在確認なしでは本チェックが
     # 「名前を変え忘れただけ」で空振り合格してしまう
-    assert config.INVALID_TOOL in published, f"{config.INVALID_TOOL} が未公開です。公開中: {sorted(published)}"
+    assert cfg.INVALID_TOOL in published, f"{cfg.INVALID_TOOL} が未公開です。公開中: {sorted(published)}"
 
     message = responses[2]
     assert "error" not in message, f"プロトコルエラーになっています: {message}"
@@ -408,7 +453,7 @@ def test_tool_error_reaches_the_model() -> None:
     assert "validation error" not in text, (
         f"INVALID_ARGS が引数検証で弾かれています。ToolError の経路を通る引数にしてください: {text!r}"
     )
-    assert config.INVALID_EXPECTED_MESSAGE in text, (
+    assert cfg.INVALID_EXPECTED_MESSAGE in text, (
         f"エラーメッセージがモデルに届いていません（素の例外を投げていませんか）: {text!r}"
     )
 
@@ -420,11 +465,11 @@ def test_resource_is_served() -> None:
     キーを書き忘れると `ttlMs=0`（毎回取り直し）のままになる。
     ツール側だけ見ていると気づけない。
     """
-    responses = _exchange([_request(1, "resources/read", {"uri": config.RESOURCE_URI})])
+    responses = _exchange([_request(1, "resources/read", {"uri": cfg.RESOURCE_URI})])
     result = responses[1]["result"]
     assert result["resultType"] == "complete", result
     text = " ".join(block.get("text", "") for block in result.get("contents", []))
-    assert config.RESOURCE_EXPECTED_SUBSTRING in text, f"リソース本文が期待と違います: {text!r}"
+    assert cfg.RESOURCE_EXPECTED_SUBSTRING in text, f"リソース本文が期待と違います: {text!r}"
     assert result["ttlMs"] > 0, (
         f"resources/read の cache_hints が未設定です: ttlMs={result['ttlMs']}"
     )
@@ -437,14 +482,14 @@ def test_prompt_is_served() -> None:
     （一覧の `prompts/list` にはヒントが載る）。
     """
     responses = _exchange(
-        [_request(1, "prompts/get", {"name": config.PROMPT_NAME, "arguments": config.PROMPT_ARGS})]
+        [_request(1, "prompts/get", {"name": cfg.PROMPT_NAME, "arguments": cfg.PROMPT_ARGS})]
     )
     result = responses[1]["result"]
     assert result["resultType"] == "complete", result
     text = " ".join(
         message.get("content", {}).get("text", "") for message in result.get("messages", [])
     )
-    assert config.PROMPT_EXPECTED_SUBSTRING in text, f"プロンプト本文が期待と違います: {text!r}"
+    assert cfg.PROMPT_EXPECTED_SUBSTRING in text, f"プロンプト本文が期待と違います: {text!r}"
 
 
 def test_paging_round_trip() -> None:
@@ -453,21 +498,21 @@ def test_paging_round_trip() -> None:
     1 ページ目と 2 ページ目を**別々のプロセス**で取る。カーソルが自己完結していれば
     （共有の鍵だけで）どのインスタンスでも続きを返せる。
     """
-    first = _exchange([_call(1, config.PAGED_TOOL, config.PAGED_ARGS)], config.PAGED_ENV)[1]["result"]
+    first = _exchange([_call(1, cfg.PAGED_TOOL, cfg.PAGED_ARGS)], cfg.PAGED_ENV)[1]["result"]
     assert first.get("isError") is not True, first
     page1 = first["structuredContent"]
     cursor = page1.get("next_cursor")
     assert isinstance(cursor, str) and cursor, f"1 ページ目に next_cursor がありません: {page1}"
-    assert len(_text(first)) <= config.MAX_RESULT_CHARS, "1 ページ目が予算を超えています"
+    assert len(_text(first)) <= cfg.MAX_RESULT_CHARS, "1 ページ目が予算を超えています"
 
     tampered = cursor[:-2] + ("AA" if not cursor.endswith("AA") else "BB")
     responses = _exchange(
         [
-            _call(1, config.PAGED_TOOL, {**config.PAGED_ARGS, "cursor": cursor}),
-            _call(2, config.PAGED_TOOL, {**config.PAGED_ARGS, "cursor": tampered}),
-            _call(3, config.PAGED_TOOL, {**config.PAGED_CHANGED_ARGS, "cursor": cursor}),
+            _call(1, cfg.PAGED_TOOL, {**cfg.PAGED_ARGS, "cursor": cursor}),
+            _call(2, cfg.PAGED_TOOL, {**cfg.PAGED_ARGS, "cursor": tampered}),
+            _call(3, cfg.PAGED_TOOL, {**cfg.PAGED_CHANGED_ARGS, "cursor": cursor}),
         ],
-        config.PAGED_ENV,
+        cfg.PAGED_ENV,
     )
     second = responses[1]["result"]
     assert second.get("isError") is not True, f"別のプロセスで続きを取れません: {second}"
@@ -478,19 +523,19 @@ def test_paging_round_trip() -> None:
     for request_id, label in ((2, "改ざんしたカーソル"), (3, "条件を変えたカーソル")):
         rejected = responses[request_id]["result"]
         assert rejected.get("isError") is True, f"{label}が受け付けられました: {rejected}"
-        assert config.CURSOR_ERROR_SUBSTRING in _text(rejected), rejected
+        assert cfg.CURSOR_ERROR_SUBSTRING in _text(rejected), rejected
 
 
 def test_unknown_field_gets_suggestion() -> None:
     """未知の項目パスが `isError` になり、近い候補が示されること。"""
-    result = _exchange([_call(1, config.FIELDS_TOOL, config.FIELDS_BAD_ARGS)])[1]["result"]
+    result = _exchange([_call(1, cfg.FIELDS_TOOL, cfg.FIELDS_BAD_ARGS)])[1]["result"]
     assert result.get("isError") is True, result
-    assert config.FIELDS_EXPECTED_SUGGESTION in _text(result), result
+    assert cfg.FIELDS_EXPECTED_SUGGESTION in _text(result), result
 
 
 def test_mrtr_round_trips() -> None:
     """MRTR の各ケースで、再送の最終結果が期待どおりであること（承認と拒否の両分岐）。"""
-    for case in config.MRTR_CASES:
+    for case in cfg.MRTR_CASES:
         result = elicit_round_trip(
             case["tool"], case["arguments"], case["action"], case.get("content"), case.get("setup")
         )
@@ -499,27 +544,101 @@ def test_mrtr_round_trips() -> None:
         assert case["expected_text"] in _text(result), f"{label}: {result}"
 
 
+def test_settings_are_known() -> None:
+    """smoke_config.py に必須の設定があり、知らない名前（綴りの誤り）が無いこと。"""
+    missing = [name for name in REQUIRED_SETTINGS if name not in DEFINED_SETTINGS]
+    unknown = sorted(set(DEFINED_SETTINGS) - set(REQUIRED_SETTINGS) - set(OPTIONAL_SETTINGS))
+    assert not missing, f"smoke_config.py に {missing} がありません"
+    assert not unknown, f"smoke_config.py の {unknown} は使われない名前です（綴りを確かめる）。使える名前: {sorted(OPTIONAL_SETTINGS)}"
+
+
+def legacy_api_hits(root: Path, *, skip: Path) -> list[str]:
+    """root 以下のテキストファイルから、旧仕様の API 名・機構に当たる行を集める。
+
+    Args:
+        root: 走査の起点。
+        skip: 走査しないファイル（パターンの定義そのものを含む smoke_check.py）。
+
+    Returns:
+        `パス:行番号: 行` の一覧。
+    """
+    hits: list[str] = []
+    for directory, subdirs, files in os.walk(root):
+        subdirs[:] = sorted(name for name in subdirs if name not in SKIPPED_DIRS and not name.endswith(".egg-info"))
+        for name in sorted(files):
+            path = Path(directory, name)
+            if path.resolve() == skip.resolve():
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except (UnicodeDecodeError, OSError):
+                continue  # バイナリ（.pyc など）は見ない
+            hits.extend(
+                f"{path.relative_to(root)}:{number}: {line.strip()}"
+                for number, line in enumerate(lines, 1)
+                if FORBIDDEN_PATTERN.search(line)
+            )
+    return hits
+
+
+def test_no_legacy_api() -> None:
+    """生成先のファイルに、旧仕様の API 名・機構が残っていないこと。
+
+    説明文に書いただけでも当たる（正規表現は呼び出しと散文を区別しない）。旧 API に
+    触れるなら「`Context` の `elicit` メソッド」のように受け手と名前を分けて書く。
+    """
+    here = Path(__file__).resolve()
+    hits = legacy_api_hits(here.parent, skip=here)
+    assert not hits, "旧仕様の API 名・機構が残っています:\n" + "\n".join(hits)
+
+
+def sdk_protocol_warning() -> str | None:
+    """SDK の最新プロトコル版が、このスケルトンの版と違えば警告文を返す。
+
+    Returns:
+        警告文。版が同じとき、または SDK を読めないとき（その場合はサーバの起動の検査が落ちる）は None。
+    """
+    completed = subprocess.run(
+        [sys.executable, "-c", "import mcp.types as t; print(t.LATEST_PROTOCOL_VERSION)"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    latest = completed.stdout.strip()
+    if completed.returncode != 0 or latest == PROTOCOL_VERSION:
+        return None
+    return f"SDK の最新プロトコル版は {latest} で、スケルトンの {PROTOCOL_VERSION} と違います。SDK の changelog を読み直してください"
+
+
 def main() -> int:
     """全チェックを実行し、終了コードを返す。
 
     Returns:
         全て通れば 0、1 つでも落ちれば 1。
     """
+    try:
+        test_settings_are_known()
+    except AssertionError as error:
+        print(f"FAIL test_settings_are_known: {error}", file=sys.stderr)
+        return 1
+    print("PASS test_settings_are_known", file=sys.stderr)
     failures = 0
     checks: list[Callable[[], None]] = [
         test_protocol_surface,
         test_tool_definitions_follow_design,
         test_unknown_argument_is_rejected,
         test_text_mirrors_structured_content,
-        test_tool_error_reaches_the_model,
+        test_no_legacy_api,
     ]
     # 「実行しなかった」を「合格」に潰さない。第三の値として記録する。
     optional = (
-        (config.RESOURCE_URI, test_resource_is_served, "RESOURCE_URI"),
-        (config.PROMPT_NAME, test_prompt_is_served, "PROMPT_NAME"),
-        (config.PAGED_TOOL, test_paging_round_trip, "PAGED_TOOL"),
-        (config.FIELDS_TOOL, test_unknown_field_gets_suggestion, "FIELDS_TOOL"),
-        (config.MRTR_CASES, test_mrtr_round_trips, "MRTR_CASES"),
+        (cfg.INVALID_TOOL, test_tool_error_reaches_the_model, "INVALID_TOOL"),
+        (cfg.RESOURCE_URI, test_resource_is_served, "RESOURCE_URI"),
+        (cfg.PROMPT_NAME, test_prompt_is_served, "PROMPT_NAME"),
+        (cfg.PAGED_TOOL, test_paging_round_trip, "PAGED_TOOL"),
+        (cfg.FIELDS_TOOL, test_unknown_field_gets_suggestion, "FIELDS_TOOL"),
+        (cfg.MRTR_CASES, test_mrtr_round_trips, "MRTR_CASES"),
     )
     for enabled, check, setting in optional:
         if enabled:
@@ -534,6 +653,9 @@ def main() -> int:
             print(f"FAIL {check.__name__}: {error}", file=sys.stderr)
         else:
             print(f"PASS {check.__name__}", file=sys.stderr)
+    warning = sdk_protocol_warning()
+    if warning:
+        print(f"WARN {warning}", file=sys.stderr)
     return 1 if failures else 0
 
 

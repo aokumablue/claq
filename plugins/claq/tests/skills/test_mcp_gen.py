@@ -9,7 +9,6 @@ from __future__ import annotations
 import ast
 import asyncio
 import importlib.util
-import re
 import sys
 import types
 from collections.abc import Iterator
@@ -22,7 +21,6 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 _SKILL_DIR = _PLUGIN_ROOT / "skills" / "mcp-gen"
 _TEMPLATE = _SKILL_DIR / "assets" / "template"
 _OVERLAY = _SKILL_DIR / "assets" / "facade-overlay"
-_SPEC_REFERENCE = _SKILL_DIR / "references" / "spec-2026-07-28.md"
 
 
 def _load(name: str, path: Path) -> types.ModuleType:
@@ -89,9 +87,22 @@ def guard() -> types.ModuleType:
 
 @pytest.fixture
 def smoke_check(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
-    """smoke_check.py を、設定モジュールを差し替えて読み込む。"""
+    """smoke_check.py を、共通スケルトンの設定で読み込む。"""
+    return _load_smoke_check(monkeypatch, _config(_TEMPLATE / "smoke_config.py"))
+
+
+def _load_smoke_check(monkeypatch: pytest.MonkeyPatch, settings: dict[str, Any]) -> types.ModuleType:
+    """smoke_check.py を、設定モジュールを差し替えて読み込む。
+
+    Args:
+        monkeypatch: 差し替えを戻すための fixture。
+        settings: smoke_config.py の代わりに置く設定。
+
+    Returns:
+        読み込んだ smoke_check モジュール。
+    """
     stub = types.ModuleType("smoke_config")
-    stub.__dict__.update(_config(_TEMPLATE / "smoke_config.py"))
+    stub.__dict__.update(settings)
     monkeypatch.setitem(sys.modules, "smoke_config", stub)
     return _load("mcp_gen_smoke_check", _TEMPLATE / "smoke_check.py")
 
@@ -320,18 +331,86 @@ def test_smoke_config_names_exist_in_server(skeleton: Path) -> None:
             assert config[key] in tools, f"{skeleton.name}/smoke_config.py の {key}={config[key]} が server.py に無い"
 
 
-def test_assets_pass_forbidden_pattern_grep() -> None:
-    """スケルトン一式が、正本の禁止パターンに 1 件も当たらない。"""
-    match = re.search(r"'([^']+)' <生成先>", _SPEC_REFERENCE.read_text(encoding="utf-8"))
-    assert match, "spec-2026-07-28.md から禁止パターンを取り出せません"
-    pattern = re.compile(match.group(1))
-    hits = []
-    for path in sorted((_SKILL_DIR / "assets").rglob("*")):
-        if path.is_file() and "__pycache__" not in path.parts:
-            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                if pattern.search(line):
-                    hits.append(f"{path.relative_to(_SKILL_DIR)}:{number}: {line.strip()}")
-    assert hits == []
+def test_assets_have_no_legacy_api(smoke_check: types.ModuleType) -> None:
+    """スケルトン一式が、smoke_check の旧仕様パターン（正本）に 1 件も当たらない。"""
+    assert smoke_check.legacy_api_hits(_SKILL_DIR / "assets", skip=_TEMPLATE / "smoke_check.py") == []
+
+
+class TestSmokeCheckSettings:
+    """smoke_config.py の名前の検査。"""
+
+    def test_known_settings_pass(self, smoke_check: types.ModuleType) -> None:
+        """両スケルトンの設定は、知らない名前を持たない。"""
+        smoke_check.test_settings_are_known()
+        for skeleton in (_TEMPLATE, _OVERLAY):
+            unknown = set(_config(skeleton / "smoke_config.py")) - set(smoke_check.REQUIRED_SETTINGS)
+            assert unknown <= set(smoke_check.OPTIONAL_SETTINGS), skeleton
+
+    def test_typo_and_missing_fail(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """綴りを誤った名前と、必須の名前の欠落を落とす。"""
+        settings = {**_config(_TEMPLATE / "smoke_config.py"), "PAGE_TOOL": "orders_search"}
+        with pytest.raises(AssertionError, match="PAGE_TOOL"):
+            _load_smoke_check(monkeypatch, settings).test_settings_are_known()
+        settings = {key: value for key, value in _config(_TEMPLATE / "smoke_config.py").items() if key != "HAPPY_ARGS"}
+        with pytest.raises(AssertionError, match="HAPPY_ARGS"):
+            _load_smoke_check(monkeypatch, settings).test_settings_are_known()
+
+    def test_omitted_settings_use_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """書かなかった任意の名前は既定値になる（検査は SKIP）。"""
+        settings = {"HAPPY_TOOL": "t", "HAPPY_ARGS": {}, "HAPPY_EXPECTED_STRUCTURED": {}}
+        module = _load_smoke_check(monkeypatch, settings)
+        assert module.cfg.INVALID_TOOL == ""
+        assert module.cfg.PAGED_TOOL == ""
+        assert module.cfg.MRTR_CASES == []
+        assert module.REQUEST_META["io.modelcontextprotocol/clientCapabilities"] == {}
+
+
+class TestLegacyApiScan:
+    """旧仕様の API 名・機構の走査。"""
+
+    def test_finds_hits_and_skips_outside_files(self, smoke_check: types.ModuleType, tmp_path: Path) -> None:
+        """生成先のファイルの当たりを返し、仮想環境・キャッシュ・バイナリ・自分自身は見ない。"""
+        legacy = "from mcp.server import Fast" + "MCP\n"
+        (tmp_path / "server.py").write_text("print('ok')\n" + legacy, encoding="utf-8")
+        (tmp_path / "README.md").write_text("ctx" + ".info(x)\n", encoding="utf-8")
+        for skipped in (".venv", "venv", "__pycache__", "pkg.egg-info"):
+            (tmp_path / skipped).mkdir()
+            (tmp_path / skipped / "x.py").write_text(legacy, encoding="utf-8")
+        (tmp_path / "blob.pyc").write_bytes(b"\xff\xfe" + legacy.encode())
+        checker = tmp_path / "smoke_check.py"
+        checker.write_text(legacy, encoding="utf-8")
+        assert smoke_check.legacy_api_hits(tmp_path, skip=checker) == [
+            "README.md:1: ctx" + ".info(x)",
+            "server.py:2: " + legacy.strip(),
+        ]
+
+    def test_clean_tree_has_no_hits(self, smoke_check: types.ModuleType, tmp_path: Path) -> None:
+        """旧仕様の名前が無ければ空を返す。"""
+        (tmp_path / "server.py").write_text("from mcp.server import MCPServer\n", encoding="utf-8")
+        assert smoke_check.legacy_api_hits(tmp_path, skip=tmp_path / "smoke_check.py") == []
+
+
+class TestSdkProtocolWarning:
+    """SDK のプロトコル版の警告。"""
+
+    @staticmethod
+    def _fake_run(returncode: int, stdout: str) -> Any:
+        """subprocess.run の代わりに固定の結果を返す関数を作る。"""
+
+        def run(*args: Any, **kwargs: Any) -> Any:
+            """固定の完了結果を返す。"""
+            return types.SimpleNamespace(returncode=returncode, stdout=stdout)
+
+        return run
+
+    def test_warns_only_when_sdk_moved(self, smoke_check: types.ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+        """版が違えば警告し、同じとき・SDK を読めないときは黙る。"""
+        monkeypatch.setattr(smoke_check.subprocess, "run", self._fake_run(0, "2099-01-01\n"))
+        assert "2099-01-01" in smoke_check.sdk_protocol_warning()
+        monkeypatch.setattr(smoke_check.subprocess, "run", self._fake_run(0, smoke_check.PROTOCOL_VERSION))
+        assert smoke_check.sdk_protocol_warning() is None
+        monkeypatch.setattr(smoke_check.subprocess, "run", self._fake_run(1, ""))
+        assert smoke_check.sdk_protocol_warning() is None
 
 
 def test_assets_ship_no_bytecode() -> None:

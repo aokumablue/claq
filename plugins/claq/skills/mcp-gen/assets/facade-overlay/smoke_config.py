@@ -54,13 +54,6 @@ INVALID_TOOL = "orders_get"
 INVALID_ARGS: dict = {"order_id": "ord_999999"}
 INVALID_EXPECTED_MESSAGE = "見つからない"
 
-# リソースとプロンプトは公開しない（SKIP として記録される）。
-RESOURCE_URI = ""
-RESOURCE_EXPECTED_SUBSTRING = ""
-PROMPT_NAME = ""
-PROMPT_ARGS: dict = {}
-PROMPT_EXPECTED_SUBSTRING = ""
-
 # 設計規則の上限。既定値であり、要件に合わせて変えてよい。
 READ_ONLY_SERVER = True
 MAX_TOOLS = 10
@@ -79,12 +72,3 @@ CURSOR_ERROR_SUBSTRING = "cursor"
 FIELDS_TOOL = "orders_get"
 FIELDS_BAD_ARGS: dict = {"order_id": "ord_000001", "fields": ["shiping.address.city"]}
 FIELDS_EXPECTED_SUGGESTION = "shipping.address.city"
-
-# MRTR（実行中の確認・追加入力）を使うサーバだけが設定する。
-# CLIENT_CAPABILITIES には {"elicitation": {"form": {}}} を入れる（無いと -32021 で落ちる）。
-# MRTR_CASES には承認と拒否の両分岐を書く。各ケースのキー:
-#   tool / arguments / action（accept・decline・cancel）/ content（accept のとき返す値）/
-#   setup（先に同じプロセスへ送る呼び出し [(ツール名, 引数), ...]）/
-#   expected_is_error（再送の結果の isError）/ expected_text（結果の text に含まれる文字列）
-CLIENT_CAPABILITIES: dict = {}
-MRTR_CASES: list = []
