@@ -2,16 +2,8 @@
 name = "example-server"
 version = "0.1.0"
 description = "MCP server (protocol 2026-07-28)"
-requires-python = ">=3.12"  # 型引数の構文（PEP 695）を使う
-# 2.x でサーバクラスは `MCPServer` に改名された。旧名は import が通ったまま残って
-# いるため、古い書き方でも起動してしまい誤りに気づけない。3.x で再度変わりうるため
-# 上限を張る。（旧クラス名そのものはここに書かない — 禁止パターン grep の検査対象に
-# このファイルも入るため、書くと必ず誤検出になる。）
-# 2.3.0 は LATEST_PROTOCOL_VERSION == "2026-07-28" と、guard.py が頼る middleware の
-# 挙動を実測確認済みの版。
-# `server.py` は `mcp_types` を直接 import する。`mcp` の推移依存でもあるが、
-# 直接 import する以上は直接依存として宣言する（上流が vendoring した時点で
-# 無警告に壊れるのを防ぐ）。
+requires-python = ">=3.12"
+# mcp は 3.x で API が変わりうるので上限を張る。mcp_types は直接 import するので直接依存にする。
 dependencies = ["mcp>=2.3.0,<3", "mcp-types"]
 
 [project.scripts]
@@ -21,11 +13,7 @@ example-server = "server:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# 単一モジュール構成なので明示が要る。hatchling の既定はプロジェクト名から
-# ディレクトリ（`example_server/`）を探すため、これが無いと
-# `Unable to determine which files to ship inside the wheel` で install が失敗する。
-# サーバのファイルを足したら only-include にも足すこと（上流 API ファサードを
-# 重ねたなら "adapters.py" と "facade" を足す）。
+# パッケージを持たない構成なので、同梱するファイルを明示する（無いと install が失敗する）。
 [tool.hatch.build.targets.wheel]
 only-include = ["server.py", "guard.py", "transport.py"]
 sources = ["."]

@@ -107,54 +107,12 @@ Bash 経由の書き込みは `bash_config_protection` に、Write/Edit は `con
 `facade/` の部品。`transport.py` は公開するホスト名を足すとき以外は触らない。
 stdio だけの要件でも `--http` は残す。
 
-#### `smoke_config.py` を合わせる
+ツールの書き方（説明・引数・出力・失敗・注釈・状態）は `references/tool-design.md` に従う。
+検査の対象は `smoke_config.py` に書く。値の選び方はファイル内のコメントに従い、サンプルの
+ままにしない（検証が実サーバを見なくなる）。
 
-検査の対象（ツール名・引数・期待値・上限）はすべて `smoke_config.py` にある。
-`smoke_check.py` は編集しない。サンプルのままだと検証が実サーバを見なくなる。
+ツール以外で守ること:
 
-- 採用した面（tools / resources / prompts）はそれぞれ検査を持たせる。
-  公開しない面は `RESOURCE_URI = ""` / `PROMPT_NAME = ""`（SKIP として記録される。
-  合格には潰さない）。
-- `HAPPY_TOOL` は出力が決定的で、戻り値がモデルのツール。基準は「毎回新しい子プロセスで同じ順番に
-  呼んで同じ値が返るか」。UUID・現在時刻・乱数は落ちる。プロセス内カウンタの採番 ID は
-  その呼び出しが毎回 1 回目なら通る。迷ったら数回実行して確かめる。
-- `INVALID_TOOL` / `INVALID_ARGS` は「ツール本体まで到達して `ToolError` で失敗する」
-  組み合わせにする。`Field` の制約に引っかかる引数を選ぶと、SDK の引数検証が
-  読めるメッセージを返すため `ToolError` を一度も通らずに検査が合格してしまう。
-  存在しない ID など、型と範囲は正しいが業務的に失敗する引数を選ぶ。
-- 書き込みのツールがあるなら `READ_ONLY_SERVER = False`。
-- 重ね合わせたなら `PAGED_*`（2 ページ以上ある条件と、値を 1 つだけ変えた条件）と
-  `FIELDS_*`（綴りを誤った項目パスと、候補に出るべき正しいパス）を実際のツールで設定する。
-
-#### 書くときの規則
-
-- モデルに見せる説明は `@mcp.tool(description=...)` で書く。省くと docstring の全文
-  （`Args:` や実装の注記）がそのまま説明になる。docstring は開発者向けに別に書く。
-- モデルに読ませたい失敗は `ToolError` で投げる
-  （`from mcp.server.mcpserver.exceptions import ToolError`）。
-  素の例外（`ValueError` 等）と、ツール本体から投げた `MCPError` は
-  メッセージが伏せられ、モデルには `Error executing tool <name>` しか届かない。
-  重ね合わせの部品の失敗は `with model_errors():` の中で `ToolError` に変わる。
-- 引数の制約は型注釈で宣言する（自前の `if` では schema にも載らず本文も届かない）:
-
-  | 制約 | 書き方 | schema |
-  |---|---|---|
-  | 数値範囲 | `Annotated[int, Field(ge=1, le=100)]` | `minimum` / `maximum` |
-  | 選択肢 | `Literal["dev", "prod"]` | `enum` |
-  | 文字列書式 | `Annotated[str, Field(pattern=...)]` | `pattern` |
-  | 文字列長 | `Annotated[str, Field(min_length=1, max_length=200)]` | `minLength` / `maxLength` |
-  | 例 | `Annotated[str, Field(examples=["..."])]` | `examples` |
-
-  `ToolError` 経路と衝突したら `ToolError` を優先する。引数を取るツールが 1 本で
-  業務エラーが選択肢制約そのもの（単位・種別などの列挙型ドメイン）なら、`Literal` に
-  した瞬間 `ToolError` が 1 本も無いサーバになる。`str` で受けて `ToolError` を投げ、
-  選択肢は description・一覧ツール・エラー本文で補う。範囲・長さ制約は無関係なので残す。
-- 引数は平坦に並べ、入れ子のモデルを引数にしない（公開スキーマに `$defs` / `$ref` が出て
-  smoke が落とす）。省略可能な引数は `X | None = None` でよい（`anyOf` は guard が外す）。
-- 出力は戻り値の型（pydantic モデル）で書く。増えうる値は `Literal` にせず `str` と説明で示す
-  （出力スキーマを閉じると、値や項目を足したときに古いスキーマでの検証が落ちる）。
-- 注釈は `ToolAnnotations(readOnlyHint=True, openWorldHint=False)` を基本にする。
-  `idempotentHint` / `destructiveHint` は `readOnlyHint=False` のときだけ付ける。
 - `cache_hints` を意図して設定する。既定は `ttl_ms=0` / `scope="private"`（毎回
   取り直し）。キーを置ける先は `tools/list` / `prompts/list` / `resources/list` /
   `resources/templates/list` / `resources/read` / `server/discover` の 6 つ。
@@ -164,39 +122,24 @@ stdio だけの要件でも `--http` は残す。
 - ログは標準 `logging`。`MCPServer(log_level=...)` を渡せば SDK が設定する。
   出力は stderr。`print` は stdout を汚して JSON-RPC フレームを壊す。
   ログはモデルに届かない（届くのは戻り値だけ）。進捗は `ctx.report_progress()`。
-- 状態はツール引数のハンドルで持ち回す。ただし「不透明・有効期限付き・呼び出し
-  ごとに認可再検証」が要るのは認可文脈を運ぶハンドルだけ。ドメイン上の識別子
-  （注文番号など）は普通の ID でよい。取り違えると要件違反を作り込む。
-- `x-mcp-header` を機微な引数に付けない（ヘッダは中間装置から見える）。
-- 生成コードの説明文に旧 API 名を書かない。`ctx.elicit()` を「使わない理由」として
-  docstring に書くだけで手順 5 の grep が当たる。触れるなら「`Context` の `elicit`
-  メソッド」のように名前を分割する。
+- 生成コードの説明文に旧 API 名を書かない。説明文に書いただけでも手順 5 の検査が当たる。
+  触れるなら「`Context` の `elicit` メソッド」のように名前を分割する。
 - 全ての関数に docstring を付ける。
 
 ### 5. 検証する（省略不可）
 
-このステップのコマンドはすべて `mcp` が入った interpreter の絶対パスで実行する
-（以下 `$PY`）。`smoke_check.py` はサーバを `sys.executable` で起動するため、
-裸の `python3` で呼ぶとサーバ側だけが `ModuleNotFoundError` で死ぬ。
+`mcp` が入った interpreter の絶対パス（以下 `$PY`）で実行する。`smoke_check.py` は
+サーバを `sys.executable` で起動するため、裸の `python3` で呼ぶとサーバ側だけが
+`ModuleNotFoundError` で死ぬ。
 
 ```bash
 "$PY" smoke_check.py
 ```
 
-exit code 0 を確認するまで完了報告しない。プロトコルの形に加えて、ツール定義の設計規則・
-未知の引数の拒否・text の写し・結果の大きさ（重ね合わせたならページングと項目パスも）を確かめる。
-
-次に旧仕様の混入を機械確認する。パターンの正本は
-`references/spec-2026-07-28.md` の `## 生成後に機械確認する禁止パターン（正本）`。
-その節の grep をそのままフラグごと実行する（ここに複製しない）。1 件でも当たれば
-混入している。後方互換を意図して書いた場合のみ例外とし、対象版をコメントに明記する。
-
-```bash
-"$PY" -c "import mcp.types; print(mcp.types.LATEST_PROTOCOL_VERSION)"
-```
-
-`2026-07-28` 以外なら SDK が新仕様へ進んでいる。スケルトンを信じず、先に
-changelog を読み直す（等号アサートはコードに入れない。新版の日に偽の失敗になる）。
+exit code 0 を確認するまで完了報告しない。`FAIL` の文面には直し方が書いてある。
+旧仕様の名前が当たったときは、その意味を `references/spec-2026-07-28.md` の表で確かめる。
+`WARN` が出たら SDK が新しいプロトコル版へ進んでいる。スケルトンを信じず、先に SDK の
+changelog を読み直す。
 
 ### 6. 登録と評価の手順を渡す
 
@@ -214,57 +157,76 @@ README の「エージェントでの評価」の手順と合わせて渡す（�
 from mcp.server.mcpserver import Elicit, ElicitationResult, Resolve
 
 
-def ask_confirm(target: str) -> Elicit[Confirm]:
-    """確認を求める。"""
-    return Elicit(f"{target} を削除してよいですか", Confirm)
+class Confirm(BaseModel):
+    """削除の確認。"""
+
+    approve: bool
 
 
-@mcp.tool(description="対象を削除する。実行前に利用者の確認を取る。")
-async def danger(
-    target: str,
+class DeleteResult(BaseModel):
+    """削除の結果。"""
+
+    deleted: bool = Field(description="削除したか")
+    message: str = Field(description="結果の説明")
+
+
+def ask_confirm(item_id: str) -> Elicit[Confirm]:
+    """削除の確認を求める。リゾルバはツール引数を名前で受け取れる。"""
+    return Elicit(f"{item_id} を削除してよいですか", Confirm)
+
+
+@mcp.tool(
+    description="項目を削除する。実行前に利用者の確認を取る。",
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False),
+)
+async def items_delete(
+    item_id: Annotated[str, Field(min_length=1, description="項目 ID")],
     confirm: Annotated[ElicitationResult[Confirm], Resolve(ask_confirm)],
-) -> str:
-    """確認を取ってから破壊的操作を行う。"""
+) -> DeleteResult:
+    """確認を取ってから削除する。"""
     if confirm.action != "accept":
-        return f"中止しました（{confirm.action}）"
-    return "削除しました" if confirm.data.approve else "中止しました"
+        return DeleteResult(deleted=False, message=f"中止しました（{confirm.action}）")
+    if not confirm.data.approve:
+        return DeleteResult(deleted=False, message="中止しました")
+    return DeleteResult(deleted=True, message="削除しました")
 ```
 
 - 確認・同意では `ElicitationResult[T]` で受ける。素の `T` で受けると拒否が
   ツール実行エラーになり、「中止しました」を正常な戻り値で返せない。
   素の `T` が適切なのは「拒否＝呼び出しの失敗」でよい場合だけ。
-- `smoke_config.py` の `CLIENT_CAPABILITIES` に `{"elicitation": {"form": {}}}` を入れる
-  （無いと `-32021` で落ちる）。
-- `MRTR_CASES` に承認と拒否の両分岐を書く。1 往復目だけでは拒否がエラー化する
-  実装ミスを見つけられない。承認分岐が事前状態に依存するなら、ケースの `setup` で
-  同一プロセスへ先に呼び出しを送る（空のストアへの削除は「対象が無い」エラーになり、
-  配線の正否を判別できない）。
+- `smoke_config.py` に次を足し、承認と拒否の両分岐を検査する（1 往復目だけでは、拒否が
+  エラーになる実装の誤りを見つけられない）。`CLIENT_CAPABILITIES` が無いと `-32021` で落ちる。
+  書き込みのツールを足したので `READ_ONLY_SERVER = False` にする。
+
+  ```python
+  CLIENT_CAPABILITIES: dict = {"elicitation": {"form": {}}}
+  MRTR_CASES: list = [
+      {"tool": "items_delete", "arguments": {"item_id": "item-1"}, "action": "accept",
+       "content": {"approve": True}, "expected_is_error": False, "expected_text": "削除しました"},
+      {"tool": "items_delete", "arguments": {"item_id": "item-1"}, "action": "decline",
+       "expected_is_error": False, "expected_text": "中止しました"},
+  ]
+  ```
+
+- 承認分岐が事前状態に依存するなら、ケースに `"setup": [(ツール名, 引数), ...]` を足して
+  同一プロセスへ先に送る（空のストアへの削除は「対象が無い」エラーになり、配線の正否を
+  判別できない）。
 
 詳細と実測ワイヤ、`requestState` の完全性保護要件は `references/sdk-api-evidence.md`。
 
 ## スケルトンの範囲外
 
-- 認証（HTTP の OAuth）— 認可サーバ探索・クライアント登録（動的登録は非推奨、
-  CIMD へ）・RFC 9207 の `iss` 検証を含む独立した subsystem。満たすべき要件と
-  上流の資格情報・データ層の認可は `references/remote-auth.md`。
-  stdio は認可仕様の対象外で、資格情報は環境変数から取る。
-- 複数インスタンス運用 — MRTR を使うなら `RequestStateSecurity(keys=[...])` と
-  全インスタンス同名の `MCPServer(...)` が要る（既定はプロセスごとに鍵を作るため、
-  再送が別ワーカーへ届くと復号に失敗する）。重ね合わせのカーソルの鍵も共有する。
+HTTP の OAuth と、複数インスタンスでの運用。満たすべき要件と進め方は
+`references/remote-auth.md`。stdio は認可仕様の対象外で、資格情報は環境変数から取る。
 
 ## 詰まったときに見るところ
 
 - `server/discover` / `resultType` / `_meta.serverInfo` / `inputSchema` /
   `outputSchema` / `structuredContent` / 引数検証は SDK が自動でやる。
   これらを自前で実装しようとしていたら、記憶で書いている兆候。
-- smoke が「docstring がそのまま説明になっています」で落ちる → `@mcp.tool(description=...)` を書く。
-- smoke が「inputSchema に [...] が残っています」で落ちる → 入れ子のモデル引数を平坦な引数にする。
-- smoke が「未知の引数が受け付けられました」で落ちる → `install_guard(mcp)` を消していないか確かめる。
 - HTTP で `400 Bad Request: Missing session ID` → `MCP-Protocol-Version` ヘッダの
   付け忘れ。この仕様にセッションは存在しない。真に受けて実装すると廃止済みの
   機構を作り込む。
-- 検証スクリプトを `test_*.py` / `*_test.py` と名付けない（親リポジトリの pytest に
-  収集され、`mcp` 未導入の環境で無関係に失敗する）。
 
 ## 参照
 
@@ -272,7 +234,7 @@ async def danger(
 - `references/facade.md` — 上流 API ファサードの重ね合わせ（正規化・段階開示・予算・カーソル・合成・上流の呼び出し）
 - `references/remote-auth.md` — リモート配置の認可、上流の資格情報、データ層の認可
 - `references/spec-2026-07-28.md` — 削除・追加・非推奨の一覧、`_meta` 予約キー、
-  セキュリティ必須事項、禁止パターン grep の正本
+  セキュリティ必須事項、smoke が検出する旧仕様の名前の意味
 - `references/sdk-api-evidence.md` — `mcp` 2.x の実測 API と実測ワイヤ JSON
 
 ## 永続メモリ

@@ -80,6 +80,17 @@ API やエンドポイントごとに 1 ツールにしない（モデルが API
 | 引数の名前を変えない（変えるなら新しいツールにする） | 未知の引数は guard が拒否するので、古い呼び方は失敗になる |
 | `x-mcp-header` を使わない（ゲートウェイの振り分けに要る、機微でない値だけを例外とする） | ヘッダは中間装置から見える |
 
+制約は型注釈で宣言する（自前の `if` では公開スキーマに載らず、モデルが呼ぶ前に範囲を知れない）。
+
+| 制約 | 書き方 | 公開スキーマ |
+|---|---|---|
+| 数値範囲 | `Annotated[int, Field(ge=1, le=100)]` | `minimum` / `maximum` |
+| 選択肢 | `Literal["dev", "prod"]` | `enum` |
+| 文字列書式 | `Annotated[str, Field(pattern=...)]` | `pattern` |
+| 文字列長 | `Annotated[str, Field(min_length=1, max_length=200)]` | `minLength` / `maxLength` |
+| 件数 | `Annotated[list[str], Field(max_length=5)]` | `maxItems` |
+| 例 | `Annotated[str, Field(examples=["..."])]` | `examples` |
+
 ## 出力
 
 - 戻り値の型を pydantic のモデルで書く（`outputSchema` が生成され、ホストの code mode が型として使う）。
@@ -103,7 +114,9 @@ API やエンドポイントごとに 1 ツールにしない（モデルが API
 | 業務上の失敗（見つからない・条件が無い・期間が逆） | `ToolError` で、何が悪いか・正しい形・次に使うツールを書く |
 | 上流の失敗 | `ToolError` で、時間を置くか条件を絞るかを行動の形で書く。上流の詳細はログにだけ出す |
 
-- 素の例外（`ValueError` など）は文面が伏せられ、モデルは何も学べない。
+- `ToolError`（`from mcp.server.mcpserver.exceptions import ToolError`）で投げる。素の例外
+  （`ValueError` など）と、ツール本体から投げた `MCPError` は文面が伏せられ、モデルには
+  `Error executing tool <name>` しか届かない。
 - 権限の無い ID と存在しない ID は区別せず「見つからないか、閲覧の権限がありません」と返す（存在を漏らさない）。
 - スタックトレース・上流の URL やホスト名・SQL・秘密を文面に入れない。
 

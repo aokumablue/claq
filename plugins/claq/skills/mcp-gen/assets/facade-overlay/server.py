@@ -1,22 +1,4 @@
-"""上流 API を包む取得ファサードのスケルトン（共通スケルトンの server.py を置き換える）。
-
-見本の業務は受注で、上流は受注 API と配送 API の偽物（adapters.py）。新しいサーバでは:
-  1. adapters.py の偽物を実際の HTTP 呼び出しに置き換える
-  2. CATALOG・出力モデル・ツールを対象の業務に合わせて書き換える（問いのカタログから）
-  3. smoke_config.py を合わせる
-facade/ の部品は編集せずに使う。guard.py と transport.py も共通スケルトンのまま使う。
-
-このスケルトンが実証している設計:
-  - ツールは API ごとではなく問いごとに置く（検索 → 取得 → 項目辞書）。
-  - 応答は正規ドメインモデルにしてから、view と fields で必要な部分だけを返す。
-    入れ子の構造は保ち、配列は先頭 ARRAY_LIMIT 件に `<名前>_more` を添える。
-  - 結果は文字数の予算に収め、続きは署名付きのカーソルで取らせる（状態を持たない）。
-  - 複数の上流は並列に呼び、一部が失敗しても取れた分を partial 付きで返す。
-  - 部品の失敗（FacadeError）と上流の失敗（UpstreamError）は model_errors() で
-    ToolError に変換する。上流の詳細はログにだけ出し、モデルには次の行動を返す。
-
-旧 API 名を説明に書くときは、`Context` の `elicit` メソッドのように受け手と名前を分ける
-（ドットでつなぐと禁止パターン検査に当たる）。
+"""orders-facade: 受注 API と配送 API を包む読み取り専用の MCP サーバ（見本。上流は adapters.py の偽物）。
 
 実行:
     python3 server.py             # stdio
@@ -139,7 +121,7 @@ mcp = MCPServer(
     # 項目カタログは静的で全員に同じなので public。スコープで一覧を絞るなら private にする。
     cache_hints={"tools/list": CacheHint(ttl_ms=300_000, scope="public")},
 )
-install_guard(mcp)
+install_guard(mcp)  # 未知の引数の拒否と、公開する inputSchema の整形（guard.py）
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 CURSOR = CursorCodec(_cursor_secret(), ttl_seconds=CURSOR_TTL_SECONDS)
