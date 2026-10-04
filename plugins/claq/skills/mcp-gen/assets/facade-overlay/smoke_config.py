@@ -72,7 +72,8 @@ PAGED_CHANGED_ARGS: dict = {"customer_id": "cus_0000000001", "limit": 4}
 PAGED_ENV: dict = {"FACADE_CURSOR_SECRET": secrets.token_hex(32)}
 CURSOR_ERROR_SUBSTRING = "cursor"
 
-# 項目パス: 綴りを誤ったパスと、候補として示されるべき正しいパス。
+# 項目パス: 綴りを誤ったパスと、候補として示されるべき正しいパス。綴り違いも項目のパスの書式
+# （英小文字・数字・_ をドットでつなぐ）で書く（書式を外れると入口の検証で弾かれ、候補の文面まで届かない）。
 FIELDS_TOOL = "orders_get"
 FIELDS_BAD_ARGS: dict = {"order_id": "ord_000001", "fields": ["shiping.address.city"]}
 FIELDS_EXPECTED_SUGGESTION = "shipping.address.city"

@@ -22,6 +22,7 @@ _TOO_LARGE_FOR_SUMMARY = "この結果は summary でも上限を超えるため
 # 一覧（*_search）の件数を予算に合わせて減らしたときに、notes でモデルに伝える文面
 REDUCED_NOTE = "結果が大きいため件数を減らしました。続きは next_cursor で取得できます。"
 _TOO_LARGE_FOR_ONE = "1 件でも結果が大きすぎて返せません。fields を減らしてください。"
+_PAGE_OVER_BUDGET = "結果が上限を超えるため返せません。サーバの運用者に結果の上限の見直しを依頼してください。"
 
 # 射影の葉に許す値（JSON のスカラー）。中間の節に許すのは Mapping と list と null だけ
 _JSON_SCALARS = (str, int, float, bool, type(None))
@@ -229,7 +230,8 @@ def fit_page[T, R](
     今回のページの候補のうち、予算に収まる先頭の件数だけを返す。残りがあれば同じ上流の
     ページで読み飛ばす件数を増やした位置を、無ければ上流の次のページの先頭を、続きの
     cursor にする。大きさは、発行しうる続きの cursor のうち最も長いものと、最も長い
-    notes で見積もるので、返す結果は必ず予算に収まる。
+    notes で見積もる。返す前に結果全体も測り、予算を超えるなら返さずに失敗にする
+    （返す結果は必ず予算に収まる）。
 
     上流の次のページトークンを cursor に封じられない（`issue` が失敗する）ときは、今の
     ページが収まっても全体を失敗にする（続きを取れない結果を返さない）。
@@ -248,7 +250,8 @@ def fit_page[T, R](
         結果全体。
 
     Raises:
-        FacadeError: 1 件でも予算を超えるとき、または `issue` が続きの cursor を発行できないとき。
+        FacadeError: 1 件でも予算を超えるとき、結果全体が予算を超えるとき、または `issue` が
+            続きの cursor を発行できないとき。
     """
     # 発行しうる続きの位置（同じページの読み飛ばしと、上流の次のページの先頭）だけで見積もる
     candidates = [{"page": position["page"], "skip": position["skip"] + len(items)}]
@@ -266,7 +269,11 @@ def fit_page[T, R](
         next_position = {"page": upstream_next, "skip": 0} if upstream_next else None
         notes = [] if items or next_position else [empty_note]
     next_cursor = issue(next_position) if next_position else None
-    return build(list(items[:count]), next_cursor, notes)
+    result = build(list(items[:count]), next_cursor, notes)
+    if measure(result) > max_chars:
+        # 候補を見積もりで収めたときは起きない。候補が 0 件で、続きの cursor と notes だけで上限を超えるとき
+        raise FacadeError(_PAGE_OVER_BUDGET)
+    return result
 
 
 def fit_view[T](

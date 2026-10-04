@@ -135,6 +135,18 @@ class TestRejection:
         """引数を取らないツールでは「使える引数: なし」と示す。"""
         assert "なし" in guard.rejection(["x"], [], server_name="s", server_version="1")["content"][0]["text"]
 
+    def test_rejection_bounds_echoed_names(self, guard: types.ModuleType) -> None:
+        """名指しする未知の引数は先頭の数件に絞り、長い名前は切り詰める（要求の文字列をそのまま返さない）。"""
+        long_name = "a" * 500
+        unknown = [long_name, "b", "c", "d", "e", "omitted_f", "omitted_g"]
+        text = guard.rejection(unknown, ["status"], server_name="s", server_version="1")["content"][0]["text"]
+        assert "a" * guard.ECHOED_NAME_MAX_CHARS + "…" in text
+        assert "a" * (guard.ECHOED_NAME_MAX_CHARS + 1) not in text
+        assert all(name in text for name in ["b", "c", "d", "e"])
+        assert "omitted" not in text
+        assert "ほか 2 個" in text
+        assert len(text) < 300
+
 
 class _FakeServer:
     """install_guard が使う最小限のサーバ面。"""

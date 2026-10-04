@@ -27,6 +27,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from mcp.server import MCPServer
 
+# 拒否の文面で名指しする未知の引数の数と、1 つの名前の長さの上限（要求の文字列をそのまま返さない）
+ECHOED_NAMES = 5
+ECHOED_NAME_MAX_CHARS = 64
+
 
 def install_guard(server: MCPServer) -> None:
     """ガードを middleware の末尾に登録する。
@@ -99,6 +103,23 @@ def unknown_arguments(arguments: Mapping[str, Any], allowed: list[str]) -> list[
     return sorted(set(arguments) - set(allowed))
 
 
+def _echoed(names: list[str]) -> str:
+    """拒否の文面で名指しする未知の引数を、先頭の数件と切り詰めた名前にする。
+
+    Args:
+        names: 未知の引数名。
+
+    Returns:
+        読点でつないだ名前（残りがあれば件数を添える）。
+    """
+    shown = [
+        name if len(name) <= ECHOED_NAME_MAX_CHARS else name[:ECHOED_NAME_MAX_CHARS] + "…"
+        for name in names[:ECHOED_NAMES]
+    ]
+    rest = len(names) - len(shown)
+    return "、".join(shown) + (f" ほか {rest} 個" if rest else "")
+
+
 def rejection(unknown: list[str], allowed: list[str], *, server_name: str, server_version: str) -> dict[str, Any]:
     """未知の引数を拒否するツール実行エラーを組み立てる。
 
@@ -112,7 +133,7 @@ def rejection(unknown: list[str], allowed: list[str], *, server_name: str, serve
         `isError: true` の CallToolResult（JSON の形）。
     """
     names = "、".join(allowed) if allowed else "なし"
-    text = f"未知の引数 {'、'.join(unknown)} は受け付けません。使える引数: {names}。綴りを確かめて呼び直してください。"
+    text = f"未知の引数 {_echoed(unknown)} は受け付けません。使える引数: {names}。綴りを確かめて呼び直してください。"
     return {
         "resultType": "complete",
         "isError": True,

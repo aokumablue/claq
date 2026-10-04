@@ -315,6 +315,24 @@ class TestFitPage:
         with pytest.raises(facade.errors.FacadeError, match="too long"):
             self._fit(facade, self._ITEMS, issue=refuse_upstream_page)
 
+    def test_empty_page_over_budget_raises(self, facade: types.SimpleNamespace) -> None:
+        """候補が 0 件でも、結果全体（続きの cursor と notes）が予算を超えるなら返さずに失敗する。"""
+        with pytest.raises(facade.errors.FacadeError, match="上限"):
+            self._fit(facade, [], max_chars=10)
+
+    def test_empty_page_fits_or_fails(self, facade: types.SimpleNamespace) -> None:
+        """候補が 0 件のときも、返した結果は必ず予算に収まる（収まらなければ失敗にする）。"""
+        returned = 0
+        for budget in range(1, 200, 3):
+            for upstream_next in ("p2", None):
+                try:
+                    result = self._fit(facade, [], max_chars=budget, upstream_next=upstream_next)
+                except facade.errors.FacadeError:
+                    continue
+                returned += 1
+                assert len(facade.shaping.compact_json(result)) <= budget, (budget, upstream_next)
+        assert returned > 0
+
     def test_result_always_fits_budget(self, facade: types.SimpleNamespace) -> None:
         """どの予算でも、返した結果全体は予算に収まる（見積もりは実際の cursor と notes 以上）。"""
         longest_note = max(facade.shaping.REDUCED_NOTE, self._EMPTY, key=len)
