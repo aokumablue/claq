@@ -3,8 +3,9 @@ name = "example-server"
 version = "0.1.0"
 description = "MCP server (protocol 2026-07-28)"
 requires-python = ">=3.12"
-# mcp は 3.x で API が変わりうるので上限を張る。mcp_types は直接 import するので直接依存にする。
-dependencies = ["mcp>=2.3.0,<3", "mcp-types"]
+# mcp は 3.x で API が変わりうるので上限を張る。mcp_types と pydantic は直接 import するので直接依存にする
+# （pydantic の下限は mcp 2.3.0 が要求する版にそろえる）。
+dependencies = ["mcp>=2.3.0,<3", "mcp-types", "pydantic>=2.12.0"]
 
 [project.scripts]
 example-server = "server:main"

@@ -4,8 +4,9 @@
 として起動し、生の JSON-RPC を書き込んで応答を読む。SDK を経由しないので
 「SDK が正しいと言っている」ではなく「ワイヤに正しい形が出ている」を確認できる。
 
-検査の対象（ツール名・引数・期待値・上限）は `smoke_config.py` に書く。このファイルは
-編集しない。
+検査の対象（ツール名・引数・期待値・上限）は `smoke_config.py` に書く。このファイルと、
+サーバを起動しない検査の部品（旧仕様の名前の走査・同梱するファイルの確認）を置いた
+`smoke_static.py` は編集しない。
 
 実行方法（**venv の interpreter で実行すること**）:
     .venv/bin/python3 smoke_check.py    # 単体実行（pytest 不要）
@@ -32,12 +33,15 @@ import re
 import subprocess
 import sys
 import threading
+import unittest
+import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import smoke_config as config
+import smoke_static
 
 # smoke_config.py で設定できる名前。HAPPY_* は必須で、残りは省略すると既定値になる
 # （使わない検査の設定は書かない。知らない名前は test_settings_are_known が落とす）。
@@ -66,12 +70,22 @@ OPTIONAL_SETTINGS: dict[str, Any] = {
     "CLIENT_CAPABILITIES": {},
     "MRTR_CASES": [],
 }
+# 有効にした検査（キー）に要る期待値（値）。空のままだと `"" in text` のように検査が必ず通る。
+PAIRED_SETTINGS: dict[str, tuple[str, ...]] = {
+    "INVALID_TOOL": ("INVALID_EXPECTED_MESSAGE",),
+    "RESOURCE_URI": ("RESOURCE_EXPECTED_SUBSTRING",),
+    "PROMPT_NAME": ("PROMPT_EXPECTED_SUBSTRING",),
+    "FIELDS_TOOL": ("FIELDS_BAD_ARGS", "FIELDS_EXPECTED_SUGGESTION"),
+    "PAGED_TOOL": ("PAGED_ARGS", "PAGED_CHANGED_ARGS", "CURSOR_ERROR_SUBSTRING"),
+}
+MRTR_CASE_KEYS = ("tool", "arguments", "action", "expected_is_error", "expected_text")
 DEFINED_SETTINGS = {name: value for name, value in vars(config).items() if name.isupper()}
 cfg = SimpleNamespace(**{**OPTIONAL_SETTINGS, **DEFINED_SETTINGS})
 
 SERVER_PATH = Path(__file__).with_name("server.py")
 PROTOCOL_VERSION = "2026-07-28"
 RESPONSE_TIMEOUT_SECONDS = 30.0
+SDK_PROBE_TIMEOUT_SECONDS = 60
 UNKNOWN_ARGUMENT = "zz_unknown_argument"
 # ホストがツール完全名に許す文字は英数字・`_`・`-` に限られることが多い。`-` も避ける。
 TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -79,18 +93,6 @@ TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 DOCSTRING_SECTION_PATTERN = re.compile(r"^\s*(Args|Returns|Raises|Yields):\s*$", re.MULTILINE)
 # 公開する inputSchema に残してはいけないキー（ガードが外す・入れ子のモデルを使わない）
 FORBIDDEN_INPUT_SCHEMA_KEYS = ("anyOf", "oneOf", "allOf", "$ref", "$defs", "title")
-# 旧仕様の API 名・機構（正本）。生成先のファイルに 1 件でも当たれば旧仕様が混入している。
-# 各パターンの意味は、生成に使った mcp-gen スキルの references/spec-2026-07-28.md にある。
-FORBIDDEN_PATTERN = re.compile(
-    r"FastMCP|Mcp-Session-Id|mcp_session_id|resources/(un)?subscribe|Last-Event-ID|logging/setLevel"
-    r"|elicitationId|-32002|notifications/(initialized|elicitation/complete)|ctx\.elicit(_url)?\("
-    r"|ctx\.(log|info|debug|warning|error)\(|send_log_message\(|create_message\(|list_roots\("
-)
-# 生成先の外から来たファイル（仮想環境・依存・キャッシュ）は見ない。SDK 自身が旧名を含むため。
-SKIPPED_DIRS = frozenset(
-    {"__pycache__", ".venv", "venv", "site-packages", ".git", "node_modules", ".pytest_cache", ".ruff_cache",
-     ".mypy_cache", "build", "dist"}
-)
 
 # 2026-07-28 では各リクエストが自分でプロトコル版と capability を運ぶ。
 # `initialize` ハンドシェイクは存在しないので、いきなり本題のリクエストを送る。
@@ -100,6 +102,10 @@ REQUEST_META = {
     "io.modelcontextprotocol/clientInfo": {"name": "smoke-check", "version": "1.0.0"},
     "io.modelcontextprotocol/clientCapabilities": cfg.CLIENT_CAPABILITIES,
 }
+
+
+class SmokeWarning(UserWarning):
+    """検査は落とさないが、確かめられなかったことがあるという知らせ（main は WARN と表示する）。"""
 
 
 def _spawn(env: dict[str, str] | None = None) -> subprocess.Popen:
@@ -225,6 +231,21 @@ def _text(result: dict) -> str:
         text ブロックの本文を空白でつないだ文字列。
     """
     return " ".join(block.get("text", "") for block in result.get("content", []))
+
+
+def _require(setting: str) -> None:
+    """任意の検査の設定が無ければ、その検査を SKIP にする。
+
+    「実行しなかった」を「合格」に潰さない。pytest でも SKIP として数えられる。
+
+    Args:
+        setting: 検査を有効にする設定の名前。
+
+    Raises:
+        unittest.SkipTest: 設定が無い（空の）とき。
+    """
+    if not getattr(cfg, setting):
+        raise unittest.SkipTest(f"{setting} 未設定")
 
 
 def _walk_keys(node: object) -> Iterator[str]:
@@ -430,6 +451,7 @@ def test_tool_error_reaches_the_model() -> None:
     `isError` は立つのにモデルは何が悪かったのか分からない。
     モデルが自己修正できるのは `ToolError` で投げた場合だけ。
     """
+    _require("INVALID_TOOL")
     responses = _exchange(
         [
             _request(1, "tools/list"),
@@ -465,6 +487,7 @@ def test_resource_is_served() -> None:
     キーを書き忘れると `ttlMs=0`（毎回取り直し）のままになる。
     ツール側だけ見ていると気づけない。
     """
+    _require("RESOURCE_URI")
     responses = _exchange([_request(1, "resources/read", {"uri": cfg.RESOURCE_URI})])
     result = responses[1]["result"]
     assert result["resultType"] == "complete", result
@@ -481,6 +504,7 @@ def test_prompt_is_served() -> None:
     `prompts/get` は `CacheableMethod` ではないので `ttlMs` は見ない
     （一覧の `prompts/list` にはヒントが載る）。
     """
+    _require("PROMPT_NAME")
     responses = _exchange(
         [_request(1, "prompts/get", {"name": cfg.PROMPT_NAME, "arguments": cfg.PROMPT_ARGS})]
     )
@@ -498,6 +522,7 @@ def test_paging_round_trip() -> None:
     1 ページ目と 2 ページ目を**別々のプロセス**で取る。カーソルが自己完結していれば
     （共有の鍵だけで）どのインスタンスでも続きを返せる。
     """
+    _require("PAGED_TOOL")
     first = _exchange([_call(1, cfg.PAGED_TOOL, cfg.PAGED_ARGS)], cfg.PAGED_ENV)[1]["result"]
     assert first.get("isError") is not True, first
     page1 = first["structuredContent"]
@@ -528,13 +553,19 @@ def test_paging_round_trip() -> None:
 
 def test_unknown_field_gets_suggestion() -> None:
     """未知の項目パスが `isError` になり、近い候補が示されること。"""
-    result = _exchange([_call(1, cfg.FIELDS_TOOL, cfg.FIELDS_BAD_ARGS)])[1]["result"]
+    _require("FIELDS_TOOL")
+    responses = _exchange([_request(1, "tools/list"), _call(2, cfg.FIELDS_TOOL, cfg.FIELDS_BAD_ARGS)])
+    published = {tool["name"] for tool in responses[1]["result"]["tools"]}
+    # 未知ツールも `isError: true` を返すため、実在確認なしでは名前の変え忘れで空振り合格する
+    assert cfg.FIELDS_TOOL in published, f"{cfg.FIELDS_TOOL} が未公開です。公開中: {sorted(published)}"
+    result = responses[2]["result"]
     assert result.get("isError") is True, result
     assert cfg.FIELDS_EXPECTED_SUGGESTION in _text(result), result
 
 
 def test_mrtr_round_trips() -> None:
     """MRTR の各ケースで、再送の最終結果が期待どおりであること（承認と拒否の両分岐）。"""
+    _require("MRTR_CASES")
     for case in cfg.MRTR_CASES:
         result = elicit_round_trip(
             case["tool"], case["arguments"], case["action"], case.get("content"), case.get("setup")
@@ -544,41 +575,38 @@ def test_mrtr_round_trips() -> None:
         assert case["expected_text"] in _text(result), f"{label}: {result}"
 
 
+def _missing_expectations() -> list[str]:
+    """有効にした検査に、対になる期待値が欠けていないかを調べる。
+
+    Returns:
+        足りない設定を説明する文の一覧。
+    """
+    problems = [
+        f"{enabled} を設定したなら {needed} も空でない値で書いてください（空のままでは検査が必ず通ります）"
+        for enabled, needed_names in PAIRED_SETTINGS.items()
+        if getattr(cfg, enabled)
+        for needed in needed_names
+        if not getattr(cfg, needed)
+    ]
+    if cfg.PAGED_TOOL and cfg.PAGED_CHANGED_ARGS and cfg.PAGED_CHANGED_ARGS == cfg.PAGED_ARGS:
+        problems.append("PAGED_CHANGED_ARGS は PAGED_ARGS の値を 1 つ変えた条件にしてください（同じでは条件の変更の拒否を確かめられません）")
+    for index, case in enumerate(cfg.MRTR_CASES):
+        missing = [key for key in MRTR_CASE_KEYS if key not in case] if isinstance(case, dict) else list(MRTR_CASE_KEYS)
+        if missing:
+            problems.append(f"MRTR_CASES[{index}] に {missing} がありません")
+        elif not case["expected_text"]:
+            problems.append(f"MRTR_CASES[{index}] の expected_text が空です（空では結果の文面を確かめられません）")
+    return problems
+
+
 def test_settings_are_known() -> None:
-    """smoke_config.py に必須の設定があり、知らない名前（綴りの誤り）が無いこと。"""
+    """smoke_config.py に必須の設定があり、知らない名前（綴りの誤り）が無く、有効にした検査の期待値が揃っていること。"""
     missing = [name for name in REQUIRED_SETTINGS if name not in DEFINED_SETTINGS]
     unknown = sorted(set(DEFINED_SETTINGS) - set(REQUIRED_SETTINGS) - set(OPTIONAL_SETTINGS))
     assert not missing, f"smoke_config.py に {missing} がありません"
     assert not unknown, f"smoke_config.py の {unknown} は使われない名前です（綴りを確かめる）。使える名前: {sorted(OPTIONAL_SETTINGS)}"
-
-
-def legacy_api_hits(root: Path, *, skip: Path) -> list[str]:
-    """root 以下のテキストファイルから、旧仕様の API 名・機構に当たる行を集める。
-
-    Args:
-        root: 走査の起点。
-        skip: 走査しないファイル（パターンの定義そのものを含む smoke_check.py）。
-
-    Returns:
-        `パス:行番号: 行` の一覧。
-    """
-    hits: list[str] = []
-    for directory, subdirs, files in os.walk(root):
-        subdirs[:] = sorted(name for name in subdirs if name not in SKIPPED_DIRS and not name.endswith(".egg-info"))
-        for name in sorted(files):
-            path = Path(directory, name)
-            if path.resolve() == skip.resolve():
-                continue
-            try:
-                lines = path.read_text(encoding="utf-8").splitlines()
-            except (UnicodeDecodeError, OSError):
-                continue  # バイナリ（.pyc など）は見ない
-            hits.extend(
-                f"{path.relative_to(root)}:{number}: {line.strip()}"
-                for number, line in enumerate(lines, 1)
-                if FORBIDDEN_PATTERN.search(line)
-            )
-    return hits
+    problems = _missing_expectations()
+    assert not problems, "smoke_config.py の期待値が足りません:\n" + "\n".join(problems)
 
 
 def test_no_legacy_api() -> None:
@@ -586,10 +614,30 @@ def test_no_legacy_api() -> None:
 
     説明文に書いただけでも当たる（正規表現は呼び出しと散文を区別しない）。旧 API に
     触れるなら「`Context` の `elicit` メソッド」のように受け手と名前を分けて書く。
+    パターンの正本を持つ smoke_static.py と、この smoke_check.py は走査しない。
+    走査しなかったファイルは SmokeWarning で 1 件ずつ知らせる（main は WARN と表示する）。
     """
     here = Path(__file__).resolve()
-    hits = legacy_api_hits(here.parent, skip=here)
+    hits, unscanned = smoke_static.legacy_api_hits(here.parent, skip=(here, Path(smoke_static.__file__)))
+    for entry in unscanned:
+        warnings.warn(f"旧仕様の名前を走査していません: {entry}", SmokeWarning, stacklevel=2)
     assert not hits, "旧仕様の API 名・機構が残っています:\n" + "\n".join(hits)
+
+
+def test_packaging_includes_local_modules() -> None:
+    """pyproject.toml の only-include が、server.py から import する生成先のモジュールを全て含むこと。
+
+    only-include に無いファイルは wheel に入らず、install したサーバが起動時に
+    ModuleNotFoundError で落ちる（生成先のディレクトリで起動するこの検査の他の項目では気づけない）。
+    """
+    root = Path(__file__).resolve().parent
+    if not (root / "pyproject.toml").is_file():
+        raise unittest.SkipTest("pyproject.toml が無い")
+    gaps = smoke_static.packaging_gaps(root)
+    assert not gaps, (
+        f"pyproject.toml の [tool.hatch.build.targets.wheel] の only-include に {gaps} がありません。"
+        "server.py から import されるので、足さないと install したサーバが ModuleNotFoundError で起動しません"
+    )
 
 
 def sdk_protocol_warning() -> str | None:
@@ -597,62 +645,96 @@ def sdk_protocol_warning() -> str | None:
 
     Returns:
         警告文。版が同じとき、または SDK を読めないとき（その場合はサーバの起動の検査が落ちる）は None。
+        確かめる子プロセスが時間切れなら、確かめられなかったことを書いた警告文。
     """
-    completed = subprocess.run(
-        [sys.executable, "-c", "import mcp.types as t; print(t.LATEST_PROTOCOL_VERSION)"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", "import mcp.types as t; print(t.LATEST_PROTOCOL_VERSION)"],
+            capture_output=True,
+            text=True,
+            timeout=SDK_PROBE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return (
+            f"SDK の最新プロトコル版を {SDK_PROBE_TIMEOUT_SECONDS} 秒以内に確かめられませんでした。"
+            f"スケルトンの {PROTOCOL_VERSION} と同じかどうかは確かめられません"
+        )
     latest = completed.stdout.strip()
     if completed.returncode != 0 or latest == PROTOCOL_VERSION:
         return None
     return f"SDK の最新プロトコル版は {latest} で、スケルトンの {PROTOCOL_VERSION} と違います。SDK の changelog を読み直してください"
 
 
+# main が順に回す検査（設定の検査は先に単独で回す）。任意の検査は、設定が無ければ自分で SKIP する。
+CHECKS: tuple[Callable[[], None], ...] = (
+    test_protocol_surface,
+    test_tool_definitions_follow_design,
+    test_unknown_argument_is_rejected,
+    test_text_mirrors_structured_content,
+    test_no_legacy_api,
+    test_packaging_includes_local_modules,
+    test_tool_error_reaches_the_model,
+    test_resource_is_served,
+    test_prompt_is_served,
+    test_paging_round_trip,
+    test_unknown_field_gets_suggestion,
+    test_mrtr_round_trips,
+)
+
+
+def _run_check(check: Callable[[], None]) -> bool:
+    """検査を 1 つ実行し、PASS・FAIL・SKIP と、検査が出した SmokeWarning を WARN として表示する。
+
+    SmokeWarning 以外の警告は、元どおり `warnings.showwarning` に渡す。
+
+    Args:
+        check: 実行する検査。
+
+    Returns:
+        落ちたら True。
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", SmokeWarning)
+        failed = _execute(check)
+    for warning in caught:
+        if issubclass(warning.category, SmokeWarning):
+            print(f"WARN {check.__name__}: {warning.message}", file=sys.stderr)
+        else:
+            warnings.showwarning(warning.message, warning.category, warning.filename, warning.lineno, warning.file, warning.line)
+    return failed
+
+
+def _execute(check: Callable[[], None]) -> bool:
+    """検査を 1 つ実行し、PASS・FAIL・SKIP を表示する。
+
+    Args:
+        check: 実行する検査。
+
+    Returns:
+        落ちたら True。
+    """
+    try:
+        check()
+    except unittest.SkipTest as skipped:
+        print(f"SKIP {check.__name__} ({skipped})", file=sys.stderr)
+    except AssertionError as error:
+        print(f"FAIL {check.__name__}: {error}", file=sys.stderr)
+        return True
+    else:
+        print(f"PASS {check.__name__}", file=sys.stderr)
+    return False
+
+
 def main() -> int:
     """全チェックを実行し、終了コードを返す。
 
     Returns:
-        全て通れば 0、1 つでも落ちれば 1。
+        全て通れば 0（SKIP は落ちたことにしない）、1 つでも落ちれば 1。
     """
-    try:
-        test_settings_are_known()
-    except AssertionError as error:
-        print(f"FAIL test_settings_are_known: {error}", file=sys.stderr)
+    if _run_check(test_settings_are_known):
         return 1
-    print("PASS test_settings_are_known", file=sys.stderr)
-    failures = 0
-    checks: list[Callable[[], None]] = [
-        test_protocol_surface,
-        test_tool_definitions_follow_design,
-        test_unknown_argument_is_rejected,
-        test_text_mirrors_structured_content,
-        test_no_legacy_api,
-    ]
-    # 「実行しなかった」を「合格」に潰さない。第三の値として記録する。
-    optional = (
-        (cfg.INVALID_TOOL, test_tool_error_reaches_the_model, "INVALID_TOOL"),
-        (cfg.RESOURCE_URI, test_resource_is_served, "RESOURCE_URI"),
-        (cfg.PROMPT_NAME, test_prompt_is_served, "PROMPT_NAME"),
-        (cfg.PAGED_TOOL, test_paging_round_trip, "PAGED_TOOL"),
-        (cfg.FIELDS_TOOL, test_unknown_field_gets_suggestion, "FIELDS_TOOL"),
-        (cfg.MRTR_CASES, test_mrtr_round_trips, "MRTR_CASES"),
-    )
-    for enabled, check, setting in optional:
-        if enabled:
-            checks.append(check)
-        else:
-            print(f"SKIP {check.__name__} ({setting} 未設定)", file=sys.stderr)
-    for check in checks:
-        try:
-            check()
-        except AssertionError as error:
-            failures += 1
-            print(f"FAIL {check.__name__}: {error}", file=sys.stderr)
-        else:
-            print(f"PASS {check.__name__}", file=sys.stderr)
+    failures = sum(_run_check(check) for check in CHECKS)
     warning = sdk_protocol_warning()
     if warning:
         print(f"WARN {warning}", file=sys.stderr)

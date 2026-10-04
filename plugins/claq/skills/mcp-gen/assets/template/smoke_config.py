@@ -14,16 +14,16 @@ HAPPY_EXPECTED_STRUCTURED: dict = {"value": 3.0, "unit": "ms"}
 
 # 型と範囲は正しいが業務的に失敗し、ツール本体から ToolError が投げられる呼び出し。
 # 引数検証で弾かれる値を選ぶと、ToolError の経路を一度も通らずに合格してしまう。
-# 業務上の失敗を持たないサーバなら 3 つとも消す（SKIP として記録される）。
+# 業務上の失敗を持たないサーバなら、3 つとも書かない（SKIP として記録される）。
 INVALID_TOOL = "items_get"
 INVALID_ARGS: dict = {"item_id": "bad"}
 INVALID_EXPECTED_MESSAGE = "item-"
 
-# 公開するリソース。公開しないなら RESOURCE_URI = ""（SKIP として記録される）。
+# 公開するリソース。公開しないなら、2 つとも書かない（SKIP として記録される）。
 RESOURCE_URI = "config://runtime"
 RESOURCE_EXPECTED_SUBSTRING = "example-server"
 
-# 公開するプロンプト。公開しないなら PROMPT_NAME = ""。引数はワイヤ上つねに文字列。
+# 公開するプロンプト。公開しないなら、3 つとも書かない（SKIP として記録される）。引数はワイヤ上つねに文字列。
 PROMPT_NAME = "review_request"
 PROMPT_ARGS: dict = {"target": "server.py"}
 PROMPT_EXPECTED_SUBSTRING = "server.py"

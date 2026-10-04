@@ -74,6 +74,7 @@ cp /abs/skill/mcp-gen/assets/template/server.py /abs/path/to/dest/server.py
 cp /abs/skill/mcp-gen/assets/template/guard.py /abs/path/to/dest/guard.py
 cp /abs/skill/mcp-gen/assets/template/transport.py /abs/path/to/dest/transport.py
 cp /abs/skill/mcp-gen/assets/template/smoke_check.py /abs/path/to/dest/smoke_check.py
+cp /abs/skill/mcp-gen/assets/template/smoke_static.py /abs/path/to/dest/smoke_static.py
 cp /abs/skill/mcp-gen/assets/template/smoke_config.py /abs/path/to/dest/smoke_config.py
 cp /abs/skill/mcp-gen/assets/template/README.md /abs/path/to/dest/README.md
 ```
@@ -100,11 +101,12 @@ Bash 経由の書き込みは `bash_config_protection` に、Write/Edit は `con
 ### 4. 編集する
 
 差し替える: `SERVER_NAME` / `SERVER_VERSION` / `instructions` / `cache_hints`、
+`pyproject.toml` の `name` と `[project.scripts]` のコマンド名（`SERVER_NAME` にそろえる）、
 見本のツール・リソース・プロンプト（不要なら削除）。重ね合わせたなら `CATALOG`・
 出力モデル・`adapters.py` の偽物（実際の上流の呼び出しに置き換える）も。
 
 触らない: `install_guard(mcp)` と `run(mcp)` の呼び出し、`guard.py`、`smoke_check.py`、
-`facade/` の部品。`transport.py` は公開するホスト名を足すとき以外は触らない。
+`smoke_static.py`、`facade/` の部品。`transport.py` は公開するホスト名を足すとき以外は触らない。
 stdio だけの要件でも `--http` は残す。
 
 ツールの書き方（説明・引数・出力・失敗・注釈・状態）は `references/tool-design.md` に従う。
@@ -118,7 +120,7 @@ stdio だけの要件でも `--http` は残す。
   `resources/templates/list` / `resources/read` / `server/discover` の 6 つ。
   公開する面のキーを書き忘れるとその応答だけ `ttlMs=0` に取り残される
   （`resources/read` の忘れが多い）。公開しない面のキーは消す。
-  認可で内容が変わる一覧に `"public"` を付けない。
+  主体や認可で内容が変わる応答（一覧と `resources/read`）に `"public"` を付けない。
 - ログは標準 `logging`。`MCPServer(log_level=...)` を渡せば SDK が設定する。
   出力は stderr。`print` は stdout を汚して JSON-RPC フレームを壊す。
   ログはモデルに届かない（届くのは戻り値だけ）。進捗は `ctx.report_progress()`。
@@ -216,13 +218,16 @@ async def items_delete(
 
 ## スケルトンの範囲外
 
-HTTP の OAuth と、複数インスタンスでの運用。満たすべき要件と進め方は
-`references/remote-auth.md`。stdio は認可仕様の対象外で、資格情報は環境変数から取る。
+HTTP の OAuth と、複数インスタンスでの運用。スケルトンの HTTP は認証を持たないので、
+ループバック（127.0.0.1 / ::1 / localhost）でだけ待ち受け、それ以外の `--host` は起動時に拒否する。
+満たすべき要件と進め方は `references/remote-auth.md`。stdio は認可仕様の対象外で、
+資格情報は環境変数から取る。
 
 ## 詰まったときに見るところ
 
 - `server/discover` / `resultType` / `_meta.serverInfo` / `inputSchema` /
-  `outputSchema` / `structuredContent` / 引数検証は SDK が自動でやる。
+  `outputSchema` / `structuredContent` / 引数検証は SDK が自動でやる（`guard.py` が補正する
+  3 点、未知の引数の拒否・公開する inputSchema の整形・structuredContent の写しの text を除く）。
   これらを自前で実装しようとしていたら、記憶で書いている兆候。
 - HTTP で `400 Bad Request: Missing session ID` → `MCP-Protocol-Version` ヘッダの
   付け忘れ。この仕様にセッションは存在しない。真に受けて実装すると廃止済みの

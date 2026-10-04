@@ -1,4 +1,4 @@
-"""トランスポートを選んでサーバを起動する（全サーバ共通。編集しない）。
+"""トランスポートを選んでサーバを起動する（全サーバ共通。公開するホスト名を足すとき以外は編集しない）。
 
 stdio が既定で、`--http` で Streamable HTTP（既定は 127.0.0.1:8000/mcp）を使う。
 どの server.py もここを通して起動し、HTTP の安全設定を 1 か所に保つ。
@@ -14,7 +14,20 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 logger = logging.getLogger(__name__)
 
+# HTTP でバインドしてよいホスト。認証を実装していないので、ループバックだけにする。
 _LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
+
+
+def _authority(host: str) -> str:
+    """ホストを、Host ヘッダと Origin に現れる形にする（IPv6 のアドレスはブラケットで囲む）。
+
+    Args:
+        host: バインド先のホスト。
+
+    Returns:
+        `127.0.0.1`・`localhost`・`[::1]` のような形。
+    """
+    return f"[{host}]" if ":" in host else host
 
 
 def run(server: MCPServer) -> None:
@@ -25,11 +38,10 @@ def run(server: MCPServer) -> None:
     """
     parser = argparse.ArgumentParser(description=f"{server.name} MCP server")
     parser.add_argument("--http", action="store_true", help="Streamable HTTP で起動する（既定は stdio）")
-    parser.add_argument("--host", default="127.0.0.1", help="HTTP バインド先（既定はループバックのみ）")
     parser.add_argument(
-        "--allow-remote",
-        action="store_true",
-        help="ループバック以外へのバインドを許可する（DNS リバインディング検査が実質無効になる）",
+        "--host",
+        default="127.0.0.1",
+        help=f"HTTP のバインド先。ループバック（{' / '.join(_LOOPBACK_HOSTS)}）だけを受け付ける（既定は 127.0.0.1）",
     )
     parser.add_argument("--port", type=int, default=8000, help="HTTP ポート")
     args = parser.parse_args()
@@ -39,20 +51,18 @@ def run(server: MCPServer) -> None:
         server.run(transport="stdio")
         return
 
-    # 仕様上、HTTP サーバは Origin を検証し（DNS リバインディング対策）、
-    # ローカル実行ではループバックにのみバインドしなければならない。
-    # 許可リストは args.host から導出するため、非ループバックへ広げた瞬間に
-    # 「バインド先と同じ値を照合する」形になり検査が実質無効化する。明示フラグを要求する。
-    if args.host not in _LOOPBACK_HOSTS and not args.allow_remote:
-        parser.error(f"--host {args.host} は非ループバック。--allow-remote を明示すること")
-    # 既定の許可リストは空で localhost しか通らないため、実ホスト名で公開するときは
-    # 裸のホスト名とポート付きの両方を挙げる（挙げ忘れると全リクエストが 421 になる）。
-    # リバースプロキシが Host/Origin を制御しているなら
-    # enable_dns_rebinding_protection=False にする。
+    # 仕様上、ローカル実行の HTTP サーバはループバックにだけバインドし、Origin を検証する
+    # （DNS リバインディング対策）。認証の無いサーバをループバックの外へ公開する手段は置かない。
+    if args.host not in _LOOPBACK_HOSTS:
+        parser.error(f"--host {args.host} は使えません。認証を実装していないので、ループバック以外には公開しない")
+    # SDK は Host ヘッダと Origin を許可リストとの完全一致で照合する。IPv6 の Host ヘッダは
+    # ブラケット付き（[::1]:8000）で届くので、裸のホストとポート付きの両方をその形で挙げる
+    # （挙げ忘れると全リクエストが 421 になる）。
+    authority = _authority(args.host)
     security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=[args.host, f"{args.host}:{args.port}"],
-        allowed_origins=[f"http://{args.host}:{args.port}"],
+        allowed_hosts=[authority, f"{authority}:{args.port}"],
+        allowed_origins=[f"http://{authority}:{args.port}"],
     )
     logger.info("starting streamable-http on %s:%s", args.host, args.port)
     server.run(

@@ -172,7 +172,8 @@ def compact_text(result: dict[str, Any]) -> None:
     """structuredContent の写しの text を、詰めた JSON に置き換える。
 
     text が 1 ブロックだけで、その中身が structuredContent と同じ JSON のときに限る。
-    ツールが自分で組み立てた text（要約文など）には触れない。
+    ツールが自分で組み立てた text（要約文など）と、JSON として読めない text（入れ子が
+    深すぎるものを含む）には触れない。
 
     Args:
         result: `tools/call` の結果（JSON の形）。その場で書き換える。
@@ -186,7 +187,7 @@ def compact_text(result: dict[str, Any]) -> None:
         return
     try:
         mirrored = json.loads(block.get("text", ""))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         return
     if mirrored == structured:
         block["text"] = json.dumps(structured, ensure_ascii=False, separators=(",", ":"))

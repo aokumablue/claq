@@ -1,8 +1,11 @@
 """smoke_check.py の検査対象（上流 API ファサードの見本向け）。生成したサーバに合わせて書き換える。
 
 サンプルの値のままだと、検査が実際のサーバを見なくなる（未知ツールで落ちるか、
-見本のツールだけを検査して合格する）。
+見本のツールだけを検査して合格する）。使わない検査の名前は書かない（省略すると SKIP か
+既定値になる。使える名前は smoke_check.py の OPTIONAL_SETTINGS）。
 """
+
+import secrets
 
 # 出力が決定的なツール。毎回新しい子プロセスで同じ順に呼んで同じ値が返ること。
 # 戻り値をモデルにしたツールを選ぶ（`-> str` は text が生の文字列になり、写しの検査に落ちる）。
@@ -64,8 +67,9 @@ MAX_RESULT_CHARS = 20_000  # server.py の MAX_RESULT_CHARS 以上にする
 PAGED_TOOL = "orders_search"
 PAGED_ARGS: dict = {"customer_id": "cus_0000000001", "limit": 3}
 PAGED_CHANGED_ARGS: dict = {"customer_id": "cus_0000000001", "limit": 4}
-# 2 つのプロセスで同じ鍵を使い、カーソルが自己完結していることを確かめる
-PAGED_ENV: dict = {"FACADE_CURSOR_SECRET": "smoke-check-shared-secret-0123456789abcdef"}
+# 2 つのプロセスで同じ鍵を使い、カーソルが自己完結していることを確かめる。鍵は実行ごとに作る
+# （公開された固定の値を置くと、その値を本番に流用したときに誰でもカーソルを作れる）。
+PAGED_ENV: dict = {"FACADE_CURSOR_SECRET": secrets.token_hex(32)}
 CURSOR_ERROR_SUBSTRING = "cursor"
 
 # 項目パス: 綴りを誤ったパスと、候補として示されるべき正しいパス。
