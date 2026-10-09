@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import functools
 import importlib.util
 import re
 import subprocess
@@ -519,15 +520,68 @@ _MD_CALLABLE_EXEMPTIONS = {
     "clamp": "CSS の流体サイズ関数（skills/html-gen）",
     "minmax": "CSS グリッドのトラックサイズ関数（skills/html-gen）",
     "oklch": "CSS の色関数。shadcn/ui のトークンがこの表記で配られる（skills/html-gen）",
+    "model_dump": "pydantic の API。SDK の実測記録が SDK 内部の呼び方を引用する（skills/mcp-gen）",
 }
 
 
-def _defined_callables() -> set[str]:
-    """src/ の Python 関数と runtime シェルヘルパの名前を集める。"""
+def _function_names(path: Path) -> set[str]:
+    """Python ファイルが定義する関数の名前を集める。
+
+    Args:
+        path: Python ファイルのパス。
+
+    Returns:
+        関数名の集合。
+    """
+    return {m.group(1) for m in _PY_DEF_RE.finditer(path.read_text(encoding="utf-8"))}
+
+
+@functools.cache
+def _shared_callables() -> frozenset[str]:
+    """全ての md が名指ししてよい名前（src/ の Python 関数と runtime シェルヘルパ）を集める。
+
+    Returns:
+        関数名の集合。
+    """
     names = {m.group(1) for m in _SHELL_FUNC_RE.finditer(_HELPERS_SH.read_text(encoding="utf-8"))}
     for py in (_ROOT / "src").rglob("*.py"):
-        names |= {m.group(1) for m in _PY_DEF_RE.finditer(py.read_text(encoding="utf-8"))}
-    return names
+        names |= _function_names(py)
+    return frozenset(names)
+
+
+@functools.cache
+def _skill_asset_callables(skill: str) -> frozenset[str]:
+    """スキルのスケルトン（skills/<name>/assets）の Python 関数の名前を集める。
+
+    スケルトンは生成先へ複製される実装であり、名指ししてよいのはそのスキルの md だけ。
+
+    Args:
+        skill: スキルのディレクトリ名。
+
+    Returns:
+        関数名の集合。
+    """
+    return frozenset(name for py in (_ROOT / "skills" / skill).glob("assets/**/*.py") for name in _function_names(py))
+
+
+def _defined_callables(md_file: Path) -> frozenset[str]:
+    """md が名指ししてよい関数の名前を返す。
+
+    src/ の Python 関数と runtime シェルヘルパの名前は全ての md に効く。スキルのスケルトン
+    （skills/<name>/assets）の関数の名前は、同じ skills/<name>/ 配下の md にだけ効く。全スキルの
+    スケルトンの名前を全ての md に効かせていた頃は、open・view・resolve のような汎用の名前が
+    スケルトンと無関係な md でも定義済みとして通り、ずれを見逃していた。
+
+    Args:
+        md_file: 名指ししている md（`_ROOT` 配下）。
+
+    Returns:
+        定義済みとみなす名前の集合。
+    """
+    parts = md_file.relative_to(_ROOT).parts
+    if parts[0] != "skills":
+        return _shared_callables()
+    return _shared_callables() | _skill_asset_callables(parts[1])
 
 
 def test_md_named_callables_are_defined() -> None:
@@ -535,11 +589,12 @@ def test_md_named_callables_are_defined() -> None:
 
     存在しない関数の呼び出しを手順に書くと、記載どおり実行した時点で詰まる。
     静的 validator も既存のリンクチェッカも、md 本文が名指しする**シンボル**の
-    実在は見ていなかった。
+    実在は見ていなかった。スキルのスケルトンの関数は、そのスキルの md でだけ定義済みとみなす
+    （`_defined_callables`）。
     """
-    defined = _defined_callables()
     missing: list[str] = []
     for md_file in _iter_md_files():
+        defined = _defined_callables(md_file)
         for match in _MD_CALLABLE_RE.finditer(md_file.read_text(encoding="utf-8")):
             name = match.group(1)
             if name in defined or name in _MD_CALLABLE_EXEMPTIONS:
@@ -547,6 +602,26 @@ def test_md_named_callables_are_defined() -> None:
             missing.append(f"{md_file.relative_to(_ROOT)}: `{name}(...)`")
     assert missing == [], "実装に存在しない呼び出し表記:\n" + "\n".join(sorted(set(missing)))
     assert all(_MD_CALLABLE_EXEMPTIONS.values()), "免除には理由が要る"
+
+
+def test_skill_asset_callables_apply_only_to_their_skill() -> None:
+    """スケルトンの関数名が、同じスキルの md でだけ定義済みになり、スキルの外の md では未定義のままであること。
+
+    本体テストはコーパス経由でしか `_defined_callables` を実行しないため、範囲を全ての md に
+    戻しても何も落ちない（範囲が広がると検出が緩むだけ）。範囲そのものを直接固定する。
+    """
+    skills = sorted(path.name for path in (_ROOT / "skills").iterdir() if path.is_dir())
+    owner = next(skill for skill in skills if _skill_asset_callables(skill) - _shared_callables())
+    other = next(skill for skill in skills if skill != owner)
+    exclusive = _skill_asset_callables(owner) - _shared_callables() - _skill_asset_callables(other)
+    assert exclusive, f"{owner} のスケルトンにだけある関数名が無い（検査の前提が崩れている）"
+    assert exclusive <= _defined_callables(_ROOT / "skills" / owner / "references" / "any.md")
+    for outside in (
+        _ROOT / "agents" / "reviewer.md",
+        _ROOT / "commands" / "any.md",
+        _ROOT / "skills" / other / "SKILL.md",
+    ):
+        assert exclusive.isdisjoint(_defined_callables(outside)), outside.relative_to(_ROOT)
 
 
 def test_md_shell_helper_invocations_are_defined() -> None:

@@ -110,7 +110,7 @@ claude plugin install claq@claq
 | [`loop-audit`](plugins/claq/skills/loop-audit/SKILL.md) | 自動発火 + `/loop-audit` | fork | ループ収束品質診断 | loop-dev 開発サイクルの収束品質を履歴から集計しスコア化 |
 | [`loop-dev`](plugins/claq/skills/loop-dev/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 実装ループ本体 | plan→generate→evaluate を最大2反復で収束させる実装ループ（feat-dev/bugfix/refactor 等専用） |
 | [`maintain`](plugins/claq/skills/maintain/SKILL.md) | 自動発火 + `/maintain` | fork | ハーネス定期メンテ | commands/skills/agents/hooks のレビュー→修正→強化→検証→記録を1回で完遂 |
-| [`mcp-gen`](plugins/claq/skills/mcp-gen/SKILL.md) | 自動発火 + `/mcp-gen` | inline | MCP サーバ生成 | 検証済みテンプレートを複製して MCP サーバを新規構築 |
+| [`mcp-gen`](plugins/claq/skills/mcp-gen/SKILL.md) | 自動発火 + `/mcp-gen` | inline | MCP サーバ生成 | 検証済みスケルトンを複製して Python の MCP サーバを新規構築。上流 API を包むなら取得ファサードの骨格を重ねる |
 | [`quick-code`](plugins/claq/skills/quick-code/SKILL.md) | `/quick-code`（自動発火なし） | inline | 往復実装 | 人間が実行とテストを担う往復実装モード。自分ではテスト・ビルドを走らせない |
 | [`quick-debug`](plugins/claq/skills/quick-debug/SKILL.md) | `/quick-debug`（自動発火なし） | inline | 往復切り分け | 人間が再現とログ採取を担う往復切り分けモード。修正は当てず観測だけを入れる |
 | [`quick-refactor`](plugins/claq/skills/quick-refactor/SKILL.md) | `/quick-refactor`（自動発火なし） | inline | 往復リファクタ | 人間がテストを実行する往復リファクタモード。振る舞いを変えない書き換えのみ |
@@ -664,19 +664,20 @@ flowchart LR
 
   U(["🔌 MCP サーバ化依頼"]) --> MG["/mcp-gen"]:::skill
 
-  subgraph mcpgen["⚙️ mcp-gen 内部（5ステップ）"]
+  subgraph mcpgen["⚙️ mcp-gen 内部（6ステップ）"]
     direction TB
-    REQ["要件確定"] --> TPL["検証済みテンプレート複製"]
-    TPL --> EDIT["編集<br/>smoke_check.py も同期"]
+    REQ["要件と特性の確定<br/>上流 API を包むなら問いのカタログ"] --> TPL["共通スケルトン複製<br/>上流 API を包むならファサードを重ねる"]
+    TPL --> DES["ツール設計"]
+    DES --> EDIT["編集<br/>smoke_config.py も同期"]
     EDIT --> VER["検証<br/>省略不可"]
-    VER --> REG["登録手順を渡す"]
+    VER --> REG["登録と評価の手順を渡す"]
   end
 
   MG --> mcpgen
 ```
 
 **トリガー**: 「MCP サーバを作って」「既存 API を MCP サーバにして」等
-**期待効果**: 記憶で書かず検証済みテンプレートを複製するため設定ミスが起きにくい。実起動スモークで適合を確認するまで一気通貫。既存 MCP サーバの単発バグ修正は `/bugfix`、脆弱性レビューは `secure` スキル
+**期待効果**: 記憶で書かず検証済みスケルトンを複製するため設定ミスが起きにくい。規模ではなく要件の特性（上流 API を包む・応答が入れ子で大きい・複数 API を結合する・リモートで公開する）で、重ねる骨格と読む規則を選ぶ。実起動スモークで仕様と設計規則（未知の引数の拒否・結果の大きさ・ページング）への適合を確認するまで一気通貫。既存 MCP サーバの単発バグ修正は `/bugfix`、脆弱性レビューは `secure` スキル
 
 **実行例**:
 
