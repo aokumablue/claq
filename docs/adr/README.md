@@ -25,6 +25,7 @@
 | [definition-and-subagent-design.md](definition-and-subagent-design.md) | 定義文書を何体に分け、中身に何を書き何を書かないか |
 | [staleness-detection.md](staleness-detection.md) | 書いたものが黙って古くなる経路をどう塞ぐか。実測できないものをどうするか |
 | [verification-scope-release-gates.md](verification-scope-release-gates.md) | 何を CI で検証し、何をリリースゲートにし、何を配布しないか |
+| [code-simplicity-and-defense.md](code-simplicity-and-defense.md) | 防御・フォールバック・抽象をどこまで置くか。レビューは余剰をどう扱うか |
 
 ## 新しい決定を追加するとき
 
