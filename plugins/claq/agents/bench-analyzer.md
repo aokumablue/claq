@@ -66,12 +66,12 @@ tools: Read, Grep, Glob
   "winner_strengths": [
     "複数ページ文書を扱うための段階的な指示が明確だった",
     "整形エラーを検出できる検証スクリプトが含まれていた",
-    "OCR が失敗したときのフォールバックが明示されていた"
+    "OCR が失敗したときの扱い（原因を報告して止まる）が明示されていた"
   ],
   "loser_weaknesses": [
     "『文書を適切に処理する』という曖昧な指示があり、挙動がぶれた",
     "検証用スクリプトがなく、agent が場当たり的になった",
-    "OCR 失敗時の指示がなく、代替策を試す前に諦めた"
+    "OCR 失敗時の指示がなく、場当たりの代替策を重ねて誤った出力を返した"
   ],
   "instruction_following": {
     "winner": {
@@ -105,8 +105,8 @@ tools: Read, Grep, Glob
     {
       "priority": "medium",
       "category": "error_handling",
-      "suggestion": "フォールバック指示を追加する: 『OCR が失敗したら、1) 解像度を変える 2) 画像前処理を試す 3) 手動抽出する』",
-      "expected_impact": "難しい文書でも早期失敗しにくくなる"
+      "suggestion": "失敗時の扱いを明示する: 『OCR が失敗したら代替策を重ねず、失敗したページと原因を報告して止まる』",
+      "expected_impact": "誤った抽出結果を成功として返さなくなる"
     }
   ],
   "transcript_insights": {
