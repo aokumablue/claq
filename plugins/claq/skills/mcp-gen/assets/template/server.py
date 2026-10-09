@@ -65,7 +65,7 @@ class Item(BaseModel):
     annotations=READ_ONLY,
 )
 def measurements_compute(
-    samples: Annotated[int, Field(ge=1, le=100, description="サンプル数。1〜100", examples=[10])],
+    samples: Annotated[int, Field(ge=1, le=100, description="サンプル数。1〜100（例: 10）", examples=[10])],
     round_digits: Annotated[int | None, Field(ge=0, le=6, description="小数点以下の桁数。省略時は丸めない")] = None,
 ) -> Measurement:
     """サンプル数から計測値を算出する。
@@ -91,7 +91,9 @@ def measurements_compute(
     annotations=READ_ONLY,
 )
 def items_get(
-    item_id: Annotated[str, Field(min_length=1, max_length=100, description="'item-' で始まる項目 ID", examples=["item-1"])],
+    item_id: Annotated[
+        str, Field(min_length=1, max_length=100, description="'item-' で始まる項目 ID（例: item-1）", examples=["item-1"])
+    ],
 ) -> Item:
     """項目 ID を引いて内容を返す。
 

@@ -260,11 +260,10 @@ def _walk_keys(node: object) -> Iterator[str]:
     if isinstance(node, dict):
         for key, value in node.items():
             yield key
-            if key == "properties" and isinstance(value, dict):
-                for child in value.values():
-                    yield from _walk_keys(child)
-            else:
-                yield from _walk_keys(value)
+            # `properties` の値は「引数名 → スキーマ」なので、引数名を飛ばして各スキーマをたどる
+            children = value.values() if key == "properties" and isinstance(value, dict) else (value,)
+            for child in children:
+                yield from _walk_keys(child)
     elif isinstance(node, list):
         for child in node:
             yield from _walk_keys(child)

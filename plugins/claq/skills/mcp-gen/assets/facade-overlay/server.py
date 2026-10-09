@@ -35,6 +35,8 @@ SERVER_VERSION = "0.1.0"
 
 # 既定値。問いのカタログでの評価に合わせて変えてよい。
 ARRAY_LIMIT = 10  # 入れ子の配列ごとに返す件数
+DEFAULT_SEARCH_LIMIT = 10  # orders_search の limit の既定値（ツールの説明にも書く）
+MAX_SEARCH_LIMIT = 50  # orders_search の limit の上限（ツールの説明にも書く）
 MAX_RESULT_CHARS = 20_000  # 1 回の結果の text の上限（smoke_config.MAX_RESULT_CHARS 以下）
 TOOL_DEADLINE_SECONDS = 10.0  # 1 回のツール呼び出しの締切（ホストのタイムアウトより短く）
 CURSOR_TTL_SECONDS = 900
@@ -127,7 +129,11 @@ CATALOG = Catalog(
         # 個人情報はビューに入れない（fields で明示され、かつ許されたときだけ返す）
         FieldSpec("shipping.address.postal_code", "string", "配送先の郵便番号（7 桁、ハイフンなし）", sensitivity="personal"),
         FieldSpec(
-            "items.sku", "string", "明細の商品コード（items は配列。先頭 10 件まで）", sensitivity="internal", views=("detail",)
+            "items.sku",
+            "string",
+            f"明細の商品コード（items は配列。先頭 {ARRAY_LIMIT} 件まで）",
+            sensitivity="internal",
+            views=("detail",),
         ),
         FieldSpec("items.quantity", "integer", "明細の数量", sensitivity="internal", views=("detail",)),
         FieldSpec("items.unit_price.amount", "number", "明細の単価", sensitivity="internal"),
@@ -441,6 +447,65 @@ def _result_chars(result: BaseModel) -> int:
     return len(compact_json(result.model_dump(mode="json")))
 
 
+def _search_conditions(
+    query: str | None,
+    customer_id: str | None,
+    status: Sequence[str] | None,
+    ordered_from: str | None,
+    ordered_to: str | None,
+) -> dict[str, Any]:
+    """orders_search の絞り込みの条件をまとめ、1 つ以上指定されていることを確かめる。
+
+    Args:
+        query: 注文番号・顧客名の部分一致。
+        customer_id: 顧客 ID。
+        status: 受注の状態。
+        ordered_from: 注文日の下限（JST、この日を含む）。
+        ordered_to: 注文日の上限（JST、この日を含む）。
+
+    Returns:
+        引数名 → 値（検索条件の指紋の素にする）。
+
+    Raises:
+        FacadeError: 条件が 1 つも指定されていないとき。
+    """
+    conditions = {
+        "query": query,
+        "customer_id": customer_id,
+        "status": status,
+        "ordered_from": ordered_from,
+        "ordered_to": ordered_to,
+    }
+    if all(value is None for value in conditions.values()):
+        raise FacadeError("条件（query・customer_id・status・ordered_from・ordered_to）を 1 つ以上指定してください。")
+    return conditions
+
+
+def _search_paths(fields: Sequence[str] | None) -> tuple[list[str], list[str]]:
+    """検索結果の 1 件に出す項目のパスを、主体に許された機微区分で決める。
+
+    Args:
+        fields: 各候補に足す項目のパス。
+
+    Returns:
+        （要約に出す項目のパス、追加で付ける項目のパス）。
+
+    Raises:
+        FacadeError: order_id を主体に返せないとき、または fields に未知のパス・検索結果に付けられない
+            パス・権限の無いパスがあるとき。
+    """
+    allowed = _allowed_sensitivity()
+    # 要約も orders_get と同じく区分で絞る（order_id を返せない主体には、識別できない候補を返さない）
+    summary_paths = CATALOG.summary_view("order_id", allowed_sensitivity=allowed)
+    # 要約に既にある項目は extra に重ねない
+    extra_paths = [
+        path
+        for path in CATALOG.resolve(fields or [], for_search=True, allowed_sensitivity=allowed)
+        if path not in summary_paths
+    ]
+    return summary_paths, extra_paths
+
+
 @mcp.tool(
     description=(
         "条件に合う受注の候補を要約で返す。\n"
@@ -448,7 +513,7 @@ def _result_chars(result: BaseModel) -> int:
         "使わない場面: 受注 ID が分かっているときは orders_get を使う。\n"
         "主な引数: query・customer_id・status・ordered_from・ordered_to のうち 1 つ以上を指定する。"
         "fields で各候補に項目を足せる（使えるパスは fields_describe）。\n"
-        "応答: 既定 10 件、最大 50 件。続きは next_cursor を cursor に渡す"
+        f"応答: 既定 {DEFAULT_SEARCH_LIMIT} 件、最大 {MAX_SEARCH_LIMIT} 件。続きは next_cursor を cursor に渡す"
         f"（他の引数は変えない。next_cursor は発行から {CURSOR_TTL} 有効）。"
         "ページの間の一貫性は保証しない。"
     ),
@@ -457,11 +522,20 @@ def _result_chars(result: BaseModel) -> int:
 async def orders_search(
     query: Annotated[
         str | None,
-        Field(min_length=1, max_length=200, description="注文番号・顧客名の部分一致", examples=["ORD-2026-0007"]),
+        Field(
+            min_length=1,
+            max_length=200,
+            description="注文番号・顧客名の部分一致（例: ORD-2026-0007）",
+            examples=["ORD-2026-0007"],
+        ),
     ] = None,
     customer_id: Annotated[
         str | None,
-        Field(pattern=r"^cus_[0-9]{10}$", description="顧客 ID（cus_ と数字 10 桁）", examples=["cus_0000000001"]),
+        Field(
+            pattern=r"^cus_[0-9]{10}$",
+            description="顧客 ID（cus_ と数字 10 桁。例: cus_0000000001）",
+            examples=["cus_0000000001"],
+        ),
     ] = None,
     status: Annotated[
         list[Literal["open", "paid", "shipped", "delivered", "cancelled"]] | None,
@@ -475,10 +549,14 @@ async def orders_search(
     ] = None,
     fields: Annotated[
         list[FieldPath] | None,
-        Field(max_length=5, description="各候補に足す項目のパス", examples=[["shipping.address.city"]]),
+        Field(
+            max_length=5,
+            description="各候補に足す項目のパス（例: shipping.address.city）",
+            examples=[["shipping.address.city"]],
+        ),
     ] = None,
     sort: Literal["ordered_at_desc", "ordered_at_asc", "total_desc"] = "ordered_at_desc",
-    limit: Annotated[int, Field(ge=1, le=50, description="返す件数")] = 10,
+    limit: Annotated[int, Field(ge=1, le=MAX_SEARCH_LIMIT, description="返す件数")] = DEFAULT_SEARCH_LIMIT,
     cursor: Annotated[
         str | None,
         Field(
@@ -508,25 +586,9 @@ async def orders_search(
             上流が失敗した・上流のページトークンが長すぎて続きの cursor を発行できないとき。
     """
     with model_errors():
-        conditions = {
-            "query": query,
-            "customer_id": customer_id,
-            "status": status,
-            "ordered_from": ordered_from,
-            "ordered_to": ordered_to,
-        }
-        if all(value is None for value in conditions.values()):
-            raise FacadeError("条件（query・customer_id・status・ordered_from・ordered_to）を 1 つ以上指定してください。")
+        conditions = _search_conditions(query, customer_id, status, ordered_from, ordered_to)
         created_from, created_before = _created_range(ordered_from, ordered_to)
-        allowed = _allowed_sensitivity()
-        # 要約も orders_get と同じく区分で絞る（order_id を返せない主体には、識別できない候補を返さない）
-        summary_paths = CATALOG.summary_view("order_id", allowed_sensitivity=allowed)
-        # 要約に既にある項目は extra に重ねない
-        extra_paths = [
-            path
-            for path in CATALOG.resolve(fields or [], for_search=True, allowed_sensitivity=allowed)
-            if path not in summary_paths
-        ]
+        summary_paths, extra_paths = _search_paths(fields)
 
         fingerprint = query_fingerprint({**conditions, "fields": fields, "sort": sort, "limit": limit})
         principal = _principal()
@@ -579,7 +641,7 @@ async def orders_search(
         "使う場面: orders_search などで受注 ID が分かったあと、詳しく見るとき。\n"
         "主な引数: view = summary（既定・主要項目）か detail（配送先・明細・配送を含む）。"
         "fields で項目を足せる（使えるパスは fields_describe）。\n"
-        "応答: 入れ子の構造を保つ。配列は先頭 10 件で、総数は <名前>_more にある。"
+        f"応答: 入れ子の構造を保つ。配列は先頭 {ARRAY_LIMIT} 件で、総数は <名前>_more にある。"
         "取れなかった部分は partial に書く。"
     ),
     annotations=READ_ONLY,
@@ -589,14 +651,18 @@ async def orders_get(
         str,
         Field(
             pattern=r"^ord_[0-9]{6}$",
-            description="受注 ID（ord_ と数字 6 桁。orders_search で得る）",
+            description="受注 ID（ord_ と数字 6 桁。orders_search で得る。例: ord_000001）",
             examples=["ord_000001"],
         ),
     ],
     view: Annotated[Literal["summary", "detail"], Field(description="返す項目のまとまり")] = "summary",
     fields: Annotated[
         list[FieldPath] | None,
-        Field(max_length=20, description="view に加えて返す項目のパス", examples=[["items.unit_price.amount"]]),
+        Field(
+            max_length=20,
+            description="view に加えて返す項目のパス（例: items.unit_price.amount）",
+            examples=[["items.unit_price.amount"]],
+        ),
     ] = None,
 ) -> OrderDetailResult:
     """受注と配送を並列に取り、指定のビューと項目だけを、予算に収まる形で返す。
@@ -661,7 +727,8 @@ async def orders_get(
 def fields_describe(
     entity: Annotated[Literal["order"], Field(description="エンティティ")],
     query: Annotated[
-        str | None, Field(min_length=1, max_length=50, description="パスか説明の部分一致", examples=["配送"])
+        str | None,
+        Field(min_length=1, max_length=50, description="パスか説明の部分一致（例: 配送）", examples=["配送"]),
     ] = None,
     limit: Annotated[int, Field(ge=1, le=50, description="返す最大件数")] = 20,
 ) -> FieldsDescribeResult:

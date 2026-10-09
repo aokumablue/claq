@@ -22,11 +22,12 @@ def _tool_functions(server: Path) -> set[str]:
     tree = ast.parse(server.read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            for decorator in node.decorator_list:
-                target = decorator.func if isinstance(decorator, ast.Call) else decorator
-                if isinstance(target, ast.Attribute) and target.attr == "tool":
-                    names.add(node.name)
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        for decorator in node.decorator_list:
+            target = decorator.func if isinstance(decorator, ast.Call) else decorator
+            if isinstance(target, ast.Attribute) and target.attr == "tool":
+                names.add(node.name)
     return names
 
 

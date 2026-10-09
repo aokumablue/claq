@@ -40,10 +40,12 @@ def _strings(value: Any) -> Iterator[str]:
     """
     if isinstance(value, str):
         yield value
-    elif isinstance(value, dict):
+        return
+    if isinstance(value, dict):
         for child in value.values():
             yield from _strings(child)
-    elif isinstance(value, list):
+        return
+    if isinstance(value, list):
         for child in value:
             yield from _strings(child)
 

@@ -70,12 +70,12 @@ def cap_arrays(value: Any, *, array_limit: int) -> Any:
     if isinstance(value, Mapping):
         capped: dict[str, Any] = {}
         for key, child in value.items():
-            if isinstance(child, list):
-                capped[key] = [cap_arrays(element, array_limit=array_limit) for element in child[:array_limit]]
-                if len(child) > array_limit:
-                    capped[f"{key}{MORE_SUFFIX}"] = {"total": len(child), "returned": array_limit}
-            else:
+            if not isinstance(child, list):
                 capped[key] = cap_arrays(child, array_limit=array_limit)
+                continue
+            capped[key] = [cap_arrays(element, array_limit=array_limit) for element in child[:array_limit]]
+            if len(child) > array_limit:
+                capped[f"{key}{MORE_SUFFIX}"] = {"total": len(child), "returned": array_limit}
         return capped
     if isinstance(value, list):
         return [cap_arrays(element, array_limit=array_limit) for element in value[:array_limit]]
@@ -94,14 +94,13 @@ def _path_tree(paths: Sequence[str]) -> dict[str, Any]:
     tree: dict[str, Any] = {}
     for path in paths:
         node = tree
-        parts = path.split(".")
-        for index, part in enumerate(parts):
-            if index == len(parts) - 1:
-                node[part] = None
-            elif node.get(part, {}) is None:
-                break
-            else:
-                node = node.setdefault(part, {})
+        *parents, leaf = path.split(".")
+        for part in parents:
+            if node.get(part, {}) is None:
+                break  # 祖先が葉なので、このパスは吸収される
+            node = node.setdefault(part, {})
+        else:
+            node[leaf] = None
     return tree
 
 

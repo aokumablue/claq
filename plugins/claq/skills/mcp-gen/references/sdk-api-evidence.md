@@ -1,4 +1,4 @@
-# Python SDK `mcp` の実 API と実測ワイヤ形式
+# Python SDK `mcp` の実 API と実測ワイヤ形式（mcp 2.1.1・2026-08-31 採取）
 
 ## 目次
 
@@ -48,6 +48,9 @@ requires-python: >=3.10
 | middleware | `MCPServer.middleware`（暫定の API。2.x の minor で形が変わりうる）。`ctx.method` と検証前の `ctx.params` を読める。`tools/list` と `tools/call` の結果は dict（camelCase のキー）で届く。middleware が dict を返すとそのまま送られる（`resultType` は自分で入れる） | guard はこの形に依存する。版を上げたら smoke で確かめる |
 | 公開中のツール | `await mcp.list_tools()` が `name` / `input_schema` を持つツール定義を返す（公開 API） | guard が許される引数名をここから得る |
 | エラーの文面 | `ToolError` は文面が届き、`ValueError` は伏せられる（2.1.1 と同じ） | 変更なし |
+| ツール本体の `MCPError` | `MCPError(code, message)` を投げると、`isError` のツール実行エラーではなく JSON-RPC error（`code` と `message` がそのまま）で返る。2.1.1 では `UnexpectedToolError` に包まれて文面が伏せられた | ツール本体では投げず、`ToolError` を使う |
+| 形が壊れた `tools/call` | `name` が無い・型が違うと JSON-RPC error `-32602`（`Invalid request parameters`） | 自分では作らない |
+| 未知のメソッド | JSON-RPC error `-32601`（`Method not found`） | 自分では作らない |
 | MRTR | リゾルバ（`Resolve` + `Elicit`）と `ElicitationResult` で、承認と拒否の両分岐が 2.1.1 と同じ形で通る。guard は再送（`inputResponses` 付き）を妨げない | smoke_config の `MRTR_CASES` で検査する |
 
 ## import の実体
@@ -261,9 +264,10 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 上流ドキュメントの判断基準は「賢いモデルなら避けられた失敗か？」
 — Yes なら `ToolError`、No なら `MCPError`。ただし**ツール本体から投げた
-`MCPError` は実測では JSON-RPC error にならず本文も伏せられる**ため、
-ツール内での使い分けとしては機能していない。ツール本体では `ToolError` を使い、
-それ以外の例外は「クラッシュ（本文はサーバログのみ）」として扱うのが実態に合う。
+`MCPError` は、2.1.1 ではツール実行エラーに包まれて本文が伏せられ、2.3.0 ではツール実行
+エラーにならず JSON-RPC error として本文ごと返る**（2.3.0 の節）ため、ツール内での使い分け
+としては機能していない。ツール本体では `ToolError` を使い、それ以外の例外は「クラッシュ（本文は
+サーバログのみ）」として扱うのが実態に合う。
 
 ### 引数の制約は Field で宣言する（自前の if より強い）
 
@@ -368,10 +372,11 @@ logger.info("searching for %r", query)
 | `inputSchema` / `outputSchema` 生成 | 自動 | 型注釈から |
 | `structuredContent` + テキスト併記 | 自動 | 後方互換のミラーも SDK が出す |
 | 例外 → `isError: true` 変換 | 自動 | `ValueError` 等がツール実行エラーになる |
-| 未知の引数の拒否 | **しない** | 黙って捨てる。guard.py が拒否する |
-| 公開 inputSchema の root を閉じる | **しない** | guard.py が閉じる |
 | `ttlMs` / `cacheScope` の**有用な値** | **手動** | 既定は `0` / `private` ＝ 即時陳腐化 |
 | `allowed_hosts` / `allowed_origins` | **手動** | 既定は空リスト |
+
+未知の引数の拒否と、公開する inputSchema の root を閉じることも SDK はしない（guard.py が受け持つ）。
+どちらも 2.3.0 で採取したので、「## 2.3.0 で採取した項目」の表に書いてある。
 
 ## 検証時の落とし穴（実測で踏んだもの）
 
