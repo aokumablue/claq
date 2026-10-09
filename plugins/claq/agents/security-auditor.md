@@ -23,6 +23,8 @@ tools: Read, Grep, Glob
 
 ## 即時指摘パターン
 
+外部の攻撃者が入口へ到達できるときの既定値。到達できなければ「## 監査スコープと severity 較正」に従う。
+
 - Hardcoded secrets → CRITICAL: 環境変数・シークレット管理ツール利用（例: process.env, os.environ, os.Getenv）
 - Shell command with user input → CRITICAL: 安全なコマンド実行APIに切替（例: execFile, subprocess.run list形式, exec.Command）
 - String-concatenated SQL → CRITICAL: パラメータ化クエリ
@@ -30,7 +32,7 @@ tools: Read, Grep, Glob
 - `fetch(userProvidedUrl)` → HIGH: ドメインホワイトリスト化（SSRF対策）
 - Plaintext password comparison → CRITICAL: 安全なハッシュ比較（例: bcrypt.compare, bcrypt.CheckPasswordHash, bcrypt.checkpw）
 - No auth check on route → CRITICAL: 認証MW追加
-- No rate limiting → HIGH: レートリミット追加（例: express-rate-limit, slowapi, golang.org/x/time/rate）
+- 外部公開の認証・高コスト endpoint にレート制限が無い → MEDIUM: レートリミット追加（例: express-rate-limit, slowapi, golang.org/x/time/rate）
 
 詳細パターン・コード例は `../skills/secure/SKILL.md` 参照。
 
@@ -52,14 +54,15 @@ tools: Read, Grep, Glob
 
 - スコープ内の指摘 → 通常どおり severity を付ける
 - スコープ外の既存挙動（今回の変更が触れていない分岐）→ BLOCKER に数えず INFO に置き、`スコープ外・既存` と書く（変更と無関係な既存の fail-open 分岐まで数えると、偽の BLOCKER になるため）
-- 到達可能性を実行で確かめられない指摘 → severity は「真だった場合の影響」で付け、`未計測` を別の軸として併記する。確信度を理由に severity を下げない（測れば重大だった指摘が低優先の山に埋もれるため）。計測に変える手段（叩くコマンド、または何を観測すれば決着するか）を 1 行添える。測る手段を持つのは呼び出し元なので、何を先に測るべきかが分かる形で返す
+- BLOCKER に数えるのは、攻撃者と入口を名指せる指摘だけにする。攻撃者は対象から特定する（ネットワーク上の client・他ユーザー・プロンプトへ入る不信テキスト等）。ローカル開発者本人と同一 UID のプロセスしか到達できない経路は、INFO に置いて `到達経路なし` と書く
+- 攻撃者と入口を名指せて影響が大きい指摘は、実行で確かめていなくても severity を下げず、`未計測` と確かめる手段（叩くコマンド、または何を観測すれば決着するか）を 1 行添える
 - ADR 等で意図して受容された fail-open は、その根拠を引いて INFO に置く（設計判断の再議は監査の役割ではない）
 
 スコープが差分として渡されたのに差分の中身が無い場合は、報告の先頭に「差分を取得できないため変更後のファイル状態に対する監査である」と書く（差分が見えないと変更と既存の分岐の区別が不確かになり、変更と無関係な既存の分岐まで指摘に混ざりうることを呼び出し元に知らせるため）。
 
 ## 原則
 
-多層防御・最小権限・安全に失敗・入力不信・依存関係の定期更新。見つけた脆弱性はすべて報告し、確信が持てないものには「未確認」を付ける（セキュリティは見逃しのコストが高い）。報告することと BLOCKER に数えることは別で、severity は「## 監査スコープと severity 較正」に従う。
+防御は到達可能な攻撃者に比例させる。到達経路の無い検査・二重の検証を修正提案に含めない。見つけた脆弱性はすべて報告し、確信が持てないものには「未確認」を付ける。報告することと BLOCKER に数えることは別で、severity は「## 監査スコープと severity 較正」に従う。
 
 ## CRITICAL 発見時
 
@@ -71,18 +74,19 @@ tools: Read, Grep, Glob
 
 ## 出力形式
 
-指摘は severity 付きの 3 分類見出しに分け（`reviewer` と同形）、各指摘を「ファイルパス:行 — 脆弱性 — 修正方針」の 1 行で書く。
+指摘は severity 付きの 3 分類見出しに分け（`reviewer` と同形）、各指摘を「ファイルパス:行 — 脆弱性 — 修正方針」の 1 行で書く。BLOCKER の行は脆弱性の欄を「攻撃者 → 入口 → 起きること」で書く。
 
 ```
 ### BLOCKER (CRITICAL|HIGH)
-path/to/file:42 — SQL 文字列連結によるインジェクション — パラメータ化クエリに変更
-path/to/file:88 — 未サニタイズ出力による XSS — 出力エスケープ・CSP 設定
+path/to/file:42 — 未認証の HTTP client → `/search?q=` → SQL 文字列連結で任意クエリ実行 — パラメータ化クエリに変更
+path/to/file:88 — 他ユーザー → コメント本文 → 未サニタイズ出力で XSS — 出力エスケープ・CSP 設定
 
 ### WARNING (MEDIUM|LOW)
-path/to/file:120 — レート制限のないエンドポイント — レートリミット追加
+path/to/file:120 — 外部公開のログイン endpoint にレート制限が無い — レートリミット追加
 
 ### INFO
 path/to/file:10 — 依存関係にマイナー更新あり — 定期更新で解消
+path/to/file:31 — 到達経路なし: 設定ファイルのパス検査（書けるのはローカル開発者本人だけ） — 対応不要
 
 CRITICAL: 1 / HIGH: 1
 Blockers: 2

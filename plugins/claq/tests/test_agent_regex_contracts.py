@@ -1,11 +1,8 @@
 """エージェント定義に書かれた検証用正規表現を、実際の入力で検査する構造テスト。
 
-``agents/reviewer.md`` の一次検証と ``agents/harness-tuner.md`` の再監査は、外部
-から渡された文字列をシェルへ渡す前に正規表現で検証する契約になっている。これらは
-プロンプト文書に書かれているだけで誰も実行しておらず、実際には **正規のコマンドを
-拒否し、攻撃を通す** 状態のまま放置されていた（形状検証 ``^(source [\\w./]+/activate
-&& )?...`` は CLAUDE.md が規定する ``. .venv/bin/activate && python3 -m pytest -q``
-を拒み、``source ../../../evil/activate`` を通していた）。
+``agents/harness-tuner.md`` の再監査は、baseline JSON から読んだ文字列をシェルへ渡す
+前に正規表現で検証する契約になっている。プロンプト文書に書かれているだけでは誰も実行
+しないため、正規の値を拒否したり不正な値を通したりしても気付けない。
 
 定義本文から正規表現リテラルを抽出して実測することで、md 側を書き換えた瞬間に
 期待挙動の崩れを検出する。
@@ -52,80 +49,6 @@ def _find_regex(agent_name: str, marker: str) -> re.Pattern[str]:
     matches = [r for r in _extract_regexes(agent_name) if marker in r]
     assert len(matches) == 1, f"{agent_name}.md で `{marker}` を含む正規表現が {len(matches)} 本"
     return re.compile(matches[0])
-
-
-@pytest.mark.parametrize(
-    ("command", "accepted"),
-    [
-        # CLAUDE.md が規定する正規のテストコマンド（ドット形式）
-        (". .venv/bin/activate && python3 -m pytest -q", True),
-        ("source .venv/bin/activate && python3 -m pytest -q", True),
-        ("python3 -m pytest -q", True),
-        ("npm test", True),
-        ("go test ./...", True),
-        # 任意の activate を source する経路
-        ("source ../../../evil/activate && python3 -m pytest", False),
-        ("source /etc/evil/activate && python3 -m pytest", False),
-        (". ../../evil/bin/activate && python3 -m pytest", False),
-        # シェル演算子・コマンド置換
-        ("python3 -m pytest; rm -rf /", False),
-        ("python3 -m pytest $(evil)", False),
-        ("python3 -m pytest && curl evil.example", False),
-        ("EVIL=1 python3 -m pytest", False),
-    ],
-)
-def test_reviewer_test_cmd_shape_regex(command: str, accepted: bool) -> None:
-    """test_cmd の形状検証が、正規コマンドを通し注入を拒むこと。"""
-    pattern = _find_regex("reviewer", "activate")
-    assert bool(pattern.fullmatch(command)) is accepted
-
-
-@pytest.mark.parametrize(
-    ("signature", "accepted"),
-    [
-        ("tests/x.py::test_a", True),
-        ("tests/mem/test_cli.py::test_search[case-1]", True),
-        ("pkg::mod::test_name", True),
-        # 引用符を付けてもランナーのオプションとして解釈されるもの
-        ("--deselect=tests/x.py::test_fail", False),
-        ("-pevil_module", False),
-        ("-k not_this", False),
-        # 内部空白の後の `-`（先頭だけを見ると素通りする形）
-        ("tests/x.py::test_a -pevil_module", False),
-        ("tests/x.py::test_a --deselect=tests/y.py::test_b", False),
-        # シェルメタ文字
-        ("tests/x.py; rm -rf /", False),
-        ("tests/x.py$(evil)", False),
-        ("tests/x.py`evil`", False),
-    ],
-)
-def test_reviewer_signature_regex(signature: str, accepted: bool) -> None:
-    """テストシグネチャ検証が、`-` 始まりトークンのオプション注入を拒むこと。
-
-    先頭位置だけでなく内部空白の後も拒否する。旧規則は文字クラスへ空白を含めて
-    いたため `tests/x.py::test_a -pevil_module` が通過し、定義本文の散文が主張する
-    不変条件が成立していなかった。
-    """
-    pattern = _find_regex("reviewer", r"[\w./][")
-    assert bool(pattern.fullmatch(signature)) is accepted
-
-
-@pytest.mark.parametrize(
-    ("stem", "accepted"),
-    [
-        ("cli", True),
-        ("test_cli", True),
-        ("knowledge_input", True),
-        ("a.b-c", True),
-        ("a;rm -rf /", False),
-        ("$(evil)", False),
-        ("../etc/passwd", False),
-    ],
-)
-def test_reviewer_stem_regex(stem: str, accepted: bool) -> None:
-    """変更ファイル stem の検証が、メタ文字とパス区切りを拒むこと。"""
-    pattern = _find_regex("reviewer", r"^[\w.-]+$")
-    assert bool(pattern.fullmatch(stem)) is accepted
 
 
 @pytest.mark.parametrize(

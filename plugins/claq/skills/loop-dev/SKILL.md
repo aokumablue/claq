@@ -44,7 +44,7 @@ user-invocable: false
 
    生成の直後に、検出したテストコマンドと linter（本リポジトリなら `python3 -m pytest -q` と `ruff check plugins/claq`。src と tests の両方）を実行し、red なら evaluate へ進む前に同じ generate の中で直す。報告する PASS/FAIL は本セッションで実際に実行したツール出力だけを根拠にし、未実行の項目は未検証と書く。Edit/Write が成功していれば確認のための再 Read はしない（失敗時はツールがエラーを返す）
 4. evaluate: `claq:reviewer` を必ず起動する。認証/ユーザー入力/シークレット/API エンドポイント/支払い、および外部由来の文字列をプロンプト・エージェントへ渡す実装（信頼境界・サブエージェント権限・恒久メモリへの書込み）に触れる変更のときだけ、`claq:security-auditor` を並列に加え、reviewer の依頼文に並列であることを書く
-   - reviewer には `verify_mode: reexecute`、失敗テストのシグネチャ（反復履歴の tests= と同じもの）、baseline step で自ら検出・実行したテストコマンドを `test_cmd` として渡し、baseline 由来であることを明示する。run 開始時点（反復1 の baseline step より前）のコミット SHA も `baseline_sha` として渡す（反復ごとに green コミットするため、`HEAD` を基準にすると反復2 以降は実装者の変更を含んでしまう）。`approved_plan` から変更予定のテストファイルが分かればその一覧も渡す。generate の自己検証コマンドや「テスト通過」等の自己申告は渡さない（diff とテスト結果は reviewer が自分で取る。反復2 も同じ）
+   - reviewer には `verify_mode: reexecute`、失敗テストのシグネチャ（反復履歴の tests= と同じもの）、baseline step で自ら検出・実行したテストコマンドを `test_cmd` として渡す。`approved_plan` から変更予定のテストファイルが分かればその一覧も渡す。generate の自己検証コマンドや「テスト通過」等の自己申告は渡さない（diff とテスト結果は reviewer が自分で取る。反復2 も同じ）
    - スコープガード: `approved_plan` に変更ファイル一覧があるときだけ、編集したファイルが一覧内かを照合し、逸脱は blocker にする（一覧の無い呼び出し元では照合しない）。ただしテスト基盤ファイル（テストランナー・カバレッジの設定や共有フィクスチャ。Python なら任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `jest.config.*`/`vitest.config.*`・`package.json` の `scripts`、共通で `Makefile` の test ターゲット・CI 設定等）の変更は一覧の有無に関わらず照合し、一覧に無ければ blocker にする
 5. 収束判定: change 由来の red がゼロ（`red_baseline` のシグネチャを除く）かつ lint green かつ evaluate の blocker（CRITICAL/HIGH）ゼロかつ `converge_extra` を満たせば収束
    - evaluate の出力に `Blockers: {n}` 行（security-auditor 併用時は両方）が実際にあることを収束の前提にする。行が無い（途中終了・出力破損・起動失敗）場合は blocker ゼロとは解釈せず、未収束としてエスカレーションする。指摘が無いことと、判定が返ってこないことは別である
@@ -116,7 +116,7 @@ Assumptions: {仮決定事項 or "-"}
 
 - 3 反復目に入らない（「あと少しで直る」と判断しても上限を守る）
 - 後方互換を含め、要件に無いフォールバックは置かない。古いコードは削除する
-- テストコマンドは反復1 の baseline step で確定したものを全反復で使い、反復ごとに導き直さない（`test_cmd` を baseline step 由来に限る規則と揃える）
+- テストコマンドは反復1 の baseline step で確定したものを全反復で使い、反復ごとに導き直さない
 
 ## Human Gate
 
