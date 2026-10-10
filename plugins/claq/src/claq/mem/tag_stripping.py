@@ -139,7 +139,7 @@ _TAG_NAME_END = r"(?=[\s/>])"
 # 属性付き閉じタグ（`</claq-memory x>`）の無害化は後段の escape が担う。escape は
 # 属性を一切見ないため属性付き閉じタグはそちらで完全に塞がっており、ペア除去まで広げる必要は無い。
 # 広げて得られるのは `<tag>X</tag foo>` の中身除去だけだが、その中身除去に依存する
-# シークレット再結合は `erase_known_tags` の判定経路が別途担保する。
+# シークレット再結合は `_erase_known_tags` の判定経路が別途担保する。
 _PAIR_PATTERNS = [
     re.compile(
         rf"<{tag}{_TAG_NAME_END}{_TAG_ATTRS}>"
@@ -216,9 +216,6 @@ def drop_known_tag_blocks(text: str) -> str:
     Returns:
         対になったブロックを中身ごと除いたテキスト。**無害化はしていない** —
         出力・永続化・注入へ回すなら ``strip_tags`` を使うこと。
-
-    Raises:
-        例外は発生しません。
     """
     for pattern in _PAIR_PATTERNS:
         for _ in range(_MAX_NESTING_PASSES):
@@ -240,9 +237,6 @@ def _collapse_blank_lines(text: str) -> str:
 
     Returns:
         空行を詰めて前後を strip したテキスト。
-
-    Raises:
-        例外は発生しません。
     """
     return _BLANK_LINES.sub("\n\n", text).strip()
 
@@ -259,9 +253,6 @@ def _neutralize(text: str) -> str:
     Returns:
         既知タグ名の直前に生の ``<`` を持たず、``<`` を表す実体参照も倒した
         テキスト。
-
-    Raises:
-        例外は発生しません。
     """
     return _NEUTRALIZE_PATTERN.sub(_NEUTRALIZED_LT, _ENTITY_LT_PATTERN.sub(_NEUTRALIZED_AMP, text))
 
@@ -279,9 +270,6 @@ def _neutralization_targets(text: str) -> int:
 
     Returns:
         両パターンの一致数の合計。
-
-    Raises:
-        例外は発生しません。
     """
     return len(_ENTITY_LT_PATTERN.findall(text)) + len(_NEUTRALIZE_PATTERN.findall(text))
 
@@ -298,9 +286,6 @@ def _erase_known_tags(text: str) -> str:
 
     Returns:
         既知タグの表記を取り除いたテキスト。**出力には使わないこと。**
-
-    Raises:
-        例外は発生しません。
     """
     return _ERASE_PATTERN.sub("", text)
 
@@ -328,9 +313,6 @@ def _hides_secret_behind_tags(text: str) -> bool:
 
     Returns:
         タグ除去とマスクが可換でなければ True。
-
-    Raises:
-        例外は発生しません。
     """
     erased = _erase_known_tags(text)
     if erased == text:
@@ -357,9 +339,6 @@ def _forges_tag_after_deletion(text: str) -> bool:
 
     Returns:
         埋め草削除で無害化対象が増えるなら True。
-
-    Raises:
-        例外は発生しません。
     """
     deleted = remove_filler_phrases(text)
     if deleted == text:
@@ -395,9 +374,6 @@ def strip_tags(text: str) -> str:
         既知タグ名の直前に生の ``<`` を含まないテキスト。前後の空白と
         3 行以上の空行は詰める。細工を検出した場合は ``[REDACTED]``、または
         ``&`` と ``<`` を全て倒した本文。
-
-    Raises:
-        例外は発生しません。
     """
     if not text:
         return text
