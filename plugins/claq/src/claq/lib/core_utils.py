@@ -21,16 +21,21 @@ _ANSI_ESCAPE = re.compile(r"\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07\x1b]*(?:\x07|\x1b
 
 
 def get_home_dir() -> Path:
-    """ユーザーのホームディレクトリを取得する（``CLAQ_HOME`` → ``HOME`` → ``USERPROFILE`` → 既定）。"""
+    """ユーザーのホームディレクトリを取得する（``CLAQ_HOME`` → ``HOME`` → ``USERPROFILE`` → 既定）。
+
+    Raises:
+        OSError: ホームを決められない場合。cwd へ逃げると、リポジトリに置かれた
+            ``.claq/mem.db`` や transcript を自分のものとして読んでしまう。``OSError`` にするのは、
+            書き込み先を扱う呼び出し元が既に ``OSError`` を「書けない」として扱っているため。
+    """
     for env_name in ("CLAQ_HOME", "HOME", "USERPROFILE"):
         raw = os.environ.get(env_name)
         if raw:
             return Path(raw).expanduser()
-
     try:
         return Path.home()
-    except RuntimeError:
-        return Path.cwd()
+    except RuntimeError as exc:
+        raise OSError(f"ホームディレクトリを決められません: {exc}") from exc
 
 
 def get_plugin_root() -> Path:

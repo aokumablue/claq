@@ -42,8 +42,11 @@ class TestDirectoryFunctions:
         monkeypatch.setenv("HOME", str(tmp_path))
         assert get_home_dir() == tmp_path
 
-    def test_get_home_dir_falls_back_to_cwd_when_home_is_unavailable(self, monkeypatch, tmp_path):
-        """Path.home() が失敗しても cwd にフォールバックすること。"""
+    def test_get_home_dir_raises_oserror_when_home_is_unavailable(self, monkeypatch, tmp_path):
+        """HOME を決められないときは cwd へ逃げず OSError を送出すること。
+
+        cwd へ逃げると、リポジトリに置かれた `.claq/mem.db` を読んで注入してしまう。
+        """
         monkeypatch.delenv("CLAQ_HOME", raising=False)
         monkeypatch.delenv("CLAUDE_HOME", raising=False)
         monkeypatch.delenv("HOME", raising=False)
@@ -51,7 +54,8 @@ class TestDirectoryFunctions:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(Path, "home", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
 
-        assert get_home_dir() == tmp_path
+        with pytest.raises(OSError):
+            get_home_dir()
 
     def test_get_claq_dir(self):
         """ホーム配下の .claq を返すこと。"""

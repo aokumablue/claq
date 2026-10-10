@@ -786,6 +786,23 @@ class TestPidIsAlive:
 class TestGcRoots:
     """_gc_roots / _gc_one の削除判定のテスト。"""
 
+    def test_unicode_digit_and_huge_pid_names_do_not_raise(self, tmp_path: Path) -> None:
+        """Unicode の数字や C の int に収まらない数字の名前でも例外で落ちず、猶予後に削除する。
+
+        ここで落ちると launcher が hook を実行する前に終わり、保護フックが素通りになる。
+        """
+        roots_dir = tmp_path / "roots"
+        roots_dir.mkdir()
+        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
+        for name in ("²", "9" * 40):
+            entry = roots_dir / name
+            entry.write_text("/old\n", encoding="utf-8")
+            os.utime(entry, (old, old))
+
+        mod._gc_roots(roots_dir)
+
+        assert list(roots_dir.iterdir()) == []
+
     def test_non_digit_names_past_grace_are_removed(self, tmp_path: Path) -> None:
         """旧形式（<pid>.sh・latest・latest.sh）は猶予後に削除する。"""
         roots_dir = tmp_path / "roots"

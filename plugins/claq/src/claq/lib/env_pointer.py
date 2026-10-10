@@ -346,7 +346,7 @@ def _pid_is_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    except OSError:
+    except (OSError, OverflowError):  # OverflowError は C の int に収まらない PID（実在しえない）
         return False
     return True
 
@@ -386,7 +386,8 @@ def _gc_one(entry: Path, now: float) -> None:
     Raises:
         OSError: stat/unlink に失敗した場合（呼び出し元で無視される）。
     """
-    alive = entry.name.isdigit() and _pid_is_alive(int(entry.name))
+    # isdigit は ² のような Unicode の数字も真にするので、int() で落ちないよう ASCII に限る
+    alive = entry.name.isascii() and entry.name.isdigit() and _pid_is_alive(int(entry.name))
     mtime = entry.stat().st_mtime
     if mtime < now - (_MAX_ROOT_AGE_SECONDS if alive else _DEAD_PID_GRACE_SECONDS):
         entry.unlink()
