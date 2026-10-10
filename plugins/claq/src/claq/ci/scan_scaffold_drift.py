@@ -2,8 +2,7 @@
 
 ``lib/harness.py`` の ``_SCAFFOLD_TAGS`` は denylist であり、列挙漏れは「素通り」
 として現れる。ホストが新しい足場タグを追加しても、テストも CI も緑のまま
-引き継ぎがノイズで埋まる（docs/adr/untrusted-input-prompt-boundary.md の残存リスク筆頭）。実際に本リポジトリでは
-初回の足場漏れと ``agent-message`` の 2 回、この形で実害が出ている。
+引き継ぎがノイズで埋まる（docs/adr/untrusted-input-prompt-boundary.md の残存リスク筆頭）。
 
 列挙漏れは定義上「まだ知らないもの」なので、列挙の完全性を静的に検証することは
 できない。代わりに実データを見て「知らないタグが来ていないか」を報告する。
@@ -21,15 +20,13 @@
 
 **判定は「対を成す未知タグ」に限る。** ユーザーの依頼本文には
 ``<key>`` ``<yyyy-mm-dd>`` ``<path>`` のようなプレースホルダが裸で現れるが、
-ハーネスが生成する足場は必ず開始と終了が対になっている。実 transcript 273 本での
-実測では、未知タグ全件だと 41 種（うち 40 種が誤検知）、対を成すものだけに絞ると
-1 種（誤検知 0、真の漏れ ``agent-message`` を検出）になる。
+ハーネスが生成する足場は必ず開始と終了が対になっている。対を成すものだけに絞ると、
+真の漏れを残したまま誤検知がほぼ消える。
 
 **コードスパン（``` フェンスとバッククォート）は判定前に落とす。** 依頼本文が
 コード片や正規表現を引用すると、その中の ``<document>`` ``<crm>`` ``<tag[^>]*>``
-がそのまま「対を成す未知タグ」になる。実測では残存 3 種すべてがこの形である。
-ホストの足場はメッセージ直下に生で載るものであり、利用者が打ったコードフェンスの
-内側には現れない。フェンスが閉じていない場合はテキストを一切触らない（docs/adr/untrusted-input-prompt-boundary.md で
+がそのまま「対を成す未知タグ」になる。ホストの足場はメッセージ直下に生で載る
+ものであり、利用者が打ったコードフェンスの内側には現れない。フェンスが閉じていない場合はテキストを一切触らない（docs/adr/untrusted-input-prompt-boundary.md で
 閉じた「終端の来ない入力を EOF まで飲み込む」型を隣のモジュールで再現しないため）。
 
 CI へは組み込まない。コーパスは各利用者のローカルにしか無く、コミットできない
@@ -96,9 +93,6 @@ def strip_code_spans(text: str) -> str:
 
     Returns:
         コードスパンを取り除いたテキスト。
-
-    Raises:
-        例外は発生しません。
     """
     return _INLINE_CODE.sub("", _FENCE_BLOCK.sub("", text))
 
@@ -115,12 +109,8 @@ def known_tags() -> frozenset[str]:
 
     Returns:
         小文字化した既知タグ名の集合。
-
-    Raises:
-        例外は発生しません。
     """
-    names = set(SCAFFOLD_TAGS) | set(COMMAND_TAGS) | set(STRIPPED_TAGS) | set(BENIGN_TAGS)
-    return frozenset(name.lower() for name in names)
+    return frozenset(name.lower() for tags in (SCAFFOLD_TAGS, COMMAND_TAGS, STRIPPED_TAGS, BENIGN_TAGS) for name in tags)
 
 
 def find_paired_unknown_tags(text: str, known: frozenset[str]) -> set[str]:
@@ -135,9 +125,6 @@ def find_paired_unknown_tags(text: str, known: frozenset[str]) -> set[str]:
 
     Returns:
         対を成していて既知でないタグ名の集合。
-
-    Raises:
-        例外は発生しません。
     """
     opened: set[str] = set()
     closed: set[str] = set()
@@ -156,11 +143,8 @@ def _user_texts(raw: str) -> Iterator[str]:
         user エントリのプレーンテキスト。
     """
     for line in raw.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
         try:
-            entry = json.loads(stripped)
+            entry = json.loads(line.strip())
         except json.JSONDecodeError:
             continue
         if not isinstance(entry, dict):
@@ -187,9 +171,6 @@ def iter_transcripts(roots: Iterable[Path], limit: int) -> list[Path]:
 
     Returns:
         信頼判定を通った transcript のパス一覧。
-
-    Raises:
-        例外は発生しません。
     """
     found: list[tuple[float, Path]] = []
     for root in roots:
@@ -214,9 +195,6 @@ def scan(paths: Iterable[Path]) -> Counter[str]:
 
     Returns:
         未知タグ名 → それが現れたファイル数の Counter。
-
-    Raises:
-        例外は発生しません。
     """
     known = known_tags()
     counts: Counter[str] = Counter()
@@ -236,26 +214,6 @@ def scan(paths: Iterable[Path]) -> Counter[str]:
     return counts
 
 
-def _parse_args(argv: list[str]) -> argparse.Namespace:
-    """コマンドライン引数を解析する。
-
-    Args:
-        argv: コマンド名を除いた引数リスト。
-
-    Returns:
-        解析済みの引数。
-
-    Raises:
-        SystemExit: 引数が不正な場合（argparse の既定動作）。
-    """
-    parser = argparse.ArgumentParser(
-        description="実 transcript を走査し、足場タグ denylist の漏れを検出する。",
-    )
-    parser.add_argument("--root", action="append", default=[], help="走査する root（既定: 既知 host の transcript root）")
-    parser.add_argument("--limit", type=int, default=DEFAULT_SCAN_LIMIT, help="走査する transcript の最大件数")
-    return parser.parse_args(argv)
-
-
 def main(argv: list[str] | None = None) -> int:
     """CLI エントリポイント。
 
@@ -266,9 +224,12 @@ def main(argv: list[str] | None = None) -> int:
         0 = ドリフトなし / 1 = ドリフト検出 / 2 = 走査対象ゼロ。
 
     Raises:
-        例外は発生しません。
+        SystemExit: 引数が不正な場合（argparse の既定動作）。
     """
-    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    parser = argparse.ArgumentParser(description="実 transcript を走査し、足場タグ denylist の漏れを検出する。")
+    parser.add_argument("--root", action="append", default=[], help="走査する root（既定: 既知 host の transcript root）")
+    parser.add_argument("--limit", type=int, default=DEFAULT_SCAN_LIMIT, help="走査する transcript の最大件数")
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     roots = [Path(root).expanduser() for root in args.root] or list(trusted_transcript_roots())
     paths = iter_transcripts(roots, args.limit)
     if not paths:
