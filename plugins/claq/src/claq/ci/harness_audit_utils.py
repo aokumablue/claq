@@ -64,12 +64,11 @@ def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
     """ディレクトリ以下のファイルエントリを再帰走査して返す。
 
     `_VENDOR_DIR_NAMES` を枝刈りするのは、依存ツリーへ同梱された third-party の
-    ファイルを「このプロジェクトのもの」として採点に数えないためです。枝刈りが
-    `has_python_tests` のインライン走査にしか無かった頃は、`node_modules/dep/a.spec.js`
-    を 1 個置いただけのツリーが `has_file_with_extension` 経由で
-    `consumer-test-suite`（4pts）をプロジェクト自身のテスト 0 件で満点通過した
-    （実測）。同じ ``pass`` 式に並ぶ 2 つの述語で枝刈りの有無が割れていたので、
-    走査の共通経路である本関数へ寄せる。
+    ファイルを「このプロジェクトのもの」として採点に数えないためです。枝刈りを
+    述語ごとに持つと、`node_modules/dep/a.spec.js` を 1 個置いただけのツリーが
+    枝刈りの無い側（`has_file_with_extension`）経由で `consumer-test-suite`（4pts）
+    をプロジェクト自身のテスト 0 件で満点通過しうる。そのため走査の共通経路で
+    ある本関数へ寄せる。
 
     `OSError` をディレクトリ単位で握り潰すのも同じ理由で共通化してある。読めない
     ディレクトリは走査から落とすだけで、監査レポート全体を落とさない
@@ -105,14 +104,12 @@ def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
     拡張子だけで判定する ``has_file_with_extension`` では Python のテストを
     拾えない。規約が接頭辞（``test_*.py``）と接尾辞（``*_test.py``）に割れて
     おり、``.py`` で照合すると全 Python ファイルが一致してしまうためです。
-    JS/TS 規約しか見ていなかったころは、pytest だけを持つ Python
-    リポジトリが `consumer-test-suite`（1 件以上）でも
-    `consumer-eval-coverage`（複数件）でも 0 点になり「テストを追加せよ」と
-    助言されていました（実測: 2,466 件の pytest を持つ本リポジトリでも
-    `evals/` が無ければ後者が 0 点）。
+    JS/TS 規約しか見ないと、pytest だけを持つ Python リポジトリが
+    `consumer-test-suite`（1 件以上）でも `consumer-eval-coverage`（複数件）でも
+    0 点になり「テストを追加せよ」と助言されます。
 
     ``minimum`` に既定値を置かないのは、閾値を呼び出し側に必ず宣言させる
-    ためです。既定値つきの引数は「1 件でよい」旧挙動を暗黙に温存する経路に
+    ためです。既定値つきの引数は「1 件でよい」を暗黙に既定にする経路に
     なり、閾値の異なる 2 つの検査を同じ関数へ寄せた意味を失います。
 
     ``minimum`` 件に達した時点で打ち切るのは、`consumer-test-suite` の
@@ -200,9 +197,9 @@ def detect_target_mode(root_dir: str | Path) -> str:
     """repo か consumer かを判定する。
 
     判定材料はプラグイン提供元としての構造（``REPO_CORE_MARKERS`` と
-    ``HARNESS_MARKERS``）だけに置く。以前は派生元プラグイン名
-    （``package.json`` の ``name``）を見る分岐が残っており、claq 自身と
-    無関係な名前で repo 判定していた。
+    ``HARNESS_MARKERS``）だけに置く（``package.json`` の ``name`` のような
+    プラグイン名は見ない。名前で判定すると claq 自身と無関係な名前で repo
+    判定しうる）。
     """
     if all(file_exists(root_dir, marker) for marker in REPO_CORE_MARKERS) and _has_any_file(root_dir, HARNESS_MARKERS):
         return "repo"
@@ -225,14 +222,11 @@ def _has_gitlab_security_scanning(root_dir: str | Path) -> bool:
 
 
 # consumer モードで「このプラグインが導入済みか」を見るときの探索先。
-# 派生元の名前が残っていたため、claq の監査が別プラグインの導入を
-# 要求していた。
 _PLUGIN_NAME = "claq"
 # ホストごとの配置。Copilot CLI は `.copilot/installed-plugins/<plugin>/<plugin>/`
-# へ展開する（release-verify 2026-09-03 の P1-007。実インストール先の実測）。
-# `.claude` だけを見ていた頃は、導入済みの Copilot 環境で
-# `consumer-plugin-install` が pass=false になり、監査が「既に満たされた助言」を
-# 第 1 位に出していた。
+# へ展開する（実インストール先の実測）。`.claude` だけを見ると、導入済みの
+# Copilot 環境で `consumer-plugin-install` が pass=false になり、監査が
+# 「既に満たされた助言」を第 1 位に出す。
 _PLUGIN_JSON_RELATIVES = (
     Path(".claude") / "plugins" / _PLUGIN_NAME / ".claude-plugin" / "plugin.json",
     Path(".claude") / "plugins" / _PLUGIN_NAME / "plugin.json",
@@ -257,9 +251,8 @@ def find_plugin_install(root_dir: str | Path) -> str | None:
     """claq プラグインのインストール先を探す。
 
     リポジトリ直下を先に、ホームディレクトリ配下を続けて探す。ホームの解決は
-    `core_utils.get_home_dir()` に委ねる（``HOME`` を直接読んでいた頃は、
-    ``HOME`` を持たない Windows で必ずリポジトリ直下しか見えなかった。
-    P1-007）。各ルートでは平置きレイアウト（``.claude/plugins/claq/`` /
+    `core_utils.get_home_dir()` に委ねる（``HOME`` を直接読むと、
+    ``HOME`` を持たない Windows で必ずリポジトリ直下しか見えない）。各ルートでは平置きレイアウト（``.claude/plugins/claq/`` /
     ``.copilot/installed-plugins/claq/claq/``）を先に見て、見つからなければ
     マーケットプレイス配置（``<host>/.../<marketplace>/claq/<version>/``）を
     走査する。同じルートに複数版が残っている場合はパスの**辞書順で最初**の

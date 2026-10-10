@@ -62,7 +62,7 @@ def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR, *, optional: bo
         agents_dir: 処理に渡す agents_dir の値です。
         optional: True なら対象パスが存在しない場合に検証をスキップして 0 を返す。
             既定の False では欠落を失敗として扱う（宣言がまるごと失われた破損を
-            成功と報告しないため。F-03）。
+            成功と報告しないため）。
 
     Returns:
         処理結果を返します。

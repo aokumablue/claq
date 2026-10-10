@@ -34,10 +34,10 @@ def _list_markdown_files(directory: Path) -> list[Path]:
 _COMMAND_REFERENCE_PATTERN = re.compile(r"`/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\s[^`]*)?`")
 """バッククォートで囲まれたコマンド参照。名前の後に引数が続く形も捕捉する。
 
-閉じバッククォートが名前の直後に来る形だけを見ていた頃は、引数付きの参照が
-検証をすり抜けた（実測: 同じ行に置いた ``/does-not-exist arg`` は素通りし
+閉じバッククォートが名前の直後に来る形だけを見ると、引数付きの参照が
+検証をすり抜ける（同じ行に置いた ``/does-not-exist arg`` は素通りし
 ``/also-missing`` だけがエラーになる）。引数部は ``\\s`` 始まりに限るので、
-``/usr/bin/env`` のようなパスは従来どおり一致しない。
+``/usr/bin/env`` のようなパスは一致しない。
 
 本パターンの適用先は ``commands/*.md`` だけで（`validate_commands` が
 `_list_markdown_files` に渡すのは commands ディレクトリのみ）、現時点の
@@ -257,10 +257,10 @@ def validate_commands(
         agents_dir: 処理に渡す agents_dir の値です。
         skills_dir: 処理に渡す skills_dir の値です。
         optional: True なら対象パスが存在しない場合に検証をスキップして 0 を返す。
-            既定の False では欠落を失敗として扱う（F-03）。hooks / skills / agents の
-            3 バリデータは同じ kwarg を持つのに commands だけが無条件スキップで、
-            ``commands/`` を消す・改名するだけで相互参照検証チェーン全体が
-            「成功」を報告していた（実測 exit=0）。
+            既定の False では欠落を失敗として扱う。hooks / skills / agents の
+            3 バリデータと同じ kwarg を持たせるのは、commands だけを無条件
+            スキップにすると ``commands/`` を消す・改名するだけで相互参照検証
+            チェーン全体が「成功」を報告するため。
 
     Returns:
         処理結果を返します。

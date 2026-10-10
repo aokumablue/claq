@@ -54,10 +54,9 @@ RUBRIC_VERSION = "2026-09-06"
 
 スコアはこの版の中でのみ比較可能で、版が上がった時点で過去のベースラインとは
 比較不能になる。同じ文字列を ``commands/harness.md`` の散文と
-``agents/harness-tuner.md`` のサンプル JSON が書いており、かつては前者しか
-機械照合されていなかったため、片方だけ更新して「比較不能なスコア比較」が
-静かに通る状態だった。3 箇所すべての一致を tests/test_md_references.py が
-機械照合する。
+``agents/harness-tuner.md`` のサンプル JSON が書いており、片方だけ更新すると
+「比較不能なスコア比較」が静かに通る。そのため 3 箇所すべての一致を
+tests/test_md_references.py が機械照合する。
 """
 
 
@@ -73,10 +72,10 @@ def _option_value(args: list[str], index: int, name: str) -> tuple[str, int]:
     """`--name VALUE` または `--name=VALUE` の値と次インデックスを返す。
 
     値が無い・空文字・``-`` 始まり（＝次のフラグを値として食っている）の 3 つを
-    まとめてエラーにする（N-04）。呼び出し側ごとに書くのではなく取得の唯一の
-    経路である本関数へ置くのは、フラグを増やすたびにガードを書き忘れる余地を
-    残さないため。実測で ``--root --help`` は ``root=<cwd>/--help`` かつ
-    ``help=False`` になり、``--scope``（値なし）は黙って ``repo`` へ落ちていた。
+    まとめてエラーにする（そうしないと ``--root --help`` は ``root=<cwd>/--help``
+    かつ ``help=False`` になり、``--scope``（値なし）は黙って ``repo`` へ落ちる）。
+    呼び出し側ごとに書くのではなく取得の唯一の経路である本関数へ置くのは、
+    フラグを増やすたびにガードを書き忘れる余地を残さないため。
 
     Args:
         args: 全引数のリスト。
@@ -363,9 +362,8 @@ def _consumer_memory_and_eval_checks(root_dir: str | Path) -> list[dict[str, Any
             "scopes": ["repo"],
             "path": "evals/",
             "description": "プロジェクトが評価テストまたは複数の自動テストを持つ",
-            # 「複数の自動テスト」の側が JS 規約専用だったため、pytest だけの
-            # リポジトリは `evals/` が無いと 0 点になっていた（`consumer-test-suite`
-            # と同型の欠陥）。閾値は JS 側と揃えて 3 件。判定順は
+            # 「複数の自動テスト」の側は Python のテストも数える（JS 規約専用だと、
+            # pytest だけのリポジトリは `evals/` が無いと 0 点になる）。閾値は JS 側と揃えて 3 件。判定順は
             # `consumer-test-suite` と同じ理由で、短絡する has_python_tests を
             # 全数え上げの count_files より前に置く。`evals/` 側を先頭に
             # 残すのは、この判定を落とすリポジトリには `evals/` が無く即 0 が
@@ -497,11 +495,11 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
 def summarize_category_scores(checks: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     """カテゴリ別スコアを集計する。
 
-    キー名で単位を明示する。以前は同じ dict の中で ``score`` が 0..10 の正規化値、
-    ``max`` が生配点という異なる単位を持っていたため、``score > max`` や
+    キー名で単位を明示する。同じ dict の中で ``score`` が 0..10 の正規化値、
+    ``max`` が生配点という異なる単位を持つと、``score > max`` や
     「カテゴリ score の合計が overall と一致しない」が正常値になり、JSON を
-    機械利用すると誤読しやすかった（F-19）。テキスト出力は元から
-    ``score/10 (earned/max pts)`` と書き分けていたので、崩れていたのは JSON だけ。
+    機械利用すると誤読しやすい（テキスト出力の ``score/10 (earned/max pts)``
+    と同じく書き分ける）。
     """
     scores: dict[str, dict[str, int]] = {}
     for category in CATEGORIES:
@@ -541,8 +539,8 @@ def build_report(scope: str, root_dir: str | Path | None = None, target_mode: st
     """監査レポートを組み立てる。
 
     `target_mode` を明示した場合、自動判定（`detect_target_mode`）と
-    不一致なら ValueError を送出する（F-04 対応）。`--root` を指定せず
-    誤った作業ルートを監査していた場合、明示指定と自動判定の食い違いで
+    不一致なら ValueError を送出する。`--root` を指定せず
+    誤った作業ルートを監査している場合、明示指定と自動判定の食い違いで
     気付けるようにするため、黙って明示値を信用しない。
 
     Args:

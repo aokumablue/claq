@@ -59,7 +59,7 @@ def validate_skills(skills_dir: str | Path = DEFAULT_SKILLS_DIR, *, optional: bo
         skills_dir: 処理に渡す skills_dir の値です。
         optional: True なら対象パスが存在しない場合に検証をスキップして 0 を返す。
             既定の False では欠落を失敗として扱う（宣言がまるごと失われた破損を
-            成功と報告しないため。F-03）。
+            成功と報告しないため）。
 
     Returns:
         処理結果を返します。
@@ -99,10 +99,8 @@ def validate_skills(skills_dir: str | Path = DEFAULT_SKILLS_DIR, *, optional: bo
             has_errors = True
             continue
 
-        # agents と同じく frontmatter を必須にする（F-03）。名前と説明が無い
+        # agents と同じく frontmatter を必須にする。名前と説明が無い
         # SKILL.md はホストが登録できず、あるいは「いつ呼ぶか」を判断できない。
-        # 以前は「存在する・読める・空でない」しか見ておらず、agents 側だけが
-        # frontmatter を検査するという非対称が残っていた。
         frontmatter = extract_frontmatter(content)
         if frontmatter is None:
             emit_error(f"{directory.name}/SKILL.md - フロントマターがありません")

@@ -160,12 +160,12 @@ def always_on_description_chars(root_dir: str | Path) -> int:
     そちらを直接測る。
 
     測定は frontmatter をパースした結果の値に対して行う。``description:`` で
-    始まる行を 1 行だけ数えていた頃は、YAML のブロックスカラー
+    始まる行を 1 行だけ数えると、YAML のブロックスカラー
     （``description: >`` に続く折り返し行）の中身が丸ごと計上から漏れ、
-    ``description: >`` の行そのものが残す 2 文字しか加算されなかった。
+    ``description: >`` の行そのものが残す 2 文字しか加算されない。
     どれだけ長い description を折り返しで書いても
-    `context-always-on-budget`（予算 4,000 文字）を通過できたということで、
-    行ではなく値を測れば折り返しの書き方に依らず実コストに比例する。
+    `context-always-on-budget`（予算 4,000 文字）を通過できてしまうので、
+    行ではなく値を測る。値を測れば折り返しの書き方に依らず実コストに比例する。
 
     本リポジトリはブロックスカラーの description を 1 件も持たないため、この
     穴が実害として顕在化してはいなかった（実測: surface 35 ファイルで旧算法
@@ -272,10 +272,10 @@ _COVERAGE_GATE_KEY_PATH = ("tool", "coverage", "report", "fail_under")
 def _coverage_gate_configured(root_dir: str | Path) -> bool:
     """カバレッジ閾値（fail_under）がゲートとして機能する値で設定されているかを判定する。
 
-    以前は ``"fail_under" in pyproject.toml`` の部分文字列照合だった。実測で
+    ``"fail_under" in pyproject.toml`` のような部分文字列照合では、
     ``fail_under = 0``（何も落とさない）も ``# fail_under = 100 (disabled)``
     （コメントアウト）も True を返し、`eval-tests-presence`（2pts）がゲート無効の
-    ままで満点になった。docs/adr/verification-scope-release-gates.md の「skip されるゲートはゲートとして機能しない」
+    ままで満点になる。docs/adr/verification-scope-release-gates.md の「skip されるゲートはゲートとして機能しない」
     と同じく、宣言の字面ではなく有効な値を条件にする。
 
     ``bool`` を明示的に弾くのは ``isinstance(True, int)`` が True になるため。
