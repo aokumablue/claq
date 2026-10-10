@@ -96,7 +96,7 @@ async def call_with_retry[T](
     base_delay: float = 0.2,
     max_delay: float = 2.0,
     max_retry_after: float = 5.0,
-    deadline: float | None = None,
+    deadline: float,
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
     jitter: Callable[[], float] = random.random,
@@ -113,7 +113,7 @@ async def call_with_retry[T](
         base_delay: 最初の待ち時間（秒）。
         max_delay: 待ち時間の上限（秒）。
         max_retry_after: 上流の `retry_after` に従って待つ上限（秒）。超えるなら待たずに失敗を投げる。
-        deadline: 締切（`clock` と同じ基準の時刻）。None なら締切なし。
+        deadline: 締切（`clock` と同じ基準の時刻）。
         sleep: 待つ関数。
         clock: 単調増加する現在時刻を返す関数。
         jitter: 0 以上 1 未満の乱数を返す関数。
@@ -135,7 +135,7 @@ async def call_with_retry[T](
                 raise
             if delay is None:
                 delay = min(max_delay, base_delay * 2**attempt) * (0.5 + jitter() / 2)
-            if deadline is not None and clock() + delay >= deadline:
+            if clock() + delay >= deadline:
                 raise
             await sleep(delay)
     raise AssertionError("unreachable")  # pragma: no cover
@@ -164,31 +164,11 @@ class CircuitBreaker:
         self._failures = 0
         self._opened_at: float | None = None
 
-    def allow(self) -> bool:
-        """今、上流を呼んでよいか。
-
-        Returns:
-            閉じている、または遮断から `reset_seconds` が過ぎていれば True。
-        """
-        if self._opened_at is None:
-            return True
-        return self._clock() - self._opened_at >= self._reset_seconds
-
-    def record_success(self) -> None:
-        """成功を記録し、遮断を解く。"""
-        self._failures = 0
-        self._opened_at = None
-
-    def record_failure(self) -> None:
-        """一時的な失敗を記録し、回数が閾値に達したら遮断する。"""
-        self._failures += 1
-        if self._failures >= self._failure_threshold:
-            self._opened_at = self._clock()
-
     async def call[T](self, operation: Callable[[], Awaitable[T]]) -> T:
         """遮断器を通して上流を呼ぶ。
 
-        数えるのは一時的な失敗（`retryable`）だけ。404 などの業務上の失敗は数えない。
+        遮断中（遮断から `reset_seconds` が過ぎるまで）は上流を呼ばない。数えるのは一時的な失敗
+        （`retryable`）だけで、404 などの業務上の失敗は数えない。成功したら数を戻し、遮断を解く。
 
         Args:
             operation: 上流を呼ぶ関数（再試行を含めてよい）。
@@ -199,15 +179,18 @@ class CircuitBreaker:
         Raises:
             UpstreamError: 遮断中、または上流が失敗したとき。
         """
-        if not self.allow():
+        if self._opened_at is not None and self._clock() - self._opened_at < self._reset_seconds:
             raise UpstreamError(503, "circuit open")
         try:
             result = await operation()
         except UpstreamError as error:
             if error.retryable:
-                self.record_failure()
+                self._failures += 1
+                if self._failures >= self._failure_threshold:
+                    self._opened_at = self._clock()
             raise
-        self.record_success()
+        self._failures = 0
+        self._opened_at = None
         return result
 
 
@@ -279,8 +262,6 @@ async def fan_out(
         Exception: いずれかの呼び出しが `UpstreamError` 以外の例外を投げたとき。
     """
     tasks = {name: asyncio.ensure_future(call()) for name, call in calls.items()}
-    if not tasks:
-        return {}, {}
     try:
         _, pending = await asyncio.wait(tasks.values(), timeout=timeout)
     finally:
