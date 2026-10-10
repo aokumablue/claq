@@ -50,22 +50,11 @@ def file_exists(root_dir: str | Path, relative_path: str) -> bool:
 
 
 def file_has_content(root_dir: str | Path, relative_path: str) -> bool:
-    """相対パスが存在し、かつ中身が空でないかを確認する。
+    """相対パスが存在し、かつ空白以外の中身を持つかを確認する。
 
-    存在検査だけを合格条件にすると、ファイルを 0 バイトへ切り詰めても満点が出る
-    （実測: `tests/hooks/test_hook_edge_cases.py` を空にしても 58/58）。存在を根拠に
-    「テストがある」「ポリシーがある」と採点する以上、中身の消失は不合格でなければ
-    ならない（docs/adr/verification-scope-release-gates.md: skip されるゲートはゲートとして機能しない）。
-
-    Args:
-        root_dir: 監査対象ルート。
-        relative_path: ルートからの相対パス。
-
-    Returns:
-        ファイルが存在し、空白のみでない中身を持つなら True。
-
-    Raises:
-        例外は発生しません（読み取り失敗は False として扱う）。
+    存在を根拠に「テストがある」「ポリシーがある」と採点する以上、0 バイトへの
+    切り詰めは不合格でなければならない（docs/adr/verification-scope-release-gates.md:
+    skip されるゲートはゲートとして機能しない）。読み取り失敗は False として扱う。
     """
     path = Path(root_dir, relative_path)
     try:
@@ -84,27 +73,15 @@ _VENDOR_DIR_NAMES = frozenset({".git", ".venv", "venv", "node_modules", "vendor"
 
 
 def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
-    """ディレクトリ以下のファイルエントリを再帰走査して返す。
+    """ディレクトリ以下のファイルエントリを、シンボリックリンクを辿らず再帰走査して返す。
 
-    `_VENDOR_DIR_NAMES` を枝刈りするのは、依存ツリーへ同梱された third-party の
-    ファイルを「このプロジェクトのもの」として採点に数えないためです。枝刈りを
-    述語ごとに持つと、`node_modules/dep/a.spec.js` を 1 個置いただけのツリーが
-    枝刈りの無い側（`has_file_with_extension`）経由で `consumer-test-suite`（4pts）
-    をプロジェクト自身のテスト 0 件で満点通過しうる。そのため走査の共通経路で
-    ある本関数へ寄せる。
+    `_VENDOR_DIR_NAMES` の枝刈りは、依存ツリーへ同梱された third-party の
+    ファイルを「このプロジェクトのもの」として採点に数えないため。述語ごとに
+    持つと、枝刈りの無い側を経由して `node_modules/dep/a.spec.js` 1 個で
+    `consumer-test-suite` を満点通過しうるので、走査の共通経路である本関数へ寄せる。
 
-    `OSError` をディレクトリ単位で握り潰すのも同じ理由で共通化してある。読めない
-    ディレクトリは走査から落とすだけで、監査レポート全体を落とさない
-    （`file_has_content` と同じ姿勢）。
-
-    Args:
-        root_path: 走査を開始するディレクトリ。
-
-    Yields:
-        シンボリックリンクを辿らず、ベンダーディレクトリを除いたファイルエントリ。
-
-    Raises:
-        例外は発生しません（`OSError` は該当ディレクトリのスキップとして扱う）。
+    読めない（存在しないものを含む）ディレクトリは `OSError` を握り潰して走査から
+    落とすだけで、監査レポート全体を落とさない（`file_has_content` と同じ姿勢）。
     """
     stack = [root_path]
     while stack:
@@ -112,54 +89,34 @@ def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
         try:
             with os.scandir(current) as entries:
                 for entry in entries:
-                    if entry.is_dir(follow_symlinks=False):
-                        if entry.name not in _VENDOR_DIR_NAMES:
-                            stack.append(Path(entry.path))
-                    else:
+                    if not entry.is_dir(follow_symlinks=False):
                         yield entry
+                    elif entry.name not in _VENDOR_DIR_NAMES:
+                        stack.append(Path(entry.path))
         except OSError:
             continue
 
 
 def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
-    """pytest / unittest の命名規約に沿ったテストファイルが ``minimum`` 件以上あるかを調べる。
+    """pytest / unittest の命名規約（``test_*.py`` / ``*_test.py``）のテストが ``minimum`` 件以上あるかを調べる。
 
-    拡張子だけで判定する ``has_file_with_extension`` では Python のテストを
-    拾えない。規約が接頭辞（``test_*.py``）と接尾辞（``*_test.py``）に割れて
-    おり、``.py`` で照合すると全 Python ファイルが一致してしまうためです。
-    JS/TS 規約しか見ないと、pytest だけを持つ Python リポジトリが
-    `consumer-test-suite`（1 件以上）でも `consumer-eval-coverage`（複数件）でも
-    0 点になり「テストを追加せよ」と助言されます。
+    拡張子だけの ``has_file_with_extension`` では Python のテストを拾えない
+    （``.py`` で照合すると全 Python ファイルが一致する）。JS/TS 規約しか見ないと、
+    pytest だけを持つリポジトリが `consumer-test-suite` でも
+    `consumer-eval-coverage` でも 0 点になる。
 
-    ``minimum`` に既定値を置かないのは、閾値を呼び出し側に必ず宣言させる
-    ためです。既定値つきの引数は「1 件でよい」を暗黙に既定にする経路に
-    なり、閾値の異なる 2 つの検査を同じ関数へ寄せた意味を失います。
-
-    ``minimum`` 件に達した時点で打ち切るのは、`consumer-test-suite` の
-    判定順コメントが定める性能契約（テストを持つリポジトリを全数え上げ
-    しない）を数え上げ版でも守るためです。
-
-    ベンダーディレクトリの枝刈り（`.venv/lib/**/test_*.py` 等を「このプロジェクトの
-    テスト」として加点しない）と読めないディレクトリのスキップは `_walk_dir` に
-    集約してある。
+    ``minimum`` に既定値を置かないのは、閾値を呼び出し側に必ず宣言させるため。
+    ``minimum`` 件に達した時点で打ち切るのは、テストを持つリポジトリを全数え上げ
+    しないため（`consumer-test-suite` の判定順の前提）。
 
     Args:
         root_dir: 走査するルートディレクトリ。
         minimum: 合格に必要なテストファイルの最小件数。呼び出し側は 1 以上を渡す。
-            検証はせず、0 以下でも「0 件で True」にはならない（件数を加算した
-            後にしか閾値を見ないため）。
-
-    Returns:
-        プロジェクト自身のテストファイルが ``minimum`` 件以上あれば True。
-
-    Raises:
-        例外は発生しません（`OSError` は該当ディレクトリのスキップとして扱う）。
+            0 以下でも「0 件で True」にはならない（件数を加算した後にしか閾値を見ない）。
     """
     found = 0
     for entry in _walk_dir(Path(root_dir)):
-        if entry.name.endswith(".py") and (
-            entry.name.startswith("test_") or entry.name.endswith("_test.py")
-        ):
+        if entry.name.endswith(".py") and (entry.name.startswith("test_") or entry.name.endswith("_test.py")):
             found += 1
             if found >= minimum:
                 return True
@@ -167,20 +124,14 @@ def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
 
 
 def count_files(root_dir: str | Path, relative_dir: str, extension: str | None) -> int:
-    """指定ディレクトリ以下のファイル数を数える。"""
-    dir_path = Path(root_dir, relative_dir)
-    if not dir_path.exists():
-        return 0
-
-    count = 0
-    for entry in _walk_dir(dir_path):
-        if extension is None or entry.name.endswith(extension):
-            count += 1
-    return count
+    """指定ディレクトリ以下の、``extension`` で終わる（None なら全）ファイル数を数える。"""
+    return sum(
+        1 for entry in _walk_dir(Path(root_dir, relative_dir)) if extension is None or entry.name.endswith(extension)
+    )
 
 
 def safe_read(root_dir: str | Path, relative_path: str) -> str:
-    """失敗しても空文字を返す安全な読み込み。"""
+    """読めなければ空文字を返す読み込み。"""
     try:
         return read_text(root_dir, relative_path)
     except OSError:
@@ -188,10 +139,7 @@ def safe_read(root_dir: str | Path, relative_path: str) -> str:
 
 
 def safe_parse_json(text: str) -> Any | None:
-    """空文字や不正 JSON を None として扱う。"""
-    if not text or not text.strip():
-        return None
-
+    """JSON を解析する。空文字や不正 JSON は None。"""
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -205,51 +153,40 @@ def _has_any_file(root_dir: str | Path, relative_paths: Sequence[str]) -> bool:
 
 def has_file_with_extension(root_dir: str | Path, relative_dir: str, extensions: str | Sequence[str]) -> bool:
     """指定拡張子のファイルが 1 つでもあるかを調べる。"""
-    dir_path = Path(root_dir, relative_dir)
-    if not dir_path.exists():
-        return False
-
-    allowed = [extensions] if isinstance(extensions, str) else list(extensions)
-    for entry in _walk_dir(dir_path):
-        if any(entry.name.endswith(extension) for extension in allowed):
-            return True
-    return False
+    suffixes = (extensions,) if isinstance(extensions, str) else tuple(extensions)
+    return any(entry.name.endswith(suffixes) for entry in _walk_dir(Path(root_dir, relative_dir)))
 
 
 def detect_target_mode(root_dir: str | Path) -> str:
     """repo か consumer かを判定する。
 
     判定材料はプラグイン提供元としての構造（``REPO_CORE_MARKERS`` と
-    ``HARNESS_MARKERS``）だけに置く（``package.json`` の ``name`` のような
-    プラグイン名は見ない。名前で判定すると claq 自身と無関係な名前で repo
-    判定しうる）。
+    ``HARNESS_MARKERS``）だけに置く。``package.json`` の ``name`` のような
+    プラグイン名で判定すると、claq 自身と無関係な名前で repo 判定しうる。
     """
     if all(file_exists(root_dir, marker) for marker in REPO_CORE_MARKERS) and _has_any_file(root_dir, HARNESS_MARKERS):
         return "repo"
-
     return "consumer"
+
+
+_GITLAB_SECURITY_PATTERNS = (
+    r"(?mi)^\s*(dependency_scanning|sast|container_scanning|secret_detection|license_scanning)\s*:",
+    r"(?mi)^\s*-\s*template:\s*Security/",
+    r"(?mi)^\s*template:\s*Security/",
+)
 
 
 def _has_gitlab_security_scanning(root_dir: str | Path) -> bool:
     """GitLab CI に最低限のセキュリティスキャン設定があるかを確認する。"""
     content = safe_read(root_dir, ".gitlab-ci.yml")
-    if not content:
-        return False
-
-    patterns = (
-        r"(?mi)^\s*(dependency_scanning|sast|container_scanning|secret_detection|license_scanning)\s*:",
-        r"(?mi)^\s*-\s*template:\s*Security/",
-        r"(?mi)^\s*template:\s*Security/",
-    )
-    return any(re.search(pattern, content) for pattern in patterns)
+    return any(re.search(pattern, content) for pattern in _GITLAB_SECURITY_PATTERNS)
 
 
 # consumer モードで「このプラグインが導入済みか」を見るときの探索先。
 _PLUGIN_NAME = "claq"
 # ホストごとの配置。Copilot CLI は `.copilot/installed-plugins/<plugin>/<plugin>/`
-# へ展開する（実インストール先の実測）。`.claude` だけを見ると、導入済みの
-# Copilot 環境で `consumer-plugin-install` が pass=false になり、監査が
-# 「既に満たされた助言」を第 1 位に出す。
+# へ展開する。`.claude` だけを見ると、導入済みの Copilot 環境で
+# `consumer-plugin-install` が pass=false になり、既に満たされた助言を第 1 位に出す。
 _PLUGIN_JSON_RELATIVES = (
     Path(".claude") / "plugins" / _PLUGIN_NAME / ".claude-plugin" / "plugin.json",
     Path(".claude") / "plugins" / _PLUGIN_NAME / "plugin.json",
@@ -260,10 +197,7 @@ _PLUGIN_JSON_RELATIVES = (
 # マーケットプレイス経由で導入したときの実体配置。ホストは
 # `.claude/plugins/cache/<marketplace>/<plugin>/<version>/` へ展開するため、
 # 平置きの `.claude/plugins/<plugin>/` だけを見ると正しく導入済みの環境を
-# 「未導入」と判定する（実測: `~/.claude/plugins/cache/claq/claq/0.9.48/`
-# へ導入済みの機で `consumer-plugin-install` が pass=false になり、
-# `top_actions` の第 1 位に「プラグインを導入せよ」という既に満たされた
-# 助言が出た）。
+# 「未導入」と判定し、`top_actions` の第 1 位に既に満たされた助言が出る。
 _PLUGIN_CACHE_GLOBS = (
     f".claude/plugins/cache/*/{_PLUGIN_NAME}/*/.claude-plugin/plugin.json",
     f".copilot/installed-plugins/*/{_PLUGIN_NAME}/*/.claude-plugin/plugin.json",
@@ -271,37 +205,22 @@ _PLUGIN_CACHE_GLOBS = (
 
 
 def find_plugin_install(root_dir: str | Path) -> str | None:
-    """claq プラグインのインストール先を探す。
+    """claq プラグインの ``plugin.json`` の絶対パスを探す。無ければ None。
 
     リポジトリ直下を先に、ホームディレクトリ配下を続けて探す。ホームの解決は
-    `core_utils.get_home_dir()` に委ねる（``HOME`` を直接読むと、
-    ``HOME`` を持たない Windows で必ずリポジトリ直下しか見えない）。各ルートでは平置きレイアウト（``.claude/plugins/claq/`` /
-    ``.copilot/installed-plugins/claq/claq/``）を先に見て、見つからなければ
-    マーケットプレイス配置（``<host>/.../<marketplace>/claq/<version>/``）を
-    走査する。同じルートに複数版が残っている場合はパスの**辞書順で最初**の
-    ものを返す。呼び出し側は導入有無しか見ないため、これは同じ入力に同じ答えを
-    返させるための順序固定であって、版の新旧を表さない（辞書順では
-    ``0.9.48`` より ``0.9.9`` が後ろに来る）。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ。
-
-    Returns:
-        見つかった ``plugin.json`` の絶対パス文字列。無ければ None。
-
-    Raises:
-        例外は発生しません。
+    `core_utils.get_home_dir()` に委ねる（``HOME`` を直接読むと、``HOME`` を
+    持たない Windows で必ずリポジトリ直下しか見えない）。各ルートでは平置き
+    レイアウトを先に見て、無ければマーケットプレイス配置を走査する。複数版が
+    残っている場合はパスの辞書順で最初のものを返す。呼び出し側は導入有無しか
+    見ないため、これは同じ入力に同じ答えを返させるための順序固定であって、
+    版の新旧を表さない。
     """
-    search_roots = [Path(root_dir), get_home_dir()]
-
-    for search_root in search_roots:
+    for search_root in (Path(root_dir), get_home_dir()):
         for relative in _PLUGIN_JSON_RELATIVES:
             candidate = search_root / relative
             if candidate.exists():
                 return str(candidate)
-        cached = sorted(
-            str(path) for glob in _PLUGIN_CACHE_GLOBS for path in search_root.glob(glob)
-        )
+        cached = sorted(str(path) for glob in _PLUGIN_CACHE_GLOBS for path in search_root.glob(glob))
         if cached:
             return cached[0]
     return None
