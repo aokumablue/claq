@@ -261,6 +261,8 @@ async def fan_out(
         asyncio.CancelledError: 待っている間に呼び出し元が取り消されたとき。
         Exception: いずれかの呼び出しが `UpstreamError` 以外の例外を投げたとき。
     """
+    if not calls:  # 呼ぶ上流を条件で組み立てると空になりうる（asyncio.wait は空の集合を受け付けない）
+        return {}, {}
     tasks = {name: asyncio.ensure_future(call()) for name, call in calls.items()}
     try:
         _, pending = await asyncio.wait(tasks.values(), timeout=timeout)

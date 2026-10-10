@@ -173,7 +173,7 @@ class TestNeutralizationDoesNotReassembleTags:
         strip_tags('<<private>/claq-memory>')  ->  '</claq-memory>'
 
     このペイロードは 43 文字で `_sanitize_structured` の 120 文字にも
-    `_truncate` の 1050 文字にも収まり、transcript 経由の全自動経路で成立する。
+    `build_handoff` の文字数予算（1050 文字）にも収まり、transcript 経由の全自動経路で成立する。
     escape は文字を消さない＝接着が起きない構造である。
     """
 

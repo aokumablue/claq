@@ -815,11 +815,12 @@ def evaluate(raw_input: str) -> dict:
     try:
         input_data = parse_json_object(raw_input)
         if input_data is None:
-            if raw_input.strip():
-                if re.search(r"\bgit\s+commit\b", raw_input):
-                    log("[Hook] ERROR: malformed JSON input, but raw command text matches `git commit`.")
-                    return _blocked(raw_input, _MALFORMED_COMMIT_MESSAGE)
-                log("[Hook] WARNING: could not parse hook input as JSON; not a git commit, passing through.")
+            if not raw_input.strip():
+                return {"output": raw_input, "exitCode": 0}
+            if re.search(r"\bgit\s+commit\b", raw_input):
+                log("[Hook] ERROR: malformed JSON input, but raw command text matches `git commit`.")
+                return _blocked(raw_input, _MALFORMED_COMMIT_MESSAGE)
+            log("[Hook] WARNING: could not parse hook input as JSON; not a git commit, passing through.")
             return {"output": raw_input, "exitCode": 0}
 
         # コンテナキーは 1 つも取りこぼさず走査し、commit を**全て**集める。先に判定できた

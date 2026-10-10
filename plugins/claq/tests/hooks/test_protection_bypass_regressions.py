@@ -277,7 +277,7 @@ _ALLOWED_CASES = [
     ("対 大文字の cat", "pre_bash_commit_quality", _bash("Cat app.py && git commit -m 'fix: x'")),
     ("対 単独 commit", "pre_bash_commit_quality", _bash("git commit -m 'fix: x'")),
     (
-        "対 in-place でない sed",
+        "対 in-place でない sed（--expression）",
         "pre_bash_commit_quality",
         _bash("sed --expression s/a/b/ app.py && git commit -m 'fix: x'"),
     ),

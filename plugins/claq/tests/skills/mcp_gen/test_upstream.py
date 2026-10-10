@@ -175,6 +175,7 @@ class TestUpstream:
         assert results == {"a": 1}
         assert failures["b"].status == 503
         assert failures["c"].status is None
+        assert asyncio.run(facade.upstream.fan_out({}, timeout=1)) == ({}, {})
 
     def test_fan_out_cancellation_stops_unfinished_calls(self, facade: types.SimpleNamespace) -> None:
         """fan_out を待っている間に呼び出し元が取り消されたら、終わっていない上流の呼び出しも取り消してから終える。"""
