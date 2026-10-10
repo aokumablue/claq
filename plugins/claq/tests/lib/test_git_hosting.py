@@ -12,14 +12,7 @@ import pytest
 from claq.lib import git_hosting
 from claq.lib.git_hosting import (
     _remote_host,
-    build_git_hosting_item_url,
     detect_git_hosting_service,
-    extract_git_hosting_item_details,
-    get_git_hosting_cli_name,
-    get_git_hosting_create_command,
-    get_git_hosting_item_label,
-    get_git_hosting_item_short_label,
-    get_git_hosting_review_command,
     normalize_git_hosting_service,
 )
 
@@ -75,30 +68,6 @@ def test_detect_git_hosting_service_accepts_cwd(tmp_path: Path, monkeypatch: pyt
     assert str(tmp_path) in captured["cmd"]  # type: ignore[operator]
 
 
-def test_git_hosting_helpers_support_github_and_gitlab_urls() -> None:
-    github_url = build_git_hosting_item_url("github", "owner/repo", "12")
-    gitlab_url = build_git_hosting_item_url("gitlab", "group/subgroup/repo", "34")
-
-    assert github_url == "https://github.com/owner/repo/pull/12"
-    assert gitlab_url == "https://gitlab.com/group/subgroup/repo/-/merge_requests/34"
-
-    assert extract_git_hosting_item_details("github", github_url) == ("owner/repo", "12")
-    assert extract_git_hosting_item_details("gitlab", gitlab_url) == ("group/subgroup/repo", "34")
-
-
-def test_git_hosting_commands_and_labels() -> None:
-    assert get_git_hosting_create_command("github") == "gh pr create"
-    assert get_git_hosting_create_command("gitlab") == "glab mr create"
-    assert get_git_hosting_cli_name("github") == "gh"
-    assert get_git_hosting_cli_name("gitlab") == "glab"
-    assert get_git_hosting_review_command("github") == "gh pr review"
-    assert get_git_hosting_review_command("gitlab") == "glab mr view"
-    assert get_git_hosting_item_label("github") == "Pull Request"
-    assert get_git_hosting_item_label("gitlab") == "Merge Request"
-    assert get_git_hosting_item_short_label("github") == "PR"
-    assert get_git_hosting_item_short_label("gitlab") == "MR"
-
-
 class TestNormalizeGitHostingServiceEdgeCases:
     """normalize_git_hosting_service のエッジケースを網羅するテスト。"""
 
@@ -133,24 +102,6 @@ class TestNormalizeGitHostingServiceEdgeCases:
         """value が有効なら default は使われないこと。"""
         result = normalize_git_hosting_service("gitlab", default="invalid")
         assert result == "gitlab"
-
-    def test_extract_returns_none_when_no_match(self) -> None:
-        """パターンにマッチしない場合 None を返すこと。"""
-        result = extract_git_hosting_item_details("github", "no url here")
-        assert result is None
-
-    def test_extract_returns_none_for_invalid_service(self) -> None:
-        """SERVICE_ITEM_URL_PATTERNS に存在しない service では None を返すこと。
-
-        normalize_git_hosting_service が "github" に正規化するため、
-        実際には github パターンが使われるが、マッチしない文字列で None を確認する。
-        """
-        result = extract_git_hosting_item_details("github", "https://example.com/no-match")
-        assert result is None
-
-    def test_extract_returns_none_when_normalization_returns_unknown(self, monkeypatch) -> None:
-        monkeypatch.setattr("claq.lib.git_hosting.normalize_git_hosting_service", lambda value, default="github": "bitbucket")
-        assert extract_git_hosting_item_details("github", "https://github.com/owner/repo/pull/1") is None
 
 
 def test_normalize_invalid_value_and_invalid_default() -> None:
