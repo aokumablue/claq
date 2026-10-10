@@ -8,8 +8,9 @@ dataclass を定義し、``sqlite3.Row`` からの復元を ``from_row`` で提�
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
+from typing import Self
 
 
 def utc_now_iso() -> str:
@@ -21,16 +22,32 @@ def utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
+class _RowModel:
+    """テーブルの列名と同名のフィールドを持つ dataclass の基底。"""
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Self:
+        """``SELECT *`` で得た行を、同名フィールドへ写して復元する。
+
+        Args:
+            row: 対応するテーブルの行。
+
+        Returns:
+            復元したインスタンス。
+        """
+        return cls(**{f.name: row[f.name] for f in fields(cls)})
+
+
 @dataclass
-class Repo:
+class Repo(_RowModel):
     """リポジトリ台帳 1 行。知識のスコープ境界を表す。
 
     Attributes:
         id: 人間可読スラッグ（例 ``claq-dev``）。
         identity_key: 正規化 remote URL、無ければ repo root 絶対パス。
         root_path: 最後に観測した絶対パス。
-        remote_url: userinfo（`user:token@`）除去済みの remote URL（無ければ
-            None。`repo_identity._strip_userinfo` を参照）。
+        remote_url: credential（userinfo・query・fragment）除去済みの remote URL
+            （無ければ None。`repo_identity._strip_credentials` を参照）。
         first_seen_at: 初回観測時刻（ISO8601）。
         last_seen_at: 最終観測時刻（ISO8601）。
     """
@@ -42,28 +59,9 @@ class Repo:
     first_seen_at: str = field(default_factory=utc_now_iso)
     last_seen_at: str = field(default_factory=utc_now_iso)
 
-    @classmethod
-    def from_row(cls, row: sqlite3.Row) -> Repo:
-        """``repos`` の Row を Repo に変換する。
-
-        Args:
-            row: ``SELECT * FROM repos`` で得た行。
-
-        Returns:
-            復元された Repo。
-        """
-        return cls(
-            id=row["id"],
-            identity_key=row["identity_key"],
-            root_path=row["root_path"],
-            remote_url=row["remote_url"],
-            first_seen_at=row["first_seen_at"],
-            last_seen_at=row["last_seen_at"],
-        )
-
 
 @dataclass
-class Session:
+class Session(_RowModel):
     """セッション履歴 1 行。knowledge の出所であり引き継ぎを持つ。
 
     Attributes:
@@ -84,29 +82,9 @@ class Session:
     ended_at: str | None = None
     id: int | None = None
 
-    @classmethod
-    def from_row(cls, row: sqlite3.Row) -> Session:
-        """``sessions`` の Row を Session に変換する。
-
-        Args:
-            row: ``SELECT * FROM sessions`` で得た行。
-
-        Returns:
-            復元された Session。
-        """
-        return cls(
-            session_uid=row["session_uid"],
-            repo_id=row["repo_id"],
-            harness=row["harness"],
-            handoff=row["handoff"],
-            started_at=row["started_at"],
-            ended_at=row["ended_at"],
-            id=row["id"],
-        )
-
 
 @dataclass
-class Knowledge:
+class Knowledge(_RowModel):
     """知識カード 1 行。1 行 = 1 つの再利用可能な言明。
 
     Attributes:
@@ -150,32 +128,3 @@ class Knowledge:
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
     id: int | None = None
-
-    @classmethod
-    def from_row(cls, row: sqlite3.Row) -> Knowledge:
-        """``knowledge`` の Row を Knowledge に変換する。
-
-        Args:
-            row: ``SELECT * FROM knowledge`` で得た行。
-
-        Returns:
-            復元された Knowledge。
-        """
-        return cls(
-            key=row["key"],
-            scope=row["scope"],
-            kind=row["kind"],
-            title=row["title"],
-            source=row["source"],
-            repo_id=row["repo_id"],
-            body=row["body"],
-            domain=row["domain"],
-            confidence=row["confidence"],
-            status=row["status"],
-            source_ref=row["source_ref"],
-            session_id=row["session_id"],
-            superseded_by=row["superseded_by"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            id=row["id"],
-        )
