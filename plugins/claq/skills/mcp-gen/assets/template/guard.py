@@ -79,15 +79,12 @@ async def _reject_unknown_arguments(server: MCPServer, params: Mapping[str, Any]
     arguments = params.get("arguments") or {}
     if not isinstance(arguments, Mapping):
         return None
-    for tool in await server.list_tools():
-        if tool.name != params.get("name"):
-            continue
-        allowed = sorted(tool.input_schema.get("properties", {}))
-        unknown = sorted(set(arguments) - set(allowed))
-        if not unknown:
-            return None
-        return rejection(unknown, allowed, server_name=server.name, server_version=server.version)
-    return None
+    tool = next((tool for tool in await server.list_tools() if tool.name == params.get("name")), None)
+    if tool is None:
+        return None
+    allowed = sorted(tool.input_schema.get("properties", {}))
+    unknown = sorted(set(arguments) - set(allowed))
+    return rejection(unknown, allowed, server_name=server.name, server_version=server.version) if unknown else None
 
 
 def _echoed(names: list[str]) -> str:
