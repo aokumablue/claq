@@ -244,16 +244,32 @@ class TestRunModuleInProcess:
 
 
 class TestResolveModuleCommand:
-    """detach 用コマンドリストの構築。"""
+    """detach 用コマンドリストの構築（--bg 起動の main 経由）。"""
 
-    def test_builds_module_invocation(self) -> None:
+    @staticmethod
+    def _detached_command(monkeypatch: pytest.MonkeyPatch, target: str, args: list[str]) -> list[str]:
+        """--bg 起動で detach_process へ渡ったコマンドリストを返す。"""
+        captured: dict[str, list[str]] = {}
+
+        def fake_detach(cmd: list[str], raw: str, *, env: dict[str, str] | None = None) -> bool:
+            captured["cmd"] = cmd
+            return True
+
+        monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
+        monkeypatch.setattr("claq.hooks.hook_common.read_raw_stdin", lambda: "")
+        monkeypatch.setattr("claq.hooks.hook_common.detach_process", fake_detach)
+        monkeypatch.setattr(launcher, "build_env", lambda: {})
+        assert launcher.main(["--bg", target, *args]) == 0
+        return captured["cmd"]
+
+    def test_builds_module_invocation(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """引数付きの python -m コマンドを返す。"""
-        cmd = launcher._resolve_module_command("claq.hooks.config_protection", ["a", "b"])
+        cmd = self._detached_command(monkeypatch, "claq.hooks.config_protection", ["a", "b"])
         assert cmd == [sys.executable, "-m", "claq.hooks.config_protection", "a", "b"]
 
-    def test_builds_module_invocation_without_args(self) -> None:
+    def test_builds_module_invocation_without_args(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """引数なしならモジュール名だけを付ける。"""
-        cmd = launcher._resolve_module_command("claq.mem.cli", [])
+        cmd = self._detached_command(monkeypatch, "claq.mem.cli", [])
         assert cmd == [sys.executable, "-m", "claq.mem.cli"]
 
 
