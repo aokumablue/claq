@@ -1235,7 +1235,7 @@ class TestEnvShRealExecution:
         assert result.returncode == 0, result.stderr
         assert "ran:marker" in result.stdout
 
-    def test_h02_two_unrelated_alive_hosts_exit_127(self, tmp_path: Path, _isolate_home: Path) -> None:
+    def test_two_unrelated_alive_hosts_exit_127(self, tmp_path: Path, _isolate_home: Path) -> None:
         """祖先ではない 2 つの実在プロセスの root が対立していても、
         当て推量せず 127 にする（root 値合意のような fallback で片方を
         静かに採用しない）。

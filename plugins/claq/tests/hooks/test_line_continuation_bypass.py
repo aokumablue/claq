@@ -40,7 +40,7 @@ _CASES = [
         "block_no_verify",
         "git commit \\\n  --no-verify -m x",
         2,
-        "対照: インデント付き継続行（旧実装でも検出できていた形）",
+        "対照: インデント付き継続行",
     ),
     ("block_no_verify", "git commit --no-verify -m x", 2, "対照: 行継続なし"),
     ("block_no_verify", "git commit -m x", 0, "対照: 正常な commit は通す"),
