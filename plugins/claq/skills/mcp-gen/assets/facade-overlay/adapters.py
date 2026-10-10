@@ -274,9 +274,6 @@ class OrdersApi:
 
         Returns:
             （上流の形の受注の一覧、次のページトークン）。最後のページなら None。
-
-        Raises:
-            UpstreamError: ページトークンが壊れているとき（400）。
         """
         matched = [
             raw
@@ -295,10 +292,8 @@ class OrdersApi:
             matched.sort(key=lambda raw: -raw["data"]["attributes"]["grandTotal"]["value"])
         else:
             matched.sort(key=_created_at, reverse=sort == "ordered_at_desc")
-        try:
-            offset = int((page or "o:0").removeprefix("o:"))
-        except ValueError as error:
-            raise UpstreamError(400, "bad page token") from error
+        # page は署名付きの cursor から戻した、この偽物自身が返したトークン（`o:` と件数）
+        offset = int((page or "o:0").removeprefix("o:"))
         page = matched[offset : offset + page_size]
         has_next = offset + page_size < len(matched)
         return page, (f"o:{offset + page_size}" if has_next else None)
@@ -331,17 +326,15 @@ class ShipmentsApi:
             order_id: 受注 ID。
 
         Returns:
-            上流の形の配送の一覧。数値でない受注 ID は該当なしとして空。
+            上流の形の配送の一覧。
 
         Raises:
             UpstreamError: 部分失敗の見本の受注では 503。
         """
         if order_id == UNAVAILABLE_SHIPMENTS_ORDER:
             raise UpstreamError(503, "shipments api maintenance", retry_after=0.0)
-        digits = order_id.removeprefix("ord_")
-        if not (digits.isascii() and digits.isdigit()):
-            return []
-        number = int(digits)
+        # order_id は orders_get の入口で `^ord_[0-9]{6}$` に縛ってある
+        number = int(order_id.removeprefix("ord_"))
         return [{"trackingNo": f"TRK{number:08d}{index}", "st": "PTD"[index % 3]} for index in range(number % 3)]
 
 
