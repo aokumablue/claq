@@ -91,11 +91,16 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
-def redact(text: str) -> str:
-    """テキスト中の PII・シークレットを [REDACTED] に置換して返す。"""
-    for _, pattern in _PATTERNS:
+def _apply(patterns: list[tuple[str, re.Pattern[str]]], text: str) -> str:
+    """*patterns* を上から順に適用し、一致を [REDACTED] に置換して返す。"""
+    for _, pattern in patterns:
         text = pattern.sub(_PLACEHOLDER, text)
     return text
+
+
+def redact(text: str) -> str:
+    """テキスト中の PII・シークレットを [REDACTED] に置換して返す。"""
+    return _apply(_PATTERNS, text)
 
 
 # knowledge カード（title/body/source_ref）向けの縮小版パターン。
@@ -129,10 +134,5 @@ def redact_knowledge_text(text: str) -> str:
 
     Returns:
         既知プレフィックス系シークレットを [REDACTED] に置換した文字列。
-
-    Raises:
-        例外は発生しません。
     """
-    for _, pattern in _KNOWLEDGE_PATTERNS:
-        text = pattern.sub(_PLACEHOLDER, text)
-    return text
+    return _apply(_KNOWLEDGE_PATTERNS, text)
