@@ -27,9 +27,6 @@ def _reject_non_regular_file(path: Path) -> None:
     Args:
         path: 検証対象のパス。
 
-    Returns:
-        何も返しません。
-
     Raises:
         DatabaseError: symlink または regular file 以外の場合。
     """
@@ -52,39 +49,21 @@ class Database:
     def __init__(self, db_path: str | Path) -> None:
         """DB へ接続し、スキーマ初期化と最適化 PRAGMA を適用する。
 
-        新規作成時は ``os.open`` の O_CREAT|O_EXCL で最初から 0600 で
-        作る（sqlite3.connect に作らせて後から chmod すると、作成直後
-        から chmod までの間だけ他ユーザーに読めるファイルが存在する
-        窓ができるため）。既存 DB（他ツールが作った・過去バージョンが
-        作った等で 0600 以外の mode を持つ場合を含む）も、接続のたびに
-        mode を検証して補正する（新規作成時だけ補正すると、既存の 0644 DB は
-        開き直しても放置される）。
-
-        この mode 補正は POSIX でのみ収束する。Windows の ``chmod`` は
-        読み取り専用属性しか動かさず ``st_mode`` は 0o666 のままなので、
-        検証は毎回不一致となり ``chmod`` が空振りする（害は無く、読み取り
-        専用属性の解除だけが起きる）。Windows でのアクセス制御を
-        ``%USERPROFILE%`` の既定 ACL に委ねる判断とその理由は
-        `core_utils.ensure_private_dir` の docstring に集約してある。
-
-        WAL/SHM sidecar は本メソッドの時点ではまだ存在しない（SQLite が
-        WAL モードで最初の書き込み時に遅延作成するため、ここで chmod
-        しても no-op）。親ディレクトリは ``ensure_private_dir`` が
-        無条件に 0700 へ揃えるため、sidecar が 0644 でも他ユーザーから
-        到達できない。
+        新規作成は ``os.open`` の O_CREAT|O_EXCL で最初から 0600 にする
+        （sqlite3.connect に作らせて後から chmod すると、その間だけ他ユーザーに
+        読める窓ができる）。既存 DB も接続のたびに mode を検証して補正する
+        （新規作成時だけだと既存の 0644 DB が放置される）。Windows の ``chmod`` は
+        読み取り専用属性しか動かさず補正は空振りするが害は無い。Windows の
+        アクセス制御は ``core_utils.ensure_private_dir`` の判断に委ねる。
+        WAL/SHM sidecar は最初の書き込みで遅延作成されるため、ここでは補正
+        しない。親ディレクトリが 0700 なので他ユーザーから到達できない。
 
         既存パスは接続前に ``lstat`` で symlink と非 regular file を拒否する。
-        ``O_EXCL`` はぶら下がり symlink に対しても ``FileExistsError`` を
-        投げるため、この検査が無いと生きたリンクもぶら下がりリンクも
-        同じ分岐へ落ち、``sqlite3.connect`` がリンクを追ってリンク先へ
-        ``repos``/``sessions``/``knowledge`` を作る。二次被害として
-        直後の ``path.stat()`` もリンクを追うため、0600 の chmod がリンク先へ
-        着弾する。``~/.claq`` は 0700 に締められるので権限昇格ではないが、
-        復元事故や誤設定で無関係な DB を壊しうる完全性の問題である。
-
-        この検査は TOCTOU を完全には防がない（lstat と connect の間に差し替え
-        られる余地は残る）。同一 UID に対する真正性は docs/adr/plugin-root-resolution.md のとおり保証
-        対象外であり、ここで防ぐのは誤設定・復元事故による取り違えである。
+        ``O_EXCL`` はぶら下がり symlink にも ``FileExistsError`` を投げるため、
+        この検査が無いと ``sqlite3.connect`` と後続の chmod がリンクを追い、
+        無関係な DB を壊しうる。lstat と connect の間の差し替え（TOCTOU）は
+        防がない。同一 UID に対する真正性は保証対象外で、ここで防ぐのは
+        誤設定・復元事故による取り違えである。
 
         Args:
             db_path: mem.db のパス。親ディレクトリが無ければ作成する。
@@ -95,26 +74,21 @@ class Database:
         path = Path(db_path)
         ensure_private_dir(path.parent)
         try:
-            fd = os.open(str(path), os.O_CREAT | os.O_EXCL, 0o600)
-            os.close(fd)
+            os.close(os.open(str(path), os.O_CREAT | os.O_EXCL, 0o600))
         except FileExistsError:
             _reject_non_regular_file(path)
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         if stat.S_IMODE(path.stat().st_mode) != 0o600:
             path.chmod(0o600)
         self.conn.row_factory = sqlite3.Row
-        self._init_schema()
+        self.conn.executescript(_SCHEMA_SQL)
+        self.conn.commit()
         for pragma in (
             "PRAGMA temp_store = MEMORY",
             "PRAGMA mmap_size = 268435456",
             "PRAGMA cache_size = -64000",
         ):
             self.conn.execute(pragma)
-
-    def _init_schema(self) -> None:
-        """repos → sessions → knowledge の順にスキーマを作成する。"""
-        self.conn.executescript(_SCHEMA_SQL)
-        self.conn.commit()
 
     def close(self) -> None:
         """DB 接続を閉じる。"""
