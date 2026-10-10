@@ -85,7 +85,7 @@ ComponentName: 入力型 → 出力型
    - Verify: `claq_run claq.mem.cli search "test" --days 30` が `CommandError` にならず実行できる
    - Dependencies: なし / 複雑度: 低 / Risk: Low
 2. **フィルタロジックの実装** (plugins/claq/src/claq/mem/cli.py)
-   - Action: `_take_rows` 相当の結果整形処理の前段で `updated_at` が `--days` 日以内の行のみに絞る
+   - Action: 結果を整形する前に `updated_at` が `--days` 日以内の行のみに絞る
    - Why: CLI 引数を実クエリへ接続するため
    - Verify: `search(days=1)` が1日以内更新分のみ返す（ステップ3のテストで確認）
    - Dependencies: ステップ1 / 複雑度: 中 / Risk: Low
