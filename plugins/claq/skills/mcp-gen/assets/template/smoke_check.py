@@ -35,7 +35,7 @@ import sys
 import threading
 import unittest
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -128,6 +128,42 @@ def _spawn(env: dict[str, str] | None = None) -> subprocess.Popen:
     )
 
 
+def _send(process: subprocess.Popen, request: dict) -> None:
+    """リクエストを JSON の 1 行としてサーバの stdin へ書き込む。
+
+    Args:
+        process: 起動済みのサーバプロセス。
+        request: 送信する JSON-RPC リクエスト。
+    """
+    process.stdin.write(json.dumps(request) + "\n")
+    process.stdin.flush()
+
+
+def _stop(process: subprocess.Popen) -> None:
+    """stdin を閉じてサーバの終了を待ち、10 秒で終わらなければ kill する。
+
+    Args:
+        process: 起動済みのサーバプロセス。
+    """
+    process.stdin.close()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+
+
+def _stderr_tail(process: subprocess.Popen) -> str:
+    """サーバの stderr の末尾 2000 文字を返す。
+
+    Args:
+        process: 起動済みのサーバプロセス。
+
+    Returns:
+        stderr の末尾。
+    """
+    return (process.stderr.read() if process.stderr else "")[-2000:]
+
+
 def _exchange(requests: list[dict], env: dict[str, str] | None = None) -> dict[int, dict]:
     """サーバを起動してリクエスト列を送り、id をキーにした応答を返す。
 
@@ -164,17 +200,12 @@ def _exchange(requests: list[dict], env: dict[str, str] | None = None) -> dict[i
     threading.Thread(target=_read, daemon=True).start()
     try:
         for request in requests:
-            process.stdin.write(json.dumps(request) + "\n")
-            process.stdin.flush()
+            _send(process, request)
         got_all = complete.wait(timeout=RESPONSE_TIMEOUT_SECONDS)
     finally:
-        process.stdin.close()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        _stop(process)
 
-    stderr_tail = (process.stderr.read() if process.stderr else "")[-2000:]
+    stderr_tail = _stderr_tail(process)
     # 最頻の失敗は「サーバ側の python に mcp が入っていない」。この検査は自分では
     # mcp を import しないので**自分は起動でき**、死ぬのは spawn した子だけ。
     # 素の件数だけ出すと原因が stderr の末尾に埋もれるため、先に名指しする。
@@ -199,12 +230,7 @@ def _request(request_id: int, method: str, params: dict | None = None) -> dict:
     Returns:
         送信可能な JSON-RPC リクエスト。
     """
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "method": method,
-        "params": {**(params or {}), "_meta": REQUEST_META},
-    }
+    return {"jsonrpc": "2.0", "id": request_id, "method": method, "params": {**(params or {}), "_meta": REQUEST_META}}
 
 
 def _call(request_id: int, tool: str, arguments: dict) -> dict:
@@ -246,6 +272,21 @@ def _require(setting: str) -> None:
     """
     if not getattr(cfg, setting):
         raise unittest.SkipTest(f"{setting} 未設定")
+
+
+def _assert_published(tool: str, published: Iterable[str]) -> None:
+    """設定したツールが公開されていることを確かめる。
+
+    未知のツールも `isError: true` を返すため、確かめないと名前の変え忘れで検査が空振り合格する。
+
+    Args:
+        tool: 設定したツール名。
+        published: 公開中のツール名。
+
+    Raises:
+        AssertionError: 公開されていないとき。
+    """
+    assert tool in published, f"{tool} が未公開です。公開中: {sorted(published)}"
 
 
 def _walk_keys(node: object) -> Iterator[str]:
@@ -305,20 +346,14 @@ def elicit_round_trip(
     try:
         next_id = 1
         for setup_tool, setup_args in setup or []:
-            process.stdin.write(json.dumps(_call(next_id, setup_tool, setup_args)) + "\n")
-            process.stdin.flush()
-            setup_result = json.loads(_read_line(process))["result"]
-            assert setup_result.get("isError") is not True, (
-                f"事前呼び出し {setup_tool} が失敗しました: {setup_result}"
-            )
+            _send(process, _call(next_id, setup_tool, setup_args))
+            setup_result = _read_result(process)
+            assert setup_result.get("isError") is not True, f"事前呼び出し {setup_tool} が失敗しました: {setup_result}"
             next_id += 1
 
-        process.stdin.write(json.dumps(_call(next_id, tool, arguments)) + "\n")
-        process.stdin.flush()
-        first = json.loads(_read_line(process))["result"]
-        assert first.get("resultType") == "input_required", (
-            f"1 往復目が input_required を返しませんでした: {first}"
-        )
+        _send(process, _call(next_id, tool, arguments))
+        first = _read_result(process)
+        assert first.get("resultType") == "input_required", f"1 往復目が input_required を返しませんでした: {first}"
         key = next(iter(first["inputRequests"]))
 
         answer: dict = {"action": action}
@@ -331,33 +366,28 @@ def elicit_round_trip(
             "inputResponses": {key: answer},
             "requestState": first.get("requestState"),
         }
-        process.stdin.write(json.dumps(_request(next_id + 1, "tools/call", retry_params)) + "\n")
-        process.stdin.flush()
-        return json.loads(_read_line(process))["result"]
+        _send(process, _request(next_id + 1, "tools/call", retry_params))
+        return _read_result(process)
     finally:
-        process.stdin.close()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        _stop(process)
 
 
-def _read_line(process: subprocess.Popen) -> str:
-    """サーバの stdout から応答を 1 行読む。
+def _read_result(process: subprocess.Popen) -> dict:
+    """サーバの stdout から応答を 1 行読み、その result を返す。
 
     Args:
         process: 起動済みのサーバプロセス。
 
     Returns:
-        読み取った JSON 1 行。
+        応答の result オブジェクト。
 
     Raises:
         AssertionError: 応答が来ないまま stdout が閉じたとき。
     """
     for line in process.stdout or []:
         if line.strip():
-            return line
-    raise AssertionError(f"応答が返りませんでした。stderr:\n{(process.stderr.read() if process.stderr else '')[-2000:]}")
+            return json.loads(line)["result"]
+    raise AssertionError(f"応答が返りませんでした。stderr:\n{_stderr_tail(process)}")
 
 
 def test_protocol_surface() -> None:
@@ -381,10 +411,9 @@ def test_protocol_surface() -> None:
     assert tools["resultType"] == "complete", tools
     assert tools["tools"], "ツールが 1 つも公開されていません"
     published = [tool["name"] for tool in tools["tools"]]
-    # 編集し忘れを「未知ツール」として素通りさせず、ここで名指しで落とす
-    assert cfg.HAPPY_TOOL in published, f"{cfg.HAPPY_TOOL} が未公開です。公開中: {sorted(published)}"
+    _assert_published(cfg.HAPPY_TOOL, published)
     if cfg.INVALID_TOOL:
-        assert cfg.INVALID_TOOL in published, f"{cfg.INVALID_TOOL} が未公開です。公開中: {sorted(published)}"
+        _assert_published(cfg.INVALID_TOOL, published)
     # ttlMs=0（既定）のままだとクライアントは毎回取り直す。意図した値か確認する
     assert tools["ttlMs"] > 0, f"cache_hints が効いていません: ttlMs={tools['ttlMs']}"
     assert tools["cacheScope"] in {"public", "private"}, tools
@@ -401,9 +430,7 @@ def test_protocol_surface() -> None:
 def test_tool_definitions_follow_design() -> None:
     """公開するツール定義が設計規則（名前・説明・スキーマ・注釈・数）に従うこと。"""
     tools = _exchange([_request(1, "tools/list")])[1]["result"]["tools"]
-    assert len(tools) <= cfg.MAX_TOOLS, (
-        f"ツールが {len(tools)} 個あります（上限 {cfg.MAX_TOOLS}）。ツールセットに分けてください"
-    )
+    assert len(tools) <= cfg.MAX_TOOLS, f"ツールが {len(tools)} 個あります（上限 {cfg.MAX_TOOLS}）。ツールセットに分けてください"
     for tool in tools:
         name = tool["name"]
         assert TOOL_NAME_PATTERN.match(name), f"{name}: ツール名は英小文字・数字・_ だけで書く"
@@ -451,16 +478,8 @@ def test_tool_error_reaches_the_model() -> None:
     モデルが自己修正できるのは `ToolError` で投げた場合だけ。
     """
     _require("INVALID_TOOL")
-    responses = _exchange(
-        [
-            _request(1, "tools/list"),
-            _call(2, cfg.INVALID_TOOL, cfg.INVALID_ARGS),
-        ]
-    )
-    published = {tool["name"] for tool in responses[1]["result"]["tools"]}
-    # 未知ツールも `isError: true` を返すため、実在確認なしでは本チェックが
-    # 「名前を変え忘れただけ」で空振り合格してしまう
-    assert cfg.INVALID_TOOL in published, f"{cfg.INVALID_TOOL} が未公開です。公開中: {sorted(published)}"
+    responses = _exchange([_request(1, "tools/list"), _call(2, cfg.INVALID_TOOL, cfg.INVALID_ARGS)])
+    _assert_published(cfg.INVALID_TOOL, {tool["name"] for tool in responses[1]["result"]["tools"]})
 
     message = responses[2]
     assert "error" not in message, f"プロトコルエラーになっています: {message}"
@@ -487,14 +506,11 @@ def test_resource_is_served() -> None:
     ツール側だけ見ていると気づけない。
     """
     _require("RESOURCE_URI")
-    responses = _exchange([_request(1, "resources/read", {"uri": cfg.RESOURCE_URI})])
-    result = responses[1]["result"]
+    result = _exchange([_request(1, "resources/read", {"uri": cfg.RESOURCE_URI})])[1]["result"]
     assert result["resultType"] == "complete", result
     text = " ".join(block.get("text", "") for block in result.get("contents", []))
     assert cfg.RESOURCE_EXPECTED_SUBSTRING in text, f"リソース本文が期待と違います: {text!r}"
-    assert result["ttlMs"] > 0, (
-        f"resources/read の cache_hints が未設定です: ttlMs={result['ttlMs']}"
-    )
+    assert result["ttlMs"] > 0, f"resources/read の cache_hints が未設定です: ttlMs={result['ttlMs']}"
 
 
 def test_prompt_is_served() -> None:
@@ -504,14 +520,9 @@ def test_prompt_is_served() -> None:
     （一覧の `prompts/list` にはヒントが載る）。
     """
     _require("PROMPT_NAME")
-    responses = _exchange(
-        [_request(1, "prompts/get", {"name": cfg.PROMPT_NAME, "arguments": cfg.PROMPT_ARGS})]
-    )
-    result = responses[1]["result"]
+    result = _exchange([_request(1, "prompts/get", {"name": cfg.PROMPT_NAME, "arguments": cfg.PROMPT_ARGS})])[1]["result"]
     assert result["resultType"] == "complete", result
-    text = " ".join(
-        message.get("content", {}).get("text", "") for message in result.get("messages", [])
-    )
+    text = " ".join(message.get("content", {}).get("text", "") for message in result.get("messages", []))
     assert cfg.PROMPT_EXPECTED_SUBSTRING in text, f"プロンプト本文が期待と違います: {text!r}"
 
 
@@ -554,9 +565,7 @@ def test_unknown_field_gets_suggestion() -> None:
     """未知の項目パスが `isError` になり、近い候補が示されること。"""
     _require("FIELDS_TOOL")
     responses = _exchange([_request(1, "tools/list"), _call(2, cfg.FIELDS_TOOL, cfg.FIELDS_BAD_ARGS)])
-    published = {tool["name"] for tool in responses[1]["result"]["tools"]}
-    # 未知ツールも `isError: true` を返すため、実在確認なしでは名前の変え忘れで空振り合格する
-    assert cfg.FIELDS_TOOL in published, f"{cfg.FIELDS_TOOL} が未公開です。公開中: {sorted(published)}"
+    _assert_published(cfg.FIELDS_TOOL, {tool["name"] for tool in responses[1]["result"]["tools"]})
     result = responses[2]["result"]
     assert result.get("isError") is True, result
     assert cfg.FIELDS_EXPECTED_SUGGESTION in _text(result), result
@@ -566,9 +575,7 @@ def test_mrtr_round_trips() -> None:
     """MRTR の各ケースで、再送の最終結果が期待どおりであること（承認と拒否の両分岐）。"""
     _require("MRTR_CASES")
     for case in cfg.MRTR_CASES:
-        result = elicit_round_trip(
-            case["tool"], case["arguments"], case["action"], case.get("content"), case.get("setup")
-        )
+        result = elicit_round_trip(case["tool"], case["arguments"], case["action"], case.get("content"), case.get("setup"))
         label = f"{case['tool']} / {case['action']}"
         assert result.get("isError") is case["expected_is_error"], f"{label}: {result}"
         assert case["expected_text"] in _text(result), f"{label}: {result}"
