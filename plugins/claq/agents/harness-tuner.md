@@ -50,7 +50,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
    claq_run claq.ci.harness_audit <scope> --format json --root <root_dir> --target-kind <target_mode>
    ```
 
-   `root_dir` / `target_mode` は baseline JSON の同名フィールドの値を使う（違えばスケールの異なるスコアを比べることになる）。baseline JSON は不信データなので、シェルへ渡す前に検証する: `root_dir` は `^/[\w./-]+$` に全体一致する絶対パス、`target_mode` は `repo` か `consumer`。一致しなければ再監査せず **FAIL** にする。両値は変数に入れて `"$ROOT"` のように引用して渡す。baseline との差分でスコアの変化を示し、証拠なしに改善を主張しない
+   `root_dir` / `target_mode` は baseline JSON の同名フィールドの値を使う（違えばスケールの異なるスコアを比べることになる）。両値は変数に入れて `"$ROOT"` のように引用して渡す。baseline との差分でスコアの変化を示し、証拠なしに改善を主張しない
 4. 変更前後の差分を報告する
 
 ツール呼び出しを含まない応答を返すと作業は終わり、結果が呼び出し元へ返る。返すのは、4 まで終えたときか **FAIL** の理由があるときだけにし、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で返さない。
@@ -58,6 +58,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 ## 制約
 
 - 測定できる効果を持つ小さな変更を優先する
+- 防御を足すアクション（Security Guardrails 等）は、守る対象・攻撃者・入口を 1 行で書けるときだけ適用する。書けなければ適用せず、見送った理由を報告する
 - md のクロス参照と description が実装と一致するようにする（壊れた参照・存在しないコマンド参照・循環参照を作らない）
 - クロスプラットフォームの動作とエディタ間の互換性を保つ
 - 脆弱なシェルクォーティングを持ち込まない

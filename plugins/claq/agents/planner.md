@@ -63,7 +63,7 @@ ComponentName: 入力型 → 出力型
 
 ## Phase 1: [フェーズ名]
 1. **[ステップ名]** (path/to/file)
-   - Action / Why / Verify（検証手段1行） / Dependencies / 複雑度: 低|中|高 / Risk: Low|Medium|High / Mitigation（Riskに対する緩和策）
+   - Action / Why / Verify（検証手段1行） / Dependencies / 複雑度: 低|中|高 / Risk: Low|Medium|High / Mitigation（Medium 以上のとき）
 
 ## テスト戦略 / リスクと緩和策 / 成功条件
 
@@ -83,19 +83,19 @@ ComponentName: 入力型 → 出力型
    - Action: `_VALUE_OPTIONS` に `--days` を追加し `search` サブコマンドで受理する
    - Why: 呼び出し側で更新日フィルタを指定できるようにするため
    - Verify: `claq_run claq.mem.cli search "test" --days 30` が `CommandError` にならず実行できる
-   - Dependencies: なし / 複雑度: 低 / Risk: Low / Mitigation: 未指定時は既存の全件対象と同じ挙動を維持
+   - Dependencies: なし / 複雑度: 低 / Risk: Low
 2. **フィルタロジックの実装** (plugins/claq/src/claq/mem/cli.py)
    - Action: `_take_rows` 相当の結果整形処理の前段で `updated_at` が `--days` 日以内の行のみに絞る
    - Why: CLI 引数を実クエリへ接続するため
    - Verify: `search(days=1)` が1日以内更新分のみ返す（ステップ3のテストで確認）
-   - Dependencies: ステップ1 / 複雑度: 中 / Risk: Low / Mitigation: 境界値（ちょうど N 日前）をテストする
+   - Dependencies: ステップ1 / 複雑度: 中 / Risk: Low
 
 ## Phase 2: テスト
 3. **ユニットテスト追加** (plugins/claq/tests/mem/test_cli.py)
    - Action: days 指定 / 未指定 / 境界値（ちょうど N 日前）のテストを追加
    - Why: days 指定・未指定・境界値の挙動を回帰から守るため
    - Verify: `cd plugins/claq && python3 -m pytest -q tests/mem/test_cli.py` が exit 0
-   - Dependencies: ステップ2 / 複雑度: 中 / Risk: Low / Mitigation: 境界値をテストする
+   - Dependencies: ステップ2 / 複雑度: 中 / Risk: Low
 
 ## テスト戦略
 `python3 -m pytest -q` 全体 + 境界値（days=0 / 1 / 未指定）
@@ -115,7 +115,7 @@ ComponentName: 入力型 → 出力型
 - 1 ステップ 1 検証可能成果物（ステップ単独でテスト・確認できる粒度に割る）
 - 各ステップに Dependencies を書く（無ければ「なし」）
 - 各ステップに複雑度（低/中/高）を付ける。高は分割を検討する
-- 各ステップの Risk に Mitigation を添える（Low でも一言）
+- Risk が Medium 以上のステップにだけ Mitigation を添える
 - 各ステップの成功条件は機械検証できる形（テスト名/コマンド/観測値）で書く
 - 不確定な前提は Assumptions に分け、確定事実と混ぜない
 - 計画の長さは変更の規模に合わせる。中身の無い節を埋め合わせで書かない（Assumptions の「なし」は残す）
