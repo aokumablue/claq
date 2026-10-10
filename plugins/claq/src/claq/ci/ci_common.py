@@ -46,6 +46,15 @@ def report_missing(label: str, path: Path, optional: bool) -> int:
     return 1
 
 
+def read_or_report(path: Path, label: str) -> str | None:
+    """UTF-8 で読む。読めなければ ``label`` 付きのエラーを書き出して None を返す。"""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as err:
+        emit_error(f"{label} - ファイルの読み取りに失敗しました: {err}")
+        return None
+
+
 def parse_validator_args(description: str, argv: Sequence[str] | None, **path_defaults: Path) -> argparse.Namespace:
     """validator 共通の CLI（``--optional`` とパス指定フラグ）を解析する。
 
