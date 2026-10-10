@@ -29,6 +29,7 @@ def _default_data_dir() -> Path:
         return Path(override)
     return get_home_dir() / BASE_DIR_NAME
 
+
 # --- context 注入の予算 ---
 
 _CHARS_PER_TOKEN = 3.5
