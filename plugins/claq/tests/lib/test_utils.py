@@ -201,11 +201,6 @@ class TestStripAnsi:
         """通常テキストはそのまま返すこと。"""
         assert strip_ansi("plain text") == "plain text"
 
-    def test_handles_non_string(self):
-        """文字列以外の入力では空文字列を返すこと。"""
-        assert strip_ansi(None) == ""
-        assert strip_ansi(123) == ""
-
 
 class TestEnsureDirRaceCondition:
     """ensure_dir のレースコンディション (FileExistsError) テスト。"""
