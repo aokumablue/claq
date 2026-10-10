@@ -18,18 +18,6 @@ logger = logging.getLogger(__name__)
 _LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
 
 
-def _authority(host: str) -> str:
-    """ホストを、Host ヘッダと Origin に現れる形にする（IPv6 のアドレスはブラケットで囲む）。
-
-    Args:
-        host: バインド先のホスト。
-
-    Returns:
-        `127.0.0.1`・`localhost`・`[::1]` のような形。
-    """
-    return f"[{host}]" if ":" in host else host
-
-
 def run(server: MCPServer) -> None:
     """コマンドライン引数でトランスポートを選び、サーバを起動する。
 
@@ -58,7 +46,7 @@ def run(server: MCPServer) -> None:
     # SDK は Host ヘッダと Origin を許可リストとの完全一致で照合する。IPv6 の Host ヘッダは
     # ブラケット付き（[::1]:8000）で届くので、裸のホストとポート付きの両方をその形で挙げる
     # （挙げ忘れると全リクエストが 421 になる）。
-    authority = _authority(args.host)
+    authority = f"[{args.host}]" if ":" in args.host else args.host
     security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=[authority, f"{authority}:{args.port}"],
