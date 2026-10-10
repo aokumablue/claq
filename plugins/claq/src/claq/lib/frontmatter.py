@@ -27,6 +27,7 @@ pyyaml との意図的な差分: ``yes`` / ``no`` / ``on`` / ``off`` は bool �
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Iterator
 
 __all__ = [
     "FrontmatterError",
@@ -265,9 +266,8 @@ def _read_double_quoted(text: str, start: int) -> tuple[str, int]:
 
 def _read_quoted(text: str, start: int) -> tuple[str, int]:
     """引用符付き文字列を読み取り (値, 閉じ引用符の次の位置) を返す。"""
-    if text[start] == "'":
-        return _read_single_quoted(text, start)
-    return _read_double_quoted(text, start)
+    reader = _read_single_quoted if text[start] == "'" else _read_double_quoted
+    return reader(text, start)
 
 
 def _ensure_no_trailing(text: str, index: int) -> None:
@@ -364,18 +364,30 @@ def _skip_spaces(text: str, index: int) -> int:
     return index
 
 
-def _skip_flow_comma(text: str, index: int) -> int:
-    """フローコレクションの要素区切りカンマを読み飛ばす。
+def _next_flow_entry(text: str, index: int, close: str, kind: str, first: bool) -> tuple[bool, int]:
+    """フローコレクションの次の要素の開始位置へ進む。
+
+    2 要素目以降（``first`` が偽）は区切りカンマを読み飛ばす。末尾カンマは
+    許容する（pyyaml 互換）。``kind`` はエラーメッセージに使う種別名。
+
+    Returns:
+        (閉じたか, 位置)。閉じたなら閉じ括弧の次、そうでなければ要素の開始位置。
 
     Raises:
-        FrontmatterError: カンマが無い、またはカンマの後で入力が尽きた場合。
+        FrontmatterError: 閉じ括弧が無い、または区切りが不正な場合。
     """
-    if text[index] != ",":
-        raise FrontmatterError("フローコレクションの区切りが不正です")
-    index = _skip_spaces(text, index + 1)
+    index = _skip_spaces(text, index)
     if index >= len(text):
-        raise FrontmatterError("フローコレクションが閉じていません")
-    return index
+        raise FrontmatterError(f"フロー{kind}が閉じていません")
+    if text[index] != close and not first:
+        if text[index] != ",":
+            raise FrontmatterError("フローコレクションの区切りが不正です")
+        index = _skip_spaces(text, index + 1)
+        if index >= len(text):
+            raise FrontmatterError("フローコレクションが閉じていません")
+    if text[index] == close:
+        return True, index + 1
+    return False, index
 
 
 def _read_flow_key(text: str, index: int) -> tuple[str, int]:
@@ -460,6 +472,28 @@ class _Parser:
         self.pos += 1
         return self._parse_value(rest, indent - 1, depth)
 
+    def _block_entries(self, indent: int, depth: int, parse_entry: Callable[[int, int], object]) -> Iterator[object]:
+        """同一インデントに並ぶブロックのエントリを順に解析して返す。
+
+        寛容モードでは解釈できないエントリを読み飛ばす。
+
+        Raises:
+            FrontmatterError: 厳格モードでエントリを解釈できない場合。
+        """
+        while True:
+            self._skip_blank_lines()
+            if self.pos >= len(self.lines) or _indent_width(self.lines[self.pos]) < indent:
+                return
+            start = self.pos
+            try:
+                entry = parse_entry(indent, depth)
+            except FrontmatterError:
+                if not self.lenient:
+                    raise
+                self._recover(start, indent)
+                continue
+            yield entry
+
     def _parse_mapping(self, indent: int, depth: int) -> dict[str, object]:
         """同一インデントに並ぶ ``key: value`` を辞書として解析する。
 
@@ -467,26 +501,13 @@ class _Parser:
             FrontmatterError: 厳格モードでエントリを解釈できない、またはキーが重複した場合。
         """
         result: dict[str, object] = {}
-        while True:
-            self._skip_blank_lines()
-            if self.pos >= len(self.lines):
-                break
-            start = self.pos
-            if _indent_width(self.lines[start]) < indent:
-                break
-            try:
-                key, value = self._parse_mapping_entry(indent, depth)
-            except FrontmatterError:
-                if not self.lenient:
-                    raise
-                self._recover(start, indent)
-                continue
+        for key, value in self._block_entries(indent, depth, self._parse_mapping_entry):
             # 重複キーは lenient でも誤りにする。`lenient` は**解釈できない**
             # エントリを読み飛ばすための緩和であって、矛盾した宣言を黙認する
             # ためのものではない。先勝ちで黙認すると、検証器が `tools: Read` を
             # 見る一方で後勝ちのホストは `tools: Bash` を見る、というパーサ差分に
-            # なる。宣言の意味が読み手ごとに
-            # 変わる状態は、検証を通り抜ける経路そのものになる。
+            # なる。宣言の意味が読み手ごとに変わる状態は、検証を通り抜ける経路
+            # そのものになる。
             if key in result:
                 raise FrontmatterError(f"キー '{key}' が重複しています")
             result[key] = value
@@ -517,21 +538,7 @@ class _Parser:
         Raises:
             FrontmatterError: 厳格モードでエントリを解釈できない場合。
         """
-        items: list[object] = []
-        while True:
-            self._skip_blank_lines()
-            if self.pos >= len(self.lines):
-                break
-            start = self.pos
-            if _indent_width(self.lines[start]) < indent:
-                break
-            try:
-                items.append(self._parse_sequence_entry(indent, depth))
-            except FrontmatterError:
-                if not self.lenient:
-                    raise
-                self._recover(start, indent)
-        return items
+        return list(self._block_entries(indent, depth, self._parse_sequence_entry))
 
     def _parse_sequence_entry(self, indent: int, depth: int) -> object:
         """シーケンスの 1 エントリを解析して値を返す。
@@ -609,9 +616,7 @@ class _Parser:
         parts = [_strip_comment(first)]
         while self.pos < len(self.lines):
             line = self.lines[self.pos]
-            if _is_blank(line):
-                break
-            if self._indent_of(line) <= base_indent:
+            if _is_blank(line) or self._indent_of(line) <= base_indent:
                 break
             parts.append(_strip_comment(line.strip()))
             self.pos += 1
@@ -652,10 +657,7 @@ class _Parser:
             end -= 1
         kept = content[:end]
         trailing = len(content) - end
-        if style == "|":
-            body = "".join(line + "\n" for line in kept)
-        else:
-            body = _fold_lines(kept)
+        body = "".join(line + "\n" for line in kept) if style == "|" else _fold_lines(kept)
         if chomping == "-":
             return body.rstrip("\n")
         if chomping == "+":
@@ -676,50 +678,32 @@ class _Parser:
     def _read_flow_sequence(self, text: str, start: int, depth: int) -> tuple[list[object], int]:
         """``[a, b]`` 形式のフローシーケンスを解析する。
 
-        末尾カンマは許容する（pyyaml 互換）。
-
         Raises:
             FrontmatterError: 閉じ括弧が無い、または区切りが不正な場合。
         """
         items: list[object] = []
         index = start + 1
-        first = True
         while True:
-            index = _skip_spaces(text, index)
-            if index >= len(text):
-                raise FrontmatterError("フローシーケンスが閉じていません")
-            if text[index] == "]":
-                return items, index + 1
-            if not first:
-                index = _skip_flow_comma(text, index)
-                if text[index] == "]":
-                    return items, index + 1
+            closed, index = _next_flow_entry(text, index, "]", "シーケンス", not items)
+            if closed:
+                return items, index
             value, index = self._read_flow_item(text, index, depth)
             items.append(value)
-            first = False
 
     def _read_flow_mapping(self, text: str, start: int, depth: int) -> tuple[dict[str, object], int]:
         """``{k: v}`` 形式のフローマッピングを解析する。
 
-        末尾カンマは許容する（pyyaml 互換）。キーの重複は厳格モードでエラー、
-        寛容モードでは先勝ちで黙認する。
+        キーの重複はモードに関わらずエラーにする（寛容モードではエントリごと読み飛ばされる）。
 
         Raises:
             FrontmatterError: 閉じ括弧が無い、区切りが不正、またはキーが重複した場合。
         """
         result: dict[str, object] = {}
         index = start + 1
-        first = True
         while True:
-            index = _skip_spaces(text, index)
-            if index >= len(text):
-                raise FrontmatterError("フローマッピングが閉じていません")
-            if text[index] == "}":
-                return result, index + 1
-            if not first:
-                index = _skip_flow_comma(text, index)
-                if text[index] == "}":
-                    return result, index + 1
+            closed, index = _next_flow_entry(text, index, "}", "マッピング", not result)
+            if closed:
+                return result, index
             key, index = _read_flow_key(text, index)
             index = _skip_spaces(text, index)
             if index >= len(text) or text[index] != ":":
@@ -728,7 +712,6 @@ class _Parser:
             if key in result:
                 raise FrontmatterError(f"キー '{key}' が重複しています")
             result[key] = value
-            first = False
 
     def _read_flow_item(self, text: str, index: int, depth: int) -> tuple[object, int]:
         """フローコレクションの要素を 1 つ読み取り (値, 次の位置) を返す。
