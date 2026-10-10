@@ -33,25 +33,15 @@ def build_payload(environ: dict[str, str]) -> dict[str, str]:
 
     Returns:
         空でない値だけを持つ payload 辞書。
-
-    Raises:
-        例外は発生しません。
     """
-    payload = {field: environ.get(_ENV_PREFIX + field.upper(), "") for field in _FIELDS}
-    return {key: value for key, value in payload.items() if value}
+    return {field: value for field in _FIELDS if (value := environ.get(_ENV_PREFIX + field.upper(), ""))}
 
 
 def main() -> int:
-    """payload を JSON として stdout へ書き出す。
-
-    Args:
-        引数はありません（``CLAQ_LEARN_*`` 環境変数から読み取る）。
+    """``CLAQ_LEARN_*`` 環境変数から組み立てた payload を JSON として stdout へ書き出す。
 
     Returns:
         終了コード 0。
-
-    Raises:
-        例外は発生しません。
     """
     json.dump(build_payload(dict(os.environ)), sys.stdout, ensure_ascii=False)
     return 0
