@@ -145,7 +145,7 @@ def _run_module_in_process(target: str, target_args: list[str]) -> int:
     """モジュールをインプロセスで実行し、終了コードを返します。
 
     runpy.run_module に run_name="__main__" を渡すことで、対象モジュールの
-    `if __name__ == "__main__":` 経路を従来のサブプロセス実行と同一の
+    `if __name__ == "__main__":` 経路をサブプロセス実行と同一の
     入口から通す。sys.argv[1:] にターゲット引数を設定してから実行する
     （mem.cli 等はサブコマンドを sys.argv[1] から読むため）。
 
@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # md（agents/commands/skills）がベンダ固有パスを書かずに plugin root を
     # 解決できるよう、全 hook 起動のたびに ~/.claq/env.sh ポインタを更新する
-    # （M-02 対応）。失敗しても hook 本来の処理は妨げない。
+    # 失敗しても hook 本来の処理は妨げない。
     write_env_pointer(REPO_ROOT)
 
     args = list(sys.argv[1:] if argv is None else argv)

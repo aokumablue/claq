@@ -90,8 +90,8 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
     ``chmod`` では失効しない。``chmod`` は「既に 0755 で存在するディレクトリ
     を締め直す」是正用として残す。
 
-    Windows では ``chmod`` が読み取り専用属性しか動かさず、DACL は変わらない
-    （release-verify 2026-09-03 の P1-008）。ここで ``icacls`` や
+    Windows では ``chmod`` が読み取り専用属性しか動かさず、DACL は変わらない。
+    ここで ``icacls`` や
     ``SetNamedSecurityInfo`` を呼ぶことはしない: ``%USERPROFILE%`` 配下は
     既定でそのユーザー（と SYSTEM / Administrators）だけに許可されており、
     docs/adr/shell-analysis-boundary.md が定める脅威モデル（同一 OS ユーザーの敵対的回避は非対象）に
@@ -124,9 +124,8 @@ def actor_identity() -> str:
     """監査ログ用の実行ユーザー識別子を返す（クロスプラットフォーム）。
 
     ``os.getuid()`` は POSIX にしか存在せず、Windows では ``AttributeError``
-    になる。``mem promote`` は DB 更新の**後**にこれを呼んでいたため、
-    Windows では「カードは active になったのに監査ログを書けず非 0 終了」と
-    いう部分成功になりえた（release-verify 2026-09-03 の P1-005）。
+    になる。それを使うと、Windows で ``mem promote`` が「カードは active に
+    なったのに監査ログを書けず非 0 終了」という部分成功になりうる。
 
     ``getpass.getuser()`` は POSIX では ``LOGNAME``/``USER``/``LNAME``/
     ``USERNAME`` と ``pwd`` を、Windows では ``USERNAME`` を見るため、

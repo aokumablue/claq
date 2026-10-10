@@ -1,12 +1,12 @@
 """plugin root をベンダ非依存の固定住所（``~/.claq/env.sh``）へ書き出す。
 
-M-02（ホスト固有パスの探索ループが agents/commands/skills の md に重複していた
-問題）と、ユーザー要件「``.claude``/``.copilot``/``.grok`` 等のベンダ固有パスを
-md へ書かない」を同時に解決する。``CLAUDE_PLUGIN_ROOT`` は Bash tool の環境変数に
-乗らない（実測）ため、md 側から plugin root を知る手段が無かった。本モジュールは
+ホスト固有パスの探索ループを agents/commands/skills の md に重複させないことと、
+ユーザー要件「``.claude``/``.copilot``/``.grok`` 等のベンダ固有パスを md へ
+書かない」を同時に満たす。``CLAUDE_PLUGIN_ROOT`` は Bash tool の環境変数に
+乗らない（実測）ため、md 側には plugin root を知る手段が他に無い。本モジュールは
 `launcher.py` の全 hook 起動時に、その時点で分かっている plugin root
 （``launcher.REPO_ROOT``）を ``~/.claq`` 配下へ書き出す。md 側は
-``. "$HOME/.claq/env.sh"`` の 1 行だけを書けばよくなる。
+``. "$HOME/.claq/env.sh"`` の 1 行だけを書けばよい。
 
 ポインタはホストプロセス単位で分離する（``os.getppid()`` をキーにする）。単一
 ファイルにすると、別ターミナルで異なるホスト（Claude Code / Copilot 等）を同時に
@@ -16,29 +16,25 @@ install を source してしまうため。Bash tool の親プロセスは常に
 Python 側の ``os.getppid()`` と shell 側の ``$PPID`` は一致する（実測）。
 
 環境変数によるホスト判定（``COPILOT_*`` 等）は採らない。Copilot CLI / Grok CLI が
-bash tool の環境へ自身の識別変数を注入することは文書化されておらず、確認できた
-のは Claude Code の変数（``CLAUDECODE`` 等）のみだったため（詳細は
+bash tool の環境へ自身の識別変数を注入することは文書化されておらず、確認できる
+のは Claude Code の変数（``CLAUDECODE`` 等）のみのため（詳細は
 ``docs/adr/plugin-root-resolution.md``）。
 
-R-01〜R-06 の指摘を受け、v0.9.35 の設計を改めた:
+ポインタの形式と置き場所:
 
-- ポインタは shell script ではなく **データファイル**（絶対パス 1 行のみ）にする。
-  resolver（``runtime/env-template.sh``）が ``.``/``source`` で読み込むのをやめ、
-  ``read`` で 1 行だけ取り出す形に変えたため、ポインタの内容がそのまま shell
-  として実行されることはない（R-01/R-03）。
-  ``CLAQ_ROOT="..."`` という shell 代入形式は廃止した。
+- ポインタは shell script ではなく **データファイル**にする。resolver
+  （``runtime/env-template.sh``）は ``.``/``source`` で読み込まず ``read`` で
+  行を取り出すため、ポインタの内容がそのまま shell として実行されることはない。
 - ポインタの置き場所は ``get_claq_dir()``（``CLAQ_HOME`` を見る、
-  テスト隔離用のノブ）ではなく **``$HOME/.claq`` 固定**にする（R-04）。
+  テスト隔離用のノブ）ではなく **``$HOME/.claq`` 固定**にする。
   md の bootstrap 行 ``. "$HOME/.claq/env.sh"`` は環境依存の分岐を持たない
   固定住所である必要があり、writer 側もそれに合わせる。データ永続化
   （``mem.db``・``logs``）側の ``get_claq_dir()`` 契約とは別の契約であり、
   意図的に切り離している。
-- ``roots/latest`` という「無条件で採用される」ポインタは廃止した。
+- 「無条件で採用される」ポインタ（``roots/latest`` のようなもの）は置かない。
 
-H-01/H-02/M-01 の指摘を受け、さらに設計を改めた。とくに H-02
-（祖先不一致時に「root 値が一致する候補」で推測 fallback していた）は
-ユーザーから「リスクがあるとみなせる fallback は望ましくない」との明示
-指示を受け、**推測に基づく fallback を全廃**した:
+祖先チェーンによる解決。「リスクがあるとみなせる fallback は望ましくない」という
+ユーザーの明示指示に従い、**推測に基づく fallback は置かない**:
 
 - writer は ``os.getppid()`` とその親（**最大 2 段**）にのみ root を
   記録する（``_resolve_ancestor_chain``）。1 回の
@@ -56,17 +52,16 @@ H-01/H-02/M-01 の指摘を受け、さらに設計を改めた。とくに H-02
   ことはない。より上位の祖先（login shell・terminal app 等）は同じ
   terminal / login shell から起動された別々の host 間で共有されうるが、
   writer はそこへ一切書き込まないため、共有祖先での衝突という事象
-  自体が構造的に発生しない（初版はこれを「poison」で事後検知していたが、
-  advisor レビューで「共有されうる祖先が生存し続ける限り poison が
-  恒久化し、その host が数日単位でブロックされうる」という自己修復
-  不能な失敗モードを指摘され、事前回避（書き込み範囲を狭める）へ設計を
-  改めた）。同一 PID に異なる root が観測されるのは「同一 host が
+  自体が構造的に発生しない（衝突を事後検知する方式では、共有されうる
+  祖先が生存し続ける限り検知状態が恒久化し、その host が数日単位で
+  ブロックされうる。書き込み範囲を狭めて事前に回避するのはそのため）。
+  同一 PID に異なる root が観測されるのは「同一 host が
   プラグインをアップグレードした」ケースのみであり、これは上書きが
   正しい挙動なので単純に上書きする。
 - resolver（``env-template.sh``）は祖先チェーン（同じく最大 2 段）の
   ``lstart`` が一致するポインタしか採用しない。祖先チェーンで解決
-  できなければ、推測せず常に ``exit 127`` にする（旧 tier 2「root 値
-  合意 + 鮮度フィルタ」は削除）。
+  できなければ、推測せず常に ``exit 127`` にする（root 値の一致や
+  鮮度で候補を推測しない）。
 """
 
 from __future__ import annotations
@@ -116,8 +111,8 @@ def ancestor_pointers_supported() -> bool:
     この方式は writer（``ps -eo pid=,ppid=,lstart=``）と resolver
     （POSIX sh + ``ps -o lstart=``）の両方に依存する。Windows には ``ps`` が
     無く、Git Bash が同梱する ``ps`` は ``-o`` 書式を持たないうえ MSYS の
-    別 PID 空間を返すため、writer が記録した Windows PID と照合できない
-    （release-verify 2026-09-03 の P1-003）。したがって Windows では
+    別 PID 空間を返すため、writer が記録した Windows PID と照合できない。
+    したがって Windows では
     ``$HOME/.claq/env.sh`` は原理的に解決できず、md の bootstrap 行の
     代わりに `runtime/claq-hook` を直接呼ぶ必要がある。SessionStart の
     ``mem context`` はこの関数で判定して、その読み替え方をその場で提示する。
@@ -302,7 +297,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
 
 def _write_text_if_changed(path: Path, text: str) -> bool:
-    """内容が既に一致していれば書き込みを丸ごと省く（M-3）。
+    """内容が既に一致していれば書き込みを丸ごと省く。
 
     ``env.sh`` はリポジトリ内テンプレートの verbatim コピーで、同じプラグイン
     バージョンが動いている間は内容が変わらない。それでも `_atomic_write_text`
@@ -320,7 +315,7 @@ def _write_text_if_changed(path: Path, text: str) -> bool:
     `write_env_pointer` の ``OSError`` ハンドラを素通りしてフックを落とす。
 
     symlink は内容が一致していても書き直す。``os.replace`` は symlink を通常
-    ファイルへ置き換えるので、現行の無条件書き込みには「``env.sh`` が別の場所へ
+    ファイルへ置き換えるので、書き込みには「``env.sh`` が別の場所へ
     向けられていたら実体へ戻す」という自己修復が付随している。内容一致だけで
     省くとその性質が静かに失われる。
 
@@ -430,9 +425,8 @@ def _write_ancestor_pointer(path: Path, root_text: str, lstart: str) -> None:
     書き込み対象の PID は host インスタンス専有（モジュール docstring
     参照）であるため、既存の記録と ``root_text`` が食い違っていても
     「別 host との衝突」ではなく「同一 host のプラグインアップグレード」
-    でしかありえず、単純上書きが正しい。poison のような衝突検知は
-    行わない（旧設計は行っていたが、共有されない PID にしか書かない
-    設計へ改めたことで不要になった — advisor レビュー指摘）。
+    でしかありえず、単純上書きが正しい。共有されない PID にしか書かない
+    ため、衝突検知は要らない。
 
     Args:
         path: ``roots/<pid>`` のポインタパス。
@@ -457,7 +451,7 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
     達成済みになる。
 
     ``env.sh`` は内容が既存と一致していれば書き込みごと省く
-    （`_write_text_if_changed`。M-3）。祖先ポインタ側は GC が mtime を
+    （`_write_text_if_changed`）。祖先ポインタ側は GC が mtime を
     見るため常に書く。
 
     Args:
@@ -633,7 +627,7 @@ def _gc_one(entry: Path, now: float) -> None:
         # `<name>.tmp.`。`_atomic_write_text` が `roots/` 内に作る）もこの
         # 分岐に落ちる。旧 writer 残骸（`<pid>.tmp.<writer_pid>`）も非数字
         # なので同じ age-gate 対象。即削除すると、その writer の rename
-        # 前に消してしまう race がある（M-01）。実際の一時ファイル寿命は
+        # 前に消してしまう race がある。実際の一時ファイル寿命は
         # ミリ秒オーダーなので、`_DEAD_PID_GRACE_SECONDS` を過ぎてから
         # 削除しても実害は無く、race window を閉じられる。
         mtime = entry.stat().st_mtime
@@ -664,7 +658,7 @@ def _gc_stale_temp_files(claq_dir: Path, now: float) -> None:
     detach の stdin 一時ファイル（``*.stdin``）はここでは扱わない。生成側の
     `hook_common.detach_process` は ``get_claq_dir()``（``CLAQ_HOME`` を見る）
     配下に作るのに対し、本モジュールは ``$HOME`` 固定の別契約であり
-    （モジュール docstring の R-04）、走査先が食い違う。回収は生成側に置く
+    （モジュール docstring 参照）、走査先が食い違う。回収は生成側に置く
     （`hook_common.gc_detach_stdin_orphans`）。
 
     Args:

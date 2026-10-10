@@ -107,11 +107,10 @@ def find_latest_installed_claq(installed_dir: Path | None = None) -> Path | None
 
     mtime の取得は候補ごとに ``_mtime_or_none`` で行い、失敗した候補は除外する。
     列挙と stat の間には隙間があり（TOCTOU）、Grok が同時にプラグインを更新して
-    古い ``claq-<hash>`` を消すと ``FileNotFoundError`` が起きる。以前は
-    ``candidates.sort(key=lambda p: p.stat().st_mtime)`` が try の外にあったため、
-    それが本関数（「例外は発生しません」）→ ``_resolve_symlink_target`` →
+    古い ``claq-<hash>`` を消すと ``FileNotFoundError`` が起きる。stat を try の
+    外で行うと、それが本関数（「例外は発生しません」）→ ``_resolve_symlink_target`` →
     ``ensure_grok_plugin_root_symlink``（「OSError は握りつぶす」）を貫通し、
-    ``scripts/grok.sh`` が traceback で異常終了していた。
+    ``scripts/grok.sh`` が traceback で異常終了する。
 
     Args:
         installed_dir: 探索先。None なら ``~/.grok/installed-plugins``。
