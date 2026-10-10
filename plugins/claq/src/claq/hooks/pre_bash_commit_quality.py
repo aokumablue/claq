@@ -399,6 +399,8 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
                 return True
             continue
 
+        # 素の basename（大小区別・`.exe` 残し）で照合すると ``CP evil.py app.py`` や
+        # ``cp.exe`` が語彙から外れ、未検査の内容が commit されるため共有の正規化を通す。
         name = normalize_executable_name(token)
         if name in _WORKTREE_MUTATING_EXECUTABLES or name in ALWAYS_MUTATING_EDIT_EXECUTABLES:
             return True
@@ -622,7 +624,8 @@ def _count_file_issues(
             continue
         log(f"\n[FILE] {file_path}")
         for issue in file_issues:
-            # 未知 severity は「検査したが分類できない」ため、見逃さず安全側の error に数える。
+            # scanner の内部契約（キー欠落なし）に依存せず .get() で読む。未知 severity は
+            # 「検査したが分類できない」ため、見逃さず安全側の error に数える。
             severity = issue.get("severity")
             log(f"  {severity_label.get(severity, 'INFO')} Line {issue.get('line', 0)}: {issue.get('message', '')}")
             counts[severity if severity in counts else "error"] += 1
