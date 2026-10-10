@@ -59,36 +59,35 @@ def _run_git(cwd: str, *args: str) -> str | None:
     return result.stdout.strip() or None
 
 
-def _strip_git_suffix(path: str) -> str:
-    """URL のパス部から前後のスラッシュと末尾 ``.git`` を除去する。
+def _trim_git_suffix(path: str, *, keep_leading_slash: bool) -> str:
+    """パスから末尾 ``.git`` と前後（または末尾だけ）のスラッシュを除去する。
 
     Args:
-        path: ホスト名より後ろのパス文字列。
+        path: ホスト名より後ろのパス、またはローカルパス表記の remote。
+        keep_leading_slash: 先頭スラッシュを絶対パスの一部として残すなら True。
 
     Returns:
-        前後スラッシュと末尾 ``.git`` を落とした文字列。
+        整理したパス文字列。空になることがある。
     """
-    cleaned = path.strip("/")
+    strip = str.rstrip if keep_leading_slash else str.strip
+    cleaned = strip(path, "/")
     if cleaned.lower().endswith(".git"):
         cleaned = cleaned[:-4]
-    return cleaned.strip("/")
+    return strip(cleaned, "/")
 
 
-def _normalize_path_remote(path: str) -> str:
-    """ローカルパス remote から末尾スラッシュと ``.git`` を除去する。
-
-    先頭のスラッシュは絶対パスの一部なので保持する。
+def _is_scp_like(remote: str) -> bool:
+    """scp 形式（``user@host:owner/repo``）か。最初のコロンがスラッシュより前に来る。
 
     Args:
-        path: ローカルパス表記の remote。
+        remote: scheme を持たない remote 表記。
 
     Returns:
-        末尾を整理したパス文字列。空になることがある。
+        scp 形式なら True。
     """
-    cleaned = path.rstrip("/")
-    if cleaned.lower().endswith(".git"):
-        cleaned = cleaned[:-4]
-    return cleaned.rstrip("/")
+    colon = remote.find(":")
+    slash = remote.find("/")
+    return colon != -1 and (slash == -1 or colon < slash)
 
 
 def _join_host_path(authority: str, path: str, *, strip_port: bool) -> str | None:
@@ -107,7 +106,7 @@ def _join_host_path(authority: str, path: str, *, strip_port: bool) -> str | Non
     if strip_port:
         host = _PORT_RE.sub("", host)
     host = host.lower()
-    cleaned = _strip_git_suffix(path)
+    cleaned = _trim_git_suffix(path, keep_leading_slash=False)
     if not cleaned:
         return host or None
     return f"{host}/{cleaned}"
@@ -116,74 +115,31 @@ def _join_host_path(authority: str, path: str, *, strip_port: bool) -> str | Non
 def _strip_credentials(remote_url: str) -> str:
     """remote URL から credential を運びうる部分（userinfo・query・fragment）を除去する。
 
-    `_join_host_path` が identity_key を組み立てる際に使う
-    ``authority.rpartition("@")[2]`` と同じロジックを、scheme・パス・大小文字
-    を保ったまま remote_url 全体に適用する小関数です。DB へ保存する
-    ``repos.remote_url`` に credential 付き authority
-    （``https://user:token@github.com/o/r``）をそのまま残さないためです。
+    DB へ保存する ``repos.remote_url`` に credential 付き authority
+    （``https://user:token@github.com/o/r``）を残さないため、identity_key と
+    同じ ``rpartition("@")`` を scheme・パス・大小文字を保ったまま適用する。
+    scp 形式も一貫して ``host:owner/repo`` にする。
 
-    ``https://user:token@github.com/o/r`` → ``https://github.com/o/r``。
-    scp 形式（``git@host:owner/repo``）にも同じロジックを一貫して適用し
-    ``host:owner/repo`` にします（``git@`` は SSH の固定ユーザー名で秘密は
-    含みませんが、identity_key 側の扱いと一貫させます）。
-
-    userinfo に加えて **query（``?``）と fragment（``#``）も丸ごと捨てます**。
-    ``https://github.com/o/r?access_token=SECRET`` のような形は
-    userinfo の除去だけでは残り、``repos.remote_url`` として DB とログへ
-    永続化されます。git の
-    remote URL において query / fragment は取得先を特定する情報を持たない
-    ため、鍵名を列挙して redact するのではなく丸ごと落とす（列挙方式は
-    新しい鍵名を取りこぼすうえ、鍵名自体が事前に分からない）。
+    query（``?``）と fragment（``#``）は先に現れた方から丸ごと捨てる。
+    ``?access_token=SECRET`` は userinfo の除去だけでは残り、git の remote URL
+    において query / fragment は取得先を特定しない。鍵名の列挙方式は新しい
+    鍵名を取りこぼすため採らない。
 
     Args:
         remote_url: 生の remote URL（strip 済み・非空を想定）。
 
     Returns:
         userinfo・query・fragment を除去した remote URL。
-
-    Raises:
-        例外は発生しません。
     """
-    trimmed = _strip_query_and_fragment(remote_url)
+    trimmed = re.split(r"[?#]", remote_url, maxsplit=1)[0]
     scheme_match = _SCHEME_RE.match(trimmed)
     if scheme_match:
-        scheme_token, rest = scheme_match.group(1), scheme_match.group(2)
-        authority, sep, path = rest.partition("/")
-        host = authority.rpartition("@")[2]
-        return f"{scheme_token}://{host}{sep}{path}"
-
-    colon = trimmed.find(":")
-    slash = trimmed.find("/")
-    # scp 形式（user@host:owner/repo）は、最初のコロンがスラッシュより前に来る。
-    # normalize_remote_url の scp 判定条件と同一にする。
-    if colon != -1 and (slash == -1 or colon < slash):
+        authority, sep, path = scheme_match.group(2).partition("/")
+        return f"{scheme_match.group(1)}://{authority.rpartition('@')[2]}{sep}{path}"
+    if _is_scp_like(trimmed):
         authority, sep, path = trimmed.partition(":")
-        host = authority.rpartition("@")[2]
-        return f"{host}{sep}{path}"
-
+        return f"{authority.rpartition('@')[2]}{sep}{path}"
     return trimmed
-
-
-def _strip_query_and_fragment(remote_url: str) -> str:
-    """remote URL から最初の ``?`` / ``#`` 以降を落とす。
-
-    先に現れた方を境界にする（``...#frag?x`` のように fragment 内へ ``?`` が
-    現れる形でも取りこぼさない）。
-
-    Args:
-        remote_url: 生の remote URL。
-
-    Returns:
-        query / fragment を除いた文字列。どちらも無ければ元の文字列。
-
-    Raises:
-        例外は発生しません。
-    """
-    cut = min(
-        (index for index in (remote_url.find("?"), remote_url.find("#")) if index != -1),
-        default=-1,
-    )
-    return remote_url if cut == -1 else remote_url[:cut]
 
 
 def normalize_remote_url(remote_url: str | None) -> str | None:
@@ -213,18 +169,13 @@ def normalize_remote_url(remote_url: str | None) -> str | None:
     if scheme_match:
         scheme, rest = scheme_match.group(1).lower(), scheme_match.group(2)
         if scheme == "file":
-            return _normalize_path_remote(rest) or None
+            return _trim_git_suffix(rest, keep_leading_slash=True) or None
         authority, _, path = rest.partition("/")
         return _join_host_path(authority, path, strip_port=True)
-
-    colon = raw.find(":")
-    slash = raw.find("/")
-    # scp 形式（git@host:owner/repo）は、最初のコロンがスラッシュより前に来る。
-    if colon != -1 and (slash == -1 or colon < slash):
+    if _is_scp_like(raw):
         authority, _, path = raw.partition(":")
         return _join_host_path(authority, path, strip_port=False)
-
-    return _normalize_path_remote(raw) or None
+    return _trim_git_suffix(raw, keep_leading_slash=True) or None
 
 
 @dataclass(frozen=True)
@@ -283,30 +234,22 @@ def detect_repo_identity(cwd: str | Path | None = None) -> RepoIdentity:
 
     remote が取得でき正規化にも成功した場合のみ remote 由来の identity_key を使う。
     それ以外は repo root の絶対パスを identity_key とし、remote_url は None にする
-    （使えない remote を台帳に残さない）。保存する remote_url は
-    `_strip_userinfo` で userinfo（`user:token@`）を除去した後の文字列にする
-    （identity_key の正規化とは独立に、DB へそのまま保存される
-    生の remote_url にも credential 除去を適用する）。
+    （使えない remote を台帳に残さない）。保存する remote_url には
+    `_strip_credentials` を適用する。
 
     Args:
         cwd: 起点ディレクトリ。None なら現在の作業ディレクトリ。
 
     Returns:
         確定した RepoIdentity。
-
-    Raises:
-        例外は発生しません。
     """
     root_path = find_repo_root(cwd)
     remote_url = read_remote_url(root_path)
     normalized = normalize_remote_url(remote_url)
     if normalized is None:
         return RepoIdentity(identity_key=root_path, root_path=root_path, remote_url=None)
-    # normalize_remote_url は remote_url が falsy なら必ず None を返す契約
-    # （`if not remote_url: return None`）。ここに到達した時点で remote_url
-    # は truthy な文字列であることが保証される。
-    sanitized_remote_url = _strip_credentials(remote_url)
-    return RepoIdentity(identity_key=normalized, root_path=root_path, remote_url=sanitized_remote_url)
+    # normalize_remote_url は falsy な remote_url に None を返すので、ここでは str。
+    return RepoIdentity(identity_key=normalized, root_path=root_path, remote_url=_strip_credentials(remote_url))
 
 
 def slugify(name: str) -> str:
@@ -395,8 +338,7 @@ def allocate_repo_slug(identity: RepoIdentity, db: Database) -> str:
         return path_match.id
 
     base = base_slug(identity)
-    candidate = base
-    suffix = 1
+    candidate, suffix = base, 1
     while candidate in taken:
         suffix += 1
         candidate = f"{base}-{suffix}"
