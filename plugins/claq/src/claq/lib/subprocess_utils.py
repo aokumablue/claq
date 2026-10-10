@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import Any
 
 
 def run_text(
@@ -28,15 +27,14 @@ def run_text(
     env = os.environ.copy()
     if extra_env:
         env.update(extra_env)
-
-    run_kwargs: dict[str, Any] = {
-        "input": input_text,
-        "text": True,
-        "encoding": "utf-8",
-        "errors": "replace",
-        "capture_output": True,
-        "check": False,
-        "timeout": timeout,
-        "env": env,
-    }
-    return subprocess.run(cmd, **run_kwargs)
+    return subprocess.run(
+        cmd,
+        input=input_text,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+        timeout=timeout,
+        env=env,
+    )
