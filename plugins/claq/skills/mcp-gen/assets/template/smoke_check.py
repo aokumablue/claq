@@ -693,36 +693,24 @@ def _run_check(check: Callable[[], None]) -> bool:
     Returns:
         落ちたら True。
     """
+    failed = False
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", SmokeWarning)
-        failed = _execute(check)
+        try:
+            check()
+        except unittest.SkipTest as skipped:
+            print(f"SKIP {check.__name__} ({skipped})", file=sys.stderr)
+        except AssertionError as error:
+            print(f"FAIL {check.__name__}: {error}", file=sys.stderr)
+            failed = True
+        else:
+            print(f"PASS {check.__name__}", file=sys.stderr)
     for warning in caught:
         if issubclass(warning.category, SmokeWarning):
             print(f"WARN {check.__name__}: {warning.message}", file=sys.stderr)
         else:
             warnings.showwarning(warning.message, warning.category, warning.filename, warning.lineno, warning.file, warning.line)
     return failed
-
-
-def _execute(check: Callable[[], None]) -> bool:
-    """検査を 1 つ実行し、PASS・FAIL・SKIP を表示する。
-
-    Args:
-        check: 実行する検査。
-
-    Returns:
-        落ちたら True。
-    """
-    try:
-        check()
-    except unittest.SkipTest as skipped:
-        print(f"SKIP {check.__name__} ({skipped})", file=sys.stderr)
-    except AssertionError as error:
-        print(f"FAIL {check.__name__}: {error}", file=sys.stderr)
-        return True
-    else:
-        print(f"PASS {check.__name__}", file=sys.stderr)
-    return False
 
 
 def main() -> int:
