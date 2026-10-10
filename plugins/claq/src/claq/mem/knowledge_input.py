@@ -52,6 +52,7 @@ _FIXED_SOURCE = "agent"
 _FIXED_STATUS = "pending"
 
 DEFAULT_CONFIDENCE = 0.5
+"""``confidence`` 未指定時の確信度。"""
 
 #: title / body に許すバイト数の上限。
 #:
@@ -64,8 +65,6 @@ DEFAULT_CONFIDENCE = 0.5
 #: 正当な入力を落とすことは実務上ない。
 MAX_TITLE_BYTES = 4 * 1024
 MAX_BODY_BYTES = 64 * 1024
-
-"""``confidence`` 未指定時の確信度。"""
 
 _ASCII_ALNUM_RE = re.compile(r"[A-Za-z0-9]")
 _KEY_HASH_LENGTH = 8
@@ -133,30 +132,6 @@ def coerce_confidence(value: Any) -> float:
     return confidence
 
 
-def _payload_choice(
-    payload: dict[str, Any],
-    name: str,
-    allowed: frozenset[str],
-    *,
-    default: str = "",
-) -> str:
-    """ペイロードから列挙値を取り出して検証する。
-
-    Args:
-        payload: 知識カードを表す dict。
-        name: 項目名。ペイロードのキーとエラーメッセージに使う。
-        allowed: 許可される値の集合。
-        default: ペイロードに値が無いときの既定値。
-
-    Returns:
-        検証を通った列挙値。
-
-    Raises:
-        KnowledgeInputError: 値が *allowed* に含まれない場合。
-    """
-    return validate_choice(name, str(payload.get(name) or default), allowed)
-
-
 def _fixed_choice(payload: dict[str, Any], name: str, fixed_value: str) -> str:
     """generic learn 経路で常に固定値を返し、payload の非既定値を authority として拒否する。
 
@@ -201,9 +176,6 @@ def slug_with_hash_fallback(redacted: str, prefix: str) -> str:
 
     Returns:
         ``[a-z0-9-]`` のみからなる slug。
-
-    Raises:
-        例外は発生しません。
     """
     base = slugify(redacted) if _ASCII_ALNUM_RE.search(redacted) else ""
     if len(base) < _MIN_KEY_SLUG_LENGTH:
@@ -249,9 +221,6 @@ def generate_key(raw_title: str, kind: str) -> str:
 
     Returns:
         ``[a-z0-9-]`` のみからなる key。
-
-    Raises:
-        例外は発生しません。
     """
     redacted_title = redact_knowledge_text(raw_title)
     base = slug_with_hash_fallback(redacted_title, kind)
@@ -344,23 +313,6 @@ def _reject_oversized(text: str, field: str, limit: int) -> None:
         raise KnowledgeInputError(f"learn: {field} が大きすぎます（{size:,} バイト > {limit:,}）")
 
 
-def _checked_body(payload: dict[str, Any]) -> str:
-    """body を取り出し、上限バイト数を超えていないことを確かめて返す。
-
-    Args:
-        payload: learn の入力
-
-    Returns:
-        検査を通った body 文字列
-
-    Raises:
-        KnowledgeInputError: 上限を超えた場合。
-    """
-    body = str(payload.get("body") or "")
-    _reject_oversized(body, "body", MAX_BODY_BYTES)
-    return body
-
-
 def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     """JSON ペイロードを検証済みの ``KnowledgeDraft`` へ変換する。
 
@@ -375,7 +327,8 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     redact + slugify を通してから使う（同じ理由。明示 key だけが検証・
     redaction を素通りする穴を作らない）。
 
-    ``source``/``status`` は常に ``agent``/``pending`` に固定する。payload がそれ以外の値を明示した場合は拒否する（`_fixed_choice`）。
+    ``source``/``status`` は常に ``agent``/``pending`` に固定し、payload が
+    それ以外の値を明示した場合は拒否する（`_fixed_choice`）。
 
     Args:
         payload: 知識カードを表す dict。
@@ -395,8 +348,8 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     if not title:
         raise KnowledgeInputError("learn: title は必須です")
 
-    kind = _payload_choice(payload, "kind", KINDS)
-    scope = _payload_choice(payload, "scope", SCOPES, default="repo")
+    kind = validate_choice("kind", str(payload.get("kind") or ""), KINDS)
+    scope = validate_choice("scope", str(payload.get("scope") or "repo"), SCOPES)
     source = _fixed_choice(payload, "source", _FIXED_SOURCE)
     status = _fixed_choice(payload, "status", _FIXED_STATUS)
 
@@ -407,6 +360,8 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     # `日本語` と `別` のような ASCII を含まない明示 key が同じ slug へ潰れ、
     # upsert で別の知識を黙って上書きする。
     key = slug_with_hash_fallback(redact_knowledge_text(raw_key), kind) if raw_key else generate_key(title, kind)
+    body = str(payload.get("body") or "")
+    _reject_oversized(body, "body", MAX_BODY_BYTES)
 
     source_ref = optional_str(payload.get("source_ref"))
     domain = optional_str(payload.get("domain"))
@@ -416,7 +371,7 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
         scope=scope,
         kind=kind,
         title=redact_knowledge_text(title),
-        body=redact_knowledge_text(_checked_body(payload)),
+        body=redact_knowledge_text(body),
         domain=redact_knowledge_text(domain) if domain else None,
         confidence=coerce_confidence(payload.get("confidence")),
         status=status,
