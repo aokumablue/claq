@@ -176,7 +176,7 @@ class TestPowerShellCmdlets:
 class TestCommandNameNormalization:
     """実行位置のコマンド名比較が 3 箇所すべてで揃っていること。
 
-    `_executed_command_args` だけ大小無視にすると、`CD ..; rm ruff.toml` が
+    書き込み先の抽出（`_EXECUTED_COMMAND_TARGET_RULES`）だけ大小無視にすると、`CD ..; rm ruff.toml` が
     docs/adr/shell-analysis-boundary.md の無条件 deny 分岐へ落ちず repo スコープ判定側へ回る（誤通過）。
     正規化を 1 関数へ集約したことを、比較箇所ごとに固定する。
     """

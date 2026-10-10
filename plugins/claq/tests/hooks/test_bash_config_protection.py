@@ -423,8 +423,8 @@ class TestMalformedFallbackCoversDestructiveVerbs:
     def test_destructive_verbs_are_detected(self, raw_input: str) -> None:
         """削除・リンク系の verb と保護対象名が同居したら deny 対象になること。
 
-        トークン化できる経路では `_remove_target` / `_ln_target` が既にこれらを
-        見ている。JSON の壊れ方だけで同じ入力が通ったり通らなくなったりするのは
+        トークン化できる経路では、書き込み先の抽出（`_EXECUTED_COMMAND_TARGET_RULES`）が
+        既にこれらを見ている。JSON の壊れ方だけで同じ入力が通ったり通らなくなったりするのは
         境界として説明できない。
         """
         assert bash_config_protection._raw_text_write_risk(raw_input) is not None
