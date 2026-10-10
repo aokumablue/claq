@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
-import argparse
+from collections.abc import Iterator
 from pathlib import Path
 
-from claq.ci.ci_common import REPO_ROOT, emit_error, extract_frontmatter
+from claq.ci.ci_common import (
+    REPO_ROOT,
+    emit_error,
+    extract_frontmatter,
+    parse_validator_args,
+    read_or_report,
+    report_errors,
+    report_missing,
+)
 
 DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
 
@@ -27,143 +35,70 @@ _KNOWN_FRONTMATTER_FIELDS = frozenset(
 )
 
 
-def _frontmatter_field_errors(label: str, frontmatter: dict[str, object]) -> list[str]:
-    """真偽値フィールドの型と、ハイフン／アンダースコアの綴り違いを検査する。
-
-    Args:
-        label: エラーメッセージへ出す対象名
-        frontmatter: 解析済みの frontmatter
-
-    Returns:
-        エラーメッセージの一覧（違反が無ければ空）
-    """
-    errors: list[str] = []
+def _frontmatter_field_errors(label: str, frontmatter: dict[str, object]) -> Iterator[str]:
+    """ハイフン／アンダースコアの綴り違いと、真偽値フィールドの型の誤りを返す。"""
     for key in frontmatter:
         swapped = key.replace("_", "-")
         if swapped != key and swapped in _KNOWN_FRONTMATTER_FIELDS:
-            errors.append(f"{label} - frontmatter の {key} は {swapped} の綴り違い（黙って無視される）")
+            yield f"{label} - frontmatter の {key} は {swapped} の綴り違い（黙って無視される）"
     for field in _BOOLEAN_FRONTMATTER_FIELDS:
         if field in frontmatter and not isinstance(frontmatter[field], bool):
-            value = frontmatter[field]
-            errors.append(
-                f"{label} - frontmatter の {field} が真偽値でない（{value!r}）。"
+            yield (
+                f"{label} - frontmatter の {field} が真偽値でない（{frontmatter[field]!r}）。"
                 "引用符なしの true / false で書く（文字列や数値はホストに効かない）"
             )
-    return errors
+
+
+def _validate_skill_dir(directory: Path) -> bool:
+    """1 つのスキルディレクトリの SKILL.md を検証し、誤りがあれば True を返す。"""
+    label = f"{directory.name}/SKILL.md"
+    skill_md = directory / "SKILL.md"
+    if not skill_md.exists():
+        emit_error(f"{directory.name}/ - SKILL.md が見つかりません")
+        return True
+    content = read_or_report(skill_md, label)
+    if content is None:
+        return True
+    if not content.strip():
+        emit_error(f"{label} - ファイルが空です")
+        return True
+    # agents と同じく frontmatter を必須にする。名前と説明が無い
+    # SKILL.md はホストが登録できず、あるいは「いつ呼ぶか」を判断できない。
+    frontmatter = extract_frontmatter(content)
+    if frontmatter is None:
+        emit_error(f"{label} - フロントマターがありません")
+        return True
+    missing = [field for field in _REQUIRED_FRONTMATTER_FIELDS if not frontmatter.get(field)]
+    if missing:
+        emit_error(f"{label} - frontmatter に {' '.join(missing)} がありません")
+        return True
+    return report_errors(_frontmatter_field_errors(label, frontmatter))
 
 
 def validate_skills(skills_dir: str | Path = DEFAULT_SKILLS_DIR, *, optional: bool = False) -> int:
     """スキルディレクトリを検証し、JS バリデータと同じメッセージを表示する。
 
     Args:
-        skills_dir: 処理に渡す skills_dir の値です。
+        skills_dir: 検証するスキルディレクトリ。
         optional: True なら対象パスが存在しない場合に検証をスキップして 0 を返す。
-            既定の False では欠落を失敗として扱う（宣言がまるごと失われた破損を
-            成功と報告しないため）。
 
     Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
+        終了コード（0 = 合格、1 = 不合格）。
     """
     skills_path = Path(skills_dir)
     if not skills_path.exists():
-        if optional:
-            print("skills ディレクトリが見つかりません。--optional 指定のため検証をスキップします")
-            return 0
-        emit_error(f"skills ディレクトリが見つかりません: {skills_path}")
+        return report_missing("skills ディレクトリ", skills_path, optional)
+    dirs = [entry for entry in skills_path.iterdir() if entry.is_dir()]
+    # 全ディレクトリの誤りを出し切るため、短絡させずに検証する。
+    if [directory for directory in dirs if _validate_skill_dir(directory)]:
         return 1
-
-    entries = list(skills_path.iterdir())
-    dirs = [entry for entry in entries if entry.is_dir()]
-    has_errors = False
-    valid_count = 0
-
-    for directory in dirs:
-        skill_md = directory / "SKILL.md"
-        if not skill_md.exists():
-            emit_error(f"{directory.name}/ - SKILL.md が見つかりません")
-            has_errors = True
-            continue
-
-        try:
-            content = skill_md.read_text(encoding="utf-8")
-        except OSError as err:
-            emit_error(f"{directory.name}/SKILL.md - ファイルの読み取りに失敗しました: {err}")
-            has_errors = True
-            continue
-
-        if content.strip() == "":
-            emit_error(f"{directory.name}/SKILL.md - ファイルが空です")
-            has_errors = True
-            continue
-
-        # agents と同じく frontmatter を必須にする。名前と説明が無い
-        # SKILL.md はホストが登録できず、あるいは「いつ呼ぶか」を判断できない。
-        frontmatter = extract_frontmatter(content)
-        if frontmatter is None:
-            emit_error(f"{directory.name}/SKILL.md - フロントマターがありません")
-            has_errors = True
-            continue
-
-        missing = [field for field in _REQUIRED_FRONTMATTER_FIELDS if not frontmatter.get(field)]
-        if missing:
-            emit_error(f"{directory.name}/SKILL.md - frontmatter に {' '.join(missing)} がありません")
-            has_errors = True
-            continue
-
-        field_errors = _frontmatter_field_errors(f"{directory.name}/SKILL.md", frontmatter)
-        if field_errors:
-            for message in field_errors:
-                emit_error(message)
-            has_errors = True
-            continue
-
-        valid_count += 1
-
-    if has_errors:
-        return 1
-
-    print(f"{valid_count} 個のスキルディレクトリを検証しました")
+    print(f"{len(dirs)} 個のスキルディレクトリを検証しました")
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """CLI パーサーを構築する。
-
-    Args:
-        引数はありません。
-
-    Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    parser = argparse.ArgumentParser(description="Validate curated skills")
-    parser.add_argument(
-        "--optional",
-        action="store_true",
-        help="対象パスが存在しない場合に失敗ではなくスキップする",
-    )
-    parser.add_argument("--skills-dir", default=str(DEFAULT_SKILLS_DIR))
-    return parser
-
-
 def main(argv: list[str] | None = None) -> int:
-    """CLI のエントリポイント。
-
-    Args:
-        argv: 処理に渡す argv の値です。
-
-    Returns:
-        処理結果を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    args = build_parser().parse_args(argv)
+    """CLI のエントリポイント。"""
+    args = parse_validator_args("Validate curated skills", argv, skills_dir=DEFAULT_SKILLS_DIR)
     return validate_skills(args.skills_dir, optional=args.optional)
 
 
