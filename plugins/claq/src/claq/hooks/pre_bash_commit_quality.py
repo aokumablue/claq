@@ -13,7 +13,7 @@ commit 検出は `hook_common.tokenize`/`split_segments`（`block_no_verify` と
 結合短形式（例: `-am`）を検出した場合は、未ステージ変更ファイルを
 **作業ツリーから**読んでスキャン対象へ加えます（`git commit -a` は
 作業ツリーの内容をコミットするため、INDEX ではなく作業ツリーを読む
-必要があります）。ステージ済みファイルは従来どおり INDEX
+必要があります）。ステージ済みファイルは INDEX
 （`git show :path`）から読みます。
 
 シークレット検出は nosec・ファイルサイズに関わらず全体を走査します
@@ -104,7 +104,7 @@ _STAGED_FILES_UNAVAILABLE_MESSAGE = (
 
 # `git commit -a` で未ステージ変更を作業ツリーから読む必要があるのに、
 # repo root（`git rev-parse --show-toplevel`）自体が git 失敗・timeout で
-# 解決できなかった場合の deny 理由。get_staged_files() の None（R-01）と
+# 解決できなかった場合の deny 理由。get_staged_files() の None と
 # 対称の fail-closed 扱いにする — 実際にコミットされる未ステージ変更を
 # 一切検査できないまま「問題なし」を返さないため。
 _REPO_ROOT_UNAVAILABLE_MESSAGE = (
@@ -154,7 +154,7 @@ _TOKEN_BUDGET_MESSAGE = (
 
 # stdin が MAX_STDIN_BYTES を超えて切り捨てられた場合の deny 理由。切り捨て後の
 # JSON は不完全になりうる（commit かどうかの判定自体が信用できない）ため、
-# block_no_verify / config_protection と同じく fail-closed にする（A-05 相当対応）。
+# block_no_verify / config_protection と同じく fail-closed にする。
 _TRUNCATED_INPUT_MESSAGE = (
     f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for pre:bash-commit-quality. "
     "Refusing to evaluate a possibly-truncated payload for a git commit quality scan. "
@@ -168,7 +168,7 @@ def _git_name_only(git_args: list[str]) -> list[str] | None:
     「git は成功したがファイル 0 件」（`None` ではなく `[]`）と「git 自体が
     失敗・timeout した」（`None`）を区別する。両者を同じ `[]` に潰すと、
     呼び出し側が「対象ファイルなし」と「検査不能」を見分けられず、後者を
-    無言で見逃す（R-01 残余）。
+    無言で見逃す。
 
     subprocess は `subprocess_utils.run_text` 経由で呼ぶ。`text=True` だけで
     encoding を指定しないと locale 依存のデコードになり、**ステージ済み
@@ -182,19 +182,19 @@ def _git_name_only(git_args: list[str]) -> list[str] | None:
     `"\350\250\255…"` の 8 進エスケープへ潰して出力するため ASCII に収まるが、
     日本語ファイル名を `git status` で読める形にするため `quotePath=false` を
     global 設定に入れる運用は珍しくない。その環境で `LC_ALL=C` だと git が
-    生の UTF-8 バイトを返し、旧実装は `UnicodeDecodeError` を送出していた
-    （実測で再現・修正後の解消を確認済み）。
+    生の UTF-8 バイトを返し、encoding を指定しないデコードは
+    `UnicodeDecodeError` を送出する。
 
     `errors="replace"` はデコード不能なバイトを置換文字へ潰すため、その
     ファイル名は `git show :path` で引けず内容を読めない。それでも例外で
     フック全体を落とすより良い —— 落とせば commit は無検査のまま通る
     （fail-open）のに対し、置換された 1 件はスキャン対象から外れるだけで、
-    残りのステージ済みファイルは従来どおり検査されるため。
+    残りのステージ済みファイルは検査されるため。
 
-    except タプルからは `CalledProcessError` を外す。`check=False` で呼ぶ限り
-    送出されない死んだ分岐だった。代わりに `OSError` を捕まえる —— 従来の
-    `FileNotFoundError` は `OSError` の部分集合に過ぎず、`PermissionError` や
-    実行形式不正（`OSError`）で git を起動できない場合を取りこぼしていた。
+    except タプルに `CalledProcessError` は入れない。`check=False` で呼ぶ限り
+    送出されない。代わりに `OSError` を捕まえる —— `FileNotFoundError` だけ
+    では、`PermissionError` や実行形式不正（`OSError`）で git を起動できない
+    場合を取りこぼす。
     `TimeoutExpired` は `OSError` の部分集合ではないため個別に残す。
 
     Args:
@@ -294,14 +294,14 @@ def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
 
     `git` トークン（`hook_common.is_git_executable_token` で絶対パス・`.exe`・
     大小を正規化して判定。`block_no_verify` と共有する実装で、2 箇所へ別々に
-    実装すると正規化の齟齬が再発するため一元化しています）の後は、既知/未知を
+    実装すると正規化の齟齬が生じるため一元化しています）の後は、既知/未知を
     問わずグローバルオプション・その値トークンを区別せず単純に読み飛ばし、
     `commit` サブコマンドに到達するかを判定します（allowlist に無い
     `--exec-path <path>` / `--super-prefix <path>` 等の値トークンで走査が
     打ち切られ検出漏れになる問題を避けるため、過剰検出側に倒しています）。
     セグメントは呼び出し元（`hook_common.split_segments`）が既に
     `&&`/`;`/`|`/`&`/`(`/`)` で分割済みのため、本関数はセグメント内に区切り
-    トークンが存在しない前提で走査します（A-01 対応: `status;echo` の
+    トークンが存在しない前提で走査します（`status;echo` の
     ようにシェル区切りがトークンに密着した非 commit コマンドを、区切り前に
     セグメントを分けることで取り逃さないようにします）。
 
@@ -328,10 +328,10 @@ def _detect_git_commit(command: str) -> tuple[str, list[str]] | None:
     """2 つのシェル方言の読み方で `git commit` 起動を探す。
 
     `block_no_verify` / `bash_config_protection` と同じ
-    `command_dialect_variants` を使う。POSIX 読みだけを見ていた頃は、
+    `command_dialect_variants` を使う。POSIX 読みだけを見ると、
     Windows の絶対パス起動（``C:\\Git\\bin\\git.exe commit -m x``）が
     `shlex(posix=True)` で ``C:Gitbingit.exe`` に潰れ、commit と認識できず
-    品質ゲートが丸ごと素通りしていた（`block_no_verify` では検出される
+    品質ゲートが丸ごと素通りする（`block_no_verify` では検出される
     のに本フックだけ通る非対称。docs/adr/shell-analysis-boundary.md）。
 
     Args:
@@ -359,18 +359,17 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     分割してから、セグメントごとに `git` → グローバルオプション → `commit` の並びを
     探します。セグメント分割により、``git status;echo commit`` のように区切り文字が
     トークンへ密着した非 commit コマンドを誤って commit と判定しません
-    （`block_no_verify.has_bypass_flag` と同じトークナイザを共有する A-01 対応）。
+    （`block_no_verify.has_bypass_flag` と同じトークナイザを共有する）。
 
     トークン化がクォート不整合（heredoc 等）で空白分割へフォールバックした場合
     **だけ**、`re.search(r"\\bgit\\s+commit\\b", command)` で最終判定します。
     解析できなかった入力に対して過剰検出側へ倒すフェイルセーフです。
 
     `shlex` が最後まで解析できた場合は、その結果を信頼して生文字列の正規表現を
-    当てません（F-08）。当てていた頃は `copilot -p 'Explain why a git commit
+    当てません。当てると `copilot -p 'Explain why a git commit
     command may fail'` のような引用文まで commit と判定し、無関係な Bash 呼び出しが
-    index の状態次第でブロックされた。同じ入力を `block_no_verify` は無視して
-    おり、2 つのフックが「commit とは何か」で食い違っていた。この非対称を
-    どの ADR も正当化していない。docs/adr/shell-analysis-boundary.md の「誤検出 > 誤通過」は解析できない
+    index の状態次第でブロックされる。同じ入力を `block_no_verify` は無視する
+    ので、2 つのフックが「commit とは何か」で食い違うことにもなる。docs/adr/shell-analysis-boundary.md の「誤検出 > 誤通過」は解析できない
     構文についての規定であり、解析できた構文にまで適用する根拠にはならない。
 
     非目標: シェル展開・変数分割経由（`git $(echo commit)` / `git${IFS}commit`
@@ -443,9 +442,9 @@ _WORKTREE_MUTATING_EXECUTABLES = frozenset(
     }
 )
 # `-i` を伴うときだけ書き込みになるコマンド。`-i` 無しは標準出力へ流すだけ。
-# **フラグ無しでも書き込むコマンドはここへ置かない** — `ed` を置いていた頃は
-# ``ed app.py && git commit -am x`` がフラグ判定に落ちて allow になっていた
-# （M-8。実測 exit 0）。その分類は `hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES`。
+# **フラグ無しでも書き込むコマンドはここへ置かない** — `ed` を置くと
+# ``ed app.py && git commit -am x`` がフラグ判定に落ちて allow になる。
+# その分類は `hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES`。
 _INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl"})
 _MUTATING_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>", ">&"})
 
@@ -474,20 +473,19 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
             # 「最初の非 `-` トークン」で決めると、値を別トークンに取る
             # グローバルオプション（`-C .` / `-c a=b` / `--git-dir .git` /
             # `--work-tree .`）1 個でその**値**がサブコマンドと読まれ、
-            # ガードが不発になる（実測 2026-09-07: `git -C . add x && git commit`
-            # が exit 0 で通った）。兄弟の `_find_git_commit_args_in_segment` は
-            # 同じ状況を全トークン走査で解いており、非対称を正当化する ADR は無い。
-            # 早期 return も外す — git トークンで打ち切ると、同一セグメント内の
-            # 後続の書込み実行ファイルまで見ずに False を返していた。
+            # ガードが不発になる（`git -C . add x && git commit` が通る）。兄弟の
+            # `_find_git_commit_args_in_segment` と同じく全トークン走査で解く。
+            # 早期 return もしない — git トークンで打ち切ると、同一セグメント内の
+            # 後続の書込み実行ファイルまで見ずに False を返す。
             if any(sub in _INDEX_MUTATING_GIT_SUBCOMMANDS for sub in segment[i + 1 :]):
                 return True
             continue
 
         # 実行名の正規化は `is_git_executable_token` と同じ共有 helper へ通す。
-        # ここだけ素の basename（大小区別・`.exe` 残し）で照合していたため、
+        # 素の basename（大小区別・`.exe` 残し）で照合すると、
         # APFS で実 `cp` を起動する ``CP evil.py app.py && git commit`` や
         # Windows の ``cp.exe`` / ``TEE`` が語彙から外れ、mutation ガードが
-        # 不発になっていた（H-6）。scan は変更前の作業ツリーを読むので、
+        # 不発になる。scan は変更前の作業ツリーを読むので、
         # 取りこぼしはそのまま「未検査の内容が commit される」ことを意味する。
         name = normalize_executable_name(token)
         if name in _WORKTREE_MUTATING_EXECUTABLES or name in ALWAYS_MUTATING_EDIT_EXECUTABLES:
@@ -850,7 +848,7 @@ def _collect_worktree_issues(
     ます。`-a`/`--all` で実際にコミットされる未ステージ変更ファイルの
     内容を一切検査できないまま「問題なし」を返すのは、`get_staged_files`
     が git 失敗時に None を返すのと同じ理由で非ブロッキングにできません
-    （R-01 で修正した staged 側の fail-open と対称にするため）。
+    （staged 側を fail-closed にしているのと対称にするため）。
 
     Args:
         worktree_targets: 作業ツリーから読むチェック対象ファイルパスです。
@@ -1070,14 +1068,13 @@ def main() -> int:
     ブロック時（exitCode == 2）は emit_block_output で host 非依存の合併出力
     （stderr の理由 + stdout の permissionDecision: deny JSON、exit 2）に変換する。
 
-    fail-open/fail-closed の境界は「commit と確定したか」で分けます
-    （A-05 相当対応）:
+    fail-open/fail-closed の境界は「commit と確定したか」で分けます:
 
     - `read_raw_stdin_with_truncation` が `StdinUnavailableError` を送出した
       場合（payload はあるはずなのに読めなかった）は fail-closed。commit か
       どうかを判定する材料そのものが得られていないため、他の 3 保護 hook と
       同じ deny に倒す（docs/adr/hook-failure-direction.md）。読む対象が無い場合（tty 起動・stdin 未
-      接続・即 EOF）は例外にならず空文字列として届き、従来どおり素通りする。
+      接続・即 EOF）は例外にならず空文字列として届き、素通りする。
       1 MiB 超の truncation は commit かどうか判定不能なため fail-closed
       （block_no_verify / config_protection と同じ 4 段構成に揃える）。
     - `evaluate()` 自体は例外を投げない契約だが、防御的に例外時は

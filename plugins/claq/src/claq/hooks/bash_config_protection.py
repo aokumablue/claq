@@ -1,4 +1,4 @@
-"""Bash 経由の重要な設定ファイル直接書き換えを保護します（A-06 対応）。
+"""Bash 経由の重要な設定ファイル直接書き換えを保護します。
 
 トリガー: pre:bash
 入力: bashコマンドを含むJSON
@@ -6,14 +6,14 @@
 終了: 0 (許可) または 2 (ブロック)
 
 `config_protection` は Edit/Write/MultiEdit 系 matcher にしか登録されておらず、
-`printf x > pyproject.toml` のような Bash 経由の直接書き換えを検査しない
-（監査 A-06）。本モジュールは同じ保護対象定義（大小無視で畳んだ basename 集合の
+`printf x > pyproject.toml` のような Bash 経由の直接書き換えを検査しない。
+本モジュールは同じ保護対象定義（大小無視で畳んだ basename 集合の
 `PROTECTED_FILES_FOLDED` / `CONDITIONALLY_PROTECTED_FILES_FOLDED` と、ディレクトリ
 単位の `protected_path_segment`。いずれも `config_protection` から import して共有）を
 Bash コマンド文字列に対して適用する。保護対象の定義は `config_protection` を
 単一情報源とし、本モジュール側で再定義しない。畳んだ側を import するのは、
 `config_protection` が Write を deny する綴り（``Ruff.toml``）と本モジュールが
-Bash を deny する綴りを必ず一致させるため（C-2: 片側だけ大小無視にすると、
+Bash を deny する綴りを必ず一致させるため（片側だけ大小無視にすると、
 Write は塞がるのに ``rm Ruff.toml`` は通る非対称が生まれる）。
 
 `config_protection` を Bash matcher に相乗りさせない理由:
@@ -46,10 +46,9 @@ Write は塞がるのに ``rm Ruff.toml`` は通る非対称が生まれる）�
     さらに、書き込み先ヒットがあった場合のみ `hook_common.resolve_repo_root`
     （`git rev-parse --show-toplevel`、プロセス内 1 回キャッシュ）でリポジトリ
     ルートを解決し、書き込み先を cwd 基準で解決したうえで**そのルート配下に
-    ある場合のみ** deny する（A-06: basename だけの判定は別リポジトリ・別
-    ディレクトリの同名ファイルを誤検出していた）。**リポジトリルートが決定
-    できない場合は allow**（決定不能を deny に倒すと A-06 の false positive が
-    残るため）。
+    ある場合のみ** deny する（basename だけで判定すると別リポジトリ・別
+    ディレクトリの同名ファイルを誤検出する）。**リポジトリルートが決定
+    できない場合は allow**（決定不能を deny に倒すとその誤検出が残るため）。
 
     repo スコープ判定の適用範囲:
         この判定はシェル展開を経ていない生トークンに対して行うため、
@@ -123,11 +122,10 @@ _BASH_TOOL_NAMES = frozenset({"bash"})
 # （数字プレフィックス自体を明示しているのは意図の記録目的）。
 _REDIRECT_OPERATORS = frozenset({">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>"})
 
-# 最終引数が書き込み先になるコマンド群（A-02）。
 # 末尾引数が書き込み先になるコマンド。PowerShell の長形式 cmdlet を併記するのは、
 # Windows のシェルツールが PowerShell だからである（`cp`/`mv`/`rm` は
-# PowerShell の別名として同じ cmdlet に解決されるので既に効くが、長形式で
-# 書かれると語彙から外れていた。release-verify 2026-09-03 の再レビュー）。
+# PowerShell の別名として同じ cmdlet に解決されるが、長形式で書かれると
+# 別名の語彙だけでは拾えない）。
 _LAST_ARG_WRITE_COMMANDS = frozenset(
     {"cp", "mv", "install", "copy-item", "move-item", "copy", "move", "cpi", "mi"}
 )
@@ -174,23 +172,21 @@ _TEE_COMMANDS = frozenset(
     {"tee", "set-content", "add-content", "out-file", "new-item", "sc", "ac", "ni"}
 )
 # in-place 編集で**フラグを伴うときだけ**書き込みになるコマンド。フラグ判定は
-# `is_inplace_edit_flag`（`hook_common`）が単一情報源で、`sed` と `perl` を別関数に
-# 分けていた頃の「sed は `-i` 前方一致 / perl は `i` の包含」という食い違いは
-# ここで消える。フラグ無しでも書き込むエディタは
-# `ALWAYS_MUTATING_EDIT_EXECUTABLES` の側（M-8）。
+# `is_inplace_edit_flag`（`hook_common`）が単一情報源で、コマンドごとにフラグの
+# 解釈が食い違わないようにしている。フラグ無しでも書き込むエディタは
+# `ALWAYS_MUTATING_EDIT_EXECUTABLES` の側。
 # `ruby -pi -e ""` は `perl -pi` と同一セマンティクスの in-place 編集で、
-# `-pi` を持つ以上 perl と同じ分類に属する（実測で素通りしていた）。
+# `-pi` を持つ以上 perl と同じ分類に属する。
 # `python3 -c` のような任意インタプリタは非目標宣言済みで、ここには入れない。
 _INPLACE_EDIT_COMMANDS = frozenset({"sed", "perl", "ruby"})
 _LN_COMMANDS = frozenset({"ln"})
 _DD_COMMANDS = frozenset({"dd"})
 
-# 存在しないファイルを空で新規作成するコマンド（M-9）。内容を書き換えられなくても、
+# 存在しないファイルを空で新規作成するコマンド。内容を書き換えられなくても、
 # **保護対象の名前を空で置くだけで検査を無効化できる**: 多くの linter は設定ファイルを
 # 見つけた時点で上位ディレクトリの探索を打ち切るため（ESLint の cascade、
 # ``.eslintrc`` が典型）、空の設定を置くことは「上位のルール一式を無効化する」ことに
-# 等しい。`touch` はどの語彙集合にも入っておらず、保護対象 36 ファイル全てで
-# allow だった（実測 exit 0）。
+# 等しい。
 #
 # PowerShell の ``New-Item`` は同じ効果を持つが、既に `_TEE_COMMANDS`
 # （非オプション引数がすべて書き込み先）に載っているのでここへは重複させない。
@@ -203,15 +199,15 @@ _DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILES_FOLDED
 
 # ~/.claq/logs/ 配下（bg 失敗ログ）をディレクトリ構造で保護する
-# （2026-09-12 リポジトリレビュー HIGH-1: `recent_bg_failure_notice` が当日・
+# （`recent_bg_failure_notice` が当日・
 # 前日のログ末尾行を無条件で次回 SessionStart の <claq-memory> へ注入するため、
 # このディレクトリへの自由な追記はプロンプト注入の永続化経路になる）。
 #
 # `config_protection._PROTECTED_PATH_SEGMENTS`（``.git/hooks`` 等）とは
-# あえて別枠にし、アルゴリズムだけ同じ構造的一致にする。今回の修正は
-# 「Bash からの直接追記の拒否」だけを範囲とすると明示されており、共有
-# `_PROTECTED_PATH_SEGMENTS` へ足すと `config_protection`（Edit/Write）の
-# 挙動まで変わって宣言された範囲を超えるため、本モジュール内に閉じる。
+# あえて別枠にし、アルゴリズムだけ同じ構造的一致にする。この保護の範囲は
+# 「Bash からの直接追記の拒否」に限る。共有 `_PROTECTED_PATH_SEGMENTS` へ
+# 足すと `config_protection`（Edit/Write）の挙動まで変わってその範囲を
+# 超えるため、本モジュール内に閉じる。
 _HOME_LOG_PATH_SEGMENTS = ((".claq", "logs"),)
 
 
@@ -219,16 +215,16 @@ def _find_home_log_directory_match(token: str) -> str | None:
     """トークンが ``~/.claq/logs/`` のディレクトリ構造に一致するか、その
     ディレクトリ自身を指すかを判定する。
 
-    symlink は `resolve_effective_target` で解決してから判定する（H-02 と
-    同じ理由）。比較は畳んだ側（`normalize_protected_name`）で行う（C-2 と
-    同じ理由: ``Path.resolve()`` は APFS / NTFS で綴りを実体の大小へ正規化
+    symlink は `resolve_effective_target` で解決してから判定する（`_protected_target`
+    と同じ理由）。比較は畳んだ側（`normalize_protected_name`）で行う
+    （``Path.resolve()`` は APFS / NTFS で綴りを実体の大小へ正規化
     しないため）。`config_protection.protected_path_segment` と同じ構造的
     一致アルゴリズムだが、対象集合が本モジュール固有（`_HOME_LOG_PATH_SEGMENTS`）
     なので独立して持つ（理由は `_HOME_LOG_PATH_SEGMENTS` のコメント参照）。
 
     呼び出し側（`_find_protected_write_in_dialect`）はこの一致を、
-    `bash_config_protection` のリポジトリスコープ判定（A-06、
-    `resolve_repo_root` / `_within_repo_root`）を適用せず即座に deny する
+    `bash_config_protection` のリポジトリスコープ判定
+    （`resolve_repo_root` / `_within_repo_root`）を適用せず即座に deny する
     印として使うこと。``~/.claq/logs/`` はどのリポジトリで作業していても
     同一の固定位置を指すため、「別リポジトリの同名ファイルを誤検出しない
     ための」repo スコープ判定の前提がそもそも成立しない。
@@ -239,7 +235,7 @@ def _find_home_log_directory_match(token: str) -> str | None:
     （`test_relative_after_cd_is_blocked`）ではプロセス cwd 基準の解決結果
     に対する構造一致でしか判定できない。したがって理論上はリポジトリ内に
     偶然 ``.claq/logs`` という並びのディレクトリがあると誤って deny しうる
-    （false positive）が、A-06 と同じ「決定不能なら安全側」の方針であり、
+    （false positive）が、リポジトリスコープ判定と同じ「決定不能なら安全側」の方針であり、
     悪用経路にはならない誤検出側の広さなので許容する。
 
     Args:
@@ -264,7 +260,6 @@ def _find_home_log_directory_match(token: str) -> str | None:
     return None
 
 
-# `NAME=value` 形式の literal 環境変数代入（M-01: 実行 executable 位置の特定に使う）。
 # malformed JSON fallback で「破壊的操作の指示」とみなす部分文字列。書き込み系
 # （`>`/`tee`/`-i`）に加えて、トークン化経路が既に見ている削除・リンク系の verb を
 # 含める。部分一致なので過剰検出側に倒れるが、malformed 入力に対しては
@@ -283,13 +278,14 @@ _RAW_TEXT_RISK_INDICATORS = (
     + ("ln",)
 )
 
+# `NAME=value` 形式の literal 環境変数代入（`_command_index` が実行 executable の位置を特定するのに使う）。
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 # `_command_index` が読み飛ばす実行 wrapper（`normalize_executable_name` で判定）。
 #
 # ホワイトリストである理由と、`block_no_verify` が全トークン走査を採る理由の非対称は
 # **意図的な設計判断**であり `docs/adr/shell-analysis-boundary.md`
-# に記録した。要旨だけ再掲すると: 本モジュールは M-01 のため
+# に記録している。要旨: 本モジュールは
 # **実行位置の特定**が必要で、``tee pyproject.toml``（deny）と
 # ``echo tee pyproject.toml``（allow）は構文上同じ「語 → 語 → パス」なので何らかの
 # 名前集合が原理的に不可避になる。`block_no_verify` は実行位置を必要としないため
@@ -332,7 +328,7 @@ _WRAPPER_POSITIONAL_VALUE_RE = re.compile(r"^[0-9]")
 
 
 def _command_index(segment: list[str]) -> int | None:
-    """セグメント内で実際に実行される executable トークンの index を返す（M-01）。
+    """セグメント内で実際に実行される executable トークンの index を返す。
 
     `tee pyproject.toml` の実行位置と `echo tee pyproject.toml` の
     非実行位置を区別するために使う。先頭から連続する literal 環境変数代入
@@ -389,16 +385,16 @@ def _protected_target(token: str) -> str | None:
 
     `config_protection` は basename 集合（`PROTECTED_FILES` /
     `CONDITIONALLY_PROTECTED_FILES`）と path 集合（`protected_path_segment`）の
-    2 系統で保護しているが、本モジュールは前者しか見ておらず、
-    ``.git/hooks/`` 配下への Bash 経由の書込み・削除が素通りしていた。Write/Edit
-    なら deny される同じ書込みが Bash なら通るという非対称は、A-06 で本モジュール
-    を作った理由（`config_protection` の Edit/Write 限定を Bash 側で補完する）
-    そのものに反するため、両系統をここで一本化する。判定の定義は
+    2 系統で保護している。前者だけを見ると ``.git/hooks/`` 配下への Bash 経由の
+    書込み・削除が素通りし、Write/Edit なら deny される同じ書込みが Bash なら
+    通るという非対称になる。これは本モジュールの目的（`config_protection` の
+    Edit/Write 限定を Bash 側で補完する）そのものに反するため、両系統をここで
+    一本化する。判定の定義は
     `config_protection` を単一情報源とし、本モジュールでは再定義しない。
 
-    basename 判定は symlink を解決してから行う（H-02 対応）。
+    basename 判定は symlink を解決してから行う。
     ``alias -> pyproject.toml`` のような symlink 経由の書込みは、raw token の
-    basename（``alias``）だけを見ると保護対象と判定できずすり抜けていた。
+    basename（``alias``）だけを見ると保護対象と判定できずすり抜ける。
     `resolve_effective_target` で実体 path を解決してから basename を取る。
     解決不能（壊れた・循環した symlink 等）な場合は raw token の basename に
     フォールバックする（`config_protection._effective_basename` と同じ理由）。
@@ -417,9 +413,9 @@ def _protected_target(token: str) -> str | None:
     """
     resolved = resolve_effective_target(token)
     name = resolved.name if resolved is not None else basename(token)
-    # 判定は畳んだ名前で行い、返す表示名は観測した綴りのままにする（C-2）。
+    # 判定は畳んだ名前で行い、返す表示名は観測した綴りのままにする。
     # `Path.resolve()` は APFS / NTFS で綴りを実体の大小へ直さないため、素の
-    # 比較では ``rm Ruff.toml`` が実体 ``ruff.toml`` を消すのに素通りしていた。
+    # 比較では ``rm Ruff.toml`` が実体 ``ruff.toml`` を消すのに素通りする。
     if normalize_protected_name(name) in _ALL_PROTECTED_BASENAMES:
         return name
     segment = protected_path_segment(token)
@@ -431,7 +427,7 @@ def _executed_command_args(segment: list[str], names: frozenset[str]) -> list[st
 
     `tee pyproject.toml` の実行位置と `echo tee pyproject.toml` の非実行位置を
     区別する `_command_index` の判定を、コマンド別の抽出関数が写経せずに共有する
-    ための helper（M-01 の判定軸を 1 か所に保つ）。
+    ための helper（実行位置の判定軸を 1 か所に保つ）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
@@ -487,7 +483,7 @@ def _redirect_targets(segment: list[str]) -> list[str]:
 def _tee_targets(segment: list[str]) -> list[str]:
     """`tee` の出力先引数をすべて返す。
 
-    `tee` が実際に実行される位置にある場合のみ判定する（M-01）。`-a`（追記）等の
+    `tee` が実際に実行される位置にある場合のみ判定する。`-a`（追記）等の
     オプショントークンは出力先ではないので除く。
 
     Args:
@@ -506,13 +502,13 @@ def _tee_targets(segment: list[str]) -> list[str]:
 def _inplace_edit_targets(segment: list[str]) -> list[str]:
     """`sed` / `perl` の in-place 編集の対象になりうる引数をすべて返す。
 
-    対象コマンドが実際に実行される位置にある場合のみ判定する（M-01）。
+    対象コマンドが実際に実行される位置にある場合のみ判定する。
     スクリプト引数（``s/a/b/``）も含めて返すが、保護対象かどうかの判定は
     呼び出し側が `_protected_target` で行うため誤検出にはならない。
 
-    フラグ判定は `hook_common.is_inplace_edit_flag` に委ねる。sed 用と perl 用を
-    別関数に分けていた頃は sed 側だけが GNU 長形式を知らず、
-    ``sed --in-place s/x/y/ ruff.toml`` が素通りしていた（H-5。実測で exit 0）。
+    フラグ判定は `hook_common.is_inplace_edit_flag` に委ねる（コマンドごとに
+    判定を持つと、片側だけが GNU 長形式を知らず ``sed --in-place s/x/y/ ruff.toml``
+    のような形が素通りする）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
@@ -534,8 +530,8 @@ def _always_mutating_edit_targets(segment: list[str]) -> list[str]:
     """`ed`/`red`/`ex`/`sponge` の編集対象になりうる引数をすべて返す。
 
     これらはフラグを 1 つも伴わずに引数のファイルを書き換えるため、
-    `_inplace_edit_targets` のフラグ判定に掛けると常に空になる。実測では
-    ``ed ruff.toml`` が exit 0 で素通りしていた（M-8）。語彙の根拠は
+    `_inplace_edit_targets` のフラグ判定に掛けると常に空になり、
+    ``ed ruff.toml`` が素通りする。語彙の根拠は
     `hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES` を単一情報源とする。
 
     Args:
@@ -556,7 +552,7 @@ def _touch_targets(segment: list[str]) -> list[str]:
 
     内容は書き換えられないが、保護対象の名前を**空で新規作成**できる。空の
     ``.eslintrc`` は ESLint の上位カスケード探索をそこで打ち切らせるため、実質的な
-    lint 設定の無効化になる（M-9）。
+    lint 設定の無効化になる。
 
     値を取るオプション（``-t <stamp>`` / ``-d <date>`` / ``-r <ref>``）の値は
     `_non_option_args` を素通りして候補に混じる。``touch -r ruff.toml app.py`` は
@@ -645,7 +641,6 @@ def _ln_targets(segment: list[str]) -> list[str]:
     `-f` の有無で区別しない。既存ファイルを置き換える `ln -f` だけでなく、
     保護対象がまだ存在しない状態での `ln -s weak.toml ruff.toml` も、以後
     その名前を読む処理をリンク先の内容へ差し替えるため実質的な書き込みである。
-    `-f` 付きだけを見ていた頃は、後者が素通りしていた（F-07）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
@@ -664,7 +659,7 @@ def _dd_of_targets(segment: list[str]) -> list[str]:
     """`dd of=<path>` の書き込み先をすべて返す。
 
     `of=` トークンだけでは write command とみなさず、`dd` が実際に実行される
-    位置にある場合のみ判定する（M-01: ``echo of=pyproject.toml`` のような
+    位置にある場合のみ判定する（``echo of=pyproject.toml`` のような
     非実行位置での誤検出を避ける）。
 
     Args:
@@ -685,9 +680,8 @@ def _dd_of_targets(segment: list[str]) -> list[str]:
 def _write_target_tokens_in_segment(segment: list[str]) -> list[str]:
     """セグメント内の書き込み先候補トークンを**すべて**返す。
 
-    先勝ちで 1 件だけ返していた頃は、repo 外の囮を先頭に置くだけで後続の
-    保護対象書き込みが検査から外れた（実測: ``rm -f /tmp/ruff.toml ruff.toml``
-    が exit 0。囮なしの ``rm -f ruff.toml`` は exit 2）。保護対象かどうかと
+    先勝ちで 1 件だけ返すと、repo 外の囮を先頭に置くだけで後続の保護対象
+    書き込みが検査から外れる（``rm -f /tmp/ruff.toml ruff.toml``）。保護対象かどうかと
     repo スコープ内かどうかの判定は呼び出し側が候補ごとに行う。
 
     Args:
@@ -738,7 +732,7 @@ def _within_repo_root(token: str, repo_root: Path) -> bool:
 
     `token` が絶対パスなら cwd は無視される（pathlib の `/` 演算子の挙動）。
     symlink 解決は `_protected_target` と同じ `resolve_effective_target` を
-    共有し、判定基準を一本化する（H-02）。
+    共有し、判定基準を一本化する。
 
     Args:
         token: 書き込み先の生トークン（パス文字列）。
@@ -768,20 +762,20 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
     """コマンド文字列内に保護対象への書き込みがあればその表示名を返す。
 
     保護対象ヒットがあった場合のみ `resolve_repo_root` を呼び、書き込み先が
-    現在のリポジトリルート配下にある場合のみ deny する（A-06）。リポジトリ
+    現在のリポジトリルート配下にある場合のみ deny する。リポジトリ
     ルートが決定できない場合は allow（決定不能を deny に倒すと false
     positive が残るため）。
 
     ただしコマンドが `cd` 等でカレントディレクトリを移動する場合、cwd 基準の
     相対パス解決は実行時の位置とずれるため repo スコープ判定を信用できない。
     その場合は保護対象 basename のヒットをそのまま deny する（docs/adr/shell-analysis-boundary.md。
-    実測: ``cd plugins && printf x > ../ruff.toml`` が exit 0 だった）。
+    ``cd plugins && printf x > ../ruff.toml`` のような形を通さないため）。
     `cd` を跨いだ symlink 解決のずれは同じ理由で非目標。
 
     既知シェルの ``-c`` へ渡された文字列コマンドへは 1 段だけ再帰する
-    （実測: ``bash -c 'printf x > ruff.toml'`` が exit 0 だった。`block_no_verify`
-    は同じ再帰を持っており、片方だけ持たない非対称は A-06 で本モジュールを
-    足した理由そのものに反する）。2 段以上のネストは docs/adr/shell-analysis-boundary.md の非目標。
+    （``bash -c 'printf x > ruff.toml'`` を通さないため。`block_no_verify`
+    は同じ再帰を持っており、片方だけ持たない非対称は本モジュールの目的
+    そのものに反する）。2 段以上のネストは docs/adr/shell-analysis-boundary.md の非目標。
 
     Args:
         command: 検査対象のシェルコマンド文字列。
@@ -837,7 +831,7 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
                 return found
             repo_root = resolve_repo_root()
             if repo_root is None:
-                # 「決定不能なら allow」は意図された fail-open（A-06）だが、
+                # 「決定不能なら allow」は意図された fail-open だが、
                 # それはこの書込み先 1 つについての判断である。`return` にすると
                 # 同一コマンドの残りの書込み先候補と `sh -c` 再帰まで捨てて
                 # しまい、文書化されていない範囲まで allow が広がる。
@@ -860,9 +854,9 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
 
     破壊的操作には削除・リンク系（`rm`/`unlink`/`shred`/`truncate`/`mv`/`ln`）も
     含める。トークン化できる経路では `_remove_target` / `_ln_target` が既に
-    これらを見ているのに、malformed fallback だけが書き込み指示（`>`/`tee`/`-i`）
-    しか見ていなかった（F-07）。同じ入力が JSON の壊れ方だけで通ったり通らなく
-    なったりするのは、境界としては説明できない。
+    これらを見ている。malformed fallback だけが書き込み指示（`>`/`tee`/`-i`）
+    しか見ないと、同じ入力が JSON の壊れ方だけで通ったり通らなくなったりし、
+    境界として説明できない。
 
     ディレクトリ単位の保護 path（`protected_path_segment`）はここでは見ない。
     理由は特異度ではなく露出の小ささである（``.git/hooks/`` は本関数が既に
@@ -915,7 +909,7 @@ def _blocked_home_log_message(display_name: str) -> str:
 
     `blocked_message_for_file` はリンタ設定向けの文言で、ログディレクトリの
     保護理由（プロンプト注入の永続化経路を塞ぐこと）には適合しないため、
-    専用の文言を持つ（2026-09-12 リポジトリレビュー HIGH-1）。
+    専用の文言を持つ。
 
     Args:
         display_name: ブロックされたパスの表示名。
@@ -970,7 +964,7 @@ def main() -> int:
 
     tool_name = extract_raw_tool_name(data)
     # 既知の「シェルではないツール」だけを skip する。ツール名を特定
-    # できない payload を対象外へ倒すと保護が丸ごと無効になる（S-8）。
+    # できない payload を対象外へ倒すと保護が丸ごと無効になる。
     if normalize_tool_name(tool_name).lower() not in _BASH_TOOL_NAMES and not is_unidentifiable_tool(
         tool_name
     ):

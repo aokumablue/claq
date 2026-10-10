@@ -50,7 +50,7 @@ heredoc 本文:
     ``cat > note.md <<'EOF'`` のようにデータとして書かれた heredoc 本文は、
     トークン化の前に ``hook_common.strip_data_heredoc_bodies`` で落とします
     （docs/adr/shell-analysis-boundary.md）。本文が実行されうる形（演算子行のシェル起動・継続演算子・
-    未終端）は落とさず、従来どおり検出対象のまま残します。非シェルインタプリタ
+    未終端）は落とさず、検出対象に残します。非シェルインタプリタ
     （``python3 - <<EOF``）の本文からの間接実行は非目標です。
 
 クォート内の誤検知:
@@ -67,7 +67,7 @@ long オプションの短縮形:
 
 config 経由のフック無効化:
     ``--no-verify`` を使わずに git 自身のフック（`.git/hooks/pre-commit` 等）を
-    無効化する経路をまとめてブロックします（A-07 / H-05 / H-06 とその拡張）。
+    無効化する経路をまとめてブロックします。
     config key の大小文字は区別せず判定します（git の config key 名は大小文字を
     区別しないため）。
 
@@ -87,7 +87,7 @@ config 経由のフック無効化:
     同じ判定へ通します。``-c`` は結合短フラグ（``bash -lc 'git commit -n'``）
     でも成立するため、``c`` を含む短フラグクラスタを同じ扱いにします。
     2 段以上のネスト（``sh -c "sh -c 'git commit -n'"``）
-    や ``eval``・任意ラッパースクリプトへは再帰しません（A-07 対応。深い
+    や ``eval``・任意ラッパースクリプトへは再帰しません（深い
     再帰はコンテキスト消費と誤検知リスクの両方が増えるため、1 段に限定する
     設計判断です）。
 
@@ -210,7 +210,7 @@ _MIN_ABBREVIATED_LONG_OPTION_LENGTH = 3
 _BYPASS_SHORT_FLAG = "-n"
 
 # ``-c`` / ``--config-env`` の値が指す config key。git の config key 名は
-# 大小文字を区別しないため、比較は小文字化した上で行います（A-07 対応）。
+# 大小文字を区別しないため、比較は小文字化した上で行います。
 _HOOKS_PATH_CONFIG_KEY = "core.hookspath"
 
 # フック実行を左右しうる config key の前置。いずれも小文字で比較します。
@@ -247,7 +247,7 @@ class GitInvocation(NamedTuple):
             検出に使います。
         subcommand_args: サブコマンド確定後に現れた非オプショントークン
             （値トークンとして消費されたものは含まない）。``git config
-            core.hooksPath <path>`` のような位置引数形式の検出（H-06）に使う。
+            core.hooksPath <path>`` のような位置引数形式の検出に使う。
     """
 
     subcommand: str | None
@@ -262,8 +262,7 @@ def is_git_invocation(token: str) -> bool:
 
     ``git`` そのものに加え ``/usr/bin/git`` のようなパス付き起動、
     ``git.exe``（Windows）、``GIT``（大文字。macOS 既定の APFS は大小文字を
-    区別しないため ``GIT commit --no-verify`` は実 git を起動する。H-04
-    対応）を拾う。``gitk`` / ``GIT_DIR=.git`` / ``git/``（ディレクトリ）は
+    区別しないため ``GIT commit --no-verify`` は実 git を起動する）を拾う。``gitk`` / ``GIT_DIR=.git`` / ``git/``（ディレクトリ）は
     一致しない。判定は ``pre_bash_commit_quality`` と共有する
     ``hook_common.is_git_executable_token`` に委譲し、2 箇所で正規化が
     分岐する事態を防ぐ。
@@ -332,10 +331,9 @@ def parse_git_segment(segment: list[str]) -> GitInvocation:
     値を取るかどうかを判定できずサブコマンド位置がずれるため
     ``subcommand_certain=False`` を返します。``-c`` / ``--config-env`` に
     渡された値は `GitInvocation.config_values` に集約します
-    （``core.hooksPath`` オーバーライド検出用、A-07 対応）。サブコマンド
+    （``core.hooksPath`` オーバーライド検出用）。サブコマンド
     確定後に現れた非オプショントークンは `GitInvocation.subcommand_args`
-    に集約します（``git config core.hooksPath <path>`` の位置引数形式検出用、
-    H-06 対応）。
+    に集約します（``git config core.hooksPath <path>`` の位置引数形式検出用）。
 
     Args:
         segment: 先頭要素が ``git`` 起動トークンであるトークンリスト。
@@ -446,12 +444,12 @@ def _is_sensitive_config_override(config_values: list[str]) -> bool:
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
 
-# GIT_CONFIG_KEY_<n> の index 部分を取り出す正規表現（H-05）。
+# GIT_CONFIG_KEY_<n> の index 部分を取り出す正規表現。
 _GIT_CONFIG_KEY_INDEX_RE = re.compile(r"^GIT_CONFIG_KEY_\d+$")
 
 # git 自身が config を注入・差し替えるために読む literal 環境変数名。値を
 # shell-eval せず、出現した時点で deny する（中身を解釈しても安全側の判定を
-# 追加できないため）。``GIT_CONFIG_PARAMETERS`` は H-05 で追加。
+# 追加できないため）。
 # ``GIT_CONFIG_GLOBAL`` / ``GIT_CONFIG_SYSTEM`` は config ファイルそのものを
 # 差し替えられ、差し替え先で ``core.hooksPath`` を書けるため同じ経路。
 # ``GIT_CONFIG_NOSYSTEM`` は system config を無効化するので、system 側に
@@ -466,18 +464,18 @@ _GIT_CONFIG_INJECTION_ENV_NAMES = frozenset(
 )
 
 def _collect_literal_env_assignments(prefix_tokens: list[str]) -> dict[str, str]:
-    """git 起動トークンより前にある literal 環境変数代入を集める（H-05）。
+    """git 起動トークンより前にある literal 環境変数代入を集める。
 
-    **前置トークンを全部走査する。** 以前は「先頭から連続する代入」＋「既知の
-    ラッパ 2 個（`sudo` / `command`）」＋「`env` の既知オプション 3 個」だけを
-    読み飛ばす形だったため、知らないラッパやオプションに当たった時点で走査が
-    終わり、その先の代入が検査対象から外れていた。実測で素通りした形:
+    **前置トークンを全部走査する。** 「先頭から連続する代入」や既知のラッパ
+    （`sudo` / `command`）・`env` の既知オプションだけを読み飛ばす形にすると、
+    知らないラッパやオプションに当たった時点で走査が終わり、その先の代入が
+    検査対象から外れる。たとえば次の形がそうなる:
 
-        env -v GIT_CONFIG_GLOBAL=/tmp/e git commit -m x       # exit 0 だった
-        env -C /tmp GIT_CONFIG_GLOBAL=/tmp/e git commit -m x  # exit 0 だった
-        command -p env GIT_CONFIG_GLOBAL=/tmp/e git commit    # exit 0 だった
-        sudo -E GIT_CONFIG_GLOBAL=/tmp/e git commit -m x      # exit 0 だった
-        nohup env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x    # exit 0 だった
+        env -v GIT_CONFIG_GLOBAL=/tmp/e git commit -m x
+        env -C /tmp GIT_CONFIG_GLOBAL=/tmp/e git commit -m x
+        command -p env GIT_CONFIG_GLOBAL=/tmp/e git commit
+        sudo -E GIT_CONFIG_GLOBAL=/tmp/e git commit -m x
+        nohup env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x
 
     ラッパ名とそのオプションを列挙して追随する設計は、列挙が漏れた瞬間に
     **素通り側へ倒れる**。前置は定義上 git 起動より前なので、そこに現れる
@@ -510,7 +508,7 @@ def _collect_literal_env_assignments(prefix_tokens: list[str]) -> dict[str, str]
 
 
 def _is_literal_env_hooks_path_override(prefix_tokens: list[str]) -> bool:
-    """git 起動前の literal 環境変数代入に ``core.hooksPath`` オーバーライドがあるか判定する（H-05）。
+    """git 起動前の literal 環境変数代入に ``core.hooksPath`` オーバーライドがあるか判定する。
 
     ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_KEY_<n>`` / ``GIT_CONFIG_VALUE_<n>`` は
     index ごとに検証し、key が ``core.hooksPath``（大小文字不問）なら value
@@ -536,13 +534,13 @@ def _is_literal_env_hooks_path_override(prefix_tokens: list[str]) -> bool:
     return False
 
 
-# `git config` の read-only であることが確定しているフラグ（H-06）。
+# `git config` の read-only であることが確定しているフラグ。
 _GIT_CONFIG_READ_ONLY_FLAGS = frozenset({"--get", "--get-all", "--get-regexp", "--list", "--show-origin"})
 
-# `git config` の書込み・削除であることが確定しているフラグ（H-06）。
+# `git config` の書込み・削除であることが確定しているフラグ。
 _GIT_CONFIG_WRITE_FLAGS = frozenset({"--add", "--replace-all", "--unset", "--unset-all"})
 
-# git 2.46+ の `git config <op> <key>` 新構文（H-06）。
+# git 2.46+ の `git config <op> <key>` 新構文。
 _GIT_CONFIG_NEW_READ_OPS = frozenset({"get", "list"})
 _GIT_CONFIG_NEW_WRITE_OPS = frozenset({"set", "unset", "add"})
 
@@ -563,7 +561,7 @@ def _config_args_touch_sensitive_key(args: list[str]) -> bool:
 
 
 def _is_config_sensitive_key_mutation(invocation: GitInvocation) -> bool:
-    """``git config`` 呼び出しが機微な config key への書込み・削除操作かを判定する（H-06）。
+    """``git config`` 呼び出しが機微な config key への書込み・削除操作かを判定する。
 
     ``-c`` / ``--config-env`` によるオーバーライド（`_is_sensitive_config_override`）
     とは別に、``git config core.hooksPath <path>`` のような通常の subcommand
@@ -640,7 +638,7 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
     ``/usr/bin/git commit --no-verify`` を捕捉するため）。1 セグメントに
     複数の git 起動があれば全て検査します。加えて、``sh``/``bash``/``zsh``/
     ``dash`` の ``-c`` に渡された文字列引数へ 1 段だけ再帰します
-    （``sh -c 'git commit --no-verify'`` を検出するため、A-07 対応。
+    （``sh -c 'git commit --no-verify'`` を検出するため。
     ``_recursed`` は内部再帰用の引数で外部から指定しません）。
 
     Args:
@@ -733,7 +731,7 @@ def main() -> int:
 
     入力が壊れている（切り捨て・不正 JSON・必須フィールド欠落）場合は
     判定不能として fail-closed でブロックする。空入力（tty・stdin 未接続）
-    だけは従来通り非ブロッキングで許可する（F-01 対応）。
+    だけは非ブロッキングで許可する。
 
     Args:
         引数はありません（標準入力から読み取る）。

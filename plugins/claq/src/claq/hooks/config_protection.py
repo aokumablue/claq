@@ -113,7 +113,7 @@ PROTECTED_FILES = frozenset({
 _PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), ("hooks", "hooks.json"))
 
 # 大小無視で比較するための畳み済み複製。`.GIT/HOOKS` は APFS / NTFS では
-# `.git/hooks` そのものを指すため、素の比較では保護 path が素通りする（C-2）。
+# `.git/hooks` そのものを指すため、素の比較では保護 path が素通りする。
 # 表示名には畳む前の綴りを使うので、両者を対で持つ。
 _PROTECTED_PATH_SEGMENTS_FOLDED = tuple(
     tuple(normalize_protected_name(part) for part in segments) for segments in _PROTECTED_PATH_SEGMENTS
@@ -122,7 +122,7 @@ _PROTECTED_PATH_SEGMENTS_FOLDED = tuple(
 # ファイル名だけでは保護できない汎用設定ファイル。version bump・依存追加
 # 等の正当な編集が頻繁なため全面ブロックはしない。書き込み内容が
 # lint/format/coverage 設定を弱めうる場合のみ _conditional_block_reason
-# でブロックする（R-07）。
+# でブロックする。
 CONDITIONALLY_PROTECTED_FILES = frozenset({
     "pyproject.toml",
     "setup.cfg",
@@ -151,8 +151,7 @@ CONDITIONALLY_PROTECTED_FILES_FOLDED = frozenset(
 
 # セクション見出しの照合パターン（前方一致）。[tool.ruff.lint] のような
 # サブセクションも拾うため prefix 一致にする。`[testenv` は tox.ini の
-# `[testenv]` / `[testenv:py312]` 等のサブ環境セクションを両方カバーする
-# （A-04 対応）。
+# `[testenv]` / `[testenv:py312]` 等のサブ環境セクションを両方カバーする。
 _LINT_SECTION_HEADERS = (
     "[tool.ruff",
     "[tool.coverage",
@@ -191,7 +190,7 @@ _PACKAGE_JSON_LINT_KEYS = ("eslintConfig", "prettier")
 # tox.ini の実行コマンドキー。`_LINT_KEYS` へ追加しない理由: `commands` は
 # tox.ini 以外（例: pyproject.toml の正当な設定）にも現れうる汎用的な語で
 # あり、グローバル追加すると無関係な変更まで deny してしまう。そのため
-# tox.ini 限定分岐として独立させる（A-04 対応、package.json の特例と同じ形）。
+# tox.ini 限定分岐として独立させる（package.json の特例と同じ形）。
 # 行頭空白を ``[ \t]`` に絞る理由は `_LINT_KEY_PATTERN` と同じ（同型の二次オーダー
 # 後退。片側だけ直すと同じ穴が残る）。
 _TOX_COMMAND_KEYS = ("commands", "commands_pre", "commands_post")
@@ -218,7 +217,7 @@ def protected_path_segment(file_path: str) -> str | None:
     """パスがディレクトリ単位の保護対象配下か、保護ディレクトリ自身かを判定する。
 
     symlink は `resolve_effective_target` で解決してから判定する
-    （`_effective_basename` と同じ理由。H-02）。解決不能なら生パスで判定する。
+    （`_effective_basename` と同じ理由）。解決不能なら生パスで判定する。
 
     `bash_config_protection` が Bash 経路へ同じ判定を伝播させるため公開名に
     している（`_PROTECTED_PATH_SEGMENTS` 自体は本モジュール private のまま。
@@ -240,18 +239,17 @@ def protected_path_segment(file_path: str) -> str | None:
     """
     resolved = resolve_effective_target(file_path)
     parts = resolved.parts if resolved is not None else Path(file_path).parts
-    # 比較は畳んだ側だけで行い、返す表示名は畳む前の綴りを使う（C-2）。
+    # 比較は畳んだ側だけで行い、返す表示名は畳む前の綴りを使う。
     folded_parts = tuple(normalize_protected_name(part) for part in parts)
     for segments, folded_segments in zip(
         _PROTECTED_PATH_SEGMENTS, _PROTECTED_PATH_SEGMENTS_FOLDED, strict=True
     ):
         width = len(segments)
-        # 保護ディレクトリ自身（``.git/hooks``）も一致させる。当初は親ディレクトリ
-        # 列だけを見て末尾一致を除外していたが、それが正しいのは Edit/Write の
-        # ようにディレクトリを対象にできない経路だけだった。`bash_config_protection`
-        # が本判定を Bash へ伝播させたことで、``rm .git/hooks/pre-commit`` は deny
-        # なのに 1 コンポーネント短い ``rm -rf .git/hooks`` は allow という、同じ
-        # verb・同じ結果（フックが走らない状態）に対する非対称が生まれた。
+        # 保護ディレクトリ自身（``.git/hooks``）も一致させる。本判定は
+        # `bash_config_protection` 経由で Bash にも効くため、末尾一致を除くと
+        # ``rm .git/hooks/pre-commit`` は deny なのに 1 コンポーネント短い
+        # ``rm -rf .git/hooks`` は allow という、同じ結果（フックが走らない状態）
+        # に対する非対称になる。
         for index in range(len(folded_parts) - width + 1):
             if folded_parts[index : index + width] == folded_segments:
                 return "/".join(segments)
@@ -259,10 +257,10 @@ def protected_path_segment(file_path: str) -> str | None:
 
 
 def _effective_basename(file_path: str) -> str:
-    """symlink を解決した実体 basename を返す（H-02 対応）。
+    """symlink を解決した実体 basename を返す。
 
-    ``alias -> pyproject.toml`` のような symlink 経由の書込みが、raw path の
-    basename（``alias``）だけを見る判定をすり抜けていた。
+    raw path の basename（``alias``）だけを見ると、``alias -> pyproject.toml``
+    のような symlink 経由の書込みが判定をすり抜ける。
     ``resolve_effective_target`` で実体 path を解決してから basename を取り、
     保護対象判定を実際の書込み先ファイルに対して行う。
 
@@ -402,7 +400,7 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
 
     値行だけの Edit（`old_string`/`new_string` にセクション見出しが含まれ
     ない）でも、ディスク上の現在の内容から実際の所属セクションを解決する
-    （二段構えの主判定。R-07）。Write の content は新規内容そのものが
+    （二段構えの主判定）。Write の content は新規内容そのものが
     ディスクにまだ無いため、多くの場合ここでは判定不能（None）になり、
     副判定（`_text_has_protected_signal`）が本命として効く。
 
@@ -451,7 +449,7 @@ def _text_has_protected_signal(text: str, file_name: str) -> bool:
 
     package.json は TOML/INI ではないため専用のキー照合を使う。tox.ini は
     `commands`/`commands_pre`/`commands_post` の実行コマンド変更を専用照合で
-    拾う（A-04 対応。見出しを伴わない値行編集で `[testenv]` がスニペットに
+    拾う（見出しを伴わない値行編集で `[testenv]` がスニペットに
     含まれない場合でも検出するため）。それ以外は共通のセクション見出しの
     部分一致、または見出しを伴わない値行編集を拾うためのキー行照合
     （`ignore = [...]` 等）で判定する。
@@ -474,7 +472,7 @@ def _text_has_protected_signal(text: str, file_name: str) -> bool:
         return True
     # ファイル別分岐も畳んだ名前で選ぶ。basename 側だけ大小無視にすると、
     # ``Package.json`` が条件付き保護には入るのに package.json 専用のキー照合
-    # （`eslintConfig`）へ落ちず共通照合で素通りする、という半開きが残る（C-2）。
+    # （`eslintConfig`）へ落ちず共通照合で素通りする、という半開きが残る。
     folded_name = normalize_protected_name(file_name)
     if folded_name in ("settings.json", "settings.local.json"):
         return any(key in text for key in _SETTINGS_GUARD_KEYS)
@@ -533,7 +531,7 @@ def _conditional_block_reason(tool_name: str, container: Any, file_path: str, fi
 
     ファイル名だけでは保護できない（version bump 等の正当な編集が頻繁な
     ため）。編集内容が lint/format/coverage 設定を弱めうる場合のみブロック
-    する（R-07）。判定は主（ディスク上のセクション解決）・副（テキスト
+    する。判定は主（ディスク上のセクション解決）・副（テキスト
     照合）の和集合で行う。内容が一切取得できない場合は fail-closed で
     deny する。
 
@@ -610,7 +608,7 @@ def _block_reason(data: dict[str, Any]) -> str | None:
     """
     tool_name = extract_raw_tool_name(data)
     # 既知の「書き込みではないツール」だけを skip する。ツール名を特定
-    # できない payload を対象外へ倒すと保護が丸ごと無効になる（S-8）。
+    # できない payload を対象外へ倒すと保護が丸ごと無効になる。
     if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES and not is_unidentifiable_tool(
         tool_name
     ):
@@ -622,9 +620,9 @@ def _block_reason(data: dict[str, Any]) -> str | None:
     # `_block_reason_for_container` の非 None の戻り値は**すべて deny**
     # （判定不能時の `_UNDECIDABLE_TARGET_MESSAGE` を含む）なので、残りの
     # コンテナを評価しても結論は deny のまま変わらない。
-    # 「`tool_input` を重くすると `toolArgs` が評価されない」という観測は
-    # 短絡ではなく _LINT_KEY_PATTERN の二次オーダー後退が host timeout を
-    # 踏んでフックごと殺されていたことの症状であり、そちらを直して塞ぐ。
+    # 重い `tool_input` で後続コンテナが評価されないように見えるなら、原因は
+    # 短絡ではなく _LINT_KEY_PATTERN の処理時間による host timeout であり、
+    # 正規表現側で塞ぐ。
     for container in iter_tool_input_containers(data):
         reason = _block_reason_for_container(tool_name, container)
         if reason:
@@ -685,14 +683,14 @@ def main() -> int:
 
     if not raw:
         # matcher が書込み系ツールに限定しているため、空入力は tty・stdin
-        # 未接続など呼び出し自体が想定外の経路。ここは従来通り非ブロッキング。
+        # 未接続など呼び出し自体が想定外の経路。ここは非ブロッキング。
         return 0
 
     data = parse_json_object(raw)
     if data is None:
         # matcher により書込み系ツール呼び出しであることは確定している。
         # 非空 stdin が JSON として読めない場合、保護対象ファイルかどうかを
-        # 判定できないため fail-closed にする（F-02 対応）。
+        # 判定できないため fail-closed にする。
         return emit_block_output(_UNPARSEABLE_INPUT_MESSAGE)
 
     reason = _block_reason(data)

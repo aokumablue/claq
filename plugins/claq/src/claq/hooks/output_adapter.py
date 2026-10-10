@@ -6,11 +6,8 @@ host 分岐は行わない。各 host が自分の読むキーだけを拾える
 を読む。未知キーは無視される前提とし、実機未検証の host（Codex / Grok）に
 対しても同じ merged JSON を出力する。
 
-``modifiedResult`` は出力しない。以前この docstring だけがそのキーに言及して
-おり、実装（``additionalContext`` + ``hookSpecificOutput``）と食い違って
-いた（release-verify 2026-09-03 の P2-016）。claq の hook はコンテキスト注入と
-deny しか行わず、ツール結果の**書き換え**は 1 箇所も行わないため、実装が
-正しく文書が誤っていた。実測していない host 契約を推測でキーとして足すのは、
+``modifiedResult`` は出力しない。claq の hook はコンテキスト注入と
+deny しか行わず、ツール結果の**書き換え**は 1 箇所も行わない。実測していない host 契約を推測でキーとして足すのは、
 未検証の挙動を配布物へ持ち込むことになるので行わない。
 """
 

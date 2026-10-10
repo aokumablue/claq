@@ -8,14 +8,14 @@
 といったエントリ側のロジックは `pre_bash_commit_quality` に残ります。
 
 シークレット検出はテキストファイルであれば nosec・ファイルサイズに関わらず
-全体を走査します（サイズによる打ち切りは行いません。A-02 対応）。バイナリ
+全体を走査します（サイズによる打ち切りは行いません）。バイナリ
 判定されたファイルも走査対象で、`_extract_printable_runs` が抽出した印字可能
-文字列を擬似的な行として同じパターンを当てます（docs/adr/shell-analysis-boundary.md。以前は secret scan
-自体をスキップしており、先頭に NUL を 1 バイト混ぜるだけで検査を回避できた）。
+文字列を擬似的な行として同じパターンを当てます（docs/adr/shell-analysis-boundary.md。
+バイナリを走査対象から外すと、先頭に NUL を 1 バイト混ぜるだけで検査を回避できる）。
 走査量に上限を設けないと
 `pre_bash_commit_quality` の hook timeout（30秒）に達し、host がフックを
 キャンセルして続行する（fail-open）ため commit 全体の secret scan が無検査に
-なりうる、という 1MiB cap より悪いリスクがあります。そのため実時間バジェット
+なりうる、というサイズで打ち切るより悪いリスクがあります。そのため実時間バジェット
 （`_SECRET_SCAN_TIME_BUDGET_SECONDS`）を設け、超過したテキストファイルは
 `scan_error`（severity `error`、fail-closed）として扱います。
 
@@ -99,16 +99,14 @@ _SECRET_SCAN_EXCLUDED_FILENAMES = {
 _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     # ベンダ prefix の集合は `claq.mem.redaction._PATTERNS` と揃える。同じ
     # リポジトリで「記録時はマスクするが commit 時は検出しない」秘密が
-    # 生まれないようにするため（実測で 12 形式中 10 形式が本モジュールだけ
-    # 素通りしていた）。
+    # 生まれないようにするため。
     #
     # `sk-` の文字クラスに `-` を含めるのは、OpenAI の現行形式
-    # （`sk-` の後にセグメントとハイフンが続く）が旧形式のクラスでは
-    # 原理的に一致しないため。隣の Anthropic パターンは同じ位置に
-    # 既に `-` を持っており、非対称だった。
-    # `(?!ant-)` は Anthropic 形との二重計上を避けるため。文字クラスへ `-` を
-    # 入れた結果、`sk-ant-...` が両方のパターンに一致して 1 行から 2 件の
-    # issue が出ていた。
+    # （`sk-` の後にセグメントとハイフンが続く）が `-` を含まないクラスでは
+    # 原理的に一致しないため（隣の Anthropic パターンと同じ形）。
+    # `(?!ant-)` は Anthropic 形との二重計上を避けるため。文字クラスに `-` が
+    # あると、`sk-ant-...` が両方のパターンに一致して 1 行から 2 件の
+    # issue が出る。
     (r"sk-(?!ant-)[a-zA-Z0-9_-]{20,}", "OpenAI API key"),
     (r"sk-ant-[a-zA-Z0-9_-]{20,}", "Anthropic API key"),
     (r"gh[pors]_[a-zA-Z0-9]{36,}", "GitHub PAT"),
@@ -133,8 +131,7 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"(?<![a-zA-Z0-9_-])eyJ[a-zA-Z0-9_-]++\.[a-zA-Z0-9_-]++\.[a-zA-Z0-9_-]*+", "JWT"),
     # 認証情報の代入。クォートを必須にすると `.env` の `API_KEY=...` と
     # YAML の `api_key: ...` が素通りするが、単にクォートを任意にすると
-    # `token = segment[index]` のような通常のコード代入まで拾ってしまう
-    # （実測: 自リポジトリの自己走査で 23 件が普通の Python 行だった）。
+    # `token = segment[index]` のような通常のコード代入まで拾ってしまう。
     # commit をブロックするフックでこの誤検出は可用性を壊すため、
     # 「クォート付き」「区切りの前後に空白が無い env/ini 形」「行頭キーの
     # YAML 形」の 3 形に限定する。値の文字集合を ASCII の秘密様文字へ
@@ -160,8 +157,7 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     # 鍵種別を増やすときは、この 1 本の交替へ語を足す。種別ごとに完成形の
     # ヘッダを literal で書き並べる形にはしない —— その行自身が自分の
     # パターンへ一致し、「本モジュールを走査すると秘密が検出される」状態に
-    # なる（実測で PGP 用の literal パターンを別行として足した際に
-    # `tests/hooks/test_hook_edge_cases.py` の自己走査テストが赤くなった）。
+    # なる（`tests/hooks/test_hook_edge_cases.py` の自己走査テストがそれを検出して落ちる）。
     # 同じ理由で、この付近のコメントにも完成形のヘッダを書かない。
     (
         r"-----BEGIN (?:RSA |DSA |EC |OPENSSH |ENCRYPTED |PGP |SSH2 |SSH2 ENCRYPTED )?"
@@ -222,8 +218,8 @@ class SecretScanBudgetExceeded(Exception):
     fail-closed）にそのまま乗せるための専用例外です。
 
     予算は secret scan 専用ではなく lint scan とも共有する 1 本ですが、名前は
-    `new_secret_scan_deadline` と対で据え置いています（予算の実体は当初から
-    「フック 1 回の起動全体で共有する 1 本」で変わっておらず、改名は
+    `new_secret_scan_deadline` と対にしています（予算の実体は
+    「フック 1 回の起動全体で共有する 1 本」であり、改名は
     `pre_bash_commit_quality` 側への波及だけを生んで意味を足さないため）。
     """
 
@@ -247,7 +243,7 @@ class _ScanBudget:
     必ず開始時に 1 回は deadline を見る**ので、予算が尽きていれば次のファイル
     （あるいは同じファイルの secret scan）が必ず fail-closed で止まります。
     積算間隔が受け持つのは「1 ファイルの中を走り抜ける間の取りこぼし」——
-    まさに旧「行数」基準が改行の無い巨大 1 行で落としていた区間——だけです。
+    行数基準では改行の無い巨大 1 行で落ちる区間——だけです。
     """
 
     def __init__(self, deadline: float) -> None:
@@ -381,7 +377,7 @@ def get_worktree_file_content(repo_root: Path, file_path: str) -> str | None:
 
     包含チェックに違反した場合は無言で None を返します（既存の「読めなければ
     None」契約と一致させ、fail-open のノイズを増やさないためです）。
-    repo 内に留まる正当なシンボリックリンクは通過し従来どおり読みます
+    repo 内に留まる正当なシンボリックリンクは通過して読みます
     （最小修正の方針。過検知は避けつつ実体は別経路でも検出されます）。
 
     Args:
@@ -430,7 +426,7 @@ def should_scan_secrets(file_path: str) -> bool:
     - パッケージマネージャのロックファイル（内容が長大かつ生成物のため）
     - 圧縮・生成物（`*.min.js` / `*.min.css`）
 
-    ファイルサイズによる除外は行いません（A-02 対応）。バイナリ判定による
+    ファイルサイズによる除外は行いません。バイナリ判定による
     除外も行いません —— バイナリは `find_file_issues` 側で印字可能文字列を
     抽出した上で同じパターンを当てます（docs/adr/shell-analysis-boundary.md）。
 
@@ -456,7 +452,7 @@ def _sanitize_untrusted_excerpt(text: str) -> str:
     stderr 経由でモデルのコンテキストへ入るため、囲いを偽装するタグ
     （``</claq-memory>`` など）を `strip_tags` で倒し、長さにも上限を置く。
     `mem/cli` の注入経路と `hook_common.recent_bg_failure_notice` は既に
-    `strip_tags` を通しており、PreToolUse の deny 経路だけが素通りしていた。
+    `strip_tags` を通しており、PreToolUse の deny 経路も同じ扱いに揃える。
 
     Args:
         text: ファイル本文から切り出した抜粋。
@@ -481,10 +477,10 @@ def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
     抑制します（シークレット検出は別関数で `# nosec` の対象外です）。
 
     secret scan と**同じ 1 本の実時間予算**に載せます。`deadline` を受け取らず
-    時間検査を持たない状態では、`find_file_issues` が本関数を secret より先に
+    時間検査を持たないと、`find_file_issues` が本関数を secret より先に
     呼ぶ（＝予算の外側で任意時間を消費できる）ため、モジュール docstring が
     掲げた目的（ホスト側 timeout に達して fail-open で commit 全体が無検査に
-    なるのを防ぐ）が原理的に達成できませんでした。`deadline` に既定値を
+    なるのを防ぐ）が原理的に達成できません。`deadline` に既定値を
     持たせないのは `find_file_issues` と同じ理由です。
 
     Args:
@@ -565,14 +561,14 @@ def _scan_secret_issues(
     呼びます。その場合は行分割の代わりに `_extract_printable_runs` の抽出結果が
     擬似的な行として渡されます（docs/adr/shell-analysis-boundary.md）。テキストファイルは `# nosec`・
     ファイルサイズに関わらず全体を走査します（サイズによる打ち切りは行いません。
-    A-02 対応。1MiB 境界より後ろに置かれた secret も検出します）。
+    ファイル後方に置かれた secret も検出します）。
 
     走査量に上限を設けないと `pre_bash_commit_quality` の hook timeout に
     達しうるため、呼び出し元から渡された `deadline` を `_ScanBudget` 経由で
     `_SCAN_BUDGET_CHECK_BYTES` バイトごとに確認します。確認の粒度は
-    「行 × パターン」です —— 行数基準（旧 `index % 2000`）だと、改行の無い
+    「行 × パターン」です —— 行数基準（`index % 2000` のような）だと、改行の無い
     巨大 1 行のファイルでは index 0 の 1 回、つまり走査開始前にしか確認されず、
-    予算が原理的に効きませんでした。超過した場合は
+    予算が原理的に効きません。超過した場合は
     `SecretScanBudgetExceeded` を送出し、呼び出し元の既存の例外ガードで
     `scan_error`（severity `error`、fail-closed）として扱われます。deadline を
     この関数で作らないのは、それがファイル単位の予算になり、フック 1 回で
@@ -631,11 +627,11 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
     ファイルのみ対象です。
 
     シークレット検出は `should_scan_secrets` が True であれば `# nosec`・ファイル
-    サイズ・バイナリ判定に関わらず必ず実施します（A-02 対応。サイズによる
+    サイズ・バイナリ判定に関わらず必ず実施します（サイズによる
     打ち切りはありません）。バイナリ判定されたファイルは行分割が意味を持たない
     ため、`_extract_printable_runs` で印字可能文字列を抽出し、それを擬似的な行と
-    して同じパターンを当てます（docs/adr/shell-analysis-boundary.md。以前は secret scan 自体をスキップして
-    おり、先頭に NUL を 1 バイト混ぜるだけで検査を回避できた）。真のバイナリ
+    して同じパターンを当てます（docs/adr/shell-analysis-boundary.md。バイナリで secret scan を
+    スキップすると、先頭に NUL を 1 バイト混ぜるだけで検査を回避できる）。真のバイナリ
     （画像等）は secret パターンに一致する印字可能文字列を通常含まないため、
     一律ブロックにはなりません。
 
@@ -654,7 +650,7 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
     実時間予算は lint scan と secret scan で共有する 1 本です。lint 側で予算が
     尽きた場合は `scan_error`（severity `error`、fail-closed）を積んで secret scan
     を回さずに返します（予算が尽きた状態で続行してもホスト側 timeout を踏むだけ
-    のため）。lint scanner のそれ以外の例外は従来どおり warning に留めます。
+    のため）。lint scanner のそれ以外の例外は warning に留めます。
 
     secret scan の実時間予算はフック 1 回の起動全体で 1 本です。呼び出し元は
     `new_secret_scan_deadline()` を起動ごとに 1 度だけ呼び、その値を全ファイルへ

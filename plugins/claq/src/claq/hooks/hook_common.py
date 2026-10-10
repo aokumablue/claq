@@ -63,8 +63,8 @@ MAX_COMMAND_TOKENS = 5000
 #
 # 2 倍ごとに約 4 倍＝バイト数の二次。1MB は `MAX_STDIN_BYTES` の内側なので
 # stdin 上限では止まらず、host が kill した hook は exit code を返さないため
-# **silent fail-open = 保護の完全なバイパス**になる。トークン予算を足した時点で
-# 塞いだつもりだった穴が、次元違いのまま残っていた。
+# **silent fail-open = 保護の完全なバイパス**になる。トークン予算だけでは
+# この穴は塞がらない。
 #
 # 64KB は実測 0.2 秒未満で timeout に対し 75 倍以上の余裕がある。トークン予算
 # 5,000 に収まる正当なコマンドは平均 8 バイト/トークンでも 40KB 程度なので、
@@ -74,7 +74,7 @@ MAX_COMMAND_BYTES = 64 * 1024
 # コマンド全体をセグメントに割るシェル区切りトークン。`block_no_verify` と
 # `pre_bash_commit_quality` が共に shell 区切り文字密着トークン（例:
 # ``status;echo``）を誤って 1 トークンとして扱わないよう、この定数と
-# `tokenize`/`split_segments` を共有ヘルパとして 1 箇所に持つ（A-01 対応）。
+# `tokenize`/`split_segments` を共有ヘルパとして 1 箇所に持つ。
 _SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
 
 
@@ -86,8 +86,8 @@ SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash"})
 # 実行ファイルではないが、渡されたテキストを現在のシェルで実行するビルトイン。
 # ``. /dev/stdin <<'EOF'`` / ``source /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``
 # はいずれも heredoc 本文をコマンドとして実行するため、本文をデータとして
-# 剥がすと docs/adr/shell-analysis-boundary.md が「除去しない条件 1」で禁じている誤通過になる（実測:
-# 本文に `git commit --no-verify` を置くと exit 0 だった）。判定軸は
+# 剥がすと docs/adr/shell-analysis-boundary.md が「除去しない条件 1」で禁じている誤通過になる（本文に
+# `git commit --no-verify` を置くと素通りする）。判定軸は
 # 「本文が実行されうるか」であって「実行ファイルか」ではないので、
 # `SHELL_WRAPPER_EXECUTABLES` とは別集合として持ち、両方を見る。
 _BODY_EXECUTING_BUILTINS = frozenset({".", "source", "eval"})
@@ -96,8 +96,8 @@ _BODY_EXECUTING_BUILTINS = frozenset({".", "source", "eval"})
 # ある ``#`` だけをコメント開始とみなす（``echo a#b`` の ``#`` は語の一部）。
 _COMMENT_PRECEDING_CHARS = frozenset(" \t\n;|&()<>")
 
-# ``-c`` を含む結合短フラグ（``bash -lc 'cmd'``）。単独の ``-c`` だけを見ていた
-# 頃は ``bash -lc`` でラッパー再帰が不発になり、保護フックが素通りしていた（実測）。
+# ``-c`` を含む結合短フラグ（``bash -lc 'cmd'``）。単独の ``-c`` だけを見ると
+# ``bash -lc`` でラッパー再帰が不発になり、保護フックが素通りする。
 # 長オプション（``--``）は該当しないので先頭 1 文字のハイフンに限定する。
 _SHELL_COMMAND_FLAG_RE = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 
@@ -135,12 +135,12 @@ def extract_shell_wrapper_command(segment: list[str]) -> str | None:
     ``sh -c 'git commit --no-verify'`` のように basename が
     `SHELL_WRAPPER_EXECUTABLES` のいずれかであるトークンを探し、続くトークンに
     ``-c`` を含む短フラグがあれば、その次のトークン（シェルへ渡す文字列コマンド）
-    を返す。``-c`` 単独だけを見ていた頃は ``bash -lc 'git commit --no-verify'``
-    で再帰が不発になり、素通りしていた（実測）。
+    を返す。``-c`` 単独だけを見ると ``bash -lc 'git commit --no-verify'``
+    で再帰が不発になり、素通りする。
 
     `block_no_verify` と `bash_config_protection` が共有する。片方だけがラッパー
-    再帰を持つと「Write なら止まるが Bash なら通る」と同型の非対称（A-06 で
-    本モジュール群を分けた理由そのもの）が再発するため、単一情報源にする。
+    再帰を持つと「Write なら止まるが Bash なら通る」と同型の非対称（本モジュール群
+    を分けた理由そのもの）が生じるため、単一情報源にする。
     再帰の段数は呼び出し側が決める（docs/adr/shell-analysis-boundary.md: 2 段以上のネストは非目標）。
 
     Args:
@@ -232,10 +232,10 @@ def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], st
 def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, bool]], str | None]:
     """行に現れる heredoc の区切り語を出現順に返し、行末のクォート状態も返す。
 
-    照合は `_operator_start_offsets` が返した位置からのみ行う。生の行へ
-    `finditer` を当てていた頃は、コメント内・クォート内の ``<<`` を演算子と
-    誤認していた。位置を絞ってから `re.Pattern.match` するため lookbehind
-    （``(?<!<)``）は従来どおり手前の文字を見られる。
+    照合は `_operator_start_offsets` が返した位置からのみ行う（生の行へ
+    `finditer` を当てると、コメント内・クォート内の ``<<`` を演算子と誤認する）。
+    位置を絞ってから `re.Pattern.match` するため lookbehind（``(?<!<)``）は
+    手前の文字を見られる。
 
     採用した照合は `finditer` と同じく非重複にする（`consumed_to` で
     直前の照合範囲内の候補を飛ばす）。位置ごとに独立して照合すると、
@@ -397,8 +397,8 @@ def _strip_line_comments(command: str) -> str:
     `_replace_unquoted_newlines` が改行を ``;`` へ正規化した後の文字列を渡す
     ため、``shlex`` が探すコメント終端（改行）が 1 つも残っていないからである。
     その結果 ``git status #`` 改行 ``git commit --no-verify`` の 2 行目が丸ごと
-    未検査になり、Bash 系フックが揃って exit 0 になっていた（実測）。
-    ``echo a#b && git commit --no-verify`` も同様に素通りしていた（``shlex`` は
+    未検査になり、Bash 系フックが揃って素通りする。
+    ``echo a#b && git commit --no-verify`` も同様に素通りする（``shlex`` は
     語中の ``#`` もコメント開始として扱うため）。
 
     そこで正規化の前段でコメントを自分で落とし、``shlex`` 側のコメント処理は
@@ -473,13 +473,13 @@ def _strip_line_continuations(command: str) -> str:
     先頭文字**として吸収し、継続行が 0 桁目から始まるときにその先頭語が丸ごと
     別トークンへ化ける。
 
-    実測（2026-09-07）で 4 経路の誤通過を確認した — ``git commit \\`` + 改行 +
+    除去しないと 4 経路が誤通過する — ``git commit \\`` + 改行 +
     ``--no-verify`` / 同 ``-n`` が `block_no_verify` を、``git \\`` + 改行 +
     ``commit`` が `pre_bash_commit_quality` の commit 判定を、
     ``printf x >\\`` + 改行 + ``ruff.toml`` が `bash_config_protection` の
-    リダイレクト先判定を、いずれも exit 0 で素通りさせた。継続行がインデント
-    されている形では ``\n`` が単独トークンとして切れるため検出は維持されており、
-    **「継続行が 0 桁目から始まるか」だけで保護の有無が反転**していた。
+    リダイレクト先判定を、いずれも素通りする。継続行がインデントされている形
+    では ``\n`` が単独トークンとして切れるため検出されるので、
+    **「継続行が 0 桁目から始まるか」だけで保護の有無が反転**する。
 
     単一クォート内では行継続は成立しない（``\\`` も改行もリテラル）ので触らない。
 
@@ -537,7 +537,7 @@ def _replace_unquoted_newlines(command: str) -> str:
     境界に依存する判定がすべて不発になる（実測: ``printf x > s.py`` 改行
     ``git add s.py`` 改行 ``git commit -m x`` が exit 0。``;`` 区切りの同内容は
     exit 2。``bash_config_protection`` も 2 行目以降の ``tee`` / ``sed -i`` /
-    ``cp`` を実行位置と認識できていなかった）。
+    ``cp`` を実行位置と認識できない）。
 
     クォート内の改行は置き換えない（``echo 'a`` 改行 ``b'`` は 1 トークンの
     まま）。``\\`` でエスケープされた改行は行継続なので区切りにしない。
@@ -603,7 +603,7 @@ def command_dialect_variants(command: str) -> tuple[str, ...]:
     ただのパス区切りである。その結果 ``rm .\\ruff.toml`` は
     ``['rm', '.ruff.toml']`` に、``C:\\Git\\git.exe commit --no-verify`` は
     ``['C:Gitgit.exe', ...]`` になり、保護 hook が basename も git 起動も
-    見失う（実測。release-verify 2026-09-03 の再レビュー）。
+    見失う。
 
     どちらの方言で解釈されるかは実行前には決められない（hook の入力に
     シェル種別は載らない）。そこで**両方の読み方で検査し、どちらかが
@@ -656,7 +656,7 @@ def tokenize(command: str) -> list[str]:
     のように空白なしで連結された区切り記号も独立トークンにします。クォート外の
     改行は ``;`` へ正規化してから渡します（``_replace_unquoted_newlines``。
     ``shlex`` は改行を whitespace として消費し区切りトークンを出さないため、
-    複数行コマンドが 1 セグメントへ融合していました）。クォート
+    正規化しないと複数行コマンドが 1 セグメントへ融合します）。クォート
     不整合で ``ValueError`` になる入力は空白分割へフォールバックします
     （クォートが閉じていない入力ではクォート内容もフラグとして走査され、
     ブロック側＝fail-closed に倒れます）。
@@ -704,7 +704,7 @@ def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     フォールバックしたかどうかを呼び出し側が知る必要があるのは、生文字列への
     正規表現フォールバックを「解析できなかったときだけ」に限定するため。
     解析できた入力にまで生文字列の正規表現を当てると、``echo "git commit"`` の
-    ような引用文まで実行命令と誤認する（F-08）。
+    ような引用文まで実行命令と誤認する。
 
     Args:
         command: 対象のシェルコマンド文字列。
@@ -759,7 +759,7 @@ def split_segments(tokens: list[str]) -> list[list[str]]:
 def resolve_repo_root() -> Path | None:
     """`git rev-parse --show-toplevel` でリポジトリルートの絶対パスを解決しキャッシュする。
 
-    `bash_config_protection`（A-06: 保護対象パスがリポジトリ配下かの判定）と
+    `bash_config_protection`（保護対象パスがリポジトリ配下かの判定）と
     `pre_bash_commit_quality`（`git commit -a` の未ステージ変更を作業ツリーから
     読むため）が共有する。呼び出し側は「保護対象 basename のヒットがあった
     場合にのみ」呼ぶことを前提にしており（`git ls-files` 等が出現しない
@@ -804,9 +804,9 @@ class StdinUnavailableError(RuntimeError):
     ホストがそもそも入力を渡していない状態で、保護 hook が検査すべき対象自体
     が存在しない。後者は「入力はあるはずなのに取り出せなかった」状態であり、
     保護 hook が判定不能のまま許可へ倒すと、まさに守るべきコマンドが素通り
-    する（実測: Windows で ``select.select`` が ``OSError`` になり、
-    ``git commit --no-verify`` と ``git status`` が揃って exit 0 になった。
-    release-verify 2026-09-03 の P1-004）。呼び出し側にこの 2 つを取り違え
+    する（Windows で ``select.select`` が ``OSError`` になる経路を「入力なし」と
+    読むと、``git commit --no-verify`` と ``git status`` が揃って exit 0 になる）。
+    呼び出し側にこの 2 つを取り違え
     させないため、後者だけを例外として区別する（詳細は
     ``docs/adr/hook-failure-direction.md``）。
     """
@@ -894,8 +894,8 @@ def _pump_stdin(reader: Any, max_bytes: int, sink: queue.Queue) -> None:
 
     ``select.select`` は使いません。Windows では select が socket にしか
     使えず、通常のパイプに対して ``OSError`` を投げます。その例外を
-    「入力なし」と読み替えていたため、保護 hook が payload を 1 バイトも
-    読まずに許可側へ抜けていました（P1-004）。ブロッキング read を
+    「入力なし」と読み替えると、保護 hook が payload を 1 バイトも
+    読まずに許可側へ抜けます。ブロッキング read を
     ワーカースレッドへ隔離し、呼び出し側が queue のタイムアウトで待つ形に
     すると、readiness 判定に OS 固有 API が要らなくなり、3 プラットフォーム
     で同一のロジックになります。
@@ -1203,12 +1203,10 @@ def normalize_executable_name(token: str) -> str:
     を起動する）、PowerShell が cmdlet 名を大小無視で解決するためです。Linux では
     `RM` が `rm` に一致する誤検出側へ倒れますが、docs/adr/shell-analysis-boundary.md の範囲内です。
 
-    保護 hook の実行名照合は**この 1 関数だけ**を通します。かつて
-    `is_git_executable_token`（`hook_common`）・`bash_config_protection._command_name`・
-    `pre_bash_commit_quality._segment_mutates_worktree_or_index` が同じ正規化を
-    別々に持ち、大小無視と `.exe` 除去が兄弟ごとに 1 世代ずつずれた結果、
+    保護 hook の実行名照合は**この 1 関数だけ**を通します。同じ正規化を
+    呼び出し側ごとに持つと、大小無視と `.exe` 除去が兄弟ごとにずれて、
     ``git.exe commit --no-verify`` は捕まるのに ``CP evil.py app.py && git commit``
-    や ``rm.exe ruff.toml`` は語彙から外れる非対称が出荷されました（H-04 / H-6）。
+    や ``rm.exe ruff.toml`` は語彙から外れる非対称が生じます。
 
     Args:
         token: `shlex` 等でトークン化された 1 トークンです。
@@ -1234,14 +1232,14 @@ def normalize_protected_name(path: str) -> str:
 
     `Path.resolve()` は APFS / NTFS で綴りを実体の大小へ正規化しないため、
     解決後の basename を素で比較すると ``Write Ruff.toml`` が実体 ``ruff.toml``
-    へ着地するのに保護判定は外れます（C-2。実測で exit 0）。
+    へ着地するのに保護判定は外れます。
 
     あわせて Win32 のファイル名正準化を畳みます。Windows は末尾のドットと
     空白を切り捨て、``:`` 以降を代替データストリーム名として扱うため、
     ``ruff.toml.`` / ``ruff.toml`` +空白 / ``ruff.toml:x`` はいずれも実体
     ``ruff.toml`` を指しますが、素の basename 比較では保護判定から外れます。
     `normalize_executable_name` は ``.exe`` 除去という Windows 固有の畳み込みを
-    既に持っており、保護対象名の側だけ持たないのは非対称でした。
+    既に持っており、保護対象名の側にも同じ畳み込みを持たせて対称にします。
 
     Args:
         path: 検査対象のパス文字列、またはファイル名です。
@@ -1275,14 +1273,13 @@ def is_git_executable_token(token: str) -> bool:
     return normalize_executable_name(token) == "git"
 
 
-# **フラグの有無に関わらず**引数のファイルを書き換えるエディタ／フィルタ
-# （M-8）。`is_inplace_edit_flag` が扱う `sed` / `perl` とは分類が違う。
+# **フラグの有無に関わらず**引数のファイルを書き換えるエディタ／フィルタ。
+# `is_inplace_edit_flag` が扱う `sed` / `perl` とは分類が違う。
 #
 # なぜ別分類が要るのか:
-#     `ed` は `_INPLACE_EDIT_EXECUTABLES`（フラグを要求する集合）に置かれて
-#     いたため、``ed app.py && git commit -am x`` が
+#     `ed` をフラグを要求する集合に置くと、``ed app.py && git commit -am x`` が
 #     `pre_bash_commit_quality` の mutation-before-commit ガードを素通り
-#     していた（実測 exit 0。`sed -i` 版は exit 2）。`ed` に in-place フラグは
+#     する（`sed -i` 版は止まる）。`ed` に in-place フラグは
 #     無く、``ed FILE`` は編集コマンドを stdin から読んでその場で書き戻す。
 #     「フラグが立っていれば書き込み」という軸ではこの形を表現できない。
 #
@@ -1299,7 +1296,7 @@ def is_git_executable_token(token: str) -> bool:
 # `bash_config_protection`（保護対象への書き込み）と `pre_bash_commit_quality`
 # （commit 前の作業ツリー変更）が共有する。`is_inplace_edit_flag` /
 # `SHELL_WRAPPER_EXECUTABLES` と同じ理由で単一情報源にする — 判定軸が兄弟ごとに
-# 割れると、片方だけ 1 世代ずれた語彙を持って静かなバイパスになる（H-6）。
+# 割れると、片方だけ 1 世代ずれた語彙を持って静かなバイパスになる。
 ALWAYS_MUTATING_EDIT_EXECUTABLES = frozenset({"ed", "red", "ex", "sponge"})
 
 
@@ -1327,9 +1324,8 @@ def is_inplace_edit_flag(token: str) -> bool:
 
     `bash_config_protection`（保護対象への in-place 書き込み）と
     `pre_bash_commit_quality`（commit 前の作業ツリー変更）が共有します。
-    後者は `not arg.startswith("--")` で長形式を**明示的に**除外していたため、
-    ``sed --in-place ... && git commit -am x`` で両方のガードが同時に不発に
-    なっていました（H-5）。
+    どちらかが長形式を除外すると、``sed --in-place ... && git commit -am x``
+    のような形でガードが不発になります。
 
     Args:
         token: 引数トークン列の 1 トークンです。
@@ -1377,11 +1373,11 @@ def _expand_leading_tilde(raw_path: str) -> str:
 
 
 def resolve_effective_target(raw_path: str) -> Path | None:
-    """cwd 基準で解決し、symlink を辿った実体 path を返します（H-02 対応）。
+    """cwd 基準で解決し、symlink を辿った実体 path を返します。
 
-    `config_protection` / `bash_config_protection` が basename だけで保護対象
-    判定していたため、`alias -> pyproject.toml` のような symlink 経由の
-    書き込みが判定をすり抜けていた。両モジュールがこの共有 helper で解決後の
+    `config_protection` / `bash_config_protection` が basename だけで保護対象を
+    判定すると、`alias -> pyproject.toml` のような symlink 経由の
+    書き込みが判定をすり抜ける。両モジュールがこの共有 helper で解決後の
     実体 path を得てから basename 判定することで、判定基準を一本化する。
 
     先頭の ``~`` は `_expand_leading_tilde` でホームディレクトリへ展開してから解決する。
@@ -1431,8 +1427,8 @@ _DETACH_KILL_AFTER_SECONDS = 30
 # は直接の子 1 プロセスにしか届かないため、孫プロセスの無期限残留を防げない。
 #
 # Windows には killpg / SIGKILL が無い（`os.killpg` 不在、`signal.SIGKILL`
-# 未定義、`start_new_session` は ValueError）。ここは Windows 用の分岐を置く
-# （release-verify 2026-09-03 の P1-013）。分岐はプラットフォーム名ではなく
+# 未定義、`start_new_session` は ValueError）。ここは Windows 用の分岐を置く。
+# 分岐はプラットフォーム名ではなく
 # `hasattr(os, "killpg")` という capability で行い、Windows では
 # CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS で起動して
 # Popen.terminate()/kill() で回収する。
@@ -1519,7 +1515,7 @@ def detached_spawn_kwargs() -> dict[str, Any]:
     POSIX は ``start_new_session=True``、Windows は
     ``CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`` が同じ意図を表す
     （``start_new_session`` を Windows で渡すと ``ValueError`` になり、
-    SessionEnd の handoff hook がそこで落ちていた。P1-013）。分岐は
+    SessionEnd の handoff hook がそこで落ちる）。分岐は
     プラットフォーム名ではなく ``os.setsid`` の有無という capability で
     行う。
 
@@ -1565,9 +1561,9 @@ def _watchdog_argv(cmd: list[str]) -> list[str]:
 def _detach_log_path() -> Path | None:
     """detach した子プロセスの stdout/stderr を追記するログファイルのパスを返す。
 
-    以前は DEVNULL に捨てており、detach 対象（--bg 起動）の import 失敗
-    等の出力が完全に消えていた（起動受付成功と処理完了・成功の区別が
-    付かない一因。F-18）。日付ごとに 1 ファイルへ追記する
+    DEVNULL に捨てると、detach 対象（--bg 起動）の import 失敗等の出力が
+    完全に消え、起動受付成功と処理完了・成功の区別が付かなくなる。
+    日付ごとに 1 ファイルへ追記する
     （mem/logger.py の `mem-YYYY-MM-DD.log` と同じ命名規則）。
     best-effort の diagnostics であり、ログディレクトリを作れない場合は
     None を返して detach 自体は継続させる（ログが取れないことを理由に
@@ -1602,8 +1598,7 @@ def gc_detach_stdin_orphans() -> None:
 
     POSIX では `detach_process` が起動直後に unlink するため孤児は生じない。
     Windows は「開いているファイルを削除できない」ため（子が継承ハンドルを
-    保持している）unlink が必ず失敗し、SessionEnd ごとに 1 個ずつ積み上がる
-    （release-verify 2026-09-03 の再レビュー W4）。
+    保持している）unlink が必ず失敗し、SessionEnd ごとに 1 個ずつ積み上がる。
 
     回収を生成側と同じモジュールへ置くのは、走査先を生成側と同じ
     ``get_claq_dir()``（``CLAQ_HOME`` を見る）に揃えるため。``env_pointer`` の
@@ -1738,8 +1733,8 @@ def recent_bg_failure_notice() -> str:
     """前回セッションの detach 起動（``--bg``）に失敗の痕跡があれば 1 行の通知を返す。
 
     `detach_process` の戻り値は「起動受付」であり「処理成功」ではないため
-    （docstring 参照）、detach した子の失敗は呼び出し元へ同期的に伝わらない
-    （§6.2 対応）。そこで次回 SessionStart の ``mem context`` で、前回の
+    （docstring 参照）、detach した子の失敗は呼び出し元へ同期的に伝わらない。
+    そこで次回 SessionStart の ``mem context`` で、前回の
     `_detach_log_path` が書いたログファイル（``bg-YYYY-MM-DD.log``。
     正常系では対象プロセスが何も出力しないため中身は空のはず）に内容が
     あれば「起動受付後に何かが起きた」痕跡とみなし、末尾 1 行だけ提示する。
@@ -1788,17 +1783,15 @@ def emit_block_output(reason: str) -> int:
 
     出力層が失敗しても deny の終了コードは返します。`write_stdout` /
     `write_stderr` は `sys.stdout.write` を呼ぶため BrokenPipeError・OSError・
-    UnicodeEncodeError を送出しうる（両関数の docstring の「例外は発生しません」は
-    事実に反していた）。例外がここを抜けると `main()` の外まで伝播して exit 1 に
+    UnicodeEncodeError を送出しうる。例外がここを抜けると `main()` の外まで伝播して exit 1 に
     なり、**PreToolUse の契約では exit 1 は non-blocking error ＝ ツールは実行
     される** — つまり deny が黙って allow へ反転する。現実的な誘因は host が
     パイプを閉じたときの BrokenPipeError で、これは host の timeout と同時に
     起きるため、最も守りたい局面でちょうど外れる。
 
-    `pre_bash_commit_quality` は各呼び出し側で同じ guard を持っていたが、
-    残る 3 フックには無く docs/adr/hook-failure-direction.md が成果に挙げる「4 フックが同じ exit 契約に
-    揃う」がこの経路で成立していなかった。呼び出し側 12 箇所へ複製するのでは
-    なく、出力の唯一の口である本関数の内側へ集約する。
+    docs/adr/hook-failure-direction.md の「4 フックが同じ exit 契約に揃う」を
+    この経路でも成立させるため、guard を呼び出し側ごとに複製するのではなく、
+    出力の唯一の口である本関数の内側へ集約する。
 
     Raises:
         例外は発生しません。
