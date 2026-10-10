@@ -54,12 +54,12 @@ def install_guard(server: MCPServer) -> None:
             if rejected is not None:
                 return rejected
         result = await call_next(ctx)
-        if isinstance(result, dict):
-            if ctx.method == "tools/list":
-                for tool in result.get("tools", []):
-                    tool["inputSchema"] = normalize_input_schema(tool.get("inputSchema") or {})
-            elif ctx.method == "tools/call":
-                compact_text(result)
+        # tools/list と tools/call の結果は dict（camelCase のキー）で届く（SDK で実測）
+        if ctx.method == "tools/list":
+            for tool in result["tools"]:
+                tool["inputSchema"] = normalize_input_schema(tool["inputSchema"])
+        elif ctx.method == "tools/call":
+            compact_text(result)
         return result
 
     server.middleware.append(guard)
@@ -82,25 +82,12 @@ async def _reject_unknown_arguments(server: MCPServer, params: Mapping[str, Any]
     for tool in await server.list_tools():
         if tool.name != params.get("name"):
             continue
-        allowed = sorted((tool.input_schema or {}).get("properties", {}))
-        unknown = unknown_arguments(arguments, allowed)
+        allowed = sorted(tool.input_schema.get("properties", {}))
+        unknown = sorted(set(arguments) - set(allowed))
         if not unknown:
             return None
         return rejection(unknown, allowed, server_name=server.name, server_version=server.version)
     return None
-
-
-def unknown_arguments(arguments: Mapping[str, Any], allowed: list[str]) -> list[str]:
-    """許されていない引数名を、名前順で返す。
-
-    Args:
-        arguments: 呼び出しの引数。
-        allowed: ツールが受け付ける引数名。
-
-    Returns:
-        未知の引数名の一覧。
-    """
-    return sorted(set(arguments) - set(allowed))
 
 
 def _echoed(names: list[str]) -> str:

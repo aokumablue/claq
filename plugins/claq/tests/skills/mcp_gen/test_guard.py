@@ -118,10 +118,6 @@ class TestCompactText:
 class TestRejection:
     """未知の引数の判定と拒否の形。"""
 
-    def test_unknown_arguments_sorted(self, guard: types.ModuleType) -> None:
-        """許されていない引数名を名前順で返す。"""
-        assert guard.unknown_arguments({"b": 1, "stauts": 2, "a": 3}, ["a", "b"]) == ["stauts"]
-
     def test_rejection_is_tool_execution_error(self, guard: types.ModuleType) -> None:
         """プロトコルエラーではなく、名指しした `isError` の結果になる。"""
         rejected = guard.rejection(["stauts"], ["status"], server_name="s", server_version="1")
@@ -206,14 +202,11 @@ class TestInstalledGuard:
 
     def test_normalizes_tools_list(self, guard: types.ModuleType) -> None:
         """tools/list の各ツールの inputSchema を整える。"""
-        result = {"tools": [{"name": "t", "inputSchema": {"type": "object", "title": "x"}}, {"name": "u"}]}
+        result = {"tools": [{"name": "t", "inputSchema": {"type": "object", "title": "x"}}]}
         outcome, _ = self._run(guard, "tools/list", {}, result)
         assert outcome["tools"][0]["inputSchema"] == {"type": "object", "additionalProperties": False}
-        assert outcome["tools"][1]["inputSchema"] == {"additionalProperties": False}
 
-    def test_leaves_non_dict_results(self, guard: types.ModuleType) -> None:
-        """dict でない結果と、対象外のメソッドには触れない。"""
-        sentinel = object()
-        assert self._run(guard, "tools/list", {}, sentinel)[0] is sentinel
+    def test_leaves_other_methods(self, guard: types.ModuleType) -> None:
+        """対象外のメソッドの結果には触れない。"""
         untouched = {"content": [{"type": "text", "text": '{\n "a": 1\n}'}], "structuredContent": {"a": 1}}
         assert self._run(guard, "resources/read", {}, untouched)[0]["content"][0]["text"] == '{\n "a": 1\n}'
