@@ -46,74 +46,29 @@ TRANSCRIPT_MAX_BYTES = 2 * 1024 * 1024
 """トランスクリプトから読む末尾バイト数の上限。直近の作業ほど引き継ぎ価値が高い。"""
 
 _TRANSCRIPT_ROOTS_ENV = "CLAQ_TRANSCRIPT_ROOTS"
-"""追加の trusted transcript root をコロン区切りで指定する環境変数。"""
+"""追加の trusted transcript root を ``os.pathsep`` 区切りで指定する環境変数。"""
 
 
-def _default_trusted_transcript_roots() -> tuple[Path, ...]:
-    """既知 host の transcript root を返す。
+def trusted_transcript_roots() -> tuple[Path, ...]:
+    """走査対象にしてよい transcript root 一覧を返す。
 
-    ``plugins/claq/src`` 配下に host 検出コード（``COPILOT_*`` /
-    ``CLAUDECODE`` / ``CODEX_*`` 等の環境変数参照）は一切存在しない
-    （host 非依存の性質検査のみで防御する設計方針のため）。そのため
-    「実行中の host を判定してそこから root を導出する」実装は取れず、
-    既知 host の transcript 格納規約を静的な allowlist として列挙する。
-
-    Args:
-        なし
+    src 配下は host 検出（``COPILOT_*`` / ``CLAUDECODE`` / ``CODEX_*`` 等の参照）を
+    持たない設計のため、実行中の host から root を導出できない。既知 host の
+    格納規約を静的な allowlist として列挙し、未知 host の利用者は
+    ``CLAQ_TRANSCRIPT_ROOTS`` で自分の host の root を追加できる。
 
     Returns:
-        既知 host の transcript root 絶対パスのタプル（存在確認はしない）。
-
-    Raises:
-        例外は発生しません。
+        既知 host の root と ``CLAQ_TRANSCRIPT_ROOTS`` で追加された root
+        （存在確認はしない）。
     """
     home = get_home_dir()
+    extra = os.environ.get(_TRANSCRIPT_ROOTS_ENV, "").split(os.pathsep)
     return (
         home / ".claude" / "projects",
         home / ".copilot",
         home / ".codex",
+        *(Path(raw.strip()).expanduser() for raw in extra if raw.strip()),
     )
-
-
-def _trusted_transcript_roots() -> tuple[Path, ...]:
-    """trusted transcript root 一覧（既知 host + 環境変数追加分）を返す。
-
-    ``CLAQ_TRANSCRIPT_ROOTS``（``os.pathsep`` 区切り）で追加・拡張できる
-    （未知 host では transcript 要約が失われるトレードオフを、利用者が
-    自分の host の root を教えることで解消できるようにする）。
-
-    Args:
-        なし
-
-    Returns:
-        trusted root 絶対パスのタプル。
-
-    Raises:
-        例外は発生しません。
-    """
-    roots = list(_default_trusted_transcript_roots())
-    extra = os.environ.get(_TRANSCRIPT_ROOTS_ENV, "")
-    for raw in extra.split(os.pathsep):
-        stripped = raw.strip()
-        if stripped:
-            roots.append(Path(stripped).expanduser())
-    return tuple(roots)
-
-
-def _is_under_trusted_root(resolved_path: Path) -> bool:
-    """解決済み絶対パスが trusted transcript root のいずれか配下かを判定する。
-
-    Args:
-        resolved_path: ``Path.resolve()`` 済みの絶対パス。
-
-    Returns:
-        既知 host の trusted root 配下、または環境変数で追加された root
-        配下なら True。
-
-    Raises:
-        例外は発生しません。
-    """
-    return any(resolved_path.is_relative_to(root.resolve()) for root in _trusted_transcript_roots())
 
 
 _USER_MESSAGE_COUNT = 3
@@ -185,9 +140,6 @@ def _sanitize_freeform(text: str) -> str:
         足場を落とし、信頼境界タグを無害化し、シークレットをマスクした本文。
         足場しか含まれない、細工が検出された、またはタグで分断された秘密が
         見つかった場合は空文字列。
-
-    Raises:
-        例外は発生しません。
     """
     stripped = strip_tags(normalize_user_message(text))
     if stripped == _REDACTION_MARKER:
@@ -220,9 +172,6 @@ def _sanitize_compact(text: str, limit: int) -> str:
 
     Returns:
         無害化済みの 1 行。細工が検出された場合は空文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return compact_line(_sanitize_freeform(text), limit)
 
@@ -250,42 +199,26 @@ def _sanitize_structured(value: str) -> str:
 def build_handoff(payload: dict[str, Any]) -> str:
     """フックの stdin JSON から引き継ぎ本文を組み立てる。
 
-    ``handoff`` キーがあればエージェントの明示指定として優先し、
-    無ければトランスクリプトから要約を組み立てる。
+    ``handoff`` キーがあればエージェントの明示指定として優先し、無ければ
+    トランスクリプトから要約を組み立てる。
 
     シークレット除去は自由文（明示指定の本文とユーザー発話）にだけ掛ける。
-    ファイルパスとツール名は機械生成の構造データであり、``redact`` の
-    base64 検出が 40 文字超のパスを丸ごと ``[REDACTED]`` にしてしまうため
-    通さない（引き継ぎで最も価値のある情報が消える）。
+    ファイルパスとツール名は、``redact`` の base64 検出が 40 文字超のパスを
+    丸ごと ``[REDACTED]`` にしてしまうため通さない（最も価値のある情報が消える）。
 
-    明示指定の本文も ``_sanitize_freeform``（``normalize_user_message`` →
-    ``strip_tags`` → ``redact``）を通す。無害化の結果が空になった場合は
-    transcript へフォールバックせず空文字列を返す — 空になるのは足場の細工が
-    検出されたときであり、細工した側に第 2 の経路を与えないため。
+    明示指定の無害化結果が空になっても transcript へフォールバックしない —
+    空になるのは足場の細工が検出されたときであり、細工した側に第 2 の経路を
+    与えないため。
 
     Args:
         payload: SessionEnd フックが stdin へ渡した JSON。
 
     Returns:
-        引き継ぎ本文。組み立てる材料が無ければ空文字列。
+        ``CONTEXT_HANDOFF_CHAR_BUDGET`` 文字以内の引き継ぎ本文（切った場合は
+        末尾を省略記号にする）。組み立てる材料が無ければ空文字列。
     """
     explicit = str(payload.get("handoff") or "").strip()
     text = _sanitize_freeform(explicit) if explicit else _summarize_transcript(str(payload.get("transcript_path") or ""))
-    if not text:
-        return ""
-    return _truncate(text)
-
-
-def _truncate(text: str) -> str:
-    """引き継ぎ本文を context 注入の予算内へ切り詰める。
-
-    Args:
-        text: 切り詰め前の本文。
-
-    Returns:
-        ``CONTEXT_HANDOFF_CHAR_BUDGET`` 文字以内の本文。切った場合は
-        末尾を省略記号にする。
-    """
     if len(text) <= CONTEXT_HANDOFF_CHAR_BUDGET:
         return text
     return text[: CONTEXT_HANDOFF_CHAR_BUDGET - 1] + "…"
@@ -294,23 +227,15 @@ def _truncate(text: str) -> str:
 def _summarize_transcript(transcript_path: str) -> str:
     """トランスクリプトを走査して引き継ぎ要約を組み立てる。
 
-    ``transcript_path`` は SessionEnd payload の host 供給値であり、
-    Claude Code は ``~/.claude/projects/...``、Copilot CLI は
-    ``~/.copilot/...`` と host ごとに置き場所が異なる。まず host 非依存の
-    性質検査（symlink 拒否・通常ファイル・所有者一致）で防御し、その後段に
-    既知 host transcript root の allowlist 包含チェックを追加する
-    （``_trusted_transcript_roots``）。所有者一致の任意 regular file を
-    無条件で読むと、ユーザーが書ける任意ファイルを prompt injection の入力に
-    できてしまうため、性質検査だけでは不十分である。allowlist 外なら要約を諦めて空文字列を返す
-    （handoff は明示テキスト・構造化事実で継続するため、壊れずに劣化する。
-    トレードオフ: 未知 host では transcript 要約が失われる）。
+    ``transcript_path`` は host 供給値なので ``is_trusted_transcript`` で検査し、
+    通らなければ要約を諦める（handoff は壊れずに劣化する。未知 host では
+    transcript 要約が失われる）。
 
     Args:
         transcript_path: フックが渡した JSONL トランスクリプトのパス。
 
     Returns:
-        要約の散文。パスが読めない・シンボリックリンク・所有者不一致・
-        trusted root 外・材料が無い場合は空文字列。
+        要約の散文。信頼できないパス・材料が無い場合は空文字列。
     """
     path = Path(transcript_path)
     if not is_trusted_transcript(path):
@@ -325,74 +250,32 @@ def is_trusted_transcript(path: Path) -> bool:
     所有者一致の任意 regular file を無条件で読むと、ユーザーが書ける任意
     ファイルを prompt injection の入力にできてしまう。host 非依存の性質検査
     （symlink 拒否・通常ファイル・所有者一致）に加えて、既知 host の transcript
-    root allowlist 包含も要求する。
+    root allowlist 包含も要求する。同じ判定を別モジュールで書き直すと片側だけ
+    強化されて非対称になるため、走査側もこの関数を使う。
 
-    同じ判定を別モジュールで書き直すと片側だけ強化されて非対称になるため、
-    走査側はこの関数を使う。
-
-    所有者一致の検査は POSIX の uid が意味を持つ環境でのみ行う。
-    ``os.getuid`` は Windows に存在せず、``st_uid`` も常に 0 を返すため、
-    そこで uid を比較すると「常に一致」か ``AttributeError`` のどちらかに
-    しかならない（前者は検査したふり、後者は transcript の一律拒否）。
-    プラットフォーム名では分岐せず、``os.getuid`` の有無という capability
-    で分岐する。uid 比較が使えない
-    環境で残る防御は symlink 拒否・通常ファイル要求・trusted root 包含の
-    3 つで、trusted root はいずれもユーザーのホーム配下＝Windows では
-    既定でそのユーザーの ACL に閉じている。
+    所有者一致は ``os.getuid`` の有無という capability で分岐し、uid が意味を
+    持つ環境でだけ検査する。Windows では ``os.getuid`` が無く ``st_uid`` も常に
+    0 で、比較は「検査したふり」か一律拒否にしかならない。そこで残る防御は
+    他の 3 つで、trusted root はユーザーのホーム配下＝既定でそのユーザーの
+    ACL に閉じている。
 
     Args:
         path: 判定対象のパス。
 
     Returns:
         symlink でなく、通常ファイルで、（uid が意味を持つ環境では）所有者が
-        自分で、trusted root 配下なら True。
-
-    Raises:
-        例外は発生しません。
+        自分で、trusted root 配下なら True。``stat`` / ``resolve`` の失敗は False。
     """
     if path.is_symlink() or not path.is_file():
         return False
-    if not _owner_matches_current_user(path):
-        return False
+    getuid = getattr(os, "getuid", None)
     try:
+        if getuid is not None and path.stat().st_uid != getuid():
+            return False
         resolved = path.resolve()
     except OSError:
         return False
-    return _is_under_trusted_root(resolved)
-
-
-def _owner_matches_current_user(path: Path) -> bool:
-    """ファイルの所有者が現在のユーザーかを、uid が意味を持つ環境でだけ検査する。
-
-    Args:
-        path: 判定対象のパス。
-
-    Returns:
-        所有者が一致する場合、または uid による所有者判定ができない環境
-        （Windows）では True。``stat`` に失敗した場合は False。
-
-    Raises:
-        例外は発生しません。
-    """
-    getuid = getattr(os, "getuid", None)
-    if getuid is None:
-        return True
-    try:
-        return path.stat().st_uid == getuid()
-    except OSError:
-        return False
-
-
-def trusted_transcript_roots() -> tuple[Path, ...]:
-    """走査対象にしてよい transcript root 一覧を返す。
-
-    Returns:
-        既知 host の root と ``CLAQ_TRANSCRIPT_ROOTS`` で追加された root。
-
-    Raises:
-        例外は発生しません。
-    """
-    return _trusted_transcript_roots()
+    return any(resolved.is_relative_to(root.resolve()) for root in trusted_transcript_roots())
 
 
 def _read_tail(path: Path) -> str:
@@ -470,15 +353,11 @@ def _dedupe_keeping_latest(messages: list[str]) -> list[str]:
     for message in reversed(messages):
         # 切り詰められた行は先頭 _USER_MESSAGE_CHAR_LIMIT 文字しか残っておらず、
         # 一致しても元の依頼が同一とは限らない。畳むと別依頼が片方消えるため対象外。
-        if message.endswith(_TRUNCATION_MARKER):
-            kept.append(message)
-            continue
-        if message in seen:
+        if message in seen and not message.endswith(_TRUNCATION_MARKER):
             continue
         seen.add(message)
         kept.append(message)
-    kept.reverse()
-    return kept
+    return kept[::-1]
 
 
 def _parse_entry(line: str) -> dict[str, Any] | None:
@@ -569,9 +448,7 @@ def _is_speech_block(part: object) -> bool:
     if block_type in _SPEECH_BLOCK_TYPES:
         return True
     if block_type not in _NON_SPEECH_BLOCK_TYPES:
-        log.info(
-            "transcript の未知ブロック種別を発話として採らなかった: %r", block_type
-        )
+        log.info("transcript の未知ブロック種別を発話として採らなかった: %r", block_type)
     return False
 
 
