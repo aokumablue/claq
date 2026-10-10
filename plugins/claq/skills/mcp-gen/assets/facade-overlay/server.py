@@ -696,12 +696,13 @@ async def orders_get(
         results, failures = await fan_out(calls, timeout=TOOL_DEADLINE_SECONDS)
         if "order" in failures:
             raise failures["order"]
+        partial: list[str] = []
         if "shipments" in failures:
             logger.warning("upstream failure: %s", failures["shipments"])
+            partial.append(f"shipments: {model_message(failures['shipments'])}")
         order = normalize_order(results["order"])
         if "shipments" in results:
             order["shipments"] = results["shipments"]
-        partial = [f"shipments: {model_message(error)}" for name, error in failures.items() if name == "shipments"]
         as_of = _now()
         result, returned = fit_view(
             lambda chosen, notes: _detail_result(order, chosen, partial=partial, as_of=as_of, notes=notes),
