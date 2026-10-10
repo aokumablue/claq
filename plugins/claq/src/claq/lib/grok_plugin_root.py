@@ -19,41 +19,18 @@ import os
 from pathlib import Path
 
 
-def _home() -> Path:
-    """ホームディレクトリを返す。"""
-    return Path.home()
-
-
 def installed_plugins_dir(home: Path | None = None) -> Path:
-    """``~/.grok/installed-plugins`` のパスを返す。
-
-    Args:
-        home: ホームディレクトリ上書き（テスト用）。None なら Path.home()。
-
-    Returns:
-        installed-plugins ディレクトリの Path。
-    """
-    base = home if home is not None else _home()
+    """``~/.grok/installed-plugins`` のパスを返す（``home`` は None なら ``Path.home()``）。"""
+    base = home if home is not None else Path.home()
     return base / ".grok" / "installed-plugins"
 
 
 def is_grok_installed_plugin_root(path: Path | str) -> bool:
-    """パスが Grok の公式インストール先（installed-plugins/claq-*）か判定する。
-
-    Args:
-        path: 検査対象パス。
-
-    Returns:
-        installed-plugins 配下の claq-* ツリーなら True。
-
-    Raises:
-        例外は発生しません。
-    """
+    """パスが Grok の公式インストール先（installed-plugins/claq-* 配下）か判定する。"""
     try:
-        resolved = Path(path).resolve()
+        parts = Path(path).resolve().parts
     except OSError:
         return False
-    parts = resolved.parts
     try:
         grok_idx = parts.index(".grok")
     except ValueError:
@@ -85,17 +62,7 @@ def _installed_target(path: Path | str) -> Path | None:
 
 
 def _mtime_or_none(path: Path) -> float | None:
-    """``path`` の mtime を返し、stat に失敗したら None を返す。
-
-    Args:
-        path: mtime を取りたいパス。
-
-    Returns:
-        mtime（秒）。stat に失敗すれば None。
-
-    Raises:
-        例外は発生しません。
-    """
+    """``path`` の mtime を返し、stat に失敗したら None を返す。"""
     try:
         return path.stat().st_mtime
     except OSError:
@@ -103,21 +70,18 @@ def _mtime_or_none(path: Path) -> float | None:
 
 
 def find_latest_installed_claq(installed_dir: Path | None = None) -> Path | None:
-    """``~/.grok/installed-plugins/claq-*`` のうち最新のディレクトリを返す。
+    """``~/.grok/installed-plugins/claq-*`` のうち launcher.py を含む最新のディレクトリを返す。
 
-    mtime の取得は候補ごとに ``_mtime_or_none`` で行い、失敗した候補は除外する。
-    列挙と stat の間には隙間があり（TOCTOU）、Grok が同時にプラグインを更新して
-    古い ``claq-<hash>`` を消すと ``FileNotFoundError`` が起きる。stat を try の
-    外で行うと、それが本関数（「例外は発生しません」）→ ``_resolve_symlink_target`` →
-    ``ensure_grok_plugin_root_symlink``（「OSError は握りつぶす」）を貫通し、
+    mtime の取得に失敗した候補は除外する。列挙と stat の間には隙間があり（TOCTOU）、
+    Grok が同時に古い ``claq-<hash>`` を消すと ``FileNotFoundError`` が起きる。stat を
+    try の外で行うと、それが ``ensure_grok_plugin_root_symlink`` まで貫通し、
     ``scripts/grok.sh`` が traceback で異常終了する。
 
     Args:
         installed_dir: 探索先。None なら ``~/.grok/installed-plugins``。
 
     Returns:
-        launcher.py を含む最新ディレクトリ。無ければ None
-        （全候補の stat が失敗した場合も None）。
+        最新ディレクトリ。無ければ None（全候補の stat が失敗した場合も None）。
 
     Raises:
         例外は発生しません。
@@ -128,22 +92,17 @@ def find_latest_installed_claq(installed_dir: Path | None = None) -> Path | None
     candidates: list[tuple[float, Path]] = []
     try:
         for path in root.iterdir():
-            if not path.is_dir():
-                continue
-            if not path.name.startswith("claq-"):
-                continue
-            if not _has_launcher(path):
+            if not (path.is_dir() and path.name.startswith("claq-") and _has_launcher(path)):
                 continue
             mtime = _mtime_or_none(path)
-            if mtime is None:
-                continue
-            candidates.append((mtime, path))
+            if mtime is not None:
+                candidates.append((mtime, path))
     except OSError:
         return None
     if not candidates:
         return None
-    # 同 mtime のときは iterdir の順（＝旧 sort(reverse=True) の安定性）を保つため
-    # max の「最初の最大要素を返す」性質に委ね、Path 同士を比較させない。
+    # 同 mtime のときは iterdir の順を保つため max の「最初の最大要素を返す」性質に
+    # 委ね、Path 同士を比較させない。
     return max(candidates, key=lambda item: item[0])[1]
 
 
@@ -164,12 +123,9 @@ def ensure_grok_plugin_root_symlink(
         home: ホーム上書き（テスト用）。
 
     Returns:
-        作成・更新したリンク先 Path。何もしなければ None。
-
-    Raises:
-        例外は発生しません（OSError は握りつぶす）。
+        作成・更新したリンク先 Path。何もしなければ None（OSError は握りつぶす）。
     """
-    base = home if home is not None else _home()
+    base = home if home is not None else Path.home()
     link = Path(link_path) if link_path is not None else base / ".grok" / "plugins" / "claq"
 
     target = _resolve_symlink_target(plugin_root, base)
@@ -180,14 +136,9 @@ def ensure_grok_plugin_root_symlink(
 
 def _resolve_symlink_target(plugin_root: Path | str | None, home: Path) -> Path | None:
     """リンク先を plugin_root → 環境変数 → 最新インストールの順で解決する。"""
-    if plugin_root is not None:
-        target = _installed_target(plugin_root)
-        if target is not None:
-            return target
     env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-    if env_root:
-        target = _installed_target(env_root)
-        if target is not None:
+    for candidate in (plugin_root, env_root or None):
+        if candidate is not None and (target := _installed_target(candidate)) is not None:
             return target
     found = find_latest_installed_claq(installed_plugins_dir(home))
     if found is None:
