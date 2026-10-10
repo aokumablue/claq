@@ -177,7 +177,7 @@ class CursorCodec:
     def open(self, token: str, *, scope: str, principal: str, fingerprint: str) -> dict[str, Any]:
         """カーソルを検証し、封じた位置を返す。
 
-        確かめる順は、文字種と形式 → 署名 → 本体の形 → 期限。署名を確かめる前に
+        確かめる順は、文字種 → 署名 → 本体の形 → 期限。署名を確かめる前に
         本体を読まず、理由ごとに文面を変えない（期限切れだけは署名が合った後に分かる）。
 
         Args:
@@ -193,11 +193,11 @@ class CursorCodec:
             CursorError: ASCII でない・形式が不正・署名が合わない（改ざん・別の用途・主体・
                 検索条件）・本体を読めないか版や形が違う・期限切れのとき。
         """
+        # compare_digest は ASCII でない str を TypeError で拒むので、先に同じ文面で拒否する
         if not token.isascii():
             raise CursorError()
-        body, separator, signature = token.partition(".")
-        if not (body and separator and signature):
-            raise CursorError()
+        # 区切りの無い・空の部分は、署名が合わないので下の照合で拒否される
+        body, _, signature = token.partition(".")
         expected = self._sign(body, scope=scope, principal=principal, fingerprint=fingerprint)
         if not hmac.compare_digest(signature, expected):
             raise CursorError()
