@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +15,7 @@ from claq.ci.harness_audit_utils import (
 )
 from claq.ci.harness_audit_utils import (
     _has_gitlab_security_scanning,
+    check,
     count_files,
     detect_target_mode,
     file_has_content,
@@ -68,22 +68,31 @@ def normalize_scope(scope: str | None) -> str:
     return value
 
 
+def _normalize_target_kind(value: str) -> str:
+    """--target-kind の値を正規化する。"""
+    normalized = value.lower()
+    if normalized not in VALID_TARGET_KINDS:
+        raise ValueError(f"Invalid target-kind: {value}. Use repo or consumer.")
+    return normalized
+
+
+_VALUE_OPTIONS: tuple[tuple[str, str, Callable[[str], Any]], ...] = (
+    ("--format", "format", str.lower),
+    ("--scope", "scope", normalize_scope),
+    ("--root", "root", lambda value: Path(value).resolve()),
+    ("--target-kind", "target_kind", _normalize_target_kind),
+)
+"""値を取るフラグ名・格納先キー・値の変換。"""
+
+
 def _option_value(args: list[str], index: int, name: str) -> tuple[str, int]:
     """`--name VALUE` または `--name=VALUE` の値と次インデックスを返す。
 
     値が無い・空文字・``-`` 始まり（＝次のフラグを値として食っている）の 3 つを
     まとめてエラーにする（そうしないと ``--root --help`` は ``root=<cwd>/--help``
     かつ ``help=False`` になり、``--scope``（値なし）は黙って ``repo`` へ落ちる）。
-    呼び出し側ごとに書くのではなく取得の唯一の経路である本関数へ置くのは、
-    フラグを増やすたびにガードを書き忘れる余地を残さないため。
-
-    Args:
-        args: 全引数のリスト。
-        index: `name` または `name=` 形式の引数のインデックス。
-        name: フラグ名（例: ``--format``）。
-
-    Returns:
-        (オプション値, 次に処理すべきインデックス) のタプル。
+    取得の唯一の経路である本関数へ置くのは、フラグを増やすたびにガードを
+    書き忘れる余地を残さないため。
 
     Raises:
         ValueError: 値が無い、空文字、または ``-`` 始まりの場合。
@@ -101,49 +110,20 @@ def _option_value(args: list[str], index: int, name: str) -> tuple[str, int]:
 def _apply_arg(parsed: dict[str, Any], args: list[str], index: int) -> int:
     """単一の CLI 引数を解釈して parsed を更新し、次のインデックスを返す。
 
-    Args:
-        parsed: 解析結果を蓄積する辞書（インプレース更新）
-        args: 全引数のリスト
-        index: 現在処理中の引数のインデックス
-
-    Returns:
-        次に処理すべき引数のインデックス
-
     Raises:
-        ValueError: 不明な引数が渡された場合
+        ValueError: 不明な引数、または値が不正な場合
     """
     arg = args[index]
-
     if arg in {"--help", "-h"}:
         parsed["help"] = True
         return index + 1
-
-    if arg == "--format" or arg.startswith("--format="):
-        value, next_index = _option_value(args, index, "--format")
-        parsed["format"] = value.lower()
-        return next_index
-
-    if arg == "--scope" or arg.startswith("--scope="):
-        value, next_index = _option_value(args, index, "--scope")
-        parsed["scope"] = normalize_scope(value)
-        return next_index
-
-    if arg == "--root" or arg.startswith("--root="):
-        value, next_index = _option_value(args, index, "--root")
-        parsed["root"] = Path(value).resolve()
-        return next_index
-
-    if arg == "--target-kind" or arg.startswith("--target-kind="):
-        value, next_index = _option_value(args, index, "--target-kind")
-        normalized = value.lower()
-        if normalized not in VALID_TARGET_KINDS:
-            raise ValueError(f"Invalid target-kind: {value}. Use repo or consumer.")
-        parsed["target_kind"] = normalized
-        return next_index
-
+    for name, key, convert in _VALUE_OPTIONS:
+        if arg == name or arg.startswith(f"{name}="):
+            value, next_index = _option_value(args, index, name)
+            parsed[key] = convert(value)
+            return next_index
     if arg.startswith("-"):
         raise ValueError(f"Unknown argument: {arg}")
-
     parsed["scope"] = normalize_scope(arg)
     return index + 1
 
@@ -158,307 +138,30 @@ def parse_args(argv: Sequence[str] | None = None) -> dict[str, Any]:
         "root": Path(os.getcwd()).resolve(),
         "target_kind": None,
     }
-
     index = 0
     while index < len(args):
         index = _apply_arg(parsed, args, index)
-
     if parsed["format"] not in VALID_FORMATS:
         raise ValueError(f"Invalid format: {parsed['format']}. Use text or json.")
-
     return parsed
 
 
-def _consumer_security_status(root_dir: str | Path, hosting_service: str) -> bool:
-    """consumer プロジェクトのセキュリティポリシー有無を判定する。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ
-        hosting_service: 正規化済みの Git ホスティングサービス名
-
-    Returns:
-        セキュリティポリシー・スキャン設定が存在すれば True
-
-    Raises:
-        例外は発生しません。
-    """
-    security_pass = file_has_content(root_dir, "SECURITY.md")
+def _hosting_layout(root_dir: str | Path, hosting_service: str) -> tuple[str, str, bool, bool]:
+    """consumer 向けの (CI パス, セキュリティパス, CI 有無, セキュリティポリシー有無) を返す。"""
     if hosting_service == "gitlab":
-        return security_pass or _has_gitlab_security_scanning(root_dir)
-    return (
-        security_pass
-        or file_has_content(root_dir, ".github/dependabot.yml")
-        or file_has_content(root_dir, ".github/codeql.yml")
-    )
-
-
-def _consumer_tool_coverage_checks(root_dir: str | Path, plugin_install: str | None) -> list[dict[str, Any]]:
-    """consumer モードの Tool Coverage カテゴリのチェック定義を返す。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ
-        plugin_install: 検出されたプラグインのインストールパス（無ければ None）
-
-    Returns:
-        Tool Coverage チェック辞書のリスト
-
-    Raises:
-        例外は発生しません。
-    """
-    return [
-        {
-            "id": "consumer-plugin-install",
-            "category": "Tool Coverage",
-            "points": 4,
-            "scopes": ["repo"],
-            "path": "~/.claude/plugins/",
-            "description": "プラグインがインストールされている",
-            "pass": bool(plugin_install),
-            "fix": "Install the claq plugin for this user or project before auditing project-specific harness quality.",
-        },
-        {
-            "id": "consumer-project-overrides",
-            "category": "Tool Coverage",
-            "points": 3,
-            "scopes": ["repo", "hooks", "skills", "commands", "agents"],
-            "path": ".claude/",
-            "description": "プロジェクト固有のハーネスオーバーライドが .claude/ 配下に存在する",
-            "pass": count_files(root_dir, ".claude/agents", ".md") > 0
-            or count_files(root_dir, ".claude/skills", "SKILL.md") > 0
-            or count_files(root_dir, ".claude/commands", ".md") > 0
-            or file_has_content(root_dir, ".claude/settings.json")
-            or file_has_content(root_dir, ".claude/hooks.json"),
-            "fix": "Add project-local .claude hooks, commands, skills, or settings that tailor claq to this repo.",
-        },
-    ]
-
-
-def _consumer_context_efficiency_checks(root_dir: str | Path) -> list[dict[str, Any]]:
-    """consumer モードの Context Efficiency カテゴリのチェック定義を返す。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ
-
-    Returns:
-        Context Efficiency チェック辞書のリスト
-
-    Raises:
-        例外は発生しません。
-    """
-    return [
-        {
-            "id": "consumer-instructions",
-            "category": "Context Efficiency",
-            "points": 3,
-            "scopes": ["repo"],
-            "path": "AGENTS.md",
-            "description": "プロジェクトが明示的なエージェント・命令コンテキストを持つ",
-            "pass": file_has_content(root_dir, "AGENTS.md")
-            or file_has_content(root_dir, "CLAUDE.md")
-            or file_has_content(root_dir, ".claude/CLAUDE.md"),
-            "fix": "Add AGENTS.md or CLAUDE.md so the harness has project-specific instructions.",
-        },
-        {
-            "id": "consumer-project-config",
-            "category": "Context Efficiency",
-            "points": 2,
-            "scopes": ["repo", "hooks"],
-            "path": ".mcp.json",
-            "description": "プロジェクトがローカル MCP・Claude 設定を宣言している",
-            "pass": file_has_content(root_dir, ".mcp.json")
-            or file_has_content(root_dir, ".claude/settings.json")
-            or file_has_content(root_dir, ".claude/settings.local.json"),
-            "fix": "Add .mcp.json or .claude/settings.json so project-local tool configuration is explicit.",
-        },
-    ]
-
-
-def _consumer_quality_gates_checks(
-    root_dir: str | Path,
-    package_json: dict[str, Any],
-    ci_path: str,
-    hosting_label: str,
-    ci_pass: bool,
-) -> list[dict[str, Any]]:
-    """consumer モードの Quality Gates カテゴリのチェック定義を返す。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ
-        package_json: 解析済みの package.json（無い場合は空辞書）
-        ci_path: 表示用の CI 設定パス
-        hosting_label: Git ホスティングサービスの表示ラベル
-        ci_pass: CI 設定が存在するかの判定結果
-
-    Returns:
-        Quality Gates チェック辞書のリスト
-
-    Raises:
-        例外は発生しません。
-    """
-    return [
-        {
-            "id": "consumer-test-suite",
-            "category": "Quality Gates",
-            "points": 4,
-            "scopes": ["repo"],
-            "path": "tests/",
-            "description": "プロジェクトが自動テストのエントリポイントを持つ",
-            # 走査を伴う判定は、最初のヒットで打ち切る 2 つ
-            # （has_python_tests / has_file_with_extension）を先に置く。
-            # count_files はヒットしても数え上げを続けるため最後に回す
-            # ——先頭に置くと、テストを持つリポジトリでも tests/ を必ず
-            # 全数え上げしてから短絡することになる。
-            "pass": (
-                isinstance(package_json.get("scripts"), dict) and isinstance(package_json["scripts"].get("test"), str)
-            )
-            or has_python_tests(root_dir, minimum=1)
-            or has_file_with_extension(root_dir, ".", [".spec.js", ".spec.ts", ".test.ts"])
-            or count_files(root_dir, "tests", ".test.js") > 0,
-            "fix": (
-                "Add a test script or checked-in tests (package.json scripts.test, *.spec.ts, "
-                "or pytest test_*.py) so harness recommendations can be verified automatically."
-            ),
-        },
-        {
-            "id": "consumer-ci-workflow",
-            "category": "Quality Gates",
-            "points": 3,
-            "scopes": ["repo"],
-            "path": ci_path,
-            "description": f"プロジェクトが {hosting_label} CI 設定をチェックインしている",
-            "pass": ci_pass,
-            "fix": f"Add at least one CI configuration file for {hosting_label} so harness and test checks run outside local development.",
-        },
-    ]
-
-
-def _consumer_memory_and_eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
-    """consumer モードの Memory Persistence と Eval Coverage カテゴリのチェック定義を返す。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ
-
-    Returns:
-        Memory Persistence と Eval Coverage チェック辞書のリスト
-
-    Raises:
-        例外は発生しません。
-    """
-    return [
-        {
-            "id": "consumer-memory-notes",
-            "category": "Memory Persistence",
-            "points": 2,
-            "scopes": ["repo"],
-            "path": ".claude/memory.md",
-            "description": "プロジェクトメモリ・恒久的なノートがチェックインされている",
-            "pass": file_has_content(root_dir, ".claude/memory.md") or count_files(root_dir, "docs/adr", ".md") > 0,
-            "fix": "Add durable project memory such as .claude/memory.md or ADRs under docs/adr/.",
-        },
-        {
-            "id": "consumer-eval-coverage",
-            "category": "Eval Coverage",
-            "points": 2,
-            "scopes": ["repo"],
-            "path": "evals/",
-            "description": "プロジェクトが評価テストまたは複数の自動テストを持つ",
-            # 「複数の自動テスト」の側は Python のテストも数える（JS 規約専用だと、
-            # pytest だけのリポジトリは `evals/` が無いと 0 点になる）。閾値は JS 側と揃えて 3 件。判定順は
-            # `consumer-test-suite` と同じ理由で、短絡する has_python_tests を
-            # 全数え上げの count_files より前に置く。`evals/` 側を先頭に
-            # 残すのは、この判定を落とすリポジトリには `evals/` が無く即 0 が
-            # 返るため——`evals/` を持つリポジトリでは同ツリーを全数え上げする。
-            "pass": count_files(root_dir, "evals", None) > 0
-            or has_python_tests(root_dir, minimum=3)
-            or count_files(root_dir, "tests", ".test.js") >= 3,
-            "fix": "Add eval fixtures or at least a few focused automated tests for critical flows.",
-        },
-    ]
-
-
-def _consumer_security_policy_checks(
-    gitignore: str, security_path: str, hosting_label: str, security_pass: bool
-) -> list[dict[str, Any]]:
-    """consumer モードのセキュリティポリシー・シークレット衛生チェック2件を返す。"""
-    return [
-        {
-            "id": "consumer-security-policy",
-            "category": "Security Guardrails",
-            "points": 2,
-            "scopes": ["repo"],
-            "path": security_path,
-            "description": "プロジェクトがセキュリティポリシー・自動依存スキャンを公開している",
-            "pass": security_pass,
-            "fix": f"Add SECURITY.md or {hosting_label}-appropriate dependency/code scanning configuration to document the project security posture.",
-        },
-        {
-            "id": "consumer-secret-hygiene",
-            "category": "Security Guardrails",
-            "points": 2,
-            "scopes": ["repo"],
-            "path": ".gitignore",
-            "description": "プロジェクトが一般的なシークレット環境ファイルを無視している",
-            "pass": ".env" in gitignore,
-            "fix": "Ignore .env-style files in .gitignore so secrets do not land in the repo.",
-        },
-    ]
-
-
-@dataclass(frozen=True)
-class _GuardrailsCtx:
-    """_consumer_security_guardrails_checks のセキュリティチェックコンテキスト。"""
-
-    root_dir: str | Path
-    gitignore: str
-    project_hooks: str
-    security_path: str
-    hosting_label: str
-    security_pass: bool
-
-
-def _consumer_security_guardrails_checks(ctx: _GuardrailsCtx) -> list[dict[str, Any]]:
-    """consumer モードの Security Guardrails カテゴリのチェック定義を返す。
-
-    Args:
-        ctx: gitignore・フック設定・ホスティング表示に使うコンテキスト。
-
-    Returns:
-        Security Guardrails チェック辞書のリスト
-    """
-    return _consumer_security_policy_checks(
-        ctx.gitignore, ctx.security_path, ctx.hosting_label, ctx.security_pass
-    ) + [
-        {
-            "id": "consumer-hook-guardrails",
-            "category": "Security Guardrails",
-            "points": 2,
-            "scopes": ["repo", "hooks"],
-            "path": ".claude/settings.json",
-            "description": "プロジェクトローカルフック設定がツール・プロンプトガードを参照している",
-            "pass": "PreToolUse" in ctx.project_hooks
-            or "beforeSubmitPrompt" in ctx.project_hooks
-            or file_has_content(ctx.root_dir, ".claude/hooks.json"),
-            "fix": "Add project-local hook settings or hook definitions for prompt/tool guardrails.",
-        },
-    ]
-
-
-def _consumer_hosting_layout(root_dir: str | Path, hosting_service: str) -> tuple[str, str, bool]:
-    """consumer 向けの CI パス・セキュリティパス・CI 有無を返す。
-
-    Args:
-        root_dir: 監査対象のルートディレクトリ。
-        hosting_service: 正規化済みの Git ホスティングサービス名。
-
-    Returns:
-        (ci_path, security_path, ci_pass) のタプル。
-    """
-    if hosting_service == "gitlab":
-        return ".gitlab-ci.yml", ".gitlab-ci.yml", file_has_content(root_dir, ".gitlab-ci.yml")
+        return (
+            ".gitlab-ci.yml",
+            ".gitlab-ci.yml",
+            file_has_content(root_dir, ".gitlab-ci.yml"),
+            file_has_content(root_dir, "SECURITY.md") or _has_gitlab_security_scanning(root_dir),
+        )
     return (
         ".github/workflows/",
         "SECURITY.md",
         has_file_with_extension(root_dir, ".github/workflows", [".yml", ".yaml"]),
+        file_has_content(root_dir, "SECURITY.md")
+        or file_has_content(root_dir, ".github/dependabot.yml")
+        or file_has_content(root_dir, ".github/codeql.yml"),
     )
 
 
@@ -467,28 +170,103 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
     package_json = safe_parse_json(safe_read(root_dir, "package.json"))
     if not isinstance(package_json, dict):
         package_json = {}
-
     gitignore = safe_read(root_dir, ".gitignore")
     project_hooks = safe_read(root_dir, ".claude/settings.json")
     plugin_install = find_plugin_install(root_dir)
     hosting_service = normalize_git_hosting_service(git_hosting_service)
     hosting_label = get_git_hosting_service_label(hosting_service)
-    ci_path, security_path, ci_pass = _consumer_hosting_layout(root_dir, hosting_service)
-    security_pass = _consumer_security_status(root_dir, hosting_service)
+    ci_path, security_path, ci_pass, security_pass = _hosting_layout(root_dir, hosting_service)
 
     return [
-        *_consumer_tool_coverage_checks(root_dir, plugin_install),
-        *_consumer_context_efficiency_checks(root_dir),
-        *_consumer_quality_gates_checks(root_dir, package_json, ci_path, hosting_label, ci_pass),
-        *_consumer_memory_and_eval_checks(root_dir),
-        *_consumer_security_guardrails_checks(_GuardrailsCtx(
-            root_dir=root_dir,
-            gitignore=gitignore,
-            project_hooks=project_hooks,
-            security_path=security_path,
-            hosting_label=hosting_label,
-            security_pass=security_pass,
-        )),
+        check(
+            "consumer-plugin-install", "Tool Coverage", 4, ["repo"], "~/.claude/plugins/",
+            "プラグインがインストールされている",
+            bool(plugin_install),
+            "Install the claq plugin for this user or project before auditing project-specific harness quality.",
+        ),
+        check(
+            "consumer-project-overrides", "Tool Coverage", 3, ["repo", "hooks", "skills", "commands", "agents"],
+            ".claude/",
+            "プロジェクト固有のハーネスオーバーライドが .claude/ 配下に存在する",
+            count_files(root_dir, ".claude/agents", ".md") > 0
+            or count_files(root_dir, ".claude/skills", "SKILL.md") > 0
+            or count_files(root_dir, ".claude/commands", ".md") > 0
+            or file_has_content(root_dir, ".claude/settings.json")
+            or file_has_content(root_dir, ".claude/hooks.json"),
+            "Add project-local .claude hooks, commands, skills, or settings that tailor claq to this repo.",
+        ),
+        check(
+            "consumer-instructions", "Context Efficiency", 3, ["repo"], "AGENTS.md",
+            "プロジェクトが明示的なエージェント・命令コンテキストを持つ",
+            file_has_content(root_dir, "AGENTS.md")
+            or file_has_content(root_dir, "CLAUDE.md")
+            or file_has_content(root_dir, ".claude/CLAUDE.md"),
+            "Add AGENTS.md or CLAUDE.md so the harness has project-specific instructions.",
+        ),
+        check(
+            "consumer-project-config", "Context Efficiency", 2, ["repo", "hooks"], ".mcp.json",
+            "プロジェクトがローカル MCP・Claude 設定を宣言している",
+            file_has_content(root_dir, ".mcp.json")
+            or file_has_content(root_dir, ".claude/settings.json")
+            or file_has_content(root_dir, ".claude/settings.local.json"),
+            "Add .mcp.json or .claude/settings.json so project-local tool configuration is explicit.",
+        ),
+        check(
+            "consumer-test-suite", "Quality Gates", 4, ["repo"], "tests/",
+            "プロジェクトが自動テストのエントリポイントを持つ",
+            # 最初のヒットで打ち切る判定（has_python_tests / has_file_with_extension）を
+            # 先に置く。count_files はヒットしても数え上げを続けるため最後に回す。
+            (isinstance(package_json.get("scripts"), dict) and isinstance(package_json["scripts"].get("test"), str))
+            or has_python_tests(root_dir, minimum=1)
+            or has_file_with_extension(root_dir, ".", [".spec.js", ".spec.ts", ".test.ts"])
+            or count_files(root_dir, "tests", ".test.js") > 0,
+            "Add a test script or checked-in tests (package.json scripts.test, *.spec.ts, "
+            "or pytest test_*.py) so harness recommendations can be verified automatically.",
+        ),
+        check(
+            "consumer-ci-workflow", "Quality Gates", 3, ["repo"], ci_path,
+            f"プロジェクトが {hosting_label} CI 設定をチェックインしている",
+            ci_pass,
+            f"Add at least one CI configuration file for {hosting_label} so harness and test checks run outside local development.",
+        ),
+        check(
+            "consumer-memory-notes", "Memory Persistence", 2, ["repo"], ".claude/memory.md",
+            "プロジェクトメモリ・恒久的なノートがチェックインされている",
+            file_has_content(root_dir, ".claude/memory.md") or count_files(root_dir, "docs/adr", ".md") > 0,
+            "Add durable project memory such as .claude/memory.md or ADRs under docs/adr/.",
+        ),
+        check(
+            "consumer-eval-coverage", "Eval Coverage", 2, ["repo"], "evals/",
+            "プロジェクトが評価テストまたは複数の自動テストを持つ",
+            # 「複数の自動テスト」は Python のテストも数え、閾値は JS 側と揃えて 3 件。
+            # 判定順は consumer-test-suite と同じ理由で、短絡する has_python_tests を
+            # 全数え上げの count_files より前に置く。`evals/` を先頭に残すのは、
+            # この判定を落とすリポジトリには `evals/` が無く即 0 が返るため。
+            count_files(root_dir, "evals", None) > 0
+            or has_python_tests(root_dir, minimum=3)
+            or count_files(root_dir, "tests", ".test.js") >= 3,
+            "Add eval fixtures or at least a few focused automated tests for critical flows.",
+        ),
+        check(
+            "consumer-security-policy", "Security Guardrails", 2, ["repo"], security_path,
+            "プロジェクトがセキュリティポリシー・自動依存スキャンを公開している",
+            security_pass,
+            f"Add SECURITY.md or {hosting_label}-appropriate dependency/code scanning configuration to document the project security posture.",
+        ),
+        check(
+            "consumer-secret-hygiene", "Security Guardrails", 2, ["repo"], ".gitignore",
+            "プロジェクトが一般的なシークレット環境ファイルを無視している",
+            ".env" in gitignore,
+            "Ignore .env-style files in .gitignore so secrets do not land in the repo.",
+        ),
+        check(
+            "consumer-hook-guardrails", "Security Guardrails", 2, ["repo", "hooks"], ".claude/settings.json",
+            "プロジェクトローカルフック設定がツール・プロンプトガードを参照している",
+            "PreToolUse" in project_hooks
+            or "beforeSubmitPrompt" in project_hooks
+            or file_has_content(root_dir, ".claude/hooks.json"),
+            "Add project-local hook settings or hook definitions for prompt/tool guardrails.",
+        ),
     ]
 
 
@@ -506,11 +284,10 @@ def summarize_category_scores(checks: list[dict[str, Any]]) -> dict[str, dict[st
         in_category = [check for check in checks if check["category"] == category]
         max_points = sum(check["points"] for check in in_category)
         earned_points = sum(check["points"] for check in in_category if check["pass"])
-        normalized = 0 if max_points == 0 else round((earned_points / max_points) * 10)
         scores[category] = {
             "earned_points": earned_points,
             "max_points": max_points,
-            "normalized_score": normalized,
+            "normalized_score": 0 if max_points == 0 else round((earned_points / max_points) * 10),
         }
     return scores
 
@@ -520,13 +297,7 @@ def _plugin_provider_hint(root_dir: Path) -> str:
 
     プラグイン提供元リポジトリのルートは、それ自体はプラグインではないので
     consumer と判定される。「repo モードで測りたいのに consumer の点数が出る」を
-    自力で解けるよう、実際に指すべきパスを提示する。
-
-    Args:
-        root_dir: 判定に使ったルートディレクトリ
-
-    Returns:
-        該当があれば案内文、無ければ空文字列
+    自力で解けるよう、実際に指すべきパスを提示する。該当が無ければ空文字列。
     """
     providers = sorted((root_dir / "plugins").glob("*/.claude-plugin/plugin.json"))
     if not providers:
@@ -538,19 +309,15 @@ def _plugin_provider_hint(root_dir: Path) -> str:
 def build_report(scope: str, root_dir: str | Path | None = None, target_mode: str | None = None) -> dict[str, Any]:
     """監査レポートを組み立てる。
 
-    `target_mode` を明示した場合、自動判定（`detect_target_mode`）と
-    不一致なら ValueError を送出する。`--root` を指定せず
-    誤った作業ルートを監査している場合、明示指定と自動判定の食い違いで
-    気付けるようにするため、黙って明示値を信用しない。
+    `target_mode` を明示した場合、自動判定（`detect_target_mode`）と不一致なら
+    ValueError を送出する。誤った作業ルートを監査していることに、明示指定と
+    自動判定の食い違いで気付けるようにするため、黙って明示値を信用しない。
 
     Args:
         scope: 監査スコープ。
         root_dir: 監査対象のルート。None なら cwd。
         target_mode: ``"repo"`` / ``"consumer"`` を明示する場合に指定する。
             None なら自動判定に任せる。
-
-    Returns:
-        監査レポートの辞書。
 
     Raises:
         ValueError: 明示した target_mode が自動判定と食い違う場合。
@@ -584,18 +351,7 @@ def build_report(scope: str, root_dir: str | Path | None = None, target_mode: st
             f"カテゴリ earned_points の合計 {category_total} が overall_score {overall_score} と一致しません"
         )
 
-    failed_checks = [check for check in checks if not check["pass"]]
-    failed_checks.sort(key=lambda check: check["points"], reverse=True)
-    top_actions = [
-        {
-            "action": check["fix"],
-            "path": check["path"],
-            "category": check["category"],
-            "points": check["points"],
-        }
-        for check in failed_checks[:3]
-    ]
-
+    failed_checks = sorted((check for check in checks if not check["pass"]), key=lambda c: c["points"], reverse=True)
     return {
         "scope": scope,
         "root_dir": str(resolved_root),
@@ -606,17 +362,13 @@ def build_report(scope: str, root_dir: str | Path | None = None, target_mode: st
         "max_score": max_score,
         "categories": category_scores,
         "checks": [
-            {
-                "id": check["id"],
-                "category": check["category"],
-                "points": check["points"],
-                "path": check["path"],
-                "description": check["description"],
-                "pass": check["pass"],
-            }
+            {key: check[key] for key in ("id", "category", "points", "path", "description", "pass")}
             for check in checks
         ],
-        "top_actions": top_actions,
+        "top_actions": [
+            {"action": check["fix"], "path": check["path"], "category": check["category"], "points": check["points"]}
+            for check in failed_checks[:3]
+        ],
     }
 
 
@@ -627,20 +379,17 @@ def print_text(report: dict[str, Any]) -> None:
     )
     print(f"Root: {report['root_dir']}")
     print()
-
     for category in CATEGORIES:
         data = report["categories"][category]
-        if not data or data["max_points"] == 0:
-            continue
-        print(
-            f"- {category}: {data['normalized_score']}/10 "
-            f"({data['earned_points']}/{data['max_points']} pts)"
-        )
+        if data["max_points"]:
+            print(
+                f"- {category}: {data['normalized_score']}/10 "
+                f"({data['earned_points']}/{data['max_points']} pts)"
+            )
 
     failed = [check for check in report["checks"] if not check["pass"]]
     print()
     print(f"Checks: {len(report['checks'])} total, {len(failed)} failing")
-
     if failed:
         print()
         print("Top 3 Actions:")
@@ -669,20 +418,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     """CLI のエントリポイント。"""
     try:
         args = parse_args(argv)
-
         if args["help"]:
             show_help(0)
-
         report = build_report(args["scope"], root_dir=args["root"], target_mode=args["target_kind"])
-
         if args["format"] == "json":
             print(json.dumps(report, indent=2, ensure_ascii=False))
         else:
             print_text(report)
-
-        if any(not check["pass"] for check in report["checks"]):
-            return 1
-        return 0
+        return int(any(not check["pass"] for check in report["checks"]))
     except (OSError, RuntimeError, ValueError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
