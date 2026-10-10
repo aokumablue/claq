@@ -107,18 +107,6 @@ class TestShaping:
             "grid": [[{"v": 1}, {"v": 2}], [{"v": 4}]]
         }
 
-    def test_cap_arrays(self, facade: types.SimpleNamespace) -> None:
-        """全ての配列を上限で切り、元の値は変えない。"""
-        value = {"a": [1, 2, 3], "b": {"c": [4, 5]}, "d": 1}
-        assert facade.shaping.cap_arrays(value, array_limit=2) == {
-            "a": [1, 2],
-            "a_more": {"total": 3, "returned": 2},
-            "b": {"c": [4, 5]},
-            "d": 1,
-        }
-        assert facade.shaping.cap_arrays([[1, 2, 3]], array_limit=2) == [[1, 2]]
-        assert value["a"] == [1, 2, 3]
-
     def test_fit_items(self, facade: types.SimpleNamespace) -> None:
         """予算に収まる最大の件数を返す。"""
         items = ["x" * 10] * 10

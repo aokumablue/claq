@@ -57,28 +57,18 @@ def compact_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def cap_arrays(value: Any, *, array_limit: int) -> Any:
-    """値の中の配列を先頭 `array_limit` 件にし、隣に `<名前>_more` で総数を添える。
+def _cap_lists(value: Any, array_limit: int) -> Any:
+    """葉の値（JSON のスカラーか、その入れ子の配列）の配列を、入れ子ごとに先頭 `array_limit` 件にする。
 
     Args:
-        value: 整形する値。
+        value: 葉の値。
         array_limit: 配列ごとに残す件数。
 
     Returns:
-        整形した値（元の値は変更しない）。
+        切り詰めた値（元の値は変更しない）。
     """
-    if isinstance(value, Mapping):
-        capped: dict[str, Any] = {}
-        for key, child in value.items():
-            if not isinstance(child, list):
-                capped[key] = cap_arrays(child, array_limit=array_limit)
-                continue
-            capped[key] = [cap_arrays(element, array_limit=array_limit) for element in child[:array_limit]]
-            if len(child) > array_limit:
-                capped[f"{key}{MORE_SUFFIX}"] = {"total": len(child), "returned": array_limit}
-        return capped
     if isinstance(value, list):
-        return [cap_arrays(element, array_limit=array_limit) for element in value[:array_limit]]
+        return [_cap_lists(element, array_limit) for element in value[:array_limit]]
     return value
 
 
@@ -141,7 +131,7 @@ def _select(value: Any, tree: dict[str, Any] | None, array_limit: int) -> Any:
             raise ValueError(
                 "葉の値が JSON のスカラーかその配列ではありません（object・tuple・dataclass など）。カタログの葉はスカラーにする"
             )
-        return cap_arrays(value, array_limit=array_limit)
+        return _cap_lists(value, array_limit)
     if value is None:
         return None
     if isinstance(value, list):

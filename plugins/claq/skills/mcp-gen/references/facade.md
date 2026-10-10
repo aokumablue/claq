@@ -32,7 +32,7 @@
 | モジュール | 使う場面 |
 |---|---|
 | `cursor` | `CursorCodec`（カーソルの署名と検証）、`PageCursor`（検索ツールのカーソルの発行と開封。位置の検査と拒否の監査を含む）、`query_fingerprint`（検索条件の指紋） |
-| `shaping` | `project`（入れ子を保った射影）、`cap_arrays`（`project` が内部で使う。射影も区分の検査もしないので、文書に直接使わない）、`fit_items`（予算に収まる件数）、`fit_page`（一覧の 1 ページを予算に収め、続きの位置を cursor に封じる）、`fit_view`（取得の結果を予算に収め、超えたら summary に落とす）、`clean_text`（上流の文字列の無害化）、`compact_json` |
+| `shaping` | `project`（入れ子を保った射影）、`fit_items`（予算に収まる件数）、`fit_page`（一覧の 1 ページを予算に収め、続きの位置を cursor に封じる）、`fit_view`（取得の結果を予算に収め、超えたら summary に落とす）、`clean_text`（上流の文字列の無害化）、`compact_json` |
 | `catalog` | `FieldSpec` と `Catalog`（`fields_describe`・ビュー・検索の要約の項目・項目パスの検証・個人情報のパスの抽出） |
 | `upstream` | `UpstreamError`、`model_message`、`call_with_retry`、`CircuitBreaker`、`call_upstream`（遮断器・再試行・締切をまとめた 1 回の呼び出し）、`fan_out` |
 | `audit` | `resolve_principal`（呼び出しの主体）、`AuditLog`（監査ログ。主体は鍵付きの要約で残す） |
