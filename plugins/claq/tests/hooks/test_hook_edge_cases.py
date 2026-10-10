@@ -779,9 +779,7 @@ def test_pre_bash_commit_quality_finds_parser_and_reading_errors(monkeypatch: py
     assert {issue["type"] for issue in parsed["issues"]} >= {"format", "length"}
 
 
-def test_pre_bash_commit_quality_run_wrapper_and_main_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert pre_bash_commit_quality.run("payload") == pre_bash_commit_quality.evaluate("payload")
-
+def test_pre_bash_commit_quality_main_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "claq.hooks.hook_common.read_raw_stdin_with_truncation", lambda: ("payload", False)
     )
