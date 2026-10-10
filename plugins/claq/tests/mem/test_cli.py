@@ -133,7 +133,7 @@ class TestSessionStartContract:
         `finally` が正しい SessionStart JSON を出し切っており原因も stderr へ
         出ているため、非 0 にして得られるものが無い。
         """
-        monkeypatch.setattr(cli, "_run_session_start_command", _always_raise("boom"))
+        monkeypatch.setitem(cli._COMMAND_HANDLERS, "context", _always_raise("boom"))
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert exit_code == 0
         assert "boom" in stderr
@@ -147,7 +147,7 @@ class TestSessionStartContract:
         def _raise_command_error(*_args: object, **_kwargs: object) -> None:
             raise cli.CommandError("bad handler input")
 
-        monkeypatch.setattr(cli, "_run_session_start_command", _raise_command_error)
+        monkeypatch.setitem(cli._COMMAND_HANDLERS, "context", _raise_command_error)
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert exit_code == 0
         assert "bad handler input" in stderr
@@ -412,7 +412,7 @@ class TestNormalCommandFailures:
 
     def test_handler_exception_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """ハンドラ例外は exit_code=1 と stderr 出力。"""
-        monkeypatch.setattr(cli, "_run_normal_command", _always_raise("init failure"))
+        monkeypatch.setitem(cli._COMMAND_HANDLERS, "init", _always_raise("init failure"))
         _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["init"])
         assert exit_code == 1
         assert "init failure" in stderr
