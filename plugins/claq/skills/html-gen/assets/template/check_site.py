@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import math
 import re
@@ -134,23 +135,18 @@ def _norm_hex(value: str) -> str:
 
 def _to_linear(channel: float) -> float:
     """sRGB 成分を線形化する。"""
-    if channel <= 0.04045:
-        return channel / 12.92
-    return ((channel + 0.055) / 1.055) ** 2.4
+    return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
 
 
 def _to_srgb(channel: float) -> float:
     """線形成分を sRGB へ戻す。"""
-    if channel <= 0.0031308:
-        return channel * 12.92
-    return 1.055 * (channel ** (1 / 2.4)) - 0.055
+    return channel * 12.92 if channel <= 0.0031308 else 1.055 * (channel ** (1 / 2.4)) - 0.055
 
 
 def _linear_rgb(hex_color: str) -> tuple[float, float, float]:
     """hex を線形 RGB へ変換する。"""
     body = _norm_hex(hex_color)[1:]
-    red, green, blue = (_to_linear(int(body[i : i + 2], 16) / 255.0) for i in (0, 2, 4))
-    return red, green, blue
+    return tuple(_to_linear(int(body[i : i + 2], 16) / 255.0) for i in (0, 2, 4))
 
 
 _WHITE = (0.95047, 1.0, 1.08883)
@@ -165,9 +161,7 @@ def hex_to_lab(hex_color: str) -> tuple[float, float, float]:
 
     def f(value: float) -> float:
         """Lab の非線形圧縮。"""
-        if value > 216 / 24389:
-            return value ** (1 / 3)
-        return (24389 / 27 * value + 16) / 116
+        return value ** (1 / 3) if value > 216 / 24389 else (24389 / 27 * value + 16) / 116
 
     fx, fy, fz = (f(c / w) for c, w in zip((x, y, z), _WHITE, strict=True))
     return 116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)
@@ -286,9 +280,7 @@ def base_ids(tokens: dict[str, Any]) -> tuple[str, ...]:
     return tuple(tokens["bases"])
 
 
-def _lower_lightness_until(
-    value: str, backdrop_hex: str, minimum: float
-) -> str:
+def _lower_lightness_until(value: str, backdrop_hex: str, minimum: float) -> str:
     """色相と彩度を保ったまま明度だけ下げ、比率を満たす最大の明度を返す。
 
     upstream の値をできる限り残すため、条件を満たした時点で止める。
@@ -310,12 +302,11 @@ def series_colors(tokens: dict[str, Any], theme: str) -> dict[str, str]:
     """
     series = tokens["series"]
     lightness = series["light_lightness"] if theme == "light" else series["dark_lightness"]
-    colors: dict[str, str] = {}
-    for index, (hue, chroma) in enumerate(
-        zip(series["hues"][: series["count"]], series["chromas"][: series["count"]], strict=True), start=1
-    ):
-        colors[f"--chart-{index}"] = format_oklch(lightness, fit_chroma(lightness, chroma, hue), hue)
-    return colors
+    count = series["count"]
+    return {
+        f"--chart-{index}": format_oklch(lightness, fit_chroma(lightness, chroma, hue), hue)
+        for index, (hue, chroma) in enumerate(zip(series["hues"][:count], series["chromas"][:count], strict=True), 1)
+    }
 
 
 def scheme(tokens: dict[str, Any], base_id: str, theme: str) -> dict[str, str]:
@@ -325,8 +316,9 @@ def scheme(tokens: dict[str, Any], base_id: str, theme: str) -> dict[str, str]:
         name = f'--{fix["var"]}'
         backdrop = resolved[f'--{fix["against"]}']
         current = oklch_to_hex(resolved[name], backdrop)
-        if contrast_ratio(current, oklch_to_hex(backdrop)) < fix["min_ratio"]:
-            resolved[name] = _lower_lightness_until(resolved[name], oklch_to_hex(backdrop), fix["min_ratio"])
+        backdrop_hex = oklch_to_hex(backdrop)
+        if contrast_ratio(current, backdrop_hex) < fix["min_ratio"]:
+            resolved[name] = _lower_lightness_until(resolved[name], backdrop_hex, fix["min_ratio"])
     for name, spec in tokens["derived_roles"].items():
         resolved[f"--{name}"] = spec[theme]
     resolved.update(series_colors(tokens, theme))
@@ -360,9 +352,7 @@ def contrast_violations(tokens: dict[str, Any], base_id: str, theme: str) -> lis
     for foreground, background, minimum in CONTRAST_CONTRACT:
         ratio = contrast_ratio(colors[foreground], colors[background])
         if ratio < minimum:
-            violations.append(
-                f"{label} {foreground} と {background} のコントラストが {ratio:.2f}（下限 {minimum}）"
-            )
+            violations.append(f"{label} {foreground} と {background} のコントラストが {ratio:.2f}（下限 {minimum}）")
     decorative = tokens["decorative_roles"]
     for name in decorative["vars"]:
         backdrop = "--sidebar" if name.startswith("sidebar") else "--background"
@@ -375,14 +365,12 @@ def contrast_violations(tokens: dict[str, Any], base_id: str, theme: str) -> lis
     if len(set(series)) != len(series):
         violations.append(f"{label} 系列色に重複がある")
     minimum_distance = tokens["series"]["min_delta_e"]
-    for left in range(len(series)):
-        for right in range(left + 1, len(series)):
-            distance = delta_e(series[left], series[right])
-            if distance < minimum_distance:
-                violations.append(
-                    f"{label} --chart-{left + 1} と --chart-{right + 1} の色差が "
-                    f"{distance:.1f}（下限 {minimum_distance}）"
-                )
+    for (left, first), (right, second) in itertools.combinations(enumerate(series, 1), 2):
+        distance = delta_e(first, second)
+        if distance < minimum_distance:
+            violations.append(
+                f"{label} --chart-{left} と --chart-{right} の色差が {distance:.1f}（下限 {minimum_distance}）"
+            )
     return violations
 
 
@@ -424,10 +412,12 @@ def render_tokens_css(tokens: dict[str, Any]) -> str:
     for base_id in base_ids(tokens):
         for theme in THEMES:
             resolved = scheme(tokens, base_id, theme)
-            lines.append(f':root[data-theme="{theme}"][data-base="{base_id}"] {{')
-            lines.extend(f"  {name}: {resolved[name]};" for name in names)
-            lines.append("}")
-            lines.append("")
+            lines += [
+                f':root[data-theme="{theme}"][data-base="{base_id}"] {{',
+                *(f"  {name}: {resolved[name]};" for name in names),
+                "}",
+                "",
+            ]
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -439,8 +429,7 @@ def _typography_lines(tokens: dict[str, Any]) -> list[str]:
         f'  --font-mono: {typography["mono_family"]};',
     ]
     for name, spec in typography["scale"].items():
-        lines.append(f'  --text-{name}: {spec["size"]}rem;')
-        lines.append(f'  --text-{name}-line: {spec["line"]}rem;')
+        lines += [f'  --text-{name}: {spec["size"]}rem;', f'  --text-{name}-line: {spec["line"]}rem;']
     lines.extend(f"  --tracking-{name}: {value}em;" for name, value in typography["tracking"].items())
     lines.extend(f"  --font-weight-{name}: {value};" for name, value in typography["weight"].items())
     return lines
@@ -458,10 +447,9 @@ def _radius_lines(tokens: dict[str, Any]) -> list[str]:
 
 def _shadow_lines(tokens: dict[str, Any]) -> list[str]:
     """影の変数を返す。影色は黒固定で、両テーマとも同じ定義を使う。"""
-    shadow = tokens["shadow"]
     return [
         "  --shadow-rgb: 0 0 0;",
-        *(f"  --shadow-{name}: {value};" for name, value in shadow.items() if name != "source"),
+        *(f"  --shadow-{name}: {value};" for name, value in tokens["shadow"].items() if name != "source"),
     ]
 
 
@@ -484,19 +472,11 @@ def _state_lines(tokens: dict[str, Any]) -> list[str]:
 
 def _layout_lines(tokens: dict[str, Any]) -> list[str]:
     """レイアウト（ブレークポイント / ガター）変数を返す。"""
-    layout = tokens["layout"]
     return [
         f'  --layout-{name.replace("_", "-").removesuffix("-px")}: {value}px;'
-        for name, value in layout.items()
+        for name, value in tokens["layout"].items()
         if name != "source"
     ]
-
-
-def write_tokens_css(site_dir: Path, tokens: dict[str, Any]) -> Path:
-    """tokens.css を書き出す。"""
-    path = site_dir / "tokens.css"
-    path.write_text(render_tokens_css(tokens), encoding="utf-8")
-    return path
 
 
 # --- HTML 解析 ---------------------------------------------------------------
@@ -526,17 +506,15 @@ def validate_site(site_dir: Path, tokens: dict[str, Any] | None = None) -> list[
     missing = [name for name, path in paths.items() if not path.is_file()]
     if missing:
         return [f"{name} が無い" for name in missing]
-    html = paths["index.html"].read_text(encoding="utf-8")
-    styles = paths["styles.css"].read_text(encoding="utf-8")
-    generated = paths["tokens.css"].read_text(encoding="utf-8")
-    script = paths["app.js"].read_text(encoding="utf-8")
-    violations = _validate_html(html, tokens)
-    violations.extend(_validate_generated_css(generated, tokens))
-    violations.extend(_validate_styles(styles))
-    violations.extend(_validate_js(script))
-    violations.extend(_validate_authored_colors(html + styles + script))
-    violations.extend(_validate_axis_text_scale(html, styles))
-    return violations
+    html, styles, generated, script = (path.read_text(encoding="utf-8") for path in paths.values())
+    return [
+        *_validate_html(html, tokens),
+        *_validate_generated_css(generated, tokens),
+        *_validate_styles(styles),
+        *_validate_js(script),
+        *_validate_authored_colors(html + styles + script),
+        *_validate_axis_text_scale(html, styles),
+    ]
 
 
 def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:
@@ -610,9 +588,7 @@ _MIN_AXIS_TICKS = 3
 #: `arc`（ドーナツ）は角度で符号化するので直交軸を持たず、`spark-*` は後述の
 #: 潰し判定で除外される。
 #:
-#: **種別を増やしたらここも増やす。** `chart-forms.md` へ散布図と 100% 積み上げ
-#: 横棒を足したとき `point` / `seg` の追加を忘れ、その 2 形だけが軸ゼロでも
-#: 素通りしていた。形の語彙を広げて検知器を広げないと、新しい形だけが無検査になる。
+#: **種別を増やしたらここも増やす。** 増やさないと、新しい形だけが軸ゼロでも素通りする。
 #: `bar--h` は `class="bar` の前方一致で既に入る。
 _CARTESIAN_MARK_CLASSES = ("bar", "series-line", "series-area", "point", "seg")
 
@@ -652,8 +628,6 @@ def _is_cartesian_chart(svg: str) -> bool:
 def _validate_chart_axes(html: str) -> list[str]:
     """直交軸チャートが目盛りを持つことを検査する。
 
-    テンプレート同梱のチャートは正しい軸を持っていたが、モデルが新しく書いた
-    チャートから軸が丸ごと落ちても、この検知器が無い間は全項目が合格していた。
     「図はあるが数値が読めない」は、図が無いのと同じかそれより悪い（読めた気に
     させる分だけ悪い）。散文で禁じるだけでは残るので機械的に落とす。
 
@@ -712,10 +686,7 @@ def _validate_axis_text_scale(html: str, css: str) -> list[str]:
     SVG の文字は viewBox 座標で書かれるので、SVG が幅 W で描かれるとき実効
     サイズは `宣言サイズ × W / viewBox幅` になる。W の下限は CSS の
     `min-inline-size` で静的に決まるため、最悪ケースをここで計算できる。
-
-    この穴があった間、`.axis-text` は 12px 宣言のまま実測 7.7px で描かれていた。
-    「目盛りはあるのに数値が読めない」の正体であり、CSS の宣言だけを見る
-    `_validate_styles` の 12px 検査は素通りする。
+    CSS の宣言だけを見る `_validate_styles` の 12px 検査では、この縮みを捉えられない。
 
     Args:
         html: 検査対象の HTML 文字列
@@ -756,9 +727,8 @@ def _validate_chart_scroll_wrapper(html: str) -> list[str]:
     """最小幅を持つチャートが横スクロール用の器に入っていることを検査する。
 
     `.chart` は `min-inline-size` で潰れを防いでいる。この下限がカード幅を超えた
-    とき、器が無いと SVG がページごと横へはみ出す（実測: 幅 1269px の画面で
-    文書幅が 1422px になった）。器があれば、はみ出しはカードの中の横スクロールに
-    閉じる。
+    とき、器が無いと SVG がページごと横へはみ出す。器があれば、はみ出しはカードの
+    中の横スクロールに閉じる。
 
     Args:
         html: 検査対象の HTML 文字列
@@ -766,17 +736,11 @@ def _validate_chart_scroll_wrapper(html: str) -> list[str]:
     Returns:
         違反メッセージの一覧
     """
-    violations: list[str] = []
-    for match in re.finditer(r'(.{0,80})<svg class="(chart[^"]*)"', html, re.DOTALL):
-        classes = match.group(2)
-        if "chart--donut" in classes:
-            continue
-        if "chart-scroll" not in match.group(1):
-            violations.append(
-                f'<svg class="{classes}"> が .chart-scroll の中に無い'
-                "（最小幅がカードを超えるとページごと横へはみ出す）"
-            )
-    return violations
+    return [
+        f'<svg class="{match.group(2)}"> が .chart-scroll の中に無い（最小幅がカードを超えるとページごと横へはみ出す）'
+        for match in re.finditer(r'(.{0,80})<svg class="(chart[^"]*)"', html, re.DOTALL)
+        if "chart--donut" not in match.group(2) and "chart-scroll" not in match.group(1)
+    ]
 
 
 #: 目盛りの刻みとして許す仮数。1・2・5 に 10 の冪を掛けた値だけが「読める」刻みで、
@@ -803,9 +767,8 @@ def _is_nice_step(step: float) -> bool:
 def _validate_tick_steps(html: str) -> list[str]:
     """値の目盛りが等間隔で、かつ 1・2・5 の刻みであることを検査する。
 
-    `references/design.md`「軸と目盛り」の刻み規則。散文へ書いただけでは守られず、
-    テンプレート自身が刻み 45 と 150（最大値を本数で割った端数）で出荷されていた。
-    読み手は 0 / 45 / 90 から「1 目盛りいくら」を即座に取れない。
+    `references/design.md`「軸と目盛り」の刻み規則。散文へ書いただけでは守られない。
+    最大値を本数で割った端数（0 / 45 / 90）では、読み手が「1 目盛りいくら」を即座に取れない。
 
     数字だけのラベルを値の目盛りとみなす。「1月」「Q1」のような分類ラベルは
     数値として解釈できないので自然に外れる。
@@ -819,12 +782,10 @@ def _validate_tick_steps(html: str) -> list[str]:
     violations: list[str] = []
     for index, svg in enumerate(_iter_svg_blocks(html), start=1):
         labels = re.findall(r'<text class="axis-text"[^>]*>([^<]+)</text>', svg)
-        values = sorted(
-            float(label.replace(",", "")) for label in labels if re.fullmatch(r"[\d,]+", label)
-        )
+        values = sorted(float(label.replace(",", "")) for label in labels if re.fullmatch(r"[\d,]+", label))
         if len(values) < 2:
             continue
-        steps = {round(values[i + 1] - values[i], 6) for i in range(len(values) - 1)}
+        steps = {round(upper - lower, 6) for lower, upper in itertools.pairwise(values)}
         if len(steps) > 1:
             violations.append(f"{index} 枚目の目盛りが等間隔でない（刻み {sorted(steps)}）")
             continue
@@ -863,9 +824,7 @@ def _validate_chart_form(html: str) -> list[str]:
             )
         bars = re.findall(r'<rect class="bar[^>]*>', svg)
         if len(bars) == 1:
-            violations.append(
-                f"{index} 枚目が棒 1 本のグラフ（値が 1 つなら指標カードにする）"
-            )
+            violations.append(f"{index} 枚目が棒 1 本のグラフ（値が 1 つなら指標カードにする）")
         vertical = [bar for bar in bars if _is_vertical_bar(bar)]
         if len(vertical) > _MAX_VERTICAL_BARS:
             violations.append(
@@ -908,14 +867,11 @@ def _validate_stretched_svg_text(html: str) -> list[str]:
     Returns:
         違反メッセージの一覧
     """
-    violations: list[str] = []
-    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        if 'preserveAspectRatio="none"' in svg and "<text" in svg:
-            violations.append(
-                f"{index} 枚目の SVG が preserveAspectRatio=\"none\" のまま <text> を持つ"
-                "（縦横独立に伸びるため文字が歪む）"
-            )
-    return violations
+    return [
+        f"{index} 枚目の SVG が preserveAspectRatio=\"none\" のまま <text> を持つ（縦横独立に伸びるため文字が歪む）"
+        for index, svg in enumerate(_iter_svg_blocks(html), start=1)
+        if 'preserveAspectRatio="none"' in svg and "<text" in svg
+    ]
 
 
 def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> list[str]:
@@ -943,12 +899,11 @@ def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> li
 
 def _script_runs_before_body(tags: list[tuple[str, dict[str, str]]]) -> bool:
     """app.js が body より前（head 内）で読み込まれているかを返す。"""
-    for tag, attrs in tags:
-        if tag == "body":
-            return False
-        if tag == "script" and "app.js" in attrs.get("src", ""):
-            return True
-    return False
+    # body と app.js の script のうち、先に現れたほうで決まる
+    first = next(
+        (tag for tag, attrs in tags if tag == "body" or (tag == "script" and "app.js" in attrs.get("src", ""))), None
+    )
+    return first == "script"
 
 
 def _validate_generated_css(css: str, tokens: dict[str, Any]) -> list[str]:
@@ -956,34 +911,35 @@ def _validate_generated_css(css: str, tokens: dict[str, Any]) -> list[str]:
     violations: list[str] = []
     if css != render_tokens_css(tokens):
         violations.append("tokens.css が tokens.json からの生成結果と一致しない（--write-css で再生成する）")
-    for base_id in base_ids(tokens):
-        for theme in THEMES:
-            violations.extend(contrast_violations(tokens, base_id, theme))
-    return violations
+    return violations + [
+        violation
+        for base_id in base_ids(tokens)
+        for theme in THEMES
+        for violation in contrast_violations(tokens, base_id, theme)
+    ]
 
 
 def _validate_styles(css: str) -> list[str]:
     """手書き CSS のレスポンシブ・モーション・トークン利用契約を検査する。"""
-    violations: list[str] = []
-    for name in REQUIRED_STYLE_VARS:
-        if f"var({name}" not in css:
-            violations.append(f"styles.css が {name} を使っていない")
-    for width in REQUIRED_BREAKPOINTS:
-        if f"{width}px" not in css:
-            violations.append(f"styles.css に {width}px のブレークポイントが無い")
-    if "minmax(" not in css:
-        violations.append("styles.css に伸縮するグリッド（minmax）が無い")
-    if "clamp(" not in css:
-        violations.append("styles.css に流体タイポ（clamp）が無い")
-    if ":focus-visible" not in css:
-        violations.append("styles.css に :focus-visible のリングが無い（キーボード操作が見えない）")
+    violations = [f"styles.css が {name} を使っていない" for name in REQUIRED_STYLE_VARS if f"var({name}" not in css]
+    violations += [
+        f"styles.css に {width}px のブレークポイントが無い" for width in REQUIRED_BREAKPOINTS if f"{width}px" not in css
+    ]
+    violations += [
+        message
+        for needle, message in (
+            ("minmax(", "styles.css に伸縮するグリッド（minmax）が無い"),
+            ("clamp(", "styles.css に流体タイポ（clamp）が無い"),
+            (":focus-visible", "styles.css に :focus-visible のリングが無い（キーボード操作が見えない）"),
+        )
+        if needle not in css
+    ]
     # 文字色を透明との混合で作ると、ライトでは背景へ寄って可読性契約を割る。
     # 面や枠の混合は問題ないので、`color:` だけを見る。
-    for match in re.finditer(r"(?<![-\w])color:\s*color-mix\([^;}]*\btransparent\b", css):
-        violations.append(
-            f"文字色を透明との color-mix で作っている: `{match.group(0)[:52]}...`"
-            "（役割変数を直接使う）"
-        )
+    violations += [
+        f"文字色を透明との color-mix で作っている: `{match.group(0)[:52]}...`（役割変数を直接使う）"
+        for match in re.finditer(r"(?<![-\w])color:\s*color-mix\([^;}]*\btransparent\b", css)
+    ]
     if re.search(r"font-size:\s*(?:[0-9]|1[0-1])px", css):
         violations.append("12px 未満の font-size がある")
     violations.extend(_validate_reduced_motion(css))
@@ -996,18 +952,12 @@ def _validate_styles(css: str) -> list[str]:
 
 def _validate_reduced_motion(css: str) -> list[str]:
     """モーション低減設定への追従を検査する。"""
-    match = re.search(
-        r"@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)\s*\{(.*?)\n\}", css, re.DOTALL
-    )
+    match = re.search(r"@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)\s*\{(.*?)\n\}", css, re.DOTALL)
     if match is None:
         return ["@media (prefers-reduced-motion: reduce) のブロックが無い"]
-    body = match.group(1)
-    violations: list[str] = []
-    if "animation" not in body:
-        violations.append("モーション低減ブロックが animation を止めていない")
-    if "transition" not in body:
-        violations.append("モーション低減ブロックが transition を止めていない")
-    return violations
+    return [
+        f"モーション低減ブロックが {name} を止めていない" for name in ("animation", "transition") if name not in match.group(1)
+    ]
 
 
 def _validate_resting_state(css: str) -> list[str]:
@@ -1023,9 +973,7 @@ def _validate_resting_state(css: str) -> list[str]:
        そもそも起動しない
     """
     violations: list[str] = []
-    if re.search(r"animation-fill-mode:\s*forwards", css) or re.search(
-        r"animation:[^;}]*\bforwards\b", css
-    ):
+    if re.search(r"animation-fill-mode:\s*forwards", css) or re.search(r"animation:[^;}]*\bforwards\b", css):
         violations.append("animation の fill-mode に forwards がある（静止状態が不可視になる）")
     outside = re.sub(r"@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\}\s*)*\}", "", css, flags=re.DOTALL)
     if re.search(r"(?<![-\w])opacity:\s*0(?:\.0+)?\s*;", outside):
@@ -1044,24 +992,24 @@ def _validate_resting_state(css: str) -> list[str]:
 
 def _validate_fluid_width(css: str) -> list[str]:
     """固定幅キャンバスが残っていないかを検査する。"""
-    violations: list[str] = []
-    for match in re.finditer(r"(?<![-\w(])width:\s*(\d{3,})px", css):
-        if int(match.group(1)) >= REQUIRED_BREAKPOINTS[0]:
-            violations.append(f"固定幅 {match.group(1)}px がある（表示領域を使い切れない）")
-    for match in re.finditer(r"(?<![(\w])max-width:\s*(\d{3,})px", css):
-        if int(match.group(1)) < 1600:
-            violations.append(f"max-width {match.group(1)}px が広い画面を捨てている")
-    return violations
+    return [
+        f"固定幅 {match.group(1)}px がある（表示領域を使い切れない）"
+        for match in re.finditer(r"(?<![-\w(])width:\s*(\d{3,})px", css)
+        if int(match.group(1)) >= REQUIRED_BREAKPOINTS[0]
+    ] + [
+        f"max-width {match.group(1)}px が広い画面を捨てている"
+        for match in re.finditer(r"(?<![(\w])max-width:\s*(\d{3,})px", css)
+        if int(match.group(1)) < 1600
+    ]
 
 
 def _validate_fluid_height(css: str) -> list[str]:
     """チャートの高さを固定 px で頭打ちにしていないことを検査する。
 
-    `_validate_fluid_width` が横方向で禁じているのと同じ誤りが、縦方向では
-    見逃されていた。``block-size: auto`` の SVG は viewBox の比率どおりに伸びる
-    ので、そこへ固定 px の上限を掛けると広い画面ほど
-    ``preserveAspectRatio`` のレターボックスで**図だけが小さく残る**。
-    「大きな画面なのにグラフが極端に小さい」の正体がこれである。
+    `_validate_fluid_width` が横方向で禁じているのと同じ誤りを縦方向で禁じる。
+    ``block-size: auto`` の SVG は viewBox の比率どおりに伸びるので、そこへ固定 px の
+    上限を掛けると広い画面ほど ``preserveAspectRatio`` のレターボックスで
+    **図だけが小さく残る**。
 
     上限そのものは要る（超ワイドで 900px 超の図になっても読みやすくはない）。
     禁じるのは上限が**ビューポートに追従しない**ことなので、``clamp()`` /
@@ -1073,15 +1021,12 @@ def _validate_fluid_height(css: str) -> list[str]:
     Returns:
         違反メッセージの一覧
     """
-    violations: list[str] = []
-    for match in re.finditer(r"max-block-size:\s*([^;}]+)", css):
-        value = match.group(1).strip()
-        if re.fullmatch(r"\d+px", value):
-            violations.append(
-                f"max-block-size: {value} が固定（ビューポートに追従しないため"
-                "広い画面で図だけが小さく残る。clamp() / vh を使う）"
-            )
-    return violations
+    values = (match.group(1).strip() for match in re.finditer(r"max-block-size:\s*([^;}]+)", css))
+    return [
+        f"max-block-size: {value} が固定（ビューポートに追従しないため広い画面で図だけが小さく残る。clamp() / vh を使う）"
+        for value in values
+        if re.fullmatch(r"\d+px", value)
+    ]
 
 
 def _validate_chart_chrome(css: str) -> list[str]:
@@ -1102,8 +1047,7 @@ def _validate_chart_chrome(css: str) -> list[str]:
         block = re.search(rf"{re.escape(selector)}\s*\{{(.*?)\}}", css, re.DOTALL)
         if block and "stroke-dasharray" in block.group(1):
             violations.append(
-                f"{selector} が破線（stroke-dasharray）"
-                "（破線は予測・しきい値の記法。目盛りは実線のヘアラインにする）"
+                f"{selector} が破線（stroke-dasharray）（破線は予測・しきい値の記法。目盛りは実線のヘアラインにする）"
             )
     return violations
 
@@ -1121,11 +1065,7 @@ def _validate_js(script: str) -> list[str]:
         ("prefers-reduced-motion", ("prefers-reduced-motion",)),
         ("DOM 構築前の実行順", ("defer", "DOMContentLoaded")),
     )
-    violations = [
-        f"app.js が {label} を扱っていない"
-        for label, needles in any_of
-        if not any(needle in script for needle in needles)
-    ]
+    violations = [f"app.js が {label} を扱っていない" for label, needles in any_of if not any(n in script for n in needles)]
     if "light" not in script or "dark" not in script:
         violations.append("app.js が light/dark を扱っていない")
     return violations
@@ -1137,31 +1077,25 @@ def _validate_authored_colors(text: str) -> list[str]:
     色の正本は tokens.json だけ。HTML / styles.css / app.js の色は必ず
     `var(--*)` を通す。ここを緩めるとテーマ切替が片側だけ壊れる。
     """
-    violations: list[str] = []
-    for hex_color in sorted({match.upper() for match in HEX_RE.findall(text)}):
-        violations.append(f"手書きファイルに生の hex {hex_color} がある（tokens.json 経由で参照する）")
-    for function in sorted({match.group(1).lower() for match in COLOR_FUNCTION_RE.finditer(text)}):
-        violations.append(f"手書きファイルに色関数 `{function}()` がある（var(--*) か color-mix を使う）")
-    for name in sorted({match.group(1).lower() for match in NAMED_COLOR_RE.finditer(text)}):
-        if name not in NON_COLOR_KEYWORDS:
-            violations.append(f"名前付き色 `{name}` は禁止（var(--*) を使う）")
-    return violations
+    hexes = sorted({match.upper() for match in HEX_RE.findall(text)})
+    functions = sorted({match.group(1).lower() for match in COLOR_FUNCTION_RE.finditer(text)})
+    names = sorted({match.group(1).lower() for match in NAMED_COLOR_RE.finditer(text)} - NON_COLOR_KEYWORDS)
+    return [
+        *(f"手書きファイルに生の hex {hex_color} がある（tokens.json 経由で参照する）" for hex_color in hexes),
+        *(f"手書きファイルに色関数 `{function}()` がある（var(--*) か color-mix を使う）" for function in functions),
+        *(f"名前付き色 `{name}` は禁止（var(--*) を使う）" for name in names),
+    ]
 
 
 # --- CLI ---------------------------------------------------------------------
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """CLI パーサを構築する。"""
+def main(argv: list[str] | None = None) -> int:
+    """エントリポイント。"""
     parser = argparse.ArgumentParser(description="shadcn/ui トークン契約の検査 / 生成")
     parser.add_argument("site", nargs="?", default=".", help="検査するサイトディレクトリ")
     parser.add_argument("--write-css", action="store_true", help="tokens.json から tokens.css を再生成する")
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    """エントリポイント。"""
-    args = build_parser().parse_args(argv)
+    args = parser.parse_args(argv)
     site_dir = Path(args.site).resolve()
     try:
         tokens = load_tokens(default_tokens_path(site_dir))
@@ -1169,7 +1103,9 @@ def main(argv: list[str] | None = None) -> int:
         print(err, file=sys.stderr)
         return 2
     if args.write_css:
-        print(write_tokens_css(site_dir, tokens))
+        path = site_dir / "tokens.css"
+        path.write_text(render_tokens_css(tokens), encoding="utf-8")
+        print(path)
         return 0
     violations = validate_site(site_dir, tokens)
     if not violations:
