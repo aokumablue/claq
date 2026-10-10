@@ -1,36 +1,24 @@
 #!/usr/bin/env python3
 """コミット対象ファイルの内容を取得し、品質・シークレット問題を検出します。
 
-`pre_bash_commit_quality` フックのスキャナ層です。ファイル内容の取得
-（INDEX / 作業ツリー）、lint 対象・シークレットスキャン対象の判定、
-バイナリ判定、そして実際の問題検出（ログ出力呼び出し / デバッガ文 / TODO /
-シークレット）を担います。`git commit` の検出やコミットメッセージ検証
-といったエントリ側のロジックは `pre_bash_commit_quality` に残ります。
+`pre_bash_commit_quality` フックのスキャナ層です。ファイル内容の取得（INDEX /
+作業ツリー）、lint 対象・シークレットスキャン対象の判定、バイナリ判定、問題検出
+（ログ出力呼び出し / デバッガ文 / TODO / シークレット）を担います。`git commit` の
+検出やコミットメッセージ検証はエントリ側の `pre_bash_commit_quality` に残ります。
 
-シークレット検出はテキストファイルであれば nosec・ファイルサイズに関わらず
-全体を走査します（サイズによる打ち切りは行いません）。バイナリ
-判定されたファイルも走査対象で、`_extract_printable_runs` が抽出した印字可能
-文字列を擬似的な行として同じパターンを当てます（docs/adr/shell-analysis-boundary.md。
-バイナリを走査対象から外すと、先頭に NUL を 1 バイト混ぜるだけで検査を回避できる）。
-走査量に上限を設けないと
-`pre_bash_commit_quality` の hook timeout（30秒）に達し、host がフックを
-キャンセルして続行する（fail-open）ため commit 全体の secret scan が無検査に
-なりうる、というサイズで打ち切るより悪いリスクがあります。そのため実時間バジェット
-（`_SECRET_SCAN_TIME_BUDGET_SECONDS`）を設け、超過したテキストファイルは
-`scan_error`（severity `error`、fail-closed）として扱います。
+シークレット検出は nosec・ファイルサイズに関わらず全体を走査します。バイナリ判定
+されたファイルも、`_extract_printable_runs` が抽出した印字可能文字列へ同じパターンを
+当てます（docs/adr/shell-analysis-boundary.md。外すと先頭に NUL を 1 バイト混ぜるだけで
+検査を回避できる）。
 
-このバジェットは**フック 1 回の起動全体で共有する 1 本の予算**です
-（`new_secret_scan_deadline` で起動ごとに 1 度だけ deadline を作り、
-`find_file_issues` 経由で `_scan_secret_issues` へ渡します）。ファイル単位に
-すると staged が N 件あるとき N 倍の実時間を許してしまい、1 ファイルあたりは
-予算内でも累積で hook timeout に達するため、上記の目的を果たせません。
-
-同じ 1 本の予算に **lint scan（`_scan_lint_issues`）も載せます**。lint は
-`find_file_issues` が secret より先に呼ぶため、lint 側が予算の外にあると
-「secret scan に入る前に hook timeout へ達する」経路が開いたままになり、
-上記の目的が原理的に達成できません。予算の確認間隔は走査済みバイト数で数え
-（`_SCAN_BUDGET_CHECK_BYTES`）、行数では数えません —— 改行の無い巨大 1 行の
-ファイルは行数が 1 なので、行数基準では走査開始前の 1 回しか確認されません。
+走査量に上限が無いと `pre_bash_commit_quality` の hook timeout（30秒）に達し、host が
+フックをキャンセルして続行する（fail-open）。そのため実時間バジェット
+（`_SECRET_SCAN_TIME_BUDGET_SECONDS`）を設け、超過は `scan_error`（severity `error`、
+fail-closed）として扱います。このバジェットは**フック 1 回の起動全体で共有する
+1 本の予算**で（`new_secret_scan_deadline`）、secret より先に走る lint scan も同じ予算に
+載せます。ファイル単位や secret 単独の予算では、累積や lint 側で hook timeout に
+達する経路が残るためです。予算の確認間隔は行数ではなく走査済みバイト数で数えます
+（改行の無い巨大 1 行のファイルでは、行数基準だと走査開始前の 1 回しか確認されない）。
 """
 
 from __future__ import annotations
@@ -44,8 +32,8 @@ from claq.lib.core_utils import log
 from claq.mem.tag_stripping import strip_tags
 
 # deny 出力へ載せる不信データ（ステージされたファイルの行内容）の最大文字数。
-# stderr は `output_adapter.emit_block` の docstring どおりモデルへ提示される
-# チャネルなので、長さ無制限の抜粋はコンテキストを丸ごと押し出せる。
+# stderr はモデルへ提示されるチャネルなので、長さ無制限の抜粋はコンテキストを
+# 丸ごと押し出せる。
 _UNTRUSTED_EXCERPT_MAX_CHARS = 200
 
 _BINARY_SNIFF_SIZE = 8192  # 8KB
@@ -57,33 +45,20 @@ _BINARY_STRINGS_RE = re.compile(
     rf"[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]{{{_BINARY_STRINGS_MIN_LENGTH},}}"
 )
 
-# フック 1 回の起動で secret scan 全体に許す実時間予算（秒）。ファイル数に
-# よらず 1 本で、pre_bash_commit_quality の hooks.json timeout（30秒）より
-# 十分小さく取り、予算超過を scan_error（fail-closed）として検知してから
-# ホスト側 timeout に達しないようにする。
-#
-# この予算が支配するのはパターン走査の実時間だけで、ファイル内容の読み取り
-# （`git show` は 1 ファイルにつき 1 回・timeout=5 秒）は課金対象外。よって
-# 「30 秒 − 10 秒 = 20 秒あれば読み取りは必ず収まる」とは言えず、ファイル数が
-# 多いコミットでは読み取り側が hook timeout を支配しうる。読み取りを同じ予算へ
-# 載せるかは本予算とは別の未対応論点。
+# フック 1 回の起動で走査全体に許す実時間予算（秒）。hooks.json の timeout（30秒）より
+# 十分小さく取り、ホスト側 timeout に達する前に scan_error（fail-closed）として検知する。
+# 予算が支配するのはパターン走査の実時間だけで、ファイル内容の読み取り（`git show` は
+# 1 ファイルにつき timeout=5 秒）は課金対象外。
 _SECRET_SCAN_TIME_BUDGET_SECONDS = 10.0
 
-# 予算チェックの間隔（走査済みバイト数）。毎回 `_monotonic()` を呼ぶコストを
-# 避けつつ、予算超過を実用上十分な精度で検知する。
-#
-# 「行数」基準（2000 行ごと）にしてはならない。改行の無い巨大 1 行のファイルは
-# 行数が 1 なので index 0 の 1 回、つまり**走査開始前**にしか確認されず、
-# バジェットが原理的に効かなかった。走査の実コストは行数ではなくバイト数に
-# 比例するため、間隔もバイト数で数える。
+# 予算チェックの間隔（走査済みバイト数）。毎回時刻を読むコストを避けつつ、予算超過を
+# 実用上十分な精度で検知する。走査の実コストはバイト数に比例するため、行数では数えない。
 _SCAN_BUDGET_CHECK_BYTES = 256 * 1024
 
-# 1 行あたりの上限長は設けない（＝長い行を打ち切らない）。打ち切ると、上限より
-# 後ろに secret を置いた 1 行を作るだけで検査を回避できる新しいバイパスになる。
-# 代わりに予算確認を「行 × パターン」の粒度で行い（`_ScanBudget.check`）、
-# 予算超過を検知してから実際に走査を止めるまでの超過量を「1 パターン × 1 行の
-# 1 回の線形走査」に抑える。全パターンが線形であること（JWT の lookbehind と
-# 所有量指定子）がこの上界の前提。
+# 1 行あたりの上限長は設けない。打ち切ると、上限より後ろに secret を置いた 1 行で
+# 検査を回避できる。代わりに予算確認を「行 × パターン」の粒度で行い、超過検知から
+# 停止までの超過量を「1 パターン × 1 行の線形走査 1 回」に抑える。全パターンが線形で
+# あること（JWT の lookbehind と所有量指定子）がこの上界の前提。
 
 _LINTABLE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
 _MINIFIED_SUFFIXES = (".min.js", ".min.css")
@@ -97,16 +72,11 @@ _SECRET_SCAN_EXCLUDED_FILENAMES = {
     "Pipfile.lock",
 }
 _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
-    # ベンダ prefix の集合は `claq.mem.redaction._PATTERNS` と揃える。同じ
-    # リポジトリで「記録時はマスクするが commit 時は検出しない」秘密が
-    # 生まれないようにするため。
+    # ベンダ prefix の集合は `claq.mem.redaction._PATTERNS` と揃える（記録時はマスクするが
+    # commit 時は検出しない秘密を作らないため）。
     #
-    # `sk-` の文字クラスに `-` を含めるのは、OpenAI の現行形式
-    # （`sk-` の後にセグメントとハイフンが続く）が `-` を含まないクラスでは
-    # 原理的に一致しないため（隣の Anthropic パターンと同じ形）。
-    # `(?!ant-)` は Anthropic 形との二重計上を避けるため。文字クラスに `-` が
-    # あると、`sk-ant-...` が両方のパターンに一致して 1 行から 2 件の
-    # issue が出る。
+    # `sk-` の文字クラスに `-` を含めるのは、OpenAI の現行形式がハイフンを含むため。
+    # `(?!ant-)` は Anthropic 形と 1 行から 2 件の issue が出る二重計上を避けるため。
     (r"sk-(?!ant-)[a-zA-Z0-9_-]{20,}", "OpenAI API key"),
     (r"sk-ant-[a-zA-Z0-9_-]{20,}", "Anthropic API key"),
     (r"gh[pors]_[a-zA-Z0-9]{36,}", "GitHub PAT"),
@@ -114,28 +84,16 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"xox[bpoa]-[a-zA-Z0-9-]{10,}", "Slack token"),
     (r"AIza[a-zA-Z0-9_-]{35}", "Google API key"),
     (r"(?:AKIA|ASIA|AIDA|AROA)[A-Z0-9]{16}", "AWS Access Key"),
-    # `eyJ` の直前に base64url 文字が無いことを要求する（lookbehind）。これが無いと
-    # `eyJeyJeyJ…` のような入力で 3 バイトごとに開始位置が立ち、そのたびに
-    # `[a-zA-Z0-9_-]+` が残り全体を貪欲に取ってから後退するため、走査が二次
-    # オーダーへ落ちる（実測: 24,000 文字で 0.50s。1MiB へ外挿すると 15 分超で、
-    # pre_bash_commit_quality の hook timeout 30 秒を桁で超える）。lookbehind が
-    # 付くと開始位置の直前は必ず非 base64url 文字になり、各開始位置が走査する
-    # 文字クラス連鎖どうしが重ならないため全体が線形になる。
-    # 併せて量指定子を所有的（`++` / `*+`）にして後退そのものを禁じる。直後の
-    # `\.` は文字クラスと素なので貪欲一致は元から `.` の手前で止まり、一致する
-    # 文字列の集合は変わらない。
-    # 代償として `abceyJhbGci…` のように base64url 文字へ続く `eyJ` は一致
-    # しなくなる。JWT はトークンであり実物は区切りの直後に現れるため、これは
-    # 意図した絞り込み —— 下の PEM パターンで「曖昧な繰り返しは走査を二次
-    # オーダーへ落とすので使わない」とした判断と同じ方針を適用したもの。
+    # `eyJ` の直前に base64url 文字が無いことを要求する（lookbehind）。無いと `eyJeyJeyJ…`
+    # で 3 バイトごとに開始位置が立ち、各位置が残り全体を貪欲に取って後退するため走査が
+    # 二次オーダーへ落ち、hook timeout を桁で超える。量指定子も所有的にして後退を禁じる
+    # （直後の `\.` は文字クラスと素なので一致集合は変わらない）。代償として base64url
+    # 文字へ続く `eyJ` は一致しないが、JWT の実物は区切りの直後に現れる。
     (r"(?<![a-zA-Z0-9_-])eyJ[a-zA-Z0-9_-]++\.[a-zA-Z0-9_-]++\.[a-zA-Z0-9_-]*+", "JWT"),
-    # 認証情報の代入。クォートを必須にすると `.env` の `API_KEY=...` と
-    # YAML の `api_key: ...` が素通りするが、単にクォートを任意にすると
-    # `token = segment[index]` のような通常のコード代入まで拾ってしまう。
-    # commit をブロックするフックでこの誤検出は可用性を壊すため、
-    # 「クォート付き」「区切りの前後に空白が無い env/ini 形」「行頭キーの
-    # YAML 形」の 3 形に限定する。値の文字集合を ASCII の秘密様文字へ
-    # 絞ることで、docstring の `token: 検査対象のトークン。` も外れる。
+    # 認証情報の代入。クォートを任意にすると `token = segment[index]` のような通常の
+    # コード代入まで拾い、commit をブロックするフックの可用性を壊す。そのため
+    # 「クォート付き」「区切りの前後に空白が無い env/ini 形」「行頭キーの YAML 形」の
+    # 3 形に限定し、値の文字集合も ASCII の秘密様文字へ絞る。
     (
         r"(?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*['\"][^'\"\s]+['\"]",
         "credential assignment",
@@ -148,17 +106,13 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
         r"^\s*[a-z0-9_]*(?:password|passwd|secret|token|api[-_]?key)\s*:\s+[A-Za-z0-9_\-./+]{8,}\s*$",
         "credential assignment",
     ),
-    # PEM / OpenSSH / PGP 秘密鍵ブロックのヘッダ行。鍵種別は列挙で固定し
-    # `[A-Z ]+` のような曖昧な繰り返しを使わない（曖昧な繰り返しは、
-    # 前置の 5 ハイフンに一致した後の長い大文字列で走査を二次オーダーへ
-    # 落とす）。公開物のヘッダ（CERTIFICATE / PUBLIC KEY）は
+    # PEM / OpenSSH / PGP 秘密鍵ブロックのヘッダ行。鍵種別は列挙で固定し、走査を二次
+    # オーダーへ落とす `[A-Z ]+` のような曖昧な繰り返しを使わない。公開物のヘッダは
     # "PRIVATE KEY" を含まないので一致しない。
     #
-    # 鍵種別を増やすときは、この 1 本の交替へ語を足す。種別ごとに完成形の
-    # ヘッダを literal で書き並べる形にはしない —— その行自身が自分の
-    # パターンへ一致し、「本モジュールを走査すると秘密が検出される」状態に
-    # なる（`tests/hooks/test_hook_edge_cases.py` の自己走査テストがそれを検出して落ちる）。
-    # 同じ理由で、この付近のコメントにも完成形のヘッダを書かない。
+    # 鍵種別はこの 1 本の交替へ語を足す。完成形のヘッダを literal で書き並べると、その
+    # 行自身がパターンへ一致し、本モジュールの自己走査テストが落ちる。同じ理由で、この
+    # 付近のコメントにも完成形のヘッダを書かない。
     (
         r"-----BEGIN (?:RSA |DSA |EC |OPENSSH |ENCRYPTED |PGP |SSH2 |SSH2 ENCRYPTED )?"
         r"PRIVATE KEY(?: BLOCK)?[-]{5}",
@@ -176,12 +130,8 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
 def _monotonic() -> float:
     """`time.monotonic()` を返す間接呼び出し。
 
-    secret scan の実時間バジェット判定に使う時刻取得をテストから
-    決定的に差し替え可能にするための間接層です（`time.monotonic()` を
-    直接呼ぶとテストがスリープに依存し flaky になるため）。
-
-    Args:
-        なし
+    実時間バジェット判定の時刻取得を、テストがスリープに依存せず決定的に差し替える
+    ための間接層です。
 
     Returns:
         単調増加する時刻（秒）。
@@ -193,14 +143,10 @@ def _monotonic() -> float:
 
 
 def new_secret_scan_deadline() -> float:
-    """secret scan の実時間予算 1 本分の deadline を作ります。
+    """走査の実時間予算 1 本分の deadline を作ります。
 
-    フック 1 回の起動につき 1 度だけ呼び、返り値を全ファイルの
-    `find_file_issues` へ渡してください。ファイルごとに呼ぶと予算が
-    ファイル数分だけ増え、累積で hook timeout に達しうる状態へ戻ります。
-
-    Args:
-        なし
+    フック 1 回の起動につき 1 度だけ呼び、返り値を全ファイルの `find_file_issues` へ
+    渡してください。ファイルごとに呼ぶと予算がファイル数分だけ増えます。
 
     Returns:
         `_monotonic()` 基準で走査を打ち切るべき時刻（秒）。
@@ -214,36 +160,22 @@ def new_secret_scan_deadline() -> float:
 class SecretScanBudgetExceeded(Exception):
     """走査が実時間予算を超過したことを表す例外。
 
-    `find_file_issues` の既存の例外ガード（`scan_error`、severity `error`、
-    fail-closed）にそのまま乗せるための専用例外です。
-
-    予算は secret scan 専用ではなく lint scan とも共有する 1 本ですが、名前は
-    `new_secret_scan_deadline` と対にしています（予算の実体は
-    「フック 1 回の起動全体で共有する 1 本」であり、改名は
-    `pre_bash_commit_quality` 側への波及だけを生んで意味を足さないため）。
+    `find_file_issues` の例外ガード（`scan_error`、severity `error`、fail-closed）に
+    乗せるための専用例外です。予算は lint scan とも共有しますが、名前は
+    `new_secret_scan_deadline` と対にしています。
     """
 
 
 class _ScanBudget:
     """走査の実時間予算を「走査済みバイト数」間隔で確認するガードです。
 
-    `check()` は呼ばれるたびに走査済みバイト数を積み、`_SCAN_BUDGET_CHECK_BYTES`
-    を跨いだときだけ `_monotonic()` を読みます。初期残量を 0 にしてあるため、
-    最初の `check()` は必ず時刻を読みます。
+    `check()` は走査済みバイト数を積み、`_SCAN_BUDGET_CHECK_BYTES` を跨いだときだけ
+    時刻を読みます。初期残量を 0 にしてあるため、最初の `check()` は必ず時刻を読みます。
 
-    **共有されるのは `deadline` だけで、バイト数の積算はインスタンス単位**です。
-    本クラスはスキャナ呼び出しごと（＝ファイルごとに lint 用と secret 用の
-    2 個）生成されるため、積算はファイルを跨いで持ち越されません。したがって
-    `_SCAN_BUDGET_CHECK_BYTES` が実際に発火するのは「1 ファイルの中で
-    256KiB 以上を走査したとき」だけで、256KiB 未満の小さなファイルが N 件
-    並ぶケースでは 1 ファイルにつき初回の 1 回しか時刻を読みません。
-
-    それで足りるのは、実時間の上界を与えているのが積算間隔ではなく共有
-    `deadline` の方だからです。初期残量 0 によって**各ファイル・各スキャナが
-    必ず開始時に 1 回は deadline を見る**ので、予算が尽きていれば次のファイル
-    （あるいは同じファイルの secret scan）が必ず fail-closed で止まります。
-    積算間隔が受け持つのは「1 ファイルの中を走り抜ける間の取りこぼし」——
-    行数基準では改行の無い巨大 1 行で落ちる区間——だけです。
+    共有されるのは `deadline` だけで、バイト数の積算はインスタンス（ファイルごとの
+    lint 用・secret 用）単位です。実時間の上界を与えるのは共有 `deadline` の方で、各
+    スキャナが開始時に必ず 1 回 deadline を見るため、予算が尽きていれば次のスキャナが
+    fail-closed で止まります。積算間隔が受け持つのは 1 ファイルの中を走り抜ける間だけです。
     """
 
     def __init__(self, deadline: float) -> None:
@@ -262,9 +194,6 @@ class _ScanBudget:
             scanned_bytes: 直前の走査で消費したバイト数です。
             where: 超過時のメッセージに載せる位置情報です。
 
-        Returns:
-            なし
-
         Raises:
             SecretScanBudgetExceeded: 実時間バジェットを超過した場合。
         """
@@ -281,13 +210,8 @@ class _ScanBudget:
 def _is_binary_content(content: str) -> bool:
     """先頭 `_BINARY_SNIFF_SIZE` 文字に NUL 文字（`\\x00`）が含まれるかでバイナリ判定します。
 
-    UTF-8 の NUL バイト（0x00）はデコード後も `\\x00` 文字として保持される
-    ため、デコード済みテキストに対して判定できます。この判定は lint
-    チェックの抑制にのみ使用し、シークレット検出の実施可否には使いません
-    （バイナリ判定を悪用して secret 検査を回避できないようにするためです）。
-    バイナリ判定された内容に対しては、行分割の代わりに
-    `_extract_printable_runs` で印字可能文字列を抽出して同じ secret パターンを
-    適用します（docs/adr/shell-analysis-boundary.md）。
+    この判定は lint チェックの抑制にのみ使い、シークレット検出の実施可否には使いません
+    （バイナリ判定を悪用して secret 検査を回避できないようにするため）。
 
     Args:
         content: 判定対象のデコード済み文字列です。
@@ -304,14 +228,9 @@ def _is_binary_content(content: str) -> bool:
 def _extract_printable_runs(content: str) -> list[str]:
     """バイナリ判定された内容から、印字可能文字の連続を擬似的な行として抽出します。
 
-    `strings(1)` と同じ発想です。NUL を含む制御文字で区切られた
-    `_BINARY_STRINGS_MIN_LENGTH` 文字以上の連続だけを返し、それぞれを 1 行と
-    みなして通常の secret パターンを適用します。
-
-    これにより「先頭に NUL を 1 バイト混ぜてバイナリ判定させ、secret 検査を
-    まるごと回避する」経路が塞がれます。真のバイナリ（画像等）は secret
-    パターンに一致する印字可能文字列を通常含まないため、一律ブロックには
-    なりません。
+    `strings(1)` と同じ発想で、制御文字で区切られた `_BINARY_STRINGS_MIN_LENGTH` 文字
+    以上の連続を返します。真のバイナリ（画像等）は secret パターンに一致する印字可能
+    文字列を通常含まないため、一律ブロックにはなりません。
 
     Args:
         content: バイナリ判定されたデコード済み文字列です。
@@ -328,11 +247,8 @@ def _extract_printable_runs(content: str) -> list[str]:
 def get_staged_file_content(file_path: str) -> str | None:
     """INDEX（ステージング領域）からファイル内容をテキストとして取得します。
 
-    `git show :path` の出力を bytes で取得し、UTF-8 として
-    `errors="replace"` でデコードします（不正なバイト列による
-    `UnicodeDecodeError` を避けるためです）。バイナリ判定はここでは行わず
-    `find_file_issues` 側で `_is_binary_content` を用いて lint 抑制のみに
-    適用します（シークレット検出はバイナリでも常に実行するためです）。
+    `git show :path` の出力を bytes で取得し、不正なバイト列で `UnicodeDecodeError` に
+    ならないよう UTF-8 / `errors="replace"` でデコードします。
 
     Args:
         file_path: 対象ファイルのパスです。
@@ -350,35 +266,21 @@ def get_staged_file_content(file_path: str) -> str | None:
             check=False,
             timeout=5,
         )
-        if result.returncode != 0:
-            return None
-        return result.stdout.decode("utf-8", errors="replace")
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.decode("utf-8", errors="replace")
 
 
 def get_worktree_file_content(repo_root: Path, file_path: str) -> str | None:
     """作業ツリーからファイル内容をテキストとして取得します。
 
-    `git commit -a` は作業ツリーの現在の内容をコミットするため、未ステージ
-    の変更ファイル（INDEX には反映されていない）はここから読む必要が
-    あります。UTF-8 として `errors="replace"` でデコードします。
-
-    読み取り前に realpath 包含チェックを行い、解決後の絶対パスが
-    `repo_root` 配下に収まっていることを確認します。これにより以下を
-    まとめて封鎖します:
-
-    - `file_path` 自身、または中間ディレクトリがシンボリックリンクで
-      `repo_root` 外の実体を指している場合（OS レベルでリンクを追跡すると
-      repo 外の秘密鍵等を読み込み、secret 検出結果としてログに一部露出
-      しうるため）
-    - `file_path` が絶対パスの場合（pathlib の仕様上 `repo_root` が無視される）
-    - `file_path` に `..` が含まれ `repo_root` 外へ traversal する場合
-
-    包含チェックに違反した場合は無言で None を返します（既存の「読めなければ
-    None」契約と一致させ、fail-open のノイズを増やさないためです）。
-    repo 内に留まる正当なシンボリックリンクは通過して読みます
-    （最小修正の方針。過検知は避けつつ実体は別経路でも検出されます）。
+    `git commit -a` は作業ツリーの現在の内容をコミットするため、未ステージの変更
+    ファイルはここから読みます。読み取り前に、解決後の絶対パスが `repo_root` 配下に
+    収まることを確認し、symlink（中間ディレクトリを含む）・絶対パス・`..` で repo 外の
+    秘密鍵等を読んでログへ一部露出させる経路を塞ぎます。違反は「読めなければ None」と
+    同じ扱いにします。repo 内に留まる symlink は通過して読みます。
 
     Args:
         repo_root: リポジトリルートの絶対パスです。
@@ -420,15 +322,9 @@ def should_lint_file(file_path: str) -> bool:
 def should_scan_secrets(file_path: str) -> bool:
     """ハードコードされたシークレットのスキャン対象かどうかを判定します。
 
-    lint チェックとは異なり拡張子で絞り込まず、原則として全ファイルを対象と
-    します（`tests/` 配下も除外しません）。以下のみ除外します:
-
-    - パッケージマネージャのロックファイル（内容が長大かつ生成物のため）
-    - 圧縮・生成物（`*.min.js` / `*.min.css`）
-
-    ファイルサイズによる除外は行いません。バイナリ判定による
-    除外も行いません —— バイナリは `find_file_issues` 側で印字可能文字列を
-    抽出した上で同じパターンを当てます（docs/adr/shell-analysis-boundary.md）。
+    拡張子で絞り込まず原則として全ファイル（`tests/` 配下も）を対象とし、パッケージ
+    マネージャのロックファイルと `*.min.js` / `*.min.css` だけを除外します。サイズや
+    バイナリ判定による除外は行いません。
 
     Args:
         file_path: 判定対象のファイルパスです。
@@ -448,11 +344,9 @@ def should_scan_secrets(file_path: str) -> bool:
 def _sanitize_untrusted_excerpt(text: str) -> str:
     """ファイル由来の抜粋を deny 出力へ載せる前に無害化する。
 
-    この抜粋は検査対象ファイルの本文であり、攻撃者が内容を選べる。deny 時に
-    stderr 経由でモデルのコンテキストへ入るため、囲いを偽装するタグ
-    （``</claq-memory>`` など）を `strip_tags` で倒し、長さにも上限を置く。
-    `mem/cli` の注入経路と `hook_common.recent_bg_failure_notice` は既に
-    `strip_tags` を通しており、PreToolUse の deny 経路も同じ扱いに揃える。
+    抜粋は攻撃者が内容を選べるファイル本文で、deny 時に stderr 経由でモデルの
+    コンテキストへ入る。囲いを偽装するタグ（``</claq-memory>`` など）を `strip_tags` で
+    倒し、長さにも上限を置く（`mem` の注入経路と同じ扱い）。
 
     Args:
         text: ファイル本文から切り出した抜粋。
@@ -472,22 +366,13 @@ def _sanitize_untrusted_excerpt(text: str) -> str:
 def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
     """ファイル内容からログ出力呼び出し / デバッガ文 / Issue 参照なし TODO を検出します。
 
-    `# nosec` を含む行は検出器自身のテストフィクスチャ等、意図的に
-    パターンを含む行とみなしてログ出力呼び出し / デバッガ文 / TODO チェックを
-    抑制します（シークレット検出は別関数で `# nosec` の対象外です）。
-
-    secret scan と**同じ 1 本の実時間予算**に載せます。`deadline` を受け取らず
-    時間検査を持たないと、`find_file_issues` が本関数を secret より先に
-    呼ぶ（＝予算の外側で任意時間を消費できる）ため、モジュール docstring が
-    掲げた目的（ホスト側 timeout に達して fail-open で commit 全体が無検査に
-    なるのを防ぐ）が原理的に達成できません。`deadline` に既定値を
-    持たせないのは `find_file_issues` と同じ理由です。
+    `# nosec` を含む行は検出器自身のテストフィクスチャ等、意図的にパターンを含む行と
+    みなして抑制します。secret scan と同じ 1 本の実時間予算に載せます。
 
     Args:
-        lines: 検査対象のデコード済みファイル内容を改行で分割した行リストです
-            （呼び出し側 `find_file_issues` が一度だけ分割して渡します）。
-        deadline: 走査を打ち切る `_monotonic()` 基準の時刻です。フック 1 回の
-            起動全体で共有する 1 本の予算（`new_secret_scan_deadline`）を渡します。
+        lines: 検査対象のデコード済みファイル内容を改行で分割した行リストです。
+        deadline: 走査を打ち切る `_monotonic()` 基準の時刻です
+            （`new_secret_scan_deadline` の 1 本の予算）。
 
     Returns:
         検出した lint 問題の辞書リストを返します。
@@ -501,12 +386,9 @@ def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
         line_num = index + 1
         budget.check(len(line), f"line {line_num}")
 
-        # 抑制マーカー付き行（検出器自身のテストフィクスチャ等、意図的に
-        # パターンを含む行）はログ出力呼び出し/デバッガ文/todo をスキップする。
         if "# nosec" in line:
             continue
 
-        # ログ出力呼び出しをチェック
         if "console.log" in line and not line.strip().startswith(("//", "*")):  # nosec
             issues.append(
                 {
@@ -517,7 +399,6 @@ def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
                 }
             )
 
-        # デバッガ文をチェック
         if re.search(r"\bdebugger\b", line) and not line.strip().startswith("//"):
             issues.append(
                 {
@@ -528,18 +409,12 @@ def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
                 }
             )
 
-        # Issue 参照のない TODO/FIXME をチェック
         todo_match = re.search(r"(?://|#)\s*(TODO|FIXME):?\s*(.+)", line)
         if todo_match and not re.search(r"#\d+|issue", todo_match.group(2), re.IGNORECASE):
             issues.append(
                 {
                     "type": "todo",
-                    # 行内容はステージされたファイル由来 = 不信データで、この
-                    # メッセージは deny 時に stderr 経由でモデルのコンテキストへ
-                    # 入る（`output_adapter.emit_block` の docstring 参照）。
-                    # 囲いを偽装するタグを倒し、長さにも上限を置く。
-                    # `_scan_error_issue` が例外メッセージを型名だけへ落として
-                    # いるのと同じ方針。
+                    # 行内容は不信データで、deny 時にモデルのコンテキストへ入るため無害化する。
                     "message": (
                         f"TODO/FIXME without issue reference at line {line_num}: "
                         f'"{_sanitize_untrusted_excerpt(todo_match.group(2))}"'
@@ -557,31 +432,18 @@ def _scan_secret_issues(
 ) -> list[dict]:
     """ファイル内容からハードコードされたシークレットを検出します。
 
-    バイナリ判定されたファイルでも呼び出し元（`find_file_issues`）はこの関数を
-    呼びます。その場合は行分割の代わりに `_extract_printable_runs` の抽出結果が
-    擬似的な行として渡されます（docs/adr/shell-analysis-boundary.md）。テキストファイルは `# nosec`・
-    ファイルサイズに関わらず全体を走査します（サイズによる打ち切りは行いません。
-    ファイル後方に置かれた secret も検出します）。
-
-    走査量に上限を設けないと `pre_bash_commit_quality` の hook timeout に
-    達しうるため、呼び出し元から渡された `deadline` を `_ScanBudget` 経由で
-    `_SCAN_BUDGET_CHECK_BYTES` バイトごとに確認します。確認の粒度は
-    「行 × パターン」です —— 行数基準（`index % 2000` のような）だと、改行の無い
-    巨大 1 行のファイルでは index 0 の 1 回、つまり走査開始前にしか確認されず、
-    予算が原理的に効きません。超過した場合は
-    `SecretScanBudgetExceeded` を送出し、呼び出し元の既存の例外ガードで
-    `scan_error`（severity `error`、fail-closed）として扱われます。deadline を
-    この関数で作らないのは、それがファイル単位の予算になり、フック 1 回で
-    ファイル数分の実時間を許してしまうためです。
+    `# nosec`・ファイルサイズに関わらず全体を走査します。呼び出し元から渡された
+    `deadline` を「行 × パターン」の粒度で確認し、超過したら `SecretScanBudgetExceeded`
+    を送出します（呼び出し元で `scan_error` として fail-closed になる）。deadline を
+    ここで作らないのは、ファイル単位の予算になるためです。
 
     Args:
         content: 検査対象のデコード済みファイル内容です（未使用ですが、
             呼び出し側とのインターフェース共有のため引数として残します）。
-        lines: 走査単位のリストです。テキストファイルでは `content` を改行で
-            分割済みの行リスト（呼び出し側 `find_file_issues` が lint スキャンと
-            共有する分割結果）、バイナリでは `_extract_printable_runs` の抽出結果です。
-        deadline: 走査を打ち切る `_monotonic()` 基準の時刻です。フック 1 回の
-            起動全体で共有する 1 本の予算（`new_secret_scan_deadline`）を渡します。
+        lines: 走査単位のリストです。テキストファイルでは改行で分割済みの行リスト、
+            バイナリでは `_extract_printable_runs` の抽出結果です。
+        deadline: 走査を打ち切る `_monotonic()` 基準の時刻です
+            （`new_secret_scan_deadline` の 1 本の予算）。
         report_lines: 走査単位が実際の行に対応するなら True。バイナリの抽出
             文字列は行に対応しないため False を渡し、行番号を報告しません。
 
@@ -597,8 +459,6 @@ def _scan_secret_issues(
         line_num = index + 1 if report_lines else 0
         location = f"at line {line_num}" if report_lines else "in extracted binary content"
         for pattern, name in _SECRET_PATTERNS:
-            # 予算確認は「行 × パターン」の粒度。行単位だと改行の無い巨大 1 行で
-            # 走査開始前の 1 回しか確認されない。
             budget.check(len(line), f"line {index + 1}")
             if re.search(pattern, line, re.IGNORECASE):
                 issues.append(
@@ -616,54 +476,24 @@ def _scan_secret_issues(
 def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline: float) -> list[dict]:
     """ファイル内容から代表的な問題を検出します。
 
-    `repo_root` が None（既定）なら INDEX（`git show :path`、
-    `get_staged_file_content`）から読みます。`repo_root` を渡すと作業ツリー
-    （`get_worktree_file_content`）から読みます。`git commit -a` で
-    コミットされる未ステージ変更ファイルは作業ツリーの内容がコミット対象と
-    なるため、`repo_root` 経由で読む必要があります。
+    `repo_root` が None なら INDEX から、渡すと作業ツリー（`git commit -a` の未ステージ
+    変更用）から読みます。lint チェックは `should_lint_file` が True でバイナリでない
+    ファイルだけ、シークレット検出は `should_scan_secrets` が True ならバイナリでも
+    （印字可能文字列を抽出して）必ず実施します。
 
-    lint チェック（ログ出力呼び出し / デバッガ文 / TODO）は `should_lint_file` が
-    True、かつバイナリでない（先頭 `_BINARY_SNIFF_SIZE` 文字に NUL を含まない）
-    ファイルのみ対象です。
+    各段階は独立した例外ガードを持ち、想定外の例外は検査不能を示す `scan_error` issue に
+    します（読み取り・判定・secret は error、lint は warning）。黙って issue が消える
+    （＝検査したのに問題なしと区別が付かない）ことはありません。lint 側で予算が尽きた
+    場合は error を積んで secret scan を回さずに返します。
 
-    シークレット検出は `should_scan_secrets` が True であれば `# nosec`・ファイル
-    サイズ・バイナリ判定に関わらず必ず実施します（サイズによる
-    打ち切りはありません）。バイナリ判定されたファイルは行分割が意味を持たない
-    ため、`_extract_printable_runs` で印字可能文字列を抽出し、それを擬似的な行と
-    して同じパターンを当てます（docs/adr/shell-analysis-boundary.md。バイナリで secret scan を
-    スキップすると、先頭に NUL を 1 バイト混ぜるだけで検査を回避できる）。真のバイナリ
-    （画像等）は secret パターンに一致する印字可能文字列を通常含まないため、
-    一律ブロックにはなりません。
-
-    `# nosec` を含む行はログ出力呼び出し / デバッガ文 / TODO チェックを抑制します
-    （検出器自身のテストフィクスチャ等、意図的にパターンを含む行のため）。
-    シークレット検出は `# nosec` の対象外です。
-
-    ファイル読み取り・走査対象判定・lint・secret の各段階はそれぞれ独立した
-    例外ガードを持ちます。いずれかで想定外の例外が起きた場合は検査不能を
-    示す `scan_error` issue を積んで呼び出し元へ返します（secret scanner
-    とファイル読み取りの失敗は error severity。false negative のコストが
-    lint より高いため、検査不能をブロック側へ倒します。lint scanner の
-    失敗は warning に留めます）。黙って issue が消える（＝検査したのに
-    問題なしと区別が付かない）ことはありません。
-
-    実時間予算は lint scan と secret scan で共有する 1 本です。lint 側で予算が
-    尽きた場合は `scan_error`（severity `error`、fail-closed）を積んで secret scan
-    を回さずに返します（予算が尽きた状態で続行してもホスト側 timeout を踏むだけ
-    のため）。lint scanner のそれ以外の例外は warning に留めます。
-
-    secret scan の実時間予算はフック 1 回の起動全体で 1 本です。呼び出し元は
-    `new_secret_scan_deadline()` を起動ごとに 1 度だけ呼び、その値を全ファイルへ
-    `deadline` として渡してください。ファイルごとに新しい deadline を作ると予算が
-    ファイル数分に増え、累積で hook timeout に達しうる状態へ戻ります。`deadline`
-    に既定値を持たせないのはこのためです —— 既定値があると、渡し忘れた呼び出し元が
-    ファイル単位予算へ静かに退行し、型・lint・テストのいずれでも検知できません。
+    `deadline` に既定値を持たせないのは、渡し忘れた呼び出し元がファイル単位予算へ静かに
+    退行し、型・lint・テストのいずれでも検知できなくなるためです。
 
     Args:
         file_path: 調査対象のファイルパスです。
         repo_root: 指定すると作業ツリーから読みます（`git commit -a` の
             未ステージ変更用）。None なら INDEX から読みます。
-        deadline: secret scan を打ち切る `_monotonic()` 基準の時刻です
+        deadline: 走査を打ち切る `_monotonic()` 基準の時刻です
             （`new_secret_scan_deadline()` の返り値）。
 
     Returns:
@@ -672,7 +502,6 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
     Raises:
         例外は発生しません。
     """
-    issues: list[dict] = []
     try:
         content = (
             get_worktree_file_content(repo_root, file_path)
@@ -680,61 +509,45 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
             else get_staged_file_content(file_path)
         )
     except Exception as err:
-        # get_staged_file_content / get_worktree_file_content は自前で
-        # 例外を握り潰し読めなければ None を返す契約だが、その契約が
-        # 破られた場合でも find_file_issues 自体の「例外を発生させない」
-        # 契約を守るため、ここでもガードして scan_error を返す。
-        issues.append(_scan_error_issue(file_path, "ファイル読み取り", err, severity="error"))
-        return issues
+        # 読み取り関数は読めなければ None を返す契約だが、それが破られても本関数の
+        # 「例外を発生させない」契約を守る。
+        return [_scan_error_issue(file_path, "ファイル読み取り", err, severity="error")]
     if content is None:
-        # get_staged_file_content / get_worktree_file_content の正常系の
-        # エラー経路（git 非0終了・OSError・repo_root 外への symlink/traversal
-        # 拒否）はいずれも None を返す契約。ここで黙って空 issue を返すと
-        # 「スキャンして問題なし」と「検査不能」が区別できず、対象ファイル
-        # は無検査のままコミットが通ってしまう。scan_error（error）として
-        # 積み、_finalize_result 側でブロック対象にする。
+        # 黙って空 issue を返すと「問題なし」と「検査不能」が区別できず、対象ファイルは
+        # 無検査のままコミットが通る。scan_error（error）としてブロック対象にする。
         log(f"[Hook] scan_error: {file_path} の内容取得に失敗しました（読み取り不能または取得拒否）")
-        issues.append(
+        return [
             {
                 "type": "scan_error",
                 "message": f"{file_path}: 内容を取得できなかったため検査できませんでした",
                 "line": 0,
                 "severity": "error",
             }
-        )
-        return issues
+        ]
 
     try:
         is_binary = _is_binary_content(content)
         do_lint = should_lint_file(file_path) and not is_binary
         do_secrets = should_scan_secrets(file_path)
     except Exception as err:
-        issues.append(_scan_error_issue(file_path, "scan target 判定", err, severity="error"))
-        return issues
+        return [_scan_error_issue(file_path, "scan target 判定", err, severity="error")]
 
+    issues: list[dict] = []
     if not do_lint and not do_secrets:
         return issues
 
-    # lint / secret 双方が対象の場合、content.split("\n") の重複計算を
-    # 避けるため一度だけ分割して共有する。
     lines = content.split("\n")
     if do_lint:
         try:
             issues.extend(_scan_lint_issues(lines, deadline=deadline))
         except SecretScanBudgetExceeded as err:
-            # 予算超過だけは lint でも error（fail-closed）。予算はフック 1 回で
-            # 共有の 1 本なので、ここで尽きている＝この後 secret scan を回しても
-            # ホスト側 timeout を踏むだけであり、走査せずに検査不能として返す。
-            # 通常の lint 例外（下の warning）と同じ扱いにすると、予算切れが
-            # commit をブロックしない severity へ落ちてしまう。
+            # 予算超過だけは lint でも error。共有の予算が尽きている以上、secret scan を
+            # 回してもホスト側 timeout を踏むだけなので、検査不能として返す。
             issues.append(_scan_error_issue(file_path, "lint scan", err, severity="error"))
             return issues
         except Exception as err:
             issues.append(_scan_error_issue(file_path, "lint scan", err, severity="warning"))
     if do_secrets:
-        # バイナリ判定でも secret scan は必ず実施する。行分割が意味を持たない
-        # ため、印字可能文字列の抽出結果を擬似的な行として同じパターンを当てる
-        # （docs/adr/shell-analysis-boundary.md: NUL 1 バイトで検査を回避できる状態を許容しない）。
         scan_lines = _extract_printable_runs(content) if is_binary else lines
         try:
             issues.extend(
