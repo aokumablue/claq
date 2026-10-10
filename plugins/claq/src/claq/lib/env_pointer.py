@@ -1,67 +1,24 @@
 """plugin root をベンダ非依存の固定住所（``~/.claq/env.sh``）へ書き出す。
 
-ホスト固有パスの探索ループを agents/commands/skills の md に重複させないことと、
-ユーザー要件「``.claude``/``.copilot``/``.grok`` 等のベンダ固有パスを md へ
-書かない」を同時に満たす。``CLAUDE_PLUGIN_ROOT`` は Bash tool の環境変数に
-乗らない（実測）ため、md 側には plugin root を知る手段が他に無い。本モジュールは
-`launcher.py` の全 hook 起動時に、その時点で分かっている plugin root
-（``launcher.REPO_ROOT``）を ``~/.claq`` 配下へ書き出す。md 側は
-``. "$HOME/.claq/env.sh"`` の 1 行だけを書けばよい。
+``CLAUDE_PLUGIN_ROOT`` は Bash tool の環境変数に乗らないため、md 側には plugin root を
+知る手段が無い。`launcher.py` が全 hook 起動のたびに本モジュールで plugin root を
+書き出し、md 側は ``. "$HOME/.claq/env.sh"`` の 1 行だけを書く（ベンダ固有パスを
+md に書かない）。
 
-ポインタはホストプロセス単位で分離する（``os.getppid()`` をキーにする）。単一
-ファイルにすると、別ターミナルで異なるホスト（Claude Code / Copilot 等）を同時に
-開いたとき後勝ちで上書きされ、先に開いていたホストのセッションが別ホストの
-install を source してしまうため。Bash tool の親プロセスは常にホストのバイナリ
-そのものであり、hook（launcher）も Bash tool も同じホストプロセスの子なので、
-Python 側の ``os.getppid()`` と shell 側の ``$PPID`` は一致する（実測）。
-
-環境変数によるホスト判定（``COPILOT_*`` 等）は採らない。Copilot CLI / Grok CLI が
-bash tool の環境へ自身の識別変数を注入することは文書化されておらず、確認できる
-のは Claude Code の変数（``CLAUDECODE`` 等）のみのため（詳細は
-``docs/adr/plugin-root-resolution.md``）。
-
-ポインタの形式と置き場所:
-
-- ポインタは shell script ではなく **データファイル**にする。resolver
-  （``runtime/env-template.sh``）は ``.``/``source`` で読み込まず ``read`` で
-  行を取り出すため、ポインタの内容がそのまま shell として実行されることはない。
-- ポインタの置き場所は ``get_claq_dir()``（``CLAQ_HOME`` を見る、
-  テスト隔離用のノブ）ではなく **``$HOME/.claq`` 固定**にする。
-  md の bootstrap 行 ``. "$HOME/.claq/env.sh"`` は環境依存の分岐を持たない
-  固定住所である必要があり、writer 側もそれに合わせる。データ永続化
-  （``mem.db``・``logs``）側の ``get_claq_dir()`` 契約とは別の契約であり、
-  意図的に切り離している。
-- 「無条件で採用される」ポインタ（``roots/latest`` のようなもの）は置かない。
-
-祖先チェーンによる解決。「リスクがあるとみなせる fallback は望ましくない」という
-ユーザーの明示指示に従い、**推測に基づく fallback は置かない**:
-
-- writer は ``os.getppid()`` とその親（**最大 2 段**）にのみ root を
-  記録する（``_resolve_ancestor_chain``）。1 回の
-  ``ps -eo pid=,ppid=,lstart=`` でチェーンと各 PID の起動時刻
-  （``lstart``）を同時に取得する（実測 10〜16ms、hook のタイムアウト
-  予算に対して無視できるコスト）。
-- 各ポインタは ``root\nlstart\n`` の 2 行になる。``lstart`` は
-  resolver 側が「今生きているその PID は、記録時と同一のプロセスか」を
-  照合するための識別子（PID は再利用されるが、同一 PID が同一
-  ``lstart`` を持つのは同一プロセスの生存中に限られる）。
-- 深さを 2 段に絞っているのは、共有されうる祖先へ書き込むこと自体を
-  やめるため。``os.getppid()``（bash tool の shell）とその親
-  （host バイナリそのもの）は、いずれもこの host インスタンス専有の
-  PID であり、他の host インスタンスがこれらの PID を祖先として持つ
-  ことはない。より上位の祖先（login shell・terminal app 等）は同じ
-  terminal / login shell から起動された別々の host 間で共有されうるが、
-  writer はそこへ一切書き込まないため、共有祖先での衝突という事象
-  自体が構造的に発生しない（衝突を事後検知する方式では、共有されうる
-  祖先が生存し続ける限り検知状態が恒久化し、その host が数日単位で
-  ブロックされうる。書き込み範囲を狭めて事前に回避するのはそのため）。
-  同一 PID に異なる root が観測されるのは「同一 host が
-  プラグインをアップグレードした」ケースのみであり、これは上書きが
-  正しい挙動なので単純に上書きする。
-- resolver（``env-template.sh``）は祖先チェーン（同じく最大 2 段）の
-  ``lstart`` が一致するポインタしか採用しない。祖先チェーンで解決
-  できなければ、推測せず常に ``exit 127`` にする（root 値の一致や
-  鮮度で候補を推測しない）。
+- ポインタはホストプロセス単位で分ける。単一ファイルにすると、別ターミナルで異なる
+  ホストを同時に開いたとき後勝ちで上書きされ、先のセッションが別ホストの install を
+  source してしまう。環境変数によるホスト判定は、Copilot CLI / Grok CLI が識別変数を
+  bash tool へ注入する保証が無いため採らない。
+- writer は ``os.getppid()`` とその親（最大 2 段）にだけ ``root\\nlstart\\n`` の
+  2 行を書く。この 2 段（bash tool の shell と host バイナリ）は host インスタンス
+  専有の PID で、他 host と共有されうる上位の祖先には書かない。したがって同一 PID に
+  別の root が観測されるのはプラグインのアップグレードだけで、単純に上書きする。
+- ``lstart`` は resolver（``runtime/env-template.sh``）が「その PID は記録時と同一の
+  プロセスか」を照合する識別子。resolver は祖先で解決できなければ推測せず
+  ``exit 127`` にする。``roots/latest`` のような無条件に採用されるポインタは置かない。
+- ポインタは shell script ではなくデータで、resolver は ``read`` で取り出す。
+- 置き場所は ``get_claq_dir()``（``CLAQ_HOME`` を見る）ではなく ``$HOME/.claq`` 固定。
+  md の bootstrap 行が ``$HOME`` 固定なので writer も合わせる。
 """
 
 from __future__ import annotations
@@ -71,6 +28,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from claq.lib.constants import BASE_DIR_NAME
@@ -82,10 +40,7 @@ _ENV_TMP_PREFIX = f"{_ENV_FILENAME}.tmp."
 _ENV_TEMPLATE_RELATIVE = Path("runtime") / "env-template.sh"
 
 _MAX_ANCESTOR_DEPTH = 2
-"""writer が祖先 PID へポインタを書く最大段数（``os.getppid()`` とその親のみ）。
-resolver 側（``env-template.sh`` の祖先 walk）と同じ深さに揃える。この 2 段は
-host インスタンス専有の PID（bash tool の shell・host バイナリ）に限られ、
-他 host と共有されないことが設計の前提（モジュール docstring 参照）。"""
+"""writer が祖先 PID へポインタを書く最大段数。resolver の祖先 walk と同じ深さに揃える。"""
 
 _PS_TIMEOUT_SECONDS = 5
 """祖先チェーン取得用 ``ps`` 呼び出しのハードタイムアウト。"""
@@ -108,26 +63,16 @@ _warned_this_process = False
 def ancestor_pointers_supported() -> bool:
     """祖先 PID ポインタ方式が成立する OS かを返す。
 
-    この方式は writer（``ps -eo pid=,ppid=,lstart=``）と resolver
-    （POSIX sh + ``ps -o lstart=``）の両方に依存する。Windows には ``ps`` が
-    無く、Git Bash が同梱する ``ps`` は ``-o`` 書式を持たないうえ MSYS の
-    別 PID 空間を返すため、writer が記録した Windows PID と照合できない。
-    したがって Windows では
-    ``$HOME/.claq/env.sh`` は原理的に解決できず、md の bootstrap 行の
-    代わりに `runtime/claq-hook` を直接呼ぶ必要がある。SessionStart の
-    ``mem context`` はこの関数で判定して、その読み替え方をその場で提示する。
+    この方式は writer（``ps -eo pid=,ppid=,lstart=``）と resolver（POSIX sh +
+    ``ps -o lstart=``）の両方に依存する。Windows には ``ps`` が無く、Git Bash の
+    ``ps`` は ``-o`` 書式を持たないうえ MSYS の別 PID 空間を返すため照合できない。
+    Windows では md の bootstrap 行の代わりに `runtime/claq-hook` を直接呼ぶ必要があり、
+    SessionStart の ``mem context`` はこの関数でその読み替え方を提示する。
 
-    プラットフォーム名ではなく ``os.setsid`` の有無（POSIX プロセス
-    セッション API の有無）を probe にする。
-
-    Args:
-        なし
+    プラットフォーム名ではなく ``os.setsid``（POSIX プロセスセッション API）の有無で判定する。
 
     Returns:
         POSIX（祖先ポインタ方式が使える）なら True。
-
-    Raises:
-        例外は発生しません。
     """
     return hasattr(os, "setsid")
 
@@ -135,18 +80,12 @@ def ancestor_pointers_supported() -> bool:
 def write_env_pointer(plugin_root: Path) -> None:
     """plugin root を ``~/.claq`` 配下のポインタへ書き出す。
 
-    書き込み失敗（``OSError``）は握り潰す。本関数は hook のあらゆる起動経路から
-    呼ばれるため、失敗しても呼び出し元の hook 本来の処理を妨げてはならない。
-    ただし失敗はプロセスごと 1 回だけ stderr へ記録し、無音の機能低下を防ぐ。
+    hook のあらゆる起動経路から呼ばれるため、失敗（``OSError`` と HOME を決められない
+    ``RuntimeError``）で hook 本来の処理を妨げない。ただし無音の機能低下を防ぐため、
+    失敗はプロセスごと 1 回だけ stderr へ記録する。
 
     Args:
         plugin_root: このプラグインのソースルート（``launcher.REPO_ROOT``）。
-
-    Returns:
-        なし。
-
-    Raises:
-        例外は発生しません（``OSError`` と HOME を決められない ``RuntimeError`` は内部で捕捉します）。
     """
     try:
         _write_env_pointer_unsafe(plugin_root)
@@ -155,45 +94,25 @@ def write_env_pointer(plugin_root: Path) -> None:
 
 
 def _warn_once(reason: str) -> None:
-    """pointer 書き込み失敗をプロセスごと 1 回だけ stderr へ記録する。
-
-    Args:
-        reason: 失敗理由（例外メッセージ）。
-
-    Returns:
-        なし。
-
-    Raises:
-        例外は発生しません。
-    """
+    """pointer 書き込み失敗をプロセスごと 1 回だけ stderr へ JSON で記録する。"""
     global _warned_this_process
     if _warned_this_process:
         return
     _warned_this_process = True
     try:
-        sys.stderr.write(
-            json.dumps({"claqEnvPointerWriteFailed": True, "reason": reason}) + "\n"
-        )
+        sys.stderr.write(json.dumps({"claqEnvPointerWriteFailed": True, "reason": reason}) + "\n")
     except OSError:
         pass
 
 
 def _state_home() -> Path:
-    """env pointer の置き場所となる HOME を解決する。
+    """env pointer の置き場所となる HOME を返す。
 
-    ``CLAQ_HOME`` は見ない（テスト隔離専用のノブであり、md の bootstrap 行が
-    ``$HOME`` 固定であるため writer 側もそれに合わせる契約。データ永続化側の
-    ``get_claq_dir()``/``get_home_dir()`` とは別契約）。
-
-    Args:
-        なし。
-
-    Returns:
-        HOME ディレクトリの Path。``HOME`` 未設定時は ``Path.home()``。
+    ``CLAQ_HOME`` は見ない（モジュール docstring 参照）。``HOME`` 未設定時は ``Path.home()``。
 
     Raises:
-        RuntimeError: HOME ディレクトリを決められない場合（読む側のシェルは
-            ``$HOME`` しか見ないため、別の場所へは書かない）。
+        RuntimeError: HOME ディレクトリを決められない場合（読む側のシェルは ``$HOME``
+            しか見ないため、別の場所へは書かない）。
     """
     raw = os.environ.get("HOME")
     if raw:
@@ -201,41 +120,15 @@ def _state_home() -> Path:
     return Path.home()
 
 
-def _state_dir() -> Path:
-    """env pointer 一式（``env.sh``・``roots/``）を置くディレクトリを返す。
-
-    Args:
-        なし。
-
-    Returns:
-        ``$HOME/.claq`` の Path。
-
-    Raises:
-        例外は発生しません。
-    """
-    return _state_home() / BASE_DIR_NAME
-
-
 def _ensure_private_dir(path: Path) -> Path:
-    """ディレクトリを作成し 0700 に締める（``core_utils.ensure_private_dir`` と同等）。
+    """ディレクトリを根から順に 0700 で作成し、0700 に締めて返す。
 
-    ``core_utils`` 側は ``get_claq_dir()``（``CLAQ_HOME`` 対応）基準で
-    「claq_dir 配下かどうか」を判定するため、``$HOME`` 固定の本モジュールでは
-    そのまま流用できない。ロジックを複製せず、必要な最小限だけをここに持つ。
+    ``core_utils.ensure_private_dir`` は ``get_claq_dir()``（``CLAQ_HOME`` 対応）基準で
+    判定するため、``$HOME`` 固定の本モジュールでは流用できない。
 
-    作成そのものを 0700 で行い、根から順に祖先も 0700 で作る。作成と
-    ``chmod`` を分けると、その窓の間 ``~/.claq`` を他 OS ユーザーが
-    ``opendir`` でき、POSIX の権限検査は open 時のみなので窓内で取得された
-    fd は後続の ``chmod`` で失効しない。``mkdir(mode=..., parents=True)`` は
-    **親に mode を適用しない**（pathlib の仕様。親は既定モードで作られる）
-    ため、``parents=True`` ではなく祖先を 1 段ずつ作る。``chmod`` は既に
-    0755 で存在するディレクトリの是正用として残す。
-
-    Args:
-        path: 作成・権限設定するディレクトリ。
-
-    Returns:
-        対象ディレクトリの Path。
+    作成と ``chmod`` を分けると、その窓の間に他 OS ユーザーが ``opendir`` で得た fd は
+    後続の ``chmod`` で失効しない。``mkdir(mode=..., parents=True)`` は親に mode を
+    適用しないため、祖先を 1 段ずつ作る。``chmod`` は既に 0755 で存在する場合の是正用。
 
     Raises:
         OSError: 作成・chmod に失敗した場合。
@@ -247,30 +140,17 @@ def _ensure_private_dir(path: Path) -> Path:
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
-    """テキストを一時ファイル経由で原子的に書き込む（partial read を防ぐ）。
+    """テキストを同一ディレクトリの一時ファイル経由で原子的に書き込む。
 
-    同一ディレクトリに ``tempfile.mkstemp`` で ``<name>.tmp.<random>`` を
-    mode 0600 で作成し、``fsync`` 後に ``os.replace()`` で公開する。
-    prefix は ``<name>.tmp.`` で、名前は数字のみにならない（``roots/`` の
-    GC が非数字名として age-gate する契約）。``fdopen`` が失敗した場合は
-    mkstemp の fd を閉じてから tmp を消す。reader は常に「書き込み前の
-    内容」か「書き込み後の内容」のどちらかしか見えない。
-
-    Args:
-        path: 最終的な公開先ファイルパス。
-        text: 書き込む内容。
-
-    Returns:
-        なし。
+    ``<name>.tmp.<random>`` を mode 0600 で作り、``fsync`` 後に ``os.replace()`` で公開する
+    ので、reader は書き込み前後どちらかの内容しか見ない。名前は数字のみにならない
+    （``roots/`` の GC が非数字名として age-gate する契約）。``fdopen`` が失敗した場合は
+    mkstemp の fd を閉じてから tmp を消す。
 
     Raises:
         OSError: 一時ファイルの作成・書き込み・rename に失敗した場合。
     """
-    fd, tmp_name = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f"{path.name}.tmp.",
-        suffix="",
-    )
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.tmp.")
     tmp_path = Path(tmp_name)
     owned_fd: int | None = fd
     try:
@@ -296,36 +176,20 @@ def _atomic_write_text(path: Path, text: str) -> None:
 def _write_text_if_changed(path: Path, text: str) -> bool:
     """内容が既に一致していれば書き込みを丸ごと省く。
 
-    ``env.sh`` はリポジトリ内テンプレートの verbatim コピーで、同じプラグイン
-    バージョンが動いている間は内容が変わらない。それでも `_atomic_write_text`
-    を毎回呼ぶと、mkstemp + write + **fsync** + rename が走る。この書き込みは
-    PreToolUse フック（`launcher` 経由）が**全ツール呼び出しで**行うため、
-    ネットワーク HOME や暗号化 FS では 1 ツール呼び出しあたり回避可能な fsync
-    1 本がそのまま体感の遅延になる。
+    ``env.sh`` は同じプラグインバージョンの間は内容が変わらないが、PreToolUse が全ツール
+    呼び出しで書くため、毎回の fsync がネットワーク HOME や暗号化 FS で遅延になる。
+    ``roots/<pid>`` は GC が mtime で鮮度を判定するため、この省略を使わない。
 
-    ``roots/<pid>`` の祖先ポインタは同じ扱いにしない。GC が mtime で鮮度を
-    判定する（`_gc_one`）ため、内容が同じでも書き直して mtime を進める必要が
-    ある。省けるのは mtime に意味の無い ``env.sh`` だけである。
-
-    比較はバイト列で行う。``read_text`` は非 UTF-8 の既存ファイルで
-    ``UnicodeDecodeError``（``ValueError`` 系）を送出し、これは
-    `write_env_pointer` の ``OSError`` ハンドラを素通りしてフックを落とす。
-
-    symlink は内容が一致していても書き直す。``os.replace`` は symlink を通常
-    ファイルへ置き換えるので、書き込みには「``env.sh`` が別の場所へ
-    向けられていたら実体へ戻す」という自己修復が付随している。内容一致だけで
-    省くとその性質が静かに失われる。
-
-    Args:
-        path: 書き込み先。
-        text: 書き込む内容。
+    比較はバイト列で行う（``read_text`` は非 UTF-8 の既存ファイルで ``ValueError`` 系を
+    送出し、`write_env_pointer` の ``OSError`` ハンドラを素通りしてフックを落とす）。
+    symlink は内容が一致していても書き直す。``os.replace`` が実体ファイルへ戻す自己修復を
+    失わないため。
 
     Returns:
         実際に書き込んだなら True、内容一致で省いたなら False。
 
     Raises:
-        OSError: 書き込みに失敗した場合（読み取り失敗は書き込みへ倒すので
-            送出しない）。
+        OSError: 書き込みに失敗した場合（読み取り失敗は書き込みへ倒すので送出しない）。
     """
     try:
         if not path.is_symlink() and path.read_bytes() == text.encode("utf-8"):
@@ -340,49 +204,28 @@ def _write_text_if_changed(path: Path, text: str) -> bool:
 def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
     """``os.getppid()`` から始まる祖先チェーンと、各 PID の起動時刻を返す。
 
-    1 回の ``ps -eo pid=,ppid=,lstart=`` でプロセス表全体を取得し、
-    Python 側でチェーンを計算する（hook 起動のたびに ``ps`` を複数回
-    呼ばずに済む。全 hook 起動でこの関数が走るため、呼び出し回数は
-    最小化する）。``lstart`` は末尾の改行だけを取り除いた raw な文字列
-    のまま保持する — 内部の空白を正規化（strip 等）すると、shell 側の
-    ``$(ps -o lstart= -p <pid>)`` が返す文字列とバイト単位で一致しなく
-    なるため（実機で非正規化同士が一致することを確認済み）。
+    全 hook 起動で走るため、1 回の ``ps -eo pid=,ppid=,lstart=`` でプロセス表全体を取り、
+    チェーンは Python 側で組む。``lstart`` は内部の空白を正規化しない raw な文字列のまま
+    保持する（shell 側の ``$(ps -o lstart= -p <pid>)`` とバイト単位で一致させるため）。
 
-    ``ps`` は ``LC_ALL=C`` を強制した環境で実行する。``lstart`` の出力は
-    ロケール依存（例: ``LANG=ja_JP.UTF-8`` では ``木  8/20 ...``、
-    ``C`` ロケールでは ``Thu Aug 20 ...``）であることを実機で確認した
-    — writer（このプロセスの ambient locale）と resolver（bootstrap を
-    実行する shell の ambient locale）が異なる環境で起動されると、
-    正規化なしでは同一プロセスなのに文字列が一致せず PID 再利用と誤判定
-    してしまう。resolver 側（``env-template.sh``）も同じく ``LC_ALL=C``
-    を明示して ``ps`` を呼ぶ。
-
-    subprocess は ``subprocess_utils.run_text`` 経由で呼ぶ。``text=True`` だけで
-    encoding を指定しないと locale 依存のデコードになり、``UnicodeDecodeError``
-    が下の except を貫通して本 docstring の「例外は発生しません」が破れる。
-    ここは子へ ``LC_ALL=C`` を強制していて ``ps`` の出力が ASCII になるため実害は
-    低いが、encoding 指定を集約した ``run_text`` を迂回する経路自体を残さない
-    （残すと「どちらが正しい呼び方か」が分岐し、次の追加でまた迂回側が選ばれる）。
+    ``lstart`` はロケール依存なので、resolver 側と同じく ``LC_ALL=C`` を強制する。
+    subprocess は encoding 指定を集約した ``run_text`` 経由で呼ぶ（locale 依存のデコードで
+    ``UnicodeDecodeError`` が下の except を貫通しないため）。
 
     Args:
         max_depth: 辿る祖先の最大段数（``os.getppid()`` 自身を含む）。
 
     Returns:
-        ``(pid, lstart)`` の近い祖先から遠い祖先の順のリスト。``ps`` の
-        起動・実行に失敗した場合は空リスト（docs/adr/hook-failure-direction.md の fail-open —
-        この回はポインタを書かず、次回 hook 起動での自己修復に委ねる）。
-        チェーンは PID 0/1 に達するか、プロセス表から親を特定できなく
-        なった時点で打ち切る。
+        ``(pid, lstart)`` の近い祖先から遠い祖先の順のリスト。``ps`` の起動・実行に
+        失敗した場合は空リスト（docs/adr/hook-failure-direction.md の fail-open —
+        この回はポインタを書かず、次回 hook 起動での自己修復に委ねる）。チェーンは
+        PID 0/1 に達するか、プロセス表から親を特定できなくなった時点で打ち切る。
 
     Raises:
         例外は発生しません。
     """
     try:
-        proc = run_text(
-            ["ps", "-eo", "pid=,ppid=,lstart="],
-            timeout=_PS_TIMEOUT_SECONDS,
-            extra_env={"LC_ALL": "C"},
-        )
+        proc = run_text(["ps", "-eo", "pid=,ppid=,lstart="], timeout=_PS_TIMEOUT_SECONDS, extra_env={"LC_ALL": "C"})
     except (OSError, subprocess.SubprocessError):
         return []
     if proc.returncode != 0:
@@ -395,8 +238,7 @@ def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
         if len(parts) < 3:
             continue
         try:
-            pid = int(parts[0])
-            ppid = int(parts[1])
+            pid, ppid = int(parts[0]), int(parts[1])
         except ValueError:
             continue
         ppid_of[pid] = ppid
@@ -417,22 +259,10 @@ def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
 
 
 def _write_ancestor_pointer(path: Path, root_text: str, lstart: str) -> None:
-    """1 つの祖先 PID のポインタへ ``root_text``/``lstart`` を（無条件に）書く。
+    """1 つの祖先 PID のポインタへ ``root_text`` と ``lstart`` の 2 行を無条件に書く。
 
-    書き込み対象の PID は host インスタンス専有（モジュール docstring
-    参照）であるため、既存の記録と ``root_text`` が食い違っていても
-    「別 host との衝突」ではなく「同一 host のプラグインアップグレード」
-    でしかありえず、単純上書きが正しい。共有されない PID にしか書かない
-    ため、衝突検知は要らない。
-
-    Args:
-        path: ``roots/<pid>`` のポインタパス。
-        root_text: 記録したい plugin root（改行/NUL を含まないことは
-            呼び出し元で検証済み）。
-        lstart: この祖先 PID 自身の起動時刻（resolver が照合する識別子）。
-
-    Returns:
-        なし。
+    書き込み対象の PID は host インスタンス専有なので、既存の記録と食い違っても
+    同一 host のアップグレードでしかなく、衝突検知は要らない。
 
     Raises:
         OSError: 書き込みに失敗した場合。
@@ -441,73 +271,45 @@ def _write_ancestor_pointer(path: Path, root_text: str, lstart: str) -> None:
 
 
 def _write_env_pointer_unsafe(plugin_root: Path) -> None:
-    """``write_env_pointer`` の本体。``OSError`` を送出しうる。
+    """``write_env_pointer`` の本体。
 
-    書き込み順は「祖先ポインタ群 → ``env.sh`` → GC」。GC を最後にする
-    ことで、途中で GC が失敗しても本来の目的（root の記録）は既に
-    達成済みになる。
-
-    ``env.sh`` は内容が既存と一致していれば書き込みごと省く
-    （`_write_text_if_changed`）。祖先ポインタ側は GC が mtime を
-    見るため常に書く。
-
-    Args:
-        plugin_root: このプラグインのソースルート。
-
-    Returns:
-        なし。
+    書き込み順は「祖先ポインタ群 → ``env.sh`` → GC」。GC を最後にして、GC が失敗しても
+    root の記録は済んでいるようにする。
 
     Raises:
-        OSError: root 文字列が不正、またはディレクトリ作成・ファイル書き込みに
-            失敗した場合。
+        OSError: root 文字列が不正、またはディレクトリ作成・ファイル書き込みに失敗した場合。
     """
     root_text = str(plugin_root)
     if "\n" in root_text or "\r" in root_text or "\x00" in root_text:
         raise OSError(f"plugin root contains a newline or NUL byte: {root_text!r}")
 
-    claq_dir = _ensure_private_dir(_state_dir())
+    claq_dir = _ensure_private_dir(_state_home() / BASE_DIR_NAME)
     roots_dir = _ensure_private_dir(claq_dir / _ROOTS_DIRNAME)
 
-    # 祖先ポインタ方式が成立しない OS（Windows）では `ps` を呼ばない。
-    # 呼んでも FileNotFoundError で空チェーンになるだけだが、全 hook 起動ごとの
-    # 無駄な spawn になるうえ、MSYS/Cygwin 由来の `ps.exe` が PATH にあると
-    # 別 PID 空間の値を拾って無意味なポインタを書きうる。
-    if ancestor_pointers_supported():
-        chain = _resolve_ancestor_chain(_MAX_ANCESTOR_DEPTH)
-    else:
-        chain = []
+    # 祖先ポインタ方式が成立しない OS（Windows）では `ps` を呼ばない。全 hook 起動ごとの
+    # 無駄な spawn になるうえ、MSYS/Cygwin 由来の `ps.exe` が PATH にあると別 PID 空間の
+    # 値を拾って無意味なポインタを書きうる。
+    chain = _resolve_ancestor_chain(_MAX_ANCESTOR_DEPTH) if ancestor_pointers_supported() else []
     for pid, lstart in chain:
         _write_ancestor_pointer(roots_dir / str(pid), root_text, lstart)
-    written_pids = frozenset(pid for pid, _lstart in chain)
 
-    template_path = plugin_root / _ENV_TEMPLATE_RELATIVE
-    template_text = template_path.read_text(encoding="utf-8")
+    template_text = (plugin_root / _ENV_TEMPLATE_RELATIVE).read_text(encoding="utf-8")
     _write_text_if_changed(claq_dir / _ENV_FILENAME, template_text)
 
-    _maybe_run_gc(claq_dir, roots_dir, keep_pids=written_pids)
+    _maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset(pid for pid, _lstart in chain))
 
 
 def _maybe_run_gc(claq_dir: Path, roots_dir: Path, *, keep_pids: frozenset[int]) -> None:
     """throttle を守りつつ ``roots/`` と ``claq_dir`` 直下の一時ファイルの GC を実行する。
 
-    ``roots-gc.stamp`` の mtime を見て ``_GC_THROTTLE_SECONDS`` 以内なら何もしない
-    （全 hook 起動のたびに ``roots/`` を全走査しないため）。stamp の更新自体も
-    GC 実行の合図として扱う。
+    ``roots-gc.stamp`` の mtime が ``_GC_THROTTLE_SECONDS`` 以内なら何もしない。
 
     Args:
         claq_dir: ``$HOME/.claq`` の Path。
         roots_dir: ``$HOME/.claq/roots`` の Path。
-        keep_pids: この呼び出しで書いた祖先チェーン全体の PID 集合。GC の
-            対象から無条件で除外する（祖先 PID が launcher 起動のたびに
-            使い捨てられる中間 shell を指す場合、書いた直後の PID が既に
-            「不在」に見えて GC 対象になりうるため。実行中ホストが自分で
-            書いたばかりの記録を、そのホスト自身が壊すことがあってはならない）。
-
-    Returns:
-        なし。
-
-    Raises:
-        例外は発生しません（内部の GC 処理は失敗を個別に無視します）。
+        keep_pids: この呼び出しで書いた祖先チェーンの PID 集合。GC 対象から無条件に
+            除外する（祖先が使い捨ての中間 shell だと、書いた直後の PID が既に不在に
+            見えるため。実行中ホストが書いたばかりの記録を自分で壊さない）。
     """
     stamp = claq_dir / _GC_STAMP_FILENAME
     try:
@@ -527,25 +329,14 @@ def _maybe_run_gc(claq_dir: Path, roots_dir: Path, *, keep_pids: frozenset[int])
 
 def _now() -> float:
     """現在時刻の unix time を返す（テストで monkeypatch しやすいよう分離）。"""
-    import time
-
     return time.time()
 
 
 def _pid_is_alive(pid: int) -> bool:
     """PID が現在生存しているか調べる。
 
-    Args:
-        pid: 検査対象の PID。
-
-    Returns:
-        生存していれば True。自プロセスグループ全体へシグナルが飛ぶ ``pid=0``
-        は常に False（無効な入力として扱う）。他ユーザー所有で ``kill`` の権限が
-        無い場合（``PermissionError``）は「生存している」とみなす（可視性が無い
-        だけで、存在自体は確からしいため）。
-
-    Raises:
-        例外は発生しません。
+    自プロセスグループ全体へシグナルが飛ぶ ``pid=0`` 以下は常に False。他ユーザー所有で
+    ``kill`` の権限が無い場合（``PermissionError``）は、存在自体は確からしいので True。
     """
     if pid <= 0:
         return False
@@ -563,30 +354,9 @@ def _pid_is_alive(pid: int) -> bool:
 def _gc_roots(roots_dir: Path, *, keep_pids: frozenset[int] = frozenset()) -> None:
     """``roots/`` を掃除する。実行中ホストのポインタは残す。
 
-    削除条件（いずれか）:
-
-    - ファイル名が数字のみでない（旧形式 ``<pid>.sh``・``latest``・``latest.sh``、
-      および他 writer の in-flight 一時ファイルを含む。``_DEAD_PID_GRACE_SECONDS``
-      による age-gate は ``_gc_one`` 側で行う）。
-    - PID が既に存在せず、かつ mtime が ``_DEAD_PID_GRACE_SECONDS`` より古い
-      （書き込み直後の短命プロセスは 1 サイクル猶予する）。
-    - PID は存在するが mtime が ``_MAX_ROOT_AGE_SECONDS`` より古い（稼働中の
-      ホストは全 hook 起動で mtime を更新し続けるため、これは PID 再利用と判断
-      できる）。
-
-    ``keep_pids`` に含まれるファイル名は、上記のどの条件に当てはまっても
-    削除しない（このプロセス自身が今まさに書いた祖先チェーン全体のポインタを、
-    同じ呼び出しの中で自分自身が消してしまう自己矛盾を避けるため）。
-
-    Args:
-        roots_dir: ``$HOME/.claq/roots`` の Path。
-        keep_pids: 削除対象から無条件で除外する PID の集合。
-
-    Returns:
-        なし。
-
-    Raises:
-        例外は発生しません（個々のエントリの stat/unlink 失敗は無視します）。
+    ``keep_pids`` に含まれるファイル名は削除しない（同じ呼び出しで書いたばかりの
+    ポインタを自分で消さないため）。個々のエントリの判定は ``_gc_one`` が行い、
+    stat/unlink の失敗は無視する。
     """
     now = _now()
     try:
@@ -607,66 +377,31 @@ def _gc_roots(roots_dir: Path, *, keep_pids: frozenset[int] = frozenset()) -> No
 def _gc_one(entry: Path, now: float) -> None:
     """``roots/`` 配下の 1 エントリを判定し、対象なら削除する。
 
-    Args:
-        entry: 判定対象のファイル。
-        now: 現在時刻（unix time）。
-
-    Returns:
-        なし。
+    - 生存 PID のポインタは mtime が ``_MAX_ROOT_AGE_SECONDS`` より古ければ削除する
+      （稼働中のホストは全 hook 起動で mtime を更新し続けるため、PID 再利用と判断できる）。
+    - それ以外（PID 不在・数字のみでない名前）は mtime が ``_DEAD_PID_GRACE_SECONDS``
+      より古ければ削除する。数字のみでない名前には別 writer が ``os.replace()`` 直前に
+      作った一時ファイルも含まれ、即削除するとその rename 前に消す race になる。
 
     Raises:
         OSError: stat/unlink に失敗した場合（呼び出し元で無視される）。
     """
-    if not entry.name.isdigit():
-        # 旧形式ポインタ（`<pid>.sh`・`latest`・`latest.sh`）だけでなく、
-        # 別 writer が `os.replace()` 直前に作った
-        # `<name>.tmp.<random>` 一時ファイル（`tempfile.mkstemp`、prefix
-        # `<name>.tmp.`。`_atomic_write_text` が `roots/` 内に作る）もこの
-        # 分岐に落ちる。旧 writer 残骸（`<pid>.tmp.<writer_pid>`）も非数字
-        # なので同じ age-gate 対象。即削除すると、その writer の rename
-        # 前に消してしまう race がある。実際の一時ファイル寿命は
-        # ミリ秒オーダーなので、`_DEAD_PID_GRACE_SECONDS` を過ぎてから
-        # 削除しても実害は無く、race window を閉じられる。
-        mtime = entry.stat().st_mtime
-        if mtime < now - _DEAD_PID_GRACE_SECONDS:
-            entry.unlink()
-        return
-
-    pid = int(entry.name)
+    alive = entry.name.isdigit() and _pid_is_alive(int(entry.name))
     mtime = entry.stat().st_mtime
-
-    if _pid_is_alive(pid):
-        if mtime < now - _MAX_ROOT_AGE_SECONDS:
-            entry.unlink()
-        return
-
-    if mtime < now - _DEAD_PID_GRACE_SECONDS:
+    if mtime < now - (_MAX_ROOT_AGE_SECONDS if alive else _DEAD_PID_GRACE_SECONDS):
         entry.unlink()
 
 
 def _gc_stale_temp_files(claq_dir: Path, now: float) -> None:
     """``claq_dir`` 直下の ``env.sh.tmp.*`` 孤児を age-gate で回収する。
 
-    ``_atomic_write_text`` が ``env.sh`` を書くときの中間ファイルは、クラッシュ
-    すると ``roots/`` ではなく ``claq_dir`` 直下に残る。``_gc_roots`` は
-    ``roots/`` しか見ないため、ここで拾う。``_DEAD_PID_GRACE_SECONDS``（1 時間）
-    を過ぎたものだけを消すので、書き込み中のファイルを取り上げることはない。
+    ``env.sh`` の中間ファイルはクラッシュすると ``roots/`` ではなく ``claq_dir`` 直下に
+    残るため、``_gc_roots`` とは別にここで拾う。``_DEAD_PID_GRACE_SECONDS`` を過ぎた
+    ものだけを消すので、書き込み中のファイルは取り上げない。iterdir/stat/unlink の失敗は
+    無視する。
 
-    detach の stdin 一時ファイル（``*.stdin``）はここでは扱わない。生成側の
-    `hook_common.detach_process` は ``get_claq_dir()``（``CLAQ_HOME`` を見る）
-    配下に作るのに対し、本モジュールは ``$HOME`` 固定の別契約であり
-    （モジュール docstring 参照）、走査先が食い違う。回収は生成側に置く
-    （`hook_common.gc_detach_stdin_orphans`）。
-
-    Args:
-        claq_dir: ``$HOME/.claq`` の Path。
-        now: 現在時刻（unix time）。
-
-    Returns:
-        なし。
-
-    Raises:
-        例外は発生しません（iterdir/stat/unlink 失敗は無視します）。
+    detach の stdin 一時ファイルは生成側が ``get_claq_dir()`` 配下に作る別契約なので、
+    回収も生成側（`hook_common.gc_detach_stdin_orphans`）に置く。
     """
     try:
         entries = list(claq_dir.iterdir())
@@ -676,9 +411,7 @@ def _gc_stale_temp_files(claq_dir: Path, now: float) -> None:
         if not entry.name.startswith(_ENV_TMP_PREFIX):
             continue
         try:
-            mtime = entry.stat().st_mtime
-            if mtime < now - _DEAD_PID_GRACE_SECONDS:
+            if entry.stat().st_mtime < now - _DEAD_PID_GRACE_SECONDS:
                 entry.unlink()
         except OSError:
             continue
-
