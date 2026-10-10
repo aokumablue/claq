@@ -65,15 +65,9 @@ def remove_filler_phrases(value: str) -> str:
 
 
 def _strip_markdown_prefix(line: str) -> str:
-    """見出しや箇条書きの先頭記号を落とす。"""
+    """見出しや箇条書きの先頭記号を落とす。コードフェンス行と表の行は空にする。"""
     stripped = line.lstrip()
-    if not stripped:
-        return ""
-
-    if stripped.startswith("```"):
-        return ""
-
-    if stripped.startswith("|"):
+    if not stripped or stripped.startswith(("```", "|")):
         return ""
 
     if stripped[0] == "#":
@@ -84,29 +78,6 @@ def _strip_markdown_prefix(line: str) -> str:
         stripped = stripped[3:].strip()
 
     return stripped
-
-
-def first_meaningful_line(text: str) -> str:
-    """コードブロックを避けて最初の意味のある行を返す。"""
-    in_code_block = False
-
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        if line.startswith("```"):
-            in_code_block = not in_code_block
-            continue
-
-        if in_code_block:
-            continue
-
-        line = _normalize_line(line)
-        if line:
-            return line
-
-    return ""
 
 
 def compact_line(text: str, max_length: int) -> str:
@@ -123,14 +94,7 @@ def compact_line(text: str, max_length: int) -> str:
 
 def _normalize_line(text: str) -> str:
     """行を圧縮用に正規化する。"""
-    value = " ".join(text.split())
-    if not value:
-        return ""
-
-    value = _strip_markdown_prefix(value)
-    if not value:
-        return ""
-
+    value = _strip_markdown_prefix(" ".join(text.split()))
     for phrase in _LEADING_PHRASES:
         if value.startswith(phrase):
             value = value[len(phrase) :].lstrip()
