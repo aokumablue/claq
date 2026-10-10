@@ -2,13 +2,11 @@
 
 host 分岐は行わない。各 host が自分の読むキーだけを拾える形で、複数プロトコル
 分の出力を同一 JSON に無条件で同梱する（合併出力）。Claude Code は
-``hookSpecificOutput``、Copilot CLI は トップレベルの ``additionalContext``
-を読む。未知キーは無視される前提とし、実機未検証の host（Codex / Grok）に
-対しても同じ merged JSON を出力する。
+``hookSpecificOutput``、Copilot CLI はトップレベルの ``additionalContext`` を読む。
+未知キーは無視される前提とし、実機未検証の host（Codex / Grok）にも同じ JSON を出す。
 
-``modifiedResult`` は出力しない。claq の hook はコンテキスト注入と
-deny しか行わず、ツール結果の**書き換え**は 1 箇所も行わない。実測していない host 契約を推測でキーとして足すのは、
-未検証の挙動を配布物へ持ち込むことになるので行わない。
+``modifiedResult`` は出力しない。claq の hook はコンテキスト注入と deny しか行わず、
+実測していない host 契約を推測でキーとして足すと未検証の挙動を配布物へ持ち込むため。
 """
 
 from __future__ import annotations
@@ -40,7 +38,6 @@ def adapt_context_output(event_name: str, additional_context: str) -> str:
         },
         ensure_ascii=False,
     )
-
 
 
 def emit_block(reason: str) -> tuple[int, str, str]:

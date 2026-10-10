@@ -20,22 +20,16 @@ from claq.lib.core_utils import (
 def main() -> int:
     """コンパクション発生をログに記録する。
 
-    Args:
-        引数はありません。
-
     Returns:
-        終了コード（0: 成功、その他: エラー）
+        終了コード。失敗してもフックをブロックしないため常に 0。
 
     Raises:
-        例外は発生しません（エラーは終了コードで返す）。
+        例外は発生しません。
     """
     try:
         sessions_dir = get_sessions_dir()
-        compaction_log = sessions_dir / "compaction-log.txt"
-
         ensure_dir(sessions_dir)
-        append_file(compaction_log, f"[{get_datetime_string()}] Context compaction triggered\n")
-
+        append_file(sessions_dir / "compaction-log.txt", f"[{get_datetime_string()}] Context compaction triggered\n")
         log("[PreCompact] State saved before compaction")
     except Exception as err:  # noqa: BLE001 - フックはノンブロッキングのままにする必要がある
         log(f"[PreCompact] Error: {err}")
