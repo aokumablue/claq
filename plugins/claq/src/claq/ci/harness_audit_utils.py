@@ -21,7 +21,7 @@ HARNESS_MARKERS = [
 ]
 
 
-def check(
+def make_check(
     check_id: str,
     category: str,
     points: int,
@@ -80,8 +80,8 @@ def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
     持つと、枝刈りの無い側を経由して `node_modules/dep/a.spec.js` 1 個で
     `consumer-test-suite` を満点通過しうるので、走査の共通経路である本関数へ寄せる。
 
-    読めない（存在しないものを含む）ディレクトリは `OSError` を握り潰して走査から
-    落とすだけで、監査レポート全体を落とさない（`file_has_content` と同じ姿勢）。
+    読めないディレクトリは `OSError` を握り潰して走査から落とすだけで、監査レポート
+    全体を落とさない（`file_has_content` と同じ姿勢）。
     """
     stack = [root_path]
     while stack:
@@ -125,9 +125,10 @@ def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
 
 def count_files(root_dir: str | Path, relative_dir: str, extension: str | None) -> int:
     """指定ディレクトリ以下の、``extension`` で終わる（None なら全）ファイル数を数える。"""
-    return sum(
-        1 for entry in _walk_dir(Path(root_dir, relative_dir)) if extension is None or entry.name.endswith(extension)
-    )
+    dir_path = Path(root_dir, relative_dir)
+    if not dir_path.exists():
+        return 0
+    return sum(1 for entry in _walk_dir(dir_path) if extension is None or entry.name.endswith(extension))
 
 
 def safe_read(root_dir: str | Path, relative_path: str) -> str:
@@ -153,8 +154,11 @@ def _has_any_file(root_dir: str | Path, relative_paths: Sequence[str]) -> bool:
 
 def has_file_with_extension(root_dir: str | Path, relative_dir: str, extensions: str | Sequence[str]) -> bool:
     """指定拡張子のファイルが 1 つでもあるかを調べる。"""
+    dir_path = Path(root_dir, relative_dir)
+    if not dir_path.exists():
+        return False
     suffixes = (extensions,) if isinstance(extensions, str) else tuple(extensions)
-    return any(entry.name.endswith(suffixes) for entry in _walk_dir(Path(root_dir, relative_dir)))
+    return any(entry.name.endswith(suffixes) for entry in _walk_dir(dir_path))
 
 
 def detect_target_mode(root_dir: str | Path) -> str:

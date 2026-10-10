@@ -171,6 +171,7 @@ def validate_hooks(hooks_file: str | Path = DEFAULT_HOOKS_FILE, *, optional: boo
     """
     hooks_path = Path(hooks_file)
     if not hooks_path.exists():
+        # 他の validator の「skills ディレクトリが…」と違い、ファイル名の後に空白を置いた文面になる。
         return report_missing("hooks.json ", hooks_path, optional)
     try:
         data = read_json(hooks_path, "hooks.json")

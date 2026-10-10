@@ -15,13 +15,13 @@ from claq.ci.harness_audit_utils import (
 )
 from claq.ci.harness_audit_utils import (
     _has_gitlab_security_scanning,
-    check,
     count_files,
     detect_target_mode,
     file_has_content,
     find_plugin_install,
     has_file_with_extension,
     has_python_tests,
+    make_check,
     safe_parse_json,
     safe_read,
 )
@@ -178,13 +178,13 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
     ci_path, security_path, ci_pass, security_pass = _hosting_layout(root_dir, hosting_service)
 
     return [
-        check(
+        make_check(
             "consumer-plugin-install", "Tool Coverage", 4, ["repo"], "~/.claude/plugins/",
             "プラグインがインストールされている",
             bool(plugin_install),
             "Install the claq plugin for this user or project before auditing project-specific harness quality.",
         ),
-        check(
+        make_check(
             "consumer-project-overrides", "Tool Coverage", 3, ["repo", "hooks", "skills", "commands", "agents"],
             ".claude/",
             "プロジェクト固有のハーネスオーバーライドが .claude/ 配下に存在する",
@@ -195,7 +195,7 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
             or file_has_content(root_dir, ".claude/hooks.json"),
             "Add project-local .claude hooks, commands, skills, or settings that tailor claq to this repo.",
         ),
-        check(
+        make_check(
             "consumer-instructions", "Context Efficiency", 3, ["repo"], "AGENTS.md",
             "プロジェクトが明示的なエージェント・命令コンテキストを持つ",
             file_has_content(root_dir, "AGENTS.md")
@@ -203,7 +203,7 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
             or file_has_content(root_dir, ".claude/CLAUDE.md"),
             "Add AGENTS.md or CLAUDE.md so the harness has project-specific instructions.",
         ),
-        check(
+        make_check(
             "consumer-project-config", "Context Efficiency", 2, ["repo", "hooks"], ".mcp.json",
             "プロジェクトがローカル MCP・Claude 設定を宣言している",
             file_has_content(root_dir, ".mcp.json")
@@ -211,7 +211,7 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
             or file_has_content(root_dir, ".claude/settings.local.json"),
             "Add .mcp.json or .claude/settings.json so project-local tool configuration is explicit.",
         ),
-        check(
+        make_check(
             "consumer-test-suite", "Quality Gates", 4, ["repo"], "tests/",
             "プロジェクトが自動テストのエントリポイントを持つ",
             # 最初のヒットで打ち切る判定（has_python_tests / has_file_with_extension）を
@@ -223,19 +223,19 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
             "Add a test script or checked-in tests (package.json scripts.test, *.spec.ts, "
             "or pytest test_*.py) so harness recommendations can be verified automatically.",
         ),
-        check(
+        make_check(
             "consumer-ci-workflow", "Quality Gates", 3, ["repo"], ci_path,
             f"プロジェクトが {hosting_label} CI 設定をチェックインしている",
             ci_pass,
             f"Add at least one CI configuration file for {hosting_label} so harness and test checks run outside local development.",
         ),
-        check(
+        make_check(
             "consumer-memory-notes", "Memory Persistence", 2, ["repo"], ".claude/memory.md",
             "プロジェクトメモリ・恒久的なノートがチェックインされている",
             file_has_content(root_dir, ".claude/memory.md") or count_files(root_dir, "docs/adr", ".md") > 0,
             "Add durable project memory such as .claude/memory.md or ADRs under docs/adr/.",
         ),
-        check(
+        make_check(
             "consumer-eval-coverage", "Eval Coverage", 2, ["repo"], "evals/",
             "プロジェクトが評価テストまたは複数の自動テストを持つ",
             # 「複数の自動テスト」は Python のテストも数え、閾値は JS 側と揃えて 3 件。
@@ -247,19 +247,19 @@ def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github
             or count_files(root_dir, "tests", ".test.js") >= 3,
             "Add eval fixtures or at least a few focused automated tests for critical flows.",
         ),
-        check(
+        make_check(
             "consumer-security-policy", "Security Guardrails", 2, ["repo"], security_path,
             "プロジェクトがセキュリティポリシー・自動依存スキャンを公開している",
             security_pass,
             f"Add SECURITY.md or {hosting_label}-appropriate dependency/code scanning configuration to document the project security posture.",
         ),
-        check(
+        make_check(
             "consumer-secret-hygiene", "Security Guardrails", 2, ["repo"], ".gitignore",
             "プロジェクトが一般的なシークレット環境ファイルを無視している",
             ".env" in gitignore,
             "Ignore .env-style files in .gitignore so secrets do not land in the repo.",
         ),
-        check(
+        make_check(
             "consumer-hook-guardrails", "Security Guardrails", 2, ["repo", "hooks"], ".claude/settings.json",
             "プロジェクトローカルフック設定がツール・プロンプトガードを参照している",
             "PreToolUse" in project_hooks
