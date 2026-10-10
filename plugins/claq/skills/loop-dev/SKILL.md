@@ -37,8 +37,8 @@ user-invocable: false
 
    | 作業内容 | 担当エージェント |
    |---|---|
-   | コード追加・振る舞いの変更を伴う feature/bugfix/test（通る経路にあるフォールバックの削除を含む） | `claq:tdd-writer` |
-   | 可読性・重複整理 | `claq:code-refiner`（依頼文へ `mode: simplify` を明示） |
+   | コード追加・振る舞いの変更を伴う feature/bugfix/test | `claq:tdd-writer` |
+   | 可読性・重複整理・到達しない余剰の削除 | `claq:code-refiner`（依頼文へ `mode: simplify` を明示） |
    | 未使用コード削除 | `claq:code-refiner`（依頼文へ `mode: clean` を明示） |
    | 性能改善 | `claq:code-refiner`（依頼文へ `mode: perf` を明示） |
 
