@@ -1,11 +1,12 @@
-"""claqフック実装の共通ユーティリティ。
+"""claq フック実装の共通ユーティリティ。
 
-フック用の入力読み込み、JSON解析、
-出力書き込みの共有関数を提供します。
+フック用の stdin 読み込み、シェルコマンドの解析、JSON 解析、出力書き込み、
+detach 起動の共有関数を提供する。
 """
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import os
@@ -28,68 +29,30 @@ from claq.lib.harness import JSON_PARSE_FAILURES
 MAX_STDIN_BYTES = 1024 * 1024
 
 # 1 コマンドに許すシェルトークン数の上限。
-#
-# `block_no_verify` は git トークンごとに残りセグメントを再走査するため
-# O(N^2) で、実測（2026-09-07・darwin）では次のようになった:
-#
-#     git×4,000  (16KB)   0.42s
-#     git×12,000 (48KB)   3.75s
-#     git×20,000 (80KB)  10.59s
-#     git×24,000 (96KB) 15.23s ← hooks.json の timeout（15秒）を超過
-#
-# 96KB は `MAX_STDIN_BYTES` の 9.2% でしかなく、stdin 上限の fail-closed では
-# 止まらない。host が kill した hook は exit code を返さないため、これは
-# **silent fail-open = 保護の完全なバイパス**になる（`pre_bash_commit_quality`
-# も同じ入力で 12.39s / timeout 30s と同じ軌道にある）。
-#
-# 上限超過は「検査しきれなかったので通す」ではなく BLOCKED で返す。
-# 同じ扱いを stdin 上限超過に対して既に採っており（`_TRUNCATED_INPUT_MESSAGE`）、
-# docs/adr/shell-analysis-boundary.md が本フック群の検出境界を「誤検出を誤通過より選ぶ」と定めている。
-# 実測 8,000 トークンで 1.66 秒なので 5,000 は timeout に対し 20 倍以上の余裕が
-# あり、正当なシェルコマンドがこの規模になることは実務上ない。
+# `block_no_verify` の走査はトークン数の二次で、上限が無いと stdin 上限の内側で
+# hooks.json の timeout（15 秒）を超える入力を作れる。host が kill した hook は
+# exit code を返さず silent fail-open になるため、超過は通さず BLOCKED で返す
+# （docs/adr/hook-failure-direction.md）。5,000 は timeout に対し 20 倍以上の余裕があり、
+# 正当なシェルコマンドがこの規模になることは実務上ない。
 MAX_COMMAND_TOKENS = 5000
 
 # 1 コマンドに許すバイト数の上限。
-#
-# `MAX_COMMAND_TOKENS` はトークン**数**しか縛らないが、走査コストを決めるのは
-# `shlex` の**バイト数**である。単一の巨大トークンはトークン数 2 のまま予算を
-# 素通りする。実測（2026-09-12・darwin、`echo <N>` を実経路で起動）:
-#
-#     125KB  0.41s
-#     250KB  1.03s
-#     500KB  3.38s
-#     1MB   12.71s ← hooks.json の timeout（15秒）に対し余裕 15%
-#     1MB（deny 経路）12.65s
-#
-# 2 倍ごとに約 4 倍＝バイト数の二次。1MB は `MAX_STDIN_BYTES` の内側なので
-# stdin 上限では止まらず、host が kill した hook は exit code を返さないため
-# **silent fail-open = 保護の完全なバイパス**になる。トークン予算だけでは
-# この穴は塞がらない。
-#
-# 64KB は実測 0.2 秒未満で timeout に対し 75 倍以上の余裕がある。トークン予算
-# 5,000 に収まる正当なコマンドは平均 8 バイト/トークンでも 40KB 程度なので、
-# この上限が正当な入力を落とすことは実務上ない。
+# 単一の巨大トークンはトークン数の上限を素通りするが、`shlex` の走査コストは
+# バイト数の二次で、1MB で timeout に迫る。64KB は timeout に対し 75 倍以上の余裕が
+# あり、トークン上限に収まる正当なコマンド（40KB 程度）を落とさない。
 MAX_COMMAND_BYTES = 64 * 1024
 
-# コマンド全体をセグメントに割るシェル区切りトークン。`block_no_verify` と
-# `pre_bash_commit_quality` が共に shell 区切り文字密着トークン（例:
-# ``status;echo``）を誤って 1 トークンとして扱わないよう、この定数と
-# `tokenize`/`split_segments` を共有ヘルパとして 1 箇所に持つ。
+# コマンド全体をセグメントに割るシェル区切りトークン。区切り文字に密着した
+# トークン（``status;echo``）を全フックが同じ規則で割るため 1 箇所に持つ。
 _SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
 
-
 # ``sh -c`` 再帰と heredoc 本文判定で共有する既知シェル実行ファイル（basename 判定）。
-# heredoc 側だけ別集合を持つと「本文が実行されるか」の判定軸が 2 つに割れるため、
-# block_no_verify から本モジュールへ移して単一情報源にする。
+# 別集合を持つと「本文が実行されるか」の判定軸が 2 つに割れる。
 SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash"})
 
 # 実行ファイルではないが、渡されたテキストを現在のシェルで実行するビルトイン。
-# ``. /dev/stdin <<'EOF'`` / ``source /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``
-# はいずれも heredoc 本文をコマンドとして実行するため、本文をデータとして
-# 剥がすと docs/adr/shell-analysis-boundary.md が「除去しない条件 1」で禁じている誤通過になる（本文に
-# `git commit --no-verify` を置くと素通りする）。判定軸は
-# 「本文が実行されうるか」であって「実行ファイルか」ではないので、
-# `SHELL_WRAPPER_EXECUTABLES` とは別集合として持ち、両方を見る。
+# ``. /dev/stdin <<'EOF'`` 等の本文はコマンドとして実行されるため、データとして
+# 剥がすと誤通過になる（docs/adr/shell-analysis-boundary.md の除去しない条件 1）。
 _BODY_EXECUTING_BUILTINS = frozenset({".", "source", "eval"})
 
 # ``#`` を行コメントの開始として扱ってよい直前の文字。POSIX シェルは語の先頭に
@@ -98,12 +61,10 @@ _COMMENT_PRECEDING_CHARS = frozenset(" \t\n;|&()<>")
 
 # ``-c`` を含む結合短フラグ（``bash -lc 'cmd'``）。単独の ``-c`` だけを見ると
 # ``bash -lc`` でラッパー再帰が不発になり、保護フックが素通りする。
-# 長オプション（``--``）は該当しないので先頭 1 文字のハイフンに限定する。
 _SHELL_COMMAND_FLAG_RE = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 
-# heredoc 演算子。``<<<``（herestring）を誤って heredoc と読まないよう、
-# 前後に ``<`` が無いことを lookbehind / lookahead の両方で要求する
-# （lookahead だけだと ``<<<EOF`` が offset 1 で再マッチする）。
+# heredoc 演算子。``<<<``（herestring）を heredoc と読まないよう、前後に ``<`` が
+# 無いことを要求する（lookahead だけだと ``<<<EOF`` が offset 1 で再マッチする）。
 _HEREDOC_OPERATOR_RE = re.compile(
     r"(?<!<)<<(?!<)(-?)[ \t]*"
     r"(?:'(?P<squote>[^']*)'|\"(?P<dquote>[^\"]*)\"|\\?(?P<bare>[A-Za-z_][A-Za-z0-9_.-]*))"
@@ -132,16 +93,10 @@ def is_shell_wrapper_token(token: str) -> bool:
 def extract_shell_wrapper_command(segment: list[str]) -> str | None:
     """セグメント内の既知シェル ``-c`` 呼び出しから、ラップされた文字列コマンドを取り出す。
 
-    ``sh -c 'git commit --no-verify'`` のように basename が
-    `SHELL_WRAPPER_EXECUTABLES` のいずれかであるトークンを探し、続くトークンに
-    ``-c`` を含む短フラグがあれば、その次のトークン（シェルへ渡す文字列コマンド）
-    を返す。``-c`` 単独だけを見ると ``bash -lc 'git commit --no-verify'``
-    で再帰が不発になり、素通りする。
-
-    `block_no_verify` と `bash_config_protection` が共有する。片方だけがラッパー
-    再帰を持つと「Write なら止まるが Bash なら通る」と同型の非対称（本モジュール群
-    を分けた理由そのもの）が生じるため、単一情報源にする。
-    再帰の段数は呼び出し側が決める（docs/adr/shell-analysis-boundary.md: 2 段以上のネストは非目標）。
+    既知シェルのトークンに続く ``-c`` を含む短フラグを探し、その次のトークンを返す。
+    `block_no_verify` と `bash_config_protection` が共有する。片方だけがラッパー再帰を
+    持つと、同じコマンドが片方のフックだけを素通りする。再帰の段数は呼び出し側が
+    決める（docs/adr/shell-analysis-boundary.md: 2 段以上のネストは非目標）。
 
     Args:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
@@ -155,11 +110,9 @@ def extract_shell_wrapper_command(segment: list[str]) -> str | None:
     for index, token in enumerate(segment):
         if not is_shell_wrapper_token(token):
             continue
-        for offset, candidate in enumerate(segment[index + 1 :]):
-            if not _SHELL_COMMAND_FLAG_RE.fullmatch(candidate):
-                continue
-            remaining = segment[index + 1 + offset + 1 :]
-            return remaining[0] if remaining else None
+        for position in range(index + 1, len(segment)):
+            if _SHELL_COMMAND_FLAG_RE.fullmatch(segment[position]):
+                return segment[position + 1] if position + 1 < len(segment) else None
     return None
 
 
@@ -167,24 +120,16 @@ def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], st
     """heredoc 演算子になりうる ``<`` の位置と、行末のクォート状態を返す。
 
     コメント内・クォート内・``\\`` エスケープ後の ``<`` は heredoc を開始しない。
-    これらを演算子として採ると、実際には**実行される**後続行が「本文」として
-    捨てられる（実測: ``# <<EOF`` 改行 ``git commit --no-verify`` 改行 ``EOF`` で
-    保護フック 3 種が揃って exit 0 になった）。docs/adr/shell-analysis-boundary.md が本文剥がしを正当化した
-    前提「本文範囲は演算子・区切り語・終端行だけで決まる」は、そもそも heredoc が
-    開始しないこの形では成立しない。
+    これらを演算子として採ると、実際には実行される後続行が「本文」として捨てられ、
+    保護フックが素通りする。
 
-    クォート状態は行をまたぐため（シェルのクォートは改行を含む）、呼び出し元が
-    **非本文行だけ**を鎖のように繋いで渡す。heredoc 本文行・終端行はシェルの
-    語彙ではないので状態を更新してはならない — 本文中の ``#`` や閉じない
-    アポストロフィ（``don't``）で以降の解析が壊れる。
+    クォート状態は行をまたぐため、呼び出し元が**非本文行だけ**を鎖のように繋いで
+    渡す。本文行・終端行はシェルの語彙ではないので、本文中の ``#`` や閉じない
+    アポストロフィ（``don't``）で以降の解析を壊さないよう状態を更新しない。
+    行末の ``\\`` が消費するのは改行自体なので、エスケープ状態は持ち越さない。
 
-    ``\\`` エスケープは行内で完結させる。行末の ``\\`` が消費するのは改行自体
-    （行継続）であり、次行の先頭文字ではないため、状態として持ち越さない。
-
-    コメント判定は `_strip_line_comments` と同じ POSIX 規則（語の先頭にある
-    ``#`` だけ）で、`_COMMENT_PRECEDING_CHARS` を共有する。前段で
-    `_strip_line_comments` を単純適用する形は採れない — heredoc 本文中の ``#``
-    や閉じないアポストロフィまで巻き込んで壊すため。
+    `_strip_line_comments` を前段で単純適用する形は採れない。heredoc 本文中の
+    ``#`` や閉じないアポストロフィまで巻き込んで壊すため。
 
     Args:
         line: 走査対象の 1 物理行（非本文行）。
@@ -232,15 +177,10 @@ def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], st
 def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, bool]], str | None]:
     """行に現れる heredoc の区切り語を出現順に返し、行末のクォート状態も返す。
 
-    照合は `_operator_start_offsets` が返した位置からのみ行う（生の行へ
-    `finditer` を当てると、コメント内・クォート内の ``<<`` を演算子と誤認する）。
-    位置を絞ってから `re.Pattern.match` するため lookbehind（``(?<!<)``）は
-    手前の文字を見られる。
-
-    採用した照合は `finditer` と同じく非重複にする（`consumed_to` で
-    直前の照合範囲内の候補を飛ばす）。位置ごとに独立して照合すると、
-    クォート内の ``<<`` を跨いだ重複照合が新たな区切り語を生み、本文を
-    余計に剥がす＝誤通過側へ倒れうるため。
+    照合は `_operator_start_offsets` が返した位置からのみ行う。照合は非重複にする
+    （直前の照合範囲内の候補を飛ばす）。位置ごとに独立して照合すると、クォート内の
+    ``<<`` を跨いだ重複照合が新たな区切り語を生み、本文を余計に剥がして誤通過側へ
+    倒れうるため。
 
     Args:
         line: 走査対象の 1 物理行（非本文行）。
@@ -262,9 +202,7 @@ def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, b
         if match is None:
             continue
         # ``<<''`` の空文字列区切りを落とさないため or 連結にしない。
-        word = next(
-            value for value in (match.group("squote"), match.group("dquote"), match.group("bare")) if value is not None
-        )
+        word = next(value for value in match.group("squote", "dquote", "bare") if value is not None)
         delimiters.append((word, match.group(1) == "-"))
         consumed_to = match.end()
     return delimiters, next_quote
@@ -273,10 +211,8 @@ def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, b
 def _line_keeps_heredoc_bodies(line: str) -> bool:
     """演算子行を見て、本文を剥がさずに残すべきかを判定する。
 
-    本文が実行されうる形（シェル起動・本文を実行するビルトイン・パイプや
-    継続で次行へ繋がる形）はすべて残す側へ倒す。``bash <<'EOF'`` や
-    ``. /dev/stdin <<'EOF'`` の本文は実際に実行されるため、データとして
-    剥がすと docs/adr/shell-analysis-boundary.md が禁じる誤通過になる（実測で確認済み）。
+    本文が実行されうる形（シェル起動・本文を実行するビルトイン・パイプや継続で
+    次行へ繋がる形）はすべて残す側へ倒す。
 
     Args:
         line: heredoc 演算子を含む物理行。
@@ -289,9 +225,7 @@ def _line_keeps_heredoc_bodies(line: str) -> bool:
     """
     if line.rstrip().endswith(_HEREDOC_CONTINUATION_SUFFIXES):
         return True
-    return any(
-        is_shell_wrapper_token(token) or token in _BODY_EXECUTING_BUILTINS for token in tokenize(line)
-    )
+    return any(is_shell_wrapper_token(token) or token in _BODY_EXECUTING_BUILTINS for token in tokenize(line))
 
 
 def _consume_heredoc_bodies(
@@ -299,8 +233,8 @@ def _consume_heredoc_bodies(
 ) -> tuple[int, list[str]] | None:
     """区切り語の本文を読み飛ばし、終端行だけを残して返す。
 
-    本文の走査中に ``<<`` を再検出しない。``<<'OUTER'`` の本文に
-    ``<<'INNER'`` が現れる形で走査が同期ずれを起こすのを防ぐ。
+    本文の走査中に ``<<`` を再検出しない。``<<'OUTER'`` の本文に ``<<'INNER'`` が
+    現れる形で走査が同期ずれを起こすのを防ぐ。
 
     Args:
         lines: コマンド全体の物理行リスト。
@@ -331,28 +265,18 @@ def _consume_heredoc_bodies(
 def strip_data_heredoc_bodies(command: str) -> str:
     """heredoc の**データ**本文をコマンド文字列から取り除く。
 
-    heredoc 本文はどのシェルでもコマンドの語彙に入らないため、そのまま
-    トークン化すると散文が実行命令として読まれる（実測: ``cat > note.md
-    <<'EOF'`` の本文に ``git commit --no-verify`` と書いただけで 3 つの保護
-    フックが exit 2 になった）。docs/adr/shell-analysis-boundary.md の「誤検出 > 誤通過」は解析できない
-    構文についての規定であり、heredoc の本文範囲は演算子・区切り語・終端行
-    だけで決まる環境非依存の構文なので、この規定は本 FP を正当化しない。
-
-    ただし本文がデータだと**静的に確定できる場合だけ**剥がす。次のいずれかに
-    当たれば剥がさず現状の挙動（＝検出側）を維持する:
+    heredoc 本文はコマンドの語彙に入らないため、そのままトークン化すると散文が
+    実行命令として読まれ、フックの禁止事項を名指しする説明文書自体が書けなくなる。
+    本文範囲は演算子・区切り語・終端行だけで決まる環境非依存の構文なので、本文が
+    データだと**静的に確定できる場合だけ**剥がす。次のいずれかに当たれば剥がさず
+    検出側を維持する（docs/adr/shell-analysis-boundary.md）:
 
     1. 演算子行に本文を実行するトークンがある（``bash <<'EOF'`` /
        ``cat <<'EOF' | bash`` / ``. /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``）
     2. 演算子行が継続演算子で終わる（本文開始が次行とは限らない）
     3. 終端行が見つからない（未終端）
     4. ``<<`` がそもそも heredoc 演算子ではない（コメント内・クォート内・
-       ``\\`` エスケープ後）。この場合 heredoc は開始せず、後続行は**実行される
-       コマンド**なので、本文として剥がすと保護フックが素通りする（実測:
-       ``# <<EOF`` 改行 ``git commit --no-verify`` 改行 ``EOF`` で 3 フックが
-       揃って exit 0）。docs/adr/shell-analysis-boundary.md の前提「本文範囲は演算子・区切り語・終端行だけ
-       で決まる」はここでは成立しない。判定は `_operator_start_offsets` が持つ
-       クォート／コメント状態で行い、状態は**非本文行だけ**を鎖にして更新する
-       （本文行・終端行はシェルの語彙ではないため）。
+       ``\\`` エスケープ後）。後続行は実行されるコマンドなので剥がすと素通りする。
 
     終端行を残すため冪等（``f(f(x)) == f(x)``）。
 
@@ -393,21 +317,14 @@ def strip_data_heredoc_bodies(command: str) -> str:
 def _strip_line_comments(command: str) -> str:
     """クォート外の ``#`` 行コメントを行末まで取り除く。
 
-    ``shlex`` にコメント処理を任せると、``#`` 以降が**入力末尾まで**捨てられる。
-    `_replace_unquoted_newlines` が改行を ``;`` へ正規化した後の文字列を渡す
-    ため、``shlex`` が探すコメント終端（改行）が 1 つも残っていないからである。
-    その結果 ``git status #`` 改行 ``git commit --no-verify`` の 2 行目が丸ごと
-    未検査になり、Bash 系フックが揃って素通りする。
-    ``echo a#b && git commit --no-verify`` も同様に素通りする（``shlex`` は
-    語中の ``#`` もコメント開始として扱うため）。
+    ``shlex`` にコメント処理を任せると、改行を ``;`` へ正規化した後の文字列では
+    ``#`` 以降が**入力末尾まで**捨てられ、2 行目以降が未検査になる。``shlex`` は
+    語中の ``#`` もコメント開始として扱うため ``echo a#b && git commit --no-verify``
+    も素通りする。そこで正規化の前段で POSIX 規則（語の先頭の ``#`` だけ）に従って
+    自分で落とし、``shlex`` 側のコメント処理は無効化する。
 
-    そこで正規化の前段でコメントを自分で落とし、``shlex`` 側のコメント処理は
-    無効化する（`tokenize_with_status`）。POSIX シェルに合わせて、語の先頭に
-    ある ``#`` だけをコメント開始とみなす（``echo a#b`` の ``#`` は語の一部）。
-    クォート内・``\\`` エスケープ後の ``#`` はコメントにしない。
-
-    クォートが閉じていない入力では「クォート内」と判定したまま末尾に達するため
-    コメントは剥がされず、検査対象として残る（fail-closed 側）。
+    クォートが閉じていない入力ではクォート内と判定したまま末尾に達するため、
+    コメントは剥がされず検査対象に残る（fail-closed 側）。
 
     Args:
         command: 元のコマンド文字列。
@@ -466,27 +383,14 @@ def _strip_line_comments(command: str) -> str:
 def _strip_line_continuations(command: str) -> str:
     """クォート外・二重クォート内の行継続（``\\`` + 改行）を除去する。
 
-    シェルは ``\\`` と改行の**両方**を消して行を連結するが、
-    ``_replace_unquoted_newlines`` / ``_strip_line_comments`` はエスケープ済みの
-    1 文字をそのまま出力するため両方が残る。残ったまま ``shlex(posix=True)`` へ
-    渡すと、whitespace 状態の ``\\`` が escape 状態へ遷移して改行を**次トークンの
-    先頭文字**として吸収し、継続行が 0 桁目から始まるときにその先頭語が丸ごと
-    別トークンへ化ける。
+    除去しないと ``shlex(posix=True)`` が改行を次トークンの先頭文字として吸収し、
+    継続行が 0 桁目から始まるときにその先頭語が別トークンへ化ける（``git commit \\``
+    + 改行 + ``--no-verify`` が素通りする）。単一クォート内では行継続は成立しない
+    ので触らない。
 
-    除去しないと 4 経路が誤通過する — ``git commit \\`` + 改行 +
-    ``--no-verify`` / 同 ``-n`` が `block_no_verify` を、``git \\`` + 改行 +
-    ``commit`` が `pre_bash_commit_quality` の commit 判定を、
-    ``printf x >\\`` + 改行 + ``ruff.toml`` が `bash_config_protection` の
-    リダイレクト先判定を、いずれも素通りする。継続行がインデントされている形
-    では ``\n`` が単独トークンとして切れるため検出されるので、
-    **「継続行が 0 桁目から始まるか」だけで保護の有無が反転**する。
-
-    単一クォート内では行継続は成立しない（``\\`` も改行もリテラル）ので触らない。
-
-    `_strip_line_comments` の**後**に適用すること。前に置くと
-    ``# foo \\`` + 改行 + ``git commit --no-verify`` が 1 行のコメントへ畳まれ、
-    2 行目が丸ごと消えて新しい誤通過を作る（シェルはコメント中の ``\\`` を
-    行継続として扱わない）。
+    `_strip_line_comments` の**後**に適用すること。前に置くと ``# foo \\`` + 改行 +
+    ``git commit --no-verify`` が 1 行のコメントへ畳まれ、2 行目が消える（シェルは
+    コメント中の ``\\`` を行継続として扱わない）。
 
     Args:
         command: 検査対象のコマンド文字列。
@@ -508,20 +412,14 @@ def _strip_line_continuations(command: str) -> str:
         char = command[index]
         if char == "\\" and quote != "'" and index + 1 < length:
             following = command[index + 1]
-            if following == "\n":
-                index += 2
-                continue
-            result.append(char)
-            result.append(following)
+            if following != "\n":
+                result += (char, following)
             index += 2
             continue
         if quote is not None:
             if char == quote:
                 quote = None
-            result.append(char)
-            index += 1
-            continue
-        if char in ("'", '"'):
+        elif char in ("'", '"'):
             quote = char
         result.append(char)
         index += 1
@@ -531,16 +429,9 @@ def _strip_line_continuations(command: str) -> str:
 def _replace_unquoted_newlines(command: str) -> str:
     """クォート外の改行をシェル区切り ``;`` へ置き換える。
 
-    改行はシェルにとって ``;`` と等価なコマンド区切りだが、``shlex`` は
-    whitespace として消費するため区切りトークンを出さない。その結果
-    ``split_segments`` が複数行コマンドを 1 セグメントへ融合し、セグメント
-    境界に依存する判定がすべて不発になる（実測: ``printf x > s.py`` 改行
-    ``git add s.py`` 改行 ``git commit -m x`` が exit 0。``;`` 区切りの同内容は
-    exit 2。``bash_config_protection`` も 2 行目以降の ``tee`` / ``sed -i`` /
-    ``cp`` を実行位置と認識できない）。
-
-    クォート内の改行は置き換えない（``echo 'a`` 改行 ``b'`` は 1 トークンの
-    まま）。``\\`` でエスケープされた改行は行継続なので区切りにしない。
+    改行はシェルにとって ``;`` と等価だが、``shlex`` は whitespace として消費する
+    ため、複数行コマンドが 1 セグメントへ融合してセグメント境界に依存する判定が
+    すべて不発になる。クォート内の改行と ``\\`` でエスケープされた改行は置き換えない。
 
     Args:
         command: 元のコマンド文字列。
@@ -579,58 +470,29 @@ def _replace_unquoted_newlines(command: str) -> str:
     return "".join(result)
 
 
-# Windows 読みでパス区切りへ変換するバックスラッシュ。直後が空白と ``/`` の
-# ものは除く（下 2 つの正規表現がそれぞれ別扱いする）。
+# Windows 読みでパス区切り ``/`` へ変換するバックスラッシュ（直後が空白と ``/`` 以外）。
 _WINDOWS_SEPARATOR_BACKSLASH_RE = re.compile(r"\\(?=[^\s/])")
 
-# Windows 読みで**除去**するバックスラッシュ（直後が空白）。POSIX では
-# ``rm my\\ ruff.toml`` は 1 トークン ``my ruff.toml`` だが、エスケープを持たない
-# PowerShell / cmd では ``my\\`` と ``ruff.toml`` の 2 引数であり、``ruff.toml`` が
-# 実際に削除される。``git commit -m fix\\ --no-verify`` も同様に ``--no-verify``
-# が独立した引数になり、フックがバイパスされる。したがってこの形は
-# 「POSIX の誤検出」ではなく「Windows の真陽性」であり、検出side へ倒す
-# （docs/adr/shell-analysis-boundary.md: 誤検出 > 誤通過）。``/`` へ置換するのではなく除去するのは、
-# 実在しない ``my/`` のようなパスを作らないため。
+# Windows 読みで除去するバックスラッシュ（直後が空白）。エスケープを持たない
+# PowerShell / cmd では ``rm my\\ ruff.toml`` は 2 引数で ``ruff.toml`` が実際に
+# 削除されるため、検出側へ倒す。``/`` へ置換しないのは実在しない ``my/`` を作らないため。
 _WINDOWS_ESCAPED_SPACE_RE = re.compile(r"\\(?=[ \t])")
 
 
 def command_dialect_variants(command: str) -> tuple[str, ...]:
-    """1 つのコマンド文字列を、2 つのシェル方言の読み方へ展開する。
+    """1 つのコマンド文字列を、POSIX 読みと Windows 読みの 2 方言へ展開する。
 
-    ``tokenize`` は ``shlex(posix=True)`` を使うため、クォート外の ``\\`` を
-    「次の 1 文字をエスケープする記号」として消費する。POSIX シェルでは
-    正しいが、Windows の実行シェル（PowerShell / cmd）では ``\\`` は
-    ただのパス区切りである。その結果 ``rm .\\ruff.toml`` は
-    ``['rm', '.ruff.toml']`` に、``C:\\Git\\git.exe commit --no-verify`` は
-    ``['C:Gitgit.exe', ...]`` になり、保護 hook が basename も git 起動も
-    見失う。
+    ``shlex(posix=True)`` はクォート外の ``\\`` をエスケープとして消費するが、
+    Windows の実行シェルでは ``\\`` はパス区切りである。どちらの方言で実行されるかは
+    hook の入力から決められないため、両方の読み方で検査し、どちらかが引っ掛かれば
+    deny する（docs/adr/shell-analysis-boundary.md）。
 
-    どちらの方言で解釈されるかは実行前には決められない（hook の入力に
-    シェル種別は載らない）。そこで**両方の読み方で検査し、どちらかが
-    引っ掛かれば deny する**。docs/adr/shell-analysis-boundary.md は保護 hook の検出境界を
-    「誤検出を誤通過より選ぶ」と定めており、この非対称はその規定の
-    範囲内である。
-
-    Windows 読みの作り方は、``\\`` の直後の文字で 3 通りに分ける:
-
-    - **パス構成文字** → ``/`` へ置換（``.\\ruff.toml`` → ``./ruff.toml``）。
-    - **空白 / タブ** → ``\\`` を除去（``my\\ ruff.toml`` → ``my ruff.toml``）。
-      PowerShell / cmd に単語結合のエスケープは無いので、この形は Windows では
-      2 引数であり ``ruff.toml`` が実際に書き込み対象になる。POSIX 読みでは
-      1 トークンの非保護ファイル名なので両立しないが、docs/adr/shell-analysis-boundary.md に従い検出側へ
-      倒す。``/`` へ置換せず除去するのは、実在しない ``my/`` を作らないため。
-    - **``/``** → 変換しない。``\\/`` は sed スクリプト等の POSIX エスケープで、
-      Windows のパス区切りには現れない。POSIX 読みでも Windows 読みでも ``/`` は
-      区切りのまま残るので、除外しても検出力は落ちない
-      （``sed -i 's/\\.git\\/hooks\\/pre-commit//' notes.md`` の誤検出はこれで消える）。
-
-    残る誤検出はある（例: ``rm a\\.eslintrc``）。これは docs/adr/shell-analysis-boundary.md が受容する側の
-    誤りであり、`tests/hooks/test_windows_shell_dialect.py` に characterization
-    test として固定してある。
+    Windows 読みは ``\\`` の直後の文字で分ける: パス構成文字なら ``/`` へ置換、
+    空白 / タブなら ``\\`` を除去、``/`` なら変換しない（``\\/`` は sed 等の POSIX
+    エスケープで、Windows のパス区切りには現れない）。
 
     `block_no_verify` と `bash_config_protection` が共有する。「何をパス区切りと
-    みなすか」を 2 箇所へ別々に実装すると、片方だけ強化される非対称
-    （``INPUT_CONTAINER_KEYS`` で実際に起きた失敗）を再生産するため。
+    みなすか」を 2 箇所に持つと、片方だけ強化される非対称が生じる。
 
     Args:
         command: 検査対象のコマンド文字列。
@@ -641,9 +503,7 @@ def command_dialect_variants(command: str) -> tuple[str, ...]:
     Raises:
         例外は発生しません。
     """
-    windows_reading = _WINDOWS_ESCAPED_SPACE_RE.sub(
-        "", _WINDOWS_SEPARATOR_BACKSLASH_RE.sub("/", command)
-    )
+    windows_reading = _WINDOWS_ESCAPED_SPACE_RE.sub("", _WINDOWS_SEPARATOR_BACKSLASH_RE.sub("/", command))
     if windows_reading == command:
         return (command,)
     return (command, windows_reading)
@@ -652,14 +512,7 @@ def command_dialect_variants(command: str) -> tuple[str, ...]:
 def tokenize(command: str) -> list[str]:
     """シェルコマンドを区切り記号込みのトークン列へ分割する。
 
-    ``shlex`` を ``punctuation_chars=True`` で使い、``git add -A&&git commit``
-    のように空白なしで連結された区切り記号も独立トークンにします。クォート外の
-    改行は ``;`` へ正規化してから渡します（``_replace_unquoted_newlines``。
-    ``shlex`` は改行を whitespace として消費し区切りトークンを出さないため、
-    正規化しないと複数行コマンドが 1 セグメントへ融合します）。クォート
-    不整合で ``ValueError`` になる入力は空白分割へフォールバックします
-    （クォートが閉じていない入力ではクォート内容もフラグとして走査され、
-    ブロック側＝fail-closed に倒れます）。
+    詳細は `tokenize_with_status` を参照。
 
     Args:
         command: 対象のシェルコマンド文字列。
@@ -670,19 +523,15 @@ def tokenize(command: str) -> list[str]:
     Raises:
         例外は発生しません。
     """
-    tokens, _parsed_cleanly = tokenize_with_status(command)
-    return tokens
+    return tokenize_with_status(command)[0]
 
 
 def command_exceeds_scan_budget(command: str) -> bool:
     """コマンドが検査予算（バイト数・トークン数）を超えるか判定する。
 
-    超過したコマンドは走査に timeout を超える時間がかかり、host に kill されて
-    silent fail-open になる。呼び出し元は True を受けたら走査せず BLOCKED を
-    返すこと（理由は `MAX_COMMAND_TOKENS` / `MAX_COMMAND_BYTES` のコメント）。
-
-    **バイト数を先に見る。** `tokenize` 自身が走査コストの本体（バイト数の二次）
-    なので、トークン数を数えるために `tokenize` を呼んだ時点で手遅れになる。
+    呼び出し元は True を受けたら走査せず BLOCKED を返すこと（理由は
+    `MAX_COMMAND_TOKENS` / `MAX_COMMAND_BYTES` のコメント）。`tokenize` 自身が
+    走査コストの本体なので、バイト数を先に見る。
 
     Args:
         command: 検査対象のシェルコマンド文字列。
@@ -699,12 +548,17 @@ def command_exceeds_scan_budget(command: str) -> bool:
 
 
 def tokenize_with_status(command: str) -> tuple[list[str], bool]:
-    """`tokenize` に加えて、``shlex`` で解析し切れたかどうかを返す。
+    """シェルコマンドをトークン化し、``shlex`` で解析し切れたかどうかも返す。
 
-    フォールバックしたかどうかを呼び出し側が知る必要があるのは、生文字列への
-    正規表現フォールバックを「解析できなかったときだけ」に限定するため。
-    解析できた入力にまで生文字列の正規表現を当てると、``echo "git commit"`` の
-    ような引用文まで実行命令と誤認する。
+    ``punctuation_chars=True`` で、空白なしで連結された区切り記号
+    （``git add -A&&git commit``）も独立トークンにする。コメント除去・行継続の連結・
+    クォート外改行の ``;`` 化を先に行う。クォート不整合で ``ValueError`` になる入力は
+    空白分割へフォールバックする（クォート内容もフラグとして走査され、ブロック側に
+    倒れる）。
+
+    解析できたかを返すのは、生文字列への正規表現フォールバックを「解析できなかった
+    ときだけ」に限定するため。解析できた入力にまで当てると ``echo "git commit"``
+    のような引用文まで実行命令と誤認する。
 
     Args:
         command: 対象のシェルコマンド文字列。
@@ -718,9 +572,8 @@ def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     normalized = _replace_unquoted_newlines(_strip_line_continuations(_strip_line_comments(command)))
     lexer = shlex.shlex(normalized, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
-    # コメントは `_strip_line_comments` が行単位で落とし済み。ここを既定
-    # （``#``）のままにすると、正規化で改行を失った文字列に対して ``#`` 以降が
-    # 入力末尾まで捨てられ、2 行目以降が未検査になる。
+    # コメントは `_strip_line_comments` が落とし済み。既定の ``#`` のままだと、
+    # 改行を失った文字列で ``#`` 以降が入力末尾まで捨てられる。
     lexer.commenters = ""
     try:
         return list(lexer), True
@@ -744,12 +597,12 @@ def split_segments(tokens: list[str]) -> list[list[str]]:
     segments: list[list[str]] = []
     current: list[str] = []
     for token in tokens:
-        if token in _SHELL_SEPARATORS:
-            if current:
-                segments.append(current)
-            current = []
+        if token not in _SHELL_SEPARATORS:
+            current.append(token)
             continue
-        current.append(token)
+        if current:
+            segments.append(current)
+        current = []
     if current:
         segments.append(current)
     return segments
@@ -759,24 +612,13 @@ def split_segments(tokens: list[str]) -> list[list[str]]:
 def resolve_repo_root() -> Path | None:
     """`git rev-parse --show-toplevel` でリポジトリルートの絶対パスを解決しキャッシュする。
 
-    `bash_config_protection`（保護対象パスがリポジトリ配下かの判定）と
-    `pre_bash_commit_quality`（`git commit -a` の未ステージ変更を作業ツリーから
-    読むため）が共有する。呼び出し側は「保護対象 basename のヒットがあった
-    場合にのみ」呼ぶことを前提にしており（`git ls-files` 等が出現しない
-    大多数の Bash 呼び出しでは subprocess を起動しない）、`lru_cache` で
-    同一プロセス内では最大 1 回だけ実際に `git` を実行する（セグメントや
-    呼び出し箇所ごとに再起動しない）。テストでキャッシュを跨がせない場合は
-    `resolve_repo_root.cache_clear()` を呼ぶこと。
-
-    タイムアウト・失敗時は None を返し、呼び出し側で非ブロッキングに
-    フォールバック（deny を避ける、または INDEX のみ検査に留める）
-    できるようにする。
-
-    Args:
-        引数はありません。
+    `bash_config_protection` と `pre_bash_commit_quality` が共有する。呼び出し側は
+    必要なときだけ呼び、`lru_cache` で同一プロセス内の `git` 起動を最大 1 回にする。
+    テストでキャッシュを跨がせない場合は `resolve_repo_root.cache_clear()` を呼ぶこと。
 
     Returns:
-        リポジトリルートの絶対パス。解決できなければ None を返します。
+        リポジトリルートの絶対パス。タイムアウト・失敗時は None（呼び出し側が
+        非ブロッキングにフォールバックする）。
 
     Raises:
         例外は発生しません。
@@ -789,41 +631,27 @@ def resolve_repo_root() -> Path | None:
             timeout=5,
             check=False,
         )
-        if result.returncode != 0:
-            return None
-        top = result.stdout.strip()
-        return Path(top) if top else None
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
+    top = result.stdout.strip()
+    return Path(top) if result.returncode == 0 and top else None
 
 
 class StdinUnavailableError(RuntimeError):
     """stdin に payload があるはずなのに読み取れなかったことを表す例外。
 
-    「payload が無い」（tty 起動・stdin 未接続・即 EOF）とは区別する。前者は
-    ホストがそもそも入力を渡していない状態で、保護 hook が検査すべき対象自体
-    が存在しない。後者は「入力はあるはずなのに取り出せなかった」状態であり、
-    保護 hook が判定不能のまま許可へ倒すと、まさに守るべきコマンドが素通り
-    する（Windows で ``select.select`` が ``OSError`` になる経路を「入力なし」と
-    読むと、``git commit --no-verify`` と ``git status`` が揃って exit 0 になる）。
-    呼び出し側にこの 2 つを取り違え
-    させないため、後者だけを例外として区別する（詳細は
-    ``docs/adr/hook-failure-direction.md``）。
+    「payload が無い」（tty 起動・stdin 未接続・即 EOF）とは区別する。前者で保護
+    hook が許可へ倒すと、守るべきコマンドが素通りする。呼び出し側に 2 つを取り違え
+    させないため、後者だけを例外にする（docs/adr/hook-failure-direction.md）。
     """
 
 
-# hooks は Claude Code が spawn 直後に stdin へ JSON を書き込むため、
-# 最初のバイト到着まで 2 秒あれば十分な余裕がある。
-# stdin リダイレクト漏れ（パイプ未接続のまま open）での無期限ブロックを防ぐ。
-# launcher がインプロセス実行になったことで、この guard は各フックが
-# 自分で stdin を読む read_raw_stdin* の先頭に置く（旧: launcher._read_stdin）。
+# ホストは spawn 直後に stdin へ JSON を書き込むため、最初のバイト到着まで 2 秒
+# あれば十分。stdin リダイレクト漏れ（パイプ未接続のまま open）での無期限ブロックを防ぐ。
 STDIN_FIRST_BYTE_TIMEOUT = 2.0
 
-# _read_stdin_bytes のチャンク読み取りループ全体に許す壁時計予算（秒）。
-# 最初のバイト到着待ち（STDIN_FIRST_BYTE_TIMEOUT）とは別予算で、最初の
-# チャンクを受け取った時点から計測する。hooks の stdin ペイロードは
-# Claude Code から渡される KB オーダーの JSON であり、3 秒は正常系では絶対に
-# 触れない余裕であって、正常系を制約する値ではない。
+# 最初のチャンク受信後のチャンク読み取りループ全体に許す壁時計予算（秒）。
+# payload は KB オーダーの JSON であり、正常系では触れない余裕として取る。
 STDIN_READ_DEADLINE_SECONDS = 3.0
 
 # 1 回の read 呼び出しで要求する最大バイト数（チャンクサイズ）。
@@ -833,13 +661,9 @@ STDIN_CHUNK_BYTES = 65536
 def _stdin_is_absent() -> bool:
     """stdin がそもそも存在しない（読む対象が無い）かを判定します。
 
-    ``sys.stdin`` が None（detach された子プロセス等）か、TTY に繋がって
-    いる（人手による直接起動）場合を「payload なし」として扱います。
-    ``isatty()`` が例外化する場合は「判定できない」ため False を返し、
-    実際の読み取り側（`_read_stdin_bytes`）に判断を委ねます。
-
-    Args:
-        なし
+    ``sys.stdin`` が None か TTY に繋がっている場合を「payload なし」とする。
+    ``isatty()`` が例外化する場合は判定できないため False を返し、実際の読み取り側
+    （`_read_stdin_bytes`）に判断を委ねる。
 
     Returns:
         読む対象が無いと確定できれば True。
@@ -858,17 +682,11 @@ def _stdin_is_absent() -> bool:
 def _stdin_chunk_reader(stdin_buffer: Any) -> Any:
     """ワーカースレッドが使う「n バイト読む」関数を選ぶ。
 
-    実 fd があるときは ``BufferedReader.read1()`` ではなく ``os.read()`` を
-    使う。``read1()`` は BufferedReader のロックを保持したままブロックする
-    ため、書き手が止まったまま本スレッドがタイムアウトで先に進むと、
-    インタプリタ終了時の stdin 後始末がそのロックを取れず
-    ``Fatal Python error: _enter_buffered_busy`` でプロセスが abort する
-    （実測: 開いたまま何も書かれないパイプを渡すと、deny 出力の直後に abort し
-    exit code が 2 ではなくなった）。``os.read()`` は Python レベルのロックを
-    握らないので、ブロックしたワーカーが残っても終了処理を妨げない。
-
-    fd を持たないオブジェクト（テストのフェイク・io.BytesIO 等）では
-    ``read1()`` へ落とす。
+    実 fd があるときは ``os.read()`` を使う。``read1()`` は BufferedReader のロックを
+    保持したままブロックするため、本スレッドがタイムアウトで先に進むと、終了時の
+    stdin 後始末がロックを取れず ``Fatal Python error: _enter_buffered_busy`` で
+    abort し、deny の exit code 2 が失われる。fd を持たないオブジェクト（テストの
+    フェイク・io.BytesIO 等）では ``read1()`` へ落とす。
 
     Args:
         stdin_buffer: 読み取り対象のバイナリストリーム。
@@ -892,25 +710,16 @@ def _stdin_chunk_reader(stdin_buffer: Any) -> Any:
 def _pump_stdin(reader: Any, max_bytes: int, sink: queue.Queue) -> None:
     """stdin をチャンク単位で読み、結果を `sink` へ流す（ワーカースレッド本体）。
 
-    ``select.select`` は使いません。Windows では select が socket にしか
-    使えず、通常のパイプに対して ``OSError`` を投げます。その例外を
-    「入力なし」と読み替えると、保護 hook が payload を 1 バイトも
-    読まずに許可側へ抜けます。ブロッキング read を
-    ワーカースレッドへ隔離し、呼び出し側が queue のタイムアウトで待つ形に
-    すると、readiness 判定に OS 固有 API が要らなくなり、3 プラットフォーム
-    で同一のロジックになります。
-
-    各チャンクは ``.read()`` ではなく ``.read1()`` で読みます。``.read(n)``
-    は ``n`` バイト届くか EOF まで待ち続けるため、書き手が途中で止まると
-    デッドライン判定の外側でブロックし続けます。
+    ``select.select`` は使わない。Windows では通常のパイプに ``OSError`` を投げ、
+    それを「入力なし」と読むと保護 hook が許可側へ抜ける。ブロッキング read を
+    ワーカースレッドへ隔離し、呼び出し側が queue のタイムアウトで待つ形にすると、
+    3 プラットフォームで同一のロジックになる。各チャンクは ``n`` バイト揃うまで
+    待たない読み方で読み、書き手が途中で止まってもデッドライン判定へ戻れるようにする。
 
     Args:
         reader: ``reader(n) -> bytes`` の読み取り関数（`_stdin_chunk_reader`）。
         max_bytes: 読み取る最大バイト数。
         sink: ``("data", bytes)`` / ``("error", Exception)`` を受け取るキュー。
-
-    Returns:
-        なし
 
     Raises:
         例外は発生しません（読み取り例外は sink へ載せます）。
@@ -925,31 +734,27 @@ def _pump_stdin(reader: Any, max_bytes: int, sink: queue.Queue) -> None:
             collected += len(chunk)
     except (OSError, ValueError, AttributeError) as exc:
         # AttributeError は `.buffer` があるのに `.read1` を持たない stdin
-        # （pytest の DontReadFromInput 等）。読めない点は OSError と同じなので
-        # 同じ扱いにする。ここで捕らえないとワーカースレッド内で例外が消える。
+        # （pytest の DontReadFromInput 等）。捕らえないとワーカー内で例外が消える。
         sink.put(("error", exc))
 
 
 def _read_stdin_bytes(max_bytes: int) -> bytes:
     """stdin から最大 `max_bytes` 分をバイト列として読みます。
 
-    ``.buffer`` があればワーカースレッド（`_pump_stdin`）へブロッキング
-    read を隔離し、本スレッドは queue のタイムアウトで待ちます。最初の
-    チャンクは STDIN_FIRST_BYTE_TIMEOUT 秒、以降はそこから
-    STDIN_READ_DEADLINE_SECONDS 秒の予算で待ちます。ワーカーは daemon
-    なので、待ち切れずに残ってもプロセス終了を妨げません。
+    ``.buffer`` があればワーカースレッド（`_pump_stdin`）へ read を隔離し、最初の
+    チャンクは STDIN_FIRST_BYTE_TIMEOUT 秒、以降は STDIN_READ_DEADLINE_SECONDS 秒の
+    予算で待つ。ワーカーは daemon なので、残ってもプロセス終了を妨げない。
 
-    ``.buffer`` が無い場合（io.StringIO 等）は文字数で読んだあと UTF-8 に
-    再エンコードします。文字数 read ではバイト上限を最大 4 倍超過しうる
-    ため、呼び出し側でバイト換算の切り詰めを行います。
+    ``.buffer`` が無い場合（io.StringIO 等）は文字数で読んで UTF-8 へ再エンコード
+    する。バイト上限を超えうるため、呼び出し側でバイト換算の切り詰めを行う。
 
     Args:
         max_bytes: 読み取る最大バイト数です（buffer 無し時は最大文字数）。
 
     Returns:
-        読み取ったバイト列。1 バイト以上受け取った後にデッドライン超過・
-        読み取り例外・EOF で打ち切った場合は、その時点までの部分データを
-        返します（壊れた JSON として後段が fail-closed に倒します）。
+        読み取ったバイト列。1 バイト以上受け取った後にデッドライン超過・読み取り
+        例外・EOF で打ち切った場合は、その時点までの部分データ（壊れた JSON として
+        後段が fail-closed に倒す）。
 
     Raises:
         StdinUnavailableError: 1 バイトも受け取れないまま、読み取りが例外化
@@ -970,16 +775,13 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
     collected = b""
     deadline: float | None = None
     while len(collected) < max_bytes:
-        timeout = (
-            STDIN_FIRST_BYTE_TIMEOUT if deadline is None else max(0.0, deadline - time.monotonic())
-        )
+        timeout = STDIN_FIRST_BYTE_TIMEOUT if deadline is None else max(0.0, deadline - time.monotonic())
         try:
             kind, payload = sink.get(timeout=timeout)
         except queue.Empty:
             if not collected:
                 raise StdinUnavailableError(
-                    "stdin の最初のバイトが "
-                    f"{STDIN_FIRST_BYTE_TIMEOUT} 秒以内に届きませんでした"
+                    f"stdin の最初のバイトが {STDIN_FIRST_BYTE_TIMEOUT} 秒以内に届きませんでした"
                 ) from None
             write_stderr(
                 "WARNING: stdin 読み取りが上限時間に達したため、"
@@ -1002,12 +804,10 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
 def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
     """標準入力から生のテキストをバイト単位の上限つきで読み取ります。
 
-    読み取れなかった場合も空文字列を返します。非保護経路（launcher の
-    ``--bg`` 中継・``mem.cli`` の payload 読み取り）専用で、これらは
-    「入力が無い」と「読めない」を区別しても採れる別の行動が無いためです
-    （どちらでも記録すべき材料が無い）。保護 hook は
-    `read_raw_stdin_with_truncation` を使い、`StdinUnavailableError` を
-    自分で捕捉して fail-closed に倒すこと。
+    読み取れなかった場合も空文字列を返す。非保護経路（launcher の ``--bg`` 中継・
+    ``mem.cli`` の payload 読み取り）専用で、これらは「入力が無い」と「読めない」を
+    区別しても採れる別の行動が無い。保護 hook は `read_raw_stdin_with_truncation` を
+    使い、`StdinUnavailableError` を捕捉して fail-closed に倒すこと。
 
     Args:
         max_bytes: 読み取る最大バイト数です。
@@ -1031,10 +831,9 @@ def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
 def read_raw_stdin_with_truncation(max_bytes: int = MAX_STDIN_BYTES) -> tuple[str, bool]:
     """標準入力を読み取り、切り捨ての有無を返します（保護 hook 用）。
 
-    読む対象が無い場合（tty 起動・``sys.stdin`` が None・即 EOF）は
-    ``("", False)`` を返します。読み取り自体に失敗した場合は
-    `StdinUnavailableError` を送出します — 呼び出し側の保護 hook は
-    これを捕捉して deny に倒すこと（docs/adr/hook-failure-direction.md）。
+    読む対象が無い場合（tty 起動・``sys.stdin`` が None・即 EOF）は ``("", False)``。
+    呼び出し側の保護 hook は `StdinUnavailableError` を捕捉して deny に倒すこと
+    （docs/adr/hook-failure-direction.md）。
 
     Args:
         max_bytes: 読み取る最大バイト数です。
@@ -1048,18 +847,13 @@ def read_raw_stdin_with_truncation(max_bytes: int = MAX_STDIN_BYTES) -> tuple[st
     if _stdin_is_absent():
         return "", False
     raw_bytes = _read_stdin_bytes(max_bytes + 1)
-    truncated = len(raw_bytes) > max_bytes
-    if truncated:
-        raw_bytes = raw_bytes[:max_bytes]
-    return raw_bytes.decode("utf-8", errors="replace"), truncated
+    return raw_bytes[:max_bytes].decode("utf-8", errors="replace"), len(raw_bytes) > max_bytes
 
 
 def stdin_unreadable_message(hook_name: str, reason: object) -> str:
     """stdin 読み取り不能時の deny 理由を組み立てます。
 
-    4 つの保護 hook が同じ文面を使うための単一情報源です。片方だけ文面や
-    方針がずれると「Write なら止まるが Bash なら通る」型の非対称が再発
-    します。
+    4 つの保護 hook が同じ文面と方針を使うための単一情報源です。
 
     Args:
         hook_name: 呼び出し元 hook の識別名。
@@ -1081,12 +875,10 @@ def stdin_unreadable_message(hook_name: str, reason: object) -> str:
 def parse_json_object(raw: str) -> dict[str, Any] | None:
     """JSON 文字列を辞書としてパースします。
 
-    パース不能は ``JSON_PARSE_FAILURES``（`claq.lib.harness`）で一括して受けます。
-    ここで ``json.JSONDecodeError`` だけを捕まえると、深くネストした配列/オブジェクト
-    に対して CPython の再帰下降デコーダが送出する ``RecursionError`` が貫通し、
-    呼び出し元の保護フックが例外で異常終了して PreToolUse の exit 1
-    （non-blocking error = ツールはそのまま実行される）へ倒れます。本関数の None は
-    呼び出し元で「判定不能 → deny」として扱われる fail-closed 側の値です。
+    パース不能は ``JSON_PARSE_FAILURES`` で一括して受ける。``json.JSONDecodeError``
+    だけだと、深いネストで送出される ``RecursionError`` が貫通して保護フックが
+    exit 1（PreToolUse では non-blocking error ＝ ツールが実行される）へ倒れる。
+    None は呼び出し元で「判定不能 → deny」として扱われる fail-closed 側の値。
 
     Args:
         raw: パース対象の JSON 文字列です。
@@ -1112,14 +904,9 @@ def write_stdout(text: str) -> None:
     Args:
         text: 出力するテキストです。
 
-    Returns:
-        なし
-
     Raises:
         OSError: パイプが閉じている場合（BrokenPipeError を含む）。
         UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
-
-    deny の判定を落とさないため、`emit_block_output` はこれらを内側で捕まえる。
     """
     sys.stdout.write(text)
 
@@ -1130,14 +917,9 @@ def write_stderr(text: str) -> None:
     Args:
         text: 出力するテキストです。
 
-    Returns:
-        なし
-
     Raises:
         OSError: パイプが閉じている場合（BrokenPipeError を含む）。
         UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
-
-    deny の判定を落とさないため、`emit_block_output` はこれらを内側で捕まえる。
     """
     sys.stderr.write(text)
 
@@ -1175,11 +957,9 @@ def basename(path: str) -> str:
 def _basename_any_separator(path: str) -> str:
     """`/` と `\\` の**両方**を区切りとみなして basename を取り出します。
 
-    `basename`（`Path(path).name`）は POSIX ホストでは `\\` を区切りとみなさない
-    ため、クォートで守られた Windows 絶対パス（``"C:\\bin\\rm.exe" ruff.toml``）が
-    `shlex(posix=True)` を通っても `\\` を保ったまま 1 トークンで残り、名前照合が
-    パス全体と比較されて外れます。`command_dialect_variants` は**クォート外**の
-    `\\` しか `/` へ読み替えないため、この経路は方言展開では閉じません。
+    `basename` は POSIX ホストでは `\\` を区切りとみなさない。クォートで守られた
+    Windows 絶対パス（``"C:\\bin\\rm.exe" ruff.toml``）は方言展開でも `\\` を保った
+    まま 1 トークンで残るため、ここで両方の区切りを扱う。
 
     Args:
         path: パスまたは実行トークンの文字列です。
@@ -1196,17 +976,11 @@ def _basename_any_separator(path: str) -> str:
 def normalize_executable_name(token: str) -> str:
     """実行トークンを比較用の名前（basename 化・大小無視・`.exe` 除去）へ正規化します。
 
-    `/usr/bin/git`（絶対パス）・`git.exe`（Windows）・
-    `C:\\Program Files\\Git\\bin\\git.exe`（Windows 絶対パス）・`GIT`（大文字）を
-    いずれも `git` へ畳みます。大小を無視するのは、macOS 既定の APFS と Windows の
-    NTFS が既定で大小を区別せず（``CP foo bar`` は実 `cp` を起動し、``RM`` は実 `rm`
-    を起動する）、PowerShell が cmdlet 名を大小無視で解決するためです。Linux では
-    `RM` が `rm` に一致する誤検出側へ倒れますが、docs/adr/shell-analysis-boundary.md の範囲内です。
-
-    保護 hook の実行名照合は**この 1 関数だけ**を通します。同じ正規化を
-    呼び出し側ごとに持つと、大小無視と `.exe` 除去が兄弟ごとにずれて、
-    ``git.exe commit --no-verify`` は捕まるのに ``CP evil.py app.py && git commit``
-    や ``rm.exe ruff.toml`` は語彙から外れる非対称が生じます。
+    `/usr/bin/git`・`git.exe`・`C:\\Program Files\\Git\\bin\\git.exe`・`GIT` を
+    いずれも `git` へ畳む。大小を無視するのは、APFS / NTFS が既定で大小を区別せず、
+    PowerShell が cmdlet 名を大小無視で解決するため（Linux での誤検出は
+    docs/adr/shell-analysis-boundary.md の範囲内）。保護 hook の実行名照合は
+    この 1 関数だけを通し、兄弟フック間で正規化がずれないようにする。
 
     Args:
         token: `shlex` 等でトークン化された 1 トークンです。
@@ -1222,24 +996,16 @@ def normalize_executable_name(token: str) -> str:
 
 
 def normalize_protected_name(path: str) -> str:
-    """保護対象ファイル名の照合用に basename を大小無視へ畳みます。
+    """保護対象ファイル名の照合用に basename を大小無視・Win32 正準化へ畳みます。
 
-    `normalize_executable_name` と**同じ case 演算（`casefold`）と同じ basename
-    規則**を使います。片方を `lower` / もう片方を `casefold` にすると、閉じたはず
-    の非対称（実行名は大小無視なのにファイル名は大小区別、の逆）をそのまま
-    再生産するためです。実行名と違い `.exe` は落としません — 保護対象は設定
-    ファイルであり、`ruff.toml.exe` を `ruff.toml` と同一視する根拠が無いためです。
-
+    `normalize_executable_name` と同じ case 演算（`casefold`）と basename 規則を使う。
     `Path.resolve()` は APFS / NTFS で綴りを実体の大小へ正規化しないため、
-    解決後の basename を素で比較すると ``Write Ruff.toml`` が実体 ``ruff.toml``
-    へ着地するのに保護判定は外れます。
+    ``Write Ruff.toml`` が実体 ``ruff.toml`` へ着地しても素の比較では外れる。
+    `.exe` は落とさない（保護対象は設定ファイルで、同一視する根拠が無い）。
 
-    あわせて Win32 のファイル名正準化を畳みます。Windows は末尾のドットと
-    空白を切り捨て、``:`` 以降を代替データストリーム名として扱うため、
-    ``ruff.toml.`` / ``ruff.toml`` +空白 / ``ruff.toml:x`` はいずれも実体
-    ``ruff.toml`` を指しますが、素の basename 比較では保護判定から外れます。
-    `normalize_executable_name` は ``.exe`` 除去という Windows 固有の畳み込みを
-    既に持っており、保護対象名の側にも同じ畳み込みを持たせて対称にします。
+    Windows は末尾のドットと空白を切り捨て、``:`` 以降を代替データストリーム名と
+    して扱うため、``ruff.toml.`` / ``ruff.toml`` +空白 / ``ruff.toml:x`` も
+    ``ruff.toml`` へ畳む。
 
     Args:
         path: 検査対象のパス文字列、またはファイル名です。
@@ -1250,16 +1016,12 @@ def normalize_protected_name(path: str) -> str:
     Raises:
         例外は発生しません。
     """
-    name = _basename_any_separator(path)
-    name = name.split(":", 1)[0]
+    name = _basename_any_separator(path).split(":", 1)[0]
     return name.rstrip(". \t").casefold()
 
 
 def is_git_executable_token(token: str) -> bool:
     """トークンが git 実行ファイルを指すかを判定します。
-
-    正規化は `normalize_executable_name` へ委譲します（`block_no_verify` /
-    `pre_bash_commit_quality` / `bash_config_protection` で共有する単一情報源）。
 
     Args:
         token: `shlex` 等でトークン化された1トークンです。
@@ -1274,58 +1036,31 @@ def is_git_executable_token(token: str) -> bool:
 
 
 # **フラグの有無に関わらず**引数のファイルを書き換えるエディタ／フィルタ。
-# `is_inplace_edit_flag` が扱う `sed` / `perl` とは分類が違う。
-#
-# なぜ別分類が要るのか:
-#     `ed` をフラグを要求する集合に置くと、``ed app.py && git commit -am x`` が
-#     `pre_bash_commit_quality` の mutation-before-commit ガードを素通り
-#     する（`sed -i` 版は止まる）。`ed` に in-place フラグは
-#     無く、``ed FILE`` は編集コマンドを stdin から読んでその場で書き戻す。
-#     「フラグが立っていれば書き込み」という軸ではこの形を表現できない。
-#
-# 語彙の基準は「フラグ 1 つ無しでも名前を挙げたファイルを書き換えうるか」:
-#     - ``ed`` / ``red``（制限版 ed）/ ``ex``（vi の行エディタモード）:
-#       いずれも POSIX の行エディタで、``w`` コマンドで引数のファイルへ
-#       書き戻す。
+# `ed` に in-place フラグは無く、``ed FILE`` は stdin の編集コマンドでその場で書き戻す
+# ため、`is_inplace_edit_flag` の「フラグが立っていれば書き込み」という軸では表せない。
+# 基準は「フラグ 1 つ無しでも名前を挙げたファイルを書き換えうるか」:
+#     - ``ed`` / ``red`` / ``ex``: POSIX の行エディタで、``w`` で引数のファイルへ書き戻す。
 #     - ``sponge``（moreutils）: stdin を吸ってから引数のファイルへ書く。
-#       フラグは `-a`（追記）だけで、無指定が上書きにあたる。
-#     `vi` / `vim` / `nvim` は含めない — 無フラグでは書き込まず（対話編集を
-#     開始するだけ）、書き込ませるには `-c wq` が要るのでフラグ側の分類になる。
-#     どちらの分類にも属さないものを片方へ寄せると、その語彙の意味が濁る。
-#
-# `bash_config_protection`（保護対象への書き込み）と `pre_bash_commit_quality`
-# （commit 前の作業ツリー変更）が共有する。`is_inplace_edit_flag` /
-# `SHELL_WRAPPER_EXECUTABLES` と同じ理由で単一情報源にする — 判定軸が兄弟ごとに
-# 割れると、片方だけ 1 世代ずれた語彙を持って静かなバイパスになる。
+#     `vi` / `vim` / `nvim` は無フラグでは書き込まず（`-c wq` が要る）、含めない。
+# `bash_config_protection` と `pre_bash_commit_quality` が共有する。判定軸が兄弟ごとに
+# 割れると、片方だけずれた語彙を持って静かなバイパスになる。
 ALWAYS_MUTATING_EDIT_EXECUTABLES = frozenset({"ed", "red", "ex", "sponge"})
 
-
-# sed の GNU 長形式 in-place フラグ。GNU getopt は曖昧でない限り長形式の短縮を
-# 受け付け、sed の長形式で `--i` から始まるのは `--in-place` だけなので、
-# ``sed --i s/x/y/ ruff.toml`` も実際に in-place 編集になる。したがって
-# 「`in-place` の非空プレフィックス」を一致条件にする（`--in-place=.bak` の
-# サフィックス指定も名前部分だけを見て拾う）。
+# sed の GNU 長形式 in-place フラグ。GNU getopt は曖昧でない長形式の短縮を受け付け、
+# ``sed --i`` も in-place になるため、この名前の非空プレフィックスを一致条件にする。
 _LONG_INPLACE_OPTION_NAME = "in-place"
 
 
 def is_inplace_edit_flag(token: str) -> bool:
     """トークンが in-place 編集フラグ（`sed -i` / `perl -0pi` / `sed --in-place`）かを判定します。
 
-    単一ダッシュの短形式は**結合位置を問わず** `i` を含むかで判定します
-    （`-i` / `-i.bak` / `-0pi` / `-ni` はいずれも in-place）。`sed` 側だけが
-    `-i` 前方一致で、`perl` 側だけが `i` の包含判定という食い違いがあったため、
-    両者の和集合をこの 1 関数へ集約します。
+    単一ダッシュの短形式は結合位置を問わず `i` を含むかで判定する（`-i` / `-i.bak` /
+    `-0pi` / `-ni`）。長形式は `_LONG_INPLACE_OPTION_NAME` の非空プレフィックスに
+    限る（`--in-place=.bak` は名前部分だけを見る）。区切りの `--` は名前部分が空に
+    なるため in-place とみなさない。
 
-    長形式は `_LONG_INPLACE_OPTION_NAME` の非空プレフィックスに限ります。
-    区切りの `--` は名前部分が空になるため in-place とみなしません
-    （``sed -- s/x/y/ ruff.toml`` は標準出力へ流すだけで書き込まない）。
-    `--expression` のような別の長形式も、`in-place` のプレフィックスでは
-    ないので一致しません。
-
-    `bash_config_protection`（保護対象への in-place 書き込み）と
-    `pre_bash_commit_quality`（commit 前の作業ツリー変更）が共有します。
-    どちらかが長形式を除外すると、``sed --in-place ... && git commit -am x``
-    のような形でガードが不発になります。
+    `bash_config_protection` と `pre_bash_commit_quality` が共有する。どちらかが
+    長形式を除外すると ``sed --in-place ... && git commit -am x`` でガードが不発になる。
 
     Args:
         token: 引数トークン列の 1 トークンです。
@@ -1347,15 +1082,9 @@ def is_inplace_edit_flag(token: str) -> bool:
 def _expand_leading_tilde(raw_path: str) -> str:
     """先頭の ``~`` をホームディレクトリへ展開する（シェルのチルダ展開に相当）。
 
-    シェルは行頭の（クォートされていない）``~`` を実行前に ``$HOME`` へ展開する
-    ため、フックがこれを展開しないまま `Path.cwd() / raw_path` へ渡すと、``~``
-    はカレントディレクトリ配下の文字通りのフォルダ名として扱われ、
-    ``~/.claq/logs/x`` が実際のホーム配下ではなく別の場所を指してしまう。
-
-    展開先はテスト・実行環境の双方で `get_home_dir()`（``CLAQ_HOME`` /
-    ``HOME`` / ``USERPROFILE`` の優先順）と揃える。``~otheruser`` のような
-    他ユーザー指定形式は展開しない（標準ライブラリに対応 API が無く、
-    docs/adr/shell-analysis-boundary.md の「うっかりバイパスの抑止」の対象範囲外）。
+    展開しないと ``~`` がカレントディレクトリ配下のフォルダ名として扱われる。
+    展開先は `get_home_dir()` に揃える。``~otheruser`` 形式は標準ライブラリに対応
+    API が無く、うっかりバイパスの抑止という対象範囲の外なので展開しない。
 
     Args:
         raw_path: 検査対象の生パス文字列。
@@ -1375,20 +1104,16 @@ def _expand_leading_tilde(raw_path: str) -> str:
 def resolve_effective_target(raw_path: str) -> Path | None:
     """cwd 基準で解決し、symlink を辿った実体 path を返します。
 
-    `config_protection` / `bash_config_protection` が basename だけで保護対象を
-    判定すると、`alias -> pyproject.toml` のような symlink 経由の
-    書き込みが判定をすり抜ける。両モジュールがこの共有 helper で解決後の
-    実体 path を得てから basename 判定することで、判定基準を一本化する。
-
-    先頭の ``~`` は `_expand_leading_tilde` でホームディレクトリへ展開してから解決する。
+    basename だけで保護対象を判定すると `alias -> pyproject.toml` のような symlink
+    経由の書き込みがすり抜けるため、`config_protection` / `bash_config_protection`
+    はこの関数で実体 path を得てから判定する。先頭の ``~`` は展開してから解決する。
 
     Args:
         raw_path: 検査対象の生パス文字列（相対 / 絶対 / symlink いずれも可）。
 
     Returns:
-        解決できた実体 Path。壊れた・循環した symlink 等で解決できない場合は
-        None（呼び出し側はこの場合を fail-closed/fail-open どちらに倒すか
-        自身の文脈で決める）。
+        解決できた実体 Path。解決できない場合は None（fail-closed / fail-open の
+        どちらに倒すかは呼び出し側が決める）。
 
     Raises:
         例外は発生しません。
@@ -1399,64 +1124,30 @@ def resolve_effective_target(raw_path: str) -> Path | None:
         return None
 
 
-# detach 起動した子の実行時間上限（秒）。start_new_session=True の子はハーネスの
-# timeout で kill されないため、自前の watchdog で自決させる。
-#
-# この値は hooks.json の timeout とは無関係に決める。detach 後の子はハーネスの
-# 管轄外であり、hooks.json の値（最大は pre_bash_commit_quality の 30 秒だが、これは
-# detach しない同期エントリ）と紐付ける論拠がないため。
-#
-# detach 対象（launcher --bg: mem.cli handoff）は正常系ではローカル I/O 数秒で
-# 終わる。したがって
-# 上限は「正常系を絶対に切らない」ことを優先した安全網の閾値であり、
-# 10 分走り続けていれば確実に異常（ハング・暴走）と断定できる 600 秒を採る。
+# detach 起動した子の実行時間上限（秒）。detach 後の子はハーネスの timeout の
+# 管轄外なので、自前の watchdog で止める。正常系はローカル I/O 数秒で終わるため、
+# 正常系を絶対に切らず、確実に異常と断定できる 10 分を採る。
 DETACH_TIMEOUT_SECONDS = 600
 # SIGTERM を無視して詰まったプロセスを SIGKILL で確実に回収するまでの猶予（秒）。
 _DETACH_KILL_AFTER_SECONDS = 30
 
-# detach した子を DETACH_TIMEOUT_SECONDS で穏当に停止（POSIX: SIGTERM、
-# Windows: TerminateProcess 相当）し、応答が無ければ _DETACH_KILL_AFTER_SECONDS
-# 後に強制終了する watchdog。coreutils の `timeout`/`gtimeout` は BSD/macOS に
-# 標準で存在せず（--kill-after は GNU 固有）、ランタイム依存ゼロの方針にも
-# 反するため、既に起動に使っている sys.executable 自身で実装し外部コマンドへの
-# 依存をなくす。
+# detach した子を DETACH_TIMEOUT_SECONDS で穏当に停止し、応答が無ければ
+# _DETACH_KILL_AFTER_SECONDS 後に強制終了する watchdog。coreutils の `timeout` は
+# BSD/macOS に標準で無く、ランタイム依存ゼロの方針にも反するため sys.executable で書く。
 #
-# POSIX では停止シグナルを「プロセスグループ」へ送る。子を
-# start_new_session=True で新しいセッション（= 新しいプロセスグループ）の
-# リーダーにし、os.killpg で子と孫をまとめて回収する。Popen.terminate()/kill()
-# は直接の子 1 プロセスにしか届かないため、孫プロセスの無期限残留を防げない。
+# POSIX では子を新しいプロセスグループのリーダーにし、os.killpg で孫までまとめて
+# 回収する（Popen.terminate()/kill() は直接の子にしか届かない）。Windows には killpg /
+# SIGKILL が無いため、capability（`hasattr(os, "killpg")`）で分岐して
+# CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS で起動し Popen.terminate()/kill() で回収する。
+# Windows で孫が回収されない差は受容する（現在の対象の孫は `git` だけで、git 側にも
+# ハードタイムアウトがある）。
 #
-# Windows には killpg / SIGKILL が無い（`os.killpg` 不在、`signal.SIGKILL`
-# 未定義、`start_new_session` は ValueError）。ここは Windows 用の分岐を置く。
-# 分岐はプラットフォーム名ではなく
-# `hasattr(os, "killpg")` という capability で行い、Windows では
-# CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS で起動して
-# Popen.terminate()/kill() で回収する。
+# watchdog 自身が SIGTERM を受けた場合も孫を残さないよう、ハンドラで子へ停止を
+# cascade する（ハンドラ内で proc.wait() を再入させないよう time.sleep で待つ）。
 #
-# 受容する差: Windows では孫プロセスが回収されない（Job Object を使えば
-# 回収できるが、ctypes で書く 100 行超が macOS/Linux では 1 行も実行されず
-# 検証もできない）。現在の --bg 対象は SessionEnd の `mem.cli handoff` の
-# 1 つで、その孫は `git` 呼び出しのみ。git 側にも GIT_TIMEOUT_SECONDS の
-# ハードタイムアウトがあり、無期限残留は起きない。対象が孫を長時間持つ
-# 処理へ広がった時点で Job Object を再検討する。
-#
-# watchdog 自身が SIGTERM を受けた場合も、そのまま終了すると孫が残るため、
-# ハンドラで子へ停止を cascade し、猶予後に強制終了してから抜ける
-# （ハンドラ内で proc.wait() を再入させないよう time.sleep で待つ）。
-#
-# コスト: detach 1 回につき watchdog + 対象の 2 プロセスが起動する。現在の --bg
-# 対象（SessionEnd の mem.cli handoff）はセッション終了イベントでのみ発火する
-# ため、ツールコールごとの頻度ではない。それでも意図的なコストであり、
-# 削減目的で watchdog を外してはならない:
-#   - watchdog を消すと、detach 済みの子と孫を kill する主体が消滅する。子は
-#     ハーネス timeout の管轄外なので、ハングした子と孫が無制限に残留する。
-#   - 子プロセス内の `signal.alarm` では代替できない。alarm は自プロセスにしか
-#     届かず、子が孫プロセスを起動する構成になった場合に回収できないため
-#     等価ではない。Windows には alarm 自体が無い。
-#   - watchdog は sys.executable の `-c` 実行で、対象モジュールを import せず
-#     待つだけなので、追加コストは Python インタプリタ起動 1 回分に留まる。
-# すなわち「毎回 1 プロセス分の起動コスト」と「孫プロセスの無制限残留を防ぐ
-# kill 保証」のトレードオフであり、後者を採る。
+# detach 1 回につき 2 プロセスが起動するが、watchdog を外すとハングした子と孫を
+# 回収する主体が消える。子プロセス内の `signal.alarm` は孫に届かず Windows に無いため
+# 代替にならない。
 _WATCHDOG_SCRIPT = """
 import os, signal, subprocess, sys, time
 
@@ -1513,14 +1204,8 @@ def detached_spawn_kwargs() -> dict[str, Any]:
     """親から独立したプロセスグループで子を起動するための Popen 引数を返す。
 
     POSIX は ``start_new_session=True``、Windows は
-    ``CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`` が同じ意図を表す
-    （``start_new_session`` を Windows で渡すと ``ValueError`` になり、
-    SessionEnd の handoff hook がそこで落ちる）。分岐は
-    プラットフォーム名ではなく ``os.setsid`` の有無という capability で
-    行う。
-
-    Args:
-        なし
+    ``CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS``（``start_new_session`` は Windows で
+    ``ValueError`` になる）。分岐は ``os.setsid`` の有無という capability で行う。
 
     Returns:
         ``subprocess.Popen`` へ展開する追加キーワード引数。
@@ -1536,41 +1221,12 @@ def detached_spawn_kwargs() -> dict[str, Any]:
     }
 
 
-def _watchdog_argv(cmd: list[str]) -> list[str]:
-    """detach 対象を watchdog 付きで起動する argv を組み立てます。
-
-    Args:
-        cmd: 監視対象のコマンドリストです。
-
-    Returns:
-        `sys.executable -c _WATCHDOG_SCRIPT` で対象を包んだ argv を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    return [
-        sys.executable,
-        "-c",
-        _WATCHDOG_SCRIPT,
-        str(DETACH_TIMEOUT_SECONDS),
-        str(_DETACH_KILL_AFTER_SECONDS),
-        *cmd,
-    ]
-
-
 def _detach_log_path() -> Path | None:
     """detach した子プロセスの stdout/stderr を追記するログファイルのパスを返す。
 
-    DEVNULL に捨てると、detach 対象（--bg 起動）の import 失敗等の出力が
-    完全に消え、起動受付成功と処理完了・成功の区別が付かなくなる。
-    日付ごとに 1 ファイルへ追記する
-    （mem/logger.py の `mem-YYYY-MM-DD.log` と同じ命名規則）。
-    best-effort の diagnostics であり、ログディレクトリを作れない場合は
-    None を返して detach 自体は継続させる（ログが取れないことを理由に
-    起動を諦めない）。
-
-    Args:
-        なし
+    DEVNULL に捨てると、起動受付成功と処理成功の区別が付かなくなる。日付ごとに
+    1 ファイルへ追記する。best-effort の diagnostics であり、ログディレクトリを
+    作れない場合も detach 自体は継続させる。
 
     Returns:
         `~/.claq/logs/bg-YYYY-MM-DD.log` の Path。作成失敗時は None。
@@ -1596,20 +1252,10 @@ detach の実行上限は DETACH_TIMEOUT_SECONDS（600 秒）なので、1 時�
 def gc_detach_stdin_orphans() -> None:
     """``~/.claq`` 直下に残った detach 用 stdin 一時ファイルを age-gate で回収する。
 
-    POSIX では `detach_process` が起動直後に unlink するため孤児は生じない。
-    Windows は「開いているファイルを削除できない」ため（子が継承ハンドルを
-    保持している）unlink が必ず失敗し、SessionEnd ごとに 1 個ずつ積み上がる。
-
-    回収を生成側と同じモジュールへ置くのは、走査先を生成側と同じ
-    ``get_claq_dir()``（``CLAQ_HOME`` を見る）に揃えるため。``env_pointer`` の
-    GC は ``$HOME`` 固定の別契約であり、そちらに置くと ``CLAQ_HOME`` を使う
-    環境で「作る場所と掃除する場所が違う」ことになる。
-
-    Args:
-        なし
-
-    Returns:
-        なし
+    POSIX では `detach_process` が起動直後に unlink するため孤児は生じない。Windows は
+    子が継承ハンドルを保持していて unlink が必ず失敗し、起動ごとに積み上がる。
+    走査先を生成側と同じ ``get_claq_dir()``（``CLAQ_HOME`` を見る）に揃えるため、
+    生成側と同じモジュールに置く。
 
     Raises:
         例外は発生しません（iterdir/stat/unlink の失敗は無視します）。
@@ -1632,26 +1278,13 @@ def gc_detach_stdin_orphans() -> None:
 def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None = None) -> bool:
     """コマンドを detached（新セッション）で起動し stdin を一時ファイル経由で渡す。
 
-    親プロセスの終了に影響されず子を走らせ続けるために使う。起動のたびに
-    `gc_detach_stdin_orphans` で過去の孤児（Windows では unlink できず必ず
-    残る）を掃除してから作る。一時ファイルは
-    world-writable な /tmp を避けて ~/.claq 配下に作成し、close→reopen の
-    TOCTOU 窓を作らないよう同一 fd を seek(0) して子へ継承する。起動直後に
-    unlink する（継承済み fd は有効なまま）。
+    起動前に `gc_detach_stdin_orphans` で過去の孤児を掃除する。一時ファイルは
+    world-writable な /tmp を避けて ~/.claq 配下に作り、close→reopen の TOCTOU 窓を
+    作らないよう同一 fd を seek(0) して子へ継承し、起動直後に unlink する。
 
-    detach 後の子はハーネスの timeout の管轄外になるため、_WATCHDOG_SCRIPT で
-    ラップして DETACH_TIMEOUT_SECONDS で穏当に停止、さらに猶予後に強制終了し、
-    暴走プロセスの無期限残留を防ぐ。POSIX では停止シグナルを子のプロセス
-    グループへ送るため、子が起動した孫プロセスもまとめて回収される
-    （Windows は直接の子のみ。理由は `_WATCHDOG_SCRIPT` のコメント参照）。
-
-    対象の stdout/stderr は `CLAQ_BG_LOG_PATH` 環境変数で
-    _WATCHDOG_SCRIPT へ log ファイルパスを渡し、そこへ追記させる
-    （`_detach_log_path` が None を返した場合のみ DEVNULL にフォールバック
-    する）。起動受付の成否（この関数の戻り値）と、対象プロセスの実行結果
-    は依然として別概念であり、後者を呼び出し元へ同期的に返す契約は無い
-    （best-effort の非同期処理という host 契約は変えない）。診断が必要な
-    場合は log ファイルを参照する。
+    子は `_WATCHDOG_SCRIPT` でラップして DETACH_TIMEOUT_SECONDS で停止させる。
+    子の stdout/stderr は `CLAQ_BG_LOG_PATH` で渡したログへ追記させる（ログを
+    作れなければ DEVNULL）。戻り値は起動受付の成否であり、子の処理結果ではない。
 
     Args:
         cmd: subprocess に渡すコマンドリスト。
@@ -1668,7 +1301,7 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
     try:
         private_dir = ensure_private_dir(get_claq_dir())
         tmp = tempfile.NamedTemporaryFile(
-            mode="w+", encoding="utf-8", suffix=".stdin", dir=private_dir, delete=False
+            mode="w+", encoding="utf-8", suffix=_DETACH_STDIN_SUFFIX, dir=private_dir, delete=False
         )
     except OSError:
         return False
@@ -1676,12 +1309,19 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
         tmp.write(raw_stdin)
         tmp.flush()
         tmp.seek(0)
-        child_env = dict(env) if env is not None else dict(os.environ)
+        child_env = dict(os.environ if env is None else env)
         log_path = _detach_log_path()
         if log_path is not None:
             child_env["CLAQ_BG_LOG_PATH"] = str(log_path)
         subprocess.Popen(
-            _watchdog_argv(cmd),
+            [
+                sys.executable,
+                "-c",
+                _WATCHDOG_SCRIPT,
+                str(DETACH_TIMEOUT_SECONDS),
+                str(_DETACH_KILL_AFTER_SECONDS),
+                *cmd,
+            ],
             stdin=tmp,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -1693,22 +1333,17 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
         return False
     finally:
         tmp.close()
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp.name)
-        except OSError:
-            pass
 
 
-# 前回セッション detach 失敗通知（recent_bg_failure_notice）の 1 ファイル
-# あたり読み取り上限バイト数。1 行提示できれば十分なため小さく取る。
+# 前回セッション detach 失敗通知の 1 ファイルあたり読み取り上限バイト数。
+# 1 行提示できれば十分なため小さく取る。
 _BG_FAILURE_TAIL_MAX_BYTES = 4096
 
 
 def _read_tail_bytes(path: Path, max_bytes: int) -> str:
     """ファイル末尾を上限バイトまで読む（seek-from-end）。
-
-    `mem.handoff._read_tail` と同じ末尾限定パターンです。読めない場合は
-    空文字列を返します（呼び出し元を落とさない）。
 
     Args:
         path: 読み取り対象のファイル。
@@ -1732,20 +1367,10 @@ def _read_tail_bytes(path: Path, max_bytes: int) -> str:
 def recent_bg_failure_notice() -> str:
     """前回セッションの detach 起動（``--bg``）に失敗の痕跡があれば 1 行の通知を返す。
 
-    `detach_process` の戻り値は「起動受付」であり「処理成功」ではないため
-    （docstring 参照）、detach した子の失敗は呼び出し元へ同期的に伝わらない。
-    そこで次回 SessionStart の ``mem context`` で、前回の
-    `_detach_log_path` が書いたログファイル（``bg-YYYY-MM-DD.log``。
-    正常系では対象プロセスが何も出力しないため中身は空のはず）に内容が
-    あれば「起動受付後に何かが起きた」痕跡とみなし、末尾 1 行だけ提示する。
-    失敗時のみ出力するため「出力トークン最小化」原則と両立する。
-
-    読み取り範囲は当日＋前日の 2 ファイルまでに限定し、各ファイルは末尾
-    `_BG_FAILURE_TAIL_MAX_BYTES` バイトまでしか読まない（SessionStart の
-    hooks.json の SessionStart timeout 20 秒に対する境界を持たせるため）。
-
-    Args:
-        なし
+    detach した子の失敗は呼び出し元へ同期的に伝わらないため、次回 SessionStart で
+    `_detach_log_path` のログ（正常系では空）に内容があれば末尾 1 行だけ提示する。
+    SessionStart の timeout に対する境界として、当日＋前日の 2 ファイルを各末尾
+    `_BG_FAILURE_TAIL_MAX_BYTES` バイトまでしか読まない。
 
     Returns:
         失敗の痕跡があれば人間可読の 1 行。無ければ空文字列。
@@ -1756,24 +1381,23 @@ def recent_bg_failure_notice() -> str:
     log_dir = get_claq_dir() / "logs"
     today = datetime.now()
     for offset in (0, 1):
-        day = today - timedelta(days=offset)
-        path = log_dir / f"bg-{day:%Y-%m-%d}.log"
+        path = log_dir / f"bg-{today - timedelta(days=offset):%Y-%m-%d}.log"
         if not path.is_file():
             continue
         tail = _read_tail_bytes(path, _BG_FAILURE_TAIL_MAX_BYTES).strip()
-        if not tail:
-            continue
-        last_line = tail.splitlines()[-1]
-        return f"前回のバックグラウンド起動でエラーの痕跡があります（{path.name}）: {last_line}"
+        if tail:
+            return f"前回のバックグラウンド起動でエラーの痕跡があります（{path.name}）: {tail.splitlines()[-1]}"
     return ""
 
 
 def emit_block_output(reason: str) -> int:
     """ツール実行ブロックを host 非依存の合併出力で stdout/stderr に書き出す。
 
-    ツール実行をブロックするフックは終了コードを直接返さず、このヘルパの
-    戻り値を返すこと（stderr への理由書き出し + stdout への deny JSON を
-    同時に出し、exit code は常に 2 を返す）。
+    ツール実行をブロックするフックは、このヘルパの戻り値（常に 2）を終了コードとして
+    返すこと。出力層の例外（host がパイプを閉じたときの BrokenPipeError 等）が抜けると
+    exit 1 になり、PreToolUse では non-blocking error ＝ ツールが実行されて deny が
+    allow へ反転する。出力の唯一の口であるここで握り潰し、判定は exit code で運ぶ
+    （docs/adr/hook-failure-direction.md）。
 
     Args:
         reason: ブロック理由（ユーザー / エージェントに提示される）。
@@ -1781,53 +1405,18 @@ def emit_block_output(reason: str) -> int:
     Returns:
         フックが返すべき終了コード。
 
-    出力層が失敗しても deny の終了コードは返します。`write_stdout` /
-    `write_stderr` は `sys.stdout.write` を呼ぶため BrokenPipeError・OSError・
-    UnicodeEncodeError を送出しうる。例外がここを抜けると `main()` の外まで伝播して exit 1 に
-    なり、**PreToolUse の契約では exit 1 は non-blocking error ＝ ツールは実行
-    される** — つまり deny が黙って allow へ反転する。現実的な誘因は host が
-    パイプを閉じたときの BrokenPipeError で、これは host の timeout と同時に
-    起きるため、最も守りたい局面でちょうど外れる。
-
-    docs/adr/hook-failure-direction.md の「4 フックが同じ exit 契約に揃う」を
-    この経路でも成立させるため、guard を呼び出し側ごとに複製するのではなく、
-    出力の唯一の口である本関数の内側へ集約する。
-
     Raises:
         例外は発生しません。
     """
     exit_code, deny_out, reason_err = emit_block(reason)
-    try:
+    with contextlib.suppress(Exception):
         write_stdout(deny_out)
         write_stderr(reason_err + "\n")
-    except Exception:
-        # 出力に失敗しても deny は維持する。ここで握り潰すのは「理由を
-        # 伝えられなかった」ことだけで、判定そのものは exit code が運ぶ。
-        pass
     return exit_code
 
 
-def _emit_hook_specific_output(event_name: str, additional_context: str) -> str:
-    """コンテキスト注入出力を host 非依存の合併 JSON で返す。
-
-    Args:
-        event_name: hookEventName に設定するイベント名。
-        additional_context: コンテキストに注入する追加文字列。
-
-    Returns:
-        ハーネスのプロトコルに適合した JSON 文字列。
-
-    Raises:
-        例外は発生しません。
-    """
-    return adapt_context_output(event_name, additional_context)
-
-
 def emit_session_start_output(additional_context: str = "") -> str:
-    """SessionStart 用のフック出力 JSON 文字列を返す。
-
-    host 非依存の合併出力を output_adapter 経由で生成する。
-    stdout への書き込みは行わない純粋関数として使う。
+    """SessionStart 用のフック出力 JSON 文字列を返す（stdout へは書かない）。
 
     Args:
         additional_context: コンテキストに注入する追加文字列。
@@ -1839,7 +1428,7 @@ def emit_session_start_output(additional_context: str = "") -> str:
     Raises:
         例外は発生しません。
     """
-    return _emit_hook_specific_output("SessionStart", additional_context)
+    return adapt_context_output("SessionStart", additional_context)
 
 
 def print_session_start_output(additional_context: str = "") -> None:
@@ -1847,9 +1436,6 @@ def print_session_start_output(additional_context: str = "") -> None:
 
     Args:
         additional_context: コンテキストに注入する追加文字列。
-
-    Returns:
-        None
 
     Raises:
         例外は発生しません。
