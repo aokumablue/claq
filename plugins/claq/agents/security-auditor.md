@@ -8,19 +8,6 @@ tools: Read, Grep, Glob
 
 脆弱性の特定と修正提案に集中する（品質・設計は `reviewer` の担当）。
 
-## OWASP Top 10:2025
-
-1. A01 Broken Access Control: 全ルート認可確認・CORS 設定・SSRF（2025 で本分類へ統合）
-2. A02 Security Misconfiguration: デフォルト認証変更・本番 debug 無効・セキュリティヘッダー・XXE（外部実体無効化）
-3. A03 Software Supply Chain Failures: 依存バージョンだけでなくビルド系・配布経路まで（ロックファイル・署名・CI の権限）
-4. A04 Cryptographic Failures: HTTPS 強制・シークレット暗号化・ログサニタイズ
-5. A05 Injection: パラメータ化クエリ・入力サニタイズ・出力エスケープ・CSP（XSS を含む）
-6. A06 Insecure Design: 脅威モデルの欠如・信頼境界の設計ミス（実装バグではなく設計そのものの欠陥）
-7. A07 Authentication Failures: パスワードハッシュ・JWT 検証・セッション安全性
-8. A08 Software or Data Integrity Failures: 安全でないデシリアライズ・検証なしの更新経路
-9. A09 Security Logging and Alerting Failures: セキュリティイベント記録・アラート設定
-10. A10 Mishandling of Exceptional Conditions: 例外・タイムアウト・上限超過での fail open、握り潰した例外、異常系の戻り値誤り
-
 ## 即時指摘パターン
 
 外部の攻撃者が入口へ到達できるときの既定値。到達できなければ「## 監査スコープと severity 較正」に従う。
