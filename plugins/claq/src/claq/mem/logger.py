@@ -36,11 +36,10 @@ def _file_handler(log_dir: Path) -> logging.Handler:
     """日次ログファイルへ書く FileHandler を作る。
 
     ``mkdir(parents=True)`` は mode を**親へ適用しない**ため、`~/.claq` を最初に
-    作るのがこの関数だったとき、親は umask 既定（通常 0755）のまま残っていた。
+    作るのがこの関数だと、親は umask 既定（通常 0755）のまま残る。
     ロガーは `_load_settings_or_raise()` の中で走り、どの ``Database()`` よりも
     先に動くので、DB を開かずに終わる経路（例: ``mem list --kind bogus``）では
-    `ensure_private_dir` を一度も通らない。実測で `~/.claq` が
-    ``drwxr-xr-x`` のまま残っていた。根から 0700 で作る
+    `ensure_private_dir` を一度も通らない。そのため根から 0700 で作る
     ``ensure_private_dir`` を通す。
 
     ログファイルも同じ理由で ``O_CREAT|O_EXCL`` で先に 0600 を作る。

@@ -13,8 +13,8 @@ from claq.lib.core_utils import get_home_dir
 def _default_data_dir() -> Path:
     """mem のデータディレクトリ既定値を返す。
 
-    `Path.home()` を直接見ていた頃は、`CLAQ_HOME` を設定しても DB だけが本物の
-    `~/.claq` を掴んでいた（transcript の trusted root は `get_home_dir()` 経由で
+    `Path.home()` を直接見ると、`CLAQ_HOME` を設定しても DB だけが本物の
+    `~/.claq` を掴む（transcript の trusted root は `get_home_dir()` 経由で
     移るのに DB は移らない、という非対称）。隔離したつもりのテストが利用者の
     実データへ書く事故になるため、`core_utils.get_home_dir()` へ揃える。
 

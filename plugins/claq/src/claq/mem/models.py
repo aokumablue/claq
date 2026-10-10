@@ -30,7 +30,7 @@ class Repo:
         identity_key: 正規化 remote URL、無ければ repo root 絶対パス。
         root_path: 最後に観測した絶対パス。
         remote_url: userinfo（`user:token@`）除去済みの remote URL（無ければ
-            None。§7-4 対応、`repo_identity._strip_userinfo` を参照）。
+            None。`repo_identity._strip_userinfo` を参照）。
         first_seen_at: 初回観測時刻（ISO8601）。
         last_seen_at: 最終観測時刻（ISO8601）。
     """
@@ -121,10 +121,9 @@ class Knowledge:
         domain: ``testing`` ``git`` ``build`` 等。任意。
         confidence: 0.0〜1.0 の確信度。
         status: ``active`` / ``pending`` / ``archived``。**既定値を持たない
-            必須引数**にしてある。以前は ``"active"`` を既定に持ち、コメント自ら
-            「実際には使われない」と認めていたが、``Knowledge(...)`` を直接
-            構築する経路が 1 本増えた瞬間に、H-01（agent 由来カードは人間の
-            promote を経なければ注入されない）を素通りする ``active`` カードが
+            必須引数**にしてある。``"active"`` を既定に持つと、``Knowledge(...)`` を
+            直接構築する経路が 1 本増えた瞬間に、「agent 由来カードは人間の
+            promote を経なければ注入されない」原則を素通りする ``active`` カードが
             生まれる。呼び出し側に毎回明示させることでその経路を作らせない。
             generic learn 経路の値は ``knowledge_input`` が ``pending`` に固定する。
         source_ref: 出所の自由記述（ファイルパス等）。

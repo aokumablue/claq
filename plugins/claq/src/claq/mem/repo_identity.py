@@ -1,8 +1,7 @@
 """リポジトリの正体キー解決 — ``repos`` テーブルへの唯一の入口。
 
-旧実装ではリポジトリ識別が ``basename(cwd)`` / ``sha256(remote)[:12]`` /
-``~/.claq/projects/<id>`` / ``projects.json`` のキーへ分裂しており突合できなかった。
-本モジュールは識別を 1 系統に統一する:
+リポジトリ識別は本モジュールの 1 系統に統一する（識別方法が複数あると
+同じリポジトリを突合できない）:
 
 * ``identity_key`` — 正規化した remote URL。remote が無ければ repo root の絶対パス。
 * ``id`` — 人間可読 kebab-case スラッグ。別リポジトリと衝突したときだけ ``-2`` を付す。
@@ -121,8 +120,7 @@ def _strip_credentials(remote_url: str) -> str:
     ``authority.rpartition("@")[2]`` と同じロジックを、scheme・パス・大小文字
     を保ったまま remote_url 全体に適用する小関数です。DB へ保存する
     ``repos.remote_url`` に credential 付き authority
-    （``https://user:token@github.com/o/r``）がそのまま残っていた問題
-    （§7-4 対応）を解消します。
+    （``https://user:token@github.com/o/r``）をそのまま残さないためです。
 
     ``https://user:token@github.com/o/r`` → ``https://github.com/o/r``。
     scp 形式（``git@host:owner/repo``）にも同じロジックを一貫して適用し
@@ -132,7 +130,7 @@ def _strip_credentials(remote_url: str) -> str:
     userinfo に加えて **query（``?``）と fragment（``#``）も丸ごと捨てます**。
     ``https://github.com/o/r?access_token=SECRET`` のような形は
     userinfo の除去だけでは残り、``repos.remote_url`` として DB とログへ
-    永続化されていました（release-verify 2026-09-03 の P1-009）。git の
+    永続化されます。git の
     remote URL において query / fragment は取得先を特定する情報を持たない
     ため、鍵名を列挙して redact するのではなく丸ごと落とす（列挙方式は
     新しい鍵名を取りこぼすうえ、鍵名自体が事前に分からない）。
@@ -237,7 +235,7 @@ class RepoIdentity:
         identity_key: 正規化 remote URL。remote が無ければ repo root 絶対パス。
         root_path: シンボリックリンク解決済みの絶対パス（worktree は本体へ寄せる）。
         remote_url: userinfo（`user:token@`）除去済みの remote URL。remote が
-            無い・使えない場合は None（§7-4 対応。`_strip_credentials` 適用済み）。
+            無い・使えない場合は None（`_strip_credentials` 適用済み）。
     """
 
     identity_key: str
@@ -287,7 +285,7 @@ def detect_repo_identity(cwd: str | Path | None = None) -> RepoIdentity:
     それ以外は repo root の絶対パスを identity_key とし、remote_url は None にする
     （使えない remote を台帳に残さない）。保存する remote_url は
     `_strip_userinfo` で userinfo（`user:token@`）を除去した後の文字列にする
-    （§7-4 対応。identity_key の正規化とは独立に、DB へそのまま保存される
+    （identity_key の正規化とは独立に、DB へそのまま保存される
     生の remote_url にも credential 除去を適用する）。
 
     Args:

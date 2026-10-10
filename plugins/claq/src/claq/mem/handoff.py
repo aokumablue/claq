@@ -46,7 +46,7 @@ TRANSCRIPT_MAX_BYTES = 2 * 1024 * 1024
 """トランスクリプトから読む末尾バイト数の上限。直近の作業ほど引き継ぎ価値が高い。"""
 
 _TRANSCRIPT_ROOTS_ENV = "CLAQ_TRANSCRIPT_ROOTS"
-"""追加の trusted transcript root をコロン区切りで指定する環境変数（§6.4 対応）。"""
+"""追加の trusted transcript root をコロン区切りで指定する環境変数。"""
 
 
 def _default_trusted_transcript_roots() -> tuple[Path, ...]:
@@ -80,7 +80,7 @@ def _trusted_transcript_roots() -> tuple[Path, ...]:
 
     ``CLAQ_TRANSCRIPT_ROOTS``（``os.pathsep`` 区切り）で追加・拡張できる
     （未知 host では transcript 要約が失われるトレードオフを、利用者が
-    自分の host の root を教えることで解消できるようにする。§6.4 対応）。
+    自分の host の root を教えることで解消できるようにする）。
 
     Args:
         なし
@@ -159,12 +159,11 @@ def _sanitize_freeform(text: str) -> str:
 
     順序は ``normalize_user_message`` → ``strip_tags`` → ``redact`` で固定する。
     この 3 段は互いに順序依存があり、経路ごとに書き直すと片側だけずれる。
-    実際に明示 handoff 経路だけが ``strip_tags(redact(...))`` になっていた
-    ことがあり、タグで分断された秘密（``sk-ant-<private>zz</private>api03-…``）が
-    ``redact`` をすり抜けた後に ``strip_tags`` で 1 本へ再結合し、未マスクのまま
-    ``sessions.handoff`` へ永続化されて以後の全 SessionStart へ注入されていた
-    （実測）。同じ非対称は ``INPUT_CONTAINER_KEYS`` でも起きているため、
-    合成そのものを 1 箇所に閉じる。
+    たとえば ``strip_tags(redact(...))`` の順にすると、タグで分断された秘密
+    （``sk-ant-<private>zz</private>api03-…``）が ``redact`` をすり抜けた後に
+    ``strip_tags`` で 1 本へ再結合し、未マスクのまま ``sessions.handoff`` へ
+    永続化されて以後の全 SessionStart へ注入される。そのため合成そのものを
+    1 箇所に閉じる。
 
     - ``normalize_user_message`` が先: docs/adr/untrusted-input-prompt-boundary.md の足場除去は生の足場タグを
       前提にしており、他の処理が先に走ると足場の形が崩れて検出できない。
@@ -298,12 +297,11 @@ def _summarize_transcript(transcript_path: str) -> str:
     ``transcript_path`` は SessionEnd payload の host 供給値であり、
     Claude Code は ``~/.claude/projects/...``、Copilot CLI は
     ``~/.copilot/...`` と host ごとに置き場所が異なる。まず host 非依存の
-    性質検査（symlink 拒否・通常ファイル・所有者一致）で防御し（F-08a
-    対応）、その後段に既知 host transcript root の allowlist 包含チェックを
-    追加する（``_trusted_transcript_roots``。§6.4 対応）。所有者一致の
-    任意 regular file を無条件で読むと、ユーザーが書ける任意ファイルを
-    prompt injection の入力にできてしまうため、性質検査だけでは不十分
-    という監査指摘に対応する。allowlist 外なら要約を諦めて空文字列を返す
+    性質検査（symlink 拒否・通常ファイル・所有者一致）で防御し、その後段に
+    既知 host transcript root の allowlist 包含チェックを追加する
+    （``_trusted_transcript_roots``）。所有者一致の任意 regular file を
+    無条件で読むと、ユーザーが書ける任意ファイルを prompt injection の入力に
+    できてしまうため、性質検査だけでは不十分である。allowlist 外なら要約を諦めて空文字列を返す
     （handoff は明示テキスト・構造化事実で継続するため、壊れずに劣化する。
     トレードオフ: 未知 host では transcript 要約が失われる）。
 
@@ -329,15 +327,15 @@ def is_trusted_transcript(path: Path) -> bool:
     （symlink 拒否・通常ファイル・所有者一致）に加えて、既知 host の transcript
     root allowlist 包含も要求する。
 
-    同じ判定を別モジュールで書き直すと片側だけ強化されて非対称になるため
-    （``INPUT_CONTAINER_KEYS`` で実際に起きた失敗）、走査側はこの関数を使う。
+    同じ判定を別モジュールで書き直すと片側だけ強化されて非対称になるため、
+    走査側はこの関数を使う。
 
     所有者一致の検査は POSIX の uid が意味を持つ環境でのみ行う。
     ``os.getuid`` は Windows に存在せず、``st_uid`` も常に 0 を返すため、
     そこで uid を比較すると「常に一致」か ``AttributeError`` のどちらかに
     しかならない（前者は検査したふり、後者は transcript の一律拒否）。
     プラットフォーム名では分岐せず、``os.getuid`` の有無という capability
-    で分岐する（release-verify 2026-09-03 の P1-006）。uid 比較が使えない
+    で分岐する。uid 比較が使えない
     環境で残る防御は symlink 拒否・通常ファイル要求・trusted root 包含の
     3 つで、trusted root はいずれもユーザーのホーム配下＝Windows では
     既定でそのユーザーの ACL に閉じている。
@@ -504,23 +502,23 @@ def _parse_entry(line: str) -> dict[str, Any] | None:
 
 # ユーザー発話として本文に採ってよいブロック種別（allowlist）。
 #
-# ここは **denylist から allowlist へ反転した**。以前は既知の非発話種別だけを
-# 除外し未知の種別は通していたが、その向きだと「知らない種別＝通す」なので、
-# transcript に載る外部由来テキスト（ツール出力・ファイル内容・web 取得結果）が
-# **人間の承認ゲートを一切通らずに恒久注入へ届く**。handoff は `promote` を
-# 通らないため、ここが唯一の防壁である。実測で 3 形が注入まで到達した:
+# ここは **allowlist** にする。既知の非発話種別だけを除外する denylist では
+# 「知らない種別＝通す」なので、transcript に載る外部由来テキスト（ツール出力・
+# ファイル内容・web 取得結果）が **人間の承認ゲートを一切通らずに恒久注入へ
+# 届く**。handoff は `promote` を通らないため、ここが唯一の防壁である。
+# denylist では次の 3 形が注入まで到達する:
 #
-#     {"type": "function_result", "text": ...}   → 注入された
-#     {"type": "tool_output",     "text": ...}   → 注入された
-#     {"text": ...}（type キー無し）              → 注入された
+#     {"type": "function_result", "text": ...}
+#     {"type": "tool_output",     "text": ...}
+#     {"text": ...}（type キー無し）
 #
-# 反転を選んだ根拠は、両方向の失敗のコストが非対称なこと。allowlist が外すと
+# allowlist を選ぶ根拠は、両方向の失敗のコストが非対称なこと。allowlist が外すと
 # 「引き継ぎが薄くなる」＝**見えて直せる**劣化で済むが、denylist が漏らすと
 # 「攻撃者が書いた文字列が依頼として注入される」＝**黙って通る**。docs/adr/shell-analysis-boundary.md の
 # 「誤検出 > 誤通過」と `schema.py` の「最も危険な値を既定に据えない」も同じ向き。
 #
-# 旧コメントは「host ごとに type 名が異なりうるので allowlist は実依頼を落とす」
-# と危惧していた。実測（実トランスクリプト 40 ファイル）ではその損失はゼロ:
+# 「host ごとに type 名が異なりうるので allowlist は実依頼を落とす」懸念は、
+# 実測（実トランスクリプト 40 ファイル）ではゼロである:
 #
 #     tool_result 359 / content が生文字列 75 / text 3 / 未知 0 / type 無し 0
 #
@@ -616,8 +614,8 @@ def _collect_tools(entry: dict[str, Any], tools: set[str], files: set[str]) -> N
     単独エントリのツール名・入力コンテナの抽出は ``lib/harness`` に委ねる。
     ここで ``tool_name`` / ``tool_input`` だけを直接読むと camelCase
     （``toolName`` / ``toolInput``）・``toolArgs``・JSON 文字列化コンテナを
-    取りこぼす。同じ取りこぼしはコンテナキー一覧を独自に持っていた
-    ``config_protection`` で一度起きており、共有層に寄せて再発させない。
+    取りこぼす。コンテナキー一覧を独自に持つと同じ取りこぼしが起きるため、
+    共有層に寄せる。
 
     assistant メッセージ内のブロックは Anthropic の content block スキーマ
     （``{"type": "tool_use", "name": ..., "input": ...}``）で別物なので、
@@ -673,10 +671,10 @@ def _shorten_path(path: str) -> str:
     知りたいのは「どのファイルを触っていたか」だけで先頭のディレクトリ
     階層は不要なため。
 
-    区切りは ``/`` と ``\\`` の両方を見る。``/`` だけで分割していた頃は
+    区切りは ``/`` と ``\\`` の両方を見る。``/`` だけで分割すると
     ``C:\\Users\\<name>\\proj\\src\\app.py`` が 1 セグメント扱いになり、
-    ユーザー名を含む絶対パスがそのまま handoff と DB に残っていた
-    （release-verify 2026-09-03 の P2-014）。プラットフォーム判定はしない
+    ユーザー名を含む絶対パスがそのまま handoff と DB に残る。
+    プラットフォーム判定はしない
     — POSIX のパスに ``\\`` が現れることは事実上なく、両方を区切りとして
     扱う 1 本のロジックで 3 プラットフォームを賄える。
 

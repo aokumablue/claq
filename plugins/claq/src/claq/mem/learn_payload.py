@@ -2,9 +2,9 @@
 
 `runtime/claq-helpers.sh` の `claq_mem_learn` は、値に含まれる引用符・改行・
 非 ASCII をシェルでエスケープせずに済ませるため JSON へ marshal してから
-`mem.cli learn` へ渡す。以前はこれを helpers 内の ``python3 -c`` で行って
-いたが、裸の ``python3`` は Windows で Microsoft Store の App execution alias
-に解決されて起動できない（release-verify 2026-09-03 の実測）。インタプリタ
+`mem.cli learn` へ渡す。この処理を helpers 内の ``python3 -c`` で行わないのは、
+裸の ``python3`` が Windows で Microsoft Store の App execution alias
+に解決されて起動できないため。インタプリタ
 解決は `runtime/claq-hook` の単一責務なので、marshal 処理もランチャ経由で
 呼べるモジュールとして切り出し、helpers 側から ``python3`` の直接起動を
 無くす。

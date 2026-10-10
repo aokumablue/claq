@@ -57,16 +57,15 @@ class Database:
         から chmod までの間だけ他ユーザーに読めるファイルが存在する
         窓ができるため）。既存 DB（他ツールが作った・過去バージョンが
         作った等で 0600 以外の mode を持つ場合を含む）も、接続のたびに
-        mode を検証して補正する（F-08 対応。以前は新規作成時にしか
-        補正しておらず、既存の 0644 DB は開き直しても放置されていた）。
+        mode を検証して補正する（新規作成時だけ補正すると、既存の 0644 DB は
+        開き直しても放置される）。
 
         この mode 補正は POSIX でのみ収束する。Windows の ``chmod`` は
         読み取り専用属性しか動かさず ``st_mode`` は 0o666 のままなので、
         検証は毎回不一致となり ``chmod`` が空振りする（害は無く、読み取り
         専用属性の解除だけが起きる）。Windows でのアクセス制御を
         ``%USERPROFILE%`` の既定 ACL に委ねる判断とその理由は
-        `core_utils.ensure_private_dir` の docstring に集約してある
-        （release-verify 2026-09-03 の P1-008）。
+        `core_utils.ensure_private_dir` の docstring に集約してある。
 
         WAL/SHM sidecar は本メソッドの時点ではまだ存在しない（SQLite が
         WAL モードで最初の書き込み時に遅延作成するため、ここで chmod
@@ -74,13 +73,13 @@ class Database:
         無条件に 0700 へ揃えるため、sidecar が 0644 でも他ユーザーから
         到達できない。
 
-        既存パスは接続前に ``lstat`` で symlink と非 regular file を拒否する
-        （F-25 対応）。``O_EXCL`` はぶら下がり symlink に対しても
-        ``FileExistsError`` を投げるため、以前は生きたリンクもぶら下がりリンクも
+        既存パスは接続前に ``lstat`` で symlink と非 regular file を拒否する。
+        ``O_EXCL`` はぶら下がり symlink に対しても ``FileExistsError`` を
+        投げるため、この検査が無いと生きたリンクもぶら下がりリンクも
         同じ分岐へ落ち、``sqlite3.connect`` がリンクを追ってリンク先へ
-        ``repos``/``sessions``/``knowledge`` を作っていた。二次被害として
+        ``repos``/``sessions``/``knowledge`` を作る。二次被害として
         直後の ``path.stat()`` もリンクを追うため、0600 の chmod がリンク先へ
-        着弾していた。``~/.claq`` は 0700 に締められるので権限昇格ではないが、
+        着弾する。``~/.claq`` は 0700 に締められるので権限昇格ではないが、
         復元事故や誤設定で無関係な DB を壊しうる完全性の問題である。
 
         この検査は TOCTOU を完全には防がない（lstat と connect の間に差し替え
@@ -252,7 +251,7 @@ class Database:
         おり、維持ガードを入れると forget が黙って効かなくなる。
 
         「人間が promote した active カードを agent の再 learn が pending へ
-        戻す」問題（H-3）は、本メソッドではなく ``cli._handle_learn`` で塞ぐ。
+        戻す」問題は、本メソッドではなく ``cli._handle_learn`` で塞ぐ。
         DB 層は汎用の upsert のままにし、誰の書込みを拒むかという判断は
         経路ごとに持たせる。
 

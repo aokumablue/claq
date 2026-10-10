@@ -119,10 +119,10 @@ class CommandError(Exception):
     """
 
 
-# 人間が promote 済みのカードへ再 learn したときの拒否理由（H-3 対応）。
+# 人間が promote 済みのカードへ再 learn したときの拒否理由。
 # 「失敗」ではなく「その知識は既に有効なので何もしなくてよい」と読めるよう、
 # 次に取るべき行動まで書く。ここを曖昧にすると、agent が別 key で作り直して
-# 重複カードを量産する（この経路が防ごうとしていた事故そのもの）。
+# 重複カードを量産する（この経路が防ごうとしている事故そのもの）。
 _ACTIVE_CARD_IS_IMMUTABLE_MESSAGE = (
     "learn: {key} は既に active（人間が promote 済み）です。"
     "agent からの更新は受け付けません —— 更新できてしまうと、人間が承認した内容と"
@@ -194,8 +194,8 @@ def _read_stdin_json() -> dict[str, Any]:
     hook_common.read_raw_stdin() を使う。tty 判定に加え、最初のバイト
     到着（2 秒）と読み取り全体（5 秒）の両方に上限を持つ。``context`` は
     launcher の in-process 実行で host の実 pipe を直接読むため、書き手が
-    pipe を閉じないまま部分送信で止まった場合に旧実装（sys.stdin.read()）
-    は EOF まで無期限ブロックしていた（F-03 対応）。
+    pipe を閉じないまま部分送信で止まった場合、``sys.stdin.read()`` では
+    EOF まで無期限ブロックする。
 
     Returns:
         読み取った dict。stdin が tty・空・上限到達・非 dict・不正 JSON
@@ -245,18 +245,18 @@ def _parse_args_and_stdin(command: str, argv: list[str]) -> CommandArgs:
     )
 
 
-# 位置引数を一切取らない subcommand（L-01 対応）。
+# 位置引数を一切取らない subcommand。
 _ZERO_POSITIONAL_COMMANDS: frozenset[str] = frozenset({"init", "learn", "list", "context", "handoff"})
 
-# 位置引数をちょうど 1 個（key）だけ取る subcommand（L-01 対応）。
+# 位置引数をちょうど 1 個（key）だけ取る subcommand。
 _SINGLE_KEY_COMMANDS: frozenset[str] = frozenset({"show", "promote", "forget"})
 
 # subcommand ごとに受理するオプション。`_parse_options` はグローバルな
 # `_VALUE_OPTIONS` / `_BOOL_FLAGS` しか見ないため、ここで対応表を持たないと
 # `promote <key> --global` のような未対応 flag が黙って通り、指定と異なる
-# カード（repo 優先探索の結果）を操作してしまう（F-22）。`--global` と
-# `--repo` の排他チェックも list/search からしか呼ばれていなかったため、
-# `--global --repo` の同時指定すら素通りしていた。
+# カード（repo 優先探索の結果）を操作してしまう。`--global` と
+# `--repo` の排他チェックも全 subcommand で効かせないと、
+# `--global --repo` の同時指定が素通りする。
 _SUPPORTED_OPTIONS: dict[str, frozenset[str]] = {
     "init": frozenset(),
     "context": frozenset(),
@@ -277,8 +277,8 @@ def _check_supported_options(command: str, args: CommandArgs) -> None:
     """subcommand が受理しないオプションを、副作用より先に拒否する。
 
     黙って無視すると、利用者の指定と異なるカードを操作したことに気づけない。
-    たとえば `promote <key> --global` は repo 側のカードを昇格させ、global 側は
-    pending のまま残っていた。
+    たとえば `promote <key> --global` を黙って受けると、repo 側のカードを
+    昇格させ、global 側は pending のまま残る。
 
     Args:
         command: 実行するコマンド名。
@@ -305,11 +305,11 @@ def _check_supported_options(command: str, args: CommandArgs) -> None:
 
 
 def _check_positional_arity(command: str, args: CommandArgs) -> None:
-    """side effect（DB オープン・再作成等）より先に位置引数の個数を検証する（L-01 対応）。
+    """side effect（DB オープン・再作成等）より先に位置引数の個数を検証する。
 
     ドキュメント化されていない位置引数を黙って無視すると、typo が成功扱いに
     なり呼出元が失敗を検知できない（例: 隔離 DB で ``init unexpected`` を
-    実行すると、usage error ではなく exit 0 で DB が再作成されていた）。
+    実行すると、usage error ではなく exit 0 で DB が再作成される）。
     各 subcommand の契約: ``init``/``learn``/``list``/``context``/``handoff``
     は 0 個、``show``/``promote``/``forget`` はちょうど 1 個。``search`` は
     複数の positional を検索語として連結する既存契約のため対象外とする。
@@ -334,10 +334,11 @@ def _check_positional_arity(command: str, args: CommandArgs) -> None:
 
 
 def _check_learn_options(command: str, args: CommandArgs) -> None:
-    """learn は ``--status`` を受け付けない（H-01 対応）。
+    """learn は ``--status`` を受け付けない。
 
-    caller（agent・外部入力を処理した agent 含む）が ``--status active`` を
-    指定するだけで永続 SessionStart context への注入を自己承認できていた。
+    受け付けると、caller（agent・外部入力を処理した agent 含む）が
+    ``--status active`` を指定するだけで永続 SessionStart context への注入を
+    自己承認できてしまう。
     ``--status`` は ``list``/``search`` の絞り込みフラグとしては引き続き有効
     （`_VALUE_OPTIONS` に残したまま）だが、``learn`` に渡された場合だけ拒否する。
     黙って無視すると「指定したのに効いていない」という別の事故を招くため、
@@ -425,10 +426,8 @@ def main() -> int:
     additional_context = ""
     # SessionStart はどの失敗経路でも exit 0 を維持する。フックが非 0 を返すと
     # セッション全体がエラー扱いになるため、`Returns:` に書いた契約はこの 1 本の
-    # 値で表現し、失敗を捕まえる 4 箇所すべてがこれを使う。以前は
-    # `if not session_start` を持つのが設定ロード失敗の 1 箇所だけで、
-    # CommandError 経路と実行時例外経路は無条件に 1 を立てていた（＝契約が
-    # 3 箇所で破れていた）。片方だけ直すと非対称が残るので 1 本に集約する。
+    # 値で表現し、失敗を捕まえる 4 箇所すべてがこれを使う（経路ごとに
+    # `if not session_start` を持つと、片方だけ直したときに非対称が残る）。
     #
     # 失敗しても沈黙はさせない。stderr への出力はどの経路でも行う —— 黙って
     # 抜けると記憶注入が失われたこと自体に気づけないため。
@@ -559,7 +558,7 @@ def _require_key(args: CommandArgs) -> str:
     """位置引数から key を取り出す。
 
     呼び出し元（show/promote/forget）は dispatch 層の `_check_positional_arity`
-    （L-01 対応）を経ているため、``args.positionals`` は必ずちょうど 1 件。
+    を経ているため、``args.positionals`` は必ずちょうど 1 件。
 
     Args:
         args: コマンド引数。
@@ -631,27 +630,27 @@ def _handle_learn(settings: Settings, args: CommandArgs) -> None:
     """learn コマンド: stdin の JSON から知識カードを 1 件登録する。
 
     既存の key と衝突した場合は ``upsert_knowledge`` が更新に落とす。ただし
-    既存行が ``status='active'`` のときは更新せず usage error にする（H-3 対応。
-    後述）。出力は ``learned: <key>`` の 1 行のみ。``source``/``status`` は常に
-    ``agent``/``pending`` に固定される（H-01 対応。caller が JSON の
+    既存行が ``status='active'`` のときは更新せず usage error にする（後述）。
+    出力は ``learned: <key>`` の 1 行のみ。``source``/``status`` は常に
+    ``agent``/``pending`` に固定される（caller が JSON の
     ``source``/``status`` を書いても authority として扱わない）。有効化
     （``status='active'``）は ``promote <key>`` による人間承認のみ。
 
-    **active カードは learn 経路から不変にする**（H-3）。以前は ``upsert`` の
-    ``ON CONFLICT`` が ``status = excluded.status`` で無条件に上書きしていたため、
-    人間が ``promote`` したカードと同じ key へ再 learn すると、learn が常に
-    ``pending`` を書く（H-01）都合で **人間の承認が黙って取り消され**、以後
-    SessionStart へ注入されなくなっていた。しかも本文まで差し替わるため、
+    **active カードは learn 経路から不変にする**。``upsert`` の ``ON CONFLICT``
+    は ``status = excluded.status`` で無条件に上書きするため、そのまま通すと
+    人間が ``promote`` したカードと同じ key へ再 learn したとき、learn が常に
+    ``pending`` を書く都合で **人間の承認が黙って取り消され**、以後
+    SessionStart へ注入されなくなる。しかも本文まで差し替わるため、
     「人間が承認済み」かつ「再発するほど重要」という最も価値の高いカードだけが
     狙い撃ちで注入対象から外れる。
 
     拒否（案 a）を選び、既存 status を維持する更新（案 b）は採らない。案 b は
     「agent が active カードの本文を書き換えられる」＝人間が承認した内容と違う
-    ものが注入され続ける、という H-01 と同じ穴を別の口で開けるため。案 a なら
-    「active カードは agent の書込みに対して不変」という 1 行の不変条件になり、
-    H-01 の設計思想（agent 由来の書込みは自動で有効化されない）と整合する。
+    ものが注入され続ける、という「agent 由来の書込みは自動で有効化されない」
+    原則の穴を別の口で開けるため。案 a なら「active カードは agent の書込みに
+    対して不変」という 1 行の不変条件になり、その原則と整合する。
 
-    ``archived`` と ``pending`` は従来どおり更新できる。``archived`` への再 learn は
+    ``archived`` と ``pending`` は更新できる。``archived`` への再 learn は
     ``pending`` へ戻すだけで注入はされず、人間が再度 ``promote`` を通す余地を
     残す方が「人間が決める」方針に合う。
 
@@ -981,9 +980,9 @@ def _handle_promote(settings: Settings, args: CommandArgs) -> None:
         CommandError: key の指定が無い、または該当が無い場合。
     """
     key = _require_key(args)
-    # actor は DB 更新の前に確定させる。更新後に解決していた頃は、識別子の
-    # 取得に失敗すると「カードは active になったのに監査ログが残らず非 0 終了」
-    # という部分成功になりえた（P1-005）。
+    # actor は DB 更新の前に確定させる。更新後に解決すると、識別子の
+    # 取得に失敗したとき「カードは active になったのに監査ログが残らず非 0 終了」
+    # という部分成功になりうる。
     actor = actor_identity()
     with Database(settings.db_path) as db:
         found = _find_knowledge(db, key)
@@ -1146,17 +1145,17 @@ def _handoff_section(db: Database, repo_id: str) -> str:
 
 
 def _bg_failure_section() -> str:
-    """前回セッションの detach 起動（``--bg``）失敗痕跡があれば 1 行の節にする（§6.2 対応）。
+    """前回セッションの detach 起動（``--bg``）失敗痕跡があれば 1 行の節にする。
 
     通知本文はログファイルの末尾行そのままであり、Bash からの直接書込みは
-    `bash_config_protection` の ``~/.claq/logs/`` 保護（2026-09-12 HIGH-1）で
+    `bash_config_protection` の ``~/.claq/logs/`` 保護で
     塞ぐが、それでもログへ書き込まれた行は次セッション以降の SessionStart で
     注入され続けるため、隣の handoff 節（``_handoff_section`` →
     ``handoff._summarize_transcript``）の ``_sanitize_freeform`` と同じ順序
     （``normalize_user_message`` → ``strip_tags`` → ``redact``）で注入前に
-    無害化する。通していなかった頃は ``</claq-memory> IMPORTANT: ...`` の
+    無害化する。通さないと ``</claq-memory> IMPORTANT: ...`` の
     1 行をログへ追記するだけで注入枠のタグ境界を閉じ、以後の本文を指示として
-    提示できた（実測）。``strip_tags`` だけでは足場タグ（``<system-reminder>``
+    提示できる。``strip_tags`` だけでは足場タグ（``<system-reminder>``
     等）が素通りするため両方を通し、``redact`` はログへ書かれたシークレット
     （API キー等）が未マスクのまま注入されるのを防ぐ
     （``strip_tags`` の後に ``redact`` を置く順序も `_sanitize_freeform` と揃える。
@@ -1237,7 +1236,7 @@ def _build_context(settings: Settings, args: CommandArgs) -> str:
     前回の引き継ぎの 3 節を、いずれも ``status='active'`` に限って集める
     （``pending`` は人間の昇格レビュー前の下書きでノイズになるため注入しない）。
     加えて、前回セッションの detach 起動（``--bg``）に失敗痕跡があれば
-    4 節目として 1 行だけ追加する（§6.2 対応、`_bg_failure_section`）。
+    4 節目として 1 行だけ追加する（`_bg_failure_section`）。
 
     Args:
         settings: mem 設定。

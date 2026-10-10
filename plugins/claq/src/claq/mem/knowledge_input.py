@@ -5,11 +5,11 @@
 前に Python 側で強制する。現在の入力経路は ``mem learn``（stdin の JSON。
 人間・エージェントが明示的に書く）の1つのみ。
 
-``source``/``status`` は generic learn の authority としては扱わない
-（H-01 対応）。``mem learn`` の呼び出し元は agent・human・agent が処理した
-外部入力のいずれもあり得て CLI 側には区別する手段が無いため、caller が
-JSON へ ``source: "human"`` や ``status: "active"`` と書くだけで、永続
-SessionStart context への注入（``status='active'``）を自己承認できていた。
+``source``/``status`` は generic learn の authority としては扱わない。
+``mem learn`` の呼び出し元は agent・human・agent が処理した
+外部入力のいずれもあり得て CLI 側には区別する手段が無いため、authority として
+扱うと caller が JSON へ ``source: "human"`` や ``status: "active"`` と書くだけで、
+永続 SessionStart context への注入（``status='active'``）を自己承認できてしまう。
 本モジュールは常に ``source="agent"`` / ``status="pending"`` を書き込み、
 payload がそれ以外の値を明示した場合は ``KnowledgeInputError`` にする
 （黙って上書きすると「指定したのに効いていない」という別の事故を招くため）。
@@ -44,9 +44,9 @@ SCOPES: frozenset[str] = frozenset({"global", "repo"})
 
 STATUSES: frozenset[str] = frozenset({"active", "pending", "archived"})
 """``knowledge.status`` の許容値。``list``/``search`` の ``--status`` 絞り込み
-フラグが参照する（generic learn からは常に ``pending`` 固定。H-01 対応）。"""
+フラグが参照する（generic learn からは常に ``pending`` 固定）。"""
 
-# generic learn 経路が常に書き込む固定値（H-01 対応）。payload/CLI からの
+# generic learn 経路が常に書き込む固定値。payload/CLI からの
 # 上書きは authority として扱わず、非既定値は KnowledgeInputError にする。
 _FIXED_SOURCE = "agent"
 _FIXED_STATUS = "pending"
@@ -158,7 +158,7 @@ def _payload_choice(
 
 
 def _fixed_choice(payload: dict[str, Any], name: str, fixed_value: str) -> str:
-    """generic learn 経路で常に固定値を返し、payload の非既定値を authority として拒否する（H-01 対応）。
+    """generic learn 経路で常に固定値を返し、payload の非既定値を authority として拒否する。
 
     payload が *name* を明示的に指定していて、かつその値が *fixed_value* と
     異なる場合は ``KnowledgeInputError`` にする。未指定、または *fixed_value*
@@ -215,7 +215,7 @@ def slug_with_hash_fallback(redacted: str, prefix: str) -> str:
 def generate_key(raw_title: str, kind: str) -> str:
     """title から知識カードの key スラッグを生成する。
 
-    key は **redact 後** の title から生成します（A-03 対応）。redact 前の
+    key は **redact 後** の title から生成します。redact 前の
     生 title から生成すると、シークレットを含む title の断片が
     ``learned:`` 標準出力・``show <key>`` の入力履歴・ログへそのまま残る
     ためです（title/body 自体は redact 済みでも key 経由で漏れる）。
@@ -368,15 +368,14 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     ``redact_knowledge_text`` で既知プレフィックス系シークレットを
     マスクする（agent/外部入力由来の未検証データが SessionStart context
     へそのまま昇格するのを防ぐ）。key は **redact 後**の title から
-    `generate_key` で生成する（A-03 対応。redact 前の生 title から生成する
+    `generate_key` で生成する（redact 前の生 title から生成する
     と、title/body 自体は redact 済みでも key・``learned:`` 標準出力・
     ``show <key>`` の入力履歴経由でシークレットが残ってしまうため）。
     ペイロードが ``key`` を明示指定した場合も、生の値をそのまま使わず
     redact + slugify を通してから使う（同じ理由。明示 key だけが検証・
-    redaction を素通りする穴になっていた）。
+    redaction を素通りする穴を作らない）。
 
-    ``source``/``status`` は常に ``agent``/``pending`` に固定する（H-01
-    対応）。payload がそれ以外の値を明示した場合は拒否する（`_fixed_choice`）。
+    ``source``/``status`` は常に ``agent``/``pending`` に固定する。payload がそれ以外の値を明示した場合は拒否する（`_fixed_choice`）。
 
     Args:
         payload: 知識カードを表す dict。
@@ -403,10 +402,10 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
 
     raw_key = str(payload.get("key") or "").strip()
     # 明示 key もシークレット断片を持ち込みうるため、生成 key と同じく
-    # redact してから slugify を通す（A-03 対応。ここが素通りする穴だった）。
+    # redact してから slugify を通す。
     # ハッシュ fallback も title 由来 key と同じく適用する。適用しないと
     # `日本語` と `別` のような ASCII を含まない明示 key が同じ slug へ潰れ、
-    # upsert で別の知識を黙って上書きする（F-24）。
+    # upsert で別の知識を黙って上書きする。
     key = slug_with_hash_fallback(redact_knowledge_text(raw_key), kind) if raw_key else generate_key(title, kind)
 
     source_ref = optional_str(payload.get("source_ref"))
