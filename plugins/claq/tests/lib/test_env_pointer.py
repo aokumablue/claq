@@ -284,14 +284,22 @@ class TestStateHome:
         monkeypatch.setattr(mod.Path, "home", classmethod(lambda cls: tmp_path))
         assert mod._state_home() == tmp_path
 
-    def test_falls_back_to_cwd_when_home_unresolvable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_write_warns_when_home_unresolvable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """HOME を決められないときは cwd へ書かず、警告して終わる（シェル側は $HOME しか読まない）。"""
+        monkeypatch.setattr(mod, "_warned_this_process", False)
         monkeypatch.delenv("HOME", raising=False)
+        monkeypatch.chdir(tmp_path)
 
         def _boom(cls: object) -> Path:
             raise RuntimeError("no home")
 
         monkeypatch.setattr(mod.Path, "home", classmethod(_boom))
-        assert mod._state_home() == Path.cwd()
+        mod.write_env_pointer(_make_plugin_root(tmp_path / "plugin"))
+
+        assert not (tmp_path / BASE_DIR_NAME).exists()
+        assert json.loads(capsys.readouterr().err.strip())["claqEnvPointerWriteFailed"] is True
 
     def test_ignores_claq_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """CLAQ_HOME はテスト隔離専用のノブであり、state dir には影響しない。"""

@@ -1116,14 +1116,7 @@ def main() -> int:
             log(f"[Hook] Error: {err}")
             return 2
 
-    try:
-        result = evaluate(raw)
-    except Exception as err:
-        # evaluate() は例外を投げない契約だが、防御的に commit 確定前の
-        # 例外と同様に fail-open で扱う。
-        log(f"[Hook] Error: {err}")
-        return 0
-
+    result = evaluate(raw)
     if result["exitCode"] == 2:
         try:
             return emit_block_output(result["reason"])

@@ -77,20 +77,6 @@ class TestMainStdinBoundary:
         assert "BLOCKED" in err
         assert "exceeded" in err
 
-    def test_evaluate_exception_is_fail_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """`evaluate()` は例外を投げない契約だが、防御的に例外時も fail-open で扱う。"""
-        payload = json.dumps({"tool_input": {"command": "git commit -m x"}})
-        monkeypatch.setattr(
-            "claq.hooks.hook_common.read_raw_stdin_with_truncation", lambda: (payload, False)
-        )
-
-        def _raise(_raw: str) -> dict:
-            raise RuntimeError("evaluate failure")
-
-        monkeypatch.setattr(pbcq, "evaluate", _raise)
-
-        assert pbcq.main() == 0
-
     def test_emit_block_output_failure_after_commit_confirmed_is_fail_closed(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

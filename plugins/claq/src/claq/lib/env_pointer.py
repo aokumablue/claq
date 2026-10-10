@@ -146,11 +146,11 @@ def write_env_pointer(plugin_root: Path) -> None:
         なし。
 
     Raises:
-        例外は発生しません（``OSError`` は内部で捕捉します）。
+        例外は発生しません（``OSError`` と HOME を決められない ``RuntimeError`` は内部で捕捉します）。
     """
     try:
         _write_env_pointer_unsafe(plugin_root)
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         _warn_once(str(exc))
 
 
@@ -189,19 +189,16 @@ def _state_home() -> Path:
         なし。
 
     Returns:
-        HOME ディレクトリの Path。``HOME`` 未設定時は ``Path.home()``、それも
-        失敗する場合は ``Path.cwd()``。
+        HOME ディレクトリの Path。``HOME`` 未設定時は ``Path.home()``。
 
     Raises:
-        例外は発生しません。
+        RuntimeError: HOME ディレクトリを決められない場合（読む側のシェルは
+            ``$HOME`` しか見ないため、別の場所へは書かない）。
     """
     raw = os.environ.get("HOME")
     if raw:
         return Path(raw).expanduser()
-    try:
-        return Path.home()
-    except RuntimeError:
-        return Path.cwd()
+    return Path.home()
 
 
 def _state_dir() -> Path:
