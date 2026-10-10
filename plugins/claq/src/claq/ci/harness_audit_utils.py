@@ -21,6 +21,29 @@ HARNESS_MARKERS = [
 ]
 
 
+def check(
+    check_id: str,
+    category: str,
+    points: int,
+    scopes: list[str],
+    path: str,
+    description: str,
+    passed: bool,
+    fix: str,
+) -> dict[str, Any]:
+    """採点項目 1 件を、レポート組み立てが読む辞書にする。"""
+    return {
+        "id": check_id,
+        "category": category,
+        "points": points,
+        "scopes": scopes,
+        "path": path,
+        "description": description,
+        "pass": passed,
+        "fix": fix,
+    }
+
+
 def file_exists(root_dir: str | Path, relative_path: str) -> bool:
     """相対パスが存在するかを確認する。"""
     return Path(root_dir, relative_path).exists()
