@@ -8,7 +8,7 @@
 #   claq_run claq.mem.cli learn <<'JSON'
 #   ...
 #
-# roots/<pid> files are DATA, never shell code (R-01/R-03): each
+# roots/<pid> files are DATA, never shell code: each
 # holds two lines — the absolute plugin root path, then the pid's own process
 # start time (`ps -o lstart=`) as an opaque identity token. This resolver never
 # `.`/`source`s them — it only `read`s the two lines — so no content placed in
@@ -22,20 +22,20 @@
 # start-time line matches that pid's *current* `ps -o lstart=` output
 # byte-for-byte, use its recorded root. A mismatch means the pid was reused
 # by an unrelated process since the pointer was written — skip it. An empty
-# or malformed file is treated the same way (defensive only — the writer no
-# longer produces empty files by design; see docs/adr/plugin-root-resolution.md revision 3).
+# or malformed file is treated the same way (defensive only — the writer does
+# not produce empty files by design; see docs/adr/plugin-root-resolution.md).
 #
 # There is no second-tier fallback. If neither candidate yields a verified
-# match, this exits 127 rather than guessing (H-02: an
-# earlier design fell back to "the root every valid pointer agrees on",
-# which cannot prove the shell asking is actually that host's descendant).
+# match, this exits 127 rather than guessing (a fallback such as "the root
+# every valid pointer agrees on" cannot prove the shell asking is actually
+# that host's descendant).
 
 _claq_env_root=""
 
 _claq_resolve_ancestor_pointer() {
   # $1: candidate pid. On success, prints the recorded root on stdout and
   # returns 0. Prints nothing and returns 1 if the pointer is missing,
-  # empty or malformed (defensive only — the writer no longer produces
+  # empty or malformed (defensive only — the writer does not produce
   # these), or its recorded start-time does not match the pid's current
   # start-time (pid reuse).
   _claq_walk_candidate_pid="$1"

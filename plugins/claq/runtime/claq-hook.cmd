@@ -13,8 +13,8 @@ rem Resolution order: %CLAQ_PYTHON% -> py -3 -> python -> python3.
 rem Candidates found under ...\WindowsApps\ are skipped: those are Microsoft
 rem Store "App execution alias" stubs that own the names python.exe/python3.exe
 rem without shipping an interpreter. Invoking one prints
-rem "Python was not found" and exits 9009, which is exactly how every claq hook
-rem failed on Windows (release-verify 2026-09-03). The `py` launcher is tried
+rem "Python was not found" and exits 9009, which would make every claq hook
+rem fail on Windows. The `py` launcher is tried
 rem first because it is installed to %WINDIR% by the official installer and
 rem selects the newest Python 3.
 rem

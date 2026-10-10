@@ -26,9 +26,8 @@
 #   curl -fsSL <配布スクリプトのURL> | bash
 
 # 候補の選択規則は grok_plugin_root.find_latest_installed_claq と揃える
-# （mtime 最新）。以前はシェル側が glob の先頭＝辞書順を採っていたため、複数
-# インストールが同居すると「実行される bootstrap コード」と「symlink の張り先」が
-# 別バージョンになりえた（F-12）。選択は stdlib だけで済むので、PYTHONPATH を
+# （mtime 最新）。食い違うと、複数インストールが同居したとき
+# 「実行される bootstrap コード」と「symlink の張り先」が別バージョンになる。選択は stdlib だけで済むので、PYTHONPATH を
 # 用意する前に python3 へ委ねる。
 SRC_DIR="$(python3 -c '
 import pathlib
@@ -48,8 +47,8 @@ print(max(candidates, key=lambda path: path.stat().st_mtime) / "src")
     exit 1
 }
 
-# 未導入・import 失敗・link 失敗はいずれも非 0 で返す。以前は「何もできなかった」
-# 場合も exit 0 だったため、呼び出し側が成功と区別できなかった（F-12）。
+# 未導入・import 失敗・link 失敗はいずれも非 0 で返す（「何もできなかった」
+# 場合に exit 0 を返すと、呼び出し側が成功と区別できない）。
 PYTHONPATH="$SRC_DIR" python3 -c '
 import sys
 

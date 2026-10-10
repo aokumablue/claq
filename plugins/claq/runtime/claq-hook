@@ -30,8 +30,8 @@ case "$0" in
   *) _claq_hook_dir=. ;;
 esac
 # `cd` が失敗してもここでは抜けない。root が解決できなければ launcher も
-# 見つからず、下の存在検査が診断付きの fail-open で終わらせる。以前はこの行で
-# 無言の exit 0 をしており、保護が無効化されたことが誰にも観測できなかった。
+# 見つからず、下の存在検査が診断付きの fail-open で終わらせる（この行で
+# 無言の exit 0 をすると、保護が無効化されたことが誰にも観測できない）。
 _claq_root=$(CDPATH= cd -- "$_claq_hook_dir/.." && pwd)
 _claq_launcher="$_claq_root/src/claq/launcher.py"
 
@@ -39,9 +39,9 @@ _claq_launcher="$_claq_root/src/claq/launcher.py"
 # どれも同じファイルを渡すため、ここを通さないと不在時に全経路が同じ形で壊れる。
 #
 # `python3 <存在しないファイル>` は **exit 2** を返す。PreToolUse の「exit 2 =
-# deny」契約により、不完全インストール・Grok の hash symlink 切れ・root 解決の
-# 失敗はいずれも「4 つの保護 hook が全ツール呼び出しを偽 deny する」という形に
-# 化けていた。これは上に書いた fail-open ポリシーの真逆であり、しかも復旧手段の
+# deny」契約により、存在を確かめないと不完全インストール・Grok の hash symlink
+# 切れ・root 解決の失敗はいずれも「4 つの保護 hook が全ツール呼び出しを偽 deny
+# する」という形に化ける。これは上に書いた fail-open ポリシーの真逆であり、しかも復旧手段の
 # Bash ごと塞ぐためセッション内から直せない。読めない launcher も python 側は
 # 同じ exit 2 になるので、存在と可読性を一度に見る。
 #

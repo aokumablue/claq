@@ -35,10 +35,10 @@ fi
 #
 # The `cd` is checked. It fails when the directory this file was sourced from no
 # longer exists -- the normal case is a plugin upgrade replacing the versioned
-# cache directory while a shell that already sourced env.sh keeps running. The
-# old body printed an empty line and returned 0 there, so `claq_run` went on to
-# execute "/runtime/claq-hook" and every later call failed with an error that
-# named neither the stale root nor the upgrade. Report the actual cause once and
+# cache directory while a shell that already sourced env.sh keeps running.
+# Printing an empty line and returning 0 there would make `claq_run` execute
+# "/runtime/claq-hook", and every later call would fail with an error that
+# names neither the stale root nor the upgrade. Report the actual cause once and
 # return non-zero (127: the resolved command is not there).
 claq_plugin_root() {
   local plugin_root
@@ -82,7 +82,7 @@ claq_run() {
 #   kind    : convention | decision | pitfall | howto | fact | preference
 #   scope   : repo (default) | global
 #   status  : always pending. This helper has no --status/--source flag
-#             (H-01: caller-supplied source/status are not trusted as
+#             (caller-supplied source/status are not trusted as
 #             authority for the generic learn path — `mem.cli learn`
 #             itself rejects them). Every card it records has
 #             source=agent, status=pending, and needs a human to run
@@ -158,11 +158,10 @@ collect_skill_create_inputs() {
 
   printf '\n%s\n' "# ファイルごとのコミット頻度"
   # 空の `--pretty=format:` でコミット見出しを最初から出力しない。
-  # 以前は `--oneline` で見出しを出してから `grep -v "^[a-f0-9]"` で短縮 SHA を
-  # 落としていたが、これは 16 進数字で始まる**実在パスも巻き添えにする**。
-  # 実測で agents/ commands/ docs/ conftest.py が消え、plugins/ scripts/ は
-  # 残るため欠落に気づけず、/skill-gen が「agents/commands はほとんど触られて
-  # いない」という誤った頻度表を受け取っていた。出力しないものは選り分ける
+  # `--oneline` で見出しを出してから `grep -v "^[a-f0-9]"` で短縮 SHA を
+  # 落とすと、16 進数字で始まる**実在パスも巻き添えにする**（agents/ commands/
+  # docs/ conftest.py が消え、plugins/ scripts/ は残るため欠落に気づけず、
+  # /skill-gen が誤った頻度表を受け取る）。出力しないものは選り分ける
   # 必要も無いので、残すフィルタは空行除去だけでよい。
   git log -n "${commits}" --name-only --pretty=format: | grep -v "^$" | sort | uniq -c | sort -rn | head -20
 }
