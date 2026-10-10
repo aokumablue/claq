@@ -178,7 +178,7 @@ def _run_protection(monkeypatch: pytest.MonkeyPatch, payload: dict | str, *, tru
 def test_config_protection_blocks_protected_file_from_native_camel_case_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """R-03: native toolName=edit / toolArgs.file_path=ruff.toml を deny する。"""
+    """native toolName=edit / toolArgs.file_path=ruff.toml を deny する。"""
     reasons = _spy_block(monkeypatch)
     rc = _run_protection(
         monkeypatch,
@@ -324,7 +324,7 @@ def test_config_protection_remaining_dt03_rows(
     expect_block: bool,
     reason_snippet: str | None,
 ) -> None:
-    """DT-03 残行: JSON 文字列・tool_args・basename・非書込み・fail-closed。"""
+    """JSON 文字列・tool_args・basename・非書込み・fail-closed。"""
     reasons = _spy_block(monkeypatch)
     rc = _run_protection(monkeypatch, payload)
     if expect_block:
@@ -350,7 +350,7 @@ def test_config_protection_blocks_unparseable_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """matcher が書込み系ツールに限定するため、非空だが不正な JSON は
-    保護対象ファイルかどうか判定できず fail-closed で block する（F-02）。
+    保護対象ファイルかどうか判定できず fail-closed で block する。
     """
     reasons = _spy_block(monkeypatch)
     assert _run_protection(monkeypatch, "{not-json") == 2
@@ -361,7 +361,7 @@ def test_config_protection_blocks_unparseable_json(
 def test_config_protection_truncation_fail_closed_via_spy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """DT-03 #11: 切り捨て入力は fail-closed で block する。"""
+    """切り捨て入力は fail-closed で block する。"""
     reasons = _spy_block(monkeypatch)
     rc = _run_protection(monkeypatch, "{not-even-json", truncated=True)
     assert rc == 2
@@ -393,7 +393,7 @@ class TestProtectionHookOwnConfig:
 
     `config_protection` は lint 設定を「エージェントが自分の作業を通すために
     ガードレール側を緩める」経路として守る。同じ動機で最も効く緩め方
-    — 保護フックの登録そのものを消す — が対象外だった。
+    — 保護フックの登録そのものを消す — も対象にする。
     """
 
     @pytest.mark.parametrize(

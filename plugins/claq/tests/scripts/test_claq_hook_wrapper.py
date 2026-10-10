@@ -1,9 +1,9 @@
 """runtime/claq-hook（および Windows 版 .cmd）の起動契約テスト。
 
 hooks.json の全エントリはこの wrapper 経由で launcher を起動する。裸の
-``python3`` を hooks.json へ書いていた頃は、Windows で ``python3`` が
+``python3`` を hooks.json へ書くと、Windows で ``python3`` が
 Microsoft Store の App execution alias に解決され、launcher へ到達する前に
-全 PreToolUse が hook error になっていた（release-verify 2026-09-03）。
+全 PreToolUse が hook error になる。
 インタプリタ解決の責務をこの 1 ファイルへ寄せた以上、解決順・見つからない
 場合の終了コード・診断出力は機械的に固定する。
 
@@ -183,10 +183,10 @@ def test_wrapper_is_executable() -> None:
 
 
 def test_wrapper_fails_open_when_launcher_is_missing(tmp_path: Path) -> None:
-    """launcher が無いとき exit 2 ではなく exit 0 + 診断で終わること（H-1）。
+    """launcher が無いとき exit 2 ではなく exit 0 + 診断で終わること。
 
-    fix 前は launcher の存在を確認せず `exec python3 "$_claq_launcher"` して
-    いた。`python3 <存在しないファイル>` は **exit 2** を返し、PreToolUse の
+    launcher の存在を確認せず `exec python3 "$_claq_launcher"` すると、
+    `python3 <存在しないファイル>` は **exit 2** を返し、PreToolUse の
     「exit 2 = deny」契約により 4 つの保護 hook が**全ツール呼び出しを偽
     deny** する。fail-open（診断を出して exit 0）を掲げる設計と真逆の挙動で、
     しかも復旧手段の Bash ごと塞がるためセッション内から直せない。
@@ -241,7 +241,7 @@ def test_wrapper_fails_open_when_launcher_is_unreadable(tmp_path: Path) -> None:
 
 
 def test_wrapper_fails_open_when_invoked_without_a_path_separator(tmp_path: Path) -> None:
-    """`$0` にスラッシュが無い起動でも偽 deny にならないこと（H-1）。
+    """`$0` にスラッシュが無い起動でも偽 deny にならないこと。
 
     `sh claq-hook` のように引数へ直接渡すと `$0` は "claq-hook" のままになり、
     wrapper の `*) _claq_hook_dir=.` 分岐が root を `$PWD/..` として解決する。
@@ -279,7 +279,7 @@ def test_wrapper_fails_open_when_invoked_without_a_path_separator(tmp_path: Path
 
 
 def test_launcher_diagnostics_never_embed_a_path_in_json() -> None:
-    """診断 JSON にパスを載せないこと（F）。
+    """診断 JSON にパスを載せないこと。
 
     POSIX のパスは `"`・`\\`・改行を全て含んでよい。生のまま JSON へ連結すると
     引用符や `\\U` で壊れ、改行を含むパスなら**偽の構造化行を 1 本注入**できる
@@ -330,8 +330,8 @@ def test_wrapper_uses_claq_python_override(tmp_path: Path) -> None:
 def test_wrapper_prefers_python3_over_python_when_both_exist(tmp_path: Path) -> None:
     """両方が PATH にあるとき `python3` が勝つこと（CLAUDE.md 規定の順序）。
 
-    既存の 2 件はそれぞれ片方だけを stub するため、実装の順序を入れ替えても
-    どちらも緑のままだった。順序そのものを踏む対照がここまで無かった。
+    片方だけを stub するテストでは、実装の順序を入れ替えても緑のまま通る。
+    順序そのものを踏む対照としてここで固定する。
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -387,7 +387,7 @@ def test_wrapper_rejects_python_older_than_312(tmp_path: Path) -> None:
 
 
 def test_wrapper_probe_does_not_consume_the_hook_payload(tmp_path: Path) -> None:
-    """3.12+ probe が hook の stdin を食わないこと（G）。
+    """3.12+ probe が hook の stdin を食わないこと。
 
     probe は `python -c` を起動する。stdin を閉じずに起動すると、コード側が
     読みさえすれば**ツール入力 JSON がそこで消費され**、本体は空の payload を
@@ -437,13 +437,13 @@ def test_wrapper_reports_when_no_interpreter_exists(tmp_path: Path) -> None:
     assert diagnostic["requiredVersion"] == "3.12+"
 
 
-# --- A: cwd 由来インタプリタの採用（実測で悪用可能だった経路） -------------------
+# --- cwd 由来インタプリタの採用（実測で悪用可能な経路） -------------------------
 #
 # POSIX は PATH の長さ 0 の要素（先頭 `:`・末尾 `:`・連続 `::`）と `.` を
 # 「カレントディレクトリ」と規定する。hook は cwd=プロジェクトルートで起動する
 # ため、リポジトリが同梱した `./python3` が `command -v python3` と
 # `exec python3` の両方で採用され、hook の stdin（ツール入力 JSON）を受け取り
-# exit code まで支配できていた（= 保護の完全な乗っ取り。修正前に実測で再現）。
+# exit code まで支配できる（= 保護の完全な乗っ取り。実測で再現する）。
 #
 # 表の各行は「空要素/`.`/相対エントリが**唯一解決しうるエントリ**」になるよう
 # 組む。`/usr/bin` のような実在ディレクトリを同居させると、そちらが順序で勝って
@@ -526,7 +526,7 @@ def test_wrapper_exports_a_sanitized_path_to_the_interpreter(tmp_path: Path) -> 
     assert result.stdout.strip() == f"PATH=[{bin_dir}]"
 
 
-# --- B: CLAQ_PYTHON の相対値 ---------------------------------------------------
+# --- CLAQ_PYTHON の相対値 ------------------------------------------------------
 @pytest.mark.parametrize(
     ("label", "value"),
     [
@@ -539,8 +539,7 @@ def test_wrapper_exports_a_sanitized_path_to_the_interpreter(tmp_path: Path) -> 
 def test_wrapper_rejects_a_relative_claq_python(tmp_path: Path, label: str, value: str) -> None:
     """CLAQ_PYTHON が相対なら cwd のインタプリタを絶対に起動しないこと。
 
-    `CLAQ_PYTHON=./python3` は POSIX 側でも実測で乗っ取りに成立した（監査は
-    裸の名前しか試しておらず「POSIX では再現せず」と報告していた）。裸の名前も
+    `CLAQ_PYTHON=./python3` は POSIX 側でも実測で乗っ取りが成立する。裸の名前も
     PATH に空要素があれば同じ穴になる。PATH 探索へ**落とさない**のも契約で、
     明示的な override が黙って別のインタプリタに化けるのは利用者の前提を破る。
 
@@ -633,11 +632,11 @@ def test_both_wrappers_use_the_same_diagnostic_reasons() -> None:
 
 
 def test_windows_wrapper_checks_the_launcher_before_choosing_an_interpreter() -> None:
-    """launcher 不在/不読の検査がインタプリタ選択より前にあること（H-1 の Windows 側）。
+    """launcher 不在/不読の検査がインタプリタ選択より前にあること（Windows 側）。
 
     POSIX 側だけ塞ぐと、同じ不完全インストールが Windows でだけ exit 2 の
     偽 deny になる。順序が契約の本体なので、宣言の有無ではなく**位置**を見る。
-    可読性検査（D）も同じ位置に要る: POSIX 側は `[ -f ]` と `[ -r ]` を対で
+    可読性検査も同じ位置に要る: POSIX 側は `[ -f ]` と `[ -r ]` を対で
     見ており、`type` を欠くと「存在するが読めない launcher」が Windows でだけ
     exit 2 の偽 deny に戻る。
     """
@@ -672,7 +671,7 @@ def test_windows_wrapper_detects_empty_path_entries() -> None:
     ``:claq_path_unsafe`` へ飛ぶ」という構造であって、振る舞いの検証ではない。
 
     構造が重要なのは失敗の向きを縛るため: 検査行が壊れて解釈できなくても
-    ``CLAQ_PATH_RISK`` は未設定のまま残り、解決は従来どおり進む。壊れた検査が
+    ``CLAQ_PATH_RISK`` は未設定のまま残り、解決は通常どおり進む。壊れた検査が
     「Windows で保護が無効」へ倒れることはない。
     """
     lines = _cmd_lines()
@@ -726,7 +725,7 @@ def test_windows_wrapper_path_diagnostic_fails_open() -> None:
 
 
 def test_windows_wrapper_requires_an_absolute_claq_python() -> None:
-    """CLAQ_PYTHON の絶対パス検査が Windows 側にもあること（B）。
+    """CLAQ_PYTHON の絶対パス検査が Windows 側にもあること。
 
     cmd.exe は裸の名前も `.\\name` も**常に cwd から先に**解決するため、この穴は
     Windows では無条件に成立する。POSIX 側は `CLAQ_PYTHON=./python3` が実測で
@@ -760,7 +759,7 @@ def test_windows_wrapper_requires_an_absolute_claq_python() -> None:
 
 
 def test_windows_wrapper_quotes_every_path_expansion() -> None:
-    """パスを持ちうる %VAR% が必ず引用符の内側で展開されること（C）。
+    """パスを持ちうる %VAR% が必ず引用符の内側で展開されること。
 
     cmd はパーセント展開の**後**に行を再パースするので、`echo ... %CLAQ_LAUNCHER%`
     のような裸の展開はインストールパスに `&` があるとコマンド実行になる。
@@ -777,7 +776,7 @@ def test_windows_wrapper_quotes_every_path_expansion() -> None:
 
 
 def test_windows_wrapper_probes_each_candidate_with_its_exec_arguments() -> None:
-    """採用前に 3.12+ probe を通し、probe と exec の引数が一致すること（H-18b）。
+    """採用前に 3.12+ probe を通し、probe と exec の引数が一致すること。
 
     `py.exe` だけがあり Python 3 が未登録の host では `py -3` が非ゼロで終わる。
     probe が無いとその候補のまま exec し、launcher が一度も動かないまま
@@ -785,7 +784,7 @@ def test_windows_wrapper_probes_each_candidate_with_its_exec_arguments() -> None
     probe を `%CLAQ_PYARGS%` 付きで行うのは、bare `py` と `py -3` が別の
     ランタイムを選びうるため（probe した物と exec する物を一致させる）。
 
-    probe は `<nul` で stdin を閉じる（G）。閉じないと probe が hook の
+    probe は `<nul` で stdin を閉じる。閉じないと probe が hook の
     ツール入力 JSON を食いうる。exec 行には付けない（本体は stdin を読む）。
     """
     lines = _cmd_lines()
@@ -800,9 +799,9 @@ def test_windows_wrapper_probes_each_candidate_with_its_exec_arguments() -> None
 
 
 def test_windows_wrapper_probes_python3_as_well() -> None:
-    """`python3` だけ probe を免除しないこと（E）。
+    """`python3` だけ probe を免除しないこと。
 
-    旧実装は `if /i "%1"=="python3" exit /b 0` で probe を飛ばしていた。候補
+    `if /i "%1"=="python3" exit /b 0` のように probe を飛ばすと危うい。候補
     フィルタは `\\WindowsApps` の denylist なので、Microsoft が alias stub の
     設置先を変えるとフィルタを抜けた stub が**無 probe で採用**され、exit 9009
     （非ブロッキングエラー）＝保護無効へ倒れる。POSIX 側の `python3` 無 probe は
@@ -824,7 +823,7 @@ def test_windows_wrapper_never_expands_errorlevel_after_running_python() -> None
     cmd は `if (...)` ブロック内の `%VAR%` を**パース時**に展開する。
     ブロック内で python を起動して `exit /b %ERRORLEVEL%` と書くと、返るのは
     起動**前**の errorlevel になる。保護 hook の exit 2 が 0 として host へ
-    報告され、Windows でだけ全ブロックが素通りする（P1-004 と同じ失敗クラス）。
+    報告され、Windows でだけ全ブロックが素通りする（stdin の読み違いと同じ失敗クラス）。
     素の `exit /b` は現在の errorlevel を保つ。
 
     禁じるのは `%ERRORLEVEL%` の**パーセント展開**だけで、`if errorlevel N`
@@ -876,7 +875,7 @@ def test_windows_wrapper_filters_store_alias_inside_the_where_pipeline() -> None
 
 
 def test_windows_wrapper_resolves_candidates_from_path_only() -> None:
-    """`where` の検索範囲を PATH に限定すること（H-18a）。
+    """`where` の検索範囲を PATH に限定すること。
 
     Windows の `where` は仕様上 **PATH より先にカレントディレクトリ**を見る。
     hook は cwd=プロジェクトルートで起動するため、リポジトリ直下に置かれた

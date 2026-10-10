@@ -1,12 +1,12 @@
 """`scripts/publish.sh` の配布除外リストが開発専用アーティファクトを網羅することを検証する。
 
 配布ツリーへ「除去済みパスを指す設定ファイル」が残ると、実機監査が誤検出を
-起こす。実際 docs/adr/verification-scope-release-gates.md が警告する形で、``tests/`` を除去しつつ
+起こす。docs/adr/verification-scope-release-gates.md が警告する形で、``tests/`` を除去しつつ
 ``testpaths=["tests"]`` と ``fail_under=100`` を持つ ``pyproject.toml`` を
-同梱していたため、配布ツリーでの ``pytest`` が「coverage 0% で FAIL」という
-回帰そっくりの出力を返し、3 ラウンド続けて「テストが消失した」と誤報告された。
+同梱すると、配布ツリーでの ``pytest`` が「coverage 0% で FAIL」という
+回帰そっくりの出力を返し、「テストが消失した」と誤報告される。
 
-散文（ADR・README）は 3 回とも読まれた上で誤検出を止められなかったので、
+散文（ADR・README）だけでは誤検出を止められないので、
 ここでは除外リストの定義そのものを機械的に固定する。
 """
 
@@ -61,11 +61,10 @@ def test_publish_does_not_exclude_paths_that_no_longer_exist() -> None:
 
 # 配布ツリーの pytest を「回帰そっくりに失敗」させうる設定キー。
 #
-# `testpaths` だけを走査していた頃は、``setup.cfg`` に
-# ``[coverage:report] fail_under = 100`` だけを置けば本テストが緑のまま通った
-# （かつ setup.cfg は publish.sh の除外 5 件に含まれない）。docstring が
-# 「両方を守る」と宣言しながら片方しか見ていない状態だったため、宣言側では
-# なく走査側をキーの列挙へ揃える。`addopts` も同じ経路で
+# `testpaths` だけを走査すると、``setup.cfg`` に
+# ``[coverage:report] fail_under = 100`` だけを置けば本テストが緑のまま通る
+# （かつ setup.cfg は publish.sh の除外 5 件に含まれない）。docstring の
+# 「両方を守る」という宣言に合わせ、走査側をキーの列挙へ揃える。`addopts` も同じ経路で
 # ``--cov`` / ``--cov-fail-under`` を持ち込めるため含める。
 _TEST_CONFIG_KEYS = ("testpaths", "fail_under", "addopts")
 

@@ -1,7 +1,7 @@
-"""config_protection / bash_config_protection の symlink 経由バイパス回帰テスト（H-02）。
+"""config_protection / bash_config_protection の symlink 経由バイパス回帰テスト。
 
 `alias -> pyproject.toml` のような symlink 経由の書込みは、raw path の
-basename（``alias``）だけを見る判定をすり抜けていた（v0.9.34 監査 H-02）。
+basename（``alias``）だけを見る判定をすり抜ける。
 両モジュールが `hook_common.resolve_effective_target` で実体 path を解決
 してから basename 判定することを、Edit/Write（`config_protection`）と
 Bash 直接書込み（`bash_config_protection`）の両経路で確認する。
@@ -67,7 +67,7 @@ class TestConfigProtectionSymlink:
     def test_still_blocks_direct_protected_path_without_symlink(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """symlink を介さない直接 path 指定は従来どおり deny する（回帰防止）。"""
+        """symlink を介さない直接 path 指定は deny する（回帰防止）。"""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(
             config_protection,
@@ -121,7 +121,7 @@ class TestBashConfigProtectionSymlink:
         assert bash_config_protection.find_protected_write("printf x > alias-safe") is None
 
     def test_symlink_target_outside_repo_root_is_allowed(self, tmp_path: Path) -> None:
-        """A-06 の契約を維持: 解決後 target がリポジトリ外なら allow。"""
+        """repo スコープの契約を維持: 解決後 target がリポジトリ外なら allow。"""
         outside_dir = tmp_path.parent / "outside-repo-root-fixture"
         outside_dir.mkdir(exist_ok=True)
         outside_target = outside_dir / ".ruff.toml"

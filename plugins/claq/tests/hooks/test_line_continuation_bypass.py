@@ -1,16 +1,16 @@
 """行継続（``\\`` + 改行）による保護フック一斉バイパスの回帰テスト。
 
-2026-09-07 の定義・フック監査で実測した CRITICAL。シェルは ``\\`` と改行の
+シェルは ``\\`` と改行の
 **両方**を消して行を連結するが、`_strip_line_comments` / `_replace_unquoted_newlines`
-はエスケープ済みの 1 文字をそのまま出力するため両方が残っていた。残ったまま
+はエスケープ済みの 1 文字をそのまま出力するため両方が残る。残ったまま
 ``shlex(posix=True)`` へ渡すと、whitespace 状態の ``\\`` が escape 状態へ遷移して
 改行を**次トークンの先頭文字**として吸収する。結果、継続行が 0 桁目から始まる
 ときにその先頭語が丸ごと別トークンへ化け、Bash 系保護フック 4 種が同時に
-素通りしていた（実測 exit 0）。
+素通りする。
 
-**「継続行が 0 桁目から始まるか」だけで保護の有無が反転していた**点が、この欠陥を
-敵対的にも偶発的にも踏みやすくしている。インデントされた継続行では ``\\n`` が
-単独トークンとして切れるため検出は維持されていた（下の対照を参照）。
+**「継続行が 0 桁目から始まるか」だけで保護の有無が反転する**点が、この欠陥を
+敵対的にも偶発的にも踏みやすくする。インデントされた継続行では ``\\n`` が
+単独トークンとして切れるため検出される（下の対照を参照）。
 
 `_detect_git_commit` の生文字列フォールバックも作動しない — ``shlex`` は最後まで
 解析でき ``parsed_cleanly=True`` になり、payload も正しい JSON だからである。
@@ -92,9 +92,9 @@ def test_line_continuation_does_not_bypass_protection(
 def test_git_line_continuation_is_still_detected_as_commit() -> None:
     """``git \\`` + 改行 + ``commit`` が commit として認識されること。
 
-    旧実装ではトークンが ``['git', '\\ncommit', ...]`` になり
+    行継続を除去しないとトークンが ``['git', '\\ncommit', ...]`` になり
     `_find_git_commit_args_in_segment` の ``tok == "commit"`` に一致せず、
-    staged ファイルの lint・secret スキャンが 1 件も走らないまま通っていた。
+    staged ファイルの lint・secret スキャンが 1 件も走らないまま通る。
     """
     from claq.hooks.pre_bash_commit_quality import _detect_git_commit
 
@@ -149,9 +149,9 @@ _GIT_GLOBAL_OPTION_CASES = [
 def test_git_global_options_do_not_hide_index_mutation(command: str, label: str) -> None:
     """値を別トークンに取るグローバルオプションで mutation ガードが外れないこと。
 
-    旧実装は git トークン直後の**最初の非 ``-`` トークン**でサブコマンドを決めて
-    いたため、その**値**（``.`` / ``a=b`` / ``.git``）がサブコマンドと読まれて
-    `add` を見失い、未検査の内容がコミットされる経路が開いていた（実測 exit 0）。
+    git トークン直後の**最初の非 ``-`` トークン**でサブコマンドを決めると、
+    その**値**（``.`` / ``a=b`` / ``.git``）がサブコマンドと読まれて
+    `add` を見失い、未検査の内容がコミットされる経路が開く。
     """
     from claq.hooks.hook_common import tokenize
     from claq.hooks.pre_bash_commit_quality import _segment_mutates_worktree_or_index
@@ -184,10 +184,10 @@ def test_oversized_command_is_blocked_instead_of_timing_out() -> None:
     （2026-09-07・darwin）では 24,000 トークン（96KB = `MAX_STDIN_BYTES` の
     9.2%）で 15.23 秒かかり hooks.json の timeout（15秒）を超えた。host に
     kill された hook は exit code を返さないため、これは **silent fail-open =
-    保護の完全なバイパス**だった（`pre_bash_commit_quality` も同じ入力で
-    12.39 秒 / timeout 30 秒と同じ軌道にあった）。
+    保護の完全なバイパス**になる（`pre_bash_commit_quality` も同じ入力で
+    12.39 秒 / timeout 30 秒と同じ軌道にある）。
 
-    修正後は走査前に予算で弾くため、同じ入力が 0.1 秒未満で exit 2 になる。
+    走査前に予算で弾くため、同じ入力が 0.1 秒未満で exit 2 になる。
     """
     import time
 
@@ -201,7 +201,7 @@ def test_oversized_command_is_blocked_instead_of_timing_out() -> None:
 
 
 def test_command_at_token_budget_is_still_inspected() -> None:
-    """予算内のコマンドは従来どおり中身で判定されること（予算が過剰に効かない）。"""
+    """予算内のコマンドは中身で判定されること（予算が過剰に効かない）。"""
     from claq.hooks.hook_common import MAX_COMMAND_TOKENS, command_exceeds_scan_budget
 
     within = "git status " * 100
@@ -257,8 +257,8 @@ def test_token_budget_covers_the_sh_c_recursion_boundary() -> None:
     予算検査を entry loop（`main()`）だけに置くと、外側が数トークンしか無い
     ネスト payload は通過し、再帰先が無予算で走る。実測（2026-09-07）では
     `sh -c '<git×24000 && git commit --no-verify -m x>'` が **16.23 秒**かかり
-    hooks.json の timeout（15秒）を超えていた — 修正が塞いだはずの silent
-    fail-open がネスト経由でそのまま残っていた。1 段の `sh -c` は docs/adr/shell-analysis-boundary.md が
+    hooks.json の timeout（15秒）を超える — entry loop で塞いだ silent
+    fail-open がネスト経由でそのまま残る。1 段の `sh -c` は docs/adr/shell-analysis-boundary.md が
     対応範囲と明記した経路である。
     """
     import time
@@ -270,7 +270,7 @@ def test_token_budget_covers_the_sh_c_recursion_boundary() -> None:
     assert _run_hook("block_no_verify", f"sh -c '{inner}'") == 2
     assert time.perf_counter() - started < 5.0, "再帰先が無予算で走査へ落ちている"
 
-    # 予算内のネストは従来どおり中身で判定される（予算が過剰に効かない）。
+    # 予算内のネストは中身で判定される（予算が過剰に効かない）。
     assert _run_hook("block_no_verify", "sh -c 'git commit --no-verify -m x'") == 2
     assert _run_hook("block_no_verify", "sh -c 'git commit -m x'") == 0
 
@@ -286,7 +286,7 @@ def test_emit_block_output_keeps_deny_when_output_fails(failure: Exception) -> N
     では **exit 1 = non-blocking error ＝ ツールは実行される** — deny が黙って
     allow へ反転する。現実的な誘因は host がパイプを閉じたときの
     BrokenPipeError で、host の timeout と同時に起きるため最も守りたい局面で
-    ちょうど外れていた。
+    ちょうど外れる。
     """
     from unittest import mock
 

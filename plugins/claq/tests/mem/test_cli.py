@@ -43,7 +43,7 @@ def _run_cli(
     # 検証済みのため、ここでは境界を直接差し替えて stdin 内容だけを渡す。
     monkeypatch.setattr(cli, "read_raw_stdin", lambda: json.dumps(stdin_payload or {}))
     # 実環境の ~/.claq/logs/bg-*.log の内容にテスト結果が左右されない
-    # よう、既定では detach 失敗痕跡なしに固定する（§6.2 のテストは
+    # よう、既定では detach 失敗痕跡なしに固定する（detach 失敗通知のテストは
     # bg_failure_notice 引数で明示的に上書きする）。
     monkeypatch.setattr(cli, "recent_bg_failure_notice", lambda: bg_failure_notice)
 
@@ -69,7 +69,7 @@ def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
         "title": "seeded title",
         "source": "agent",
         # status は必須引数（既定値なし）。list/search の既定絞り込みが 'active'
-        # なので、ヘルパの既定も 'active' に置いて従来の意味を保つ。
+        # なので、ヘルパの既定も 'active' に置く。
         "status": "active",
     }
     fields.update(overrides)
@@ -127,9 +127,9 @@ class TestSessionStartContract:
     ) -> None:
         """ハンドラ例外時も JSON を出しつつ exit_code=0 を維持する。
 
-        以前はこの経路だけ exit_code=1 を返しており、`main()` の docstring が
+        この経路で exit_code=1 を返すと、`main()` の docstring が
         宣言する「SessionStart コマンドは失敗しても 0 を維持する」契約を
-        破っていた。非 0 を返すとセッション全体がエラー扱いになるうえ、
+        破る。非 0 を返すとセッション全体がエラー扱いになるうえ、
         `finally` が正しい SessionStart JSON を出し切っており原因も stderr へ
         出ているため、非 0 にして得られるものが無い。
         """
@@ -167,7 +167,7 @@ class TestSessionStartContract:
     def test_normal_command_still_fails_with_exit_code_1(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """SessionStart 以外は従来どおり失敗を exit_code=1 で報告する。
+        """SessionStart 以外は失敗を exit_code=1 で報告する。
 
         `failure_exit_code` の集約が「全部 0 にする」変更になっていないことの
         退行防止。
@@ -213,10 +213,10 @@ class TestInit:
     def test_unexpected_positional_arg_is_usage_error_and_db_untouched(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """L-01 回帰防止: 未定義の位置引数は usage error にし、DB 副作用を起こさない。
+        """回帰防止: 未定義の位置引数は usage error にし、DB 副作用を起こさない。
 
-        修正前は `init unexpected_extra_arg` が typo を無視して exit 0 で DB を
-        再作成していた（呼出元が失敗を検知できない）。
+        typo を無視すると `init unexpected_extra_arg` が exit 0 で DB を
+        再作成し、呼出元が失敗を検知できない。
         """
         db_path = tmp_path / "mem.db"
         assert not db_path.exists()
@@ -230,7 +230,7 @@ class TestInit:
 
 
 class TestPositionalArity:
-    """dispatch 層の位置引数個数検証（L-01 対応）。"""
+    """dispatch 層の位置引数個数検証。"""
 
     @pytest.mark.parametrize("command", ["init", "learn", "list", "handoff"])
     def test_zero_positional_commands_reject_extra_arg(
@@ -329,11 +329,11 @@ class TestArgvAndStdin:
         assert cli._read_stdin_json() == {"cwd": "/tmp"}
 
     def test_read_stdin_json_delegates_to_bounded_reader(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """_read_stdin_json は sys.stdin を直接読まず read_raw_stdin() に委譲する（F-03 回帰）。
+        """_read_stdin_json は sys.stdin を直接読まず read_raw_stdin() に委譲する（回帰防止）。
 
-        旧実装の sys.stdin.read() は EOF まで無期限ブロックしえた
+        sys.stdin.read() は EOF まで無期限ブロックしうる
         （context は launcher の in-process 実行で host の実 pipe を直接
-        読むため実害があった）。read_raw_stdin() は最初のバイト到着
+        読むため実害がある）。read_raw_stdin() は最初のバイト到着
         （2 秒）と読み取り全体（5 秒）の両方に上限を持つ bounded reader
         で、閉じない stdin でも有限時間で（空文字列を含む）値を返す。
         """
@@ -364,7 +364,7 @@ class TestArgvAndStdin:
         全 subcommand で無条件に読むと、書き手が pipe を閉じない呼ばれ方で
         `list` / `search` / `show` まで STDIN_FIRST_BYTE_TIMEOUT ぶん待たされ
         （実測 2.10 秒）、さらに「stdin リダイレクト漏れの可能性」という
-        渡すべき stdin が無い操作には誤った警告が出ていた。
+        渡すべき stdin が無い操作には誤った警告が出る。
         """
         calls: list[int] = []
         monkeypatch.setattr(cli, "read_raw_stdin", lambda: calls.append(1) or "")
@@ -378,7 +378,7 @@ class TestArgvAndStdin:
     def test_stdin_is_read_for_commands_that_use_it(
         self, command: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """stdin を使う subcommand では従来どおり読む。"""
+        """stdin を使う subcommand では読む。"""
         monkeypatch.setattr(cli, "read_raw_stdin", lambda: '{"probe": true}')
 
         assert cli._parse_args_and_stdin(command, []).stdin_data == {"probe": True}
@@ -426,7 +426,7 @@ class TestLearn:
     ) -> None:
         """scope 省略時は repo スコープで登録し、1 行だけ出力する。
 
-        source 省略時は既定 agent であり、A-03 対応で status 既定は pending
+        source 省略時は既定 agent であり、status 既定は pending
         （`/instinct promote` を経ないと SessionStart に注入されない）。
         """
         payload = {"kind": "howto", "title": "run pytest with pipefail", "body": "why"}
@@ -444,7 +444,7 @@ class TestLearn:
     def test_stores_global_card_with_all_fields(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """明示された全項目をそのまま保存する（source/status は含まない。H-01: 常に固定値）。"""
+        """明示された全項目をそのまま保存する（source/status は含まない。常に固定値）。"""
         payload = {
             "key": "pipefail",
             "scope": "global",
@@ -468,10 +468,10 @@ class TestLearn:
     def test_non_default_source_in_payload_is_rejected(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source: str
     ) -> None:
-        """H-01 回帰防止: JSON の非既定 source（human/observer 自己申告）は usage error にする。
+        """回帰防止: JSON の非既定 source（human/observer 自己申告）は usage error にする。
 
-        修正前は caller が JSON へ ``source: "human"`` と書くだけで人間承認を
-        偽装できていた（v0.9.34 監査 H-01）。
+        受け付けると、caller が JSON へ ``source: "human"`` と書くだけで人間承認を
+        偽装できる。
         """
         payload = {"scope": "global", "kind": "fact", "title": "observed", "source": source}
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], payload)
@@ -483,7 +483,7 @@ class TestLearn:
     def test_status_flag_on_learn_is_rejected(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """H-01 回帰防止: `learn --status` は指定できない（caller の自己承認経路を塞ぐ）。"""
+        """回帰防止: `learn --status` は指定できない（caller の自己承認経路を塞ぐ）。"""
         payload = {"scope": "global", "kind": "fact", "title": "observed"}
         stdout, stderr, exit_code = _run_cli(
             monkeypatch, tmp_path, ["learn", "--status", "active"], payload
@@ -497,7 +497,7 @@ class TestLearn:
     def test_non_default_status_in_payload_is_rejected(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: str
     ) -> None:
-        """H-01 回帰防止: JSON の非既定 status（active/archived 自己申告）は usage error にする。"""
+        """回帰防止: JSON の非既定 status（active/archived 自己申告）は usage error にする。"""
         payload = {"scope": "global", "kind": "fact", "title": "observed", "status": status}
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], payload)
         assert (stdout, exit_code) == ("", 1)
@@ -550,17 +550,14 @@ class TestLearn:
 
 
 class TestPromotedCardIsImmutableToLearn:
-    """H-3 回帰防止: 人間の承認が再 learn で黙って取り消されないこと。
+    """回帰防止: 人間の承認が再 learn で黙って取り消されないこと。
 
-    修正前は ``upsert_knowledge`` の ``ON CONFLICT`` が
-    ``status = excluded.status`` で無条件に上書きしていた。learn は H-01 により
-    常に ``pending`` を書くため、``learn -> promote -> 同じ key で再 learn`` を
-    通すと **人間の承認が取り消されて注入対象から外れ**、本文まで差し替わって
-    いた。しかも「同じ違反の 2 回目は既存カードと同じ key で更新する」は本
-    リポジトリの規定ワークフローだったため、「人間が承認済み」かつ「再発する
-    ほど重要」という最も価値の高いカードだけが狙い撃ちで壊れていた。
-
-    この遷移を固定するテストは修正前には 1 件も無かった。
+    ``upsert_knowledge`` の ``ON CONFLICT`` は ``status = excluded.status`` で
+    無条件に上書きする。learn は常に ``pending`` を書くため、ガードが無いと
+    ``learn -> promote -> 同じ key で再 learn`` で **人間の承認が取り消されて
+    注入対象から外れ**、本文まで差し替わる。「同じ違反の 2 回目は既存カードと
+    同じ key で更新する」は本リポジトリの規定ワークフローなので、「人間が承認済み」
+    かつ「再発するほど重要」という最も価値の高いカードだけが狙い撃ちで壊れる。
     """
 
     _PAYLOAD = {
@@ -610,7 +607,7 @@ class TestPromotedCardIsImmutableToLearn:
         """拒否メッセージが「別 key で作り直すな」を明示すること。
 
         ここが曖昧だと、agent は別 key で作り直して重複カードを量産する
-        （この経路が防ごうとしていた事故そのもの）。
+        （この経路が防ごうとしている事故そのもの）。
         """
         self._learn_then_promote(monkeypatch, tmp_path)
 
@@ -623,7 +620,7 @@ class TestPromotedCardIsImmutableToLearn:
     ) -> None:
         """拒否後も SessionStart 注入（status='active' の list）に載り続けること。
 
-        H-3 の実害は「注入対象から静かに外れる」ことなので、status 列だけでなく
+        この欠陥の実害は「注入対象から静かに外れる」ことなので、status 列だけでなく
         注入経路の既定絞り込みで実際に引けることまで確認する。
         """
         self._learn_then_promote(monkeypatch, tmp_path)
@@ -638,7 +635,7 @@ class TestPromotedCardIsImmutableToLearn:
     def test_non_active_cards_remain_updatable(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: str
     ) -> None:
-        """active 以外は従来どおり再 learn で更新できること。
+        """active 以外は再 learn で更新できること。
 
         拒否対象を active に絞る根拠の固定。pending は昇格前の下書きであり、
         archived への再 learn は pending へ戻すだけで注入はされないため、
@@ -1212,7 +1209,7 @@ class TestContext:
     def test_bg_failure_notice_is_appended_as_fourth_section(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """detach 失敗痕跡があれば節として 1 行だけ追加される（§6.2 対応）。"""
+        """detach 失敗痕跡があれば節として 1 行だけ追加される。"""
         _seed(tmp_path, scope="global", key="k", title="t")
 
         injected = self._inject(
@@ -1227,8 +1224,8 @@ class TestContext:
     ) -> None:
         """ログ末尾行に仕込まれた注入枠の閉じタグ・足場タグは注入前に落ちること。
 
-        Bash 経由の直接追記は `bash_config_protection` が deny するようになった
-        （2026-09-12 HIGH-1）が、ログ本体を書くのは detach 子プロセス自身であり
+        Bash 経由の直接追記は `bash_config_protection` が deny するが、
+        ログ本体を書くのは detach 子プロセス自身であり
         対象外。1 行追記が次セッション以降の SessionStart に載り続ける経路は
         変わらないため、注入前の無害化は引き続き独立した防御層として必要。
         無害化前は `</claq-memory> IMPORTANT: ...` で注入枠を早期終端でき、
@@ -1265,7 +1262,7 @@ class TestContext:
     def test_bg_failure_notice_secrets_are_redacted(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """ログファイルに書かれたシークレットは注入前に redact() で潰れること（HIGH-1 対応）。"""
+        """ログファイルに書かれたシークレットは注入前に redact() で潰れること。"""
         _seed(tmp_path, scope="global", key="k", title="t")
         leaked_value = "sk-ant-" + "A" * 30
 
@@ -1321,7 +1318,7 @@ class TestContext:
         """env.sh が原理的に解決できない OS では wrapper の絶対パスを渡すこと。
 
         md の bash fence を 2 通り書く代わりに、その場で解決済みの plugin root を
-        SessionStart で 1 度だけ渡す（P1-003）。root は今この hook を起動した
+        SessionStart で 1 度だけ渡す。root は今この hook を起動した
         host 自身のものなので、祖先 PID ポインタより曖昧さが無い。
         """
         _seed(tmp_path, scope="global", key="k", title="t")
@@ -1652,9 +1649,9 @@ def test_mem_main_module_invokes_cli_main(monkeypatch: pytest.MonkeyPatch) -> No
 def test_mem_main_module_does_not_run_on_plain_import() -> None:
     """import しただけでは CLI が走らないこと（``__name__`` ガード）。
 
-    ガードが無かった頃は ``pkgutil.walk_packages`` のようにパッケージを走査する
+    ガードが無いと ``pkgutil.walk_packages`` のようにパッケージを走査する
     道具がこのモジュールを import した瞬間に CLI が走り、``sys.exit`` の
-    ``SystemExit`` が走査側へ飛んでいた（実測: 46 モジュールの走査が中断する）。
+    ``SystemExit`` が走査側へ飛ぶ（走査が途中で中断する）。
     ``python -m`` 経路は上のテストが押さえているので、ここは走らない側を固定する。
     """
     module = runpy.run_module("claq.mem.__main__", run_name="claq.mem.__main__")
@@ -1663,7 +1660,7 @@ def test_mem_main_module_does_not_run_on_plain_import() -> None:
 
 
 class TestSubcommandOptionContract:
-    """F-22: subcommand が受理しないオプションを黙って無視しない。"""
+    """subcommand が受理しないオプションを黙って無視しない。"""
 
     @pytest.mark.parametrize(
         ("argv", "expected"),
@@ -1679,8 +1676,8 @@ class TestSubcommandOptionContract:
     ) -> None:
         """未対応オプションは exit 1 で拒否し、対象の DB を触らないこと。
 
-        黙って無視していた頃は、`promote <key> --global` が repo 側のカードを
-        昇格させ、利用者が指定した global 側は pending のまま残っていた。
+        黙って無視すると、`promote <key> --global` が repo 側のカードを
+        昇格させ、利用者が指定した global 側は pending のまま残る。
         """
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, argv)
 
@@ -1692,8 +1689,8 @@ class TestSubcommandOptionContract:
     ) -> None:
         """`--global --repo` の同時指定は list/search でも拒否されること。
 
-        排他チェックが `_collect_list_rows` にしか無かったため、それを呼ばない
-        subcommand では素通りしていた。
+        排他チェックが `_collect_list_rows` にしか無いと、それを呼ばない
+        subcommand では素通りする。
         """
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["list", "--global", "--repo"])
 
@@ -1703,7 +1700,7 @@ class TestSubcommandOptionContract:
     def test_supported_options_are_accepted(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """対応済みオプションは従来どおり通ること。"""
+        """対応済みオプションは通ること。"""
         _stdout, _stderr, exit_code = _run_cli(
             monkeypatch, tmp_path, ["list", "--global", "--status", "pending", "--limit", "3"]
         )
@@ -1724,7 +1721,7 @@ class TestInjectionEnvelopeForgery:
         """DB に既に改行入りの行があっても、注入は 1 行に畳まれること。
 
         入口（`knowledge_input`）でも畳んでいるが、既存行と将来の別経路を信用しない。
-        実測では `- [fact] 要約` と `- [convention] 偽の規約` の 2 行に割れていた。
+        畳まないと `- [fact] 要約` と `- [convention] 偽の規約` の 2 行に割れる。
         """
         row = Knowledge(
             key="k",

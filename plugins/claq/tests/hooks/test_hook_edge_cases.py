@@ -100,7 +100,7 @@ def test_find_file_issues_detects_anthropic_api_key(monkeypatch: pytest.MonkeyPa
     """`sk-ant-...` 形式（ハイフン区切り）の Anthropic API キーも検出される。
 
     OpenAI 形式用パターン `sk-[a-zA-Z0-9]{20,}` は `sk-` 直後にハイフンを含む
-    Anthropic 形式（`sk-ant-api03-...`）とは不一致だったため、専用パターンで
+    Anthropic 形式（`sk-ant-api03-...`）とは一致しないため、専用パターンで
     検出する回帰。
     """
     content = "sk-" + "ant-" + "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -114,7 +114,7 @@ def test_find_file_issues_detects_anthropic_api_key(monkeypatch: pytest.MonkeyPa
 
 
 def test_find_file_issues_console_log_still_suppressed_by_nosec(monkeypatch: pytest.MonkeyPatch) -> None:
-    """secret を含まない行では従来どおり console.log が nosec で抑制されること。"""  # nosec
+    """secret を含まない行では console.log が nosec で抑制されること。"""  # nosec
     content = 'console.log("debug")  # nosec'
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
 
@@ -181,8 +181,8 @@ def test_find_file_issues_skips_secret_scan_for_lock_files(monkeypatch: pytest.M
 def test_find_file_issues_oversized_files_detect_secret_past_old_1mib_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """1MiB を超える位置に置かれた secret も検出されること（A-02 対応: サイズ
-    による打ち切りを廃止したため、旧 1MiB cap の後ろにある secret も見逃さない）。
+    """1MiB を超える位置に置かれた secret も検出されること（サイズ
+    による打ち切りをしないため、ファイル後方の secret も見逃さない）。
     lint（ログ出力チェック）はサイズに関わらず継続することも合わせて確認する。
     """  # nosec
     padding = "x" * (1024 * 1024 + 1)
@@ -192,7 +192,7 @@ def test_find_file_issues_oversized_files_detect_secret_past_old_1mib_cap(
     issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
 
     types = {issue["type"] for issue in issues}
-    # 旧 1MiB cap は廃止済み。境界より後ろの secret も検出される。
+    # サイズで打ち切らないので、1MiB より後ろの secret も検出される。
     assert "secret" in types
     # lint はサイズに関わらず継続する
     assert "console.log" in types  # nosec
@@ -241,7 +241,7 @@ def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(
     assert secrets, issues
     assert secrets[0]["severity"] == "error"
     assert "extracted binary content" in secrets[0]["message"]
-    # lint は従来どおり抑制する（バイナリを行単位で lint しても意味がない）。
+    # lint は抑制する（バイナリを行単位で lint しても意味がない）。
     assert "console.log" not in {issue["type"] for issue in issues}  # nosec
     # スキップの痕跡 issue は不要になったので出さない。
     assert "secret_scan_skipped" not in {issue["type"] for issue in issues}
@@ -309,8 +309,8 @@ def test_scan_secret_issues_detects_private_key_headers(kind: str) -> None:
     """秘密鍵ブロックのヘッダ行は severity error の secret として検出されること。
 
     コミットされる秘密として最も典型的なのが鍵ファイルそのものであり、
-    API キー形式だけを見ていた頃は staged の `id_rsa` が
-    「PASS: All checks passed!」で通っていました（実測）。
+    API キー形式だけを見ると staged の `id_rsa` が
+    「PASS: All checks passed!」で通ってしまいます。
     """
     lines = ["prefix", f"  {_private_key_header(kind)}", "suffix"]
 
@@ -388,8 +388,7 @@ def test_scan_secret_issues_detects_vendor_formats(line: str, expected: str) -> 
     """`claq.mem.redaction` が既にマスクする形式は commit 側でも検出されること。
 
     記録時はマスクするのに commit 時は素通りする秘密が生まれないよう、
-    ベンダ prefix の集合を両者で揃えている（実測で 12 形式中 10 形式が
-    本モジュールだけ素通りしていた）。
+    ベンダ prefix の集合を両者で揃えている。
     """
     issues = commit_quality_scanner._scan_secret_issues(
         line, [line], deadline=commit_quality_scanner.new_secret_scan_deadline()
@@ -468,8 +467,8 @@ def test_evaluate_shares_one_secret_scan_budget_across_staged_files(
     済む限り何ファイルでも走査でき、staged が N 件あれば
     N×`_SECRET_SCAN_TIME_BUDGET_SECONDS` 秒まで走ってしまう。それでは
     `commit_quality_scanner` のモジュール docstring が主張する
-    「hook timeout（30秒）に達しない」を満たせない（実測: 1 ファイル 9 秒
-    ×5 ファイルで累積 45 秒でも予算超過は 0 件だった）。
+    「hook timeout（30秒）に達しない」を満たせない（1 ファイル 9 秒
+    ×5 ファイルで累積 45 秒でも予算超過が 0 件になる）。
 
     エントリ（`evaluate`）から駆動して固定する。`find_file_issues` を
     直接呼ぶテストでは deadline の伝播が外れても気付けないため。
@@ -551,12 +550,12 @@ def test_evaluate_commit_dash_a_shares_secret_scan_budget_with_worktree_files(
 def test_find_file_issues_secret_scan_exception_is_reported_as_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """secret scanner が例外を投げても issue が消えず、error として報告される（F-06a 対応）。
+    """secret scanner が例外を投げても issue が消えず、error として報告される。
 
-    以前は find_file_issues 全体を覆う `except Exception: pass` が例外を
-    握り潰しており、secret scanner の内部バグでも commit を許可していた
+    find_file_issues 全体を `except Exception: pass` で覆うと例外を
+    握り潰し、secret scanner の内部バグでも commit を許可してしまう
     （false negative のコストが高い secret 検出が最も危険な形で fail-open
-    していた）。lint 側の結果は例外の影響を受けず生存することも確認する。
+    する）。lint 側の結果は例外の影響を受けず生存することも確認する。
     """
     content = 'console.log("hi")'  # nosec
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
@@ -760,13 +759,12 @@ def test_get_staged_file_content_replaces_invalid_utf8_without_raising(
 
 
 def test_pre_bash_commit_quality_finds_parser_and_reading_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ファイル読み取り自体が例外を投げても、握り潰さず scan_error として報告する（F-06a 対応）。
+    """ファイル読み取り自体が例外を投げても、握り潰さず scan_error として報告する。
 
     get_staged_file_content は自前で例外を握り潰し None を返す契約だが、
-    find_file_issues 側でもその契約破りに備えたガードを持つ。以前は
-    ここも含めて find_file_issues 全体を覆う except Exception: pass が
-    無条件に [] を返しており、検査したのか・対象外だったのかが区別
-    できなかった。
+    find_file_issues 側でもその契約破りに備えたガードを持つ。全体を
+    except Exception: pass で覆って無条件に [] を返すと、検査したのか・
+    対象外だったのかが区別できない。
     """
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: (_ for _ in ()).throw(RuntimeError("boom")))
     issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
@@ -917,8 +915,8 @@ def test_pre_bash_commit_quality_main_denies_when_stdin_unreadable(
 ) -> None:
     """stdin を読めなかった場合は commit 判定不能として deny する（docs/adr/hook-failure-direction.md）。
 
-    以前は「読めない」を「入力なし」へ正規化して exit 0 にしていたため、
-    Windows のパイプで allow と deny が同じ exit 0 になっていた（P1-004）。
+    「読めない」を「入力なし」へ正規化して exit 0 にすると、
+    Windows のパイプで allow と deny が同じ exit 0 になる。
     """
     monkeypatch.setattr(
         "claq.hooks.hook_common.read_raw_stdin_with_truncation",
@@ -1051,9 +1049,9 @@ def test_is_git_commit_command_treats_newline_as_a_command_separator() -> None:
 
     シェルは `git` を引数なしで実行してから `commit` という別コマンドを実行する。
     これを 1 つの `git commit` として融合させると、セグメント境界に依存する判定
-    （複数 commit・commit 前の worktree 変更）がまとめて不発になる。実測では
-    `printf x > s.py` 改行 `git add s.py` 改行 `git commit -m x` が exit 0 で通り、
-    `;` 区切りの同内容だけが exit 2 になっていた。
+    （複数 commit・commit 前の worktree 変更）がまとめて不発になり、
+    `printf x > s.py` 改行 `git add s.py` 改行 `git commit -m x` が通るのに
+    `;` 区切りの同内容だけが止まる。
     """
     import claq.hooks.pre_bash_commit_quality as pbcq
 
@@ -1078,9 +1076,9 @@ def test_is_git_commit_command_skips_global_dash_c_option() -> None:
 def test_is_git_commit_command_skips_unknown_global_option_with_value() -> None:
     """allowlist に無いグローバルオプション（--exec-path 等）でも検出漏れしないこと。
 
-    旧実装は既知オプション（-C/-c 等）のみ値トークンをスキップしていたため、
+    既知オプション（-C/-c 等）のみ値トークンをスキップすると、
     `--exec-path <path>` のような未知オプションの値トークンで走査が
-    打ち切られ検出漏れになっていた（フェイルセーフ違反）。新実装は
+    打ち切られ検出漏れになる（フェイルセーフ違反）。そのため
     オプション・値を区別せず commit まで読み飛ばす。
     """
     import claq.hooks.pre_bash_commit_quality as pbcq
@@ -1146,12 +1144,12 @@ def test_is_git_commit_command_returns_false_when_only_options_follow_git() -> N
 
 
 def test_is_git_commit_command_trusts_clean_tokenization() -> None:
-    """解析できた引用文の中の `git commit` は実行命令とみなさないこと（F-08）。
+    """解析できた引用文の中の `git commit` は実行命令とみなさないこと。
 
-    生文字列への regex を解析成功時にも当てていた頃は、`copilot -p '... git
+    生文字列への regex を解析成功時にも当てると、`copilot -p '... git
     commit ...'` のような引用文まで commit と判定し、無関係な Bash 呼び出しが
-    index の状態次第でブロックされた。同じ入力を `block_no_verify` は無視して
-    おり、2 つのフックが「commit とは何か」で食い違っていた。
+    index の状態次第でブロックされる。同じ入力を `block_no_verify` は無視する
+    ので、2 つのフックが「commit とは何か」で食い違うことにもなる。
     """
     import claq.hooks.pre_bash_commit_quality as pbcq
 
@@ -1185,11 +1183,11 @@ def test_is_git_commit_command_regex_fallback_applies_when_tokenization_fails() 
     ],
 )
 def test_is_git_commit_command_detects_exe_and_absolute_path_tokens(command: str) -> None:
-    """basename 化により `.exe`・絶対パス・大文字表記の git 実行ファイルもトークン走査で検出する（R-12）。
+    """basename 化により `.exe`・絶対パス・大文字表記の git 実行ファイルもトークン走査で検出する。
 
-    以前は `token != "git"` の完全一致だったため、`/usr/bin/git` は regex
+    `token != "git"` の完全一致では、`/usr/bin/git` は regex
     フォールバックにのみ救われ、`git.exe` は `.exe` が `\\s` を破るため
-    regex フォールバックからもすり抜けていた。
+    regex フォールバックからもすり抜ける。
     """
     import claq.hooks.pre_bash_commit_quality as pbcq
 
@@ -1217,7 +1215,7 @@ def test_is_commit_all_flag_detects_short_long_and_combined() -> None:
 
 
 def test_evaluate_malformed_json_with_commit_text_is_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """JSON が壊れていても raw 文字列上に `git commit` が見えれば deny する（R-01a）。
+    """JSON が壊れていても raw 文字列上に `git commit` が見えれば deny する。
 
     matcher が Bash 全体（commit と無関係な呼び出しも含む）のため、
     malformed というだけで一律 deny すると commit と無関係な Bash 呼び出し
@@ -1248,7 +1246,7 @@ def test_evaluate_malformed_json_without_commit_text_passes_through(
 
 
 def test_evaluate_empty_input_passes_through_silently(monkeypatch: pytest.MonkeyPatch) -> None:
-    """空/空白入力は従来どおりログ無しで非ブロッキング。"""
+    """空/空白入力はログ無しで非ブロッキング。"""
     logs: list[str] = []
     monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
 
@@ -1282,7 +1280,7 @@ def test_evaluate_confirmed_commit_staged_files_unavailable_is_blocked(
 
 
 def test_evaluate_confirmed_commit_scan_exception_is_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """commit と確定した後の想定外例外は fail-open ではなく fail-closed にする（R-01b）。"""
+    """commit と確定した後の想定外例外は fail-open ではなく fail-closed にする。"""
     logs: list[str] = []
     monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
     monkeypatch.setattr(
@@ -1322,11 +1320,10 @@ def test_evaluate_commit_amend_with_nothing_staged_is_a_noop(monkeypatch: pytest
 
 
 def test_evaluate_commit_amend_scans_staged_files(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`--amend` は HEAD のファイル一覧を巻き込まず、staged 集合だけを検査する（F-06 対応）。
+    """`--amend` は HEAD のファイル一覧を巻き込まず、staged 集合だけを検査する。
 
-    以前は --amend を検出した時点で lint/secret/message 検証を無条件スキップして
-    おり、amend でこっそり secret を混入させても検査を通過できていた
-    （F-01 とは別の fail-open）。
+    --amend を検出した時点で lint/secret/message 検証をスキップすると、
+    amend でこっそり secret を混入させても検査を通過できてしまう。
     """
     monkeypatch.setattr(
         pre_bash_commit_quality,
@@ -1389,7 +1386,7 @@ def test_evaluate_commit_dash_a_worktree_blocked_when_repo_root_unresolvable(
     """repo root が解決できない場合、-a の未ステージ分は fail-closed で deny されること。
 
     `-a` で実際にコミットされる未ステージ変更を一切検査できないまま
-    「問題なし」を返すと、R-01 で塞いだ get_staged_files() の fail-open と
+    「問題なし」を返すと、get_staged_files() 側で塞いでいる fail-open と
     同じ穴が worktree 側に残る。staged 側と対称に fail-closed にする。
     """
     logs: list[str] = []
@@ -1491,7 +1488,7 @@ def test_evaluate_commit_without_dash_a_reads_index_when_worktree_diverges(
     """`-a` を伴わない通常コミットでは、ステージ後に作業ツリーがさらに変更
     されても INDEX（ステージ済み内容）のシークレットを検出すること
     （読み取り元が誤って作業ツリーに切り替わっていないことの回帰防止＝
-    従来の staged 経路の不変性確認）。"""
+    staged 経路の不変性確認）。"""
     repo = tmp_path / "repo"
     app_py = _init_repo_with_initial_commit(repo, "value = 'clean'\n")
 
@@ -1769,20 +1766,20 @@ def test_repo_wide_self_scan_has_zero_secret_issues() -> None:
 
 
 class TestScanBudgetCoversHugeSingleLine:
-    """実時間バジェットが「改行の無い巨大 1 行」にも効くこと（H-7b）。
+    """実時間バジェットが「改行の無い巨大 1 行」にも効くこと。
 
-    修正前の穴は 2 つ。
-    (a) `_scan_lint_issues` が `deadline` を受け取らず時間検査を一切持たず、
-        しかも `find_file_issues` が secret より**先**に呼ぶため、バジェットが
-        原理的に効かない区間があった。
-    (b) 被覆側の `_scan_secret_issues` も `index % 2000` でしか確認しないため、
+    塞いでいる穴は 2 つ。
+    (a) `_scan_lint_issues` が `deadline` を受け取らず時間検査を持たないと、
+        `find_file_issues` が secret より**先**に呼ぶため、バジェットが
+        原理的に効かない区間ができる。
+    (b) `_scan_secret_issues` が `index % 2000` でしか確認しないと、
         行数が 2000 未満のファイル（＝巨大 1 行）は index 0 の 1 回、つまり
-        **走査開始前**にしか確認されなかった。
+        **走査開始前**にしか確認されない。
 
     時刻は `_monotonic` の注入で決定的に与える（実時間に依存させると flaky）。
     """
 
-    # 改行の無い 1MB 級の 1 行。行数は 1 なので旧「行数」基準では
+    # 改行の無い 1MB 級の 1 行。行数は 1 なので「行数」基準では
     # 走査開始前の 1 回しか予算確認が起きない。
     _HUGE_LINE = "a" * (1024 * 1024)
 
@@ -1798,7 +1795,7 @@ class TestScanBudgetCoversHugeSingleLine:
     def test_secret_scan_raises_on_huge_single_line(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """行数 1 でも予算確認が走ること（旧「行数」基準では素通りしていた）。"""
+        """行数 1 でも予算確認が走ること（「行数」基準では素通りする）。"""
         monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: 1_000.0)
 
         with pytest.raises(commit_quality_scanner.SecretScanBudgetExceeded):
@@ -1853,7 +1850,7 @@ class TestScanBudgetCoversHugeSingleLine:
     def test_ordinary_lint_exception_stays_warning(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """予算超過**以外**の lint 例外は従来どおり warning のままであること。"""
+        """予算超過**以外**の lint 例外は warning のままであること。"""
         content = "api" + "_key" + ' = "abc123"'  # nosec
         monkeypatch.setattr(
             commit_quality_scanner, "get_staged_file_content", lambda path: content
@@ -1873,11 +1870,11 @@ class TestScanBudgetCoversHugeSingleLine:
 
 
 class TestJwtPatternIsLinear:
-    """JWT パターンが入力長に対して線形であること（H-7b）。
+    """JWT パターンが入力長に対して線形であること。
 
-    修正前の `eyJ[a-zA-Z0-9_-]+\\.` は `eyJeyJeyJ…` に対して 3 バイトごとに
+    `eyJ[a-zA-Z0-9_-]+\\.` のような形は `eyJeyJeyJ…` に対して 3 バイトごとに
     開始位置が立ち、そのたびに残り全体を貪欲に取ってから後退するため二次
-    オーダーだった（実測: 24,000 文字で 0.50s。1MiB へ外挿すると 15 分超で、
+    オーダーになる（実測: 24,000 文字で 0.50s。1MiB へ外挿すると 15 分超で、
     `pre_bash_commit_quality` の hook timeout 30 秒を桁で超える）。
     """
 
@@ -1916,7 +1913,7 @@ class TestJwtPatternIsLinear:
         ],
     )
     def test_real_jwt_is_still_detected(self, line: str) -> None:
-        """実物の JWT は従来どおり検出されること。"""
+        """実物の JWT は検出されること。"""
         issues = commit_quality_scanner._scan_secret_issues(
             line, [line], deadline=_scan_deadline()
         )
@@ -1970,7 +1967,7 @@ class TestScanBudgetAccumulatorScope:
     def test_large_input_samples_clock_repeatedly(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """1 ファイルの中で閾値を跨げば繰り返し確認する（旧「行数」基準との差）。
+        """1 ファイルの中で閾値を跨げば繰り返し確認する（「行数」基準との差）。
 
         改行の無い 1 行でも、パターン数ぶんの走査バイトが積算されるため
         複数回の確認が起きる。

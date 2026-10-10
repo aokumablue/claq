@@ -194,9 +194,9 @@ def test_every_repo_hook_entry_launches_the_claq_hook_wrapper() -> None:
     する同名の `.cmd`。PowerShell ホスト向けの明示宣言は次項）を起動し、
     インタプリタ解決はこの wrapper の単一責務」と規定する。ここが見るのは
     `command` 側で、`powershell` 側の起動対象は
-    `TestRepoHooksJsonPowerShellParity` が別途照合する。これまでこの規則を守っていたのは `_repo_hook_argv` の `next(...)`
-    が StopIteration になる副作用だけで、assert もメッセージも無く、
-    `claq-hook` で終わる任意のパスを受理していた。
+    `TestRepoHooksJsonPowerShellParity` が別途照合する。`_repo_hook_argv` の
+    `next(...)` が StopIteration になる副作用だけに頼ると、assert もメッセージも
+    無く、`claq-hook` で終わる任意のパスを受理してしまう。
     """
     repo_root = Path(__file__).resolve().parents[4]
     hooks = json.loads((repo_root / "plugins/claq/hooks/hooks.json").read_text(encoding="utf-8"))
@@ -333,9 +333,9 @@ def test_validate_hooks_requires_hooks_object(
 ) -> None:
     """`hooks` キーがイベント辞書でなければ失敗すること。
 
-    かつては `data.hooks || data` 相当のフォールバックがあり、`hooks` を省いた
-    「裸のイベント辞書」も受理していた。`version` を必須にした時点でこの形は
-    表現不能（`version` がイベント名として検査される）になったため撤去済み。
+    `data.hooks || data` 相当のフォールバックは持たない。`version` が必須なので
+    `hooks` を省いた「裸のイベント辞書」は表現不能（`version` がイベント名として
+    検査される）である。
     """
     hooks_file = tmp_path / "hooks.json"
     document: dict[str, object] = {"version": validate_hooks.REQUIRED_HOOKS_VERSION}
@@ -350,7 +350,7 @@ def test_validate_hooks_requires_hooks_object(
 def test_validate_hooks_rejects_bare_event_map(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """`hooks` ラッパー無しのイベント辞書は受理しないこと。
 
-    JS バリデータ互換のフォールバックを撤去したことの検知器。復活させると
+    `hooks` ラッパー無しを受理するフォールバックが無いことの検知器。足すと
     `$schema` や `version` がイベント名として検査され、診断が意味を失う。
     """
     hooks_file = tmp_path / "hooks.json"
@@ -398,7 +398,7 @@ def test_validate_command_hook_accepts_valid_powershell() -> None:
 
 
 def test_validate_command_hook_without_powershell_key_is_valid() -> None:
-    """`powershell` キーが無い command フックは従来どおり通ること。"""
+    """`powershell` キーが無い command フックは通ること。"""
     assert validate_hooks.validate_hook_entry({"type": "command", "command": "echo ok"}, "label") is False
 
 

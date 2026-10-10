@@ -29,18 +29,18 @@ class TestSettingsDefaults:
         assert s.log_level == "info"
 
     def test_no_warm_settings(self) -> None:
-        """warm 層設定（廃止済み）が存在しないことを確認する。"""
+        """warm 層設定が存在しないことを確認する。"""
         s = Settings()
         assert not hasattr(s, "context_warm_tokens")
         assert not hasattr(s, "context_warm_days")
 
     def test_no_context_max_tokens(self) -> None:
-        """context_max_tokens（死コード化していたため削除済み）が存在しないことを確認する。"""
+        """context_max_tokens が存在しないことを確認する。"""
         s = Settings()
         assert not hasattr(s, "context_max_tokens")
 
     def test_no_sync_or_team_settings(self) -> None:
-        """PostgreSQL チーム同期関連の設定（廃止済み）が存在しないことを確認する。"""
+        """PostgreSQL チーム同期関連の設定が存在しないことを確認する。"""
         s = Settings()
         assert not hasattr(s, "sync")
         assert not hasattr(s, "team")

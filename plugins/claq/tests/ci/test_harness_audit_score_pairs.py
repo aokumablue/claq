@@ -60,11 +60,9 @@ def _write_pyproject(root_dir: Path, body: str) -> None:
 class TestContextAlwaysOnBudget:
     """`context-always-on-budget`（2pts）は description を行ではなく値で測る。
 
-    ``description:`` の行を 1 行だけ数えていた頃は、YAML のブロックスカラーが
+    ``description:`` の行を 1 行だけ数えると、YAML のブロックスカラーが
     2 文字として計上され、実際には数千〜数万文字の常時注入 description でも
-    予算 4,000 を満たしているように見えた。下の fixture がその形を再現する。
-    （本リポジトリ自身にブロックスカラー description は無く、旧算法 3,672 /
-    新算法 3,637 で合否は変わらなかった。穴は実在するが未顕在だった。）
+    予算 4,000 を満たしているように見える。下の fixture がその形を再現する。
     """
 
     def test_short_description_passes(self, tmp_path: Path) -> None:
@@ -76,8 +74,8 @@ class TestContextAlwaysOnBudget:
     def test_block_scalar_description_over_budget_fails(self, tmp_path: Path) -> None:
         """ブロックスカラーで折り返した超過 description は不合格になること。
 
-        旧実装では ``description: >`` の行だけを見て 2 文字と数えたため、この
-        fixture が満点で通っていた（H-8 の実測再現）。
+        ``description: >`` の行だけを見て 2 文字と数えると、この
+        fixture が満点で通ってしまう。
         """
         folded = "\n".join(f"  {'あ' * 80}" for _ in range(60))
         _write_skill(tmp_path, "huge", f"name: huge\ndescription: >\n{folded}")
@@ -106,11 +104,9 @@ class TestContextAlwaysOnBudget:
 def test_real_repo_passes_every_repo_check() -> None:
     """本リポジトリが自身の repo 監査を全項目通過すること。
 
-    これが無かった頃、監査の不合格は ``max_score`` を読むためだけに監査を
-    ``check=True`` で起動していた `tests/test_md_references.py` の 2 件へ
-    ``CalledProcessError`` として現れていた。どちらのテスト名にも不合格の原因を
-    示す語が無く、辿るには監査を手で起動して failing check を探すしかなかった。
-    不合格はここで、**落ちた check の id を名指しして**報告する。
+    監査全体の合否を見るのはこのテストだけである（`max_score` を読むテストは
+    監査の不合格では落ちない）。これが無いと不合格の check が見過ごされるため、
+    ここで**落ちた check の id を名指しして**報告する。
     """
     plugin_root = Path(__file__).resolve().parents[2]
     failing = sorted(check["id"] for check in get_repo_checks(plugin_root) if not check["pass"])
@@ -121,8 +117,8 @@ def test_real_repo_passes_every_repo_check() -> None:
 class TestCoverageGateConfigured:
     """`eval-tests-presence`（2pts）はカバレッジ閾値の有効値を要求する。
 
-    ``"fail_under" in pyproject.toml`` の部分文字列照合だった頃は、ゲートが
-    無効（0）でもコメントアウトでも満点だった。
+    ``"fail_under" in pyproject.toml`` のような部分文字列照合では、ゲートが
+    無効（0）でもコメントアウトでも満点になる。
     """
 
     def test_effective_threshold_passes(self, tmp_path: Path) -> None:
@@ -157,9 +153,8 @@ class TestCoverageGateConfigured:
 class TestSecurityPreflightHook:
     """`security-prompt-hook`（2pts）は実ガードモジュールの起動を要求する。
 
-    エントリの有無だけを見ていた頃は、何もしない ``command: "true"`` でも満点に
-    なった。同ファイルの `_event_has_matching_command` が argv 照合を既に実装して
-    いるのに、セキュリティ側だけ「有無」に留まっていた非対称の解消。
+    エントリの有無だけを見ると、何もしない ``command: "true"`` でも満点に
+    なる。同ファイルの `_event_has_matching_command` と同じく argv で照合する。
     """
 
     def test_real_guard_module_passes(self, tmp_path: Path) -> None:
@@ -235,9 +230,9 @@ class TestSecurityPreflightHook:
 class TestConsumerTestSuiteVendorPruning:
     """`consumer-test-suite`（4pts）はベンダーツリーのテストを数えない。
 
-    `_walk_dir` に枝刈りが無かったため、`node_modules/dep/a.spec.js` を 1 個
-    置いただけのツリーが `has_file_with_extension` 経由で満点を取れた。同じ
-    ``pass`` 式に並ぶ `has_python_tests` は枝刈り済みという非対称だった。
+    `_walk_dir` に枝刈りが無いと、`node_modules/dep/a.spec.js` を 1 個
+    置いただけのツリーが `has_file_with_extension` 経由で満点を取れる。同じ
+    ``pass`` 式に並ぶ `has_python_tests` と同じく枝刈りする。
     """
 
     @pytest.fixture(autouse=True)
@@ -254,7 +249,7 @@ class TestConsumerTestSuiteVendorPruning:
 
     @pytest.mark.parametrize("vendor_dir", ["node_modules", "vendor", ".venv"])
     def test_vendor_only_spec_file_fails(self, tmp_path: Path, vendor_dir: str) -> None:
-        """ベンダーツリーにしかテストが無ければ不合格になること（H-8 の実測再現）。"""
+        """ベンダーツリーにしかテストが無ければ不合格になること。"""
         nested = tmp_path / vendor_dir / "dep"
         nested.mkdir(parents=True)
         (nested / "a.spec.js").write_text("it('x', () => {});\n", encoding="utf-8")

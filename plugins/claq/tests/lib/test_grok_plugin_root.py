@@ -335,15 +335,14 @@ class TestEnsureGrokPluginRootSymlink:
 
 
 class TestFindLatestSurvivesStatRace:
-    """列挙と stat の間で候補が消えても例外を出さないこと（H-19b）。
+    """列挙と stat の間で候補が消えても例外を出さないこと。
 
-    `iterdir()` は try 内だが `candidates.sort(key=lambda p: p.stat().st_mtime)`
-    は try の外にあった。Grok が同時にプラグインを更新して古い
+    stat を try の外で行うと、Grok が同時にプラグインを更新して古い
     `~/.grok/installed-plugins/claq-<hash>` を消すと `FileNotFoundError` が
     `find_latest_installed_claq`（「例外は発生しません」）→
     `_resolve_symlink_target` → `ensure_grok_plugin_root_symlink`
     （「OSError は握りつぶす」）を貫通し、`scripts/grok.sh` が traceback で
-    異常終了していた。
+    異常終了する。
     """
 
     @staticmethod
@@ -385,7 +384,7 @@ class TestFindLatestSurvivesStatRace:
     ) -> None:
         """貫通経路の入口（`ensure_grok_plugin_root_symlink`）でも例外にならないこと。
 
-        `scripts/grok.sh` が呼ぶのはこちら。ここが traceback で落ちていた。
+        `scripts/grok.sh` が呼ぶのはこちら。ここが traceback で落ちてはならない。
         """
         # 実環境の CLAUDE_PLUGIN_ROOT が installed-plugins を指していると
         # `_resolve_symlink_target` が探索前に解決してしまい、判定がぶれる。

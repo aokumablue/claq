@@ -146,7 +146,7 @@ class TestNormalizeRemoteUrl:
 class TestStripCredentials:
     """`_strip_credentials`（remote_url からの credential 除去）の表駆動テスト。
 
-    userinfo（§7-4）に加えて query / fragment（P1-009）も落とすことを固定する。
+    userinfo に加えて query / fragment も落とすことを固定する。
     """
 
     @pytest.mark.parametrize(
@@ -175,7 +175,7 @@ class TestStripCredentials:
                 "file:///srv/git/repo.git",
                 "file:///srv/git/repo.git",
             ),
-            # query / fragment 内の token（P1-009。userinfo 除去だけでは残っていた）
+            # query / fragment 内の token（userinfo 除去だけでは残る）
             (
                 "https://github.com/o/r?access_token=SECRET",
                 "https://github.com/o/r",
@@ -324,8 +324,7 @@ class TestDetectRepoIdentity:
 
     def test_uses_normalized_remote(self, tmp_path: Path) -> None:
         """remote があれば正規化 remote が identity_key になる。remote_url は
-        userinfo（scp 形式の固定ユーザー名 ``git@``）を除去した値になる
-        （§7-4 対応）。"""
+        userinfo（scp 形式の固定ユーザー名 ``git@``）を除去した値になる。"""
         root = _make_repo(tmp_path / "main", remote="git@github.com:aokumablue/claq-dev.git")
         identity = detect_repo_identity(root)
         assert identity.identity_key == "github.com/aokumablue/claq-dev"
@@ -334,7 +333,7 @@ class TestDetectRepoIdentity:
 
     def test_strips_credential_userinfo_from_remote_url(self, tmp_path: Path) -> None:
         """https の `user:token@` credential は identity_key だけでなく
-        remote_url からも除去される（§7-4 対応、監査で確認された実害）。"""
+        remote_url からも除去される。"""
         root = _make_repo(
             tmp_path / "main",
             remote="https://user:ghp_abcdefghijklmnopqrstuvwxyz012345@github.com/o/r.git",
@@ -433,10 +432,10 @@ class TestResolveRepo:
     def test_adding_remote_keeps_repo_id_and_knowledge(self, tmp_path: Path, db: Database) -> None:
         """remote 追加で identity_key が変わっても id を引き継ぎ、知識が到達可能なままであること。
 
-        修正前は remote 無しで登録済みのリポジトリに ``git remote add origin``
-        すると identity_key が repo root パスから ``github.com/o/r`` へ変わり、
-        別リポジトリ扱いで ``-2`` 付きの新 id を採番していた。その結果、旧 id
-        配下の ``scope='repo'`` 知識が全件 SessionStart 注入から静かに消えていた
+        引き継がないと、remote 無しで登録済みのリポジトリに ``git remote add origin``
+        したとき identity_key が repo root パスから ``github.com/o/r`` へ変わり、
+        別リポジトリ扱いで ``-2`` 付きの新 id を採番する。その結果、元の id
+        配下の ``scope='repo'`` 知識が全件 SessionStart 注入から静かに消える
         （DB には残るが到達不能）。
 
         id 一致だけでは不十分なので、知識が実際に引けるところまで確認する。

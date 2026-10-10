@@ -1,7 +1,7 @@
 """Windows のシェル方言（PowerShell / cmd）で書かれたコマンドの検出テスト。
 
 Windows ホストのシェルツールは PowerShell であり、次の 2 点で POSIX 前提の
-解析からずれる（release-verify 2026-09-03 の再レビューで実測）:
+解析からずれる:
 
 1. `\\` はエスケープ記号ではなくパス区切り。`shlex(posix=True)` は
    `rm .\\.eslintrc` を `['rm', '..eslintrc']` に潰し、保護対象 basename も
@@ -28,7 +28,7 @@ from claq.hooks.hook_common import command_dialect_variants
 
 @pytest.fixture(autouse=True)
 def _fixed_repo_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """repo スコープ判定（A-06）を tmp_path 配下に固定する。
+    """repo スコープ判定を tmp_path 配下に固定する。
 
     `find_protected_write` は保護対象ヒット後にリポジトリルート配下かどうかを
     見る。`resolve_repo_root` は `lru_cache` 付きで、実行環境の git 状態や
@@ -128,7 +128,7 @@ class TestWindowsPathSeparators:
         """残る誤検出を characterization test として固定する。
 
         ``\\`` の直後がパス構成文字なら Windows 読みを試すので、POSIX で
-        「エスケープされた特殊文字」だったものが区切りに化ける場合がある。
+        「エスケープされた特殊文字」であるものが区切りに化ける場合がある。
         docs/adr/shell-analysis-boundary.md が受容する側（誤検出）の誤りであり、意図した挙動として固定する。
         ここが赤くなったら、変換規則を変えた影響が誤検出の範囲に及んでいる。
         """
@@ -235,7 +235,7 @@ class TestCommitQualityDialect:
         assert detected[1] == ["-m", "x"]
 
     def test_plain_commit_is_recognized(self) -> None:
-        """通常の POSIX 起動も従来どおり検出すること。"""
+        """通常の POSIX 起動も検出すること。"""
         assert pre_bash_commit_quality._detect_git_commit("git commit -m x") is not None
 
     def test_non_commit_is_not_recognized(self) -> None:

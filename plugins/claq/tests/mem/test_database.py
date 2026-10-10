@@ -43,7 +43,7 @@ def _knowledge(key: str = "use-python3", **overrides: object) -> Knowledge:
         "title": "Python は python3 コマンドで実行する",
         "source": "human",
         # status は必須引数（既定値なし）。DB 層のテストは注入対象の挙動を見る
-        # ものが多いため、ヘルパの既定は 'active' に置いて従来の意味を保つ。
+        # ものが多いため、ヘルパの既定は 'active' に置く。
         "status": "active",
         "created_at": _TS,
         "updated_at": _TS,
@@ -103,7 +103,7 @@ class TestSchema:
     def test_status_column_defaults_to_pending(self, db: Database) -> None:
         """status を省略した INSERT は 'pending'（注入されない側）に落ちる。
 
-        H-01「agent 由来カードは人間の promote を経なければ注入されない」を
+        「agent 由来カードは人間の promote を経なければ注入されない」原則を
         支えるのが Python 検証 1 層だけだと、status を省略する経路が 1 本増えた
         瞬間に破れる。永続層の既定を fail-safe 側に据えて多層防御にする。
 
@@ -163,10 +163,10 @@ class TestConnection:
             os.umask(old_umask)
 
     def test_existing_db_permission_is_corrected(self, tmp_path: Path) -> None:
-        """既存 DB が 0600 以外なら開き直すたびに 0600 へ補正する（F-08）。
+        """既存 DB が 0600 以外なら開き直すたびに 0600 へ補正する。
 
-        以前は新規作成時にしか chmod せず、既存 DB は 0644 のまま
-        放置していた。他ユーザーが読めるファイルを残さないよう、
+        新規作成時にしか chmod しないと、既存 DB は 0644 のまま
+        放置される。他ユーザーが読めるファイルを残さないよう、
         接続のたびに mode を検証・補正する。
         """
         db_path = tmp_path / "mem.db"
@@ -460,7 +460,7 @@ class TestSessions:
 
 
 class TestPathValidation:
-    """F-25: 既存パスが symlink / 非 regular file なら接続前に拒否する。"""
+    """既存パスが symlink / 非 regular file なら接続前に拒否する。"""
 
     def test_symlink_is_rejected_before_connect(self, tmp_path: Path) -> None:
         """`mem.db -> target.db` を張られた状態で開くとリンク先を汚染しないこと。

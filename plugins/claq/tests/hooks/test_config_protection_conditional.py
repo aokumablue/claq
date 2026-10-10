@@ -1,4 +1,4 @@
-"""config_protection の CONDITIONALLY_PROTECTED_FILES（R-07）のテスト。
+"""config_protection の CONDITIONALLY_PROTECTED_FILES のテスト。
 
 pyproject.toml 等はファイル名だけでは保護できない（version bump 等の
 正当な編集が頻繁なため）。編集内容が lint/format/coverage 設定を弱め
@@ -183,7 +183,7 @@ class TestEdit:
 
 
 class TestToxIni:
-    """A-04: tox.ini の `[testenv]`/`[testenv:*]` の commands 系キー検出。"""
+    """tox.ini の `[testenv]`/`[testenv:*]` の commands 系キー検出。"""
 
     def test_blocks_write_with_testenv_commands(self, monkeypatch: pytest.MonkeyPatch) -> None:
         code = _run(
@@ -462,11 +462,11 @@ class TestUnknownTool:
 
 
 class TestLintKeyPatternIsLinear:
-    """行頭キー照合が入力長に対して線形であること（H-7a）。
+    """行頭キー照合が入力長に対して線形であること。
 
-    修正前の `(?m)^\\s*(...)\\s*=` は `\\s` が改行を含むため、**一致しない**
+    `(?m)^\\s*(...)\\s*=` のような形は `\\s` が改行を含むため、**一致しない**
     空白主体テキストに対して「各行頭 × 残り空白長」で後退し二次オーダーに
-    なっていた（実測: 改行だけの入力で N=5,000 → 0.105s、N=20,000 → 1.619s、
+    なる（実測: 改行だけの入力で N=5,000 → 0.105s、N=20,000 → 1.619s、
     N=50,000 → 10.187s）。config_protection の hooks.json timeout は 15 秒
     なので約 60,000 バイトの改行だけで超過し、host にフックを殺されれば
     allow へ倒れる＝保護そのものが無効化される。
@@ -475,7 +475,7 @@ class TestLintKeyPatternIsLinear:
     アサートは小さい N ではノイズ支配で他マシンで flake するため。
     """
 
-    # 修正後は 200,000 改行で 0.01 秒未満。修正前は同じ入力で 100 秒超に
+    # 線形なら 200,000 改行で 0.01 秒未満。二次オーダーなら同じ入力で 100 秒超に
     # なるため、200 倍以上の余裕を取っても二次オーダーへの回帰は必ず捕まる。
     _CEILING_SECONDS = 2.0
     _SIZE = 200_000
@@ -529,7 +529,7 @@ class TestLintKeyPatternIsLinear:
 
 
 class TestLintSignalTextLengthCap:
-    """`_text_has_protected_signal` の走査量上限（H-7a）。"""
+    """`_text_has_protected_signal` の走査量上限。"""
 
     def test_over_cap_text_blocks_fail_closed(self) -> None:
         """上限超過のテキストは走査せず True（ブロック）を返す。
@@ -543,7 +543,7 @@ class TestLintSignalTextLengthCap:
         assert config_protection._text_has_protected_signal(text, "pyproject.toml") is True
 
     def test_large_but_harmless_text_under_cap_is_not_blocked(self) -> None:
-        """上限内の大きな非 lint テキストは従来どおり False（陰性対照）。
+        """上限内の大きな非 lint テキストは False（陰性対照）。
 
         上限を入れたことで「大きいだけの正当な書き込み」まで deny へ倒れて
         いないことを固定する。

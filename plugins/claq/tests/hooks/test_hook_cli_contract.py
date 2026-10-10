@@ -1,4 +1,4 @@
-"""DT-06: リポジトリ内 launcher.py 経由の hook 入出力契約。
+"""リポジトリ内 launcher.py 経由の hook 入出力契約。
 
 インストール済み plugin や実 HOME には触れない。COPILOT_TEST=1 で
 Copilot の deny JSON を選ばせる。
@@ -89,7 +89,7 @@ def _assert_denied_ruff(result: subprocess.CompletedProcess[str]) -> None:
 
 
 def test_launcher_config_protection_denies_snake_case_payload(tmp_path: Path) -> None:
-    """DT-06 #1: snake_case の ruff.toml 編集は deny JSON・exit 2。"""
+    """snake_case の ruff.toml 編集は deny JSON・exit 2。"""
     result = _run_launcher(
         "claq.hooks.config_protection",
         {"tool_name": "Edit", "tool_input": {"file_path": "ruff.toml"}},
@@ -99,7 +99,7 @@ def test_launcher_config_protection_denies_snake_case_payload(tmp_path: Path) ->
 
 
 def test_launcher_config_protection_denies_native_camel_case_payload(tmp_path: Path) -> None:
-    """DT-06 #2: native camelCase の ruff.toml 編集も同じ deny。"""
+    """native camelCase の ruff.toml 編集も同じ deny。"""
     result = _run_launcher(
         "claq.hooks.config_protection",
         {"toolName": "edit", "toolArgs": {"file_path": "ruff.toml"}},
@@ -109,7 +109,7 @@ def test_launcher_config_protection_denies_native_camel_case_payload(tmp_path: P
 
 
 def test_launcher_config_protection_allows_unprotected_native_file(tmp_path: Path) -> None:
-    """DT-06 #3: native camelCase の sample.py は deny なし。"""
+    """native camelCase の sample.py は deny なし。"""
     result = _run_launcher(
         "claq.hooks.config_protection",
         {"toolName": "edit", "toolArgs": {"file_path": "sample.py"}},
@@ -237,11 +237,9 @@ def test_session_start_emits_valid_json_and_creates_db(tmp_path: Path) -> None:
 # --- PreToolUse の入力形状ゲート -------------------------------------------------
 #
 # 判定関数の in-process テストは stdin JSON → コンテナキー解決 → 形状展開 →
-# exit code までの経路を通らない。v0.9.43 は `{"tool_input": [{"file_path":
-# "ruff.toml"}]}` と `{"tool_input": "ruff.toml"}` を exit 0 で素通りさせたまま
-# リリースされたが、そのときプロセス層のテストは dict 形状しか流しておらず
-# （list 形状 0 件・生文字列形状 0 件）、`harness_audit` も修正前後のツリーを
-# 同一 58/58 と採点した（実測）。止められる層が 1 つも無かった。
+# exit code までの経路を通らない。プロセス層のテストが dict 形状しか流さないと、
+# `{"tool_input": [{"file_path": "ruff.toml"}]}` や `{"tool_input": "ruff.toml"}`
+# の素通りを止められる層が 1 つも無い（`harness_audit` も実効性は測らない）。
 #
 # ここでコンテナキー × 形状の直積を陽性/陰性の対で流し、コミット時に落とす。
 
@@ -345,8 +343,7 @@ def test_pre_tool_use_hook_discriminates_across_container_and_shape(
 
 # コンテナキー「多重度」の軸。上の形状ゲートはキーを 1 つずつしか流さないため、
 # 「無害なキーが先頭にあり、危険な入力が後続キーにある」payload を 1 度も作らない。
-# 実測では v0.9.44 の bash_config_protection / pre_bash_commit_quality がこの形で
-# exit 0 のまま素通りしており、形状ゲートは緑のままだった。走査層を共有しても
+# この形の素通りは形状ゲートが緑のままでも起こりうる。走査層を共有しても
 # 消費側が先勝ちなら穴は残るので、多重度は独立した軸として全 PreToolUse hook に流す。
 #
 # hook → (tool_name, フィールド名, 後続キーへ入れる deny 値, 先頭キーへ入れる無害値)。
@@ -687,9 +684,9 @@ def test_pre_tool_use_hook_accepts_tool_name_aliases(
 
 # フィールド「多重度」の軸。上のフィールド別名ゲートは別名を 1 つずつしか流さない
 # ため、「無害な正規フィールドと危険な別名フィールドが同居する」payload を作らない。
-# 実測では 4 フックすべてがこの形で exit 0 のまま素通りしていた（コンテナキー側で
-# 塞いだ先勝ちバイパスと同型のものが 1 階層下に残っていた）。dict の挿入順ではなく
-# 実装のタプル順が結果を決めるため、危険な側を先に置いても素通りしていた。
+# 消費側が先勝ちだと、この形はコンテナキー側の先勝ちバイパスと同型の穴として
+# 1 階層下に残る。dict の挿入順ではなく実装のタプル順が結果を決めるため、
+# 危険な側を先に置いても素通りしうる。
 #
 # hook → (tool_name, 無害フィールド, 無害値, 危険フィールド, 危険値)。
 _FIELD_MULTIPLICITY_GATED_HOOKS = {

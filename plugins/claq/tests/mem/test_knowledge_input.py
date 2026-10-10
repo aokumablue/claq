@@ -42,10 +42,10 @@ class TestGenerateKey:
         two_chars = generate_key("md の構造テストで見出しを収集する", "pitfall")
         assert two_chars.startswith("pitfall-")
 
-        # 衝突しないこと（従来はどちらも "n" に潰れていた）
+        # 衝突しないこと（ハッシュ fallback が無いとどちらも "n" に潰れる）
         assert short_ascii != generate_key("結論は N 件に絞る", "convention")
 
-        # 3 文字以上の slug は従来どおり slug のまま
+        # 3 文字以上の slug は slug のまま
         assert generate_key("use ci for checks", "convention") == "use-ci-for-checks"
 
     def test_pure_japanese_title_falls_back_to_hash(self) -> None:
@@ -57,7 +57,7 @@ class TestGenerateKey:
 
     def test_bracketed_redacted_title_yields_stable_slug(self) -> None:
         """redact 後の title に残る角括弧混じりの `[REDACTED]` も安定した
-        スラッグ（redacted を含む形）に落ちる（A-03 の確認事項）。"""
+        スラッグ（redacted を含む形）に落ちる。"""
         key = generate_key("Keep [REDACTED] out of titles", "pitfall")
         assert "redacted" in key
         assert key == generate_key("Keep [REDACTED] out of titles", "pitfall")
@@ -105,7 +105,7 @@ class TestParseKnowledgePayload:
     """ペイロード全体の検証。"""
 
     def test_minimal_payload_fills_defaults(self) -> None:
-        """必須項目だけの入力は既定値で埋まる（source 既定 agent → status 既定 pending、A-03）。"""
+        """必須項目だけの入力は既定値で埋まる（source 既定 agent → status 既定 pending）。"""
         draft = parse_knowledge_payload({"kind": "howto", "title": "run pytest with pipefail"})
         assert draft == KnowledgeDraft(
             key="run-pytest-with-pipefail",
@@ -129,10 +129,10 @@ class TestParseKnowledgePayload:
 
     @pytest.mark.parametrize("source", ["human", "observer"])
     def test_non_default_source_is_rejected(self, source: str) -> None:
-        """H-01: generic learn は source=agent 固定。human/observer の自己申告は拒否する。
+        """generic learn は source=agent 固定。human/observer の自己申告は拒否する。
 
-        caller（agent・外部入力を処理した agent 含む）が JSON に
-        ``source: "human"`` と書くだけで人間承認を偽装できていた
+        受け付けると、caller（agent・外部入力を処理した agent 含む）が JSON に
+        ``source: "human"`` と書くだけで人間承認を偽装できる
         （docs/adr/untrusted-input-prompt-boundary.md）。
         """
         with pytest.raises(KnowledgeInputError, match="source"):
@@ -140,11 +140,11 @@ class TestParseKnowledgePayload:
 
     @pytest.mark.parametrize("status", ["active", "archived"])
     def test_non_default_status_is_rejected(self, status: str) -> None:
-        """H-01: generic learn は status=pending 固定。active/archived の自己申告は拒否する。
+        """generic learn は status=pending 固定。active/archived の自己申告は拒否する。
 
-        caller が JSON に ``status: "active"`` と書くだけで、人間承認
+        受け付けると、caller が JSON に ``status: "active"`` と書くだけで、人間承認
         （``promote <key>``）を経ずに永続 SessionStart context への注入を
-        自己承認できていた（docs/adr/untrusted-input-prompt-boundary.md）。
+        自己承認できる（docs/adr/untrusted-input-prompt-boundary.md）。
         """
         with pytest.raises(KnowledgeInputError, match="status"):
             parse_knowledge_payload({"kind": "fact", "title": "t", "status": status})
@@ -188,7 +188,7 @@ class TestParseKnowledgePayload:
 
 
 class TestSecretRedaction:
-    """parse_knowledge_payload の title/body/source_ref redaction（R-04）。
+    """parse_knowledge_payload の title/body/source_ref redaction。
 
     注意: シークレット様のリテラルは文字列連結で組み立てる。
     commit_quality_scanner の自己スキャン（test_repo_wide_self_scan_
@@ -237,7 +237,7 @@ class TestSecretRedaction:
 
     def test_key_generation_uses_redacted_title_when_title_itself_is_a_secret(self) -> None:
         """title 自体がシークレット様の文字列でも、key は redact 後の title から
-        生成され、生のシークレット断片を含まない（A-03 対応）。"""
+        生成され、生のシークレット断片を含まない。"""
         payload = {"kind": "fact", "title": "token" + "=hunter2hunter2hunter2secret!!"}
         draft = parse_knowledge_payload(dict(payload))
         assert "hunter2" not in draft.key
@@ -245,7 +245,7 @@ class TestSecretRedaction:
 
     def test_same_secret_title_learned_twice_yields_same_key(self) -> None:
         """同じ secret 入り title を 2 度 learn しても同一 key に落ちる
-        （upsert され重複カードを作らない。A-03 の確認事項）。"""
+        （upsert され重複カードを作らない）。"""
         payload = {"kind": "pitfall", "title": f"Keep {self._GITHUB_PAT} out of titles"}
         first = parse_knowledge_payload(dict(payload))
         second = parse_knowledge_payload(dict(payload))
@@ -254,7 +254,7 @@ class TestSecretRedaction:
 
     def test_different_secrets_with_same_surrounding_text_get_different_keys(self) -> None:
         """redact 後に同一テキストへ潰れる 2 枚（異なる secret）は、生 title 由来の
-        衝突回避サフィックスで別々の key になる（A-03: key 衝突による情報混同の防止）。"""
+        衝突回避サフィックスで別々の key になる（key 衝突による情報混同の防止）。"""
         other_pat = "ghp_" + "9876543210fedcba9876543210fedcba9876"
         draft_a = parse_knowledge_payload({"kind": "pitfall", "title": f"Keep {self._GITHUB_PAT} safe"})
         draft_b = parse_knowledge_payload({"kind": "pitfall", "title": f"Keep {other_pat} safe"})
@@ -263,12 +263,12 @@ class TestSecretRedaction:
         assert "ghp_" not in draft_b.key
 
     def test_explicit_key_with_secret_is_redacted(self) -> None:
-        """payload の明示 ``key`` もシークレット断片を素通りさせない（A-03 対応）。"""
+        """payload の明示 ``key`` もシークレット断片を素通りさせない。"""
         draft = parse_knowledge_payload({"kind": "fact", "title": "t", "key": self._GITHUB_PAT})
         assert "ghp_" not in draft.key
 
     def test_domain_is_redacted(self) -> None:
-        """domain もシークレットを持ち込みうるため redact する（A-03 対応）。"""
+        """domain もシークレットを持ち込みうるため redact する。"""
         draft = parse_knowledge_payload(
             {"kind": "fact", "title": "t", "domain": f"leak {self._ANTHROPIC_KEY}"}
         )
@@ -287,7 +287,7 @@ class TestSecretRedaction:
         assert "[REDACTED]" not in draft.body
 
     def test_email_in_body_is_still_redacted(self) -> None:
-        """縮小版でも既知パターン（email 等）は従来どおり適用される。"""
+        """縮小版でも既知パターン（email 等）は適用される。"""
         draft = parse_knowledge_payload({"kind": "fact", "title": "contact", "body": "reach me at a@example.com"})
         assert "a@example.com" not in draft.body
         assert "[REDACTED]" in draft.body
@@ -320,7 +320,7 @@ class TestToKnowledge:
 
 
 class TestExplicitKeyHashFallback:
-    """F-24: ASCII を含まない明示 key が同じ slug へ潰れて上書きし合う退行を防ぐ。"""
+    """ASCII を含まない明示 key が同じ slug へ潰れて上書きし合う退行を防ぐ。"""
 
     @staticmethod
     def _key_for(explicit_key: str) -> str:
@@ -333,8 +333,8 @@ class TestExplicitKeyHashFallback:
     def test_non_ascii_explicit_keys_do_not_collide(self) -> None:
         """異なる非 ASCII 明示 key が別々の key に落ちること。
 
-        以前は slugify の FALLBACK_SLUG により全て `repo` へ潰れ、upsert で
-        別の知識カードを黙って上書きしていた。
+        ハッシュ fallback が無いと slugify の FALLBACK_SLUG により全て `repo` へ
+        潰れ、upsert で別の知識カードを黙って上書きする。
         """
         keys = [self._key_for(k) for k in ("日本語", "別", "中文キー", "한국어")]
 
@@ -351,10 +351,10 @@ class TestExplicitKeyHashFallback:
 
 
 # --------------------------------------------------------------------------
-# 列挙値と SQL CHECK 句の突き合わせ（H-21）
+# 列挙値と SQL CHECK 句の突き合わせ
 #
-# 従来は「許可値 1 つが通る・別の 1 つが弾かれる」サンプル検査しかなく、集合の
-# 完全一致も `schema.py` の CHECK 句との一致も見ていなかった。実測: `KINDS` へ
+# 「許可値 1 つが通る・別の 1 つが弾かれる」サンプル検査だけでは、集合の
+# 完全一致も `schema.py` の CHECK 句との一致も見られない。たとえば `KINDS` へ
 # "insight" を足すと全テストが緑のまま `learn` が受理し、INSERT 時に sqlite の
 # CHECK で IntegrityError になる（Python 層と DB 層の食い違いが実行時まで露見
 # しない）。
@@ -503,7 +503,7 @@ def test_oversized_fields_are_rejected_at_the_entrance(field: str, limit_name: s
 
 
 def test_fields_within_the_limit_are_accepted() -> None:
-    """上限の内側は従来どおり受理すること（拾いすぎの対照）。"""
+    """上限の内側は受理すること（拾いすぎの対照）。"""
     card = parse_knowledge_payload(
         {"kind": "fact", "scope": "global", "title": "t", "body": "A" * 1000, "domain": "d"}
     )

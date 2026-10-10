@@ -61,10 +61,9 @@ def _print_plugin_root_script_relative_source_then_cd(cd_to: Path) -> str:
 
     _REPO_ROOT で相対パス "plugins/claq/runtime/claq-helpers.sh" を
     source し、CLAUDE_PLUGIN_ROOT を unset した状態で cd_to へ cd してから
-    claq_plugin_root を呼ぶ。fix 前のコードは BASH_SOURCE[0] を
-    claq_plugin_root 呼び出し時に相対パスのまま dirname 解決していたため、
-    source 後に cd すると cwd 起点で解決が壊れる（bash でも zsh でも）。
-    fix 後のコードは source 時点でファイル先頭スコープの
+    claq_plugin_root を呼ぶ。BASH_SOURCE[0] を claq_plugin_root 呼び出し時に
+    相対パスのまま dirname 解決すると、source 後に cd したとき cwd 起点で解決が
+    壊れる（bash でも zsh でも）。helper は source 時点でファイル先頭スコープの
     `_CLAQ_HELPERS_DIR` を絶対パスへ解決済みのため、この cd の影響を受けない。
     """
     return f'''
@@ -93,13 +92,12 @@ def test_claq_plugin_root_relative_source_then_cd_survives_under_zsh(tmp_path: P
 
 
 def test_helpers_expose_no_unwatchdogged_background_runner() -> None:
-    """ハードタイムアウトを持たない background runner を再導入しないこと（H-17）。
+    """ハードタイムアウトを持たない background runner を helper に置かないこと。
 
-    `claq_run_bg` は `nohup ... &` だけで、CLAUDE.md が新規の外部呼び出しに
-    義務付けるハードタイムアウトを持たなかった（`--bg` 経由の
+    `nohup ... &` だけの runner は、CLAUDE.md が新規の外部呼び出しに
+    義務付けるハードタイムアウトを持たない（`--bg` 経由の
     `hook_common.detach_process` が使う watchdog を通らないため、mem.db の
-    ロック待ちに入ると無期限に残留する）。本番の呼び出し元はゼロだったので、
-    「古いコードは必ず削除する」に従い関数ごと落とした。
+    ロック待ちに入ると無期限に残留する）。
     """
     text = _HELPER.read_text(encoding="utf-8")
 
@@ -197,12 +195,12 @@ def _stale_root_script(root: Path, call: str) -> str:
 
 @pytest.mark.parametrize("shell", _STALE_ROOT_SHELLS)
 def test_claq_plugin_root_fails_loudly_when_the_sourced_root_is_gone(shell: str, tmp_path: Path) -> None:
-    """stale root では空文字を返さず、理由を stderr へ出して非ゼロで返すこと（M-5）。
+    """stale root では空文字を返さず、理由を stderr へ出して非ゼロで返すこと。
 
-    旧実装は `cd` の失敗を検査せず空文字を返し、終了ステータスも 0 だった。
-    その結果 `claq_run` が ``"/runtime/claq-hook"``（root が空のまま連結された
+    `cd` の失敗を検査せず空文字と終了ステータス 0 を返すと、
+    `claq_run` が ``"/runtime/claq-hook"``（root が空のまま連結された
     絶対パス）を実行しようとし、プラグイン更新後のシェルでは以後すべての
-    `claq_run` が原因と無関係なエラーになっていた。
+    `claq_run` が原因と無関係なエラーになる。
 
     Args:
         shell: 実行するシェル名。
@@ -226,7 +224,7 @@ def test_claq_plugin_root_fails_loudly_when_the_sourced_root_is_gone(shell: str,
 def test_claq_run_does_not_execute_a_root_relative_path_when_root_is_gone(
     shell: str, tmp_path: Path
 ) -> None:
-    """stale root では `claq_run` が root 相対パスの実行へ進まないこと（M-5）。
+    """stale root では `claq_run` が root 相対パスの実行へ進まないこと。
 
     「解決できなかった」ことを stale root の名前で伝えるのが目的なので、
     ``/runtime/claq-hook`` という誤ったパスに言及するエラーが出ていないことを
@@ -326,7 +324,7 @@ def test_claq_mem_learn_records_a_pending_agent_card(
     assert card is not None
     assert card.title == title
     assert card.body == body
-    # docs/adr/untrusted-input-prompt-boundary.md / H-01: helper 経由のカードは例外なく agent / pending。
+    # docs/adr/untrusted-input-prompt-boundary.md: helper 経由のカードは例外なく agent / pending。
     assert (card.source, card.status) == ("agent", "pending")
 
 
@@ -344,8 +342,8 @@ def test_collect_skill_create_inputs_rejects_non_positive_commits(bad: str) -> N
 def test_collect_skill_create_inputs_applies_commits_to_both_git_log_calls(tmp_path: Path) -> None:
     """commits 引数が 2 回の git log 双方へ渡ること。
 
-    2 回目だけ `-n 200` がハードコードされていたため引数が半分しか効かず、
-    2 つのセクションが別々の範囲を説明していた。
+    片方だけ `-n 200` をハードコードすると引数が半分しか効かず、
+    2 つのセクションが別々の範囲を説明してしまう。
     """
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -409,10 +407,10 @@ def _synthetic_repo(tmp_path: Path, paths: list[str]) -> Path:
 def test_collect_skill_create_inputs_keeps_paths_that_start_with_hex_characters(
     tmp_path: Path,
 ) -> None:
-    """頻度表が `a-f` / `0-9` 始まりのパスを落とさないこと（H-16）。
+    """頻度表が `a-f` / `0-9` 始まりのパスを落とさないこと。
 
     短縮 SHA 行を落とす目的の `grep -v "^[a-f0-9]"` は、**16 進数字で始まる
-    全パス**も落としていた。実測で `agents/` `commands/` `docs/` `conftest.py`
+    全パス**も落とす。`agents/` `commands/` `docs/` `conftest.py`
     が消え、`plugins/` `scripts/` は残るため欠落に気づけない。/skill-gen は
     「agents/commands はほとんど触られていない」という誤った頻度表を受け取る。
 

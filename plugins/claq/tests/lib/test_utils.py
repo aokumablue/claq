@@ -142,8 +142,8 @@ class TestEnsurePrivateDir:
 class TestActorIdentity:
     """`actor_identity`（監査ログ用のユーザー識別子）のテスト。
 
-    `os.getuid()` は Windows に存在しないため、`mem promote` の監査ログは
-    POSIX 専用だった（P1-005）。`getpass.getuser()` は 3 プラットフォームで
+    `os.getuid()` は Windows に存在しないため、それに頼ると `mem promote` の
+    監査ログは POSIX 専用になる。`getpass.getuser()` は 3 プラットフォームで
     同じ 1 本の実装になる。
     """
 

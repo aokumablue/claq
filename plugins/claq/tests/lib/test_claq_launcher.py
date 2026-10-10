@@ -22,8 +22,8 @@ LAUNCHER_PATH = Path(launcher.__file__).resolve()
 def _isolate_claq_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """main() 経由の write_env_pointer が実 HOME の ~/.claq を汚さないようにする。
 
-    main() は全 hook 起動で ~/.claq/env.sh 等を書き出す（M-02 対応）。
-    env_pointer の state dir は ``$HOME`` 固定（``CLAQ_HOME`` は見ない。R-04 —
+    main() は全 hook 起動で ~/.claq/env.sh 等を書き出す。
+    env_pointer の state dir は ``$HOME`` 固定（``CLAQ_HOME`` は見ない。
     md の bootstrap 行 `. "$HOME/.claq/env.sh"` が固定住所であるべきという
     契約に writer 側を合わせた）なので、隔離は ``HOME`` を差し替えて行う。
     """
@@ -151,7 +151,7 @@ class TestUnsupportedPythonExitCode:
         capsys: pytest.CaptureFixture[str],
         version: tuple[int, int, int],
     ) -> None:
-        """3.12 未満なら stderr に実バージョンと構造化 JSON を書いて 0 を返す（F-07 対応）。"""
+        """3.12 未満なら stderr に実バージョンと構造化 JSON を書いて 0 を返す。"""
         monkeypatch.setattr(launcher.sys, "version_info", version)
         displayed = ".".join(str(part) for part in version)
 

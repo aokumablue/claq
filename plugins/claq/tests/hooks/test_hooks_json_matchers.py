@@ -22,8 +22,8 @@ no-op になるが、その手前で Python プロセスが 1 つ起動する分
 - ``NotebookEdit``: `normalize_tool_name` は "NotebookEdit" を "NotebookEdit" の
   ままにする（`_TOOL_NAME_MAP` の "notebookedit" → "NotebookEdit"）。
   config_protection の `_WRITE_TOOL_NAMES` は {edit, write, multiedit} で
-  "notebookedit" を含まないため、従来も必ず no-op だった。よって matcher
-  から落として挙動は変わらない。
+  "notebookedit" を含まないため、必ず no-op になる。よって matcher
+  に含めなくても挙動は変わらない。
 - ``BashOutput``: `normalize_tool_name("BashOutput")` は "Bash" にならない。
   block_no_verify / pre_bash_commit_quality は ``tool_input.command`` を読むが
   BashOutput の tool_input に command は無いため空文字列となり no-op。
@@ -56,7 +56,7 @@ TOOL_GATED_HOOKS: dict[str, frozenset[str]] = {
     "claq.hooks.block_no_verify": frozenset({"Bash"}),
     "claq.hooks.pre_bash_commit_quality": frozenset({"Bash"}),
     # _BASH_TOOL_NAMES == {bash}（正規化後 "Bash"）。config_protection の
-    # Edit/Write/MultiEdit 限定を補完する Bash 経由の直接書き換え検知（A-06）。
+    # Edit/Write/MultiEdit 限定を補完する Bash 経由の直接書き換え検知。
     "claq.hooks.bash_config_protection": frozenset({"Bash"}),
     # _WRITE_TOOL_NAMES == {edit, write, multiedit}
     "claq.hooks.config_protection": frozenset({"Edit", "Write", "MultiEdit"}),

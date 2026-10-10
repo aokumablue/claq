@@ -97,8 +97,8 @@ class TestLogger:
     ) -> None:
         """ハンドラ構築が失敗しても初期化済みフラグが立たず、次の setup で復帰できる。
 
-        `_initialized = True` を構築前に立てていた頃は、一度でも失敗すると
-        「初期化済みだがハンドラが空」という復帰不能な状態がプロセス内に残った。
+        `_initialized = True` を構築前に立てると、一度でも失敗したとき
+        「初期化済みだがハンドラが空」という復帰不能な状態がプロセス内に残る。
         """
         logger.reset()
         calls = {"n": 0}
@@ -127,8 +127,8 @@ def test_setup_closes_the_parent_directory_too(tmp_path: Path) -> None:
     `mkdir(parents=True)` は mode を親へ適用しない。ロガーは
     `_load_settings_or_raise()` の中でどの ``Database()`` よりも先に走るため、
     DB を開かずに終わる経路（``mem list --kind bogus``）では `~/.claq` を最初に
-    作るのがロガーになる。実測ではそこが ``drwxr-xr-x``（0755）のまま残り、
-    CLAUDE.md が定める「`~/.claq` の 0700」を割っていた。
+    作るのがロガーになる。そこで 0700 にしないと ``drwxr-xr-x``（0755）のまま残り、
+    CLAUDE.md が定める「`~/.claq` の 0700」を割る。
     """
     logger.reset()
     root = tmp_path / "claq-root"

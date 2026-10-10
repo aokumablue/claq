@@ -45,10 +45,10 @@ def test_option_value_without_following_token_raises(args: list[str]) -> None:
 
 
 def test_parse_args_root_flag_without_value_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """`--root` に値が続かない場合は cwd へ黙って落とさずエラーにする（N-04 対応）。
+    """`--root` に値が続かない場合は cwd へ黙って落とさずエラーにする。
 
-    以前は空値で cwd にフォールバックしており、意図しない root を
-    監査していることに気付けなかった。
+    空値で cwd にフォールバックすると、意図しない root を
+    監査していることに気付けない。
     """
     monkeypatch.chdir(tmp_path)
 
@@ -72,10 +72,10 @@ def test_parse_args_root_flag_with_empty_value_raises() -> None:
     ],
 )
 def test_parse_args_rejects_flag_shaped_option_value(args: list[str]) -> None:
-    """後続フラグを値として食う形は拒否する（N-04）。
+    """後続フラグを値として食う形は拒否する。
 
-    実測で ``--root --help`` は ``root=<cwd>/--help`` かつ ``help=False`` になり、
-    ``--help`` を書いたのにヘルプが出ないまま存在しない root を監査していた。
+    受け付けると ``--root --help`` は ``root=<cwd>/--help`` かつ ``help=False`` になり、
+    ``--help`` を書いたのにヘルプが出ないまま存在しない root を監査する。
     """
     with pytest.raises(ValueError, match=f"{args[0]} requires a non-empty value"):
         harness_audit.parse_args(args)
@@ -132,7 +132,7 @@ def test_build_report_target_kind_matching_auto_detection_succeeds(tmp_path: Pat
 
 
 def test_build_report_target_kind_mismatch_raises(tmp_path: Path) -> None:
-    """明示 target_kind が自動判定と食い違えば FAIL する（F-04 対応）。
+    """明示 target_kind が自動判定と食い違えば FAIL する。
 
     consumer 判定になる root（provider の agents/skills が無い）を
     誤って --target-kind repo で監査しようとした場合の再現。

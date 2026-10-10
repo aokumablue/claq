@@ -3,15 +3,15 @@
 `src/claq/**/*.py` を `ast` で走査し、全 import 文のトップレベルモジュール名が
 明示の許可集合 :data:`ALLOWED_TOP_LEVEL_MODULES` に収まることを表明する。
 
-なぜ ``sys.stdlib_module_names`` を直接使わないか（H-12）:
-    以前は ``frozenset(sys.stdlib_module_names)`` を許可集合にしていた。これは
+なぜ ``sys.stdlib_module_names`` を直接使わないか:
+    ``frozenset(sys.stdlib_module_names)`` は
     **テストを実行しているインタプリタ**の標準ライブラリであって、CLAUDE.md と
     ``launcher.py`` が宣言する対応下限 3.12 のそれではない。開発 venv は 3.14 な
     ので、3.14 では標準ライブラリだが 3.12 に存在しない名前（``annotationlib`` /
     ``compression`` / ``_interpreters`` など）を import しても本テストは緑のまま
-    通り、3.12 ホストでは ImportError で落ちていた。つまり CLAUDE.md が掲げる
+    通り、3.12 ホストでは ImportError で落ちる。つまり CLAUDE.md が掲げる
     「依存ゼロは本テストが機械的に保証する」という主張が、保証すべき下限に対して
-    成立していなかった。
+    成立しない。
 
 なぜ「3.12 の標準ライブラリ全一覧」ではなく「実際に import している名前の一覧」か:
     3.12 のインタプリタが手元に無い環境では全一覧を機械生成できず、手写しでは
@@ -47,7 +47,7 @@ MIN_PYTHON = (3, 12)
 # `claq` 以外はすべて Python 3.12 の標準ライブラリである（最も新しい `tomllib`
 # でも 3.11 追加で、下限を下回らない）。ここへ名前を足すときは、追加した
 # モジュールが 3.12 に存在することを確認すること —— 実行中インタプリタに
-# あるかどうかは根拠にならない（それが H-12 の欠陥そのもの）。
+# あるかどうかは根拠にならない（上記の欠陥そのもの）。
 ALLOWED_TOP_LEVEL_MODULES = frozenset({
     "__future__",
     "argparse",
@@ -81,8 +81,8 @@ ALLOWED_TOP_LEVEL_MODULES = frozenset({
 })
 
 # 3.14 では `sys.stdlib_module_names` に含まれるが 3.12 には存在しない名前。
-# 旧実装（実行中インタプリタ基準）ではこれらが素通りしていたため、下限基準へ
-# 移ったことを直接表明するための対照サンプルとして持つ。
+# 実行中インタプリタ基準ではこれらが素通りするため、下限基準であることを
+# 直接表明するための対照サンプルとして持つ。
 _STDLIB_ADDED_AFTER_MIN_PYTHON = frozenset({"annotationlib", "compression", "_interpreters"})
 
 
@@ -145,7 +145,7 @@ class TestRuntimeDependencies:
         """許可集合が実際の import 集合と完全一致すること。
 
         許可集合が実態より広いと、そのぶん「何を import してよいか」の宣言が
-        緩み、最終的に旧実装（`sys.stdlib_module_names` 丸ごと）へ戻るのと同じ
+        緩み、最終的に `sys.stdlib_module_names` 丸ごとを許可するのと同じ
         状態になる。使わなくなった名前は削除する（後方互換の残置はしない）。
         """
         assert ALLOWED_TOP_LEVEL_MODULES == _imported_top_level_modules()
@@ -163,8 +163,8 @@ class TestRuntimeDependencies:
     def test_allowlist_excludes_stdlib_added_after_minimum(self) -> None:
         """下限より後に標準ライブラリ入りした名前を許可しないこと。
 
-        許可集合を実行中インタプリタから作っていた頃はこれらが素通りしていた
-        （H-12）。ここが赤くなるのは許可集合の基準が実行中バージョンへ戻った
+        許可集合を実行中インタプリタから作るとこれらが素通りする。
+        ここが赤くなるのは許可集合の基準が実行中バージョンへ戻った
         ときであり、判定軸が下限 3.12 のままかを直接見張る対照。
 
         実行中インタプリタの ``sys.stdlib_module_names`` とは照合しない。対照

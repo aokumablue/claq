@@ -1,9 +1,8 @@
 """保護フックの既知バイパスを block / allow の表で固定する。
 
-release-verify v0.9.48 の実起動で、`Security Guardrails` が満点のまま
-`block_no_verify` / `bash_config_protection` / `config_protection` の 7 経路が
-素通りしていた。`harness_audit` はフックの**存在**を測るだけで実効性を測らない
-（`skills/maintain/SKILL.md` のステップ5 が明記）ため、実効性の回帰はこのファイルの
+`harness_audit` はフックの**存在**を測るだけで実効性を測らない
+（`skills/maintain/SKILL.md` のステップ5 が明記）ため、`Security Guardrails` が
+満点でも保護フックが素通りしうる。そのため実効性の回帰はこのファイルの
 block / allow 一覧が担う。
 
 `allow` 側を同じ表に置くのは、fail-closed へ寄せた判定が通常操作を巻き込んでいない
@@ -98,23 +97,23 @@ _PROTECTED_WRITE = "printf x > ruff.toml"
 
 # (ラベル, フック名, payload) — すべて exit 2 でなければならない。
 _BLOCKED_CASES = [
-    # S-1: `#` の作用域は行末までであり入力末尾までではない。
+    # `#` の作用域は行末までであり入力末尾までではない。
     ("S-1 行コメント後の 2 行目", "block_no_verify", _bash(f"git status #\n{_NO_VERIFY}")),
     ("S-1 行コメント後の書き込み", "bash_config_protection", _bash(f"echo ok #\n{_PROTECTED_WRITE}")),
     ("S-1 語中の #", "block_no_verify", _bash(f"echo a#b && {_NO_VERIFY}")),
     ("S-1 引用符内の #", "block_no_verify", _bash('git commit -m "fix #1" --no-verify')),
-    # S-3: セグメント内の書き込み先は 1 件ではない。
+    # セグメント内の書き込み先は 1 件ではない。
     ("S-3 repo 外の囮が先頭", "bash_config_protection", _bash("rm -f /tmp/ruff.toml ruff.toml")),
     ("S-3 リダイレクト 2 連", "bash_config_protection", _bash("printf x > notes.txt > ruff.toml")),
-    # S-4: `cd` があると cwd 基準の repo スコープ判定が信用できない。
+    # `cd` があると cwd 基準の repo スコープ判定が信用できない。
     ("S-4 cd 後の相対書き込み", "bash_config_protection", _bash("cd sub && printf x > ../ruff.toml")),
     ("S-4 cd の解決先不明", "bash_config_protection", _bash("cd - && printf x > ruff.toml")),
-    # S-5: `-c` は結合短フラグでも成立する。
+    # `-c` は結合短フラグでも成立する。
     ("S-5 bash -lc", "block_no_verify", _bash(f"bash -lc '{_NO_VERIFY}'")),
     ("S-5 bash -lc 書き込み", "bash_config_protection", _bash(f"bash -lc '{_PROTECTED_WRITE}'")),
     ("S-5b bash -c 書き込み", "bash_config_protection", _bash(f"bash -c '{_PROTECTED_WRITE}'")),
     ("S-5b sh -c 書き込み", "bash_config_protection", _bash(f"sh -c '{_PROTECTED_WRITE}'")),
-    # S-6: `.` / `source` / `eval` は heredoc 本文を実行する。
+    # `.` / `source` / `eval` は heredoc 本文を実行する。
     ("S-6 . /dev/stdin", "block_no_verify", _bash(_BYPASS_HEREDOC.format(body=_NO_VERIFY))),
     ("S-6 source /dev/stdin", "block_no_verify", _bash(_SOURCE_HEREDOC.format(body=_NO_VERIFY))),
     ("S-6 eval $(cat)", "block_no_verify", _bash(_EVAL_HEREDOC.format(body=_NO_VERIFY))),
@@ -123,7 +122,7 @@ _BLOCKED_CASES = [
         "bash_config_protection",
         _bash(_BYPASS_HEREDOC.format(body=_PROTECTED_WRITE)),
     ),
-    # S-7: フィールド値は文字列とは限らない。
+    # フィールド値は文字列とは限らない。
     (
         "S-7 command が list",
         "block_no_verify",
@@ -135,7 +134,7 @@ _BLOCKED_CASES = [
         "bash_config_protection",
         {"tool_name": "Bash", "tool_input": {"command": ["sh", "-c", _PROTECTED_WRITE]}},
     ),
-    # S-8: ツール名を特定できない payload を「対象外」と読み替えない。
+    # ツール名を特定できない payload を「対象外」と読み替えない。
     (
         "S-8 tool_name が非文字列",
         "config_protection",
@@ -156,7 +155,7 @@ _BLOCKED_CASES = [
         "bash_config_protection",
         {"tool_input": {"command": _PROTECTED_WRITE}},
     ),
-    # C-2: 保護対象の照合が大小を区別しない（APFS / NTFS は既定で大小無視なので
+    # 保護対象の照合が大小を区別しない（APFS / NTFS は既定で大小無視なので
     # `Ruff.toml` への書込みは実体 `ruff.toml` に当たる）。
     ("C-2 Write 大文字混在", "config_protection", _write("Ruff.toml")),
     ("C-2 Write 全大文字", "config_protection", _write("RUFF.TOML")),
@@ -175,7 +174,7 @@ _BLOCKED_CASES = [
         _write_content("Package.json", '{"eslintConfig": {}}'),
     ),
     ("C-2 tox.ini 専用照合の大文字", "config_protection", _write_content("TOX.ini", "commands = true")),
-    # H-5: sed の GNU 長形式（短縮形を含む）と実行 wrapper。
+    # sed の GNU 長形式（短縮形を含む）と実行 wrapper。
     ("H-5 sed --in-place", "bash_config_protection", _bash("sed --in-place s/x/y/ ruff.toml")),
     ("H-5 sed --in-place=.bak", "bash_config_protection", _bash("sed --in-place=.bak s/x/y/ ruff.toml")),
     ("H-5 sed 長形式の短縮 --i", "bash_config_protection", _bash("sed --i s/x/y/ ruff.toml")),
@@ -187,7 +186,7 @@ _BLOCKED_CASES = [
     ("H-5 nice -n の数値", "bash_config_protection", _bash("nice -n 10 rm ruff.toml")),
     ("H-5 stdbuf wrapper", "bash_config_protection", _bash("stdbuf -o0 rm ruff.toml")),
     ("H-5 wrapper 多重", "bash_config_protection", _bash("nohup nice timeout 5 rm ruff.toml")),
-    # H-6: commit 前 mutation ガードの語彙が兄弟の正規化から取り残されていた。
+    # commit 前 mutation ガードの語彙も兄弟と同じ正規化を通す。
     # scan は変更前の作業ツリーを読むため、取りこぼしは未検査コミットになる。
     (
         "H-6 大文字の cp",
@@ -207,9 +206,9 @@ _BLOCKED_CASES = [
         "pre_bash_commit_quality",
         _bash("perl -0pi -e s/a/b/ app.py && git commit -m 'fix: x'"),
     ),
-    # M-8: フラグ無しでファイルを書き換えるエディタ。`ed` はフラグを要求する
-    # `_INPLACE_EDIT_EXECUTABLES` に置かれていたため、``ed app.py && git commit``
-    # が mutation-before-commit ガードを素通りしていた（実測 exit 0）。
+    # フラグ無しでファイルを書き換えるエディタ。`ed` をフラグを要求する
+    # `_INPLACE_EDIT_EXECUTABLES` に置くと、``ed app.py && git commit``
+    # が mutation-before-commit ガードを素通りする。
     ("M-8 ed の commit 前編集", "pre_bash_commit_quality", _bash("ed app.py && git commit -m 'fix: x'")),
     ("M-8 ex の commit 前編集", "pre_bash_commit_quality", _bash("ex app.py && git commit -m 'fix: x'")),
     ("M-8 red の commit 前編集", "pre_bash_commit_quality", _bash("red app.py && git commit -m 'fix: x'")),
@@ -219,19 +218,18 @@ _BLOCKED_CASES = [
         _bash("echo x | sponge app.py && git commit -m 'fix: x'"),
     ),
     ("M-8 ED 大文字", "pre_bash_commit_quality", _bash("ED app.py && git commit -m 'fix: x'")),
-    # 同じ語彙の穴は保護 config 側にも開いていた（``ed ruff.toml`` が exit 0）。
+    # 同じ語彙の穴は保護 config 側にも開きうる（``ed ruff.toml``）。
     ("M-8 ed で保護 config", "bash_config_protection", _bash("ed ruff.toml")),
     ("M-8 ex で保護 config", "bash_config_protection", _bash("ex .eslintrc")),
     ("M-8 sponge で保護 config", "bash_config_protection", _bash("echo x | sponge ruff.toml")),
     ("M-8 wrapper 越しの ed", "bash_config_protection", _bash("timeout 5 ed ruff.toml")),
-    # M-9: `touch` は内容を変えないが、保護対象を**空で新規作成**できる。空の
+    # `touch` は内容を変えないが、保護対象を**空で新規作成**できる。空の
     # `.eslintrc` は ESLint の上位カスケード探索を止めるため実質的な無効化になる。
-    # 修正前は保護対象 36 ファイル全てで allow だった（実測 exit 0）。
     ("M-9 touch で保護 config", "bash_config_protection", _bash("touch ruff.toml")),
     ("M-9 touch の大小混在", "bash_config_protection", _bash("touch .Eslintrc")),
     ("M-9 touch の値付きオプション", "bash_config_protection", _bash("touch -t 202601010000 ruff.toml")),
     ("M-9 wrapper 越しの touch", "bash_config_protection", _bash("timeout 5 touch ruff.toml")),
-    # 陽性対照（修正前から exit 2。fail-closed 化で失われていないこと）。
+    # 陽性対照（fail-closed 化で失われていないこと）。
     ("対照 コメント無しの 2 行目", "block_no_verify", _bash(f"git status\n{_NO_VERIFY}")),
     ("対照 bash -c", "block_no_verify", _bash(f"bash -c '{_NO_VERIFY}'")),
     ("対照 素の書き込み", "bash_config_protection", _bash(_PROTECTED_WRITE)),
@@ -256,7 +254,7 @@ _ALLOWED_CASES = [
     ("Grep は書き込みではない", "config_protection", {"tool_name": "Grep", "tool_input": {"file_path": "ruff.toml"}}),
     ("保護対象でない Write", "config_protection", _write("notes.txt")),
     # --- 上の block 追加と対になる陰性対照 ---
-    # C-2: 大小無視は「保護対象の綴り違い」だけに効き、無関係なファイルは巻き込まない。
+    # 大小無視は「保護対象の綴り違い」だけに効き、無関係なファイルは巻き込まない。
     ("C-2 対 大文字混在の無関係 Write", "config_protection", _write("App.py")),
     ("C-2 対 大文字混在の無関係 rm", "bash_config_protection", _bash("rm App.py")),
     ("C-2 対 名前が似た別ファイル", "config_protection", _write("Ruff.toml.bak")),
@@ -265,17 +263,17 @@ _ALLOWED_CASES = [
         "config_protection",
         _write_content("PyProject.toml", '[project]\nversion = "1.2.3"'),
     ),
-    # H-5: in-place でない sed と、実行位置に無い wrapper 語は allow のまま。
+    # in-place でない sed と、実行位置に無い wrapper 語は allow のまま。
     ("H-5 対 sed --expression", "bash_config_protection", _bash("sed --expression s/x/y/ app.py")),
     ("H-5 対 保護対象への非 in-place sed", "bash_config_protection", _bash("sed --expression s/x/y/ ruff.toml")),
     # 区切りの `--` は長形式ではないので in-place ではない（名前部分が空）。
     ("H-5 対 区切りの --", "bash_config_protection", _bash("sed -- s/x/y/ ruff.toml")),
-    # M-01: wrapper 語彙を足しても、非実行位置の言及は実行位置にならない。
+    # wrapper 語彙を足しても、非実行位置の言及は実行位置にならない。
     ("H-5 対 echo tee 言及", "bash_config_protection", _bash("echo tee pyproject.toml")),
     ("H-5 対 echo の中の wrapper 列", "bash_config_protection", _bash("echo timeout 5 rm ruff.toml")),
     # wrapper の先が読み取り専用なら書き込み先は現れない。
     ("H-5 対 timeout 経由の cat", "bash_config_protection", _bash("timeout 5 cat ruff.toml")),
-    # H-6: 正規化を足しても、変更しないコマンドは mutation とみなさない。
+    # 正規化を足しても、変更しないコマンドは mutation とみなさない。
     ("H-6 対 大文字の cat", "pre_bash_commit_quality", _bash("Cat app.py && git commit -m 'fix: x'")),
     ("H-6 対 単独 commit", "pre_bash_commit_quality", _bash("git commit -m 'fix: x'")),
     (
@@ -284,7 +282,7 @@ _ALLOWED_CASES = [
         _bash("sed --expression s/a/b/ app.py && git commit -m 'fix: x'"),
     ),
     ("H-6 対 commit 無しの mutation", "pre_bash_commit_quality", _bash("CP /tmp/evil.py app.py")),
-    # M-8: 常時 mutation 分類を足しても、非実行位置の言及・保護対象でない引数・
+    # 常時 mutation 分類を足しても、非実行位置の言及・保護対象でない引数・
     # フラグを要求する側の語彙（`sed` は `-i` 無しなら標準出力）は allow のまま。
     ("M-8 対 commit 無しの ed", "pre_bash_commit_quality", _bash("ed app.py")),
     (
@@ -295,7 +293,7 @@ _ALLOWED_CASES = [
     ("M-8 対 保護対象でない ed", "bash_config_protection", _bash("ed app.py")),
     ("M-8 対 非実行位置の ed", "bash_config_protection", _bash("echo ed ruff.toml")),
     ("M-8 対 保護対象の読み取り（ex 名の別語）", "bash_config_protection", _bash("grep -rn ex ruff.toml")),
-    # M-9: `touch` を書込み verb にしても、保護対象でないファイル・repo 外・
+    # `touch` を書込み verb にしても、保護対象でないファイル・repo 外・
     # 非実行位置は allow のまま。「全部ブロックする」実装をここで落とす。
     ("M-9 対 touch app.py", "bash_config_protection", _bash("touch app.py")),
     ("M-9 対 touch README.md", "bash_config_protection", _bash("touch README.md")),
@@ -306,7 +304,7 @@ _ALLOWED_CASES = [
 
 # ハーネスごとの payload 形状（`lib/harness.py` の `_TOOL_NAME_MAP` /
 # `INPUT_CONTAINER_KEYS` に対応）。ツール名を特定できない payload を検査側へ倒す
-# 変更（S-8）が、Claude Code 以外のハーネスの通常操作を巻き込んでいないことを
+# 判定が、Claude Code 以外のハーネスの通常操作を巻き込んでいないことを
 # 固定する。ここが緑でないと「Claude Code では動くが Copilot では全部ブロック」
 # という片側だけの退行が出荷される。
 _HARNESS_CASES = [
@@ -330,7 +328,7 @@ _HARNESS_CASES = [
 def _repo_scope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """cwd と repo ルートを使い捨てディレクトリへ固定する。
 
-    `bash_config_protection` の repo スコープ判定（A-06）が実行環境の git
+    `bash_config_protection` の repo スコープ判定が実行環境の git
     リポジトリに依存しないようにする。`cd sub` の到達先も用意する。
 
     Args:
@@ -419,7 +417,7 @@ def test_other_harness_payload_shapes(
 ) -> None:
     """Claude Code 以外のハーネスの payload 形状でも判定が変わらないこと。
 
-    ツール名を特定できない payload を検査側へ倒した（S-8）ため、Copilot CLI の
+    ツール名を特定できない payload を検査側へ倒すため、Copilot CLI の
     lowercase runtime 名・Grok の固有名・Codex の apply_patch が「未知」と扱われて
     通常操作まで塞がれていないかを、危険側と通常側の両方で固定する。
 
@@ -434,13 +432,14 @@ def test_other_harness_payload_shapes(
 
 
 # --------------------------------------------------------------------------
-# 保護語彙の全数検査（H-11）
+# 保護語彙の全数検査
 #
-# 上の `_BLOCKED_CASES` / `_ALLOWED_CASES` は語彙の**サンプル**しか流していな
-# かった。保護集合は複数行にまたがる 1 個の set リテラル（= 1 statement）なので、
+# 上の `_BLOCKED_CASES` / `_ALLOWED_CASES` は語彙の**サンプル**しか流さない。
+# 保護集合は複数行にまたがる 1 個の set リテラル（= 1 statement）なので、
 # 要素を 1 個消しても実行行は変わらず `fail_under=100` では原理的に検出できない。
-# 実測: `config_protection.py` から ".shellcheckrc" を消すと、スイート全緑のまま
-# `Write .shellcheckrc` と `printf x > .shellcheckrc` の両経路が allow へ戻った。
+# たとえば `config_protection.py` から ".shellcheckrc" を消しても、サンプル検査だけ
+# ならスイート全緑のまま `Write .shellcheckrc` と `printf x > .shellcheckrc` の
+# 両経路が allow へ戻る。
 #
 # 検査は 2 層に分ける。片方だけでは穴が残るため、どちらも必須:
 #
@@ -636,7 +635,7 @@ def test_every_protected_file_is_denied_on_bash_write(
     `bash_config_protection` が取りこぼしていても気付けない。両フックが同じ
     語彙を共有していることを要素ごとに実測する。
 
-    `touch` を含めるのは M-9 の指摘（保護対象 36 ファイル**全て**で allow だった）を
+    `touch` を含めるのは、`touch` による空ファイル作成の deny を
     サンプルではなく全数で固定するため。空ファイルの新規作成は内容を書き換えないが、
     linter の上位カスケード探索を止めるので上書きと同じ弱体化にあたる。
 
@@ -653,10 +652,10 @@ def test_every_protected_file_is_denied_on_bash_write(
 def test_every_protected_file_is_denied_case_insensitively(
     name: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`PROTECTED_FILES` の全要素が大文字綴りでも deny されること（層1・C-2 の全数版）。
+    """`PROTECTED_FILES` の全要素が大文字綴りでも deny されること（層1・大小無視の全数版）。
 
-    APFS / NTFS では `RUFF.TOML` が `ruff.toml` そのものを指す。従来は数件の
-    サンプルでしか確認していなかった。
+    APFS / NTFS では `RUFF.TOML` が `ruff.toml` そのものを指す。数件の
+    サンプルではなく全要素で確認する。
 
     Args:
         name: 保護対象のファイル名。
@@ -705,9 +704,9 @@ def test_every_directory_change_command_forces_unconditional_deny(
 
     判別には **repo ルート外**を指す書き込み先を使う。repo 内のパスは
     `_within_repo_root` で当然 deny になるので、それでは「cd 系だから deny した」
-    のか「repo 内だから deny した」のか区別できない —— 実測でも
+    のか「repo 内だから deny した」のか区別できない —— 実際
     `pushd sub && printf x > ../ruff.toml` は cd 系の判定を落としても deny のまま
-    だった。cd 系が無い同じコマンドが allow であることを対照として先に固定する。
+    になる。cd 系が無い同じコマンドが allow であることを対照として先に固定する。
 
     Args:
         command: ディレクトリ移動コマンド名。
@@ -759,15 +758,15 @@ def test_non_lint_section_or_key_is_allowed(word: str, monkeypatch: pytest.Monke
 
 
 # --------------------------------------------------------------------------
-# 全語彙集合の固定（M-10）
+# 全語彙集合の固定
 #
-# H-11 は保護**ファイル名**の集合だけを固定した。同じ盲点は保護フックの他の語彙
+# 上の全数検査は保護**ファイル名**の集合だけを固定する。同じ盲点は保護フックの他の語彙
 # 集合すべてに残っている: 集合リテラルは複数行にまたがっても 1 statement なので、
 # 要素を 1 個消しても実行行は変わらず `fail_under=100` では原理的に検出できない。
 # 代表値をフックへ流す検査（`_BLOCKED_CASES`）はサンプルしか見ないため、消えた
 # 要素がサンプル外なら緑のまま通る。
 #
-# 検査は H-11 と同じ 2 層で行う。
+# 検査は保護ファイル名の全数検査と同じ 2 層で行う。
 #
 #   層2（固定）: チェックイン済みの期待値に対する**完全一致**。語彙の増減を
 #       人間の意識的な変更に限定する関門。これが本項目の非交渉部分。
@@ -776,7 +775,7 @@ def test_non_lint_section_or_key_is_allowed(word: str, monkeypatch: pytest.Monke
 #
 # 層1 の入力は必ず期待値（`_EXPECTED_VOCABULARIES`）側から取る。実装の集合を
 # parametrize の入力にすると、要素を消したときにテストケースも一緒に消えて
-# スイートが緑のまま通る（H-11 で実測した罠）。
+# スイートが緑のまま通る。
 #
 # さらに「期待値表そのものから行を消す」という 1 段上の盲点を
 # `test_vocabulary_inventory_is_complete` が塞ぐ。`claq.hooks` 配下の全モジュールを
@@ -940,11 +939,10 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "GIT_CONFIG_SYSTEM",
         }
     ),
-    # `_ENV_BOOLEAN_OPTIONS` と `_EXEC_WRAPPERS` は撤去した。ラッパ名とその
-    # オプションを列挙して読み飛ばす設計は、列挙が漏れた瞬間に**素通り側へ倒れる**
-    # （実測: `env -v` / `env -C` / `command -p` / `sudo -E` / `nohup env` の 5 形が
-    # exit 0 だった）。前置トークンを全部走査する形へ変えたので、この 2 つの語彙は
-    # もう存在しない。語彙を持たない実装は語彙の陳腐化で壊れない。
+    # ラッパ名とそのオプションの語彙は持たない。列挙して読み飛ばす設計は、列挙が
+    # 漏れた瞬間に**素通り側へ倒れる**（`env -v` / `env -C` / `command -p` /
+    # `sudo -E` / `nohup env` など）。前置トークンを全部走査するので語彙が要らず、
+    # 語彙を持たない実装は語彙の陳腐化で壊れない。
     "block_no_verify._GIT_CONFIG_READ_ONLY_FLAGS": frozenset(
         {"--get", "--get-all", "--get-regexp", "--list", "--show-origin"}
     ),
@@ -1049,8 +1047,8 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
 # `_SECRET_PATTERNS` は 14 本の正規表現リテラルで、期待値へ複製すると同じ綴りを
 # 2 か所で保守することになる。この集合には外部の突き合わせ先（`claq.mem.redaction`）
 # があり、`tests/mem/test_redaction.py::TestVendorPatternSync` が「同じ検体に両者が
-# 反応するか」という振る舞いで全ベンダ形式を固定している。H-11 の方針
-# （「外部に抽出元がある場合はそちらを使う」）どおり、そちらを単一の関門にする。
+# 反応するか」という振る舞いで全ベンダ形式を固定している。「外部に抽出元が
+# ある場合はそちらを使う」方針どおり、そちらを単一の関門にする。
 _EXTERNALLY_PINNED_VOCABULARIES: dict[str, str] = {
     "commit_quality_scanner._SECRET_PATTERNS": (
         "tests/mem/test_redaction.py::TestVendorPatternSync が redaction 側との"
@@ -1129,7 +1127,7 @@ def test_vocabulary_inventory_is_complete() -> None:
     """`claq.hooks` 配下の語彙集合が 1 つ残らず期待値表に載っていること（層2 の関門）。
 
     層2 の完全一致検査は「表に載っている集合」しか守れない。表から行を消せば、
-    その集合は無検査に戻る（H-11 が層1 について指摘したのと同じ罠が 1 段上で
+    その集合は無検査に戻る（層1 にある罠と同じものが 1 段上で
     再現する）。実装側を機械的に数え上げて見出し集合と突き合わせることで、
     表の行を消す・新しい語彙を足して表へ書き忘れる、のどちらも赤くする。
     """
@@ -1210,7 +1208,7 @@ _VOCABULARY_DENY_ALLOW_CASES = (
         "{item} -i s/x/y/ ruff.toml",
         "{item} s/x/y/ ruff.toml",
     ),
-    # wrapper は「実行位置に無ければ allow」を対にする（M-01 の判定軸）。
+    # wrapper は「実行位置に無ければ allow」を対にする（実行位置の判定軸）。
     ("bash_config_protection._COMMAND_POSITION_WRAPPERS", "bash_config_protection", "{item} rm ruff.toml", "echo {item} rm ruff.toml"),
     (
         "bash_config_protection._WRAPPER_VALUE_SHORT_OPTIONS",
@@ -1334,7 +1332,7 @@ def _expand(cases: tuple[tuple[Any, ...], ...]) -> list[tuple[Any, ...]]:
 
     展開元は必ず `_EXPECTED_VOCABULARIES`（チェックイン済みの期待値）にする。
     実装側の集合を入力にすると、要素を消したときに parametrize ケースも一緒に
-    消えてスイートが緑のまま通る（H-11 で実測した罠）。
+    消えてスイートが緑のまま通る。
 
     Args:
         cases: 先頭要素が語彙の完全修飾名である定義タプルの列。
@@ -1594,9 +1592,9 @@ def test_env_injection_is_denied_through_any_wrapper(
 ) -> None:
     """前置にラッパやオプションが何個あっても env 注入を deny すること。
 
-    ラッパ名とそのオプションを列挙して読み飛ばす設計だった頃、列挙に無い形は
-    走査が途中で止まって素通りしていた（実測: 下 5 形が exit 0）。列挙を捨てて
-    前置トークンを全部走査する形にした回帰防止。
+    ラッパ名とそのオプションを列挙して読み飛ばす設計では、列挙に無い形
+    （下の 5 形）で走査が途中で止まって素通りする。前置トークンを全部走査する
+    形の回帰防止。
     """
     assert _run("block_no_verify", _bash(command), monkeypatch) == 2
 
@@ -1625,7 +1623,7 @@ def test_huge_single_token_is_blocked_before_tokenizing(monkeypatch: pytest.Monk
 
     `MAX_COMMAND_TOKENS` はトークン**数**しか縛らないが、走査コストは `shlex` の
     **バイト数**の二次で決まる。1MB の単一トークンはトークン数 2 なので予算を
-    素通りし、実測 12.71 秒（timeout 15 秒に対し余裕 15%）かかっていた。host が
+    素通りすると、実測 12.71 秒（timeout 15 秒に対し余裕 15%）かかる。host が
     kill した hook は exit code を返さないため silent fail-open になる。
     """
     from claq.hooks.hook_common import MAX_COMMAND_BYTES, command_exceeds_scan_budget
@@ -1634,7 +1632,7 @@ def test_huge_single_token_is_blocked_before_tokenizing(monkeypatch: pytest.Monk
 
     assert command_exceeds_scan_budget(huge) is True
     assert _run("block_no_verify", _bash(huge), monkeypatch) == 2
-    # 上限の内側は従来どおり通る（拾いすぎの対照）
+    # 上限の内側は通る（拾いすぎの対照）
     assert command_exceeds_scan_budget("echo " + "A" * 1000) is False
 
 

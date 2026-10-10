@@ -1,10 +1,9 @@
 """stdin を読めなかったとき、4 つの保護 hook が揃って deny することのテスト。
 
-Windows の通常パイプでは ``select.select`` が ``OSError`` になり、旧実装は
-それを「入力なし」へ正規化していた。その結果 ``git status`` と
-``git commit --no-verify`` が揃って exit 0 になり、保護 hook が 1 バイトも
-検査しないまま素通りしていた（release-verify 2026-09-03 の P1-004。
-`docs/adr/hook-failure-direction.md`）。
+Windows の通常パイプでは ``select.select`` が ``OSError`` になる。それを
+「入力なし」へ正規化すると ``git status`` と ``git commit --no-verify`` が
+揃って exit 0 になり、保護 hook が 1 バイトも検査しないまま素通りする
+（`docs/adr/hook-failure-direction.md`）。
 
 「読む対象が無い」（tty 起動・stdin 未接続・即 EOF）と「読めなかった」を
 区別するのが修正の核心なので、両方をこの 1 ファイルで並べて固定する。
@@ -13,7 +12,7 @@ Windows の通常パイプでは ``select.select`` が ``OSError`` になり、�
 
 デシジョンテーブル:
   - StdinUnavailableError → exit 2 + deny JSON + hook 名入りの stderr
-  - 空文字列（payload なし） → exit 0（素通り。F-01 の契約を維持）
+  - 空文字列（payload なし） → exit 0（素通り。空入力は非ブロッキングの契約を維持）
 """
 
 from __future__ import annotations
@@ -110,7 +109,7 @@ def test_absent_stdin_still_passes_through(
     reader_module: str,
     hook_name: str,
 ) -> None:
-    """payload が無い場合（tty 起動等）は従来どおり素通りすること。
+    """payload が無い場合（tty 起動等）は素通りすること。
 
     ここまで deny にすると、payload を渡さない host で全ツール呼び出しが
     拒否され、セッションが復旧不能になる。「入力が無い」と「読めなかった」を
@@ -128,12 +127,11 @@ _LAUNCHER = _PLUGIN_ROOT / "src" / "claq" / "launcher.py"
 def test_stalled_stdin_exits_cleanly_in_a_real_process(tmp_path: Path) -> None:
     """開いたまま何も書かれない stdin でも、abort せず exit 2 で終わること。
 
-    読み取りワーカーを daemon スレッドへ隔離した当初、ワーカーは
-    `BufferedReader.read1()` の中で BufferedReader のロックを握ったまま
-    ブロックしていた。本スレッドがタイムアウトで deny を出して戻ると、
+    ワーカーが `BufferedReader.read1()` の中で BufferedReader のロックを
+    握ったままブロックすると、本スレッドがタイムアウトで deny を出して戻った後、
     インタプリタ終了時の stdin 後始末がそのロックを取れず
     `Fatal Python error: _enter_buffered_busy` で abort し、終了コードが 2 で
-    なくなっていた（実測）。この失敗はプロセス終了時にしか現れないため、
+    なくなる。この失敗はプロセス終了時にしか現れないため、
     実プロセスで確認する。
     """
     env = {

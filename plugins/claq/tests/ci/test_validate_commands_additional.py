@@ -27,7 +27,7 @@ def test_validate_commands_helper(tmp_path: Path) -> None:
         ("`/instinct promote`", ["instinct"]),
         ("`/instinct promote <key>`", ["instinct"]),
         ("`/first arg` と `/second`", ["first", "second"]),
-        # 引数部は空白始まりに限るので、パス表記は従来どおり一致しない。
+        # 引数部は空白始まりに限るので、パス表記は一致しない。
         ("`/usr/bin/env python`", []),
         ("`/tmp/x`", []),
     ],
@@ -35,9 +35,9 @@ def test_validate_commands_helper(tmp_path: Path) -> None:
 def test_command_reference_pattern_catches_arguments(text: str, expected: list[str]) -> None:
     """引数付きのコマンド参照も名前を取り出せること。
 
-    閉じバッククォートが名前の直後に来る形だけを見ていた頃は、実測で
+    閉じバッククォートが名前の直後に来る形だけを見ると、
     ``/does-not-exist arg`` が素通りし、同じ行の ``/also-missing`` だけが
-    エラーになっていた。
+    エラーになる。
     """
     assert [m.group(1) for m in validate_commands._COMMAND_REFERENCE_PATTERN.finditer(text)] == expected
 

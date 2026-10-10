@@ -222,7 +222,7 @@ def test_detect_git_hosting_service_uses_host_only(
 
 
 def test_detect_git_hosting_service_survives_non_ascii_remote_url(tmp_path: Path) -> None:
-    """非 ASCII を含む origin URL でも例外を出さないこと（H-19a）。
+    """非 ASCII を含む origin URL でも例外を出さないこと。
 
     `text=True` に encoding 指定が無いと locale 依存のデコードになり、
     `LC_ALL=C`（preferred encoding = US-ASCII）環境で `UnicodeDecodeError` が

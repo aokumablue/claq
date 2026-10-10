@@ -159,7 +159,7 @@ _ONE_MIB = 1024 * 1024
 _SESSION_END_BUDGET_SECONDS = 10.0
 
 # 1MiB 入力 1 回あたりに許す上限。予算の 1/5 に取り、二次オーダーへ戻れば
-# 必ず超える水準にする（修正前の実測: JWT 形 約 280 秒・email 形 約 43 秒）。
+# 必ず超える水準にする（二次オーダーでの実測: JWT 形 約 280 秒・email 形 約 43 秒）。
 _SINGLE_CALL_LIMIT_SECONDS = 2.0
 
 
@@ -180,10 +180,10 @@ def _repeat_to(unit: str, size: int) -> str:
 
 
 # 二次オーダーを誘発する worst-case 入力の単位文字列。
-# - `eyJ` 反復は JWT パターンの開始位置を 3 文字ごとに立てる（lookbehind 前は
-#   そのたびに残り全体を貪欲走査していた）。
+# - `eyJ` 反復は JWT パターンの開始位置を 3 文字ごとに立てる（lookbehind が
+#   無いとそのたびに残り全体を貪欲走査する）。
 # - 残りは「クラス内の長い連続に `\b` が多数立つ」形で、email パターンの
-#   local part が開始位置ごとに残り全体を走査していた形。
+#   local part が無界なら開始位置ごとに残り全体を走査する形。
 _WORST_CASE_UNITS: tuple[tuple[str, str], ...] = (
     ("jwt_prefix_repeat", "eyJ"),
     ("email_local_plus", "A" * 39 + "+"),
@@ -271,7 +271,7 @@ class TestJwtPatternNarrowing:
     """JWT パターンの lookbehind による絞り込みを固定する。"""
 
     def test_jwt_after_delimiter_is_redacted(self) -> None:
-        """区切りの直後に現れる JWT は従来どおりマスクされる。
+        """区切りの直後に現れる JWT はマスクされる。
 
         ローカル変数を credential 系の語（token / secret / password / api_key）
         で命名しないこと。その語にクォート付きの値を代入する行は、それ自身が
@@ -324,7 +324,7 @@ class TestEmailLocalPartBound:
         assert _email_pattern().search(("a" * 65) + "@example.com") is None
 
     def test_ordinary_address_still_redacted(self) -> None:
-        """実在しうる長さのアドレスは `redact` 経由で従来どおりマスクされる。"""
+        """実在しうる長さのアドレスは `redact` 経由でマスクされる。"""
         assert redact("contact: first.last+tag@sub.example.co.jp") == "contact: " + _PLACEHOLDER
 
 

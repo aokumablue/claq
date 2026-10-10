@@ -687,7 +687,7 @@ def test_unscoped_fill_mode_both_is_reported(tmp_path: Path) -> None:
     """[data-animate] の外で both / backwards を使うと落ちる。
 
     遅延中と停止中に `from` の状態が貼り付くため、背面タブでは要素が
-    見えないまま固まる。実際にこの形で出荷しかけた。
+    見えないまま固まる。
     """
     dest = _copy_site(tmp_path)
     assert "both/backwards" in _append(
@@ -1090,7 +1090,7 @@ def test_chart_axis_removal_is_reported(tmp_path: Path) -> None:
     """目盛りラベル・目盛り線を消すとそれぞれ違反になる。
 
     テンプレート同梱のチャートは正しい軸を持つが、モデルが新しく書いた図から
-    軸が落ちても検知器が無い間は全項目が合格していた。両方向を固定する。
+    軸が落ちても検知器が無ければ全項目が合格する。両方向を固定する。
     """
     dest = _copy_site(tmp_path)
     assert "目盛りラベル" in _edit(dest, "index.html", ('class="axis-text"', 'class="ax"'))
@@ -1218,9 +1218,9 @@ def test_chart_without_scroll_wrapper_is_reported() -> None:
 def test_scatter_and_stack_marks_are_checked_for_axes() -> None:
     """散布点・積み上げ区画も直交軸として軸検査の対象になること。
 
-    `chart-forms.md` へ散布図と 100% 積み上げ横棒を足したとき、マーク class の
-    一覧へ `point` / `seg` を足し忘れ、その 2 形だけが軸ゼロでも素通りしていた。
-    形の語彙を広げて検知器を広げないと、新しい形だけが無検査になる。
+    `chart-forms.md` へ図の形を足したときにマーク class の一覧（`point` / `seg`
+    など）へ足し忘れると、その形だけが軸ゼロでも素通りする。形の語彙を広げて
+    検知器を広げないと、新しい形だけが無検査になる。
     """
     scatter = '<svg class="chart chart--scatter" viewBox="0 0 720 380"><circle class="point" r="6"/></svg>'
     stack = '<svg class="chart chart--stack" viewBox="0 0 720 128"><rect class="seg" width="100"/></svg>'
@@ -1233,8 +1233,7 @@ def test_scatter_and_stack_marks_are_checked_for_axes() -> None:
 def test_tick_steps_must_be_nice_numbers() -> None:
     """目盛りの刻みが 1・2・5 の倍数でなければ違反になること。
 
-    テンプレート自身が刻み 45 と 150（最大値を本数で割った端数）で出荷されていた。
-    散文の規則だけでは守られない。
+    最大値を本数で割った端数（45 や 150）の刻みは、散文の規則だけでは防げない。
     """
     def svg(*labels: str) -> str:
         cells = "".join(f'<text class="axis-text" x="10" y="10">{label}</text>' for label in labels)
@@ -1270,8 +1269,8 @@ def test_template_charts_use_nice_tick_steps() -> None:
 def test_every_role_img_svg_has_title_and_desc() -> None:
     """`svg[role="img"]` が例外なく `<title>`/`<desc>` を持つこと。
 
-    スパークライン 4 枚は `aria-label` だけで出荷されていた。design.md は
-    `svg[role="img"]` 全てに両方を求めているので、模写元が破っていると散文が効かない。
+    design.md は `svg[role="img"]` 全てに両方を求めている（スパークラインのような
+    小さな図も含む）。模写元が破っていると散文が効かない。
     """
     html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
     bare = [

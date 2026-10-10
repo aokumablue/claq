@@ -238,7 +238,7 @@ class TestStdinIsAbsent:
 
     ここが True になる経路だけが「payload なし = 素通り」であり、それ以外は
     実際に読んでみて判断する。select による readiness 判定は Windows の
-    パイプで OSError になり「入力なし」に化けていたため撤去した（P1-004）。
+    パイプで OSError になり「入力なし」に化けるため使わない。
     """
 
     def test_tty_is_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -266,7 +266,7 @@ class TestStdinIsAbsent:
         """isatty() が例外化した場合は「無い」と決めつけず、読み取り側へ委ねる。
 
         ここで True を返すと、判定不能を「payload なし = 素通り」へ倒すことに
-        なり、P1-004 と同じ fail-open を別経路で再生産する。
+        なり、Windows のパイプで起きる fail-open を別経路で再生産する。
         """
 
         class _RaisingStdin:
@@ -329,9 +329,9 @@ class TestReadRawStdin:
 class TestReadStdinBytesChunkedDeadline:
     """`_read_stdin_bytes` のチャンクループ・デッドライン挙動のテスト。
 
-    NG-B2 回帰防止: `.buffer.read(max_bytes)` 1 回きりの旧実装は、書き手が
+    回帰防止: `.buffer.read(max_bytes)` 1 回きりの読み取りは、書き手が
     `max_bytes` に満たないデータしか送らず接続も閉じない場合に無期限へ
-    ブロックしていた。現行実装はブロッキング read をワーカースレッドへ隔離し、
+    ブロックする。実装はブロッキング read をワーカースレッドへ隔離し、
     本スレッドは queue のタイムアウトで打ち切る（select は使わない）。
     """
 
@@ -393,8 +393,8 @@ class TestReadStdinBytesChunkedDeadline:
     def test_first_byte_timeout_raises_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """最初のバイトが届かないまま予算切れになったら例外を送出する。
 
-        旧実装はここで空文字列を返しており、保護 hook が payload を 1 バイトも
-        読まないまま許可側へ抜けていた（P1-004 の fail-open）。
+        ここで空文字列を返すと、保護 hook が payload を 1 バイトも
+        読まないまま許可側へ抜ける（fail-open）。
         """
         monkeypatch.setattr(hook_common, "STDIN_FIRST_BYTE_TIMEOUT", 0.05)
         monkeypatch.setattr(hook_common.sys, "stdin", _BlockingStdin([]))
@@ -408,7 +408,7 @@ class TestReadStdinBytesChunkedDeadline:
     ) -> None:
         """1 バイトも読めていない状態での read1 例外は「読めなかった」として送出する。
 
-        Windows の通常パイプで select が OSError になっていた経路と同型で、
+        Windows の通常パイプで select が OSError になる経路と同型で、
         ここを空文字列へ正規化すると allow と deny が同じ exit 0 になる。
         """
 
@@ -545,7 +545,7 @@ class TestStdinUnreadableMessage:
 
 
 class TestResolveRepoRoot:
-    """`resolve_repo_root`（A-06 共有ヘルパー）の解決・プロセス内キャッシュのテスト。
+    """`resolve_repo_root`（共有ヘルパー）の解決・プロセス内キャッシュのテスト。
 
     `resolve_repo_root` は `functools.lru_cache` を持つため、各テストの
     前後で `cache_clear()` してテスト間の漏れ込みを防ぐ。
@@ -620,7 +620,7 @@ class TestResolveRepoRoot:
 
 
 class TestIsGitExecutableToken:
-    """is_git_executable_token（H-04 共有正規化。block_no_verify /
+    """is_git_executable_token（共有正規化。block_no_verify /
     pre_bash_commit_quality が共に使う）のテスト。
     """
 
@@ -644,11 +644,11 @@ class TestIsGitExecutableToken:
 
 
 class TestNormalizeExecutableName:
-    """normalize_executable_name（H-6 共有正規化）のテスト。
+    """normalize_executable_name（共有正規化）のテスト。
 
     `is_git_executable_token` / `bash_config_protection` の実行名照合 /
     `pre_bash_commit_quality` の mutation 語彙が同じ規則を使うことを固定する。
-    片方だけ `.exe` を落とす・片方だけ大小を区別する状態が繰り返し出荷された。
+    片方だけ `.exe` を落とす・片方だけ大小を区別する状態を防ぐ。
     """
 
     @pytest.mark.parametrize(
@@ -673,7 +673,7 @@ class TestNormalizeExecutableName:
 
 
 class TestNormalizeProtectedName:
-    """normalize_protected_name（C-2 共有正規化）のテスト。
+    """normalize_protected_name（共有正規化）のテスト。
 
     実行名側と**同じ case 演算**を使うこと、および `.exe` は落とさないこと
     （保護対象は設定ファイルであり `ruff.toml.exe` を同一視する根拠が無い）を
@@ -698,12 +698,12 @@ class TestNormalizeProtectedName:
 
 
 class TestIsInplaceEditFlag:
-    """is_inplace_edit_flag（H-5 共有述語）のテスト。
+    """is_inplace_edit_flag（共有述語）のテスト。
 
     `bash_config_protection`（保護対象への in-place 書き込み）と
     `pre_bash_commit_quality`（commit 前の作業ツリー変更）が同じ語彙を使うことを
-    固定する。後者は `not arg.startswith("--")` で長形式を明示的に除外しており、
-    `sed --in-place ... && git commit -am x` で両ガードが同時に不発だった。
+    固定する。どちらかが長形式を除外すると、
+    `sed --in-place ... && git commit -am x` でガードが不発になる。
     """
 
     @pytest.mark.parametrize(
@@ -741,7 +741,7 @@ class TestIsInplaceEditFlag:
 
 
 class TestResolveEffectiveTarget:
-    """resolve_effective_target（H-02 共有 helper。config_protection /
+    """resolve_effective_target（共有 helper。config_protection /
     bash_config_protection が symlink 解決に使う）のテスト。
     """
 
@@ -796,7 +796,7 @@ class TestResolveEffectiveTarget:
 
         `Path.cwd() / raw_path` はそのままでは ``~`` を展開せず、
         ``<cwd>/~/.claq/logs/x`` のようなカレントディレクトリ配下の
-        リテラルなフォルダ名として扱ってしまう（H-01）。
+        リテラルなフォルダ名として扱ってしまう。
         """
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.delenv("CLAQ_HOME", raising=False)
@@ -878,8 +878,8 @@ class TestReadRawStdinWithTruncation:
 class TestParseJsonObject:
     """parse_json_object の直接テスト。
 
-    block_no_verify / config_protection は F-01/F-02 対応で raw が空の
-    場合に parse_json_object を呼ばず早期 return するようになったため、
+    block_no_verify / config_protection は raw が空の場合に
+    parse_json_object を呼ばず早期 return するため、
     空・空白のみ入力を渡す経路をここで直接固定する。
     """
 
@@ -945,7 +945,7 @@ class TestReadTailBytes:
 
 
 class TestRecentBgFailureNotice:
-    """recent_bg_failure_notice のテスト（§6.2 対応）。"""
+    """recent_bg_failure_notice のテスト。"""
 
     def _log_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         monkeypatch.setenv("HOME", str(tmp_path))
@@ -1077,7 +1077,7 @@ class TestDetachedSpawnKwargs:
     """`detached_spawn_kwargs`（プロセスグループ分離）のプラットフォーム契約。
 
     `start_new_session=True` は Windows で `ValueError` になり、SessionEnd の
-    handoff hook がそこで落ちていた（P1-013）。プラットフォーム名ではなく
+    handoff hook がそこで落ちる。プラットフォーム名ではなく
     `os.setsid` の有無という capability で分岐することを固定する。
     """
 
@@ -1131,7 +1131,7 @@ class TestDetachProcess:
         assert captured["cmd"][5:] == ["python3", "-m", "claq.mem.cli", "observe"]
         assert captured["env"]["X"] == "1"
         # 呼び出し元の env はそのまま維持しつつ、対象プロセスの stdout/stderr を
-        # DEVNULL の代わりに追記させるログパスが差し込まれること（F-18 対応）。
+        # DEVNULL の代わりに追記させるログパスが差し込まれること。
         log_path = Path(captured["env"]["CLAQ_BG_LOG_PATH"])
         assert log_path.parent == tmp_path / ".claq" / "logs"
         assert log_path.name.startswith("bg-") and log_path.name.endswith(".log")
@@ -1426,7 +1426,7 @@ class TestHeredocNormalization:
             ("cat <<A <<B", [("A", False), ("B", False)]),
             # 「幻の演算子」: heredoc を開始しない `<<` を演算子として採らない。
             # 採ると後続の**実行される**行が本文として捨てられ、保護フックが
-            # 素通りする（実測。C-1）。
+            # 素通りする。
             ("# <<EOF", []),
             ("  # <<EOF", []),
             ("cat x # <<EOF", []),
@@ -1606,7 +1606,7 @@ class TestHeredocNormalization:
                 "cat <<'EOF' |\nbash\ngit commit --no-verify\nEOF",
                 "cat <<'EOF' |\nbash\ngit commit --no-verify\nEOF",
             ),
-            # C-1「幻の演算子」。heredoc が開始しない `<<` を演算子として採ると、
+            # 「幻の演算子」。heredoc が開始しない `<<` を演算子として採ると、
             # 実行される後続行が本文として消え、保護フック 3 種が同時に素通りする。
             (
                 "コメント内の << では本文を剥がさない",
@@ -1772,7 +1772,7 @@ class TestUnquotedNewlineNormalization:
     ) -> None:
         """`#` の読み捨ては行末までで、クォート内・エスケープ後には及ばないこと。
 
-        `shlex` のコメント処理に任せていた頃は `#` 以降が入力**末尾**まで捨てられ、
-        2 行目の `git commit --no-verify` が丸ごと未検査になっていた（実測）。
+        `shlex` のコメント処理に任せると `#` 以降が入力**末尾**まで捨てられ、
+        2 行目の `git commit --no-verify` が丸ごと未検査になる。
         """
         assert hook_common.tokenize(command) == expected, label

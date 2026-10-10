@@ -1,4 +1,4 @@
-"""`bash_config_protection` フックのテスト（A-06: Bash 経由の設定ファイル直接書き換え保護）。"""
+"""`bash_config_protection` フックのテスト（Bash 経由の設定ファイル直接書き換え保護）。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def _bash_payload(command: str) -> str:
 
 @pytest.fixture(autouse=True)
 def _fixed_repo_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """`find_protected_write` の repo スコープ判定（A-06）を tmp_path 配下に固定する。
+    """`find_protected_write` の repo スコープ判定を tmp_path 配下に固定する。
 
     実行環境の git リポジトリに依存せず、cwd と `resolve_repo_root` の両方を
     同一の一時ディレクトリに揃えることでテストを決定的にする。
@@ -43,20 +43,20 @@ class TestFindProtectedWrite:
             "sed -i.bak 's/a/b/' setup.cfg",
             "cat <<'EOF' > pyproject.toml\nx\nEOF",
             "true && printf x > pyproject.toml",
-            # A-02: 拡張したリダイレクト演算子。
+            # 数字プレフィックス付き等のリダイレクト演算子。
             "echo x &> pyproject.toml",
             "echo x >| pyproject.toml",
             "echo x 1> pyproject.toml",
             "echo x 2>> pyproject.toml",
-            # A-02: 書き込み先が引数位置に明示されるコマンド群。
+            # 書き込み先が引数位置に明示されるコマンド群。
             "cp src.py pyproject.toml",
             "mv src.py pyproject.toml",
             "install -m 644 src.py pyproject.toml",
             "ln -f /dev/null pyproject.toml",
-            # F-07: -f 無しの新規 symlink 作成も、以後その名前を読む処理を
+            # -f 無しの新規 symlink 作成も、以後その名前を読む処理を
             # リンク先へ差し替えるため実質的な書き込み。
             "ln -s weak.toml pyproject.toml",
-            # F-07: 長オプション形式の --force も検出する。
+            # 長オプション形式の --force も検出する。
             "ln --force /dev/null pyproject.toml",
             "dd if=/dev/zero of=pyproject.toml",
             "perl -i -pe s/a/b/ pyproject.toml",
@@ -134,14 +134,13 @@ class TestFindProtectedWrite:
     def test_detects_write_through_command_wrapper(self, command: str) -> None:
         """wrapper 経由（sudo/env/command）でも最終引数・ln -f を検出する。
 
-        tee/sed/perl/dd は `_command_index` を通していたが cp/mv/install と
-        ln -f は素の `segment[0]` を見ており、`sudo cp ... pyproject.toml` が
-        素通りしていた。
+        cp/mv/install と ln -f も tee/sed/perl/dd と同じく `_command_index` を通す
+        （素の `segment[0]` を見ると `sudo cp ... pyproject.toml` が素通りする）。
         """
         assert bash_config_protection.find_protected_write(command) is not None
 
     def test_allows_protected_basename_outside_repo_root(self) -> None:
-        """A-06 回帰防止: リポジトリ外の同名ファイルへの書き込みは allow する。"""
+        """回帰防止: リポジトリ外の同名ファイルへの書き込みは allow する。"""
         assert (
             bash_config_protection.find_protected_write(
                 "printf x > /definitely-outside-the-repo/pyproject.toml"
@@ -154,10 +153,10 @@ class TestFindProtectedWrite:
     ) -> None:
         """`~` 展開後にリポジトリ外へ解決される同名ファイルは allow する。
 
-        `_expand_leading_tilde`（2026-09-12 HIGH-1 対応）が無いと ``~`` は
+        `_expand_leading_tilde` が無いと ``~`` は
         cwd 相対の文字通りのフォルダ名として扱われ、cwd がリポジトリ配下
         にある限り ``<repo_root>/~/outside/pyproject.toml`` という構造に
-        なって `_within_repo_root` が誤って True を返し deny していた
+        なって `_within_repo_root` が誤って True を返し deny する
         （false positive）。展開後は実際の home 配下に解決されるため、
         home がリポジトリ外にあればこの回帰は起きない。
         """
@@ -170,7 +169,7 @@ class TestFindProtectedWrite:
         )
 
     def test_allows_when_repo_root_undetermined(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A-06: リポジトリルートが決定できない場合は allow する（deny に倒さない）。"""
+        """リポジトリルートが決定できない場合は allow する（deny に倒さない）。"""
         monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: None)
 
         assert bash_config_protection.find_protected_write("printf x > pyproject.toml") is None
@@ -213,9 +212,9 @@ class TestFindProtectedWrite:
     @pytest.mark.parametrize(
         "command",
         [
-            # M-01: tee/sed/perl/dd/of= が「実行位置」ではなくただの引数文字列
+            # tee/sed/perl/dd/of= が「実行位置」ではなくただの引数文字列
             # として現れるだけの場合は allow する（コマンド名の文字列一致だけ
-            # で deny していた過去の実装は誤検出していた）。
+            # で deny すると誤検出する）。
             "echo tee pyproject.toml",
             "echo of=pyproject.toml",
             "echo sed -i pyproject.toml",
@@ -225,14 +224,14 @@ class TestFindProtectedWrite:
         ],
     )
     def test_command_position_non_matches_allow(self, command: str) -> None:
-        """M-01: tee/sed/perl/dd が実行位置に無ければ allow する。"""
+        """tee/sed/perl/dd が実行位置に無ければ allow する。"""
         assert bash_config_protection.find_protected_write(command) is None
 
     @pytest.mark.parametrize(
         "command",
         [
-            # M-01: wrapper を挟んでも実行位置の特定は維持する（過検出防止の
-            # ための修正で既存の wrapper 検出力を落とさない）。
+            # wrapper を挟んでも実行位置の特定は維持する（過検出防止の
+            # ために wrapper 検出力を落とさない）。
             "env X=1 tee pyproject.toml",
             "sudo tee pyproject.toml",
             "command tee pyproject.toml",
@@ -246,7 +245,7 @@ class TestFindProtectedWrite:
         ],
     )
     def test_wrapped_command_position_still_detected(self, command: str) -> None:
-        """M-01: env/sudo/command wrapper 経由でも実行位置を正しく特定して deny する。"""
+        """env/sudo/command wrapper 経由でも実行位置を正しく特定して deny する。"""
         assert bash_config_protection.find_protected_write(command) is not None
 
     @pytest.mark.parametrize(
@@ -265,7 +264,7 @@ class TestFindProtectedWrite:
     def test_within_repo_root_returns_false_on_resolve_oserror(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """cwd の resolve() が OSError を投げても deny せず False を返す（可用性優先。H-02 の
+        """cwd の resolve() が OSError を投げても deny せず False を返す（可用性優先。
         resolve_effective_target 経由でこの分岐に入る）。
         """
 
@@ -307,8 +306,8 @@ class TestMain:
     ) -> None:
         """先頭キーが無害でも後続キーの保護対象書き込みをブロックする。
 
-        先勝ちで 1 キーだけ見ていた頃は、`tool_input` に無害なコマンドを置き
-        `toolArgs` に保護対象への書き込みを載せると exit 0 で素通りした（実測）。
+        先勝ちで 1 キーだけ見ると、`tool_input` に無害なコマンドを置き
+        `toolArgs` に保護対象への書き込みを載せるだけで素通りする。
         """
         payload = json.dumps(
             {
@@ -410,7 +409,7 @@ class TestMain:
 
 
 class TestMalformedFallbackCoversDestructiveVerbs:
-    """F-07: malformed JSON fallback がトークン化経路と同じ verb 集合を見ること。"""
+    """malformed JSON fallback がトークン化経路と同じ verb 集合を見ること。"""
 
     @pytest.mark.parametrize(
         "raw_input",
@@ -438,8 +437,8 @@ class TestMalformedFallbackCoversDestructiveVerbs:
 class TestPathProtectionPropagates:
     """`config_protection` の path ベース保護が Bash 経路にも伝播する。
 
-    `bash_config_protection` は A-06 で「`config_protection` の Edit/Write 限定を
-    Bash 側で補完する」ために作られた。basename 集合だけを import して path
+    `bash_config_protection` の目的は「`config_protection` の Edit/Write 限定を
+    Bash 側で補完する」こと。basename 集合だけを import して path
     ベースの保護（`.git/hooks/` 配下）を取りこぼすと、同じ書込みが Write では
     exit 2、Bash では exit 0 という非対称が生まれ、このモジュールの存在理由
     そのものに反する。
@@ -570,7 +569,7 @@ class TestModeChangeIsBlocked:
 
 
 class TestHomeLogDirectoryProtection:
-    """``~/.claq/logs/`` への Bash 経由の書込みを保護する（2026-09-12 HIGH-1 対応）。
+    """``~/.claq/logs/`` への Bash 経由の書込みを保護する。
 
     `recent_bg_failure_notice` が当日・前日のログ末尾行を無条件で次回
     SessionStart の `<claq-memory>` へ注入するため、このディレクトリへの

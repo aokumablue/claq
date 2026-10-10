@@ -51,8 +51,8 @@ def test_links_when_installed_plugin_exists(tmp_path: Path) -> None:
 def test_no_installed_plugin_exits_nonzero_without_link(tmp_path: Path) -> None:
     """installed-plugins が無ければ symlink を作らず非 0 で終わる。
 
-    以前は「何もできなかった」場合も exit 0 だったため、呼び出し側が成功と
-    区別できなかった（F-12）。
+    「何もできなかった」場合に exit 0 を返すと、呼び出し側が成功と
+    区別できない。
     """
     result = _run_script(tmp_path, check=False)
 
@@ -65,8 +65,8 @@ def test_no_installed_plugin_exits_nonzero_without_link(tmp_path: Path) -> None:
 def test_picks_newest_install_like_the_python_resolver(tmp_path: Path) -> None:
     """複数インストールが同居する場合、mtime 最新を選ぶこと。
 
-    シェル側が glob 先頭（辞書順）を採っていた頃は、実行される bootstrap
-    コードと symlink の張り先が別バージョンになりえた（F-12）。
+    シェル側が glob 先頭（辞書順）を採ると、実行される bootstrap
+    コードと symlink の張り先が別バージョンになりうる。
     """
     older = _make_installed_plugin(tmp_path, name="claq-aaa111")
     newer = _make_installed_plugin(tmp_path, name="claq-zzz999")

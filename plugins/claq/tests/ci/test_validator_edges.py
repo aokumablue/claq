@@ -31,7 +31,7 @@ def _raise_oserror_on_read(monkeypatch: pytest.MonkeyPatch, broken_file: Path) -
 
 def test_validate_skills_handles_missing_dir_and_success(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     missing = tmp_path / "missing-skills"
-    # 既定では欠落を失敗として扱う（F-03）。--optional でだけスキップする。
+    # 既定では欠落を失敗として扱う。--optional でだけスキップする。
     assert validate_skills.validate_skills(missing) == 1
     assert "見つかりません" in capsys.readouterr().err
     assert validate_skills.validate_skills(missing, optional=True) == 0
@@ -122,7 +122,7 @@ def test_validate_agents_missing_dir_fails_unless_optional(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     missing = tmp_path / "missing-agents"
-    # 既定では欠落を失敗として扱う（F-03）。--optional でだけスキップする。
+    # 既定では欠落を失敗として扱う。--optional でだけスキップする。
     assert validate_agents.validate_agents(missing) == 1
     assert "見つかりません" in capsys.readouterr().err
     assert validate_agents.validate_agents(missing, optional=True) == 0
@@ -186,10 +186,10 @@ def test_validate_commands_covers_warnings_and_success(tmp_path: Path, capsys: p
 
 
 def test_validate_commands_fails_on_missing_dir(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """`commands/` が無い場合は既定で失敗すること（F-03）。
+    """`commands/` が無い場合は既定で失敗すること。
 
-    以前は無条件スキップで exit 0 だったため、``commands/`` を消す・改名する
-    だけで相互参照検証チェーン全体が「成功」を報告できた。
+    無条件スキップで exit 0 にすると、``commands/`` を消す・改名する
+    だけで相互参照検証チェーン全体が「成功」を報告できてしまう。
     """
     root = tmp_path
     assert validate_commands.validate_commands(root, root / "commands", root / "agents", root / "skills") == 1

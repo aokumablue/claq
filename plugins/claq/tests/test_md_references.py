@@ -47,15 +47,15 @@ def test_relative_md_references_resolve() -> None:
     相対も repo root 相対も解決手段を持たない。referrer 相対だけが唯一実行可能な
     形式なので、その基準のみで検査する。
 
-    以前は ``../`` と ``references/`` 始まりだけを対象にしていたため、
+    ``../`` と ``references/`` 始まりだけを対象にすると、
     ``skills/checkpoint/SKILL.md``（repo root 相対のつもり）や ``schemas.md``
-    （別ディレクトリのファイル）のような参照が検査を素通りしていた。
+    （別ディレクトリのファイル）のような参照が検査を素通りする。
 
     referrer 相対で解決しても**プラグインディレクトリの外へ抜ける参照は不合格**
     にする。``docs/`` はリポジトリ統治文書であって配布物に含まれないため、
     ``../../../../docs/adr/xxxx.md`` はリポジトリでは解決するのに installed build
-    では 100% 切れる（実測: v0.9.43 のインストール済みキャッシュで 5 件が dangling）。
-    リポジトリ基準で検査すると通ってしまうこの死角が、ドリフトを生き残らせていた。
+    では 100% 切れる。リポジトリ基準で検査すると通ってしまうこの死角が、
+    ドリフトを生き残らせる。
     出典として ADR を挙げたい場合は ``docs/adr/`` 始まりのリポジトリルート基準表記
     を使う（``_REPO_ROOT_MD_REF_PREFIXES``）。
     """
@@ -110,8 +110,8 @@ def test_readme_command_table_matches_filesystem() -> None:
 def test_readme_agent_skill_command_counts_match_filesystem() -> None:
     """README 内 `Agents (N)` / `Skills (N` / `Commands (N)` の件数表記が実体と一致すること。
 
-    README.md v0.9.30 時点では `Agents (16)`（実 13）のような在庫ドリフトが
-    起きていた。表記が複数箇所にあってもすべて実数と一致することを確認する。
+    `Agents (16)`（実 13）のような在庫ドリフトを防ぐため、表記が複数箇所に
+    あってもすべて実数と一致することを確認する。
     """
     readme = (_ROOT.parent.parent / "README.md").read_text(encoding="utf-8")
     counts = {
@@ -133,20 +133,19 @@ def test_readme_agent_skill_command_counts_match_filesystem() -> None:
 
 _VENDOR_PATH_MARKERS = (".copilot", ".grok", "installed-plugins", "CLAUDE_PLUGIN_ROOT")
 
-# シェルコマンドを載せるフェンスの言語表記。```bash だけを対象にしていた頃は、
+# シェルコマンドを載せるフェンスの言語表記。```bash だけを対象にすると、
 # 同じ内容を ```sh / ```shell / ```console で書いた瞬間に、このファイルの
 # シェル系検査 3 件（bootstrap 同梱・--status/--source 禁止・呼び出し可能シンボル
-# 在庫）が無言でスキップされていた。現コーパスは 34 件すべて ```bash なので
-# 実害は出ていないが、語彙を広げないと「書き方を変えるだけで検査が消える」
-# 状態が残る。`_COMMENT_HASH_FENCE_RE` が既に列挙していた語彙へ揃え、
-# 両者が同じ定数を共有することでこの取りこぼしが再発しないようにする。
+# 在庫）が無言でスキップされ、「書き方を変えるだけで検査が消える」状態になる。
+# `_COMMENT_HASH_FENCE_RE` と同じ語彙にし、両者が同じ定数を共有することで
+# この取りこぼしを防ぐ。
 _SHELL_FENCE_LANGS = ("bash", "sh", "shell", "zsh", "console")
 _BASH_FENCE_RE = re.compile(rf"```(?:{'|'.join(_SHELL_FENCE_LANGS)})\n(.*?)```", re.DOTALL)
 _ENV_POINTER_LINE = '. "$HOME/.claq/env.sh"'
 
 
 def test_md_surfaces_have_no_vendor_specific_paths() -> None:
-    """agents/skills/commands の md にベンダ固有パスが 1 件も出現しないこと（M-02 対応）。
+    """agents/skills/commands の md にベンダ固有パスが 1 件も出現しないこと。
 
     ``CLAUDE_PLUGIN_ROOT`` は Bash tool の環境変数に乗らない（実測）ため、
     plugin root の解決はもう md に書かない。``~/.claq/env.sh`` ポインタ
@@ -168,7 +167,7 @@ def test_md_surfaces_have_no_vendor_specific_paths() -> None:
 
 def test_claq_run_bash_fences_bootstrap_in_same_block() -> None:
     """``claq_run``/``claq_mem_learn`` を呼ぶ ```bash フェンスは、同一フェンス内に
-    ``. "$HOME/.claq/env.sh"`` の bootstrap を持つこと（M-02 対応）。
+    ``. "$HOME/.claq/env.sh"`` の bootstrap を持つこと。
 
     shell 関数は Bash tool 呼び出しを跨いで継続しない。「別のコードブロックで
     source 済み」という前提は実行時に ``claq_run: command not found``
@@ -184,7 +183,7 @@ def test_claq_run_bash_fences_bootstrap_in_same_block() -> None:
 
 
 def test_mem_learn_invocations_pass_no_status_or_source_flag() -> None:
-    r"""``claq_mem_learn`` 呼び出しは ``--status``/``--source`` を渡さないこと（H-01 対応）。
+    r"""``claq_mem_learn`` 呼び出しは ``--status``/``--source`` を渡さないこと。
 
     `runtime/claq-helpers.sh` の `claq_mem_learn` は `--status`/`--source`
     の option parsing を持たない（未知オプションで exit 2）。md がこれらを渡す
@@ -232,15 +231,15 @@ def _declared_tools(agent_name: str) -> set[str]:
 
 
 def test_agent_tools_match_expected_exactly() -> None:
-    """9 定義の tools 宣言が期待集合と完全一致すること（F-05 / docs/adr/definition-and-subagent-design.md）。
+    """9 定義の tools 宣言が期待集合と完全一致すること（docs/adr/definition-and-subagent-design.md）。
 
     security-auditor の read-only は「本文の約束」ではなく tools 権限による技術的
     強制であり、reviewer との権限非対称は docs/adr/definition-and-subagent-design.md の決定そのもの。同ファイルは
     さらに「新規エージェントに Task を与えない（子が子を呼ぶ階層を作らない）」を
     tools 権限で構造的に保証すると定めた。
 
-    以前の実装は Bash/Edit/Write の**非包含**だけを見ていたため、`Task`（Bash 持ち
-    サブエージェントへ委譲できる）や `NotebookEdit` の追加を素通りさせていた。権限
+    Bash/Edit/Write の**非包含**だけを見ると、`Task`（Bash 持ち
+    サブエージェントへ委譲できる）や `NotebookEdit` の追加を素通りさせる。権限
     はレビューできる場所に固定しておく必要があるため、集合の完全一致で検査する。
     """
     actual = {name: _declared_tools(name) for name in _EXPECTED_AGENT_TOOLS}
@@ -344,10 +343,9 @@ def test_intra_document_section_references_resolve() -> None:
     """節参照が、同一ファイルまたは同一行で指した .md の見出しとして実在すること。
 
     節を削除・改名したときに参照だけが残ると、モデルは存在しないルールを探し、
-    見つからないまま幻覚で補完する。実例として 5d200fc が ``## 確信度ゲート`` を
-    撤去した際、agents/reviewer.md に参照が 2 箇所残った。
+    見つからないまま幻覚で補完する。
     test_relative_md_references_resolve はバッククォート付きの相対 .md **ファイル**
-    参照しか見ないため、文書内・文書間の節参照はどのテストにも掛かっていなかった。
+    参照しか見ないため、文書内・文書間の節参照はここで検査する。
     """
     broken: list[str] = []
     cache: dict[Path, tuple[set[str], set[str]]] = {}
@@ -402,10 +400,10 @@ def test_section_ref_helpers_detect_and_accept() -> None:
 
 _PLUGIN_REF_RE = re.compile(r"claq:([a-z][\w-]*)")
 
-# md が名指しする Python モジュールの参照形。`claq_run <module>` だけを見ていた
-# 頃は、md に実在する `python3 -m claq.X` 形（skills/maintain/SKILL.md と
-# skills/release-verify/SKILL.md の計 5 箇所）が import 可能性検査を素通りし、
-# `claq.ci.validate_skills` をリネームしても md が dangling のまま緑だった。
+# md が名指しする Python モジュールの参照形。`claq_run <module>` だけを見ると、
+# md に実在する `python3 -m claq.X` 形（skills/maintain/SKILL.md や
+# skills/release-verify/SKILL.md）が import 可能性検査を素通りし、
+# モジュールをリネームしても md が dangling のまま緑になる。
 #
 # モジュール名の各要素を ASCII の Python 識別子に限る理由: `\w` は既定で Unicode
 # 対応なので、`[\w.]*` 系のパターンは散文の `python3 -m claq.モジュール名`
@@ -451,9 +449,8 @@ def test_claq_run_module_references_are_importable() -> None:
 
 
 # ルーブリック版を書き写している md と、そこから版を取り出す正規表現。
-# 実装の定数を含めて 3 箇所が同じ文字列を持つ。`commands/harness.md` しか
-# 照合していなかった頃は `agents/harness-tuner.md` のサンプル JSON が取り残され、
-# 版を上げても古い版のスコアと比較する助言が出せる状態だった。
+# 実装の定数を含めて 3 箇所が同じ文字列を持つ。1 箇所しか照合しないと
+# 残りが取り残され、版を上げても古い版のスコアと比較する助言が出せてしまう。
 _RUBRIC_VERSION_SITES = (
     (Path("commands") / "harness.md", re.compile(r"ルーブリック版: `([^`]+)`")),
     (Path("agents") / "harness-tuner.md", re.compile(r'"rubric_version":\s*"([^"]+)"')),
@@ -465,8 +462,8 @@ def test_md_rubric_version_matches_audit_constant(relative_path: Path, pattern: 
     """ルーブリック版を書き写している md がすべて実装の定数と一致すること。
 
     スコアはルーブリック版の中でのみ比較可能で、版が上がると過去のベースラインとは
-    比較不能になる。実装側の定数と md の散文が別々に書かれていた頃は、片方だけ
-    更新しても何も落ちず、比較不能なスコア比較が静かに通る状態だった。
+    比較不能になる。実装側の定数と md の散文は別々に書かれるため、照合しないと
+    片方だけ更新しても何も落ちず、比較不能なスコア比較が静かに通る。
     """
     from claq.ci.harness_audit import RUBRIC_VERSION
 
@@ -499,10 +496,8 @@ def test_no_stale_rubric_version_strings_remain() -> None:
 
 
 # md が `name(...)` の呼び出し形で名指しするシンボル。実装側の関数名と md の散文は
-# 別々に書かれるため、リネームや実装取り止めで静かに壊れる。実例: commands/test-gen.md
-# が `get_test_command(project_root)` の呼び出しを指示していたが、その関数は
-# src/ にも runtime/claq-helpers.sh にも存在せず、手順が実行不能だった
-# （README.md の図にも同じ名前が複製されていた）。
+# 別々に書かれるため、リネームや実装取り止めで静かに壊れる（md が指示する関数が
+# src/ にも runtime/claq-helpers.sh にも存在しないと、手順が実行不能になる）。
 _MD_CALLABLE_RE = re.compile(r"`([a-z_][a-z0-9_]*)\([^`)]*\)`")
 _SHELL_FUNC_RE = re.compile(r"^([a-z_][a-z0-9_]*)\(\)", re.M)
 _PY_DEF_RE = re.compile(r"^\s*def ([a-z_][a-z0-9_]*)\(", re.M)
@@ -569,8 +564,8 @@ def _defined_callables(md_file: Path) -> frozenset[str]:
 
     src/ の Python 関数と runtime シェルヘルパの名前は全ての md に効く。スキルのスケルトン
     （skills/<name>/assets）の関数の名前は、同じ skills/<name>/ 配下の md にだけ効く。全スキルの
-    スケルトンの名前を全ての md に効かせていた頃は、open・view・resolve のような汎用の名前が
-    スケルトンと無関係な md でも定義済みとして通り、ずれを見逃していた。
+    スケルトンの名前を全ての md に効かせると、open・view・resolve のような汎用の名前が
+    スケルトンと無関係な md でも定義済みとして通り、ずれを見逃す。
 
     Args:
         md_file: 名指ししている md（`_ROOT` 配下）。
@@ -645,8 +640,8 @@ def _run_repo_audit() -> subprocess.CompletedProcess[str]:
 
     ``check=True`` は使わない。監査は「check が 1 件でも不合格」でも exit 1 を
     返すため、``max_score``（不合格でも必ず出力される値）を読むだけのテストが
-    無関係な不合格に巻き込まれて ``CalledProcessError`` で落ちていた。テスト名は
-    どちらも `max_score` を名乗るので、原因が監査の不合格だと分からなかった。
+    無関係な不合格に巻き込まれて ``CalledProcessError`` で落ちる。テスト名は
+    どちらも `max_score` を名乗るので、原因が監査の不合格だと分からない。
     監査全体の合否は `tests/ci/test_harness_audit_score_pairs.py` の
     ``test_real_repo_passes_every_repo_check`` が check id を名指しで見る。
 
@@ -670,7 +665,7 @@ def test_harness_tuner_schema_example_matches_real_max_score() -> None:
     """harness-tuner.md の baseline スキーマ例の `max_score` が実装と一致すること。
 
     この値はエージェントが「満点いくつの尺度か」を読み取る唯一の手がかりで、
-    ずれると改善幅の見積もりが黙って狂う（実測: md は 70、実装は 58 だった）。
+    ずれると改善幅の見積もりが黙って狂う。
     実装側は check の points 合計なので、check を足すたびに変わる。md へ数値を
     書いた以上、機械で突き合わせる。
     """
@@ -691,10 +686,10 @@ def test_harness_tuner_schema_example_matches_real_max_score() -> None:
 def test_md_max_score_mentions_match_real_audit() -> None:
     """md が散文へ書き写した `max_score` が実装の実測値と一致すること。
 
-    `harness-tuner.md` の JSON 例だけを照合していた頃、`commands/harness.md` の
-    「`max_score`（`repo` では58）」は素通りしていた。`max_score` は check の
+    `harness-tuner.md` の JSON 例だけを照合すると、`commands/harness.md` の
+    「`max_score`（`repo` では58）」は素通りする。`max_score` は check の
     points 合計なので check を足すたびに変わり、ずれると満点尺度が黙って狂う。
-    docs/adr/definition-and-subagent-design.md 決定 6（定義に書いた検証規則は CI で実測する）の適用。
+    docs/adr/definition-and-subagent-design.md の「定義に書いた検証規則は CI で実測する」の適用。
     """
     import json
 

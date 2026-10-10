@@ -1,8 +1,8 @@
-"""`pre_bash_commit_quality` 専用テスト（A-01 shell 区切り誤認 / A-05 相当の fail-open 境界）。
+"""`pre_bash_commit_quality` 専用テスト（shell 区切り誤認 / fail-open 境界）。
 
-`test_hook_edge_cases.py` に相乗りしていた `_is_git_commit_command` 系テストのうち、
-shell 区切り文字の密着トークン化（A-01）と stdin truncation / main() の
-fail-open・fail-closed 境界分割（A-05 相当）に関する分岐は本ファイルへ集約する。
+`_is_git_commit_command` 系テストのうち、shell 区切り文字の密着トークン化と
+stdin truncation / main() の fail-open・fail-closed 境界分割に関する分岐は
+本ファイルへ集約する。
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from claq.hooks import pre_bash_commit_quality as pbcq
 
 
 class TestShellSeparatorTokenization:
-    """A-01: shell 区切り文字がトークンへ密着した非 commit コマンドの誤検出防止。"""
+    """shell 区切り文字がトークンへ密着した非 commit コマンドの誤検出防止。"""
 
     @pytest.mark.parametrize(
         ("command", "expected_is_commit"),
@@ -43,7 +43,7 @@ class TestShellSeparatorTokenization:
         assert is_commit is expected_is_commit
 
     def test_quoted_git_commit_is_not_a_commit(self) -> None:
-        """解析できた引用文の `git commit` は commit と判定しないこと（F-08）。"""
+        """解析できた引用文の `git commit` は commit と判定しないこと。"""
         is_commit, _args = pbcq._is_git_commit_command('echo "git commit"')
         assert is_commit is False
 
@@ -61,7 +61,7 @@ class TestShellSeparatorTokenization:
 
 
 class TestMainStdinBoundary:
-    """A-05相当: stdin truncation 検知と main() の fail-open/fail-closed 境界分割。"""
+    """stdin truncation 検知と main() の fail-open/fail-closed 境界分割。"""
 
     def test_truncated_stdin_is_fail_closed(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -136,7 +136,7 @@ class TestMainStdinBoundary:
 
 
 class TestCompoundCommitGuard:
-    """F-05: 実行前状態では commit 内容を検査できない複合コマンドを deny する。"""
+    """実行前状態では commit 内容を検査できない複合コマンドを deny する。"""
 
     @pytest.mark.parametrize(
         ("command", "expected_message"),
@@ -200,8 +200,8 @@ class TestCompoundCommitGuard:
     def test_evaluate_scans_every_container_key(self) -> None:
         """先頭キーが無害でも後続キーの `git commit` を検査する。
 
-        先勝ちで 1 キーだけ見ていた頃は、`tool_input` に無害なコマンドを置き
-        `toolArgs` に `git commit` を載せると品質検査ごと素通りした（実測: exit 0）。
+        先勝ちで 1 キーだけ見ると、`tool_input` に無害なコマンドを置き
+        `toolArgs` に `git commit` を載せるだけで品質検査ごと素通りする。
         """
         raw = json.dumps(
             {
@@ -266,7 +266,7 @@ class TestCompoundCommitGuard:
 
 
 class TestWorktreeEnumerationFailClosed:
-    """F-06(a): `git commit -a` の作業ツリー列挙失敗を「対象なし」と区別する。"""
+    """`git commit -a` の作業ツリー列挙失敗を「対象なし」と区別する。"""
 
     def test_partition_returns_none_when_enumeration_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """列挙が None を返したら分割結果も None になること。"""
@@ -286,11 +286,10 @@ class TestWorktreeEnumerationFailClosed:
 class TestStagedFileNameDecoding:
     """非 ASCII のステージ済みファイル名を例外なく扱えること。
 
-    `_git_name_only` が `text=True` だけで encoding を指定していなかった頃、
-    デコードは locale 依存だった。`LC_ALL=C`（preferred encoding = US-ASCII）の
-    環境で日本語ファイル名を stage すると `UnicodeDecodeError` が except タプル
-    （`CalledProcessError` / `FileNotFoundError` / `TimeoutExpired`）を貫通し、
-    docstring の「例外は発生しません」が破れてフック全体が落ちていた。
+    `text=True` だけで encoding を指定しないと、デコードは locale 依存になる。
+    `LC_ALL=C`（preferred encoding = US-ASCII）の環境で日本語ファイル名を
+    stage すると `UnicodeDecodeError` が except タプルを貫通し、docstring の
+    「例外は発生しません」が破れてフック全体が落ちる。
     ファイル名は利用者が日常的に作るため、origin URL 由来の同種欠陥より
     発火確率が高い。
     """
@@ -317,7 +316,7 @@ class TestStagedFileNameDecoding:
 
         `errors="replace"` でそのファイル名は置換文字へ潰れ内容を読めなくなるが、
         例外でフックごと落ちて commit が無検査で通る（fail-open）よりは、
-        残りのファイルを従来どおり検査できる方が良いという判断。
+        残りのファイルを検査できる方が良いという判断。
         """
         raw = b"src/\xff\xfe-broken.py\nsrc/plain.py\n"
 
@@ -348,8 +347,8 @@ class TestStagedFileNameDecoding:
     ) -> None:
         """git を起動できない OSError 系は None（検査不能）に落ちること。
 
-        従来の except タプルは `FileNotFoundError` しか持たず、`PermissionError`
-        や実行形式不正は貫通していた。
+        except が `FileNotFoundError` しか持たないと、`PermissionError`
+        や実行形式不正は貫通する。
         """
 
         def fake_run(command: list[str], **kwargs: object):

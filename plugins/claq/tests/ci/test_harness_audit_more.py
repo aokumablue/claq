@@ -190,7 +190,7 @@ def test_has_python_tests_recognizes_both_pytest_conventions(tmp_path: Path) -> 
 def test_has_python_tests_counts_until_minimum_is_reached(tmp_path: Path) -> None:
     """件数が `minimum` に届くまでは False を返し、届いた時点で True になる。
 
-    1 件で打ち切っていた頃の挙動が既定値として残っていると、閾値 3 を要求する
+    「1 件で打ち切る」挙動が既定値として残っていると、閾値 3 を要求する
     `consumer-eval-coverage` が 1 件のリポジトリで通ってしまう。
     """
     pkg = tmp_path / "pkg"
@@ -235,8 +235,8 @@ def test_consumer_eval_coverage_uses_python_tests_at_the_js_threshold(
 ) -> None:
     """pytest だけのリポジトリでも JS と同じ 3 件で `consumer-eval-coverage` が通る。
 
-    「複数の自動テスト」の側が `tests/*.test.js` >= 3 しか見ていなかったため、
-    2,466 件の pytest を持つリポジトリでも `evals/` が無ければ 0 点だった。
+    「複数の自動テスト」の側が `tests/*.test.js` >= 3 しか見ないと、
+    大量の pytest を持つリポジトリでも `evals/` が無ければ 0 点になる。
     閾値は JS 側と揃えてあり、2 件では通らないことまで固定する。
 
     HOME を tmp 配下へ固定するのは、`find_plugin_install` が実 HOME の
@@ -258,7 +258,7 @@ def test_consumer_eval_coverage_uses_python_tests_at_the_js_threshold(
 def test_consumer_eval_coverage_fails_without_tests_or_evals(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """テストも `evals/` も無いリポジトリは従来どおり落ちる（判定の緩みすぎ防止）。"""
+    """テストも `evals/` も無いリポジトリは落ちる（判定の緩みすぎ防止）。"""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
@@ -269,7 +269,7 @@ def test_consumer_eval_coverage_fails_without_tests_or_evals(
 def test_consumer_eval_coverage_still_passes_via_evals_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Python テストが 1 件も無くても `evals/` 経路は従来どおり通る（非退行）。"""
+    """Python テストが 1 件も無くても `evals/` 経路は通る（非退行）。"""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "evals").mkdir()
     (tmp_path / "evals" / "case.yaml").write_text("name: case\n", encoding="utf-8")
@@ -419,17 +419,15 @@ def test_get_consumer_checks_accepts_dict_package_json(tmp_path: Path) -> None:
 def test_get_repo_checks_python_structure_checks_pass_on_real_repo() -> None:
     """JS 前提から Python 構造ベースへ書き換えたチェック群が実リポジトリで pass すること。
 
-    ハーネス監査は元々 Node.js 実装(claq)のルーブリックを
-    引き継いでいたため、対象チェックが scripts/hooks/*.js のような JS 専用
-    パスを前提にしていた。本リポジトリは Python 実装のため該当チェックは
-    常に false-negative になっていた。実際の Python 構造
-    （src/claq/hooks/ 等）を対象にした変換後、実リポジトリに対して
+    対象チェックが scripts/hooks/*.js のような JS 専用パスを前提にすると、
+    Python 実装の本リポジトリでは常に false-negative になる。実際の Python
+    構造（src/claq/hooks/ 等）を対象にしたチェックが、実リポジトリに対して
     pass=True になることを確認する。
 
     tool-hooks-impl-count（最低12モジュール）・eval-tests-presence（最低60
-    テストファイル）は、claq 自身が過剰処理を廃止し src/tests を意図的に
-    最小化したため、本テストの対象から除外している（「多いほど良い」という
-    前提自体が本リファクタの方針と矛盾するため）。
+    テストファイル）は、claq が src/tests を意図的に最小に保つため、
+    本テストの対象から除外している（「多いほど良い」という前提自体が
+    その方針と矛盾するため）。
     """
     plugin_root = Path(__file__).resolve().parents[2]
     checks = {check["id"]: check for check in get_repo_checks(plugin_root)}
@@ -454,9 +452,8 @@ def _write_hooks_json(root_dir: Path, hooks: dict) -> None:
 def test_memory_hooks_lifecycle_check_fails_when_hooks_json_missing(tmp_path: Path) -> None:
     """回帰テスト: hooks/hooks.json が存在しない場合は不合格になる。
 
-    旧実装(id=memory-hooks-dir)は hooks/memory-persistence/ ディレクトリの存在
-    だけで合格していたため、hooks.json の中身が空・欠落していても満点扱いに
-    なる誤判定があった。
+    ディレクトリの存在だけで合格させると、hooks.json の中身が空・欠落して
+    いても満点扱いになる誤判定が起きる。
     """
     checks = {check["id"]: check for check in get_repo_checks(tmp_path)}
 

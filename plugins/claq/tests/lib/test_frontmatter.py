@@ -66,10 +66,10 @@ def test_split_frontmatter_allows_trailing_spaces_on_fence() -> None:
 
 
 def test_split_frontmatter_does_not_treat_indented_dashes_as_fence() -> None:
-    """インデント付き ``---`` は本文であり frontmatter を切らない（H-13）。
+    """インデント付き ``---`` は本文であり frontmatter を切らない。
 
-    旧実装は ``strip()`` 一致でフェンスを探しており列 0 を要求しなかったため、
-    frontmatter の内側に現れたインデント付き ``---`` で切ってしまっていた。
+    ``strip()`` 一致でフェンスを探すと列 0 を要求しないため、
+    frontmatter の内側に現れたインデント付き ``---`` で切ってしまう。
     ここが「切らない」ことを確認できないと、下の
     :func:`test_split_frontmatter_keeps_indented_dashes_inside_block_scalar`
     が守っている挙動を実装側でいつでも壊せる。
@@ -79,11 +79,11 @@ def test_split_frontmatter_does_not_treat_indented_dashes_as_fence() -> None:
 
 
 def test_split_frontmatter_keeps_indented_dashes_inside_block_scalar() -> None:
-    """ブロックスカラー内の ``---`` で frontmatter が途中終了しないこと（H-13）。
+    """ブロックスカラー内の ``---`` で frontmatter が途中終了しないこと。
 
-    実測（旧実装）: この入力は ``  ---`` で切られ
+    列 0 を要求しない照合では、この入力は ``  ---`` で切られ
     ``extract_frontmatter`` が ``{'description': ''}`` を返し、``name`` と
-    ``tools`` が本文へ落ちていた。frontmatter を読む側（validate_agents 等）から
+    ``tools`` が本文へ落ちる。frontmatter を読む側（validate_agents 等）から
     見ると必須キーが黙って消える形になる。
     """
     content = "---\ndescription: |\n  ---\nname: x\ntools: Read\n---\nbody\n"
@@ -614,8 +614,8 @@ def test_block_scalar_tab_indent_raises() -> None:
 
 # 解釈できない構文（厳格モードは FrontmatterError、寛容モードは部分結果）と、
 # 寛容モードが返すべき値の対。値まで固定するのは、寛容モードの「どこまで捨てたか」が
-# 変わったことを検出するため（旧テストは例外の有無しか見ておらず、下 2 件の無警告
-# データ損失が緑のまま通っていた）。
+# 変わったことを検出するため（例外の有無しか見ないと、下 2 件の無警告
+# データ損失が緑のまま通る）。
 #
 # 末尾 2 件は「YAML としては妥当なのに黙って値が失われる」形なので特記する:
 #   * multi-line-block-sequence: キーと同インデントのブロックシーケンスは YAML 1.2 で
@@ -678,10 +678,9 @@ def test_strict_mode_raises_frontmatter_error(text: str, lenient_expected: objec
 def test_lenient_mode_returns_declared_partial_result(text: str, lenient_expected: object) -> None:
     """寛容モードが例外を送出せず、宣言どおりの部分結果を返すこと。
 
-    旧実装（``test_lenient_mode_never_raises``）は結果値を一切表明しておらず、
-    「例外さえ出なければ何を返してもよい」状態だった。そのため寛容モードの
-    無警告データ損失（``tools:`` 直下のブロックシーケンス消失・複数ドキュメントの
-    合流。表の下方 2 件）が緑のまま通っていた。捨てた範囲が変われば赤くなる
+    結果値を表明しないと「例外さえ出なければ何を返してもよい」状態になり、
+    寛容モードの無警告データ損失（``tools:`` 直下のブロックシーケンス消失・
+    複数ドキュメントの合流。表の下方 2 件）が緑のまま通る。捨てた範囲が変われば赤くなる
     ように、入力ごとの戻り値を表として固定する。
 
     Args:
@@ -724,9 +723,9 @@ def test_lenient_still_rejects_duplicate_keys() -> None:
     """重複キーは寛容モードでも誤りにする。
 
     `lenient` は**解釈できない**エントリを読み飛ばすための緩和であって、矛盾した
-    宣言を黙認するためのものではない。先勝ちで黙認していた頃は、検証器が
+    宣言を黙認するためのものではない。先勝ちで黙認すると、検証器が
     `tools: Read` を見る一方で後勝ちのホストは `tools: Bash` を見る、という
-    パーサ差分になり、検証を通り抜ける経路そのものになっていた。
+    パーサ差分になり、検証を通り抜ける経路そのものになる。
     """
     # 最上位の解析失敗は None になる契約（`test_lenient_returns_none_when_root_fails`）。
     # 呼び出し側（`ci_common.extract_frontmatter`）はこれを不合格として扱う。

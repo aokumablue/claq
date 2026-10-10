@@ -50,7 +50,7 @@ def test_config_protection_blocks_protected_file(monkeypatch: pytest.MonkeyPatch
 
 
 def test_config_protection_allows_model_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    """埋め込みモデル廃止に伴い model.json は保護対象から外れている。"""
+    """model.json は保護対象ではない（Write を allow する）。"""
     code, _stdout, stderr = _run_config_protection(
         monkeypatch,
         {"tool_name": "Write", "tool_input": {"file_path": "plugins/claq/model.json"}},

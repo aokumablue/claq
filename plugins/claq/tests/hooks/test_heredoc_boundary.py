@@ -3,8 +3,8 @@
 正規化の適用点はフックごとに異なる（`has_bypass_flag` / `find_protected_write` /
 `evaluate` のループ）。片側だけ変更されたときのドリフトを 1 ファイルで検出する。
 
-実測の出発点: `cat > note.md <<'EOF'` の本文に保護対象の語を書いただけで
-3 フックすべてが exit 2 になった（v0.9.44）。一方 `bash <<'EOF'` の本文は
+本文をデータとして剥がさないと、`cat > note.md <<'EOF'` の本文に保護対象の語を
+書いただけで 3 フックすべてが exit 2 になる。一方 `bash <<'EOF'` の本文は
 実際に実行されるため exit 2 のままでなければならない。両者を同じ表で固定する。
 """
 
@@ -41,9 +41,9 @@ _HOOK_BODIES = {
     "claq.hooks.bash_config_protection": "printf x > ruff.toml",
 }
 
-# 「幻の演算子」（C-1）。`<<` がコメント内・クォート内・`\` エスケープ後にあると
+# 「幻の演算子」。`<<` がコメント内・クォート内・`\` エスケープ後にあると
 # heredoc は開始せず、続く行は**実行されるコマンド**である。それを本文として
-# 捨てていた頃は 3 フックが揃って exit 0 になった（実測）。
+# 捨てると 3 フックが揃って素通りする。
 #
 # deny 側だけを並べても意味がない — 「heredoc 本文を一切剥がさない」実装でも
 # 全行が緑になるため。剥がすべき形（本物の heredoc）を allow 側の対照として
@@ -51,7 +51,7 @@ _HOOK_BODIES = {
 _PHANTOM_OPERATOR_CASES = (
     ("コメント内の <<", "# <<EOF\n{body}\nEOF", 2),
     # 行頭以外のコメントは `ls -a` にする。`ls .` だと `.` が
-    # `_BODY_EXECUTING_BUILTINS` に当たって修正前でも deny になり、この行が
+    # `_BODY_EXECUTING_BUILTINS` に当たって演算子の誤認があっても deny になり、この行が
     # 何も固定しなくなる（実測で確認）。
     ("行頭以外のコメント内の <<", "ls -a # <<EOF\n{body}\nEOF", 2),
     ("ダブルクォート内の <<", 'echo "<<EOF"\n{body}\nEOF', 2),
@@ -129,7 +129,7 @@ def test_data_heredoc_body_is_not_command_text(
 def test_executed_heredoc_body_stays_blocked(
     hook: str, operator_line: str, tmp_path: Path, repo: Path
 ) -> None:
-    """本文が実行される形は従来どおりブロックし続ける（誤通過を作らない）。"""
+    """本文が実行される形はブロックし続ける（誤通過を作らない）。"""
     command = f"{operator_line}\n{_HOOK_BODIES[hook]}\nEOF"
 
     result = _run(hook, command, tmp_path, repo)
@@ -154,7 +154,7 @@ def test_commit_quality_does_not_scan_for_data_heredoc_body(operator_line: str, 
 
 @pytest.mark.parametrize("operator_line", _EXECUTED_HEREDOC_LINES)
 def test_commit_quality_still_scans_executed_heredoc_body(operator_line: str, tmp_path: Path, repo: Path) -> None:
-    """本文が実行される形では従来どおり commit として扱う。"""
+    """本文が実行される形では commit として扱う。"""
     command = f"{operator_line}\ngit add . && git commit -m x\nEOF"
 
     result = _run("claq.hooks.pre_bash_commit_quality", command, tmp_path, repo)

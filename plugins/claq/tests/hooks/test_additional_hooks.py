@@ -59,13 +59,13 @@ _BYPASS_COMMANDS = [
     "git commit -u -n",
     "git commit -F - -n",
     # core.hooksPath オーバーライド（--no-verify を使わずに git 自身の
-    # フックを無効化できるため、単独でもブロックする。A-07）
+    # フックを無効化できるため、単独でもブロックする）
     "git -c core.hooksPath=/dev/null commit",
     "git -ccore.hooksPath=/dev/null commit",
     "git -c CORE.HOOKSPATH=/dev/null commit",
     "git --config-env=core.hooksPath=MYVAR commit",
     "git --config-env core.hooksPath=MYVAR commit",
-    # sh -c ラッパー 1 段（A-07）
+    # sh -c ラッパー 1 段
     f"sh -c 'git commit {NV}'",
     f"bash -c 'git commit {NV}'",
     # -c より前に他オプションが挟まっても -c を探し続ける
@@ -76,14 +76,14 @@ _BYPASS_COMMANDS = [
     "git -Z value commit -n",
     # shlex 失敗（未閉じクォート）は fail-closed
     f'git commit -m "unclosed {NV}',
-    # 実行ファイル表記ゆれ（H-04）: macOS 既定 APFS は大小文字を区別しないため
+    # 実行ファイル表記ゆれ: macOS 既定 APFS は大小文字を区別しないため
     # `GIT` は実 git を起動する。Windows の `.exe` サフィックスも同一視する。
     f"GIT commit {NV}",
     f"Git commit {NV}",
     f"git.exe commit {NV}",
     f"GIT.EXE commit {NV}",
     "GIT commit -n",
-    # literal GIT_CONFIG_* 環境変数プレフィックス（H-05）: --no-verify を
+    # literal GIT_CONFIG_* 環境変数プレフィックス: --no-verify を
     # 使わずに core.hooksPath を上書きし git 自身のフックを無効化する。
     "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp/x git commit -m x",
     "GIT_CONFIG_KEY_0=core.hooksPath git commit -m x",
@@ -94,7 +94,7 @@ _BYPASS_COMMANDS = [
     "env -uFOO GIT_CONFIG_KEY_0=core.hooksPath git commit -m x",
     "env --ignore-environment GIT_CONFIG_KEY_0=core.hooksPath git commit -m x",
     "GIT_CONFIG_PARAMETERS=x git commit -m x",
-    # `git config` サブコマンド経由の core.hooksPath 書込み・削除（H-06）。
+    # `git config` サブコマンド経由の core.hooksPath 書込み・削除。
     "git config core.hooksPath /tmp/evil-hooks",
     "git config CORE.HOOKSPATH /tmp/evil-hooks",
     "git config --unset core.hooksPath",
@@ -169,7 +169,7 @@ _ALLOWED_COMMANDS = [
     "FOO=bar git commit -m x",
     "env FOO git commit -m x",
     "env GIT_CONFIG_KEY_0=user.name git commit -m x",
-    # `git config` の read-only 操作・無関係キーは allow（H-06）。
+    # `git config` の read-only 操作・無関係キーは allow。
     "git config --get core.hooksPath",
     "git config --get-all core.hooksPath",
     "git config --get-regexp core.hooksPath",
@@ -309,7 +309,7 @@ class TestBlockNoVerify:
             (".git", False),
             ("git/", False),
             ("git commit --no-verify", False),
-            # 実行ファイル表記ゆれ（H-04）: 大小文字・.exe・Windows パス区切り。
+            # 実行ファイル表記ゆれ: 大小文字・.exe・Windows パス区切り。
             ("GIT", True),
             ("Git", True),
             ("git.exe", True),
@@ -377,7 +377,7 @@ class TestBlockNoVerify:
     def test_truncated_input_is_fail_closed(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """1 MiB 超で切り捨てられた入力は判定不能として deny する（F-01 回帰）。
+        """1 MiB 超で切り捨てられた入力は判定不能として deny する（回帰防止）。
 
         切り捨て後の JSON は不完全になりうるため、切り捨てフラグそのものを
         deny の根拠にする（切り捨て後の中身がたまたま parse できても信用しない）。
@@ -394,7 +394,7 @@ class TestBlockNoVerify:
     def test_unparseable_json_is_fail_closed(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """非空だが JSON として読めない入力は判定不能として deny する（F-01 回帰）。"""
+        """非空だが JSON として読めない入力は判定不能として deny する（回帰防止）。"""
         monkeypatch.setattr(
             block_no_verify, "read_raw_stdin_with_truncation", lambda: ("{not-json", False)
         )
@@ -405,7 +405,7 @@ class TestBlockNoVerify:
     def test_missing_tool_input_is_fail_closed(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """JSON は妥当だが tool_input 系キーが無い場合も deny する（F-01 回帰）。"""
+        """JSON は妥当だが tool_input 系キーが無い場合も deny する（回帰防止）。"""
         monkeypatch.setattr(
             block_no_verify,
             "read_raw_stdin_with_truncation",
@@ -500,7 +500,7 @@ class TestBlockNoVerifyScansAllContainerKeys:
         """先頭キーが無害でも後続キーのバイパスを検出する。
 
         先勝ちで 1 キーだけ見る実装では、無害な tool_input と悪意ある toolInput が
-        同居する payload を素通りさせていた。docs/adr/shell-analysis-boundary.md は本フックの検出境界を
+        同居する payload を素通りさせる。docs/adr/shell-analysis-boundary.md は本フックの検出境界を
         「誤検出を誤通過より選ぶ」と定めており、config_protection は既に全キー走査。
         """
         code = self._run(
@@ -534,7 +534,7 @@ class TestBlockNoVerifyScansAllContainerKeys:
     def test_list_shaped_container_is_blocked(
         self, monkeypatch: pytest.MonkeyPatch, container: list
     ) -> None:
-        """list 形状のコンテナも走査する（M3: 実測で exit 0 の素通りだった）。"""
+        """list 形状のコンテナも走査する（走査しないと素通りする）。"""
         assert self._run(monkeypatch, {"tool_input": container}) == 2
 
     def test_benign_list_shaped_container_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -543,16 +543,16 @@ class TestBlockNoVerifyScansAllContainerKeys:
 
 
 class TestDeepNestingDoesNotFailOpen:
-    """深いネストの payload で保護フックが exit 1 へ倒れないこと（H-2）。
+    """深いネストの payload で保護フックが exit 1 へ倒れないこと。
 
     PreToolUse の契約は 2=deny / 0=allow / **1=non-blocking error**。1 は
     「フックが壊れた」を意味し、host はツールをそのまま実行する。つまり
     exit 1 は fail-open であり、保護フックにとって最も避けるべき終了コード。
 
-    修正前の実測: 深さ 200,000 の入れ子を JSON 文字列値の内側に置いた
-    400KB の payload（`MAX_STDIN_BYTES` = 1MiB の内側）で、`extract_tool_input`
-    の `json.loads` が送出した `RecursionError` が except を貫通し
-    `block_no_verify` が exit 1。
+    深さ 200,000 の入れ子を JSON 文字列値の内側に置いた 400KB の payload
+    （`MAX_STDIN_BYTES` = 1MiB の内側）では、`extract_tool_input` の
+    `json.loads` が `RecursionError` を送出する。これが except を貫通すると
+    `block_no_verify` が exit 1 になる。
     """
 
     _DEPTH = 200_000

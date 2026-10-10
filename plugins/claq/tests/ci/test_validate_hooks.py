@@ -17,7 +17,7 @@ def complete_hooks(**events: object) -> dict:
 
     `validate_hooks` は「完成した hooks マニフェスト」を検証する契約であり、
     必須イベント（PreToolUse / PreCompact / SessionStart / SessionEnd）が
-    揃っていなければ失敗する（F-03）。1 つのマッチャーの構造だけを見たい
+    揃っていなければ失敗する。1 つのマッチャーの構造だけを見たい
     テストでも、残りは構造的に正しいダミーで埋めて完成形にする。
     """
     filler = [{"matcher": "*", "hooks": [{"type": "command", "command": "true", "timeout": 5}]}]
@@ -32,10 +32,10 @@ def write_json(path: Path, value: object) -> None:
 
 
 def test_validate_hooks_fails_when_missing(tmp_path, capsys):
-    """hooks.json が無い場合は失敗すること（F-03）。
+    """hooks.json が無い場合は失敗すること。
 
-    「見つからないのでスキップします」と表示して 0 を返していた頃は、
-    宣言がまるごと失われた破損を成功として報告していた。
+    「見つからないのでスキップします」と表示して 0 を返すと、
+    宣言がまるごと失われた破損を成功として報告してしまう。
     """
     result = validate_hooks(tmp_path / "hooks.json")
 
@@ -52,7 +52,7 @@ def test_validate_hooks_skips_when_missing_and_optional(tmp_path, capsys):
 
 
 def test_validate_hooks_rejects_empty_hooks_object(tmp_path, capsys):
-    """`{"hooks": {}}` を「0 個検証しました」と成功扱いしないこと（F-03）。"""
+    """`{"hooks": {}}` を「0 個検証しました」と成功扱いしないこと。"""
     hooks_file = tmp_path / "hooks.json"
     write_json(hooks_file, {"version": REQUIRED_HOOKS_VERSION, "hooks": {}})
 
@@ -115,7 +115,7 @@ def test_validate_hooks_accepts_inline_js_strings(tmp_path, capsys):
 class TestRepoHooksJsonStaticChecks:
     """実リポジトリの hooks/hooks.json に対する静的検証（Phase 6）。
 
-    §7-3（実 install/update + host 登録の smoke test）は本タスクのスコープを
+    実 install/update + host 登録の smoke test はこのテストの範囲を
     大きく超えるため実施しない。代わりに、hooks.json 自体が全経路を宣言し、
     かつ全エントリが timeout を持つことを静的に検証する。
     """
@@ -153,7 +153,7 @@ class TestRepoHooksJsonStaticChecks:
         assert missing == []
 
     def test_every_hook_entry_has_a_timeout(self) -> None:
-        """全イベントの全 hook エントリが timeout を持つこと（現状 PreCompact のみ未指定だった）。"""
+        """全イベントの全 hook エントリが timeout を持つこと。"""
         hooks = self._load_hooks()
         missing_timeout = [
             (event, hook.get("command"))

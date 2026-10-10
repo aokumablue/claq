@@ -159,10 +159,10 @@ def test_extract_frontmatter_returns_none_for_non_mapping_frontmatter() -> None:
 
 
 def test_validate_skills_requires_frontmatter_fields(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """SKILL.md の frontmatter に name / description が無ければ失敗すること（F-03）。
+    """SKILL.md の frontmatter に name / description が無ければ失敗すること。
 
-    agents は各ファイルの frontmatter を検査するのに skills は「存在する・
-    読める・空でない」しか見ておらず、非対称が残っていた。
+    agents と同じく skills も frontmatter を検査する（「存在する・
+    読める・空でない」だけを見ると非対称になる）。
     """
     skills_dir = tmp_path / "skills"
     (skills_dir / "no-frontmatter").mkdir(parents=True)

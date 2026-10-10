@@ -39,7 +39,7 @@ def _make_plugin_root(root: Path) -> Path:
 
 @pytest.fixture(autouse=True)
 def _isolate_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """``HOME`` をテスト用ディレクトリへ差し替える（state dir は ``$HOME`` 固定、R-04）。"""
+    """``HOME`` をテスト用ディレクトリへ差し替える（state dir は ``$HOME`` 固定）。"""
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -51,8 +51,7 @@ class TestWriteEnvPointer:
     """write_env_pointer の Python 側ロジックのテスト。"""
 
     def test_writes_roots_and_env_sh_as_plain_data(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """roots/<ppid> は shell 代入形式ではなく root + lstart の 2 行のみであること
-        （R-01/R-03）。"""
+        """roots/<ppid> は shell 代入形式ではなく root + lstart の 2 行のみであること。"""
         plugin_root = _make_plugin_root(tmp_path / "plugin")
 
         mod.write_env_pointer(plugin_root)
@@ -90,15 +89,15 @@ class TestWriteEnvPointer:
         assert (claq_dir / "env.sh").is_file()
 
     def test_writes_ancestor_chain_not_just_direct_ppid(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """H-02: 直接 PPID だけでなく祖先にも書く（実チェーンでの下限確認）。
+        """直接 PPID だけでなく祖先にも書く（実チェーンでの下限確認）。
 
         実測段数は環境依存（pytest プロセスの親が既に init/1 なら 1 段で
         打ち切られる）ので、ここでは「直接 PPID が必ず書かれる」ことと
         「``_MAX_ANCESTOR_DEPTH`` を超えない」ことだけを実チェーンで見る。
         「2 段目も確かに書かれる」ことは合成チェーンを与える
         :meth:`test_writes_every_pid_in_the_resolved_ancestor_chain` が担う
-        （旧実装はここで ``1 <= len(written)`` を許していたため、
-        ``_MAX_ANCESTOR_DEPTH = 1`` や ``chain[:1]`` への退行が緑のまま通った）。
+        （ここで ``1 <= len(written)`` を許すだけでは、
+        ``_MAX_ANCESTOR_DEPTH = 1`` や ``chain[:1]`` への退行が緑のまま通る）。
         """
         plugin_root = _make_plugin_root(tmp_path / "plugin")
 
@@ -112,7 +111,7 @@ class TestWriteEnvPointer:
     def test_max_ancestor_depth_is_more_than_the_direct_parent(self) -> None:
         """``_MAX_ANCESTOR_DEPTH`` が 2 以上に保たれていること。
 
-        H-02 の目的は「直接 PPID だけでは足りない」ことなので、この定数が 1 に
+        祖先チェーンに書く目的は「直接 PPID だけでは足りない」ことなので、この定数が 1 に
         戻ると仕様そのものが消える。実チェーンの段数は環境依存で下限を表明
         できないため、定数側を固定して退行を止める。
         """
@@ -254,7 +253,7 @@ class TestWriteEnvPointer:
     def test_just_written_pointers_survive_gc_even_if_pids_look_dead(
         self, tmp_path: Path, _isolate_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """祖先チェーン全体が使い捨てプロセスだった場合の自壊を防ぐ回帰テスト。
+        """祖先チェーン全体が使い捨てプロセスの場合の自壊を防ぐ回帰テスト。
 
         祖先チェーンの PID が全て既に居ない（かつ猶予も切れている）状況を
         強制しても、同じ呼び出しで書いたポインタ群は GC が消さないこと
@@ -295,7 +294,7 @@ class TestStateHome:
         assert mod._state_home() == Path.cwd()
 
     def test_ignores_claq_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """CLAQ_HOME はテスト隔離専用のノブであり、state dir には影響しない（R-04）。"""
+        """CLAQ_HOME はテスト隔離専用のノブであり、state dir には影響しない。"""
         other = tmp_path / "other"
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("CLAQ_HOME", str(other))
@@ -500,7 +499,7 @@ class TestAtomicWrite:
 
 
 class TestWriteTextIfChanged:
-    """_write_text_if_changed（M-3）の分岐と、それが env.sh 経路へ効くことのテスト。"""
+    """_write_text_if_changed の分岐と、それが env.sh 経路へ効くことのテスト。"""
 
     def test_missing_file_is_written(self, tmp_path: Path) -> None:
         """未作成なら書く。"""
@@ -558,8 +557,8 @@ class TestWriteTextIfChanged:
     def test_symlink_with_identical_content_is_replaced(self, tmp_path: Path) -> None:
         """内容が一致していても symlink なら実体ファイルへ戻す。
 
-        `os.replace` による無条件書き込みには「`env.sh` が別の場所へ向けられて
-        いたら実体へ戻す」自己修復が付随していた。内容一致だけで省くとこの性質が
+        `os.replace` による書き込みには「`env.sh` が別の場所へ向けられて
+        いたら実体へ戻す」自己修復が付随する。内容一致だけで省くとこの性質が
         静かに失われるため、symlink は比較の前に除外する。
         """
         real = tmp_path / "elsewhere.sh"
@@ -574,7 +573,7 @@ class TestWriteTextIfChanged:
     def test_second_write_env_pointer_call_does_not_touch_env_sh(
         self, tmp_path: Path, _isolate_home: Path
     ) -> None:
-        """2 回目以降の `write_env_pointer` は env.sh を書き直さない（M-3 の受領証）。
+        """2 回目以降の `write_env_pointer` は env.sh を書き直さない。
 
         PreToolUse は全ツール呼び出しで発火するため、内容が変わらない env.sh の
         書き直しは 1 呼び出しあたり回避可能な fsync 1 本になる。inode と mtime が
@@ -794,11 +793,11 @@ class TestGcRoots:
         assert list(roots_dir.iterdir()) == []
 
     def test_fresh_non_digit_temp_file_survives_gc(self, tmp_path: Path) -> None:
-        """M-01: 別 writer が rename 直前に作った一時ファイルを race で消さない。
+        """別 writer が rename 直前に作った一時ファイルを race で消さない。
 
         ``roots/`` で実際に発生しうるのは ``<name>.tmp.<random>``
-        （mkstemp）。旧 writer 残骸（``<pid>.tmp.<writer_pid>``）と、
-        レポートが ``roots/`` に置いて再現していた ``env.sh.tmp.<pid>`` も
+        （mkstemp）。旧 writer 残骸（``<pid>.tmp.<writer_pid>``）と
+        ``env.sh.tmp.<pid>`` も
         非数字名として同じ age-gate 対象になる。
         """
         roots_dir = tmp_path / "roots"
@@ -1161,7 +1160,7 @@ class TestEnvShRealExecution:
         """3 段祖先（walk 上限 2 段の外側）にしかポインタが無ければ、推測せず 127 にする。
 
         writer は host インスタンス専有の 2 段（bash tool の shell とその親）
-        にしか書かない設計（advisor レビュー、poison 廃止の裏返し）。resolver
+        にしか書かない設計（共有祖先での衝突を構造的に起こさないため）。resolver
         の walk 上限も同じ 2 段であることをここで固定する。深いネストの文字列
         エスケープを避けるため、各層を argv リストとして組み立て、
         ``shlex.quote`` で 1 段ずつ包む。
@@ -1237,9 +1236,9 @@ class TestEnvShRealExecution:
         assert "ran:marker" in result.stdout
 
     def test_h02_two_unrelated_alive_hosts_exit_127(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """H-02 のレポート再現: 祖先ではない 2 つの実在プロセスの root が
-        対立していても、当て推量せず 127 にする（旧設計は root 値合意の
-        recent fallback で片方を静かに採用していた）。
+        """祖先ではない 2 つの実在プロセスの root が対立していても、
+        当て推量せず 127 にする（root 値合意のような fallback で片方を
+        静かに採用しない）。
         """
         _install_env_sh(_isolate_home)
         root_a = _make_plugin_root(tmp_path / "root-a")
@@ -1318,7 +1317,7 @@ class TestEnvShRealExecution:
         assert "could not resolve the plugin root" in result.stderr
 
     def test_malicious_pointer_content_is_not_executed(self, _isolate_home: Path) -> None:
-        """R-01: ポインタに shell コードを書いても実行されない。
+        """ポインタに shell コードを書いても実行されない。
 
         1 行目が root、2 行目が lstart として読まれるだけで、どちらの行も
         評価・実行はされない。この内容は 2 行目（"CLAQ_ROOT=/x"）が
@@ -1338,7 +1337,7 @@ class TestEnvShRealExecution:
         assert result.returncode == 127
 
     def test_root_with_special_characters_resolves(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """R-03: $・空白・二重引用符・backtick を含む root がシェル展開されず解決できる。"""
+        """$・空白・二重引用符・backtick を含む root がシェル展開されず解決できる。"""
         _install_env_sh(_isolate_home)
         odd_root = _make_plugin_root(tmp_path / 'plugin$var with space and "quote`tick')
         _write_pointer(_isolate_home / BASE_DIR_NAME / "roots", os.getpid(), odd_root)
@@ -1351,11 +1350,10 @@ class TestEnvShRealExecution:
     def test_symlink_pointer_is_rejected(self, tmp_path: Path, _isolate_home: Path) -> None:
         """symlink であること**だけ**を理由に拒否されること（``[ -L ... ] ||`` ガード）。
 
-        旧実装は symlink 先の中身を 1 行（root のみ・lstart 行なし）にしていた
-        ため、``env-template.sh`` の ``-L`` ガードを削除しても後段の空 lstart
-        チェックが 127 を返し、緑のまま通った —— つまり resolver 15 件のどの
-        テストも「有効な 2 行を持つ symlink」を置いておらず、``-L`` ガードは
-        一度も実行されていなかった。
+        symlink 先の中身を 1 行（root のみ・lstart 行なし）にすると、
+        ``env-template.sh`` の ``-L`` ガードを削除しても後段の空 lstart
+        チェックが 127 を返し、緑のまま通る —— ``-L`` ガードを実行させるには
+        「有効な 2 行を持つ symlink」を置く必要がある。
 
         ここでは symlink 先を通常ファイルとして置けば解決できる内容
         （``root\\n<自 PID の実 lstart>\\n``）にし、同じ内容を通常ファイルとして
@@ -1465,7 +1463,7 @@ class TestEnvShRealExecution:
     def test_pointer_with_embedded_nul_does_not_execute_anything(self, _isolate_home: Path) -> None:
         """writer は NUL を書かないが、resolver 側も多層防御として NUL 入りポインタで
         コードを実行しないことを確認する（読み取り結果がどう切れても shell として
-        評価されないことが本質。R-01 の防御は format 変更そのものにあるため、
+        評価されないことが本質。この防御はデータ形式そのものにあるため、
         結果が 0/127 のどちらでも良く、実行痕跡が無いことだけを検証する）。
         """
         roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
@@ -1479,7 +1477,7 @@ class TestEnvShRealExecution:
 
 
 def test_ps_call_routes_through_run_text() -> None:
-    """`ps` 呼び出しが `subprocess.run` 直呼びへ戻っていないこと（H-19a）。
+    """`ps` 呼び出しが `subprocess.run` 直呼びになっていないこと。
 
     `text=True` だけで encoding を指定しないと locale 依存のデコードになり、
     `UnicodeDecodeError` が `except (OSError, SubprocessError)` を貫通して

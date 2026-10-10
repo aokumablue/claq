@@ -59,7 +59,7 @@ class TestNormalizeToolName:
         ],
     )
     def test_grok_names_normalize_to_claude_code_form(self, grok_name, expected):
-        """Grok 固有の runtime tool 名を Claude Code 表記へ正規化する（H-04）。"""
+        """Grok 固有の runtime tool 名を Claude Code 表記へ正規化する。"""
         assert harness.normalize_tool_name(grok_name) == expected
 
 
@@ -88,12 +88,12 @@ class TestJsonStringContainerNormalization:
 
     @pytest.mark.parametrize("prefix", ["", " ", "\t", "\n", "\r", "\x0c", "\x0b"])
     def test_patch_container_is_parsed_regardless_of_leading_whitespace(self, prefix: str) -> None:
-        """パッチ本文コンテナでも判定とパースの文字列を揃える（M-1）。
+        """パッチ本文コンテナでも判定とパースの文字列を揃える。
 
-        `extract_tool_input` は同じ罠を潰していたのに `_extract_patch_text` だけ
-        `lstrip` 前の文字列をパースしていた。`\\x0c` を 1 文字前置しただけで
-        `apply_patch` 以外のツール名では生の JSON 文字列がそのままパス候補になり、
-        本来の対象 `.git/hooks/pre-commit` が候補から消えていた（実測）。
+        `extract_tool_input` と同じく、`lstrip` 前の文字列をパースすると
+        `\\x0c` を 1 文字前置しただけで `apply_patch` 以外のツール名では
+        生の JSON 文字列がそのままパス候補になり、本来の対象
+        `.git/hooks/pre-commit` が候補から消える。
         """
         patch = "*** Begin Patch\n*** Update File: .git/hooks/pre-commit\n*** End Patch"
         tool_input = prefix + json.dumps({"input": patch})
@@ -138,8 +138,8 @@ class TestIterBashCommands:
         """list 形状のコンテナも要素ごとに command を取り出す。
 
         取り出せないと `extract_tool_input` が list を返すため必須フィールド
-        欠落の fail-closed を素通りし、フックが静かに許可する（実測で
-        `git commit --no-verify` を list に包むと exit 0 だった）。
+        欠落の fail-closed を素通りし、フックが静かに許可する
+        （`git commit --no-verify` を list に包むだけで通る）。
         """
         payload = {"tool_input": [{"command": "ls"}, {"command": "git commit --no-verify"}]}
 
@@ -208,7 +208,7 @@ class TestIterBashCommands:
 
 
 class TestExtractToolInput:
-    """DT-01: extract_tool_input のコンテナ優先順位と JSON デコード。"""
+    """extract_tool_input のコンテナ優先順位と JSON デコード。"""
 
     def test_extract_tool_input_accepts_tool_args_dict(self) -> None:
         """toolArgs / tool_args が dict ならそのまま返す。"""
@@ -262,12 +262,12 @@ class TestExtractToolInput:
     def test_extract_tool_input_remaining_dt01_rows(
         self, payload: dict, expected: object
     ) -> None:
-        """DT-01 の残行（存在優先・非 object JSON・型保持）を固定する。"""
+        """存在優先・非 object JSON・型保持を固定する。"""
         assert harness.extract_tool_input(payload) == expected
 
 
 class TestExtractRawToolName:
-    """DT-01: extract_raw_tool_name は normalize 前の生文字列を返す。"""
+    """extract_raw_tool_name は normalize 前の生文字列を返す。"""
 
     def test_extract_raw_tool_name_accepts_snake_and_camel_case_fields(self) -> None:
         """tool_name と toolName の有効な文字列を吸収し、正規化はしない。"""
@@ -314,8 +314,8 @@ class TestExtractFilePaths:
     def test_non_string_file_path_is_undecidable(self):
         """file_path がパスとして解釈できない値なら判定不能（None）を返す。
 
-        空リストを返していた頃は、呼び出し側が「対象ファイルが 1 つも無い
-        書き込み」として静かに許可していた。判定できない入力は fail-closed へ
+        空リストを返すと、呼び出し側が「対象ファイルが 1 つも無い
+        書き込み」として静かに許可してしまう。判定できない入力は fail-closed へ
         倒す（docs/adr/shell-analysis-boundary.md: 誤検出 > 誤通過）。
         """
         assert harness.extract_file_paths("Edit", {"file_path": 123}) is None
@@ -795,11 +795,11 @@ class TestPerInvocationFolding:
 class TestOrphanDetectionIgnoresAttributeLimit:
     """孤立足場タグの検出は属性長の上限に依存しない。
 
-    除去パターンと破棄判定が同じ ``_MAX_TAG_ATTR_CHARS`` を共有していた頃は、
-    上限を超えた入力で**両方が同時に外れた** — ブロック除去に一致せず、
+    除去パターンと破棄判定が同じ ``_MAX_TAG_ATTR_CHARS`` を共有すると、
+    上限を超えた入力で**両方が同時に外れる** — ブロック除去に一致せず、
     孤立タグ検出にも一致せず、docs/adr/untrusted-input-prompt-boundary.md が宣言する「孤立タグ 1 個で破棄」が
-    発火しないまま素通りした（実測: 属性 513 文字の ``<system-reminder …>``）。
-    除去できなかったものほど破棄すべきなのに、失敗の向きが逆だった。
+    発火しないまま素通りする（属性 513 文字の ``<system-reminder …>``）。
+    除去できなかったものほど破棄すべきなので、失敗の向きが逆になる。
     """
 
     @pytest.mark.parametrize("attr_length", [0, 1, 511, 512, 513, 5000])
@@ -830,9 +830,9 @@ class TestOrphanDetectionReachesTheEndOfString:
     """文字列の終端で終わる足場タグも孤立タグとして破棄される。
 
     除去側の「名前の終わり」（``_TAG_NAME_END``）は名前の後ろに 1 文字を要求する。
-    破棄判定がこれを共有していた頃は、発話が足場タグ名で終わる入力
+    破棄判定がこれを共有すると、発話が足場タグ名で終わる入力
     （``payload["handoff"] = "作業完了 <system-reminder"``）がブロック除去にも
-    孤立検出にも一致せず、docs/adr/untrusted-input-prompt-boundary.md の fail closed に穴が残っていた（実測）。
+    孤立検出にも一致せず、docs/adr/untrusted-input-prompt-boundary.md の fail closed に穴が残る。
     明示 handoff 経路は他の要因なしで単独成立する。
     """
 
@@ -926,13 +926,13 @@ class TestAgentMessageIsNotARequest:
 
 
 class TestExtractFilePathsNestedValue:
-    """extract_file_paths のフィールド値展開（S-7）のテスト。"""
+    """extract_file_paths のフィールド値展開のテスト。"""
 
     def test_list_valued_file_path_is_expanded(self):
         """`file_path` の値が list でも対象ファイルとして取り出される。
 
-        文字列以外を捨てていた頃は「対象ファイルが 1 つも無い書き込み」として
-        config_protection が exit 0 で素通りした（実測）。
+        文字列以外を捨てると「対象ファイルが 1 つも無い書き込み」として
+        config_protection が素通りする。
         """
         assert harness.extract_file_paths("Write", {"file_path": ["ruff.toml"]}) == ["ruff.toml"]
 
@@ -951,7 +951,7 @@ class TestExtractFilePathsNestedValue:
 
 
 class TestDeepNestingIsParseFailureNotCrash:
-    """深いネストの JSON が例外で貫通しないこと（H-2）。
+    """深いネストの JSON が例外で貫通しないこと。
 
     CPython の JSON デコーダは再帰下降で、深くネストした配列/オブジェクトに
     対して `JSONDecodeError` ではなく `RecursionError` を送出する。これを

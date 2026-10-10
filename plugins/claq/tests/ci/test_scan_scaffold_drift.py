@@ -320,7 +320,7 @@ class TestStripCodeSpans:
         assert scanner.scan([path]) == {}
 
     def test_real_scaffold_outside_code_is_still_reported(self, tmp_path: Path) -> None:
-        """コードスパンの外にある未知タグは従来どおり検出する。"""
+        """コードスパンの外にある未知タグは検出する。"""
         path = _write_transcript(tmp_path, "b.jsonl", ["`<crm>x</crm>` <peer-broadcast>y</peer-broadcast>"])
 
         assert "peer-broadcast" in scanner.scan([path])
