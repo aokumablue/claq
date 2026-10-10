@@ -6,107 +6,69 @@
 終了: バイパス検出時は 2、それ以外は 0
 
 判定方式:
-    正規表現ではなく ``shlex`` によるトークン走査を行います。``git`` と
-    サブコマンドの隣接を前提にすると、``git --no-pager commit --no-verify``
-    や ``git -C <path> commit --no-verify``、``git -c k=v commit --no-verify``
-    のようにグローバルオプションを挟む形で容易にバイパスできるためです。
-    トークン列は ``&&`` / ``||`` / ``;`` / ``|`` / ``&`` / ``(`` / ``)`` で
-    セグメントに分割し（``git add -A && git commit --no-verify`` を検出する
-    ため）、各セグメントの**全トークン**から git 起動トークンを探索します。
+    正規表現ではなく ``shlex`` によるトークン走査を行います。``git`` とサブコマンドの
+    隣接を前提にすると、``git --no-pager commit --no-verify`` や ``git -C <path> commit
+    --no-verify`` のようにグローバルオプションを挟む形で容易にバイパスできるためです。
+    トークン列はシェル区切りでセグメントに分割し、各セグメントの**全トークン**から
+    git 起動トークンを探索します。
 
 git 起動トークンの探索:
-    セグメント先頭が ``git`` であることは前提にしません。先頭固定にすると
-    ``sudo git commit --no-verify`` / ``env git ...`` / ``GIT_DIR=.git git ...``
-    / ``xargs -I% git ...`` / ``/usr/bin/git ...`` がいずれも素通りします。
-    ラッパー名（``env`` / ``sudo`` / ``nice`` …）のホワイトリスト方式は将来の
-    ラッパーを取りこぼすため採らず、**トークンの basename が ``git``** なら
-    git 起動とみなす方式にしています。1 セグメント内に複数の git 起動が
-    あり得る（``sudo -u git git commit -n``）ため、全ての git 起動トークンを
-    検査します。解析は git 起動トークン以降のみを対象とするので、
-    ``grep -rn git .`` のように ``-n`` が git より前にある形は誤検知しません。
+    セグメント先頭が ``git`` であることは前提にしません（``sudo git commit --no-verify`` /
+    ``GIT_DIR=.git git ...`` / ``xargs -I% git ...`` / ``/usr/bin/git ...`` を通さないため）。
+    ラッパー名のホワイトリストは将来のラッパーを取りこぼすため採らず、**トークンの
+    basename が ``git``** なら git 起動とみなします。1 セグメント内の全ての git 起動
+    （``sudo -u git git commit -n``）を検査し、解析は git 起動トークン以降だけを対象に
+    するので ``grep -rn git .`` は誤検知しません。
 
-    兄弟の ``bash_config_protection`` は逆に wrapper の allowlist
-    （``_COMMAND_POSITION_WRAPPERS``）を持ちます。**この非対称は意図的**で、
-    どちらか一方が未修正なのではありません。本モジュールが要るのは「git が
-    起動されるか」だけで実行位置を必要としないため名前集合を持たずに済み、
-    あちらは ``tee pyproject.toml`` と ``echo tee pyproject.toml`` を分けるために
-    実行位置の特定が必須で、名前集合が原理的に不可避になります。根拠と代替案の
-    実測は `docs/adr/shell-analysis-boundary.md`
-    にあります（本モジュールへ allowlist を導入する案は代替案 3 として却下済み）。
+    兄弟の ``bash_config_protection`` が wrapper の allowlist を持つのとの非対称は意図的
+    です。本モジュールは「git が起動されるか」だけを見れば足り、実行位置を必要としない
+    ため名前集合を持たずに済みます（docs/adr/shell-analysis-boundary.md）。
 
 ``-n`` の扱い:
-    ``-n`` は ``git commit`` では ``--no-verify`` の別名ですが、``git push``
-    では ``--dry-run`` の別名でありフックバイパスではありません。そのため
-    ``-n`` はサブコマンドが ``commit`` と確定できた場合にブロックし、
-    ``git push -n`` や ``git log -n 5`` は通します。加えて、既知でない
-    グローバルオプション（将来の git が追加するもの）が値を取るかどうかは
-    判定できずサブコマンド解決がずれるため、**サブコマンドを確定できない
-    場合は fail-closed でブロック**します（``git --future-option value
-    commit -n`` を塞ぐ）。``--no-verify`` は ``commit`` / ``push`` いずれでも
-    フックバイパスなので、サブコマンドの確定を待たず git 起動トークン以降に
-    現れた時点でブロックします。
+    ``-n`` は ``git commit`` では ``--no-verify`` の別名ですが、``git push`` では
+    ``--dry-run`` です。そのため ``-n`` はサブコマンドが ``commit`` と確定できた場合に
+    ブロックし、``git push -n`` や ``git log -n 5`` は通します。既知でないグローバル
+    オプションが値を取るかは判定できずサブコマンド解決がずれるため、**サブコマンドを
+    確定できない場合は fail-closed でブロック**します（``git --future-option value
+    commit -n``）。``--no-verify`` はサブコマンドを問わずブロックします。
 
 heredoc 本文:
-    ``cat > note.md <<'EOF'`` のようにデータとして書かれた heredoc 本文は、
-    トークン化の前に ``hook_common.strip_data_heredoc_bodies`` で落とします
-    （docs/adr/shell-analysis-boundary.md）。本文が実行されうる形（演算子行のシェル起動・継続演算子・
-    未終端）は落とさず、検出対象に残します。非シェルインタプリタ
-    （``python3 - <<EOF``）の本文からの間接実行は非目標です。
+    データとして書かれた heredoc 本文はトークン化の前に落とします
+    （docs/adr/shell-analysis-boundary.md）。本文が実行されうる形は落としません。
 
 クォート内の誤検知:
-    ``shlex`` はクォート内をひとつのトークンとして保持するため、
-    ``git commit -m "use -n flag"`` のメッセージ本文はフラグとして
-    解釈されず、``echo "git commit --no-verify"`` の中身も git 起動トークン
-    になりません。加えて値を取るオプション（``-m`` / ``-F`` など）の
-    値トークンはフラグ走査から除外します。
+    ``shlex`` はクォート内をひとつのトークンとして保持するため、``git commit -m "use -n
+    flag"`` のメッセージ本文や ``echo "git commit --no-verify"`` の中身はフラグや git 起動に
+    なりません。値を取るオプション（``-m`` / ``-F`` など）の値トークンもフラグ走査から
+    除外します。
 
 long オプションの短縮形:
-    git は曖昧でない限り long オプションの**前置**を受理します
-    （``git commit --no-veri`` は実際に通る）。完全一致だけを見ると素通りする
-    ため、``--no-verify`` の前置（``--n`` 以上の長さ）を同様にブロックします。
+    git は曖昧でない限り long オプションの**前置**を受理するため（``git commit
+    --no-veri`` は実際に通る）、``--no-verify`` の前置（``--n`` 以上の長さ）もブロックします。
 
-config 経由のフック無効化:
-    ``--no-verify`` を使わずに git 自身のフック（`.git/hooks/pre-commit` 等）を
-    無効化する経路をまとめてブロックします。
-    config key の大小文字は区別せず判定します（git の config key 名は大小文字を
-    区別しないため）。
-
-    - ``-c`` / ``--config-env`` / ``git config`` の書込みで
-      ``core.hooksPath`` を差し替える
+config 経由のフック無効化（config key は大小文字を区別せず判定）:
+    - ``-c`` / ``--config-env`` / ``git config`` の書込みで ``core.hooksPath`` を差し替える
     - 同じ経路で ``include.path`` / ``includeIf.*`` を書き、取り込んだ先で
       ``core.hooksPath`` を書く
     - 同じ経路で ``alias.*`` を定義し、展開先に ``--no-verify`` を隠す
-      （``git -c alias.ci='commit --no-verify' ci``）。展開結果を解釈する術が
-      無いため、alias の定義そのものを deny します
-    - ``GIT_CONFIG_PARAMETERS`` / ``GIT_CONFIG_GLOBAL`` / ``GIT_CONFIG_SYSTEM``
-      / ``GIT_CONFIG_NOSYSTEM`` / ``GIT_CONFIG_KEY_<n>`` の literal 環境変数代入
+    - ``GIT_CONFIG_PARAMETERS`` / ``GIT_CONFIG_GLOBAL`` / ``GIT_CONFIG_SYSTEM`` /
+      ``GIT_CONFIG_NOSYSTEM`` / ``GIT_CONFIG_KEY_<n>`` の literal 環境変数代入
 
 ``sh -c`` ラッパー（1 段のみ）:
-    ``sh -c 'git commit --no-verify'`` のように既知シェル（``sh``/``bash``/
-    ``zsh``/``dash``）の ``-c`` へ渡された文字列引数は、1 段だけ再帰的に
-    同じ判定へ通します。``-c`` は結合短フラグ（``bash -lc 'git commit -n'``）
-    でも成立するため、``c`` を含む短フラグクラスタを同じ扱いにします。
-    2 段以上のネスト（``sh -c "sh -c 'git commit -n'"``）
-    や ``eval``・任意ラッパースクリプトへは再帰しません（深い
-    再帰はコンテキスト消費と誤検知リスクの両方が増えるため、1 段に限定する
-    設計判断です）。
+    既知シェルの ``-c``（結合短フラグ ``bash -lc`` を含む）へ渡された文字列引数は、1 段
+    だけ再帰的に同じ判定へ通します。2 段以上のネストや ``eval``・任意ラッパー
+    スクリプトへは再帰しません。
 
 非目標（原理的に検出不能、または意図的に対象外とするため検出しません）:
-    - シェルエイリアス・シェル関数経由の呼び出し（``alias g=git`` の ``g``、
-      ``commit() { git commit --no-verify; }`` の ``commit``）。コマンドラインに
-      現れないため。config の ``alias.*`` は literal に現れるので対象内
-    - ``git --git-dir=<other>`` / ``GIT_DIR=<other>``。別リポジトリを対象に
-      するだけで、そのリポジトリのフックは通常どおり走るためバイパスではない
-    - ``git $(echo commit) --no-verify`` のようなコマンド置換・変数展開
-      （``$VAR`` / ``$(...)`` / バッククォート）を経由した組み立て
-    - ``git`` 以外の名前を持つラッパースクリプト（``mygit`` / ``./deploy.sh``）
-      の内部で行われる git 呼び出し
+    - シェルエイリアス・シェル関数経由の呼び出し（コマンドラインに現れないため。
+      config の ``alias.*`` は literal に現れるので対象内）
+    - ``git --git-dir=<other>`` / ``GIT_DIR=<other>``（そのリポジトリのフックは通常どおり
+      走るためバイパスではない）
+    - コマンド置換・変数展開（``$VAR`` / ``$(...)`` / バッククォート）を経由した組み立て
+    - ``git`` 以外の名前を持つラッパースクリプト内部の git 呼び出し
     - ``eval`` に渡す文字列の解釈、および ``sh -c`` の 2 段以上のネスト
-    POSIX シェルのセマンティクス全体を模倣することは不可能であり、本フックは
-    「うっかりバイパス」の抑止であって敵対的回避への防壁ではありません。
-    git 自体が大文字小文字を区別するため、トークン比較も区別します
-    （``core.hooksPath`` の config key を除く。git config key は大小文字を
-    区別しないため）。
+    本フックは「うっかりバイパス」の抑止であって敵対的回避への防壁ではありません。
+    git 自体が大文字小文字を区別するため、トークン比較も区別します（config key を除く）。
 """
 
 from __future__ import annotations
@@ -200,10 +162,8 @@ _OPTIONAL_VALUE_SHORT_OPTIONS = frozenset("uS")
 # フックバイパスに直結する long フラグ。サブコマンドを問わずブロックします。
 _BYPASS_LONG_FLAG = "--no-verify"
 
-# long オプションの短縮形を受け付ける最短長。git は曖昧でない限り long
-# オプションの**前置**を受理するため（``git commit --no-veri`` は実際に通る）、
-# 完全一致だけを見ると素通りする。``--n`` / ``--no`` は git 側では曖昧で
-# エラーになるが、ここでは deny 側に倒す（docs/adr/shell-analysis-boundary.md: 誤検出 > 誤通過）。
+# long オプションの短縮形を受け付ける最短長。``--n`` / ``--no`` は git 側では曖昧で
+# エラーになるが、deny 側に倒す（誤検出 > 誤通過）。
 _MIN_ABBREVIATED_LONG_OPTION_LENGTH = 3
 
 # ``git commit`` でのみ ``--no-verify`` の別名になる short フラグ。
@@ -216,15 +176,11 @@ _HOOKS_PATH_CONFIG_KEY = "core.hookspath"
 # フック実行を左右しうる config key の前置。いずれも小文字で比較します。
 #
 # - ``core.hookspath``: フック置き場そのものの差し替え。
-# - ``include.path`` / ``includeif.``: 任意の config ファイルを取り込める。
-#   取り込んだ先で ``core.hooksPath`` を書けるため、直接指定と等価。
-# - ``alias.``: 別名の展開先を本フックは知らない。``git -c
-#   alias.ci='commit --no-verify' ci`` は ``--no-verify`` が config **値**の
-#   中にあるためフラグ走査に掛からない。展開結果を解釈する術が無い以上、
-#   alias の定義そのものを deny する（docs/adr/shell-analysis-boundary.md の false-positive 優先）。
-#
-# シェルエイリアス（``alias g=git``）は依然として非目標だが、それは
-# コマンドラインに現れないため。``-c alias.X=`` は literal に現れる。
+# - ``include.path`` / ``includeif.``: 取り込んだ先で ``core.hooksPath`` を書けるため、
+#   直接指定と等価。
+# - ``alias.``: ``git -c alias.ci='commit --no-verify' ci`` は ``--no-verify`` が config
+#   **値**の中にあるためフラグ走査に掛からない。展開結果を解釈する術が無い以上、
+#   alias の定義そのものを deny する（誤検出 > 誤通過）。
 _SENSITIVE_CONFIG_KEY_PREFIXES = (
     _HOOKS_PATH_CONFIG_KEY,
     "include.path",
@@ -260,12 +216,9 @@ class GitInvocation(NamedTuple):
 def is_git_invocation(token: str) -> bool:
     """トークンが git 実行ファイルの起動かどうかを判定する。
 
-    ``git`` そのものに加え ``/usr/bin/git`` のようなパス付き起動、
-    ``git.exe``（Windows）、``GIT``（大文字。macOS 既定の APFS は大小文字を
-    区別しないため ``GIT commit --no-verify`` は実 git を起動する）を拾う。``gitk`` / ``GIT_DIR=.git`` / ``git/``（ディレクトリ）は
-    一致しない。判定は ``pre_bash_commit_quality`` と共有する
-    ``hook_common.is_git_executable_token`` に委譲し、2 箇所で正規化が
-    分岐する事態を防ぐ。
+    ``/usr/bin/git``・``git.exe``・``GIT`` を拾い、``gitk`` / ``GIT_DIR=.git`` / ``git/`` は
+    一致しない。正規化は兄弟フックと共有する ``hook_common.is_git_executable_token`` に
+    委譲する。
 
     Args:
         token: 検査対象のトークン。
@@ -427,33 +380,15 @@ def _is_sensitive_config_key(key: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in _SENSITIVE_CONFIG_KEY_PREFIXES)
 
 
-def _is_sensitive_config_override(config_values: list[str]) -> bool:
-    """``-c``/``--config-env`` の値に機微な config key の上書きが含まれるかを判定する。
-
-    Args:
-        config_values: `GitInvocation.config_values`。
-
-    Returns:
-        フック実行を左右しうる key（大小文字不問）を上書きする値があれば True。
-
-    Raises:
-        例外は発生しません。
-    """
-    return any(_is_sensitive_config_key(value.split("=", 1)[0]) for value in config_values)
-
-
 _ENV_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
 
 # GIT_CONFIG_KEY_<n> の index 部分を取り出す正規表現。
 _GIT_CONFIG_KEY_INDEX_RE = re.compile(r"^GIT_CONFIG_KEY_\d+$")
 
-# git 自身が config を注入・差し替えるために読む literal 環境変数名。値を
-# shell-eval せず、出現した時点で deny する（中身を解釈しても安全側の判定を
-# 追加できないため）。
-# ``GIT_CONFIG_GLOBAL`` / ``GIT_CONFIG_SYSTEM`` は config ファイルそのものを
-# 差し替えられ、差し替え先で ``core.hooksPath`` を書けるため同じ経路。
-# ``GIT_CONFIG_NOSYSTEM`` は system config を無効化するので、system 側に
-# 置かれた保護設定を落とせる。
+# git 自身が config を注入・差し替えるために読む literal 環境変数名。値を解釈しても
+# 安全側の判定を追加できないため、出現した時点で deny する。``GIT_CONFIG_GLOBAL`` /
+# ``GIT_CONFIG_SYSTEM`` は差し替え先で ``core.hooksPath`` を書け、``GIT_CONFIG_NOSYSTEM``
+# は system 側に置かれた保護設定を落とせる。
 _GIT_CONFIG_INJECTION_ENV_NAMES = frozenset(
     {
         "GIT_CONFIG_PARAMETERS",
@@ -463,58 +398,19 @@ _GIT_CONFIG_INJECTION_ENV_NAMES = frozenset(
     }
 )
 
-def _collect_literal_env_assignments(prefix_tokens: list[str]) -> dict[str, str]:
-    """git 起動トークンより前にある literal 環境変数代入を集める。
-
-    **前置トークンを全部走査する。** 「先頭から連続する代入」や既知のラッパ
-    （`sudo` / `command`）・`env` の既知オプションだけを読み飛ばす形にすると、
-    知らないラッパやオプションに当たった時点で走査が終わり、その先の代入が
-    検査対象から外れる。たとえば次の形がそうなる:
-
-        env -v GIT_CONFIG_GLOBAL=/tmp/e git commit -m x
-        env -C /tmp GIT_CONFIG_GLOBAL=/tmp/e git commit -m x
-        command -p env GIT_CONFIG_GLOBAL=/tmp/e git commit
-        sudo -E GIT_CONFIG_GLOBAL=/tmp/e git commit -m x
-        nohup env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x
-
-    ラッパ名とそのオプションを列挙して追随する設計は、列挙が漏れた瞬間に
-    **素通り側へ倒れる**。前置は定義上 git 起動より前なので、そこに現れる
-    ``NAME=value`` は実質すべて環境変数代入であり、列挙に依存せず拾える。
-    docs/adr/shell-analysis-boundary.md の「誤検出 > 誤通過」に沿って、拾いすぎる側へ倒す。
-
-    拾いすぎの実害は無い。代入名が危険なもの（``GIT_CONFIG_*`` など）に一致した
-    ときだけ deny するので、無関係な ``a=b`` を拾っても何も起きない。git の
-    オプション（``--author=Foo``）は識別子で始まらないため
-    ``_ENV_ASSIGNMENT_RE`` に一致しない。
-
-    シェルエイリアス・変数展開・コマンド置換・``eval`` 経由の間接的な代入は
-    対象外（docs/adr/shell-analysis-boundary.md の非目標）。
-
-    Args:
-        prefix_tokens: セグメント内で git 起動トークンより前にあるトークン列。
-
-    Returns:
-        変数名から値への写像。代入が無ければ空 dict。
-
-    Raises:
-        例外は発生しません。
-    """
-    assignments: dict[str, str] = {}
-    for token in prefix_tokens:
-        match = _ENV_ASSIGNMENT_RE.match(token)
-        if match:
-            assignments[match.group(1)] = match.group(2)
-    return assignments
-
 
 def _is_literal_env_hooks_path_override(prefix_tokens: list[str]) -> bool:
     """git 起動前の literal 環境変数代入に ``core.hooksPath`` オーバーライドがあるか判定する。
 
-    ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_KEY_<n>`` / ``GIT_CONFIG_VALUE_<n>`` は
-    index ごとに検証し、key が ``core.hooksPath``（大小文字不問）なら value
-    の有無や ``GIT_CONFIG_COUNT`` との整合性を問わず deny する（不完全・
-    矛盾する triplet を安全とみなさない）。``GIT_CONFIG_PARAMETERS`` は git
-    自身が使う config 注入 literal であり、値を解釈せず出現時点で deny する。
+    **前置トークンを全部走査する。** 既知のラッパ（`sudo` / `env` 等）とそのオプション
+    だけを読み飛ばす形にすると、``env -C /tmp GIT_CONFIG_GLOBAL=/tmp/e git commit`` の
+    ように列挙が漏れた瞬間に素通り側へ倒れる。git 起動より前の ``NAME=value`` は実質
+    すべて環境変数代入であり、危険な名前に一致したときだけ deny するので拾いすぎても
+    実害は無い（git のオプション ``--author=Foo`` は識別子で始まらず一致しない）。
+
+    ``GIT_CONFIG_KEY_<n>`` は key が機微なら ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_VALUE_<n>``
+    との整合を問わず deny する（不完全・矛盾する triplet を安全とみなさない）。同名の
+    代入が複数あれば後のものを採る。
 
     Args:
         prefix_tokens: セグメント内で git 起動トークンより前にあるトークン列。
@@ -525,13 +421,12 @@ def _is_literal_env_hooks_path_override(prefix_tokens: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    assignments = _collect_literal_env_assignments(prefix_tokens)
+    assignments = dict(match.groups() for token in prefix_tokens if (match := _ENV_ASSIGNMENT_RE.match(token)))
     if _GIT_CONFIG_INJECTION_ENV_NAMES & assignments.keys():
         return True
-    for name, value in assignments.items():
-        if _GIT_CONFIG_KEY_INDEX_RE.match(name) and _is_sensitive_config_key(value):
-            return True
-    return False
+    return any(
+        _GIT_CONFIG_KEY_INDEX_RE.match(name) and _is_sensitive_config_key(value) for name, value in assignments.items()
+    )
 
 
 # `git config` の read-only であることが確定しているフラグ。
@@ -545,30 +440,12 @@ _GIT_CONFIG_NEW_READ_OPS = frozenset({"get", "list"})
 _GIT_CONFIG_NEW_WRITE_OPS = frozenset({"set", "unset", "add"})
 
 
-def _config_args_touch_sensitive_key(args: list[str]) -> bool:
-    """`git config` の位置引数に機微な config key（大小文字不問）が含まれるか判定する。
-
-    Args:
-        args: `GitInvocation.subcommand_args`（新構文の op トークンを除いたもの）。
-
-    Returns:
-        含まれていれば True。
-
-    Raises:
-        例外は発生しません。
-    """
-    return any(_is_sensitive_config_key(arg) for arg in args)
-
-
 def _is_config_sensitive_key_mutation(invocation: GitInvocation) -> bool:
     """``git config`` 呼び出しが機微な config key への書込み・削除操作かを判定する。
 
-    ``-c`` / ``--config-env`` によるオーバーライド（`_is_sensitive_config_override`）
-    とは別に、``git config core.hooksPath <path>`` のような通常の subcommand
-    呼び出しを検査する。読み取り専用と確定できる形（``--get`` 系、新構文の
-    ``get``/``list``、値を伴わない legacy query）だけを allow し、それ以外の
-    ``core.hooksPath`` に触れる呼び出しは deny する（docs/adr/shell-analysis-boundary.md の
-    false-positive 優先方針）。
+    ``git config core.hooksPath <path>`` のような通常の subcommand 呼び出しを検査する。
+    読み取り専用と確定できる形（``--get`` 系、新構文の ``get``/``list``、値を伴わない
+    legacy query）だけを allow し、それ以外は deny する（誤検出 > 誤通過）。
 
     Args:
         invocation: git 起動トークン以降の解析結果。
@@ -582,12 +459,12 @@ def _is_config_sensitive_key_mutation(invocation: GitInvocation) -> bool:
     if invocation.subcommand != "config":
         return False
 
-    args = list(invocation.subcommand_args)
+    args = invocation.subcommand_args
     new_op: str | None = None
     if args and args[0] in _GIT_CONFIG_NEW_READ_OPS | _GIT_CONFIG_NEW_WRITE_OPS:
         new_op, args = args[0], args[1:]
 
-    if not _config_args_touch_sensitive_key(args):
+    if not any(_is_sensitive_config_key(arg) for arg in args):
         return False
 
     if new_op is not None:
@@ -621,7 +498,7 @@ def _is_bypass_invocation(invocation: GitInvocation) -> bool:
     """
     if any(_is_no_verify_flag(flag) for flag in invocation.flags):
         return True
-    if _is_sensitive_config_override(invocation.config_values):
+    if any(_is_sensitive_config_key(value.split("=", 1)[0]) for value in invocation.config_values):
         return True
     if _is_config_sensitive_key_mutation(invocation):
         return True
@@ -633,13 +510,8 @@ def _is_bypass_invocation(invocation: GitInvocation) -> bool:
 def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
     """コマンド文字列に git フックバイパスフラグが含まれるかを判定する。
 
-    セグメント先頭に限らず全トークンから git 起動トークンを探し、見つかった
-    位置以降を `parse_git_segment` で解析します（``sudo git commit -n`` や
-    ``/usr/bin/git commit --no-verify`` を捕捉するため）。1 セグメントに
-    複数の git 起動があれば全て検査します。加えて、``sh``/``bash``/``zsh``/
-    ``dash`` の ``-c`` に渡された文字列引数へ 1 段だけ再帰します
-    （``sh -c 'git commit --no-verify'`` を検出するため。
-    ``_recursed`` は内部再帰用の引数で外部から指定しません）。
+    全トークンから git 起動トークンを探し、見つかった位置以降を `parse_git_segment` で
+    解析する。既知シェルの ``-c`` に渡された文字列引数へは 1 段だけ再帰する。
 
     Args:
         command: 検査対象のシェルコマンド文字列。
@@ -656,9 +528,8 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
     Raises:
         例外は発生しません。
     """
-    # heredoc のデータ本文はコマンドの語彙に入らないため、トークン化の前に
-    # 落とす（本文が実行されうる形は `strip_data_heredoc_bodies` が残す）。
-    # 入口で正規化するので `sh -c` の再帰先にも同じ規則が効く。
+    # heredoc のデータ本文はトークン化の前に落とす。入口で正規化するので `sh -c` の
+    # 再帰先にも同じ規則が効く。
     command = strip_data_heredoc_bodies(command)
     return any(_has_bypass_flag_in_dialect(variant, _recursed=_recursed) for variant in command_dialect_variants(command))
 
@@ -684,19 +555,16 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool) -> bool:
                 return True
             if _is_literal_env_hooks_path_override(segment[:index]):
                 return True
-        if not _recursed:
-            wrapper_command = extract_shell_wrapper_command(segment)
-            if wrapper_command is None:
-                continue
-            # `sh -c '<巨大なコマンド>'` は外側が数トークンしか無いため main() の
-            # 予算検査を通過する。再帰先を無予算で走らせると timeout 超過 →
-            # host が kill → silent fail-open になるので、境界でも同じ上限を当てる。
-            # 上限超過は True（＝BLOCK）へ倒す — 検査しきれない入力を通さない
-            # 方針は main() 側と同じで、docs/adr/shell-analysis-boundary.md の「誤検出を誤通過より選ぶ」に従う。
-            if command_exceeds_scan_budget(wrapper_command):
-                return True
-            if has_bypass_flag(wrapper_command, _recursed=True):
-                return True
+        if _recursed:
+            continue
+        wrapper_command = extract_shell_wrapper_command(segment)
+        # `sh -c '<巨大なコマンド>'` は外側が数トークンしか無く main() の予算検査を通過する。
+        # 再帰先を無予算で走らせると timeout で host に kill され silent fail-open になる
+        # ため、境界でも同じ上限を当て、超過は BLOCK へ倒す。
+        if wrapper_command is not None and (
+            command_exceeds_scan_budget(wrapper_command) or has_bypass_flag(wrapper_command, _recursed=True)
+        ):
+            return True
     return False
 
 
@@ -733,9 +601,6 @@ def main() -> int:
     判定不能として fail-closed でブロックする。空入力（tty・stdin 未接続）
     だけは非ブロッキングで許可する。
 
-    Args:
-        引数はありません（標準入力から読み取る）。
-
     Returns:
         終了コード（0: 許可、ブロック時は 2）
 
@@ -759,14 +624,11 @@ def main() -> int:
     if extract_tool_input(data) is None:
         return emit_block_output(_MISSING_FIELDS_MESSAGE)
 
-    # コンテナキーの全走査は iter_bash_commands（lib/harness.py）が単一情報源。
-    # 先勝ちで 1 キーだけ見ると、payload が複数のコンテナキーを持つ host で
-    # 無害な側だけを検査して素通りさせうる。docs/adr/shell-analysis-boundary.md は本フックの検出境界を
-    # 「誤検出を誤通過より選ぶ」と定めている。
+    # 先勝ちで 1 キーだけ見ると、複数のコンテナキーを持つ payload で無害な側だけを
+    # 検査して素通りさせうるため、全キーを走査する。
     for command in iter_bash_commands(data):
-        # 走査は git トークン数に対し O(N^2)。上限超過をそのまま走らせると
-        # hooks.json の timeout を超えて host に kill され、silent fail-open
-        # （＝バイパス成功）になる。検査しきれない入力は通さず止める。
+        # 走査は git トークン数の二次。上限超過を走らせると timeout で host に kill され
+        # silent fail-open になるため、検査しきれない入力は通さず止める。
         if command_exceeds_scan_budget(command):
             return emit_block_output(_TOKEN_BUDGET_MESSAGE)
         if has_bypass_flag(command):
