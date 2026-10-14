@@ -59,6 +59,13 @@ h4 {
   font-weight: var(--font-weight-semibold);
   letter-spacing: var(--tracking-tight);
   line-height: 1.25;
+  text-wrap: balance;
+  /* lang="ja" の見出しを文節で折り返す（「ダッシュボ／ード」のような分断を防ぐ）。 */
+  word-break: auto-phrase;
+}
+
+p {
+  text-wrap: pretty;
 }
 
 ::selection {
@@ -334,6 +341,7 @@ h4 {
   min-inline-size: 0;
   color: var(--muted-foreground);
   font-size: var(--text-sm);
+  white-space: nowrap;
 }
 
 /* 狭い画面では現在地だけ残す（上位階層はサイドバーで辿れる）。 */
@@ -342,8 +350,10 @@ h4 {
 }
 
 .crumbs strong {
+  overflow: hidden;
   color: var(--foreground);
   font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
 }
 
 .topbar__tools {
@@ -370,9 +380,10 @@ h4 {
 }
 
 .search input {
-  inline-size: 200px;
+  inline-size: clamp(160px, 18vw, 240px);
   block-size: 36px;
-  padding-inline: 32px 12px;
+  /* 右端の `/` の札に文字を潜らせない。 */
+  padding-inline: 32px 34px;
   border: 1px solid var(--input);
   border-radius: var(--radius-md);
   background: var(--background);
@@ -388,7 +399,7 @@ h4 {
 }
 
 .search input:focus-visible {
-  inline-size: 260px;
+  inline-size: clamp(180px, 22vw, 300px);
   border-color: var(--ring);
   outline: none;
   box-shadow: 0 0 0 var(--state-ring-width) color-mix(in oklab, var(--ring) 50%, transparent);
@@ -509,6 +520,7 @@ h4 {
   font-size: var(--text-xs);
   line-height: var(--text-xs-line);
   font-weight: var(--font-weight-medium);
+  white-space: nowrap;
   transition:
     background var(--duration-base) var(--ease-out),
     color var(--duration-base) var(--ease-out);
@@ -523,8 +535,7 @@ h4 {
   color: var(--foreground);
 }
 
-.segmented button[aria-pressed="true"],
-.segmented button[aria-selected="true"] {
+.segmented button[aria-pressed="true"] {
   background: var(--background);
   color: var(--foreground);
   box-shadow: var(--shadow-xs);
@@ -608,10 +619,12 @@ h4 {
   flex: 1;
 }
 
+/* 指標カードは 2 列まで。1 列になるのは 2 枚が 150px を割る幅（320px 前後）だけ。
+   スマホでも 4 指標が 2 行で一望できる（全体像を先に見せる）。 */
 .grid {
   display: grid;
   gap: clamp(12px, 1.6vw, 18px);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, max(150px, calc(50% - 9px))), 1fr));
 }
 
 .grid--main {
@@ -657,6 +670,7 @@ h4 {
 
 .card__desc {
   margin-block-start: 3px;
+  word-break: auto-phrase;
   color: var(--muted-foreground);
   font-size: var(--text-xs);
   line-height: var(--text-xs-line);
@@ -716,8 +730,9 @@ h4 {
 
 .metric__foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   margin-block-start: 10px;
 }
 
@@ -811,7 +826,6 @@ h4 {
   inline-size: 100%;
   min-inline-size: 600px;
   block-size: auto;
-  min-block-size: 240px;
   max-block-size: clamp(320px, 46vh, 620px);
   overflow: visible;
 }
@@ -832,10 +846,8 @@ h4 {
   max-block-size: clamp(320px, 58vh, 760px);
 }
 
-/* 100% 積み上げは 1 本なので低い。`.chart` の min-block-size をそのまま継ぐと
-   自然高さ（viewBox 比）の倍以上の箱になり、半分以上がレターボックスになる。 */
+/* 100% 積み上げは 1 本なので低い。上限も低く取る。 */
 .chart--stack {
-  min-block-size: 120px;
   max-block-size: clamp(150px, 22vh, 260px);
 }
 
@@ -876,12 +888,14 @@ h4 {
 }
 
 .bar,
+.bin,
 .series-area {
   transform-box: fill-box;
   transform-origin: bottom;
 }
 
-.bar {
+.bar,
+.bin {
   transition: opacity var(--duration-base) var(--ease-out);
 }
 
@@ -889,10 +903,10 @@ h4 {
  * 円弧の開始位置は SVG 属性の stroke-dashoffset が持つ。ここで
  * stroke-dashoffset を宣言すると属性より CSS が優先され、全セグメントが
  * 12 時から重なって描かれる。触らないこと。
+ * 端は丸めない。丸い端は弧を線幅の半分ずつ伸ばし、小さい分類ほど大きく見せる。
  */
 .arc {
   fill: none;
-  stroke-linecap: round;
   transition:
     stroke-width var(--duration-base) var(--ease-out),
     opacity var(--duration-base) var(--ease-out);
@@ -917,7 +931,8 @@ h4 {
   animation-delay: calc(var(--i, 0) * 90ms + var(--duration-reveal));
 }
 
-[data-animate="in"] .bar {
+[data-animate="in"] .bar,
+[data-animate="in"] .bin {
   animation: grow-y var(--duration-slow) var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 55ms);
 }
@@ -977,6 +992,7 @@ h4 {
 
 /* 図の中でホバー中の系列だけを残し、他を沈める。JS を使わない強調。 */
 .chart:has(.bar:hover) .bar:not(:hover),
+.chart:has(.bin:hover) .bin:not(:hover),
 .chart:has(.bar--h:hover) .bar--h:not(:hover),
 .chart:has(.seg:hover) .seg:not(:hover),
 .chart:has(.point:hover) .point:not(:hover),
@@ -988,9 +1004,34 @@ h4 {
   stroke-width: 20;
 }
 
-.chart:has(.series-line:hover) .series-line:not(:hover),
-.chart:has(.series-line:hover) .series-area {
-  opacity: 0.25;
+/* 区画の境界に重ねる面の色の仕切り。長さを削らずに区切る。 */
+.slice-gap {
+  stroke: var(--card);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+/*
+ * 時系列の時点ごとの当たり判定。最前面に塗らずに置き、細い線を狙わなくても
+ * 各月の値（<title>）に届くようにする。ガイド線と点はホバー中だけ出す。
+ */
+.hit {
+  pointer-events: all;
+}
+
+.guide,
+.hover-dot {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.guide {
+  stroke: var(--muted-foreground);
+  stroke-width: 1;
+}
+
+.hover-col:hover :is(.guide, .hover-dot) {
+  visibility: visible;
 }
 
 .legend {
@@ -1049,6 +1090,34 @@ h4 {
   line-height: var(--text-xs-line);
 }
 
+/* 図の値の浮き札。中身はマークの <title> で、位置は app.js が決める。 */
+.chart-tip {
+  position: fixed;
+  z-index: 70;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  max-inline-size: 240px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs-line);
+  font-variant-numeric: tabular-nums;
+  white-space: pre-line;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+}
+
+.chart-tip::first-line {
+  font-weight: var(--font-weight-semibold);
+}
+
+.chart-tip[hidden] {
+  display: none;
+}
+
 /* --- 表 ------------------------------------------------------------------ */
 
 .table-scroll {
@@ -1099,6 +1168,16 @@ tbody tr:last-child {
 
 .num {
   text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * ヒートマップ表。セルの濃さは --v（0〜1）で決め、数値は文字のまま残す。
+ * 混合の上限 55% は、全ベースカラー・両テーマで文字が 4.5:1 を保つ範囲（最悪 5.5:1）。
+ */
+.heat td {
+  background: color-mix(in oklab, var(--chart-1) calc(var(--v, 0) * 55%), var(--card));
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1232,10 +1311,6 @@ tbody tr:last-child {
     display: none;
   }
 
-  .crumbs > :not(strong) {
-    display: inline;
-  }
-
   .page-head__actions {
     inline-size: auto;
   }
@@ -1248,35 +1323,25 @@ tbody tr:last-child {
     display: block;
   }
 
-  .theme-label {
-    display: inline;
-  }
-
-  .grid--main {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .span-2 {
-    grid-column: span 2;
-  }
-
-  .span-3,
-  .span-5,
-  .span-7 {
-    grid-column: span 3;
-  }
 }
 
 @media (min-width: 1024px) {
-  .base-picker {
-    display: inline-flex;
+  .crumbs > :not(strong) {
+    display: inline;
   }
-
 }
 
 @media (min-width: 1280px) {
   .pane {
     padding-inline: 32px;
+  }
+
+  .base-picker {
+    display: inline-flex;
+  }
+
+  .theme-label {
+    display: inline;
   }
 
   .grid {
@@ -1317,6 +1382,25 @@ tbody tr:last-child {
 
 .metric {
   container-type: inline-size;
+}
+
+/* ドーナツのカードが横に広い（1 列配置の 768〜1279px）ときは、凡例を図の右へ縦に並べる。 */
+.card--donut {
+  container-type: inline-size;
+}
+
+@container (min-width: 480px) {
+  .card--donut .card__body {
+    display: grid;
+    grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+    align-items: center;
+    gap: 24px;
+  }
+
+  .card--donut .legend {
+    flex-direction: column;
+    margin-block-start: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

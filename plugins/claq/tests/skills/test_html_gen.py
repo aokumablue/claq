@@ -1008,7 +1008,7 @@ def test_e2e_animation_never_hides_content_permanently() -> None:
     css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
     assert check_site._validate_resting_state(css) == []
     assert '[data-animate="in"] .series-line {' in css
-    assert '[data-animate="in"] .bar {' in css
+    assert '[data-animate="in"] .bar,\n[data-animate="in"] .bin {' in css
     assert '[data-animate="in"] .arc {' in css
     assert ".series-line {\n  fill: none;" in css
 
@@ -1022,7 +1022,25 @@ def test_e2e_arc_offset_is_left_to_the_svg_attribute() -> None:
     css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
     arc_block = css.split(".arc {", 1)[1].split("}", 1)[0]
     assert "stroke-dashoffset" not in arc_block
+    # 丸い端は弧を線幅の半分ずつ伸ばし、11% の分類が約 25% 増しに見えていた。
+    assert "stroke-linecap" not in arc_block
     assert "@keyframes arc-draw {" in css
+
+
+def test_e2e_every_time_point_can_be_read_on_hover_or_tap() -> None:
+    """時系列の全時点に当たり判定があり、値を浮き札で読めること。
+
+    点を偶数月だけに置いていたため、奇数月と比較系列の値に届かなかった。
+    浮き札はタッチ（pointerdown）でも出て、退避した <title> を閉じるときに戻す。
+    """
+    html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
+    script = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
+    mrr = next(svg for svg in check_site._iter_svg_blocks(html) if 'aria-labelledby="mrr-t' in svg)
+    months = re.findall(r'text-anchor="middle">\d+月</text>', mrr)
+    assert len(months) == mrr.count('class="hit"') == 12
+    assert "bindChartTips();" in script
+    assert 'event.pointerType === "touch"' in script
+    assert "active.title.textContent = active.text;" in script
 
 
 def test_e2e_squashed_sparkline_does_not_use_dash_drawing() -> None:

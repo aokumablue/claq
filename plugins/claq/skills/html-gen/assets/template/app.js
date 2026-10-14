@@ -175,6 +175,59 @@
   };
 
   /**
+   * 図のマークの <title> を、ホバー・タップした位置へ浮き札で即座に出す。
+   *
+   * ブラウザ既定のツールチップは出るまで約 1 秒かかり、タッチでは出ない。
+   * 値の出どころは <title> 1 か所のままにし、表示中だけ中身を退避して
+   * 既定のツールチップとの二重表示を防ぐ。
+   */
+  const bindChartTips = () => {
+    const tip = document.createElement("div");
+    tip.className = "chart-tip";
+    tip.hidden = true;
+    tip.setAttribute("aria-hidden", "true");
+    document.body.append(tip);
+    let active = null;
+
+    const hide = () => {
+      if (!active) return;
+      active.title.textContent = active.text;
+      active = null;
+      tip.hidden = true;
+    };
+
+    const follow = (event) => {
+      const title = event.target.closest?.("svg.chart *")?.querySelector(":scope > title");
+      if (!title) {
+        hide();
+        return;
+      }
+      if (active?.title !== title) {
+        hide();
+        active = { title, text: title.textContent };
+        tip.textContent = active.text;
+        title.textContent = "";
+        tip.hidden = false;
+      }
+      const x = Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+      const above = event.clientY - tip.offsetHeight - 14;
+      tip.style.translate = `${Math.max(x, 8)}px ${above < 8 ? event.clientY + 18 : above}px`;
+    };
+
+    document.addEventListener("pointermove", (event) => {
+      if (event.pointerType !== "touch") follow(event);
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "touch") follow(event);
+    });
+    document.documentElement.addEventListener("pointerleave", hide);
+    document.addEventListener("scroll", hide, { capture: true, passive: true });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") hide();
+    });
+  };
+
+  /**
    * 画面に入った要素へ data-animate を付け、CSS 側の入場アニメーションを起動する。
    *
    * 静止状態（属性なし）が完成形なので、JS 無効・印刷・モーション低減の
@@ -259,6 +312,7 @@
     bindSidebar();
     bindNav();
     bindSearchKey();
+    bindChartTips();
     revealOnScroll();
     countUp();
   };
