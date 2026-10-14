@@ -1133,6 +1133,30 @@ def test_e2e_charts_stay_legible_on_small_screens() -> None:
     assert re.search(r"\.chart \{[^}]*min-inline-size:\s*\d+px", css, re.DOTALL)
 
 
+def test_e2e_axis_text_is_capped_on_wide_screens() -> None:
+    """広い画面で目盛り文字が、宣言より小さい上限で頭打ちになること。
+
+    SVG の文字は viewBox の倍率で一緒に伸びるので、幅 1920px では宣言 15px の目盛りが
+    約 20px になり、カード見出しより大きくなっていた。app.js が描画倍率を
+    --chart-scale として渡し、CSS がそれを割って描画後の大きさに上限を掛ける。
+    上限は下限（_MIN_RENDERED_AXIS_PX）と宣言サイズの間に置き、JS が動かない環境と
+    印刷では宣言のまま伸ばす。
+    """
+    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+    script = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
+    cap = re.search(
+        r'@media screen \{\s*\.chart\[style\*="--chart-scale"\] \.axis-text \{\s*'
+        r"font-size: min\((\d+)px, calc\((\d+)px / var\(--chart-scale\)\)\);",
+        css,
+    )
+    assert cap is not None
+    declared = check_site._css_length(css, ".axis-text", "font-size")
+    assert float(cap.group(1)) == declared
+    assert check_site._MIN_RENDERED_AXIS_PX <= float(cap.group(2)) < declared
+    assert 'style.setProperty("--chart-scale"' in script
+    assert "bindChartScale();" in script
+
+
 def test_e2e_metric_direction_and_sentiment_are_separate() -> None:
     """バッジの色は良し悪し、アイコンは増減の向きで、両者を混ぜない。"""
     html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")

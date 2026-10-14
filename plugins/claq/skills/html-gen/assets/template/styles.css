@@ -580,6 +580,7 @@ p {
 /* --- レイアウト ---------------------------------------------------------- */
 
 .pane {
+  container: pane / inline-size;
   flex: 1;
   inline-size: 100%;
   max-inline-size: var(--layout-pane-max);
@@ -873,6 +874,17 @@ p {
   font-family: var(--font-sans);
   font-size: 15px;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 描画後の大きさを 13px で頭打ちにする（--chart-scale は app.js が渡す描画倍率）。
+ * 下限 12px は最小幅で決まり、上限はこの倍率で決まるので干渉しない。
+ * JS 無効と印刷では倍率が渡らないので 15px のまま伸びる。
+ */
+@media screen {
+  .chart[style*="--chart-scale"] .axis-text {
+    font-size: min(15px, calc(13px / var(--chart-scale)));
+  }
 }
 
 /*
@@ -1350,31 +1362,33 @@ tbody tr:last-child {
     display: inline;
   }
 
-  .grid {
+  /* 4 列は指標カードだけ。主カラムへ継がせると、列割りを決める下の @container が
+     効かない幅（.pane が 1000px 未満）で図と表が 4 等分のカードからはみ出す。 */
+  .grid:not(.grid--main) {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+}
 
+/* 列割りは画面幅ではなく .pane の幅で決める。1000px は 8/12 の折れ線（最小 600px＋余白 36px）と
+   6/12 の表（自然幅 451px＋36px）が収まる下限。 */
+@container pane (min-width: 1000px) {
   .grid--main {
     grid-template-columns: repeat(12, minmax(0, 1fr));
   }
 
-  .span-2 {
-    grid-column: span 8;
-  }
-
-  .span-3 {
+  .span-4 {
     grid-column: span 4;
   }
 
-  .span-5 {
-    grid-column: span 5;
+  .span-6 {
+    grid-column: span 6;
   }
 
-  .span-7 {
-    grid-column: span 7;
+  .span-8 {
+    grid-column: span 8;
   }
 
-  .span-full {
+  .span-12 {
     grid-column: span 12;
   }
 }
@@ -1390,7 +1404,7 @@ tbody tr:last-child {
   container-type: inline-size;
 }
 
-/* ドーナツのカードが横に広い（1 列配置の 768〜1279px）ときは、凡例を図の右へ縦に並べる。 */
+/* ドーナツのカードが横に広い（主カラムが 1 列に並ぶ幅）ときは、凡例を図の右へ縦に並べる。 */
 .card--donut {
   container-type: inline-size;
 }

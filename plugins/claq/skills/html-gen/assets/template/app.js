@@ -250,6 +250,25 @@
   };
 
   /**
+   * 各チャートの描画倍率を `--chart-scale` として CSS へ渡す。
+   *
+   * SVG の文字は viewBox の倍率で一緒に伸びるので、広い画面では宣言 15px の目盛りが
+   * 20px を超え、カード見出しより大きくなる。CSS は描画倍率を知れないため、描画幅・
+   * 高さと viewBox の比のうち小さいほう（meet の縮尺）を渡し、CSS 側で描画後の
+   * 大きさに上限を掛ける。倍率は viewBox に対して決まるので、viewBox を持つ図だけを見る。
+   */
+  const bindChartScale = () => {
+    const observer = new ResizeObserver((entries) => {
+      entries.forEach(({ target, contentRect }) => {
+        const box = target.viewBox.baseVal;
+        const scale = Math.min(contentRect.width / box.width, contentRect.height / box.height);
+        target.style.setProperty("--chart-scale", String(scale));
+      });
+    });
+    document.querySelectorAll("svg.chart[viewBox]").forEach((svg) => observer.observe(svg));
+  };
+
+  /**
    * 画面に入った要素へ data-animate を付け、CSS 側の入場アニメーションを起動する。
    *
    * 静止状態（属性なし）が完成形なので、JS 無効・印刷・モーション低減の
@@ -335,6 +354,7 @@
     bindNav();
     bindSearchKey();
     bindChartTips();
+    bindChartScale();
     revealOnScroll();
     countUp();
   };
