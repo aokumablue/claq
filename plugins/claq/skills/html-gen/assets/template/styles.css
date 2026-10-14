@@ -326,7 +326,7 @@ p {
   z-index: 30;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-block-size: 56px;
   padding-inline: clamp(12px, 3vw, 24px);
   border-block-end: 1px solid var(--border);
@@ -481,6 +481,7 @@ p {
 }
 
 .btn--icon {
+  flex: none;
   inline-size: 36px;
   padding-inline: 0;
 }
@@ -514,7 +515,7 @@ p {
   align-items: center;
   gap: 6px;
   min-block-size: 28px;
-  padding-inline: 10px;
+  padding-inline: 8px;
   border-radius: var(--radius-sm);
   color: var(--muted-foreground);
   font-size: var(--text-xs);
