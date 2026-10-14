@@ -50,7 +50,7 @@ PAGE_KINDS = ("dashboard", "content")
 #: shadcn/ui が配布する系列色の本数。upstream と同数に揃える。
 SERIES_COUNT = 5
 CHART_VARS = tuple(f"--chart-{index}" for index in range(1, SERIES_COUNT + 1))
-#: (前景変数, 背景変数, 最低比率)。WCAG 2.1: 文字 4.5:1 / 非文字 3:1。
+#: (前景変数, 背景変数, 最低比率)。WCAG 2.2: 文字 4.5:1（SC 1.4.3）/ 非文字 3:1（SC 1.4.11）。
 #: border 系は `decorative_roles` として別枠（tokens.json に理由がある）。
 CONTRAST_CONTRACT: tuple[tuple[str, str, float], ...] = (
     ("--foreground", "--background", 4.5),

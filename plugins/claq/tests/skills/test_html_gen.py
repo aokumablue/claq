@@ -752,7 +752,7 @@ def test_resting_state_allows_opacity_zero_inside_keyframes(tmp_path: Path) -> N
 def test_looping_animation_is_reported(tmp_path: Path) -> None:
     """止まらない動き（infinite）は落ちる。
 
-    自動で始まり 5 秒を超えて続く動きは、止める手段が無いと WCAG 2.2.2 に反する。
+    自動で始まり 5 秒を超えて続く動きは、止める手段が無いと WCAG 2.2 SC 2.2.2 に反する。
     脈動する点は静的なページで「リアルタイム更新中」の誤った合図にもなる。
     """
     dest = _copy_site(tmp_path)

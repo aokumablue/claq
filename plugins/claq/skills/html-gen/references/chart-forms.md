@@ -1,6 +1,6 @@
 # チャート種別ごとの骨格
 
-`design.md`「グラフ種別の選定」で選んだ種別を、実際の SVG に落とすための寸法と
+`design.md`「グラフ種別の選定」で選んだ種別を、実際の SVG と表に落とすための寸法と
 骨格。種別を決めても骨格が無ければ、毎回違う書き方になる。
 
 ## viewBox 幅の上限は逆算できる
@@ -57,13 +57,16 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 最長の文字列を数える。全角ラベルは `font-size` と同じ幅を食うので、12u 想定で
 引いた余白は 15u の今では 25% 足りない。
 
+縦の目盛りは右揃え（`text-anchor="end"`）、横は中央揃え（`middle`）で置く。検査は揃えで
+軸を分ける。
+
 ## 骨格
 
 系列色は `var(--chart-1..5)`、面の色は `var(--card)`。生の色を書かない。
 
 ### 折れ線（`.chart`）
 
-テンプレートの「月間経常収益の推移」を写す。比較の系列（前年など）は
+規則 5 で選ぶ形。テンプレートの「月間経常収益の推移」を写す。比較の系列（前年など）は
 `var(--muted-foreground)` で沈め、主役の系列だけ着色して面を敷く。
 
 - 比較の系列は `.series-line--compare` にする（線幅は属性ではなくクラスで持つ。CSS が
@@ -88,7 +91,7 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 
 ### 縦棒（`.chart--bars`）
 
-棒の幅は帯幅の 0.6（棒と棒の隙間は棒の 2/3）にそろえる。
+規則 6・10 で選ぶ形。棒の幅は帯幅の 0.6（棒と棒の隙間は棒の 2/3）にそろえる。
 
 ```html
 <div class="chart-scroll">
@@ -124,7 +127,7 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
     <text class="axis-text" x="46" y="219" text-anchor="end">0</text>
     <line class="axis-line" x1="56" y1="214" x2="680" y2="214"/>
     <rect class="bin" style="--i: 0" x="57" y="135.6" width="50" height="78.4" fill="var(--chart-1)">
-      <title>0〜1,000 円 120 件</title>
+      <title>0〜1,000 円未満 120 件</title>
     </rect>
     <text class="axis-text" x="56" y="236" text-anchor="middle">0</text>
     <text class="axis-text axis-title" x="368" y="270" text-anchor="middle">注文金額（円）</text>
@@ -145,7 +148,7 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
   <table class="heat">
     <caption>曜日×時間帯の問い合わせ件数。色が濃いほど多い（最多 182 件）</caption>
     <thead>
-      <tr><th scope="col">曜日</th><th scope="col">0–6 時</th><th scope="col">6–12 時</th></tr>
+      <tr><th scope="col">曜日</th><th scope="col">0〜5 時台</th><th scope="col">6〜11 時台</th></tr>
     </thead>
     <tbody>
       <tr><th scope="row">月</th><td style="--v: 0.08">14</td><td style="--v: 0.56">102</td></tr>
@@ -185,8 +188,9 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 
 隙間を区画の長さから引かない。引くと全分類が一律に短くなり、合計が 100% に
 届かなくなる（6 分類で 98.3%、各分類が 0.3pt 過小）。合計が意味を持つ図で長さを
-削るのは符号化の誤りである。区画は真の長さで描き、境界の上へ面の色の
-2px の仕切りを重ねる。
+削るのは符号化の誤りである。区画は真の長さで描き（区画は x=8 から幅 704 が 100%）、
+境界の上へ面の色の 2px の仕切りを重ねる。仕切りは当たり判定を持たない線
+（`.slice-gap`）で引く。rect で引くと当たり判定を持ち、境界の片側の区画だけを削る。
 
 ```html
 <div class="chart-scroll">
@@ -196,11 +200,11 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
     <desc id="mx-d">食品が 32% で最大。上位 3 カテゴリで 74%。</desc>
     <line class="grid-line" x1="8" y1="26" x2="8" y2="76"/>
     <text class="axis-text" x="8" y="20" text-anchor="middle">0%</text>
-    <rect class="seg" style="--i: 0" x="8" y="34" width="238" height="34" fill="var(--chart-1)">
-      <title>食品 33.8%</title>
+    <rect class="seg" style="--i: 0" x="8" y="34" width="225.3" height="34" fill="var(--chart-1)">
+      <title>食品 32%</title>
     </rect>
     <!-- 区画を全部描いた後、境界へ面の色の仕切りを重ねる（長さは削らない） -->
-    <rect x="246" y="34" width="2" height="34" fill="var(--card)"/>
+    <line class="slice-gap" x1="233.3" y1="34" x2="233.3" y2="68"/>
     <rect class="legend-key" x="8" y="82" width="10" height="10" rx="2" fill="var(--chart-1)"/>
     <text class="axis-text" x="24" y="91">食品 32%</text>
     <!-- 目盛りは 0/20/40/60/80/100%、区画と凡例は分類の数だけ繰り返す。
@@ -223,12 +227,13 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
     <line class="grid-line" x1="76" y1="320" x2="702" y2="320"/>
     <text class="axis-text" x="66" y="325" text-anchor="end">0</text>
     <line class="axis-line" x1="76" y1="320" x2="702" y2="320"/>
+    <text class="axis-text" x="200" y="342" text-anchor="middle">100</text>
     <text class="axis-text axis-title" x="389" y="376" text-anchor="middle">広告費（万円）</text>
     <text class="axis-text axis-title" x="16" y="174" text-anchor="middle"
           transform="rotate(-90 16 174)">売上（万円）</text>
     <circle class="point" style="--i: 0" cx="200" cy="250" r="6"
             fill="var(--chart-1)" stroke="var(--card)" stroke-width="2">
-      <title>札幌 広告費 120 万円 / 売上 1,840 万円</title>
+      <title>札幌 広告費 100 万円 / 売上 1,840 万円</title>
     </circle>
     <!-- 目盛りは両軸 3 本以上、点はデータの数だけ繰り返す -->
   </svg>
@@ -248,5 +253,5 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 | 主カラムの広いカード | 折れ線・横棒・積み上げ横棒・散布図・ヒストグラム・ヒートマップ表 |
 | 側カラムの狭いカード | ドーナツ・縦棒（分類 5 以下）・指標カード |
 
-規則 8 や 9 で横長の形が選ばれたら、カードの側を広い方へ移す。図を縮めて
+主カラム向きの種別が選ばれたら、カードの側を広い方へ移す。図を縮めて
 入れない。

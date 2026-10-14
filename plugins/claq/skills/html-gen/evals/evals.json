@@ -12,7 +12,7 @@
         "No raw hex or oklch() colors in index.html, styles.css, or app.js (colors go through var(--*))",
         "Output includes metric cards and at least one SVG chart with origin 0 and a desc element",
         "Every cartesian chart (bar, line, area, scatter, stacked, histogram) carries at least 3 axis tick labels and 3 gridlines",
-        "The distribution is drawn as a histogram (rule 3) with equal-width adjacent bins (class bin), not as a single average or a category bar chart",
+        "The distribution is drawn as a histogram (rule 3) with equal-width bins separated only by a thin uniform gap (class bin), not as a single average or a category bar chart",
         "Every time point of the line chart can be read on hover or tap: one .hover-col hit area per point with the values in its <title>",
         "Axis tick steps are multiples of 1, 2 or 5 times a power of ten (never 45, 150 or similar remainders)",
         "Axis text stays at least 12px once the viewBox scale is applied (declared size x min-inline-size / viewBox width)",
