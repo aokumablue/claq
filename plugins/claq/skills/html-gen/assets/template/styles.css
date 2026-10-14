@@ -1205,6 +1205,12 @@ tbody tr:last-child {
   text-align: center;
 }
 
+/* 行区切りはセルの 2px の枠に衝突解決で負け、枠の無い先頭列にだけ線が残るので消す。 */
+.heat thead th,
+.heat tbody tr {
+  border-block-end: 0;
+}
+
 /* --- フッター ------------------------------------------------------------ */
 
 .foot {

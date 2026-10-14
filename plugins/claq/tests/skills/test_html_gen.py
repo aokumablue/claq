@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import itertools
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -369,6 +370,37 @@ def test_text_color_from_a_transparent_mix_is_reported(tmp_path: Path) -> None:
         )
         == ""
     )
+
+
+def test_heatmap_cap_keeps_cell_text_readable_in_every_block() -> None:
+    """ヒートマップの濃さの上限（`.heat td` の 55%）で、セルの文字が 4.5:1 を保つこと。
+
+    上限を上げると、ダークの濃いセルで --card-foreground が下地の系列色に近づき
+    可読性契約を割る。CSS の `color-mix(in oklab, …)` と同じ OKLab 上の線形混合で、
+    全ベースカラー × 両テーマの最も濃いセル（`--v: 1`）を確かめる。
+    """
+    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+    cap = re.search(r"\.heat td \{[^}]*?calc\(var\(--v, 0\) \* ([\d.]+)%\)", css)
+    assert cap is not None
+    share = float(cap.group(1)) / 100
+
+    def oklab(value: str) -> tuple[float, float, float]:
+        """不透明な oklch() を OKLab の (L, a, b) にする。"""
+        lightness, chroma, hue, alpha = check_site.parse_oklch(value)
+        assert alpha == 1.0, value
+        return lightness, chroma * math.cos(math.radians(hue)), chroma * math.sin(math.radians(hue))
+
+    for base_id in BASES:
+        for theme in check_site.THEMES:
+            resolved = check_site.scheme(TOKENS, base_id, theme)
+            lightness, a_axis, b_axis = (
+                share * top + (1 - share) * under
+                for top, under in zip(oklab(resolved["--chart-1"]), oklab(resolved["--card"]), strict=True)
+            )
+            hue = math.degrees(math.atan2(b_axis, a_axis)) % 360
+            cell = check_site.oklch_to_hex(f"oklch({lightness:.6f} {math.hypot(a_axis, b_axis):.6f} {hue:.6f})")
+            text = check_site.resolved_hex(TOKENS, base_id, theme)["--card-foreground"]
+            assert check_site.contrast_ratio(text, cell) >= 4.5, f"{theme}/{base_id}"
 
 
 def test_authored_text_colors_go_through_role_variables() -> None:
