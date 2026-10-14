@@ -1016,22 +1016,22 @@ p {
  * 時系列の時点ごとの当たり判定。最前面に塗らずに置き、細い線を狙わなくても
  * 各月の値（<title>）に届くようにする。ガイド線と点はホバー中だけ出す。
  */
-.hit {
+.hover-hit {
   pointer-events: all;
 }
 
-.guide,
+.hover-guide,
 .hover-dot {
   visibility: hidden;
   pointer-events: none;
 }
 
-.guide {
+.hover-guide {
   stroke: var(--muted-foreground);
   stroke-width: 1;
 }
 
-.hover-col:hover :is(.guide, .hover-dot) {
+.hover-col:hover :is(.hover-guide, .hover-dot) {
   visibility: visible;
 }
 

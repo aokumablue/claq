@@ -111,6 +111,16 @@ REQUIRED_STYLE_VARS = (
 )
 #: Tailwind のブレークポイント。全部を手書き CSS が扱っていること。
 REQUIRED_BREAKPOINTS = (768, 1024, 1280)
+#: 止まらない動き。自動で始まり 5 秒を超えて続く動きは、止める手段が無いと
+#: WCAG 2.2 SC 2.2.2 に反する。脈動する点は「リアルタイムで更新中」の合図にも読め、
+#: 静的なページでは誤りになる。styles.css と HTML に埋め込んだ CSS で同じ基準を使う。
+LOOPING_ANIMATION_RE = re.compile(r"animation(?:-iteration-count)?:[^;}]*\binfinite\b")
+#: SVG の SMIL アニメーションの無限反復。
+LOOPING_SMIL_RE = re.compile(r"(?<![-\w])repeat(?:Count|Dur)\s*=\s*[\"']indefinite[\"']")
+#: HTML に埋め込まれた CSS（style 属性の値と <style> 要素の中身）。
+EMBEDDED_CSS_RE = re.compile(
+    r"(?<![-\w])style\s*=\s*(?:\"([^\"]*)\"|'([^']*)')|<style\b[^>]*>(.*?)</style>", re.IGNORECASE | re.DOTALL
+)
 
 
 # --- 色空間 -----------------------------------------------------------------
@@ -547,6 +557,7 @@ def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:
             violations.append(f"<{landmark}> が無い")
     violations.extend(_validate_theme_toggle(tags))
     violations.extend(_validate_stylesheets(tags))
+    violations.extend(_validate_inline_motion(html))
     if page_kind == "dashboard":
         violations.extend(_validate_dashboard(html, tags))
         violations.extend(_validate_chart_scroll_wrapper(html))
@@ -574,6 +585,26 @@ def _validate_stylesheets(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
     local = [href for href in hrefs if href in ("tokens.css", "styles.css")]
     if local != ["tokens.css", "styles.css"]:
         return ["tokens.css → styles.css の順で読み込まれていない（手書き側が上書きできない）"]
+    return []
+
+
+def _validate_inline_motion(html: str) -> list[str]:
+    """HTML に直接書いた止まらない動きを検査する。
+
+    styles.css の検査だけでは、SVG の ``<animate repeatCount="indefinite">`` や、
+    style 属性・``<style>`` 要素に書いた ``infinite`` が素通りする。どこに書いても
+    止まらない動きであることは変わらないので、styles.css と同じ基準で落とす。
+    埋め込み CSS は ``;`` で区切ってつなぎ、別の属性の語をまたいで拾わない。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    embedded = ";".join(part for match in EMBEDDED_CSS_RE.finditer(html) for part in match.groups() if part)
+    if LOOPING_SMIL_RE.search(html) or LOOPING_ANIMATION_RE.search(embedded):
+        return ["index.html に止まらない動き（infinite / indefinite）がある（回数を有限にするか、動きを外す）"]
     return []
 
 
@@ -903,6 +934,36 @@ def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> li
     violations.extend(_validate_stretched_svg_text(html))
     violations.extend(_validate_chart_form(html))
     violations.extend(_validate_tick_steps(html))
+    violations.extend(_validate_time_point_hits(html))
+    return violations
+
+
+def _validate_time_point_hits(html: str) -> list[str]:
+    """時系列の時点ラベルごとに、値へ届く当たり判定があることを検査する。
+
+    折れ線の値は時点ごとの当たり判定（``.hover-hit``）の ``<title>`` で読ませる。
+    点や当たり判定を間引くと、ラベルはあるのに値へ届かない時点が残る。時点ラベルは
+    横軸に中央揃えで置くので、その数を当たり判定の下限にする。軸の名前
+    （``axis-text axis-title``）は時点ではないので数えない。潰し描画の
+    スパークラインは値を指標カードの数値で読ませるので対象外。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    violations: list[str] = []
+    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
+        if 'class="series-line' not in svg or 'preserveAspectRatio="none"' in svg:
+            continue
+        labels = len(re.findall(r'<text class="axis-text"[^>]*\btext-anchor="middle"', svg))
+        hits = len(re.findall(r'class="hover-hit\b', svg))
+        if hits < labels:
+            violations.append(
+                f"{index} 枚目の時系列の当たり判定（.hover-hit）が {hits} 個で、時点ラベル {labels} 個に届かない"
+                "（点を間引くと値に届かない時点が残る。全時点に .hover-col を置く）"
+            )
     return violations
 
 
@@ -951,9 +1012,7 @@ def _validate_styles(css: str) -> list[str]:
     ]
     if re.search(r"font-size:\s*(?:[0-9]|1[0-1])px", css):
         violations.append("12px 未満の font-size がある")
-    # 自動で始まり 5 秒を超えて続く動きは、止める手段が無いと WCAG 2.2.2 に反する。
-    # 脈動する点は「リアルタイムで更新中」の合図にも読め、静的なページでは誤りになる。
-    if re.search(r"animation(?:-iteration-count)?:[^;}]*\binfinite\b", css):
+    if LOOPING_ANIMATION_RE.search(css):
         violations.append("styles.css に止まらない動き（infinite）がある（回数を有限にするか、動きを外す）")
     violations.extend(_validate_reduced_motion(css))
     violations.extend(_validate_resting_state(css))

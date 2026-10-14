@@ -75,10 +75,10 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 
 ```html
 <g class="hover-col">
-  <line class="guide" x1="110.9" y1="18" x2="110.9" y2="214"/>
+  <line class="hover-guide" x1="110.9" y1="18" x2="110.9" y2="214"/>
   <circle class="hover-dot" cx="110.9" cy="136.4" r="4" fill="var(--muted-foreground)" stroke="var(--card)" stroke-width="2"/>
   <circle class="hover-dot" cx="110.9" cy="108.9" r="4.5" fill="var(--chart-1)" stroke="var(--card)" stroke-width="2"/>
-  <rect class="hit" x="81.5" y="18" width="58.9" height="196" fill="none">
+  <rect class="hover-hit" x="81.5" y="18" width="58.9" height="196" fill="none">
     <title>2月&#10;本年 134 百万円&#10;前年 99 百万円&#10;前年比 +35%</title>
   </rect>
 </g>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import itertools
 import json
 import re
 import shutil
@@ -732,6 +733,34 @@ def test_looping_animation_is_reported(tmp_path: Path) -> None:
     assert _append(dest, "styles.css", "\n.live { animation-iteration-count: 2; }\n") == ""
 
 
+def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
+    """HTML に直接書いた止まらない動きも落ちる。
+
+    styles.css だけを見ていると、SVG の <animate repeatCount="indefinite"> や
+    style 属性・<style> 要素に書いた infinite で脈動が素通りする。回数が有限なら通す。
+    """
+    dest = _copy_site(tmp_path)
+    smil = '<animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite"/>'
+    assert "止まらない動き" in _edit(dest, "index.html", ('<desc id="mrr-d">', f'{smil}<desc id="mrr-d">'))
+
+    dest = _copy_site(tmp_path, "s2")
+    dot = '<circle class="series-dot" style="--i: 1'
+    assert "止まらない動き" in _edit(dest, "index.html", (dot, f"{dot}; animation: pulse 2s infinite"))
+
+    for markup in (
+        "<style>.live { animation-iteration-count: infinite; }</style>",
+        "<animate repeatDur='indefinite'/>",
+    ):
+        assert check_site._validate_inline_motion(markup) != [], markup
+    for markup in (
+        '<animate repeatCount="3"/>',
+        '<i style="animation-iteration-count: 2"></i>',
+        # 属性の境界をまたいで別の属性の語を拾わない
+        '<i style="animation: rise 1s" data-note="infinite"></i>',
+    ):
+        assert check_site._validate_inline_motion(markup) == [], markup
+
+
 def test_fixed_canvas_width_is_reported(tmp_path: Path) -> None:
     """ブレークポイント以上の固定幅は落ちる。"""
     dest = _copy_site(tmp_path)
@@ -1028,19 +1057,54 @@ def test_e2e_arc_offset_is_left_to_the_svg_attribute() -> None:
 
 
 def test_e2e_every_time_point_can_be_read_on_hover_or_tap() -> None:
-    """時系列の全時点に当たり判定があり、値を浮き札で読めること。
+    """時系列の全時点に当たり判定があり、プロット領域を隙間なく覆うこと。
 
-    点を偶数月だけに置いていたため、奇数月と比較系列の値に届かなかった。
-    浮き札はタッチ（pointerdown）でも出て、退避した <title> を閉じるときに戻す。
+    点を偶数月だけに置いていたため、奇数月と比較系列の値に届かなかった。当たり判定は
+    月ラベルと同じ順に 12 個並び、左端 52 から右端 700 までを隙間なく覆う。
+    浮き札の挙動（タッチで出る・閉じると <title> を戻す）はこのテストでは見られないので、
+    JS は boot で結線していることだけを確かめ、挙動はブラウザで確かめる。
     """
     html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
     script = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
     mrr = next(svg for svg in check_site._iter_svg_blocks(html) if 'aria-labelledby="mrr-t' in svg)
-    months = re.findall(r'text-anchor="middle">\d+月</text>', mrr)
-    assert len(months) == mrr.count('class="hit"') == 12
+    months = re.findall(r'text-anchor="middle">(\d+月)</text>', mrr)
+    hits = re.findall(
+        r'<rect class="hover-hit" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"[^>]*><title>(\d+月)&#10;', mrr
+    )
+    assert len(months) == 12
+    assert [month for _, _, month in hits] == months
+    spans = [(float(x), float(x) + float(width)) for x, width, _ in hits]
+    assert spans[0][0] == pytest.approx(52.0)
+    assert spans[-1][1] == pytest.approx(700.0)
+    assert all(right == pytest.approx(left) for (_, right), (left, _) in itertools.pairwise(spans))
     assert "bindChartTips();" in script
-    assert 'event.pointerType === "touch"' in script
-    assert "active.title.textContent = active.text;" in script
+
+
+def test_time_series_hit_areas_must_reach_every_labeled_point(tmp_path: Path) -> None:
+    """時点ラベルより当たり判定が少ない時系列は違反になること。
+
+    点や当たり判定を間引くと、ラベルはあるのに値（<title>）へ届かない時点が残る。
+    軸の名前（axis-title）は時点ではないので数えず、潰し描画と時系列でない図は対象外。
+    """
+    dest = _copy_site(tmp_path)
+    assert "当たり判定" in _edit(dest, "index.html", ('<rect class="hover-hit" x="52.0"', '<rect class="x" x="52.0"'))
+
+    def line(hits: int, labels: int) -> str:
+        """時点ラベルと当たり判定の数を指定した折れ線の SVG を返す。"""
+        ticks = '<text class="axis-text" x="0" y="0" text-anchor="middle">1月</text>' * labels
+        areas = '<rect class="hover-hit" x="0" y="0" width="1" height="1"/>' * hits
+        return f'<svg><path class="series-line" d="M0 0"/>{ticks}{areas}</svg>'
+
+    assert "2 個で、時点ラベル 3 個" in "\n".join(check_site._validate_time_point_hits(line(2, 3)))
+    assert check_site._validate_time_point_hits(line(12, 12)) == []
+    # ラベルを 1 つおきに間引いた時系列は、当たり判定がラベルより多くてよい
+    assert check_site._validate_time_point_hits(line(24, 12)) == []
+    title = '<text class="axis-text axis-title" x="0" y="0" text-anchor="middle">月</text>'
+    assert check_site._validate_time_point_hits(line(2, 2).replace("</svg>", f"{title}</svg>")) == []
+    stretched = line(0, 3).replace("<svg>", '<svg preserveAspectRatio="none">')
+    assert check_site._validate_time_point_hits(stretched) == []
+    bars = '<svg><rect class="bar" width="10" height="50"/><text class="axis-text" text-anchor="middle">Q1</text></svg>'
+    assert check_site._validate_time_point_hits(bars) == []
 
 
 def test_e2e_squashed_sparkline_does_not_use_dash_drawing() -> None:
@@ -1275,7 +1339,8 @@ def test_tick_steps_must_be_nice_numbers() -> None:
     最大値を本数で割った端数（45 や 150）の刻みは、散文の規則だけでは防げない。
     """
     def svg(*labels: str) -> str:
-        cells = "".join(f'<text class="axis-text" x="10" y="10">{label}</text>' for label in labels)
+        """揃えを省いた（start の）目盛りラベルを並べた SVG を返す。"""
+        cells ="".join(f'<text class="axis-text" x="10" y="10">{label}</text>' for label in labels)
         return f"<svg>{cells}</svg>"
 
     assert check_site._validate_tick_steps(svg("0", "150", "300", "450")) != []
@@ -1297,6 +1362,7 @@ def test_tick_steps_are_compared_per_axis() -> None:
     「等間隔でない」で落ちる。縦軸は右揃え、横軸は中央揃えで見分ける。
     """
     def axis(anchor: str, *labels: str) -> str:
+        """指定の揃えで目盛りラベルを並べた断片を返す。"""
         return "".join(
             f'<text class="axis-text" x="0" y="0" text-anchor="{anchor}">{label}</text>' for label in labels
         )
