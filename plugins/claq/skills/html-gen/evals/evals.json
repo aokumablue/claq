@@ -61,7 +61,7 @@
         "The 4 quarterly points are drawn as vertical columns (rule 6), not a line chart",
         "The advertising-spend vs revenue pairs are drawn as a scatter plot (rule 2) with both axes named",
         "The weekday x time-slot visitor counts are drawn as a heatmap table (rule 4) that keeps the numbers in the cells",
-        "Every chart is wrapped in a .chart-scroll container except the donut",
+        "Every SVG chart except the donut is wrapped in a .chart-scroll container (the heatmap table sits in .table-scroll instead)",
         "check_site.py exits 0 on the generated site"
       ]
     }

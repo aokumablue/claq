@@ -1305,6 +1305,9 @@ def test_tick_steps_are_compared_per_axis() -> None:
     assert check_site._validate_tick_steps(both) == []
     bad_x = f'<svg>{axis("end", "0", "500", "1,000")}{axis("middle", "0", "45", "90")}</svg>'
     assert "45" in "\n".join(check_site._validate_tick_steps(bad_x))
+    # 縦軸を左揃え（揃えの省略を含む）で書いた図も、中央揃えの横軸と混ぜない
+    unanchored = "".join(f'<text class="axis-text" x="0" y="0">{label}</text>' for label in ("0", "500", "1,000"))
+    assert check_site._validate_tick_steps(f'<svg>{unanchored}{axis("middle", "0", "50", "100")}</svg>') == []
 
 
 def test_nice_step_rejects_non_decade_mantissas() -> None:

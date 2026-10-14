@@ -774,9 +774,9 @@ def _validate_tick_steps(html: str) -> list[str]:
     数字だけのラベルを値の目盛りとみなす。「1月」「Q1」のような分類ラベルは
     数値として解釈できないので自然に外れる。
 
-    縦軸の目盛りは右揃え（``text-anchor="end"``）、横軸は中央揃えで置くので、揃えで
-    軸を分けて比べる。散布図やヒストグラムは両軸が数値で、まとめると 2 本の軸の
-    目盛りが 1 列に混ざり、正しい図が「等間隔でない」で落ちる。
+    縦軸の目盛りは右揃え（``text-anchor="end"``）、横軸は中央揃えで置くので、揃えの
+    値（省略時は start）で軸を分けて比べる。散布図やヒストグラムは両軸が数値で、
+    まとめると 2 本の軸の目盛りが 1 列に混ざり、正しい図が「等間隔でない」で落ちる。
 
     Args:
         html: 検査対象の HTML 文字列
@@ -786,10 +786,11 @@ def _validate_tick_steps(html: str) -> list[str]:
     """
     violations: list[str] = []
     for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        axes: dict[bool, list[float]] = {}
+        axes: dict[str, list[float]] = {}
         for attrs, label in re.findall(r'<text class="axis-text"([^>]*)>([^<]+)</text>', svg):
             if re.fullmatch(r"[\d,]+", label):
-                axes.setdefault('text-anchor="end"' in attrs, []).append(float(label.replace(",", "")))
+                anchor = re.search(r'text-anchor="([a-z]+)"', attrs)
+                axes.setdefault(anchor.group(1) if anchor else "start", []).append(float(label.replace(",", "")))
         for values in axes.values():
             if len(values) < 2:
                 continue
