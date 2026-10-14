@@ -1208,25 +1208,6 @@ tbody tr:last-child {
   }
 }
 
-@keyframes ping {
-  from {
-    opacity: 0.5;
-    transform: scale(1);
-  }
-
-  to {
-    opacity: 0;
-    transform: scale(2.6);
-  }
-}
-
-.ping {
-  transform-box: fill-box;
-  transform-origin: center;
-  opacity: 0.5;
-  animation: ping 2.4s var(--ease-out) infinite;
-}
-
 /* --- レスポンシブ --------------------------------------------------------- */
 
 @media (min-width: 768px) {

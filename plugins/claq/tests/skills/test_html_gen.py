@@ -716,6 +716,22 @@ def test_resting_state_allows_opacity_zero_inside_keyframes(tmp_path: Path) -> N
     ) == ""
 
 
+def test_looping_animation_is_reported(tmp_path: Path) -> None:
+    """止まらない動き（infinite）は落ちる。
+
+    自動で始まり 5 秒を超えて続く動きは、止める手段が無いと WCAG 2.2.2 に反する。
+    脈動する点は静的なページで「リアルタイム更新中」の誤った合図にもなる。
+    """
+    dest = _copy_site(tmp_path)
+    assert "infinite" in _append(dest, "styles.css", "\n.live { animation: pulse 2s ease-out infinite; }\n")
+
+    dest = _copy_site(tmp_path, "s2")
+    assert "infinite" in _append(dest, "styles.css", "\n.live { animation-iteration-count: infinite; }\n")
+
+    dest = _copy_site(tmp_path, "s3")
+    assert _append(dest, "styles.css", "\n.live { animation-iteration-count: 2; }\n") == ""
+
+
 def test_fixed_canvas_width_is_reported(tmp_path: Path) -> None:
     """ブレークポイント以上の固定幅は落ちる。"""
     dest = _copy_site(tmp_path)
@@ -1137,6 +1153,10 @@ def test_chart_form_rules_are_enforced() -> None:
     wide = "<svg>" + '<rect class="bar" width="50" height="10" />' * 8 + "</svg>"
     assert check_site._validate_chart_form(wide) == []
 
+    # ヒストグラムのビンは分類ではないので、縦棒の分類上限に数えない
+    bins = "<svg>" + '<rect class="bin" width="10" height="50" />' * 12 + "</svg>"
+    assert check_site._validate_chart_form(bins) == []
+
 
 def test_bar_orientation_is_read_from_dimensions() -> None:
     """棒の向きは class 名ではなく寸法で判定される。"""
@@ -1225,7 +1245,8 @@ def test_scatter_and_stack_marks_are_checked_for_axes() -> None:
     scatter = '<svg class="chart chart--scatter" viewBox="0 0 720 380"><circle class="point" r="6"/></svg>'
     stack = '<svg class="chart chart--stack" viewBox="0 0 720 128"><rect class="seg" width="100"/></svg>'
     hbar = '<svg class="chart chart--hbars" viewBox="0 0 720 422"><rect class="bar--h" width="500"/></svg>'
-    for name, svg in (("散布図", scatter), ("積み上げ", stack), ("横棒", hbar)):
+    hist = '<svg class="chart" viewBox="0 0 720 280"><rect class="bin" width="52" height="120"/></svg>'
+    for name, svg in (("散布図", scatter), ("積み上げ", stack), ("横棒", hbar), ("ヒストグラム", hist)):
         assert check_site._is_cartesian_chart(svg) is True, name
         assert len(check_site._validate_chart_axes(svg)) == 2, name
 
@@ -1249,6 +1270,23 @@ def test_tick_steps_must_be_nice_numbers() -> None:
     # 分類ラベルは数値として読めないので対象外。目盛り 1 本以下も対象外
     assert check_site._validate_tick_steps(svg("1月", "2月", "3月")) == []
     assert check_site._validate_tick_steps(svg("100")) == []
+
+
+def test_tick_steps_are_compared_per_axis() -> None:
+    """両軸が数値の図では、縦軸と横軸の目盛りを別々に比べること。
+
+    散布図・ヒストグラムの x 目盛りを y 目盛りと 1 列にまとめると、正しい図が
+    「等間隔でない」で落ちる。縦軸は右揃え、横軸は中央揃えで見分ける。
+    """
+    def axis(anchor: str, *labels: str) -> str:
+        return "".join(
+            f'<text class="axis-text" x="0" y="0" text-anchor="{anchor}">{label}</text>' for label in labels
+        )
+
+    both = f'<svg>{axis("end", "0", "500", "1,000")}{axis("middle", "0", "50", "100", "150")}</svg>'
+    assert check_site._validate_tick_steps(both) == []
+    bad_x = f'<svg>{axis("end", "0", "500", "1,000")}{axis("middle", "0", "45", "90")}</svg>'
+    assert "45" in "\n".join(check_site._validate_tick_steps(bad_x))
 
 
 def test_nice_step_rejects_non_decade_mantissas() -> None:

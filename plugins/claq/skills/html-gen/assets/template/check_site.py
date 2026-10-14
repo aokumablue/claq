@@ -589,8 +589,9 @@ _MIN_AXIS_TICKS = 3
 #: 潰し判定で除外される。
 #:
 #: **種別を増やしたらここも増やす。** 増やさないと、新しい形だけが軸ゼロでも素通りする。
-#: `bar--h` は `class="bar` の前方一致で既に入る。
-_CARTESIAN_MARK_CLASSES = ("bar", "series-line", "series-area", "point", "seg")
+#: `bar--h` は `class="bar` の前方一致で既に入る。ヒストグラムの `bin` は縦棒の
+#: 分類上限（`_MAX_VERTICAL_BARS`）に数えないよう、`bar` と別の名前にしてある。
+_CARTESIAN_MARK_CLASSES = ("bar", "bin", "series-line", "series-area", "point", "seg")
 
 
 def _iter_svg_blocks(html: str) -> list[str]:
@@ -773,6 +774,10 @@ def _validate_tick_steps(html: str) -> list[str]:
     数字だけのラベルを値の目盛りとみなす。「1月」「Q1」のような分類ラベルは
     数値として解釈できないので自然に外れる。
 
+    縦軸の目盛りは右揃え（``text-anchor="end"``）、横軸は中央揃えで置くので、揃えで
+    軸を分けて比べる。散布図やヒストグラムは両軸が数値で、まとめると 2 本の軸の
+    目盛りが 1 列に混ざり、正しい図が「等間隔でない」で落ちる。
+
     Args:
         html: 検査対象の HTML 文字列
 
@@ -781,20 +786,23 @@ def _validate_tick_steps(html: str) -> list[str]:
     """
     violations: list[str] = []
     for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        labels = re.findall(r'<text class="axis-text"[^>]*>([^<]+)</text>', svg)
-        values = sorted(float(label.replace(",", "")) for label in labels if re.fullmatch(r"[\d,]+", label))
-        if len(values) < 2:
-            continue
-        steps = {round(upper - lower, 6) for lower, upper in itertools.pairwise(values)}
-        if len(steps) > 1:
-            violations.append(f"{index} 枚目の目盛りが等間隔でない（刻み {sorted(steps)}）")
-            continue
-        step = steps.pop()
-        if not _is_nice_step(step):
-            violations.append(
-                f"{index} 枚目の目盛りの刻みが {step:g}"
-                "（1・2・5 の倍数にする。最大値を本数で割った端数は読み手が使えない）"
-            )
+        axes: dict[bool, list[float]] = {}
+        for attrs, label in re.findall(r'<text class="axis-text"([^>]*)>([^<]+)</text>', svg):
+            if re.fullmatch(r"[\d,]+", label):
+                axes.setdefault('text-anchor="end"' in attrs, []).append(float(label.replace(",", "")))
+        for values in axes.values():
+            if len(values) < 2:
+                continue
+            steps = {round(upper - lower, 6) for lower, upper in itertools.pairwise(sorted(values))}
+            if len(steps) > 1:
+                violations.append(f"{index} 枚目の目盛りが等間隔でない（刻み {sorted(steps)}）")
+                continue
+            step = steps.pop()
+            if not _is_nice_step(step):
+                violations.append(
+                    f"{index} 枚目の目盛りの刻みが {step:g}"
+                    "（1・2・5 の倍数にする。最大値を本数で割った端数は読み手が使えない）"
+                )
     return violations
 
 
@@ -942,6 +950,10 @@ def _validate_styles(css: str) -> list[str]:
     ]
     if re.search(r"font-size:\s*(?:[0-9]|1[0-1])px", css):
         violations.append("12px 未満の font-size がある")
+    # 自動で始まり 5 秒を超えて続く動きは、止める手段が無いと WCAG 2.2.2 に反する。
+    # 脈動する点は「リアルタイムで更新中」の合図にも読め、静的なページでは誤りになる。
+    if re.search(r"animation(?:-iteration-count)?:[^;}]*\binfinite\b", css):
+        violations.append("styles.css に止まらない動き（infinite）がある（回数を有限にするか、動きを外す）")
     violations.extend(_validate_reduced_motion(css))
     violations.extend(_validate_resting_state(css))
     violations.extend(_validate_fluid_width(css))
