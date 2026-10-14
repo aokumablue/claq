@@ -66,6 +66,8 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 テンプレートの「月間経常収益の推移」を写す。比較の系列（前年など）は
 `var(--muted-foreground)` で沈め、主役の系列だけ着色して面を敷く。
 
+- 比較の系列は `.series-line--compare` にする（線幅は属性ではなくクラスで持つ。CSS が
+  SVG の表現属性に勝つため、`stroke-width` 属性を書いても `.series-line` の値で上書きされる）
 - 線の `--len` と `stroke-dasharray` はパスの実長以上にする。短いと静止状態で
   線の末尾が隙間に落ちて消える
 - 曲線は行き過ぎない単調補間（d3 の `curveMonotoneX` と同じ）にする。通常の
@@ -79,7 +81,7 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
   <circle class="hover-dot" cx="110.9" cy="136.4" r="4" fill="var(--muted-foreground)" stroke="var(--card)" stroke-width="2"/>
   <circle class="hover-dot" cx="110.9" cy="108.9" r="4.5" fill="var(--chart-1)" stroke="var(--card)" stroke-width="2"/>
   <rect class="hover-hit" x="81.5" y="18" width="58.9" height="196" fill="none">
-    <title>2月&#10;本年 134 百万円&#10;前年 99 百万円&#10;前年比 +35%</title>
+    <title>2月&#10;本年 134 百万円&#10;前年 99 百万円&#10;前年同月比 +35.4%</title>
   </rect>
 </g>
 ```

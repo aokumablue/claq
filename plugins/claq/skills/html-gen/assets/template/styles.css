@@ -900,6 +900,12 @@ p {
   stroke-dashoffset: 0;
 }
 
+/* 比較の系列は灰へ沈め、主役より細くする。 */
+.series-line--compare {
+  stroke: var(--muted-foreground);
+  stroke-width: 1.5;
+}
+
 .bar,
 .bin,
 .series-area {
