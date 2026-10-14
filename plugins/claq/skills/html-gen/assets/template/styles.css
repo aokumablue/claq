@@ -1176,9 +1176,14 @@ tbody tr:last-child {
  * 混合の上限 55% は、全ベースカラー・両テーマで文字が 4.5:1 を保つ範囲（最悪 5.5:1）。
  */
 .heat td {
+  border: 2px solid var(--card);
   background: color-mix(in oklab, var(--chart-1) calc(var(--v, 0) * 55%), var(--card));
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+.heat thead th + th {
+  text-align: center;
 }
 
 /* --- フッター ------------------------------------------------------------ */

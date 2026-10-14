@@ -20,7 +20,7 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 
 | クラス | 最小描画幅 | viewBox 幅の上限 | 使う種別 |
 |---|---|---|---|
-| `.chart` | 600px | 750 | 折れ線・面 |
+| `.chart` | 600px | 750 | 折れ線・面・ヒストグラム |
 | `.chart--hbars` | 600px | 750 | 横棒 |
 | `.chart--stack` | 600px | 750 | 100% 積み上げ横棒 |
 | `.chart--scatter` | 600px | 750 | 散布図 |
@@ -61,9 +61,32 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 
 系列色は `var(--chart-1..5)`、面の色は `var(--card)`。生の色を書かない。
 
+### 折れ線（`.chart`）
+
+テンプレートの「月間経常収益の推移」を写す。比較の系列（前年など）は
+`var(--muted-foreground)` で沈め、主役の系列だけ着色して面を敷く。
+
+- 線の `--len` と `stroke-dasharray` はパスの実長以上にする。短いと静止状態で
+  線の末尾が隙間に落ちて消える
+- 曲線は行き過ぎない単調補間（d3 の `curveMonotoneX` と同じ）にする。通常の
+  スプラインは山と谷の外へはみ出し、無い値を描く
+- 時点ごとに当たり判定の列を最前面へ置く。幅は時点の間隔で、両端はプロット領域の
+  内側で切る。`<title>` の 1 行目は時点（浮き札で太字になる）、続けて系列ごとに 1 行
+
+```html
+<g class="hover-col">
+  <line class="guide" x1="110.9" y1="18" x2="110.9" y2="214"/>
+  <circle class="hover-dot" cx="110.9" cy="136.4" r="4" fill="var(--muted-foreground)" stroke="var(--card)" stroke-width="2"/>
+  <circle class="hover-dot" cx="110.9" cy="108.9" r="4.5" fill="var(--chart-1)" stroke="var(--card)" stroke-width="2"/>
+  <rect class="hit" x="81.5" y="18" width="58.9" height="196" fill="none">
+    <title>2月&#10;本年 134 百万円&#10;前年 99 百万円&#10;前年比 +35%</title>
+  </rect>
+</g>
+```
+
 ### 縦棒（`.chart--bars`）
 
-棒は 24 以下に留め、帯の余りは余白に残す（`帯幅 × 0.45` と 24 の小さい方）。
+棒の幅は帯幅の 0.6（棒と棒の隙間は棒の 2/3）にそろえる。
 
 ```html
 <div class="chart-scroll">
@@ -71,21 +94,67 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
        preserveAspectRatio="xMidYMid meet" data-origin="0" aria-labelledby="q-t q-d">
     <title id="q-t">四半期別の売上</title>
     <desc id="q-d">Q1 の 3,180 万円から Q4 の 4,890 万円へ 4 期連続で増加。</desc>
-    <line class="grid-line" x1="58" y1="198" x2="454" y2="198"/>
-    <text class="axis-text" x="48" y="203" text-anchor="end">0</text>
-    <line class="axis-line" x1="58" y1="198" x2="454" y2="198"/>
-    <rect class="bar" style="--i: 0" x="94" y="86" width="24" height="112" rx="4" fill="var(--chart-1)">
+    <line class="grid-line" x1="56" y1="214" x2="462" y2="214"/>
+    <text class="axis-text" x="46" y="219" text-anchor="end">0</text>
+    <line class="axis-line" x1="56" y1="214" x2="462" y2="214"/>
+    <rect class="bar" style="--i: 0" x="76.3" y="89.3" width="60.9" height="124.7" rx="4" fill="var(--chart-1)">
       <title>2025 Q1 3,180 万円</title>
     </rect>
-    <text class="axis-text" x="106" y="234" text-anchor="middle">Q1</text>
+    <text class="axis-text" x="106.8" y="236" text-anchor="middle">Q1</text>
     <!-- 目盛りは 3 本以上、棒と分類ラベルは分類の数だけ繰り返す（--i を 1 ずつ増やす） -->
   </svg>
 </div>
 ```
 
+### ヒストグラム（`.chart` + `.bin`）
+
+規則 3 で選ぶ形。ビンは幅をそろえ、全ビン同じ隙間 2 で並べる（高さだけが値を
+表す）。棒の class を `bar` にしない — 縦棒の分類上限（7）で落ちる。縦の目盛りは
+右揃え、横の目盛りはビンの境界に中央揃えで置く（混み合うなら 1 つおき）。
+
+```html
+<div class="chart-scroll">
+  <svg class="chart" role="img" viewBox="0 0 720 280"
+       preserveAspectRatio="xMidYMid meet" data-origin="0" aria-labelledby="ds-t ds-d">
+    <title id="ds-t">注文金額の分布</title>
+    <desc id="ds-d">注文の 6 割が 2,000〜6,000 円に集まり、10,000 円を超える注文は 4%。</desc>
+    <line class="grid-line" x1="56" y1="214" x2="680" y2="214"/>
+    <text class="axis-text" x="46" y="219" text-anchor="end">0</text>
+    <line class="axis-line" x1="56" y1="214" x2="680" y2="214"/>
+    <rect class="bin" style="--i: 0" x="57" y="135.6" width="50" height="78.4" fill="var(--chart-1)">
+      <title>0〜1,000 円 120 件</title>
+    </rect>
+    <text class="axis-text" x="56" y="236" text-anchor="middle">0</text>
+    <text class="axis-text axis-title" x="368" y="270" text-anchor="middle">注文金額（円）</text>
+    <!-- 縦の目盛りは 3 本以上。ビンは 52 ずつ右へずらす（幅 50 + 隙間 2） -->
+  </svg>
+</div>
+```
+
+### ヒートマップ表（`table.heat`）
+
+規則 4 で選ぶ形。SVG ではなく表のセルを塗る。数値は消さない（色だけでは値を
+読めない）。`--v` は「値 ÷ 最大値」（0〜1）。濃さの上限は CSS で 55% に固定して
+あり、1 を超える `--v` は文字のコントラストを割る。行と列は曜日順・時刻順などの
+自然な順に置き、値で並べ替えない（周期が崩れる）。
+
+```html
+<div class="table-scroll">
+  <table class="heat">
+    <caption>曜日×時間帯の問い合わせ件数。色が濃いほど多い（最多 182 件）</caption>
+    <thead>
+      <tr><th scope="col">曜日</th><th scope="col">0–6 時</th><th scope="col">6–12 時</th></tr>
+    </thead>
+    <tbody>
+      <tr><th scope="row">月</th><td style="--v: 0.08">14</td><td style="--v: 0.56">102</td></tr>
+    </tbody>
+  </table>
+</div>
+```
+
 ### 横棒（`.chart--hbars`）
 
-規則 7 で選ぶ形。降順に並べる（順位を読ませるのが目的）。高さは
+規則 9 で選ぶ形。降順に並べる（順位を読ませるのが目的）。高さは
 `分類数 × (棒22 + 間隔14) - 14 + 上10 + 下30`（分類 11 なら 422）。値軸のグリッドは縦線になる。
 
 ```html
@@ -109,7 +178,7 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 
 ### 100% 積み上げ横棒（`.chart--stack`）
 
-規則 6 で選ぶ形。分類 6 以上・複数時点の部分と全体をドーナツにしない。
+規則 8 で選ぶ形。分類 6 以上・複数時点の部分と全体をドーナツにしない。
 区切りは面の色の 2px の隙間が作る。枠線を描かない。
 
 隙間を区画の長さから引かない。引くと全分類が一律に短くなり、合計が 100% に
@@ -174,8 +243,8 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 
 | 置き場所 | 収まる種別 |
 |---|---|
-| 主カラムの広いカード | 折れ線・横棒・積み上げ横棒・散布図 |
+| 主カラムの広いカード | 折れ線・横棒・積み上げ横棒・散布図・ヒストグラム・ヒートマップ表 |
 | 側カラムの狭いカード | ドーナツ・縦棒（分類 5 以下）・指標カード |
 
-規則 6 や 7 で横長の形が選ばれたら、カードの側を広い方へ移す。図を縮めて
+規則 8 や 9 で横長の形が選ばれたら、カードの側を広い方へ移す。図を縮めて
 入れない。
