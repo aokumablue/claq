@@ -1111,7 +1111,7 @@ p {
   pointer-events: none;
 }
 
-.chart-tip::first-line {
+.chart-tip strong {
   font-weight: var(--font-weight-semibold);
 }
 

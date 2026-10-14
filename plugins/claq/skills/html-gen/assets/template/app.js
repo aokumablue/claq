@@ -196,6 +196,25 @@
       tip.hidden = true;
     };
 
+    /**
+     * 浮き札の中身を組む。複数行なら 1 行目（時点）だけを太字の見出しにする。
+     *
+     * `::first-line` で太字にすると 1 行だけの値まで太字になり、折り返した長い
+     * 値では見た目の 1 行目だけが太くなる。行の区切りで要素を分ければ、
+     * 見出しを持つ札だけが見出しを太く出せる。
+     * @param {string} text <title> の文字列
+     */
+    const render = (text) => {
+      const [head, ...rest] = text.split("\n");
+      if (!rest.length) {
+        tip.textContent = text;
+        return;
+      }
+      const strong = document.createElement("strong");
+      strong.textContent = head;
+      tip.replaceChildren(strong, `\n${rest.join("\n")}`);
+    };
+
     const follow = (event) => {
       const title = event.target.closest?.("svg.chart *")?.querySelector(":scope > title");
       if (!title) {
@@ -205,7 +224,7 @@
       if (active?.title !== title) {
         hide();
         active = { title, text: title.textContent };
-        tip.textContent = active.text;
+        render(active.text);
         title.textContent = "";
         tip.hidden = false;
       }
@@ -220,7 +239,10 @@
     document.addEventListener("pointerdown", (event) => {
       if (event.pointerType === "touch") follow(event);
     });
-    document.documentElement.addEventListener("pointerleave", hide);
+    // タッチは指を離すと <html> まで pointerleave が届くので、閉じるのは別の場所のタップ・スクロール・Esc に任せる。
+    document.documentElement.addEventListener("pointerleave", (event) => {
+      if (event.pointerType !== "touch") hide();
+    });
     document.addEventListener("scroll", hide, { capture: true, passive: true });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") hide();
