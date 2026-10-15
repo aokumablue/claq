@@ -1085,23 +1085,24 @@ def test_e2e_animation_never_hides_content_permanently() -> None:
     css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
     assert check_site._validate_resting_state(css) == []
     assert '[data-animate="in"] .series-line {' in css
-    # data-animate が付いたときに棒とビンが下から伸びること（grow-y）を、セレクタの並びや改行に依らず見る。
+    # 棒とビンが data-animate の下で grow-y の動きを持つことを、セレクタの並びや改行に依らず見る。
     rules = re.findall(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL))
     for mark in (".bar", ".bin"):
         assert any(
             f'[data-animate="in"] {mark}' in {selector.strip() for selector in selectors.split(",")}
-            and re.search(r"\banimation:\s*grow-y\b", body)
+            and re.search(r"\banimation:\s*grow-y(?![\w-])", body)
             for selectors, body in rules
         ), mark
     assert '[data-animate="in"] .arc {' in css
     assert ".series-line {\n  fill: none;" in css
 
 
-def test_e2e_arc_offset_is_left_to_the_svg_attribute() -> None:
-    """円弧の開始位置を CSS で宣言しない。
+def test_e2e_arcs_keep_their_start_and_true_length() -> None:
+    """円弧の開始位置を CSS で宣言せず、端を丸めない。
 
     CSS は presentation attribute より優先されるため、ここで
     `stroke-dashoffset` を宣言すると全セグメントが 12 時から重なって描かれる。
+    端を丸めると弧が線幅の半分ずつ伸び、小さい分類ほど大きく見える。
     """
     css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
     html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
