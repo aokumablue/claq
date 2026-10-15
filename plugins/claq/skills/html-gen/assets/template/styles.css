@@ -481,6 +481,7 @@ p {
 }
 
 .btn--icon {
+  position: relative;
   flex: none;
   inline-size: 36px;
   padding-inline: 0;
@@ -494,10 +495,6 @@ p {
   inline-size: var(--layout-touch-target);
   block-size: var(--layout-touch-target);
   translate: -50% -50%;
-}
-
-.btn--icon {
-  position: relative;
 }
 
 /* --- セグメント（テーマ / 期間） ----------------------------------------- */
@@ -1142,10 +1139,6 @@ p {
   font-weight: var(--font-weight-semibold);
 }
 
-.chart-tip[hidden] {
-  display: none;
-}
-
 /* --- 表 ------------------------------------------------------------------ */
 
 .table-scroll {
@@ -1253,10 +1246,6 @@ tbody tr:last-child {
   animation: toast-in var(--duration-slow) var(--ease-out);
 }
 
-.toast[hidden] {
-  display: none;
-}
-
 /* --- 入場アニメーション --------------------------------------------------- */
 
 /*
@@ -1361,7 +1350,6 @@ tbody tr:last-child {
   .search {
     display: block;
   }
-
 }
 
 @media (min-width: 1024px) {
