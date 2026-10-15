@@ -1,7 +1,6 @@
 /**
- * テーマ / ベースカラーの永続、サイドバーの開閉、ナビゲーションの現在地、検索への
- * ショートカット、図の値の浮き札、描画倍率（--chart-scale）の受け渡し、入場
- * アニメーションと数値のカウントアップを担う。
+ * テーマ / ベースカラーの永続、サイドバーの開閉、ナビゲーションの現在地、図の値の浮き札、
+ * 描画倍率（--chart-scale）の受け渡し、入場アニメーションと数値のカウントアップを担う。
  *
  * `<head>` で defer 読み込みする。テーマの復元だけは即時に走らせ、初回描画で
  * 白がちらつかないようにする（DOM 構築を待つのは操作の結線だけ）。
@@ -161,18 +160,6 @@
         items.forEach((other) => other.removeAttribute("aria-current"));
         item.setAttribute("aria-current", "page");
       });
-    });
-  };
-
-  /** `/` で検索へ飛ばす。入力中は横取りしない。 */
-  const bindSearchKey = () => {
-    const field = document.getElementById("q");
-    if (!field) return;
-    document.addEventListener("keydown", (event) => {
-      const tag = document.activeElement ? document.activeElement.tagName : "";
-      if (event.key !== "/" || tag === "INPUT" || tag === "TEXTAREA") return;
-      event.preventDefault();
-      field.focus();
     });
   };
 
@@ -355,7 +342,6 @@
     bindBase();
     bindSidebar();
     bindNav();
-    bindSearchKey();
     bindChartTips();
     bindChartScale();
     revealOnScroll();

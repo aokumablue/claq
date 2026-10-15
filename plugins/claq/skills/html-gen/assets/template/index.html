@@ -58,12 +58,6 @@
           <span>ワークスペース</span><span aria-hidden="true">/</span><strong>収益ダッシュボード</strong>
         </nav>
         <div class="topbar__tools">
-          <div class="search">
-            <label class="visually-hidden" for="q">検索</label>
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-            <input id="q" type="search" placeholder="顧客・請求を検索" autocomplete="off">
-            <kbd class="search__hint">/</kbd>
-          </div>
           <div class="base-picker" role="group" aria-label="ベースカラー">
             <button type="button" data-base-value="neutral" data-base-label="Neutral" aria-pressed="true"
               title="Neutral" aria-label="Neutral の配色にする" style="background: var(--base-neutral)"></button>
@@ -82,7 +76,6 @@
             <button type="button" data-theme-value="dark" aria-pressed="false"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg><span
                 class="theme-label">ダーク</span></button>
           </div>
-          <button class="btn btn--ghost btn--icon" type="button" aria-label="通知"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 8a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg></button>
         </div>
       </header>
 
@@ -91,15 +84,6 @@
           <div>
             <h1>収益ダッシュボード</h1>
             <p>2025 年 12 月時点。前年同月と比較しています。</p>
-          </div>
-          <div class="page-head__actions">
-            <div class="segmented" role="group" aria-label="集計期間">
-              <button type="button" aria-pressed="false">30 日</button>
-              <button type="button" aria-pressed="false">四半期</button>
-              <button type="button" aria-pressed="true">12 か月</button>
-            </div>
-            <button class="btn btn--outline" type="button"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>CSV</button>
-            <button class="btn btn--primary" type="button"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v14"/><path d="M5 12h14"/></svg>レポート作成</button>
           </div>
         </div>
 
@@ -163,7 +147,6 @@
                 <h2 class="card__title" id="tbl-h">直近の契約</h2>
                 <p class="card__desc">金額は年換算・税抜</p>
               </div>
-              <button class="btn btn--ghost" type="button">すべて表示</button>
             </div>
             <div class="card__body">
               <div class="table-scroll">

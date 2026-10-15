@@ -363,62 +363,6 @@ p {
   margin-inline-start: auto;
 }
 
-.search {
-  position: relative;
-  display: none;
-}
-
-.search svg {
-  position: absolute;
-  inset-block-start: 50%;
-  inset-inline-start: 10px;
-  inline-size: 15px;
-  block-size: 15px;
-  color: var(--muted-foreground);
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-
-.search input {
-  inline-size: clamp(160px, 18vw, 240px);
-  block-size: 36px;
-  /* 右端の `/` の札に文字を潜らせない。 */
-  padding-inline: 32px 34px;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-md);
-  background: var(--background);
-  font-size: var(--text-sm);
-  transition:
-    border-color var(--duration-base) var(--ease-out),
-    box-shadow var(--duration-base) var(--ease-out),
-    inline-size var(--duration-slow) var(--ease-out);
-}
-
-.search input::placeholder {
-  color: var(--muted-foreground);
-}
-
-.search input:focus-visible {
-  inline-size: clamp(180px, 22vw, 300px);
-  border-color: var(--ring);
-  outline: none;
-  box-shadow: 0 0 0 var(--state-ring-width) color-mix(in oklab, var(--ring) 50%, transparent);
-}
-
-.search__hint {
-  position: absolute;
-  inset-block-start: 50%;
-  inset-inline-end: 8px;
-  padding: 1px 5px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-
 /* --- ボタン -------------------------------------------------------------- */
 
 .btn {
@@ -450,27 +394,6 @@ p {
   transform: translateY(0.5px);
 }
 
-.btn--primary {
-  background: var(--primary);
-  color: var(--primary-foreground);
-  box-shadow: var(--shadow-xs);
-}
-
-.btn--primary:hover {
-  background: color-mix(in oklab, var(--primary) 90%, var(--background));
-}
-
-.btn--outline {
-  border-color: var(--border);
-  background: var(--background);
-  box-shadow: var(--shadow-xs);
-}
-
-.btn--outline:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
 .btn--ghost {
   color: var(--muted-foreground);
 }
@@ -497,7 +420,7 @@ p {
   translate: -50% -50%;
 }
 
-/* --- セグメント（テーマ / 期間） ----------------------------------------- */
+/* --- セグメント（テーマ） ----------------------------------------- */
 
 .segmented {
   display: inline-flex;
@@ -603,19 +526,6 @@ p {
   margin-block-start: 6px;
   color: var(--muted-foreground);
   font-size: var(--text-sm);
-}
-
-.page-head__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  inline-size: 100%;
-}
-
-/* 狭い画面では主要操作を全幅にして押しやすくする。 */
-.page-head__actions .btn--primary {
-  flex: 1;
 }
 
 /* 1280px 未満の指標カードは 2 列まで（最小幅の 40% は 3 枚で 120% になり入らない）。
@@ -1363,18 +1273,6 @@ tbody tr:last-child {
 
   .menu-button {
     display: none;
-  }
-
-  .page-head__actions {
-    inline-size: auto;
-  }
-
-  .page-head__actions .btn--primary {
-    flex: none;
-  }
-
-  .search {
-    display: block;
   }
 }
 
