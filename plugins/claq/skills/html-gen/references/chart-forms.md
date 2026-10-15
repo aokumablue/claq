@@ -60,6 +60,10 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 縦の目盛りは右揃え（`text-anchor="end"`）、横は中央揃え（`middle`）で置く。検査は揃えで
 軸を分ける。
 
+中央揃え以外の文字（縦軸の目盛り・横棒の分類と値・凡例）は、y に線・棒・色見本の中心を
+書く（CSS の `dominant-baseline: central` が文字の中心をそこへ合わせ、文字を 13px で
+頭打ちにしても線からずれない）。中央揃えの横軸の文字は、y にベースラインを書く。
+
 ## 骨格
 
 系列色は `var(--chart-1..5)`、面の色は `var(--card)`。生の色を書かない。
@@ -100,7 +104,7 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
     <title id="q-t">四半期別の売上</title>
     <desc id="q-d">Q1 の 3,180 万円から Q4 の 4,890 万円へ 4 期連続で増加。</desc>
     <line class="grid-line" x1="56" y1="214" x2="462" y2="214"/>
-    <text class="axis-text" x="46" y="219" text-anchor="end">0</text>
+    <text class="axis-text" x="46" y="214" text-anchor="end">0</text>
     <line class="axis-line" x1="56" y1="214" x2="462" y2="214"/>
     <rect class="bar" style="--i: 0" x="76.3" y="89.3" width="60.9" height="124.7" rx="4" fill="var(--chart-1)">
       <title>2025 Q1 3,180 万円</title>
@@ -124,7 +128,7 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
     <title id="ds-t">注文金額の分布</title>
     <desc id="ds-d">注文の 6 割が 2,000〜6,000 円に集まり、10,000 円を超える注文は 4%。</desc>
     <line class="grid-line" x1="56" y1="214" x2="680" y2="214"/>
-    <text class="axis-text" x="46" y="219" text-anchor="end">0</text>
+    <text class="axis-text" x="46" y="214" text-anchor="end">0</text>
     <line class="axis-line" x1="56" y1="214" x2="680" y2="214"/>
     <rect class="bin" style="--i: 0" x="57" y="135.6" width="50" height="78.4" fill="var(--chart-1)">
       <title>0〜1,000 円未満 120 件</title>
@@ -174,8 +178,8 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
     <rect class="bar--h" style="--i: 0" x="148" y="10" width="504" height="22" rx="4" fill="var(--chart-1)">
       <title>神奈川県横浜港北店 4,820 万円</title>
     </rect>
-    <text class="axis-text" x="135" y="26" text-anchor="end">神奈川県横浜港北店</text>
-    <text class="axis-text bar-value" x="660" y="26">4,820</text>
+    <text class="axis-text" x="135" y="21" text-anchor="end">神奈川県横浜港北店</text>
+    <text class="axis-text bar-value" x="660" y="21">4,820</text>
     <!-- 目盛りは 3 本以上、棒・ラベル・値は分類の数だけ繰り返す（y を 36 ずつ下げる） -->
   </svg>
 </div>
@@ -206,7 +210,7 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
     <!-- 区画を全部描いた後、境界へ面の色の仕切りを重ねる（長さは削らない） -->
     <line class="slice-gap" x1="233.3" y1="34" x2="233.3" y2="68"/>
     <rect class="legend-key" x="8" y="82" width="10" height="10" rx="2" fill="var(--chart-1)"/>
-    <text class="axis-text" x="24" y="91">食品 32%</text>
+    <text class="axis-text" x="24" y="87">食品 32%</text>
     <!-- 目盛りは 0/20/40/60/80/100%、区画と凡例は分類の数だけ繰り返す。
          凡例の x は必ず viewBox 幅の内側へ収める（等間隔に置くと末尾が図外へ出る） -->
   </svg>
@@ -225,7 +229,7 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
     <title id="sc-t">広告費と売上の関係</title>
     <desc id="sc-d">広告費が増えるほど売上も増える正の相関。</desc>
     <line class="grid-line" x1="76" y1="320" x2="702" y2="320"/>
-    <text class="axis-text" x="66" y="325" text-anchor="end">0</text>
+    <text class="axis-text" x="66" y="320" text-anchor="end">0</text>
     <line class="axis-line" x1="76" y1="320" x2="702" y2="320"/>
     <text class="axis-text" x="200" y="342" text-anchor="middle">100</text>
     <text class="axis-text axis-title" x="389" y="376" text-anchor="middle">広告費（万円）</text>

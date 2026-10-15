@@ -1189,6 +1189,28 @@ def test_e2e_axis_text_is_capped_on_wide_screens() -> None:
     assert "bindChartScale();" in script
 
 
+def test_e2e_side_aligned_axis_text_is_centered_on_its_line() -> None:
+    """線や棒へ横に寄せる軸文字は、y に書いた線の中心へ文字の中心が合うこと。
+
+    縦軸の目盛りを目盛り線 +5 のベースラインで置いていたため、広い画面で文字を 13px で
+    頭打ちにすると、目盛りが線から下へずれた（幅 1920 の実測で 2.4〜3.3px）。中央揃え
+    以外の文字は CSS の dominant-baseline: central で中心を y に合わせ、目盛りの y には
+    目盛り線と同じ値を書く。規則は印刷と JS 無効（15px のまま）でも効くよう、
+    @media の外（行頭）に置く。
+    """
+    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+    html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
+    assert re.search(
+        r'^\.axis-text:not\(\[text-anchor="middle"\]\) \{\s*dominant-baseline: central;\s*\}', css, re.MULTILINE
+    )
+    for chart in ("mrr-t", "ch-t"):
+        svg = next(svg for svg in check_site._iter_svg_blocks(html) if f'aria-labelledby="{chart}' in svg)
+        grids = {float(y) for y in re.findall(r'<line class="grid-line" x1="[\d.]+" y1="([\d.]+)"', svg)}
+        ticks = [float(y) for y in re.findall(r'<text class="axis-text" x="[\d.]+" y="([\d.]+)" text-anchor="end"', svg)]
+        assert len(ticks) >= check_site._MIN_AXIS_TICKS, chart
+        assert [tick for tick in ticks if tick not in grids] == [], chart
+
+
 def test_e2e_metric_direction_and_sentiment_are_separate() -> None:
     """バッジの色は良し悪し、アイコンは増減の向きで、両者を混ぜない。"""
     html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
