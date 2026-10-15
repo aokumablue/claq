@@ -942,8 +942,32 @@ def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> li
     return violations
 
 
-#: 折れ線の d で 1 区間を描くコマンド。M（始点）と Z（閉じ）は時点を増やさない。
-_PATH_SEGMENT_RE = re.compile(r"[LlHhVvCcSsQqTtAa]")
+#: 折れ線の d で時点を 1 つ置くコマンド。始点の M も時点を置き、Z（閉じ）は置かない。
+#: 欠測の時点で線を途切れさせると M が 2 回以上現れ、区間の数 + 1 では時点を数え漏らす。
+_PATH_POINT_RE = re.compile(r"[MmLlHhVvCcSsQqTtAa]")
+#: polyline の points に並ぶ数値。x と y の 2 つで時点を 1 つ置く。
+_NUMBER_RE = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
+
+
+def _series_line_points(svg: str) -> list[int]:
+    """SVG 1 枚の ``.series-line`` ごとに、線が置く時点の数を返す。
+
+    path は ``d`` のコマンドの数、polyline は ``points`` の数値の数 ÷ 2 で数える。
+    ブラウザは単引用符の値も、改行をはさんだ値も同じ線として描くので、どちらも読む。
+
+    Args:
+        svg: ``<svg>`` 1 枚分の文字列
+
+    Returns:
+        線ごとの時点の数（``d`` / ``points`` を持たない線は含めない）
+    """
+    counts: list[int] = []
+    for element, attrs in re.findall(r'<(path|polyline)\b([^>]*\bclass="series-line[^>]*)>', svg):
+        name, unit, per_point = ("d", _PATH_POINT_RE, 1) if element == "path" else ("points", _NUMBER_RE, 2)
+        value = re.search(rf"\s{name}=([\"'])(.*?)\1", attrs, re.DOTALL)
+        if value:
+            counts.append(len(unit.findall(value.group(2))) // per_point)
+    return counts
 
 
 def _validate_time_point_hits(html: str) -> list[str]:
@@ -951,11 +975,12 @@ def _validate_time_point_hits(html: str) -> list[str]:
 
     折れ線の値は時点ごとの当たり判定（``.hover-hit``）の ``<title>`` で読ませる。
     点や当たり判定を間引くと、線は通っているのに値へ届かない時点が残る。時点の数は
-    ``.series-line`` の ``d`` が描く区間の数 + 1 で数え、時点の最も多い系列を
-    当たり判定の下限にする。横軸のラベルでは数えない。月の行の下に年の行を置くと
-    ラベルが時点より多くなり、ラベルを間引くと少なくなる。散布図の点（``.point``）は
-    自身の ``<title>`` で値を読ませるので、回帰線を ``.series-line`` で引いても対象外。
-    潰し描画のスパークラインは値を指標カードの数値で読ませるので対象外。
+    ``.series-line`` の線が置く頂点の数（path は ``d`` のコマンドの数、polyline は
+    ``points`` の座標の組の数）で数え、時点の最も多い系列を当たり判定の下限にする。
+    横軸のラベルでは数えない。月の行の下に年の行を置くとラベルが時点より多くなり、
+    ラベルを間引くと少なくなる。散布図の点（``.point``）は自身の ``<title>`` で値を
+    読ませるので、回帰線を ``.series-line`` で引いても対象外。潰し描画の
+    スパークラインは値を指標カードの数値で読ませるので対象外。
 
     Args:
         html: 検査対象の HTML 文字列
@@ -967,13 +992,10 @@ def _validate_time_point_hits(html: str) -> list[str]:
     for index, svg in enumerate(_iter_svg_blocks(html), start=1):
         if 'preserveAspectRatio="none"' in svg or 'class="point' in svg:
             continue
-        paths = [
-            re.search(r'\sd="([^"]*)"', tag) for tag in re.findall(r'<path\b[^>]*\bclass="series-line[^>]*>', svg)
-        ]
-        segments = [len(_PATH_SEGMENT_RE.findall(path.group(1))) for path in paths if path]
-        if not segments:
+        counts = _series_line_points(svg)
+        if not counts:
             continue
-        points = max(segments) + 1
+        points = max(counts)
         hits = len(re.findall(r'class="hover-hit\b', svg))
         if hits < points:
             violations.append(

@@ -1128,7 +1128,7 @@ def test_e2e_every_time_point_can_be_read_on_hover_or_tap() -> None:
 def test_time_series_hit_areas_must_reach_every_point_on_the_line(tmp_path: Path) -> None:
     """線の時点より当たり判定が少ない時系列は違反になること。
 
-    時点は .series-line の d が描く区間の数 + 1 で数える。横軸のラベルで数えていたため、
+    時点は .series-line の線が置く頂点の数で数える。横軸のラベルで数えていたため、
     月の行の下に年の行を置いた正しい図が落ち、ラベルを間引いた図では当たり判定の間引きを
     見逃していた。散布図の点は自身の <title> で値を読ませるので、回帰線を series-line で
     引いても対象外。潰し描画と線の無い図も対象外。
@@ -1173,6 +1173,27 @@ def test_time_series_hit_areas_must_reach_every_point_on_the_line(tmp_path: Path
     assert check_site._validate_time_point_hits(stretched) == []
     bars = '<svg><rect class="bar" width="10" height="50"/><text class="axis-text" text-anchor="middle">Q1</text></svg>'
     assert check_site._validate_time_point_hits(bars) == []
+
+
+def test_time_series_hit_check_counts_points_however_the_line_is_written() -> None:
+    """線の書き方を変えても、当たり判定が 1 個足りなければ違反になること。
+
+    ブラウザは単引用符の d も、改行をはさんだ d / points も、polyline も同じ線として描く。
+    欠測の時点で線を途切れさせると M が 2 回現れ、区間の数 + 1 では時点を 1 つ数え漏らす。
+    """
+    area = '<rect class="hover-hit" x="0" y="0" width="1" height="1"/>'
+    for line, points in (
+        ("<path class=\"series-line\" d='M0 100L10 99L20 98L30 97'/>", 4),
+        ('<path class="series-line" d="M0 100\n  L10 99\n  L20 98"/>', 3),
+        ('<polyline class="series-line" points="52.0,113.6 110.9,108.9\n  169.8,103.5 228.7,98.8"/>', 4),
+        # 3 時点目（x=20）が欠測
+        ('<path class="series-line" d="M0 100L10 99M30 97L40 96L50 95"/>', 5),
+    ):
+        assert check_site._validate_time_point_hits(f"<svg>{line}{area * points}</svg>") == [], line
+        thinned = check_site._validate_time_point_hits(f"<svg>{line}{area * (points - 1)}</svg>")
+        assert f"{points - 1} 個で、線の時点 {points} 個" in "\n".join(thinned), line
+    # d の無い線は何も描かないので、時点を数えずに飛ばす
+    assert check_site._validate_time_point_hits(f'<svg><path class="series-line"/>{area}</svg>') == []
 
 
 def test_e2e_squashed_sparkline_does_not_use_dash_drawing() -> None:
