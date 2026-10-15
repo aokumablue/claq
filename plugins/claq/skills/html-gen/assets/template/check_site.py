@@ -947,6 +947,9 @@ def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> li
 _PATH_POINT_RE = re.compile(r"[MmLlHhVvCcSsQqTtAa]")
 #: polyline の points に並ぶ数値。x と y の 2 つで時点を 1 つ置く。
 _NUMBER_RE = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
+#: ルートの svg の class に chart--scatter を持つ散布図。.point の有無で見分けると、
+#: 折れ線に強調の点を 1 つ置いただけで時系列の検査が外れる。
+_SCATTER_ROOT_RE = re.compile(r'<svg\b[^>]*\sclass="(?:[^"]*\s)?chart--scatter[\s"]')
 
 
 def _series_line_points(svg: str) -> list[int]:
@@ -978,9 +981,10 @@ def _validate_time_point_hits(html: str) -> list[str]:
     ``.series-line`` の線が置く頂点の数（path は ``d`` のコマンドの数、polyline は
     ``points`` の座標の組の数）で数え、時点の最も多い系列を当たり判定の下限にする。
     横軸のラベルでは数えない。月の行の下に年の行を置くとラベルが時点より多くなり、
-    ラベルを間引くと少なくなる。散布図の点（``.point``）は自身の ``<title>`` で値を
-    読ませるので、回帰線を ``.series-line`` で引いても対象外。潰し描画の
-    スパークラインは値を指標カードの数値で読ませるので対象外。
+    ラベルを間引くと少なくなる。散布図（ルートの svg に ``.chart--scatter``）は点が
+    自身の ``<title>`` で値を読ませるので、回帰線を ``.series-line`` で引いても対象外。
+    折れ線に強調の点（``.point``）を置いても対象のまま。潰し描画のスパークラインは
+    値を指標カードの数値で読ませるので対象外。
 
     Args:
         html: 検査対象の HTML 文字列
@@ -990,7 +994,7 @@ def _validate_time_point_hits(html: str) -> list[str]:
     """
     violations: list[str] = []
     for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        if 'preserveAspectRatio="none"' in svg or 'class="point' in svg:
+        if 'preserveAspectRatio="none"' in svg or _SCATTER_ROOT_RE.match(svg):
             continue
         counts = _series_line_points(svg)
         if not counts:

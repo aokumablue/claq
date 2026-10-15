@@ -1130,8 +1130,9 @@ def test_time_series_hit_areas_must_reach_every_point_on_the_line(tmp_path: Path
 
     時点は .series-line の線が置く頂点の数で数える。横軸のラベルで数えていたため、
     月の行の下に年の行を置いた正しい図が落ち、ラベルを間引いた図では当たり判定の間引きを
-    見逃していた。散布図の点は自身の <title> で値を読ませるので、回帰線を series-line で
-    引いても対象外。潰し描画と線の無い図も対象外。
+    見逃していた。散布図（ルートの svg に chart--scatter）は点が自身の <title> で値を
+    読ませるので、回帰線を series-line で引いても対象外。折れ線に強調の点（.point）を
+    置いても対象のまま。潰し描画と線の無い図も対象外。
     """
     dest = _copy_site(tmp_path)
     assert "当たり判定" in _edit(dest, "index.html", ('<rect class="hover-hit" x="52.0"', '<rect class="x" x="52.0"'))
@@ -1167,8 +1168,11 @@ def test_time_series_hit_areas_must_reach_every_point_on_the_line(tmp_path: Path
     assert check_site._validate_time_point_hits(f"<svg>{paths}{area * 17}</svg>") == []
     overlaid = check_site._validate_time_point_hits(f"<svg>{paths}{area * 8}</svg>")
     assert "8 個で、線の時点 17 個" in "\n".join(overlaid)
-    scatter = line(2, 0, ("100", "200", "300")).replace("</svg>", '<circle class="point" r="6"/></svg>')
-    assert check_site._validate_time_point_hits(scatter) == []
+    dot = '<circle class="point" r="6"/></svg>'
+    scatter = line(2, 0, ("100", "200", "300")).replace("<svg>", '<svg class="chart chart--scatter">')
+    assert check_site._validate_time_point_hits(scatter.replace("</svg>", dot)) == []
+    marked = line(12, 11).replace("</svg>", dot)
+    assert "11 個で、線の時点 12 個" in "\n".join(check_site._validate_time_point_hits(marked))
     stretched = line(12, 0).replace("<svg>", '<svg preserveAspectRatio="none">')
     assert check_site._validate_time_point_hits(stretched) == []
     bars = '<svg><rect class="bar" width="10" height="50"/><text class="axis-text" text-anchor="middle">Q1</text></svg>'
