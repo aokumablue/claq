@@ -942,14 +942,20 @@ def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> li
     return violations
 
 
+#: 折れ線の d で 1 区間を描くコマンド。M（始点）と Z（閉じ）は時点を増やさない。
+_PATH_SEGMENT_RE = re.compile(r"[LlHhVvCcSsQqTtAa]")
+
+
 def _validate_time_point_hits(html: str) -> list[str]:
-    """時系列の時点ラベルごとに、値へ届く当たり判定があることを検査する。
+    """時系列の時点ごとに、値へ届く当たり判定があることを検査する。
 
     折れ線の値は時点ごとの当たり判定（``.hover-hit``）の ``<title>`` で読ませる。
-    点や当たり判定を間引くと、ラベルはあるのに値へ届かない時点が残る。時点ラベルは
-    横軸に中央揃えで置くので、その数を当たり判定の下限にする。軸の名前
-    （``axis-text axis-title``）は時点ではないので数えない。潰し描画の
-    スパークラインは値を指標カードの数値で読ませるので対象外。
+    点や当たり判定を間引くと、線は通っているのに値へ届かない時点が残る。時点の数は
+    ``.series-line`` の ``d`` が描く区間の数 + 1 で数え、時点の最も多い系列を
+    当たり判定の下限にする。横軸のラベルでは数えない。月の行の下に年の行を置くと
+    ラベルが時点より多くなり、ラベルを間引くと少なくなる。散布図の点（``.point``）は
+    自身の ``<title>`` で値を読ませるので、回帰線を ``.series-line`` で引いても対象外。
+    潰し描画のスパークラインは値を指標カードの数値で読ませるので対象外。
 
     Args:
         html: 検査対象の HTML 文字列
@@ -959,13 +965,19 @@ def _validate_time_point_hits(html: str) -> list[str]:
     """
     violations: list[str] = []
     for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        if 'class="series-line' not in svg or 'preserveAspectRatio="none"' in svg:
+        if 'preserveAspectRatio="none"' in svg or 'class="point' in svg:
             continue
-        labels = len(re.findall(r'<text class="axis-text"[^>]*\btext-anchor="middle"', svg))
+        paths = [
+            re.search(r'\sd="([^"]*)"', tag) for tag in re.findall(r'<path\b[^>]*\bclass="series-line[^>]*>', svg)
+        ]
+        segments = [len(_PATH_SEGMENT_RE.findall(path.group(1))) for path in paths if path]
+        if not segments:
+            continue
+        points = max(segments) + 1
         hits = len(re.findall(r'class="hover-hit\b', svg))
-        if hits < labels:
+        if hits < points:
             violations.append(
-                f"{index} 枚目の時系列の当たり判定（.hover-hit）が {hits} 個で、時点ラベル {labels} 個に届かない"
+                f"{index} 枚目の時系列の当たり判定（.hover-hit）が {hits} 個で、線の時点 {points} 個に届かない"
                 "（点を間引くと値に届かない時点が残る。全時点に .hover-col を置く）"
             )
     return violations

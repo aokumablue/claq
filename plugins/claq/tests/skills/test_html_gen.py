@@ -1125,28 +1125,33 @@ def test_e2e_every_time_point_can_be_read_on_hover_or_tap() -> None:
     assert "bindChartTips();" in script
 
 
-def test_time_series_hit_areas_must_reach_every_labeled_point(tmp_path: Path) -> None:
-    """時点ラベルより当たり判定が少ない時系列は違反になること。
+def test_time_series_hit_areas_must_reach_every_point_on_the_line(tmp_path: Path) -> None:
+    """線の時点より当たり判定が少ない時系列は違反になること。
 
-    点や当たり判定を間引くと、ラベルはあるのに値（<title>）へ届かない時点が残る。
-    軸の名前（axis-title）は時点ではないので数えず、潰し描画と時系列でない図は対象外。
+    時点は .series-line の d が描く区間の数 + 1 で数える。横軸のラベルで数えていたため、
+    月の行の下に年の行を置いた正しい図が落ち、ラベルを間引いた図では当たり判定の間引きを
+    見逃していた。散布図の点は自身の <title> で値を読ませるので、回帰線を series-line で
+    引いても対象外。潰し描画と線の無い図も対象外。
     """
     dest = _copy_site(tmp_path)
     assert "当たり判定" in _edit(dest, "index.html", ('<rect class="hover-hit" x="52.0"', '<rect class="x" x="52.0"'))
 
-    def line(hits: int, labels: int) -> str:
-        """時点ラベルと当たり判定の数を指定した折れ線の SVG を返す。"""
-        ticks = '<text class="axis-text" x="0" y="0" text-anchor="middle">1月</text>' * labels
+    def line(points: int, hits: int, labels: tuple[str, ...] = ()) -> str:
+        """時点数・当たり判定の数・横軸のラベルを指定した折れ線の SVG を返す。"""
+        path = "M0 100" + "".join(f"L{point * 10} {100 - point}" for point in range(1, points))
+        ticks = "".join(f'<text class="axis-text" x="0" y="236" text-anchor="middle">{label}</text>' for label in labels)
         areas = '<rect class="hover-hit" x="0" y="0" width="1" height="1"/>' * hits
-        return f'<svg><path class="series-line" d="M0 0"/>{ticks}{areas}</svg>'
+        return f'<svg><path class="series-line" d="{path}"/>{ticks}{areas}</svg>'
 
-    assert "2 個で、時点ラベル 3 個" in "\n".join(check_site._validate_time_point_hits(line(2, 3)))
-    assert check_site._validate_time_point_hits(line(12, 12)) == []
-    # ラベルを 1 つおきに間引いた時系列は、当たり判定がラベルより多くてよい
-    assert check_site._validate_time_point_hits(line(24, 12)) == []
-    title = '<text class="axis-text axis-title" x="0" y="0" text-anchor="middle">月</text>'
-    assert check_site._validate_time_point_hits(line(2, 2).replace("</svg>", f"{title}</svg>")) == []
-    stretched = line(0, 3).replace("<svg>", '<svg preserveAspectRatio="none">')
+    months = tuple(f"{month}月" for month in range(1, 13))
+    # 月の行の下に年の行を置くと、ラベル（14 個）が時点（12 個）より多くなる
+    assert check_site._validate_time_point_hits(line(12, 12, (*months, "2024", "2025"))) == []
+    # ラベルを 1 つおきに間引いても、当たり判定は全時点に要る
+    sparse = line(12, 6, months[::2])
+    assert "6 個で、線の時点 12 個" in "\n".join(check_site._validate_time_point_hits(sparse))
+    scatter = line(2, 0, ("100", "200", "300")).replace("</svg>", '<circle class="point" r="6"/></svg>')
+    assert check_site._validate_time_point_hits(scatter) == []
+    stretched = line(12, 0).replace("<svg>", '<svg preserveAspectRatio="none">')
     assert check_site._validate_time_point_hits(stretched) == []
     bars = '<svg><rect class="bar" width="10" height="50"/><text class="axis-text" text-anchor="middle">Q1</text></svg>'
     assert check_site._validate_time_point_hits(bars) == []
