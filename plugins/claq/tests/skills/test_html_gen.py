@@ -1149,6 +1149,24 @@ def test_time_series_hit_areas_must_reach_every_point_on_the_line(tmp_path: Path
     # ラベルを 1 つおきに間引いても、当たり判定は全時点に要る
     sparse = line(12, 6, months[::2])
     assert "6 個で、線の時点 12 個" in "\n".join(check_site._validate_time_point_hits(sparse))
+    # 系列の長さが違うときは最も長い系列で数える。最も長い線（区間コマンド 16 種を 1 つずつ
+    # 使う 17 時点）を比較の線にし、8 時点の本系列と 8 時点の比較の線の間に置く。先頭・末尾・
+    # 最短の系列や本系列だけで数えると時点が 8 になり、当たり判定 8 個の間引きを見逃す。
+    # コマンドを 1 種類でも数え漏らすと時点が 17 にならず、断言で落ちる。
+    short = "M0 100" + "".join(f"L{point * 10} {100 - point}" for point in range(1, 8))
+    mixed = (
+        "M0 100L10 99l10 -1H30h10V97v-1C43 96 47 95 50 95c3 0 7 -1 10 -1"
+        "S67 93 70 93s7 -1 10 -1Q85 92 90 91q5 0 10 -1T110 89t10 -1A5 5 0 0 1 130 87a5 5 0 0 1 10 -1"
+    )
+    paths = (
+        f'<path class="series-line" d="{short}"/>'
+        f'<path class="series-line series-line--compare" d="{mixed}"/>'
+        f'<path class="series-line series-line--compare" d="{short}"/>'
+    )
+    area = '<rect class="hover-hit" x="0" y="0" width="1" height="1"/>'
+    assert check_site._validate_time_point_hits(f"<svg>{paths}{area * 17}</svg>") == []
+    overlaid = check_site._validate_time_point_hits(f"<svg>{paths}{area * 8}</svg>")
+    assert "8 個で、線の時点 17 個" in "\n".join(overlaid)
     scatter = line(2, 0, ("100", "200", "300")).replace("</svg>", '<circle class="point" r="6"/></svg>')
     assert check_site._validate_time_point_hits(scatter) == []
     stretched = line(12, 0).replace("<svg>", '<svg preserveAspectRatio="none">')
