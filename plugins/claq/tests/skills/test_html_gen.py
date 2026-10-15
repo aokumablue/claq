@@ -1085,7 +1085,14 @@ def test_e2e_animation_never_hides_content_permanently() -> None:
     css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
     assert check_site._validate_resting_state(css) == []
     assert '[data-animate="in"] .series-line {' in css
-    assert '[data-animate="in"] .bar,\n[data-animate="in"] .bin {' in css
+    # data-animate が付いたときに棒とビンが下から伸びること（grow-y）を、セレクタの並びや改行に依らず見る。
+    rules = re.findall(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL))
+    for mark in (".bar", ".bin"):
+        assert any(
+            f'[data-animate="in"] {mark}' in {selector.strip() for selector in selectors.split(",")}
+            and re.search(r"\banimation:\s*grow-y\b", body)
+            for selectors, body in rules
+        ), mark
     assert '[data-animate="in"] .arc {' in css
     assert ".series-line {\n  fill: none;" in css
 
@@ -1097,10 +1104,15 @@ def test_e2e_arc_offset_is_left_to_the_svg_attribute() -> None:
     `stroke-dashoffset` を宣言すると全セグメントが 12 時から重なって描かれる。
     """
     css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+    html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
     arc_block = css.split(".arc {", 1)[1].split("}", 1)[0]
     assert "stroke-dashoffset" not in arc_block
     # 丸い端は弧を線幅の半分ずつ伸ばし、11% の分類が約 25% 増しに見えていた。
     assert "stroke-linecap" not in arc_block
+    # SVG の属性で丸めても同じなので、CSS だけでなくドーナツの SVG も見る。
+    donuts = [svg for svg in check_site._iter_svg_blocks(html) if "chart--donut" in svg]
+    assert len(donuts) == 1
+    assert "stroke-linecap" not in donuts[0]
     assert "@keyframes arc-draw {" in css
 
 
@@ -1497,7 +1509,7 @@ def test_tick_steps_must_be_nice_numbers() -> None:
     """
     def svg(*labels: str) -> str:
         """揃えを省いた（start の）目盛りラベルを並べた SVG を返す。"""
-        cells ="".join(f'<text class="axis-text" x="10" y="10">{label}</text>' for label in labels)
+        cells = "".join(f'<text class="axis-text" x="10" y="10">{label}</text>' for label in labels)
         return f"<svg>{cells}</svg>"
 
     assert check_site._validate_tick_steps(svg("0", "150", "300", "450")) != []
