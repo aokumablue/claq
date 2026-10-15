@@ -618,12 +618,13 @@ p {
   flex: 1;
 }
 
-/* 指標カードは 2 列まで。1 列になるのは 2 枚が 150px を割る幅（320px 前後）だけ。
-   スマホでも 4 指標が 2 行で一望できる（全体像を先に見せる）。 */
+/* 指標カードは 2 列まで（最小幅の 40% は 3 枚で 120% になり入らない）。1 列になるのは
+   2 枚が 150px を割る幅（320px 前後）だけ。スマホでも 4 指標が 2 行で一望できる
+   （全体像を先に見せる）。 */
 .grid {
   display: grid;
   gap: clamp(12px, 1.6vw, 18px);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, max(150px, calc(50% - 9px))), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, max(150px, 40%)), 1fr));
 }
 
 .grid--main {
@@ -831,7 +832,6 @@ p {
 
 .chart--donut {
   min-inline-size: 0;
-  min-block-size: 180px;
   max-block-size: clamp(200px, 26vh, 340px);
 }
 
