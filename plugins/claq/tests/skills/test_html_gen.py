@@ -771,6 +771,15 @@ def test_looping_animation_is_reported(tmp_path: Path) -> None:
         dest = _copy_site(tmp_path, name)
         assert "infinite" in _append(dest, "styles.css", f"\n.live {{ {rule}; }}\n"), rule
 
+    # Tailwind v4 の既定テーマ（--animate-ping など）は値に infinite を含む。写して
+    # animation: var(--animate-ping) で使うと、animation の宣言には infinite が現れない。
+    dest = _copy_site(tmp_path, "s6")
+    ping = ":root { --animate-ping: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite; }"
+    assert "infinite" in _append(dest, "styles.css", f"\n{ping}\n.live {{ animation: var(--animate-ping); }}\n")
+
+    dest = _copy_site(tmp_path, "s7")
+    assert _append(dest, "styles.css", "\n:root { --pulse-count: 1; }\n") == ""
+
 
 def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
     """HTML に直接書いた止まらない動きも落ちる。
@@ -790,6 +799,8 @@ def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
         "<style>.live { animation-iteration-count: infinite; }</style>",
         "<animate repeatDur='indefinite'/>",
         '<i style="ANIMATION: pulse 2S INFINITE"></i>',
+        '<i style="--animate-ping: ping 1s infinite"></i>',
+        "<style>:root { --animate-pulse: pulse 2s infinite; }</style>",
         # HTML パーサは属性名を大小文字を問わず repeatCount / repeatDur へ直し、
         # 引用符の無い値も読むので、どちらも止まらない動きになる
         "<animate repeatcount=indefinite />",
@@ -804,6 +815,7 @@ def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
         '<i style="animation-iteration-count: 2"></i>',
         # 属性の境界をまたいで別の属性の語を拾わない
         '<i style="animation: rise 1s" data-note="infinite"></i>',
+        '<i style="--gap: 4px; --n: 2"></i>',
         # 値は大小文字を区別する。INDEFINITE はブラウザが無効な値として捨て、1 回で止まる
         '<animate REPEATDUR="INDEFINITE"/>',
     ):
