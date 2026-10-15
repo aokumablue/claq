@@ -793,6 +793,9 @@ def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
         # 引用符の無い値も読むので、どちらも止まらない動きになる
         "<animate repeatcount=indefinite />",
         '<animate REPEATDUR="indefinite"/>',
+        # 値の前後の空白を除いて読むブラウザでは止まらない（Chrome は repeatDur、Firefox は repeatCount）
+        '<animate repeatDur=" indefinite "/>',
+        "<animate repeatCount=' indefinite'/>",
     ):
         assert check_site._validate_inline_motion(markup) != [], markup
     for markup in (

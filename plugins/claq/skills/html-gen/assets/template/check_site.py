@@ -120,7 +120,9 @@ LOOPING_ANIMATION_RE = re.compile(r"animation(?:-iteration-count)?\s*:[^;}]*\bin
 #: SVG の SMIL アニメーションの無限反復。HTML パーサは属性名を大小文字を問わず
 #: repeatCount / repeatDur へ直し、引用符の無い値も読む。値は大小文字を区別し、
 #: INDEFINITE は無効な値として捨てられて 1 回で止まるので、indefinite だけを拾う。
-LOOPING_SMIL_RE = re.compile(r"(?<![-\w])(?i:repeat(?:count|dur))\s*=\s*[\"']?indefinite\b")
+#: 値の前後の空白を除いて読むブラウザ（Chrome は repeatDur、Firefox は repeatCount）
+#: では止まらないので、引用符の内側の空白も許す。
+LOOPING_SMIL_RE = re.compile(r"(?<![-\w])(?i:repeat(?:count|dur))\s*=\s*[\"']?\s*indefinite\b")
 #: HTML に埋め込まれた CSS（style 属性の値と <style> 要素の中身）。
 EMBEDDED_CSS_RE = re.compile(
     r"(?<![-\w])style\s*=\s*(?:\"([^\"]*)\"|'([^']*)')|<style\b[^>]*>(.*?)</style>", re.IGNORECASE | re.DOTALL
