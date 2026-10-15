@@ -114,9 +114,13 @@ REQUIRED_BREAKPOINTS = (768, 1024, 1280)
 #: 止まらない動き。自動で始まり 5 秒を超えて続く動きは、止める手段が無いと
 #: WCAG 2.2 SC 2.2.2 に反する。脈動する点は「リアルタイムで更新中」の合図にも読め、
 #: 静的なページでは誤りになる。styles.css と HTML に埋め込んだ CSS で同じ基準を使う。
-LOOPING_ANIMATION_RE = re.compile(r"animation(?:-iteration-count)?:[^;}]*\binfinite\b")
-#: SVG の SMIL アニメーションの無限反復。
-LOOPING_SMIL_RE = re.compile(r"(?<![-\w])repeat(?:Count|Dur)\s*=\s*[\"']indefinite[\"']")
+#: CSS のプロパティ名とキーワードは大小文字を区別せず、コロンの前に空白も置けるので、
+#: どの書き方でもブラウザは止まらない動きにする。
+LOOPING_ANIMATION_RE = re.compile(r"animation(?:-iteration-count)?\s*:[^;}]*\binfinite\b", re.IGNORECASE)
+#: SVG の SMIL アニメーションの無限反復。HTML パーサは属性名を大小文字を問わず
+#: repeatCount / repeatDur へ直し、引用符の無い値も読む。値は大小文字を区別し、
+#: INDEFINITE は無効な値として捨てられて 1 回で止まるので、indefinite だけを拾う。
+LOOPING_SMIL_RE = re.compile(r"(?<![-\w])(?i:repeat(?:count|dur))\s*=\s*[\"']?indefinite\b")
 #: HTML に埋め込まれた CSS（style 属性の値と <style> 要素の中身）。
 EMBEDDED_CSS_RE = re.compile(
     r"(?<![-\w])style\s*=\s*(?:\"([^\"]*)\"|'([^']*)')|<style\b[^>]*>(.*?)</style>", re.IGNORECASE | re.DOTALL

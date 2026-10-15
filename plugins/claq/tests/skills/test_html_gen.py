@@ -764,6 +764,12 @@ def test_looping_animation_is_reported(tmp_path: Path) -> None:
     dest = _copy_site(tmp_path, "s3")
     assert _append(dest, "styles.css", "\n.live { animation-iteration-count: 2; }\n") == ""
 
+    # CSS のプロパティ名とキーワードは大小文字を区別せず、コロンの前に空白も置ける。
+    # どちらもブラウザでは止まらない動きになる。
+    for name, rule in (("s4", "ANIMATION: pulse 2S INFINITE"), ("s5", "animation : pulse 2s infinite")):
+        dest = _copy_site(tmp_path, name)
+        assert "infinite" in _append(dest, "styles.css", f"\n.live {{ {rule}; }}\n"), rule
+
 
 def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
     """HTML に直接書いた止まらない動きも落ちる。
@@ -782,6 +788,11 @@ def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
     for markup in (
         "<style>.live { animation-iteration-count: infinite; }</style>",
         "<animate repeatDur='indefinite'/>",
+        '<i style="ANIMATION: pulse 2S INFINITE"></i>',
+        # HTML パーサは属性名を大小文字を問わず repeatCount / repeatDur へ直し、
+        # 引用符の無い値も読むので、どちらも止まらない動きになる
+        "<animate repeatcount=indefinite />",
+        '<animate REPEATDUR="indefinite"/>',
     ):
         assert check_site._validate_inline_motion(markup) != [], markup
     for markup in (
@@ -789,6 +800,8 @@ def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
         '<i style="animation-iteration-count: 2"></i>',
         # 属性の境界をまたいで別の属性の語を拾わない
         '<i style="animation: rise 1s" data-note="infinite"></i>',
+        # 値は大小文字を区別する。INDEFINITE はブラウザが無効な値として捨て、1 回で止まる
+        '<animate REPEATDUR="INDEFINITE"/>',
     ):
         assert check_site._validate_inline_motion(markup) == [], markup
 
