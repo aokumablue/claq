@@ -1,5 +1,6 @@
 /**
- * テーマ / ベースカラーの永続、サイドバーの開閉、入場アニメーションを担う。
+ * テーマ / ベースカラーの永続、サイドバーの開閉、図の値の浮き札、描画倍率
+ * （--chart-scale）の受け渡し、入場アニメーションを担う。
  *
  * `<head>` で defer 読み込みする。テーマの復元だけは即時に走らせ、初回描画で
  * 白がちらつかないようにする（DOM 構築を待つのは操作の結線だけ）。
@@ -216,7 +217,7 @@
     };
 
     const follow = (event) => {
-      const title = event.target.closest?.("svg.chart *")?.querySelector(":scope > title");
+      const title = event.target.closest("svg.chart *")?.querySelector(":scope > title");
       if (!title) {
         hide();
         return;
@@ -228,7 +229,8 @@
         title.textContent = "";
         tip.hidden = false;
       }
-      const x = Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+      // innerWidth は縦のスクロールバーを含み、右端の札がその下へ潜る。
+      const x = Math.min(event.clientX + 14, document.documentElement.clientWidth - tip.offsetWidth - 8);
       const above = event.clientY - tip.offsetHeight - 14;
       tip.style.translate = `${Math.max(x, 8)}px ${above < 8 ? event.clientY + 18 : above}px`;
     };
@@ -243,7 +245,7 @@
     document.documentElement.addEventListener("pointerleave", (event) => {
       if (event.pointerType !== "touch") hide();
     });
-    document.addEventListener("scroll", hide, { capture: true, passive: true });
+    document.addEventListener("scroll", hide, { capture: true });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") hide();
     });
