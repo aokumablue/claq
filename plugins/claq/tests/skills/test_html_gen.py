@@ -1186,7 +1186,9 @@ def test_time_series_hit_check_counts_points_however_the_line_is_written() -> No
     """線の書き方を変えても、当たり判定が 1 個足りなければ違反になること。
 
     ブラウザは単引用符の d も、改行をはさんだ d / points も、polyline も同じ線として描く。
-    欠測の時点で線を途切れさせると M が 2 回現れ、区間の数 + 1 では時点を 1 つ数え漏らす。
+    1 つのコマンドの後に座標を続けると同じコマンドの繰り返しになり、コマンドの文字の数では
+    時点を数え漏らす。欠測の時点で線を途切れさせると M が 2 回現れ、区間の数 + 1 では
+    時点を 1 つ数え漏らす。
     """
     area = '<rect class="hover-hit" x="0" y="0" width="1" height="1"/>'
     for line, points in (
@@ -1195,6 +1197,19 @@ def test_time_series_hit_check_counts_points_however_the_line_is_written() -> No
         ('<polyline class="series-line" points="52.0,113.6 110.9,108.9\n  169.8,103.5 228.7,98.8"/>', 4),
         # 3 時点目（x=20）が欠測
         ('<path class="series-line" d="M0 100L10 99M30 97L40 96L50 95"/>', 5),
+        # M の後に続けた座標は L の繰り返しになる
+        ('<path class="series-line" d="M0,100 10,99 20,98 30,97"/>', 4),
+        ('<path class="series-line" d="M0 100L10 99 20 98 30 97"/>', 4),
+        ('<path class="series-line" d="M0 100C3 100 7 99 10 99 13 99 17 98 20 98 23 98 27 97 30 97"/>', 4),
+        # どのコマンドも引数を 2 組続けて 2 時点を置く
+        (
+            '<path class="series-line" d="M0 100 5 100L10 99 15 99H20 25V98 97'
+            "C27 97 28 96 30 96 32 96 33 95 35 95S38 94 40 94 43 93 45 93Q48 92 50 92 53 91 55 91"
+            'T60 90 65 89A5 5 0 0 1 70 88 5 5 0 0 1 75 87"/>',
+            18,
+        ),
+        # 円弧のフラグは区切らずに書ける（0110 は 0・1・10）。数値が引数の数に満たなくても 1 時点を置く
+        ('<path class="series-line" d="M0 100A5 5 0 0110 99"/>', 2),
     ):
         assert check_site._validate_time_point_hits(f"<svg>{line}{area * points}</svg>") == [], line
         thinned = check_site._validate_time_point_hits(f"<svg>{line}{area * (points - 1)}</svg>")

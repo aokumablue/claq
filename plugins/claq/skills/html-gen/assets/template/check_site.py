@@ -944,20 +944,44 @@ def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> li
     return violations
 
 
-#: 折れ線の d で時点を 1 つ置くコマンド。始点の M も時点を置き、Z（閉じ）は置かない。
-#: 欠測の時点で線を途切れさせると M が 2 回以上現れ、区間の数 + 1 では時点を数え漏らす。
-_PATH_POINT_RE = re.compile(r"[MmLlHhVvCcSsQqTtAa]")
-#: polyline の points に並ぶ数値。x と y の 2 つで時点を 1 つ置く。
+#: 折れ線の d のコマンドと、その後に続く引数。Z（閉じ）は時点を置かないので拾わない。
+_PATH_COMMAND_RE = re.compile(r"([MmLlHhVvCcSsQqTtAa])([^MmLlHhVvCcSsQqTtAaZz]*)")
+#: コマンドが 1 時点を置くのに使う引数の数。1 つのコマンドの後に座標を続けると同じ
+#: コマンドの繰り返し（M の後は L）になるので、コマンドの文字ではなく引数の数で数える。
+#: 始点の M も時点を置く。欠測の時点で線を途切れさせると M が 2 回以上現れ、区間の
+#: 数 + 1 では時点を数え漏らす。
+_PATH_ARITY = {"m": 2, "l": 2, "t": 2, "h": 1, "v": 1, "s": 4, "q": 4, "c": 6, "a": 7}
+#: d と points に並ぶ数値。SVG は符号や小数点の前で区切りを省けるので、区切りではなく
+#: 数値の形で拾う。
 _NUMBER_RE = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 #: ルートの svg の class に chart--scatter を持つ散布図。.point の有無で見分けると、
 #: 折れ線に強調の点を 1 つ置いただけで時系列の検査が外れる。
 _SCATTER_ROOT_RE = re.compile(r'<svg\b[^>]*\sclass="(?:[^"]*\s)?chart--scatter[\s"]')
 
 
+def _path_points(d: str) -> int:
+    """path の ``d`` が置く頂点の数を返す。
+
+    コマンドごとに、引数の数を 1 時点分の引数の数で割って足す。円弧のフラグは区切らずに
+    書ける（``0110`` は 0・1・10）ため数値が引数の数に満たないことがあるが、コマンドは
+    少なくとも 1 時点を置くので 1 と数える。
+
+    Args:
+        d: path の ``d`` 属性の値
+
+    Returns:
+        頂点の数
+    """
+    return sum(
+        max(1, len(_NUMBER_RE.findall(args)) // _PATH_ARITY[command.lower()])
+        for command, args in _PATH_COMMAND_RE.findall(d)
+    )
+
+
 def _series_line_points(svg: str) -> list[int]:
     """SVG 1 枚の ``.series-line`` ごとに、線が置く時点の数を返す。
 
-    path は ``d`` のコマンドの数、polyline は ``points`` の数値の数 ÷ 2 で数える。
+    path は ``d`` の頂点の数、polyline は ``points`` の数値の数 ÷ 2 で数える。
     ブラウザは単引用符の値も、改行をはさんだ値も同じ線として描くので、どちらも読む。
 
     Args:
@@ -968,10 +992,11 @@ def _series_line_points(svg: str) -> list[int]:
     """
     counts: list[int] = []
     for element, attrs in re.findall(r'<(path|polyline)\b([^>]*\bclass="series-line[^>]*)>', svg):
-        name, unit, per_point = ("d", _PATH_POINT_RE, 1) if element == "path" else ("points", _NUMBER_RE, 2)
+        name = "d" if element == "path" else "points"
         value = re.search(rf"\s{name}=([\"'])(.*?)\1", attrs, re.DOTALL)
         if value:
-            counts.append(len(unit.findall(value.group(2))) // per_point)
+            text = value.group(2)
+            counts.append(_path_points(text) if element == "path" else len(_NUMBER_RE.findall(text)) // 2)
     return counts
 
 
@@ -980,8 +1005,8 @@ def _validate_time_point_hits(html: str) -> list[str]:
 
     折れ線の値は時点ごとの当たり判定（``.hover-hit``）の ``<title>`` で読ませる。
     点や当たり判定を間引くと、線は通っているのに値へ届かない時点が残る。時点の数は
-    ``.series-line`` の線が置く頂点の数（path は ``d`` のコマンドの数、polyline は
-    ``points`` の座標の組の数）で数え、時点の最も多い系列を当たり判定の下限にする。
+    ``.series-line`` の線が置く頂点の数（path は ``d`` の各コマンドが置く頂点、
+    polyline は ``points`` の座標の組）で数え、時点の最も多い系列を当たり判定の下限にする。
     横軸のラベルでは数えない。月の行の下に年の行を置くとラベルが時点より多くなり、
     ラベルを間引くと少なくなる。散布図（ルートの svg に ``.chart--scatter``）は点が
     自身の ``<title>`` で値を読ませるので、回帰線を ``.series-line`` で引いても対象外。
