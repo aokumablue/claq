@@ -247,6 +247,24 @@ viewBox 幅の上限 = 宣言サイズ × 最小描画幅 ÷ 12
 点が重なるほど密なら、それは散布図で表せる密度を超えている。分類を減らすか、
 区間ごとに集計した図に替える。
 
+### 図の直下の数値表（`details.chart-data`）
+
+値が `<title>` にしか無い図には、図の直下に畳んだ表を置く（凡例に値を書くドーナツ・
+積み上げ横棒は不要）。行は図と同じ順にし、単位は caption か列見出しに書く。
+
+```html
+<details class="chart-data">
+  <summary>表で見る</summary>
+  <div class="table-scroll">
+    <table>
+      <caption>チャネル別の新規契約数（直近 90 日、単位: 件）</caption>
+      <thead><tr><th scope="col">チャネル</th><th scope="col" class="num">件数</th></tr></thead>
+      <tbody><tr><th scope="row">オーガニック</th><td class="num">412</td></tr></tbody>
+    </table>
+  </div>
+</details>
+```
+
 ## 種別と置き場所を合わせる
 
 横長の図を狭い側カードへ入れない。幅 720 の 100% 積み上げ横棒を幅 250 の

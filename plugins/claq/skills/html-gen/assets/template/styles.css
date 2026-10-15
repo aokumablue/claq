@@ -1141,6 +1141,30 @@ p {
   font-weight: var(--font-weight-semibold);
 }
 
+/*
+ * 図の値を表でも読めるようにする。値が <title> にしか無いと、ホバーもタップもできない
+ * 利用者（キーボード・読み上げ）は値に届かない。既定は畳んでページを伸ばさない。
+ */
+.chart-data {
+  margin-block-start: 12px;
+}
+
+.chart-data summary {
+  inline-size: fit-content;
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs-line);
+  cursor: pointer;
+}
+
+.chart-data summary:hover {
+  color: var(--foreground);
+}
+
+.chart-data table {
+  margin-block-start: 8px;
+}
+
 /* --- 表 ------------------------------------------------------------------ */
 
 .table-scroll {

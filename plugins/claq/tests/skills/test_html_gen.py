@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+from html import unescape
 from pathlib import Path
 
 import pytest
@@ -1115,6 +1116,26 @@ def test_e2e_arcs_keep_their_start_and_true_length() -> None:
     assert len(donuts) == 1
     assert "stroke-linecap" not in donuts[0]
     assert "@keyframes arc-draw {" in css
+
+
+def test_e2e_chart_values_are_also_in_a_table_below_the_chart() -> None:
+    """値が <title> にしか無い図の直下に、同じ値を同じ順に並べた数値表があること。
+
+    <title> はホバー・タップでしか出ず、role="img" の子は支援技術に出ないので、
+    キーボードや読み上げの利用者は表でしか値に届かない。
+    """
+    html = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
+    number = r"[+-]?\d[\d.,]*%?"
+    for chart, mark in (('aria-labelledby="mrr-t', "hover-hit"), ('aria-labelledby="ch-t', "bar")):
+        svg = next(block for block in check_site._iter_svg_blocks(html) if chart in block)
+        card = html.split(svg, 1)[1].split("</section>", 1)[0]
+        table = re.search(r'<details class="chart-data">.*?</details>', card, re.DOTALL)
+        assert table, chart
+        titles = re.findall(rf'<rect class="{mark}"[^>]*><title>([^<]*)</title>', svg)
+        rows = re.findall(r"<tr><th scope=\"row\">(.*?)</tr>", table.group(0))
+        assert titles and len(rows) == len(titles), chart
+        for title, row in zip(titles, rows, strict=True):
+            assert re.findall(number, unescape(title)) == re.findall(number, re.sub(r"<[^>]+>", " ", row)), title
 
 
 def test_e2e_every_time_point_can_be_read_on_hover_or_tap() -> None:

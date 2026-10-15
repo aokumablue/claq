@@ -108,7 +108,9 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 
 - 座標は viewBox 内の数値で持つ。系列色は `var(--chart-1..5)`
 - 値はマークの `<title>` に書く（`app.js` がホバー・タップで浮き札にする）。
-  時系列は全時点に当たり判定（`.hover-col`）を置き、点を間引いて値の届かない時点を作らない
+  時系列は全時点に当たり判定（`.hover-col`）を置き、点を間引いて値の届かない時点を作らない。
+  同じ値を図の直下の `<details class="chart-data">` の表にも置く（キーボード・読み上げ向け。
+  凡例に値があるドーナツ・積み上げ横棒は不要）
 - viewBox の縦横比がそのまま図の縦横比になる。高さの上限に固定 px を書かない
   （広い画面でレターボックスが働き図だけ小さく残る）。`clamp(320px, 46vh, 620px)`
 - x 軸のラベル帯とy 軸の目盛り幅を viewBox の内側に取る（下 20px / 左 40〜55px）
