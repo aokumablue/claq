@@ -263,6 +263,41 @@ _BLOCKED_CASES = [
     ("touch の大小混在", "bash_config_protection", _bash("touch .Eslintrc")),
     ("touch の値付きオプション", "bash_config_protection", _bash("touch -t 202601010000 ruff.toml")),
     ("wrapper 越しの touch", "bash_config_protection", _bash("timeout 5 touch ruff.toml")),
+    # bash では有効だが `shlex` が解析できない `$'\\''` の直後に、区切り記号が語へ密着した
+    # 形。空白分割へ倒れても区切りで割れていないと git 起動・書込み先が 1 語に埋もれる。
+    ("解析不能の後の ; 密着 git", "block_no_verify", _bash("echo $'\\'';git commit --no-verify")),
+    ("解析不能の後の && 密着 git", "block_no_verify", _bash("echo $'\\''&&git commit --no-verify")),
+    ("解析不能の後の || 密着 git", "block_no_verify", _bash("echo $'\\''||git commit --no-verify")),
+    ("解析不能の後の | 密着 git", "block_no_verify", _bash("echo $'\\''|git commit --no-verify")),
+    ("解析不能の後の & 密着 git", "block_no_verify", _bash("echo $'\\''&git commit --no-verify")),
+    ("解析不能の後の括弧 git", "block_no_verify", _bash("echo $'\\'';(git commit --no-verify)")),
+    ("解析不能の後の hooksPath", "block_no_verify", _bash("echo $'\\'';git config core.hooksPath /x")),
+    # 区切りを割っても、解析不能のまま語に引用符が残る形は構造では読めない。
+    # `block_no_verify` だけは、解析不能のときに限り生文字列の `--no-verify` / hooksPath で止める。
+    ("解析不能の後の引用付き git", "block_no_verify", _bash("echo $'\\'';\"git\" commit --no-verify")),
+    ("解析不能の後の引用付きフラグ", "block_no_verify", _bash("echo $'\\'';git commit \"--no-verify\"")),
+    ("解析不能の後の連結引用 git", "block_no_verify", _bash("echo $'\\'';g''it commit --no-verify")),
+    ("解析不能の後の引用付き hooksPath", "block_no_verify", _bash("echo $'\\'';git -c \"core.hooksPath=/x\" commit")),
+    ("解析不能の後の大文字 hooksPath", "block_no_verify", _bash("echo $'\\'';git -c core.HOOKSPATH=/x commit")),
+    ("解析不能の後のコマンド置換", "block_no_verify", _bash("echo $'\\'';`git commit --no-verify`")),
+    ("解析不能の後の sh -c", "block_no_verify", _bash("echo $'\\'';sh -c 'git commit --no-verify'")),
+    ("解析不能の後の別引用", "block_no_verify", _bash("echo $'\\'';git commit --no-verify -m \"a;b")),
+    ("解析不能の後の > 密着", "bash_config_protection", _bash("echo $'\\'' >ruff.toml")),
+    ("解析不能の後の >> 密着", "bash_config_protection", _bash("echo $'\\'' >>ruff.toml")),
+    ("解析不能の後の >| 密着", "bash_config_protection", _bash("echo $'\\'' >|ruff.toml")),
+    ("解析不能の後の &> 密着", "bash_config_protection", _bash("echo $'\\'' &>ruff.toml")),
+    ("解析不能の後の 2> 密着", "bash_config_protection", _bash("echo $'\\'' 2>ruff.toml")),
+    ("解析不能の後の 2>> 密着", "bash_config_protection", _bash("echo $'\\'' 2>>ruff.toml")),
+    # fd 複製の `&` で後続の語を別セグメントへ切り離さない。
+    ("解析不能の後の 2>&1 越しの rm", "bash_config_protection", _bash("echo $'\\'' ; rm -f 2>&1 ruff.toml")),
+    ("解析不能の後の >&2 越しの rm", "bash_config_protection", _bash("echo $'\\'' ; rm -f >&2 ruff.toml")),
+    ("解析不能の後の <&3 越しの rm", "bash_config_protection", _bash("echo $'\\'' ; rm -f <&3 ruff.toml")),
+    ("解析不能の後の 2>&1 越しの commit", "block_no_verify", _bash("echo $'\\'' ; git commit 2>&1 -n")),
+    ("解析不能の後の >&2 越しの commit", "block_no_verify", _bash("echo $'\\'' ; git commit >&2 -n")),
+    ("解析不能の後の ; 密着 rm", "bash_config_protection", _bash("echo $'\\'';rm ruff.toml")),
+    ("解析不能の後の && 密着 rm", "bash_config_protection", _bash("echo $'\\''&&rm ruff.toml")),
+    ("解析不能の後の || 密着 rm", "bash_config_protection", _bash("echo $'\\''||rm ruff.toml")),
+    ("解析不能の後の | 密着 tee", "bash_config_protection", _bash("echo $'\\''|tee ruff.toml")),
     # 陽性対照（fail-closed 化で失われていないこと）。
     ("対照 コメント無しの 2 行目", "block_no_verify", _bash(f"git status\n{_NO_VERIFY}")),
     ("対照 bash -c", "block_no_verify", _bash(f"bash -c '{_NO_VERIFY}'")),
@@ -298,6 +333,20 @@ _ALLOWED_CASES = [
     ("Read は書き込みではない", "config_protection", {"tool_name": "Read", "tool_input": {"file_path": "ruff.toml"}}),
     ("Grep は書き込みではない", "config_protection", {"tool_name": "Grep", "tool_input": {"file_path": "ruff.toml"}}),
     ("保護対象でない Write", "config_protection", _write("notes.txt")),
+    # 解析不能（引用符不整合）でも、区切りを割るだけで「危険語が見えたら deny」にはしない。
+    # 読み取りコマンドは従来どおり通す。
+    ("対 解析不能の後の読み取り", "bash_config_protection", _bash("echo $'\\'' && cat ruff.toml")),
+    ("対 解析不能の後の読み取り（block_no_verify）", "block_no_verify", _bash("echo $'\\'' && cat ruff.toml")),
+    ("対 解析不能の grep", "bash_config_protection", _bash("grep 'a ruff.toml")),
+    ("対 解析不能の grep（block_no_verify）", "block_no_verify", _bash("grep 'a ruff.toml")),
+    # 生文字列の deny は「解析不能」かつ「`--no-verify` / hooksPath が見える」ときだけ。
+    # 解析できた入力の引数・引用文は従来どおり通す。
+    ("対 解析できた入力の --no-verify 引数", "block_no_verify", _bash("grep -- '--no-verify' README.md")),
+    ("対 解析できた入力の hooksPath 引数", "block_no_verify", _bash("grep hooksPath README.md")),
+    ("対 解析不能で危険語なしの commit", "block_no_verify", _bash("echo $'\\'';git commit -m \"x\"")),
+    ("対 解析不能の後の密着 cat", "bash_config_protection", _bash("echo $'\\'';cat ruff.toml")),
+    ("対 解析不能の後の通常 commit", "block_no_verify", _bash("echo $'\\'';git commit -m x")),
+    ("対 解析不能の後の <  読み取り", "bash_config_protection", _bash("echo $'\\'' <ruff.toml")),
     # --- 上の block 追加と対になる陰性対照 ---
     # 大小無視は「保護対象の綴り違い」だけに効き、無関係なファイルは巻き込まない。
     ("対 大文字混在の無関係 Write", "config_protection", _write("App.py")),

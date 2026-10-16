@@ -36,6 +36,16 @@ heredoc 本文:
     データとして書かれた heredoc 本文はトークン化の前に落とします
     （docs/adr/shell-analysis-boundary.md）。本文が実行されうる形は落としません。
 
+解析できない入力（クォート不整合）:
+    ``echo $'\\'';git commit`` のように bash では有効でも ``shlex`` が解析できない入力は、
+    区切り演算子を割った空白分割（`hook_common.tokenize_with_status`）で走査する。語に
+    引用符が残るため（``"git" commit "--no-verify"``）それでも読めない形が残る。この
+    **解析できなかったときに限り**、生文字列に ``--no-verify`` / ``hooksPath`` が見えたら
+    ブロックする。解析できた入力には当てない（``grep -- '--no-verify' README.md`` を通す）。
+    解析不能な入力の引用文に危険語があれば誤ってブロックされるが、回避は引用符を整合させる
+    ことで、誤通過より小さい代償として許容する。``-n`` と ``--no-verify`` の前置は生文字列では
+    判定できず、この経路では検出しない。
+
 クォート内の誤検知:
     ``shlex`` はクォート内をひとつのトークンとして保持するため、``git commit -m "use -n
     flag"`` のメッセージ本文や ``echo "git commit --no-verify"`` の中身はフラグや git 起動に
@@ -90,7 +100,7 @@ from claq.hooks.hook_common import (
     split_segments,
     stdin_unreadable_message,
     strip_data_heredoc_bodies,
-    tokenize,
+    tokenize_with_status,
 )
 from claq.lib.harness import INPUT_CONTAINER_KEYS, extract_tool_input, iter_bash_commands
 
@@ -534,6 +544,11 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
     return any(_has_bypass_flag_in_dialect(variant, _recursed=_recursed) for variant in command_dialect_variants(command))
 
 
+# `shlex` が解析できなかった入力にだけ当てる、生文字列のバイパス兆候。`hooksPath` は
+# git の config key が大小無視なので IGNORECASE。
+_UNPARSED_RAW_BYPASS_RE = re.compile(r"--no-verify|hookspath", re.IGNORECASE)
+
+
 def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool) -> bool:
     """1 つのシェル方言の読み方で `has_bypass_flag` の判定を行う。
 
@@ -547,7 +562,10 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool) -> bool:
     Raises:
         例外は発生しません。
     """
-    for segment in split_segments(tokenize(command)):
+    tokens, parsed_cleanly = tokenize_with_status(command)
+    if not parsed_cleanly and _UNPARSED_RAW_BYPASS_RE.search(command):
+        return True
+    for segment in split_segments(tokens):
         for index, token in enumerate(segment):
             if not is_git_invocation(token):
                 continue

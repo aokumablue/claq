@@ -260,7 +260,31 @@ class TestBlockNoVerify:
 
     def test_tokenize_falls_back_to_whitespace_split(self) -> None:
         """クォート不整合時は空白分割へフォールバックする（fail-closed）。"""
-        assert block_no_verify.tokenize('git commit -m "x') == ["git", "commit", "-m", '"x']
+        assert block_no_verify.tokenize_with_status('git commit -m "x') == (["git", "commit", "-m", '"x'], False)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo $'\\'';\"git\" commit --no-verify",
+            "echo $'\\'';git commit \"--no-verify\"",
+            "echo $'\\'';git -c \"core.HooksPath=/x\" commit",
+        ],
+    )
+    def test_unparsed_command_with_raw_bypass_text_is_blocked(self, command: str) -> None:
+        """解析不能な入力は、生文字列に --no-verify / hooksPath が見えたらブロックする。"""
+        assert block_no_verify.has_bypass_flag(command) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo $'\\'' && cat ruff.toml",
+            "echo $'\\'';git commit -m \"x\"",
+            "grep -- '--no-verify' README.md",
+        ],
+    )
+    def test_unparsed_command_without_raw_bypass_text_is_allowed(self, command: str) -> None:
+        """危険語が無い解析不能な入力、および解析できた引用文は巻き込まない。"""
+        assert block_no_verify.has_bypass_flag(command) is False
 
     def test_split_segments_drops_empty_segments(self) -> None:
         """連続する区切りトークンで空セグメントを作らない。"""

@@ -1744,6 +1744,68 @@ class TestUnquotedNewlineNormalization:
         """
         assert hook_common.tokenize_with_status(command) == expected, label
 
+    @pytest.mark.parametrize(
+        ("label", "command", "expected"),
+        [
+            ("; が語に密着", "echo $'\\'';git commit", ["echo", "$'\\''", ";", "git", "commit"]),
+            ("&& が語に密着", "echo $'\\''&&git commit", ["echo", "$'\\''", "&&", "git", "commit"]),
+            ("|| が語に密着", "echo $'\\''||git commit", ["echo", "$'\\''", "||", "git", "commit"]),
+            ("| が語に密着", "echo $'\\''|tee ruff.toml", ["echo", "$'\\''", "|", "tee", "ruff.toml"]),
+            ("& が語に密着", "echo $'\\''&git commit", ["echo", "$'\\''", "&", "git", "commit"]),
+            ("括弧が語に密着", "echo $'\\'';(git commit)", ["echo", "$'\\''", ";", "(", "git", "commit", ")"]),
+            ("> が語に密着", "echo $'\\'' >ruff.toml", ["echo", "$'\\''", ">", "ruff.toml"]),
+            (">> は 1 単位", "echo $'\\'' >>ruff.toml", ["echo", "$'\\''", ">>", "ruff.toml"]),
+            (">| は 1 単位", "echo $'\\'' >|ruff.toml", ["echo", "$'\\''", ">|", "ruff.toml"]),
+            ("&> は 1 単位", "echo $'\\'' &>ruff.toml", ["echo", "$'\\''", "&>", "ruff.toml"]),
+            ("&>> は 1 単位", "echo $'\\'' &>>ruff.toml", ["echo", "$'\\''", "&>>", "ruff.toml"]),
+            ("2> は 1 単位", "echo $'\\'' 2>ruff.toml", ["echo", "$'\\''", "2>", "ruff.toml"]),
+            ("2>> は 1 単位", "echo $'\\'' 2>>ruff.toml", ["echo", "$'\\''", "2>>", "ruff.toml"]),
+            ("< が語に密着", "echo $'\\'' <in.txt", ["echo", "$'\\''", "<", "in.txt"]),
+            ("語中の 2 は割らない", "echo $'\\'' a2>x", ["echo", "$'\\''", "a2", ">", "x"]),
+            ("1> は 1 単位", "echo $'\\'' 1>ruff.toml", ["echo", "$'\\''", "1>", "ruff.toml"]),
+            ("1>> は 1 単位", "echo $'\\'' 1>>ruff.toml", ["echo", "$'\\''", "1>>", "ruff.toml"]),
+            # `&` は区切りだが、`>&` / `<&` の一部としては区切りでない。`2>&1` を `2> & 1` に
+            # 割ると、後続の語がセグメントごと切り離される。
+            ("2>&1 は区切りを作らない", "echo $'\\'' 2>&1 x", ["echo", "$'\\''", "2", ">&", "1", "x"]),
+            (">&2 は区切りを作らない", "echo $'\\'' >&2 x", ["echo", "$'\\''", ">&", "2", "x"]),
+            ("<&3 は区切りを作らない", "echo $'\\'' <&3 x", ["echo", "$'\\''", "<&", "3", "x"]),
+            ("区切りが無ければ空白分割のまま", "echo $'\\'' a b", ["echo", "$'\\''", "a", "b"]),
+        ],
+    )
+    def test_tokenize_with_status_fallback_splits_glued_operators(
+        self, label: str, command: str, expected: list[str]
+    ) -> None:
+        """空白分割へ倒れた入力でも、語に密着した区切り演算子を独立トークンにする。
+
+        ``echo $'\\'';git commit`` は bash では有効だが `shlex` は ``ValueError`` にする。
+        単純な空白分割では ``$'\\'';git`` が 1 語になり、`git` 起動が見えなくなる。
+        演算子は最長一致の 1 単位で割る（``>>ruff.toml`` を ``> > ruff.toml`` にすると
+        リダイレクト先の判定がずれる）。
+        """
+        tokens, parsed_cleanly = hook_common.tokenize_with_status(command)
+
+        assert parsed_cleanly is False, label
+        assert tokens == expected, label
+
+    @pytest.mark.parametrize(
+        ("label", "command", "expected"),
+        [
+            ("&& 密着", "git add -A&&git commit -m x", ["git", "add", "-A", "&&", "git", "commit", "-m", "x"]),
+            ("; 密着", "echo a;rm b", ["echo", "a", ";", "rm", "b"]),
+            (">> 密着", "echo a>>b", ["echo", "a", ">>", "b"]),
+            ("2> は数字が別トークン", "echo a 2>b", ["echo", "a", "2", ">", "b"]),
+            ("&> 密着", "echo a &>b", ["echo", "a", "&>", "b"]),
+            (">| 密着", "echo a>|b", ["echo", "a", ">|", "b"]),
+            ("引用符内の ; は割らない", "echo 'a;b' \"c&&d\"", ["echo", "a;b", "c&&d"]),
+            ("引用符内の > は割らない", "grep 'a>b' ruff.toml", ["grep", "a>b", "ruff.toml"]),
+        ],
+    )
+    def test_tokenize_with_status_parsed_path_is_unchanged(
+        self, label: str, command: str, expected: list[str]
+    ) -> None:
+        """`shlex` で解析できた入力のトークン列は、フォールバックの演算子分割に影響されない。"""
+        assert hook_common.tokenize_with_status(command) == (expected, True), label
+
     def test_multiline_command_splits_into_segments(self) -> None:
         """複数行コマンドが行ごとのセグメントへ分かれること。"""
         tokens = hook_common.tokenize("printf x > s.py\ngit add s.py\ngit commit -m m")

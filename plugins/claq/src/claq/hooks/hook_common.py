@@ -547,14 +547,31 @@ def command_exceeds_scan_budget(command: str) -> bool:
     return len(tokenize(command)) > MAX_COMMAND_TOKENS
 
 
+# `shlex` が解析できなかった入力で、空白分割の前に前後へ空白を入れる区切り演算子。
+# 長い演算子を先に置いて最長一致にする。1 文字ずつ割ると ``>>ruff.toml`` が
+# ``> > ruff.toml`` になり、リダイレクト先の判定がずれて新しい迂回口になる。
+# ``1>`` / ``2>`` / ``1>>`` / ``2>>`` は語頭の fd 指定だけを 1 単位にする（``a2>x`` の ``a2``
+# は割らない）。``>&`` / ``<&``（fd 複製）は 1 単位で、``2>&1`` の ``&`` を区切りとして読むと
+# 後続の語が別セグメントへ切り離される。
+_FALLBACK_OPERATOR_RE = re.compile(
+    r"(&>>|(?<!\S)[12]>>|&>|(?<!\S)[12]>(?!&)|>>|>\||>&|<&|&&|\|\||[;|&()<>])"
+)
+
+
 def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     """シェルコマンドをトークン化し、``shlex`` で解析し切れたかどうかも返す。
 
     ``punctuation_chars=True`` で、空白なしで連結された区切り記号
     （``git add -A&&git commit``）も独立トークンにする。コメント除去・行継続の連結・
-    クォート外改行の ``;`` 化を先に行う。クォート不整合で ``ValueError`` になる入力は
-    空白分割へフォールバックする（クォート内容もフラグとして走査され、ブロック側に
-    倒れる）。
+    クォート外改行の ``;`` 化を先に行う。
+
+    クォート不整合で ``ValueError`` になる入力（bash では有効な ``$'\\''`` を含む）は、
+    区切り演算子（`_FALLBACK_OPERATOR_RE`）の前後に空白を入れてから空白分割する。
+    これで ``echo $'\\'';git commit`` の ``;`` や ``>ruff.toml`` の ``>`` が語に埋もれず、
+    クォート内容もフラグとして走査される。ただしクォートの対応は取らないため、本物の
+    クォート内にある区切り記号まで割る。割るのは区切りの前後だけで、危険語が見えた
+    こと自体では deny しない（読み取りコマンドを巻き込むため）。解析できた入力のトークン列は
+    このフォールバックの影響を受けない。
 
     解析できたかを返すのは、生文字列への正規表現フォールバックを「解析できなかった
     ときだけ」に限定するため。解析できた入力にまで当てると ``echo "git commit"``
@@ -578,7 +595,7 @@ def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     try:
         return list(lexer), True
     except ValueError:
-        return normalized.split(), False
+        return _FALLBACK_OPERATOR_RE.sub(r" \1 ", normalized).split(), False
 
 
 def split_segments(tokens: list[str]) -> list[list[str]]:
