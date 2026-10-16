@@ -257,7 +257,7 @@ class TestResolveModuleCommand:
 
         monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
         monkeypatch.setattr("claq.hooks.hook_common.read_raw_stdin", lambda: "")
-        monkeypatch.setattr("claq.hooks.hook_common.detach_process", fake_detach)
+        monkeypatch.setattr("claq.hooks.detach.detach_process", fake_detach)
         monkeypatch.setattr(launcher, "build_env", lambda: {})
         assert launcher.main(["--bg", target, *args]) == 0
         return captured["cmd"]
@@ -309,7 +309,7 @@ class TestMain:
             captured["raw"] = raw
             return True
 
-        monkeypatch.setattr("claq.hooks.hook_common.detach_process", fake_detach)
+        monkeypatch.setattr("claq.hooks.detach.detach_process", fake_detach)
         monkeypatch.setattr(launcher, "build_env", lambda: {})
 
         run_in_process_called: list[object] = []
@@ -332,7 +332,7 @@ class TestMain:
         処理を受付成功と誤認する（子の処理結果は依然として非同期のまま）。
         """
         monkeypatch.setattr("claq.hooks.hook_common.read_raw_stdin", lambda: "")
-        monkeypatch.setattr("claq.hooks.hook_common.detach_process", lambda *a, **k: False)
+        monkeypatch.setattr("claq.hooks.detach.detach_process", lambda *a, **k: False)
         monkeypatch.setattr(launcher, "build_env", lambda: {})
 
         assert launcher.main(["--bg", "claq.mem.cli", "handoff"]) == 1

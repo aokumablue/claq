@@ -160,7 +160,7 @@ _DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILES_FOLDED
 
-# ~/.claq/logs/ 配下（bg 失敗ログ）をディレクトリ構造で保護する。`recent_bg_failure_notice`
+# ~/.claq/logs/ 配下（bg 失敗ログ）をディレクトリ構造で保護する。`detach.recent_bg_failure_notice`
 # がログ末尾行を次回 SessionStart のコンテキストへ注入するため、自由な追記はプロンプト
 # 注入の永続化経路になる。保護の範囲を「Bash からの直接追記の拒否」に限るため、
 # `config_protection` の保護 path（Edit/Write にも効く）へは足さず本モジュールに閉じる。

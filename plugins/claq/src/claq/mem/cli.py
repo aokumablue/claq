@@ -32,11 +32,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from claq.hooks.hook_common import (
-    print_session_start_output,
-    read_raw_stdin,
-    recent_bg_failure_notice,
-)
+from claq.hooks.detach import recent_bg_failure_notice
+from claq.hooks.hook_common import print_session_start_output, read_raw_stdin
 from claq.lib.core_utils import actor_identity, get_plugin_root
 from claq.lib.env_pointer import ancestor_pointers_supported
 from claq.lib.harness import normalize_user_message

@@ -96,7 +96,7 @@ def test_helpers_expose_no_unwatchdogged_background_runner() -> None:
 
     `nohup ... &` だけの runner は、CLAUDE.md が新規の外部呼び出しに
     義務付けるハードタイムアウトを持たない（`--bg` 経由の
-    `hook_common.detach_process` が使う watchdog を通らないため、mem.db の
+    `detach.detach_process` が使う watchdog を通らないため、mem.db の
     ロック待ちに入ると無期限に残留する）。
     """
     text = _HELPER.read_text(encoding="utf-8")

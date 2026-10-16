@@ -160,7 +160,8 @@ def main(argv: list[str] | None = None) -> int:
     if src_dir not in sys.path:
         sys.path.insert(0, src_dir)
 
-    from claq.hooks.hook_common import detach_process, read_raw_stdin, write_stderr
+    from claq.hooks.detach import detach_process
+    from claq.hooks.hook_common import read_raw_stdin, write_stderr
     from claq.lib.env_pointer import write_env_pointer
 
     # md（agents/commands/skills）がベンダ固有パスを書かずに plugin root を

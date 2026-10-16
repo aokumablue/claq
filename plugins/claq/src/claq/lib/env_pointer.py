@@ -402,7 +402,7 @@ def _gc_stale_temp_files(claq_dir: Path, now: float) -> None:
     無視する。
 
     detach の stdin 一時ファイルは生成側が ``get_claq_dir()`` 配下に作る別契約なので、
-    回収も生成側（`hook_common.gc_detach_stdin_orphans`）に置く。
+    回収も生成側（`detach.gc_detach_stdin_orphans`）に置く。
     """
     try:
         entries = list(claq_dir.iterdir())
