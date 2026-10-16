@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from collections.abc import Iterable, Iterator
 from typing import Any
 
@@ -149,7 +150,11 @@ def _commands_from_tool_input(tool_input: Any) -> list[str]:
     外れる（dict の挿入順ではなくキーの順序が結果を決めるため、並びを問わない）。
 
     Returns:
-        非空のコマンド文字列のリスト。list 形状は要素ごとに再帰して連結する。
+        非空のコマンド文字列のリスト。list 形状は要素ごとに再帰して連結する。要素が 2 つ
+        以上で全て str の list（argv 配列）は、要素ごとの走査に加えて ``shlex.join`` で
+        1 コマンドへ結合した文字列も末尾に返す。要素単位でしか見ないと
+        ``["git", "commit", "--no-verify"]`` の各要素は単独では無害に読め、全フックを
+        素通りする。
     """
     if isinstance(tool_input, dict):
         # 値は文字列とは限らない。``{"command": ["bash", "-lc", "git commit
@@ -164,7 +169,10 @@ def _commands_from_tool_input(tool_input: Any) -> list[str]:
     if isinstance(tool_input, str):
         return [tool_input] if tool_input else []
     if isinstance(tool_input, list):
-        return [command for item in tool_input for command in _commands_from_tool_input(item)]
+        commands = [command for item in tool_input for command in _commands_from_tool_input(item)]
+        if len(tool_input) > 1 and all(isinstance(item, str) for item in tool_input):
+            commands.append(shlex.join(tool_input))
+        return commands
     return []
 
 

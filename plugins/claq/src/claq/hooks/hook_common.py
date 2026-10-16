@@ -1120,7 +1120,11 @@ def resolve_effective_target(raw_path: str) -> Path | None:
     """
     try:
         return (Path.cwd() / _expand_leading_tilde(raw_path)).resolve(strict=False)
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):
+        # ValueError は単独サロゲート（JSON の \ud800）の ``UnicodeEncodeError`` と
+        # NUL 混入。入力側が任意に作れるため、貫通させると呼び出し側の保護フックが
+        # exit 1（＝ PreToolUse では non-blocking でツール実行）で落ち、後続トークンの
+        # 保護対象書き込みの検査ごと失われる。
         return None
 
 

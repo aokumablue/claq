@@ -789,6 +789,13 @@ class TestResolveEffectiveTarget:
 
         assert hook_common.resolve_effective_target("whatever") is None
 
+    def test_returns_none_on_lone_surrogate(self) -> None:
+        """単独サロゲートは ``UnicodeEncodeError``（``ValueError``）で解決不能になり、None を返す。
+
+        例外を貫通させると呼び出し側の保護フックが exit 1（＝ツール実行）で落ちる。
+        """
+        assert hook_common.resolve_effective_target("\ud800x") is None
+
     def test_expands_leading_tilde_before_resolving(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

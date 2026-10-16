@@ -163,6 +163,53 @@ class TestIterBashCommands:
         """入れ子の list も再帰的に取り出す。"""
         assert list(harness.iter_bash_commands({"tool_input": [["git status"]]})) == ["git status"]
 
+    def test_argv_list_also_yields_the_joined_command(self):
+        """全要素が str の argv 配列は、要素ごとの走査に加えて 1 コマンドへ結合した文字列も返す。
+
+        要素ごとにしか検査しないと ``["git", "commit", "--no-verify"]`` の各要素は単独では
+        無害に見え、全フックを素通りする。結合した 1 文字列が検査対象に入って初めて
+        フラグが ``git commit`` と同じコマンドの引数として読める。
+        """
+        payload = {"tool_input": {"command": ["git", "commit", "--no-verify", "-m", "x"]}}
+
+        assert list(harness.iter_bash_commands(payload)) == [
+            "git",
+            "commit",
+            "--no-verify",
+            "-m",
+            "x",
+            "git commit --no-verify -m x",
+        ]
+
+    def test_argv_join_quotes_elements_that_contain_spaces(self):
+        """空白を含む要素は ``shlex.join`` が引用し、1 語のまま読めること。"""
+        payload = {"tool_input": {"cmd": ["git", "commit", "-m", "a b"]}}
+
+        assert list(harness.iter_bash_commands(payload))[-1] == "git commit -m 'a b'"
+
+    def test_bare_and_nested_argv_lists_are_joined(self):
+        """``tool_input`` 直下の配列と入れ子の配列も、階層ごとに結合する。"""
+        assert list(harness.iter_bash_commands({"tool_input": ["rm", "ruff.toml"]})) == [
+            "rm",
+            "ruff.toml",
+            "rm ruff.toml",
+        ]
+        assert list(harness.iter_bash_commands({"tool_input": [["rm", "ruff.toml"]]})) == [
+            "rm",
+            "ruff.toml",
+            "rm ruff.toml",
+        ]
+
+    def test_single_element_list_is_not_joined_again(self):
+        """要素が 1 つなら結合しても情報が増えない（引用が付くだけ）ので返さない。"""
+        assert list(harness.iter_bash_commands({"tool_input": {"command": ["git status"]}})) == ["git status"]
+
+    def test_list_with_non_string_element_is_not_joined(self):
+        """str 以外を含む配列は結合しない（要素ごとの走査だけを行う）。"""
+        payload = {"tool_input": {"command": ["git", 1, "status"]}}
+
+        assert list(harness.iter_bash_commands(payload)) == ["git", "status"]
+
     def test_cmd_alias_field(self):
         """command が無く cmd があればそれを使う。"""
         assert list(harness.iter_bash_commands({"tool_input": {"cmd": "whoami"}})) == ["whoami"]

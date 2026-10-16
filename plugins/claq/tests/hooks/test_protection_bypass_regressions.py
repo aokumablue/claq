@@ -128,6 +128,30 @@ _BLOCKED_CASES = [
         "block_no_verify",
         {"tool_name": "shell", "tool_input": {"command": ["bash", "-lc", _NO_VERIFY]}},
     ),
+    # argv 配列は要素ごとにも見るが、結合した 1 コマンドとしても見る。要素単位でしか
+    # 見ないと ``--no-verify`` も ``ruff.toml`` も単独では無害に読める。
+    (
+        "argv 配列に分解された --no-verify",
+        "block_no_verify",
+        {"tool_name": "shell", "tool_input": {"command": ["git", "commit", "--no-verify", "-m", "x"]}},
+    ),
+    (
+        "argv 配列に分解された保護対象の削除",
+        "bash_config_protection",
+        {"tool_name": "shell", "tool_input": {"command": ["rm", "ruff.toml"]}},
+    ),
+    # 単独サロゲートはファイルシステム API で ``UnicodeEncodeError`` になる。解決不能な
+    # トークンが 1 つ混ざるだけで、後続の保護対象書き込みの検査まで落としてはならない。
+    (
+        "単独サロゲートの囮トークン",
+        "bash_config_protection",
+        _bash("touch \ud800x; printf y > ruff.toml"),
+    ),
+    (
+        "単独サロゲートを含む保護 path（Write）",
+        "config_protection",
+        _write("\ud800/.git/hooks/pre-commit"),
+    ),
     ("file_path が list", "config_protection", _write(["ruff.toml"])),
     (
         "command が list（書き込み）",
@@ -244,6 +268,17 @@ _ALLOWED_CASES = [
     ("引用された散文", "block_no_verify", _bash(f"echo '# {_NO_VERIFY}'")),
     ("語中の # は語の一部", "block_no_verify", _bash('echo "a#b"')),
     ("データ heredoc", "block_no_verify", _bash(_DATA_HEREDOC.format(body=_NO_VERIFY))),
+    (
+        "argv 配列の通常の commit",
+        "block_no_verify",
+        {"tool_name": "shell", "tool_input": {"command": ["git", "commit", "-m", "x"]}},
+    ),
+    (
+        "argv 配列の保護対象でない書き込み",
+        "bash_config_protection",
+        {"tool_name": "shell", "tool_input": {"command": ["rm", "notes.txt"]}},
+    ),
+    ("単独サロゲートだけで保護対象なし", "bash_config_protection", _bash("touch \ud800x")),
     ("保護対象でない書き込み", "bash_config_protection", _bash("printf x > notes.txt")),
     ("保護対象の読み取り", "bash_config_protection", _bash("cat ruff.toml")),
     ("repo 外への書き込み", "bash_config_protection", _bash("printf x > /tmp/ruff.toml")),
@@ -1648,3 +1683,40 @@ def test_scan_budget_is_measured_in_bytes_not_characters() -> None:
 
     assert len(multibyte) < MAX_COMMAND_BYTES
     assert command_exceeds_scan_budget(multibyte) is True
+
+
+def test_oversized_command_is_blocked_by_bash_config_protection(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """トークン予算を超えるコマンドは走査せず BLOCKED にすること。
+
+    `bash_config_protection` だけが予算を見ていなかった。40 万トークンの
+    ``touch a a a ...; rm ruff.toml`` は走査に 20.7 秒かかり、`hooks.json` の timeout
+    （15 秒）で host に kill される。kill された hook は exit code を返さないため
+    silent fail-open になる。走査前に弾けば同じ入力が即座に exit 2 になる。
+    """
+    from claq.hooks.hook_common import MAX_COMMAND_TOKENS
+
+    oversized = "echo " + "a " * (MAX_COMMAND_TOKENS + 1)
+
+    assert _run("bash_config_protection", _bash(oversized), monkeypatch) == 2
+    assert "exceeds" in capsys.readouterr().err
+
+
+def test_oversized_command_inside_sh_c_is_blocked_by_bash_config_protection(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``sh -c '<巨大なコマンド>'`` の再帰境界にも同じ予算が効くこと。
+
+    入口だけに置いた予算は、外側が数トークンしか無いネスト payload を通し、再帰先が
+    無予算で走る。
+    """
+    from claq.hooks.hook_common import MAX_COMMAND_TOKENS
+
+    inner = "echo " + "a " * (MAX_COMMAND_TOKENS + 1)
+
+    assert _run("bash_config_protection", _bash(f"sh -c '{inner}'"), monkeypatch) == 2
+    assert "exceeds" in capsys.readouterr().err
+    # 予算内のネストは中身で判定される（予算が過剰に効かない）。
+    assert _run("bash_config_protection", _bash("sh -c 'printf x > ruff.toml'"), monkeypatch) == 2
+    assert _run("bash_config_protection", _bash("sh -c 'printf x > notes.txt'"), monkeypatch) == 0
