@@ -262,10 +262,13 @@ _BLOCKED_CASES = [
     (">& で保護 config", "bash_config_protection", _bash("echo x >&ruff.toml")),
     (">& 空白あり", "bash_config_protection", _bash("echo x >& ruff.toml")),
     ("2>& で保護 config", "bash_config_protection", _bash("echo x 2>&ruff.toml")),
-    # commit 前の `&>>` は作業ツリーへの書き込み。`>&` は fd 複製（`>&2`）と書き込み先指定が
-    # 同じ演算子なので、後ろが fd かどうかを見ずに常に mutation 扱いのまま（現状値の固定）。
+    # commit 前の `&>>` と `>&file` は作業ツリーへの書き込み。`>&` の後ろが fd（数字のみ・`-`）なら
+    # 複製・クローズで書き込みではない（allow 側の「対 >&2 の commit 前」）。
     ("&>> の commit 前変更", "pre_bash_commit_quality", _bash("echo x &>>f && git commit -m 'fix: x'")),
-    ("現状値 >&2 の commit 前変更", "pre_bash_commit_quality", _bash("echo x >&2 && git commit -m 'fix: x'")),
+    ("&> の commit 前変更", "pre_bash_commit_quality", _bash("echo x &>f && git commit -m 'fix: x'")),
+    ("> の commit 前変更", "pre_bash_commit_quality", _bash("echo x > f && git commit -m 'fix: x'")),
+    (">&file の commit 前変更", "pre_bash_commit_quality", _bash("echo x >&f && git commit -m 'fix: x'")),
+    (">&2x の commit 前変更", "pre_bash_commit_quality", _bash("echo x >&2x && git commit -m 'fix: x'")),
     ("wrapper 越しの ed", "bash_config_protection", _bash("timeout 5 ed ruff.toml")),
     # `touch` は内容を変えないが、保護対象を**空で新規作成**できる。空の
     # `.eslintrc` は ESLint の上位カスケード探索を止めるため実質的な無効化になる。
@@ -409,6 +412,10 @@ _ALLOWED_CASES = [
     ("対 保護名でない &>>", "bash_config_protection", _bash("echo x &>>notes.txt")),
     ("対 解析不能の後の >&2", "bash_config_protection", _bash("echo $'\\'' >&2")),
     ("対 &>> の commit 無し", "pre_bash_commit_quality", _bash("echo x &>>f")),
+    ("対 >&2 の commit 前", "pre_bash_commit_quality", _bash("echo x >&2 && git commit -m 'fix: x'")),
+    ("対 2>&1 の commit 前", "pre_bash_commit_quality", _bash("cmd 2>&1 && git commit -m 'fix: x'")),
+    ("対 >&- の commit 前", "pre_bash_commit_quality", _bash("cmd >&- && git commit -m 'fix: x'")),
+    ("対 1>&2 の commit 前", "pre_bash_commit_quality", _bash("cmd 1>&2 && git commit -m 'fix: x'")),
     ("対 touch app.py", "bash_config_protection", _bash("touch app.py")),
     ("対 touch README.md", "bash_config_protection", _bash("touch README.md")),
     ("対 repo 外の touch", "bash_config_protection", _bash("touch /tmp/ruff.toml")),

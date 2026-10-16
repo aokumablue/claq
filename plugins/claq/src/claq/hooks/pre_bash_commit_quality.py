@@ -370,6 +370,32 @@ _WORKTREE_MUTATING_EXECUTABLES = frozenset(
 # ここへ置くとフラグ判定に落ちて allow になるため、`ALWAYS_MUTATING_EDIT_EXECUTABLES` に置く。
 _INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl"})
 _MUTATING_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", "&>>", ">|", "1>", "2>", "1>>", "2>>", ">&"})
+# `>&` は直後が fd 番号（数字のみ）か `-` のとき、fd の複製・クローズでありファイルへ書かない。
+# それ以外（`>&file`）は `&>file` の別綴りで書き込み。`2>&1` も `2`・`>&`・`1` に割れる。
+_FD_DUP_OPERATOR = ">&"
+_FD_CLOSE_TARGET = "-"
+
+
+def _is_fd_duplication(segment: list[str], index: int) -> bool:
+    """`segment[index]` が fd の複製・クローズ（`>&2` / `>&-`）かを判定します。
+
+    直後のトークンだけを見る。`echo 1 >&f` の `1` のように別位置の数字は対象にしない。
+    全角数字などは fd 番号ではないため ASCII の数字に限る。
+
+    Args:
+        segment: `hook_common.split_segments` で得た 1 セグメント分のトークン列です。
+        index: 判定する `>&` のセグメント内位置です。
+
+    Returns:
+        `>&` で、直後が ASCII 数字のみのトークンか `-` なら True を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    if segment[index] != _FD_DUP_OPERATOR or index + 1 >= len(segment):
+        return False
+    target = segment[index + 1]
+    return target == _FD_CLOSE_TARGET or (target.isascii() and target.isdigit())
 
 
 def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
@@ -387,7 +413,9 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
     Raises:
         例外は発生しません。
     """
-    if any(token in _MUTATING_REDIRECT_OPERATORS for token in segment):
+    if any(
+        token in _MUTATING_REDIRECT_OPERATORS and not _is_fd_duplication(segment, i) for i, token in enumerate(segment)
+    ):
         return True
 
     for i, token in enumerate(segment):

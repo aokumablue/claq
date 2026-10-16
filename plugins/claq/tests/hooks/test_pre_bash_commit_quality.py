@@ -141,6 +141,33 @@ class TestCompoundCommitGuard:
             ("sed -i 's/a/b/' f.py && git commit -m x", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
             ("git reset --soft HEAD~1 && git commit -m x", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
             ("cp a.py b.py && git commit -am x", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            # ファイルへのリダイレクトは `>&` でも作業ツリーへの書き込み。
+            ("echo x >&f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >& f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x &>f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x &>>f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x > f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >> f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            # `2x` は数字のみではなくファイル名。数字を含んでも fd 複製とは読まない。
+            ("echo x >&2x && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            # 全角数字は fd 番号ではない。
+            ("echo x >&\uff12 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            # fd 複製の免除は `>&` だけ。他の変更演算子の直後が数字・`-` でもファイル名なので変更扱い。
+            ("echo x > 2 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x &> 2 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >> 1 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x &>> 1 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x 2> 1 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >| 3 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x > - && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            # 後続トークンが無い `>&` は書き込み先を判定できないため変更扱い。
+            ("echo x >& ; git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            # fd 複製の直後でない数字は巻き込まない: `>&` の次はファイル名 `f`。
+            ("echo 1 >&f 2 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            # fd 複製の後ろに別の書き込みがあれば、そちらで変更扱い。
+            ("cmd 2>&1 > f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            # 解析不能な入力でも `>&file` は変更扱い。
+            ("echo $'\\'' >&f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
         ],
     )
     def test_uninspectable_compounds_are_denied(self, command: str, expected_message: str) -> None:
@@ -162,6 +189,15 @@ class TestCompoundCommitGuard:
             "git commit -m x && rm tmp.py",
             # 引用文中の語は実行位置ではない。
             "git commit -m 'add . && commit'",
+            # fd の複製・クローズ（`>&` の直後が数字のみか `-`）は書き込みではない。
+            "cmd 2>&1 && git commit -m x",
+            "echo x >&2 && git commit -m a",
+            "echo x >& 2 && git commit -m a",
+            "cmd >&- && git commit -m x",
+            "cmd 1>&2 && git commit -m x",
+            "cmd 2>&1 | cat && git commit -m x",
+            "echo 1 >&2 && git commit -m x",
+            "echo $'\\'' >&2 && git commit -m a",
         ],
     )
     def test_inspectable_commands_pass(self, command: str) -> None:
