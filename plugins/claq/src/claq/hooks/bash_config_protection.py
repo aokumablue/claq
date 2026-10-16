@@ -28,6 +28,9 @@ import するのは、Write を deny する綴りと Bash を deny する綴り�
         - `ed`/`red`/`ex`/`sponge`（`hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES`）の引数
         - `touch` の引数、削除・移動・権限変更コマンドの引数
         - `cp`/`mv`/`install` の最終引数、`ln` の最終引数、`dd of=<path>`
+    ``.git/config`` は `config_protection` では書込み内容の兆候（``core.hooksPath`` 等）で判定するが、
+    Bash の書込み本文は解釈できないため、書き込み先位置に現れた時点で内容を問わず deny する
+    （``git config <key> <value>`` は書き込み先トークンを持たないので影響を受けない）。
     書き込み先ヒットがあった場合のみリポジトリルートを解決し、書き込み先を cwd 基準で
     解決して**そのルート配下にある場合のみ** deny する（basename だけで判定すると別
     リポジトリの同名ファイルを誤検出する）。**リポジトリルートが決定できない場合は allow**。
@@ -55,6 +58,7 @@ from claq.hooks.config_protection import (
     CONDITIONALLY_PROTECTED_FILES_FOLDED,
     PROTECTED_FILES_FOLDED,
     blocked_message_for_file,
+    conditionally_protected_path,
     protected_path_segment,
 )
 from claq.hooks.hook_common import (
@@ -159,6 +163,9 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILE
 # 注入の永続化経路になる。保護の範囲を「Bash からの直接追記の拒否」に限るため、
 # `config_protection` の保護 path（Edit/Write にも効く）へは足さず本モジュールに閉じる。
 _HOME_LOG_PATH_SEGMENTS = ((".claq", "logs"),)
+
+# `conditionally_protected_path` が返す ``.git/config`` の表示名。専用のブロック文言を選ぶ鍵。
+_GIT_CONFIG_DISPLAY_NAME = ".git/config"
 
 
 def _find_home_log_directory_match(token: str) -> str | None:
@@ -299,9 +306,9 @@ def _protected_target(token: str) -> str | None:
         token: 検査対象のトークン（パスの可能性がある）。
 
     Returns:
-        保護対象の表示名。basename 一致ならそのファイル名、path 一致なら
-        末尾に ``/`` を付けた保護 path（例 ``.git/hooks/``）。
-        該当しなければ None。
+        保護対象の表示名。basename 一致ならそのファイル名、ディレクトリの path 一致なら
+        末尾に ``/`` を付けた保護 path（例 ``.git/hooks/``）、内容次第で保護するファイルの
+        path 一致なら ``.git/config``。該当しなければ None。
 
     Raises:
         例外は発生しません。
@@ -313,7 +320,12 @@ def _protected_target(token: str) -> str | None:
     if normalize_protected_name(name) in _ALL_PROTECTED_BASENAMES:
         return name
     segment = protected_path_segment(token)
-    return f"{segment}/" if segment is not None else None
+    if segment is not None:
+        return f"{segment}/"
+    # ``.git/config`` は Edit/Write なら内容の兆候で判定するが、Bash の書込みは内容を解釈
+    # できない（``printf … >> .git/config`` の本文は別のトークンで、素通りの余地が残る）ため、
+    # 書込み先位置に現れた時点で deny する。
+    return conditionally_protected_path(token)
 
 
 def _non_option_args(args: list[str]) -> list[str]:
@@ -650,6 +662,49 @@ def _blocked_home_log_message(display_name: str) -> str:
     )
 
 
+def _blocked_git_config_message(display_name: str) -> str:
+    """``.git/config`` への Bash 経由の書込みブロック時の理由メッセージを生成する。
+
+    `blocked_message_for_file` は linter 設定向けの文言で、``.git/config`` の保護理由
+    （``core.hooksPath`` 等でフックを無効化できること）に合わないため専用の文言を持つ。
+
+    Args:
+        display_name: ブロックされたパスの表示名。
+
+    Returns:
+        ブロック理由の文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        f"[Hook] BLOCKED: Writing to {display_name} via Bash is not allowed. "
+        "The file can disable git hooks (core.hooksPath, include.path, alias) and the "
+        "written content cannot be inspected here. Change ordinary settings with "
+        "`git config <key> <value>` instead. If this write is genuinely necessary, ask the "
+        "user to make it — do not disable the protection hook yourself."
+    )
+
+
+def _blocked_message(found: str) -> str:
+    """保護対象の表示名に対応するブロック理由を選ぶ。
+
+    Args:
+        found: `find_protected_write` が返した表示名。
+
+    Returns:
+        ブロック理由の文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    if found.startswith("~/"):
+        return _blocked_home_log_message(found)
+    if found == _GIT_CONFIG_DISPLAY_NAME:
+        return _blocked_git_config_message(found)
+    return blocked_message_for_file(found)
+
+
 def main() -> int:
     """Bash コマンドによる保護対象設定ファイルへの直接書き込みを検知してブロックする。
 
@@ -693,8 +748,7 @@ def main() -> int:
         except ScanBudgetExceededError:
             return emit_block_output(_TOKEN_BUDGET_MESSAGE)
         if found:
-            message = _blocked_home_log_message(found) if found.startswith("~/") else blocked_message_for_file(found)
-            return emit_block_output(message)
+            return emit_block_output(_blocked_message(found))
     return 0
 
 

@@ -87,7 +87,7 @@ def test_config_protection_blocks_commit_check_definitions(
 
 @pytest.mark.parametrize(
     "file_path",
-    ["src/hooks/pre-commit", ".git/config", "docs/.git-hooks-notes.md", "hooks/pre-commit"],
+    ["src/hooks/pre-commit", ".git/info/exclude", "docs/.git-hooks-notes.md", "hooks/pre-commit"],
     ids=["same-basename-elsewhere", "git-dir-but-not-hooks", "prose", "hooks-without-git"],
 )
 def test_config_protection_allows_lookalike_paths(

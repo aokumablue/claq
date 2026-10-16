@@ -199,6 +199,40 @@ _SENSITIVE_CONFIG_KEY_PREFIXES = (
 )
 
 
+def _config_text_pattern_for_prefix(prefix: str) -> str:
+    """config key の前置を、config ファイル本文（INI 形式）上の照合パターンへ変換する。
+
+    ``section.key`` 形の前置は key 名の行（行頭、または同じ行の ``]`` の直後）で、
+    ``section.`` 形の前置はセクション見出しで照合する。本文上では key が見出しとは別行に
+    あり、Edit が既存セクションの内側だけを書き換えることもあるため、見出しに依存せず key
+    名だけで照合できるものは key 名で見る。
+
+    Args:
+        prefix: `_SENSITIVE_CONFIG_KEY_PREFIXES` の要素（小文字）。
+
+    Returns:
+        正規表現の断片。
+
+    Raises:
+        例外は発生しません。
+    """
+    section, _, key = prefix.partition(".")
+    if key:
+        return rf"(?:^|\])[ \t]*{re.escape(key)}[ \t]*="
+    return rf"\[[ \t]*{re.escape(section)}"
+
+
+# config ファイルの本文（``.git/config`` への Edit/Write の内容）に、`_SENSITIVE_CONFIG_KEY_PREFIXES`
+# の key が現れるかを見る正規表現。`config_protection` が ``.git/config`` への書込みを条件付きで
+# 保護する際の兆候として使う。key 集合を `git config` 経由の検出と 1 本にするため、前置から導く。
+# 既存セクションの内側への追記のうちセクション見出し単位でしか照合できないもの（``[alias]``
+# 内の ``ci = commit --no-verify``）は、見出しが断片に含まれない限り検出しない。
+GIT_CONFIG_TEXT_SIGNAL_RE = re.compile(
+    "|".join(_config_text_pattern_for_prefix(prefix) for prefix in _SENSITIVE_CONFIG_KEY_PREFIXES),
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
 class GitInvocation(NamedTuple):
     """git 起動トークン以降を解析した結果。
 

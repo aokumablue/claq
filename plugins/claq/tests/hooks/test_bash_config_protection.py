@@ -517,7 +517,7 @@ class TestPathProtectionPropagates:
         "command",
         [
             "echo x > src/hooks/pre-commit",
-            "echo x > .git/config",
+            "echo x > .git/info/exclude",
             "echo x > README.md",
             "echo x > hooks/pre-commit",
         ],
@@ -599,10 +599,10 @@ class TestModeChangeIsBlocked:
             "chmod +x scripts/deploy.sh",
             "chmod 644 README.md",
             "chmod -x src/hooks/pre-commit",
-            "chown me:me .git/config",
+            "chown me:me .git/info/exclude",
             "echo chmod -x .git/hooks/pre-commit",
         ],
-        ids=["script", "readme", "same-basename-elsewhere", "git-config", "not-executed"],
+        ids=["script", "readme", "same-basename-elsewhere", "git-info", "not-executed"],
     )
     def test_mode_change_on_other_targets_is_allowed(self, command: str) -> None:
         """保護対象でないパスへの権限変更は通す。"""

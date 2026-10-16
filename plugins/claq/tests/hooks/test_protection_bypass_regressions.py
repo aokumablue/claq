@@ -901,6 +901,9 @@ _EXPECTED_TOUCH_COMMANDS = frozenset({"touch"})
 # `config_protection._PROTECTED_PATH_SEGMENTS` の期待内容（層2）。
 _EXPECTED_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), ("hooks", "hooks.json"))
 
+# `config_protection._CONDITIONALLY_PROTECTED_PATH_SEGMENTS` の期待内容（層2）。
+_EXPECTED_CONDITIONALLY_PROTECTED_PATH_SEGMENTS = ((".git", "config"),)
+
 
 def _folded(names: frozenset[str]) -> frozenset[str]:
     """保護名の畳み込みを期待値側でも同じ規則で行う。
@@ -1079,6 +1082,11 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "config_protection._PROTECTED_PATH_SEGMENTS_FOLDED": tuple(
         tuple(hook_common.normalize_protected_name(part) for part in segments)
         for segments in _EXPECTED_PROTECTED_PATH_SEGMENTS
+    ),
+    "config_protection._CONDITIONALLY_PROTECTED_PATH_SEGMENTS": _EXPECTED_CONDITIONALLY_PROTECTED_PATH_SEGMENTS,
+    "config_protection._CONDITIONALLY_PROTECTED_PATH_SEGMENTS_FOLDED": tuple(
+        tuple(hook_common.normalize_protected_name(part) for part in segments)
+        for segments in _EXPECTED_CONDITIONALLY_PROTECTED_PATH_SEGMENTS
     ),
     "config_protection._LINT_SECTION_HEADERS": _EXPECTED_LINT_SECTION_HEADERS,
     "config_protection._LINT_KEYS": _EXPECTED_LINT_KEYS,
@@ -1387,6 +1395,11 @@ _VOCABULARY_WRITE_CASES = (
         lambda item: _write("/".join(item) + "/pre-commit"),
         _write("docs/hooks/pre-commit"),
     ),
+    (
+        "config_protection._CONDITIONALLY_PROTECTED_PATH_SEGMENTS",
+        lambda item: _write_content("/".join(item), "[core]\n\thooksPath = /dev/null\n"),
+        _write_content("docs/config", "[core]\n\thooksPath = /dev/null\n"),
+    ),
 )
 
 # 層1 をこのファイルの別テストが担っている語彙と、その担い手。
@@ -1403,6 +1416,7 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
     "config_protection.PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
     "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
     "config_protection._PROTECTED_PATH_SEGMENTS_FOLDED": "_BLOCKED_CASES の保護 path の大文字（Bash）",
+    "config_protection._CONDITIONALLY_PROTECTED_PATH_SEGMENTS_FOLDED": "test_nested_git_dir_is_matched_case_insensitively (test_git_config_protection)",
     "config_protection._LINT_SECTION_HEADERS": "test_every_lint_section_header_is_detected",
     "config_protection._LINT_KEYS": "test_every_lint_key_is_detected",
     "config_protection._SETTINGS_GUARD_KEYS": "test_every_conditionally_protected_file_denies_only_lint_signals の settings.json / settings.local.json",
