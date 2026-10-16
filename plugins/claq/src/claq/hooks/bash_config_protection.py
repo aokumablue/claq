@@ -63,17 +63,19 @@ from claq.hooks.config_protection import (
 )
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
-    MAX_COMMAND_TOKENS,
     basename,
-    command_dialect_variants,
-    command_exceeds_scan_budget,
     emit_block_output,
-    extract_shell_wrapper_command,
     is_inplace_edit_flag,
     normalize_executable_name,
     normalize_protected_name,
     resolve_effective_target,
     resolve_repo_root,
+)
+from claq.hooks.shell_tokens import (
+    MAX_COMMAND_TOKENS,
+    command_dialect_variants,
+    command_exceeds_scan_budget,
+    extract_shell_wrapper_command,
     split_segments,
     strip_data_heredoc_bodies,
     tokenize,

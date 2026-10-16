@@ -23,7 +23,7 @@ import pytest
 from claq.hooks import bash_config_protection, pre_bash_commit_quality
 from claq.hooks.bash_config_protection import _raw_text_write_risk, find_protected_write
 from claq.hooks.block_no_verify import has_bypass_flag
-from claq.hooks.hook_common import command_dialect_variants
+from claq.hooks.shell_tokens import command_dialect_variants
 
 
 @pytest.fixture(autouse=True)

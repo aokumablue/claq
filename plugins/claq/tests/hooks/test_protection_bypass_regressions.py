@@ -29,6 +29,7 @@ from claq.hooks import (
     config_protection,
     hook_common,
     pre_bash_commit_quality,
+    shell_tokens,
     stdin_io,
 )
 
@@ -1120,12 +1121,13 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "config_protection._LINT_KEYS": _EXPECTED_LINT_KEYS,
     "config_protection._PACKAGE_JSON_LINT_KEYS": ("eslintConfig", "prettier"),
     "config_protection._TOX_COMMAND_KEYS": ("commands", "commands_pre", "commands_post"),
+    # --- shell_tokens ---
+    "shell_tokens._SHELL_SEPARATORS": frozenset({"&&", "||", ";", "|", "&", "(", ")"}),
+    "shell_tokens.SHELL_WRAPPER_EXECUTABLES": frozenset({"sh", "bash", "zsh", "dash"}),
+    "shell_tokens._BODY_EXECUTING_BUILTINS": frozenset({".", "source", "eval"}),
+    "shell_tokens._COMMENT_PRECEDING_CHARS": frozenset(" \t\n;|&()<>"),
+    "shell_tokens._HEREDOC_CONTINUATION_SUFFIXES": ("\\", "|", "&"),
     # --- hook_common ---
-    "hook_common._SHELL_SEPARATORS": frozenset({"&&", "||", ";", "|", "&", "(", ")"}),
-    "hook_common.SHELL_WRAPPER_EXECUTABLES": frozenset({"sh", "bash", "zsh", "dash"}),
-    "hook_common._BODY_EXECUTING_BUILTINS": frozenset({".", "source", "eval"}),
-    "hook_common._COMMENT_PRECEDING_CHARS": frozenset(" \t\n;|&()<>"),
-    "hook_common._HEREDOC_CONTINUATION_SUFFIXES": ("\\", "|", "&"),
     "hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES": frozenset({"ed", "red", "ex", "sponge"}),
     # --- pre_bash_commit_quality ---
     "pre_bash_commit_quality._INDEX_MUTATING_GIT_SUBCOMMANDS": frozenset(
@@ -1346,17 +1348,17 @@ _VOCABULARY_DENY_ALLOW_CASES = (
         "sudo {item} root rm ruff.toml",
         "echo sudo {item} root rm ruff.toml",
     ),
-    # --- hook_common の共有語彙 ---
+    # --- hook_common / shell_tokens の共有語彙 ---
     ("hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES", "bash_config_protection", "{item} ruff.toml", "{item} app.py"),
-    ("hook_common.SHELL_WRAPPER_EXECUTABLES", "block_no_verify", "{item} -c '" + _NO_VERIFY + "'", "{item} -c 'git commit -m x'"),
+    ("shell_tokens.SHELL_WRAPPER_EXECUTABLES", "block_no_verify", "{item} -c '" + _NO_VERIFY + "'", "{item} -c 'git commit -m x'"),
     (
-        "hook_common._BODY_EXECUTING_BUILTINS",
+        "shell_tokens._BODY_EXECUTING_BUILTINS",
         "block_no_verify",
         "{item} /dev/stdin <<'EOF'\n" + _NO_VERIFY + "\nEOF",
         "cat /dev/stdin <<'EOF'\n" + _NO_VERIFY + "\nEOF",
     ),
     # 区切りが効かないとセグメントが融合し、後続コマンドが実行位置に来ない。
-    ("hook_common._SHELL_SEPARATORS", "bash_config_protection", "cat notes.txt {item} rm ruff.toml", "cat notes.txt {item} rm app.py"),
+    ("shell_tokens._SHELL_SEPARATORS", "bash_config_protection", "cat notes.txt {item} rm ruff.toml", "cat notes.txt {item} rm app.py"),
     # --- block_no_verify の config 注入経路 ---
     ("block_no_verify._SENSITIVE_CONFIG_KEY_PREFIXES", "block_no_verify", "git -c {item}=x commit -m y", "git -c user.name=x commit -m y"),
     ("block_no_verify._GIT_CONFIG_INJECTION_ENV_NAMES", "block_no_verify", "{item}=x git commit -m y", "SOME_VAR=x git commit -m y"),
@@ -1398,7 +1400,7 @@ _VOCABULARY_ALLOW_ONLY_CASES = (
     ("block_no_verify._GIT_CONFIG_READ_ONLY_FLAGS", "block_no_verify", "git config {item} core.hooksPath", "git config --add core.hooksPath x"),
     ("block_no_verify._GIT_CONFIG_NEW_READ_OPS", "block_no_verify", "git config {item} core.hooksPath", "git config set core.hooksPath x"),
     # 行コメントの開始条件。直前文字が語彙に無ければ `#` は語の一部なので deny。
-    ("hook_common._COMMENT_PRECEDING_CHARS", "block_no_verify", "echo ok{item}# " + _NO_VERIFY, "echo okX# " + _NO_VERIFY),
+    ("shell_tokens._COMMENT_PRECEDING_CHARS", "block_no_verify", "echo ok{item}# " + _NO_VERIFY, "echo okX# " + _NO_VERIFY),
 )
 
 # 層1（Write 系 payload）: (語彙の完全修飾名, deny payload の組み立て, allow payload)。
@@ -1619,7 +1621,7 @@ def test_every_mutating_redirect_operator_marks_the_segment(operator: str) -> No
 
 
 @pytest.mark.parametrize(
-    "suffix", _EXPECTED_VOCABULARIES["hook_common._HEREDOC_CONTINUATION_SUFFIXES"]
+    "suffix", _EXPECTED_VOCABULARIES["shell_tokens._HEREDOC_CONTINUATION_SUFFIXES"]
 )
 def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     """`_HEREDOC_CONTINUATION_SUFFIXES` の全要素が本文の剥がしを止めること（層1・単体）。
@@ -1638,8 +1640,8 @@ def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     body = _NO_VERIFY
     kept = f"cat <<'EOF' {suffix}\n{body}\nEOF"
     stripped = f"cat <<'EOF'\n{body}\nEOF"
-    assert hook_common.strip_data_heredoc_bodies(kept) == kept
-    assert hook_common.strip_data_heredoc_bodies(stripped) != stripped
+    assert shell_tokens.strip_data_heredoc_bodies(kept) == kept
+    assert shell_tokens.strip_data_heredoc_bodies(stripped) != stripped
 
 
 @pytest.mark.parametrize(
@@ -1693,7 +1695,7 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
     unit_covered = {
         "bash_config_protection._REDIRECT_OPERATORS",
         "pre_bash_commit_quality._MUTATING_REDIRECT_OPERATORS",
-        "hook_common._HEREDOC_CONTINUATION_SUFFIXES",
+        "shell_tokens._HEREDOC_CONTINUATION_SUFFIXES",
         "commit_quality_scanner._LINTABLE_SUFFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",
         "commit_quality_scanner._MINIFIED_SUFFIXES",
@@ -1762,7 +1764,7 @@ def test_huge_single_token_is_blocked_before_tokenizing(monkeypatch: pytest.Monk
     素通りすると、実測 12.71 秒（timeout 15 秒に対し余裕 15%）かかる。host が
     kill した hook は exit code を返さないため silent fail-open になる。
     """
-    from claq.hooks.hook_common import MAX_COMMAND_BYTES, command_exceeds_scan_budget
+    from claq.hooks.shell_tokens import MAX_COMMAND_BYTES, command_exceeds_scan_budget
 
     huge = "echo " + "A" * (MAX_COMMAND_BYTES + 1)
 
@@ -1778,7 +1780,7 @@ def test_scan_budget_is_measured_in_bytes_not_characters() -> None:
     文字数で数えると、日本語 1 文字 = 3 バイトの入力が上限の 3 倍まで通り、
     走査コストは 9 倍になる。
     """
-    from claq.hooks.hook_common import MAX_COMMAND_BYTES, command_exceeds_scan_budget
+    from claq.hooks.shell_tokens import MAX_COMMAND_BYTES, command_exceeds_scan_budget
 
     multibyte = "あ" * (MAX_COMMAND_BYTES // 3 + 1)
 
@@ -1796,7 +1798,7 @@ def test_oversized_command_is_blocked_by_bash_config_protection(
     （15 秒）で host に kill される。kill された hook は exit code を返さないため
     silent fail-open になる。走査前に弾けば同じ入力が即座に exit 2 になる。
     """
-    from claq.hooks.hook_common import MAX_COMMAND_TOKENS
+    from claq.hooks.shell_tokens import MAX_COMMAND_TOKENS
 
     oversized = "echo " + "a " * (MAX_COMMAND_TOKENS + 1)
 
@@ -1812,7 +1814,7 @@ def test_oversized_command_inside_sh_c_is_blocked_by_bash_config_protection(
     入口だけに置いた予算は、外側が数トークンしか無いネスト payload を通し、再帰先が
     無予算で走る。
     """
-    from claq.hooks.hook_common import MAX_COMMAND_TOKENS
+    from claq.hooks.shell_tokens import MAX_COMMAND_TOKENS
 
     inner = "echo " + "a " * (MAX_COMMAND_TOKENS + 1)
 

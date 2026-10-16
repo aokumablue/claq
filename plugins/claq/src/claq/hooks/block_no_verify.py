@@ -38,7 +38,7 @@ heredoc 本文:
 
 解析できない入力（クォート不整合）:
     ``echo $'\\'';git commit`` のように bash では有効でも ``shlex`` が解析できない入力は、
-    区切り演算子を割った空白分割（`hook_common.tokenize_with_status`）で走査する。語に
+    区切り演算子を割った空白分割（`shell_tokens.tokenize_with_status`）で走査する。語に
     引用符が残るため（``"git" commit "--no-verify"``）それでも読めない形が残る。この
     **解析できなかったときに限り**、生文字列に ``--no-verify`` / ``hooksPath`` が見えたら
     ブロックする。解析できた入力には当てない（``grep -- '--no-verify' README.md`` を通す）。
@@ -87,12 +87,14 @@ import re
 from typing import NamedTuple
 
 from claq.hooks.hook_common import (
+    emit_block_output,
+    is_git_executable_token,
+)
+from claq.hooks.shell_tokens import (
     MAX_COMMAND_TOKENS,
     command_dialect_variants,
     command_exceeds_scan_budget,
-    emit_block_output,
     extract_shell_wrapper_command,
-    is_git_executable_token,
     split_segments,
     strip_data_heredoc_bodies,
     tokenize_with_status,

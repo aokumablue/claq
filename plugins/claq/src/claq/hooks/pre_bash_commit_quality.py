@@ -6,7 +6,7 @@ pre:bash で `git commit` を検出したときだけ、lint や簡易静的チ�
 問題が見つかった場合はコミットを止め、それ以外は入力をそのまま通過させます。
 
 commit 検出は `block_no_verify` と共有する区切り記号対応トークナイザ
-（`hook_common.tokenize` / `split_segments`）で行い、`git` のグローバルオプションは
+（`shell_tokens.tokenize` / `split_segments`）で行い、`git` のグローバルオプションは
 値の有無・既知/未知を問わず読み飛ばします。`git commit -a` / `--all` / 結合短形式
 （`-am`）では、未ステージ変更ファイルを**作業ツリーから**読んでスキャン対象へ
 加えます（`-a` は作業ツリーの内容をコミットするため）。ステージ済みファイルは
@@ -17,7 +17,7 @@ INDEX（`git show :path`）から読みます。
 詳細は `commit_quality_scanner` のモジュール docstring）。
 
 データとして書かれた heredoc 本文は `evaluate()` のループで 1 回だけ
-`hook_common.strip_data_heredoc_bodies` で落とし、下流の commit 判定・compound risk
+`shell_tokens.strip_data_heredoc_bodies` で落とし、下流の commit 判定・compound risk
 判定・確定後の検査が必ず同じ文字列を見るようにします。
 
 非目標: ラッパースクリプトやシェルエイリアス経由の `git commit` 呼び出し検出、
@@ -42,13 +42,15 @@ from claq.hooks.commit_quality_scanner import (
 )
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
-    MAX_COMMAND_TOKENS,
-    command_dialect_variants,
-    command_exceeds_scan_budget,
     is_git_executable_token,
     is_inplace_edit_flag,
     normalize_executable_name,
     resolve_repo_root,
+)
+from claq.hooks.shell_tokens import (
+    MAX_COMMAND_TOKENS,
+    command_dialect_variants,
+    command_exceeds_scan_budget,
     split_segments,
     strip_data_heredoc_bodies,
     tokenize,
@@ -122,7 +124,7 @@ _MUTATION_BEFORE_COMMIT_MESSAGE = (
     "`git add` in a separate tool call, then commit."
 )
 
-# 走査コストが hooks.json の timeout を超える入力（`hook_common.MAX_COMMAND_TOKENS`）。
+# 走査コストが hooks.json の timeout を超える入力（`shell_tokens.MAX_COMMAND_TOKENS`）。
 _TOKEN_BUDGET_MESSAGE = (
     f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_TOKENS} shell tokens for pre:bash-commit-quality. "
     "A command this large cannot be inspected within the hook timeout, and an un-inspected "
@@ -253,7 +255,7 @@ def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
     等の値トークンで走査が打ち切られて検出漏れになるのを避け、過剰検出側へ倒す。
 
     Args:
-        segment: `hook_common.tokenize` + `split_segments` で得た 1 セグメント分のトークン列です。
+        segment: `shell_tokens.tokenize` + `split_segments` で得た 1 セグメント分のトークン列です。
 
     Returns:
         commit 呼び出しの引数トークンリスト。見つからなければ None を返します。
@@ -382,7 +384,7 @@ def _is_fd_duplication(segment: list[str], index: int) -> bool:
     全角数字などは fd 番号ではないため ASCII の数字に限る。
 
     Args:
-        segment: `hook_common.split_segments` で得た 1 セグメント分のトークン列です。
+        segment: `shell_tokens.split_segments` で得た 1 セグメント分のトークン列です。
         index: 判定する `>&` のセグメント内位置です。
 
     Returns:
@@ -404,7 +406,7 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
     誤通過のコスト（未検査の内容が commit される）より小さい。
 
     Args:
-        segment: `hook_common.split_segments` で得た 1 セグメント分のトークン列です。
+        segment: `shell_tokens.split_segments` で得た 1 セグメント分のトークン列です。
 
     Returns:
         変更しうるなら True を返します。

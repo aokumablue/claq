@@ -103,21 +103,21 @@ def test_git_line_continuation_is_still_detected_as_commit() -> None:
 
 def test_single_quoted_backslash_newline_is_not_a_continuation() -> None:
     """単一クォート内の ``\\`` + 改行は行継続ではなくリテラルであること。"""
-    from claq.hooks.hook_common import _strip_line_continuations
+    from claq.hooks.shell_tokens import _strip_line_continuations
 
     assert _strip_line_continuations("echo 'a \\\nb'") == "echo 'a \\\nb'"
 
 
 def test_double_quoted_backslash_newline_is_a_continuation() -> None:
     """二重クォート内の ``\\`` + 改行は POSIX では行継続であること。"""
-    from claq.hooks.hook_common import _strip_line_continuations
+    from claq.hooks.shell_tokens import _strip_line_continuations
 
     assert _strip_line_continuations('echo "a \\\nb"') == 'echo "a b"'
 
 
 def test_command_without_continuation_is_returned_unchanged() -> None:
     """行継続を含まない入力は同一オブジェクトを素通しすること（早期 return）。"""
-    from claq.hooks.hook_common import _strip_line_continuations
+    from claq.hooks.shell_tokens import _strip_line_continuations
 
     command = "git commit -m x"
     assert _strip_line_continuations(command) is command
@@ -125,14 +125,14 @@ def test_command_without_continuation_is_returned_unchanged() -> None:
 
 def test_trailing_backslash_at_end_of_input_is_preserved() -> None:
     """末尾の孤立した ``\\`` は続く文字が無いのでそのまま残ること。"""
-    from claq.hooks.hook_common import _strip_line_continuations
+    from claq.hooks.shell_tokens import _strip_line_continuations
 
     assert _strip_line_continuations("echo a \\\nb \\") == "echo a b \\"
 
 
 def test_escaped_non_newline_pair_is_preserved() -> None:
     """``\\`` + 改行以外のエスケープ対はそのまま残ること。"""
-    from claq.hooks.hook_common import _strip_line_continuations
+    from claq.hooks.shell_tokens import _strip_line_continuations
 
     assert _strip_line_continuations("echo a\\ b \\\nc") == "echo a\\ b c"
 
@@ -153,8 +153,8 @@ def test_git_global_options_do_not_hide_index_mutation(command: str, label: str)
     その**値**（``.`` / ``a=b`` / ``.git``）がサブコマンドと読まれて
     `add` を見失い、未検査の内容がコミットされる経路が開く。
     """
-    from claq.hooks.hook_common import tokenize
     from claq.hooks.pre_bash_commit_quality import _segment_mutates_worktree_or_index
+    from claq.hooks.shell_tokens import tokenize
 
     segment = [token for token in tokenize(command.split("&&")[0]) if token]
     assert _segment_mutates_worktree_or_index(segment) is True, label
@@ -191,7 +191,7 @@ def test_oversized_command_is_blocked_instead_of_timing_out() -> None:
     """
     import time
 
-    from claq.hooks.hook_common import MAX_COMMAND_TOKENS
+    from claq.hooks.shell_tokens import MAX_COMMAND_TOKENS
 
     command = "git " * (MAX_COMMAND_TOKENS * 5) + "&& git commit --no-verify -m x"
     for module in ("block_no_verify", "pre_bash_commit_quality"):
@@ -202,7 +202,7 @@ def test_oversized_command_is_blocked_instead_of_timing_out() -> None:
 
 def test_command_at_token_budget_is_still_inspected() -> None:
     """予算内のコマンドは中身で判定されること（予算が過剰に効かない）。"""
-    from claq.hooks.hook_common import MAX_COMMAND_TOKENS, command_exceeds_scan_budget
+    from claq.hooks.shell_tokens import MAX_COMMAND_TOKENS, command_exceeds_scan_budget
 
     within = "git status " * 100
     assert command_exceeds_scan_budget(within) is False
@@ -263,7 +263,7 @@ def test_token_budget_covers_the_sh_c_recursion_boundary() -> None:
     """
     import time
 
-    from claq.hooks.hook_common import MAX_COMMAND_TOKENS
+    from claq.hooks.shell_tokens import MAX_COMMAND_TOKENS
 
     inner = "git " * (MAX_COMMAND_TOKENS * 5) + "&& git commit --no-verify -m x"
     started = time.perf_counter()
