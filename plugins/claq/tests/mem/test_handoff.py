@@ -215,7 +215,7 @@ class TestCompactionCannotReassembleScaffoldTags:
 
     塞ぐ場所は ``strip_tags`` の内側とする。圧縮の後にもう一度無害化を掛ける
     形でも handoff だけは守れるが、注入側や知識カードは守れない
-    （``mem/cli`` は ``strip_tags`` を単独で呼ぶ）。
+    （``mem/cmd_context`` は ``strip_tags`` を単独で呼ぶ）。
     """
 
     def test_filler_removal_does_not_forge_a_scaffold_tag(self, tmp_path: Path) -> None:
@@ -930,7 +930,7 @@ class TestSpeechBlockAllowlist:
 class TestControlCharactersAreRemovedFromTheHandoff:
     """書き込み側（自由文・パス・ツール名）でも C0 制御文字と DEL を落とす。
 
-    読み出し側（``mem/cli._handoff_section``）が守っていても、DB に制御文字入りの
+    読み出し側（``mem/cmd_context._handoff_section``）が守っていても、DB に制御文字入りの
     本文を永続化する理由は無い。タブと改行は正当な引き継ぎが使うので残す。
     """
 

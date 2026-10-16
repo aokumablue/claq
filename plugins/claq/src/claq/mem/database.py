@@ -221,11 +221,11 @@ class Database:
 
         ``status`` は衝突時も ``excluded.status`` で上書きする。**これは意図的で
         あり、ここへ「既存 status を維持する」ガードを足してはならない** ——
-        ``cli._handle_forget`` が ``archived`` を書き込むのに本メソッドを使って
+        ``cmd_knowledge._handle_forget`` が ``archived`` を書き込むのに本メソッドを使って
         おり、維持ガードを入れると forget が黙って効かなくなる。
 
         「人間が promote した active カードを agent の再 learn が pending へ
-        戻す」問題は、本メソッドではなく ``cli._handle_learn`` で塞ぐ。
+        戻す」問題は、本メソッドではなく ``cmd_knowledge._handle_learn`` で塞ぐ。
         DB 層は汎用の upsert のままにし、誰の書込みを拒むかという判断は
         経路ごとに持たせる。
 

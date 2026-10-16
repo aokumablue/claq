@@ -66,7 +66,7 @@
 docs/adr/untrusted-input-prompt-boundary.md が「中身を残すべき用途と捨てるべき用途を
 同じ関数に同居させない」と定めている）。escape の語彙にだけ足場タグを含めるのはこの
 合流に当たらない — escape はどちらの用途でも中身を残すのでこの衝突が起きない。実際に
-注入側（``mem/cli._handoff_section``）は ``strip_tags`` しか掛けず、足場タグを倒す
+注入側（``mem/cmd_context._handoff_section``）は ``strip_tags`` しか掛けず、足場タグを倒す
 手段が他に無い。
 """
 
@@ -385,7 +385,7 @@ def strip_tags(text: str) -> str:
     - 秘密がタグで分断されている: 本文ごと ``[REDACTED]`` にする。断片を救う
       利得より、未マスクの鍵が ``sessions.handoff`` へ永続化され、あるいは
       知識カードとして以後の全 SessionStart へ注入される損失のほうが大きい
-      （``mem/cli._format_injected_item`` は ``strip_tags`` の後に ``redact``
+      （``mem/cmd_context._format_injected_item`` は ``strip_tags`` の後に ``redact``
       を掛けない。書き込み時の ``redact_knowledge_text`` も分断された鍵は
       見えないため、ここが最後の関門になる）。
     - 後段の削除変換でタグを組み上げ直せる: ``&`` と ``<`` を 1 つ残らず倒す。

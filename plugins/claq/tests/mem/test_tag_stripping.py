@@ -343,7 +343,7 @@ class TestTagSplitSecretFailsClosed:
     クラスの外）。孤立タグを**除去**する方式で成立する「再結合して
     から redact」という前提は、escape では成立しない。
 
-    注入側 ``mem/cli._format_injected_item`` は ``strip_tags`` の後に ``redact``
+    注入側 ``mem/cmd_context._format_injected_item`` は ``strip_tags`` の後に ``redact``
     を掛けず、書き込み時の ``redact_knowledge_text`` も分断された鍵は見えない。
     したがってここが最後の関門になる。
     """
@@ -476,7 +476,7 @@ class TestNeutralizationIsInjective:
 class TestScaffoldTagsAreNeutralizedButNotRemoved:
     """足場タグは escape の語彙に含めるが、中身は捨てない。
 
-    注入側 ``mem/cli._handoff_section`` は ``strip_tags`` しか掛けないため、
+    注入側 ``mem/cmd_context._handoff_section`` は ``strip_tags`` しか掛けないため、
     語彙に無い足場タグは ``<claq-memory>`` ブロックの内側へ生のまま入る。
     中身ごと除去する規則（``lib/harness``）との合流は docs/adr/untrusted-input-prompt-boundary.md が却下している
     が、却下理由は「中身を残すべき用途と捨てるべき用途の同居」であり、escape は
