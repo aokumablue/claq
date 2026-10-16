@@ -1515,7 +1515,7 @@ def test_get_unstaged_modified_files_returns_success_output(monkeypatch: pytest.
     """`git diff HEAD` の成功出力からファイル一覧を返すこと。"""
 
     def fake_run(command: list[str], **kwargs: object):
-        assert command == ["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"]
+        assert command == ["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMRT"]
         # `_git_name_only` は `subprocess_utils.run_text` 経由で呼ぶため、
         # `encoding` / `errors` / `env` / `input` も渡ってくる。個別に受けると
         # 呼び出し側の引数が増えるたびにテストが壊れるので **kwargs で受ける。
@@ -1616,8 +1616,8 @@ def test_get_worktree_file_content_reads_real_file(tmp_path: Path) -> None:
     assert content == "value = 1\n"
 
 
-def test_get_worktree_file_content_rejects_symlink_escaping_repo_root(tmp_path: Path) -> None:
-    """repo 外の実体を指すシンボリックリンクは None を返すこと（realpath 包含チェック）。
+def test_get_worktree_file_content_does_not_read_symlink_target_outside_repo_root(tmp_path: Path) -> None:
+    """repo 外の実体を指すシンボリックリンクは先を辿らず link 先文字列だけを返すこと。
 
     OS レベルでシンボリックリンクを追跡すると、repo 内の悪意あるリンクが
     `git commit -a` の対象に入った場合に repo 外の実体（秘密鍵等）を読み、
@@ -1631,7 +1631,7 @@ def test_get_worktree_file_content_rejects_symlink_escaping_repo_root(tmp_path: 
     link = repo_root / "evil_link.py"
     link.symlink_to(outside_secret)
 
-    assert commit_quality_scanner.get_worktree_file_content(repo_root, "evil_link.py") is None
+    assert commit_quality_scanner.get_worktree_file_content(repo_root, "evil_link.py") == str(outside_secret)
 
 
 def test_get_worktree_file_content_rejects_absolute_file_path(tmp_path: Path) -> None:

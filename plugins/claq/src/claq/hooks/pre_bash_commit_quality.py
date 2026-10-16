@@ -198,7 +198,7 @@ def get_staged_files() -> list[str] | None:
     Raises:
         例外は発生しません。
     """
-    return _git_name_only(["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"])
+    return _git_name_only(["git", "diff", "--cached", "--name-only", "--diff-filter=ACMRT"])
 
 
 def _head_exists() -> bool | None:
@@ -229,7 +229,7 @@ def _head_exists() -> bool | None:
 def get_unstaged_modified_files() -> list[str] | None:
     """`git commit -a` 相当で追加取り込む作業ツリーの変更ファイル一覧を取得します。
 
-    `git diff HEAD --name-only --diff-filter=ACMR` の結果を返す。列挙の失敗は
+    `git diff HEAD --name-only --diff-filter=ACMRT` の結果を返す。列挙の失敗は
     「HEAD が無い（初回コミット）」なら正常系の空リスト、「git 自体が失敗した」なら
     None にして呼び出し元で fail-closed にする（docs/adr/hook-failure-direction.md）。
 
@@ -240,7 +240,7 @@ def get_unstaged_modified_files() -> list[str] | None:
     Raises:
         例外は発生しません。
     """
-    result = _git_name_only(["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR"])
+    result = _git_name_only(["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMRT"])
     if result is not None:
         return result
     return [] if _head_exists() is False else None

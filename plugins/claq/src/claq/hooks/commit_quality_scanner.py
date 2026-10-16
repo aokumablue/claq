@@ -23,6 +23,7 @@ fail-closed）として扱います。このバジェットは**フック 1 回�
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import time
@@ -277,27 +278,37 @@ def get_worktree_file_content(repo_root: Path, file_path: str) -> str | None:
     """作業ツリーからファイル内容をテキストとして取得します。
 
     `git commit -a` は作業ツリーの現在の内容をコミットするため、未ステージの変更
-    ファイルはここから読みます。読み取り前に、解決後の絶対パスが `repo_root` 配下に
-    収まることを確認し、symlink（中間ディレクトリを含む）・絶対パス・`..` で repo 外の
-    秘密鍵等を読んでログへ一部露出させる経路を塞ぎます。違反は「読めなければ None」と
-    同じ扱いにします。repo 内に留まる symlink は通過して読みます。
+    ファイルはここから読みます。読み取り前に、親ディレクトリの解決後の絶対パスが
+    `repo_root` 配下に収まることを確認し、中間ディレクトリの symlink・絶対パス・`..`
+    で repo 外の秘密鍵等を読んでログへ一部露出させる経路を塞ぎます。違反は
+    「読めなければ None」と同じ扱いにします。
+
+    末尾要素が symlink のときは先を辿らず、link 先文字列を返します。git が symlink
+    の blob として保存するのがその文字列であり（INDEX 側の `git show :path` も同じ
+    文字列を返す）、先を辿ると通常ファイルから symlink（ディレクトリ・壊れた先・
+    repo 外）へ typechange しただけの正当な commit が読み取り失敗で止まるうえ、
+    repo 外の内容を読む経路にもなるため。
 
     Args:
         repo_root: リポジトリルートの絶対パスです。
         file_path: `repo_root` からの相対ファイルパスです。
 
     Returns:
-        ファイル内容の文字列。読み取れない・repo_root 外の場合は None を
-        返します。
+        ファイル内容の文字列（symlink は link 先文字列）。読み取れない・repo_root 外の
+        場合は None を返します。
 
     Raises:
         例外は発生しません。
     """
     try:
         base = repo_root.resolve()
-        target = (repo_root / file_path).resolve()
-        if not target.is_relative_to(base):
+        requested = repo_root / file_path
+        parent = requested.parent.resolve()
+        if not parent.is_relative_to(base):
             return None
+        target = parent / requested.name
+        if target.is_symlink():
+            return os.readlink(target)
         raw = target.read_bytes()
     except OSError:
         return None
