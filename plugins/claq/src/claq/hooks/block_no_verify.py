@@ -315,6 +315,70 @@ def _consume_short_cluster(token: str, flags: list[str]) -> tuple[int, bool, str
     return 0, unknown, None
 
 
+def _consume_long_option(
+    token: str, next_token: str | None, flags: list[str], config_values: list[str]
+) -> tuple[int, bool]:
+    """``--`` で始まる long オプション 1 トークンをフラグへ記録し、値の消費と未知判定を返す。
+
+    ``--name=value`` の結合形は次トークンを消費しません。値を別トークンで取る long オプション
+    （`_VALUE_LONG_OPTIONS`）は次トークンを値として 1 つ消費します。``--config-env`` の値は
+    結合形・分離形のどちらでも ``config_values`` へ集約します。
+
+    Args:
+        token: ``--`` で始まるトークン（``--`` 単独ではない）。
+        next_token: 直後のトークン。無ければ None。
+        flags: 検出したフラグを追記するリスト。
+        config_values: ``--config-env`` の値を追記するリスト。
+
+    Returns:
+        (値として追加で消費すべき後続トークン数（0 または 1）,
+        値を取るか判定できない未知の long オプションか) の 2 要素タプル。
+
+    Raises:
+        例外は発生しません。
+    """
+    name, has_value, inline_value = token.partition("=")
+    flags.append(name)
+    if has_value:
+        if name == "--config-env":
+            config_values.append(inline_value)
+        return 0, False
+    if name in _VALUE_LONG_OPTIONS:
+        if name == "--config-env" and next_token is not None:
+            config_values.append(next_token)
+        return 1, False
+    return 0, name not in _BOOLEAN_GLOBAL_LONG_OPTIONS
+
+
+def _consume_short_option(
+    token: str, next_token: str | None, flags: list[str], config_values: list[str]
+) -> tuple[int, bool]:
+    """``-`` で始まる short オプション 1 トークンをフラグへ記録し、値の消費と未知判定を返す。
+
+    結合形の ``-c`` の値（``-ccore.hooksPath=x``）と、非結合形の ``-c`` が次トークンに持つ値を、
+    ともに ``config_values`` へ集約します。
+
+    Args:
+        token: ``-`` で始まる（``--`` ではなく、``-`` 単独でもない）トークン。
+        next_token: 直後のトークン。無ければ None。
+        flags: 検出したフラグを追記するリスト。
+        config_values: ``-c`` の値を追記するリスト。
+
+    Returns:
+        (値として追加で消費すべき後続トークン数（0 または 1）,
+        git グローバルオプションとして未知の文字を含むか) の 2 要素タプル。
+
+    Raises:
+        例外は発生しません。
+    """
+    consumed, unknown, config_value = _consume_short_cluster(token, flags)
+    if config_value is None and consumed == 1 and flags[-1] == "-c":
+        config_value = next_token
+    if config_value is not None:
+        config_values.append(config_value)
+    return consumed, unknown
+
+
 def parse_git_segment(segment: list[str]) -> GitInvocation:
     """``git`` で始まるトークン列からサブコマンドとフラグ一覧を取り出す。
 
@@ -351,35 +415,22 @@ def parse_git_segment(segment: list[str]) -> GitInvocation:
     while index < len(segment):
         token = segment[index]
         index += 1
+        next_token = segment[index] if index < len(segment) else None
         if token == "--":
             break
         if token.startswith("--"):
-            name = token.split("=", 1)[0]
-            flags.append(name)
-            if "=" not in token:
-                if name in _VALUE_LONG_OPTIONS:
-                    if name == "--config-env" and index < len(segment):
-                        config_values.append(segment[index])
-                    index += 1
-                elif subcommand is None and name not in _BOOLEAN_GLOBAL_LONG_OPTIONS:
-                    certain = False
-            elif name == "--config-env":
-                config_values.append(token.split("=", 1)[1])
-            continue
-        if token.startswith("-") and len(token) > 1:
-            consumed, unknown, config_value = _consume_short_cluster(token, flags)
-            if config_value is None and consumed == 1 and flags[-1] == "-c" and index < len(segment):
-                config_value = segment[index]
-            if config_value is not None:
-                config_values.append(config_value)
-            index += consumed
-            if unknown and subcommand is None:
-                certain = False
-            continue
-        if subcommand is None:
-            subcommand = token
+            consumed, unknown = _consume_long_option(token, next_token, flags, config_values)
+        elif token.startswith("-") and len(token) > 1:
+            consumed, unknown = _consume_short_option(token, next_token, flags, config_values)
         else:
-            subcommand_args.append(token)
+            consumed, unknown = 0, False
+            if subcommand is None:
+                subcommand = token
+            else:
+                subcommand_args.append(token)
+        index += consumed
+        if unknown and subcommand is None:
+            certain = False
     return GitInvocation(
         subcommand=subcommand,
         flags=flags,
