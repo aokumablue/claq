@@ -51,8 +51,29 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("aws_secret", re.compile(r'(?i)(?:aws.?secret|secret.?access.?key)\s*[=:]\s*["\']?([A-Za-z0-9/+]{40})["\']?')),
     # Generic Bearer token
     ("bearer_token", re.compile(r'(?i)\bbearer\s+[A-Za-z0-9\-._~+/]+=*\b')),
-    # パスワード / シークレット代入（password= / secret= 等）
-    ("password_assign", re.compile(r'(?i)(?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*["\']?([^\s"\']{8,})["\']?')),
+    # パスワード / シークレット代入（password= / secret= 等）。キー語の後ろに許すのは
+    # 次の 2 つだけで、どちらも実在する代入形に限る。
+    #  - 接続語 `_KEY` / `_TOKEN` / `_SECRET` / `_BASE`（`SECRET_KEY=` / `SECRET_KEY_BASE=`）。
+    #    キー語に続く任意の識別子文字を許すと `passwordless:` / `reset_password_url =` /
+    #    `secretary:` / `tokenizer:` のような普通の識別子まで値を伏せてしまうため、
+    #    閉じた語彙にする。
+    #  - キーを囲む閉じ引用符（JSON `"password": "…"` / dict repr `'password': '…'`）。
+    #    この形は値も引用符で始まる場合に限る。コード中の `{"X_SECRET": secrets.token_hex(32)}`
+    #    のような式は文字列リテラルの秘密ではなく、JSON / dict repr の文字列値は必ず
+    #    引用符付きで現れるため、取りこぼしは生まない。
+    # 接続語は最大 2 個の所有的量指定子にする。無界の `*` だと `secret_key_secret_key_…`
+    # の各 `secret` が開始位置になり、そのたびに連鎖の末尾まで走査して二次オーダーに
+    # なる（実測: 8 万文字で 2.5 秒、入力 2 倍で 4 倍。1MiB へ外挿して数百秒）。
+    # 実在する最長の連鎖は `SECRET_KEY_BASE` の 2 個。
+    # 値は従来どおり 8 文字以上の非空白・非引用符の連続に限る。
+    (
+        "password_assign",
+        re.compile(
+            r"(?i)(?:password|passwd|secret|token|api[-_]?key)"
+            r"(?:[-_](?:key|token|secret|base)){0,2}+"
+            r"""(?:\s*[=:]\s*["']?|["']\s*[=:]\s*["'])([^\s"']{8,})["']?"""
+        ),
+    ),
     # メールアドレス。local part は上限付きの所有的量指定子 `{1,64}+` にする。
     #
     # 曖昧な `+` のままだと、クラス内の長い連続に `\b` が多数立つ入力

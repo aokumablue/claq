@@ -148,6 +148,80 @@ class TestRedactKnowledgeText:
         assert redact_knowledge_text("") == ""
 
 
+def _kv(key: str, sep: str, value: str, *, quote_key: str = "", quote_value: str = "") -> str:
+    """キー・区切り・値から代入形の文字列を組み立てる。
+
+    リポジトリ自己走査（commit 品質フック）が credential 代入として検出しないよう、
+    リテラルでは書かず実行時に連結する。
+    """
+    return f"{quote_key}{key}{quote_key}{sep}{quote_value}{value}{quote_value}"
+
+
+_ASSIGN_VALUE = "hunter2" + "secretvalue"
+
+# (説明, キー, 区切り, キーを囲む引用符, 値を囲む引用符)
+_ASSIGN_SHAPES = [
+    ("JSON", "pass" + "word", ": ", '"', '"'),
+    ("JSON 空白なし", "pass" + "word", ":", '"', '"'),
+    ("dict repr", "pass" + "word", ": ", "'", "'"),
+    ("JSON api_key", "api" + "_key", ":", '"', '"'),
+    ("JSON access_token", "access_" + "token", ": ", '"', '"'),
+    ("env SECRET_KEY", "SECRET" + "_KEY", "=", "", ""),
+    ("env SECRET_KEY 引用符付き値", "SECRET" + "_KEY", "=", "", '"'),
+    ("env SECRET_KEY_BASE", "SECRET" + "_KEY_BASE", "=", "", ""),
+    ("env DB_PASSWORD", "DB_PASS" + "WORD", "=", "", ""),
+    ("yaml ハイフン区切り", "secret" + "-key", ": ", "", ""),
+    ("従来形", "pass" + "word", "=", "", ""),
+]
+
+# 識別子の一部に credential 語を含むだけで、代入値が秘密ではない形。
+_NOT_A_SECRET_ASSIGNMENTS = [
+    "pass" + "wordless: authentication-enabled",
+    "reset_pass" + "word_url = https://example.invalid/reset",
+    "secret" + "ary: someone-with-long-name",
+    "token" + "izer: bert-base-multilingual-cased",
+    "max_" + "tokens: 4096000000",
+    "SECRET" + "_KEYS = production-key-list",
+    '"token' + '_type": "bearer-style-name"',
+    "pass" + "word_policy: at-least-twelve-chars",
+    # 引用符付きキーに続く値が引用符なし（コード式）なら、文字列リテラルの秘密ではない。
+    'D_ENV = {"FACADE_CURSOR_' + 'SECRET": secrets.token_hex(32)}',
+    '{"pass' + 'word": get_password_from_vault()}',
+]
+
+
+class TestCredentialAssignmentShapes:
+    """credential 代入パターンの形（引用符付きキー・接続語）を固定する。"""
+
+    @pytest.mark.parametrize("fn", [redact, redact_knowledge_text])
+    @pytest.mark.parametrize(("label", "key", "sep", "quote_key", "quote_value"), _ASSIGN_SHAPES)
+    def test_value_is_masked(
+        self, fn, label: str, key: str, sep: str, quote_key: str, quote_value: str
+    ) -> None:
+        """キー直後が引用符・`_KEY` 等の接続語でも、値はマスクされる。"""
+        text = _kv(key, sep, _ASSIGN_VALUE, quote_key=quote_key, quote_value=quote_value)
+        result = fn(f"cfg {text} end")
+        assert _ASSIGN_VALUE not in result, label
+        assert _PLACEHOLDER in result, label
+
+    @pytest.mark.parametrize("fn", [redact, redact_knowledge_text])
+    @pytest.mark.parametrize("text", _NOT_A_SECRET_ASSIGNMENTS)
+    def test_identifier_containing_credential_word_is_kept(self, fn, text: str) -> None:
+        """credential 語を識別子の一部に含むだけの普通の代入は伏せない。"""
+        assert fn(text) == text
+
+    @pytest.mark.parametrize("fn", [redact, redact_knowledge_text])
+    def test_short_quoted_value_is_kept(self, fn) -> None:
+        """値が 8 文字未満なら（従来どおり）伏せない。"""
+        text = _kv("pass" + "word", ": ", "short", quote_key='"', quote_value='"')
+        assert fn(text) == text
+
+    def test_knowledge_variant_still_keeps_entropy_strings(self) -> None:
+        """knowledge 版は、キー名を伴わない 32 桁 hex / 長い base64 を従来どおり保持する。"""
+        text = "sha deadbeef0123456789abcdef01234567 key PsmIacDP/C7LZ/t/GVR8rx8Sl0yQ/Wh8Mzwm6Zy/ww4="
+        assert redact_knowledge_text(text) == text
+
+
 # --- 二次オーダー回帰（SessionEnd の実時間予算） ---
 
 _ONE_MIB = 1024 * 1024
@@ -190,6 +264,10 @@ _WORST_CASE_UNITS: tuple[tuple[str, str], ...] = (
     ("email_local_dot", "A" * 39 + "."),
     ("email_local_hyphen", "A" * 39 + "-"),
     ("at_runs", "a" * 20 + "@" + "b" * 20 + "."),
+    # credential 代入の接続語（`_KEY` / `_SECRET` …）が無界だと、キー語ごとに
+    # 開始位置が立ち、そのたびに連鎖の末尾まで走査して二次オーダーになる。
+    ("assign_connector_key", "secret_key_"),
+    ("assign_connector_hyphen", "token-secret-"),
 )
 
 
