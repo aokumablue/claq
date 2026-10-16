@@ -506,6 +506,116 @@ def _search_paths(fields: Sequence[str] | None) -> tuple[list[str], list[str]]:
     return summary_paths, extra_paths
 
 
+def _page_result(
+    summaries: list[OrderSummary],
+    position: dict[str, Any],
+    upstream_next: str | None,
+    *,
+    principal: str,
+    fingerprint: str,
+    extra_paths: list[str],
+) -> OrderSearchResult:
+    """検索結果の 1 ページを予算に収め、続きのカーソルを封じて返す。個人情報を返したら監査に残す。
+
+    Args:
+        summaries: 今回のページの候補（cursor の skip を読み飛ばした後）。
+        position: 今回のページの位置（`page` と `skip`）。
+        upstream_next: 上流の次のページトークン。無ければ None。
+        principal: 呼び出しの主体（続きの cursor の束縛先）。
+        fingerprint: 検索条件の指紋（続きの cursor の束縛先）。
+        extra_paths: 各候補に足した項目のパス（監査に残す個人情報の判定に使う）。
+
+    Returns:
+        予算に収まる検索結果。
+
+    Raises:
+        FacadeError: 結果が予算を超えるとき、または上流のページトークンが長すぎて続きの cursor を発行できないとき。
+    """
+    as_of = _now()
+    # 予算に収まる件数だけを返し、残り（またはその次の上流のページ）を続きの cursor に封じる
+    result = fit_page(
+        summaries,
+        position,
+        upstream_next,
+        issue=lambda next_position: SEARCH_CURSOR.issue(next_position, principal=principal, fingerprint=fingerprint),
+        build=lambda items, next_cursor, notes: OrderSearchResult(
+            items=items, has_more=next_cursor is not None, next_cursor=next_cursor, as_of=as_of, notes=notes
+        ),
+        measure=_result_chars,
+        max_chars=MAX_RESULT_CHARS,
+        empty_note="該当する受注はありません。条件を緩めてください。",
+    )
+    AUDIT.personal_returned(
+        "orders_search", CATALOG.personal_paths(extra_paths), len(result.items), principal=_principal
+    )
+    return result
+
+
+async def _search_orders(
+    query: str | None,
+    customer_id: str | None,
+    status: Sequence[str] | None,
+    ordered_from: str | None,
+    ordered_to: str | None,
+    fields: Sequence[str] | None,
+    sort: str,
+    limit: int,
+    cursor: str | None,
+) -> OrderSearchResult:
+    """orders_search の本体。条件を検証し、上流の 1 ページを引いて、予算内の要約と続きのカーソルを返す。
+
+    Args:
+        query: 注文番号・顧客名の部分一致。
+        customer_id: 顧客 ID。
+        status: 受注の状態。
+        ordered_from: 注文日の下限（JST、この日を含む）。
+        ordered_to: 注文日の上限（JST、この日を含む）。
+        fields: 各候補に足す項目のパス。
+        sort: 並び順。
+        limit: 返す件数。
+        cursor: 前回の next_cursor。
+
+    Returns:
+        検索結果。
+
+    Raises:
+        FacadeError: 条件が無い・日付や項目パスが不正・カーソルが使えない・主体を決められない・order_id を閲覧できない・
+            上流が失敗した・上流のページトークンが長すぎて続きの cursor を発行できないとき。
+    """
+    conditions = _search_conditions(query, customer_id, status, ordered_from, ordered_to)
+    created_from, created_before = _created_range(ordered_from, ordered_to)
+    summary_paths, extra_paths = _search_paths(fields)
+
+    fingerprint = query_fingerprint({**conditions, "fields": fields, "sort": sort, "limit": limit})
+    principal = _principal()
+    position = (
+        SEARCH_CURSOR.open(cursor, principal=principal, fingerprint=fingerprint)
+        if cursor
+        else {"page": None, "skip": 0}
+    )
+    deadline = time.monotonic() + TOOL_DEADLINE_SECONDS
+    raw_page, upstream_next = await _upstream(
+        "orders",
+        lambda: ORDERS.search(
+            text=query,
+            customer_ref=customer_id,
+            status_codes=[STATUS_CODES[name] for name in status] if status else None,
+            created_from=created_from,
+            created_before=created_before,
+            sort=sort,
+            page=position["page"],
+            page_size=limit,
+        ),
+        deadline,
+    )
+    summaries = [
+        _summary(normalize_order(raw), summary_paths, extra_paths) for raw in raw_page[position["skip"] :]
+    ]
+    return _page_result(
+        summaries, position, upstream_next, principal=principal, fingerprint=fingerprint, extra_paths=extra_paths
+    )
+
+
 @mcp.tool(
     description=(
         "条件に合う受注の候補を要約で返す。\n"
@@ -586,53 +696,7 @@ async def orders_search(
             上流が失敗した・上流のページトークンが長すぎて続きの cursor を発行できないとき。
     """
     with model_errors():
-        conditions = _search_conditions(query, customer_id, status, ordered_from, ordered_to)
-        created_from, created_before = _created_range(ordered_from, ordered_to)
-        summary_paths, extra_paths = _search_paths(fields)
-
-        fingerprint = query_fingerprint({**conditions, "fields": fields, "sort": sort, "limit": limit})
-        principal = _principal()
-        position = (
-            SEARCH_CURSOR.open(cursor, principal=principal, fingerprint=fingerprint)
-            if cursor
-            else {"page": None, "skip": 0}
-        )
-        deadline = time.monotonic() + TOOL_DEADLINE_SECONDS
-        raw_page, upstream_next = await _upstream(
-            "orders",
-            lambda: ORDERS.search(
-                text=query,
-                customer_ref=customer_id,
-                status_codes=[STATUS_CODES[name] for name in status] if status else None,
-                created_from=created_from,
-                created_before=created_before,
-                sort=sort,
-                page=position["page"],
-                page_size=limit,
-            ),
-            deadline,
-        )
-        summaries = [
-            _summary(normalize_order(raw), summary_paths, extra_paths) for raw in raw_page[position["skip"] :]
-        ]
-        as_of = _now()
-        # 予算に収まる件数だけを返し、残り（またはその次の上流のページ）を続きの cursor に封じる
-        result = fit_page(
-            summaries,
-            position,
-            upstream_next,
-            issue=lambda next_position: SEARCH_CURSOR.issue(next_position, principal=principal, fingerprint=fingerprint),
-            build=lambda items, next_cursor, notes: OrderSearchResult(
-                items=items, has_more=next_cursor is not None, next_cursor=next_cursor, as_of=as_of, notes=notes
-            ),
-            measure=_result_chars,
-            max_chars=MAX_RESULT_CHARS,
-            empty_note="該当する受注はありません。条件を緩めてください。",
-        )
-        AUDIT.personal_returned(
-            "orders_search", CATALOG.personal_paths(extra_paths), len(result.items), principal=_principal
-        )
-        return result
+        return await _search_orders(query, customer_id, status, ordered_from, ordered_to, fields, sort, limit, cursor)
 
 
 @mcp.tool(

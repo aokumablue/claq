@@ -106,17 +106,19 @@ def test_overlay_cursor_limits_share_constants() -> None:
     ) == (["MAX_CURSOR_CHARS"], [["MAX_CURSOR_CHARS"]], [["MAX_PAGE_TOKEN_CHARS"]])
 
 
-def _overlay_tool(name: str) -> ast.AsyncFunctionDef:
-    """重ね合わせの server.py から、名前の一致するツール関数の構文木を取り出す。
+def _overlay_tool(name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    """重ね合わせの server.py から、名前の一致する関数（ツール関数と、その本体を持つ補助関数）の構文木を取り出す。
 
     Args:
-        name: ツール関数の名前。
+        name: 関数の名前。
 
     Returns:
         関数の構文木。
     """
     tree = ast.parse((_OVERLAY / "server.py").read_text(encoding="utf-8"))
-    return next(node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == name)
+    return next(
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == name
+    )
 
 
 @pytest.mark.parametrize("tool", ["orders_search", "orders_get"])
@@ -137,6 +139,6 @@ def test_overlay_fields_items_share_catalog_limits(tool: str) -> None:
 def test_overlay_search_leaves_paging_to_facade() -> None:
     """一覧の予算と続きの位置の決定は facade の fit_page に任せ、server.py に予算の分岐を置かない（CI で検査できる側に置く）。"""
     source = (_OVERLAY / "server.py").read_text(encoding="utf-8")
-    calls = {ast.unparse(node.func) for node in ast.walk(_overlay_tool("orders_search")) if isinstance(node, ast.Call)}
+    calls = {ast.unparse(node.func) for node in ast.walk(_overlay_tool("_page_result")) if isinstance(node, ast.Call)}
     assert "fit_page" in calls
     assert "fit_items" not in source
