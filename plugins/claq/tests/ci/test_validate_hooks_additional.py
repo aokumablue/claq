@@ -19,34 +19,39 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2), encoding="utf-8")
 
 
+def _entry_has_errors(hook: object, label: str) -> bool:
+    """単一フックエントリの誤りを stderr へ書き出し、誤りがあれば True を返す。"""
+    return validate_hooks.report_errors(validate_hooks._hook_entry_errors(hook, label))
+
+
 def test_validate_hook_entry_errors(capsys: pytest.CaptureFixture[str]) -> None:
-    assert validate_hooks.validate_hook_entry("bad", "label") is True
+    assert _entry_has_errors("bad", "label") is True
     stderr = capsys.readouterr().err
     assert "label は 'type' フィールドが不足しているか無効です" in stderr
 
-    assert validate_hooks.validate_hook_entry({"type": "unknown"}, "label") is True
-    assert validate_hooks.validate_hook_entry({"type": "command", "command": 1, "async": "no", "timeout": -1}, "label") is True
-    assert validate_hooks.validate_hook_entry(
+    assert _entry_has_errors({"type": "unknown"}, "label") is True
+    assert _entry_has_errors({"type": "command", "command": 1, "async": "no", "timeout": -1}, "label") is True
+    assert _entry_has_errors(
         {"type": "http", "url": "", "headers": {"a": 1}, "allowedEnvVars": [1], "async": True},
         "label",
     ) is True
-    assert validate_hooks.validate_hook_entry({"type": "prompt", "prompt": "", "model": ""}, "label") is True
-    assert validate_hooks.validate_hook_entry({"type": ""}, "label") is True
+    assert _entry_has_errors({"type": "prompt", "prompt": "", "model": ""}, "label") is True
+    assert _entry_has_errors({"type": ""}, "label") is True
     assert (
-        validate_hooks.validate_hook_entry(
+        _entry_has_errors(
             {"type": "command", "command": "echo ok", "async": False, "timeout": 0},
             "label",
         )
         is False
     )
     assert (
-        validate_hooks.validate_hook_entry(
+        _entry_has_errors(
             {"type": "http", "url": "https://example.com", "headers": {"a": "b"}, "allowedEnvVars": ["A"]},
             "label",
         )
         is False
     )
-    assert validate_hooks.validate_hook_entry({"type": "prompt", "prompt": "ok", "model": "sonnet"}, "label") is False
+    assert _entry_has_errors({"type": "prompt", "prompt": "ok", "model": "sonnet"}, "label") is False
 
     stderr = capsys.readouterr().err
     assert "サポートされていないフックタイプ 'unknown'" in stderr
@@ -382,7 +387,7 @@ def test_validate_command_hook_rejects_non_string_powershell(
     """
     hook = {"type": "command", "command": "echo ok", "powershell": powershell}
 
-    assert validate_hooks.validate_hook_entry(hook, "label") is True
+    assert _entry_has_errors(hook, "label") is True
     assert "label の 'powershell' は空でない文字列である必要があります" in capsys.readouterr().err
 
 
@@ -394,12 +399,12 @@ def test_validate_command_hook_accepts_valid_powershell() -> None:
         "powershell": '& "${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd" claq.hooks.pre_compact',
     }
 
-    assert validate_hooks.validate_hook_entry(hook, "label") is False
+    assert _entry_has_errors(hook, "label") is False
 
 
 def test_validate_command_hook_without_powershell_key_is_valid() -> None:
     """`powershell` キーが無い command フックは通ること。"""
-    assert validate_hooks.validate_hook_entry({"type": "command", "command": "echo ok"}, "label") is False
+    assert _entry_has_errors({"type": "command", "command": "echo ok"}, "label") is False
 
 
 @pytest.mark.parametrize(
@@ -418,5 +423,5 @@ def test_powershell_is_rejected_on_non_command_hooks(
     無診断で捨てられ、Windows だけ静かに動かない — 本フィールドが解消した
     障害と同じ形が 1 階層下に残る。
     """
-    assert validate_hooks.validate_hook_entry({**hook, "powershell": "& x"}, "label") is True
+    assert _entry_has_errors({**hook, "powershell": "& x"}, "label") is True
     assert "label では 'powershell' は command フックでのみサポートされています" in capsys.readouterr().err

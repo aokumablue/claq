@@ -245,148 +245,221 @@ def _declares_preflight_hook(hooks_json: str) -> bool:
     )
 
 
-def get_repo_checks(root_dir: str | Path) -> list[dict[str, Any]]:
-    """repo モード向けのチェック定義を返す。"""
-    hooks_json = safe_read(root_dir, "hooks/hooks.json")
-    tool, context, quality = "Tool Coverage", "Context Efficiency", "Quality Gates"
-    memory, evals, security, cost = "Memory Persistence", "Eval Coverage", "Security Guardrails", "Cost Efficiency"
-    checks = [
+def _tool_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
+    """repo モードの Tool Coverage カテゴリのチェックを返す。"""
+    category = "Tool Coverage"
+    return [
         make_check(
-            "tool-hooks-config", tool, 2, ["repo", "hooks"], "hooks/hooks.json",
-            "フック設定ファイルが存在する",
-            file_has_content(root_dir, "hooks/hooks.json"),
-            "Create hooks/hooks.json and define baseline hook events.",
+            check_id="tool-hooks-config", category=category, points=2, scopes=["repo", "hooks"],
+            path="hooks/hooks.json",
+            description="フック設定ファイルが存在する",
+            passed=file_has_content(root_dir, "hooks/hooks.json"),
+            fix="Create hooks/hooks.json and define baseline hook events.",
         ),
         make_check(
-            "tool-hooks-manifest-consistent", tool, 2, ["repo", "hooks"], "hooks/hooks.json",
-            "hooks.json が参照する実装モジュールがすべて実在する（個数ではなく整合を見る）",
-            _hook_modules_resolve(root_dir, hooks_json),
-            "Fix hooks.json entries that point at modules which do not exist under src/claq/hooks/.",
+            check_id="tool-hooks-manifest-consistent", category=category, points=2, scopes=["repo", "hooks"],
+            path="hooks/hooks.json",
+            description="hooks.json が参照する実装モジュールがすべて実在する（個数ではなく整合を見る）",
+            passed=_hook_modules_resolve(root_dir, hooks_json),
+            fix="Fix hooks.json entries that point at modules which do not exist under src/claq/hooks/.",
         ),
         make_check(
-            "tool-agent-count", tool, 2, ["repo", "agents"], "agents/",
-            "エージェント定義の surface が失われていない（破損検知の下限。数は品質指標ではない — docs/adr/definition-and-subagent-design.md）",
-            count_files(root_dir, "agents", ".md") >= 5,
-            "Restore agent definitions under agents/ if the surface was emptied. Do NOT split agents to raise this count.",
+            check_id="tool-agent-count", category=category, points=2, scopes=["repo", "agents"],
+            path="agents/",
+            description="エージェント定義の surface が失われていない（破損検知の下限。数は品質指標ではない — docs/adr/definition-and-subagent-design.md）",
+            passed=count_files(root_dir, "agents", ".md") >= 5,
+            fix="Restore agent definitions under agents/ if the surface was emptied. Do NOT split agents to raise this count.",
         ),
         make_check(
-            "tool-skill-count", tool, 2, ["repo", "skills"], "skills/",
-            "スキル定義の surface が失われていない（破損検知の下限。数は品質指標ではない — docs/adr/definition-and-subagent-design.md）",
-            count_files(root_dir, "skills", "SKILL.md") >= 1,
-            "Restore skill directories under skills/ if the surface was emptied. Do NOT split skills to raise this count.",
+            check_id="tool-skill-count", category=category, points=2, scopes=["repo", "skills"],
+            path="skills/",
+            description="スキル定義の surface が失われていない（破損検知の下限。数は品質指標ではない — docs/adr/definition-and-subagent-design.md）",
+            passed=count_files(root_dir, "skills", "SKILL.md") >= 1,
+            fix="Restore skill directories under skills/ if the surface was emptied. Do NOT split skills to raise this count.",
         ),
         make_check(
-            "tool-manifest-surface-consistent", tool, 2, ["repo", "commands"], ".claude-plugin/plugin.json",
-            "manifest が宣言する surface とディスク上の実体が一致している",
-            _manifest_surfaces_resolve(root_dir),
-            "Make .claude-plugin/plugin.json declarations match the directories that actually exist.",
-        ),
-        make_check(
-            "context-model-route", context, 2, ["repo", "commands"], "commands/plan.md",
-            "モデルルーティングコマンドが存在する（タスク複雑度に応じたモデル選択）",
-            file_has_content(root_dir, "commands/plan.md"),
-            "Add plan command guidance in commands/plan.md.",
-        ),
-        make_check(
-            "context-always-on-budget", context, 2, ["repo"], "skills/, commands/, agents/",
-            f"常時注入される frontmatter description の総量が予算内（{_ALWAYS_ON_DESCRIPTION_BUDGET_CHARS} 文字）",
-            always_on_description_chars(root_dir) <= _ALWAYS_ON_DESCRIPTION_BUDGET_CHARS,
-            "Shorten skill/command/agent frontmatter descriptions; only they are paid on every session.",
+            check_id="tool-manifest-surface-consistent", category=category, points=2, scopes=["repo", "commands"],
+            path=".claude-plugin/plugin.json",
+            description="manifest が宣言する surface とディスク上の実体が一致している",
+            passed=_manifest_surfaces_resolve(root_dir),
+            fix="Make .claude-plugin/plugin.json declarations match the directories that actually exist.",
         ),
     ]
+
+
+def _context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """repo モードの Context Efficiency カテゴリのチェックを返す。"""
+    category = "Context Efficiency"
+    return [
+        make_check(
+            check_id="context-model-route", category=category, points=2, scopes=["repo", "commands"],
+            path="commands/plan.md",
+            description="モデルルーティングコマンドが存在する（タスク複雑度に応じたモデル選択）",
+            passed=file_has_content(root_dir, "commands/plan.md"),
+            fix="Add plan command guidance in commands/plan.md.",
+        ),
+        make_check(
+            check_id="context-always-on-budget", category=category, points=2, scopes=["repo"],
+            path="skills/, commands/, agents/",
+            description=f"常時注入される frontmatter description の総量が予算内（{_ALWAYS_ON_DESCRIPTION_BUDGET_CHARS} 文字）",
+            passed=always_on_description_chars(root_dir) <= _ALWAYS_ON_DESCRIPTION_BUDGET_CHARS,
+            fix="Shorten skill/command/agent frontmatter descriptions; only they are paid on every session.",
+        ),
+    ]
+
+
+def _quality_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """repo モードの Quality Gates カテゴリのチェックを返す。"""
+    category = "Quality Gates"
     pyproject_toml = safe_read(root_dir, "pyproject.toml")
     validators_test = safe_read(root_dir, "tests/ci/test_validators.py")
-    checks += [
+    return [
         make_check(
-            "quality-test-runner", quality, 3, ["repo"], "pyproject.toml",
-            "一元化されたテストランナー設定が存在する（pytest testpaths）",
-            "[tool.pytest.ini_options]" in pyproject_toml and "testpaths" in pyproject_toml,
-            "Add [tool.pytest.ini_options] with testpaths in pyproject.toml to enforce complete suite execution.",
+            check_id="quality-test-runner", category=category, points=3, scopes=["repo"],
+            path="pyproject.toml",
+            description="一元化されたテストランナー設定が存在する（pytest testpaths）",
+            passed="[tool.pytest.ini_options]" in pyproject_toml and "testpaths" in pyproject_toml,
+            fix="Add [tool.pytest.ini_options] with testpaths in pyproject.toml to enforce complete suite execution.",
         ),
         make_check(
-            "quality-ci-validations", quality, 3, ["repo"], "tests/ci/test_validators.py",
-            "検証(validate_*)チェーンが pytest 実行に組み込まれている",
-            "validate_commands" in validators_test and "validate_agents" in validators_test,
-            "Wire validate_*.py checks into tests/ci/test_validators.py so validation runs inside the standard pytest suite.",
+            check_id="quality-ci-validations", category=category, points=3, scopes=["repo"],
+            path="tests/ci/test_validators.py",
+            description="検証(validate_*)チェーンが pytest 実行に組み込まれている",
+            passed="validate_commands" in validators_test and "validate_agents" in validators_test,
+            fix="Wire validate_*.py checks into tests/ci/test_validators.py so validation runs inside the standard pytest suite.",
         ),
         make_check(
-            "quality-hook-tests", quality, 2, ["repo", "hooks"], "tests/hooks/test_hook_edge_cases.py",
-            "フックカバレッジテストファイルが存在する",
-            file_has_content(root_dir, "tests/hooks/test_hook_edge_cases.py"),
-            "Add tests/hooks/test_hook_edge_cases.py for hook behavior validation.",
+            check_id="quality-hook-tests", category=category, points=2, scopes=["repo", "hooks"],
+            path="tests/hooks/test_hook_edge_cases.py",
+            description="フックカバレッジテストファイルが存在する",
+            passed=file_has_content(root_dir, "tests/hooks/test_hook_edge_cases.py"),
+            fix="Add tests/hooks/test_hook_edge_cases.py for hook behavior validation.",
         ),
+    ]
+
+
+def _memory_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """repo モードの Memory Persistence カテゴリのチェックを返す。"""
+    category = "Memory Persistence"
+    return [
         make_check(
-            "memory-hooks-lifecycle", memory, 4, ["repo", "hooks"], "hooks/hooks.json",
-            "実際に使用されるメモリ永続化ライフサイクル定義が hooks/hooks.json に存在する",
-            _has_memory_lifecycle_hooks(root_dir),
-            "Wire real memory lifecycle commands (claq.mem.cli context/handoff) into "
+            check_id="memory-hooks-lifecycle", category=category, points=4, scopes=["repo", "hooks"],
+            path="hooks/hooks.json",
+            description="実際に使用されるメモリ永続化ライフサイクル定義が hooks/hooks.json に存在する",
+            passed=_has_memory_lifecycle_hooks(root_dir),
+            fix="Wire real memory lifecycle commands (claq.mem.cli context/handoff) into "
             "hooks/hooks.json's SessionStart/SessionEnd events.",
         ),
         make_check(
-            "memory-session-hooks", memory, 4, ["repo", "hooks"], "src/claq/mem/cli.py",
-            "セッション永続化を担う mem CLI 実装が存在する",
-            file_has_content(root_dir, "src/claq/mem/cli.py"),
-            "Implement src/claq/mem/cli.py for session persistence (context/handoff commands).",
+            check_id="memory-session-hooks", category=category, points=4, scopes=["repo", "hooks"],
+            path="src/claq/mem/cli.py",
+            description="セッション永続化を担う mem CLI 実装が存在する",
+            passed=file_has_content(root_dir, "src/claq/mem/cli.py"),
+            fix="Implement src/claq/mem/cli.py for session persistence (context/handoff commands).",
         ),
         make_check(
-            "memory-learning-skill", memory, 2, ["repo", "skills"], "skills/learn/SKILL.md",
-            "継続学習スキルが存在する（セッション観測→インスティンクト作成→スキル進化）",
-            file_has_content(root_dir, "skills/learn/SKILL.md"),
-            "Add skills/learn/SKILL.md for memory evolution flow.",
-        ),
-        make_check(
-            "eval-skill", evals, 4, ["repo", "skills"], "commands/harness.md",
-            "品質監査コマンドが存在する（ハーネス監査・スキル棚卸し・遵守率測定）",
-            file_has_content(root_dir, "commands/harness.md"),
-            "Add commands/harness.md for quality audit evaluation.",
-        ),
-        make_check(
-            "eval-commands", evals, 4, ["repo", "commands"], "commands/review.md",
-            "検証コマンドとプランコマンドが存在する",
-            file_has_content(root_dir, "commands/review.md") and file_has_content(root_dir, "commands/plan.md"),
-            "Add commands/review.md and commands/plan.md to standardize verification loops.",
-        ),
-        make_check(
-            "eval-tests-presence", evals, 2, ["repo"], "tests/",
-            "カバレッジゲートが設定され、テスト surface が失われていない（数は品質指標ではない）",
-            count_files(root_dir, "tests", ".py") >= 1 and _coverage_gate_configured(root_dir),
-            "Keep tests/ populated and configure a coverage threshold (fail_under) in pyproject.toml.",
-        ),
-        make_check(
-            "security-review-skill", security, 3, ["repo", "skills"], "skills/secure/SKILL.md",
-            "セキュリティレビュースキルが存在する（認証・入力処理・シークレット管理）",
-            file_has_content(root_dir, "skills/secure/SKILL.md"),
-            "Add skills/secure/SKILL.md for security checklist coverage.",
-        ),
-        make_check(
-            "security-agent", security, 3, ["repo", "agents"], "agents/security-auditor.md",
-            "セキュリティレビューエージェントが存在する",
-            file_has_content(root_dir, "agents/security-auditor.md"),
-            "Add agents/security-auditor.md for delegated security audits.",
-        ),
-        make_check(
-            "security-prompt-hook", security, 2, ["repo", "hooks"], "hooks/hooks.json",
-            "フックにプロンプト送信・ツール実行時のセキュリティガードが含まれている",
-            _declares_preflight_hook(hooks_json),
-            "Add prompt/tool preflight security guards in hooks/hooks.json.",
-        ),
-        make_check(
-            "security-scan-command", security, 2, ["repo", "commands"], "commands/review.md",
-            "セキュリティスキャンコマンドが存在する",
-            file_has_content(root_dir, "commands/review.md"),
-            "Add commands/review.md with scan and remediation workflow.",
-        ),
-        make_check(
-            "cost-no-oversized-surface", cost, 3, ["repo"], "skills/, commands/",
-            f"起動ごとに読まれる定義が 1 件も肥大化していない（各 {_ON_INVOKE_BUDGET_CHARS} 文字以内）",
-            not oversized_surfaces(root_dir),
-            "Split or trim the oversized SKILL.md / command definitions; each is paid in full on every invocation.",
-        ),
-        make_check(
-            "cost-model-route-command", cost, 3, ["repo", "commands"], "commands/plan.md",
-            "モデルルーティングコマンドが存在する（複雑度に応じたモデル選択ポリシー）",
-            file_has_content(root_dir, "commands/plan.md"),
-            "Add commands/plan.md and route policies for cheap-default execution.",
+            check_id="memory-learning-skill", category=category, points=2, scopes=["repo", "skills"],
+            path="skills/learn/SKILL.md",
+            description="継続学習スキルが存在する（セッション観測→インスティンクト作成→スキル進化）",
+            passed=file_has_content(root_dir, "skills/learn/SKILL.md"),
+            fix="Add skills/learn/SKILL.md for memory evolution flow.",
         ),
     ]
-    return checks
+
+
+def _eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """repo モードの Eval Coverage カテゴリのチェックを返す。"""
+    category = "Eval Coverage"
+    return [
+        make_check(
+            check_id="eval-skill", category=category, points=4, scopes=["repo", "skills"],
+            path="commands/harness.md",
+            description="品質監査コマンドが存在する（ハーネス監査・スキル棚卸し・遵守率測定）",
+            passed=file_has_content(root_dir, "commands/harness.md"),
+            fix="Add commands/harness.md for quality audit evaluation.",
+        ),
+        make_check(
+            check_id="eval-commands", category=category, points=4, scopes=["repo", "commands"],
+            path="commands/review.md",
+            description="検証コマンドとプランコマンドが存在する",
+            passed=file_has_content(root_dir, "commands/review.md") and file_has_content(root_dir, "commands/plan.md"),
+            fix="Add commands/review.md and commands/plan.md to standardize verification loops.",
+        ),
+        make_check(
+            check_id="eval-tests-presence", category=category, points=2, scopes=["repo"],
+            path="tests/",
+            description="カバレッジゲートが設定され、テスト surface が失われていない（数は品質指標ではない）",
+            passed=count_files(root_dir, "tests", ".py") >= 1 and _coverage_gate_configured(root_dir),
+            fix="Keep tests/ populated and configure a coverage threshold (fail_under) in pyproject.toml.",
+        ),
+    ]
+
+
+def _security_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
+    """repo モードの Security Guardrails カテゴリのチェックを返す。"""
+    category = "Security Guardrails"
+    return [
+        make_check(
+            check_id="security-review-skill", category=category, points=3, scopes=["repo", "skills"],
+            path="skills/secure/SKILL.md",
+            description="セキュリティレビュースキルが存在する（認証・入力処理・シークレット管理）",
+            passed=file_has_content(root_dir, "skills/secure/SKILL.md"),
+            fix="Add skills/secure/SKILL.md for security checklist coverage.",
+        ),
+        make_check(
+            check_id="security-agent", category=category, points=3, scopes=["repo", "agents"],
+            path="agents/security-auditor.md",
+            description="セキュリティレビューエージェントが存在する",
+            passed=file_has_content(root_dir, "agents/security-auditor.md"),
+            fix="Add agents/security-auditor.md for delegated security audits.",
+        ),
+        make_check(
+            check_id="security-prompt-hook", category=category, points=2, scopes=["repo", "hooks"],
+            path="hooks/hooks.json",
+            description="フックにプロンプト送信・ツール実行時のセキュリティガードが含まれている",
+            passed=_declares_preflight_hook(hooks_json),
+            fix="Add prompt/tool preflight security guards in hooks/hooks.json.",
+        ),
+        make_check(
+            check_id="security-scan-command", category=category, points=2, scopes=["repo", "commands"],
+            path="commands/review.md",
+            description="セキュリティスキャンコマンドが存在する",
+            passed=file_has_content(root_dir, "commands/review.md"),
+            fix="Add commands/review.md with scan and remediation workflow.",
+        ),
+    ]
+
+
+def _cost_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """repo モードの Cost Efficiency カテゴリのチェックを返す。"""
+    category = "Cost Efficiency"
+    return [
+        make_check(
+            check_id="cost-no-oversized-surface", category=category, points=3, scopes=["repo"],
+            path="skills/, commands/",
+            description=f"起動ごとに読まれる定義が 1 件も肥大化していない（各 {_ON_INVOKE_BUDGET_CHARS} 文字以内）",
+            passed=not oversized_surfaces(root_dir),
+            fix="Split or trim the oversized SKILL.md / command definitions; each is paid in full on every invocation.",
+        ),
+        make_check(
+            check_id="cost-model-route-command", category=category, points=3, scopes=["repo", "commands"],
+            path="commands/plan.md",
+            description="モデルルーティングコマンドが存在する（複雑度に応じたモデル選択ポリシー）",
+            passed=file_has_content(root_dir, "commands/plan.md"),
+            fix="Add commands/plan.md and route policies for cheap-default execution.",
+        ),
+    ]
+
+
+def get_repo_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """repo モード向けのチェック定義を、カテゴリ順に連結して返す。"""
+    hooks_json = safe_read(root_dir, "hooks/hooks.json")
+    return [
+        *_tool_checks(root_dir, hooks_json),
+        *_context_checks(root_dir),
+        *_quality_checks(root_dir),
+        *_memory_checks(root_dir),
+        *_eval_checks(root_dir),
+        *_security_checks(root_dir, hooks_json),
+        *_cost_checks(root_dir),
+    ]

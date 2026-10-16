@@ -22,6 +22,7 @@ HARNESS_MARKERS = [
 
 
 def make_check(
+    *,
     check_id: str,
     category: str,
     points: int,
@@ -31,7 +32,11 @@ def make_check(
     passed: bool,
     fix: str,
 ) -> dict[str, Any]:
-    """採点項目 1 件を、レポート組み立てが読む辞書にする。"""
+    """採点項目 1 件を、レポート組み立てが読む辞書にする。
+
+    8 個の引数は型が近く（文字列 5・真偽 1・整数 1・リスト 1）、位置渡しでは
+    入れ違いが型検査をすり抜けるため、すべてキーワード専用にしている。
+    """
     return {
         "id": check_id,
         "category": category,
@@ -72,6 +77,20 @@ _VENDOR_DIR_NAMES = frozenset({".git", ".venv", "venv", "node_modules", "vendor"
 """ファイル走査で降りないディレクトリ名。依存ツリー同梱のファイルを除くため。"""
 
 
+def _list_dir(path: Path) -> list[os.DirEntry[str]]:
+    """ディレクトリ直下のエントリ一覧を返す。読めなければ空リスト。
+
+    `OSError` は握り潰して走査から落とすだけにする（`file_has_content` と同じ姿勢）。
+    ``with`` の中で一覧化し切るのは、`os.scandir` のイテレータを閉じた後で
+    エントリを使わないため（`DirEntry` 自体は閉じた後も参照できる）。
+    """
+    try:
+        with os.scandir(path) as entries:
+            return list(entries)
+    except OSError:
+        return []
+
+
 def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
     """ディレクトリ以下のファイルエントリを、シンボリックリンクを辿らず再帰走査して返す。
 
@@ -85,16 +104,12 @@ def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
     """
     stack = [root_path]
     while stack:
-        current = stack.pop()
-        try:
-            with os.scandir(current) as entries:
-                for entry in entries:
-                    if not entry.is_dir(follow_symlinks=False):
-                        yield entry
-                    elif entry.name not in _VENDOR_DIR_NAMES:
-                        stack.append(Path(entry.path))
-        except OSError:
-            continue
+        entries = _list_dir(stack.pop())
+        for entry in entries:
+            if not entry.is_dir(follow_symlinks=False):
+                yield entry
+            elif entry.name not in _VENDOR_DIR_NAMES:
+                stack.append(Path(entry.path))
 
 
 def has_python_tests(root_dir: str | Path, minimum: int) -> bool:

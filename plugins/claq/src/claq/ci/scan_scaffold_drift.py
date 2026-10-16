@@ -47,6 +47,7 @@ import sys
 from collections import Counter
 from collections.abc import Iterable, Iterator
 from pathlib import Path
+from typing import Any
 
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, normalize_user_message
 from claq.mem.handoff import TRANSCRIPT_MAX_BYTES, is_trusted_transcript, trusted_transcript_roots
@@ -133,6 +134,23 @@ def find_paired_unknown_tags(text: str, known: frozenset[str]) -> set[str]:
     return (opened & closed) - known
 
 
+def _content_texts(content: Any) -> Iterator[str]:
+    """user エントリの ``content`` から本文テキストを取り出す。
+
+    Args:
+        content: 文字列、または ``text`` を持つパートの配列。それ以外は本文なし。
+
+    Yields:
+        文字列ならその全体、配列なら ``text`` が文字列のパートのテキスト。
+    """
+    if isinstance(content, str):
+        yield content
+    elif isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                yield part["text"]
+
+
 def _user_texts(raw: str) -> Iterator[str]:
     """transcript 本文から user エントリのテキストを取り出す。
 
@@ -153,13 +171,7 @@ def _user_texts(raw: str) -> Iterator[str]:
         message = message if isinstance(message, dict) else {}
         if "user" not in (entry.get("type"), entry.get("role"), message.get("role")):
             continue
-        content = message.get("content") or entry.get("content")
-        if isinstance(content, str):
-            yield content
-        elif isinstance(content, list):
-            for part in content:
-                if isinstance(part, dict) and isinstance(part.get("text"), str):
-                    yield part["text"]
+        yield from _content_texts(message.get("content") or entry.get("content"))
 
 
 def iter_transcripts(roots: Iterable[Path], limit: int) -> list[Path]:

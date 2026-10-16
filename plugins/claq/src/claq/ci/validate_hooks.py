@@ -120,11 +120,6 @@ def _hook_entry_errors(hook: Any, label: str) -> Iterator[str]:
     yield from (_http_hook_errors if hook_type == "http" else _prompt_hook_errors)(hook, label)
 
 
-def validate_hook_entry(hook: Any, label: str) -> bool:
-    """単一のフックエントリを検証し、誤りを stderr へ書き出す。誤りがあれば True。"""
-    return report_errors(_hook_entry_errors(hook, label))
-
-
 def _matcher_errors(event_type: str, index: int, matcher: Any) -> Iterator[str]:
     """イベント配下の単一マッチャーエントリとその hooks の誤りを返す。"""
     prefix = f"{event_type}[{index}]"

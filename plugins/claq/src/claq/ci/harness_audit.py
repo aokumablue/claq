@@ -165,108 +165,159 @@ def _hosting_layout(root_dir: str | Path, hosting_service: str) -> tuple[str, st
     )
 
 
-def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github") -> list[dict[str, Any]]:
-    """consumer project 向けのチェック定義を返す。"""
-    package_json = safe_parse_json(safe_read(root_dir, "package.json"))
-    if not isinstance(package_json, dict):
-        package_json = {}
-    gitignore = safe_read(root_dir, ".gitignore")
-    project_hooks = safe_read(root_dir, ".claude/settings.json")
-    plugin_install = find_plugin_install(root_dir)
-    hosting_service = normalize_git_hosting_service(git_hosting_service)
-    hosting_label = get_git_hosting_service_label(hosting_service)
-    ci_path, security_path, ci_pass, security_pass = _hosting_layout(root_dir, hosting_service)
-
+def _consumer_tool_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """consumer モードの Tool Coverage カテゴリのチェックを返す。"""
+    category = "Tool Coverage"
     return [
         make_check(
-            "consumer-plugin-install", "Tool Coverage", 4, ["repo"], "~/.claude/plugins/",
-            "プラグインがインストールされている",
-            bool(plugin_install),
-            "Install the claq plugin for this user or project before auditing project-specific harness quality.",
+            check_id="consumer-plugin-install", category=category, points=4, scopes=["repo"],
+            path="~/.claude/plugins/",
+            description="プラグインがインストールされている",
+            passed=bool(find_plugin_install(root_dir)),
+            fix="Install the claq plugin for this user or project before auditing project-specific harness quality.",
         ),
         make_check(
-            "consumer-project-overrides", "Tool Coverage", 3, ["repo", "hooks", "skills", "commands", "agents"],
-            ".claude/",
-            "プロジェクト固有のハーネスオーバーライドが .claude/ 配下に存在する",
-            count_files(root_dir, ".claude/agents", ".md") > 0
+            check_id="consumer-project-overrides", category=category, points=3,
+            scopes=["repo", "hooks", "skills", "commands", "agents"],
+            path=".claude/",
+            description="プロジェクト固有のハーネスオーバーライドが .claude/ 配下に存在する",
+            passed=count_files(root_dir, ".claude/agents", ".md") > 0
             or count_files(root_dir, ".claude/skills", "SKILL.md") > 0
             or count_files(root_dir, ".claude/commands", ".md") > 0
             or file_has_content(root_dir, ".claude/settings.json")
             or file_has_content(root_dir, ".claude/hooks.json"),
-            "Add project-local .claude hooks, commands, skills, or settings that tailor claq to this repo.",
+            fix="Add project-local .claude hooks, commands, skills, or settings that tailor claq to this repo.",
         ),
+    ]
+
+
+def _consumer_context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """consumer モードの Context Efficiency カテゴリのチェックを返す。"""
+    category = "Context Efficiency"
+    return [
         make_check(
-            "consumer-instructions", "Context Efficiency", 3, ["repo"], "AGENTS.md",
-            "プロジェクトが明示的なエージェント・命令コンテキストを持つ",
-            file_has_content(root_dir, "AGENTS.md")
+            check_id="consumer-instructions", category=category, points=3, scopes=["repo"],
+            path="AGENTS.md",
+            description="プロジェクトが明示的なエージェント・命令コンテキストを持つ",
+            passed=file_has_content(root_dir, "AGENTS.md")
             or file_has_content(root_dir, "CLAUDE.md")
             or file_has_content(root_dir, ".claude/CLAUDE.md"),
-            "Add AGENTS.md or CLAUDE.md so the harness has project-specific instructions.",
+            fix="Add AGENTS.md or CLAUDE.md so the harness has project-specific instructions.",
         ),
         make_check(
-            "consumer-project-config", "Context Efficiency", 2, ["repo", "hooks"], ".mcp.json",
-            "プロジェクトがローカル MCP・Claude 設定を宣言している",
-            file_has_content(root_dir, ".mcp.json")
+            check_id="consumer-project-config", category=category, points=2, scopes=["repo", "hooks"],
+            path=".mcp.json",
+            description="プロジェクトがローカル MCP・Claude 設定を宣言している",
+            passed=file_has_content(root_dir, ".mcp.json")
             or file_has_content(root_dir, ".claude/settings.json")
             or file_has_content(root_dir, ".claude/settings.local.json"),
-            "Add .mcp.json or .claude/settings.json so project-local tool configuration is explicit.",
+            fix="Add .mcp.json or .claude/settings.json so project-local tool configuration is explicit.",
         ),
+    ]
+
+
+def _consumer_quality_checks(
+    root_dir: str | Path, hosting_label: str, ci_path: str, ci_pass: bool
+) -> list[dict[str, Any]]:
+    """consumer モードの Quality Gates カテゴリのチェックを返す。"""
+    category = "Quality Gates"
+    package_json = safe_parse_json(safe_read(root_dir, "package.json"))
+    if not isinstance(package_json, dict):
+        package_json = {}
+    return [
         make_check(
-            "consumer-test-suite", "Quality Gates", 4, ["repo"], "tests/",
-            "プロジェクトが自動テストのエントリポイントを持つ",
+            check_id="consumer-test-suite", category=category, points=4, scopes=["repo"],
+            path="tests/",
+            description="プロジェクトが自動テストのエントリポイントを持つ",
             # 最初のヒットで打ち切る判定（has_python_tests / has_file_with_extension）を
             # 先に置く。count_files はヒットしても数え上げを続けるため最後に回す。
-            (isinstance(package_json.get("scripts"), dict) and isinstance(package_json["scripts"].get("test"), str))
+            passed=(isinstance(package_json.get("scripts"), dict) and isinstance(package_json["scripts"].get("test"), str))
             or has_python_tests(root_dir, minimum=1)
             or has_file_with_extension(root_dir, ".", [".spec.js", ".spec.ts", ".test.ts"])
             or count_files(root_dir, "tests", ".test.js") > 0,
-            "Add a test script or checked-in tests (package.json scripts.test, *.spec.ts, "
+            fix="Add a test script or checked-in tests (package.json scripts.test, *.spec.ts, "
             "or pytest test_*.py) so harness recommendations can be verified automatically.",
         ),
         make_check(
-            "consumer-ci-workflow", "Quality Gates", 3, ["repo"], ci_path,
-            f"プロジェクトが {hosting_label} CI 設定をチェックインしている",
-            ci_pass,
-            f"Add at least one CI configuration file for {hosting_label} so harness and test checks run outside local development.",
+            check_id="consumer-ci-workflow", category=category, points=3, scopes=["repo"],
+            path=ci_path,
+            description=f"プロジェクトが {hosting_label} CI 設定をチェックインしている",
+            passed=ci_pass,
+            fix=f"Add at least one CI configuration file for {hosting_label} so harness and test checks run outside local development.",
+        ),
+    ]
+
+
+def _consumer_memory_eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+    """consumer モードの Memory Persistence・Eval Coverage カテゴリのチェックを返す。"""
+    return [
+        make_check(
+            check_id="consumer-memory-notes", category="Memory Persistence", points=2, scopes=["repo"],
+            path=".claude/memory.md",
+            description="プロジェクトメモリ・恒久的なノートがチェックインされている",
+            passed=file_has_content(root_dir, ".claude/memory.md") or count_files(root_dir, "docs/adr", ".md") > 0,
+            fix="Add durable project memory such as .claude/memory.md or ADRs under docs/adr/.",
         ),
         make_check(
-            "consumer-memory-notes", "Memory Persistence", 2, ["repo"], ".claude/memory.md",
-            "プロジェクトメモリ・恒久的なノートがチェックインされている",
-            file_has_content(root_dir, ".claude/memory.md") or count_files(root_dir, "docs/adr", ".md") > 0,
-            "Add durable project memory such as .claude/memory.md or ADRs under docs/adr/.",
-        ),
-        make_check(
-            "consumer-eval-coverage", "Eval Coverage", 2, ["repo"], "evals/",
-            "プロジェクトが評価テストまたは複数の自動テストを持つ",
+            check_id="consumer-eval-coverage", category="Eval Coverage", points=2, scopes=["repo"],
+            path="evals/",
+            description="プロジェクトが評価テストまたは複数の自動テストを持つ",
             # 「複数の自動テスト」は Python のテストも数え、閾値は JS 側と揃えて 3 件。
             # 判定順は consumer-test-suite と同じ理由で、短絡する has_python_tests を
             # 全数え上げの count_files より前に置く。`evals/` を先頭に残すのは、
             # この判定を落とすリポジトリには `evals/` が無く即 0 が返るため。
-            count_files(root_dir, "evals", None) > 0
+            passed=count_files(root_dir, "evals", None) > 0
             or has_python_tests(root_dir, minimum=3)
             or count_files(root_dir, "tests", ".test.js") >= 3,
-            "Add eval fixtures or at least a few focused automated tests for critical flows.",
+            fix="Add eval fixtures or at least a few focused automated tests for critical flows.",
+        ),
+    ]
+
+
+def _consumer_security_checks(
+    root_dir: str | Path, hosting_label: str, security_path: str, security_pass: bool
+) -> list[dict[str, Any]]:
+    """consumer モードの Security Guardrails カテゴリのチェックを返す。"""
+    category = "Security Guardrails"
+    project_hooks = safe_read(root_dir, ".claude/settings.json")
+    return [
+        make_check(
+            check_id="consumer-security-policy", category=category, points=2, scopes=["repo"],
+            path=security_path,
+            description="プロジェクトがセキュリティポリシー・自動依存スキャンを公開している",
+            passed=security_pass,
+            fix=f"Add SECURITY.md or {hosting_label}-appropriate dependency/code scanning configuration to document the project security posture.",
         ),
         make_check(
-            "consumer-security-policy", "Security Guardrails", 2, ["repo"], security_path,
-            "プロジェクトがセキュリティポリシー・自動依存スキャンを公開している",
-            security_pass,
-            f"Add SECURITY.md or {hosting_label}-appropriate dependency/code scanning configuration to document the project security posture.",
+            check_id="consumer-secret-hygiene", category=category, points=2, scopes=["repo"],
+            path=".gitignore",
+            description="プロジェクトが一般的なシークレット環境ファイルを無視している",
+            passed=".env" in safe_read(root_dir, ".gitignore"),
+            fix="Ignore .env-style files in .gitignore so secrets do not land in the repo.",
         ),
         make_check(
-            "consumer-secret-hygiene", "Security Guardrails", 2, ["repo"], ".gitignore",
-            "プロジェクトが一般的なシークレット環境ファイルを無視している",
-            ".env" in gitignore,
-            "Ignore .env-style files in .gitignore so secrets do not land in the repo.",
-        ),
-        make_check(
-            "consumer-hook-guardrails", "Security Guardrails", 2, ["repo", "hooks"], ".claude/settings.json",
-            "プロジェクトローカルフック設定がツール・プロンプトガードを参照している",
-            "PreToolUse" in project_hooks
+            check_id="consumer-hook-guardrails", category=category, points=2, scopes=["repo", "hooks"],
+            path=".claude/settings.json",
+            description="プロジェクトローカルフック設定がツール・プロンプトガードを参照している",
+            passed="PreToolUse" in project_hooks
             or "beforeSubmitPrompt" in project_hooks
             or file_has_content(root_dir, ".claude/hooks.json"),
-            "Add project-local hook settings or hook definitions for prompt/tool guardrails.",
+            fix="Add project-local hook settings or hook definitions for prompt/tool guardrails.",
         ),
+    ]
+
+
+def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github") -> list[dict[str, Any]]:
+    """consumer project 向けのチェック定義を、カテゴリ順に連結して返す。"""
+    hosting_service = normalize_git_hosting_service(git_hosting_service)
+    hosting_label = get_git_hosting_service_label(hosting_service)
+    ci_path, security_path, ci_pass, security_pass = _hosting_layout(root_dir, hosting_service)
+    return [
+        *_consumer_tool_checks(root_dir),
+        *_consumer_context_checks(root_dir),
+        *_consumer_quality_checks(root_dir, hosting_label, ci_path, ci_pass),
+        *_consumer_memory_eval_checks(root_dir),
+        *_consumer_security_checks(root_dir, hosting_label, security_path, security_pass),
     ]
 
 
