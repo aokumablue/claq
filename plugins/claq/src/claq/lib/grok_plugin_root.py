@@ -161,20 +161,32 @@ def _remove_empty_or_file(link: Path) -> bool:
     return False
 
 
+def _is_link_to(link: Path, target: Path) -> bool:
+    """``link`` が ``target`` へ解決されるシンボリックリンクか。resolve が OSError なら False。"""
+    try:
+        return link.resolve() == target
+    except OSError:
+        return False
+
+
+def _clear_existing(link: Path) -> bool:
+    """``link`` の既存物を片付ける。触ってはいけない（launcher を含む / 空でないディレクトリ）なら False。"""
+    if link.is_symlink():
+        link.unlink()
+        return True
+    if link.exists():
+        return not _has_launcher(link) and _remove_empty_or_file(link)
+    return True
+
+
 def _ensure_symlink(link: Path, target: Path) -> Path | None:
     """``link`` を ``target`` へ張り、結果の Path または何もしない/失敗時の None を返す。"""
     try:
         link.parent.mkdir(parents=True, exist_ok=True)
-        if link.is_symlink():
-            try:
-                if link.resolve() == target:
-                    return target
-            except OSError:
-                pass
-            link.unlink()
-        elif link.exists():
-            if _has_launcher(link) or not _remove_empty_or_file(link):
-                return None
+        if link.is_symlink() and _is_link_to(link, target):
+            return target
+        if not _clear_existing(link):
+            return None
         link.symlink_to(target, target_is_directory=True)
         return target
     except OSError:
