@@ -3,7 +3,6 @@
 import os
 import re
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -85,6 +84,45 @@ class TestEnsureDir:
         assert result == existing
         assert existing.exists()
 
+    def test_regular_file_raises_file_exists_error(self, tmp_path: Path) -> None:
+        """通常ファイルが居る場所はディレクトリではないので FileExistsError を伝える。"""
+        target = tmp_path / "occupied"
+        target.write_text("data")
+        with pytest.raises(FileExistsError):
+            ensure_dir(target)
+        assert target.read_text() == "data"
+
+    def test_symlink_to_file_raises_file_exists_error(self, tmp_path: Path) -> None:
+        """ファイルへの symlink もディレクトリではないので FileExistsError を伝える。"""
+        real = tmp_path / "real"
+        real.write_text("data")
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        with pytest.raises(FileExistsError):
+            ensure_dir(link)
+
+    def test_dangling_symlink_raises_file_exists_error(self, tmp_path: Path) -> None:
+        """壊れた symlink もディレクトリではないので FileExistsError を伝える。"""
+        link = tmp_path / "dangling"
+        link.symlink_to(tmp_path / "missing")
+        with pytest.raises(FileExistsError):
+            ensure_dir(link)
+
+    def test_symlink_to_directory_succeeds(self, tmp_path: Path) -> None:
+        """ディレクトリへの symlink は既存ディレクトリとして成功する。"""
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real, target_is_directory=True)
+        assert ensure_dir(link) == link
+
+    def test_file_as_ancestor_raises_not_a_directory_error(self, tmp_path: Path) -> None:
+        """祖先が通常ファイルなら NotADirectoryError を伝える。"""
+        blocker = tmp_path / "blocker"
+        blocker.write_text("data")
+        with pytest.raises(NotADirectoryError):
+            ensure_dir(blocker / "sub")
+
 
 class TestEnsurePrivateDir:
     """ensure_private_dir の 0700 作成と既存締め直し。"""
@@ -131,16 +169,52 @@ class TestEnsurePrivateDir:
         assert stat.S_IMODE(other.stat().st_mode) == 0o700
         assert stat.S_IMODE(claq.stat().st_mode) == 0o755
 
-    def test_file_exists_error_is_swallowed(self, tmp_path: Path) -> None:
-        """mkdir が FileExistsError でも chmod まで進む。"""
+    def test_regular_file_raises_and_keeps_mode(self, tmp_path: Path) -> None:
+        """通常ファイルには FileExistsError を伝え、chmod しない。"""
         import stat
 
-        target = tmp_path / "existing"
-        target.mkdir()
-        with patch.object(Path, "mkdir", side_effect=FileExistsError):
-            result = ensure_private_dir(target)
-        assert result == target
-        assert stat.S_IMODE(target.stat().st_mode) == 0o700
+        target = tmp_path / "occupied"
+        target.write_text("data")
+        target.chmod(0o644)
+        with pytest.raises(FileExistsError):
+            ensure_private_dir(target)
+        assert stat.S_IMODE(target.stat().st_mode) == 0o644
+
+    def test_symlink_to_file_raises_and_keeps_target_mode(self, tmp_path: Path) -> None:
+        """ファイルへの symlink には FileExistsError を伝え、リンク先を chmod しない。"""
+        import stat
+
+        real = tmp_path / "real"
+        real.write_text("data")
+        real.chmod(0o644)
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        with pytest.raises(FileExistsError):
+            ensure_private_dir(link)
+        assert stat.S_IMODE(real.stat().st_mode) == 0o644
+
+    def test_file_as_ancestor_raises_file_exists_error(self, tmp_path: Path) -> None:
+        """祖先が通常ファイルなら、その祖先で FileExistsError を伝え、chmod しない。"""
+        import stat
+
+        blocker = tmp_path / "blocker"
+        blocker.write_text("data")
+        blocker.chmod(0o644)
+        with pytest.raises(FileExistsError):
+            ensure_private_dir(blocker / "sub")
+        assert stat.S_IMODE(blocker.stat().st_mode) == 0o644
+
+    def test_existing_directory_symlink_tightens_target(self, tmp_path: Path) -> None:
+        """ディレクトリへの symlink は既存ディレクトリとして成功し、リンク先を 0700 にする。"""
+        import stat
+
+        real = tmp_path / "real"
+        real.mkdir(mode=0o755)
+        real.chmod(0o755)
+        link = tmp_path / "link"
+        link.symlink_to(real, target_is_directory=True)
+        assert ensure_private_dir(link) == link
+        assert stat.S_IMODE(real.stat().st_mode) == 0o700
 
 
 class TestActorIdentity:
@@ -209,21 +283,6 @@ class TestStripAnsi:
         """文字列以外の入力では空文字列を返すこと。"""
         assert strip_ansi(None) == ""
         assert strip_ansi(123) == ""
-
-
-class TestEnsureDirRaceCondition:
-    """ensure_dir のレースコンディション (FileExistsError) テスト。"""
-
-    def test_file_exists_error_is_swallowed(self, tmp_path: Path):
-        """mkdir が FileExistsError を起こしても例外を上げないこと。"""
-        from unittest.mock import patch
-
-        target = tmp_path / "existing"
-        target.mkdir()
-
-        with patch.object(Path, "mkdir", side_effect=FileExistsError):
-            result = ensure_dir(target)
-        assert isinstance(result, Path)
 
 
 class TestLog:

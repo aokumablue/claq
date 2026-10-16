@@ -61,16 +61,18 @@ def get_sessions_dir() -> Path:
 def ensure_dir(dir_path: str | Path) -> Path:
     """ディレクトリを親ごと作成して Path を返す。
 
-    他プロセスとの競合による ``FileExistsError`` は無視する。
+    既にディレクトリ（ディレクトリへの symlink を含む）なら何もしない。他プロセスとの
+    作成競合は ``mkdir(exist_ok=True)`` が吸収する（競合に負けた側の
+    ``FileExistsError`` は、対象がディレクトリなら pathlib が握る）ので、ここでは扱わない。
 
     Raises:
+        FileExistsError: ``dir_path`` が通常ファイル・ファイルへの symlink・壊れた symlink
+            など、ディレクトリ以外として存在する場合。
+        NotADirectoryError: 祖先が通常ファイルの場合。
         OSError: ディレクトリを作成できない場合（例: 権限不足）
     """
     path = Path(dir_path)
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except FileExistsError:
-        pass
+    path.mkdir(parents=True, exist_ok=True)
     return path
 
 
@@ -84,7 +86,10 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
     1 段ずつ作る。既存の祖先は ``chmod`` しない（``/`` や ``$HOME`` を 0700 にしない）。
     0700 は group/other のビットを立てないので umask で緩まない。
 
-    ``chmod`` は既に 0755 で存在する対象を締め直す是正用。``dir_path`` が
+    ``chmod`` は既に 0755 のディレクトリとして存在する対象を締め直す是正用。
+    ``dir_path`` が通常ファイルなど非ディレクトリなら、``chmod`` に進む前に
+    ``FileExistsError`` で止まる（ファイルの mode を 0700 に変えない）。
+    作成競合は ``mkdir(exist_ok=True)`` が吸収するため、ここでは握らない。``dir_path`` が
     ``get_claq_dir()`` 配下なら ``~/.claq`` 自身も 0700 にする。
 
     Windows では ``chmod`` が読み取り専用属性しか動かさず、DACL は変わらない。
@@ -93,14 +98,15 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
     敵対的回避は非対象）に対して POSIX の 0700 と同水準になるため、``icacls`` 等は呼ばない。
 
     Raises:
-        OSError: 作成も chmod もできない場合（``FileExistsError`` は競合として無視）。
+        FileExistsError: ``dir_path`` またはその祖先が通常ファイル・ファイルへの symlink・
+            壊れた symlink など、ディレクトリ以外として存在する場合（``chmod`` しない）。
+            祖先も 1 段ずつ ``mkdir`` するため、``ensure_dir`` と違い祖先が
+            ファイルでも ``NotADirectoryError`` ではなくこちらになる。
+        OSError: 作成も chmod もできない場合。
     """
     path = Path(dir_path)
     for target in (*reversed(path.parents), path):
-        try:
-            target.mkdir(mode=0o700, exist_ok=True)
-        except FileExistsError:
-            pass
+        target.mkdir(mode=0o700, exist_ok=True)
     path.chmod(0o700)
     claq_dir = get_claq_dir()
     try:
