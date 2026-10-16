@@ -35,6 +35,7 @@ from typing import Any
 from claq.mem.models import Knowledge, utc_now_iso
 from claq.mem.redaction import redact_knowledge_text
 from claq.mem.repo_identity import slugify
+from claq.mem.tag_stripping import strip_control_chars
 
 KINDS: frozenset[str] = frozenset({"convention", "decision", "pitfall", "howto", "fact", "preference"})
 """``knowledge.kind`` の許容値。スキーマの CHECK 制約と 1 対 1 で対応する。"""
@@ -297,6 +298,21 @@ class KnowledgeDraft:
         )
 
 
+def _stripped_optional(value: Any) -> str | None:
+    """制御文字を除いた上で、空でない値だけを文字列にして返す。
+
+    制御文字で分断した鍵が ``redact_knowledge_text`` をすり抜けて保存され、注入側の除去で
+    1 本に戻るのを防ぐため、除去は redact より前に行う。
+
+    Args:
+        value: JSON から得た任意の値。
+
+    Returns:
+        制御文字を除いた文字列。None・空・除去後に空になる値なら None。
+    """
+    return strip_control_chars(optional_str(value) or "") or None
+
+
 def _reject_oversized(text: str, field: str, limit: int) -> None:
     """文字列が上限バイト数を超えていたら ``KnowledgeInputError`` を送出する。
 
@@ -316,8 +332,8 @@ def _reject_oversized(text: str, field: str, limit: int) -> None:
 def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     """JSON ペイロードを検証済みの ``KnowledgeDraft`` へ変換する。
 
-    ``title`` / ``body`` / ``source_ref`` / ``domain`` は DB へ書く前に
-    ``redact_knowledge_text`` で既知プレフィックス系シークレットを
+    ``title`` / ``body`` / ``source_ref`` / ``domain`` / ``key`` は制御文字（C0・DEL）を除いてから、
+    DB へ書く前に ``redact_knowledge_text`` で既知プレフィックス系シークレットを
     マスクする（agent/外部入力由来の未検証データが SessionStart context
     へそのまま昇格するのを防ぐ）。key は **redact 後**の title から
     `generate_key` で生成する（redact 前の生 title から生成する
@@ -343,7 +359,7 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     # `.strip()` は前後しか落とさず、内部の改行は DB へ入る。title は注入時に
     # `- [kind] title` の 1 行として描かれる契約なので、改行が残ると 1 枚のカードが
     # 複数行に割れ、偽の知識カード行を注入枠の内側に作れる（実測済み）。
-    title = " ".join(str(payload.get("title") or "").split())
+    title = " ".join(strip_control_chars(str(payload.get("title") or "")).split())
     _reject_oversized(title, "title", MAX_TITLE_BYTES)
     if not title:
         raise KnowledgeInputError("learn: title は必須です")
@@ -353,18 +369,18 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     source = _fixed_choice(payload, "source", _FIXED_SOURCE)
     status = _fixed_choice(payload, "status", _FIXED_STATUS)
 
-    raw_key = str(payload.get("key") or "").strip()
+    raw_key = strip_control_chars(str(payload.get("key") or "")).strip()
     # 明示 key もシークレット断片を持ち込みうるため、生成 key と同じく
     # redact してから slugify を通す。
     # ハッシュ fallback も title 由来 key と同じく適用する。適用しないと
     # `日本語` と `別` のような ASCII を含まない明示 key が同じ slug へ潰れ、
     # upsert で別の知識を黙って上書きする。
     key = slug_with_hash_fallback(redact_knowledge_text(raw_key), kind) if raw_key else generate_key(title, kind)
-    body = str(payload.get("body") or "")
+    body = strip_control_chars(str(payload.get("body") or ""))
     _reject_oversized(body, "body", MAX_BODY_BYTES)
 
-    source_ref = optional_str(payload.get("source_ref"))
-    domain = optional_str(payload.get("domain"))
+    source_ref = _stripped_optional(payload.get("source_ref"))
+    domain = _stripped_optional(payload.get("domain"))
 
     return KnowledgeDraft(
         key=key,

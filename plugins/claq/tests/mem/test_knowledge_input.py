@@ -522,3 +522,34 @@ def test_size_limit_is_measured_in_bytes_not_characters() -> None:
         parse_knowledge_payload(
             {"kind": "fact", "scope": "global", "title": title, "body": "b", "domain": "d"}
         )
+
+
+def test_control_chars_are_stripped_before_redaction() -> None:
+    """NUL・ESC で分断した鍵は、除去で 1 本に戻してから redact されて保存されない。
+
+    redact より後に除去すると、分断された鍵は redact に一致せず保存され、注入側の除去で
+    再結合して鍵のまま載る。
+    """
+    key = "sk-ant-" + "abcdefghijklmnopqrstuvwxyz0123456789"
+    split = key[:8] + "\x00" + key[8:20] + "\x1b" + key[20:]
+    draft = parse_knowledge_payload(
+        {
+            "title": f"t {split}",
+            "body": f"b {split}\nline2",
+            "domain": split,
+            "source_ref": split,
+            "key": split,
+            "kind": "pitfall",
+        }
+    )
+    for field in (draft.key, draft.title, draft.body, draft.domain or "", draft.source_ref or ""):
+        assert "sk-ant-" not in field
+        assert "\x00" not in field and "\x1b" not in field
+    assert "\n" in draft.body
+
+
+def test_control_only_optional_fields_become_none() -> None:
+    """除去後に空になる domain / source_ref は None になる。"""
+    draft = parse_knowledge_payload({"title": "t", "kind": "pitfall", "domain": "\x00\x1b", "source_ref": "\x07"})
+    assert draft.domain is None
+    assert draft.source_ref is None
