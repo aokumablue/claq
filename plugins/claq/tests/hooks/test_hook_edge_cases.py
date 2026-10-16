@@ -17,8 +17,8 @@ from unittest import mock
 import pytest
 
 from claq.hooks import commit_quality_scanner as commit_quality_scanner
-from claq.hooks import hook_common as hook_common
 from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
+from claq.hooks import stdin_io as stdin_io
 
 
 def _scan_deadline() -> float:
@@ -781,7 +781,7 @@ def test_pre_bash_commit_quality_finds_parser_and_reading_errors(monkeypatch: py
 
 def test_pre_bash_commit_quality_main_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "claq.hooks.hook_common.read_raw_stdin_with_truncation", lambda: ("payload", False)
+        "claq.hooks.stdin_io.read_raw_stdin_with_truncation", lambda: ("payload", False)
     )
     monkeypatch.setattr(
         pre_bash_commit_quality,
@@ -917,8 +917,8 @@ def test_pre_bash_commit_quality_main_denies_when_stdin_unreadable(
     Windows のパイプで allow と deny が同じ exit 0 になる。
     """
     monkeypatch.setattr(
-        "claq.hooks.hook_common.read_raw_stdin_with_truncation",
-        lambda: (_ for _ in ()).throw(hook_common.StdinUnavailableError("boom")),
+        "claq.hooks.stdin_io.read_raw_stdin_with_truncation",
+        lambda: (_ for _ in ()).throw(stdin_io.StdinUnavailableError("boom")),
     )
 
     assert pre_bash_commit_quality.main() == 2
@@ -932,8 +932,8 @@ def test_pre_bash_commit_quality_main_denies_when_emit_fails_on_unreadable_stdin
 ) -> None:
     """deny 出力自体が失敗しても exit 2 を保つ（出力層の失敗で素通りさせない）。"""
     monkeypatch.setattr(
-        "claq.hooks.hook_common.read_raw_stdin_with_truncation",
-        lambda: (_ for _ in ()).throw(hook_common.StdinUnavailableError("boom")),
+        "claq.hooks.stdin_io.read_raw_stdin_with_truncation",
+        lambda: (_ for _ in ()).throw(stdin_io.StdinUnavailableError("boom")),
     )
     monkeypatch.setattr(
         "claq.hooks.hook_common.emit_block_output",

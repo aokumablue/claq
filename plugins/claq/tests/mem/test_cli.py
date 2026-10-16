@@ -38,8 +38,8 @@ def _run_cli(
     monkeypatch.setattr(settings_mod, "_default_data_dir", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "argv", ["python", *argv])
-    # _read_stdin_json は hook_common.read_raw_stdin() 経由（tty 判定・
-    # select による deadline を内包）。その機構自体は test_hook_common.py が
+    # _read_stdin_json は stdin_io.read_raw_stdin() 経由（tty 判定・
+    # select による deadline を内包）。その機構自体は test_stdin_io.py が
     # 検証済みのため、ここでは境界を直接差し替えて stdin 内容だけを渡す。
     monkeypatch.setattr(cli, "read_raw_stdin", lambda: json.dumps(stdin_payload or {}))
     # 実環境の ~/.claq/logs/bg-*.log の内容にテスト結果が左右されない
@@ -316,8 +316,8 @@ class TestArgvAndStdin:
         """read_raw_stdin() の戻りが空・非 dict・不正 JSON ならすべて空 dict に落とす。
 
         空文字列は tty・stdin 未接続・deadline 到達のいずれでも
-        hook_common.read_raw_stdin() が返す値。個々の原因ごとの分岐は
-        hook_common 側（test_hook_common.py）が検証済みのため、ここでは
+        stdin_io.read_raw_stdin() が返す値。個々の原因ごとの分岐は
+        stdin_io 側（test_stdin_io.py）が検証済みのため、ここでは
         _read_stdin_json がその戻り値をどう扱うかだけを見る。
         """
         monkeypatch.setattr(cli, "read_raw_stdin", lambda: raw)

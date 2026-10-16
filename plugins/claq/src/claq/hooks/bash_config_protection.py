@@ -64,8 +64,6 @@ from claq.hooks.config_protection import (
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     MAX_COMMAND_TOKENS,
-    MAX_STDIN_BYTES,
-    StdinUnavailableError,
     basename,
     command_dialect_variants,
     command_exceeds_scan_budget,
@@ -74,14 +72,18 @@ from claq.hooks.hook_common import (
     is_inplace_edit_flag,
     normalize_executable_name,
     normalize_protected_name,
-    parse_json_object,
-    read_raw_stdin_with_truncation,
     resolve_effective_target,
     resolve_repo_root,
     split_segments,
-    stdin_unreadable_message,
     strip_data_heredoc_bodies,
     tokenize,
+)
+from claq.hooks.stdin_io import (
+    MAX_STDIN_BYTES,
+    StdinUnavailableError,
+    parse_json_object,
+    read_raw_stdin_with_truncation,
+    stdin_unreadable_message,
 )
 from claq.lib.harness import (
     extract_raw_tool_name,

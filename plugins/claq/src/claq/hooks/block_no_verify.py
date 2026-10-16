@@ -88,19 +88,21 @@ from typing import NamedTuple
 
 from claq.hooks.hook_common import (
     MAX_COMMAND_TOKENS,
-    MAX_STDIN_BYTES,
-    StdinUnavailableError,
     command_dialect_variants,
     command_exceeds_scan_budget,
     emit_block_output,
     extract_shell_wrapper_command,
     is_git_executable_token,
-    parse_json_object,
-    read_raw_stdin_with_truncation,
     split_segments,
-    stdin_unreadable_message,
     strip_data_heredoc_bodies,
     tokenize_with_status,
+)
+from claq.hooks.stdin_io import (
+    MAX_STDIN_BYTES,
+    StdinUnavailableError,
+    parse_json_object,
+    read_raw_stdin_with_truncation,
+    stdin_unreadable_message,
 )
 from claq.lib.harness import INPUT_CONTAINER_KEYS, extract_tool_input, iter_bash_commands
 

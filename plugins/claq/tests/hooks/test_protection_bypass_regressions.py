@@ -29,6 +29,7 @@ from claq.hooks import (
     config_protection,
     hook_common,
     pre_bash_commit_quality,
+    stdin_io,
 )
 
 # 検査対象フック名 → main() を持つモジュール。
@@ -492,9 +493,9 @@ def _run(hook: str, payload: dict[str, Any], monkeypatch: pytest.MonkeyPatch) ->
         return json.dumps(payload), False
 
     module = _HOOKS[hook]
-    # `pre_bash_commit_quality.main()` は `hook_common` から関数内 import する
+    # `pre_bash_commit_quality.main()` は `stdin_io` から関数内 import する
     # ため、モジュール束縛の差し替えだけでは効かない。両方を差し替える。
-    monkeypatch.setattr(hook_common, "read_raw_stdin_with_truncation", _read)
+    monkeypatch.setattr(stdin_io, "read_raw_stdin_with_truncation", _read)
     if hasattr(module, "read_raw_stdin_with_truncation"):
         monkeypatch.setattr(module, "read_raw_stdin_with_truncation", _read)
     return module.main()

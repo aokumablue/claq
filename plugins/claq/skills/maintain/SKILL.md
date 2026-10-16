@@ -14,7 +14,7 @@ commands/skills/agents/hooks をレビューし、実害を直し、指示文書
 1. 工程分離: レビュー（ステップ1-2）は READ-ONLY、編集はステップ4 以降。混ぜない
 2. 現物実証: CRITICAL の指摘は鵜呑みにせず、サンドボックスや実行で失敗を再現してから直す
 3. 既存の文言を再利用する: 新しい表現を発明せず、tdd-writer / reviewer / feat-dev / loop-dev の既存の文言を使う（トークンと表現の揺れを増やさないため）。禁止事項を列挙するより、肯定形の原則で書く
-4. 両ハーネス互換: プラグインは Claude Code（主）と GitHub Copilot CLI（副）の両方で動く。ハーネスに依存する入出力は `hook_common` / `output_adapter` の既存の関門（`emit_block_output` / `adapt_context_output` 等）に集め、Copilot で実現できない機能には同等の代替（無理なら安全側に倒した明示的なスキップ）を実装する。Claude Code 側の処理経路は変えない。ハーネスの判定やプロトコルの分岐をフック内に直書きした実装は、レビューで指摘して直す
+4. 両ハーネス互換: プラグインは Claude Code（主）と GitHub Copilot CLI（副）の両方で動く。ハーネスに依存する入出力は `stdin_io`（stdin の読み取り）/ `hook_common` / `output_adapter` の既存の関門（`emit_block_output` / `adapt_context_output` 等）に集め、Copilot で実現できない機能には同等の代替（無理なら安全側に倒した明示的なスキップ）を実装する。Claude Code 側の処理経路は変えない。ハーネスの判定やプロトコルの分岐をフック内に直書きした実装は、レビューで指摘して直す
 
 ## 停止点
 
@@ -83,7 +83,7 @@ BLOCKER（CRITICAL/HIGH）の指摘を種別に分けて示し、応答を待た
 
 - バグ: `claq:tdd-writer` で RED→GREEN（原則2 の現物実証）。実害のある脆弱性も同じ
 - 余剰: `claq:code-refiner`（`mode: simplify`）で削除する
-- フック修正: ハーネス依存の入出力は `hook_common` / `output_adapter` の関門へ寄せる（原則4）。新しいフック・外部呼び出しは非ブロッキングかつハードタイムアウト付きにする（CLAUDE.md に従う）
+- フック修正: ハーネス依存の入出力は、stdin の読み取りを `stdin_io`、出力と共通判定を `hook_common` / `output_adapter` の関門へ寄せる（原則4）。新しいフック・外部呼び出しは非ブロッキングかつハードタイムアウト付きにする（CLAUDE.md に従う）
 - 強化: 指示文書への条項の追加は WHAT を変えるので、WHAT 不変が前提の `/refactor` ではなく直接編集する。既存の文言を再利用する（原則3）。指示・ガードを足すのは、実行で失敗が観測された場合だけにする。1 行足すごとに、効いていない行を 1 行削れないか探す
 - 仕様変更: 実装せず、`/plan` 用の要件だけを整理する
 - 修正の単位ごとに検証し（baseline と同じ 4 コマンド）、新しい失敗が出たらその単位を戻して続け、戻した分はステップ6 の残タスクに書く。作業を細かく分け、現在のブランチへ `type(scope): 要約` の規約でコミットする（main へ直接コミットしない）

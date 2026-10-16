@@ -17,14 +17,16 @@ from typing import Any
 
 from claq.hooks.block_no_verify import GIT_CONFIG_TEXT_SIGNAL_RE
 from claq.hooks.hook_common import (
-    MAX_STDIN_BYTES,
-    StdinUnavailableError,
     basename,
     emit_block_output,
     normalize_protected_name,
+    resolve_effective_target,
+)
+from claq.hooks.stdin_io import (
+    MAX_STDIN_BYTES,
+    StdinUnavailableError,
     parse_json_object,
     read_raw_stdin_with_truncation,
-    resolve_effective_target,
     stdin_unreadable_message,
 )
 from claq.lib.harness import (

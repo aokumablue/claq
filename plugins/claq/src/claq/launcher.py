@@ -6,7 +6,7 @@ Claude Code 等のハーネスから `python3 launcher.py [--bg] <module> [args.
 サブプロセスを spawn せず runpy でインプロセス実行する。Python 3.12 未満
 では hook を実行せず stderr に理由を書いて 0 で終了する（fail-open）。
 venv への自己置換は行わない。stdin はターゲット自身が
-`hook_common.read_raw_stdin()` 等で直接読む（launcher は代読しない）。
+`stdin_io.read_raw_stdin()` 等で直接読む（launcher は代読しない）。
 
 Python 3.12 未満でも構文として読めるよう、本ファイルでは新しい構文を使わない。
 """
@@ -161,7 +161,8 @@ def main(argv: list[str] | None = None) -> int:
         sys.path.insert(0, src_dir)
 
     from claq.hooks.detach import detach_process
-    from claq.hooks.hook_common import read_raw_stdin, write_stderr
+    from claq.hooks.hook_common import write_stderr
+    from claq.hooks.stdin_io import read_raw_stdin
     from claq.lib.env_pointer import write_env_pointer
 
     # md（agents/commands/skills）がベンダ固有パスを書かずに plugin root を

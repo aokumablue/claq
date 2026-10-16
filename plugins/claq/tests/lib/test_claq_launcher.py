@@ -256,7 +256,7 @@ class TestResolveModuleCommand:
             return True
 
         monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
-        monkeypatch.setattr("claq.hooks.hook_common.read_raw_stdin", lambda: "")
+        monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin", lambda: "")
         monkeypatch.setattr("claq.hooks.detach.detach_process", fake_detach)
         monkeypatch.setattr(launcher, "build_env", lambda: {})
         assert launcher.main(["--bg", target, *args]) == 0
@@ -300,7 +300,7 @@ class TestMain:
 
     def test_bg_always_detaches_and_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """--bg は host に関わらず常に detach して 0 を返す。"""
-        monkeypatch.setattr("claq.hooks.hook_common.read_raw_stdin", lambda: "{}")
+        monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin", lambda: "{}")
 
         captured: dict[str, object] = {}
 
@@ -331,7 +331,7 @@ class TestMain:
         受付そのものに失敗したのに 0 を返すと、呼び出し側は起動されていない
         処理を受付成功と誤認する（子の処理結果は依然として非同期のまま）。
         """
-        monkeypatch.setattr("claq.hooks.hook_common.read_raw_stdin", lambda: "")
+        monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin", lambda: "")
         monkeypatch.setattr("claq.hooks.detach.detach_process", lambda *a, **k: False)
         monkeypatch.setattr(launcher, "build_env", lambda: {})
 

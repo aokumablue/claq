@@ -43,19 +43,18 @@ from claq.hooks.commit_quality_scanner import (
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     MAX_COMMAND_TOKENS,
-    MAX_STDIN_BYTES,
     command_dialect_variants,
     command_exceeds_scan_budget,
     is_git_executable_token,
     is_inplace_edit_flag,
     normalize_executable_name,
-    parse_json_object,
     resolve_repo_root,
     split_segments,
     strip_data_heredoc_bodies,
     tokenize,
     tokenize_with_status,
 )
+from claq.hooks.stdin_io import MAX_STDIN_BYTES, parse_json_object
 from claq.lib.core_utils import log
 from claq.lib.harness import iter_bash_command_groups
 from claq.lib.subprocess_utils import run_text
@@ -963,7 +962,7 @@ def main() -> int:
     Raises:
         例外は発生しません。
     """
-    from claq.hooks.hook_common import (
+    from claq.hooks.stdin_io import (
         StdinUnavailableError,
         read_raw_stdin_with_truncation,
         stdin_unreadable_message,

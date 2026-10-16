@@ -478,7 +478,7 @@ class TestPreCompact:
 class TestSimpleHookEntrypoints:
     def test_block_no_verify_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "claq.hooks.hook_common.read_raw_stdin_with_truncation",
+            "claq.hooks.stdin_io.read_raw_stdin_with_truncation",
             lambda: (json.dumps({"tool_input": {"command": "git status"}}), False),
         )
 

@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from claq.hooks.hook_common import StdinUnavailableError
+from claq.hooks.stdin_io import StdinUnavailableError
 
 # (hook モジュール名, 差し替え対象モジュール名, deny 理由に載る hook 名)
 #
@@ -55,8 +55,8 @@ _PROTECTION_HOOKS = [
     ),
     pytest.param(
         "claq.hooks.pre_bash_commit_quality",
-        # main() 内で hook_common から遅延 import するため、差し替えは共通側。
-        "claq.hooks.hook_common",
+        # main() 内で stdin_io から遅延 import するため、差し替えは共通側。
+        "claq.hooks.stdin_io",
         "pre:bash-commit-quality",
         id="pre_bash_commit_quality",
     ),

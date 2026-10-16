@@ -54,7 +54,7 @@ INPUT_CONTAINER_KEYS = ("tool_input", "toolInput", "toolArgs", "tool_args")
 _PATCH_FILE_MARKERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ")
 
 # ``json.loads`` が「この文字列は JSON として読めない」ことを示すために送出しうる
-# 例外。本モジュールと ``hook_common.parse_json_object`` の JSON パースは全て
+# 例外。本モジュールと ``stdin_io.parse_json_object`` の JSON パースは全て
 # この 1 タプルで受ける（片側だけ塞ぐと、同型の穴が別の呼び出し箇所に残る）。
 #
 # ``RecursionError`` を含めるのは必須。CPython の JSON デコーダは深くネストした

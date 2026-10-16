@@ -68,7 +68,7 @@ class TestMainStdinBoundary:
     ) -> None:
         """1 MiB 超で切り捨てられた入力は commit 判定不能として deny する。"""
         monkeypatch.setattr(
-            "claq.hooks.hook_common.read_raw_stdin_with_truncation",
+            "claq.hooks.stdin_io.read_raw_stdin_with_truncation",
             lambda: ("{not-even-json", True),
         )
 
@@ -85,7 +85,7 @@ class TestMainStdinBoundary:
         # (_MALFORMED_COMMIT_MESSAGE) は staged files 取得を経由せず
         # 即座に exitCode=2 を確定するため、ここでの検証に適する。
         monkeypatch.setattr(
-            "claq.hooks.hook_common.read_raw_stdin_with_truncation",
+            "claq.hooks.stdin_io.read_raw_stdin_with_truncation",
             lambda: ("not-json but has git commit in it", False),
         )
 
@@ -101,7 +101,7 @@ class TestMainStdinBoundary:
     ) -> None:
         """truncation 検知後の emit_block_output 失敗も fail-closed（exit 2）。"""
         monkeypatch.setattr(
-            "claq.hooks.hook_common.read_raw_stdin_with_truncation",
+            "claq.hooks.stdin_io.read_raw_stdin_with_truncation",
             lambda: ("{not-even-json", True),
         )
 
@@ -115,7 +115,7 @@ class TestMainStdinBoundary:
     def test_non_commit_command_still_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         payload = json.dumps({"tool_input": {"command": "git status"}})
         monkeypatch.setattr(
-            "claq.hooks.hook_common.read_raw_stdin_with_truncation", lambda: (payload, False)
+            "claq.hooks.stdin_io.read_raw_stdin_with_truncation", lambda: (payload, False)
         )
 
         assert pbcq.main() == 0
