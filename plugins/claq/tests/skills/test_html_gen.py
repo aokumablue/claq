@@ -798,6 +798,7 @@ def test_looping_animation_is_reported(tmp_path: Path) -> None:
         ("e4", '.a { background: url("data:image/svg+xml;utf8,<svg>/*</svg>"); }'),
         ("e5", 'a[href*="/*"] { color: red; }'),
         ("e6", ".a::before { content: '/*'; }"),
+        ("e7", ".a { background: URL(/*x.png); }"),
     ):
         dest = _copy_site(tmp_path, name)
         assert "infinite" in _append(dest, "styles.css", f"\n{prefix} .b {{ animation: x 1s infinite; }}\n"), prefix
@@ -848,6 +849,11 @@ def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
         "<style>:root { --animate-spin: spin 1s linear INFINITE; }</style>",
         # コメントの外にある宣言は、同じ要素のコメントに紛れても落とす
         "<style>/* note */ .live { animation: pulse 2s infinite; }</style>",
+        # 文字列リテラルや url()（大文字の URL() を含む）の中の /* はコメントの開始ではない
+        '<style>.a::before { content: "/*"; } .b { animation: x 1s infinite; }</style>',
+        "<style>.a { background: url(img/*.png); } .b { animation: x 1s infinite; }</style>",
+        "<style>.a { background: URL(/*x.png); } .b { animation: x 1s infinite; }</style>",
+        '<i style="content: \'/*\'; animation: x 1s infinite"></i>',
     ):
         assert check_site._validate_inline_motion(markup) != [], markup
     for markup in (
