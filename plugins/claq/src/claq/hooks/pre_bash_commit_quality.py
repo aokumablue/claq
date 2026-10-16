@@ -57,7 +57,7 @@ from claq.hooks.hook_common import (
     tokenize_with_status,
 )
 from claq.lib.core_utils import log
-from claq.lib.harness import iter_bash_commands
+from claq.lib.harness import iter_bash_command_groups
 from claq.lib.subprocess_utils import run_text
 
 _CONVENTIONAL_COMMIT = re.compile(
@@ -795,6 +795,45 @@ def _evaluate_confirmed_commit(raw_input: str, command: str, commit_args: list[s
         return _blocked(raw_input, _SCAN_FAILURE_MESSAGE)
 
 
+def _detect_group_commits(group: tuple[str, ...]) -> list[tuple[str, list[str]]] | None:
+    """1 グループ（1 回の呼び出しを表す候補文字列の組）から `git commit` 起動を集める。
+
+    各候補を個別に検出する。argv 配列のグループ（長さ 2 以上。末尾が結合文字列）では、
+    結合候補が commit を検出し、要素側の検出が 1 件以下なら結合候補 1 件へ畳む。
+    ``["git", "commit", "-m", "fix: git commit handling"]`` は要素にも結合にも commit が
+    見え、そのまま数えると 1 回の commit が「複数 commit」になる。要素側の検出が 2 件以上
+    （``["git commit -m a", "git commit -m b"]`` のようなコマンド文字列の配列）なら別々の
+    commit なので要素をそのまま数える。結合候補が検出しない場合も要素をそのまま数える
+    （``["bash", "-lc", "git commit -m x"]`` の commit は要素側でしか見えない）。
+
+    Args:
+        group: ``iter_bash_command_groups`` が返すグループです。
+
+    Returns:
+        検出した commit のリスト。走査予算を超える候補があれば None（呼び出し側が block する）。
+
+    Raises:
+        例外は発生しません（候補ごとの判定失敗は記録して読み飛ばす）。
+    """
+    has_joined = len(group) > 1
+    detections: list[tuple[str, list[str]] | None] = []
+    for raw_command in group:
+        command = strip_data_heredoc_bodies(raw_command)
+        # 上限超過を走らせると timeout で host に kill され、検査が丸ごと飛ぶ。
+        if command_exceeds_scan_budget(command):
+            return None
+        try:
+            detections.append(_detect_git_commit(command))
+        except Exception as err:  # noqa: BLE001 - 1 候補の失敗で他を落とさない
+            log(f"[Hook] Error: {err}")
+            detections.append(None)
+    joined = detections.pop() if has_joined else None
+    elements = [detected for detected in detections if detected is not None]
+    if joined is not None and len(elements) <= 1:
+        return [joined]
+    return elements
+
+
 def evaluate(raw_input: str) -> dict:
     """入力を評価し、出力内容と終了コードを返します。
 
@@ -826,19 +865,12 @@ def evaluate(raw_input: str) -> dict:
         # コンテナキーは 1 つも取りこぼさず走査し、commit を**全て**集める。先に判定できた
         # コンテナの結論を返すと、先頭が「通る commit」のときに後続キーの commit が
         # 検査されない。
-        commits = []
-        for raw_command in iter_bash_commands(input_data):
-            command = strip_data_heredoc_bodies(raw_command)
-            # 上限超過を走らせると timeout で host に kill され、検査が丸ごと飛ぶ。
-            if command_exceeds_scan_budget(command):
+        commits: list[tuple[str, list[str]]] = []
+        for group in iter_bash_command_groups(input_data):
+            group_commits = _detect_group_commits(group)
+            if group_commits is None:
                 return _blocked(raw_input, _TOKEN_BUDGET_MESSAGE)
-            try:
-                detected = _detect_git_commit(command)
-            except Exception as err:  # noqa: BLE001 - 1 コンテナの失敗で他を落とさない
-                log(f"[Hook] Error: {err}")
-                continue
-            if detected is not None:
-                commits.append(detected)
+            commits.extend(group_commits)
 
         if not commits:
             return {"output": raw_input, "exitCode": 0}

@@ -187,3 +187,29 @@ wrapper 自身の positional 値として読み飛ばす（`timeout 5 rm` の `5
 numeric positional の消費だけが唯一の一般化である。allowlist の要素が静かに減っても集合リテラル
 1 statement なのでカバレッジでは検出できないため、期待値との完全一致と全要素の deny 実測で固定
 する。
+
+## argv 配列は要素と結合の両方で検査し、commit は argv 1 本を 1 件と数える
+
+host によってはコマンドが文字列ではなく argv 配列（`["git", "commit", "--no-verify"]`、
+`["bash", "-lc", "git commit -m x"]`）で渡る。要素だけを見ると各要素は単独では無害に読め、結合
+だけを見ると `sh -c` の引数に包まれた `git commit` が 1 語に潰れて検出できない。保護フックは
+どちらか一方に倒さず、**全て str で 2 要素以上の配列を（各要素…, `shlex.join` で結合した 1 文字列）
+の 1 グループとして扱い、全候補を検査する。**
+
+- 共有層（`lib/harness.py`）は `iter_bash_command_groups` でグループ単位に返し、
+  `iter_bash_commands` はそれを平坦化しただけの関数とする。`shlex.join` は引用で 1 語を保つので、
+  結合文字列は `shlex.split` で元の配列に戻る
+- 「どれか 1 つでも該当すれば deny」の判定（`block_no_verify` / `bash_config_protection`）は
+  候補の個数に意味が無いので平坦化した列を使う。要素と結合のどちらが検出しても deny する
+- `pre_bash_commit_quality` は commit を**数える**ので、グループ単位で数える。要素にも結合にも
+  `git commit` が見える argv（`["git", "commit", "-m", "fix: git commit handling"]`）を要素と
+  結合の 2 件と数えると、1 回の commit が「複数 commit」として誤って deny される。結合候補が
+  commit を検出し要素側の検出が 1 件以下なら、グループを結合候補 1 件に畳む。結合候補が検出
+  しない配列（`["bash", "-lc", "git commit -m x"]` の commit は要素側でしか見えない）と、
+  要素側の検出が 2 件以上の配列（コマンド文字列を並べた `["git commit -m a", "git commit -m b"]`、
+  argv を入れ子で並べた `[["git", "commit", "-m", "a"], ["git", "commit", "-m", "b"]]`）は、
+  別々の commit として要素をそのまま数え、複数 commit で deny する
+- 走査予算の超過 block と候補単位の判定失敗の読み飛ばしは、グループ内の候補ごとに適用する
+- PowerShell（`pwsh -Command`）・`cmd /c` 経由の呼び出しは、文字列形と同じく検出範囲外とする。
+  `sh -c` の 1 段は要素側の検出で拾えるが、2 段以上のラッパー、変数展開、`eval` を読まない
+  点は文字列形と同じ

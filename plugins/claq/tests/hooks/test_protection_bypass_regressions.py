@@ -136,6 +136,16 @@ _BLOCKED_CASES = [
         {"tool_name": "shell", "tool_input": {"command": ["git", "commit", "--no-verify", "-m", "x"]}},
     ),
     (
+        "argv 配列の sh -c に包まれた --no-verify",
+        "block_no_verify",
+        {"tool_name": "shell", "tool_input": {"command": ["bash", "-lc", "git commit --no-verify"]}},
+    ),
+    (
+        "コマンド dict の配列の後続要素の --no-verify",
+        "block_no_verify",
+        {"tool_name": "shell", "tool_input": [{"command": "ls"}, {"command": "git commit --no-verify"}]},
+    ),
+    (
         "argv 配列に分解された保護対象の削除",
         "bash_config_protection",
         {"tool_name": "shell", "tool_input": {"command": ["rm", "ruff.toml"]}},

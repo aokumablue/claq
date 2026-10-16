@@ -251,6 +251,97 @@ class TestCompoundCommitGuard:
         assert result["reason"] == pbcq._MUTATION_BEFORE_COMMIT_MESSAGE
 
 
+class TestArgvGroupCommitCounting:
+    """argv 配列は 1 本のコマンドとして数え、要素と結合の二重計上で誤拒否しない。"""
+
+    @staticmethod
+    def _run(command: object, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, list[str]]:
+        """品質スキャンを stub に差し替えて ``evaluate`` を実行し、スキャンに渡った command を返す。"""
+        scanned: list[str] = []
+
+        def _stub(raw_input: str, command: str, commit_args: list[str]) -> dict:
+            scanned.append(command)
+            return {"output": raw_input, "exitCode": 0}
+
+        monkeypatch.setattr(pbcq, "_evaluate_confirmed_commit", _stub)
+        raw = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
+        return pbcq.evaluate(raw), scanned
+
+    def test_argv_commit_whose_message_mentions_git_commit_is_one_commit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """引数に ``git commit`` を含む argv の commit は複数 commit として拒否しない。"""
+        result, scanned = self._run(["git", "commit", "-m", "fix: git commit handling"], monkeypatch)
+
+        assert result["exitCode"] == 0
+        assert scanned == ["git commit -m 'fix: git commit handling'"]
+
+    def test_argv_wrapped_in_shell_dash_c_is_still_detected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``bash -lc`` の引数に包まれた commit は要素側で検出し、品質スキャンを走らせる。"""
+        result, scanned = self._run(["bash", "-lc", "git commit -m 'bad'"], monkeypatch)
+
+        assert result["exitCode"] == 0
+        assert scanned == ["git commit -m 'bad'"]
+
+    def test_nested_argv_lists_with_two_commits_are_denied(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """argv を 2 本並べた配列は別々の commit として数え、複数 commit で deny する。"""
+        result, scanned = self._run(
+            [["git", "commit", "-m", "a"], ["git", "commit", "-m", "b"]], monkeypatch
+        )
+
+        assert result["exitCode"] == 2
+        assert result["reason"] == pbcq._MULTIPLE_COMMITS_MESSAGE
+        assert scanned == []
+
+    def test_flat_command_strings_with_two_commits_are_denied(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """コマンド文字列を並べた配列の複数 commit は要素をそのまま数えて deny する。"""
+        result, scanned = self._run(["git commit -m a", "git commit -m b"], monkeypatch)
+
+        assert result["exitCode"] == 2
+        assert result["reason"] == pbcq._MULTIPLE_COMMITS_MESSAGE
+        assert scanned == []
+
+    def test_flat_command_strings_with_one_commit_are_scanned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """結合側が検出しない配列でも、要素 1 件の commit は検査する。"""
+        result, scanned = self._run(["git commit -m a", "echo done"], monkeypatch)
+
+        assert result["exitCode"] == 0
+        assert scanned == ["git commit -m a"]
+
+    def test_non_commit_argv_passes_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """commit を含まない argv は検査せずに通す。"""
+        result, scanned = self._run(["git", "status", "--short"], monkeypatch)
+
+        assert result["exitCode"] == 0
+        assert scanned == []
+
+    def test_oversized_element_in_argv_group_is_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """グループ内の候補が走査予算を超えれば block する（候補単位の予算は維持）。"""
+        monkeypatch.setattr(pbcq, "command_exceeds_scan_budget", lambda command: command == "big")
+        result, scanned = self._run(["git", "big"], monkeypatch)
+
+        assert result["exitCode"] == 2
+        assert result["reason"] == pbcq._TOKEN_BUDGET_MESSAGE
+        assert scanned == []
+
+    def test_failing_candidate_in_argv_group_does_not_drop_the_others(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """グループ内 1 候補の判定失敗で、残りの候補の commit 検出を捨てない。"""
+        real = pbcq._detect_git_commit
+
+        def _flaky(command: str):
+            if command == "boom":
+                raise RuntimeError("tokenize exploded")
+            return real(command)
+
+        monkeypatch.setattr(pbcq, "_detect_git_commit", _flaky)
+        result, scanned = self._run(["boom", "git commit -m a"], monkeypatch)
+
+        assert result["exitCode"] == 0
+        assert scanned == ["git commit -m a"]
+
+
 class TestWorktreeEnumerationFailClosed:
     """`git commit -a` の作業ツリー列挙失敗を「対象なし」と区別する。"""
 

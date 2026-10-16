@@ -210,6 +210,80 @@ class TestIterBashCommands:
 
         assert list(harness.iter_bash_commands(payload)) == ["git", "status"]
 
+    def test_argv_list_is_one_group_ending_with_the_joined_command(self):
+        """全 str の argv 配列は（要素…, 結合）の 1 グループになる。
+
+        フラット化すると呼び出し側が「同じ 1 コマンドの別表現」と「別コマンド」を
+        区別できない。``fix: git commit handling`` のように引数の文字列に ``git commit``
+        を含む commit が、要素と結合の 2 件として数えられてしまう。
+        """
+        payload = {"tool_input": {"command": ["git", "commit", "-m", "fix: git commit handling"]}}
+
+        groups = list(harness.iter_bash_command_groups(payload))
+
+        assert groups == [
+            ("git", "commit", "-m", "fix: git commit handling", "git commit -m 'fix: git commit handling'")
+        ]
+        assert list(harness.iter_bash_commands(payload)) == list(groups[0])
+
+    def test_plain_strings_are_singleton_groups(self):
+        """文字列と、argv 配列でない list の要素は 1 要素ずつのグループになる。"""
+        payload = {"tool_input": [{"command": "ls"}, {"cmd": "pwd"}]}
+
+        assert list(harness.iter_bash_command_groups(payload)) == [("ls",), ("pwd",)]
+
+    def test_nested_argv_lists_are_separate_groups(self):
+        """入れ子の argv 配列はそれぞれが別のグループ（別のコマンド）になる。"""
+        payload = {"tool_input": [["git", "commit", "-m", "a"], ["git", "commit", "-m", "b"]]}
+
+        assert list(harness.iter_bash_command_groups(payload)) == [
+            ("git", "commit", "-m", "a", "git commit -m a"),
+            ("git", "commit", "-m", "b", "git commit -m b"),
+        ]
+
+    def test_flat_command_strings_list_is_one_group(self):
+        """複数コマンド文字列を並べた配列も argv 配列と同じ形（要素…, 結合）を取る。"""
+        payload = {"tool_input": ["git commit -m a", "git commit -m b"]}
+
+        groups = list(harness.iter_bash_command_groups(payload))
+
+        assert len(groups) == 1
+        assert groups[0][:2] == ("git commit -m a", "git commit -m b")
+
+    def test_every_container_key_yields_its_own_groups(self):
+        """コンテナキーごとにグループを返す（先頭が無害でも後続を落とさない）。"""
+        payload = {
+            "tool_input": {"command": "echo safe"},
+            "toolArgs": {"command": ["git", "commit", "--no-verify"]},
+        }
+
+        assert list(harness.iter_bash_command_groups(payload)) == [
+            ("echo safe",),
+            ("git", "commit", "--no-verify", "git commit --no-verify"),
+        ]
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["git", "commit", "-m", "a b"],
+            ["echo", "it's"],
+            ["echo", 'say "hi"'],
+            ["printf", "a\nb", "line1\nline2"],
+            ["echo", "$HOME", "`id`", "$(id)"],
+            ["echo", "日本語", "\u00e9\u200b"],
+            ["echo", "", "x"],
+            ["echo", "a;b", "c&&d", "e|f", "#g"],
+            ["x", "\\"],
+        ],
+    )
+    def test_joined_command_round_trips_to_the_argv(self, argv):
+        """結合文字列は ``shlex.split`` で元の argv に戻る（引用が 1 語を保つ）。"""
+        import shlex
+
+        group = next(harness.iter_bash_command_groups({"tool_input": {"command": argv}}))
+
+        assert shlex.split(group[-1]) == argv
+
     def test_cmd_alias_field(self):
         """command が無く cmd があればそれを使う。"""
         assert list(harness.iter_bash_commands({"tool_input": {"cmd": "whoami"}})) == ["whoami"]

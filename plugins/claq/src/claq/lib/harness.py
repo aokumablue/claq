@@ -125,54 +125,73 @@ def iter_tool_input_containers(payload: dict[str, Any]) -> Iterator[Any]:
             yield extract_tool_input({key: payload[key]})
 
 
-def iter_bash_commands(payload: dict[str, Any]) -> Iterator[str]:
-    """フック payload に含まれる Bash/shell の command 文字列を全て返す。
+def iter_bash_command_groups(payload: dict[str, Any]) -> Iterator[tuple[str, ...]]:
+    """フック payload に含まれる Bash/shell の command をグループ単位で返す。
 
     ``tool_input.command`` / ``toolArgs``（JSON 文字列含む）/ 生文字列 / list 形状を
-    吸収し、コンテナキーは 1 つも取りこぼさず走査する。list 形状を取りこぼすと、
-    コマンドが 1 つも無い payload として静かに許可されてしまう。
+    吸収し、コンテナキーは 1 つも取りこぼさず走査する。
+
+    グループは「同じ 1 回の呼び出しを表す候補文字列の組」である。全て str で 2 要素以上の
+    list（argv 配列）は（各要素…, ``shlex.join`` で結合した 1 文字列）の 1 グループになり、
+    それ以外の command 文字列は 1 要素のグループになる。要素と結合は同じ呼び出しの
+    別表現なので、呼び出し側が「1 コマンド」を数える（commit の数え上げ等）ときは
+    グループを単位にする。長さ 2 以上のグループは必ず末尾が結合文字列である。
 
     1 つも yield しない場合の扱いは呼び出し側の責務。コンテナキー自体が無い場合の
     fail-closed は ``block_no_verify`` が ``extract_tool_input`` の None 判定で別途行う。
 
     Yields:
-        非空の command 文字列。
+        非空の command 文字列からなるグループ。
     """
     for container in iter_tool_input_containers(payload):
         yield from _commands_from_tool_input(container)
 
 
-def _commands_from_tool_input(tool_input: Any) -> list[str]:
-    """正規化済み tool 入力から command 文字列を**すべて**取り出す。
+def iter_bash_commands(payload: dict[str, Any]) -> Iterator[str]:
+    """フック payload に含まれる Bash/shell の command 文字列を全て返す。
+
+    ``iter_bash_command_groups`` を平坦化したもの。「どれか 1 つでも該当すれば deny」
+    の判定（``block_no_verify`` / ``bash_config_protection``）は、候補の個数に意味が
+    無いのでこちらを使う。list 形状を取りこぼすと、コマンドが 1 つも無い payload として
+    静かに許可されてしまう。
+
+    Yields:
+        非空の command 文字列。
+    """
+    for group in iter_bash_command_groups(payload):
+        yield from group
+
+
+def _commands_from_tool_input(tool_input: Any) -> list[tuple[str, ...]]:
+    """正規化済み tool 入力から command 文字列を**すべて**グループ単位で取り出す。
 
     フィールド別名（``command`` / ``cmd``）は 1 つも取りこぼさず走査する。先勝ちに
     すると、無害な ``command`` を 1 つ足すだけで ``cmd`` の危険なコマンドが検査から
     外れる（dict の挿入順ではなくキーの順序が結果を決めるため、並びを問わない）。
 
     Returns:
-        非空のコマンド文字列のリスト。list 形状は要素ごとに再帰して連結する。要素が 2 つ
-        以上で全て str の list（argv 配列）は、要素ごとの走査に加えて ``shlex.join`` で
-        1 コマンドへ結合した文字列も末尾に返す。要素単位でしか見ないと
+        非空の command 文字列のグループのリスト。文字列は 1 要素のグループ。要素が 2 つ
+        以上で全て str の list（argv 配列）は、非空の要素に ``shlex.join`` で 1 コマンドへ
+        結合した文字列を末尾に足した 1 グループ。要素単位でしか見ないと
         ``["git", "commit", "--no-verify"]`` の各要素は単独では無害に読め、全フックを
-        素通りする。
+        素通りする。それ以外の list は要素ごとに再帰して連結する。
     """
     if isinstance(tool_input, dict):
         # 値は文字列とは限らない。``{"command": ["bash", "-lc", "git commit
         # --no-verify -m x"]}`` のように argv 配列で渡す host があり、文字列
         # 以外を捨てるとコマンドが 1 つも無い payload として静かに許可される。
         return [
-            command
+            group
             for key in ("command", "cmd")
             if key in tool_input
-            for command in _commands_from_tool_input(tool_input[key])
+            for group in _commands_from_tool_input(tool_input[key])
         ]
     if isinstance(tool_input, str):
-        return [tool_input] if tool_input else []
+        return [(tool_input,)] if tool_input else []
     if isinstance(tool_input, list):
-        commands = [command for item in tool_input for command in _commands_from_tool_input(item)]
         if len(tool_input) > 1 and all(isinstance(item, str) for item in tool_input):
-            commands.append(shlex.join(tool_input))
-        return commands
+            return [(*(item for item in tool_input if item), shlex.join(tool_input))]
+        return [group for item in tool_input for group in _commands_from_tool_input(item)]
     return []
 
 
