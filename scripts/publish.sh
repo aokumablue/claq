@@ -146,6 +146,19 @@ run_gate() {
   return 0
 }
 
+# リポジトリの git common dir を実体パスで返す（引数: リポジトリのパス）。
+# linked worktree は作業ツリーのパスが違っても common dir（refs の置き場）を共有するため、
+# toplevel ではなく common dir で同一性を判定する。実体パス化で symlink と相対 .git を吸収する。
+# 同一実体かの比較は呼び出し側が -ef（dev+inode）で行う: 大文字小文字を区別しない FS では
+# pwd -P が入力の綴りを保つため、同じ実体でも文字列が食い違う。
+# CDPATH は unset する: 相対の .git が CDPATH 配下の別ディレクトリへ解決され、cd が解決先を
+# stdout に出して出力が壊れるため。
+resolve_git_common_dir() {
+  local repo="$1" gcd
+  gcd="$(git -C "${repo}" rev-parse --git-common-dir)" || return 1
+  (unset CDPATH; cd -- "${repo}" && cd -- "${gcd}" && pwd -P)
+}
+
 # ── Preflight（検証のみ・無変更）──
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "ERROR: 作業ツリーに未コミット変更があります。コミットまたは退避してから再実行してください。" >&2
@@ -155,6 +168,16 @@ fi
 
 if [[ ! -d "${PUBLISH_REMOTE}/.git" ]]; then
   echo "ERROR: 公開先リポジトリが見つかりません: ${PUBLISH_REMOTE}" >&2
+  exit 1
+fi
+
+# 公開先が dev 自身と refs を共有していると、後段の update-ref refs/heads/main と
+# reset --hard が dev の main を書き換える（既定の PUBLISH_REMOTE は $HOME/dev/claq で、
+# dev の checkout と一致しうる）。linked worktree も common dir を共有するため同様に中断する。
+DEV_GIT_COMMON_DIR="$(resolve_git_common_dir "${REPO_ROOT}")"
+PUBLISH_GIT_COMMON_DIR="$(resolve_git_common_dir "${PUBLISH_REMOTE}")"
+if [[ "${DEV_GIT_COMMON_DIR}" -ef "${PUBLISH_GIT_COMMON_DIR}" ]]; then
+  echo "ERROR: 公開先が dev 自身と同じリポジトリです（git common dir が一致: ${DEV_GIT_COMMON_DIR}）。公開すると dev の main を書き換えるため中断します。CLAQ_PUBLISH_REMOTE に公開用の別リポジトリを指定してください。" >&2
   exit 1
 fi
 
