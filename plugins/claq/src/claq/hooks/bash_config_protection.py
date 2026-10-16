@@ -458,22 +458,20 @@ def _changes_working_directory(segment: list[str]) -> bool:
     return index is not None and normalize_executable_name(segment[index]) in _DIRECTORY_CHANGE_COMMANDS
 
 
-def _within_repo_root(token: str, repo_root: Path) -> bool:
-    """書き込み先トークンを cwd 基準・symlink 解決済みで `repo_root` 配下にあるかを判定する。
+def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
+    """解決済みの書き込み先が `repo_root` 配下にあるかを判定する。
 
     Args:
-        token: 書き込み先の生トークン（パス文字列）。絶対パスなら cwd は無視される。
+        resolved: `resolve_effective_target` が返した、cwd 基準・symlink 解決済みの実体 path。
         repo_root: `resolve_repo_root` が返したリポジトリルート。
 
     Returns:
-        `repo_root` 配下にあれば True。解決不能・配下外なら False。
+        `repo_root` 配下にあれば True。配下外、または `repo_root` 自身の解決に失敗した
+        場合は False。
 
     Raises:
         例外は発生しません。
     """
-    resolved = resolve_effective_target(token)
-    if resolved is None:
-        return False
     try:
         return resolved.is_relative_to(repo_root.resolve())
     except (OSError, RuntimeError):
@@ -494,7 +492,9 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
     """コマンド文字列内に保護対象への書き込みがあればその表示名を返す。
 
     保護対象ヒットがあった場合のみリポジトリルートを解決し、書き込み先がその配下に
-    ある場合のみ deny する。ルートが決定できない場合は allow。
+    ある場合のみ deny する。ルートが決定できない場合は allow。ただし保護名に一致した
+    トークン自体が解決できない場合（単独サロゲート・symlink ループ等）は、リポジトリ外と
+    示せないため deny する。
 
     コマンドが `cd` 等でカレントディレクトリを移動する場合は、cwd 基準の相対パス解決が
     実行時の位置とずれるため、保護対象のヒットをそのまま deny する
@@ -528,6 +528,7 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
     """1 つのシェル方言の読み方で保護対象書き込みを探す。
 
     ``~/.claq/logs/`` への一致は repo スコープ判定より前で、無条件に deny する。
+    保護名に一致したトークンの解決に失敗した場合も repo スコープ判定に進めないため deny する。
 
     Args:
         command: `command_dialect_variants` が返した 1 通りの読み方
@@ -552,12 +553,18 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
                 continue
             if not scope_certain:
                 return found
+            resolved = resolve_effective_target(token)
+            if resolved is None:
+                # 保護名に一致したトークンが解決できない（単独サロゲート・symlink ループ等）。
+                # 書込み先がリポジトリ外だと示せない以上、入力側が任意に作れる解決不能で
+                # 保護を外せないよう deny する（docs/adr/hook-failure-direction.md）。
+                return found
             repo_root = resolve_repo_root()
             if repo_root is None:
                 # 「決定不能なら allow」はこの書込み先 1 つについての判断。return にすると
                 # 残りの書込み先候補と `sh -c` 再帰まで捨てて allow が広がる。
                 continue
-            if _within_repo_root(token, repo_root):
+            if _within_repo_root(resolved, repo_root):
                 return found
         if not _recursed:
             wrapped = extract_shell_wrapper_command(segment)

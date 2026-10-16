@@ -261,24 +261,78 @@ class TestFindProtectedWrite:
     def test_command_index_unresolvable_allows(self, command: str) -> None:
         assert bash_config_protection.find_protected_write(command) is None
 
-    def test_within_repo_root_returns_false_on_resolve_oserror(
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # 単独サロゲート（JSON の \ud800）で解決が ValueError になっても、保護 path
+            # セグメントに一致する以上は deny する。
+            "rm \ud800/.git/hooks/pre-commit",
+            "printf x > \ud800/.git/hooks/pre-commit",
+            # 保護 basename に一致する解決不能トークン。
+            "printf x > \ud800/ruff.toml",
+            "rm \ud800/pyproject.toml",
+        ],
+        ids=["rm-hooks-segment", "redirect-hooks-segment", "redirect-basename", "rm-basename"],
+    )
+    def test_denies_unresolvable_token_matching_protected_name(self, command: str) -> None:
+        """保護名に一致するトークンが解決できないときは deny する。
+
+        検査対象（保護対象への書き込み）が確定した後の失敗は fail-closed（
+        docs/adr/hook-failure-direction.md）。解決不能を allow にすると、
+        入力側が単独サロゲートを混ぜるだけで保護を外せる。
+        """
+        assert bash_config_protection.find_protected_write(command) is not None
+
+    def test_denies_unresolvable_protected_token_even_when_repo_root_undetermined(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """cwd の resolve() が OSError を投げても deny せず False を返す（可用性優先。
-        resolve_effective_target 経由でこの分岐に入る）。
+        """リポジトリルートが決定できなくても、解決不能な保護名トークンは deny する。
+
+        解決不能は repo スコープ判定の入力に使えないため、ルートの有無で結論が変わらない。
+        """
+        monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: None)
+
+        assert bash_config_protection.find_protected_write("rm \ud800/.git/hooks/pre-commit") is not None
+
+    def test_denies_protected_name_when_resolution_raises_runtime_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """symlink ループで `Path.resolve` が RuntimeError になる実装でも deny する。
+
+        Python 3.12 は strict=False のループで RuntimeError を投げる。
         """
 
-        def _raising_cwd() -> Path:
-            raise OSError("cwd unavailable")
+        def _looping_resolve(self: Path, strict: bool = False) -> Path:  # noqa: ARG001
+            raise RuntimeError("Symlink loop")
 
-        monkeypatch.setattr(bash_config_protection.Path, "cwd", classmethod(lambda cls: _raising_cwd()))
+        monkeypatch.setattr(bash_config_protection.Path, "resolve", _looping_resolve)
 
-        assert bash_config_protection._within_repo_root("pyproject.toml", Path("/repo")) is False
+        assert bash_config_protection.find_protected_write("printf x > ruff.toml") is not None
+
+    def test_denies_protected_write_through_symlink_loop(self, tmp_path: Path) -> None:
+        """実際の symlink ループ越しの保護パスへの書き込みを deny する。"""
+        (tmp_path / "a").symlink_to(tmp_path / "b")
+        (tmp_path / "b").symlink_to(tmp_path / "a")
+
+        assert bash_config_protection.find_protected_write("rm a/.git/hooks/pre-commit") is not None
+        assert bash_config_protection.find_protected_write("printf x > a/ruff.toml") is not None
+
+    def test_allows_unresolvable_token_not_matching_protected_name(self) -> None:
+        """保護名に一致しない解決不能トークンは allow のまま。"""
+        assert bash_config_protection.find_protected_write("rm \ud800/notes.txt") is None
+        assert bash_config_protection.find_protected_write("printf x > \ud800/src/main.py") is None
+
+    def test_allows_resolvable_protected_name_outside_repo_root(self, tmp_path_factory: pytest.TempPathFactory) -> None:
+        """解決できてリポジトリ外のパスは、保護名に一致しても allow のまま。"""
+        outside = tmp_path_factory.mktemp("outside")
+
+        assert bash_config_protection.find_protected_write(f"printf x > {outside}/ruff.toml") is None
+        assert bash_config_protection.find_protected_write(f"rm {outside}/.git/hooks/pre-commit") is None
 
     def test_within_repo_root_returns_false_when_repo_root_resolve_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """token 側の解決は成功しても repo_root.resolve() が失敗すれば False を返す。"""
+        """書き込み先の解決は成功していても repo_root.resolve() が失敗すれば False を返す。"""
         monkeypatch.chdir(tmp_path)
         (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
 
@@ -286,7 +340,7 @@ class TestFindProtectedWrite:
             def resolve(self, strict: bool = False) -> Path:  # noqa: ARG002
                 raise OSError("repo root unavailable")
 
-        assert bash_config_protection._within_repo_root("pyproject.toml", _BoomPath(tmp_path)) is False
+        assert bash_config_protection._within_repo_root(tmp_path / "pyproject.toml", _BoomPath(tmp_path)) is False
 
 
 class TestMain:
