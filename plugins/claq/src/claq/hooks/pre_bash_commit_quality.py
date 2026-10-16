@@ -369,7 +369,7 @@ _WORKTREE_MUTATING_EXECUTABLES = frozenset(
 # `-i` を伴うときだけ書き込みになるコマンド。フラグ無しでも書き込むコマンド（`ed` 等）を
 # ここへ置くとフラグ判定に落ちて allow になるため、`ALWAYS_MUTATING_EDIT_EXECUTABLES` に置く。
 _INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl"})
-_MUTATING_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>", ">&"})
+_MUTATING_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", "&>>", ">|", "1>", "2>", "1>>", "2>>", ">&"})
 
 
 def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:

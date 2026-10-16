@@ -48,6 +48,8 @@ class TestFindProtectedWrite:
             "echo x >| pyproject.toml",
             "echo x 1> pyproject.toml",
             "echo x 2>> pyproject.toml",
+            "echo x &>> pyproject.toml",
+            "echo x >& pyproject.toml",
             # 書き込み先が引数位置に明示されるコマンド群。
             "cp src.py pyproject.toml",
             "mv src.py pyproject.toml",
@@ -70,6 +72,9 @@ class TestFindProtectedWrite:
         "command",
         [
             "printf x > notes.txt",
+            # fd 複製の `>&` は保護名が続かない限り書き込みではない。
+            "echo x >&2",
+            "ls 2>&1",
             "cat pyproject.toml",
             "echo pyproject.toml",
             "grep -n commands tox.ini",

@@ -256,6 +256,16 @@ _BLOCKED_CASES = [
     ("ed で保護 config", "bash_config_protection", _bash("ed ruff.toml")),
     ("ex で保護 config", "bash_config_protection", _bash("ex .eslintrc")),
     ("sponge で保護 config", "bash_config_protection", _bash("echo x | sponge ruff.toml")),
+    # `&>>`（stdout+stderr の追記）と `>&`（`&>` の別綴り）も保護 config への書き込み。
+    ("&>> で保護 config", "bash_config_protection", _bash("echo x &>>ruff.toml")),
+    ("&>> 空白あり", "bash_config_protection", _bash("echo x &>> ruff.toml")),
+    (">& で保護 config", "bash_config_protection", _bash("echo x >&ruff.toml")),
+    (">& 空白あり", "bash_config_protection", _bash("echo x >& ruff.toml")),
+    ("2>& で保護 config", "bash_config_protection", _bash("echo x 2>&ruff.toml")),
+    # commit 前の `&>>` は作業ツリーへの書き込み。`>&` は fd 複製（`>&2`）と書き込み先指定が
+    # 同じ演算子なので、後ろが fd かどうかを見ずに常に mutation 扱いのまま（現状値の固定）。
+    ("&>> の commit 前変更", "pre_bash_commit_quality", _bash("echo x &>>f && git commit -m 'fix: x'")),
+    ("現状値 >&2 の commit 前変更", "pre_bash_commit_quality", _bash("echo x >&2 && git commit -m 'fix: x'")),
     ("wrapper 越しの ed", "bash_config_protection", _bash("timeout 5 ed ruff.toml")),
     # `touch` は内容を変えないが、保護対象を**空で新規作成**できる。空の
     # `.eslintrc` は ESLint の上位カスケード探索を止めるため実質的な無効化になる。
@@ -288,6 +298,8 @@ _BLOCKED_CASES = [
     ("解析不能の後の &> 密着", "bash_config_protection", _bash("echo $'\\'' &>ruff.toml")),
     ("解析不能の後の 2> 密着", "bash_config_protection", _bash("echo $'\\'' 2>ruff.toml")),
     ("解析不能の後の 2>> 密着", "bash_config_protection", _bash("echo $'\\'' 2>>ruff.toml")),
+    ("解析不能の後の &>> 密着", "bash_config_protection", _bash("echo $'\\'' &>>ruff.toml")),
+    ("解析不能の後の >& 密着", "bash_config_protection", _bash("echo $'\\'' >&ruff.toml")),
     # fd 複製の `&` で後続の語を別セグメントへ切り離さない。
     ("解析不能の後の 2>&1 越しの rm", "bash_config_protection", _bash("echo $'\\'' ; rm -f 2>&1 ruff.toml")),
     ("解析不能の後の >&2 越しの rm", "bash_config_protection", _bash("echo $'\\'' ; rm -f >&2 ruff.toml")),
@@ -389,6 +401,14 @@ _ALLOWED_CASES = [
     ("対 保護対象の読み取り（ex 名の別語）", "bash_config_protection", _bash("grep -rn ex ruff.toml")),
     # `touch` を書込み verb にしても、保護対象でないファイル・repo 外・
     # 非実行位置は allow のまま。「全部ブロックする」実装をここで落とす。
+    # `>&` を書き込み演算子にしても、fd 複製（保護名でない後続）は allow のまま。
+    ("対 >&2", "bash_config_protection", _bash("echo x >&2")),
+    ("対 2>&1", "bash_config_protection", _bash("ls 2>&1")),
+    ("対 >&2 後の git status", "bash_config_protection", _bash("echo hi >&2 && git status")),
+    ("対 >&- (fd を閉じる)", "bash_config_protection", _bash("echo x >&-")),
+    ("対 保護名でない &>>", "bash_config_protection", _bash("echo x &>>notes.txt")),
+    ("対 解析不能の後の >&2", "bash_config_protection", _bash("echo $'\\'' >&2")),
+    ("対 &>> の commit 無し", "pre_bash_commit_quality", _bash("echo x &>>f")),
     ("対 touch app.py", "bash_config_protection", _bash("touch app.py")),
     ("対 touch README.md", "bash_config_protection", _bash("touch README.md")),
     ("対 repo 外の touch", "bash_config_protection", _bash("touch /tmp/ruff.toml")),
@@ -928,7 +948,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     # --- bash_config_protection ---
     "bash_config_protection._BASH_TOOL_NAMES": frozenset({"bash"}),
     "bash_config_protection._REDIRECT_OPERATORS": frozenset(
-        {">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>"}
+        {">", ">>", "&>", "&>>", ">&", ">|", "1>", "2>", "1>>", "2>>"}
     ),
     "bash_config_protection._LAST_ARG_WRITE_COMMANDS": frozenset(
         {"copy", "copy-item", "cp", "cpi", "install", "mi", "move", "move-item", "mv"}
@@ -1140,7 +1160,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     ),
     "pre_bash_commit_quality._INPLACE_EDIT_EXECUTABLES": frozenset({"perl", "sed"}),
     "pre_bash_commit_quality._MUTATING_REDIRECT_OPERATORS": frozenset(
-        {">", ">>", "&>", ">|", "1>", "2>", "1>>", "2>>", ">&"}
+        {">", ">>", "&>", "&>>", ">|", "1>", "2>", "1>>", "2>>", ">&"}
     ),
 }
 
