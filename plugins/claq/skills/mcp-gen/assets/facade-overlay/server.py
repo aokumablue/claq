@@ -517,19 +517,8 @@ def _page_result(
 ) -> OrderSearchResult:
     """検索結果の 1 ページを予算に収め、続きのカーソルを封じて返す。個人情報を返したら監査に残す。
 
-    Args:
-        summaries: 今回のページの候補（cursor の skip を読み飛ばした後）。
-        position: 今回のページの位置（`page` と `skip`）。
-        upstream_next: 上流の次のページトークン。無ければ None。
-        principal: 呼び出しの主体（続きの cursor の束縛先）。
-        fingerprint: 検索条件の指紋（続きの cursor の束縛先）。
-        extra_paths: 各候補に足した項目のパス（監査に残す個人情報の判定に使う）。
-
-    Returns:
-        予算に収まる検索結果。
-
-    Raises:
-        FacadeError: 結果が予算を超えるとき、または上流のページトークンが長すぎて続きの cursor を発行できないとき。
+    引数は `_search_orders` の同名の変数と同じ。予算を超えるとき、または上流のページトークンが
+    長すぎて続きの cursor を発行できないときは FacadeError。
     """
     as_of = _now()
     # 予算に収まる件数だけを返し、残り（またはその次の上流のページ）を続きの cursor に封じる
@@ -562,25 +551,9 @@ async def _search_orders(
     limit: int,
     cursor: str | None,
 ) -> OrderSearchResult:
-    """orders_search の本体。条件を検証し、上流の 1 ページを引いて、予算内の要約と続きのカーソルを返す。
+    """orders_search の本体。引数と例外は orders_search と同じ。
 
-    Args:
-        query: 注文番号・顧客名の部分一致。
-        customer_id: 顧客 ID。
-        status: 受注の状態。
-        ordered_from: 注文日の下限（JST、この日を含む）。
-        ordered_to: 注文日の上限（JST、この日を含む）。
-        fields: 各候補に足す項目のパス。
-        sort: 並び順。
-        limit: 返す件数。
-        cursor: 前回の next_cursor。
-
-    Returns:
-        検索結果。
-
-    Raises:
-        FacadeError: 条件が無い・日付や項目パスが不正・カーソルが使えない・主体を決められない・order_id を閲覧できない・
-            上流が失敗した・上流のページトークンが長すぎて続きの cursor を発行できないとき。
+    条件を検証し、上流の 1 ページを引いて、予算内の要約と続きのカーソルを返す。
     """
     conditions = _search_conditions(query, customer_id, status, ordered_from, ordered_to)
     created_from, created_before = _created_range(ordered_from, ordered_to)
