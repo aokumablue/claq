@@ -61,7 +61,7 @@ from claq.mem.settings import (
     CONTEXT_REPO_CHAR_BUDGET,
     Settings,
 )
-from claq.mem.tag_stripping import strip_tags
+from claq.mem.tag_stripping import strip_control_chars, strip_tags
 
 log = mem_logger.get("CLI")
 
@@ -871,7 +871,9 @@ def _format_injected_item(row: Knowledge) -> str:
 
     既定は ``- [kind] title`` のみ。``body`` を足しても ``CONTEXT_ITEM_CHAR_LIMIT``
     文字に収まる場合だけ ``—`` で続け、長い body が節の予算を食い潰すのを防ぐ。
-    title / body は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。
+    title / body は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。その前に
+    ``strip_control_chars`` で制御文字を落とす（後ろに置くと、制御文字で分断したタグが
+    除去で再結合して ``strip_tags`` をすり抜ける）。
 
     Args:
         row: 注入対象の知識カード。
@@ -881,8 +883,8 @@ def _format_injected_item(row: Knowledge) -> str:
     """
     # 入口で畳んでいても、既に DB にある行や将来の別経路を信用しない。返り値が
     # 「改行を含まない 1 行」であることは、この関数が自分で保証する。
-    head = f"- [{row.kind}] {_one_line(strip_tags(row.title))}"
-    body = _one_line(strip_tags(row.body.strip()))
+    head = f"- [{row.kind}] {_one_line(strip_tags(strip_control_chars(row.title)))}"
+    body = _one_line(strip_tags(strip_control_chars(row.body).strip()))
     if not body:
         return head
     combined = f"{head} — {body}"
@@ -911,7 +913,8 @@ def _knowledge_section(heading: str, rows: list[Knowledge], budget: int) -> str:
 def _handoff_section(db: Database, repo_id: str) -> str:
     """直近セッションの引き継ぎを ``前回の続き`` 節へ組み立てる。
 
-    handoff 本文は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。
+    handoff 本文は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。その前に
+    ``strip_control_chars`` で制御文字（タブと改行を除く）を落とす。改行は残す。
 
     Args:
         db: 参照する mem データベース。
@@ -923,7 +926,7 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     session = db.get_latest_session(repo_id)
     if session is None:
         return ""
-    handoff = _neutralize_handoff_structure(strip_tags(session.handoff.strip()))
+    handoff = _neutralize_handoff_structure(strip_tags(strip_control_chars(session.handoff).strip()))
     if not handoff:
         return ""
     if len(handoff) > CONTEXT_HANDOFF_CHAR_BUDGET:
@@ -932,10 +935,8 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     return f"## 前回の続き ({stamp})\n{handoff}"
 
 
-# detach 失敗通知の 1 行化に使う。改行（CR・LF・NEL・LS・PS）の連なりは空白 1 つに畳み、
-# 残る C0 制御文字（タブ・改行を除く）と DEL は取り除く。
+# detach 失敗通知の 1 行化に使う。改行（CR・LF・NEL・LS・PS）の連なりは空白 1 つに畳む。
 _BG_NOTICE_LINE_BREAKS = re.compile(r"[\r\n\x85\u2028\u2029]+")
-_BG_NOTICE_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def _bg_failure_section() -> str:
@@ -958,7 +959,7 @@ def _bg_failure_section() -> str:
     Returns:
         痕跡があれば見出し付き 1 行の節。無ければ空文字列。
     """
-    one_line = _BG_NOTICE_CONTROLS.sub("", _BG_NOTICE_LINE_BREAKS.sub(" ", recent_bg_failure_notice()))
+    one_line = strip_control_chars(_BG_NOTICE_LINE_BREAKS.sub(" ", recent_bg_failure_notice()))
     notice = redact(strip_tags(normalize_user_message(one_line))).strip()
     if not notice:
         return ""

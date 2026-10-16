@@ -195,6 +195,9 @@ _REDACTION_MARKER = "[REDACTED]"
 # 3 行以上の空行を 2 行へ詰めるパターン。
 _BLANK_LINES = re.compile(r"\n{3,}")
 
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+"""除去対象の制御文字: C0 制御文字のうちタブ・LF・CR 以外と DEL。"""
+
 
 def drop_known_tag_blocks(text: str) -> str:
     """開始・終了が対になった対象タグを中身ごと除去する。
@@ -344,6 +347,27 @@ def _forges_tag_after_deletion(text: str) -> bool:
     if deleted == text:
         return False
     return _neutralization_targets(deleted) > _neutralization_targets(text)
+
+
+def strip_control_chars(text: str) -> str:
+    """C0 制御文字（タブと改行を除く）と DEL を取り除く。
+
+    ESC・BEL・NUL は注入文の表示と後段の文字列処理（NUL 終端等）を壊す。注入経路
+    （handoff 節・知識カード・detach 失敗通知）は同じ信頼境界にあるため、除去を
+    この 1 関数に閉じる。タブ・LF・CR は正当な引き継ぎと本文が使うので残す
+    （1 行へ畳むかどうかは呼び出し側の責務）。
+
+    呼び出し側は **``normalize_user_message`` / ``strip_tags`` / ``redact`` より前**
+    に呼ぶ。後ろに置くと、制御文字で分断した ``sk-ant-…`` や ``</claq-memory>``
+    が除去で 1 本へ再結合し、どの無害化も見ていない形で注入される。
+
+    Args:
+        text: 無害化前のテキスト。
+
+    Returns:
+        制御文字を含まないテキスト。タブ・LF・CR とそれ以外の文字は変えない。
+    """
+    return _CONTROL_CHARS.sub("", text)
 
 
 def strip_tags(text: str) -> str:

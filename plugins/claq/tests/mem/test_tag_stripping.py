@@ -5,7 +5,7 @@ import time
 import pytest
 
 from claq.lib.slim_text import compact_line
-from claq.mem.tag_stripping import _erase_known_tags, strip_tags
+from claq.mem.tag_stripping import _erase_known_tags, strip_control_chars, strip_tags
 
 
 class TestStripTags:
@@ -575,3 +575,25 @@ class TestNestingPassCap:
 
         assert "<private>" not in result
         assert "</private>" not in result
+
+
+class TestStripControlChars:
+    """``strip_control_chars``: C0 制御文字（タブ・LF・CR を除く）と DEL だけを落とす。"""
+
+    @pytest.mark.parametrize("ch", [chr(c) for c in [*range(0x09), 0x0B, 0x0C, *range(0x0E, 0x20), 0x7F]])
+    def test_removes_every_c0_control_except_tab_and_line_breaks_and_del(self, ch: str) -> None:
+        """対象の制御文字は 1 文字ずつ落ちる（ESC・BEL・NUL を含む）。"""
+        assert strip_control_chars(f"a{ch}b") == "ab"
+
+    @pytest.mark.parametrize("ch", ["\t", "\n", "\r"])
+    def test_keeps_tab_and_line_breaks(self, ch: str) -> None:
+        """タブ・LF・CR は残す（1 行へ畳むかは呼び出し側の責務）。"""
+        assert strip_control_chars(f"a{ch}b") == f"a{ch}b"
+
+    @pytest.mark.parametrize(
+        "text",
+        ["", "日本語 English 😀", "タブ\t付き\n二行目\r\n三行目", "\x80\x85\u2028 は C1 と Unicode 改行で対象外"],
+    )
+    def test_ordinary_text_is_unchanged(self, text: str) -> None:
+        """通常の日本語・英語・絵文字・空白は変えない（C1 制御と Unicode 改行も対象外）。"""
+        assert strip_control_chars(text) == text
