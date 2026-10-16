@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -931,6 +932,12 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     return f"## 前回の続き ({stamp})\n{handoff}"
 
 
+# detach 失敗通知の 1 行化に使う。改行（CR・LF・NEL・LS・PS）の連なりは空白 1 つに畳み、
+# 残る C0 制御文字（タブ・改行を除く）と DEL は取り除く。
+_BG_NOTICE_LINE_BREAKS = re.compile(r"[\r\n\x85\u2028\u2029]+")
+_BG_NOTICE_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
 def _bg_failure_section() -> str:
     """前回セッションの detach 起動（``--bg``）失敗痕跡があれば 1 行の節にする。
 
@@ -942,10 +949,17 @@ def _bg_failure_section() -> str:
     を伏せる。タグで分断された秘密は ``strip_tags`` で再結合して初めて
     ``redact`` に一致するため、``redact`` を後に置く。
 
+    その前段で、改行を空白 1 つに畳んで 1 行にし、C0 制御文字（タブを除く）と DEL を
+    取り除く（ESC・BEL・NUL は表示と後段の文字列処理を壊し、改行は見出し行の下に
+    別の行を作れる）。除去を無害化の後に置くと、制御文字で分断した秘密や閉じタグが
+    除去で再結合し、``redact`` / ``strip_tags`` が見ていない形で注入されるため、
+    必ず最初に行う。
+
     Returns:
         痕跡があれば見出し付き 1 行の節。無ければ空文字列。
     """
-    notice = redact(strip_tags(normalize_user_message(recent_bg_failure_notice()))).strip()
+    one_line = _BG_NOTICE_CONTROLS.sub("", _BG_NOTICE_LINE_BREAKS.sub(" ", recent_bg_failure_notice()))
+    notice = redact(strip_tags(normalize_user_message(one_line))).strip()
     if not notice:
         return ""
     return f"## 前回セッションの通知\n{notice}"
