@@ -789,6 +789,19 @@ def test_looping_animation_is_reported(tmp_path: Path) -> None:
         dest = _copy_site(tmp_path, name)
         assert "infinite" in _append(dest, "styles.css", f"\n{rule}\n"), rule
 
+    # 偽陰性: 文字列リテラルや url() の中の ``/*`` はコメントではない。コメントと誤認して以降を
+    # 消すと、後ろに書いた止まらない動きを見逃す。
+    for name, prefix in (
+        ("e1", '.a::before { content: "/*"; }'),
+        ("e2", ".a { background: url(/*x.png); }"),
+        ("e3", ".a { background: url(img/*.png); }"),
+        ("e4", '.a { background: url("data:image/svg+xml;utf8,<svg>/*</svg>"); }'),
+        ("e5", 'a[href*="/*"] { color: red; }'),
+        ("e6", ".a::before { content: '/*'; }"),
+    ):
+        dest = _copy_site(tmp_path, name)
+        assert "infinite" in _append(dest, "styles.css", f"\n{prefix} .b {{ animation: x 1s infinite; }}\n"), prefix
+
     # 偽陽性: キーフレーム名が infinite- で始まるだけで反復は 2 回。
     # コメントに書いた記述はブラウザが読まないので動きにならない（閉じていないコメントは末尾まで）。
     for name, rule in (

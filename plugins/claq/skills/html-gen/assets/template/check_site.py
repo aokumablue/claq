@@ -126,8 +126,12 @@ REQUIRED_BREAKPOINTS = (768, 1024, 1280)
 LOOPING_ANIMATION_RE = re.compile(
     r"(?:animation(?:-iteration-count)?|--[\w-]+)\s*:[^;}]*(?<![\w-])infinite(?![\w-])", re.IGNORECASE
 )
-#: CSS コメント。ブラウザは読まないので動きとして数えない。閉じていないコメントは末尾まで続く。
-CSS_COMMENT_RE = re.compile(r"/\*.*?(?:\*/|\Z)", re.DOTALL)
+#: CSS の字句。文字列リテラルと引用符の無い ``url()`` は ``/*`` を含んでもコメントの開始ではない
+#: ので先に読み飛ばし、残る ``/* ... */`` だけをコメント（グループ 1）として拾う。コメントは
+#: ブラウザが読まないので動きとして数えない。閉じていないコメントは末尾まで続く。
+CSS_TOKEN_RE = re.compile(
+    r"\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|url\(\s*[^)\"'\s][^)]*\)|(/\*.*?(?:\*/|\Z))", re.DOTALL
+)
 #: SVG の SMIL アニメーションの無限反復。HTML パーサは属性名を大小文字を問わず
 #: repeatCount / repeatDur へ直し、引用符の無い値も読む。値は大小文字を区別し、
 #: INDEFINITE は無効な値として捨てられて 1 回で止まるので、indefinite だけを拾う。
@@ -143,13 +147,17 @@ EMBEDDED_CSS_RE = re.compile(
 def _has_looping_animation(css: str) -> bool:
     """CSS に止まらない動き（``infinite``）があるかを返す。コメントの中は無視する。
 
+    文字列リテラルと ``url()`` の中の ``/*`` はコメントの開始ではないので、読み飛ばしてから
+    コメントだけを除く（そうしないと閉じ ``*/`` の無い ``/*`` 以降が丸ごと消えて見逃す）。
+
     Args:
         css: 検査対象の CSS 文字列
 
     Returns:
         コメントを除いた CSS に ``infinite`` の宣言があれば True
     """
-    return LOOPING_ANIMATION_RE.search(CSS_COMMENT_RE.sub(" ", css)) is not None
+    stripped = CSS_TOKEN_RE.sub(lambda match: " " if match.group(1) is not None else match.group(0), css)
+    return LOOPING_ANIMATION_RE.search(stripped) is not None
 
 
 # --- 色空間 -----------------------------------------------------------------
