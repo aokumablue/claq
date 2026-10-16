@@ -170,12 +170,12 @@ def _is_link_to(link: Path, target: Path) -> bool:
 
 
 def _clear_existing(link: Path) -> bool:
-    """``link`` の既存物を片付ける。触ってはいけない（launcher を含む / 空でないディレクトリ）なら False。"""
+    """``link`` の既存物を片付ける。触ってはいけない（空でないディレクトリ。launcher を含むものもここに入る）なら False。"""
     if link.is_symlink():
         link.unlink()
         return True
     if link.exists():
-        return not _has_launcher(link) and _remove_empty_or_file(link)
+        return _remove_empty_or_file(link)
     return True
 
 

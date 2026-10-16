@@ -142,3 +142,11 @@ def test_overlay_search_leaves_paging_to_facade() -> None:
     calls = {ast.unparse(node.func) for node in ast.walk(_overlay_tool("_page_result")) if isinstance(node, ast.Call)}
     assert "fit_page" in calls
     assert "fit_items" not in source
+
+
+def test_overlay_search_reaches_paging_through_its_helpers() -> None:
+    """ツール関数 → 本体 → 一覧の整形、の呼び出しの鎖を固定する（途中が切れると fit_page が呼ばれなくなる）。"""
+    chain = ("orders_search", "_search_orders", "_page_result")
+    for caller, callee in zip(chain, chain[1:], strict=False):
+        calls = {ast.unparse(node.func) for node in ast.walk(_overlay_tool(caller)) if isinstance(node, ast.Call)}
+        assert callee in calls, f"{caller} が {callee} を呼んでいない"
