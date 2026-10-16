@@ -121,9 +121,13 @@ REQUIRED_BREAKPOINTS = (768, 1024, 1280)
 #: ``--animate-pulse`` / ``--animate-bounce`` は値に ``infinite`` を含む。これを写して
 #: ``animation: var(--animate-ping)`` で使うと、``animation`` の宣言には ``infinite`` が
 #: 現れず素通りするので、宣言側（``--*``）の値も見る。
+#: ``infinite`` はキーワードとして単独で現れたものだけを拾う。``infinite-scroll`` のように
+#: キーフレーム名の一部になっているものは、反復が有限でも語境界（``\b``）では一致してしまう。
 LOOPING_ANIMATION_RE = re.compile(
-    r"(?:animation(?:-iteration-count)?|--[\w-]+)\s*:[^;}]*\binfinite\b", re.IGNORECASE
+    r"(?:animation(?:-iteration-count)?|--[\w-]+)\s*:[^;}]*(?<![\w-])infinite(?![\w-])", re.IGNORECASE
 )
+#: CSS コメント。ブラウザは読まないので動きとして数えない。閉じていないコメントは末尾まで続く。
+CSS_COMMENT_RE = re.compile(r"/\*.*?(?:\*/|\Z)", re.DOTALL)
 #: SVG の SMIL アニメーションの無限反復。HTML パーサは属性名を大小文字を問わず
 #: repeatCount / repeatDur へ直し、引用符の無い値も読む。値は大小文字を区別し、
 #: INDEFINITE は無効な値として捨てられて 1 回で止まるので、indefinite だけを拾う。
@@ -134,6 +138,18 @@ LOOPING_SMIL_RE = re.compile(r"(?<![-\w])(?i:repeat(?:count|dur))\s*=\s*[\"']?\s
 EMBEDDED_CSS_RE = re.compile(
     r"(?<![-\w])style\s*=\s*(?:\"([^\"]*)\"|'([^']*)')|<style\b[^>]*>(.*?)</style>", re.IGNORECASE | re.DOTALL
 )
+
+
+def _has_looping_animation(css: str) -> bool:
+    """CSS に止まらない動き（``infinite``）があるかを返す。コメントの中は無視する。
+
+    Args:
+        css: 検査対象の CSS 文字列
+
+    Returns:
+        コメントを除いた CSS に ``infinite`` の宣言があれば True
+    """
+    return LOOPING_ANIMATION_RE.search(CSS_COMMENT_RE.sub(" ", css)) is not None
 
 
 # --- 色空間 -----------------------------------------------------------------
@@ -529,7 +545,10 @@ def validate_site(site_dir: Path, tokens: dict[str, Any] | None = None) -> list[
     missing = [name for name, path in paths.items() if not path.is_file()]
     if missing:
         return [f"{name} が無い" for name in missing]
-    html, styles, generated, script = (path.read_text(encoding="utf-8") for path in paths.values())
+    html = paths["index.html"].read_text(encoding="utf-8")
+    styles = paths["styles.css"].read_text(encoding="utf-8")
+    generated = paths["tokens.css"].read_text(encoding="utf-8")
+    script = paths["app.js"].read_text(encoding="utf-8")
     return [
         *_validate_html(html, tokens),
         *_validate_generated_css(generated, tokens),
@@ -615,8 +634,8 @@ def _validate_inline_motion(html: str) -> list[str]:
     Returns:
         違反メッセージの一覧
     """
-    embedded = ";".join(part for match in EMBEDDED_CSS_RE.finditer(html) for part in match.groups() if part)
-    if LOOPING_SMIL_RE.search(html) or LOOPING_ANIMATION_RE.search(embedded):
+    embedded = [part for match in EMBEDDED_CSS_RE.finditer(html) for part in match.groups() if part]
+    if LOOPING_SMIL_RE.search(html) or any(_has_looping_animation(part) for part in embedded):
         return ["index.html に止まらない動き（infinite / indefinite）がある（回数を有限にするか、動きを外す）"]
     return []
 
@@ -1088,7 +1107,7 @@ def _validate_styles(css: str) -> list[str]:
     ]
     if re.search(r"font-size:\s*(?:[0-9]|1[0-1])px", css):
         violations.append("12px 未満の font-size がある")
-    if LOOPING_ANIMATION_RE.search(css):
+    if _has_looping_animation(css):
         violations.append("styles.css に止まらない動き（infinite）がある（回数を有限にするか、動きを外す）")
     violations.extend(_validate_reduced_motion(css))
     violations.extend(_validate_resting_state(css))

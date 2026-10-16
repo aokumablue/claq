@@ -780,6 +780,27 @@ def test_looping_animation_is_reported(tmp_path: Path) -> None:
     dest = _copy_site(tmp_path, "s7")
     assert _append(dest, "styles.css", "\n:root { --pulse-count: 1; }\n") == ""
 
+    # 回帰: 止まらない動きの典型形は、語としての照合に変えても落ち続ける。
+    for name, rule in (
+        ("s8", ".live { animation: spin 1s linear infinite; }"),
+        ("s9", ":root { --animate-spin: spin 1s linear infinite; }"),
+        ("s10", ".live { animation-iteration-count: INFINITE; }"),
+    ):
+        dest = _copy_site(tmp_path, name)
+        assert "infinite" in _append(dest, "styles.css", f"\n{rule}\n"), rule
+
+    # 偽陽性: キーフレーム名が infinite- で始まるだけで反復は 2 回。
+    # コメントに書いた記述はブラウザが読まないので動きにならない（閉じていないコメントは末尾まで）。
+    for name, rule in (
+        ("s11", ".live { animation: infinite-scroll 1s 2; }"),
+        ("s12", "/* animation: x infinite */ .a { color: inherit; }"),
+        ("s13", ".a { color: inherit; } /* --animate-spin: spin 1s infinite;\n   animation: x infinite */"),
+        ("s14", ".live { animation: pulse 1s 2; } /* animation: x infinite;"),
+        ("s15", ".live { animation: scroll-infinite 1s 2; }"),
+    ):
+        dest = _copy_site(tmp_path, name)
+        assert _append(dest, "styles.css", f"\n{rule}\n") == "", rule
+
 
 def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
     """HTML に直接書いた止まらない動きも落ちる。
@@ -808,6 +829,12 @@ def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
         # 値の前後の空白を除いて読むブラウザでは止まらない（Chrome は repeatDur、Firefox は repeatCount）
         '<animate repeatDur=" indefinite "/>',
         "<animate repeatCount=' indefinite'/>",
+        # 回帰: 典型形と、カスタムプロパティ経由の止まらない動き
+        '<i style="animation: spin 1s linear infinite"></i>',
+        '<i style="--animate-spin: spin 1s linear infinite"></i>',
+        "<style>:root { --animate-spin: spin 1s linear INFINITE; }</style>",
+        # コメントの外にある宣言は、同じ要素のコメントに紛れても落とす
+        "<style>/* note */ .live { animation: pulse 2s infinite; }</style>",
     ):
         assert check_site._validate_inline_motion(markup) != [], markup
     for markup in (
@@ -818,6 +845,13 @@ def test_looping_motion_written_in_the_html_is_reported(tmp_path: Path) -> None:
         '<i style="--gap: 4px; --n: 2"></i>',
         # 値は大小文字を区別する。INDEFINITE はブラウザが無効な値として捨て、1 回で止まる
         '<animate REPEATDUR="INDEFINITE"/>',
+        # キーフレーム名が infinite- で始まるだけの有限の動き
+        '<i style="animation: infinite-scroll 1s 2"></i>',
+        "<style>.live { animation: infinite-scroll 1s 2; }</style>",
+        # コメント内の記述は動きにならない。閉じていないコメントは末尾まで
+        "<style>/* animation: x infinite */ .a { color: inherit; }</style>",
+        '<i style="/* animation: x infinite */ color: inherit"></i>',
+        "<style>.a { color: inherit; } /* --animate-spin: spin 1s infinite;</style>",
     ):
         assert check_site._validate_inline_motion(markup) == [], markup
 
