@@ -26,6 +26,7 @@ from claq.hooks import (
     bash_config_protection,
     block_no_verify,
     commit_quality_scanner,
+    commit_risk,
     config_protection,
     hook_common,
     pre_bash_commit_quality,
@@ -1129,8 +1130,8 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "shell_tokens._HEREDOC_CONTINUATION_SUFFIXES": ("\\", "|", "&"),
     # --- hook_common ---
     "hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES": frozenset({"ed", "red", "ex", "sponge"}),
-    # --- pre_bash_commit_quality ---
-    "pre_bash_commit_quality._INDEX_MUTATING_GIT_SUBCOMMANDS": frozenset(
+    # --- commit_risk ---
+    "commit_risk._INDEX_MUTATING_GIT_SUBCOMMANDS": frozenset(
         {
             "add",
             "am",
@@ -1149,7 +1150,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "switch",
         }
     ),
-    "pre_bash_commit_quality._WORKTREE_MUTATING_EXECUTABLES": frozenset(
+    "commit_risk._WORKTREE_MUTATING_EXECUTABLES": frozenset(
         {
             "chmod",
             "chown",
@@ -1168,8 +1169,8 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "unlink",
         }
     ),
-    "pre_bash_commit_quality._INPLACE_EDIT_EXECUTABLES": frozenset({"perl", "sed"}),
-    "pre_bash_commit_quality._MUTATING_REDIRECT_OPERATORS": frozenset(
+    "commit_risk._INPLACE_EDIT_EXECUTABLES": frozenset({"perl", "sed"}),
+    "commit_risk._MUTATING_REDIRECT_OPERATORS": frozenset(
         {">", ">>", "&>", "&>>", ">|", "1>", "2>", "1>>", "2>>", ">&"}
     ),
 }
@@ -1366,19 +1367,19 @@ _VOCABULARY_DENY_ALLOW_CASES = (
     ("block_no_verify._GIT_CONFIG_NEW_WRITE_OPS", "block_no_verify", "git config {item} core.hooksPath x", "git config {item} user.name x"),
     # --- commit 前 mutation ガード ---
     (
-        "pre_bash_commit_quality._INDEX_MUTATING_GIT_SUBCOMMANDS",
+        "commit_risk._INDEX_MUTATING_GIT_SUBCOMMANDS",
         "pre_bash_commit_quality",
         "git {item} && git commit -m 'fix: x'",
         "git status && git commit -m 'fix: x'",
     ),
     (
-        "pre_bash_commit_quality._WORKTREE_MUTATING_EXECUTABLES",
+        "commit_risk._WORKTREE_MUTATING_EXECUTABLES",
         "pre_bash_commit_quality",
         "{item} app.py && git commit -m 'fix: x'",
         "cat app.py && git commit -m 'fix: x'",
     ),
     (
-        "pre_bash_commit_quality._INPLACE_EDIT_EXECUTABLES",
+        "commit_risk._INPLACE_EDIT_EXECUTABLES",
         "pre_bash_commit_quality",
         "{item} -i s/a/b/ app.py && git commit -m 'fix: x'",
         "{item} s/a/b/ app.py && git commit -m 'fix: x'",
@@ -1603,7 +1604,7 @@ def test_every_redirect_operator_yields_a_write_target(operator: str) -> None:
 
 @pytest.mark.parametrize(
     "operator",
-    sorted(_EXPECTED_VOCABULARIES["pre_bash_commit_quality._MUTATING_REDIRECT_OPERATORS"]),
+    sorted(_EXPECTED_VOCABULARIES["commit_risk._MUTATING_REDIRECT_OPERATORS"]),
 )
 def test_every_mutating_redirect_operator_marks_the_segment(operator: str) -> None:
     """`_MUTATING_REDIRECT_OPERATORS` の全要素が mutation 判定を立てること（層1・単体）。
@@ -1614,10 +1615,10 @@ def test_every_mutating_redirect_operator_marks_the_segment(operator: str) -> No
     Args:
         operator: リダイレクト演算子。
     """
-    assert pre_bash_commit_quality._segment_mutates_worktree_or_index(
+    assert commit_risk._segment_mutates_worktree_or_index(
         ["printf", "x", operator, "app.py"]
     )
-    assert not pre_bash_commit_quality._segment_mutates_worktree_or_index(["printf", "x", "app.py"])
+    assert not commit_risk._segment_mutates_worktree_or_index(["printf", "x", "app.py"])
 
 
 @pytest.mark.parametrize(
@@ -1694,7 +1695,7 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
     """
     unit_covered = {
         "bash_config_protection._REDIRECT_OPERATORS",
-        "pre_bash_commit_quality._MUTATING_REDIRECT_OPERATORS",
+        "commit_risk._MUTATING_REDIRECT_OPERATORS",
         "shell_tokens._HEREDOC_CONTINUATION_SUFFIXES",
         "commit_quality_scanner._LINTABLE_SUFFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",

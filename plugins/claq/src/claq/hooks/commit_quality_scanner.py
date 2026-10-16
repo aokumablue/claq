@@ -4,7 +4,8 @@
 `pre_bash_commit_quality` フックのスキャナ層です。ファイル内容の取得（INDEX /
 作業ツリー）、lint 対象・シークレットスキャン対象の判定、バイナリ判定、問題検出
 （ログ出力呼び出し / デバッガ文 / TODO / シークレット）を担います。`git commit` の
-検出やコミットメッセージ検証はエントリ側の `pre_bash_commit_quality` に残ります。
+検出は `commit_risk`、コミットメッセージ検証は `commit_message`、評価の制御はエントリ側の
+`pre_bash_commit_quality` が持ちます。
 
 シークレット検出は nosec・ファイルサイズに関わらず全体を走査します。バイナリ判定
 されたファイルも、`_extract_printable_runs` が抽出した印字可能文字列へ同じパターンを

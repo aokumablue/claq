@@ -153,7 +153,7 @@ def test_git_global_options_do_not_hide_index_mutation(command: str, label: str)
     その**値**（``.`` / ``a=b`` / ``.git``）がサブコマンドと読まれて
     `add` を見失い、未検査の内容がコミットされる経路が開く。
     """
-    from claq.hooks.pre_bash_commit_quality import _segment_mutates_worktree_or_index
+    from claq.hooks.commit_risk import _segment_mutates_worktree_or_index
     from claq.hooks.shell_tokens import tokenize
 
     segment = [token for token in tokenize(command.split("&&")[0]) if token]

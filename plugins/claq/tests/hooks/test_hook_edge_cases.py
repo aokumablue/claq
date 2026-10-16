@@ -16,7 +16,9 @@ from unittest import mock
 
 import pytest
 
+from claq.hooks import commit_message as commit_message
 from claq.hooks import commit_quality_scanner as commit_quality_scanner
+from claq.hooks import commit_risk as commit_risk
 from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
 from claq.hooks import stdin_io as stdin_io
 
@@ -58,8 +60,8 @@ def test_pre_bash_commit_quality_detects_file_issues_and_commit_message_rules(
     assert [issue["line"] for issue in issues if issue["type"] == "console.log"] == [1]  # nosec
     assert [issue["line"] for issue in issues if issue["type"] == "todo"] == [4]
 
-    assert pre_bash_commit_quality.validate_commit_message("git status") is None
-    message = pre_bash_commit_quality.validate_commit_message('git commit -m "feat(core): Add feature."')
+    assert commit_message.validate_commit_message("git status") is None
+    message = commit_message.validate_commit_message('git commit -m "feat(core): Add feature."')
     assert message is not None
     assert message["message"] == "feat(core): Add feature."
     assert {issue["type"] for issue in message["issues"]} == {"capitalization", "punctuation"}
@@ -774,7 +776,7 @@ def test_pre_bash_commit_quality_finds_parser_and_reading_errors(monkeypatch: py
     assert "RuntimeError" in issues[0]["message"]
 
     long_message = "git commit -m \"bad message with no conventional format and a very long subject line that keeps going.\""
-    parsed = pre_bash_commit_quality.validate_commit_message(long_message)
+    parsed = commit_message.validate_commit_message(long_message)
     assert parsed is not None
     assert {issue["type"] for issue in parsed["issues"]} >= {"format", "length"}
 
@@ -991,7 +993,7 @@ def test_pre_bash_commit_quality_entrypoint_exits_zero(monkeypatch: pytest.Monke
 
 def test_validate_commit_message_lowercase_no_period() -> None:
     """conventional commit で小文字始まり・末尾ピリオド無しなら指摘なし。"""
-    from claq.hooks.pre_bash_commit_quality import validate_commit_message
+    from claq.hooks.commit_message import validate_commit_message
 
     result = validate_commit_message('git commit -m "feat: add new feature"')
     assert result is not None
@@ -1035,9 +1037,7 @@ def test_apply_commit_message_issues_without_suggestion(monkeypatch) -> None:
 
 def test_is_git_commit_command_detects_double_space() -> None:
     """連続空白（git  commit）でも commit 検出が成立すること。"""
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, args = pbcq._is_git_commit_command("git  commit -m x")
+    is_commit, args = commit_risk._is_git_commit_command("git  commit -m x")
     assert is_commit is True
     assert args == ["-m", "x"]
 
@@ -1051,22 +1051,18 @@ def test_is_git_commit_command_treats_newline_as_a_command_separator() -> None:
     `printf x > s.py` 改行 `git add s.py` 改行 `git commit -m x` が通るのに
     `;` 区切りの同内容だけが止まる。
     """
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, _args = pbcq._is_git_commit_command("git\ncommit -m x")
+    is_commit, _args = commit_risk._is_git_commit_command("git\ncommit -m x")
     assert is_commit is False
 
     # 各行が独立したコマンドとして読まれるため、行内で完結する commit は検出する。
-    is_commit, args = pbcq._is_git_commit_command("echo hi\ngit commit -m x")
+    is_commit, args = commit_risk._is_git_commit_command("echo hi\ngit commit -m x")
     assert is_commit is True
     assert args == ["-m", "x"]
 
 
 def test_is_git_commit_command_skips_global_dash_c_option() -> None:
     """`git -C <path> commit` のようなグローバルオプション付きでも検出できること。"""
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, args = pbcq._is_git_commit_command("git -C /tmp/repo commit -m x")
+    is_commit, args = commit_risk._is_git_commit_command("git -C /tmp/repo commit -m x")
     assert is_commit is True
     assert args == ["-m", "x"]
 
@@ -1079,64 +1075,50 @@ def test_is_git_commit_command_skips_unknown_global_option_with_value() -> None:
     打ち切られ検出漏れになる（フェイルセーフ違反）。そのため
     オプション・値を区別せず commit まで読み飛ばす。
     """
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, args = pbcq._is_git_commit_command("git --exec-path /foo commit -m x")
+    is_commit, args = commit_risk._is_git_commit_command("git --exec-path /foo commit -m x")
     assert is_commit is True
     assert args == ["-m", "x"]
 
 
 def test_is_git_commit_command_skips_unknown_global_option_detects_dash_a() -> None:
     """未知グローバルオプション経由でも -a 相当のフラグが検出できること。"""
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, args = pbcq._is_git_commit_command("git --super-prefix /x commit -am y")
+    is_commit, args = commit_risk._is_git_commit_command("git --super-prefix /x commit -am y")
     assert is_commit is True
-    assert pbcq._is_commit_all_flag(args) is True
+    assert commit_risk._is_commit_all_flag(args) is True
 
 
 def test_is_git_commit_command_detects_within_composite_command() -> None:
     """`&&` で連結された複合コマンド中の git commit も検出できること。"""
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, args = pbcq._is_git_commit_command("echo hi && git commit -m x")
+    is_commit, args = commit_risk._is_git_commit_command("echo hi && git commit -m x")
     assert is_commit is True
     assert args == ["-m", "x"]
 
 
 def test_is_git_commit_command_returns_false_for_non_commit() -> None:
     """git commit を含まないコマンドは False を返すこと。"""
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, args = pbcq._is_git_commit_command("git status")
+    is_commit, args = commit_risk._is_git_commit_command("git status")
     assert is_commit is False
     assert args == []
 
 
 def test_is_git_commit_command_falls_back_on_shlex_failure() -> None:
     """クォート不整合（heredoc 等）で shlex.split が失敗しても検出を継続すること。"""
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
     broken_command = "git commit -m 'unterminated quote"
-    is_commit, _args = pbcq._is_git_commit_command(broken_command)
+    is_commit, _args = commit_risk._is_git_commit_command(broken_command)
     assert is_commit is True
 
 
 def test_is_git_commit_command_fallback_non_commit_returns_false() -> None:
     """フォールバック経路でも git commit を含まなければ False を返すこと。"""
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
     broken_command = "echo 'unterminated quote"
-    is_commit, args = pbcq._is_git_commit_command(broken_command)
+    is_commit, args = commit_risk._is_git_commit_command(broken_command)
     assert is_commit is False
     assert args == []
 
 
 def test_is_git_commit_command_returns_false_when_only_options_follow_git() -> None:
     """git の後がオプションのみで commit が現れなければ False を返すこと。"""
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, args = pbcq._is_git_commit_command("git --version")
+    is_commit, args = commit_risk._is_git_commit_command("git --version")
     assert is_commit is False
     assert args == []
 
@@ -1149,9 +1131,7 @@ def test_is_git_commit_command_trusts_clean_tokenization() -> None:
     index の状態次第でブロックされる。同じ入力を `block_no_verify` は無視する
     ので、2 つのフックが「commit とは何か」で食い違うことにもなる。
     """
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, args = pbcq._is_git_commit_command("git status -m 'please run git commit later'")
+    is_commit, args = commit_risk._is_git_commit_command("git status -m 'please run git commit later'")
     assert is_commit is False
     assert args == []
 
@@ -1161,11 +1141,9 @@ def test_is_git_commit_command_regex_fallback_applies_when_tokenization_fails() 
 
     解析できない構文に対しては docs/adr/shell-analysis-boundary.md どおり過剰検出側へ倒す。
     """
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
     # クォート不整合で shlex が失敗し、空白分割後のトークン `"git` は git 実行
     # ファイルとして認識されない。生文字列の regex だけが commit を見つける。
-    is_commit, args = pbcq._is_git_commit_command('echo "git commit')
+    is_commit, args = commit_risk._is_git_commit_command('echo "git commit')
     assert is_commit is True
     assert args == []
 
@@ -1187,29 +1165,23 @@ def test_is_git_commit_command_detects_exe_and_absolute_path_tokens(command: str
     フォールバックにのみ救われ、`git.exe` は `.exe` が `\\s` を破るため
     regex フォールバックからもすり抜ける。
     """
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, _args = pbcq._is_git_commit_command(command)
+    is_commit, _args = commit_risk._is_git_commit_command(command)
     assert is_commit is True
 
 
 def test_is_git_commit_command_exe_token_walk_not_regex_fallback() -> None:
     """`git.exe commit` はトークン走査自体で捕まる（regex フォールバック頼みではない）。"""
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    args = pbcq._find_git_commit_args_in_segment(["git.exe", "commit", "-m", "x"])
+    args = commit_risk._find_git_commit_args_in_segment(["git.exe", "commit", "-m", "x"])
     assert args == ["-m", "x"]
 
 
 def test_is_commit_all_flag_detects_short_long_and_combined() -> None:
     """-a / --all / -am のような結合短形式を検出すること。"""
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    assert pbcq._is_commit_all_flag(["-a", "-m", "x"]) is True
-    assert pbcq._is_commit_all_flag(["--all", "-m", "x"]) is True
-    assert pbcq._is_commit_all_flag(["-am", "x"]) is True
-    assert pbcq._is_commit_all_flag(["-m", "x"]) is False
-    assert pbcq._is_commit_all_flag(["--amend", "-m", "x"]) is False
+    assert commit_risk._is_commit_all_flag(["-a", "-m", "x"]) is True
+    assert commit_risk._is_commit_all_flag(["--all", "-m", "x"]) is True
+    assert commit_risk._is_commit_all_flag(["-am", "x"]) is True
+    assert commit_risk._is_commit_all_flag(["-m", "x"]) is False
+    assert commit_risk._is_commit_all_flag(["--amend", "-m", "x"]) is False
 
 
 def test_evaluate_malformed_json_with_commit_text_is_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1673,26 +1645,22 @@ def test_find_git_commit_args_stops_at_separator_before_commit() -> None:
     みなさないこと（区切り記号でセグメントが分かれ、`commit` が別セグメントに
     孤立するため見つからない分岐）。
     """
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, args = pbcq._is_git_commit_command("git && echo hi")
+    is_commit, args = commit_risk._is_git_commit_command("git && echo hi")
     assert is_commit is False
     assert args == []
 
 
 def test_git_commit_args_stop_at_shell_operator() -> None:
     """`git commit` 後の引数収集は `&&` / `;` / `|` 等のセグメント境界で打ち切る。"""
-    import claq.hooks.pre_bash_commit_quality as pbcq
-
-    is_commit, args = pbcq._is_git_commit_command("git commit -m x && echo hi")
+    is_commit, args = commit_risk._is_git_commit_command("git commit -m x && echo hi")
     assert is_commit is True
     assert args == ["-m", "x"]
 
-    is_commit, args = pbcq._is_git_commit_command("git commit -m x ; true")
+    is_commit, args = commit_risk._is_git_commit_command("git commit -m x ; true")
     assert is_commit is True
     assert args == ["-m", "x"]
 
-    is_commit, args = pbcq._is_git_commit_command("&& echo hi")
+    is_commit, args = commit_risk._is_git_commit_command("&& echo hi")
     assert is_commit is False
     assert args == []
 

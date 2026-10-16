@@ -12,7 +12,7 @@ import subprocess
 
 import pytest
 
-from claq.hooks import block_no_verify
+from claq.hooks import block_no_verify, commit_risk
 from claq.hooks import pre_bash_commit_quality as pbcq
 
 
@@ -39,12 +39,12 @@ class TestShellSeparatorTokenization:
     def test_is_git_commit_command_shell_separator_boundary(
         self, command: str, expected_is_commit: bool
     ) -> None:
-        is_commit, _args = pbcq._is_git_commit_command(command)
+        is_commit, _args = commit_risk._is_git_commit_command(command)
         assert is_commit is expected_is_commit
 
     def test_quoted_git_commit_is_not_a_commit(self) -> None:
         """解析できた引用文の `git commit` は commit と判定しないこと。"""
-        is_commit, _args = pbcq._is_git_commit_command('echo "git commit"')
+        is_commit, _args = commit_risk._is_git_commit_command('echo "git commit"')
         assert is_commit is False
 
     def test_block_no_verify_and_commit_quality_agree_on_quoted_text(self) -> None:
@@ -56,7 +56,7 @@ class TestShellSeparatorTokenization:
         """
         quoted = "copilot -p 'Explain why a git commit command may fail'"
 
-        assert pbcq._is_git_commit_command(quoted)[0] is False
+        assert commit_risk._is_git_commit_command(quoted)[0] is False
         assert block_no_verify.has_bypass_flag(quoted) is False
 
 
@@ -128,50 +128,50 @@ class TestCompoundCommitGuard:
         ("command", "expected_message"),
         [
             # 複数 commit: 2 つ目がコミットする内容は実行前状態に現れない。
-            ("git commit --allow-empty -m first && git commit -am second", pbcq._MULTIPLE_COMMITS_MESSAGE),
-            ("git commit -m a; git commit -m b", pbcq._MULTIPLE_COMMITS_MESSAGE),
+            ("git commit --allow-empty -m first && git commit -am second", commit_risk._MULTIPLE_COMMITS_MESSAGE),
+            ("git commit -m a; git commit -m b", commit_risk._MULTIPLE_COMMITS_MESSAGE),
             # commit より前の index / worktree 変更。
-            ("git add . && git commit -m x", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("git add . && git commit -m x", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             (
                 "printf '" + "password" + "=supersecret123\\n' > secret.py"
                 " && git add secret.py && git commit -m x",
-                pbcq._MUTATION_BEFORE_COMMIT_MESSAGE,
+                commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE,
             ),
-            ("rm old.py && git commit -am x", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("sed -i 's/a/b/' f.py && git commit -m x", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("git reset --soft HEAD~1 && git commit -m x", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("cp a.py b.py && git commit -am x", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("rm old.py && git commit -am x", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("sed -i 's/a/b/' f.py && git commit -m x", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("git reset --soft HEAD~1 && git commit -m x", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("cp a.py b.py && git commit -am x", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             # ファイルへのリダイレクトは `>&` でも作業ツリーへの書き込み。
-            ("echo x >&f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("echo x >& f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("echo x &>f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("echo x &>>f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("echo x > f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("echo x >> f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >&f && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >& f && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x &>f && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x &>>f && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x > f && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >> f && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             # `2x` は数字のみではなくファイル名。数字を含んでも fd 複製とは読まない。
-            ("echo x >&2x && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >&2x && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             # 全角数字は fd 番号ではない。
-            ("echo x >&\uff12 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >&\uff12 && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             # fd 複製の免除は `>&` だけ。他の変更演算子の直後が数字・`-` でもファイル名なので変更扱い。
-            ("echo x > 2 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("echo x &> 2 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("echo x >> 1 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("echo x &>> 1 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("echo x 2> 1 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("echo x >| 3 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
-            ("echo x > - && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x > 2 && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x &> 2 && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >> 1 && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x &>> 1 && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x 2> 1 && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >| 3 && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x > - && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             # 後続トークンが無い `>&` は書き込み先を判定できないため変更扱い。
-            ("echo x >& ; git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo x >& ; git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             # fd 複製の直後でない数字は巻き込まない: `>&` の次はファイル名 `f`。
-            ("echo 1 >&f 2 && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo 1 >&f 2 && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             # fd 複製の後ろに別の書き込みがあれば、そちらで変更扱い。
-            ("cmd 2>&1 > f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("cmd 2>&1 > f && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             # 解析不能な入力でも `>&file` は変更扱い。
-            ("echo $'\\'' >&f && git commit -m a", pbcq._MUTATION_BEFORE_COMMIT_MESSAGE),
+            ("echo $'\\'' >&f && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
         ],
     )
     def test_uninspectable_compounds_are_denied(self, command: str, expected_message: str) -> None:
-        assert pbcq._compound_commit_risk(command) == expected_message
+        assert commit_risk._compound_commit_risk(command) == expected_message
 
     @pytest.mark.parametrize(
         "command",
@@ -201,23 +201,23 @@ class TestCompoundCommitGuard:
         ],
     )
     def test_inspectable_commands_pass(self, command: str) -> None:
-        assert pbcq._compound_commit_risk(command) is None
+        assert commit_risk._compound_commit_risk(command) is None
 
     def test_non_commit_command_is_not_evaluated(self) -> None:
         """commit を含まないコマンドは、変更操作があっても本ガードの対象外。"""
-        assert pbcq._compound_commit_risk("git add . && git status") is None
+        assert commit_risk._compound_commit_risk("git add . && git status") is None
 
     def test_bare_git_without_subcommand_is_not_a_mutation(self) -> None:
         """サブコマンドの無い `git` 単体は index を変更しない。"""
-        assert pbcq._segment_mutates_worktree_or_index(["git"]) is False
+        assert commit_risk._segment_mutates_worktree_or_index(["git"]) is False
 
     def test_git_with_only_options_is_not_a_mutation(self) -> None:
         """オプションだけで終わる `git -C /tmp` は index を変更しない。"""
-        assert pbcq._segment_mutates_worktree_or_index(["git", "-C", "/tmp"]) is False
+        assert commit_risk._segment_mutates_worktree_or_index(["git", "-C", "/tmp"]) is False
 
     def test_long_option_is_not_mistaken_for_sed_inplace(self) -> None:
         """`sed --in-place` 以外の長オプションを `-i` と誤認しないこと。"""
-        assert pbcq._segment_mutates_worktree_or_index(["sed", "--expression", "s/a/b/", "f.py"]) is False
+        assert commit_risk._segment_mutates_worktree_or_index(["sed", "--expression", "s/a/b/", "f.py"]) is False
 
     def test_evaluate_scans_every_container_key(self) -> None:
         """先頭キーが無害でも後続キーの `git commit` を検査する。
@@ -255,7 +255,7 @@ class TestCompoundCommitGuard:
         result = pbcq.evaluate(raw)
 
         assert result["exitCode"] == 2
-        assert result["reason"] == pbcq._MULTIPLE_COMMITS_MESSAGE
+        assert result["reason"] == commit_risk._MULTIPLE_COMMITS_MESSAGE
 
     def test_evaluate_skips_container_whose_commit_detection_raises(
         self, monkeypatch: pytest.MonkeyPatch
@@ -284,7 +284,7 @@ class TestCompoundCommitGuard:
         raw = json.dumps({"tool_input": {"command": "git add . && git commit -m x"}})
         result = pbcq.evaluate(raw)
         assert result["exitCode"] == 2
-        assert result["reason"] == pbcq._MUTATION_BEFORE_COMMIT_MESSAGE
+        assert result["reason"] == commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE
 
 
 class TestArgvGroupCommitCounting:
@@ -326,7 +326,7 @@ class TestArgvGroupCommitCounting:
         )
 
         assert result["exitCode"] == 2
-        assert result["reason"] == pbcq._MULTIPLE_COMMITS_MESSAGE
+        assert result["reason"] == commit_risk._MULTIPLE_COMMITS_MESSAGE
         assert scanned == []
 
     def test_flat_command_strings_with_two_commits_are_denied(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -334,7 +334,7 @@ class TestArgvGroupCommitCounting:
         result, scanned = self._run(["git commit -m a", "git commit -m b"], monkeypatch)
 
         assert result["exitCode"] == 2
-        assert result["reason"] == pbcq._MULTIPLE_COMMITS_MESSAGE
+        assert result["reason"] == commit_risk._MULTIPLE_COMMITS_MESSAGE
         assert scanned == []
 
     def test_flat_command_strings_with_one_commit_are_scanned(self, monkeypatch: pytest.MonkeyPatch) -> None:
