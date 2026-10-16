@@ -1111,7 +1111,7 @@ def _expand_leading_tilde(raw_path: str) -> str:
         それ以外はそのまま返す。
 
     Raises:
-        例外は発生しません。
+        OSError: 先頭が ``~`` で、ホームディレクトリを決定できないとき（``get_home_dir`` 由来）。
     """
     if raw_path == "~" or raw_path.startswith("~/"):
         return str(get_home_dir()) + raw_path[1:]

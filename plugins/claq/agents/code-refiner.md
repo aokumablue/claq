@@ -192,11 +192,11 @@ def status(user):
 - 同期 I/O ブロッキング → 非同期化・バックグラウンドジョブ化
 - キャッシュなし高頻度 DB 読み取り → アプリキャッシュ層追加
 
-### Web フロント特化（Core Web Vitals 2024-03 改訂 / Lighthouse 10 以降）
+### Web フロント特化
 
 - 大 vendor バンドル → ツリーシェイキング・軽量代替 / 重複コード → 共有モジュール抽出
 - イベントリスナー未解除 → 破棄時に解除 / タイマー未クリア → clearInterval・clearTimeout / 購読解除忘れ → unsubscribe
-- Core Web Vitals: LCP < 2.5s / INP < 200ms / CLS < 0.1（INP は 2024-03 に FID を置き換えた。FID を指標に採らない）
+- Core Web Vitals: LCP < 2.5s / INP < 200ms / CLS < 0.1（FID は指標に採らない）
 - Lighthouse 補助指標: FCP < 1.8s / TBT < 200ms / Speed Index < 3.4s（TTI は Lighthouse 10 で退役。指標に採らない）
 - Bundle(gzip) < 200KB
 
