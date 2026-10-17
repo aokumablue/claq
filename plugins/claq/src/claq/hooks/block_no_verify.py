@@ -195,45 +195,14 @@ _HOOKS_PATH_CONFIG_KEY = "core.hookspath"
 # - ``alias.``: ``git -c alias.ci='commit --no-verify' ci`` は ``--no-verify`` が config
 #   **値**の中にあるためフラグ走査に掛からない。展開結果を解釈する術が無い以上、
 #   alias の定義そのものを deny する（誤検出 > 誤通過）。
+#
+# `is_sensitive_config_key` は `git config` / ``-c`` の key だけでなく、`config_protection` が
+# config ファイルの本文を解析して得た key の判定にも使う（key 集合を 1 本にするため）。
 _SENSITIVE_CONFIG_KEY_PREFIXES = (
     _HOOKS_PATH_CONFIG_KEY,
     "include.path",
     "includeif.",
     "alias.",
-)
-
-
-def _config_text_pattern_for_prefix(prefix: str) -> str:
-    """config key の前置を、config ファイル本文（INI 形式）上の照合パターンへ変換する。
-
-    ``section.key`` 形の前置は key 名の行（行頭、または同じ行の ``]`` の直後）で、
-    ``section.`` 形の前置はセクション見出しで照合する。本文上では key が見出しとは別行に
-    あり、Edit が既存セクションの内側だけを書き換えることもあるため、見出しに依存せず key
-    名だけで照合できるものは key 名で見る。
-
-    Args:
-        prefix: `_SENSITIVE_CONFIG_KEY_PREFIXES` の要素（小文字）。
-
-    Returns:
-        正規表現の断片。
-
-    Raises:
-        例外は発生しません。
-    """
-    section, _, key = prefix.partition(".")
-    if key:
-        return rf"(?:^|\])[ \t]*{re.escape(key)}[ \t]*="
-    return rf"\[[ \t]*{re.escape(section)}"
-
-
-# config ファイルの本文（``.git/config`` への Edit/Write の内容）に、`_SENSITIVE_CONFIG_KEY_PREFIXES`
-# の key が現れるかを見る正規表現。`config_protection` が ``.git/config`` への書込みを条件付きで
-# 保護する際の兆候として使う。key 集合を `git config` 経由の検出と 1 本にするため、前置から導く。
-# 既存セクションの内側への追記のうちセクション見出し単位でしか照合できないもの（``[alias]``
-# 内の ``ci = commit --no-verify``）は、見出しが断片に含まれない限り検出しない。
-GIT_CONFIG_TEXT_SIGNAL_RE = re.compile(
-    "|".join(_config_text_pattern_for_prefix(prefix) for prefix in _SENSITIVE_CONFIG_KEY_PREFIXES),
-    re.IGNORECASE | re.MULTILINE,
 )
 
 
@@ -463,8 +432,11 @@ def _is_no_verify_flag(flag: str) -> bool:
     )
 
 
-def _is_sensitive_config_key(key: str) -> bool:
+def is_sensitive_config_key(key: str) -> bool:
     """config key がフック実行を左右しうるものかを判定する。
+
+    `config_protection` が config ファイルの本文から得た完全修飾 key（``section.sub.key``）にも
+    使うため公開名にしている。
 
     Args:
         key: config key 名（大小文字不問）。
@@ -524,7 +496,7 @@ def _is_literal_env_hooks_path_override(prefix_tokens: list[str]) -> bool:
     if _GIT_CONFIG_INJECTION_ENV_NAMES & assignments.keys():
         return True
     return any(
-        _GIT_CONFIG_KEY_INDEX_RE.match(name) and _is_sensitive_config_key(value) for name, value in assignments.items()
+        _GIT_CONFIG_KEY_INDEX_RE.match(name) and is_sensitive_config_key(value) for name, value in assignments.items()
     )
 
 
@@ -563,7 +535,7 @@ def _is_config_sensitive_key_mutation(invocation: GitInvocation) -> bool:
     if args and args[0] in _GIT_CONFIG_NEW_READ_OPS | _GIT_CONFIG_NEW_WRITE_OPS:
         new_op, args = args[0], args[1:]
 
-    if not any(_is_sensitive_config_key(arg) for arg in args):
+    if not any(is_sensitive_config_key(arg) for arg in args):
         return False
 
     if new_op is not None:
@@ -597,7 +569,7 @@ def _is_bypass_invocation(invocation: GitInvocation) -> bool:
     """
     if any(_is_no_verify_flag(flag) for flag in invocation.flags):
         return True
-    if any(_is_sensitive_config_key(value.split("=", 1)[0]) for value in invocation.config_values):
+    if any(is_sensitive_config_key(value.split("=", 1)[0]) for value in invocation.config_values):
         return True
     if _is_config_sensitive_key_mutation(invocation):
         return True

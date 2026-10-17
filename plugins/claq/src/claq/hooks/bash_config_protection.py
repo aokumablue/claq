@@ -56,10 +56,11 @@ from pathlib import Path
 
 from claq.hooks.config_protection import (
     CONDITIONALLY_PROTECTED_FILES_FOLDED,
+    GIT_CONFIG_DISPLAY_NAMES,
     PROTECTED_FILES_FOLDED,
     blocked_message_for_file,
-    conditionally_protected_path,
     protected_path_segment,
+    repo_git_config_path,
 )
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
@@ -169,9 +170,6 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILE
 # 注入の永続化経路になる。保護の範囲を「Bash からの直接追記の拒否」に限るため、
 # `config_protection` の保護 path（Edit/Write にも効く）へは足さず本モジュールに閉じる。
 _HOME_LOG_PATH_SEGMENTS = ((".claq", "logs"),)
-
-# `conditionally_protected_path` が返す ``.git/config`` の表示名。専用のブロック文言を選ぶ鍵。
-_GIT_CONFIG_DISPLAY_NAME = ".git/config"
 
 
 def _find_home_log_directory_match(token: str) -> str | None:
@@ -331,7 +329,7 @@ def _protected_target(token: str) -> str | None:
     # ``.git/config`` は Edit/Write なら内容の兆候で判定するが、Bash の書込みは内容を解釈
     # できない（``printf … >> .git/config`` の本文は別のトークンで、素通りの余地が残る）ため、
     # 書込み先位置に現れた時点で deny する。
-    return conditionally_protected_path(token)
+    return repo_git_config_path(token)
 
 
 def _non_option_args(args: list[str]) -> list[str]:
@@ -706,7 +704,7 @@ def _blocked_message(found: str) -> str:
     """
     if found.startswith("~/"):
         return _blocked_home_log_message(found)
-    if found == _GIT_CONFIG_DISPLAY_NAME:
+    if found in GIT_CONFIG_DISPLAY_NAMES:
         return _blocked_git_config_message(found)
     return blocked_message_for_file(found)
 

@@ -15,7 +15,15 @@ import re
 from pathlib import Path
 from typing import Any
 
-from claq.hooks.block_no_verify import GIT_CONFIG_TEXT_SIGNAL_RE
+from claq.hooks.block_no_verify import is_sensitive_config_key
+from claq.hooks.git_config_text import (
+    GLOBAL_GIT_CONFIG_DISPLAY_NAMES,
+    GitConfigParseError,
+    adds_sensitive_entries,
+    git_config_text_after,
+    global_git_config_path,
+    read_current_text,
+)
 from claq.hooks.hook_common import (
     basename,
     emit_block_output,
@@ -107,15 +115,26 @@ _PROTECTED_PATH_SEGMENTS_FOLDED = tuple(
     tuple(normalize_protected_name(part) for part in segments) for segments in _PROTECTED_PATH_SEGMENTS
 )
 
-# 内容次第で保護するパス。``.git/config`` は remote / branch / user の通常編集が正当に
-# あるため無条件では塞がず、``core.hooksPath`` / ``include`` / ``alias`` のようにフック実行を
-# 左右する key（`block_no_verify` が ``git config`` 経由で塞ぐものと同じ集合）の兆候が書込み内容に
-# あるときだけ塞ぐ。Bash 経由の書込みは内容を解釈できないため `bash_config_protection` が
-# 無条件に塞ぐ。``~/.gitconfig`` と ``.git/config.worktree`` は対象外。
-_CONDITIONALLY_PROTECTED_PATH_SEGMENTS = ((".git", "config"),)
-_CONDITIONALLY_PROTECTED_PATH_SEGMENTS_FOLDED = tuple(
-    tuple(normalize_protected_name(part) for part in segments)
-    for segments in _CONDITIONALLY_PROTECTED_PATH_SEGMENTS
+# 内容次第で保護する git config のパス。remote / branch / user の通常編集が正当にあるため
+# 無条件では塞がず、置換後の全文を解析して ``core.hooksPath`` / ``include`` / ``alias`` のように
+# フック実行を左右する key（`block_no_verify` が ``git config`` 経由で塞ぐものと同じ集合）が
+# 新しく現れる、または値が変わるときだけ塞ぐ。Bash 経由の書込みは内容を解釈できないため
+# `bash_config_protection` が書込み先位置に現れた時点で無条件に塞ぐ。
+#
+# リポジトリ内の設定ファイル（``*`` は worktree 名）。
+_GIT_CONFIG_REPO_SEGMENTS = (
+    (".git", "config"),
+    (".git", "config.worktree"),
+    (".git", "worktrees", "*", "config"),
+    (".git", "worktrees", "*", "config.worktree"),
+)
+_GIT_CONFIG_REPO_SEGMENTS_FOLDED = tuple(
+    tuple(normalize_protected_name(part) for part in segments) for segments in _GIT_CONFIG_REPO_SEGMENTS
+)
+
+# git config として扱う保護 path の表示名の全体（ホーム側を含む）。ブロック文言を選ぶ鍵として公開する。
+GIT_CONFIG_DISPLAY_NAMES = frozenset(
+    {"/".join(segments) for segments in _GIT_CONFIG_REPO_SEGMENTS} | GLOBAL_GIT_CONFIG_DISPLAY_NAMES
 )
 
 # ファイル名だけでは保護できない汎用設定ファイル。version bump・依存追加等の正当な
@@ -194,7 +213,7 @@ def _match_path_segments(
     """パスの連続した要素が候補のいずれかに一致するか判定する。
 
     symlink は解決してから判定し、解決不能なら生パスで判定する。比較は畳んだ側だけで行い、
-    返す表示名は畳む前の綴りを使う。
+    返す表示名は畳む前の綴りを使う。候補の要素 ``*`` は任意の 1 要素に一致する。
 
     Args:
         file_path: 検査対象の生パス文字列。
@@ -213,7 +232,8 @@ def _match_path_segments(
     for segments, folded_segments in zip(candidates, folded_candidates, strict=True):
         width = len(segments)
         for index in range(len(folded_parts) - width + 1):
-            if folded_parts[index : index + width] == folded_segments:
+            window = folded_parts[index : index + width]
+            if all(want in ("*", got) for want, got in zip(folded_segments, window, strict=True)):
                 return "/".join(segments)
     return None
 
@@ -237,24 +257,37 @@ def protected_path_segment(file_path: str) -> str | None:
     return _match_path_segments(file_path, _PROTECTED_PATH_SEGMENTS, _PROTECTED_PATH_SEGMENTS_FOLDED)
 
 
-def conditionally_protected_path(file_path: str) -> str | None:
-    """パスが内容次第で保護するパス（``.git/config``）かを判定する。
+def repo_git_config_path(file_path: str) -> str | None:
+    """パスがリポジトリ内の git config（``.git/config`` 等）かを判定する。
 
-    Edit/Write は内容の兆候で、Bash は `bash_config_protection` が無条件に塞ぐ。後者のため
-    公開名にしている。
+    Edit/Write は置換後の全文で、Bash は `bash_config_protection` が書込み先位置に現れた時点で
+    塞ぐ。後者のため公開名にしている。
 
     Args:
         file_path: 検査対象の生パス文字列。
 
     Returns:
-        該当した保護 path の表示名（``.git/config``）。該当しなければ None。
+        該当した保護 path の表示名（``.git/config`` 等）。該当しなければ None。
 
     Raises:
         例外は発生しません。
     """
-    return _match_path_segments(
-        file_path, _CONDITIONALLY_PROTECTED_PATH_SEGMENTS, _CONDITIONALLY_PROTECTED_PATH_SEGMENTS_FOLDED
-    )
+    return _match_path_segments(file_path, _GIT_CONFIG_REPO_SEGMENTS, _GIT_CONFIG_REPO_SEGMENTS_FOLDED)
+
+
+def git_config_path(file_path: str) -> str | None:
+    """パスが内容次第で保護する git config（リポジトリ内・ホーム側）かを判定する。
+
+    Args:
+        file_path: 検査対象の生パス文字列。
+
+    Returns:
+        該当した保護 path の表示名。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    return repo_git_config_path(file_path) or global_git_config_path(file_path)
 
 
 def _effective_basename(file_path: str) -> str:
@@ -498,7 +531,7 @@ def _conditional_block_reason(tool_name: str, container: Any, file_path: str, fi
 
 
 def _git_config_blocked_message(display_name: str) -> str:
-    """``.git/config`` への書込みが hooksPath 等の兆候を含む場合のブロック理由を生成する。
+    """git config への書込みが hooksPath 等を新しく持ち込む場合のブロック理由を生成する。
 
     Args:
         display_name: ブロックされたパスの表示名。
@@ -510,25 +543,46 @@ def _git_config_blocked_message(display_name: str) -> str:
         例外は発生しません。
     """
     return (
-        f"BLOCKED: The change to {display_name} appears to touch a key that can disable git hooks "
-        "(core.hooksPath, include.path / includeIf, alias). Ordinary settings (remote, branch, "
-        "user) can be changed with `git config <key> <value>`. "
-        "If this change is genuinely necessary, ask the user to make it — "
+        f"BLOCKED: The change to {display_name} adds or changes a key that can disable git hooks "
+        "(core.hooksPath, include.path / includeIf, any alias). Ordinary settings (remote, branch, "
+        "user) can be changed freely, but a key that runs commands cannot be added here: "
+        "if this change is genuinely necessary, ask the user to make it — "
         "do not disable the protection hook yourself."
     )
 
 
-def _git_config_block_reason(tool_name: str, container: Any, display_name: str) -> str | None:
-    """``.git/config`` への Edit/Write の内容を検査する。
+def _git_config_unparsable_message(display_name: str) -> str:
+    """git config への書込み内容を検証できない場合のブロック理由を生成する。
 
-    フック実行を左右する key の兆候（`GIT_CONFIG_TEXT_SIGNAL_RE`）が内容にあるか、内容が
-    取得できない・走査上限を超える場合に deny する。既存セクションの内側へ追記する Edit は
-    断片に key 名が含まれる限り検出するが、ディスク上のセクション構造は解析しない。
+    Args:
+        display_name: ブロックされたパスの表示名。
+
+    Returns:
+        ブロック理由文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        f"BLOCKED: The change to {display_name} could not be verified: the resulting file does not "
+        f"parse as git config text, or the file or the result exceeds {_LINT_SIGNAL_MAX_TEXT_BYTES} bytes. "
+        "Refusing an unverifiable write rather than risking a git-hook bypass."
+    )
+
+
+def _git_config_block_reason(tool_name: str, container: Any, file_path: str, display_name: str) -> str | None:
+    """git config への Edit/Write を、置換前後の全文を比べて検査する。
+
+    置換後の全文を解析し、フック実行を左右する key（`is_sensitive_config_key`）が置換前に
+    無かった、または値が変わったときに deny する。既存の ``[alias]`` の内側へ足す断片も、
+    ディスク上の全文から所属セクションが決まるため検出できる。全文を作れない・解析できない・
+    走査上限を超える場合も deny する。
 
     Args:
         tool_name: 正規化前の生ツール名。
         container: extract_tool_input 相当の 1 コンテナ値。
-        display_name: 対象の表示名（``.git/config``）。
+        file_path: 対象ファイルパス。
+        display_name: 対象の表示名（``.git/config`` 等）。
 
     Returns:
         ブロック理由。問題なければ None。
@@ -536,12 +590,17 @@ def _git_config_block_reason(tool_name: str, container: Any, display_name: str) 
     Raises:
         例外は発生しません。
     """
-    snippets = _editable_text(tool_name, container)
-    if snippets is None:
+    before = read_current_text(file_path, _LINT_SIGNAL_MAX_TEXT_BYTES + 1)
+    after = git_config_text_after(tool_name, container, before)
+    if after is None:
         return _unverifiable_conditional_message(display_name)
-    text = "\n".join(snippets)
-    if len(text) > _LINT_SIGNAL_MAX_TEXT_BYTES or GIT_CONFIG_TEXT_SIGNAL_RE.search(text):
-        return _git_config_blocked_message(display_name)
+    if max(len(before), len(after)) > _LINT_SIGNAL_MAX_TEXT_BYTES:
+        return _git_config_unparsable_message(display_name)
+    try:
+        if adds_sensitive_entries(before, after, is_sensitive_config_key):
+            return _git_config_blocked_message(display_name)
+    except GitConfigParseError:
+        return _git_config_unparsable_message(display_name)
     return None
 
 
@@ -568,9 +627,9 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
         protected_segment = protected_path_segment(file_path)
         if protected_segment is not None:
             return blocked_message_for_file(f"{protected_segment}/")
-        conditional_path = conditionally_protected_path(file_path)
-        if conditional_path is not None:
-            reason = _git_config_block_reason(tool_name, container, conditional_path)
+        git_config = git_config_path(file_path)
+        if git_config is not None:
+            reason = _git_config_block_reason(tool_name, container, file_path, git_config)
             if reason:
                 return reason
         file_name = _effective_basename(file_path)

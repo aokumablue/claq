@@ -955,8 +955,18 @@ _EXPECTED_TOUCH_COMMANDS = frozenset({"touch"})
 # `config_protection._PROTECTED_PATH_SEGMENTS` の期待内容（層2）。
 _EXPECTED_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), ("hooks", "hooks.json"))
 
-# `config_protection._CONDITIONALLY_PROTECTED_PATH_SEGMENTS` の期待内容（層2）。
-_EXPECTED_CONDITIONALLY_PROTECTED_PATH_SEGMENTS = ((".git", "config"),)
+# `config_protection._GIT_CONFIG_REPO_SEGMENTS` の期待内容（層2）。``*`` は worktree 名。
+_EXPECTED_GIT_CONFIG_REPO_SEGMENTS = (
+    (".git", "config"),
+    (".git", "config.worktree"),
+    (".git", "worktrees", "*", "config"),
+    (".git", "worktrees", "*", "config.worktree"),
+)
+
+# `git_config_text.GLOBAL_GIT_CONFIG_DISPLAY_NAMES` の期待内容（層2）。
+_EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES = frozenset(
+    {"~/.gitconfig", "$XDG_CONFIG_HOME/git/config", "~/.config/git/config"}
+)
 
 
 def _folded(names: frozenset[str]) -> frozenset[str]:
@@ -1137,11 +1147,14 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
         tuple(hook_common.normalize_protected_name(part) for part in segments)
         for segments in _EXPECTED_PROTECTED_PATH_SEGMENTS
     ),
-    "config_protection._CONDITIONALLY_PROTECTED_PATH_SEGMENTS": _EXPECTED_CONDITIONALLY_PROTECTED_PATH_SEGMENTS,
-    "config_protection._CONDITIONALLY_PROTECTED_PATH_SEGMENTS_FOLDED": tuple(
+    "config_protection._GIT_CONFIG_REPO_SEGMENTS": _EXPECTED_GIT_CONFIG_REPO_SEGMENTS,
+    "config_protection._GIT_CONFIG_REPO_SEGMENTS_FOLDED": tuple(
         tuple(hook_common.normalize_protected_name(part) for part in segments)
-        for segments in _EXPECTED_CONDITIONALLY_PROTECTED_PATH_SEGMENTS
+        for segments in _EXPECTED_GIT_CONFIG_REPO_SEGMENTS
     ),
+    "config_protection.GIT_CONFIG_DISPLAY_NAMES": frozenset("/".join(segments) for segments in _EXPECTED_GIT_CONFIG_REPO_SEGMENTS)
+    | _EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES,
+    "git_config_text.GLOBAL_GIT_CONFIG_DISPLAY_NAMES": _EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES,
     "config_protection._LINT_SECTION_HEADERS": _EXPECTED_LINT_SECTION_HEADERS,
     "config_protection._LINT_KEYS": _EXPECTED_LINT_KEYS,
     "config_protection._PACKAGE_JSON_LINT_KEYS": ("eslintConfig", "prettier"),
@@ -1451,8 +1464,15 @@ _VOCABULARY_WRITE_CASES = (
         _write("docs/hooks/pre-commit"),
     ),
     (
-        "config_protection._CONDITIONALLY_PROTECTED_PATH_SEGMENTS",
-        lambda item: _write_content("/".join(item), "[core]\n\thooksPath = /dev/null\n"),
+        # ``*`` は worktree 名。
+        "config_protection._GIT_CONFIG_REPO_SEGMENTS",
+        lambda item: _write_content("/".join(item).replace("*", "wt"), "[core]\n\thooksPath = /dev/null\n"),
+        _write_content("docs/config", "[core]\n\thooksPath = /dev/null\n"),
+    ),
+    (
+        # 畳み済みの複製は大文字綴りで引く（APFS / NTFS では同じファイル）。
+        "config_protection._GIT_CONFIG_REPO_SEGMENTS_FOLDED",
+        lambda item: _write_content("/".join(item).replace("*", "wt").upper(), "[core]\n\thooksPath = /dev/null\n"),
         _write_content("docs/config", "[core]\n\thooksPath = /dev/null\n"),
     ),
 )
@@ -1471,7 +1491,6 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
     "config_protection.PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
     "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
     "config_protection._PROTECTED_PATH_SEGMENTS_FOLDED": "_BLOCKED_CASES の保護 path の大文字（Bash）",
-    "config_protection._CONDITIONALLY_PROTECTED_PATH_SEGMENTS_FOLDED": "test_nested_git_dir_is_matched_case_insensitively (test_git_config_protection)",
     "config_protection._LINT_SECTION_HEADERS": "test_every_lint_section_header_is_detected",
     "config_protection._LINT_KEYS": "test_every_lint_key_is_detected",
     "config_protection._SETTINGS_GUARD_KEYS": "test_every_conditionally_protected_file_denies_only_lint_signals の settings.json / settings.local.json",
@@ -1482,6 +1501,14 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
 # 「要素を消しても判定が変わらない」ケースを層1 に混ぜると、緑が何も保証しない
 # 偽の受領証になる。持てないものは持てないと書き、層2 の完全一致だけで守る。
 _VOCABULARY_LAYER1_ABSENT = {
+    "config_protection.GIT_CONFIG_DISPLAY_NAMES": (
+        "派生値（`_GIT_CONFIG_REPO_SEGMENTS` の連結とホーム側の表示名の和集合）で、Bash 側の"
+        "ブロック文言を選ぶ鍵にすぎない。保護対象かどうかの判定は変えない"
+    ),
+    "git_config_text.GLOBAL_GIT_CONFIG_DISPLAY_NAMES": (
+        "表示名であり、保護対象のパスはホームと XDG_CONFIG_HOME から実行時に決まる。要素単位で判定が"
+        "変わる経路が無い（パス判定は test_git_config_protection.TestProtectedPaths が担う）"
+    ),
     "bash_config_protection._RAW_TEXT_RISK_INDICATORS": (
         "派生値（`_REMOVE_COMMANDS` 等の連結）であり、構成元の各集合が層1 を持つ。"
         "この tuple 自体は malformed JSON 専用の部分一致指標で、要素単位で判定が"
