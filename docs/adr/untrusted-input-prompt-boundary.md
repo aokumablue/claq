@@ -165,5 +165,19 @@ NFKC で `<` `/` `-` やタグ名になる文字で書かれた `claq-memory` �
     落ちる。Python に同名の判定が無いため、個別の文字をテストで固定する。
 - commit スキャンが deny 出力へ載せるファイル本文の抜粋も同じ信頼境界にあるため、`strip_tags` の
   前に `keep_allowed_chars` を掛ける。
+- commit スキャンが deny 出力へ載せるファイルパスも同じ信頼境界にある。ファイル名は攻撃者が選べ、
+  git の `--name-only` は改行・ESC・`"` を C 形式に引用するが、`<` `>` は引用しない
+  （`<system-reminder>` を含む名前が生で届く）。`core.quotePath=false` では非 ASCII も生バイトで
+  届く（U+2028、双方向制御、タグ文字）。スキャナが message とログへ載せるパスは
+  `sanitize_untrusted_path`（許可リスト → `strip_tags` → 行区切りを空白 1 個へ畳む）を通す。
+  抜粋と違い長さの上限は置かず、通常のパスは変えない（前後の空白と `&lt;` のような実体参照の形は
+  変わる）。読み取りに渡すパスは生のままにする。
+  - 残余として、`pre_bash_commit_quality` が問題のあるファイルごとに出す `[FILE] <path>` 行は
+    無害化していない。この行が残る間、スキャナ側の無害化は deny 出力に載る生パスの量を減らさない
+    （同じパスが 1 行上に生で出る）。
+  - 残余として、TODO/FIXME の抜粋（`_sanitize_untrusted_excerpt`）は行区切りを畳まない。
+    `content.split("\n")` は U+2028・NEL・単独 CR・VT・FF を行の中に残し、許可リストがそれらを LF に
+    揃えるため、抜粋が deny 出力で複数行になり、偽の行（`[Hook] PASS` など）を作れる。
+    タグは倒れるが行構造は倒れない。
 - 判定は実行系の `unicodedata` に依存する。実行系の Unicode 表より新しく割り当てられた文字は Cn
   として落ちる。

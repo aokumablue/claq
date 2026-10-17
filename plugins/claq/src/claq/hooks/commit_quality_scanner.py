@@ -376,6 +376,35 @@ def _sanitize_untrusted_excerpt(text: str) -> str:
     return sanitized
 
 
+# `sanitize_untrusted_path` が 1 行へ畳む対象。許可リスト処理の後は行区切りが LF に揃っている。
+_PATH_LINE_BREAKS = re.compile(r"\n+")
+
+
+def sanitize_untrusted_path(path: str) -> str:
+    """ステージされたファイルのパスを deny 出力へ載せる前に無害化する。
+
+    ファイル名は攻撃者が選べる文字列で、`git diff --name-only` の既定は改行・ESC・`"` を
+    C 形式に引用するが、`<` `>` は引用しない。`core.quotePath=false` では非 ASCII も生バイトで
+    返る（行区切り U+2028、双方向制御、タグ文字を含む）。deny 時に stderr 経由でモデルの
+    コンテキストへ入るため、`_sanitize_untrusted_excerpt` と同じく許可リストで文字を残し
+    （不可視文字で分断したタグを `strip_tags` が見られる形へ戻す）、囲いを偽装するタグを
+    `strip_tags` で倒す。さらに行区切りを空白 1 個へ畳み、出力が 1 行の形を保つようにする。
+    抜粋と違い長さの上限は置かない（通常のパスを切り詰めない。長さは git のパス長で抑えられる）。
+
+    読み取りに渡すパスは生のままにする。本関数は表示専用である。
+
+    Args:
+        path: git が返したファイルパス。
+
+    Returns:
+        タグを無害化し、1 行に畳んだ表示用のパス。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _PATH_LINE_BREAKS.sub(" ", strip_tags(keep_allowed_chars(path)))
+
+
 def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
     """ファイル内容からログ出力呼び出し / デバッガ文 / Issue 参照なし TODO を検出します。
 
@@ -528,11 +557,12 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
     if content is None:
         # 黙って空 issue を返すと「問題なし」と「検査不能」が区別できず、対象ファイルは
         # 無検査のままコミットが通る。scan_error（error）としてブロック対象にする。
-        log(f"[Hook] scan_error: {file_path} の内容取得に失敗しました（読み取り不能または取得拒否）")
+        shown_path = sanitize_untrusted_path(file_path)
+        log(f"[Hook] scan_error: {shown_path} の内容取得に失敗しました（読み取り不能または取得拒否）")
         return [
             {
                 "type": "scan_error",
-                "message": f"{file_path}: 内容を取得できなかったため検査できませんでした",
+                "message": f"{shown_path}: 内容を取得できなかったため検査できませんでした",
                 "line": 0,
                 "severity": "error",
             }
@@ -578,6 +608,8 @@ def _scan_error_issue(file_path: str, stage: str, err: Exception, *, severity: s
     例外メッセージ自体（ファイル内容の断片を含みうる）は出力に含めず、
     型名だけを記録する（秘密情報の二次漏洩を避けるため）。
 
+    パスは攻撃者が選べるため、出力へ載せる前に `sanitize_untrusted_path` を通す。
+
     Args:
         file_path: 対象ファイルのパス。
         stage: 失敗した処理段階の説明（ログ用）。
@@ -591,10 +623,11 @@ def _scan_error_issue(file_path: str, stage: str, err: Exception, *, severity: s
         例外は発生しません。
     """
     error_type = type(err).__name__
-    log(f"[Hook] scan_error: {file_path} の{stage}に失敗しました（{error_type}）")
+    shown_path = sanitize_untrusted_path(file_path)
+    log(f"[Hook] scan_error: {shown_path} の{stage}に失敗しました（{error_type}）")
     return {
         "type": "scan_error",
-        "message": f"{file_path}: {stage}に失敗したため検査できませんでした（{error_type}）",
+        "message": f"{shown_path}: {stage}に失敗したため検査できませんでした（{error_type}）",
         "line": 0,
         "severity": severity,
     }
