@@ -78,11 +78,18 @@ def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
 
 
 def _always_raise(message: str):
-    """呼び出されると必ず RuntimeError を送出するスタブを返す。"""
+    """呼び出されると必ず RuntimeError を送出するスタブを返す。
 
-    def _stub(*_args: object, **_kwargs: object) -> None:
+    呼び出しごとの ``(args, kwargs)`` を ``stub.calls`` に記録する。パッチが対象へ届かず
+    本物が成功した場合は結果が変わらないテストが多いので、呼ばれたことを ``calls`` で固定する。
+    """
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _stub(*args: object, **kwargs: object) -> None:
+        calls.append((args, kwargs))
         raise RuntimeError(message)
 
+    _stub.calls = calls  # type: ignore[attr-defined]
     return _stub
 
 
@@ -102,8 +109,10 @@ class TestSessionStartContract:
 
     def test_swallows_db_failure(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """コンテキスト組み立てが失敗してもフックを壊さず JSON を返す。"""
-        monkeypatch.setattr(cmd_context, "_build_context", _always_raise("db broken"))
+        stub = _always_raise("db broken")
+        monkeypatch.setattr(cmd_context, "_build_context", stub)
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
+        assert len(stub.calls) == 1
         assert exit_code == 0
         assert stderr == ""
         assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
@@ -1616,8 +1625,12 @@ class TestContext:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """組み立てに失敗してもフックを壊さず注入ゼロに倒す。"""
-        monkeypatch.setattr(cmd_context, "_build_context", _always_raise("db broken"))
+        # 注入できるカードを置く。パッチが外れて本物が走れば注入が出るので、空であることが失敗の握り潰しを示す。
+        _seed(tmp_path, key="g", title="global card")
+        stub = _always_raise("db broken")
+        monkeypatch.setattr(cmd_context, "_build_context", stub)
         assert self._inject(monkeypatch, tmp_path) == ""
+        assert len(stub.calls) == 1
 
     # --- 制御文字の除去（handoff 節・knowledge 節・通知節で共通） ---
 
@@ -1883,9 +1896,15 @@ class TestHandoff:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """記録に失敗してもフックを壊さず終了コード 0 を保つ。"""
-        monkeypatch.setattr(cmd_context, "_record_handoff", _always_raise("db broken"))
+        stub = _always_raise("db broken")
+        monkeypatch.setattr(cmd_context, "_record_handoff", stub)
+        payload = {"session_id": "s1", "handoff": "引き継ぎ"}
 
-        self._run(monkeypatch, tmp_path, {"session_id": "s1", "handoff": "引き継ぎ"})
+        self._run(monkeypatch, tmp_path, payload)
+
+        assert [call_args[1] for call_args, _ in stub.calls] == [payload]
+        # パッチが外れて本物が走れば sessions に行が残る。
+        assert self._sessions(tmp_path) == []
 
 
 def test_mem_main_module_invokes_cli_main(monkeypatch: pytest.MonkeyPatch) -> None:
