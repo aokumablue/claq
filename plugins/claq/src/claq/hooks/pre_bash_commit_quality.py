@@ -39,6 +39,7 @@ from claq.hooks.commit_message import validate_commit_message
 from claq.hooks.commit_quality_scanner import (
     find_file_issues,
     new_secret_scan_deadline,
+    sanitize_untrusted_path,
     should_lint_file,
     should_scan_secrets,
 )
@@ -320,7 +321,7 @@ def _count_file_issues(
         file_issues = find_file_issues(file_path, repo_root=repo_root, deadline=deadline)
         if not file_issues:
             continue
-        log(f"\n[FILE] {file_path}")
+        log(f"\n[FILE] {sanitize_untrusted_path(file_path)}")
         for issue in file_issues:
             # scanner の内部契約（キー欠落なし）に依存せず .get() で読む。未知 severity は
             # 「検査したが分類できない」ため、見逃さず安全側の error に数える。
