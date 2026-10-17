@@ -327,6 +327,13 @@ _BLOCKED_CASES = [
     ("解析不能でない引用符付き git と -n（対照）", "block_no_verify", _bash("\"git\" commit -n")),
     ("解析不能でない引用符付きフラグ（対照）", "block_no_verify", _bash("git commit \"--no-verify\"")),
     ("解析不能でない引用符付き hooksPath（対照）", "block_no_verify", _bash("git -c \"core.hooksPath=/x\" commit -m a")),
+    # 受容済みの誤検出: 引用符の対応を取らない空白分割は、引用符内の区切り・リダイレクトも
+    # 実行構造として読む。解析不能な入力に限り、引用文中の保護名の書込み様の語や
+    # `git commit -n` 様の語を deny する（引用符を整合させれば通る。ADR の該当節）。
+    ("受容 解析不能の後の引用文中の ; rm", "bash_config_protection", _bash("echo $'\\''; echo \"a; rm ruff.toml\"")),
+    ("受容 解析不能の後の引用文中の >", "bash_config_protection", _bash("echo $'\\''; echo \"x > ruff.toml\"")),
+    ("受容 解析不能の後の引用文中の git commit -n", "block_no_verify", _bash("echo $'\\''; echo \"git commit -n\"")),
+    ("受容 閉じない引用符の中の git commit -n", "block_no_verify", _bash("grep \"git commit -n README.md")),
     # 陽性対照（fail-closed 化で失われていないこと）。
     ("対照 コメント無しの 2 行目", "block_no_verify", _bash(f"git status\n{_NO_VERIFY}")),
     ("対照 bash -c", "block_no_verify", _bash(f"bash -c '{_NO_VERIFY}'")),

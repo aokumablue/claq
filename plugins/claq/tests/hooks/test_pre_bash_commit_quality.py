@@ -168,6 +168,8 @@ class TestCompoundCommitGuard:
             ("cmd 2>&1 > f && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             # 解析不能な入力でも `>&file` は変更扱い。
             ("echo $'\\'' >&f && git commit -m a", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
+            # 受容済みの誤検出: 解析不能な入力では引用文中の index 変更も実行構造として読む。
+            ("echo $'\\''; echo \"git add -A\"; git commit -m x", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
         ],
     )
     def test_uninspectable_compounds_are_denied(self, command: str, expected_message: str) -> None:
