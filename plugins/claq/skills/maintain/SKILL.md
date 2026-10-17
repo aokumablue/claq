@@ -20,6 +20,8 @@ commands/skills/agents/hooks をレビューし、実害を直し、指示文書
 
 止まるのは次のときだけ: 対象 surfaces が見つからない（`BLOCKED`）、`--dry-run` でステップ2 を終えた、final gate を 3 周で満たせない、ステップ6 を終えた。次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返るため）。進捗のメモは次のツール呼び出しと同じ応答に書く。
 
+本 skill が起動する子はすべて `run_in_background: false` で起動し、hand-back が揃うまで次の工程へ進まない。background だと結果待ちの応答で fork が終わるため。
+
 ## スコープ
 
 - 主対象: `plugins/claq/{commands,skills,agents,hooks}`（`--scope` で上書き）。指摘が指す実装ファイル（`src/claq/hooks/` 等）の修正も含む
@@ -64,7 +66,7 @@ baseline を取る（リポジトリ直下の `.venv` を有効化する）。
 
 ## ステップ2: レビュー（READ-ONLY・並列）
 
-対象に `claq:reviewer`（品質・設計・保守性）と `claq:security-auditor`（脆弱性）を `run_in_background: false` で同時に起動し（background だと結果待ちの応答で fork が終わるため）、両方の hand-back が届いてから結果を深刻度（CRITICAL/HIGH/MEDIUM/LOW）・ファイル位置・行番号・推奨修正で統合する。reviewer の依頼文には security-auditor と並列であることと、ステップ1 の web の動向に照らした最新のプラクティスとの乖離という観点を書く。
+対象に `claq:reviewer`（品質・設計・保守性）と `claq:security-auditor`（脆弱性）を同時に起動し、両方の結果を深刻度（CRITICAL/HIGH/MEDIUM/LOW）・ファイル位置・行番号・推奨修正で統合する。reviewer の依頼文には security-auditor と並列であることと、ステップ1 の web の動向に照らした最新のプラクティスとの乖離という観点を書く。
 
 hooks / `src/claq/hooks/` を含む回は、両ハーネス互換（原則4）を必須の観点にする: ブロック系の出力は `emit_block_output` 経由か、コンテキスト注入は `adapt_context_output` 経由か、Copilot CLI が対応しないイベント・機能に代替（または安全側のスキップ）があるか、Claude Code の経路に影響が無いか。ハーネスごとの判定と出力アダプタの実態は `src/claq/lib/harness.py` と `src/claq/hooks/output_adapter.py` で確かめる。
 

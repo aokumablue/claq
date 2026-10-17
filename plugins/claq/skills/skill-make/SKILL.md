@@ -13,6 +13,8 @@ user-invocable: false
 
 止まるのは、「全体の流れ」の 8 を終えたときと、`references/improvement-guide.md` の止める条件に当たったときだけ。それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返るため）。進捗のメモは次のツール呼び出しと同じ応答に書く。
 
+本 skill が起動する子はすべて `run_in_background: false` で起動し、hand-back が揃うまで次の工程へ進まない。background だと結果待ちの応答で fork が終わるため。
+
 ## 全体の流れ
 
 1. スキルの目的を決める
@@ -67,7 +69,7 @@ skill-name/
 
 詳細: `references/eval-workflow.md`
 
-1. スキルありとベースラインの 2 サブエージェントを `run_in_background: false` で同時に起動する（background だと結果待ちの応答で fork が終わるため）
+1. スキルありとベースラインの 2 サブエージェントを同時に起動する
 2. 定量的なアサーションを下書きする
 3. `timing.json` にすぐ保存する
 4. grading → ベンチマーク集約 → 分析 → viewer 表示

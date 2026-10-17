@@ -69,7 +69,7 @@ claq_mem_learn --kind pitfall --scope repo --domain <domain> \
 
 - Repro / Root cause / Fix: ステップ1-2 の自分の記録
 - Tests / Loop: loop-dev の Loop-Dev Result から転記
-- Review: loop-dev の `Blockers: {n} remaining` から導く（0 件 → PASS / 1 件以上 → BLOCKED）
+- Review: loop-dev の `Blockers: {n} remaining` から導く（0 件 → PASS / 1 件以上 → BLOCKED / 数値でない「未判定」→ BLOCKED）
 - Learned: ステップ4 の結果（記録が無ければ `なし`。欄は省かない）
 
 ```
