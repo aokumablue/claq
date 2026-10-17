@@ -452,6 +452,64 @@ class TestBashWrite:
         assert bash_config_protection.find_protected_write(command) == ".git/config"
 
     @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("echo x >> .git/config.worktree", ".git/config.worktree"),
+            ("echo x > .git/worktrees/wt/config", ".git/worktrees/*/config"),
+            ("tee .git/worktrees/wt/config.worktree", ".git/worktrees/*/config.worktree"),
+        ],
+        ids=["config-worktree", "worktree-config", "worktree-config-worktree"],
+    )
+    def test_other_repo_config_files_are_blocked(self, command: str, expected: str) -> None:
+        """`config.worktree` と worktree ごとの設定も書込み先位置で deny する。"""
+        assert bash_config_protection.find_protected_write(command) == expected
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("printf x >> ~/.gitconfig", "~/.gitconfig"),
+            ("echo x > $HOME/.gitconfig", "~/.gitconfig"),
+            ("echo x > ${HOME}/.gitconfig", "~/.gitconfig"),
+            ("echo x | tee ~/.gitconfig", "~/.gitconfig"),
+            ("sed -i 's/a/b/' ~/.gitconfig", "~/.gitconfig"),
+            ("cp /tmp/evil ~/.gitconfig", "~/.gitconfig"),
+            ("rm ~/.gitconfig", "~/.gitconfig"),
+            ("echo x > ~/.config/git/config", "~/.config/git/config"),
+            ("echo x > $HOME/.config/git/config", "~/.config/git/config"),
+        ],
+        ids=["tilde", "home-var", "home-brace", "tee", "sed-i", "cp", "rm", "xdg-default", "xdg-default-var"],
+    )
+    def test_global_config_writes_are_blocked(self, command: str, expected: str) -> None:
+        """`~/.gitconfig` と XDG の設定は、書込み先位置に現れたら内容を問わず deny する。"""
+        assert bash_config_protection.find_protected_write(command) == expected
+
+    def test_absolute_home_path_is_blocked(self, _isolated_home: Path) -> None:
+        """ホームの絶対パスでも同じ。"""
+        assert bash_config_protection.find_protected_write(f"echo x > {_isolated_home}/.gitconfig") == "~/.gitconfig"
+
+    def test_xdg_config_home_variable_is_blocked(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """`XDG_CONFIG_HOME` を設定していれば `$XDG_CONFIG_HOME/git/config` が対象になる。"""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        for token in ("$XDG_CONFIG_HOME/git/config", "${XDG_CONFIG_HOME}/git/config", str(tmp_path / "xdg/git/config")):
+            assert bash_config_protection.find_protected_write(f"echo x > {token}") == "$XDG_CONFIG_HOME/git/config"
+
+    def test_unset_xdg_variable_is_not_expanded(self) -> None:
+        """未設定の `XDG_CONFIG_HOME` は展開しない（別の位置を指す）。"""
+        assert bash_config_protection.find_protected_write("echo x > $XDG_CONFIG_HOME/git/config") is None
+
+    def test_global_config_is_blocked_without_repo_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """リポジトリ外の固定位置なので、リポジトリルートが決まらなくても、`cd` を挟んでも deny する。"""
+        monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: None)
+        assert bash_config_protection.find_protected_write("echo x > ~/.gitconfig") == "~/.gitconfig"
+        assert bash_config_protection.find_protected_write("cd /tmp && echo x > ~/.gitconfig") == "~/.gitconfig"
+
+    def test_global_config_symlink_target_is_blocked(self, tmp_path: Path, _isolated_home: Path) -> None:
+        """dotfiles への symlink になっている `~/.gitconfig` は、実体への書込みも deny する。"""
+        real = _put(tmp_path / "dotfiles" / "gitconfig", "[user]\n")
+        (_isolated_home / ".gitconfig").symlink_to(real)
+        assert bash_config_protection.find_protected_write(f"echo x > {real}") == "~/.gitconfig"
+
+    @pytest.mark.parametrize(
         "command",
         [
             "cat .git/config",
@@ -462,8 +520,31 @@ class TestBashWrite:
             "echo x > .gitconfig",
             "echo x > config",
             "echo '>> .git/config'",
+            "cat ~/.gitconfig",
+            "grep alias ~/.gitconfig",
+            "cp ~/.gitconfig /tmp/backup",
+            "git config --global user.name x",
+            "echo x > ~/.gitconfig.bak",
+            "echo x > ~/.config/git/ignore",
+            "sed -n p ~/.gitconfig",
         ],
-        ids=["cat", "grep", "cp-source", "git-config-name", "git-config-get", "gitconfig", "bare-config", "quoted"],
+        ids=[
+            "cat",
+            "grep",
+            "cp-source",
+            "git-config-name",
+            "git-config-get",
+            "gitconfig",
+            "bare-config",
+            "quoted",
+            "cat-global",
+            "grep-global",
+            "cp-source-global",
+            "git-config-global",
+            "backup-name",
+            "xdg-ignore",
+            "sed-print",
+        ],
     )
     def test_reads_and_git_config_are_allowed(self, command: str) -> None:
         """読み取り・`git config` 経由・別名は通す。"""
@@ -480,6 +561,18 @@ class TestBashWrite:
         assert ".git/config" in stderr
         assert "git config" in stderr
         assert "linter" not in stderr
+
+    def test_main_message_names_global_config(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`~/.gitconfig` への書込みは、ログ保護ではなく git config 向けの文言を出す。"""
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "echo x >> ~/.gitconfig"}})
+        monkeypatch.setattr(bash_config_protection, "read_raw_stdin_with_truncation", lambda: (payload, False))
+        assert bash_config_protection.main() == 2
+        stderr = capsys.readouterr().err
+        assert "~/.gitconfig" in stderr
+        assert "git config" in stderr
+        assert "prompt-injection" not in stderr
 
     def test_git_config_hooks_path_stays_blocked_by_block_no_verify(self) -> None:
         """`git config core.hooksPath` は従来どおり block_no_verify が塞ぐ。"""

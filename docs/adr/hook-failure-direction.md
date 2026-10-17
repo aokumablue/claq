@@ -122,24 +122,43 @@ Windows の wrapper + インタプリタ起動の遅さで host 側 timeout（�
    `.claude/hooks.json` と衝突する）。`settings.json` / `settings.local.json` は `CLAQ_PYTHON` の
    出現、および `hooks` / `enabledPlugins` / `disabledPlugins` のときだけ deny する。ブロック
    メッセージは「ユーザーに依頼せよ。フックを自分で無効化するな」とする
-5. **`.git/config` は Edit/Write では内容の兆候で、Bash では書込み先に現れた時点で deny する。**
-   `core.hooksPath` / `include.path` / `includeIf` / `alias` は `git config` 経由では
-   `block_no_verify` が塞いでいるが、設定ファイルを直接書けば同じ効果になるため、片側だけでは
-   迂回口が残る。`.git/config` を無条件に塞ぐと remote / branch / user の通常編集まで壊れるので、
-   Edit/Write は書込み内容（Edit は old/new の両断片）に、`block_no_verify` が塞ぐ key 集合から導いた
-   兆候（`hooksPath` / `path` の key 名行はセクションを問わず、`[includeIf` / `[alias` は見出し前置。
-   大小無視）があるときだけ deny する。`path =` をセクション非依存で見るため、`.git/config` に
-   `path` key を足す Edit は include 以外でも deny する（誤検出側）。内容を取得できない書込み・
-   走査上限超過は他の条件付き保護対象と同じく deny する。
-   Bash は書込み本文をトークンから解釈できないため、内容を問わず書込み先位置の `.git/config`
-   （リダイレクト・`tee`・`sed -i`・`cp`/`mv` の宛先・`rm`・`chmod` 等）を deny する。remote 追記も
-   deny になるが、通常設定の回避路は `git config <key> <value>`（書込み先トークンを持たない）である。
-   **残る穴**: 既存の `[alias]` セクションの内側へ `ci = commit --no-verify` だけを足す Edit は、
-   断片に見出しが無いため検出しない（ディスク上のセクション構造は解析しない）。`~/.gitconfig`・
-   `.git/config.worktree`・`GIT_DIR` の差し替え先は対象外（`git config --global` と `GIT_CONFIG_*`
-   の代入だけを `block_no_verify` が塞ぐ）。`core.sshCommand` / `core.fsmonitor` /
-   `credential.helper` のようにフック以外でコマンドを走らせる key も、`block_no_verify` の集合に
-   無いため対象外である
+5. **git config は Edit/Write では置換後の全文の前後比較で、Bash では書込み先に現れた時点で deny する。**
+   対象は `.git/config`・`.git/config.worktree`・`.git/worktrees/*/config`・
+   `.git/worktrees/*/config.worktree` と、ホーム側の `~/.gitconfig`・`$XDG_CONFIG_HOME/git/config`
+   （未設定なら `~/.config/git/config`。ホームは `get_home_dir` に揃える。symlink は実体で比べ、
+   大小は無視する）。`core.hooksPath` / `include.path` / `includeIf` / `alias` は `git config` 経由では
+   `block_no_verify` が塞いでいるが、設定ファイルを直接書けば同じ効果になる。ホーム側の
+   `core.hooksPath` は全リポジトリのフックを一度に外せる。対象を無条件に塞ぐと remote / branch /
+   user の通常編集まで壊れるので、Edit/Write は内容で判定する。
+   判定は、置換前の全文（ディスク上の現在の内容。読めない・存在しなければ空）と置換後の全文を
+   最小限の git-config パーサで (section, subsection, key, 値) に分解し、`block_no_verify` が塞ぐ
+   key 集合（key・section は大小無視）と照合する。置換後の全文は、Write なら content、Edit なら
+   置換を当てた全文（`replace_all` を尊重）、MultiEdit なら編集を順に当てた全文である。置換対象が
+   空・見つからない場合は new_string だけを断片として扱う。パーサは `[sec]`・`[sec "sub"]`・旧記法
+   `[sec.sub]`、`#` / `;` のコメント、継続行、値の引用符とエスケープ、値なしの key、見出しと同じ行の
+   key、CRLF、先頭の BOM を読む。見出しより前の key や読めない行は解析エラーである。
+   deny するのは、置換後の危険 key の列が置換前の列の部分列でない、または key ごとの最後の値
+   （実効値）が変わるときである。集合ではなく順序つきの列で比べるのは、後ろの上書きだけを消して
+   危険な値を実効にする編集や、順序の入れ替えを通さないためである。危険 key を丸ごと消すだけの編集、
+   危険 key を含まない編集（remote / branch / user の追加・変更）、置換前後で危険 key が同一の編集は
+   通す。`alias` セクションのキーは全て危険とみなす（alias が任意コマンドを定義できるかは静的に
+   決められないため）。したがって `[alias] st = status` のような無害な alias の追加も deny になり、
+   ユーザーに依頼する。コメント内の `hooksPath`、`[aliases]` のような別名の見出し、include 以外の
+   セクションの `path =` は通す。
+   解析できない全文・全文を作れない入力（`apply_patch` を含む）・置換前後どちらかが走査上限
+   （256KiB）を超える入力は、他の条件付き保護対象と同じく deny する。置換前が解析できないとき
+   だけは、置換前に危険 key が無かったものとして扱う（置換後が解析でき、危険 key が無ければ通る）。
+   Bash は書込み本文をトークンから解釈できないため、内容を問わず書込み先位置の上記パス
+   （リダイレクト・`tee`・`sed -i`・`cp`/`mv` の宛先・`rm`・`chmod` 等）を deny する。`cat`・`grep`・
+   `sed -n p` のような読み取りは通す。ホーム側の設定はリポジトリ外の固定位置なので repo スコープ
+   判定の前に、リポジトリルートが決まらなくても、`cd` を挟んでも deny する。書込み先トークンの
+   先頭の `$HOME` / `${HOME}` と、設定されている `$XDG_CONFIG_HOME` は展開してから照合する。通常設定の
+   回避路は `git config <key> <value>`（書込み先トークンを持たない）である。
+   **残る穴**: `GIT_DIR` の差し替え先とベアリポジトリの設定、system config（`/etc/gitconfig`）、
+   `include.path` が指す先のファイルそのもの（既存の include 先を書き換えれば `core.hooksPath` を
+   入れられる）、`$HOME` 以外の変数やコマンド置換を含む書込み先、`core.sshCommand` /
+   `core.fsmonitor` / `credential.helper` のようにフック以外でコマンドを走らせる key
+   （`block_no_verify` の集合に無い）は対象外である
 
 この保護は決定的ではない。書込み先がリダイレクトでも既知エディタでもない経路（`python3 -c` に
 よる直接書き込み等）は素通りしうる。守っているのは素直な agent が近道を取る経路と、低コストな

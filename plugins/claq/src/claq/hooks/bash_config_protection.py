@@ -28,9 +28,11 @@ import するのは、Write を deny する綴りと Bash を deny する綴り�
         - `ed`/`red`/`ex`/`sponge`（`hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES`）の引数
         - `touch` の引数、削除・移動・権限変更コマンドの引数
         - `cp`/`mv`/`install` の最終引数、`ln` の最終引数、`dd of=<path>`
-    ``.git/config`` は `config_protection` では書込み内容の兆候（``core.hooksPath`` 等）で判定するが、
-    Bash の書込み本文は解釈できないため、書き込み先位置に現れた時点で内容を問わず deny する
-    （``git config <key> <value>`` は書き込み先トークンを持たないので影響を受けない）。
+    git config（``.git/config``・``.git/config.worktree``・``.git/worktrees/*/config``、および
+    ホーム側の ``~/.gitconfig`` / ``$XDG_CONFIG_HOME/git/config``）は `config_protection` では置換後の
+    全文の前後比較で判定するが、Bash の書込み本文は解釈できないため、書き込み先位置に現れた時点で
+    内容を問わず deny する（``git config <key> <value>`` は書き込み先トークンを持たないので影響を
+    受けない）。ホーム側の設定はリポジトリ外の固定位置なので repo スコープ判定の前に deny する。
     書き込み先ヒットがあった場合のみリポジトリルートを解決し、書き込み先を cwd 基準で
     解決して**そのルート配下にある場合のみ** deny する（basename だけで判定すると別
     リポジトリの同名ファイルを誤検出する）。**リポジトリルートが決定できない場合は allow**。
@@ -51,6 +53,7 @@ import するのは、Write を deny する綴りと Bash を deny する綴り�
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -62,6 +65,7 @@ from claq.hooks.config_protection import (
     protected_path_segment,
     repo_git_config_path,
 )
+from claq.hooks.git_config_text import global_git_config_path
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     basename,
@@ -170,6 +174,34 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILE
 # 注入の永続化経路になる。保護の範囲を「Bash からの直接追記の拒否」に限るため、
 # `config_protection` の保護 path（Edit/Write にも効く）へは足さず本モジュールに閉じる。
 _HOME_LOG_PATH_SEGMENTS = ((".claq", "logs"),)
+
+
+# 書込み先トークンの先頭にある ``$HOME`` / ``${HOME}`` と ``$XDG_CONFIG_HOME`` /
+# ``${XDG_CONFIG_HOME}``。シェルはトークンを展開してから実行するため、未展開のまま
+# ``~/.gitconfig`` と同じファイルを指せる。
+_HOME_VARIABLE_PREFIX_RE = re.compile(r"^\$(?:\{HOME\}|HOME)(?=/|$)")
+_XDG_VARIABLE_PREFIX_RE = re.compile(r"^\$(?:\{XDG_CONFIG_HOME\}|XDG_CONFIG_HOME)(?=/|$)")
+
+
+def _expand_config_home_variables(token: str) -> str:
+    """書込み先トークン先頭の ``$HOME`` / ``$XDG_CONFIG_HOME`` を展開する。
+
+    ``$HOME`` はチルダ（`resolve_effective_target` が `get_home_dir` へ展開する）に揃える。
+    ``$XDG_CONFIG_HOME`` は設定されているときだけ値へ展開し、未設定なら展開しない
+    （シェルでは空文字になり別の位置を指すため、``~/.config`` とは同一視しない）。
+
+    Args:
+        token: 検査対象の生トークン。
+
+    Returns:
+        先頭の変数を展開したトークン。変数で始まらなければそのまま。
+
+    Raises:
+        例外は発生しません。
+    """
+    token = _HOME_VARIABLE_PREFIX_RE.sub("~", token)
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    return _XDG_VARIABLE_PREFIX_RE.sub(lambda _match: xdg, token) if xdg else token
 
 
 def _find_home_log_directory_match(token: str) -> str | None:
@@ -564,6 +596,11 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
             home_log_hit = _find_home_log_directory_match(token)
             if home_log_hit is not None:
                 return home_log_hit
+            # ``~/.gitconfig`` と XDG の設定もリポジトリ外の固定位置で、全リポジトリのフックを
+            # 一度に外せる。repo スコープ判定の対象にすると、リポジトリ外として allow になる。
+            global_config_hit = global_git_config_path(_expand_config_home_variables(token))
+            if global_config_hit is not None:
+                return global_config_hit
             found = _protected_target(token)
             if found is None:
                 continue
@@ -702,10 +739,10 @@ def _blocked_message(found: str) -> str:
     Raises:
         例外は発生しません。
     """
-    if found.startswith("~/"):
-        return _blocked_home_log_message(found)
     if found in GIT_CONFIG_DISPLAY_NAMES:
         return _blocked_git_config_message(found)
+    if found.startswith("~/"):
+        return _blocked_home_log_message(found)
     return blocked_message_for_file(found)
 
 
