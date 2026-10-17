@@ -91,10 +91,10 @@ ComponentName: 入力型 → 出力型
    - Dependencies: ステップ1 / 複雑度: 中 / Risk: Low
 
 ## Phase 2: テスト
-3. **ユニットテスト追加** (plugins/claq/tests/mem/test_cli.py)
+3. **ユニットテスト追加** (plugins/claq/tests/mem/test_cmd_knowledge.py)
    - Action: days 指定 / 未指定 / 境界値（ちょうど N 日前）のテストを追加
    - Why: days 指定・未指定・境界値の挙動を回帰から守るため
-   - Verify: `cd plugins/claq && python3 -m pytest -q tests/mem/test_cli.py` が exit 0
+   - Verify: `cd plugins/claq && python3 -m pytest -q tests/mem/test_cmd_knowledge.py` が exit 0
    - Dependencies: ステップ2 / 複雑度: 中 / Risk: Low
 
 ## テスト戦略
