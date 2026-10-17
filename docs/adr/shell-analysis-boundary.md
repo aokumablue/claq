@@ -36,14 +36,17 @@
 
 - `block_no_verify` / `bash_config_protection` の非目標: シェルエイリアス・シェル関数・変数展開・
   コマンド置換・2 段以上の `sh -c` / `eval`・`git` 以外の名前を持つラッパースクリプト経由の呼び
-  出し。これらは検出しない（見逃しを許容する）
+  出し。これらは検出しない（見逃しを許容する）。変数展開の唯一の例外は、`bash_config_protection` が
+  ホーム側の git 設定（保護パス）を照合するときに、書込み先トークンの先頭の `$HOME` / `${HOME}` と
+  設定済みの `$XDG_CONFIG_HOME` だけを展開すること。それ以外の変数とコマンド置換は展開しない
 - `block_no_verify` は git 起動に前置された `GIT_CONFIG_*` と、global 設定の読み込み元を決める
   `HOME` / `XDG_CONFIG_HOME` の代入を、`env` などのラッパを挟んでも deny する。前置トークンを
   すべて走査するため、`HOME=/tmp/h grep -rn git .` や `echo HOME=/x git` のように、代入の形の
   トークンと `git` トークンが同じセグメントにあれば git 以外のコマンドでも deny する（受容済みの
   誤検出。回避は代入を外すか別セグメントに分ける）。`NAME+=value` も代入として扱う。
   `sh -c` の 1 段の内側が git を起動するときは、外側セグメントでシェル起動より前にある代入も
-  内側の git への前置として扱う（`HOME=/tmp/h sh -c 'git commit'` は deny、内側が git を
+  内側の git への前置として扱う（1 段だけ。2 段以上の `sh -c` は非目標のまま。
+  `HOME=/tmp/h sh -c 'git commit'` は deny、内側が git を
   起動しない `HOME=/tmp/h sh -c 'ls'` は allow）。`-c` の文字列より後ろの位置引数は環境では
   ないので見ない。
   `export HOME=…; git commit` のように変数の状態に依存する形、`GIT_DIR` の差し替え（commit が
@@ -58,7 +61,9 @@
 
 解析できない構文を一律 deny にはしない。両フックは Bash という最も広い matcher に登録されており、
 一律 deny にすると `git commit` や設定ファイル書き込みと無関係な大多数の Bash 呼び出し
-（`$(date)` を含むログ出力等）まで巻き込み、可用性が壊れる。
+（`$(date)` を含むログ出力等）まで巻き込み、可用性が壊れる。例外は `block_no_verify` が持つ、解析不能
+**かつ** `--no-verify` / `hooksPath` が生文字列に見える入力だけを deny する判定で、解析不能というだけでは
+deny しない（末尾の「引用符が不整合で `shlex` が解析できない入力」の節）。
 
 本フック群を「敵対的な回避を防ぐセキュリティ境界」だと誤認して運用すると、`python -c` / `eval` /
 任意スクリプト経由の間接書き込み、2 段以上の `sh -c`・変数展開経由の `--no-verify` 回避は検出
