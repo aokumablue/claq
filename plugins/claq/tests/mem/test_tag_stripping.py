@@ -666,8 +666,8 @@ class TestKeepAllowedChars:
                 allowed.add(cp)
         line_breaks = {0x0B, 0x0C, 0x0D, 0x85, 0x2028, 0x2029}
         assert allowed.isdisjoint(line_breaks)
-        invisible_but_allowed = {0x034F, 0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800}
-        selectors = {*range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0)}
+        invisible_but_allowed = {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x3164, 0xFFA0, 0x2800, 0x16FE4}
+        selectors = {0x180B, 0x180C, 0x180D, 0x180F, *range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0)}
         assert invisible_but_allowed <= allowed
         assert selectors <= allowed
         for cp in range(0x110000):
@@ -683,14 +683,14 @@ class TestKeepAllowedChars:
             else:
                 assert result == "", hex(cp)
 
-    @pytest.mark.parametrize("ch", ["\u034f", "\u115f", "\u1160", "\u3164", "\uffa0", "\u2800"])
+    @pytest.mark.parametrize("ch", ["\u034f", "\u115f", "\u1160", "\u17b4", "\u17b5", "\u3164", "\uffa0", "\u2800", "\U00016fe4"])
     def test_invisible_fillers_are_always_removed(self, ch: str) -> None:
         """CGJ・ハングル filler・点字空白は、前後が何であっても落ちる（ASCII の間でも日本語の間でも）。"""
         assert keep_allowed_chars(f"a{ch}b") == "ab"
         assert keep_allowed_chars(f"日{ch}本") == "日本"
         assert keep_allowed_chars(f"{ch}x{ch}") == "x"
 
-    @pytest.mark.parametrize("selector", ["\ufe00", "\ufe0e", "\ufe0f", "\U000e0100", "\U000e01ef"])
+    @pytest.mark.parametrize("selector", ["\u180b", "\u180d", "\u180f", "\ufe00", "\ufe0e", "\ufe0f", "\U000e0100", "\U000e01ef"])
     def test_variation_selector_after_ascii_is_removed(self, selector: str) -> None:
         """異体字セレクタは直前が ASCII（改行・文頭を含む）なら落ち、連続していても全て落ちる。"""
         assert keep_allowed_chars(f"a{selector}b") == "ab"
@@ -709,6 +709,7 @@ class TestKeepAllowedChars:
             "❤\ufe0f",  # 絵文字の表示選択子
             "☺\ufe0e",  # テキスト表示選択子
             "葛\U000e0100",  # 日本語の人名の異体字（IVS）
+            "\u1820\u180b",  # モンゴル文字 + 自由異体字セレクタ
             "渡\U000e0101辺",
             "1\ufe0f\u20e3",  # keycap
             "#\ufe0f\u20e3",
@@ -748,12 +749,18 @@ class TestKeepAllowedChars:
         assert cleaned == "</claq-memory>"
         assert strip_tags(cleaned) == "&lt;/claq-memory>"
 
-    @pytest.mark.parametrize("filler", ["\u3164", "\u2800", "\u115f", "\u1160", "\uffa0", "\u034f", "\ufe0f", "\U000e0100"])
+    @pytest.mark.parametrize(
+        "filler",
+        ["\u3164", "\u2800", "\u115f", "\u1160", "\uffa0", "\u034f", "\u17b4", "\u17b5", "\U00016fe4", "\u180b", "\u180f", "\ufe0f", "\U000e0100"],
+    )
     def test_line_start_markers_behind_an_invisible_filler_are_exposed(self, filler: str) -> None:
         """行頭の ``## x`` ``- [x]`` を不可視文字で隠せない（除去後に行頭マーカーとして見える）。"""
         assert keep_allowed_chars(f"終\n{filler}## x\n{filler}- [x] y") == "終\n## x\n- [x] y"
 
-    @pytest.mark.parametrize("filler", ["\u034f", "\ufe0f", "\U000e0100", "\u3164", "\u2800", "\u115f", "\u1160", "\uffa0"])
+    @pytest.mark.parametrize(
+        "filler",
+        ["\u034f", "\ufe0f", "\U000e0100", "\u3164", "\u2800", "\u115f", "\u1160", "\uffa0", "\u17b4", "\u17b5", "\U00016fe4", "\u180b", "\u180c", "\u180d", "\u180f"],
+    )
     def test_secret_split_by_each_invisible_character_rejoins(self, filler: str) -> None:
         """CGJ・異体字セレクタ・ハングル filler・点字空白で分断した鍵も 1 本に戻る。"""
         assert keep_allowed_chars(f"sk-ant-{filler}api03-{filler}" + "A" * 20) == "sk-ant-api03-" + "A" * 20
