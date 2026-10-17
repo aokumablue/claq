@@ -286,7 +286,6 @@ def test_block_no_verify_main_blocks_oversized_command_in_process(
     payload = json.dumps(
         {"tool_name": "Bash", "tool_input": {"command": "git " * 8 + "commit --no-verify"}}
     )
-    monkeypatch.setattr(block_no_verify, "MAX_COMMAND_TOKENS", 3)
     monkeypatch.setattr(
         block_no_verify, "command_exceeds_scan_budget", lambda command: len(command.split()) > 3
     )
