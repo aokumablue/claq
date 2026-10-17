@@ -184,6 +184,13 @@ _ASSIGN_SHAPES = [
     ("エスケープ済み JSON", "pass" + "word", ": ", '\\"', '\\"'),
     ("エスケープ済み JSON 空白なし", "pass" + "word", ":", '\\"', '\\"'),
     ("エスケープ済み JSON aws", "aws_secret" + "_access_key", ": ", '\\"', '\\"'),
+    # 添字代入（`os.environ["KEY"] = "…"`）。キーの閉じ引用符と `=` の間に `]` が入る。
+    ("添字代入 aws", "AWS_SECRET" + "_ACCESS_KEY", "] = ", '"', '"'),
+    ("添字代入 aws 空白なし", "AWS_SECRET" + "_ACCESS_KEY", "]=", '"', '"'),
+    ("添字代入 aws 単引用符", "AWS_SECRET" + "_ACCESS_KEY", "] = ", "'", "'"),
+    ("添字代入 password", "pass" + "word", "] = ", '"', '"'),
+    ("添字代入 secret_key", "SECRET" + "_KEY", "]: ", '"', '"'),
+    ("添字代入 エスケープ済み", "AWS_SECRET" + "_ACCESS_KEY", "] = ", '\\"', '\\"'),
 ]
 
 # 識別子の一部に credential 語を含むだけで、代入値が秘密ではない形。
@@ -217,6 +224,14 @@ _NOT_A_SECRET_ASSIGNMENTS = [
     'os.environ["AWS_SECRET' + '_ACCESS_KEY"]',
     "os.environ['AWS_SECRET" + "_ACCESS_KEY']",
     "os.getenv('AWS_SECRET" + "_ACCESS_KEY')",
+    # 添字の参照・比較・式（代入でない、または値が文字列リテラルでない）は伏せない。
+    'os.environ["AWS_SECRET' + '_ACCESS_KEY"] == "aaaaaaaaaaaa"',
+    'if cfg["pass' + 'word"] == "aaaaaaaaaaaa": pass',
+    'os.environ["AWS_SECRET' + '_ACCESS_KEY"] = os.getenv("aaaaaaaaaaaa")',
+    'cfg["pass' + 'word"] = get_password_from_vault()',
+    'cfg["token' + '_type"] = "bearer-style-name"',
+    'cfg["pass' + 'wordless"] = "aaaaaaaaaaaa"',
+    'x = os.environ["AWS_SECRET' + '_ACCESS_KEY"] or "aaaaaaaaaaaa"',
     # エスケープ済み JSON でも、値が引用符で始まらない式・識別子は伏せない。
     '{\\"pass' + 'word\\": get_password_from_vault()}',
     '{\\"token' + '_type\\": \\"bearer-style-name\\"}',
@@ -308,6 +323,10 @@ _WORST_CASE_UNITS: tuple[tuple[str, str], ...] = (
     ("assign_prefix_short", "a_"),
     ("assign_prefix_then_key", "AWS_" * 8 + "SECRET_ACCESS_KEY"),
     ("assign_escaped_quote", 'password\\"'),
+    # 閉じ引用符と `]` の直後に `=` が来ない形（添字の参照）。
+    ("assign_bracket_close", 'password"]'),
+    ("assign_bracket_close_spaced", 'password"]    '),
+    ("assign_bracket_close_aws", 'AWS_SECRET_ACCESS_KEY"] '),
 )
 
 
@@ -383,6 +402,20 @@ class TestRedactScanCost:
             f"[{name}] 入力 2 倍で所要時間が {ratio:.1f} 倍になった"
             f"（{base:.4f}s -> {doubled:.4f}s）。二次オーダーへ戻っている。"
         )
+
+
+    @pytest.mark.parametrize("filler", [" ", "\t", "\u3000", '"', "]", '"]'])
+    def test_one_mib_after_a_single_key_fits_in_budget(self, filler: str) -> None:
+        """キー語 1 個の後ろに 1MiB の空白・引用符・`]` が続き `=` が無くても予算内で終わること。
+
+        添字代入の `]` と空白は、キー語の直後で 1 回ずつ読む。連なりに量指定子が重なると
+        `=` の無い 1 個のキー語から二次オーダーで走査する。
+        """
+        text = "AWS_SECRET" + "_ACCESS_KEY" + '"]' + filler * (_ONE_MIB // len(filler))
+
+        elapsed = _timed(text)
+
+        assert elapsed < _SINGLE_CALL_LIMIT_SECONDS, f"1MiB の redact に {elapsed:.2f}s かかった（filler={filler!r}）"
 
 
 class TestJwtPatternNarrowing:
