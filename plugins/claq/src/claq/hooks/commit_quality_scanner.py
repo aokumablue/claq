@@ -10,7 +10,8 @@
 シークレット検出は nosec・ファイルサイズに関わらず全体を走査します。バイナリ判定
 されたファイルも、`_extract_printable_runs` が抽出した印字可能文字列へ同じパターンを
 当てます（docs/adr/shell-analysis-boundary.md。外すと先頭に NUL を 1 バイト混ぜるだけで
-検査を回避できる）。
+検査を回避できる）。BOM 付き UTF-16 / UTF-32 は `_decode_scan_text` が復号本文を足して
+同じ経路で走査します。
 
 走査量に上限が無いと `pre_bash_commit_quality` の hook timeout（30秒）に達し、host が
 フックをキャンセルして続行する（fail-open）。そのため実時間バジェット
@@ -45,6 +46,15 @@ _BINARY_SNIFF_SIZE = 8192  # 8KB
 _BINARY_STRINGS_MIN_LENGTH = 4
 _BINARY_STRINGS_RE = re.compile(
     rf"[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]{{{_BINARY_STRINGS_MIN_LENGTH},}}"
+)
+
+# UTF-16 / UTF-32 の BOM と対応するコーデック。UTF-32LE の BOM（FF FE 00 00）は
+# UTF-16LE の BOM（FF FE）の先頭と一致するため、UTF-32 を先に判定する順で並べる。
+_BOM_CODECS = (
+    (b"\xff\xfe\x00\x00", "utf-32-le"),
+    (b"\x00\x00\xfe\xff", "utf-32-be"),
+    (b"\xff\xfe", "utf-16-le"),
+    (b"\xfe\xff", "utf-16-be"),
 )
 
 # フック 1 回の起動で走査全体に許す実時間予算（秒）。hooks.json の timeout（30秒）より
@@ -246,11 +256,44 @@ def _extract_printable_runs(content: str) -> list[str]:
     return _BINARY_STRINGS_RE.findall(content)
 
 
+def _decode_scan_text(raw: bytes) -> str:
+    """ファイルのバイト列を走査用の文字列へ復号します。
+
+    UTF-8 / `errors="replace"` の復号結果は常にそのまま残します。先頭に UTF-16 / UTF-32
+    の BOM がある場合だけ、BOM を除いた本体を strict で追加復号し、UTF-8 の復号結果の
+    後ろに改行で区切って足します（Windows PowerShell 5 の `Out-File` や `.reg` が作る
+    BOM 付き UTF-16 は、UTF-8 では NUL 混じりになり、印字可能連続の抽出で 1 文字ずつに
+    割れて secret パターンに一致しない）。足した本文は UTF-8 側と同じ判定を受け（NUL を
+    含めば印字可能連続の抽出経由、含まなければ通常の行）、同じ `_ScanBudget` の中で
+    実時間予算にも載ります。BOM がなければ推定せず、strict 復号に
+    失敗した場合や本文が空の場合は UTF-8 の復号結果だけを返します。
+
+    Args:
+        raw: ファイルの生のバイト列です。
+
+    Returns:
+        UTF-8 の復号結果。BOM 付きで追加復号できたときはその後ろに復号本文を足した文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    text = raw.decode("utf-8", errors="replace")
+    for bom, codec in _BOM_CODECS:
+        if raw.startswith(bom):
+            try:
+                body = raw[len(bom) :].decode(codec)
+            except UnicodeDecodeError:
+                return text
+            return f"{text}\n{body}" if body else text
+    return text
+
+
 def get_staged_file_content(file_path: str) -> str | None:
     """INDEX（ステージング領域）からファイル内容をテキストとして取得します。
 
     `git show :path` の出力を bytes で取得し、不正なバイト列で `UnicodeDecodeError` に
-    ならないよう UTF-8 / `errors="replace"` でデコードします。
+    ならないよう `_decode_scan_text` でデコードします（UTF-8 / `errors="replace"`。BOM 付き
+    UTF-16 / UTF-32 は復号本文を足す）。
 
     Args:
         file_path: 対象ファイルのパスです。
@@ -272,7 +315,7 @@ def get_staged_file_content(file_path: str) -> str | None:
         return None
     if result.returncode != 0:
         return None
-    return result.stdout.decode("utf-8", errors="replace")
+    return _decode_scan_text(result.stdout)
 
 
 def get_worktree_file_content(repo_root: Path, file_path: str) -> str | None:
@@ -288,7 +331,7 @@ def get_worktree_file_content(repo_root: Path, file_path: str) -> str | None:
     の blob として保存するのがその文字列であり（INDEX 側の `git show :path` も同じ
     文字列を返す）、先を辿ると通常ファイルから symlink（ディレクトリ・壊れた先・
     repo 外）へ typechange しただけの正当な commit が読み取り失敗で止まるうえ、
-    repo 外の内容を読む経路にもなるため。
+    repo 外の内容を読む経路にもなるため。通常ファイルは `_decode_scan_text` で復号します。
 
     Args:
         repo_root: リポジトリルートの絶対パスです。
@@ -313,7 +356,7 @@ def get_worktree_file_content(repo_root: Path, file_path: str) -> str | None:
         raw = target.read_bytes()
     except OSError:
         return None
-    return raw.decode("utf-8", errors="replace")
+    return _decode_scan_text(raw)
 
 
 def should_lint_file(file_path: str) -> bool:
