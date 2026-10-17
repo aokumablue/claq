@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 
 from claq.lib.core_utils import log
-from claq.mem.tag_stripping import strip_tags
+from claq.mem.tag_stripping import keep_allowed_chars, strip_tags
 
 # deny 出力へ載せる不信データ（ステージされたファイルの行内容）の最大文字数。
 # stderr はモデルへ提示されるチャネルなので、長さ無制限の抜粋はコンテキストを
@@ -357,8 +357,9 @@ def _sanitize_untrusted_excerpt(text: str) -> str:
     """ファイル由来の抜粋を deny 出力へ載せる前に無害化する。
 
     抜粋は攻撃者が内容を選べるファイル本文で、deny 時に stderr 経由でモデルの
-    コンテキストへ入る。囲いを偽装するタグ（``</claq-memory>`` など）を `strip_tags` で
-    倒し、長さにも上限を置く（`mem` の注入経路と同じ扱い）。
+    コンテキストへ入る。許可した文字だけを `keep_allowed_chars` で残し（不可視文字で分断した
+    タグを `strip_tags` が見られる形へ戻す）、囲いを偽装するタグ（``</claq-memory>`` など）を
+    `strip_tags` で倒し、長さにも上限を置く（`mem` の注入経路と同じ扱い）。
 
     Args:
         text: ファイル本文から切り出した抜粋。
@@ -369,7 +370,7 @@ def _sanitize_untrusted_excerpt(text: str) -> str:
     Raises:
         例外は発生しません。
     """
-    sanitized = strip_tags(text.strip()).strip()
+    sanitized = strip_tags(keep_allowed_chars(text.strip())).strip()
     if len(sanitized) > _UNTRUSTED_EXCERPT_MAX_CHARS:
         return sanitized[:_UNTRUSTED_EXCERPT_MAX_CHARS] + "…"
     return sanitized
