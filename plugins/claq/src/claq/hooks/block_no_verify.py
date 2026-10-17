@@ -69,7 +69,8 @@ config 経由のフック無効化（config key は大小文字を区別せず�
 ``sh -c`` ラッパー（1 段のみ）:
     既知シェルの ``-c``（結合短フラグ ``bash -lc`` を含む）へ渡された文字列引数は、1 段
     だけ再帰的に同じ判定へ通します。2 段以上のネストや ``eval``・任意ラッパー
-    スクリプトへは再帰しません。
+    スクリプトへは再帰しません。外側セグメントでシェル起動より前にある環境変数代入
+    （``HOME=/tmp/h sh -c 'git commit'``）は、内側の git 起動に前置された代入と同じ扱いです。
 
 非目標（原理的に検出不能、または意図的に対象外とするため検出しません）:
     - シェルエイリアス・シェル関数経由の呼び出し（コマンドラインに現れないため。
@@ -81,6 +82,7 @@ config 経由のフック無効化（config key は大小文字を区別せず�
     - コマンド置換・変数展開（``$VAR`` / ``$(...)`` / バッククォート）を経由した組み立て
     - ``git`` 以外の名前を持つラッパースクリプト内部の git 呼び出し
     - ``eval`` に渡す文字列の解釈、および ``sh -c`` の 2 段以上のネスト
+    - ``env -S 'HOME=/tmp/h git commit'`` のように ``env -S`` が文字列を再分割して実行する構文の解釈
     本フックは「うっかりバイパス」の抑止であって敵対的回避への防壁ではありません。
     git 自体が大文字小文字を区別するため、トークン比較も区別します（config key を除く）。
 """
@@ -99,6 +101,7 @@ from claq.hooks.shell_tokens import (
     command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
+    is_shell_wrapper_token,
     split_segments,
     strip_data_heredoc_bodies,
     tokenize_with_status,
@@ -455,7 +458,9 @@ def is_sensitive_config_key(key: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in _SENSITIVE_CONFIG_KEY_PREFIXES)
 
 
-_ENV_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
+# ``NAME=value`` と追記代入 ``NAME+=value`` の両方を代入として読む。``+=`` は bash の追記で、
+# 未設定の変数へは単なる代入になるため、``HOME+=x`` も ``HOME`` の差し替えである。
+_ENV_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\+?=(.*)$", re.DOTALL)
 
 # GIT_CONFIG_KEY_<n> の index 部分を取り出す正規表現。
 _GIT_CONFIG_KEY_INDEX_RE = re.compile(r"^GIT_CONFIG_KEY_\d+$")
@@ -489,6 +494,9 @@ def _is_literal_env_hooks_path_override(prefix_tokens: list[str]) -> bool:
     見るため、``HOME=/tmp/h grep -rn git .`` や ``echo HOME=/x git`` のように、代入の形の
     トークンと ``git`` トークンが同じセグメントにあれば git 以外のコマンドでも deny になる。
     この誤検出は受容し、回避は代入を外すか別セグメントに分けることである。
+
+    ``sh -c`` の内側へ再帰するときは、外側セグメントでシェル起動より前にある代入が環境として
+    内側の git へ引き継がれるため、呼び出し側が ``prefix_tokens`` の先頭へ連結して渡す。
 
     ``GIT_CONFIG_KEY_<n>`` は key が機微なら ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_VALUE_<n>``
     との整合を問わず deny する（不完全・矛盾する triplet を安全とみなさない）。同名の
@@ -589,7 +597,7 @@ def _is_bypass_invocation(invocation: GitInvocation) -> bool:
     return invocation.subcommand == "commit" or not invocation.subcommand_certain
 
 
-def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
+def has_bypass_flag(command: str, *, _recursed: bool = False, _inherited_prefix: tuple[str, ...] = ()) -> bool:
     """コマンド文字列に git フックバイパスフラグが含まれるかを判定する。
 
     全トークンから git 起動トークンを探し、見つかった位置以降を `parse_git_segment` で
@@ -599,6 +607,8 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
         command: 検査対象のシェルコマンド文字列。
         _recursed: 内部再帰用フラグ。True の場合、これ以上 ``sh -c`` へは
             再帰しません（2 段以上のネストは非目標）。
+        _inherited_prefix: 内部再帰用。外側セグメントでシェル起動より前にあるトークン列。
+            内側の git 起動に前置された代入と同じ扱いで環境変数の注入を判定します。
 
     Returns:
         ``--no-verify``（サブコマンド不問）、``core.hooksPath`` オーバーライド
@@ -614,7 +624,10 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
     # heredoc のデータ本文はトークン化の前に落とす。入口で正規化するので `sh -c` の
     # 再帰先にも同じ規則が効く。
     command = strip_data_heredoc_bodies(command)
-    return any(_has_bypass_flag_in_dialect(variant, _recursed=_recursed) for variant in command_dialect_variants(command))
+    return any(
+        _has_bypass_flag_in_dialect(variant, _recursed=_recursed, _inherited_prefix=_inherited_prefix)
+        for variant in command_dialect_variants(command)
+    )
 
 
 # `shlex` が解析できなかった入力にだけ当てる、生文字列のバイパス兆候。`hooksPath` は
@@ -622,12 +635,34 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
 _UNPARSED_RAW_BYPASS_RE = re.compile(r"--no-verify|hookspath", re.IGNORECASE)
 
 
-def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool) -> bool:
+def _wrapper_prefix_tokens(segment: list[str]) -> tuple[str, ...]:
+    """セグメント内で最初の既知シェル起動より前にあるトークン列を返す。
+
+    ``HOME=/tmp/h sh -c '...'`` や ``env HOME=/tmp/h sh -c '...'`` の ``HOME=/tmp/h`` は、
+    シェルの子プロセスとして動く内側の git にも環境として渡る。``-c`` の文字列より後ろの
+    位置引数（``sh -c '...' HOME=/tmp/h``）は環境ではないため含めない。
+
+    Args:
+        segment: `extract_shell_wrapper_command` が文字列コマンドを返したセグメント。
+            シェル起動トークンを必ず含む。
+
+    Returns:
+        最初のシェル起動トークンより前のトークン列。
+
+    Raises:
+        StopIteration: セグメントにシェル起動トークンが無い場合（呼び出し側の契約違反）。
+    """
+    index = next(i for i, token in enumerate(segment) if is_shell_wrapper_token(token))
+    return tuple(segment[:index])
+
+
+def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_prefix: tuple[str, ...]) -> bool:
     """1 つのシェル方言の読み方で `has_bypass_flag` の判定を行う。
 
     Args:
         command: `command_dialect_variants` が返した 1 通りの読み方。
         _recursed: ラッパー再帰済みかどうか。
+        _inherited_prefix: 外側セグメントから引き継いだ前置トークン列（再帰先でのみ非空）。
 
     Returns:
         バイパスフラグを検出したら True。
@@ -644,7 +679,7 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool) -> bool:
                 continue
             if _is_bypass_invocation(parse_git_segment(segment[index:])):
                 return True
-            if _is_literal_env_hooks_path_override(segment[:index]):
+            if _is_literal_env_hooks_path_override([*_inherited_prefix, *segment[:index]]):
                 return True
         if _recursed:
             continue
@@ -653,7 +688,8 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool) -> bool:
         # 再帰先を無予算で走らせると timeout で host に kill され silent fail-open になる
         # ため、境界でも同じ上限を当て、超過は BLOCK へ倒す。
         if wrapper_command is not None and (
-            command_exceeds_scan_budget(wrapper_command) or has_bypass_flag(wrapper_command, _recursed=True)
+            command_exceeds_scan_budget(wrapper_command)
+            or has_bypass_flag(wrapper_command, _recursed=True, _inherited_prefix=_wrapper_prefix_tokens(segment))
         ):
             return True
     return False

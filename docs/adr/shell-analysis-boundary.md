@@ -41,9 +41,14 @@
   `HOME` / `XDG_CONFIG_HOME` の代入を、`env` などのラッパを挟んでも deny する。前置トークンを
   すべて走査するため、`HOME=/tmp/h grep -rn git .` や `echo HOME=/x git` のように、代入の形の
   トークンと `git` トークンが同じセグメントにあれば git 以外のコマンドでも deny する（受容済みの
-  誤検出。回避は代入を外すか別セグメントに分ける）。
+  誤検出。回避は代入を外すか別セグメントに分ける）。`NAME+=value` も代入として扱う。
+  `sh -c` の 1 段の内側が git を起動するときは、外側セグメントでシェル起動より前にある代入も
+  内側の git への前置として扱う（`HOME=/tmp/h sh -c 'git commit'` は deny、内側が git を
+  起動しない `HOME=/tmp/h sh -c 'ls'` は allow）。`-c` の文字列より後ろの位置引数は環境では
+  ないので見ない。
   `export HOME=…; git commit` のように変数の状態に依存する形、`GIT_DIR` の差し替え（commit が
   別のリポジトリに入るだけで、このリポジトリのフックは迂回されない）、`$'…'` の ANSI-C クォートの
+  解釈、`env -S 'HOME=/tmp/h git commit'` のように `env -S` が文字列を再分割して実行する構文の
   解釈は非目標である
 - `pre_bash_commit_quality` の `echo "git commit"` のような誤検出は「安全側」として維持する。
   誤って quality scan を実行するコストは、commit を見逃すコストより小さい

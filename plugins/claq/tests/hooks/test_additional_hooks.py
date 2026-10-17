@@ -118,6 +118,15 @@ _BYPASS_COMMANDS = [
     "HOME=/tmp/h git commit -m x",
     "XDG_CONFIG_HOME=/tmp/h git commit -m x",
     "HOME=/tmp/h git status",
+    # `+=` も代入。追記した値でも HOME の差し替えになる。
+    "HOME+=x git commit -m x",
+    "GIT_CONFIG_GLOBAL+=/tmp/cfg git commit -m x",
+    # sh -c の内側が git を起動するなら、外側セグメントの前置代入が内側へ効く。
+    "HOME=/tmp/h sh -c 'git commit -m x'",
+    "GIT_CONFIG_GLOBAL=/tmp/h/c sh -c 'git commit -m x'",
+    "XDG_CONFIG_HOME=/tmp/h bash -lc 'git commit -m x'",
+    "env HOME=/tmp/h sh -c 'git commit -m x'",
+    "GIT_CONFIG_KEY_0=core.hooksPath sh -c 'git commit -m x'",
     # include.path / includeIf.* は任意 config を取り込める。
     "git -c include.path=/tmp/evil commit -m x",
     "git -c includeIf.gitdir:/x/.path=/tmp/evil commit -m x",
@@ -177,6 +186,13 @@ _ALLOWED_COMMANDS = [
     "HOME=/tmp/h ls",
     "HOME=/tmp/h; git status",
     "XDG_CONFIG_HOME=/tmp/h ls",
+    "FOO+=x git commit -m x",
+    # 外側の代入でも、内側が git を起動しなければ対象外。内側の代入が外側を上書きする形も allow。
+    "HOME=/tmp/h sh -c 'ls'",
+    "FOO=1 sh -c 'git commit -m x'",
+    "GIT_CONFIG_KEY_0=core.hooksPath sh -c 'GIT_CONFIG_KEY_0=user.name git commit -m x'",
+    # 代入は -c の文字列より後ろの位置引数（$0 以降）に置かれても外側の前置代入ではない。
+    "sh -c 'git commit -m x' HOME=/tmp/h",
     "env GIT_CONFIG_KEY_0=user.name git commit -m x",
     # `git config` の read-only 操作・無関係キーは allow。
     "git config --get core.hooksPath",
