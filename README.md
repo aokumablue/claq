@@ -411,7 +411,7 @@ flowchart LR
   subgraph review["⚙️ review 内部（並列）"]
     direction LR
     AR["✅ reviewer<br/>品質・設計"]:::agent
-    AS["🛡️ security-auditor<br/>OWASP Top10"]:::agent
+    AS["🛡️ security-auditor<br/>脆弱性・プロンプト境界"]:::agent
     SS["secure"]:::skill -.-> AS
   end
 
@@ -420,7 +420,7 @@ flowchart LR
 ```
 
 **トリガー**: 認証・決済・シークレット・API エンドポイント実装
-**期待効果**: OWASP 検出 (security-auditor) + 設計チェックリスト (secure) の二段構え。CRITICAL/HIGH があれば commit をブロック
+**期待効果**: 脆弱性検出 (security-auditor) + 設計チェックリスト (secure) の二段構え。CRITICAL/HIGH があれば commit をブロック
 
 **実行例**:
 
