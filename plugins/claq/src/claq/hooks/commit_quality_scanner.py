@@ -247,13 +247,17 @@ def _extract_printable_runs(content: str) -> list[str]:
     Args:
         content: バイナリ判定されたデコード済み文字列です。
 
+    改行（LF / CR）は連続の途中に残るので、さらに行ごとに分ける。BOM 付き UTF-16 の
+    復号本文のように複数行が 1 本の連続になると、行頭アンカーの付いたパターン
+    （YAML 形の認証情報）が 2 行目以降で一致しなくなるため。
+
     Returns:
-        抽出した印字可能文字列のリストを返します。
+        抽出した印字可能文字列（行単位）のリストを返します。
 
     Raises:
         例外は発生しません。
     """
-    return _BINARY_STRINGS_RE.findall(content)
+    return [line for run in _BINARY_STRINGS_RE.findall(content) for line in run.splitlines()]
 
 
 def _decode_scan_text(raw: bytes) -> str:

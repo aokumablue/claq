@@ -247,3 +247,20 @@ class TestBudgetCoversAppendedBody:
         issues = commit_quality_scanner.find_file_issues("notes.txt", repo_root=tmp_path, deadline=10.0)
 
         assert [(i["type"], i["severity"]) for i in issues] == [("scan_error", "error")]
+
+
+@pytest.mark.parametrize("name", sorted(_ENCODED_KEYS))
+def test_multiline_bom_body_is_scanned_line_by_line(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """複数行の BOM 付き本文でも、行頭アンカーの付いた YAML 形の認証情報を 2 行目以降で検出する。
+
+    NUL を含む内容は印字可能連続の抽出経由になり、改行を含む 1 本の連続になる。行ごとに分けないと
+    `^\\s*...password: value$` 形のパターンが先頭行でしか効かない。
+    """
+    value = "v" + "x" * 11
+    text = f"name: demo\r\nport: 8080\r\napi_key: {value}\r\n"
+    codec = {"utf16le": "utf-16-le", "utf16be": "utf-16-be", "utf32le": "utf-32-le", "utf32be": "utf-32-be"}[name]
+    bom = {"utf16le": _BOM_UTF16_LE, "utf16be": _BOM_UTF16_BE, "utf32le": _BOM_UTF32_LE, "utf32be": _BOM_UTF32_BE}[name]
+
+    secrets = _secrets(_scan_staged(monkeypatch, bom + text.encode(codec)))
+
+    assert len(secrets) == 1
