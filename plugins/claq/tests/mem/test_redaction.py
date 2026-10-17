@@ -172,6 +172,18 @@ _ASSIGN_SHAPES = [
     ("env DB_PASSWORD", "DB_PASS" + "WORD", "=", "", ""),
     ("yaml ハイフン区切り", "secret" + "-key", ": ", "", ""),
     ("従来形", "pass" + "word", "=", "", ""),
+    # AWS の秘密鍵（`_ACCESS` 接続語）。接頭辞（`AWS_` / `MY_APP_`）はキー語の左に
+    # 語境界を要求しないため、そのまま通る。
+    ("env AWS_SECRET_ACCESS_KEY", "AWS_SECRET" + "_ACCESS_KEY", "=", "", ""),
+    ("env 多段接頭辞", "MY_APP_AWS_SECRET" + "_ACCESS_KEY", "=", "", ""),
+    ("env 接頭辞なし", "SECRET" + "_ACCESS_KEY", "=", "", ""),
+    ("env ダンプ形（コロン）", "SECRET" + "_ACCESS_KEY", ": ", "", ""),
+    ("~/.aws/credentials ini 形", "aws_secret" + "_access_key", " = ", "", ""),
+    ("JSON aws_secret_access_key", "aws_secret" + "_access_key", ": ", '"', '"'),
+    # エスケープ済み JSON（JSON 文字列の中に入れた JSON。引用符が `\"` になる）。
+    ("エスケープ済み JSON", "pass" + "word", ": ", '\\"', '\\"'),
+    ("エスケープ済み JSON 空白なし", "pass" + "word", ":", '\\"', '\\"'),
+    ("エスケープ済み JSON aws", "aws_secret" + "_access_key", ": ", '\\"', '\\"'),
 ]
 
 # 識別子の一部に credential 語を含むだけで、代入値が秘密ではない形。
@@ -187,6 +199,27 @@ _NOT_A_SECRET_ASSIGNMENTS = [
     # 引用符付きキーに続く値が引用符なし（コード式）なら、文字列リテラルの秘密ではない。
     'D_ENV = {"FACADE_CURSOR_' + 'SECRET": secrets.token_hex(32)}',
     '{"pass' + 'word": get_password_from_vault()}',
+    # 普通のプロパティ名・識別子（値が引用符付きでも空でも伏せない）。
+    'access_token_' + 'expires_in: "aaaaaaaaaaaa"',
+    "access_token_" + "expires_in: 3600000000",
+    'pass' + 'wordless: "aaaaaaaaaaaa"',
+    'secret' + 'ary: ""',
+    'token' + 'izer: ',
+    "SECRET" + "_KEYS: 'aaaaaaaaaaaa'",
+    'pass' + 'word_policy: ""',
+    # `_access` は `_access_key` の組でだけ接続語になる。単独の `*_access:` は普通のプロパティ。
+    "token" + "_access: restricted-to-admins",
+    "secret" + "_access: allowed_for_everyone",
+    "pass" + "word_access: readonly_everywhere",
+    "api_key" + "_access: enabled_for_all",
+    "token" + "_access_level: restricted-to-admins",
+    # コード上の参照（値ではない）。
+    'os.environ["AWS_SECRET' + '_ACCESS_KEY"]',
+    "os.environ['AWS_SECRET" + "_ACCESS_KEY']",
+    "os.getenv('AWS_SECRET" + "_ACCESS_KEY')",
+    # エスケープ済み JSON でも、値が引用符で始まらない式・識別子は伏せない。
+    '{\\"pass' + 'word\\": get_password_from_vault()}',
+    '{\\"token' + '_type\\": \\"bearer-style-name\\"}',
 ]
 
 
@@ -268,6 +301,13 @@ _WORST_CASE_UNITS: tuple[tuple[str, str], ...] = (
     # 開始位置が立ち、そのたびに連鎖の末尾まで走査して二次オーダーになる。
     ("assign_connector_key", "secret_key_"),
     ("assign_connector_hyphen", "token-secret-"),
+    ("assign_connector_access", "secret_access_key_"),
+    # 接頭辞（`AWS_` / `a_`）の繰り返し。キー語の左は無制限に走査し得る位置なので、
+    # 接頭辞を許すパターンが二次オーダーにならないことを固定する。
+    ("assign_prefix_aws", "AWS_"),
+    ("assign_prefix_short", "a_"),
+    ("assign_prefix_then_key", "AWS_" * 8 + "SECRET_ACCESS_KEY"),
+    ("assign_escaped_quote", 'password\\"'),
 )
 
 
