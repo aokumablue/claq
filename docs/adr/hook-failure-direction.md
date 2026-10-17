@@ -125,16 +125,21 @@ Windows の wrapper + インタプリタ起動の遅さで host 側 timeout（�
 5. **git config は Edit/Write では置換後の全文の前後比較で、Bash では書込み先に現れた時点で deny する。**
    対象は `.git/config`・`.git/config.worktree`・`.git/worktrees/*/config`・
    `.git/worktrees/*/config.worktree` と、ホーム側の `~/.gitconfig`・`$XDG_CONFIG_HOME/git/config`
-   （未設定なら `~/.config/git/config`。ホームは `get_home_dir` に揃える。symlink は実体で比べ、
-   大小は無視する）。`core.hooksPath` / `include.path` / `includeIf` / `alias` は `git config` 経由では
+   （未設定なら `~/.config/git/config`）。ホームは `get_home_dir`（`CLAQ_HOME` → `HOME` →
+   `USERPROFILE`）に揃えるため、`CLAQ_HOME` を設定した環境では `HOME` 側の `.gitconfig` は対象外になる。
+   symlink は実体で比べ、大小は無視する。`core.hooksPath` / `include.path` / `includeIf` / `alias` は `git config` 経由では
    `block_no_verify` が塞いでいるが、設定ファイルを直接書けば同じ効果になる。ホーム側の
    `core.hooksPath` は全リポジトリのフックを一度に外せる。対象を無条件に塞ぐと remote / branch /
    user の通常編集まで壊れるので、Edit/Write は内容で判定する。
    判定は、置換前の全文（ディスク上の現在の内容。読めない・存在しなければ空）と置換後の全文を
    最小限の git-config パーサで (section, subsection, key, 値) に分解し、`block_no_verify` が塞ぐ
    key 集合（key・section は大小無視）と照合する。置換後の全文は、Write なら content、Edit なら
-   置換を当てた全文（`replace_all` を尊重）、MultiEdit なら編集を順に当てた全文である。置換対象が
-   空・見つからない場合は new_string だけを断片として扱う。パーサは `[sec]`・`[sec "sub"]`・旧記法
+   置換を当てた全文（`replace_all` を尊重）、MultiEdit なら編集を順に当てた全文（64 件まで）である。
+   置換前は改行を変換せずに読む（git は CRLF だけを改行に畳み、単独の CR は空白として読む）。
+   対象が空・存在しない・読めないときは new_string だけを断片として扱う。内容のあるファイルで
+   置換対象が空・見つからないときは、実ツールが（引用符の正規化などで）一致させる可能性を
+   排除できないため全文を作らず deny する。置換の結果が走査上限を超えるときは、文字列を作る前に
+   deny する（置換の連鎖で全文を膨らませて検査を時間切れへ追い込ませない）。パーサは `[sec]`・`[sec "sub"]`・旧記法
    `[sec.sub]`、`#` / `;` のコメント、継続行、値の引用符とエスケープ、値なしの key、見出しと同じ行の
    key、CRLF、先頭の BOM を読む。見出しより前の key や読めない行は解析エラーである。
    deny するのは、置換後の危険 key の列が置換前の列の部分列でない、または key ごとの最後の値
@@ -151,12 +156,15 @@ Windows の wrapper + インタプリタ起動の遅さで host 側 timeout（�
    Bash は書込み本文をトークンから解釈できないため、内容を問わず書込み先位置の上記パス
    （リダイレクト・`tee`・`sed -i`・`cp`/`mv` の宛先・`rm`・`chmod` 等）を deny する。`cat`・`grep`・
    `sed -n p` のような読み取りは通す。ホーム側の設定はリポジトリ外の固定位置なので repo スコープ
-   判定の前に、リポジトリルートが決まらなくても、`cd` を挟んでも deny する。書込み先トークンの
-   先頭の `$HOME` / `${HOME}` と、設定されている `$XDG_CONFIG_HOME` は展開してから照合する。通常設定の
+   判定の前に、リポジトリルートが決まらなくても deny する。`cd` を含むコマンドでは相対パスを cwd 基準で
+   解決できないため、basename が `.gitconfig` の書込み先を deny する。書込み先トークンの先頭の `$HOME` /
+   `${HOME}` と、設定されている `$XDG_CONFIG_HOME` は展開してから照合する。通常設定の
    回避路は `git config <key> <value>`（書込み先トークンを持たない）である。
    **残る穴**: `GIT_DIR` の差し替え先とベアリポジトリの設定、system config（`/etc/gitconfig`）、
    `include.path` が指す先のファイルそのもの（既存の include 先を書き換えれば `core.hooksPath` を
-   入れられる）、`$HOME` 以外の変数やコマンド置換を含む書込み先、`core.sshCommand` /
+   入れられる）、ハードリンク経由の書込み、サブモジュールの設定（`.git/modules/*/config`）、`$HOME` 以外の変数やコマンド置換
+   （`${XDG_CONFIG_HOME:-...}` を含む）を含む書込み先、`cd` 後の `.gitconfig` 以外の相対パス
+   （`cd ~/.config/git && echo x >> config`）、`core.sshCommand` /
    `core.fsmonitor` / `credential.helper` のようにフック以外でコマンドを走らせる key
    （`block_no_verify` の集合に無い）は対象外である
 

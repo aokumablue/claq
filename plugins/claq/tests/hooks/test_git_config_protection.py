@@ -133,20 +133,33 @@ class TestEditAgainstDisk:
         _put(".git/config", "[user]\n\tname = x\n[remote \"o\"]\n\turl = x\n")
         assert _run(monkeypatch, _edit("= x", "= y")) == 0
 
-    def test_old_string_not_found_falls_back_to_fragment(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """置換対象が見つからなければ new_string だけを断片として判定する。"""
+    def test_old_string_not_found_in_existing_file_is_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """内容のあるファイルで置換対象が見つからなければ、実ツールとの食い違いを排除できないため deny する。"""
         _put(".git/config", _ALIAS_CONFIG)
-        assert _run(monkeypatch, _edit("no such text", _HOOKS_PATH_SECTION)) == 2
-        assert _run(monkeypatch, _edit("no such text", _REMOTE_SECTION)) == 0
+        assert _run(monkeypatch, _edit("no such text", _REMOTE_SECTION)) == 2
 
-    def test_empty_old_string_falls_back_to_fragment(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """空の old_string は全文字の間への挿入にせず、断片として判定する。"""
+    def test_empty_old_string_on_existing_file_is_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """空の old_string は全文字の間への挿入にせず、内容のあるファイルでは deny する。"""
         _put(".git/config", _ALIAS_CONFIG)
+        assert _run(monkeypatch, _edit("", _REMOTE_SECTION)) == 2
+
+    def test_lone_carriage_return_is_not_converted_when_reading(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """単独の CR を改行に変換せずに読む。変換すると、コメントの一部だった行を危険 key の既存行と誤認する。"""
+        Path(".git").mkdir()
+        Path(".git/config").write_bytes(b"[user]\n# x\r[core] hooksPath = /e\n")
+        assert _run(monkeypatch, _edit("# x", "")) == 2
+
+    def test_crlf_file_keeps_unrelated_edits_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """CRLF のファイルでも、無関係な編集は通す。"""
+        Path(".git").mkdir()
+        Path(".git/config").write_bytes(b"[alias]\r\n\tci = commit\r\n[user]\r\n\tname = x\r\n")
+        assert _run(monkeypatch, _edit("name = x", "name = y")) == 0
+
+    def test_missing_or_empty_file_uses_new_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ファイルが無い・空なら new_string が全文になる。"""
+        _put(".git/config", "")
         assert _run(monkeypatch, _edit("", _REMOTE_SECTION)) == 0
-        assert _run(monkeypatch, _edit("", _HOOKS_PATH_SECTION)) == 2
-
-    def test_missing_file_uses_new_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """ファイルが無ければ new_string が全文になる。"""
+        Path(".git/config").unlink()
         assert _run(monkeypatch, _edit("", _REMOTE_SECTION)) == 0
         assert _run(monkeypatch, _edit("x", _HOOKS_PATH_SECTION)) == 2
 
@@ -300,23 +313,34 @@ class TestMultiEdit:
         edits = [{"old_string": "= x", "new_string": "= y", "replace_all": True}]
         assert _run(monkeypatch, _multi_edit(edits)) == 2
 
-    def test_unapplicable_edit_falls_back_to_fragments(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """適用できない編集があれば new_string 全体を断片として判定する。"""
+    def test_unapplicable_edit_on_existing_file_is_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """内容のあるファイルで適用できない編集が 1 件でもあれば deny する。"""
         _put(".git/config", _ALIAS_CONFIG)
         edits = [
             {"old_string": "bare = false", "new_string": "bare = true"},
-            {"old_string": "missing", "new_string": _HOOKS_PATH_SECTION},
+            {"old_string": "missing", "new_string": "[user]\n\tname = x\n"},
         ]
         assert _run(monkeypatch, _multi_edit(edits)) == 2
 
-    def test_edits_after_an_unapplicable_one_are_collected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """適用できない編集より後ろの new_string も断片に含めて判定する。"""
-        _put(".git/config", _ALIAS_CONFIG)
-        edits = [
-            {"old_string": "missing", "new_string": "[user]\n\tname = x\n"},
-            {"old_string": "bare = false", "new_string": "[alias]\n\tci = commit --no-verify\n"},
-        ]
+    def test_edits_on_missing_file_are_collected_as_fragments(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ファイルが無いときは全編集の new_string を連結した全文で判定する。"""
+        ordinary = [{"old_string": "", "new_string": "[user]\n"}, {"old_string": "x", "new_string": "\tname = x\n"}]
+        assert _run(monkeypatch, _multi_edit(ordinary)) == 0
+        sensitive = [{"old_string": "", "new_string": "[user]\n"}, {"old_string": "x", "new_string": _HOOKS_PATH_SECTION}]
+        assert _run(monkeypatch, _multi_edit(sensitive)) == 2
+
+    def test_expanding_edits_are_stopped_before_allocation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """置換で全文を上限超へ膨らませる編集は、文字列を作る前に deny する。"""
+        _put(".git/config", " " * 100_000)
+        edits = [{"old_string": " ", "new_string": " " * 2_000, "replace_all": True}]
         assert _run(monkeypatch, _multi_edit(edits)) == 2
+
+    def test_too_many_edits_are_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """編集件数が上限を超える MultiEdit は deny する。"""
+        _put(".git/config", "[user]\n\tname = x\n")
+        edits = [{"old_string": "x", "new_string": "x"}] * 65
+        assert _run(monkeypatch, _multi_edit(edits)) == 2
+        assert _run(monkeypatch, _multi_edit(edits[:64])) == 0
 
     @pytest.mark.parametrize("edits", [[], "x", [1], [{"old_string": "a"}]], ids=["empty", "not-list", "not-dict", "no-new"])
     def test_malformed_edits_are_blocked(self, monkeypatch: pytest.MonkeyPatch, edits: object) -> None:
@@ -502,6 +526,11 @@ class TestBashWrite:
         monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: None)
         assert bash_config_protection.find_protected_write("echo x > ~/.gitconfig") == "~/.gitconfig"
         assert bash_config_protection.find_protected_write("cd /tmp && echo x > ~/.gitconfig") == "~/.gitconfig"
+
+    def test_gitconfig_after_cd_is_blocked(self) -> None:
+        """`cd` 後の相対パスは解決できないため、basename が `.gitconfig` の書込み先を deny する。"""
+        assert bash_config_protection.find_protected_write("cd ~ && printf x >> .gitconfig") == "~/.gitconfig"
+        assert bash_config_protection.find_protected_write("cd ~ && printf x >> notes.txt") is None
 
     def test_global_config_symlink_target_is_blocked(self, tmp_path: Path, _isolated_home: Path) -> None:
         """dotfiles への symlink になっている `~/.gitconfig` は、実体への書込みも deny する。"""

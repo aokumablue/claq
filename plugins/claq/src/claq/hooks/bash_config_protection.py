@@ -65,7 +65,11 @@ from claq.hooks.config_protection import (
     protected_path_segment,
     repo_git_config_path,
 )
-from claq.hooks.git_config_text import global_git_config_path
+from claq.hooks.git_config_text import (
+    GLOBAL_GITCONFIG_DISPLAY_NAME,
+    GLOBAL_GITCONFIG_NAME,
+    global_git_config_path,
+)
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     basename,
@@ -176,9 +180,7 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILE
 _HOME_LOG_PATH_SEGMENTS = ((".claq", "logs"),)
 
 
-# 書込み先トークンの先頭にある ``$HOME`` / ``${HOME}`` と ``$XDG_CONFIG_HOME`` /
-# ``${XDG_CONFIG_HOME}``。シェルはトークンを展開してから実行するため、未展開のまま
-# ``~/.gitconfig`` と同じファイルを指せる。
+# 未展開のまま ``~/.gitconfig`` 等を指せる、書込み先トークン先頭の ``$HOME`` / ``$XDG_CONFIG_HOME``（``{}`` 付き可）。
 _HOME_VARIABLE_PREFIX_RE = re.compile(r"^\$(?:\{HOME\}|HOME)(?=/|$)")
 _XDG_VARIABLE_PREFIX_RE = re.compile(r"^\$(?:\{XDG_CONFIG_HOME\}|XDG_CONFIG_HOME)(?=/|$)")
 
@@ -186,9 +188,7 @@ _XDG_VARIABLE_PREFIX_RE = re.compile(r"^\$(?:\{XDG_CONFIG_HOME\}|XDG_CONFIG_HOME
 def _expand_config_home_variables(token: str) -> str:
     """書込み先トークン先頭の ``$HOME`` / ``$XDG_CONFIG_HOME`` を展開する。
 
-    ``$HOME`` はチルダ（`resolve_effective_target` が `get_home_dir` へ展開する）に揃える。
-    ``$XDG_CONFIG_HOME`` は設定されているときだけ値へ展開し、未設定なら展開しない
-    （シェルでは空文字になり別の位置を指すため、``~/.config`` とは同一視しない）。
+    ``$HOME`` はチルダに揃える。``$XDG_CONFIG_HOME`` は設定時だけ値へ展開する。
 
     Args:
         token: 検査対象の生トークン。
@@ -596,11 +596,13 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
             home_log_hit = _find_home_log_directory_match(token)
             if home_log_hit is not None:
                 return home_log_hit
-            # ``~/.gitconfig`` と XDG の設定もリポジトリ外の固定位置で、全リポジトリのフックを
-            # 一度に外せる。repo スコープ判定の対象にすると、リポジトリ外として allow になる。
+            # ホーム側の設定はリポジトリ外の固定位置。repo スコープ判定に掛けると allow になる。
             global_config_hit = global_git_config_path(_expand_config_home_variables(token))
             if global_config_hit is not None:
                 return global_config_hit
+            # ``cd ~ && printf x >> .gitconfig``: `cd` を含むコマンドは basename で見る。
+            if not scope_certain and normalize_protected_name(basename(token)) == GLOBAL_GITCONFIG_NAME:
+                return GLOBAL_GITCONFIG_DISPLAY_NAME
             found = _protected_target(token)
             if found is None:
                 continue

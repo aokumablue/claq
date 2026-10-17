@@ -21,16 +21,22 @@ from claq.hooks.hook_common import normalize_protected_name, resolve_effective_t
 from claq.lib.core_utils import get_home_dir
 from claq.lib.harness import normalize_tool_name
 
-# git が空白として扱う文字（``isspace``）。改行は行の区切りとして別に扱う。
-_BLANKS = " \t\r\v\f"
+# git が空白として扱う文字（``isspace``）は ASCII の空白・タブ・CR・LF だけで、``\v`` ``\f`` や
+# Unicode の空白は含まない。値の区別に関わるため `str.isspace` は使わない。改行は行の区切りとして別に扱う。
+_BLANKS = " \t\r"
+_WHITESPACE = _BLANKS + "\n"
 _COMMENT_STARTS = "#;"
+# MultiEdit の編集件数の上限。置換 1 件ごとに全文を走査するため、件数でも検査時間を抑える。
+_MAX_EDITS = 64
+
 # ホーム側の設定ファイル（全リポジトリのフックを一度に外せる）の表示名。XDG は
 # ``$XDG_CONFIG_HOME`` が設定されていればそちら、未設定なら ``~/.config`` 配下を指す。
-_GLOBAL_GITCONFIG_DISPLAY_NAME = "~/.gitconfig"
+GLOBAL_GITCONFIG_NAME = ".gitconfig"
+GLOBAL_GITCONFIG_DISPLAY_NAME = "~/.gitconfig"
 _XDG_GIT_CONFIG_DISPLAY_NAME = "$XDG_CONFIG_HOME/git/config"
 _DEFAULT_XDG_GIT_CONFIG_DISPLAY_NAME = "~/.config/git/config"
 GLOBAL_GIT_CONFIG_DISPLAY_NAMES = frozenset(
-    {_GLOBAL_GITCONFIG_DISPLAY_NAME, _XDG_GIT_CONFIG_DISPLAY_NAME, _DEFAULT_XDG_GIT_CONFIG_DISPLAY_NAME}
+    {GLOBAL_GITCONFIG_DISPLAY_NAME, _XDG_GIT_CONFIG_DISPLAY_NAME, _DEFAULT_XDG_GIT_CONFIG_DISPLAY_NAME}
 )
 # 値の中のバックスラッシュエスケープ（``\\`` ``\"`` ``\n`` ``\t`` ``\b``）。``\<改行>`` は継続行。
 _VALUE_ESCAPES = {"n": "\n", "t": "\t", "b": "\b", "\\": "\\", '"': '"'}
@@ -109,7 +115,7 @@ def _parse_header(text: str, pos: int) -> tuple[str, int]:
         pos += 1
         if char == "]":
             break
-        if char.isspace():
+        if char in _WHITESPACE:
             return _parse_extended_header("".join(name), text, pos - 1)
         if not (_is_key_char(char) or char == "."):
             raise GitConfigParseError(f"invalid character in section header: {char!r}")
@@ -134,7 +140,7 @@ def _parse_extended_header(base: str, text: str, pos: int) -> tuple[str, int]:
         GitConfigParseError: 引用符が無い・閉じない・途中で改行する・``]`` が続かない・名前が空。
     """
     length = len(text)
-    while pos < length and text[pos].isspace():
+    while pos < length and text[pos] in _WHITESPACE:
         if text[pos] == "\n":
             raise GitConfigParseError("newline in section header")
         pos += 1
@@ -189,15 +195,16 @@ def _parse_value(text: str, pos: int) -> tuple[str, int]:
             return "".join(value), pos
         if in_comment:
             continue
-        if char.isspace() and not quoted:
+        if char in _BLANKS and not quoted:
             if value:
                 pending_spaces += 1
             continue
         if not quoted and char in _COMMENT_STARTS:
             in_comment = True
             continue
-        value.append(" " * pending_spaces)
-        pending_spaces = 0
+        if pending_spaces:
+            value.append(" " * pending_spaces)
+            pending_spaces = 0
         if char == "\\":
             if pos >= length:
                 raise GitConfigParseError("trailing backslash in value")
@@ -233,14 +240,14 @@ def parse_git_config(text: str) -> list[ConfigEntry]:
     Raises:
         GitConfigParseError: git config として解釈できない行がある。
     """
-    text = text.removeprefix("﻿").replace("\r\n", "\n")
+    text = text.removeprefix("\ufeff").replace("\r\n", "\n")
     length = len(text)
     entries: list[ConfigEntry] = []
     prefix: str | None = None
     pos = 0
     while pos < length:
         char = text[pos]
-        if char.isspace():
+        if char in _WHITESPACE:
             pos += 1
         elif char in _COMMENT_STARTS:
             pos = _skip_line(text, pos)
@@ -312,7 +319,8 @@ def adds_sensitive_entries(before: str, after: str, is_sensitive: Callable[[str]
     if not all(entry in remaining for entry in new):
         return True
     effective_old = {entry.key: entry.value for entry in old}
-    return any(effective_old[entry.key] != entry.value for entry in new)
+    effective_new = {entry.key: entry.value for entry in new}
+    return any(effective_old[key] != value for key, value in effective_new.items())
 
 
 def _global_git_config_candidates() -> tuple[tuple[Path, str], ...]:
@@ -336,7 +344,7 @@ def _global_git_config_candidates() -> tuple[tuple[Path, str], ...]:
         xdg_path, xdg_name = Path(xdg) / "git" / "config", _XDG_GIT_CONFIG_DISPLAY_NAME
     else:
         xdg_path, xdg_name = home / ".config" / "git" / "config", _DEFAULT_XDG_GIT_CONFIG_DISPLAY_NAME
-    return ((home / ".gitconfig", _GLOBAL_GITCONFIG_DISPLAY_NAME), (xdg_path, xdg_name))
+    return ((home / GLOBAL_GITCONFIG_NAME, GLOBAL_GITCONFIG_DISPLAY_NAME), (xdg_path, xdg_name))
 
 
 def global_git_config_path(file_path: str) -> str | None:
@@ -369,8 +377,10 @@ def global_git_config_path(file_path: str) -> str | None:
 def read_current_text(file_path: str, limit: int) -> str:
     """対象ファイルの現在の内容を先頭 ``limit`` 文字まで読む。
 
-    読めない・存在しない・ディレクトリの場合は空文字列（新規ファイルと同じ扱い）。呼び出し側が
-    走査上限を超えたことを長さで検出できるよう、上限より 1 文字多い値を ``limit`` に渡す。
+    改行は変換しない。git は CRLF だけを改行に畳み、単独の CR は空白として読むため、
+    universal newlines で読むと実ファイルと違う全文を解析してしまう。読めない・存在しない・
+    ディレクトリの場合は空文字列（新規ファイルと同じ扱い）。呼び出し側が走査上限を超えたことを
+    長さで検出できるよう、上限より 1 文字多い値を ``limit`` に渡す。
 
     Args:
         file_path: 対象ファイルパス。
@@ -386,43 +396,52 @@ def read_current_text(file_path: str, limit: int) -> str:
     if resolved is None:
         return ""
     try:
-        with resolved.open(encoding="utf-8", errors="replace") as handle:
+        with resolved.open(encoding="utf-8", errors="replace", newline="") as handle:
             return handle.read(limit)
     except OSError:
         return ""
 
 
-def _apply_edit(text: str, old: object, new: str, *, replace_all: bool) -> str | None:
+def _apply_edit(text: str, old: object, new: str, *, replace_all: bool, max_chars: int) -> str | None:
     """Edit 1 件の置換を全文へ適用する。
+
+    置換の結果が ``max_chars`` を超える場合は、文字列を作る前に打ち切る。置換の連鎖で全文を
+    膨らませて検査を時間切れ（＝ allow）へ追い込む入力を許さないため。
 
     Args:
         text: 置換前の全文。
         old: 置換対象。
         new: 置換後の文字列。
         replace_all: 全出現を置換するか（False は最初の 1 件）。
+        max_chars: 置換後の全文の最大文字数。
 
     Returns:
-        置換後の全文。置換対象が空・文字列でない・全文に見つからなければ None。
+        置換後の全文。置換対象が空・文字列でない・全文に見つからない・結果が上限を超えるなら None。
 
     Raises:
         例外は発生しません。
     """
     if not isinstance(old, str) or not old or old not in text:
         return None
-    return text.replace(old, new) if replace_all else text.replace(old, new, 1)
+    count = text.count(old) if replace_all else 1
+    if len(text) + count * (len(new) - len(old)) > max_chars:
+        return None
+    return text.replace(old, new, count)
 
 
-def git_config_text_after(tool_name: str, container: Any, before: str) -> str | None:
+def git_config_text_after(tool_name: str, container: Any, before: str, max_chars: int) -> str | None:
     """書込み系入力を適用した後の全文を組み立てる。
 
-    Write は content。Edit は置換を当てた全文、MultiEdit は編集を順に当てた全文。置換対象が
-    見つからない（空・ファイルが読めない・存在しない）場合は、Write と同じく new_string だけを
-    断片として扱う。apply_patch は全文を作れないため None。
+    Write は content。Edit は置換を当てた全文、MultiEdit は編集を順に当てた全文（件数は
+    `_MAX_EDITS` まで）。対象が空・存在しない・読めない場合は、Write と同じく new_string だけを
+    断片として扱う。内容のあるファイルで置換対象が見つからない場合は、実際のツールが一致させる
+    可能性（引用符の正規化など）を排除できないため全文を作らない。apply_patch も全文を作れない。
 
     Args:
         tool_name: 正規化前の生ツール名。
         container: extract_tool_input 相当の 1 コンテナ値。
         before: 対象ファイルの現在の内容。
+        max_chars: 組み立てる全文の最大文字数。
 
     Returns:
         置換後の全文。組み立てられなければ None（呼び出し側は fail-closed とする）。
@@ -437,7 +456,7 @@ def git_config_text_after(tool_name: str, container: Any, before: str) -> str | 
         content = container.get("content")
         return content if isinstance(content, str) else None
     edits = container.get("edits") if normalized == "multiedit" else [container]
-    if not isinstance(edits, list):
+    if not isinstance(edits, list) or not 0 < len(edits) <= _MAX_EDITS:
         return None
     fragments: list[str] = []
     text: str | None = before
@@ -445,8 +464,10 @@ def git_config_text_after(tool_name: str, container: Any, before: str) -> str | 
         if not isinstance(edit, dict) or not isinstance(new := edit.get("new_string"), str):
             return None
         fragments.append(new)
-        if text is not None:
-            text = _apply_edit(text, edit.get("old_string"), new, replace_all=edit.get("replace_all") is True)
-    if not fragments:
-        return None
-    return text if text is not None else "\n".join(fragments)
+        if before:
+            text = _apply_edit(
+                text or "", edit.get("old_string"), new, replace_all=edit.get("replace_all") is True, max_chars=max_chars
+            )
+            if text is None:
+                return None
+    return text if before else "\n".join(fragments)

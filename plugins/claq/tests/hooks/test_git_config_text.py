@@ -18,6 +18,11 @@ def _sensitive(key: str) -> bool:
     return lowered.startswith(("alias.", "core.hookspath"))
 
 
+def _sensitive_include(key: str) -> bool:
+    """テスト用の危険 key 判定（include.path）。"""
+    return key.lower().startswith("include.path")
+
+
 def _entries(text: str) -> list[tuple[str, str | None]]:
     """解析結果を (key, value) の組で返す。"""
     return [(entry.key, entry.value) for entry in parse_git_config(text)]
@@ -246,6 +251,27 @@ class TestAddsSensitiveEntries:
         """置換後が解析できなければ例外を伝える。"""
         with pytest.raises(GitConfigParseError):
             adds_sensitive_entries("", "garbage\n", _sensitive)
+
+    def test_unrelated_edit_with_multi_valued_key_is_allowed(self) -> None:
+        """複数値の key（include.path の列）を持つファイルへの無関係な編集は通す。"""
+        before = "[include]\n path=a\n path=b\n"
+        assert not adds_sensitive_entries(before, before + '[remote "o"]\n url=x\n', _sensitive_include)
+
+    def test_changing_a_non_final_value_of_multi_valued_key_is_detected(self) -> None:
+        """複数値の key の途中の値を書き換える編集は、列の部分列でなくなるため True。"""
+        before = "[include]\n path=a\n path=b\n"
+        assert adds_sensitive_entries(before, "[include]\n path=evil\n path=b\n", _sensitive_include)
+
+    @pytest.mark.parametrize("blank", ["\xa0", "\v", "\f", "\u3000"])
+    def test_non_git_whitespace_is_part_of_the_value(self, blank: str) -> None:
+        """git が空白と見ない文字（NBSP・VT・FF・全角空白）は値の一部で、値の変更として検出する。"""
+        before = f"[alias]\n ci = commit{blank}--no-verify\n"
+        assert adds_sensitive_entries(before, "[alias]\n ci = commit --no-verify\n", _sensitive)
+        assert adds_sensitive_entries("[core]\n hooksPath=/a\n", f"[core]\n hooksPath=/a{blank}\n", _sensitive)
+
+    def test_empty_quotes_then_space_is_not_a_separator(self) -> None:
+        """``""`` だけの値の後ろの空白は、値が空のままなので区切りに数えない。"""
+        assert _entries('[a]\nk = "" a\n') == [("a.k", "a")]
 
     def test_sensitive_key_in_comment_is_ignored(self) -> None:
         """コメント内の hooksPath は危険 key ではない。"""

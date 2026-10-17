@@ -591,10 +591,12 @@ def _git_config_block_reason(tool_name: str, container: Any, file_path: str, dis
         例外は発生しません。
     """
     before = read_current_text(file_path, _LINT_SIGNAL_MAX_TEXT_BYTES + 1)
-    after = git_config_text_after(tool_name, container, before)
+    if len(before) > _LINT_SIGNAL_MAX_TEXT_BYTES:
+        return _git_config_unparsable_message(display_name)
+    after = git_config_text_after(tool_name, container, before, _LINT_SIGNAL_MAX_TEXT_BYTES)
     if after is None:
         return _unverifiable_conditional_message(display_name)
-    if max(len(before), len(after)) > _LINT_SIGNAL_MAX_TEXT_BYTES:
+    if len(after) > _LINT_SIGNAL_MAX_TEXT_BYTES:
         return _git_config_unparsable_message(display_name)
     try:
         if adds_sensitive_entries(before, after, is_sensitive_config_key):
