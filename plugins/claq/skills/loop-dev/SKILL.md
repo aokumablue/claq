@@ -61,6 +61,8 @@ user-invocable: false
 2. generate: 各 blocker を直す前に根本原因を 1 行で書く（反復履歴の rootcause に記録する。対症療法のパッチは当てない）。blocker の箇所だけを直し（新機能の追加・リファクタの拡大はしない）、自己検証する
 3. circuit breaker の判定: 自己検証の結果を反復1 のシグネチャと照合する（`## circuit breaker`）。hard trigger なら evaluate を飛ばす
 4. evaluate: reviewer を再実行する。依頼文に前回の blocker 一覧を渡し、その解消と反復2 の差分が持ち込んだ問題だけを見させる（反復1 で指摘されなかった既存コードの問題は掘り起こさない）
+   - security-auditor は、反復1 の security-auditor が `Blockers` 1 以上を返したか、反復2 の差分が反復1 と同じ起動条件に触れるときだけ再実行する。依頼文には security-auditor 由来の前回 blocker 一覧と反復2 の diff 本文か変更ファイルの一覧を載せ、同じ限定で見させる。前回 blocker 一覧は出所ごとに分け、reviewer には reviewer 由来の分だけを渡す（混ぜると reviewer がセキュリティ blocker の解消を判定してしまうため）
+   - 再実行しないときは、反復1 の security-auditor の `Blockers` 行を収束判定に引き継ぐ
 5. 収束判定 → checkpoint 更新 → green コミット
 
 ### 上限超過時
