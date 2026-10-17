@@ -86,6 +86,7 @@ def _always_raise(message: str):
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def _stub(*args: object, **kwargs: object) -> None:
+        """呼び出しを記録して RuntimeError を送出する。"""
         calls.append((args, kwargs))
         raise RuntimeError(message)
 

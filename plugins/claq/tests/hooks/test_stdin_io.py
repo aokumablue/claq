@@ -212,6 +212,8 @@ class TestStdinIsAbsent:
         isatty_calls: list[None] = []
 
         class _RaisingStdin:
+            """isatty() の呼び出しを記録して例外化する stdin。"""
+
             def isatty(self) -> bool:
                 isatty_calls.append(None)
                 raise error

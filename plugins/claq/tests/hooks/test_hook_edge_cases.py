@@ -33,6 +33,7 @@ def _spy_commit_message_validation(monkeypatch: pytest.MonkeyPatch) -> list[str]
     validated: list[str] = []
 
     def _spy(command: str) -> None:
+        """受け取ったコマンドを記録し、検証結果なし(None)を返す。"""
         validated.append(command)
 
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", _spy)
