@@ -260,7 +260,7 @@ class TestBlockNoVerify:
 
     def test_tokenize_falls_back_to_whitespace_split(self) -> None:
         """クォート不整合時は空白分割へフォールバックする（fail-closed）。"""
-        assert block_no_verify.tokenize_with_status('git commit -m "x') == (["git", "commit", "-m", '"x'], False)
+        assert block_no_verify.tokenize_with_status('git commit -m "x') == (["git", "commit", "-m", "x"], False)
 
     @pytest.mark.parametrize(
         "command",

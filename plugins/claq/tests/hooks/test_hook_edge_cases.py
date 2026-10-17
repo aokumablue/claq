@@ -1042,6 +1042,17 @@ def test_is_git_commit_command_detects_double_space() -> None:
     assert args == ["-m", "x"]
 
 
+def test_is_git_commit_command_detects_quoted_git_after_unparsable_input() -> None:
+    """解析不能な入力の後でも、引用符付きの `git` / `commit` を commit として検出すること。
+
+    空白分割へ倒れても各トークンから引用符を取り除くため、生文字列の正規表現
+    （`git\\s+commit`）に一致しない `"git" commit` が検出から漏れない。
+    """
+    is_commit, args = commit_risk._is_git_commit_command("echo $'\\''; \"git\" commit -m x")
+    assert is_commit is True
+    assert args == ["-m", "x"]
+
+
 def test_is_git_commit_command_treats_newline_as_a_command_separator() -> None:
     """改行はコマンド区切りなので `git` 改行 `commit` は commit ではない。
 
@@ -1106,6 +1117,15 @@ def test_is_git_commit_command_falls_back_on_shlex_failure() -> None:
     broken_command = "git commit -m 'unterminated quote"
     is_commit, _args = commit_risk._is_git_commit_command(broken_command)
     assert is_commit is True
+
+
+def test_is_git_commit_command_raw_regex_still_applies_when_tokens_miss_it() -> None:
+    """解析不能な入力では、トークン列が commit を見つけられなくても生文字列の正規表現で検出すること。
+
+    ``x-git`` は git の起動ではないためトークン経由では commit にならないが、解析できない
+    入力に対するフェイルセーフとして ``git commit`` の語が見えた時点で commit とみなす。
+    """
+    assert commit_risk._is_git_commit_command("echo $'\\''; echo x-git commit") == (True, [])
 
 
 def test_is_git_commit_command_fallback_non_commit_returns_false() -> None:

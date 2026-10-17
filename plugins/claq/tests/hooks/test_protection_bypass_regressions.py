@@ -316,6 +316,17 @@ _BLOCKED_CASES = [
     ("解析不能の後の && 密着 rm", "bash_config_protection", _bash("echo $'\\''&&rm ruff.toml")),
     ("解析不能の後の || 密着 rm", "bash_config_protection", _bash("echo $'\\''||rm ruff.toml")),
     ("解析不能の後の | 密着 tee", "bash_config_protection", _bash("echo $'\\''|tee ruff.toml")),
+    # 解析不能の後は引用符がトークンに残るため、引用符付きの保護名・コマンド名が照合を抜けていた。
+    ("解析不能の後の二重引用符付き rm", "bash_config_protection", _bash("echo $'\\''; rm \"ruff.toml\"")),
+    ("解析不能の後の単一引用符付き rm", "bash_config_protection", _bash("echo $'\\''; rm 'ruff.toml'")),
+    ("解析不能の後の引用符付きリダイレクト先", "bash_config_protection", _bash("echo $'\\''; printf x >\"ruff.toml\"")),
+    ("解析不能の後の引用符付き sed -i", "bash_config_protection", _bash("echo $'\\''; sed -i 's/a/b/' \"ruff.toml\"")),
+    ("解析不能の後の引用符付き tee", "bash_config_protection", _bash("echo $'\\''; echo x | tee \"ruff.toml\"")),
+    ("解析不能の後の引用符付き git と -n", "block_no_verify", _bash("echo $'\\''; \"git\" commit -n -m a")),
+    ("解析不能の後の連結引用 git と -n", "block_no_verify", _bash("echo $'\\''; g''it commit -n -m a")),
+    ("解析不能でない引用符付き git と -n（対照）", "block_no_verify", _bash("\"git\" commit -n")),
+    ("解析不能でない引用符付きフラグ（対照）", "block_no_verify", _bash("git commit \"--no-verify\"")),
+    ("解析不能でない引用符付き hooksPath（対照）", "block_no_verify", _bash("git -c \"core.hooksPath=/x\" commit -m a")),
     # 陽性対照（fail-closed 化で失われていないこと）。
     ("対照 コメント無しの 2 行目", "block_no_verify", _bash(f"git status\n{_NO_VERIFY}")),
     ("対照 bash -c", "block_no_verify", _bash(f"bash -c '{_NO_VERIFY}'")),
@@ -423,6 +434,12 @@ _ALLOWED_CASES = [
     ("対 touch README.md", "bash_config_protection", _bash("touch README.md")),
     ("対 repo 外の touch", "bash_config_protection", _bash("touch /tmp/ruff.toml")),
     ("対 非実行位置の touch", "bash_config_protection", _bash("echo touch ruff.toml")),
+    # 解析不能な入力でも、引用符付きの読み取りや保護名でない書き込みは巻き込まない。
+    ("解析不能の後の引用符付き cat", "bash_config_protection", _bash("echo $'\\''; cat \"ruff.toml\"")),
+    ("解析不能の後の保護名でない引用符付き rm", "bash_config_protection", _bash("echo $'\\''; rm \"notes.txt\"")),
+    ("解析不能の後の引数位置の保護名", "bash_config_protection", _bash("echo $'\\''; echo \"ruff.toml\"")),
+    ("閉じない引用符内の保護名を読む", "bash_config_protection", _bash("grep \"a ruff.toml")),
+    ("解析不能の後の引用符付き commit", "block_no_verify", _bash("echo $'\\''; git commit -m \"x\"")),
 ]
 
 

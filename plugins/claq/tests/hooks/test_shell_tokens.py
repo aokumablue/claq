@@ -342,12 +342,12 @@ class TestUnquotedNewlineNormalization:
             (
                 "シングルクォートが閉じない",
                 "echo 'unterminated\nrm -rf /",
-                (["echo", "'unterminated", "rm", "-rf", "/"], False),
+                (["echo", "unterminated", "rm", "-rf", "/"], False),
             ),
             (
                 "ダブルクォートが閉じない",
                 'echo "unterminated\nrm -rf /',
-                (["echo", '"unterminated', "rm", "-rf", "/"], False),
+                (["echo", "unterminated", "rm", "-rf", "/"], False),
             ),
         ],
     )
@@ -364,29 +364,29 @@ class TestUnquotedNewlineNormalization:
     @pytest.mark.parametrize(
         ("label", "command", "expected"),
         [
-            ("; が語に密着", "echo $'\\'';git commit", ["echo", "$'\\''", ";", "git", "commit"]),
-            ("&& が語に密着", "echo $'\\''&&git commit", ["echo", "$'\\''", "&&", "git", "commit"]),
-            ("|| が語に密着", "echo $'\\''||git commit", ["echo", "$'\\''", "||", "git", "commit"]),
-            ("| が語に密着", "echo $'\\''|tee ruff.toml", ["echo", "$'\\''", "|", "tee", "ruff.toml"]),
-            ("& が語に密着", "echo $'\\''&git commit", ["echo", "$'\\''", "&", "git", "commit"]),
-            ("括弧が語に密着", "echo $'\\'';(git commit)", ["echo", "$'\\''", ";", "(", "git", "commit", ")"]),
-            ("> が語に密着", "echo $'\\'' >ruff.toml", ["echo", "$'\\''", ">", "ruff.toml"]),
-            (">> は 1 単位", "echo $'\\'' >>ruff.toml", ["echo", "$'\\''", ">>", "ruff.toml"]),
-            (">| は 1 単位", "echo $'\\'' >|ruff.toml", ["echo", "$'\\''", ">|", "ruff.toml"]),
-            ("&> は 1 単位", "echo $'\\'' &>ruff.toml", ["echo", "$'\\''", "&>", "ruff.toml"]),
-            ("&>> は 1 単位", "echo $'\\'' &>>ruff.toml", ["echo", "$'\\''", "&>>", "ruff.toml"]),
-            ("2> は 1 単位", "echo $'\\'' 2>ruff.toml", ["echo", "$'\\''", "2>", "ruff.toml"]),
-            ("2>> は 1 単位", "echo $'\\'' 2>>ruff.toml", ["echo", "$'\\''", "2>>", "ruff.toml"]),
-            ("< が語に密着", "echo $'\\'' <in.txt", ["echo", "$'\\''", "<", "in.txt"]),
-            ("語中の 2 は割らない", "echo $'\\'' a2>x", ["echo", "$'\\''", "a2", ">", "x"]),
-            ("1> は 1 単位", "echo $'\\'' 1>ruff.toml", ["echo", "$'\\''", "1>", "ruff.toml"]),
-            ("1>> は 1 単位", "echo $'\\'' 1>>ruff.toml", ["echo", "$'\\''", "1>>", "ruff.toml"]),
+            ("; が語に密着", "echo $'\\'';git commit", ["echo", "$\\", ";", "git", "commit"]),
+            ("&& が語に密着", "echo $'\\''&&git commit", ["echo", "$\\", "&&", "git", "commit"]),
+            ("|| が語に密着", "echo $'\\''||git commit", ["echo", "$\\", "||", "git", "commit"]),
+            ("| が語に密着", "echo $'\\''|tee ruff.toml", ["echo", "$\\", "|", "tee", "ruff.toml"]),
+            ("& が語に密着", "echo $'\\''&git commit", ["echo", "$\\", "&", "git", "commit"]),
+            ("括弧が語に密着", "echo $'\\'';(git commit)", ["echo", "$\\", ";", "(", "git", "commit", ")"]),
+            ("> が語に密着", "echo $'\\'' >ruff.toml", ["echo", "$\\", ">", "ruff.toml"]),
+            (">> は 1 単位", "echo $'\\'' >>ruff.toml", ["echo", "$\\", ">>", "ruff.toml"]),
+            (">| は 1 単位", "echo $'\\'' >|ruff.toml", ["echo", "$\\", ">|", "ruff.toml"]),
+            ("&> は 1 単位", "echo $'\\'' &>ruff.toml", ["echo", "$\\", "&>", "ruff.toml"]),
+            ("&>> は 1 単位", "echo $'\\'' &>>ruff.toml", ["echo", "$\\", "&>>", "ruff.toml"]),
+            ("2> は 1 単位", "echo $'\\'' 2>ruff.toml", ["echo", "$\\", "2>", "ruff.toml"]),
+            ("2>> は 1 単位", "echo $'\\'' 2>>ruff.toml", ["echo", "$\\", "2>>", "ruff.toml"]),
+            ("< が語に密着", "echo $'\\'' <in.txt", ["echo", "$\\", "<", "in.txt"]),
+            ("語中の 2 は割らない", "echo $'\\'' a2>x", ["echo", "$\\", "a2", ">", "x"]),
+            ("1> は 1 単位", "echo $'\\'' 1>ruff.toml", ["echo", "$\\", "1>", "ruff.toml"]),
+            ("1>> は 1 単位", "echo $'\\'' 1>>ruff.toml", ["echo", "$\\", "1>>", "ruff.toml"]),
             # `&` は区切りだが、`>&` / `<&` の一部としては区切りでない。`2>&1` を `2> & 1` に
             # 割ると、後続の語がセグメントごと切り離される。
-            ("2>&1 は区切りを作らない", "echo $'\\'' 2>&1 x", ["echo", "$'\\''", "2", ">&", "1", "x"]),
-            (">&2 は区切りを作らない", "echo $'\\'' >&2 x", ["echo", "$'\\''", ">&", "2", "x"]),
-            ("<&3 は区切りを作らない", "echo $'\\'' <&3 x", ["echo", "$'\\''", "<&", "3", "x"]),
-            ("区切りが無ければ空白分割のまま", "echo $'\\'' a b", ["echo", "$'\\''", "a", "b"]),
+            ("2>&1 は区切りを作らない", "echo $'\\'' 2>&1 x", ["echo", "$\\", "2", ">&", "1", "x"]),
+            (">&2 は区切りを作らない", "echo $'\\'' >&2 x", ["echo", "$\\", ">&", "2", "x"]),
+            ("<&3 は区切りを作らない", "echo $'\\'' <&3 x", ["echo", "$\\", "<&", "3", "x"]),
+            ("区切りが無ければ空白分割のまま", "echo $'\\'' a b", ["echo", "$\\", "a", "b"]),
         ],
     )
     def test_tokenize_with_status_fallback_splits_glued_operators(
@@ -422,6 +422,37 @@ class TestUnquotedNewlineNormalization:
     ) -> None:
         """`shlex` で解析できた入力のトークン列は、フォールバックの演算子分割に影響されない。"""
         assert shell_tokens.tokenize_with_status(command) == (expected, True), label
+
+    @pytest.mark.parametrize(
+        ("label", "command", "expected"),
+        [
+            ("二重引用符の語", "echo $'\\''; rm \"ruff.toml\"", ["echo", "$\\", ";", "rm", "ruff.toml"]),
+            ("単一引用符の語", "echo $'\\''; rm 'ruff.toml'", ["echo", "$\\", ";", "rm", "ruff.toml"]),
+            ("引用符で挟まれた語頭", "echo $'\\''; \"git\" commit", ["echo", "$\\", ";", "git", "commit"]),
+            ("語中の連結引用符", "echo $'\\''; g''it commit", ["echo", "$\\", ";", "git", "commit"]),
+            ("リダイレクト先の引用符", "echo $'\\'' >\"ruff.toml\"", ["echo", "$\\", ">", "ruff.toml"]),
+            ("閉じない引用符", "grep \"a ruff.toml", ["grep", "a", "ruff.toml"]),
+            # 空文字列の引用符対も 1 トークンとして位置を保つ（個数を変えない）。
+            ("空文字列の引用符対", "echo $'\\''; rm \"\" x", ["echo", "$\\", ";", "rm", "", "x"]),
+        ],
+    )
+    def test_tokenize_with_status_fallback_strips_quote_characters(
+        self, label: str, command: str, expected: list[str]
+    ) -> None:
+        """空白分割へ倒れた入力では、各トークンから ``"`` と ``'`` を取り除く（個数と順序は保つ）。
+
+        ``shlex`` が解析できないとトークンに引用符が残り、保護名の照合（basename 比較）が
+        ``"ruff.toml"`` に一致しない。位置ベースの書き込み先判定を保つため、取り除くのは
+        文字だけでトークンの結合・分割はしない。
+        """
+        tokens, parsed_cleanly = shell_tokens.tokenize_with_status(command)
+
+        assert parsed_cleanly is False, label
+        assert tokens == expected, label
+
+    def test_tokenize_with_status_parsed_path_keeps_quote_characters_inside_words(self) -> None:
+        """解析できた入力では、語の中の引用符文字を取り除かない（フォールバック経路のみの処理）。"""
+        assert shell_tokens.tokenize_with_status("echo \"it's\" 'say \"hi\"'") == (["echo", "it's", 'say "hi"'], True)
 
     def test_multiline_command_splits_into_segments(self) -> None:
         """複数行コマンドが行ごとのセグメントへ分かれること。"""

@@ -539,6 +539,12 @@ _FALLBACK_OPERATOR_RE = re.compile(
 )
 
 
+# 空白分割へ倒れたトークンから取り除く引用符文字。`shlex` が解析できない入力では引用符が
+# トークンに残り、保護名の照合（basename 比較）やコマンド名・フラグの照合が
+# ``"ruff.toml"`` / ``"git"`` / ``"--no-verify"`` に一致しない。
+_FALLBACK_QUOTE_CHARS_RE = re.compile(r"[\"']")
+
+
 def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     """シェルコマンドをトークン化し、``shlex`` で解析し切れたかどうかも返す。
 
@@ -551,8 +557,9 @@ def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     これで ``echo $'\\'';git commit`` の ``;`` や ``>ruff.toml`` の ``>`` が語に埋もれず、
     クォート内容もフラグとして走査される。ただしクォートの対応は取らないため、本物の
     クォート内にある区切り記号まで割る。割るのは区切りの前後だけで、危険語が見えた
-    こと自体では deny しない（読み取りコマンドを巻き込むため）。解析できた入力のトークン列は
-    このフォールバックの影響を受けない。
+    こと自体では deny しない（読み取りコマンドを巻き込むため）。分割後は各トークンから
+    ``"`` と ``'`` の文字を取り除く（トークンの個数と位置は変えない。位置ベースの書き込み先
+    判定がそのまま効く）。解析できた入力のトークン列はこのフォールバックの影響を受けない。
 
     解析できたかを返すのは、生文字列への正規表現フォールバックを「解析できなかった
     ときだけ」に限定するため。解析できた入力にまで当てると ``echo "git commit"``
@@ -576,7 +583,8 @@ def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     try:
         return list(lexer), True
     except ValueError:
-        return _FALLBACK_OPERATOR_RE.sub(r" \1 ", normalized).split(), False
+        spaced = _FALLBACK_OPERATOR_RE.sub(r" \1 ", normalized).split()
+        return [_FALLBACK_QUOTE_CHARS_RE.sub("", token) for token in spaced], False
 
 
 def split_segments(tokens: list[str]) -> list[list[str]]:
