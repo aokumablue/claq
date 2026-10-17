@@ -23,6 +23,22 @@ from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
 from claq.hooks import stdin_io as stdin_io
 
 
+def _spy_commit_message_validation(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """`validate_commit_message` を「問題なし」(None) を返すスパイに替え、受け取ったコマンドの記録を返す。
+
+    コミットメッセージ検証を無関係な観点のテストから切り離すためのスタブ。None を返すだけだと、
+    パッチが外れても本物が None を返す場面では結果が変わらず、差し替えが `evaluate` の経路へ
+    届いたかを判別できない。呼び出しの記録を assert すれば、スタブが実際に検証段へ入ったことが固定される。
+    """
+    validated: list[str] = []
+
+    def _spy(command: str) -> None:
+        validated.append(command)
+
+    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", _spy)
+    return validated
+
+
 def _scan_deadline() -> float:
     """テストから `find_file_issues` へ渡す secret scan 予算 1 本分の deadline を作る。
 
@@ -490,7 +506,7 @@ def test_evaluate_shares_one_secret_scan_budget_across_staged_files(
     )
     staged = [f"src/app{index}.js" for index in range(1, 6)]
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: staged)
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+    validated = _spy_commit_message_validation(monkeypatch)
 
     result = pre_bash_commit_quality.evaluate("payload")
 
@@ -505,6 +521,7 @@ def test_evaluate_shares_one_secret_scan_budget_across_staged_files(
         if any(path in message and "SecretScanBudgetExceeded" in message for message in logs)
     ]
     assert exceeded == staged
+    assert validated == ["git commit -m 'feat(core): add'"]
 
 
 def test_evaluate_commit_dash_a_shares_secret_scan_budget_with_worktree_files(
@@ -537,7 +554,7 @@ def test_evaluate_commit_dash_a_shares_secret_scan_budget_with_worktree_files(
         pre_bash_commit_quality, "get_unstaged_modified_files", lambda: ["src/unstaged.js"]
     )
     monkeypatch.setattr(pre_bash_commit_quality, "resolve_repo_root", lambda: Path("/dummy/repo"))
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+    validated = _spy_commit_message_validation(monkeypatch)
 
     result = pre_bash_commit_quality.evaluate("payload")
 
@@ -547,6 +564,7 @@ def test_evaluate_commit_dash_a_shares_secret_scan_budget_with_worktree_files(
     assert any(
         "src/unstaged.js" in message and "SecretScanBudgetExceeded" in message for message in logs
     )
+    assert validated == ["git commit -am 'feat(core): add'"]
 
 
 def test_find_file_issues_secret_scan_exception_is_reported_as_error(
@@ -639,12 +657,13 @@ def test_evaluate_scans_non_lint_extension_files_for_secrets(monkeypatch: pytest
         return []
 
     monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", _fake_find_file_issues)
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+    validated = _spy_commit_message_validation(monkeypatch)
 
     assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
     # .env は secret スキャン対象なので走査される。package-lock.json は
     # lint 非対象・secret 対象外の双方であるため走査対象から除外される。
     assert seen == [".env"]
+    assert validated == ["git commit -m 'feat(core): add'"]
 
 
 def test_pre_bash_commit_quality_helpers_handle_subprocess_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -854,12 +873,13 @@ def test_pre_bash_commit_quality_blocks_on_error_and_allows_warnings(
         "find_file_issues",
         lambda path, *, repo_root=None, deadline: [{"severity": "error", "line": 1, "message": "boom"}],
     )
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+    validated = _spy_commit_message_validation(monkeypatch)
     assert pre_bash_commit_quality.evaluate("payload") == {
         "output": "payload",
         "exitCode": 2,
         "reason": "[Hook] BLOCKED: 1 error(s) found in staged files. Fix them before committing.",
     }
+    assert validated == ["git commit -m 'feat(core): add'"]
 
     warning_logs: list[str] = []
     monkeypatch.setattr(pre_bash_commit_quality, "log", warning_logs.append)
@@ -895,10 +915,11 @@ def test_pre_bash_commit_quality_counts_warning_and_info_issues(monkeypatch: pyt
             {"severity": "info", "line": 2, "message": "info"},
         ],
     )
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+    validated = _spy_commit_message_validation(monkeypatch)
 
     assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
     assert any("1 warning(s), 1 info" in message for message in logs)
+    assert validated == ["git commit -m 'feat(core): add'"]
 
 
 def test_pre_bash_commit_quality_evaluate_logs_and_recovers_from_parser_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -976,10 +997,11 @@ def test_pre_bash_commit_quality_helpers_and_pass_branch(monkeypatch: pytest.Mon
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: ["src/app.js"])
     monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
     monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None, deadline: [])
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+    validated = _spy_commit_message_validation(monkeypatch)
 
     assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
     assert any("PASS: All checks passed" in message for message in logs)
+    assert validated == ["git commit -m 'feat(core): add'"]
 
 
 def test_pre_bash_commit_quality_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1044,10 +1066,17 @@ def test_apply_commit_message_issues_without_suggestion(monkeypatch) -> None:
     """suggestion の無い issue でもカウントを加算する。"""
     import claq.hooks.pre_bash_commit_quality as pbcq
 
-    monkeypatch.setattr(pbcq, "log", lambda *a, **k: None)
-    monkeypatch.setattr(pbcq, "validate_commit_message", lambda cmd: {"issues": [{"message": "m"}]})
+    logged: list[str] = []
+    monkeypatch.setattr(pbcq, "log", logged.append)
+    # 番兵の issue。本物の validate_commit_message が同じ件数の issue を返しても区別できるよう、
+    # メッセージ文字列でスタブ経由であることを固定する。
+    monkeypatch.setattr(
+        pbcq, "validate_commit_message", lambda cmd: {"issues": [{"message": "SENTINEL-ISSUE"}]}
+    )
     total, warn = pbcq._apply_commit_message_issues("git commit -m x", 0, 0)
     assert (total, warn) == (1, 1)
+    assert "  WARNING SENTINEL-ISSUE" in logged
+    assert not any("TIP" in line for line in logged)
 
 
 # ─────────────────────────────────────────────
@@ -1384,10 +1413,11 @@ def test_evaluate_commit_dash_a_unions_unstaged_modified_files(monkeypatch: pyte
         return []
 
     monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", _fake_find_file_issues)
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+    validated = _spy_commit_message_validation(monkeypatch)
 
     assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
     assert dict(seen) == {"src/staged.py": None, "src/unstaged.py": dummy_repo_root}
+    assert validated == ["git commit -am 'feat(core): add'"]
 
 
 def test_evaluate_commit_dash_a_worktree_blocked_when_repo_root_unresolvable(
@@ -1420,7 +1450,6 @@ def test_evaluate_commit_dash_a_worktree_blocked_when_repo_root_unresolvable(
         return []
 
     monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", _fake_find_file_issues)
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
 
     result = pre_bash_commit_quality.evaluate("payload")
 
@@ -1448,9 +1477,10 @@ def test_evaluate_commit_without_dash_a_ignores_unstaged_modified_files(
     )
     monkeypatch.setattr(pre_bash_commit_quality, "should_lint_file", lambda path: True)
     monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None, deadline: [])
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+    validated = _spy_commit_message_validation(monkeypatch)
 
     assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+    assert validated == ["git commit -m 'feat(core): add'"]
 
 
 def _init_repo_with_initial_commit(repo: Path, initial_content: str) -> Path:

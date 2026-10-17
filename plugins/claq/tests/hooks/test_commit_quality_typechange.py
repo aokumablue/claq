@@ -53,9 +53,16 @@ def _evaluate(command: str, repo: Path, monkeypatch: pytest.MonkeyPatch) -> dict
         "parse_json_object",
         lambda raw: {"tool_input": {"command": command}},
     )
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", lambda command: None)
+    # コミットメッセージ検証はこのファイルの関心外なので「問題なし」(None) のスパイに替える。
+    # None を返すだけではパッチが外れても結果が変わらないため、検証段へ実際に入ったことを記録で固定する。
+    validated: list[str] = []
+    monkeypatch.setattr(
+        pre_bash_commit_quality, "validate_commit_message", lambda message_command: validated.append(message_command)
+    )
     try:
-        return pre_bash_commit_quality.evaluate("payload")
+        result = pre_bash_commit_quality.evaluate("payload")
+        assert validated == [command]
+        return result
     finally:
         resolve_repo_root.cache_clear()
 
