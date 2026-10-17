@@ -67,7 +67,7 @@ skill-name/
 
 詳細: `references/eval-workflow.md`
 
-1. スキルありとベースラインの 2 サブエージェントを同時に起動する
+1. スキルありとベースラインの 2 サブエージェントを `run_in_background: false` で同時に起動する（background だと結果待ちの応答で fork が終わるため）
 2. 定量的なアサーションを下書きする
 3. `timing.json` にすぐ保存する
 4. grading → ベンチマーク集約 → 分析 → viewer 表示
