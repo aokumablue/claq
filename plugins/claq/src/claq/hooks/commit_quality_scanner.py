@@ -400,13 +400,36 @@ def should_scan_secrets(file_path: str) -> bool:
     return not name.endswith(_MINIFIED_SUFFIXES)
 
 
+# 出力を 1 行に保つために畳む対象。許可リスト処理の後は行区切りが LF に揃っている。
+_LINE_BREAKS = re.compile(r"\n+")
+
+
+def _fold_line_breaks(text: str) -> str:
+    """連続する改行を空白 1 個へ畳み、deny 出力の 1 項目が 1 行に収まるようにする。
+
+    行区切りを残すと、抜粋やパスに続けて `[Hook] PASS` のような行を偽装できる。呼び出し側は
+    `keep_allowed_chars` を先に掛け、U+2028・NEL・CR などを LF に揃えておく。
+
+    Args:
+        text: 許可リスト処理済みの文字列。
+
+    Returns:
+        改行を含まない文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return _LINE_BREAKS.sub(" ", text)
+
+
 def _sanitize_untrusted_excerpt(text: str) -> str:
     """ファイル由来の抜粋を deny 出力へ載せる前に無害化する。
 
     抜粋は攻撃者が内容を選べるファイル本文で、deny 時に stderr 経由でモデルの
     コンテキストへ入る。許可した文字だけを `keep_allowed_chars` で残し（不可視文字で分断した
     タグを `strip_tags` が見られる形へ戻す）、囲いを偽装するタグ（``</claq-memory>`` など）を
-    `strip_tags` で倒し、長さにも上限を置く（`mem` の注入経路と同じ扱い）。
+    `strip_tags` で倒し、行区切りを空白 1 個へ畳み（偽の行を後ろに続けさせない）、長さにも上限を置く
+    （`mem` の注入経路と同じ扱い）。
 
     Args:
         text: ファイル本文から切り出した抜粋。
@@ -417,14 +440,10 @@ def _sanitize_untrusted_excerpt(text: str) -> str:
     Raises:
         例外は発生しません。
     """
-    sanitized = strip_tags(keep_allowed_chars(text.strip())).strip()
+    sanitized = _fold_line_breaks(strip_tags(keep_allowed_chars(text.strip()))).strip()
     if len(sanitized) > _UNTRUSTED_EXCERPT_MAX_CHARS:
         return sanitized[:_UNTRUSTED_EXCERPT_MAX_CHARS] + "…"
     return sanitized
-
-
-# `sanitize_untrusted_path` が 1 行へ畳む対象。許可リスト処理の後は行区切りが LF に揃っている。
-_PATH_LINE_BREAKS = re.compile(r"\n+")
 
 
 def sanitize_untrusted_path(path: str) -> str:
@@ -449,7 +468,7 @@ def sanitize_untrusted_path(path: str) -> str:
     Raises:
         例外は発生しません。
     """
-    return _PATH_LINE_BREAKS.sub(" ", strip_tags(keep_allowed_chars(path)))
+    return _fold_line_breaks(strip_tags(keep_allowed_chars(path)))
 
 
 def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:

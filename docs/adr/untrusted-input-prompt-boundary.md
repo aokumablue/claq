@@ -172,12 +172,11 @@ NFKC で `<` `/` `-` やタグ名になる文字で書かれた `claq-memory` �
   `sanitize_untrusted_path`（許可リスト → `strip_tags` → 行区切りを空白 1 個へ畳む）を通す。
   抜粋と違い長さの上限は置かず、通常のパスは変えない（前後の空白と `&lt;` のような実体参照の形は
   変わる）。読み取りに渡すパスは生のままにする。
-  - 残余として、`pre_bash_commit_quality` が問題のあるファイルごとに出す `[FILE] <path>` 行は
-    無害化していない。この行が残る間、スキャナ側の無害化は deny 出力に載る生パスの量を減らさない
-    （同じパスが 1 行上に生で出る）。
-  - 残余として、TODO/FIXME の抜粋（`_sanitize_untrusted_excerpt`）は行区切りを畳まない。
-    `content.split("\n")` は U+2028・NEL・単独 CR・VT・FF を行の中に残し、許可リストがそれらを LF に
-    揃えるため、抜粋が deny 出力で複数行になり、偽の行（`[Hook] PASS` など）を作れる。
-    タグは倒れるが行構造は倒れない。
+  - `pre_bash_commit_quality` が問題のあるファイルごとに出す `[FILE] <path>` 行も、同じ
+    `sanitize_untrusted_path` を通す。
+  - TODO/FIXME の抜粋（`_sanitize_untrusted_excerpt`）は、許可リスト → `strip_tags` の後に行区切りを
+    空白 1 個へ畳み（パスと同じ `_fold_line_breaks`）、長さの上限を置く。`content.split("\n")` は
+    U+2028・NEL・単独 CR・VT・FF を行の中に残し、許可リストがそれらを LF に揃えるため、畳まないと
+    抜粋が deny 出力で複数行になり、偽の行（`[Hook] PASS` など）を作れる。
 - 判定は実行系の `unicodedata` に依存する。実行系の Unicode 表より新しく割り当てられた文字は Cn
   として落ちる。
