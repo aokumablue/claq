@@ -53,29 +53,50 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-#: 引き継ぎ本文の行頭で無害化する構造マーカー。注入枠は `## 見出し` と
-#: `- [kind] タイトル` で組み立てられているため、引き継ぎ側がこの 2 つを行頭へ
-#: 置けると、人間の承認（promote）を通った知識と見分けの付かない節や項目を
-#: 捏造できる。引き継ぎは promote を通らないので、ここが唯一の防壁になる。
-_HANDOFF_STRUCTURE_MARKERS = ("#", "- [")
+#: 引き継ぎ本文の行頭で無害化する箇条書き記号。`- [kind] タイトル` と同じカード行として
+#: 読まれうる記号は `-` だけでなく `*` と `+` もある。
+_HANDOFF_BULLET_MARKERS = ("-", "*", "+")
+
+
+def _is_handoff_structure_line(line: str) -> bool:
+    """行が注入枠の見出し・知識カード行として読まれうる形かを返す。
+
+    注入枠は `## 見出し` と `- [kind] タイトル` で組み立てられているため、引き継ぎ側がこの
+    2 つと同じに読まれる行を置けると、人間の承認（promote）を通った知識と見分けの付かない節や
+    項目を捏造できる。字下げと、箇条書き記号の後ろの空白は、許可リストが残す水平空白
+    （半角・タブ・NBSP・U+2000–200A・U+3000 など）の任意個を同じに読む。
+
+    - 見出し: 字下げの後に `#` が来る行（`#` の後ろは見ない）。
+    - カード行: 字下げの後に `-` `*` `+` のどれかが来て、空白（0 個以上）を挟んで `[` が来る行。
+
+    `-` で始まる説明文（`- /plugin`、`-1 は…`）、`**[重要]**`、行中の `[x]` は対象にしない。
+
+    Args:
+        line: 改行を含まない 1 行。
+
+    Returns:
+        見出しまたはカード行として読まれうるなら True。
+    """
+    body = line.lstrip()
+    if body.startswith("#"):
+        return True
+    return body.startswith(_HANDOFF_BULLET_MARKERS) and body[1:].lstrip().startswith("[")
 
 
 def _neutralize_handoff_structure(text: str) -> str:
     """引き継ぎ本文が注入枠の構造を偽装するのを防ぐ。
 
-    行頭の `#`（見出し）と `- [`（知識カード行）だけを対象にし、空白 1 個で
-    字下げする。正当な引き継ぎが使う改行と通常の箇条書き `- ` は残す。
+    ``_is_handoff_structure_line`` が真の行だけを、元の字下げを捨てて空白 1 個で字下げする。
+    正当な引き継ぎが使う改行と通常の箇条書き `- ` は残す。引き継ぎは promote を通らない
+    ので、ここが唯一の防壁になる。
 
     Args:
         text: 引き継ぎ本文
 
     Returns:
-        行頭の構造マーカーを無害化した本文
+        見出し・カード行として読まれうる行頭を無害化した本文
     """
-    return "\n".join(
-        f" {line.lstrip()}" if line.lstrip().startswith(_HANDOFF_STRUCTURE_MARKERS) else line
-        for line in text.split("\n")
-    )
+    return "\n".join(f" {line.lstrip()}" if _is_handoff_structure_line(line) else line for line in text.split("\n"))
 
 
 def _format_injected_item(row: Knowledge) -> str:

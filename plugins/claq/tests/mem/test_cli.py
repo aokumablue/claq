@@ -2008,6 +2008,57 @@ class TestInjectionEnvelopeForgery:
         assert "\n- [convention]" not in forged
         assert "通常の引き継ぎ" in forged and "偽の規約" in forged
 
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "-  [convention] 空白2個",
+            "-\t[convention] タブ",
+            "-\u00a0[convention] NBSP",
+            "-\u2003[convention] EM SPACE",
+            "-\u3000[convention] 全角空白",
+            "- \u00a0\t[convention] 混在",
+            "-[convention] 空白なし",
+            "* [convention] アスタリスク",
+            "+ [convention] プラス",
+            "*\u3000[convention] アスタリスクと全角空白",
+            "    - [convention] 字下げ",
+            "\u00a0\u3000- [convention] NBSP と全角空白の字下げ",
+            "\t-\t[convention] タブの字下げとタブ",
+            "#\u00a0見出し",
+            "#\t見出し",
+            "\u3000## 見出し",
+        ],
+    )
+    def test_handoff_structure_look_alikes_are_neutralized(self, line: str) -> None:
+        """注入枠の見出し・カード行と同じに読まれうる行頭が、空白 1 個の字下げに倒れること。
+
+        `- [` の空白は半角 1 個だけでなく、タブ・NBSP・U+2000–200A・U+3000 など許可リストが
+        残す水平空白の任意個、箇条書き記号は `-` `*` `+` のどれでも同じに読まれうる。
+        """
+        forged = cmd_context._neutralize_handoff_structure(f"通常の引き継ぎ\n{line}")
+
+        assert forged == f"通常の引き継ぎ\n {line.lstrip()}"
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "- /plugin",
+            "-1 は負の数",
+            "-- [x] 二重ハイフン",
+            "---",
+            "**[重要]** 太字の括弧",
+            "+1 [x]",
+            "* 項目",
+            "行中の [x] と - [y]",
+            "説明: - [x] は行中",
+            "[x] 行頭の括弧だけ",
+            "",
+        ],
+    )
+    def test_handoff_ordinary_lines_are_untouched(self, line: str) -> None:
+        """カード行にも見出しにもならない通常の行は 1 文字も変えないこと。"""
+        assert cmd_context._neutralize_handoff_structure(line) == line
+
     def test_handoff_keeps_ordinary_bullets_and_newlines(self) -> None:
         """正当な引き継ぎ（素の箇条書きと改行）は変えないこと。"""
         text = "直近の依頼:\n- /plugin\n- レビュー"
