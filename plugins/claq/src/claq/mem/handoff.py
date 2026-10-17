@@ -35,7 +35,7 @@ from claq.lib.slim_text import compact_line
 from claq.mem.logger import get as _get_logger
 from claq.mem.redaction import redact
 from claq.mem.settings import CONTEXT_HANDOFF_CHAR_BUDGET
-from claq.mem.tag_stripping import strip_control_chars, strip_tags
+from claq.mem.tag_stripping import keep_allowed_chars, strip_tags
 
 log = _get_logger("HANDOFF")
 
@@ -112,7 +112,7 @@ _MAX_TRANSCRIPT_LINE_CHARS = 1_000_000
 def _sanitize_freeform(text: str) -> str:
     """自由文（明示 handoff・ユーザー発話）を引き継ぎへ載せる前に無害化する。
 
-    順序は ``strip_control_chars`` → ``normalize_user_message`` → ``strip_tags`` →
+    順序は ``keep_allowed_chars`` → ``normalize_user_message`` → ``strip_tags`` →
     ``redact`` で固定する。
     この 4 段は互いに順序依存があり、経路ごとに書き直すと片側だけずれる。
     たとえば ``strip_tags(redact(...))`` の順にすると、タグで分断された秘密
@@ -121,10 +121,11 @@ def _sanitize_freeform(text: str) -> str:
     永続化されて以後の全 SessionStart へ注入される。そのため合成そのものを
     1 箇所に閉じる。
 
-    - ``strip_control_chars`` が最初: 制御文字で分断した秘密・タグ（``sk-ant-…\\x00…``、
-      ``</claq\\x00-memory>``）は、除去で 1 本へ戻して初めて後続の 3 段が見える。除去を
-      後ろに置くと、除去が再結合した形はどの段も見ずに ``sessions.handoff`` へ永続化される。
-      タブと改行は残す（引き継ぎ本文が使う）。
+    - ``keep_allowed_chars`` が最初: 制御文字・不可視文字で分断した秘密・タグ
+      （``sk-ant-…\\x00…``、``</claq\\u200b-memory>``）は、除去で 1 本へ戻して初めて後続の
+      3 段が見える。除去を後ろに置くと、除去が再結合した形はどの段も見ずに
+      ``sessions.handoff`` へ永続化される。タブと改行は残し、CR・NEL・LS・PS は LF に揃う
+      （引き継ぎ本文が使う）。
     - ``normalize_user_message`` が次: docs/adr/untrusted-input-prompt-boundary.md の足場除去は生の足場タグを
       前提にしており、他の処理が先に走ると足場の形が崩れて検出できない。
     - ``strip_tags`` が ``redact`` より先: タグで分断された秘密は、タグを
@@ -146,7 +147,7 @@ def _sanitize_freeform(text: str) -> str:
         足場しか含まれない、細工が検出された、またはタグで分断された秘密が
         見つかった場合は空文字列。
     """
-    stripped = strip_tags(normalize_user_message(strip_control_chars(text)))
+    stripped = strip_tags(normalize_user_message(keep_allowed_chars(text)))
     if stripped == _REDACTION_MARKER:
         log.warning("タグで分断されたシークレットを検出しました: 引き継ぎ本文を破棄します")
         return ""
@@ -197,7 +198,7 @@ def _sanitize_structured(value: str) -> str:
     Returns:
         タグ・制御文字・改行・過剰な長さを落とした値。無害化の結果が空なら空文字列。
     """
-    cleaned = strip_tags(normalize_user_message(strip_control_chars(value)))
+    cleaned = strip_tags(normalize_user_message(keep_allowed_chars(value)))
     return " ".join(cleaned.split())[:_STRUCTURED_VALUE_LIMIT]
 
 

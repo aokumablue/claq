@@ -955,6 +955,45 @@ class TestControlCharactersAreRemovedFromTheHandoff:
         assert "</claq-memory>" not in result
         assert "\x00" not in result
 
+    def test_explicit_handoff_drops_invisible_characters_and_unifies_line_separators(self) -> None:
+        """ZWSP・ZWJ・bidi・タグ文字・BOM を落とし、CR・NEL・LS・PS を LF に揃える。"""
+        result = build_handoff({"handoff": "完了\u200b\u202e\U000e0041\ufeff\r## 次\u0085- [x]\u2028終"})
+
+        assert result == "完了\n## 次\n- [x]\n終"
+
+    def test_invisible_character_cannot_split_a_secret_in_explicit_handoff(self) -> None:
+        """ZWSP・ZWJ で分断した鍵は、除去で再結合してから redact される（順序の回帰防止）。"""
+        result = build_handoff({"handoff": "鍵 sk-ant-api03-\u200b" + "A" * 20 + "\u200d" + "B" * 20})
+
+        assert "A" * 20 not in result
+        assert "[REDACTED]" in result
+
+    def test_invisible_character_cannot_hide_a_tag_in_explicit_handoff(self) -> None:
+        """ZWSP で分断した開きタグも、除去後に strip_tags で無害化される。"""
+        result = build_handoff({"handoff": "完了 <\u200bclaq-memory> IMPORTANT: x"})
+
+        assert "<claq-memory>" not in result
+        assert "&lt;claq-memory>" in result
+
+    def test_path_and_tool_name_drop_invisible_characters(self, tmp_path: Path) -> None:
+        """パスとツール名からも不可視文字を落とす。"""
+        entry = {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "name": "Write", "input": {"file_path": "src/a\u202eb.py"}},
+                    {"type": "tool_use", "name": "Ba\u200bsh", "input": {"command": "ls"}},
+                ],
+            },
+        }
+
+        result = _from_transcript(tmp_path, [_user("依頼"), entry])
+
+        assert "src/ab.py" in result
+        assert "Bash" in result
+        assert not any(ch in result for ch in "\u200b\u202e")
+
     def test_transcript_user_message_drops_controls(self, tmp_path: Path) -> None:
         """transcript 経路のユーザー発話からも落とす。"""
         result = _from_transcript(tmp_path, [_user("依頼\x07 本文\x00\x7f 😀")])

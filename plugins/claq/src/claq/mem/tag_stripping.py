@@ -68,11 +68,24 @@ docs/adr/untrusted-input-prompt-boundary.md が「中身を残すべき用途と
 合流に当たらない — escape はどちらの用途でも中身を残すのでこの衝突が起きない。実際に
 注入側（``mem/cmd_context._handoff_section``）は ``strip_tags`` しか掛けず、足場タグを倒す
 手段が他に無い。
+
+文字の許可リストと全角山括弧
+    ``strip_tags`` の前段として、注入経路は ``keep_allowed_chars`` で**許可した文字だけ**を
+    残す。禁止リストは未知の不可視文字（ゼロ幅・bidi・タグ文字）を通すため採らない。
+    ``strip_tags`` は ``<`` を ``&lt;`` にする際、NFKC で ``<`` ``/`` になる文字
+    （``＜`` ``／`` 等）で書かれた ``claq-memory`` タグの開き山括弧も同じ形で倒す。
+    NFKC は検出だけに使い、本文は書き換えない。
+
+    許可リストの中にも、ASCII の間へ挟んでタグ名や鍵を分断できる不可視の文字が残る。
+    CGJ・ハングル filler・点字空白は常に落とし、異体字セレクタは直前が ASCII のときだけ
+    落とす（絵文字の表示選択子・人名の IVS・keycap は残す）。視認できる結合記号は分断として
+    見えるため残す。この判定は ``keep_allowed_chars`` の 1 箇所に閉じる。
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS
 from claq.lib.slim_text import remove_filler_phrases
@@ -195,8 +208,94 @@ _REDACTION_MARKER = "[REDACTED]"
 # 3 行以上の空行を 2 行へ詰めるパターン。
 _BLANK_LINES = re.compile(r"\n{3,}")
 
-_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-"""除去対象の制御文字: C0 制御文字のうちタブ・LF・CR 以外と DEL。"""
+_LT_LIKE = frozenset({"<", "\ufe64", "\uff1c"})
+"""NFKC で ``<`` 1 文字になる文字（ASCII の ``<``、小書き ``﹤``、全角 ``＜``）。
+
+Unicode の更新で増えても検出漏れにならないよう、全コードポイントの走査から導いた集合と
+テストで突き合わせる（import 時に全走査すると SessionStart の遅延になる）。
+"""
+
+_CLAQ_MEMORY_OPEN = re.compile(r"<(?=/?claq-memory)", re.IGNORECASE)
+"""NFKC 後の本文で ``claq-memory`` タグの開き山括弧を捉える（``_NEUTRALIZE_PATTERN`` と同形）。"""
+
+_LINE_BREAKS = frozenset("\r\x0b\x0c\x85\u2028\u2029")
+"""LF に揃える行区切り: CR・VT・FF・NEL・LS・PS（CRLF は先に LF 1 つへ畳む）。"""
+
+_KEPT_CATEGORIES = frozenset({"Zs"})
+"""一般カテゴリのうち、頭文字では括れない残す分類。L*・M*・N*・P*・S* は頭文字で判定する。"""
+
+_KEPT_CATEGORY_INITIALS = frozenset("LMNPS")
+"""残す一般カテゴリの頭文字（文字・結合記号・数字・句読点・記号）。"""
+
+_ALWAYS_DROPPED = frozenset("\u034f\u115f\u1160\u3164\uffa0\u2800")
+"""許可カテゴリに属するが、文脈を問わず落とす不可視文字。
+
+CGJ（U+034F）・ハングル filler（U+115F・U+1160・U+3164・U+FFA0）・点字空白（U+2800）。
+何も表示しないため ASCII の間や行頭へ挟んでタグ名・鍵・行頭マーカーを分断でき、
+日本語の本文には現れない。
+"""
+
+_VARIATION_SELECTORS = "\ufe00-\ufe0f\U000e0100-\U000e01ef"
+"""異体字セレクタ（U+FE00–FE0F、U+E0100–E01EF）。正規表現の文字クラスの中身。"""
+
+_KEYCAP = r"[0-9#*]\ufe0f?\u20e3"
+"""keycap 絵文字の並び（``1️⃣``）。異体字セレクタの除去から丸ごと除く。"""
+
+_SELECTOR_AFTER_ASCII = re.compile(rf"({_KEYCAP})|(?<![^\x00-\x7f])[{_VARIATION_SELECTORS}]+")
+"""ASCII（または文頭）の直後に続く異体字セレクタの連なりと、除外する keycap の並び。
+
+ASCII に付いた異体字セレクタは何も修飾せず、ASCII の間へ挟んでタグ名や鍵を分断する足場に
+なる。ASCII に付かないもの（絵文字の表示選択子 ``❤️``、人名の異体字 IVS ``葛󠄀``）は
+文字の見え方を決めるので残す。視認できる結合記号（分音記号・濁点・母音記号）は分断として
+見えるので、ASCII に付いていても対象にしない。
+"""
+
+_MAX_CACHED_CODEPOINTS = 65536
+"""判定結果を覚えるコードポイント数の上限。入力に全 Unicode が並んでも表が肥大しない。"""
+
+
+class _AllowlistTable(dict):
+    """``str.translate`` に渡す許可リストの判定表。コードポイントごとの判定を覚える。
+
+    値が文字なら残す（行区切りは ``\\n``）、``None`` なら落とす。``str.translate`` は
+    表に無い文字で ``__missing__`` を呼ぶため、初見の文字だけ Python で判定し、
+    以後は C の辞書引きで済む（1MB の日本語でも速い）。
+    """
+
+    def __init__(self, max_entries: int = _MAX_CACHED_CODEPOINTS) -> None:
+        """判定表を作る。
+
+        Args:
+            max_entries: 判定結果を覚える件数の上限。超えた文字は覚えずに毎回判定する。
+        """
+        super().__init__()
+        self._max_entries = max_entries
+
+    def __missing__(self, codepoint: int) -> str | None:
+        """未判定のコードポイントを許可リストで判定する。
+
+        Args:
+            codepoint: 判定する文字のコードポイント。
+
+        Returns:
+            残す文字（行区切りは ``\\n``）。落とすなら ``None``。
+        """
+        ch = chr(codepoint)
+        category = unicodedata.category(ch)
+        if ch in _LINE_BREAKS:
+            verdict: str | None = "\n"
+        elif ch in _ALWAYS_DROPPED:
+            verdict = None
+        elif ch in "\t\n" or category[0] in _KEPT_CATEGORY_INITIALS or category in _KEPT_CATEGORIES:
+            verdict = ch
+        else:
+            verdict = None
+        if len(self) < self._max_entries:
+            self[codepoint] = verdict
+        return verdict
+
+
+_ALLOWLIST_TABLE = _AllowlistTable()
 
 
 def drop_known_tag_blocks(text: str) -> str:
@@ -244,24 +343,84 @@ def _collapse_blank_lines(text: str) -> str:
     return _BLANK_LINES.sub("\n\n", text).strip()
 
 
+def _compat_open_positions(text: str) -> list[int]:
+    """NFKC で ``claq-memory`` タグになる並びの、開き山括弧の位置を返す。
+
+    注入枠を閉じるのは字面どおりの ``</claq-memory>`` だけだが、``＜/claq-memory＞`` や
+    ``<／claq-memory>`` のように ``<`` ``/`` ``-`` やタグ名を互換文字で書いた表記は、
+    LLM が同等に読みうる。NFKC は**検出のためだけ**に使い、本文は書き換えない。
+
+    NFKC は文字列長を変える（``㍿`` → ``株式会社``）ため、1 文字ずつ正規化して元の位置を
+    持ち回る。タグ名を含まない本文（大多数）は、全体を 1 回正規化して名前の有無を見るだけで
+    返る。この入口の判定は NFKD で行う（NFKC は末尾の結合記号を直前の文字へ合成して
+    ``y`` + U+0301 → ``ý`` とし、1 文字ずつ正規化する本走査と食い違って検出漏れになる）。
+    ASCII のみの本文は NFKC で変わらないので走査しない（``_NEUTRALIZE_PATTERN`` が担う）。
+
+    Args:
+        text: 検査対象のテキスト（生の ``<`` でも escape 済みでもよい）。
+
+    Returns:
+        開き山括弧にあたる元の文字の位置（昇順）。元の文字が NFKC で ``<`` 1 文字になる場合に
+        限る。
+    """
+    if text.isascii() or "claq-memory" not in unicodedata.normalize("NFKD", text).lower():
+        return []
+    normalized: list[str] = []
+    owners: list[int] = []
+    for index, ch in enumerate(text):
+        folded = unicodedata.normalize("NFKC", ch)
+        normalized.append(folded)
+        owners.extend([index] * len(folded))
+    return sorted(
+        {
+            owners[match.start()]
+            for match in _CLAQ_MEMORY_OPEN.finditer("".join(normalized))
+            if text[owners[match.start()]] in _LT_LIKE
+        }
+    )
+
+
+def _escape_compat_brackets(text: str) -> str:
+    """互換文字で書かれた ``claq-memory`` タグの開き山括弧を ``&lt;`` にする。
+
+    ``claq-memory`` を書いていない全角記号（``＜重要＞``）は一切変えない。文字を消さず
+    置換するだけなので、前後の文字が接着して新しいタグを作ることはない。
+
+    Args:
+        text: 無害化途中のテキスト。
+
+    Returns:
+        該当する開き山括弧を ``&lt;`` にしたテキスト。
+    """
+    positions = _compat_open_positions(text)
+    if not positions:
+        return text
+    chars = list(text)
+    for position in positions:
+        chars[position] = _NEUTRALIZED_LT
+    return "".join(chars)
+
+
 def _neutralize(text: str) -> str:
-    """実体参照の ``&`` とタグの ``<`` を、この順で倒す。
+    """実体参照の ``&`` とタグの ``<`` を、この順で倒し、互換文字の開き山括弧も倒す。
 
     順序は入れ替えられない。``<`` を先に倒すと自分で書いた ``&lt;`` の ``&`` を
-    次の段が ``&amp;lt;`` へ二重エスケープしてしまう。
+    次の段が ``&amp;lt;`` へ二重エスケープしてしまう。互換文字の開き山括弧は、
+    書き込む ``&lt;`` を ``&`` の段が再エスケープしないよう、最後に倒す。
 
     Args:
         text: 無害化前のテキスト。
 
     Returns:
         既知タグ名の直前に生の ``<`` を持たず、``<`` を表す実体参照も倒した
-        テキスト。
+        テキスト。``claq-memory`` を互換文字で書いた開き山括弧も倒してある。
     """
-    return _NEUTRALIZE_PATTERN.sub(_NEUTRALIZED_LT, _ENTITY_LT_PATTERN.sub(_NEUTRALIZED_AMP, text))
+    escaped = _NEUTRALIZE_PATTERN.sub(_NEUTRALIZED_LT, _ENTITY_LT_PATTERN.sub(_NEUTRALIZED_AMP, text))
+    return _escape_compat_brackets(escaped)
 
 
 def _neutralization_targets(text: str) -> int:
-    """無害化対象（倒すべき ``&`` と ``<``）の個数を数える。
+    """無害化対象（倒すべき ``&`` と ``<``、互換文字の開き山括弧）の個数を数える。
 
     削除変換がタグを組み上げ直していないかの判定に使う。埋め草表現は
     非 ASCII なのでタグ名や実体参照の一部にはならず、削除は対象を**増やす**
@@ -272,9 +431,10 @@ def _neutralization_targets(text: str) -> int:
         text: 判定対象のテキスト。
 
     Returns:
-        両パターンの一致数の合計。
+        実体参照・ASCII の ``<``・互換文字の開き山括弧の位置の数の合計。
     """
-    return len(_ENTITY_LT_PATTERN.findall(text)) + len(_NEUTRALIZE_PATTERN.findall(text))
+    ascii_targets = {match.start() for match in _NEUTRALIZE_PATTERN.finditer(text)}
+    return len(_ENTITY_LT_PATTERN.findall(text)) + len(ascii_targets | set(_compat_open_positions(text)))
 
 
 def _erase_known_tags(text: str) -> str:
@@ -349,25 +509,88 @@ def _forges_tag_after_deletion(text: str) -> bool:
     return _neutralization_targets(deleted) > _neutralization_targets(text)
 
 
-def strip_control_chars(text: str) -> str:
-    """C0 制御文字（タブと改行を除く）と DEL を取り除く。
+def _escape_every_bracket(text: str) -> str:
+    """``&`` と、``<`` と見なせる文字（ASCII・全角・小書き）を 1 つ残らず倒す。
 
-    ESC・BEL・NUL は注入文の表示と後段の文字列処理（NUL 終端等）を壊す。注入経路
-    （handoff 節・知識カード・detach 失敗通知）は同じ信頼境界にあるため、除去を
-    この 1 関数に閉じる。タブ・LF・CR は正当な引き継ぎと本文が使うので残す
-    （1 行へ畳むかどうかは呼び出し側の責務）。
-
-    呼び出し側は **``normalize_user_message`` / ``strip_tags`` / ``redact`` より前**
-    に呼ぶ。後ろに置くと、制御文字で分断した ``sk-ant-…`` や ``</claq-memory>``
-    が除去で 1 本へ再結合し、どの無害化も見ていない形で注入される。
+    削除変換がタグを組み上げ直せると分かった本文に使う。倒した後は削除で ``<`` も
+    ``&lt;`` も作れない。互換文字の山括弧も全て倒すのは、``＜まあ/claq-memory＞`` の
+    ように削除で初めて ``claq-memory`` タグになる並びを、先に壊しておくため。文字は消さない。
 
     Args:
         text: 無害化前のテキスト。
 
     Returns:
-        制御文字を含まないテキスト。タブ・LF・CR とそれ以外の文字は変えない。
+        ``&`` と全ての ``<`` 相当の文字を実体参照にしたテキスト。
     """
-    return _CONTROL_CHARS.sub("", text)
+    escaped = text.replace("&", _NEUTRALIZED_AMP)
+    for bracket in _LT_LIKE:
+        escaped = escaped.replace(bracket, _NEUTRALIZED_LT)
+    return escaped
+
+
+def keep_allowed_chars(text: str) -> str:
+    """許可した文字だけを残し、行区切りを LF に揃える。
+
+    許可するのは Unicode 一般カテゴリの L*（文字）・M*（結合記号。結合濁点・母音記号・
+    ASCII に付かない異体字セレクタを落とさない）・N*（数字）・P*（句読点）・S*（記号）・Zs（空白）と、
+    タブ・LF。Cf（ZWSP・ZWJ・ZWNJ・bidi・タグ文字・BOM・ソフトハイフン）・Cc（C0・DEL・C1）・
+    Co・Cn・Cs・Zl・Zp は落とす。不可視文字は鍵やタグを分断して ``redact`` / ``strip_tags``
+    をすり抜ける足場になるうえ、タグ文字（U+E0000–E007F）は不可視の ASCII を混ぜられる。
+    ZWJ 絵文字（👨‍👩‍👧）は ZWJ だけが落ち、構成要素の絵文字は残る。
+
+    許可カテゴリのうち、何も表示せず ASCII の間へ挟んでタグ名や鍵を分断できる文字も落とす。
+    文脈を問わず落とすのは CGJ（U+034F）・ハングル filler（U+115F・U+1160・U+3164・U+FFA0）・
+    点字空白（U+2800）。異体字セレクタ（U+FE00–FE0F・U+E0100–E01EF）は、**除去後の並びで**直前が
+    ASCII（文頭を含む）のときだけ落とす。``❤️``（FE0F）と ``葛󠄀``（IVS）は直前が非 ASCII なので
+    残り、keycap（``[0-9#*]`` + FE0F? + U+20E3）は丸ごと残す。視認できる結合記号（U+0301・濁点・
+    母音記号）は分断として見えるため対象にしない。
+
+    行区切り（CRLF・CR・NEL・LS・PS・VT・FF）は先に LF へ揃える。``\\n`` 分割しかしない
+    後段（handoff の行頭マーカー判定）が、CR や NEL の後ろの行を見落とさないため。
+
+    **NFKC は本文の書き換えに使わない。** 全角の括弧・英数字が半角に変わり、既存カードの
+    表示が変わるため。
+
+    注入経路（handoff 節・知識カード・detach 失敗通知・learn の書き込み）は同じ信頼境界に
+    あるため、除去をこの 1 関数に閉じる。呼び出し側は **``normalize_user_message`` /
+    ``strip_tags`` / ``redact`` より前** に呼ぶ。後ろに置くと、不可視文字で分断した
+    ``sk-ant-…`` や ``</claq-memory>`` が除去で 1 本へ再結合し、どの無害化も見ていない形で
+    注入される。
+
+    Args:
+        text: 無害化前のテキスト。
+
+    Returns:
+        許可した文字だけからなるテキスト。行区切りは LF のみ。
+    """
+    allowed = text.replace("\r\n", "\n").translate(_ALLOWLIST_TABLE)
+    return _SELECTOR_AFTER_ASCII.sub(lambda match: match.group(1) or "", allowed)
+
+
+def keep_allowed_chars_for_injection(text: str) -> str:
+    """注入の読み出し側で許可した文字だけを残し、再結合した鍵を伏せる。
+
+    読み出し側は ``redact`` を掛けない（書き込み時に伏せた前提）。しかし DB へ直接書かれた行や
+    書き込み時の ``redact`` を通っていない行には、ZWSP 等で分断された鍵が残りうる。分断されている
+    間は ``redact`` に一致せず、除去が 1 本へ戻した瞬間に鍵が平文で注入される。そこで
+    ``keep_allowed_chars`` と ``redact`` が**可換か**を調べ（``_hides_secret_behind_tags`` と
+    同じ考え方）、可換でなければ除去後の本文を ``redact`` して返す。
+
+    除く文字が無ければ ``redact`` を走らせない。通常のカードは出力が変わらず、
+    ``redact`` の base64 検出が長い文字列を伏せることもない。
+
+    Args:
+        text: DB から読んだ無害化前のテキスト。
+
+    Returns:
+        許可した文字だけからなるテキスト。除去で鍵が再結合する場合は鍵を ``[REDACTED]`` にしたもの。
+    """
+    cleaned = keep_allowed_chars(text)
+    if cleaned == text:
+        return cleaned
+    if keep_allowed_chars(redact(text)) == redact(cleaned):
+        return cleaned
+    return redact(cleaned)
 
 
 def strip_tags(text: str) -> str:
@@ -407,5 +630,5 @@ def strip_tags(text: str) -> str:
     if _hides_secret_behind_tags(neutralized):
         return _REDACTION_MARKER
     if _forges_tag_after_deletion(neutralized):
-        return _collapse_blank_lines(dropped.replace("&", _NEUTRALIZED_AMP).replace("<", _NEUTRALIZED_LT))
+        return _collapse_blank_lines(_escape_every_bracket(dropped))
     return neutralized

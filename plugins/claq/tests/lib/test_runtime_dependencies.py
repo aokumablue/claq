@@ -77,6 +77,7 @@ ALLOWED_TOP_LEVEL_MODULES = frozenset({
     "tomllib",
     "types",
     "typing",
+    "unicodedata",
     "warnings",
 })
 

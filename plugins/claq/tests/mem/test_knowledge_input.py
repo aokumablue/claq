@@ -548,6 +548,51 @@ def test_control_chars_are_stripped_before_redaction() -> None:
     assert "\n" in draft.body
 
 
+def test_invisible_characters_cannot_split_a_secret_before_redaction() -> None:
+    """ZWSP・ZWJ・bidi・タグ文字で分断した鍵も、除去で 1 本に戻してから redact されて保存されない。"""
+    key = "sk-ant-" + "abcdefghijklmnopqrstuvwxyz0123456789"
+    split = key[:8] + "\u200b" + key[8:14] + "\u200d" + key[14:20] + "\u202e" + key[20:26] + "\U000e0041" + key[26:]
+    draft = parse_knowledge_payload(
+        {
+            "title": f"t {split}",
+            "body": f"b {split}\nline2",
+            "domain": split,
+            "source_ref": split,
+            "key": split,
+            "kind": "pitfall",
+        }
+    )
+    for field in (draft.key, draft.title, draft.body, draft.domain or "", draft.source_ref or ""):
+        assert "sk-ant-" not in field
+        assert not any(ch in field for ch in "\u200b\u200d\u202e\U000e0041")
+    assert "[REDACTED]" in draft.body
+    assert "\n" in draft.body
+
+
+def test_filler_characters_cannot_split_a_secret_before_redaction() -> None:
+    """CGJ・異体字セレクタ・IVS・ハングル filler・点字空白で分断した鍵も、保存前に redact される。"""
+    key = "sk-ant-" + "abcdefghijklmnopqrstuvwxyz0123456789"
+    split = key[:8] + "\u034f" + key[8:12] + "\ufe0f" + key[12:16] + "\U000e0100" + key[16:20] + "\u3164" + key[20:24] + "\u2800" + key[24:]
+    draft = parse_knowledge_payload({"title": f"t {split}", "body": f"b {split}", "kind": "pitfall"})
+    for field in (draft.title, draft.body):
+        assert "sk-ant-" not in field
+        assert "[REDACTED]" in field
+        assert not any(ch in field for ch in "\u034f\ufe0f\U000e0100\u3164\u2800")
+
+
+def test_body_line_separators_are_normalized_to_lf() -> None:
+    """body の CRLF・CR・NEL・LS・PS は LF に揃って保存される。"""
+    draft = parse_knowledge_payload({"title": "t", "kind": "pitfall", "body": "a\r\nb\rc\u0085d\u2028e\u2029f"})
+    assert draft.body == "a\nb\nc\nd\ne\nf"
+
+
+def test_ordinary_text_is_kept_in_every_field() -> None:
+    """日本語・全角・結合濁点・デーヴァナーガリー・異体字セレクタ付き絵文字は保存でも変わらない。"""
+    text = "日本語（全角）ＡＢＣ か\u3099 हिन्दी ❤\ufe0f"
+    draft = parse_knowledge_payload({"title": text, "kind": "pitfall", "body": text, "domain": text, "source_ref": text})
+    assert (draft.title, draft.body, draft.domain, draft.source_ref) == (text, text, text, text)
+
+
 def test_control_only_optional_fields_become_none() -> None:
     """除去後に空になる domain / source_ref は None になる。"""
     draft = parse_knowledge_payload({"title": "t", "kind": "pitfall", "domain": "\x00\x1b", "source_ref": "\x07"})
