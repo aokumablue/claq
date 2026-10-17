@@ -113,6 +113,11 @@ _BYPASS_COMMANDS = [
     "GIT_CONFIG_SYSTEM=/tmp/cfg git commit -m x",
     "GIT_CONFIG_NOSYSTEM=1 git commit -m x",
     "env GIT_CONFIG_GLOBAL=/tmp/cfg git commit -m x",
+    # git は global 設定を $HOME/.gitconfig と $XDG_CONFIG_HOME/git/config から読むため、
+    # 前置代入でホームを差し替えると保護対象外のパスの設定が効く。GIT_CONFIG_GLOBAL と同種。
+    "HOME=/tmp/h git commit -m x",
+    "XDG_CONFIG_HOME=/tmp/h git commit -m x",
+    "HOME=/tmp/h git status",
     # include.path / includeIf.* は任意 config を取り込める。
     "git -c include.path=/tmp/evil commit -m x",
     "git -c includeIf.gitdir:/x/.path=/tmp/evil commit -m x",
@@ -168,6 +173,10 @@ _ALLOWED_COMMANDS = [
     # literal 環境変数プレフィックスがあっても core.hooksPath と無関係なら allow。
     "FOO=bar git commit -m x",
     "env FOO git commit -m x",
+    # HOME の代入は git 起動に前置されたときだけ対象。git を呼ばない前置・別セグメントは allow。
+    "HOME=/tmp/h ls",
+    "HOME=/tmp/h; git status",
+    "XDG_CONFIG_HOME=/tmp/h ls",
     "env GIT_CONFIG_KEY_0=user.name git commit -m x",
     # `git config` の read-only 操作・無関係キーは allow。
     "git config --get core.hooksPath",

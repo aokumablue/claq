@@ -1098,6 +1098,8 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "GIT_CONFIG_NOSYSTEM",
             "GIT_CONFIG_PARAMETERS",
             "GIT_CONFIG_SYSTEM",
+            "HOME",
+            "XDG_CONFIG_HOME",
         }
     ),
     # ラッパ名とそのオプションの語彙は持たない。列挙して読み飛ばす設計は、列挙が
@@ -1775,6 +1777,12 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
         "nohup env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
         "timeout 5 env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
         "env -v GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp git commit -m x",
+        "HOME=/tmp/h git commit -m x",
+        "env HOME=/tmp/h git commit -m x",
+        "env -i HOME=/tmp/h git commit -m x",
+        "/usr/bin/env HOME=/tmp/h git commit -m x",
+        "env -C /tmp XDG_CONFIG_HOME=/tmp/h git commit -m x",
+        "sudo -E HOME=/tmp/h git commit -m x",
     ],
 )
 def test_env_injection_is_denied_through_any_wrapper(
@@ -1785,6 +1793,24 @@ def test_env_injection_is_denied_through_any_wrapper(
     ラッパ名とそのオプションを列挙して読み飛ばす設計では、列挙に無い形
     （下の 5 形）で走査が途中で止まって素通りする。前置トークンを全部走査する
     形の回帰防止。
+    """
+    assert _run("block_no_verify", _bash(command), monkeypatch) == 2
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "HOME=/tmp/h grep -rn git .",
+        "GIT_CONFIG_GLOBAL=/tmp/e grep -rn git .",
+    ],
+)
+def test_env_assignment_before_non_git_command_naming_git_is_denied(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """git 以外のコマンドの引数に `git` があるだけでも前置代入は deny される（受容済みの誤検出）。
+
+    git 起動の判定はトークンの basename が `git` であることだけを見るため、`grep -rn git .` の
+    引数 `git` も git 起動として数える。回避は代入を外すか別セグメントに分けること。
     """
     assert _run("block_no_verify", _bash(command), monkeypatch) == 2
 

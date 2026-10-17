@@ -63,6 +63,8 @@ config 経由のフック無効化（config key は大小文字を区別せず�
     - 同じ経路で ``alias.*`` を定義し、展開先に ``--no-verify`` を隠す
     - ``GIT_CONFIG_PARAMETERS`` / ``GIT_CONFIG_GLOBAL`` / ``GIT_CONFIG_SYSTEM`` /
       ``GIT_CONFIG_NOSYSTEM`` / ``GIT_CONFIG_KEY_<n>`` の literal 環境変数代入
+    - git 起動に前置された ``HOME`` / ``XDG_CONFIG_HOME`` の literal 代入（global 設定の
+      読み込み元を保護対象外のパスへ差し替えられる。``env HOME=... git`` も同じ）
 
 ``sh -c`` ラッパー（1 段のみ）:
     既知シェルの ``-c``（結合短フラグ ``bash -lc`` を含む）へ渡された文字列引数は、1 段
@@ -74,6 +76,8 @@ config 経由のフック無効化（config key は大小文字を区別せず�
       config の ``alias.*`` は literal に現れるので対象内）
     - ``git --git-dir=<other>`` / ``GIT_DIR=<other>``（そのリポジトリのフックは通常どおり
       走るためバイパスではない）
+    - ``export HOME=...; git commit`` のように、変数の状態に依存して別セグメントで効く形
+      （前置代入は git 起動と同じセグメントにあるものだけを見る）
     - コマンド置換・変数展開（``$VAR`` / ``$(...)`` / バッククォート）を経由した組み立て
     - ``git`` 以外の名前を持つラッパースクリプト内部の git 呼び出し
     - ``eval`` に渡す文字列の解釈、および ``sh -c`` の 2 段以上のネスト
@@ -456,16 +460,20 @@ _ENV_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
 # GIT_CONFIG_KEY_<n> の index 部分を取り出す正規表現。
 _GIT_CONFIG_KEY_INDEX_RE = re.compile(r"^GIT_CONFIG_KEY_\d+$")
 
-# git 自身が config を注入・差し替えるために読む literal 環境変数名。値を解釈しても
+# git が config の読み込み元を決めるために読む literal 環境変数名。値を解釈しても
 # 安全側の判定を追加できないため、出現した時点で deny する。``GIT_CONFIG_GLOBAL`` /
 # ``GIT_CONFIG_SYSTEM`` は差し替え先で ``core.hooksPath`` を書け、``GIT_CONFIG_NOSYSTEM``
-# は system 側に置かれた保護設定を落とせる。
+# は system 側に置かれた保護設定を落とせる。``HOME`` / ``XDG_CONFIG_HOME`` は global 設定
+# （``$HOME/.gitconfig`` / ``$XDG_CONFIG_HOME/git/config``）の場所を決めるため、保護対象外の
+# パスへ向けると同じ効果になる。
 _GIT_CONFIG_INJECTION_ENV_NAMES = frozenset(
     {
         "GIT_CONFIG_PARAMETERS",
         "GIT_CONFIG_GLOBAL",
         "GIT_CONFIG_SYSTEM",
         "GIT_CONFIG_NOSYSTEM",
+        "HOME",
+        "XDG_CONFIG_HOME",
     }
 )
 
@@ -476,8 +484,11 @@ def _is_literal_env_hooks_path_override(prefix_tokens: list[str]) -> bool:
     **前置トークンを全部走査する。** 既知のラッパ（`sudo` / `env` 等）とそのオプション
     だけを読み飛ばす形にすると、``env -C /tmp GIT_CONFIG_GLOBAL=/tmp/e git commit`` の
     ように列挙が漏れた瞬間に素通り側へ倒れる。git 起動より前の ``NAME=value`` は実質
-    すべて環境変数代入であり、危険な名前に一致したときだけ deny するので拾いすぎても
-    実害は無い（git のオプション ``--author=Foo`` は識別子で始まらず一致しない）。
+    すべて環境変数代入であり、危険な名前に一致したときだけ deny する（git のオプション
+    ``--author=Foo`` は識別子で始まらず一致しない）。git 起動の判定がトークンの basename だけを
+    見るため、``HOME=/tmp/h grep -rn git .`` や ``echo HOME=/x git`` のように、代入の形の
+    トークンと ``git`` トークンが同じセグメントにあれば git 以外のコマンドでも deny になる。
+    この誤検出は受容し、回避は代入を外すか別セグメントに分けることである。
 
     ``GIT_CONFIG_KEY_<n>`` は key が機微なら ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_VALUE_<n>``
     との整合を問わず deny する（不完全・矛盾する triplet を安全とみなさない）。同名の
@@ -592,7 +603,8 @@ def has_bypass_flag(command: str, *, _recursed: bool = False) -> bool:
     Returns:
         ``--no-verify``（サブコマンド不問）、``core.hooksPath`` オーバーライド
         （``-c``/``--config-env``、``git config`` の書込み操作、または
-        literal ``GIT_CONFIG_*`` 環境変数代入のいずれか経由）、``git commit``
+        literal ``GIT_CONFIG_*`` / ``HOME`` / ``XDG_CONFIG_HOME`` 環境変数代入の
+        いずれか経由）、``git commit``
         の ``-n``、またはサブコマンドを確定できない状態での ``-n`` を
         検出したら True。
 

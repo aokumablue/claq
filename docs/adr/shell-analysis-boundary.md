@@ -37,6 +37,14 @@
 - `block_no_verify` / `bash_config_protection` の非目標: シェルエイリアス・シェル関数・変数展開・
   コマンド置換・2 段以上の `sh -c` / `eval`・`git` 以外の名前を持つラッパースクリプト経由の呼び
   出し。これらは検出しない（見逃しを許容する）
+- `block_no_verify` は git 起動に前置された `GIT_CONFIG_*` と、global 設定の読み込み元を決める
+  `HOME` / `XDG_CONFIG_HOME` の代入を、`env` などのラッパを挟んでも deny する。前置トークンを
+  すべて走査するため、`HOME=/tmp/h grep -rn git .` や `echo HOME=/x git` のように、代入の形の
+  トークンと `git` トークンが同じセグメントにあれば git 以外のコマンドでも deny する（受容済みの
+  誤検出。回避は代入を外すか別セグメントに分ける）。
+  `export HOME=…; git commit` のように変数の状態に依存する形、`GIT_DIR` の差し替え（commit が
+  別のリポジトリに入るだけで、このリポジトリのフックは迂回されない）、`$'…'` の ANSI-C クォートの
+  解釈は非目標である
 - `pre_bash_commit_quality` の `echo "git commit"` のような誤検出は「安全側」として維持する。
   誤って quality scan を実行するコストは、commit を見逃すコストより小さい
 - 書き込み先が引数位置に明示されるコマンド群（`cp` / `mv` / `install` / `ln -f` / `dd of=` /
