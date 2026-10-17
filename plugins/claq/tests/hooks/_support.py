@@ -5,11 +5,18 @@
 - 保護語彙の期待値表（`_EXPECTED_*`、`_EXPECTED_VOCABULARIES`、`_EXTERNALLY_PINNED_VOCABULARIES`）。
   保護ファイル名の全数検査（`test_protection_bypass_regressions.py`）と語彙集合の固定
   （`test_protection_vocabulary_declarations.py`）が同じ表を使うため、ここに 1 つだけ置く。
+- launcher 経由の hook 起動の土台（`PLUGIN_ROOT` / `LAUNCHER` / `HOOK_WRAPPER` / `HOOKS_JSON`、隔離環境 `_launcher_env`、
+  `_run_launcher`、hooks.json の宣言列挙 `_iter_declared_commands`）。起動スモーク（`test_hook_cli_launch_smoke.py`）と
+  PreToolUse 入力軸のゲート（`test_hook_cli_contract.py`）が共有する。
 """
 
 from __future__ import annotations
 
 import json
+import os
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -527,3 +534,83 @@ _EXTERNALLY_PINNED_VOCABULARIES: dict[str, str] = {
         "振る舞い一致で固定する（正規表現リテラルの二重保守を避ける）"
     ),
 }
+
+
+PLUGIN_ROOT = Path(__file__).resolve().parents[2]
+LAUNCHER = PLUGIN_ROOT / "src" / "claq" / "launcher.py"
+HOOK_WRAPPER = PLUGIN_ROOT / "runtime" / "claq-hook"
+_ISOLATED_ENV_PREFIXES = ("CODEX_", "GROK_", "COPILOT_")
+_ISOLATED_ENV_KEYS = frozenset({
+    "CLAUDECODE",
+    "PLUGIN_DATA",
+    "CLAQ_HOME",
+    # mem のデータ位置を決めるのはこちら（src/claq/mem/settings.py）。
+    # CLAQ_HOME は lib/core_utils.get_claq_dir() が読む別変数で、
+    # これを消しても実 ~/.claq への書き込みは止まらなかった。
+    "CLAQ_DATA_PATH",
+    "CLAUDE_SESSION_ID",
+    "CLAUDE_PROJECT_DIR",
+    "CLAUDE_PLUGIN_ROOT",
+})
+
+
+def _launcher_env(tmp_home: Path) -> dict[str, str]:
+    """launcher サブプロセス用の隔離環境を組み立てる。
+
+    Args:
+        tmp_home: 一時 HOME。実ユーザーの ~/.claq を触らない。
+
+    Returns:
+        サブプロセスに渡す環境変数。
+    """
+    env = os.environ.copy()
+    for key in list(env):
+        if key.startswith(_ISOLATED_ENV_PREFIXES) or key in _ISOLATED_ENV_KEYS:
+            del env[key]
+    env["HOME"] = str(tmp_home)
+    env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+    env["COPILOT_TEST"] = "1"
+    return env
+
+
+def _run_launcher(hook: str, payload: dict, tmp_home: Path) -> subprocess.CompletedProcess[str]:
+    """リポジトリ内 launcher で hook モジュールを実行する。
+
+    Args:
+        hook: dotted module name（例: claq.hooks.config_protection）。
+        payload: stdin に渡す JSON オブジェクト。
+        tmp_home: 一時 HOME。
+
+    Returns:
+        CompletedProcess。
+    """
+    return subprocess.run(
+        [sys.executable, str(LAUNCHER), hook],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        env=_launcher_env(tmp_home),
+        timeout=30,
+        check=False,
+    )
+
+
+HOOKS_JSON = PLUGIN_ROOT / "hooks" / "hooks.json"
+
+
+def _iter_declared_commands() -> list[tuple[str, list[str], int]]:
+    """hooks.json が宣言する (イベント名, wrapper 引数, timeout) を列挙する。
+
+    Returns:
+        宣言順の (event, args, timeout) タプル。args は ``runtime/claq-hook``
+        以降の引数。
+    """
+    declared = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))["hooks"]
+    entries: list[tuple[str, list[str], int]] = []
+    for event, groups in declared.items():
+        for group in groups:
+            for hook in group.get("hooks", []):
+                tokens = shlex.split(hook["command"])
+                wrapper_index = next(i for i, t in enumerate(tokens) if t.endswith(HOOK_WRAPPER.name))
+                entries.append((event, tokens[wrapper_index + 1 :], hook.get("timeout", 0)))
+    return entries
