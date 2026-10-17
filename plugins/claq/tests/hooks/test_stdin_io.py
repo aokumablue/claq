@@ -21,14 +21,20 @@ class _FakeBuffer:
 
 
 class _FakeStdin:
-    """isatty() を備えた stdin の代替オブジェクト。"""
+    """isatty() を備えた stdin の代替オブジェクト。
+
+    ``isatty_calls`` に isatty() の呼び出し回数を記録する。pytest 既定の stdin は非 TTY なので、
+    差し替えが外れても「非 TTY」と答える判定は結果が変わらない。呼ばれた回数で差し替えの到達を固定する。
+    """
 
     def __init__(self, text: str, *, tty: bool = False) -> None:
         self._tty = tty
         self.buffer = _FakeBuffer(text.encode("utf-8"))
         self.read_called = False
+        self.isatty_calls = 0
 
     def isatty(self) -> bool:
+        self.isatty_calls += 1
         return self._tty
 
     def read(self, n: int = -1) -> str:
@@ -54,9 +60,12 @@ class _QueueBuffer:
             なし
         """
         self._chunks = list(chunks)
+        self.requested: list[int] = []
 
     def read1(self, n: int = -1) -> bytes:
         """キューの先頭チャンクから最大 `n` バイトを返す。尽きていれば EOF（b""）。
+
+        呼び出しごとの要求量 `n` を ``requested`` に記録する（チャンクサイズ定数が使われたかの検査用）。
 
         `n` バイト以上あれば先頭 `n` バイトだけを返し、残りは次回呼び出し用に
         キューの先頭へ戻す（実 `read1()` が要求量を超えて返さない挙動を模す）。
@@ -67,6 +76,7 @@ class _QueueBuffer:
         Returns:
             キューの次のバイト列（最大 `n` バイト）、または尽きていれば b""。
         """
+        self.requested.append(n)
         if not self._chunks:
             return b""
         chunk = self._chunks[0]
@@ -177,9 +187,11 @@ class TestStdinIsAbsent:
 
     def test_pipe_is_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """非 TTY のパイプは payload ありとして扱う。"""
-        monkeypatch.setattr(stdin_io.sys, "stdin", _FakeStdin("payload"))
+        fake_stdin = _FakeStdin("payload")
+        monkeypatch.setattr(stdin_io.sys, "stdin", fake_stdin)
 
         assert stdin_io._stdin_is_absent() is False
+        assert fake_stdin.isatty_calls == 1
 
     def test_stdin_none_is_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """detach された子プロセス等で sys.stdin が None の場合は payload なし。"""
@@ -197,13 +209,18 @@ class TestStdinIsAbsent:
         なり、Windows のパイプで起きる fail-open を別経路で再生産する。
         """
 
+        isatty_calls: list[None] = []
+
         class _RaisingStdin:
             def isatty(self) -> bool:
+                isatty_calls.append(None)
                 raise error
 
         monkeypatch.setattr(stdin_io.sys, "stdin", _RaisingStdin())
 
         assert stdin_io._stdin_is_absent() is False
+        # pytest 既定の stdin も非 TTY で False を返すため、差し替えが効いたことは呼び出しで固定する。
+        assert isatty_calls == [None]
 
 
 class TestReadRawStdin:
@@ -248,10 +265,17 @@ class TestReadRawStdin:
         同じ関数にしないのは、launcher の `--bg` 中継や `mem context` には
         「読めなかった」ときに採れる別の行動が無いため。
         """
+        default_timeout = stdin_io.STDIN_FIRST_BYTE_TIMEOUT
         monkeypatch.setattr(stdin_io, "STDIN_FIRST_BYTE_TIMEOUT", 0.05)
         monkeypatch.setattr(stdin_io.sys, "stdin", _BlockingStdin([]))
 
-        assert stdin_io.read_raw_stdin() == ""
+        started = time.perf_counter()
+        result = stdin_io.read_raw_stdin()
+        elapsed = time.perf_counter() - started
+
+        assert result == ""
+        # 既定値（2 秒）のままなら待ち時間は必ずそれ以上になる。短縮値が使われたことを時間で固定する。
+        assert elapsed < default_timeout
 
 
 class TestReadStdinBytesChunkedDeadline:
@@ -266,9 +290,12 @@ class TestReadStdinBytesChunkedDeadline:
     def test_multi_chunk_read_reassembles_full_bytes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """小さい STDIN_CHUNK_BYTES でも複数チャンクを結合して全データを返す。"""
         monkeypatch.setattr(stdin_io, "STDIN_CHUNK_BYTES", 4)
-        monkeypatch.setattr(stdin_io.sys, "stdin", _QueueStdin([b"abcd", b"efgh", b"ij"]))
+        queue_stdin = _QueueStdin([b"abcd", b"efgh", b"ij"])
+        monkeypatch.setattr(stdin_io.sys, "stdin", queue_stdin)
 
         assert stdin_io._read_stdin_bytes(10) == b"abcdefghij"
+        # 要求量が 4, 4, 残り 2。定数が使われなければ 10, 6, 2 になる。
+        assert queue_stdin.buffer.requested == [4, 4, 2]
 
     def test_chunk_request_size_respects_max_bytes_boundary(
         self, monkeypatch: pytest.MonkeyPatch
@@ -280,11 +307,14 @@ class TestReadStdinBytesChunkedDeadline:
         超えるバイト列を集めてしまい、ここで検出できる。
         """
         monkeypatch.setattr(stdin_io, "STDIN_CHUNK_BYTES", 4)
-        monkeypatch.setattr(stdin_io.sys, "stdin", _QueueStdin([b"ab", b"cdefghij"]))
+        queue_stdin = _QueueStdin([b"ab", b"cdefghij"])
+        monkeypatch.setattr(stdin_io.sys, "stdin", queue_stdin)
 
         result = stdin_io._read_stdin_bytes(5)
 
         assert result == b"abcde"
+        # 1 回目は min(4, 5)、2 回目は min(4, 5 - 2)。定数が使われなければ 1 回目が 5 になる。
+        assert queue_stdin.buffer.requested == [4, 3]
 
     def test_single_chunk_fast_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """全データが 1 回のチャンク読みで収まる場合もそのまま返す。"""
@@ -307,6 +337,7 @@ class TestReadStdinBytesChunkedDeadline:
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """1 チャンク受信後に書き手が止まったら、予算切れで部分データを返し警告する。"""
+        default_deadline = stdin_io.STDIN_READ_DEADLINE_SECONDS
         monkeypatch.setattr(stdin_io, "STDIN_READ_DEADLINE_SECONDS", 0.05)
         monkeypatch.setattr(stdin_io.sys, "stdin", _BlockingStdin([b"abc"]))
 
@@ -315,7 +346,8 @@ class TestReadStdinBytesChunkedDeadline:
         elapsed = time.perf_counter() - started
 
         assert result == b"abc"
-        assert elapsed < 5.0
+        # 既定値（3 秒）のままなら待ち時間は必ずそれ以上になる。短縮値が使われたことを時間で固定する。
+        assert elapsed < default_deadline
         assert "上限時間に達した" in capsys.readouterr().err
 
     def test_first_byte_timeout_raises_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -324,11 +356,15 @@ class TestReadStdinBytesChunkedDeadline:
         ここで空文字列を返すと、保護 hook が payload を 1 バイトも
         読まないまま許可側へ抜ける（fail-open）。
         """
+        default_timeout = stdin_io.STDIN_FIRST_BYTE_TIMEOUT
         monkeypatch.setattr(stdin_io, "STDIN_FIRST_BYTE_TIMEOUT", 0.05)
         monkeypatch.setattr(stdin_io.sys, "stdin", _BlockingStdin([]))
 
-        with pytest.raises(stdin_io.StdinUnavailableError):
+        started = time.perf_counter()
+        with pytest.raises(stdin_io.StdinUnavailableError, match="0.05 秒以内"):
             stdin_io._read_stdin_bytes(10)
+        # 既定値（2 秒）のままなら待ち時間は必ずそれ以上になる。短縮値が使われたことを時間で固定する。
+        assert time.perf_counter() - started < default_timeout
 
     @pytest.mark.parametrize("error", [OSError("bad fd"), ValueError("closed file")])
     def test_read1_failure_before_any_data_raises_unavailable(
@@ -506,11 +542,15 @@ class TestReadRawStdinWithTruncation:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """読み取り不能は例外にする（保護 hook が deny へ倒せるようにする）。"""
+        default_timeout = stdin_io.STDIN_FIRST_BYTE_TIMEOUT
         monkeypatch.setattr(stdin_io, "STDIN_FIRST_BYTE_TIMEOUT", 0.05)
         monkeypatch.setattr(stdin_io.sys, "stdin", _BlockingStdin([]))
 
-        with pytest.raises(stdin_io.StdinUnavailableError):
+        started = time.perf_counter()
+        with pytest.raises(stdin_io.StdinUnavailableError, match="0.05 秒以内"):
             stdin_io.read_raw_stdin_with_truncation()
+        # 既定値（2 秒）のままなら待ち時間は必ずそれ以上になる。短縮値が使われたことを時間で固定する。
+        assert time.perf_counter() - started < default_timeout
 
 
 class TestParseJsonObject:
