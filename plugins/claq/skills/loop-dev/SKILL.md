@@ -44,7 +44,7 @@ user-invocable: false
    | 未使用コード削除 | `claq:code-refiner`（依頼文へ `mode: clean` を明示） |
    | 性能改善 | `claq:code-refiner`（依頼文へ `mode: perf` を明示） |
 
-   生成の直後に、検出したテストコマンドと linter（本リポジトリなら `python3 -m pytest -q` と `ruff check plugins/claq`。src と tests の両方）を実行し、red なら evaluate へ進む前に同じ generate の中で直す。報告する PASS/FAIL は本セッションで実際に実行したツール出力だけを根拠にし、未実行の項目は未検証と書く。Edit/Write が成功していれば確認のための再 Read はしない（失敗時はツールがエラーを返す）
+   生成の直後に、検出したテストコマンドと linter（本リポジトリなら `python3 -m pytest -q` と `ruff check plugins/claq`。src と tests の両方）を実行し、red なら evaluate へ進む前に同じ generate の中で直す。ただし `bugfix` / `refactor-fix` で baseline が green だったテストが red になったときは、重ねて直さず、その generate が加えた編集だけを取り消し、該当の blocker は未解消のまま残す（`git checkout --` は未コミットの編集をすべて消すので使わない）。報告する PASS/FAIL は本セッションで実際に実行したツール出力だけを根拠にし、未実行の項目は未検証と書く。Edit/Write が成功していれば確認のための再 Read はしない（失敗時はツールがエラーを返す）
 4. evaluate: `claq:reviewer` を必ず起動する。認証/ユーザー入力/シークレット/API エンドポイント/支払い、および外部由来の文字列をプロンプト・エージェントへ渡す実装（信頼境界・サブエージェント権限・恒久メモリへの書込み）に触れる変更のときだけ、`claq:security-auditor` を並列に加え（Bash を持たず diff を取れないため、依頼文へ diff 本文か変更ファイルの一覧を載せる）、reviewer の依頼文に並列であることを書く。並列のときは同じ応答に Agent 呼び出しを並べる
    - reviewer には `verify_mode: reexecute`、失敗テストのシグネチャ（反復履歴の tests= と同じもの）、baseline step で自ら検出・実行したテストコマンドを `test_cmd` として渡す。`approved_plan` から変更予定のテストファイルが分かればその一覧も渡す。generate の自己検証コマンドや「テスト通過」等の自己申告は渡さない（diff とテスト結果は reviewer が自分で取る。反復2 も同じ）
    - スコープガード: `approved_plan` に変更ファイル一覧があるときだけ、編集したファイルが一覧内かを照合し、逸脱は blocker にする（一覧の無い呼び出し元では照合しない）。ただしテスト基盤ファイル（テストランナー・カバレッジの設定や共有フィクスチャ。Python なら任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `jest.config.*`/`vitest.config.*`・`package.json` の `scripts`、共通で `Makefile` の test ターゲット・CI 設定等）の変更は一覧の有無に関わらず照合し、一覧に無ければ blocker にする
