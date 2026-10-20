@@ -176,6 +176,56 @@
     return found;
   };
 
+  /**
+   * 描画結果で、図の文字の大きさ・一覧の検索と絞り込みの動作を測る。
+   *
+   * 文字の大きさは viewBox の倍率（getScreenCTM）を掛けた描画後の px で見る。
+   * computed style の font-size は viewBox 座標の値で、描画後の大きさではない。
+   * 一覧は実際に検索語を入れて行が減り、0 件で空の行が出て、戻せることまで確かめる。
+   * @returns {object[]} 契約を割った項目の記録
+   */
+  const measureBehavior = () => {
+    const found = [];
+    const sizes = [];
+    document.querySelectorAll("svg.chart").forEach((svg, index) => {
+      const scale = svg.getScreenCTM().a;
+      svg.querySelectorAll("text").forEach((text) => {
+        sizes.push({ chart: index + 1, px: parseFloat(getComputedStyle(text).fontSize) * scale });
+      });
+    });
+    sizes.forEach(({ chart, px }) => {
+      if (px < 11.9 || px > 13.6) found.push({ check: "chart-text-size", chart, px: Number(px.toFixed(2)) });
+    });
+    document.querySelectorAll(".nav-item").forEach((item) => {
+      const id = (item.getAttribute("href") || "").slice(1);
+      if (!id || !document.getElementById(id)) found.push({ check: "nav-target", item: item.textContent.trim() });
+    });
+    document.querySelectorAll("table[data-list]").forEach((table, index) => {
+      const tools = table.closest(".table-scroll")?.previousElementSibling ?? table.previousElementSibling;
+      const search = tools?.querySelector('input[type="search"]');
+      if (!search) {
+        found.push({ check: "list-search-missing", table: index + 1 });
+        return;
+      }
+      const rows = [...table.tBodies[0].rows].filter((row) => !row.classList.contains("list-empty"));
+      const shown = () => rows.filter((row) => !row.hidden).length;
+      search.value = "\u0000no-such-row";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      if (shown() !== 0 || table.querySelector(".list-empty").hidden) found.push({ check: "list-search-nomatch", table: index + 1 });
+      search.value = "";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      if (shown() !== rows.length) found.push({ check: "list-search-reset", table: index + 1 });
+      tools.querySelectorAll("select").forEach((select) => {
+        select.selectedIndex = 1;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        if (shown() === 0 || shown() > rows.length) found.push({ check: "list-facet", table: index + 1, label: select.getAttribute("aria-label") });
+        select.selectedIndex = 0;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    });
+    return found;
+  };
+
   const failures = [];
   const textFailures = [];
   const rows = [];
@@ -201,23 +251,28 @@
     });
   });
 
+  const behaviorFailures = measureBehavior();
+
   root.dataset.theme = original.theme;
   root.dataset.base = original.base;
   probe.remove();
   freeze.remove();
 
   const report = {
-    verdict: failures.length === 0 && textFailures.length === 0 ? "GREEN" : "RED",
+    verdict: failures.length === 0 && textFailures.length === 0 && behaviorFailures.length === 0 ? "GREEN" : "RED",
     checked: rows.length,
     failures,
     textFailures,
+    behaviorFailures,
   };
   console.table(failures.length ? failures : rows.slice(0, 12));
   if (textFailures.length) console.table(textFailures);
+  if (behaviorFailures.length) console.table(behaviorFailures);
   console.log(
     report.verdict,
     `${rows.length} pairs checked, ${failures.length} failed;`,
-    `rendered text: ${textFailures.length} failed`
+    `rendered text: ${textFailures.length} failed;`,
+    `behavior: ${behaviorFailures.length} failed`
   );
   return report;
 })();

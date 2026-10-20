@@ -20,6 +20,9 @@
         "Chart height caps are viewport-relative (clamp/vh), never a fixed px max-block-size",
         "Gridlines are solid hairlines, not dashed",
         "Layout uses fluid grids with no fixed canvas width and no horizontal page scroll from 320px to 1920px",
+        "Every sidebar item is an <a href=\"#id\"> whose target section exists in the page (no <button> items, no dead links)",
+        "Every list table carries data-list with thead and tbody, and no hand-written search input exists in the HTML (app.js generates the search box and the facet selects)",
+        "All <text> elements inside charts use the axis-text class with no per-element font-size, so rendered axis text is one size across charts",
         "check_site.py exits 0 on the generated site"
       ]
     },

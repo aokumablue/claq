@@ -239,6 +239,7 @@ p {
   font-size: var(--text-sm);
   font-weight: var(--font-weight-medium);
   text-align: start;
+  text-decoration: none;
   transition:
     background var(--duration-base) var(--ease-out),
     color var(--duration-base) var(--ease-out);
@@ -255,13 +256,13 @@ p {
   color: var(--sidebar-accent-foreground);
 }
 
-.nav-item[aria-current="page"] {
+.nav-item[aria-current] {
   background: var(--sidebar-accent);
   color: var(--sidebar-accent-foreground);
   font-weight: var(--font-weight-semibold);
 }
 
-.nav-item[aria-current="page"]::before {
+.nav-item[aria-current]::before {
   content: "";
   position: absolute;
   inset-inline-start: 0;
@@ -498,6 +499,11 @@ p {
 }
 
 /* --- レイアウト ---------------------------------------------------------- */
+
+/* ナビのリンク先。sticky の topbar（56px）の下に見出しが潜らないようにする。 */
+.pane [id] {
+  scroll-margin-block-start: 72px;
+}
 
 .pane {
   container: pane / inline-size;
@@ -776,6 +782,7 @@ p {
 
 /* viewBox 座標系の単位。SVG が最小幅で描かれたとき 12px を割らない値にする
    （`_validate_axis_text_scale` が実効サイズを計算して落とす）。 */
+.chart text,
 .axis-text {
   fill: var(--muted-foreground);
   font-family: var(--font-sans);
@@ -788,6 +795,7 @@ p {
  * 文字の中心を合わせる。ベースラインで置くと、13px の上限で文字を縮めたときに
  * 線から下へずれる。中央揃えの文字は y にベースラインを書く。
  */
+.chart text:not([text-anchor="middle"]),
 .axis-text:not([text-anchor="middle"]) {
   dominant-baseline: central;
 }
@@ -800,7 +808,7 @@ p {
  * viewBox の倍率で伸び縮みする。
  */
 @media screen {
-  .chart[style*="--chart-scale"] .axis-text {
+  .chart[style*="--chart-scale"] text {
     font-size: min(15px, calc(13px / var(--chart-scale)));
   }
 }
@@ -1126,6 +1134,53 @@ tbody tr:last-child {
 .num {
   text-align: end;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 一覧の検索・絞り込み。app.js が table[data-list] の直前へ生成する。
+ * 手書きの検索欄は置かない（結線されない欄は、押しても何も起きない部品になる）。
+ */
+.list-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-block-end: 12px;
+}
+
+.list-tools__field {
+  min-inline-size: 0;
+  block-size: 36px;
+  padding-inline: 12px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-size: var(--text-sm);
+}
+
+.list-tools__field option {
+  background: var(--popover);
+  color: var(--popover-foreground);
+}
+
+.list-tools__field--search {
+  flex: 1 1 180px;
+  max-inline-size: 320px;
+}
+
+.list-tools__count {
+  margin-inline-start: auto;
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs-line);
+  font-variant-numeric: tabular-nums;
+}
+
+.list-empty td {
+  padding-block: 24px;
+  color: var(--muted-foreground);
+  text-align: center;
+  white-space: normal;
 }
 
 /*

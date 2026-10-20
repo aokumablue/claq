@@ -125,7 +125,18 @@ upstream をそのまま使えない箇所だけ、規則として差分を持�
 - セグメント: `--muted` の器に、選択中だけ `--background` + `--shadow-xs`
 - 表: ヘッダは `--muted-foreground` の `--text-xs`、行区切りは `--border` を
   薄めたもの。数値列は `font-variant-numeric: tabular-nums` で桁を揃える
-- サイドバー: `--sidebar-*` の一式を使う。本文側の `--background` を流用しない
+- サイドバー: `--sidebar-*` の一式を使う。本文側の `--background` を流用しない。
+  項目は `<a href="#id">` で、飛び先の節に `id` を付ける（`<button>` は押しても移動しない）。
+  sticky の topbar に見出しが潜らないよう、`.pane [id]` に `scroll-margin-block-start` を掛けてある。
+  現在地（`aria-current="location"`）は `app.js` がスクロール位置から決める。最下部では
+  見出しが上端へ届かない節があるので、最後の項目を現在地とし、直前にクリックした項目を優先する
+- 一覧（`table[data-list]`）: 検索と主要項目の絞り込みを `app.js` が表の直前へ生成する。
+  生成にしているのは、手書きの検索欄が結線されないまま残るのを構造的に防ぐため。
+  検索は全角半角・大小・空白をそろえ（NFKC）、空白区切りの全語を含む行を残す（AND）。
+  絞り込みの列は、行見出しでも数値でもなく、全行が値を持ち、異なる値が 2〜6 個で行数より少ない列
+  （全行が別の値なら識別子や氏名で絞り込みにならない）。状態・ステータス系の見出しを先頭に、
+  残りは左から、最大 2 列。検索欄は form で包まない（Enter でページが再読込される）。
+  該当 0 件のときは空の行を出し、件数は `aria-live` で伝える
 
 ## チャートとアニメーション
 
@@ -263,6 +274,10 @@ upstream をそのまま使えない箇所だけ、規則として差分を持�
   viewBox が 460px で描かれれば実効 7.7px になる（手書き CSS の 12px 検査は宣言しか
   見ないので素通りする）。viewBox 幅の上限の求め方は `chart-forms.md`、
   計算して落とすのは `_validate_axis_text_scale`
+- 図の中の `<text>` は 1 種類の大きさにそろえる。CSS は `.chart text`（`.axis-text` を含む）に
+  宣言サイズと頭打ちを掛けるので、class を持たない文字や `font-size` を個別に書いた文字は
+  その外に出て、他の軸文字より大きく出る（`_validate_chart_text` が落とす）。逆に viewBox を
+  狭く書くと最小幅でも文字が伸びる（`_validate_axis_text_scale` が 18px 超を落とす）
 - 広い画面では逆に、SVG の文字も viewBox の倍率で伸びる（幅 1920px で宣言 15px の目盛りが
   約 20px になり、カード見出しより大きくなる）。`app.js` が描画倍率（描画幅・高さと
   viewBox の比の小さいほう）を `--chart-scale` として各 `svg.chart` へ渡し、CSS が描画後の

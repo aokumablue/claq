@@ -598,6 +598,8 @@ def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:
     violations.extend(_validate_theme_toggle(tags))
     violations.extend(_validate_stylesheets(tags))
     violations.extend(_validate_inline_motion(html))
+    violations.extend(_validate_nav_links(tags))
+    violations.extend(_validate_lists(html, tags))
     if page_kind == "dashboard":
         violations.extend(_validate_dashboard(html, tags))
         violations.extend(_validate_chart_scroll_wrapper(html))
@@ -742,6 +744,11 @@ _MAX_VERTICAL_BARS = 7
 #: 倍率で一緒に縮むため、宣言が 12px でも描画は 12px を割りうる。
 _MIN_RENDERED_AXIS_PX = 12.0
 
+#: 同じく、最小幅で描かれたときの上限（px）。viewBox を狭く書くと、宣言が 15px でも
+#: 描画は本文やカード見出しより大きくなる（広い画面では app.js が 13px で頭打ちにするが、
+#: JS 無効・印刷では上限が効かない）。
+_MAX_RENDERED_AXIS_PX = 18.0
+
 
 def _css_length(css: str, selector: str, prop: str) -> float | None:
     """セレクタ 1 個の宣言から px 長さを取り出す。見つからなければ None。"""
@@ -792,6 +799,101 @@ def _validate_axis_text_scale(html: str, css: str) -> list[str]:
                 f"（{_MIN_RENDERED_AXIS_PX:.0f}px 以上。viewBox 幅 {box.group(1)} に対し"
                 f"最小描画幅 {floor:.0f}px。font-size を上げるか viewBox を狭める）"
             )
+        elif rendered > _MAX_RENDERED_AXIS_PX:
+            violations.append(
+                f"{index} 枚目の目盛り文字が最小幅で {rendered:.1f}px に伸びる"
+                f"（{_MAX_RENDERED_AXIS_PX:.0f}px 以下。viewBox 幅 {box.group(1)} に対し"
+                f"最小描画幅 {floor:.0f}px。viewBox を広げて座標を取り直す）"
+            )
+    return violations
+
+
+def _class_names(tag: str) -> list[str]:
+    """開始タグの文字列から class 名の一覧を取り出す。class が無ければ空。"""
+    found = re.search(r'class="([^"]*)"', tag)
+    return found.group(1).split() if found else []
+
+
+def _validate_chart_text(html: str) -> list[str]:
+    """図の中の文字がすべて ``axis-text`` に揃っていることを検査する。
+
+    文字の大きさと、広い画面での 13px の頭打ちは CSS が ``.chart text`` に掛ける。
+    ``font-size`` を属性や style で個別に書いた文字、または class を持たない
+    ``<text>`` は、その外で viewBox の倍率のまま伸びて、他の軸文字より大きく出る。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    violations: list[str] = []
+    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
+        for tag in re.findall(r"<text\b[^>]*>", svg):
+            if re.search(r"font-size\s*[=:]", tag):
+                violations.append(f"{index} 枚目の SVG の <text> が font-size を個別に指定している（軸文字の大きさが揃わない）")
+            if "axis-text" not in _class_names(tag):
+                violations.append(f"{index} 枚目の SVG の <text> が axis-text を持たない（軸文字の大きさが揃わない）")
+    return violations
+
+
+def _validate_nav_links(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
+    """サイドバーの項目が、文書内の実在する節へ飛ぶリンクであることを検査する。
+
+    ``<button>`` の項目や、飛び先の id が無いリンクは、押しても何も起きない。
+
+    Args:
+        tags: 開始タグと属性の一覧
+
+    Returns:
+        違反メッセージの一覧
+    """
+    ids = {attrs["id"] for _, attrs in tags if attrs.get("id")}
+    violations: list[str] = []
+    for tag, attrs in tags:
+        if "nav-item" not in attrs.get("class", "").split():
+            continue
+        href = attrs.get("href", "")
+        if tag != "a" or not href.startswith("#"):
+            violations.append("ナビの項目 (.nav-item) が <a href=\"#id\"> ではない（押しても節へ移動しない）")
+        elif href[1:] not in ids:
+            violations.append(f"ナビの項目の飛び先 {href} が文書内に無い（id を付けた節が必要）")
+    return violations
+
+
+#: 一覧とみなさない表。ヒートマップは格子全体を読む図で、図の直下の表は図の値の控え。
+_NON_LIST_TABLE_CLASS = "heat"
+
+
+def _validate_lists(html: str, tags: list[tuple[str, dict[str, str]]]) -> list[str]:
+    """一覧の表が検索・絞り込みを持ち、検索欄を手書きしていないことを検査する。
+
+    検索欄と絞り込みは app.js が ``table[data-list]`` から生成する。手書きの検索欄は
+    結線されず、押しても何も起きない部品になるので置かせない。
+
+    Args:
+        html: 検査対象の HTML 文字列
+        tags: 開始タグと属性の一覧
+
+    Returns:
+        違反メッセージの一覧
+    """
+    violations: list[str] = []
+    if any(
+        (tag == "input" and attrs.get("type") == "search") or attrs.get("role") == "search" for tag, attrs in tags
+    ):
+        violations.append("検索欄を手書きしている（一覧の検索は table[data-list] から app.js が生成する）")
+    figure_data = [m.span() for m in re.finditer(r"<details\b[^>]*chart-data[^>]*>.*?</details>", html, re.DOTALL)]
+    for match in re.finditer(r"<table\b([^>]*)>(.*?)</table>", html, re.DOTALL):
+        attrs = match.group(1)
+        if any(start <= match.start() < end for start, end in figure_data):
+            continue
+        if _NON_LIST_TABLE_CLASS in _class_names(attrs):
+            continue
+        if "data-list" not in attrs:
+            violations.append("表に data-list が無い（一覧には検索と主要項目の絞り込みを付ける）")
+        elif "<thead" not in match.group(2) or "<tbody" not in match.group(2):
+            violations.append("table[data-list] に <thead> と <tbody> が要る（絞り込みの列を読み取れない）")
     return violations
 
 
@@ -972,6 +1074,7 @@ def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> li
         violations.append("表が無い（図を読めない利用者への同等手段）")
     violations.extend(_validate_chart_axes(html))
     violations.extend(_validate_stretched_svg_text(html))
+    violations.extend(_validate_chart_text(html))
     violations.extend(_validate_chart_form(html))
     violations.extend(_validate_tick_steps(html))
     violations.extend(_validate_time_point_hits(html))
@@ -1239,6 +1342,7 @@ def _validate_js(script: str) -> list[str]:
         ("data-base", ("dataset.base", "data-base")),
         ("prefers-reduced-motion", ("prefers-reduced-motion",)),
         ("DOM 構築前の実行順", ("defer", "DOMContentLoaded")),
+        ("一覧の検索・絞り込み", ("data-list",)),
     )
     violations = [f"app.js が {label} を扱っていない" for label, needles in any_of if not any(n in script for n in needles)]
     if "light" not in script or "dark" not in script:

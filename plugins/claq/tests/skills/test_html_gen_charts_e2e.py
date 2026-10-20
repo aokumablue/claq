@@ -89,7 +89,7 @@ def test_e2e_script_measures_rendered_text_not_just_variables() -> None:
     assert "backdropOf" in script
     assert "textFailures" in script
     # 判定は両方のパスを含む。
-    assert "failures.length === 0 && textFailures.length === 0" in script
+    assert "failures.length === 0 && textFailures.length === 0 && behaviorFailures.length === 0" in script
 
 
 def test_e2e_script_freezes_transitions_while_measuring() -> None:
@@ -329,7 +329,7 @@ def test_e2e_axis_text_is_capped_on_wide_screens() -> None:
     css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
     script = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
     cap = re.search(
-        r'@media screen \{\s*\.chart\[style\*="--chart-scale"\] \.axis-text \{\s*'
+        r'@media screen \{\s*\.chart\[style\*="--chart-scale"\] text \{\s*'
         r"font-size: min\((\d+)px, calc\((\d+)px / var\(--chart-scale\)\)\);",
         css,
     )
