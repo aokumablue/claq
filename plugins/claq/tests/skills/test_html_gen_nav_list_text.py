@@ -67,7 +67,7 @@ def test_template_list_table_is_wired_for_search() -> None:
     script = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
     assert "table[data-list]" in script
     assert "bindList();" in script
-    assert "normalize(\"NFKC\")" in script
+    assert 'normalize("NFKC")' in script
 
 
 def test_handwritten_search_input_is_reported(tmp_path: Path) -> None:
@@ -94,7 +94,9 @@ def test_list_table_without_data_list_is_reported(tmp_path: Path) -> None:
 def test_list_table_needs_head_and_body(tmp_path: Path) -> None:
     """data-list の表に thead / tbody が無いと、絞り込みの列を読めないので違反になる。"""
     dest = _copy_site(tmp_path)
-    report = _edit(dest, "index.html", ("<table data-list>", "<table data-list><tr><td>x</td></tr></table><table>"))
+    report = _edit(
+        dest, "index.html", ("<table data-list>", "<table data-list><tr><td>x</td><td>y</td></tr></table><table>")
+    )
     assert "<thead> と <tbody>" in report
 
 
@@ -122,7 +124,9 @@ def test_template_chart_text_is_uniform() -> None:
 def test_chart_text_with_own_font_size_is_reported(tmp_path: Path) -> None:
     """図の中の文字が font-size を属性で書くと違反になる。"""
     dest = _copy_site(tmp_path)
-    report = _edit(dest, "index.html", ('<text class="axis-text" x="42"', '<text class="axis-text" font-size="22" x="42"'))
+    report = _edit(
+        dest, "index.html", ('<text class="axis-text" x="42"', '<text class="axis-text" font-size="22" x="42"')
+    )
     assert "font-size を個別に指定" in report
 
 
@@ -134,7 +138,7 @@ def test_chart_text_with_style_font_size_is_reported() -> None:
 
 def test_chart_text_without_axis_text_class_is_reported() -> None:
     """class を持たない <text> は軸文字と大きさが揃わないので違反になる。"""
-    svg = "<svg><text x=\"1\">label</text></svg>"
+    svg = '<svg><text x="1">label</text></svg>'
     assert "axis-text を持たない" in "".join(check_site._validate_chart_text(svg))
 
 
@@ -144,3 +148,35 @@ def test_axis_text_that_would_render_too_large_is_reported() -> None:
     svg = '<svg class="chart" viewBox="0 0 400 200">axis-text</svg>'
     report = "".join(check_site._validate_axis_text_scale(svg, css))
     assert "伸びる" in report
+
+
+def test_svg_with_text_but_no_chart_class_is_reported() -> None:
+    """<text> を持つ SVG のルートに class="chart" が無いと、頭打ちが掛からないので違反になる。"""
+    svg = '<svg role="img" viewBox="0 0 720 250"><text class="axis-text">1</text></svg>'
+    assert 'class="chart" が無い' in "".join(check_site._validate_chart_text(svg))
+    ok = '<svg class="chart chart--bars" viewBox="0 0 470 252"><text class="axis-text">1</text></svg>'
+    assert check_site._validate_chart_text(ok) == []
+
+
+def test_font_size_on_a_tspan_is_reported() -> None:
+    """<text> の子の <tspan> に書いた font-size も、CSS の .chart text が効かない経路なので違反になる。"""
+    svg = '<svg class="chart"><text class="axis-text"><tspan font-size="30">1</tspan></text></svg>'
+    assert "font-size を個別に指定" in "".join(check_site._validate_chart_text(svg))
+
+
+def test_svg_without_text_is_not_a_chart_text_target() -> None:
+    """文字を持たない SVG（アイコン・スパークライン）は class="chart" を要求されない。"""
+    assert check_site._validate_chart_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>') == []
+
+
+def test_key_value_table_is_not_a_list() -> None:
+    """行見出し + 値 1 列の項目表（会社概要など）は、data-list を要求されない。"""
+    table = '<table><tbody><tr><th scope="row">社名</th><td>Nimbus</td></tr><tr><th scope="row">設立</th><td>2020</td></tr></tbody></table>'
+    assert check_site._validate_lists(table, []) == []
+
+
+def test_multi_column_table_is_still_a_list() -> None:
+    """値が 2 列以上ある表は一覧で、data-list が要る。"""
+    table = '<table><thead><tr><th>a</th></tr></thead><tbody><tr><th scope="row">x</th><td>1</td><td>2</td></tr></tbody></table>'
+    assert "data-list が無い" in "".join(check_site._validate_lists(table, []))
+    assert check_site._is_key_value_table("<tbody></tbody>") is False

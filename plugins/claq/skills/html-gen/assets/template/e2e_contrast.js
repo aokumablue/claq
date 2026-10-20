@@ -187,7 +187,8 @@
   const measureBehavior = () => {
     const found = [];
     const sizes = [];
-    document.querySelectorAll("svg.chart").forEach((svg, index) => {
+    document.querySelectorAll("main svg").forEach((svg, index) => {
+      if (svg.closest("[aria-hidden='true']")) return;
       const scale = svg.getScreenCTM().a;
       svg.querySelectorAll("text").forEach((text) => {
         sizes.push({ chart: index + 1, px: parseFloat(getComputedStyle(text).fontSize) * scale });

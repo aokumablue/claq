@@ -815,11 +815,15 @@ def _class_names(tag: str) -> list[str]:
 
 
 def _validate_chart_text(html: str) -> list[str]:
-    """図の中の文字がすべて ``axis-text`` に揃っていることを検査する。
+    """図の中の文字がすべて ``axis-text`` で、``.chart`` の下にあることを検査する。
 
-    文字の大きさと、広い画面での 13px の頭打ちは CSS が ``.chart text`` に掛ける。
-    ``font-size`` を属性や style で個別に書いた文字、または class を持たない
-    ``<text>`` は、その外で viewBox の倍率のまま伸びて、他の軸文字より大きく出る。
+    文字の大きさと、広い画面での 13px の頭打ちは CSS が ``.chart text`` に掛け、
+    描画倍率は app.js が ``svg.chart`` へだけ渡す。したがって次の文字は、その外で
+    viewBox の倍率のまま伸びて、他の軸文字より大きく出る。
+
+    - ``<text>`` を持つのにルートの class に ``chart`` が無い SVG の文字
+    - ``font-size`` を属性や style で個別に書いた文字（``<tspan>`` などを含む）
+    - class を持たない、または ``axis-text`` を持たない ``<text>``
 
     Args:
         html: 検査対象の HTML 文字列
@@ -829,11 +833,18 @@ def _validate_chart_text(html: str) -> list[str]:
     """
     violations: list[str] = []
     for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        for tag in re.findall(r"<text\b[^>]*>", svg):
-            if re.search(r"font-size\s*[=:]", tag):
-                violations.append(f"{index} 枚目の SVG の <text> が font-size を個別に指定している（軸文字の大きさが揃わない）")
-            if "axis-text" not in _class_names(tag):
-                violations.append(f"{index} 枚目の SVG の <text> が axis-text を持たない（軸文字の大きさが揃わない）")
+        texts = re.findall(r"<text\b[^>]*>", svg)
+        if not texts:
+            continue
+        if "chart" not in _class_names(re.match(r"<svg\b[^>]*>", svg).group(0)):
+            violations.append(
+                f"{index} 枚目の SVG が <text> を持つのに class=\"chart\" が無い"
+                "（文字の頭打ちが掛からず、広い画面で伸びる）"
+            )
+        if re.search(r"font-size\s*[=:]", svg):
+            violations.append(f"{index} 枚目の SVG が font-size を個別に指定している（軸文字の大きさが揃わない）")
+        if any("axis-text" not in _class_names(tag) for tag in texts):
+            violations.append(f"{index} 枚目の SVG の <text> が axis-text を持たない（軸文字の大きさが揃わない）")
     return violations
 
 
@@ -865,6 +876,21 @@ def _validate_nav_links(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
 _NON_LIST_TABLE_CLASS = "heat"
 
 
+def _is_key_value_table(inner: str) -> bool:
+    """表が「行見出し + 値 1 列」の項目表（会社概要など）かを返す。
+
+    項目表は絞り込む対象の集合ではないので、一覧とみなさない。
+
+    Args:
+        inner: ``<table>`` の中身
+
+    Returns:
+        本体の全行が値のセルを 1 つ以下しか持たなければ True
+    """
+    rows = re.findall(r"<tr\b[^>]*>(.*?)</tr>", inner.split("<tbody", 1)[-1], re.DOTALL)
+    return bool(rows) and all(len(re.findall(r"<td\b", row)) <= 1 for row in rows)
+
+
 def _validate_lists(html: str, tags: list[tuple[str, dict[str, str]]]) -> list[str]:
     """一覧の表が検索・絞り込みを持ち、検索欄を手書きしていないことを検査する。
 
@@ -889,6 +915,8 @@ def _validate_lists(html: str, tags: list[tuple[str, dict[str, str]]]) -> list[s
         if any(start <= match.start() < end for start, end in figure_data):
             continue
         if _NON_LIST_TABLE_CLASS in _class_names(attrs):
+            continue
+        if _is_key_value_table(match.group(2)):
             continue
         if "data-list" not in attrs:
             violations.append("表に data-list が無い（一覧には検索と主要項目の絞り込みを付ける）")
