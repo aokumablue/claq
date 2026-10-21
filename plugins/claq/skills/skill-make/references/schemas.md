@@ -4,11 +4,9 @@
 
 - evals.json
 - grading.json
-- metrics.json
 - timing.json
 - benchmark.json
 - comparison.json
-- analysis.json
 
 `skill-make` が使う JSON スキーマ定義。
 
@@ -50,121 +48,7 @@ skillのeval定義。スキルディレクトリ内の `evals/evals.json` に置
 
 ## grading.json
 
-grader エージェントの返値。呼び出し元が schema 検証のうえ `<run-dir>/grading.json` へ保存する（grader 自身はファイルを書かない）。
-
-```json
-{
-  "expectations": [
-    {
-      "text": "The output includes the name 'John Smith'",
-      "passed": true,
-      "evidence": "Found in transcript Step 3: 'Extracted names: John Smith, Sarah Johnson'"
-    },
-    {
-      "text": "The spreadsheet has a SUM formula in cell B10",
-      "passed": false,
-      "evidence": "No spreadsheet was created. The output was a text file."
-    }
-  ],
-  "summary": {
-    "passed": 1,
-    "failed": 1,
-    "total": 2,
-    "pass_rate": 0.5
-  },
-  "execution_metrics": {
-    "tool_calls": {
-      "Read": 5,
-      "Write": 2,
-      "Bash": 8
-    },
-    "total_tool_calls": 15,
-    "total_steps": 6,
-    "errors_encountered": 0,
-    "output_chars": 12450,
-    "transcript_chars": 3200
-  },
-  "timing": {
-    "executor_duration_seconds": 165.0,
-    "grader_duration_seconds": 26.0,
-    "total_duration_seconds": 191.0
-  },
-  "claims": [
-    {
-      "claim": "The form has 12 fillable fields",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Counted 12 fields in field_info.json"
-    }
-  ],
-  "user_notes_summary": {
-    "uncertainties": ["Used 2023 data, may be stale"],
-    "needs_review": [],
-    "workarounds": ["Fell back to text overlay for non-fillable fields"]
-  },
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "The output includes the name 'John Smith'",
-        "reason": "A hallucinated document that mentions the name would also pass"
-      }
-    ],
-    "overall": "Assertions check presence but not correctness."
-  }
-}
-```
-
-**フィールド**
-
-- `expectations[]`: 採点済みの期待値と証拠
-- `summary`: 集計結果
-- `execution_metrics`: executorの `metrics.json` 由来のメトリクス
-- `timing`: `timing.json` 由来の実時間
-- `claims`: 出力から抽出して検証した主張
-- `user_notes_summary`: executorが残した注意点
-- `eval_feedback`: 必要があれば付けるeval改善案
-
-**不変条件**（`../../../agents/grader.md` の出力契約。検証はこの 4 点を満たすかで行う）:
-
-- `summary.total == len(expectations)`
-- `summary.passed + summary.failed == summary.total`
-- `summary.pass_rate == round(summary.passed / summary.total, 2)`
-- `total == 0`（`expectations` が空）は判定不能。PASS ではなく **FAIL** として扱う
-
----
-
-## metrics.json
-
-executorエージェントの出力。`<run-dir>/outputs/metrics.json` に置く。
-
-```json
-{
-  "tool_calls": {
-    "Read": 5,
-    "Write": 2,
-    "Bash": 8,
-    "Edit": 1,
-    "Glob": 2,
-    "Grep": 0
-  },
-  "total_tool_calls": 18,
-  "total_steps": 6,
-  "files_created": ["filled_form.pdf", "field_values.json"],
-  "errors_encountered": 0,
-  "output_chars": 12450,
-  "transcript_chars": 3200
-}
-```
-
-**フィールド**
-
-- `tool_calls`: ツール種別ごとの回数
-- `total_tool_calls`: 全ツール呼び出し数
-- `total_steps`: 主要ステップ数
-- `files_created`: 作成した出力ファイル
-- `errors_encountered`: 実行中のエラー数
-- `output_chars`: 出力ファイルの総文字数
-- `transcript_chars`: トランスクリプトの文字数
+grader エージェントの返値。形式と不変条件は `../../../agents/grader.md` の「出力契約」「出力形式」が正。呼び出し元がそれで検証したうえで `<run-dir>/grading.json` へ保存する（grader 自身はファイルを書かない）。
 
 ---
 
@@ -192,7 +76,7 @@ executorエージェントの出力。`<run-dir>/outputs/metrics.json` に置く
 
 ## benchmark.json
 
-Benchmarkモードの出力。`benchmarks/<timestamp>/benchmark.json` に置く。
+eval-workflow §4 の集約結果。`<workspace>/iteration-<N>/benchmark.json` に置く。
 
 ```json
 {
@@ -273,7 +157,7 @@ Benchmarkモードの出力。`benchmarks/<timestamp>/benchmark.json` に置く�
 - `run_summary`: 構成ごとの統計
   - `with_skill` と使用したベースライン（`without_skill` または `old_skill`）: それぞれ `pass_rate`/`time_seconds`/`tokens` の `mean` と `stddev`
   - `delta`: `"+0.50"` などの差分文字列
-- `notes`: 分析メモ
+- `notes`: bench-analyzer（`benchmark_analysis` モード）の返値（文字列配列）
 
 **重要**: フィールド名はこのスキーマのとおりにする（`configuration` を `config` にしない、`pass_rate` を `result` の外に置かない）。benchmark.jsonを手で作る場合はこのスキーマを必ず参照。
 
@@ -281,123 +165,4 @@ Benchmarkモードの出力。`benchmarks/<timestamp>/benchmark.json` に置く�
 
 ## comparison.json
 
-comparator エージェントの返値。呼び出し元が schema 検証のうえ `<workspace>/compare-<ID>/comparison.json` へ保存する（comparator 自身はファイルを書かない）。
-
-```json
-{
-  "winner": "A",
-  "reasoning": "Output A provides a complete solution with proper formatting and all required fields. Output B is missing the date field and has formatting inconsistencies.",
-  "rubric": {
-    "A": {
-      "content": {
-        "correctness": 5,
-        "completeness": 5,
-        "validity": 4
-      },
-      "structure": {
-        "organization": 4,
-        "formatting": 5,
-        "usability": 4
-      },
-      "content_score": 4.7,
-      "structure_score": 4.3,
-      "overall_score": 9.0
-    },
-    "B": {
-      "content": {
-        "correctness": 3,
-        "completeness": 2,
-        "validity": 3
-      },
-      "structure": {
-        "organization": 3,
-        "formatting": 2,
-        "usability": 3
-      },
-      "content_score": 2.7,
-      "structure_score": 2.7,
-      "overall_score": 5.4
-    }
-  },
-  "output_quality": {
-    "A": {
-      "score": 9,
-      "strengths": ["Complete solution", "Well-formatted", "All fields present"],
-      "weaknesses": ["Minor style inconsistency in header"]
-    },
-    "B": {
-      "score": 5,
-      "strengths": ["Readable output", "Correct basic structure"],
-      "weaknesses": ["Missing date field", "Formatting inconsistencies", "Partial data extraction"]
-    }
-  },
-  "expectation_results": {
-    "A": {
-      "passed": 4,
-      "total": 5,
-      "pass_rate": 0.80,
-      "details": [
-        {"text": "Output includes name", "passed": true}
-      ]
-    },
-    "B": {
-      "passed": 3,
-      "total": 5,
-      "pass_rate": 0.60,
-      "details": [
-        {"text": "Output includes name", "passed": true}
-      ]
-    }
-  }
-}
-```
-
----
-
-## analysis.json
-
-bench-analyzer エージェントの返値。呼び出し元が schema 検証のうえ `<grading-dir>/analysis.json` へ保存する（bench-analyzer 自身はファイルを書かない）。
-
-```json
-{
-  "comparison_summary": {
-    "winner": "A",
-    "winner_skill": "path/to/winner/skill",
-    "loser_skill": "path/to/loser/skill",
-    "comparator_reasoning": "勝者を選んだ理由の要約"
-  },
-  "winner_strengths": [
-    "Clear step-by-step instructions for handling multi-page documents",
-    "Included validation script that caught formatting errors"
-  ],
-  "loser_weaknesses": [
-    "Vague instruction 'process the document appropriately' led to inconsistent behavior",
-    "No script for validation, agent had to improvise"
-  ],
-  "instruction_following": {
-    "winner": {
-      "score": 9,
-      "issues": ["Minor: skipped optional logging step"]
-    },
-    "loser": {
-      "score": 6,
-      "issues": [
-        "Did not use the skill's formatting template",
-        "Invented own approach instead of following step 3"
-      ]
-    }
-  },
-  "improvement_suggestions": [
-    {
-      "priority": "high",
-      "category": "instructions",
-      "suggestion": "Replace 'process the document appropriately' with explicit steps",
-      "expected_impact": "Would eliminate ambiguity that caused inconsistent behavior"
-    }
-  ],
-  "transcript_insights": {
-    "winner_execution_pattern": "Read skill -> Followed 5-step process -> Used validation script",
-    "loser_execution_pattern": "Read skill -> Unclear on approach -> Tried 3 different methods"
-  }
-}
-```
+comparator エージェントの返値。形式は `../../../agents/comparator.md` の「出力契約」「出力形式」が正。呼び出し元がそれで検証したうえで `<workspace>/compare-<ID>/comparison.json` へ保存する（comparator 自身はファイルを書かない）。

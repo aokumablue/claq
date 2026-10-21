@@ -38,15 +38,13 @@ Skill ツールで `skill-make` skill を起動し、ステップ1〜2 の入力
 
 eval（`../skills/skill-make/references/eval-workflow.md` §4）では `claq:grader` / `claq:comparator` / `claq:bench-analyzer` が評価を担い、返値の schema 検証と保存も skill-make 側で行う。
 
-comparator の判定は助言として扱う。機械判定できる期待値は deterministic なアサーションで先に確定させ、skill の採用のような後戻りしにくい判断を comparator の勝敗だけで決めない（勝たせる指示を埋め込んだ候補には判定ごと曲げられうる）。
-
 ### 完了ゲート（1 つでも満たさなければ完了と報告せず BLOCKED）
 
 skill-make が戻った後、本コマンドがその戻り値と workspace に保存された `grading.json` / `comparison.json` / `benchmark.json` に対して次のゲートを適用する。
 
 「実行した」と書くことと実際に実行されたことは別なので、次の証跡で確かめる。
 
-1. 実行証跡: 各 run について transcript・実行コマンド・exit code・入力 artifact の hash が揃っている。`transcript_chars: 0` や `total_tool_calls: 0` は実行の証跡にならない
+1. 実行証跡: 各 run について transcript・`outputs/`・`timing.json` が揃っている
 2. 未計測は `null`: 計測できなかった値は理由付きの `null` にし、`0` で代用しない（`0` が実測値と欠測の両方を意味すると、比較が成立しているように見えるため）
 3. 候補と成果物の対応: comparator が候補 A/B について述べた内容が、その候補の実際の artifact に含まれている。引用が実在しない、または対応が入れ替わっている判定は破棄する
 4. 相互整合: grader と comparator の期待値判定が食い違えば完了せず BLOCKED にし、どちらの誤りかが確定するまで採用判断に進まない
@@ -66,10 +64,9 @@ claq_mem_learn --key <slug> --kind convention --scope repo \
   --title "<1 行要約>" --domain <domain> --body "<根拠>"
 ```
 
-登録は常に `status=pending` になり、採否は人間が `/instinct` でレビューして決める（自動生成の候補をそのまま注入枠に載せない）。記録基準は `../skills/learn/SKILL.md` の「記録する / しない」に従い、リポジトリを読めば分かることは登録しない。
+記録基準は `../skills/learn/SKILL.md` の「記録する / しない」に従い、リポジトリを読めば分かることは登録しない。
 
 ## 引数
 
 - `--commits=<n>` — 直近コミット件数（既定: 200）
-- `--output=<path>` — 生成先（既定: `skills/`）
 - `--knowledge` — 知識カード生成も行う（ステップ5）
