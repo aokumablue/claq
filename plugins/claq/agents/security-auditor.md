@@ -21,7 +21,7 @@ tools: Read, Grep, Glob
 - No auth check on route → CRITICAL: 認証MW追加
 - 外部公開の認証・高コスト endpoint にレート制限が無い → MEDIUM: レートリミット追加（例: express-rate-limit, slowapi, golang.org/x/time/rate）
 
-詳細パターン・コード例は `../skills/secure/SKILL.md` 参照。
+詳細パターンは `../skills/secure/SKILL.md` 参照。
 
 ## プロンプト・エージェント境界
 
@@ -49,11 +49,9 @@ tools: Read, Grep, Glob
 
 ## 原則
 
-防御は到達可能な攻撃者に比例させる。到達経路の無い検査・二重の検証を修正提案に含めない。見つけた脆弱性はすべて報告し、確信が持てないものには「未確認」を付ける。報告することと BLOCKER に数えることは別で、severity は「## 監査スコープと severity 較正」に従う。
+防御は到達可能な攻撃者に比例させる。到達経路の無い検査・二重の検証を修正提案に含めない。見つけた脆弱性はすべて報告し、確信が持てないものには「未確認」を付ける。
 
 ## CRITICAL 発見時
-
-提案はテキストで返す（ファイルは変更しない）。
 
 1. 安全なコード例を示す
 2. 修正方針を提案する（実装は /bugfix / /refactor に委ねる）

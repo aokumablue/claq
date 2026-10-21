@@ -24,6 +24,7 @@ RED → GREEN → REFACTOR → REPEAT
 
 - GREEN に達するたびに検証を通してコミットできる状態にし、1 サイクル 1 論理変更で進める
 - 合否はテスト実行の出力を証跡にして報告し、実行していないテストの成否は報告しない
+- GREEN の最小実装は仕様を一般に満たす最小のもので、テスト入力に合わせた分岐や値の埋め込みではない。テストが要求しない機能は書かない
 
 ### 例外: 既存の正しい実装へテストを足す場合（characterization）
 
@@ -33,43 +34,6 @@ RED → GREEN → REFACTOR → REPEAT
 - テストの検出力は、production コードを一時的に変異させて赤くなることで示す。確認後は変異を必ず元へ戻し、変異の内容と復元を出力に書く
 - 期待値をわざと誤らせて RED を作らない（正しい `classify(0) == "zero"` に `"positive"` を期待させる RED は仕様不一致の証拠にならず、中断すると誤ったテストだけが残る）
 - 呼び出し元が `task_type: test` で起動した場合（`/test-gen` 経由）は、既定でこの経路を採る
-
-## サイクル具体例（pytest）
-
-### RED — 失敗するテストを先に書く
-
-```python
-def test_slugify_spaces_replaced_with_hyphen():
-    """空白がハイフン 1 個に変換されること。"""
-    from myproject.text import slugify
-
-    assert slugify("hello world") == "hello-world"
-```
-
-実行: `python3 -m pytest -q` → `ImportError` / `AssertionError` で失敗することを確認する。
-
-### GREEN — テストを通す最小限実装
-
-```python
-def slugify(text: str) -> str:
-    """テキストを URL スラッグへ変換する。"""
-    return text.lower().replace(" ", "-")
-```
-
-実行: `python3 -m pytest -q` → 合格を確認する。テストが要求しない機能は書かない。最小限とは仕様を一般に満たす最小の実装で、テスト入力に合わせた分岐や値の埋め込みではない。
-
-### REFACTOR — グリーン維持のまま整理
-
-```python
-_SEPARATOR = "-"
-
-
-def slugify(text: str) -> str:
-    """テキストを URL スラッグへ変換する。"""
-    return _SEPARATOR.join(text.lower().split())
-```
-
-実行: `python3 -m pytest -q` → グリーンのままであることを確認してから次のサイクルへ進む。
 
 ## timeout/subprocess
 
@@ -113,7 +77,7 @@ def slugify(text: str) -> str:
 - 実装詳細（内部状態）のテスト
 - 相互依存テスト（共有状態）
 - アサーションが少ない合格テスト
-- 外部依存（Supabase・Redis・OpenAI）をモックしないテスト
+- 外部依存（DB・キャッシュ・外部 API）をモックしないテスト
 
 ## 永続メモリ
 
