@@ -1,6 +1,6 @@
 ---
 name: feat-dev
-description: 新機能開発統括。発見→探索→loop-dev 反復実装（plan/generate/evaluate 最大2反復）→サマリー。専門エージェント連携で一気通貫。新機能実装・機能拡張・中規模リファクタリング時に使用。
+description: 新機能・機能拡張を、探索から loop-dev による反復実装・サマリーまで一気通貫で進める。
 command: /feat-dev
 ---
 

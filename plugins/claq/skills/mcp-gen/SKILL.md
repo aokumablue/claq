@@ -1,6 +1,6 @@
 ---
 name: mcp-gen
-description: MCP サーバ（Python）を新規構築する。検証済みのスケルトンを複製し、上流 API を包んでデータを返すサーバなら上流 API ファサードの骨格を重ね、実起動スモークで仕様と設計規則への適合を確認するまでを一気通貫で行う。「MCP サーバを作って」「社内 API を MCP 化して」「ツールを MCP で公開して」等で発火。Python 以外の言語の MCP サーバは対象外。既存 MCP サーバの単発バグ修正は /bugfix、脆弱性レビューは /secure。
+description: Python の MCP サーバを新規構築する。「MCP サーバを作って」「社内 API を MCP 化して」「ツールを MCP で公開して」等で発火。Python 以外の言語の MCP サーバは対象外。既存 MCP サーバの単発バグ修正は /bugfix、脆弱性レビューは /secure。
 user-invocable: true
 ---
 

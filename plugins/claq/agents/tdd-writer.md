@@ -1,6 +1,6 @@
 ---
 name: tdd-writer
-description: テストファースト強制の TDD 専門。新機能・バグ修正でテストを伴う実装を行うときに使用し、RED→GREEN→REFACTOR でカバレッジを達成する。テストを書かない変更では呼ばない。機能を変えない整理（可読性・デッドコード削除・性能改善）は `code-refiner` の担当で、本エージェントでは行わない。
+description: テストファーストで実装する TDD 専門。新機能・バグ修正などテストを伴う実装に使う。テストを書かない変更では呼ばない。機能を変えない整理は `code-refiner` の担当。
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
