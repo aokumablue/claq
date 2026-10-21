@@ -90,7 +90,7 @@ claude plugin install claq@claq
 | [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | preflight→baseline→clean→simplify→perf→review+secure→final gate の安全な自動連鎖。`--mode` で部分実行 |
 | [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。レビュー工程（ステップ1〜3）は **READ-ONLY**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース）。後処理（ステップ4）で、裏取りできた CRITICAL/HIGH だけを種別ごとに自律修正 |
 | [`/harness`](plugins/claq/commands/harness.md) | 品質管理 | `[scope] --root=<path> --target-kind=repo\|consumer [--format=text\|json] [--apply] [--audit-only]` | 監査→トップ3提示（既定はここで停止）。`--apply` で harness-tuner による改善適用と再採点まで進む |
-| [`/skill-gen`](plugins/claq/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--output=path] [--knowledge]` | 入力収集→skill-make→skill-tune→grader/comparator/bench-analyzer 評価 |
+| [`/skill-gen`](plugins/claq/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--knowledge]` | 入力収集→skill-make（生成 + grader/comparator/bench-analyzer による eval）→skill-tune で改善 |
 | [`/instinct`](plugins/claq/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
 | [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→loop-dev 実装→検証。承認待ちは置かない。言語非依存 |
 
@@ -300,16 +300,18 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
 
   U(["✨ 単純化依頼"]) --> CREF["/refactor<br/>--mode=simplify"]:::cmd
-  CREF --> AS1["✨ code-refiner #1<br/>mode=simplify"]:::agent
-  CREF --> AS2["✨ code-refiner #2<br/>mode=simplify"]:::agent
-  CREF --> AS3["✨ code-refiner #3<br/>mode=simplify"]:::agent
+  CREF --> PRE(["preflight + baseline"])
+  PRE --> AS1["✨ code-refiner #1<br/>mode=simplify"]:::agent
+  PRE --> AS2["✨ code-refiner #2<br/>mode=simplify"]:::agent
+  PRE --> AS3["✨ code-refiner #3<br/>mode=simplify"]:::agent
   AS1 & AS2 & AS3 --> AR["✅ reviewer"]:::agent
   AS1 & AS2 & AS3 --> ASEC["🛡️ security-auditor"]:::agent
   AR & ASEC --> GATE{{"final gate<br/>CRITICAL/HIGH 残→BLOCKED"}}
+  GATE --> SUM(["学びの記録 → 要約"])
 ```
 
 **トリガー**: 可読性・保守性向上のみ、機能変更なし
-**期待効果**: ファイルグループを並列（同時起動は上限4）で単純化。clean / perf はスキップするが、review+secure と final gate は省かない
+**期待効果**: ファイルグループを並列（同時起動は上限4）で単純化。clean / perf はスキップするが、preflight・baseline・review+secure・final gate・学びの記録・要約は省かない
 
 **実行例**:
 
@@ -327,11 +329,12 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
 
   U(["🗑️ クリーンアップ"]) --> CREF["/refactor<br/>--mode=clean"]:::cmd
-  CREF --> AC["🧹 code-refiner<br/>mode=clean"]:::agent
+  CREF --> PRE(["preflight + baseline"])
+  PRE --> AC["🧹 code-refiner<br/>mode=clean"]:::agent
   AC --> TEST(["✅ テスト検証<br/>ファイル単位"])
   TEST -->|失敗| REVERT(["git checkout -- file"])
   TEST -->|成功| NEXT(["次ファイルへ"])
-  NEXT --> RV(["✅ reviewer + 🛡️ security-auditor<br/>→ final gate"])
+  NEXT --> RV(["✅ reviewer + 🛡️ security-auditor<br/>→ final gate → 学びの記録 → 要約"])
 ```
 
 **トリガー**: 未使用コード・依存関係の削除
@@ -557,23 +560,23 @@ flowchart LR
     direction TB
     COL["入力収集<br/>collect_skill_create_inputs"] --> PAT["パターン検出"]
     PAT --> SM["skill-make<br/>SKILL.md生成"]:::skill
-    SM --> ST["skill-tune<br/>反復改善ループ"]:::skill
 
-    subgraph loop["🔁 各反復"]
+    subgraph loop["🔁 skill-make の eval"]
       direction LR
       AG["📊 grader<br/>期待値照合"]:::agent --> AC["⚖️ comparator<br/>盲検比較"]:::agent
-      AC --> AA["📈 bench-analyzer<br/>勝因・性能傾向"]:::agent
+      AC --> AA["📈 bench-analyzer<br/>性能傾向"]:::agent
     end
 
-    ST --> loop
-    loop -->|"未収束"| ST
+    SM --> loop
+    loop -->|"改善"| SM
+    loop -->|"完了ゲート"| ST["skill-tune<br/>実行評価→最小修正の反復"]:::skill
   end
 
   CSG --> skillgen
 ```
 
 **トリガー**: 新スキル作成・既存スキル改善
-**期待効果**: 生成→eval→ベンチマーク分析が自動連鎖。連続2回で新規不明瞭点ゼロ、または同一勝者で収束判定
+**期待効果**: 生成→eval→ベンチマーク分析が自動連鎖し、skill-tune が連続 2 回の新規不明瞭点ゼロと指標の安定で収束判定
 
 **実行例**:
 
