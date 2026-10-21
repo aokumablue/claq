@@ -43,9 +43,9 @@ Execute this task:
 
 実行を待つ間に、各テストケースの定量的な assertions を下書きする。`evals/evals.json` に既に assertions があれば見直し、何を検証しているかをユーザーに説明する。
 
-良い assertions は、客観的に検証できて、名前だけで内容が分かるもの（benchmark viewer で並んだときに何を見ているかが一目で分かる）。文章の味やデザインの良し悪しのような主観的なものは無理に定量化せず、定性的に評価する。
+良い assertions は、客観的に検証できて、名前だけで内容が分かるもの。文章の味やデザインの良し悪しのような主観的なものは無理に定量化せず、定性的に評価する。
 
-下書きができたら `eval_metadata.json` と `evals/evals.json` を更新し、viewer でユーザーが何を見るのか（定性的な出力と定量的な benchmark の両方）を説明する。
+下書きができたら `eval_metadata.json` と `evals/evals.json` を更新する。
 
 ## 3. 完了した run から timing を記録する
 
@@ -70,12 +70,14 @@ Execute this task:
    - プログラムで判定できるものはスクリプトにする（目視より速く、再利用しやすい）
 
 2. ベンチマークに集約する
-   - 各 `grading.json` / `timing.json` を読み、`schemas.md`（同じ階層）のビューアー用スキーマに従って `benchmark.json` を作る。各構成の通過率・時間・トークン数を平均 ± 標準偏差と差分付きでまとめ、`with_skill` を `without_skill` の前に並べる
+   - 各 `grading.json` / `timing.json` を読み、`schemas.md`（同じ階層）の benchmark.json のスキーマに従って `benchmark.json` を作る。各構成の通過率・時間・トークン数を平均 ± 標準偏差と差分付きでまとめ、`with_skill` を `without_skill` の前に並べる
    - comparator へ渡すときは、比べる 2 構成の出力を `<workspace>/compare-<ID>/candidate-a/` と `candidate-b/` へコピーし、A/B の割り当てをランダムにする。対応表は呼び出し元だけが持つ。`with_skill` / `without_skill` / `old_skill` のパスをそのまま渡すと、パス文字列から出自が分かって盲検が成立しない（`../../../agents/comparator.md` はこの形を FAIL として拒否する）。comparator の判定は助言として扱い、機械判定できる期待値は deterministic なアサーションで先に確定させ、skill の採用を勝敗だけで決めない（勝たせる指示を埋め込んだ候補には判定ごと曲げられうる）
+   - comparator の返値は `schemas.md` の comparison.json のスキーマで検証してから `<workspace>/compare-<ID>/comparison.json` へ保存する。保存するのは本ワークフロー側で、comparator 自身はファイルを書かない
 
 3. 分析を入れる
    - `benchmark.json` と各 `grading.json` を直接読んで分析する
    - `../../../agents/bench-analyzer.md` の `## モード: benchmark_analysis — ベンチマーク結果の分析` を参照する
+   - bench-analyzer の返値（文字列配列）は `benchmark.json` の `notes` へ入れる。書き込むのは本ワークフロー側で、bench-analyzer 自身はファイルを書かない
    - 例: 常に通るだけで差が出ない assertions・ばらつきが大きい eval・時間/トークンのトレードオフ
 
 ## 5. 分析結果をもとに改善する

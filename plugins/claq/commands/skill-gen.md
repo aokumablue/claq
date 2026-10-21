@@ -1,12 +1,12 @@
 ---
 name: skill-gen
-description: リポジトリ固有入力収集→skill-make スキルに SKILL.md 生成委譲→skill-tune スキルに改善委譲→grader/comparator/bench-analyzer による評価。
+description: リポジトリ固有入力収集→skill-make スキルに SKILL.md 生成と grader/comparator/bench-analyzer による評価を委譲→skill-tune スキルに改善委譲。
 command: /skill-gen
 ---
 
 # スキル生成入力収集
 
-リポジトリ固有の入力を集めて整理し、SKILL.md の生成は `skill-make` skill に、生成後の実行評価による改善は `skill-tune` skill に委ねる。改善の各反復では `grader` / `comparator` / `bench-analyzer` が評価を担う。
+リポジトリ固有の入力を集めて整理し、SKILL.md の生成と eval は `skill-make` skill に、生成後の実行評価による改善は `skill-tune` skill に委ねる。eval では `grader` / `comparator` / `bench-analyzer` が評価を担う。
 
 ## 停止点
 
@@ -32,23 +32,17 @@ collect_skill_create_inputs "${COMMITS:-200}"
 
 コミット規約（feat:/fix:/chore:）・ファイルの同時変更パターン・繰り返しのワークフロー・フォルダ構造/命名規則・テストパターンを抽出する。
 
-## ステップ3: SKILL.md 生成
+## ステップ3: SKILL.md 生成と評価
 
 Skill ツールで `skill-make` skill を起動し、ステップ1〜2 の入力を渡して SKILL.md の下書きを作らせる。
 
-## ステップ4: 改善と評価
-
-Skill ツールで `skill-tune` skill を起動し、実行評価と反復改善のループに入る。各反復では次の 3 エージェントを順に呼ぶ。
-
-1. `claq:grader`: 実行トランスクリプトと出力を期待値と照合し、合否と根拠を出す
-2. `claq:comparator`: 改善前後（または 2 候補）の出力を盲検で比べ、どちらが課題をよく達成したかを判定する
-3. `claq:bench-analyzer`: ベンチマーク結果と比較結果から勝因・性能傾向を抽出する
-
-3 エージェントは結果を返値で返す（ファイルは書かない）。本コマンドが schema を検証して固定の保存先へ書き、次の完了ゲートを通す。
+eval（`../skills/skill-make/references/eval-workflow.md` §4）では `claq:grader` / `claq:comparator` / `claq:bench-analyzer` が評価を担い、返値の schema 検証と保存も skill-make 側で行う。
 
 comparator の判定は助言として扱う。機械判定できる期待値は deterministic なアサーションで先に確定させ、skill の採用のような後戻りしにくい判断を comparator の勝敗だけで決めない（勝たせる指示を埋め込んだ候補には判定ごと曲げられうる）。
 
 ### 完了ゲート（1 つでも満たさなければ完了と報告せず BLOCKED）
+
+skill-make が戻った後、本コマンドがその戻り値と workspace に保存された `grading.json` / `comparison.json` / `benchmark.json` に対して次のゲートを適用する。
 
 「実行した」と書くことと実際に実行されたことは別なので、次の証跡で確かめる。
 
@@ -58,7 +52,9 @@ comparator の判定は助言として扱う。機械判定できる期待値は
 4. 相互整合: grader と comparator の期待値判定が食い違えば完了せず BLOCKED にし、どちらの誤りかが確定するまで採用判断に進まない
 5. 表現: 実行していない eval を「実行済み」と書かない
 
-収束条件は `../skills/skill-tune/SKILL.md` の Step 7 に従う（本コマンドで定義し直さない）。上のゲートを満たさない反復は収束の回数に数えない。`grader` の期待値合否（`summary.pass_rate`）と `comparator` の勝者は収束判定への入力であって、判定の主体ではない。
+## ステップ4: 改善
+
+Skill ツールで `skill-tune` skill を起動し、実行評価と反復改善のループに入る。収束条件は `../skills/skill-tune/SKILL.md` の Step 7 に従う（本コマンドで定義し直さない）。
 
 ## ステップ5: 知識カード生成（`--knowledge` 時のみ）
 

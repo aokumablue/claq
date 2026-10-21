@@ -70,7 +70,7 @@ for event, groups in d['hooks'].items():
 
 `user-invocable: false` はホストの Skill ツールからの直接起動を妨げない（`/` 補完に出なくなるだけ）。そのため skill は直接起動を第一手とし、委譲の経路そのものを測りたいときだけ委譲元のコマンドを起動する。委譲元:
 
-- `loop-dev` ← `feat-dev` / `bugfix` / `refactor`
+- `loop-dev` ← `feat-dev` / `bugfix` / `refactor` / `test-gen` / `plan` / `review`
 - `skill-make` ← `skill-gen`
 - `refactor-prep` / `refactor-rollback` ← `refactor`
 

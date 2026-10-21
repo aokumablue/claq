@@ -24,7 +24,7 @@ command: /refactor
 - `refactor-prep` skill: 対象分割・依存可視化・テストセットを確定する（fork 実行。結果は報告で受け取る）
 - `refactor-rollback` skill: ファイル単位のリバート計画（Rollback Blueprint）を作る（inline 実行で本セッションに展開される）。ステップ3 以降の `git checkout -- <file>` は処理開始前の未コミット編集も区別なく破棄するため、その退避（worktree clean の確認と baseline patch の保存）もここで行われる
 
-`deps.from` / `deps.to` は `groups` 配列のインデックスを指す。`deps_order` はトポロジカル順に解決し、復旧時は逆順で適用する。`refactor-rollback` が `CAUTION` としたファイルは自動適用せず最終要約に記録し、`Skip Rules`（`{file, reason, required_action}`）のファイルは処理対象から外す。
+複数ファイルを戻すときは Rollback Blueprint の `Order` に従う。`refactor-rollback` が `CAUTION` としたファイルは自動適用せず最終要約に記録し、`Skip Rules`（`{file, reason, required_action}`）のファイルは処理対象から外す。
 
 `refactor-rollback` の出力を受け取った直後に、実効スコープを確定する（precondition gate）。
 

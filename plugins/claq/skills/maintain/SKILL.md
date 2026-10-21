@@ -126,7 +126,7 @@ claq_mem_learn --key <slug> --kind pitfall --scope repo --domain harness \
   --title "<1 行要約>" --body "<根拠と回避法>"
 ```
 
-記録基準は `../learn/SKILL.md` の「記録する / しない」。同じ違反の 2 回目は、既存カードと同じ `key` で更新して `confidence` を上げる。
+記録基準は `../learn/SKILL.md` の「記録する / しない」。同じ違反の 2 回目の扱い（`pending` なら同じ `key` で `confidence` を上げて更新、`active` なら何もしない）も `../learn/SKILL.md` に従う。
 
 要約は結論から書き、修正コミット・final gate の結果・残タスク（`/plan` 提示分）を示す。
 

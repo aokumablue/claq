@@ -265,7 +265,7 @@ Benchmarkモードの出力。`benchmarks/<timestamp>/benchmark.json` に置く�
   - `runs_per_configuration`: 構成ごとの実行回数（例: 3）
 - `runs[]`: 個々の実行結果
   - `eval_id`: 数値ID
-  - `eval_name`: 人間向けのeval名（viewerでは見出しに使う）
+  - `eval_name`: 人間向けのeval名
   - `configuration`: `"with_skill"` か、比較ベースラインの `"without_skill"` / `"old_skill"`（既存スキル改善パスは `old_skill` を出力する）。ベースライン名は fixture 全体で一方だけに揃える
   - `run_number`: 実行番号（1, 2, 3...）
   - `result`: `pass_rate`/`passed`/`total`/`time_seconds`/`tokens`/`errors` を含む
@@ -275,13 +275,13 @@ Benchmarkモードの出力。`benchmarks/<timestamp>/benchmark.json` に置く�
   - `delta`: `"+0.50"` などの差分文字列
 - `notes`: 分析メモ
 
-**重要**: viewerはこのフィールド名をそのまま読む。`config` を `configuration` の代わりに使ったり、`pass_rate` を `result` の外に置いたりすると→viewer では空値。benchmark.jsonを手で作る場合はこのスキーマを必ず参照。
+**重要**: フィールド名はこのスキーマのとおりにする（`configuration` を `config` にしない、`pass_rate` を `result` の外に置かない）。benchmark.jsonを手で作る場合はこのスキーマを必ず参照。
 
 ---
 
 ## comparison.json
 
-comparator エージェントの返値。呼び出し元が schema 検証のうえ `<grading-dir>/comparison-N.json` へ保存する（comparator 自身はファイルを書かない）。
+comparator エージェントの返値。呼び出し元が schema 検証のうえ `<workspace>/compare-<ID>/comparison.json` へ保存する（comparator 自身はファイルを書かない）。
 
 ```json
 {
