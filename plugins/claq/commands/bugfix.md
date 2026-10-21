@@ -52,7 +52,7 @@ loop-dev の収束または停止の報告を受け取ったらステップ4へ�
 | 再現手順が毎回同じで、次も同じ手順を踏む | `howto` | 手順の目的（「hook の再現は stdin に JSON を流す」） |
 | 明文化されていなかった規約に反していたのが原因 | `convention` | 守るべきルール |
 
-記録しないもの: リポジトリを読めば分かること（README・CLAUDE.md・型定義・docstring）、作業ログ（SessionEnd の `handoff` が残す）、diff の要約、そのセッション限りの事情、一般的なプログラミング知識。
+記録しないもの（learn の基準に加えて）: diff の要約。
 
 ```bash
 . "$HOME/.claq/env.sh" || exit 127
@@ -61,7 +61,7 @@ claq_mem_learn --kind pitfall --scope repo --domain <domain> \
   --body "<根本原因と、次に踏まないための具体策>"
 ```
 
-該当が無ければ 1 件も記録しない（0 件は正しい結果。埋め合わせで書かない）。登録は常に `status=pending` になり、採否は `/instinct` のレビューで決まる。重複確認とシークレットのマスクは `../skills/learn/SKILL.md` に従う。
+該当が無ければ 1 件も記録しない（0 件は正しい結果。埋め合わせで書かない）。重複確認とシークレットのマスクは `../skills/learn/SKILL.md` に従う。
 
 ## 記録テンプレート
 
@@ -88,7 +88,6 @@ Learned:    {記録した key} / なし
 
 ## ルール
 
-- 再現テストを先に作る / 修正は最小にする / 回帰確認を省かない
 - 仕様バグ・設計欠陥・品質改善は `/refactor` / `/plan` / `/review` に切り分ける
 
 ## 引数

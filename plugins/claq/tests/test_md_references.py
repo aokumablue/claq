@@ -452,7 +452,6 @@ def test_claq_run_module_references_are_importable() -> None:
 # 実装の定数を含めて 3 箇所が同じ文字列を持つ。1 箇所しか照合しないと
 # 残りが取り残され、版を上げても古い版のスコアと比較する助言が出せてしまう。
 _RUBRIC_VERSION_SITES = (
-    (Path("commands") / "harness.md", re.compile(r"ルーブリック版: `([^`]+)`")),
     (Path("agents") / "harness-tuner.md", re.compile(r'"rubric_version":\s*"([^"]+)"')),
 )
 

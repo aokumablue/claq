@@ -22,7 +22,7 @@ command: /refactor
 着手前に Skill ツールで次の 2 つを起動する。どちらも省かない。
 
 - `refactor-prep` skill: 対象分割・依存可視化・テストセットを確定する（fork 実行。結果は報告で受け取る）
-- `refactor-rollback` skill: ファイル単位のリバート計画（Rollback Blueprint）を作る（inline 実行で本セッションに展開される）。ステップ3 以降の `git checkout -- <file>` は処理開始前の未コミット編集も区別なく破棄するため、その退避（worktree clean の確認と baseline patch の保存）もここで行われる
+- `refactor-rollback` skill: ファイル単位のリバート計画（Rollback Blueprint）を作る（inline 実行で本セッションに展開される）
 
 複数ファイルを戻すときは Rollback Blueprint の `Order` に従う。`refactor-rollback` が `CAUTION` としたファイルは自動適用せず最終要約に記録し、`Skip Rules`（`{file, reason, required_action}`）のファイルは処理対象から外す。
 
@@ -71,7 +71,7 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 - CRITICAL/HIGH が 0 件
 - ステップ6 の `reviewer` / `security-auditor` の出力に `Blockers: {n}` 行が実際にある。無ければ「指摘ゼロ」ではなく「判定を取れなかった」として `BLOCKED` にする
 
-リバートできないファイル（Skip Rules / `revert=NOT_AVAILABLE`）はステップ1 の precondition gate で除外済みなので、ここでは判定材料にしない。収束 gate の最終権限は `loop-dev` の evaluate にあり、本 gate はその入力を作る。
+リバートできないファイル（Skip Rules / `revert=NOT_AVAILABLE`）はステップ1 の precondition gate で除外済みなので、ここでは判定材料にしない。
 
 CRITICAL/HIGH の blocker、またはテスト/lint の失敗が出たら、Skill ツールで `loop-dev` skill を起動する。入力:
 
@@ -92,8 +92,6 @@ loop-dev が 2 反復で収束しなければ、ファイル単位のリバー�
 | 3 回以上繰り返した安全な手順 | `howto` | 手順の目的（「分割 → テスト → 適用の順で回す」） |
 | 合意された、明文化されていないコーディング規約 | `convention` | 守るべきルール |
 | 採用した設計と却下した案 | `decision` | 選択と理由 |
-
-記録しないもの: リポジトリを読めば分かること、作業ログ（削除ファイル一覧・件数・スコアは要約に書けば足りる）、そのセッション限りの妥協、一般的なリファクタ知識。
 
 ```bash
 . "$HOME/.claq/env.sh" || exit 127
@@ -126,7 +124,6 @@ Final Gate: PASS / BLOCKED
 - 各委譲の完了の主張はテスト/lint の出力で裏を取り、証跡の無い完了は未検証として扱う
 - 機能を変えない（WHAT 不変）。挙動が変わる疑いのある変更は要確認として報告する
 - 安全性に疑いがある変更は飛ばし、最終要約に書く
-- 作業は `claq:code-refiner`（`mode` = clean / simplify / perf）・`claq:reviewer`・`claq:security-auditor` に委譲する。実行順・並列制御・ファイル単位のリバートは本コマンドが直接行う
 
 ## 引数
 

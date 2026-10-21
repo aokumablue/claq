@@ -21,7 +21,7 @@ command: /harness
 /harness --scope hooks --root /path/to/repo --target-kind repo
 ```
 
-`scope` は位置引数でも `--scope` でも指定できる（既定 `repo`）。`--root` と `--target-kind repo|consumer` は必須。省くと cwd から自動判定され、marketplace レイアウトの provider リポジトリ直下を consumer と誤判定しうる。`--target-kind` が自動判定と食い違えば FAIL し、誤った root を監査したまま進むのを防ぐ。
+`scope` は位置引数でも `--scope` でも指定できる（既定 `repo`）。`claq_run` には `--root` と `--target-kind repo|consumer` を常に渡す（ユーザーが省いたら監査対象のルートと種別を決めて渡す）。省くと cwd から自動判定され、marketplace レイアウトの provider リポジトリ直下を consumer と誤判定しうる。`--target-kind` が自動判定と食い違えば FAIL し、誤った root を監査したまま進むのを防ぐ。
 
 ## ステップ1: ベースライン取得
 
@@ -33,9 +33,6 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --targ
 スコアカードを出力する。`--audit-only` は /harness の制御フラグで `claq_run` へは渡さず、指定時はここで終える。`--root` / `--target-kind` はステップ4 の比較まで同じ値を保つ。
 
 採点はこのスクリプトの出力だけを根拠にし、手で採点しない。
-
-ルーブリック版: `2026-09-06` — 固定カテゴリ7個（各0〜10に正規化）:
-ツール網羅性 / 文脈効率 / 品質ゲート / メモリ永続性 / 評価網羅性 / セキュリティガードレール / コスト効率
 
 ## ステップ2: トップ3アクション特定
 
@@ -60,28 +57,12 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --targ
 
 変更前後の差分・カテゴリ別のスコア変化・harness-tuner が適用した変更を出力する。
 
-## 制約
-
-- 測定できる効果を持つ小さな変更を優先する
-- クロスプラットフォームの動作を保ち、脆弱なシェルクォーティングを持ち込まない
-- `checks[]` と `top_actions[]` にある正確なファイルパスを残す
-
-## 出力仕様
-
-1. ベースライン `overall_score` と `max_score`（`repo` では58）
-2. カテゴリ別スコアと指摘
-3. 失敗チェックと正確なファイルパス
-4. 上位3件のアクション（`top_actions`）
-5. （`--apply` 指定時）harness-tuner が適用した内容
-6. （`--apply` 指定時）改善後スコアカード
-7. （`--apply` 指定時）変更前後の差分サマリー
-
 ## 引数
 
 - 位置 #1: `[scope]` = `repo|hooks|skills|commands|agents`（既定: `repo`）
 - `--scope=<scope>`: 位置引数の別名
 - `--format=text|json`（既定: `text`）
-- `--root=<path>`: 監査対象ルート（必須）
-- `--target-kind=repo|consumer`: 期待する判定モード（必須。自動判定と食い違えば FAIL）
-- `--audit-only`: ステップ1 だけで終える（トップ3も出さない）。/harness の制御フラグで `claq_run` へは渡さない
-- `--apply`: トップ3を harness-tuner に適用させる（ステップ3〜5）。引数によるスコープ指定であって承認待ちではないので、`--apply` があれば途中で止まらない
+- `--root=<path>`: 監査対象ルート
+- `--target-kind=repo|consumer`: 期待する判定モード（自動判定と食い違えば FAIL）
+- `--audit-only`: ステップ1 だけで終える（トップ3も出さない）
+- `--apply`: トップ3を harness-tuner に適用させる（ステップ3〜5）
