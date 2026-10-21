@@ -23,7 +23,7 @@ claq は、Claude Code の作業を「最初の計画からレビューまで」
 
 | 項目 | 内容 |
 | --- | --- |
-| Agents | 計画、レビュー、TDD、セキュリティ、性能、探索などの専門サブエージェント |
+| Agents | 計画、レビュー、TDD、セキュリティ、コード整理（可読性・性能）、スキル評価、ハーネス調整などの専門サブエージェント |
 | Skills | ワークフローや運用知識を段階的に案内 |
 | Commands | 定番作業をすぐ呼び出し |
 | Hooks | ツール実行の前後に自動チェックや記録を実行 |
@@ -38,10 +38,10 @@ claq は、Claude Code の作業を「最初の計画からレビューまで」
 | 用語 | 種別 | 起動方法 | 例 |
 |---|---|---|---|
 | **Command** | ユーザーが明示的に呼ぶ | `/<name> [args]` | `/plan`, `/review`, `/feat-dev` |
-| **Agent** | 内部から委譲される専門家 | コマンド / skill から `Task` ツール経由で `subagent_type` 指定起動 | `reviewer`, `planner`, `tdd-writer` |
+| **Agent** | 内部から委譲される専門家 | コマンド / skill から Agent ツール経由で `subagent_type` 指定起動 | `reviewer`, `planner`, `tdd-writer` |
 | **Skill** | 条件発火 or 委譲先の知識モジュール | description マッチで Claude Code が自動起動 / inline 展開 or fork 委譲（`context` で決まる） | `grillme`, `learn`, `skill-make` |
 | **Knowledge** | 蓄積された知識カード（罠・規約・手順・事実） | SessionStart で `<claq-memory>` として自動注入（`status='active'` のみ） | `/instinct` で棚卸し・昇格 |
-| **Hook** | ツール実行時に自動発火するスクリプト | `hooks.json` 登録 → Claude Code が呼ぶ | PreToolUse, SessionStart, SessionEnd |
+| **Hook** | ツール実行時に自動発火するスクリプト | `hooks.json` 登録 → Claude Code が呼ぶ | PreToolUse, PreCompact, SessionStart, SessionEnd |
 
 **ざっくりまとめると**: ユーザーは Command だけを覚えれば OK。Command が内部で必要な Agent / Skill を自動で連れてきます。Knowledge と Hook はバックグラウンドで動く仕組みです。
 
@@ -85,14 +85,14 @@ claude plugin install claq@claq
 | コマンド | 用途 | 引数 | 一言説明 |
 |---|---|---|---|
 | [`/plan`](plugins/claq/commands/plan.md) | 実装前計画 | `[要件説明]` | 要件言い換え→リスク評価→段階的計画。コード前にユーザー確認 |
-| [`/feat-dev`](plugins/claq/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見→探索→質問→設計→実装→レビュー の7段階一気通貫 |
-| [`/bugfix`](plugins/claq/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 再現→原因分析→最小修正→回帰防止→レビュー の一気通貫 |
-| [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | clean→simplify→perf→review の安全な自動連鎖。`--mode` で部分実行 |
-| [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。**READ-ONLY 厳守**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース） |
+| [`/feat-dev`](plugins/claq/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見+探索→残分岐確認→loop-dev 反復実装→学びの記録→サマリー の一気通貫 |
+| [`/bugfix`](plugins/claq/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 要件整理→再現テスト確立→loop-dev 反復修正→学びの記録 の一気通貫 |
+| [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | preflight→baseline→clean→simplify→perf→review+secure→final gate の安全な自動連鎖。`--mode` で部分実行 |
+| [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。レビュー工程（ステップ1〜3）は **READ-ONLY**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース）。後処理（ステップ4）で、裏取りできた CRITICAL/HIGH だけを種別ごとに自律修正 |
 | [`/harness`](plugins/claq/commands/harness.md) | 品質管理 | `[scope] --root=<path> --target-kind=repo\|consumer [--format=text\|json] [--apply] [--audit-only]` | 監査→トップ3提示（既定はここで停止）。`--apply` で harness-tuner による改善適用と再採点まで進む |
 | [`/skill-gen`](plugins/claq/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--output=path] [--knowledge]` | 入力収集→skill-make→skill-tune→grader/comparator/bench-analyzer 評価 |
 | [`/instinct`](plugins/claq/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
-| [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→承認→実装。言語非依存 |
+| [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→loop-dev 実装→検証。承認待ちは置かない。言語非依存 |
 
 ---
 
@@ -180,25 +180,30 @@ flowchart LR
   U(["👤 新機能依頼"]) --> CP["/plan"]:::cmd
   CP --> CF["/feat-dev"]:::cmd
 
-  subgraph featdev["⚙️ feat-dev 内部（7ステップ）"]
+  subgraph featdev["⚙️ feat-dev 内部（5ステップ）"]
     direction TB
-    SG1["grillme"]:::skill -.-> AE
-    AE["🔍 Explore<br/>既存構造探索（大規模時のみ並列）"]:::agent --> SG2["grillme<br/>質問確定"]:::skill
-    SG2 --> AA["🏗️ planner<br/>決定モード"]:::agent
-    AA & APO["⚡ code-refiner<br/>mode=perf"]:::agent --> AT["🧪 tdd-writer<br/>RED→GREEN"]:::agent
-    AT --> AR["✅ reviewer"]:::agent
-    AT --> ASEC["🛡️ security-auditor"]:::agent
+    SG1["grillme<br/>要件が曖昧なときだけ"]:::skill -.-> AE
+    AE["🔍 発見 + 探索<br/>小規模は自分で読む / 広いときだけ Explore"]:::agent --> SG2["残分岐確認<br/>新しい分岐があるときだけ"]
+    SG2 --> LD["loop-dev<br/>plan→generate→evaluate 最大2反復"]:::skill
+    LD --> LEARN["学びの記録"]
+    LEARN --> SUM["サマリー"]
     SS["search"]:::skill -.-> AE
-    SA["adr"]:::skill -.-> AA
+    SA["adr"]:::skill -.-> LD
   end
 
+  subgraph loopdev["🔁 loop-dev 内部"]
+    direction TB
+    LP["📐 planner<br/>決定モード"]:::agent --> LG["🧪 tdd-writer<br/>または code-refiner"]:::agent
+    LG --> LR["✅ reviewer"]:::agent
+    LG -.-> LS["🛡️ security-auditor<br/>認証・入力・秘匿・外部由来文字列に触れるときだけ"]:::agent
+  end
+
+  LD --> loopdev
   CF --> featdev
-  featdev --> CR["/review"]:::cmd
-  CR --> CH["/harness<br/>--scope=hooks"]:::cmd
 ```
 
 **トリガー**: 新機能実装・機能拡張・中規模リファクタリング
-**期待効果**: 探索→設計→実装→レビュー→セキュリティ検証が自動連鎖。段階飛ばし禁止のため既存パターン無視・重複実装が起きない
+**期待効果**: 探索→実装→レビュー（セキュリティに触れる変更は security-auditor も）が自動連鎖。実装は loop-dev に委ね、plan→generate→evaluate を最大2反復で収束させる。探索を先に済ませるので既存パターン無視・重複実装が起きにくい
 
 **実行例**:
 
@@ -219,22 +224,22 @@ flowchart LR
 
   U(["🐛 バグ報告"]) --> CB["/bugfix"]:::cmd
 
-  subgraph bugfix["⚙️ bugfix 内部（5ステップ）"]
+  subgraph bugfix["⚙️ bugfix 内部（4ステップ）"]
     direction TB
-    SG["grillme"]:::skill --> REPRO["再現テスト確立"]
-    REPRO --> ROOT["原因分析"]
-    ROOT --> FIX["最小修正"]
-    FIX --> ST["loop-dev"]:::skill
+    SG["grillme<br/>要件が曖昧なときだけ"]:::skill -.-> REQ
+    REQ["要件整理"] --> REPRO["再現テスト確立<br/>再現できなければ不足情報を示して停止"]
+    REPRO --> ST["loop-dev<br/>反復修正（最大2反復）"]:::skill
     ST --> AT["🧪 tdd-writer"]:::agent
     AT --> AR["✅ reviewer"]:::agent
-    AT --> ASEC["🛡️ security-auditor"]:::agent
+    AT -.-> ASEC["🛡️ security-auditor<br/>セキュリティに触れるときだけ"]:::agent
+    AR --> LEARN["学びの記録"]
   end
 
   CB --> bugfix
 ```
 
 **トリガー**: バグ修正・不具合対応
-**期待効果**: 再現テストを先に作るので「再現できないバグ」を直したつもりが残らない。回帰防止テストも自動追加
+**期待効果**: 再現テストを先に作るので「再現できないバグ」を直したつもりが残らない。再現テスト green と回帰テスト追加済みを収束条件に、loop-dev が修正する
 
 **実行例**:
 
@@ -255,25 +260,28 @@ flowchart LR
   U(["🔧 リファクタ依頼"]) --> CP["/plan"]:::cmd
   CP --> CREF["/refactor"]:::cmd
 
-  subgraph refactor["⚙️ refactor 内部（8ステップ）"]
+  subgraph refactor["⚙️ refactor 内部（9ステップ）"]
     direction TB
     CREF --> SP["refactor-prep"]:::skill
     SP --> RB["refactor-rollback"]:::skill
-    RB --> AC["🧹 code-refiner<br/>mode=clean"]:::agent
+    RB --> BASE["baseline<br/>テスト・linter の基準取得"]
+    BASE --> AC["🧹 code-refiner<br/>mode=clean"]:::agent
     AC --> ASI1["✨ code-refiner #1<br/>mode=simplify"]:::agent
     AC --> ASI2["✨ code-refiner #2<br/>mode=simplify"]:::agent
-    AC --> ASI3["✨ code-refiner #3<br/>mode=simplify"]:::agent
+    AC --> ASI3["✨ code-refiner #N<br/>mode=simplify（同時起動は上限4）"]:::agent
     ASI1 & ASI2 & ASI3 --> AP["⚡ code-refiner<br/>mode=perf"]:::agent
     AP --> AR["✅ reviewer"]:::agent
     AP --> AS["🛡️ security-auditor"]:::agent
-    AR & AS --> GATE{{"final gate<br/>CRITICAL/HIGH残→BLOCK"}}
+    AR & AS --> GATE{{"final gate<br/>CRITICAL/HIGH 残→BLOCKED"}}
+    GATE -.->|"blocker・テスト失敗あり"| LD["loop-dev<br/>task_type=refactor-fix"]:::skill
+    GATE --> LEARN["学びの記録 → 要約"]
   end
 
   CREF --> refactor
 ```
 
 **トリガー**: 5件以上のリファクタ・大規模コード整理
-**期待効果**: clean → simplify（並列）→ perf → review を安全に自動連鎖。各段階の失敗は即ファイル単位でリバート、CRITICAL/HIGH 残存時は最終 gate でブロック
+**期待効果**: clean → simplify（並列）→ perf → review+secure を安全に自動連鎖。各段階の失敗は即ファイル単位でリバートし、final gate で CRITICAL/HIGH が残れば loop-dev（`refactor-fix`）で解消を試み、それでも残れば BLOCKED
 
 **実行例**:
 
@@ -295,11 +303,13 @@ flowchart LR
   CREF --> AS1["✨ code-refiner #1<br/>mode=simplify"]:::agent
   CREF --> AS2["✨ code-refiner #2<br/>mode=simplify"]:::agent
   CREF --> AS3["✨ code-refiner #3<br/>mode=simplify"]:::agent
-  AS1 & AS2 & AS3 --> CR["/review"]:::cmd
+  AS1 & AS2 & AS3 --> AR["✅ reviewer"]:::agent
+  AS1 & AS2 & AS3 --> ASEC["🛡️ security-auditor"]:::agent
+  AR & ASEC --> GATE{{"final gate<br/>CRITICAL/HIGH 残→BLOCKED"}}
 ```
 
 **トリガー**: 可読性・保守性向上のみ、機能変更なし
-**期待効果**: 最大並列でファイルグループを同時単純化。clean / perf はスキップ
+**期待効果**: ファイルグループを並列（同時起動は上限4）で単純化。clean / perf はスキップするが、review+secure と final gate は省かない
 
 **実行例**:
 
@@ -321,10 +331,11 @@ flowchart LR
   AC --> TEST(["✅ テスト検証<br/>ファイル単位"])
   TEST -->|失敗| REVERT(["git checkout -- file"])
   TEST -->|成功| NEXT(["次ファイルへ"])
+  NEXT --> RV(["✅ reviewer + 🛡️ security-auditor<br/>→ final gate"])
 ```
 
 **トリガー**: 未使用コード・依存関係の削除
-**期待効果**: 削除ごとにテスト実行、失敗時は即リバート。安全に dead code を排除
+**期待効果**: 削除ごとにテスト実行、失敗時は即リバート。全ファイル完了後に review+secure と final gate を通し、安全に dead code を排除
 
 **実行例**:
 
@@ -374,15 +385,15 @@ flowchart TD
   D --> E["ベースライン取得<br/>カバレッジ測定"]
   E --> F["🎯 デシジョンテーブル設計<br/>関数単位・ブランチ網羅"]
   F --> G["テーブル提示<br/>（応答は待たない）"]
-  G --> H["テスト実装<br/>言語慣習に従う"]
+  G --> H["loop-dev 反復実装<br/>言語慣習に従う・未到達 0 行なら起動しない"]:::skill
   H --> I["検証<br/>test + coverage + lint"]
   I --> J{"Gate"}
   J -- PASS --> K(["✅ 要約レポート"])
-  J -- BLOCKED --> L(["⚠️ 失敗内容を報告<br/>自動修正しない"])
+  J -- BLOCKED --> L(["⚠️ 理由を報告<br/>テストコマンド未検出 / 外部ライブラリ追加の確認待ち"])
 ```
 
 **トリガー**: テストコードの新規追加・カバレッジ補完
-**期待効果**: デシジョンテーブルによるブランチ網羅 → 承認後に自動実装。失敗テストは自動修正しないので仕様の不明点が露呈する
+**期待効果**: デシジョンテーブルによるブランチ網羅 → 承認を待たず loop-dev が実装。生成テストの失敗はプロダクトコードを直さず報告するので、仕様の不明点が露呈する。外部ライブラリが要るときだけ追加の可否を確認する
 
 **実行例**:
 
@@ -416,11 +427,12 @@ flowchart LR
   end
 
   CR --> review
-  review --> NEXT(["⚠️ CRITICAL/HIGH → commit BLOCK"])
+  review --> NEXT(["⚠️ CRITICAL/HIGH → 判定 Block"])
+  NEXT --> FIXR(["後処理: 裏取りできた CRITICAL/HIGH を<br/>種別ごとに loop-dev で自律修正（仕様変更は /plan 提示のみ）"])
 ```
 
 **トリガー**: 認証・決済・シークレット・API エンドポイント実装
-**期待効果**: 脆弱性検出 (security-auditor) + 設計チェックリスト (secure) の二段構え。CRITICAL/HIGH があれば commit をブロック
+**期待効果**: 脆弱性検出 (security-auditor) + 設計チェックリスト (secure) の二段構え。CRITICAL/HIGH があればレポートの判定は `Block`（コミット不可）。後処理で、実挙動から裏取りできた指摘だけを修正する
 
 **実行例**:
 
@@ -444,19 +456,21 @@ flowchart LR
   subgraph harness["⚙️ harness 内部（5ステップ）"]
     direction TB
     BASE["ベースライン取得<br/>harness_audit"] --> TOP["トップ3アクション特定"]
-    TOP --> AHT["⚙️ harness-tuner<br/>設定最適化適用"]:::agent
+    TOP -->|"既定はここで停止"| STOP(["トップ3を提示して終了"])
+    TOP -->|"--apply 指定時のみ"| AHT["⚙️ harness-tuner<br/>設定最適化適用"]:::agent
     AHT --> RESC["改善後再採点"]
     RESC --> DIFF["差分要約"]
   end
 ```
 
 **トリガー**: 週次・月次の品質チェック
-**期待効果**: ハーネスで自動採点 → harness-tuner で改善案を適用 → 再採点で効果検証
+**期待効果**: ハーネスで自動採点しトップ3の改善案を提示（既定）。`--apply` を付けたときだけ harness-tuner が適用し、再採点で効果を検証する
 
 **実行例**:
 
 ```bash
-/harness repo
+/harness repo --root . --target-kind repo           # 採点とトップ3の提示まで
+/harness repo --root . --target-kind repo --apply   # 適用と再採点まで
 ```
 
 ---
@@ -572,8 +586,8 @@ flowchart LR
 ### 知識蓄積サイクル
 
 各コマンド末尾の「学びの記録」ステップ（`/review` `/refactor` `/bugfix` `maintain` 等）で
-agent/skill が明示的に `claq_mem_learn` を呼ぶことで知識カードが増える。自動バックグラウンド観測（旧
-session-observer）は廃止済み — 定期実行や無操作での自動蓄積はない。
+command/skill が明示的に `claq_mem_learn` を呼ぶことで知識カードが増える。定期実行や無操作での
+自動蓄積はない。
 
 ```mermaid
 flowchart TD
@@ -587,7 +601,7 @@ flowchart TD
   subgraph session["💻 セッション中（各コマンド最終ステップで明示実行）"]
     direction LR
     SAD["adr<br/>アーキ決定記録"]:::skill
-    CW["learn<br/>claq_mem_learn（source=agent、常に status=pending, A-03）"]:::skill
+    CW["learn<br/>claq_mem_learn（source=agent、常に status=pending）"]:::skill
     CA["/instinct learn<br/>人間が手動登録（任意）"]:::cmd
   end
 
@@ -602,7 +616,7 @@ flowchart TD
 ```
 
 **トリガー**: 各コマンドの「学びの記録」ステップ（agent/skill が明示的に判断・実行。ユーザー操作は不要だがコマンド実行が前提）
-**期待効果**: 再利用可能な学び（罠・規約・決定）が知識カードとして蓄積し次セッション以降へ自動注入。agent 由来カード（`claq_mem_learn`）は**常に** `status=pending` で登録され、`/instinct promote <key>` を経て初めて注入される（A-03）。`learn` に `--status` は無く、helper も CLI も指定を拒否する
+**期待効果**: 再利用可能な学び（罠・規約・決定）が知識カードとして蓄積し次セッション以降へ自動注入。agent 由来カード（`claq_mem_learn`）は**常に** `status=pending` で登録され、`/instinct promote <key>` を経て初めて注入される。`learn` に `--status` は無く、helper も CLI も指定を拒否する
 
 **実行例**: 通常操作不要（各コマンドが完了時に自動判断）。手動登録した pending 分だけ週次で `/instinct list --status pending` → 採用分を `/instinct promote <key>`
 
@@ -627,7 +641,7 @@ flowchart LR
 **実行例**:
 
 ```bash
-/loop-audit --since=2026-08-01
+/loop-audit 2026-08-01 以降
 ```
 
 ---
@@ -726,15 +740,24 @@ flowchart LR
 flowchart LR
   classDef auto   fill:#ea580c,stroke:#c2410c,color:#fff,rx:4
 
-  U(["👤 git commit / merge<br/>/ rebase / push"]) --> HK(["🔗 Bash PreToolUse<br/>フック発火"]):::auto
-  HK --> ADV(["💡 アドバイス/警告<br/>注入"]):::auto
-  ADV --> GO(["✅ git 操作実行"])
+  U(["👤 Bash で git 操作"]) --> HK(["🔗 Bash PreToolUse<br/>フック発火"]):::auto
+  HK --> NV{"hook bypass フラグ<br/>--no-verify 等"}
+  NV -->|あり| DENY(["⛔ deny（exit 2）"]):::auto
+  NV -->|なし| CQ{"git commit か"}
+  CQ -->|No| GO(["✅ git 操作実行"])
+  CQ -->|Yes| QC["品質検査<br/>ステージ済みファイルの lint・秘密情報・コミットメッセージ"]:::auto
+  QC -->|error| DENY
+  QC -->|warning のみ| WARN(["⚠️ 警告を表示して実行"]):::auto
+  QC -->|問題なし| GO
+  WARN --> GO
 ```
 
-**トリガー**: `git commit` / `merge` / `rebase` / `push` 実行時（自動）
-**期待効果**: 普通に git 操作するだけでベストプラクティスのアドバイスが自動注入
+**トリガー**: Bash ツールでの git 操作（自動）。`--no-verify` 等の hook bypass の拒否は `commit` / `merge` / `rebase` / `push` などの git 操作が対象で、品質検査は `git commit` だけが対象
+**期待効果**: pre-commit・commit-msg・pre-push フックの握り潰しを防ぎ、コミット前に壊れたファイルや秘密情報の混入を止める。warning は止めずに表示する
 
 **実行例**: 通常の git 操作のみ。意識的に呼ぶ必要なし
+
+**他の保護フック**: `config_protection`（Edit/Write 系）と `bash_config_protection`（Bash のリダイレクト・`tee`・`sed -i` 等）は、linter/formatter の設定ファイルの書き換えを deny し、設定を弱めずコードを直す方向へ導く。`PreCompact` はコンテキスト圧縮の発生を `~/.claq/session-data/compaction-log.txt` に追記するだけで、ブロックしない
 
 ---
 
@@ -773,6 +796,15 @@ flowchart TB
 - スキルの `context: fork` は「ツール消費が報告より重く、ユーザーの応答も本文自体も親に不要」なものだけに付ける（fork は既定でバックグラウンド実行され対話・承認ゲートを持てないため）。対話/承認を伴う skill・本文や出力そのものが親の判断材料になる skill は inline。ユーザー直接起動の可否は `user-invocable` で独立に決める
 - 永続化は **SQLite（個人）** の単層。テーブルは `repos` / `knowledge` / `sessions` の 3 つだけ
 - 検索は埋め込みも FTS5 も使わず Python 側でスコアリング（ランタイム依存はゼロ、標準ライブラリのみ）
-- 知識カードを書くのは Commands の「学びの記録」ステップのみ。Agents は候補を呼び出し元へ報告する
+- 知識カードを書くのは Commands / Skills の「学びの記録」ステップのみ。Agents は書かず、候補を呼び出し元へ報告する
 
 各コマンドの詳細仕様は [`plugins/claq/commands/`](plugins/claq/commands/) 配下を参照。
+
+---
+
+## 📚 ドキュメント
+
+| 場所 | 内容 |
+|---|---|
+| [`docs/adr/`](docs/adr/README.md) | 現在有効な設計判断の基準（フック失敗の倒し方・シェル解析の境界・定義文書とサブエージェントの設計など）。役割ごとに 1 ファイル |
+| [`docs/specs/`](docs/specs/multi-api-mcp-design.md) | 設計概要書。複数の複雑な API から読み取り専用でデータを取得する MCP サーバの設計方針（`mcp-gen` の上流 API ファサードの根拠） |
