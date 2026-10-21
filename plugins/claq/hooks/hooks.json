@@ -37,7 +37,7 @@
             "timeout": 15
           }
         ],
-        "description": "Bashのリダイレクト/tee/sed -iによるlinter/formatter設定ファイルへの直接書き換えをブロックします（config_protectionのEdit/Write限定を補完）。"
+        "description": "Bashのリダイレクト/tee/sed -iなどによる、linter/formatter設定・.git/hooks・gitのフック無効化設定・claq自身のhooks.json・ホスト設定への直接書き換えをブロックします（config_protectionのEdit/Write限定を補完）。"
       },
       {
         "matcher": "^(Edit|Write|MultiEdit|edit|write|multiedit|apply_patch|search_replace)$",
@@ -63,7 +63,7 @@
             "timeout": 15
           }
         ],
-        "description": "コンテキストの圧縮前に状態を保存します"
+        "description": "コンテキスト圧縮の発生を ~/.claq/session-data/compaction-log.txt に記録します（ブロックしません）"
       }
     ],
     "SessionStart": [
