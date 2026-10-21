@@ -179,11 +179,11 @@ return new Response(response.body, { status: response.status, headers });
 
 #### WAF ルール
 
-Cloudflare WAF のマネージドルールを有効化: OWASP Core Ruleset / Cloudflare Managed Ruleset / レート制限 / ボット保護。
+Cloudflare WAF のマネージドルールセットを有効化し、レート制限とボット保護を設定する。
 
 #### 確認項目
 
-- [ ] OWASP ルール付きで WAF を有効化している
+- [ ] マネージドルールセット付きで WAF を有効化している
 - [ ] レート制限を設定している
 - [ ] ボット保護を有効化している
 - [ ] DDoS 保護を有効化している
@@ -247,35 +247,13 @@ LLM エージェントを動かす基盤は、**不信な入力（取得した�
       エージェントの自己判断で完了させない。承認をエージェント自身の出力で満たせる設計に
       しない（自己承認の禁止）
 
-## デプロイ前のクラウドセキュリティチェックリスト
-
-本番環境へのクラウドデプロイ前には必ず確認してください:
-
-- [ ] **IAM**: ルートアカウントを使用していない、MFA を有効化している、最小権限ポリシーを適用している
-- [ ] **Secrets**: すべてのシークレットを、ローテーション対応のクラウドシークレットマネージャーで管理している
-- [ ] **Network**: セキュリティグループを制限し、公開データベースを置いていない
-- [ ] **Logging**: CloudWatch/ログを有効化し、保持期間を設定している
-- [ ] **Monitoring**: 異常に対するアラートを設定している
-- [ ] **CI/CD**: OIDC 認証、シークレットスキャン、依存関係監査を実施している
-- [ ] **CDN/WAF**: OWASP ルール付きで Cloudflare WAF を有効化している
-- [ ] **Encryption**: 保存時と転送時の両方でデータを暗号化している
-- [ ] **Backups**: テスト済みの復旧手順を伴う自動バックアップを設定している
-- [ ] **Compliance**: （該当する場合）GDPR/HIPAA 要件を満たしている
-- [ ] **Documentation**: インフラを文書化し、手順書を作成している
-- [ ] **Incident Response**: セキュリティインシデント対応計画を整備している
-- [ ] **Agent Runtime**: エージェント実行ロールを最小権限・短命化し、エグレスを許可先リストで
-      絞り、ツール実行を使い捨てサンドボックスへ隔離している
-
 ## よくあるクラウドセキュリティの設定ミス
 
 - **S3 バケットの公開**: `--acl public-read` は不可。`--acl private` + 特定アクセスのみ許可する bucket policy を使う。
-- **RDS のパブリックアクセス**: `publicly_accessible = true` は不可。`false` にし `vpc_security_group_ids` で制限する。
-- **エージェントへの汎用ロール付与**: 「試行錯誤のため」と広い権限を渡したまま本番へ残す。注入が 1 回通れば、到達範囲はそのロールの権限範囲そのものになる。
 
 ## 参考資料
 
 - [AWS セキュリティのベストプラクティス](https://aws.amazon.com/security/best-practices/)
-- [CIS AWS Foundations ベンチマーク](https://www.cisecurity.org/benchmark/amazon_web_services)
 - [Cloudflare のセキュリティドキュメント](https://developers.cloudflare.com/security/)
 - [OWASP クラウドセキュリティ](https://owasp.org/www-project-cloud-security/)
 - [Terraform のセキュリティベストプラクティス](https://www.terraform.io/docs/cloud/guides/recommended-practices/)

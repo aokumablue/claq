@@ -45,8 +45,8 @@ collect_skill_create_inputs "${COMMITS:-200}"        # コミット規約・同�
 
 baseline を取る（リポジトリ直下の `.venv` を有効化する）。
 
-- `python3 -m pytest -q`（全体）と `cd plugins/claq && python3 -m pytest -q --cov`（カバレッジ）。`fail_under=100` は `plugins/claq` を cwd にしたときだけ効く（リポジトリ直下には coverage 設定が無く、100% 未満でも exit 0 になる）
-- `ruff check plugins/claq`（src と tests の両方。tests を外すと未定義名や不要な import が残る）
+- `python3 -m pytest -q`（全体）と `cd plugins/claq && python3 -m pytest -q --cov`（カバレッジ）。`fail_under=100` は `plugins/claq` を cwd にしたときだけ効く
+- `ruff check plugins/claq`
 - `python3 -m claq.ci.validate_skills`（`validate_commands` / `validate_agents` / `validate_hooks` も同じ形で 4 つすべて）
 - `python3 -m claq.ci.harness_audit repo --root plugins/claq --target-kind repo --format json`
   - audit の scope は `repo|hooks|skills|commands|agents` のキーワードで、本スキルの `--scope`（パス）とは別物
@@ -88,7 +88,7 @@ BLOCKER（CRITICAL/HIGH）の指摘を種別に分けて示し、応答を待た
 - フック修正: ハーネス依存の入出力は、stdin の読み取りを `stdin_io`、出力と共通判定を `hook_common` / `output_adapter` の関門へ寄せる（原則4）。新しいフック・外部呼び出しは非ブロッキングかつハードタイムアウト付きにする（CLAUDE.md に従う）
 - 強化: 指示文書への条項の追加は WHAT を変えるので、WHAT 不変が前提の `/refactor` ではなく直接編集する。既存の文言を再利用する（原則3）。指示・ガードを足すのは、実行で失敗が観測された場合だけにする。1 行足すごとに、効いていない行を 1 行削れないか探す
 - 仕様変更: 実装せず、`/plan` 用の要件だけを整理する
-- 修正の単位ごとに検証し（baseline と同じ 4 コマンド）、新しい失敗が出たらその単位を戻して続け、戻した分はステップ6 の残タスクに書く。作業を細かく分け、現在のブランチへ `type(scope): 要約` の規約でコミットする（main へ直接コミットしない）
+- 修正の単位ごとに検証し（ステップ1 の baseline と同じコマンド）、新しい失敗が出たらその単位を戻して続け、戻した分はステップ6 の残タスクに書く。作業を細かく分け、現在のブランチへ `type(scope): 要約` の規約でコミットする（main へ直接コミットしない）
 
 ## ステップ5: final gate（非退行ゲート）
 

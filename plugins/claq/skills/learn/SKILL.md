@@ -23,7 +23,7 @@ user-invocable: false
 | `domain` | 分類語（`testing` / `build` / `sqlite` など） |
 | `confidence` | 0.0〜1.0。確からしさ |
 | `status` | `active`（注入対象）/ `pending`（人間の昇格待ち）/ `archived` |
-| `source` | `agent`（エージェントが `claq_run claq.mem.cli learn`）/ `observer`（自動抽出）/ `human` |
+| `source` | `agent`（エージェントが `claq_run claq.mem.cli learn`）/ `human` |
 
 ## kind の使い分け
 
