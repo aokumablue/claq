@@ -464,13 +464,13 @@ flowchart LR
 ```
 
 **トリガー**: 週次・月次の品質チェック
-**期待効果**: ハーネスで自動採点しトップ3の改善案を提示（既定）。`--apply` を付けたときだけ harness-tuner が適用し、再採点で効果を検証する
+**期待効果**: ハーネスで自動採点しトップ3の改善案を提示（既定）。`--apply` を付けたときだけ harness-tuner が適用し、再採点で効果を検証する。`--target-kind` は監査対象に合わせる（自分のプロジェクトは `consumer`、claq 本体のリポジトリは `repo`。自動判定と食い違うと FAIL する）
 
 **実行例**:
 
 ```bash
-/harness repo --root . --target-kind repo           # 採点とトップ3の提示まで
-/harness repo --root . --target-kind repo --apply   # 適用と再採点まで
+/harness repo --root . --target-kind consumer           # 採点とトップ3の提示まで
+/harness repo --root . --target-kind consumer --apply   # 適用と再採点まで
 ```
 
 ---
@@ -641,7 +641,7 @@ flowchart LR
 **実行例**:
 
 ```bash
-/loop-audit 2026-08-01 以降
+/loop-audit 2026-08-01 前後で比較
 ```
 
 ---
@@ -757,7 +757,7 @@ flowchart LR
 
 **実行例**: 通常の git 操作のみ。意識的に呼ぶ必要なし
 
-**他の保護フック**: `config_protection`（Edit/Write 系）と `bash_config_protection`（Bash のリダイレクト・`tee`・`sed -i` 等）は、linter/formatter の設定ファイルの書き換えを deny し、設定を弱めずコードを直す方向へ導く。`PreCompact` はコンテキスト圧縮の発生を `~/.claq/session-data/compaction-log.txt` に追記するだけで、ブロックしない
+**他の保護フック**: `config_protection`（Edit/Write 系）と `bash_config_protection`（Bash のリダイレクト・`tee`・`sed -i` 等）は、linter/formatter の設定ファイル、`.git/hooks/`、git config のフック無効化キー、claq 自身の `hooks.json` とホスト設定（`settings.json` の `hooks` / `enabledPlugins` 等）の書き換えを deny し、設定を弱めずコードを直す方向へ導く。コミット品質検査は、同じ呼び出しで作業ツリーや index を変更してから `git commit` するとブロックする（変更と `git add` を別の呼び出しに分ける）。`PreCompact` はコンテキスト圧縮の発生を `~/.claq/session-data/compaction-log.txt` に追記するだけで、ブロックしない
 
 ---
 
