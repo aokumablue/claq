@@ -20,7 +20,6 @@
         "skills",
         "commands",
         "hooks",
-        "rules",
         "workflow",
         "plugin"
       ],
@@ -30,7 +29,6 @@
         "skills",
         "commands",
         "hooks",
-        "rules",
         "workflow",
         "plugin"
       ],
