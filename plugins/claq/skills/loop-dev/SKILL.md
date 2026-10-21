@@ -93,6 +93,7 @@ checkpoint skill は呼ばず、そのフォーマット（`../checkpoint/SKILL.
 
 - 各反復の収束判定が green になったら自動でコミットする（メッセージは変更要約 1 行。反復番号は checkpoint の反復履歴に記録するのでメッセージには書かない）
 - コミット前に対象リポジトリの CLAUDE.md / AGENTS.md / CONTRIBUTING.md のコミット禁止・ブランチ規約を確認する。禁止されていればコミットせず、出力に「未コミット（理由）」と書く
+- `--no-verify` などでフックを迂回しない（保護フックは Python 3.12 未満で fail-open するため、この行が唯一の歯止めになる環境がある）
 - `git add` と `git commit` は別々のツール呼び出しに分ける。`git add -A && git commit -m ...` のように 1 回の Bash 呼び出しにまとめると、commit 品質フック（`pre_bash_commit_quality`）が実行前の index しか見られず deny する
 - コミットの失敗（品質ガードの reject 等）は未収束として扱わない（収束条件はテスト green で、コミットは付帯動作）
 - `commit: false` なら飛ばす

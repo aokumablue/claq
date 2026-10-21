@@ -25,7 +25,7 @@ _NON_REPO_MD_REFS = {
     "CLAUDE.md": "利用者側リポジトリのファイル",
     "README.md": "利用者側リポジトリのファイル",
     "docs/adr/README.md": "利用者側リポジトリのファイル",
-    "user_notes.md": "eval の run 成果物（実行時に生成）",
+    "transcript.md": "eval の run 成果物（実行時に生成）",
 }
 # claq リポジトリのルート基準で解決する出典表記。配布物（プラグインディレクトリ）
 # には同梱されないため referrer 相対では解決できないが、リポジトリ側では実在する

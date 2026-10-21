@@ -89,7 +89,7 @@ claude plugin install claq@claq
 | [`/bugfix`](plugins/claq/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 要件整理→再現テスト確立→loop-dev 反復修正→学びの記録 の一気通貫 |
 | [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | preflight→baseline→clean→simplify→perf→review+secure→final gate の安全な自動連鎖。`--mode` で部分実行 |
 | [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。レビュー工程（ステップ1〜3）は **READ-ONLY**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース）。後処理（ステップ4）で、裏取りできた CRITICAL/HIGH だけを種別ごとに自律修正 |
-| [`/harness`](plugins/claq/commands/harness.md) | 品質管理 | `[scope] --root=<path> --target-kind=repo\|consumer [--format=text\|json] [--apply] [--audit-only]` | 監査→トップ3提示（既定はここで停止）。`--apply` で harness-tuner による改善適用と再採点まで進む |
+| [`/harness`](plugins/claq/commands/harness.md) | 品質管理 | `[scope] [--root=<path>] [--target-kind=repo\|consumer] [--format=text\|json] [--apply] [--audit-only]` | 監査→トップ3提示（既定はここで停止）。`--apply` で harness-tuner による改善適用と再採点まで進む |
 | [`/skill-gen`](plugins/claq/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--knowledge]` | 入力収集→skill-make（生成 + grader/comparator/bench-analyzer による eval）→skill-tune で改善 |
 | [`/instinct`](plugins/claq/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
 | [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→loop-dev 実装→検証。承認待ちは置かない。言語非依存 |

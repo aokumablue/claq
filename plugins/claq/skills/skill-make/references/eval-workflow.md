@@ -49,7 +49,7 @@ Execute this task:
 
 ## 3. 完了した run から timing を記録する
 
-各サブエージェントのタスクが終わると、通知に `total_tokens` と `duration_ms` が含まれる。この情報はその通知でしか取れないので、届いたらすぐ run ディレクトリの `timing.json` に保存する（後でまとめて処理しない）。
+各サブエージェントのタスクが終わると、通知に `total_tokens` と `duration_ms` が含まれる。この情報はその通知でしか取れないので、届いたらすぐ run ディレクトリの `timing.json` に保存する（後でまとめて処理しない）。サブエージェントの最終応答も同じ run ディレクトリの `transcript.md` へ保存する（grader の `transcript_path` に渡す）。
 
 ```json
 {
