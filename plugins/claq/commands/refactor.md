@@ -104,7 +104,7 @@ claq_mem_learn --kind fact --scope repo --domain <domain> \
 
 ## ステップ9: 要約
 
-次のテンプレートで示す。Issues は `claq:reviewer` と `claq:security-auditor` の統合件数。末尾にステップ8 で記録した key を 1 行で添える（記録が無ければ `Learned: なし`）。
+次のテンプレートで示す。Issues は `claq:reviewer` と `claq:security-auditor` の統合件数。部分モードで実行しなかった stage の行は件数の代わりに `skipped (--mode={mode})` と書く（0 と書くと「実行して変更なし」と区別できない）。末尾にステップ8 で記録した key を 1 行で添える（記録が無ければ `Learned: なし`）。
 
 ```text
 Unified Refactor

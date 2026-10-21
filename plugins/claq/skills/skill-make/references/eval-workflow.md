@@ -63,6 +63,8 @@ Execute this task:
 
 すべての run が終わったら:
 
+grader / comparator / bench-analyzer の返値が検証を通らなければ保存せず、推測で補った JSON も書かない。その run（比較）は判定欠落として skill-make の呼び出し元へ伝える。
+
 1. 各 run を grading する
    - grader サブエージェントを起動するか、本文に従って inline で評価する
    - grader の返値（判定 JSON）を schema 検証してから `grading.json` へ保存する。保存するのは本ワークフロー側で、grader 自身はファイルを書かない（`../../../agents/grader.md`）
