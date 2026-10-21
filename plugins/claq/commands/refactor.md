@@ -56,7 +56,7 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 
 ## 部分モード
 
-`--mode=clean` はステップ3 → 6 → 7、`--mode=simplify` はステップ4 → 6 → 7 だけを実行する。部分モードでもステップ6 と CRITICAL/HIGH のブロック判定は省かない。
+`--mode=clean` はステップ1 → 2 → 3 → 6 → 7 → 8 → 9、`--mode=simplify` はステップ1 → 2 → 4 → 6 → 7 → 8 → 9 を実行する。部分モードでもステップ6 と CRITICAL/HIGH のブロック判定は省かない。
 
 ## ステップ7: final gate
 
