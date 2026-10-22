@@ -33,7 +33,7 @@
 
 ## 上級編: 盲検比較
 
-スキルの 2 版をより厳密に比べたいときは、盲検比較を使える（`../../../agents/comparator.md` と `../../../agents/bench-analyzer.md`）。どちらがどちらかを明かさずに 2 つの出力を独立したエージェントに渡して品質を判定させ、その勝因を分析する。サブエージェントが要る。bench-analyzer（`posthoc_comparison`）へは、`compare-<ID>/comparison.json` と、`mapping.json` で引いた勝者・敗者それぞれの SKILL.md と run の `transcript.md` を渡す（`winner` が `TIE` の比較は渡さない）。返値の改善案は「5. 分析結果をもとに改善する」の材料にする。
+スキルの 2 版をより厳密に比べたいときは、盲検比較を使える（`../../../agents/comparator.md` と `../../../agents/bench-analyzer.md`）。どちらがどちらかを明かさずに 2 つの出力を独立したエージェントに渡して品質を判定させ、その勝因を分析する。サブエージェントが要る。bench-analyzer（`posthoc_comparison`。両方に SKILL.md がある `old_skill` との比較に限る）へは、`compare-<ID>/comparison.json` と、`mapping.json` で引いた勝者・敗者それぞれの SKILL.md と run の `transcript.md` を渡す（`winner` が `TIE` の比較は渡さない）。返値の改善案は「5. 分析結果をもとに改善する」の材料にする。
 
 ## 説明文の最適化
 

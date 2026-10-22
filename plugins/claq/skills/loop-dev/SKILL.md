@@ -44,7 +44,7 @@ user-invocable: false
    | 未使用コード削除 | `claq:code-refiner`（依頼文へ `mode: clean` を明示） |
    | 性能改善 | `claq:code-refiner`（依頼文へ `mode: perf` を明示） |
 
-   生成の直後に、検出したテストコマンドと linter（本リポジトリなら `python3 -m pytest -q` と `ruff check plugins/claq`。src と tests の両方）を実行し、red なら evaluate へ進む前に同じ generate の中で直す。ただし `bugfix` / `refactor-fix` で baseline が green だったテストが red になったときは、重ねて直さず、その generate が加えた編集の逆適用だけで取り消し、該当の blocker は未解消のまま残す（`git checkout --`・`git restore`・`git reset --hard`・`git stash`・`git clean` のように、呼び出し前からある未コミットの編集まで巻き込む操作は使わない）。報告する PASS/FAIL は本セッションで実際に実行したツール出力だけを根拠にし、未実行の項目は未検証と書く。Edit/Write が成功していれば確認のための再 Read はしない（失敗時はツールがエラーを返す）
+   生成の直後に、検出したテストコマンドと linter（本リポジトリなら `python3 -m pytest -q` と `ruff check plugins/claq`。src と tests の両方）を実行し、red なら evaluate へ進む前に同じ担当エージェントに直させる。ただし `bugfix` / `refactor-fix` で baseline が green だったテストが red になったときは、重ねて直さず、その generate が加えた編集の逆適用だけで取り消し、該当の blocker は未解消のまま残す（`git checkout --`・`git restore`・`git reset --hard`・`git stash`・`git clean` のように、呼び出し前からある未コミットの編集まで巻き込む操作は使わない）。報告する PASS/FAIL は本セッションで実際に実行したツール出力だけを根拠にし、未実行の項目は未検証と書く。Edit/Write が成功していれば確認のための再 Read はしない（失敗時はツールがエラーを返す）
 4. evaluate: `claq:reviewer` を必ず起動する。認証/ユーザー入力/シークレット/API エンドポイント/支払い、および外部由来の文字列をプロンプト・エージェントへ渡す実装（信頼境界・サブエージェント権限・恒久メモリへの書込み）に触れる変更のときだけ、`claq:security-auditor` を並列に加え（Bash を持たず diff を取れないため、依頼文へ diff 本文か変更ファイルの一覧を載せる）、reviewer の依頼文に並列であることを書く。並列のときは同じ応答に Agent 呼び出しを並べる
    - reviewer には `verify_mode: reexecute`、失敗テストのシグネチャ（反復履歴の tests= と同じもの）、baseline step で自ら検出・実行したテストコマンドを `test_cmd` として渡す。`task` と、あれば `approved_plan`（変更予定のテストファイル一覧を含む）も載せる（差分で足されたフォールバックの出所の照合にも使う）。generate の自己検証コマンドや「テスト通過」等の自己申告は渡さない（diff とテスト結果は reviewer が自分で取る。反復2 も同じ）
    - スコープガード: `approved_plan` に変更ファイル一覧があるときだけ、編集したファイルが一覧内かを照合し、逸脱は blocker にする（一覧の無い呼び出し元では照合しない）。ただしテスト基盤ファイル（テストランナー・カバレッジの設定や共有フィクスチャ。Python なら任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `jest.config.*`/`vitest.config.*`・`package.json` の `scripts`、共通で `Makefile` の test ターゲット・CI 設定等）の変更は一覧の有無に関わらず照合し、一覧に無ければ blocker にする
@@ -58,7 +58,7 @@ user-invocable: false
 ### 反復2（修正専用。スコープを広げない）
 
 1. plan は省き、反復1 の evaluate の blocker をそのまま修正タスクにする
-2. generate: 各 blocker を直す前に根本原因を 1 行で書く（反復履歴の rootcause に記録する。対症療法のパッチは当てない）。blocker の箇所だけを直し（新機能の追加・リファクタの拡大はしない）、自己検証する。baseline が green だったテストが red になったときの扱いは反復1 の generate と同じ（重ねて直さず、加えた編集だけを取り消す）
+2. generate: 反復1 と同じ担当表のエージェントに blocker を渡して直させる。各 blocker の根本原因を 1 行で書かせ（反復履歴の rootcause に記録する。対症療法のパッチは当てない）、blocker の箇所だけを直させ（新機能の追加・リファクタの拡大はしない）、自己検証させる。baseline が green だったテストが red になったときの扱いは反復1 の generate と同じ（重ねて直さず、加えた編集だけを取り消す）
 3. circuit breaker の判定: 自己検証の結果を反復1 のシグネチャと照合する（`## circuit breaker`）。hard trigger なら evaluate を飛ばす
 4. evaluate: reviewer を再実行する。依頼文に前回の blocker 一覧を渡し、その解消と反復2 の差分が持ち込んだ問題だけを見させる（反復1 で指摘されなかった既存コードの問題は掘り起こさない）
    - security-auditor は、反復1 の security-auditor が `Blockers` 1 以上を返したか、反復2 の差分が反復1 と同じ起動条件に触れるときだけ再実行する。依頼文には security-auditor 由来の前回 blocker 一覧と反復2 の diff 本文か変更ファイルの一覧を載せ、同じ限定で見させる。前回 blocker 一覧は出所ごとに分け、reviewer には reviewer 由来の分だけを渡す（混ぜると reviewer がセキュリティ blocker の解消を判定してしまうため）
@@ -126,10 +126,6 @@ Assumptions: {仮決定事項 or "-"}
 - `Blockers: 未判定（{reviewer|security-auditor} 未受領）`
 - `Commits: none ({reviewer|security-auditor} 未受領)`（コミットしない）
 - Checkpoint は `completed: false` のまま。`Assumptions` に未受領の子と状態を書く
-
-## ルール
-
-- 後方互換を含め、要件に無いフォールバックは置かない。古いコードは削除する
 
 ## Human Gate
 
