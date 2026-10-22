@@ -1,6 +1,6 @@
 ---
 name: maintain
-description: ハーネス（commands/skills/agents/hooks）の定期メンテを一気通貫で実施する。レビュー→修正→強化→検証→記録まで1回で完了。「ハーネスをメンテ」「プラグイン全体を見直して直す」等で発火。単発の1ファイル修正は /review /bugfix /refactor、audit スコア改善のみは /harness。
+description: ハーネス（commands/skills/agents/hooks）の定期メンテを一気通貫で実施する。「ハーネスをメンテ」「プラグイン全体を見直して直す」等で発火。単発の1ファイル修正は /review /bugfix /refactor、audit スコア改善のみは /harness。
 context: fork
 user-invocable: true
 ---
@@ -26,7 +26,7 @@ commands/skills/agents/hooks をレビューし、実害を直し、指示文書
 
 - 主対象: `plugins/claq/{commands,skills,agents,hooks}`（`--scope` で上書き）。指摘が指す実装ファイル（`src/claq/hooks/` 等）の修正も含む
 - `agents/` と定義文書の中身を変えるときは、claq リポジトリの `docs/adr/definition-and-subagent-design.md` の基準に従う（配布物には含まれない）
-- 対象外: `rules/` のメンテ / スケジューラの内蔵 / auto-push / RLS 級の新機能の実装（見つけたら `/plan` の提示に留める）
+- 対象外: スケジューラの内蔵 / auto-push / RLS 級の新機能の実装（見つけたら `/plan` の提示に留める）
 - 対象の surfaces が 1 つも見つからなければ PASS にしない。`--scope` を省いたときは cwd がリポジトリルート（`plugins/claq/` を辿れる）である前提で、対象パスが存在しなければ「対象なし・問題なし」とは報告せず、`BLOCKED: 対象 surfaces が見つかりません（cwd={現在の cwd}、想定パス={解決したパス}）。--scope で対象ディレクトリを明示してください` として止まる（別の cwd から起動すると、installed plugin のメンテを「対象なし」と誤認しうるため）
 
 ## ステップ1: 準備・入力収集（READ-ONLY）
@@ -34,13 +34,11 @@ commands/skills/agents/hooks をレビューし、実害を直し、指示文書
 ```bash
 # 開発リポジトリでは repo 版を source する（プラグインキャッシュ版は stale の可能性）
 source plugins/claq/runtime/claq-helpers.sh
-collect_skill_create_inputs "${COMMITS:-200}"        # コミット規約・同時変更パターン
 ```
 
 次の入力を集める（どれかが失敗しても本体は止めない）。
 
-- 蓄積メモリ: `python3 -m claq.mem.cli search "maintain harness 勘所 違反"` を引く（editable install が venv の `claq` をリポジトリの `plugins/claq/src` へ向けるので `PYTHONPATH` は不要）。既定の `active` だけで引き、`--status pending` を判断材料に混ぜない（`pending` は人間が `/instinct promote` を通していないカードで、混ぜるとステップ6 が書いた自分のカードが次回の自分の判断を動かす）。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要るカードだけ `python3 -m claq.mem.cli show <key>` に渡す（0 件なら何も出ない）
-- 過去のセッション: `~/.claq/session-data/checkpoint-*.md` と git log
+- 蓄積メモリ: `python3 -m claq.mem.cli search "maintain harness 勘所 違反"` を引く（editable install が venv の `claq` をリポジトリの `plugins/claq/src` へ向けるので `PYTHONPATH` は不要）。既定の `active` だけで引き、`--status pending` を判断材料に混ぜない（理由は `../learn/SKILL.md`）。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要るカードだけ `python3 -m claq.mem.cli show <key>` に渡す（0 件なら何も出ない）
 - 最新の Claude Code の動向（既定で有効。`--no-web` で無効）: WebSearch/WebFetch でハーネス設計のベストプラクティスを調べる。上限は検索 5 件・取得 3 件で、タイムアウト付き・非ブロッキングにする。失敗・オフラインなら「トレンド入力なし」と書いて続ける
 
 baseline を取る（リポジトリ直下の `.venv` を有効化する）。
@@ -85,7 +83,7 @@ BLOCKER（CRITICAL/HIGH）の指摘を種別に分けて示し、応答を待た
 
 - バグ: `claq:tdd-writer` で RED→GREEN（原則2 の現物実証）。実害のある脆弱性も同じ
 - 余剰: `claq:code-refiner`（`mode: simplify`）で削除する
-- フック修正: ハーネス依存の入出力は、stdin の読み取りを `stdin_io`、出力と共通判定を `hook_common` / `output_adapter` の関門へ寄せる（原則4）。新しいフック・外部呼び出しは非ブロッキングかつハードタイムアウト付きにする（CLAUDE.md に従う）
+- フック修正: 原則4 に従う。新しいフック・外部呼び出しは非ブロッキングかつハードタイムアウト付きにする（CLAUDE.md）
 - 強化: 指示文書への条項の追加は WHAT を変えるので、WHAT 不変が前提の `/refactor` ではなく直接編集する。既存の文言を再利用する（原則3）。指示・ガードを足すのは、実行で失敗が観測された場合だけにする。1 行足すごとに、効いていない行を 1 行削れないか探す
 - 仕様変更: 実装せず、`/plan` 用の要件だけを整理する
 - 修正の単位ごとに検証し（ステップ1 の baseline と同じコマンド）、新しい失敗が出たらその単位を戻して続け、戻した分はステップ6 の残タスクに書く。作業を細かく分け、現在のブランチへ `type(scope): 要約` の規約でコミットする（main へ直接コミットしない）
@@ -126,13 +124,12 @@ claq_mem_learn --key <slug> --kind pitfall --scope repo --domain harness \
   --title "<1 行要約>" --body "<根拠と回避法>"
 ```
 
-記録基準は `../learn/SKILL.md` の「記録する / しない」。同じ違反の 2 回目の扱い（`pending` なら同じ `key` で `confidence` を上げて更新、`active` なら何もしない）も `../learn/SKILL.md` に従う。
+記録基準は `../learn/SKILL.md` の「記録する / しない」。同じ違反の 2 回目の扱いも `../learn/SKILL.md` に従う。
 
 要約は結論から書き、修正コミット・final gate の結果・残タスク（`/plan` 提示分）を示す。
 
 ## 引数
 
 - `--scope=<path>`: 対象の上書き（既定 `plugins/claq/{commands,skills,agents,hooks}`）
-- `--commits=<n>`: 入力収集のコミット数（既定 200）
 - `--no-web`: web の動向調査を無効にする
 - `--dry-run`: ステップ1-2（audit とレビューの報告）の後、ステップ3 以降を実行せずに止まる。引数によるスコープ指定であって承認待ちではない。ステップ4 の編集もステップ6 の `claq_mem_learn` も行われない

@@ -129,7 +129,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
 
 ### 副作用の隔離
 
-DB へ書く操作は必ず後始末する。mem の DB の位置を決めるのは `CLAQ_DATA_PATH` で、`CLAQ_HOME` ではない（`mem/settings.py`）。取り違えると実 DB（`~/.claq/mem.db`）を汚す。破壊的な操作を実測するなら、使い捨ての作業ツリーと一時 DB を使う。
+DB へ書く操作は必ず後始末する。mem の DB の位置は `CLAQ_DATA_PATH`（未設定なら `CLAQ_HOME`、それも無ければ `HOME` の配下の `.claq`）で決まる（`mem/settings.py`）。ここでは `CLAQ_DATA_PATH` で隔離する。取り違えると実 DB（`~/.claq/mem.db`）を汚す。破壊的な操作を実測するなら、使い捨ての作業ツリーと一時 DB を使う。
 
 環境変数は Bash の呼び出しをまたいで残らないので、`$(mktemp -d)` は呼び出しごとに別のディレクトリになり、前の呼び出しで書いた内容を検証できない。固定パスを、毎回同じ式から導いて export する。
 
@@ -171,7 +171,7 @@ claq_run claq.ci.scan_scaffold_drift
 指摘 1 件ごとに、着手前に「直すのが本当に正しいか」を人間と判定し、`修正` / `NO-FIX（根拠付き）` のどちらかに分ける。
 
 - 裁定に届かなかった指摘は、第三の値 `Unadjudicated` に数える。合格でも不合格でもなく、終了条件2 を未達にする（`Not run` と同じ扱い）。`Pending` は `修正` と裁定済みで未着手のものだけを指すので、裁定が終わっていない指摘を `Pending` に入れない
-- 台帳には `裁定` 列（`修正` / `NO-FIX` / `未裁定`）を、進捗を表す状態列（未着手 / 修正済み）とは別に必ず持ち、計上先は 2 列の組み合わせから機械的に決める。裁定の記録が無い指摘は、状態列が「未修正」でも `Pending` ではなく `Unadjudicated`
+- 台帳には `裁定` 列（`修正` / `NO-FIX` / `未裁定`）を、進捗を表す状態列（未着手 / 修正済み）とは別に必ず持ち、計上先は 2 列の組み合わせから機械的に決める
 - NO-FIX は「直さない」判定であって「見なかった」ではない。根拠を 1 行で書き、出力に必ず載せる
 
 NO-FIX の例:
@@ -206,7 +206,7 @@ cd plugins/claq && python3 -m pytest -q --cov  # fail_under=100 はこのディ�
 
 `Scaffold-Drift` の `NOT-RUN` は 1〜4 のどれにも数えない（出力への明記だけを求める独立した行）。
 
-実行が完了したかどうか（上の 4 条件）と、リリースしてよいか（`Gate`）は別の軸である。部分実行や修正禁止の実行で `Gate: BLOCKED` が出るのは正常終了で、実行の失敗ではない。未起動は合格でも不合格でもない「未実施」として別に数え、出力でも独立した行にする（実行されないゲートはゲートとして機能しない）。
+実行が完了したかどうか（上の 4 条件）と、リリースしてよいか（`Gate`）は別の軸である。部分実行や修正禁止の実行で `Gate: BLOCKED` が出るのは正常終了で、実行の失敗ではない。
 
 ## 入力安全
 
@@ -238,7 +238,7 @@ Learned:    {知識カードの key} / なし
 ```
 
 - `Gate: BLOCKED` になるのは、`Not run` が 1 以上 / `Unadjudicated` が 1 以上 / `Build:` が `same=no` のいずれか。`same=no` のとき `Fixed` は修理 root で閉じた件数で測定 root には未反映なので、`Gate: PASS` を出さない（配布ビルドを測りながらリポジトリの修正結果で合格にしない）
-- 行の恒等式は `Findings 合計 = Fixed + NO-FIX + Pending + Unadjudicated`。どの指摘（エージェントの主張を含む）も 4 行のどれかに入る。恒等式の母集合は `Findings` 行で、単位は指摘。再現していない指摘は `unrated` に数え、`= {合計}` には 4 スロットすべての和を書く。コンポーネント単位の数（`Invoked` / `Not run` / `Unspecified`）は恒等式に入れない
+- 行の恒等式は `Findings 合計 = Fixed + NO-FIX + Pending + Unadjudicated`。どの指摘（エージェントの主張を含む）も 4 行のどれかに入る。恒等式の母集合は `Findings` 行で、単位は指摘。`= {合計}` には 4 スロットすべての和を書く。コンポーネント単位の数（`Invoked` / `Not run` / `Unspecified`）は恒等式に入れない
 - `Scaffold-Drift` の `DRIFT` / `NOT-RUN` は BLOCKED の条件に加えない。`DRIFT` は通常の指摘として恒等式に入るので `Pending` / `Unadjudicated` 経由で判定に効く。`NOT-RUN` は出力への明記を必須にする一方、単独では BLOCKED にしない（コーパスが無いホストや root ポインタが未記録のホストで常に BLOCKED になるのを避けるため）
 - NO-FIX は件数だけでなく理由を 1 行ずつ添える。末尾に記録した知識カードの key を 1 行書く（無ければ `Learned: なし`）
 

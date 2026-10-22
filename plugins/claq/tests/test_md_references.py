@@ -685,8 +685,8 @@ def test_harness_tuner_schema_example_matches_real_max_score() -> None:
 def test_md_max_score_mentions_match_real_audit() -> None:
     """md が散文へ書き写した `max_score` が実装の実測値と一致すること。
 
-    `harness-tuner.md` の JSON 例だけを照合すると、`commands/harness.md` の
-    「`max_score`（`repo` では58）」は素通りする。`max_score` は check の
+    `harness-tuner.md` の JSON 例だけを照合すると、散文へ書き写した
+    「`max_score`（`repo` では N）」の形は素通りする。`max_score` は check の
     points 合計なので check を足すたびに変わり、ずれると満点尺度が黙って狂う。
     docs/adr/definition-and-subagent-design.md の「定義に書いた検証規則は CI で実測する」の適用。
     """

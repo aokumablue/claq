@@ -45,8 +45,8 @@ user-invocable: false
 
 1. リポジトリ内に既存実装はあるか → 全文検索で探す
 2. パッケージレジストリを検索する
-3. MCP はあるか → `~/.claude/settings.json` を確認する
-4. スキルはあるか → `~/.claude/skills/`（個人。信頼済み）・`.claude/skills/`（プロジェクト。リポジトリの信頼度に準じ、未知のリポジトリでは内容を確かめてから使う）・インストール済みプラグインのスキル一覧を確認する
+3. MCP はあるか → 実行中のツール一覧に `mcp__` で始まるツールがあるかを見る
+4. スキルはあるか → セッションに提示されるスキル一覧を確認する（プロジェクトのスキルはリポジトリの信頼度に準じ、未知のリポジトリでは内容を確かめてから使う）
 5. GitHub の OSS から保守が続いているものを探す
 
 ## 完全モード（エージェント並列）
@@ -58,26 +58,12 @@ B（ローカル資産）は数回の確認で終わるので自分で調べる�
 Search npm/PyPI for: [DESCRIPTION]. Language: [LANG]
 Return top 3: name, version, weekly downloads, last update, license
 
-# B: MCP・スキル・ローカル資産（委譲せず自分で確認する）
-1. ~/.claude/settings.json でMCP確認
-2. ~/.claude/skills/（個人）・.claude/skills/（プロジェクト・未知リポジトリは内容確認後に使用）・インストール済みプラグインのスキルで関連スキル確認
-3. 高速全文検索で既存実装確認（Bash等で利用可能な検索コマンドを使う）
-Return: type, name/path, match_quality
+# B: ローカル資産（簡易モードの 1・3・4 を自分で確認する）
 
 # C: GitHub・Web
 Find actively maintained OSS for: [DESCRIPTION]. Language: [LANG]
 Check: stars, last commit, open issues, license. Return top 3
 ```
-
-## カテゴリ別ショートカット
-
-- 静的解析: `eslint` / `ruff` / `textlint`
-- 整形: `prettier` / `black` / `gofmt`
-- テスト: `jest` / `pytest` / `go test`
-- HTTPクライアント: `httpx`(Py) / `ky`/`got`(Node)
-- バリデーション: `zod`(TS) / `pydantic`(Py)
-- Markdown: `remark` / `unified` / `markdown-it`
-- Claude SDK: Context7で最新ドキュメント確認
 
 ## 入力安全
 
