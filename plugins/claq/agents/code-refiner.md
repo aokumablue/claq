@@ -123,7 +123,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 
 字面の grep はファイル名・シンボル名を静的に探すだけなので、次の経路で生きているファイルを未参照と誤判定しうる。削除前に確認する。
 
-- マニフェストのディレクトリ読み込み — `.claude-plugin/plugin.json` がディレクトリ単位で登録する定義ファイル（`agents/`・`skills/`・`commands/` 配下等）はファイル名がコードに現れない
+- 定義ファイルの自動読み込み — `skills/`・`commands/` は `.claude-plugin/plugin.json` がディレクトリ単位で登録し、`agents/` は既定の場所から自動で読み込まれる。どちらもファイル名がコードに現れない
 - frontmatter の `user-invocable` — `user-invocable: true` の skill はコマンド名の文字列ではなく frontmatter 経由で発火する。`false` でも散文からの参照だけで生きている場合がある
 - description ベースの dispatch — agent/skill はキーワードではなく `description` の意味で選ばれることがある
 - `hooks.json` の event/matcher 登録 — hook モジュールは `hooks.json` 内のドット区切り文字列（`claq.hooks.xxx`）としてだけ参照され、import 文には現れない

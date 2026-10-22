@@ -95,7 +95,7 @@ cp -R /abs/skill/mcp-gen/assets/facade-overlay/facade /abs/path/to/dest/facade
 
 `references/tool-design.md` を読み、ツールの一覧（名前・類型・引数・出力・注釈）を決める。
 上流の API を包むなら `references/facade.md` も読み、正規ドメインモデルと項目カタログを決める。
-問いのカタログの全ての問いに、答えるツール呼び出しの列があること。
+問いのカタログを作ったなら、その全ての問いに答えるツール呼び出しの列があること。
 
 ### 4. 編集する
 

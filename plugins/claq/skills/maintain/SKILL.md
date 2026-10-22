@@ -95,7 +95,7 @@ BLOCKER（CRITICAL/HIGH）の指摘を種別に分けて示し、応答を待た
 1. `validate_{skills,commands,agents,hooks}` / `pytest --cov` / `ruff` が baseline から退行していない（新しい失敗がゼロ。baseline の既存の失敗はステップ3 の分類に従う）
 2. 今回修正したファイルに起因する失敗がゼロ
 3. `harness_audit` の `overall_score` が baseline から退行していない。`Security Guardrails` は保護フックの存在を測るだけで実効性は測らない（満点のままバイパスが素通りしうる）。実効性の回帰は pytest 側の block / allow のコマンド一覧が担うので、満点を「保護が効いている」と読み替えない
-4. `scan_scaffold_drift` が exit 0（実 transcript に未知の足場タグが無い）
+4. `scan_scaffold_drift` が exit 0（実 transcript に未知の足場タグが無い）。exit 2（走査対象ゼロ）は未実施として報告し、繰り返しの条件にしない
 
 ```bash
 . "$HOME/.claq/env.sh" || exit 127

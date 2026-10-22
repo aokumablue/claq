@@ -97,13 +97,13 @@ jobs:
     permissions:
       contents: read           # 最小権限
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@<コミット SHA>  # サードパーティの Action は SHA で固定する
       - name: Secret scanning   # シークレット走査
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@<コミット SHA>
       - name: Audit dependencies
         run: npm audit --audit-level=high
       - name: Configure AWS credentials  # 長期トークンでなく OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@<コミット SHA>
         with:
           role-to-assume: arn:aws:iam::123456789:role/GitHubActionsRole
           aws-region: us-east-1
@@ -112,6 +112,7 @@ jobs:
 #### 確認項目
 
 - [ ] 長期有効な認証情報の代わりに OIDC を使用している
+- [ ] サードパーティの Action をコミット SHA で固定している
 - [ ] パイプラインでシークレットスキャンを実施している
 - [ ] 依存関係の脆弱性スキャンを行っている
 - [ ] コンテナイメージスキャンを行っている（該当する場合）

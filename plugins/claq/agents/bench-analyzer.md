@@ -35,7 +35,7 @@ tools: Read, Grep, Glob
 
 ### 入力
 
-- winner: `"A"` または `"B"`（ブラインド比較の結果）
+- winner: `"A"` または `"B"`（ブラインド比較の結果。`"TIE"` の比較は勝因が無いので分析せず **FAIL** を返す）
 - winner_skill_path: 勝者の出力を生んだ skill へのパス
 - winner_transcript_path: 勝者の実行トランスクリプトへのパス
 - loser_skill_path: 敗者の出力を生んだ skill へのパス

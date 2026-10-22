@@ -95,7 +95,7 @@ claq_mem_learn --key prod-build-env-not-injected --kind pitfall --scope repo \
 
 - 別の key で作り直さない（重複カードになり、注入枠を二重に使う）
 - 本文を変えたい・確信度を上げたいときは人間に頼む（注入対象を決めるのは `status` で、`active` のカードの `confidence` を上げる実益は無い）
-- 内容が陳腐化したら、更新ではなく `forget <key>` で `archived` にする
+- 内容が陳腐化したら、更新ではなく `forget` の候補として key と理由を人間に示す（実行は `/instinct` の承認を経る）
 
 
 ## 参照する
@@ -110,7 +110,7 @@ claq_run claq.mem.cli show prod-build-env-not-injected   # body を読む唯一�
 
 ## 陳腐化した知識の扱い
 
-削除せず `claq_run claq.mem.cli forget <key>` で `archived` にする。置き換えた場合は `claq_run claq.mem.cli forget <old-key> --superseded-by <new-key>` で置換関係を残す。
+削除せず `archived` にする。agent は候補として key と理由を示し、実行は `/instinct` の承認を経る（`forget` は注入済みの知識も落とすため）。置き換えた場合は `forget <old-key> --superseded-by <new-key>` で置換関係を残す。
 
 ## 入力安全
 
