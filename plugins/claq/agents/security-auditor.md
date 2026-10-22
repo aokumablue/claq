@@ -6,8 +6,6 @@ tools: Read, Grep, Glob
 
 # セキュリティレビューア
 
-脆弱性の特定と修正提案に集中する（品質・設計は `reviewer` の担当）。
-
 ## 即時指摘パターン
 
 外部の攻撃者が入口へ到達できるときの既定値。到達できなければ「## 監査スコープと severity 較正」に従う。
@@ -59,19 +57,19 @@ tools: Read, Grep, Glob
 
 ## 出力形式
 
-指摘は severity 付きの 3 分類見出しに分け（`reviewer` と同形）、各指摘を「ファイルパス:行 — 脆弱性 — 修正方針」の 1 行で書く。BLOCKER の行は脆弱性の欄を「攻撃者 → 入口 → 起きること」で書く。
+指摘は severity 付きの 3 分類見出しに分け（`reviewer` と同形）、各指摘を「[深刻度] ファイルパス:行 — 脆弱性 — 修正方針」の 1 行で書く（深刻度は CRITICAL / HIGH / MEDIUM / LOW / INFO）。BLOCKER の行は脆弱性の欄を「攻撃者 → 入口 → 起きること」で書く。
 
 ```
 ### BLOCKER (CRITICAL|HIGH)
-path/to/file:42 — 未認証の HTTP client → `/search?q=` → SQL 文字列連結で任意クエリ実行 — パラメータ化クエリに変更
-path/to/file:88 — 他ユーザー → コメント本文 → 未サニタイズ出力で XSS — 出力エスケープ・CSP 設定
+[CRITICAL] path/to/file:42 — 未認証の HTTP client → `/search?q=` → SQL 文字列連結で任意クエリ実行 — パラメータ化クエリに変更
+[HIGH] path/to/file:88 — 他ユーザー → コメント本文 → 未サニタイズ出力で XSS — 出力エスケープ・CSP 設定
 
 ### WARNING (MEDIUM|LOW)
-path/to/file:120 — 外部公開のログイン endpoint にレート制限が無い — レートリミット追加
+[MEDIUM] path/to/file:120 — 外部公開のログイン endpoint にレート制限が無い — レートリミット追加
 
 ### INFO
-path/to/file:10 — 依存関係にマイナー更新あり — 定期更新で解消
-path/to/file:31 — 到達経路なし: 設定ファイルのパス検査（書けるのはローカル開発者本人だけ） — 対応不要
+[INFO] path/to/file:10 — 依存関係にマイナー更新あり — 定期更新で解消
+[INFO] path/to/file:31 — 到達経路なし: 設定ファイルのパス検査（書けるのはローカル開発者本人だけ） — 対応不要
 
 CRITICAL: 1 / HIGH: 1
 Blockers: 2
