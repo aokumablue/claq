@@ -24,6 +24,8 @@ _COPIES = (
     Path("skills") / "quick-refactor" / "SKILL.md",
     Path("skills") / "quick-review" / "SKILL.md",
     Path("skills") / "mcp-gen" / "SKILL.md",
+    Path("skills") / "html-gen" / "SKILL.md",
+    Path("skills") / "release-verify" / "SKILL.md",
 )
 
 
