@@ -48,7 +48,7 @@ requires-python: >=3.10
 | middleware | `MCPServer.middleware`（暫定の API。2.x の minor で形が変わりうる）。`ctx.method` と検証前の `ctx.params` を読める。`tools/list` と `tools/call` の結果は dict（camelCase のキー）で届く。middleware が dict を返すとそのまま送られる（`resultType` は自分で入れる） | guard はこの形に依存する。版を上げたら smoke で確かめる |
 | 公開中のツール | `await mcp.list_tools()` が `name` / `input_schema` を持つツール定義を返す（公開 API） | guard が許される引数名をここから得る |
 | エラーの文面 | `ToolError` は文面が届き、`ValueError` は伏せられる（2.1.1 と同じ） | 変更なし |
-| ツール本体の `MCPError` | `MCPError(code, message)` を投げると、`isError` のツール実行エラーではなく JSON-RPC error（`code` と `message` がそのまま）で返る。2.1.1 では `UnexpectedToolError` に包まれて文面が伏せられた | ツール本体では投げず、`ToolError` を使う |
+| ツール本体の `MCPError` | `MCPError(code, message)` を投げると、`isError` のツール実行エラーではなく JSON-RPC error（`code` と `message` がそのまま）で返る | ツール本体では投げず、`ToolError` を使う |
 | 形が壊れた `tools/call` | `name` が無い・型が違うと JSON-RPC error `-32602`（`Invalid request parameters`） | 自分では作らない |
 | 未知のメソッド | JSON-RPC error `-32601`（`Method not found`） | 自分では作らない |
 | MRTR | リゾルバ（`Resolve` + `Elicit`）と `ElicitationResult` で、承認と拒否の両分岐が 2.1.1 と同じ形で通る。guard は再送（`inputResponses` 付き）を妨げない | smoke_config の `MRTR_CASES` で検査する |
@@ -182,18 +182,6 @@ async def danger(target: str, confirm: Annotated[Confirm, Resolve(ask_confirm)])
 | `Annotated[T, Resolve(fn)]` | `true` | `Error executing tool bare: Resolver for parameter 'c' could not resolve: elicitation was decline` |
 | `Annotated[ElicitationResult[T], Resolve(fn)]` | `false` | ハンドラが返した文字列（例 `aborted (decline)`） |
 
-`ElicitationResult` の import 元は `Elicit` / `Resolve` と同じ
-`mcp.server.mcpserver`。確認用途の完全な形:
-
-```python
-@mcp.tool()
-async def danger(target: str, confirm: Annotated[ElicitationResult[Confirm], Resolve(ask_confirm)]) -> str:
-    """確認を取ってから破壊的操作を行う。"""
-    if confirm.action != "accept":
-        return f"中止しました（{confirm.action}）"
-    return "削除しました" if confirm.data.approve else "中止しました"
-```
-
 つまり素の `T` は「拒否＝呼び出しの失敗」という意味になる。
 **確認・同意の用途では `ElicitationResult[T]` を使う**（拒否は正常な結果であり、
 「中止しました」を戻り値で返せる必要があるため）。素の `T` が適切なのは、
@@ -206,6 +194,69 @@ accept のときだけ埋まる `data` を持つ。
   新規実装では使わない。実質使うのは `Elicit` だけ。
 - クライアントが対応 capability を宣言していない場合、SDK は
   `MissingRequiredClientCapability`（`-32021`）を返す。
+
+### 確認用途の完全な形と smoke の設定
+
+`ElicitationResult` の import 元は `Elicit` / `Resolve` と同じ `mcp.server.mcpserver`（`Field`・`ToolAnnotations`・`BaseModel` はスケルトンの `server.py` と同じ import）。
+
+```python
+from mcp.server.mcpserver import Elicit, ElicitationResult, Resolve
+
+
+class Confirm(BaseModel):
+    """削除の確認。"""
+
+    approve: bool
+
+
+class DeleteResult(BaseModel):
+    """削除の結果。"""
+
+    deleted: bool = Field(description="削除したか")
+    message: str = Field(description="結果の説明")
+
+
+def ask_confirm(item_id: str) -> Elicit[Confirm]:
+    """削除の確認を求める。リゾルバはツール引数を名前で受け取れる。"""
+    return Elicit(f"{item_id} を削除してよいですか", Confirm)
+
+
+@mcp.tool(
+    description="項目を削除する。実行前に利用者の確認を取る。",
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False),
+)
+async def items_delete(
+    item_id: Annotated[str, Field(min_length=1, description="項目 ID")],
+    confirm: Annotated[ElicitationResult[Confirm], Resolve(ask_confirm)],
+) -> DeleteResult:
+    """確認を取ってから削除する。"""
+    if confirm.action != "accept":
+        return DeleteResult(deleted=False, message=f"中止しました（{confirm.action}）")
+    if not confirm.data.approve:
+        return DeleteResult(deleted=False, message="中止しました")
+    return DeleteResult(deleted=True, message="削除しました")
+```
+
+- 確認・同意では `ElicitationResult[T]` で受ける。素の `T` で受けると拒否が
+  ツール実行エラーになり、「中止しました」を正常な戻り値で返せない。
+  素の `T` が適切なのは「拒否＝呼び出しの失敗」でよい場合だけ。
+- `smoke_config.py` に次を足し、承認と拒否の両分岐を検査する（1 往復目だけでは、拒否が
+  エラーになる実装の誤りを見つけられない）。`CLIENT_CAPABILITIES` が無いと `-32021` で落ちる。
+  書き込みのツールを足したので `READ_ONLY_SERVER = False` にする。
+
+  ```python
+  CLIENT_CAPABILITIES: dict = {"elicitation": {"form": {}}}
+  MRTR_CASES: list = [
+      {"tool": "items_delete", "arguments": {"item_id": "item-1"}, "action": "accept",
+       "content": {"approve": True}, "expected_is_error": False, "expected_text": "削除しました"},
+      {"tool": "items_delete", "arguments": {"item_id": "item-1"}, "action": "decline",
+       "expected_is_error": False, "expected_text": "中止しました"},
+  ]
+  ```
+
+- 承認分岐が事前状態に依存するなら、ケースに `"setup": [(ツール名, 引数), ...]` を足して
+  同一プロセスへ先に送る（空のストアへの削除は「対象が無い」エラーになり、配線の正否を
+  判別できない）。
 
 実測ワイヤ（1 往復目 → 再送 → 完了）:
 
@@ -252,7 +303,6 @@ accept のときだけ埋まる `data` を持つ。
 | `ToolError("count は 1..100")` | `Error executing tool t: count は 1..100` | **直せる** |
 | `ValueError("count は 1..100")` | `Error executing tool t` | 直せない（本文が消える） |
 | `RuntimeError(...)` | `Error executing tool t` | 直せない |
-| `MCPError(ErrorData(...))` | `Error executing tool t` | 直せない（`UnexpectedToolError` に包まれる） |
 
 ```python
 from mcp.server.mcpserver.exceptions import ToolError
@@ -262,12 +312,9 @@ from mcp.server.mcpserver.exceptions import ToolError
 `MCPServerError` / `ToolError` / `UnexpectedToolError` /
 `ResourceError` / `ResourceNotFoundError` / `UnexpectedResourceError`。
 
-上流ドキュメントの判断基準は「賢いモデルなら避けられた失敗か？」
-— Yes なら `ToolError`、No なら `MCPError`。ただし**ツール本体から投げた
-`MCPError` は、2.1.1 ではツール実行エラーに包まれて本文が伏せられ、2.3.0 ではツール実行
-エラーにならず JSON-RPC error として本文ごと返る**（2.3.0 の節）ため、ツール内での使い分け
-としては機能していない。ツール本体では `ToolError` を使い、それ以外の例外は「クラッシュ（本文は
-サーバログのみ）」として扱うのが実態に合う。
+上流ドキュメントは「賢いモデルなら避けられた失敗か」で `ToolError` と `MCPError` を分けるが、
+ツール本体から投げた `MCPError` は JSON-RPC error になる（2.3.0 の表）。ツール本体では `ToolError` を使い、
+それ以外の例外はクラッシュ（本文はサーバログのみ）として扱う。
 
 ### 引数の制約は Field で宣言する（自前の if より強い）
 
@@ -371,7 +418,7 @@ logger.info("searching for %r", query)
 | `_meta` の `serverInfo` | 自動 | `version=` を渡していれば載る |
 | `inputSchema` / `outputSchema` 生成 | 自動 | 型注釈から |
 | `structuredContent` + テキスト併記 | 自動 | 後方互換のミラーも SDK が出す |
-| 例外 → `isError: true` 変換 | 自動 | `ValueError` 等がツール実行エラーになる |
+| 例外 → `isError: true` 変換 | 自動 | `ValueError` 等がツール実行エラーになる（`MCPError` を除く） |
 | `ttlMs` / `cacheScope` の**有用な値** | **手動** | 既定は `0` / `private` ＝ 即時陳腐化 |
 | `allowed_hosts` / `allowed_origins` | **手動** | 既定は空リスト |
 
@@ -429,21 +476,7 @@ SDK リポジトリの `examples/` のみ。
 | `MCP-Protocol-Version` あり・`Mcp-Method` なし | `400` `-32020` `mcp-method header does not match the request body's method` |
 | MCP エンドポイントへの `GET` | `400` |
 
-### `Missing session ID` に釣られないこと
-
-`MCP-Protocol-Version` ヘッダを付け忘れると、SDK は**旧版（セッションがあった頃）の
-経路へフォールバック**し、`Bad Request: Missing session ID` を返す。
-
-このメッセージは**この仕様に存在しない機構を名指ししている**。真に受けて
-セッション ID を付けようとすると、まさに廃止された `Mcp-Session-Id` を
-実装しにいくことになる。正しい対処は**プロトコル版ヘッダを付けること**。
-`-32600` かつ本文にセッションの語が出たら、まずヘッダの付け忘れを疑う。
-
-1 行目は仕様どおり（`Mcp-Name` が必須なのは `tools/call` /
-`resources/read` / `prompts/get` だけで、`tools/list` には要らない）。
-2 行目も仕様どおり（`MCP-Protocol-Version` 欠落は `400`）。
-
-3 行目は**仕様との差異**。仕様はこの版のみを実装するサーバが GET に
-`405 Method Not Allowed` を返すことを SHOULD としているが、SDK 2.1.1 は `400` を返す。
-旧クライアントの後方互換探索は `400` / `404` / `405` のいずれでも
-フォールバックへ進むため実害は無いが、`405` を期待した検査を書くと落ちる。
+1〜3 行目は仕様どおり（`Mcp-Name` が要るのは `tools/call` / `resources/read` / `prompts/get` だけ。
+`MCP-Protocol-Version` 欠落は `400`。本文と食い違うヘッダは `-32020`）。4 行目は仕様との差異: 仕様は GET に
+`405` を SHOULD とするが SDK 2.1.1 は `400` を返す。旧クライアントの探索は `400` / `404` / `405` のどれでも
+進むので実害は無いが、`405` を期待した検査は落ちる。

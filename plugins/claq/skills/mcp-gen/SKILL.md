@@ -9,7 +9,7 @@ user-invocable: true
 ## 大前提: スケルトンを複製し、記憶で書かない
 
 2026-07-28 は旧仕様を削除した破壊的改訂である。学習データにある形も、
-星の多い既存サーバ（公式リファレンス実装ですら `mcp<2` 固定）も、旧仕様である。
+星の多い既存サーバも、旧仕様である。
 
 最悪なのは、旧仕様でも import が通りサーバが起動すること。クラッシュしない
 ので誤りに気づけない。ゼロから書かず、写経もせず、`assets/` のスケルトンを複製する。
@@ -39,7 +39,7 @@ user-invocable: true
 - トランスポート: stdio（既定）か Streamable HTTP
 - ツール実行の途中で確認・追加入力が要るか → 要るなら MRTR（後述）
 - 状態を跨いで保持するか → 要るならハンドル設計
-- 認証の要否（HTTP のみ）→ 要るなら `references/remote-auth.md`（実装はスケルトンの範囲外）
+- 認証の要否（HTTP のみ）
 
 重ねるスケルトンと読む参照は、要件の特性で決める。規模（ツールの数や行数）では決めない。
 
@@ -50,8 +50,7 @@ user-invocable: true
 | 応答の入れ子が深い・項目が多い・件数が多い | 同上（段階開示・サイズ予算・カーソル） |
 | 複数の上流 API を結合して答える | 同上（ファンアウトと部分失敗） |
 | 共有のリモート（複数の利用者）・個人情報を返す | `references/remote-auth.md` |
-| ツールが 10 を超える | `references/tool-design.md` のツールセット |
-| 実行中に利用者の確認が要る | 本書の MRTR 節 |
+| 実行中に利用者の確認が要る | `references/sdk-api-evidence.md` の MRTR 節 |
 
 上流の API を包むときは、ツールを決める前に問いのカタログを作る。利用者が実際に聞く問いを
 10〜30 件集め、それぞれに「どのツールをどの引数で呼べば答えられるか」を書く
@@ -59,13 +58,13 @@ user-invocable: true
 
 ### 2. スケルトンを複製する
 
-スケルトンはスキル起動時に提示されるベースディレクトリの `assets/` にある。提示が無いときだけ次で探す（Claude Code のキャッシュ配置に固有のフォールバックで、他ホストではベースディレクトリの提示が必須）。`/Users` や `$HOME` 全体を起点にしない（返ってこない）。
+スケルトンはスキル起動時に提示されるベースディレクトリの `assets/` にある。提示が無いときは、次が返す plugin root の `skills/mcp-gen/assets/` を使う（失敗したら止めて報告する）。
 
 ```bash
-find "$HOME/.claude/plugins/cache" -maxdepth 7 -type d -path '*/mcp-gen/assets/template'
+. "$HOME/.claq/env.sh" && claq_plugin_root
 ```
 
-複製先は完全なリテラル絶対パスで書く（`$VAR` を含めると保護フックに止められる）。
+複製先は完全なリテラル絶対パスで書く。
 共通スケルトンは常に複製する。
 
 ```bash
@@ -90,7 +89,7 @@ cp -R /abs/skill/mcp-gen/assets/facade-overlay/facade /abs/path/to/dest/facade
 
 `pyproject.toml` は `pyproject.toml.template` の中身を読んで Write ツールで作る。重ね合わせたなら
 `only-include` に `"adapters.py"` と `"facade"` を足す。
-Bash 経由の書き込みは `bash_config_protection` に、Write/Edit は `config_protection` に検査される。生成先が claq リポジトリ外なら通るが、`ignore` / `select` / `exclude` / `addopts` / `fail_under` や lint セクション見出しを含む内容は経路によらず deny される。
+（Bash で書くと、生成先が作業中の git リポジトリ内なら内容によらず保護フックに止められる。Write でも lint・テスト・カバレッジの節やキー（`ignore` / `select` / `exclude` / `addopts` / `fail_under` 等）を含むと止められる）
 
 ### 3. ツールを設計する
 
@@ -107,7 +106,6 @@ Bash 経由の書き込みは `bash_config_protection` に、Write/Edit は `con
 
 触らない: `install_guard(mcp)` と `run(mcp)` の呼び出し、`guard.py`、`smoke_check.py`、
 `smoke_static.py`、`facade/` の部品。`transport.py` は公開するホスト名を足すとき以外は触らない。
-stdio だけの要件でも `--http` は残す。
 
 ツールの書き方（説明・引数・出力・失敗・注釈・状態）は `references/tool-design.md` に従う。
 検査の対象は `smoke_config.py` に書く。値の選び方はファイル内のコメントに従い、サンプルの
@@ -137,18 +135,16 @@ stdio だけの要件でも `--http` は残す。
 
 ### 5. 検証する（省略不可）
 
-`mcp` が入った interpreter の絶対パス（以下 `$PY`）で実行する。`smoke_check.py` は
-サーバを `sys.executable` で起動するため、裸の `python3` で呼ぶとサーバ側だけが
-`ModuleNotFoundError` で死ぬ。
+`mcp` が入った interpreter の絶対パス（以下 `$PY`）で実行する。
 
 ```bash
-"$PY" smoke_check.py
+"$PY" /abs/path/to/dest/smoke_check.py
 ```
 
 exit code 0 を確認するまで完了報告しない。`FAIL` の文面には直し方が書いてある。
 旧仕様の名前が当たったときは、その意味を `references/spec-2026-07-28.md` の表で確かめる。
-`WARN` が出たら SDK が新しいプロトコル版へ進んでいる。スケルトンを信じず、先に SDK の
-changelog を読み直す。
+`WARN` は文面に従う（走査できなかったファイルは、そのファイルに旧仕様の名前が無いかを確かめる。版の不一致なら、
+スケルトンを信じず先に SDK の changelog を読み直す）。
 
 ### 6. 登録と評価の手順を渡す
 
@@ -159,69 +155,9 @@ README の「エージェントでの評価」の手順と合わせて渡す（�
 
 ## MRTR（ツール実行中の確認・追加入力）
 
-スケルトンには入れていない。必要になったら足す。`ctx.elicit()` は使わない
-（旧経路。ステートレス下では失敗する）。正しい経路はリゾルバによる依存注入:
-
-```python
-from mcp.server.mcpserver import Elicit, ElicitationResult, Resolve
-
-
-class Confirm(BaseModel):
-    """削除の確認。"""
-
-    approve: bool
-
-
-class DeleteResult(BaseModel):
-    """削除の結果。"""
-
-    deleted: bool = Field(description="削除したか")
-    message: str = Field(description="結果の説明")
-
-
-def ask_confirm(item_id: str) -> Elicit[Confirm]:
-    """削除の確認を求める。リゾルバはツール引数を名前で受け取れる。"""
-    return Elicit(f"{item_id} を削除してよいですか", Confirm)
-
-
-@mcp.tool(
-    description="項目を削除する。実行前に利用者の確認を取る。",
-    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False),
-)
-async def items_delete(
-    item_id: Annotated[str, Field(min_length=1, description="項目 ID")],
-    confirm: Annotated[ElicitationResult[Confirm], Resolve(ask_confirm)],
-) -> DeleteResult:
-    """確認を取ってから削除する。"""
-    if confirm.action != "accept":
-        return DeleteResult(deleted=False, message=f"中止しました（{confirm.action}）")
-    if not confirm.data.approve:
-        return DeleteResult(deleted=False, message="中止しました")
-    return DeleteResult(deleted=True, message="削除しました")
-```
-
-- 確認・同意では `ElicitationResult[T]` で受ける。素の `T` で受けると拒否が
-  ツール実行エラーになり、「中止しました」を正常な戻り値で返せない。
-  素の `T` が適切なのは「拒否＝呼び出しの失敗」でよい場合だけ。
-- `smoke_config.py` に次を足し、承認と拒否の両分岐を検査する（1 往復目だけでは、拒否が
-  エラーになる実装の誤りを見つけられない）。`CLIENT_CAPABILITIES` が無いと `-32021` で落ちる。
-  書き込みのツールを足したので `READ_ONLY_SERVER = False` にする。
-
-  ```python
-  CLIENT_CAPABILITIES: dict = {"elicitation": {"form": {}}}
-  MRTR_CASES: list = [
-      {"tool": "items_delete", "arguments": {"item_id": "item-1"}, "action": "accept",
-       "content": {"approve": True}, "expected_is_error": False, "expected_text": "削除しました"},
-      {"tool": "items_delete", "arguments": {"item_id": "item-1"}, "action": "decline",
-       "expected_is_error": False, "expected_text": "中止しました"},
-  ]
-  ```
-
-- 承認分岐が事前状態に依存するなら、ケースに `"setup": [(ツール名, 引数), ...]` を足して
-  同一プロセスへ先に送る（空のストアへの削除は「対象が無い」エラーになり、配線の正否を
-  判別できない）。
-
-詳細と実測ワイヤ、`requestState` の完全性保護要件は `references/sdk-api-evidence.md`。
+スケルトンには入れていない。要るときは `references/sdk-api-evidence.md` の MRTR 節の形で足し、
+同節の `smoke_config.py` の設定（承認と拒否の両分岐）を書く。`ctx.elicit()` は使わない（旧経路。
+ステートレス下では失敗する）。
 
 ## スケルトンの範囲外
 
@@ -239,15 +175,6 @@ HTTP の OAuth と、複数インスタンスでの運用。スケルトンの H
 - HTTP で `400 Bad Request: Missing session ID` → `MCP-Protocol-Version` ヘッダの
   付け忘れ。この仕様にセッションは存在しない。真に受けて実装すると廃止済みの
   機構を作り込む。
-
-## 参照
-
-- `references/tool-design.md` — ツールの類型・数・名前・説明・引数・出力・失敗・注釈・状態の規則
-- `references/facade.md` — 上流 API ファサードの重ね合わせ（正規化・段階開示・予算・カーソル・合成・上流の呼び出し）
-- `references/remote-auth.md` — リモート配置の認可、上流の資格情報、データ層の認可
-- `references/spec-2026-07-28.md` — 削除・追加・非推奨の一覧、`_meta` 予約キー、
-  セキュリティ必須事項、smoke が検出する旧仕様の名前の意味
-- `references/sdk-api-evidence.md` — `mcp` 2.x の実測 API と実測ワイヤ JSON
 
 ## 永続メモリ
 
