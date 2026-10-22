@@ -61,14 +61,8 @@ grader エージェントの返値。形式と不変条件は `../../../agents/g
 ```json
 {
   "total_tokens": 84852,
-  "duration_ms": 23332,
-  "total_duration_seconds": 23.3,
-  "executor_start": "2026-01-15T10:30:00Z",
-  "executor_end": "2026-01-15T10:32:45Z",
-  "executor_duration_seconds": 165.0,
-  "grader_start": "2026-01-15T10:32:46Z",
-  "grader_end": "2026-01-15T10:33:12Z",
-  "grader_duration_seconds": 26.0
+  "tool_uses": 12,
+  "duration_ms": 23332
 }
 ```
 
@@ -102,8 +96,7 @@ eval-workflow §4 の集約結果。`<workspace>/iteration-<N>/benchmark.json` �
         "total": 7,
         "time_seconds": 42.5,
         "tokens": 3800,
-        "tool_calls": 18,
-        "errors": 0
+        "tool_calls": 18
       },
       "expectations": [
         {"text": "...", "passed": true, "evidence": "..."}
@@ -149,15 +142,16 @@ eval-workflow §4 の集約結果。`<workspace>/iteration-<N>/benchmark.json` �
   - `runs_per_configuration`: 構成ごとの実行回数（例: 3）
 - `runs[]`: 個々の実行結果
   - `eval_id`: 数値ID
-  - `eval_name`: 人間向けのeval名
+  - `eval_name`: eval ディレクトリ名
   - `configuration`: `"with_skill"` か、比較ベースラインの `"without_skill"` / `"old_skill"`（既存スキル改善パスは `old_skill` を出力する）。ベースライン名は fixture 全体で一方だけに揃える
   - `run_number`: 実行番号（1, 2, 3...）
-  - `result`: `pass_rate`/`passed`/`total`/`time_seconds`/`tokens`/`errors` を含む
+  - `result`: `pass_rate`/`passed`/`failed`/`total`/`time_seconds`/`tokens`/`tool_calls` を含む（`time_seconds` は timing.json の `duration_ms` ÷ 1000、`tool_calls` は `tool_uses`）。計測できない値は `null` にし、理由をその run の `notes` に書く（`0` で代用しない）
   - `expectations`: 期待値ごとの判定。**欠けると `bench-analyzer` が FAIL する**
+  - `notes`: その run の補足（計測できなかった値の理由など）
 - `run_summary`: 構成ごとの統計
   - `with_skill` と使用したベースライン（`without_skill` または `old_skill`）: それぞれ `pass_rate`/`time_seconds`/`tokens` の `mean` と `stddev`
   - `delta`: `"+0.50"` などの差分文字列
-- `notes`: bench-analyzer（`benchmark_analysis` モード）の返値（文字列配列）
+- `notes`: eval-workflow §4 の 2 では `[]` で作り、3 で bench-analyzer（`benchmark_analysis` モード）の返値（文字列配列）に置き換える
 
 **重要**: フィールド名はこのスキーマのとおりにする（`configuration` を `config` にしない、`pass_rate` を `result` の外に置かない）。benchmark.jsonを手で作る場合はこのスキーマを必ず参照。
 

@@ -90,7 +90,7 @@ claude plugin install claq@claq
 | [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | preflight→baseline→clean→simplify→perf→review+secure→final gate の安全な自動連鎖。`--mode` で部分実行 |
 | [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。レビュー工程（ステップ1〜3）は **READ-ONLY**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース）。後処理（ステップ4）で、裏取りできた CRITICAL/HIGH だけを種別ごとに自律修正 |
 | [`/harness`](plugins/claq/commands/harness.md) | 品質管理 | `[scope] [--root=<path>] [--target-kind=repo\|consumer] [--format=text\|json] [--apply] [--audit-only]` | 監査→トップ3提示（既定はここで停止）。`--apply` で harness-tuner による改善適用と再採点まで進む |
-| [`/skill-gen`](plugins/claq/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--knowledge]` | 入力収集→skill-make（生成 + grader/comparator/bench-analyzer による eval）→skill-tune で改善 |
+| [`/skill-gen`](plugins/claq/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--knowledge]` | 入力収集→skill-make（生成・grader/comparator/bench-analyzer による eval・改善）→完了ゲート |
 | [`/instinct`](plugins/claq/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
 | [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→loop-dev 実装→検証。承認待ちは置かない。言語非依存 |
 
@@ -556,7 +556,7 @@ flowchart LR
 
   U(["🛠️ スキル作成依頼"]) --> CSG["/skill-gen"]:::cmd
 
-  subgraph skillgen["⚙️ skill-gen 内部（5ステップ）"]
+  subgraph skillgen["⚙️ skill-gen 内部（4ステップ）"]
     direction TB
     COL["入力収集<br/>collect_skill_create_inputs"] --> PAT["パターン検出"]
     PAT --> SM["skill-make<br/>SKILL.md生成"]:::skill
@@ -569,14 +569,14 @@ flowchart LR
 
     SM --> loop
     loop -->|"改善"| SM
-    loop -->|"完了ゲート"| ST["skill-tune<br/>実行評価→最小修正の反復"]:::skill
+    loop -->|"止める条件"| GATE{{"完了ゲート<br/>実行証跡・判定の整合"}}
   end
 
   CSG --> skillgen
 ```
 
 **トリガー**: 新スキル作成・既存スキル改善
-**期待効果**: 生成→eval→ベンチマーク分析が自動連鎖し、skill-tune が連続 2 回の新規不明瞭点ゼロと指標の安定で収束判定
+**期待効果**: 生成→eval→ベンチマーク分析→改善が自動連鎖し、新しい失敗と eval の改善案が出なくなった時点で止まる。完了ゲートが実行証跡と判定の整合を確かめる
 
 **実行例**:
 
