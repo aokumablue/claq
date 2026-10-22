@@ -8,457 +8,247 @@ pyproject.toml 等はファイル名だけでは保護できない（version bum
 
 from __future__ import annotations
 
-import json
 import pathlib
 import time
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from claq.hooks import config_protection
 
-
-def _run(monkeypatch: pytest.MonkeyPatch, payload: dict) -> int:
-    """config_protection.main() を実行し終了コードを返す。"""
-    monkeypatch.setattr(config_protection, "read_raw_stdin_with_truncation", lambda: (json.dumps(payload), False))
-    return config_protection.main()
+from ._support import _run, _write_content
 
 
-class TestWrite:
-    """Write（新規全内容）に対する判定。"""
-
-    def test_blocks_content_with_lint_section_header(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Write",
-                "tool_input": {"file_path": "pyproject.toml", "content": "[tool.ruff]\nignore=[]"},
-            },
-        )
-        assert code == 2
-
-    def test_allows_version_bump_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Write",
-                "tool_input": {"file_path": "pyproject.toml", "content": '[project]\nversion="0.9.32"'},
-            },
-        )
-        assert code == 0
-
-    def test_blocks_setup_cfg_flake8_section(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Write",
-                "tool_input": {"file_path": "setup.cfg", "content": "[flake8]\nmax-line-length = 200"},
-            },
-        )
-        assert code == 2
-
-    def test_blocks_package_json_eslint_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Write",
-                "tool_input": {"file_path": "package.json", "content": '{"eslintConfig": {"rules": {}}}'},
-            },
-        )
-        assert code == 2
-
-    def test_allows_package_json_without_lint_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Write",
-                "tool_input": {"file_path": "package.json", "content": '{"name": "x", "version": "1.0.1"}'},
-            },
-        )
-        assert code == 0
-
-    def test_blocks_when_content_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """content が無い（取得不能）場合は fail-closed で deny する。"""
-        code = _run(
-            monkeypatch,
-            {"tool_name": "Write", "tool_input": {"file_path": "pyproject.toml"}},
-        )
-        assert code == 2
+def _edit(file_path: str, old_string: str, new_string: str, tool_name: str = "Edit") -> dict[str, Any]:
+    """Edit 系ツールの payload を組み立てる。"""
+    return {
+        "tool_name": tool_name,
+        "tool_input": {"file_path": file_path, "old_string": old_string, "new_string": new_string},
+    }
 
 
-class TestEdit:
-    """Edit（old_string/new_string の断片のみ）に対する判定。"""
+def _multi_edit(edits: list[dict[str, str]]) -> dict[str, Any]:
+    """pyproject.toml への MultiEdit の payload を組み立てる。"""
+    return {"tool_name": "MultiEdit", "tool_input": {"file_path": "pyproject.toml", "edits": edits}}
 
-    def test_blocks_header_visible_in_new_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": "pyproject.toml",
-                    "old_string": "[tool.pytest.ini_options]\naddopts = '-v'",
-                    "new_string": "[tool.pytest.ini_options]\naddopts = ''",
-                },
-            },
-        )
-        assert code == 2
 
-    def test_blocks_value_line_without_header_via_key_match(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """見出しを含まない値行編集（fail_under 100→80）も副判定のキー照合で拾う。"""
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": "pyproject.toml",
-                    "old_string": "fail_under = 100",
-                    "new_string": "fail_under = 80",
-                },
-            },
-        )
-        assert code == 2
+def _apply_patch(*body: str) -> dict[str, Any]:
+    """pyproject.toml を更新する apply_patch（tool_input が生のパッチ文字列）の payload を組み立てる。"""
+    patch = "*** Begin Patch\n*** Update File: pyproject.toml\n@@\n" + "".join(body) + "*** End Patch\n"
+    return {"tool_name": "apply_patch", "tool_input": patch}
 
-    def test_allows_unrelated_value_edit(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": "pyproject.toml",
-                    "old_string": 'version = "0.9.31"',
-                    "new_string": 'version = "0.9.32"',
-                },
-            },
-        )
-        assert code == 0
 
-    def test_blocks_when_old_string_resolves_to_lint_section_on_disk(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
-        """見出しがスニペットに現れなくても、ディスク上の現在の内容から所属セクションを解決する（主判定）。"""
+_VERSION_EDIT = {"old_string": 'version = "0.9.31"', "new_string": 'version = "0.9.32"'}
+
+# (payload, ディスク上の現在の内容, 期待 exit code)。
+# ディスク内容が None の行は cwd を動かさない（プラグインルートの実ファイルを主判定が読む経路のまま）。
+# 文字列の行は tmp へ移って file_path にその内容を置き、主判定（所属セクションの解決）を効かせる。
+_CASES = [
+    # --- Write（新規全内容） ---
+    pytest.param(_write_content("pyproject.toml", "[tool.ruff]\nignore=[]"), None, 2, id="write-lint-section-header"),
+    pytest.param(_write_content("pyproject.toml", '[project]\nversion="0.9.32"'), None, 0, id="write-version-bump-only"),
+    pytest.param(
+        _write_content("setup.cfg", "[flake8]\nmax-line-length = 200"), None, 2, id="write-setup-cfg-flake8-section"
+    ),
+    pytest.param(
+        _write_content("package.json", '{"eslintConfig": {"rules": {}}}'), None, 2, id="write-package-json-eslint-config"
+    ),
+    pytest.param(
+        _write_content("package.json", '{"name": "x", "version": "1.0.1"}'),
+        None,
+        0,
+        id="write-package-json-without-lint-keys",
+    ),
+    # content が無い（取得不能）場合は fail-closed。
+    pytest.param(
+        {"tool_name": "Write", "tool_input": {"file_path": "pyproject.toml"}}, None, 2, id="write-content-missing"
+    ),
+    # --- Edit（old_string/new_string の断片のみ） ---
+    pytest.param(
+        _edit(
+            "pyproject.toml",
+            "[tool.pytest.ini_options]\naddopts = '-v'",
+            "[tool.pytest.ini_options]\naddopts = ''",
+        ),
+        None,
+        2,
+        id="edit-header-visible-in-new-string",
+    ),
+    # 見出しを含まない値行編集（fail_under 100→80）も副判定のキー照合で拾う。
+    pytest.param(
+        _edit("pyproject.toml", "fail_under = 100", "fail_under = 80"), None, 2, id="edit-value-line-key-match"
+    ),
+    pytest.param(_edit("pyproject.toml", **_VERSION_EDIT), None, 0, id="edit-unrelated-value"),
+    # 見出しがスニペットに現れなくても、ディスク上の現在の内容から所属セクションを解決する（主判定）。
+    pytest.param(
+        _edit("pyproject.toml", "some_new_key = 1", "some_new_key = 2"),
+        "[project]\nname = 'x'\n\n[tool.ruff.lint]\nselect = ['E']\nsome_new_key = 1\n",
+        2,
+        id="edit-resolves-to-lint-section-on-disk",
+    ),
+    pytest.param(
+        _edit("pyproject.toml", "description = 'old'", "description = 'new'"),
+        "[project]\nname = 'x'\ndescription = 'old'\n",
+        0,
+        id="edit-resolves-to-non-lint-section-on-disk",
+    ),
+    pytest.param(
+        {"tool_name": "Edit", "tool_input": {"file_path": "pyproject.toml"}},
+        None,
+        2,
+        id="edit-old-and-new-string-missing",
+    ),
+    # 既知の write/multiedit 以外（例: search_replace）は Edit 相当として扱う。
+    pytest.param(
+        _edit("pyproject.toml", "select = ['E']", "select = []", tool_name="search_replace"),
+        None,
+        2,
+        id="unknown-write-tool-treated-as-edit",
+    ),
+    # --- tox.ini の `[testenv]`/`[testenv:*]` の commands 系キー ---
+    pytest.param(
+        _write_content("tox.ini", "[testenv]\ncommands = pytest --no-cov\n"), None, 2, id="tox-write-testenv-commands"
+    ),
+    # `[testenv:py312]` のようなサブ環境見出しも前方一致で拾う。
+    pytest.param(
+        _write_content("tox.ini", "[testenv:py312]\ncommands = pytest --no-cov\n"),
+        None,
+        2,
+        id="tox-write-named-subenvironment",
+    ),
+    pytest.param(_write_content("tox.ini", "[tox]\ndescription = 'ci'\n"), None, 0, id="tox-write-description-only"),
+    pytest.param(
+        _write_content("tox.ini", "[testenv]\ncommands_pre = echo ok\n"), None, 2, id="tox-write-commands-pre"
+    ),
+    pytest.param(
+        _write_content("tox.ini", "[testenv]\ncommands_post = echo ok\n"), None, 2, id="tox-write-commands-post"
+    ),
+    # 見出しを含まない値行編集（`commands = ...` のみ）も tox.ini 専用キー照合で拾う。
+    pytest.param(
+        _edit("tox.ini", "commands = pytest", "commands = pytest --no-cov"), None, 2, id="tox-edit-commands-value-line"
+    ),
+    # tox.ini 限定分岐のため、他ファイルの `commands` という語自体は誤検出しない。
+    pytest.param(
+        _edit("pyproject.toml", 'description = "old commands here"', 'description = "new commands here"'),
+        None,
+        0,
+        id="pyproject-commands-word-not-blocked",
+    ),
+    pytest.param(
+        _edit("tox.ini", "some_new_key = 1", "some_new_key = 2"),
+        "[tox]\nenvlist = py312\n\n[testenv:py312]\ncommands = pytest\nsome_new_key = 1\n",
+        2,
+        id="tox-edit-resolves-to-testenv-on-disk",
+    ),
+    pytest.param(
+        _edit("tox.ini", "description = 'old'", "description = 'new'"),
+        "[tox]\nenvlist = py312\ndescription = 'old'\n",
+        0,
+        id="tox-edit-resolves-to-non-testenv-on-disk",
+    ),
+    # --- MultiEdit ---
+    pytest.param(
+        _multi_edit([_VERSION_EDIT, {"old_string": "ignore = ['E501']", "new_string": "ignore = ['E501', 'F401']"}]),
+        None,
+        2,
+        id="multiedit-any-edit-touches-lint-key",
+    ),
+    pytest.param(_multi_edit([_VERSION_EDIT]), None, 0, id="multiedit-no-lint-signal"),
+    pytest.param(
+        {"tool_name": "MultiEdit", "tool_input": {"file_path": "pyproject.toml"}}, None, 2, id="multiedit-edits-missing"
+    ),
+    # --- apply_patch ---
+    pytest.param(
+        _apply_patch("-[tool.coverage.report]\n", "-fail_under = 100\n", "+[tool.coverage.report]\n", "+fail_under = 50\n"),
+        None,
+        2,
+        id="apply-patch-lint-section",
+    ),
+    pytest.param(
+        _apply_patch('-version = "0.9.31"\n', '+version = "0.9.32"\n'), None, 0, id="apply-patch-without-lint-signal"
+    ),
+]
+
+
+@pytest.mark.parametrize(("payload", "disk", "expected"), _CASES)
+def test_conditional_protection(
+    payload: dict[str, Any], disk: str | None, expected: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """編集内容が lint 設定を弱めうるときだけ deny する。"""
+    if disk is not None:
         monkeypatch.chdir(tmp_path)
-        target = tmp_path / "pyproject.toml"
-        target.write_text(
-            "[project]\nname = 'x'\n\n[tool.ruff.lint]\nselect = ['E']\nsome_new_key = 1\n",
-            encoding="utf-8",
-        )
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": "pyproject.toml",
-                    "old_string": "some_new_key = 1",
-                    "new_string": "some_new_key = 2",
-                },
-            },
-        )
-        assert code == 2
+        (tmp_path / payload["tool_input"]["file_path"]).write_text(disk, encoding="utf-8")
 
-    def test_allows_when_old_string_resolves_to_non_lint_section_on_disk(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
-        """ディスク上で lint 系以外のセクションに属すると判定できれば、その断片は主判定でブロックしない。"""
-        monkeypatch.chdir(tmp_path)
-        target = tmp_path / "pyproject.toml"
-        target.write_text("[project]\nname = 'x'\ndescription = 'old'\n", encoding="utf-8")
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": "pyproject.toml",
-                    "old_string": "description = 'old'",
-                    "new_string": "description = 'new'",
-                },
-            },
-        )
-        assert code == 0
-
-    def test_blocks_when_old_string_and_new_string_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {"tool_name": "Edit", "tool_input": {"file_path": "pyproject.toml"}},
-        )
-        assert code == 2
+    assert _run("config_protection", payload, monkeypatch) == expected
 
 
-class TestToxIni:
-    """tox.ini の `[testenv]`/`[testenv:*]` の commands 系キー検出。"""
-
-    def test_blocks_write_with_testenv_commands(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Write",
-                "tool_input": {"file_path": "tox.ini", "content": "[testenv]\ncommands = pytest --no-cov\n"},
-            },
-        )
-        assert code == 2
-
-    def test_blocks_named_subenvironment_via_prefix_match(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """`[testenv:py312]` のようなサブ環境見出しも前方一致で拾う。"""
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Write",
-                "tool_input": {
-                    "file_path": "tox.ini",
-                    "content": "[testenv:py312]\ncommands = pytest --no-cov\n",
-                },
-            },
-        )
-        assert code == 2
-
-    def test_allows_version_or_description_only_edit(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """正当な非コマンド編集（description 等）は許可する。"""
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Write",
-                "tool_input": {"file_path": "tox.ini", "content": "[tox]\ndescription = 'ci'\n"},
-            },
-        )
-        assert code == 0
-
-    def test_blocks_commands_pre_and_commands_post(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        for key in ("commands_pre", "commands_post"):
-            code = _run(
-                monkeypatch,
-                {
-                    "tool_name": "Write",
-                    "tool_input": {"file_path": "tox.ini", "content": f"[testenv]\n{key} = echo ok\n"},
-                },
-            )
-            assert code == 2, key
-
-    def test_blocks_commands_value_line_without_header_via_key_match(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """見出しを含まない値行編集（`commands = ...` のみ）も tox.ini 専用キー照合で拾う。"""
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": "tox.ini",
-                    "old_string": "commands = pytest",
-                    "new_string": "commands = pytest --no-cov",
-                },
-            },
-        )
-        assert code == 2
-
-    def test_pyproject_toml_commands_key_is_not_blocked_globally(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """tox.ini 限定分岐のため、他ファイルの `commands` という語自体は誤検出しない。"""
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": "pyproject.toml",
-                    "old_string": 'description = "old commands here"',
-                    "new_string": 'description = "new commands here"',
-                },
-            },
-        )
-        assert code == 0
-
-    def test_blocks_when_old_string_resolves_to_testenv_section_on_disk(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
-        """見出しがスニペットに現れなくても、ディスク上の現在の内容から `[testenv:*]` 所属を解決する（主判定）。"""
-        monkeypatch.chdir(tmp_path)
-        target = tmp_path / "tox.ini"
-        target.write_text(
-            "[tox]\nenvlist = py312\n\n[testenv:py312]\ncommands = pytest\nsome_new_key = 1\n",
-            encoding="utf-8",
-        )
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": "tox.ini",
-                    "old_string": "some_new_key = 1",
-                    "new_string": "some_new_key = 2",
-                },
-            },
-        )
-        assert code == 2
-
-    def test_allows_when_old_string_resolves_to_non_testenv_section_on_disk(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
-        monkeypatch.chdir(tmp_path)
-        target = tmp_path / "tox.ini"
-        target.write_text("[tox]\nenvlist = py312\ndescription = 'old'\n", encoding="utf-8")
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": "tox.ini",
-                    "old_string": "description = 'old'",
-                    "new_string": "description = 'new'",
-                },
-            },
-        )
-        assert code == 0
+@pytest.mark.parametrize(
+    ("tool_name", "container", "expected"),
+    [
+        pytest.param("apply_patch", {"input": "*** patch ***"}, ["*** patch ***"], id="apply-patch-dict-with-input"),
+        pytest.param("apply_patch", {"other": "x"}, None, id="apply-patch-dict-without-input"),
+        pytest.param("apply_patch", 123, None, id="apply-patch-wrong-type"),
+        # Edit 系で container が dict でない（想定外の shape）場合は判定不能扱い。
+        pytest.param("Edit", "raw string, not dict", None, id="edit-container-not-dict"),
+    ],
+)
+def test_editable_text(tool_name: str, container: Any, expected: list[str] | None) -> None:
+    """_editable_text の分岐（実 JSON 経路では組み立てにくい枝）。"""
+    assert config_protection._editable_text(tool_name, container) == expected
 
 
-class TestMultiEdit:
-    def test_blocks_when_any_edit_touches_lint_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "MultiEdit",
-                "tool_input": {
-                    "file_path": "pyproject.toml",
-                    "edits": [
-                        {"old_string": 'version = "0.9.31"', "new_string": 'version = "0.9.32"'},
-                        {"old_string": "ignore = ['E501']", "new_string": "ignore = ['E501', 'F401']"},
-                    ],
-                },
-            },
-        )
-        assert code == 2
-
-    def test_allows_when_no_edit_touches_lint_signal(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "MultiEdit",
-                "tool_input": {
-                    "file_path": "pyproject.toml",
-                    "edits": [
-                        {"old_string": 'version = "0.9.31"', "new_string": 'version = "0.9.32"'},
-                    ],
-                },
-            },
-        )
-        assert code == 0
-
-    def test_blocks_when_edits_field_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        code = _run(
-            monkeypatch,
-            {"tool_name": "MultiEdit", "tool_input": {"file_path": "pyproject.toml"}},
-        )
-        assert code == 2
+def test_resolve_lint_section_empty_snippet_is_undetermined() -> None:
+    """空の断片はディスク上のセクションを判定できない。"""
+    assert config_protection._resolve_lint_section_from_disk("pyproject.toml", "") is None
 
 
-class TestApplyPatch:
-    def test_blocks_patch_text_with_lint_section(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        patch_text = (
-            "*** Begin Patch\n"
-            "*** Update File: pyproject.toml\n"
-            "@@\n"
-            "-[tool.coverage.report]\n"
-            "-fail_under = 100\n"
-            "+[tool.coverage.report]\n"
-            "+fail_under = 50\n"
-            "*** End Patch\n"
-        )
-        code = _run(monkeypatch, {"tool_name": "apply_patch", "tool_input": patch_text})
-        assert code == 2
+def test_resolve_lint_section_read_failure_is_undetermined(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """読み取りが失敗したら判定不能（読み取りは open + 上限付き read で行う）。"""
+    target = tmp_path / "pyproject.toml"
+    target.write_text("[project]\nname = 'x'\n", encoding="utf-8")
 
-    def test_allows_patch_text_without_lint_signal(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        patch_text = (
-            "*** Begin Patch\n"
-            "*** Update File: pyproject.toml\n"
-            "@@\n"
-            '-version = "0.9.31"\n'
-            '+version = "0.9.32"\n'
-            "*** End Patch\n"
-        )
-        code = _run(monkeypatch, {"tool_name": "apply_patch", "tool_input": patch_text})
-        assert code == 0
+    def _boom(*args, **kwargs):
+        """open を常に失敗させる。"""
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("pathlib.Path.open", _boom)
+    assert config_protection._resolve_lint_section_from_disk(str(target), "name") is None
 
 
-class TestEditableTextUnitLevel:
-    """_editable_text の分岐を直接叩く単体テスト（実 JSON 経路では組み立てにくい枝）。"""
+def test_resolve_lint_section_read_is_capped_at_max_stdin_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """読み取り量に上限があること（無制限だと hook timeout を踏んで allow へ倒れる）。"""
+    target = tmp_path / "pyproject.toml"
+    target.write_text("[tool.ruff]\nignore = ['E']\n", encoding="utf-8")
+    requested: list[int | None] = []
+    real_open = pathlib.Path.open
 
-    def test_apply_patch_dict_container_with_input_key(self) -> None:
-        result = config_protection._editable_text("apply_patch", {"input": "*** patch ***"})
-        assert result == ["*** patch ***"]
+    def _spy_open(self, *args, **kwargs):
+        """open したハンドルの read に渡された上限を記録する。"""
+        handle = real_open(self, *args, **kwargs)
+        real_read = handle.read
 
-    def test_apply_patch_dict_container_without_input_key(self) -> None:
-        assert config_protection._editable_text("apply_patch", {"other": "x"}) is None
+        def _read(size=None):
+            """要求サイズを記録して本物の read へ渡す。"""
+            requested.append(size)
+            return real_read(size)
 
-    def test_apply_patch_container_wrong_type(self) -> None:
-        assert config_protection._editable_text("apply_patch", 123) is None
+        handle.read = _read
+        return handle
 
-    def test_non_apply_patch_container_not_dict(self) -> None:
-        """Edit 系で container が dict でない（想定外の shape）場合は判定不能扱い。"""
-        assert config_protection._editable_text("Edit", "raw string, not dict") is None
+    monkeypatch.setattr("pathlib.Path.open", _spy_open)
+    config_protection._resolve_lint_section_from_disk(str(target), "ignore")
 
-
-class TestResolveLintSectionFromDiskUnitLevel:
-    """_resolve_lint_section_from_disk の分岐を直接叩く単体テスト。"""
-
-    def test_empty_snippet_is_undetermined(self) -> None:
-        assert config_protection._resolve_lint_section_from_disk("pyproject.toml", "") is None
-
-    def test_read_failure_is_undetermined(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-        """読み取りが失敗したら判定不能（読み取りは open + 上限付き read で行う）。"""
-        target = tmp_path / "pyproject.toml"
-        target.write_text("[project]\nname = 'x'\n", encoding="utf-8")
-
-        def _boom(*args, **kwargs):
-            raise OSError("permission denied")
-
-        monkeypatch.setattr("pathlib.Path.open", _boom)
-        assert config_protection._resolve_lint_section_from_disk(str(target), "name") is None
-
-    def test_read_is_capped_at_max_stdin_bytes(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-        """読み取り量に上限があること（無制限だと hook timeout を踏んで allow へ倒れる）。"""
-        target = tmp_path / "pyproject.toml"
-        target.write_text("[tool.ruff]\nignore = ['E']\n", encoding="utf-8")
-        requested: list[int | None] = []
-        real_open = pathlib.Path.open
-
-        def _spy_open(self, *args, **kwargs):
-            handle = real_open(self, *args, **kwargs)
-            real_read = handle.read
-
-            def _read(size=None):
-                requested.append(size)
-                return real_read(size)
-
-            handle.read = _read
-            return handle
-
-        monkeypatch.setattr("pathlib.Path.open", _spy_open)
-        config_protection._resolve_lint_section_from_disk(str(target), "ignore")
-
-        assert requested == [config_protection.MAX_STDIN_BYTES]
-
-    def test_snippet_before_any_section_header_is_not_lint(self, tmp_path) -> None:
-        """先頭セクション見出しより前（トップレベル）に見つかった場合は lint 系ではない。"""
-        target = tmp_path / "setup.cfg"
-        target.write_text("# leading comment\ntop_level_marker\n[flake8]\nmax-line-length = 100\n", encoding="utf-8")
-        result = config_protection._resolve_lint_section_from_disk(str(target), "top_level_marker")
-        assert result is False
+    assert requested == [config_protection.MAX_STDIN_BYTES]
 
 
-class TestUnknownTool:
-    def test_unrecognized_write_tool_shape_is_treated_as_edit_and_denied_when_empty(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """既知の write/multiedit 以外（例: search_replace）は Edit 相当として扱う。"""
-        code = _run(
-            monkeypatch,
-            {
-                "tool_name": "search_replace",
-                "tool_input": {
-                    "file_path": "pyproject.toml",
-                    "old_string": "select = ['E']",
-                    "new_string": "select = []",
-                },
-            },
-        )
-        assert code == 2
+def test_resolve_lint_section_snippet_before_any_header_is_not_lint(tmp_path: Path) -> None:
+    """先頭セクション見出しより前（トップレベル）に見つかった場合は lint 系ではない。"""
+    target = tmp_path / "setup.cfg"
+    target.write_text("# leading comment\ntop_level_marker\n[flake8]\nmax-line-length = 100\n", encoding="utf-8")
+    assert config_protection._resolve_lint_section_from_disk(str(target), "top_level_marker") is False
 
 
 class TestLintKeyPatternIsLinear:
@@ -481,33 +271,26 @@ class TestLintKeyPatternIsLinear:
     _SIZE = 200_000
 
     @pytest.mark.parametrize(
-        "pattern_name", ["_LINT_KEY_PATTERN", "_TOX_COMMAND_KEY_PATTERN"]
+        ("pattern_name", "text"),
+        [
+            # 改行だけの入力（最悪ケース）。
+            ("_LINT_KEY_PATTERN", "\n" * _SIZE),
+            ("_TOX_COMMAND_KEY_PATTERN", "\n" * _SIZE),
+            # 行頭インデント付きの非一致テキスト。
+            ("_LINT_KEY_PATTERN", ("    \t" * 20 + "\n") * 4_000),
+        ],
+        ids=["lint-key-newlines", "tox-command-key-newlines", "lint-key-mixed-indent"],
     )
-    def test_whitespace_only_input_returns_quickly(self, pattern_name: str) -> None:
-        """改行だけの入力（最悪ケース）が上限時間内に一致なしで返る。"""
+    def test_non_matching_input_returns_quickly(self, pattern_name: str, text: str) -> None:
+        """一致しない空白主体の入力が上限時間内に一致なしで返る。"""
         pattern = getattr(config_protection, pattern_name)
-        text = "\n" * self._SIZE
 
         started = time.monotonic()
         match = pattern.search(text)
         elapsed = time.monotonic() - started
 
         assert match is None
-        assert elapsed < self._CEILING_SECONDS, (
-            f"{pattern_name} took {elapsed:.3f}s for {self._SIZE} newlines "
-            f"(二次オーダーへ回帰した疑い)"
-        )
-
-    def test_mixed_indent_input_returns_quickly(self) -> None:
-        """行頭インデント付きの非一致テキストでも線形であること。"""
-        text = ("    \t" * 20 + "\n") * 4_000
-
-        started = time.monotonic()
-        match = config_protection._LINT_KEY_PATTERN.search(text)
-        elapsed = time.monotonic() - started
-
-        assert match is None
-        assert elapsed < self._CEILING_SECONDS
+        assert elapsed < self._CEILING_SECONDS, f"{pattern_name} took {elapsed:.3f}s (二次オーダーへ回帰した疑い)"
 
     @pytest.mark.parametrize(
         ("text", "expected"),
@@ -528,26 +311,18 @@ class TestLintKeyPatternIsLinear:
         assert bool(config_protection._LINT_KEY_PATTERN.search(text)) is expected
 
 
-class TestLintSignalTextLengthCap:
-    """`_text_has_protected_signal` の走査量上限。"""
+@pytest.mark.parametrize(
+    ("excess", "expected"),
+    [
+        # 上限超過は走査せず True（ブロック）。打ち切って走査を続ける（truncate）形にすると、
+        # 上限より後ろに lint キーを置くだけで条件付き保護を素通りできるため fail-closed 側へ倒す。
+        pytest.param(1, True, id="over-cap-blocks-fail-closed"),
+        # 陰性対照: 上限を入れたことで「大きいだけの正当な書き込み」まで deny へ倒れていない。
+        pytest.param(-1, False, id="large-harmless-text-under-cap"),
+    ],
+)
+def test_lint_signal_text_length_cap(excess: int, expected: bool) -> None:
+    """`_text_has_protected_signal` は走査量の上限を超えるテキストを fail-closed で扱う。"""
+    text = "x" * (config_protection._LINT_SIGNAL_MAX_TEXT_BYTES + excess)
 
-    def test_over_cap_text_blocks_fail_closed(self) -> None:
-        """上限超過のテキストは走査せず True（ブロック）を返す。
-
-        打ち切って走査を続ける（truncate）形にすると、上限より後ろに lint
-        キーを置くだけで条件付き保護を素通りできる新しいバイパスになるため、
-        fail-closed 側へ倒す。
-        """
-        text = "x" * (config_protection._LINT_SIGNAL_MAX_TEXT_BYTES + 1)
-
-        assert config_protection._text_has_protected_signal(text, "pyproject.toml") is True
-
-    def test_large_but_harmless_text_under_cap_is_not_blocked(self) -> None:
-        """上限内の大きな非 lint テキストは False（陰性対照）。
-
-        上限を入れたことで「大きいだけの正当な書き込み」まで deny へ倒れて
-        いないことを固定する。
-        """
-        text = "x" * (config_protection._LINT_SIGNAL_MAX_TEXT_BYTES - 1)
-
-        assert config_protection._text_has_protected_signal(text, "pyproject.toml") is False
+    assert config_protection._text_has_protected_signal(text, "pyproject.toml") is expected
