@@ -1,6 +1,6 @@
 ---
 name: bugfix
-description: バグを再現→原因分析→最小修正→回帰防止→レビューまで一気通貫で進める。
+description: バグを再現テストから回帰防止まで一気通貫で直す。設計変更は /plan、品質改善は /refactor。
 command: /bugfix
 ---
 
@@ -23,7 +23,7 @@ command: /bugfix
 
 1. 症状・期待動作・実際の動作を分ける
 2. 症状に関係するコード・既存テスト・直近の変更（git log）を、依頼に書かれていない関連箇所も含めて読み、再現条件・入力・環境差分・影響範囲を確認する
-3. 仕様バグ・設計欠陥の疑いがあれば、修正前に切り分ける
+3. 仕様バグ・設計欠陥の疑いがあれば、修正前に切り分け、設計変更は /plan、品質改善は /refactor へ回す
 
 ## ステップ2: 再現テスト確立
 
@@ -48,8 +48,8 @@ loop-dev の収束または停止の報告を受け取ったらステップ4へ�
 | 見つけたもの | kind | title に書くこと |
 |---|---|---|
 | 原因が非自明で、同じ状況なら次も踏む罠 | `pitfall` | 症状ではなく回避条件（「X するときは Y が要る」） |
-| 調べないと分からなかったこのリポジトリ固有の事実 | `fact` | 事実そのもの（「開発用 venv はリポジトリ直下 `.venv` のみ。ランタイムは venv を作らない」） |
-| 再現手順が毎回同じで、次も同じ手順を踏む | `howto` | 手順の目的（「hook の再現は stdin に JSON を流す」） |
+| 調べないと分からなかったこのリポジトリ固有の事実 | `fact` | 事実そのもの |
+| 再現手順が毎回同じで、次も同じ手順を踏む | `howto` | 手順の目的 |
 | 明文化されていなかった規約に反していたのが原因 | `convention` | 守るべきルール |
 
 記録しないもの（learn の基準に加えて）: diff の要約。
@@ -63,13 +63,15 @@ claq_mem_learn --kind pitfall --scope repo --domain <domain> \
 
 該当が無ければ 1 件も記録しない（0 件は正しい結果。埋め合わせで書かない）。重複確認とシークレットのマスクは `../skills/learn/SKILL.md` に従う。
 
-## 記録テンプレート
+## 報告テンプレート
 
 未受領の項目を PASS と書かない。各欄の出所:
 
+- Scope: 位置 #2（省略時はステップ1 で特定した範囲）
 - Repro / Root cause / Fix: ステップ1-2 の自分の記録
 - Tests / Loop: loop-dev の Loop-Dev Result から転記
 - Review: loop-dev の `Blockers: {n} remaining` から導く（0 件 → PASS / 1 件以上 → BLOCKED / 数値でない「未判定」→ BLOCKED）
+- Assumptions: loop-dev の Loop-Dev Result から転記（要件確認が要るフォールバック候補を含む）
 - Learned: ステップ4 の結果（記録が無ければ `なし`。欄は省かない）
 
 ```
@@ -82,13 +84,10 @@ Fix:        {fix}
 Tests:      {tests}
 Loop:       {n}/2
 Review:     PASS / BLOCKED
+Assumptions: {仮決定事項 / -}
 Learned:    {記録した key} / なし
 ──────────────────────────────
 ```
-
-## ルール
-
-- 仕様バグ・設計欠陥・品質改善は `/refactor` / `/plan` / `/review` に切り分ける
 
 ## 引数
 

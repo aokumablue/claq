@@ -62,7 +62,7 @@ title / key / domain / body へのヒットを重み付けし、confidence と�
 
 ### promote `<key>`
 
-`status` を `active` にする。以後 SessionStart で注入される。
+`status` を `active` にする。
 
 レビュー手順: `list --status pending` で候補を出す → 気になる key を `show` で読む → `../skills/learn/SKILL.md` の「記録する / しない」に照らして採否を決める → 採用分だけ `promote`。昇格は注入枠を使うので、一覧をまとめて全件昇格しない。
 
@@ -84,7 +84,7 @@ claq_mem_learn --key sqlite-wal-sidecars --kind pitfall --scope repo \
   --body "close 時に自動削除されない SQLite ビルドがあるため、DB 再作成後は明示的に unlink する。"
 ```
 
-同じ `key` への `learn` は上書き更新になる（重複行は作られない）。既存カードが `active` なら更新されず usage error になる。`--status` フラグは無く、常に `status=pending` で登録される（JSON で `status`/`source` を指定しても usage error になる）。
+同じ `key` への `learn` は上書き更新になる。`--status`・`--source` は指定できない（常に `pending`）。`active` カードの扱いは `../skills/learn/SKILL.md` に従う。
 
 ## ステップ3: 結果報告
 

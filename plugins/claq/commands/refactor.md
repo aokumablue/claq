@@ -1,6 +1,6 @@
 ---
 name: refactor
-description: コードを一気通貫でリファクタリング。差分・指定パスの両方に対応。性能劣化防止・デッドコード排除・可読性改善・レビューを実行。
+description: 機能を変えずにコードをリファクタリングする（デッドコード削除・可読性・性能。差分または指定パス）。新機能は /feat-dev。
 command: /refactor
 ---
 
@@ -17,24 +17,23 @@ command: /refactor
 
 ## ステップ1: preflight（スコープ確定 + 実行準備）
 
-スコープは次の優先順で決める: 引数パス（ディレクトリ = 配下の全ファイル / ファイル = そのファイル）→ `git diff --name-only HEAD`。
+スコープは `refactor-prep` が確定する（引数パスがあれば渡す。結果は `scope_files`）。
 
 着手前に Skill ツールで次の 2 つを起動する。どちらも省かない。
 
 - `refactor-prep` skill: 対象分割・依存可視化・テストセットを確定する（fork 実行。結果は報告で受け取る）
 - `refactor-rollback` skill: ファイル単位のリバート計画（Rollback Blueprint）を作る（inline 実行で本セッションに展開される）
 
-複数ファイルを戻すときは Rollback Blueprint の `Order` に従う。`refactor-rollback` が `CAUTION` としたファイルは自動適用せず最終要約に記録し、`Skip Rules`（`{file, reason, required_action}`）のファイルは処理対象から外す。
+複数ファイルを戻すときは Rollback Blueprint の `Order` に従う。
 
 `refactor-rollback` の出力を受け取った直後に、実効スコープを確定する（precondition gate）。
 
-1. `effective_scope = スコープ確定の結果 − Skip Rules の file 集合 − CAUTION の file 集合`
+1. `effective_scope = scope_files − Skip Rules の file 集合 − CAUTION の file 集合`
 2. `effective_scope` が空なら、1 件も編集せずに `BLOCKED: effective scope が空です（Skip Rules: {file 一覧}）` として終える（リバートできない問題を final gate まで持ち越すと、変更が残ったまま止まるため）
-3. ステップ3〜5 の各委譲の依頼文へ、`effective_scope` をファイルパス一覧として明示して渡す（この手順書に書いた除外は子エージェントへ届かないため）
 
 ## ステップ2: baseline
 
-1. テスト・linter を実行して基準を取る
+1. `refactor-prep` の `tests.baseline` でテスト・linter を実行して基準を取る
 2. 既存の失敗を記録し、新規失敗の判定に使う
 3. 基準を取れなければ編集を始めず、取れない原因を報告して止まる（基準が無いと新規失敗を判定できない）
 
@@ -48,7 +47,7 @@ command: /refactor
 
 ## ステップ5: perf（`claq:code-refiner`）
 
-simplify の全グループが終わってから始める。依頼文に `mode: perf` と `effective_scope` を明示する。計測データは渡さないので、code-refiner は明白なアルゴリズム欠陥（不要計算・重複 I/O・N+1・過剰なメモリアロケーション）の修正に限り、実施内容に「未計測」と書く（実測を伴う最適化が要るならプロファイル取得を先に行う）。変更ごとにテストし、失敗したらファイル単位で戻す。
+simplify の全グループが終わってから始める。依頼文に `mode: perf` と `effective_scope` を明示し、計測データは渡さない。変更ごとにテストし、失敗したらファイル単位で戻す。
 
 ## ステップ6: review + secure（並列）
 
@@ -56,27 +55,24 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 
 ## 部分モード
 
-`--mode=clean` はステップ1 → 2 → 3 → 6 → 7 → 8 → 9、`--mode=simplify` はステップ1 → 2 → 4 → 6 → 7 → 8 → 9 を実行する。部分モードでもステップ6 と CRITICAL/HIGH のブロック判定は省かない。
+`--mode=clean` はステップ1 → 2 → 3 → 6 → 7 → 8 → 9、`--mode=simplify` はステップ1 → 2 → 4 → 6 → 7 → 8 → 9 を実行する。
 
 ## ステップ7: final gate
 
-1. テストと linter を再実行する
-2. CRITICAL または HIGH が 1 件でもあればブロックする
-3. 失敗した変更はファイル単位で戻して再検証する
-4. すべて通ったときだけ完了にする
+1. `refactor-prep` の `tests.final` を再実行する
+2. 失敗した変更はファイル単位で戻して再検証する
 
 `Final Gate: PASS` になるのは次をすべて満たすときだけで、1 つでも欠ければ `BLOCKED`。
 
 - 実行対象の stage（全体 = clean/simplify/perf/review+secure、`--mode=clean` = clean/review+secure、`--mode=simplify` = simplify/review+secure）がすべて完了している。スキップ・未実行・リバートしたままの放置は完了ではなく、全ファイルがリバートされて実質変更ゼロになった stage も未完了とする
 - CRITICAL/HIGH が 0 件
+- テストと linter が green（ステップ2 で記録した既存の失敗を除く）
 - ステップ6 の `reviewer` / `security-auditor` の出力に `Blockers: {n}` 行が実際にある。無ければ「指摘ゼロ」ではなく「判定を取れなかった」として `BLOCKED` にする
 
-リバートできないファイル（Skip Rules / `revert=NOT_AVAILABLE`）はステップ1 の precondition gate で除外済みなので、ここでは判定材料にしない。
-
-CRITICAL/HIGH の blocker、またはテスト/lint の失敗が出たら、Skill ツールで `loop-dev` skill を起動する。入力:
+ファイル単位のリバートの後も CRITICAL/HIGH の blocker が残ったら、Skill ツールで `loop-dev` skill を起動する。入力:
 
 - `task` = final gate の CRITICAL/HIGH 指摘の解消
-- `approved_plan` = blocker 一覧（plan 段を縮退させる）
+- `approved_plan` = blocker 一覧
 - `task_type` = `refactor-fix`
 
 loop-dev が 2 反復で収束しなければ、ファイル単位のリバート方針に従い、未解消分を要約に書く。
@@ -104,7 +100,7 @@ claq_mem_learn --kind fact --scope repo --domain <domain> \
 
 ## ステップ9: 要約
 
-次のテンプレートで示す。Issues は `claq:reviewer` と `claq:security-auditor` の統合件数。部分モードで実行しなかった stage の行は件数の代わりに `skipped (--mode={mode})` と書く（0 と書くと「実行して変更なし」と区別できない）。末尾にステップ8 で記録した key を 1 行で添える（記録が無ければ `Learned: なし`）。
+次のテンプレートで示す。Issues は `claq:reviewer` と `claq:security-auditor` の統合件数。部分モードで実行しなかった stage の行は件数の代わりに `skipped (--mode={mode})` と書く（0 と書くと「実行して変更なし」と区別できない）。
 
 ```text
 Unified Refactor
@@ -114,9 +110,11 @@ Cleaned:    {cleaned} files
 Simplified: {simplified} files
 Perf fixed: {perf_fixed} files
 Reverted:   {reverted} files
+Skipped:    {Skip Rules・CAUTION で除外したファイルと、code-refiner が UNKNOWN とした候補}
 Issues:     CRITICAL {c} / HIGH {h} / MEDIUM {m} / LOW {l}
 ──────────────────────────────
 Final Gate: PASS / BLOCKED
+Learned:    {ステップ8 で記録した key / なし}
 ```
 
 ## ルール
