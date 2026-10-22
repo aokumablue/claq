@@ -12,6 +12,17 @@ import pytest
 from claq.lib.constants import BASE_DIR_NAME
 from claq.mem.settings import Settings
 
+#: 削除済みの設定項目と state 永続化 API。どれも再導入しない。
+_REMOVED_ATTRIBUTES = (
+    *("context_warm_tokens", "context_warm_days", "context_max_tokens"),  # warm 層と旧トークン上限
+    *("sync", "team"),  # PostgreSQL チーム同期
+    # チャンク・自動圧縮（死コード化のため削除済み）
+    *("excluded_projects", "search_half_life_days", "chunk_max_length", "context_chunk_count"),
+    *("context_hot_tokens", "context_hot_hours", "context_digest_tokens", "context_digest_count"),
+    *("auto_compact_enabled", "auto_compact_interval_days", "last_compacted_at", "embedding_model"),
+    *("save", "load", "state_path"),  # state ファイルの読み書き
+)
+
 
 @pytest.fixture(autouse=True)
 def _patch_default_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -21,65 +32,24 @@ def _patch_default_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     monkeypatch.setattr(mod, "_default_data_dir", lambda: tmp_path)
 
 
-class TestSettingsDefaults:
-    """デフォルト値のテスト"""
+def test_defaults_and_derived_paths_without_touching_disk(tmp_path: Path) -> None:
+    """既定値と導出パスを返し、構築してもファイルを 1 つも作らない。"""
+    s = Settings()
 
-    def test_default_values(self) -> None:
-        s = Settings()
-        assert s.log_level == "info"
+    assert (s.log_level, s.data_path, s.db_path, s.log_dir) == (
+        "info",
+        tmp_path,
+        tmp_path / "mem.db",
+        tmp_path / "logs",
+    )
+    assert list(tmp_path.iterdir()) == []
 
-    def test_no_warm_settings(self) -> None:
-        """warm 層設定が存在しないことを確認する。"""
-        s = Settings()
-        assert not hasattr(s, "context_warm_tokens")
-        assert not hasattr(s, "context_warm_days")
 
-    def test_no_context_max_tokens(self) -> None:
-        """context_max_tokens が存在しないことを確認する。"""
-        s = Settings()
-        assert not hasattr(s, "context_max_tokens")
-
-    def test_no_sync_or_team_settings(self) -> None:
-        """PostgreSQL チーム同期関連の設定が存在しないことを確認する。"""
-        s = Settings()
-        assert not hasattr(s, "sync")
-        assert not hasattr(s, "team")
-
-    def test_no_chunk_or_auto_compact_settings(self) -> None:
-        """チャンク・自動圧縮関連の設定（死コード化のため削除済み）が存在しないことを確認する。"""
-        s = Settings()
-        for name in (
-            "excluded_projects",
-            "search_half_life_days",
-            "chunk_max_length",
-            "context_chunk_count",
-            "context_hot_tokens",
-            "context_hot_hours",
-            "context_digest_tokens",
-            "context_digest_count",
-            "auto_compact_enabled",
-            "auto_compact_interval_days",
-            "last_compacted_at",
-            "embedding_model",
-        ):
-            assert not hasattr(s, name), name
-
-    def test_no_state_persistence(self) -> None:
-        """state ファイルの読み書き API（削除済み）が存在しないことを確認する。"""
-        assert not hasattr(Settings, "save")
-        assert not hasattr(Settings, "load")
-        assert not hasattr(Settings(), "state_path")
-
-    def test_derived_properties(self, tmp_path: Path) -> None:
-        s = Settings()
-        assert s.data_path == tmp_path
-        assert s.db_path == tmp_path / "mem.db"
-        assert s.log_dir == tmp_path / "logs"
-
-    def test_construction_does_not_touch_disk(self, tmp_path: Path) -> None:
-        """Settings の構築はファイルを一切作らない。"""
-        Settings()
-        assert list(tmp_path.iterdir()) == []
+def test_removed_settings_and_state_api_stay_absent() -> None:
+    """削除済みの設定項目・state 永続化 API が Settings に存在しない（インスタンス経由でクラス属性も見る）。"""
+    s = Settings()
+    for name in _REMOVED_ATTRIBUTES:
+        assert not hasattr(s, name), name
 
 
 def test_default_data_dir_uses_claq_data_path_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
