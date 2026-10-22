@@ -39,6 +39,9 @@ def _load_check_site():
 check_site = _load_check_site()
 TOKENS = check_site.load_tokens(_TOKENS)
 BASES = check_site.base_ids(TOKENS)
+HTML = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
+CSS = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
+JS = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
 
 
 def _copy_site(tmp_path: Path, name: str = "site") -> Path:
@@ -54,10 +57,11 @@ def _copy_site(tmp_path: Path, name: str = "site") -> Path:
 
 
 def _edit(dest: Path, filename: str, *replacements: tuple[str, str]) -> str:
-    """サイト内のファイルを置換して書き戻し、違反を 1 本の文字列で返す。"""
+    """サイト内のファイルを置換して書き戻し、違反を 1 本の文字列で返す（置換元が無ければ空振りなので落とす）。"""
     path = dest / filename
     text = path.read_text(encoding="utf-8")
     for old, new in replacements:
+        assert old in text, f"{filename} に置換元が無い: {old!r}"
         text = text.replace(old, new)
     path.write_text(text, encoding="utf-8")
     return "\n".join(check_site.validate_site(dest))
