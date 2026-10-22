@@ -13,266 +13,180 @@ from claq.hooks.git_config_text import (
 
 
 def _sensitive(key: str) -> bool:
-    """テスト用の危険 key 判定（alias と core.hookspath）。"""
-    lowered = key.lower()
-    return lowered.startswith(("alias.", "core.hookspath"))
+    """テスト用の危険 key 判定（alias・core.hookspath・include.path）。"""
+    return key.lower().startswith(("alias.", "core.hookspath", "include.path"))
 
 
-def _sensitive_include(key: str) -> bool:
-    """テスト用の危険 key 判定（include.path）。"""
-    return key.lower().startswith("include.path")
+# 解析結果の表: 本文 → (key, value) の列。key は section 名・key 名を小文字にし、subsection は大小を保つ。
+_PARSED = [
+    # --- セクション見出し ---
+    pytest.param("[Core]\n\tHooksPath = x\n", [("core.hookspath", "x")], id="plain-section"),
+    pytest.param('[remote "Origin"]\n\tURL = u\n', [("remote.Origin.url", "u")], id="subsection-keeps-case"),
+    # subsection 中の `\"` と `\\` は次の 1 文字をそのまま取る。
+    pytest.param('[s "a\\"b\\\\c"]\n\tk = v\n', [('s.a"b\\c.k', "v")], id="subsection-escapes"),
+    pytest.param("[Alias.X]\n\tk = v\n", [("alias.x.k", "v")], id="legacy-dotted-section-lowercased"),
+    pytest.param(
+        '[includeIf   "gitdir:~/x/"]\n\tpath = y\n', [("includeif.gitdir:~/x/.path", "y")], id="spaces-before-quote"
+    ),
+    pytest.param("[core] hooksPath = x\n", [("core.hookspath", "x")], id="key-on-header-line"),
+    pytest.param("[core] # c\n\tk = v\n", [("core.k", "v")], id="comment-after-header"),
+    pytest.param("[a]\nx = 1\n[b]\ny = 2\n", [("a.x", "1"), ("b.y", "2")], id="key-belongs-to-latest-header"),
+    # --- key 行 ---
+    pytest.param(
+        "[core]\n\tbare\n\tother\t\n[x]\n\tlast",
+        [("core.bare", None), ("core.other", None), ("x.last", None)],
+        id="value-less-key-is-none",
+    ),
+    pytest.param("[a]\nk =\n", [("a.k", "")], id="empty-value"),
+    pytest.param("[a]\nk-1 = v\n", [("a.k-1", "v")], id="key-charset-letter-digit-dash"),
+    pytest.param("[a]\nk = v\n", [("a.k", "v")], id="entries-are-config-entry"),
+    # --- 値 ---
+    pytest.param("[a]\nk = v ; c\nj = w # c\n", [("a.k", "v"), ("a.j", "w")], id="inline-comments"),
+    pytest.param('[a]\nk = " v # ; "\n', [("a.k", " v # ; ")], id="quoted-value-keeps-comment-chars-and-spaces"),
+    pytest.param("[a]\nk = a  b \t \n", [("a.k", "a  b")], id="internal-whitespace-kept-trailing-trimmed"),
+    pytest.param('[a]\nk = "a\\n\\t\\b\\\\\\""\n', [("a.k", 'a\n\t\b\\"')], id="escapes"),
+    # 継続行の行頭の空白も値の区切りとして数える。
+    pytest.param(
+        "[alias]\n\tci = commit \\\n\t--no-verify\n", [("alias.ci", "commit  --no-verify")], id="continuation-line"
+    ),
+    pytest.param('[a]\nk = "x\\\ny"\n', [("a.k", "xy")], id="continuation-inside-quotes"),
+    pytest.param(
+        "[a]\nk = v # c \\\nj = w\n", [("a.k", "v"), ("a.j", "w")], id="comment-backslash-is-not-continuation"
+    ),
+    pytest.param("\ufeff[a]\r\nk = v\r\n", [("a.k", "v")], id="crlf-and-bom"),
+    pytest.param("[a]\nk = v", [("a.k", "v")], id="value-at-eof-without-newline"),
+    pytest.param("# a\n; b\n\n[a] \n  # hooksPath = x\n", [], id="comment-and-blank-lines-ignored"),
+    # `""` だけの値の後ろの空白は、値が空のままなので区切りに数えない。
+    pytest.param('[a]\nk = "" a\n', [("a.k", "a")], id="empty-quotes-then-space-is-not-separator"),
+]
 
+# 解析エラーの表: 見出し・key 行・値として読めない本文。
+_MALFORMED = [
+    # --- 見出し ---
+    pytest.param("[]\n", id="header-empty"),
+    pytest.param("[core\n", id="header-unterminated-newline"),
+    pytest.param("[core", id="header-unterminated-eof"),
+    pytest.param("[co!re]\n", id="header-bad-char"),
+    pytest.param("[core \n", id="header-space-then-newline"),
+    pytest.param('[core "x\n"]\n', id="header-newline-in-subsection"),
+    pytest.param('[core "x"', id="header-missing-close"),
+    pytest.param('[core "x" ]\n', id="header-space-before-close"),
+    pytest.param('[core "x\\\n"]\n', id="header-escaped-newline-in-subsection"),
+    pytest.param("[core] ]\n", id="header-stray-bracket"),
+    pytest.param("[core x]\n", id="header-unquoted-subsection"),
+    pytest.param('[ "x"]\n', id="header-empty-name-with-subsection"),
+    # --- key 行 ---
+    pytest.param("hooksPath = x\n", id="key-before-any-section"),
+    pytest.param("[a]\n1k = v\n", id="key-digit-start"),
+    # key でも見出しでもコメントでもない行。
+    pytest.param("[a]\n= v\n", id="key-no-name"),
+    pytest.param("[a]\nk ; c\n", id="key-comment-after-bare"),
+    pytest.param("[a]\nk v\n", id="key-junk-after-name"),
+    pytest.param("[a]\nk!x = v\n", id="key-bad-char"),
+    # --- 値 ---
+    pytest.param('[a]\nk = "v\n', id="value-open-quote-newline"),
+    pytest.param('[a]\nk = "v', id="value-open-quote-eof"),
+    pytest.param("[a]\nk = v\\", id="value-trailing-backslash-eof"),
+    pytest.param("[a]\nk = \\q\n", id="value-unknown-escape"),
+]
 
-def _entries(text: str) -> list[tuple[str, str | None]]:
-    """解析結果を (key, value) の組で返す。"""
-    return [(entry.key, entry.value) for entry in parse_git_config(text)]
+_NON_GIT_BLANKS = {"nbsp": "\xa0", "vt": "\v", "ff": "\f", "ideographic-space": "\u3000"}
 
-
-class TestSections:
-    """セクション見出しの解釈。"""
-
-    def test_plain_section(self) -> None:
-        """`[sec]` の key は `sec.key`（小文字）になる。"""
-        assert _entries("[Core]\n\tHooksPath = x\n") == [("core.hookspath", "x")]
-
-    def test_subsection_keeps_case(self) -> None:
-        """`[sec "Sub"]` の subsection は大小を保つ。"""
-        assert _entries('[remote "Origin"]\n\tURL = u\n') == [("remote.Origin.url", "u")]
-
-    def test_subsection_escapes(self) -> None:
-        """subsection 中の `\\"` と `\\\\` は次の 1 文字をそのまま取る。"""
-        assert _entries('[s "a\\"b\\\\c"]\n\tk = v\n') == [('s.a"b\\c.k', "v")]
-
-    def test_legacy_dotted_section_is_lowercased(self) -> None:
-        """`[sec.sub]` の旧記法は全体を小文字にする。"""
-        assert _entries("[Alias.X]\n\tk = v\n") == [("alias.x.k", "v")]
-
-    def test_header_with_space_before_quote(self) -> None:
-        """名前と引用符の間の空白は何個でもよい。"""
-        assert _entries('[includeIf   "gitdir:~/x/"]\n\tpath = y\n') == [("includeif.gitdir:~/x/.path", "y")]
-
-    def test_key_on_header_line(self) -> None:
-        """見出しと同じ行の key を拾う。"""
-        assert _entries("[core] hooksPath = x\n") == [("core.hookspath", "x")]
-
-    def test_comment_after_header(self) -> None:
-        """見出しの後ろのコメントは読み飛ばす。"""
-        assert _entries("[core] # c\n\tk = v\n") == [("core.k", "v")]
-
-    def test_later_section_replaces_earlier(self) -> None:
-        """key は直近の見出しに属する。"""
-        assert _entries("[a]\nx = 1\n[b]\ny = 2\n") == [("a.x", "1"), ("b.y", "2")]
-
-    @pytest.mark.parametrize(
-        "text",
-        [
-            "[]\n",
-            "[core\n",
-            "[core",
-            "[co!re]\n",
-            "[core \n",
-            '[core "x\n"]\n',
-            '[core "x"',
-            '[core "x" ]\n',
-            '[core "x\\\n"]\n',
-            "[core] ]\n",
-            "[core x]\n",
-            '[ "x"]\n',
-        ],
-        ids=[
-            "empty",
-            "unterminated-newline",
-            "unterminated-eof",
-            "bad-char",
-            "space-then-newline",
-            "newline-in-subsection",
-            "missing-close",
-            "space-before-close",
-            "escaped-newline-in-subsection",
-            "stray-bracket",
-            "unquoted-subsection",
-            "empty-name-with-subsection",
-        ],
-    )
-    def test_malformed_header_is_rejected(self, text: str) -> None:
-        """壊れた見出しは解析エラーにする。"""
-        with pytest.raises(GitConfigParseError):
-            parse_git_config(text)
-
-
-class TestKeys:
-    """key 行の解釈。"""
-
-    def test_key_before_any_section_is_rejected(self) -> None:
-        """見出しより前の key は解析エラーにする。"""
-        with pytest.raises(GitConfigParseError):
-            parse_git_config("hooksPath = x\n")
-
-    def test_value_less_key(self) -> None:
-        """`=` の無い key は値なし（None）になる。"""
-        assert _entries("[core]\n\tbare\n\tother\t\n[x]\n\tlast") == [
-            ("core.bare", None),
-            ("core.other", None),
-            ("x.last", None),
-        ]
-
-    def test_empty_value(self) -> None:
-        """`key =` の値は空文字列。"""
-        assert _entries("[a]\nk =\n") == [("a.k", "")]
-
-    def test_key_charset(self) -> None:
-        """key は英字で始まり、英数字と `-` を続けられる。"""
-        assert _entries("[a]\nk-1 = v\n") == [("a.k-1", "v")]
-
-    @pytest.mark.parametrize(
-        "text",
-        ["[a]\n1k = v\n", "[a]\n= v\n", "[a]\nk ; c\n", "[a]\nk v\n", "[a]\nk!x = v\n"],
-        ids=["digit-start", "no-name", "comment-after-bare", "junk-after-name", "bad-char"],
-    )
-    def test_malformed_key_line_is_rejected(self, text: str) -> None:
-        """key 行として読めない行は解析エラーにする。"""
-        with pytest.raises(GitConfigParseError):
-            parse_git_config(text)
-
-
-class TestValues:
-    """値の解釈。"""
-
-    def test_inline_comments(self) -> None:
-        """引用符の外の `#` と `;` から行末まではコメント。"""
-        assert _entries("[a]\nk = v ; c\nj = w # c\n") == [("a.k", "v"), ("a.j", "w")]
-
-    def test_quoted_value_keeps_comment_chars_and_spaces(self) -> None:
-        """引用符の中の `#` と `;` と前後の空白は値に残る。"""
-        assert _entries('[a]\nk = " v # ; "\n') == [("a.k", " v # ; ")]
-
-    def test_internal_whitespace_is_kept_and_trailing_trimmed(self) -> None:
-        """値の内側の空白は残り、末尾の空白は落ちる。"""
-        assert _entries("[a]\nk = a  b \t \n") == [("a.k", "a  b")]
-
-    def test_escapes(self) -> None:
-        """`\\n` `\\t` `\\b` `\\\\` `\\\"` を解釈する。"""
-        assert _entries('[a]\nk = "a\\n\\t\\b\\\\\\""\n') == [("a.k", 'a\n\t\b\\"')]
-
-    def test_continuation_line(self) -> None:
-        """行末の `\\` は次の行へ値を続ける（継続行の行頭の空白も値の区切りとして数える）。"""
-        assert _entries("[alias]\n\tci = commit \\\n\t--no-verify\n") == [("alias.ci", "commit  --no-verify")]
-
-    def test_continuation_inside_quotes(self) -> None:
-        """引用符の中でも継続行は使える。"""
-        assert _entries('[a]\nk = "x\\\ny"\n') == [("a.k", "xy")]
-
-    def test_comment_ends_at_newline_even_with_backslash(self) -> None:
-        """コメントの末尾の `\\` は継続行にならない。"""
-        assert _entries("[a]\nk = v # c \\\nj = w\n") == [("a.k", "v"), ("a.j", "w")]
-
-    def test_crlf_and_bom(self) -> None:
-        """CRLF と先頭の BOM を受け付ける。"""
-        assert _entries("\ufeff[a]\r\nk = v\r\n") == [("a.k", "v")]
-
-    def test_value_at_eof_without_newline(self) -> None:
-        """末尾の改行が無くても値を読み切る。"""
-        assert _entries("[a]\nk = v") == [("a.k", "v")]
-
-    def test_comment_lines_and_blank_lines(self) -> None:
-        """行頭のコメントと空行は無視する。"""
-        assert _entries("# a\n; b\n\n[a] \n  # hooksPath = x\n") == []
-
-    @pytest.mark.parametrize(
-        "text",
-        ['[a]\nk = "v\n', '[a]\nk = "v', "[a]\nk = v\\", "[a]\nk = \\q\n"],
-        ids=["open-quote-newline", "open-quote-eof", "trailing-backslash-eof", "unknown-escape"],
-    )
-    def test_malformed_value_is_rejected(self, text: str) -> None:
-        """閉じない引用符・未知のエスケープは解析エラーにする。"""
-        with pytest.raises(GitConfigParseError):
-            parse_git_config(text)
-
-    def test_unrecognized_line_is_rejected(self) -> None:
-        """key でも見出しでもコメントでもない行は解析エラーにする。"""
-        with pytest.raises(GitConfigParseError):
-            parse_git_config("[a]\n= v\n")
-
-
-class TestAddsSensitiveEntries:
-    """危険 key の前後比較。"""
-
-    def test_returns_entries_as_named_tuples(self) -> None:
-        """解析結果は ConfigEntry。"""
-        assert parse_git_config("[a]\nk = v\n") == [ConfigEntry("a.k", "v")]
-
-    def test_new_sensitive_entry(self) -> None:
-        """前に無い危険 key が現れたら True。"""
-        assert adds_sensitive_entries("[user]\nname = x\n", "[user]\nname = x\n[core]\nhooksPath = y\n", _sensitive)
-
-    def test_unchanged_sensitive_entries(self) -> None:
-        """危険 key が前後で同一なら、他の key が変わっても False。"""
-        before = "[alias]\nci = commit\n[remote]\nurl = a\n"
-        after = "[alias]\nci = commit\n[remote]\nurl = b\n"
-        assert not adds_sensitive_entries(before, after, _sensitive)
-
-    def test_changed_value(self) -> None:
-        """危険 key の値が変わったら True。"""
-        assert adds_sensitive_entries("[alias]\nci = commit\n", "[alias]\nci = commit --no-verify\n", _sensitive)
-
-    def test_added_alias_in_existing_section(self) -> None:
-        """既存セクションの内側へ足した alias を検出する。"""
-        assert adds_sensitive_entries(
-            "[alias]\nst = status\n", "[alias]\nst = status\nci = commit --no-verify\n", _sensitive
+# 危険 key の前後比較の表: (置換前, 置換後) → 危険 key が増えた・変わったか。
+_SENSITIVE_CHANGES = [
+    pytest.param("[user]\nname = x\n", "[user]\nname = x\n[core]\nhooksPath = y\n", True, id="new-sensitive-entry"),
+    pytest.param(
+        "[alias]\nci = commit\n[remote]\nurl = a\n",
+        "[alias]\nci = commit\n[remote]\nurl = b\n",
+        False,
+        id="sensitive-unchanged-other-key-changed",
+    ),
+    pytest.param("[alias]\nci = commit\n", "[alias]\nci = commit --no-verify\n", True, id="changed-value"),
+    pytest.param(
+        "[alias]\nst = status\n",
+        "[alias]\nst = status\nci = commit --no-verify\n",
+        True,
+        id="added-alias-in-existing-section",
+    ),
+    # 後ろの上書きだけを消すと実効値が危険側へ戻る。
+    pytest.param(
+        "[alias]\nci = commit --no-verify\nci = commit\n",
+        "[alias]\nci = commit --no-verify\n",
+        True,
+        id="removing-shadowing-entry",
+    ),
+    pytest.param(
+        "[alias]\na = 1\n[core]\nhooksPath = x\n",
+        "[core]\nhooksPath = x\n[alias]\na = 1\n",
+        True,
+        id="reordering",
+    ),
+    pytest.param("[alias]\nci = commit\nst = status\n", "[alias]\nst = status\n", False, id="pure-removal"),
+    pytest.param(
+        "[core]\nhooksPath = a\nhooksPath = b\n",
+        "[core]\nhooksPath = a\n",
+        True,
+        id="removing-trailing-entry-changes-effective-value",
+    ),
+    # 置換前が解析できなければ、置換後の危険 key は全て新規扱い。
+    pytest.param("garbage\n", "[alias]\nci = x\n", True, id="unparsable-before-sensitive-after"),
+    pytest.param("garbage\n", "[user]\nname = x\n", False, id="unparsable-before-ordinary-after"),
+    # 複数値の key（include.path の列）。無関係な編集は通し、途中の値の書き換えは部分列でなくなるため検出する。
+    pytest.param(
+        "[include]\n path=a\n path=b\n",
+        '[include]\n path=a\n path=b\n[remote "o"]\n url=x\n',
+        False,
+        id="multi-valued-key-unrelated-edit",
+    ),
+    pytest.param(
+        "[include]\n path=a\n path=b\n",
+        "[include]\n path=evil\n path=b\n",
+        True,
+        id="multi-valued-key-non-final-value-changed",
+    ),
+    # git が空白と見ない文字（NBSP・VT・FF・全角空白）は値の一部で、値の変更として検出する。
+    *(
+        pytest.param(
+            f"[alias]\n ci = commit{blank}--no-verify\n",
+            "[alias]\n ci = commit --no-verify\n",
+            True,
+            id=f"non-git-blank-{name}-inside-value",
         )
+        for name, blank in _NON_GIT_BLANKS.items()
+    ),
+    *(
+        pytest.param(
+            "[core]\n hooksPath=/a\n", f"[core]\n hooksPath=/a{blank}\n", True, id=f"non-git-blank-{name}-trailing"
+        )
+        for name, blank in _NON_GIT_BLANKS.items()
+    ),
+    pytest.param("", "# hooksPath = x\n[user]\n# [core]\n", False, id="sensitive-key-in-comment-ignored"),
+]
 
-    def test_removing_shadowing_entry_is_detected(self) -> None:
-        """後ろの上書きだけを消すと実効値が危険側へ戻るため True。"""
-        before = "[alias]\nci = commit --no-verify\nci = commit\n"
-        after = "[alias]\nci = commit --no-verify\n"
-        assert adds_sensitive_entries(before, after, _sensitive)
 
-    def test_reordering_is_detected(self) -> None:
-        """危険 key の順序入れ替えは True。"""
-        before = "[alias]\na = 1\n[core]\nhooksPath = x\n"
-        after = "[core]\nhooksPath = x\n[alias]\na = 1\n"
-        assert adds_sensitive_entries(before, after, _sensitive)
+@pytest.mark.parametrize(("text", "expected"), _PARSED)
+def test_parse_git_config(text: str, expected: list[tuple[str, str | None]]) -> None:
+    """本文を ConfigEntry の列へ解析する。"""
+    entries = parse_git_config(text)
 
-    def test_pure_removal_is_allowed(self) -> None:
-        """危険 key を丸ごと消すだけなら False。"""
-        assert not adds_sensitive_entries("[alias]\nci = commit\nst = status\n", "[alias]\nst = status\n", _sensitive)
+    assert entries == [ConfigEntry(key, value) for key, value in expected]
+    assert [(entry.key, entry.value) for entry in entries] == expected
 
-    def test_removing_trailing_entry_that_changes_effective_value_is_detected(self) -> None:
-        """最後の値を消して手前の値が実効になる場合は True。"""
-        before = "[core]\nhooksPath = a\nhooksPath = b\n"
-        assert adds_sensitive_entries(before, "[core]\nhooksPath = a\n", _sensitive)
 
-    def test_unparsable_before_counts_as_empty(self) -> None:
-        """置換前が解析できなければ、置換後の危険 key は全て新規扱い。"""
-        assert adds_sensitive_entries("garbage\n", "[alias]\nci = x\n", _sensitive)
-        assert not adds_sensitive_entries("garbage\n", "[user]\nname = x\n", _sensitive)
+@pytest.mark.parametrize("text", _MALFORMED)
+def test_malformed_text_is_rejected(text: str) -> None:
+    """読めない見出し・key 行・値は解析エラーにする。"""
+    with pytest.raises(GitConfigParseError):
+        parse_git_config(text)
 
-    def test_unparsable_after_raises(self) -> None:
-        """置換後が解析できなければ例外を伝える。"""
-        with pytest.raises(GitConfigParseError):
-            adds_sensitive_entries("", "garbage\n", _sensitive)
 
-    def test_unrelated_edit_with_multi_valued_key_is_allowed(self) -> None:
-        """複数値の key（include.path の列）を持つファイルへの無関係な編集は通す。"""
-        before = "[include]\n path=a\n path=b\n"
-        assert not adds_sensitive_entries(before, before + '[remote "o"]\n url=x\n', _sensitive_include)
+@pytest.mark.parametrize(("before", "after", "expected"), _SENSITIVE_CHANGES)
+def test_adds_sensitive_entries(before: str, after: str, expected: bool) -> None:
+    """危険 key が置換前に無かった・値や順序が変わったときだけ True。"""
+    assert adds_sensitive_entries(before, after, _sensitive) is expected
 
-    def test_changing_a_non_final_value_of_multi_valued_key_is_detected(self) -> None:
-        """複数値の key の途中の値を書き換える編集は、列の部分列でなくなるため True。"""
-        before = "[include]\n path=a\n path=b\n"
-        assert adds_sensitive_entries(before, "[include]\n path=evil\n path=b\n", _sensitive_include)
 
-    @pytest.mark.parametrize("blank", ["\xa0", "\v", "\f", "\u3000"])
-    def test_non_git_whitespace_is_part_of_the_value(self, blank: str) -> None:
-        """git が空白と見ない文字（NBSP・VT・FF・全角空白）は値の一部で、値の変更として検出する。"""
-        before = f"[alias]\n ci = commit{blank}--no-verify\n"
-        assert adds_sensitive_entries(before, "[alias]\n ci = commit --no-verify\n", _sensitive)
-        assert adds_sensitive_entries("[core]\n hooksPath=/a\n", f"[core]\n hooksPath=/a{blank}\n", _sensitive)
-
-    def test_empty_quotes_then_space_is_not_a_separator(self) -> None:
-        """``""`` だけの値の後ろの空白は、値が空のままなので区切りに数えない。"""
-        assert _entries('[a]\nk = "" a\n') == [("a.k", "a")]
-
-    def test_sensitive_key_in_comment_is_ignored(self) -> None:
-        """コメント内の hooksPath は危険 key ではない。"""
-        assert not adds_sensitive_entries("", "# hooksPath = x\n[user]\n# [core]\n", _sensitive)
+def test_unparsable_after_raises() -> None:
+    """置換後が解析できなければ例外を伝える。"""
+    with pytest.raises(GitConfigParseError):
+        adds_sensitive_entries("", "garbage\n", _sensitive)
