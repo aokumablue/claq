@@ -1,6 +1,6 @@
 ---
 name: harness
-description: ハーネス監査を実行しトップ3改善案を提示する。`--apply` 指定時のみ改善適用と改善後スコア報告まで進む。
+description: ハーネスを監査して改善案を示す。適用は `--apply` 指定時のみ。
 command: /harness
 ---
 
@@ -30,19 +30,19 @@ command: /harness
 claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --target-kind <repo|consumer>
 ```
 
-スコアカードを出力する。`--audit-only` は /harness の制御フラグで `claq_run` へは渡さず、指定時はここで終える。`--root` / `--target-kind` はステップ4 の比較まで同じ値を保つ。
+スコアカードを出力する。`--apply` 指定時は harness-tuner へ生の JSON を渡すため `--format json` で実行し、表示はその JSON から整形する（text 出力に JSON は含まれない）。`--audit-only` は /harness の制御フラグで `claq_run` へは渡さず、指定時はここで終える。`--root` / `--target-kind` はステップ4 の比較まで同じ値を保つ。
 
 採点はこのスクリプトの出力だけを根拠にし、手で採点しない。
 
 ## ステップ2: トップ3アクション特定
 
-`top_actions[]` から効果の高い 3 件を選ぶ。各アクションには `checks[]` の失敗チェックに紐付く正確なファイルパスが付いている。
+`top_actions[]`（スクリプトが points 降順の上位 3 件に絞り済み）をそのまま使う。各 `path` は失敗チェックのファイルパスである。
 
 `--apply` が指定されていなければ、トップ3（提案内容・対象ファイル・想定効果）を提示してここで終える（harness-tuner へ適用を委ねない）。`--apply` の明示がこの先へ進む承認にあたる。
 
 ## ステップ3: harness-tuner による改善適用（`--apply` 指定時のみ）
 
-`claq:harness-tuner` を起動し、ベースライン JSON とトップ3アクションを渡して信頼性・コスト・スループットの最適化を委ねる。harness-tuner は、ハーネス設定（hooks.json / settings.json 等）への最小限で元に戻せる変更だけを適用し、影響範囲を要約する。
+`claq:harness-tuner` を起動し、ステップ1 の JSON 出力をそのまま渡す（トップ3はその `top_actions`）。
 
 ## ステップ4: 改善後スコア（`--apply` 指定時のみ）
 
@@ -50,8 +50,6 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --targ
 . "$HOME/.claq/env.sh" || exit 127
 claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --target-kind <repo|consumer>
 ```
-
-ステップ1 と同じ `--root` / `--target-kind` で採点し直す（異なる root・スケールのスコアを比べない）。
 
 ## ステップ5: 差分要約（`--apply` 指定時のみ）
 
@@ -64,5 +62,5 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --targ
 - `--format=text|json`（既定: `text`）
 - `--root=<path>`: 監査対象ルート
 - `--target-kind=repo|consumer`: 期待する判定モード（自動判定と食い違えば FAIL）
-- `--audit-only`: ステップ1 だけで終える（トップ3も出さない）
+- `--audit-only`: ステップ1 だけで終える
 - `--apply`: トップ3を harness-tuner に適用させる（ステップ3〜5）
