@@ -20,11 +20,9 @@ user-invocable: true
 | `tokens.css` を手で直す | `tokens.json` を直して `--write-css` で再生成する |
 | React や Tailwind CLI を足す | 素の CSS のまま（理由は `references/design.md`） |
 | トグルを後付けする | テンプレのライト/ダークボタンを残す |
-| 目視だけで完了する | `check_site.py` が PASS するまで完了報告しない |
 
 設計原則・レイアウト・コンポーネント・チャートの作法は `references/design.md`。
 チャート種別ごとの骨格と寸法は `references/chart-forms.md`。
-React 版の shadcn/ui ではなくトークンを CSS へ写している理由も同じ文書にある。
 
 ## 手順
 
@@ -39,19 +37,15 @@ React 版の shadcn/ui ではなくトークンを CSS へ写している理由�
 - ページ種別: `dashboard`（既定）か `content`（記事・紹介。指標や図を必須にしない）
 - 実データかサンプルか
 
-ベースカラーは shadcn/ui が配る 5 つがそのまま入っている。増やしたいときは
-`https://ui.shadcn.com/r/colors/<name>.json` の `cssVarsV4` を `tokens.json` の
-`bases` へ足して `--write-css` を回す。コントラストの調整は自動で入る。
-
 ### 2. テンプレートを複製する
 
-テンプレートはスキル起動時に提示されるベースディレクトリの `assets/template/` にある。提示が無いときだけ次で探す（Claude Code のキャッシュ配置に固有のフォールバックで、他ホストではベースディレクトリの提示が必須）。`/Users` や `$HOME` 全体を起点にしない（返ってこない）。
+テンプレートはスキル起動時に提示されるベースディレクトリの `assets/template/` にある。提示が無いときは、次が返す plugin root の `skills/html-gen/assets/template/` を使う（失敗したら止めて報告する）。
 
 ```bash
-find "$HOME/.claude/plugins/cache" -maxdepth 7 -type d -path '*/html-gen/assets/template'
+. "$HOME/.claq/env.sh" && claq_plugin_root
 ```
 
-複製先は完全なリテラル絶対パスで書く（`$VAR` を含めると保護フックに止められる）。
+複製先は完全なリテラル絶対パスで書く。
 
 ```bash
 mkdir -p /abs/path/to/dest
@@ -75,12 +69,12 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 `.chart-scroll` ラッパ、`@media (prefers-reduced-motion: reduce)` ブロック、
 `svg[role="img"]` の `<title>`/`<desc>`、`data-origin="0"`。
 
-足さない: 動作の無い操作部品（例: 期間切替・CSV・レポート作成・通知・すべて表示・ヘッダの全体検索）。押しても何も起きない部品は、ページ全体の信頼を損なう。テンプレートも持たない。検索欄は次項の一覧ツールバー（`app.js` が生成）だけで、手書きしない。それ以外の部品は、置くなら動作まで結線する。
+足さない: 動作の無い操作部品（例: 期間切替・CSV・レポート作成・通知・すべて表示・ヘッダの全体検索）。押しても何も起きない部品は、ページ全体の信頼を損なう。テンプレートも持たない。それ以外の部品は、置くなら動作まで結線する。
 
 サイドバーと一覧は、結線済みの仕組みへ載せるだけにする（`check_site.py` が外れを落とす）。
 
 - サイドバーの項目は `<a class="nav-item" href="#id">` で、飛び先の節に同じ `id` を付ける。`<button>` にしない。飛び先の無い項目は置かない（項目を増やすなら節も増やす）。現在地・狭い画面で閉じる動作・スクロール位置の追従は `app.js` が担う
-- 一覧の `<table>` には `data-list` を付け、`<thead>` と `<tbody>` を持たせる。検索欄・主要項目の絞り込み・件数表示は `app.js` が表の直前に生成する。**検索欄（`input[type=search]`・`role="search"`）は HTML に手書きしない**（結線されない欄になる）。絞り込みの列は `app.js` が決める（行見出しでも数値でもなく、異なる値が 2〜6 個で行数より少ない列。状態・ステータス系を先頭に、最大 2 列。全項目の絞り込みは作らない）。ヒートマップ表・図の直下の表（`details.chart-data`）・項目表（本体の全行が行見出し + 値 1 列。会社概要など）は一覧ではないので付けない
+- 一覧の `<table>` には `data-list` を付け、`<thead>` と `<tbody>` を持たせる。検索欄・主要項目の絞り込み・件数表示は `app.js` が表の直前に生成する。**検索欄（`input[type=search]`・`role="search"`）は HTML に手書きしない**（結線されない欄になる）。絞り込みの列は `app.js` が決める（行見出しでも `td.num` でもなく、全行が値を持ち、異なる値が 2〜6 個で行数より少ない列。状態・ステータス系を先頭に、最大 2 列。全項目の絞り込みは作らない）。ヒートマップ表・図の直下の表（`details.chart-data`）・項目表（本体の全行が行見出し + 値 1 列。会社概要など）は一覧ではないので付けない
 
 足さない（依頼で求められない限り）: 見出しの一部の語だけを斜体にする強調、`01` `02` `03` のような番号付きのセクションラベル、等幅フォントの見出し・ラベル、クリーム色・オフホワイトの背景（背景は `var(--background)` のまま）、ピル形のボタン（新しく足すボタンは `--radius-md`）。どれもテンプレートの外から持ち込まれやすい意匠で、shadcn/ui の見た目から外れる。テンプレートに既にある要素（配色ピッカーの円形ボタン・バッジなど）の形は変えない。
 
@@ -98,13 +92,12 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 | 6 | 時間軸・時点 7 以下（合計に意味がある構成比の推移は規則 8） | 縦棒 |
 | 7 | 部分と全体・分類 5 以下・1 時点 | ドーナツ |
 | 8 | 部分と全体・分類 6 以上または複数時点 | 100% 積み上げ横棒 |
-| 9 | 大小比較・分類 8 以上またはラベル 9 文字以上 | 横棒（降順） |
+| 9 | 大小比較・分類 8 以上またはラベル最長 9 文字以上 | 横棒（降順） |
 | 10 | 大小比較（上記以外） | 縦棒 |
 | 11 | 意味のある分類が 8 以上で省けない | 表 |
 
 時間は必ず横軸へ置く。例外は規則 8 の構成比で、時点を行として縦に並べる。縦横の向きは見た目の好みで決めない。
-選んだ種別の SVG 骨格・viewBox 幅の上限・余白の取り方は `references/chart-forms.md`。
-種別を決めても骨格が無ければ毎回違う書き方になるので、必ず写して使う。
+選んだ種別の SVG 骨格・viewBox 幅の上限・余白の取り方は `references/chart-forms.md` から写して使う。
 
 軸の無いグラフは出荷しない。直交軸チャートには目盛りラベルと目盛り線を
 最低 3 本ずつ（通常 5〜7 本）置き、刻みは 1・2・5 の倍数にする。検査が落とす。
@@ -118,8 +111,8 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
   凡例に値があるドーナツ・積み上げ横棒は不要）
 - viewBox の縦横比がそのまま図の縦横比になる。高さの上限に固定 px を書かない
   （広い画面でレターボックスが働き図だけ小さく残る）。`clamp(320px, 46vh, 620px)`
-- 図の中の文字は、軸名・凡例・値のラベルを含め、すべて `<text class="axis-text">`（軸名は `axis-text axis-title`）にする。`font-size` を属性や style で個別に書かない。大きさと広い画面での頭打ちは CSS（`.chart text`）が一律に掛けるので、別の大きさの文字は「やたら大きい軸ラベル」になる（`check_site.py` が落とす）
-- x 軸のラベル帯とy 軸の目盛り幅を viewBox の内側に取る（下 20px / 左 40〜55px）
+- 図の中の文字は軸名・凡例・値のラベルも含めすべて `<text class="axis-text">`（軸名は `axis-text axis-title`）。`font-size` を個別に書かない（`check_site.py` が落とす）
+- x 軸のラベル帯と y 軸の目盛り幅を viewBox の内側に取る（幅は `references/chart-forms.md`「余白の取り方」で数える）
 - 静止状態を完成形にする。動きは `[data-animate="in"]` の下だけに書く。
   `opacity: 0` を静止状態に置いたり `animation-fill-mode: forwards` を使うと、
   背面タブ・JS 無効・印刷で真っ白なページになる（検査で落ちる）
@@ -127,7 +120,7 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
   （CSS が属性より優先され、全セグメントが重なる）
 - 潰した SVG（`preserveAspectRatio="none"`）に `stroke-dasharray` のドローを
   使わない。`clip-path` で拭う
-- 時系列を足したら `.chart-scroll` で包む。包まないと狭い画面で軸文字が潰れる
+- ドーナツ以外の図は `.chart-scroll` で包む（`check_site.py` が落とす）
 - `auto-fit` のグリッドに `span` を掛けない。列数を明示する
 
 依頼が指標・内訳・時系列・分布を求めるダッシュボードなら、それぞれ 1 つ以上置く（分布はテンプレートに無いので `references/chart-forms.md` のヒストグラムを写す）。
@@ -138,35 +131,25 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 python3 /abs/path/to/dest/check_site.py /abs/path/to/dest
 ```
 
-exit code 0（`PASS`）を確認するまで完了報告しない。`FAIL:` が出たら
-手書きファイルに色を直書きしていないか、`tokens.css` を手で直していないか、
-トグルを消していないかを先に疑う。
+exit code 0（`PASS`）を確認するまで完了報告しない。`FAIL:` の文面が違反箇所と直し方を示す。
 
-`check_site.py` は `tokens.json` 上の値しか見ないので、実際に描画された姿は
-ブラウザでも確かめる。
+`check_site.py` のコントラスト検査は `tokens.json` 上の値で測るので、描画された姿はブラウザでも確かめる。
 
 1. `python3 -m http.server` で配信して開く（`file://` は localStorage が使えず
    永続を確認できない）
 2. DevTools コンソールに `e2e_contrast.js` を貼り付けて実行する。
-   5 ベースカラー × ライト/ダークの 10 ブロックを巡回し、`verdict` が `GREEN`
-   なら受け入れ、`RED` なら `failures` がそのまま是正対象
-   `verdict` が `GREEN` なら、図の文字の描画後の大きさ（12〜13px）と、一覧の検索・絞り込みの動作（実際に検索語を入れて行が増減する）も通っている
+   5 ベースカラー × ライト/ダークの 10 ブロックを巡回する。`verdict` が `GREEN` なら受け入れ、
+   `RED` なら `failures`・`textFailures`・`behaviorFailures` に出た項目を直す。`GREEN` なら、
+   図の文字の描画後の大きさ（12〜13px）と、一覧の検索・絞り込みの動作も通っている
 3. 幅 320 / 390 / 768 / 1280 / 1920px で `document.documentElement.scrollWidth` が
    `clientWidth` と一致することを見る（横スクロールが出ていない証拠）
 4. 再読込してもテーマとベースカラーが保たれ、白がちらつかないことを見る
 5. 図が描き切った状態で止まること、モーションを切っても全部読めることを見る
-6. サイドバーの全項目を実際にクリックし、その節へスクロールして現在地が付くこと（狭い幅ではサイドバーが閉じること）、一覧の検索欄へ文字を入れて行が絞られることを見る
+6. サイドバーの全項目を実際にクリックし、その節へスクロールして現在地が付くこと（狭い幅ではサイドバーが閉じること）を見る
 
 ## 完了条件
 
-- `check_site.py` が PASS
-- `e2e_contrast.js` が GREEN
-- ライトとダークをユーザーが選べ、再読込後も保たれる
-- サイドバーの全項目が実在する節へ飛び、一覧には検索と主要項目の絞り込みがある
-- 手書きファイルに生の色が 1 つも無い
-- 320〜1920px で横スクロールが出ない
-- アニメーションが走らない環境（背面タブ・JS 無効・`prefers-reduced-motion`）でも
-  図と数値が全部読める
+手順4 の `check_site.py` PASS・`e2e_contrast.js` GREEN・確認 3〜6 がすべて通り、一覧に主要項目の絞り込みが生成されている（生成されなくても検査は落ちないので目で確かめる）。
 
 ## 永続メモリ
 

@@ -3,9 +3,9 @@
  *
  * DevTools のコンソールへ貼り付けて実行する。全ベースカラー × ライト/ダークを
  * 順に適用し、ブラウザが正規化した**描画された値**で比を測る。check_site.py は
- * tokens.json 上の値しか見ないので、CSS の上書きや半透明のブレンドで落ちた分は
- * ここでしか出ない。`verdict` が GREEN なら受け入れ、RED なら `failures` が
- * そのまま是正対象。
+ * tokens.json 上の値でコントラストを測るので、CSS の上書きや半透明のブレンドで落ちた分は
+ * ここでしか出ない。`verdict` が GREEN なら受け入れ、RED なら `failures`・`textFailures`・
+ * `behaviorFailures` に出た項目を直す。
  */
 (() => {
   "use strict";
