@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import types
 from typing import Any
@@ -79,6 +80,26 @@ class TestUpstream:
         )
         assert result == "ok"
         assert sleeper.delays == [0.2, 0.4]
+
+    def test_retry_is_logged(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
+        """再試行するたびに、試行回数・待ち時間・status を警告ログに残す（続行を見える形にする）。"""
+        outcomes = [facade.upstream.UpstreamError(503, "orders.list"), "ok"]
+
+        async def operation() -> str:
+            """1 回目だけ失敗し、2 回目で成功する。"""
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        with caplog.at_level(logging.WARNING):
+            asyncio.run(
+                facade.upstream.call_with_retry(
+                    operation, base_delay=0.2, deadline=math.inf, sleep=_Sleeper(), jitter=lambda: 1.0
+                )
+            )
+        warnings = [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING]
+        assert warnings == ["upstream retry: attempt=1/3 delay=0.20s status=503 orders.list"]
 
     def test_retry_gives_up(self, facade: types.SimpleNamespace) -> None:
         """再試行しない失敗・回数切れ・締切越えでは諦める。上流の retry_after に従う。"""

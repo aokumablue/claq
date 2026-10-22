@@ -42,6 +42,7 @@ def resolve_principal(environ: Mapping[str, str] = os.environ, getuser: Callable
     if configured:
         return configured
     try:
+        # stdio の主体は起動した利用者そのもの（既定値で続行するフォールバックではない）
         return getuser()
     except (OSError, KeyError, ImportError) as error:
         # 3.13 以降は OSError だけを投げる。3.12 は uid が passwd に無いと KeyError、pwd が無いと ImportError

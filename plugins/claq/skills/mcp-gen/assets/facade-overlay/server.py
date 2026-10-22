@@ -67,6 +67,7 @@ def _cursor_secret() -> bytes:
     configured = os.environ.get("FACADE_CURSOR_SECRET", "")
     if configured:
         return configured.encode("utf-8")
+    # 出所: 1 プロセスの stdio では鍵を共有する相手がいない。続行したことは次の警告で見える
     logger.warning("FACADE_CURSOR_SECRET が未設定です。プロセスごとの鍵を使うため、再起動後は cursor が無効になります")
     return secrets.token_bytes(32)
 

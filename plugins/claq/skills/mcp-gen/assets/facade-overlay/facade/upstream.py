@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import time
 import unicodedata
@@ -15,6 +16,8 @@ from typing import Any
 
 RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
 DETAIL_MAX_CHARS = 200
+
+logger = logging.getLogger(__name__)
 
 
 def _loggable(detail: str) -> str:
@@ -103,7 +106,9 @@ async def call_with_retry[T](
 ) -> T:
     """一時的な失敗に限って、指数バックオフとジッタで再試行する。
 
-    再試行するのは `retryable` な `UpstreamError` だけ（読み取りは冪等なので安全）。
+    再試行するのは `retryable` な `UpstreamError` だけ。出所: 429・503 は HTTP の契約で再試行を
+    求める応答（Retry-After）で、502・504・接続失敗は冪等な読み取りなら繰り返しても結果が変わらない。
+    再試行するたびに警告ログを残す（続行したことを運用者に見せる）。
     上流の `retry_after` があればそれに従う。ただし `max_retry_after` を超える待ちと、
     締切を越える待ちはせずに諦める。
 
@@ -137,6 +142,14 @@ async def call_with_retry[T](
                 delay = min(max_delay, base_delay * 2**attempt) * (0.5 + jitter() / 2)
             if clock() + delay >= deadline:
                 raise
+            logger.warning(
+                "upstream retry: attempt=%d/%d delay=%.2fs status=%s %s",
+                attempt + 1,
+                attempts,
+                delay,
+                error.status,
+                error.detail,
+            )
             await sleep(delay)
     raise AssertionError("unreachable")  # pragma: no cover
 

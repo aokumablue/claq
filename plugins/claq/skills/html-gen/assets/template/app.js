@@ -21,6 +21,7 @@
     try {
       return window.localStorage.getItem(key);
     } catch {
+      // 出所: Web Storage はプライベートモードやサンドボックスの iframe で SecurityError を投げうる（HTML 仕様）
       return null;
     }
   };
@@ -34,7 +35,7 @@
     try {
       window.localStorage.setItem(key, value);
     } catch {
-      /* 保存できない環境ではセッション内だけ反映する */
+      // 出所: 読み取りと同じ（HTML 仕様）。保存できない環境ではセッション内だけ反映する
     }
   };
 
