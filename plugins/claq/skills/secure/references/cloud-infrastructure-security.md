@@ -1,14 +1,5 @@
 # クラウド・インフラセキュリティ
 
-## 目次
-
-- クラウドセキュリティチェックリスト
-- デプロイ前のクラウドセキュリティチェックリスト
-- よくあるクラウドセキュリティの設定ミス
-- 参考資料
-
-クラウドインフラ・CI/CDパイプライン・デプロイ設定がセキュリティベストプラクティスに従い、業界標準に準拠するようにする。
-
 ## クラウドセキュリティチェックリスト
 
 各例で `PASS` = 推奨、`FAIL` = アンチパターン。
@@ -26,18 +17,10 @@ iam_role:
 # FAIL: s3:* を "*"（全アクション×全リソース）に付与
 ```
 
-#### 多要素認証（MFA）
-
-```bash
-# ルート/管理者アカウントは必ず MFA を有効化
-aws iam enable-mfa-device --user-name admin \
-  --serial-number arn:aws:iam::123456789:mfa/admin \
-  --authentication-code1 123456 --authentication-code2 789012
-```
-
 #### 確認項目
 
 - [ ] 本番環境でルートアカウントを使用していない
+- [ ] ストレージ（S3 等）を公開 ACL にせず、必要なアクセスだけを bucket policy で許可している
 - [ ] 特権アカウントすべてで MFA を有効化している
 - [ ] サービスアカウントは長期有効な認証情報ではなくロールを使用している
 - [ ] IAM ポリシーが最小権限の原則に従っている
@@ -56,21 +39,11 @@ const apiKey = JSON.parse(secret.SecretString).key;
 // FAIL: process.env.API_KEY のみ（未ローテーション・未監査）
 ```
 
-#### シークレットのローテーション
-
-```bash
-# DB 認証情報を 30 日ごとに自動ローテーション
-aws secretsmanager rotate-secret --secret-id prod/db-password \
-  --rotation-lambda-arn arn:aws:lambda:region:account:function:rotate \
-  --rotation-rules AutomaticallyAfterDays=30
-```
-
 #### 確認項目
 
 - [ ] すべてのシークレットをクラウドシークレットマネージャー（AWS Secrets Manager、Vercel Secrets）に保存している
 - [ ] データベース認証情報の自動ローテーションを有効化している
 - [ ] API キーを少なくとも四半期ごとにローテーションしている
-- [ ] コード、ログ、エラーメッセージにシークレットを含めていない
 - [ ] シークレットアクセスの監査ログを有効化している
 
 ### 3. ネットワークセキュリティ
@@ -100,22 +73,9 @@ resource "aws_security_group" "app" {
 - [ ] セキュリティグループが最小権限の原則に従っている
 - [ ] Network ACL が設定されている
 - [ ] VPC フローログが有効化されている
+- [ ] 転送時（TLS）と保存時（ストレージ・DB・バックアップ）の暗号化を有効化している
 
 ### 4. ログと監視
-
-#### CloudWatch/ログ設定
-
-```typescript
-// PASS: 包括的なロギング（機微データは記録しない）
-await cloudwatch.putLogEvents({
-  logGroupName: '/aws/security/events',
-  logStreamName: 'authentication',
-  logEvents: [{
-    timestamp: Date.now(),
-    message: JSON.stringify({ type: event.type, userId: event.userId, ip: event.ip, result: event.result }),
-  }],
-});
-```
 
 #### 確認項目
 
@@ -148,10 +108,6 @@ jobs:
           role-to-assume: arn:aws:iam::123456789:role/GitHubActionsRole
           aws-region: us-east-1
 ```
-
-#### サプライチェーンセキュリティ
-
-再現可能ビルドのため lock ファイル + 整合性チェックを使う（`npm ci` でインストール、`npm audit` で監査）。
 
 #### 確認項目
 
@@ -246,15 +202,3 @@ LLM エージェントを動かす基盤は、**不信な入力（取得した�
 - [ ] **人間のゲート**: 不可逆な操作（デプロイ・削除・権限変更・外部への送信）は
       エージェントの自己判断で完了させない。承認をエージェント自身の出力で満たせる設計に
       しない（自己承認の禁止）
-
-## よくあるクラウドセキュリティの設定ミス
-
-- **S3 バケットの公開**: `--acl public-read` は不可。`--acl private` + 特定アクセスのみ許可する bucket policy を使う。
-
-## 参考資料
-
-- [AWS セキュリティのベストプラクティス](https://aws.amazon.com/security/best-practices/)
-- [Cloudflare のセキュリティドキュメント](https://developers.cloudflare.com/security/)
-- [OWASP クラウドセキュリティ](https://owasp.org/www-project-cloud-security/)
-- [Terraform のセキュリティベストプラクティス](https://www.terraform.io/docs/cloud/guides/recommended-practices/)
-
