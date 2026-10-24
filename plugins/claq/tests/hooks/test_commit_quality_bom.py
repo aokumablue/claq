@@ -75,7 +75,10 @@ def scan(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_pa
     [
         *[(bom + _KEY.encode(codec), _secret_in_binary("Anthropic API key")) for bom, codec in _BOMS.values()],
         # 複数行でも行ごとに分けて走査し、`^\s*...: value$` 形のパターンが 3 行目で効くこと。
-        *[(bom + _MULTILINE.encode(codec), _secret_in_binary("credential assignment")) for bom, codec in _BOMS.values()],
+        *[
+            (bom + _MULTILINE.encode(codec), _secret_in_binary("credential assignment"))
+            for bom, codec in _BOMS.values()
+        ],
         *[(bom, []) for bom, _codec in _BOMS.values()],
         # strict 復号に失敗したら追加走査をせず、UTF-8 側の結果だけで検出する（例外にならない）。
         *[(bad + b"\n" + _KEY.encode(), _secret_in_binary("Anthropic API key")) for bad in _UNDECODABLE.values()],

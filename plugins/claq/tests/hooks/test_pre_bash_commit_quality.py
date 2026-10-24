@@ -409,46 +409,37 @@ class TestStagedFileNameDecoding:
     発火確率が高い。
     """
 
-    def test_non_ascii_staged_file_names_survive_c_locale(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """US-ASCII ロケールでも日本語ファイル名を復元して返すこと。"""
+    @pytest.mark.parametrize(
+        ("returncode", "raw", "expected"),
+        [
+            (0, b"src/app.py\nsrc/tool.ts\n", ["src/app.py", "src/tool.ts"]),
+            (0, "src/設定ファイル.py\nsrc/plain.py\n".encode(), ["src/設定ファイル.py", "src/plain.py"]),
+            # `errors="replace"` でそのファイル名は置換文字へ潰れ内容を読めなくなるが、例外でフックごと
+            # 落ちて commit が無検査で通る（fail-open）よりは、残りのファイルを検査できる方が良い。
+            (0, b"src/\xff\xfe-broken.py\nsrc/plain.py\n", ["src/��-broken.py", "src/plain.py"]),
+            # git 自体が非0終了した場合は「0 件」ではなく None（検査不能）を返す。
+            (1, b"", None),
+        ],
+        ids=["ascii", "non-ascii", "undecodable-bytes", "git-fails"],
+    )
+    def test_staged_file_names_are_decoded_as_utf8_under_c_locale(
+        self, monkeypatch: pytest.MonkeyPatch, returncode: int, raw: bytes, expected: list[str] | None
+    ) -> None:
+        """US-ASCII ロケールでも `git diff` の出力を UTF-8（不正バイトは置換）で復号して返すこと。"""
         monkeypatch.setenv("LC_ALL", "C")
         monkeypatch.setenv("LANG", "C")
-        raw = "src/設定ファイル.py\nsrc/plain.py\n".encode()
 
-        def fake_run(command: list[str], **kwargs: object):
-            encoding = kwargs["encoding"]
-            assert isinstance(encoding, str)
+        def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+            """`git diff` だけを受け付け、呼び出し側が渡した encoding / errors で ``raw`` を復号して返す。"""
+            assert command[:2] == ["git", "diff"]
+            assert kwargs["encoding"] == "utf-8"
             errors = kwargs["errors"]
             assert isinstance(errors, str)
-            return subprocess.CompletedProcess(command, 0, stdout=raw.decode(encoding, errors), stderr="")
+            return subprocess.CompletedProcess(command, returncode, stdout=raw.decode("utf-8", errors), stderr="")
 
         monkeypatch.setattr(subprocess, "run", fake_run)
 
-        assert pbcq.get_staged_files() == ["src/設定ファイル.py", "src/plain.py"]
-
-    def test_undecodable_bytes_do_not_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """UTF-8 として不正なバイト列でも例外にせず走査を続けること。
-
-        `errors="replace"` でそのファイル名は置換文字へ潰れ内容を読めなくなるが、
-        例外でフックごと落ちて commit が無検査で通る（fail-open）よりは、
-        残りのファイルを検査できる方が良いという判断。
-        """
-        raw = b"src/\xff\xfe-broken.py\nsrc/plain.py\n"
-
-        def fake_run(command: list[str], **kwargs: object):
-            encoding = kwargs["encoding"]
-            assert isinstance(encoding, str)
-            errors = kwargs["errors"]
-            assert isinstance(errors, str)
-            return subprocess.CompletedProcess(command, 0, stdout=raw.decode(encoding, errors), stderr="")
-
-        monkeypatch.setattr(subprocess, "run", fake_run)
-
-        staged = pbcq.get_staged_files()
-
-        assert staged is not None
-        assert len(staged) == 2
-        assert staged[1] == "src/plain.py"
+        assert pbcq.get_staged_files() == expected
 
     @pytest.mark.parametrize(
         "error",

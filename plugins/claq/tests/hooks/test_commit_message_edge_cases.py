@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import pytest
 
-def test_validate_commit_message_lowercase_no_period() -> None:
-    """conventional commit で小文字始まり・末尾ピリオド無しなら指摘なし。"""
-    from claq.hooks.commit_message import validate_commit_message
+from claq.hooks import commit_message
 
-    result = validate_commit_message('git commit -m "feat: add new feature"')
-    assert result is not None
-    types = {i["type"] for i in result["issues"]}
-    assert "capitalization" not in types
-    assert "punctuation" not in types
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("git status", None),
+        ('git commit -m "feat: add new feature"', ("feat: add new feature", [])),
+        ('git commit -m "feat(core): Add feature."', ("feat(core): Add feature.", ["capitalization", "punctuation"])),
+    ],
+    ids=["not-a-commit", "lowercase-no-period", "capitalized-with-period"],
+)
+def test_validate_commit_message(command: str, expected: tuple[str, list[str]] | None) -> None:
+    """commit 以外は None、commit はメッセージと指摘種別（大文字始まり・末尾ピリオド）を返すこと。"""
+    result = commit_message.validate_commit_message(command)
+
+    summary = None if result is None else (result["message"], [issue["type"] for issue in result["issues"]])
+    assert summary == expected

@@ -120,33 +120,6 @@ def test_regular_file_to_symlink_typechange_is_not_blocked(
     assert _evaluate(command, repo, monkeypatch)["exitCode"] == 0
 
 
-@pytest.mark.parametrize("kind", ["file", "dir", "broken"])
-def test_worktree_symlink_content_is_link_target_string(kind: str, tmp_path: Path) -> None:
-    """symlink は先の内容でなく link 先文字列（git が blob に保存するもの）を返すこと。"""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "real.txt").write_text(_SECRET_LINE, encoding="utf-8")
-    (repo / "sub").mkdir()
-    link_target = {"file": "real.txt", "dir": "sub", "broken": "nowhere"}[kind]
-    (repo / "link.py").symlink_to(link_target)
-
-    assert commit_quality_scanner.get_worktree_file_content(repo, "link.py") == link_target
-
-
-def test_worktree_symlink_to_outside_returns_link_string_not_target_content(tmp_path: Path) -> None:
-    """repo 外を指す symlink でも repo 外の内容は読まず、link 先文字列だけを返すこと。"""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    outside = tmp_path / "outside_secret.txt"
-    outside.write_text(_SECRET_LINE, encoding="utf-8")
-    (repo / "evil.py").symlink_to(outside)
-
-    content = commit_quality_scanner.get_worktree_file_content(repo, "evil.py")
-
-    assert content == str(outside)
-    assert "hunter2" not in content
-
-
 def test_staged_content_of_stage_prefixed_name_is_read_from_that_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

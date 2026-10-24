@@ -1,4 +1,8 @@
-"""claq.hooks.commit_quality_scanner の端の挙動のテスト（find_file_issues の対象判定・nosec・サイズ・バイナリ・例外、staged／worktree の内容取得、自己走査）。"""
+"""claq.hooks.commit_quality_scanner の端の挙動のテスト（find_file_issues の対象判定・nosec・サイズ・バイナリ・例外、staged／worktree の内容取得、自己走査）。
+
+このファイル自身を走査して issue 0 件を確かめるテストがあるため、ログ出力・デバッガ文・TODO の
+パターンを含む行には `# nosec` を付け、鍵の形の文字列は実行時に連結して組み立てる。
+"""
 
 from __future__ import annotations
 
@@ -8,110 +12,154 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import commit_message as commit_message
 from claq.hooks import commit_quality_scanner as commit_quality_scanner
 from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
 
 from ._support import _scan_deadline
 
+_API_KEY_LINE = "api" + "_key" + ' = "abc123"'
+_SECRET_LINE = "api" + "_key" + ' = "hunter2secret"\n'
+_OVER_1MIB = "x" * (1024 * 1024 + 1)
 
-def test_pre_bash_commit_quality_detects_file_issues_and_commit_message_rules(
-    monkeypatch: pytest.MonkeyPatch,
+
+def _issues(file_path: str, content: str, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    """INDEX の内容を ``content`` に差し替えて ``find_file_issues`` を満額の予算で呼ぶ。"""
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
+    return commit_quality_scanner.find_file_issues(file_path, deadline=_scan_deadline())
+
+
+@pytest.mark.parametrize(
+    ("file_path", "content", "expected"),
+    [
+        (
+            "src/app.js",
+            "\n".join(
+                [
+                    'console.log("hi")',  # nosec
+                    "// console.log('commented')",  # nosec
+                    "debugger",  # nosec
+                    "// TODO: clean this up",  # nosec
+                    "// TODO: #123 tracked",
+                    "const " + "api" + "_key" + ' = "abc";',
+                ]
+            ),
+            [
+                ("console.log", 1, "warning"),  # nosec
+                ("debugger", 3, "error"),  # nosec
+                ("todo", 4, "info"),
+                ("secret", 6, "error"),
+            ],
+        ),
+        # `# nosec` は lint だけを抑制し、secret 検出は抑制しない（バイパス防止）。
+        (
+            "src/app.py",
+            "debugger  # nosec\n" + "const " + "api" + "_key" + ' = "x";  # nosec',
+            [("secret", 2, "error")],
+        ),
+        ("src/app.py", "api" + "_key" + ' = "hunter2secret"  # nosec', [("secret", 1, "error")]),
+        ("src/app.py", 'console.log("debug")  # nosec', []),
+        # `sk-ant-...`（`sk-` 直後にハイフン）は OpenAI 形のパターンに一致しないため専用パターンで検出する。
+        ("src/app.py", "sk-" + "ant-" + "abcdefghijklmnopqrstuvwxyz0123456789", [("secret", 1, "error")]),
+        # lint 対象外の拡張子でも secret は検出し、lint だけを行わない。
+        (".env", "API_" + "KEY" + '="hunter2secret"', [("secret", 1, "error")]),
+        (".env", 'console.log("hi")', []),  # nosec
+        # ロックファイルは secret パターンに一致しても検出しない。
+        ("package-lock.json", _API_KEY_LINE, []),
+        # 圧縮生成物（*.min.js）は lint 対象（拡張子は .js）だが secret スキャンは対象外。
+        ("dist/app.min.js", 'console.log("hi")\n' + _API_KEY_LINE, [("console.log", 1, "warning")]),  # nosec
+        # 真のバイナリ（画像等）は secret パターンに当たらない（バイナリ commit を一律ブロックしない）。
+        ("logo.png", "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x00\x00\x00\x01\x00\x08\x06", []),
+        # サイズで打ち切らないので、1MiB の前後どちらの secret も検出し、lint も継続する。
+        (
+            "src/app.js",
+            _OVER_1MIB + "\n" + 'console.log("hi")' + "\n" + _API_KEY_LINE,  # nosec
+            [("console.log", 2, "warning"), ("secret", 3, "error")],  # nosec
+        ),
+        ("src/app.js", _API_KEY_LINE + "\n" + _OVER_1MIB, [("secret", 1, "error")]),
+        ("src/app.js", "x" * (1024 * 1024 - 100) + "\n" + _API_KEY_LINE, [("secret", 2, "error")]),
+    ],
+    ids=[
+        "lint-mix",
+        "nosec-hides-lint-not-secret",
+        "nosec-does-not-hide-secret",
+        "nosec-hides-console-log",
+        "anthropic-key",
+        "non-lint-extension-secret",
+        "non-lint-extension-skips-lint",
+        "lock-file",
+        "minified-js",
+        "real-binary",
+        "secret-past-1mib",
+        "secret-before-1mib-padding",
+        "secret-under-1mib",
+    ],
+)
+def test_find_file_issues_by_path_and_content(
+    monkeypatch: pytest.MonkeyPatch, file_path: str, content: str, expected: list[tuple[str, int, str]]
 ) -> None:
-    content = "\n".join(
-        [
-            'console.log("hi")',  # nosec
-            "// console.log('commented')",  # nosec
-            "debugger",  # nosec
-            "// TODO: clean this up",  # nosec
-            "// TODO: #123 tracked",
-            "const " + "api" + "_key" + ' = "abc";',
-        ]
-    )
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
+    """パスと内容ごとに、lint と secret の issue が (種別, 行, severity) の完全一致で出ること。"""
+    issues = _issues(file_path, content, monkeypatch)
 
-    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
-
-    assert {issue["type"] for issue in issues} == {"console.log", "debugger", "todo", "secret"}  # nosec
-    assert [issue["line"] for issue in issues if issue["type"] == "console.log"] == [1]  # nosec
-    assert [issue["line"] for issue in issues if issue["type"] == "todo"] == [4]
-
-    assert commit_message.validate_commit_message("git status") is None
-    message = commit_message.validate_commit_message('git commit -m "feat(core): Add feature."')
-    assert message is not None
-    assert message["message"] == "feat(core): Add feature."
-    assert {issue["type"] for issue in message["issues"]} == {"capitalization", "punctuation"}
+    assert [(issue["type"], issue["line"], issue["severity"]) for issue in issues] == expected
 
 
-def test_find_file_issues_skips_nosec_marked_lines(monkeypatch: pytest.MonkeyPatch) -> None:
-    """# nosec は console.log/debugger/todo を抑制するが、secret 検出は抑制しない。"""
-    content = "\n".join(
-        [
-            'debugger  # nosec',
-            "const " + "api" + "_key" + ' = "x";  # nosec',
-        ]
-    )
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
+def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """バイナリ判定（先頭に NUL を含む）は lint だけを抑制し、secret scan は続ける。
 
-    issues = commit_quality_scanner.find_file_issues("src/app.py", deadline=_scan_deadline())
-
-    # デバッガ文は nosec で抑制される
-    assert not any(issue["type"] == "debugger" for issue in issues)  # nosec
-    # secret は nosec があっても検出される（バイパス防止）
-    assert [issue["type"] for issue in issues] == ["secret"]
-    assert issues[0]["line"] == 2
-
-
-def test_find_file_issues_secret_detection_not_bypassed_by_nosec(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`# nosec` を付与しても api_key のようなシークレットパターンはブロック対象として検出され続ける。"""
-    content = "api" + "_key" + ' = "hunter2secret"  # nosec'
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-
-    issues = commit_quality_scanner.find_file_issues("src/app.py", deadline=_scan_deadline())
-
-    assert len(issues) == 1
-    assert issues[0]["type"] == "secret"
-    assert issues[0]["severity"] == "error"
-
-
-def test_find_file_issues_detects_anthropic_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`sk-ant-...` 形式（ハイフン区切り）の Anthropic API キーも検出される。
-
-    OpenAI 形式用パターン `sk-[a-zA-Z0-9]{20,}` は `sk-` 直後にハイフンを含む
-    Anthropic 形式（`sk-ant-api03-...`）とは一致しないため、専用パターンで
-    検出する回帰。
+    docs/adr/shell-analysis-boundary.md: 先頭に NUL を 1 バイト混ぜてバイナリ判定させるだけで secret 検査を
+    まるごと回避できる状態は許容しない。行分割が意味を持たないため、印字可能
+    文字列を抽出して同じパターンを当てる。スキップの痕跡 issue も出さない。
     """
-    content = "sk-" + "ant-" + "abcdefghijklmnopqrstuvwxyz0123456789"
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
+    content = "\0binary preamble\n" + 'console.log("hi")\n' + _API_KEY_LINE  # nosec
 
-    issues = commit_quality_scanner.find_file_issues("src/app.py", deadline=_scan_deadline())
+    issues = _issues("weird.js", content, monkeypatch)
 
-    assert len(issues) == 1
-    assert issues[0]["type"] == "secret"
-    assert issues[0]["severity"] == "error"
+    assert [(issue["type"], issue["line"], issue["severity"]) for issue in issues] == [("secret", 0, "error")]
+    assert "extracted binary content" in issues[0]["message"]
 
 
-def test_find_file_issues_console_log_still_suppressed_by_nosec(monkeypatch: pytest.MonkeyPatch) -> None:
-    """secret を含まない行では console.log が nosec で抑制されること。"""  # nosec
-    content = 'console.log("debug")  # nosec'
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
+@pytest.mark.parametrize(
+    ("target", "error", "content", "expected"),
+    [
+        # secret scanner の例外を握り潰すと、内部バグで commit を許可する最も危険な fail-open になる。
+        # lint 側の結果は影響を受けず生存する。
+        (
+            "_scan_secret_issues",
+            RuntimeError("boom"),
+            'console.log("hi")',  # nosec
+            [("console.log", "warning"), ("scan_error", "error")],  # nosec
+        ),
+        # lint は false negative のコストが secret ほど高くないため warning に留め、secret 側は生存する。
+        ("_scan_lint_issues", ValueError("boom"), _API_KEY_LINE, [("scan_error", "warning"), ("secret", "error")]),
+        # 走査対象判定自体が例外を投げても検査不能を報告する。
+        ("_is_binary_content", OSError("boom"), "content", [("scan_error", "error")]),
+    ],
+    ids=["secret-scan", "lint-scan", "scan-target-detection"],
+)
+def test_find_file_issues_reports_stage_exception_as_scan_error(
+    monkeypatch: pytest.MonkeyPatch, target: str, error: Exception, content: str, expected: list[tuple[str, str]]
+) -> None:
+    """各段階の例外は issue を消さず、段階ごとの severity の scan_error（パスと例外型名入り）として報告されること。"""
+    monkeypatch.setattr(commit_quality_scanner, target, mock.Mock(side_effect=error))
 
-    assert commit_quality_scanner.find_file_issues("src/app.py", deadline=_scan_deadline()) == []
+    issues = _issues("src/app.js", content, monkeypatch)
+
+    assert [(issue["type"], issue["severity"]) for issue in issues] == expected
+    scan_error = next(issue for issue in issues if issue["type"] == "scan_error")
+    assert "src/app.js" in scan_error["message"]
+    assert type(error).__name__ in scan_error["message"]
 
 
 def test_find_file_issues_self_check_has_zero_secret_issues(monkeypatch: pytest.MonkeyPatch) -> None:
     """このフック自身のソースを検査しても secret 検出が0件であること（自己検出回避の nosec が secret を隠していないことの担保）。"""
     source_path = Path(commit_quality_scanner.__file__)
-    own_source = source_path.read_text(encoding="utf-8")
 
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: own_source)
-    issues = commit_quality_scanner.find_file_issues(str(source_path), deadline=_scan_deadline())
+    issues = _issues(str(source_path), source_path.read_text(encoding="utf-8"), monkeypatch)
 
-    secret_issues = [issue for issue in issues if issue["type"] == "secret"]
-    assert secret_issues == []
+    assert [issue for issue in issues if issue["type"] == "secret"] == []
 
 
-def test_find_file_issues_self_check_on_this_test_file_has_zero_issues() -> None:
+def test_find_file_issues_self_check_on_this_test_file_has_zero_issues(monkeypatch: pytest.MonkeyPatch) -> None:
     """このテストファイル自身を検査しても issue が0件であること（fixture 文字列の自己マッチ回帰防止）。
 
     cbabdad で secret 検出が nosec 無視・常時実行になった結果、本ファイルの
@@ -120,392 +168,132 @@ def test_find_file_issues_self_check_on_this_test_file_has_zero_issues() -> None
     回帰が発生した。本テストはその回帰を検知する。
     """
     this_file = Path(__file__)
-    own_source = this_file.read_text(encoding="utf-8")
 
-    with mock.patch.object(commit_quality_scanner, "get_staged_file_content", return_value=own_source):
-        issues = commit_quality_scanner.find_file_issues(str(this_file), deadline=_scan_deadline())
-
-    assert issues == []
-
-
-def test_find_file_issues_detects_secret_in_non_lint_extension(monkeypatch: pytest.MonkeyPatch) -> None:
-    """.py/.js 等の lint 対象外拡張子（例: .env）でも secret 検出が行われること。"""
-    content = "API_" + "KEY" + '="hunter2secret"'
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-
-    issues = commit_quality_scanner.find_file_issues(".env", deadline=_scan_deadline())
-
-    assert [issue["type"] for issue in issues] == ["secret"]
-
-
-def test_find_file_issues_lint_only_checks_skipped_for_non_lint_extension(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """lint 対象外拡張子では console.log/デバッガ文/todo は検出されないこと（secret のみ対象）。"""  # nosec
-    content = 'console.log("hi")'  # nosec
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-
-    assert commit_quality_scanner.find_file_issues(".env", deadline=_scan_deadline()) == []
-
-
-def test_find_file_issues_skips_secret_scan_for_lock_files(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ロックファイルは内容が secret パターンに一致しても検出しないこと。"""
-    content = "api" + "_key" + ' = "abc123"'
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-
-    assert commit_quality_scanner.find_file_issues("package-lock.json", deadline=_scan_deadline()) == []
-
-
-def test_find_file_issues_oversized_files_detect_secret_past_old_1mib_cap(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """1MiB を超える位置に置かれた secret も検出されること（サイズ
-    による打ち切りをしないため、ファイル後方の secret も見逃さない）。
-    lint（ログ出力チェック）はサイズに関わらず継続することも合わせて確認する。
-    """  # nosec
-    padding = "x" * (1024 * 1024 + 1)
-    content = padding + "\n" + 'console.log("hi")' + "\n" + "api" + "_key" + ' = "abc123"'  # nosec
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-
-    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
-
-    types = {issue["type"] for issue in issues}
-    # サイズで打ち切らないので、1MiB より後ろの secret も検出される。
-    assert "secret" in types
-    # lint はサイズに関わらず継続する
-    assert "console.log" in types  # nosec
-
-
-def test_find_file_issues_oversized_files_scan_prefix_for_secrets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """1MB 超のファイルでも、先頭側にある secret は検出されること。"""
-    secret_line = "api" + "_key" + ' = "abc123"'
-    padding = "x" * (1024 * 1024 + 1)
-    content = secret_line + "\n" + padding
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-
-    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
-
-    assert any(issue["type"] == "secret" and issue["line"] == 1 for issue in issues)
-
-
-def test_find_file_issues_secret_scan_applies_under_size_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """1MB 以下のファイルは通常どおり secret スキャンされること（境界値確認）。"""
-    padding = "x" * (1024 * 1024 - 100)
-    content = padding + "\n" + "api" + "_key" + ' = "abc123"'
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-
-    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
-
-    assert any(issue["type"] == "secret" for issue in issues)
-
-
-def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """バイナリ判定（先頭に NUL を含む）は lint だけを抑制し、secret scan は続ける。
-
-    docs/adr/shell-analysis-boundary.md: 先頭に NUL を 1 バイト混ぜてバイナリ判定させるだけで secret 検査を
-    まるごと回避できる状態は許容しない。行分割が意味を持たないため、印字可能
-    文字列を抽出して同じパターンを当てる。
-    """
-    content = "\0binary preamble\n" + 'console.log("hi")\n' + "api" + "_key" + ' = "abc123"'  # nosec
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-
-    issues = commit_quality_scanner.find_file_issues("weird.js", deadline=_scan_deadline())
-
-    secrets = [issue for issue in issues if issue["type"] == "secret"]
-    assert secrets, issues
-    assert secrets[0]["severity"] == "error"
-    assert "extracted binary content" in secrets[0]["message"]
-    # lint は抑制する（バイナリを行単位で lint しても意味がない）。
-    assert "console.log" not in {issue["type"] for issue in issues}  # nosec
-    # スキップの痕跡 issue は不要になったので出さない。
-    assert "secret_scan_skipped" not in {issue["type"] for issue in issues}
-
-
-def test_find_file_issues_real_binary_is_not_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """真のバイナリ（画像等）は secret パターンに当たらず error を出さないこと。
-
-    バイナリ commit を一律ブロックしないという既存の要件を維持する。
-    """
-    png = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x00\x00\x00\x01\x00\x08\x06"
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: png)
-
-    issues = commit_quality_scanner.find_file_issues("logo.png", deadline=_scan_deadline())
-
-    assert [issue for issue in issues if issue["severity"] == "error"] == []
+    assert _issues(str(this_file), this_file.read_text(encoding="utf-8"), monkeypatch) == []
 
 
 def test_extract_printable_runs_splits_on_control_characters() -> None:
     """制御文字で区切られた短すぎる断片は走査単位に含めないこと。"""
-    runs = commit_quality_scanner._extract_printable_runs("ab\x00longer-run\x01cd")
-
-    assert runs == ["longer-run"]
+    assert commit_quality_scanner._extract_printable_runs("ab\x00longer-run\x01cd") == ["longer-run"]
 
 
-def test_find_file_issues_secret_scan_exception_is_reported_as_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """secret scanner が例外を投げても issue が消えず、error として報告される。
-
-    find_file_issues 全体を `except Exception: pass` で覆うと例外を
-    握り潰し、secret scanner の内部バグでも commit を許可してしまう
-    （false negative のコストが高い secret 検出が最も危険な形で fail-open
-    する）。lint 側の結果は例外の影響を受けず生存することも確認する。
-    """
-    content = 'console.log("hi")'  # nosec
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-    monkeypatch.setattr(
-        commit_quality_scanner,
-        "_scan_secret_issues",
-        mock.Mock(side_effect=RuntimeError("boom")),
-    )
-
-    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
-
-    types = {issue["type"] for issue in issues}
-    assert "console.log" in types  # lint 側は secret scanner の例外の影響を受けない  # nosec
-    scan_errors = [issue for issue in issues if issue["type"] == "scan_error"]
-    assert len(scan_errors) == 1
-    assert scan_errors[0]["severity"] == "error"
-    assert "src/app.js" in scan_errors[0]["message"]
-    assert "RuntimeError" in scan_errors[0]["message"]
-
-
-def test_find_file_issues_lint_scan_exception_is_reported_as_warning(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """lint scanner の例外は warning として報告し、secret 側は生存する。
-
-    lint と secret で severity を非対称にする（lint は false negative の
-    コストが secret ほど高くないため warning に留め、commit をブロックしない）。
-    """
-    content = "api" + "_key" + ' = "abc123"'  # nosec
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-    monkeypatch.setattr(
-        commit_quality_scanner,
-        "_scan_lint_issues",
-        mock.Mock(side_effect=ValueError("boom")),
-    )
-
-    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
-
-    types = {issue["type"] for issue in issues}
-    assert "secret" in types
-    scan_errors = [issue for issue in issues if issue["type"] == "scan_error"]
-    assert len(scan_errors) == 1
-    assert scan_errors[0]["severity"] == "warning"
-    assert "ValueError" in scan_errors[0]["message"]
-
-
-def test_find_file_issues_scan_target_detection_exception_is_reported_as_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """走査対象判定自体（_is_binary_content 等）が例外を投げても検査不能を報告する。"""
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: "content")
-    monkeypatch.setattr(
-        commit_quality_scanner,
-        "_is_binary_content",
-        mock.Mock(side_effect=OSError("boom")),
-    )
-
-    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
-
-    assert len(issues) == 1
-    assert issues[0]["type"] == "scan_error"
-    assert issues[0]["severity"] == "error"
-    assert "OSError" in issues[0]["message"]
-
-
-def test_pre_bash_commit_quality_helpers_handle_subprocess_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        pre_bash_commit_quality.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, stdout="", stderr=""),
-    )
-    monkeypatch.setattr(
-        commit_quality_scanner.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, stdout="", stderr=""),
-    )
-
-    # git 自体が非0終了した場合は「0 件」ではなく None（検査不能）を返す
-    assert pre_bash_commit_quality.get_staged_files() is None
-    assert commit_quality_scanner.get_staged_file_content("src/app.js") is None
+def test_should_lint_file_by_extension() -> None:
+    """lint 対象の拡張子だけを lint すること。"""
     assert commit_quality_scanner.should_lint_file("src/app.py")
     assert not commit_quality_scanner.should_lint_file("src/app.txt")
 
 
 @pytest.mark.parametrize(
-    "file_path",
+    ("file_path", "expected"),
     [
-        "package-lock.json",
-        "yarn.lock",
-        "pnpm-lock.yaml",
-        "Cargo.lock",
-        "poetry.lock",
-        "uv.lock",
-        "Pipfile.lock",
-        "vendor/package-lock.json",
-        "dist/bundle.min.js",
-        "static/app.min.css",
+        # ロックファイルと圧縮生成物（*.min.js/*.min.css）は対象外。
+        ("package-lock.json", False),
+        ("yarn.lock", False),
+        ("pnpm-lock.yaml", False),
+        ("Cargo.lock", False),
+        ("poetry.lock", False),
+        ("uv.lock", False),
+        ("Pipfile.lock", False),
+        ("vendor/package-lock.json", False),
+        ("dist/bundle.min.js", False),
+        ("static/app.min.css", False),
+        # lint 対象外の拡張子でも対象（tests/ 配下も除外しない）。
+        (".env", True),
+        ("config.json", True),
+        ("app.yaml", True),
+        ("deploy.sh", True),
+        ("Dockerfile", True),
+        ("src/app.txt", True),
+        ("tests/fixtures/secret.env", True),
     ],
 )
-def test_should_scan_secrets_excludes_lock_and_minified_files(file_path: str) -> None:
-    """ロックファイルと圧縮生成物（*.min.js/*.min.css）は secret スキャン対象外であること。"""
-    assert pre_bash_commit_quality.should_scan_secrets(file_path) is False
+def test_should_scan_secrets(file_path: str, expected: bool) -> None:
+    """secret スキャン対象はロックファイルと圧縮生成物を除く全ファイルであること。"""
+    assert pre_bash_commit_quality.should_scan_secrets(file_path) is expected
 
 
 @pytest.mark.parametrize(
-    "file_path",
+    ("returncode", "stdout", "expected"),
     [
-        ".env",
-        "config.json",
-        "app.yaml",
-        "deploy.sh",
-        "Dockerfile",
-        "src/app.txt",
-        "tests/fixtures/secret.env",
+        # git 自体が非0終了した場合は「0 件」ではなく None（検査不能）を返す。
+        (1, b"", None),
+        (0, b"file content", "file content"),
+        # バイナリ判定は find_file_issues 側で lint 抑制にだけ使う。取得層で None にすると
+        # NUL 1 個で secret 検査を回避できる抜け道になる。
+        (0, b"PNG\x00\x01\x02fake image bytes", "PNG\x00\x01\x02fake image bytes"),
+        # 不正な UTF-8 でも UnicodeDecodeError を送出せず置換する（旧 text=True 実装の潜在バグ）。
+        (0, b"valid text \xff\xfe invalid bytes", "valid text �� invalid bytes"),
     ],
+    ids=["git-fails", "text", "binary-not-filtered", "invalid-utf8-replaced"],
 )
-def test_should_scan_secrets_includes_non_lint_extensions(file_path: str) -> None:
-    """.env/.yaml/.sh/Dockerfile 等、lint 対象外の拡張子でも secret スキャン対象であること
-    （tests/ 配下も除外しない）。"""
-    assert pre_bash_commit_quality.should_scan_secrets(file_path) is True
+def test_get_staged_file_content(
+    monkeypatch: pytest.MonkeyPatch, returncode: int, stdout: bytes, expected: str | None
+) -> None:
+    """`git show` の bytes 出力を復号して返し、git の失敗は None になること。"""
 
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        """`git show` だけを受け付け、指定の終了コードと bytes を返す。"""
+        assert command[:2] == ["git", "show"]
+        return subprocess.CompletedProcess(command, returncode, stdout=stdout, stderr=b"")
 
-def test_pre_bash_commit_quality_helpers_return_success_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(command: list[str], **kwargs: object):
-        # `get_staged_files` は `subprocess_utils.run_text` 経由になったため
-        # `encoding` / `errors` / `env` / `input` も渡ってくる（**kwargs で受ける）。
-        if command[:2] == ["git", "diff"]:
-            assert kwargs["encoding"] == "utf-8"
-            return subprocess.CompletedProcess(command, 0, stdout="src/app.py\nsrc/tool.ts\n", stderr="")
-        if command[:2] == ["git", "show"]:
-            # get_staged_file_content はバイナリ判定のため text=True を付けずに bytes で取得する
-            return subprocess.CompletedProcess(command, 0, stdout=b"file content", stderr=b"")
-        raise AssertionError(f"unexpected command: {command}")
-
-    monkeypatch.setattr(pre_bash_commit_quality.subprocess, "run", fake_run)
     monkeypatch.setattr(commit_quality_scanner.subprocess, "run", fake_run)
 
-    assert pre_bash_commit_quality.get_staged_files() == ["src/app.py", "src/tool.ts"]
-    assert commit_quality_scanner.get_staged_file_content("src/app.js") == "file content"
+    assert commit_quality_scanner.get_staged_file_content("src/app.js") == expected
 
 
-def test_get_staged_file_content_does_not_filter_binary_content(monkeypatch: pytest.MonkeyPatch) -> None:
-    """get_staged_file_content 自体はバイナリ判定を行わず、NUL を含む内容もそのまま返すこと。
-
-    バイナリ判定（`_is_binary_content`）は `find_file_issues` 側で lint 抑制の
-    みに使う設計であり、ここで None を返してしまうと secret 検出まで巻き
-    込んで全放棄されてしまう（NUL 1個で secret 検査を回避できる抜け道）ため、
-    取得層では判定しないことを保証する。
-    """
-    binary_bytes = b"PNG\x00\x01\x02fake image bytes"
-
-    monkeypatch.setattr(
-        commit_quality_scanner.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=binary_bytes, stderr=b""),
-    )
-    content = commit_quality_scanner.get_staged_file_content("image.png")
-    assert content is not None
-    assert "\0" in content
-
-
-def test_get_staged_file_content_replaces_invalid_utf8_without_raising(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """不正な UTF-8 バイト列でも UnicodeDecodeError を送出せず置換して返すこと
-    （旧 text=True 実装の潜在バグの回帰防止）。"""
-    invalid_utf8 = b"valid text \xff\xfe invalid bytes"
-
-    monkeypatch.setattr(
-        commit_quality_scanner.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=invalid_utf8, stderr=b""),
-    )
-    content = commit_quality_scanner.get_staged_file_content("weird_encoding.txt")
-    assert content is not None
-    assert "valid text" in content
+@pytest.fixture
+def worktree(tmp_path: Path) -> Path:
+    """実ファイル・各種 symlink を置いた repo を返す。repo の隣に secret 入りのファイルとディレクトリを置く。"""
+    repo = tmp_path / "repo"
+    (repo / "sub").mkdir(parents=True)
+    (tmp_path / "outside_dir").mkdir()
+    for path in (tmp_path / "outside_secret.txt", tmp_path / "outside_dir" / "app.py", repo / "real.txt"):
+        path.write_text(_SECRET_LINE, encoding="utf-8")
+    (repo / "app.py").write_text("value = 1\n", encoding="utf-8")
+    links = {
+        "linked_subdir": tmp_path / "outside_dir",
+        "link_file.py": "real.txt",
+        "link_dir.py": "sub",
+        "link_broken.py": "nowhere",
+        "link_outside.py": tmp_path / "outside_secret.txt",
+    }
+    for name, target in links.items():
+        (repo / name).symlink_to(target)
+    return repo
 
 
-def test_get_worktree_file_content_returns_none_on_oserror(tmp_path: Path) -> None:
-    """作業ツリーにファイルが無い等で読み取れない場合は None を返すこと。"""
-    assert commit_quality_scanner.get_worktree_file_content(tmp_path, "missing.py") is None
+@pytest.mark.parametrize(
+    ("file_path", "expected"),
+    [
+        ("missing.py", None),
+        ("app.py", "value = 1\n"),
+        # repo 外への脱出: 絶対パス（pathlib の仕様上 repo_root が無視される）・`..`・symlink の中間ディレクトリ。
+        ("{outside}", None),
+        ("../outside_secret.txt", None),
+        ("linked_subdir/app.py", None),
+        # symlink は先を辿らず link 先文字列（git が blob に保存するもの）を返す。repo 外を指していても
+        # repo 外の実体（秘密鍵等）を読まない。
+        ("link_file.py", "real.txt"),
+        ("link_dir.py", "sub"),
+        ("link_broken.py", "nowhere"),
+        ("link_outside.py", "{outside}"),
+    ],
+    ids=[
+        "missing",
+        "regular-file",
+        "absolute-path",
+        "dotdot-traversal",
+        "symlinked-intermediate-dir",
+        "symlink-to-file",
+        "symlink-to-dir",
+        "broken-symlink",
+        "symlink-outside-repo",
+    ],
+)
+def test_get_worktree_file_content(worktree: Path, file_path: str, expected: str | None) -> None:
+    """作業ツリーの実ファイルは内容、symlink は link 先文字列を返し、読めない・repo 外は None になること。"""
+    outside = str(worktree.parent / "outside_secret.txt")
 
+    content = commit_quality_scanner.get_worktree_file_content(worktree, file_path.format(outside=outside))
 
-def test_get_worktree_file_content_reads_real_file(tmp_path: Path) -> None:
-    """作業ツリー上の実ファイルを読み取れること。"""
-    (tmp_path / "app.py").write_text("value = 1\n", encoding="utf-8")
-    content = commit_quality_scanner.get_worktree_file_content(tmp_path, "app.py")
-    assert content == "value = 1\n"
-
-
-def test_get_worktree_file_content_does_not_read_symlink_target_outside_repo_root(tmp_path: Path) -> None:
-    """repo 外の実体を指すシンボリックリンクは先を辿らず link 先文字列だけを返すこと。
-
-    OS レベルでシンボリックリンクを追跡すると、repo 内の悪意あるリンクが
-    `git commit -a` の対象に入った場合に repo 外の実体（秘密鍵等）を読み、
-    secret パターン一致でログに一部露出しうる欠陥の回帰防止。
-    """
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    outside_secret = tmp_path / "outside_secret.txt"
-    outside_secret.write_text("api" + "_key" + ' = "hunter2secret"', encoding="utf-8")
-
-    link = repo_root / "evil_link.py"
-    link.symlink_to(outside_secret)
-
-    assert commit_quality_scanner.get_worktree_file_content(repo_root, "evil_link.py") == str(outside_secret)
-
-
-def test_get_worktree_file_content_rejects_absolute_file_path(tmp_path: Path) -> None:
-    """file_path が絶対パスの場合は None を返すこと（pathlib の仕様上 repo_root が無視される経路）。"""
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    outside_secret = tmp_path / "outside_secret.txt"
-    outside_secret.write_text("secret content", encoding="utf-8")
-
-    assert commit_quality_scanner.get_worktree_file_content(repo_root, str(outside_secret)) is None
-
-
-def test_get_worktree_file_content_rejects_dotdot_traversal(tmp_path: Path) -> None:
-    """`..` を含む file_path で repo_root 外へ脱出しようとした場合は None を返すこと。"""
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    outside_secret = tmp_path / "outside_secret.txt"
-    outside_secret.write_text("secret content", encoding="utf-8")
-
-    assert commit_quality_scanner.get_worktree_file_content(repo_root, "../outside_secret.txt") is None
-
-
-def test_get_worktree_file_content_rejects_symlinked_intermediate_directory(tmp_path: Path) -> None:
-    """中間ディレクトリがシンボリックリンクで repo 外へ脱出する場合も None を返すこと。"""
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    outside_dir = tmp_path / "outside_dir"
-    outside_dir.mkdir()
-    (outside_dir / "app.py").write_text("secret content", encoding="utf-8")
-
-    linked_subdir = repo_root / "linked_subdir"
-    linked_subdir.symlink_to(outside_dir)
-
-    assert commit_quality_scanner.get_worktree_file_content(repo_root, "linked_subdir/app.py") is None
-
-
-def test_find_file_issues_minified_js_lints_but_skips_secret_scan(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """圧縮生成物（*.min.js）は lint 対象（拡張子は .js）だが secret スキャンは
-    対象外であること（do_lint=True かつ do_secrets=False の組み合わせ）。"""
-    content = 'console.log("hi")\n' + "api" + "_key" + ' = "abc123"'  # nosec
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-
-    issues = commit_quality_scanner.find_file_issues("dist/app.min.js", deadline=_scan_deadline())
-
-    types = {issue["type"] for issue in issues}
-    assert "console.log" in types  # nosec
-    assert "secret" not in types
+    assert content == (None if expected is None else expected.format(outside=outside))
