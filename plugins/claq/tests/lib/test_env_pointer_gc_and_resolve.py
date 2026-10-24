@@ -24,151 +24,149 @@ from claq.lib.constants import BASE_DIR_NAME
 from ._support import _ENV_TEMPLATE, _make_plugin_root
 from ._support import _isolate_home as _isolate_home
 
+_PAST_GRACE = mod._DEAD_PID_GRACE_SECONDS + 60
+"""PID 不在・非数字名のエントリが削除対象になる経過秒数。"""
+
+_SOURCE_AND_RUN = '. "$HOME/.claq/env.sh" || exit 127\nclaq_run marker\n'
+_NESTED_SOURCE_AND_RUN = 'sh -c \'. "$HOME/.claq/env.sh" || exit 127; claq_run marker\'\n'
+
+
+def _age(path: Path, seconds: float) -> None:
+    """``path`` の mtime を現在から ``seconds`` 秒前にする。"""
+    old = time.time() - seconds
+    os.utime(path, (old, old))
+
+
+def _dead_pid() -> int:
+    """終了済みの子プロセスの PID を返す。"""
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    return proc.pid
+
+
+def _raise_oserror(*_args: object, **_kwargs: object) -> None:
+    """常に OSError を送出する差し替え関数。"""
+    raise OSError("boom")
+
 
 class TestPidIsAlive:
     """_pid_is_alive の判定分岐のテスト。"""
 
-    def test_self_pid_is_alive(self) -> None:
-        assert mod._pid_is_alive(os.getpid()) is True
-
-    def test_zero_pid_is_never_alive(self) -> None:
-        """pid=0 は自プロセスグループへのシグナルになるため常に False とする。"""
-        assert mod._pid_is_alive(0) is False
-
-    def test_negative_pid_is_never_alive(self) -> None:
-        assert mod._pid_is_alive(-1) is False
+    @pytest.mark.parametrize(
+        ("pid", "expected"), [(os.getpid(), True), (0, False), (-1, False)], ids=["self", "zero", "negative"]
+    )
+    def test_pid_sign_and_self(self, pid: int, expected: bool) -> None:
+        """自プロセスは生存。pid=0 は自プロセスグループへのシグナルになるため 0 以下は常に False。"""
+        assert mod._pid_is_alive(pid) is expected
 
     def test_dead_pid_is_not_alive(self) -> None:
-        proc = subprocess.Popen(["true"])
-        proc.wait()
-        assert mod._pid_is_alive(proc.pid) is False
+        """終了済みの PID は生存していない。"""
+        assert mod._pid_is_alive(_dead_pid()) is False
 
-    def test_permission_error_counts_as_alive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        ("exc", "expected"), [(PermissionError, True), (OSError("unexpected"), False)], ids=["permission", "other"]
+    )
+    def test_kill_error_decides_liveness(
+        self, monkeypatch: pytest.MonkeyPatch, exc: BaseException | type[BaseException], expected: bool
+    ) -> None:
+        """kill の PermissionError は存在すると見なし、その他の OSError は不在と見なす。"""
+
         def _boom(_pid: int, _sig: int) -> None:
-            raise PermissionError
+            """kill の失敗を模す。"""
+            raise exc
 
         monkeypatch.setattr(mod.os, "kill", _boom)
-        assert mod._pid_is_alive(12345) is True
-
-    def test_other_oserror_counts_as_not_alive(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def _boom(_pid: int, _sig: int) -> None:
-            raise OSError("unexpected")
-
-        monkeypatch.setattr(mod.os, "kill", _boom)
-        assert mod._pid_is_alive(12345) is False
+        assert mod._pid_is_alive(12345) is expected
 
 
 class TestGcRoots:
-    """_gc_roots / _gc_one の削除判定のテスト。"""
+    """_gc_roots / _gc_one / _gc_stale_temp_files の削除判定のテスト。"""
 
-    def test_unicode_digit_and_huge_pid_names_do_not_raise(self, tmp_path: Path) -> None:
-        """Unicode の数字や C の int に収まらない数字の名前でも例外で落ちず、猶予後に削除する。
-
-        ここで落ちると launcher が hook を実行する前に終わり、保護フックが素通りになる。
-        """
+    @pytest.mark.parametrize(
+        ("name", "age", "keep", "survives"),
+        [
+            # Unicode の数字や C の int に収まらない数字の名前でも落ちない（落ちると保護フックが素通りになる）
+            pytest.param("²", _PAST_GRACE, False, False, id="unicode-digit-past-grace"),
+            pytest.param("9" * 40, _PAST_GRACE, False, False, id="huge-pid-past-grace"),
+            # 旧形式は猶予後に削除する
+            pytest.param("999999.sh", _PAST_GRACE, False, False, id="legacy-pid-sh-past-grace"),
+            pytest.param("latest", _PAST_GRACE, False, False, id="legacy-latest-past-grace"),
+            pytest.param("latest.sh", _PAST_GRACE, False, False, id="legacy-latest-sh-past-grace"),
+            # rename 直前の一時ファイル（mkstemp・旧 writer 残骸・env.sh tmp）を race で消さない
+            pytest.param("env.sh.tmp.12345", 0, False, True, id="fresh-env-sh-tmp"),
+            pytest.param("555555.tmp.666666", 0, False, True, id="fresh-legacy-writer-tmp"),
+            pytest.param("555555.tmp.abcdefgh", 0, False, True, id="fresh-mkstemp-tmp"),
+            pytest.param("<self>", 0, False, True, id="alive-fresh"),
+            # 稼働中のホストは毎 hook で mtime を更新するため、古いままなのは PID 再利用と判断する
+            pytest.param("<self>", mod._MAX_ROOT_AGE_SECONDS + 3600, False, False, id="alive-past-max-age"),
+            # 書き込み直後の短命プロセスは 1 サイクル猶予する
+            pytest.param("<dead>", 0, False, True, id="dead-within-grace"),
+            pytest.param("<dead>", _PAST_GRACE, False, False, id="dead-past-grace"),
+            # 使い捨ての中間 shell に書いたばかりのポインタが同じ GC 呼び出しで自壊しない
+            pytest.param("<dead>", _PAST_GRACE, True, True, id="dead-past-grace-in-keep-pids"),
+            pytest.param(mod._GC_STAMP_FILENAME, _PAST_GRACE, False, True, id="gc-stamp-skipped"),
+        ],
+    )
+    def test_gc_roots_decides_each_entry(
+        self, tmp_path: Path, name: str, age: float, keep: bool, survives: bool
+    ) -> None:
+        """roots/ の 1 エントリが名前（``<self>`` は自 PID・``<dead>`` は不在 PID）・経過時間・keep_pids で判定されること。"""
+        name = {"<self>": str(os.getpid()), "<dead>": str(_dead_pid())}.get(name, name)
         roots_dir = tmp_path / "roots"
         roots_dir.mkdir()
-        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        for name in ("²", "9" * 40):
-            entry = roots_dir / name
-            entry.write_text("/old\n", encoding="utf-8")
-            os.utime(entry, (old, old))
+        entry = roots_dir / name
+        entry.write_text("/old\n", encoding="utf-8")
+        _age(entry, age)
+
+        mod._gc_roots(roots_dir, keep_pids=frozenset({int(name)}) if keep else frozenset())
+
+        assert entry.exists() is survives
+
+    def test_entry_unlink_failure_is_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """削除対象エントリの unlink 失敗は例外にせず、エントリは残る。"""
+        roots_dir = tmp_path / "roots"
+        roots_dir.mkdir()
+        entry = roots_dir / "424242"
+        entry.write_text("/x\n", encoding="utf-8")
+        _age(entry, _PAST_GRACE)
+        monkeypatch.setattr(mod, "_pid_is_alive", lambda _pid: False)
+        monkeypatch.setattr(Path, "unlink", _raise_oserror)
 
         mod._gc_roots(roots_dir)
 
-        assert list(roots_dir.iterdir()) == []
+        assert entry.exists()
 
-    def test_non_digit_names_past_grace_are_removed(self, tmp_path: Path) -> None:
-        """旧形式（<pid>.sh・latest・latest.sh）は猶予後に削除する。"""
-        roots_dir = tmp_path / "roots"
-        roots_dir.mkdir()
-        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        for name in ("999999.sh", "latest", "latest.sh"):
-            entry = roots_dir / name
-            entry.write_text("/old\n", encoding="utf-8")
-            os.utime(entry, (old, old))
+    def test_missing_dir_is_noop(self, tmp_path: Path) -> None:
+        """列挙できないディレクトリでは roots GC も env.sh tmp GC も例外を送出しない。"""
+        mod._gc_roots(tmp_path / "does-not-exist")
+        mod._gc_stale_temp_files(tmp_path / "does-not-exist", time.time())
 
-        mod._gc_roots(roots_dir)
+    def test_stale_temp_gc_removes_only_old_env_sh_tmp(self, tmp_path: Path) -> None:
+        """claq_dir 直下では猶予切れの env.sh.tmp.* だけを回収し、新鮮な tmp とプレフィックス不一致の state は残す。
 
-        assert list(roots_dir.iterdir()) == []
-
-    def test_fresh_non_digit_temp_file_survives_gc(self, tmp_path: Path) -> None:
-        """別 writer が rename 直前に作った一時ファイルを race で消さない。
-
-        ``roots/`` で実際に発生しうるのは ``<name>.tmp.<random>``
-        （mkstemp）。旧 writer 残骸（``<pid>.tmp.<writer_pid>``）と
-        ``env.sh.tmp.<pid>`` も
-        非数字名として同じ age-gate 対象になる。
-        """
-        roots_dir = tmp_path / "roots"
-        roots_dir.mkdir()
-        for name in ("env.sh.tmp.12345", "555555.tmp.666666", "555555.tmp.abcdefgh"):
-            (roots_dir / name).write_text("x\n", encoding="utf-8")
-
-        mod._gc_roots(roots_dir)
-
-        assert (roots_dir / "env.sh.tmp.12345").exists()
-        assert (roots_dir / "555555.tmp.666666").exists()
-        assert (roots_dir / "555555.tmp.abcdefgh").exists()
-
-    def test_fresh_env_sh_tmp_in_claq_dir_survives_gc(self, tmp_path: Path) -> None:
-        """claq_dir 直下の新鮮な env.sh.tmp.* は age-gate で残る。"""
-        claq_dir = tmp_path / "bc"
-        claq_dir.mkdir()
-        fresh = claq_dir / f"{mod._ENV_TMP_PREFIX}freshxxx"
-        fresh.write_text("in-flight\n", encoding="utf-8")
-
-        mod._gc_stale_temp_files(claq_dir, time.time())
-
-        assert fresh.exists()
-
-    def test_stale_env_sh_tmp_in_claq_dir_is_removed(self, tmp_path: Path) -> None:
-        """猶予を過ぎた env.sh.tmp.* は claq_dir から回収する。"""
-        claq_dir = tmp_path / "bc"
-        claq_dir.mkdir()
-        stale = claq_dir / f"{mod._ENV_TMP_PREFIX}stalexxx"
-        stale.write_text("orphan\n", encoding="utf-8")
-        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        os.utime(stale, (old, old))
-
-        mod._gc_stale_temp_files(claq_dir, time.time())
-
-        assert not stale.exists()
-
-    def test_gc_env_sh_tmp_does_not_touch_env_sh_or_mem_db(self, tmp_path: Path) -> None:
-        """プレフィックス不一致の state ファイルは env.sh tmp GC の対象外。
-
-        survivor も stale tmp と同じ古い mtime にする。新鮮なまま残すと、
+        survivor（env.sh・mem.db・無関係ファイル）も stale tmp と同じ古い mtime にする。新鮮なまま残すと、
         プレフィックスを ``env.sh`` まで広げた実装でもこのテストは緑になる。
         """
         claq_dir = tmp_path / "bc"
         claq_dir.mkdir()
-        env_sh = claq_dir / mod._ENV_FILENAME
-        mem_db = claq_dir / "mem.db"
-        other = claq_dir / "unrelated.txt"
-        env_sh.write_text("keep-env\n", encoding="utf-8")
-        mem_db.write_text("keep-db\n", encoding="utf-8")
-        other.write_text("keep-other\n", encoding="utf-8")
+        fresh = claq_dir / f"{mod._ENV_TMP_PREFIX}freshxxx"
+        fresh.write_text("in-flight\n", encoding="utf-8")
         stale = claq_dir / f"{mod._ENV_TMP_PREFIX}stalexxx"
         stale.write_text("orphan\n", encoding="utf-8")
-        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        for path in (env_sh, mem_db, other, stale):
-            os.utime(path, (old, old))
+        _age(stale, _PAST_GRACE)
+        kept = {claq_dir / mod._ENV_FILENAME: "keep-env\n", claq_dir / "mem.db": "keep-db\n"}
+        kept[claq_dir / "unrelated.txt"] = "keep-other\n"
+        for path, text in kept.items():
+            path.write_text(text, encoding="utf-8")
+            _age(path, _PAST_GRACE)
 
         mod._gc_stale_temp_files(claq_dir, time.time())
 
+        assert fresh.exists()
         assert not stale.exists()
-        assert env_sh.read_text(encoding="utf-8") == "keep-env\n"
-        assert mem_db.read_text(encoding="utf-8") == "keep-db\n"
-        assert other.read_text(encoding="utf-8") == "keep-other\n"
+        assert {path: path.read_text(encoding="utf-8") for path in kept} == kept
 
-    def test_unlistable_claq_dir_is_noop_for_env_sh_tmp_gc(self, tmp_path: Path) -> None:
-        """claq_dir が列挙できなくても env.sh tmp GC は例外を送出しない。"""
-        mod._gc_stale_temp_files(tmp_path / "does-not-exist", time.time())
-
-    def test_env_sh_tmp_stat_failure_is_ignored(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_sh_tmp_stat_failure_is_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """env.sh.tmp.* の stat 失敗は無視する。"""
         claq_dir = tmp_path / "bc"
         claq_dir.mkdir()
@@ -177,6 +175,7 @@ class TestGcRoots:
         real_stat = Path.stat
 
         def _boom_stat(self: Path, *args: object, **kwargs: object) -> object:
+            """対象エントリだけ stat を失敗させる。"""
             if self == entry:
                 raise OSError("boom")
             return real_stat(self, *args, **kwargs)
@@ -185,206 +184,78 @@ class TestGcRoots:
         mod._gc_stale_temp_files(claq_dir, time.time())
         assert entry.exists()
 
-    def test_alive_fresh_pid_is_kept(self, tmp_path: Path) -> None:
-        roots_dir = tmp_path / "roots"
-        roots_dir.mkdir()
-        entry = roots_dir / str(os.getpid())
-        entry.write_text("/self\n", encoding="utf-8")
-
-        mod._gc_roots(roots_dir)
-
-        assert entry.exists()
-
-    def test_alive_pid_but_stale_mtime_is_removed(self, tmp_path: Path) -> None:
-        """稼働中のホストは毎 hook で mtime を更新するため、古いままなのは PID 再利用と判断する。"""
-        roots_dir = tmp_path / "roots"
-        roots_dir.mkdir()
-        entry = roots_dir / str(os.getpid())
-        entry.write_text("/self\n", encoding="utf-8")
-        old = time.time() - mod._MAX_ROOT_AGE_SECONDS - 3600
-        os.utime(entry, (old, old))
-
-        mod._gc_roots(roots_dir)
-
-        assert not entry.exists()
-
-    def test_dead_pid_within_grace_is_kept(self, tmp_path: Path) -> None:
-        """書き込み直後の短命プロセスは 1 サイクル猶予する。"""
-        roots_dir = tmp_path / "roots"
-        roots_dir.mkdir()
-        proc = subprocess.Popen(["true"])
-        proc.wait()
-        entry = roots_dir / str(proc.pid)
-        entry.write_text("/gone\n", encoding="utf-8")
-
-        mod._gc_roots(roots_dir)
-
-        assert entry.exists()
-
-    def test_dead_pid_past_grace_is_removed(self, tmp_path: Path) -> None:
-        roots_dir = tmp_path / "roots"
-        roots_dir.mkdir()
-        proc = subprocess.Popen(["true"])
-        proc.wait()
-        entry = roots_dir / str(proc.pid)
-        entry.write_text("/gone\n", encoding="utf-8")
-        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        os.utime(entry, (old, old))
-
-        mod._gc_roots(roots_dir)
-
-        assert not entry.exists()
-
-    def test_keep_pids_survives_even_if_dead_and_past_grace(self, tmp_path: Path) -> None:
-        """keep_pids に含まれるエントリは、他の削除条件をすべて満たしても残る。
-
-        launcher の親プロセス（``os.getppid()``）が使い捨ての中間 shell を指す
-        場合、書いたばかりのポインタが同じ GC 呼び出しの中で「PID 不在かつ
-        猶予切れ」に見えて自壊しうる。そうならないことを確認する。
-        """
-        roots_dir = tmp_path / "roots"
-        roots_dir.mkdir()
-        proc = subprocess.Popen(["true"])
-        proc.wait()
-        entry = roots_dir / str(proc.pid)
-        entry.write_text("/just-written\n", encoding="utf-8")
-        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        os.utime(entry, (old, old))
-
-        mod._gc_roots(roots_dir, keep_pids=frozenset({proc.pid}))
-
-        assert entry.exists()
-
-    def test_gc_stamp_file_is_skipped(self, tmp_path: Path) -> None:
-        """GC throttle 用の stamp ファイル自体は roots/ の掃除対象にしない。"""
-        roots_dir = tmp_path / "roots"
-        roots_dir.mkdir()
-        stamp = roots_dir / mod._GC_STAMP_FILENAME
-        stamp.write_text("", encoding="utf-8")
-
-        mod._gc_roots(roots_dir)
-
-        assert stamp.exists()
-
-    def test_unlistable_roots_dir_is_noop(self, tmp_path: Path) -> None:
-        mod._gc_roots(tmp_path / "does-not-exist")  # 例外を送出しないことを確認
-
-    def test_entry_stat_failure_is_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        roots_dir = tmp_path / "roots"
-        roots_dir.mkdir()
-        entry = roots_dir / "424242"
-        entry.write_text("/x\n", encoding="utf-8")
-
-        real_unlink = Path.unlink
-
-        def _boom_unlink(self: Path, *args: object, **kwargs: object) -> None:
-            if self == entry:
-                raise OSError("boom")
-            return real_unlink(self, *args, **kwargs)
-
-        # 存在しない PID にして削除対象にしつつ、unlink 失敗を注入する
-        monkeypatch.setattr(mod, "_pid_is_alive", lambda _pid: False)
-        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        os.utime(entry, (old, old))
-        monkeypatch.setattr(Path, "unlink", _boom_unlink)
-
-        mod._gc_roots(roots_dir)  # 例外を送出しないことを確認
-
 
 class TestGcThrottle:
     """_maybe_run_gc の throttle 挙動のテスト。"""
 
-    def test_gc_runs_when_stamp_absent(self, tmp_path: Path) -> None:
+    @pytest.fixture
+    def gc_dirs(self, tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+        """GC が走れば消える古い legacy ポインタと env.sh tmp を置き、(claq_dir, roots_dir, legacy, tmp) を返す。"""
         claq_dir = tmp_path / "bc"
-        claq_dir.mkdir()
         roots_dir = claq_dir / "roots"
-        roots_dir.mkdir()
+        roots_dir.mkdir(parents=True)
         legacy = roots_dir / "latest"
         legacy.write_text("/old\n", encoding="utf-8")
-        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        os.utime(legacy, (old, old))
         stale_env_tmp = claq_dir / f"{mod._ENV_TMP_PREFIX}stalexxx"
         stale_env_tmp.write_text("orphan\n", encoding="utf-8")
-        os.utime(stale_env_tmp, (old, old))
+        for path in (legacy, stale_env_tmp):
+            _age(path, _PAST_GRACE)
+        return claq_dir, roots_dir, legacy, stale_env_tmp
 
-        mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())
-
-        assert not legacy.exists()
-        assert not stale_env_tmp.exists()
-        assert (claq_dir / mod._GC_STAMP_FILENAME).exists()
-
-    def test_gc_skipped_when_stamp_is_fresh(self, tmp_path: Path) -> None:
-        claq_dir = tmp_path / "bc"
-        claq_dir.mkdir()
-        roots_dir = claq_dir / "roots"
-        roots_dir.mkdir()
-        (claq_dir / mod._GC_STAMP_FILENAME).touch()
-        (roots_dir / "latest").write_text("/old\n", encoding="utf-8")
-        stale_env_tmp = claq_dir / f"{mod._ENV_TMP_PREFIX}stalexxx"
-        stale_env_tmp.write_text("orphan\n", encoding="utf-8")
-        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        os.utime(stale_env_tmp, (old, old))
-
-        mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())
-
-        assert (roots_dir / "latest").exists()  # throttle により GC は走らない
-        assert stale_env_tmp.exists()
-
-    def test_gc_runs_when_stamp_is_stale(self, tmp_path: Path) -> None:
-        claq_dir = tmp_path / "bc"
-        claq_dir.mkdir()
-        roots_dir = claq_dir / "roots"
-        roots_dir.mkdir()
+    @pytest.mark.parametrize(
+        ("stamp_age", "runs"),
+        [(None, True), (0, False), (mod._GC_THROTTLE_SECONDS + 60, True)],
+        ids=["stamp-absent", "stamp-fresh", "stamp-stale"],
+    )
+    def test_stamp_age_decides_whether_gc_runs(
+        self, gc_dirs: tuple[Path, Path, Path, Path], stamp_age: float | None, runs: bool
+    ) -> None:
+        """stamp が無いか throttle 間隔より古ければ GC を走らせて stamp を残し、新しければ何もしない。"""
+        claq_dir, roots_dir, legacy, stale_env_tmp = gc_dirs
         stamp = claq_dir / mod._GC_STAMP_FILENAME
-        stamp.touch()
-        stamp_old = time.time() - mod._GC_THROTTLE_SECONDS - 60
-        os.utime(stamp, (stamp_old, stamp_old))
-        legacy = roots_dir / "latest"
-        legacy.write_text("/old\n", encoding="utf-8")
-        legacy_old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        os.utime(legacy, (legacy_old, legacy_old))
+        if stamp_age is not None:
+            stamp.touch()
+            _age(stamp, stamp_age)
 
         mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())
 
-        assert not legacy.exists()
+        assert legacy.exists() is not runs
+        assert stale_env_tmp.exists() is not runs
+        assert stamp.exists()
 
     def test_stamp_stat_failure_is_treated_as_absent(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, gc_dirs: tuple[Path, Path, Path, Path], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        claq_dir = tmp_path / "bc"
-        claq_dir.mkdir()
-        roots_dir = claq_dir / "roots"
-        roots_dir.mkdir()
-
+        """stamp の stat 失敗は stamp 無しとして扱い、GC を走らせる。"""
+        claq_dir, roots_dir, legacy, _tmp = gc_dirs
         real_stat = Path.stat
 
         def _boom_stat(self: Path, *args: object, **kwargs: object) -> object:
+            """stamp だけ stat を失敗させる。"""
             if self.name == mod._GC_STAMP_FILENAME:
                 raise OSError("boom")
             return real_stat(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "stat", _boom_stat)
 
-        mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())  # 例外を送出しないことを確認
+        mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())
 
-    def test_stamp_touch_failure_is_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        claq_dir = tmp_path / "bc"
-        claq_dir.mkdir()
-        roots_dir = claq_dir / "roots"
-        roots_dir.mkdir()
+        assert not legacy.exists()
 
-        def _boom_touch(self: Path, *args: object, **kwargs: object) -> None:
-            raise OSError("boom")
+    def test_stamp_touch_failure_is_ignored(
+        self, gc_dirs: tuple[Path, Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """stamp の touch 失敗は無視し、GC 自体は実行される。"""
+        claq_dir, roots_dir, legacy, _tmp = gc_dirs
+        monkeypatch.setattr(Path, "touch", _raise_oserror)
 
-        monkeypatch.setattr(Path, "touch", _boom_touch)
+        mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())
 
-        mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())  # GC 自体は実行される（touch 失敗は無視）
+        assert not legacy.exists()
 
 
-def _run_env_sh(
-    home: Path, *, script: str = '. "$HOME/.claq/env.sh" || exit 127\nclaq_run marker\n'
-) -> subprocess.CompletedProcess[str]:
-    """clean shell で env.sh を実行する。"""
+def _run_env_sh(home: Path, *, script: str = _SOURCE_AND_RUN) -> subprocess.CompletedProcess[str]:
+    """clean shell（HOME と PATH だけの環境）で ``script`` を実行する。"""
     return subprocess.run(
         ["sh", "-c", script],
         capture_output=True,
@@ -394,7 +265,7 @@ def _run_env_sh(
 
 
 def _lstart_for(pid: int) -> str:
-    """``pid`` の現在の起動時刻を ``LC_ALL=C`` で取得する（テスト用ヘルパー）。
+    """``pid`` の現在の起動時刻を ``LC_ALL=C`` で取得する。
 
     writer 実装（``_resolve_ancestor_chain``）と同じロケール固定・
     非正規化ポリシーで取得する。存在しない PID には空文字列を返す。
@@ -408,309 +279,192 @@ def _lstart_for(pid: int) -> str:
     return result.stdout.rstrip("\n")
 
 
-def _write_pointer(roots_dir: Path, pid: int, root: Path, *, lstart: str | None = None) -> None:
-    """``roots/<pid>`` へ ``root\\nlstart\\n`` の 2 行フォーマットで書く。
-
-    ``lstart`` を省略した場合、``pid`` 自身の現在の起動時刻を使う（テストが
-    実在する PID — 自プロセスや生成した子プロセス — を使う場合の便宜）。
-    存在しない PID を意図的に使う、または PID 再利用を装いたい場合は
-    明示的な文字列を渡す。
-    """
+def _write_pointer(roots_dir: Path, pid: int, root: Path) -> None:
+    """``roots/<pid>`` へ ``root\\n<pid の実 lstart>\\n`` の 2 行フォーマットで書く。"""
     roots_dir.mkdir(parents=True, exist_ok=True)
-    if lstart is None:
-        lstart = _lstart_for(pid)
-    (roots_dir / str(pid)).write_text(f"{root}\n{lstart}\n", encoding="utf-8")
+    (roots_dir / str(pid)).write_text(f"{root}\n{_lstart_for(pid)}\n", encoding="utf-8")
 
 
-def _install_env_sh(home: Path) -> None:
-    """``home/.claq/env.sh`` にテンプレートを置く（``roots/`` は各テストが用意する）。"""
-    (home / BASE_DIR_NAME).mkdir(parents=True, exist_ok=True)
-    (home / BASE_DIR_NAME / "env.sh").write_text(_ENV_TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
+def _assert_resolved(result: subprocess.CompletedProcess[str]) -> None:
+    """resolver が root を解決して claq_run を実行できたことを確かめる。"""
+    assert result.returncode == 0, result.stderr
+    assert "ran:marker" in result.stdout
+
+
+def _assert_unresolved(result: subprocess.CompletedProcess[str]) -> None:
+    """resolver が推測せず 127 で止まったことを確かめる。"""
+    assert result.returncode == 127
+    assert "could not resolve the plugin root" in result.stderr
+
+
+@pytest.fixture
+def roots_dir(_isolate_home: Path) -> Path:
+    """``~/.claq/env.sh`` にテンプレートを置き、``roots/`` の場所（未作成）を返す。"""
+    claq_dir = _isolate_home / BASE_DIR_NAME
+    claq_dir.mkdir(parents=True, exist_ok=True)
+    (claq_dir / "env.sh").write_text(_ENV_TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
+    return claq_dir / "roots"
 
 
 class TestEnvShRealExecution:
-    """生成された env.sh を実際に source し、tier の各分岐を実行検証する。"""
+    """生成された env.sh を実際に source し、tier の各分岐を実行検証する。
 
-    def test_ppid_pointer_used(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """``sh -c`` で起動した子プロセスの $PPID はテストプロセス自身の PID になる。"""
-        _install_env_sh(_isolate_home)
-        pointer_root = _make_plugin_root(tmp_path / "pointer-root")
-        _write_pointer(_isolate_home / BASE_DIR_NAME / "roots", os.getpid(), pointer_root)
+    ``sh -c`` で起動した子の $PPID はテストプロセス自身の PID になる。``os.getpid()`` に置いた
+    ポインタは、直接起動なら直接 PPID、内側にもう 1 段 ``sh -c`` を挟めば祖先として読まれる。
+    """
 
-        result = _run_env_sh(_isolate_home)
+    @pytest.mark.parametrize(
+        ("root_name", "script"),
+        [
+            pytest.param("pointer-root", _SOURCE_AND_RUN, id="direct-ppid"),
+            pytest.param("pointer-root", _NESTED_SOURCE_AND_RUN, id="ancestor-when-direct-ppid-misses"),
+            # 直接 PPID（中間 sh）に lstart が食い違うポインタ（PID 再利用）を書き、スキップさせる
+            pytest.param(
+                "pointer-root",
+                'printf "not-a-real-root\\nintentionally-wrong-lstart\\n" > "$HOME/.claq/roots/$$"\n'
+                + _NESTED_SOURCE_AND_RUN,
+                id="pid-reuse-at-direct-ppid-falls-through",
+            ),
+            # 直接 PPID の空ポインタは不正データとしてスキップし、walk を続ける（read 側の防御）
+            pytest.param(
+                "pointer-root",
+                'printf "" > "$HOME/.claq/roots/$$"\n' + _NESTED_SOURCE_AND_RUN,
+                id="empty-direct-pointer-skipped",
+            ),
+            # $・空白・二重引用符・backtick を含む root がシェル展開されない
+            pytest.param('plugin$var with space and "quote`tick', _SOURCE_AND_RUN, id="special-characters-root"),
+        ],
+    )
+    def test_resolves_from_test_process_pointer(
+        self, tmp_path: Path, _isolate_home: Path, roots_dir: Path, root_name: str, script: str
+    ) -> None:
+        """テストプロセスに置いた有効なポインタへ、直接または不正な直接 PPID を飛ばして解決すること。"""
+        _write_pointer(roots_dir, os.getpid(), _make_plugin_root(tmp_path / root_name))
 
-        assert result.returncode == 0, result.stderr
-        assert "ran:marker" in result.stdout
+        _assert_resolved(_run_env_sh(_isolate_home, script=script))
 
-    def test_ancestor_pointer_used_when_direct_ppid_misses(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """直接の $PPID に一致が無くても、祖先チェーンを辿って解決する。"""
-        _install_env_sh(_isolate_home)
-        pointer_root = _make_plugin_root(tmp_path / "pointer-root")
-        # このテストプロセス自身（内側 sh -c の祖先）にポインタを置く。直接の
-        # $PPID（中間の sh）には置かないことで、祖先チェーン tier を踏ませる。
-        _write_pointer(_isolate_home / BASE_DIR_NAME / "roots", os.getpid(), pointer_root)
-
-        script = 'sh -c \'. "$HOME/.claq/env.sh" || exit 127; claq_run marker\'\n'
-        result = _run_env_sh(_isolate_home, script=script)
-
-        assert result.returncode == 0, result.stderr
-        assert "ran:marker" in result.stdout
-
-    def test_ancestor_beyond_depth_limit_exits_127(self, tmp_path: Path, _isolate_home: Path) -> None:
+    def test_ancestor_beyond_depth_limit_exits_127(self, tmp_path: Path, _isolate_home: Path, roots_dir: Path) -> None:
         """3 段祖先（walk 上限 2 段の外側）にしかポインタが無ければ、推測せず 127 にする。
 
-        writer は host インスタンス専有の 2 段（bash tool の shell とその親）
-        にしか書かない設計（共有祖先での衝突を構造的に起こさないため）。resolver
-        の walk 上限も同じ 2 段であることをここで固定する。深いネストの文字列
-        エスケープを避けるため、各層を argv リストとして組み立て、
-        ``shlex.quote`` で 1 段ずつ包む。
+        writer は host インスタンス専有の 2 段（bash tool の shell とその親）にしか書かない設計
+        （共有祖先での衝突を構造的に起こさないため）。resolver の walk 上限も同じ 2 段である
+        ことをここで固定する。深いネストの文字列エスケープを避けるため、各層を argv リストとして
+        組み立て、``shlex.quote`` で 1 段ずつ包む。
         """
-        _install_env_sh(_isolate_home)
-        pointer_root = _make_plugin_root(tmp_path / "pointer-root")
-        # テストプロセス自身（inner から見て depth 2）にのみポインタを置く —
-        # walk 上限（depth 0/1）の外側なので解決できないはず。
-        _write_pointer(_isolate_home / BASE_DIR_NAME / "roots", os.getpid(), pointer_root)
-
+        # テストプロセス自身（inner から見て depth 2）にのみポインタを置く — walk 上限（depth 0/1）の外側
+        _write_pointer(roots_dir, os.getpid(), _make_plugin_root(tmp_path / "pointer-root"))
         script_file = tmp_path / "depth3.sh"
-        script_file.write_text('. "$HOME/.claq/env.sh" || exit 127\nclaq_run marker\n', encoding="utf-8")
+        script_file.write_text(_SOURCE_AND_RUN, encoding="utf-8")
 
-        # `; exit $?` を各層に付ける: 単一コマンドだけの `sh -c` はシェルが
-        # tail-call 最適化で自分自身を exec 置換することがあり（実機で
-        # 確認済み — `sh -c "sh -c 'ps ...'"` の ppid チェーンが 1 段
-        # 潰れる）、意図した 3 段ネストが実際には 1〜2 段にしかならない。
-        # 複数コマンドにすることで exec 置換を防ぎ、fork による本物の
-        # 3 段プロセスチェーンを作る。終了コードは `$?` で伝播する。
-        inner = ["sh", str(script_file)]
-        middle_script = " ".join(shlex.quote(x) for x in inner) + "; exit $?"
-        middle = ["sh", "-c", middle_script]
-        outer_script = " ".join(shlex.quote(x) for x in middle) + "; exit $?"
-        outer = ["sh", "-c", outer_script]
-        result = subprocess.run(
-            outer, capture_output=True, text=True, env={"HOME": str(_isolate_home), "PATH": "/usr/bin:/bin"}
-        )
+        # `; exit $?` を各層に付ける: 単一コマンドだけの `sh -c` は tail-call 最適化で自分自身を
+        # exec 置換することがあり（実機で確認済み）、意図した 3 段ネストが 1〜2 段に潰れる。
+        # 複数コマンドにして exec 置換を防ぎ、fork による本物の 3 段チェーンを作る。
+        middle = ["sh", "-c", f"{shlex.join(['sh', str(script_file)])}; exit $?"]
+        result = _run_env_sh(_isolate_home, script=f"{shlex.join(middle)}; exit $?")
 
-        assert result.returncode == 127
-        assert "could not resolve" in result.stderr
+        _assert_unresolved(result)
 
-    def test_pid_reuse_at_direct_ppid_falls_through_to_ancestor(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """直接 PPID の記録された lstart が現在値と食い違えば（PID 再利用）
-        スキップし、さらに祖先を辿って解決する。"""
-        _install_env_sh(_isolate_home)
-        pointer_root = _make_plugin_root(tmp_path / "pointer-root")
-        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
-        # 祖先（このテストプロセス自身）には正しいポインタを置く。
-        _write_pointer(roots_dir, os.getpid(), pointer_root)
+    def test_two_unrelated_alive_hosts_exit_127(self, tmp_path: Path, _isolate_home: Path, roots_dir: Path) -> None:
+        """祖先ではない 2 つの実在プロセスの root が対立していても、当て推量せず 127 にする。
 
-        # 内側 sh -c の直接 PPID（中間 sh）には、実行時に自分自身の $$ を
-        # 使って「実際の lstart とは一致しない」ポインタを書き込ませる。
-        script = (
-            'printf "not-a-real-root\\nintentionally-wrong-lstart\\n" > "$HOME/.claq/roots/$$"\n'
-            'sh -c \'. "$HOME/.claq/env.sh" || exit 127; claq_run marker\'\n'
-        )
-        result = _run_env_sh(_isolate_home, script=script)
-
-        assert result.returncode == 0, result.stderr
-        assert "ran:marker" in result.stdout
-
-    def test_malformed_ancestor_is_skipped_and_walk_continues(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """空/不正なポインタはスキップし、さらに遠い祖先で解決する。
-
-        writer はもはや衝突検知で意図的に空ファイルを作らない（poison は
-        advisor レビューで撤回済み）が、resolver 側は防御として空・欠落
-        ポインタを不正データ扱いでスキップし続ける（read 側の余剰防御。
-        `[ -z ... ]` チェックは変更していない）。"""
-        _install_env_sh(_isolate_home)
-        pointer_root = _make_plugin_root(tmp_path / "pointer-root")
-        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
-        # 祖先（このテストプロセス自身）に正しいポインタを置く。
-        _write_pointer(roots_dir, os.getpid(), pointer_root)
-
-        # 直接 PPID（中間 sh）のポインタは空にしておく。
-        script = (
-            'printf "" > "$HOME/.claq/roots/$$"\n'
-            'sh -c \'. "$HOME/.claq/env.sh" || exit 127; claq_run marker\'\n'
-        )
-        result = _run_env_sh(_isolate_home, script=script)
-
-        assert result.returncode == 0, result.stderr
-        assert "ran:marker" in result.stdout
-
-    def test_two_unrelated_alive_hosts_exit_127(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """祖先ではない 2 つの実在プロセスの root が対立していても、
-        当て推量せず 127 にする（root 値合意のような fallback で片方を
-        静かに採用しない）。
+        root 値合意のような fallback で片方を静かに採用しない。
         """
-        _install_env_sh(_isolate_home)
-        root_a = _make_plugin_root(tmp_path / "root-a")
-        root_b = _make_plugin_root(tmp_path / "root-b")
-        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
-
-        proc_a = subprocess.Popen(["sleep", "5"])
-        proc_b = subprocess.Popen(["sleep", "5"])
+        procs = [subprocess.Popen(["sleep", "5"]) for _ in range(2)]
         try:
-            _write_pointer(roots_dir, proc_a.pid, root_a)
-            _write_pointer(roots_dir, proc_b.pid, root_b)
+            for proc, name in zip(procs, ("root-a", "root-b"), strict=True):
+                _write_pointer(roots_dir, proc.pid, _make_plugin_root(tmp_path / name))
 
-            result = _run_env_sh(_isolate_home)
-
-            assert result.returncode == 127
-            assert "could not resolve" in result.stderr
+            _assert_unresolved(_run_env_sh(_isolate_home))
         finally:
-            proc_a.terminate()
-            proc_b.terminate()
-            proc_a.wait()
-            proc_b.wait()
+            for proc in procs:
+                proc.terminate()
+                proc.wait()
 
     def test_resolves_when_writer_runs_under_non_c_locale(
         self, tmp_path: Path, _isolate_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """writer（env_pointer.py）の ambient locale が C でなくても、resolver
-        （``env -i`` 相当の最小環境、事実上 C ロケール）から解決できること。
+        """writer の ambient locale が C でなくても、resolver（事実上 C ロケール）から解決できること。
 
-        ``ps -o lstart=`` の出力はロケール依存（``LANG=ja_JP.UTF-8`` では
-        ``木  8/20 ...``、``C`` ロケールでは ``Thu Aug 20 ...``）であることを
-        実機で確認した。writer/resolver 双方が ``LC_ALL=C`` を明示するため、
-        ambient locale の違いに関わらず一致する必要がある — これは実機で
-        踏んだ回帰（writer 側の ``LC_ALL`` 指定漏れ）を固定する。
-
-        ``write_env_pointer`` は内部で常に ``LC_ALL=C`` を注入するため、単に
-        ``LANG`` を設定して解決成功を確認するだけでは、``LC_ALL`` 注入を
-        誤って外した future 回帰を検知できない（advisor レビュー指摘）。
-        先に「``LC_ALL=C`` 版と ``LANG=ja_JP.UTF-8``（``LC_ALL`` 無し）版の
-        ``ps -o lstart=`` が実際に異なる」ことを確認し、ロケール差分が
-        存在する環境でだけ本題の解決成功を assert する（差分が無い環境
-        ―― 日本語ロケール未インストール等 ―― では xfail 相当としてスキップし、
-        偽の green を防ぐ）。
+        ``ps -o lstart=`` の出力はロケール依存（``LANG=ja_JP.UTF-8`` では ``木  8/20 ...``）。
+        writer/resolver 双方が ``LC_ALL=C`` を明示するため一致する必要がある —— writer 側の
+        ``LC_ALL`` 指定漏れという実機で踏んだ回帰を固定する。単に ``LANG`` を設定して成功を見る
+        だけでは ``LC_ALL`` 注入を外した回帰を検知できないので、先に C 版と ja 版の
+        ``ps -o lstart=`` が実際に異なることを確かめ、差分が無い環境ではスキップして偽の green を防ぐ。
         """
-        own_pid = os.getpid()
-        c_lstart = subprocess.run(
-            ["ps", "-o", "lstart=", "-p", str(own_pid)],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "LC_ALL": "C"},
-        ).stdout
         ja_env = {**os.environ, "LANG": "ja_JP.UTF-8"}
         ja_env.pop("LC_ALL", None)
         ja_lstart = subprocess.run(
-            ["ps", "-o", "lstart=", "-p", str(own_pid)], capture_output=True, text=True, env=ja_env
-        ).stdout
-        if c_lstart == ja_lstart:
+            ["ps", "-o", "lstart=", "-p", str(os.getpid())], capture_output=True, text=True, env=ja_env
+        ).stdout.rstrip("\n")
+        if _lstart_for(os.getpid()) == ja_lstart:
             pytest.skip("ja_JP.UTF-8 locale not available on this host; ps -o lstart= is locale-invariant here")
 
         monkeypatch.setenv("LANG", "ja_JP.UTF-8")
         monkeypatch.delenv("LC_ALL", raising=False)
-        plugin_root = _make_plugin_root(tmp_path / "plugin")
 
-        mod.write_env_pointer(plugin_root)
+        mod.write_env_pointer(_make_plugin_root(tmp_path / "plugin"))
 
-        result = _run_env_sh(_isolate_home)  # env は HOME/PATH のみ（LANG 無し）
+        _assert_resolved(_run_env_sh(_isolate_home))  # env は HOME/PATH のみ（LANG 無し）
 
-        assert result.returncode == 0, result.stderr
-        assert "ran:marker" in result.stdout
-
-    def test_exits_127_when_no_candidates(self, _isolate_home: Path) -> None:
-        _install_env_sh(_isolate_home)
-
-        result = _run_env_sh(_isolate_home)
-
-        assert result.returncode == 127
-        assert "could not resolve the plugin root" in result.stderr
-
-    def test_malicious_pointer_content_is_not_executed(self, _isolate_home: Path) -> None:
-        """ポインタに shell コードを書いても実行されない。
-
-        1 行目が root、2 行目が lstart として読まれるだけで、どちらの行も
-        評価・実行はされない。この内容は 2 行目（"CLAQ_ROOT=/x"）が
-        lstart として扱われ、実際の PID の lstart と一致しないため
-        （PID 再利用相当）127 になる。
-        """
-        _install_env_sh(_isolate_home)
-        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
-        roots_dir.mkdir()
-        (roots_dir / str(os.getpid())).write_text(
-            "printf ROOT_FILE_EXECUTED >&2\nCLAQ_ROOT=/x\n", encoding="utf-8"
-        )
+    @pytest.mark.parametrize(
+        ("content", "message"),
+        [
+            pytest.param(None, True, id="no-candidates"),
+            pytest.param(b"", True, id="empty-pointer"),
+            # 1 行目が root、2 行目が lstart として読まれるだけで評価されず、lstart 不一致で 127
+            pytest.param(b"printf ROOT_FILE_EXECUTED >&2\nCLAQ_ROOT=/x\n", True, id="shell-code-in-pointer"),
+            # writer は NUL を書かない。読み取りがどう切れても評価されないことが本質で、終了コードは問わない
+            pytest.param(b"printf ROOT_FILE_EXECUTED >&2\x00/tmp/x\n", False, id="embedded-nul"),
+        ],
+    )
+    def test_invalid_self_pointer_is_never_executed(
+        self, _isolate_home: Path, roots_dir: Path, content: bytes | None, message: bool
+    ) -> None:
+        """自 PID のポインタが無い・空・shell コード入りでは 127 にし、どの内容もコードとして実行しない。"""
+        if content is not None:
+            roots_dir.mkdir()
+            (roots_dir / str(os.getpid())).write_bytes(content)
 
         result = _run_env_sh(_isolate_home)
 
         assert "ROOT_FILE_EXECUTED" not in result.stderr
-        assert result.returncode == 127
+        if message:
+            _assert_unresolved(result)
 
-    def test_root_with_special_characters_resolves(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """$・空白・二重引用符・backtick を含む root がシェル展開されず解決できる。"""
-        _install_env_sh(_isolate_home)
-        odd_root = _make_plugin_root(tmp_path / 'plugin$var with space and "quote`tick')
-        _write_pointer(_isolate_home / BASE_DIR_NAME / "roots", os.getpid(), odd_root)
-
-        result = _run_env_sh(_isolate_home)
-
-        assert result.returncode == 0, result.stderr
-        assert "ran:marker" in result.stdout
-
-    def test_symlink_pointer_is_rejected(self, tmp_path: Path, _isolate_home: Path) -> None:
+    def test_symlink_pointer_is_rejected(self, tmp_path: Path, _isolate_home: Path, roots_dir: Path) -> None:
         """symlink であること**だけ**を理由に拒否されること（``[ -L ... ] ||`` ガード）。
 
-        symlink 先の中身を 1 行（root のみ・lstart 行なし）にすると、
-        ``env-template.sh`` の ``-L`` ガードを削除しても後段の空 lstart
-        チェックが 127 を返し、緑のまま通る —— ``-L`` ガードを実行させるには
-        「有効な 2 行を持つ symlink」を置く必要がある。
-
-        ここでは symlink 先を通常ファイルとして置けば解決できる内容
-        （``root\\n<自 PID の実 lstart>\\n``）にし、同じ内容を通常ファイルとして
-        置いた場合は解決できることを陽性対照として先に確認する。両者の差は
-        symlink かどうかだけなので、127 の理由が ``-L`` ガードに特定される。
+        symlink 先の中身を 1 行にすると ``-L`` ガードを削除しても後段の空 lstart チェックが 127 を
+        返して緑のまま通るので、symlink 先は通常ファイルなら解決できる内容にする。同じ内容を
+        通常ファイルとして置けば解決できることを陽性対照として先に確かめ、127 の理由を
+        ``-L`` ガードに特定する。
         """
-        _install_env_sh(_isolate_home)
-        pointer_root = _make_plugin_root(tmp_path / "pointer-root")
-        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
         pointer_path = roots_dir / str(os.getpid())
-
-        # 陽性対照: まったく同じ内容を通常ファイルとして置けば解決できる。
-        _write_pointer(roots_dir, os.getpid(), pointer_root)
-        valid_content = pointer_path.read_text(encoding="utf-8")
+        _write_pointer(roots_dir, os.getpid(), _make_plugin_root(tmp_path / "pointer-root"))
         assert _run_env_sh(_isolate_home).returncode == 0
 
-        # 本題: 内容は同一のまま、実体を symlink に差し替える。
         real_pointer = tmp_path / "real-pointer"
-        real_pointer.write_text(valid_content, encoding="utf-8")
+        real_pointer.write_text(pointer_path.read_text(encoding="utf-8"), encoding="utf-8")
         pointer_path.unlink()
         pointer_path.symlink_to(real_pointer)
 
-        result = _run_env_sh(_isolate_home)
-
-        assert result.returncode == 127
-
-    def test_empty_pointer_file_is_ignored(self, _isolate_home: Path) -> None:
-        _install_env_sh(_isolate_home)
-        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
-        roots_dir.mkdir()
-        (roots_dir / str(os.getpid())).write_text("", encoding="utf-8")
-
-        result = _run_env_sh(_isolate_home)
-
-        assert result.returncode == 127
+        assert _run_env_sh(_isolate_home).returncode == 127
 
     def test_end_to_end_via_write_env_pointer(self, tmp_path: Path, _isolate_home: Path) -> None:
         """write_env_pointer が書いた env.sh をそのまま source して解決できる（統合確認）。"""
-        plugin_root = _make_plugin_root(tmp_path / "plugin")
+        mod.write_env_pointer(_make_plugin_root(tmp_path / "plugin"))
 
-        mod.write_env_pointer(plugin_root)
+        _assert_resolved(_run_env_sh(_isolate_home))
 
-        result = _run_env_sh(_isolate_home)
+    def test_no_internal_variables_leak_into_caller_shell(
+        self, tmp_path: Path, _isolate_home: Path, roots_dir: Path
+    ) -> None:
+        """source 後、resolver 内部の一時変数（root path や lstart を保持しうるものを含む）が呼び出し元シェルに残らないこと。
 
-        assert result.returncode == 0, result.stderr
-        assert "ran:marker" in result.stdout
-
-    def test_no_internal_variables_leak_into_caller_shell(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """source 後、resolver 内部の一時変数（root path や lstart を保持しうる
-        ものを含む）が呼び出し元シェルに残らないこと。bootstrap 行は ``.`` で
-        呼び出し元シェルに直接効くため、内部変数を unset し忘れると md 側の
+        bootstrap 行は ``.`` で呼び出し元シェルに直接効くため、内部変数を unset し忘れると md 側の
         セッションを汚染する。
         """
-        _install_env_sh(_isolate_home)
-        pointer_root = _make_plugin_root(tmp_path / "pointer-root")
-        _write_pointer(_isolate_home / BASE_DIR_NAME / "roots", os.getpid(), pointer_root)
-
+        _write_pointer(roots_dir, os.getpid(), _make_plugin_root(tmp_path / "pointer-root"))
         leak_vars = (
             "_claq_env_root",
             "_claq_walk_pid",
@@ -723,54 +477,23 @@ class TestEnvShRealExecution:
             "_claq_walk_actual_lstart",
         )
         printf_args = " ".join(f'"${{{name}:-U}}"' for name in leak_vars)
-        printf_fmt = "".join("[%s]" for _ in leak_vars)
-        script = (
-            '. "$HOME/.claq/env.sh" || exit 127\n'
-            'claq_run marker\n'
-            f"printf 'leak={printf_fmt}\\n' {printf_args}\n"
-        )
-        result = _run_env_sh(_isolate_home, script=script)
+        printf_fmt = "[%s]" * len(leak_vars)
 
-        assert result.returncode == 0, result.stderr
+        result = _run_env_sh(_isolate_home, script=f"{_SOURCE_AND_RUN}printf 'leak={printf_fmt}\\n' {printf_args}\n")
+
+        _assert_resolved(result)
         assert f"leak={'[U]' * len(leak_vars)}" in result.stdout
 
-    def test_gc_removed_dead_pointer_then_resolver_exits_127(self, tmp_path: Path, _isolate_home: Path) -> None:
-        """GC が不在 PID のポインタを消した後、resolver がそれを 127 として扱うこと。
-
-        個々には ``TestGcRoots``（削除判定）と ``TestEnvShRealExecution``
-        （resolver の 127 分岐）で検証済みだが、両者を跨ぐ合成的な振る舞い
-        （GC が実際に消し、その結果を resolver が正しく「候補ゼロ」として
-        扱う）をここで固定する。
-        """
-        _install_env_sh(_isolate_home)
-        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
-        roots_dir.mkdir(parents=True)
-        proc = subprocess.Popen(["true"])
-        proc.wait()
-        dead_entry = roots_dir / str(proc.pid)
+    def test_gc_removed_dead_pointer_then_resolver_exits_127(
+        self, tmp_path: Path, _isolate_home: Path, roots_dir: Path
+    ) -> None:
+        """GC が不在 PID のポインタを実際に消し、その結果を resolver が「候補ゼロ」の 127 として扱うこと。"""
+        roots_dir.mkdir()
+        dead_entry = roots_dir / str(_dead_pid())
         dead_entry.write_text(f"{tmp_path / 'stale-root'}\nsome-lstart\n", encoding="utf-8")
-        old = time.time() - mod._DEAD_PID_GRACE_SECONDS - 60
-        os.utime(dead_entry, (old, old))
+        _age(dead_entry, _PAST_GRACE)
 
         mod._gc_roots(roots_dir)
         assert not dead_entry.exists()
 
-        result = _run_env_sh(_isolate_home)
-
-        assert result.returncode == 127
-        assert "could not resolve" in result.stderr
-
-    def test_pointer_with_embedded_nul_does_not_execute_anything(self, _isolate_home: Path) -> None:
-        """writer は NUL を書かないが、resolver 側も多層防御として NUL 入りポインタで
-        コードを実行しないことを確認する（読み取り結果がどう切れても shell として
-        評価されないことが本質。この防御はデータ形式そのものにあるため、
-        結果が 0/127 のどちらでも良く、実行痕跡が無いことだけを検証する）。
-        """
-        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
-        roots_dir.mkdir(parents=True)
-        (roots_dir / str(os.getpid())).write_bytes(b"printf ROOT_FILE_EXECUTED >&2\x00/tmp/x\n")
-        _install_env_sh(_isolate_home)
-
-        result = _run_env_sh(_isolate_home)
-
-        assert "ROOT_FILE_EXECUTED" not in result.stderr
+        _assert_unresolved(_run_env_sh(_isolate_home))
