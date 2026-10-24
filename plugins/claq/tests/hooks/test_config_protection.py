@@ -1,391 +1,141 @@
-"""config_protection フックの apply_patch 生文字列入力テスト。
+"""config_protection.main() の入力形（apply_patch 生文字列・Copilot の小文字ツール名・native camelCase・
+空/不正/切り捨て入力）と、保護フック自身の設定を守る判定のテスト。
 
-test_hook_helpers.py の既存テストは tool_input が {"input": patch} 形式（dict）を対象とする。
-本モジュールは tool_input が生のパッチ文字列（dict ではなく str）として渡る
-Copilot CLI 実行パスをカバーする。
-
-config_protection は emit_block_output（hook_common から自モジュール名前空間へ
-直接 import）でブロック出力を書くため、write_stderr は自モジュールに存在しない。
-capsys で実際の stdout/stderr を検証する（block_no_verify のテストと同じ方式）。
+`emit_block_output` は本物の出力へ素通しするスパイで包み、ブロック理由の呼び出し回数と
+実際の stdout/stderr を同じ行で検査する。
 """
 
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
 from claq.hooks import config_protection
 
 
-def _apply_patch_payload(path: str) -> str:
-    """指定パスへの apply_patch ペイロード JSON を生成する。
-
-    Args:
-        path: パッチ対象ファイルパス。
-
-    Returns:
-        tool_input が生文字列のパッチペイロード JSON 文字列。
-
-    Raises:
-        例外は発生しません。
-    """
-    patch_text = (
-        "*** Begin Patch\n"
-        f"*** Update File: {path}\n"
-        "@@\n"
-        "-old\n"
-        "+new\n"
-        "*** End Patch\n"
-    )
-    return json.dumps({"tool_name": "apply_patch", "tool_input": patch_text})
+def _apply_patch(path: str) -> dict[str, Any]:
+    """tool_input が生のパッチ文字列（dict ではない Copilot CLI 実行パス）の apply_patch payload を作る。"""
+    return {"tool_name": "apply_patch", "tool_input": f"*** Begin Patch\n*** Update File: {path}\n@@\n-old\n+new\n*** End Patch\n"}
 
 
-def test_main_blocks_protected_file_for_apply_patch_string(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """tool_input が生文字列の apply_patch で保護ファイルをブロックする。"""
-    monkeypatch.setattr(
-        config_protection,
-        "read_raw_stdin_with_truncation",
-        lambda: (_apply_patch_payload("/tmp/.prettierrc"), False),
-    )
-
-    assert config_protection.main() == 2
-    assert "BLOCKED: Modifying .prettierrc is not allowed." in capsys.readouterr().err
-
-
-def test_main_allows_non_protected_file_for_apply_patch_string(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """tool_input が生文字列の apply_patch で非保護ファイルを通過させる。"""
-    monkeypatch.setattr(
-        config_protection,
-        "read_raw_stdin_with_truncation",
-        lambda: (_apply_patch_payload("/tmp/example.txt"), False),
-    )
-
-    assert config_protection.main() == 0
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == ""
-
-
-def test_main_blocks_protected_file_for_copilot_lowercase_write(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Copilot CLI の lowercase tool_name（write）でも保護ファイルをブロックする。
-
-    extract_file_paths() は apply_patch 以外は tool_name の値によらず
-    file_path フィールドを抽出するため、正規化なしでも動作することの回帰確認。
-    """
-    payload = json.dumps({"tool_name": "write", "tool_input": {"file_path": ".prettierrc"}})
-    monkeypatch.setattr(config_protection, "read_raw_stdin_with_truncation", lambda: (payload, False))
-
-    assert config_protection.main() == 2
-    assert "BLOCKED: Modifying .prettierrc is not allowed." in capsys.readouterr().err
-
-
-def test_main_skips_non_write_tool_even_with_protected_path(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """matcher が "*" に広がっても、Read 等の非書込みツールでは保護判定自体を行わない（早期 return）。"""
-    payload = json.dumps({"tool_name": "Read", "tool_input": {"file_path": ".prettierrc"}})
-    monkeypatch.setattr(config_protection, "read_raw_stdin_with_truncation", lambda: (payload, False))
-
-    assert config_protection.main() == 0
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == ""
-
-
-def test_main_skips_copilot_lowercase_non_write_tool(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Copilot CLI の lowercase 非書込みツール名（read）でも早期 return する。"""
-    payload = json.dumps({"tool_name": "read", "tool_input": {"file_path": ".prettierrc"}})
-    monkeypatch.setattr(config_protection, "read_raw_stdin_with_truncation", lambda: (payload, False))
-
-    assert config_protection.main() == 0
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == ""
-
-
-def test_main_blocks_protected_file_for_copilot_lowercase_edit(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Copilot CLI の lowercase tool_name（edit）でも保護ファイルをブロックする。"""
-    payload = json.dumps({"tool_name": "edit", "tool_input": {"file_path": "biome.json"}})
-    monkeypatch.setattr(config_protection, "read_raw_stdin_with_truncation", lambda: (payload, False))
-
-    assert config_protection.main() == 2
-    assert "BLOCKED: Modifying biome.json is not allowed." in capsys.readouterr().err
-
-
-def test_main_blocks_on_truncated_input(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """入力が切り捨てられた場合は fail-closed でブロックする（自己完結 guard）。"""
-    monkeypatch.setattr(
-        config_protection, "read_raw_stdin_with_truncation", lambda: ("{not-even-json", True)
-    )
-
-    assert config_protection.main() == 2
-    assert "BLOCKED: Hook input exceeded" in capsys.readouterr().err
-
-
-def _spy_block(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """emit_block_output を spy し、理由文字列のリストを返す。
-
-    Args:
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-
-    Returns:
-        emit_block_output に渡された reason の蓄積リスト。
-    """
+def _run_protection(
+    monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any] | str, *, truncated: bool = False
+) -> tuple[int, list[str]]:
+    """stdin を差し替えて main() を実行し、終了コードと emit_block_output へ渡った理由の列を返す。"""
     reasons: list[str] = []
+    real_emit = config_protection.emit_block_output
 
     def _spy(reason: str) -> int:
-        """ブロック理由を記録し、Claude 相当の終了コード 2 を返す。"""
+        """ブロック理由を記録し、本物の出力へ渡す。"""
         reasons.append(reason)
-        return 2
+        return real_emit(reason)
 
-    monkeypatch.setattr(config_protection, "emit_block_output", _spy)
-    return reasons
-
-
-def _run_protection(monkeypatch: pytest.MonkeyPatch, payload: dict | str, *, truncated: bool = False) -> int:
-    """stdin を差し替えて config_protection.main を実行する。
-
-    Args:
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-        payload: JSON にできる dict、または生文字列。
-        truncated: 切り捨てフラグ。
-
-    Returns:
-        main() の終了コード。
-    """
     raw = payload if isinstance(payload, str) else json.dumps(payload)
-    monkeypatch.setattr(
-        config_protection,
-        "read_raw_stdin_with_truncation",
-        lambda: (raw, truncated),
-    )
-    return config_protection.main()
+    monkeypatch.setattr(config_protection, "emit_block_output", _spy)
+    monkeypatch.setattr(config_protection, "read_raw_stdin_with_truncation", lambda: (raw, truncated))
+    return config_protection.main(), reasons
 
 
-def test_config_protection_blocks_protected_file_from_native_camel_case_payload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """native toolName=edit / toolArgs.file_path=ruff.toml を deny する。"""
-    reasons = _spy_block(monkeypatch)
-    rc = _run_protection(
-        monkeypatch,
-        {"toolName": "edit", "toolArgs": {"file_path": "ruff.toml"}},
-    )
-    assert rc == 2
-    assert len(reasons) == 1
-    assert "ruff.toml" in reasons[0]
+_MODIFY_PRETTIERRC = "BLOCKED: Modifying .prettierrc is not allowed."
 
-
-def test_config_protection_blocks_legacy_file_from_native_tool_args(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """native toolArgs の旧 file キーでも保護ファイルを deny する。"""
-    reasons = _spy_block(monkeypatch)
-    rc = _run_protection(
-        monkeypatch,
-        {"toolName": "edit", "toolArgs": {"file": "ruff.toml"}},
-    )
-    assert rc == 2
-    assert len(reasons) == 1
-    assert "ruff.toml" in reasons[0]
-
-
-def test_config_protection_denies_conflicting_payload_when_any_target_is_protected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """混在 payload は、いずれかのコンテナが保護対象なら deny する。"""
-    reasons = _spy_block(monkeypatch)
-    rc = _run_protection(
-        monkeypatch,
+# (stdin の payload, ブロック理由に含まれる文言)。文言が None の行は allow で、何も出力しない。
+_CASES = [
+    pytest.param(_apply_patch("/tmp/.prettierrc"), _MODIFY_PRETTIERRC, id="apply-patch-string-protected"),
+    pytest.param(_apply_patch("/tmp/example.txt"), None, id="apply-patch-string-unprotected"),
+    # extract_file_paths() は apply_patch 以外は tool_name によらず file_path を抽出する（正規化なしの回帰確認）。
+    pytest.param({"tool_name": "write", "tool_input": {"file_path": ".prettierrc"}}, _MODIFY_PRETTIERRC, id="copilot-write"),
+    pytest.param(
+        {"tool_name": "edit", "tool_input": {"file_path": "biome.json"}},
+        "BLOCKED: Modifying biome.json is not allowed.",
+        id="copilot-edit",
+    ),
+    # matcher が "*" に広がっても、非書込みツールでは保護判定自体を行わない（早期 return）。
+    pytest.param({"tool_name": "Read", "tool_input": {"file_path": ".prettierrc"}}, None, id="non-write-read"),
+    pytest.param({"tool_name": "read", "tool_input": {"file_path": ".prettierrc"}}, None, id="copilot-non-write-read"),
+    pytest.param({"toolName": "edit", "toolArgs": {"file_path": "ruff.toml"}}, "ruff.toml", id="native-camel-case"),
+    pytest.param({"toolName": "edit", "toolArgs": {"file": "ruff.toml"}}, "ruff.toml", id="native-legacy-file-key"),
+    # 混在 payload は、いずれかのコンテナが保護対象なら deny する。
+    pytest.param(
         {
             "tool_name": "Edit",
             "tool_input": {"file_path": "src/sample.py"},
             "toolName": "edit",
             "toolArgs": {"file_path": "ruff.toml"},
         },
-    )
-    assert rc == 2
-    assert len(reasons) == 1
-    assert "ruff.toml" in reasons[0]
-
-    reasons.clear()
-    rc = _run_protection(
-        monkeypatch,
+        "ruff.toml",
+        id="conflicting-native-side-protected",
+    ),
+    pytest.param(
         {
             "tool_name": "Edit",
             "tool_input": {"file_path": "ruff.toml"},
             "toolName": "edit",
             "toolArgs": {"file_path": "src/sample.py"},
         },
-    )
-    assert rc == 2
-    assert len(reasons) == 1
-    assert "ruff.toml" in reasons[0]
+        "ruff.toml",
+        id="conflicting-snake-side-protected",
+    ),
+    pytest.param({"toolName": "multiedit", "toolArgs": {"file_path": "src/sample.py"}}, None, id="native-unprotected"),
+    pytest.param({"tool_name": "Edit", "tool_input": {"file_path": "ruff.toml"}}, "ruff.toml", id="dt03-1-snake-ruff"),
+    pytest.param(
+        {"toolName": "edit", "toolArgs": json.dumps({"file_path": "ruff.toml"})}, "ruff.toml", id="dt03-3-toolargs-json-string"
+    ),
+    pytest.param(
+        {"tool_name": "Write", "tool_args": {"file_path": ".eslintrc"}}, ".eslintrc", id="dt03-4-tool_args-eslintrc"
+    ),
+    pytest.param({"toolName": "edit", "toolArgs": {"file_path": "src/ruff.toml"}}, "ruff.toml", id="dt03-7-basename"),
+    pytest.param({"toolName": "bash", "toolArgs": {"file_path": "ruff.toml"}}, None, id="dt03-8-non-write-bash"),
+    pytest.param({"toolName": "edit", "toolArgs": {}}, None, id="dt03-9-no-path-key"),
+    pytest.param(
+        {"toolName": "apply_patch", "toolArgs": {"input": "garbage"}},
+        "Could not determine target files",
+        id="dt03-10-apply-patch-fail-closed",
+    ),
+    pytest.param(
+        {"tool_name": "Edit", "tool_input": {"file_path": "src/a.py"}, "toolArgs": {"file_path": "src/b.py"}},
+        None,
+        id="dt03-13-both-unprotected",
+    ),
+    pytest.param(
+        {"tool_name": "Edit", "tool_input": None, "toolArgs": {"file_path": "ruff.toml"}},
+        "ruff.toml",
+        id="dt03-14-tool-input-none-still-scans",
+    ),
+    # 空入力（tty・stdin 未接続等）は保護判定せず allow する。
+    pytest.param("", None, id="empty-input"),
+    # matcher が書込み系ツールに限るため、非空だが不正な JSON は保護対象か判定できず fail-closed で block する。
+    pytest.param("{not-json", "Could not parse hook input", id="unparseable-json"),
+]
 
 
-def test_config_protection_allows_unprotected_native_camel_case_payload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """native camelCase の非保護パスは allow（block 未呼び出し）。"""
-    reasons = _spy_block(monkeypatch)
-    rc = _run_protection(
-        monkeypatch,
-        {"toolName": "multiedit", "toolArgs": {"file_path": "src/sample.py"}},
-    )
-    assert rc == 0
-    assert reasons == []
-
-
-@pytest.mark.parametrize(
-    ("payload", "expect_block", "reason_snippet"),
-    [
-        (
-            {"tool_name": "Edit", "tool_input": {"file_path": "ruff.toml"}},
-            True,
-            "ruff.toml",
-        ),
-        (
-            {"toolName": "edit", "toolArgs": json.dumps({"file_path": "ruff.toml"})},
-            True,
-            "ruff.toml",
-        ),
-        (
-            {"tool_name": "Write", "tool_args": {"file_path": ".eslintrc"}},
-            True,
-            ".eslintrc",
-        ),
-        (
-            {"toolName": "edit", "toolArgs": {"file_path": "src/ruff.toml"}},
-            True,
-            "ruff.toml",
-        ),
-        (
-            {"toolName": "bash", "toolArgs": {"file_path": "ruff.toml"}},
-            False,
-            None,
-        ),
-        (
-            {"toolName": "edit", "toolArgs": {}},
-            False,
-            None,
-        ),
-        (
-            {"toolName": "apply_patch", "toolArgs": {"input": "garbage"}},
-            True,
-            "Could not determine target files",
-        ),
-        (
-            {
-                "tool_name": "Edit",
-                "tool_input": {"file_path": "src/a.py"},
-                "toolArgs": {"file_path": "src/b.py"},
-            },
-            False,
-            None,
-        ),
-        (
-            {
-                "tool_name": "Edit",
-                "tool_input": None,
-                "toolArgs": {"file_path": "ruff.toml"},
-            },
-            True,
-            "ruff.toml",
-        ),
-    ],
-    ids=[
-        "dt03-1-snake-ruff",
-        "dt03-3-toolargs-json-string",
-        "dt03-4-tool_args-eslintrc",
-        "dt03-7-basename",
-        "dt03-8-non-write-bash",
-        "dt03-9-no-path-key",
-        "dt03-10-apply-patch-fail-closed",
-        "dt03-13-both-unprotected",
-        "dt03-14-tool-input-none-still-scans",
-    ],
-)
-def test_config_protection_remaining_dt03_rows(
-    monkeypatch: pytest.MonkeyPatch,
-    payload: dict,
-    expect_block: bool,
+@pytest.mark.parametrize(("payload", "reason_snippet"), _CASES)
+def test_main_verdict_and_output(
+    payload: dict[str, Any] | str,
     reason_snippet: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """JSON 文字列・tool_args・basename・非書込み・fail-closed。"""
-    reasons = _spy_block(monkeypatch)
-    rc = _run_protection(monkeypatch, payload)
-    if expect_block:
-        assert rc == 2
-        assert len(reasons) == 1
-        assert reason_snippet is not None
-        assert reason_snippet in reasons[0]
+    """保護対象なら理由を 1 回だけ出して exit 2、それ以外は何も出さず exit 0。"""
+    rc, reasons = _run_protection(monkeypatch, payload)
+    captured = capsys.readouterr()
+
+    if reason_snippet is None:
+        assert (rc, reasons, captured.out, captured.err) == (0, [], "", "")
     else:
-        assert rc == 0
-        assert reasons == []
+        assert (rc, len(reasons)) == (2, 1)
+        assert reason_snippet in reasons[0]
+        assert reason_snippet in captured.err
 
 
-def test_config_protection_allows_empty_input(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """空入力（tty・stdin 未接続等）は保護判定せず allow する。"""
-    reasons = _spy_block(monkeypatch)
-    assert _run_protection(monkeypatch, "") == 0
-    assert reasons == []
+def test_main_blocks_on_truncated_input(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """入力が切り捨てられた場合は fail-closed でブロックする（自己完結 guard）。"""
+    rc, reasons = _run_protection(monkeypatch, "{not-even-json", truncated=True)
 
-
-def test_config_protection_blocks_unparseable_json(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """matcher が書込み系ツールに限定するため、非空だが不正な JSON は
-    保護対象ファイルかどうか判定できず fail-closed で block する。
-    """
-    reasons = _spy_block(monkeypatch)
-    assert _run_protection(monkeypatch, "{not-json") == 2
-    assert len(reasons) == 1
-    assert "Could not parse hook input" in reasons[0]
-
-
-def test_config_protection_truncation_fail_closed_via_spy(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """切り捨て入力は fail-closed で block する。"""
-    reasons = _spy_block(monkeypatch)
-    rc = _run_protection(monkeypatch, "{not-even-json", truncated=True)
-    assert rc == 2
-    assert len(reasons) == 1
-    assert "Hook input exceeded" in reasons[0]
-
-
-def _run_hook(payload: dict, monkeypatch: pytest.MonkeyPatch) -> int:
-    """payload を stdin として `config_protection.main()` を回し exit code を返す。
-
-    Args:
-        payload: フックへ渡す stdin の dict。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-
-    Returns:
-        フックの exit code（2 = deny）。
-
-    Raises:
-        例外は発生しません。
-    """
-    monkeypatch.setattr(
-        config_protection, "read_raw_stdin_with_truncation", lambda: (json.dumps(payload), False)
-    )
-    return config_protection.main()
+    assert (rc, len(reasons)) == (2, 1)
+    assert "BLOCKED: Hook input exceeded" in reasons[0]
+    assert "BLOCKED: Hook input exceeded" in capsys.readouterr().err
 
 
 class TestProtectionHookOwnConfig:
@@ -416,7 +166,7 @@ class TestProtectionHookOwnConfig:
     ) -> None:
         """プラグインの hooks.json だけを守り、consumer 側は通すこと。"""
         payload = {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": "{}"}}
-        assert _run_hook(payload, monkeypatch) == expected
+        assert _run_protection(monkeypatch, payload)[0] == expected
 
     @pytest.mark.parametrize(
         ("content", "expected"),
@@ -438,8 +188,5 @@ class TestProtectionHookOwnConfig:
         self, content: str, expected: int, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """ホスト設定は保護を外せるキーのときだけ deny すること。"""
-        payload = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/repo/.claude/settings.json", "content": content},
-        }
-        assert _run_hook(payload, monkeypatch) == expected
+        payload = {"tool_name": "Write", "tool_input": {"file_path": "/repo/.claude/settings.json", "content": content}}
+        assert _run_protection(monkeypatch, payload)[0] == expected
