@@ -424,16 +424,8 @@ class TestStagedFileNameDecoding:
 
         assert pbcq.get_staged_files() == expected
 
-    @pytest.mark.parametrize(
-        "error",
-        [
-            PermissionError("git is not executable"),
-            OSError("exec format error"),
-        ],
-    )
-    def test_os_errors_are_caught_as_unavailable(
-        self, monkeypatch: pytest.MonkeyPatch, error: Exception
-    ) -> None:
+    @pytest.mark.parametrize("error", [PermissionError("git is not executable"), OSError("exec format error")])
+    def test_os_errors_are_caught_as_unavailable(self, monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
         """git を起動できない OSError 系は None（検査不能）に落ちること。
 
         except が `FileNotFoundError` しか持たないと、`PermissionError`
@@ -441,6 +433,7 @@ class TestStagedFileNameDecoding:
         """
 
         def fake_run(command: list[str], **kwargs: object):
+            """git の起動失敗を再現する。"""
             raise error
 
         monkeypatch.setattr(subprocess, "run", fake_run)

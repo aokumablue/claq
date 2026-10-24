@@ -262,6 +262,7 @@ def worktree(tmp_path: Path) -> Path:
     return repo
 
 
+# `{outside}` は repo の隣に置いた outside_secret.txt の絶対パス（tmp_path ごとに変わるため実行時に埋める）。
 @pytest.mark.parametrize(
     ("file_path", "expected"),
     [
