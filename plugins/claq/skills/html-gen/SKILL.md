@@ -10,16 +10,14 @@ user-invocable: true
 
 配色は `assets/template/tokens.css` に生成済みで、その正本は
 `references/tokens.json`（shadcn/ui レジストリの逐語コピー）。Tailwind 既定色、
-`#0d1117`、`#2563eb` の類を 1 つでも手書きすると検査で落ちる
-（手書きファイルに生の hex や `oklch()` があること自体が違反）。
+`#0d1117`、`#2563eb` の類を 1 つでも手書きすると検査で落ちる。
 
 | 避ける | 代わりに |
 |---|---|
 | hex や `oklch()` を手で書く | `var(--primary)` / `var(--chart-N)` を使う |
 | ゼロから HTML を書く | `assets/template/` を複製して中身を差し替える |
 | `tokens.css` を手で直す | `tokens.json` を直して `--write-css` で再生成する |
-| React や Tailwind CLI を足す | 素の CSS のまま（理由は `references/design.md`） |
-| トグルを後付けする | テンプレのライト/ダークボタンを残す |
+| React や Tailwind CLI を足す | 素の CSS のまま（ビルド工程を成果物に入れない） |
 
 設計原則・レイアウト・コンポーネント・チャートの作法は `references/design.md`。
 チャート種別ごとの骨格と寸法は `references/chart-forms.md`。
@@ -125,13 +123,13 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 
 依頼が指標・内訳・時系列・分布を求めるダッシュボードなら、それぞれ 1 つ以上置く（分布はテンプレートに無いので `references/chart-forms.md` のヒストグラムを写す）。
 
-### 4. 検証する（省略不可）
+### 4. 検証する
 
 ```bash
 python3 /abs/path/to/dest/check_site.py /abs/path/to/dest
 ```
 
-exit code 0（`PASS`）を確認するまで完了報告しない。`FAIL:` の文面が違反箇所と直し方を示す。
+`FAIL:` の文面が違反箇所と直し方を示す。
 
 `check_site.py` のコントラスト検査は `tokens.json` 上の値で測るので、描画された姿はブラウザでも確かめる。
 

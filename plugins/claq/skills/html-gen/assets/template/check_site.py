@@ -116,8 +116,8 @@ REQUIRED_BREAKPOINTS = (768, 1024, 1280)
 #: 静的なページでは誤りになる。styles.css と HTML に埋め込んだ CSS で同じ基準を使う。
 #: CSS のプロパティ名とキーワードは大小文字を区別せず、コロンの前に空白も置けるので、
 #: どの書き方でもブラウザは止まらない動きにする。
-#: 動きはカスタムプロパティ経由でも渡せる。design.md は Tailwind v4 のドキュメントを
-#: トークンの出典に挙げており、その既定テーマの ``--animate-spin`` / ``--animate-ping`` /
+#: 動きはカスタムプロパティ経由でも渡せる。tokens.json の `source` は Tailwind v4 のドキュメントを
+#: 出典に挙げており、その既定テーマの ``--animate-spin`` / ``--animate-ping`` /
 #: ``--animate-pulse`` / ``--animate-bounce`` は値に ``infinite`` を含む。これを写して
 #: ``animation: var(--animate-ping)`` で使うと、``animation`` の宣言には ``infinite`` が
 #: 現れず素通りするので、宣言側（``--*``）の値も見る。

@@ -237,9 +237,6 @@ async def items_delete(
     return DeleteResult(deleted=True, message="削除しました")
 ```
 
-- 確認・同意では `ElicitationResult[T]` で受ける。素の `T` で受けると拒否が
-  ツール実行エラーになり、「中止しました」を正常な戻り値で返せない。
-  素の `T` が適切なのは「拒否＝呼び出しの失敗」でよい場合だけ。
 - `smoke_config.py` に次を足し、承認と拒否の両分岐を検査する（1 往復目だけでは、拒否が
   エラーになる実装の誤りを見つけられない）。`CLIENT_CAPABILITIES` が無いと `-32021` で落ちる。
   書き込みのツールを足したので `READ_ONLY_SERVER = False` にする。
@@ -312,10 +309,6 @@ from mcp.server.mcpserver.exceptions import ToolError
 `MCPServerError` / `ToolError` / `UnexpectedToolError` /
 `ResourceError` / `ResourceNotFoundError` / `UnexpectedResourceError`。
 
-上流ドキュメントは「賢いモデルなら避けられた失敗か」で `ToolError` と `MCPError` を分けるが、
-ツール本体から投げた `MCPError` は JSON-RPC error になる（2.3.0 の表）。ツール本体では `ToolError` を使い、
-それ以外の例外はクラッシュ（本文はサーバログのみ）として扱う。
-
 ### 引数の制約は Field で宣言する（自前の if より強い）
 
 ```python
@@ -330,9 +323,6 @@ Error executing tool fetch: 1 validation error for fetchArguments
 count
   Input should be greater than or equal to 1 [type=greater_than_equal, input_value=0, ...]
 ```
-
-自前の `if` + 素の `ValueError` にすると、スキーマに制約が載らず（モデルが
-呼ぶ前に範囲を知れない）、メッセージも伏せられる。二重に損。
 
 ## ログ — プロトコル機能は非推奨
 
@@ -421,9 +411,6 @@ logger.info("searching for %r", query)
 | 例外 → `isError: true` 変換 | 自動 | `ValueError` 等がツール実行エラーになる（`MCPError` を除く） |
 | `ttlMs` / `cacheScope` の**有用な値** | **手動** | 既定は `0` / `private` ＝ 即時陳腐化 |
 | `allowed_hosts` / `allowed_origins` | **手動** | 既定は空リスト |
-
-未知の引数の拒否と、公開する inputSchema の root を閉じることも SDK はしない（guard.py が受け持つ）。
-どちらも 2.3.0 で採取したので、「## 2.3.0 で採取した項目」の表に書いてある。
 
 ## 検証時の落とし穴（実測で踏んだもの）
 

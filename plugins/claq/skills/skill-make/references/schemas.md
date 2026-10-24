@@ -48,15 +48,13 @@ skillのeval定義。スキルディレクトリ内の `evals/evals.json` に置
 
 ## grading.json
 
-grader エージェントの返値。形式と不変条件は `../../../agents/grader.md` の「出力契約」「出力形式」が正。呼び出し元がそれで検証したうえで `<run-dir>/grading.json` へ保存する（grader 自身はファイルを書かない）。
+grader エージェントの返値。形式と不変条件は `../../../agents/grader.md` の「出力契約」「出力形式」が正。`<run-dir>/grading.json` に置く。
 
 ---
 
 ## timing.json
 
 1回の実行にかかった実時間。`<run-dir>/timing.json` に置く。
-
-**取得方法**: サブエージェントのタスク完了時、通知に `total_tokens` と `duration_ms` が含まれる。その場で保存→後からは復元不可。
 
 ```json
 {
@@ -151,12 +149,12 @@ eval-workflow §4 の集約結果。`<workspace>/iteration-<N>/benchmark.json` �
 - `run_summary`: 構成ごとの統計
   - `with_skill` と使用したベースライン（`without_skill` または `old_skill`）: それぞれ `pass_rate`/`time_seconds`/`tokens` の `mean` と `stddev`
   - `delta`: `"+0.50"` などの差分文字列
-- `notes`: eval-workflow §4 の 2 では `[]` で作り、3 で bench-analyzer（`benchmark_analysis` モード）の返値（文字列配列）に置き換える
+- `notes`: bench-analyzer（`benchmark_analysis`）が返す文字列配列
 
-**重要**: フィールド名はこのスキーマのとおりにする（`configuration` を `config` にしない、`pass_rate` を `result` の外に置かない）。benchmark.jsonを手で作る場合はこのスキーマを必ず参照。
+フィールド名はこのスキーマのとおりにする（`configuration` を `config` にしない、`pass_rate` を `result` の外に置かない）。
 
 ---
 
 ## comparison.json
 
-comparator エージェントの返値。形式は `../../../agents/comparator.md` の「出力契約」「出力形式」が正。呼び出し元がそれで検証したうえで `<workspace>/compare-<ID>/comparison.json` へ保存する（comparator 自身はファイルを書かない）。
+comparator エージェントの返値。形式は `../../../agents/comparator.md` の「出力契約」「出力形式」が正。`<workspace>/compare-<ID>/comparison.json` に置く。

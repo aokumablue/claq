@@ -17,69 +17,19 @@
 
 色の正本は `tokens.json`。ここに色コードを再掲しない。
 
-出典:
-
-- トークン定義: <https://ui.shadcn.com/docs/theming>
-- ベースカラーのレジストリ: `https://ui.shadcn.com/r/colors/{neutral,zinc,slate,stone,gray}.json`
-- コンポーネント: <https://ui.shadcn.com/docs/components>
-- ダッシュボードのブロック: <https://ui.shadcn.com/blocks>
-- タイポ・影・ブレークポイント: <https://tailwindcss.com/docs>
-- 非テキストコントラスト（WCAG 2.2 SC 1.4.11）: <https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html>
-- グラフ種別の選定: <https://www.datawrapper.de/blog/chart-types-guide> / <https://datavizcatalogue.com/blog/chart-selection-guide/>
-- 棒の向き: <https://www.storytellingwithdata.com/blog/2022/1/21/which-bar-orientation-should-i-use>
-- 円・ドーナツの限界: <https://data.europa.eu/apps/data-visualisation-guide/alternatives-to-pie-charts>
-- 目盛りの刻み: <https://www.baeldung.com/cs/grid-line-intervals-on-graph>
-- 潰し描画と文字の歪み: <https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/preserveAspectRatio>
-
 ## CLI ではなくトークンを写す理由
 
-shadcn/ui は「npm パッケージ」ではなく、React + Tailwind CSS + Radix UI の
-ソースを自分のリポジトリへコピーして使う配布形式をとる。したがって
-`npx shadcn add button` の出力は React コンポーネントで、静的 HTML には載らない。
-Tailwind のユーティリティも、ビルド工程なしでは解決されない。
-
-一方で shadcn/ui の見た目を決めているのは CSS カスタムプロパティの層
-（`--background` `--primary` `--muted` `--border` `--ring` `--radius` `--chart-*`
-`--sidebar-*`）と、その上に載る視覚仕様（1px のヘアライン、抑えた影、
-`tracking-tight` の見出し、`focus-visible` のリング）である。これらは素の CSS に
-そのまま書ける。
-
-そこで本テンプレートは、レジストリが配るトークンの実値と、コンポーネントの
-視覚仕様を素の CSS へ写す。外部 JS はゼロ、CDN は Google Fonts だけで、
-生成した HTML はブラウザで開けばそのまま動く。
-
-React を足して「本物の shadcn にする」改修はしない。静的 1 枚で完結する
-という前提が崩れ、ビルド工程とパッケージ管理がスキルの成果物に入り込む。
+`npx shadcn add` の出力は React コンポーネントで、Tailwind のユーティリティもビルド工程なしでは
+解決されないので、トークンの実値と視覚仕様だけを素の CSS へ写す。React を足して「本物の shadcn
+にする」改修はしない（ビルド工程とパッケージ管理が成果物に入り込む）。
 
 ## 色は upstream の逐語コピー。差分は 4 点だけ
 
-`tokens.json` の `bases` は 5 つのベースカラー（neutral / zinc / slate / stone /
-gray）× ライト/ダークを、レジストリの `cssVarsV4` からそのまま写したもの。
-`oklch()` の値を書き換えない。ブラウザは OKLCh をネイティブに解釈し、広色域の
-ディスプレイでは P3 で描く。検査は sRGB へ落とした最悪ケースで行う。
-
-upstream をそのまま使えない箇所だけ、規則として差分を持つ。理由は
-`tokens.json` の各項目の `reason` にも書いてある。
-
-| 対象 | upstream | 差分 | 根拠 |
-|---|---|---|---|
-| `ring` / `sidebar-ring` | ライトで背景に 2.58〜2.63:1 | 色相・彩度を保ち明度だけ下げて 3:1 | フォーカスの可視性（WCAG 2.2 SC 1.4.11） |
-| `muted-foreground` | ライトで muted 面に 4.35〜4.41:1 | 同上で 4.5:1 | 本文相当の文字 |
-| `chart-1..5` | neutral/zinc/stone はグレースケール、相互 ΔE\*ab が 8 前後。ライトの chart-1 は白背景に 1.48:1 | 色相と彩度は upstream のダークセット、明度はテーマ固定値 | 系列が判別できない・描いても見えない |
-| `destructive-foreground` | v4 のレジストリに無い（React 側で `text-white` を当てる） | ライトは白、ダークは暗色 | 静的 CSS には変数が要る。ダークの destructive は明るい赤なので前景は暗色 |
-
-`border` / `input` / `sidebar-border` は 3:1 契約から外す。1px の
-ヘアラインでコンポーネントの状態を伝えてはおらず、SC 1.4.11 の対象ではない。
-ただし背景と同値になると面が消えるので、`decorative_roles` の
-`min_ratio` で「同化していないこと」だけ別に課す。
+`tokens.json` の `bases` は shadcn/ui レジストリ `cssVarsV4` の逐語コピーなので、`oklch()` の値を書き換えない。
+upstream からの差分（`ring` / `sidebar-ring`・`muted-foreground`・`chart-1..5`・`destructive-foreground`）と `border` 系を 3:1 契約から外す理由は、`tokens.json` の各項目の `reason` にある。
 
 ## 系列色
 
-- 色相は upstream のダークセット（5 色が色相環に散る）を両テーマ共通で使う。
-  upstream はライトとダークで色相が入れ替わり、テーマを切り替えると同じ系列の
-  色が変わってしまう。データ可視化としては誤りなので採らない
-- 明度はライト 0.58 / ダーク 0.75 の固定。背景・カード・muted のどの面に対しても
-  3:1 以上、相互の ΔE\*ab は 20 以上（実測で 31 以上）
 - 塗り面は不透明度で薄めない。SVG のグラデーション（`stop-opacity`）か
   `color-mix(in oklab, var(--chart-1) N%, var(--card))` で作る
 - 1 系列の棒グラフに 5 色を使わない。色は系列を区別するためのもので、
@@ -120,11 +70,8 @@ upstream をそのまま使えない箇所だけ、規則として差分を持�
   「解約率が下がった（良い）」が赤で出るような反転が起きる
 - セグメント: `--muted` の器に、選択中だけ `--background` + `--shadow-xs`
 - 表: ヘッダは `--muted-foreground` の `--text-xs`、行区切りは `--border` を
-  薄めたもの。数値列は `font-variant-numeric: tabular-nums` で桁を揃える
+  薄めたもの。
 - サイドバー: `--sidebar-*` の一式を使う。本文側の `--background` を流用しない（項目の書き方は SKILL.md 手順3）
-- 一覧（`table[data-list]`）: 検索と主要項目の絞り込みを `app.js` が表の直前へ生成する。
-  生成にしているのは、手書きの検索欄が結線されないまま残るのを構造的に防ぐため。
-  絞り込みの列の条件は SKILL.md 手順3。全行が別の値の列を外すのは、識別子や氏名では絞り込みにならないため
 
 ## チャートとアニメーション
 
@@ -186,15 +133,12 @@ upstream をそのまま使えない箇所だけ、規則として差分を持�
   読み比べるしかない。セルの濃淡にすると偏りと周期が一目で出る。色は 1 色の濃淡だけ
 - 時点 7 / 8 の境: 少数の時点は棒、多数は折れ線。点が少ないと折れ線の
   「間を補間している」含意が嘘になり、点が多いと棒が細くなって形が読めない
-- ドーナツ 5 分類: 角度と面積の比較は長さの比較より精度が落ちる。3〜5
-  分類で、かつ差が大きいときだけ成立する。6 以上・複数時点・微差の比較は
+- ドーナツ 5 分類: 角度と面積の比較は長さの比較より精度が落ちる。6 以上・複数時点は
   積み上げ横棒に倒す
 - 横棒 8 分類 / ラベル 9 文字: 縦棒は分類が増えるとラベルを回転させるか
   省略することになる。回転した文字は読む速度が落ちる。日本語ラベルは全角
   なので、8 文字（「オーガニック検索」）で既に縦棒の限界に達する
 - 8 分類で表: 色で区別できる上限を超えている。9 色目を作って解決しない
-
-選んだ種別の SVG 骨格・viewBox 幅の上限・余白の取り方は `chart-forms.md`。
 
 系列数が増えたときの扱い:
 
@@ -211,7 +155,7 @@ upstream をそのまま使えない箇所だけ、規則として差分を持�
 軸の無いグラフは出荷しない。目盛りが無い図は大小しか伝えず、しかも読めた
 気にさせる分だけ数値表だけより悪い。`check_site.py` が
 直交軸チャート 1 枚あたり目盛りラベル 3 個・目盛り線 3 本を下限として機械的に
-落とす（下限であって目標ではない。通常は 5〜7 本）。
+落とす。
 
 - 目盛りの刻みは 1・2・5 の倍数（10 の冪を掛けたもの）。0 / 50 / 100 / 150
   のように読める値にする。データの最大値を本数で割った端数（0 / 47 / 94）は使わない
@@ -222,7 +166,6 @@ upstream をそのまま使えない箇所だけ、規則として差分を持�
 - 目盛り線と軸線は実線のヘアライン（1px、面から 1 段外した色）。破線にしない
   — 破線は「予測値」「しきい値」の記法として読まれ、ただの目盛りに意味を足す
   （`check_site.py` が落とす）
-- 数値の目盛りは `tabular-nums`。桁が縦に揃う
 - 軸ラベルに系列色を使わない。色を持つのはマークだけで、文字は
   `--muted-foreground`
 
@@ -253,8 +196,7 @@ upstream をそのまま使えない箇所だけ、規則として差分を持�
 - 最小の高さを `min-block-size` で重ねない。高さは最小幅と viewBox の比で
   既に決まり、重ねると自然高さより高い箱の上下がレターボックスで空く
 - チャートは必ず `.chart-scroll` で包む（ドーナツを除く）。`min-inline-size`
-  がカード幅を超えたとき、器が無いと SVG がページごと横へはみ出す（実測: 幅
-  1269px の画面で文書幅 1422px）。器があれば、はみ出しはカードの中の横スクロール
+  がカード幅を超えたとき、器が無いと SVG がページごと横へはみ出す。器があれば、はみ出しはカードの中の横スクロール
   に閉じる（`check_site.py` が落とす）
 - 時系列は狭い幅で等倍のまま横スクロールさせる（`.chart-scroll` +
   `min-inline-size`）。縮めて軸文字を潰さない
