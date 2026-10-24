@@ -327,7 +327,7 @@ class TestRedactScanCost:
             f"（{base:.4f}s -> {doubled:.4f}s）。二次オーダーへ戻っている。"
         )
 
-    @pytest.mark.parametrize("filler", [" ", "\t", "　", '"', "]", '"]'])
+    @pytest.mark.parametrize("filler", [" ", "\t", "\u3000", '"', "]", '"]'])
     def test_one_mib_after_a_single_key_fits_in_budget(self, filler: str) -> None:
         """キー語 1 個の後ろに 1MiB の空白・引用符・`]` が続き `=` が無くても予算内で終わること。
 
