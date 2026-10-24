@@ -18,61 +18,57 @@ import pytest
 from claq.mem.learn_payload import build_payload, main
 
 
-def test_build_payload_collects_all_fields() -> None:
-    """``CLAQ_LEARN_*`` の全フィールドが payload へ載ること。"""
-    environ = {
-        "CLAQ_LEARN_KEY": "k",
-        "CLAQ_LEARN_KIND": "pitfall",
-        "CLAQ_LEARN_SCOPE": "repo",
-        "CLAQ_LEARN_TITLE": "t",
-        "CLAQ_LEARN_BODY": "b",
-        "CLAQ_LEARN_DOMAIN": "testing",
-        "CLAQ_LEARN_CONFIDENCE": "0.8",
-        "CLAQ_LEARN_SOURCE_REF": "docs/x.md",
-    }
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        (
+            {
+                "CLAQ_LEARN_KEY": "k",
+                "CLAQ_LEARN_KIND": "pitfall",
+                "CLAQ_LEARN_SCOPE": "repo",
+                "CLAQ_LEARN_TITLE": "t",
+                "CLAQ_LEARN_BODY": "b",
+                "CLAQ_LEARN_DOMAIN": "testing",
+                "CLAQ_LEARN_CONFIDENCE": "0.8",
+                "CLAQ_LEARN_SOURCE_REF": "docs/x.md",
+            },
+            {
+                "key": "k",
+                "kind": "pitfall",
+                "scope": "repo",
+                "title": "t",
+                "body": "b",
+                "domain": "testing",
+                "confidence": "0.8",
+                "source_ref": "docs/x.md",
+            },
+        ),
+        (
+            {
+                "CLAQ_LEARN_KIND": "fact",
+                "CLAQ_LEARN_TITLE": "t",
+                "CLAQ_LEARN_BODY": "",
+                "CLAQ_LEARN_SOURCE": "human",
+                "CLAQ_LEARN_STATUS": "active",
+            },
+            {"kind": "fact", "title": "t"},
+        ),
+        ({}, {}),
+    ],
+    ids=["all-fields", "empty-and-source-status-dropped", "no-env"],
+)
+def test_build_payload(environ: dict[str, str], expected: dict[str, str]) -> None:
+    """``CLAQ_LEARN_*`` の空でない対象フィールドだけを payload へ載せる。"""
+    assert build_payload(environ) == expected
 
-    assert build_payload(environ) == {
-        "key": "k",
-        "kind": "pitfall",
-        "scope": "repo",
-        "title": "t",
-        "body": "b",
-        "domain": "testing",
-        "confidence": "0.8",
-        "source_ref": "docs/x.md",
-    }
 
-
-def test_build_payload_drops_empty_and_unknown_fields() -> None:
-    """空文字列は落とし、source/status のような対象外キーは拾わないこと。"""
-    environ = {
-        "CLAQ_LEARN_KIND": "fact",
-        "CLAQ_LEARN_TITLE": "t",
-        "CLAQ_LEARN_BODY": "",
-        "CLAQ_LEARN_SOURCE": "human",
-        "CLAQ_LEARN_STATUS": "active",
-    }
-
-    assert build_payload(environ) == {"kind": "fact", "title": "t"}
-
-
-def test_build_payload_returns_empty_without_env() -> None:
-    """環境変数が 1 つも無ければ空の payload になること。"""
-    assert build_payload({}) == {}
-
-
-def test_main_writes_json_to_stdout(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_main_writes_json_to_stdout(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """main が payload を JSON として stdout へ書き、0 を返すこと。"""
     monkeypatch.setenv("CLAQ_LEARN_KIND", "howto")
     monkeypatch.setenv("CLAQ_LEARN_TITLE", "非 ASCII も素通しする ✓")
 
     assert main() == 0
-    assert json.loads(capsys.readouterr().out) == {
-        "kind": "howto",
-        "title": "非 ASCII も素通しする ✓",
-    }
+    assert json.loads(capsys.readouterr().out) == {"kind": "howto", "title": "非 ASCII も素通しする ✓"}
 
 
 def test_module_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch) -> None:
