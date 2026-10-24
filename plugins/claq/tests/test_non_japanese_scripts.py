@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -48,9 +49,7 @@ def _target_files() -> list[Path]:
     return sorted(
         path
         for path in _ROOT.rglob("*")
-        if path.is_file()
-        and path.suffix.lower() in _TARGET_SUFFIXES
-        and not _SKIP_DIRS.intersection(path.parts)
+        if path.is_file() and path.suffix.lower() in _TARGET_SUFFIXES and not _SKIP_DIRS.intersection(path.parts)
     )
 
 
@@ -66,7 +65,7 @@ def _is_hangul(char: str) -> bool:
     return 0xAC00 <= code <= 0xD7AF or 0x1100 <= code <= 0x11FF or 0x3130 <= code <= 0x318F
 
 
-def _findings(path: Path, predicate) -> list[str]:
+def _findings(path: Path, predicate: Callable[[str], bool]) -> list[str]:
     """述語に一致する文字を「ファイル:行 文字」の形で返す。"""
     try:
         text = path.read_text(encoding="utf-8")
@@ -81,63 +80,52 @@ def _findings(path: Path, predicate) -> list[str]:
     return found
 
 
-def test_no_hangul_outside_multilingual_fixtures() -> None:
-    """ハングルが多言語フィクスチャ以外に現れないこと。"""
-    violations = [
-        message
-        for path in _target_files()
-        if str(path.relative_to(_ROOT)) not in _MULTILINGUAL_FIXTURES
-        for message in _findings(path, _is_hangul)
-    ]
-
-    assert violations == [], "ハングルの混入:\n" + "\n".join(violations)
-
-
-def test_no_cjk_outside_the_japanese_standard_set() -> None:
-    """JIS X 0208 に無い漢字が現れないこと（簡体字・中国語専用字の検出）。
+def _outside_japanese(char: str) -> bool:
+    """JIS X 0208（Shift_JIS）に符号化できない CJK 統合漢字かを返す。
 
     日本語の常用漢字は JIS X 0208 に収まる。符号化に失敗する漢字は、簡体字か
     中国語専用の字か、日本語では使わない異体字である。
     """
-
-    def outside_japanese(char: str) -> bool:
-        if not _is_cjk(char):
-            return False
-        try:
-            char.encode("shift_jis")
-        except UnicodeEncodeError:
-            return True
+    if not _is_cjk(char):
         return False
+    try:
+        char.encode("shift_jis")
+    except UnicodeEncodeError:
+        return True
+    return False
 
-    violations = [message for path in _target_files() for message in _findings(path, outside_japanese)]
 
-    assert violations == [], "日本語標準外の漢字（簡体字などの疑い）:\n" + "\n".join(violations)
+def _block(low: int, high: int) -> Callable[[str], bool]:
+    """文字が [low, high] の符号位置に入るかを返す述語を作る。"""
+    return lambda char: low <= ord(char) <= high
+
+
+def _unexpected_greek(char: str) -> bool:
+    """ΔE*ab / Σ の技術記法以外のギリシャ文字かを返す。"""
+    return 0x0370 <= ord(char) <= 0x03FF and char not in _ALLOWED_GREEK
 
 
 @pytest.mark.parametrize(
-    ("label", "ranges"),
-    [("キリル文字", ((0x0400, 0x04FF),)), ("タイ文字", ((0x0E00, 0x0E7F),)), ("アラビア文字", ((0x0600, 0x06FF),))],
+    ("label", "predicate", "exempt"),
+    [
+        pytest.param("ハングルの混入", _is_hangul, _MULTILINGUAL_FIXTURES, id="hangul-outside-fixtures"),
+        pytest.param("日本語標準外の漢字（簡体字などの疑い）", _outside_japanese, frozenset(), id="cjk-outside-jis"),
+        pytest.param("キリル文字の混入", _block(0x0400, 0x04FF), frozenset(), id="cyrillic"),
+        pytest.param("タイ文字の混入", _block(0x0E00, 0x0E7F), frozenset(), id="thai"),
+        pytest.param("アラビア文字の混入", _block(0x0600, 0x06FF), frozenset(), id="arabic"),
+        pytest.param("想定外のギリシャ文字", _unexpected_greek, frozenset(), id="greek-outside-notation"),
+    ],
 )
-def test_no_unexpected_scripts(label: str, ranges: tuple[tuple[int, int], ...]) -> None:
-    """想定しない文字体系が現れないこと。"""
+def test_no_unexpected_scripts(label: str, predicate: Callable[[str], bool], exempt: frozenset[str]) -> None:
+    """想定しない文字体系の文字が、免除ファイル以外に現れないこと。"""
+    violations = [
+        message
+        for path in _target_files()
+        if str(path.relative_to(_ROOT)) not in exempt
+        for message in _findings(path, predicate)
+    ]
 
-    def in_ranges(char: str) -> bool:
-        return any(low <= ord(char) <= high for low, high in ranges)
-
-    violations = [message for path in _target_files() for message in _findings(path, in_ranges)]
-
-    assert violations == [], f"{label}の混入:\n" + "\n".join(violations)
-
-
-def test_greek_letters_are_limited_to_technical_notation() -> None:
-    """ギリシャ文字は ΔE*ab / Σ の技術記法だけに限ること。"""
-
-    def unexpected_greek(char: str) -> bool:
-        return 0x0370 <= ord(char) <= 0x03FF and char not in _ALLOWED_GREEK
-
-    violations = [message for path in _target_files() for message in _findings(path, unexpected_greek)]
-
-    assert violations == [], "想定外のギリシャ文字:\n" + "\n".join(violations)
+    assert violations == [], f"{label}:\n" + "\n".join(violations)
 
 
 def test_detector_catches_known_simplified_characters() -> None:
@@ -146,13 +134,5 @@ def test_detector_catches_known_simplified_characters() -> None:
     検知器に歯があることの確認。日本語の常用漢字を落とさないことも同時に見る
     （過検出で正当なファイルを落とすと、検査ごと無効化されるため）。
     """
-
-    def outside_japanese(char: str) -> bool:
-        try:
-            char.encode("shift_jis")
-        except UnicodeEncodeError:
-            return True
-        return False
-
-    assert all(outside_japanese(char) for char in _SIMPLIFIED_SAMPLES), _SIMPLIFIED_SAMPLES
-    assert not any(outside_japanese(char) for char in "日本語検査実装時刻個説")
+    assert all(_outside_japanese(char) for char in _SIMPLIFIED_SAMPLES), _SIMPLIFIED_SAMPLES
+    assert not any(_outside_japanese(char) for char in "日本語検査実装時刻個説")
