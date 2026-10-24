@@ -68,7 +68,7 @@ for event, groups in d['hooks'].items():
 
 計数の単位: `hooks {n}` は上のスクリプトが出力するフックエントリの数（`powershell:` の続き行は数えない）。1 エントリは POSIX 用の `command` と PowerShell 用の `powershell` の 2 行を持ち、どちらを実行するかはホストが決める。cmd.exe のホストは `command` を PATHEXT で `.cmd` へ解決し、Copilot CLI のように PowerShell を優先するホストは `powershell` を実行する。Windows のホストで測るときは、どちらの行を起動したかをレポートに書く（`(未宣言)` のエントリはそのホストで起動しないことがある）。`tool_input` を受け取るのは PreToolUse の分だけなので、ステップ2 の payload 形状マトリクスの対象件数は「うち N 件」と別に書く。
 
-`user-invocable: false` はホストの Skill ツールからの直接起動を妨げない（`/` 補完に出なくなるだけ）。そのため skill は直接起動を第一手とし、委譲の経路そのものを測りたいときだけ委譲元のコマンドを起動する。委譲元:
+委譲元（ステップ2 で委譲経路そのものを測る回だけ経由させる）:
 
 - `loop-dev` ← `feat-dev` / `bugfix` / `refactor` / `test-gen` / `plan` / `review`
 - `skill-make` ← `skill-gen`
@@ -89,7 +89,7 @@ stdin へ実 payload を流し、exit code を実測する。payload の形状�
 | listdict | `{"K": [{"F": V}]}` |
 | liststr | `{"K": [V]}` |
 
-`F` はフックが見るフィールド。`lib/harness.py` の抽出関数が読む別名まで含めると、バイパス面は次の 4 軸ある。16 通りで閉じるのは 2 軸だけなので、閉じていない軸を黙って 1 値に固定しない（その軸の退行が `Findings: HIGH 0` として記録される）。
+`F` はフックが見るフィールド。`lib/harness.py` の抽出関数が読む別名まで含めると、バイパス面は次の 5 軸ある。16 通りで閉じるのは 2 軸だけなので、閉じていない軸を黙って 1 値に固定しない（その軸の退行が `Findings: HIGH 0` として記録される）。
 
 | 軸 | 実装が読む値（`lib/harness.py`） | 状態 |
 |---|---|---|
@@ -125,7 +125,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
 
 記録は「起動できた（呼び出しが成立し応答が返った）」と「意図どおり動いた（出力が定義どおりの形・内容だった）」の 2 列に分け、前者だけで合格にしない。起動できて出力が壊れているものは「起動済み・不合格」で、未起動とも合格とも別に扱う。
 
-「意図どおり動いた」の合格条件は、各コンポーネントの定義が明示している出力契約（箱型テンプレの行・`Blockers: {n}` 行・終了コード等）とする。契約が書かれていないものは合否を付けず、コンポーネント単位の `Unspecified` に数える（指摘単位の `Pending` には入れない。単位の違う数を同じ行に混ぜると出力の恒等式が閉じない）。
+「意図どおり動いた」の合格条件は、各コンポーネントの定義が明示している出力契約（箱型テンプレの行・`Blockers: {n}` 行・終了コード等）とする。契約が書かれていないものは合否を付けず、コンポーネント単位の `Unspecified` に数える。
 
 ### 副作用の隔離
 
@@ -139,15 +139,15 @@ export CLAQ_DATA_PATH="$(git rev-parse --show-toplevel)/.release-verify-data"
 mkdir -p "$CLAQ_DATA_PATH"
 ```
 
-この式を書き換えたり `$(mktemp -d)` に戻したりしない。export ごと落とすと、`mem/settings.py` は `CLAQ_DATA_PATH` の有無で分岐するため `~/.claq` へ着地して実 DB を汚す。検証後は `rm -rf "$CLAQ_DATA_PATH"` で消す。
+検証後は `rm -rf "$CLAQ_DATA_PATH"` で消す。
 
-隔離が効いた証跡は、実 DB（`~/.claq/mem.db`）の `knowledge` / `sessions` / `repos` の行数が変わっていないことで示す。mtime は判定に使わない（WAL のチェックポイントは読み取り専用の `search` でも本体ファイルの mtime を動かす）。読み取りだから副作用ゼロとも決めつけず、行数で確かめる。
+隔離が効いた証跡は、実 DB（`~/.claq/mem.db`）の `knowledge` / `sessions` / `repos` の行数が変わっていないことで示す。mtime は判定に使わない（WAL のチェックポイントは読み取り専用の `search` でも本体ファイルの mtime を動かす）。
 
 ## ステップ3: 実測による裁定
 
 ### scan_scaffold_drift（足場タグ denylist の陳腐化検知）
 
-`ci/scan_scaffold_drift.py` は、`lib/harness.py` の `_SCAFFOLD_TAGS` から漏れた新しい足場タグを実 transcript から検知する。コーパスが利用者ローカルの未サニタイズな transcript なので CI には組み込めず、ここで明示的に呼ぶ。コンポーネントのインベントリとは別の単位で、コンポーネント数には加えない。
+`ci/scan_scaffold_drift.py` は、`lib/harness.py` の `_SCAFFOLD_TAGS` から漏れた新しい足場タグを実 transcript から検知する。コンポーネントのインベントリとは別の単位で、コンポーネント数には加えない。
 
 ```bash
 . "$HOME/.claq/env.sh" || exit 127
@@ -155,14 +155,14 @@ claq_run claq.ci.scan_scaffold_drift
 ```
 
 - `0`（ドリフトなし）: 対応不要
-- `1`（未知の足場タグ検出）: 実 transcript による一次証跡なので、通常の指摘として裁定に載せる。3 択の振り分け（ホスト足場 → `lib/harness.py`、依頼本文の良性 HTML タグ → `BENIGN_TAGS`、どちらでもない → コードスパン除去の穴）は `../maintain/SKILL.md` `## ステップ5: final gate` に従う
+- `1`（未知の足場タグ検出）: 実 transcript による一次証跡なので、通常の指摘として裁定に載せる。3 択の振り分けは `../maintain/SKILL.md` `## ステップ5: final gate` に従う
 - `2`（走査対象ゼロ）と `127`（`claq_run` が root ポインタ未記録で解決できない）: 合格ではなく未実施。コンポーネント単位の `Not run` とは別に数え、出力に `Scaffold-Drift: NOT-RUN` を必ず書く
 
 ### 裁定の規則
 
 - エージェントの自己申告は一次証跡ではない。主張は自分で再現してから採用する
 - 再現していない主張も指摘台帳に入れる。エージェントの主張は「再現できた → 通常の指摘」「再現を試みて失敗 → `NO-FIX`（根拠 = 再現手順と観測結果）」「再現を試みていない → `Unadjudicated`」のどれかに必ず落とし、台帳の外に「要裁定」のような別節を作らない（別節に置いた指摘は出力の恒等式に数えられないまま終わる）
-- 一次証跡の無い指摘に severity を付けない。自分で再現していない項目は `unrated` に数え、エージェントが申告した severity を転記しない（転記は自己申告を証跡として採用するのと同じ）。severity を付けるのは自分の実測で立った指摘だけ
+- 一次証跡の無い指摘に severity を付けない。自分で再現していない項目は `unrated` に数え、エージェントが申告した severity を転記しない（転記は自己申告を証跡として採用するのと同じ）
 - 自分の計測も疑う。計測が「効いていない」側に倒れていないかを、入力長を変えて確かめる（長さに対して時間が伸びないなら、計測が攻撃形状を作れていない可能性を先に疑う）
 - 「存在の測定」と「実効性の測定」を混同しない。`harness_audit` の `Security Guardrails` は保護フックの存在を測るだけで、同カテゴリが満点のままバイパスが素通りしうる。実効性は実 payload の exit code でしか測れない
 
@@ -214,7 +214,7 @@ cd plugins/claq && python3 -m pytest -q --cov  # fail_under=100 はこのディ�
 3. ステップ5 のゲートがすべて緑。回帰ゲート 3 つと、修正 1 件ごとの再実測ゲート (a) 元 payload の陽性・陰性の反転 (b) 隣接軸 1 本、の両方（修正が 0 件なら回帰ゲート 3 つのみ）。(b) が記録されていない修正が 1 件でもあれば未達
 4. 測定 root と修理 root が `Build:` 行に記録されている
 
-`Scaffold-Drift` の `NOT-RUN` は 1〜4 のどれにも数えない（出力への明記だけを求める独立した行）。
+`Scaffold-Drift` の `NOT-RUN` は 1〜4 のどれにも数えない。
 
 実行が完了したかどうか（上の 4 条件）と、リリースしてよいか（`Gate`）は別の軸である。部分実行や修正禁止の実行で `Gate: BLOCKED` が出るのは正常終了で、実行の失敗ではない。
 
@@ -249,8 +249,8 @@ Learned:    {知識カードの key} / なし
 
 - `Gate: BLOCKED` になるのは、`Not run` が 1 以上 / `Unadjudicated` が 1 以上 / `Build:` が `same=no` のいずれか。`same=no` のとき `Fixed` は修理 root で閉じた件数で測定 root には未反映なので、`Gate: PASS` を出さない（配布ビルドを測りながらリポジトリの修正結果で合格にしない）
 - 行の恒等式は `Findings 合計 = Fixed + NO-FIX + Pending + Unadjudicated`。どの指摘（エージェントの主張を含む）も 4 行のどれかに入る。恒等式の母集合は `Findings` 行で、単位は指摘。`= {合計}` には 4 スロットすべての和を書く。コンポーネント単位の数（`Invoked` / `Not run` / `Unspecified`）は恒等式に入れない
-- `Scaffold-Drift` の `DRIFT` / `NOT-RUN` は BLOCKED の条件に加えない。`DRIFT` は通常の指摘として恒等式に入るので `Pending` / `Unadjudicated` 経由で判定に効く。`NOT-RUN` は出力への明記を必須にする一方、単独では BLOCKED にしない（コーパスが無いホストや root ポインタが未記録のホストで常に BLOCKED になるのを避けるため）
-- NO-FIX は件数だけでなく理由を 1 行ずつ添える。末尾に記録した知識カードの key を 1 行書く（無ければ `Learned: なし`）
+- `Scaffold-Drift` の `DRIFT` / `NOT-RUN` は BLOCKED の条件に加えない。`DRIFT` は通常の指摘として恒等式に入るので `Pending` / `Unadjudicated` 経由で判定に効く。`NOT-RUN` は単独では BLOCKED にしない（コーパスが無いホストや root ポインタが未記録のホストで常に BLOCKED になるのを避けるため）
+- 末尾に記録した知識カードの key を 1 行書く（無ければ `Learned: なし`）
 
 ## 引数
 

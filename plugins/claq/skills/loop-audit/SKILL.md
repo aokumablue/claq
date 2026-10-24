@@ -7,7 +7,7 @@ user-invocable: true
 
 # ループ収束品質診断
 
-loop-dev の実行履歴（checkpoint の反復履歴 + git log）を全件走査し、収束品質の指標と 3 つのスコア（process_readiness / outcome_health / observation_coverage）と改善提案を出す。対象は実行履歴の集計で、プロンプトの文言の診断は skill-tune の担当。
+loop-dev の実行履歴（checkpoint の反復履歴 + git log）を全件走査し、収束品質の指標と 3 つのスコア（process_readiness / outcome_health / observation_coverage）と改善提案を出す。
 
 止まるのは、レポートを出したとき（履歴ゼロ件の報告を含む）だけ。それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返るため）。
 
@@ -52,7 +52,7 @@ loop-dev の実行履歴（checkpoint の反復履歴 + git log）を全件走�
 8. escalation 品質 — stopped/circuit-break のとき、残った blocker と次アクションが checkpoint の再開コンテキストに残っているか
 9. human gate — 上限超過・circuit break の後に自動で続行した形跡が無いか
 
-実測できない領域は N/A として `process_readiness` の分母から外すが、10 点満点へ換算し直さない（換算すると観測が乏しいほどスコアが上がる）。代わりに `observation_coverage = 実測できた領域数 / 9` を別に出す。未計測を 0 点にもしない（0 点は「工程が無い」の意味で、「見えなかった」とは別）。
+実測できない領域は N/A として `process_readiness` の分母から外すが、10 点満点へ換算し直さない（換算すると観測が乏しいほどスコアが上がる）。未計測を 0 点にもしない（0 点は「工程が無い」の意味で、「見えなかった」とは別）。
 
 ## 期間指定と before/after 比較
 
@@ -67,6 +67,7 @@ loop-dev の実行履歴（checkpoint の反復履歴 + git log）を全件走�
 Loop-Audit Report
 ──────────────────────────────
 Period:          {全期間 | before: 〜X / after: X〜}
+Assumptions:     {採った日付の解釈 or -}
 Runs:            {n}（checkpoint）
 収束率:          {%} {before→after}
 平均反復数:      {n.n}
@@ -82,7 +83,7 @@ Observation Coverage:{n} / 9（N/A: {領域名, ...}）
 2. ...
 ```
 
-改善提案は充足度の低い領域から順に最大 3 件。各提案に根拠となる実測値を 1 行添える。
+改善提案は充足度の低い領域から順に並べ、各提案に根拠となる実測値を 1 行添える。
 
 ## ルール
 

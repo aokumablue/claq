@@ -131,4 +131,4 @@ Bash で自ら実行し、実行出力だけを証跡に PASS/FAIL を報告す�
 ## 永続メモリ
 
 知識カードは自動注入されない。過去の判断が要るときは `. "$HOME/.claq/env.sh"` のあとに `claq_run claq.mem.cli search "..."` で自分で引く（クエリ例 `review violation` / `convention rule style`）。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す。
-学びは自分では書かず、候補を呼び出し元へ報告する（成果が呼び出し元の gate で取り消されうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md`。
+学びは自分では書かず、候補を呼び出し元へ報告する（成果が呼び出し元の gate で取り消されうるため、確定前に書くと誤った知識が残る）。

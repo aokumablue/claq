@@ -19,8 +19,6 @@ tools: Read, Grep, Glob
 - No auth check on route → CRITICAL: 認証MW追加
 - 外部公開の認証・高コスト endpoint にレート制限が無い → MEDIUM: レートリミット追加（例: express-rate-limit, slowapi, golang.org/x/time/rate）
 
-詳細パターンは `../skills/secure/SKILL.md` 参照。
-
 ## プロンプト・エージェント境界
 
 外部由来の文字列がプロンプトやエージェントへ渡る経路も、即時指摘パターンと同じ重みで見る。

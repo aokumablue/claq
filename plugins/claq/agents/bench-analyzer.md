@@ -24,10 +24,7 @@ tools: Read, Grep, Glob
 
 ### 失敗条件
 
-- 入力 path はすべて実在し読み取れること
-- 必須入力・fixture・トランスクリプト・JSON が欠けていれば **FAIL**。推測で補う・空で埋める・架空のデータを作ることはしない
-- 実行していない benchmark・読めないトランスクリプト・壊れた JSON を根拠に PASS を出さない
-- 欠けた benchmark fixture を新たに生成して埋め合わせない（既存成果物の分析が担当）
+- 入力 path が欠けている・読めない、または JSON が壊れているときは **FAIL** を返す。推測で補う・空で埋める・欠けた fixture を生成して埋め合わせることはしない（既存成果物の分析が担当）
 
 ## モード: posthoc_comparison
 
@@ -44,7 +41,7 @@ tools: Read, Grep, Glob
 
 ### 手順
 
-1. `comparison_result_path` を読み、勝者（A か B）・理由・スコアと、比較エージェントが勝者の何を重視したかを把握する。ファイル欠落・JSON 破損ならその場で **FAIL**
+1. `comparison_result_path` を読み、勝者（A か B）・理由・スコアと、比較エージェントが勝者の何を重視したかを把握する
 2. 勝者・敗者それぞれの SKILL.md と重要な参照ファイルを読み、構造の違いを探す: 指示の明確さ・具体性、スクリプト/ツールの使い方、例のカバレッジ、エッジケース対応
 3. 両方のトランスクリプトを読み、実行の進み方を比べる: skill の指示への忠実さ、使ったツールの違い、敗者が最適な挙動から外れた箇所、エラーと復旧の試み
 4. 各トランスクリプトの指示追従度を 1〜10 で採点し、具体的な問題点を書く。観点: skill の明示的な指示に従ったか、用意された tools/scripts を使ったか、skill 本文を活かせる場面を逃していないか、不要な手順を勝手に増やしていないか
@@ -125,7 +122,7 @@ tools: Read, Grep, Glob
 
 ### 入力
 
-- benchmark_data_path: すべての run 結果を含む benchmark.json へのパス（必須。未指定・ファイルなし・JSON 不正・中身不足なら **FAIL** とし分析を続けない）
+- benchmark_data_path: すべての run 結果を含む benchmark.json へのパス（必須）
 - skill_path: ベンチマーク対象のスキルへのパス
 
 ### benchmark fixture の最小検証
@@ -138,7 +135,7 @@ tools: Read, Grep, Glob
 - ベースライン名は fixture 全体で一方だけで、各 `(eval_id, run_number)` に `with_skill` とそのベースラインが各 1 件ずつある
 - `run_summary` が実行された 2 構成と一致する
 
-満たさない fixture は **FAIL** にし、不足キー・壊れた run・欠落設定・二重ベースライン・`run_summary` との不一致を列挙する（推測で補わない）。fixture が無い場合は、必要な採取手順（`with_skill` とベースラインを同一 eval/run 番号で実行し、`../skills/skill-make/references/schemas.md` のスキーマに従って `benchmark.json` を作る等）を示して **FAIL** を返す。
+満たさない fixture は **FAIL** にし、不足キー・壊れた run・欠落設定・二重ベースライン・`run_summary` との不一致を列挙する。fixture が無い場合は、必要な採取手順（`with_skill` とベースラインを同一 eval/run 番号で実行し、`../skills/skill-make/references/schemas.md` のスキーマに従って `benchmark.json` を作る等）を示して **FAIL** を返す。
 
 ### 手順
 

@@ -1,6 +1,6 @@
 ---
 name: learn
-description: 再利用できる学び（罠・事実・定型手順・規約・判断）を知識カードとして記録するとき、または記録基準を確かめるときに使う。作業ログやセッション限りの事情には使わない。
+description: 再利用できる学び（罠・事実・定型手順・規約・判断）を知識カードとして記録するときに使う。作業ログやセッション限りの事情には使わない。
 context: fork
 user-invocable: false
 ---
@@ -95,7 +95,6 @@ claq_mem_learn --key prod-build-env-not-injected --kind pitfall --scope repo \
 
 - 別の key で作り直さない（重複カードになり、注入枠を二重に使う）
 - 本文を変えたい・確信度を上げたいときは人間に頼む（注入対象を決めるのは `status` で、`active` のカードの `confidence` を上げる実益は無い）
-- 内容が陳腐化したら、更新ではなく `forget` の候補として key と理由を人間に示す（実行は `/instinct` の承認を経る）
 
 
 ## 参照する
@@ -106,7 +105,7 @@ claq_run claq.mem.cli search "本番ビルド 環境変数"   # 上位 5 件の 
 claq_run claq.mem.cli show prod-build-env-not-injected   # body を読む唯一の口
 ```
 
-`search` / `list` が返すのは `- [kind] title (key)` の 1 行だけで `body` は含まない。本文が要る key だけを 1 件ずつ `show` に渡す（注入トークンの節約）。
+本文が要る key だけを 1 件ずつ `show` に渡す（注入トークンの節約）。
 
 ## 陳腐化した知識の扱い
 

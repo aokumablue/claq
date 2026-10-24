@@ -13,15 +13,7 @@ command: /harness
 
 ## 使い方
 
-```bash
-/harness                    # ベースライン取得→トップ3提示までで停止（apply しない）
-/harness --audit-only       # スコアカード出力のみ
-/harness --apply            # トップ3を確認なしで harness-tuner に適用させる
-/harness skills --format json
-/harness --scope hooks --root /path/to/repo --target-kind repo
-```
-
-`scope` は位置引数でも `--scope` でも指定できる（既定 `repo`）。`claq_run` には `--root` と `--target-kind repo|consumer` を常に渡す（ユーザーが省いたら監査対象のルートと種別を決めて渡す）。省くと cwd から自動判定され、marketplace レイアウトの provider リポジトリ直下を consumer と誤判定しうる。`--target-kind` が自動判定と食い違えば FAIL し、誤った root を監査したまま進むのを防ぐ。
+`claq_run` には `--root` と `--target-kind repo|consumer` を常に渡す（ユーザーが省いたら監査対象のルートと種別を決めて渡す。省くと cwd から自動判定され、provider リポジトリ直下を consumer と誤判定しうる）。
 
 ## ステップ1: ベースライン取得
 

@@ -25,7 +25,6 @@ RED → GREEN → REFACTOR → REPEAT
 ```
 
 - GREEN に達するたびに検証を通してコミットできる状態にし、1 サイクル 1 論理変更で進める
-- 合否はテスト実行の出力を証跡にして報告し、実行していないテストの成否は報告しない
 - GREEN の最小実装は仕様を一般に満たす最小のもので、テスト入力に合わせた分岐や値の埋め込みではない。テストが要求しない機能は書かない
 
 ### 例外: 既存の正しい実装へテストを足す場合（characterization）
@@ -84,4 +83,4 @@ RED → GREEN → REFACTOR → REPEAT
 ## 永続メモリ
 
 知識カードは自動注入されない。過去の判断が要るときは `. "$HOME/.claq/env.sh"` のあとに `claq_run claq.mem.cli search "..."` で自分で引く（クエリ例 `test pattern` / `bug fix regression test`）。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す。
-学びは自分では書かず、候補を呼び出し元へ報告する（成果が呼び出し元の gate で取り消されうるため、確定前に書くと誤った知識が残る）。基準は `../skills/learn/SKILL.md`。
+学びは自分では書かず、候補を呼び出し元へ報告する（成果が呼び出し元の gate で取り消されうるため、確定前に書くと誤った知識が残る）。

@@ -19,7 +19,7 @@ user-invocable: false
 
 ## 入力契約
 
-要件は呼び出し元で確定済みなので grillme は起動しない（自由記述を受けるコマンドは入口の grillme で、`/refactor` `/test-gen` `/review` は引数・diff・フラグで確定させている）。
+要件は呼び出し元で確定済みなので grillme は起動しない。
 
 - `task`: 合意済み要件（1〜3 文）
 - `task_type`: `feature` | `bugfix` | `test` | `refactor-fix`
@@ -49,7 +49,7 @@ user-invocable: false
    - reviewer には `verify_mode: reexecute`、失敗テストのシグネチャ（反復履歴の tests= と同じもの）、baseline step で自ら検出・実行したテストコマンドを `test_cmd` として渡す。`task` と、あれば `approved_plan`（変更予定のテストファイル一覧を含む）も載せる（差分で足されたフォールバックの出所の照合にも使う）。generate の自己検証コマンドや「テスト通過」等の自己申告は渡さない（diff とテスト結果は reviewer が自分で取る。反復2 も同じ）
    - スコープガード: `approved_plan` に変更ファイル一覧があるときだけ、編集したファイルが一覧内かを照合し、逸脱は blocker にする（一覧の無い呼び出し元では照合しない）。ただしテスト基盤ファイル（テストランナー・カバレッジの設定や共有フィクスチャ。Python なら任意パスの `conftest.py`・`pyproject.toml` の `[tool.pytest.ini_options]`/`[tool.coverage.*]`・`pytest.ini`・`setup.cfg`、JS なら `jest.config.*`/`vitest.config.*`・`package.json` の `scripts`、共通で `Makefile` の test ターゲット・CI 設定等）の変更は一覧の有無に関わらず照合し、一覧に無ければ blocker にする
 5. 収束判定: change 由来の red がゼロ（`red_baseline` のシグネチャを除く）かつ lint green かつ evaluate の blocker（CRITICAL/HIGH）ゼロかつ `converge_extra` を満たせば収束
-   - evaluate の出力に `Blockers: {n}` 行（security-auditor 併用時は両方）が実際にあることを収束の前提にする。行が無い（途中終了・出力破損・起動失敗）場合は blocker ゼロとは解釈せず、未収束としてエスカレーションする。指摘が無いことと、判定が返ってこないことは別である
+   - evaluate の出力に `Blockers: {n}` 行（security-auditor 併用時は両方）が実際にあることを収束の前提にする。行が無い（途中終了・出力破損・起動失敗）場合は blocker ゼロとは解釈せず、未収束としてエスカレーションする
    - `red_baseline` の red は収束を妨げない。未収束でエスカレーションするときは本文で隔離して報告し、収束時は出力の `Assumptions` に `pre-existing red: {n}` を書き足す（ボックスの行は増やさない）
    - 不成立なら circuit breaker の early trigger を判定する（`## circuit breaker`）
    - flake: テストが失敗したら同じテストを最大 2 回再実行し、結果が揺れれば flake とする。flake をプロダクトコードの変更で握りつぶさない。エスカレーション本文で隔離して報告し、報告後は収束判定から外してよい（ボックスに flake 行は足さない）。`red_baseline` のシグネチャは flake の再実行・分類の対象外
@@ -58,8 +58,8 @@ user-invocable: false
 ### 反復2（修正専用。スコープを広げない）
 
 1. plan は省き、反復1 の evaluate の blocker をそのまま修正タスクにする
-2. generate: 反復1 と同じ担当表のエージェントに blocker を渡して直させる。各 blocker の根本原因を 1 行で書かせ（反復履歴の rootcause に記録する。対症療法のパッチは当てない）、blocker の箇所だけを直させ（新機能の追加・リファクタの拡大はしない）、自己検証させる。baseline が green だったテストが red になったときの扱いは反復1 の generate と同じ（重ねて直さず、加えた編集だけを取り消す）
-3. circuit breaker の判定: 自己検証の結果を反復1 のシグネチャと照合する（`## circuit breaker`）。hard trigger なら evaluate を飛ばす
+2. generate: 反復1 と同じ担当表のエージェントに blocker を渡して直させる。各 blocker の根本原因を 1 行で書かせ（反復履歴の rootcause に記録する。対症療法のパッチは当てない）、blocker の箇所だけを直させ（新機能の追加・リファクタの拡大はしない）、自己検証させる。baseline が green だったテストが red になったときの扱いは反復1 の generate と同じ
+3. circuit breaker を判定する（`## circuit breaker`）。hard trigger なら evaluate を飛ばす
 4. evaluate: reviewer を再実行する。依頼文に前回の blocker 一覧を渡し、その解消と反復2 の差分が持ち込んだ問題だけを見させる（反復1 で指摘されなかった既存コードの問題は掘り起こさない）
    - security-auditor は、反復1 の security-auditor が `Blockers` 1 以上を返したか、反復2 の差分が反復1 と同じ起動条件に触れるときだけ再実行する。依頼文には security-auditor 由来の前回 blocker 一覧と反復2 の diff 本文か変更ファイルの一覧を載せ、同じ限定で見させる。前回 blocker 一覧は出所ごとに分け、reviewer には reviewer 由来の分だけを渡す（混ぜると reviewer がセキュリティ blocker の解消を判定してしまうため）
    - 再実行しないときは、反復1 の security-auditor の `Blockers` 行を収束判定に引き継ぐ
@@ -129,7 +129,7 @@ Assumptions: {仮決定事項 or "-"}
 
 ## Human Gate
 
-人間が確認する停止点は次の 4 つだけ（自律度のパラメータは設けない）。収束 gate の最終権限は loop-dev の evaluate にあり、呼び出し元が独自の gate を持つ場合（`/refactor` の final gate 等）も loop-dev の判定を正とする。
+人間が確認する停止点は次の 4 つだけ。
 
 1. 計画: `/plan` から委譲されたときは人間が承認済み（この gate だけ本 skill の外にある）
 2. 上限超過・circuit break: エスカレーションを出力し、ユーザーに報告して止まる

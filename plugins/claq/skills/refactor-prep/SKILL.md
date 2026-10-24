@@ -53,7 +53,7 @@ JSON 契約（`deps.from` / `deps.to` は `groups` 配列のインデックス�
 
 - `scope_files` / `groups` / `deps` / `tests.baseline` / `tests.group` / `tests.final` のキーは必ず出す（値は空でもよい）
 - baseline / group / final のカテゴリ全体で実在するコマンドを確認できなければ、その配列を空にする。空配列が JSON 契約上の「検証手段なし」で、JSON だけを読む `refactor-rollback` はそれで判定する（テキスト側の「検証手段なし」は人間向けの表記）
-- `tests.group[i]` は `groups[i]` を検証するコマンドで、`len(tests.group) == len(groups)`（または全体が空配列）にする。`groups[i]` にだけ検証手段が無ければ、配列ごと空にせず `tests.group[i]` を空文字列 `""` にする。`refactor-rollback` は添字で引いて各ファイルの `verify` を決めるため、長さがずれると、リバートした対象を検証しないコマンドを検証として提示することになる。`0 < len(tests.group) < len(groups)` は契約違反で、下流は不足分を `NOT_AVAILABLE` として扱う
+- `tests.group[i]` は `groups[i]` を検証するコマンドで、`len(tests.group) == len(groups)`（または全体が空配列）にする。`groups[i]` にだけ検証手段が無ければ、配列ごと空にせず `tests.group[i]` を空文字列 `""` にする。`refactor-rollback` は添字で引いて各ファイルの `verify` を決めるため、長さがずれると、リバートした対象を検証しないコマンドを検証として提示することになる
 
 ## ルール
 

@@ -13,11 +13,6 @@ user-invocable: false
 - 変更対象: `refactor-prep` の `scope_files`
 - `refactor-prep` のグループ・依存関係・テストセット（形は `../refactor-prep/SKILL.md` の JSON 契約に従う。ここに複製しない）
 
-`refactor-prep` の契約のうち、本スキルが頼るのは 2 点だけ:
-
-- `scope_files` / `groups` / `deps` / `tests.baseline` / `tests.group` / `tests.final` のキーは必ずある（値は空でありうる）
-- 空配列は欠損ではなく「検証手段なし」という正当な値で、手順3 で `NOT_AVAILABLE` として扱う
-
 ## 手順
 
 0. worktree clean の確認: 手順1 で決める `git checkout -- {file}` は index/HEAD から戻すため、処理開始前からあった未コミットの編集も区別なく捨てる。対象について `git status --porcelain -- {scope_files}` を実行し、未コミットの変更があれば `git diff -- {scope_files}` をリバート対象外の場所へ baseline patch として保存してから進む。保存できなければ（書き込み不可・diff 取得失敗等）そのファイルはリバート対象にせず、Skip Rules へ回す

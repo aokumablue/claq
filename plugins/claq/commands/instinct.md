@@ -8,8 +8,6 @@ command: /instinct
 
 `knowledge` テーブルに蓄積された知識カードの棚卸しを扱う。知識モデル・kind の使い分け・記録基準は `../skills/learn/SKILL.md` が正。
 
-中心となる作業は昇格である。`learn` で入れた候補は常に `status='pending'` で登録され、SessionStart には注入されない。ここでレビューして `promote` したものだけが `status='active'` になり、以後の全セッションへ注入される。昇格は key・scope・source・直前の status とともに監査ログへ記録される。
-
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `{棚卸し対象の domain}` / `{key}`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`

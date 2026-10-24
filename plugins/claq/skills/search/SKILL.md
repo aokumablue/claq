@@ -56,13 +56,13 @@ B（ローカル資産）は数回の確認で終わるので自分で調べる�
 ```text
 # A: パッケージレジストリ
 Search npm/PyPI for: [DESCRIPTION]. Language: [LANG]
-Return top 3: name, version, weekly downloads, last update, license
+Return every fitting candidate: name, version, weekly downloads, last update, license
 
 # B: ローカル資産（簡易モードの 1・3・4 を自分で確認する）
 
 # C: GitHub・Web
 Find actively maintained OSS for: [DESCRIPTION]. Language: [LANG]
-Check: stars, last commit, open issues, license. Return top 3
+Check: stars, last commit, open issues, license. Return every fitting candidate
 ```
 
 ## 入力安全
