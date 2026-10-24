@@ -26,7 +26,7 @@ from claq.mem.repo_identity import (
 )
 
 # 鍵の形の文字列はコミット品質フックが止めるため実行時に組み立てる。
-_TOKEN = "ghp_" + "abcdefghijklmnopqrstuvwxyz012345"
+_GITHUB_PAT = "ghp_" + "abcdefghijklmnopqrstuvwxyz012345"
 
 
 @pytest.fixture
@@ -153,7 +153,7 @@ class TestStripCredentials:
         [
             # https + credential（監査で確認された実害の再現）
             ("https://user:token@github.com/o/r.git", "https://github.com/o/r.git"),
-            (f"https://user:{_TOKEN}@github.com/o/r", "https://github.com/o/r"),
+            (f"https://user:{_GITHUB_PAT}@github.com/o/r", "https://github.com/o/r"),
             # https + credential なし（scheme あり、@ なし authority）
             ("https://github.com/o/r.git", "https://github.com/o/r.git"),
             # ssh scheme + userinfo
@@ -278,7 +278,7 @@ class TestDetectRepoIdentity:
         ("remote", "identity_key", "remote_url"),
         [
             ("git@github.com:o/claq-dev.git", "github.com/o/claq-dev", "github.com:o/claq-dev.git"),
-            (f"https://user:{_TOKEN}@github.com/o/r.git", "github.com/o/r", "https://github.com/o/r.git"),
+            (f"https://user:{_GITHUB_PAT}@github.com/o/r.git", "github.com/o/r", "https://github.com/o/r.git"),
             (None, None, None),
         ],
         ids=["scp-userinfo", "https-credential", "no-origin"],
