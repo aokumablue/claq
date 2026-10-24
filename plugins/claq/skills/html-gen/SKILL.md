@@ -62,6 +62,8 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 ナビゲーション項目、`html[data-base]`（手順1で選んだベースカラー）、
 `html[data-page-kind]`。
 
+データ由来の文字列は HTML エスケープして書く（表のセル・SVG の title/desc）。
+
 触らない: `tokens.css`（生成物）、`app.js`、`button[data-theme-value="light"|"dark"]`、
 `<head>` の `app.js` 読み込み位置（body 末尾へ移すと初回に白がちらつく）、
 `.chart-scroll` ラッパ、`@media (prefers-reduced-motion: reduce)` ブロック、

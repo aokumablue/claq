@@ -8,7 +8,7 @@
    `ring` / `muted-foreground` / `chart-*` だけを規則に沿って調整する。
 2. **検査**: 生成された `tokens.css` が tokens.json と一致すること、手書きの
    `styles.css` / `index.html` / `app.js` が契約（色は変数経由のみ・
-   コントラスト・レスポンシブ・モーション低減・アクセシビリティ）を守ることを
+   コントラスト・レスポンシブ・モーション低減・アクセシビリティ・スクリプト混入）を守ることを
    確認する。
 
     python3 check_site.py .              # 検査
@@ -23,6 +23,7 @@ import json
 import math
 import re
 import sys
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -542,6 +543,55 @@ class _Dom(HTMLParser):
         self.tags.append((tag, {key: (value or "") for key, value in attrs}))
 
 
+#: 開始タグ名だけを消費する（属性は別に読む）。引用値やコメントの中の "<img" も、位置ごとに独立して走査される。
+_RAW_TAG_RE = re.compile(r"<([A-Za-z][^\t\n\f\r />]*)")
+#: 属性 1 個。区切りは HTML の空白か "/"（0 個も可: src="x"onerror=）。引用符は "=" の直後でだけ値を囲む（title=a"b は無引用値）。
+_RAW_ATTR_RE = re.compile(
+    r"[\t\n\f\r /]*([^\t\n\f\r />][^\t\n\f\r />=]*)"
+    r"(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:\"([^\"]*)\"|'([^']*)'|([^\t\n\f\r >]*)))?"
+)
+#: URL パーサが位置を問わず捨てる文字（ASCII タブ・改行）。
+_URL_TAB_OR_NEWLINE_RE = re.compile(r"[\t\n\r]")
+#: URL パーサが先頭から捨てる文字（C0 制御文字と空白）。
+_URL_LEADING_JUNK = "".join(chr(code) for code in range(0x21))
+
+
+def _raw_start_tags(html: str) -> list[tuple[str, list[tuple[str, str]]]]:
+    """生テキストから開始タグとその属性を拾う。
+
+    HTMLParser は RCDATA（SVG の ``<title>`` など）の中のタグを報告しないので使わない。
+    ブラウザはそこに書いた ``<img>`` を SVG の外へ出して実行する。
+    タグ名だけを消費するので、引用値・コメントに埋もれた ``<`` も個別に読む。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        (小文字のタグ名, [(小文字の属性名, 実体参照を解いた値), ...]) の一覧。重複属性も潰さない
+    """
+    tags: list[tuple[str, list[tuple[str, str]]]] = []
+    for tag in _RAW_TAG_RE.finditer(html):
+        attrs: list[tuple[str, str]] = []
+        pos = tag.end()
+        while (attr := _RAW_ATTR_RE.match(html, pos)) is not None:
+            attrs.append((attr.group(1).lower(), unescape(attr.group(2) or attr.group(3) or attr.group(4) or "")))
+            pos = attr.end()
+        tags.append((tag.group(1).lower(), attrs))
+    return tags
+
+
+def _is_javascript_url(value: str) -> bool:
+    """URL パーサと同じ前処理をした値が javascript: スキームかを返す。
+
+    Args:
+        value: 実体参照を解いた属性値
+
+    Returns:
+        javascript: の URL なら True
+    """
+    return _URL_TAB_OR_NEWLINE_RE.sub("", value).lstrip(_URL_LEADING_JUNK).lower().startswith("javascript:")
+
+
 # --- 検査 --------------------------------------------------------------------
 
 
@@ -568,7 +618,7 @@ def validate_site(site_dir: Path, tokens: dict[str, Any] | None = None) -> list[
 
 
 def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:
-    """HTML の構造・アクセシビリティ契約を検査する。"""
+    """HTML の構造・アクセシビリティ・スクリプト混入の契約を検査する。"""
     violations: list[str] = []
     parser = _Dom()
     parser.feed(html)
@@ -598,6 +648,7 @@ def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:
     violations.extend(_validate_theme_toggle(tags))
     violations.extend(_validate_stylesheets(tags))
     violations.extend(_validate_inline_motion(html))
+    violations.extend(_validate_script_injection(html))
     violations.extend(_validate_nav_links(tags))
     violations.extend(_validate_lists(html, tags))
     if page_kind == "dashboard":
@@ -605,6 +656,10 @@ def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:
         violations.extend(_validate_chart_scroll_wrapper(html))
     if not _script_runs_before_body(tags):
         violations.append("app.js が <head> で読み込まれていない（ダーク選択時に白のちらつきが出る）")
+    if not _csp_meta_in_head(tags):
+        violations.append(
+            "Content-Security-Policy の meta が <head> に無い（<meta charset> の直後に置く。<body> 内ではブラウザが無視する）"
+        )
     return violations
 
 
@@ -648,6 +703,37 @@ def _validate_inline_motion(html: str) -> list[str]:
     if LOOPING_SMIL_RE.search(html) or any(_has_looping_animation(part) for part in embedded):
         return ["index.html に止まらない動き（infinite / indefinite）がある（回数を有限にするか、動きを外す）"]
     return []
+
+
+def _validate_script_injection(html: str) -> list[str]:
+    """データ由来の文字列に紛れて実行されるスクリプトを検査する。
+
+    イベント属性・javascript: の URL・app.js 以外の ``<script>`` を、HTMLParser が
+    読み飛ばす場所（SVG の ``<title>`` / ``<style>`` の中など）も含めて落とす。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    tags = _raw_start_tags(html)
+    handlers = sorted({name for _, attrs in tags for name, _ in attrs if name.startswith("on")})
+    violations = [
+        f"index.html にイベント属性 {name} がある（データ由来の文字列は HTML エスケープして書く。動作は app.js に置く）"
+        for name in handlers
+    ]
+    if any(_is_javascript_url(value) for _, attrs in tags for _, value in attrs):
+        violations.append(
+            "index.html に javascript: の URL がある（データ由来の文字列は HTML エスケープして書く。"
+            "リンク先は http(s) か #id にする）"
+        )
+    if any(tag == "script" and {value for name, value in attrs if name == "src"} != {"app.js"} for tag, attrs in tags):
+        violations.append(
+            "index.html に app.js 以外の <script> がある（スクリプトは app.js だけにし、"
+            "データ由来の文字列は HTML エスケープして書く）"
+        )
+    return violations
 
 
 #: 直交軸チャート 1 枚に要求する目盛りラベルと目盛り線の最小本数。
@@ -1208,6 +1294,20 @@ def _script_runs_before_body(tags: list[tuple[str, dict[str, str]]]) -> bool:
         (tag for tag, attrs in tags if tag == "body" or (tag == "script" and "app.js" in attrs.get("src", ""))), None
     )
     return first == "script"
+
+
+def _csp_meta_in_head(tags: list[tuple[str, dict[str, str]]]) -> bool:
+    """Content-Security-Policy の meta が body より前（head 内）にあるかを返す。"""
+    # body と CSP の meta のうち、先に現れたほうで決まる
+    first = next(
+        (
+            tag
+            for tag, attrs in tags
+            if tag == "body" or (tag == "meta" and attrs.get("http-equiv", "").lower() == "content-security-policy")
+        ),
+        None,
+    )
+    return first == "meta"
 
 
 def _validate_generated_css(css: str, tokens: dict[str, Any]) -> list[str]:

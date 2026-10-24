@@ -62,6 +62,12 @@ def test_generated_tokens_css_is_the_only_place_with_raw_color() -> None:
 _SMIL = '<animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite"/>'
 _DOT = '<circle class="series-dot" style="--i: 1'
 _STYLESHEETS = '<link rel="stylesheet" href="tokens.css">\n  <link rel="stylesheet" href="styles.css">'
+_AURORA = '<th scope="row">Aurora 工業</th>'
+_CSP = (
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\'; '
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
+    "img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'\">"
+)
 
 
 @pytest.mark.parametrize(
@@ -114,6 +120,54 @@ _STYLESHEETS = '<link rel="stylesheet" href="tokens.css">\n  <link rel="styleshe
         pytest.param(
             "index.html", [(_DOT, f"{_DOT}; animation: pulse 2s infinite")], "止まらない動き", id="html-style-loop"
         ),
+        # HTML: データ由来の文字列に紛れたスクリプト（表のセルへ書いた未エスケープの値）
+        *[
+            pytest.param("index.html", [(_AURORA, f'<th scope="row">Aurora{payload}</th>')], needle, id=case)
+            for case, payload, needle in (
+                ("xss-th-repro", "<img src=x onerror=alert(document.domain)>", "イベント属性 onerror"),
+                ("xss-svg-slash", "<svg/onload=alert(1)>", "イベント属性 onload"),
+                ("xss-uppercase", "<IMG SRC=x ONERROR=alert(1)>", "イベント属性 onerror"),
+                ("xss-quoted-gt", "<img alt='>' src=x onerror=alert(1)>", "イベント属性 onerror"),
+                ("xss-unquoted-quote", '<img title=a"b onerror=alert(1)>', "イベント属性 onerror"),
+                ("xss-no-separator", '<img src="x"onerror=alert(1)>', "イベント属性 onerror"),
+                ("xss-comment-quote", '<!--<a title="--><img src=x onerror=alert(1)>"', "イベント属性 onerror"),
+                ("xss-inline-script", "<script>alert(document.domain)</script>", "app.js 以外の <script>"),
+                (
+                    "xss-external-app-js",
+                    '<script src="https://evil.example/app.js"></script>',
+                    "app.js 以外の <script>",
+                ),
+                ("xss-duplicate-src", '<script src="evil.js" src="app.js"></script>', "app.js 以外の <script>"),
+                ("xss-javascript-url", '<a href="&#106;ava&#x09;script:alert(1)">x</a>', "javascript: の URL"),
+            )
+        ],
+        # SVG の <title>/<desc>/<style> の中（HTMLParser が中身のタグを報告しない場所）
+        pytest.param(
+            "index.html",
+            [("<title>1月&#10;", "<title><img src=x onerror=alert(1)>1月&#10;")],
+            "イベント属性 onerror",
+            id="xss-hover-title",
+        ),
+        pytest.param(
+            "index.html",
+            [('<desc id="mrr-d">', '<desc id="mrr-d"><img src=x onerror=alert(1)>')],
+            "イベント属性 onerror",
+            id="xss-desc",
+        ),
+        pytest.param(
+            "index.html",
+            [('<desc id="mrr-d">', '<style><img src=x onerror=alert(1)></style><desc id="mrr-d">')],
+            "イベント属性 onerror",
+            id="xss-svg-style",
+        ),
+        # CSP の meta は <head> に置く（<body> 内ではブラウザが無視する）
+        pytest.param("index.html", [(_CSP, "")], "Content-Security-Policy", id="csp-missing"),
+        pytest.param(
+            "index.html",
+            [(_CSP, ""), ("<body>\n", f"<body>\n  {_CSP}\n")],
+            "Content-Security-Policy",
+            id="csp-in-body",
+        ),
         # CSS: 骨格の変数・Tailwind のブレークポイント・流体の部品・フォーカス・モーション低減
         pytest.param("styles.css", [("var(--ring)", "currentColor")], "--ring", id="role-variable"),
         pytest.param("styles.css", [("min-width: 1024px", "min-width: 1023px")], "1024px", id="breakpoint"),
@@ -153,6 +207,25 @@ def test_broken_contract_is_reported(
 ) -> None:
     """テンプレートの契約を 1 つ壊すと、その違反が報告される。"""
     assert needle in _edit(_copy_site(tmp_path), filename, *replacements)
+
+
+@pytest.mark.parametrize(
+    "replacements",
+    [
+        pytest.param(
+            [(_AURORA, '<th scope="row">Aurora&lt;img src=x onerror=alert(document.domain)&gt;</th>')],
+            id="escaped-th",
+        ),
+        pytest.param(
+            [("<title>1月&#10;", "<title>&lt;img src=x onerror=alert(1)&gt;1月&#10;")], id="escaped-hover-title"
+        ),
+        # 属性値の中の語はイベント属性でも URL でもない
+        pytest.param([('title="Neutral"', 'title="onerror=alert(1) &quot;javascript:x"')], id="data-in-attribute-value"),
+    ],
+)
+def test_escaped_data_passes(tmp_path: Path, replacements: list[tuple[str, str]]) -> None:
+    """HTML エスケープしたデータ由来の文字列は、スクリプト混入として報告されない。"""
+    assert _edit(_copy_site(tmp_path), "index.html", *replacements) == ""
 
 
 # --- 壊すと落ちる契約（styles.css への追記） -----------------------------------
