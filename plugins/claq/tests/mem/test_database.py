@@ -215,13 +215,13 @@ class TestRepos:
         assert len(db.list_repos()) == 1
 
     def test_list_repos_orders_by_last_seen_desc(self, db: Database) -> None:
-        """1 件も無ければ空リスト、あれば最終観測の新しい順に返す。"""
+        """1 件も無ければ空リスト、あれば最終観測の新しい順に返す（挿入順・id 順とは独立）。"""
         assert db.list_repos() == []
-        db.upsert_repo(_repo("old", "key-old"))
-        newer = _repo("new", "key-new")
-        newer.last_seen_at = "2026-07-01T00:00:00+00:00"
-        db.upsert_repo(newer)
-        assert [repo.id for repo in db.list_repos()] == ["new", "old"]
+        for repo_id, month in (("a-old", "01"), ("b-newest", "07"), ("c-mid", "03")):
+            repo = _repo(repo_id, f"key-{repo_id}")
+            repo.last_seen_at = f"2026-{month}-01T00:00:00+00:00"
+            db.upsert_repo(repo)
+        assert [repo.id for repo in db.list_repos()] == ["b-newest", "c-mid", "a-old"]
 
     def test_relink_repo_identity_reports_missing_row(self, db: Database) -> None:
         """存在しない id の載せ替えは False を返すこと。"""

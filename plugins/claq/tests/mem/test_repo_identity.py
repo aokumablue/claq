@@ -265,10 +265,13 @@ class TestFindRepoRoot:
         assert find_repo_root(plain) == os.path.realpath(plain)
 
     def test_timeout_falls_back_to_absolute_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """git がタイムアウトしても絶対パスへ分岐してハングしない。"""
-        root = _make_repo(tmp_path / "main")
+        """git がタイムアウトしても絶対パスへ分岐してハングしない。
+
+        起点を `.git` にするのは、git が動けば本体ルートへ寄せる経路と結果を分けるため。
+        """
+        git_dir = _make_repo(tmp_path / "main") / ".git"
         monkeypatch.setattr(repo_identity, "run_text", _raising(_TIMEOUT))
-        assert find_repo_root(root) == os.path.realpath(root)
+        assert find_repo_root(git_dir) == os.path.realpath(git_dir)
 
 
 class TestDetectRepoIdentity:
