@@ -34,6 +34,12 @@ def test_session_start_output(context: str | None, capsys: pytest.CaptureFixture
     assert capsys.readouterr().out == result + "\n"
 
 
+@pytest.mark.parametrize("value", [None, "", "0", " no "])
+def test_is_truthy_rejects_falsey_values(value: str | None) -> None:
+    """None・空文字・"0"・前後に空白のある " no " を真値とみなさないこと。"""
+    assert hook_common.is_truthy(value) is False
+
+
 @pytest.mark.parametrize(
     ("outcome", "expected"),
     [

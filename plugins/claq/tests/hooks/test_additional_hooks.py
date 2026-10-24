@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import runpy
 import subprocess
@@ -467,33 +468,25 @@ class TestPreCompact:
         assert pre_compact.main() == 0
         assert any("Error: boom" in message for message in logs)
 
-    def test_main_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr("claq.lib.core_utils.get_sessions_dir", lambda: tmp_path)
-        monkeypatch.setattr("claq.lib.core_utils.ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr("claq.lib.core_utils.append_file", lambda path, content: None)
-        monkeypatch.setattr("claq.lib.core_utils.get_datetime_string", lambda: "2026-01-01 00:00:00")
-        monkeypatch.setattr("claq.lib.core_utils.log", lambda message: None)
-
-        assert _run_entrypoint("claq.hooks.pre_compact") == 0
-
-
-class TestSimpleHookEntrypoints:
-    def test_block_no_verify_entrypoint_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "claq.hooks.stdin_io.read_raw_stdin_with_truncation",
-            lambda: (json.dumps({"tool_input": {"command": "git status"}}), False),
-        )
-
-        assert _run_entrypoint("claq.hooks.block_no_verify") == 0
-
 
 @pytest.mark.parametrize(
-    "module_name",
+    ("module_name", "stdin"),
     [
-        "block_no_verify",
-        "config_protection",
+        ("block_no_verify", json.dumps({"tool_input": {"command": "git status"}})),
+        ("config_protection", json.dumps({"tool_input": {"file_path": "README.md"}})),
+        ("pre_compact", ""),
     ],
+    ids=["block_no_verify", "config_protection", "pre_compact"],
 )
+def test_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, module_name: str, stdin: str) -> None:
+    """各フックを __main__ として起動すると、通る入力で exit 0 を返すこと（pre_compact の記録先は tmp_path）。"""
+    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
+    monkeypatch.setattr("claq.lib.core_utils.get_sessions_dir", lambda: tmp_path)
+
+    assert _run_entrypoint(f"claq.hooks.{module_name}") == 0
+
+
+@pytest.mark.parametrize("module_name", ["block_no_verify"])
 def test_empty_input_passthrough(monkeypatch: pytest.MonkeyPatch, module_name: str) -> None:
     """空入力（data None）では本処理をスキップして 0 を返す。"""
     import importlib
@@ -501,15 +494,6 @@ def test_empty_input_passthrough(monkeypatch: pytest.MonkeyPatch, module_name: s
     mod = importlib.import_module(f"claq.hooks.{module_name}")
     _capture_io(monkeypatch, mod, "")
     assert mod.main() == 0
-
-
-def test_config_protection_blank_file_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    """file_path が空なら保護判定をスキップする。"""
-    from claq.hooks import config_protection
-
-    payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": ""}})
-    _capture_io(monkeypatch, config_protection, payload)
-    assert config_protection.main() == 0
 
 
 class TestBlockNoVerifyScansAllContainerKeys:

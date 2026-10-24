@@ -1,5 +1,5 @@
-"""config_protection.main() の入力形（apply_patch 生文字列・Copilot の小文字ツール名・native camelCase・
-空/不正/切り捨て入力）と、保護フック自身の設定を守る判定のテスト。
+"""config_protection.main() の入力形（Write の基本形・apply_patch の生文字列と Codex の dict・Copilot の小文字ツール名・
+native camelCase・旧 file キー・空/不正/切り捨て入力）と、コミット前検査の定義・保護フック自身の設定を守る判定のテスト。
 
 `emit_block_output` は本物の出力へ素通しするスパイで包み、ブロック理由の呼び出し回数と
 実際の stdout/stderr を同じ行で検査する。
@@ -18,6 +18,16 @@ from claq.hooks import config_protection
 def _apply_patch(path: str) -> dict[str, Any]:
     """tool_input が生のパッチ文字列（dict ではない Copilot CLI 実行パス）の apply_patch payload を作る。"""
     return {"tool_name": "apply_patch", "tool_input": f"*** Begin Patch\n*** Update File: {path}\n@@\n-old\n+new\n*** End Patch\n"}
+
+
+def _codex_patch(path: str) -> dict[str, Any]:
+    """tool_input が ``{"input": パッチ}`` の dict（Codex 実行パス）の apply_patch payload を作る。"""
+    return {"tool_name": "apply_patch", "tool_input": {"input": f"*** Begin Patch\n*** Update File: {path}\n@@\n-a\n+b\n*** End Patch"}}
+
+
+def _write_path(path: str) -> dict[str, Any]:
+    """file_path だけを持つ Write payload を作る。"""
+    return {"tool_name": "Write", "tool_input": {"file_path": path}}
 
 
 def _run_protection(
@@ -103,6 +113,34 @@ _CASES = [
         "ruff.toml",
         id="dt03-14-tool-input-none-still-scans",
     ),
+    pytest.param(_write_path("eslint.config.js"), "BLOCKED: Modifying eslint.config.js is not allowed.", id="write-protected"),
+    pytest.param(_write_path("README.md"), None, id="write-unprotected"),
+    pytest.param(_write_path("plugins/claq/model.json"), None, id="write-model-json"),
+    # file_path が空なら保護判定をスキップする。
+    pytest.param(_write_path(""), None, id="write-blank-file-path"),
+    pytest.param(
+        {"tool_name": "Write", "tool_input": {"file": "biome.json"}},
+        "BLOCKED: Modifying biome.json is not allowed.",
+        id="write-legacy-file-key",
+    ),
+    # コミット前検査の定義そのもの（block_no_verify が --no-verify / core.hooksPath を塞いでも、フックスクリプトや
+    # .pre-commit-config.yaml を直接書き換えれば検査が走らない同じ結果になる）。
+    pytest.param(_write_path(".pre-commit-config.yaml"), "BLOCKED: Modifying .pre-commit-config.yaml is not allowed.", id="pre-commit-yaml"),
+    pytest.param(_write_path("/repo/.pre-commit-config.yml"), "BLOCKED: Modifying .pre-commit-config.yml is not allowed.", id="pre-commit-yml"),
+    pytest.param(_write_path(".git/hooks/pre-commit"), "BLOCKED: Modifying .git/hooks/ is not allowed.", id="git-hooks-relative"),
+    pytest.param(_write_path("/repo/.git/hooks/commit-msg"), "BLOCKED: Modifying .git/hooks/ is not allowed.", id="git-hooks-absolute"),
+    # `.git/hooks/` 配下でない同名・類似パスは通す。
+    pytest.param(_write_path("src/hooks/pre-commit"), None, id="same-basename-elsewhere"),
+    pytest.param(_write_path(".git/info/exclude"), None, id="git-dir-but-not-hooks"),
+    pytest.param(_write_path("docs/.git-hooks-notes.md"), None, id="prose"),
+    pytest.param(_write_path("hooks/pre-commit"), None, id="hooks-without-git"),
+    pytest.param(_codex_patch("ruff.toml"), "BLOCKED: Modifying ruff.toml is not allowed.", id="codex-apply-patch-protected"),
+    pytest.param(_codex_patch("src/main.py"), None, id="codex-apply-patch-unprotected"),
+    pytest.param(
+        {"tool_name": "apply_patch", "tool_input": {"input": "garbage"}},
+        "Could not determine target files",
+        id="codex-apply-patch-garbage",
+    ),
     # 空入力（tty・stdin 未接続等）は保護判定せず allow する。
     pytest.param("", None, id="empty-input"),
     # matcher が書込み系ツールに限るため、非空だが不正な JSON は保護対象か判定できず fail-closed で block する。
@@ -117,7 +155,7 @@ def test_main_verdict_and_output(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """保護対象なら理由を 1 回だけ出して exit 2、それ以外は何も出さず exit 0。"""
+    """保護対象なら理由を 1 回だけ出して exit 2（stdout は deny JSON）、それ以外は何も出さず exit 0。"""
     rc, reasons = _run_protection(monkeypatch, payload)
     captured = capsys.readouterr()
 
@@ -127,6 +165,7 @@ def test_main_verdict_and_output(
         assert (rc, len(reasons)) == (2, 1)
         assert reason_snippet in reasons[0]
         assert reason_snippet in captured.err
+        assert json.loads(captured.out) == {"permissionDecision": "deny", "permissionDecisionReason": reasons[0]}
 
 
 def test_main_blocks_on_truncated_input(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
