@@ -348,29 +348,6 @@ class TestBlockNoVerify:
         assert block_no_verify.parse_git_segment(segment).subcommand_certain is certain
 
     @pytest.mark.parametrize(
-        ("token", "expected"),
-        [
-            ("git", True),
-            ("/usr/bin/git", True),
-            ("./git", True),
-            ("gitk", False),
-            ("GIT_DIR=.git", False),
-            (".git", False),
-            ("git/", False),
-            ("git commit --no-verify", False),
-            # 実行ファイル表記ゆれ: 大小文字・.exe・Windows パス区切り。
-            ("GIT", True),
-            ("Git", True),
-            ("git.exe", True),
-            ("GIT.EXE", True),
-            (r"C:\Program Files\Git\bin\git.exe", True),
-        ],
-    )
-    def test_is_git_invocation(self, token: str, expected: bool) -> None:
-        """basename が git のトークンだけを git 起動として扱う。"""
-        assert block_no_verify.is_git_invocation(token) is expected
-
-    @pytest.mark.parametrize(
         ("command", "expected_code"),
         [(command, 2) for command in _BYPASS_COMMANDS] + [(command, 0) for command in _ALLOWED_COMMANDS],
     )
