@@ -66,21 +66,12 @@ def _is_vocabulary(value: Any) -> bool:
     要素がすべて文字列の集合／タプル（``PROTECTED_FILES`` 等）と、要素が
     すべて文字列タプルの集合／タプル（``_PROTECTED_PATH_SEGMENTS`` 等）を
     語彙として扱う。空の集合は語彙とみなさない（判定材料が無いため）。
-
-    Args:
-        value: モジュール属性の値。
-
-    Returns:
-        語彙集合なら True。
     """
     if not isinstance(value, (frozenset, set, tuple)) or not value:
         return False
     if all(isinstance(element, str) for element in value):
         return True
-    return all(
-        isinstance(element, tuple) and all(isinstance(part, str) for part in element)
-        for element in value
-    )
+    return all(isinstance(element, tuple) and all(isinstance(part, str) for part in element) for element in value)
 
 
 def _declared_vocabularies(module: ModuleType) -> dict[str, Any]:
@@ -89,13 +80,7 @@ def _declared_vocabularies(module: ModuleType) -> dict[str, Any]:
     `vars(module)` だけを見ると import した名前（`bash_config_protection` へ
     import された `PROTECTED_FILES_FOLDED` 等）まで数え上げ、同じ集合が定義元と
     参照側の両方で期待値を要求されてしまう。ソースを AST で読み、モジュール
-    トップレベルの代入文で束縛された名前だけに絞る。
-
-    Args:
-        module: 対象モジュール。
-
-    Returns:
-        ``{定数名: 値}``。語彙集合でない属性は含まない。
+    トップレベルの代入文で束縛された名前だけに絞り、``{定数名: 値}`` を返す。
     """
     tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
     declared: set[str] = set()
@@ -104,11 +89,7 @@ def _declared_vocabularies(module: ModuleType) -> dict[str, Any]:
             declared |= {target.id for target in node.targets if isinstance(target, ast.Name)}
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             declared.add(node.target.id)
-    return {
-        name: getattr(module, name)
-        for name in sorted(declared)
-        if _is_vocabulary(getattr(module, name, None))
-    }
+    return {name: getattr(module, name) for name in sorted(declared) if _is_vocabulary(getattr(module, name, None))}
 
 
 def _hook_modules() -> dict[str, ModuleType]:
@@ -116,9 +97,6 @@ def _hook_modules() -> dict[str, ModuleType]:
 
     モジュール名を表へ書き写さず実際のパッケージから数え上げるため、新しい
     フックモジュールを足しても語彙の数え上げから漏れない。
-
-    Returns:
-        ``{モジュール名: モジュール}``。
     """
     return {
         info.name: importlib.import_module(f"claq.hooks.{info.name}")
@@ -148,9 +126,6 @@ def test_externally_pinned_vocabulary_still_exists(qualified: str) -> None:
 
     免除の一覧は「表に載せない理由」を書く場所であって、消えた集合を隠す場所では
     ない。名前ごと消えたら免除の前提（外部の突き合わせ先がある）も消えている。
-
-    Args:
-        qualified: ``<モジュール名>.<定数名>``。
     """
     module_name, _, name = qualified.partition(".")
     assert _is_vocabulary(getattr(_hook_modules()[module_name], name))
@@ -162,9 +137,6 @@ def test_vocabulary_is_exactly_as_declared(qualified: str) -> None:
 
     集合リテラルは複数行でも 1 statement なので、要素を消しても実行行は変わらず
     `fail_under=100` では検出できない。語彙の増減をここでレビュー対象へ上げる。
-
-    Args:
-        qualified: ``<モジュール名>.<定数名>``。
     """
     module_name, _, name = qualified.partition(".")
     assert getattr(_hook_modules()[module_name], name) == _EXPECTED_VOCABULARIES[qualified]
@@ -175,13 +147,6 @@ def _fill(template: str, item: str) -> str:
 
     `str.format` は使わない。payload に JSON（``{"eslintConfig": {}}``）を載せる
     ケースがあり、波括弧のエスケープでテンプレートが読めなくなるため。
-
-    Args:
-        template: ``{item}`` を含む文字列。
-        item: 埋め込む語彙要素。
-
-    Returns:
-        置換後の文字列。
     """
     return template.replace("{item}", item)
 
@@ -372,16 +337,7 @@ def _expand(cases: tuple[tuple[Any, ...], ...]) -> list[tuple[Any, ...]]:
 
     展開元は必ず `_EXPECTED_VOCABULARIES`（チェックイン済みの期待値）にする。
     実装側の集合を入力にすると、要素を消したときに parametrize ケースも一緒に
-    消えてスイートが緑のまま通る。
-
-    Args:
-        cases: 先頭要素が語彙の完全修飾名である定義タプルの列。
-
-    Returns:
-        ``(要素, *定義の残り)`` へ展開したケース列。
-
-    Raises:
-        例外は発生しません。
+    消えてスイートが緑のまま通る。各定義（先頭が語彙の完全修飾名）を ``(名前, 要素, *残り)`` へ展開する。
     """
     return [
         (qualified, item, *rest)
@@ -412,15 +368,7 @@ def test_every_vocabulary_element_changes_the_verdict(
 
     deny 側だけでは「全部 deny する」実装でも緑になる。同じ語のまま判定軸
     （保護対象かどうか / in-place フラグ / 実行位置）だけを外した allow 側を
-    対に置き、要素が**その軸で**効いていることを示す。
-
-    Args:
-        qualified: 語彙の完全修飾名（失敗時の可読性のため）。
-        item: 語彙要素。
-        hook: 対象フック名。
-        deny_template: exit 2 になるコマンド書式。
-        allow_template: exit 0 になるコマンド書式。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
+    対に置き、要素が**その軸で**効いていることを示す。qualified は失敗時の可読性のために渡す。
     """
     assert _run(hook, _bash(_fill(deny_template, item)), monkeypatch) == 2, qualified
     assert _run(hook, _bash(_fill(allow_template, item)), monkeypatch) == 0, qualified
@@ -445,14 +393,6 @@ def test_every_parser_vocabulary_element_keeps_a_normal_command_allowed(
     信用できないとして fail-closed（deny）へ倒れる。したがって要素が効いている
     証拠は allow 側にしか現れない。同じフックが対照コマンドを deny することを
     同時に確認し、allow が空虚でないことを示す。
-
-    Args:
-        qualified: 語彙の完全修飾名（失敗時の可読性のため）。
-        item: 語彙要素。
-        hook: 対象フック名。
-        allow_template: exit 0 になるコマンド書式。
-        control_deny: 同じフックが exit 2 にする対照コマンド。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
     """
     assert _run(hook, _bash(control_deny), monkeypatch) == 2, qualified
     assert _run(hook, _bash(_fill(allow_template, item)), monkeypatch) == 0, qualified
@@ -470,22 +410,12 @@ def test_every_write_path_vocabulary_element_changes_the_verdict(
     allow_payload: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Write 経路の語彙の全要素が deny を生み、対照が allow のままであること（層1）。
-
-    Args:
-        qualified: 語彙の完全修飾名（失敗時の可読性のため）。
-        item: 語彙要素。
-        build_deny: 要素から deny payload を組み立てる callable。
-        allow_payload: 同じ検査軸を外した allow payload。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-    """
+    """Write 経路の語彙の全要素が deny を生み、同じ検査軸を外した対照が allow のままであること（層1）。"""
     assert _run("config_protection", build_deny(item), monkeypatch) == 2, qualified
     assert _run("config_protection", allow_payload, monkeypatch) == 0, qualified
 
 
-@pytest.mark.parametrize(
-    "operator", sorted(_EXPECTED_VOCABULARIES["bash_config_protection._REDIRECT_OPERATORS"])
-)
+@pytest.mark.parametrize("operator", sorted(_EXPECTED_VOCABULARIES["bash_config_protection._REDIRECT_OPERATORS"]))
 def test_every_redirect_operator_yields_a_write_target(operator: str) -> None:
     """`_REDIRECT_OPERATORS` の全要素がリダイレクト先を返すこと（層1・単体）。
 
@@ -494,37 +424,22 @@ def test_every_redirect_operator_yields_a_write_target(operator: str) -> None:
     ``>>`` そのものにも一致し、フックへ流す形では要素を消しても exit code が
     変わらない（＝緑が何も保証しない偽の受領証になる）。抽出関数の戻り値を
     見れば、要素ごとに参照されていることを実測できる。
-
-    Args:
-        operator: リダイレクト演算子。
     """
-    assert bash_config_protection._redirect_targets(["printf", "x", operator, "ruff.toml"]) == [
-        "ruff.toml"
-    ]
+    assert bash_config_protection._redirect_targets(["printf", "x", operator, "ruff.toml"]) == ["ruff.toml"]
 
 
-@pytest.mark.parametrize(
-    "operator",
-    sorted(_EXPECTED_VOCABULARIES["commit_risk._MUTATING_REDIRECT_OPERATORS"]),
-)
+@pytest.mark.parametrize("operator", sorted(_EXPECTED_VOCABULARIES["commit_risk._MUTATING_REDIRECT_OPERATORS"]))
 def test_every_mutating_redirect_operator_marks_the_segment(operator: str) -> None:
     """`_MUTATING_REDIRECT_OPERATORS` の全要素が mutation 判定を立てること（層1・単体）。
 
     `_REDIRECT_OPERATORS` と同じ理由で単体呼び出しにする。演算子を含まない
     同形のセグメントが False であることを対照に置き、判定が演算子由来だと示す。
-
-    Args:
-        operator: リダイレクト演算子。
     """
-    assert commit_risk._segment_mutates_worktree_or_index(
-        ["printf", "x", operator, "app.py"]
-    )
+    assert commit_risk._segment_mutates_worktree_or_index(["printf", "x", operator, "app.py"])
     assert not commit_risk._segment_mutates_worktree_or_index(["printf", "x", "app.py"])
 
 
-@pytest.mark.parametrize(
-    "suffix", _EXPECTED_VOCABULARIES["shell_tokens._HEREDOC_CONTINUATION_SUFFIXES"]
-)
+@pytest.mark.parametrize("suffix", _EXPECTED_VOCABULARIES["shell_tokens._HEREDOC_CONTINUATION_SUFFIXES"])
 def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     """`_HEREDOC_CONTINUATION_SUFFIXES` の全要素が本文の剥がしを止めること（層1・単体）。
 
@@ -535,9 +450,6 @@ def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     次行の先頭語と 1 トークンへ融合させるため（実測: ``\\ngit`` という 1 トークンに
     なり git 起動として認識されない）、本文を残しても exit code が変わらない。
     正規化関数の出力を直接見る。
-
-    Args:
-        suffix: 継続演算子。
     """
     body = _NO_VERIFY
     kept = f"cat <<'EOF' {suffix}\n{body}\nEOF"
@@ -546,15 +458,9 @@ def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     assert shell_tokens.strip_data_heredoc_bodies(stripped) != stripped
 
 
-@pytest.mark.parametrize(
-    "suffix", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._LINTABLE_SUFFIXES"])
-)
+@pytest.mark.parametrize("suffix", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._LINTABLE_SUFFIXES"]))
 def test_every_lintable_suffix_is_checked(suffix: str) -> None:
-    """`_LINTABLE_SUFFIXES` の全要素が lint 検査対象になること（層1・単体）。
-
-    Args:
-        suffix: 拡張子。
-    """
+    """`_LINTABLE_SUFFIXES` の全要素が lint 検査対象になること（層1・単体）。"""
     assert commit_quality_scanner.should_lint_file(f"src/app{suffix}")
     assert not commit_quality_scanner.should_lint_file("src/app.txt")
 
@@ -563,24 +469,14 @@ def test_every_lintable_suffix_is_checked(suffix: str) -> None:
     "name", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES"])
 )
 def test_every_excluded_lockfile_skips_secret_scan(name: str) -> None:
-    """`_SECRET_SCAN_EXCLUDED_FILENAMES` の全要素が secret 走査から外れること（層1・単体）。
-
-    Args:
-        name: ロックファイル名。
-    """
+    """`_SECRET_SCAN_EXCLUDED_FILENAMES` の全要素が secret 走査から外れること（層1・単体）。"""
     assert not commit_quality_scanner.should_scan_secrets(f"sub/{name}")
     assert commit_quality_scanner.should_scan_secrets("sub/app.py")
 
 
-@pytest.mark.parametrize(
-    "suffix", _EXPECTED_VOCABULARIES["commit_quality_scanner._MINIFIED_SUFFIXES"]
-)
+@pytest.mark.parametrize("suffix", _EXPECTED_VOCABULARIES["commit_quality_scanner._MINIFIED_SUFFIXES"])
 def test_every_minified_suffix_skips_secret_scan(suffix: str) -> None:
-    """`_MINIFIED_SUFFIXES` の全要素が secret 走査から外れること（層1・単体）。
-
-    Args:
-        suffix: 圧縮生成物の拡張子。
-    """
+    """`_MINIFIED_SUFFIXES` の全要素が secret 走査から外れること（層1・単体）。"""
     assert not commit_quality_scanner.should_scan_secrets(f"dist/bundle{suffix}")
     assert commit_quality_scanner.should_scan_secrets("dist/bundle.js")
 
@@ -613,73 +509,42 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
     assert declared == set(_EXPECTED_VOCABULARIES)
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
-        "env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
-        "env -v GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
-        "env -C /tmp GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
-        "command -p env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
-        "sudo -E GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
-        "nohup env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
-        "timeout 5 env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x",
-        "env -v GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp git commit -m x",
-        "HOME=/tmp/h git commit -m x",
-        "env HOME=/tmp/h git commit -m x",
-        "env -i HOME=/tmp/h git commit -m x",
-        "/usr/bin/env HOME=/tmp/h git commit -m x",
-        "env -C /tmp XDG_CONFIG_HOME=/tmp/h git commit -m x",
-        "sudo -E HOME=/tmp/h git commit -m x",
-    ],
-)
-def test_env_injection_is_denied_through_any_wrapper(
-    command: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """前置にラッパやオプションが何個あっても env 注入を deny すること。
-
-    ラッパ名とそのオプションを列挙して読み飛ばす設計では、列挙に無い形
-    （下の 5 形）で走査が途中で止まって素通りする。前置トークンを全部走査する
-    形の回帰防止。
-    """
-    assert _run("block_no_verify", _bash(command), monkeypatch) == 2
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "HOME=/tmp/h grep -rn git .",
-        "GIT_CONFIG_GLOBAL=/tmp/e grep -rn git .",
-    ],
-)
-def test_env_assignment_before_non_git_command_naming_git_is_denied(
-    command: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """git 以外のコマンドの引数に `git` があるだけでも前置代入は deny される（受容済みの誤検出）。
-
-    git 起動の判定はトークンの basename が `git` であることだけを見るため、`grep -rn git .` の
-    引数 `git` も git 起動として数える。回避は代入を外すか別セグメントに分けること。
-    """
-    assert _run("block_no_verify", _bash(command), monkeypatch) == 2
+# block_no_verify の env 注入判定: (コマンド, 期待 exit code)。
+_ENV_ASSIGNMENT_CASES = [
+    # 前置にラッパやオプションが何個あっても env 注入を deny する。ラッパ名とそのオプションを列挙して読み飛ばす
+    # 設計では、列挙に無い形（`env -v` / `env -C` / `command -p` / `sudo -E` / `nohup env`）で走査が途中で
+    # 止まって素通りする。前置トークンを全部走査する形の回帰防止。
+    ("GIT_CONFIG_GLOBAL=/tmp/e git commit -m x", 2),
+    ("env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x", 2),
+    ("env -v GIT_CONFIG_GLOBAL=/tmp/e git commit -m x", 2),
+    ("env -C /tmp GIT_CONFIG_GLOBAL=/tmp/e git commit -m x", 2),
+    ("command -p env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x", 2),
+    ("sudo -E GIT_CONFIG_GLOBAL=/tmp/e git commit -m x", 2),
+    ("nohup env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x", 2),
+    ("timeout 5 env GIT_CONFIG_GLOBAL=/tmp/e git commit -m x", 2),
+    ("env -v GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp git commit -m x", 2),
+    ("HOME=/tmp/h git commit -m x", 2),
+    ("env HOME=/tmp/h git commit -m x", 2),
+    ("env -i HOME=/tmp/h git commit -m x", 2),
+    ("/usr/bin/env HOME=/tmp/h git commit -m x", 2),
+    ("env -C /tmp XDG_CONFIG_HOME=/tmp/h git commit -m x", 2),
+    ("sudo -E HOME=/tmp/h git commit -m x", 2),
+    # 受容済みの誤検出: git 起動の判定はトークンの basename が `git` であることだけを見るため、
+    # `grep -rn git .` の引数 `git` も git 起動として数える。回避は代入を外すか別セグメントに分けること。
+    ("HOME=/tmp/h grep -rn git .", 2),
+    ("GIT_CONFIG_GLOBAL=/tmp/e grep -rn git .", 2),
+    # 拾いすぎの対照: deny するのは危険な変数名に一致したときだけ。git のオプション（`--author=Foo`）は
+    # 識別子で始まらないので代入に一致しない。
+    ('git commit -m "a=b"', 0),
+    ("git commit --author=Foo -m x", 0),
+    ("env SOME_VAR=x git commit -m y", 0),
+]
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        'git commit -m "a=b"',
-        "git commit --author=Foo -m x",
-        "env SOME_VAR=x git commit -m y",
-    ],
-)
-def test_benign_assignments_stay_allowed(
-    command: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """危険でない代入・git のオプションは通り続けること（拾いすぎの対照）。
-
-    前置を全部走査しても、deny するのは危険な変数名に一致したときだけ。
-    git のオプション（`--author=Foo`）は識別子で始まらないので代入に一致しない。
-    """
-    assert _run("block_no_verify", _bash(command), monkeypatch) == 0
+@pytest.mark.parametrize(("command", "expected"), _ENV_ASSIGNMENT_CASES)
+def test_env_assignment_verdict(command: str, expected: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """危険な変数名の前置代入だけを、前置の形によらず deny すること。"""
+    assert _run("block_no_verify", _bash(command), monkeypatch) == expected
 
 
 def test_huge_single_token_is_blocked_before_tokenizing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -690,14 +555,12 @@ def test_huge_single_token_is_blocked_before_tokenizing(monkeypatch: pytest.Monk
     素通りすると、実測 12.71 秒（timeout 15 秒に対し余裕 15%）かかる。host が
     kill した hook は exit code を返さないため silent fail-open になる。
     """
-    from claq.hooks.shell_tokens import MAX_COMMAND_BYTES, command_exceeds_scan_budget
+    huge = "echo " + "A" * (shell_tokens.MAX_COMMAND_BYTES + 1)
 
-    huge = "echo " + "A" * (MAX_COMMAND_BYTES + 1)
-
-    assert command_exceeds_scan_budget(huge) is True
+    assert shell_tokens.command_exceeds_scan_budget(huge) is True
     assert _run("block_no_verify", _bash(huge), monkeypatch) == 2
     # 上限の内側は通る（拾いすぎの対照）
-    assert command_exceeds_scan_budget("echo " + "A" * 1000) is False
+    assert shell_tokens.command_exceeds_scan_budget("echo " + "A" * 1000) is False
 
 
 def test_scan_budget_is_measured_in_bytes_not_characters() -> None:
@@ -706,46 +569,33 @@ def test_scan_budget_is_measured_in_bytes_not_characters() -> None:
     文字数で数えると、日本語 1 文字 = 3 バイトの入力が上限の 3 倍まで通り、
     走査コストは 9 倍になる。
     """
-    from claq.hooks.shell_tokens import MAX_COMMAND_BYTES, command_exceeds_scan_budget
+    multibyte = "あ" * (shell_tokens.MAX_COMMAND_BYTES // 3 + 1)
 
-    multibyte = "あ" * (MAX_COMMAND_BYTES // 3 + 1)
-
-    assert len(multibyte) < MAX_COMMAND_BYTES
-    assert command_exceeds_scan_budget(multibyte) is True
+    assert len(multibyte) < shell_tokens.MAX_COMMAND_BYTES
+    assert shell_tokens.command_exceeds_scan_budget(multibyte) is True
 
 
-def test_oversized_command_is_blocked_by_bash_config_protection(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+_OVER_TOKEN_BUDGET = "echo " + "a " * (shell_tokens.MAX_COMMAND_TOKENS + 1)
+
+
+@pytest.mark.parametrize(
+    ("command", "expected", "over_budget"),
+    [
+        # `bash_config_protection` だけが予算を見ていなかった。40 万トークンの ``touch a a a ...; rm ruff.toml`` は
+        # 走査に 20.7 秒かかり、`hooks.json` の timeout（15 秒）で host に kill される。kill された hook は
+        # exit code を返さないため silent fail-open になる。走査前に弾けば同じ入力が即座に exit 2 になる。
+        pytest.param(_OVER_TOKEN_BUDGET, 2, True, id="oversized"),
+        # 入口だけに置いた予算は、外側が数トークンしか無いネスト payload を通し、再帰先が無予算で走る。
+        pytest.param(f"sh -c '{_OVER_TOKEN_BUDGET}'", 2, True, id="oversized-inside-sh-c"),
+        # 予算内のネストは中身で判定される（予算が過剰に効かない）。
+        pytest.param("sh -c 'printf x > ruff.toml'", 2, False, id="in-budget-sh-c-protected"),
+        pytest.param("sh -c 'printf x > notes.txt'", 0, False, id="in-budget-sh-c-unprotected"),
+    ],
+)
+def test_token_budget_in_bash_config_protection(
+    command: str, expected: int, over_budget: bool, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """トークン予算を超えるコマンドは走査せず BLOCKED にすること。
+    """トークン予算を超えるコマンドは、入口でも ``sh -c`` の再帰境界でも走査せず BLOCKED にすること。"""
+    code = _run("bash_config_protection", _bash(command), monkeypatch)
 
-    `bash_config_protection` だけが予算を見ていなかった。40 万トークンの
-    ``touch a a a ...; rm ruff.toml`` は走査に 20.7 秒かかり、`hooks.json` の timeout
-    （15 秒）で host に kill される。kill された hook は exit code を返さないため
-    silent fail-open になる。走査前に弾けば同じ入力が即座に exit 2 になる。
-    """
-    from claq.hooks.shell_tokens import MAX_COMMAND_TOKENS
-
-    oversized = "echo " + "a " * (MAX_COMMAND_TOKENS + 1)
-
-    assert _run("bash_config_protection", _bash(oversized), monkeypatch) == 2
-    assert "exceeds" in capsys.readouterr().err
-
-
-def test_oversized_command_inside_sh_c_is_blocked_by_bash_config_protection(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """``sh -c '<巨大なコマンド>'`` の再帰境界にも同じ予算が効くこと。
-
-    入口だけに置いた予算は、外側が数トークンしか無いネスト payload を通し、再帰先が
-    無予算で走る。
-    """
-    from claq.hooks.shell_tokens import MAX_COMMAND_TOKENS
-
-    inner = "echo " + "a " * (MAX_COMMAND_TOKENS + 1)
-
-    assert _run("bash_config_protection", _bash(f"sh -c '{inner}'"), monkeypatch) == 2
-    assert "exceeds" in capsys.readouterr().err
-    # 予算内のネストは中身で判定される（予算が過剰に効かない）。
-    assert _run("bash_config_protection", _bash("sh -c 'printf x > ruff.toml'"), monkeypatch) == 2
-    assert _run("bash_config_protection", _bash("sh -c 'printf x > notes.txt'"), monkeypatch) == 0
+    assert (code, "exceeds" in capsys.readouterr().err) == (expected, over_budget)
