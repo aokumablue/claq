@@ -14,19 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from ._support import _MINIMAL_SETTINGS, _OVERLAY, _SKILL_DIR, _TEMPLATE, _load
+from ._support import _MINIMAL_SETTINGS, _OVERLAY, _SKILL_DIR, _TEMPLATE, _load_smoke_check
 
 
 def _write(root: Path, files: dict[str, str]) -> Path:
-    """相対パス → 中身の対応で、ファイルを書く。
-
-    Args:
-        root: 書く先のディレクトリ。
-        files: 相対パスと中身。
-
-    Returns:
-        root。
-    """
+    """root の下に、相対パス → 中身の対応でファイルを書き、root を返す。"""
     for name, content in files.items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text(content, encoding="utf-8")
@@ -34,14 +26,7 @@ def _write(root: Path, files: dict[str, str]) -> Path:
 
 
 def _pyproject(only_include: list[str] | None) -> str:
-    """only-include だけを持つ pyproject.toml の中身を作る。
-
-    Args:
-        only_include: only-include の要素。None なら only-include を書かない。
-
-    Returns:
-        pyproject.toml の中身。
-    """
+    """only-include（None なら書かない）だけを持つ pyproject.toml の中身を作る。"""
     wheel = "" if only_include is None else f"only-include = {json.dumps(only_include)}\n"
     return f'[project]\nname = "x"\n\n[tool.hatch.build.targets.wheel]\n{wheel}sources = ["."]\n'
 
@@ -100,12 +85,8 @@ class TestPackaging:
     def test_check_uses_its_own_directory(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """検査は smoke_check.py のディレクトリで閉包を測り、足りなければ名指しで落とす。"""
         root = _write(tmp_path, {**self._TREE, "pyproject.toml": _pyproject(["server.py", "guard.py", "helper.py", "pkg", "other.py"])})
-        (root / "smoke_check.py").write_text((_TEMPLATE / "smoke_check.py").read_text(encoding="utf-8"), encoding="utf-8")
-        stub = types.ModuleType("smoke_config")
-        stub.__dict__.update(_MINIMAL_SETTINGS)
-        monkeypatch.setitem(sys.modules, "smoke_config", stub)
-        monkeypatch.setitem(sys.modules, "smoke_static", _load("mcp_gen_smoke_static", _TEMPLATE / "smoke_static.py"))
-        module = _load("mcp_gen_smoke_check_copy", root / "smoke_check.py")
+        shutil.copyfile(_TEMPLATE / "smoke_check.py", root / "smoke_check.py")
+        module = _load_smoke_check(monkeypatch, _MINIMAL_SETTINGS, root / "smoke_check.py")
         with pytest.raises(AssertionError, match=r"\['nspkg'\]"):
             module.test_packaging_includes_local_modules()
         (root / "pyproject.toml").write_text(_pyproject(["server.py", "guard.py", "helper.py", "pkg", "other.py", "nspkg"]), encoding="utf-8")
@@ -113,23 +94,12 @@ class TestPackaging:
 
 
 def _only_include(pyproject_text: str) -> list[str]:
-    """pyproject の中身から [tool.hatch.build.targets.wheel] の only-include を読む。
-
-    Args:
-        pyproject_text: pyproject.toml の中身。
-
-    Returns:
-        only-include の要素。
-    """
+    """pyproject.toml の中身から [tool.hatch.build.targets.wheel] の only-include を読む。"""
     return tomllib.loads(pyproject_text)["tool"]["hatch"]["build"]["targets"]["wheel"]["only-include"]
 
 
 def _overlay_additions() -> list[str]:
-    """SKILL.md の手順 2 から、重ね合わせたときに only-include に足す名前を抜き出す（正本は SKILL.md）。
-
-    Returns:
-        足す名前（SKILL.md に書かれた順）。
-    """
+    """SKILL.md の手順 2 から、重ね合わせたときに only-include に足す名前を書かれた順に抜き出す（正本は SKILL.md）。"""
     text = (_SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
     sentence = re.search(r"重ね合わせたなら\s*`only-include`\s*に(.+?)を足す。", text, re.DOTALL)
     assert sentence, "SKILL.md の手順 2 に「重ね合わせたなら `only-include` に ... を足す。」がありません"
@@ -139,14 +109,7 @@ def _overlay_additions() -> list[str]:
 
 
 def _merged_skeleton(destination: Path) -> Path:
-    """template を複製し、facade-overlay を上書きで重ねた生成先を作る（SKILL.md の手順 2 と同じ重ね方）。
-
-    Args:
-        destination: 作る先のディレクトリ。
-
-    Returns:
-        destination。
-    """
+    """destination に template を複製し、facade-overlay を上書きで重ねた生成先を作る（SKILL.md の手順 2 と同じ重ね方）。"""
     shutil.copytree(_TEMPLATE, destination, dirs_exist_ok=True)
     shutil.copytree(_OVERLAY, destination, dirs_exist_ok=True)
     return destination
@@ -188,15 +151,7 @@ class TestSkeletonPackaging:
 
 
 def _third_party_imports(smoke_static: types.ModuleType, root: Path) -> set[str]:
-    """生成先で同梱するモジュールが直接 import する、標準ライブラリでも生成先のものでもない名前を集める。
-
-    Args:
-        smoke_static: 読み込んだ smoke_static モジュール（同梱するモジュールの閉包を測る）。
-        root: 生成先のディレクトリ。
-
-    Returns:
-        import の先頭の名前（`mcp_types` など）。
-    """
+    """生成先 root で同梱するモジュールが直接 import する、標準ライブラリでも生成先のものでもない先頭の名前を集める。"""
     shipped = smoke_static.local_modules(root)
     sources = [path for entry in shipped for path in ((root / entry).rglob("*.py") if (root / entry).is_dir() else [root / entry])]
     names = {

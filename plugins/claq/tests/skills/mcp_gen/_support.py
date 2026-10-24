@@ -29,15 +29,7 @@ _AUDIT_SECRET = b"k" * 32
 
 
 def _load(name: str, path: Path) -> types.ModuleType:
-    """ファイルをモジュールとして読み込む（`.pyc` を書かない）。
-
-    Args:
-        name: 読み込み後のモジュール名。
-        path: 読み込むファイル。
-
-    Returns:
-        読み込んだモジュール。
-    """
+    """ファイル path をモジュール name として読み込む（`.pyc` を書かない）。"""
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -51,49 +43,28 @@ def _load(name: str, path: Path) -> types.ModuleType:
 
 
 def _config(path: Path) -> dict[str, Any]:
-    """smoke_config.py を実行して設定値を辞書で返す。
-
-    Args:
-        path: smoke_config.py のパス。
-
-    Returns:
-        大文字の名前だけを集めた設定値。
-    """
+    """smoke_config.py を実行し、大文字の名前だけを集めた設定値を返す。"""
     namespace: dict[str, Any] = {}
     exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), namespace)
     return {key: value for key, value in namespace.items() if key.isupper()}
 
 
-def _load_smoke_check(monkeypatch: pytest.MonkeyPatch, settings: dict[str, Any]) -> types.ModuleType:
-    """smoke_check.py を、設定モジュールを差し替えて読み込む。
+def _load_smoke_check(
+    monkeypatch: pytest.MonkeyPatch, settings: dict[str, Any], source: Path = _TEMPLATE / "smoke_check.py"
+) -> types.ModuleType:
+    """smoke_check.py（既定はスケルトンのもの）を、smoke_config を settings のスタブに差し替えて読み込む。
 
-    smoke_check.py が import する smoke_static も、`.pyc` を書かない読み込み方で先に登録する
-    （読み込んだものは `モジュール.smoke_static` で触れる）。
-
-    Args:
-        monkeypatch: 差し替えを戻すための fixture。
-        settings: smoke_config.py の代わりに置く設定。
-
-    Returns:
-        読み込んだ smoke_check モジュール。
+    import する smoke_static も `.pyc` を書かずに先に登録する（`モジュール.smoke_static` で触れる）。
     """
     stub = types.ModuleType("smoke_config")
     stub.__dict__.update(settings)
     monkeypatch.setitem(sys.modules, "smoke_config", stub)
     monkeypatch.setitem(sys.modules, "smoke_static", _load("mcp_gen_smoke_static", _TEMPLATE / "smoke_static.py"))
-    return _load("mcp_gen_smoke_check", _TEMPLATE / "smoke_check.py")
+    return _load("mcp_gen_smoke_check", source)
 
 
 def _is_invisible(char: str) -> bool:
-    """ソースに直接書かない文字か（見た目と中身が食い違い、レビューで見落とすため）。
-
-    Args:
-        char: 調べる 1 文字。
-
-    Returns:
-        \\n と \\t 以外の制御文字・書式文字・私用文字・未割り当て・異体字セレクタ・
-        ハングルの埋め字なら True。
-    """
+    """\\n と \\t 以外の制御文字・書式文字・私用文字・未割り当て・異体字セレクタ・ハングルの埋め字か（見た目と中身が食い違い、レビューで見落とすのでソースに直接書かない）。"""
     if char in "\n\t":
         return False
     code = ord(char)
@@ -118,16 +89,7 @@ class _Clock:
 
 
 def _audit_log(facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture, name: str) -> Any:
-    """記録を caplog で捕まえる AuditLog を作る。
-
-    Args:
-        facade: 読み込んだ facade パッケージ。
-        caplog: ログの捕捉。
-        name: 出力先の logger の名前（テストごとに分ける）。
-
-    Returns:
-        AuditLog。
-    """
+    """記録を caplog で捕まえる AuditLog を、テストごとに分けた名前 name の logger へ出すように作る。"""
     caplog.set_level(logging.INFO, logger=name)
     return facade.audit.AuditLog(_AUDIT_SECRET, logger=logging.getLogger(name))
 

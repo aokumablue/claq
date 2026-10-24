@@ -76,27 +76,19 @@ class TestSmokeCheckSettings:
     )
     def test_enabled_check_needs_expectation(self, monkeypatch: pytest.MonkeyPatch, settings: dict[str, Any], named: str) -> None:
         """有効にした検査に対になる期待値が無い・空なら、名指しで落とす（空文字はどの文面にも含まれ、検査が必ず通る）。"""
-        module = _load_smoke_check(monkeypatch, {"HAPPY_TOOL": "t", "HAPPY_ARGS": {}, "HAPPY_EXPECTED_STRUCTURED": {}, **settings})
+        module = _load_smoke_check(monkeypatch, {**_MINIMAL_SETTINGS, **settings})
         with pytest.raises(AssertionError, match=named):
             module.test_settings_are_known()
 
     def test_complete_mrtr_case_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """必須のキーが揃い、expected_text が空でない MRTR のケースは通す。"""
         case = {"tool": "items_delete", "arguments": {"item_id": "item-1"}, "action": "decline", "expected_is_error": False, "expected_text": "中止しました"}
-        settings = {"HAPPY_TOOL": "t", "HAPPY_ARGS": {}, "HAPPY_EXPECTED_STRUCTURED": {}, "MRTR_CASES": [case]}
-        _load_smoke_check(monkeypatch, settings).test_settings_are_known()
+        _load_smoke_check(monkeypatch, {**_MINIMAL_SETTINGS, "MRTR_CASES": [case]}).test_settings_are_known()
 
     def test_fields_check_requires_published_tool(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """FIELDS_TOOL が未公開なら、未知ツールの isError で空振り合格させず、tools/list で名指しして落とす。"""
-        settings = {
-            "HAPPY_TOOL": "t",
-            "HAPPY_ARGS": {},
-            "HAPPY_EXPECTED_STRUCTURED": {},
-            "FIELDS_TOOL": "orders_get",
-            "FIELDS_BAD_ARGS": {"fields": ["shiping"]},
-            "FIELDS_EXPECTED_SUGGESTION": "shipping",
-        }
-        module = _load_smoke_check(monkeypatch, settings)
+        fields = {"FIELDS_TOOL": "orders_get", "FIELDS_BAD_ARGS": {"fields": ["shiping"]}, "FIELDS_EXPECTED_SUGGESTION": "shipping"}
+        module = _load_smoke_check(monkeypatch, {**_MINIMAL_SETTINGS, **fields})
         unknown_tool = {"isError": True, "content": [{"type": "text", "text": "Unknown tool: orders_get (shipping)"}]}
 
         def exchange(tools: list[str]) -> Any:
@@ -120,11 +112,8 @@ class TestSmokeCheckSettings:
 
     def test_omitted_settings_use_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """書かなかった任意の名前は既定値になる（検査は SKIP）。"""
-        settings = {"HAPPY_TOOL": "t", "HAPPY_ARGS": {}, "HAPPY_EXPECTED_STRUCTURED": {}}
-        module = _load_smoke_check(monkeypatch, settings)
-        assert module.cfg.INVALID_TOOL == ""
-        assert module.cfg.PAGED_TOOL == ""
-        assert module.cfg.MRTR_CASES == []
+        module = _load_smoke_check(monkeypatch, _MINIMAL_SETTINGS)
+        assert (module.cfg.INVALID_TOOL, module.cfg.PAGED_TOOL, module.cfg.MRTR_CASES) == ("", "", [])
         assert module.REQUEST_META["io.modelcontextprotocol/clientCapabilities"] == {}
 
 
