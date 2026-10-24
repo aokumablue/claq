@@ -125,6 +125,7 @@ def test_has_python_tests_skips_unreadable_directories(tmp_path: Path) -> None:
         # 先頭の --bg（非 Claude ハーネス向け detach フラグ）は実体でないため除去する
         ("claq-hook --bg a b", ("a", "b")),
     ],
+    ids=["bad-quote", "no-args", "python-launcher", "other-wrapper", "bare-wrapper", "wrapper-path", "windows-cmd", "bg"],
 )
 def test_hook_command_argv(command: str, expected: tuple[str, ...] | None) -> None:
     """wrapper 起動のコマンドだけから起動後の引数列を取り出し、それ以外は None を返す。"""
@@ -143,6 +144,10 @@ def test_hook_command_argv(command: str, expected: tuple[str, ...] | None) -> No
         ([{"hooks": [{"command": "claq-hook"}]}], False),
         ([{"hooks": [{"command": "claq-hook claq.mem.cli other:action"}]}], False),
         ([{"hooks": [{"command": "claq-hook claq.mem.cli session:mem:setup"}]}], True),
+    ],
+    ids=[
+        "event-not-list", "empty", "matcher-not-dict", "hooks-not-list", "hook-not-dict",
+        "command-not-str", "no-args", "other-action", "match",
     ],
 )
 def test_event_has_matching_command(event_hooks: object, expected: bool) -> None:

@@ -63,6 +63,11 @@ def test_option_value_returns_value_and_next_index() -> None:
         (["--bogus"], "Unknown argument: --bogus"),
         (["--target-kind", "provider"], "Invalid target-kind"),
     ],
+    ids=[
+        "format-missing", "root-missing", "scope-missing", "kind-missing", "root-empty",
+        "root-eats-help", "scope-eats-format", "kind-eats-help", "format-eats-help",
+        "format-invalid", "unknown-flag", "kind-invalid",
+    ],
 )
 def test_parse_args_rejects_invalid_arguments(argv: list[str], match: str) -> None:
     """値なし・空値・後続フラグを値として食う形・不正値・未知フラグはエラーにする。
@@ -82,7 +87,9 @@ def test_normalize_scope_defaults_lowercases_and_rejects_unknown() -> None:
         harness_audit.normalize_scope("bad")
 
 
-@pytest.mark.parametrize(("include_harness", "expected"), [(True, "repo"), (False, "consumer")])
+@pytest.mark.parametrize(
+    ("include_harness", "expected"), [(True, "repo"), (False, "consumer")], ids=["python-marker", "js-marker-only"]
+)
 def test_detect_target_mode_requires_python_harness_marker(
     tmp_path: Path, include_harness: bool, expected: str
 ) -> None:
@@ -163,6 +170,7 @@ def test_build_report_consumer_checks_follow_project_files(tmp_path: Path) -> No
             "GitLab",
         ),
     ],
+    ids=["github", "gitlab"],
 )
 def test_build_report_uses_git_hosting_service_for_consumer_checks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, service: str, files: dict[str, str], ci_path: str, label: str
@@ -181,19 +189,30 @@ def test_build_report_uses_git_hosting_service_for_consumer_checks(
 
 def test_build_report_top_actions_pick_highest_failing_points(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """top_actions は不合格のうち配点の高い順に 3 件で、合格した高配点や 4 番手以降は出さない。"""
-    points = [(1, False), (5, True), (4, False), (2, False), (3, False), (1, False)]
+    rows = [
+        ("Tool Coverage", 1, False),
+        ("Quality Gates", 5, True),
+        ("Security Guardrails", 4, False),
+        ("Eval Coverage", 2, False),
+        ("Cost Efficiency", 3, False),
+        ("Memory Persistence", 1, False),
+    ]
     checks = [
         make_check(
-            check_id=f"c{index}", category="Tool Coverage", points=value, scopes=["repo"],
+            check_id=f"c{index}", category=category, points=value, scopes=["repo"],
             path=f"p{index}", description="", passed=passed, fix=f"fix{index}",
         )
-        for index, (value, passed) in enumerate(points)
+        for index, (category, value, passed) in enumerate(rows)
     ]
     monkeypatch.setattr(harness_audit, "get_consumer_checks", lambda *_args: checks)
 
     report = harness_audit.build_report("repo", root_dir=tmp_path)
 
-    assert [action["path"] for action in report["top_actions"]] == ["p2", "p4", "p3"]
+    assert [(action["path"], action["category"], action["points"]) for action in report["top_actions"]] == [
+        ("p2", "Security Guardrails", 4),
+        ("p4", "Cost Efficiency", 3),
+        ("p3", "Eval Coverage", 2),
+    ]
     assert (report["overall_score"], report["max_score"]) == (5, 16)
 
 
