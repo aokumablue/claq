@@ -705,10 +705,14 @@ def _validate_inline_motion(html: str) -> list[str]:
     return []
 
 
+#: URL として解釈される属性。javascript: の判定はここに限る（``title="JavaScript: 入門"`` を落とさない）。
+_URL_ATTRIBUTES = frozenset({"href", "src", "action", "formaction", "xlink:href", "data", "poster", "srcdoc"})
+
+
 def _validate_script_injection(html: str) -> list[str]:
     """データ由来の文字列に紛れて実行されるスクリプトを検査する。
 
-    イベント属性・javascript: の URL・app.js 以外の ``<script>`` を、HTMLParser が
+    イベント属性・javascript: の URL・meta refresh・app.js 以外の ``<script>`` を、HTMLParser が
     読み飛ばす場所（SVG の ``<title>`` / ``<style>`` の中など）も含めて落とす。
 
     Args:
@@ -723,10 +727,14 @@ def _validate_script_injection(html: str) -> list[str]:
         f"index.html にイベント属性 {name} がある（データ由来の文字列は HTML エスケープして書く。動作は app.js に置く）"
         for name in handlers
     ]
-    if any(_is_javascript_url(value) for _, attrs in tags for _, value in attrs):
+    if any(_is_javascript_url(value) for _, attrs in tags for name, value in attrs if name in _URL_ATTRIBUTES):
         violations.append(
             "index.html に javascript: の URL がある（データ由来の文字列は HTML エスケープして書く。"
             "リンク先は http(s) か #id にする）"
+        )
+    if any(tag == "meta" and dict(attrs).get("http-equiv", "").lower() == "refresh" for tag, attrs in tags):
+        violations.append(
+            "index.html に meta refresh がある（閲覧者を別のページへ飛ばせる。データ由来の文字列は HTML エスケープして書く）"
         )
     if any(tag == "script" and {value for name, value in attrs if name == "src"} != {"app.js"} for tag, attrs in tags):
         violations.append(

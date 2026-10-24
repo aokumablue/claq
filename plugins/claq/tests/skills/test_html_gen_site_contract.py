@@ -139,6 +139,7 @@ _CSP = (
                 ),
                 ("xss-duplicate-src", '<script src="evil.js" src="app.js"></script>', "app.js 以外の <script>"),
                 ("xss-javascript-url", '<a href="&#106;ava&#x09;script:alert(1)">x</a>', "javascript: の URL"),
+                ("xss-meta-refresh", '<meta http-equiv="Refresh" content="0;url=https://evil.example">', "meta refresh"),
             )
         ],
         # SVG の <title>/<desc>/<style> の中（HTMLParser が中身のタグを報告しない場所）
@@ -221,6 +222,8 @@ def test_broken_contract_is_reported(
         ),
         # 属性値の中の語はイベント属性でも URL でもない
         pytest.param([('title="Neutral"', 'title="onerror=alert(1) &quot;javascript:x"')], id="data-in-attribute-value"),
+        # javascript: を見るのは URL を取る属性だけ
+        pytest.param([('title="Neutral"', 'title="JavaScript: 入門"')], id="javascript-word-in-title"),
     ],
 )
 def test_escaped_data_passes(tmp_path: Path, replacements: list[tuple[str, str]]) -> None:
