@@ -71,42 +71,12 @@ class TestHeredocNormalization:
     @pytest.mark.parametrize(
         ("label", "line", "quote", "expected"),
         [
-            (
-                "開いたダブルクォートの内側は演算子にしない",
-                "still quoted <<EOF",
-                '"',
-                ([], '"'),
-            ),
-            (
-                "行内でクォートが閉じれば以降は演算子",
-                'end" && cat <<EOF',
-                '"',
-                ([("EOF", False)], None),
-            ),
-            (
-                "開いたシングルクォート内の \\ は literal（エスケープしない）",
-                r"a\' <<EOF",
-                "'",
-                ([("EOF", False)], None),
-            ),
-            (
-                "開いたダブルクォート内の \\ は次の 1 文字を消費する",
-                r'a\" <<EOF',
-                '"',
-                ([], '"'),
-            ),
-            (
-                "閉じないクォートは次行へ持ち越す",
-                'echo "open',
-                None,
-                ([], '"'),
-            ),
-            (
-                "開いたクォート内の # はコメントにならない",
-                "a # b\" && cat <<EOF",
-                '"',
-                ([("EOF", False)], None),
-            ),
+            ("開いたダブルクォートの内側は演算子にしない", "still quoted <<EOF", '"', ([], '"')),
+            ("行内でクォートが閉じれば以降は演算子", 'end" && cat <<EOF', '"', ([("EOF", False)], None)),
+            ("開いたシングルクォート内の \\ は literal（エスケープしない）", r"a\' <<EOF", "'", ([("EOF", False)], None)),
+            ("開いたダブルクォート内の \\ は次の 1 文字を消費する", r'a\" <<EOF', '"', ([], '"')),
+            ("閉じないクォートは次行へ持ち越す", 'echo "open', None, ([], '"')),
+            ("開いたクォート内の # はコメントにならない", "a # b\" && cat <<EOF", '"', ([("EOF", False)], None)),
         ],
     )
     def test_heredoc_delimiters_carries_quote_state(
@@ -159,21 +129,9 @@ class TestHeredocNormalization:
         [
             ("heredoc 無しは素通り", "echo 'git commit --no-verify'", "echo 'git commit --no-verify'"),
             ("herestring は素通り", "grep x <<< 'git commit'", "grep x <<< 'git commit'"),
-            (
-                "データ本文は剥がす",
-                "cat > note.md <<'EOF'\ngit commit --no-verify\nEOF",
-                "cat > note.md <<'EOF'\nEOF",
-            ),
-            (
-                "未クォート区切りでも剥がす",
-                "cat <<EOF > note.md\nprintf x > pyproject.toml\nEOF",
-                "cat <<EOF > note.md\nEOF",
-            ),
-            (
-                "シェル起動なら残す",
-                "bash <<'EOF'\ngit commit --no-verify\nEOF",
-                "bash <<'EOF'\ngit commit --no-verify\nEOF",
-            ),
+            ("データ本文は剥がす", "cat > note.md <<'EOF'\ngit commit --no-verify\nEOF", "cat > note.md <<'EOF'\nEOF"),
+            ("未クォート区切りでも剥がす", "cat <<EOF > note.md\nprintf x > pyproject.toml\nEOF", "cat <<EOF > note.md\nEOF"),
+            ("シェル起動なら残す", "bash <<'EOF'\ngit commit --no-verify\nEOF", "bash <<'EOF'\ngit commit --no-verify\nEOF"),
             (
                 "パイプ先がシェルなら残す",
                 "cat <<'EOF' | bash\ngit commit --no-verify\nEOF",
@@ -215,11 +173,7 @@ class TestHeredocNormalization:
                 "cat > note.md <<'EOF'\r\ngit commit --no-verify\r\nEOF\r\n",
                 "cat > note.md <<'EOF'\r\ngit commit --no-verify\r\nEOF\r\n",
             ),
-            (
-                "後続に空白のある終端行は終端せず本文として扱う",
-                "cat > n.md <<'EOF'\nprose\nEOF \nEOF",
-                "cat > n.md <<'EOF'\nEOF",
-            ),
+            ("後続に空白のある終端行は終端せず本文として扱う", "cat > n.md <<'EOF'\nprose\nEOF \nEOF", "cat > n.md <<'EOF'\nEOF"),
             (
                 "空白付きの行しか無ければ未終端として剥がさない",
                 "cat > n.md <<'EOF'\ngit commit --no-verify\nEOF ",
@@ -273,6 +227,27 @@ class TestHeredocNormalization:
                 "cat > n.md <<\"E'F\"\nprose\nE'F\ngit commit --no-verify",
                 "cat > n.md <<\"E'F\"\nE'F\ngit commit --no-verify",
             ),
+            # 二重適用の入力（フックごとに適用点が異なるため、再適用しても結果が変わらないことを固定する）。
+            ("散文のデータ本文は剥がす", "cat > note.md <<'EOF'\nprose\nEOF", "cat > note.md <<'EOF'\nEOF"),
+            ("シェル起動の本文は残す", "bash <<'EOF'\ngit commit\nEOF", "bash <<'EOF'\ngit commit\nEOF"),
+            ("未終端の散文は残す", "cat > note.md <<'EOF'\nunterminated", "cat > note.md <<'EOF'\nunterminated"),
+            ("空白付き終端の後の厳密な終端行で剥がす", "cat > note.md <<'EOF'\nprose\nEOF \nEOF", "cat > note.md <<'EOF'\nEOF"),
+            (
+                "CRLF の散文本文は未終端側で残す",
+                "cat > note.md <<'EOF'\r\nprose\r\nEOF\r\n",
+                "cat > note.md <<'EOF'\r\nprose\r\nEOF\r\n",
+            ),
+            ("heredoc 無しの echo は素通り", "echo hi", "echo hi"),
+            (
+                "コメント内の << は -m 無しでも剥がさない",
+                "# <<EOF\ngit commit --no-verify\nEOF",
+                "# <<EOF\ngit commit --no-verify\nEOF",
+            ),
+            (
+                "ダブルクォート内の << は -m 無しでも剥がさない",
+                'echo "<<EOF"\ngit commit --no-verify\nEOF',
+                'echo "<<EOF"\ngit commit --no-verify\nEOF',
+            ),
         ],
     )
     def test_strip_data_heredoc_bodies(self, label: str, command: str, expected: str) -> None:
@@ -282,31 +257,10 @@ class TestHeredocNormalization:
         固定する。CRLF 行は区切り語と一致せず未終端側へ、空白付きの `EOF ` は終端と
         認めず本文として扱い（後続に厳密一致の行があればそこで終端し、無ければ
         未終端）、継続演算子で終わる行は次行が `bash` でも本文を剥がさない。
+        終端行を残す設計により、結果へ再適用しても変わらない（冪等）。
         """
         assert shell_tokens.strip_data_heredoc_bodies(command) == expected, label
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "cat > note.md <<'EOF'\nprose\nEOF",
-            "bash <<'EOF'\ngit commit\nEOF",
-            "cat > note.md <<'EOF'\nunterminated",
-            "cat > note.md <<'EOF'\nprose\nEOF \nEOF",
-            "cat > note.md <<'EOF'\r\nprose\r\nEOF\r\n",
-            "echo hi",
-            "# <<EOF\ngit commit --no-verify\nEOF",
-            'echo "<<EOF"\ngit commit --no-verify\nEOF',
-            "cat > n.md <<'EOF'\ndon't # note\nEOF\ngit commit --no-verify",
-        ],
-    )
-    def test_strip_is_idempotent(self, command: str) -> None:
-        """終端行を残す設計により再適用しても結果が変わらない。
-
-        フックごとに適用点が異なるため、二重適用が起きても安全であることを固定する。
-        """
-        once = shell_tokens.strip_data_heredoc_bodies(command)
-
-        assert shell_tokens.strip_data_heredoc_bodies(once) == once
+        assert shell_tokens.strip_data_heredoc_bodies(expected) == expected, label
 
 
 class TestUnquotedNewlineNormalization:
@@ -336,34 +290,14 @@ class TestUnquotedNewlineNormalization:
         """クォート外の改行だけを区切りへ置き換える。"""
         assert shell_tokens._replace_unquoted_newlines(command) == expected, label
 
-    @pytest.mark.parametrize(
-        ("label", "command", "expected"),
-        [
-            (
-                "シングルクォートが閉じない",
-                "echo 'unterminated\nrm -rf /",
-                (["echo", "unterminated", "rm", "-rf", "/"], False),
-            ),
-            (
-                "ダブルクォートが閉じない",
-                'echo "unterminated\nrm -rf /',
-                (["echo", "unterminated", "rm", "-rf", "/"], False),
-            ),
-        ],
-    )
-    def test_tokenize_with_status_unterminated_quote(self, label: str, command: str, expected: tuple) -> None:
-        """クォートが閉じない入力では改行を区切りにしないが、後続行の語は走査対象に残る。
-
-        `_replace_unquoted_newlines` は開いたクォートの内側とみなして `;` を挿さない。
-        代わりに `shlex` が `ValueError` になり空白分割へフォールバックするため、改行の
-        後ろにある語もトークンとして現れる（解析できなかった印として第 2 要素は False。
-        呼び出し側はこれを見て生文字列の正規表現へ倒す＝fail-closed 側になる）。
-        """
-        assert shell_tokens.tokenize_with_status(command) == expected, label
 
     @pytest.mark.parametrize(
         ("label", "command", "expected"),
         [
+            # クォートが閉じない入力では改行を区切りにしないが、後続行の語は走査対象に残る。
+            ("シングルクォートが閉じない", "echo 'unterminated\nrm -rf /", ["echo", "unterminated", "rm", "-rf", "/"]),
+            ("ダブルクォートが閉じない", 'echo "unterminated\nrm -rf /', ["echo", "unterminated", "rm", "-rf", "/"]),
+            # 語に密着した区切り演算子は独立トークンにし、複数文字の演算子は最長一致の 1 単位で割る。
             ("; が語に密着", "echo $'\\'';git commit", ["echo", "$\\", ";", "git", "commit"]),
             ("&& が語に密着", "echo $'\\''&&git commit", ["echo", "$\\", "&&", "git", "commit"]),
             ("|| が語に密着", "echo $'\\''||git commit", ["echo", "$\\", "||", "git", "commit"]),
@@ -381,51 +315,14 @@ class TestUnquotedNewlineNormalization:
             ("語中の 2 は割らない", "echo $'\\'' a2>x", ["echo", "$\\", "a2", ">", "x"]),
             ("1> は 1 単位", "echo $'\\'' 1>ruff.toml", ["echo", "$\\", "1>", "ruff.toml"]),
             ("1>> は 1 単位", "echo $'\\'' 1>>ruff.toml", ["echo", "$\\", "1>>", "ruff.toml"]),
+            ("<> は 1 単位", "echo $'\\'' <>ruff.toml", ["echo", "$\\", "<>", "ruff.toml"]),
             # `&` は区切りだが、`>&` / `<&` の一部としては区切りでない。`2>&1` を `2> & 1` に
             # 割ると、後続の語がセグメントごと切り離される。
             ("2>&1 は区切りを作らない", "echo $'\\'' 2>&1 x", ["echo", "$\\", "2", ">&", "1", "x"]),
             (">&2 は区切りを作らない", "echo $'\\'' >&2 x", ["echo", "$\\", ">&", "2", "x"]),
             ("<&3 は区切りを作らない", "echo $'\\'' <&3 x", ["echo", "$\\", "<&", "3", "x"]),
             ("区切りが無ければ空白分割のまま", "echo $'\\'' a b", ["echo", "$\\", "a", "b"]),
-        ],
-    )
-    def test_tokenize_with_status_fallback_splits_glued_operators(
-        self, label: str, command: str, expected: list[str]
-    ) -> None:
-        """空白分割へ倒れた入力でも、語に密着した区切り演算子を独立トークンにする。
-
-        ``echo $'\\'';git commit`` は bash では有効だが `shlex` は ``ValueError`` にする。
-        単純な空白分割では ``$'\\'';git`` が 1 語になり、`git` 起動が見えなくなる。
-        演算子は最長一致の 1 単位で割る（``>>ruff.toml`` を ``> > ruff.toml`` にすると
-        リダイレクト先の判定がずれる）。
-        """
-        tokens, parsed_cleanly = shell_tokens.tokenize_with_status(command)
-
-        assert parsed_cleanly is False, label
-        assert tokens == expected, label
-
-    @pytest.mark.parametrize(
-        ("label", "command", "expected"),
-        [
-            ("&& 密着", "git add -A&&git commit -m x", ["git", "add", "-A", "&&", "git", "commit", "-m", "x"]),
-            ("; 密着", "echo a;rm b", ["echo", "a", ";", "rm", "b"]),
-            (">> 密着", "echo a>>b", ["echo", "a", ">>", "b"]),
-            ("2> は数字が別トークン", "echo a 2>b", ["echo", "a", "2", ">", "b"]),
-            ("&> 密着", "echo a &>b", ["echo", "a", "&>", "b"]),
-            (">| 密着", "echo a>|b", ["echo", "a", ">|", "b"]),
-            ("引用符内の ; は割らない", "echo 'a;b' \"c&&d\"", ["echo", "a;b", "c&&d"]),
-            ("引用符内の > は割らない", "grep 'a>b' ruff.toml", ["grep", "a>b", "ruff.toml"]),
-        ],
-    )
-    def test_tokenize_with_status_parsed_path_is_unchanged(
-        self, label: str, command: str, expected: list[str]
-    ) -> None:
-        """`shlex` で解析できた入力のトークン列は、フォールバックの演算子分割に影響されない。"""
-        assert shell_tokens.tokenize_with_status(command) == (expected, True), label
-
-    @pytest.mark.parametrize(
-        ("label", "command", "expected"),
-        [
+            # 各トークンから `"` と `'` を取り除く（個数と順序は保つ）。
             ("二重引用符の語", "echo $'\\''; rm \"ruff.toml\"", ["echo", "$\\", ";", "rm", "ruff.toml"]),
             ("単一引用符の語", "echo $'\\''; rm 'ruff.toml'", ["echo", "$\\", ";", "rm", "ruff.toml"]),
             ("引用符で挟まれた語頭", "echo $'\\''; \"git\" commit", ["echo", "$\\", ";", "git", "commit"]),
@@ -436,23 +333,54 @@ class TestUnquotedNewlineNormalization:
             ("空文字列の引用符対", "echo $'\\''; rm \"\" x", ["echo", "$\\", ";", "rm", "", "x"]),
         ],
     )
-    def test_tokenize_with_status_fallback_strips_quote_characters(
-        self, label: str, command: str, expected: list[str]
-    ) -> None:
-        """空白分割へ倒れた入力では、各トークンから ``"`` と ``'`` を取り除く（個数と順序は保つ）。
+    def test_tokenize_with_status_fallback(self, label: str, command: str, expected: list[str]) -> None:
+        """`shlex` が `ValueError` にする入力は空白分割へ倒れ、解析できなかった印（False）を返す。
 
-        ``shlex`` が解析できないとトークンに引用符が残り、保護名の照合（basename 比較）が
-        ``"ruff.toml"`` に一致しない。位置ベースの書き込み先判定を保つため、取り除くのは
-        文字だけでトークンの結合・分割はしない。
+        閉じないクォートでは `_replace_unquoted_newlines` が `;` を挿さないが、空白分割で改行の
+        後ろの語もトークンとして現れる（呼び出し側は False を見て生文字列の正規表現へ倒す＝fail-closed）。
+        ``echo $'\\'';git commit`` は bash では有効だが、単純な空白分割では ``$'\\'';git`` が 1 語になり
+        `git` 起動が見えなくなる。``>>ruff.toml`` を ``> > ruff.toml`` に割るとリダイレクト先の判定が
+        ずれる。引用符が残ると保護名の照合（basename 比較）が ``"ruff.toml"`` に一致しないので文字だけ
+        取り除き、位置ベースの書き込み先判定を保つためトークンの結合・分割はしない。
         """
-        tokens, parsed_cleanly = shell_tokens.tokenize_with_status(command)
+        assert shell_tokens.tokenize_with_status(command) == (expected, False), label
 
-        assert parsed_cleanly is False, label
-        assert tokens == expected, label
+    @pytest.mark.parametrize(
+        ("label", "command", "expected"),
+        [
+            # フォールバックの演算子分割・引用符除去に影響されない。
+            ("&& 密着", "git add -A&&git commit -m x", ["git", "add", "-A", "&&", "git", "commit", "-m", "x"]),
+            ("; 密着", "echo a;rm b", ["echo", "a", ";", "rm", "b"]),
+            (">> 密着", "echo a>>b", ["echo", "a", ">>", "b"]),
+            ("2> は数字が別トークン", "echo a 2>b", ["echo", "a", "2", ">", "b"]),
+            ("&> 密着", "echo a &>b", ["echo", "a", "&>", "b"]),
+            (">| 密着", "echo a>|b", ["echo", "a", ">|", "b"]),
+            ("引用符内の ; は割らない", "echo 'a;b' \"c&&d\"", ["echo", "a;b", "c&&d"]),
+            ("引用符内の > は割らない", "grep 'a>b' ruff.toml", ["grep", "a>b", "ruff.toml"]),
+            ("語の中の引用符文字は残す", "echo \"it's\" 'say \"hi\"'", ["echo", "it's", 'say "hi"']),
+            # `punctuation_chars=True` の `shlex` が 1 トークンで返す記号の連なり（``;(`` ``)>`` ``|&``）。
+            ("; と ( の連なり", "true;(rm ruff.toml)", ["true", ";", "(", "rm", "ruff.toml", ")"]),
+            (") と > の連なり", "(printf x)>.git/hooks/pre-commit", ["(", "printf", "x", ")", ">", ".git/hooks/pre-commit"]),
+            ("|& は | と &", "echo x|&tee ruff.toml", ["echo", "x", "|", "&", "tee", "ruff.toml"]),
+            ("<> は 1 単位", "printf x <>ruff.toml", ["printf", "x", "<>", "ruff.toml"]),
+            ("&& は 1 単位", "a&&b", ["a", "&&", "b"]),
+            ("|| は 1 単位", "a||b", ["a", "||", "b"]),
+            (">> は 1 単位", "a>>b", ["a", ">>", "b"]),
+            (">| は 1 単位", "a>|b", ["a", ">|", "b"]),
+            ("&> は 1 単位", "a &>b", ["a", "&>", "b"]),
+            ("&>> は 1 単位", "a &>>b", ["a", "&>>", "b"]),
+            (">& は 1 単位", "a >&2", ["a", ">&", "2"]),
+            ("<& は 1 単位", "a <&3", ["a", "<&", "3"]),
+            ("2>&1 は区切りを作らない", "a 2>&1;b", ["a", "2", ">&", "1", ";", "b"]),
+            ("引用符内の記号の語は割らない", "echo 'a;(b'", ["echo", "a;(b"]),
+        ],
+    )
+    def test_tokenize_with_status_parsed_path(self, label: str, command: str, expected: list[str]) -> None:
+        """`shlex` で解析できた入力は、記号の連なりだけをフォールバックと同じ最長一致単位へ割る。
 
-    def test_tokenize_with_status_parsed_path_keeps_quote_characters_inside_words(self) -> None:
-        """解析できた入力では、語の中の引用符文字を取り除かない（フォールバック経路のみの処理）。"""
-        assert shell_tokens.tokenize_with_status("echo \"it's\" 'say \"hi\"'") == (["echo", "it's", 'say "hi"'], True)
+        記号の連なりが 1 トークンのままだと区切り・リダイレクトの完全一致をすり抜ける。
+        """
+        assert shell_tokens.tokenize_with_status(command) == (expected, True), label
 
     def test_multiline_command_splits_into_segments(self) -> None:
         """複数行コマンドが行ごとのセグメントへ分かれること。"""
@@ -472,11 +400,7 @@ class TestUnquotedNewlineNormalization:
                 r"echo \# && git commit --no-verify",
                 ["echo", "#", "&&", "git", "commit", "--no-verify"],
             ),
-            (
-                "シングルクォート内の \\ は literal",
-                r"echo 'a\b' # 注釈",
-                ["echo", r"a\b"],
-            ),
+            ("シングルクォート内の \\ は literal", r"echo 'a\b' # 注釈", ["echo", r"a\b"]),
             (
                 "ダブルクォート内の # はコメントにならない",
                 'echo "a # b" && git commit --no-verify',
@@ -494,40 +418,3 @@ class TestUnquotedNewlineNormalization:
         """
         assert shell_tokens.tokenize(command) == expected, label
 
-
-class TestParsedPathOperatorRuns:
-    """`shlex` の成功経路でも、記号だけの連なりを演算子の最長一致単位へ割る。
-
-    `punctuation_chars=True` の `shlex` は ``;(`` ``)>`` ``|&`` を 1 トークンで返し、
-    区切り・リダイレクトの完全一致をすり抜ける。フォールバック経路と同じ単位で割る。
-    """
-
-    @pytest.mark.parametrize(
-        ("label", "command", "expected"),
-        [
-            ("; と ( の連なり", "true;(rm ruff.toml)", ["true", ";", "(", "rm", "ruff.toml", ")"]),
-            (") と > の連なり", "(printf x)>.git/hooks/pre-commit", ["(", "printf", "x", ")", ">", ".git/hooks/pre-commit"]),
-            ("|& は | と &", "echo x|&tee ruff.toml", ["echo", "x", "|", "&", "tee", "ruff.toml"]),
-            ("<> は 1 単位", "printf x <>ruff.toml", ["printf", "x", "<>", "ruff.toml"]),
-            ("&& は 1 単位", "a&&b", ["a", "&&", "b"]),
-            ("|| は 1 単位", "a||b", ["a", "||", "b"]),
-            (">> は 1 単位", "a>>b", ["a", ">>", "b"]),
-            (">| は 1 単位", "a>|b", ["a", ">|", "b"]),
-            ("&> は 1 単位", "a &>b", ["a", "&>", "b"]),
-            ("&>> は 1 単位", "a &>>b", ["a", "&>>", "b"]),
-            (">& は 1 単位", "a >&2", ["a", ">&", "2"]),
-            ("<& は 1 単位", "a <&3", ["a", "<&", "3"]),
-            ("2>&1 は区切りを作らない", "a 2>&1;b", ["a", "2", ">&", "1", ";", "b"]),
-            ("引用符内の記号の語は割らない", "echo 'a;(b'", ["echo", "a;(b"]),
-        ],
-    )
-    def test_symbol_runs_split_into_operator_units(self, label: str, command: str, expected: list[str]) -> None:
-        """記号の連なりは割り、複数文字の演算子は 1 単位に保つ。"""
-        assert shell_tokens.tokenize_with_status(command) == (expected, True), label
-
-    def test_fallback_keeps_read_write_open_as_one_unit(self) -> None:
-        """フォールバック経路でも ``<>`` を ``<`` ``>`` に割らない。"""
-        assert shell_tokens.tokenize_with_status("echo $'\\'' <>ruff.toml") == (
-            ["echo", "$\\", "<>", "ruff.toml"],
-            False,
-        )
