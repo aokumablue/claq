@@ -1,4 +1,4 @@
-"""低カバレッジの hook モジュールをまとめて検証するテスト。"""
+"""claq.hooks.block_no_verify（git フックのバイパス検出）と pre_compact のテスト、各フックの __main__ 起動のテスト。"""
 
 from __future__ import annotations
 
@@ -8,13 +8,11 @@ import runpy
 import subprocess
 import sys
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
-from claq.hooks import (
-    block_no_verify,
-    pre_compact,
-)
+from claq.hooks import block_no_verify, pre_compact
 
 # ``--no-verify``。テストケース表の横幅を抑えるための別名。
 NV = "--no-verify"
@@ -138,6 +136,10 @@ _BYPASS_COMMANDS = [
     "git -c alias.ci='commit --no-verify' ci -m x",
     "git -c ALIAS.CI='commit -n' ci",
     "git config alias.ci 'commit --no-verify'",
+    # 解析不能な入力（`$'\''` で shlex が失敗する）は、生文字列に --no-verify / hooksPath が見えたらブロックする。
+    "echo $'\\'';\"git\" commit --no-verify",
+    "echo $'\\'';git commit \"--no-verify\"",
+    "echo $'\\'';git -c \"core.HooksPath=/x\" commit",
 ]
 
 # 通さなければならないコマンド（誤検知の回帰防止）。
@@ -154,6 +156,7 @@ _ALLOWED_COMMANDS = [
     "git -c foo.bar=1 log -n 5",
     # クォート内の -n / --no-verify はフラグではない
     'git commit -m "use -n flag"',
+    'git commit -m "docs: explain -n flag usage"',
     "git commit -m'msg with -n'",
     f"git commit -m 'note: {NV} is banned'",
     f'echo "git commit {NV}"',
@@ -215,23 +218,13 @@ _ALLOWED_COMMANDS = [
     "git config alias.ci",
     "git config get include.path",
     "git config user.name x",
+    # 危険語が無い解析不能な入力と、解析できた引用文の危険語は巻き込まない。
+    "echo $'\\'' && cat ruff.toml",
+    "echo $'\\'';git commit -m \"x\"",
+    "grep -- '--no-verify' README.md",
 ]
 
-
-def _capture_io(monkeypatch: pytest.MonkeyPatch, module, payload: str) -> tuple[list[str], list[str]]:
-    stdout: list[str] = []
-    stderr: list[str] = []
-    if hasattr(module, "read_raw_stdin_with_truncation"):
-        # config_protection は自己完結した truncation guard を持つため
-        # (raw, truncated) タプルを返す read_raw_stdin_with_truncation を使う。
-        monkeypatch.setattr(module, "read_raw_stdin_with_truncation", lambda: (payload, False))
-    else:
-        monkeypatch.setattr(module, "read_raw_stdin", lambda: payload)
-    if hasattr(module, "write_stdout"):
-        monkeypatch.setattr(module, "write_stdout", stdout.append)
-    if hasattr(module, "write_stderr"):
-        monkeypatch.setattr(module, "write_stderr", stderr.append)
-    return stdout, stderr
+_BYPASS_REASON = "[Hook] BLOCKED: git hook bypass flags are not allowed"
 
 
 def _run_entrypoint(module_name: str) -> int:
@@ -242,231 +235,197 @@ def _run_entrypoint(module_name: str) -> int:
     return excinfo.value.code
 
 
-class TestBlockNoVerify:
-    @pytest.mark.parametrize(
-        ("command", "expected_code", "blocked"),
-        [
-            ("git commit --no-verify", 2, True),
-            # git push の -n は --dry-run（フックバイパスではない）ため通す。
-            ("git push -n", 0, False),
-            ("git push --no-verify", 2, True),
-            ("git status", 0, False),
-            ('git commit -m "docs: explain -n flag usage"', 0, False),
-            ("git commit -m 'note: --no-verify is banned'", 0, False),
-            ('git commit --no-verify -m "fix: x"', 2, True),
-            ('echo "git commit --no-verify"', 0, False),
-        ],
+def _run_module(payload: str) -> subprocess.CompletedProcess[str]:
+    """``payload`` を実 stdin へ流して ``python -m claq.hooks.block_no_verify`` を別プロセスで実行する。"""
+    src_root = Path(block_no_verify.__file__).resolve().parents[2]
+    return subprocess.run(
+        [sys.executable, "-m", "claq.hooks.block_no_verify"],
+        input=payload,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(src_root), "CLAUDECODE": "1"},
     )
-    def test_main(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-        command: str,
-        expected_code: int,
-        blocked: bool,
-    ) -> None:
-        payload = json.dumps({"tool_input": {"command": command}})
-        monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False))
 
-        assert block_no_verify.main() == expected_code
-        captured = capsys.readouterr()
-        # ブロック時のみ stdout に permissionDecision: deny の合併 JSON を出す。
-        assert bool(captured.out) is blocked
-        assert bool(captured.err) is blocked
 
-    @pytest.mark.parametrize("command", _BYPASS_COMMANDS)
-    def test_has_bypass_flag_blocks(self, command: str) -> None:
-        """ラッパー・パス付き起動・グローバルオプション経由のバイパスを検出する。"""
-        assert block_no_verify.has_bypass_flag(command) is True
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [(command, True) for command in _BYPASS_COMMANDS] + [(command, False) for command in _ALLOWED_COMMANDS],
+)
+def test_has_bypass_flag(command: str, expected: bool) -> None:
+    """ラッパー・パス付き起動・グローバルオプション・環境変数・設定経由のバイパスを検出し、バイパスでないコマンドは誤検知しないこと。"""
+    assert block_no_verify.has_bypass_flag(command) is expected
 
-    @pytest.mark.parametrize("command", _ALLOWED_COMMANDS)
-    def test_has_bypass_flag_allows(self, command: str) -> None:
-        """バイパスでないコマンドを誤検知しない。"""
-        assert block_no_verify.has_bypass_flag(command) is False
 
-    def test_tokenize_falls_back_to_whitespace_split(self) -> None:
-        """クォート不整合時は空白分割へフォールバックする（fail-closed）。"""
-        assert block_no_verify.tokenize_with_status('git commit -m "x') == (["git", "commit", "-m", "x"], False)
+@pytest.mark.parametrize(
+    ("command", "expected_code"),
+    [(command, 2) for command in _BYPASS_COMMANDS] + [(command, 0) for command in _ALLOWED_COMMANDS],
+)
+def test_end_to_end_via_module_subprocess(command: str, expected_code: int) -> None:
+    """実 JSON を stdin へ流す ``python -m`` 実行でも同じ判定になり、block のときだけ stdout と stderr を出すこと。"""
+    completed = _run_module(json.dumps({"tool_input": {"command": command}}))
 
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "echo $'\\'';\"git\" commit --no-verify",
-            "echo $'\\'';git commit \"--no-verify\"",
-            "echo $'\\'';git -c \"core.HooksPath=/x\" commit",
-        ],
+    assert completed.returncode == expected_code
+    assert bool(completed.stdout) is (expected_code != 0)
+    assert bool(completed.stderr) is (expected_code != 0)
+
+
+def test_oversized_payload_is_fail_closed_end_to_end() -> None:
+    """1 MiB を超える実 stdin ペイロードは launcher 経由でも deny する（監査の再現手順そのもの）。"""
+    filler = "x" * (1024 * 1024 + 100)
+    completed = _run_module(
+        json.dumps({"tool_name": "Bash", "tool_input": {"command": "git commit --no-verify"}, "filler": filler})
     )
-    def test_unparsed_command_with_raw_bypass_text_is_blocked(self, command: str) -> None:
-        """解析不能な入力は、生文字列に --no-verify / hooksPath が見えたらブロックする。"""
-        assert block_no_verify.has_bypass_flag(command) is True
 
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "echo $'\\'' && cat ruff.toml",
-            "echo $'\\'';git commit -m \"x\"",
-            "grep -- '--no-verify' README.md",
-        ],
+    assert completed.returncode == 2
+    assert "BLOCKED" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("stdin", "truncated", "expected_reason"),
+    [
+        # 1 MiB 超で切り捨てられた入力は、切り捨て後の中身がたまたま parse できても信用せず deny する。
+        ("{not-even-json", True, block_no_verify._TRUNCATED_INPUT_MESSAGE),
+        # 非空だが JSON として読めない・tool_input 系キーが無い入力も判定不能として deny する。
+        ("{not-json", False, block_no_verify._UNPARSEABLE_INPUT_MESSAGE),
+        ({"unrelated": "payload"}, False, block_no_verify._MISSING_FIELDS_MESSAGE),
+        # 空入力（tty・stdin 未接続）だけは本処理をスキップして通す。
+        ("", False, None),
+        ({"tool_input": {"command": "git commit --no-verify"}}, False, _BYPASS_REASON),
+        # 先勝ちで 1 キーだけ見ると、無害な tool_input と悪意ある toolInput の同居を素通りさせる
+        # （docs/adr/shell-analysis-boundary.md の「誤検出を誤通過より選ぶ」。config_protection も全キー走査）。
+        ({"tool_input": {"command": "ls"}, "toolInput": {"command": "git commit --no-verify"}}, False, _BYPASS_REASON),
+        ({"tool_input": {"command": "ls"}, "toolInput": {"command": "git status"}}, False, None),
+        # list 形状のコンテナも走査する（走査しないと素通りする）。
+        ({"tool_input": [{"command": f"git commit {NV}"}]}, False, _BYPASS_REASON),
+        ({"tool_input": [f"git commit {NV}"]}, False, _BYPASS_REASON),
+        ({"tool_input": [{"command": "ls"}, {"command": "git commit -n"}]}, False, _BYPASS_REASON),
+        ({"tool_input": [{"command": "ls"}]}, False, None),
+    ],
+    ids=[
+        "truncated",
+        "unparseable-json",
+        "missing-tool-input",
+        "empty-input",
+        "bypass",
+        "bypass-in-later-container-key",
+        "all-container-keys-benign",
+        "list-of-dicts",
+        "list-of-strings",
+        "bypass-in-later-element",
+        "benign-list",
+    ],
+)
+def test_main(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stdin: dict | str,
+    truncated: bool,
+    expected_reason: str | None,
+) -> None:
+    """deny は host に関わらず exit 2 と理由入りの deny JSON・stderr を同時に出し、通すときは何も出さず exit 0 になること。"""
+    raw = stdin if isinstance(stdin, str) else json.dumps(stdin)
+    monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (raw, truncated))
+
+    rc = block_no_verify.main()
+    captured = capsys.readouterr()
+
+    if expected_reason is None:
+        assert (rc, captured.out, captured.err) == (0, "", "")
+    else:
+        assert rc == 2
+        assert json.loads(captured.out) == {"permissionDecision": "deny", "permissionDecisionReason": expected_reason}
+        assert captured.err == expected_reason + "\n"
+
+
+_NESTED = "[" * 200_000 + "]" * 200_000
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_codes"),
+    [
+        # 外側の parse_json_object は dict を返し、extract_tool_input 内側の json.loads だけが RecursionError を送出する経路。
+        (json.dumps({"tool_name": "Bash", "tool_input": {"command": "echo hi"}, "toolArgs": _NESTED}), {0, 2}),
+        # 外側の parse_json_object が RecursionError を受ける経路は、パース不能 = 判定不能なので deny。
+        ('{"tool_name":"Bash","tool_input":' + _NESTED + "}", {2}),
+        # バイパスフラグを載せた形は tool_input 側の実コマンドが検査され deny される（toolArgs は生文字列に倒れる）。
+        (json.dumps({"tool_name": "Bash", "tool_input": {"command": f"git commit {NV} -m x"}, "toolArgs": _NESTED}), {2}),
+    ],
+    ids=["nested-inside-json-string", "nested-in-outer-payload", "nested-with-bypass-flag"],
+)
+def test_deep_nesting_does_not_fail_open(monkeypatch: pytest.MonkeyPatch, payload: str, expected_codes: set[int]) -> None:
+    """深さ 200,000 の入れ子（1 MiB の内側の 400KB 超）でも exit 1（PreToolUse の non-blocking error = fail-open）へ倒れないこと。"""
+    assert len(payload) > 400_000
+    monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False))
+
+    assert block_no_verify.main() in expected_codes
+
+
+def test_tokenize_falls_back_to_whitespace_split() -> None:
+    """クォート不整合時は空白分割へフォールバックする（fail-closed）。"""
+    assert block_no_verify.tokenize_with_status('git commit -m "x') == (["git", "commit", "-m", "x"], False)
+
+
+def test_split_segments_drops_empty_segments() -> None:
+    """連続する区切りトークンで空セグメントを作らない。"""
+    tokens = ["&&", "git", "status", ";", ";", "git", "commit"]
+
+    assert block_no_verify.split_segments(tokens) == [["git", "status"], ["git", "commit"]]
+
+
+def test_parse_git_segment_returns_subcommand_and_flags() -> None:
+    """グローバルオプションを読み飛ばしてサブコマンドとフラグを返す。"""
+    invocation = block_no_verify.parse_git_segment(["git", "-C", "/tmp", "--no-pager", "commit", "-am", "msg", "--no-verify"])
+
+    assert invocation.subcommand == "commit"
+    assert invocation.flags == ["-C", "--no-pager", "-a", "-m", "--no-verify"]
+    assert invocation.subcommand_certain is True
+
+
+@pytest.mark.parametrize(
+    ("segment", "certain"),
+    [
+        # 既知の boolean グローバルオプションはサブコマンド解決を乱さない。
+        (["git", "--no-pager", "log"], True),
+        (["git", "-p", "log"], True),
+        # 未知の long / short オプションは値を取るか不明なので解決を信用しない（クラスタ内の 1 文字でも未知なら不確定）。
+        (["git", "--future-option", "value", "commit"], False),
+        (["git", "-Z", "value", "commit"], False),
+        # サブコマンド解決後の未知オプションは解決結果に影響しない。
+        (["git", "commit", "--future-option", "value"], True),
+        (["git", "push", "-Z"], True),
+        # 値が = で結合された未知オプションは次トークンを食わないので確定。
+        (["git", "--future-option=value", "commit"], True),
+    ],
+)
+def test_parse_git_segment_subcommand_certainty(segment: list[str], certain: bool) -> None:
+    """未知グローバルオプションの有無でサブコマンド確度を切り替える。"""
+    assert block_no_verify.parse_git_segment(segment).subcommand_certain is certain
+
+
+def test_pre_compact_main_appends_to_compaction_log(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """圧縮イベントを sessions ディレクトリの compaction-log.txt へ日時付きで追記し、記録したことをログへ出すこと。"""
+    logs: list[str] = []
+    monkeypatch.setattr(pre_compact, "get_sessions_dir", lambda: tmp_path)
+    monkeypatch.setattr(pre_compact, "log", logs.append)
+    monkeypatch.setattr(pre_compact, "get_datetime_string", lambda: "2026-01-01 00:00:00")
+
+    assert pre_compact.main() == 0
+    assert (tmp_path / "compaction-log.txt").read_text(encoding="utf-8") == (
+        "[2026-01-01 00:00:00] Context compaction triggered\n"
     )
-    def test_unparsed_command_without_raw_bypass_text_is_allowed(self, command: str) -> None:
-        """危険語が無い解析不能な入力、および解析できた引用文は巻き込まない。"""
-        assert block_no_verify.has_bypass_flag(command) is False
-
-    def test_split_segments_drops_empty_segments(self) -> None:
-        """連続する区切りトークンで空セグメントを作らない。"""
-        tokens = ["&&", "git", "status", ";", ";", "git", "commit"]
-        assert block_no_verify.split_segments(tokens) == [["git", "status"], ["git", "commit"]]
-
-    def test_parse_git_segment_returns_subcommand_and_flags(self) -> None:
-        """グローバルオプションを読み飛ばしてサブコマンドとフラグを返す。"""
-        segment = ["git", "-C", "/tmp", "--no-pager", "commit", "-am", "msg", "--no-verify"]
-
-        invocation = block_no_verify.parse_git_segment(segment)
-
-        assert invocation.subcommand == "commit"
-        assert invocation.flags == ["-C", "--no-pager", "-a", "-m", "--no-verify"]
-        assert invocation.subcommand_certain is True
-
-    @pytest.mark.parametrize(
-        ("segment", "certain"),
-        [
-            # 既知の boolean グローバルオプションはサブコマンド解決を乱さない。
-            (["git", "--no-pager", "log"], True),
-            (["git", "-p", "log"], True),
-            # 未知の long オプションは値を取るか不明なので解決を信用しない。
-            (["git", "--future-option", "value", "commit"], False),
-            # 未知の short オプションも同様（クラスタ内の 1 文字でも未知なら不確定）。
-            (["git", "-Z", "value", "commit"], False),
-            # サブコマンド解決後の未知オプションは解決結果に影響しない。
-            (["git", "commit", "--future-option", "value"], True),
-            (["git", "push", "-Z"], True),
-            # 値が = で結合された未知オプションは次トークンを食わないので確定。
-            (["git", "--future-option=value", "commit"], True),
-        ],
-    )
-    def test_parse_git_segment_subcommand_certainty(self, segment: list[str], certain: bool) -> None:
-        """未知グローバルオプションの有無でサブコマンド確度を切り替える。"""
-        assert block_no_verify.parse_git_segment(segment).subcommand_certain is certain
-
-    @pytest.mark.parametrize(
-        ("command", "expected_code"),
-        [(command, 2) for command in _BYPASS_COMMANDS] + [(command, 0) for command in _ALLOWED_COMMANDS],
-    )
-    def test_end_to_end_via_module_subprocess(self, command: str, expected_code: int) -> None:
-        """実 JSON を stdin へ流す ``python -m`` 実行で判定を end-to-end 検証する。"""
-        payload = json.dumps({"tool_input": {"command": command}})
-        src_root = Path(block_no_verify.__file__).resolve().parents[2]
-        completed = subprocess.run(
-            [sys.executable, "-m", "claq.hooks.block_no_verify"],
-            input=payload,
-            capture_output=True,
-            text=True,
-            check=False,
-            env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(src_root), "CLAUDECODE": "1"},
-        )
-
-        assert completed.returncode == expected_code
-        assert bool(completed.stdout) is (expected_code != 0)
-        assert bool(completed.stderr) is (expected_code != 0)
-
-    def test_oversized_payload_is_fail_closed_end_to_end(self) -> None:
-        """1 MiB を超える実 stdin ペイロードは launcher 経由でも deny する（監査の再現手順そのもの）。"""
-        payload = json.dumps(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "git commit --no-verify"},
-                "filler": "x" * (1024 * 1024 + 100),
-            }
-        )
-        src_root = Path(block_no_verify.__file__).resolve().parents[2]
-        completed = subprocess.run(
-            [sys.executable, "-m", "claq.hooks.block_no_verify"],
-            input=payload,
-            capture_output=True,
-            text=True,
-            check=False,
-            env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(src_root), "CLAUDECODE": "1"},
-        )
-
-        assert completed.returncode == 2
-        assert "BLOCKED" in completed.stderr
-
-    def test_blocked_emits_deny_json_alongside_exit_2(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """ブロック時は host に関わらず stdout の deny JSON + exit 2 を同時に出す。"""
-        payload = json.dumps({"tool_input": {"command": "git commit --no-verify"}})
-        monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False))
-        assert block_no_verify.main() == 2
-        deny = json.loads(capsys.readouterr().out)
-        assert deny["permissionDecision"] == "deny"
-
-    def test_truncated_input_is_fail_closed(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """1 MiB 超で切り捨てられた入力は判定不能として deny する（回帰防止）。
-
-        切り捨て後の JSON は不完全になりうるため、切り捨てフラグそのものを
-        deny の根拠にする（切り捨て後の中身がたまたま parse できても信用しない）。
-        """
-        monkeypatch.setattr(
-            block_no_verify, "read_raw_stdin_with_truncation", lambda: ("{not-even-json", True)
-        )
-
-        assert block_no_verify.main() == 2
-        err = capsys.readouterr().err
-        assert "BLOCKED" in err
-        assert "exceeded" in err
-
-    def test_unparseable_json_is_fail_closed(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """非空だが JSON として読めない入力は判定不能として deny する（回帰防止）。"""
-        monkeypatch.setattr(
-            block_no_verify, "read_raw_stdin_with_truncation", lambda: ("{not-json", False)
-        )
-
-        assert block_no_verify.main() == 2
-        assert "could not parse hook input" in capsys.readouterr().err
-
-    def test_missing_tool_input_is_fail_closed(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """JSON は妥当だが tool_input 系キーが無い場合も deny する（回帰防止）。"""
-        monkeypatch.setattr(
-            block_no_verify,
-            "read_raw_stdin_with_truncation",
-            lambda: (json.dumps({"unrelated": "payload"}), False),
-        )
-
-        assert block_no_verify.main() == 2
-        assert "no recognizable tool_input" in capsys.readouterr().err
+    assert logs == ["[PreCompact] State saved before compaction"]
 
 
-class TestPreCompact:
-    def test_main_logs_compaction(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        appended: list[tuple[Path, str]] = []
-        logs: list[str] = []
+def test_pre_compact_main_logs_error_without_blocking(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """追記に失敗してもブロックせず exit 0 を返し、エラーをログへ出すこと。"""
+    logs: list[str] = []
+    monkeypatch.setattr(pre_compact, "get_sessions_dir", lambda: tmp_path)
+    monkeypatch.setattr(pre_compact, "append_file", mock.Mock(side_effect=RuntimeError("boom")))
+    monkeypatch.setattr(pre_compact, "log", logs.append)
 
-        monkeypatch.setattr(pre_compact, "get_sessions_dir", lambda: tmp_path)
-        monkeypatch.setattr(pre_compact, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(pre_compact, "append_file", lambda path, content: appended.append((Path(path), content)))
-        monkeypatch.setattr(pre_compact, "log", logs.append)
-        monkeypatch.setattr(pre_compact, "get_datetime_string", lambda: "2026-01-01 00:00:00")
-
-        assert pre_compact.main() == 0
-        assert appended == [(tmp_path / "compaction-log.txt", "[2026-01-01 00:00:00] Context compaction triggered\n")]
-        assert logs == ["[PreCompact] State saved before compaction"]
-
-    def test_main_logs_on_exception(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        logs: list[str] = []
-        monkeypatch.setattr(pre_compact, "get_sessions_dir", lambda: tmp_path)
-        monkeypatch.setattr(pre_compact, "ensure_dir", lambda path: Path(path))
-        monkeypatch.setattr(pre_compact, "append_file", lambda path, content: (_ for _ in ()).throw(RuntimeError("boom")))
-        monkeypatch.setattr(pre_compact, "log", logs.append)
-
-        assert pre_compact.main() == 0
-        assert any("Error: boom" in message for message in logs)
+    assert pre_compact.main() == 0
+    assert logs == ["[PreCompact] Error: boom"]
 
 
 @pytest.mark.parametrize(
@@ -484,133 +443,3 @@ def test_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, 
     monkeypatch.setattr("claq.lib.core_utils.get_sessions_dir", lambda: tmp_path)
 
     assert _run_entrypoint(f"claq.hooks.{module_name}") == 0
-
-
-@pytest.mark.parametrize("module_name", ["block_no_verify"])
-def test_empty_input_passthrough(monkeypatch: pytest.MonkeyPatch, module_name: str) -> None:
-    """空入力（data None）では本処理をスキップして 0 を返す。"""
-    import importlib
-
-    mod = importlib.import_module(f"claq.hooks.{module_name}")
-    _capture_io(monkeypatch, mod, "")
-    assert mod.main() == 0
-
-
-class TestBlockNoVerifyScansAllContainerKeys:
-    """コンテナキーを全て走査する（先勝ちで無害な側だけ見て素通りしない）。"""
-
-    def _run(self, monkeypatch: pytest.MonkeyPatch, payload: dict) -> int:
-        raw = json.dumps(payload)
-        monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (raw, False))
-        return block_no_verify.main()
-
-    def test_bypass_in_later_container_key_is_blocked(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """先頭キーが無害でも後続キーのバイパスを検出する。
-
-        先勝ちで 1 キーだけ見る実装では、無害な tool_input と悪意ある toolInput が
-        同居する payload を素通りさせる。docs/adr/shell-analysis-boundary.md は本フックの検出境界を
-        「誤検出を誤通過より選ぶ」と定めており、config_protection は既に全キー走査。
-        """
-        code = self._run(
-            monkeypatch,
-            {"tool_input": {"command": "ls"}, "toolInput": {"command": "git commit --no-verify"}},
-        )
-
-        assert code == 2
-        assert "bypass" in capsys.readouterr().err
-
-    def test_all_benign_container_keys_pass(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """全キーが無害なら通す。"""
-        code = self._run(
-            monkeypatch, {"tool_input": {"command": "ls"}, "toolInput": {"command": "git status"}}
-        )
-
-        assert code == 0
-        assert capsys.readouterr().err == ""
-
-    @pytest.mark.parametrize(
-        "container",
-        [
-            [{"command": f"git commit {NV}"}],
-            [f"git commit {NV}"],
-            [{"command": "ls"}, {"command": "git commit -n"}],
-        ],
-        ids=["list-of-dicts", "list-of-strings", "bypass-in-later-element"],
-    )
-    def test_list_shaped_container_is_blocked(
-        self, monkeypatch: pytest.MonkeyPatch, container: list
-    ) -> None:
-        """list 形状のコンテナも走査する（走査しないと素通りする）。"""
-        assert self._run(monkeypatch, {"tool_input": container}) == 2
-
-    def test_benign_list_shaped_container_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """list 形状でも無害なら通す。"""
-        assert self._run(monkeypatch, {"tool_input": [{"command": "ls"}]}) == 0
-
-
-class TestDeepNestingDoesNotFailOpen:
-    """深いネストの payload で保護フックが exit 1 へ倒れないこと。
-
-    PreToolUse の契約は 2=deny / 0=allow / **1=non-blocking error**。1 は
-    「フックが壊れた」を意味し、host はツールをそのまま実行する。つまり
-    exit 1 は fail-open であり、保護フックにとって最も避けるべき終了コード。
-
-    深さ 200,000 の入れ子を JSON 文字列値の内側に置いた 400KB の payload
-    （`MAX_STDIN_BYTES` = 1MiB の内側）では、`extract_tool_input` の
-    `json.loads` が `RecursionError` を送出する。これが except を貫通すると
-    `block_no_verify` が exit 1 になる。
-    """
-
-    _DEPTH = 200_000
-
-    def _run(self, monkeypatch: pytest.MonkeyPatch, payload: str) -> int:
-        """block_no_verify.main() を実行し終了コードを返す。"""
-        monkeypatch.setattr(
-            block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False)
-        )
-        return block_no_verify.main()
-
-    def test_nesting_inside_json_string_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """入れ子を JSON 文字列値の内側に置いた形。
-
-        外側の `parse_json_object` は正常に dict を返し、`extract_tool_input`
-        内側の `json.loads` だけが `RecursionError` を送出する経路。
-        """
-        nested = "[" * self._DEPTH + "]" * self._DEPTH
-        payload = json.dumps(
-            {"tool_name": "Bash", "tool_input": {"command": "echo hi"}, "toolArgs": nested}
-        )
-        assert len(payload) > 400_000
-
-        exit_code = self._run(monkeypatch, payload)
-
-        # 非ブロッキングエラー（fail-open）ではないこと。
-        assert exit_code != 1
-        assert exit_code in (0, 2)
-
-    def test_nesting_in_outer_payload_is_denied(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """入れ子を payload 本体に置いた形は fail-closed（deny）になること。
-
-        こちらは外側の `parse_json_object` が `RecursionError` を受ける経路。
-        パース不能 = 判定不能なので deny が正しい。
-        """
-        nested = "[" * self._DEPTH + "]" * self._DEPTH
-        payload = '{"tool_name":"Bash","tool_input":' + nested + "}"
-
-        assert self._run(monkeypatch, payload) == 2
-
-    def test_nested_payload_carrying_bypass_flag_is_not_fail_open(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """バイパスフラグを載せた深いネスト payload でも exit 1 にならないこと。"""
-        nested = "[" * self._DEPTH + "]" * self._DEPTH
-        payload = json.dumps(
-            {"tool_name": "Bash", "tool_input": {"command": f"git commit {NV} -m x"}, "toolArgs": nested}
-        )
-
-        # tool_input 側の実コマンドが検査され deny される（toolArgs は生文字列に倒れる）。
-        assert self._run(monkeypatch, payload) == 2
