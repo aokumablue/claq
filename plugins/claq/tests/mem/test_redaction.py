@@ -12,140 +12,109 @@ _PLACEHOLDER = "[REDACTED]"
 
 
 class TestRedact:
-    """redact() のテーブル駆動テスト"""
+    """redact() のテーブル駆動テスト（ベンダ prefix 単体の検体は TestVendorPatternSync が検査する）"""
 
     @pytest.mark.parametrize(
-        "name, text, should_redact",
+        "text",
         [
-            # Anthropic API キー
-            ("anthropic_key", "key=" + "sk-ant-" + "api03-abcdefghijklmnopqrst1234567890ABCDEFGHIJKLMNO", True),
-            # OpenAI API キー
-            ("openai_key", "token = " + "sk-" + "abcdefghijklmnopqrstuvwxyz1234567890ABCD", True),
-            # Slack Bot トークン
-            ("slack_bot_token", "xox" + "b-123456789012-123456789012-abcdefghijklmnopqrstuvwx", True),
-            # GitHub classic PAT
-            ("github_pat_classic", "ghp_" + "abcdefghijklmnopqrstuvwxyz123456ABCD", True),
-            # GitHub Fine-Grained PAT
-            (
-                "github_fine_pat",
-                "github" + "_pat_11ABCDE_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-                True,
-            ),
-            # AWS Access Key ID
-            ("aws_key_id", "AKIA" + "IOSFODNN7EXAMPLE", True),
-            # AWS Secret Key（代入形式）
-            ("aws_secret_assign", "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", True),
-            # Bearer トークン
-            ("bearer_token", "Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.abc", True),
-            # password 代入
-            ("password_assign", "password" + "=mysecretpassword123", True),
-            # メールアドレス
-            ("email", "contact: user@example.com", True),
-            # IPv4 アドレス
-            ("ipv4", "server: 192.168.1.100", True),
-            # 32 文字以上の hex 文字列
-            ("hex_secret", "token: deadbeef0123456789abcdef01234567", True),
-            # 通常テキストは変更なし
-            ("plain_text", "今日は良い天気です。コードをリファクタリングしました。", False),
-            # ファイルパスは変更なし
-            ("file_path", "/home/user/dev/project/src/main.py", False),
-            # 短い hex は変更なし（31 文字以下）
-            ("short_hex", "deadbeef01234567", False),
-            # 40 桁の大文字 SHA-1 commit hash は base64_long で誤検出しない
-            # （小文字は hex_secret が拾うが、大文字/混在は hex_secret 対象外）
-            ("sha1_upper_commit", "DA39A3EE5E6B4B0D3255BFEF95601890AFD80709", False),
-            # 40 桁の混在ケース commit hash も誤検出しない
-            ("sha1_mixed_commit", "Da39A3ee5E6b4B0d3255Bfef95601890AfD80709", False),
-            # 64 桁の大文字 SHA-256 hash も誤検出しない
-            (
-                "sha256_upper",
-                "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
-                False,
-            ),
-            # base64 シークレット（32 バイト鍵 = 44 文字、非 hex 文字を含む）は依然マスクされる
-            ("base64_secret_44", "PsmIacDP/C7LZ/t/GVR8rx8Sl0yQ/Wh8Mzwm6Zy/ww4=", True),
-            # 非 hex 文字を含む 64 文字 base64（48 バイト鍵）も依然マスクされる
-            (
-                "base64_secret_64",
-                "WWQjq6fc3tLz3+KfcziN7rO+GkNwpSA6d6c9Qg3HvhSFUt5gjmio8mHpIEVzVkOx",
-                True,
-            ),
+            pytest.param("key=" + "sk-ant-" + "api03-abcdefghijklmnopqrst1234567890ABCDEFGHIJKLMNO", id="anthropic_key"),
+            pytest.param("token = " + "sk-" + "abcdefghijklmnopqrstuvwxyz1234567890ABCD", id="openai_key"),
+            pytest.param("aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", id="aws_secret_assign"),
+            pytest.param("Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.abc", id="bearer_token"),
+            pytest.param("password" + "=mysecretpassword123", id="password_assign"),
+            pytest.param("contact: user@example.com", id="email"),
+            pytest.param("server: 192.168.1.100", id="ipv4"),
+            pytest.param("token: deadbeef0123456789abcdef01234567", id="hex_secret"),
+            # 非 hex 文字を含む base64 シークレット（32 バイト鍵 = 44 文字 / 48 バイト鍵 = 64 文字）
+            pytest.param("PsmIacDP/C7LZ/t/GVR8rx8Sl0yQ/Wh8Mzwm6Zy/ww4=", id="base64_secret_44"),
+            pytest.param("WWQjq6fc3tLz3+KfcziN7rO+GkNwpSA6d6c9Qg3HvhSFUt5gjmio8mHpIEVzVkOx", id="base64_secret_64"),
         ],
     )
-    def test_redact(self, name: str, text: str, should_redact: bool) -> None:
+    def test_secret_is_masked(self, text: str) -> None:
+        """シークレット・PII を含むテキストは [REDACTED] が入り、元の文字列が残らない。"""
         result = redact(text)
-        if should_redact:
-            assert _PLACEHOLDER in result, f"[{name}] {_PLACEHOLDER!r} が含まれていない: {result!r}"
-            assert text not in result or text == result, f"[{name}] 元のシークレットが残存している"
-        else:
-            assert result == text, f"[{name}] 変更されてはいけないテキストが変更された: {result!r}"
+
+        assert _PLACEHOLDER in result
+        assert text not in result
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param("今日は良い天気です。コードをリファクタリングしました。", id="plain_text"),
+            pytest.param("/home/user/dev/project/src/main.py", id="file_path"),
+            pytest.param("deadbeef01234567", id="short_hex"),
+            # 大文字/混在の commit hash は hex_secret の対象外で、base64_long の先読みでも誤検出しない
+            pytest.param("DA39A3EE5E6B4B0D3255BFEF95601890AFD80709", id="sha1_upper_commit"),
+            pytest.param("Da39A3ee5E6b4B0d3255Bfef95601890AfD80709", id="sha1_mixed_commit"),
+            pytest.param("E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855", id="sha256_upper"),
+            pytest.param("", id="empty"),
+            pytest.param("def authenticate(user_id: str) -> bool:\n    return db.lookup(user_id)", id="code_structure"),
+        ],
+    )
+    def test_ordinary_text_is_unchanged(self, text: str) -> None:
+        """通常テキスト・パス・短い hex・大文字の hash・コードは変更されない。"""
+        assert redact(text) == text
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            # 区切りの直後に現れる JWT（JWT の lookbehind は区切りの直後なら一致する）
+            pytest.param(
+                "Authorization: " + "eyJ" + "hbGciOiJIUzI1NiJ9" + ".eyJzdWIiOiIxMjMifQ.s1gnatur3",
+                "Authorization: " + _PLACEHOLDER,
+                id="jwt_after_delimiter",
+            ),
+            # 実在しうる長さのアドレス（email の local part 上限の内側）
+            pytest.param("contact: first.last+tag@sub.example.co.jp", "contact: " + _PLACEHOLDER, id="ordinary_email"),
+        ],
+    )
+    def test_exact_output(self, text: str, expected: str) -> None:
+        """一致した部分だけが [REDACTED] に置き換わる。"""
+        assert redact(text) == expected
 
     def test_multiple_secrets_in_one_text(self) -> None:
         """複数シークレットが混在するテキストを全てマスクする"""
-        text = (
-            "email=admin@example.com apikey="
-            + "sk-"
-            + "abcdefghijklmnopqrstuvwxyz1234567890ABCD"
-            + " server=10.0.0.1"
-        )
-        result = redact(text)
-        assert result.count(_PLACEHOLDER) >= 3
-
-    def test_empty_string(self) -> None:
-        """空文字列はそのまま返る"""
-        assert redact("") == ""
+        text = "email=admin@example.com apikey=" + "sk-" + "abcdefghijklmnopqrstuvwxyz1234567890ABCD" + " server=10.0.0.1"
+        assert redact(text).count(_PLACEHOLDER) >= 3
 
     def test_idempotent(self) -> None:
         """2 回適用しても結果が変わらない"""
-        text = "password" + "=secret123 user@example.com"
-        once = redact(text)
-        twice = redact(once)
-        assert once == twice
-
-    def test_preserves_structure(self) -> None:
-        """コードのファイルパスや変数名はマスクされない"""
-        code = "def authenticate(user_id: str) -> bool:\n    return db.lookup(user_id)"
-        assert redact(code) == code
+        once = redact("password" + "=secret123 user@example.com")
+        assert redact(once) == once
 
 
 class TestRedactKnowledgeText:
     """redact_knowledge_text() — knowledge カード向け縮小版（hex_secret/base64_long 除外）"""
 
-    def test_known_prefix_secrets_still_redacted(self) -> None:
-        """既知プレフィックス系（password 代入等）は通常版と同様にマスクされる。"""
-        result = redact_knowledge_text("password" + "=mysecretpassword123")
+    @pytest.mark.parametrize(
+        "text, leaked",
+        [
+            pytest.param("password" + "=mysecretpassword123", "mysecretpassword123", id="password_assign"),
+            pytest.param("ghp_" + "abcdefghijklmnopqrstuvwxyz123456ABCD", "abcdefghijklmnopqrstuvwxyz123456ABCD", id="github_pat"),
+            pytest.param("contact: user@example.com", "user@example.com", id="email"),
+        ],
+    )
+    def test_known_prefix_secrets_still_redacted(self, text: str, leaked: str) -> None:
+        """既知プレフィックス・キーワード系は通常版と同様にマスクされる。"""
+        result = redact_knowledge_text(text)
+
         assert _PLACEHOLDER in result
-        assert "mysecretpassword123" not in result
+        assert leaked not in result
 
-    def test_github_pat_still_redacted(self) -> None:
-        result = redact_knowledge_text("ghp_" + "abcdefghijklmnopqrstuvwxyz123456ABCD")
-        assert _PLACEHOLDER in result
-
-    def test_email_still_redacted(self) -> None:
-        result = redact_knowledge_text("contact: user@example.com")
-        assert _PLACEHOLDER in result
-
-    def test_hex_secret_not_redacted(self) -> None:
-        """32 文字以上の16進文字列（commit SHA 等）は knowledge 用途では保持する。
-
-        password_assign 等のキーワード付きパターンに誤って引っかからないよう、
-        認証情報の代入形（キーワード + 区切り + 値）に当たらない素の16進文字列を使う。
-        """
-        text = "see commit deadbeef0123456789abcdef01234567 for details"
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # 認証情報の代入形に当たらない素の 16 進文字列（commit SHA 等）
+            pytest.param("see commit deadbeef0123456789abcdef01234567 for details", id="hex_in_prose"),
+            pytest.param("PsmIacDP/C7LZ/t/GVR8rx8Sl0yQ/Wh8Mzwm6Zy/ww4=", id="base64_long"),
+            pytest.param("see commit " + "a" * 40, id="full_commit_sha"),
+            pytest.param("sha deadbeef0123456789abcdef01234567 key PsmIacDP/C7LZ/t/GVR8rx8Sl0yQ/Wh8Mzwm6Zy/ww4=", id="hex_and_base64"),
+            pytest.param("", id="empty"),
+        ],
+    )
+    def test_entropy_strings_are_kept(self, text: str) -> None:
+        """キー名を伴わない 32 桁以上の hex・40 文字超の base64 は knowledge 用途では保持する。"""
         assert redact_knowledge_text(text) == text
-
-    def test_base64_long_not_redacted(self) -> None:
-        """40 文字超の base64 様文字列も knowledge 用途では保持する。"""
-        text = "PsmIacDP/C7LZ/t/GVR8rx8Sl0yQ/Wh8Mzwm6Zy/ww4="
-        assert redact_knowledge_text(text) == text
-
-    def test_full_commit_sha_preserved(self) -> None:
-        sha = "a" * 40
-        text = f"see commit {sha}"
-        assert redact_knowledge_text(text) == text
-
-    def test_empty_string(self) -> None:
-        assert redact_knowledge_text("") == ""
 
 
 def _kv(key: str, sep: str, value: str, *, quote_key: str = "", quote_value: str = "") -> str:
@@ -235,6 +204,8 @@ _NOT_A_SECRET_ASSIGNMENTS = [
     # エスケープ済み JSON でも、値が引用符で始まらない式・識別子は伏せない。
     '{\\"pass' + 'word\\": get_password_from_vault()}',
     '{\\"token' + '_type\\": \\"bearer-style-name\\"}',
+    # 値が 8 文字未満なら伏せない。
+    _kv("pass" + "word", ": ", "short", quote_key='"', quote_value='"'),
 ]
 
 
@@ -255,19 +226,8 @@ class TestCredentialAssignmentShapes:
     @pytest.mark.parametrize("fn", [redact, redact_knowledge_text])
     @pytest.mark.parametrize("text", _NOT_A_SECRET_ASSIGNMENTS)
     def test_identifier_containing_credential_word_is_kept(self, fn, text: str) -> None:
-        """credential 語を識別子の一部に含むだけの普通の代入は伏せない。"""
+        """credential 語を識別子の一部に含むだけの代入や、8 文字未満の値は伏せない。"""
         assert fn(text) == text
-
-    @pytest.mark.parametrize("fn", [redact, redact_knowledge_text])
-    def test_short_quoted_value_is_kept(self, fn) -> None:
-        """値が 8 文字未満なら（従来どおり）伏せない。"""
-        text = _kv("pass" + "word", ": ", "short", quote_key='"', quote_value='"')
-        assert fn(text) == text
-
-    def test_knowledge_variant_still_keeps_entropy_strings(self) -> None:
-        """knowledge 版は、キー名を伴わない 32 桁 hex / 長い base64 を従来どおり保持する。"""
-        text = "sha deadbeef0123456789abcdef01234567 key PsmIacDP/C7LZ/t/GVR8rx8Sl0yQ/Wh8Mzwm6Zy/ww4="
-        assert redact_knowledge_text(text) == text
 
 
 # --- 二次オーダー回帰（SessionEnd の実時間予算） ---
@@ -286,18 +246,7 @@ _SINGLE_CALL_LIMIT_SECONDS = 2.0
 
 
 def _repeat_to(unit: str, size: int) -> str:
-    """*unit* を繰り返して *size* 文字前後の文字列を作る。
-
-    Args:
-        unit: 繰り返す単位文字列。
-        size: 目標の文字数。
-
-    Returns:
-        *unit* を ``size // len(unit)`` 回繰り返した文字列。
-
-    Raises:
-        例外は発生しません。
-    """
+    """*unit* を ``size // len(unit)`` 回繰り返して *size* 文字前後の文字列を作る。"""
     return unit * (size // len(unit))
 
 
@@ -330,41 +279,16 @@ _WORST_CASE_UNITS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _best_of(text: str, repeats: int = 3) -> float:
-    """``redact(text)`` の最小実行時間を返す。
-
-    最小値を採るのは、スケジューラ由来の上振れだけを落として測定を安定させる
-    ため（`timeit` と同じ考え方）。平均や単発だと負荷の高い CI で ratio 判定が
-    flaky になる。
-
-    Args:
-        text: 計測対象の入力。
-        repeats: 計測回数。
-
-    Returns:
-        最小の実行時間（秒）。
-
-    Raises:
-        例外は発生しません。
-    """
-    return min(_timed(text) for _ in range(repeats))
-
-
 def _timed(text: str) -> float:
-    """``redact(text)`` を 1 回実行して所要時間を返す。
-
-    Args:
-        text: 計測対象の入力。
-
-    Returns:
-        実行時間（秒）。
-
-    Raises:
-        例外は発生しません。
-    """
+    """``redact(text)`` を 1 回実行して所要時間（秒）を返す。"""
     start = time.perf_counter()
     redact(text)
     return time.perf_counter() - start
+
+
+def _best_of(text: str, repeats: int = 3) -> float:
+    """``redact(text)`` の最小実行時間を返す（スケジューラ由来の上振れだけを落とし、ratio 判定を安定させる）。"""
+    return min(_timed(text) for _ in range(repeats))
 
 
 class TestRedactScanCost:
@@ -403,8 +327,7 @@ class TestRedactScanCost:
             f"（{base:.4f}s -> {doubled:.4f}s）。二次オーダーへ戻っている。"
         )
 
-
-    @pytest.mark.parametrize("filler", [" ", "\t", "\u3000", '"', "]", '"]'])
+    @pytest.mark.parametrize("filler", [" ", "\t", "　", '"', "]", '"]'])
     def test_one_mib_after_a_single_key_fits_in_budget(self, filler: str) -> None:
         """キー語 1 個の後ろに 1MiB の空白・引用符・`]` が続き `=` が無くても予算内で終わること。
 
@@ -418,41 +341,8 @@ class TestRedactScanCost:
         assert elapsed < _SINGLE_CALL_LIMIT_SECONDS, f"1MiB の redact に {elapsed:.2f}s かかった（filler={filler!r}）"
 
 
-class TestJwtPatternNarrowing:
-    """JWT パターンの lookbehind による絞り込みを固定する。"""
-
-    def test_jwt_after_delimiter_is_redacted(self) -> None:
-        """区切りの直後に現れる JWT はマスクされる。
-
-        ローカル変数を credential 系の語（token / secret / password / api_key）
-        で命名しないこと。その語にクォート付きの値を代入する行は、それ自身が
-        スキャナの credential assignment パターンに一致し、リポジトリ自己走査
-        テストを赤くする（実測で踏んだ）。この注意書き自体も同じ理由で、
-        一致する形の実例を書かずに説明だけに留めている。
-        """
-        jwt = "eyJ" + "hbGciOiJIUzI1NiJ9" + ".eyJzdWIiOiIxMjMifQ.s1gnatur3"
-        assert redact(f"Authorization: {jwt}") == "Authorization: " + _PLACEHOLDER
-
-    def test_jwt_glued_to_base64url_run_is_not_matched(self) -> None:
-        """base64url 文字へ続く `eyJ` は一致しない（意図した絞り込み）。
-
-        二次オーダーを断つための lookbehind の代償。JWT はトークンであり実物は
-        区切りの直後に現れるため、`hooks/commit_quality_scanner.py` が先に採った
-        判断へ揃えたもの。
-        """
-        glued = "abc" + "eyJ" + "hbGciOiJIUzI1NiJ9" + ".payload.sig"
-        assert _PLACEHOLDER not in redact(glued)
-
-
 def _email_pattern() -> re.Pattern[str]:
-    """`_PATTERNS` から email パターンを 1 本だけ引く。
-
-    Returns:
-        コンパイル済みの email パターン。
-
-    Raises:
-        AssertionError: email パターンが 1 本に定まらない場合。
-    """
+    """`_PATTERNS` から email パターンを 1 本だけ引く（1 本に定まらなければ AssertionError）。"""
     found = [pattern for name, pattern in _PATTERNS if name == "email"]
     assert len(found) == 1
     return found[0]
@@ -463,72 +353,50 @@ class TestEmailLocalPartBound:
 
     判定は email パターン単体に対して行う。`redact` 全体で見ると 40 文字超の
     local part は `hex_secret` / `base64_long` にも一致してしまい、email 側の
-    上限が効いているかを切り分けられないため。
+    上限が効いているかを切り分けられないため。実在しうる長さのアドレスが
+    `redact` 経由でマスクされることは `TestRedact.test_exact_output` が見る。
     """
 
-    def test_local_part_at_bound_matches(self) -> None:
-        """64 文字ちょうどの local part は一致する。"""
-        assert _email_pattern().search(("a" * 64) + "@example.com") is not None
-
-    def test_local_part_over_bound_does_not_match(self) -> None:
-        """65 文字の local part は一致しない（配送不能な長さ。意図した絞り込み）。"""
-        assert _email_pattern().search(("a" * 65) + "@example.com") is None
-
-    def test_ordinary_address_still_redacted(self) -> None:
-        """実在しうる長さのアドレスは `redact` 経由でマスクされる。"""
-        assert redact("contact: first.last+tag@sub.example.co.jp") == "contact: " + _PLACEHOLDER
+    @pytest.mark.parametrize(
+        "local_length, matches",
+        [
+            pytest.param(64, True, id="at-bound"),
+            # 配送不能な長さ。意図した絞り込み
+            pytest.param(65, False, id="over-bound"),
+        ],
+    )
+    def test_local_part_length_bound(self, local_length: int, matches: bool) -> None:
+        """64 文字ちょうどの local part は一致し、65 文字は一致しない。"""
+        assert (_email_pattern().search("a" * local_length + "@example.com") is not None) is matches
 
 
 # --- redaction と commit_quality_scanner のベンダ prefix 同期 ---
 
-
-def _vendor_samples() -> tuple[tuple[str, str], ...]:
-    """ベンダ prefix 系シークレットの検体を実行時に組み立てて返す。
-
-    検体をソースへ直書きすると、このファイル自身が
-    `commit_quality_scanner._SECRET_PATTERNS` に一致し、リポジトリ自己走査テスト
-    （`tests/hooks/test_hook_edge_cases.py` の
-    `test_repo_wide_self_scan_has_zero_secret_issues`）が赤くなる。既存の
-    `_private_key_header` と同じく連結で組み立てて直書きを避ける。
-
-    Returns:
-        ``(ラベル, 検体)`` のタプル列。
-
-    Raises:
-        例外は発生しません。
-    """
-    return (
-        ("openai", "sk-" + "abcdefghijklmnopqrstuvwxyz1234567890ABCD"),
-        ("anthropic", "sk-" + "ant-" + "api03-abcdefghijklmnopqrst1234567890ABCDEFGHIJKLMNO"),
-        ("github_classic_p", "gh" + "p_" + "abcdefghijklmnopqrstuvwxyz123456ABCD"),
-        ("github_classic_o", "gh" + "o_" + "abcdefghijklmnopqrstuvwxyz123456ABCD"),
-        ("github_classic_s", "gh" + "s_" + "abcdefghijklmnopqrstuvwxyz123456ABCD"),
-        ("github_classic_r", "gh" + "r_" + "abcdefghijklmnopqrstuvwxyz123456ABCD"),
-        (
-            "github_fine_pat",
-            "github" + "_pat_" + "11ABCDE_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-        ),
-        ("slack_bot", "xox" + "b-" + "123456789012-123456789012-abcdefghijklmnopqrstuvwx"),
-        ("slack_user", "xox" + "p-" + "123456789012-123456789012-abcdefghijklmnopqrstuvwx"),
-        ("google_api", "AIza" + "SyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456"),
-        ("aws_akia", "AKIA" + "IOSFODNN7EXAMPLE"),
-        ("aws_asia", "ASIA" + "IOSFODNN7EXAMPLE"),
-        ("jwt", "eyJ" + "hbGciOiJIUzI1NiJ9" + ".eyJzdWIiOiIxMjMifQ.s1gnatur3"),
-    )
+# 検体をソースへ直書きすると、このファイル自身が `commit_quality_scanner._SECRET_PATTERNS` に一致し、
+# リポジトリ自己走査テスト（`tests/hooks/test_hook_edge_cases.py` の
+# `test_repo_wide_self_scan_has_zero_secret_issues`）が赤くなるため、連結で組み立てる。
+_VENDOR_SAMPLES: tuple[tuple[str, str], ...] = (
+    ("openai", "sk-" + "abcdefghijklmnopqrstuvwxyz1234567890ABCD"),
+    ("anthropic", "sk-" + "ant-" + "api03-abcdefghijklmnopqrst1234567890ABCDEFGHIJKLMNO"),
+    ("github_classic_p", "gh" + "p_" + "abcdefghijklmnopqrstuvwxyz123456ABCD"),
+    ("github_classic_o", "gh" + "o_" + "abcdefghijklmnopqrstuvwxyz123456ABCD"),
+    ("github_classic_s", "gh" + "s_" + "abcdefghijklmnopqrstuvwxyz123456ABCD"),
+    ("github_classic_r", "gh" + "r_" + "abcdefghijklmnopqrstuvwxyz123456ABCD"),
+    (
+        "github_fine_pat",
+        "github" + "_pat_" + "11ABCDE_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    ),
+    ("slack_bot", "xox" + "b-" + "123456789012-123456789012-abcdefghijklmnopqrstuvwx"),
+    ("slack_user", "xox" + "p-" + "123456789012-123456789012-abcdefghijklmnopqrstuvwx"),
+    ("google_api", "AIza" + "SyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456"),
+    ("aws_akia", "AKIA" + "IOSFODNN7EXAMPLE"),
+    ("aws_asia", "ASIA" + "IOSFODNN7EXAMPLE"),
+    ("jwt", "eyJ" + "hbGciOiJIUzI1NiJ9" + ".eyJzdWIiOiIxMjMifQ.s1gnatur3"),
+)
 
 
 def _scanner_detects(sample: str) -> bool:
-    """`commit_quality_scanner._SECRET_PATTERNS` のどれかが *sample* に一致するか。
-
-    Args:
-        sample: 検体文字列。
-
-    Returns:
-        1 つでも一致すれば True。
-
-    Raises:
-        例外は発生しません。
-    """
+    """`commit_quality_scanner._SECRET_PATTERNS` のどれかが *sample* に一致するか。"""
     return any(re.search(pattern, sample) for pattern, _ in commit_quality_scanner._SECRET_PATTERNS)
 
 
@@ -553,44 +421,33 @@ class TestVendorPatternSync:
     意図的な非対称である。
     """
 
-    @pytest.mark.parametrize(("label", "sample"), _vendor_samples())
-    def test_redaction_masks_vendor_secret(self, label: str, sample: str) -> None:
-        """redaction 側がベンダ検体をマスクすること。"""
-        assert redact(sample) != sample, f"[{label}] redaction が検体をマスクしていない"
-
-    @pytest.mark.parametrize(("label", "sample"), _vendor_samples())
-    def test_scanner_detects_vendor_secret(self, label: str, sample: str) -> None:
-        """commit_quality_scanner 側が同じ検体を検出すること。"""
+    @pytest.mark.parametrize(("label", "sample"), _VENDOR_SAMPLES)
+    def test_both_sides_catch_vendor_secret(self, label: str, sample: str) -> None:
+        """redaction 側は検体全体を [REDACTED] に置き換え、scanner 側も同じ検体を検出すること。"""
+        assert redact(sample) == _PLACEHOLDER, f"[{label}] redaction が検体をマスクしていない"
         assert _scanner_detects(sample), f"[{label}] scanner が検体を検出していない"
 
-    @pytest.mark.parametrize(("label", "sample"), _vendor_samples())
-    def test_both_sides_agree(self, label: str, sample: str) -> None:
-        """同じ検体に対する 2 モジュールの判定が一致すること。"""
-        assert (redact(sample) != sample) == _scanner_detects(sample), (
-            f"[{label}] redaction と scanner の判定が食い違っている"
-        )
-
     def test_jwt_narrowing_is_synchronized(self) -> None:
-        """JWT の lookbehind による絞り込みが両モジュールで同じであること。
+        """base64url 文字へ続く `eyJ` は両モジュールとも一致しない（JWT の lookbehind による絞り込みが同じ）。
 
-        片方だけが `eyJ` の直前に base64url 文字を許すと、二次オーダー修正が
-        片側にしか入っていない状態（＝今回の指摘そのもの）を検出できる。
+        二次オーダーを断つための lookbehind の代償で、JWT はトークンであり実物は区切りの直後に
+        現れるため意図した絞り込み。片方だけが `eyJ` の直前に base64url 文字を許すと、
+        二次オーダー修正が片側にしか入っていない状態を検出できる。
         """
         glued = "abc" + "eyJ" + "hbGciOiJIUzI1NiJ9" + ".payload.sig"
 
         assert _PLACEHOLDER not in redact(glued)
         assert not _scanner_detects(glued)
 
-    @pytest.mark.parametrize(("name", "unit"), (("jwt_prefix_repeat", "eyJ"),))
-    def test_scanner_jwt_is_also_linear(self, name: str, unit: str) -> None:
-        """スキャナ側 JWT も同じ worst-case 入力で線形に留まること。"""
+    def test_scanner_jwt_is_also_linear(self) -> None:
+        """スキャナ側 JWT も同じ worst-case 入力（`eyJ` の反復）で線形に留まること。"""
         jwt_patterns = [pattern for pattern, label in commit_quality_scanner._SECRET_PATTERNS if label == "JWT"]
         assert len(jwt_patterns) == 1
         compiled = re.compile(jwt_patterns[0])
-        text = _repeat_to(unit, _ONE_MIB)
+        text = _repeat_to("eyJ", _ONE_MIB)
 
         start = time.perf_counter()
         compiled.sub(_PLACEHOLDER, text)
         elapsed = time.perf_counter() - start
 
-        assert elapsed < _SINGLE_CALL_LIMIT_SECONDS, f"[{name}] スキャナ側 JWT が {elapsed:.2f}s かかった"
+        assert elapsed < _SINGLE_CALL_LIMIT_SECONDS, f"[jwt_prefix_repeat] スキャナ側 JWT が {elapsed:.2f}s かかった"
