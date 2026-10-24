@@ -45,14 +45,7 @@ def _running_root(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.
 
 
 def _edit(file_path: str) -> dict[str, Any]:
-    """Edit ツール呼び出しの payload を組み立てる。
-
-    Args:
-        file_path: 対象ファイルパス。
-
-    Returns:
-        フック stdin へ渡す payload dict。
-    """
+    """file_path への Edit ツール呼び出しの payload を組み立てる。"""
     return {"tool_name": "Edit", "tool_input": {"file_path": file_path, "old_string": "a", "new_string": "b"}}
 
 
@@ -150,42 +143,45 @@ def test_every_runtime_entrypoint_name_is_denied_after_cd(item: str, _running_ro
     assert verdicts == ("runtime/", None)
 
 
-def _dev_checkout_verdicts(root: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, ...]:
-    """runtime / src への Write と、直接・cd 経由の Bash 書込みの判定をまとめて返す。
+@pytest.mark.parametrize(
+    ("toplevel", "tracked", "expected"),
+    [
+        # plugin root が作業中リポジトリの内側にある開発用 checkout は、runtime も src も編集できる。
+        pytest.param("parent", True, (0, 0, None, None), id="dev-checkout-inside-working-repo"),
+        # toplevel の綴りが大小違いでも、開発用 checkout として除外する。
+        pytest.param("parent-upper", True, (0, 0, None, None), id="dev-checkout-match-ignores-case"),
+        # ホームを git で管理していて plugin root が toplevel の内側に入っても、追跡外なら守る。
+        pytest.param("parent", False, (2, 2, "runtime/", "runtime/"), id="untracked-plugin-inside-working-repo"),
+        # 作業中リポジトリが plugin root を含まなければ、保護は外れない（追跡判定は差し替えない）。
+        pytest.param("unrelated", None, (2, 2, "runtime/", "runtime/"), id="unrelated-working-repo"),
+    ],
+)
+def test_dev_checkout_exclusion(
+    toplevel: str,
+    tracked: bool | None,
+    expected: tuple[Any, ...],
+    _running_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """toplevel と追跡状態ごとの、runtime / src への Write と直接・cd 経由の Bash 書込みの判定。"""
+    repo = {
+        "parent": _running_root.parents[1],
+        "parent-upper": Path(str(_running_root.parents[1]).upper()),
+        "unrelated": tmp_path,
+    }[toplevel]
+    monkeypatch.setattr(config_protection, "resolve_repo_root", lambda: repo)
+    if tracked is not None:
+        monkeypatch.setattr(config_protection, "_plugin_runtime_is_tracked", lambda _repo, _root: tracked)
 
-    Args:
-        root: 差し替えた plugin root。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-
-    Returns:
-        ``(Write runtime, Write src, Bash 直接, Bash cd 経由)`` の判定。
-    """
-    return (
-        _run("config_protection", _write(str(root / "runtime" / "claq-hook")), monkeypatch),
-        _run("config_protection", _write(str(root / "src" / "claq" / "launcher.py")), monkeypatch),
-        bash_config_protection.find_protected_write(f"printf x > {root}/runtime/claq-hook"),
-        bash_config_protection.find_protected_write(f"cd {root}/runtime && printf x > claq-hook"),
+    verdicts = (
+        _run("config_protection", _write(str(_running_root / "runtime" / "claq-hook")), monkeypatch),
+        _run("config_protection", _write(str(_running_root / "src" / "claq" / "launcher.py")), monkeypatch),
+        bash_config_protection.find_protected_write(f"printf x > {_running_root}/runtime/claq-hook"),
+        bash_config_protection.find_protected_write(f"cd {_running_root}/runtime && printf x > claq-hook"),
     )
 
-
-def test_dev_checkout_inside_working_repo_is_not_guarded(
-    _running_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """plugin root が作業中リポジトリの内側にある開発用 checkout は、runtime も src も編集できる。"""
-    monkeypatch.setattr(config_protection, "resolve_repo_root", lambda: _running_root.parents[1])
-    monkeypatch.setattr(config_protection, "_plugin_runtime_is_tracked", lambda _repo, _root: True)
-
-    assert _dev_checkout_verdicts(_running_root, monkeypatch) == (0, 0, None, None)
-
-
-def test_untracked_plugin_inside_working_repo_keeps_protection(
-    _running_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """ホームを git で管理していて plugin root が toplevel の内側に入っても、追跡外なら守る。"""
-    monkeypatch.setattr(config_protection, "resolve_repo_root", lambda: _running_root.parents[1])
-    monkeypatch.setattr(config_protection, "_plugin_runtime_is_tracked", lambda _repo, _root: False)
-
-    assert _dev_checkout_verdicts(_running_root, monkeypatch)[:3] == (2, 2, "runtime/")
+    assert verdicts == expected
 
 
 @pytest.mark.parametrize(("tracked", "expected"), [(True, True), (False, False)], ids=["tracked", "untracked"])
@@ -214,25 +210,6 @@ def test_plugin_runtime_is_tracked_is_false_when_git_fails(
     monkeypatch.setattr(config_protection.subprocess, "run", _raise)
 
     assert config_protection._plugin_runtime_is_tracked(_running_root.parents[1], _running_root) is False
-
-
-def test_dev_checkout_match_ignores_case(_running_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """toplevel の綴りが大小違いでも、開発用 checkout として除外する。"""
-    monkeypatch.setattr(config_protection, "resolve_repo_root", lambda: Path(str(_running_root.parents[1]).upper()))
-    monkeypatch.setattr(config_protection, "_plugin_runtime_is_tracked", lambda _repo, _root: True)
-
-    payload = _write(str(_running_root / "src" / "claq" / "launcher.py"))
-
-    assert _run("config_protection", payload, monkeypatch) == 0
-
-
-def test_unrelated_working_repo_keeps_protection(
-    _running_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """作業中リポジトリが plugin root を含まなければ、保護は外れない。"""
-    monkeypatch.setattr(config_protection, "resolve_repo_root", lambda: tmp_path)
-
-    assert _run("config_protection", _write(str(_running_root / "runtime" / "claq-hook")), monkeypatch) == 2
 
 
 def test_lookalikes_are_allowed(_running_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
