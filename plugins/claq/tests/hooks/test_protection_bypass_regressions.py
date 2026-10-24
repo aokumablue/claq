@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from claq.hooks import bash_config_protection, config_protection
+from claq.hooks.hook_common import normalize_protected_name
 
 from ._support import (
     _EXPECTED_CONDITIONALLY_PROTECTED_FILES,
@@ -425,84 +426,40 @@ _HARNESS_CASES = [
 ]
 
 
-@pytest.mark.parametrize(("label", "hook", "payload"), _BLOCKED_CASES, ids=[case[0] for case in _BLOCKED_CASES])
-def test_known_bypass_is_blocked(
-    label: str, hook: str, payload: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """既知バイパス経路が exit 2 でブロックされること。
-
-    Args:
-        label: ケースの識別ラベル（失敗時の可読性のため）。
-        hook: 対象フック名。
-        payload: フックへ渡す payload。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-    """
-    assert _run(hook, payload, monkeypatch) == 2, label
-
-
-@pytest.mark.parametrize(("label", "hook", "payload"), _ALLOWED_CASES, ids=[case[0] for case in _ALLOWED_CASES])
-def test_ordinary_command_is_allowed(
-    label: str, hook: str, payload: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """通常操作が fail-closed 化に巻き込まれず exit 0 のままであること。
-
-    Args:
-        label: ケースの識別ラベル（失敗時の可読性のため）。
-        hook: 対象フック名。
-        payload: フックへ渡す payload。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-    """
-    assert _run(hook, payload, monkeypatch) == 0, label
+# 期待 exit code を付けて 1 本の表にまとめる。ids はラベル（3 表を通して一意）。
+_VERDICT_CASES = [
+    *((label, hook, payload, 2) for label, hook, payload in _BLOCKED_CASES),
+    *((label, hook, payload, 0) for label, hook, payload in _ALLOWED_CASES),
+    *_HARNESS_CASES,
+]
 
 
 @pytest.mark.parametrize(
-    ("label", "hook", "payload", "expected"), _HARNESS_CASES, ids=[case[0] for case in _HARNESS_CASES]
+    ("label", "hook", "payload", "expected"), _VERDICT_CASES, ids=[case[0] for case in _VERDICT_CASES]
 )
-def test_other_harness_payload_shapes(
+def test_hook_verdict(
     label: str, hook: str, payload: dict[str, Any], expected: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Claude Code 以外のハーネスの payload 形状でも判定が変わらないこと。
-
-    ツール名を特定できない payload を検査側へ倒すため、Copilot CLI の
-    lowercase runtime 名・Grok の固有名・Codex の apply_patch が「未知」と扱われて
-    通常操作まで塞がれていないかを、危険側と通常側の両方で固定する。
-
-    Args:
-        label: ケースの識別ラベル（失敗時の可読性のため）。
-        hook: 対象フック名。
-        payload: フックへ渡す payload。
-        expected: 期待する終了コード。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-    """
+    """既知バイパスは exit 2・通常操作は exit 0 になること（他ハーネスの payload 形状を含む）。"""
     assert _run(hook, payload, monkeypatch) == expected, label
 
 
 # --------------------------------------------------------------------------
 # 保護語彙の全数検査
 #
-# 上の `_BLOCKED_CASES` / `_ALLOWED_CASES` は語彙の**サンプル**しか流さない。
-# 保護集合は複数行にまたがる 1 個の set リテラル（= 1 statement）なので、
-# 要素を 1 個消しても実行行は変わらず `fail_under=100` では原理的に検出できない。
-# たとえば `config_protection.py` から ".shellcheckrc" を消しても、サンプル検査だけ
-# ならスイート全緑のまま `Write .shellcheckrc` と `printf x > .shellcheckrc` の
-# 両経路が allow へ戻る。
+# 上の表は語彙の**サンプル**しか流さない。保護集合は複数行にまたがっても 1 statement
+# なので、要素を 1 個消しても実行行は変わらず `fail_under=100` では検出できない。
+# 検査は 2 層に分け、どちらも必須:
 #
-# 検査は 2 層に分ける。片方だけでは穴が残るため、どちらも必須:
-#
-#   層1（列挙）: 集合そのものを parametrize の入力にし、全要素で deny を実測する。
+#   層1（列挙）: 期待値の全要素を parametrize の入力にし、deny を実測する。
 #       「集合には載っているが実際には効いていない」要素を検出する。
 #   層2（固定）: 集合の内容を完全一致で表明する。層1 だけだと、要素を削除した
 #       瞬間にその parametrize ケース自体が消えるため**緑のまま**通ってしまう。
-#       保護語彙の増減を人間の意識的な変更に限定する関門がこちら。
 #
-# 層2 は実装の定義をテストへ複製する形になるが、これは意図的である。保護語彙は
-# 「壊れても誰も困らないから気付かれない」種類のデータで、外部に突き合わせ先を
-# 持たない（version-up.sh のように抽出元がある場合はそちらを使う）。ここでは
-# 集合の変更そのものをレビュー対象へ引き上げることが目的。
+# 保護語彙は外部に突き合わせ先を持たないため、層2 は意図的に定義をテストへ複製する。
 # --------------------------------------------------------------------------
 
-# 保護語彙に**似ているが載っていない**名前。層1 の deny がファイル名を見ずに
-# 一律 deny しているだけではないことを示す陰性対照（拡張子だけを変えてある）。
+# 保護語彙に**似ているが載っていない**名前（拡張子だけを変えてある）。層1 の陰性対照。
 _NON_MEMBER_CONFIG_NAMES = (
     ".eslintrc.toml",
     "eslint.config.jsonc",
@@ -517,9 +474,8 @@ _NON_MEMBER_CONFIG_NAMES = (
 )
 
 # 条件付き保護ファイルごとの (lint 兆候を含む内容, 含まない内容)。
-# `package.json` だけは TOML/INI ではないため専用キー（`eslintConfig` / `prettier`）
-# を signal に使う —— 同じ表へ一律 `[tool.ruff]` を流すと「実装のバイパス」ではなく
-# 「テストの取り違え」で赤くなり、検出件数を汚す。
+# `package.json` は TOML/INI ではないため専用キー（`eslintConfig` / `prettier`）を signal に使う
+# —— 一律 `[tool.ruff]` を流すと「テストの取り違え」で赤くなる。
 _CONDITIONAL_SIGNALS = {
     "pyproject.toml": ("[tool.ruff]\nignore = []\n", "[project]\nname = \"x\"\n"),
     "setup.cfg": ("[flake8]\nignore = E501\n", "[metadata]\nname = x\n"),
@@ -536,54 +492,37 @@ _CONDITIONAL_SIGNALS = {
 }
 
 
-def test_protected_files_set_is_exactly_as_declared() -> None:
-    """`PROTECTED_FILES` の内容が完全一致で固定されていること（層2）。
-
-    層1 の parametrize は集合を入力にするため、要素を削除するとケースごと消えて
-    緑のまま通る。保護語彙の増減はここでしか止まらない。
-    """
-    assert config_protection.PROTECTED_FILES == _EXPECTED_PROTECTED_FILES
-
-
-def test_conditionally_protected_files_set_is_exactly_as_declared() -> None:
-    """`CONDITIONALLY_PROTECTED_FILES` の内容が完全一致で固定されていること（層2）。"""
-    assert config_protection.CONDITIONALLY_PROTECTED_FILES == _EXPECTED_CONDITIONALLY_PROTECTED_FILES
-
-
-def test_directory_change_commands_set_is_exactly_as_declared() -> None:
-    """`_DIRECTORY_CHANGE_COMMANDS` の内容が完全一致で固定されていること（層2）。"""
-    assert bash_config_protection._DIRECTORY_CHANGE_COMMANDS == _EXPECTED_DIRECTORY_CHANGE_COMMANDS
-
-
-def test_lint_section_headers_are_exactly_as_declared() -> None:
-    """`_LINT_SECTION_HEADERS` の内容が完全一致で固定されていること（層2）。"""
-    assert config_protection._LINT_SECTION_HEADERS == _EXPECTED_LINT_SECTION_HEADERS
-
-
-def test_lint_keys_are_exactly_as_declared() -> None:
-    """`_LINT_KEYS` の内容が完全一致で固定されていること（層2）。"""
-    assert config_protection._LINT_KEYS == _EXPECTED_LINT_KEYS
+@pytest.mark.parametrize(
+    ("actual", "expected"),
+    [
+        (config_protection.PROTECTED_FILES, _EXPECTED_PROTECTED_FILES),
+        (config_protection.CONDITIONALLY_PROTECTED_FILES, _EXPECTED_CONDITIONALLY_PROTECTED_FILES),
+        (bash_config_protection._DIRECTORY_CHANGE_COMMANDS, _EXPECTED_DIRECTORY_CHANGE_COMMANDS),
+        (config_protection._LINT_SECTION_HEADERS, _EXPECTED_LINT_SECTION_HEADERS),
+        (config_protection._LINT_KEYS, _EXPECTED_LINT_KEYS),
+    ],
+    ids=[
+        "PROTECTED_FILES",
+        "CONDITIONALLY_PROTECTED_FILES",
+        "_DIRECTORY_CHANGE_COMMANDS",
+        "_LINT_SECTION_HEADERS",
+        "_LINT_KEYS",
+    ],
+)
+def test_protected_vocabulary_is_exactly_as_declared(actual: Any, expected: Any) -> None:
+    """層1 が入力にする保護語彙の内容が完全一致で固定されていること（層2）。"""
+    assert actual == expected
 
 
 def test_folded_protected_sets_cover_every_declared_name() -> None:
-    """判定に使う畳み済み集合が、宣言側の全要素を漏れなく含むこと。
+    """判定に使う畳み済み集合が、宣言側の全要素を漏れなく・余計なく含むこと。
 
-    判定は `*_FOLDED` 側でのみ行われるため、畳み込みが一部を落としても宣言側の
-    見た目は正しいまま保護だけが消える。件数の一致まで見て、畳み込みが余計な
-    名前を増やしていないことも同時に固定する。
-
-    期待値は実装側の集合ではなく層2 の `_EXPECTED_*` から組み立てる。実装の集合
-    から実装と同じ式で作ると「畳み込みがまったく別の入力から作られている」場合
-    しか捕まえられず、宣言側と畳み込み側が揃って壊れた場合に緑のまま通る。
+    判定は `*_FOLDED` 側でのみ行われる。期待値は実装の集合ではなく `_EXPECTED_*` から組み立てる
+    （実装から同じ式で作ると、宣言側と畳み込み側が揃って壊れた場合に緑のまま通る）。
     """
-    from claq.hooks.hook_common import normalize_protected_name
-
     for expected, folded in (
         (_EXPECTED_PROTECTED_FILES, config_protection.PROTECTED_FILES_FOLDED),
-        (
-            _EXPECTED_CONDITIONALLY_PROTECTED_FILES,
-            config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED,
-        ),
+        (_EXPECTED_CONDITIONALLY_PROTECTED_FILES, config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED),
     ):
         assert folded == frozenset(normalize_protected_name(name) for name in expected)
         assert len(folded) == len(expected)
@@ -591,64 +530,28 @@ def test_folded_protected_sets_cover_every_declared_name() -> None:
 
 @pytest.mark.parametrize("name", sorted(_EXPECTED_PROTECTED_FILES))
 def test_every_protected_file_is_denied_on_write(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`PROTECTED_FILES` の全要素が Write 経路で deny されること（層1）。
+    """`PROTECTED_FILES` の全要素が Write 経路で、元の綴りでも大文字綴りでも deny されること（層1）。
 
-    Args:
-        name: 保護対象のファイル名。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
+    APFS / NTFS では `RUFF.TOML` が `ruff.toml` そのものを指すため、大小無視も全要素で確認する。
     """
     assert _run("config_protection", _write(name), monkeypatch) == 2
+    assert _run("config_protection", _write(name.upper()), monkeypatch) == 2
 
 
 @pytest.mark.parametrize("name", sorted(_EXPECTED_PROTECTED_FILES))
-def test_every_protected_file_is_denied_on_bash_write(
-    name: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_every_protected_file_is_denied_on_bash_write(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """`PROTECTED_FILES` の全要素が Bash 経路（リダイレクト・削除・作成）で deny されること（層1）。
 
-    Write だけを見ると、`config_protection` にしか載っていない名前を
-    `bash_config_protection` が取りこぼしていても気付けない。両フックが同じ
-    語彙を共有していることを要素ごとに実測する。
-
-    `touch` を含めるのは、`touch` による空ファイル作成の deny を
-    サンプルではなく全数で固定するため。空ファイルの新規作成は内容を書き換えないが、
-    linter の上位カスケード探索を止めるので上書きと同じ弱体化にあたる。
-
-    Args:
-        name: 保護対象のファイル名。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
+    Write だけでは `bash_config_protection` の取りこぼしに気付けない。`touch` を含めるのは、
+    空ファイルの新規作成も linter の上位カスケード探索を止めて上書きと同じ弱体化になるため。
     """
-    assert _run("bash_config_protection", _bash(f"printf x > {name}"), monkeypatch) == 2
-    assert _run("bash_config_protection", _bash(f"rm {name}"), monkeypatch) == 2
-    assert _run("bash_config_protection", _bash(f"touch {name}"), monkeypatch) == 2
-
-
-@pytest.mark.parametrize("name", sorted(_EXPECTED_PROTECTED_FILES))
-def test_every_protected_file_is_denied_case_insensitively(
-    name: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`PROTECTED_FILES` の全要素が大文字綴りでも deny されること（層1・大小無視の全数版）。
-
-    APFS / NTFS では `RUFF.TOML` が `ruff.toml` そのものを指す。数件の
-    サンプルではなく全要素で確認する。
-
-    Args:
-        name: 保護対象のファイル名。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-    """
-    assert _run("config_protection", _write(name.upper()), monkeypatch) == 2
+    for command in (f"printf x > {name}", f"rm {name}", f"touch {name}"):
+        assert _run("bash_config_protection", _bash(command), monkeypatch) == 2, command
 
 
 @pytest.mark.parametrize("name", _NON_MEMBER_CONFIG_NAMES)
 def test_non_member_config_name_is_allowed(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """保護語彙に載っていない類似名は allow のままであること（層1 の陰性対照）。
-
-    これが無いと「全部 deny する」実装でも層1 が緑になる。
-
-    Args:
-        name: 保護語彙に載っていない類似ファイル名。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-    """
+    """保護語彙に載っていない類似名は allow のままであること（「全部 deny する」実装を落とす陰性対照）。"""
     assert name not in _EXPECTED_PROTECTED_FILES
     assert _run("config_protection", _write(name), monkeypatch) == 0
 
@@ -657,12 +560,7 @@ def test_non_member_config_name_is_allowed(name: str, monkeypatch: pytest.Monkey
 def test_every_conditionally_protected_file_denies_only_lint_signals(
     name: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """条件付き保護の全要素が、lint 兆候ありで deny・なしで allow になること（層1）。
-
-    Args:
-        name: 条件付き保護対象のファイル名。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-    """
+    """条件付き保護の全要素が、lint 兆候ありで deny・なしで allow になること（層1）。"""
     with_signal, without_signal = _CONDITIONAL_SIGNALS[name]
     assert _run("config_protection", _write_content(name, with_signal), monkeypatch) == 2
     assert _run("config_protection", _write_content(name, without_signal), monkeypatch) == 0
@@ -674,18 +572,9 @@ def test_every_directory_change_command_forces_unconditional_deny(
 ) -> None:
     """`_DIRECTORY_CHANGE_COMMANDS` の全要素が repo スコープ判定を放棄させること（層1）。
 
-    docs/adr/shell-analysis-boundary.md: cwd を動かすコマンドがあると相対パス解決が実行時の位置とずれるため、
-    repo スコープを信用せず保護対象 basename のヒットをそのまま deny する。
-
-    判別には **repo ルート外**を指す書き込み先を使う。repo 内のパスは
-    `_within_repo_root` で当然 deny になるので、それでは「cd 系だから deny した」
-    のか「repo 内だから deny した」のか区別できない —— 実際
-    `pushd sub && printf x > ../ruff.toml` は cd 系の判定を落としても deny のまま
-    になる。cd 系が無い同じコマンドが allow であることを対照として先に固定する。
-
-    Args:
-        command: ディレクトリ移動コマンド名。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
+    cwd を動かすと相対パス解決が実行時の位置とずれるため、保護対象 basename のヒットをそのまま deny する。
+    repo 内のパスでは「repo 内だから deny」と区別できないので、cd 系が無ければ allow になる
+    **repo ルート外**の書き込み先を対照として先に固定する。
     """
     outside_repo = "printf x > ../ruff.toml"
     assert _run("bash_config_protection", _bash(outside_repo), monkeypatch) == 0
@@ -693,40 +582,20 @@ def test_every_directory_change_command_forces_unconditional_deny(
 
 
 @pytest.mark.parametrize("header", _EXPECTED_LINT_SECTION_HEADERS)
-def test_every_lint_section_header_is_detected(
-    header: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`_LINT_SECTION_HEADERS` の全要素が条件付き保護を発火させること（層1）。
-
-    前方一致で判定するため、閉じ括弧を持たない要素（`[tool.ruff` / `[testenv`）は
-    サブセクション形で流す。
-
-    Args:
-        header: セクション見出しの照合文字列。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-    """
+def test_every_lint_section_header_is_detected(header: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_LINT_SECTION_HEADERS` の全要素が条件付き保護を発火させること（層1・前方一致なので `[tool.ruff` 等は `.sub]` を足す）。"""
     line = header if header.endswith("]") else f"{header}.sub]"
     assert _run("config_protection", _write_content("setup.cfg", f"{line}\nx = 1\n"), monkeypatch) == 2
 
 
 @pytest.mark.parametrize("key", _EXPECTED_LINT_KEYS)
 def test_every_lint_key_is_detected(key: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_LINT_KEYS` の全要素が見出し無しの値行編集でも条件付き保護を発火させること（層1）。
-
-    Args:
-        key: lint 設定キー。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-    """
+    """`_LINT_KEYS` の全要素が見出し無しの値行編集でも条件付き保護を発火させること（層1）。"""
     assert _run("config_protection", _write_content("pyproject.toml", f"{key} = 1\n"), monkeypatch) == 2
 
 
 @pytest.mark.parametrize("word", ["description", "requires-python", "name", "[project]", "[metadata]"])
 def test_non_lint_section_or_key_is_allowed(word: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """lint 語彙でない見出し・キーは条件付き保護を発火させないこと（層1 の陰性対照）。
-
-    Args:
-        word: lint 語彙に載っていない見出しまたはキー。
-        monkeypatch: pytest の monkeypatch フィクスチャ。
-    """
+    """lint 語彙でない見出し・キーは条件付き保護を発火させないこと（層1 の陰性対照）。"""
     body = f"{word}\nx = 1\n" if word.startswith("[") else f"{word} = 1\n"
     assert _run("config_protection", _write_content("pyproject.toml", body), monkeypatch) == 0
