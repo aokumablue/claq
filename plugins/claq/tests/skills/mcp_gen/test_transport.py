@@ -74,18 +74,25 @@ class TestTransport:
         assert security.enable_dns_rebinding_protection is True
         assert (security.allowed_hosts, security.allowed_origins) == (hosts, origins)
 
-    @pytest.mark.parametrize("argv", [("--http", "--host", "0.0.0.0"), ("--http", "--host", "mcp.example.com")])
+    @pytest.mark.parametrize(
+        ("argv", "message"),
+        [
+            (("--http", "--host", "0.0.0.0"), "認証を実装していないので、ループバック以外には公開しない"),
+            (("--http", "--host", "mcp.example.com"), "認証を実装していないので、ループバック以外には公開しない"),
+            (("--http", "--host", "0.0.0.0", "--allow-remote"), "--allow-remote"),
+        ],
+        ids=["any-address", "public-name", "allow-remote-flag"],
+    )
     def test_rejects_non_loopback_host(
-        self, transport: types.ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], argv: tuple[str, ...]
+        self,
+        transport: types.ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        argv: tuple[str, ...],
+        message: str,
     ) -> None:
-        """ループバック以外のホストは、認証を実装していないので起動せずに拒否する。"""
+        """ループバック以外のホストは、認証を実装していないので起動せずに拒否し、ループバック以外へ広げる抜け道（--allow-remote）も持たない。"""
         with pytest.raises(SystemExit) as exited:
             self._run(transport, monkeypatch, *argv)
         assert exited.value.code == 2
-        assert "認証を実装していないので、ループバック以外には公開しない" in capsys.readouterr().err
-
-    def test_has_no_allow_remote_flag(self, transport: types.ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-        """ループバック以外へ広げる抜け道（--allow-remote）を持たない。"""
-        with pytest.raises(SystemExit):
-            self._run(transport, monkeypatch, "--http", "--host", "0.0.0.0", "--allow-remote")
-        assert "--allow-remote" in capsys.readouterr().err
+        assert message in capsys.readouterr().err
