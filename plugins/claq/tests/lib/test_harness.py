@@ -182,7 +182,7 @@ def test_iter_bash_command_groups(payload: dict, expected: list[tuple[str, ...]]
         ["echo", 'say "hi"'],
         ["printf", "a\nb", "line1\nline2"],
         ["echo", "$HOME", "`id`", "$(id)"],
-        ["echo", "日本語", "é​"],
+        ["echo", "日本語", "\u00e9\u200b"],
         ["echo", "", "x"],
         ["echo", "a;b", "c&&d", "e|f", "#g"],
         ["x", "\\"],
