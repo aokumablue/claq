@@ -8,7 +8,6 @@ docs/adr/code-simplicity-and-defense.md は、サブエージェントに参照�
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -46,15 +45,6 @@ def _contains(lines: list[str], block: list[str]) -> bool:
     return any(lines[i : i + len(block)] == block for i in range(len(lines) - len(block) + 1))
 
 
-def _iter_definitions() -> Iterator[Path]:
-    """assets を除く定義 md を、プラグインルートからの相対パスで列挙する。"""
-    for dirname in _TARGET_DIRS:
-        for path in sorted((_ROOT / dirname).rglob("*.md")):
-            relative = path.relative_to(_ROOT)
-            if "assets" not in relative.parts:
-                yield relative
-
-
 @pytest.mark.parametrize("relative_path", _COPIES, ids=str)
 def test_copy_contains_canonical_block(relative_path: Path) -> None:
     """各定義が正本と同じ簡潔さ基準を、一字一句同じ連続した行として含むこと。"""
@@ -69,5 +59,6 @@ def test_every_partial_copy_is_registered() -> None:
     写しを新しい定義へ足したのに登録を忘れると、その写しだけが照合から漏れてずれる。
     """
     first_line = _canonical_block()[0]
-    holders = {path for path in _iter_definitions() if first_line in _lines(path)}
+    definitions = {path.relative_to(_ROOT) for dirname in _TARGET_DIRS for path in (_ROOT / dirname).rglob("*.md")}
+    holders = {path for path in definitions if "assets" not in path.parts and first_line in _lines(path)}
     assert holders == {_CANONICAL, *_COPIES}

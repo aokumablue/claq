@@ -9,10 +9,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_ADR_DIR = Path(__file__).resolve().parents[3] / "docs" / "adr"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_ADR_DIR = _REPO_ROOT / "docs" / "adr"
 _TOPIC_RE = re.compile(r"^[a-z][a-z0-9-]+\.md$")
 _EXCLUDED_TOPIC_NAMES = {"readme.md", "template.md"}
 _SERIAL_RE = re.compile(r"ADR-\d{4}")
+_SKIP_DIR_NAMES = {".git", ".venv", "__pycache__", "node_modules"}
+_SCAN_SUFFIXES = {".md", ".py", ".sh", ".cmd", ".json", ".toml", ".txt", ".yml", ".yaml"}
 
 
 def _topic_files() -> list[Path]:
@@ -37,7 +40,7 @@ def test_topic_files_have_common_principles_and_a_decision_section() -> None:
         headings = re.findall(r"^## (.+)$", path.read_text(encoding="utf-8"), re.MULTILINE)
         if "共通原則" not in headings:
             missing.append(f"{path.name}: 「共通原則」が無い")
-        if len([h for h in headings if h != "共通原則"]) < 1:
+        if all(h == "共通原則" for h in headings):
             missing.append(f"{path.name}: 決定節が無い")
     assert missing == [], "トピックファイルの見出し不足:\n" + "\n".join(missing)
 
@@ -58,18 +61,11 @@ def test_topic_files_are_self_contained() -> None:
     assert violations == [], "トピック間参照が残っている:\n" + "\n".join(violations)
 
 
-_SKIP_DIR_NAMES = {".git", ".venv", "__pycache__", "node_modules"}
-_SCAN_SUFFIXES = {".md", ".py", ".sh", ".cmd", ".json", ".toml", ".txt", ".yml", ".yaml"}
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
 def test_repo_does_not_use_adr_serial_ids() -> None:
     """採番 ID をリポジトリへ残さないこと。参照はトピックファイル名で行う。"""
     hits: list[str] = []
     for path in _REPO_ROOT.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in _SCAN_SUFFIXES:
-            continue
-        if any(part in _SKIP_DIR_NAMES for part in path.parts):
+        if not path.is_file() or path.suffix.lower() not in _SCAN_SUFFIXES or _SKIP_DIR_NAMES.intersection(path.parts):
             continue
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
@@ -77,6 +73,5 @@ def test_repo_does_not_use_adr_serial_ids() -> None:
             continue
         for i, line in enumerate(lines, 1):
             if _SERIAL_RE.search(line):
-                rel = path.relative_to(_REPO_ROOT)
-                hits.append(f"{rel}:{i}: {line.strip()}")
+                hits.append(f"{path.relative_to(_REPO_ROOT)}:{i}: {line.strip()}")
     assert hits == [], "採番 ID が残っている:\n" + "\n".join(hits)
