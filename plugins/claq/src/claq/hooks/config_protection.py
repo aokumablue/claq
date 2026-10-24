@@ -11,9 +11,10 @@ launcher は stdin を代読しないため、入力切り捨て時のブロッ�
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from claq.hooks.block_no_verify import is_sensitive_config_key
 from claq.hooks.git_config_text import (
@@ -29,6 +30,7 @@ from claq.hooks.hook_common import (
     emit_block_output,
     normalize_protected_name,
     resolve_effective_target,
+    resolve_repo_root,
 )
 from claq.hooks.stdin_io import (
     MAX_STDIN_BYTES,
@@ -37,6 +39,7 @@ from claq.hooks.stdin_io import (
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
 )
+from claq.lib.core_utils import get_plugin_root
 from claq.lib.harness import (
     extract_file_paths,
     extract_raw_tool_name,
@@ -144,10 +147,9 @@ CONDITIONALLY_PROTECTED_FILES = frozenset({
     "setup.cfg",
     "tox.ini",
     "package.json",
-    # ホスト設定。保護フックを止める手段を持つ（`env` の `CLAQ_PYTHON`、`hooks` の差し替え、
-    # プラグインの無効化）。`CLAQ_PYTHON` は `runtime/claq-hook` が exec するため、全ツール
-    # 呼び出しでの任意コード実行になる。`env` への `DEBUG=true` 等の正当な編集を壊さない
-    # よう、全面保護にはしない。
+    # ホスト設定。保護フックを止める手段を持つ（`hooks` の差し替え、プラグインの無効化、
+    # インタプリタ解決を乗っ取る `env`）。`model` / `permissions` / `env` の `DEBUG` 等の正当な
+    # 編集を壊さないよう、置換前後の全文で `_SETTINGS_GUARDED_*` が変わるときだけ塞ぐ。
     "settings.json",
     "settings.local.json",
 })
@@ -182,9 +184,22 @@ _LINT_KEY_PATTERN = re.compile(
     r"(?m)^[ \t]*(" + "|".join(re.escape(key) for key in _LINT_KEYS) + r")[ \t]*="
 )
 
-# ホスト設定（settings.json / settings.local.json）で保護を外せるキー。`env` 全般ではなく
-# `CLAQ_PYTHON` の出現そのものを見る。
-_SETTINGS_GUARD_KEYS = ("CLAQ_PYTHON", '"hooks"', '"enabledPlugins"', '"disabledPlugins"')
+# ホスト設定（settings.json / settings.local.json）で置換前後を比べる top-level の部分木。
+# 有無の変化も変化として扱う。`disableAllHooks` は全フックを一括で止める。
+_SETTINGS_GUARDED_SUBTREES = ("hooks", "enabledPlugins", "disabledPlugins", "disableAllHooks")
+
+# 同じく比べる `env` のキー。`CLAQ_PYTHON` は `runtime/claq-hook` が exec し、`PATH` は
+# `CLAQ_PYTHON` 未設定時の `python3` 探索を、`PYTHONPATH` / `PYTHONHOME` は標準ライブラリの解決を
+# 左右するため、どれも全ツール呼び出しでの任意コード実行になる。Windows の環境変数名は大小を
+# 区別しないので、照合時に casefold して比べる。
+_SETTINGS_GUARDED_ENV_NAMES = ("CLAQ_PYTHON", "PATH", "PYTHONPATH", "PYTHONHOME")
+
+# 実行中の plugin root から見て守るディレクトリ。`runtime/` は hooks.json が起動する
+# `claq-hook`、`src/claq/` はフック本体で、書き換えると次のツール呼び出しから全保護フックが外れる。
+_RUNNING_PLUGIN_GUARDED_DIRS = (("runtime",), ("src", "claq"))
+
+# 上の表示名。`blocked_message_for_file` がブロック文言を選ぶ鍵（Edit/Write と Bash で共有）。
+RUNNING_PLUGIN_DISPLAY_NAMES = frozenset("/".join(segments) + "/" for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
 
 # package.json は TOML/INI ではないため専用のキー照合にする。
 _PACKAGE_JSON_LINT_KEYS = ("eslintConfig", "prettier")
@@ -313,8 +328,11 @@ def _effective_basename(file_path: str) -> str:
 def blocked_message_for_file(file_name: str) -> str:
     """保護されたファイルに対するブロックメッセージを生成する。
 
+    実行中の plugin root の保護ディレクトリ（`RUNNING_PLUGIN_DISPLAY_NAMES`）には専用の文言を返す。
+    Edit/Write と Bash（`bash_config_protection`）が同じ表示名から同じ文言を得るため、選択をここに置く。
+
     Args:
-        file_name: ブロックされたファイル名
+        file_name: ブロックされたファイル名、または保護 path の表示名。
 
     Returns:
         ブロックメッセージ文字列
@@ -322,6 +340,8 @@ def blocked_message_for_file(file_name: str) -> str:
     Raises:
         例外は発生しません。
     """
+    if file_name in RUNNING_PLUGIN_DISPLAY_NAMES:
+        return _running_plugin_blocked_message(file_name)
     return (
         f"BLOCKED: Modifying {file_name} is not allowed. "
         "Fix the source code to satisfy linter/formatter rules instead of "
@@ -430,9 +450,9 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
 def _text_has_protected_signal(text: str, file_name: str) -> bool:
     """テキストに保護対象を弱めうる兆候が含まれるか判定する（副判定）。
 
-    ホスト設定は保護フックを止めるキーを、package.json は専用のキーを、tox.ini は実行
-    コマンドのキー（見出しを伴わない値行編集でも検出するため）を、それ以外は共通の
-    セクション見出しの部分一致またはキー行照合（`ignore = [...]` 等）を見る。
+    package.json は専用のキーを、tox.ini は実行コマンドのキー（見出しを伴わない値行編集でも
+    検出するため）を、それ以外は共通のセクション見出しの部分一致またはキー行照合
+    （`ignore = [...]` 等）を見る。
     `_LINT_SIGNAL_MAX_TEXT_BYTES` を超えるテキストは走査せず True を返す。
 
     Args:
@@ -449,8 +469,6 @@ def _text_has_protected_signal(text: str, file_name: str) -> bool:
         return True
     # ファイル別分岐も畳んだ名前で選ぶ（``Package.json`` を専用のキー照合へ落とすため）。
     folded_name = normalize_protected_name(file_name)
-    if folded_name in ("settings.json", "settings.local.json"):
-        return any(key in text for key in _SETTINGS_GUARD_KEYS)
     if folded_name == "package.json":
         return any(key in text for key in _PACKAGE_JSON_LINT_KEYS)
     if folded_name == "tox.ini" and _TOX_COMMAND_KEY_PATTERN.search(text):
@@ -474,8 +492,7 @@ def _conditional_blocked_message(file_name: str) -> str:
     """
     return (
         f"BLOCKED: The change to {file_name} appears to touch a protected setting "
-        "(a lint/format/coverage section or key, or a host setting that can disable the "
-        "protection hooks: CLAQ_PYTHON, hooks, enabledPlugins/disabledPlugins). "
+        "(a lint/format/coverage section or key). "
         "Fix the source code to satisfy the rules instead of weakening the config. "
         "If this change is genuinely necessary, ask the user to make it — "
         "do not disable the protection hook yourself."
@@ -501,11 +518,115 @@ def _unverifiable_conditional_message(file_name: str) -> str:
     )
 
 
-def _conditional_block_reason(tool_name: str, container: Any, file_path: str, file_name: str) -> str | None:
-    """`CONDITIONALLY_PROTECTED_FILES` に該当するファイルへの変更を検査する。
+def _reject_json_constant(name: str) -> NoReturn:
+    """JSON の ``NaN`` / ``Infinity`` / ``-Infinity`` を拒否する。
 
-    判定は主（ディスク上のセクション解決）・副（テキスト照合）の和集合で行う。内容が
-    一切取得できない場合は fail-closed で deny する。
+    host の JSON パーサはこれらを受け付けずファイルごと無視するため、置換後に現れると
+    ``enabledPlugins`` ごと設定が消えうる。読めない JSON として扱う。
+
+    Args:
+        name: パーサが渡す定数名。
+
+    Raises:
+        ValueError: 常に送出する。
+    """
+    raise ValueError(f"non-standard JSON constant: {name}")
+
+
+def _parse_settings_object(text: str) -> dict[str, Any] | None:
+    """ホスト設定の全文を JSON object として読む。
+
+    深すぎる入れ子の RecursionError はここでは捕まえず、比較と合わせて呼び出し側が deny にする。
+
+    Args:
+        text: ファイルの全文。
+
+    Returns:
+        読めた object。JSON として読めない・top-level が object でない場合は None。
+
+    Raises:
+        RecursionError: 入れ子が深すぎる。
+    """
+    try:
+        value = json.loads(text, parse_constant=_reject_json_constant)
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _settings_guarded_view(settings: dict[str, Any]) -> dict[str, Any]:
+    """ホスト設定のうち、保護フックを止めうる部分だけを取り出す。
+
+    ``env`` が無いことは空 object と同じに扱う（保護対象の名前を持たない ``env`` を消す編集を
+    止めないため）。``env`` が object でなければ、名前で選べないので値全体を比べる。
+
+    Args:
+        settings: 解析済みのホスト設定。
+
+    Returns:
+        ``_SETTINGS_GUARDED_SUBTREES`` の部分木（存在するもののみ）と ``env`` の保護対象の名前。
+
+    Raises:
+        例外は発生しません。
+    """
+    view = {key: settings[key] for key in _SETTINGS_GUARDED_SUBTREES if key in settings}
+    env = settings.get("env", {})
+    guarded_names = {name.casefold() for name in _SETTINGS_GUARDED_ENV_NAMES}
+    view["env"] = (
+        {name: value for name, value in env.items() if name.casefold() in guarded_names}
+        if isinstance(env, dict)
+        else env
+    )
+    return view
+
+
+def _settings_blocked_message(file_name: str) -> str:
+    """ホスト設定の変更が保護フックを止めうる場合のブロック理由を生成する。
+
+    Args:
+        file_name: ブロックされたファイル名。
+
+    Returns:
+        ブロック理由文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        f"BLOCKED: The change to {file_name} changes a setting that can disable the protection hooks "
+        "(hooks, enabledPlugins/disabledPlugins, env CLAQ_PYTHON/PATH/PYTHONPATH/PYTHONHOME). "
+        "Other settings (model, permissions, other env entries) can be changed freely. "
+        "If this change is genuinely necessary, ask the user to make it — "
+        "do not disable the protection hook yourself."
+    )
+
+
+def _settings_unverifiable_message(file_name: str) -> str:
+    """ホスト設定の変更結果を検証できない場合のブロック理由を生成する。
+
+    Args:
+        file_name: ブロックされたファイル名。
+
+    Returns:
+        ブロック理由文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        f"BLOCKED: The change to {file_name} could not be verified: the result must be a plain JSON object "
+        "(no comments, trailing commas, NaN/Infinity, or excessive nesting) within "
+        f"{_LINT_SIGNAL_MAX_TEXT_BYTES} bytes, built from a Write or an exact Edit/MultiEdit. "
+        "Ask the user to make this change instead of working around the check."
+    )
+
+
+def _settings_block_reason(tool_name: str, container: Any, file_path: str, file_name: str) -> str | None:
+    """ホスト設定への Edit/Write を、置換前後の全文を JSON として比べて検査する。
+
+    ``_settings_guarded_view`` が変わる編集だけを deny する。置換前が読めない（不在・壊れている・
+    object でない）ときは保護対象が無かったものとして扱う。置換後が読めない・全文を作れない・
+    走査上限を超える場合は検査できないので deny する。
 
     Args:
         tool_name: 正規化前の生ツール名。
@@ -519,6 +640,49 @@ def _conditional_block_reason(tool_name: str, container: Any, file_path: str, fi
     Raises:
         例外は発生しません。
     """
+    before = read_current_text(file_path, _LINT_SIGNAL_MAX_TEXT_BYTES + 1)
+    if len(before) > _LINT_SIGNAL_MAX_TEXT_BYTES:
+        return _settings_unverifiable_message(file_name)
+    after = git_config_text_after(tool_name, container, before, _LINT_SIGNAL_MAX_TEXT_BYTES)
+    if after is None or len(after) > _LINT_SIGNAL_MAX_TEXT_BYTES:
+        return _settings_unverifiable_message(file_name)
+    # 深い入れ子は解析・直列化で RecursionError になる。貫通すると exit 1（PreToolUse では allow）。
+    try:
+        after_obj = _parse_settings_object(after)
+        if after_obj is None:
+            return _settings_unverifiable_message(file_name)
+        before_obj = _parse_settings_object(before) or {}
+        # 直列化して比べる。dict の == は true と 1、1 と 1.0 を同じとみなし、型の書換えを見逃す。
+        if json.dumps(_settings_guarded_view(before_obj), sort_keys=True) != json.dumps(
+            _settings_guarded_view(after_obj), sort_keys=True
+        ):
+            return _settings_blocked_message(file_name)
+    except RecursionError:
+        return _settings_unverifiable_message(file_name)
+    return None
+
+
+def _conditional_block_reason(tool_name: str, container: Any, file_path: str, file_name: str) -> str | None:
+    """`CONDITIONALLY_PROTECTED_FILES` に該当するファイルへの変更を検査する。
+
+    ホスト設定は `_settings_block_reason` で全文を比べる。それ以外は主（ディスク上の
+    セクション解決）・副（テキスト照合）の和集合で行い、内容が一切取得できない場合は
+    fail-closed で deny する。
+
+    Args:
+        tool_name: 正規化前の生ツール名。
+        container: extract_tool_input 相当の 1 コンテナ値。
+        file_path: 対象ファイルパス。
+        file_name: 対象ファイルの basename。
+
+    Returns:
+        ブロック理由。問題なければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    if normalize_protected_name(file_name) in ("settings.json", "settings.local.json"):
+        return _settings_block_reason(tool_name, container, file_path, file_name)
     snippets = _editable_text(tool_name, container)
     if snippets is None:
         return _unverifiable_conditional_message(file_name)
@@ -606,6 +770,86 @@ def _git_config_block_reason(tool_name: str, container: Any, file_path: str, dis
     return None
 
 
+def _folded_parts(path: Path) -> tuple[str, ...]:
+    """パスの各要素を大小無視で畳む。
+
+    Args:
+        path: 畳むパス。
+
+    Returns:
+        畳んだ要素列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return tuple(normalize_protected_name(part) for part in path.parts)
+
+
+def running_plugin_root_is_guarded() -> bool:
+    """実行中の plugin root を保護するか（作業中リポジトリ内の開発用 checkout でないか）を判定する。
+
+    claq 自身を開発する checkout では `runtime/` と `src/claq/` の編集が本来の作業なので守らない。
+    toplevel が決まらない（リポジトリ外・git 不在・タイムアウト）ときは除外しない。git を起動するので、
+    書込み先が保護ディレクトリに当たった後でだけ呼ぶ。
+
+    Returns:
+        保護するなら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    repo_root = resolve_repo_root()
+    if repo_root is None:
+        return True
+    plugin_parts = _folded_parts(get_plugin_root())
+    repo_parts = _folded_parts(repo_root.resolve())
+    return plugin_parts[: len(repo_parts)] != repo_parts
+
+
+def running_plugin_guarded_dir(resolved: Path, *, include_ancestors: bool) -> str | None:
+    """実体パスが実行中の plugin root の保護ディレクトリに当たるかを判定する。
+
+    比較は畳んだ要素列の前方一致で行う（APFS / NTFS では `resolve()` が大小を正規化しない）。
+
+    Args:
+        resolved: symlink を解決した書込み先の実体パス。
+        include_ancestors: 保護ディレクトリ自身・祖先も当てるか（Bash の削除・退避）。
+
+    Returns:
+        当たった保護ディレクトリの表示名（``runtime/`` / ``src/claq/``）。当たらない、または
+        開発用 checkout で保護しない場合は None。
+
+    Raises:
+        例外は発生しません。
+    """
+    target = _folded_parts(resolved)
+    for segments in _RUNNING_PLUGIN_GUARDED_DIRS:
+        guarded = _folded_parts(get_plugin_root().joinpath(*segments))
+        if target[: len(guarded)] == guarded or (include_ancestors and guarded[: len(target)] == target):
+            return "/".join(segments) + "/" if running_plugin_root_is_guarded() else None
+    return None
+
+
+def _running_plugin_blocked_message(display_name: str) -> str:
+    """実行中の plugin root の保護ディレクトリへの書込みに対するブロック理由を生成する。
+
+    Args:
+        display_name: 保護ディレクトリの表示名。
+
+    Returns:
+        ブロック理由文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        f"BLOCKED: Modifying {display_name} of the running claq plugin is not allowed. "
+        "Every protection hook runs from this code, so changing it would disable all of them "
+        "from the next tool call. If this change is genuinely necessary, ask the user to make it — "
+        "do not disable the protection hook yourself."
+    )
+
+
 def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
     """1 つの入力コンテナが保護対象ならブロック理由を返す。
 
@@ -626,6 +870,12 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
     if file_paths is None:
         return _UNDECIDABLE_TARGET_MESSAGE
     for file_path in file_paths:
+        # 実体パスを解決できない file_path は位置で照合できないので、下の名前の判定に任せる。
+        resolved = resolve_effective_target(file_path)
+        if resolved is not None:
+            running_dir = running_plugin_guarded_dir(resolved, include_ancestors=False)
+            if running_dir is not None:
+                return blocked_message_for_file(running_dir)
         protected_segment = protected_path_segment(file_path)
         if protected_segment is not None:
             return blocked_message_for_file(f"{protected_segment}/")

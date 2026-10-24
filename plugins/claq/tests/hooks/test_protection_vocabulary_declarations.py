@@ -308,6 +308,16 @@ _VOCABULARY_WRITE_CASES = (
         lambda item: _write_content("/".join(item).replace("*", "wt").upper(), "[core]\n\thooksPath = /dev/null\n"),
         _write_content("docs/config", "[core]\n\thooksPath = /dev/null\n"),
     ),
+    (
+        "config_protection._SETTINGS_GUARDED_SUBTREES",
+        lambda item: _write_content(".claude/settings.json", '{"' + item + '": {}}'),
+        _write_content(".claude/settings.json", '{"model": "x"}'),
+    ),
+    (
+        "config_protection._SETTINGS_GUARDED_ENV_NAMES",
+        lambda item: _write_content(".claude/settings.json", '{"env": {"' + item + '": "/tmp/x"}}'),
+        _write_content(".claude/settings.json", '{"env": {"DEBUG": "1"}}'),
+    ),
 )
 
 # 層1 をこのファイルの別テストが担っている語彙と、その担い手。
@@ -327,7 +337,8 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
     "config_protection._PROTECTED_PATH_SEGMENTS_FOLDED": "_BLOCKED_CASES の保護 path の大文字（Bash）",
     "config_protection._LINT_SECTION_HEADERS": "test_every_lint_section_header_is_detected",
     "config_protection._LINT_KEYS": "test_every_lint_key_is_detected",
-    "config_protection._SETTINGS_GUARD_KEYS": "test_every_conditionally_protected_file_denies_only_lint_signals の settings.json / settings.local.json",
+    "config_protection._RUNNING_PLUGIN_GUARDED_DIRS": "test_every_running_plugin_guarded_dir_is_denied_on_write_and_bash (test_running_plugin_protection)",
+    "host_guard_targets._RUNTIME_ENTRYPOINT_NAMES": "test_every_runtime_entrypoint_name_is_denied_after_cd (test_running_plugin_protection)",
 }
 
 # 層1 を持たない語彙と、その理由。
@@ -342,6 +353,10 @@ _VOCABULARY_LAYER1_ABSENT = {
     "git_config_text.GLOBAL_GIT_CONFIG_DISPLAY_NAMES": (
         "表示名であり、保護対象のパスはホームと XDG_CONFIG_HOME から実行時に決まる。要素単位で判定が"
         "変わる経路が無い（パス判定は test_git_config_protection.TestProtectedPaths が担う）"
+    ),
+    "config_protection.RUNNING_PLUGIN_DISPLAY_NAMES": (
+        "派生値（`_RUNNING_PLUGIN_GUARDED_DIRS` の表示名）で、`blocked_message_for_file` がブロック文言を選ぶ鍵にすぎない。"
+        "保護対象かどうかの判定は変えない"
     ),
     "bash_config_protection._RAW_TEXT_RISK_INDICATORS": (
         "派生値（`_REMOVE_COMMANDS` 等の連結）であり、構成元の各集合が層1 を持つ。"

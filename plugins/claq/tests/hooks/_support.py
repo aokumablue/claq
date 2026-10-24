@@ -270,6 +270,9 @@ _EXPECTED_GIT_CONFIG_REPO_SEGMENTS = (
     (".git", "worktrees", "*", "config.worktree"),
 )
 
+# `config_protection._RUNNING_PLUGIN_GUARDED_DIRS` の期待内容（層2）。実行中の plugin root からの相対要素列。
+_EXPECTED_RUNNING_PLUGIN_GUARDED_DIRS = (("runtime",), ("src", "claq"))
+
 # `git_config_text.GLOBAL_GIT_CONFIG_DISPLAY_NAMES` の期待内容（層2）。
 _EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES = frozenset(
     {"~/.gitconfig", "$XDG_CONFIG_HOME/git/config", "~/.config/git/config"}
@@ -445,16 +448,16 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": _folded(
         _EXPECTED_CONDITIONALLY_PROTECTED_FILES
     ),
-    # ホスト設定で保護フックを止められるキー。`env` 全般を条件にすると
-    # `update-config` skill の `DEBUG=true` や `.vscode/settings.json` の
-    # `terminal.integrated.env.*` を巻き込むため、`CLAQ_PYTHON` の出現そのものと
-    # 保護を外せる 3 キーだけに絞る。
-    "config_protection._SETTINGS_GUARD_KEYS": (
-        "CLAQ_PYTHON",
-        '"hooks"',
-        '"enabledPlugins"',
-        '"disabledPlugins"',
+    # ホスト設定（settings.json / settings.local.json）で置換前後の全文を比べる部分木と env のキー。
+    # env のキーは大小無視で照合する（Windows の環境変数名は大小を区別しない）。
+    "config_protection._SETTINGS_GUARDED_SUBTREES": ("hooks", "enabledPlugins", "disabledPlugins", "disableAllHooks"),
+    "config_protection._SETTINGS_GUARDED_ENV_NAMES": ("CLAQ_PYTHON", "PATH", "PYTHONPATH", "PYTHONHOME"),
+    "config_protection._RUNNING_PLUGIN_GUARDED_DIRS": _EXPECTED_RUNNING_PLUGIN_GUARDED_DIRS,
+    # 派生: 上の表示名（`blocked_message_for_file` が文言を選ぶ鍵）。
+    "config_protection.RUNNING_PLUGIN_DISPLAY_NAMES": frozenset(
+        "/".join(segments) + "/" for segments in _EXPECTED_RUNNING_PLUGIN_GUARDED_DIRS
     ),
+    "host_guard_targets._RUNTIME_ENTRYPOINT_NAMES": ("claq-hook", "claq-hook.cmd"),
     "config_protection._PROTECTED_PATH_SEGMENTS": _EXPECTED_PROTECTED_PATH_SEGMENTS,
     "config_protection._PROTECTED_PATH_SEGMENTS_FOLDED": tuple(
         tuple(hook_common.normalize_protected_name(part) for part in segments)

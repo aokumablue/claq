@@ -552,8 +552,8 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
         _recursed: 内部再帰用フラグ。True の場合、これ以上ラッパーへ再帰しない。
 
     Returns:
-        `_protected_target` / `find_host_guard_match` の表示名（そのまま
-        `blocked_message_for_file` に渡せる）、または ``~/.claq/logs``。該当しなければ None。
+        `_protected_target` / `find_host_guard_match` の表示名（`_blocked_message` が文言を選ぶ鍵）、
+        または ``~/.claq/logs``。該当しなければ None。
 
     Raises:
         ScanBudgetExceededError: `sh -c` の再帰先が検査予算を超えた。
@@ -571,8 +571,8 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
 def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | None:
     """1 つのシェル方言の読み方で保護対象書き込みを探す。
 
-    ``~/.claq/logs/``・ホーム側の git 設定・`find_host_guard_match`（プラグインの
-    ``hooks/hooks.json`` とホスト設定）への一致は repo スコープ判定より前で、無条件に deny する。
+    ``~/.claq/logs/``・ホーム側の git 設定・`find_host_guard_match`（``hooks/hooks.json``・実行中の
+    plugin の ``runtime/`` と ``src/claq/``・ホスト設定）への一致は repo スコープ判定より前で、無条件に deny する。
     保護名に一致したトークンの解決に失敗した場合も repo スコープ判定に進めないため deny する。
 
     Args:

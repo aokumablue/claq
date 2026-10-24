@@ -120,11 +120,34 @@ Windows の wrapper + インタプリタ起動の遅さで host 側 timeout（�
 3. **deny の終了コードは出力層の失敗から独立させる。** 出力例外は内側で捕まえ、exit code は必ず
    返す。PreToolUse では exit 1 が non-blocking error（＝ツール実行）になるため、出力層の例外が
    deny を allow へ反転させてはならない
-4. **`config_protection` はプラグイン自身の `hooks.json` と、ホスト設定の無効化口を守る。**
-   `plugins/claq/hooks/hooks.json` はパス連続一致で無条件保護する（basename 一致だと consumer の
-   `.claude/hooks.json` と衝突する）。`settings.json` / `settings.local.json` は `CLAQ_PYTHON` の
-   出現、および `hooks` / `enabledPlugins` / `disabledPlugins` のときだけ deny する。ブロック
-   メッセージは「ユーザーに依頼せよ。フックを自分で無効化するな」とする
+4. **`config_protection` はプラグイン自身の `hooks.json`、実行中のプラグインのランタイム、ホスト設定の無効化口を守る。**
+   - `plugins/claq/hooks/hooks.json` はパス連続一致で無条件保護する（basename 一致だと consumer の
+     `.claude/hooks.json` と衝突する）。
+   - 実行中の plugin root（フック自身のファイル位置から導く実体パス）の `runtime/`（`hooks.json` が
+     起動する `claq-hook`）と `src/claq/`（フック本体）を守る。書き換えると次のツール呼び出しから
+     全保護フックが外れるため。配下への Edit/Write と Bash の書込み、Bash によるディレクトリ自身・
+     祖先の削除と退避を deny する。照合は symlink を解決した実体パスで、大小を無視する。
+   - plugin root が作業中リポジトリ（git の toplevel）の内側にあるときは対象外にする。claq 自身を
+     開発する checkout ではこれらの編集が本来の作業で、守ると claq を開発できなくなる。git は
+     書込み先がこれらに当たったときだけ起動する。toplevel が決まらない（リポジトリ外・git 不在・
+     タイムアウト）ときは対象外にしない。
+   - `cd` を含む Bash コマンドでは相対パスを解決できないので、basename が `claq-hook` /
+     `claq-hook.cmd` の書込み先を deny する。
+   - `settings.json` / `settings.local.json`（basename で判定）は置換前後の全文を JSON として比べる
+     （全文の作り方は git config と同じ）。比べるのは top-level の `hooks` / `enabledPlugins` /
+     `disabledPlugins` の部分木（有無の変化を含む）と、`env` のうちインタプリタ解決に効く
+     `CLAQ_PYTHON` / `PATH` / `PYTHONPATH` / `PYTHONHOME`（名前は大小無視）である。`env` が object
+     でなければ値全体を比べ、`env` が無いことは空と同じに扱う。値は型まで区別する（`true` を `1` に
+     変えるのも変化）。これらが変わる編集だけを deny し、それ以外（`model` / `permissions` / `env`
+     の他のキー）は通す。
+   - 置換後が JSON object として読めない（コメント・末尾カンマ・NaN/Infinity・深すぎる入れ子）、
+     全文を作れない（`apply_patch` を含む）、走査上限（256KiB）を超える場合は検査できないので
+     deny する。コメントを含む `.vscode/settings.json` もここに入る。置換前が読めないときは
+     保護対象が無かったものとして扱う。
+   - ブロックメッセージは「ユーザーに依頼せよ。フックを自分で無効化するな」とする。
+   - 残る穴: `src/` 直下（`src/claq/` の外）のモジュールによる標準ライブラリの差し替え、`cd` 後の
+     起動ファイル以外の相対パス、toplevel を変える操作（上位での `git init`、`env` の `GIT_DIR` /
+     `GIT_WORK_TREE`）による除外の拡大、`env` のその他の変数（`LD_PRELOAD` 等）、ハードリンク経由の書込み。
 5. **git config は Edit/Write では置換後の全文の前後比較で、Bash では書込み先に現れた時点で deny する。**
    対象は `.git/config`・`.git/config.worktree`・`.git/worktrees/*/config`・
    `.git/worktrees/*/config.worktree` と、ホーム側の `~/.gitconfig`・`$XDG_CONFIG_HOME/git/config`

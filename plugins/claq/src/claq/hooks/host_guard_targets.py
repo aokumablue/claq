@@ -1,14 +1,15 @@
 """保護フックそのものを止められる、リポジトリ外の書込み先の判定。
 
 `bash_config_protection` が repo スコープ判定より前に呼ぶ。対象はプラグイン自身の
-``hooks/hooks.json``（PreToolUse ガードの登録元）と、ホスト設定 ``settings.json`` /
-``settings.local.json``（`CLAQ_PYTHON`・`hooks`・プラグインの無効化を持てる）。Edit/Write
+``hooks/hooks.json``（PreToolUse ガードの登録元）、実行中の plugin root の ``runtime/``・``src/claq/``
+（全保護フックの起動ファイルと本体）、ホスト設定 ``settings.json`` / ``settings.local.json``
+（`hooks`・プラグインの無効化・インタプリタ解決に効く `env` を持てる）。Edit/Write
 （`config_protection`）は同じ書込みを deny するため、Bash だけ repo 外として allow にすると
-片側だけ塞いだ状態になる（docs/adr/hook-failure-direction.md「`config_protection` は
-プラグイン自身の `hooks.json` と、ホスト設定の無効化口を守る」）。
+片側だけ塞いだ状態になる（docs/adr/hook-failure-direction.md「`config_protection` はプラグイン自身の
+`hooks.json`、実行中のプラグインのランタイム、ホスト設定の無効化口を守る」）。
 
 Bash の書込みは内容を解釈できないので、Edit/Write のような内容判定はせず位置で塞ぐ。
-位置は 2 系統で見る。
+位置は 3 系統で見る。
 
 1. 名前の構造一致: ``hooks/hooks.json`` と ``.claude/settings*.json`` の連続要素。書いた名前
    （raw token）と symlink の実体のどちらで一致しても塞ぐ。`cd` を含むコマンドでは解決基準が
@@ -17,6 +18,10 @@ Bash の書込みは内容を解釈できないので、Edit/Write のような�
    ホスト設定を解決した実体。書込み先がその実体自身か祖先ディレクトリなら塞ぐ。実体パスで直接書く
    形（dotfiles 管理の symlink 先）と、ディレクトリごと消す・退避する形（``rm -rf <plugin>/hooks`` /
    ``mv ~/.claude x``）は名前の一致では捉えられない。
+3. 実行中の plugin root の ``runtime/``・``src/claq/``: 配下なら書換え、自身・祖先なら削除・退避として
+   塞ぐ（`config_protection.running_plugin_guarded_dir`）。作業中リポジトリ内の開発用 checkout は除外する。
+   `cd` を含むコマンドでは解決基準がずれるため、起動ファイルの basename（``claq-hook`` /
+   ``claq-hook.cmd``）で塞ぐ。
 
 構造一致なので別リポジトリの ``.claude/settings.json`` も塞ぎ、祖先一致なのでホーム直下への
 ``cp x ~/`` も塞ぐ。いずれも悪用経路にならない誤検出側の広さとして許容する
@@ -28,7 +33,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from claq.hooks.config_protection import protected_path_segment
+from claq.hooks.config_protection import (
+    protected_path_segment,
+    running_plugin_guarded_dir,
+    running_plugin_root_is_guarded,
+)
 from claq.hooks.hook_common import basename, normalize_protected_name, resolve_effective_target
 from claq.lib.core_utils import get_home_dir, get_plugin_root
 
@@ -36,6 +45,11 @@ from claq.lib.core_utils import get_home_dir, get_plugin_root
 _PLUGIN_HOOKS_JSON_SEGMENT = "hooks/hooks.json"
 _PLUGIN_HOOKS_JSON_DISPLAY = f"{_PLUGIN_HOOKS_JSON_SEGMENT}/"
 _HOOKS_JSON_NAME = "hooks.json"
+
+# `cd` を含むコマンドで basename だけで塞ぐ、実行中のランタイムの起動ファイル（hooks.json が起動する）。
+# ``runtime`` 単独の basename までは広げない（一般的な名前で誤検出が過大になる）。
+_RUNTIME_ENTRYPOINT_NAMES = ("claq-hook", "claq-hook.cmd")
+_RUNTIME_DIR_DISPLAY = "runtime/"
 
 # ホスト設定の置き場（``.claude/`` 直下）と名前の構造一致。
 _HOST_SETTINGS_PATH_SEGMENTS = ((".claude", "settings.json"), (".claude", "settings.local.json"))
@@ -98,7 +112,7 @@ def _guarded_locations() -> list[tuple[Path, str]]:
 
 
 def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
-    """書込み先トークンがプラグインの ``hooks/hooks.json`` かホスト設定に当たるかを判定する。
+    """書込み先トークンがプラグインの ``hooks/hooks.json``・実行中のランタイム・ホスト設定に当たるかを判定する。
 
     呼び出し側は repo スコープ判定を適用せず、一致した時点で deny する。
 
@@ -107,8 +121,8 @@ def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
         scope_certain: コマンドが `cd` 系を含まず、cwd 基準の解決を信用できるなら True。
 
     Returns:
-        ``hooks/hooks.json/`` または ``.claude/settings.json`` 形の表示名（そのまま
-        `blocked_message_for_file` に渡せる）。該当しなければ None。
+        ``hooks/hooks.json/``・``.claude/settings.json`` 形・``runtime/`` / ``src/claq/`` の表示名
+        （`bash_config_protection._blocked_message` が文言を選ぶ鍵）。該当しなければ None。
 
     Raises:
         例外は発生しません。
@@ -117,6 +131,12 @@ def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
         return _PLUGIN_HOOKS_JSON_DISPLAY
     if not scope_certain and normalize_protected_name(basename(token)) == _HOOKS_JSON_NAME:
         return _PLUGIN_HOOKS_JSON_DISPLAY
+    if (
+        not scope_certain
+        and normalize_protected_name(basename(token)) in _RUNTIME_ENTRYPOINT_NAMES
+        and running_plugin_root_is_guarded()
+    ):
+        return _RUNTIME_DIR_DISPLAY
     resolved = resolve_effective_target(token)
     candidates = [Path(token).parts] if resolved is None else [Path(token).parts, resolved.parts]
     for parts in candidates:
@@ -128,4 +148,4 @@ def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
     for location, display in _guarded_locations():
         if location.is_relative_to(resolved):
             return display
-    return None
+    return running_plugin_guarded_dir(resolved, include_ancestors=True)
