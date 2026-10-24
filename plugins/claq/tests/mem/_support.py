@@ -1,4 +1,4 @@
-"""tests/mem のテストの複数のファイルが使う補助（CLI 実行・repos/knowledge の投入・必ず失敗するスタブ・handoff 用の transcript 組み立て）。"""
+"""tests/mem のテストの複数のファイルが使う補助（CLI 実行・repos/knowledge の投入・必ず失敗するスタブ）。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ import pytest
 
 from claq.mem import cli, cmd_context
 from claq.mem.database import Database
-from claq.mem.handoff import build_handoff
 from claq.mem.models import Knowledge
 from claq.mem.repo_identity import resolve_repo
 
@@ -85,35 +84,3 @@ def _always_raise(message: str):
 
     _stub.calls = calls  # type: ignore[attr-defined]
     return _stub
-
-
-# test_handoff.py と test_handoff_transcript.py が共有する。次のフィクスチャの docstring にある
-# 「本ファイル」は、この 2 ファイルを指す（それぞれが import して autouse を効かせる）。
-@pytest.fixture(autouse=True)
-def _trust_tmp_path_as_transcript_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """既定では tmp_path を trusted transcript root として扱う（allowlist 対応）。
-
-    本ファイルの大半のテストは要約ロジック自体を検証する目的で tmp_path 配下に
-    transcript を書くため、allowlist を tmp_path まで拡張する。
-    allowlist 自体の検証は `TestTrustedTranscriptRoots` に切り出し、そちらは
-    このデフォルトを明示的に上書き・解除する。
-    """
-    monkeypatch.setenv("CLAQ_TRANSCRIPT_ROOTS", str(tmp_path))
-
-
-def _write_transcript(tmp_path: Path, entries: list[dict | str]) -> str:
-    """JSONL トランスクリプトを書き出してパスを返す。"""
-    lines = [entry if isinstance(entry, str) else json.dumps(entry, ensure_ascii=False) for entry in entries]
-    path = tmp_path / "transcript.jsonl"
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return str(path)
-
-
-def _user(text: str) -> dict:
-    """Claude Code 形式のユーザーエントリを組み立てる。"""
-    return {"type": "user", "message": {"role": "user", "content": text}}
-
-
-def _from_transcript(tmp_path: Path, entries: list[dict | str]) -> str:
-    """entries をトランスクリプトにして build_handoff する。"""
-    return build_handoff({"transcript_path": _write_transcript(tmp_path, entries)})
