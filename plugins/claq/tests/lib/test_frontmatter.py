@@ -1,4 +1,4 @@
-"""claq.lib.frontmatter の単体テスト。"""
+"""claq.lib.frontmatter の単体テスト（厳格モードと寛容モード）。"""
 
 from __future__ import annotations
 
@@ -19,11 +19,7 @@ def _nested_mapping(levels: int) -> str:
 
 
 def _nested_dict(levels: int) -> dict[str, object]:
-    """levels 段だけネストした ``{"k": {...}}`` を組み立てる。
-
-    深さ上限（``_MAX_DEPTH`` = 32）超過時に寛容モードが返す部分結果の期待値を、
-    31 段の dict リテラルを書かずに表現するためのヘルパー。
-    """
+    """levels 段だけネストした ``{"k": {...}}`` を組み立てる（深さ超過時の寛容モードの部分結果）。"""
     result: dict[str, object] = {}
     for _ in range(levels):
         result = {"k": result}
@@ -35,83 +31,49 @@ def _nested_dict(levels: int) -> dict[str, object]:
 # --------------------------------------------------------------------------
 
 
-def test_split_frontmatter_returns_block_between_fences() -> None:
-    """先頭と終了の --- の間だけを返す。"""
-    assert split_frontmatter("---\nname: x\n---\nbody\n") == "name: x"
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        pytest.param("---\nname: x\n---\nbody\n", "name: x", id="block-between-fences"),
+        pytest.param("---\na: 1\nb: 2\n---\n", "a: 1\nb: 2", id="multiline"),
+        pytest.param("---\n---\n", "", id="empty-block"),
+        pytest.param("\ufeff---\r\nname: x\r\n---\r\nbody", "name: x", id="bom-and-crlf"),
+        pytest.param("---\ra: 1\r---\rbody", "a: 1", id="lone-cr"),
+        # 行末空白は許容する（列 0 から始まっていれば良い）。
+        pytest.param("---  \nname: x\n---  \n", "name: x", id="trailing-spaces-on-fence"),
+    ],
+)
+def test_split_frontmatter_returns_block(content: str, expected: str) -> None:
+    """BOM 除去と改行正規化のあと、列 0 のフェンスに挟まれた部分だけを返す。"""
+    assert split_frontmatter(content) == expected
 
 
-def test_split_frontmatter_returns_multiline_block() -> None:
-    """複数行の frontmatter を改行区切りで返す。"""
-    assert split_frontmatter("---\na: 1\nb: 2\n---\n") == "a: 1\nb: 2"
-
-
-def test_split_frontmatter_returns_empty_string_for_empty_block() -> None:
-    """フェンスが連続する空の frontmatter は空文字列を返す。"""
-    assert split_frontmatter("---\n---\n") == ""
-
-
-def test_split_frontmatter_strips_bom_and_normalizes_crlf() -> None:
-    """BOM を除去し CRLF を LF へ正規化してから切り出す。"""
-    assert split_frontmatter("\ufeff---\r\nname: x\r\n---\r\nbody") == "name: x"
-
-
-def test_split_frontmatter_normalizes_lone_cr() -> None:
-    """CR のみの改行も LF へ正規化する。"""
-    assert split_frontmatter("---\ra: 1\r---\rbody") == "a: 1"
-
-
-def test_split_frontmatter_allows_trailing_spaces_on_fence() -> None:
-    """フェンス行の**行末**空白は許容する（列 0 から始まっていれば良い）。"""
-    assert split_frontmatter("---  \nname: x\n---  \n") == "name: x"
-
-
-def test_split_frontmatter_does_not_treat_indented_dashes_as_fence() -> None:
-    """インデント付き ``---`` は本文であり frontmatter を切らない。
-
-    ``strip()`` 一致でフェンスを探すと列 0 を要求しないため、
-    frontmatter の内側に現れたインデント付き ``---`` で切ってしまう。
-    ここが「切らない」ことを確認できないと、下の
-    :func:`test_split_frontmatter_keeps_indented_dashes_inside_block_scalar`
-    が守っている挙動を実装側でいつでも壊せる。
-    """
-    with pytest.raises(UnterminatedFrontmatterError):
-        split_frontmatter("---\nname: x\n  ---\n")
+@pytest.mark.parametrize(
+    ("content", "error"),
+    [
+        pytest.param("name: x\n---\n", MissingFrontmatterError, id="missing-start-fence"),
+        pytest.param("---extra\nname: x\n---\n", MissingFrontmatterError, id="fence-with-trailing-text"),
+        pytest.param("---\nname: x\nbody\n", UnterminatedFrontmatterError, id="missing-end-fence"),
+        # strip() 一致で探すと列 0 を要求せず、内側のインデント付き --- で切ってしまう。
+        pytest.param("---\nname: x\n  ---\n", UnterminatedFrontmatterError, id="indented-dashes-are-not-fence"),
+    ],
+)
+def test_split_frontmatter_rejects(content: str, error: type[FrontmatterError]) -> None:
+    """フェンスが欠ける・列 0 の ``---`` だけの行でない入力は種類別の例外にする。"""
+    with pytest.raises(error):
+        split_frontmatter(content)
 
 
 def test_split_frontmatter_keeps_indented_dashes_inside_block_scalar() -> None:
     """ブロックスカラー内の ``---`` で frontmatter が途中終了しないこと。
 
-    列 0 を要求しない照合では、この入力は ``  ---`` で切られ
-    ``extract_frontmatter`` が ``{'description': ''}`` を返し、``name`` と
-    ``tools`` が本文へ落ちる。frontmatter を読む側（validate_agents 等）から
-    見ると必須キーが黙って消える形になる。
+    列 0 を要求しない照合では ``  ---`` で切られ、``name`` と ``tools`` が本文へ落ちて
+    frontmatter を読む側（validate_agents 等）から必須キーが黙って消える。
     """
     content = "---\ndescription: |\n  ---\nname: x\ntools: Read\n---\nbody\n"
 
     assert split_frontmatter(content) == "description: |\n  ---\nname: x\ntools: Read"
-    assert parse_yaml(split_frontmatter(content)) == {
-        "description": "---\n",
-        "name": "x",
-        "tools": "Read",
-    }
-
-
-def test_split_frontmatter_rejects_missing_start_fence() -> None:
-    """先頭行が --- でなければ MissingFrontmatterError を送出する。"""
-    with pytest.raises(MissingFrontmatterError):
-        split_frontmatter("name: x\n---\n")
-
-
-def test_split_frontmatter_rejects_fence_with_trailing_text() -> None:
-    """---extra はフェンスとみなさない。"""
-    with pytest.raises(MissingFrontmatterError):
-        split_frontmatter("---extra\nname: x\n---\n")
-
-
-def test_split_frontmatter_rejects_missing_end_fence() -> None:
-    """終了の --- が無ければ UnterminatedFrontmatterError を送出する。"""
-    with pytest.raises(UnterminatedFrontmatterError):
-        split_frontmatter("---\nname: x\nbody\n")
+    assert parse_yaml(split_frontmatter(content)) == {"description": "---\n", "name": "x", "tools": "Read"}
 
 
 def test_split_frontmatter_errors_derive_from_frontmatter_error() -> None:
@@ -122,13 +84,14 @@ def test_split_frontmatter_errors_derive_from_frontmatter_error() -> None:
 
 
 # --------------------------------------------------------------------------
-# スカラー型解決
+# 値 1 つ（キー a の値）の解釈
 # --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
+        ("a: 1", 1),
         ("a: 123", 123),
         ("a: 0", 0),
         ("a: -7", -7),
@@ -162,8 +125,11 @@ def test_split_frontmatter_errors_derive_from_frontmatter_error() -> None:
     ],
 )
 def test_plain_scalar_type_resolution(text: str, expected: object) -> None:
-    """プレーンスカラーを想定どおりの Python 型へ解決する。"""
-    assert parse_yaml(text) == {"a": expected}
+    """プレーンスカラーを想定どおりの値と型へ解決する（1 / 0 は bool にならない）。"""
+    result = parse_yaml(text)
+
+    assert result == {"a": expected}
+    assert type(result["a"]) is type(expected)
 
 
 @pytest.mark.parametrize("literal", ["yes", "no", "on", "off", "Yes", "No", "On", "Off", "y", "n"])
@@ -172,59 +138,10 @@ def test_yaml11_booleans_stay_strings(literal: str) -> None:
     assert parse_yaml(f"a: {literal}") == {"a": literal}
 
 
-def test_int_one_is_not_bool() -> None:
-    """1 は int として解決され bool にはならない。"""
-    result = parse_yaml("a: 1")
-    assert result == {"a": 1}
-    assert isinstance(result["a"], int)
-    assert not isinstance(result["a"], bool)
-
-
-def test_int_zero_is_not_bool() -> None:
-    """0 は int として解決され bool にはならない。"""
-    assert not isinstance(parse_yaml("a: 0")["a"], bool)
-
-
-def test_bool_true_is_bool() -> None:
-    """true リテラルは bool として解決される。"""
-    assert isinstance(parse_yaml("a: true")["a"], bool)
-
-
-def test_numeric_key_becomes_string() -> None:
-    """数値に見えるキーも常に str として保持する。"""
-    result = parse_yaml("1: x\nname: a")
-    assert result == {"1": "x", "name": "a"}
-    assert all(isinstance(key, str) for key in result)
-
-
-def test_bool_like_key_becomes_string() -> None:
-    """true に見えるキーも str として保持する。"""
-    assert list(parse_yaml("true: x")) == ["true"]
-
-
-def test_empty_document_returns_none() -> None:
-    """空文書は None を返す。"""
-    assert parse_yaml("") is None
-
-
-def test_blank_and_comment_only_document_returns_none() -> None:
-    """空行と行全体コメントだけの文書は None を返す。"""
-    assert parse_yaml("\n\n# only a comment\n\n") is None
-
-
-def test_toplevel_scalar_is_returned_as_is() -> None:
-    """最上位がスカラーならその値をそのまま返す。"""
-    assert parse_yaml("plain text") == "plain text"
-
-
-# --------------------------------------------------------------------------
-# コメント除去
-# --------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
+        # 空白直前の # 以降だけをコメントとして落とす。
         ("a: v # note", "v"),
         ("a: v\t# note", "v"),
         ("a: v   # note # more", "v"),
@@ -232,57 +149,14 @@ def test_toplevel_scalar_is_returned_as_is() -> None:
         ("a: 1 # note", 1),
         ('a: "v # x"', "v # x"),
         ("a: 'v # x'", "v # x"),
+        ("a: [1, 2] # note", [1, 2]),
+        ('a: "x" # note', "x"),
+        ("a: | # note\n  x", "x\n"),
     ],
 )
 def test_comment_stripping(text: str, expected: object) -> None:
-    """空白直前の # 以降だけをコメントとして落とす。"""
+    """値の後ろのコメントを落とし、引用符内や空白の無い # は値として残す。"""
     assert parse_yaml(text) == {"a": expected}
-
-
-def test_full_line_comment_is_skipped() -> None:
-    """行全体コメントは読み飛ばす。"""
-    assert parse_yaml("# lead\na: 1\n  # inner\nb: 2") == {"a": 1, "b": 2}
-
-
-def test_blank_lines_between_entries_are_skipped() -> None:
-    """エントリ間の空行は読み飛ばす。"""
-    assert parse_yaml("a: 1\n\n\nb: 2") == {"a": 1, "b": 2}
-
-
-def test_comment_only_value_becomes_none() -> None:
-    """値がコメントだけならブロック値として扱い None になる。"""
-    assert parse_yaml("a: # note\nb: 1") == {"a": None, "b": 1}
-
-
-def test_comment_after_flow_collection_is_ignored() -> None:
-    """フローコレクションの後ろのコメントは無視する。"""
-    assert parse_yaml("a: [1, 2] # note") == {"a": [1, 2]}
-
-
-def test_comment_after_quoted_value_is_ignored() -> None:
-    """引用符付き値の後ろのコメントは無視する。"""
-    assert parse_yaml('a: "x" # note') == {"a": "x"}
-
-
-def test_comment_before_any_key_separator_makes_line_a_scalar() -> None:
-    """キー区切りより先にコメントが現れる行はマッピングではなくスカラーとして扱う。"""
-    assert parse_yaml("plain # note") == "plain"
-
-
-def test_comment_before_key_separator_in_mapping_raises() -> None:
-    """マッピング内でコロンがコメントより後ろにある行はエラーにする。"""
-    with pytest.raises(FrontmatterError):
-        parse_yaml("a: 1\nb # note: c")
-
-
-def test_comment_after_block_scalar_header_is_ignored() -> None:
-    """ブロックスカラーヘッダの後ろのコメントは無視する。"""
-    assert parse_yaml("a: | # note\n  x") == {"a": "x\n"}
-
-
-# --------------------------------------------------------------------------
-# クォート
-# --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -316,40 +190,6 @@ def test_quoted_scalars(text: str, expected: str) -> None:
     assert parse_yaml(text) == {"a": expected}
 
 
-def test_quoted_key_is_unquoted() -> None:
-    """引用符付きキーは引用符を外して解釈する。"""
-    assert parse_yaml("'a b': 1") == {"a b": 1}
-
-
-def test_double_quoted_key_is_unquoted() -> None:
-    """二重引用符付きキーも引用符を外して解釈する。"""
-    assert parse_yaml('"a:b": 1') == {"a:b": 1}
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "a: 'unterminated",
-        'a: "unterminated',
-        "'unterminated: 1",
-        r'a: "bad\qescape"',
-        r'a: "bad\xZZhex"',
-        r'a: "short\x4"',
-        r'a: "short\u12"',
-        'a: "trailing\\',
-    ],
-)
-def test_quoted_scalar_errors(text: str) -> None:
-    """未終端の引用符と不正なエスケープはエラーにする。"""
-    with pytest.raises(FrontmatterError):
-        parse_yaml(text)
-
-
-# --------------------------------------------------------------------------
-# フローコレクション
-# --------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
@@ -375,50 +215,6 @@ def test_flow_collections(text: str, expected: object) -> None:
     assert parse_yaml(text) == {"a": expected}
 
 
-def test_toplevel_flow_mapping() -> None:
-    """最上位のフローマッピングをそのまま解析する。"""
-    assert parse_yaml("{k: v}") == {"k": "v"}
-
-
-def test_flow_sequence_unterminated_raises() -> None:
-    """未終端のフローシーケンスはエラーにする（既存テストの必須条件）。"""
-    with pytest.raises(FrontmatterError):
-        parse_yaml("name: [")
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "a: [",
-        "a: [1",
-        "a: [1,",
-        "a: [1}",
-        "a: [,]",
-        "a: [a,,b]",
-        "a: [a: 1]",
-        "a: [a:]",
-        'a: ["x" "y"]',
-        "a: {",
-        "a: {k",
-        "a: {k}",
-        "a: {k:",
-        "a: {: 1}",
-        "a: {&x: 1}",
-        "a: {k: 1, k: 2}",
-    ],
-)
-def test_flow_collection_errors(text: str) -> None:
-    """フローの未終端・空要素・暗黙マップ・重複キーはエラーにする。"""
-    with pytest.raises(FrontmatterError):
-        parse_yaml(text)
-
-
-def test_flow_depth_limit_exceeded_raises() -> None:
-    """33 段ネストのフローは深さ上限を超えてエラーになる。"""
-    with pytest.raises(FrontmatterError):
-        parse_yaml("a: " + "[" * 33 + "]" * 33)
-
-
 def test_flow_depth_within_limit_is_accepted() -> None:
     """上限内のネストしたフローは解析できる。"""
     value = parse_yaml("a: " + "[" * 20 + "]" * 20)["a"]
@@ -426,121 +222,6 @@ def test_flow_depth_within_limit_is_accepted() -> None:
         assert isinstance(value, list)
         value = value[0]
     assert value == []
-
-
-# --------------------------------------------------------------------------
-# ブロック構造
-# --------------------------------------------------------------------------
-
-
-def test_nested_block_mapping_does_not_leak_to_toplevel() -> None:
-    """入れ子のキーが最上位へ漏れない（既存テストの必須条件）。"""
-    assert parse_yaml("metadata:\n  owner: team-a") == {"metadata": {"owner": "team-a"}}
-
-
-def test_block_mapping_resumes_after_nested_block() -> None:
-    """入れ子ブロックの後に同階層のエントリへ戻れる。"""
-    assert parse_yaml("a:\n  b: 1\nc: 2") == {"a": {"b": 1}, "c": 2}
-
-
-def test_deeply_nested_block_mapping() -> None:
-    """3 段以上のネストも解析できる。"""
-    assert parse_yaml("a:\n  b:\n    c: 1") == {"a": {"b": {"c": 1}}}
-
-
-def test_block_mapping_with_varied_indent_width() -> None:
-    """インデント幅は最初の子行に合わせて決まる。"""
-    assert parse_yaml("a:\n    b: 1\n    c: 2") == {"a": {"b": 1, "c": 2}}
-
-
-def test_empty_value_at_end_of_document_becomes_none() -> None:
-    """値が無いまま文書が終わるキーは None になる。"""
-    assert parse_yaml("a:") == {"a": None}
-
-
-def test_empty_value_followed_by_sibling_becomes_none() -> None:
-    """深い行が続かないキーは None になる。"""
-    assert parse_yaml("a:\nb: 1") == {"a": None, "b": 1}
-
-
-def test_empty_key_is_allowed() -> None:
-    """コロンで始まる行は空文字列キーとして解釈する。"""
-    assert parse_yaml(": v") == {"": "v"}
-
-
-def test_toplevel_block_sequence() -> None:
-    """最上位のブロックシーケンスは list になる（既存テストの必須条件）。"""
-    assert parse_yaml("- item") == ["item"]
-
-
-def test_block_sequence_with_multiple_items() -> None:
-    """複数のシーケンス要素を順に解析する。"""
-    assert parse_yaml("- a\n- b\n- 3") == ["a", "b", 3]
-
-
-def test_block_sequence_under_key() -> None:
-    """キー配下のより深いブロックシーケンスを解析する。"""
-    assert parse_yaml("a:\n  - x\n  - y\nb: 1") == {"a": ["x", "y"], "b": 1}
-
-
-def test_block_sequence_compact_mapping() -> None:
-    """`- k: v` のコンパクトマップを解析する。"""
-    assert parse_yaml("- k: 1\n  j: 2\n- k: 3") == [{"k": 1, "j": 2}, {"k": 3}]
-
-
-def test_block_sequence_nested_sequence() -> None:
-    """ダッシュだけの行に続く深いシーケンスを入れ子として解析する。"""
-    assert parse_yaml("-\n  - x") == [["x"]]
-
-
-def test_bare_dash_without_value_becomes_none() -> None:
-    """値の無いダッシュだけの要素は None になる。"""
-    assert parse_yaml("-") == [None]
-
-
-def test_block_sequence_with_wide_dash_spacing() -> None:
-    """ダッシュ後の空白が複数でも要素内容を正しく取る。"""
-    assert parse_yaml("-   item") == ["item"]
-
-
-def test_multiline_plain_scalar_is_joined_with_space() -> None:
-    """深いインデントの継続行は空白 1 個で連結する。"""
-    assert parse_yaml("a: foo\n  bar\n  baz") == {"a": "foo bar baz"}
-
-
-def test_multiline_plain_scalar_stops_at_blank_line() -> None:
-    """空行でプレーンスカラーの継続は終わる。"""
-    assert parse_yaml("a: foo\n\nb: 1") == {"a": "foo", "b": 1}
-
-
-def test_multiline_plain_scalar_stops_at_comment_line() -> None:
-    """行全体コメントでプレーンスカラーの継続は終わる。"""
-    assert parse_yaml("a: foo\n  # note\nb: 1") == {"a": "foo", "b": 1}
-
-
-def test_multiline_plain_scalar_in_sequence_item() -> None:
-    """シーケンス要素のプレーンスカラーも継続行を連結する。"""
-    assert parse_yaml("- a\n  b") == ["a b"]
-
-
-def test_block_depth_limit_exceeded_raises() -> None:
-    """33 段ネストのブロックマッピングは深さ上限を超えてエラーになる。"""
-    with pytest.raises(FrontmatterError):
-        parse_yaml(_nested_mapping(33))
-
-
-def test_block_depth_within_limit_is_accepted() -> None:
-    """32 段ネストのブロックマッピングは受け入れる。"""
-    result = parse_yaml(_nested_mapping(32))
-    for _ in range(32):
-        assert isinstance(result, dict)
-        result = result["k"]
-    assert result is None
-
-
-# --------------------------------------------------------------------------
-# ブロックスカラー
-# --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -568,61 +249,129 @@ def test_block_scalars(text: str, expected: str) -> None:
     assert parse_yaml(text)["a"] == expected
 
 
-def test_folded_block_scalar_at_toplevel() -> None:
-    """最上位の折り畳みブロックスカラーは末尾改行付きの文字列になる。"""
-    assert parse_yaml(">\n  a\n  b") == "a b\n"
+# --------------------------------------------------------------------------
+# 文書全体の構造
+# --------------------------------------------------------------------------
 
 
-def test_literal_block_scalar_at_toplevel() -> None:
-    """最上位のリテラルブロックスカラーは行ごとに改行を保つ。"""
-    assert parse_yaml("|\n  a\n  b") == "a\nb\n"
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # 最上位の形
+        pytest.param("", None, id="empty-document"),
+        pytest.param("\n\n# only a comment\n\n", None, id="blank-and-comment-only"),
+        pytest.param("plain text", "plain text", id="toplevel-scalar"),
+        pytest.param("plain # note", "plain", id="comment-before-key-separator-is-scalar"),
+        pytest.param("{k: v}", {"k": "v"}, id="toplevel-flow-mapping"),
+        pytest.param(">\n  a\n  b", "a b\n", id="toplevel-folded-block-scalar"),
+        pytest.param("|\n  a\n  b", "a\nb\n", id="toplevel-literal-block-scalar"),
+        # キーは常に str（数値・bool に見えても型解決しない）
+        pytest.param("1: x\nname: a", {"1": "x", "name": "a"}, id="numeric-key"),
+        pytest.param("true: x", {"true": "x"}, id="bool-like-key"),
+        pytest.param("'a b': 1", {"a b": 1}, id="single-quoted-key"),
+        pytest.param('"a:b": 1', {"a:b": 1}, id="double-quoted-key"),
+        pytest.param(": v", {"": "v"}, id="empty-key"),
+        # E14: 空行と行全体コメントは読み飛ばす
+        pytest.param("# lead\na: 1\n  # inner\nb: 2", {"a": 1, "b": 2}, id="E14-full-line-comments"),
+        pytest.param("\na: 1\n\n", {"a": 1}, id="E14-surrounding-blank-lines"),
+        pytest.param("a: 1\n\n\nb: 2", {"a": 1, "b": 2}, id="E14-blank-lines-between"),
+        pytest.param("a: # note\nb: 1", {"a": None, "b": 1}, id="comment-only-value-is-none"),
+        # ブロックマッピング
+        pytest.param("metadata:\n  owner: team-a", {"metadata": {"owner": "team-a"}}, id="nested-does-not-leak"),
+        pytest.param("a:\n  b: 1\nc: 2", {"a": {"b": 1}, "c": 2}, id="resumes-after-nested"),
+        pytest.param("a:\n  b:\n    c: 1", {"a": {"b": {"c": 1}}}, id="three-levels"),
+        pytest.param("a:\n    b: 1\n    c: 2", {"a": {"b": 1, "c": 2}}, id="indent-width-from-first-child"),
+        pytest.param("a:", {"a": None}, id="empty-value-at-end"),
+        pytest.param("a:\nb: 1", {"a": None, "b": 1}, id="empty-value-before-sibling"),
+        # ブロックシーケンス
+        pytest.param("- item", ["item"], id="toplevel-sequence"),
+        pytest.param("- a\n- b\n- 3", ["a", "b", 3], id="sequence-items"),
+        pytest.param("a:\n  - x\n  - y\nb: 1", {"a": ["x", "y"], "b": 1}, id="sequence-under-key"),
+        pytest.param("- k: 1\n  j: 2\n- k: 3", [{"k": 1, "j": 2}, {"k": 3}], id="compact-mapping"),
+        pytest.param("-\n  - x", [["x"]], id="nested-sequence"),
+        pytest.param("-", [None], id="bare-dash"),
+        pytest.param("-   item", ["item"], id="wide-dash-spacing"),
+        # 複数行プレーンスカラーは空白 1 個で連結し、空行・コメント行で終わる
+        pytest.param("a: foo\n  bar\n  baz", {"a": "foo bar baz"}, id="multiline-plain-joined"),
+        pytest.param("a: foo\n\nb: 1", {"a": "foo", "b": 1}, id="multiline-plain-stops-at-blank"),
+        pytest.param("a: foo\n  # note\nb: 1", {"a": "foo", "b": 1}, id="multiline-plain-stops-at-comment"),
+        pytest.param("- a\n  b", ["a b"], id="multiline-plain-in-sequence"),
+        # ブロックスカラーの終わり
+        pytest.param("a: |\n  x\n\n\nb: 1", {"a": "x\n", "b": 1}, id="block-scalar-clips-trailing-blanks"),
+        pytest.param("a: |\n  x\nb: 1", {"a": "x\n", "b": 1}, id="block-scalar-stops-at-shallower"),
+    ],
+)
+def test_document_structure(text: str, expected: object) -> None:
+    """文書全体を想定どおりの最上位値へ解析する。"""
+    assert parse_yaml(text) == expected
 
 
-def test_block_scalar_trailing_blank_lines_are_clipped() -> None:
-    """clip では末尾の空行を 1 個の改行へ畳む。"""
-    assert parse_yaml("a: |\n  x\n\n\nb: 1") == {"a": "x\n", "b": 1}
-
-
-def test_block_scalar_stops_at_shallower_indent() -> None:
-    """コンテンツより浅い行でブロックスカラーは終わる。"""
-    assert parse_yaml("a: |\n  x\nb: 1") == {"a": "x\n", "b": 1}
-
-
-@pytest.mark.parametrize("header", ["a: |2\n  x", "a: >2\n  x", "a: |2-\n  x"])
-def test_block_scalar_explicit_indent_indicator_raises(header: str) -> None:
-    """明示インデント指示子はサポートせずエラーにする。"""
-    with pytest.raises(FrontmatterError):
-        parse_yaml(header)
-
-
-def test_block_scalar_dedent_below_content_indent_raises() -> None:
-    """コンテンツインデントより浅い中途半端な行はエラーになる。"""
-    with pytest.raises(FrontmatterError):
-        parse_yaml("a: |\n    x\n  y")
-
-
-def test_block_scalar_tab_indent_raises() -> None:
-    """ブロックスカラー本文のタブインデントはエラーにする。"""
-    with pytest.raises(FrontmatterError):
-        parse_yaml("a: |\n\tx")
+def test_block_depth_within_limit_is_accepted() -> None:
+    """32 段ネストのブロックマッピングは受け入れる。"""
+    result = parse_yaml(_nested_mapping(32))
+    for _ in range(32):
+        assert isinstance(result, dict)
+        result = result["k"]
+    assert result is None
 
 
 # --------------------------------------------------------------------------
-# エラー条件 E1-E14
+# エラー条件
 # --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # 引用符の未終端と不正なエスケープ
+        "a: 'unterminated",
+        'a: "unterminated',
+        "'unterminated: 1",
+        r'a: "bad\qescape"',
+        r'a: "bad\xZZhex"',
+        r'a: "short\x4"',
+        r'a: "short\u12"',
+        'a: "trailing\\',
+        # フローの未終端・空要素・暗黙マップ
+        "a: [",
+        "a: [1",
+        "a: [1,",
+        "a: [1}",
+        "a: [,]",
+        "a: [a,,b]",
+        "a: [a: 1]",
+        "a: [a:]",
+        'a: ["x" "y"]',
+        "a: {",
+        "a: {k",
+        "a: {k}",
+        "a: {k:",
+        "a: {: 1}",
+        "a: {&x: 1}",
+        # ブロックスカラーの明示インデント指示子・中途半端なデデント・タブインデント
+        "a: >2\n  x",
+        "a: |2-\n  x",
+        "a: |\n    x\n  y",
+        "a: |\n\tx",
+        # マッピング内でコロンがコメントより後ろにある行
+        "a: 1\nb # note: c",
+    ],
+)
+def test_strict_mode_rejects_malformed_syntax(text: str) -> None:
+    """解釈できない構文は FrontmatterError にする。"""
+    with pytest.raises(FrontmatterError):
+        parse_yaml(text)
 
 
 # 解釈できない構文（厳格モードは FrontmatterError、寛容モードは部分結果）と、
-# 寛容モードが返すべき値の対。値まで固定するのは、寛容モードの「どこまで捨てたか」が
-# 変わったことを検出するため（例外の有無しか見ないと、下 2 件の無警告
-# データ損失が緑のまま通る）。
+# 寛容モードが返すべき値の対。値まで固定するのは「どこまで捨てたか」の変化を検出するため。
 #
-# 末尾 2 件は「YAML としては妥当なのに黙って値が失われる」形なので特記する:
+#   * 重複キーは寛容モードでも不合格にする。lenient は解釈できないエントリを読み飛ばす
+#     緩和であって矛盾した宣言の黙認ではない。先勝ちで黙認すると検証器とホストで
+#     見える値が分かれるパーサ差分になる。最上位では None、フロー側はエントリごと消える。
 #   * multi-line-block-sequence: キーと同インデントのブロックシーケンスは YAML 1.2 で
-#     妥当だが本パーサは非対応で、寛容モードでは値ごと落ちて {'tools': None} になる。
-#     リストが消えたことは呼び出し側からは分からない。
-#   * multi-document: モジュール docstring が複数ドキュメントを非サポートと明記して
-#     いるとおり厳格モードは弾くが、寛容モードでは `---` がコロン無しの行として
+#     妥当だが非対応で、寛容モードでは値ごと落ちて {'tools': None} になる（無警告の損失）。
+#   * multi-document: 厳格モードは弾くが、寛容モードでは `---` がコロン無しの行として
 #     読み飛ばされ、2 つのドキュメントが 1 つの dict へ合流する。
 _ERROR_INPUTS = [
     pytest.param('name: [', {}, id='E1-unterminated-flow'),
@@ -636,10 +385,12 @@ _ERROR_INPUTS = [
     pytest.param('a:\n  b: 1\n c: 2', {'a': {'b': 1}}, id='E5-bad-dedent'),
     pytest.param('  a: 1\nb: 2', {'a': 1}, id='E5-shallower-than-root'),
     pytest.param('a: 1\nnocolon', {'a': 1}, id='E6-missing-colon'),
+    pytest.param('name: x\nnocolon', {'name': 'x'}, id='E6-missing-colon-name'),
+    pytest.param('name: x\nbad\n  deeper\n\n  more\nkind: y', {'name': 'x', 'kind': 'y'}, id='E6-drops-deeper-lines'),
     pytest.param('a: foo: bar', {}, id='E7-colon-in-plain'),
     pytest.param('a: foo:', {}, id='E7-trailing-colon-in-plain'),
-    # 重複キーは寛容モードでも不合格（先勝ちで黙認するとパーサ差分になる）。
     pytest.param('a: 1\na: 2', None, id='E8-duplicate-key'),
+    pytest.param('a: {k: 1, k: 2}', {}, id='E8-duplicate-key-in-flow'),
     pytest.param(_nested_mapping(33), _nested_dict(31), id='E9-depth-block'),
     pytest.param("a: " + "[" * 33 + "]" * 33, {}, id='E9-depth-flow'),
     pytest.param('a: &anchor', {}, id='E10-anchor'),
@@ -652,6 +403,7 @@ _ERROR_INPUTS = [
     pytest.param('a: [1] junk', {}, id='E13-trailing-token-flow'),
     pytest.param('a: "x" junk', {}, id='E13-trailing-token-quote'),
     pytest.param("'a' b: 1", {}, id='E13-trailing-token-key'),
+    pytest.param('name: x\nbroken: [\nkind: y', {'name': 'x', 'kind': 'y'}, id='broken-flow-value-entry'),
     pytest.param('- a\nb: 1', ['a'], id='sequence-entry-without-dash'),
     pytest.param('- [1]\n   - b', [[1]], id='sequence-entry-bad-indent'),
     pytest.param('"abc', None, id='unterminated-quote-in-key-scan'),
@@ -661,46 +413,11 @@ _ERROR_INPUTS = [
 
 
 @pytest.mark.parametrize(("text", "lenient_expected"), _ERROR_INPUTS)
-def test_strict_mode_raises_frontmatter_error(text: str, lenient_expected: object) -> None:
-    """厳格モードでは解釈できない構文をすべて FrontmatterError にする。
-
-    Args:
-        text: 解釈できない構文を含む入力。
-        lenient_expected: 寛容モード側の期待値（本テストでは未使用。表を
-            1 つに保つため同じ parametrize を共有している）。
-    """
-    del lenient_expected
+def test_strict_and_lenient_modes_on_malformed_syntax(text: str, lenient_expected: object) -> None:
+    """厳格モードは FrontmatterError を送出し、寛容モードは宣言どおりの部分結果を返す。"""
     with pytest.raises(FrontmatterError):
         parse_yaml(text)
-
-
-@pytest.mark.parametrize(("text", "lenient_expected"), _ERROR_INPUTS)
-def test_lenient_mode_returns_declared_partial_result(text: str, lenient_expected: object) -> None:
-    """寛容モードが例外を送出せず、宣言どおりの部分結果を返すこと。
-
-    結果値を表明しないと「例外さえ出なければ何を返してもよい」状態になり、
-    寛容モードの無警告データ損失（``tools:`` 直下のブロックシーケンス消失・
-    複数ドキュメントの合流。表の下方 2 件）が緑のまま通る。捨てた範囲が変われば赤くなる
-    ように、入力ごとの戻り値を表として固定する。
-
-    Args:
-        text: 解釈できない構文を含む入力。
-        lenient_expected: 寛容モードが返すべき部分結果。
-    """
     assert parse_yaml(text, lenient=True) == lenient_expected
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("# lead\na: 1", {"a": 1}),
-        ("\na: 1\n\n", {"a": 1}),
-        ("a: 1\n   # inner comment\nb: 2", {"a": 1, "b": 2}),
-    ],
-)
-def test_blank_and_comment_lines_are_tolerated(text: str, expected: dict[str, object]) -> None:
-    """E14: 空行と行全体コメントはエラーにせず読み飛ばす。"""
-    assert parse_yaml(text) == expected
 
 
 # --------------------------------------------------------------------------
@@ -709,7 +426,7 @@ def test_blank_and_comment_lines_are_tolerated(text: str, expected: dict[str, ob
 
 
 def test_realistic_skill_frontmatter() -> None:
-    """実データ相当の SKILL.md frontmatter をまとめて解析する。"""
+    """実データ相当の SKILL.md frontmatter を厳格・寛容の両モードで同じ値へ解析する。"""
     content = (
         "---\n"
         "name: sample-skill\n"
@@ -723,7 +440,7 @@ def test_realistic_skill_frontmatter() -> None:
         "---\n"
         "# Body\n"
     )
-    assert parse_yaml(split_frontmatter(content)) == {
+    expected = {
         "name": "sample-skill",
         "description": "sample description",
         "license": "MIT",
@@ -733,10 +450,11 @@ def test_realistic_skill_frontmatter() -> None:
         "user-invocable": True,
     }
 
+    assert parse_yaml(split_frontmatter(content)) == expected
+    assert parse_yaml(split_frontmatter(content), lenient=True) == expected
+
 
 def test_realistic_folded_description_needs_caller_strip() -> None:
     """折り畳み description は YAML 準拠で末尾改行を残す（呼び出し元で strip する前提）。"""
     content = "---\nname: sample-skill\ndescription: >\n  first line\n  second line\n---\n# Body\n"
-    parsed = parse_yaml(split_frontmatter(content))
-    assert parsed["description"] == "first line second line\n"
-    assert parsed["description"].strip() == "first line second line"
+    assert parse_yaml(split_frontmatter(content))["description"] == "first line second line\n"
