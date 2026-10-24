@@ -273,6 +273,8 @@ def test_block_scalars(text: str, expected: str) -> None:
         pytest.param(": v", {"": "v"}, id="empty-key"),
         # E14: 空行と行全体コメントは読み飛ばす
         pytest.param("# lead\na: 1\n  # inner\nb: 2", {"a": 1, "b": 2}, id="E14-full-line-comments"),
+        pytest.param("# lead\na: 1", {"a": 1}, id="E14-leading-comment"),
+        pytest.param("a: 1\n   # inner comment\nb: 2", {"a": 1, "b": 2}, id="E14-indented-inner-comment"),
         pytest.param("\na: 1\n\n", {"a": 1}, id="E14-surrounding-blank-lines"),
         pytest.param("a: 1\n\n\nb: 2", {"a": 1, "b": 2}, id="E14-blank-lines-between"),
         pytest.param("a: # note\nb: 1", {"a": None, "b": 1}, id="comment-only-value-is-none"),
