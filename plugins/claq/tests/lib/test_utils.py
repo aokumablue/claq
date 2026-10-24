@@ -2,6 +2,7 @@
 
 import os
 import re
+import stat
 from pathlib import Path
 
 import pytest
@@ -20,276 +21,168 @@ from claq.lib.core_utils import (
 )
 
 
-class TestDirectoryFunctions:
-    """ディレクトリ関連関数のテスト。"""
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """HOME を tmp へ向け、ディレクトリ種別ごとの見本を置く。
 
-    def test_get_home_dir(self):
-        """ホームディレクトリを返すこと。"""
-        home = get_home_dir()
-        assert isinstance(home, Path)
-        assert home.exists()
-
-    def test_get_home_dir_prefers_explicit_env(self, monkeypatch, tmp_path):
-        """明示的な環境変数があればそれを優先すること。"""
-        monkeypatch.setenv("CLAQ_HOME", str(tmp_path))
-        assert get_home_dir() == tmp_path
-
-    def test_get_home_dir_falls_back_to_home_when_claq_home_is_unset(self, monkeypatch, tmp_path):
-        """CLAQ_HOME がなければ HOME を使うこと。"""
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
-        monkeypatch.delenv("CLAUDE_HOME", raising=False)
-        monkeypatch.setenv("HOME", str(tmp_path))
-        assert get_home_dir() == tmp_path
-
-    def test_get_home_dir_raises_oserror_when_home_is_unavailable(self, monkeypatch, tmp_path):
-        """HOME を決められないときは cwd へ逃げず OSError を送出すること。
-
-        cwd へ逃げると、リポジトリに置かれた `.claq/mem.db` を読んで注入してしまう。
-        """
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
-        monkeypatch.delenv("CLAUDE_HOME", raising=False)
-        monkeypatch.delenv("HOME", raising=False)
-        monkeypatch.delenv("USERPROFILE", raising=False)
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(Path, "home", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-
-        with pytest.raises(OSError):
-            get_home_dir()
-
-    def test_get_claq_dir(self):
-        """ホーム配下の .claq を返すこと。"""
-        assert get_claq_dir() == get_home_dir() / ".claq"
-
-    def test_get_sessions_dir(self):
-        """claq ディレクトリ配下の session-data を返すこと。"""
-        sessions = get_sessions_dir()
-        assert sessions == get_claq_dir() / "session-data"
+    file（0644・中身 data）・filelink（file への symlink）・dangling（壊れた symlink）・
+    realdir（0755）・dirlink（realdir への symlink）。
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("CLAQ_HOME", raising=False)
+    (tmp_path / "file").write_text("data")
+    (tmp_path / "file").chmod(0o644)
+    (tmp_path / "filelink").symlink_to(tmp_path / "file")
+    (tmp_path / "dangling").symlink_to(tmp_path / "missing")
+    (tmp_path / "realdir").mkdir()
+    (tmp_path / "realdir").chmod(0o755)
+    (tmp_path / "dirlink").symlink_to(tmp_path / "realdir", target_is_directory=True)
+    return tmp_path
 
 
-class TestEnsureDir:
-    """ensure_dir 関数のテスト。"""
+def _mode(path: Path) -> int:
+    """パーミッションビットを返す。"""
+    return stat.S_IMODE(path.stat().st_mode)
 
-    def test_creates_directory(self, tmp_path):
-        """ディレクトリが存在しない場合は作成すること。"""
-        new_dir = tmp_path / "new" / "nested" / "dir"
-        result = ensure_dir(new_dir)
-        assert result == new_dir
-        assert new_dir.exists()
 
-    def test_handles_existing_directory(self, tmp_path):
-        """ディレクトリが既に存在しても失敗しないこと。"""
-        existing = tmp_path / "existing"
-        existing.mkdir()
-        result = ensure_dir(existing)
-        assert result == existing
-        assert existing.exists()
+@pytest.mark.parametrize(
+    ("set_vars", "expected"),
+    [(("CLAQ_HOME", "HOME"), "CLAQ_HOME"), (("HOME", "USERPROFILE"), "HOME"), (("USERPROFILE",), "USERPROFILE")],
+    ids=["claq-home-first", "home-next", "userprofile-last"],
+)
+def test_get_home_dir_env_priority(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, set_vars: tuple[str, ...], expected: str
+) -> None:
+    """CLAQ_HOME → HOME → USERPROFILE の順で、最初に設定された環境変数を使う。"""
+    for name in ("CLAQ_HOME", "HOME", "USERPROFILE"):
+        monkeypatch.delenv(name, raising=False)
+    for name in set_vars:
+        monkeypatch.setenv(name, str(tmp_path / name))
 
-    def test_regular_file_raises_file_exists_error(self, tmp_path: Path) -> None:
-        """通常ファイルが居る場所はディレクトリではないので FileExistsError を伝える。"""
-        target = tmp_path / "occupied"
-        target.write_text("data")
-        with pytest.raises(FileExistsError):
+    assert get_home_dir() == tmp_path / expected
+
+
+def test_get_home_dir_raises_oserror_when_home_is_unavailable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """HOME を決められないときは cwd へ逃げず OSError を送出する（cwd の `.claq/mem.db` を読んで注入しない）。"""
+    for name in ("CLAQ_HOME", "HOME", "USERPROFILE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    with pytest.raises(OSError):
+        get_home_dir()
+
+
+def test_claq_and_sessions_dirs(home: Path) -> None:
+    """claq ディレクトリはホーム配下の .claq、セッションはその下の session-data。"""
+    assert get_claq_dir() == home / ".claq"
+    assert get_sessions_dir() == home / ".claq" / "session-data"
+
+
+@pytest.mark.parametrize(
+    ("relative", "error"),
+    [
+        ("new/nested/dir", None),
+        ("realdir", None),
+        ("dirlink", None),
+        ("file", FileExistsError),
+        ("filelink", FileExistsError),
+        ("dangling", FileExistsError),
+        ("file/sub", NotADirectoryError),
+    ],
+)
+def test_ensure_dir(home: Path, relative: str, error: type[OSError] | None) -> None:
+    """ディレクトリ（への symlink）は作成・既存とも成功し、ディレクトリ以外の場所はその例外を伝えて中身を変えない。"""
+    target = home / relative
+    if error is None:
+        assert ensure_dir(target) == target
+        assert target.is_dir()
+    else:
+        with pytest.raises(error):
             ensure_dir(target)
-        assert target.read_text() == "data"
-
-    def test_symlink_to_file_raises_file_exists_error(self, tmp_path: Path) -> None:
-        """ファイルへの symlink もディレクトリではないので FileExistsError を伝える。"""
-        real = tmp_path / "real"
-        real.write_text("data")
-        link = tmp_path / "link"
-        link.symlink_to(real)
-        with pytest.raises(FileExistsError):
-            ensure_dir(link)
-
-    def test_dangling_symlink_raises_file_exists_error(self, tmp_path: Path) -> None:
-        """壊れた symlink もディレクトリではないので FileExistsError を伝える。"""
-        link = tmp_path / "dangling"
-        link.symlink_to(tmp_path / "missing")
-        with pytest.raises(FileExistsError):
-            ensure_dir(link)
-
-    def test_symlink_to_directory_succeeds(self, tmp_path: Path) -> None:
-        """ディレクトリへの symlink は既存ディレクトリとして成功する。"""
-        real = tmp_path / "real"
-        real.mkdir()
-        link = tmp_path / "link"
-        link.symlink_to(real, target_is_directory=True)
-        assert ensure_dir(link) == link
-
-    def test_file_as_ancestor_raises_not_a_directory_error(self, tmp_path: Path) -> None:
-        """祖先が通常ファイルなら NotADirectoryError を伝える。"""
-        blocker = tmp_path / "blocker"
-        blocker.write_text("data")
-        with pytest.raises(NotADirectoryError):
-            ensure_dir(blocker / "sub")
+    assert (home / "file").read_text() == "data"
 
 
-class TestEnsurePrivateDir:
-    """ensure_private_dir の 0700 作成と既存締め直し。"""
+@pytest.mark.parametrize(
+    ("relative", "precreate_claq", "expected_modes"),
+    [
+        (".claq/nested", False, {".claq/nested": 0o700, ".claq": 0o700}),
+        (".claq", True, {".claq": 0o700}),
+        ("other", True, {"other": 0o700, ".claq": 0o755}),
+        ("dirlink", False, {"realdir": 0o700}),
+    ],
+    ids=["creates-and-tightens-claq", "tightens-existing-0755", "outside-claq-keeps-claq", "dir-symlink-tightens-target"],
+)
+def test_ensure_private_dir(
+    home: Path, relative: str, precreate_claq: bool, expected_modes: dict[str, int]
+) -> None:
+    """umask 022 でも対象を 0700 にし、~/.claq 配下なら ~/.claq も締める（配下でなければ触らない）。"""
+    if precreate_claq:
+        (home / ".claq").mkdir()
+        (home / ".claq").chmod(0o755)
+    old_umask = os.umask(0o022)
+    try:
+        assert ensure_private_dir(home / relative) == home / relative
+    finally:
+        os.umask(old_umask)
 
-    def test_creates_0700_and_tightens_claq_parent(self, tmp_path: Path, monkeypatch) -> None:
-        """umask 022 でも対象と ~/.claq を 0700 にする。"""
-        import stat
-
-        monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
-        old_umask = os.umask(0o022)
-        try:
-            target = tmp_path / ".claq" / "nested"
-            result = ensure_private_dir(target)
-            assert result == target
-            assert stat.S_IMODE(target.stat().st_mode) == 0o700
-            assert stat.S_IMODE((tmp_path / ".claq").stat().st_mode) == 0o700
-        finally:
-            os.umask(old_umask)
-
-    def test_tightens_existing_0755(self, tmp_path: Path, monkeypatch) -> None:
-        """既存 0755 ディレクトリを 0700 に締め直す。"""
-        import stat
-
-        monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
-        claq = tmp_path / ".claq"
-        claq.mkdir(mode=0o755)
-        claq.chmod(0o755)
-        ensure_private_dir(claq)
-        assert stat.S_IMODE(claq.stat().st_mode) == 0o700
-
-    def test_outside_claq_does_not_chmod_claq(self, tmp_path: Path, monkeypatch) -> None:
-        """~/.claq 配下でなければ親の .claq は触らない。"""
-        import stat
-
-        monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
-        claq = tmp_path / ".claq"
-        claq.mkdir(mode=0o755)
-        claq.chmod(0o755)
-        other = tmp_path / "other"
-        ensure_private_dir(other)
-        assert stat.S_IMODE(other.stat().st_mode) == 0o700
-        assert stat.S_IMODE(claq.stat().st_mode) == 0o755
-
-    def test_regular_file_raises_and_keeps_mode(self, tmp_path: Path) -> None:
-        """通常ファイルには FileExistsError を伝え、chmod しない。"""
-        import stat
-
-        target = tmp_path / "occupied"
-        target.write_text("data")
-        target.chmod(0o644)
-        with pytest.raises(FileExistsError):
-            ensure_private_dir(target)
-        assert stat.S_IMODE(target.stat().st_mode) == 0o644
-
-    def test_symlink_to_file_raises_and_keeps_target_mode(self, tmp_path: Path) -> None:
-        """ファイルへの symlink には FileExistsError を伝え、リンク先を chmod しない。"""
-        import stat
-
-        real = tmp_path / "real"
-        real.write_text("data")
-        real.chmod(0o644)
-        link = tmp_path / "link"
-        link.symlink_to(real)
-        with pytest.raises(FileExistsError):
-            ensure_private_dir(link)
-        assert stat.S_IMODE(real.stat().st_mode) == 0o644
-
-    def test_file_as_ancestor_raises_file_exists_error(self, tmp_path: Path) -> None:
-        """祖先が通常ファイルなら、その祖先で FileExistsError を伝え、chmod しない。"""
-        import stat
-
-        blocker = tmp_path / "blocker"
-        blocker.write_text("data")
-        blocker.chmod(0o644)
-        with pytest.raises(FileExistsError):
-            ensure_private_dir(blocker / "sub")
-        assert stat.S_IMODE(blocker.stat().st_mode) == 0o644
-
-    def test_existing_directory_symlink_tightens_target(self, tmp_path: Path) -> None:
-        """ディレクトリへの symlink は既存ディレクトリとして成功し、リンク先を 0700 にする。"""
-        import stat
-
-        real = tmp_path / "real"
-        real.mkdir(mode=0o755)
-        real.chmod(0o755)
-        link = tmp_path / "link"
-        link.symlink_to(real, target_is_directory=True)
-        assert ensure_private_dir(link) == link
-        assert stat.S_IMODE(real.stat().st_mode) == 0o700
+    assert {name: _mode(home / name) for name in expected_modes} == expected_modes
 
 
-class TestActorIdentity:
-    """`actor_identity`（監査ログ用のユーザー識別子）のテスト。
+@pytest.mark.parametrize("relative", ["file", "filelink", "dangling", "file/sub"])
+def test_ensure_private_dir_non_directory_raises_without_chmod(home: Path, relative: str) -> None:
+    """自身や祖先がディレクトリ以外なら FileExistsError を伝え、ファイル（symlink のリンク先）を chmod しない。"""
+    with pytest.raises(FileExistsError):
+        ensure_private_dir(home / relative)
+    assert _mode(home / "file") == 0o644
 
-    `os.getuid()` は Windows に存在しないため、それに頼ると `mem promote` の
-    監査ログは POSIX 専用になる。`getpass.getuser()` は 3 プラットフォームで
-    同じ 1 本の実装になる。
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [(None, "someone"), (OSError("no uid"), "unknown"), (KeyError("no pwd entry"), "unknown")],
+    ids=["resolved", "oserror", "keyerror"],
+)
+def test_actor_identity(monkeypatch: pytest.MonkeyPatch, error: Exception | None, expected: str) -> None:
+    """監査ログ用のユーザー名を getpass で返し、解決できなくても例外にせず "unknown" を返す。
+
+    `os.getuid()` は Windows に無い。取れないことを理由に promote 自体を失敗させない（部分成功を作らない）。
     """
 
-    def test_returns_resolved_user_name(self, monkeypatch):
-        """解決できたユーザー名をそのまま返すこと。"""
-        monkeypatch.setattr(core_utils.getpass, "getuser", lambda: "someone")
-
-        assert core_utils.actor_identity() == "someone"
-
-    @pytest.mark.parametrize("error", [OSError("no uid"), KeyError("no pwd entry")])
-    def test_falls_back_to_unknown(self, monkeypatch, error):
-        """識別子を解決できない環境でも例外にせず "unknown" を返すこと。
-
-        これは監査ログのための値であり、取れないことを理由に promote 自体を
-        失敗させない（部分成功を作らない）。
-        """
-
-        def _raise():
+    def fake_getuser() -> str:
+        """``error`` があれば送出し、無ければ名前を返す。"""
+        if error is not None:
             raise error
+        return "someone"
 
-        monkeypatch.setattr(core_utils.getpass, "getuser", _raise)
+    monkeypatch.setattr(core_utils.getpass, "getuser", fake_getuser)
 
-        assert core_utils.actor_identity() == "unknown"
-
-
-class TestDateTimeFunctions:
-    """日付・時刻関連関数のテスト。"""
-
-    def test_get_datetime_string_format(self):
-        """YYYY-MM-DD HH:MM:SS 形式で返すこと。"""
-        dt_str = get_datetime_string()
-        assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", dt_str)
+    assert core_utils.actor_identity() == expected
 
 
-class TestAppendFile:
-    """append_file 関数のテスト。"""
-
-    def test_creates_parent_dirs_and_appends(self, tmp_path):
-        """親ディレクトリを作り、既存内容の後ろへ追記すること。"""
-        test_file = tmp_path / "a" / "b" / "append.txt"
-        append_file(test_file, "first")
-        append_file(test_file, "second")
-        assert test_file.read_text(encoding="utf-8") == "firstsecond"
+def test_get_datetime_string_format() -> None:
+    """YYYY-MM-DD HH:MM:SS 形式で返す。"""
+    assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", get_datetime_string())
 
 
-class TestStripAnsi:
-    """strip_ansi 関数のテスト。"""
-
-    def test_strips_color_codes(self):
-        """カラーコードを除去すること。"""
-        colored = "\x1b[31mred text\x1b[0m"
-        assert strip_ansi(colored) == "red text"
-
-    def test_handles_plain_text(self):
-        """通常テキストはそのまま返すこと。"""
-        assert strip_ansi("plain text") == "plain text"
-
-    def test_handles_non_string(self):
-        """文字列以外の入力では空文字列を返すこと。"""
-        assert strip_ansi(None) == ""
-        assert strip_ansi(123) == ""
+def test_append_file_creates_parent_dirs_and_appends(tmp_path: Path) -> None:
+    """親ディレクトリを作り、既存内容の後ろへ追記する。"""
+    test_file = tmp_path / "a" / "b" / "append.txt"
+    append_file(test_file, "first")
+    append_file(test_file, "second")
+    assert test_file.read_text(encoding="utf-8") == "firstsecond"
 
 
-class TestLog:
-    """log 関数のテスト。"""
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("\x1b[31mred text\x1b[0m", "red text"), ("plain text", "plain text"), (None, ""), (123, "")],
+    ids=["color-codes", "plain", "none", "int"],
+)
+def test_strip_ansi(value: object, expected: str) -> None:
+    """カラーコードを除去し、通常テキストはそのまま、文字列以外は空文字列を返す。"""
+    assert strip_ansi(value) == expected
 
-    def test_log_writes_to_stderr(self, capsys):
-        """stderr に書き込むこと。"""
-        log("test message")
-        captured = capsys.readouterr()
-        assert captured.err == "test message\n"
+
+def test_log_writes_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+    """stderr に 1 行書き込む。"""
+    log("test message")
+    assert capsys.readouterr().err == "test message\n"
