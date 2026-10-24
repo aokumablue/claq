@@ -222,7 +222,7 @@ def test_should_scan_secrets(file_path: str, expected: bool) -> None:
         # NUL 1 個で secret 検査を回避できる抜け道になる。
         (0, b"PNG\x00\x01\x02fake image bytes", "PNG\x00\x01\x02fake image bytes"),
         # 不正な UTF-8 でも UnicodeDecodeError を送出せず置換する（旧 text=True 実装の潜在バグ）。
-        (0, b"valid text \xff\xfe invalid bytes", "valid text �� invalid bytes"),
+        (0, b"valid text \xff\xfe invalid bytes", "valid text \ufffd\ufffd invalid bytes"),
     ],
     ids=["git-fails", "text", "binary-not-filtered", "invalid-utf8-replaced"],
 )
