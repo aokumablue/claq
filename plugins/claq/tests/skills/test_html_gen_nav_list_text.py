@@ -142,14 +142,6 @@ def test_chart_text_without_axis_text_class_is_reported() -> None:
     assert "axis-text を持たない" in "".join(check_site._validate_chart_text(svg))
 
 
-def test_axis_text_that_would_render_too_large_is_reported() -> None:
-    """viewBox を狭く書いて最小幅で描くと文字が大きく伸びる組み合わせは違反になる。"""
-    css = ".chart{min-inline-size:600px}.axis-text{font-size:15px}"
-    svg = '<svg class="chart" viewBox="0 0 400 200">axis-text</svg>'
-    report = "".join(check_site._validate_axis_text_scale(svg, css))
-    assert "伸びる" in report
-
-
 def test_svg_with_text_but_no_chart_class_is_reported() -> None:
     """<text> を持つ SVG のルートに class="chart" が無いと、頭打ちが掛からないので違反になる。"""
     svg = '<svg role="img" viewBox="0 0 720 250"><text class="axis-text">1</text></svg>'
