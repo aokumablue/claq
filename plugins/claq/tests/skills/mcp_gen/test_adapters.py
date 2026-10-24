@@ -30,14 +30,7 @@ def adapters(facade: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def _strings(value: Any) -> Iterator[str]:
-    """値の中の文字列を、入れ子をたどって全て列挙する。
-
-    Args:
-        value: JSON の形の値。
-
-    Yields:
-        値の中の文字列。
-    """
+    """JSON の形の値の中の文字列を、入れ子をたどって全て列挙する。"""
     if isinstance(value, str):
         yield value
         return
@@ -54,16 +47,7 @@ _DELETE = object()
 
 
 def _replaced(document: Any, path: str, value: Any) -> Any:
-    """document を深く複製し、ドット区切りのパスの値を置き換えて返す（不正な上流の応答を作る）。
-
-    Args:
-        document: 元の値（変更しない）。
-        path: ドット区切りのパス。数字の部分は配列の添字。
-        value: 置き換える値。`_DELETE` なら項目を消す。
-
-    Returns:
-        置き換えた複製。
-    """
+    """document を深く複製し、ドット区切りのパス（数字は配列の添字）の値を置き換える（`_DELETE` なら消す）。"""
     copied = copy.deepcopy(document)
     *parents, last = path.split(".")
     node = copied
@@ -78,30 +62,13 @@ def _replaced(document: Any, path: str, value: Any) -> Any:
 
 
 def _normalize_replaced(adapters: types.ModuleType, path: str, value: Any) -> dict[str, Any]:
-    """見本の受注 1 と配送 1 件の、パスの値を置き換えて正規化する。
-
-    Args:
-        adapters: 読み込んだ adapters モジュール。
-        path: `order.` か `shipments.` で始まるパス。
-        value: 置き換える値。
-
-    Returns:
-        正規化した受注。
-    """
+    """見本の受注 1 と配送 1 件の、`order.` か `shipments.` で始まるパスの値を置き換えて正規化する。"""
     upstream = _replaced({"order": adapters._raw_order(1), "shipments": [{"trackingNo": "TRK1", "st": "D"}]}, path, value)
     return {**adapters.normalize_order(upstream["order"]), "shipments": adapters.normalize_shipments(upstream["shipments"])}
 
 
 def _search(adapters: types.ModuleType, **conditions: Any) -> tuple[list[str], str | None]:
-    """偽の受注 API を検索し、受注 ID の一覧と次のページトークンを返す。
-
-    Args:
-        adapters: 読み込んだ adapters モジュール。
-        **conditions: 既定の条件に上書きする検索条件。
-
-    Returns:
-        （受注 ID の一覧、次のページトークン）。
-    """
+    """既定の条件を conditions で上書きして偽の受注 API を検索し、（受注 ID の一覧、次のページトークン）を返す。"""
     arguments = {
         "text": None,
         "customer_ref": None,
@@ -121,7 +88,7 @@ class TestAdapters:
     """重ね合わせの見本の上流（偽物）と正規化。"""
 
     def test_normalize_order(self, adapters: types.ModuleType) -> None:
-        """包み・略語・数値コード・UTC を外して正規ドメインモデルにし、備考は無害化する。"""
+        """包み・略語・数値コード・UTC を外して正規ドメインモデルにし、備考は無害化して空なら null にする（配送は含めず normalize_shipments で別に作る）。"""
         order = adapters.normalize_order(adapters._raw_order(7))
         assert order == {
             "order_id": "ord_000007",
@@ -137,6 +104,8 @@ class TestAdapters:
             ],
             "note": "至急 対応お願いします",
         }
+        order = adapters.normalize_order(adapters._raw_order(1))
+        assert ("shipments" in order, order["note"]) == (False, None)
 
     def test_normalize_shipments(self, adapters: types.ModuleType) -> None:
         """配送は受注とは別に正規化する（形の不正を配送だけの部分失敗にできるように）。"""
@@ -147,12 +116,6 @@ class TestAdapters:
         with pytest.raises(adapters.UpstreamError) as raised:
             adapters.normalize_shipments([{"trackingNo": "TRK1", "st": "X"}])
         assert raised.value.status == 502
-
-    def test_normalize_omits_shipments_and_empty_note(self, adapters: types.ModuleType) -> None:
-        """受注の正規化は配送を含めず（normalize_shipments で別に作る）、空の備考は null にする。"""
-        order = adapters.normalize_order(adapters._raw_order(1))
-        assert "shipments" not in order
-        assert order["note"] is None
 
     def test_label_has_no_customer_name(self, adapters: types.ModuleType) -> None:
         """label は注文番号（注文日）だけにする（顧客名は customer.label の項目で取らせる）。"""
@@ -190,15 +153,6 @@ class TestAdapters:
         assert order["note"] == "備考" + "x" * (adapters.NOTE_MAX_CHARS - 2) + "…"
         assert len(order["order_id"]) == adapters.ID_MAX_CHARS + 1
 
-    @pytest.mark.parametrize("quantity", ["2", {"n": 2}, True, False, 2.5, 2.0, None])
-    def test_normalize_quantity_not_int_raises_502(
-        self, adapters: types.ModuleType, facade: types.SimpleNamespace, quantity: Any
-    ) -> None:
-        """明細の数量は int（bool を除く）だけを通し、文字列・object・bool・小数は上流の失敗（502）にする。"""
-        with pytest.raises(facade.upstream.UpstreamError) as malformed:
-            _normalize_replaced(adapters, "order.data.attributes.lines.0.qty", quantity)
-        assert malformed.value.status == 502
-
     @pytest.mark.parametrize(
         ("path", "value"),
         [
@@ -231,6 +185,7 @@ class TestAdapters:
             ("order.data.attributes.lines", {"sku": "SKU"}),
             ("order.data.attributes.lines.0", "SKU"),
             ("order.data.attributes.lines.0.sku", None),
+            *(("order.data.attributes.lines.0.qty", quantity) for quantity in ["2", {"n": 2}, True, False, 2.5, 2.0, None]),
             ("order.data.attributes.lines.0.unitPrice", _DELETE),
             ("order.data.attributes.lines.0.unitPrice.value", "1000"),
             ("order.data.attributes.memo", None),
@@ -244,7 +199,7 @@ class TestAdapters:
     def test_normalize_malformed_upstream_raises_502(
         self, adapters: types.ModuleType, facade: types.SimpleNamespace, path: str, value: Any
     ) -> None:
-        """上流の値の型・コード・日時・数値・入れ物が想定と違えば、素通しも汎用の例外もせず、上流の失敗（502）にする。"""
+        """上流の値の型・コード・日時・数値・入れ物が想定と違えば（明細の数量は bool を除く int だけを通す）、素通しも汎用の例外もせず、上流の失敗（502）にする。"""
         with pytest.raises(facade.upstream.UpstreamError) as malformed:
             _normalize_replaced(adapters, path, value)
         assert malformed.value.status == 502
