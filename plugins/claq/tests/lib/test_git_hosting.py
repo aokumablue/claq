@@ -5,171 +5,137 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
 
 from claq.lib import git_hosting
-from claq.lib.git_hosting import (
-    _remote_host,
-    detect_git_hosting_service,
-    normalize_git_hosting_service,
-)
+from claq.lib.git_hosting import _remote_host, detect_git_hosting_service, normalize_git_hosting_service
 
 
-def test_normalize_git_hosting_service_defaults_to_github() -> None:
-    assert normalize_git_hosting_service("github") == "github"
-    assert normalize_git_hosting_service("gitlab") == "gitlab"
-    with pytest.warns(UserWarning):
-        assert normalize_git_hosting_service("unknown") == "github"
+def _invalid(value: str, fallback: str) -> str:
+    """不正値の警告文を返す。"""
+    return f"Invalid git-hosting-service '{value}', falling back to '{fallback}'"
 
 
 @pytest.mark.parametrize(
-    ("remote_url", "returncode", "expected"),
+    ("value", "default", "expected", "warning"),
+    [
+        ("github", None, "github", None),
+        ("gitlab", None, "gitlab", None),
+        ("unknown", None, "github", _invalid("unknown", "github")),
+        ("gitlab", "invalid", "gitlab", None),
+        ("unknown", "also-invalid", "github", _invalid("unknown", "github")),
+        ("unknown", "gitlab", "gitlab", _invalid("unknown", "gitlab")),
+        ("", "github", "github", None),
+        ("", "gitlab", "gitlab", None),
+        ("", "bad-default", "github", None),
+        (None, "bad-default", "github", None),
+    ],
+    ids=[
+        "github",
+        "gitlab",
+        "invalid-uses-github-default",
+        "valid-overrides-invalid-default",
+        "invalid-with-invalid-default",
+        "invalid-uses-given-default",
+        "empty-with-github-default",
+        "empty-with-gitlab-default",
+        "empty-with-invalid-default",
+        "none-with-invalid-default",
+    ],
+)
+def test_normalize_git_hosting_service(
+    value: str | None, default: str | None, expected: str, warning: str | None
+) -> None:
+    """有効値はそのまま、空・不正値は default（これも不正なら github）。警告は値が空でなく不正なときだけ（default=None は引数省略）。"""
+    kwargs = {} if default is None else {"default": default}
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert normalize_git_hosting_service(value, **kwargs) == expected
+
+    assert [(w.category, str(w.message)) for w in caught] == ([(UserWarning, warning)] if warning else [])
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://github.com/owner/repo.git", "github.com"),
+        ("http://gitlab.example.com/g/r.git", "gitlab.example.com"),
+        ("ssh://git@gitlab.example.com:2222/g/r.git", "gitlab.example.com"),
+        ("https://user:pw@gitlab.example.com/g/r.git", "gitlab.example.com"),
+        ("ssh://git@[::1]:22/g/r.git", "[::1]"),
+        # scp 形式（scheme が無いので専用パターンが要る）
+        ("git@gitlab.example.com:group/repo.git", "gitlab.example.com"),
+        ("gitlab.example.com:group/repo.git", "gitlab.example.com"),
+        # ホストを特定できない形
+        ("/srv/git/gitlab/repo.git", ""),
+        ("../relative/repo.git", ""),
+        ("", ""),
+    ],
+)
+def test_remote_host_is_extracted(url: str, expected: str) -> None:
+    """origin URL からホスト部だけを取り出す（URL 全体の部分一致をやめる）。"""
+    assert _remote_host(url) == expected
+
+
+@pytest.mark.parametrize(
+    ("stdout", "returncode", "expected"),
     [
         ("git@github.com:owner/repo.git", 0, "github"),
         ("https://github.com/owner/repo.git", 0, "github"),
         ("git@gitlab.com:group/repo.git", 0, "gitlab"),
         ("https://gitlab.example.com/group/repo.git", 0, "gitlab"),
-        ("https://bitbucket.org/owner/repo.git", 0, "github"),  # 未対応は github fallback
+        ("https://bitbucket.org/owner/repo.git", 0, "github"),  # 未対応は default
         ("", 1, "github"),  # git 失敗は default
+        # リポジトリ名に他方の名前を含んでも誤判定しない（判定はホスト部だけ）
+        ("https://github.com/acme/gitlab-migration.git\n", 0, "github"),
+        ("https://gitlab.com/acme/github-mirror.git\n", 0, "gitlab"),
+        # scp 形式の自前 GitLab（urlsplit だけで済ませると host が取れず既定へ落ちる）
+        ("git@gitlab.example.com:group/repo.git\n", 0, "gitlab"),
+        ("ssh://git@gitlab.example.com:2222/group/repo.git\n", 0, "gitlab"),
+        # ホストを取り出せない形は default（ローカルパスは hosting service ではない）
+        ("/srv/git/gitlab/repo.git\n", 0, "github"),
     ],
 )
-def test_detect_git_hosting_service_infers_from_remote_url(
-    monkeypatch: pytest.MonkeyPatch,
-    remote_url: str,
-    returncode: int,
-    expected: str,
+def test_detect_git_hosting_service_infers_from_remote_host(
+    monkeypatch: pytest.MonkeyPatch, stdout: str, returncode: int, expected: str
 ) -> None:
-    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=remote_url, stderr="")
+    """`git remote get-url origin` の出力のホスト部から hosting service を推測する。"""
+    monkeypatch.setattr(
+        git_hosting, "run_text", lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, returncode, stdout, "")
+    )
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
     assert detect_git_hosting_service() == expected
 
 
-def test_detect_git_hosting_service_handles_subprocess_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    def raiser(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        raise OSError("git not found")
+@pytest.mark.parametrize("error", [OSError("git not found"), subprocess.TimeoutExpired("git", 5)])
+def test_detect_git_hosting_service_handles_subprocess_errors(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    """git を起動できない・時間切れなら default を返す。"""
 
-    monkeypatch.setattr(subprocess, "run", raiser)
+    def raiser(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """``error`` を送出する。"""
+        raise error
+
+    monkeypatch.setattr(git_hosting, "run_text", raiser)
     assert detect_git_hosting_service() == "github"
 
 
 def test_detect_git_hosting_service_accepts_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, object] = {}
+    """cwd を ``git -C`` へ渡して判定する。"""
+    captured: list[list[str]] = []
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        captured["cmd"] = cmd
-        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="https://gitlab.com/x/y.git", stderr="")
+        """コマンドを記録して gitlab の URL を返す。"""
+        captured.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "https://gitlab.com/x/y.git", "")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(git_hosting, "run_text", fake_run)
     assert detect_git_hosting_service(cwd=tmp_path) == "gitlab"
-    assert str(tmp_path) in captured["cmd"]  # type: ignore[operator]
-
-
-class TestNormalizeGitHostingServiceEdgeCases:
-    """normalize_git_hosting_service のエッジケースを網羅するテスト。"""
-
-    # デシジョンテーブル:
-    # | value     | default   | 期待値   | warn? |
-    # |-----------|-----------|----------|-------|
-    # | "github"  | any       | "github" | No    |
-    # | "gitlab"  | any       | "gitlab" | No    |
-    # | "bad"     | "github"  | "github" | Yes (invalid value + valid default) |
-    # | ""        | "github"  | "github" | No   (空は warn なし) |
-    # | "bad"     | "bad"     | "github" | Yes (invalid value + invalid default) |
-    # | ""        | "bad"     | "github" | No   (value が空 → warn なし, default も invalid) |
-
-    def test_invalid_value_with_invalid_default_warns_and_returns_github(self) -> None:
-        """value も default も不正な場合、warn して GITHUB を返すこと。"""
-        with pytest.warns(UserWarning, match="Invalid git-hosting-service"):
-            result = normalize_git_hosting_service("unknown", default="also-invalid")
-        assert result == "github"
-
-    def test_empty_value_with_invalid_default_returns_github_no_warn(self) -> None:
-        """value が空で default も不正な場合、warn なしで GITHUB を返すこと。"""
-        # value が空文字 → normalized が空 → warn は発生しない
-        result = normalize_git_hosting_service("", default="bad-default")
-        assert result == "github"
-
-    def test_none_value_with_invalid_default_returns_github_no_warn(self) -> None:
-        """value が None で default も不正な場合、warn なしで GITHUB を返すこと。"""
-        result = normalize_git_hosting_service(None, default="bad-default")
-        assert result == "github"
-
-    def test_valid_value_overrides_invalid_default(self) -> None:
-        """value が有効なら default は使われないこと。"""
-        result = normalize_git_hosting_service("gitlab", default="invalid")
-        assert result == "gitlab"
-
-
-def test_normalize_invalid_value_and_invalid_default() -> None:
-    """値もデフォルトも不正なら GITHUB にフォールバックする。"""
-    import warnings
-
-    from claq.lib.git_hosting import GITHUB, normalize_git_hosting_service
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        assert normalize_git_hosting_service("invalid", default="alsobad") == GITHUB
-
-
-def test_normalize_empty_value_with_valid_default() -> None:
-    """値が空で有効なデフォルトがあれば警告なしでデフォルトを返す。"""
-    from claq.lib.git_hosting import normalize_git_hosting_service
-
-    assert normalize_git_hosting_service("", default="github") == "github"
-
-
-class TestRemoteHostExtraction:
-    """origin URL からホスト部だけを取り出す（INFO: URL 全体の部分一致をやめる）。"""
-
-    @pytest.mark.parametrize(
-        ("url", "expected"),
-        [
-            ("https://github.com/owner/repo.git", "github.com"),
-            ("http://gitlab.example.com/g/r.git", "gitlab.example.com"),
-            ("ssh://git@gitlab.example.com:2222/g/r.git", "gitlab.example.com"),
-            ("https://user:pw@gitlab.example.com/g/r.git", "gitlab.example.com"),
-            ("ssh://git@[::1]:22/g/r.git", "[::1]"),
-            # scp 形式（scheme が無いので専用パターンが要る）
-            ("git@gitlab.example.com:group/repo.git", "gitlab.example.com"),
-            ("gitlab.example.com:group/repo.git", "gitlab.example.com"),
-            # ホストを特定できない形
-            ("/srv/git/gitlab/repo.git", ""),
-            ("../relative/repo.git", ""),
-            ("", ""),
-        ],
-    )
-    def test_host_is_extracted(self, url: str, expected: str) -> None:
-        assert _remote_host(url) == expected
-
-
-@pytest.mark.parametrize(
-    ("remote_url", "expected"),
-    [
-        # INFO の本体: リポジトリ名に他方の名前を含んでも誤判定しない
-        ("https://github.com/acme/gitlab-migration.git", "github"),
-        ("https://gitlab.com/acme/github-mirror.git", "gitlab"),
-        # scp 形式の自前 GitLab（urlsplit だけで済ませると host が取れず既定へ落ちる）
-        ("git@gitlab.example.com:group/repo.git", "gitlab"),
-        ("ssh://git@gitlab.example.com:2222/group/repo.git", "gitlab"),
-        # ホストを取り出せない形は default（ローカルパスは hosting service ではない）
-        ("/srv/git/gitlab/repo.git", "github"),
-    ],
-)
-def test_detect_git_hosting_service_uses_host_only(
-    monkeypatch: pytest.MonkeyPatch, remote_url: str, expected: str
-) -> None:
-    """判定は URL 全体ではなくホスト部で行うこと。"""
-    monkeypatch.setattr(
-        git_hosting,
-        "run_text",
-        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, remote_url + "\n", ""),
-    )
-
-    assert detect_git_hosting_service() == expected
+    assert captured == [["git", "-C", str(tmp_path), "remote", "get-url", "origin"]]
 
 
 def test_detect_git_hosting_service_survives_non_ascii_remote_url(tmp_path: Path) -> None:
@@ -201,17 +167,9 @@ def test_detect_git_hosting_service_survives_non_ascii_remote_url(tmp_path: Path
         "from claq.lib.git_hosting import detect_git_hosting_service\n"
         f"sys.stdout.write(detect_git_hosting_service(cwd={str(repo)!r}))\n"
     )
-    env = {
-        **os.environ,
-        "PYTHONUTF8": "0",
-        "PYTHONCOERCECLOCALE": "0",
-        "LC_ALL": "C",
-        "LANG": "C",
-    }
+    env = {**os.environ, "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0", "LC_ALL": "C", "LANG": "C"}
 
-    result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, env=env, timeout=30
-    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env, timeout=30)
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "gitlab"
