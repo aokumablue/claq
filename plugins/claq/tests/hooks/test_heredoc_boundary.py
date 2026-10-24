@@ -35,11 +35,11 @@ _EXECUTED_HEREDOC_LINES = (
     "sh <<'EOF'",
 )
 
-# フック → (deny されるべき本文, 陰性対照として通る本文)。
-_HOOK_BODIES = {
-    "claq.hooks.block_no_verify": "git commit --no-verify -m x",
-    "claq.hooks.bash_config_protection": "printf x > ruff.toml",
-}
+# (演算子行, 期待 exit)。データ形は deny 対象の本文でも通し、実行されうる形は deny のまま。
+_HEREDOC_CASES = (
+    *((line, 0) for line in _DATA_HEREDOC_LINES),
+    *((line, 2) for line in _EXECUTED_HEREDOC_LINES),
+)
 
 # 「幻の演算子」。`<<` がコメント内・クォート内・`\` エスケープ後にあると
 # heredoc は開始せず、続く行は**実行されるコマンド**である。それを本文として
@@ -65,8 +65,8 @@ _PHANTOM_OPERATOR_CASES = (
     ("行末コメント付きの本物の heredoc", "cat > note.md <<'EOF' # note\n{body}\nEOF", 0),
 )
 
-# 幻の演算子の表を流す 3 フックと、それぞれが deny すべき本文。
-_PHANTOM_HOOK_BODIES = {
+# 表を流す 3 フックと、それぞれが deny すべき本文。
+_HOOK_BODIES = {
     "claq.hooks.block_no_verify": "git commit --no-verify -m x",
     "claq.hooks.bash_config_protection": "printf x > ruff.toml",
     "claq.hooks.pre_bash_commit_quality": "git add . && git commit -m x",
@@ -74,17 +74,7 @@ _PHANTOM_HOOK_BODIES = {
 
 
 def _run(hook: str, command: str, tmp_home: Path, cwd: Path) -> subprocess.CompletedProcess[str]:
-    """リポジトリ内 launcher で hook を実行する。
-
-    Args:
-        hook: dotted module name。
-        command: フックへ渡す Bash コマンド文字列。
-        tmp_home: 一時 HOME（実 ~/.claq を触らない）。
-        cwd: 実行ディレクトリ（リポジトリスコープ判定に使われる）。
-
-    Returns:
-        CompletedProcess。
-    """
+    """リポジトリ内 launcher で hook を実行する（HOME は一時ディレクトリ、cwd はリポジトリスコープ判定の基準）。"""
     env = {
         "HOME": str(tmp_home),
         "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
@@ -112,29 +102,12 @@ def repo(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize("hook", sorted(_HOOK_BODIES))
-@pytest.mark.parametrize("operator_line", _DATA_HEREDOC_LINES)
-def test_data_heredoc_body_is_not_command_text(
-    hook: str, operator_line: str, tmp_path: Path, repo: Path
-) -> None:
-    """データ本文に保護対象の語が現れても通す。"""
-    command = f"{operator_line}\n{_HOOK_BODIES[hook]}\nEOF"
+@pytest.mark.parametrize(("operator_line", "expected"), _HEREDOC_CASES)
+def test_heredoc_body_verdict(hook: str, operator_line: str, expected: int, tmp_path: Path, repo: Path) -> None:
+    """データ本文に保護対象の語が現れても通し、本文が実行される形はブロックし続けること。"""
+    result = _run(hook, f"{operator_line}\n{_HOOK_BODIES[hook]}\nEOF", tmp_path, repo)
 
-    result = _run(hook, command, tmp_path, repo)
-
-    assert result.returncode == 0, f"{hook}: データ heredoc 本文で exit {result.returncode} err={result.stderr[:200]}"
-
-
-@pytest.mark.parametrize("hook", sorted(_HOOK_BODIES))
-@pytest.mark.parametrize("operator_line", _EXECUTED_HEREDOC_LINES)
-def test_executed_heredoc_body_stays_blocked(
-    hook: str, operator_line: str, tmp_path: Path, repo: Path
-) -> None:
-    """本文が実行される形はブロックし続ける（誤通過を作らない）。"""
-    command = f"{operator_line}\n{_HOOK_BODIES[hook]}\nEOF"
-
-    result = _run(hook, command, tmp_path, repo)
-
-    assert result.returncode == 2, f"{hook}: 実行される heredoc 本文が exit {result.returncode} で素通りした"
+    assert result.returncode == expected, f"{hook}: exit {result.returncode} err={result.stderr[:200]}"
 
 
 @pytest.mark.parametrize("operator_line", _DATA_HEREDOC_LINES)
@@ -152,17 +125,7 @@ def test_commit_quality_does_not_scan_for_data_heredoc_body(operator_line: str, 
     assert "Checking" not in result.stderr, f"データ本文で品質スキャンが走った: {result.stderr[:200]}"
 
 
-@pytest.mark.parametrize("operator_line", _EXECUTED_HEREDOC_LINES)
-def test_commit_quality_still_scans_executed_heredoc_body(operator_line: str, tmp_path: Path, repo: Path) -> None:
-    """本文が実行される形では commit として扱う。"""
-    command = f"{operator_line}\ngit add . && git commit -m x\nEOF"
-
-    result = _run("claq.hooks.pre_bash_commit_quality", command, tmp_path, repo)
-
-    assert result.returncode == 2
-
-
-@pytest.mark.parametrize("hook", sorted(_PHANTOM_HOOK_BODIES))
+@pytest.mark.parametrize("hook", sorted(_HOOK_BODIES))
 @pytest.mark.parametrize(("label", "template", "expected"), _PHANTOM_OPERATOR_CASES)
 def test_phantom_heredoc_operator(
     hook: str, label: str, template: str, expected: int, tmp_path: Path, repo: Path
@@ -172,7 +135,7 @@ def test_phantom_heredoc_operator(
     deny 側（幻の演算子）と allow 側（本物の heredoc）を同じ表で挟む。片側だけ
     だと「常に剥がす」実装と「常に剥がさない」実装のどちらかが緑で通る。
     """
-    command = template.format(body=_PHANTOM_HOOK_BODIES[hook])
+    command = template.format(body=_HOOK_BODIES[hook])
 
     result = _run(hook, command, tmp_path, repo)
 
