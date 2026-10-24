@@ -1,4 +1,4 @@
-"""logger のテスト"""
+"""claq.mem.logger のテスト。"""
 
 import logging
 from pathlib import Path
@@ -8,121 +8,50 @@ import pytest
 import claq.mem.logger as logger
 
 
-def _flush() -> None:
-    """claq.mem ロガーの全ハンドラを flush する。"""
-    for handler in logging.getLogger("claq.mem").handlers:
-        handler.flush()
+@pytest.fixture(autouse=True)
+def _reset_logger() -> None:
+    """各テストの前後でロガーの初期化状態とハンドラを消す。"""
+    logger.reset()
+    yield
+    logger.reset()
 
 
-class TestLogger:
-    """ロガーのテスト"""
-
-    def setup_method(self) -> None:
-        logger.reset()
-
-    def teardown_method(self) -> None:
-        logger.reset()
-
-    def test_get_returns_logger(self) -> None:
-        log = logger.get("TEST")
-        assert isinstance(log, logging.Logger)
-        assert log.name == "claq.mem.TEST"
-
-    def test_setup_creates_handlers(self, tmp_path: Path) -> None:
-        logger.setup(tmp_path, level="debug")
-        root = logging.getLogger("claq.mem")
-        assert len(root.handlers) == 2  # ファイル出力 + stderr
-        assert root.level == logging.DEBUG
-
-    def test_setup_creates_log_file(self, tmp_path: Path) -> None:
-        logger.setup(tmp_path, level="info")
-        log_files = list(tmp_path.glob("mem-*.log"))
-        assert len(log_files) == 1
-
-    def test_setup_idempotent(self, tmp_path: Path) -> None:
-        logger.setup(tmp_path, level="info")
-        logger.setup(tmp_path, level="debug")  # 2回目は無視
-        root = logging.getLogger("claq.mem")
-        assert len(root.handlers) == 2  # 増えない
-
-    def test_setup_invalid_level_defaults_to_info(self, tmp_path: Path) -> None:
-        logger.setup(tmp_path, level="nonexistent")
-        root = logging.getLogger("claq.mem")
-        assert root.level == logging.INFO
-
-    def test_reset_clears_state(self, tmp_path: Path) -> None:
-        logger.setup(tmp_path)
-        logger.reset()
-        root = logging.getLogger("claq.mem")
-        assert len(root.handlers) == 0
-        assert not logger._initialized
-
-    def test_log_message_written_to_file(self, tmp_path: Path) -> None:
-        logger.setup(tmp_path, level="info")
-        log = logger.get("TEST")
-        log.info("test message 12345")
-        _flush()
-        log_file = list(tmp_path.glob("mem-*.log"))[0]
-        content = log_file.read_text()
-        assert "test message 12345" in content
-
-    def test_log_dir_chmod_0700(self, tmp_path: Path) -> None:
-        """ログディレクトリは chmod 0700 で作成される。"""
-        log_dir = tmp_path / "logs"
-        logger.setup(log_dir, level="info")
-        mode = log_dir.stat().st_mode & 0o777
-        assert mode == 0o700, f"ログディレクトリ権限が期待 0o700 だが {oct(mode)}"
-
-    def test_log_file_chmod_0600(self, tmp_path: Path) -> None:
-        """ログファイルは chmod 0600 で作成される。"""
-        logger.setup(tmp_path, level="info")
-        log_files = list(tmp_path.glob("mem-*.log"))
-        assert log_files
-        mode = log_files[0].stat().st_mode & 0o777
-        assert mode == 0o600, f"ログファイル権限が期待 0o600 だが {oct(mode)}"
-
-    def test_redacting_formatter_masks_secret(self, tmp_path: Path) -> None:
-        """ログに書かれたシークレットが [REDACTED] に置換される。"""
-        logger.setup(tmp_path, level="info")
-        log = logger.get("TEST")
-        log.info("token=" + "sk-ant-" + "api03-" + "A" * 90)
-        _flush()
-        log_file = list(tmp_path.glob("mem-*.log"))[0]
-        content = log_file.read_text()
-        assert "[REDACTED]" in content
-        assert "sk-ant-api03-" not in content
-
-    def test_setup_can_retry_after_handler_construction_failure(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """ハンドラ構築が失敗しても初期化済みフラグが立たず、次の setup で復帰できる。
-
-        `_initialized = True` を構築前に立てると、一度でも失敗したとき
-        「初期化済みだがハンドラが空」という復帰不能な状態がプロセス内に残る。
-        """
-        logger.reset()
-        calls = {"n": 0}
-        real_file_handler = logger._file_handler
-
-        def flaky_file_handler(log_dir: Path):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise OSError("disk full")
-            return real_file_handler(log_dir)
-
-        monkeypatch.setattr(logger, "_file_handler", flaky_file_handler)
-
-        with pytest.raises(OSError):
-            logger.setup(tmp_path, level="info")
-        assert logger._initialized is False
-
-        logger.setup(tmp_path, level="info")
-        assert logging.getLogger("claq.mem").handlers
+def _mem_root() -> logging.Logger:
+    """claq.mem のルートロガーを返す。"""
+    return logging.getLogger("claq.mem")
 
 
-@pytest.mark.skipif(not hasattr(Path, "chmod"), reason="POSIX の mode を持たない環境")
-def test_setup_closes_the_parent_directory_too(tmp_path: Path) -> None:
-    """ログ用ディレクトリの**親**まで 0700 で閉じること。
+def test_get_returns_child_logger() -> None:
+    """get はコンポーネント名を付けた claq.mem 配下のロガーを返す。"""
+    log = logger.get("TEST")
+    assert isinstance(log, logging.Logger)
+    assert log.name == "claq.mem.TEST"
+
+
+@pytest.mark.parametrize(
+    ("level", "expected"),
+    [("debug", logging.DEBUG), ("info", logging.INFO), ("nonexistent", logging.INFO)],
+)
+def test_setup_adds_file_and_stderr_handlers_with_level(tmp_path: Path, level: str, expected: int) -> None:
+    """ファイル出力と stderr の 2 ハンドラを付け、レベルを設定する（不正なレベルは INFO）。"""
+    logger.setup(tmp_path, level=level)
+    assert len(_mem_root().handlers) == 2
+    assert _mem_root().level == expected
+
+
+def test_setup_is_idempotent_and_reset_clears_state(tmp_path: Path) -> None:
+    """2 回目の setup は無視され（ハンドラもレベルも変わらない）、reset でハンドラと初期化済みフラグが消える。"""
+    logger.setup(tmp_path, level="info")
+    logger.setup(tmp_path, level="debug")
+    assert len(_mem_root().handlers) == 2
+    assert _mem_root().level == logging.INFO
+    logger.reset()
+    assert _mem_root().handlers == []
+    assert logger._initialized is False
+
+
+def test_setup_closes_dirs_and_reuses_log_file(tmp_path: Path) -> None:
+    """ログ用ディレクトリと**その親**を 0700、日次ログファイルを 0600 で作り、再 setup では同じファイルを使う。
 
     `mkdir(parents=True)` は mode を親へ適用しない。ロガーは
     `_load_settings_or_raise()` の中でどの ``Database()`` よりも先に走るため、
@@ -130,26 +59,55 @@ def test_setup_closes_the_parent_directory_too(tmp_path: Path) -> None:
     作るのがロガーになる。そこで 0700 にしないと ``drwxr-xr-x``（0755）のまま残り、
     CLAUDE.md が定める「`~/.claq` の 0700」を割る。
     """
-    logger.reset()
     root = tmp_path / "claq-root"
-    logger.setup(root / "logs", level="info")
-
-    assert root.stat().st_mode & 0o777 == 0o700
-    assert (root / "logs").stat().st_mode & 0o777 == 0o700
-    logs = list((root / "logs").glob("mem-*.log"))
-    assert logs and logs[0].stat().st_mode & 0o777 == 0o600
-
-
-def test_setup_reuses_an_existing_log_file(tmp_path: Path) -> None:
-    """同日の 2 回目以降、既存のログファイルをそのまま使うこと（mode も維持）。"""
-    logs = tmp_path / "logs"
-    logger.reset()
+    logs = root / "logs"
     logger.setup(logs, level="info")
     existing = sorted(logs.glob("mem-*.log"))
-    assert existing
+    assert len(existing) == 1
+    assert root.stat().st_mode & 0o777 == 0o700
+    assert logs.stat().st_mode & 0o777 == 0o700
+    assert existing[0].stat().st_mode & 0o777 == 0o600
 
     logger.reset()
     logger.setup(logs, level="info")
-
     assert sorted(logs.glob("mem-*.log")) == existing
     assert existing[0].stat().st_mode & 0o777 == 0o600
+
+
+def test_messages_are_written_to_file_with_secrets_redacted(tmp_path: Path) -> None:
+    """ログメッセージはファイルへ書かれ、シークレットは [REDACTED] に置換される。"""
+    logger.setup(tmp_path, level="info")
+    log = logger.get("TEST")
+    log.info("test message 12345")
+    log.info("token=" + "sk-ant-" + "api03-" + "A" * 90)
+    for handler in _mem_root().handlers:
+        handler.flush()
+    content = next(tmp_path.glob("mem-*.log")).read_text()
+    assert "test message 12345" in content
+    assert "[REDACTED]" in content
+    assert "sk-ant-api03-" not in content
+
+
+def test_setup_can_retry_after_handler_construction_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """ハンドラ構築が失敗しても初期化済みフラグが立たず、次の setup で復帰できる。
+
+    `_initialized = True` を構築前に立てると、一度でも失敗したとき
+    「初期化済みだがハンドラが空」という復帰不能な状態がプロセス内に残る。
+    """
+    real_file_handler = logger._file_handler
+    failures = [OSError("disk full")]
+
+    def flaky_file_handler(log_dir: Path) -> logging.Handler:
+        """初回だけ OSError を送出し、以降は本物のハンドラを返す。"""
+        if failures:
+            raise failures.pop()
+        return real_file_handler(log_dir)
+
+    monkeypatch.setattr(logger, "_file_handler", flaky_file_handler)
+
+    with pytest.raises(OSError, match="disk full"):
+        logger.setup(tmp_path, level="info")
+    assert logger._initialized is False
+
+    logger.setup(tmp_path, level="info")
+    assert _mem_root().handlers
