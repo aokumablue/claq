@@ -103,66 +103,16 @@ _GATE_FAILED_MARKER = "テストゲート失敗（再開モード、push なし�
 
 
 def _git(cwd: Path, *args: str, env: dict[str, str]) -> str:
-    """隔離環境で git を実行し、標準出力（末尾空白除去）を返す。
-
-    Args:
-        cwd: git を実行するディレクトリ。
-        *args: git のサブコマンドと引数。
-        env: 隔離済みの環境変数。
-
-    Returns:
-        標準出力。
-
-    Raises:
-        subprocess.CalledProcessError: git が失敗した場合。
-    """
+    """隔離環境で git を実行し、標準出力（末尾空白除去）を返す。失敗は CalledProcessError で伝える。"""
     result = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True, check=True, timeout=60)
     return result.stdout.strip()
 
 
-def _isolated_env(tmp_path: Path) -> dict[str, str]:
-    """実ユーザーの git 設定・hook・venv を一切拾わない環境変数を作る。
-
-    ``CLAQ_VENV`` を存在しないパスにするので、ガードが無くても ``run_gate`` が
-    ``filter-repo`` / ``update-ref`` / push より前に失敗し、テストが副作用を持たない。
-
-    Args:
-        tmp_path: HOME と空の gitconfig の置き場。
-
-    Returns:
-        subprocess に渡す環境変数。
-    """
-    home = tmp_path / "home"
-    home.mkdir()
-    gitconfig = tmp_path / "gitconfig"
-    gitconfig.write_text("", encoding="utf-8")
-    return {
-        "PATH": os.environ["PATH"],
-        "HOME": str(home),
-        "GIT_CONFIG_GLOBAL": str(gitconfig),
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_AUTHOR_NAME": "t",
-        "GIT_AUTHOR_EMAIL": "t@example.invalid",
-        "GIT_COMMITTER_NAME": "t",
-        "GIT_COMMITTER_EMAIL": "t@example.invalid",
-        "CLAQ_VENV": str(tmp_path / "no-such-venv"),
-    }
-
-
 def _init_repo(path: Path, env: dict[str, str]) -> Path:
-    """版 1.0.0 の plugin.json を持ち ``release: v1.0.0`` で commit 済みのリポジトリを作る。
-
-    Args:
-        path: 作成先（親は既存であること）。
-        env: 隔離済みの環境変数。
-
-    Returns:
-        ``path`` そのもの。
-    """
-    path.mkdir()
-    _git(path, "init", "--quiet", "-b", "main", env=env)
+    """版 1.0.0 の plugin.json を持ち ``release: v1.0.0`` で commit 済みのリポジトリを ``path`` に作る。"""
     manifest = path / "plugins" / "claq" / ".claude-plugin" / "plugin.json"
     manifest.parent.mkdir(parents=True)
+    _git(path, "init", "--quiet", "-b", "main", env=env)
     manifest.write_text(json.dumps({"version": "1.0.0"}), encoding="utf-8")
     _git(path, "add", ".", env=env)
     _git(path, "commit", "--quiet", "-m", _RELEASE_SUBJECT, env=env)
@@ -170,16 +120,7 @@ def _init_repo(path: Path, env: dict[str, str]) -> Path:
 
 
 def _run_publish(cwd: Path, remote: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    """``publish.sh --no-push`` を ``cwd`` で実行する。
-
-    Args:
-        cwd: dev 側の作業ディレクトリ。
-        remote: ``CLAQ_PUBLISH_REMOTE`` に渡す公開先。
-        env: 隔離済みの環境変数。
-
-    Returns:
-        完了したプロセス。
-    """
+    """``CLAQ_PUBLISH_REMOTE=<remote> publish.sh --no-push`` を ``cwd`` で実行する。"""
     return subprocess.run(
         [_BASH, str(_PUBLISH_SH), "--no-push"],
         cwd=cwd,
@@ -197,28 +138,45 @@ class TestPublishRemoteGuard:
 
     @pytest.fixture
     def env(self, tmp_path: Path) -> dict[str, str]:
-        """隔離環境変数。"""
-        return _isolated_env(tmp_path)
+        """実ユーザーの git 設定・hook・venv を拾わない環境変数。
+
+        ``CLAQ_VENV`` を存在しないパスにするので、ガードが無くても ``run_gate`` が
+        ``filter-repo`` / ``update-ref`` / push より前に失敗し、テストが副作用を持たない。
+        """
+        (tmp_path / "home").mkdir()
+        (tmp_path / "gitconfig").write_text("", encoding="utf-8")
+        return {
+            "PATH": os.environ["PATH"],
+            "HOME": str(tmp_path / "home"),
+            "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@example.invalid",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@example.invalid",
+            "CLAQ_VENV": str(tmp_path / "no-such-venv"),
+        }
 
     @pytest.fixture
     def dev(self, tmp_path: Path, env: dict[str, str]) -> Path:
         """dev 側のリポジトリ。"""
         return _init_repo(tmp_path / "dev", env)
 
-    def _assert_aborted_before_touching_remote(
-        self, result: subprocess.CompletedProcess[str], dev: Path, before: str, env: dict[str, str], message: str
-    ) -> None:
-        """指定メッセージで中断し、fetch 以降へ進まず dev の main が不変であること。"""
+    @staticmethod
+    def _assert_publish_aborts(cwd: Path, remote: Path, env: dict[str, str], message: str) -> None:
+        """``cwd`` から publish すると指定メッセージで中断し、fetch 以降へ進まず main が不変であること。"""
+        before = _git(cwd, "rev-parse", "refs/heads/main", env=env)
+
+        result = _run_publish(cwd, remote, env)
+
         assert result.returncode != 0
         assert message in result.stderr
         assert _FETCH_MARKER not in result.stdout
-        assert _git(dev, "rev-parse", "refs/heads/main", env=env) == before
+        assert _git(cwd, "rev-parse", "refs/heads/main", env=env) == before
 
     def test_aborts_when_remote_is_the_dev_checkout(self, dev: Path, env: dict[str, str]) -> None:
         """公開先が dev 自身なら中断する。"""
-        before = _git(dev, "rev-parse", "refs/heads/main", env=env)
-        result = _run_publish(dev, dev, env)
-        self._assert_aborted_before_touching_remote(result, dev, before, env, _SELF_REMOTE_ERROR)
+        self._assert_publish_aborts(dev, dev, env, _SELF_REMOTE_ERROR)
 
     def test_aborts_when_remote_is_a_symlink_to_the_dev_checkout(
         self, tmp_path: Path, dev: Path, env: dict[str, str]
@@ -226,9 +184,7 @@ class TestPublishRemoteGuard:
         """symlink 経由で dev 自身を指す公開先でも中断する。"""
         link = tmp_path / "link-to-dev"
         link.symlink_to(dev, target_is_directory=True)
-        before = _git(dev, "rev-parse", "refs/heads/main", env=env)
-        result = _run_publish(dev, link, env)
-        self._assert_aborted_before_touching_remote(result, dev, before, env, _SELF_REMOTE_ERROR)
+        self._assert_publish_aborts(dev, link, env, _SELF_REMOTE_ERROR)
 
     def test_aborts_when_dev_is_a_linked_worktree_of_the_remote(
         self, tmp_path: Path, dev: Path, env: dict[str, str]
@@ -236,9 +192,7 @@ class TestPublishRemoteGuard:
         """dev が公開先の linked worktree でも、refs を共有するので中断する。"""
         worktree = tmp_path / "dev-worktree"
         _git(dev, "worktree", "add", "--quiet", "-b", "work", str(worktree), env=env)
-        before = _git(dev, "rev-parse", "refs/heads/main", env=env)
-        result = _run_publish(worktree, dev, env)
-        self._assert_aborted_before_touching_remote(result, worktree, before, env, _SELF_REMOTE_ERROR)
+        self._assert_publish_aborts(worktree, dev, env, _SELF_REMOTE_ERROR)
 
     def test_aborts_when_remote_is_a_linked_worktree_of_dev(
         self, tmp_path: Path, dev: Path, env: dict[str, str]
@@ -251,13 +205,9 @@ class TestPublishRemoteGuard:
         """
         worktree = tmp_path / "remote-worktree"
         _git(dev, "worktree", "add", "--quiet", "-b", "work", str(worktree), env=env)
-        before = _git(dev, "rev-parse", "refs/heads/main", env=env)
-        result = _run_publish(dev, worktree, env)
-        self._assert_aborted_before_touching_remote(result, dev, before, env, _PRE_EXISTING_REMOTE_ERROR)
+        self._assert_publish_aborts(dev, worktree, env, _PRE_EXISTING_REMOTE_ERROR)
 
-    def test_aborts_when_remote_differs_from_dev_only_by_case(
-        self, tmp_path: Path, dev: Path, env: dict[str, str]
-    ) -> None:
+    def test_aborts_when_remote_differs_from_dev_only_by_case(self, dev: Path, env: dict[str, str]) -> None:
         """大文字小文字を区別しない FS で、綴りの大小だけが違う公開先でも中断する。
 
         ``pwd -P`` は入力の綴りを保つので、文字列比較では同一実体を別物と誤判定する。
@@ -265,31 +215,23 @@ class TestPublishRemoteGuard:
         flipped = dev.with_name(dev.name.upper())
         if not flipped.exists():
             pytest.skip("大文字小文字を区別する FS")
-        before = _git(dev, "rev-parse", "refs/heads/main", env=env)
-        result = _run_publish(dev, flipped, env)
-        self._assert_aborted_before_touching_remote(result, dev, before, env, _SELF_REMOTE_ERROR)
+        self._assert_publish_aborts(dev, flipped, env, _SELF_REMOTE_ERROR)
 
-    def test_cdpath_does_not_make_a_different_repository_look_identical(
-        self, tmp_path: Path, dev: Path, env: dict[str, str]
-    ) -> None:
-        """``CDPATH`` に別の ``.git`` があっても、相対 ``.git`` の解決がそれに引きずられない。
-
-        ``cd .git`` が ``CDPATH`` を引くと、dev 側も公開先側も decoy を指して一致し、
-        別リポジトリなのに「同一」と誤判定して中断してしまう。
-        """
-        decoy_root = tmp_path / "decoy"
-        (decoy_root / ".git").mkdir(parents=True)
-        remote = _init_repo(tmp_path / "remote", env)
-        result = _run_publish(dev, remote, {**env, "CDPATH": str(decoy_root)})
-        assert _SELF_REMOTE_ERROR not in result.stderr
-        assert _GATE_FAILED_MARKER in result.stderr
-
+    @pytest.mark.parametrize("cdpath_decoy", [False, True], ids=["plain", "cdpath-has-another-git"])
     def test_proceeds_when_remote_is_a_different_repository(
-        self, tmp_path: Path, dev: Path, env: dict[str, str]
+        self, tmp_path: Path, dev: Path, env: dict[str, str], cdpath_decoy: bool
     ) -> None:
-        """別リポジトリなら従来どおりガードを通過し、後続のテストゲートまで進む。"""
-        remote = _init_repo(tmp_path / "remote", env)
-        result = _run_publish(dev, remote, env)
+        """別リポジトリならガードを通過し、後続のテストゲートまで進む。
+
+        ``CDPATH`` に別の ``.git`` があっても相対 ``.git`` の解決が引きずられないこと。``cd .git`` が
+        ``CDPATH`` を引くと、dev 側も公開先側も decoy を指して一致し、別リポジトリなのに中断してしまう。
+        """
+        if cdpath_decoy:
+            (tmp_path / "decoy" / ".git").mkdir(parents=True)
+            env = {**env, "CDPATH": str(tmp_path / "decoy")}
+
+        result = _run_publish(dev, _init_repo(tmp_path / "remote", env), env)
+
         assert _SELF_REMOTE_ERROR not in result.stderr
         assert _FETCH_MARKER in result.stdout
         assert _GATE_FAILED_MARKER in result.stderr
