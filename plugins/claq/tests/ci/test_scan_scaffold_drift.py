@@ -72,12 +72,12 @@ class TestIterTranscripts:
     """走査対象の収集。"""
 
     def test_collects_trusted_transcripts_newest_first(self, tmp_path: Path) -> None:
-        """更新時刻の新しい順に集める。"""
-        old = _write_transcript(tmp_path, "old.jsonl", ["a"])
-        new = _write_transcript(tmp_path, "new.jsonl", ["b"])
-        os.utime(old, (1, 1))
+        """更新時刻の新しい順に集める（最新を名前順・書き込み順の中央に置き、並べ替えの有無を判別する）。"""
+        a, b, c = (_write_transcript(tmp_path, f"{name}.jsonl", ["x"]) for name in "abc")
+        for path, mtime in ((a, 1), (b, 3), (c, 2)):
+            os.utime(path, (mtime, mtime))
 
-        assert scanner.iter_transcripts([tmp_path], limit=10)[0] == new
+        assert scanner.iter_transcripts([tmp_path], limit=10) == [b, c, a]
 
     def test_limit_is_applied(self, tmp_path: Path) -> None:
         """上限を超える分は取らない。"""
@@ -96,7 +96,7 @@ class TestIterTranscripts:
         link = tmp_path / "link.jsonl"
         link.symlink_to(target)
 
-        assert link not in scanner.iter_transcripts([tmp_path], limit=10)
+        assert scanner.iter_transcripts([tmp_path], limit=10) == [target]
 
     def test_unstatable_path_is_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """stat に失敗するパスは飛ばす。"""
@@ -222,10 +222,10 @@ class TestMain:
         assert scanner.main([]) == scanner.EXIT_DRIFT
 
     def test_limit_option_is_honoured(self, tmp_path: Path) -> None:
-        """--limit で走査件数を絞れる。"""
-        _write_transcript(tmp_path, "clean.jsonl", ["普通の依頼"])
-        leaky = _write_transcript(tmp_path, "leaky.jsonl", [_LEAK])
-        os.utime(leaky, (1, 1))
+        """--limit で最新の走査件数に絞れる（最新の clean を名前順の中央に置く）。"""
+        for name, texts, mtime in (("a", [_LEAK], 1), ("b", ["普通の依頼"], 3), ("c", [_LEAK], 2)):
+            path = _write_transcript(tmp_path, f"{name}.jsonl", texts)
+            os.utime(path, (mtime, mtime))
 
         assert scanner.main(["--root", str(tmp_path), "--limit", "1"]) == scanner.EXIT_OK
 
