@@ -73,7 +73,7 @@ skill-name/
 詳細: `references/eval-workflow.md`
 
 1. スキルありとベースラインの 2 サブエージェントを同時に起動する
-2. 定量的なアサーションを下書きする
+2. 定量的な期待値（expectations）を下書きする
 3. `timing.json` にすぐ保存する
 4. grading → ベンチマーク集約 → 分析
 
