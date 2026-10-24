@@ -19,11 +19,7 @@ _SITE_FILES = ("index.html", "styles.css", "tokens.css", "app.js", "check_site.p
 
 
 def _load_check_site():
-    """check_site.py をモジュールとして読み込む。
-
-    `assets/template/` は配布される成果物なので、読み込みの副作用で
-    `__pycache__` を書かせない（配布物に .pyc が混ざる）。
-    """
+    """check_site.py をモジュールとして読み込む（`assets/template/` は配布物なので、読み込みの副作用で `__pycache__` を書かせない）。"""
     spec = importlib.util.spec_from_file_location("html_gen_check_site", _CHECK_SITE)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

@@ -25,11 +25,7 @@ def test_bases_are_the_five_shadcn_registry_base_colors() -> None:
 
 
 def test_neutral_tokens_are_verbatim_upstream_values() -> None:
-    """neutral の主要トークンが shadcn/ui レジストリの値そのままである。
-
-    ここが upstream との同一性のアンカー。生成器を書き換えても、この値が
-    ずれれば「shadcn/ui の配色」を名乗れなくなる。
-    """
+    """neutral の主要トークンが shadcn/ui レジストリの値そのままである（upstream との同一性のアンカー。生成器を書き換えてもこの値がずれれば「shadcn/ui の配色」を名乗れない）。"""
     light = TOKENS["bases"]["neutral"]["light"]
     dark = TOKENS["bases"]["neutral"]["dark"]
     assert light["background"] == "oklch(1 0 0)"
@@ -89,9 +85,7 @@ def test_series_uses_five_colors_like_upstream() -> None:
         pytest.param(check_site.oklch_to_hex, ("oklch(1 0 0 / 10%)", "oklch(1 0 0)"), "#FFFFFF", id="alpha-on-white"),
         pytest.param(check_site.oklch_to_hex, ("oklch(1 0 0 / 10%)", "oklch(0 0 0)"), "#595959", id="alpha-on-black"),
         # 既に満たしている色は明度を動かさない（upstream の値をできる限り残す）
-        pytest.param(
-            check_site._lower_lightness_until, ("oklch(0.7 0 0)", "#000000", 4.5), "oklch(0.7 0 0)", id="compliant"
-        ),
+        pytest.param(check_site._lower_lightness_until, ("oklch(0.7 0 0)", "#000000", 4.5), "oklch(0.7 0 0)", id="already-compliant"),
     ],
 )
 def test_color_math_matches_reference_values(convert: Callable[..., Any], args: tuple[Any, ...], expected: Any) -> None:
@@ -197,12 +191,7 @@ def test_contrast_contract_holds_for_every_base_and_theme() -> None:
 
 
 def test_contrast_contract_covers_charts_status_focus_and_sidebar_text() -> None:
-    """契約表が系列色・破壊的操作・フォーカスリング・サイドバー面の補助テキストを取りこぼしていない。
-
-    面ごとに変数が分かれているので、背景・カードだけ見ていると
-    サイドバーの文字が誰にも見張られないまま出荷される。サイドバー面の補助テキストは
-    文字の下限 4.5:1 で入れ、全ブロックで満たすことは上の契約の検査が確かめる。
-    """
+    """契約表が系列色・破壊的操作・フォーカスリング・サイドバー面の補助テキスト（面ごとに変数が分かれ、背景とカードだけでは誰にも見張られない。文字の下限 4.5:1 で入れ、全ブロックでの充足は契約の検査が確かめる）を取りこぼしていない。"""
     pairs = {(foreground, background) for foreground, background, _ in check_site.CONTRAST_CONTRACT}
     for pair in (
         *((name, surface) for name in check_site.CHART_VARS for surface in ("--card", "--background")),
@@ -217,11 +206,7 @@ def test_contrast_contract_covers_charts_status_focus_and_sidebar_text() -> None
 
 
 def test_text_color_from_a_transparent_mix_is_reported(tmp_path: Path) -> None:
-    """文字色を透明との混合で作ると落ちる。
-
-    ライトでは前景を薄めるほど背景（白）へ寄るので、可読性契約を割る。
-    面や枠の混合は問題ないので通す。
-    """
+    """文字色を透明との混合で作ると落ち（ライトでは前景を薄めるほど白い背景へ寄って可読性契約を割る）、面や枠の混合は通る。"""
     text = "\n.x { color: color-mix(in oklab, var(--foreground) 50%, transparent); }\n"
     assert "透明との color-mix" in _append(_copy_site(tmp_path), "styles.css", text)
     surfaces = (
@@ -232,12 +217,7 @@ def test_text_color_from_a_transparent_mix_is_reported(tmp_path: Path) -> None:
 
 
 def test_heatmap_cap_keeps_cell_text_readable_in_every_block() -> None:
-    """ヒートマップの濃さの上限（`.heat td` の 55%）で、セルの文字が 4.5:1 を保つこと。
-
-    上限を上げると、ダークの濃いセルで --card-foreground が下地の系列色に近づき
-    可読性契約を割る。CSS の `color-mix(in oklab, …)` と同じ OKLab 上の線形混合で、
-    全ベースカラー × 両テーマの最も濃いセル（`--v: 1`）を確かめる。
-    """
+    """ヒートマップの濃さの上限（`.heat td` の 55%）で、全ブロックの最も濃いセル（`--v: 1`）の文字が 4.5:1 を保つ（上限を上げるとダークで --card-foreground が下地の系列色に近づく。CSS の color-mix(in oklab, …) と同じ OKLab 上の線形混合で測る）。"""
     cap = re.search(r"\.heat td \{[^}]*?calc\(var\(--v, 0\) \* ([\d.]+)%\)", CSS)
     assert cap is not None
     share = float(cap.group(1)) / 100
@@ -290,14 +270,10 @@ def _broken_tokens(section: tuple[str, ...], values: dict[str, Any]) -> dict[str
 @pytest.mark.parametrize(
     ("section", "values", "needles"),
     [
-        # ヘアラインが背景と同値になる
-        pytest.param(("bases", "neutral", "light"), {"border": "oklch(1 0 0)"}, ("--border", "同化"), id="border"),
-        # 系列色がカード面に沈む
-        pytest.param(("series",), {"light_lightness": 0.98}, ("--chart-", "コントラスト"), id="sunken-series"),
-        # 系列色が重複する
+        pytest.param(("bases", "neutral", "light"), {"border": "oklch(1 0 0)"}, ("--border", "同化"), id="border-matches-background"),
+        pytest.param(("series",), {"light_lightness": 0.98}, ("--chart-", "コントラスト"), id="series-sunk-into-card"),
         pytest.param(("series",), {"hues": [264.376] * 5, "chromas": [0.243] * 5}, ("重複",), id="duplicate-series"),
-        # 系列の色差が下限を割る
-        pytest.param(("series",), {"hues": [264.376, 266.0, 268.0, 270.0, 272.0]}, ("色差",), id="close-series"),
+        pytest.param(("series",), {"hues": [264.376, 266.0, 268.0, 270.0, 272.0]}, ("色差",), id="indistinguishable-series"),
     ],
 )
 def test_broken_tokens_are_reported(section: tuple[str, ...], values: dict[str, Any], needles: tuple[str, ...]) -> None:
