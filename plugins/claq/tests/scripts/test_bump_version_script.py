@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import ast
 import json
-import os
 import re
 import shutil
 import subprocess
 import tomllib
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[4]
 SOURCE_SCRIPT = ROOT / "scripts" / "version-up.sh"
@@ -19,20 +20,10 @@ _PY_HEREDOC_RE = re.compile(r"(?m)^python3 - .*<<'PY'\n(.*?)\n^PY$", re.DOTALL)
 
 
 def _extract_script_version_targets() -> frozenset[Path]:
-    """version-up.sh が更新するファイルのリポジトリ相対パスを機械抽出する。
+    """version-up.sh の埋め込み Python の ``paths = {...}`` を ``ast`` で読み、更新対象の相対パスを返す。
 
-    埋め込み Python の ``paths = {...}`` を ``ast`` で読み、各値
-    （``repo_root / "a" / "b"`` という ``/`` 連鎖）から文字列リテラルを
-    取り出して相対パスへ組み立てる。
-
-    手で複製したリストと突き合わせるためのもので、抽出側がスクリプト本体を
-    直接読むため定義がずれた瞬間に食い違いが露見する。
-
-    Returns:
-        更新対象のリポジトリ相対パス集合。
-
-    Raises:
-        AssertionError: heredoc または ``paths`` 代入を見つけられない場合。
+    各値（``repo_root / "a" / "b"`` という ``/`` 連鎖）の文字列リテラルを組み立てる。スクリプト本体を
+    直接読むので、手で複製した ``_VERSION_FILES`` と定義がずれた瞬間に食い違いが露見する。
     """
     match = _PY_HEREDOC_RE.search(SOURCE_SCRIPT.read_text(encoding="utf-8"))
     assert match is not None, "version-up.sh の Python heredoc を抽出できない"
@@ -71,48 +62,35 @@ _VERSION_FILES = (
 )
 
 
-def run_script(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """version-up.sh と 4 つの更新対象だけを複製した最小リポジトリ。"""
+    repo_root = tmp_path / "repo"
+    for rel in (Path("scripts/version-up.sh"), *_VERSION_FILES):
+        (repo_root / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / rel, repo_root / rel)
+    return repo_root
+
+
+def run_script(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """指定したリポジトリで version-up.sh を実行する。"""
     return subprocess.run(
         ["bash", str(repo_root / "scripts" / "version-up.sh"), *args],
         cwd=repo_root,
-        env=os.environ.copy(),
         capture_output=True,
         check=False,
         text=True,
     )
 
 
-def prepare_repo(tmp_path: Path) -> Path:
-    """最小構成のリポジトリを用意する。"""
-    repo_root = tmp_path / "repo"
-    script_dest = repo_root / "scripts" / "version-up.sh"
-    script_dest.parent.mkdir(parents=True)
-    shutil.copy2(SOURCE_SCRIPT, script_dest)
-    script_dest.chmod(0o755)
-
-    for rel in _VERSION_FILES:
-        dest = repo_root / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / rel, dest)
-
-    return repo_root
-
-
 def read_versions(repo_root: Path) -> tuple[str, str, str, str]:
-    """4つのバージョン値を読む。"""
-    pyproject = tomllib.loads((repo_root / "plugins" / "claq" / "pyproject.toml").read_text(encoding="utf-8"))
-    plugin = json.loads((repo_root / "plugins" / "claq" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    marketplace = json.loads((repo_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
-    init_text = (repo_root / "plugins" / "claq" / "src" / "claq" / "mem" / "__init__.py").read_text(
-        encoding="utf-8"
-    )
-    mem_version = init_text.split('__version__ = "', 1)[1].split('"', 1)[0]
+    """4つのバージョン値を _VERSION_FILES の順で読む。"""
+    pyproject, plugin, marketplace, mem_init = ((repo_root / rel).read_text(encoding="utf-8") for rel in _VERSION_FILES)
     return (
-        pyproject["project"]["version"],
-        plugin["version"],
-        marketplace["plugins"][0]["version"],
-        mem_version,
+        tomllib.loads(pyproject)["project"]["version"],
+        json.loads(plugin)["version"],
+        json.loads(marketplace)["plugins"][0]["version"],
+        mem_init.split('__version__ = "', 1)[1].split('"', 1)[0],
     )
 
 
@@ -134,51 +112,44 @@ def test_version_files_match_script_targets() -> None:
     assert set(_VERSION_FILES) == extracted
 
 
-def test_bump_version_updates_all_targets(tmp_path: Path) -> None:
+def test_bump_version_updates_all_targets(repo: Path) -> None:
     """4箇所のバージョンを同時に更新できること。"""
-    repo_root = prepare_repo(tmp_path)
-    current = read_versions(repo_root)[0]
-    next_version = _next_patch(current)
+    next_version = _next_patch(read_versions(repo)[0])
 
-    result = run_script(repo_root, ["--version", next_version])
+    result = run_script(repo, "--version", next_version)
 
     assert result.returncode == 0, result.stderr
     assert f"[version-up] Updated version to {next_version}" in result.stdout
-    assert read_versions(repo_root) == (next_version, next_version, next_version, next_version)
+    assert read_versions(repo) == (next_version,) * 4
 
 
-def test_bump_version_rejects_invalid_version(tmp_path: Path) -> None:
-    """セマンティックバージョン形式以外を拒否すること。"""
-    repo_root = prepare_repo(tmp_path)
-    current = read_versions(repo_root)[0]
+@pytest.mark.parametrize(
+    ("suffix_args", "ok", "message"),
+    [
+        (["--help"], True, "Usage: bash scripts/version-up.sh --version X.Y.Z"),
+        (["--version", "{current}-beta"], False, "invalid version format"),
+    ],
+    ids=["help-prints-usage", "rejects-non-semver"],
+)
+def test_bump_version_without_update(repo: Path, suffix_args: list[str], ok: bool, message: str) -> None:
+    """--help は usage を stdout へ、セマンティックバージョン以外は拒否を stderr へ出し、どちらも版を変えないこと。"""
+    current = read_versions(repo)[0]
 
-    result = run_script(repo_root, ["--version", f"{current}-beta"])
+    result = run_script(repo, *(arg.format(current=current) for arg in suffix_args))
 
-    assert result.returncode != 0
-    assert "invalid version format" in result.stderr
-    assert read_versions(repo_root) == (current, current, current, current)
+    assert (result.returncode == 0) is ok, result.stderr
+    assert message in (result.stdout if ok else result.stderr)
+    assert read_versions(repo) == (current,) * 4
 
 
-def test_bump_version_rejects_preexisting_version_drift(tmp_path: Path) -> None:
+def test_bump_version_rejects_preexisting_version_drift(repo: Path) -> None:
     """事前に version が不一致なら更新せず失敗すること。"""
-    repo_root = prepare_repo(tmp_path)
-    current = read_versions(repo_root)[0]
-    next_version = _next_patch(current)
-    plugin_json = repo_root / "plugins" / "claq" / ".claude-plugin" / "plugin.json"
+    current = read_versions(repo)[0]
+    plugin_json = repo / _VERSION_FILES[1]
     plugin_json.write_text(plugin_json.read_text(encoding="utf-8").replace(f'"{current}"', '"0.0.99"', 1), encoding="utf-8")
 
-    result = run_script(repo_root, ["--version", next_version])
+    result = run_script(repo, "--version", _next_patch(current))
 
     assert result.returncode != 0
     assert "version mismatch before update" in result.stderr
-    assert read_versions(repo_root) == (current, "0.0.99", current, current)
-
-
-def test_bump_version_help_prints_usage(tmp_path: Path) -> None:
-    """--help が usage を表示すること。"""
-    repo_root = prepare_repo(tmp_path)
-
-    result = run_script(repo_root, ["--help"])
-
-    assert result.returncode == 0, result.stderr
-    assert "Usage: bash scripts/version-up.sh --version X.Y.Z" in result.stdout
+    assert read_versions(repo) == (current, "0.0.99", current, current)
