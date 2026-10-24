@@ -133,6 +133,10 @@ Windows の wrapper + インタプリタ起動の遅さで host 側 timeout（�
      （ホームや `~/.claude` を git で管理していると、キャッシュの plugin root も toplevel の内側に
      入る）。git は書込み先がこれらに当たったときだけ起動する。toplevel が決まらない・追跡を
      確かめられない（リポジトリ外・git 不在・タイムアウト）ときは対象外にしない。
+   - settings ファイルにスキーマが拒む値（`"model": 123` など）を書くと、Claude Code はそのファイル
+     ごとを Settings Error として読まず、`enabledPlugins` も効かなくなる。保護フックはホストの
+     スキーマを持たず再現もできないので、この経路は塞がずに受容する。対話起動では Settings Error の
+     ダイアログが出て利用者が気づける（`-p` 実行では黙って読み飛ばされる）。
    - `cd` を含む Bash コマンドでは相対パスを解決できないので、basename が `claq-hook` /
      `claq-hook.cmd` の書込み先を deny する。
    - `settings.json` / `settings.local.json`（basename で判定）は置換前後の全文を JSON として比べる

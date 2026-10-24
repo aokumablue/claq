@@ -222,6 +222,10 @@ _EXPECTED_CONDITIONALLY_PROTECTED_FILES = frozenset({
 
 # `bash_config_protection._DIRECTORY_CHANGE_COMMANDS` の期待内容（層2）。
 _EXPECTED_DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
+# `bash_config_protection._LEADING_SHELL_KEYWORDS` の期待内容（ディレクトリ移動の前に読み飛ばす語）。
+_EXPECTED_LEADING_SHELL_KEYWORDS = frozenset(
+    {"{", "(", "!", "if", "then", "elif", "else", "while", "until", "do", "builtin"}
+)
 
 # `config_protection._LINT_SECTION_HEADERS` の期待内容（層2）。順序も含めて固定する
 # （前方一致で判定するため、要素の順序は結果に影響しないが定義の差分を見やすくする）。
@@ -317,6 +321,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "bash_config_protection._DD_COMMANDS": frozenset({"dd"}),
     "bash_config_protection._TOUCH_COMMANDS": _EXPECTED_TOUCH_COMMANDS,
     "bash_config_protection._DIRECTORY_CHANGE_COMMANDS": _EXPECTED_DIRECTORY_CHANGE_COMMANDS,
+    "bash_config_protection._LEADING_SHELL_KEYWORDS": _EXPECTED_LEADING_SHELL_KEYWORDS,
     "bash_config_protection._COMMAND_POSITION_WRAPPERS": frozenset(
         {
             "chrt",

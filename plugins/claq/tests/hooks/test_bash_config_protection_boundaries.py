@@ -14,6 +14,8 @@ import pytest
 
 from claq.hooks import bash_config_protection, host_guard_targets
 
+from ._support import _EXPECTED_LEADING_SHELL_KEYWORDS
+
 
 def _bash_payload(command: str) -> str:
     """Bash ツール呼び出しの stdin JSON を組み立てる。"""
@@ -227,3 +229,11 @@ class TestGluedOperatorRunsOnParsedPath:
     def test_non_write_operator_runs_stay_allowed(self, command: str) -> None:
         """fd 複製・here-string は書込みと読まない。"""
         assert bash_config_protection.find_protected_write(command) is None
+
+
+@pytest.mark.parametrize("keyword", sorted(_EXPECTED_LEADING_SHELL_KEYWORDS))
+def test_directory_change_behind_shell_keywords_is_not_trusted(keyword: str) -> None:
+    """予約語・グループ化・`builtin` の後ろの ``cd`` も移動として扱い、相対の ``hooks.json`` を塞ぐ。"""
+    command = f"{keyword} cd X/hooks; printf x > hooks.json"
+
+    assert bash_config_protection.find_protected_write(command) == "hooks/hooks.json/"

@@ -173,6 +173,11 @@ _TOUCH_COMMANDS = frozenset({"touch"})
 # 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
 _DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 
+# ディレクトリ移動の判定で、コマンド名より前に来うるシェルの予約語・グループ化と `builtin`。
+# ``{ cd x; …}`` / ``if cd x; then …`` / ``builtin cd x`` の ``cd`` を見落とすと、cwd 基準の解決を
+# 信用したまま相対パスの書込み先を判定してしまう。
+_LEADING_SHELL_KEYWORDS = frozenset({"{", "(", "!", "if", "then", "elif", "else", "while", "until", "do", "builtin"})
+
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILES_FOLDED
 
 # ~/.claq/logs/ 配下（bg 失敗ログ）をディレクトリ構造で保護する。`detach.recent_bg_failure_notice`
@@ -493,13 +498,17 @@ def _changes_working_directory(segment: list[str]) -> bool:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        実行位置のコマンドが `_DIRECTORY_CHANGE_COMMANDS` に属するなら True。
+        先頭の `_LEADING_SHELL_KEYWORDS` を除いた実行位置のコマンドが `_DIRECTORY_CHANGE_COMMANDS`
+        に属するなら True。
 
     Raises:
         例外は発生しません。
     """
-    index = _command_index(segment)
-    return index is not None and normalize_executable_name(segment[index]) in _DIRECTORY_CHANGE_COMMANDS
+    start = 0
+    while start < len(segment) and segment[start] in _LEADING_SHELL_KEYWORDS:
+        start += 1
+    index = _command_index(segment[start:])
+    return index is not None and normalize_executable_name(segment[start + index]) in _DIRECTORY_CHANGE_COMMANDS
 
 
 def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
