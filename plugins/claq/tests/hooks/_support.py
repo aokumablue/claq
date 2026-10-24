@@ -1,7 +1,7 @@
 """tests/hooks の複数のファイルが使う補助。
 
 - secret scan 予算の deadline 生成・コミットメッセージ検証のスパイ
-- 保護フックの `main()` をインプロセスで呼ぶ土台（`_HOOKS` / `_run` / payload 組み立て / `_repo_scope`）
+- 保護フックの `main()` をインプロセスで呼ぶ土台（`_HOOKS` / `_run` / payload 組み立て / `_repo_scope` / `_home_outside_repo`）
 - 保護語彙の期待値表（`_EXPECTED_*`、`_EXPECTED_VOCABULARIES`、`_EXTERNALLY_PINNED_VOCABULARIES`）。
   保護ファイル名の全数検査（`test_protection_bypass_regressions.py`）と語彙集合の固定
   （`test_protection_vocabulary_declarations.py`）が同じ表を使うため、ここに 1 つだけ置く。
@@ -136,6 +136,26 @@ def _repo_scope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     # `_compound_commit_risk` の結論だけが exit code に出る状態にする。
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: [])
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def _home_outside_repo(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """`~` の展開先を、repo ルート（tmp_path）と兄弟の別ディレクトリに固定する。
+
+    home が repo ルートの下にあると、`~/...` が repo スコープ判定だけで deny され、
+    repo 外を塞ぐ判定を検証したことにならない。import したモジュールでだけ autouse になる。
+
+    Args:
+        monkeypatch: pytest の monkeypatch フィクスチャ。
+        tmp_path_factory: pytest の一時ディレクトリ生成フィクスチャ。
+
+    Returns:
+        HOME として固定した一時ディレクトリ。
+    """
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CLAQ_HOME", raising=False)
+    return home
 
 
 def _run(hook: str, payload: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> int:

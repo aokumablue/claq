@@ -3,628 +3,338 @@
 from __future__ import annotations
 
 import json
+import runpy
 from pathlib import Path
 
 import pytest
 
 from claq.hooks import bash_config_protection
 
-
-def _bash_payload(command: str) -> str:
-    return json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
-
-
-@pytest.fixture(autouse=True)
-def _fixed_repo_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """`find_protected_write` の repo スコープ判定を tmp_path 配下に固定する。
-
-    実行環境の git リポジトリに依存せず、cwd と `resolve_repo_root` の両方を
-    同一の一時ディレクトリに揃えることでテストを決定的にする。
-    """
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: tmp_path)
-    return tmp_path
-
-
-class TestFindProtectedWrite:
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "printf x > pyproject.toml",
-            "printf x >> pyproject.toml",
-            "echo '[testenv]' > tox.ini",
-            "cat file.txt > .eslintrc.json",
-            "tee pyproject.toml <<< 'x'",
-            "tee -a pyproject.toml <<< 'x'",
-            "echo x | tee package.json",
-            "tee notes.txt pyproject.toml <<< 'x'",
-            "sed -i 's/a/b/' pyproject.toml",
-            "sed -i '' pyproject.toml",
-            "sed -i.bak 's/a/b/' setup.cfg",
-            "cat <<'EOF' > pyproject.toml\nx\nEOF",
-            "true && printf x > pyproject.toml",
-            # 数字プレフィックス付き等のリダイレクト演算子。
-            "echo x &> pyproject.toml",
-            "echo x >| pyproject.toml",
-            "echo x 1> pyproject.toml",
-            "echo x 2>> pyproject.toml",
-            "echo x &>> pyproject.toml",
-            "echo x >& pyproject.toml",
-            # 書き込み先が引数位置に明示されるコマンド群。
-            "cp src.py pyproject.toml",
-            "mv src.py pyproject.toml",
-            "install -m 644 src.py pyproject.toml",
-            "ln -f /dev/null pyproject.toml",
-            # -f 無しの新規 symlink 作成も、以後その名前を読む処理を
-            # リンク先へ差し替えるため実質的な書き込み。
-            "ln -s weak.toml pyproject.toml",
-            # 長オプション形式の --force も検出する。
-            "ln --force /dev/null pyproject.toml",
-            "dd if=/dev/zero of=pyproject.toml",
-            "perl -i -pe s/a/b/ pyproject.toml",
-            "perl -0pi -e 1 pyproject.toml",
-        ],
-    )
-    def test_detects_protected_write(self, command: str) -> None:
-        assert bash_config_protection.find_protected_write(command) is not None
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "printf x > notes.txt",
-            # fd 複製の `>&` は保護名が続かない限り書き込みではない。
-            "echo x >&2",
-            "ls 2>&1",
-            "cat pyproject.toml",
-            "echo pyproject.toml",
-            "grep -n commands tox.ini",
-            "sed -n '1,5p' pyproject.toml",
-            "tee",
-            "sed -i",
-            "",
-            # 保護対象でない名前への ln は対象外。
-            "ln -s a.txt b.txt",
-        ],
-    )
-    def test_allows_non_write(self, command: str) -> None:
-        assert bash_config_protection.find_protected_write(command) is None
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "rm pyproject.toml",
-            "rm -f pyproject.toml",
-            "rm -rf pyproject.toml",
-            "unlink pyproject.toml",
-            "shred pyproject.toml",
-            "truncate -s 0 pyproject.toml",
-            # mv は移動先だけでなく移動元も実質削除
-            "mv pyproject.toml /tmp/backup",
-            "sudo rm pyproject.toml",
-            "env rm pyproject.toml",
-        ],
-    )
-    def test_detects_protected_removal(self, command: str) -> None:
-        """削除・切り詰め・移動元も弱体化として検出する。
-
-        書き込み先トークンとしては現れないが、リンタ設定を消せばルールごと
-        無効化できるため上書きと同じ強さの弱体化にあたる。
-        """
-        assert bash_config_protection.find_protected_write(command) is not None
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            # 保護対象でないファイルの削除
-            "rm notes.txt",
-            # 複製は元が残るため弱体化ではない
-            "cp pyproject.toml /tmp/backup",
-            # コマンド名だけでファイル指定が無い
-            "rm",
-            "truncate -s 0",
-        ],
-    )
-    def test_allows_non_weakening_removal(self, command: str) -> None:
-        assert bash_config_protection.find_protected_write(command) is None
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "sudo cp /tmp/x pyproject.toml",
-            "sudo install /tmp/x pyproject.toml",
-            "sudo ln -f /dev/null pyproject.toml",
-            "env cp /tmp/x pyproject.toml",
-        ],
-    )
-    def test_detects_write_through_command_wrapper(self, command: str) -> None:
-        """wrapper 経由（sudo/env/command）でも最終引数・ln -f を検出する。
-
-        cp/mv/install と ln -f も tee/sed/perl/dd と同じく `_command_index` を通す
-        （素の `segment[0]` を見ると `sudo cp ... pyproject.toml` が素通りする）。
-        """
-        assert bash_config_protection.find_protected_write(command) is not None
-
-    def test_allows_protected_basename_outside_repo_root(self) -> None:
-        """回帰防止: リポジトリ外の同名ファイルへの書き込みは allow する。"""
-        assert (
-            bash_config_protection.find_protected_write(
-                "printf x > /definitely-outside-the-repo/pyproject.toml"
-            )
-            is None
-        )
-
-    def test_allows_protected_basename_outside_repo_root_via_tilde(
-        self, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """`~` 展開後にリポジトリ外へ解決される同名ファイルは allow する。
-
-        `_expand_leading_tilde` が無いと ``~`` は
-        cwd 相対の文字通りのフォルダ名として扱われ、cwd がリポジトリ配下
-        にある限り ``<repo_root>/~/outside/pyproject.toml`` という構造に
-        なって `_within_repo_root` が誤って True を返し deny する
-        （false positive）。展開後は実際の home 配下に解決されるため、
-        home がリポジトリ外にあればこの回帰は起きない。
-        """
-        home = tmp_path_factory.mktemp("home")
-        monkeypatch.setenv("HOME", str(home))
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
-        assert (
-            bash_config_protection.find_protected_write("printf x > ~/outside/pyproject.toml")
-            is None
-        )
-
-    def test_allows_when_repo_root_undetermined(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """リポジトリルートが決定できない場合は allow する（deny に倒さない）。"""
-        monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: None)
-
-        assert bash_config_protection.find_protected_write("printf x > pyproject.toml") is None
-
-    def test_resolve_repo_root_not_called_without_write_hit(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """保護対象 basename が出現しない大多数の呼び出しでは resolve_repo_root を呼ばない。"""
-        called = {"n": 0}
-
-        def _tracking_resolve() -> Path:
-            called["n"] += 1
-            return Path("/repo")
-
-        monkeypatch.setattr(bash_config_protection, "resolve_repo_root", _tracking_resolve)
-
-        assert bash_config_protection.find_protected_write("ls -la && echo hello") is None
-        assert called["n"] == 0
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            # perl: -i フラグなし（in-place ではない）。
-            "perl -pe s/a/b/ pyproject.toml",
-            # perl: -i フラグはあるが対象が保護対象でない。
-            "perl -i -pe s/a/b/ notes.txt",
-            # cp/mv/install: 非オプション引数が無い（書き込み先が確定しない）。
-            "cp -v",
-            "mv --",
-            # ln -f: 非オプション引数が無い。
-            "ln -f",
-            # dd of=: 出力先が保護対象でない。
-            "dd if=/dev/zero of=notes.txt",
-        ],
-    )
-    def test_extended_detector_edge_cases_allow(self, command: str) -> None:
-        """拡張検出（perl/cp/mv/ln/dd）の non-match 分岐（in-place 無し・引数無し・非保護対象）。"""
-        assert bash_config_protection.find_protected_write(command) is None
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            # tee/sed/perl/dd/of= が「実行位置」ではなくただの引数文字列
-            # として現れるだけの場合は allow する（コマンド名の文字列一致だけ
-            # で deny すると誤検出する）。
-            "echo tee pyproject.toml",
-            "echo of=pyproject.toml",
-            "echo sed -i pyproject.toml",
-            "echo perl -i pyproject.toml",
-            "printf 'tee pyproject.toml\\n'",
-            "grep -l 'dd of=pyproject.toml' notes.txt",
-        ],
-    )
-    def test_command_position_non_matches_allow(self, command: str) -> None:
-        """tee/sed/perl/dd が実行位置に無ければ allow する。"""
-        assert bash_config_protection.find_protected_write(command) is None
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            # wrapper を挟んでも実行位置の特定は維持する（過検出防止の
-            # ために wrapper 検出力を落とさない）。
-            "env X=1 tee pyproject.toml",
-            "sudo tee pyproject.toml",
-            "command tee pyproject.toml",
-            "sudo -u root tee pyproject.toml",
-            "env -u FOO tee pyproject.toml",
-            "env sed -i 's/a/b/' pyproject.toml",
-            "sudo dd if=/dev/zero of=pyproject.toml",
-            # 未知の wrapper オプション（値の有無を判定できない）は 1 トークン
-            # だけ読み飛ばして実行対象の探索を続ける。
-            "sudo -n tee pyproject.toml",
-        ],
-    )
-    def test_wrapped_command_position_still_detected(self, command: str) -> None:
-        """env/sudo/command wrapper 経由でも実行位置を正しく特定して deny する。"""
-        assert bash_config_protection.find_protected_write(command) is not None
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            # _command_index が実行対象を特定できない（全トークンが代入/
-            # wrapper/オプションで終わる）場合は allow する。
-            "env",
-            "FOO=bar",
-            "sudo -u",
-        ],
-    )
-    def test_command_index_unresolvable_allows(self, command: str) -> None:
-        assert bash_config_protection.find_protected_write(command) is None
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            # 単独サロゲート（JSON の \ud800）で解決が ValueError になっても、保護 path
-            # セグメントに一致する以上は deny する。
-            "rm \ud800/.git/hooks/pre-commit",
-            "printf x > \ud800/.git/hooks/pre-commit",
-            # 保護 basename に一致する解決不能トークン。
-            "printf x > \ud800/ruff.toml",
-            "rm \ud800/pyproject.toml",
-        ],
-        ids=["rm-hooks-segment", "redirect-hooks-segment", "redirect-basename", "rm-basename"],
-    )
-    def test_denies_unresolvable_token_matching_protected_name(self, command: str) -> None:
-        """保護名に一致するトークンが解決できないときは deny する。
-
-        検査対象（保護対象への書き込み）が確定した後の失敗は fail-closed（
-        docs/adr/hook-failure-direction.md）。解決不能を allow にすると、
-        入力側が単独サロゲートを混ぜるだけで保護を外せる。
-        """
-        assert bash_config_protection.find_protected_write(command) is not None
-
-    def test_denies_unresolvable_protected_token_even_when_repo_root_undetermined(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """リポジトリルートが決定できなくても、解決不能な保護名トークンは deny する。
-
-        解決不能は repo スコープ判定の入力に使えないため、ルートの有無で結論が変わらない。
-        """
-        monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: None)
-
-        assert bash_config_protection.find_protected_write("rm \ud800/.git/hooks/pre-commit") is not None
-
-    def test_denies_protected_name_when_resolution_raises_runtime_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """symlink ループで `Path.resolve` が RuntimeError になる実装でも deny する。
-
-        Python 3.12 は strict=False のループで RuntimeError を投げる。
-        """
-
-        def _looping_resolve(self: Path, strict: bool = False) -> Path:  # noqa: ARG001
-            raise RuntimeError("Symlink loop")
-
-        monkeypatch.setattr(bash_config_protection.Path, "resolve", _looping_resolve)
-
-        assert bash_config_protection.find_protected_write("printf x > ruff.toml") is not None
-
-    def test_denies_protected_write_through_symlink_loop(self, tmp_path: Path) -> None:
-        """実際の symlink ループ越しの保護パスへの書き込みを deny する。"""
-        (tmp_path / "a").symlink_to(tmp_path / "b")
-        (tmp_path / "b").symlink_to(tmp_path / "a")
-
-        assert bash_config_protection.find_protected_write("rm a/.git/hooks/pre-commit") is not None
-        assert bash_config_protection.find_protected_write("printf x > a/ruff.toml") is not None
-
-    def test_allows_unresolvable_token_not_matching_protected_name(self) -> None:
-        """保護名に一致しない解決不能トークンは allow のまま。"""
-        assert bash_config_protection.find_protected_write("rm \ud800/notes.txt") is None
-        assert bash_config_protection.find_protected_write("printf x > \ud800/src/main.py") is None
-
-    def test_allows_resolvable_protected_name_outside_repo_root(self, tmp_path_factory: pytest.TempPathFactory) -> None:
-        """解決できてリポジトリ外のパスは、保護名に一致しても allow のまま。"""
-        outside = tmp_path_factory.mktemp("outside")
-
-        assert bash_config_protection.find_protected_write(f"printf x > {outside}/ruff.toml") is None
-        assert bash_config_protection.find_protected_write(f"rm {outside}/.git/hooks/pre-commit") is None
-
-    def test_within_repo_root_returns_false_when_repo_root_resolve_fails(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """書き込み先の解決は成功していても repo_root.resolve() が失敗すれば False を返す。"""
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
-
-        class _BoomPath(Path):
-            def resolve(self, strict: bool = False) -> Path:  # noqa: ARG002
-                raise OSError("repo root unavailable")
-
-        assert bash_config_protection._within_repo_root(tmp_path / "pyproject.toml", _BoomPath(tmp_path)) is False
-
-
-class TestMain:
-    def test_main_blocks_redirect_to_protected_file(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        monkeypatch.setattr(
-            bash_config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: (_bash_payload("printf x > pyproject.toml"), False),
-        )
-        assert bash_config_protection.main() == 2
-        assert "BLOCKED: Modifying pyproject.toml is not allowed." in capsys.readouterr().err
-
-    def test_main_scans_every_container_key(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """先頭キーが無害でも後続キーの保護対象書き込みをブロックする。
-
-        先勝ちで 1 キーだけ見ると、`tool_input` に無害なコマンドを置き
-        `toolArgs` に保護対象への書き込みを載せるだけで素通りする。
-        """
-        payload = json.dumps(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "echo safe"},
-                "toolArgs": {"command": "printf x > pyproject.toml"},
-            }
-        )
-        monkeypatch.setattr(
-            bash_config_protection, "read_raw_stdin_with_truncation", lambda: (payload, False)
-        )
-
-        assert bash_config_protection.main() == 2
-        assert "BLOCKED: Modifying pyproject.toml is not allowed." in capsys.readouterr().err
-
-    def test_main_allows_non_protected_write(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            bash_config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: (_bash_payload("printf x > notes.txt"), False),
-        )
-        assert bash_config_protection.main() == 0
-
-    def test_main_allows_read_only_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            bash_config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: (_bash_payload("cat pyproject.toml"), False),
-        )
-        assert bash_config_protection.main() == 0
-
-    def test_main_ignores_non_bash_tool(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        payload = json.dumps(
-            {"tool_name": "Write", "tool_input": {"file_path": "pyproject.toml", "content": "x"}}
-        )
-        monkeypatch.setattr(
-            bash_config_protection, "read_raw_stdin_with_truncation", lambda: (payload, False)
-        )
-        assert bash_config_protection.main() == 0
-
-    def test_main_empty_input_is_non_blocking(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            bash_config_protection, "read_raw_stdin_with_truncation", lambda: ("", False)
-        )
-        assert bash_config_protection.main() == 0
-
-    def test_main_truncated_input_is_fail_closed(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        monkeypatch.setattr(
-            bash_config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: ("{not-even-json", True),
-        )
-        assert bash_config_protection.main() == 2
-        assert "exceeded" in capsys.readouterr().err
-
-    def test_main_malformed_json_with_write_risk_is_blocked(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """JSON が壊れていても生テキストに保護対象 + 書き込み指示が見えれば deny する。"""
-        monkeypatch.setattr(
-            bash_config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: ("not-json but printf x > pyproject.toml appears here", False),
-        )
-        assert bash_config_protection.main() == 2
-
-    def test_main_malformed_json_without_write_risk_passes_through(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            bash_config_protection, "read_raw_stdin_with_truncation", lambda: ("not-json at all", False)
-        )
-        assert bash_config_protection.main() == 0
-
-    def test_main_malformed_json_with_indicator_but_no_protected_name(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """書き込み指示だけあっても保護対象ファイル名が無ければ通す。"""
-        monkeypatch.setattr(
-            bash_config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: ("not-json but > notes.txt appears here", False),
-        )
-        assert bash_config_protection.main() == 0
-
-    def test_module_entrypoint_runs_main(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import runpy
-
-        # runpy が bash_config_protection を fresh に再実行するため、
-        # stdin_io（sys.modules にキャッシュされ再利用される側）を patch する。
-        monkeypatch.setattr(
-            "claq.hooks.stdin_io.read_raw_stdin_with_truncation", lambda: ("", False)
-        )
-        with pytest.raises(SystemExit) as excinfo:
-            runpy.run_module("claq.hooks.bash_config_protection", run_name="__main__")
-        assert excinfo.value.code == 0
-
-
-class TestMalformedFallbackCoversDestructiveVerbs:
-    """malformed JSON fallback がトークン化経路と同じ verb 集合を見ること。"""
-
-    @pytest.mark.parametrize(
-        "raw_input",
-        [
-            "{broken rm ruff.toml",
-            "{broken unlink pyproject.toml",
-            "{broken shred tox.ini",
-            "{broken ln -s x ruff.toml",
-        ],
-    )
-    def test_destructive_verbs_are_detected(self, raw_input: str) -> None:
-        """削除・リンク系の verb と保護対象名が同居したら deny 対象になること。
-
-        トークン化できる経路では、書き込み先の抽出（`_EXECUTED_COMMAND_TARGET_RULES`）が
-        既にこれらを見ている。JSON の壊れ方だけで同じ入力が通ったり通らなくなったりするのは
-        境界として説明できない。
-        """
-        assert bash_config_protection._raw_text_write_risk(raw_input) is not None
-
-    def test_read_only_verb_is_not_detected(self) -> None:
-        """読むだけの verb は保護対象名が見えても deny しないこと。"""
-        assert bash_config_protection._raw_text_write_risk("{broken cat ruff.toml") is None
-
-
-class TestPathProtectionPropagates:
-    """`config_protection` の path ベース保護が Bash 経路にも伝播する。
-
-    `bash_config_protection` の目的は「`config_protection` の Edit/Write 限定を
-    Bash 側で補完する」こと。basename 集合だけを import して path
-    ベースの保護（`.git/hooks/` 配下）を取りこぼすと、同じ書込みが Write では
-    exit 2、Bash では exit 0 という非対称が生まれ、このモジュールの存在理由
-    そのものに反する。
-    """
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "echo x > .git/hooks/pre-commit",
-            "printf x >> .git/hooks/pre-push",
-            "sed -i 's/a/b/' .git/hooks/pre-commit",
-            "echo x | tee .git/hooks/commit-msg",
-            "rm .git/hooks/pre-commit",
-        ],
-        ids=["redirect", "append", "sed-i", "tee", "rm"],
-    )
-    def test_writes_under_git_hooks_are_blocked(self, command: str) -> None:
-        """`.git/hooks/` 配下への Bash 経由の書込み・削除をブロックする。"""
-        assert bash_config_protection.find_protected_write(command) is not None
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "echo x > src/hooks/pre-commit",
-            "echo x > .git/info/exclude",
-            "echo x > README.md",
-            "echo x > hooks/pre-commit",
-        ],
-        ids=["same-basename-elsewhere", "git-dir-but-not-hooks", "prose", "hooks-without-git"],
-    )
-    def test_lookalike_paths_are_allowed(self, command: str) -> None:
-        """`.git/hooks/` 配下でない同名・類似パスは通す。"""
-        assert bash_config_protection.find_protected_write(command) is None
-
-    def test_main_blocks_git_hooks_write(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """main 経路でも exit 2 になり、対象を名指しする。"""
-        monkeypatch.setattr(
-            bash_config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: (_bash_payload("echo x > .git/hooks/pre-commit"), False),
-        )
-
-        assert bash_config_protection.main() == 2
-        assert ".git/hooks/" in capsys.readouterr().err
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "rm -rf .git/hooks",
-            "mv .git/hooks .git/hooks.off",
-            "ln -s /dev/null .git/hooks",
-        ],
-        ids=["rm-rf-dir", "mv-dir", "ln-over-dir"],
-    )
-    def test_protected_directory_itself_is_blocked(self, command: str) -> None:
-        """保護ディレクトリ自身を消す・退避する操作もブロックする。
-
-        配下ファイルの書換え（`rm .git/hooks/pre-commit`）は deny なのに
-        1 コンポーネント短いディレクトリ操作が allow だと、同じ verb・同じ結果
-        （フックが走らない状態）に対する非対称が残る。
-        """
-        assert bash_config_protection.find_protected_write(command) is not None
-
-
-class TestModeChangeIsBlocked:
-    """権限変更による無効化も上書きと同じ強さの弱体化として扱う。
-
-    中身を書き換えなくても実行ビットや読み取り権限を落とせば検査は無効化
-    できる。書き換え経路だけを塞ぐと、塞いだ経路の存在が誤った安心になる。
-    """
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "chmod -x .git/hooks/pre-commit",
-            "chmod 000 .eslintrc.json",
-            "chmod a-r pyproject.toml",
-            "chown nobody .git/hooks/pre-commit",
-            "chgrp nogroup .eslintrc.json",
-            "chflags uchg pyproject.toml",
-            "sudo chmod -x .git/hooks/pre-commit",
-            "chmod -R 000 .git/hooks",
-        ],
-        ids=[
-            "chmod-hook",
-            "chmod-eslintrc",
-            "chmod-pyproject",
-            "chown-hook",
-            "chgrp-eslintrc",
-            "chflags-pyproject",
-            "sudo-chmod-hook",
-            "chmod-hooks-dir",
-        ],
-    )
-    def test_mode_change_on_protected_target_is_blocked(self, command: str) -> None:
-        """保護対象への権限変更をブロックする。"""
-        assert bash_config_protection.find_protected_write(command) is not None
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "chmod +x scripts/deploy.sh",
-            "chmod 644 README.md",
-            "chmod -x src/hooks/pre-commit",
-            "chown me:me .git/info/exclude",
-            "echo chmod -x .git/hooks/pre-commit",
-        ],
-        ids=["script", "readme", "same-basename-elsewhere", "git-info", "not-executed"],
-    )
-    def test_mode_change_on_other_targets_is_allowed(self, command: str) -> None:
-        """保護対象でないパスへの権限変更は通す。"""
-        assert bash_config_protection.find_protected_write(command) is None
-
-    def test_main_blocks_chmod_on_hook(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """main 経路でも exit 2 になり、対象を名指しする。"""
-        monkeypatch.setattr(
-            bash_config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: (_bash_payload("chmod -x .git/hooks/pre-commit"), False),
-        )
-
-        assert bash_config_protection.main() == 2
-        assert ".git/hooks/" in capsys.readouterr().err
+from ._support import _bash
+from ._support import _home_outside_repo as _home_outside_repo
+from ._support import _repo_scope as _repo_scope
+
+_DENIED = [
+    # リダイレクト（数字プレフィックス付き等を含む）・tee・sed -i・heredoc・複合コマンド。
+    "printf x > pyproject.toml",
+    "printf x >> pyproject.toml",
+    "echo '[testenv]' > tox.ini",
+    "cat file.txt > .eslintrc.json",
+    "tee pyproject.toml <<< 'x'",
+    "tee -a pyproject.toml <<< 'x'",
+    "echo x | tee package.json",
+    "tee notes.txt pyproject.toml <<< 'x'",
+    "sed -i 's/a/b/' pyproject.toml",
+    "sed -i '' pyproject.toml",
+    "sed -i.bak 's/a/b/' setup.cfg",
+    "cat <<'EOF' > pyproject.toml\nx\nEOF",
+    "true && printf x > pyproject.toml",
+    "echo x &> pyproject.toml",
+    "echo x >| pyproject.toml",
+    "echo x 1> pyproject.toml",
+    "echo x 2>> pyproject.toml",
+    "echo x &>> pyproject.toml",
+    "echo x >& pyproject.toml",
+    # 書き込み先が引数位置に明示されるコマンド群。-f 無しの新規 symlink も、以後その名前を
+    # 読む処理をリンク先へ差し替えるため実質的な書き込み。
+    "cp src.py pyproject.toml",
+    "mv src.py pyproject.toml",
+    "install -m 644 src.py pyproject.toml",
+    "ln -f /dev/null pyproject.toml",
+    "ln -s weak.toml pyproject.toml",
+    "ln --force /dev/null pyproject.toml",
+    "dd if=/dev/zero of=pyproject.toml",
+    "perl -i -pe s/a/b/ pyproject.toml",
+    "perl -0pi -e 1 pyproject.toml",
+    # 削除・切り詰め・移動元。リンタ設定を消せばルールごと無効化できるため上書きと同じ強さの弱体化。
+    "rm pyproject.toml",
+    "rm -f pyproject.toml",
+    "rm -rf pyproject.toml",
+    "unlink pyproject.toml",
+    "shred pyproject.toml",
+    "truncate -s 0 pyproject.toml",
+    "mv pyproject.toml /tmp/backup",
+    "sudo rm pyproject.toml",
+    "env rm pyproject.toml",
+    # wrapper（sudo/env/command）を挟んでも実行位置を特定する。cp/mv/install と ln -f も
+    # `_command_index` を通す（素の `segment[0]` を見ると `sudo cp ... pyproject.toml` が素通りする）。
+    "sudo cp /tmp/x pyproject.toml",
+    "sudo install /tmp/x pyproject.toml",
+    "sudo ln -f /dev/null pyproject.toml",
+    "env cp /tmp/x pyproject.toml",
+    "env X=1 tee pyproject.toml",
+    "sudo tee pyproject.toml",
+    "command tee pyproject.toml",
+    "sudo -u root tee pyproject.toml",
+    "env -u FOO tee pyproject.toml",
+    "env sed -i 's/a/b/' pyproject.toml",
+    "sudo dd if=/dev/zero of=pyproject.toml",
+    # 未知の wrapper オプションは 1 トークンだけ読み飛ばして実行対象の探索を続ける。
+    "sudo -n tee pyproject.toml",
+    # 単独サロゲートで解決が ValueError になっても、保護名に一致する以上は deny する（fail-closed。
+    # docs/adr/hook-failure-direction.md）。allow にすると単独サロゲートを混ぜるだけで保護を外せる。
+    "rm \ud800/.git/hooks/pre-commit",
+    "printf x > \ud800/.git/hooks/pre-commit",
+    "printf x > \ud800/ruff.toml",
+    "rm \ud800/pyproject.toml",
+    # `config_protection` の path ベース保護（`.git/hooks/`）も Bash 経路へ伝播する。取りこぼすと
+    # 同じ書込みが Write では exit 2、Bash では exit 0 という非対称になる。
+    "echo x > .git/hooks/pre-commit",
+    "printf x >> .git/hooks/pre-push",
+    "sed -i 's/a/b/' .git/hooks/pre-commit",
+    "echo x | tee .git/hooks/commit-msg",
+    "rm .git/hooks/pre-commit",
+    # 保護ディレクトリ自身を消す・退避する操作。配下ファイルが deny でディレクトリ操作が allow だと、
+    # 同じ結果（フックが走らない状態）に対する非対称が残る。
+    "rm -rf .git/hooks",
+    "mv .git/hooks .git/hooks.off",
+    "ln -s /dev/null .git/hooks",
+    # 権限変更。中身を書き換えなくても実行ビットや読み取り権限を落とせば検査は無効化できる。
+    "chmod -x .git/hooks/pre-commit",
+    "chmod 000 .eslintrc.json",
+    "chmod a-r pyproject.toml",
+    "chown nobody .git/hooks/pre-commit",
+    "chgrp nogroup .eslintrc.json",
+    "chflags uchg pyproject.toml",
+    "sudo chmod -x .git/hooks/pre-commit",
+    "chmod -R 000 .git/hooks",
+]
+
+_ALLOWED = [
+    # 書き込みではない・保護対象でない。fd 複製の `>&` は保護名が続かない限り書き込みではない。
+    "printf x > notes.txt",
+    "echo x >&2",
+    "ls 2>&1",
+    "cat pyproject.toml",
+    "echo pyproject.toml",
+    "grep -n commands tox.ini",
+    "sed -n '1,5p' pyproject.toml",
+    "tee",
+    "sed -i",
+    "",
+    "ln -s a.txt b.txt",
+    # 弱体化でない削除系（非保護対象・複製は元が残る・ファイル指定が無い）。
+    "rm notes.txt",
+    "cp pyproject.toml /tmp/backup",
+    "rm",
+    "truncate -s 0",
+    # リポジトリ外の同名ファイル。`~` は展開してから判定する（展開しないと cwd 相対の
+    # `<repo_root>/~/outside/...` と読まれ false positive になる）。
+    "printf x > /definitely-outside-the-repo/pyproject.toml",
+    "printf x > ~/outside/pyproject.toml",
+    # 拡張検出（perl/cp/mv/ln/dd）の non-match（in-place 無し・引数無し・非保護対象）。
+    "perl -pe s/a/b/ pyproject.toml",
+    "perl -i -pe s/a/b/ notes.txt",
+    "cp -v",
+    "mv --",
+    "ln -f",
+    "dd if=/dev/zero of=notes.txt",
+    # tee/sed/perl/dd/of= が実行位置ではなくただの引数文字列として現れるだけ。
+    "echo tee pyproject.toml",
+    "echo of=pyproject.toml",
+    "echo sed -i pyproject.toml",
+    "echo perl -i pyproject.toml",
+    "printf 'tee pyproject.toml\\n'",
+    "grep -l 'dd of=pyproject.toml' notes.txt",
+    # `_command_index` が実行対象を特定できない（代入/wrapper/オプションで終わる）。
+    "env",
+    "FOO=bar",
+    "sudo -u",
+    # 保護名に一致しない解決不能トークン。
+    "rm \ud800/notes.txt",
+    "printf x > \ud800/src/main.py",
+    # `.git/hooks/` 配下でない同名・類似パス。
+    "echo x > src/hooks/pre-commit",
+    "echo x > .git/info/exclude",
+    "echo x > README.md",
+    "echo x > hooks/pre-commit",
+    # 保護対象でないパスへの権限変更。
+    "chmod +x scripts/deploy.sh",
+    "chmod 644 README.md",
+    "chmod -x src/hooks/pre-commit",
+    "chown me:me .git/info/exclude",
+    "echo chmod -x .git/hooks/pre-commit",
+    # `~/.claq/logs/` 以外の home 配下・類似パス。
+    "echo x > logs/bg-1.log",
+    "echo x > ~/.claq/mem.db",
+    "echo x > ~/.claq/session-data/x.md",
+    "echo x > ~/.config/claq/logs/x.log",
+]
+
+
+@pytest.mark.parametrize("command", _DENIED)
+def test_protected_write_is_denied(command: str) -> None:
+    """保護対象への書き込み・削除・権限変更を検出する。"""
+    assert bash_config_protection.find_protected_write(command) is not None
+
+
+@pytest.mark.parametrize("command", _ALLOWED)
+def test_non_protected_command_is_allowed(command: str) -> None:
+    """保護対象への書き込みでないコマンドは通す。"""
+    assert bash_config_protection.find_protected_write(command) is None
+
+
+@pytest.mark.parametrize(
+    ("command", "denied"),
+    [("printf x > pyproject.toml", False), ("rm \ud800/.git/hooks/pre-commit", True)],
+    ids=["resolvable-allows", "unresolvable-denies"],
+)
+def test_undetermined_repo_root_denies_only_unresolvable_token(
+    command: str, denied: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ルート不明なら allow に倒すが、解決不能な保護名トークンはルートの有無で結論を変えない。"""
+    monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: None)
+
+    assert (bash_config_protection.find_protected_write(command) is not None) is denied
+
+
+def test_resolve_repo_root_not_called_without_write_hit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """保護対象 basename が出現しない大多数の呼び出しでは resolve_repo_root を呼ばない。"""
+    called = {"n": 0}
+
+    def _tracking_resolve() -> Path:
+        """呼び出し回数を数える。"""
+        called["n"] += 1
+        return Path("/repo")
+
+    monkeypatch.setattr(bash_config_protection, "resolve_repo_root", _tracking_resolve)
+
+    assert bash_config_protection.find_protected_write("ls -la && echo hello") is None
+    assert called["n"] == 0
+
+
+def test_denies_protected_name_when_resolution_raises_runtime_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """symlink ループで `Path.resolve` が RuntimeError になる実装（Python 3.12 の strict=False）でも deny する。"""
+
+    def _looping_resolve(self: Path, strict: bool = False) -> Path:  # noqa: ARG001
+        """ループ検出の RuntimeError を投げる。"""
+        raise RuntimeError("Symlink loop")
+
+    monkeypatch.setattr(bash_config_protection.Path, "resolve", _looping_resolve)
+
+    assert bash_config_protection.find_protected_write("printf x > ruff.toml") is not None
+
+
+def test_denies_protected_write_through_symlink_loop(tmp_path: Path) -> None:
+    """実際の symlink ループ越しの保護パスへの書き込みを deny する。"""
+    (tmp_path / "a").symlink_to(tmp_path / "b")
+    (tmp_path / "b").symlink_to(tmp_path / "a")
+
+    assert bash_config_protection.find_protected_write("rm a/.git/hooks/pre-commit") is not None
+    assert bash_config_protection.find_protected_write("printf x > a/ruff.toml") is not None
+
+
+def test_allows_resolvable_protected_name_outside_repo_root(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """解決できてリポジトリ外のパスは、保護名に一致しても allow のまま。"""
+    outside = tmp_path_factory.mktemp("outside")
+
+    assert bash_config_protection.find_protected_write(f"printf x > {outside}/ruff.toml") is None
+    assert bash_config_protection.find_protected_write(f"rm {outside}/.git/hooks/pre-commit") is None
+
+
+def test_within_repo_root_returns_false_when_repo_root_resolve_fails(tmp_path: Path) -> None:
+    """書き込み先の解決は成功していても repo_root.resolve() が失敗すれば False を返す。"""
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+
+    class _BoomPath(Path):
+        """resolve が必ず失敗するパス。"""
+
+        def resolve(self, strict: bool = False) -> Path:  # noqa: ARG002
+            """repo ルートの解決失敗を模す。"""
+            raise OSError("repo root unavailable")
+
+    assert bash_config_protection._within_repo_root(tmp_path / "pyproject.toml", _BoomPath(tmp_path)) is False
+
+
+@pytest.mark.parametrize(
+    ("raw_input", "denied"),
+    [
+        # トークン化経路の書き込み先抽出（`_EXECUTED_COMMAND_TARGET_RULES`）と同じ verb 集合を見る。
+        # JSON の壊れ方だけで同じ入力の結論が変わるのは境界として説明できない。
+        ("{broken rm ruff.toml", True),
+        ("{broken unlink pyproject.toml", True),
+        ("{broken shred tox.ini", True),
+        ("{broken ln -s x ruff.toml", True),
+        ("{broken cat ruff.toml", False),
+    ],
+)
+def test_malformed_fallback_covers_destructive_verbs(raw_input: str, denied: bool) -> None:
+    """malformed JSON fallback は削除・リンク系の verb を拾い、読むだけの verb は拾わない。"""
+    assert (bash_config_protection._raw_text_write_risk(raw_input) is not None) is denied
+
+
+_BLOCKED_PYPROJECT = "BLOCKED: Modifying pyproject.toml is not allowed."
+
+
+@pytest.mark.parametrize(
+    ("raw", "truncated", "code", "fragments"),
+    [
+        pytest.param(json.dumps(_bash("printf x > pyproject.toml")), False, 2, [_BLOCKED_PYPROJECT], id="redirect"),
+        # 先勝ちで 1 キーだけ見ると、無害な `tool_input` の陰の `toolArgs` が素通りする。
+        pytest.param(
+            json.dumps(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "echo safe"},
+                    "toolArgs": {"command": "printf x > pyproject.toml"},
+                }
+            ),
+            False,
+            2,
+            [_BLOCKED_PYPROJECT],
+            id="every-container-key",
+        ),
+        pytest.param(json.dumps(_bash("echo x > .git/hooks/pre-commit")), False, 2, [".git/hooks/"], id="git-hooks"),
+        pytest.param(json.dumps(_bash("chmod -x .git/hooks/pre-commit")), False, 2, [".git/hooks/"], id="chmod-hook"),
+        pytest.param(
+            json.dumps(_bash("echo x >> ~/.claq/logs/bg-2026-09-12.log")),
+            False,
+            2,
+            ["~/.claq/logs", "prompt-injection"],
+            id="home-log",
+        ),
+        pytest.param(json.dumps(_bash("printf x > notes.txt")), False, 0, [], id="non-protected-write"),
+        pytest.param(json.dumps(_bash("cat pyproject.toml")), False, 0, [], id="read-only"),
+        pytest.param(
+            json.dumps({"tool_name": "Write", "tool_input": {"file_path": "pyproject.toml", "content": "x"}}),
+            False,
+            0,
+            [],
+            id="non-bash-tool",
+        ),
+        pytest.param("", False, 0, [], id="empty"),
+        pytest.param("{not-even-json", True, 2, ["exceeded"], id="truncated-fail-closed"),
+        # JSON が壊れていても生テキストに保護対象 + 書き込み指示が見えれば deny する。
+        pytest.param("not-json but printf x > pyproject.toml appears here", False, 2, [], id="malformed-risk"),
+        pytest.param("not-json at all", False, 0, [], id="malformed-no-risk"),
+        pytest.param("not-json but > notes.txt appears here", False, 0, [], id="malformed-no-protected-name"),
+    ],
+)
+def test_main(
+    raw: str,
+    truncated: bool,
+    code: int,
+    fragments: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """stdin の形ごとの終了コードと、ブロック時に対象を名指しする文言。"""
+    monkeypatch.setattr(bash_config_protection, "read_raw_stdin_with_truncation", lambda: (raw, truncated))
+
+    assert bash_config_protection.main() == code
+    err = capsys.readouterr().err
+    for fragment in fragments:
+        assert fragment in err
+
+
+def test_module_entrypoint_runs_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`python -m` 起動で main の終了コードが SystemExit になる。"""
+    # runpy が bash_config_protection を fresh に再実行するため、
+    # stdin_io（sys.modules にキャッシュされ再利用される側）を patch する。
+    monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin_with_truncation", lambda: ("", False))
+    with pytest.raises(SystemExit) as excinfo:
+        runpy.run_module("claq.hooks.bash_config_protection", run_name="__main__")
+    assert excinfo.value.code == 0
 
 
 class TestHomeLogDirectoryProtection:
@@ -632,26 +342,9 @@ class TestHomeLogDirectoryProtection:
 
     `recent_bg_failure_notice` が当日・前日のログ末尾行を無条件で次回
     SessionStart の `<claq-memory>` へ注入するため、このディレクトリへの
-    自由な追記はプロンプト注入の永続化経路になる。`TestPathProtectionPropagates`
-    （`.git/hooks/` の伝播）をモデルにする。
+    自由な追記はプロンプト注入の永続化経路になる。home は repo ルートと兄弟の
+    ディレクトリに固定する（`_home_outside_repo`）。
     """
-
-    @pytest.fixture(autouse=True)
-    def _fixed_home(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
-    ) -> Path:
-        """`~` の展開先を、autouse の repo_root（tmp_path）と非nestedな別ディレクトリに固定する。
-
-        home を repo_root の下に置くと、`~/.claq/logs/...` が cwd 起点の相対解決で
-        たまたまリポジトリ配下に着地し、repo スコープ判定を素通りしてしまう
-        旧来の事故的な挙動でも本テストが緑になってしまう（本当の修正を検証した
-        ことにならない）。home は repo_root と兄弟ディレクトリにして両者を
-        確実に分離する。
-        """
-        home = tmp_path_factory.mktemp("home")
-        monkeypatch.setenv("HOME", str(home))
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
-        return home
 
     @pytest.mark.parametrize(
         "command",
@@ -675,21 +368,16 @@ class TestHomeLogDirectoryProtection:
         ],
     )
     def test_tilde_form_is_blocked(self, command: str) -> None:
+        """``~`` 形の書込み先を deny する。"""
         assert bash_config_protection.find_protected_write(command) is not None
 
-    def test_absolute_form_is_blocked(
-        self, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """絶対パス直書き（`~` を介さない）でも deny すること。
+    def test_absolute_form_is_blocked(self, _home_outside_repo: Path) -> None:
+        """絶対パス直書き（`~` を介さない）でも deny する。
 
-        タブル展開だけでは絶対パス直書き型を捕まえられない（そもそも `~` を
-        含まないため tilde 展開は無関係）。構造一致（`_find_home_log_directory_match`）
+        `~` を含まないため tilde 展開は無関係。構造一致（`_find_home_log_directory_match`）
         が repo スコープ判定より前で効いていることを、この形で確認する。
         """
-        home = tmp_path_factory.mktemp("home")
-        monkeypatch.setenv("HOME", str(home))
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
-        command = f"echo x >> {home}/.claq/logs/bg-2026-09-12.log"
+        command = f"echo x >> {_home_outside_repo}/.claq/logs/bg-2026-09-12.log"
         assert bash_config_protection.find_protected_write(command) is not None
 
     def test_relative_after_cd_is_blocked(self) -> None:
@@ -705,46 +393,14 @@ class TestHomeLogDirectoryProtection:
         )
 
     @pytest.mark.parametrize(
-        "command",
-        [
-            "echo x > logs/bg-1.log",
-            "echo x > ~/.claq/mem.db",
-            "echo x > ~/.claq/session-data/x.md",
-            "echo x > ~/.config/claq/logs/x.log",
-        ],
-        ids=["repo-local-logs", "claq-mem-db", "claq-session-data", "config-claq-logs-lookalike"],
+        ("token", "expected"),
+        [("app.py", None), ("{home}/.claq/logs/bg-1.log", "~/.claq/logs")],
+        ids=["plain-relative", "absolute"],
     )
-    def test_lookalike_or_other_home_paths_are_allowed(self, command: str) -> None:
-        assert bash_config_protection.find_protected_write(command) is None
-
-    def test_main_blocks_home_log_write(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        monkeypatch.setattr(
-            bash_config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: (_bash_payload("echo x >> ~/.claq/logs/bg-2026-09-12.log"), False),
-        )
-        assert bash_config_protection.main() == 2
-        err = capsys.readouterr().err
-        assert "~/.claq/logs" in err
-        assert "prompt-injection" in err
-
-    def test_find_home_log_directory_match_no_match_on_plain_relative_path(self) -> None:
-        assert bash_config_protection._find_home_log_directory_match("app.py") is None
-
-    def test_find_home_log_directory_match_matches_absolute_path(
-        self, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        home = tmp_path_factory.mktemp("home")
-        monkeypatch.setenv("HOME", str(home))
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
-
-        result = bash_config_protection._find_home_log_directory_match(
-            f"{home}/.claq/logs/bg-1.log"
-        )
-
-        assert result == "~/.claq/logs"
+    def test_find_home_log_directory_match(self, token: str, expected: str | None, _home_outside_repo: Path) -> None:
+        """home ログ配下の絶対パスだけを表示名へ対応付ける。"""
+        token = token.format(home=_home_outside_repo)
+        assert bash_config_protection._find_home_log_directory_match(token) == expected
 
     def test_find_home_log_directory_match_falls_back_to_raw_token_when_unresolvable(
         self, monkeypatch: pytest.MonkeyPatch
@@ -752,6 +408,4 @@ class TestHomeLogDirectoryProtection:
         """`resolve_effective_target` が None を返す場合も生トークンで判定できること。"""
         monkeypatch.setattr(bash_config_protection, "resolve_effective_target", lambda _t: None)
 
-        result = bash_config_protection._find_home_log_directory_match(".claq/logs/bg-1.log")
-
-        assert result == "~/.claq/logs"
+        assert bash_config_protection._find_home_log_directory_match(".claq/logs/bg-1.log") == "~/.claq/logs"
