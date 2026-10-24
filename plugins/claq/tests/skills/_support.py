@@ -42,6 +42,8 @@ BASES = check_site.base_ids(TOKENS)
 HTML = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
 CSS = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
 JS = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
+TOKENS_CSS = (_TEMPLATE / "tokens.css").read_text(encoding="utf-8")
+E2E_JS = (_TEMPLATE / "e2e_contrast.js").read_text(encoding="utf-8")
 
 
 def _copy_site(tmp_path: Path, name: str = "site") -> Path:

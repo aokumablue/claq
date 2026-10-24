@@ -2,23 +2,18 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import re
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
+from pytest import approx
 
-from ._support import (
-    _TEMPLATE,
-    _TOKENS,
-    BASES,
-    TOKENS,
-    _append,
-    _copy_site,
-    _edit,
-    check_site,
-)
+from ._support import BASES, CSS, TOKENS, TOKENS_CSS, _append, _copy_site, _edit, check_site
 
 # --- upstream への忠実性 -----------------------------------------------------
 
@@ -65,68 +60,60 @@ def test_series_uses_five_colors_like_upstream() -> None:
 # --- 色空間 -----------------------------------------------------------------
 
 
-def test_norm_hex_expands_short_form() -> None:
-    """3 桁・4 桁・8 桁 hex を 6 桁へ正規化する。"""
-    assert check_site._norm_hex("#abc") == "#AABBCC"
-    assert check_site._norm_hex("#abcd") == "#AABBCC"
-    assert check_site._norm_hex("#AABBCCDD") == "#AABBCC"
-    with pytest.raises(ValueError):
-        check_site._norm_hex("blue")
-    with pytest.raises(ValueError):
-        check_site._norm_hex("#12345")
+@pytest.mark.parametrize(
+    ("convert", "args", "expected"),
+    [
+        # 3 桁・4 桁・8 桁の hex を 6 桁へ正規化する
+        pytest.param(check_site._norm_hex, ("#abc",), "#AABBCC", id="hex-3-digits"),
+        pytest.param(check_site._norm_hex, ("#abcd",), "#AABBCC", id="hex-4-digits"),
+        pytest.param(check_site._norm_hex, ("#AABBCCDD",), "#AABBCC", id="hex-8-digits"),
+        # WCAG のコントラスト比の既知の組み合わせ
+        pytest.param(check_site.contrast_ratio, ("#000000", "#FFFFFF"), approx(21.0, abs=1e-6), id="contrast-21"),
+        pytest.param(check_site.contrast_ratio, ("#777777", "#FFFFFF"), approx(4.48, abs=0.01), id="contrast-4.48"),
+        pytest.param(check_site.contrast_ratio, ("#FFFFFF", "#FFFFFF"), approx(1.0, abs=1e-9), id="contrast-1"),
+        # Lab 変換と色差（同じ色はゼロ、白と黒は 100）
+        pytest.param(check_site.hex_to_lab, ("#FFFFFF",), approx((100.0, 0.0, 0.0), abs=0.01), id="lab-white"),
+        pytest.param(check_site.hex_to_lab, ("#000000",), approx((0.0, 0.0, 0.0), abs=1e-6), id="lab-black"),
+        pytest.param(check_site.delta_e, ("#123456", "#123456"), approx(0.0, abs=1e-9), id="delta-e-same"),
+        pytest.param(check_site.delta_e, ("#000000", "#FFFFFF"), approx(100.0, abs=0.01), id="delta-e-black-white"),
+        # 不透明・半透明どちらの oklch() も読む
+        pytest.param(check_site.parse_oklch, ("oklch(0.5 0.1 200)",), (0.5, 0.1, 200.0, 1.0), id="oklch-opaque"),
+        pytest.param(check_site.parse_oklch, ("oklch(1 0 0 / 10%)",), (1.0, 0.0, 0.0, 0.1), id="oklch-translucent"),
+        # upstream の oklch が Tailwind v4 の既知の hex（白・slate-500・slate-200・orange-600）へ落ちる。
+        # OKLab の逆変換とガンマの両方を外部の既知値で確かめる（ずれると全コントラスト測定が静かに嘘になる）
+        pytest.param(check_site.oklch_to_hex, ("oklch(1 0 0)",), "#FFFFFF", id="white"),
+        pytest.param(check_site.oklch_to_hex, ("oklch(0.554 0.046 257.417)",), "#62748E", id="slate-500"),
+        pytest.param(check_site.oklch_to_hex, ("oklch(0.929 0.013 255.508)",), "#E2E8F0", id="slate-200"),
+        pytest.param(check_site.oklch_to_hex, ("oklch(0.646 0.222 41.116)",), "#F54900", id="orange-600"),
+        # 半透明は下地へ合成した実効色になる（白の上では白、黒の上では暗い灰）
+        pytest.param(check_site.oklch_to_hex, ("oklch(1 0 0 / 10%)", "oklch(1 0 0)"), "#FFFFFF", id="alpha-on-white"),
+        pytest.param(check_site.oklch_to_hex, ("oklch(1 0 0 / 10%)", "oklch(0 0 0)"), "#595959", id="alpha-on-black"),
+        # 既に満たしている色は明度を動かさない（upstream の値をできる限り残す）
+        pytest.param(
+            check_site._lower_lightness_until, ("oklch(0.7 0 0)", "#000000", 4.5), "oklch(0.7 0 0)", id="compliant"
+        ),
+    ],
+)
+def test_color_math_matches_reference_values(convert: Callable[..., Any], args: tuple[Any, ...], expected: Any) -> None:
+    """色空間の正規化・変換・比率が既知の値を再現する。"""
+    assert convert(*args) == expected
 
 
-def test_contrast_ratio_matches_wcag_reference_values() -> None:
-    """既知の組み合わせで WCAG の比率を再現する。"""
-    assert check_site.contrast_ratio("#000000", "#FFFFFF") == pytest.approx(21.0, abs=1e-6)
-    assert check_site.contrast_ratio("#777777", "#FFFFFF") == pytest.approx(4.48, abs=0.01)
-    assert check_site.contrast_ratio("#FFFFFF", "#FFFFFF") == pytest.approx(1.0, abs=1e-9)
-
-
-def test_lab_conversion_matches_reference_values() -> None:
-    """Lab 変換が既知の値と一致する。"""
-    lightness, a_axis, b_axis = check_site.hex_to_lab("#FFFFFF")
-    assert lightness == pytest.approx(100.0, abs=0.01)
-    assert (a_axis, b_axis) == pytest.approx((0.0, 0.0), abs=0.01)
-    assert check_site.hex_to_lab("#000000")[0] == pytest.approx(0.0, abs=1e-6)
-
-
-def test_delta_e_is_zero_for_identical_colors() -> None:
-    """同じ色の色差はゼロ、白と黒は 100 を超える。"""
-    assert check_site.delta_e("#123456", "#123456") == pytest.approx(0.0, abs=1e-9)
-    assert check_site.delta_e("#000000", "#FFFFFF") > 99.0
-
-
-def test_parse_oklch_reads_both_forms() -> None:
-    """不透明・半透明どちらの oklch() も読み、それ以外は拒否する。"""
-    assert check_site.parse_oklch("oklch(0.5 0.1 200)") == (0.5, 0.1, 200.0, 1.0)
-    assert check_site.parse_oklch("oklch(1 0 0 / 10%)") == (1.0, 0.0, 0.0, 0.1)
-    with pytest.raises(ValueError):
-        check_site.parse_oklch("#ffffff")
-
-
-def test_oklch_matches_known_tailwind_colors() -> None:
-    """upstream の oklch が Tailwind の既知 hex へ落ちる。
-
-    OKLab の逆変換とガンマの両方が正しいことを、外部の既知値で確かめる。
-    ここがずれると全コントラスト測定が静かに嘘になる。
-    """
-    assert check_site.oklch_to_hex("oklch(1 0 0)") == "#FFFFFF"
-    # slate-500 / slate-200 / orange-600（Tailwind v4）
-    assert check_site.oklch_to_hex("oklch(0.554 0.046 257.417)") == "#62748E"
-    assert check_site.oklch_to_hex("oklch(0.929 0.013 255.508)") == "#E2E8F0"
-    assert check_site.oklch_to_hex("oklch(0.646 0.222 41.116)") == "#F54900"
-
-
-def test_translucent_color_is_composited_over_its_backdrop() -> None:
-    """半透明は下地へ合成した実効色になる（合成先が無ければエラー）。"""
-    over_black = check_site.oklch_to_hex("oklch(1 0 0 / 10%)", "oklch(0 0 0)")
-    over_white = check_site.oklch_to_hex("oklch(1 0 0 / 10%)", "oklch(1 0 0)")
-    assert over_white == "#FFFFFF"
-    assert over_black != over_white
-    assert check_site.relative_luminance(over_black) < 0.1
-    with pytest.raises(ValueError):
-        check_site.oklch_to_hex("oklch(1 0 0 / 10%)")
+@pytest.mark.parametrize(
+    ("convert", "args", "message"),
+    [
+        pytest.param(check_site._norm_hex, ("blue",), "hex ではない", id="hex-without-hash"),
+        pytest.param(check_site._norm_hex, ("#12345",), "不正な hex", id="hex-5-digits"),
+        pytest.param(check_site.parse_oklch, ("#ffffff",), r"oklch\(\) ではない", id="not-oklch"),
+        pytest.param(check_site.oklch_to_hex, ("oklch(1 0 0 / 10%)",), "合成先が無い", id="translucent-without-backdrop"),
+        # どれだけ暗くしても満たせない要求（白背景の上限は 21:1）
+        pytest.param(check_site._lower_lightness_until, ("oklch(0.7 0 0)", "#FFFFFF", 25.0), "満たせない", id="unreachable"),
+    ],
+)
+def test_color_math_rejects_invalid_input(convert: Callable[..., Any], args: tuple[Any, ...], message: str) -> None:
+    """hex・oklch() として読めない値、合成先の無い半透明、届かない比率は ValueError になる。"""
+    with pytest.raises(ValueError, match=message):
+        convert(*args)
 
 
 def test_fit_chroma_clamps_chroma_and_keeps_lightness() -> None:
@@ -140,21 +127,7 @@ def test_fit_chroma_clamps_chroma_and_keeps_lightness() -> None:
 
 def test_format_oklch_is_reparsable() -> None:
     """書き出した表記をそのまま読み戻せる。"""
-    text = check_site.format_oklch(0.58, 0.1234567, 264.376)
-    assert check_site.parse_oklch(text)[0] == 0.58
-
-
-def test_lower_lightness_gives_up_when_the_target_is_unreachable() -> None:
-    """どれだけ暗くしても満たせない要求は例外にする（白背景の上限は 21:1）。"""
-    with pytest.raises(ValueError):
-        check_site._lower_lightness_until("oklch(0.7 0 0)", "#FFFFFF", 25.0)
-
-
-def test_lower_lightness_returns_immediately_when_already_compliant() -> None:
-    """既に満たしている色は明度を動かさない（upstream の値をできる限り残す）。"""
-    assert check_site._lower_lightness_until("oklch(0.7 0 0)", "#000000", 4.5) == check_site.format_oklch(
-        0.7, 0.0, 0.0
-    )
+    assert check_site.parse_oklch(check_site.format_oklch(0.58, 0.1234567, 264.376))[0] == 0.58
 
 
 # --- スキームの解決 ---------------------------------------------------------
@@ -168,9 +141,7 @@ def test_scheme_applies_contrast_fixes_only_where_needed() -> None:
     upstream_dark = TOKENS["bases"]["neutral"]["dark"]
 
     assert light["--ring"] != upstream_light["ring"]
-    assert check_site.parse_oklch(light["--ring"])[0] < check_site.parse_oklch(
-        upstream_light["ring"]
-    )[0]
+    assert check_site.parse_oklch(light["--ring"])[0] < check_site.parse_oklch(upstream_light["ring"])[0]
     assert light["--muted-foreground"] != upstream_light["muted-foreground"]
     # ダークは upstream のままで契約を満たす。
     assert dark["--ring"] == upstream_dark["ring"]
@@ -183,12 +154,10 @@ def test_scheme_applies_contrast_fixes_only_where_needed() -> None:
 
 def test_derived_roles_are_present_in_every_scheme() -> None:
     """レジストリに無い destructive-foreground を全ブロックが持つ。"""
+    expected = TOKENS["derived_roles"]["destructive-foreground"]
     for base_id in BASES:
         for theme in check_site.THEMES:
-            resolved = check_site.scheme(TOKENS, base_id, theme)
-            assert resolved["--destructive-foreground"] == TOKENS["derived_roles"][
-                "destructive-foreground"
-            ][theme]
+            assert check_site.scheme(TOKENS, base_id, theme)["--destructive-foreground"] == expected[theme]
 
 
 def test_series_colors_share_hues_across_themes() -> None:
@@ -221,40 +190,30 @@ def test_color_var_names_cover_roles_derived_and_charts() -> None:
 
 
 def test_contrast_contract_holds_for_every_base_and_theme() -> None:
-    """10 ブロック（5 ベース × 2 テーマ）すべてが可読性契約を満たす。"""
+    """10 ブロック（5 ベース × 2 テーマ）すべてが可読性契約（系列色どうしの色差の下限を含む）を満たす。"""
     for base_id in BASES:
         for theme in check_site.THEMES:
             assert check_site.contrast_violations(TOKENS, base_id, theme) == []
 
 
-def test_contrast_contract_covers_charts_status_and_focus() -> None:
-    """契約表が系列色・破壊的操作・フォーカスリングを取りこぼしていない。"""
+def test_contrast_contract_covers_charts_status_focus_and_sidebar_text() -> None:
+    """契約表が系列色・破壊的操作・フォーカスリング・サイドバー面の補助テキストを取りこぼしていない。
+
+    面ごとに変数が分かれているので、背景・カードだけ見ていると
+    サイドバーの文字が誰にも見張られないまま出荷される。サイドバー面の補助テキストは
+    文字の下限 4.5:1 で入れ、全ブロックで満たすことは上の契約の検査が確かめる。
+    """
     pairs = {(foreground, background) for foreground, background, _ in check_site.CONTRAST_CONTRACT}
-    for name in check_site.CHART_VARS:
-        assert (name, "--card") in pairs
-        assert (name, "--background") in pairs
     for pair in (
+        *((name, surface) for name in check_site.CHART_VARS for surface in ("--card", "--background")),
         ("--muted-foreground", "--card"),
         ("--destructive-foreground", "--destructive"),
         ("--ring", "--background"),
         ("--sidebar-ring", "--sidebar"),
         ("--sidebar-foreground", "--sidebar"),
     ):
-        assert pair in pairs
-
-
-def test_muted_foreground_is_checked_on_the_sidebar_surface() -> None:
-    """サイドバー面の補助テキストも契約に入っている。
-
-    面ごとに変数が分かれているので、背景・カードだけ見ていると
-    サイドバーの文字が誰にも見張られないまま出荷される。
-    """
-    pairs = {(foreground, background) for foreground, background, _ in check_site.CONTRAST_CONTRACT}
-    assert ("--muted-foreground", "--sidebar") in pairs
-    for base_id in BASES:
-        for theme in check_site.THEMES:
-            colors = check_site.resolved_hex(TOKENS, base_id, theme)
-            assert check_site.contrast_ratio(colors["--muted-foreground"], colors["--sidebar"]) >= 4.5
+        assert pair in pairs, pair
+    assert ("--muted-foreground", "--sidebar", 4.5) in check_site.CONTRAST_CONTRACT
 
 
 def test_text_color_from_a_transparent_mix_is_reported(tmp_path: Path) -> None:
@@ -263,20 +222,13 @@ def test_text_color_from_a_transparent_mix_is_reported(tmp_path: Path) -> None:
     ライトでは前景を薄めるほど背景（白）へ寄るので、可読性契約を割る。
     面や枠の混合は問題ないので通す。
     """
-    dest = _copy_site(tmp_path)
-    assert "透明との color-mix" in _append(
-        dest, "styles.css", "\n.x { color: color-mix(in oklab, var(--foreground) 50%, transparent); }\n"
+    text = "\n.x { color: color-mix(in oklab, var(--foreground) 50%, transparent); }\n"
+    assert "透明との color-mix" in _append(_copy_site(tmp_path), "styles.css", text)
+    surfaces = (
+        "\n.x { background: color-mix(in oklab, var(--foreground) 8%, transparent);"
+        " border-color: color-mix(in oklab, var(--ring) 40%, transparent); }\n"
     )
-    dest = _copy_site(tmp_path, "s2")
-    assert (
-        _append(
-            dest,
-            "styles.css",
-            "\n.x { background: color-mix(in oklab, var(--foreground) 8%, transparent);"
-            " border-color: color-mix(in oklab, var(--ring) 40%, transparent); }\n",
-        )
-        == ""
-    )
+    assert _append(_copy_site(tmp_path), "styles.css", surfaces) == ""
 
 
 def test_heatmap_cap_keeps_cell_text_readable_in_every_block() -> None:
@@ -286,8 +238,7 @@ def test_heatmap_cap_keeps_cell_text_readable_in_every_block() -> None:
     可読性契約を割る。CSS の `color-mix(in oklab, …)` と同じ OKLab 上の線形混合で、
     全ベースカラー × 両テーマの最も濃いセル（`--v: 1`）を確かめる。
     """
-    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
-    cap = re.search(r"\.heat td \{[^}]*?calc\(var\(--v, 0\) \* ([\d.]+)%\)", css)
+    cap = re.search(r"\.heat td \{[^}]*?calc\(var\(--v, 0\) \* ([\d.]+)%\)", CSS)
     assert cap is not None
     share = float(cap.group(1)) / 100
 
@@ -312,8 +263,7 @@ def test_heatmap_cap_keeps_cell_text_readable_in_every_block() -> None:
 
 def test_authored_text_colors_go_through_role_variables() -> None:
     """テンプレート自身が文字色を透明混合で作っていない。"""
-    css = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
-    assert not re.search(r"(?<![-\w])color:\s*color-mix\([^;}]*\btransparent\b", css)
+    assert not re.search(r"(?<![-\w])color:\s*color-mix\([^;}]*\btransparent\b", CSS)
 
 
 def test_decorative_borders_are_excluded_from_the_3_to_1_rule() -> None:
@@ -327,59 +277,41 @@ def test_decorative_borders_are_excluded_from_the_3_to_1_rule() -> None:
     assert TOKENS["decorative_roles"]["min_ratio"] <= ratio < 3.0
 
 
-def test_border_that_matches_the_background_is_reported() -> None:
-    """ヘアラインが背景と同値になれば違反として出る。"""
-    broken = json.loads(_TOKENS.read_text(encoding="utf-8"))
-    broken["bases"]["neutral"]["light"]["border"] = "oklch(1 0 0)"
-    violations = check_site.contrast_violations(broken, "neutral", "light")
-    assert any("--border" in item and "同化" in item for item in violations)
+def _broken_tokens(section: tuple[str, ...], values: dict[str, Any]) -> dict[str, Any]:
+    """TOKENS の写しの、キーの経路 section が指す辞書を values で上書きして返す。"""
+    broken = copy.deepcopy(TOKENS)
+    target = broken
+    for key in section:
+        target = target[key]
+    target.update(values)
+    return broken
 
 
-def test_sunken_chart_series_is_reported() -> None:
-    """カード面に沈んだ系列色は違反として出る。"""
-    broken = json.loads(_TOKENS.read_text(encoding="utf-8"))
-    broken["series"]["light_lightness"] = 0.98
-    violations = check_site.contrast_violations(broken, "neutral", "light")
-    assert any("--chart-" in item and "コントラスト" in item for item in violations)
-
-
-def test_duplicate_series_is_reported() -> None:
-    """系列色が重複したら違反として出る。"""
-    broken = json.loads(_TOKENS.read_text(encoding="utf-8"))
-    broken["series"]["hues"] = [264.376] * 5
-    broken["series"]["chromas"] = [0.243] * 5
-    violations = check_site.contrast_violations(broken, "neutral", "light")
-    assert any("重複" in item for item in violations)
-
-
-def test_indistinguishable_series_is_reported() -> None:
-    """色差が下限を割った系列は違反として出る。"""
-    broken = json.loads(_TOKENS.read_text(encoding="utf-8"))
-    broken["series"]["hues"] = [264.376, 266.0, 268.0, 270.0, 272.0]
-    violations = check_site.contrast_violations(broken, "neutral", "light")
-    assert any("色差" in item for item in violations)
-
-
-def test_series_stay_apart_in_every_block() -> None:
-    """全ブロックで系列色の相互距離が下限を上回る。"""
-    minimum = TOKENS["series"]["min_delta_e"]
-    for base_id in BASES:
-        for theme in check_site.THEMES:
-            colors = check_site.resolved_hex(TOKENS, base_id, theme)
-            series = [colors[name] for name in check_site.CHART_VARS]
-            for left in range(len(series)):
-                for right in range(left + 1, len(series)):
-                    assert check_site.delta_e(series[left], series[right]) >= minimum
+@pytest.mark.parametrize(
+    ("section", "values", "needles"),
+    [
+        # ヘアラインが背景と同値になる
+        pytest.param(("bases", "neutral", "light"), {"border": "oklch(1 0 0)"}, ("--border", "同化"), id="border"),
+        # 系列色がカード面に沈む
+        pytest.param(("series",), {"light_lightness": 0.98}, ("--chart-", "コントラスト"), id="sunken-series"),
+        # 系列色が重複する
+        pytest.param(("series",), {"hues": [264.376] * 5, "chromas": [0.243] * 5}, ("重複",), id="duplicate-series"),
+        # 系列の色差が下限を割る
+        pytest.param(("series",), {"hues": [264.376, 266.0, 268.0, 270.0, 272.0]}, ("色差",), id="close-series"),
+    ],
+)
+def test_broken_tokens_are_reported(section: tuple[str, ...], values: dict[str, Any], needles: tuple[str, ...]) -> None:
+    """tokens.json の配色を壊すと、そのブロックの検査に、壊した役割の違反が出る。"""
+    violations = check_site.contrast_violations(_broken_tokens(section, values), "neutral", "light")
+    assert any(all(needle in item for needle in needles) for item in violations), violations
 
 
 def test_broken_tokens_surface_the_contrast_failure(tmp_path: Path) -> None:
     """tokens.json を壊すと検査が実測で落ちる（検査が赤くなることの実証）。"""
     dest = _copy_site(tmp_path)
-    broken = json.loads((dest / "tokens.json").read_text(encoding="utf-8"))
-    broken["bases"]["neutral"]["light"]["foreground"] = "oklch(0.97 0 0)"
+    broken = _broken_tokens(("bases", "neutral", "light"), {"foreground": "oklch(0.97 0 0)"})
     (dest / "tokens.json").write_text(json.dumps(broken, ensure_ascii=False), encoding="utf-8")
-    violations = "\n".join(check_site.validate_site(dest))
-    assert "--foreground" in violations and "コントラスト" in violations
+    assert "--foreground と --background のコントラスト" in "\n".join(check_site.validate_site(dest))
 
 
 # --- tokens.css の生成 -------------------------------------------------------
@@ -387,15 +319,13 @@ def test_broken_tokens_surface_the_contrast_failure(tmp_path: Path) -> None:
 
 def test_tokens_css_has_a_block_for_every_base_and_theme() -> None:
     """生成 CSS が 5 ベース × 2 テーマの全ブロックを持つ。"""
-    css = (_TEMPLATE / "tokens.css").read_text(encoding="utf-8")
     for base_id in BASES:
         for theme in check_site.THEMES:
-            assert f':root[data-theme="{theme}"][data-base="{base_id}"] {{' in css
+            assert f':root[data-theme="{theme}"][data-base="{base_id}"] {{' in TOKENS_CSS
 
 
 def test_tokens_css_carries_the_shadcn_token_set() -> None:
     """配色以外のトークン（タイポ・角丸・影・モーション・レイアウト）も出る。"""
-    css = (_TEMPLATE / "tokens.css").read_text(encoding="utf-8")
     for name in (
         "--font-sans",
         "--text-sm",
@@ -413,15 +343,14 @@ def test_tokens_css_carries_the_shadcn_token_set() -> None:
         "--layout-pane-max",
         "--layout-touch-target",
     ):
-        assert f"  {name}:" in css, name
-    assert "--radius-lg: var(--radius);" in css
-    assert "--radius-sm: calc(var(--radius) - 4px);" in css
+        assert f"  {name}:" in TOKENS_CSS, name
+    assert "--radius-lg: var(--radius);" in TOKENS_CSS
+    assert "--radius-sm: calc(var(--radius) - 4px);" in TOKENS_CSS
 
 
 def test_base_swatch_variables_are_theme_independent_and_distinct() -> None:
     """ベース選択 UI 用の色は :root にあり、5 つが別の値になる。"""
-    css = (_TEMPLATE / "tokens.css").read_text(encoding="utf-8")
-    head = css.split(':root[data-theme="light"]', 1)[0]
+    head = TOKENS_CSS.split(':root[data-theme="light"]', 1)[0]
     values = []
     for base_id in BASES:
         marker = f"  --base-{base_id}: "
@@ -432,7 +361,4 @@ def test_base_swatch_variables_are_theme_independent_and_distinct() -> None:
 
 def test_edited_tokens_css_is_reported(tmp_path: Path) -> None:
     """tokens.css を手で直すと生成結果との不一致で落ちる。"""
-    dest = _copy_site(tmp_path)
-    assert "生成結果と一致しない" in _edit(
-        dest, "tokens.css", ("--radius: 0.625rem;", "--radius: 1rem;")
-    )
+    assert "生成結果と一致しない" in _edit(_copy_site(tmp_path), "tokens.css", ("--radius: 0.625rem;", "--radius: 1rem;"))
