@@ -117,12 +117,9 @@ def _imported_top_level_modules() -> frozenset[str]:
 class TestRuntimeDependencies:
     """ランタイム依存ゼロ（標準ライブラリのみ）の静的ガード"""
 
-    def test_source_files_are_discovered(self) -> None:
-        """走査対象が 0 件だと表明が空振りするため、ソースの存在自体を確認する。"""
+    def test_sources_and_imports_are_collected(self) -> None:
+        """走査対象のソースが在り、import 収集が機能していること（0 件や収集器の不具合で表明が空振りしない）。"""
         assert _iter_source_files(), f"claq のソースが見つかりません: {PACKAGE_ROOT}"
-
-    def test_imports_are_collected(self) -> None:
-        """import 収集が機能していること（収集器の不具合による偽陰性を防ぐ）。"""
         collected = _imported_top_level_modules()
         assert "claq" in collected
         assert "pathlib" in collected

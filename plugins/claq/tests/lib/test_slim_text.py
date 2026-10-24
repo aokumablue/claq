@@ -7,64 +7,43 @@ import pytest
 from claq.lib.slim_text import compact_line, remove_filler_phrases
 
 
-class TestRemoveFillerPhrases:
-    """埋め草削除は「行の途中から文字を消す唯一の処理」である。
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("まあ そうする", " そうする"),
+        ("<system-まあreminder>", "<system-reminder>"),
+        ("えーとちなみに一応とりあえず基本的にざっくり言うと", ""),
+        ("削るものが無い", "削るものが無い"),
+        ("  a   b  ", "  a   b  "),
+    ],
+    ids=["leading", "mid-token", "every-phrase", "no-op", "whitespace-kept"],
+)
+def test_remove_filler_phrases(text: str, expected: str) -> None:
+    """埋め草は位置に関わらず消え、空白の畳み込みや言い換えはしない（削除だけを担う）。
 
-    この性質に ``mem/tag_stripping`` の再鍛造検査が乗っている。ここに新しい
-    削除を足すと、escape 済みの本文からタグを組み上げ直す経路が復活する
-    （``<system-まあreminder>`` → ``<system-reminder>``）。
+    「行の途中から文字を消す唯一の処理」であり、``mem/tag_stripping`` の再鍛造検査がこの性質に乗っている。
+    ここに新しい削除を足すと、escape 済みの本文からタグを組み上げ直す経路が復活する。
     """
-
-    @pytest.mark.parametrize(
-        "text, expected",
-        [
-            ("まあ そうする", " そうする"),
-            ("<system-まあreminder>", "<system-reminder>"),
-            ("えーとちなみに一応とりあえず基本的にざっくり言うと", ""),
-            ("削るものが無い", "削るものが無い"),
-        ],
-        ids=["leading", "mid-token", "every-phrase", "no-op"],
-    )
-    def test_phrases_are_removed_regardless_of_position(self, text: str, expected: str) -> None:
-        """埋め草は位置に関わらず消える。"""
-        assert remove_filler_phrases(text) == expected
-
-    def test_no_other_transformation_is_applied(self) -> None:
-        """空白の畳み込みや語句の言い換えはしない（削除だけを担う）。"""
-        assert remove_filler_phrases("  a   b  ") == "  a   b  "
+    assert remove_filler_phrases(text) == expected
 
 
-def test_compact_line_removes_filler_and_trims_length() -> None:
-    assert compact_line("ご質問ありがとうございます。  えーと  設定変更することができます。", 80) == "設定変更できます"
-    assert compact_line("x" * 20, 10) == "xxxxxxxxxx..."
-
-
-def test_strip_markdown_prefix_variants() -> None:
-    """各種マークダウン記号を正しく処理する。"""
-    from claq.lib.slim_text import _strip_markdown_prefix
-
-    assert _strip_markdown_prefix("") == ""
-    assert _strip_markdown_prefix("```py") == ""
-    assert _strip_markdown_prefix("| table |") == ""
-    assert _strip_markdown_prefix("# heading") == "heading"
-    assert _strip_markdown_prefix("- item") == "item"
-    assert _strip_markdown_prefix("1. numbered") == "numbered"
-
-
-def test_normalize_line_markdown_only_becomes_empty() -> None:
-    """マークダウン記号のみの行は正規化で空になる。"""
-    from claq.lib.slim_text import _normalize_line
-
-    assert _normalize_line("```") == ""
-
-
-def test_normalize_line_whitespace_only_becomes_empty() -> None:
-    """空白のみの行は分割段階で空になる。"""
-    from claq.lib.slim_text import _normalize_line
-
-    assert _normalize_line("   \t \n ") == ""
-
-
-def test_compact_line_returns_empty_for_unnormalizable_text() -> None:
-    """正規化で空になるテキストは compact_line も空を返す。"""
-    assert compact_line("```", 200) == ""
+@pytest.mark.parametrize(
+    ("text", "max_length", "expected"),
+    [
+        ("ご質問ありがとうございます。  えーと  設定変更することができます。", 80, "設定変更できます"),
+        ("x" * 20, 10, "xxxxxxxxxx..."),
+        ("", 200, ""),
+        ("   \t \n ", 200, ""),
+        ("```", 200, ""),
+        ("```py", 200, ""),
+        ("| table |", 200, ""),
+        ("# heading", 200, "heading"),
+        ("- item", 200, "item"),
+        ("1. numbered", 200, "numbered"),
+    ],
+    ids=["phrases-and-replacement", "trimmed", "empty", "whitespace-only", "fence", "fence-lang", "table",
+         "heading", "bullet", "numbered"],
+)
+def test_compact_line(text: str, max_length: int, expected: str) -> None:
+    """定型句・埋め草・冗長表現とマークダウン記号を落とし、長すぎれば切って ``...`` を付ける。フェンスと表の行は空になる。"""
+    assert compact_line(text, max_length) == expected
