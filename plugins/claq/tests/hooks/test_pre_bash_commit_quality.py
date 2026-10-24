@@ -473,3 +473,95 @@ class TestStagedFileNameDecoding:
 
         assert pbcq.get_staged_files() is None
         assert pbcq._head_exists() is None
+
+
+class TestCommitAgainstAnotherIndex:
+    """フックが走査する index と別の index を commit する形を deny する。
+
+    走査はフック起動時の cwd の index に対して行う。commit セグメントの
+    ``-C`` / ``--git-dir`` / ``--work-tree`` や ``GIT_DIR=`` 等、commit より前の
+    ``cd`` / ``pushd`` は実行時に別の index を commit させ、cwd に staged が無ければ
+    未検査のまま exit 0 で通っていた。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _nothing_staged_in_cwd(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """cwd の index には staged が無い状態にする（素通りの再現条件）。"""
+        monkeypatch.setattr(pbcq, "get_staged_files", lambda: [])
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -C ../other commit -m x",
+            "git --git-dir=../other/.git commit -m x",
+            "git --git-dir ../other/.git commit -m x",
+            "git --work-tree=../other commit -am x",
+            "git --work-tree ../other commit -m x",
+            "GIT_DIR=../other/.git git commit -m x",
+            "GIT_WORK_TREE=../other git commit -am x",
+            "GIT_INDEX_FILE=/tmp/idx git commit -m x",
+            "env GIT_INDEX_FILE=/tmp/idx git commit -m x",
+            "export GIT_DIR=../other/.git; git commit -m x",
+            "cd ../other && git commit -m x",
+            "cd ../other; git commit -m x",
+            "pushd ../other && git commit -m x",
+            "(cd ../other && git commit -m x)",
+            "CD ../other && git commit -m x",
+            # 実行位置ではない位置の `cd`（複合コマンド・組み込み経由）。
+            "{ cd ../other; git commit -m x; }",
+            "if cd ../other; then git commit -m x; fi",
+            "builtin cd ../other; git commit -m x",
+            # wrapper の作業ディレクトリ指定。
+            "env --chdir=../other git commit -m x",
+            "env --chdir ../other git commit -m x",
+            "sudo -D ../other git commit -m x",
+            # 名前だけの指定・追記代入・PowerShell の代入。
+            "read GIT_DIR <<< ../other/.git; export GIT_DIR; git commit -m x",
+            "printf -v GIT_INDEX_FILE /tmp/idx; git commit -m x",
+            "GIT_INDEX_FILE+=/tmp/idx git commit -m x",
+            "$env:GIT_DIR='../other/.git'; git commit -m x",
+            # `--work-tree` と同じ効果の設定。
+            "git -c core.worktree=../other commit -am x",
+            "git -c CORE.WorkTree=../other commit -am x",
+            "git --config-env=core.worktree=WT commit -am x",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.worktree GIT_CONFIG_VALUE_0=../other git commit -am x",
+            "GIT_CONFIG_PARAMETERS=x git commit -am x",
+            "git config core.worktree ../other && git commit -am x",
+        ],
+    )
+    def test_commit_against_another_index_is_denied(self, command: str) -> None:
+        """別の index / 作業ツリーを commit しうる形は、cwd に staged が無くても deny する。"""
+        result = pbcq.evaluate(json.dumps({"tool_input": {"command": command}}))
+
+        assert result["exitCode"] == 2
+        assert result["reason"] == pbcq._COMMIT_TARGET_UNVERIFIABLE_MESSAGE
+        assert "separate tool call" in result["reason"]
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git commit -m x",
+            "git -c user.name=x commit -m x",
+            # commit 自身の `-C <commit>`（メッセージの再利用）はグローバルオプションではない。
+            "git commit -C HEAD --amend",
+            "git commit -m 'cd into GIT_DIR=x'",
+            # commit より後ろの `cd` はその commit の対象を変えない。
+            "git commit -m x && cd ..",
+        ],
+    )
+    def test_commit_against_cwd_index_is_scanned(self, command: str) -> None:
+        """cwd の index を commit する形は従来どおり走査へ進む（ここでは staged 無しで exit 0）。"""
+        result = pbcq.evaluate(json.dumps({"tool_input": {"command": command}}))
+
+        assert result["exitCode"] == 0
+
+    def test_unparsable_commit_without_directory_change_is_scanned(self) -> None:
+        """生文字列の正規表現だけが commit を検出した入力は、cd 等が無ければ走査へ進む。"""
+        assert pbcq._commit_target_risk("echo $'\\''; echo x-git commit") is None
+
+    def test_unparsable_commit_with_directory_change_is_denied(self) -> None:
+        """commit セグメントを特定できない入力では、どこかに cd があれば deny する。"""
+        assert (
+            pbcq._commit_target_risk("cd ../other; echo $'\\''; echo x-git commit")
+            == pbcq._COMMIT_TARGET_UNVERIFIABLE_MESSAGE
+        )

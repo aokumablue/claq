@@ -145,3 +145,23 @@ def test_worktree_symlink_to_outside_returns_link_string_not_target_content(tmp_
 
     assert content == str(outside)
     assert "hunter2" not in content
+
+
+def test_staged_content_of_stage_prefixed_name_is_read_from_that_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0:README.md`` を「stage 0 の README.md」と読み違えず、その名前の blob を読む。
+
+    ``git show :0:README.md`` 形の stage 前置が無いと、git は ``:0:README.md`` を
+    stage 番号付きの指定として解釈し、別ファイルの中身を走査する。
+    """
+    repo = _make_repo(tmp_path)
+    (repo / "README.md").write_text("readme\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-qm", "readme")
+    (repo / "0:README.md").write_text(_SECRET_LINE, encoding="utf-8")
+    _git(repo, "add", "0:README.md")
+    monkeypatch.chdir(repo)
+
+    assert commit_quality_scanner.get_staged_file_content("0:README.md") == _SECRET_LINE
+    assert commit_quality_scanner.get_staged_file_content("README.md") == "readme\n"

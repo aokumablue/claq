@@ -11,7 +11,13 @@ commit 検出と複合コマンドの判定は `commit_risk`、メッセージ�
 値の有無・既知/未知を問わず読み飛ばします。`git commit -a` / `--all` / 結合短形式
 （`-am`）では、未ステージ変更ファイルを**作業ツリーから**読んでスキャン対象へ
 加えます（`-a` は作業ツリーの内容をコミットするため）。ステージ済みファイルは
-INDEX（`git show :path`）から読みます。
+INDEX（`git show :0:path`）から読みます。
+
+走査はフック起動時の cwd の index に対して行うため、commit が別の index を記録しうる形
+（commit セグメントの ``-C`` / ``--git-dir`` / ``--work-tree`` / ``core.worktree`` / wrapper の
+``--chdir``、``GIT_DIR`` / ``GIT_WORK_TREE`` / ``GIT_INDEX_FILE`` / ``GIT_CONFIG*`` の指定、
+commit より前の ``cd`` / ``pushd`` 等）は
+実行時状態として判定を放棄して deny します（docs/adr/shell-analysis-boundary.md）。
 
 シークレット検出はファイルサイズに関わらず全体を走査します。バイナリ判定された
 ファイルは lint を抑制しますが secret scan は行います（docs/adr/shell-analysis-boundary.md。
@@ -35,6 +41,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from claq.hooks.bash_config_protection import _DIRECTORY_CHANGE_COMMANDS
 from claq.hooks.commit_message import validate_commit_message
 from claq.hooks.commit_quality_scanner import (
     find_file_issues,
@@ -46,15 +53,18 @@ from claq.hooks.commit_quality_scanner import (
 from claq.hooks.commit_risk import (
     _MULTIPLE_COMMITS_MESSAGE,
     _compound_commit_risk,
+    _find_git_commit_args_in_segment,
     _is_commit_all_flag,
     _is_git_commit_command,
 )
-from claq.hooks.hook_common import resolve_repo_root
+from claq.hooks.hook_common import normalize_executable_name, resolve_repo_root
 from claq.hooks.shell_tokens import (
     MAX_COMMAND_TOKENS,
     command_dialect_variants,
     command_exceeds_scan_budget,
+    split_segments,
     strip_data_heredoc_bodies,
+    tokenize,
 )
 from claq.hooks.stdin_io import MAX_STDIN_BYTES, parse_json_object
 from claq.lib.core_utils import log
@@ -115,6 +125,88 @@ _TRUNCATED_INPUT_MESSAGE = (
     "Refusing to evaluate a possibly-truncated payload for a git commit quality scan. "
     "Retry with a smaller command."
 )
+
+
+# commit が、フックの走査した cwd の index とは別の index を記録しうる場合。
+# 実行時状態（cd 後の cwd・環境変数・git の設定）は追跡せず deny する。
+_COMMIT_TARGET_UNVERIFIABLE_MESSAGE = (
+    "[Hook] BLOCKED: this `git commit` may record a different repository or index than the "
+    "one this hook scans (the current directory's index). It points git elsewhere (`git -C` / "
+    "`--git-dir` / `--work-tree` / `core.worktree`, a GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE / "
+    "GIT_CONFIG* variable, or a wrapper's `--chdir`) or changes directory (`cd` / `pushd`) before "
+    "the commit in the same call. Change into that directory first, then run the commit in a "
+    "separate tool call without these options or variables."
+)
+
+# 別の index / 作業ツリー / 設定を指す環境変数。代入（``NAME=`` / ``NAME+=`` / PowerShell の
+# ``$env:NAME=``）に加え、名前だけの指定（``export NAME`` / ``read NAME`` / ``printf -v NAME``）も
+# 拾う。``GIT_CONFIG*``（``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_KEY_n`` / ``GIT_CONFIG_PARAMETERS`` /
+# ``GIT_CONFIG_GLOBAL`` 等）は ``core.worktree`` を外から与えられる。PowerShell は名前の大小を
+# 区別しないため大小無視で照合する。
+_REPOSITORY_ENV_RE = re.compile(
+    r"^(?:\$env:)?(?:GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE|GIT_CONFIG\w*)(?:\+?=|$)", re.IGNORECASE
+)
+
+# 別のリポジトリ・作業ツリーへ移る git のグローバルオプション（``-C <dir>`` /
+# ``--git-dir[=]<dir>`` / ``--work-tree[=]<dir>``）と、wrapper の作業ディレクトリ指定
+# （``env -C`` / ``env --chdir`` / ``sudo -D`` / ``sudo --chdir``）。commit セグメントの commit より
+# 前だけで照合する（commit 自身の ``-C <commit>`` はメッセージの再利用で、対象 index を変えない）。
+# 大小を区別する（``git -c`` は設定の指定で、別に ``core.worktree`` だけを見る）。
+_REPOSITORY_OPTION_RE = re.compile(r"^(?:-C|-D|--chdir(?:=|$)|--git-dir(?:=|$)|--work-tree(?:=|$))")
+
+# ``--work-tree`` と同じ効果を持つ設定 key。``git -c`` / ``--config-env`` の値や ``git config`` の
+# 引数として現れる。git の key は大小無視なので畳んでから部分一致で見る。
+_CORE_WORKTREE_KEY = "core.worktree"
+
+
+def _points_git_elsewhere(token: str) -> bool:
+    """トークンが別の index / 作業ツリーを指す環境変数か ``core.worktree`` の指定かを判定する。
+
+    Args:
+        token: 1 トークン。
+
+    Returns:
+        該当すれば True を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    return bool(_REPOSITORY_ENV_RE.match(token)) or _CORE_WORKTREE_KEY in token.casefold()
+
+
+def _commit_target_risk(command: str) -> str | None:
+    """commit がフックの走査した index と別の index を記録しうるなら deny 理由を返す。
+
+    commit セグメントでは ``commit`` より前のトークン（代入・wrapper・``git``・グローバル
+    オプション）を見る。commit より前のセグメントでは全トークンを走査し、``cd`` 系の名前・
+    環境変数・``core.worktree`` が現れたら deny する。実行位置で照合すると ``{ cd x; …; }`` /
+    ``if cd x; then …`` / ``builtin cd x`` の ``cd`` を見落とすため、`commit_risk` の変更判定と
+    同じく誤検出側の全トークン走査にする（``echo cd`` も deny する）。commit より後ろの
+    セグメントは、その commit の対象を変えないため見ない。
+
+    Args:
+        command: `git commit` を含む bash コマンド文字列（heredoc 本文は除去済み）です。
+
+    Returns:
+        deny すべき場合は `_COMMIT_TARGET_UNVERIFIABLE_MESSAGE`、問題なければ None を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    for segment in split_segments(tokenize(command)):
+        commit_args = _find_git_commit_args_in_segment(segment)
+        if commit_args is None:
+            if any(
+                normalize_executable_name(token) in _DIRECTORY_CHANGE_COMMANDS or _points_git_elsewhere(token)
+                for token in segment
+            ):
+                return _COMMIT_TARGET_UNVERIFIABLE_MESSAGE
+            continue
+        before_commit = segment[: len(segment) - len(commit_args) - 1]
+        if any(_points_git_elsewhere(token) or _REPOSITORY_OPTION_RE.match(token) for token in before_commit):
+            return _COMMIT_TARGET_UNVERIFIABLE_MESSAGE
+        return None
+    return None
 
 
 def _blocked(raw_input: str, reason: str) -> dict:
@@ -585,6 +677,11 @@ def evaluate(raw_input: str) -> dict:
         if compound_risk is not None:
             log("[Hook] ERROR: commit content cannot be inspected before execution.")
             return _blocked(raw_input, compound_risk)
+
+        target_risk = _commit_target_risk(command)
+        if target_risk is not None:
+            log("[Hook] ERROR: the commit may record an index other than the one scanned.")
+            return _blocked(raw_input, target_risk)
 
         return _evaluate_confirmed_commit(raw_input, command, commit_args)
 

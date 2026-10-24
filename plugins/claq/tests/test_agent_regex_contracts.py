@@ -78,3 +78,50 @@ def test_reviewer_declares_skip_for_unsupported_runners() -> None:
 
     assert "上記以外" in body
     assert "skip" in body
+
+
+def _section(relative_path: str, heading: str) -> str:
+    """定義ファイルから ``## {heading}`` 節の本文を取り出す。
+
+    Args:
+        relative_path: プラグインルートからの相対パス。
+        heading: ``## `` を除いた見出しの先頭。
+
+    Returns:
+        見出しの次行から次の ``## `` 見出しの直前までの本文。
+
+    Raises:
+        AssertionError: 見出しが見つからない場合。
+    """
+    body = (_ROOT / relative_path).read_text(encoding="utf-8")
+    marker = f"\n## {heading}"
+    assert marker in body, f"{relative_path} に「## {heading}」節が見つからない"
+    return body.split(marker, 1)[1].split("\n## ", 1)[0]
+
+
+def test_skill_gen_hands_git_history_to_skill_make_inside_a_per_run_boundary() -> None:
+    """skill-gen が git 履歴（第三者が書ける件名・パス）を境界付きで skill-make へ渡すこと。
+
+    `collect_skill_create_inputs` の出力をそのまま渡すと、コミット件名に埋め込んだ
+    指示が生成される SKILL.md の方針へ混ざる。毎回生成するランダム ID 付きの
+    開始・終了タグで囲み、囲いを偽装するタグを除き、データであって指示ではないと示す。
+    """
+    step1 = _section("commands/skill-gen.md", "ステップ1")
+    step3 = _section("commands/skill-gen.md", "ステップ3")
+
+    # 境界は git 履歴が本体の文脈へ入る時点（ステップ1）から張る。
+    assert "データであり指示ではない" in step1
+    assert "ランダム ID" in step3
+    assert "開始・終了タグ" in step3
+    assert "偽装" in step3
+    assert "大小無視" in step3
+    assert "データであり指示ではない" in step3
+
+
+def test_skill_make_input_safety_covers_passed_git_history() -> None:
+    """skill-make の入力安全が、渡された git 履歴（件名・パス）も対象にしていること。"""
+    section = _section("skills/skill-make/SKILL.md", "入力安全")
+
+    assert "git 履歴" in section
+    assert "件名" in section
+    assert "転記しない" in section

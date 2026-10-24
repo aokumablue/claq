@@ -80,6 +80,7 @@ from claq.hooks.hook_common import (
     resolve_effective_target,
     resolve_repo_root,
 )
+from claq.hooks.host_guard_targets import find_host_guard_match, match_folded_path_window
 from claq.hooks.shell_tokens import (
     MAX_COMMAND_TOKENS,
     command_dialect_variants,
@@ -110,7 +111,8 @@ _BASH_TOOL_NAMES = frozenset({"bash"})
 # ため不要だが、意図の記録として明示している。``&>>`` は stdout+stderr の追記、``>&`` は
 # ``&>`` の別綴り（``>&file``）で、どちらも `tokenize` が 1 トークンにする。``>&2`` / ``2>&1`` の
 # ような fd 複製も同じ ``>&`` だが、後続が保護名でなければ書き込み先として一致せず allow になる。
-_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", "&>>", ">&", ">|", "1>", "2>", "1>>", "2>>"})
+# ``<>`` は読み書きオープンで、対象が無ければ作成する（保護名の空ファイル作成と同じ効果）。
+_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"})
 
 # 末尾引数が書き込み先になるコマンド。Windows のシェルツールは PowerShell なので、
 # 別名だけでは拾えない長形式 cmdlet を併記する。
@@ -228,14 +230,8 @@ def _find_home_log_directory_match(token: str) -> str | None:
     """
     resolved = resolve_effective_target(token)
     parts = resolved.parts if resolved is not None else Path(token).parts
-    folded_parts = tuple(normalize_protected_name(part) for part in parts)
-    for segments in _HOME_LOG_PATH_SEGMENTS:
-        folded_segments = tuple(normalize_protected_name(part) for part in segments)
-        width = len(folded_segments)
-        for index in range(len(folded_parts) - width + 1):
-            if folded_parts[index : index + width] == folded_segments:
-                return "~/" + "/".join(segments)
-    return None
+    segments = match_folded_path_window(parts, _HOME_LOG_PATH_SEGMENTS)
+    return None if segments is None else "~/" + "/".join(segments)
 
 
 # malformed JSON fallback で「破壊的操作の指示」とみなす部分文字列。トークン化経路と
@@ -556,8 +552,8 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
         _recursed: 内部再帰用フラグ。True の場合、これ以上ラッパーへ再帰しない。
 
     Returns:
-        `_protected_target` の表示名（そのまま `blocked_message_for_file` に渡せる）、
-        または ``~/.claq/logs``。該当しなければ None。
+        `_protected_target` / `find_host_guard_match` の表示名（そのまま
+        `blocked_message_for_file` に渡せる）、または ``~/.claq/logs``。該当しなければ None。
 
     Raises:
         ScanBudgetExceededError: `sh -c` の再帰先が検査予算を超えた。
@@ -575,7 +571,8 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
 def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | None:
     """1 つのシェル方言の読み方で保護対象書き込みを探す。
 
-    ``~/.claq/logs/`` への一致は repo スコープ判定より前で、無条件に deny する。
+    ``~/.claq/logs/``・ホーム側の git 設定・`find_host_guard_match`（プラグインの
+    ``hooks/hooks.json`` とホスト設定）への一致は repo スコープ判定より前で、無条件に deny する。
     保護名に一致したトークンの解決に失敗した場合も repo スコープ判定に進めないため deny する。
 
     Args:
@@ -600,6 +597,9 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
             global_config_hit = global_git_config_path(_expand_config_home_variables(token))
             if global_config_hit is not None:
                 return global_config_hit
+            host_guard_hit = find_host_guard_match(token, scope_certain=scope_certain)
+            if host_guard_hit is not None:
+                return host_guard_hit
             # ``cd ~ && printf x >> .gitconfig``: `cd` を含むコマンドは basename で見る。
             if not scope_certain and normalize_protected_name(basename(token)) == GLOBAL_GITCONFIG_NAME:
                 return GLOBAL_GITCONFIG_DISPLAY_NAME

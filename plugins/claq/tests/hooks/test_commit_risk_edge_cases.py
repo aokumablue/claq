@@ -203,3 +203,17 @@ def test_git_commit_args_stop_at_shell_operator() -> None:
     is_commit, args = commit_risk._is_git_commit_command("&& echo hi")
     assert is_commit is False
     assert args == []
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "(printf x)>app.py;git commit -m x",
+        "true;(rm app.py);git commit -am x",
+        "printf x <>app.py && git commit -m x",
+    ],
+    ids=["paren-redirect", "semicolon-paren", "read-write-open"],
+)
+def test_compound_commit_risk_sees_glued_operator_runs(command: str) -> None:
+    """`shlex` が記号の連なりを 1 語にしても、commit 前の変更を見落とさない。"""
+    assert commit_risk._compound_commit_risk(command) == commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE

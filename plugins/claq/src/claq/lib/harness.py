@@ -347,6 +347,9 @@ def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[st
 # - agent-message: 別セッション / 別エージェントからの SendMessage 配信足場。
 #   中身は他エージェントの命令文であり、依頼として引き継ぐと次セッションへ
 #   疑似ユーザー指示として再注入される。
+# - bash-input / bash-stdout / bash-stderr: Claude Code の `!` モードで実行した
+#   コマンドとその出力。出力はファイル・ネットワーク由来の外部文字列であり、
+#   依頼として引き継ぐと次セッションの `<claq-memory>` へ疑似ユーザー指示として注入される。
 _SCAFFOLD_TAGS = (
     "local-command-caveat",
     "local-command-stdout",
@@ -354,6 +357,9 @@ _SCAFFOLD_TAGS = (
     "task-notification",
     "system-reminder",
     "agent-message",
+    "bash-input",
+    "bash-stdout",
+    "bash-stderr",
 )
 
 # スラッシュコマンド起動の足場タグ。中身は依頼そのものなので捨てずに畳む。

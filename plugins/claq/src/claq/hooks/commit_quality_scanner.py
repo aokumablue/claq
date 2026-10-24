@@ -295,9 +295,12 @@ def _decode_scan_text(raw: bytes) -> str:
 def get_staged_file_content(file_path: str) -> str | None:
     """INDEX（ステージング領域）からファイル内容をテキストとして取得します。
 
-    `git show :path` の出力を bytes で取得し、不正なバイト列で `UnicodeDecodeError` に
+    `git show :0:path` の出力を bytes で取得し、不正なバイト列で `UnicodeDecodeError` に
     ならないよう `_decode_scan_text` でデコードします（UTF-8 / `errors="replace"`。BOM 付き
     UTF-16 / UTF-32 は復号本文を足す）。
+
+    stage 番号は常に前置する。``:path`` のままだと ``0:README.md`` という名前が
+    「stage 0 の README.md」と読まれ、commit される blob とは別の中身を走査する。
 
     Args:
         file_path: 対象ファイルのパスです。
@@ -310,7 +313,7 @@ def get_staged_file_content(file_path: str) -> str | None:
     """
     try:
         result = subprocess.run(
-            ["git", "show", f":{file_path}"],
+            ["git", "show", f":0:{file_path}"],
             capture_output=True,
             check=False,
             timeout=5,

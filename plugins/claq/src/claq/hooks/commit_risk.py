@@ -137,7 +137,8 @@ _WORKTREE_MUTATING_EXECUTABLES = frozenset(
 # `-i` を伴うときだけ書き込みになるコマンド。フラグ無しでも書き込むコマンド（`ed` 等）を
 # ここへ置くとフラグ判定に落ちて allow になるため、`ALWAYS_MUTATING_EDIT_EXECUTABLES` に置く。
 _INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl"})
-_MUTATING_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", "&>>", ">|", "1>", "2>", "1>>", "2>>", ">&"})
+# ``<>`` は読み書きオープンで、対象が無ければ作成する（作業ツリーの変更）。
+_MUTATING_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", "&>>", ">|", "<>", "1>", "2>", "1>>", "2>>", ">&"})
 # `>&` は直後が fd 番号（数字のみ）か `-` のとき、fd の複製・クローズでありファイルへ書かない。
 # それ以外（`>&file`）は `&>file` の別綴りで書き込み。`2>&1` も `2`・`>&`・`1` に割れる。
 _FD_DUP_OPERATOR = ">&"

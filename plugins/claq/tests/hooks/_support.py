@@ -299,7 +299,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     # --- bash_config_protection ---
     "bash_config_protection._BASH_TOOL_NAMES": frozenset({"bash"}),
     "bash_config_protection._REDIRECT_OPERATORS": frozenset(
-        {">", ">>", "&>", "&>>", ">&", ">|", "1>", "2>", "1>>", "2>>"}
+        {">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"}
     ),
     "bash_config_protection._LAST_ARG_WRITE_COMMANDS": frozenset(
         {"copy", "copy-item", "cp", "cpi", "install", "mi", "move", "move-item", "mv"}
@@ -334,6 +334,10 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     ),
     "bash_config_protection._WRAPPER_VALUE_SHORT_OPTIONS": frozenset({"-u"}),
     "bash_config_protection._HOME_LOG_PATH_SEGMENTS": ((".claq", "logs"),),
+    "host_guard_targets._HOST_SETTINGS_PATH_SEGMENTS": (
+        (".claude", "settings.json"),
+        (".claude", "settings.local.json"),
+    ),
     # 派生: 保護 basename の和集合。
     "bash_config_protection._ALL_PROTECTED_BASENAMES": (
         _folded(_EXPECTED_PROTECTED_FILES) | _folded(_EXPECTED_CONDITIONALLY_PROTECTED_FILES)
@@ -517,7 +521,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     ),
     "commit_risk._INPLACE_EDIT_EXECUTABLES": frozenset({"perl", "sed"}),
     "commit_risk._MUTATING_REDIRECT_OPERATORS": frozenset(
-        {">", ">>", "&>", "&>>", ">|", "1>", "2>", "1>>", "2>>", ">&"}
+        {">", ">>", "&>", "&>>", ">|", "<>", "1>", "2>", "1>>", "2>>", ">&"}
     ),
 }
 

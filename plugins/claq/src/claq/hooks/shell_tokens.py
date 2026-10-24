@@ -533,10 +533,16 @@ def command_exceeds_scan_budget(command: str) -> bool:
 # ``> > ruff.toml`` になり、リダイレクト先の判定がずれて新しい迂回口になる。
 # ``1>`` / ``2>`` / ``1>>`` / ``2>>`` は語頭の fd 指定だけを 1 単位にする（``a2>x`` の ``a2``
 # は割らない）。``>&`` / ``<&``（fd 複製）は 1 単位で、``2>&1`` の ``&`` を区切りとして読むと
-# 後続の語が別セグメントへ切り離される。
+# 後続の語が別セグメントへ切り離される。``<>``（読み書きオープン。無ければ作成する）も
+# 1 単位にし、保護フックの判定集合（``_REDIRECT_OPERATORS`` 等）の ``<>`` と単位を揃える。
+#
+# 解析成功経路でも、記号だけからなるトークンをこの単位で割る（`_split_operator_run`）。
 _FALLBACK_OPERATOR_RE = re.compile(
-    r"(&>>|(?<!\S)[12]>>|&>|(?<!\S)[12]>(?!&)|>>|>\||>&|<&|&&|\|\||[;|&()<>])"
+    r"(&>>|(?<!\S)[12]>>|&>|(?<!\S)[12]>(?!&)|>>|>\||>&|<&|<>|&&|\|\||[;|&()<>])"
 )
+
+# `shlex(punctuation_chars=True)` が 1 トークンにまとめる記号だけの語。
+_OPERATOR_RUN_RE = re.compile(r"[;|&()<>]+")
 
 
 # 空白分割へ倒れたトークンから取り除く引用符文字。`shlex` が解析できない入力では引用符が
@@ -545,11 +551,39 @@ _FALLBACK_OPERATOR_RE = re.compile(
 _FALLBACK_QUOTE_CHARS_RE = re.compile(r"[\"']")
 
 
+def _split_operator_run(token: str) -> list[str]:
+    """記号だけからなるトークンを演算子の最長一致単位へ割る。
+
+    ``punctuation_chars=True`` の `shlex` は隣接する記号を 1 トークンにまとめるため、
+    ``true;(rm ruff.toml)`` の ``;(``・``(printf x)>f`` の ``)>``・``echo x|&tee f`` の ``|&``
+    が区切り・リダイレクトの完全一致をすり抜ける。フォールバック経路と同じ
+    `_FALLBACK_OPERATOR_RE` の単位で割り、``>>`` ``>&`` ``&>>`` 等はそのまま 1 単位に保つ。
+
+    `shlex` の出力からは引用符の有無が分からないため、``';('`` のような引用された
+    記号だけの語も割る。区切りとして読むと後ろの引数が別セグメントへ落ちるので、見逃し側に
+    倒れる。これは引用された 1 文字の区切り（``';'``）を `shlex` が区切りとして返す既存の
+    境界と同じもので、ここで新しく開いた口ではない。
+
+    Args:
+        token: `shlex` が返した 1 トークン。
+
+    Returns:
+        記号だけの語なら演算子単位のリスト、それ以外は ``[token]``。
+
+    Raises:
+        例外は発生しません。
+    """
+    if not _OPERATOR_RUN_RE.fullmatch(token):
+        return [token]
+    return _FALLBACK_OPERATOR_RE.findall(token)
+
+
 def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     """シェルコマンドをトークン化し、``shlex`` で解析し切れたかどうかも返す。
 
     ``punctuation_chars=True`` で、空白なしで連結された区切り記号
-    （``git add -A&&git commit``）も独立トークンにする。コメント除去・行継続の連結・
+    （``git add -A&&git commit``）も独立トークンにする。`shlex` がまとめた記号だけの語
+    （``;(`` 等）は `_split_operator_run` で演算子単位へ割る。コメント除去・行継続の連結・
     クォート外改行の ``;`` 化を先に行う。
 
     クォート不整合で ``ValueError`` になる入力（bash では有効な ``$'\\''`` を含む）は、
@@ -581,7 +615,7 @@ def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     # 改行を失った文字列で ``#`` 以降が入力末尾まで捨てられる。
     lexer.commenters = ""
     try:
-        return list(lexer), True
+        return [unit for token in lexer for unit in _split_operator_run(token)], True
     except ValueError:
         spaced = _FALLBACK_OPERATOR_RE.sub(r" \1 ", normalized).split()
         return [_FALLBACK_QUOTE_CHARS_RE.sub("", token) for token in spaced], False

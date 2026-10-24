@@ -493,3 +493,41 @@ class TestUnquotedNewlineNormalization:
         2 行目の `git commit --no-verify` が丸ごと未検査になる。
         """
         assert shell_tokens.tokenize(command) == expected, label
+
+
+class TestParsedPathOperatorRuns:
+    """`shlex` の成功経路でも、記号だけの連なりを演算子の最長一致単位へ割る。
+
+    `punctuation_chars=True` の `shlex` は ``;(`` ``)>`` ``|&`` を 1 トークンで返し、
+    区切り・リダイレクトの完全一致をすり抜ける。フォールバック経路と同じ単位で割る。
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "command", "expected"),
+        [
+            ("; と ( の連なり", "true;(rm ruff.toml)", ["true", ";", "(", "rm", "ruff.toml", ")"]),
+            (") と > の連なり", "(printf x)>.git/hooks/pre-commit", ["(", "printf", "x", ")", ">", ".git/hooks/pre-commit"]),
+            ("|& は | と &", "echo x|&tee ruff.toml", ["echo", "x", "|", "&", "tee", "ruff.toml"]),
+            ("<> は 1 単位", "printf x <>ruff.toml", ["printf", "x", "<>", "ruff.toml"]),
+            ("&& は 1 単位", "a&&b", ["a", "&&", "b"]),
+            ("|| は 1 単位", "a||b", ["a", "||", "b"]),
+            (">> は 1 単位", "a>>b", ["a", ">>", "b"]),
+            (">| は 1 単位", "a>|b", ["a", ">|", "b"]),
+            ("&> は 1 単位", "a &>b", ["a", "&>", "b"]),
+            ("&>> は 1 単位", "a &>>b", ["a", "&>>", "b"]),
+            (">& は 1 単位", "a >&2", ["a", ">&", "2"]),
+            ("<& は 1 単位", "a <&3", ["a", "<&", "3"]),
+            ("2>&1 は区切りを作らない", "a 2>&1;b", ["a", "2", ">&", "1", ";", "b"]),
+            ("引用符内の記号の語は割らない", "echo 'a;(b'", ["echo", "a;(b"]),
+        ],
+    )
+    def test_symbol_runs_split_into_operator_units(self, label: str, command: str, expected: list[str]) -> None:
+        """記号の連なりは割り、複数文字の演算子は 1 単位に保つ。"""
+        assert shell_tokens.tokenize_with_status(command) == (expected, True), label
+
+    def test_fallback_keeps_read_write_open_as_one_unit(self) -> None:
+        """フォールバック経路でも ``<>`` を ``<`` ``>`` に割らない。"""
+        assert shell_tokens.tokenize_with_status("echo $'\\'' <>ruff.toml") == (
+            ["echo", "$\\", "<>", "ruff.toml"],
+            False,
+        )
