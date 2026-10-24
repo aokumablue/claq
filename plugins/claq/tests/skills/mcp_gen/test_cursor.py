@@ -12,8 +12,6 @@ import pytest
 from ._support import _audit_log, _Clock, _logged
 
 _SECRET = b"s" * 32
-
-
 _CURSOR_REJECTED = "この cursor は使えません。cursor を外して、同じ条件で検索し直してください。"
 _BINDING = {"scope": "orders_search", "principal": "alice", "fingerprint": "q1"}
 
@@ -21,11 +19,13 @@ _BINDING = {"scope": "orders_search", "principal": "alice", "fingerprint": "q1"}
 class TestCursor:
     """署名付きの自己完結カーソル。"""
 
-    def test_round_trip(self, facade: types.SimpleNamespace) -> None:
-        """発行したカーソルから、封じた位置を取り出せる。"""
+    @pytest.mark.parametrize("principal", ["alice", "user" + chr(0xDC80)], ids=["plain", "lone-surrogate"])
+    def test_round_trip(self, facade: types.SimpleNamespace, principal: str) -> None:
+        """発行したカーソルから封じた位置を取り出せ、鍵が同じなら別のインスタンスでも検証できる（状態を持たない）。主体に対になっていないサロゲート（環境変数の不正なバイト）が混じっても、例外を出さずに結びつける。"""
+        binding = {**_BINDING, "principal": principal}
         codec = facade.cursor.CursorCodec(_SECRET)
-        token = codec.issue(**_BINDING, position={"page": "o:3", "skip": 1})
-        assert codec.open(token, **_BINDING) == {"page": "o:3", "skip": 1}
+        token = codec.issue(**binding, position={"page": "o:3", "skip": 1})
+        assert codec.open(token, **binding) == facade.cursor.CursorCodec(_SECRET).open(token, **binding) == {"page": "o:3", "skip": 1}
 
     def test_payload_holds_only_position_and_expiry(self, facade: types.SimpleNamespace) -> None:
         """payload は版・位置・期限だけで、用途・主体・指紋は載せない（MAC の入力でだけ結びつける）。"""
@@ -37,11 +37,6 @@ class TestCursor:
         assert payload["pos"] == {"page": "o:3"}
         for value in binding.values():
             assert value not in json.dumps(payload)
-
-    def test_works_across_codecs_with_same_secret(self, facade: types.SimpleNamespace) -> None:
-        """鍵が同じなら、別のインスタンスでも検証できる（状態を持たない）。"""
-        token = facade.cursor.CursorCodec(_SECRET).issue(**_BINDING, position={"p": 1})
-        assert facade.cursor.CursorCodec(_SECRET).open(token, **_BINDING) == {"p": 1}
 
     @pytest.mark.parametrize(
         "binding",
@@ -111,13 +106,6 @@ class TestCursor:
             codec.open(token, **{**_BINDING, "principal": "mallory"})
         assert str(other.value) == _CURSOR_REJECTED
 
-    def test_principal_with_lone_surrogate(self, facade: types.SimpleNamespace) -> None:
-        """主体に対になっていないサロゲート（環境変数の不正なバイト）が混じっても、例外を出さずに結びつける。"""
-        codec = facade.cursor.CursorCodec(_SECRET)
-        binding = {**_BINDING, "principal": "user\udc80"}
-        token = codec.issue(**binding, position={})
-        assert codec.open(token, **binding) == {}
-
     def test_cursor_error_is_facade_error(self, facade: types.SimpleNamespace) -> None:
         """CursorError は FacadeError として model_errors() で ToolError に変換され、既定は拒否の文面。"""
         assert issubclass(facade.errors.CursorError, facade.errors.FacadeError)
@@ -140,21 +128,18 @@ _PAGE_BINDING = {"principal": "alice", "fingerprint": "q1"}
 
 
 def _page_cursor(facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture, *, scope: str = "orders_search", max_cursor_chars: int = 2000) -> tuple[Any, Any]:
-    """見本と同じ上限（ページトークン 512 文字、cursor 2000 文字）の PageCursor と、その監査ログを作る。
-
-    Args:
-        facade: 読み込んだ facade パッケージ。
-        caplog: ログの捕捉。
-        scope: cursor の用途。
-        max_cursor_chars: cursor の長さの上限。
-
-    Returns:
-        （PageCursor、AuditLog）。
-    """
+    """見本と同じ上限（ページトークン 512 文字、既定の cursor 2000 文字）の PageCursor と、その監査ログを作る。"""
     audit = _audit_log(facade, caplog, "test-page-cursor")
     codec = facade.cursor.CursorCodec(_SECRET)
     cursors = facade.cursor.PageCursor(codec, scope=scope, audit=audit, max_page_token_chars=512, max_cursor_chars=max_cursor_chars)
     return cursors, audit
+
+
+def _assert_rejected_and_audited(facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture, cursors: Any, audit: Any, token: str) -> None:
+    """orders_search の PageCursor が token を理由を区別しない文面で拒否し、拒否を WARNING で 1 行だけ監査ログに残す。"""
+    with pytest.raises(facade.errors.CursorError, match="使えません"):
+        cursors.open(token, **_PAGE_BINDING)
+    assert _logged(caplog) == [(logging.WARNING, f"cursor rejected: subject={audit.subject('alice')} tool=orders_search")]
 
 
 class TestPageCursor:
@@ -198,30 +183,22 @@ class TestPageCursor:
         """署名は合うが位置の形が違う cursor は、理由を区別しない文面で拒否し、拒否を監査ログに残す。"""
         cursors, audit = _page_cursor(facade, caplog)
         token = facade.cursor.CursorCodec(_SECRET).issue(scope="orders_search", **_PAGE_BINDING, position=position)
-        with pytest.raises(facade.errors.CursorError, match="使えません"):
-            cursors.open(token, **_PAGE_BINDING)
-        assert _logged(caplog) == [(logging.WARNING, f"cursor rejected: subject={audit.subject('alice')} tool=orders_search")]
+        _assert_rejected_and_audited(facade, caplog, cursors, audit, token)
 
     def test_open_tampered_rejected_and_audited(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
         """改ざんした cursor は拒否し、拒否を監査ログに残す。"""
         cursors, audit = _page_cursor(facade, caplog)
         token = cursors.issue({"page": "o:3", "skip": 0}, **_PAGE_BINDING)
-        with pytest.raises(facade.errors.CursorError):
-            cursors.open(token[:-1] + ("A" if token[-1] != "A" else "B"), **_PAGE_BINDING)
-        assert _logged(caplog) == [(logging.WARNING, f"cursor rejected: subject={audit.subject('alice')} tool=orders_search")]
+        _assert_rejected_and_audited(facade, caplog, cursors, audit, token[:-1] + ("A" if token[-1] != "A" else "B"))
 
     def test_open_over_cursor_limit_rejected(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
         """cursor の長さの上限を超えるものは、署名が合っても拒否する（発行側と同じ上限）。"""
-        cursors, _ = _page_cursor(facade, caplog, max_cursor_chars=60)
+        cursors, audit = _page_cursor(facade, caplog, max_cursor_chars=60)
         token = facade.cursor.CursorCodec(_SECRET).issue(scope="orders_search", **_PAGE_BINDING, position={"page": None, "skip": 0})
-        with pytest.raises(facade.errors.CursorError):
-            cursors.open(token, **_PAGE_BINDING)
-        assert len(caplog.records) == 1
+        _assert_rejected_and_audited(facade, caplog, cursors, audit, token)
 
     def test_open_other_scope_rejected(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
         """別の用途（ツール）の PageCursor が発行した cursor は開けない。"""
         invoices, _ = _page_cursor(facade, caplog, scope="invoices_search")
-        orders, _ = _page_cursor(facade, caplog)
-        token = invoices.issue({"page": None, "skip": 0}, **_PAGE_BINDING)
-        with pytest.raises(facade.errors.CursorError):
-            orders.open(token, **_PAGE_BINDING)
+        orders, audit = _page_cursor(facade, caplog)
+        _assert_rejected_and_audited(facade, caplog, orders, audit, invoices.issue({"page": None, "skip": 0}, **_PAGE_BINDING))
