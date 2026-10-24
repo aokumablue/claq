@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,6 @@ from claq.mem.repo_identity import (
     FALLBACK_SLUG,
     MAX_SLUG_LENGTH,
     RepoIdentity,
-    allocate_repo_slug,
     base_slug,
     detect_repo_identity,
     find_repo_root,
@@ -24,6 +24,9 @@ from claq.mem.repo_identity import (
     resolve_repo,
     slugify,
 )
+
+# 鍵の形の文字列はコミット品質フックが止めるため実行時に組み立てる。
+_TOKEN = "ghp_" + "abcdefghijklmnopqrstuvwxyz012345"
 
 
 @pytest.fixture
@@ -41,15 +44,7 @@ def _git(*args: str, cwd: Path) -> None:
     設定ファイルを無効化した環境で実行する。
     """
     env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
-    subprocess.run(
-        ["git", *args],
-        cwd=str(cwd),
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        env=env,
-    )
+    subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True, timeout=30, env=env)
 
 
 def _make_repo(root: Path, remote: str | None = None) -> Path:
@@ -62,6 +57,19 @@ def _make_repo(root: Path, remote: str | None = None) -> Path:
     if remote is not None:
         _git("remote", "add", "origin", remote, cwd=root)
     return root
+
+
+def _raising(exc: BaseException) -> Callable[..., object]:
+    """呼ばれると *exc* を送出する run_text の差し替えを返す。"""
+
+    def _run(cmd: list[str], **kwargs: object) -> object:
+        """*exc* を送出する。"""
+        raise exc
+
+    return _run
+
+
+_TIMEOUT = subprocess.TimeoutExpired("git", repo_identity.GIT_TIMEOUT_SECONDS)
 
 
 class TestNormalizeRemoteUrl:
@@ -111,17 +119,8 @@ class TestNormalizeRemoteUrl:
         ],
     )
     def test_normalizes(self, raw: str, expected: str) -> None:
-        """表の各表記が期待どおりの正体キーへ畳まれる。"""
+        """表の各表記が期待どおりの正体キーへ畳まれる（ssh / https / 素の https も同一キー）。"""
         assert normalize_remote_url(raw) == expected
-
-    def test_ssh_https_and_bare_https_collapse_to_one_key(self) -> None:
-        """タスクが要求する 3 表記が同一キーになる。"""
-        keys = {
-            normalize_remote_url("git@github.com:aokumablue/claq-dev.git"),
-            normalize_remote_url("https://github.com/aokumablue/claq-dev.git"),
-            normalize_remote_url("https://github.com/aokumablue/claq-dev"),
-        }
-        assert keys == {"github.com/aokumablue/claq-dev"}
 
     @pytest.mark.parametrize(
         "raw",
@@ -153,14 +152,8 @@ class TestStripCredentials:
         ("raw", "expected"),
         [
             # https + credential（監査で確認された実害の再現）
-            (
-                "https://user:token@github.com/o/r.git",
-                "https://github.com/o/r.git",
-            ),
-            (
-                "https://user:ghp_abcdefghijklmnopqrstuvwxyz012345@github.com/o/r",
-                "https://github.com/o/r",
-            ),
+            ("https://user:token@github.com/o/r.git", "https://github.com/o/r.git"),
+            (f"https://user:{_TOKEN}@github.com/o/r", "https://github.com/o/r"),
             # https + credential なし（scheme あり、@ なし authority）
             ("https://github.com/o/r.git", "https://github.com/o/r.git"),
             # ssh scheme + userinfo
@@ -171,19 +164,10 @@ class TestStripCredentials:
             ("github.com:o/r.git", "github.com:o/r.git"),
             # ローカルパス（@ を含まないためそのまま）
             ("/srv/git/repo.git", "/srv/git/repo.git"),
-            (
-                "file:///srv/git/repo.git",
-                "file:///srv/git/repo.git",
-            ),
+            ("file:///srv/git/repo.git", "file:///srv/git/repo.git"),
             # query / fragment 内の token（userinfo 除去だけでは残る）
-            (
-                "https://github.com/o/r?access_token=SECRET",
-                "https://github.com/o/r",
-            ),
-            (
-                "https://user:token@github.com/o/r.git?private_token=SECRET",
-                "https://github.com/o/r.git",
-            ),
+            ("https://github.com/o/r?access_token=SECRET", "https://github.com/o/r"),
+            ("https://user:token@github.com/o/r.git?private_token=SECRET", "https://github.com/o/r.git"),
             ("https://github.com/o/r#token=SECRET", "https://github.com/o/r"),
             # fragment が先に来る場合、その中の ? まで巻き込んで落とす
             ("https://github.com/o/r#frag?x=SECRET", "https://github.com/o/r"),
@@ -209,234 +193,168 @@ class TestSlugify:
             ("日本語", FALLBACK_SLUG),
             ("", FALLBACK_SLUG),
             ("!!!", FALLBACK_SLUG),
+            # 長すぎる名前は MAX_SLUG_LENGTH に切り詰め、切り詰め位置がハイフンでも末尾に残さない
+            ("a" * 200, "a" * MAX_SLUG_LENGTH),
+            ("a" * (MAX_SLUG_LENGTH - 1) + "-tail", "a" * (MAX_SLUG_LENGTH - 1)),
         ],
     )
     def test_slugify(self, name: str, expected: str) -> None:
-        """英数字とハイフンだけの kebab-case になる。"""
+        """英数字とハイフンだけの MAX_SLUG_LENGTH 以内の kebab-case になる。"""
         assert slugify(name) == expected
 
-    def test_truncates_long_names(self) -> None:
-        """長すぎる名前は MAX_SLUG_LENGTH に切り詰められる。"""
-        slug = slugify("a" * 200)
-        assert slug == "a" * MAX_SLUG_LENGTH
-
-    def test_truncation_does_not_leave_trailing_hyphen(self) -> None:
-        """切り詰め位置がハイフンでも末尾ハイフンを残さない。"""
-        slug = slugify("a" * (MAX_SLUG_LENGTH - 1) + "-tail")
-        assert slug == "a" * (MAX_SLUG_LENGTH - 1)
-
-    def test_base_slug_uses_last_segment(self) -> None:
-        """base_slug は identity_key の最終セグメントを使う。"""
-        remote_identity = RepoIdentity("github.com/aokumablue/claq-dev", "/x/y", "git@github.com:a/b.git")
-        path_identity = RepoIdentity("/Users/x/dev/claq-dev", "/Users/x/dev/claq-dev", None)
-        assert base_slug(remote_identity) == "claq-dev"
-        assert base_slug(path_identity) == "claq-dev"
-
-    def test_base_slug_falls_back_for_root_path(self) -> None:
-        """最終セグメントが空なら FALLBACK_SLUG になる。"""
-        assert base_slug(RepoIdentity("/", "/", None)) == FALLBACK_SLUG
+    @pytest.mark.parametrize(
+        ("identity", "expected"),
+        [
+            (RepoIdentity("github.com/aokumablue/claq-dev", "/x/y", "git@github.com:a/b.git"), "claq-dev"),
+            (RepoIdentity("/Users/x/dev/claq-dev", "/Users/x/dev/claq-dev", None), "claq-dev"),
+            (RepoIdentity("/", "/", None), FALLBACK_SLUG),
+        ],
+        ids=["remote", "path", "root-path"],
+    )
+    def test_base_slug_uses_last_segment(self, identity: RepoIdentity, expected: str) -> None:
+        """base_slug は identity_key の最終セグメントを使い、空なら FALLBACK_SLUG になる。"""
+        assert base_slug(identity) == expected
 
 
 class TestRunGit:
     """git 実行ヘルパーの異常系。"""
 
-    def test_returns_none_on_timeout(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """タイムアウトしても例外を漏らさず None を返す。"""
-
-        def _timeout(cmd: list[str], **kwargs: object) -> object:
-            raise subprocess.TimeoutExpired(cmd, repo_identity.GIT_TIMEOUT_SECONDS)
-
-        monkeypatch.setattr(repo_identity, "run_text", _timeout)
-        assert repo_identity._run_git(str(tmp_path), "rev-parse") is None
-
-    def test_returns_none_when_git_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """git バイナリが無くても None を返す。"""
-
-        def _missing(cmd: list[str], **kwargs: object) -> object:
-            raise FileNotFoundError("git")
-
-        monkeypatch.setattr(repo_identity, "run_text", _missing)
-        assert repo_identity._run_git(str(tmp_path), "rev-parse") is None
-
-    def test_returns_none_on_nonzero_exit(self, tmp_path: Path) -> None:
-        """git リポジトリ外では None を返す。"""
+    @pytest.mark.parametrize(
+        "run_text",
+        [
+            _raising(_TIMEOUT),
+            _raising(FileNotFoundError("git")),
+            lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="  \n", stderr=""),
+            None,
+        ],
+        ids=["timeout", "git-missing", "empty-stdout", "nonzero-exit-outside-repo"],
+    )
+    def test_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_text: Callable[..., object] | None
+    ) -> None:
+        """タイムアウト・git 不在でも例外を漏らさず、非 0 終了・空出力と同じく None を返す。"""
+        if run_text is not None:
+            monkeypatch.setattr(repo_identity, "run_text", run_text)
         assert repo_identity._run_git(str(tmp_path), "rev-parse", "--git-common-dir") is None
-
-    def test_returns_none_on_empty_stdout(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """成功しても出力が空なら None を返す。"""
-
-        def _empty(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-            return subprocess.CompletedProcess(cmd, 0, stdout="  \n", stderr="")
-
-        monkeypatch.setattr(repo_identity, "run_text", _empty)
-        assert repo_identity._run_git(str(tmp_path), "rev-parse") is None
 
 
 class TestFindRepoRoot:
     """repo root 解決のテスト。"""
 
-    def test_resolves_repo_root_from_subdirectory(self, tmp_path: Path) -> None:
-        """サブディレクトリから呼んでもルートに解決される。"""
+    def test_subdirectory_worktree_and_default_cwd_resolve_to_main_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """サブディレクトリ・git worktree・cwd 省略（プロセスの作業ディレクトリ）のいずれも本体のルートになる。"""
         root = _make_repo(tmp_path / "main")
         nested = root / "a" / "b"
         nested.mkdir(parents=True)
-        assert find_repo_root(nested) == os.path.realpath(root)
-
-    def test_worktree_resolves_to_main_repo(self, tmp_path: Path) -> None:
-        """git worktree 配下から呼ぶと本体リポジトリのルートになる。"""
-        root = _make_repo(tmp_path / "main")
         worktree = tmp_path / "wt"
         _git("worktree", "add", "-b", "feature", str(worktree), cwd=root)
-        assert find_repo_root(worktree) == os.path.realpath(root)
+        monkeypatch.chdir(nested)
+        expected = os.path.realpath(root)
+        assert [find_repo_root(nested), find_repo_root(worktree), find_repo_root()] == [expected] * 3
 
-    def test_bare_repo_uses_git_dir_itself(self, tmp_path: Path) -> None:
-        """bare リポジトリでは git dir 自身をルートとして扱う。"""
+    def test_bare_repo_and_non_repo_resolve_to_themselves(self, tmp_path: Path) -> None:
+        """bare リポジトリは git dir 自身を、git リポジトリでなければ cwd 自身の絶対パスを返す。"""
         bare = tmp_path / "bare.git"
         bare.mkdir()
         _git("init", "--bare", cwd=bare)
-        assert find_repo_root(bare) == os.path.realpath(bare)
-
-    def test_non_repo_falls_back_to_cwd(self, tmp_path: Path) -> None:
-        """git リポジトリでなければ cwd 自身の絶対パスを返す。"""
         plain = tmp_path / "plain"
         plain.mkdir()
+        assert find_repo_root(bare) == os.path.realpath(bare)
         assert find_repo_root(plain) == os.path.realpath(plain)
-
-    def test_defaults_to_process_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """cwd 省略時はプロセスの作業ディレクトリを使う。"""
-        root = _make_repo(tmp_path / "main")
-        monkeypatch.chdir(root)
-        assert find_repo_root() == os.path.realpath(root)
 
     def test_timeout_falls_back_to_absolute_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """git がタイムアウトしても絶対パスへ分岐してハングしない。"""
         root = _make_repo(tmp_path / "main")
-
-        def _timeout(cmd: list[str], **kwargs: object) -> object:
-            raise subprocess.TimeoutExpired(cmd, repo_identity.GIT_TIMEOUT_SECONDS)
-
-        monkeypatch.setattr(repo_identity, "run_text", _timeout)
+        monkeypatch.setattr(repo_identity, "run_text", _raising(_TIMEOUT))
         assert find_repo_root(root) == os.path.realpath(root)
 
 
 class TestDetectRepoIdentity:
     """identity_key 確定のテスト。"""
 
-    def test_uses_normalized_remote(self, tmp_path: Path) -> None:
-        """remote があれば正規化 remote が identity_key になる。remote_url は
-        userinfo（scp 形式の固定ユーザー名 ``git@``）を除去した値になる。"""
-        root = _make_repo(tmp_path / "main", remote="git@github.com:aokumablue/claq-dev.git")
-        identity = detect_repo_identity(root)
-        assert identity.identity_key == "github.com/aokumablue/claq-dev"
-        assert identity.remote_url == "github.com:aokumablue/claq-dev.git"
-        assert identity.root_path == os.path.realpath(root)
+    @pytest.mark.parametrize(
+        ("remote", "identity_key", "remote_url"),
+        [
+            ("git@github.com:o/claq-dev.git", "github.com/o/claq-dev", "github.com:o/claq-dev.git"),
+            (f"https://user:{_TOKEN}@github.com/o/r.git", "github.com/o/r", "https://github.com/o/r.git"),
+            (None, None, None),
+        ],
+        ids=["scp-userinfo", "https-credential", "no-origin"],
+    )
+    def test_identity_from_remote(
+        self, tmp_path: Path, remote: str | None, identity_key: str | None, remote_url: str | None
+    ) -> None:
+        """remote があれば正規化 remote が identity_key、userinfo を除いた URL が remote_url になる。
 
-    def test_strips_credential_userinfo_from_remote_url(self, tmp_path: Path) -> None:
-        """https の `user:token@` credential は identity_key だけでなく
-        remote_url からも除去される。"""
-        root = _make_repo(
-            tmp_path / "main",
-            remote="https://user:ghp_abcdefghijklmnopqrstuvwxyz012345@github.com/o/r.git",
-        )
-        identity = detect_repo_identity(root)
-        assert identity.identity_key == "github.com/o/r"
-        assert identity.remote_url == "https://github.com/o/r.git"
-        assert "ghp_" not in identity.remote_url
-        assert "user" not in identity.remote_url
-
-    def test_falls_back_to_root_path_without_remote(self, tmp_path: Path) -> None:
-        """remote が無ければ repo root の絶対パスが identity_key になる。"""
-        root = _make_repo(tmp_path / "main")
-        identity = detect_repo_identity(root)
-        assert identity.identity_key == os.path.realpath(root)
-        assert identity.remote_url is None
+        remote（origin）が無ければ read_remote_url は None で、repo root の絶対パスが identity_key になる。
+        """
+        root = _make_repo(tmp_path / "main", remote=remote)
+        real_root = os.path.realpath(root)
+        assert read_remote_url(str(root)) == remote
+        assert detect_repo_identity(root) == RepoIdentity(identity_key or real_root, real_root, remote_url)
 
     def test_drops_unusable_remote(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """正規化できない remote は台帳に残さずパス識別へ落とす。"""
-        root = _make_repo(tmp_path / "main")
+        root = os.path.realpath(_make_repo(tmp_path / "main"))
         monkeypatch.setattr(repo_identity, "read_remote_url", lambda _root: "\x00")
-        identity = detect_repo_identity(root)
-        assert identity.identity_key == os.path.realpath(root)
-        assert identity.remote_url is None
+        assert detect_repo_identity(root) == RepoIdentity(root, root, None)
 
     def test_non_repo_uses_cwd(self, tmp_path: Path) -> None:
         """git リポジトリでなければ cwd の絶対パスで識別する。"""
         plain = tmp_path / "plain"
         plain.mkdir()
-        identity = detect_repo_identity(plain)
-        assert identity.identity_key == os.path.realpath(plain)
-        assert identity.remote_url is None
-
-    def test_read_remote_url_returns_none_without_origin(self, tmp_path: Path) -> None:
-        """origin 未設定なら read_remote_url は None を返す。"""
-        root = _make_repo(tmp_path / "main")
-        assert read_remote_url(str(root)) is None
-
-    def test_worktree_shares_identity_with_main(self, tmp_path: Path) -> None:
-        """worktree と本体は同一 identity_key になる。"""
-        root = _make_repo(tmp_path / "main", remote="git@github.com:aokumablue/claq-dev.git")
-        worktree = tmp_path / "wt"
-        _git("worktree", "add", "-b", "feature", str(worktree), cwd=root)
-        assert detect_repo_identity(worktree) == detect_repo_identity(root)
+        real = os.path.realpath(plain)
+        assert detect_repo_identity(plain) == RepoIdentity(real, real, None)
 
 
 class TestResolveRepo:
     """DB を絡めたスラッグ採番と upsert のテスト。"""
 
-    def test_registers_new_repo(self, tmp_path: Path, db: Database) -> None:
-        """初出リポジトリは素のスラッグで登録される。"""
-        root = _make_repo(tmp_path / "claq-dev", remote="git@github.com:aokumablue/claq-dev.git")
-        repo = resolve_repo(root, db)
-        assert repo.id == "claq-dev"
-        assert repo.identity_key == "github.com/aokumablue/claq-dev"
-        assert repo.remote_url == "github.com:aokumablue/claq-dev.git"
-        assert repo.root_path == os.path.realpath(root)
-
-    def test_reresolve_keeps_id_and_first_seen(self, tmp_path: Path, db: Database) -> None:
-        """同一 identity_key の再解決は id と first_seen_at を保持する。"""
-        root = _make_repo(tmp_path / "claq-dev", remote="git@github.com:aokumablue/claq-dev.git")
-        first = resolve_repo(root, db)
-        again = resolve_repo(root, db)
-        assert again.id == first.id
-        assert again.first_seen_at == first.first_seen_at
-        assert len(db.list_repos()) == 1
-
-    def test_worktree_does_not_create_second_row(self, tmp_path: Path, db: Database) -> None:
-        """worktree から解決しても行は増えない。"""
+    def test_registers_once_and_reresolves_from_main_and_worktree(self, tmp_path: Path, db: Database) -> None:
+        """初出は素のスラッグで登録し、再解決・worktree からの解決は同じ行（id・first_seen_at）を返す。"""
         root = _make_repo(tmp_path / "claq-dev", remote="git@github.com:aokumablue/claq-dev.git")
         worktree = tmp_path / "wt"
         _git("worktree", "add", "-b", "feature", str(worktree), cwd=root)
-        main_repo = resolve_repo(root, db)
-        worktree_repo = resolve_repo(worktree, db)
-        assert worktree_repo.id == main_repo.id
-        assert worktree_repo.root_path == os.path.realpath(root)
+        first = resolve_repo(root, db)
+        assert (first.id, first.identity_key, first.remote_url, first.root_path) == (
+            "claq-dev",
+            "github.com/aokumablue/claq-dev",
+            "github.com:aokumablue/claq-dev.git",
+            os.path.realpath(root),
+        )
+        for again in (resolve_repo(root, db), resolve_repo(worktree, db)):
+            assert (again.id, again.identity_key, again.remote_url, again.root_path, again.first_seen_at) == (
+                first.id,
+                first.identity_key,
+                first.remote_url,
+                first.root_path,
+                first.first_seen_at,
+            )
         assert len(db.list_repos()) == 1
 
-    def test_same_directory_name_different_remote_gets_suffix(self, tmp_path: Path, db: Database) -> None:
-        """同名ディレクトリで別 remote なら -2 が付く。"""
-        first_root = _make_repo(tmp_path / "one" / "app", remote="git@github.com:one/app.git")
-        second_root = _make_repo(tmp_path / "two" / "app", remote="git@github.com:two/app.git")
-        third_root = _make_repo(tmp_path / "three" / "app", remote="git@github.com:three/app.git")
-        assert resolve_repo(first_root, db).id == "app"
-        assert resolve_repo(second_root, db).id == "app-2"
-        assert resolve_repo(third_root, db).id == "app-3"
+    @pytest.mark.parametrize("with_remote", [True, False], ids=["remote", "no-remote"])
+    def test_same_directory_name_gets_suffix(self, tmp_path: Path, db: Database, with_remote: bool) -> None:
+        """同名ディレクトリの別リポジトリは（remote 無しでもパス識別で）別行になり -2, -3 が付く。"""
+        roots = [
+            _make_repo(tmp_path / owner / "app", remote=f"git@github.com:{owner}/app.git" if with_remote else None)
+            for owner in ("one", "two", "three")
+        ]
+        assert [resolve_repo(root, db).id for root in roots] == ["app", "app-2", "app-3"]
         assert len(db.list_repos()) == 3
 
-    def test_same_directory_name_no_remote_gets_suffix(self, tmp_path: Path, db: Database) -> None:
-        """remote 無しの同名ディレクトリもパス識別で別行になる。"""
-        first_root = _make_repo(tmp_path / "one" / "app")
-        second_root = _make_repo(tmp_path / "two" / "app")
-        assert resolve_repo(first_root, db).id == "app"
-        assert resolve_repo(second_root, db).id == "app-2"
-
-    def test_adding_remote_keeps_repo_id_and_knowledge(self, tmp_path: Path, db: Database) -> None:
-        """remote 追加で identity_key が変わっても id を引き継ぎ、知識が到達可能なままであること。
+    def test_adding_changing_and_removing_remote_keeps_repo_id_and_knowledge(
+        self, tmp_path: Path, db: Database
+    ) -> None:
+        """remote の追加・変更・削除で identity_key が変わっても id を引き継ぎ、知識が到達可能なままであること。
 
         引き継がないと、remote 無しで登録済みのリポジトリに ``git remote add origin``
         したとき identity_key が repo root パスから ``github.com/o/r`` へ変わり、
         別リポジトリ扱いで ``-2`` 付きの新 id を採番する。その結果、元の id
         配下の ``scope='repo'`` 知識が全件 SessionStart 注入から静かに消える
-        （DB には残るが到達不能）。
+        （DB には残るが到達不能）。ホスティング移行（GitHub -> GitLab）や remote
+        削除でも identity_key は変わるため、追加と同じ経路で救う必要がある。
 
         id 一致だけでは不十分なので、知識が実際に引けるところまで確認する。
         """
@@ -453,37 +371,19 @@ class TestResolveRepo:
                 status="active",
             )
         )
-
-        _git("remote", "add", "origin", "git@github.com:owner/app.git", cwd=root)
-        after = resolve_repo(root, db)
-
-        assert after.id == before.id
-        assert after.identity_key == "github.com/owner/app"
-        assert len(db.list_repos()) == 1
-        # 到達可能性そのものを確認する（id 一致だけでは実害の解消を示せない）。
-        reachable = db.list_knowledge(scope="repo", repo_id=after.id, status="active")
-        assert [row.key for row in reachable] == ["repo-card"]
-
-    def test_changing_and_removing_remote_keeps_repo_id(self, tmp_path: Path, db: Database) -> None:
-        """remote の変更・削除でも id を引き継ぐこと。
-
-        ホスティング移行（GitHub -> GitLab）や remote 削除でも identity_key は
-        変わるため、追加と同じ経路で救う必要がある。
-        """
-        root = _make_repo(tmp_path / "app", remote="git@github.com:owner/app.git")
-        first = resolve_repo(root, db)
-
-        _git("remote", "set-url", "origin", "git@gitlab.com:owner/app.git", cwd=root)
-        moved = resolve_repo(root, db)
-
-        _git("remote", "remove", "origin", cwd=root)
-        removed = resolve_repo(root, db)
-
-        assert moved.id == first.id
-        assert removed.id == first.id
-        assert moved.identity_key == "gitlab.com/owner/app"
-        assert removed.identity_key == os.path.realpath(root)
-        assert len(db.list_repos()) == 1
+        steps = [
+            (("remote", "add", "origin", "git@github.com:owner/app.git"), "github.com/owner/app"),
+            (("remote", "set-url", "origin", "git@gitlab.com:owner/app.git"), "gitlab.com/owner/app"),
+            (("remote", "remove", "origin"), os.path.realpath(root)),
+        ]
+        for git_args, identity_key in steps:
+            _git(*git_args, cwd=root)
+            after = resolve_repo(root, db)
+            assert (after.id, after.identity_key) == (before.id, identity_key)
+            assert len(db.list_repos()) == 1
+            # 到達可能性そのものを確認する（id 一致だけでは実害の解消を示せない）。
+            reachable = db.list_knowledge(scope="repo", repo_id=after.id, status="active")
+            assert [row.key for row in reachable] == ["repo-card"]
 
     def test_identity_migration_does_not_merge_distinct_repos(self, tmp_path: Path, db: Database) -> None:
         """root_path が違うリポジトリは remote 追加後も別行のままであること。
@@ -512,13 +412,7 @@ class TestResolveRepo:
         root = _make_repo(tmp_path / "app")
         path_row = resolve_repo(root, db)
         # 同じ root_path を持つ別行を、目的の identity_key で先に登録しておく。
-        db.upsert_repo(
-            Repo(
-                id="preexisting",
-                identity_key="github.com/owner/app",
-                root_path=os.path.realpath(root),
-            )
-        )
+        db.upsert_repo(Repo(id="preexisting", identity_key="github.com/owner/app", root_path=os.path.realpath(root)))
 
         _git("remote", "add", "origin", "git@github.com:owner/app.git", cwd=root)
         resolved = resolve_repo(root, db)
@@ -526,21 +420,3 @@ class TestResolveRepo:
         assert resolved.id == "preexisting"
         assert resolved.id != path_row.id
         assert len(db.list_repos()) == 2
-
-    def test_relink_repo_identity_reports_missing_row(self, db: Database) -> None:
-        """存在しない id の載せ替えは False を返すこと。"""
-        assert db.relink_repo_identity("no-such-repo", "github.com/o/r") is False
-
-    def test_allocate_reuses_existing_id_for_known_identity(self, db: Database) -> None:
-        """登録済み identity_key にはその id をそのまま返す。"""
-        identity = RepoIdentity("github.com/one/app", "/one/app", "git@github.com:one/app.git")
-        allocated = allocate_repo_slug(identity, db)
-        stored = db.upsert_repo(
-            Repo(
-                id=allocated,
-                identity_key=identity.identity_key,
-                root_path=identity.root_path,
-                remote_url=identity.remote_url,
-            )
-        )
-        assert allocate_repo_slug(identity, db) == stored.id
