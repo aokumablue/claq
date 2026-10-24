@@ -1,4 +1,4 @@
-"""tests/ci/test_harness_audit*.py が共有する補助（ファイル書き出し・repo マーカー・HOME 隔離）。"""
+"""tests/ci のテストが共有する補助（ファイル書き出し・repo マーカー・HOME 隔離）。"""
 
 from __future__ import annotations
 
