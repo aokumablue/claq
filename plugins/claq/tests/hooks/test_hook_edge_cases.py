@@ -196,34 +196,22 @@ def test_validate_commit_message_flags_unconventional_long_message() -> None:
     assert [issue["type"] for issue in result["issues"]] == ["format", "length", "punctuation"]
 
 
+def _git_stdout(cwd: Path, *args: str) -> str:
+    """cwd で git を実行し、失敗は例外にして標準出力を返す。"""
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
+
+
 def test_repo_wide_self_scan_has_zero_secret_issues() -> None:
     """自リポジトリの全追跡ファイルを走査しても secret 検出が 0 件であること（should_scan_secrets が lock・圧縮生成物以外の原則全ファイルを対象にするため）。"""
-    repo_root_result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        cwd=str(Path(__file__).parent),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    repo_root = Path(repo_root_result.stdout.strip())
-
-    tracked_result = subprocess.run(
-        ["git", "ls-files"],
-        cwd=str(repo_root),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    tracked_files = [f for f in tracked_result.stdout.splitlines() if f]
+    repo_root = Path(_git_stdout(Path(__file__).parent, "rev-parse", "--show-toplevel").strip())
+    tracked_files = [f for f in _git_stdout(repo_root, "ls-files").splitlines() if f]
 
     secret_hits: list[str] = []
     for rel_path in tracked_files:
         if not commit_quality_scanner.should_scan_secrets(rel_path):
             continue
-
-        abs_path = repo_root / rel_path
         try:
-            raw = abs_path.read_bytes()
+            raw = (repo_root / rel_path).read_bytes()
         except OSError:
             continue
 
