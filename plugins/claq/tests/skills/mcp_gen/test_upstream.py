@@ -25,12 +25,41 @@ class _Sleeper:
         self.delays.append(delay)
 
 
+async def _ok() -> str:
+    """成功する。"""
+    return "ok"
+
+
+def _raising(error: Exception) -> Any:
+    """呼ぶたびに同じ例外を投げる operation を作る。"""
+
+    async def operation() -> None:
+        """例外を投げる。"""
+        raise error
+
+    return operation
+
+
+def _scripted(outcomes: list[Any]) -> Any:
+    """用意した順に、例外なら投げ、それ以外なら返す operation を作る。"""
+
+    async def operation() -> Any:
+        """次の結果を返すか投げる。"""
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return operation
+
+
 class TestUpstream:
     """上流の呼び出しを包む部品。"""
 
     def test_retryable_and_message(self, facade: types.SimpleNamespace) -> None:
-        """一時的な失敗の判定と、モデル向けの文面（内部の詳細を含めない）。"""
+        """一時的な失敗の判定と、モデル向けの文面（内部の詳細を含めず、403 は存在を漏らさないよう 404 と同じ）。"""
         error = facade.upstream.UpstreamError
+        message = facade.upstream.model_message
         assert error(None).retryable and error(429).retryable and error(503).retryable
         assert not error(404).retryable
         assert "status=500" in str(error(500, "boom"))
@@ -46,14 +75,9 @@ class TestUpstream:
             None: "一時的",
         }
         for status, phrase in expected.items():
-            message = facade.upstream.model_message(error(status, "secret internal detail"))
-            assert phrase in message
-            assert "secret" not in message
-
-    def test_forbidden_reads_like_not_found(self, facade: types.SimpleNamespace) -> None:
-        """403 は 404 と同じ文面にする（権限が無いことから、存在を漏らさない）。"""
-        message = facade.upstream.model_message
-        error = facade.upstream.UpstreamError
+            text = message(error(status, "secret internal detail"))
+            assert phrase in text
+            assert "secret" not in text
         assert message(error(403)) == message(error(404))
 
     def test_detail_is_safe_to_log(self, facade: types.SimpleNamespace) -> None:
@@ -63,137 +87,73 @@ class TestUpstream:
         assert "\n" not in str(error) and "\r" not in str(error) and "\x1b" not in str(error)
         assert str(error) == f"upstream status=502 {error.detail}"
 
-    def test_retry_until_success(self, facade: types.SimpleNamespace) -> None:
-        """一時的な失敗は指数バックオフ（ジッタ込み）で再試行する。"""
-        outcomes = [facade.upstream.UpstreamError(503), facade.upstream.UpstreamError(None), "ok"]
+    def test_retry_until_success_is_logged(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
+        """一時的な失敗は指数バックオフ（ジッタ込み）で再試行し、そのたびに試行回数・待ち時間・status を警告ログに残す。"""
+        error = facade.upstream.UpstreamError
         sleeper = _Sleeper()
-
-        async def operation() -> str:
-            """用意した順に失敗と成功を返す。"""
-            outcome = outcomes.pop(0)
-            if isinstance(outcome, Exception):
-                raise outcome
-            return outcome
-
-        result = asyncio.run(
-            facade.upstream.call_with_retry(operation, base_delay=0.2, deadline=math.inf, sleep=sleeper, jitter=lambda: 1.0)
-        )
-        assert result == "ok"
-        assert sleeper.delays == [0.2, 0.4]
-
-    def test_retry_is_logged(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
-        """再試行するたびに、試行回数・待ち時間・status を警告ログに残す（続行を見える形にする）。"""
-        outcomes = [facade.upstream.UpstreamError(503, "orders.list"), "ok"]
-
-        async def operation() -> str:
-            """1 回目だけ失敗し、2 回目で成功する。"""
-            outcome = outcomes.pop(0)
-            if isinstance(outcome, Exception):
-                raise outcome
-            return outcome
-
+        operation = _scripted([error(503, "orders.list"), error(None), "ok"])
         with caplog.at_level(logging.WARNING):
-            asyncio.run(
-                facade.upstream.call_with_retry(
-                    operation, base_delay=0.2, deadline=math.inf, sleep=_Sleeper(), jitter=lambda: 1.0
-                )
+            result = asyncio.run(
+                facade.upstream.call_with_retry(operation, base_delay=0.2, deadline=math.inf, sleep=sleeper, jitter=lambda: 1.0)
             )
-        warnings = [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING]
-        assert warnings == ["upstream retry: attempt=1/3 delay=0.20s status=503 orders.list"]
+        assert (result, sleeper.delays) == ("ok", [0.2, 0.4])
+        assert [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING] == [
+            "upstream retry: attempt=1/3 delay=0.20s status=503 orders.list",
+            "upstream retry: attempt=2/3 delay=0.40s status=None ",
+        ]
 
-    def test_retry_gives_up(self, facade: types.SimpleNamespace) -> None:
-        """再試行しない失敗・回数切れ・締切越えでは諦める。上流の retry_after に従う。"""
-        error = facade.upstream.UpstreamError
-
-        def failing(exc: Exception) -> Any:
-            """常に同じ失敗を投げる関数を作る。"""
-
-            async def operation() -> None:
-                """失敗を投げる。"""
-                raise exc
-
-            return operation
-
+    @pytest.mark.parametrize(
+        ("status", "retry_after", "options", "delays"),
+        [
+            (404, None, {}, []),
+            (429, 1.5, {"attempts": 2}, [1.5]),
+            (503, None, {"deadline": 100.1, "clock": _Clock(100.0)}, []),
+            (429, 5.1, {}, []),
+            (429, 5.0, {"attempts": 2}, [5.0]),
+            (429, 1.0, {"max_retry_after": 0.5}, []),
+        ],
+        ids=[
+            "not-retryable",
+            "attempts-exhausted-after-retry-after",
+            "deadline-exceeded",
+            "retry-after-over-default-cap",
+            "retry-after-at-default-cap",
+            "retry-after-over-given-cap",
+        ],
+    )
+    def test_retry_gives_up(
+        self, facade: types.SimpleNamespace, status: int, retry_after: float | None, options: dict[str, Any], delays: list[float]
+    ) -> None:
+        """再試行しない失敗・回数切れ・締切越え・上限（既定 5 秒）を超える retry_after では、その失敗を投げて諦める。待ちは上流の retry_after に従う。"""
+        error = facade.upstream.UpstreamError(status, retry_after=retry_after)
         sleeper = _Sleeper()
-        with pytest.raises(error):
-            asyncio.run(facade.upstream.call_with_retry(failing(error(404)), deadline=math.inf, sleep=sleeper))
-        assert sleeper.delays == []
-        with pytest.raises(error):
-            asyncio.run(facade.upstream.call_with_retry(failing(error(429, retry_after=1.5)), attempts=2, deadline=math.inf, sleep=sleeper))
-        assert sleeper.delays == [1.5]
-        clock = _Clock(100.0)
-        with pytest.raises(error):
-            asyncio.run(
-                facade.upstream.call_with_retry(failing(error(503)), deadline=100.1, clock=clock, sleep=sleeper)
-            )
-        assert sleeper.delays == [1.5]
-
-    def test_retry_after_is_capped(self, facade: types.SimpleNamespace) -> None:
-        """上流の retry_after が上限（既定 5 秒）を超えるなら、待たずに失敗を投げる。"""
-        error = facade.upstream.UpstreamError
-        sleeper = _Sleeper()
-
-        def failing(retry_after: float) -> Any:
-            """retry_after 付きの 429 を投げ続ける関数を作る。"""
-
-            async def operation() -> None:
-                """429 を投げる。"""
-                raise error(429, retry_after=retry_after)
-
-            return operation
-
-        with pytest.raises(error):
-            asyncio.run(facade.upstream.call_with_retry(failing(5.1), deadline=math.inf, sleep=sleeper))
-        assert sleeper.delays == []
-        with pytest.raises(error):
-            asyncio.run(facade.upstream.call_with_retry(failing(5.0), attempts=2, deadline=math.inf, sleep=sleeper))
-        assert sleeper.delays == [5.0]
-        with pytest.raises(error):
-            asyncio.run(facade.upstream.call_with_retry(failing(1.0), max_retry_after=0.5, deadline=math.inf, sleep=sleeper))
-        assert sleeper.delays == [5.0]
+        with pytest.raises(facade.upstream.UpstreamError) as raised:
+            asyncio.run(facade.upstream.call_with_retry(_raising(error), sleep=sleeper, **{"deadline": math.inf, **options}))
+        assert (raised.value is error, sleeper.delays) == (True, delays)
 
     def test_circuit_breaker(self, facade: types.SimpleNamespace) -> None:
         """連続した一時的な失敗で遮断し、時間が経てば試しに通し、成功で戻る。"""
         error = facade.upstream.UpstreamError
         clock = _Clock()
         breaker = facade.upstream.CircuitBreaker(failure_threshold=2, reset_seconds=30, clock=clock)
-
-        async def fail(status: int) -> None:
-            """指定のステータスで失敗する。"""
-            raise error(status)
-
-        async def succeed() -> str:
-            """成功する。"""
-            return "ok"
-
         for status in (404, 404, 503, 503):
             with pytest.raises(error):
-                asyncio.run(breaker.call(lambda status=status: fail(status)))
+                asyncio.run(breaker.call(_raising(error(status))))
         with pytest.raises(error, match="circuit open"):
-            asyncio.run(breaker.call(succeed))
+            asyncio.run(breaker.call(_ok))
         clock.now += 30
-        assert asyncio.run(breaker.call(succeed)) == "ok"
+        assert asyncio.run(breaker.call(_ok)) == "ok"
 
     def test_fan_out(self, facade: types.SimpleNamespace) -> None:
         """成功・失敗・締切超えを分けて返し、全体は失敗にしない。"""
-        error = facade.upstream.UpstreamError
-
-        async def ok() -> int:
-            """成功する。"""
-            return 1
-
-        async def broken() -> None:
-            """上流の失敗を投げる。"""
-            raise error(503)
 
         async def slow() -> None:
             """締切に間に合わない。"""
             await asyncio.sleep(10)
 
-        results, failures = asyncio.run(
-            facade.upstream.fan_out({"a": ok, "b": broken, "c": slow}, timeout=0.05)
-        )
-        assert results == {"a": 1}
+        calls = {"a": _ok, "b": _raising(facade.upstream.UpstreamError(503)), "c": slow}
+        results, failures = asyncio.run(facade.upstream.fan_out(calls, timeout=0.05))
+        assert results == {"a": "ok"}
         assert failures["b"].status == 503
         assert failures["c"].status is None
         assert asyncio.run(facade.upstream.fan_out({}, timeout=1)) == ({}, {})
@@ -226,24 +186,14 @@ class TestUpstream:
 
     def test_fan_out_reraises_bugs(self, facade: types.SimpleNamespace) -> None:
         """上流の失敗以外の例外（プログラムの誤り）は握りつぶさない。"""
-
-        async def bug() -> None:
-            """誤りを投げる。"""
-            raise KeyError("bug")
-
         with pytest.raises(KeyError):
-            asyncio.run(facade.upstream.fan_out({"x": bug}, timeout=1))
+            asyncio.run(facade.upstream.fan_out({"x": _raising(KeyError("bug"))}, timeout=1))
 
 
 def _breaker_is_closed(facade: types.SimpleNamespace, breaker: Any) -> bool:
     """遮断器が上流を呼ぶか（遮断中なら呼ばずに "circuit open" で失敗する）。"""
-
-    async def succeed() -> str:
-        """成功する。"""
-        return "ok"
-
     try:
-        return asyncio.run(breaker.call(succeed)) == "ok"
+        return asyncio.run(breaker.call(_ok)) == "ok"
     except facade.upstream.UpstreamError as error:
         assert error.detail == "circuit open"
         return False
@@ -251,13 +201,8 @@ def _breaker_is_closed(facade: types.SimpleNamespace, breaker: Any) -> bool:
 
 def _fail_once(facade: types.SimpleNamespace, breaker: Any) -> None:
     """遮断器を通して、一時的な失敗（503）を 1 回起こす。"""
-
-    async def unavailable() -> None:
-        """一時的に失敗する。"""
-        raise facade.upstream.UpstreamError(503)
-
     with pytest.raises(facade.upstream.UpstreamError):
-        asyncio.run(breaker.call(unavailable))
+        asyncio.run(breaker.call(_raising(facade.upstream.UpstreamError(503))))
 
 
 class TestCallUpstream:
@@ -277,12 +222,7 @@ class TestCallUpstream:
         """締切までに終われば operation の結果を返し、遮断器に成功を記録する（それまでの連続失敗を戻す）。"""
         breaker = facade.upstream.CircuitBreaker(failure_threshold=2)
         _fail_once(facade, breaker)
-
-        async def operation() -> str:
-            """成功する。"""
-            return "ok"
-
-        result = asyncio.run(facade.upstream.call_upstream(breaker, operation, deadline=10.0, clock=_Clock(0.0)))
+        result = asyncio.run(facade.upstream.call_upstream(breaker, _ok, deadline=10.0, clock=_Clock(0.0)))
         _fail_once(facade, breaker)
         assert (result, _breaker_is_closed(facade, breaker)) == ("ok", True)
 
@@ -290,49 +230,23 @@ class TestCallUpstream:
         """再試行しない失敗（404）は、そのまま投げ、遮断器の失敗として数えない。"""
         error = facade.upstream.UpstreamError(404, "missing")
         breaker = facade.upstream.CircuitBreaker(failure_threshold=1)
-
-        async def operation() -> None:
-            """見つからない。"""
-            raise error
-
         with pytest.raises(facade.upstream.UpstreamError) as raised:
-            asyncio.run(facade.upstream.call_upstream(breaker, operation, deadline=10.0, clock=_Clock(0.0)))
+            asyncio.run(facade.upstream.call_upstream(breaker, _raising(error), deadline=10.0, clock=_Clock(0.0)))
         assert (raised.value is error, _breaker_is_closed(facade, breaker)) == (True, True)
 
     def test_call_upstream_retries_on_given_clock(self, facade: types.SimpleNamespace) -> None:
         """再試行の締切は渡した時計で測る（実時間の時計では締切を過ぎていても、渡した時計で間に合えば再試行する）。"""
-        outcomes: list[Any] = [facade.upstream.UpstreamError(503, retry_after=0.0), "ok"]
-
-        async def operation() -> str:
-            """1 回目は一時的に失敗し、2 回目は成功する。"""
-            outcome = outcomes.pop(0)
-            if isinstance(outcome, Exception):
-                raise outcome
-            return outcome
-
+        operation = _scripted([facade.upstream.UpstreamError(503, retry_after=0.0), "ok"])
         breaker = facade.upstream.CircuitBreaker()
         assert asyncio.run(facade.upstream.call_upstream(breaker, operation, deadline=-1e9, clock=_Clock(-2e9))) == "ok"
 
-    def test_call_upstream_deadline_exceeded_counts_as_failure(self, facade: types.SimpleNamespace) -> None:
-        """締切を過ぎたら operation の完了を待たずに UpstreamError(None, "deadline exceeded") にし、遮断器が失敗として数える。"""
+    def test_call_upstream_deadline_exceeded_cancels_and_counts_as_failure(self, facade: types.SimpleNamespace) -> None:
+        """締切を過ぎたら operation の完了を待たずに取り消して後始末（finally）を走らせ、UpstreamError(None, "deadline exceeded") にし、遮断器が失敗として数える。"""
         breaker = facade.upstream.CircuitBreaker(failure_threshold=1)
-
-        async def operation() -> str:
-            """1 回だけ制御を返してから終わる（締切を過ぎていれば、その間に取り消される）。"""
-            await asyncio.sleep(0)
-            return "late"
-
-        with pytest.raises(facade.upstream.UpstreamError) as exceeded:
-            asyncio.run(facade.upstream.call_upstream(breaker, operation, deadline=50.0, clock=_Clock(100.0)))
-        assert (exceeded.value.status, exceeded.value.detail) == (None, "deadline exceeded")
-        assert _breaker_is_closed(facade, breaker) is False
-
-    def test_call_upstream_deadline_cancels_operation(self, facade: types.SimpleNamespace) -> None:
-        """締切を過ぎたら operation を取り消し、operation の後始末（finally）を走らせる。"""
         events: list[str] = []
 
         async def operation() -> str:
-            """取り消しと後始末を記録する。"""
+            """1 回だけ制御を返してから終わる（締切を過ぎていれば、その間に取り消される）。取り消しと後始末を記録する。"""
             try:
                 await asyncio.sleep(0)
                 return "late"
@@ -342,6 +256,7 @@ class TestCallUpstream:
             finally:
                 events.append("closed")
 
-        with pytest.raises(facade.upstream.UpstreamError):
-            asyncio.run(facade.upstream.call_upstream(facade.upstream.CircuitBreaker(), operation, deadline=50.0, clock=_Clock(100.0)))
-        assert events == ["cancelled", "closed"]
+        with pytest.raises(facade.upstream.UpstreamError) as exceeded:
+            asyncio.run(facade.upstream.call_upstream(breaker, operation, deadline=50.0, clock=_Clock(100.0)))
+        assert (exceeded.value.status, exceeded.value.detail, events) == (None, "deadline exceeded", ["cancelled", "closed"])
+        assert _breaker_is_closed(facade, breaker) is False
