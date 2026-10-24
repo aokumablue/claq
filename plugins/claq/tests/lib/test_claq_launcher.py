@@ -28,6 +28,7 @@ def _stub_run_in_process(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     captured: dict[str, object] = {}
 
     def fake_run_in_process(target: str, target_args: list[str]) -> int:
+        """ターゲットと引数を記録して 0 を返す。"""
         captured["target"] = target
         captured["args"] = target_args
         return 0
@@ -148,6 +149,7 @@ def test_run_module_in_process(
     calls: list[tuple[object, ...]] = []
 
     def fake_run_module(target: str, run_name: str | None = None, alter_sys: bool | None = None) -> None:
+        """呼び出し時の引数と sys.argv を記録し、``raised`` があれば送出する。"""
         calls.append((target, list(sys.argv), run_name, alter_sys))
         if raised is not None:
             raise raised
@@ -173,6 +175,7 @@ class TestMain:
         captured: dict[str, object] = {}
 
         def fake_detach(cmd: list[str], raw: str, *, env: dict[str, str] | None = None) -> bool:
+            """コマンドと stdin を記録して受付結果を返す。"""
             captured.update(cmd=cmd, raw=raw)
             return accepted
 

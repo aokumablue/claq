@@ -46,6 +46,7 @@ def _failing(method: str, should_fail: Callable[[Path], bool], exc: OSError) -> 
     original = getattr(Path, method)
 
     def fake(self: Path, *args: object, **kwargs: object) -> object:
+        """対象の self なら ``exc`` を送出し、それ以外は元の実装へ委ねる。"""
         if should_fail(self):
             raise exc
         return original(self, *args, **kwargs)
@@ -61,6 +62,7 @@ def _from_second_call(name: str) -> Callable[[Path], bool]:
     counts: Counter[str] = Counter()
 
     def should_fail(path: Path) -> bool:
+        """``name`` を含むパスの呼び出し回数を数え、2 回目以降で真を返す。"""
         if name not in path.parts:
             return False
         counts[str(path)] += 1
