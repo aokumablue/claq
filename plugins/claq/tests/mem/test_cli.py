@@ -15,7 +15,25 @@ from claq.mem import cli, cmd_context, command_support
 from claq.mem.database import Database
 from claq.mem.models import Repo
 
-from ._support import _always_raise, _run_cli, _seed
+from ._support import _run_cli, _seed
+
+
+def _raising(error: Exception):
+    """呼ばれると error を送出し、呼び出しを ``calls`` に記録するスタブを返す（CommandError も送出できる）。"""
+    calls: list[tuple[object, ...]] = []
+
+    def _stub(*args: object, **_kwargs: object) -> None:
+        """呼び出しを記録して error を送出する。"""
+        calls.append(args)
+        raise error
+
+    _stub.calls = calls  # type: ignore[attr-defined]
+    return _stub
+
+
+def _session_start_event(stdout: str) -> str:
+    """stdout の SessionStart 契約 JSON から hookEventName を取り出す。"""
+    return json.loads(stdout)["hookSpecificOutput"]["hookEventName"]
 
 
 class TestSessionStartContract:
@@ -26,97 +44,132 @@ class TestSessionStartContract:
     ) -> None:
         """DB が無くても作成し、SessionStart 契約の JSON を stdout に出す。"""
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
-        assert exit_code == 0
-        assert stderr == ""
-        payload = json.loads(stdout)
-        assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+        assert (stderr, exit_code) == ("", 0)
+        assert _session_start_event(stdout) == "SessionStart"
         assert (tmp_path / "mem.db").exists()
 
     def test_swallows_db_failure(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """コンテキスト組み立てが失敗してもフックを壊さず JSON を返す。"""
-        stub = _always_raise("db broken")
+        stub = _raising(RuntimeError("db broken"))
         monkeypatch.setattr(cmd_context, "_build_context", stub)
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert len(stub.calls) == 1
-        assert exit_code == 0
-        assert stderr == ""
-        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+        assert (stderr, exit_code) == ("", 0)
+        assert _session_start_event(stdout) == "SessionStart"
 
-    def test_settings_failure_still_emits_session_start_json(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+
+class TestFailurePaths:
+    """失敗経路の終了コード: SessionStart（context）は 0 を維持し、それ以外（init）は 1 で報告する。"""
+
+    @pytest.mark.parametrize(
+        ("command", "exit_code_on_failure"), [("context", 0), ("init", 1)], ids=["session-start", "normal"]
+    )
+    @pytest.mark.parametrize(
+        ("extra", "target", "error", "expected"),
+        [
+            ([], "settings", RuntimeError("設定失敗"), "設定/ログ初期化失敗: 設定失敗"),
+            ([], "handler", RuntimeError("boom"), "コマンド {command} 失敗: boom"),
+            ([], "handler", command_support.CommandError("bad handler input"), "bad handler input"),
+            (["--unknown-option"], None, None, "不明なオプション: --unknown-option"),
+            (["unexpected"], None, None, "{command} は位置引数を取りません: 'unexpected'"),
+        ],
+        ids=["settings-failure", "handler-exception", "handler-command-error", "unknown-option", "extra-positional"],
+    )
+    def test_failure_reports_to_stderr_with_contract_exit_code(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        command: str,
+        exit_code_on_failure: int,
+        extra: list[str],
+        target: str | None,
+        error: Exception | None,
+        expected: str,
     ) -> None:
-        """設定ロード失敗でも exit_code=0 と JSON 出力を維持しつつ、原因を stderr へ出す。
+        """どの失敗経路でも原因を stderr へ 1 行出し、DB を作らない。
 
-        SessionStart はセッション開始を止めないので exit 0 のままにするが、
-        黙って抜けると記憶注入が失われたこと自体に気づけない。
+        SessionStart は非 0 を返すとセッション全体がエラー扱いになるため、`finally` で契約の
+        JSON を出し切って 0 を維持する（`hooks.json` の argv は固定なので引数エラーは実運用で
+        到達しないが、経路ごとの例外は作らない）。黙って抜けると記憶注入が失われたこと自体に
+        気づけないので stderr には必ず出す。SessionStart 以外は 1 で報告する（`failure_exit_code`
+        の集約が「全部 0 にする」変更になっていないことの退行防止）。typo の位置引数を無視すると
+        `init unexpected` が exit 0 で DB を再作成し、呼出元が失敗を検知できない。
         """
-        monkeypatch.setattr(cli, "_load_settings_or_raise", _always_raise("設定失敗"))
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
-        assert exit_code == 0
-        assert "設定失敗" in stderr
-        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+        stub = _raising(error) if error is not None else None
+        if target == "settings":
+            monkeypatch.setattr(cli, "_load_settings_or_raise", stub)
+        elif target == "handler":
+            monkeypatch.setitem(cli._COMMAND_HANDLERS, command, stub)
 
-    def test_handler_exception_keeps_exit_code_0_but_emits_json(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, [command, *extra])
+
+        assert exit_code == exit_code_on_failure
+        assert stderr == expected.format(command=command) + "\n"
+        if command == "context":
+            assert _session_start_event(stdout) == "SessionStart"
+        else:
+            assert stdout == ""
+        if stub is not None:
+            assert len(stub.calls) == 1
+        assert not (tmp_path / "mem.db").exists()
+
+
+class TestUsageErrors:
+    """副作用より先に検出する usage error（位置引数の個数・未対応/排他/不明なオプション）。"""
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            (["learn", "unexpected"], "learn は位置引数を取りません: 'unexpected'"),
+            (["list", "unexpected"], "list は位置引数を取りません: 'unexpected'"),
+            (["handoff", "unexpected"], "handoff は位置引数を取りません: 'unexpected'"),
+            (["show"], "key を指定してください"),
+            (["promote"], "key を指定してください"),
+            (["forget"], "key を指定してください"),
+            (["show", "key", "extra"], "show は key を1つだけ指定してください: 'key extra'"),
+            (["promote", "key", "extra"], "promote は key を1つだけ指定してください: 'key extra'"),
+            (["forget", "key", "extra"], "forget は key を1つだけ指定してください: 'key extra'"),
+            (["promote", "some-key", "--global"], "promote は次のオプションを取りません: --global"),
+            (["show", "some-key", "--repo"], "show は次のオプションを取りません: --repo"),
+            (["forget", "some-key", "--kind", "fact"], "forget は次のオプションを取りません: --kind"),
+            (["init", "--json"], "init は次のオプションを取りません: --json"),
+            (["list", "--global", "--repo"], "--global と --repo は同時に指定できません"),
+            (["search", "alpha", "--global", "--repo"], "--global と --repo は同時に指定できません"),
+            (["list", "--bogus"], "不明なオプション: --bogus"),
+        ],
+    )
+    def test_usage_error_returns_1_without_touching_db(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str], expected: str
     ) -> None:
-        """ハンドラ例外時も JSON を出しつつ exit_code=0 を維持する。
+        """usage error は stderr 1 行と exit_code=1 で返し、DB を作らない。
 
-        この経路で exit_code=1 を返すと、`main()` の docstring が
-        宣言する「SessionStart コマンドは失敗しても 0 を維持する」契約を
-        破る。非 0 を返すとセッション全体がエラー扱いになるうえ、
-        `finally` が正しい SessionStart JSON を出し切っており原因も stderr へ
-        出ているため、非 0 にして得られるものが無い。
+        未対応オプションを黙って無視すると、`promote <key> --global` が repo 側のカードを
+        昇格させ、利用者が指定した global 側は pending のまま残る。排他チェックが
+        `_collect_list_rows` にしか無いと、それを呼ばない経路では素通りする。
         """
-        monkeypatch.setitem(cli._COMMAND_HANDLERS, "context", _always_raise("boom"))
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
+        assert _run_cli(monkeypatch, tmp_path, argv) == ("", expected + "\n", 1)
+        assert not (tmp_path / "mem.db").exists()
+
+    def test_supported_options_are_accepted(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """対応済みオプションは通ること。"""
+        argv = ["list", "--global", "--status", "pending", "--limit", "3"]
+        _stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, argv)
         assert exit_code == 0
-        assert "boom" in stderr
-        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 
-    def test_command_error_in_handler_keeps_exit_code_0(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """ハンドラが CommandError を投げても exit_code=0 と JSON 出力を維持する。"""
+    def test_search_still_accepts_multiple_positionals(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """search は複数 positional を検索語として連結する既存契約を維持する（回帰防止）。"""
+        _seed(tmp_path, key="multi-word-hit", title="two words here")
 
-        def _raise_command_error(*_args: object, **_kwargs: object) -> None:
-            raise command_support.CommandError("bad handler input")
+        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["search", "two", "words"])
 
-        monkeypatch.setitem(cli._COMMAND_HANDLERS, "context", _raise_command_error)
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert exit_code == 0
-        assert "bad handler input" in stderr
-        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-
-    def test_argument_error_keeps_exit_code_0(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """引数解析段の CommandError でも exit_code=0 と JSON 出力を維持する。
-
-        `hooks.json` の argv は固定なので実運用では到達しないが、契約は
-        「SessionStart はどの失敗経路でも 0」であり経路ごとの例外を作らない。
-        """
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context", "--unknown-option"])
-        assert exit_code == 0
-        assert stderr != ""
-        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-
-    def test_normal_command_still_fails_with_exit_code_1(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """SessionStart 以外は失敗を exit_code=1 で報告する。
-
-        `failure_exit_code` の集約が「全部 0 にする」変更になっていないことの
-        退行防止。
-        """
-        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["show", "no-such-key"])
-        assert exit_code == 1
-        assert stderr != ""
+        assert "multi-word-hit" in stdout
 
 
 class TestInit:
     """init コマンド（DB 再作成）。"""
 
-    def test_recreates_database_dropping_old_rows(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_recreates_database_dropping_old_rows(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """既存 DB と sidecar を破棄して空の DB を作り直す。"""
         db_path = tmp_path / "mem.db"
         with Database(db_path) as db:
@@ -124,12 +177,9 @@ class TestInit:
         for suffix in ("-wal", "-shm", "-journal"):
             (tmp_path / f"mem.db{suffix}").write_text("stale", encoding="utf-8")
 
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["init"])
-        assert exit_code == 0
-        assert (stdout, stderr) == ("", "")
+        assert _run_cli(monkeypatch, tmp_path, ["init"]) == ("", "", 0)
         for suffix in ("-wal", "-shm", "-journal"):
             assert not (tmp_path / f"mem.db{suffix}").exists()
-
         with Database(db_path) as db:
             assert db.list_repos() == []
 
@@ -144,97 +194,14 @@ class TestInit:
         assert not db_path.exists()
         assert not (tmp_path / "mem.db-journal").exists()
 
-    def test_unexpected_positional_arg_is_usage_error_and_db_untouched(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """回帰防止: 未定義の位置引数は usage error にし、DB 副作用を起こさない。
-
-        typo を無視すると `init unexpected_extra_arg` が exit 0 で DB を
-        再作成し、呼出元が失敗を検知できない。
-        """
-        db_path = tmp_path / "mem.db"
-        assert not db_path.exists()
-
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["init", "unexpected_extra_arg"])
-
-        assert exit_code == 1
-        assert stdout == ""
-        assert "init は位置引数を取りません" in stderr
-        assert not db_path.exists()
-
-
-class TestPositionalArity:
-    """dispatch 層の位置引数個数検証。"""
-
-    @pytest.mark.parametrize("command", ["init", "learn", "list", "handoff"])
-    def test_zero_positional_commands_reject_extra_arg(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
-    ) -> None:
-        """0 個の位置引数を取る subcommand は余分な引数を usage error にする。"""
-        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, [command, "unexpected"])
-
-        assert exit_code == 1
-        assert f"{command} は位置引数を取りません" in stderr
-
-    def test_context_reports_extra_arg_without_failing_the_hook(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """`context` も usage error を stderr へ出すが exit_code は 0 に留める。
-
-        `context` は唯一の SessionStart コマンドで、非 0 を返すとセッション全体が
-        エラー扱いになる。検出（stderr）と終了コードは別物として扱う。
-        """
-        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context", "unexpected"])
-
-        assert exit_code == 0
-        assert "context は位置引数を取りません" in stderr
-
-    @pytest.mark.parametrize("command", ["show", "promote", "forget"])
-    def test_single_key_commands_reject_missing_key(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
-    ) -> None:
-        """key 未指定は usage error にする。"""
-        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, [command])
-
-        assert exit_code == 1
-        assert "key を指定してください" in stderr
-
-    @pytest.mark.parametrize("command", ["show", "promote", "forget"])
-    def test_single_key_commands_reject_extra_positional(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
-    ) -> None:
-        """key に続く余分な位置引数は usage error にする。"""
-        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, [command, "key", "extra"])
-
-        assert exit_code == 1
-        assert f"{command} は key を1つだけ指定してください" in stderr
-
-    def test_search_still_accepts_multiple_positionals(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """search は複数 positional を検索語として連結する既存契約を維持する（回帰防止）。"""
-        _seed(tmp_path, key="multi-word-hit", title="two words here")
-
-        stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["search", "two", "words"])
-
-        assert exit_code == 0
-        assert "multi-word-hit" in stdout
-
 
 class TestArgvAndStdin:
     """引数と stdin の解釈。"""
 
-    def test_no_command_prints_help(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """引数なしは HELP_TEXT を出力する。"""
-        monkeypatch.setattr(sys, "argv", ["python"])
-        stdout = io.StringIO()
-        with redirect_stdout(stdout):
-            assert cli.main() == 0
-        assert "CLI Commands for mem" in stdout.getvalue()
-
-    def test_help_flag_prints_help(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """--help も HELP_TEXT を出力する。"""
-        monkeypatch.setattr(sys, "argv", ["python", "--help"])
+    @pytest.mark.parametrize("argv", [[], ["--help"], ["-h"]], ids=["no-command", "--help", "-h"])
+    def test_help_is_printed(self, monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> None:
+        """引数なし・--help・-h は HELP_TEXT を出力する。"""
+        monkeypatch.setattr(sys, "argv", ["python", *argv])
         stdout = io.StringIO()
         with redirect_stdout(stdout):
             assert cli.main() == 0
@@ -245,40 +212,30 @@ class TestArgvAndStdin:
         _stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["nonexistent"])
         assert exit_code == 2
 
-    @pytest.mark.parametrize("raw", ["", "   ", "[1, 2]", "{ broken"])
-    def test_unusable_stdin_yields_empty_dict(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
-        """read_raw_stdin() の戻りが空・非 dict・不正 JSON ならすべて空 dict に落とす。
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("", {}),
+            ("   ", {}),
+            ("[1, 2]", {}),
+            ("{ broken", {}),
+            ('{"cwd": "/tmp"}', {"cwd": "/tmp"}),
+        ],
+        ids=["empty", "blank", "non-dict", "broken-json", "dict"],
+    )
+    def test_read_stdin_json_parses_bounded_reader_output(
+        self, monkeypatch: pytest.MonkeyPatch, raw: str, expected: dict
+    ) -> None:
+        """read_raw_stdin() を 1 回だけ呼び、dict の JSON だけを返し、空・非 dict・不正 JSON は空 dict に落とす。
 
-        空文字列は tty・stdin 未接続・deadline 到達のいずれでも
-        stdin_io.read_raw_stdin() が返す値。個々の原因ごとの分岐は
-        stdin_io 側（test_stdin_io.py）が検証済みのため、ここでは
-        _read_stdin_json がその戻り値をどう扱うかだけを見る。
-        """
-        monkeypatch.setattr(cli, "read_raw_stdin", lambda: raw)
-        assert cli._read_stdin_json() == {}
-
-    def test_valid_stdin_is_parsed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """dict の JSON はそのまま返る。"""
-        monkeypatch.setattr(cli, "read_raw_stdin", lambda: '{"cwd": "/tmp"}')
-        assert cli._read_stdin_json() == {"cwd": "/tmp"}
-
-    def test_read_stdin_json_delegates_to_bounded_reader(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """_read_stdin_json は sys.stdin を直接読まず read_raw_stdin() に委譲する（回帰防止）。
-
-        sys.stdin.read() は EOF まで無期限ブロックしうる
-        （context は launcher の in-process 実行で host の実 pipe を直接
-        読むため実害がある）。read_raw_stdin() は最初のバイト到着
-        （2 秒）と読み取り全体（5 秒）の両方に上限を持つ bounded reader
-        で、閉じない stdin でも有限時間で（空文字列を含む）値を返す。
+        sys.stdin.read() は EOF まで無期限ブロックしうる（context は launcher の in-process
+        実行で host の実 pipe を直接読む）ため、到着と読み取り全体に上限を持つ
+        read_raw_stdin() に委譲する。空文字列は tty・stdin 未接続・deadline 到達のいずれでも
+        返る値で、原因ごとの分岐は test_stdin_io.py が検証済み。
         """
         calls: list[int] = []
-
-        def _bounded_reader() -> str:
-            calls.append(1)
-            return '{"probe": true}'
-
-        monkeypatch.setattr(cli, "read_raw_stdin", _bounded_reader)
-        assert cli._read_stdin_json() == {"probe": True}
+        monkeypatch.setattr(cli, "read_raw_stdin", lambda: calls.append(1) or raw)
+        assert cli._read_stdin_json() == expected
         assert calls == [1]
 
     def test_positionals_flags_and_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -289,11 +246,24 @@ class TestArgvAndStdin:
         assert args.flags == frozenset({"--global"})
         assert args.values == {"--limit": "5"}
 
-    @pytest.mark.parametrize("command", ["list", "search", "show", "promote", "forget", "init"])
-    def test_stdin_is_not_read_for_commands_that_do_not_use_it(
-        self, command: str, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ("command", "reads_stdin"),
+        [
+            ("list", False),
+            ("search", False),
+            ("show", False),
+            ("promote", False),
+            ("forget", False),
+            ("init", False),
+            ("learn", True),
+            ("context", True),
+            ("handoff", True),
+        ],
+    )
+    def test_stdin_is_read_only_for_commands_that_use_it(
+        self, monkeypatch: pytest.MonkeyPatch, command: str, reads_stdin: bool
     ) -> None:
-        """stdin を使わない subcommand では stdin を読まない。
+        """stdin を使う subcommand だけが stdin を読む。
 
         全 subcommand で無条件に読むと、書き手が pipe を閉じない呼ばれ方で
         `list` / `search` / `show` まで STDIN_FIRST_BYTE_TIMEOUT ぶん待たされ
@@ -301,55 +271,22 @@ class TestArgvAndStdin:
         渡すべき stdin が無い操作には誤った警告が出る。
         """
         calls: list[int] = []
-        monkeypatch.setattr(cli, "read_raw_stdin", lambda: calls.append(1) or "")
+        monkeypatch.setattr(cli, "read_raw_stdin", lambda: calls.append(1) or '{"probe": true}')
 
         args = cli._parse_args_and_stdin(command, [])
 
-        assert calls == []
-        assert args.stdin_data == {}
+        assert calls == ([1] if reads_stdin else [])
+        assert args.stdin_data == ({"probe": True} if reads_stdin else {})
 
-    @pytest.mark.parametrize("command", ["learn", "context", "handoff"])
-    def test_stdin_is_read_for_commands_that_use_it(
-        self, command: str, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """stdin を使う subcommand では読む。"""
-        monkeypatch.setattr(cli, "read_raw_stdin", lambda: '{"probe": true}')
-
-        assert cli._parse_args_and_stdin(command, []).stdin_data == {"probe": True}
-
-    def test_value_option_without_value_is_error(self) -> None:
-        """値付きオプションに値が無ければ CommandError。"""
-        with pytest.raises(command_support.CommandError, match="--limit"):
-            cli._parse_options(["--limit"])
-
-    def test_unknown_option_is_error(self) -> None:
-        """未知のオプションは CommandError。"""
-        with pytest.raises(command_support.CommandError, match="不明なオプション"):
-            cli._parse_options(["--bogus"])
-
-    def test_option_parse_error_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """オプション解析エラーは stderr 1 行と exit_code=1。"""
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["list", "--bogus"])
-        assert (stdout, exit_code) == ("", 1)
-        assert stderr.splitlines() == ["不明なオプション: --bogus"]
-
-
-class TestNormalCommandFailures:
-    """SessionStart 以外のコマンドのエラー経路。"""
-
-    def test_settings_failure_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """設定ロード失敗は exit_code=1 と stderr 出力。"""
-        monkeypatch.setattr(cli, "_load_settings_or_raise", _always_raise("設定失敗"))
-        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["init"])
-        assert exit_code == 1
-        assert "設定/ログ初期化失敗" in stderr
-
-    def test_handler_exception_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """ハンドラ例外は exit_code=1 と stderr 出力。"""
-        monkeypatch.setitem(cli._COMMAND_HANDLERS, "init", _always_raise("init failure"))
-        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["init"])
-        assert exit_code == 1
-        assert "init failure" in stderr
+    @pytest.mark.parametrize(
+        ("argv", "match"),
+        [(["--limit"], "--limit"), (["--bogus"], "不明なオプション")],
+        ids=["value-option-without-value", "unknown-option"],
+    )
+    def test_parse_options_errors(self, argv: list[str], match: str) -> None:
+        """値付きオプションに値が無い・未知のオプションは CommandError。"""
+        with pytest.raises(command_support.CommandError, match=match):
+            cli._parse_options(argv)
 
 
 def test_mem_main_module_invokes_cli_main(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -372,52 +309,3 @@ def test_mem_main_module_does_not_run_on_plain_import() -> None:
     module = runpy.run_module("claq.mem.__main__", run_name="claq.mem.__main__")
 
     assert module["__name__"] == "claq.mem.__main__"
-
-
-class TestSubcommandOptionContract:
-    """subcommand が受理しないオプションを黙って無視しない。"""
-
-    @pytest.mark.parametrize(
-        ("argv", "expected"),
-        [
-            (["promote", "some-key", "--global"], "--global"),
-            (["show", "some-key", "--repo"], "--repo"),
-            (["forget", "some-key", "--kind", "fact"], "--kind"),
-            (["init", "--json"], "--json"),
-        ],
-    )
-    def test_unsupported_option_is_rejected(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str], expected: str
-    ) -> None:
-        """未対応オプションは exit 1 で拒否し、対象の DB を触らないこと。
-
-        黙って無視すると、`promote <key> --global` が repo 側のカードを
-        昇格させ、利用者が指定した global 側は pending のまま残る。
-        """
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, argv)
-
-        assert (stdout, exit_code) == ("", 1)
-        assert expected in stderr
-
-    def test_mutually_exclusive_scope_flags_are_rejected_on_every_subcommand(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """`--global --repo` の同時指定は list/search でも拒否されること。
-
-        排他チェックが `_collect_list_rows` にしか無いと、それを呼ばない
-        subcommand では素通りする。
-        """
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["list", "--global", "--repo"])
-
-        assert (stdout, exit_code) == ("", 1)
-        assert "同時に指定できません" in stderr
-
-    def test_supported_options_are_accepted(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """対応済みオプションは通ること。"""
-        _stdout, _stderr, exit_code = _run_cli(
-            monkeypatch, tmp_path, ["list", "--global", "--status", "pending", "--limit", "3"]
-        )
-
-        assert exit_code == 0
