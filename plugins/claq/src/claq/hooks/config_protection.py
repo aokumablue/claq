@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -788,8 +789,9 @@ def _folded_parts(path: Path) -> tuple[str, ...]:
 def running_plugin_root_is_guarded() -> bool:
     """実行中の plugin root を保護するか（作業中リポジトリ内の開発用 checkout でないか）を判定する。
 
-    claq 自身を開発する checkout では `runtime/` と `src/claq/` の編集が本来の作業なので守らない。
-    toplevel が決まらない（リポジトリ外・git 不在・タイムアウト）ときは除外しない。git を起動するので、
+    claq 自身を開発する checkout（作業中リポジトリの内側にあり、ランタイムを追跡している）では
+    `runtime/` と `src/claq/` の編集が本来の作業なので守らない。toplevel が決まらない（リポジトリ外・
+    git 不在・タイムアウト）ときは除外しない。git を起動するので、
     書込み先が保護ディレクトリに当たった後でだけ呼ぶ。
 
     Returns:
@@ -801,9 +803,39 @@ def running_plugin_root_is_guarded() -> bool:
     repo_root = resolve_repo_root()
     if repo_root is None:
         return True
-    plugin_parts = _folded_parts(get_plugin_root())
+    plugin_root = get_plugin_root()
     repo_parts = _folded_parts(repo_root.resolve())
-    return plugin_parts[: len(repo_parts)] != repo_parts
+    if _folded_parts(plugin_root)[: len(repo_parts)] != repo_parts:
+        return True
+    # ホームや ~/.claude を git で管理していると、キャッシュの plugin root も toplevel の内側に入る。
+    # 内側にあるだけでなく、そのリポジトリがランタイムを追跡しているときだけ開発用 checkout とみなす。
+    return not _plugin_runtime_is_tracked(repo_root, plugin_root)
+
+
+def _plugin_runtime_is_tracked(repo_root: Path, plugin_root: Path) -> bool:
+    """plugin root のランタイム入口 ``runtime/claq-hook`` がリポジトリで追跡されているかを返す。
+
+    Args:
+        repo_root: 作業中リポジトリの toplevel。
+        plugin_root: 実行中の plugin root。
+
+    Returns:
+        index に載っていれば True。git が無い・タイムアウト・追跡外なら False（保護を外さない）。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", str(plugin_root / "runtime" / "claq-hook")],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
 
 
 def running_plugin_guarded_dir(resolved: Path, *, include_ancestors: bool) -> str | None:

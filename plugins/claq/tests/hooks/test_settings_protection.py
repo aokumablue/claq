@@ -17,6 +17,8 @@ from typing import Any
 
 import pytest
 
+from claq.hooks import config_protection
+
 from ._support import _repo_scope as _repo_scope
 from ._support import _run, _write_content
 
@@ -125,6 +127,23 @@ def test_unparseable_result_is_denied_and_asks_user(
     err = capsys.readouterr().err.casefold()
 
     assert (code, _UNVERIFIABLE_TEXT in err, "ask the user" in err) == (2, True, True)
+
+
+def test_recursion_error_while_comparing_is_denied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """解析・比較中の RecursionError は検査不能として deny する（実入力で踏める段数は版とスタックで変わる）。"""
+    path = _settings(tmp_path, '{"model": "a"}')
+
+    def _too_deep(_text: str) -> None:
+        """深すぎる入れ子を模す。"""
+        raise RecursionError
+
+    monkeypatch.setattr(config_protection, "_parse_settings_object", _too_deep)
+
+    code = _run("config_protection", _write_content(path, '{"model": "b"}'), monkeypatch)
+
+    assert (code, _UNVERIFIABLE_TEXT in capsys.readouterr().err.casefold()) == (2, True)
 
 
 def test_jsonc_vscode_settings_is_denied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -127,10 +127,12 @@ Windows の wrapper + インタプリタ起動の遅さで host 側 timeout（�
      起動する `claq-hook`）と `src/claq/`（フック本体）を守る。書き換えると次のツール呼び出しから
      全保護フックが外れるため。配下への Edit/Write と Bash の書込み、Bash によるディレクトリ自身・
      祖先の削除と退避を deny する。照合は symlink を解決した実体パスで、大小を無視する。
-   - plugin root が作業中リポジトリ（git の toplevel）の内側にあるときは対象外にする。claq 自身を
-     開発する checkout ではこれらの編集が本来の作業で、守ると claq を開発できなくなる。git は
-     書込み先がこれらに当たったときだけ起動する。toplevel が決まらない（リポジトリ外・git 不在・
-     タイムアウト）ときは対象外にしない。
+   - plugin root が作業中リポジトリ（git の toplevel）の内側にあり、そのリポジトリが
+     `runtime/claq-hook` を追跡しているときは対象外にする。claq 自身を開発する checkout では
+     これらの編集が本来の作業で、守ると claq を開発できなくなる。内側にあるだけでは外さない
+     （ホームや `~/.claude` を git で管理していると、キャッシュの plugin root も toplevel の内側に
+     入る）。git は書込み先がこれらに当たったときだけ起動する。toplevel が決まらない・追跡を
+     確かめられない（リポジトリ外・git 不在・タイムアウト）ときは対象外にしない。
    - `cd` を含む Bash コマンドでは相対パスを解決できないので、basename が `claq-hook` /
      `claq-hook.cmd` の書込み先を deny する。
    - `settings.json` / `settings.local.json`（basename で判定）は置換前後の全文を JSON として比べる

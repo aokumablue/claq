@@ -10,6 +10,7 @@ lru_cache 付きで走る。各テストは `config_protection.get_plugin_root` 
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -172,13 +173,53 @@ def test_dev_checkout_inside_working_repo_is_not_guarded(
 ) -> None:
     """plugin root が作業中リポジトリの内側にある開発用 checkout は、runtime も src も編集できる。"""
     monkeypatch.setattr(config_protection, "resolve_repo_root", lambda: _running_root.parents[1])
+    monkeypatch.setattr(config_protection, "_plugin_runtime_is_tracked", lambda _repo, _root: True)
 
     assert _dev_checkout_verdicts(_running_root, monkeypatch) == (0, 0, None, None)
+
+
+def test_untracked_plugin_inside_working_repo_keeps_protection(
+    _running_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ホームを git で管理していて plugin root が toplevel の内側に入っても、追跡外なら守る。"""
+    monkeypatch.setattr(config_protection, "resolve_repo_root", lambda: _running_root.parents[1])
+    monkeypatch.setattr(config_protection, "_plugin_runtime_is_tracked", lambda _repo, _root: False)
+
+    assert _dev_checkout_verdicts(_running_root, monkeypatch)[:3] == (2, 2, "runtime/")
+
+
+@pytest.mark.parametrize(("tracked", "expected"), [(True, True), (False, False)], ids=["tracked", "untracked"])
+def test_plugin_runtime_is_tracked_asks_git_index(
+    _running_root: Path, tracked: bool, expected: bool
+) -> None:
+    """ランタイム入口が index に載っているかを実際の git で判定する。"""
+    repo = _running_root.parents[1]
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    if tracked:
+        subprocess.run(["git", "-C", str(repo), "add", "--", str(_running_root / "runtime" / "claq-hook")], check=True)
+
+    assert config_protection._plugin_runtime_is_tracked(repo, _running_root) is expected
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError("git"), subprocess.TimeoutExpired("git", 5)], ids=["no-git", "timeout"])
+def test_plugin_runtime_is_tracked_is_false_when_git_fails(
+    _running_root: Path, error: Exception, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """git を起動できない・時間切れなら追跡外として扱い、保護を外さない。"""
+
+    def _raise(*_args: object, **_kwargs: object) -> None:
+        """git の起動失敗を模す。"""
+        raise error
+
+    monkeypatch.setattr(config_protection.subprocess, "run", _raise)
+
+    assert config_protection._plugin_runtime_is_tracked(_running_root.parents[1], _running_root) is False
 
 
 def test_dev_checkout_match_ignores_case(_running_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """toplevel の綴りが大小違いでも、開発用 checkout として除外する。"""
     monkeypatch.setattr(config_protection, "resolve_repo_root", lambda: Path(str(_running_root.parents[1]).upper()))
+    monkeypatch.setattr(config_protection, "_plugin_runtime_is_tracked", lambda _repo, _root: True)
 
     payload = _write(str(_running_root / "src" / "claq" / "launcher.py"))
 
