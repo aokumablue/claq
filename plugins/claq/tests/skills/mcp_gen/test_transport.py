@@ -10,6 +10,8 @@ import pytest
 
 from ._support import _TEMPLATE, _load
 
+_LOOPBACK_ONLY = "認証を実装していないので、ループバック以外には公開しない"
+
 
 class _RecordingServer:
     """transport.run が起動するサーバの代わり（run の引数を記録する）。"""
@@ -76,23 +78,14 @@ class TestTransport:
 
     @pytest.mark.parametrize(
         ("argv", "message"),
-        [
-            (("--http", "--host", "0.0.0.0"), "認証を実装していないので、ループバック以外には公開しない"),
-            (("--http", "--host", "mcp.example.com"), "認証を実装していないので、ループバック以外には公開しない"),
-            (("--http", "--host", "0.0.0.0", "--allow-remote"), "--allow-remote"),
-        ],
+        [(("--host", "0.0.0.0"), _LOOPBACK_ONLY), (("--host", "mcp.example.com"), _LOOPBACK_ONLY), (("--host", "0.0.0.0", "--allow-remote"), "--allow-remote")],
         ids=["any-address", "public-name", "allow-remote-flag"],
     )
     def test_rejects_non_loopback_host(
-        self,
-        transport: types.ModuleType,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-        argv: tuple[str, ...],
-        message: str,
+        self, transport: types.ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], argv: tuple[str, ...], message: str
     ) -> None:
         """ループバック以外のホストは、認証を実装していないので起動せずに拒否し、ループバック以外へ広げる抜け道（--allow-remote）も持たない。"""
         with pytest.raises(SystemExit) as exited:
-            self._run(transport, monkeypatch, *argv)
+            self._run(transport, monkeypatch, "--http", *argv)
         assert exited.value.code == 2
         assert message in capsys.readouterr().err
