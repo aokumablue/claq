@@ -9,128 +9,79 @@ Bash 直接書込み（`bash_config_protection`）の両経路で確認する。
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from claq.hooks import bash_config_protection, config_protection
 
-
-def _write_payload(file_path: str, content: str = "x") -> dict:
-    return {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": content}}
-
-
-class TestConfigProtectionSymlink:
-    """Edit/Write 経路（config_protection）の symlink 解決テスト。"""
-
-    def test_blocks_symlink_to_unconditionally_protected_file(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """alias -> .ruff.toml への Write は実体の basename で deny する。"""
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / ".ruff.toml").write_text("", encoding="utf-8")
-        (tmp_path / "alias-file").symlink_to(tmp_path / ".ruff.toml")
-        monkeypatch.setattr(
-            config_protection, "read_raw_stdin_with_truncation", lambda: (json.dumps(_write_payload("alias-file")), False)
-        )
-
-        assert config_protection.main() == 2
-
-    def test_allows_symlink_to_unprotected_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """symlink 先が保護対象でなければ allow する。"""
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "README.md").write_text("", encoding="utf-8")
-        (tmp_path / "alias-safe").symlink_to(tmp_path / "README.md")
-        monkeypatch.setattr(
-            config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: (json.dumps(_write_payload("alias-safe")), False),
-        )
-
-        assert config_protection.main() == 0
-
-    def test_broken_symlink_does_not_crash_and_allows(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """壊れた symlink は解決不能として raw basename にフォールバックし、クラッシュしない。"""
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "broken-link").symlink_to(tmp_path / "does-not-exist")
-        monkeypatch.setattr(
-            config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: (json.dumps(_write_payload("broken-link")), False),
-        )
-
-        assert config_protection.main() == 0
-
-    def test_still_blocks_direct_protected_path_without_symlink(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """symlink を介さない直接 path 指定は deny する（回帰防止）。"""
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(
-            config_protection,
-            "read_raw_stdin_with_truncation",
-            lambda: (json.dumps(_write_payload(".ruff.toml")), False),
-        )
-
-        assert config_protection.main() == 2
-
-    def test_effective_basename_falls_back_when_resolve_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """resolve_effective_target が None を返す場合、raw path の basename にフォールバックする。"""
-        monkeypatch.setattr(config_protection, "resolve_effective_target", lambda _path: None)
-
-        assert config_protection._effective_basename(".ruff.toml") == ".ruff.toml"
+from ._support import _repo_scope as _repo_scope
+from ._support import _run, _write
 
 
-class TestBashConfigProtectionSymlink:
-    """Bash 直接書込み経路（bash_config_protection）の symlink 解決テスト。"""
+def _link(tmp_path: Path, link: str, target: str, *, target_exists: bool = True) -> None:
+    """repo ルート（tmp_path）に ``link -> target`` を作る。target_exists が偽なら壊れた symlink にする。"""
+    if target_exists:
+        (tmp_path / target).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / target).write_text("", encoding="utf-8")
+    (tmp_path / link).symlink_to(tmp_path / target)
 
-    @pytest.fixture(autouse=True)
-    def _fixed_repo_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(bash_config_protection, "resolve_repo_root", lambda: tmp_path)
-        return tmp_path
 
-    def test_printf_redirect_through_symlink_is_blocked(self, tmp_path: Path) -> None:
-        (tmp_path / ".ruff.toml").write_text("", encoding="utf-8")
-        (tmp_path / "alias-file").symlink_to(tmp_path / ".ruff.toml")
+@pytest.mark.parametrize(
+    ("file_path", "target", "target_exists", "expected"),
+    [
+        pytest.param("alias-file", ".ruff.toml", True, 2, id="symlink-to-protected-denied-by-real-basename"),
+        pytest.param("alias-safe", "README.md", True, 0, id="symlink-to-unprotected-allowed"),
+        # 壊れた symlink は解決不能として raw basename にフォールバックし、クラッシュしない。
+        pytest.param("broken-link", "does-not-exist", False, 0, id="broken-symlink-allowed"),
+        # symlink を介さない直接 path 指定は deny する（回帰防止）。
+        pytest.param(".ruff.toml", None, False, 2, id="direct-protected-path"),
+    ],
+)
+def test_write_through_symlink(
+    file_path: str,
+    target: str | None,
+    target_exists: bool,
+    expected: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Edit/Write 経路は symlink の実体 basename で保護判定する。"""
+    if target is not None:
+        _link(tmp_path, file_path, target, target_exists=target_exists)
 
-        found = bash_config_protection.find_protected_write("printf x > alias-file")
+    assert _run("config_protection", _write(file_path), monkeypatch) == expected
 
-        assert found == ".ruff.toml"
 
-    def test_tee_through_symlink_is_blocked(self, tmp_path: Path) -> None:
-        (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n", encoding="utf-8")
-        (tmp_path / "alias-file").symlink_to(tmp_path / "pyproject.toml")
+def test_effective_basename_falls_back_when_resolve_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """resolve_effective_target が None を返す場合、raw path の basename にフォールバックする。"""
+    monkeypatch.setattr(config_protection, "resolve_effective_target", lambda _path: None)
 
-        # pyproject.toml は conditionally-protected ではなく find_protected_write レベルでは
-        # basename 一致のみ判定するため、確実に unconditional な .ruff.toml で検証する。
-        (tmp_path / ".ruff.toml").write_text("", encoding="utf-8")
-        (tmp_path / "alias-tee").symlink_to(tmp_path / ".ruff.toml")
+    assert config_protection._effective_basename(".ruff.toml") == ".ruff.toml"
 
-        found = bash_config_protection.find_protected_write("tee alias-tee <<< 'x'")
 
-        assert found == ".ruff.toml"
+@pytest.mark.parametrize(
+    ("command", "link", "target", "target_exists", "expected"),
+    [
+        pytest.param("printf x > alias-file", "alias-file", ".ruff.toml", True, ".ruff.toml", id="redirect-to-protected"),
+        pytest.param("tee alias-tee <<< 'x'", "alias-tee", ".ruff.toml", True, ".ruff.toml", id="tee-to-protected"),
+        pytest.param("printf x > alias-safe", "alias-safe", "notes.txt", True, None, id="unprotected-target"),
+        # repo スコープの契約を維持: 解決後 target がリポジトリ外なら allow。
+        pytest.param(
+            "printf x > alias-outside",
+            "alias-outside",
+            "../outside-repo-root-fixture/.ruff.toml",
+            True,
+            None,
+            id="target-outside-repo-root",
+        ),
+        pytest.param("printf x > broken-link", "broken-link", "does-not-exist", False, None, id="broken-symlink"),
+    ],
+)
+def test_bash_write_through_symlink(
+    command: str, link: str, target: str, target_exists: bool, expected: str | None, tmp_path: Path
+) -> None:
+    """Bash 直接書込み経路も symlink の実体で保護判定し、実体の basename を返す。"""
+    _link(tmp_path, link, target, target_exists=target_exists)
 
-    def test_symlink_to_unprotected_target_is_allowed(self, tmp_path: Path) -> None:
-        (tmp_path / "notes.txt").write_text("", encoding="utf-8")
-        (tmp_path / "alias-safe").symlink_to(tmp_path / "notes.txt")
-
-        assert bash_config_protection.find_protected_write("printf x > alias-safe") is None
-
-    def test_symlink_target_outside_repo_root_is_allowed(self, tmp_path: Path) -> None:
-        """repo スコープの契約を維持: 解決後 target がリポジトリ外なら allow。"""
-        outside_dir = tmp_path.parent / "outside-repo-root-fixture"
-        outside_dir.mkdir(exist_ok=True)
-        outside_target = outside_dir / ".ruff.toml"
-        outside_target.write_text("", encoding="utf-8")
-        (tmp_path / "alias-outside").symlink_to(outside_target)
-
-        assert bash_config_protection.find_protected_write("printf x > alias-outside") is None
-
-    def test_broken_symlink_falls_back_and_allows(self, tmp_path: Path) -> None:
-        (tmp_path / "broken-link").symlink_to(tmp_path / "does-not-exist")
-
-        assert bash_config_protection.find_protected_write("printf x > broken-link") is None
+    assert bash_config_protection.find_protected_write(command) == expected
