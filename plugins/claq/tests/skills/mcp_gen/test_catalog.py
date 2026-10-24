@@ -32,54 +32,35 @@ class TestCatalog:
         spec = facade.catalog.FieldSpec("a", "string", "x", "public", ("summary",), True)
         assert (spec.sensitivity, spec.views, spec.in_search) == ("public", ("summary",), True)
 
-    def test_rejects_bad_definitions(self, facade: types.SimpleNamespace) -> None:
-        """パスの重複と未知の機微区分は定義の誤りとして弾く。"""
-        spec = facade.catalog.FieldSpec
-        with pytest.raises(ValueError, match="重複"):
-            facade.catalog.Catalog("o", [spec("a", "string", "x", "internal"), spec("a", "string", "y", "internal")])
-        with pytest.raises(ValueError, match="機微区分"):
-            facade.catalog.Catalog("o", [spec("a", "string", "x", "secret")])
+    @pytest.mark.parametrize(
+        ("specs", "match"),
+        [
+            ([("a", "string", "x", "internal"), ("a", "string", "y", "internal")], "重複"),
+            ([("a", "string", "x", "secret")], "機微区分"),
+            ([("a.b", "string", "x", "personal", ("detail",))], "personal"),
+            ([("a", "string", "x", "internal"), ("a.b.c", "string", "y", "personal")], "葉"),
+            *(([("a", "string", "x", "internal"), ("b", field_type, "y", "internal")], "スカラー") for field_type in ["object", "array", "null", "String", ""]),
+            *(([(path, "string", "x", "internal")], "パスの書式") for path in ["Order_id", "a..b", "a.", ".a", "a b", "a-b", "住所", "a" * 101, ""]),
+        ],
+    )
+    def test_rejects_bad_definitions(self, facade: types.SimpleNamespace, specs: list[tuple[Any, ...]], match: str) -> None:
+        """定義の誤りを弾く: パスの重複・未知の機微区分・ビューに入れた個人情報（fields で明示されたときだけ返す）・別の項目の祖先のパス（祖先を指定すると子の機微区分を素通りして全体が返る）・JSON のスカラーでない葉の型（object の葉は部分木を丸ごと返す）・ツールの fields 引数の要素と同じ書式（PATH_PATTERN）と長さ（PATH_MAX_CHARS）に収まらないパス（入口で受け付けないパスを載せない）。"""
+        with pytest.raises(ValueError, match=match):
+            facade.catalog.Catalog("o", [facade.catalog.FieldSpec(*spec) for spec in specs])
 
-    @pytest.mark.parametrize("path", ["Order_id", "a..b", "a.", ".a", "a b", "a-b", "住所", "a" * 101, ""])
-    def test_rejects_paths_outside_input_limits(self, facade: types.SimpleNamespace, path: str) -> None:
-        """パスはツールの fields 引数の要素と同じ書式（PATH_PATTERN）と長さ（PATH_MAX_CHARS）に収める（入口で受け付けないパスを載せない）。"""
-        with pytest.raises(ValueError, match="パスの書式"):
-            facade.catalog.Catalog("o", [facade.catalog.FieldSpec(path, "string", "x", "internal")])
-
-    def test_accepts_paths_within_input_limits(self, facade: types.SimpleNamespace) -> None:
-        """ドット区切りの英小文字・数字・_ で、長さが上限ちょうどまでのパスは通す。"""
-        spec = facade.catalog.FieldSpec
-        paths = ["a" * facade.catalog.PATH_MAX_CHARS, "shipping.address.postal_code", "items2.unit_price.amount"]
-        catalog = facade.catalog.Catalog("o", [spec(path, "string", "x", "internal") for path in paths])
-        assert [entry["path"] for entry in catalog.describe(None, limit=10)["fields"]] == paths
-
-    def test_rejects_personal_in_views(self, facade: types.SimpleNamespace) -> None:
-        """個人情報（personal）の項目はビューに入れない（fields で明示されたときだけ返す）。"""
-        spec = facade.catalog.FieldSpec
-        with pytest.raises(ValueError, match="personal"):
-            facade.catalog.Catalog("o", [spec("a.b", "string", "x", "personal", views=("detail",))])
-
-    @pytest.mark.parametrize("field_type", ["object", "array", "null", "String", ""])
-    def test_catalog_non_scalar_type_raises(self, facade: types.SimpleNamespace, field_type: str) -> None:
-        """葉の型は JSON のスカラーに限り、object などは定義の誤りにする（object の葉は部分木を丸ごと返す）。"""
-        spec = facade.catalog.FieldSpec
-        with pytest.raises(ValueError, match="スカラー"):
-            facade.catalog.Catalog("o", [spec("a", "string", "x", "internal"), spec("b", field_type, "y", "internal")])
-
-    def test_catalog_scalar_types_accepted(self, facade: types.SimpleNamespace) -> None:
-        """JSON のスカラーの 4 つの型（string / number / integer / boolean）は受け付ける。"""
-        spec = facade.catalog.FieldSpec
-        scalars = ["string", "number", "integer", "boolean"]
-        catalog = facade.catalog.Catalog("o", [spec(name, name, "x", "internal") for name in scalars])
-        assert [field["type"] for field in catalog.describe(None, limit=10)["fields"]] == scalars
-
-    def test_rejects_ancestor_paths(self, facade: types.SimpleNamespace) -> None:
-        """別の項目の祖先のパスは載せない（祖先を指定すると、子の機微区分を素通りして全体が返る）。"""
-        spec = facade.catalog.FieldSpec
-        with pytest.raises(ValueError, match="葉"):
-            facade.catalog.Catalog("o", [spec("a", "string", "x", "internal"), spec("a.b.c", "string", "y", "personal")])
-        siblings = facade.catalog.Catalog("o", [spec("item", "string", "x", "internal"), spec("items.sku", "string", "y", "internal")])
-        assert siblings.describe(None, limit=10)["total_matches"] == 2
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            [("a" * 100, "string"), ("shipping.address.postal_code", "string"), ("items2.unit_price.amount", "string")],
+            [("string", "string"), ("number", "number"), ("integer", "integer"), ("boolean", "boolean")],
+            [("item", "string"), ("items.sku", "string")],
+        ],
+        ids=["paths-within-input-limits", "scalar-types", "prefix-sibling-is-not-ancestor"],
+    )
+    def test_accepts_valid_definitions(self, facade: types.SimpleNamespace, fields: list[tuple[str, str]]) -> None:
+        """ドット区切りの英小文字・数字・_ で長さが上限（PATH_MAX_CHARS）ちょうどまでのパス、JSON のスカラーの 4 つの型、祖先ではない前方一致の兄弟のパスは、定義順のまま載せる。"""
+        catalog = facade.catalog.Catalog("o", [facade.catalog.FieldSpec(path, field_type, "x", "internal") for path, field_type in fields])
+        assert [(entry["path"], entry["type"]) for entry in catalog.describe(None, limit=10)["fields"]] == fields
 
     def test_view(self, facade: types.SimpleNamespace) -> None:
         """ビューに含まれるパスを定義順に返し、主体に返してよい機微区分だけに絞る。"""
@@ -149,15 +130,14 @@ def _summary_catalog(facade: types.SimpleNamespace) -> Any:
 class TestSummaryView:
     """検索結果の 1 件に出す項目（summary ビューを主体に許された機微区分で絞る）。"""
 
-    def test_summary_view_all_allowed(self, facade: types.SimpleNamespace) -> None:
-        """全ての区分が許されていれば、summary ビューの項目を定義順に返す。"""
-        catalog = _summary_catalog(facade)
-        assert catalog.summary_view("order_id", allowed_sensitivity={"internal", "confidential"}) == ["order_id", "label", "total.amount"]
-
-    def test_summary_view_drops_disallowed_sensitivity(self, facade: types.SimpleNamespace) -> None:
-        """主体に許されない区分（confidential）の項目は、要約にも出さない。"""
-        catalog = _summary_catalog(facade)
-        assert catalog.summary_view("order_id", allowed_sensitivity={"internal"}) == ["order_id", "label"]
+    @pytest.mark.parametrize(
+        ("allowed", "expected"),
+        [({"internal", "confidential"}, ["order_id", "label", "total.amount"]), ({"internal"}, ["order_id", "label"])],
+        ids=["all-allowed", "confidential-not-allowed"],
+    )
+    def test_summary_view(self, facade: types.SimpleNamespace, allowed: set[str], expected: list[str]) -> None:
+        """summary ビューの項目を定義順に返し、主体に許されない区分（confidential）の項目は要約にも出さない。"""
+        assert _summary_catalog(facade).summary_view("order_id", allowed_sensitivity=allowed) == expected
 
     def test_summary_view_id_not_allowed_raises_facade_error(self, facade: types.SimpleNamespace) -> None:
         """識別の項目（order_id）自体が許されない区分なら、識別できない候補を返さずに FacadeError にする。"""
