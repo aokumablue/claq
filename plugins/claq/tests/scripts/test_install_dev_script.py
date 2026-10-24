@@ -28,15 +28,7 @@ _WARNING_MARKER = "is a leftover symlink into a checkout venv"
 
 
 def _run_installer(tmp_path: Path, *, path: str) -> subprocess.CompletedProcess[str]:
-    """``install-dev.sh --skip-python`` を合成 PATH で実行する。
-
-    Args:
-        tmp_path: ``--repo-root`` に渡す合成リポジトリルート。
-        path: 子プロセスへ渡す PATH の値。
-
-    Returns:
-        完了したプロセス。
-    """
+    """``install-dev.sh --skip-python --repo-root <tmp_path>`` を合成 PATH で実行する。"""
     env = {**os.environ, "PATH": path}
     # bash は絶対パスで呼ぶ。PATH を退化させる表が自分自身の起動に失敗するのを
     # 避けるためと、macOS の /bin/bash が 3.2（配列の落とし穴を持つ版）だから。
@@ -50,53 +42,44 @@ def _run_installer(tmp_path: Path, *, path: str) -> subprocess.CompletedProcess[
     )
 
 
-def _make_bin_dir(tmp_path: Path) -> Path:
-    """PATH に載せる合成 bin ディレクトリを作る。
+def _write_exe(path: Path) -> Path:
+    """`path` に何もしない実行可能スクリプトを置いて返す。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
 
-    Args:
-        tmp_path: 作成先の一時ディレクトリ。
 
-    Returns:
-        作成した bin ディレクトリ。
+@pytest.mark.parametrize(
+    ("tool", "dangling", "shadowed"),
+    [("ruff", False, False), ("vulture", True, False), ("ruff", False, True)],
+    ids=["live-symlink", "dangling-symlink", "behind-a-real-ruff-earlier-on-path"],
+)
+def test_warns_about_a_leftover_symlink_into_a_checkout_venv(
+    tmp_path: Path, tool: str, dangling: bool, shadowed: bool
+) -> None:
+    """旧 symlink を生死・PATH 上の位置に関わらず検出し、削除コマンドを提示すること。
+
+    - live: 生きた旧 symlink は ``command -v ruff`` を成功させるので、その成否に紐づいた案内では何も出ない。
+    - dangling: `command -v` は dangling symlink を「見つからない」と扱うので、実体の有無で分岐すると
+      いちばん壊れている機械だけ警告が出ない。
+    - shadowed: `command -v` は先頭 1 件しか返さず、venv を有効化すると /usr/local/bin の旧 symlink が
+      venv 側の実体に隠れる。全エントリを走査することを固定する。
     """
-    bin_dir = tmp_path / "fake-bin"
-    bin_dir.mkdir()
-    return bin_dir
-
-
-def _link_into_checkout_venv(bin_dir: Path, tmp_path: Path, tool: str, *, dangling: bool) -> Path:
-    """checkout 内 venv を指す symlink を張る。
-
-    Args:
-        bin_dir: symlink を置くディレクトリ。
-        tmp_path: 張り先の checkout を作る一時ディレクトリ。
-        tool: ツール名（``ruff`` / ``vulture``）。
-        dangling: 真なら張り先の実体を作らない（checkout 削除後を再現）。
-
-    Returns:
-        作成した symlink のパス。
-    """
+    stale_bin = tmp_path / "fake-bin"
+    stale_bin.mkdir()
     target = tmp_path / "other-checkout" / ".venv" / "bin" / tool
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not dangling:
-        target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        target.chmod(0o755)
-    link = bin_dir / tool
+    if dangling:
+        target.parent.mkdir(parents=True)
+    else:
+        _write_exe(target)
+    link = stale_bin / tool
     link.symlink_to(target)
-    return link
+    path = f"{stale_bin}:{os.environ['PATH']}"
+    if shadowed:
+        path = f"{_write_exe(tmp_path / 'venv-bin' / 'ruff').parent}:{path}"
 
-
-def test_warns_about_a_live_symlink_into_a_checkout_venv(tmp_path: Path) -> None:
-    """生きた旧 symlink を検出し、削除コマンドを提示すること。
-
-    ここが H の本体。旧 symlink が**生きている**と ``command -v ruff`` は成功
-    するので、`command -v` に紐づいた案内だけでは何も出ない。回収案内が
-    その成否と独立していることを、実体のある symlink で固定する。
-    """
-    bin_dir = _make_bin_dir(tmp_path)
-    link = _link_into_checkout_venv(bin_dir, tmp_path, "ruff", dangling=False)
-
-    result = _run_installer(tmp_path, path=f"{bin_dir}:{os.environ['PATH']}")
+    result = _run_installer(tmp_path, path=path)
 
     assert result.returncode == 0, result.stderr
     assert _WARNING_MARKER in result.stdout
@@ -104,83 +87,21 @@ def test_warns_about_a_live_symlink_into_a_checkout_venv(tmp_path: Path) -> None
     assert f"sudo rm -- '{link}'" in result.stdout
 
 
-def test_warns_about_a_dangling_symlink(tmp_path: Path) -> None:
-    """張り先の checkout が消えていても検出すること。
-
-    `command -v` は dangling symlink を「見つからない」と扱うので、実体の
-    有無で分岐すると、いちばん壊れている機械だけ警告が出ないことになる。
-    """
-    bin_dir = _make_bin_dir(tmp_path)
-    link = _link_into_checkout_venv(bin_dir, tmp_path, "vulture", dangling=True)
-
-    result = _run_installer(tmp_path, path=f"{bin_dir}:{os.environ['PATH']}")
-
-    assert result.returncode == 0, result.stderr
-    assert str(link) in result.stdout
-
-
-def test_warns_for_every_path_entry_not_just_the_first(tmp_path: Path) -> None:
-    """PATH の先頭に正規の ruff があっても、後方の旧 symlink を見落とさないこと。
-
-    `command -v` は先頭 1 件しか返さない。venv を有効化した状態がまさにこれで、
-    /usr/local/bin に残った旧 symlink が venv 側の実体に隠れる。全エントリを
-    走査する実装であることをここで固定する。
-    """
-    good_bin = tmp_path / "venv-bin"
-    good_bin.mkdir()
-    real_ruff = good_bin / "ruff"
-    real_ruff.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    real_ruff.chmod(0o755)
-    stale_bin = _make_bin_dir(tmp_path)
-    link = _link_into_checkout_venv(stale_bin, tmp_path, "ruff", dangling=False)
-
-    result = _run_installer(tmp_path, path=f"{good_bin}:{stale_bin}:{os.environ['PATH']}")
-
-    assert result.returncode == 0, result.stderr
-    assert str(link) in result.stdout
-
-
 @pytest.mark.parametrize(
-    ("label", "target_parts"),
-    [
-        ("Homebrew の実体", ("opt", "homebrew", "bin", "ruff")),
-        ("venv 以外の共有ディレクトリ", ("srv", "tools", "bin", "ruff")),
-    ],
+    "target_parts",
+    [("opt", "homebrew", "bin", "ruff"), ("srv", "tools", "bin", "ruff"), None],
+    ids=["homebrew-symlink", "non-venv-shared-dir-symlink", "real-binary"],
 )
-def test_does_not_warn_about_unrelated_symlinks(
-    tmp_path: Path, label: str, target_parts: tuple[str, ...]
-) -> None:
-    """checkout 内 venv を指していない symlink には触れないこと。
+def test_does_not_warn_about_unrelated_ruff(tmp_path: Path, target_parts: tuple[str, ...] | None) -> None:
+    """checkout 内 venv を指していない symlink や、symlink でない実体（venv 内の ruff そのもの）には触れないこと。"""
+    ruff = tmp_path / "fake-bin" / "ruff"
+    if target_parts is None:
+        _write_exe(ruff)
+    else:
+        ruff.parent.mkdir()
+        ruff.symlink_to(_write_exe(tmp_path.joinpath(*target_parts)))
 
-    Args:
-        tmp_path: 合成ツリーを作る一時ディレクトリ。
-        label: 失敗時に対象を読めるようにする表のラベル。
-        target_parts: 張り先パスの構成要素。
-
-    Returns:
-        なし。
-    """
-    bin_dir = _make_bin_dir(tmp_path)
-    target = tmp_path.joinpath(*target_parts)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    target.chmod(0o755)
-    (bin_dir / "ruff").symlink_to(target)
-
-    result = _run_installer(tmp_path, path=f"{bin_dir}:{os.environ['PATH']}")
-
-    assert result.returncode == 0, result.stderr
-    assert _WARNING_MARKER not in result.stdout, label
-
-
-def test_does_not_warn_about_a_real_binary(tmp_path: Path) -> None:
-    """symlink でない実体には触れないこと（venv 内の ruff そのもの）。"""
-    bin_dir = _make_bin_dir(tmp_path)
-    real = bin_dir / "ruff"
-    real.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    real.chmod(0o755)
-
-    result = _run_installer(tmp_path, path=f"{bin_dir}:{os.environ['PATH']}")
+    result = _run_installer(tmp_path, path=f"{ruff.parent}:{os.environ['PATH']}")
 
     assert result.returncode == 0, result.stderr
     assert _WARNING_MARKER not in result.stdout
@@ -201,16 +122,9 @@ def test_survives_degenerate_path_values(tmp_path: Path, label: str, path_templa
     macOS の system bash は 3.2 で、`set -u` 下の `"${arr[@]}"` は**空配列で
     unbound variable** になる（実測）。配列で PATH を割る実装だと PATH が空の
     環境でインストーラごと落ちるため、その形に戻っていないことを固定する。
-
-    Args:
-        tmp_path: 合成ツリーを作る一時ディレクトリ。
-        label: 失敗時に PATH の形を読めるようにする表のラベル。
-        path_template: `{bin}` に合成 bin を埋める PATH のひな形。
-
-    Returns:
-        なし。
     """
-    bin_dir = _make_bin_dir(tmp_path)
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
 
     result = _run_installer(tmp_path, path=path_template.format(bin=bin_dir))
 
