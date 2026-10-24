@@ -1,6 +1,7 @@
 """tests/hooks の複数のファイルが使う補助。
 
 - secret scan 予算の deadline 生成・コミットメッセージ検証のスパイ
+- 実 git リポジトリでの commit 品質フック評価の土台（`_git` / `_init_git_repo` / `_evaluate_in_repo`）
 - 保護フックの `main()` をインプロセスで呼ぶ土台（`_HOOKS` / `_run` / payload 組み立て / `_repo_scope` / `_home_outside_repo`）
 - 保護語彙の期待値表（`_EXPECTED_*`、`_EXPECTED_VOCABULARIES`、`_EXTERNALLY_PINNED_VOCABULARIES`）。
   保護ファイル名の全数検査（`test_protection_bypass_regressions.py`）と語彙集合の固定
@@ -58,6 +59,42 @@ def _scan_deadline() -> float:
         例外は発生しません。
     """
     return commit_quality_scanner.new_secret_scan_deadline()
+
+
+def _git(repo: Path, *args: str) -> None:
+    """repo で git を実行し、失敗は例外にする。"""
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+def _init_git_repo(repo: Path, files: dict[str, str]) -> Path:
+    """``files``（相対パス → 内容）を 1 回コミットした使い捨ての git リポジトリを ``repo`` に作って返す。"""
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    for relative, content in files.items():
+        (repo / relative).parent.mkdir(parents=True, exist_ok=True)
+        (repo / relative).write_text(content, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "init")
+    return repo
+
+
+def _evaluate_in_repo(command: str, repo: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+    """repo を cwd にして ``command`` の commit 品質フックを評価し、メッセージ検証段へ入ったことも確かめる。
+
+    `resolve_repo_root` は lru_cache で前のテストの repo を覚えているため、前後で捨てる。
+    """
+    monkeypatch.chdir(repo)
+    hook_common.resolve_repo_root.cache_clear()
+    monkeypatch.setattr(pre_bash_commit_quality, "parse_json_object", lambda raw: {"tool_input": {"command": command}})
+    validated = _spy_commit_message_validation(monkeypatch)
+    try:
+        result = pre_bash_commit_quality.evaluate("payload")
+        assert validated == [command]
+        return result
+    finally:
+        hook_common.resolve_repo_root.cache_clear()
 
 
 # 検査対象フック名 → main() を持つモジュール。

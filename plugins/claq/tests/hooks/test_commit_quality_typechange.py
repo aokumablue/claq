@@ -9,73 +9,37 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from claq.hooks import commit_quality_scanner, pre_bash_commit_quality
-from claq.hooks.hook_common import resolve_repo_root
+
+from ._support import _evaluate_in_repo, _git, _init_git_repo
 
 _SECRET_LINE = "api" + "_key" + ' = "hunter2secret"\n'
 
 
-def _git(repo: Path, *args: str) -> None:
-    """repo で git を実行し、失敗は例外にする。"""
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
-
-
 def _make_repo(tmp_path: Path) -> Path:
-    """a.py を 1 回コミット済みの使い捨て git リポジトリを作る。"""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q")
-    _git(repo, "config", "user.email", "test@example.com")
-    _git(repo, "config", "user.name", "Test")
-    (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
-    (repo / "real.txt").write_text("hi\n", encoding="utf-8")
-    (repo / "sub").mkdir()
-    (repo / "sub" / "f.txt").write_text("f\n", encoding="utf-8")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "init")
-    return repo
+    """a.py・real.txt・sub/f.txt を 1 回コミット済みの使い捨て git リポジトリを作る。"""
+    return _init_git_repo(tmp_path / "repo", {"a.py": "x = 1\n", "real.txt": "hi\n", "sub/f.txt": "f\n"})
 
 
-def _evaluate(command: str, repo: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
-    """repo を cwd にして commit 品質フックを評価する。
-
-    `resolve_repo_root` は lru_cache で前のテストの repo を覚えているため、前後で捨てる。
-    """
-    monkeypatch.chdir(repo)
-    resolve_repo_root.cache_clear()
-    monkeypatch.setattr(
-        pre_bash_commit_quality,
-        "parse_json_object",
-        lambda raw: {"tool_input": {"command": command}},
-    )
-    # コミットメッセージ検証はこのファイルの関心外なので「問題なし」(None) のスパイに替える。
-    # None を返すだけではパッチが外れても結果が変わらないため、検証段へ実際に入ったことを記録で固定する。
-    validated: list[str] = []
-    monkeypatch.setattr(
-        pre_bash_commit_quality, "validate_commit_message", lambda message_command: validated.append(message_command)
-    )
-    try:
-        result = pre_bash_commit_quality.evaluate("payload")
-        assert validated == [command]
-        return result
-    finally:
-        resolve_repo_root.cache_clear()
-
-
-def test_staged_and_unstaged_listings_include_typechange(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """symlink -> 通常ファイルの typechange が staged / unstaged の両列挙に載ること。"""
+def _replace_committed_symlink_with_file(tmp_path: Path, content: str) -> Path:
+    """a.py を symlink にしてコミットした後、作業ツリーで ``content`` の通常ファイルへ置き換えた repo を返す。"""
     repo = _make_repo(tmp_path)
     (repo / "a.py").unlink()
     (repo / "a.py").symlink_to("real.txt")
     _git(repo, "add", "a.py")
     _git(repo, "commit", "-qm", "link")
     (repo / "a.py").unlink()
-    (repo / "a.py").write_text("y = 2\n", encoding="utf-8")
+    (repo / "a.py").write_text(content, encoding="utf-8")
+    return repo
+
+
+def test_staged_and_unstaged_listings_include_typechange(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """symlink -> 通常ファイルの typechange が staged / unstaged の両列挙に載ること。"""
+    repo = _replace_committed_symlink_with_file(tmp_path, "y = 2\n")
     monkeypatch.chdir(repo)
 
     assert pre_bash_commit_quality.get_unstaged_modified_files() == ["a.py"]
@@ -88,16 +52,10 @@ def test_secret_hidden_behind_symlink_to_file_typechange_is_blocked(
     command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """symlink を通常ファイルへ置き換えて secret を入れる commit は止まること。"""
-    repo = _make_repo(tmp_path)
-    (repo / "a.py").unlink()
-    (repo / "a.py").symlink_to("real.txt")
-    _git(repo, "add", "a.py")
-    _git(repo, "commit", "-qm", "link")
-    (repo / "a.py").unlink()
-    (repo / "a.py").write_text(_SECRET_LINE, encoding="utf-8")
+    repo = _replace_committed_symlink_with_file(tmp_path, _SECRET_LINE)
     _git(repo, "add", "a.py")
 
-    assert _evaluate(command, repo, monkeypatch)["exitCode"] == 2
+    assert _evaluate_in_repo(command, repo, monkeypatch)["exitCode"] == 2
 
 
 @pytest.mark.parametrize("command", ["git commit -m x", "git commit -a -m x"])
@@ -107,17 +65,12 @@ def test_regular_file_to_symlink_typechange_is_not_blocked(
 ) -> None:
     """通常ファイルを symlink（ファイル・ディレクトリ・壊れた先・repo 外）へ置き換えた正当な commit は通すこと。"""
     repo = _make_repo(tmp_path)
-    targets = {
-        "file": "real.txt",
-        "dir": "sub",
-        "broken": "nowhere",
-        "outside": str(tmp_path / "outside.txt"),
-    }
+    targets = {"file": "real.txt", "dir": "sub", "broken": "nowhere", "outside": str(tmp_path / "outside.txt")}
     (repo / "a.py").unlink()
     (repo / "a.py").symlink_to(targets[kind])
     _git(repo, "add", "a.py")
 
-    assert _evaluate(command, repo, monkeypatch)["exitCode"] == 0
+    assert _evaluate_in_repo(command, repo, monkeypatch)["exitCode"] == 0
 
 
 def test_staged_content_of_stage_prefixed_name_is_read_from_that_path(
@@ -128,10 +81,7 @@ def test_staged_content_of_stage_prefixed_name_is_read_from_that_path(
     ``git show :0:README.md`` 形の stage 前置が無いと、git は ``:0:README.md`` を
     stage 番号付きの指定として解釈し、別ファイルの中身を走査する。
     """
-    repo = _make_repo(tmp_path)
-    (repo / "README.md").write_text("readme\n", encoding="utf-8")
-    _git(repo, "add", "README.md")
-    _git(repo, "commit", "-qm", "readme")
+    repo = _init_git_repo(tmp_path / "repo", {"README.md": "readme\n"})
     (repo / "0:README.md").write_text(_SECRET_LINE, encoding="utf-8")
     _git(repo, "add", "0:README.md")
     monkeypatch.chdir(repo)
