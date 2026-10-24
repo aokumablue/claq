@@ -1,4 +1,4 @@
-"""claq.hooks.pre_bash_commit_quality が commit 種別ごとに検査するファイルの範囲のテスト（--amend・-a の未ステージ変更・未ステージ変更の取得）。"""
+"""claq.hooks.pre_bash_commit_quality が commit 種別ごとに検査するファイルの範囲のテスト（--amend・-a の未ステージ変更・走査対象の選別・secret scan 予算の共有・未ステージ変更の取得）。"""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
 from ._support import _evaluate_in_repo, _git, _init_git_repo, _spy_commit_message_validation
 
 _DASH_A = "git commit -am 'feat(core): add'"
+_PLAIN = "git commit -m 'feat(core): add'"
 _DUMMY_ROOT = Path("/dummy/repo")
 _SECRET_ISSUE = {"type": "secret", "severity": "error", "message": "hardcoded secret detected", "line": 1}
 
@@ -44,17 +45,22 @@ def _stub_commit(
     return logs
 
 
-def test_evaluate_commit_dash_a_shares_secret_scan_budget_with_worktree_files(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("command", "staged", "unstaged"),
+    [
+        # 予算がファイル単位だと 1 ファイル 9 秒 × 5 ファイルで累積 45 秒でも超過が 0 件になり、commit_quality_scanner の
+        # docstring が主張する「hook timeout（30 秒）に達しない」を満たせない。
+        (_PLAIN, [f"src/app{index}.js" for index in range(1, 6)], None),
+        # `-a` では `_count_file_issues` が INDEX 用と作業ツリー用の 2 回呼ばれるため、そこで deadline を作ると予算が 2 本になる。
+        (_DASH_A, ["src/staged1.js", "src/staged2.js"], ["src/unstaged.js"]),
+    ],
+    ids=["index-files", "dash-a-index-and-worktree"],
+)
+def test_evaluate_shares_one_secret_scan_budget(
+    monkeypatch: pytest.MonkeyPatch, command: str, staged: list[str], unstaged: list[str] | None
 ) -> None:
-    """`git commit -a` の INDEX 側と作業ツリー側でも予算は 1 本を共有すること。
-
-    `_count_file_issues` はフック 1 回につき INDEX 用と作業ツリー用の 2 回
-    呼ばれるため、そこで deadline を作ると予算が 2 本になり同じ穴が半分
-    残る。作業ツリー側のファイルが INDEX 側で使い切った予算を引き継いで
-    scan_error になることを固定する。
-    """
-    logs = _stub_commit(monkeypatch, _DASH_A, ["src/staged1.js", "src/staged2.js"], ["src/unstaged.js"])
+    """secret scan の実時間予算はフック 1 回の起動で 1 本を共有し、使い切った後のファイルは全て scan_error で deny すること（evaluate から駆動して deadline の伝播を固定する）。"""
+    logs = _stub_commit(monkeypatch, command, staged, unstaged)
     clock = itertools.count(0.0, 9.0)
     monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: next(clock))
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: "some text")
@@ -63,11 +69,12 @@ def test_evaluate_commit_dash_a_shares_secret_scan_budget_with_worktree_files(
 
     result = pre_bash_commit_quality.evaluate("payload")
 
-    # INDEX 側 2 件目（累積 18 秒）で予算が尽き、作業ツリー側（累積 27 秒）も
-    # 同じ予算を見るため scan_error になる。予算が 2 本なら後者は通ってしまう。
+    # 1 ファイルの時刻取得は lint / secret の 2 回。予算 10 秒は 1 件目の secret scan（累積 18 秒）で尽き、
+    # 以降のファイルは lint scan が同じ 1 本の予算を見て即 scan_error になる。予算が複数本なら後続が通ってしまう。
+    files = staged + (unstaged or [])
     assert result["exitCode"] == 2
-    assert any("src/unstaged.js" in message and "SecretScanBudgetExceeded" in message for message in logs)
-    assert validated == [_DASH_A]
+    assert [path for path in files if any(path in m and "SecretScanBudgetExceeded" in m for m in logs)] == files
+    assert validated == [command]
 
 
 def test_evaluate_commit_amend_with_nothing_staged_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -95,24 +102,27 @@ def _record_scans(monkeypatch: pytest.MonkeyPatch, issues: list[dict]) -> list[t
 
 
 @pytest.mark.parametrize(
-    ("command", "unstaged", "expected_seen"),
+    ("command", "staged", "unstaged", "expected_seen"),
     [
         # `-a` では未ステージの変更ファイルも加わり、その分は作業ツリー（repo_root 経由）から読む
         # （INDEX を読んで機能していなかった実欠陥の回帰防止）。
-        (_DASH_A, ["src/unstaged.py"], [("src/staged.py", None), ("src/unstaged.py", _DUMMY_ROOT)]),
+        (_DASH_A, ["src/staged.py"], ["src/unstaged.py"], [("src/staged.py", None), ("src/unstaged.py", _DUMMY_ROOT)]),
         # `-a` の無い通常コミットでは未ステージの変更ファイルを取得しない。
-        ("git commit -m 'feat(core): add'", None, [("src/staged.py", None)]),
+        (_PLAIN, ["src/staged.py"], None, [("src/staged.py", None)]),
+        # lint 非対象の拡張子（.env）も secret の走査対象に含め、lint・secret の双方の対象外（lock ファイル）は外す。
+        (_PLAIN, [".env", "package-lock.json"], None, [(".env", None)]),
     ],
-    ids=["dash-a", "without-dash-a"],
+    ids=["dash-a", "without-dash-a", "scan-targets"],
 )
 def test_evaluate_scans_the_files_the_commit_includes(
     monkeypatch: pytest.MonkeyPatch,
     command: str,
+    staged: list[str],
     unstaged: list[str] | None,
     expected_seen: list[tuple[str, Path | None]],
 ) -> None:
-    """commit が含むファイルだけを、INDEX 側と作業ツリー側の正しい読み取り元で検査して通すこと。"""
-    _stub_commit(monkeypatch, command, ["src/staged.py"], unstaged)
+    """commit が含む走査対象のファイルだけを、INDEX 側と作業ツリー側の正しい読み取り元で検査して通すこと。"""
+    _stub_commit(monkeypatch, command, staged, unstaged)
     seen = _record_scans(monkeypatch, [])
     validated = _spy_commit_message_validation(monkeypatch)
 

@@ -22,7 +22,7 @@ _SECRET_LINE = "api" + "_key" + ' = "hunter2secret"\n'
 _OVER_1MIB = "x" * (1024 * 1024 + 1)
 
 
-def _issues(file_path: str, content: str, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+def _issues(file_path: str, content: str | None, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """INDEX の内容を ``content`` に差し替えて ``find_file_issues`` を満額の予算で呼ぶ。"""
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
     return commit_quality_scanner.find_file_issues(file_path, deadline=_scan_deadline())
@@ -77,6 +77,8 @@ def _issues(file_path: str, content: str, monkeypatch: pytest.MonkeyPatch) -> li
         ),
         ("src/app.js", _API_KEY_LINE + "\n" + _OVER_1MIB, [("secret", 1, "error")]),
         ("src/app.js", "x" * (1024 * 1024 - 100) + "\n" + _API_KEY_LINE, [("secret", 2, "error")]),
+        # 内容を取得できない（git が無い等で None）ファイルは「問題なし」にせず、検査不能の scan_error（error）でブロック対象にする。
+        ("src/app.js", None, [("scan_error", 0, "error")]),
     ],
     ids=[
         "lint-mix",
@@ -92,10 +94,11 @@ def _issues(file_path: str, content: str, monkeypatch: pytest.MonkeyPatch) -> li
         "secret-past-1mib",
         "secret-before-1mib-padding",
         "secret-under-1mib",
+        "content-unavailable",
     ],
 )
 def test_find_file_issues_by_path_and_content(
-    monkeypatch: pytest.MonkeyPatch, file_path: str, content: str, expected: list[tuple[str, int, str]]
+    monkeypatch: pytest.MonkeyPatch, file_path: str, content: str | None, expected: list[tuple[str, int, str]]
 ) -> None:
     """パスと内容ごとに、lint と secret の issue が (種別, 行, severity) の完全一致で出ること。"""
     issues = _issues(file_path, content, monkeypatch)
@@ -133,16 +136,20 @@ def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(monkeyp
         ("_scan_lint_issues", ValueError("boom"), _API_KEY_LINE, [("scan_error", "warning"), ("secret", "error")]),
         # 走査対象判定自体が例外を投げても検査不能を報告する。
         ("_is_binary_content", OSError("boom"), "content", [("scan_error", "error")]),
+        # 読み取り関数が契約（読めなければ None）を破って例外を投げても、握り潰さず検査不能を報告する
+        # （無条件に [] を返すと、検査したのか対象外だったのかが区別できない）。
+        ("get_staged_file_content", RuntimeError("boom"), "", [("scan_error", "error")]),
     ],
-    ids=["secret-scan", "lint-scan", "scan-target-detection"],
+    ids=["secret-scan", "lint-scan", "scan-target-detection", "file-read"],
 )
 def test_find_file_issues_reports_stage_exception_as_scan_error(
     monkeypatch: pytest.MonkeyPatch, target: str, error: Exception, content: str, expected: list[tuple[str, str]]
 ) -> None:
     """各段階の例外は issue を消さず、段階ごとの severity の scan_error（パスと例外型名入り）として報告されること。"""
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
     monkeypatch.setattr(commit_quality_scanner, target, mock.Mock(side_effect=error))
 
-    issues = _issues("src/app.js", content, monkeypatch)
+    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
 
     assert [(issue["type"], issue["severity"]) for issue in issues] == expected
     scan_error = next(issue for issue in issues if issue["type"] == "scan_error")
@@ -239,6 +246,13 @@ def test_get_staged_file_content(
     monkeypatch.setattr(commit_quality_scanner.subprocess, "run", fake_run)
 
     assert commit_quality_scanner.get_staged_file_content("src/app.js") == expected
+
+
+def test_get_staged_file_content_returns_none_when_git_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """git を起動できない（FileNotFoundError）ときも None（検査不能）を返すこと。"""
+    monkeypatch.setattr(commit_quality_scanner.subprocess, "run", mock.Mock(side_effect=FileNotFoundError("missing")))
+
+    assert commit_quality_scanner.get_staged_file_content("src/app.js") is None
 
 
 @pytest.fixture

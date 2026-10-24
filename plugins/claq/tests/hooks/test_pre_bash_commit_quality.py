@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Callable
 
 import pytest
 
-from claq.hooks import block_no_verify, commit_risk
+from claq.hooks import block_no_verify, commit_risk, stdin_io
 from claq.hooks import pre_bash_commit_quality as pbcq
 
 
@@ -56,54 +57,75 @@ class TestShellSeparatorTokenization:
         assert block_no_verify.has_bypass_flag(quoted) is False
 
 
+def _unreadable_stdin() -> tuple[str, bool]:
+    """stdin を読めない状態（`StdinUnavailableError`）を再現する。"""
+    raise stdin_io.StdinUnavailableError("boom")
+
+
+# (stdin の読み取り, deny 理由)。main() で deny が決まる経路。
+_DENIED_READS = [
+    pytest.param(lambda: ("{not-even-json", True), pbcq._TRUNCATED_INPUT_MESSAGE, id="truncated"),
+    # malformed JSON だが raw 文字列上に `git commit` が見える経路は、staged files 取得を経由せず即座に deny を確定する。
+    pytest.param(
+        lambda: ("not-json but has git commit in it", False), pbcq._MALFORMED_COMMIT_MESSAGE, id="commit-confirmed"
+    ),
+    # 「読めない」を「入力なし」へ正規化して exit 0 にすると、Windows のパイプで allow と deny が同じ exit 0 になる
+    # （docs/adr/hook-failure-direction.md）。
+    pytest.param(
+        _unreadable_stdin, stdin_io.stdin_unreadable_message("pre:bash-commit-quality", "boom"), id="stdin-unreadable"
+    ),
+]
+
+
 class TestMainStdinBoundary:
-    """stdin truncation 検知と main() の fail-open/fail-closed 境界分割。"""
-
-    @staticmethod
-    def _feed(monkeypatch: pytest.MonkeyPatch, raw: str, truncated: bool) -> None:
-        """stdin の読み取りを ``(raw, truncated)`` を返す差し替えにする。"""
-        monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin_with_truncation", lambda: (raw, truncated))
-
-    def test_truncated_stdin_is_fail_closed(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """1 MiB 超で切り捨てられた入力は commit 判定不能として deny する。"""
-        self._feed(monkeypatch, "{not-even-json", True)
-
-        assert pbcq.main() == 2
-        err = capsys.readouterr().err
-        assert "BLOCKED" in err
-        assert "exceeded" in err
+    """stdin の切り捨て・読み取り不能の検知と main() の fail-open/fail-closed 境界分割。"""
 
     @pytest.mark.parametrize(
-        ("raw", "truncated"),
+        ("read", "expected_reason"),
         [
-            ("{not-even-json", True),
-            # malformed JSON だが raw 文字列上に `git commit` が見える経路（_MALFORMED_COMMIT_MESSAGE）は
-            # staged files 取得を経由せず即座に exitCode=2 を確定する。
-            ("not-json but has git commit in it", False),
+            *_DENIED_READS,
+            pytest.param(
+                lambda: (json.dumps({"tool_input": {"command": "git status"}}), False), None, id="non-commit"
+            ),
         ],
-        ids=["truncated", "commit-confirmed"],
     )
-    def test_emit_block_output_failure_after_deny_is_fail_closed(
-        self, monkeypatch: pytest.MonkeyPatch, raw: str, truncated: bool
+    def test_main_exit_code_and_output(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        read: Callable[[], tuple[str, bool]],
+        expected_reason: str | None,
     ) -> None:
-        """truncation 検知後・commit 確定後に deny が決まってからの emit_block_output 失敗は fail-closed（exit 2）。"""
-        self._feed(monkeypatch, raw, truncated)
+        """deny は exit 2 と理由入りの deny JSON・stderr を出し、commit でないコマンドは品質スキャンに入らず無出力の exit 0 で通すこと。"""
+        monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin_with_truncation", read)
 
-        def _raise(_reason: str) -> int:
-            """出力層の失敗を再現する。"""
+        rc = pbcq.main()
+        captured = capsys.readouterr()
+
+        if expected_reason is None:
+            assert (rc, captured.out, captured.err) == (0, "", "")
+        else:
+            assert rc == 2
+            assert json.loads(captured.out) == {"permissionDecision": "deny", "permissionDecisionReason": expected_reason}
+            assert expected_reason in captured.err
+
+    @pytest.mark.parametrize(("read", "expected_reason"), _DENIED_READS)
+    def test_emit_block_output_failure_after_deny_is_fail_closed(
+        self, monkeypatch: pytest.MonkeyPatch, read: Callable[[], tuple[str, bool]], expected_reason: str
+    ) -> None:
+        """deny が決まってからの emit_block_output 失敗（出力層の失敗）でも、その理由を渡したうえで exit 2 を保つこと。"""
+        monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin_with_truncation", read)
+        reasons: list[str] = []
+
+        def _raise(reason: str) -> int:
+            """渡された理由を記録し、出力層の失敗を再現する。"""
+            reasons.append(reason)
             raise RuntimeError("emit failure")
 
         monkeypatch.setattr("claq.hooks.hook_common.emit_block_output", _raise)
 
         assert pbcq.main() == 2
-
-    def test_non_commit_command_still_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """commit でないコマンドは exit 0 で通すこと。"""
-        self._feed(monkeypatch, json.dumps({"tool_input": {"command": "git status"}}), False)
-
-        assert pbcq.main() == 0
+        assert reasons == [expected_reason]
 
 
 class TestCompoundCommitGuard:
@@ -424,7 +446,11 @@ class TestStagedFileNameDecoding:
 
         assert pbcq.get_staged_files() == expected
 
-    @pytest.mark.parametrize("error", [PermissionError("git is not executable"), OSError("exec format error")])
+    @pytest.mark.parametrize(
+        "error",
+        [PermissionError("git is not executable"), OSError("exec format error"), FileNotFoundError("missing")],
+        ids=["permission-error", "exec-format-error", "git-missing"],
+    )
     def test_os_errors_are_caught_as_unavailable(self, monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
         """git を起動できない OSError 系は None（検査不能）に落ちること。
 

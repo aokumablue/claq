@@ -433,9 +433,10 @@ def test_pre_compact_main_logs_error_without_blocking(monkeypatch: pytest.Monkey
     [
         ("block_no_verify", json.dumps({"tool_input": {"command": "git status"}})),
         ("config_protection", json.dumps({"tool_input": {"file_path": "README.md"}})),
+        ("pre_bash_commit_quality", ""),
         ("pre_compact", ""),
     ],
-    ids=["block_no_verify", "config_protection", "pre_compact"],
+    ids=["block_no_verify", "config_protection", "pre_bash_commit_quality", "pre_compact"],
 )
 def test_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, module_name: str, stdin: str) -> None:
     """各フックを __main__ として起動すると、通る入力で exit 0 を返すこと（pre_compact の記録先は tmp_path）。"""
