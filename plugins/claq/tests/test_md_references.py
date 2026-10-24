@@ -9,17 +9,16 @@ from __future__ import annotations
 
 import functools
 import importlib.util
+import json
 import re
 import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 
-import pytest
-
 _ROOT = Path(__file__).resolve().parents[1]
 _TARGET_DIRS = ("agents", "skills", "commands")
-_REF_PATTERN = re.compile(r"`([^`\n]+\.md)`")
+_MD_REF_RE = re.compile(r"`([^`\n]+\.md)`")
 # リポジトリ内パスとして解決してはいけない参照。各エントリに理由を持たせる。
 _NON_REPO_MD_REFS = {
     "CLAUDE.md": "利用者側リポジトリのファイル",
@@ -34,10 +33,14 @@ _REPO_ROOT_MD_REF_PREFIXES = ("docs/adr/",)
 _REPO_ROOT = _ROOT.parent.parent
 
 
-def _iter_md_files() -> Iterator[Path]:
-    """検証対象の md ファイルを列挙する。"""
-    for dirname in _TARGET_DIRS:
-        yield from sorted((_ROOT / dirname).rglob("*.md"))
+@functools.cache
+def _md_corpus() -> tuple[tuple[Path, str], ...]:
+    """検証対象の md ファイルと本文の組を列挙する。"""
+    return tuple(
+        (path, path.read_text(encoding="utf-8"))
+        for dirname in _TARGET_DIRS
+        for path in sorted((_ROOT / dirname).rglob("*.md"))
+    )
 
 
 def test_relative_md_references_resolve() -> None:
@@ -60,9 +63,8 @@ def test_relative_md_references_resolve() -> None:
     を使う（``_REPO_ROOT_MD_REF_PREFIXES``）。
     """
     broken: list[str] = []
-    for md_file in _iter_md_files():
-        text = md_file.read_text(encoding="utf-8")
-        for match in _REF_PATTERN.finditer(text):
+    for md_file, text in _md_corpus():
+        for match in _MD_REF_RE.finditer(text):
             ref = match.group(1)
             if ref.startswith("~/") or any(ch in ref for ch in "{<*") or ref in _NON_REPO_MD_REFS:
                 continue
@@ -101,7 +103,7 @@ def test_readme_command_table_matches_filesystem() -> None:
 
     リンク切れだけでなく、ファイルは存在するのに表から抜けている（在庫ドリフト）も検出する。
     """
-    readme = (_ROOT.parent.parent / "README.md").read_text(encoding="utf-8")
+    readme = (_REPO_ROOT / "README.md").read_text(encoding="utf-8")
     linked = set(re.findall(r"\]\(plugins/claq/commands/([a-z-]+\.md)\)", readme))
     actual = {p.name for p in (_ROOT / "commands").glob("*.md")}
     assert linked == actual, f"README Commands 表と実体の差分: リンクのみ={linked - actual} 実体のみ={actual - linked}"
@@ -113,22 +115,22 @@ def test_readme_agent_skill_command_counts_match_filesystem() -> None:
     `Agents (16)`（実 13）のような在庫ドリフトを防ぐため、表記が複数箇所に
     あってもすべて実数と一致することを確認する。
     """
-    readme = (_ROOT.parent.parent / "README.md").read_text(encoding="utf-8")
+    readme = (_REPO_ROOT / "README.md").read_text(encoding="utf-8")
     counts = {
-        "agents": len(list((_ROOT / "agents").glob("*.md"))),
-        "skills": len([p for p in (_ROOT / "skills").iterdir() if p.is_dir()]),
-        "commands": len(list((_ROOT / "commands").glob("*.md"))),
+        "Agents": len(list((_ROOT / "agents").glob("*.md"))),
+        "Skills": len([p for p in (_ROOT / "skills").iterdir() if p.is_dir()]),
+        "Commands": len(list((_ROOT / "commands").glob("*.md"))),
     }
 
-    for label, pattern, key in (
-        ("Agents", r"Agents \((\d+)\)", "agents"),
-        ("Skills", r"Skills \((\d+)", "skills"),
-        ("Commands", r"Commands \((\d+)\)", "commands"),
+    for label, pattern in (
+        ("Agents", r"Agents \((\d+)\)"),
+        ("Skills", r"Skills \((\d+)"),
+        ("Commands", r"Commands \((\d+)\)"),
     ):
         matches = re.findall(pattern, readme)
         assert matches, f"README に `{label} (N)` 表記が見つからない"
         for n in matches:
-            assert int(n) == counts[key], f"README の {label} 件数表記 {n} が実体 {counts[key]} と不一致"
+            assert int(n) == counts[label], f"README の {label} 件数表記 {n} が実体 {counts[label]} と不一致"
 
 
 _VENDOR_PATH_MARKERS = (".copilot", ".grok", "installed-plugins", "CLAUDE_PLUGIN_ROOT")
@@ -156,12 +158,12 @@ def test_md_surfaces_have_no_vendor_specific_paths() -> None:
     正当にベンダパスを持つ別モジュールなので対象外（このテストの対象は
     agents/commands/skills の md のみ）。
     """
-    violations: list[str] = []
-    for md_file in _iter_md_files():
-        text = md_file.read_text(encoding="utf-8")
-        for marker in _VENDOR_PATH_MARKERS:
-            if marker in text:
-                violations.append(f"{md_file.relative_to(_ROOT)}: ベンダ固有マーカー `{marker}` を含む")
+    violations = [
+        f"{md_file.relative_to(_ROOT)}: ベンダ固有マーカー `{marker}` を含む"
+        for md_file, text in _md_corpus()
+        for marker in _VENDOR_PATH_MARKERS
+        if marker in text
+    ]
     assert violations == [], "\n".join(violations)
 
 
@@ -173,12 +175,12 @@ def test_claq_run_bash_fences_bootstrap_in_same_block() -> None:
     source 済み」という前提は実行時に ``claq_run: command not found``
     （exit 127）になるため、呼び出しと bootstrap は必ず同一フェンスに置く。
     """
-    violations: list[str] = []
-    for md_file in _iter_md_files():
-        text = md_file.read_text(encoding="utf-8")
-        for block in _BASH_FENCE_RE.findall(text):
-            if ("claq_run" in block or "claq_mem_learn" in block) and _ENV_POINTER_LINE not in block:
-                violations.append(f"{md_file.relative_to(_ROOT)}: bootstrap を欠く bash フェンス: {block[:80]!r}")
+    violations = [
+        f"{md_file.relative_to(_ROOT)}: bootstrap を欠く bash フェンス: {block[:80]!r}"
+        for md_file, text in _md_corpus()
+        for block in _BASH_FENCE_RE.findall(text)
+        if ("claq_run" in block or "claq_mem_learn" in block) and _ENV_POINTER_LINE not in block
+    ]
     assert violations == [], "\n".join(violations)
 
 
@@ -192,14 +194,13 @@ def test_mem_learn_invocations_pass_no_status_or_source_flag() -> None:
     `list`/`search` の絞り込み用 `--status`（``claq_run claq.mem.cli list
     --status pending`` 等）は対象外 — 判定は ``claq_mem_learn`` を含む論理行に限る。
     """
-    violations: list[str] = []
-    for md_file in _iter_md_files():
-        text = md_file.read_text(encoding="utf-8")
-        for block in _BASH_FENCE_RE.findall(text):
-            joined = re.sub(r"\\\n", " ", block)
-            for line in joined.splitlines():
-                if "claq_mem_learn" in line and ("--status" in line or "--source" in line):
-                    violations.append(f"{md_file.relative_to(_ROOT)}: {line.strip()!r}")
+    violations = [
+        f"{md_file.relative_to(_ROOT)}: {line.strip()!r}"
+        for md_file, text in _md_corpus()
+        for block in _BASH_FENCE_RE.findall(text)
+        for line in re.sub(r"\\\n", " ", block).splitlines()
+        if "claq_mem_learn" in line and ("--status" in line or "--source" in line)
+    ]
     assert violations == [], "\n".join(violations)
 
 
@@ -217,21 +218,14 @@ _EXPECTED_AGENT_TOOLS = {
 
 
 def _declared_tools(agent_name: str) -> set[str]:
-    """エージェント定義の frontmatter が宣言する tools 集合を返す。
-
-    Args:
-        agent_name: 拡張子を除いたエージェント名。
-
-    Returns:
-        宣言されたツール名の集合。
-    """
+    """エージェント定義の frontmatter が宣言する tools 集合を返す。"""
     frontmatter = (_ROOT / "agents" / f"{agent_name}.md").read_text(encoding="utf-8").split("---")[1]
     tools_line = next(line for line in frontmatter.splitlines() if line.strip().startswith("tools:"))
     return {tool.strip() for tool in tools_line.split(":", 1)[1].split(",")}
 
 
 def test_agent_tools_match_expected_exactly() -> None:
-    """9 定義の tools 宣言が期待集合と完全一致すること（docs/adr/definition-and-subagent-design.md）。
+    """agents/*.md の実体と tools 宣言が期待マップと完全一致し、どのエージェントも Task を持たないこと。
 
     security-auditor の read-only は「本文の約束」ではなく tools 権限による技術的
     強制であり、reviewer との権限非対称は docs/adr/definition-and-subagent-design.md の決定そのもの。同ファイルは
@@ -241,30 +235,18 @@ def test_agent_tools_match_expected_exactly() -> None:
     Bash/Edit/Write の**非包含**だけを見ると、`Task`（Bash 持ち
     サブエージェントへ委譲できる）や `NotebookEdit` の追加を素通りさせる。権限
     はレビューできる場所に固定しておく必要があるため、集合の完全一致で検査する。
+    キーも実体の全件と突き合わせ、エージェントの追加・削除でマップの更新を強制する。
+    manifest は agents を列挙せず auto-discovery に任せるため、ここが 9 体の surface の
+    欠落を検出する唯一の安全網でもある。Task の不在は期待マップごと書き換えられても
+    残るよう、宣言そのものに対して別に見る。
     """
-    actual = {name: _declared_tools(name) for name in _EXPECTED_AGENT_TOOLS}
+    actual = {p.stem: _declared_tools(p.stem) for p in (_ROOT / "agents").glob("*.md")}
     assert actual == _EXPECTED_AGENT_TOOLS
-
-
-def test_agent_files_match_expected_tools_map() -> None:
-    """tools 期待マップが agents/*.md の実体と過不足なく対応すること。
-
-    エージェントを追加・削除したときにマップの更新を強制する（マップから漏れた
-    定義は test_agent_tools_match_expected_exactly の検査を受けない）。
-    """
-    actual = {p.stem for p in (_ROOT / "agents").glob("*.md")}
-    assert actual == set(_EXPECTED_AGENT_TOOLS)
-
-
-def test_no_agent_can_spawn_subagents() -> None:
-    """どのエージェントも Task を持たないこと（docs/adr/definition-and-subagent-design.md「子が子を呼ばない」）。"""
-    holders = [name for name in _EXPECTED_AGENT_TOOLS if "Task" in _declared_tools(name)]
-    assert holders == []
+    assert [name for name, tools in actual.items() if "Task" in tools] == []
 
 
 _SECTION_REF_RE = re.compile(r"「(#+ [^」]+)」")
 _BACKTICK_SECTION_REF_RE = re.compile(r"`(#+ [^`\n。、]+)`")
-_MD_PATH_REF_RE = re.compile(r"`([^`\n]+\.md)`")
 _HEADING_RE = re.compile(r"^(#+ .+)$", re.M)
 _FENCE_RE = re.compile(r"```.*?```", re.S)
 # `#` が行コメントである言語のフェンスは見出しを持たない（`# FAIL: ...` はコメント）。
@@ -282,12 +264,6 @@ def _collect_headings(text: str) -> tuple[set[str], set[str]]:
     dangling 参照を隠す（実測: agents/skills 全体で 64 個）。一方 code-refiner の
     ``## 未確認・スコープ外`` のようにテンプレート内にしか存在しない節も参照される
     ため、除外ではなく別集合として扱う。
-
-    Args:
-        text: Markdown ファイルの全文。
-
-    Returns:
-        (実見出しの集合, テンプレート見出しの集合)。
     """
     template: set[str] = set()
     for match in _FENCE_RE.finditer(text):
@@ -307,15 +283,9 @@ def _iter_section_refs(text: str) -> Iterator[tuple[str, tuple[str, ...]]]:
     (checkpoint → loop-dev の ``## Human Gate`` 等)。1 行が複数のファイルへ言及
     することがある（loop-dev の record 行は learn と checkpoint の両方を挙げつつ
     checkpoint 側の節を参照する）ため、最初の 1 件ではなく全件を候補として返す。
-
-    Args:
-        text: Markdown ファイルの全文。
-
-    Yields:
-        (節見出しテキスト, 解決先候補の相対パスのタプル)。候補が無ければ空タプル。
     """
     for line in text.splitlines():
-        targets = tuple(match.group(1) for match in _MD_PATH_REF_RE.finditer(line))
+        targets = tuple(match.group(1) for match in _MD_REF_RE.finditer(line))
         for pattern in (_SECTION_REF_RE, _BACKTICK_SECTION_REF_RE):
             for match in pattern.finditer(line):
                 yield match.group(1).strip(), targets
@@ -328,13 +298,6 @@ def _resolves(ref: str, headings: tuple[set[str], set[str]]) -> bool:
     実見出し ``## モード: benchmark_analysis — ベンチマーク結果の分析``）。逆向きは
     現行コーパスで 1 件も必要とされず、削除済み節への参照がたまたま別見出しの
     先頭語を含むだけで通る検出漏れを生むため許さない。
-
-    Args:
-        ref: 参照された節見出しテキスト。
-        headings: _collect_headings の戻り値。
-
-    Returns:
-        解決すれば True。
     """
     return any(head == ref or head.startswith(ref) for head in headings[0] | headings[1])
 
@@ -349,8 +312,7 @@ def test_intra_document_section_references_resolve() -> None:
     """
     broken: list[str] = []
     cache: dict[Path, tuple[set[str], set[str]]] = {}
-    for md_file in _iter_md_files():
-        text = md_file.read_text(encoding="utf-8")
+    for md_file, text in _md_corpus():
         cache[md_file] = _collect_headings(text)
         for ref, targets in _iter_section_refs(text):
             candidates = [cache[md_file]]
@@ -425,11 +387,12 @@ def test_plugin_component_references_exist() -> None:
         | {p.name for p in (_ROOT / "skills").iterdir() if p.is_dir()}
         | {p.stem for p in (_ROOT / "commands").glob("*.md")}
     )
-    missing: list[str] = []
-    for md_file in _iter_md_files():
-        for match in _PLUGIN_REF_RE.finditer(md_file.read_text(encoding="utf-8")):
-            if match.group(1) not in known:
-                missing.append(f"{md_file.relative_to(_ROOT)}: claq:{match.group(1)}")
+    missing = [
+        f"{md_file.relative_to(_ROOT)}: claq:{name}"
+        for md_file, text in _md_corpus()
+        for name in _PLUGIN_REF_RE.findall(text)
+        if name not in known
+    ]
     assert missing == [], "実在しない参照:\n" + "\n".join(sorted(set(missing)))
 
 
@@ -439,56 +402,43 @@ def test_claq_run_module_references_are_importable() -> None:
     hooks.json のドット区切り参照と同じく、モジュール名は Python の import 文
     に現れないため、リネームやモジュール削除で静かに壊れる。
     """
-    missing: list[str] = []
-    for md_file in _iter_md_files():
-        for match in _MODULE_REF_RE.finditer(md_file.read_text(encoding="utf-8")):
-            module = match.group(1)
-            if importlib.util.find_spec(module) is None:
-                missing.append(f"{md_file.relative_to(_ROOT)}: {module}")
+    missing = [
+        f"{md_file.relative_to(_ROOT)}: {module}"
+        for md_file, text in _md_corpus()
+        for module in _MODULE_REF_RE.findall(text)
+        if importlib.util.find_spec(module) is None
+    ]
     assert missing == [], "import できないモジュール参照:\n" + "\n".join(sorted(set(missing)))
 
 
 # ルーブリック版を書き写している md と、そこから版を取り出す正規表現。
 # 実装の定数を含めて 3 箇所が同じ文字列を持つ。1 箇所しか照合しないと
 # 残りが取り残され、版を上げても古い版のスコアと比較する助言が出せてしまう。
-_RUBRIC_VERSION_SITES = (
-    (Path("agents") / "harness-tuner.md", re.compile(r'"rubric_version":\s*"([^"]+)"')),
-)
+_RUBRIC_VERSION_SITES = ((Path("agents") / "harness-tuner.md", re.compile(r'"rubric_version":\s*"([^"]+)"')),)
+_RUBRIC_VERSION_ANY_RE = re.compile(r'(?:ルーブリック版: `|"rubric_version":\s*")(\d{4}-\d{2}-\d{2})')
 
 
-@pytest.mark.parametrize(("relative_path", "pattern"), _RUBRIC_VERSION_SITES)
-def test_md_rubric_version_matches_audit_constant(relative_path: Path, pattern: re.Pattern[str]) -> None:
-    """ルーブリック版を書き写している md がすべて実装の定数と一致すること。
+def test_md_rubric_version_matches_audit_constant() -> None:
+    """ルーブリック版を書き写している md がすべて実装の定数と一致し、照合箇所の外にも食い違う版が無いこと。
 
     スコアはルーブリック版の中でのみ比較可能で、版が上がると過去のベースラインとは
     比較不能になる。実装側の定数と md の散文は別々に書かれるため、照合しないと
     片方だけ更新しても何も落ちず、比較不能なスコア比較が静かに通る。
+    照合箇所を列挙する方式は新しい書き写し先が増えたときに取りこぼすため、md 全体の
+    「日付形式の rubric 版らしき文字列」も実装と照合し、`_RUBRIC_VERSION_SITES` の更新漏れ自体を検出する。
     """
     from claq.ci.harness_audit import RUBRIC_VERSION
 
-    text = (_ROOT / relative_path).read_text(encoding="utf-8")
-    found = pattern.findall(text)
-    assert found, f"{relative_path} にルーブリック版の表記が見つからない（{pattern.pattern}）"
-    for version in found:
-        assert version == RUBRIC_VERSION, (
-            f"{relative_path} のルーブリック版 {version} が実装の {RUBRIC_VERSION} と不一致"
+    for relative_path, pattern in _RUBRIC_VERSION_SITES:
+        found = pattern.findall((_ROOT / relative_path).read_text(encoding="utf-8"))
+        assert found, f"{relative_path} にルーブリック版の表記が見つからない（{pattern.pattern}）"
+        assert set(found) == {RUBRIC_VERSION}, (
+            f"{relative_path} のルーブリック版 {found} が実装の {RUBRIC_VERSION} と不一致"
         )
-
-
-def test_no_stale_rubric_version_strings_remain() -> None:
-    """定義済みの照合箇所以外に、実装と食い違う版文字列が残っていないこと。
-
-    照合箇所を列挙する方式は、新しい書き写し先が増えたときに取りこぼす。
-    md 全体を走査して「日付形式の rubric 版らしき文字列」が実装と一致することも
-    併せて固定し、`_RUBRIC_VERSION_SITES` の更新漏れ自体を検出する。
-    """
-    from claq.ci.harness_audit import RUBRIC_VERSION
-
-    version_pattern = re.compile(r'(?:ルーブリック版: `|"rubric_version":\s*")(\d{4}-\d{2}-\d{2})')
     stale = [
         f"{md_file.relative_to(_ROOT)}: {version}"
-        for md_file in _iter_md_files()
-        for version in version_pattern.findall(md_file.read_text(encoding="utf-8"))
+        for md_file, text in _md_corpus()
+        for version in _RUBRIC_VERSION_ANY_RE.findall(text)
         if version != RUBRIC_VERSION
     ]
     assert stale == [], "実装の RUBRIC_VERSION と食い違う版表記:\n" + "\n".join(sorted(stale))
@@ -519,28 +469,20 @@ _MD_CALLABLE_EXEMPTIONS = {
 
 
 def _function_names(path: Path) -> set[str]:
-    """Python ファイルが定義する関数の名前を集める。
+    """Python ファイルが定義する関数の名前を集める。"""
+    return set(_PY_DEF_RE.findall(path.read_text(encoding="utf-8")))
 
-    Args:
-        path: Python ファイルのパス。
 
-    Returns:
-        関数名の集合。
-    """
-    return {m.group(1) for m in _PY_DEF_RE.finditer(path.read_text(encoding="utf-8"))}
+@functools.cache
+def _shell_helpers() -> frozenset[str]:
+    """runtime/claq-helpers.sh が定義するシェル関数の名前を集める。"""
+    return frozenset(_SHELL_FUNC_RE.findall(_HELPERS_SH.read_text(encoding="utf-8")))
 
 
 @functools.cache
 def _shared_callables() -> frozenset[str]:
-    """全ての md が名指ししてよい名前（src/ の Python 関数と runtime シェルヘルパ）を集める。
-
-    Returns:
-        関数名の集合。
-    """
-    names = {m.group(1) for m in _SHELL_FUNC_RE.finditer(_HELPERS_SH.read_text(encoding="utf-8"))}
-    for py in (_ROOT / "src").rglob("*.py"):
-        names |= _function_names(py)
-    return frozenset(names)
+    """全ての md が名指ししてよい名前（src/ の Python 関数と runtime シェルヘルパ）を集める。"""
+    return _shell_helpers().union(*(_function_names(py) for py in (_ROOT / "src").rglob("*.py")))
 
 
 @functools.cache
@@ -548,12 +490,6 @@ def _skill_asset_callables(skill: str) -> frozenset[str]:
     """スキルのスケルトン（skills/<name>/assets）の Python 関数の名前を集める。
 
     スケルトンは生成先へ複製される実装であり、名指ししてよいのはそのスキルの md だけ。
-
-    Args:
-        skill: スキルのディレクトリ名。
-
-    Returns:
-        関数名の集合。
     """
     return frozenset(name for py in (_ROOT / "skills" / skill).glob("assets/**/*.py") for name in _function_names(py))
 
@@ -565,12 +501,6 @@ def _defined_callables(md_file: Path) -> frozenset[str]:
     （skills/<name>/assets）の関数の名前は、同じ skills/<name>/ 配下の md にだけ効く。全スキルの
     スケルトンの名前を全ての md に効かせると、open・view・resolve のような汎用の名前が
     スケルトンと無関係な md でも定義済みとして通り、ずれを見逃す。
-
-    Args:
-        md_file: 名指ししている md（`_ROOT` 配下）。
-
-    Returns:
-        定義済みとみなす名前の集合。
     """
     parts = md_file.relative_to(_ROOT).parts
     if parts[0] != "skills":
@@ -586,14 +516,12 @@ def test_md_named_callables_are_defined() -> None:
     実在は見ていなかった。スキルのスケルトンの関数は、そのスキルの md でだけ定義済みとみなす
     （`_defined_callables`）。
     """
-    missing: list[str] = []
-    for md_file in _iter_md_files():
-        defined = _defined_callables(md_file)
-        for match in _MD_CALLABLE_RE.finditer(md_file.read_text(encoding="utf-8")):
-            name = match.group(1)
-            if name in defined or name in _MD_CALLABLE_EXEMPTIONS:
-                continue
-            missing.append(f"{md_file.relative_to(_ROOT)}: `{name}(...)`")
+    missing = [
+        f"{md_file.relative_to(_ROOT)}: `{name}(...)`"
+        for md_file, text in _md_corpus()
+        for name in _MD_CALLABLE_RE.findall(text)
+        if name not in _defined_callables(md_file) and name not in _MD_CALLABLE_EXEMPTIONS
+    ]
     assert missing == [], "実装に存在しない呼び出し表記:\n" + "\n".join(sorted(set(missing)))
     assert all(_MD_CALLABLE_EXEMPTIONS.values()), "免除には理由が要る"
 
@@ -624,28 +552,29 @@ def test_md_shell_helper_invocations_are_defined() -> None:
     シェル関数名は Python の import に現れないため、リネームしても何も落ちず、
     実行時に exit 127（command not found）として初めて現れる。
     """
-    defined = {m.group(1) for m in _SHELL_FUNC_RE.finditer(_HELPERS_SH.read_text(encoding="utf-8"))}
-    missing: list[str] = []
-    for md_file in _iter_md_files():
-        for block in _BASH_FENCE_RE.findall(md_file.read_text(encoding="utf-8")):
-            for token in re.findall(r"(?<![\w./-])((?:claq|collect)_[a-z0-9_]+)", block):
-                if token not in defined:
-                    missing.append(f"{md_file.relative_to(_ROOT)}: {token}")
+    missing = [
+        f"{md_file.relative_to(_ROOT)}: {token}"
+        for md_file, text in _md_corpus()
+        for block in _BASH_FENCE_RE.findall(text)
+        for token in re.findall(r"(?<![\w./-])((?:claq|collect)_[a-z0-9_]+)", block)
+        if token not in _shell_helpers()
+    ]
     assert missing == [], "未定義のシェルヘルパ呼び出し:\n" + "\n".join(sorted(set(missing)))
 
 
-def _run_repo_audit() -> subprocess.CompletedProcess[str]:
-    """repo 監査を起動し、stdout が JSON として読める状態で返す。
+def test_md_max_score_matches_real_audit() -> None:
+    """harness-tuner.md の baseline スキーマ例と、md が散文へ書き写した `max_score` が実装の実測値と一致すること。
 
-    ``check=True`` は使わない。監査は「check が 1 件でも不合格」でも exit 1 を
-    返すため、``max_score``（不合格でも必ず出力される値）を読むだけのテストが
-    無関係な不合格に巻き込まれて ``CalledProcessError`` で落ちる。テスト名は
-    どちらも `max_score` を名乗るので、原因が監査の不合格だと分からない。
-    監査全体の合否は `tests/ci/test_harness_audit_score_pairs.py` の
+    この値はエージェントが「満点いくつの尺度か」を読み取る唯一の手がかりで、
+    ずれると改善幅の見積もりが黙って狂う。実装側は check の points 合計なので、
+    check を足すたびに変わる。JSON 例だけを照合すると、散文へ書き写した
+    「`max_score`（`repo` では N）」の形は素通りする。
+    docs/adr/definition-and-subagent-design.md の「定義に書いた検証規則は CI で実測する」の適用。
+
+    監査は ``check=True`` で起動しない。監査は「check が 1 件でも不合格」でも exit 1 を
+    返すため、``max_score``（不合格でも必ず出力される値）を読むだけのこのテストが
+    無関係な不合格に巻き込まれる。監査全体の合否は `tests/ci/test_harness_audit_score_pairs.py` の
     ``test_real_repo_passes_every_repo_check`` が check id を名指しで見る。
-
-    Returns:
-        完了したプロセス。stdout に監査レポートの JSON を含む。
     """
     result = subprocess.run(
         [sys.executable, "-m", "claq.ci.harness_audit", "repo", "--format", "json", "--root", str(_ROOT)],
@@ -654,51 +583,16 @@ def _run_repo_audit() -> subprocess.CompletedProcess[str]:
         timeout=120,
         check=False,
     )
-    assert result.stdout.strip(), (
-        f"監査が JSON を出力しなかった（exit={result.returncode}）: {result.stderr.strip()}"
-    )
-    return result
-
-
-def test_harness_tuner_schema_example_matches_real_max_score() -> None:
-    """harness-tuner.md の baseline スキーマ例の `max_score` が実装と一致すること。
-
-    この値はエージェントが「満点いくつの尺度か」を読み取る唯一の手がかりで、
-    ずれると改善幅の見積もりが黙って狂う。
-    実装側は check の points 合計なので、check を足すたびに変わる。md へ数値を
-    書いた以上、機械で突き合わせる。
-    """
-    import json
-
-    schema = json.loads(
-        re.search(
-            r"```json\n(\{.*?\})\n```",
-            (_ROOT / "agents" / "harness-tuner.md").read_text(encoding="utf-8"),
-            re.DOTALL,
-        ).group(1)
-    )
-    result = _run_repo_audit()
-
-    assert schema["max_score"] == json.loads(result.stdout)["max_score"]
-
-
-def test_md_max_score_mentions_match_real_audit() -> None:
-    """md が散文へ書き写した `max_score` が実装の実測値と一致すること。
-
-    `harness-tuner.md` の JSON 例だけを照合すると、散文へ書き写した
-    「`max_score`（`repo` では N）」の形は素通りする。`max_score` は check の
-    points 合計なので check を足すたびに変わり、ずれると満点尺度が黙って狂う。
-    docs/adr/definition-and-subagent-design.md の「定義に書いた検証規則は CI で実測する」の適用。
-    """
-    import json
-
-    result = _run_repo_audit()
+    assert result.stdout.strip(), f"監査が JSON を出力しなかった（exit={result.returncode}）: {result.stderr.strip()}"
     real = json.loads(result.stdout)["max_score"]
-    pattern = re.compile(r"`repo` では(\d+)")
+    tuner = (_ROOT / "agents" / "harness-tuner.md").read_text(encoding="utf-8")
+    schema = json.loads(re.search(r"```json\n(\{.*?\})\n```", tuner, re.DOTALL).group(1))
+
+    assert schema["max_score"] == real
     stale = [
         f"{md_file.relative_to(_ROOT)}: {value}"
-        for md_file in _iter_md_files()
-        for value in pattern.findall(md_file.read_text(encoding="utf-8"))
+        for md_file, text in _md_corpus()
+        for value in re.findall(r"`repo` では(\d+)", text)
         if int(value) != real
     ]
     assert stale == [], f"実装の max_score={real} と食い違う満点表記:\n" + "\n".join(sorted(stale))

@@ -18,55 +18,25 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[1]
-_MANIFEST = _ROOT / ".claude-plugin" / "plugin.json"
+_MANIFEST = Path(__file__).resolve().parents[1] / ".claude-plugin" / "plugin.json"
 
 
-def _load_manifest() -> dict[str, object]:
-    """plugin.json を読み込んで返す。"""
-    return json.loads(_MANIFEST.read_text(encoding="utf-8"))
+def test_manifest_leaves_agents_to_auto_discovery_and_declares_skills_commands_as_directories() -> None:
+    """manifest に ``agents`` フィールドが無く、``skills`` / ``commands`` は directory 形式で宣言されていること。
 
-
-def test_manifest_does_not_declare_agents() -> None:
-    """manifest に ``agents`` フィールドが無いこと（auto-discovery へ委ねる）。
-
-    ファイルパス配列に戻すとホスト上で ``Agents (0)`` に退行し、agent へ委譲する
+    ``agents`` をファイルパス配列に戻すとホスト上で ``Agents (0)`` に退行し、agent へ委譲する
     全 workflow が静かに機能しなくなる。静かに壊れるため人間の目視では気づけない。
+    ``skills`` / ``commands`` は directory 形式を schema が受理し、ホスト上でも全件登録される
+    （実測: Skills (22) / Commands は skills として集計）。``agents`` と挙動が
+    異なるため、同じ形へ揃えようとして壊さないよう契約を固定する。
+    ``agents/`` に 9 体の定義が実在することは tests/test_md_references.py の tools 期待マップとの
+    完全一致が固定する（auto-discovery はディレクトリの中身だけが根拠になる）。
     """
-    manifest = _load_manifest()
+    manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
+
     assert "agents" not in manifest, (
         "plugin.json に agents を宣言するとホストの loader が各パスを scandir して "
         "ENOTDIR になり Agents (0) へ退行する。agents/ の auto-discovery に任せること"
     )
-
-
-def test_agent_surface_exists_on_disk() -> None:
-    """manifest から外した後も ``agents/`` に 9 体の定義が実在すること。
-
-    auto-discovery はディレクトリの中身だけが根拠になるので、manifest による
-    列挙という安全網が無い。ここで surface の欠落を検出する。
-    """
-    agent_files = sorted(p.name for p in (_ROOT / "agents").glob("*.md"))
-    assert agent_files == [
-        "bench-analyzer.md",
-        "code-refiner.md",
-        "comparator.md",
-        "grader.md",
-        "harness-tuner.md",
-        "planner.md",
-        "reviewer.md",
-        "security-auditor.md",
-        "tdd-writer.md",
-    ]
-
-
-def test_skills_and_commands_use_directory_form() -> None:
-    """``skills`` / ``commands`` は directory 形式で宣言されていること。
-
-    この 2 つは directory 形式を schema が受理し、ホスト上でも全件登録される
-    （実測: Skills (22) / Commands は skills として集計）。``agents`` と挙動が
-    異なるため、同じ形へ揃えようとして壊さないよう契約を固定する。
-    """
-    manifest = _load_manifest()
     assert manifest["skills"] == ["./skills/"]
     assert manifest["commands"] == ["./commands/"]
