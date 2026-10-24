@@ -23,6 +23,7 @@ _ADAPTER_TABLE_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*(.+?)\s*\|$", re.MULTILI
 @pytest.mark.parametrize(
     ("runner", "required_form", "dash_dash_allowed"),
     [("pytest", "--", True), ("go test", "-run", False), ("node --test", "--test-name-pattern", False)],
+    ids=["pytest", "go-test", "node-test"],
 )
 def test_reviewer_declares_runner_specific_signature_adapters(
     runner: str, required_form: str, dash_dash_allowed: bool
