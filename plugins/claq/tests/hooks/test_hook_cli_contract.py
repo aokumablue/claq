@@ -24,44 +24,45 @@ from claq.lib.harness import INPUT_CONTAINER_KEYS, normalize_tool_name
 
 from ._support import _iter_declared_commands, _run_launcher
 
-# --- PreToolUse の入力形状ゲート -------------------------------------------------
-#
-# 判定関数の in-process テストは stdin JSON → コンテナキー解決 → 形状展開 →
-# exit code までの経路を通らない。プロセス層のテストが dict 形状しか流さないと、
-# `{"tool_input": [{"file_path": "ruff.toml"}]}` や `{"tool_input": "ruff.toml"}`
-# の素通りを止められる層が 1 つも無い（`harness_audit` も実効性は測らない）。
-#
-# ここでコンテナキー × 形状の直積を陽性/陰性の対で流し、コミット時に落とす。
 
-_PAYLOAD_SHAPES = ("dict", "jsonstr", "listdict", "liststr", "barestr")
+def _pre_tool_use_modules() -> set[str]:
+    """hooks.json の PreToolUse が宣言する dotted module 名を返す。"""
+    return {
+        next(arg for arg in args if arg.startswith("claq."))
+        for event, args, _ in _iter_declared_commands()
+        if event == "PreToolUse"
+    }
 
 
-def _wrap_payload(container_key: str, shape: str, field: str, value: str) -> dict:
-    """1 つのコンテナキー・形状に値を包んだ hook payload コンテナを組み立てる。
+def _assert_discriminates(hook: str, denied_payload: dict, allowed_payload: dict, tmp_path: Path, label: str) -> None:
+    """deny されるべき payload が exit 2 と deny JSON、陰性対照が exit 0 になることを launcher 経由で確かめる。
 
-    Args:
-        container_key: INPUT_CONTAINER_KEYS のいずれか。
-        shape: _PAYLOAD_SHAPES のいずれか。
-        field: フックが読むフィールド名（command / file_path）。
-        value: そのフィールドへ入れる値。
-
-    Returns:
-        コンテナキー 1 つだけを持つ dict。
+    陰性対照を必須にするのは、両極が同じ exit code を返す測定（両方 0 でも両方 2 でも判別していない）を合格と読ませないため。
     """
-    if shape == "dict":
-        return {container_key: {field: value}}
-    if shape == "jsonstr":
-        return {container_key: json.dumps({field: value})}
-    if shape == "listdict":
-        return {container_key: [{field: value}]}
-    if shape == "liststr":
-        return {container_key: [value]}
-    return {container_key: value}
+    denied = _run_launcher(hook, denied_payload, tmp_path)
+    allowed = _run_launcher(hook, allowed_payload, tmp_path)
 
+    assert denied.returncode == 2, f"{label}: deny されるべき payload が exit {denied.returncode} err={denied.stderr[:200]}"
+    assert json.loads(denied.stdout)["permissionDecision"] == "deny"
+    assert allowed.returncode == 0, f"{label}: 通るべき payload が exit {allowed.returncode} err={allowed.stderr[:200]}"
+
+
+# --- コンテナキー × 形状 ---------------------------------------------------------
+#
+# 判定関数の in-process テストは stdin JSON → コンテナキー解決 → 形状展開 → exit code までの経路を通らない。
+# プロセス層が dict 形状しか流さないと、`{"tool_input": [{"file_path": "ruff.toml"}]}` や
+# `{"tool_input": "ruff.toml"}` の素通りを止められる層が 1 つも無い（`harness_audit` も実効性は測らない）。
+
+# 形状名 → (フィールド名, 値) をコンテナへ包む関数。
+_PAYLOAD_SHAPES = {
+    "dict": lambda field, value: {field: value},
+    "jsonstr": lambda field, value: json.dumps({field: value}),
+    "listdict": lambda field, value: [{field: value}],
+    "liststr": lambda field, value: [value],
+    "barestr": lambda field, value: value,
+}
 
 # hook → (tool_name, フィールド名, deny されるべき値, 通るべき値)。
-# 陰性対照を必須にするのは、両極が同じ exit code を返す測定を「合格」と
-# 読ませないため（両方 0 でも両方 2 でも判別していない）。
 _SHAPE_GATED_HOOKS = {
     "claq.hooks.block_no_verify": ("Bash", "command", "git commit --no-verify -m x", "git commit -m x"),
     "claq.hooks.bash_config_protection": ("Bash", "command", "echo x > ruff.toml", "cat sample.py"),
@@ -80,61 +81,29 @@ _SHAPE_GATE_EXEMPTIONS = {
 }
 
 
-def _pre_tool_use_modules() -> set[str]:
-    """hooks.json の PreToolUse が宣言する dotted module 名を返す。"""
-    return {
-        next(arg for arg in args if arg.startswith("claq."))
-        for event, args, _ in _iter_declared_commands()
-        if event == "PreToolUse"
-    }
-
-
-def test_every_pre_tool_use_hook_is_shape_gated_or_exempted() -> None:
-    """PreToolUse の全 hook が形状ゲートか、理由つき免除のどちらかに属すること。
-
-    新しい保護フックを足したときに宣言を忘れると、その hook だけ dict 形状しか
-    検証されないまま出荷される。宣言を強制して、網羅の穴を静かに作らせない。
-    """
-    declared = _pre_tool_use_modules()
-    covered = set(_SHAPE_GATED_HOOKS) | set(_SHAPE_GATE_EXEMPTIONS)
-    assert declared <= covered, f"形状ゲート未宣言の PreToolUse hook: {sorted(declared - covered)}"
-    assert covered <= declared, f"hooks.json に存在しない hook の宣言: {sorted(covered - declared)}"
-    assert all(_SHAPE_GATE_EXEMPTIONS.values()), "免除には理由が要る"
-
-
 @pytest.mark.parametrize("hook", sorted(_SHAPE_GATED_HOOKS))
 @pytest.mark.parametrize("container_key", INPUT_CONTAINER_KEYS)
-@pytest.mark.parametrize("shape", _PAYLOAD_SHAPES)
+@pytest.mark.parametrize("shape", list(_PAYLOAD_SHAPES))
 def test_pre_tool_use_hook_discriminates_across_container_and_shape(
     hook: str, container_key: str, shape: str, tmp_path: Path
 ) -> None:
-    """全コンテナキー × 全形状で、deny されるべき payload が exit 2 になること。
-
-    同時に陰性対照が exit 0 であることも確かめる。両極が同じ exit code なら
-    その測定は判別していないので、deny 側だけを見て合格にしない。
-    """
+    """全コンテナキー × 全形状で、deny されるべき payload が exit 2、陰性対照が exit 0 になること。"""
     tool_name, field, deny_value, allow_value = _SHAPE_GATED_HOOKS[hook]
+    wrap = _PAYLOAD_SHAPES[shape]
 
-    denied = _run_launcher(
-        hook, {"tool_name": tool_name, **_wrap_payload(container_key, shape, field, deny_value)}, tmp_path
-    )
-    allowed = _run_launcher(
-        hook, {"tool_name": tool_name, **_wrap_payload(container_key, shape, field, allow_value)}, tmp_path
-    )
-
-    assert denied.returncode == 2, (
-        f"{hook} {container_key}/{shape}: deny されるべき payload が exit {denied.returncode}"
-    )
-    assert json.loads(denied.stdout)["permissionDecision"] == "deny"
-    assert allowed.returncode == 0, (
-        f"{hook} {container_key}/{shape}: 通るべき payload が exit {allowed.returncode}"
-        f" err={allowed.stderr[:200]}"
+    _assert_discriminates(
+        hook,
+        {"tool_name": tool_name, container_key: wrap(field, deny_value)},
+        {"tool_name": tool_name, container_key: wrap(field, allow_value)},
+        tmp_path,
+        f"{hook} {container_key}/{shape}",
     )
 
-# コンテナキー「多重度」の軸。上の形状ゲートはキーを 1 つずつしか流さないため、
-# 「無害なキーが先頭にあり、危険な入力が後続キーにある」payload を 1 度も作らない。
-# この形の素通りは形状ゲートが緑のままでも起こりうる。走査層を共有しても
-# 消費側が先勝ちなら穴は残るので、多重度は独立した軸として全 PreToolUse hook に流す。
+
+# --- コンテナキー多重度 ------------------------------------------------------------
+#
+# 形状ゲートはキーを 1 つずつしか流さないため、「無害なキーが先頭にあり、危険な入力が後続キーにある」
+# payload を作らない。走査層を共有しても消費側が先勝ちなら穴は残るので、全 PreToolUse hook に流す。
 #
 # hook → (tool_name, フィールド名, 後続キーへ入れる deny 値, 先頭キーへ入れる無害値)。
 _MULTIPLICITY_GATED_HOOKS = {
@@ -145,56 +114,31 @@ _MULTIPLICITY_GATED_HOOKS = {
 }
 
 
-def test_every_pre_tool_use_hook_is_multiplicity_gated() -> None:
-    """PreToolUse の全 hook が多重度ゲートに載っていること（免除枠を設けない）。
-
-    形状ゲートと違い、こちらは免除を許さない。消費側の意味論はフックごとに
-    別実装であり、共有層のゲートでは被覆できないため。
-    """
-    assert _pre_tool_use_modules() == set(_MULTIPLICITY_GATED_HOOKS)
-
-
 @pytest.mark.parametrize("hook", sorted(_MULTIPLICITY_GATED_HOOKS))
 def test_pre_tool_use_hook_scans_every_container_key(hook: str, tmp_path: Path) -> None:
-    """先頭キーが無害でも、後続キーに入った危険な入力を deny すること。
-
-    陰性対照として、全キーが無害な多重コンテナ payload が exit 0 になることも
-    確かめる（全部 deny する実装でも緑になる測定を合格にしない）。
-    """
+    """先頭キーが無害でも後続キーに入った危険な入力を deny し、全キー無害の多重コンテナは通すこと。"""
     tool_name, field, deny_value, allow_value = _MULTIPLICITY_GATED_HOOKS[hook]
-    keys = list(INPUT_CONTAINER_KEYS)
+    first, last = INPUT_CONTAINER_KEYS[0], INPUT_CONTAINER_KEYS[-1]
 
-    denied = _run_launcher(
+    _assert_discriminates(
         hook,
-        {"tool_name": tool_name, keys[0]: {field: allow_value}, keys[-1]: {field: deny_value}},
+        {"tool_name": tool_name, first: {field: allow_value}, last: {field: deny_value}},
+        {"tool_name": tool_name, first: {field: allow_value}, last: {field: allow_value}},
         tmp_path,
-    )
-    allowed = _run_launcher(
-        hook,
-        {"tool_name": tool_name, keys[0]: {field: allow_value}, keys[-1]: {field: allow_value}},
-        tmp_path,
-    )
-
-    assert denied.returncode == 2, (
-        f"{hook}: 後続コンテナキーの deny 値が exit {denied.returncode} で素通りした"
-    )
-    assert json.loads(denied.stdout)["permissionDecision"] == "deny"
-    assert allowed.returncode == 0, (
-        f"{hook}: 全キー無害の payload が exit {allowed.returncode} err={allowed.stderr[:200]}"
+        f"{hook} 後続コンテナキー",
     )
 
 
-# --- PreToolUse のフィールド別名軸 ------------------------------------------------
+# --- フィールド別名 ----------------------------------------------------------------
 #
-# 上の 2 軸はコンテナ（キー・形状・多重度）だけを動かし、コンテナ**の中**で
-# フックが読むフィールド名は正規名（command / file_path）に固定している。
-# しかし共有層はどれも別名を受理する: `_commands_from_tool_input` は
-# `command` と `cmd`、`_extract_patch_text` は生パッチ文字列と `{"input": ...}`。
-# 別名側の経路だけ判定が抜けても正規名のテストは緑のままなので、独立した軸にする。
+# 上の 2 軸はコンテナの中のフィールド名を正規名（command / file_path）に固定している。共有層は別名も受理する
+# （`_commands_from_tool_input` の `cmd`、`_extract_patch_text` の生パッチ文字列と `{"input": ...}`）ため、
+# 別名側の経路だけ判定が抜けても正規名のテストは緑のまま。別名ごとにコンテナの形が違うので、
+# ケースごとに tool_input へ入れるコンテナ値そのものを陽性/陰性の対で持つ。
 #
-# 別名ごとにコンテナの「形」が違う（dict の別キー / 生文字列 / input dict）ため、
-# 上 2 軸のような (フィールド名, 値) の直積では表現できない。ケースごとに
-# tool_input へ入れるコンテナ値そのものを陽性/陰性の対で持つ。
+# 登録はフック単位で、別名単位の網羅ではない。`config_protection` の `file`（`file_path` の別名）は
+# この表に無く、フィールド多重度ゲートが流している。表の合計が実装の読む別名と一致することは
+# `test_field_alias_gate_flows_every_alias_the_implementation_reads` が実装から抽出した集合との等号で強制する。
 
 _APPLY_PATCH_DENY = '*** Begin Patch\n*** Update File: ruff.toml\n+ignore = ["ALL"]\n*** End Patch\n'
 _APPLY_PATCH_ALLOW = "*** Begin Patch\n*** Update File: sample.py\n+x = 1\n*** End Patch\n"
@@ -236,72 +180,37 @@ _FIELD_ALIAS_CASES = {
 }
 
 
-def test_every_pre_tool_use_hook_is_field_alias_gated() -> None:
-    """PreToolUse の**全 hook**がフィールド別名軸に載っていること（免除枠を設けない）。
-
-    形状軸と違い免除を許さない。読むフィールド名はフックごとの選択であり、
-    共有層のゲートでは「そのフックが実際に別名を読むか」を被覆できないため。
-
-    強制するのはフック単位の登録であって、別名単位の網羅ではない。
-    `config_protection` の `file`（`file_path` の別名）はこの表に無く、下の
-    多重度ゲートが流している。「表の合計が実装の読む別名と一致する」ことは
-    `test_field_alias_gate_flows_every_alias_the_implementation_reads` が
-    実装から抽出した集合との等号で強制する。
-    """
-    declared = _pre_tool_use_modules()
-    covered = {hook for hook, _, _, _ in _FIELD_ALIAS_CASES.values()}
-    assert declared <= covered, f"フィールド別名ゲート未宣言の PreToolUse hook: {sorted(declared - covered)}"
-    assert covered <= declared, f"hooks.json に存在しない hook の宣言: {sorted(covered - declared)}"
-
-
 @pytest.mark.parametrize("case_id", sorted(_FIELD_ALIAS_CASES))
 def test_pre_tool_use_hook_reads_field_aliases(case_id: str, tmp_path: Path) -> None:
-    """正規名ではなく別名フィールドに入った危険な入力も deny されること。
-
-    陰性対照として、同じ別名フィールドに無害な値を入れた payload が exit 0 に
-    なることも確かめる（別名を見た瞬間に全部 deny する実装でも緑になる測定を
-    合格にしない）。
-    """
+    """別名フィールドに入った危険な入力も deny し、同じ別名フィールドの無害な値は通すこと。"""
     hook, tool_name, deny_input, allow_input = _FIELD_ALIAS_CASES[case_id]
 
-    denied = _run_launcher(hook, {"tool_name": tool_name, "tool_input": deny_input}, tmp_path)
-    allowed = _run_launcher(hook, {"tool_name": tool_name, "tool_input": allow_input}, tmp_path)
-
-    assert denied.returncode == 2, (
-        f"{case_id}: 別名フィールドの deny 値が exit {denied.returncode} で素通りした"
-    )
-    assert json.loads(denied.stdout)["permissionDecision"] == "deny"
-    assert allowed.returncode == 0, (
-        f"{case_id}: 通るべき payload が exit {allowed.returncode} err={allowed.stderr[:200]}"
+    _assert_discriminates(
+        hook,
+        {"tool_name": tool_name, "tool_input": deny_input},
+        {"tool_name": tool_name, "tool_input": allow_input},
+        tmp_path,
+        case_id,
     )
 
 
-# --- PreToolUse のツール名別名軸 --------------------------------------------------
+# --- ツール名別名 ------------------------------------------------------------------
 #
-# ここまでの軸は tool 名を常に Claude Code 表記（Bash / Write）の `tool_name` で
-# 送っている。実際のハーネスは camelCase の `toolName` キーを使い、値も
-# `run_terminal_command` / `search_replace` のような runtime 固有名や lowercase で
-# 送ってくる（`lib/harness.py` の `_TOOL_NAME_MAP`）。別名が正規化から落ちると、
-# ツール名でゲートするフックは「対象外のツール」と見なして早期 return 0 する。
+# ここまでの軸は tool 名を Claude Code 表記（Bash / Write）の `tool_name` で送る。実際のハーネスは
+# camelCase の `toolName` キーや、`run_terminal_command` / `search_replace` のような runtime 固有名・
+# lowercase で送ってくる（`lib/harness.py` の `_TOOL_NAME_MAP`）。別名が正規化から落ちると、
+# ツール名でゲートするフックは対象外のツールと見なして早期 return 0 する。
 #
-# in-hook でツール名を判定するのは bash_config_protection（`_BASH_TOOL_NAMES`）と
-# config_protection（`_WRITE_TOOL_NAMES`）の 2 つだけで、block_no_verify と
-# pre_bash_commit_quality は hooks.json の matcher に委ねており本体では tool 名を
-# 一切読まない。つまり後者 2 つの本パラメタは **vacuous に緑**である
-# ——「素通りしないこと」は確かめているが、正規化が壊れても赤くならない。
-# それでも表に載せるのは、matcher 依存という前提が崩れて in-hook 判定が入った
-# 瞬間に別名を取りこぼさないための前方固定。
+# 本体でツール名を判定するのは bash_config_protection と config_protection だけで、block_no_verify と
+# pre_bash_commit_quality は hooks.json の matcher に委ねる。後者 2 つの行は **vacuous に緑**（素通り
+# しないことは確かめるが、正規化が壊れても赤くならない）で、matcher 依存が崩れて本体判定が入った瞬間に
+# 別名を取りこぼさないための前方固定として載せる。前方固定に歯を持たせるため、
+# `test_in_hook_tool_name_gate_registration_matches_implementation` が本体でツール名を読むフックの集合を
+# 実装から導出して `_IN_HOOK_TOOL_NAME_GATES` との一致を強制し、そこへ載ったフックにだけ
+# `test_declared_tool_name_aliases_normalize_into_hook_gate` の正規化検査が及ぶ。
 #
-# ただし「前方固定」はそれ自体では成立しない。vacuous な行を別のテストが補うと
-# 注記しても、補う側の走査対象に当該フックが入る保証が無ければ、注記だけが残って
-# 歯が無い状態になる（実際 `test_declared_tool_name_aliases_normalize_into_hook_gate`
-# が走査する `_IN_HOOK_TOOL_NAME_GATES` にこの 2 つは含まれない）。そこで
-# `test_in_hook_tool_name_gate_registration_matches_implementation` が
-# 「本体で tool 名を読むフック」の集合を実装から導出し、`_IN_HOOK_TOOL_NAME_GATES`
-# との一致を強制する。matcher 依存をやめた瞬間に登録漏れが赤くなり、そこで
-# 初めて正規化の歯（下の normalize テスト）が当該フックへ及ぶ。
-#
-# hook → (フィールド名, deny されるべき値, 通るべき値, ツール名別名の一覧)。
+# 登録はフック単位で、別名単位の網羅ではない。各フックへ流す別名は `_TOOL_NAME_MAP` の部分集合の写経で、
+# `shell` や `multiedit` は含まない（`test_hooks_json_matchers.py` と `tests/lib/test_harness.py` が被覆する）。
 _BASH_TOOL_NAME_ALIASES = (
     ("toolName", "Bash"),
     ("tool_name", "run_terminal_command"),
@@ -313,6 +222,7 @@ _WRITE_TOOL_NAME_ALIASES = (
     ("tool_name", "write"),
 )
 
+# hook → (フィールド名, deny されるべき値, 通るべき値, ツール名別名の一覧)。
 _TOOL_NAME_ALIAS_GATED_HOOKS = {
     "claq.hooks.block_no_verify": (
         "command", "git commit --no-verify -m x", "git commit -m x", _BASH_TOOL_NAME_ALIASES,
@@ -328,43 +238,24 @@ _TOOL_NAME_ALIAS_GATED_HOOKS = {
     ),
 }
 
-# 本体でツール名を判定する hook → その受理集合（実装から直接参照する）。
-# 集合をテスト側へ写経すると、実装の受理集合が狭まったときに気付けない。
+# 本体でツール名を判定する hook → その受理集合。テスト側へ写経すると、実装の受理集合が狭まったときに
+# 気付けないため実装から直接参照する。
 _IN_HOOK_TOOL_NAME_GATES = {
     "claq.hooks.bash_config_protection": _BASH_TOOL_NAMES,
     "claq.hooks.config_protection": _WRITE_TOOL_NAMES,
 }
 
-
-# 本体でツール名を読んでいることを示す `lib/harness` の symbol。現状の 4 フックは
-# ツール名をこの 2 つ経由でしか読まない（生の `payload["tool_name"]` 直読みは無い）。
-#
-# 検出は symbol 直 import に限る。`from claq.lib import harness` +
-# `harness.extract_raw_tool_name(...)` の形は**すり抜ける**（false negative）。
-# 現状 4 フックはいずれも直 import で、リポジトリ全体でも module import 形式の
-# 前例が無いため未対応にしている。module import が現れたら `ast.Attribute` も
-# 見る必要がある——この限界を書かずに「実装から導出」とだけ書くと、下の
-# 登録一致テストが本来より広く効いているように読める。
+# 本体でツール名を読んでいることを示す `lib/harness` の symbol。現状の 4 フックはツール名をこの 2 つ経由で
+# しか読まない（生の `payload["tool_name"]` 直読みは無い）。
 _TOOL_NAME_READER_SYMBOLS = frozenset({"extract_raw_tool_name", "normalize_tool_name"})
 
 
 def _harness_imports(module: str) -> set[str]:
-    """モジュールが `claq.lib.harness` から直 import している symbol 名を返す。
-
-    `lib/harness` からの import を AST で見る。文字列の部分一致にすると
-    docstring 中の言及を実装と誤認するため、`ImportFrom` ノードに限定する。
-
-    上のコメントに書いた module import 形式（`from claq.lib import harness`）の
-    false negative は本関数に由来する。ツール名読み取りの導出とフィールド別名の
-    導出が同じ限界を共有するよう、走査はここ 1 か所に閉じる（2 か所へ書くと
-    片方だけ `ast.Attribute` 対応が入って被覆範囲がずれる）。
-
-    Args:
-        module: dotted module 名（例: claq.hooks.config_protection）。
-
-    Returns:
-        直 import されている harness の symbol 名の集合。
-    """
+    """モジュールが `claq.lib.harness` から直 import している symbol 名を AST の ImportFrom から返す。"""
+    # 文字列の部分一致にすると docstring 中の言及を実装と誤認するため ImportFrom に限る。検出は symbol の
+    # 直 import に限り、`from claq.lib import harness` + `harness.extract_raw_tool_name(...)` の形は
+    # すり抜ける（現状 4 フックはいずれも直 import で、module import の前例も無い）。現れたら ast.Attribute
+    # も見る必要がある。ツール名読み取りとフィールド別名の導出が同じ限界を共有するよう走査はここ 1 か所に閉じる。
     origin = importlib.util.find_spec(module).origin
     tree = ast.parse(Path(origin).read_text(encoding="utf-8"))
     return {
@@ -376,11 +267,7 @@ def _harness_imports(module: str) -> set[str]:
 
 
 def _hooks_reading_tool_name_in_body() -> set[str]:
-    """PreToolUse hook のうち、本体でツール名を読むモジュールを実装から導出する。
-
-    Returns:
-        ツール名読み取り symbol を import している dotted module 名の集合。
-    """
+    """PreToolUse hook のうち、ツール名読み取り symbol を import して本体でツール名を読むモジュールを返す。"""
     return {
         module
         for module in _pre_tool_use_modules()
@@ -388,28 +275,11 @@ def _hooks_reading_tool_name_in_body() -> set[str]:
     }
 
 
-def test_every_pre_tool_use_hook_is_tool_name_alias_gated() -> None:
-    """PreToolUse の**全 hook**がツール名別名軸に載っていること（免除枠を設けない）。
-
-    強制するのはフック単位の登録であって、別名単位の網羅ではない。各フックへ
-    流す別名は `_TOOL_NAME_MAP` の部分集合の写経で、`shell` や `multiedit` は
-    含まない（それらは `test_hooks_json_matchers.py` と `tests/lib/test_harness.py`
-    が別途被覆する）。写経が実装から乖離していないことは下の normalize テストが見る。
-    """
-    declared = _pre_tool_use_modules()
-    covered = set(_TOOL_NAME_ALIAS_GATED_HOOKS)
-    assert declared <= covered, f"ツール名別名ゲート未宣言の PreToolUse hook: {sorted(declared - covered)}"
-    assert covered <= declared, f"hooks.json に存在しない hook の宣言: {sorted(covered - declared)}"
-
-
 def test_in_hook_tool_name_gate_registration_matches_implementation() -> None:
     """本体でツール名を読むフックの集合が `_IN_HOOK_TOOL_NAME_GATES` と一致すること。
 
-    この一致が、ツール名別名軸の 6 行（block_no_verify / pre_bash_commit_quality）を
-    vacuous なまま残す判断を支える唯一の機械的な根拠。両フックが matcher 依存を
-    やめて本体判定を持った瞬間にここが赤くなり、`_IN_HOOK_TOOL_NAME_GATES` への
-    登録——ひいては normalize テストの被覆——を強制する。逆に、受理集合の登録を
-    こっそり消して検査範囲を縮める方向も同じ assert が塞ぐ。
+    ツール名別名軸の vacuous な 6 行（block_no_verify / pre_bash_commit_quality）を残す判断を支える唯一の機械的な
+    根拠。両フックが本体判定を持てばここが赤くなって登録を強制し、受理集合の登録をこっそり消す方向も塞ぐ。
     """
     assert _hooks_reading_tool_name_in_body() == set(_IN_HOOK_TOOL_NAME_GATES), (
         "本体でツール名を読むフックと受理集合の宣言がずれている: "
@@ -421,10 +291,8 @@ def test_in_hook_tool_name_gate_registration_matches_implementation() -> None:
 def test_declared_tool_name_aliases_normalize_into_hook_gate() -> None:
     """宣言した別名が、本体の受理集合へ実際に正規化されること。
 
-    別名の一覧はテスト側の写経なので、`_TOOL_NAME_MAP` から別名が落ちても
-    プロセス層テストは「対象外ツールなので exit 0」を陰性対照として緑に読み、
-    保護が消えたことを緑のまま通してしまう。正規化の対応そのものをここで
-    突き合わせて、写経が実装から乖離した時点で赤くする。
+    別名の一覧はテスト側の写経なので、`_TOOL_NAME_MAP` から別名が落ちてもプロセス層テストは「対象外ツールなので
+    exit 0」を陰性対照として緑に読み、保護が消えたことを緑のまま通す。正規化の対応そのものを突き合わせる。
     """
     for hook, gate in _IN_HOOK_TOOL_NAME_GATES.items():
         _, _, _, aliases = _TOOL_NAME_ALIAS_GATED_HOOKS[hook]
@@ -435,11 +303,7 @@ def test_declared_tool_name_aliases_normalize_into_hook_gate() -> None:
 
 
 def _tool_name_alias_cases() -> list[tuple[str, str, str]]:
-    """(hook, ツール名キー, ツール名値) の全組み合わせを宣言順に列挙する。
-
-    Returns:
-        parametrize へ渡すタプルのリスト。
-    """
+    """(hook, ツール名キー, ツール名値) の全組み合わせを宣言順に列挙する。"""
     return [
         (hook, name_key, name_value)
         for hook, (_, _, _, aliases) in sorted(_TOOL_NAME_ALIAS_GATED_HOOKS.items())
@@ -448,35 +312,27 @@ def _tool_name_alias_cases() -> list[tuple[str, str, str]]:
 
 
 @pytest.mark.parametrize(("hook", "name_key", "name_value"), _tool_name_alias_cases())
-def test_pre_tool_use_hook_accepts_tool_name_aliases(
-    hook: str, name_key: str, name_value: str, tmp_path: Path
-) -> None:
-    """ハーネス固有のツール名表記で送られても、危険な入力が deny されること。
+def test_pre_tool_use_hook_accepts_tool_name_aliases(hook: str, name_key: str, name_value: str, tmp_path: Path) -> None:
+    """ハーネス固有のツール名表記でも危険な入力を deny し、同じ表記の無害な値は通すこと。
 
-    陰性対照として同じツール名表記の無害な値が exit 0 になることも確かめる。
-    ここが両極とも 0 になるのが、別名が正規化から落ちたときの壊れ方
-    （対象外ツール扱いで早期 return）なので、陰性側だけでは判別できない。
+    別名が正規化から落ちたときの壊れ方は両極とも exit 0（対象外ツール扱いの早期 return）なので、陰性側だけでは判別できない。
     """
     field, deny_value, allow_value, _ = _TOOL_NAME_ALIAS_GATED_HOOKS[hook]
 
-    denied = _run_launcher(hook, {name_key: name_value, "tool_input": {field: deny_value}}, tmp_path)
-    allowed = _run_launcher(hook, {name_key: name_value, "tool_input": {field: allow_value}}, tmp_path)
-
-    assert denied.returncode == 2, (
-        f"{hook} {name_key}={name_value}: deny されるべき payload が exit {denied.returncode}"
-    )
-    assert json.loads(denied.stdout)["permissionDecision"] == "deny"
-    assert allowed.returncode == 0, (
-        f"{hook} {name_key}={name_value}: 通るべき payload が exit {allowed.returncode}"
-        f" err={allowed.stderr[:200]}"
+    _assert_discriminates(
+        hook,
+        {name_key: name_value, "tool_input": {field: deny_value}},
+        {name_key: name_value, "tool_input": {field: allow_value}},
+        tmp_path,
+        f"{hook} {name_key}={name_value}",
     )
 
 
-# フィールド「多重度」の軸。上のフィールド別名ゲートは別名を 1 つずつしか流さない
-# ため、「無害な正規フィールドと危険な別名フィールドが同居する」payload を作らない。
-# 消費側が先勝ちだと、この形はコンテナキー側の先勝ちバイパスと同型の穴として
-# 1 階層下に残る。dict の挿入順ではなく実装のタプル順が結果を決めるため、
-# 危険な側を先に置いても素通りしうる。
+# --- フィールド多重度 --------------------------------------------------------------
+#
+# フィールド別名ゲートは別名を 1 つずつしか流さないため、「無害な正規フィールドと危険な別名フィールドが
+# 同居する」payload を作らない。消費側が先勝ちだと、コンテナキー側の先勝ちバイパスと同型の穴が 1 階層下に
+# 残る。dict の挿入順ではなく実装のタプル順が結果を決めるため、危険な側を先に置いても素通りしうる。
 #
 # hook → (tool_name, 無害フィールド, 無害値, 危険フィールド, 危険値)。
 _FIELD_MULTIPLICITY_GATED_HOOKS = {
@@ -487,56 +343,54 @@ _FIELD_MULTIPLICITY_GATED_HOOKS = {
 }
 
 
-def test_every_pre_tool_use_hook_is_field_multiplicity_gated() -> None:
-    """PreToolUse の全 hook がフィールド多重度ゲートに載っていること（免除枠なし）。"""
-    assert _pre_tool_use_modules() == set(_FIELD_MULTIPLICITY_GATED_HOOKS)
-
-
 @pytest.mark.parametrize("hook", sorted(_FIELD_MULTIPLICITY_GATED_HOOKS))
 @pytest.mark.parametrize("dangerous_first", [False, True])
 def test_pre_tool_use_hook_scans_every_field_alias(hook: str, dangerous_first: bool, tmp_path: Path) -> None:
-    """正規フィールドと別名フィールドが同居しても危険な側を deny すること。
+    """正規フィールドと別名フィールドが同居しても危険な側を deny し、全フィールド無害なら通すこと。
 
-    dict の挿入順を両方向で流す。実装はタプル順で走査するため挿入順に依存しないが、
-    順序依存の実装へ戻した場合にどちらの向きでも赤くなるようにしておく。
+    dict の挿入順を両方向で流し、順序依存の実装へ戻した場合にどちらの向きでも赤くなるようにする。
     """
     tool_name, safe_field, safe_value, danger_field, danger_value = _FIELD_MULTIPLICITY_GATED_HOOKS[hook]
-    fields = (
-        {danger_field: danger_value, safe_field: safe_value}
-        if dangerous_first
-        else {safe_field: safe_value, danger_field: danger_value}
-    )
+    fields = [(safe_field, safe_value), (danger_field, danger_value)]
 
-    denied = _run_launcher(hook, {"tool_name": tool_name, "tool_input": fields}, tmp_path)
-    allowed = _run_launcher(
+    _assert_discriminates(
         hook,
+        {"tool_name": tool_name, "tool_input": dict(fields[::-1] if dangerous_first else fields)},
         {"tool_name": tool_name, "tool_input": {safe_field: safe_value, danger_field: safe_value}},
         tmp_path,
+        f"{hook} dangerous_first={dangerous_first}",
     )
 
-    assert denied.returncode == 2, (
-        f"{hook}: 別名フィールドの deny 値が exit {denied.returncode} で素通りした"
-        f" (dangerous_first={dangerous_first}) err={denied.stderr[:200]}"
-    )
-    assert json.loads(denied.stdout)["permissionDecision"] == "deny"
-    assert allowed.returncode == 0, (
-        f"{hook}: 全フィールド無害の payload が exit {allowed.returncode} err={allowed.stderr[:200]}"
-    )
+
+@pytest.mark.parametrize(
+    ("covered", "exemptions"),
+    [
+        pytest.param(set(_SHAPE_GATED_HOOKS), _SHAPE_GATE_EXEMPTIONS, id="shape"),
+        pytest.param(set(_MULTIPLICITY_GATED_HOOKS), {}, id="container-multiplicity"),
+        pytest.param({case[0] for case in _FIELD_ALIAS_CASES.values()}, {}, id="field-alias"),
+        pytest.param(set(_TOOL_NAME_ALIAS_GATED_HOOKS), {}, id="tool-name-alias"),
+        pytest.param(set(_FIELD_MULTIPLICITY_GATED_HOOKS), {}, id="field-multiplicity"),
+    ],
+)
+def test_every_pre_tool_use_hook_is_gated_on_each_axis(covered: set[str], exemptions: dict[str, str]) -> None:
+    """hooks.json の PreToolUse の全 hook が各軸のゲート表に載り、表に hooks.json に無い hook が無いこと。
+
+    新しい保護フックの宣言を忘れると、その hook だけ一部の入力の形しか検証されないまま出荷される。免除は形状軸だけに
+    理由つきで置ける。他の軸の消費側の意味論（読むフィールド名・ツール名・先勝ちかどうか）はフックごとの別実装で、
+    共有層のゲートでは被覆できないため免除を許さない。
+    """
+    assert covered | set(exemptions) == _pre_tool_use_modules()
+    assert all(exemptions.values()), "免除には理由が要る"
 
 
 # --- 実装が読む別名と、ゲートが流す別名の等号照合 -----------------------------------
 #
-# ここまでの別名軸（フィールド別名 / 多重度）は、実装が読む別名名を**テスト側へ
-# 写経**している。`INPUT_CONTAINER_KEYS` はモジュール定数なので import で写経を
-# 避けられたが、フィールド別名は `_commands_from_tool_input` の
-# `for key in ("command", "cmd")` と `extract_file_paths` の
-# `for key in ("file_path", "file")` のように**関数本体のインラインリテラル**で、
-# import できない。そのためタプルへ 3 つ目の別名を足しても、上の全ゲートは緑のまま
-# 通る——新しい別名だけが 1 度も payload に載らない状態で出荷される。
-#
-# ツール名別名軸の `test_declared_tool_name_aliases_normalize_into_hook_gate` は
-# 「宣言した別名が実装の受理集合へ落ちる」方向（宣言 ⊆ 実装）しか見ておらず、
-# 実装が増えた側（実装 ⊄ 宣言）を捕まえない。ここは**等号**で照合する。
+# 別名軸は実装が読む別名名をテスト側へ写経している。`INPUT_CONTAINER_KEYS` はモジュール定数なので import で
+# 写経を避けられたが、フィールド別名は `_commands_from_tool_input` の `for key in ("command", "cmd")` や
+# `extract_file_paths` の `for key in ("file_path", "file")` のような関数本体のインラインリテラルで import
+# できない。タプルへ 3 つ目の別名を足しても全ゲートは緑のまま通り、新しい別名だけが 1 度も payload に
+# 載らないまま出荷される。`test_declared_tool_name_aliases_normalize_into_hook_gate` は「宣言 ⊆ 実装」しか
+# 見ないので、ここは**等号**で照合する。
 #
 # 抽出の限界（この節が本来より広く効いていると読ませないため明記する）:
 # - seed は `_harness_imports` に依存するため module import 形式はすり抜ける
@@ -550,40 +404,20 @@ def test_pre_tool_use_hook_scans_every_field_alias(hook: str, dangerous_first: b
 #   どちらの等号にも載らない（現状 path/command 別名を本体で読むフックは 0 件。
 #   `config_protection` の `content` / `edits` 等は別名軸ではなく内容走査軸）
 
-# dict キーとして読まれる文字列リテラルを、payload 直下のキーと tool_input の
-# フィールドに振り分ける。両バケットとも別の等号照合を持つため、免除枠は無い
-# ——どちらのバケットへ入れ違えても、いずれかの等号が赤くなる。
+# payload 直下のキーを読む harness 関数。dict キーのリテラルを payload 直下のキーと tool_input のフィールドへ
+# 振り分け、両バケットとも別の等号照合を持つ（入れ違えてもいずれかの等号が赤くなるので免除枠は無い）。
 _PAYLOAD_KEY_READERS = frozenset({"extract_raw_tool_name"})
 
 
 def _harness_source() -> str:
-    """`claq.lib.harness` のソーステキストを返す。
-
-    Returns:
-        harness モジュールのソース全文。
-    """
+    """`claq.lib.harness` のソーステキストを返す。"""
     return Path(importlib.util.find_spec("claq.lib.harness").origin).read_text(encoding="utf-8")
 
 
 def _dict_key_literals(function: ast.FunctionDef) -> set[str]:
-    """関数本体が dict のキーとして読む文字列リテラルを集める。
-
-    2 つの形を拾う。``x.get("key")`` の定数引数と、``for key in ("a", "b")``
-    の文字列リテラルタプル（内包表記・`for` 文の双方）。後者は実装が別名を
-    走査する現行の書き方で、前者は単一キーを直接読む書き方。片方だけを見ると、
-    もう一方へ書き換えた瞬間に検査が無言で外れる。
-
-    現行 harness が使うのは内包表記の形だけで、`for` 文の側は該当箇所が無い
-    （テストファイルは coverage 計測対象外のため、この非対称は 100% ゲートに
-    現れない）。内包表記から `for` 文へ書き換えても検査が外れないための前方固定
-    として残す。
-
-    Args:
-        function: harness のモジュール直下 `def` ノード。
-
-    Returns:
-        キーとして読まれる文字列リテラルの集合。
-    """
+    """関数本体が dict のキーとして読む文字列リテラル（`x.get("key")` と `for key in ("a", "b")`）を集める。"""
+    # 片方の形だけを見ると、もう一方へ書き換えた瞬間に検査が無言で外れる。現行 harness が使うのは内包表記の
+    # 形だけで `for` 文の側は該当箇所が無いが、書き換えても検査が外れないための前方固定として残す。
     keys: set[str] = set()
     for node in ast.walk(function):
         if (
@@ -605,20 +439,10 @@ def _dict_key_literals(function: ast.FunctionDef) -> set[str]:
 
 
 def _key_literals_by_function(source: str, seeds: set[str]) -> dict[str, set[str]]:
-    """seed から到達する harness 関数ごとに、読む dict キーのリテラルを集める。
-
-    seed（hook が直 import した symbol）から harness 内の呼び出しを推移的に辿る。
-    hook が直接 import した関数だけを見ると、その先で読まれる別名を取りこぼす
-    （`config_protection` は `extract_file_paths` しか import しないが、実際の
-    `input` フィールドはその先の `_extract_patch_text` が読む）。
-
-    Args:
-        source: harness のソーステキスト。変異させたソースも渡せる。
-        seeds: 起点にする harness の symbol 名。
-
-    Returns:
-        関数名 → その関数が読む dict キーの集合（読まない関数は含めない）。
-    """
+    """seed から推移的に呼ばれる harness 関数ごとに、読む dict キーのリテラルを返す（読まない関数は含めない）。"""
+    # hook が直接 import した関数だけを見ると、その先で読まれる別名を取りこぼす（`config_protection` は
+    # `extract_file_paths` しか import しないが、`input` フィールドはその先の `_extract_patch_text` が読む）。
+    # source は変異させたソースも渡せる。
     functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
     reached: set[str] = set()
     stack = [name for name in seeds if name in functions]
@@ -636,15 +460,7 @@ def _key_literals_by_function(source: str, seeds: set[str]) -> dict[str, set[str
 
 
 def _implementation_field_aliases(source: str, hook: str) -> set[str]:
-    """hook が到達する実装が、tool_input のフィールドとして読む別名を返す。
-
-    Args:
-        source: harness のソーステキスト。
-        hook: dotted module 名。
-
-    Returns:
-        tool_input フィールド別名の集合。
-    """
+    """hook が到達する実装が、tool_input のフィールドとして読む別名を返す。"""
     return {
         key
         for name, keys in _key_literals_by_function(source, _harness_imports(hook)).items()
@@ -654,17 +470,8 @@ def _implementation_field_aliases(source: str, hook: str) -> set[str]:
 
 
 def _gate_field_aliases(hook: str) -> set[str]:
-    """ゲート表がその hook へ実際に流す tool_input フィールド名を返す。
-
-    別名表と多重度表の**実データ**から集める。ここで新しい一覧を書き起こすと
-    写経を写経で照合することになり、等号が実装との乖離を捕まえられない。
-
-    Args:
-        hook: dotted module 名。
-
-    Returns:
-        payload に載るフィールド名の集合。
-    """
+    """ゲート表（フィールド別名表と多重度表の実データ）がその hook へ実際に流す tool_input フィールド名を返す。"""
+    # 新しい一覧を書き起こすと写経を写経で照合することになり、等号が実装との乖離を捕まえられない。
     aliases: set[str] = set()
     for case_hook, _, deny_input, allow_input in _FIELD_ALIAS_CASES.values():
         if case_hook != hook:
@@ -686,10 +493,8 @@ def _gate_field_aliases(hook: str) -> set[str]:
 def test_field_alias_gate_flows_every_alias_the_implementation_reads(hook: str) -> None:
     """実装が読むフィールド別名と、ゲートが流す別名が一致すること。
 
-    実装側が増えれば「載せていない別名がある」、ゲート側が増えれば「実装が
-    読まないフィールドを流していて陽性が空振りしている」。どちらの向きの乖離も
-    等号で赤くする。hook の一覧は hooks.json から取るため、新しい PreToolUse
-    hook を足すと自動でこの照合の対象になる。
+    実装側が増えれば「載せていない別名がある」、ゲート側が増えれば「実装が読まないフィールドを流していて陽性が
+    空振りしている」。hook の一覧は hooks.json から取るため、新しい PreToolUse hook は自動でこの照合の対象になる。
     """
     implementation = _implementation_field_aliases(_harness_source(), hook)
     gate = _gate_field_aliases(hook)
@@ -703,14 +508,9 @@ def test_field_alias_gate_flows_every_alias_the_implementation_reads(hook: str) 
 def test_payload_key_reads_match_tool_name_alias_gate() -> None:
     """実装が payload 直下から読むツール名キーと、ツール名別名軸の name_key が一致すること。
 
-    `_PAYLOAD_KEY_READERS` はフィールド別名の等号から外れる唯一のバケットなので、
-    外した先を宙に浮かせず、ここで別の等号に載せる。`extract_raw_tool_name` が
-    3 つ目のキーを読み始めたら、そのキーを流すゲート行が無い限り赤くなる。
-
-    hook 単位ではなくモジュール単位の等号にする。ツール名を本体で読むのは
-    `_IN_HOOK_TOOL_NAME_GATES` の 2 フックだけで、残る 2 フックは matcher 依存の
-    ため実装側が空集合になる（その非対称の是非は
-    `test_in_hook_tool_name_gate_registration_matches_implementation` の担当）。
+    `_PAYLOAD_KEY_READERS` はフィールド別名の等号から外れる唯一のバケットなので、ここで別の等号に載せる。
+    ツール名を本体で読むのは 2 フックだけで残る 2 フックは実装側が空集合になるため、hook 単位ではなく
+    モジュール単位の等号にする（その非対称の是非は `test_in_hook_tool_name_gate_registration_matches_implementation` の担当）。
     """
     implementation = {
         key
@@ -739,10 +539,8 @@ _WIDENED_COMMAND_ALIAS_TUPLE = 'for key in ("command", "cmd", "commandLine")'
 def test_field_alias_gate_reddens_when_implementation_gains_an_alias() -> None:
     """実装へ別名を 1 つ足すと、上の等号が実際に破れること。
 
-    等号テストが緑であることは、それ自体では「抽出器が動いている」証拠に
-    ならない——常に空集合を返す抽出器でも、ゲート側と噛み合わなくなるまでは
-    気付けない。実装を変異させた入力を通して、抽出結果が広がり等号が破れる
-    ことをここで実測する。上の等号の歯がどこから来ているかの唯一の機械的根拠。
+    常に空集合を返す抽出器でも等号テストはゲート側と噛み合わなくなるまで緑のままなので、緑であることは
+    抽出器が動いている証拠にならない。実装を変異させた入力で抽出結果が広がり等号が破れることを実測する。
     """
     original = _harness_source()
     mutated = original.replace(_COMMAND_ALIAS_TUPLE, _WIDENED_COMMAND_ALIAS_TUPLE, 1)
