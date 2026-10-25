@@ -7,8 +7,9 @@
   保護ファイル名の全数検査（`test_protection_bypass_regressions.py`）と語彙集合の固定
   （`test_protection_vocabulary_declarations.py`）が同じ表を使うため、ここに 1 つだけ置く。
 - launcher 経由の hook 起動の土台（`PLUGIN_ROOT` / `LAUNCHER` / `HOOK_WRAPPER` / `HOOKS_JSON`、隔離環境 `_launcher_env`、
-  `_run_launcher`、hooks.json の宣言列挙 `_iter_declared_commands`）。起動スモーク（`test_hook_cli_launch_smoke.py`）と
-  PreToolUse 入力軸のゲート（`test_hook_cli_contract.py`）が共有する。
+  `_run_launcher`、hooks.json の宣言列挙 `_iter_declared_commands`）。起動スモーク（`test_hook_cli_launch_smoke.py`）・
+  PreToolUse 入力軸のゲート（`test_hook_cli_contract.py`）・stdin 停止の実プロセス検査
+  （`test_stdin_unavailable_fail_closed.py`）が共有する。
 """
 
 from __future__ import annotations

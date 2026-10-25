@@ -199,14 +199,9 @@ def _raise_oserror(*args: object, **kwargs: object) -> None:
     [(tempfile, "NamedTemporaryFile", False, 0), (subprocess, "Popen", False, 0), (os, "unlink", True, 1)],
     ids=["tempfile-fails", "popen-fails", "unlink-fails"],
 )
+@pytest.mark.usefixtures("popen_calls")
 def test_detach_process_failures(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    popen_calls: list[dict],
-    target: object,
-    name: str,
-    expected: bool,
-    leftovers: int,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, target: object, name: str, expected: bool, leftovers: int
 ) -> None:
     """一時ファイル作成・起動の失敗は False（一時ファイルは消す）、起動後の unlink 失敗は起動成功の True のままであること。"""
     monkeypatch.setattr(target, name, _raise_oserror)
@@ -216,9 +211,8 @@ def test_detach_process_failures(
 
 
 @pytest.mark.parametrize("existing_mode", [None, 0o755], ids=["created-under-umask-022", "existing-0755-tightened"])
-def test_detach_process_keeps_claq_dir_private(
-    tmp_path: Path, popen_calls: list[dict], existing_mode: int | None
-) -> None:
+@pytest.mark.usefixtures("popen_calls")
+def test_detach_process_keeps_claq_dir_private(tmp_path: Path, existing_mode: int | None) -> None:
     """umask 022 で作るときも既存 0755 のときも、`~/.claq` を 0700 にすること。"""
     claq = tmp_path / ".claq"
     old_umask = os.umask(0o022)
