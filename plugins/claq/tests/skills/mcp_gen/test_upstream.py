@@ -111,6 +111,8 @@ class TestUpstream:
             (429, 5.1, {}, []),
             (429, 5.0, {"attempts": 2}, [5.0]),
             (429, 1.0, {"max_retry_after": 0.5}, []),
+            (429, -1.0, {}, []),
+            (429, math.nan, {}, []),
         ],
         ids=[
             "not-retryable",
@@ -119,12 +121,14 @@ class TestUpstream:
             "retry-after-over-default-cap",
             "retry-after-at-default-cap",
             "retry-after-over-given-cap",
+            "retry-after-negative",
+            "retry-after-nan",
         ],
     )
     def test_retry_gives_up(
         self, facade: types.SimpleNamespace, status: int, retry_after: float | None, options: dict[str, Any], delays: list[float]
     ) -> None:
-        """再試行しない失敗・回数切れ・締切越え・上限（既定 5 秒）を超える retry_after では、その失敗を投げて諦める。待ちは上流の retry_after に従う。"""
+        """再試行しない失敗・回数切れ・締切越え・上限（既定 5 秒）を超える・負や NaN の retry_after では、その失敗を投げて諦める。待ちは上流の retry_after に従う。"""
         error = facade.upstream.UpstreamError(status, retry_after=retry_after)
         sleeper = _Sleeper()
         with pytest.raises(facade.upstream.UpstreamError) as raised:

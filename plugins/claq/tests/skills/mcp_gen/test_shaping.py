@@ -153,6 +153,11 @@ class TestShaping:
             ("a\ue000b", 100, "ab"),  # 私用文字（Co）
             ("a\uffffb", 100, "ab"),  # 非文字（Cn）
             ("a\ud800b", 100, "ab"),  # 対になっていないサロゲート（Cs）
+            ("a\u2028b\u2029c", 100, "a\nb\nc"),  # 行区切り（Zl）・段落区切り（Zp）は改行に畳む
+            ("a\u034fb\u2800c", 100, "abc"),  # 結合書記素ジョイナ・点字の空白
+            ("a\u17b4b\u17b5c", 100, "abc"),  # クメールの不可視母音
+            ("a\u180bb\u180cc\u180dd\u180fe", 100, "abcde"),  # モンゴルの異体字セレクタ
+            ("a\U00016fe4b", 100, "ab"),  # 契丹の埋め字
         ],
     )
     def test_clean_text(self, facade: types.SimpleNamespace, raw: str, max_chars: int, expected: str) -> None:

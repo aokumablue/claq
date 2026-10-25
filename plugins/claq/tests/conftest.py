@@ -29,6 +29,7 @@ def _fresh_runpy_module(monkeypatch: pytest.MonkeyPatch) -> None:
 
     @wraps(original_run_module)
     def run_module(module_name: str, *args: object, **kwargs: object) -> object:
+        """対象モジュールを sys.modules から外してから元の run_module を呼ぶ。"""
         sys.modules.pop(module_name, None)
         return original_run_module(module_name, *args, **kwargs)
 

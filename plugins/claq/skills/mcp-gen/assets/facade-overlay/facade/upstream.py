@@ -136,7 +136,8 @@ async def call_with_retry[T](
             if not error.retryable or attempt == attempts - 1:
                 raise
             delay = error.retry_after
-            if delay is not None and delay > max_retry_after:
+            # 負・NaN・上限超えの待ちは上流の誤りとして諦める（NaN は比較がすべて偽になり、ここで落ちる）。
+            if delay is not None and not 0 <= delay <= max_retry_after:
                 raise
             if delay is None:
                 delay = min(max_delay, base_delay * 2**attempt) * (0.5 + jitter() / 2)

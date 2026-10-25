@@ -41,8 +41,11 @@ _ESCAPE_SEQUENCES = re.compile(
 # 制御文字（Cc）・書式文字（Cf: ゼロ幅・双方向制御・Tag）・私用文字（Co）・サロゲート（Cs）・未割り当て（Cn）
 _HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cs", "Cn"})
 _KEPT_CONTROLS = frozenset("\n\t")
-# 区分では拾えないが表示されない文字: 異体字セレクタ（Mn）とハングルの埋め字（Lo）
-_HIDDEN_LETTERS = re.compile(r"[\ufe00-\ufe0f\U000e0100-\U000e01ef\u115f\u1160\u3164\uffa0]")
+# 区分では拾えないが表示されない文字: 異体字セレクタ（モンゴルを含む）・結合書記素ジョイナ・クメールの不可視母音（Mn）、
+# ハングルと契丹の埋め字・点字の空白（Lo/So）
+# 行区切り（Zl）と段落区切り（Zp）は、JSON に生のまま残ってモデルには改行に見えるので LF に畳む。
+_LINE_SEPARATORS = {0x2028: "\n", 0x2029: "\n"}
+_HIDDEN_LETTERS = re.compile(r"[\ufe00-\ufe0f\U000e0100-\U000e01ef\u180b-\u180d\u180f\u034f\u17b4\u17b5\u115f\u1160\u3164\uffa0\u2800\U00016fe4]")
 
 
 def compact_json(value: Any) -> str:
@@ -317,11 +320,12 @@ def clean_text(value: str, *, max_chars: int) -> str:
 
     次の順で整える。
 
-    1. CRLF を LF に揃える。
+    1. CRLF と行区切り・段落区切り（U+2028 / U+2029）を LF に揃える。
     2. 端末の制御列（CSI と OSC。7 ビットの ESC の形と、8 ビットの C1 の形）を列ごと除く。
        OSC は終端まで、終端が無ければ末尾まで除く。文字ごとに除くと、列の引数（`31m` など）が残る。
     3. 制御文字（Cc。改行とタブは残し、単独の CR は除く）・書式文字（Cf: ゼロ幅・双方向制御・Tag）・
-       私用文字（Co）・サロゲート（Cs）・未割り当て（Cn）・異体字セレクタ・ハングルの埋め字を除く。
+       私用文字（Co）・サロゲート（Cs）・未割り当て（Cn）・常に表示されない文字（異体字セレクタ・
+       結合書記素ジョイナ・埋め字・点字の空白など）を除く。
     4. 除いた後で `max_chars` 文字を超えれば切り詰め、末尾に「…」を付ける。
 
     指示文が書かれていても、ここでは消さない。データとして専用の項目に入れ、サーバが書く
@@ -334,6 +338,6 @@ def clean_text(value: str, *, max_chars: int) -> str:
     Returns:
         無害化した文字列。
     """
-    text = _ESCAPE_SEQUENCES.sub("", value.replace("\r\n", "\n"))
+    text = _ESCAPE_SEQUENCES.sub("", value.replace("\r\n", "\n").translate(_LINE_SEPARATORS))
     text = _HIDDEN_LETTERS.sub("", "".join(char for char in text if not _is_hidden(char)))
     return text if len(text) <= max_chars else text[:max_chars] + "…"
