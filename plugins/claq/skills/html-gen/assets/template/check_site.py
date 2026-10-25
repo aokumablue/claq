@@ -8,8 +8,8 @@
    `ring` / `muted-foreground` / `chart-*` だけを規則に沿って調整する。
 2. **検査**: 生成された `tokens.css` が tokens.json と一致すること、手書きの
    `styles.css` / `index.html` / `app.js` が契約（色は変数経由のみ・
-   コントラスト・レスポンシブ・モーション低減・アクセシビリティ・スクリプト混入）を守ることを
-   確認する。
+   コントラスト・レスポンシブ・モーション低減・アクセシビリティ・スクリプト混入・
+   Web フォントのライセンス同梱）を守ることを確認する。
 
     python3 check_site.py .              # 検査
     python3 check_site.py --write-css .  # tokens.css を再生成
@@ -614,7 +614,16 @@ def validate_site(site_dir: Path, tokens: dict[str, Any] | None = None) -> list[
         *_validate_js(script),
         *_validate_authored_colors(html + styles + script),
         *_validate_axis_text_scale(html, styles),
+        *_validate_fonts(site_dir),
     ]
+
+
+def _validate_fonts(site_dir: Path) -> list[str]:
+    """fonts/ に Web フォントを置くなら、ライセンス（SIL OFL 1.1）も同梱されているかを検査する。"""
+    fonts = site_dir / "fonts"
+    if any(fonts.glob("*.woff2")) and not (fonts / "OFL.txt").is_file():
+        return ["fonts/ に woff2 があるのに fonts/OFL.txt が無い（SIL OFL 1.1 の再配布条件。fetch_fonts.py で取り直す）"]
+    return []
 
 
 def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:

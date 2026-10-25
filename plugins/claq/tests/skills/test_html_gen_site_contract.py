@@ -15,6 +15,7 @@ import pytest
 
 from ._support import (
     _CHECK_SITE,
+    _FETCH_FONTS,
     _TEMPLATE,
     _TOKENS,
     CSS,
@@ -23,7 +24,7 @@ from ._support import (
     _append,
     _copy_site,
     _edit,
-    _load_check_site,
+    _load,
     check_site,
 )
 
@@ -35,10 +36,17 @@ def test_template_passes_validator() -> None:
     assert check_site.validate_site(_TEMPLATE) == []
 
 
-def test_loading_check_site_leaves_no_bytecode_in_the_shipped_assets() -> None:
-    """検査スクリプトの読み込みが配布ディレクトリに .pyc を落とさない。"""
+@pytest.mark.parametrize(
+    ("name", "path"),
+    [
+        pytest.param("html_gen_check_site", _CHECK_SITE, id="check_site"),
+        pytest.param("html_gen_fetch_fonts", _FETCH_FONTS, id="fetch_fonts"),
+    ],
+)
+def test_loading_template_scripts_leaves_no_bytecode_in_the_shipped_assets(name: str, path: Path) -> None:
+    """同梱スクリプトの読み込みが配布ディレクトリに .pyc を落とさない。"""
     shutil.rmtree(_TEMPLATE / "__pycache__", ignore_errors=True)
-    _load_check_site()
+    _load(name, path)
     assert not (_TEMPLATE / "__pycache__").exists()
 
 

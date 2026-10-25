@@ -1,6 +1,6 @@
-"""tests/skills/test_html_gen_*.py が使う補助（html-gen の検査スクリプトの読み込みと、サイト複製・編集の道具）。
+"""tests/skills/test_html_gen_*.py が使う補助（html-gen のテンプレート同梱スクリプトの読み込みと、サイト複製・編集の道具）。
 
-`check_site.py` の読み込みは import 時にこのモジュールで 1 回だけ行い、各テストファイルはその結果を import する。
+`check_site.py` と `fetch_fonts.py` の読み込みは import 時にこのモジュールで 1 回だけ行い、各テストファイルはその結果を import する。
 """
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import shutil
 import sys
+import types
 from pathlib import Path
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -15,12 +16,13 @@ _SKILL_DIR = _PLUGIN_ROOT / "skills" / "html-gen"
 _TEMPLATE = _SKILL_DIR / "assets" / "template"
 _TOKENS = _SKILL_DIR / "references" / "tokens.json"
 _CHECK_SITE = _TEMPLATE / "check_site.py"
+_FETCH_FONTS = _TEMPLATE / "fetch_fonts.py"
 _SITE_FILES = ("index.html", "styles.css", "tokens.css", "app.js", "check_site.py")
 
 
-def _load_check_site():
-    """check_site.py をモジュールとして読み込む（`assets/template/` は配布物なので、読み込みの副作用で `__pycache__` を書かせない）。"""
-    spec = importlib.util.spec_from_file_location("html_gen_check_site", _CHECK_SITE)
+def _load(name: str, path: Path) -> types.ModuleType:
+    """ファイル path をモジュール name として読み込む（`assets/template/` は配布物なので、読み込みの副作用で `__pycache__` を書かせない）。"""
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     original = sys.dont_write_bytecode
@@ -32,7 +34,8 @@ def _load_check_site():
     return module
 
 
-check_site = _load_check_site()
+check_site = _load("html_gen_check_site", _CHECK_SITE)
+fetch_fonts = _load("html_gen_fetch_fonts", _FETCH_FONTS)
 TOKENS = check_site.load_tokens(_TOKENS)
 BASES = check_site.base_ids(TOKENS)
 HTML = (_TEMPLATE / "index.html").read_text(encoding="utf-8")

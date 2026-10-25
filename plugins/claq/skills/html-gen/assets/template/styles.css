@@ -1,5 +1,22 @@
 /* 手書きスタイル。色は必ず tokens.css の変数を通す（生の色を書くと検査で落ちる）。 */
 
+/* --- Web フォント -------------------------------------------------------- */
+/* fetch_fonts.py が fonts/ に置く。無ければ読み込みに失敗し、--font-sans / --font-mono の次の候補（OS の書体）で表示する。 */
+
+@font-face {
+  font-family: "Geist";
+  src: url("fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 /* --- リセット ------------------------------------------------------------ */
 
 *,
