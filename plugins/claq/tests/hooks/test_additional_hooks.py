@@ -289,8 +289,7 @@ def test_oversized_payload_is_fail_closed_end_to_end() -> None:
         # 非空だが JSON として読めない・tool_input 系キーが無い入力も判定不能として deny する。
         ("{not-json", False, block_no_verify._UNPARSEABLE_INPUT_MESSAGE),
         ({"unrelated": "payload"}, False, block_no_verify._MISSING_FIELDS_MESSAGE),
-        # 空入力（tty・stdin 未接続）だけは本処理をスキップして通す。
-        ("", False, None),
+        # 空入力（tty・stdin 未接続）だけを通すことは、test_stdin_unavailable_fail_closed.py が 4 hook 揃えて固定する。
         ({"tool_input": {"command": "git commit --no-verify"}}, False, _BYPASS_REASON),
         # 先勝ちで 1 キーだけ見ると、無害な tool_input と悪意ある toolInput の同居を素通りさせる
         # （docs/adr/shell-analysis-boundary.md の「誤検出を誤通過より選ぶ」。config_protection も全キー走査）。
@@ -306,7 +305,6 @@ def test_oversized_payload_is_fail_closed_end_to_end() -> None:
         "truncated",
         "unparseable-json",
         "missing-tool-input",
-        "empty-input",
         "bypass",
         "bypass-in-later-container-key",
         "all-container-keys-benign",
