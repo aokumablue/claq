@@ -11,6 +11,7 @@ import http.client
 import re
 import runpy
 import sys
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -253,6 +254,32 @@ def test_fetch_failure_writes_nothing(
     rc = fetch_fonts.main([str(site)])
     err = capsys.readouterr().err
     assert (rc, (site / "fonts").exists(), f"FAIL: {label}: " in err, "OS の書体" in err) == (1, False, True, True)
+
+
+def test_fetch_gives_up_after_total_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """接続やヘッダ受信で止まっても、全体の上限で打ち切って fonts/ を作らずに 1 で終わる（生成を待たせない）。"""
+    release = threading.Event()
+    monkeypatch.setattr(fetch_fonts, "fetch_all", lambda: release.wait(5) and [])
+    monkeypatch.setattr(fetch_fonts, "TOTAL_TIMEOUT_SECONDS", 0.05)
+    site = _site(tmp_path)
+    rc = fetch_fonts.main([str(site)])
+    release.set()
+    err = capsys.readouterr().err
+    assert (rc, (site / "fonts").exists(), "FAIL: 通信: 0.05 秒以内" in err) == (1, False, True)
+
+
+def test_unexpected_error_in_worker_is_raised(monkeypatch: pytest.MonkeyPatch) -> None:
+    """取得スレッドで起きた想定外の例外は握り潰さず、呼び出し元へそのまま投げ直す。"""
+
+    def _broken() -> None:
+        """プログラムの誤りを模す。"""
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(fetch_fonts, "fetch_all", _broken)
+    with pytest.raises(RuntimeError, match="bug"):
+        fetch_fonts.fetch_within(5)
 
 
 def test_fetch_stops_reading_one_byte_past_size(

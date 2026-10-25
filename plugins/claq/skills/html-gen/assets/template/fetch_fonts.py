@@ -15,6 +15,7 @@ import hashlib
 import http.client
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import NamedTuple
@@ -24,6 +25,8 @@ COMMIT = "a0a06a3d916dcf92fe96f12051a124f89056b36a"
 _BASE = f"https://raw.githubusercontent.com/vercel/geist-font/{COMMIT}/"
 #: ファイルごとの本体受信の締め切り（秒）。urlopen のソケット操作ごとの timeout にも同じ値を渡す。
 TIMEOUT_SECONDS = 20.0
+#: 3 ファイルの取得と照合を合わせた上限（秒）。名前解決・接続・ヘッダ受信で止まっても、ページの生成を待たせない。
+TOTAL_TIMEOUT_SECONDS = 60.0
 _CHUNK = 16384
 WOFF2_MAGIC = b"wOF2"
 
@@ -118,6 +121,41 @@ def write_all(fonts_dir: Path, downloads: list[tuple[FontFile, bytes]]) -> list[
     return [final for _, final in staged]
 
 
+def fetch_all() -> list[tuple[FontFile, bytes]]:
+    """FILES を順に取得・照合し、本体の組を返す。"""
+    downloads = []
+    for entry in FILES:
+        data = download(entry)
+        verify(entry, data)
+        downloads.append((entry, data))
+    return downloads
+
+
+def fetch_within(timeout: float) -> list[tuple[FontFile, bytes]]:
+    """fetch_all を別スレッドで走らせ、timeout 秒で打ち切る（打ち切ったら通信の FetchError）。
+
+    スレッドは daemon なので、打ち切った後に通信が止まったままでもプロセスの終了を妨げない。
+    スレッドの中で起きた例外は、そのまま呼び出し元へ投げ直す。
+    """
+    outcome: dict[str, object] = {}
+
+    def run() -> None:
+        """fetch_all の結果か例外を outcome に残す。"""
+        try:
+            outcome["value"] = fetch_all()
+        except Exception as err:  # 呼び出し元のスレッドへ運んで投げ直すため（握り潰さない）
+            outcome["error"] = err
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        raise FetchError(f"通信: {timeout:g} 秒以内に 3 ファイルを取り終えられない")
+    if "error" in outcome:
+        raise outcome["error"]  # type: ignore[misc]
+    return outcome["value"]  # type: ignore[return-value]
+
+
 def main(argv: list[str] | None = None) -> int:
     """エントリポイント。0 成功 / 1 取得・照合の失敗 / 2 サイトのディレクトリが不正。"""
     parser = argparse.ArgumentParser(description="Geist / Geist Mono を取得してサイトの fonts/ に置く")
@@ -131,12 +169,8 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    downloads = []
     try:
-        for entry in FILES:
-            data = download(entry)
-            verify(entry, data)
-            downloads.append((entry, data))
+        downloads = fetch_within(TOTAL_TIMEOUT_SECONDS)
     except FetchError as err:
         print(f"FAIL: {err}", file=sys.stderr)
         print("fonts/ には何も書いていない。サイトは OS の書体で表示される。", file=sys.stderr)

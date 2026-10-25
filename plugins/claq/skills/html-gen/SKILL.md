@@ -57,13 +57,13 @@ cp /abs/skill/html-gen/assets/template/e2e_contrast.js /abs/path/to/dest/e2e_con
 cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 ```
 
-続けて Web フォントを取得する。vercel/geist-font の固定コミットから Geist / Geist Mono を `fonts/` に置く（`Geist-Variable.woff2`・`GeistMono-Variable.woff2`・`OFL.txt` の 3 ファイル、合計約 145KB）。大きさと git blob SHA-1 を照合し、1 つでも合わなければ何も書かずに非 0 で終わる。
+続けて Web フォントを取得する。vercel/geist-font の固定コミットから Geist / Geist Mono を `fonts/` に置く（`Geist-Variable.woff2`・`GeistMono-Variable.woff2`・`OFL.txt` の 3 ファイル、合計約 145KB）。大きさ・git blob SHA-1・woff2 の先頭を照合し、1 つでも合わなければ何も書かずに非 0 で終わる。取得は全体で最大 60 秒で打ち切る。
 
 ```bash
 python3 /abs/path/to/dest/fetch_fonts.py /abs/path/to/dest
 ```
 
-- 失敗しても止めずに手順3 へ進み、完了報告に「フォント未同梱（OS の書体で表示）」と `FAIL:` の文面にある原因を書く（失敗時に続行するのは利用者の決定による）
+- 失敗（通信・照合・時間切れ）してもページの作成は失敗にせず、止めずに手順3 へ進み、完了報告に「フォント未同梱（OS の書体で表示）」と `FAIL:` の文面にある原因を書く（失敗時に続行するのは利用者の決定による）
 - 日本語の字形は取得せず OS の書体で表示する（利用者の決定）
 - `fetch_fonts.py` は `check_site.py` と同じく生成先に残す。後でネットワークのある環境で同じコマンドを打ち直せばフォントが入る
 - `fonts/OFL.txt` は消さない（SIL OFL 1.1 の再配布条件。消すと `check_site.py` が落とす）
