@@ -1,4 +1,4 @@
-"""claq.hooks.pre_bash_commit_quality（PreToolUse の commit 品質フック）の evaluate の件数集計・入力不正・失敗方向のテストと、リポジトリ全体の secret 自己走査のテスト。"""
+"""claq.hooks.pre_bash_commit_quality（PreToolUse の commit 品質フック）の evaluate の件数集計・入力不正・失敗方向と、長いコミットメッセージの検証、リポジトリ全体の secret 自己走査のテスト。"""
 
 from __future__ import annotations
 
