@@ -329,6 +329,7 @@ class TestUnquotedNewlineNormalization:
             ("語中の連結引用符", "echo $'\\''; g''it commit", ["echo", "$\\", ";", "git", "commit"]),
             ("リダイレクト先の引用符", "echo $'\\'' >\"ruff.toml\"", ["echo", "$\\", ">", "ruff.toml"]),
             ("閉じない引用符", "grep \"a ruff.toml", ["grep", "a", "ruff.toml"]),
+            ("末尾の語で閉じない引用符", 'git commit -m "x', ["git", "commit", "-m", "x"]),
             # 空文字列の引用符対も 1 トークンとして位置を保つ（個数を変えない）。
             ("空文字列の引用符対", "echo $'\\''; rm \"\" x", ["echo", "$\\", ";", "rm", "", "x"]),
         ],
@@ -391,6 +392,12 @@ class TestUnquotedNewlineNormalization:
             ["git", "add", "s.py"],
             ["git", "commit", "-m", "m"],
         ]
+
+    def test_split_segments_drops_empty_segments(self) -> None:
+        """先頭と連続する区切りトークンで空セグメントを作らないこと。"""
+        tokens = ["&&", "git", "status", ";", ";", "git", "commit"]
+
+        assert shell_tokens.split_segments(tokens) == [["git", "status"], ["git", "commit"]]
 
     @pytest.mark.parametrize(
         ("label", "command", "expected"),

@@ -359,18 +359,6 @@ def test_deep_nesting_does_not_fail_open(monkeypatch: pytest.MonkeyPatch, payloa
     assert block_no_verify.main() in expected_codes
 
 
-def test_tokenize_falls_back_to_whitespace_split() -> None:
-    """クォート不整合時は空白分割へフォールバックする（fail-closed）。"""
-    assert block_no_verify.tokenize_with_status('git commit -m "x') == (["git", "commit", "-m", "x"], False)
-
-
-def test_split_segments_drops_empty_segments() -> None:
-    """連続する区切りトークンで空セグメントを作らない。"""
-    tokens = ["&&", "git", "status", ";", ";", "git", "commit"]
-
-    assert block_no_verify.split_segments(tokens) == [["git", "status"], ["git", "commit"]]
-
-
 def test_parse_git_segment_returns_subcommand_and_flags() -> None:
     """グローバルオプションを読み飛ばしてサブコマンドとフラグを返す。"""
     invocation = block_no_verify.parse_git_segment(["git", "-C", "/tmp", "--no-pager", "commit", "-am", "msg", "--no-verify"])

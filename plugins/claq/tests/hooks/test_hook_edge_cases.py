@@ -1,4 +1,4 @@
-"""claq.hooks.pre_bash_commit_quality（PreToolUse の commit 品質フック）の evaluate の件数集計・入力不正・失敗方向と、長いコミットメッセージの検証、リポジトリ全体の secret 自己走査のテスト。"""
+"""claq.hooks.pre_bash_commit_quality（PreToolUse の commit 品質フック）の evaluate の件数集計・入力不正・失敗方向と、リポジトリ全体の secret 自己走査のテスト。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import commit_message as commit_message
 from claq.hooks import commit_quality_scanner as commit_quality_scanner
 from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
 
@@ -185,15 +184,6 @@ def test_count_file_issues_sanitizes_the_logged_path(monkeypatch: pytest.MonkeyP
     assert "<system-reminder>" not in file_line
     assert "\x1b" not in file_line
     assert "\nIMPORTANT" not in file_line.lstrip("\n")
-
-
-def test_validate_commit_message_flags_unconventional_long_message() -> None:
-    """conventional でなく 72 文字を超え句点で終わるメッセージは、形式・長さ・句点の問題を返すこと。"""
-    command = 'git commit -m "bad message with no conventional format and a very long subject line that keeps going."'
-
-    result = commit_message.validate_commit_message(command)
-
-    assert [issue["type"] for issue in result["issues"]] == ["format", "length", "punctuation"]
 
 
 def _git_stdout(cwd: Path, *args: str) -> str:
