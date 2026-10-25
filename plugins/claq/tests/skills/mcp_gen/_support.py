@@ -23,7 +23,7 @@ _OVERLAY = _SKILL_DIR / "assets" / "facade-overlay"
 _INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cn"})
 _HANGUL_FILLERS = frozenset("\u115f\u1160\u3164\uffa0")
 # 重ね合わせの facade パッケージのモジュール（facade fixture が読み込み、adapters fixture が facade.* の名前でも登録する）
-_FACADE_MODULES = ("errors", "cursor", "shaping", "catalog", "upstream", "audit")
+_FACADE_MODULES = ("errors", "cursor", "shaping", "catalog", "upstream", "limits", "audit")
 _MINIMAL_SETTINGS: dict[str, Any] = {"HAPPY_TOOL": "t", "HAPPY_ARGS": {}, "HAPPY_EXPECTED_STRUCTURED": {}}
 _AUDIT_SECRET = b"k" * 32
 

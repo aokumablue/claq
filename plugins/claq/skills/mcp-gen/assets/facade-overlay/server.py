@@ -11,7 +11,7 @@ import logging
 import os
 import secrets
 import time
-from collections.abc import Awaitable, Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal
@@ -21,9 +21,10 @@ from facade.audit import AuditLog, resolve_principal
 from facade.catalog import PATH_MAX_CHARS, PATH_PATTERN, Catalog, FieldSpec
 from facade.cursor import CursorCodec, PageCursor, query_fingerprint
 from facade.errors import FacadeError
+from facade.limits import UpstreamPolicy
 from facade.shaping import MORE_SUFFIX, compact_json, fit_page, fit_view, project
-from facade.upstream import CircuitBreaker, UpstreamError, call_upstream, fan_out, model_message
-from guard import install_guard
+from facade.upstream import UpstreamError, fan_out, model_message
+from guard import CallLimiter, install_guard
 from mcp.server import CacheHint, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
@@ -39,6 +40,16 @@ DEFAULT_SEARCH_LIMIT = 10  # orders_search の limit の既定値（ツールの
 MAX_SEARCH_LIMIT = 50  # orders_search の limit の上限（ツールの説明にも書く）
 MAX_RESULT_CHARS = 20_000  # 1 回の結果の text の上限（smoke_config.MAX_RESULT_CHARS 以下）
 TOOL_DEADLINE_SECONDS = 10.0  # 1 回のツール呼び出しの締切（ホストのタイムアウトより短く）
+# 受信側のレート制限: 主体 × ツールごとに、TOOL_CALL_WINDOW_SECONDS 秒に TOOL_CALLS_PER_WINDOW 回まで通す。
+TOOL_CALLS_PER_WINDOW = 30
+TOOL_CALL_WINDOW_SECONDS = 60.0
+# 送信側の上限（上流ごと。全主体で共有する）。上流のクォータの契約より低くする（上流の 429 より先に絞る）。
+UPSTREAM_RATE_PER_SECOND = 5.0  # クォータが 1 秒あたりに回復する呼び出しの回数（再試行も 1 回と数える）
+UPSTREAM_BURST = 10  # クォータを貯められる呼び出しの回数の上限
+UPSTREAM_CONCURRENCY = 8  # 全主体を合わせた同時実行の上限
+PRINCIPAL_CONCURRENCY = 4  # 1 つの主体の同時実行の上限（1 つの主体が上流の枠を使い切らないように）
+# TOOL_CALLS_PER_WINDOW・UPSTREAM_BURST・UPSTREAM_CONCURRENCY・PRINCIPAL_CONCURRENCY は、smoke_check.py が 1 回の起動で送る
+# ツール呼び出しの数以上にする（下回ると smoke が上限で落ちる）。
 CURSOR_TTL_SECONDS = 900
 CURSOR_TTL = f"{CURSOR_TTL_SECONDS // 60} 分"  # ツールの説明に書く cursor の有効期限
 # cursor に封じる上流のページトークンの長さの上限と、cursor の長さの上限（cursor 引数の max_length）。
@@ -174,7 +185,14 @@ mcp = MCPServer(
     # 項目カタログは静的で全員に同じなので public。スコープで一覧を絞るなら private にする。
     cache_hints={"tools/list": CacheHint(ttl_ms=300_000, scope="public")},
 )
-install_guard(mcp)  # 未知の引数の拒否と、公開する inputSchema の整形（guard.py）
+# 未知の引数の拒否・主体 × ツールの呼び出しの制限・公開する inputSchema の整形（guard.py）。
+# 主体を決められない失敗（FacadeError）は、その文面の isError で返す。
+install_guard(
+    mcp,
+    limiter=CallLimiter(TOOL_CALLS_PER_WINDOW, TOOL_CALL_WINDOW_SECONDS),
+    principal=_principal,
+    principal_errors=(FacadeError,),
+)
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 # 鍵は 1 回だけ作り、cursor の署名と監査ログの主体の要約の両方に使う（未設定のときの乱数の鍵を 2 つ作らない）。
@@ -189,7 +207,21 @@ SEARCH_CURSOR = PageCursor(
 )
 ORDERS = OrdersApi()
 SHIPMENTS = ShipmentsApi()
-BREAKERS = {"orders": CircuitBreaker(), "shipments": CircuitBreaker()}
+# 上流ごとの方針（合流・同時実行の上限・遮断器・再試行・締切・クォータ）。上限は上流の契約に合わせる。
+UPSTREAM_POLICIES = {
+    "orders": UpstreamPolicy(
+        rate_per_second=UPSTREAM_RATE_PER_SECOND,
+        burst=UPSTREAM_BURST,
+        max_concurrent=UPSTREAM_CONCURRENCY,
+        max_concurrent_per_principal=PRINCIPAL_CONCURRENCY,
+    ),
+    "shipments": UpstreamPolicy(
+        rate_per_second=UPSTREAM_RATE_PER_SECOND,
+        burst=UPSTREAM_BURST,
+        max_concurrent=UPSTREAM_CONCURRENCY,
+        max_concurrent_per_principal=PRINCIPAL_CONCURRENCY,
+    ),
+}
 
 
 @contextmanager
@@ -212,26 +244,35 @@ def model_errors() -> Iterator[None]:
         raise ToolError(model_message(error)) from error
 
 
-async def _upstream[T](name: str, operation: Callable[[], Awaitable[T]], deadline: float) -> T:
-    """遮断器と再試行を通して上流を呼び、再試行を含む全体を締切で打ち切る（`call_upstream` に委ねる）。
+async def _upstream[T](
+    name: str,
+    method: Callable[..., Awaitable[T]],
+    arguments: Mapping[str, Any],
+    *,
+    principal: str,
+    deadline: float,
+) -> T:
+    """上流 name の方針（`UPSTREAM_POLICIES`）を通して、上流のメソッドを呼ぶ。
 
-    締切は遮断器の内側で掛けるので、締切超えも遮断器の失敗として数えられる。
+    同じ主体の同じ要求の合流・同時実行の上限・遮断器・再試行・締切・クォータは方針に任せる。
 
     Args:
-        name: 上流の名前（BREAKERS のキー）。
-        operation: 上流を呼ぶ関数。
+        name: 上流の名前（UPSTREAM_POLICIES のキー）。
+        method: 上流を呼ぶメソッド。
+        arguments: メソッドに渡す引数（名前で渡す）。
+        principal: 呼び出しの主体。
         deadline: 締切（time.monotonic の時刻）。
 
     Returns:
         上流の結果。
 
     Raises:
-        UpstreamError: 上流が失敗した・遮断中・締切を越えた（status は None）とき。
+        UpstreamError: 上流が失敗した・遮断中・締切を越えた（status は None）・サーバ自身が絞った（Throttled）とき。
     """
-    return await call_upstream(BREAKERS[name], operation, deadline=deadline)
+    return await UPSTREAM_POLICIES[name].call(method, arguments, principal=principal, deadline=deadline)
 
 
-async def _shipments(order_id: str, deadline: float) -> list[dict[str, Any]]:
+async def _shipments(order_id: str, principal: str, deadline: float) -> list[dict[str, Any]]:
     """受注の配送を取り、正規ドメインモデルにする。
 
     変換も fan_out の 1 本の中で行う。応答の形の不正（502）も配送だけの失敗になり、
@@ -239,6 +280,7 @@ async def _shipments(order_id: str, deadline: float) -> list[dict[str, Any]]:
 
     Args:
         order_id: 受注 ID。
+        principal: 呼び出しの主体。
         deadline: 締切（time.monotonic の時刻）。
 
     Returns:
@@ -247,7 +289,11 @@ async def _shipments(order_id: str, deadline: float) -> list[dict[str, Any]]:
     Raises:
         UpstreamError: 上流が失敗した・締切を越えた・応答の形が不正なとき。
     """
-    return normalize_shipments(await _upstream("shipments", lambda: SHIPMENTS.list_for_order(order_id), deadline))
+    return normalize_shipments(
+        await _upstream(
+            "shipments", SHIPMENTS.list_for_order, {"order_id": order_id}, principal=principal, deadline=deadline
+        )
+    )
 
 
 def _now() -> str:
@@ -570,17 +616,19 @@ async def _search_orders(
     deadline = time.monotonic() + TOOL_DEADLINE_SECONDS
     raw_page, upstream_next = await _upstream(
         "orders",
-        lambda: ORDERS.search(
-            text=query,
-            customer_ref=customer_id,
-            status_codes=[STATUS_CODES[name] for name in status] if status else None,
-            created_from=created_from,
-            created_before=created_before,
-            sort=sort,
-            page=position["page"],
-            page_size=limit,
-        ),
-        deadline,
+        ORDERS.search,
+        {
+            "text": query,
+            "customer_ref": customer_id,
+            "status_codes": [STATUS_CODES[name] for name in status] if status else None,
+            "created_from": created_from,
+            "created_before": created_before,
+            "sort": sort,
+            "page": position["page"],
+            "page_size": limit,
+        },
+        principal=principal,
+        deadline=deadline,
     )
     summaries = [
         _summary(normalize_order(raw), summary_paths, extra_paths) for raw in raw_page[position["skip"] :]
@@ -724,13 +772,16 @@ async def orders_get(
         paths = CATALOG.view(view, allowed_sensitivity=allowed) + CATALOG.resolve(
             fields or [], for_search=False, allowed_sensitivity=allowed
         )
+        principal = _principal()
         deadline = time.monotonic() + TOOL_DEADLINE_SECONDS
         calls: dict[str, Callable[[], Awaitable[Any]]] = {
-            "order": lambda: _upstream("orders", lambda: ORDERS.get(order_id), deadline)
+            "order": lambda: _upstream(
+                "orders", ORDERS.get, {"order_id": order_id}, principal=principal, deadline=deadline
+            )
         }
         # 必要な上流だけを呼ぶ（要らない呼び出しは遅延と上流の負荷を増やすだけ）
         if any(path.startswith("shipments") for path in paths):
-            calls["shipments"] = lambda: _shipments(order_id, deadline)
+            calls["shipments"] = lambda: _shipments(order_id, principal, deadline)
         results, failures = await fan_out(calls, timeout=TOOL_DEADLINE_SECONDS)
         if "order" in failures:
             raise failures["order"]

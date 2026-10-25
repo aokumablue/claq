@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from guard import install_guard
+from guard import CallLimiter, install_guard
 from mcp.server import CacheHint, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
@@ -19,6 +19,10 @@ from transport import run
 
 SERVER_NAME = "example-server"
 SERVER_VERSION = "0.1.0"
+# 受信側のレート制限: 主体 × ツールごとに、TOOL_CALL_WINDOW_SECONDS 秒に TOOL_CALLS_PER_WINDOW 回まで通す。
+# smoke_check.py が 1 回の起動で送るツール呼び出しの数以上にする（下回ると smoke が上限で落ちる）。
+TOOL_CALLS_PER_WINDOW = 30
+TOOL_CALL_WINDOW_SECONDS = 60.0
 
 # stdout は JSON-RPC 専用。ログは logging の既定の出力先（stderr）へ書き、print は使わない。
 logger = logging.getLogger(__name__)
@@ -36,7 +40,22 @@ mcp = MCPServer(
         "resources/read": CacheHint(ttl_ms=60_000, scope="public"),
     },
 )
-install_guard(mcp)  # 未知の引数の拒否と、公開する inputSchema の整形（guard.py）
+
+
+def _principal() -> str:
+    """呼び出しの主体を返す（受信側のレート制限を主体ごとに数えるため）。
+
+    stdio と、認証の無いループバックの HTTP では、呼び出し元は 1 人なので固定の値でよい。
+    リモートで認証を入れたら、検証済みのアクセストークンの主体に置き換える（ツール引数から取らない）。
+
+    Returns:
+        主体の識別子。
+    """
+    return "local"
+
+
+# 未知の引数の拒否・主体 × ツールの呼び出しの制限・公開する inputSchema の整形（guard.py）
+install_guard(mcp, limiter=CallLimiter(TOOL_CALLS_PER_WINDOW, TOOL_CALL_WINDOW_SECONDS), principal=_principal)
 
 # 注釈はヒントであり、読み取り専用の保証にはならない（保証は資格情報で行う）。
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)

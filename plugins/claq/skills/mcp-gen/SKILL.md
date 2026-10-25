@@ -101,10 +101,12 @@ cp -R /abs/skill/mcp-gen/assets/facade-overlay/facade /abs/path/to/dest/facade
 
 差し替える: `SERVER_NAME` / `SERVER_VERSION` / `instructions` / `cache_hints`、
 `pyproject.toml` の `name` と `[project.scripts]` のコマンド名（`SERVER_NAME` にそろえる）、
-見本のツール・リソース・プロンプト（不要なら削除）。重ね合わせたなら `CATALOG`・
-出力モデル・`adapters.py` の偽物（実際の上流の呼び出しに置き換える）も。
+見本のツール・リソース・プロンプト（不要なら削除）、受信側のレート制限の定数（`TOOL_CALLS_PER_WINDOW` /
+`TOOL_CALL_WINDOW_SECONDS`）と主体を返す `_principal`。重ね合わせたなら `CATALOG`・
+出力モデル・`adapters.py` の偽物（実際の上流の呼び出しに置き換える）と、`UPSTREAM_POLICIES` の上限の定数
+（`UPSTREAM_RATE_PER_SECOND` / `UPSTREAM_BURST` / `UPSTREAM_CONCURRENCY` / `PRINCIPAL_CONCURRENCY`）も。
 
-触らない: `install_guard(mcp)` と `run(mcp)` の呼び出し、`guard.py`、`smoke_check.py`、
+触らない: `install_guard(mcp, ...)` と `run(mcp)` の呼び出し（上限は定数で差し替える）、`guard.py`、`smoke_check.py`、
 `smoke_static.py`、`facade/` の部品。`transport.py` は公開するホスト名を足すとき以外は触らない。
 
 ツールの書き方（説明・引数・出力・失敗・注釈・状態）は `references/tool-design.md` に従う。

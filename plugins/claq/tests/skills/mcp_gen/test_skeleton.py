@@ -12,6 +12,21 @@ from ._support import _OVERLAY, _PLUGIN_ROOT, _SKILL_DIR, _TEMPLATE, _config, _i
 _OVERLAY_SERVER = ast.parse((_OVERLAY / "server.py").read_text(encoding="utf-8"))
 
 
+def _parse(path: Path) -> ast.Module:
+    """ファイル path の構文木を返す。"""
+    return ast.parse(path.read_text(encoding="utf-8"))
+
+
+def _constants(tree: ast.Module) -> dict[str, object]:
+    """モジュールの最上位で、大文字の名前にリテラルを代入した定数を集める。"""
+    return {
+        node.targets[0].id: ast.literal_eval(node.value)
+        for node in tree.body
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and node.targets[0].id.isupper()
+        and isinstance(node.value, ast.Constant)
+    }
+
+
 def _tool_functions(server: Path) -> set[str]:
     """server.py で `@mcp.tool(...)` を付けた（ツールとして公開される）関数名を集める。"""
     tree = ast.parse(server.read_text(encoding="utf-8"))
@@ -65,13 +80,7 @@ def test_overlay_paged_secret_is_fresh_each_run() -> None:
 
 def test_overlay_budget_fits_smoke_limit() -> None:
     """重ね合わせの server.py の予算が、smoke_config.py の上限を超えない。"""
-    constants = {
-        node.targets[0].id: ast.literal_eval(node.value)
-        for node in _OVERLAY_SERVER.body
-        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and node.targets[0].id.isupper()
-        and isinstance(node.value, ast.Constant)
-    }
-    assert constants["MAX_RESULT_CHARS"] <= _config(_OVERLAY / "smoke_config.py")["MAX_RESULT_CHARS"]
+    assert _constants(_OVERLAY_SERVER)["MAX_RESULT_CHARS"] <= _config(_OVERLAY / "smoke_config.py")["MAX_RESULT_CHARS"]
 
 
 def _overlay_function(name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
@@ -121,3 +130,126 @@ def test_overlay_search_leaves_paging_to_facade() -> None:
         calls = {ast.unparse(node.func) for node in ast.walk(_overlay_function(caller)) if isinstance(node, ast.Call)}
         assert callee in calls, f"{caller} が {callee} を呼んでいない"
     assert "fit_items" not in (_OVERLAY / "server.py").read_text(encoding="utf-8")
+
+
+def _definition(tree: ast.AST, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef:
+    """tree の中から、名前の一致する関数かクラスの定義を取り出す。"""
+    return next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and node.name == name
+    )
+
+
+def _method(tree: ast.AST, class_name: str, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    """tree の中のクラス class_name から、メソッド name の定義を取り出す。"""
+    return next(
+        node
+        for node in _definition(tree, class_name).body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == name
+    )
+
+
+def _keyword_only(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[set[str], set[str]]:
+    """関数のキーワード専用引数の（全ての名前、既定値の無い名前）を返す。"""
+    names = [argument.arg for argument in function.args.kwonlyargs]
+    return set(names), {name for name, default in zip(names, function.args.kw_defaults, strict=True) if default is None}
+
+
+def _calls(tree: ast.AST, function: str) -> list[ast.Call]:
+    """tree の中の、呼び出す式のソースが function の呼び出しを出現順に集める。"""
+    return [node for node in ast.walk(tree) if isinstance(node, ast.Call) and ast.unparse(node.func) == function]
+
+
+def _smoke_calls_per_exchange() -> int:
+    """smoke_check.py が 1 つの `_exchange([...])`（1 回の起動）で送るツール呼び出しの数の最大を返す。"""
+    return max(
+        len(_calls(exchange.args[0], "_call")) for exchange in _calls(_parse(_TEMPLATE / "smoke_check.py"), "_exchange")
+    )
+
+
+@pytest.mark.parametrize("skeleton", [_TEMPLATE, _OVERLAY])
+def test_rate_limits_fit_smoke(skeleton: Path) -> None:
+    """server.py の受信側と送信側の上限は、smoke が 1 回の起動で送る呼び出しを絞らない（smoke が上限で落ちない）。"""
+    constants = _constants(_parse(skeleton / "server.py"))
+    names = ["TOOL_CALLS_PER_WINDOW"]
+    if skeleton == _OVERLAY:
+        names += ["UPSTREAM_BURST", "UPSTREAM_CONCURRENCY", "PRINCIPAL_CONCURRENCY"]
+    needed = _smoke_calls_per_exchange()
+    assert {name: constants[name] >= needed for name in names} == dict.fromkeys(names, True)
+
+
+@pytest.mark.parametrize("skeleton", [_TEMPLATE, _OVERLAY])
+def test_guard_wiring_matches_signature(skeleton: Path) -> None:
+    """server.py の install_guard と CallLimiter の呼び出しが guard.py の定義と合い、上限に定数・主体に _principal を渡す。
+
+    server.py は mcp が無いと import できないので、呼び出しの食い違いを構文木で先に見つける。
+    """
+    guard = _parse(_TEMPLATE / "guard.py")
+    server = _parse(skeleton / "server.py")
+    accepted, required = _keyword_only(_definition(guard, "install_guard"))
+    limiter_init = _method(guard, "CallLimiter", "__init__")
+    (installed,) = _calls(server, "install_guard")
+    keywords = {item.arg: ast.unparse(item.value) for item in installed.keywords}
+    (limiter,) = _calls(installed, "CallLimiter")
+    expected = {"limiter": "CallLimiter(TOOL_CALLS_PER_WINDOW, TOOL_CALL_WINDOW_SECONDS)", "principal": "_principal"}
+    if skeleton == _OVERLAY:
+        expected["principal_errors"] = "(FacadeError,)"
+    assert (
+        [ast.unparse(argument) for argument in installed.args],
+        required <= set(keywords) <= accepted,
+        len(limiter.args) == len(limiter_init.args.args) - 1,
+        isinstance(_definition(server, "_principal"), ast.FunctionDef),
+        keywords,
+    ) == (["mcp"], True, True, True, expected)
+
+
+def test_overlay_policy_wiring_matches_signature() -> None:
+    """重ね合わせの UpstreamPolicy(...) と .call(...) が limits.py の定義と合い、上限に定数の名前を渡す。"""
+    limits = _parse(_OVERLAY / "facade" / "limits.py")
+    accepted, required = _keyword_only(_method(limits, "UpstreamPolicy", "__init__"))
+    call = _method(limits, "UpstreamPolicy", "call")
+    call_keywords, _ = _keyword_only(call)
+    constants = _constants(_OVERLAY_SERVER)
+    policies = _calls(_OVERLAY_SERVER, "UpstreamPolicy")
+    (forwarded,) = _calls(_OVERLAY_SERVER, "UPSTREAM_POLICIES[name].call")
+    expected = {
+        "rate_per_second": "UPSTREAM_RATE_PER_SECOND",
+        "burst": "UPSTREAM_BURST",
+        "max_concurrent": "UPSTREAM_CONCURRENCY",
+        "max_concurrent_per_principal": "PRINCIPAL_CONCURRENCY",
+    }
+    assert (
+        len(policies),
+        [policy.args for policy in policies],
+        [required <= {item.arg for item in policy.keywords} <= accepted for policy in policies],
+        [{item.arg: ast.unparse(item.value) for item in policy.keywords} for policy in policies],
+        set(expected.values()) <= set(constants),
+        len(forwarded.args) == len(call.args.args) - 1,
+        {item.arg for item in forwarded.keywords} == call_keywords,
+    ) == (2, [[], []], [True, True], [expected, expected], True, True, True)
+
+
+def test_overlay_upstream_calls_go_through_policy() -> None:
+    """重ね合わせの上流の呼び出しは、全て _upstream から UPSTREAM_POLICIES[name].call を通る（方針を迂回しない）。
+
+    ツール関数 → 本体・配送の補助 → _upstream → 方針、の呼び出しの鎖を固定し、上流のメソッドを
+    直接呼ぶ箇所と、方針に置き換えた遮断器の直接の利用が残っていないことを見る。
+    """
+    chain = [
+        ("orders_search", "_search_orders"),
+        ("_search_orders", "_upstream"),
+        ("orders_get", "_upstream"),
+        ("orders_get", "_shipments"),
+        ("_shipments", "_upstream"),
+        ("_upstream", "UPSTREAM_POLICIES[name].call"),
+    ]
+    missing = [(caller, callee) for caller, callee in chain if not _calls(_overlay_function(caller), callee)]
+    direct = [
+        ast.unparse(node.func)
+        for node in ast.walk(_OVERLAY_SERVER)
+        if isinstance(node, ast.Call) and ast.unparse(node.func).startswith(("ORDERS.", "SHIPMENTS."))
+    ]
+    text = (_OVERLAY / "server.py").read_text(encoding="utf-8")
+    leftovers = [name for name in ("BREAKERS", "CircuitBreaker", "call_upstream") if name in text]
+    assert (missing, direct, leftovers) == ([], [], [])
