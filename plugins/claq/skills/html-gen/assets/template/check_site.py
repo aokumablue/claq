@@ -660,6 +660,7 @@ def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:
         violations.append(
             "Content-Security-Policy の meta が <head> に無い（<meta charset> の直後に置く。<body> 内ではブラウザが無視する）"
         )
+    violations.extend(_weak_csp_directives(tags))
     return violations
 
 
@@ -1302,6 +1303,47 @@ def _script_runs_before_body(tags: list[tuple[str, dict[str, str]]]) -> bool:
         (tag for tag, attrs in tags if tag == "body" or (tag == "script" and "app.js" in attrs.get("src", ""))), None
     )
     return first == "script"
+
+
+#: CSP で値を固定する指令。スクリプトは app.js だけ、プラグインと <base> の差し替えは禁じる。
+_CSP_REQUIRED_SOURCES = {"script-src": {"'self'"}, "object-src": {"'none'"}, "base-uri": {"'none'"}}
+
+
+def _weak_csp_directives(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
+    """CSP の中身が弱められていないか（必須の指令の値と、外部オリジンの有無）を検査する。
+
+    Args:
+        tags: ``(タグ名, 属性)`` の開始タグ列
+
+    Returns:
+        違反メッセージの一覧（CSP の meta が無いときは空。欠落は別の検査が報告する）
+    """
+    content = next(
+        (
+            attrs.get("content", "")
+            for tag, attrs in tags
+            if tag == "meta" and attrs.get("http-equiv", "").lower() == "content-security-policy"
+        ),
+        None,
+    )
+    if content is None:
+        return []
+    directives = {}
+    for part in content.split(";"):
+        words = part.split()
+        if words:
+            directives[words[0].lower()] = set(words[1:])
+    violations = [
+        f"Content-Security-Policy の {name} が {' '.join(sorted(expected))} 以外を許している（値をそれだけにする）"
+        for name, expected in _CSP_REQUIRED_SOURCES.items()
+        if directives.get(name) != expected
+    ]
+    # 外部オリジンを許すと、閲覧者の IP と閲覧ページが第三者へ送られ、file:// やオフラインでも崩れる
+    if any(source == "*" or ":" in source.strip("'") for sources in directives.values() for source in sources if source != "data:"):
+        violations.append(
+            "Content-Security-Policy が外部のオリジンを許している（フォント・画像・スクリプトは同梱して 'self' から読む）"
+        )
+    return violations
 
 
 def _csp_meta_in_head(tags: list[tuple[str, dict[str, str]]]) -> bool:

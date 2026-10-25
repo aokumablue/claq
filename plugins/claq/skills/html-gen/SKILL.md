@@ -62,7 +62,7 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 ナビゲーション項目、`html[data-base]`（手順1で選んだベースカラー）、
 `html[data-page-kind]`。
 
-データ由来の文字列は HTML エスケープして書く（表のセル・SVG の title/desc）。
+データ由来の文字列は、書く場所（表のセル・SVG の title/desc・軸ラベル・凡例・属性値）を問わず HTML エスケープする。フォント・画像・スクリプトは外部から読まず同梱する（CSP が外部オリジンを許さない）。
 
 触らない: `tokens.css`（生成物）、`app.js`、`button[data-theme-value="light"|"dark"]`、
 `<head>` の `app.js` 読み込み位置（body 末尾へ移すと初回に白がちらつく）、

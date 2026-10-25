@@ -65,8 +65,7 @@ _STYLESHEETS = '<link rel="stylesheet" href="tokens.css">\n  <link rel="styleshe
 _AURORA = '<th scope="row">Aurora 工業</th>'
 _CSP = (
     '<meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\'; '
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
-    "img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'\">"
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'\">"
 )
 
 
@@ -168,6 +167,17 @@ _CSP = (
             [(_CSP, ""), ("<body>\n", f"<body>\n  {_CSP}\n")],
             "Content-Security-Policy",
             id="csp-in-body",
+        ),
+        # CSP の中身を弱めない（スクリプトは 'self' だけ、object と base は 'none'、外部オリジンを許さない）
+        pytest.param("index.html", [("script-src 'self';", "script-src 'self' 'unsafe-inline';")], "script-src", id="csp-inline-script"),
+        pytest.param("index.html", [("script-src 'self';", "script-src *;")], "script-src", id="csp-wildcard-script"),
+        pytest.param("index.html", [(" object-src 'none';", "")], "object-src", id="csp-no-object-src"),
+        pytest.param("index.html", [(" base-uri 'none';", "")], "base-uri", id="csp-no-base-uri"),
+        pytest.param(
+            "index.html",
+            [("style-src 'self' 'unsafe-inline';", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;")],
+            "外部のオリジン",
+            id="csp-external-origin",
         ),
         # CSS: 骨格の変数・Tailwind のブレークポイント・流体の部品・フォーカス・モーション低減
         pytest.param("styles.css", [("var(--ring)", "currentColor")], "--ring", id="role-variable"),
