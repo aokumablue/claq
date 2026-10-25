@@ -24,6 +24,9 @@ import sys
 
 import pytest
 
+from ._support import _bash as _bash_payload
+from ._support import _write as _write_payload
+
 DENY = 2
 """PreToolUse がツール呼び出しを拒否する終了コード。"""
 
@@ -33,13 +36,12 @@ ALLOW = 0
 
 def _bash(module: str, label: str, command: str, expect: int) -> tuple[str, str, dict, int]:
     """Bash ツール入力 1 件を表の行にする。"""
-    return (module, label, {"tool_name": "Bash", "tool_input": {"command": command}}, expect)
+    return (module, label, _bash_payload(command), expect)
 
 
 def _write(module: str, label: str, path: str, expect: int) -> tuple[str, str, dict, int]:
-    """Write ツール入力 1 件を表の行にする。"""
-    payload = {"tool_name": "Write", "tool_input": {"file_path": path, "content": "x"}}
-    return (module, label, payload, expect)
+    """Write ツール入力（内容は "x"）1 件を表の行にする。"""
+    return (module, label, _write_payload(path), expect)
 
 
 _BLOCK_ALLOW_TABLE: tuple[tuple[str, str, dict, int], ...] = (
@@ -117,25 +119,13 @@ def test_hook_process_exit_code(module: str, label: str, payload: dict, expect: 
     )
 
 
-def test_table_holds_both_directions() -> None:
-    """表が block 側と allow 側の両方を持つこと。
-
-    片側だけになると「全部ブロックする」実装でも「全部通す」実装でも緑になり、
-    表が実効性の証拠でなくなる。
-    """
-    denies = [row for row in _BLOCK_ALLOW_TABLE if row[3] == DENY]
-    allows = [row for row in _BLOCK_ALLOW_TABLE if row[3] == ALLOW]
-    assert denies, "deny 側の行が 1 つも無い"
-    assert allows, "allow 側の行が 1 つも無い"
-
-
 def test_every_hook_in_table_has_an_allow_row() -> None:
-    """deny 行を持つフックは allow 行も持つこと。
+    """表が deny 行を持ち、deny 行を持つフックはどれも allow 行も持つこと。
 
-    あるフックについて deny だけを並べると、そのフックが全入力を拒否するよう
-    退行しても表が緑のままになる。
+    片側だけだと「全部ブロックする」実装でも「全部通す」実装でも緑になり、表が実効性の証拠でなくなる。
+    あるフックについて deny だけを並べると、そのフックが全入力を拒否するよう退行しても表が緑のままになる。
     """
     deny_modules = {row[0] for row in _BLOCK_ALLOW_TABLE if row[3] == DENY}
     allow_modules = {row[0] for row in _BLOCK_ALLOW_TABLE if row[3] == ALLOW}
-    missing = sorted(deny_modules - allow_modules)
-    assert not missing, f"deny 行だけで allow 行を持たないフック: {missing}"
+    assert deny_modules, "deny 側の行が 1 つも無い"
+    assert deny_modules <= allow_modules, f"deny 行だけで allow 行を持たないフック: {sorted(deny_modules - allow_modules)}"
