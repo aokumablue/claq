@@ -65,29 +65,20 @@ TOOL_GATED_HOOKS: dict[str, frozenset[str]] = {
 ANCHORED_MATCHER_RE = re.compile(r"^\^\((?P<alternatives>[^()]+)\)\$$")
 
 
-def _load_hooks() -> dict[str, list[dict]]:
-    """hooks.json の hooks セクションを読み込む。"""
-    return json.loads(Path(HOOKS_JSON).read_text(encoding="utf-8"))["hooks"]
-
-
 def _iter_entries() -> list[tuple[str, dict]]:
-    """(イベント名, matcher エントリ) のリストを返す。"""
-    return [(event, entry) for event, entries in _load_hooks().items() for entry in entries]
-
-
-def _entry_modules(entry: dict) -> set[str]:
-    """matcher エントリが起動するフックモジュール名の集合を返す。"""
-    commands = " ".join(str(hook.get("command", "")) for hook in entry.get("hooks", []))
-    return {module for module in TOOL_GATED_HOOKS if module in commands}
+    """hooks.json の (イベント名, matcher エントリ) のリストを返す。"""
+    hooks = json.loads(Path(HOOKS_JSON).read_text(encoding="utf-8"))["hooks"]
+    return [(event, entry) for event, entries in hooks.items() for entry in entries]
 
 
 def _tool_gated_entries() -> list[tuple[str, str, frozenset[str]]]:
-    """(モジュール名, matcher 文字列, 受理する正規化ツール名) のリストを返す。"""
-    found: list[tuple[str, str, frozenset[str]]] = []
-    for _event, entry in _iter_entries():
-        for module in _entry_modules(entry):
-            found.append((module, str(entry["matcher"]), TOOL_GATED_HOOKS[module]))
-    return found
+    """(対応表のモジュール名, それを起動するエントリの matcher 文字列, 受理する正規化ツール名) のリストを返す。"""
+    return [
+        (module, str(entry["matcher"]), accepted)
+        for _event, entry in _iter_entries()
+        for module, accepted in TOOL_GATED_HOOKS.items()
+        if module in " ".join(str(hook.get("command", "")) for hook in entry.get("hooks", []))
+    ]
 
 
 def _alternatives(matcher: str) -> list[str]:
@@ -97,42 +88,31 @@ def _alternatives(matcher: str) -> list[str]:
     return match.group("alternatives").split("|")
 
 
-class TestMatcherAnchoring:
-    """hooks.json の matcher がアンカー済みであることの検証。"""
-
-    def test_all_non_wildcard_matchers_are_anchored(self) -> None:
-        """"*" 以外の全 matcher は ^(...)$ でアンカーされている。"""
-        unanchored = [
-            (event, entry["matcher"])
-            for event, entry in _iter_entries()
-            if entry.get("matcher") != WILDCARD_MATCHER and not ANCHORED_MATCHER_RE.match(str(entry.get("matcher", "")))
-        ]
-        assert unanchored == []
-
-    def test_every_tool_gated_hook_is_present(self) -> None:
-        """対応表の全フックが hooks.json に登録されている（表の腐敗検出）。"""
-        assert {module for module, _matcher, _accepted in _tool_gated_entries()} == set(TOOL_GATED_HOOKS)
+def test_all_non_wildcard_matchers_are_anchored() -> None:
+    """"*" 以外の全 matcher は ^(...)$ でアンカーされている。"""
+    unanchored = [
+        (event, entry["matcher"])
+        for event, entry in _iter_entries()
+        if entry.get("matcher") != WILDCARD_MATCHER and not ANCHORED_MATCHER_RE.match(str(entry.get("matcher", "")))
+    ]
+    assert unanchored == []
 
 
-class TestMatcherToolNameMapSync:
-    """matcher と `_TOOL_NAME_MAP` の手動同期をテストで担保する。"""
+def test_every_tool_gated_hook_is_present() -> None:
+    """対応表の全フックが hooks.json に登録されている（表の腐敗検出）。"""
+    assert {module for module, _matcher, _accepted in _tool_gated_entries()} == set(TOOL_GATED_HOOKS)
 
-    @pytest.mark.parametrize(("module", "matcher", "accepted"), _tool_gated_entries())
-    def test_matcher_covers_every_alias_of_accepted_tools(
-        self, module: str, matcher: str, accepted: frozenset[str]
-    ) -> None:
-        """フックが受理する正規化名に写る `_TOOL_NAME_MAP` のキーが matcher に揃っている。"""
-        alternatives = set(_alternatives(matcher))
-        # 正規化前の別名（Copilot CLI の小文字名・Codex の apply_patch 等）
-        aliases = {raw for raw, normalized in _TOOL_NAME_MAP.items() if normalized in accepted}
-        # 正規化後の名前（Claude Code 表記）そのものも matcher に必要
-        missing = (aliases | set(accepted)) - alternatives
-        assert missing == set(), f"{module}: matcher に不足しているツール名 {sorted(missing)}"
 
-    @pytest.mark.parametrize(("module", "matcher", "accepted"), _tool_gated_entries())
-    def test_matcher_has_no_tool_name_the_hook_ignores(
-        self, module: str, matcher: str, accepted: frozenset[str]
-    ) -> None:
-        """matcher に、フックが内部で必ず無視する（= 起動が無駄な）ツール名が無い。"""
-        stray = {name for name in _alternatives(matcher) if normalize_tool_name(name) not in accepted}
-        assert stray == set(), f"{module}: フックが受理しないツール名が matcher に残っています {sorted(stray)}"
+@pytest.mark.parametrize(("module", "matcher", "accepted"), _tool_gated_entries())
+def test_matcher_lists_every_accepted_alias_and_no_ignored_name(
+    module: str, matcher: str, accepted: frozenset[str]
+) -> None:
+    """matcher と `_TOOL_NAME_MAP` の手動同期: 受理する正規化名とその全別名が揃い、フックが必ず無視する（起動が無駄な）名前が無いこと。"""
+    alternatives = set(_alternatives(matcher))
+    # 正規化前の別名（Copilot CLI の小文字名・Codex の apply_patch 等）と、正規化後の名前（Claude Code 表記）そのもの。
+    aliases = {raw for raw, normalized in _TOOL_NAME_MAP.items() if normalized in accepted}
+    missing = (aliases | set(accepted)) - alternatives
+    stray = {name for name in alternatives if normalize_tool_name(name) not in accepted}
+
+    assert missing == set(), f"{module}: matcher に不足しているツール名 {sorted(missing)}"
+    assert stray == set(), f"{module}: フックが受理しないツール名が matcher に残っています {sorted(stray)}"
