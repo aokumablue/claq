@@ -293,6 +293,31 @@ class TestSingleFlight:
 
         assert (asyncio.run(scenario()), flights._flights) == (True, {})
 
+    def test_cancellation_after_completion_keeps_new_call_registered(self, facade: types.SimpleNamespace) -> None:
+        """完了と取り消しが重なった後に同じキーで来た呼び出しは、取り消し側の後始末で表から消されない。"""
+        flights = facade.limits.SingleFlight()
+        gate = _Gate()
+        tasks: list[asyncio.Task[Any]] = []
+
+        async def operation() -> str:
+            """同じキーの次の呼び出しを先に走らせ、最初の待ち手を取り消してから返す（次の呼び出しが取り消し側の後始末より先に表へ入る）。"""
+            tasks.append(asyncio.ensure_future(flights.run("k", gate)))
+            tasks[0].cancel()
+            return "ok"
+
+        async def scenario() -> tuple[bool, int, list[Any]]:
+            """取り消し側が片付いた後に 3 本目を同じキーで呼び、2 本目に合流するかを見る。"""
+            tasks.append(asyncio.ensure_future(flights.run("k", operation)))
+            await _settle()
+            tasks.append(asyncio.ensure_future(flights.run("k", gate)))
+            await _settle()
+            calls = gate.calls
+            gate.opened.set()
+            results = await asyncio.gather(*tasks[1:])
+            return tasks[0].cancelled(), calls, results
+
+        assert asyncio.run(scenario()) == (True, 1, ["ok", "ok"])
+
 
 def _scripted(outcomes: list[Any]) -> Any:
     """用意した順に、例外なら投げ、それ以外なら返す上流のメソッドを作る。"""
