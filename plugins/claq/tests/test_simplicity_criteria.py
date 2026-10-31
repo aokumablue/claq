@@ -1,7 +1,7 @@
-"""コードを書く定義の簡潔さ基準が一字一句そろっていることを固定する構造テスト。
+"""コードを書く定義の実装の手順が一字一句そろっていることを固定する構造テスト。
 
 docs/adr/code-simplicity-and-defense.md は、サブエージェントに参照先が届かないため、
-簡潔さ基準をコードを書く各定義へ同じ文言で置くと決めている。写しは片方だけ直されると
+実装の手順（簡潔さ基準）をコードを書く各定義へ同じ文言で置くと決めている。写しは片方だけ直されると
 ずれ、定義ごとにフォールバックや防御の判断が食い違う。正本を tdd-writer に置き、
 他の定義が同じ箇条書きを連続した行として含むことを確かめる。
 """
@@ -15,7 +15,7 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[1]
 _TARGET_DIRS = ("agents", "skills", "commands")
 _CANONICAL = Path("agents") / "tdd-writer.md"
-_HEADING = "## 簡潔さ基準"
+_HEADING = "## 実装の手順"
 _COPIES = (
     Path("agents") / "code-refiner.md",
     Path("skills") / "quick-code" / "SKILL.md",
@@ -47,9 +47,9 @@ def _contains(lines: list[str], block: list[str]) -> bool:
 
 @pytest.mark.parametrize("relative_path", _COPIES, ids=str)
 def test_copy_contains_canonical_block(relative_path: Path) -> None:
-    """各定義が正本と同じ簡潔さ基準を、一字一句同じ連続した行として含むこと。"""
+    """各定義が正本と同じ実装の手順を、一字一句同じ連続した行として含むこと。"""
     assert _contains(_lines(relative_path), _canonical_block()), (
-        f"{relative_path} の簡潔さ基準が {_CANONICAL} と一致しない"
+        f"{relative_path} の実装の手順が {_CANONICAL} と一致しない"
     )
 
 

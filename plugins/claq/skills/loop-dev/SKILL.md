@@ -58,7 +58,7 @@ user-invocable: false
 ### 反復2（修正専用。スコープを広げない）
 
 1. plan は省き、反復1 の evaluate の blocker をそのまま修正タスクにする
-2. generate: 反復1 と同じ担当表のエージェントに blocker を渡して直させる。各 blocker の根本原因を 1 行で書かせ（反復履歴の rootcause に記録する。対症療法のパッチは当てない）、blocker の箇所だけを直させ（新機能の追加・リファクタの拡大はしない）、自己検証させる。baseline が green だったテストが red になったときの扱いは反復1 の generate と同じ
+2. generate: 反復1 と同じ担当表のエージェントに blocker を渡して直させる。依頼文には「根拠（攻撃者 → 入口 → 得るもの、または再現手順）が書かれた blocker を、その箇所の最小の変更で直す。新しい仕組み（依存・ミドルウェア・設定項目・検証層）が要る blocker と、続行を決めた文の無い続行経路（握り潰し・既定値・再試行）は直さず、報告の「提案」へ回す」と書く。各 blocker の根本原因を 1 行で書かせ（反復履歴の rootcause に記録する）、blocker の箇所だけを直させ、自己検証させる。「提案」へ回った blocker は未解消として数え、Proposals に転記する。baseline が green だったテストが red になったときの扱いは反復1 の generate と同じ
 3. circuit breaker を判定する（`## circuit breaker`）。hard trigger なら evaluate を飛ばす
 4. evaluate: reviewer を再実行する。依頼文に前回の blocker 一覧を渡し、その解消と反復2 の差分が持ち込んだ問題だけを見させる（反復1 で指摘されなかった既存コードの問題は掘り起こさない）
    - security-auditor は、反復1 の security-auditor が `Blockers` 1 以上を返したか、反復2 の差分が反復1 と同じ起動条件に触れるときだけ再実行する。依頼文には security-auditor 由来の前回 blocker 一覧と反復2 の diff 本文か変更ファイルの一覧を載せ、同じ限定で見させる。前回 blocker 一覧は出所ごとに分け、reviewer には reviewer 由来の分だけを渡す（混ぜると reviewer がセキュリティ blocker の解消を判定してしまうため）
@@ -100,7 +100,7 @@ checkpoint skill は呼ばず、そのフォーマット（`../checkpoint/SKILL.
 
 ## 出力
 
-反復1 が未収束で反復2 へ進むときは Loop-Dev Result を出力せず、次のツール呼び出しへ進む。子の報告にある「要件確認が要るフォールバック候補」は `Assumptions` に転記する。
+反復1 が未収束で反復2 へ進むときは Loop-Dev Result を出力せず、次のツール呼び出しへ進む。子と evaluate の報告にある「提案」（BLOCKER 未満の指摘を含む）は `Proposals` に転記する。Proposals は採否を利用者が決める項目で、呼び出し元は既定では実施しない。
 
 ```
 Loop-Dev Result
@@ -115,6 +115,7 @@ Blockers:    {n} remaining
 Commits:     {hashes or "none (理由)"}
 Checkpoint:  {path} (completed: {true|false})
 Assumptions: {仮決定事項 or "-"}
+Proposals:   {提案（採否は利用者。既定では実施しない） or "-"}
 ──────────────────────────────
 ```
 

@@ -71,7 +71,8 @@ claq_mem_learn --kind pitfall --scope repo --domain <domain> \
 - Repro / Root cause / Fix: ステップ1-2 の自分の記録
 - Tests / Loop: loop-dev の Loop-Dev Result から転記
 - Review: loop-dev の `Blockers: {n} remaining` から導く（0 件 → PASS / 1 件以上 → BLOCKED / 数値でない「未判定」→ BLOCKED）
-- Assumptions: loop-dev の Loop-Dev Result から転記（要件確認が要るフォールバック候補を含む）
+- Assumptions: loop-dev の Loop-Dev Result から転記
+- Proposals: loop-dev の Loop-Dev Result から転記（採否は利用者が決め、既定では実施しない）
 - Learned: ステップ4 の結果（記録が無ければ `なし`。欄は省かない）
 
 ```
@@ -85,6 +86,7 @@ Tests:      {tests}
 Loop:       {n}/2
 Review:     PASS / BLOCKED
 Assumptions: {仮決定事項 / -}
+Proposals:  {提案 / -}
 Learned:    {記録した key} / なし
 ──────────────────────────────
 ```

@@ -69,9 +69,9 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 - テストと linter が green（ステップ2 で記録した既存の失敗を除く）
 - ステップ6 の `reviewer` / `security-auditor` の出力に `Blockers: {n}` 行が実際にある。無ければ「指摘ゼロ」ではなく「判定を取れなかった」として `BLOCKED` にする
 
-ファイル単位のリバートの後も CRITICAL/HIGH の blocker が残ったら、Skill ツールで `loop-dev` skill を起動する。入力:
+ファイル単位のリバートの後も CRITICAL/HIGH の blocker が残ったら、リファクタ種別（デッドコード・到達しない余剰・可読性）の blocker だけを Skill ツールで `loop-dev` skill に渡す。振る舞いを変える指摘（セキュリティの穴・バグ）は、このコマンドの範囲（機能を変えない）を超えるので、最終要約に `/bugfix` 向けの残課題として書く。入力:
 
-- `task` = final gate の CRITICAL/HIGH 指摘の解消
+- `task` = final gate のリファクタ種別の CRITICAL/HIGH 指摘の解消
 - `approved_plan` = blocker 一覧
 - `task_type` = `refactor-fix`
 

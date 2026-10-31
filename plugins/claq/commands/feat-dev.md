@@ -78,7 +78,7 @@ claq_mem_learn --kind fact --scope repo --domain <domain> \
 - key — title（ステップ4。記録が無ければ「なし」）
 
 ### Loop-Dev Result
-（箱形出力をそのまま。Assumptions の要件確認が要るフォールバック候補も含む）
+（箱形出力をそのまま。Proposals は採否を利用者が決める項目として示す）
 ```
 
 ## 引数
