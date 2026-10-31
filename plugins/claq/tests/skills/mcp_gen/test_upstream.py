@@ -139,7 +139,7 @@ class TestUpstream:
         """連続した一時的な失敗で遮断し、時間が経てば試しに通し、成功で戻る。"""
         error = facade.upstream.UpstreamError
         clock = _Clock()
-        breaker = facade.upstream.CircuitBreaker(failure_threshold=2, reset_seconds=30, clock=clock)
+        breaker = facade.breaker.CircuitBreaker(failure_threshold=2, reset_seconds=30, clock=clock)
         for status in (404, 404, 503, 503):
             with pytest.raises(error):
                 asyncio.run(breaker.call(_raising(error(status))))
@@ -213,7 +213,7 @@ class TestCallUpstream:
     """締切付きの上流呼び出し（遮断器の内側で、再試行を含む全体を締切で打ち切る）。
 
     テスト契約:
-    - 対象: `facade.upstream.call_upstream(breaker, operation, *, deadline, clock)`
+    - 対象: `facade.breaker.call_upstream(breaker, operation, *, deadline, clock)`
     - 結果: 成功は operation の値。締切超えは `UpstreamError(None, "deadline exceeded")` で、遮断器が
       失敗として数える。再試行しない失敗はそのまま投げ、遮断器は数えない
     - 許容時間: 各テスト 1 秒未満（実時間の待ちは `asyncio.sleep(0)` だけ）
@@ -224,29 +224,29 @@ class TestCallUpstream:
 
     def test_call_upstream_success_returns_result(self, facade: types.SimpleNamespace) -> None:
         """締切までに終われば operation の結果を返し、遮断器に成功を記録する（それまでの連続失敗を戻す）。"""
-        breaker = facade.upstream.CircuitBreaker(failure_threshold=2)
+        breaker = facade.breaker.CircuitBreaker(failure_threshold=2)
         _fail_once(facade, breaker)
-        result = asyncio.run(facade.upstream.call_upstream(breaker, _ok, deadline=10.0, clock=_Clock(0.0)))
+        result = asyncio.run(facade.breaker.call_upstream(breaker, _ok, deadline=10.0, clock=_Clock(0.0)))
         _fail_once(facade, breaker)
         assert (result, _breaker_is_closed(facade, breaker)) == ("ok", True)
 
     def test_call_upstream_non_retryable_passes_through(self, facade: types.SimpleNamespace) -> None:
         """再試行しない失敗（404）は、そのまま投げ、遮断器の失敗として数えない。"""
         error = facade.upstream.UpstreamError(404, "missing")
-        breaker = facade.upstream.CircuitBreaker(failure_threshold=1)
+        breaker = facade.breaker.CircuitBreaker(failure_threshold=1)
         with pytest.raises(facade.upstream.UpstreamError) as raised:
-            asyncio.run(facade.upstream.call_upstream(breaker, _raising(error), deadline=10.0, clock=_Clock(0.0)))
+            asyncio.run(facade.breaker.call_upstream(breaker, _raising(error), deadline=10.0, clock=_Clock(0.0)))
         assert (raised.value is error, _breaker_is_closed(facade, breaker)) == (True, True)
 
     def test_call_upstream_retries_on_given_clock(self, facade: types.SimpleNamespace) -> None:
         """再試行の締切は渡した時計で測る（実時間の時計では締切を過ぎていても、渡した時計で間に合えば再試行する）。"""
         operation = _scripted([facade.upstream.UpstreamError(503, retry_after=0.0), "ok"])
-        breaker = facade.upstream.CircuitBreaker()
-        assert asyncio.run(facade.upstream.call_upstream(breaker, operation, deadline=-1e9, clock=_Clock(-2e9))) == "ok"
+        breaker = facade.breaker.CircuitBreaker()
+        assert asyncio.run(facade.breaker.call_upstream(breaker, operation, deadline=-1e9, clock=_Clock(-2e9))) == "ok"
 
     def test_call_upstream_deadline_exceeded_cancels_and_counts_as_failure(self, facade: types.SimpleNamespace) -> None:
         """締切を過ぎたら operation の完了を待たずに取り消して後始末（finally）を走らせ、UpstreamError(None, "deadline exceeded") にし、遮断器が失敗として数える。"""
-        breaker = facade.upstream.CircuitBreaker(failure_threshold=1)
+        breaker = facade.breaker.CircuitBreaker(failure_threshold=1)
         events: list[str] = []
 
         async def operation() -> str:
@@ -261,6 +261,33 @@ class TestCallUpstream:
                 events.append("closed")
 
         with pytest.raises(facade.upstream.UpstreamError) as exceeded:
-            asyncio.run(facade.upstream.call_upstream(breaker, operation, deadline=50.0, clock=_Clock(100.0)))
+            asyncio.run(facade.breaker.call_upstream(breaker, operation, deadline=50.0, clock=_Clock(100.0)))
         assert (exceeded.value.status, exceeded.value.detail, events) == (None, "deadline exceeded", ["cancelled", "closed"])
         assert _breaker_is_closed(facade, breaker) is False
+
+
+class TestCallWithDeadline:
+    """既定の締切付きの上流呼び出し（再試行を含む全体を締切で打ち切る）。"""
+
+    def test_success_returns_result(self, facade: types.SimpleNamespace) -> None:
+        """締切までに終われば operation の結果を返す。"""
+        assert asyncio.run(facade.upstream.call_with_deadline(_ok, deadline=10.0, clock=_Clock(0.0))) == "ok"
+
+    def test_deadline_exceeded_cancels_operation(self, facade: types.SimpleNamespace) -> None:
+        """締切を過ぎたら operation を取り消して後始末を走らせ、UpstreamError(None, "deadline exceeded") にする。"""
+        events: list[str] = []
+
+        async def operation() -> str:
+            """1 回だけ制御を返してから終わる。取り消しと後始末を記録する。"""
+            try:
+                await asyncio.sleep(0)
+                return "late"
+            except asyncio.CancelledError:
+                events.append("cancelled")
+                raise
+            finally:
+                events.append("closed")
+
+        with pytest.raises(facade.upstream.UpstreamError) as exceeded:
+            asyncio.run(facade.upstream.call_with_deadline(operation, deadline=50.0, clock=_Clock(100.0)))
+        assert (exceeded.value.status, exceeded.value.detail, events) == (None, "deadline exceeded", ["cancelled", "closed"])

@@ -71,13 +71,6 @@ def test_skill_files_have_no_invisible_characters() -> None:
     assert found == []
 
 
-def test_overlay_paged_secret_is_fresh_each_run() -> None:
-    """重ね合わせの PAGED_ENV の鍵は、公開された固定値を置かず、実行ごとに 32 バイト以上で作る。"""
-    first, second = (_config(_OVERLAY / "smoke_config.py")["PAGED_ENV"]["FACADE_CURSOR_SECRET"] for _ in range(2))
-    assert first != second
-    assert len(first.encode("utf-8")) >= 32
-
-
 def test_overlay_budget_fits_smoke_limit() -> None:
     """重ね合わせの server.py の予算が、smoke_config.py の上限を超えない。"""
     assert _constants(_OVERLAY_SERVER)["MAX_RESULT_CHARS"] <= _config(_OVERLAY / "smoke_config.py")["MAX_RESULT_CHARS"]
@@ -170,13 +163,8 @@ def _smoke_calls_per_exchange() -> int:
 
 @pytest.mark.parametrize("skeleton", [_TEMPLATE, _OVERLAY])
 def test_rate_limits_fit_smoke(skeleton: Path) -> None:
-    """server.py の受信側と送信側の上限は、smoke が 1 回の起動で送る呼び出しを絞らない（smoke が上限で落ちない）。"""
-    constants = _constants(_parse(skeleton / "server.py"))
-    names = ["TOOL_CALLS_PER_WINDOW"]
-    if skeleton == _OVERLAY:
-        names += ["UPSTREAM_BURST", "UPSTREAM_CONCURRENCY", "PRINCIPAL_CONCURRENCY"]
-    needed = _smoke_calls_per_exchange()
-    assert {name: constants[name] >= needed for name in names} == dict.fromkeys(names, True)
+    """server.py の受信側の上限は、smoke が 1 回の起動で送る呼び出しを絞らない（smoke が上限で落ちない）。"""
+    assert _constants(_parse(skeleton / "server.py"))["TOOL_CALLS_PER_WINDOW"] >= _smoke_calls_per_exchange()
 
 
 @pytest.mark.parametrize("skeleton", [_TEMPLATE, _OVERLAY])
@@ -204,37 +192,11 @@ def test_guard_wiring_matches_signature(skeleton: Path) -> None:
     ) == (["mcp"], True, True, True, expected)
 
 
-def test_overlay_policy_wiring_matches_signature() -> None:
-    """重ね合わせの UpstreamPolicy(...) と .call(...) が limits.py の定義と合い、上限に定数の名前を渡す。"""
-    limits = _parse(_OVERLAY / "facade" / "limits.py")
-    accepted, required = _keyword_only(_method(limits, "UpstreamPolicy", "__init__"))
-    call = _method(limits, "UpstreamPolicy", "call")
-    call_keywords, _ = _keyword_only(call)
-    constants = _constants(_OVERLAY_SERVER)
-    policies = _calls(_OVERLAY_SERVER, "UpstreamPolicy")
-    (forwarded,) = _calls(_OVERLAY_SERVER, "UPSTREAM_POLICIES[name].call")
-    expected = {
-        "rate_per_second": "UPSTREAM_RATE_PER_SECOND",
-        "burst": "UPSTREAM_BURST",
-        "max_concurrent": "UPSTREAM_CONCURRENCY",
-        "max_concurrent_per_principal": "PRINCIPAL_CONCURRENCY",
-    }
-    assert (
-        len(policies),
-        [policy.args for policy in policies],
-        [required <= {item.arg for item in policy.keywords} <= accepted for policy in policies],
-        [{item.arg: ast.unparse(item.value) for item in policy.keywords} for policy in policies],
-        set(expected.values()) <= set(constants),
-        len(forwarded.args) == len(call.args.args) - 1,
-        {item.arg for item in forwarded.keywords} == call_keywords,
-    ) == (2, [[], []], [True, True], [expected, expected], True, True, True)
+def test_overlay_upstream_calls_go_through_deadline() -> None:
+    """重ね合わせの上流の呼び出しは、全て _upstream から call_with_deadline を通る（締切と再試行を迂回しない）。
 
-
-def test_overlay_upstream_calls_go_through_policy() -> None:
-    """重ね合わせの上流の呼び出しは、全て _upstream から UPSTREAM_POLICIES[name].call を通る（方針を迂回しない）。
-
-    ツール関数 → 本体・配送の補助 → _upstream → 方針、の呼び出しの鎖を固定し、上流のメソッドを
-    直接呼ぶ箇所と、方針に置き換えた遮断器の直接の利用が残っていないことを見る。
+    ツール関数 → 本体・配送の補助 → _upstream → call_with_deadline、の呼び出しの鎖を固定し、上流の
+    メソッドを直接呼ぶ箇所が残っていないことを見る。
     """
     chain = [
         ("orders_search", "_search_orders"),
@@ -242,7 +204,7 @@ def test_overlay_upstream_calls_go_through_policy() -> None:
         ("orders_get", "_upstream"),
         ("orders_get", "_shipments"),
         ("_shipments", "_upstream"),
-        ("_upstream", "UPSTREAM_POLICIES[name].call"),
+        ("_upstream", "call_with_deadline"),
     ]
     missing = [(caller, callee) for caller, callee in chain if not _calls(_overlay_function(caller), callee)]
     direct = [
@@ -250,6 +212,4 @@ def test_overlay_upstream_calls_go_through_policy() -> None:
         for node in ast.walk(_OVERLAY_SERVER)
         if isinstance(node, ast.Call) and ast.unparse(node.func).startswith(("ORDERS.", "SHIPMENTS."))
     ]
-    text = (_OVERLAY / "server.py").read_text(encoding="utf-8")
-    leftovers = [name for name in ("BREAKERS", "CircuitBreaker", "call_upstream") if name in text]
-    assert (missing, direct, leftovers) == ([], [], [])
+    assert (missing, direct) == ([], [])

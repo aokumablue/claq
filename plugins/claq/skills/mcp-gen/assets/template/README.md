@@ -12,7 +12,7 @@
 | `smoke_check.py` | 実起動の適合検査。編集しない |
 | `smoke_static.py` | `smoke_check.py` が使う、サーバを起動しない検査（旧仕様の名前の走査と、同梱するファイルの確認）。編集しない |
 | `smoke_config.py` | 検査の対象（ツール名・引数・期待値・上限）。サーバに合わせて書き換える |
-| `adapters.py` / `facade/` | 上流 API ファサードを重ねたときだけ存在する |
+| `adapters.py` / `facade/` | 上流 API ファサードを重ねたときだけ存在する（`facade/` の `limits`・`breaker`・`signed_cursor`・`audit_log` は upstream-protection-overlay を重ねたときだけ） |
 | `pyproject.toml` | 依存と、同梱するファイルの一覧（`only-include`）。モジュールを足したら一覧にも足す |
 
 ## セットアップ

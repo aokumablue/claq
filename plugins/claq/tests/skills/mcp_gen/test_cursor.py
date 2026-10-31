@@ -1,4 +1,4 @@
-"""facade/cursor.py（署名付きの自己完結カーソルと、一覧の続きの cursor）のテスト。"""
+"""facade/cursor.py（既定の署名なしの一覧の続きの cursor）と、upstream-protection-overlay の facade/signed_cursor.py（署名付きの cursor）のテスト。"""
 
 from __future__ import annotations
 
@@ -23,13 +23,13 @@ class TestCursor:
     def test_round_trip(self, facade: types.SimpleNamespace, principal: str) -> None:
         """発行したカーソルから封じた位置を取り出せ、鍵が同じなら別のインスタンスでも検証できる（状態を持たない）。主体に対になっていないサロゲート（環境変数の不正なバイト）が混じっても、例外を出さずに結びつける。"""
         binding = {**_BINDING, "principal": principal}
-        codec = facade.cursor.CursorCodec(_SECRET)
+        codec = facade.signed_cursor.CursorCodec(_SECRET)
         token = codec.issue(**binding, position={"page": "o:3", "skip": 1})
-        assert codec.open(token, **binding) == facade.cursor.CursorCodec(_SECRET).open(token, **binding) == {"page": "o:3", "skip": 1}
+        assert codec.open(token, **binding) == facade.signed_cursor.CursorCodec(_SECRET).open(token, **binding) == {"page": "o:3", "skip": 1}
 
     def test_payload_holds_only_position_and_expiry(self, facade: types.SimpleNamespace) -> None:
         """payload は版・位置・期限だけで、用途・主体・指紋は載せない（MAC の入力でだけ結びつける）。"""
-        codec = facade.cursor.CursorCodec(_SECRET)
+        codec = facade.signed_cursor.CursorCodec(_SECRET)
         binding = {"scope": "orders_search", "principal": "alice@example.com", "fingerprint": "f0" * 16}
         token = codec.issue(**binding, position={"page": "o:3"})
         payload = json.loads(facade.cursor._decode(token.partition(".")[0]))
@@ -50,7 +50,7 @@ class TestCursor:
     )
     def test_rejects_other_binding(self, facade: types.SimpleNamespace, binding: dict[str, str]) -> None:
         """別の主体・別の検索条件・別の用途のカーソルは、理由を区別しない同じ文面で拒否する。"""
-        codec = facade.cursor.CursorCodec(_SECRET)
+        codec = facade.signed_cursor.CursorCodec(_SECRET)
         token = codec.issue(**_BINDING, position={})
         with pytest.raises(facade.errors.CursorError) as rejected:
             codec.open(token, **binding)
@@ -58,9 +58,9 @@ class TestCursor:
 
     def test_rejects_tampering_and_malformed(self, facade: types.SimpleNamespace) -> None:
         """別の鍵の署名・書き換え・形式の不正・ASCII でない文字を、例外を漏らさず同じ文面で拒否する。"""
-        codec = facade.cursor.CursorCodec(_SECRET)
+        codec = facade.signed_cursor.CursorCodec(_SECRET)
         token = codec.issue(**_BINDING, position={})
-        other = facade.cursor.CursorCodec(b"t" * 32).issue(**_BINDING, position={})
+        other = facade.signed_cursor.CursorCodec(b"t" * 32).issue(**_BINDING, position={})
         flipped = token[:-1] + ("A" if token[-1] != "A" else "B")
         for bad in (other, flipped, "no-dot", ".sig", "body.", token + "あ", "あ" + token, token.replace(".", "。")):
             with pytest.raises(facade.errors.CursorError) as rejected:
@@ -84,7 +84,7 @@ class TestCursor:
     )
     def test_rejects_signed_but_malformed_payload(self, facade: types.SimpleNamespace, payload: bytes) -> None:
         """署名は合うが読めない・版が違う・形が違う payload も、例外を漏らさず同じ文面で拒否する。"""
-        codec = facade.cursor.CursorCodec(_SECRET)
+        codec = facade.signed_cursor.CursorCodec(_SECRET)
         body = facade.cursor._encode(payload)
         token = f"{body}.{codec._sign(body, **_BINDING)}"
         with pytest.raises(facade.errors.CursorError) as rejected:
@@ -94,7 +94,7 @@ class TestCursor:
     def test_expires(self, facade: types.SimpleNamespace) -> None:
         """有効期間を過ぎたカーソルは、署名を確かめた後でだけ、期限切れと分かる文面で拒否する。"""
         clock = _Clock()
-        codec = facade.cursor.CursorCodec(_SECRET, ttl_seconds=10, clock=clock)
+        codec = facade.signed_cursor.CursorCodec(_SECRET, ttl_seconds=10, clock=clock)
         token = codec.issue(**_BINDING, position={})
         clock.now += 10
         assert codec.open(token, **_BINDING) == {}
@@ -114,7 +114,7 @@ class TestCursor:
     def test_requires_long_secret(self, facade: types.SimpleNamespace) -> None:
         """32 バイト未満の鍵は受け付けない。"""
         with pytest.raises(ValueError, match="32"):
-            facade.cursor.CursorCodec(b"short")
+            facade.signed_cursor.CursorCodec(b"short")
 
     def test_fingerprint(self, facade: types.SimpleNamespace) -> None:
         """指紋は cursor とキーの順序に依存せず、値が変われば変わる。"""
@@ -128,22 +128,22 @@ _PAGE_BINDING = {"principal": "alice", "fingerprint": "q1"}
 
 
 def _page_cursor(facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture, *, scope: str = "orders_search", max_cursor_chars: int = 2000) -> tuple[Any, Any]:
-    """見本と同じ上限（ページトークン 512 文字、既定の cursor 2000 文字）の PageCursor と、その監査ログを作る。"""
+    """見本と同じ上限（ページトークン 512 文字、既定の cursor 2000 文字）の SignedPageCursor と、その監査ログを作る。"""
     audit = _audit_log(facade, caplog, "test-page-cursor")
-    codec = facade.cursor.CursorCodec(_SECRET)
-    cursors = facade.cursor.PageCursor(codec, scope=scope, audit=audit, max_page_token_chars=512, max_cursor_chars=max_cursor_chars)
+    codec = facade.signed_cursor.CursorCodec(_SECRET)
+    cursors = facade.signed_cursor.SignedPageCursor(codec, scope=scope, audit=audit, max_page_token_chars=512, max_cursor_chars=max_cursor_chars)
     return cursors, audit
 
 
 def _assert_rejected_and_audited(facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture, cursors: Any, audit: Any, token: str) -> None:
-    """orders_search の PageCursor が token を理由を区別しない文面で拒否し、拒否を WARNING で 1 行だけ監査ログに残す。"""
+    """orders_search の SignedPageCursor が token を理由を区別しない文面で拒否し、拒否を WARNING で 1 行だけ監査ログに残す。"""
     with pytest.raises(facade.errors.CursorError, match="使えません"):
         cursors.open(token, **_PAGE_BINDING)
     assert _logged(caplog) == [(logging.WARNING, f"cursor rejected: subject={audit.subject('alice')} tool=orders_search")]
 
 
-class TestPageCursor:
-    """一覧の続きの cursor（発行と開封で同じ述語と上限を確かめる）。"""
+class TestSignedPageCursor:
+    """署名付きの一覧の続きの cursor（発行と開封で同じ述語と上限を確かめる）。"""
 
     def test_round_trip_at_page_token_limit(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
         """上限ちょうど（ASCII 512 文字）のページトークンを封じた cursor は、発行でき、開けて、監査ログに何も残さない。"""
@@ -182,7 +182,7 @@ class TestPageCursor:
     ) -> None:
         """署名は合うが位置の形が違う cursor は、理由を区別しない文面で拒否し、拒否を監査ログに残す。"""
         cursors, audit = _page_cursor(facade, caplog)
-        token = facade.cursor.CursorCodec(_SECRET).issue(scope="orders_search", **_PAGE_BINDING, position=position)
+        token = facade.signed_cursor.CursorCodec(_SECRET).issue(scope="orders_search", **_PAGE_BINDING, position=position)
         _assert_rejected_and_audited(facade, caplog, cursors, audit, token)
 
     def test_open_tampered_rejected_and_audited(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
@@ -194,11 +194,103 @@ class TestPageCursor:
     def test_open_over_cursor_limit_rejected(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
         """cursor の長さの上限を超えるものは、署名が合っても拒否する（発行側と同じ上限）。"""
         cursors, audit = _page_cursor(facade, caplog, max_cursor_chars=60)
-        token = facade.cursor.CursorCodec(_SECRET).issue(scope="orders_search", **_PAGE_BINDING, position={"page": None, "skip": 0})
+        token = facade.signed_cursor.CursorCodec(_SECRET).issue(scope="orders_search", **_PAGE_BINDING, position={"page": None, "skip": 0})
         _assert_rejected_and_audited(facade, caplog, cursors, audit, token)
 
     def test_open_other_scope_rejected(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
-        """別の用途（ツール）の PageCursor が発行した cursor は開けない。"""
+        """別の用途（ツール）の SignedPageCursor が発行した cursor は開けない。"""
         invoices, _ = _page_cursor(facade, caplog, scope="invoices_search")
         orders, audit = _page_cursor(facade, caplog)
         _assert_rejected_and_audited(facade, caplog, orders, audit, invoices.issue({"page": None, "skip": 0}, **_PAGE_BINDING))
+
+
+_FP = "q1"
+
+
+def _unsigned(facade: types.SimpleNamespace, *, scope: str = "orders_search", max_cursor_chars: int = 2000) -> Any:
+    """見本と同じ上限（ページトークン 512 文字、既定の cursor 2000 文字）の署名なしの PageCursor を作る。"""
+    return facade.cursor.PageCursor(scope=scope, max_page_token_chars=512, max_cursor_chars=max_cursor_chars)
+
+
+def _sealed(facade: types.SimpleNamespace, cursors: Any, payload: Any) -> str:
+    """任意の本体に、正しい照合値を付けた cursor を作る（照合値は合うが中身の形が違う cursor の検査用）。"""
+    body = facade.cursor._encode(json.dumps(payload).encode("utf-8"))
+    return f"{body}.{cursors._check(body, _FP)}"
+
+
+class TestPageCursor:
+    """既定の署名なしの一覧の続きの cursor。"""
+
+    def test_round_trip_at_page_token_limit(self, facade: types.SimpleNamespace) -> None:
+        """上限ちょうど（ASCII 512 文字）のページトークンを封じた cursor は、発行でき、別のインスタンスでも開ける。"""
+        position = {"page": "o" * 512, "skip": 3}
+        token = _unsigned(facade).issue(position, fingerprint=_FP)
+        assert _unsigned(facade).open(token, fingerprint=_FP) == position
+
+    @pytest.mark.parametrize("page", ["o" * 513, "あ" * 512], ids=["over-512-chars", "cursor-over-2000-chars"])
+    def test_issue_unopenable_raises_facade_error(self, facade: types.SimpleNamespace, page: str) -> None:
+        """開けない cursor は発行せず、MAX_PAGE_TOKEN_CHARS を名指しした FacadeError にする。"""
+        with pytest.raises(facade.errors.FacadeError, match="MAX_PAGE_TOKEN_CHARS") as refused:
+            _unsigned(facade).issue({"page": page, "skip": 0}, fingerprint=_FP)
+        assert type(refused.value) is facade.errors.FacadeError
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"v": 1, "pos": {"page": None}},
+            {"v": 1, "pos": {"page": None, "skip": -1}},
+            {"v": 1, "pos": {"page": None, "skip": True}},
+            {"v": 1, "pos": {"page": 5, "skip": 0}},
+            {"v": 2, "pos": {"page": None, "skip": 0}},
+            {"v": 1, "pos": []},
+            [1, 2],
+        ],
+    )
+    def test_open_bad_body_rejected(self, facade: types.SimpleNamespace, payload: Any) -> None:
+        """照合値は合うが版・位置の形が違う cursor は、理由を区別しない文面で拒否する。"""
+        cursors = _unsigned(facade)
+        with pytest.raises(facade.errors.CursorError, match="使えません"):
+            cursors.open(_sealed(facade, cursors, payload), fingerprint=_FP)
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda token: token[:-2] + ("AA" if token[-2:] != "AA" else "BB"),
+            lambda token: "x" + token,
+            lambda token: token.replace(".", ""),
+            lambda token: token + "\u3042",
+        ],
+        ids=["tampered-check", "tampered-body", "no-separator", "non-ascii"],
+    )
+    def test_open_tampered_rejected(self, facade: types.SimpleNamespace, mutate: Any) -> None:
+        """書き換えた cursor は拒否する。"""
+        cursors = _unsigned(facade)
+        token = cursors.issue({"page": "o:3", "skip": 0}, fingerprint=_FP)
+        with pytest.raises(facade.errors.CursorError, match="使えません"):
+            cursors.open(mutate(token), fingerprint=_FP)
+
+    def test_open_undecodable_body_rejected(self, facade: types.SimpleNamespace) -> None:
+        """照合値が合っても、本体を読めない cursor は拒否する。"""
+        cursors = _unsigned(facade)
+        body = "!!!"
+        with pytest.raises(facade.errors.CursorError, match="使えません"):
+            cursors.open(f"{body}.{cursors._check(body, _FP)}", fingerprint=_FP)
+
+    def test_open_other_fingerprint_rejected(self, facade: types.SimpleNamespace) -> None:
+        """検索条件を変えて開くと拒否する。"""
+        cursors = _unsigned(facade)
+        token = cursors.issue({"page": None, "skip": 0}, fingerprint=_FP)
+        with pytest.raises(facade.errors.CursorError, match="使えません"):
+            cursors.open(token, fingerprint="q2")
+
+    def test_open_other_scope_rejected(self, facade: types.SimpleNamespace) -> None:
+        """別の用途（ツール）の PageCursor が発行した cursor は開けない。"""
+        token = _unsigned(facade, scope="invoices_search").issue({"page": None, "skip": 0}, fingerprint=_FP)
+        with pytest.raises(facade.errors.CursorError, match="使えません"):
+            _unsigned(facade).open(token, fingerprint=_FP)
+
+    def test_open_over_cursor_limit_rejected(self, facade: types.SimpleNamespace) -> None:
+        """cursor の長さの上限を超えるものは、照合値が合っても拒否する（発行側と同じ上限）。"""
+        token = _unsigned(facade).issue({"page": "o" * 100, "skip": 0}, fingerprint=_FP)
+        with pytest.raises(facade.errors.CursorError, match="使えません"):
+            _unsigned(facade, max_cursor_chars=60).open(token, fingerprint=_FP)

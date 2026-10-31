@@ -19,11 +19,24 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 _SKILL_DIR = _PLUGIN_ROOT / "skills" / "mcp-gen"
 _TEMPLATE = _SKILL_DIR / "assets" / "template"
 _OVERLAY = _SKILL_DIR / "assets" / "facade-overlay"
+_PROTECTION = _SKILL_DIR / "assets" / "upstream-protection-overlay"
 # ソースに直接書かない文字の区分（\n と \t を除く）。書くときは "\u202e" のようなエスケープ表記にする
 _INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cn"})
 _HANGUL_FILLERS = frozenset("\u115f\u1160\u3164\uffa0")
-# 重ね合わせの facade パッケージのモジュール（facade fixture が読み込み、adapters fixture が facade.* の名前でも登録する）
-_FACADE_MODULES = ("errors", "cursor", "shaping", "catalog", "upstream", "limits", "audit")
+# facade パッケージのモジュール（既定の重ね合わせと upstream-protection-overlay の合成。facade fixture が読み込み、
+# adapters fixture が facade.* の名前でも登録する）
+_FACADE_MODULES = (
+    "errors",
+    "cursor",
+    "shaping",
+    "catalog",
+    "upstream",
+    "principal",
+    "limits",
+    "breaker",
+    "signed_cursor",
+    "audit_log",
+)
 _MINIMAL_SETTINGS: dict[str, Any] = {"HAPPY_TOOL": "t", "HAPPY_ARGS": {}, "HAPPY_EXPECTED_STRUCTURED": {}}
 _AUDIT_SECRET = b"k" * 32
 
@@ -91,7 +104,7 @@ class _Clock:
 def _audit_log(facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture, name: str) -> Any:
     """記録を caplog で捕まえる AuditLog を、テストごとに分けた名前 name の logger へ出すように作る。"""
     caplog.set_level(logging.INFO, logger=name)
-    return facade.audit.AuditLog(_AUDIT_SECRET, logger=logging.getLogger(name))
+    return facade.audit_log.AuditLog(_AUDIT_SECRET, logger=logging.getLogger(name))
 
 
 def _logged(caplog: pytest.LogCaptureFixture) -> list[tuple[int, str]]:

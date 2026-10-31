@@ -1,4 +1,4 @@
-"""上流の呼び出しの量を絞る部品: サーバ自身の絞り・上流のクォータ・同時実行の上限・同じ要求の合流と、それらをまとめた上流ごとの方針。
+"""上流の呼び出しの量を絞る部品: サーバ自身の絞り・上流のクォータ・同時実行の上限・同じ要求の合流と、それらをまとめた上流ごとの方針（upstream-protection-overlay）。
 
 上流から 429 を受ける前に、サーバの側で呼び出しの量を絞る。絞るときは待たずにすぐ失敗を返す
 （待てば締切を越え、締切超えが遮断器の失敗として数えられる）。server.py は上流ごとに
@@ -13,7 +13,8 @@ from collections.abc import Awaitable, Callable, Hashable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
-from .upstream import CircuitBreaker, UpstreamError, call_upstream
+from .breaker import CircuitBreaker, call_upstream
+from .upstream import UpstreamError
 
 
 class Throttled(UpstreamError):

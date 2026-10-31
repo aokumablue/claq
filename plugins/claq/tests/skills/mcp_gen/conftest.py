@@ -9,7 +9,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from ._support import _FACADE_MODULES, _OVERLAY, _TEMPLATE, _config, _load, _load_smoke_check
+from ._support import _FACADE_MODULES, _OVERLAY, _PROTECTION, _TEMPLATE, _config, _load, _load_smoke_check
 
 
 @pytest.fixture
@@ -26,10 +26,16 @@ def smoke_static() -> types.ModuleType:
 
 @pytest.fixture(scope="module")
 def facade() -> Iterator[types.SimpleNamespace]:
-    """重ね合わせの facade パッケージを読み込む（相対 import を解決するためパッケージとして）。"""
+    """facade パッケージを読み込む（相対 import を解決するためパッケージとして）。
+
+    既定の重ね合わせと upstream-protection-overlay の facade/ を同じパッケージの探索先にする
+    （利用者が重ね合わせのファイルを facade/ へ複製した形と同じ）。
+    """
     package_dir = _OVERLAY / "facade"
     spec = importlib.util.spec_from_file_location(
-        "mcp_gen_facade", package_dir / "__init__.py", submodule_search_locations=[str(package_dir)]
+        "mcp_gen_facade",
+        package_dir / "__init__.py",
+        submodule_search_locations=[str(package_dir), str(_PROTECTION / "facade")],
     )
     assert spec is not None and spec.loader is not None
     package = importlib.util.module_from_spec(spec)

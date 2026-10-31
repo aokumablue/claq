@@ -5,8 +5,6 @@
 既定値になる。使える名前は smoke_check.py の OPTIONAL_SETTINGS）。
 """
 
-import secrets
-
 # 出力が決定的なツール。毎回新しい子プロセスで同じ順に呼んで同じ値が返ること。
 # 戻り値をモデルにしたツールを選ぶ（`-> str` は text が生の文字列になり、写しの検査に落ちる）。
 # 取得時刻（as_of）を含む結果は落ちるので、項目カタログのような静的な結果を選ぶ。
@@ -67,9 +65,6 @@ MAX_RESULT_CHARS = 20_000  # server.py の MAX_RESULT_CHARS 以上にする
 PAGED_TOOL = "orders_search"
 PAGED_ARGS: dict = {"customer_id": "cus_0000000001", "limit": 3}
 PAGED_CHANGED_ARGS: dict = {"customer_id": "cus_0000000001", "limit": 4}
-# 2 つのプロセスで同じ鍵を使い、カーソルが自己完結していることを確かめる。鍵は実行ごとに作る
-# （公開された固定の値を置くと、その値を本番に流用したときに誰でもカーソルを作れる）。
-PAGED_ENV: dict = {"FACADE_CURSOR_SECRET": secrets.token_hex(32)}
 CURSOR_ERROR_SUBSTRING = "cursor"
 
 # 項目パス: 綴りを誤ったパスと、候補として示されるべき正しいパス。綴り違いも項目のパスの書式

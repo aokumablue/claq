@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-import secrets
 import time
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -17,13 +16,12 @@ from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from adapters import JST, STATUS_CODES, OrdersApi, ShipmentsApi, normalize_order, normalize_shipments
-from facade.audit import AuditLog, resolve_principal
 from facade.catalog import PATH_MAX_CHARS, PATH_PATTERN, Catalog, FieldSpec
-from facade.cursor import CursorCodec, PageCursor, query_fingerprint
+from facade.cursor import PageCursor, query_fingerprint
 from facade.errors import FacadeError
-from facade.limits import UpstreamPolicy
+from facade.principal import resolve_principal
 from facade.shaping import MORE_SUFFIX, compact_json, fit_page, fit_view, project
-from facade.upstream import UpstreamError, fan_out, model_message
+from facade.upstream import UpstreamError, call_with_deadline, fan_out, model_message
 from guard import CallLimiter, install_guard
 from mcp.server import CacheHint, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -43,15 +41,7 @@ TOOL_DEADLINE_SECONDS = 10.0  # 1 回のツール呼び出しの締切（ホス�
 # 受信側のレート制限: 主体 × ツールごとに、TOOL_CALL_WINDOW_SECONDS 秒に TOOL_CALLS_PER_WINDOW 回まで通す。
 TOOL_CALLS_PER_WINDOW = 30
 TOOL_CALL_WINDOW_SECONDS = 60.0
-# 送信側の上限（上流ごと。全主体で共有する）。上流のクォータの契約より低くする（上流の 429 より先に絞る）。
-UPSTREAM_RATE_PER_SECOND = 5.0  # クォータが 1 秒あたりに回復する呼び出しの回数（再試行も 1 回と数える）
-UPSTREAM_BURST = 10  # クォータを貯められる呼び出しの回数の上限
-UPSTREAM_CONCURRENCY = 8  # 全主体を合わせた同時実行の上限
-PRINCIPAL_CONCURRENCY = 4  # 1 つの主体の同時実行の上限（1 つの主体が上流の枠を使い切らないように）
-# TOOL_CALLS_PER_WINDOW・UPSTREAM_BURST・UPSTREAM_CONCURRENCY・PRINCIPAL_CONCURRENCY は、smoke_check.py が 1 回の起動で送る
-# ツール呼び出しの数以上にする（下回ると smoke が上限で落ちる）。
-CURSOR_TTL_SECONDS = 900
-CURSOR_TTL = f"{CURSOR_TTL_SECONDS // 60} 分"  # ツールの説明に書く cursor の有効期限
+# TOOL_CALLS_PER_WINDOW は、smoke_check.py が 1 回の起動で送るツール呼び出しの数以上にする（下回ると smoke が上限で落ちる）。
 # cursor に封じる上流のページトークンの長さの上限と、cursor の長さの上限（cursor 引数の max_length）。
 # 発行と開封の両方で確かめる（PageCursor）。上流のトークンが長いなら両方を上げる
 # （ASCII でない文字は cursor の中で 6 文字以上に広がる）。
@@ -62,25 +52,6 @@ DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
 FieldPath = Annotated[str, Field(max_length=PATH_MAX_CHARS, pattern=PATH_PATTERN)]
 
 logger = logging.getLogger(__name__)
-# 監査ログ。個人情報の項目を返したときと、cursor を拒否したときに残す（値は残さず、主体は鍵付きの要約で残す）。
-audit_log = logging.getLogger("audit")
-
-
-def _cursor_secret() -> bytes:
-    """カーソルの署名鍵（監査ログの主体の要約にも使う鍵の素材）を返す。
-
-    複数インスタンス・再起動をまたいで続きを取らせるなら、全インスタンスで同じ
-    32 バイト以上の値を `FACADE_CURSOR_SECRET` に設定する。
-
-    Returns:
-        署名鍵。未設定ならプロセスごとの乱数。
-    """
-    configured = os.environ.get("FACADE_CURSOR_SECRET", "")
-    if configured:
-        return configured.encode("utf-8")
-    # 出所: 1 プロセスの stdio では鍵を共有する相手がいない。続行したことは次の警告で見える
-    logger.warning("FACADE_CURSOR_SECRET が未設定です。プロセスごとの鍵を使うため、再起動後は cursor が無効になります")
-    return secrets.token_bytes(32)
 
 
 def _principal() -> str:
@@ -195,33 +166,13 @@ install_guard(
 )
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
-# 鍵は 1 回だけ作り、cursor の署名と監査ログの主体の要約の両方に使う（未設定のときの乱数の鍵を 2 つ作らない）。
-SECRET = _cursor_secret()
-AUDIT = AuditLog(SECRET, logger=audit_log)
 SEARCH_CURSOR = PageCursor(
-    CursorCodec(SECRET, ttl_seconds=CURSOR_TTL_SECONDS),
     scope="orders_search",
-    audit=AUDIT,
     max_page_token_chars=MAX_PAGE_TOKEN_CHARS,
     max_cursor_chars=MAX_CURSOR_CHARS,
 )
 ORDERS = OrdersApi()
 SHIPMENTS = ShipmentsApi()
-# 上流ごとの方針（合流・同時実行の上限・遮断器・再試行・締切・クォータ）。上限は上流の契約に合わせる。
-UPSTREAM_POLICIES = {
-    "orders": UpstreamPolicy(
-        rate_per_second=UPSTREAM_RATE_PER_SECOND,
-        burst=UPSTREAM_BURST,
-        max_concurrent=UPSTREAM_CONCURRENCY,
-        max_concurrent_per_principal=PRINCIPAL_CONCURRENCY,
-    ),
-    "shipments": UpstreamPolicy(
-        rate_per_second=UPSTREAM_RATE_PER_SECOND,
-        burst=UPSTREAM_BURST,
-        max_concurrent=UPSTREAM_CONCURRENCY,
-        max_concurrent_per_principal=PRINCIPAL_CONCURRENCY,
-    ),
-}
 
 
 @contextmanager
@@ -245,34 +196,28 @@ def model_errors() -> Iterator[None]:
 
 
 async def _upstream[T](
-    name: str,
     method: Callable[..., Awaitable[T]],
     arguments: Mapping[str, Any],
     *,
-    principal: str,
     deadline: float,
 ) -> T:
-    """上流 name の方針（`UPSTREAM_POLICIES`）を通して、上流のメソッドを呼ぶ。
-
-    同じ主体の同じ要求の合流・同時実行の上限・遮断器・再試行・締切・クォータは方針に任せる。
+    """再試行と締切を通して、上流のメソッドを呼ぶ。
 
     Args:
-        name: 上流の名前（UPSTREAM_POLICIES のキー）。
         method: 上流を呼ぶメソッド。
         arguments: メソッドに渡す引数（名前で渡す）。
-        principal: 呼び出しの主体。
         deadline: 締切（time.monotonic の時刻）。
 
     Returns:
         上流の結果。
 
     Raises:
-        UpstreamError: 上流が失敗した・遮断中・締切を越えた（status は None）・サーバ自身が絞った（Throttled）とき。
+        UpstreamError: 上流が失敗した、または締切を越えた（status は None）とき。
     """
-    return await UPSTREAM_POLICIES[name].call(method, arguments, principal=principal, deadline=deadline)
+    return await call_with_deadline(lambda: method(**arguments), deadline=deadline)
 
 
-async def _shipments(order_id: str, principal: str, deadline: float) -> list[dict[str, Any]]:
+async def _shipments(order_id: str, deadline: float) -> list[dict[str, Any]]:
     """受注の配送を取り、正規ドメインモデルにする。
 
     変換も fan_out の 1 本の中で行う。応答の形の不正（502）も配送だけの失敗になり、
@@ -280,7 +225,6 @@ async def _shipments(order_id: str, principal: str, deadline: float) -> list[dic
 
     Args:
         order_id: 受注 ID。
-        principal: 呼び出しの主体。
         deadline: 締切（time.monotonic の時刻）。
 
     Returns:
@@ -290,9 +234,7 @@ async def _shipments(order_id: str, principal: str, deadline: float) -> list[dic
         UpstreamError: 上流が失敗した・締切を越えた・応答の形が不正なとき。
     """
     return normalize_shipments(
-        await _upstream(
-            "shipments", SHIPMENTS.list_for_order, {"order_id": order_id}, principal=principal, deadline=deadline
-        )
+        await _upstream(SHIPMENTS.list_for_order, {"order_id": order_id}, deadline=deadline)
     )
 
 
@@ -405,7 +347,7 @@ class OrderSearchResult(BaseModel):
     next_cursor: str | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
-        description=f"続きを取るときに cursor へ渡す値（発行から {CURSOR_TTL} 有効）",
+        description="続きを取るときに cursor へ渡す値",
     )
     as_of: str = Field(description="取得時刻")
     notes: list[str] = Field(default_factory=list, exclude_if=lambda value: not value, description="次の行動の提案")
@@ -558,22 +500,20 @@ def _page_result(
     position: dict[str, Any],
     upstream_next: str | None,
     *,
-    principal: str,
     fingerprint: str,
-    extra_paths: list[str],
 ) -> OrderSearchResult:
-    """検索結果の 1 ページを予算に収め、続きのカーソルを封じて返す。個人情報を返したら監査に残す。
+    """検索結果の 1 ページを予算に収め、続きのカーソルを封じて返す。
 
     引数は `_search_orders` の同名の変数と同じ。予算を超えるとき、または上流のページトークンが
     長すぎて続きの cursor を発行できないときは FacadeError。
     """
     as_of = _now()
     # 予算に収まる件数だけを返し、残り（またはその次の上流のページ）を続きの cursor に封じる
-    result = fit_page(
+    return fit_page(
         summaries,
         position,
         upstream_next,
-        issue=lambda next_position: SEARCH_CURSOR.issue(next_position, principal=principal, fingerprint=fingerprint),
+        issue=lambda next_position: SEARCH_CURSOR.issue(next_position, fingerprint=fingerprint),
         build=lambda items, next_cursor, notes: OrderSearchResult(
             items=items, has_more=next_cursor is not None, next_cursor=next_cursor, as_of=as_of, notes=notes
         ),
@@ -581,10 +521,6 @@ def _page_result(
         max_chars=MAX_RESULT_CHARS,
         empty_note="該当する受注はありません。条件を緩めてください。",
     )
-    AUDIT.personal_returned(
-        "orders_search", CATALOG.personal_paths(extra_paths), len(result.items), principal=_principal
-    )
-    return result
 
 
 async def _search_orders(
@@ -607,15 +543,9 @@ async def _search_orders(
     summary_paths, extra_paths = _search_paths(fields)
 
     fingerprint = query_fingerprint({**conditions, "fields": fields, "sort": sort, "limit": limit})
-    principal = _principal()
-    position = (
-        SEARCH_CURSOR.open(cursor, principal=principal, fingerprint=fingerprint)
-        if cursor
-        else {"page": None, "skip": 0}
-    )
+    position = SEARCH_CURSOR.open(cursor, fingerprint=fingerprint) if cursor else {"page": None, "skip": 0}
     deadline = time.monotonic() + TOOL_DEADLINE_SECONDS
     raw_page, upstream_next = await _upstream(
-        "orders",
         ORDERS.search,
         {
             "text": query,
@@ -627,15 +557,12 @@ async def _search_orders(
             "page": position["page"],
             "page_size": limit,
         },
-        principal=principal,
         deadline=deadline,
     )
     summaries = [
         _summary(normalize_order(raw), summary_paths, extra_paths) for raw in raw_page[position["skip"] :]
     ]
-    return _page_result(
-        summaries, position, upstream_next, principal=principal, fingerprint=fingerprint, extra_paths=extra_paths
-    )
+    return _page_result(summaries, position, upstream_next, fingerprint=fingerprint)
 
 
 @mcp.tool(
@@ -646,7 +573,7 @@ async def _search_orders(
         "主な引数: query・customer_id・status・ordered_from・ordered_to のうち 1 つ以上を指定する。"
         "fields で各候補に項目を足せる（使えるパスは fields_describe）。\n"
         f"応答: 既定 {DEFAULT_SEARCH_LIMIT} 件、最大 {MAX_SEARCH_LIMIT} 件。続きは next_cursor を cursor に渡す"
-        f"（他の引数は変えない。next_cursor は発行から {CURSOR_TTL} 有効）。"
+        "（他の引数は変えない）。"
         "ページの間の一貫性は保証しない。"
     ),
     annotations=READ_ONLY,
@@ -693,7 +620,7 @@ async def orders_search(
         str | None,
         Field(
             max_length=MAX_CURSOR_CHARS,
-            description=f"前回の next_cursor（発行から {CURSOR_TTL} 有効）。指定するときは他の引数を前回と同じにする",
+            description="前回の next_cursor。指定するときは他の引数を前回と同じにする",
         ),
     ] = None,
 ) -> OrderSearchResult:
@@ -772,16 +699,13 @@ async def orders_get(
         paths = CATALOG.view(view, allowed_sensitivity=allowed) + CATALOG.resolve(
             fields or [], for_search=False, allowed_sensitivity=allowed
         )
-        principal = _principal()
         deadline = time.monotonic() + TOOL_DEADLINE_SECONDS
         calls: dict[str, Callable[[], Awaitable[Any]]] = {
-            "order": lambda: _upstream(
-                "orders", ORDERS.get, {"order_id": order_id}, principal=principal, deadline=deadline
-            )
+            "order": lambda: _upstream(ORDERS.get, {"order_id": order_id}, deadline=deadline)
         }
         # 必要な上流だけを呼ぶ（要らない呼び出しは遅延と上流の負荷を増やすだけ）
         if any(path.startswith("shipments") for path in paths):
-            calls["shipments"] = lambda: _shipments(order_id, principal, deadline)
+            calls["shipments"] = lambda: _shipments(order_id, deadline)
         results, failures = await fan_out(calls, timeout=TOOL_DEADLINE_SECONDS)
         if "order" in failures:
             raise failures["order"]
@@ -793,15 +717,13 @@ async def orders_get(
         if "shipments" in results:
             order["shipments"] = results["shipments"]
         as_of = _now()
-        result, returned = fit_view(
+        result, _ = fit_view(
             lambda chosen, notes: _detail_result(order, chosen, partial=partial, as_of=as_of, notes=notes),
             _result_chars,
             paths=paths,
             fallback_paths=CATALOG.view("summary", allowed_sensitivity=allowed),
             max_chars=MAX_RESULT_CHARS,
         )
-        # 監査ログには、summary に落とした後の実際に返したパスを渡す
-        AUDIT.personal_returned("orders_get", CATALOG.personal_paths(returned), 1, principal=_principal)
         return result
 
 

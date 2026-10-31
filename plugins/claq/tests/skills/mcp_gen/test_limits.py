@@ -1,4 +1,4 @@
-"""facade/limits.py（上流ごとのクォータ・同時実行の上限・同じ要求の合流と、それらをまとめた上流の方針）のテスト。"""
+"""upstream-protection-overlay の facade/limits.py（上流ごとのクォータ・同時実行の上限・同じ要求の合流と、それらをまとめた上流の方針）のテスト。"""
 
 from __future__ import annotations
 

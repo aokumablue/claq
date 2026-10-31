@@ -49,7 +49,8 @@ user-invocable: true
 | 上流の API を呼び、そのデータを返す | `assets/facade-overlay/` を重ね、`references/facade.md` を読む |
 | 応答の入れ子が深い・項目が多い・件数が多い | 同上（段階開示・サイズ予算・カーソル） |
 | 複数の上流 API を結合して答える | 同上（ファンアウトと部分失敗） |
-| 共有のリモート（複数の利用者）・個人情報を返す | `references/remote-auth.md` |
+| 上流の契約にレート制限・同時実行の上限がある | facade-overlay に加えて `assets/upstream-protection-overlay/` を重ね、`references/upstream-protection.md` を読む |
+| 共有のリモート（複数の利用者）・個人情報を返す | `references/remote-auth.md` と、同上の upstream-protection-overlay |
 | 実行中に利用者の確認が要る | `references/sdk-api-evidence.md` の MRTR 節 |
 
 上流の API を包むときは、ツールを決める前に問いのカタログを作る。利用者が実際に聞く問いを
@@ -103,8 +104,8 @@ cp -R /abs/skill/mcp-gen/assets/facade-overlay/facade /abs/path/to/dest/facade
 `pyproject.toml` の `name` と `[project.scripts]` のコマンド名（`SERVER_NAME` にそろえる）、
 見本のツール・リソース・プロンプト（不要なら削除）、受信側のレート制限の定数（`TOOL_CALLS_PER_WINDOW` /
 `TOOL_CALL_WINDOW_SECONDS`）と主体を返す `_principal`。重ね合わせたなら `CATALOG`・
-出力モデル・`adapters.py` の偽物（実際の上流の呼び出しに置き換える）と、`UPSTREAM_POLICIES` の上限の定数
-（`UPSTREAM_RATE_PER_SECOND` / `UPSTREAM_BURST` / `UPSTREAM_CONCURRENCY` / `PRINCIPAL_CONCURRENCY`）も。
+出力モデル・`adapters.py` の偽物（実際の上流の呼び出しに置き換える）も。upstream-protection-overlay を重ねたら、
+上限の定数を上流の契約に合わせる（`references/upstream-protection.md`）。
 
 触らない: `install_guard(mcp, ...)` と `run(mcp)` の呼び出し（上限は定数で差し替える）、`guard.py`、`smoke_check.py`、
 `smoke_static.py`、`facade/` の部品。`transport.py` は公開するホスト名を足すとき以外は触らない。

@@ -1,4 +1,4 @@
-"""facade/audit.py（呼び出しの主体の決定と、監査ログ）のテスト。"""
+"""facade/principal.py（呼び出しの主体の決定）と、upstream-protection-overlay の facade/audit_log.py（監査ログ）のテスト。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class TestPrincipal:
     )
     def test_resolve_principal(self, facade: types.SimpleNamespace, environ: dict[str, str], getuser: Callable[[], str], expected: str) -> None:
         """FACADE_PRINCIPAL があれば OS の利用者名を引かずにその値を、無い・空なら OS の利用者名を返す。"""
-        assert facade.audit.resolve_principal(environ, getuser=getuser) == expected
+        assert facade.principal.resolve_principal(environ, getuser=getuser) == expected
 
     @pytest.mark.parametrize("error", [OSError("no user"), KeyError("uid"), ImportError("pwd")])
     def test_resolve_principal_unknown_raises_facade_error(self, facade: types.SimpleNamespace, error: Exception) -> None:
@@ -39,7 +39,7 @@ class TestPrincipal:
             raise error
 
         with pytest.raises(facade.errors.FacadeError, match="FACADE_PRINCIPAL") as unknown:
-            facade.audit.resolve_principal({}, getuser=failing)
+            facade.principal.resolve_principal({}, getuser=failing)
         assert unknown.value.__cause__ is error
 
 
