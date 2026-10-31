@@ -15,7 +15,6 @@ import pytest
 
 from ._support import (
     _CHECK_SITE,
-    _FETCH_FONTS,
     _TEMPLATE,
     _TOKENS,
     CSS,
@@ -40,7 +39,6 @@ def test_template_passes_validator() -> None:
     ("name", "path"),
     [
         pytest.param("html_gen_check_site", _CHECK_SITE, id="check_site"),
-        pytest.param("html_gen_fetch_fonts", _FETCH_FONTS, id="fetch_fonts"),
     ],
 )
 def test_loading_template_scripts_leaves_no_bytecode_in_the_shipped_assets(name: str, path: Path) -> None:

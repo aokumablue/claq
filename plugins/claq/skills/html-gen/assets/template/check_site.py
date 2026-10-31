@@ -622,7 +622,7 @@ def _validate_fonts(site_dir: Path) -> list[str]:
     """fonts/ に Web フォントを置くなら、ライセンス（SIL OFL 1.1）も同梱されているかを検査する。"""
     fonts = site_dir / "fonts"
     if any(fonts.glob("*.woff2")) and not (fonts / "OFL.txt").is_file():
-        return ["fonts/ に woff2 があるのに fonts/OFL.txt が無い（SIL OFL 1.1 の再配布条件。fetch_fonts.py で取り直す）"]
+        return ["fonts/ に woff2 があるのに fonts/OFL.txt が無い（SIL OFL 1.1 の再配布条件。テンプレートの fonts/ を複製し直す）"]
     return []
 
 

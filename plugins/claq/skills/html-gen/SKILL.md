@@ -52,21 +52,15 @@ cp /abs/skill/html-gen/assets/template/styles.css /abs/path/to/dest/styles.css
 cp /abs/skill/html-gen/assets/template/tokens.css /abs/path/to/dest/tokens.css
 cp /abs/skill/html-gen/assets/template/app.js /abs/path/to/dest/app.js
 cp /abs/skill/html-gen/assets/template/check_site.py /abs/path/to/dest/check_site.py
-cp /abs/skill/html-gen/assets/template/fetch_fonts.py /abs/path/to/dest/fetch_fonts.py
+cp -R /abs/skill/html-gen/assets/template/fonts /abs/path/to/dest/fonts
 cp /abs/skill/html-gen/assets/template/e2e_contrast.js /abs/path/to/dest/e2e_contrast.js
 cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 ```
 
-続けて Web フォントを取得する。vercel/geist-font の固定コミットから Geist / Geist Mono を `fonts/` に置く（`Geist-Variable.woff2`・`GeistMono-Variable.woff2`・`OFL.txt` の 3 ファイル、合計約 145KB）。大きさ・git blob SHA-1・woff2 の先頭を照合し、1 つでも合わなければ何も書かずに非 0 で終わる。取得は全体で最大 60 秒で打ち切る。
+`fonts/` は Geist / Geist Mono の可変フォントとライセンス（`Geist-Variable.woff2`・`GeistMono-Variable.woff2`・`OFL.txt`）をまとめて複製する。
 
-```bash
-python3 /abs/path/to/dest/fetch_fonts.py /abs/path/to/dest
-```
-
-- 失敗（通信・照合・時間切れ）してもページの作成は失敗にせず、止めずに手順3 へ進み、完了報告に「フォント未同梱（OS の書体で表示）」と `FAIL:` の文面にある原因を書く（失敗時に続行するのは利用者の決定による）
-- 日本語の字形は取得せず OS の書体で表示する（利用者の決定）
-- `fetch_fonts.py` は `check_site.py` と同じく生成先に残す。後でネットワークのある環境で同じコマンドを打ち直せばフォントが入る
-- `fonts/OFL.txt` は消さない（SIL OFL 1.1 の再配布条件。消すと `check_site.py` が落とす）
+- 日本語の字形は同梱せず OS の書体で表示する（利用者の決定）
+- `fonts/OFL.txt` は woff2 と一緒に置く（SIL OFL 1.1 の再配布条件。無いと `check_site.py` が落とす）
 
 ### 3. 中身を差し替える
 
@@ -74,7 +68,7 @@ python3 /abs/path/to/dest/fetch_fonts.py /abs/path/to/dest
 ナビゲーション項目、`html[data-base]`（手順1で選んだベースカラー）、
 `html[data-page-kind]`。
 
-データ由来の文字列は、書く場所（表のセル・SVG の title/desc・軸ラベル・凡例・属性値）を問わず HTML エスケープする。フォント・画像・スクリプトは外部から読まず同梱する（CSP が外部オリジンを許さない）。Web フォントは手順2 の `fetch_fonts.py` が取得して `fonts/` に同梱したものを `styles.css` が読む。
+データ由来の文字列は、書く場所（表のセル・SVG の title/desc・軸ラベル・凡例・属性値）を問わず HTML エスケープする。フォント・画像・スクリプトは外部から読まず同梱する（CSP が外部オリジンを許さない）。Web フォントは手順2 で複製した `fonts/` のものを `styles.css` が読む。
 
 触らない: `tokens.css`（生成物）、`app.js`、`button[data-theme-value="light"|"dark"]`、
 `<head>` の `app.js` 読み込み位置（body 末尾へ移すと初回に白がちらつく）、
@@ -171,7 +165,7 @@ python3 /abs/path/to/dest/check_site.py /abs/path/to/dest
 
 ## 完了条件
 
-手順4 の `check_site.py` PASS・`e2e_contrast.js` GREEN・確認 3〜6 がすべて通り、一覧に主要項目の絞り込みが生成されている（生成されなくても検査は落ちないので目で確かめる）。`fetch_fonts.py` が失敗した場合は、完了報告に「フォント未同梱（OS の書体で表示）」と原因がある。
+手順4 の `check_site.py` PASS・`e2e_contrast.js` GREEN・確認 3〜6 がすべて通り、一覧に主要項目の絞り込みが生成されている（生成されなくても検査は落ちないので目で確かめる）。
 
 ## 永続メモリ
 

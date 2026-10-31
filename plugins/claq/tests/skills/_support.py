@@ -1,6 +1,6 @@
 """tests/skills/test_html_gen_*.py が使う補助（html-gen のテンプレート同梱スクリプトの読み込みと、サイト複製・編集の道具）。
 
-`check_site.py` と `fetch_fonts.py` の読み込みは import 時にこのモジュールで 1 回だけ行い、各テストファイルはその結果を import する。
+`check_site.py` の読み込みは import 時にこのモジュールで 1 回だけ行い、各テストファイルはその結果を import する。
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ _SKILL_DIR = _PLUGIN_ROOT / "skills" / "html-gen"
 _TEMPLATE = _SKILL_DIR / "assets" / "template"
 _TOKENS = _SKILL_DIR / "references" / "tokens.json"
 _CHECK_SITE = _TEMPLATE / "check_site.py"
-_FETCH_FONTS = _TEMPLATE / "fetch_fonts.py"
 _SITE_FILES = ("index.html", "styles.css", "tokens.css", "app.js", "check_site.py")
 
 
@@ -35,7 +34,6 @@ def _load(name: str, path: Path) -> types.ModuleType:
 
 
 check_site = _load("html_gen_check_site", _CHECK_SITE)
-fetch_fonts = _load("html_gen_fetch_fonts", _FETCH_FONTS)
 TOKENS = check_site.load_tokens(_TOKENS)
 BASES = check_site.base_ids(TOKENS)
 HTML = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
