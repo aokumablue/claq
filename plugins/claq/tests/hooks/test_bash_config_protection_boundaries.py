@@ -7,6 +7,7 @@ Bash から書かせない（`host_guard_targets`）。`shlex` が記号の連�
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -198,3 +199,22 @@ def test_directory_change_behind_shell_keywords_is_not_trusted(keyword: str) -> 
     command = f"{keyword} cd X/hooks; printf x > hooks.json"
 
     assert bash_config_protection.find_protected_write(command) == "hooks/hooks.json/"
+
+
+def test_bundled_write_targets_are_judged_within_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """上限内の sh -c を束ねて書込み先を大量に並べても、hook の timeout（15 秒）より十分速く返る。
+
+    約 4,800 トークンの ``sh -c '>x;…a\\b'`` を 12 個束ねた 58KB の入力は、書込み先ごとに
+    変わらない値と同じトークンの実体 path を計算し直していたため 18.7 秒かかり timeout を超えた
+    （kill された hook は許可として扱われる）。
+    """
+    monkeypatch.chdir(tmp_path)
+    inner = ">x;" * 1600 + "a\\b"
+    command = " ; ".join([f"sh -c '{inner}'"] * 12)
+
+    started = time.monotonic()
+    code = _run("bash_config_protection", _bash(command), monkeypatch)
+    elapsed = time.monotonic() - started
+
+    assert code == 0
+    assert elapsed < 3.0, f"bash_config_protection took {elapsed:.3f}s (書込み先ごとの再計算へ回帰した疑い)"

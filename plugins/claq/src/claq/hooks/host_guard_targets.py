@@ -38,7 +38,7 @@ from claq.hooks.config_protection import (
     running_plugin_guarded_dir,
     running_plugin_root_is_guarded,
 )
-from claq.hooks.hook_common import basename, normalize_protected_name, resolve_effective_target
+from claq.hooks.hook_common import basename, memoized_in_scan, normalize_protected_name, resolve_effective_target
 from claq.lib.core_utils import get_home_dir, get_plugin_root
 
 # `protected_path_segment` がプラグインの PreToolUse ガード登録元に返す表示名。
@@ -80,6 +80,7 @@ def match_folded_path_window(
     return None
 
 
+@memoized_in_scan
 def _guarded_locations() -> list[tuple[Path, str]]:
     """保護する実体の置き場所と表示名の組を返す。
 
@@ -111,6 +112,7 @@ def _guarded_locations() -> list[tuple[Path, str]]:
     return locations
 
 
+@memoized_in_scan
 def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
     """書込み先トークンがプラグインの ``hooks/hooks.json``・実行中のランタイム・ホスト設定に当たるかを判定する。
 

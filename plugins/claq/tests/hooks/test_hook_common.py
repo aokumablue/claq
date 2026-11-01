@@ -217,3 +217,52 @@ def test_expand_leading_tilde(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, r
     monkeypatch.delenv("CLAQ_HOME", raising=False)
 
     assert hook_common._expand_leading_tilde(raw_path) == expected.format(home=tmp_path)
+
+
+def test_memoized_in_scan_reuses_results_only_inside_scan_memo() -> None:
+    """with の中では引数ごとに 1 回だけ計算し、with の外と with を出た後は毎回計算する。"""
+    calls: list[tuple[object, ...]] = []
+
+    @hook_common.memoized_in_scan
+    def probe(value: str, *, flag: bool = False) -> str:
+        """呼ばれた引数を記録して返す。"""
+        calls.append((value, flag))
+        return f"{value}:{flag}"
+
+    assert probe("a") == "a:False"
+    assert probe("a") == "a:False"
+    assert len(calls) == 2
+
+    with hook_common.scan_memo():
+        assert probe("a") == "a:False"
+        assert probe("a") == "a:False"
+        assert probe("a", flag=True) == "a:True"
+        assert probe("b") == "b:False"
+    assert calls[2:] == [("a", False), ("a", True), ("b", False)]
+
+    probe("a")
+    assert len(calls) == 6
+
+
+def test_memoized_in_scan_does_not_reuse_exceptions() -> None:
+    """例外は置き場に残さず、次の呼び出しでも計算し直して同じ例外を送る。"""
+    calls: list[str] = []
+
+    @hook_common.memoized_in_scan
+    def failing(value: str) -> str:
+        """呼ばれた引数を記録して例外を送る。"""
+        calls.append(value)
+        raise OSError(value)
+
+    with hook_common.scan_memo():
+        for _ in range(2):
+            with pytest.raises(OSError, match="x"):
+                failing("x")
+    assert calls == ["x", "x"]
+
+
+def test_scan_memo_discards_results_when_body_raises() -> None:
+    """with の本体が例外で抜けても置き場を捨てる（次の判定へ持ち越さない）。"""
+    with pytest.raises(RuntimeError), hook_common.scan_memo():
+        raise RuntimeError("boom")
+    assert hook_common._scan_memo is None

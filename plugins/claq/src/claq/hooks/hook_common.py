@@ -10,10 +10,60 @@ import contextlib
 import functools
 import subprocess
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from claq.hooks.output_adapter import adapt_context_output, emit_block
 from claq.lib.core_utils import get_home_dir
+
+# `scan_memo` の with の中でだけ使う、引数ごとの結果の置き場。with の外では None（毎回計算する）。
+_scan_memo: dict[tuple[object, ...], object] | None = None
+
+
+@contextlib.contextmanager
+def scan_memo() -> Iterator[None]:
+    """with の間だけ、`memoized_in_scan` を付けた関数の結果を引数ごとに使い回す。
+
+    書込み先 1 つの判定で、プロセス内で変わらない値（保護対象の置き場所・プラグインのルート）と
+    同じトークンの実体 path を何度も計算し直すと、``sh -c`` を束ねた 58KB の入力で
+    bash_config_protection が 18.7 秒かかり timeout（15 秒）を超えた（kill された hook は host に
+    許可として扱われる）。1 回の判定の間は cwd・環境変数・ファイルシステムを変えないので、使い回しても
+    結果は変わらない。テストが環境を変えても持ち越さないよう、with を出たら捨てる。
+
+    Yields:
+        None。
+    """
+    global _scan_memo
+    _scan_memo = {}
+    try:
+        yield
+    finally:
+        _scan_memo = None
+
+
+def memoized_in_scan[T](fn: Callable[..., T]) -> Callable[..., T]:
+    """`scan_memo` の with の間だけ、引数ごとに結果を使い回す関数にする。
+
+    例外は使い回さない（毎回呼び直して同じ例外を送る）。
+
+    Args:
+        fn: 引数がすべてハッシュ可能な関数。
+
+    Returns:
+        同じ呼び方の関数。
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: object, **kwargs: object) -> T:
+        """with の中なら置き場を引き、無ければ計算して置く。"""
+        if _scan_memo is None:
+            return fn(*args, **kwargs)
+        key = (fn, args, tuple(sorted(kwargs.items())))
+        if key not in _scan_memo:
+            _scan_memo[key] = fn(*args, **kwargs)
+        return _scan_memo[key]  # type: ignore[return-value]
+
+    return wrapper
 
 
 @functools.lru_cache(maxsize=1)
@@ -248,6 +298,7 @@ def _expand_leading_tilde(raw_path: str) -> str:
     return raw_path
 
 
+@memoized_in_scan
 def resolve_effective_target(raw_path: str) -> Path | None:
     """cwd 基準で解決し、symlink を辿った実体 path を返します。
 

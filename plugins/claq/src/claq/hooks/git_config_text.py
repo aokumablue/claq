@@ -17,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from claq.hooks.hook_common import normalize_protected_name, resolve_effective_target
+from claq.hooks.hook_common import memoized_in_scan, normalize_protected_name, resolve_effective_target
 from claq.lib.core_utils import get_home_dir
 from claq.lib.harness import normalize_tool_name
 
@@ -348,6 +348,7 @@ def _global_git_config_candidates() -> tuple[tuple[Path, str], ...]:
     return ((home / GLOBAL_GITCONFIG_NAME, GLOBAL_GITCONFIG_DISPLAY_NAME), (xdg_path, xdg_name))
 
 
+@memoized_in_scan
 def global_git_config_path(file_path: str) -> str | None:
     """パスがホーム側の git config（``~/.gitconfig`` / XDG）かを判定する。
 

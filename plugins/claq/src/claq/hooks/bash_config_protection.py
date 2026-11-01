@@ -75,10 +75,12 @@ from claq.hooks.hook_common import (
     basename,
     emit_block_output,
     is_inplace_edit_flag,
+    memoized_in_scan,
     normalize_executable_name,
     normalize_protected_name,
     resolve_effective_target,
     resolve_repo_root,
+    scan_memo,
 )
 from claq.hooks.host_guard_targets import find_host_guard_match, match_folded_path_window
 from claq.hooks.shell_tokens import (
@@ -211,6 +213,7 @@ def _expand_config_home_variables(token: str) -> str:
     return _XDG_VARIABLE_PREFIX_RE.sub(lambda _match: xdg, token) if xdg else token
 
 
+@memoized_in_scan
 def _find_home_log_directory_match(token: str) -> str | None:
     """トークンが ``~/.claq/logs/`` のディレクトリ構造に一致するか、その
     ディレクトリ自身を指すかを判定する。
@@ -331,6 +334,7 @@ def _command_index(segment: list[str]) -> int | None:
     return None
 
 
+@memoized_in_scan
 def _protected_target(token: str) -> str | None:
     """トークンが `config_protection` の保護対象なら、その表示名を返す。
 
@@ -790,17 +794,18 @@ def main() -> int:
 
     # コンテナキーは 1 つも取りこぼさず走査する。先勝ちで 1 キーだけ見ると、無害な側だけを
     # 検査して後続キーの保護対象書き込みを素通りさせる。
-    for command in iter_bash_commands(data):
-        # 走査はトークン数・バイト数に対して重い。上限超過を走らせると timeout で host に
-        # kill され silent fail-open になるため、検査しきれない入力は通さず止める。
-        if command_exceeds_scan_budget(command):
-            return emit_block_output(_TOKEN_BUDGET_MESSAGE)
-        try:
-            found = find_protected_write(command)
-        except ScanBudgetExceededError:
-            return emit_block_output(_TOKEN_BUDGET_MESSAGE)
-        if found:
-            return emit_block_output(_blocked_message(found))
+    with scan_memo():
+        for command in iter_bash_commands(data):
+            # 走査はトークン数・バイト数に対して重い。上限超過を走らせると timeout で host に
+            # kill され silent fail-open になるため、検査しきれない入力は通さず止める。
+            if command_exceeds_scan_budget(command):
+                return emit_block_output(_TOKEN_BUDGET_MESSAGE)
+            try:
+                found = find_protected_write(command)
+            except ScanBudgetExceededError:
+                return emit_block_output(_TOKEN_BUDGET_MESSAGE)
+            if found:
+                return emit_block_output(_blocked_message(found))
     return 0
 
 

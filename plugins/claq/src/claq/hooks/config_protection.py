@@ -29,6 +29,7 @@ from claq.hooks.git_config_text import (
 from claq.hooks.hook_common import (
     basename,
     emit_block_output,
+    memoized_in_scan,
     normalize_protected_name,
     resolve_effective_target,
     resolve_repo_root,
@@ -219,6 +220,7 @@ _TOX_COMMAND_KEY_PATTERN = re.compile(
 _FULL_TEXT_MAX_BYTES = 256 * 1024
 
 
+@memoized_in_scan
 def _match_path_segments(
     file_path: str,
     candidates: tuple[tuple[str, ...], ...],
@@ -782,6 +784,16 @@ def _folded_parts(path: Path) -> tuple[str, ...]:
     return tuple(normalize_protected_name(part) for part in path.parts)
 
 
+@memoized_in_scan
+def _running_plugin_root() -> Path:
+    """実行中の plugin root を返す（`scan_memo` の間は 1 回だけ解決する）。
+
+    Returns:
+        `get_plugin_root` の値。
+    """
+    return get_plugin_root()
+
+
 def running_plugin_root_is_guarded() -> bool:
     """実行中の plugin root を保護するか（作業中リポジトリ内の開発用 checkout でないか）を判定する。
 
@@ -799,7 +811,7 @@ def running_plugin_root_is_guarded() -> bool:
     repo_root = resolve_repo_root()
     if repo_root is None:
         return True
-    plugin_root = get_plugin_root()
+    plugin_root = _running_plugin_root()
     repo_parts = _folded_parts(repo_root.resolve())
     if _folded_parts(plugin_root)[: len(repo_parts)] != repo_parts:
         return True
@@ -852,7 +864,7 @@ def running_plugin_guarded_dir(resolved: Path, *, include_ancestors: bool) -> st
     """
     target = _folded_parts(resolved)
     for segments in _RUNNING_PLUGIN_GUARDED_DIRS:
-        guarded = _folded_parts(get_plugin_root().joinpath(*segments))
+        guarded = _folded_parts(_running_plugin_root().joinpath(*segments))
         if target[: len(guarded)] == guarded or (include_ancestors and guarded[: len(target)] == target):
             return "/".join(segments) + "/" if running_plugin_root_is_guarded() else None
     return None
