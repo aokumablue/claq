@@ -1,7 +1,8 @@
 """保護フックを実プロセスで起動し、上限ぎりぎりの入力での壁時計時間を測る。"""
 import json, os, subprocess, sys, time
 from pathlib import Path
-ROOT = Path("/home/user/claq/plugins/claq")
+REPO = Path(__file__).resolve().parents[4]
+ROOT = REPO / "plugins/claq"
 LAUNCHER = ROOT / "src/claq/launcher.py"
 def run(module, payload):
     env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "CLAQ_HOME": sys.argv[1]}
@@ -9,9 +10,10 @@ def run(module, payload):
     t = time.monotonic()
     r = subprocess.run([sys.executable, str(LAUNCHER), module], input=data, capture_output=True, env=env, timeout=120)
     return time.monotonic() - t, r.returncode, len(data)
-def bash(cmd): return {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": "/home/user/claq"}
+def bash(cmd): return {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(REPO)}
 cases = {
  "5000 tokens 'a'": bash(" ".join(["a"] * 4999)),
+ "5000 tokens 'git'": bash(" ".join(["git"] * 4999)),
  "5000 tokens git commit chain": bash(" && ".join(["git commit -m x"] * 1250)[: 10**9]),
  "5000 tokens quoted": bash(" ".join(['"a b"'] * 4999)),
  "64KiB single token": bash("x" * (64 * 1024 - 10)),

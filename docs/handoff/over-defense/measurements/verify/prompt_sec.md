@@ -1,4 +1,4 @@
-Read ツールで `/home/user/claq/plugins/claq/agents/security-auditor.md` を読み、その security-auditor として振る舞ってください。task は「notes API に検索と 1 件取得のエンドポイントを足す」です。次の差分を監査し、定義が求める形式で出力してください。
+Read ツールで `/Users/aokumablue/dev/claq/plugins/claq/agents/security-auditor.md` を読み、その security-auditor として振る舞ってください。task は「notes API に検索と 1 件取得のエンドポイントを足す」です。次の差分を監査し、定義が求める形式で出力してください。
 
 ## 差分 D1（Flask の notes API に足された変更）
 

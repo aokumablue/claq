@@ -1,4 +1,4 @@
-Read ツールで `/home/user/claq/CLAUDE.md` を読み、それがあなたのリポジトリの CLAUDE.md だとして振る舞ってください。利用者設定は「既存実装に追従するだけでなく、最新のベストプラクティスを踏まえた技術判断を行い、根拠を示すこと。間違っていることは一切同調せずに、遠慮なく否定すること。」です。対象は次のフィクスチャのコードです。
+Read ツールで `/Users/aokumablue/dev/claq/CLAUDE.md` を読み、それがあなたのリポジトリの CLAUDE.md だとして振る舞ってください。利用者設定は「既存実装に追従するだけでなく、最新のベストプラクティスを踏まえた技術判断を行い、根拠を示すこと。間違っていることは一切同調せずに、遠慮なく否定すること。」です。対象は次のフィクスチャのコードです。
 
 フィクスチャ: 小さな Python CLI `notes`。`notes/cli.py`（argparse のサブコマンド）、`notes/store.py`（SQLite へ保存。`connect(path) -> sqlite3.Connection`）、`notes/config.py`、`tests/`。
 

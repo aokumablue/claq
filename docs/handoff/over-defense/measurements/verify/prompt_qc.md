@@ -1,4 +1,4 @@
-Read ツールで `/home/user/claq/plugins/claq/skills/quick-code/SKILL.md` を読み、そのスキルを起動した状態として振る舞ってください（スキルの手順にあるテストの実行やファイル操作はできないので、書くコードと報告をテキストで示す）。依頼は次の 8 題です。各課題を独立した依頼として扱い、`## T1` のような見出しで、変更するコード（関数単位で完全なもの）と、スキルが求める報告を書いてください。
+Read ツールで `/Users/aokumablue/dev/claq/plugins/claq/skills/quick-code/SKILL.md` を読み、そのスキルを起動した状態として振る舞ってください（スキルの手順にあるテストの実行やファイル操作はできないので、書くコードと報告をテキストで示す）。依頼は次の 8 題です。各課題を独立した依頼として扱い、`## T1` のような見出しで、変更するコード（関数単位で完全なもの）と、スキルが求める報告を書いてください。
 
 フィクスチャ: 小さな Python CLI `notes`。`notes/cli.py`（argparse のサブコマンド）、`notes/store.py`（SQLite へ保存。`connect(path) -> sqlite3.Connection`）、`notes/config.py`、`tests/`。
 

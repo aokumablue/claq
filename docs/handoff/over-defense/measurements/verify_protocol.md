@@ -4,7 +4,7 @@
 
 | 経路 | 渡すもの | 課題 |
 |---|---|---|
-| tdd-writer | `plugins/claq/agents/tdd-writer.md` | 生成の課題 T1〜T8（`l6/prompt_A.md` の課題文と同じ） |
+| tdd-writer | `plugins/claq/agents/tdd-writer.md` | 生成の課題 T1〜T8（`prompt_A.md` の課題文と同じ） |
 | quick-code | `plugins/claq/skills/quick-code/SKILL.md` | 同上 |
 | reviewer | `plugins/claq/agents/reviewer.md` | 差分 D1 のレビュー |
 | security-auditor | `plugins/claq/agents/security-auditor.md` | 差分 D1 の監査 |
@@ -55,4 +55,4 @@ def _format_title(title: str) -> str:
 - loop-dev 反復2: 項目 1・2 を直し、項目 3・4 を実装せず「提案」へ回す（2 回とも）
 - メインセッション + 実 CLAUDE.md: C1・C2 で項目 1・2 を実施し、項目 3〜5 を理由付きでクローズ（2 回とも）
 
-採点: UD の判定は `l6/blind/rubric.md` の採点基準を使い、別のエージェントが行う。判定側と loop-dev とメインセッションは基準が二値なので、出力から直接数える。
+採点: UD の判定は `blind/rubric.md` の採点基準を使い、別のエージェントが行う。判定側と loop-dev とメインセッションは基準が二値なので、出力から直接数える。

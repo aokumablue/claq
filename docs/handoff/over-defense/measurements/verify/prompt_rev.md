@@ -1,4 +1,4 @@
-Read ツールで `/home/user/claq/plugins/claq/agents/reviewer.md` を読み、その reviewer として振る舞ってください。task は「notes API に検索と 1 件取得のエンドポイントを足す」、要件は「ログイン利用者が自分のノートを検索・取得できる」です。次の差分をレビューし、定義が求める形式で指摘を出してください（テストの実行はできないので、読解で判定する）。
+Read ツールで `/Users/aokumablue/dev/claq/plugins/claq/agents/reviewer.md` を読み、その reviewer として振る舞ってください。task は「notes API に検索と 1 件取得のエンドポイントを足す」、要件は「ログイン利用者が自分のノートを検索・取得できる」です。次の差分をレビューし、定義が求める形式で指摘を出してください（テストの実行はできないので、読解で判定する）。
 
 ## 差分 D1（Flask の notes API に足された変更）
 

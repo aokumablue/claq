@@ -1,4 +1,4 @@
-Read ツールで `/home/user/claq/plugins/claq/skills/loop-dev/SKILL.md` を読み、その「反復2」の generate を担当するエージェントとして振る舞ってください（反復2 の手順 2 の依頼文があなたへの依頼です）。対象コードは次の差分の適用後の状態です。
+Read ツールで `/Users/aokumablue/dev/claq/plugins/claq/skills/loop-dev/SKILL.md` を読み、その「反復2」の generate を担当するエージェントとして振る舞ってください（反復2 の手順 2 の依頼文があなたへの依頼です）。対象コードは次の差分の適用後の状態です。
 
 ## 差分 D1（Flask の notes API に足された変更）
 
