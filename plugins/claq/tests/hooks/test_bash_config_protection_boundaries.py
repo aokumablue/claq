@@ -218,3 +218,26 @@ def test_bundled_write_targets_are_judged_within_timeout(monkeypatch: pytest.Mon
 
     assert code == 0
     assert elapsed < 3.0, f"bash_config_protection took {elapsed:.3f}s (書込み先ごとの再計算へ回帰した疑い)"
+
+
+@pytest.mark.parametrize("hook", ["block_no_verify", "bash_config_protection", "pre_bash_commit_quality"])
+def test_argv_array_over_budget_is_blocked_before_scanning_elements(
+    hook: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """上限内の要素を並べた argv 配列は、要素を走査する前に結合候補の予算超過で止まる。
+
+    要素ごとに走査と予算検査を交互に行うと、結合候補（上限超過）に着く前に要素の走査が積み上がり、
+    4,999 トークンの要素 45 個で pre_bash_commit_quality が 7.45 秒、書込み先 1,600 件の要素 40 個で
+    bash_config_protection が 6.79 秒かかった。
+    """
+    monkeypatch.chdir(tmp_path)
+    git = " ".join(["git"] * 4997) + " a\\b"
+    targets = ["".join(f">x{k * 2000 + i};" for i in range(1600)) + "a\\b" for k in range(40)]
+    payload = {"tool_name": "Bash", "tool_input": {"command": [git] * 45 if hook != "bash_config_protection" else targets}}
+
+    started = time.monotonic()
+    code = _run(hook, payload, monkeypatch)
+    elapsed = time.monotonic() - started
+
+    assert code == 2
+    assert elapsed < 2.0, f"{hook} took {elapsed:.3f}s (要素の走査が予算検査より先に積み上がった疑い)"

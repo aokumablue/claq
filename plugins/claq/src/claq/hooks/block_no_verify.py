@@ -750,10 +750,12 @@ def main() -> int:
 
     # 先勝ちで 1 キーだけ見ると、複数のコンテナキーを持つ payload で無害な側だけを
     # 検査して素通りさせうるため、全キーを走査する。
-    for command in iter_bash_commands(data):
-        # 検査予算（トークン数・バイト数）を超える入力は走査せず止める（`MAX_COMMAND_TOKENS` のコメント）。
-        if command_exceeds_scan_budget(command):
-            return emit_block_output(_TOKEN_BUDGET_MESSAGE)
+    commands = list(iter_bash_commands(data))
+    # 検査予算（トークン数・バイト数）を超える入力は走査せず止める（`MAX_COMMAND_TOKENS` のコメント）。
+    # argv 配列の要素の走査が積み上がらないよう、全候補を走査する前に検査する。
+    if any(command_exceeds_scan_budget(command) for command in commands):
+        return emit_block_output(_TOKEN_BUDGET_MESSAGE)
+    for command in commands:
         if has_bypass_flag(command):
             return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
 

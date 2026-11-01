@@ -794,12 +794,13 @@ def main() -> int:
 
     # コンテナキーは 1 つも取りこぼさず走査する。先勝ちで 1 キーだけ見ると、無害な側だけを
     # 検査して後続キーの保護対象書き込みを素通りさせる。
+    commands = list(iter_bash_commands(data))
+    # 検査予算（トークン数・バイト数）を超える入力は走査せず止める（`MAX_COMMAND_TOKENS` のコメント）。
+    # argv 配列の要素の走査が積み上がらないよう、全候補を走査する前に検査する（上限内の要素 40 個で 6.79 秒）。
+    if any(command_exceeds_scan_budget(command) for command in commands):
+        return emit_block_output(_TOKEN_BUDGET_MESSAGE)
     with scan_memo():
-        for command in iter_bash_commands(data):
-            # 走査はトークン数・バイト数に対して重い。上限超過を走らせると timeout で host に
-            # kill され silent fail-open になるため、検査しきれない入力は通さず止める。
-            if command_exceeds_scan_budget(command):
-                return emit_block_output(_TOKEN_BUDGET_MESSAGE)
+        for command in commands:
             try:
                 found = find_protected_write(command)
             except ScanBudgetExceededError:
