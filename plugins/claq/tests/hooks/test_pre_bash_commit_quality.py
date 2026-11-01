@@ -346,7 +346,7 @@ class TestArgvGroupCommitCounting:
         result, scanned = self._run(["git", "big"], monkeypatch)
 
         assert result["exitCode"] == 2
-        assert result["reason"] == pbcq._TOKEN_BUDGET_MESSAGE
+        assert result["reason"] == pbcq._SCAN_BUDGET_MESSAGE
         assert scanned == []
 
     def test_failing_candidate_in_argv_group_does_not_drop_the_others(

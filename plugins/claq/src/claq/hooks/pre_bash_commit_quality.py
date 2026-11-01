@@ -59,7 +59,7 @@ from claq.hooks.commit_risk import (
 )
 from claq.hooks.hook_common import normalize_executable_name, resolve_repo_root
 from claq.hooks.shell_tokens import (
-    MAX_COMMAND_TOKENS,
+    MAX_COMMAND_BYTES,
     command_dialect_variants,
     command_exceeds_scan_budget,
     split_segments,
@@ -111,9 +111,9 @@ _WORKTREE_FILES_UNAVAILABLE_MESSAGE = (
     "an unverifiable commit through."
 )
 
-# 走査コストが hooks.json の timeout を超える入力（`shell_tokens.MAX_COMMAND_TOKENS`）。
-_TOKEN_BUDGET_MESSAGE = (
-    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_TOKENS} shell tokens for pre:bash-commit-quality. "
+# 走査コストが hooks.json の timeout を超える入力（`shell_tokens.MAX_COMMAND_BYTES`）。
+_SCAN_BUDGET_MESSAGE = (
+    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_BYTES} bytes for pre:bash-commit-quality. "
     "A command this large cannot be inspected within the hook timeout, and an un-inspected "
     "commit must not be allowed. Split it into smaller commands."
 )
@@ -656,7 +656,7 @@ def evaluate(raw_input: str) -> dict:
         # 並べた argv 配列で要素の走査が積み上がり、上限を超える結合候補に着く前に timeout に
         # 近づく（4,999 トークンの要素 45 個で 7.45 秒）。
         if any(command_exceeds_scan_budget(strip_data_heredoc_bodies(command)) for group in groups for command in group):
-            return _blocked(raw_input, _TOKEN_BUDGET_MESSAGE)
+            return _blocked(raw_input, _SCAN_BUDGET_MESSAGE)
         commits: list[tuple[str, list[str]]] = []
         for group in groups:
             commits.extend(_detect_group_commits(group))

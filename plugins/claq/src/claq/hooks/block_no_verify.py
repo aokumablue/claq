@@ -96,7 +96,7 @@ from claq.hooks.hook_common import (
     is_git_executable_token,
 )
 from claq.hooks.shell_tokens import (
-    MAX_COMMAND_TOKENS,
+    MAX_COMMAND_BYTES,
     command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
@@ -681,19 +681,15 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
         if _recursed:
             continue
         wrapper_command = extract_shell_wrapper_command(segment)
-        # `sh -c '<巨大なコマンド>'` は外側が数トークンしか無く main() の予算検査を通過する。
-        # `sh -c` で包むだけでトークン数の上限を素通りさせないため、境界でも同じ上限を当て、
-        # 超過は BLOCK へ倒す（`MAX_COMMAND_TOKENS` のコメント）。
-        if wrapper_command is not None and (
-            command_exceeds_scan_budget(wrapper_command)
-            or has_bypass_flag(wrapper_command, _recursed=True, _inherited_prefix=_wrapper_prefix_tokens(segment))
+        if wrapper_command is not None and has_bypass_flag(
+            wrapper_command, _recursed=True, _inherited_prefix=_wrapper_prefix_tokens(segment)
         ):
             return True
     return False
 
 
-_TOKEN_BUDGET_MESSAGE = (
-    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_TOKENS} shell tokens for pre:block-no-verify. "
+_SCAN_BUDGET_MESSAGE = (
+    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_BYTES} bytes for pre:block-no-verify. "
     "A command this large cannot be inspected within the hook timeout, and an un-inspected "
     "command must not be allowed. Split it into smaller commands."
 )
@@ -751,10 +747,10 @@ def main() -> int:
     # 先勝ちで 1 キーだけ見ると、複数のコンテナキーを持つ payload で無害な側だけを
     # 検査して素通りさせうるため、全キーを走査する。
     commands = list(iter_bash_commands(data))
-    # 検査予算（トークン数・バイト数）を超える入力は走査せず止める（`MAX_COMMAND_TOKENS` のコメント）。
+    # 検査予算（バイト数）を超える入力は走査せず止める（`MAX_COMMAND_BYTES` のコメント）。
     # argv 配列の要素の走査が積み上がらないよう、全候補を走査する前に検査する。
     if any(command_exceeds_scan_budget(command) for command in commands):
-        return emit_block_output(_TOKEN_BUDGET_MESSAGE)
+        return emit_block_output(_SCAN_BUDGET_MESSAGE)
     for command in commands:
         if has_bypass_flag(command):
             return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")

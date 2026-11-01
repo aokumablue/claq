@@ -35,12 +35,21 @@ from claq.hooks.commit_quality_scanner import (
 )
 from claq.hooks.commit_risk import _segment_mutates_worktree_or_index
 from claq.hooks.pre_bash_commit_quality import _detect_git_commit
-from claq.hooks.shell_tokens import MAX_COMMAND_TOKENS, _strip_line_continuations, command_exceeds_scan_budget, tokenize
+from claq.hooks.shell_tokens import (
+    MAX_COMMAND_BYTES,
+    _strip_line_continuations,
+    command_dialect_variants,
+    command_exceeds_scan_budget,
+    extract_shell_wrapper_command,
+    split_segments,
+    strip_data_heredoc_bodies,
+    tokenize,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# 検査予算を大きく超えるコマンド。走査すると O(N^2) で hooks.json の timeout を超える量。
-_OVERSIZED = "git " * (MAX_COMMAND_TOKENS * 5) + "&& git commit --no-verify -m x"
+# 検査予算（バイト数）を大きく超えるコマンド。
+_OVERSIZED = "git " * (MAX_COMMAND_BYTES // 2) + "&& git commit --no-verify -m x"
 
 # (モジュール, コマンド, 期待 exit code, 説明)
 _CASES = [
@@ -200,22 +209,44 @@ def test_scan_error_output_carries_sanitized_path(monkeypatch: pytest.MonkeyPatc
     ids=["block_no_verify", "pre_bash_commit_quality", "block_no_verify の sh -c 再帰先"],
 )
 def test_oversized_command_is_blocked_instead_of_timing_out(module: str, command: str) -> None:
-    """検査予算を超えるコマンドが、外側でも `sh -c` の再帰先でも走査されず速やかに BLOCKED になること。
+    """検査予算（バイト数）を超えるコマンドが、`sh -c` で包んでも走査されず速やかに BLOCKED になること。
 
-    走査は git トークン数に対し O(N^2) で、実測（2026-09-07・darwin）では 24,000 トークンで
-    `block_no_verify` が 15.23 秒、`sh -c` 越しなら 16.23 秒かかり hooks.json の timeout（15秒）を超えた。
     host に kill された hook は exit code を返さないため **silent fail-open = 保護の完全なバイパス**になる。
-    予算検査を entry loop だけに置くと、外側が数トークンの `sh -c` 経由でそのまま残る。
+    `sh -c` の中身は外側より長くならないので、入口のバイト数の検査が包んだ形も止める。
     """
     started = time.perf_counter()
     assert _run_hook(module, command) == 2
     assert time.perf_counter() - started < 5.0, f"{module} が走査へ落ちている"
 
 
-def test_command_at_token_budget_is_still_inspected() -> None:
-    """予算内のコマンドは予算超過と判定されず、超えた時点で超過になること。"""
-    assert command_exceeds_scan_budget("git status " * 100) is False
-    assert command_exceeds_scan_budget("git " * (MAX_COMMAND_TOKENS + 1)) is True
+def test_command_at_byte_budget_is_still_inspected() -> None:
+    """上限ちょうどのコマンドは予算超過と判定されず、1 バイト超えた時点で超過になること（トークン数は見ない）。"""
+    at_budget = "git " * (MAX_COMMAND_BYTES // 4)
+    assert len(at_budget.encode()) == MAX_COMMAND_BYTES
+    assert command_exceeds_scan_budget(at_budget) is False
+    assert command_exceeds_scan_budget(at_budget + "x") is True
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sh -c 'git commit --no-verify'",
+        "bash -c \"printf x > 'ruff.toml'\"",
+        "sh -c git\\ commit\\ -n",
+        "sh -c $'git\\ncommit'",
+        "HOME=/x sh -c 'a\\b c' ; bash -lc \"x \\\"y\\\" z\"",
+        "sh -c 'echo $'\\'';git commit'",
+        "cmd \\\n && sh -c 'C:\\x\\y'",
+        "sh -c \"$(cat <<EOF\nbody\nEOF\n)\"",
+    ],
+)
+def test_shell_wrapper_command_is_never_longer_than_outer(command: str) -> None:
+    """`sh -c` の中身は外側のバイト数を超えないこと（入口のバイト数の検査だけで再帰先も縛れる根拠）。"""
+    for variant in command_dialect_variants(strip_data_heredoc_bodies(command)):
+        for segment in split_segments(tokenize(variant)):
+            wrapped = extract_shell_wrapper_command(segment)
+            if wrapped is not None:
+                assert len(wrapped.encode("utf-8", "surrogatepass")) <= len(command.encode("utf-8", "surrogatepass"))
 
 
 def test_block_no_verify_main_blocks_oversized_command_in_process(
@@ -243,14 +274,6 @@ def test_pre_bash_commit_quality_evaluate_blocks_oversized_command_in_process(
 
     assert result["exitCode"] == 2
     assert "exceeds" in result["reason"]
-
-
-def test_sh_c_budget_guard_blocks_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
-    """再帰境界の予算ガードが in-process でも BLOCK 側へ倒れ、予算内のネストは中身で判定されること。"""
-    monkeypatch.setattr(block_no_verify, "command_exceeds_scan_budget", lambda command: "PAYLOAD" in command)
-
-    assert block_no_verify.has_bypass_flag("sh -c 'PAYLOAD echo ok'") is True
-    assert block_no_verify.has_bypass_flag("sh -c 'echo ok'") is False
 
 
 @pytest.mark.parametrize("failure", [BrokenPipeError("pipe"), OSError("closed"), ValueError("encode")])

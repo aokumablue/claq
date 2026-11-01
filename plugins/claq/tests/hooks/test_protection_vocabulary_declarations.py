@@ -548,12 +548,11 @@ def test_env_assignment_verdict(command: str, expected: int, monkeypatch: pytest
 
 
 def test_huge_single_token_is_blocked_before_tokenizing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """巨大な単一トークンがトークン予算を素通りせず BLOCK されること。
+    """巨大な単一トークンが走査前に BLOCK されること。
 
-    `MAX_COMMAND_TOKENS` はトークン**数**しか縛らないが、走査コストは `shlex` の
-    **バイト数**の二次で決まる。1MB の単一トークンはトークン数 2 なので予算を
-    素通りすると、実測 12.71 秒（timeout 15 秒に対し余裕 15%）かかる。host が
-    kill した hook は exit code を返さないため silent fail-open になる。
+    `shlex` の走査コストは単一トークンでバイト数の二次で決まり、1MB の単一トークンは
+    実測 12.71 秒（timeout 15 秒に対し余裕 15%）かかる。host が kill した hook は exit code を
+    返さないため silent fail-open になる。
     """
     huge = "echo " + "A" * (shell_tokens.MAX_COMMAND_BYTES + 1)
 
@@ -575,27 +574,29 @@ def test_scan_budget_is_measured_in_bytes_not_characters() -> None:
     assert shell_tokens.command_exceeds_scan_budget(multibyte) is True
 
 
-_OVER_TOKEN_BUDGET = "echo " + "a " * (shell_tokens.MAX_COMMAND_TOKENS + 1)
+_OVER_BYTE_BUDGET = "echo " + "a " * (shell_tokens.MAX_COMMAND_BYTES // 2 + 1)
+# 5,000 トークンを超えるがバイト数の上限の内側のコマンド。トークン数では止めず、中身で判定する。
+_MANY_TOKENS = "echo " + "a " * 6000
 
 
 @pytest.mark.parametrize(
     ("command", "expected", "over_budget"),
     [
-        # `bash_config_protection` だけが予算を見ていなかった。40 万トークンの ``touch a a a ...; rm ruff.toml`` は
-        # 走査に 20.7 秒かかり、`hooks.json` の timeout（15 秒）で host に kill される。kill された hook は
-        # exit code を返さないため silent fail-open になる。走査前に弾けば同じ入力が即座に exit 2 になる。
-        pytest.param(_OVER_TOKEN_BUDGET, 2, True, id="oversized"),
-        # 入口だけに置いた予算は、外側が数トークンしか無いネスト payload を通し、再帰先が無予算で走る。
-        pytest.param(f"sh -c '{_OVER_TOKEN_BUDGET}'", 2, True, id="oversized-inside-sh-c"),
-        # 予算内のネストは中身で判定される（予算が過剰に効かない）。
+        # 40 万トークンの ``touch a a a ...; rm ruff.toml`` は走査に 20.7 秒かかり、`hooks.json` の timeout（15 秒）で
+        # host に kill される。kill された hook は exit code を返さないため silent fail-open になる。
+        pytest.param(_OVER_BYTE_BUDGET, 2, True, id="oversized"),
+        # ``sh -c`` の中身は外側より長くならないので、入口の検査が包んだ形も止める。
+        pytest.param(f"sh -c '{_OVER_BYTE_BUDGET}'", 2, True, id="oversized-inside-sh-c"),
+        pytest.param(f"{_MANY_TOKENS}; printf x > ruff.toml", 2, False, id="many-tokens-protected"),
+        pytest.param(_MANY_TOKENS, 0, False, id="many-tokens-unprotected"),
         pytest.param("sh -c 'printf x > ruff.toml'", 2, False, id="in-budget-sh-c-protected"),
         pytest.param("sh -c 'printf x > notes.txt'", 0, False, id="in-budget-sh-c-unprotected"),
     ],
 )
-def test_token_budget_in_bash_config_protection(
+def test_byte_budget_in_bash_config_protection(
     command: str, expected: int, over_budget: bool, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """トークン予算を超えるコマンドは、入口でも ``sh -c`` の再帰境界でも走査せず BLOCKED にすること。"""
+    """バイト数の上限を超えるコマンドは走査せず BLOCKED にし、上限の内側はトークン数によらず中身で判定すること。"""
     code = _run("bash_config_protection", _bash(command), monkeypatch)
 
     assert (code, "exceeds" in capsys.readouterr().err) == (expected, over_budget)

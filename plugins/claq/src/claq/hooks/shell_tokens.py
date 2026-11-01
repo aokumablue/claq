@@ -9,18 +9,12 @@ from __future__ import annotations
 import re
 import shlex
 
-# 1 コマンドに許すシェルトークン数の上限。
-# 保護フックの走査時間を入力の大きさで抑え、hooks.json の timeout（15 秒）の内側に収める。
-# host が kill した hook は exit code を返さず silent fail-open になるため、超過は通さず
-# BLOCKED で返す（docs/adr/hook-failure-direction.md）。測った形のうち最も遅いもの（`git` 4,997 個を `\` で
-# 2 方言にした `sh -c` を 3 つ束ねた 60KB）で、3 つの保護フックとも起動から終了まで 0.2 秒以下
-# （macOS・Python 3.14 で実測）。正当なシェルコマンドがこの規模になることは実務上ない。
-MAX_COMMAND_TOKENS = 5000
-
 # 1 コマンドに許すバイト数の上限。
-# 単一の巨大トークンはトークン数の上限を素通りするが、`shlex` の走査コストは
-# バイト数の二次で、1MB で timeout に迫る。64KB の 1 トークンは起動から終了まで 0.2 秒（実測）で、
-# トークン上限に収まる正当なコマンド（40KB 程度）を落とさない。
+# `shlex` の走査コストは単一の巨大トークンでバイト数の二次になり、1MB で hooks.json の timeout（15 秒）に
+# 迫る。host が kill した hook は exit code を返さず silent fail-open になるため、超過は走査せず BLOCKED で
+# 返す（docs/adr/hook-failure-direction.md）。64KB の 1 トークンは起動から終了まで 0.2 秒（実測）。
+# この上限の内側では、エージェントが作れる形（単一のコマンド・argv 配列）で 3 つの保護フックとも
+# 起動から終了まで 1.9 秒以下（pre_bash_commit_quality の `git` の繰り返しが二次で最も遅い。macOS・Python 3.14 で実測）。
 MAX_COMMAND_BYTES = 64 * 1024
 
 # コマンド全体をセグメントに割るシェル区切りトークン。区切り文字に密着した
@@ -508,24 +502,22 @@ def tokenize(command: str) -> list[str]:
 
 
 def command_exceeds_scan_budget(command: str) -> bool:
-    """コマンドが検査予算（バイト数・トークン数）を超えるか判定する。
+    """コマンドが検査予算（バイト数）を超えるか判定する。
 
-    呼び出し元は True を受けたら走査せず BLOCKED を返すこと（理由は
-    `MAX_COMMAND_TOKENS` / `MAX_COMMAND_BYTES` のコメント）。`tokenize` 自身が
-    走査コストの本体なので、バイト数を先に見る。
+    呼び出し元は True を受けたら走査せず BLOCKED を返すこと（理由は `MAX_COMMAND_BYTES` の
+    コメント）。``sh -c`` の中身は外側のトークンから引用符・エスケープを除いた文字だけでできて
+    いて外側より長くならないので、入口で 1 回検査すれば再帰先も縛れる。
 
     Args:
         command: 検査対象のシェルコマンド文字列。
 
     Returns:
-        バイト数またはトークン数が上限を超えるなら True。
+        UTF-8 のバイト数が上限を超えるなら True。
 
     Raises:
         例外は発生しません。
     """
-    if len(command.encode("utf-8", "surrogatepass")) > MAX_COMMAND_BYTES:
-        return True
-    return len(tokenize(command)) > MAX_COMMAND_TOKENS
+    return len(command.encode("utf-8", "surrogatepass")) > MAX_COMMAND_BYTES
 
 
 # `shlex` が解析できなかった入力で、空白分割の前に前後へ空白を入れる区切り演算子。

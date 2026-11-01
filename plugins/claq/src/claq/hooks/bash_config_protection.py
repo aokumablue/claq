@@ -84,7 +84,7 @@ from claq.hooks.hook_common import (
 )
 from claq.hooks.host_guard_targets import find_host_guard_match, match_folded_path_window
 from claq.hooks.shell_tokens import (
-    MAX_COMMAND_TOKENS,
+    MAX_COMMAND_BYTES,
     command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
@@ -535,16 +535,6 @@ def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
         return False
 
 
-class ScanBudgetExceededError(Exception):
-    """`sh -c` の再帰先が検査予算（バイト数・トークン数）を超えたことを表す。
-
-    入口の予算検査は外側のコマンドしか見ないため、外側が数トークンしか無いネスト payload
-    を通す。再帰先を無予算で走らせると走査が `hooks.json` の timeout を超え、host に
-    kill された hook は exit code を返さず silent fail-open になる。呼び出し側
-    （`main`）は走査を打ち切って BLOCKED にする。
-    """
-
-
 def find_protected_write(command: str, *, _recursed: bool = False) -> str | None:
     """コマンド文字列内に保護対象への書き込みがあればその表示名を返す。
 
@@ -569,7 +559,7 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
         または ``~/.claq/logs``。該当しなければ None。
 
     Raises:
-        ScanBudgetExceededError: `sh -c` の再帰先が検査予算を超えた。
+        例外は発生しません。
     """
     # heredoc のデータ本文は方言展開の前に 1 回だけ落とす（`block_no_verify` と同じ順序に
     # しないと、同じ入力でも hook によって解析対象が変わる）。
@@ -597,7 +587,7 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
         保護対象の表示名。該当しなければ None。
 
     Raises:
-        ScanBudgetExceededError: `sh -c` の再帰先が検査予算を超えた。
+        例外は発生しません。
     """
     segments = split_segments(tokenize(command))
     scope_certain = not any(_changes_working_directory(segment) for segment in segments)
@@ -638,9 +628,6 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
             wrapped = extract_shell_wrapper_command(segment)
             if wrapped is None:
                 continue
-            # 入口の予算検査は外側しか見ない。再帰先にも同じ上限を当てる。
-            if command_exceeds_scan_budget(wrapped):
-                raise ScanBudgetExceededError
             if (found := find_protected_write(wrapped, _recursed=True)) is not None:
                 return found
     return None
@@ -675,8 +662,8 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
     return None
 
 
-_TOKEN_BUDGET_MESSAGE = (
-    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_TOKENS} shell tokens for pre:bash-config-protection. "
+_SCAN_BUDGET_MESSAGE = (
+    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_BYTES} bytes for pre:bash-config-protection. "
     "A command this large cannot be inspected within the hook timeout, and an un-inspected "
     "command must not be allowed. Split it into smaller commands."
 )
@@ -795,16 +782,13 @@ def main() -> int:
     # コンテナキーは 1 つも取りこぼさず走査する。先勝ちで 1 キーだけ見ると、無害な側だけを
     # 検査して後続キーの保護対象書き込みを素通りさせる。
     commands = list(iter_bash_commands(data))
-    # 検査予算（トークン数・バイト数）を超える入力は走査せず止める（`MAX_COMMAND_TOKENS` のコメント）。
+    # 検査予算（バイト数）を超える入力は走査せず止める（`MAX_COMMAND_BYTES` のコメント）。
     # argv 配列の要素の走査が積み上がらないよう、全候補を走査する前に検査する（上限内の要素 40 個で 6.79 秒）。
     if any(command_exceeds_scan_budget(command) for command in commands):
-        return emit_block_output(_TOKEN_BUDGET_MESSAGE)
+        return emit_block_output(_SCAN_BUDGET_MESSAGE)
     with scan_memo():
         for command in commands:
-            try:
-                found = find_protected_write(command)
-            except ScanBudgetExceededError:
-                return emit_block_output(_TOKEN_BUDGET_MESSAGE)
+            found = find_protected_write(command)
             if found:
                 return emit_block_output(_blocked_message(found))
     return 0
