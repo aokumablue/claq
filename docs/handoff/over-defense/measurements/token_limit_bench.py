@@ -19,6 +19,28 @@ def fill(unit, tail=""):
     return unit * ((LIMIT - len(tail)) // len(unit)) + tail
 
 
+def distinct(pattern, tail=""):
+    """pattern の {i} を毎回変えて 64KiB 未満まで並べ、tail を足す。"""
+    out, i = [], 0
+    size = len(tail)
+    while True:
+        piece = pattern.format(i=i)
+        if size + len(piece) > LIMIT:
+            return "".join(out) + tail
+        out.append(piece); size += len(piece); i += 1
+
+
+def bundle(make, per=1500):
+    """名前を通しで変えた書込み先を per 個ずつ \\ 付きの sh -c に包み、64KiB 未満まで束ねる。"""
+    parts, i, size = [], 0, 0
+    while True:
+        inner = "".join(make(i + k) for k in range(per)) + "a\\b"
+        piece = f"sh -c '{inner}' ; "
+        if size + len(piece) > LIMIT:
+            return "".join(parts) + "true"
+        parts.append(piece); size += len(piece); i += per
+
+
 cases = {
     "commit chain": fill("git commit -m x && ", "true"),
     "git x16k": fill("git "),
@@ -33,6 +55,13 @@ cases = {
     "heredoc": fill("cat <<EOF\nx\nEOF\n"),
     "git -c a=b": fill("git -c a=b "),
     "git config hooksPath": fill("git config core.hooksPath x ;"),
+    "redirect distinct": distinct(">x{i};", "a\\b"),
+    "redirect distinct bundle": bundle(lambda i: f">x{i};"),
+    "redirect deep distinct": distinct(">a/b/c/d/e/f/g/h/x{i};", "a\\b"),
+    "redirect ~ distinct": distinct(">~/x{i};", "a\\b"),
+    "redirect .. distinct": distinct(">../../../../x{i};", "a\\b"),
+    "tee distinct": distinct("tee x{i};", "a\\b"),
+    "cp distinct": distinct("cp a x{i};", "a\\b"),
 }
 for module in ["claq.hooks.block_no_verify", "claq.hooks.bash_config_protection", "claq.hooks.pre_bash_commit_quality"]:
     for name, cmd in cases.items():
