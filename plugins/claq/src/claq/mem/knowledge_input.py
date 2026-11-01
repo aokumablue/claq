@@ -273,13 +273,7 @@ class KnowledgeDraft:
 
         Returns:
             作成・更新時刻を現在時刻で埋めた Knowledge。
-
-        Raises:
-            KnowledgeInputError: scope と repo_id の組み合わせが
-                スキーマの CHECK 制約と矛盾する場合。
         """
-        if (self.scope == "repo") != (repo_id is not None):
-            raise KnowledgeInputError(f"scope={self.scope!r} と repo_id={repo_id!r} が矛盾しています")
         now = utc_now_iso()
         return Knowledge(
             key=self.key,

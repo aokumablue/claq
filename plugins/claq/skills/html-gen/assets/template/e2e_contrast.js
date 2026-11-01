@@ -159,7 +159,7 @@
       const style = getComputedStyle(element);
       if (style.visibility === "hidden" || style.display === "none") return;
       const size = parseFloat(style.fontSize);
-      const weight = Number(style.fontWeight) || 400;
+      const weight = Number(style.fontWeight);
       const minimum = size >= 24 || (size >= 18.66 && weight >= 700) ? MARK_MIN : TEXT_MIN;
       const back = backdropOf(element);
       const value = ratio(flatten(paint(style.color), [...back, 1]), back);

@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
-import io
 import os
 import threading
 import time
 import types
 from collections.abc import Callable
-from unittest import mock
 
 import pytest
 
 from claq.hooks import stdin_io
 
+_FAKE_FDS: dict[int, _FakeStdin] = {}
+
 
 class _FakeStdin:
-    """read1 ごとに先頭チャンクを要求量まで返し、尽きた後は ``end`` に従う stdin（``buffer`` は自身）。
+    """os.read ごとに先頭チャンクを要求量まで返し、尽きた後は ``end`` に従う stdin（``buffer`` は自身）。
 
-    ``end`` は None なら EOF（b""）、``"block"`` なら書き手が送り切らず閉じもしない状態として永久に待ち、
-    例外なら送出する。isatty() の呼び出し回数と read1 の要求量を記録する。待ち続けるのは daemon の
-    ワーカースレッドなので、プロセス終了は妨げない。
+    本番の読み取りは ``os.read(fd, n)`` だけなので、``fileno()`` は負の擬似 fd を返し、`_route_fake_reads`
+    がその fd の os.read をこのオブジェクトの ``read_chunk`` へ回す。``end`` は None なら EOF（b""）、
+    ``"block"`` なら書き手が送り切らず閉じもしない状態として永久に待ち、例外なら送出する。isatty() の
+    呼び出し回数と read の要求量を記録する。待ち続けるのは daemon のワーカースレッドなので、プロセス終了は妨げない。
     """
 
     def __init__(
@@ -29,13 +30,17 @@ class _FakeStdin:
         tty: bool = False,
         isatty_error: Exception | None = None,
         end: Exception | str | None = None,
+        fileno_error: Exception | None = None,
     ) -> None:
-        """返すチャンク列・TTY 判定（isatty_error があれば送出）・尽きた後の振る舞いを受け取る。"""
+        """返すチャンク列・TTY 判定・尽きた後の振る舞い・fileno() の例外を受け取る。"""
         self.buffer = self
         self._chunks = list(chunks)
         self._tty = tty
         self._isatty_error = isatty_error
         self._end = end
+        self._fileno_error = fileno_error
+        self._fd = -1 - len(_FAKE_FDS)
+        _FAKE_FDS[self._fd] = self
         self.isatty_calls = 0
         self.requested: list[int] = []
 
@@ -46,8 +51,14 @@ class _FakeStdin:
             raise self._isatty_error
         return self._tty
 
-    def read1(self, n: int = -1) -> bytes:
-        """先頭チャンクから最大 n バイトを返し、残りは次回へ回す（実 read1 は要求量を超えて返さない）。"""
+    def fileno(self) -> int:
+        """擬似 fd を返す（fileno_error があれば送出する）。"""
+        if self._fileno_error is not None:
+            raise self._fileno_error
+        return self._fd
+
+    def read_chunk(self, n: int) -> bytes:
+        """先頭チャンクから最大 n バイトを返し、残りは次回へ回す（os.read は要求量を超えて返さない）。"""
         self.requested.append(n)
         if not self._chunks:
             if isinstance(self._end, Exception):
@@ -56,10 +67,19 @@ class _FakeStdin:
                 threading.Event().wait()
             return b""
         chunk = self._chunks.pop(0)
-        if 0 <= n < len(chunk):
+        if n < len(chunk):
             self._chunks.insert(0, chunk[n:])
             return chunk[:n]
         return chunk
+
+
+@pytest.fixture(autouse=True)
+def _route_fake_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """擬似 fd への os.read を `_FakeStdin.read_chunk` へ回し、実 fd は本物の os.read へ委ねる。"""
+    real_read = os.read
+    monkeypatch.setattr(
+        stdin_io.os, "read", lambda fd, n: _FAKE_FDS[fd].read_chunk(n) if fd in _FAKE_FDS else real_read(fd, n)
+    )
 
 
 @pytest.mark.parametrize(
@@ -72,7 +92,6 @@ class _FakeStdin:
         # isatty() の例外を「無い」と決めつけると、判定不能を素通りへ倒し Windows のパイプの fail-open を再生産する。
         pytest.param(lambda: _FakeStdin(isatty_error=OSError("bad fd")), False, id="isatty-oserror"),
         pytest.param(lambda: _FakeStdin(isatty_error=ValueError("closed")), False, id="isatty-valueerror"),
-        pytest.param(lambda: _FakeStdin(isatty_error=AttributeError("x")), False, id="isatty-attributeerror"),
     ],
 )
 def test_stdin_is_absent(
@@ -93,14 +112,13 @@ def test_stdin_is_absent(
 @pytest.mark.parametrize(
     ("make_stdin", "max_bytes", "raw", "with_truncation"),
     [
-        # 10 バイト = 「あ」3 文字（9 バイト）+ 切断された 1 バイト（置換文字）。buffer の無い stdin もバイト換算で切る。
+        # 10 バイト = 「あ」3 文字（9 バイト）+ 切断された 1 バイト（置換文字）。
         pytest.param(
             lambda: _FakeStdin(("あ" * 10).encode()), 10, "あああ�", ("あああ�", True), id="buffer-cut-by-bytes"
         ),
-        pytest.param(lambda: io.StringIO("あ" * 10), 10, "あああ�", ("あああ�", True), id="text-cut-by-bytes"),
         pytest.param(lambda: _FakeStdin(b"a" * 20), 10, "a" * 10, ("a" * 10, True), id="over-limit"),
         pytest.param(
-            lambda: io.StringIO("short"), stdin_io.MAX_STDIN_BYTES, "short", ("short", False), id="within-limit"
+            lambda: _FakeStdin(b"short"), stdin_io.MAX_STDIN_BYTES, "short", ("short", False), id="within-limit"
         ),
         # TTY 接続（人手による直接起動）は読まずに payload なしとして扱う（例外にしない）。
         pytest.param(
@@ -156,7 +174,7 @@ def test_unreadable_stdin_is_empty_for_raw_reader_and_raises_for_protection(monk
 def test_read_stdin_bytes_requests_bounded_chunks(
     monkeypatch: pytest.MonkeyPatch, chunks: list[bytes], max_bytes: int, expected: bytes, requested: list[int]
 ) -> None:
-    """各 read1 の要求量が `min(STDIN_CHUNK_BYTES, max_bytes - 受信済み)` を守り、チャンクを結合して返すこと。
+    """各 os.read の要求量が `min(STDIN_CHUNK_BYTES, max_bytes - 受信済み)` を守り、チャンクを結合して返すこと。
 
     回帰防止: `.buffer.read(max_bytes)` 1 回きりの読み取りは、書き手が max_bytes に満たないまま接続も閉じないと
     無期限にブロックする。実装はブロッキング read をワーカースレッドへ隔離し、queue のタイムアウトで打ち切る。
@@ -172,7 +190,7 @@ def test_read_stdin_bytes_requests_bounded_chunks(
 @pytest.mark.parametrize(
     ("end", "warns"),
     [(None, False), ("block", True), (ValueError("I/O operation on closed file"), False)],
-    ids=["eof", "writer-stalls", "read1-fails"],
+    ids=["eof", "writer-stalls", "read-fails"],
 )
 def test_read_stdin_bytes_returns_partial_data_after_first_chunk(
     monkeypatch: pytest.MonkeyPatch,
@@ -199,10 +217,11 @@ def test_read_stdin_bytes_returns_partial_data_after_first_chunk(
     "stdin",
     [
         # Windows の通常パイプで select が OSError になる経路と同型。空へ正規化すると allow と deny が同じ exit 0 になる。
-        pytest.param(_FakeStdin(end=OSError("bad fd")), id="read1-oserror"),
-        pytest.param(_FakeStdin(end=ValueError("closed file")), id="read1-valueerror"),
-        # buffer を持たない stdin の read() 失敗も同じ扱い。
-        pytest.param(mock.Mock(spec=["read"], **{"read.side_effect": OSError("bad fd")}), id="text-read-oserror"),
+        pytest.param(_FakeStdin(end=OSError("bad fd")), id="read-oserror"),
+        pytest.param(_FakeStdin(end=ValueError("closed file")), id="read-valueerror"),
+        # 閉じた stdin は fd を取れない。読めなかったものとして同じ扱いにする。
+        pytest.param(_FakeStdin(fileno_error=ValueError("closed file")), id="fileno-valueerror"),
+        pytest.param(_FakeStdin(fileno_error=OSError("bad fd")), id="fileno-oserror"),
     ],
 )
 def test_read_failure_before_any_data_raises_unavailable(monkeypatch: pytest.MonkeyPatch, stdin: object) -> None:
@@ -230,23 +249,6 @@ def test_real_fd_is_read_without_buffer_lock(monkeypatch: pytest.MonkeyPatch) ->
         assert stdin_io._read_stdin_bytes(100) == b"payload"
     finally:
         os.close(read_fd)
-
-
-@pytest.mark.parametrize(
-    "buffer",
-    [
-        pytest.param(mock.Mock(spec=["read1"]), id="no-fileno"),
-        pytest.param(
-            mock.Mock(spec=["fileno", "read1"], **{"fileno.side_effect": OSError("no fd")}), id="fileno-oserror"
-        ),
-        pytest.param(
-            mock.Mock(spec=["fileno", "read1"], **{"fileno.side_effect": ValueError("closed")}), id="fileno-valueerror"
-        ),
-    ],
-)
-def test_buffer_without_usable_fd_falls_back_to_read1(buffer: mock.Mock) -> None:
-    """fileno を持たない・fileno() が例外化するオブジェクト（テストのフェイク・io.BytesIO 等）は read1 で読むこと。"""
-    assert stdin_io._stdin_chunk_reader(buffer) is buffer.read1
 
 
 @pytest.mark.parametrize(

@@ -166,7 +166,7 @@ def _handoff_section(db: Database, repo_id: str) -> str:
         return ""
     if len(handoff) > CONTEXT_HANDOFF_CHAR_BUDGET:
         handoff = handoff[: CONTEXT_HANDOFF_CHAR_BUDGET - 1] + "…"
-    stamp = datetime.fromisoformat(session.ended_at or session.started_at).strftime("%Y-%m-%d %H:%M")
+    stamp = datetime.fromisoformat(session.ended_at).strftime("%Y-%m-%d %H:%M")
     return f"## 前回の続き ({stamp})\n{handoff}"
 
 

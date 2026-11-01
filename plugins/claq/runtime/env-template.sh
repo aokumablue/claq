@@ -22,8 +22,7 @@
 # start-time line matches that pid's *current* `ps -o lstart=` output
 # byte-for-byte, use its recorded root. A mismatch means the pid was reused
 # by an unrelated process since the pointer was written — skip it. An empty
-# or malformed file is treated the same way (defensive only — the writer does
-# not produce empty files by design; see docs/adr/plugin-root-resolution.md).
+# or malformed file fails the same start-time comparison and is skipped too.
 #
 # There is no second-tier fallback. If neither candidate yields a verified
 # match, this exits 127 rather than guessing (a fallback such as "the root
@@ -34,10 +33,9 @@ _claq_env_root=""
 
 _claq_resolve_ancestor_pointer() {
   # $1: candidate pid. On success, prints the recorded root on stdout and
-  # returns 0. Prints nothing and returns 1 if the pointer is missing,
-  # empty or malformed (defensive only — the writer does not produce
-  # these), or its recorded start-time does not match the pid's current
-  # start-time (pid reuse).
+  # returns 0. Prints nothing and returns 1 if the pointer is missing or
+  # its recorded start-time does not match the pid's current start-time
+  # (pid reuse; an empty or malformed file fails the same comparison).
   _claq_walk_candidate_pid="$1"
   _claq_walk_pointer="$HOME/.claq/roots/$_claq_walk_candidate_pid"
   if [ -L "$_claq_walk_pointer" ] || [ ! -f "$_claq_walk_pointer" ]; then
@@ -50,9 +48,6 @@ _claq_resolve_ancestor_pointer() {
     IFS= read -r _claq_walk_root
     IFS= read -r _claq_walk_recorded_lstart
   } < "$_claq_walk_pointer" 2>/dev/null
-  if [ -z "$_claq_walk_root" ] || [ -z "$_claq_walk_recorded_lstart" ]; then
-    return 1
-  fi
 
   # LC_ALL=C: `ps -o lstart=` の出力はロケール依存（LANG=ja_JP.UTF-8 では
   # "木  8/20 ..."、C ロケールでは "Thu Aug 20 ..."。実機で確認済み）。

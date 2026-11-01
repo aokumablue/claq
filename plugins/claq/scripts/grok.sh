@@ -26,22 +26,25 @@
 #   curl -fsSL <配布スクリプトのURL> | bash
 
 # 候補の選択規則は grok_plugin_root.find_latest_installed_claq と揃える
-# （mtime 最新）。食い違うと、複数インストールが同居したとき
-# 「実行される bootstrap コード」と「symlink の張り先」が別バージョンになる。選択は stdlib だけで済むので、PYTHONPATH を
-# 用意する前に python3 へ委ねる。
+# （launcher.py を含む claq-* のうち mtime 最新。列挙後に消えた候補は除く）。食い違うと、複数インストールが
+# 同居したとき「実行される bootstrap コード」と「symlink の張り先」が別バージョンになる。選択は stdlib だけで
+# 済むので、PYTHONPATH を用意する前に python3 へ委ねる。
 SRC_DIR="$(python3 -c '
 import pathlib
 import sys
 
 root = pathlib.Path.home() / ".grok" / "installed-plugins"
-candidates = [
-    path
-    for path in (root.glob("claq-*") if root.is_dir() else [])
-    if (path / "src" / "claq" / "lib" / "grok_plugin_root.py").is_file()
-]
+candidates = []
+for path in root.glob("claq-*"):
+    if not (path / "src" / "claq" / "launcher.py").is_file():
+        continue
+    try:
+        candidates.append((path.stat().st_mtime, path))
+    except FileNotFoundError:
+        continue  # 列挙と stat の間に Grok が古い claq-<hash> を消した
 if not candidates:
     sys.exit(1)
-print(max(candidates, key=lambda path: path.stat().st_mtime) / "src")
+print(max(candidates)[1] / "src")
 ')" || {
     echo "no installed claq-* found under ~/.grok/installed-plugins" >&2
     exit 1

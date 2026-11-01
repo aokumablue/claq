@@ -21,7 +21,7 @@
 |---|---|
 | `cursor` | `PageCursor`（検索ツールのカーソルの発行と開封。用途と検索条件の取り違え・書き換えを拒否し、位置を検査する）、`query_fingerprint`（検索条件の指紋）、`accepts_position`（位置と長さの検査） |
 | `shaping` | `project`（入れ子を保った射影）、`fit_items`（予算に収まる件数）、`fit_page`（一覧の 1 ページを予算に収め、続きの位置を cursor に封じる）、`fit_view`（取得の結果を予算に収め、超えたら summary に落とす）、`clean_text`（上流の文字列の無害化）、`compact_json` |
-| `catalog` | `FieldSpec` と `Catalog`（`fields_describe`・ビュー・検索の要約の項目・項目パスの検証・個人情報のパスの抽出） |
+| `catalog` | `FieldSpec` と `Catalog`（`fields_describe`・ビュー・検索の要約の項目・項目パスの検証。`personal_paths` は upstream-protection-overlay の監査ログ用） |
 | `upstream` | `UpstreamError`、`model_message`、`call_with_retry`、`call_with_deadline`（再試行と締切をまとめた 1 回の呼び出し）、`fan_out` |
 | `principal` | `resolve_principal`（呼び出しの主体） |
 | `errors` | `FacadeError`（部品が投げる、モデルに読ませる失敗） |

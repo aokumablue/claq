@@ -30,10 +30,10 @@ def test_get_returns_child_logger() -> None:
 
 @pytest.mark.parametrize(
     ("level", "expected"),
-    [("debug", logging.DEBUG), ("info", logging.INFO), ("nonexistent", logging.INFO)],
+    [("debug", logging.DEBUG), ("info", logging.INFO)],
 )
 def test_setup_adds_file_and_stderr_handlers_with_level(tmp_path: Path, level: str, expected: int) -> None:
-    """ファイル出力と stderr の 2 ハンドラを付け、レベルを設定する（不正なレベルは INFO）。"""
+    """ファイル出力と stderr の 2 ハンドラを付け、レベルを設定する。"""
     logger.setup(tmp_path, level=level)
     assert len(_mem_root().handlers) == 2
     assert _mem_root().level == expected

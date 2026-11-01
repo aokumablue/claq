@@ -415,11 +415,9 @@ def _count_file_issues(
             continue
         log(f"\n[FILE] {sanitize_untrusted_path(file_path)}")
         for issue in file_issues:
-            # scanner の内部契約（キー欠落なし）に依存せず .get() で読む。未知 severity は
-            # 「検査したが分類できない」ため、見逃さず安全側の error に数える。
-            severity = issue.get("severity")
-            log(f"  {severity_label.get(severity, 'INFO')} Line {issue.get('line', 0)}: {issue.get('message', '')}")
-            counts[severity if severity in counts else "error"] += 1
+            severity = issue["severity"]
+            log(f"  {severity_label[severity]} Line {issue['line']}: {issue['message']}")
+            counts[severity] += 1
 
     return sum(counts.values()), counts["error"], counts["warning"], counts["info"]
 
@@ -707,11 +705,7 @@ def _emit_block(reason: str) -> int:
     """
     from claq.hooks.hook_common import emit_block_output
 
-    try:
-        return emit_block_output(reason)
-    except Exception as err:
-        log(f"[Hook] Error: {err}")
-        return 2
+    return emit_block_output(reason)
 
 
 def main() -> int:

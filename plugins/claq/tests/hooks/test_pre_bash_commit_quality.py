@@ -110,24 +110,6 @@ class TestMainStdinBoundary:
             assert json.loads(captured.out) == {"permissionDecision": "deny", "permissionDecisionReason": expected_reason}
             assert expected_reason in captured.err
 
-    @pytest.mark.parametrize(("read", "expected_reason"), [*_DENIED_READS, _UNREADABLE_READ])
-    def test_emit_block_output_failure_after_deny_is_fail_closed(
-        self, monkeypatch: pytest.MonkeyPatch, read: Callable[[], tuple[str, bool]], expected_reason: str
-    ) -> None:
-        """deny が決まってからの emit_block_output 失敗（出力層の失敗）でも、その理由を渡したうえで exit 2 を保つこと。"""
-        monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin_with_truncation", read)
-        reasons: list[str] = []
-
-        def _raise(reason: str) -> int:
-            """渡された理由を記録し、出力層の失敗を再現する。"""
-            reasons.append(reason)
-            raise RuntimeError("emit failure")
-
-        monkeypatch.setattr("claq.hooks.hook_common.emit_block_output", _raise)
-
-        assert pbcq.main() == 2
-        assert reasons == [expected_reason]
-
 
 class TestCompoundCommitGuard:
     """実行前状態では commit 内容を検査できない複合コマンドを deny する。"""

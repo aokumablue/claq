@@ -232,7 +232,7 @@ def fit_page[T, R](
         items: 今回のページの候補（cursor の skip を読み飛ばした後）。
         position: 今回のページの位置（`page` と `skip`）。
         upstream_next: 上流の次のページトークン。無ければ None。
-        issue: 位置から続きの cursor を発行する関数（主体と検索条件を結びつけたもの）。
+        issue: 位置から続きの cursor を発行する関数（用途と検索条件を結びつけたもの。署名付きカーソルなら主体も）。
         build: （返す候補、続きの cursor、notes）から結果全体を作る関数。
         measure: 結果全体の文字数（モデルが読む text の長さ）を返す関数。
         max_chars: 結果全体の文字数の上限。
@@ -289,7 +289,7 @@ def fit_view[T](
         max_chars: 結果全体の文字数の上限。
 
     Returns:
-        （結果、実際に返した項目のパス）。監査ログには実際に返したパスを渡す。
+        （結果、実際に返した項目のパス）。監査ログ（upstream-protection-overlay）には実際に返したパスを渡す。
 
     Raises:
         FacadeError: fallback でも上限を超えるとき。

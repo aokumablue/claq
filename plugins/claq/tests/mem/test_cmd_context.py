@@ -330,12 +330,6 @@ class TestContext:
         # 見出し・タグ・envelope を除いた明細だけで予算内に収まっている
         assert sum(len(line) + 1 for line in lines[2:-2]) <= CONTEXT_GLOBAL_CHAR_BUDGET
 
-    def test_handoff_falls_back_to_started_at(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """未終了セッションの見出しは started_at を使う。"""
-        self._seed_session(tmp_path, _repo_id(tmp_path), ended_at=None, started_at="2026-08-09T09:30:00+00:00")
-
-        assert "## 前回の続き (2026-08-09 09:30)" in self._inject(monkeypatch, tmp_path)
-
     def test_whitespace_only_handoff_is_skipped(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """空白だけの引き継ぎは節ごと出さない。"""
         self._seed_session(tmp_path, _repo_id(tmp_path), handoff="   ")

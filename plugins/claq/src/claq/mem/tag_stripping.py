@@ -138,7 +138,7 @@ _TAG_NAME_END = r"(?=[\s/>])"
 # 二次オーダーになる（実測: `'<private>' * N` が N=4000 で 0.62 秒、
 # 8000 で 2.47 秒、16000 で 9.93 秒 — 入力 2 倍で 4 倍）。属性部の有界化
 # （`_TAG_ATTRS`）が塞ぐのは `>` を含まない入力だけで、この経路は別物。
-# `strip_tags` は SessionStart の `mem context`（timeout 60 秒）が知識カードの
+# `strip_tags` は SessionStart の `mem context`（hooks.json の timeout 20 秒）が知識カードの
 # title/body に対して毎回呼ぶため、ここの複雑度はセッション開始の遅延になる。
 # あわせて、対を成さない開始タグから後続ブロックの閉じタグまで貫通して
 # 間のテキストを巻き込む挙動も消える。

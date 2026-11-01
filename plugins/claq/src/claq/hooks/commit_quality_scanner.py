@@ -611,18 +611,11 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
         検出した問題の辞書リストを返します。
 
     Raises:
-        例外は発生しません。
+        Exception: 読み取りの subprocess が起動できないなど、想定外の失敗。呼び出し元が deny にする。
     """
-    try:
-        content = (
-            get_worktree_file_content(repo_root, file_path)
-            if repo_root is not None
-            else get_staged_file_content(file_path)
-        )
-    except Exception as err:
-        # 読み取り関数は読めなければ None を返す契約だが、それが破られても本関数の
-        # 「例外を発生させない」契約を守る。
-        return [_scan_error_issue(file_path, "ファイル読み取り", err, severity="error")]
+    content = (
+        get_worktree_file_content(repo_root, file_path) if repo_root is not None else get_staged_file_content(file_path)
+    )
     if content is None:
         # 黙って空 issue を返すと「問題なし」と「検査不能」が区別できず、対象ファイルは
         # 無検査のままコミットが通る。scan_error（error）としてブロック対象にする。
@@ -637,12 +630,9 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
             }
         ]
 
-    try:
-        is_binary = _is_binary_content(content)
-        do_lint = should_lint_file(file_path) and not is_binary
-        do_secrets = should_scan_secrets(file_path)
-    except Exception as err:
-        return [_scan_error_issue(file_path, "scan target 判定", err, severity="error")]
+    is_binary = _is_binary_content(content)
+    do_lint = should_lint_file(file_path) and not is_binary
+    do_secrets = should_scan_secrets(file_path)
 
     issues: list[dict] = []
     if not do_lint and not do_secrets:

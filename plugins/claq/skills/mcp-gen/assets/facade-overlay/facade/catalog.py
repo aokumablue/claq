@@ -140,7 +140,7 @@ class Catalog:
         return self.view("summary", allowed_sensitivity=allowed_sensitivity)
 
     def personal_paths(self, paths: Sequence[str]) -> list[str]:
-        """与えたパスのうち、個人情報（personal）の項目のものを返す（監査ログに残す対象）。
+        """与えたパスのうち、個人情報（personal）の項目のものを返す（upstream-protection-overlay の監査ログが使う）。
 
         Args:
             paths: カタログにあるパス（`view` か `resolve` で得たもの）。

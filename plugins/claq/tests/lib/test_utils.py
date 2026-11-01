@@ -174,11 +174,11 @@ def test_append_file_creates_parent_dirs_and_appends(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [("\x1b[31mred text\x1b[0m", "red text"), ("plain text", "plain text"), (None, ""), (123, "")],
-    ids=["color-codes", "plain", "none", "int"],
+    [("\x1b[31mred text\x1b[0m", "red text"), ("plain text", "plain text")],
+    ids=["color-codes", "plain"],
 )
-def test_strip_ansi(value: object, expected: str) -> None:
-    """カラーコードを除去し、通常テキストはそのまま、文字列以外は空文字列を返す。"""
+def test_strip_ansi(value: str, expected: str) -> None:
+    """カラーコードを除去し、通常テキストはそのまま返す。"""
     assert strip_ansi(value) == expected
 
 

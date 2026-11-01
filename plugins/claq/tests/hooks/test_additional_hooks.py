@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import io
 import json
+import os
 import runpy
 import subprocess
 import sys
@@ -426,7 +426,11 @@ def test_pre_compact_main_logs_error_without_blocking(monkeypatch: pytest.Monkey
 )
 def test_entrypoint_exits_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, module_name: str, stdin: str) -> None:
     """各フックを __main__ として起動すると、通る入力で exit 0 を返すこと（pre_compact の記録先は tmp_path）。"""
-    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
-    monkeypatch.setattr("claq.lib.core_utils.get_sessions_dir", lambda: tmp_path)
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, stdin.encode("utf-8"))
+    os.close(write_fd)
+    with os.fdopen(read_fd, encoding="utf-8") as pipe:
+        monkeypatch.setattr(sys, "stdin", pipe)
+        monkeypatch.setattr("claq.lib.core_utils.get_sessions_dir", lambda: tmp_path)
 
-    assert _run_entrypoint(f"claq.hooks.{module_name}") == 0
+        assert _run_entrypoint(f"claq.hooks.{module_name}") == 0

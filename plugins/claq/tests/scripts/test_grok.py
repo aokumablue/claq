@@ -19,7 +19,7 @@ def _run_script(home: Path) -> subprocess.CompletedProcess[str]:
 def _make_installed_plugin(home: Path, name: str) -> Path:
     """``home/.grok/installed-plugins/<name>`` に実ソース一式付きツリーを作る。
 
-    grok.sh は ``src/claq/lib/grok_plugin_root.py`` の実在を見て ``PYTHONPATH`` を組み立てるため、
+    grok.sh は ``src/claq/launcher.py`` の実在を見て ``PYTHONPATH`` を組み立てるため、
     import 可能な実体が要る。リポジトリの実 src を symlink して賄う（重複コピーはしない）。
     """
     root = home / ".grok" / "installed-plugins" / name

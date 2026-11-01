@@ -150,7 +150,5 @@ def append_file(file_path: str | Path, content: str) -> None:
 
 
 def strip_ansi(text: str) -> str:
-    """文字列からすべての ANSI エスケープシーケンスを除去する。文字列以外は空文字列を返す。"""
-    if not isinstance(text, str):
-        return ""
+    """文字列からすべての ANSI エスケープシーケンスを除去する。"""
     return _ANSI_ESCAPE.sub("", text)

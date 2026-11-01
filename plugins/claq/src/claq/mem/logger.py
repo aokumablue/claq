@@ -83,7 +83,7 @@ def setup(log_dir: Path, level: str = "info") -> None:
         root = logging.getLogger("claq.mem")
         file_handler = _file_handler(log_dir)
         stderr_handler = _stderr_handler()
-        root.setLevel(getattr(logging, level.upper(), logging.INFO))
+        root.setLevel(getattr(logging, level.upper()))
         root.addHandler(file_handler)
         root.addHandler(stderr_handler)
         _initialized = True

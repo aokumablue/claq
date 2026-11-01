@@ -353,12 +353,6 @@ class TestToKnowledge:
         """global スコープは repo_id が None。"""
         assert self._draft("global").to_knowledge(None).repo_id is None
 
-    @pytest.mark.parametrize(("scope", "repo_id"), [("repo", None), ("global", "claq-dev")])
-    def test_rejects_scope_repo_id_mismatch(self, scope: str, repo_id: str | None) -> None:
-        """scope と repo_id が矛盾する組み合わせは拒否する。"""
-        with pytest.raises(KnowledgeInputError, match="矛盾"):
-            self._draft(scope).to_knowledge(repo_id)
-
 
 class TestExplicitKeyHashFallback:
     """ASCII を含まない明示 key が同じ slug へ潰れて上書きし合う退行を防ぐ。"""

@@ -161,7 +161,7 @@ def _stderr_tail(process: subprocess.Popen) -> str:
     Returns:
         stderr の末尾。
     """
-    return (process.stderr.read() if process.stderr else "")[-2000:]
+    return process.stderr.read()[-2000:]
 
 
 def _exchange(requests: list[dict], env: dict[str, str] | None = None) -> dict[int, dict]:
@@ -186,7 +186,7 @@ def _exchange(requests: list[dict], env: dict[str, str] | None = None) -> dict[i
 
     def _read() -> None:
         """stdout を 1 行ずつ読み、全応答が揃った時点でイベントを立てる。"""
-        for line in process.stdout or []:
+        for line in process.stdout:
             stripped = line.strip()
             if not stripped:
                 continue
@@ -384,7 +384,7 @@ def _read_result(process: subprocess.Popen) -> dict:
     Raises:
         AssertionError: 応答が来ないまま stdout が閉じたとき。
     """
-    for line in process.stdout or []:
+    for line in process.stdout:
         if line.strip():
             return json.loads(line)["result"]
     raise AssertionError(f"応答が返りませんでした。stderr:\n{_stderr_tail(process)}")
@@ -530,7 +530,7 @@ def test_paging_round_trip() -> None:
     """カーソルが別のプロセスでも続きを返し、改ざんと条件の変更を拒むこと。
 
     1 ページ目と 2 ページ目を**別々のプロセス**で取る。カーソルが自己完結していれば
-    （共有の鍵だけで）どのインスタンスでも続きを返せる。
+    どのインスタンスでも続きを返せる（署名付きカーソルなら PAGED_ENV で同じ鍵を渡す）。
     """
     _require("PAGED_TOOL")
     first = _exchange([_call(1, cfg.PAGED_TOOL, cfg.PAGED_ARGS)], cfg.PAGED_ENV)[1]["result"]

@@ -134,13 +134,8 @@ def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(monkeyp
         ),
         # lint は false negative のコストが secret ほど高くないため warning に留め、secret 側は生存する。
         ("_scan_lint_issues", ValueError("boom"), _API_KEY_LINE, [("scan_error", "warning"), ("secret", "error")]),
-        # 走査対象判定自体が例外を投げても検査不能を報告する。
-        ("_is_binary_content", OSError("boom"), "content", [("scan_error", "error")]),
-        # 読み取り関数が契約（読めなければ None）を破って例外を投げても、握り潰さず検査不能を報告する
-        # （無条件に [] を返すと、検査したのか対象外だったのかが区別できない）。
-        ("get_staged_file_content", RuntimeError("boom"), "", [("scan_error", "error")]),
     ],
-    ids=["secret-scan", "lint-scan", "scan-target-detection", "file-read"],
+    ids=["secret-scan", "lint-scan"],
 )
 def test_find_file_issues_reports_stage_exception_as_scan_error(
     monkeypatch: pytest.MonkeyPatch, target: str, error: Exception, content: str, expected: list[tuple[str, str]]

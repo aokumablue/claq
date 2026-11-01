@@ -59,35 +59,30 @@ def _stdin_is_absent() -> bool:
         return True
     try:
         return bool(sys.stdin.isatty())
-    except (OSError, ValueError, AttributeError):
+    except (OSError, ValueError):
         return False
 
 
 def _stdin_chunk_reader(stdin_buffer: Any) -> Any:
-    """ワーカースレッドが使う「n バイト読む」関数を選ぶ。
+    """ワーカースレッドが使う「n バイト読む」関数を返す。
 
-    実 fd があるときは ``os.read()`` を使う。``read1()`` は BufferedReader のロックを
-    保持したままブロックするため、本スレッドがタイムアウトで先に進むと、終了時の
-    stdin 後始末がロックを取れず ``Fatal Python error: _enter_buffered_busy`` で
-    abort し、deny の exit code 2 が失われる。fd を持たないオブジェクト（テストの
-    フェイク・io.BytesIO 等）では ``read1()`` へ落とす。
+    ``os.read()`` で読む。``read1()`` は BufferedReader のロックを保持したままブロックするため、
+    本スレッドがタイムアウトで先に進むと、終了時の stdin 後始末がロックを取れず
+    ``Fatal Python error: _enter_buffered_busy`` で abort し、deny の exit code 2 が失われる。
 
     Args:
-        stdin_buffer: 読み取り対象のバイナリストリーム。
+        stdin_buffer: 読み取り対象のバイナリストリーム（``sys.stdin.buffer``）。
 
     Returns:
         ``reader(n) -> bytes`` の callable。
 
     Raises:
-        例外は発生しません。
+        StdinUnavailableError: fd を取れない（閉じた stdin など）場合。
     """
-    fileno = getattr(stdin_buffer, "fileno", None)
-    if fileno is None:
-        return stdin_buffer.read1
     try:
-        fd = fileno()
-    except (OSError, ValueError):
-        return stdin_buffer.read1
+        fd = stdin_buffer.fileno()
+    except (OSError, ValueError) as exc:
+        raise StdinUnavailableError(f"stdin の読み取りに失敗しました: {exc}") from exc
     return lambda size: os.read(fd, size)
 
 
@@ -116,24 +111,19 @@ def _pump_stdin(reader: Any, max_bytes: int, sink: queue.Queue) -> None:
             if not chunk:
                 return
             collected += len(chunk)
-    except (OSError, ValueError, AttributeError) as exc:
-        # AttributeError は `.buffer` があるのに `.read1` を持たない stdin
-        # （pytest の DontReadFromInput 等）。捕らえないとワーカー内で例外が消える。
+    except (OSError, ValueError) as exc:
         sink.put(("error", exc))
 
 
 def _read_stdin_bytes(max_bytes: int) -> bytes:
     """stdin から最大 `max_bytes` 分をバイト列として読みます。
 
-    ``.buffer`` があればワーカースレッド（`_pump_stdin`）へ read を隔離し、最初の
-    チャンクは STDIN_FIRST_BYTE_TIMEOUT 秒、以降は STDIN_READ_DEADLINE_SECONDS 秒の
-    予算で待つ。ワーカーは daemon なので、残ってもプロセス終了を妨げない。
-
-    ``.buffer`` が無い場合（io.StringIO 等）は文字数で読んで UTF-8 へ再エンコード
-    する。バイト上限を超えうるため、呼び出し側でバイト換算の切り詰めを行う。
+    ワーカースレッド（`_pump_stdin`）へ read を隔離し、最初のチャンクは
+    STDIN_FIRST_BYTE_TIMEOUT 秒、以降は STDIN_READ_DEADLINE_SECONDS 秒の予算で待つ。
+    ワーカーは daemon なので、残ってもプロセス終了を妨げない。
 
     Args:
-        max_bytes: 読み取る最大バイト数です（buffer 無し時は最大文字数）。
+        max_bytes: 読み取る最大バイト数です。
 
     Returns:
         読み取ったバイト列。1 バイト以上受け取った後にデッドライン超過・読み取り
@@ -141,19 +131,12 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
         後段が fail-closed に倒す）。
 
     Raises:
-        StdinUnavailableError: 1 バイトも受け取れないまま、読み取りが例外化
-            したか最初のバイトが時間内に届かなかった場合。
+        StdinUnavailableError: fd を取れない、または 1 バイトも受け取れないまま、読み取りが
+            例外化したか最初のバイトが時間内に届かなかった場合。
     """
-    stdin_buffer = getattr(sys.stdin, "buffer", None)
-    if stdin_buffer is None:
-        try:
-            return sys.stdin.read(max_bytes).encode("utf-8", errors="replace")
-        except (OSError, ValueError, AttributeError) as exc:
-            raise StdinUnavailableError(f"stdin の読み取りに失敗しました: {exc}") from exc
-
     sink: queue.Queue = queue.Queue()
     threading.Thread(
-        target=_pump_stdin, args=(_stdin_chunk_reader(stdin_buffer), max_bytes, sink), daemon=True
+        target=_pump_stdin, args=(_stdin_chunk_reader(sys.stdin.buffer), max_bytes, sink), daemon=True
     ).start()
 
     collected = b""

@@ -119,11 +119,6 @@ claq_mem_learn() {
     shift 2
   done
 
-  if [ -z "$card_kind" ] || [ -z "$card_title" ]; then
-    printf 'claq_mem_learn: --kind and --title are required\n' >&2
-    return 2
-  fi
-
   CLAQ_LEARN_KEY="$card_key" \
   CLAQ_LEARN_KIND="$card_kind" \
   CLAQ_LEARN_SCOPE="$card_scope" \
@@ -143,7 +138,7 @@ collect_skill_create_inputs() {
   local commits="${1:-200}"
 
   case "${commits}" in
-    ''|*[!0-9]*)
+    *[!0-9]*)
       printf '%s\n' "collect_skill_create_inputs: commits must be a positive integer: ${commits}" >&2
       return 2
       ;;
