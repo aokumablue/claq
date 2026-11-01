@@ -1,0 +1,42 @@
+{
+  "G1": {
+    "T1": {"ud": 0, "items": [], "control": null, "proposals": 0},
+    "T2": {"ud": 0, "items": [], "control": null, "proposals": 0},
+    "T3": {"ud": 0, "items": [], "control": null, "proposals": 1},
+    "T4": {"ud": 0, "items": [], "control": 1, "proposals": 0},
+    "T5": {"ud": 0, "items": [], "control": 1, "proposals": 0},
+    "T6": {"ud": 1, "items": ["stop_reason != end_turn で応答を拒否（RuntimeError）"], "control": null, "proposals": 1},
+    "T7": {"ud": 0, "items": [], "control": null, "proposals": 1},
+    "T8": {"ud": 3, "items": ["charset 未宣言時に utf-8 の既定値で続行", "decode の errors=\"replace\" で不正バイトを置換して続行", "stop_reason != end_turn で応答を拒否"], "control": 1, "proposals": 2}
+  },
+  "G2": {
+    "T1": {"ud": 0, "items": [], "control": null, "proposals": 0},
+    "T2": {"ud": 0, "items": [], "control": null, "proposals": 0},
+    "T3": {"ud": 0, "items": [], "control": null, "proposals": 2},
+    "T4": {"ud": 0, "items": [], "control": 1, "proposals": 0},
+    "T5": {"ud": 0, "items": [], "control": 1, "proposals": 0},
+    "T6": {"ud": 1, "items": ["stop_reason != end_turn で応答を拒否（RuntimeError）"], "control": null, "proposals": 1},
+    "T7": {"ud": 0, "items": [], "control": null, "proposals": 1},
+    "T8": {"ud": 2, "items": ["charset 未宣言時に utf-8 の既定値で続行", "stop_reason != end_turn で応答を拒否"], "control": 1, "proposals": 2}
+  },
+  "G3": {
+    "T1": {"ud": 0, "items": [], "control": null, "proposals": 1},
+    "T2": {"ud": 0, "items": [], "control": null, "proposals": 2},
+    "T3": {"ud": 0, "items": [], "control": null, "proposals": 2},
+    "T4": {"ud": 0, "items": [], "control": 1, "proposals": 0},
+    "T5": {"ud": 0, "items": [], "control": 1, "proposals": 2},
+    "T6": {"ud": 1, "items": ["stop_reason != end_turn で応答を拒否（SummaryError）"], "control": null, "proposals": 2},
+    "T7": {"ud": 0, "items": [], "control": null, "proposals": 1},
+    "T8": {"ud": 2, "items": ["get_content_charset(\"utf-8\") で charset 未宣言時に既定値で続行", "stop_reason != end_turn で応答を拒否（SummaryError）"], "control": 1, "proposals": 4}
+  },
+  "G4": {
+    "T1": {"ud": 0, "items": [], "control": null, "proposals": 0},
+    "T2": {"ud": 0, "items": [], "control": null, "proposals": 1},
+    "T3": {"ud": 1, "items": ["--tag の値にカンマを含むと argparse で拒否（_tag）"], "control": null, "proposals": 1},
+    "T4": {"ud": 0, "items": [], "control": 1, "proposals": 0},
+    "T5": {"ud": 0, "items": [], "control": 1, "proposals": 1},
+    "T6": {"ud": 1, "items": ["stop_reason != end_turn で応答を拒否（SummarizeError）"], "control": null, "proposals": 2},
+    "T7": {"ud": 0, "items": [], "control": null, "proposals": 2},
+    "T8": {"ud": 2, "items": ["charset 未宣言時に utf-8 の既定値で続行", "stop_reason != end_turn で応答を拒否（SummarizeError）"], "control": 1, "proposals": 4}
+  }
+}
