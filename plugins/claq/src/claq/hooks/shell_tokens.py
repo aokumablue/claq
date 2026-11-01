@@ -12,7 +12,7 @@ import shlex
 # 1 コマンドに許すシェルトークン数の上限。
 # 保護フックの走査時間を入力の大きさで抑え、hooks.json の timeout（15 秒）の内側に収める。
 # host が kill した hook は exit code を返さず silent fail-open になるため、超過は通さず
-# BLOCKED で返す（docs/adr/hook-failure-direction.md）。上限内の最悪の形（`git` 4,997 個を `\` で
+# BLOCKED で返す（docs/adr/hook-failure-direction.md）。測った形のうち最も遅いもの（`git` 4,997 個を `\` で
 # 2 方言にした `sh -c` を 3 つ束ねた 60KB）で、3 つの保護フックとも起動から終了まで 0.2 秒以下
 # （macOS・Python 3.14 で実測）。正当なシェルコマンドがこの規模になることは実務上ない。
 MAX_COMMAND_TOKENS = 5000

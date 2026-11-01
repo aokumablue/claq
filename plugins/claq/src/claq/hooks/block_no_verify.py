@@ -682,8 +682,8 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
             continue
         wrapper_command = extract_shell_wrapper_command(segment)
         # `sh -c '<巨大なコマンド>'` は外側が数トークンしか無く main() の予算検査を通過する。
-        # 再帰先を無予算で走らせると timeout で host に kill され silent fail-open になる
-        # ため、境界でも同じ上限を当て、超過は BLOCK へ倒す。
+        # `sh -c` で包むだけでトークン数の上限を素通りさせないため、境界でも同じ上限を当て、
+        # 超過は BLOCK へ倒す（`MAX_COMMAND_TOKENS` のコメント）。
         if wrapper_command is not None and (
             command_exceeds_scan_budget(wrapper_command)
             or has_bypass_flag(wrapper_command, _recursed=True, _inherited_prefix=_wrapper_prefix_tokens(segment))
