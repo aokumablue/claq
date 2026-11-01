@@ -99,12 +99,26 @@ class TestIterTranscripts:
         assert scanner.iter_transcripts([tmp_path], limit=10) == [target]
 
     def test_unstatable_path_is_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """stat に失敗するパスは飛ばす。"""
-        _write_transcript(tmp_path, "a.jsonl", ["a"])
-        monkeypatch.setattr(scanner, "is_trusted_transcript", lambda _path: True)
-        monkeypatch.setattr(Path, "stat", lambda self, **_kw: (_ for _ in ()).throw(OSError))
+        """stat に失敗するパスは飛ばす。
 
-        assert scanner.iter_transcripts([tmp_path], limit=10) == []
+        Python 3.12/3.13 の `Path.is_dir` は `Path.stat` を通るので、ルートの判定まで失敗させないよう
+        transcript ファイルだけを失敗させ、ループの中の stat が失敗したことを確かめる。
+        """
+        target = _write_transcript(tmp_path, "a.jsonl", ["a"])
+        monkeypatch.setattr(scanner, "is_trusted_transcript", lambda _path: True)
+        real_stat = Path.stat
+        hits: list[Path] = []
+
+        def _boom(self: Path, *args: object, **kwargs: object) -> object:
+            """transcript ファイルの stat だけを失敗させる。"""
+            if self == target:
+                hits.append(self)
+                raise OSError
+            return real_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", _boom)
+
+        assert (scanner.iter_transcripts([tmp_path], limit=10), bool(hits)) == ([], True)
 
 
 _LEAK = "<peer-broadcast>x</peer-broadcast>"

@@ -565,14 +565,20 @@ class TestTrustedTranscript:
     def test_owner_check_fails_closed_when_stat_fails(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """is_file() 通過後に stat() が失敗するなど、所有者を確認できない場合は信頼しないこと（race 耐性）。"""
         path = Path(_write_transcript(tmp_path, [_user("消えたファイル")]))
+        real_is_symlink, real_is_file = Path.is_symlink, Path.is_file
+        calls: list[Path] = []
 
         def _boom(self: Path, *args: object, **kwargs: object) -> object:
-            """stat() を常に失敗させる。"""
+            """stat() を常に失敗させ、呼ばれたことを記録する。"""
+            calls.append(self)
             raise OSError("stat failed")
 
+        # 3.12/3.13 の is_symlink/is_file は stat を通るので、それらは通して所有者の検査の stat だけを失敗させる
+        monkeypatch.setattr(Path, "is_symlink", lambda self: False if self == path else real_is_symlink(self))
+        monkeypatch.setattr(Path, "is_file", lambda self: True if self == path else real_is_file(self))
         monkeypatch.setattr(Path, "stat", _boom)
 
-        assert handoff_mod.is_trusted_transcript(path) is False
+        assert (handoff_mod.is_trusted_transcript(path), bool(calls)) == (False, True)
         assert build_handoff({"transcript_path": str(path)}) == ""
 
     def test_owner_check_is_skipped_where_uid_is_meaningless(

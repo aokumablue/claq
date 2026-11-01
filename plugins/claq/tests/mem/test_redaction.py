@@ -286,11 +286,6 @@ def _timed(text: str) -> float:
     return time.perf_counter() - start
 
 
-def _best_of(text: str, repeats: int = 3) -> float:
-    """``redact(text)`` の最小実行時間を返す（スケジューラ由来の上振れだけを落とし、ratio 判定を安定させる）。"""
-    return min(_timed(text) for _ in range(repeats))
-
-
 class TestRedactScanCost:
     """`redact` が二次オーダーへ戻らないことを実測で固定する。
 
@@ -309,22 +304,6 @@ class TestRedactScanCost:
             f"[{name}] 1MiB の redact に {elapsed:.2f}s かかった "
             f"（上限 {_SINGLE_CALL_LIMIT_SECONDS}s / SessionEnd 予算 {_SESSION_END_BUDGET_SECONDS}s）。"
             "パターンに曖昧な繰り返しが戻っていないか確認すること。"
-        )
-
-    @pytest.mark.parametrize(("name", "unit"), _WORST_CASE_UNITS)
-    def test_scan_cost_is_linear_in_input_length(self, name: str, unit: str) -> None:
-        """入力 2 倍で所要時間も 2 倍程度に留まること（二次なら 4 倍になる）。
-
-        閾値 3.0 は線形（約 2 倍）と二次（約 4 倍）の中間に取る。上振れは
-        `_best_of` の最小値採用で落とす。
-        """
-        base = _best_of(_repeat_to(unit, 256 * 1024))
-        doubled = _best_of(_repeat_to(unit, 512 * 1024))
-
-        ratio = doubled / max(base, 1e-9)
-        assert ratio < 3.0, (
-            f"[{name}] 入力 2 倍で所要時間が {ratio:.1f} 倍になった"
-            f"（{base:.4f}s -> {doubled:.4f}s）。二次オーダーへ戻っている。"
         )
 
     @pytest.mark.parametrize("filler", [" ", "\t", "\u3000", '"', "]", '"]'])

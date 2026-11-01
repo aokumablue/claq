@@ -161,9 +161,9 @@ def test_detect_git_hosting_service_survives_non_ascii_remote_url(tmp_path: Path
         capture_output=True,
     )
     script = (
-        "import locale, sys\n"
-        "assert locale.getpreferredencoding(False).lower() in ('us-ascii', 'ascii'), "
-        "locale.getpreferredencoding(False)\n"
+        "import codecs, locale, sys\n"
+        "enc = locale.getpreferredencoding(False)\n"
+        "assert codecs.lookup(enc).name == 'ascii', enc\n"
         "from claq.lib.git_hosting import detect_git_hosting_service\n"
         f"sys.stdout.write(detect_git_hosting_service(cwd={str(repo)!r}))\n"
     )

@@ -255,10 +255,10 @@ class TestPageCursor:
     @pytest.mark.parametrize(
         "mutate",
         [
-            lambda token: token[:-2] + ("AA" if token[-2:] != "AA" else "BB"),
-            lambda token: "x" + token,
-            lambda token: token.replace(".", ""),
-            lambda token: token + "\u3042",
+            lambda cursor: cursor[:-2] + ("AA" if cursor[-2:] != "AA" else "BB"),
+            lambda cursor: "x" + cursor,
+            lambda cursor: cursor.replace(".", ""),
+            lambda cursor: cursor + "\u3042",
         ],
         ids=["tampered-check", "tampered-body", "no-separator", "non-ascii"],
     )

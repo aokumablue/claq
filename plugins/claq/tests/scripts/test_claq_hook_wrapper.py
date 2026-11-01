@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -89,6 +90,22 @@ def _hijack_tree(tmp_path: Path) -> tuple[Path, Path]:
     return repo, _stub_dir(tmp_path, "empty-bin")
 
 
+def _unreadable_prefix(launcher: Path, variant: str) -> list[str]:
+    """unreadable のとき、launcher が本当に読めない状態で wrapper を起動するための前置きを返す。
+
+    root（CAP_DAC_OVERRIDE）は chmod 000 のファイルも読めるので、その場合は setpriv で
+    dac_override と dac_read_search を落とす。読めない状態を作れなければ skip する。
+    """
+    if variant != "unreadable" or not os.access(launcher, os.R_OK):
+        return []
+    setpriv = shutil.which("setpriv")
+    prefix = [setpriv, "--bounding-set=-dac_override,-dac_read_search", "--"] if setpriv else []
+    probe = subprocess.run([*prefix, "sh", "-c", 'test ! -r "$0"', str(launcher)], check=False)
+    if not prefix or probe.returncode != 0:
+        pytest.skip("読めない launcher を作れない（特権のあるプロセスで setpriv が使えない）")
+    return prefix
+
+
 def test_wrapper_is_executable() -> None:
     """wrapper に実行ビットが立っていること（配布物でも exec できる前提）。"""
     assert os.access(_WRAPPER, os.X_OK)
@@ -124,7 +141,7 @@ def test_wrapper_fails_open_when_launcher_is_unusable(tmp_path: Path, variant: s
     if variant == "bare_dollar0":
         result = _run_wrapper(env, cmd=["/bin/sh", copy.name, _HOOK], cwd=wrapper_dir)
     else:
-        result = _run_wrapper(env, cmd=[str(copy), _HOOK])
+        result = _run_wrapper(env, cmd=[*_unreadable_prefix(launcher, variant), str(copy), _HOOK])
 
     assert result.returncode == 0, f"deny に化けている: {result.returncode} / {result.stderr}"
     assert result.stdout == ""
@@ -212,8 +229,12 @@ def test_wrapper_probe_does_not_consume_the_hook_payload(tmp_path: Path) -> None
         "bin",
         python='if [ "$1" = "-c" ]; then cat >/dev/null; exit 0; fi\nprintf "payload=[%s]\\n" "$(cat)"',
     )
-    # スタブは `cat` を呼ぶので実在の /bin も足す。洗浄がフィルタであって置き換えではないことの確認も兼ねる。
-    result = _run_wrapper(_env(tmp_path, f"{bin_dir}:/bin"), stdin='{"tool_name":"Bash"}')
+    # スタブは `cat` を呼ぶので cat だけを置いた絶対ディレクトリも足す（/bin を足すと Linux では実在の
+    # python3 が先に選ばれる）。洗浄がフィルタであって置き換えではないことの確認も兼ねる。
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "cat").symlink_to(shutil.which("cat"))
+    result = _run_wrapper(_env(tmp_path, f"{bin_dir}:{tools}"), stdin='{"tool_name":"Bash"}')
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == 'payload=[{"tool_name":"Bash"}]'

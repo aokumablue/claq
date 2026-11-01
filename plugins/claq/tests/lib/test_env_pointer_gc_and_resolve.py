@@ -172,6 +172,8 @@ class TestGcRoots:
         claq_dir.mkdir()
         entry = claq_dir / f"{mod._ENV_TMP_PREFIX}statfail"
         entry.write_text("x\n", encoding="utf-8")
+        # 古くしておき、stat の失敗だけが削除を止めていることにする（新しいファイルは失敗が無くても残る）
+        _age(entry, _PAST_GRACE)
         real_stat = Path.stat
 
         def _boom_stat(self: Path, *args: object, **kwargs: object) -> object:
@@ -182,6 +184,7 @@ class TestGcRoots:
 
         monkeypatch.setattr(Path, "stat", _boom_stat)
         mod._gc_stale_temp_files(claq_dir, time.time())
+        monkeypatch.undo()
         assert entry.exists()
 
 

@@ -37,6 +37,20 @@ def _fresh_runpy_module(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_git_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """利用者の git 設定（ファイルと、GIT_CONFIG_COUNT 等の環境変数で渡す設定）をテストから切り離す。
+
+    `url.<base>.insteadOf` が環境変数で渡されると `git remote get-url` の結果が書き換わり、
+    remote を読むテストが利用者の環境で変わる。
+    """
+    for key in list(os.environ):
+        if key in {"GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"} or key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+@pytest.fixture(autouse=True)
 def _clear_host_marker_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """各テスト前後で host マーカー環境変数をクリアし、テスト間の漏れ込みを防ぐ。
 

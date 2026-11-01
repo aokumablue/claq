@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from collections import Counter
 from collections.abc import Callable
@@ -52,6 +53,29 @@ def _failing(method: str, should_fail: Callable[[Path], bool], exc: OSError) -> 
         return original(self, *args, **kwargs)
 
     return patch.object(Path, method, fake)
+
+
+def _vanishes_after_listing(should_fail: Callable[[Path], bool], hits: list[Path]) -> contextlib.ExitStack:
+    """一覧と ``is_dir`` は通り、``stat`` の時点で消えている候補を再現するパッチ（コンテキストマネージャ）。
+
+    3.12/3.13 の ``Path.is_dir`` は ``Path.stat`` を通るので、``stat`` だけを失敗させると候補は ``is_dir``
+    で落ち、``_mtime_or_none`` まで届かない。呼ばれた ``stat`` を ``hits`` に記録する。
+    """
+    real_is_dir, real_stat = Path.is_dir, Path.stat
+
+    def fake_stat(self: Path, *args: object, **kwargs: object) -> object:
+        """対象の self なら FileNotFoundError を送出し、それ以外は元の実装へ委ねる。"""
+        if should_fail(self):
+            hits.append(self)
+            raise FileNotFoundError(2, "gone")
+        return real_stat(self, *args, **kwargs)
+
+    stack = contextlib.ExitStack()
+    stack.enter_context(
+        patch.object(Path, "is_dir", lambda self, *a, **k: True if should_fail(self) else real_is_dir(self, *a, **k))
+    )
+    stack.enter_context(patch.object(Path, "stat", fake_stat))
+    return stack
 
 
 def _from_second_call(name: str) -> Callable[[Path], bool]:
@@ -140,15 +164,19 @@ class TestFindLatestInstalledClaq:
         survivor = _make_installed_plugin(tmp_path, "claq-survivor", 1_000)
         vanished = _make_installed_plugin(tmp_path, "claq-vanished", 2_000)
 
-        with _failing("stat", lambda path: path == vanished, FileNotFoundError(2, "gone")):
+        hits: list[Path] = []
+        with _vanishes_after_listing(lambda path: path == vanished, hits):
             assert mod.find_latest_installed_claq(tmp_path / ".grok" / "installed-plugins") == survivor
+        assert hits
 
     def test_all_candidates_vanished_returns_none(self, tmp_path: Path) -> None:
         """全候補の stat が失敗しても None を返す（IndexError にしない）。"""
         only = _make_installed_plugin(tmp_path, "claq-only")
 
-        with _failing("stat", lambda path: path == only, FileNotFoundError(2, "gone")):
+        hits: list[Path] = []
+        with _vanishes_after_listing(lambda path: path == only, hits):
             assert mod.find_latest_installed_claq(tmp_path / ".grok" / "installed-plugins") is None
+        assert hits
 
 
 @pytest.mark.parametrize(
