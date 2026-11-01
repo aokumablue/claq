@@ -57,7 +57,7 @@
 | L5 | maintain の「強化」使命と「最新プラクティス」観点 | 使命を「実害を直す」、観点を廃止 API・仕様の版ずれに絞った |
 | L6 | スキルを経由しない通常会話は CLAUDE.md しか効かない | SessionStart 注入を A/B で測った → **不採用**（下の測定） |
 | L7 | handoff 経由で「残セキュリティ課題」が次セッションへ持ち越される | コード読解でクローズ。引き継ぐのはユーザーの発話・変更したパス・ツール名だけ（`plugins/claq/src/claq/mem/handoff.py`）。残る経路は payload の明示の `handoff` キー（どの定義も設定していない）と `mem learn`（承認まで pending） |
-| L8 | `~/.claq/mem.db` の active カードに防御の一般則がある可能性 | **未確認（ローカル作業 1）** |
+| L8 | `~/.claq/mem.db` の active カードに防御の一般則がある可能性 | ローカルで確認してクローズ。active は 0 件（pending 91・archived 1）で、注入されるカードが無い（下の 10 章） |
 
 ## 3. 定義側の設計（cf51732）
 
@@ -207,3 +207,23 @@ ADR の再監査（e911735）:
 - html-gen はテンプレート一式と `references/tokens.json`・`fonts/` を一時ディレクトリへ複製して `python3 check_site.py <dir>` が PASS。app.js の挙動は Playwright で開いてコンソールエラーが無いことを見る（`measurements/pw_check.js`）
 - コミットメッセージに Co-Authored-By / Claude-Session の行を付ける運用。PR は依頼されたときだけ作る
 - ADR（`docs/adr/`）には経緯・測定の記録を置かない方針なので、測定の記録はこのフォルダに置いている
+
+## 10. ローカルでの結果（2026-11-02）
+
+8 章の作業をローカル（macOS・Python 3.14）で進めた結果。
+
+| 作業 | 判断 | 結果と理由 |
+|---|---|---|
+| L8 active カード | クローズ | active 0 件で外す対象なし。pending に防御寄りのカード `pitfall-a4485436`（二乗の入力から長さの上限を逆算する）があるが、注入されない。`promote` されれば注入経路になる |
+| T8 の採点基準 | 実施 | ページの作者を攻撃者として「攻撃者 → 入口 → 得るもの」を書けるので、取得のタイムアウト（全体の期限を含む）・本文サイズの上限・モデル出力の制御文字の除去を「数えない」へ移した。`errors="replace"`・URL スキームの限定・`stop_reason` による拒否は数えると明記した（`measurements/protocol.md`・`blind/rubric.md`）。プロンプトのパスは `/home/user/claq/` だった（`/tmp/claude-0/` は無かった）のでローカルへ置き換えた |
+| 採点し直し | 実施（作り直しなし） | 新しい乱数で伏せ直し、採点者 2 体（互いのファイルを読んでいないことをトランスクリプトで確認）。L6: A 2.4 → B 2.0 / 1.8 件/回で規則 1 を満たさず**不採用のまま**、注入は足さない。生成側: UD 課題平均 0.38〜0.50・統制 100% で**合格のまま**（`grade_*_v2.json`・`mapping*_v2.json`、`python3 tally.py l6|gen ...`）。結論が変わらないので回答は作り直していない |
+| Copilot CLI の C1 | 確認して報告 | Copilot CLI 1.0.79 で `--plugin-dir` に claq を読ませ、`CLAQ_HOME` をファイルに向けた。`-p`・対話とも、セッションは続き回答も出るが、画面への通知は無い。`~/.copilot/logs` に ERROR と stderr の 1 行目が残る。ADR（`hook-failure-direction.md`）に現行の状態として書いた。通知を出す手段を足すかは利用者の判断 |
+| Windows の計測 | 実行できず | このマシンに Windows・`pwsh`・VM が無い。代わりに macOS で測った（下の作業 7） |
+| reviewer の既定値 | クローズ | `reviewer_default_protocol.md` を固定して 3 回流し、別のエージェントが判定。3 回とも `request.args.get("q", "")` を HIGH 以上にせず、穴 2 つは毎回 CRITICAL、ハードニングの HIGH 以上は 0（`measurements/reviewer_default/`）。再現しないので reviewer.md は変えない |
+| `has_bypass_flag` の計算量 | 実施 | `sh -c` で最悪形を束ね、`\` で 2 方言にすると、上限内の 60KB の入力で block_no_verify が 15.84 秒（timeout 15 秒）。kill された hook は許可として扱われるので再現できる失敗。位置ごとの集計を 1 回の走査で作る形にし、判定は旧実装と 102 万件のランダム入力・既存テストの全呼び出しで不一致 0。同じ入力で 0.19 秒。最悪形の時間を縛るテストを置いた |
+
+残課題・提案:
+
+- **提案（採否は利用者）**: 線形になったので `MAX_COMMAND_TOKENS = 5000` の根拠（二次の走査）は弱まった。外すと 5,000 トークン超のコマンドが通るようになる判定の変更なので、今回は据え置いた
+- Windows での実測は未実施
+- Copilot CLI で SessionStart の失敗を利用者へ見せる手段は無い（ログだけ）
