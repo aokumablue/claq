@@ -26,7 +26,8 @@ from claq.lib.harness import normalize_tool_name
 _BLANKS = " \t\r"
 _WHITESPACE = _BLANKS + "\n"
 _COMMENT_STARTS = "#;"
-# MultiEdit の編集件数の上限。置換 1 件ごとに全文を走査するため、件数でも検査時間を抑える。
+# MultiEdit の編集件数の上限。置換 1 件ごとに全文を走査するため、件数でも検査時間を抑える
+# （上限が無いと 1 MiB の payload に 13,981 件入り、256 KiB の全文で 5.2 秒かかった。64 件なら数 ms）。
 _MAX_EDITS = 64
 
 # ホーム側の設定ファイル（全リポジトリのフックを一度に外せる）の表示名。XDG は

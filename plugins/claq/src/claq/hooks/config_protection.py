@@ -213,12 +213,10 @@ _TOX_COMMAND_KEY_PATTERN = re.compile(
     r"(?m)^[ \t]*(" + "|".join(re.escape(key) for key in _TOX_COMMAND_KEYS) + r")[ \t]*="
 )
 
-# `_text_has_protected_signal` が 1 回の判定で走査するテキストの上限バイト数。将来
-# パターンを足して同型の後退が再発しても保護が無効化されないよう、走査量に独立した
-# 天井を置く。超過時は True（＝ブロック）を返す。打ち切って走査を続けると、上限より
-# 後ろに lint キーを置くだけで素通りできる。条件付き保護対象へ 256KiB を超える単一
-# 書き込みを行う正当な操作は無い。
-_LINT_SIGNAL_MAX_TEXT_BYTES = 256 * 1024
+# git config・ホスト設定の置換前後の全文の上限。置換前はディスクから読むので stdin の上限が効かず、
+# 置換後は MultiEdit の replace_all を重ねると倍々に伸びる（`a`→`aa` を 20 回で 1 KiB が 1 GiB）。
+# 超えたら検査できないとして deny する（hook が host timeout で kill されると許可へ倒れるため）。
+_FULL_TEXT_MAX_BYTES = 256 * 1024
 
 
 def _match_path_segments(
@@ -453,21 +451,19 @@ def _text_has_protected_signal(text: str, file_name: str) -> bool:
 
     package.json は専用のキーを、tox.ini は実行コマンドのキー（見出しを伴わない値行編集でも
     検出するため）を、それ以外は共通のセクション見出しの部分一致またはキー行照合
-    （`ignore = [...]` 等）を見る。
-    `_LINT_SIGNAL_MAX_TEXT_BYTES` を超えるテキストは走査せず True を返す。
+    （`ignore = [...]` 等）を見る。テキストは stdin の payload から来るので、長さは stdin の上限
+    （超えたら deny）で抑えられている（1 MiB の走査で 25 ms 程度。線形）。
 
     Args:
         text: 検査対象テキスト。
         file_name: 判定対象のファイル名（basename）。
 
     Returns:
-        lint/format/coverage 設定を弱めうる兆候があれば True。上限超過も True。
+        lint/format/coverage 設定を弱めうる兆候があれば True。
 
     Raises:
         例外は発生しません。
     """
-    if len(text) > _LINT_SIGNAL_MAX_TEXT_BYTES:
-        return True
     # ファイル別分岐も畳んだ名前で選ぶ（``Package.json`` を専用のキー照合へ落とすため）。
     folded_name = normalize_protected_name(file_name)
     if folded_name == "package.json":
@@ -617,7 +613,7 @@ def _settings_unverifiable_message(file_name: str) -> str:
     return (
         f"BLOCKED: The change to {file_name} could not be verified: the result must be a plain JSON object "
         "(no comments, trailing commas, NaN/Infinity, or excessive nesting) within "
-        f"{_LINT_SIGNAL_MAX_TEXT_BYTES} bytes, built from a Write or an exact Edit/MultiEdit. "
+        f"{_FULL_TEXT_MAX_BYTES} bytes, built from a Write or an exact Edit/MultiEdit. "
         "Ask the user to make this change instead of working around the check."
     )
 
@@ -641,11 +637,11 @@ def _settings_block_reason(tool_name: str, container: Any, file_path: str, file_
     Raises:
         例外は発生しません。
     """
-    before = read_current_text(file_path, _LINT_SIGNAL_MAX_TEXT_BYTES + 1)
-    if len(before) > _LINT_SIGNAL_MAX_TEXT_BYTES:
+    before = read_current_text(file_path, _FULL_TEXT_MAX_BYTES + 1)
+    if len(before) > _FULL_TEXT_MAX_BYTES:
         return _settings_unverifiable_message(file_name)
-    after = git_config_text_after(tool_name, container, before, _LINT_SIGNAL_MAX_TEXT_BYTES)
-    if after is None or len(after) > _LINT_SIGNAL_MAX_TEXT_BYTES:
+    after = git_config_text_after(tool_name, container, before, _FULL_TEXT_MAX_BYTES)
+    if after is None or len(after) > _FULL_TEXT_MAX_BYTES:
         return _settings_unverifiable_message(file_name)
     # 深い入れ子は解析・直列化で RecursionError になる。貫通すると exit 1（PreToolUse では allow）。
     try:
@@ -730,7 +726,7 @@ def _git_config_unparsable_message(display_name: str) -> str:
     """
     return (
         f"BLOCKED: The change to {display_name} could not be verified: the resulting file does not "
-        f"parse as git config text, or the file or the result exceeds {_LINT_SIGNAL_MAX_TEXT_BYTES} bytes. "
+        f"parse as git config text, or the file or the result exceeds {_FULL_TEXT_MAX_BYTES} bytes. "
         "Refusing an unverifiable write rather than risking a git-hook bypass."
     )
 
@@ -755,13 +751,13 @@ def _git_config_block_reason(tool_name: str, container: Any, file_path: str, dis
     Raises:
         例外は発生しません。
     """
-    before = read_current_text(file_path, _LINT_SIGNAL_MAX_TEXT_BYTES + 1)
-    if len(before) > _LINT_SIGNAL_MAX_TEXT_BYTES:
+    before = read_current_text(file_path, _FULL_TEXT_MAX_BYTES + 1)
+    if len(before) > _FULL_TEXT_MAX_BYTES:
         return _git_config_unparsable_message(display_name)
-    after = git_config_text_after(tool_name, container, before, _LINT_SIGNAL_MAX_TEXT_BYTES)
+    after = git_config_text_after(tool_name, container, before, _FULL_TEXT_MAX_BYTES)
     if after is None:
         return _unverifiable_conditional_message(display_name)
-    if len(after) > _LINT_SIGNAL_MAX_TEXT_BYTES:
+    if len(after) > _FULL_TEXT_MAX_BYTES:
         return _git_config_unparsable_message(display_name)
     try:
         if adds_sensitive_entries(before, after, is_sensitive_config_key):

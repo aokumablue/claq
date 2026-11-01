@@ -19,8 +19,8 @@ _HOOKS_PATH_SECTION = "[core]\n\thooksPath = /dev/null\n"
 _ALIAS_CONFIG = "[core]\n\tbare = false\n[alias]\n\tci = commit\n" + _REMOTE_SECTION
 _TWO_ALIASES = "[alias]\n\ta = x\n\tb = x\n"
 _USER = "[user]\n\tname = x\n"
-# 走査上限（_LINT_SIGNAL_MAX_TEXT_BYTES）を超える長さの本文。
-_OVER_CAP = "# pad\n" * (config_protection._LINT_SIGNAL_MAX_TEXT_BYTES // 6 + 10)
+# 走査上限（_FULL_TEXT_MAX_BYTES）を超える長さの本文。
+_OVER_CAP = "# pad\n" * (config_protection._FULL_TEXT_MAX_BYTES // 6 + 10)
 
 
 @pytest.fixture(autouse=True)

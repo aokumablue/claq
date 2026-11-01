@@ -43,7 +43,7 @@ SessionStart context への永続注入を自己承認できてしまう。
 - `claq_mem_learn` は常に `source=agent` / `status=pending` で登録する
 - 昇格は `mem promote <key>`（人間が実行するコマンド）である。これは運用上の想定であり、技術的
   強制ではない。コードと文書は「人間承認のみ」という保証を主張しない
-- 昇格時に key / scope / source / 直前 status / uid を監査ログへ記録する。これは境界ではなく
+- 昇格時に key / scope / source / 直前 status / uid（Windows では利用者名）を監査ログへ記録する。これは境界ではなく
   事後追跡である
 
 `promote` 自体は引き続き agent が実行可能な CLI コマンドであり、「人間が意図して昇格コマンドを

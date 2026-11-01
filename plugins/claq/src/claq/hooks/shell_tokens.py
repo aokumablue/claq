@@ -13,14 +13,15 @@ import shlex
 # `block_no_verify` の走査はトークン数の二次で、上限が無いと stdin 上限の内側で
 # hooks.json の timeout（15 秒）を超える入力を作れる。host が kill した hook は
 # exit code を返さず silent fail-open になるため、超過は通さず BLOCKED で返す
-# （docs/adr/hook-failure-direction.md）。5,000 は timeout に対し 20 倍以上の余裕があり、
-# 正当なシェルコマンドがこの規模になることは実務上ない。
+# （docs/adr/hook-failure-direction.md）。最悪の形（`git ` を 4,999 個）で block_no_verify の起動から
+# 終了まで 4.9 秒（Linux・Python 3.13 で実測）で、timeout に対し約 3 倍の余裕。正当なシェルコマンドが
+# この規模になることは実務上ない。
 MAX_COMMAND_TOKENS = 5000
 
 # 1 コマンドに許すバイト数の上限。
 # 単一の巨大トークンはトークン数の上限を素通りするが、`shlex` の走査コストは
-# バイト数の二次で、1MB で timeout に迫る。64KB は timeout に対し 75 倍以上の余裕が
-# あり、トークン上限に収まる正当なコマンド（40KB 程度）を落とさない。
+# バイト数の二次で、1MB で timeout に迫る。64KB の 1 トークンは起動から終了まで 0.2 秒（実測）で、
+# トークン上限に収まる正当なコマンド（40KB 程度）を落とさない。
 MAX_COMMAND_BYTES = 64 * 1024
 
 # コマンド全体をセグメントに割るシェル区切りトークン。区切り文字に密着した

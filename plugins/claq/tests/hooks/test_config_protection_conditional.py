@@ -311,18 +311,8 @@ class TestLintKeyPatternIsLinear:
         assert bool(config_protection._LINT_KEY_PATTERN.search(text)) is expected
 
 
-@pytest.mark.parametrize(
-    ("excess", "expected"),
-    [
-        # 上限超過は走査せず True（ブロック）。打ち切って走査を続ける（truncate）形にすると、
-        # 上限より後ろに lint キーを置くだけで条件付き保護を素通りできるため fail-closed 側へ倒す。
-        pytest.param(1, True, id="over-cap-blocks-fail-closed"),
-        # 陰性対照: 上限を入れたことで「大きいだけの正当な書き込み」まで deny へ倒れていない。
-        pytest.param(-1, False, id="large-harmless-text-under-cap"),
-    ],
-)
-def test_lint_signal_text_length_cap(excess: int, expected: bool) -> None:
-    """`_text_has_protected_signal` は走査量の上限を超えるテキストを fail-closed で扱う。"""
-    text = "x" * (config_protection._LINT_SIGNAL_MAX_TEXT_BYTES + excess)
-
-    assert config_protection._text_has_protected_signal(text, "pyproject.toml") is expected
+def test_lint_signal_scans_the_whole_text() -> None:
+    """大きいだけのテキストは通し、末尾に置いた lint キーも見つける（長さの上限は stdin 側が持つ）。"""
+    padding = "x = 1\n" * 100_000
+    assert config_protection._text_has_protected_signal(padding, "pyproject.toml") is False
+    assert config_protection._text_has_protected_signal(padding + "[tool.ruff]\n", "pyproject.toml") is True
