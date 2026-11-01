@@ -225,6 +225,15 @@ class TestAdapters:
         assert seen == expected
         assert tokens == ["o:3", "o:6", None]
 
+    @pytest.mark.parametrize("page", ["o:-3", "o:x", "3", "o:3 "])
+    def test_search_rejects_foreign_page_token(
+        self, adapters: types.ModuleType, facade: types.SimpleNamespace, page: str
+    ) -> None:
+        """自分が返した形（`o:` と件数）でないトークンは 400 にする（既定の cursor は署名せず書き換えられる）。"""
+        with pytest.raises(facade.upstream.UpstreamError) as rejected:
+            _search(adapters, page=page)
+        assert rejected.value.status == 400
+
     def test_search_filters_and_sorts(self, adapters: types.ModuleType) -> None:
         """注文番号・顧客名の部分一致、状態、作成日時の範囲で絞り、合計の降順にも並べる。"""
         assert _search(adapters, text="ORD-2026-0007")[0] == ["ord_000007"]

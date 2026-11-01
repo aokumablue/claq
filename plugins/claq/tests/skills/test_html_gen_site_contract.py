@@ -16,7 +16,6 @@ import pytest
 from ._support import (
     _CHECK_SITE,
     _TEMPLATE,
-    _TOKENS,
     CSS,
     HTML,
     JS,
@@ -30,9 +29,9 @@ from ._support import (
 # --- テンプレート本体 -------------------------------------------------------
 
 
-def test_template_passes_validator() -> None:
-    """同梱テンプレートは shadcn/ui 契約検査に合格する。"""
-    assert check_site.validate_site(_TEMPLATE) == []
+def test_template_passes_validator(tmp_path: Path) -> None:
+    """同梱テンプレートを手順どおり tokens.json と一緒に複製すると、shadcn/ui 契約検査に合格する。"""
+    assert check_site.validate_site(_copy_site(tmp_path)) == []
 
 
 @pytest.mark.parametrize(
@@ -456,23 +455,22 @@ def test_cli_exit_codes(tmp_path: Path) -> None:
     _edit(broken, "styles.css", ("var(--ring)", "currentColor"))
     empty = tmp_path / "empty"
     empty.mkdir()
-    assert [check_site.main([str(site)]) for site in (_TEMPLATE, broken, empty)] == [0, 1, 2]
+    assert [check_site.main([str(site)]) for site in (_copy_site(tmp_path, "ok"), broken, empty)] == [0, 1, 2]
 
 
-def test_default_tokens_path_resolution(tmp_path: Path) -> None:
-    """サイト内の tokens.json を優先し、無ければ skill 側を辿る。"""
+def test_missing_tokens_json_is_usage_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """サイトに tokens.json が無ければ探しに行かず、原因を出して 2 を返す。"""
     dest = _copy_site(tmp_path)
-    assert check_site.default_tokens_path(dest) == dest / "tokens.json"
     (dest / "tokens.json").unlink()
-    with pytest.raises(FileNotFoundError):
-        check_site.default_tokens_path(dest)
-    assert check_site.default_tokens_path(_TEMPLATE) == _TOKENS
+    assert check_site.main([str(dest)]) == 2
+    assert "tokens.json" in capsys.readouterr().err
 
 
-def test_cli_runs_as_a_subprocess() -> None:
-    """スキルの手順どおり python3 で直接叩いても PASS する。"""
+def test_cli_runs_as_a_subprocess(tmp_path: Path) -> None:
+    """スキルの手順どおり複製したサイトに python3 で直接叩いても PASS する。"""
+    dest = _copy_site(tmp_path)
     result = subprocess.run(
-        [sys.executable, str(_CHECK_SITE), str(_TEMPLATE)], capture_output=True, text=True, check=False
+        [sys.executable, str(dest / "check_site.py"), str(dest)], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0
     assert "PASS" in result.stdout

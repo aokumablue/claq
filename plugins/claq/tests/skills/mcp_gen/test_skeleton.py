@@ -181,8 +181,6 @@ def test_guard_wiring_matches_signature(skeleton: Path) -> None:
     keywords = {item.arg: ast.unparse(item.value) for item in installed.keywords}
     (limiter,) = _calls(installed, "CallLimiter")
     expected = {"limiter": "CallLimiter(TOOL_CALLS_PER_WINDOW, TOOL_CALL_WINDOW_SECONDS)", "principal": "_principal"}
-    if skeleton == _OVERLAY:
-        expected["principal_errors"] = "(FacadeError,)"
     assert (
         [ast.unparse(argument) for argument in installed.args],
         required <= set(keywords) <= accepted,

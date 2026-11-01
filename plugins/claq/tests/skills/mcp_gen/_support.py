@@ -31,7 +31,6 @@ _FACADE_MODULES = (
     "shaping",
     "catalog",
     "upstream",
-    "principal",
     "limits",
     "breaker",
     "signed_cursor",

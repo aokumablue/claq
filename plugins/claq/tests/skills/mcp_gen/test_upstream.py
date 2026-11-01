@@ -81,9 +81,9 @@ class TestUpstream:
         assert message(error(403)) == message(error(404))
 
     def test_detail_is_safe_to_log(self, facade: types.SimpleNamespace) -> None:
-        """detail は制御文字と CR/LF を除き、200 文字に切ってから持つ（例外の文面も同じ）。"""
+        """detail は制御文字と CR/LF を除いてから持つ（例外の文面も同じ）。"""
         error = facade.upstream.UpstreamError(502, "bad\r\ngateway\x1b[2J\x00" + "x" * 300)
-        assert error.detail == ("badgateway[2J" + "x" * 300)[:200]
+        assert error.detail == "badgateway[2J" + "x" * 300
         assert "\n" not in str(error) and "\r" not in str(error) and "\x1b" not in str(error)
         assert str(error) == f"upstream status=502 {error.detail}"
 
@@ -108,27 +108,25 @@ class TestUpstream:
             (404, None, {}, []),
             (429, 1.5, {"attempts": 2}, [1.5]),
             (503, None, {"deadline": 100.1, "clock": _Clock(100.0)}, []),
-            (429, 5.1, {}, []),
-            (429, 5.0, {"attempts": 2}, [5.0]),
-            (429, 1.0, {"max_retry_after": 0.5}, []),
-            (429, -1.0, {}, []),
+            (429, 30.0, {"attempts": 2}, [30.0]),
+            (429, 30.0, {"deadline": 120.0, "clock": _Clock(100.0)}, []),
+            (429, -1.0, {"attempts": 2}, [0.0]),
             (429, math.nan, {}, []),
         ],
         ids=[
             "not-retryable",
             "attempts-exhausted-after-retry-after",
             "deadline-exceeded",
-            "retry-after-over-default-cap",
-            "retry-after-at-default-cap",
-            "retry-after-over-given-cap",
-            "retry-after-negative",
+            "long-retry-after-within-deadline",
+            "retry-after-beyond-deadline",
+            "retry-after-negative-is-no-wait",
             "retry-after-nan",
         ],
     )
     def test_retry_gives_up(
         self, facade: types.SimpleNamespace, status: int, retry_after: float | None, options: dict[str, Any], delays: list[float]
     ) -> None:
-        """再試行しない失敗・回数切れ・締切越え・上限（既定 5 秒）を超える・負や NaN の retry_after では、その失敗を投げて諦める。待ちは上流の retry_after に従う。"""
+        """再試行しない失敗・回数切れ・締切越え・NaN の retry_after では、その失敗を投げて諦める。待ちは上流の retry_after に従い（負は 0）、上限は締切だけが決める。"""
         error = facade.upstream.UpstreamError(status, retry_after=retry_after)
         sleeper = _Sleeper()
         with pytest.raises(facade.upstream.UpstreamError) as raised:

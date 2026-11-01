@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -295,7 +296,10 @@ class OrdersApi:
             matched.sort(key=lambda raw: -raw["data"]["attributes"]["grandTotal"]["value"])
         else:
             matched.sort(key=_created_at, reverse=sort == "ordered_at_desc")
-        # page は署名付きの cursor から戻した、この偽物自身が返したトークン（`o:` と件数）
+        # page は cursor から戻した値で、既定の cursor は署名しないので利用者が書き換えられる。
+        # この偽物が返す形（`o:` と件数）以外は条件の誤りとして拒否する（`o:-3` は末尾から行を返す）
+        if page is not None and not re.fullmatch(r"o:\d+", page):
+            raise UpstreamError(400, "orders search: bad page token")
         offset = int((page or "o:0").removeprefix("o:"))
         page = matched[offset : offset + page_size]
         has_next = offset + page_size < len(matched)

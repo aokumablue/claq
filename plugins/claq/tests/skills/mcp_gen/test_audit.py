@@ -1,4 +1,4 @@
-"""facade/principal.py（呼び出しの主体の決定）と、upstream-protection-overlay の facade/audit_log.py（監査ログ）のテスト。"""
+"""upstream-protection-overlay の facade/audit_log.py（監査ログ）のテスト。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import hashlib
 import hmac
 import logging
 import types
-from collections.abc import Callable
 
 import pytest
 
@@ -14,33 +13,8 @@ from ._support import _AUDIT_SECRET, _audit_log, _logged
 
 
 def _never() -> str:
-    """呼ばれたら落とす（引いてはいけない主体・OS の利用者名の代わり）。"""
+    """呼ばれたら落とす（引いてはいけない主体の代わり）。"""
     raise AssertionError("引いてはいけない主体を引きました")
-
-
-class TestPrincipal:
-    """呼び出しの主体の決定。"""
-
-    @pytest.mark.parametrize(
-        ("environ", "getuser", "expected"),
-        [({"FACADE_PRINCIPAL": "alice"}, _never, "alice"), ({}, lambda: "bob", "bob"), ({"FACADE_PRINCIPAL": ""}, lambda: "bob", "bob")],
-        ids=["configured-wins", "unset-uses-os-user", "empty-uses-os-user"],
-    )
-    def test_resolve_principal(self, facade: types.SimpleNamespace, environ: dict[str, str], getuser: Callable[[], str], expected: str) -> None:
-        """FACADE_PRINCIPAL があれば OS の利用者名を引かずにその値を、無い・空なら OS の利用者名を返す。"""
-        assert facade.principal.resolve_principal(environ, getuser=getuser) == expected
-
-    @pytest.mark.parametrize("error", [OSError("no user"), KeyError("uid"), ImportError("pwd")])
-    def test_resolve_principal_unknown_raises_facade_error(self, facade: types.SimpleNamespace, error: Exception) -> None:
-        """OS の利用者名も引けなければ（3.12 の KeyError・ImportError を含む）、FACADE_PRINCIPAL の設定を促す FacadeError にする。"""
-
-        def failing() -> str:
-            """利用者名を引けない。"""
-            raise error
-
-        with pytest.raises(facade.errors.FacadeError, match="FACADE_PRINCIPAL") as unknown:
-            facade.principal.resolve_principal({}, getuser=failing)
-        assert unknown.value.__cause__ is error
 
 
 class TestAuditLog:

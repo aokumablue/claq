@@ -49,7 +49,7 @@
   }
 
   const savedBase = read(BASE_KEY);
-  if (savedBase && /^[a-z-]+$/.test(savedBase)) {
+  if (savedBase) {
     root.dataset.base = savedBase;
   }
 
@@ -313,7 +313,7 @@
    */
   const revealOnScroll = () => {
     const targets = document.querySelectorAll(".reveal:not([data-animate-skip])");
-    if (reduced.matches || !("IntersectionObserver" in window)) return;
+    if (reduced.matches) return;
     const pending = new Set();
 
     const play = (element) => {
@@ -419,7 +419,6 @@
     document.querySelectorAll("table[data-list]").forEach((table) => {
       const body = table.tBodies[0];
       const rows = [...body.rows];
-      if (!rows.length) return;
       const name = table.caption ? table.caption.textContent.trim() : "一覧";
       const haystack = new Map(rows.map((row) => [row, fold(row.textContent)]));
 

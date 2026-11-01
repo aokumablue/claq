@@ -46,6 +46,11 @@ class TestNormalizeInputSchema:
         schema = {"type": "object", "properties": {"title": {"type": "string", "title": "Title"}}}
         assert guard.normalize_input_schema(schema)["properties"] == {"title": {"type": "string"}}
 
+    def test_keeps_boolean_subschemas(self, guard: types.ModuleType) -> None:
+        """真偽値のスキーマ（任意の値を許す `true`）は落とさない（落とすと引数を禁止してしまう）。"""
+        schema = {"type": "object", "properties": {"extra": True, "a": {"title": "A", "type": "string"}}}
+        assert guard.normalize_input_schema(schema)["properties"] == {"extra": True, "a": {"type": "string"}}
+
     def test_recurses_into_items_and_defs(self, guard: types.ModuleType) -> None:
         """配列の要素と `$defs` の中も整える。"""
         schema = {
@@ -131,18 +136,6 @@ class TestRejection:
         """引数を取らないツールでは「使える引数: なし」と示す。"""
         assert "なし" in guard.rejection(["x"], [], server_name="s", server_version="1")["content"][0]["text"]
 
-    def test_rejection_bounds_echoed_names(self, guard: types.ModuleType) -> None:
-        """名指しする未知の引数は先頭の数件に絞り、長い名前は切り詰める（要求の文字列をそのまま返さない）。"""
-        long_name = "a" * 500
-        unknown = [long_name, "b", "c", "d", "e", "omitted_f", "omitted_g"]
-        text = guard.rejection(unknown, ["status"], server_name="s", server_version="1")["content"][0]["text"]
-        assert "a" * guard.ECHOED_NAME_MAX_CHARS + "…" in text
-        assert "a" * (guard.ECHOED_NAME_MAX_CHARS + 1) not in text
-        assert all(name in text for name in ["b", "c", "d", "e"])
-        assert "omitted" not in text
-        assert "ほか 2 個" in text
-        assert len(text) < 300
-
 
 class TestCallLimiter:
     """主体 × ツールの呼び出しの回数を、全キー共通の固定窓で数える。"""
@@ -195,14 +188,10 @@ class _FakeServer:
         ]
 
 
-class _PrincipalUnknown(Exception):
-    """主体を決められないことを表す、テスト用の宣言済みの失敗。"""
-
-
-def _installed(guard: types.ModuleType, limiter: Any, principal: Any = lambda: "alice", principal_errors: Any = ()) -> Any:
+def _installed(guard: types.ModuleType, limiter: Any, principal: Any = lambda: "alice") -> Any:
     """ガードを掛けたサーバの middleware を返す。後続の呼び出しは middleware.calls に記録する。"""
     server = _FakeServer()
-    guard.install_guard(server, limiter=limiter, principal=principal, principal_errors=principal_errors)
+    guard.install_guard(server, limiter=limiter, principal=principal)
     calls: list[Any] = []
     middleware = server.middleware[0]
 
@@ -299,32 +288,6 @@ class TestInstalledGuard:
         send("tools/call", _tool_call("orders_search", ["not", "a", "mapping"]))
         send("tools/call", _tool_call("orders_search", {"stauts": "open"}))
         assert send("tools/call", _tool_call("orders_search", {})).get("isError") is not True
-
-    def test_declared_principal_error_returns_tool_error(self, guard: types.ModuleType) -> None:
-        """主体を決められない失敗が宣言した型なら、その文面の isError を返し、後続へ渡さない。"""
-
-        def principal() -> str:
-            """主体を決められない。"""
-            raise _PrincipalUnknown("主体を決められません。運用者に連絡してください。")
-
-        send = _installed(guard, guard.CallLimiter(1, 60.0, clock=_Clock()), principal, (_PrincipalUnknown,))
-        outcome = send("tools/call", _tool_call("orders_search", {}))
-        assert (outcome["isError"], outcome["content"][0]["text"], send.calls) == (
-            True,
-            "主体を決められません。運用者に連絡してください。",
-            [],
-        )
-
-    def test_undeclared_principal_error_propagates(self, guard: types.ModuleType) -> None:
-        """宣言していない型の失敗は、そのまま投げる（プログラムの誤りを結果に変えない）。"""
-
-        def principal() -> str:
-            """宣言外の失敗を投げる。"""
-            raise RuntimeError("bug")
-
-        send = _installed(guard, guard.CallLimiter(1, 60.0, clock=_Clock()), principal, (_PrincipalUnknown,))
-        with pytest.raises(RuntimeError):
-            send("tools/call", _tool_call("orders_search", {}))
 
 
 def test_limited_is_tool_execution_error(guard: types.ModuleType) -> None:

@@ -33,10 +33,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from mcp.server import MCPServer
 
-# 拒否の文面で名指しする未知の引数の数と、1 つの名前の長さの上限（要求の文字列をそのまま返さない）
-ECHOED_NAMES = 5
-ECHOED_NAME_MAX_CHARS = 64
-
 
 class CallLimiter:
     """主体 × ツールの呼び出しの回数を、全キー共通の固定窓で数える。
@@ -92,7 +88,6 @@ def install_guard(
     *,
     limiter: CallLimiter,
     principal: Callable[[], str],
-    principal_errors: tuple[type[Exception], ...] = (),
 ) -> None:
     """ガードを middleware の末尾に登録する。
 
@@ -100,8 +95,6 @@ def install_guard(
         server: ガードを掛けるサーバ。
         limiter: 主体 × ツールの呼び出しの制限。
         principal: 呼び出しの主体を返す関数（ツール引数から取らない）。
-        principal_errors: principal が主体を決められないときに投げる型。これらはその文面の
-            `isError` で返す。それ以外の例外はそのまま投げる。
     """
 
     async def guard(ctx: Any, call_next: Callable[[Any], Awaitable[Any]]) -> Any:
@@ -115,9 +108,7 @@ def install_guard(
             後続の処理の結果、または呼び出しを断る結果。
         """
         if ctx.method == "tools/call" and isinstance(ctx.params, Mapping):
-            refused = await _refuse_call(
-                server, ctx.params, limiter=limiter, principal=principal, principal_errors=principal_errors
-            )
+            refused = await _refuse_call(server, ctx.params, limiter=limiter, principal=principal)
             if refused is not None:
                 return refused
         result = await call_next(ctx)
@@ -138,7 +129,6 @@ async def _refuse_call(
     *,
     limiter: CallLimiter,
     principal: Callable[[], str],
-    principal_errors: tuple[type[Exception], ...],
 ) -> dict[str, Any] | None:
     """呼び出しを後続へ渡さずに断るなら、その結果を返す。
 
@@ -150,7 +140,6 @@ async def _refuse_call(
         params: `tools/call` の検証前のパラメータ。
         limiter: 主体 × ツールの呼び出しの制限。
         principal: 呼び出しの主体を返す関数。
-        principal_errors: principal が主体を決められないときに投げる型。
 
     Returns:
         断る結果。後続へ渡すなら None。
@@ -165,32 +154,11 @@ async def _refuse_call(
     unknown = sorted(set(arguments) - set(allowed))
     if unknown:
         return rejection(unknown, allowed, server_name=server.name, server_version=server.version)
-    try:
-        caller = principal()
-    except principal_errors as error:
-        return tool_error(str(error), server_name=server.name, server_version=server.version)
-    if limiter.admit(caller, tool.name):
+    if limiter.admit(principal(), tool.name):
         return None
     return limited(
         tool.name, limiter.calls, limiter.window_seconds, server_name=server.name, server_version=server.version
     )
-
-
-def _echoed(names: list[str]) -> str:
-    """拒否の文面で名指しする未知の引数を、先頭の数件と切り詰めた名前にする。
-
-    Args:
-        names: 未知の引数名。
-
-    Returns:
-        読点でつないだ名前（残りがあれば件数を添える）。
-    """
-    shown = [
-        name if len(name) <= ECHOED_NAME_MAX_CHARS else name[:ECHOED_NAME_MAX_CHARS] + "…"
-        for name in names[:ECHOED_NAMES]
-    ]
-    rest = len(names) - len(shown)
-    return "、".join(shown) + (f" ほか {rest} 個" if rest else "")
 
 
 def rejection(unknown: list[str], allowed: list[str], *, server_name: str, server_version: str) -> dict[str, Any]:
@@ -206,7 +174,7 @@ def rejection(unknown: list[str], allowed: list[str], *, server_name: str, serve
         `isError: true` の CallToolResult（JSON の形）。
     """
     names = "、".join(allowed) if allowed else "なし"
-    text = f"未知の引数 {_echoed(unknown)} は受け付けません。使える引数: {names}。綴りを確かめて呼び直してください。"
+    text = f"未知の引数 {'、'.join(unknown)} は受け付けません。使える引数: {names}。綴りを確かめて呼び直してください。"
     return tool_error(text, server_name=server_name, server_version=server_version)
 
 
@@ -289,7 +257,10 @@ def _normalize_node(node: dict[str, Any]) -> dict[str, Any]:
     for key in ("properties", "$defs"):
         children = node.get(key)
         if isinstance(children, dict):
-            node[key] = {name: _normalize_node(child) for name, child in children.items() if isinstance(child, dict)}
+            # 真偽値のスキーマ（`true`/`false`）は整える部分が無いのでそのまま残す（落とすと引数を禁止してしまう）
+            node[key] = {
+                name: _normalize_node(child) if isinstance(child, dict) else child for name, child in children.items()
+            }
     items = node.get("items")
     if isinstance(items, dict):
         node["items"] = _normalize_node(items)

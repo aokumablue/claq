@@ -19,7 +19,6 @@ from adapters import JST, STATUS_CODES, OrdersApi, ShipmentsApi, normalize_order
 from facade.catalog import PATH_MAX_CHARS, PATH_PATTERN, Catalog, FieldSpec
 from facade.cursor import PageCursor, query_fingerprint
 from facade.errors import FacadeError
-from facade.principal import resolve_principal
 from facade.shaping import MORE_SUFFIX, compact_json, fit_page, fit_view, project
 from facade.upstream import UpstreamError, call_with_deadline, fan_out, model_message
 from guard import CallLimiter, install_guard
@@ -55,18 +54,15 @@ logger = logging.getLogger(__name__)
 
 
 def _principal() -> str:
-    """呼び出しの主体を返す（`FACADE_PRINCIPAL`、無ければ OS の利用者名）。
+    """呼び出しの主体を返す（受信側のレート制限を主体ごとに数えるため）。
 
-    stdio では起動した利用者。リモートで OAuth を入れたら、検証済みのアクセストークンの
-    主体に置き換える（ツール引数から取らない）。
+    stdio と、認証の無いループバックの HTTP では、呼び出し元は 1 人なので固定の値でよい。
+    リモートで認証を入れたら、検証済みのアクセストークンの主体に置き換える（ツール引数から取らない）。
 
     Returns:
         主体の識別子。
-
-    Raises:
-        FacadeError: FACADE_PRINCIPAL が無く、OS の利用者名も引けないとき。
     """
-    return resolve_principal()
+    return "local"
 
 
 def _allowed_sensitivity() -> set[str]:
@@ -156,14 +152,8 @@ mcp = MCPServer(
     # 項目カタログは静的で全員に同じなので public。スコープで一覧を絞るなら private にする。
     cache_hints={"tools/list": CacheHint(ttl_ms=300_000, scope="public")},
 )
-# 未知の引数の拒否・主体 × ツールの呼び出しの制限・公開する inputSchema の整形（guard.py）。
-# 主体を決められない失敗（FacadeError）は、その文面の isError で返す。
-install_guard(
-    mcp,
-    limiter=CallLimiter(TOOL_CALLS_PER_WINDOW, TOOL_CALL_WINDOW_SECONDS),
-    principal=_principal,
-    principal_errors=(FacadeError,),
-)
+# 未知の引数の拒否・主体 × ツールの呼び出しの制限・公開する inputSchema の整形（guard.py）
+install_guard(mcp, limiter=CallLimiter(TOOL_CALLS_PER_WINDOW, TOOL_CALL_WINDOW_SECONDS), principal=_principal)
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 SEARCH_CURSOR = PageCursor(

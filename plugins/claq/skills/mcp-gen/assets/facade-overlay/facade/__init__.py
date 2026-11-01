@@ -4,7 +4,6 @@
 - `shaping`: 入れ子を保った射影・配列の上限・文字数の予算・自由記述の無害化
 - `catalog`: 項目カタログ（fields_describe と項目パスの検証）
 - `upstream`: 上流の失敗の分類・モデル向けの文面・再試行・締切付きの呼び出し・ファンアウト
-- `principal`: 呼び出しの主体の決定
 - `errors`: モデルに読ませる失敗 `FacadeError`
 
 上流の契約に上限がある・共有のリモート（複数の主体）のときは、upstream-protection-overlay の

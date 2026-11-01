@@ -312,17 +312,6 @@ def load_tokens(tokens_path: Path) -> dict[str, Any]:
     return json.loads(tokens_path.read_text(encoding="utf-8"))
 
 
-def default_tokens_path(site_dir: Path) -> Path:
-    """サイトディレクトリから tokens.json を探す。"""
-    direct = site_dir / "tokens.json"
-    if direct.is_file():
-        return direct
-    sibling = site_dir.parent.parent / "references" / "tokens.json"
-    if sibling.is_file():
-        return sibling
-    raise FileNotFoundError(f"tokens.json が見つからない: {site_dir}")
-
-
 def base_ids(tokens: dict[str, Any]) -> tuple[str, ...]:
     """定義済みのベースカラー識別子を宣言順で返す。"""
     return tuple(tokens["bases"])
@@ -598,7 +587,7 @@ def _is_javascript_url(value: str) -> bool:
 def validate_site(site_dir: Path, tokens: dict[str, Any] | None = None) -> list[str]:
     """サイトが shadcn/ui の契約を満たすかを検査し、違反メッセージを返す。"""
     if tokens is None:
-        tokens = load_tokens(default_tokens_path(site_dir))
+        tokens = load_tokens(site_dir / "tokens.json")
     paths = {name: site_dir / name for name in ("index.html", "styles.css", "tokens.css", "app.js")}
     missing = [name for name, path in paths.items() if not path.is_file()]
     if missing:
@@ -1564,7 +1553,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     site_dir = Path(args.site).resolve()
     try:
-        tokens = load_tokens(default_tokens_path(site_dir))
+        tokens = load_tokens(site_dir / "tokens.json")
     except FileNotFoundError as err:
         print(err, file=sys.stderr)
         return 2

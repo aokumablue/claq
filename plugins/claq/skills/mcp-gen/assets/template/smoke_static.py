@@ -25,8 +25,6 @@ FORBIDDEN_PATTERN = re.compile(
     r"|elicitationId|-32002|notifications/(initialized|elicitation/complete)|ctx\.elicit(_url)?\("
     r"|ctx\.(log|info|debug|warning|error)\(|send_log_message\(|create_message\(|list_roots\("
 )
-# 旧仕様の名前を探すファイルの大きさの上限。超えるファイルは読まずに WARN で知らせる。
-MAX_SCANNED_BYTES = 1024 * 1024
 # 生成先の外から来たファイル（仮想環境・依存・キャッシュ）は見ない。SDK 自身が旧名を含むため。
 SKIPPED_DIRS = frozenset(
     {"__pycache__", ".venv", "venv", "site-packages", ".git", "node_modules", ".pytest_cache", ".ruff_cache",
@@ -35,7 +33,7 @@ SKIPPED_DIRS = frozenset(
 
 
 def _read_lines(path: Path) -> list[str]:
-    """通常のファイルだけを、大きさの上限の内で読んで行に分ける。
+    """通常のファイルだけを読んで行に分ける。
 
     シンボリックリンク・FIFO などは開かない（FIFO を開くと書き手が来るまで止まる）。
 
@@ -46,21 +44,19 @@ def _read_lines(path: Path) -> list[str]:
         ファイルの行。
 
     Raises:
-        OSError: 通常のファイルでない・上限を超える・読めないとき（文面に理由を書く）。
+        OSError: 通常のファイルでない・読めないとき（文面に理由を書く）。
         UnicodeDecodeError: UTF-8 として読めない（バイナリの）とき。
     """
     status = os.lstat(path)
     if not stat.S_ISREG(status.st_mode):
         raise OSError("通常のファイルではない")
-    if status.st_size > MAX_SCANNED_BYTES:
-        raise OSError(f"{MAX_SCANNED_BYTES} バイトを超える")
     return path.read_text(encoding="utf-8").splitlines()
 
 
 def legacy_api_hits(root: Path, *, skip: Iterable[Path]) -> tuple[list[str], list[str]]:
     """root 以下のテキストファイルから、旧仕様の API 名・機構に当たる行を集める。
 
-    バイナリ（.pyc など）は黙って飛ばす。通常のファイルでない・大きすぎる・読めない
+    バイナリ（.pyc など）は黙って飛ばす。通常のファイルでない・読めない
     ファイルは、走査しなかったものとして返す（黙って飛ばすと、見ていないのに合格になる）。
 
     Args:

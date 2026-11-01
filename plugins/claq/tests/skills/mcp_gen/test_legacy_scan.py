@@ -46,14 +46,12 @@ class TestLegacyApiScan:
 
     @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO を作れない OS")
     def test_reports_files_it_did_not_scan(self, smoke_static: types.ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """通常のファイルでない（FIFO・シンボリックリンク）・大きすぎる・読めないファイルは、開かずに走査しなかったものとして返す。"""
+        """通常のファイルでない（FIFO・シンボリックリンク）・読めないファイルは、開かずに走査しなかったものとして返す。"""
         legacy = "Fast" + "MCP\n"
         (tmp_path / "server.py").write_text(legacy, encoding="utf-8")
         os.mkfifo(tmp_path / "pipe")
         (tmp_path / "link.py").symlink_to(tmp_path / "server.py")
-        (tmp_path / "big.txt").write_text(legacy * 10, encoding="utf-8")
         (tmp_path / "locked.txt").write_text(legacy, encoding="utf-8")
-        monkeypatch.setattr(smoke_static, "MAX_SCANNED_BYTES", len(legacy))
         original = Path.read_text
 
         def read_text(self: Path, *args: Any, **kwargs: Any) -> str:
@@ -65,9 +63,9 @@ class TestLegacyApiScan:
         monkeypatch.setattr(Path, "read_text", read_text)
         hits, unscanned = smoke_static.legacy_api_hits(tmp_path, skip=(tmp_path / "smoke_check.py",))
         assert hits == ["server.py:1: " + legacy.strip()]
-        assert [entry.split(" ")[0] for entry in unscanned] == ["big.txt", "link.py", "locked.txt", "pipe"]
-        assert "通常のファイルではない" in unscanned[1] and "通常のファイルではない" in unscanned[3]
-        assert "Permission denied" in unscanned[2]
+        assert [entry.split(" ")[0] for entry in unscanned] == ["link.py", "locked.txt", "pipe"]
+        assert "通常のファイルではない" in unscanned[0] and "通常のファイルではない" in unscanned[2]
+        assert "Permission denied" in unscanned[1]
 
     def test_no_legacy_api_warns_unscanned(self, smoke_check: types.ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
         """smoke_check.py のディレクトリを、検査自身の 2 ファイル（smoke_check.py と smoke_static.py）を除いて走査する。

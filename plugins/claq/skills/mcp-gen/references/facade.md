@@ -23,7 +23,6 @@
 | `shaping` | `project`（入れ子を保った射影）、`fit_items`（予算に収まる件数）、`fit_page`（一覧の 1 ページを予算に収め、続きの位置を cursor に封じる）、`fit_view`（取得の結果を予算に収め、超えたら summary に落とす）、`clean_text`（上流の文字列の無害化）、`compact_json` |
 | `catalog` | `FieldSpec` と `Catalog`（`fields_describe`・ビュー・検索の要約の項目・項目パスの検証。`personal_paths` は upstream-protection-overlay の監査ログ用） |
 | `upstream` | `UpstreamError`、`model_message`、`call_with_retry`、`call_with_deadline`（再試行と締切をまとめた 1 回の呼び出し）、`fan_out` |
-| `principal` | `resolve_principal`（呼び出しの主体） |
 | `errors` | `FacadeError`（部品が投げる、モデルに読ませる失敗） |
 
 上流の契約にレート制限・同時実行の上限があるとき、または共有のリモート（複数の主体）のときは、
@@ -117,9 +116,8 @@ upstream-protection-overlay の部品（遮断器・クォータ・同時実行�
 
 ## 主体
 
-- 主体は `resolve_principal` で決める（stdio では `FACADE_PRINCIPAL`、無ければ OS の利用者名。stdio の主体は
-  起動した利用者そのものだから。どちらも無ければ失敗にする）。リモートでは検証済みのアクセストークンの主体に置き換える。
-  ツール引数から取らない。
+- 主体は server.py の `_principal()` で決める（stdio と認証の無いループバックでは呼び出し元が 1 人なので固定値）。
+  リモートでは検証済みのアクセストークンの主体に置き換える。ツール引数から取らない。
 - 主体は受信側のレート制限（`CallLimiter`）の単位に使う。共有のリモートで個人情報を返したことを
   記録するなら、upstream-protection-overlay の `AuditLog` を足す。
 
@@ -141,8 +139,7 @@ upstream-protection-overlay の部品（遮断器・クォータ・同時実行�
 - `call_with_retry` で再試行するのは、冪等な読み取りの一時的な失敗（429・502・503・504 と、
   status が None の失敗＝接続失敗・呼び出しごとのタイムアウト）だけ。429・503 は上流が再試行を求める応答で、
   残りは冪等な読み取りなら繰り返しても結果が変わらないため。500 などは再試行しない。
-  上流の `retry_after` に従うが、`max_retry_after`（既定 5 秒）を超える待ち・負や NaN の待ちと、
-  締切を越える待ちはせずに失敗を返す。
+  上流の `retry_after` に従い（負は待たない）、締切を越える待ちと NaN の待ちはせずに失敗を返す。
 - 上流のパスやクエリ言語（OData の `$filter`・JQL・SQL など）へ、モデルの入力を文字列で
   連結しない。構造化したパラメータで渡し、ID は `pattern` で縛り、行の認可の条件をモデルの
   入力と同じ式に連結しない。
@@ -179,8 +176,7 @@ upstream-protection-overlay の部品（遮断器・クォータ・同時実行�
 | 500 などその他・ツール全体の締切超え | 一時的に取得できない | 時間を置いて呼び直す |
 
 上流の詳細（`UpstreamError` の `detail`）は運用者のログにだけ出す。`detail` には URL の
-クエリ・ヘッダ・応答本文を入れない（`UpstreamError` は構築時に制御文字と改行を除き、
-200 文字に切る）。
+クエリ・ヘッダ・応答本文を入れない（`UpstreamError` は構築時に制御文字と改行を除く）。
 
 ## 上流のデータの扱い
 

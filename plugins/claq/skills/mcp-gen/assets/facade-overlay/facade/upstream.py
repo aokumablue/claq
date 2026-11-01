@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import time
 import unicodedata
@@ -15,7 +16,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
-DETAIL_MAX_CHARS = 200
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 def _loggable(detail: str) -> str:
     """detail を、ログに出してよい形にする。
 
-    制御文字（CR/LF を含む）・書式文字などの C 区分の文字を除き（ログの行の偽造と端末の
-    制御列を防ぐ）、`DETAIL_MAX_CHARS` 文字に切る。
+    制御文字（CR/LF を含む）・書式文字などの C 区分の文字を除く（ログの行の偽造と端末の
+    制御列を防ぐ）。
 
     Args:
         detail: 運用者向けの詳細。
@@ -32,7 +32,7 @@ def _loggable(detail: str) -> str:
     Returns:
         整えた詳細。
     """
-    return "".join(char for char in detail if not unicodedata.category(char).startswith("C"))[:DETAIL_MAX_CHARS]
+    return "".join(char for char in detail if not unicodedata.category(char).startswith("C"))
 
 
 class UpstreamError(Exception):
@@ -54,7 +54,7 @@ class UpstreamError(Exception):
 
         Args:
             status: HTTP ステータス。接続の失敗・タイムアウトは None。
-            detail: 運用者向けの詳細。制御文字を除き、200 文字に切って持つ。
+            detail: 運用者向けの詳細。制御文字を除いて持つ。
             retry_after: 上流が示した再試行までの秒数。
         """
         self.status = status
@@ -98,7 +98,6 @@ async def call_with_retry[T](
     attempts: int = 3,
     base_delay: float = 0.2,
     max_delay: float = 2.0,
-    max_retry_after: float = 5.0,
     deadline: float,
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
@@ -109,7 +108,7 @@ async def call_with_retry[T](
     再試行するのは `retryable` な `UpstreamError` だけ。出所: 429・503 は HTTP の契約で再試行を
     求める応答（Retry-After）で、502・504・接続失敗は冪等な読み取りなら繰り返しても結果が変わらない。
     再試行するたびに警告ログを残す（続行したことを運用者に見せる）。
-    上流の `retry_after` があればそれに従う。ただし `max_retry_after` を超える待ちと、
+    上流の `retry_after` があればそれに従う（負の値は過去の時刻を指すので待たない）。
     締切を越える待ちはせずに諦める。
 
     Args:
@@ -117,7 +116,6 @@ async def call_with_retry[T](
         attempts: 最大の試行回数（初回を含む）。
         base_delay: 最初の待ち時間（秒）。
         max_delay: 待ち時間の上限（秒）。
-        max_retry_after: 上流の `retry_after` に従って待つ上限（秒）。超えるなら待たずに失敗を投げる。
         deadline: 締切（`clock` と同じ基準の時刻）。
         sleep: 待つ関数。
         clock: 単調増加する現在時刻を返す関数。
@@ -136,11 +134,13 @@ async def call_with_retry[T](
             if not error.retryable or attempt == attempts - 1:
                 raise
             delay = error.retry_after
-            # 負・NaN・上限超えの待ちは上流の誤りとして諦める（NaN は比較がすべて偽になり、ここで落ちる）。
-            if delay is not None and not 0 <= delay <= max_retry_after:
-                raise
             if delay is None:
                 delay = min(max_delay, base_delay * 2**attempt) * (0.5 + jitter() / 2)
+            elif math.isnan(delay):
+                # NaN は締切との比較がすべて偽になり、締切を越えて待ってしまう
+                raise
+            else:
+                delay = max(0.0, delay)
             if clock() + delay >= deadline:
                 raise
             logger.warning(
