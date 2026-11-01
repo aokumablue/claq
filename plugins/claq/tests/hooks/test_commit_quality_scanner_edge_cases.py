@@ -132,10 +132,8 @@ def test_find_file_issues_binary_file_skips_lint_but_still_scans_secrets(monkeyp
             'console.log("hi")',  # nosec
             [("console.log", "warning"), ("scan_error", "error")],  # nosec
         ),
-        # lint は false negative のコストが secret ほど高くないため warning に留め、secret 側は生存する。
-        ("_scan_lint_issues", ValueError("boom"), _API_KEY_LINE, [("scan_error", "warning"), ("secret", "error")]),
     ],
-    ids=["secret-scan", "lint-scan"],
+    ids=["secret-scan"],
 )
 def test_find_file_issues_reports_stage_exception_as_scan_error(
     monkeypatch: pytest.MonkeyPatch, target: str, error: Exception, content: str, expected: list[tuple[str, str]]

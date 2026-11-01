@@ -5,57 +5,12 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import warnings
 from pathlib import Path
 
 import pytest
 
 from claq.lib import git_hosting
-from claq.lib.git_hosting import _remote_host, detect_git_hosting_service, normalize_git_hosting_service
-
-
-def _invalid(value: str, fallback: str) -> str:
-    """不正値の警告文を返す。"""
-    return f"Invalid git-hosting-service '{value}', falling back to '{fallback}'"
-
-
-@pytest.mark.parametrize(
-    ("value", "default", "expected", "warning"),
-    [
-        ("github", None, "github", None),
-        ("gitlab", None, "gitlab", None),
-        ("unknown", None, "github", _invalid("unknown", "github")),
-        ("gitlab", "invalid", "gitlab", None),
-        ("unknown", "also-invalid", "github", _invalid("unknown", "github")),
-        ("unknown", "gitlab", "gitlab", _invalid("unknown", "gitlab")),
-        ("", "github", "github", None),
-        ("", "gitlab", "gitlab", None),
-        ("", "bad-default", "github", None),
-        (None, "bad-default", "github", None),
-    ],
-    ids=[
-        "github",
-        "gitlab",
-        "invalid-uses-github-default",
-        "valid-overrides-invalid-default",
-        "invalid-with-invalid-default",
-        "invalid-uses-given-default",
-        "empty-with-github-default",
-        "empty-with-gitlab-default",
-        "empty-with-invalid-default",
-        "none-with-invalid-default",
-    ],
-)
-def test_normalize_git_hosting_service(
-    value: str | None, default: str | None, expected: str, warning: str | None
-) -> None:
-    """有効値はそのまま、空・不正値は default（これも不正なら github）。警告は値が空でなく不正なときだけ（default=None は引数省略）。"""
-    kwargs = {} if default is None else {"default": default}
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        assert normalize_git_hosting_service(value, **kwargs) == expected
-
-    assert [(w.category, str(w.message)) for w in caught] == ([(UserWarning, warning)] if warning else [])
+from claq.lib.git_hosting import _remote_host, detect_git_hosting_service
 
 
 @pytest.mark.parametrize(
@@ -87,22 +42,22 @@ def test_remote_host_is_extracted(url: str, expected: str) -> None:
         ("https://github.com/owner/repo.git", 0, "github"),
         ("git@gitlab.com:group/repo.git", 0, "gitlab"),
         ("https://gitlab.example.com/group/repo.git", 0, "gitlab"),
-        ("https://bitbucket.org/owner/repo.git", 0, "github"),  # 未対応は default
-        ("", 1, "github"),  # git 失敗は default
+        ("https://bitbucket.org/owner/repo.git", 0, None),  # 未対応は不明
+        ("", 1, None),  # origin が無い・git 失敗は不明
         # リポジトリ名に他方の名前を含んでも誤判定しない（判定はホスト部だけ）
         ("https://github.com/acme/gitlab-migration.git\n", 0, "github"),
         ("https://gitlab.com/acme/github-mirror.git\n", 0, "gitlab"),
         # scp 形式の自前 GitLab（urlsplit だけで済ませると host が取れず既定へ落ちる）
         ("git@gitlab.example.com:group/repo.git\n", 0, "gitlab"),
         ("ssh://git@gitlab.example.com:2222/group/repo.git\n", 0, "gitlab"),
-        # ホストを取り出せない形は default（ローカルパスは hosting service ではない）
-        ("/srv/git/gitlab/repo.git\n", 0, "github"),
+        # ホストを取り出せない形は不明（ローカルパスは hosting service ではない）
+        ("/srv/git/gitlab/repo.git\n", 0, None),
     ],
 )
 def test_detect_git_hosting_service_infers_from_remote_host(
-    monkeypatch: pytest.MonkeyPatch, stdout: str, returncode: int, expected: str
+    monkeypatch: pytest.MonkeyPatch, stdout: str, returncode: int, expected: str | None
 ) -> None:
-    """`git remote get-url origin` の出力のホスト部から hosting service を推測する。"""
+    """`git remote get-url origin` の出力のホスト部から hosting service を推測する（推測できなければ None）。"""
     monkeypatch.setattr(
         git_hosting, "run_text", lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, returncode, stdout, "")
     )
@@ -110,18 +65,30 @@ def test_detect_git_hosting_service_infers_from_remote_host(
     assert detect_git_hosting_service() == expected
 
 
-@pytest.mark.parametrize("error", [OSError("git not found"), subprocess.TimeoutExpired("git", 5)])
-def test_detect_git_hosting_service_handles_subprocess_errors(
-    monkeypatch: pytest.MonkeyPatch, error: Exception
-) -> None:
-    """git を起動できない・時間切れなら default を返す。"""
+def _raiser(error: Exception) -> object:
+    """呼ばれたら ``error`` を送出する run_text の代わりを返す。"""
 
     def raiser(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         """``error`` を送出する。"""
         raise error
 
-    monkeypatch.setattr(git_hosting, "run_text", raiser)
-    assert detect_git_hosting_service() == "github"
+    return raiser
+
+
+def test_detect_git_hosting_service_without_git_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """git が無ければ不明（None）を返す。"""
+    monkeypatch.setattr(git_hosting, "run_text", _raiser(FileNotFoundError("git")))
+    assert detect_git_hosting_service() is None
+
+
+@pytest.mark.parametrize("error", [PermissionError("git"), subprocess.TimeoutExpired("git", 5)])
+def test_detect_git_hosting_service_propagates_other_failures(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    """起動できない（git 不在以外）・時間切れは、既定値で続けずにそのまま伝える。"""
+    monkeypatch.setattr(git_hosting, "run_text", _raiser(error))
+    with pytest.raises(type(error)):
+        detect_git_hosting_service()
 
 
 def test_detect_git_hosting_service_accepts_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -55,18 +55,6 @@ _FIXED_STATUS = "pending"
 DEFAULT_CONFIDENCE = 0.5
 """``confidence`` 未指定時の確信度。"""
 
-#: title / body に許すバイト数の上限。
-#:
-#: 注入側は `strip_tags` を**全長**に対して走らせてから 200 文字判定で捨てるため、
-#: 巨大な body は SessionStart（同期フック）の遅延に直結する。
-#:
-#: **先に切り詰めてはならない。** `handoff._sanitize_compact` が明記するとおり、
-#: `redact` より先に切るとシークレットが分断され、断片がマスクされずに残る。
-#: よって入口で受け付けない側で塞ぐ。知識カードは人間が読む要約なので、この上限が
-#: 正当な入力を落とすことは実務上ない。
-MAX_TITLE_BYTES = 4 * 1024
-MAX_BODY_BYTES = 64 * 1024
-
 _ASCII_ALNUM_RE = re.compile(r"[A-Za-z0-9]")
 _KEY_HASH_LENGTH = 8
 _MIN_KEY_SLUG_LENGTH = 3
@@ -307,22 +295,6 @@ def _stripped_optional(value: Any) -> str | None:
     return keep_allowed_chars(optional_str(value) or "") or None
 
 
-def _reject_oversized(text: str, field: str, limit: int) -> None:
-    """文字列が上限バイト数を超えていたら ``KnowledgeInputError`` を送出する。
-
-    Args:
-        text: 検査対象
-        field: エラーメッセージへ出すフィールド名
-        limit: 許すバイト数
-
-    Raises:
-        KnowledgeInputError: 上限を超えた場合。
-    """
-    size = len(text.encode("utf-8", "surrogatepass"))
-    if size > limit:
-        raise KnowledgeInputError(f"learn: {field} が大きすぎます（{size:,} バイト > {limit:,}）")
-
-
 def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     """JSON ペイロードを検証済みの ``KnowledgeDraft`` へ変換する。
 
@@ -354,7 +326,6 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     # `- [kind] title` の 1 行として描かれる契約なので、改行が残ると 1 枚のカードが
     # 複数行に割れ、偽の知識カード行を注入枠の内側に作れる（実測済み）。
     title = " ".join(keep_allowed_chars(str(payload.get("title") or "")).split())
-    _reject_oversized(title, "title", MAX_TITLE_BYTES)
     if not title:
         raise KnowledgeInputError("learn: title は必須です")
 
@@ -371,7 +342,6 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     # upsert で別の知識を黙って上書きする。
     key = slug_with_hash_fallback(redact_knowledge_text(raw_key), kind) if raw_key else generate_key(title, kind)
     body = keep_allowed_chars(str(payload.get("body") or ""))
-    _reject_oversized(body, "body", MAX_BODY_BYTES)
 
     source_ref = _stripped_optional(payload.get("source_ref"))
     domain = _stripped_optional(payload.get("domain"))

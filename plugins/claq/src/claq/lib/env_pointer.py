@@ -315,13 +315,10 @@ def _maybe_run_gc(claq_dir: Path, roots_dir: Path, *, keep_pids: frozenset[int])
     try:
         if stamp.stat().st_mtime > _now() - _GC_THROTTLE_SECONDS:
             return
-    except OSError:
-        pass
+    except FileNotFoundError:
+        pass  # 初回はスタンプが無い
 
-    try:
-        stamp.touch()
-    except OSError:
-        pass
+    stamp.touch()
 
     _gc_roots(roots_dir, keep_pids=keep_pids)
     _gc_stale_temp_files(claq_dir, _now())

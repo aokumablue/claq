@@ -28,11 +28,10 @@ from claq.ci.harness_audit_utils import (
 from claq.ci.harness_audit_utils import (
     read_text as read_text,
 )
-from claq.lib.git_hosting import (
-    detect_git_hosting_service,
-    get_git_hosting_service_label,
-    normalize_git_hosting_service,
-)
+from claq.lib.git_hosting import SERVICE_LABELS, detect_git_hosting_service
+
+# origin からホスティングを判定できないときの表示名。
+_UNKNOWN_HOSTING_LABEL = "Git hosting（origin から判定できず）"
 
 CATEGORIES = [
     "Tool Coverage",
@@ -146,8 +145,19 @@ def parse_args(argv: Sequence[str] | None = None) -> dict[str, Any]:
     return parsed
 
 
-def _hosting_layout(root_dir: str | Path, hosting_service: str) -> tuple[str, str, bool, bool]:
-    """consumer 向けの (CI パス, セキュリティパス, CI 有無, セキュリティポリシー有無) を返す。"""
+def _hosting_layout(root_dir: str | Path, hosting_service: str | None) -> tuple[str, str, bool, bool]:
+    """consumer 向けの (CI パス, セキュリティパス, CI 有無, セキュリティポリシー有無) を返す。
+
+    ホスティングが不明なら、GitHub と GitLab のどちらの置き場所でも満たしたとみなす。
+    """
+    if hosting_service is None:
+        github, gitlab = _hosting_layout(root_dir, "github"), _hosting_layout(root_dir, "gitlab")
+        return (
+            f"{github[0]} / {gitlab[0]}",
+            f"{github[1]} / {gitlab[1]}",
+            github[2] or gitlab[2],
+            github[3] or gitlab[3],
+        )
     if hosting_service == "gitlab":
         return (
             ".gitlab-ci.yml",
@@ -307,10 +317,14 @@ def _consumer_security_checks(
     ]
 
 
-def get_consumer_checks(root_dir: str | Path, git_hosting_service: str = "github") -> list[dict[str, Any]]:
-    """consumer project 向けのチェック定義を、カテゴリ順に連結して返す。"""
-    hosting_service = normalize_git_hosting_service(git_hosting_service)
-    hosting_label = get_git_hosting_service_label(hosting_service)
+def get_consumer_checks(root_dir: str | Path, hosting_service: str | None) -> list[dict[str, Any]]:
+    """consumer project 向けのチェック定義を、カテゴリ順に連結して返す。
+
+    Args:
+        root_dir: 監査対象のルート。
+        hosting_service: `github` / `gitlab`、または判定できなかったときの None。
+    """
+    hosting_label = SERVICE_LABELS[hosting_service] if hosting_service else _UNKNOWN_HOSTING_LABEL
     ci_path, security_path, ci_pass, security_pass = _hosting_layout(root_dir, hosting_service)
     return [
         *_consumer_tool_checks(root_dir),

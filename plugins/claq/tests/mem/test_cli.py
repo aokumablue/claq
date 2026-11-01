@@ -48,22 +48,23 @@ class TestSessionStartContract:
         assert _session_start_event(stdout) == "SessionStart"
         assert (tmp_path / "mem.db").exists()
 
-    def test_swallows_db_failure(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """コンテキスト組み立てが失敗してもフックを壊さず JSON を返す。"""
+    def test_build_failure_is_reported_with_empty_stdout(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """コンテキストの組み立てに失敗したら、stdout を空にして exit 1 と stderr の原因で知らせる。
+
+        Claude Code は正しい JSON を出すと終了コードを見ずに成功扱いにするので、失敗時は JSON を出さない
+        （空の stdout と exit 1 なら、セッションは続き、利用者に hook error の通知が出る）。
+        """
         stub = _raising(RuntimeError("db broken"))
         monkeypatch.setattr(cmd_context, "_build_context", stub)
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert len(stub.calls) == 1
-        assert (stderr, exit_code) == ("", 0)
-        assert _session_start_event(stdout) == "SessionStart"
+        assert (stdout, stderr, exit_code) == ("", "コマンド context 失敗: db broken\n", 1)
 
 
 class TestFailurePaths:
-    """失敗経路の終了コード: SessionStart（context）は 0 を維持し、それ以外（init）は 1 で報告する。"""
+    """失敗経路は、SessionStart（context）もそれ以外（init）も、stdout を空にして exit 1 で報告する。"""
 
-    @pytest.mark.parametrize(
-        ("command", "exit_code_on_failure"), [("context", 0), ("init", 1)], ids=["session-start", "normal"]
-    )
+    @pytest.mark.parametrize("command", ["context", "init"], ids=["session-start", "normal"])
     @pytest.mark.parametrize(
         ("extra", "target", "error", "expected"),
         [
@@ -80,20 +81,15 @@ class TestFailurePaths:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
         command: str,
-        exit_code_on_failure: int,
         extra: list[str],
         target: str | None,
         error: Exception | None,
         expected: str,
     ) -> None:
-        """どの失敗経路でも原因を stderr へ 1 行出し、DB を作らない。
+        """どの失敗経路でも原因を stderr へ 1 行出し、stdout を空にして exit 1 で終え、DB を作らない。
 
-        SessionStart は非 0 を返すとセッション全体がエラー扱いになるため、`finally` で契約の
-        JSON を出し切って 0 を維持する（`hooks.json` の argv は固定なので引数エラーは実運用で
-        到達しないが、経路ごとの例外は作らない）。黙って抜けると記憶注入が失われたこと自体に
-        気づけないので stderr には必ず出す。SessionStart 以外は 1 で報告する（`failure_exit_code`
-        の集約が「全部 0 にする」変更になっていないことの退行防止）。typo の位置引数を無視すると
-        `init unexpected` が exit 0 で DB を再作成し、呼出元が失敗を検知できない。
+        SessionStart で JSON を出すと Claude Code は成功扱いにして通知を出さないので、失敗時は出さない。
+        typo の位置引数を無視すると `init unexpected` が exit 0 で DB を再作成し、呼出元が失敗を検知できない。
         """
         stub = _raising(error) if error is not None else None
         if target == "settings":
@@ -103,12 +99,8 @@ class TestFailurePaths:
 
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, [command, *extra])
 
-        assert exit_code == exit_code_on_failure
+        assert (stdout, exit_code) == ("", 1)
         assert stderr == expected.format(command=command) + "\n"
-        if command == "context":
-            assert _session_start_event(stdout) == "SessionStart"
-        else:
-            assert stdout == ""
         if stub is not None:
             assert len(stub.calls) == 1
         assert not (tmp_path / "mem.db").exists()
@@ -217,16 +209,14 @@ class TestArgvAndStdin:
         [
             ("", {}),
             ("   ", {}),
-            ("[1, 2]", {}),
-            ("{ broken", {}),
             ('{"cwd": "/tmp"}', {"cwd": "/tmp"}),
         ],
-        ids=["empty", "blank", "non-dict", "broken-json", "dict"],
+        ids=["empty", "blank", "dict"],
     )
     def test_read_stdin_json_parses_bounded_reader_output(
         self, monkeypatch: pytest.MonkeyPatch, raw: str, expected: dict
     ) -> None:
-        """read_raw_stdin() を 1 回だけ呼び、dict の JSON だけを返し、空・非 dict・不正 JSON は空 dict に落とす。
+        """read_raw_stdin() を 1 回だけ呼び、dict の JSON を返し、空は空 dict にする。
 
         sys.stdin.read() は EOF まで無期限ブロックしうる（context は launcher の in-process
         実行で host の実 pipe を直接読む）ため、到着と読み取り全体に上限を持つ
@@ -237,6 +227,17 @@ class TestArgvAndStdin:
         monkeypatch.setattr(cli, "read_raw_stdin", lambda: calls.append(1) or raw)
         assert cli._read_stdin_json() == expected
         assert calls == [1]
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [("[1, 2]", "JSON object ではありません"), ("{ broken", "JSON として読めません")],
+        ids=["non-dict", "broken-json"],
+    )
+    def test_read_stdin_json_rejects_non_object(self, monkeypatch: pytest.MonkeyPatch, raw: str, expected: str) -> None:
+        """JSON object として読めない stdin は CommandError にする（learn に「title は必須」と誤った文面を出さない）。"""
+        monkeypatch.setattr(cli, "read_raw_stdin", lambda: raw)
+        with pytest.raises(command_support.CommandError, match=expected):
+            cli._read_stdin_json()
 
     def test_positionals_flags_and_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """位置引数・真偽フラグ・値付きオプションを分離する。"""

@@ -41,18 +41,12 @@ def _run_commands(root: Path, **kwargs: bool) -> int:
         pytest.param(_run_commands, "commands", id="commands"),
     ],
 )
-def test_missing_dir_fails_unless_optional(
+def test_missing_dir_fails(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], run: Callable[..., int], label: str
 ) -> None:
-    """対象ディレクトリの欠落は既定で失敗し、optional=True のときだけスキップして 0 を返すこと。
-
-    無条件スキップで exit 0 にすると、ディレクトリを消す・改名するだけで
-    検証チェーン全体が「成功」を報告できてしまう。
-    """
+    """対象ディレクトリの欠落は失敗すること（消す・改名するだけで検証チェーン全体が成功を報告しないように）。"""
     assert run(tmp_path) == 1
     assert f"{label} ディレクトリが見つかりません" in capsys.readouterr().err
-    assert run(tmp_path, optional=True) == 0
-    assert "--optional 指定のため検証をスキップします" in capsys.readouterr().out
 
 
 # --- validate_agents ---------------------------------------------------------
@@ -115,13 +109,14 @@ def test_validate_agents_reports_every_broken_file(
 
     assert validate_agents.validate_agents(tmp_path / "agents") == 1
     stderr = capsys.readouterr().err
-    assert "フロントマターがありません" in stderr
+    assert "フロントマターが無いか、解析できません" in stderr
     assert "ファイルの読み取りに失敗しました" in stderr
 
 
-def test_extract_frontmatter_lenient_parsing() -> None:
-    """コロンの無い行は読み飛ばし、トップレベルが辞書でなければ None を返すこと。"""
-    assert extract_frontmatter("---\nname: x\nnocolon\n---\nbody") == {"name": "x"}
+def test_extract_frontmatter_rejects_malformed_or_non_mapping() -> None:
+    """解釈できない行を含む・トップレベルが辞書でない frontmatter は None（不合格）にすること。"""
+    assert extract_frontmatter("---\nname: x\n---\nbody") == {"name": "x"}
+    assert extract_frontmatter("---\nname: x\nnocolon\n---\nbody") is None
     assert extract_frontmatter("---\n- item\n---\nbody") is None
 
 
@@ -156,7 +151,7 @@ _SKILL_HEAD = "---\nname: planner\ndescription: 説明\n"
     [
         pytest.param(None, "broken/ - SKILL.md が見つかりません", id="no-skill-md"),
         # agents と同じく frontmatter を検査する（「存在する・読める・空でない」だけでは非対称）。
-        pytest.param("# heading only\n", "フロントマターがありません", id="no-frontmatter"),
+        pytest.param("# heading only\n", "フロントマターが無いか、解析できません", id="no-frontmatter"),
         pytest.param("---\nname: half\n---\n\n# Half\n", "description がありません", id="no-description"),
         # ホストは真の bool しか見ない。"true" / yes / 1 は宣言したつもりで効かず、
         # disable-model-invocation が効かなければスラッシュ起動専用の skill が自動発火へ戻る。
@@ -311,16 +306,6 @@ def test_validate_commands_resolves_relative_dirs_via_root_dir(
 
     assert validate_commands.validate_commands(tmp_path, "commands", "agents", "skills") == 0
     assert "1 個のコマンドファイルを検証しました" in capsys.readouterr().out
-
-
-def test_validate_commands_main_accepts_optional_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """CLI からも `--optional` でスキップできること。"""
-    argv = ["--optional", "--root-dir", str(tmp_path)]
-    for name in ("commands", "agents", "skills"):
-        argv += [f"--{name}-dir", str(tmp_path / name)]
-
-    assert validate_commands.main(argv) == 0
-    assert "--optional 指定のため検証をスキップします" in capsys.readouterr().out
 
 
 # --- CLI エントリポイント -----------------------------------------------------

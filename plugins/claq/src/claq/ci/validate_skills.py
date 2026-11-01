@@ -66,7 +66,7 @@ def _validate_skill_dir(directory: Path) -> bool:
     # SKILL.md はホストが登録できず、あるいは「いつ呼ぶか」を判断できない。
     frontmatter = extract_frontmatter(content)
     if frontmatter is None:
-        emit_error(f"{label} - フロントマターがありません")
+        emit_error(f"{label} - フロントマターが無いか、解析できません")
         return True
     missing = [field for field in _REQUIRED_FRONTMATTER_FIELDS if not frontmatter.get(field)]
     if missing:
@@ -75,19 +75,18 @@ def _validate_skill_dir(directory: Path) -> bool:
     return report_errors(_frontmatter_field_errors(label, frontmatter))
 
 
-def validate_skills(skills_dir: str | Path = DEFAULT_SKILLS_DIR, *, optional: bool = False) -> int:
+def validate_skills(skills_dir: str | Path = DEFAULT_SKILLS_DIR) -> int:
     """スキルディレクトリを検証し、JS バリデータと同じメッセージを表示する。
 
     Args:
         skills_dir: 検証するスキルディレクトリ。
-        optional: True なら対象パスが存在しない場合に検証をスキップして 0 を返す。
 
     Returns:
         終了コード（0 = 合格、1 = 不合格）。
     """
     skills_path = Path(skills_dir)
     if not skills_path.exists():
-        return report_missing("skills ディレクトリ", skills_path, optional)
+        return report_missing("skills ディレクトリ", skills_path)
     dirs = [entry for entry in skills_path.iterdir() if entry.is_dir()]
     # 全ディレクトリの誤りを出し切るため、短絡させずに検証する。
     if [directory for directory in dirs if _validate_skill_dir(directory)]:
@@ -99,7 +98,7 @@ def validate_skills(skills_dir: str | Path = DEFAULT_SKILLS_DIR, *, optional: bo
 def main(argv: list[str] | None = None) -> int:
     """CLI のエントリポイント。"""
     args = parse_validator_args("Validate curated skills", argv, skills_dir=DEFAULT_SKILLS_DIR)
-    return validate_skills(args.skills_dir, optional=args.optional)
+    return validate_skills(args.skills_dir)
 
 
 if __name__ == "__main__":

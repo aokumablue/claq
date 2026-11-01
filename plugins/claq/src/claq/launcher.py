@@ -21,6 +21,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _USAGE = "Usage: python3 src/claq/launcher.py [--bg] <module> [args...]"
+# 落ちると保護が外れる PreToolUse の保護フック（hooks.json の matcher 付きエントリ）。
+_PROTECTION_HOOKS = frozenset(
+    {
+        "claq.hooks.block_no_verify",
+        "claq.hooks.pre_bash_commit_quality",
+        "claq.hooks.bash_config_protection",
+        "claq.hooks.config_protection",
+    }
+)
 
 
 def build_env() -> dict[str, str]:
@@ -132,13 +141,14 @@ def _run_module_in_process(target: str, target_args: list[str]) -> int:
         # exit 1 は PreToolUse の契約で「non-blocking error = ツールは実行される」。
         # つまり保護フックの deny が黙って allow へ反転する。exit 2 へ倒さないのは、
         # 全入力で raise するバグを踏んだとき Bash ごと塞がって復旧手段を失うため
-        # （`launcher.py` 冒頭の fail-open と同じ理由）。代わりに、他の無効化経路と
+        # （`launcher.py` 冒頭の fail-open と同じ理由）。代わりに保護フックでは、他の無効化経路と
         # 同じ `claqProtectionDisabled` マーカーを出して**保護喪失を可視化**する。
         sys.stderr.write(f"ERROR: {target}: {exc}\n")
-        sys.stderr.write(
-            '{"claqProtectionDisabled": true, "reason": "hook_raised", '
-            f'"module": "{target}"}}\n'
-        )
+        if target in _PROTECTION_HOOKS:
+            sys.stderr.write(
+                '{"claqProtectionDisabled": true, "reason": "hook_raised", '
+                f'"module": "{target}"}}\n'
+            )
         return 1
     return 0
 
@@ -184,13 +194,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # --bg は host に関わらず常に detach し、呼び出し側フックを同期ブロックしない。
     # hooks.json / claq-helpers.sh のターゲットはすべて dotted module name なので `-m` で起動する。
-    if detach_process([sys.executable, "-m", target, *target_args], read_raw_stdin(), env=build_env()):
-        return 0
-    # docs/adr/hook-failure-direction.md: 親の exit code は「子の起動を受け付けたか」を表す。
-    # 受付そのものに失敗した以上、成功を返すと呼び出し側は起動されていない処理を
-    # 受付成功と誤認する（子の処理結果は依然として非同期）。
-    write_stderr(f"[Hook] Error detaching {target}\n")
-    return 1
+    try:
+        detach_process([sys.executable, "-m", target, *target_args], read_raw_stdin(), env=build_env())
+    except OSError as err:
+        # docs/adr/hook-failure-direction.md: 親の exit code は「子の起動を受け付けたか」を表す。
+        write_stderr(f"[Hook] Error detaching {target}: {err}\n")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

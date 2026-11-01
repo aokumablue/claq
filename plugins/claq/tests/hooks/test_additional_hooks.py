@@ -403,15 +403,13 @@ def test_pre_compact_main_appends_to_compaction_log(monkeypatch: pytest.MonkeyPa
     assert logs == ["[PreCompact] State saved before compaction"]
 
 
-def test_pre_compact_main_logs_error_without_blocking(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """追記に失敗してもブロックせず exit 0 を返し、エラーをログへ出すこと。"""
-    logs: list[str] = []
+def test_pre_compact_main_propagates_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """追記の失敗はそのまま伝える（launcher が exit 1 にし、PreCompact はブロックされない）。"""
     monkeypatch.setattr(pre_compact, "get_sessions_dir", lambda: tmp_path)
     monkeypatch.setattr(pre_compact, "append_file", mock.Mock(side_effect=RuntimeError("boom")))
-    monkeypatch.setattr(pre_compact, "log", logs.append)
 
-    assert pre_compact.main() == 0
-    assert logs == ["[PreCompact] Error: boom"]
+    with pytest.raises(RuntimeError, match="boom"):
+        pre_compact.main()
 
 
 @pytest.mark.parametrize(

@@ -148,20 +148,10 @@ def popen_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     return calls
 
 
-@pytest.mark.parametrize(
-    ("env", "logs_blocked"),
-    [({"X": "1"}, False), (None, False), ({"X": "1"}, True)],
-    ids=["env-given", "env-inherited", "log-dir-unavailable"],
-)
-def test_detach_process_launches_watchdog(
-    tmp_path: Path, popen_calls: list[dict], env: dict[str, str] | None, logs_blocked: bool
-) -> None:
-    """watchdog 越しに起動して stdin を一時ファイルで渡し、子の env へ bg ログのパスを足すこと（ログを作れなければ足さずに起動する）。"""
-    if logs_blocked:
-        (tmp_path / ".claq").mkdir()
-        (tmp_path / ".claq" / "logs").write_text("not a directory", encoding="utf-8")
-
-    assert detach_process(["python3", "-m", "claq.mem.cli", "observe"], "raw-payload", env=env) is True
+@pytest.mark.parametrize("env", [{"X": "1"}, None], ids=["env-given", "env-inherited"])
+def test_detach_process_launches_watchdog(tmp_path: Path, popen_calls: list[dict], env: dict[str, str] | None) -> None:
+    """watchdog 越しに起動して stdin を一時ファイルで渡し、子の env へ bg ログのパスを足すこと。"""
+    detach_process(["python3", "-m", "claq.mem.cli", "observe"], "raw-payload", env=env)
 
     [call] = popen_calls
     assert call["cmd"] == [
@@ -178,13 +168,10 @@ def test_detach_process_launches_watchdog(
     assert call["stdin_text"] == "raw-payload"
     assert call["start_new_session"] is True
     child_env = dict(call["env"])
-    log_path = child_env.pop("CLAQ_BG_LOG_PATH", None)
+    log_path = child_env.pop("CLAQ_BG_LOG_PATH")
     assert child_env == (dict(os.environ) if env is None else env)
-    if logs_blocked:
-        assert log_path is None
-    else:
-        assert Path(log_path).parent == tmp_path / ".claq" / "logs"
-        assert Path(log_path).name.startswith("bg-") and log_path.endswith(".log")
+    assert Path(log_path).parent == tmp_path / ".claq" / "logs"
+    assert Path(log_path).name.startswith("bg-") and log_path.endswith(".log")
     # 起動直後に unlink 済みで、一時ファイルが残らないこと。
     assert list((tmp_path / ".claq").glob("*.stdin")) == []
 
@@ -195,19 +182,39 @@ def _raise_oserror(*args: object, **kwargs: object) -> None:
 
 
 @pytest.mark.parametrize(
-    ("target", "name", "expected", "leftovers"),
-    [(tempfile, "NamedTemporaryFile", False, 0), (subprocess, "Popen", False, 0), (os, "unlink", True, 1)],
-    ids=["tempfile-fails", "popen-fails", "unlink-fails"],
+    ("target", "name"),
+    [(tempfile, "NamedTemporaryFile"), (subprocess, "Popen")],
+    ids=["tempfile-fails", "popen-fails"],
 )
 @pytest.mark.usefixtures("popen_calls")
-def test_detach_process_failures(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, target: object, name: str, expected: bool, leftovers: int
+def test_detach_process_failures_are_raised(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, target: object, name: str
 ) -> None:
-    """一時ファイル作成・起動の失敗は False（一時ファイルは消す）、起動後の unlink 失敗は起動成功の True のままであること。"""
+    """一時ファイル作成・起動の失敗は OSError をそのまま伝え（launcher が原因を表示する）、一時ファイルは残さない。"""
     monkeypatch.setattr(target, name, _raise_oserror)
 
-    assert detach_process(["true"], "raw") is expected
-    assert len(list((tmp_path / ".claq").glob("*.stdin"))) == leftovers
+    with pytest.raises(OSError, match="injected"):
+        detach_process(["true"], "raw")
+    assert list((tmp_path / ".claq").glob("*.stdin")) == []
+
+
+@pytest.mark.usefixtures("popen_calls")
+def test_detach_process_log_dir_failure_is_raised(tmp_path: Path) -> None:
+    """bg ログのディレクトリを作れなければ起動せずに失敗を伝える（子の出力が観測できない起動はしない）。"""
+    (tmp_path / ".claq").mkdir()
+    (tmp_path / ".claq" / "logs").write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(OSError):
+        detach_process(["true"], "raw")
+
+
+@pytest.mark.usefixtures("popen_calls")
+def test_detach_process_unlink_failure_keeps_the_launch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """起動後の unlink 失敗は起動成功のまま（孤児の一時ファイルは次回の掃除で消える）。"""
+    monkeypatch.setattr(os, "unlink", _raise_oserror)
+
+    detach_process(["true"], "raw")
+    assert len(list((tmp_path / ".claq").glob("*.stdin"))) == 1
 
 
 @pytest.mark.parametrize("existing_mode", [None, 0o755], ids=["created-under-umask-022", "existing-0755-tightened"])
@@ -220,7 +227,7 @@ def test_detach_process_keeps_claq_dir_private(tmp_path: Path, existing_mode: in
         if existing_mode is not None:
             claq.mkdir()
             claq.chmod(existing_mode)
-        assert detach_process(["true"], "raw") is True
+        detach_process(["true"], "raw")
     finally:
         os.umask(old_umask)
 
@@ -264,7 +271,8 @@ def test_watchdog_kills_process_group(
         "time.sleep(60)"
     )
     proc = subprocess.Popen(
-        [sys.executable, "-c", detach._WATCHDOG_SCRIPT, str(timeout), "0.3", sys.executable, "-c", child]
+        [sys.executable, "-c", detach._WATCHDOG_SCRIPT, str(timeout), "0.3", sys.executable, "-c", child],
+        env={**os.environ, "CLAQ_BG_LOG_PATH": str(tmp_path / "bg.log")},
     )
     limit = time.monotonic() + 10.0
     while time.monotonic() < limit and not (pid_file.exists() and pid_file.read_text()):

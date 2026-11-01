@@ -133,12 +133,10 @@ class TestNormalizeRemoteUrl:
             "/",
             "/.git",
             "file:///",
-            "git@github.com:\ninjected",
-            "https://github.com/o/r\x00",
         ],
     )
     def test_returns_none_for_unusable(self, raw: str | None) -> None:
-        """空・制御文字混入・実体の無い remote は None になる。"""
+        """空・実体の無い remote は None になる。"""
         assert normalize_remote_url(raw) is None
 
 
@@ -222,17 +220,16 @@ class TestRunGit:
     @pytest.mark.parametrize(
         "run_text",
         [
-            _raising(_TIMEOUT),
             _raising(FileNotFoundError("git")),
             lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="  \n", stderr=""),
             None,
         ],
-        ids=["timeout", "git-missing", "empty-stdout", "nonzero-exit-outside-repo"],
+        ids=["git-missing", "empty-stdout", "nonzero-exit-outside-repo"],
     )
     def test_returns_none(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_text: Callable[..., object] | None
     ) -> None:
-        """タイムアウト・git 不在でも例外を漏らさず、非 0 終了・空出力と同じく None を返す。"""
+        """git 不在は、非 0 終了（リポジトリ外）・空出力と同じく None を返す。"""
         if run_text is not None:
             monkeypatch.setattr(repo_identity, "run_text", run_text)
         assert repo_identity._run_git(str(tmp_path), "rev-parse", "--git-common-dir") is None
@@ -264,14 +261,12 @@ class TestFindRepoRoot:
         assert find_repo_root(bare) == os.path.realpath(bare)
         assert find_repo_root(plain) == os.path.realpath(plain)
 
-    def test_timeout_falls_back_to_absolute_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """git がタイムアウトしても絶対パスへ分岐してハングしない。
-
-        起点を `.git` にするのは、git が動けば本体ルートへ寄せる経路と結果を分けるため。
-        """
+    def test_timeout_is_propagated(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """git がタイムアウトしたら、絶対パスで続けずにそのまま伝える（同じリポジトリの識別が揺れないように）。"""
         git_dir = _make_repo(tmp_path / "main") / ".git"
         monkeypatch.setattr(repo_identity, "run_text", _raising(_TIMEOUT))
-        assert find_repo_root(git_dir) == os.path.realpath(git_dir)
+        with pytest.raises(subprocess.TimeoutExpired):
+            find_repo_root(git_dir)
 
 
 class TestDetectRepoIdentity:
@@ -299,9 +294,9 @@ class TestDetectRepoIdentity:
         assert detect_repo_identity(root) == RepoIdentity(identity_key or real_root, real_root, remote_url)
 
     def test_drops_unusable_remote(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """正規化できない remote は台帳に残さずパス識別へ落とす。"""
+        """正規化して空になる remote は台帳に残さずパス識別へ落とす。"""
         root = os.path.realpath(_make_repo(tmp_path / "main"))
-        monkeypatch.setattr(repo_identity, "read_remote_url", lambda _root: "\x00")
+        monkeypatch.setattr(repo_identity, "read_remote_url", lambda _root: "file:///")
         assert detect_repo_identity(root) == RepoIdentity(root, root, None)
 
     def test_non_repo_uses_cwd(self, tmp_path: Path) -> None:

@@ -27,10 +27,7 @@ def installed_plugins_dir(home: Path | None = None) -> Path:
 
 def is_grok_installed_plugin_root(path: Path | str) -> bool:
     """パスが Grok の公式インストール先（installed-plugins/claq-* 配下）か判定する。"""
-    try:
-        parts = Path(path).resolve().parts
-    except OSError:
-        return False
+    parts = Path(path).resolve().parts
     try:
         grok_idx = parts.index(".grok")
     except ValueError:
@@ -45,60 +42,47 @@ def _has_launcher(root: Path) -> bool:
     return (root / "src" / "claq" / "launcher.py").is_file()
 
 
-def _safe_resolve(path: Path) -> Path | None:
-    """``path.resolve()`` を試み、失敗したら None を返す。"""
-    try:
-        return path.resolve()
-    except OSError:
-        return None
-
-
 def _installed_target(path: Path | str) -> Path | None:
     """installed-plugins/claq-* かつ launcher があるなら resolve した Path。"""
     candidate = Path(path)
     if not is_grok_installed_plugin_root(candidate) or not _has_launcher(candidate):
         return None
-    return _safe_resolve(candidate)
+    return candidate.resolve()
 
 
 def _mtime_or_none(path: Path) -> float | None:
-    """``path`` の mtime を返し、stat に失敗したら None を返す。"""
+    """``path`` の mtime を返し、列挙の後に消えていたら None を返す。"""
     try:
         return path.stat().st_mtime
-    except OSError:
+    except FileNotFoundError:
         return None
 
 
 def find_latest_installed_claq(installed_dir: Path | None = None) -> Path | None:
     """``~/.grok/installed-plugins/claq-*`` のうち launcher.py を含む最新のディレクトリを返す。
 
-    mtime の取得に失敗した候補は除外する。列挙と stat の間には隙間があり（TOCTOU）、
-    Grok が同時に古い ``claq-<hash>`` を消すと ``FileNotFoundError`` が起きる。stat を
-    try の外で行うと、それが ``ensure_grok_plugin_root_symlink`` まで貫通し、
-    ``scripts/grok.sh`` が traceback で異常終了する。
+    列挙と stat の間には隙間があり（TOCTOU）、Grok が同時に古い ``claq-<hash>`` を消すと
+    ``FileNotFoundError`` が起きるので、消えた候補は除外する。
 
     Args:
         installed_dir: 探索先。None なら ``~/.grok/installed-plugins``。
 
     Returns:
-        最新ディレクトリ。無ければ None（全候補の stat が失敗した場合も None）。
+        最新ディレクトリ。無ければ None（全候補が消えていた場合も None）。
 
     Raises:
-        例外は発生しません。
+        OSError: 探索先を読めない場合。
     """
     root = installed_dir if installed_dir is not None else installed_plugins_dir()
     if not root.is_dir():
         return None
     candidates: list[tuple[float, Path]] = []
-    try:
-        for path in root.iterdir():
-            if not (path.is_dir() and path.name.startswith("claq-") and _has_launcher(path)):
-                continue
-            mtime = _mtime_or_none(path)
-            if mtime is not None:
-                candidates.append((mtime, path))
-    except OSError:
-        return None
+    for path in root.iterdir():
+        if not (path.is_dir() and path.name.startswith("claq-") and _has_launcher(path)):
+            continue
+        mtime = _mtime_or_none(path)
+        if mtime is not None:
+            candidates.append((mtime, path))
     if not candidates:
         return None
     # 同 mtime のときは iterdir の順を保つため max の「最初の最大要素を返す」性質に
@@ -108,42 +92,41 @@ def find_latest_installed_claq(installed_dir: Path | None = None) -> Path | None
 
 def ensure_grok_plugin_root_symlink(
     *,
-    plugin_root: Path | str | None = None,
     link_path: Path | str | None = None,
     home: Path | None = None,
 ) -> Path | None:
     """``~/.grok/plugins/claq`` を **installed-plugins 配下のみ** へ symlink する。
 
-    開発用リポジトリや任意パスはリンク先にしない。明示の ``plugin_root`` も
-    ``is_grok_installed_plugin_root`` を満たす場合だけ採用する。
+    開発用リポジトリや任意パスはリンク先にしない。
 
     Args:
-        plugin_root: 候補のリンク先。installed-plugins/claq-* でなければ無視。
         link_path: リンクのパス。None なら ``~/.grok/plugins/claq``。
         home: ホーム上書き（テスト用）。
 
     Returns:
-        作成・更新したリンク先 Path。何もしなければ None（OSError は握りつぶす）。
+        作成・更新したリンク先 Path。インストールが無い・既存の空でないディレクトリに触れないときは None。
+
+    Raises:
+        OSError: 解決・リンクの作成に失敗した場合（原因を ``scripts/grok.sh`` が表示する）。
     """
     base = home if home is not None else Path.home()
     link = Path(link_path) if link_path is not None else base / ".grok" / "plugins" / "claq"
 
-    target = _resolve_symlink_target(plugin_root, base)
+    target = _resolve_symlink_target(base)
     if target is None:
         return None
     return _ensure_symlink(link, target)
 
 
-def _resolve_symlink_target(plugin_root: Path | str | None, home: Path) -> Path | None:
-    """リンク先を plugin_root → 環境変数 → 最新インストールの順で解決する。"""
+def _resolve_symlink_target(home: Path) -> Path | None:
+    """リンク先を、実行中のホストの root（環境変数）→ 最新インストールの順で解決する。"""
     env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-    for candidate in (plugin_root, env_root or None):
-        if candidate is not None and (target := _installed_target(candidate)) is not None:
-            return target
+    if env_root and (target := _installed_target(env_root)) is not None:
+        return target
     found = find_latest_installed_claq(installed_plugins_dir(home))
     if found is None:
         return None
-    return _safe_resolve(found)
+    return found.resolve()
 
 
 def _remove_empty_or_file(link: Path) -> bool:
@@ -156,8 +139,6 @@ def _remove_empty_or_file(link: Path) -> bool:
     except StopIteration:
         link.rmdir()
         return True
-    except OSError:
-        return False
     return False
 
 
@@ -180,14 +161,11 @@ def _clear_existing(link: Path) -> bool:
 
 
 def _ensure_symlink(link: Path, target: Path) -> Path | None:
-    """``link`` を ``target`` へ張り、結果の Path または何もしない/失敗時の None を返す。"""
-    try:
-        link.parent.mkdir(parents=True, exist_ok=True)
-        if link.is_symlink() and _is_link_to(link, target):
-            return target
-        if not _clear_existing(link):
-            return None
-        link.symlink_to(target, target_is_directory=True)
+    """``link`` を ``target`` へ張り、結果の Path か、既存物に触れないときの None を返す。"""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() and _is_link_to(link, target):
         return target
-    except OSError:
+    if not _clear_existing(link):
         return None
+    link.symlink_to(target, target_is_directory=True)
+    return target

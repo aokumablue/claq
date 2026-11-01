@@ -129,11 +129,7 @@ class TestUnsupportedPythonExitCode:
         (SystemExit(), 0, ""),
         (SystemExit(2), 2, ""),
         (SystemExit("bad"), 1, "bad\n"),
-        (
-            RuntimeError("boom"),
-            1,
-            'ERROR: target: boom\n{"claqProtectionDisabled": true, "reason": "hook_raised", "module": "target"}\n',
-        ),
+        (RuntimeError("boom"), 1, "ERROR: target: boom\n"),
     ],
     ids=["normal-completion", "exit-0", "exit-none", "exit-2", "exit-message", "unexpected-exception"],
 )
@@ -161,6 +157,24 @@ def test_run_module_in_process(
     assert capsys.readouterr().err == expected_err
 
 
+def test_protection_hook_exception_marks_protection_disabled(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """保護フックが例外で落ちたときだけ claqProtectionDisabled の印を出す（保護の喪失を見えるようにする）。"""
+    target = "claq.hooks.config_protection"
+
+    def fake_run_module(*_args: object, **_kwargs: object) -> None:
+        """保護フックの例外を模す。"""
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(launcher.runpy, "run_module", fake_run_module)
+
+    assert launcher._run_module_in_process(target, []) == 1
+    assert capsys.readouterr().err == (
+        f'ERROR: {target}: boom\n{{"claqProtectionDisabled": true, "reason": "hook_raised", "module": "{target}"}}\n'
+    )
+
+
 class TestMain:
     """main() の引数処理・detach・バージョンガード。"""
 
@@ -171,13 +185,14 @@ class TestMain:
 
     @staticmethod
     def _stub_detach(monkeypatch: pytest.MonkeyPatch, accepted: bool) -> dict[str, object]:
-        """stdin を ``{}`` にし、detach_process を受付結果 ``accepted`` の記録用スタブへ差し替える。"""
+        """stdin を ``{}`` にし、detach_process を記録用スタブへ差し替える（``accepted`` が False なら OSError）。"""
         captured: dict[str, object] = {}
 
-        def fake_detach(cmd: list[str], raw: str, *, env: dict[str, str] | None = None) -> bool:
-            """コマンドと stdin を記録して受付結果を返す。"""
+        def fake_detach(cmd: list[str], raw: str, *, env: dict[str, str] | None = None) -> None:
+            """コマンドと stdin を記録し、受付に失敗する場合は OSError を送出する。"""
             captured.update(cmd=cmd, raw=raw)
-            return accepted
+            if not accepted:
+                raise OSError("no log dir")
 
         monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin", lambda: "{}")
         monkeypatch.setattr("claq.hooks.detach.detach_process", fake_detach)
@@ -222,7 +237,7 @@ class TestMain:
         self._stub_detach(monkeypatch, accepted=False)
 
         assert launcher.main(["--bg", "claq.mem.cli", "handoff"]) == 1
-        assert "Error detaching" in capsys.readouterr().err
+        assert capsys.readouterr().err == "[Hook] Error detaching claq.mem.cli: no log dir\n"
 
     def test_inserts_src_dir_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """src ディレクトリが sys.path に無ければ挿入する。"""

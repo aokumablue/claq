@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,7 +34,6 @@ FALLBACK_SLUG = "repo"
 
 _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*)://(.*)$", re.DOTALL)
 _PORT_RE = re.compile(r":\d+$")
-_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -47,12 +45,16 @@ def _run_git(cwd: str, *args: str) -> str | None:
         *args: ``git`` に続けて渡す引数。
 
     Returns:
-        成功時は strip 済みの標準出力。終了コードが非 0・出力が空・
-        タイムアウト・git 不在のいずれでも None。
+        成功時は strip 済みの標準出力。終了コードが非 0（リポジトリ外など）・出力が空・
+        git 不在のいずれでも None（git の無い環境も、リポジトリ外と同じく絶対パスで識別する）。
+
+    Raises:
+        subprocess.TimeoutExpired: git が時間内に終わらない場合（同じリポジトリの識別が揺れて
+            別の行が作られないよう、続行せずに失敗として伝える）。
     """
     try:
         result = run_text(["git", "-C", cwd, *args], timeout=GIT_TIMEOUT_SECONDS)
-    except (OSError, subprocess.SubprocessError):
+    except FileNotFoundError:
         return None
     if result.returncode != 0:
         return None
@@ -156,13 +158,12 @@ def normalize_remote_url(remote_url: str | None) -> str | None:
         remote_url: ``git remote get-url origin`` の生出力。None や空文字も許容する。
 
     Returns:
-        正規化済みの正体キー文字列。remote が無い・制御文字を含む・
-        正規化した結果が空になる場合は None。
+        正規化済みの正体キー文字列。remote が無い・正規化した結果が空になる場合は None。
     """
     if not remote_url:
         return None
     raw = remote_url.strip()
-    if not raw or _CONTROL_RE.search(raw):
+    if not raw:
         return None
 
     scheme_match = _SCHEME_RE.match(raw)

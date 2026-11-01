@@ -107,8 +107,6 @@ def validate_commands(
     commands_dir: str | Path = DEFAULT_COMMANDS_DIR,
     agents_dir: str | Path = DEFAULT_AGENTS_DIR,
     skills_dir: str | Path = DEFAULT_SKILLS_DIR,
-    *,
-    optional: bool = False,
 ) -> int:
     """コマンド Markdown ファイルを検証し、JS バリデータと同じメッセージを表示する。
 
@@ -117,10 +115,6 @@ def validate_commands(
         commands_dir: コマンドディレクトリ。
         agents_dir: エージェントディレクトリ。
         skills_dir: スキルディレクトリ。
-        optional: True なら commands ディレクトリが無い場合に検証をスキップして 0 を返す。
-            hooks / skills / agents の 3 バリデータと同じく既定では欠落を失敗にする。
-            commands だけ無条件スキップにすると ``commands/`` を消すだけで相互参照
-            検証チェーン全体が「成功」を報告するため。
 
     Returns:
         終了コード（0 = 合格、1 = 不合格）。
@@ -129,7 +123,7 @@ def validate_commands(
     root = Path(root_dir)
     commands_path, agents_path, skills_path = root / commands_dir, root / agents_dir, root / skills_dir
     if not commands_path.exists():
-        return report_missing("commands ディレクトリ", commands_path, optional)
+        return report_missing("commands ディレクトリ", commands_path)
 
     files = _list_markdown_files(commands_path)
     valid_commands = {path.stem for path in files}
@@ -159,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
         agents_dir=DEFAULT_AGENTS_DIR,
         skills_dir=DEFAULT_SKILLS_DIR,
     )
-    return validate_commands(args.root_dir, args.commands_dir, args.agents_dir, args.skills_dir, optional=args.optional)
+    return validate_commands(args.root_dir, args.commands_dir, args.agents_dir, args.skills_dir)
 
 
 if __name__ == "__main__":

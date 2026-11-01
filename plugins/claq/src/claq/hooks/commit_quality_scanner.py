@@ -647,8 +647,6 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
             # 回してもホスト側 timeout を踏むだけなので、検査不能として返す。
             issues.append(_scan_error_issue(file_path, "lint scan", err, severity="error"))
             return issues
-        except Exception as err:
-            issues.append(_scan_error_issue(file_path, "lint scan", err, severity="warning"))
     if do_secrets:
         scan_lines = _extract_printable_runs(content) if is_binary else lines
         try:

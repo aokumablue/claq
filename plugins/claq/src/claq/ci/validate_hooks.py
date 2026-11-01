@@ -154,12 +154,11 @@ def _hooks_errors(hooks: dict[str, Any]) -> Iterator[str]:
         yield f"必須イベントが宣言されていません: {' '.join(missing_events)}"
 
 
-def validate_hooks(hooks_file: str | Path = DEFAULT_HOOKS_FILE, *, optional: bool = False) -> int:
+def validate_hooks(hooks_file: str | Path = DEFAULT_HOOKS_FILE) -> int:
     """hooks.json を検証し、JS バリデータと同じメッセージを表示する。
 
     Args:
         hooks_file: 検証する hooks.json のパス。
-        optional: True なら対象パスが存在しない場合に検証をスキップして 0 を返す。
 
     Returns:
         終了コード（0 = 合格、1 = 不合格）。
@@ -167,7 +166,7 @@ def validate_hooks(hooks_file: str | Path = DEFAULT_HOOKS_FILE, *, optional: boo
     hooks_path = Path(hooks_file)
     if not hooks_path.exists():
         # 他の validator の「skills ディレクトリが…」と違い、ファイル名の後に空白を置いた文面になる。
-        return report_missing("hooks.json ", hooks_path, optional)
+        return report_missing("hooks.json ", hooks_path)
     try:
         data = read_json(hooks_path, "hooks.json")
     except ValueError as error:
@@ -195,7 +194,7 @@ def validate_hooks(hooks_file: str | Path = DEFAULT_HOOKS_FILE, *, optional: boo
 def main(argv: list[str] | None = None) -> int:
     """CLI のエントリポイント。"""
     args = parse_validator_args("Validate hooks.json", argv, hooks_file=DEFAULT_HOOKS_FILE)
-    return validate_hooks(args.hooks_file, optional=args.optional)
+    return validate_hooks(args.hooks_file)
 
 
 if __name__ == "__main__":

@@ -126,8 +126,10 @@ def _read_stdin_json() -> dict[str, Any]:
     ``read_raw_stdin()`` を使う。
 
     Returns:
-        読み取った dict。stdin が tty・空・上限到達・非 dict・不正 JSON
-        なら空 dict。
+        読み取った dict。stdin が tty・空なら空 dict。
+
+    Raises:
+        CommandError: stdin が JSON object として読めない（不正 JSON・非 dict・上限での切り捨て）場合。
     """
     raw = read_raw_stdin()
     if not raw.strip():
@@ -135,9 +137,10 @@ def _read_stdin_json() -> dict[str, Any]:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as e:
-        log.warning("stdin 読み取り失敗: %s", e)
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+        raise CommandError(f"stdin を JSON として読めません: {e}") from e
+    if not isinstance(parsed, dict):
+        raise CommandError("stdin が JSON object ではありません")
+    return parsed
 
 
 def _parse_args_and_stdin(command: str, argv: list[str]) -> CommandArgs:
@@ -244,8 +247,9 @@ def main() -> int:
     """CLI エントリポイント。argv からコマンドを解決して実行し、終了コードを返す。
 
     Returns:
-        終了コード。未知のコマンドは 2。SessionStart コマンドは失敗しても
-        フックエラーを避けるため 0 を維持する。
+        終了コード。成功は 0、失敗は 1、未知のコマンドは 2。SessionStart コマンドは成功したときだけ
+        stdout へ注入の JSON を出す（失敗時に JSON を出すと Claude Code は終了コードを見ずに成功扱いにし、
+        利用者に hook error の通知が出ない）。
     """
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
         print(HELP_TEXT)
@@ -254,11 +258,6 @@ def main() -> int:
     command = sys.argv[1]
     session_start = command in _SESSION_START_COMMANDS
     additional_context = ""
-    # SessionStart はどの失敗経路でも exit 0 を維持する（非 0 だとセッション全体が
-    # エラー扱いになる）。失敗を捕まえる全経路がこの 1 本の値を使い、片方だけ
-    # 直したときの非対称を防ぐ。stderr への出力はどの経路でも行う —— 黙って
-    # 抜けると記憶注入が失われたこと自体に気づけないため。
-    failure_exit_code = 0 if session_start else 1
     exit_code = 0
     try:
         args = _parse_args_and_stdin(command, sys.argv[2:])
@@ -270,15 +269,15 @@ def main() -> int:
         settings = _load_settings_or_raise()
     except CommandError as e:
         print(str(e), file=sys.stderr)
-        exit_code = failure_exit_code
+        exit_code = 1
     except Exception as e:
         print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
-        exit_code = failure_exit_code
+        exit_code = 1
     else:
         handler = _COMMAND_HANDLERS.get(command)
         try:
             if session_start:
-                additional_context = handler(settings, args) or ""
+                additional_context = handler(settings, args)
             elif handler is None:
                 log.error("不明なコマンド: %s", command)
                 exit_code = 2
@@ -286,15 +285,14 @@ def main() -> int:
                 handler(settings, args)
         except CommandError as e:
             print(str(e), file=sys.stderr)
-            exit_code = failure_exit_code
+            exit_code = 1
         except Exception as e:
             log.error("コマンド %s 失敗: %s", command, e)
             print(f"コマンド {command} 失敗: {e}", file=sys.stderr)
-            exit_code = failure_exit_code
-    finally:
-        if session_start:
-            print_session_start_output(additional_context)
+            exit_code = 1
 
+    if session_start and exit_code == 0:
+        print_session_start_output(additional_context)
     return exit_code
 
 

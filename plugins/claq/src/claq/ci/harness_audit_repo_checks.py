@@ -142,8 +142,8 @@ def always_on_description_chars(root_dir: str | Path) -> int:
         root_dir: 監査対象のルートディレクトリ
 
     Returns:
-        description の合計文字数。frontmatter が無い・``description`` が文字列で
-        ない・``disable-model-invocation: true`` のファイルは 0 として扱う。
+        description の合計文字数。frontmatter が無い・解析できない（validators が不合格にする）・
+        ``description`` が文字列でない・``disable-model-invocation: true`` のファイルは 0 として扱う。
     """
     total = 0
     for path in _iter_surface_files(root_dir):

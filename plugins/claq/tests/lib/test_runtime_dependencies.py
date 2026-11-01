@@ -78,7 +78,6 @@ ALLOWED_TOP_LEVEL_MODULES = frozenset({
     "types",
     "typing",
     "unicodedata",
-    "warnings",
 })
 
 # 3.14 では `sys.stdlib_module_names` に含まれるが 3.12 には存在しない名前。

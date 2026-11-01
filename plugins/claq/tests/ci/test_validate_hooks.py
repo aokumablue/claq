@@ -31,16 +31,10 @@ def _write_json(path: Path, value: object) -> Path:
     return path
 
 
-def test_validate_hooks_missing_file_fails_unless_optional(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """hooks.json が無ければ失敗し、optional=True のときだけスキップして 0 を返すこと。
-
-    「見つからないのでスキップします」と表示して 0 を返すと、
-    宣言がまるごと失われた破損を成功として報告してしまう。
-    """
+def test_validate_hooks_missing_file_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """hooks.json が無ければ失敗すること（宣言がまるごと失われた破損を成功として報告しない）。"""
     assert validate_hooks.validate_hooks(tmp_path / "hooks.json") == 1
     assert "見つかりません" in capsys.readouterr().err
-    assert validate_hooks.validate_hooks(tmp_path / "hooks.json", optional=True) == 0
-    assert "検証をスキップします" in capsys.readouterr().out
 
 
 def test_validate_hooks_rejects_invalid_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

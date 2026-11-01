@@ -18,14 +18,6 @@ def _nested_mapping(levels: int) -> str:
     return "\n".join(" " * level + "k:" for level in range(levels))
 
 
-def _nested_dict(levels: int) -> dict[str, object]:
-    """levels 段だけネストした ``{"k": {...}}`` を組み立てる（深さ超過時の寛容モードの部分結果）。"""
-    result: dict[str, object] = {}
-    for _ in range(levels):
-        result = {"k": result}
-    return result
-
-
 # --------------------------------------------------------------------------
 # split_frontmatter
 # --------------------------------------------------------------------------
@@ -215,8 +207,8 @@ def test_flow_collections(text: str, expected: object) -> None:
     assert parse_yaml(text) == {"a": expected}
 
 
-def test_flow_depth_within_limit_is_accepted() -> None:
-    """上限内のネストしたフローは解析できる。"""
+def test_nested_flow_is_parsed() -> None:
+    """ネストしたフローを解析する。"""
     value = parse_yaml("a: " + "[" * 20 + "]" * 20)["a"]
     for _ in range(19):
         assert isinstance(value, list)
@@ -308,8 +300,8 @@ def test_document_structure(text: str, expected: object) -> None:
     assert parse_yaml(text) == expected
 
 
-def test_block_depth_within_limit_is_accepted() -> None:
-    """32 段ネストのブロックマッピングは受け入れる。"""
+def test_nested_block_mapping_is_parsed() -> None:
+    """32 段ネストのブロックマッピングを解析する。"""
     result = parse_yaml(_nested_mapping(32))
     for _ in range(32):
         assert isinstance(result, dict)
@@ -365,61 +357,49 @@ def test_strict_mode_rejects_malformed_syntax(text: str) -> None:
         parse_yaml(text)
 
 
-# 解釈できない構文（厳格モードは FrontmatterError、寛容モードは部分結果）と、
-# 寛容モードが返すべき値の対。値まで固定するのは「どこまで捨てたか」の変化を検出するため。
-#
-#   * 重複キーは寛容モードでも不合格にする。lenient は解釈できないエントリを読み飛ばす
-#     緩和であって矛盾した宣言の黙認ではない。先勝ちで黙認すると検証器とホストで
-#     見える値が分かれるパーサ差分になる。最上位では None、フロー側はエントリごと消える。
-#   * multi-line-block-sequence: キーと同インデントのブロックシーケンスは YAML 1.2 で
-#     妥当だが非対応で、寛容モードでは値ごと落ちて {'tools': None} になる（無警告の損失）。
-#   * multi-document: 厳格モードは弾くが、寛容モードでは `---` がコロン無しの行として
-#     読み飛ばされ、2 つのドキュメントが 1 つの dict へ合流する。
+# 解釈できない構文は FrontmatterError にする（部分結果を返さない）。
 _ERROR_INPUTS = [
-    pytest.param('name: [', {}, id='E1-unterminated-flow'),
-    pytest.param("a: 'x", {}, id='E2-unterminated-quote'),
-    pytest.param(r'a: "x\q"', {}, id='E3-unknown-escape'),
-    pytest.param('\ta: 1', None, id='E4-tab-indent-root'),
-    pytest.param('a: 1\n\tb: 2', {}, id='E4-tab-indent-entry'),
-    pytest.param('a: b\n\tc', {}, id='E4-tab-indent-continuation'),
-    pytest.param('a:\n\tb: 1', {}, id='E4-tab-indent-block-value'),
-    pytest.param('a: [1]\n  b: 2', {'a': [1]}, id='E5-unexpected-indent'),
-    pytest.param('a:\n  b: 1\n c: 2', {'a': {'b': 1}}, id='E5-bad-dedent'),
-    pytest.param('  a: 1\nb: 2', {'a': 1}, id='E5-shallower-than-root'),
-    pytest.param('a: 1\nnocolon', {'a': 1}, id='E6-missing-colon'),
-    pytest.param('name: x\nnocolon', {'name': 'x'}, id='E6-missing-colon-name'),
-    pytest.param('name: x\nbad\n  deeper\n\n  more\nkind: y', {'name': 'x', 'kind': 'y'}, id='E6-drops-deeper-lines'),
-    pytest.param('a: foo: bar', {}, id='E7-colon-in-plain'),
-    pytest.param('a: foo:', {}, id='E7-trailing-colon-in-plain'),
-    pytest.param('a: 1\na: 2', None, id='E8-duplicate-key'),
-    pytest.param('a: {k: 1, k: 2}', {}, id='E8-duplicate-key-in-flow'),
-    pytest.param(_nested_mapping(33), _nested_dict(31), id='E9-depth-block'),
-    pytest.param("a: " + "[" * 33 + "]" * 33, {}, id='E9-depth-flow'),
-    pytest.param('a: &anchor', {}, id='E10-anchor'),
-    pytest.param('a: *alias', {}, id='E10-alias'),
-    pytest.param('a: !!str x', {}, id='E10-tag'),
-    pytest.param('&anchor: 1', {}, id='E10-anchor-key'),
-    pytest.param('? a\n: b', {'': 'b'}, id='E11-complex-key'),
-    pytest.param('a: 1\n? b\n: c', {'a': 1, '': 'c'}, id='E11-complex-key-entry'),
-    pytest.param('a: |2\n  x', {}, id='E12-explicit-indent-indicator'),
-    pytest.param('a: [1] junk', {}, id='E13-trailing-token-flow'),
-    pytest.param('a: "x" junk', {}, id='E13-trailing-token-quote'),
-    pytest.param("'a' b: 1", {}, id='E13-trailing-token-key'),
-    pytest.param('name: x\nbroken: [\nkind: y', {'name': 'x', 'kind': 'y'}, id='broken-flow-value-entry'),
-    pytest.param('- a\nb: 1', ['a'], id='sequence-entry-without-dash'),
-    pytest.param('- [1]\n   - b', [[1]], id='sequence-entry-bad-indent'),
-    pytest.param('"abc', None, id='unterminated-quote-in-key-scan'),
-    pytest.param('tools:\n- Read\n- Write', {'tools': None}, id='multi-line-block-sequence'),
-    pytest.param('a: 1\n---\nb: 2', {'a': 1, 'b': 2}, id='multi-document'),
+    pytest.param('name: [', id='E1-unterminated-flow'),
+    pytest.param("a: 'x", id='E2-unterminated-quote'),
+    pytest.param(r'a: "x\q"', id='E3-unknown-escape'),
+    pytest.param('\ta: 1', id='E4-tab-indent-root'),
+    pytest.param('a: 1\n\tb: 2', id='E4-tab-indent-entry'),
+    pytest.param('a: b\n\tc', id='E4-tab-indent-continuation'),
+    pytest.param('a:\n\tb: 1', id='E4-tab-indent-block-value'),
+    pytest.param('a: [1]\n  b: 2', id='E5-unexpected-indent'),
+    pytest.param('a:\n  b: 1\n c: 2', id='E5-bad-dedent'),
+    pytest.param('  a: 1\nb: 2', id='E5-shallower-than-root'),
+    pytest.param('a: 1\nnocolon', id='E6-missing-colon'),
+    pytest.param('name: x\nnocolon', id='E6-missing-colon-name'),
+    pytest.param('name: x\nbad\n  deeper\n\n  more\nkind: y', id='E6-drops-deeper-lines'),
+    pytest.param('a: foo: bar', id='E7-colon-in-plain'),
+    pytest.param('a: foo:', id='E7-trailing-colon-in-plain'),
+    pytest.param('a: 1\na: 2', id='E8-duplicate-key'),
+    pytest.param('a: {k: 1, k: 2}', id='E8-duplicate-key-in-flow'),
+    pytest.param('a: &anchor', id='E10-anchor'),
+    pytest.param('a: *alias', id='E10-alias'),
+    pytest.param('a: !!str x', id='E10-tag'),
+    pytest.param('&anchor: 1', id='E10-anchor-key'),
+    pytest.param('? a\n: b', id='E11-complex-key'),
+    pytest.param('a: 1\n? b\n: c', id='E11-complex-key-entry'),
+    pytest.param('a: |2\n  x', id='E12-explicit-indent-indicator'),
+    pytest.param('a: [1] junk', id='E13-trailing-token-flow'),
+    pytest.param('a: "x" junk', id='E13-trailing-token-quote'),
+    pytest.param("'a' b: 1", id='E13-trailing-token-key'),
+    pytest.param('name: x\nbroken: [\nkind: y', id='broken-flow-value-entry'),
+    pytest.param('- a\nb: 1', id='sequence-entry-without-dash'),
+    pytest.param('- [1]\n   - b', id='sequence-entry-bad-indent'),
+    pytest.param('"abc', id='unterminated-quote-in-key-scan'),
+    pytest.param('tools:\n- Read\n- Write', id='multi-line-block-sequence'),
+    pytest.param('a: 1\n---\nb: 2', id='multi-document'),
 ]
 
 
-@pytest.mark.parametrize(("text", "lenient_expected"), _ERROR_INPUTS)
-def test_strict_and_lenient_modes_on_malformed_syntax(text: str, lenient_expected: object) -> None:
-    """厳格モードは FrontmatterError を送出し、寛容モードは宣言どおりの部分結果を返す。"""
+@pytest.mark.parametrize("text", _ERROR_INPUTS)
+def test_malformed_syntax_is_rejected(text: str) -> None:
+    """解釈できない構文は FrontmatterError を送出する。"""
     with pytest.raises(FrontmatterError):
         parse_yaml(text)
-    assert parse_yaml(text, lenient=True) == lenient_expected
 
 
 # --------------------------------------------------------------------------
@@ -428,7 +408,7 @@ def test_strict_and_lenient_modes_on_malformed_syntax(text: str, lenient_expecte
 
 
 def test_realistic_skill_frontmatter() -> None:
-    """実データ相当の SKILL.md frontmatter を厳格・寛容の両モードで同じ値へ解析する。"""
+    """実データ相当の SKILL.md frontmatter を解析する。"""
     content = (
         "---\n"
         "name: sample-skill\n"
@@ -453,7 +433,6 @@ def test_realistic_skill_frontmatter() -> None:
     }
 
     assert parse_yaml(split_frontmatter(content)) == expected
-    assert parse_yaml(split_frontmatter(content), lenient=True) == expected
 
 
 def test_realistic_folded_description_needs_caller_strip() -> None:

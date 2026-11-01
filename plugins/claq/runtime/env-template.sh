@@ -38,7 +38,7 @@ _claq_resolve_ancestor_pointer() {
   # (pid reuse; an empty or malformed file fails the same comparison).
   _claq_walk_candidate_pid="$1"
   _claq_walk_pointer="$HOME/.claq/roots/$_claq_walk_candidate_pid"
-  if [ -L "$_claq_walk_pointer" ] || [ ! -f "$_claq_walk_pointer" ]; then
+  if [ ! -f "$_claq_walk_pointer" ]; then
     return 1
   fi
 

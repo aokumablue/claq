@@ -229,14 +229,14 @@ class TestGcThrottle:
     def test_stamp_stat_failure_is_treated_as_absent(
         self, gc_dirs: tuple[Path, Path, Path, Path], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """stamp の stat 失敗は stamp 無しとして扱い、GC を走らせる。"""
+        """stamp が無い（初回）なら GC を走らせる。"""
         claq_dir, roots_dir, legacy, _tmp = gc_dirs
         real_stat = Path.stat
 
         def _boom_stat(self: Path, *args: object, **kwargs: object) -> object:
-            """stamp だけ stat を失敗させる。"""
+            """stamp だけ「無い」ことにする。"""
             if self.name == mod._GC_STAMP_FILENAME:
-                raise OSError("boom")
+                raise FileNotFoundError(2, "no stamp")
             return real_stat(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "stat", _boom_stat)
@@ -245,16 +245,17 @@ class TestGcThrottle:
 
         assert not legacy.exists()
 
-    def test_stamp_touch_failure_is_ignored(
+    def test_stamp_touch_failure_skips_gc_and_propagates(
         self, gc_dirs: tuple[Path, Path, Path, Path], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """stamp の touch 失敗は無視し、GC 自体は実行される。"""
+        """stamp を書けなければ GC を走らせずに失敗を伝える（呼び出し元が 1 回警告する）。"""
         claq_dir, roots_dir, legacy, _tmp = gc_dirs
         monkeypatch.setattr(Path, "touch", _raise_oserror)
 
-        mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())
+        with pytest.raises(OSError):
+            mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())
 
-        assert not legacy.exists()
+        assert legacy.exists()
 
 
 def _run_env_sh(home: Path, *, script: str = _SOURCE_AND_RUN) -> subprocess.CompletedProcess[str]:
@@ -434,14 +435,10 @@ class TestEnvShRealExecution:
         if message:
             _assert_unresolved(result)
 
-    def test_symlink_pointer_is_rejected(self, tmp_path: Path, _isolate_home: Path, roots_dir: Path) -> None:
-        """symlink であること**だけ**を理由に拒否されること（``[ -L ... ] ||`` ガード）。
-
-        symlink 先の中身を 1 行にすると ``-L`` ガードを削除しても後段の空 lstart チェックが 127 を
-        返して緑のまま通るので、symlink 先は通常ファイルなら解決できる内容にする。同じ内容を
-        通常ファイルとして置けば解決できることを陽性対照として先に確かめ、127 の理由を
-        ``-L`` ガードに特定する。
-        """
+    def test_symlink_pointer_is_read_like_a_regular_file(
+        self, tmp_path: Path, _isolate_home: Path, roots_dir: Path
+    ) -> None:
+        """symlink のポインタも通常ファイルと同じく読む（同一 UID の書き手は区別できないので、symlink の検査は置かない）。"""
         pointer_path = roots_dir / str(os.getpid())
         _write_pointer(roots_dir, os.getpid(), _make_plugin_root(tmp_path / "pointer-root"))
         assert _run_env_sh(_isolate_home).returncode == 0
@@ -451,7 +448,7 @@ class TestEnvShRealExecution:
         pointer_path.unlink()
         pointer_path.symlink_to(real_pointer)
 
-        assert _run_env_sh(_isolate_home).returncode == 127
+        assert _run_env_sh(_isolate_home).returncode == 0
 
     def test_end_to_end_via_write_env_pointer(self, tmp_path: Path, _isolate_home: Path) -> None:
         """write_env_pointer が書いた env.sh をそのまま source して解決できる（統合確認）。"""

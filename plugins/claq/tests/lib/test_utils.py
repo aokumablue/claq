@@ -137,26 +137,34 @@ def test_ensure_private_dir_non_directory_raises_without_chmod(home: Path, relat
     assert _mode(home / "file") == 0o644
 
 
-@pytest.mark.parametrize(
-    ("error", "expected"),
-    [(None, "someone"), (OSError("no uid"), "unknown"), (KeyError("no pwd entry"), "unknown")],
-    ids=["resolved", "oserror", "keyerror"],
-)
-def test_actor_identity(monkeypatch: pytest.MonkeyPatch, error: Exception | None, expected: str) -> None:
-    """監査ログ用のユーザー名を getpass で返し、解決できなくても例外にせず "unknown" を返す。
+def test_actor_identity_is_uid_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """os.getuid がある環境では uid を返し、利用者名は引かない（passwd に無い uid でも失敗しない）。"""
+    monkeypatch.setattr(core_utils.os, "getuid", lambda: 4242, raising=False)
+    monkeypatch.setattr(core_utils.getpass, "getuser", lambda: pytest.fail("getuser を呼んだ"))
 
-    `os.getuid()` は Windows に無い。取れないことを理由に promote 自体を失敗させない（部分成功を作らない）。
-    """
+    assert core_utils.actor_identity() == "uid=4242"
 
-    def fake_getuser() -> str:
-        """``error`` があれば送出し、無ければ名前を返す。"""
-        if error is not None:
-            raise error
-        return "someone"
 
-    monkeypatch.setattr(core_utils.getpass, "getuser", fake_getuser)
+def test_actor_identity_uses_user_name_without_uid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """os.getuid の無い環境（Windows）では利用者名を返す。"""
+    monkeypatch.delattr(core_utils.os, "getuid", raising=False)
+    monkeypatch.setattr(core_utils.getpass, "getuser", lambda: "someone")
 
-    assert core_utils.actor_identity() == expected
+    assert core_utils.actor_identity() == "someone"
+
+
+def test_actor_identity_propagates_unresolvable_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """os.getuid が無く利用者名も引けなければ、例外をそのまま伝える（promote は DB を変える前に止まる）。"""
+    monkeypatch.delattr(core_utils.os, "getuid", raising=False)
+
+    def fail() -> str:
+        """利用者名を解決できない環境を模す。"""
+        raise OSError("no user")
+
+    monkeypatch.setattr(core_utils.getpass, "getuser", fail)
+
+    with pytest.raises(OSError, match="no user"):
+        core_utils.actor_identity()
 
 
 def test_get_datetime_string_format() -> None:

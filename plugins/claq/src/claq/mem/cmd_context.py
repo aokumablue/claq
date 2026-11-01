@@ -272,21 +272,16 @@ def _build_context(settings: Settings, args: CommandArgs) -> str:
 def _handle_context(settings: Settings, args: CommandArgs) -> str:
     """context コマンド: SessionStart へ蓄積済みの知識を注入する。
 
-    毎セッション必ず走る唯一の注入口。フックを壊さないため失敗は握り潰し、
-    注入なし（空文字列）に倒す。
+    失敗はそのまま `cli.main` へ伝え、exit 1 と stderr で利用者に通知させる。
 
     Args:
         settings: mem 設定。
         args: コマンド引数とフックの stdin JSON。
 
     Returns:
-        注入する追加コンテキスト。組み立てに失敗した場合は空文字列。
+        注入する追加コンテキスト。
     """
-    try:
-        return _build_context(settings, args)
-    except Exception as e:
-        log.warning("context 失敗: %s", e)
-        return ""
+    return _build_context(settings, args)
 
 
 # --- SessionEnd の引き継ぎ記録 ---
@@ -324,15 +319,12 @@ def _record_handoff(settings: Settings, payload: dict[str, Any]) -> None:
 def _handle_handoff(settings: Settings, args: CommandArgs) -> None:
     """handoff コマンド: SessionEnd の引き継ぎを ``sessions`` へ記録する。
 
-    フック経路のため失敗は握り潰して終了コード 0 を保つ。外部 I/O は
-    トランスクリプト走査（``TRANSCRIPT_TIMEOUT_SEC``）とローカル SQLite
-    （既定 busy timeout 5 秒）のみで、いずれも上限時間を持つ。
+    外部 I/O はトランスクリプト走査（``TRANSCRIPT_TIMEOUT_SEC``）とローカル SQLite
+    （既定 busy timeout 5 秒）のみで、いずれも上限時間を持つ。失敗は `cli.main` へ伝え、
+    stderr は ``--bg`` の bg ログに残る。
 
     Args:
         settings: mem 設定。
         args: コマンド引数とフックの stdin JSON。
     """
-    try:
-        _record_handoff(settings, args.stdin_data)
-    except Exception as e:
-        log.warning("handoff 失敗: %s", e)
+    _record_handoff(settings, args.stdin_data)

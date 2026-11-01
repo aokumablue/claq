@@ -11,8 +11,6 @@ import pytest
 from claq.mem.knowledge_input import (
     DEFAULT_CONFIDENCE,
     KINDS,
-    MAX_BODY_BYTES,
-    MAX_TITLE_BYTES,
     SCOPES,
     STATUSES,
     KnowledgeDraft,
@@ -164,8 +162,6 @@ class TestParseKnowledgePayload:
             ({"kind": "fact", "title": "t", "status": "draft"}, "status は"),
             ({"kind": "fact", "title": "t", "status": "active"}, "status は"),
             ({"kind": "fact", "title": "t", "status": "archived"}, "status は"),
-            ({"kind": "fact", "title": "A" * (MAX_TITLE_BYTES + 1)}, "大きすぎます"),
-            ({"kind": "fact", "title": "t", "body": "A" * (MAX_BODY_BYTES + 1)}, "大きすぎます"),
         ],
         ids=[
             "title-missing",
@@ -178,33 +174,17 @@ class TestParseKnowledgePayload:
             "status-unknown",
             "status-active",
             "status-archived",
-            "title-oversized",
-            "body-oversized",
         ],
     )
     def test_rejects_invalid_payload(self, payload: dict, expected: str) -> None:
-        """CHECK 制約・サイズ上限を満たさない入力は KnowledgeInputError。
+        """CHECK 制約を満たさない入力は KnowledgeInputError。
 
         generic learn は source=agent / status=pending 固定。human/observer・active/archived の
         自己申告を受け付けると、JSON に書くだけで人間承認を偽装し、``promote <key>`` を経ずに
         SessionStart への注入を自己承認できる（docs/adr/untrusted-input-prompt-boundary.md）。
-        巨大な title / body は注入側の全長走査で SessionStart を遅らせるが、redact より先に
-        切り詰めるとシークレットが分断されて残るため、入口で受け付けない側で塞ぐ。
         """
         with pytest.raises(KnowledgeInputError, match=expected):
             parse_knowledge_payload(payload)
-
-    def test_size_limit_is_measured_in_bytes_not_characters(self) -> None:
-        """マルチバイト文字でもバイト数で判定すること。"""
-        title = "あ" * (MAX_TITLE_BYTES // 3 + 1)
-        assert len(title) < MAX_TITLE_BYTES
-        with pytest.raises(KnowledgeInputError, match="大きすぎます"):
-            parse_knowledge_payload({"kind": "fact", "title": title})
-
-    def test_fields_within_the_limit_are_accepted(self) -> None:
-        """上限の内側は受理すること（拾いすぎの対照）。"""
-        card = parse_knowledge_payload({"kind": "fact", "scope": "global", "title": "t", "body": "A" * 1000})
-        assert len(card.body) == 1000
 
     def test_title_newlines_are_collapsed(self) -> None:
         """title 内部の改行が 1 個の空白へ畳まれること。

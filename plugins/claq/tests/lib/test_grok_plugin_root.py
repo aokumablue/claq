@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
@@ -78,23 +77,6 @@ def _vanishes_after_listing(should_fail: Callable[[Path], bool], hits: list[Path
     return stack
 
 
-def _from_second_call(name: str) -> Callable[[Path], bool]:
-    """``name`` を含むパスについて、同じパスの 2 回目以降の呼び出しで真になる判定を返す。
-
-    1 回目は is_grok_installed_plugin_root の判定、2 回目は採用時の resolve に当たる。
-    """
-    counts: Counter[str] = Counter()
-
-    def should_fail(path: Path) -> bool:
-        """``name`` を含むパスの呼び出し回数を数え、2 回目以降で真を返す。"""
-        if name not in path.parts:
-            return False
-        counts[str(path)] += 1
-        return counts[str(path)] >= 2
-
-    return should_fail
-
-
 @pytest.mark.parametrize(
     ("relative", "expected"),
     [
@@ -112,10 +94,10 @@ def test_is_grok_installed_plugin_root(tmp_path: Path, relative: str, expected: 
     assert mod.is_grok_installed_plugin_root(path) is expected
 
 
-def test_is_grok_installed_plugin_root_resolve_oserror_returns_false(tmp_path: Path) -> None:
-    """resolve 失敗時は False。"""
-    with patch.object(Path, "resolve", side_effect=OSError()):
-        assert mod.is_grok_installed_plugin_root(tmp_path) is False
+def test_is_grok_installed_plugin_root_propagates_resolve_oserror(tmp_path: Path) -> None:
+    """resolve の失敗は False にせず、そのまま伝える（grok.sh が原因を表示する）。"""
+    with patch.object(Path, "resolve", side_effect=OSError("loop")), pytest.raises(OSError, match="loop"):
+        mod.is_grok_installed_plugin_root(tmp_path)
 
 
 class TestFindLatestInstalledClaq:
@@ -151,13 +133,13 @@ class TestFindLatestInstalledClaq:
         """探索先が無ければ None。"""
         assert mod.find_latest_installed_claq(tmp_path / "nope") is None
 
-    def test_iterdir_oserror_returns_none(self, tmp_path: Path) -> None:
-        """探索先の iterdir が OSError なら None。"""
+    def test_iterdir_oserror_is_propagated(self, tmp_path: Path) -> None:
+        """探索先を読めなければ、None にせずそのまま伝える。"""
         installed = tmp_path / "installed"
         installed.mkdir()
 
-        with _failing("iterdir", lambda path: path == installed, OSError()):
-            assert mod.find_latest_installed_claq(installed) is None
+        with _failing("iterdir", lambda path: path == installed, OSError("denied")), pytest.raises(OSError):
+            mod.find_latest_installed_claq(installed)
 
     def test_vanished_candidate_is_excluded(self, tmp_path: Path) -> None:
         """stat に失敗した候補は除外し、残りから最新を返す（消える側を新しくして、除外されなければ選ばれる状況にする）。"""
@@ -180,29 +162,17 @@ class TestFindLatestInstalledClaq:
 
 
 @pytest.mark.parametrize(
-    ("plugin_root", "env_root", "expected"),
-    [
-        ("claq-explicit", None, "claq-explicit"),
-        (None, "claq-env", "claq-env"),
-        ("claq-explicit", "claq-env", "claq-explicit"),
-        ("dev", None, "claq-newest"),
-        (None, "claq-empty", "claq-newest"),
-    ],
-    ids=["explicit-installed", "env-installed", "explicit-before-env", "dev-tree-ignored", "env-without-launcher"],
+    ("env_root", "expected"),
+    [("claq-env", "claq-env"), ("dev", "claq-newest"), ("claq-empty", "claq-newest"), (None, "claq-newest")],
+    ids=["env-installed", "dev-tree-ignored", "env-without-launcher", "no-env"],
 )
 def test_symlink_target_resolution_order(
-    tmp_path: Path,
-    link: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    plugin_root: str | None,
-    env_root: str | None,
-    expected: str,
+    tmp_path: Path, link: Path, monkeypatch: pytest.MonkeyPatch, env_root: str | None, expected: str
 ) -> None:
-    """リンク先は plugin_root → CLAUDE_PLUGIN_ROOT → 最新インストールの順で、installed かつ launcher 付きだけを採る。
+    """リンク先は CLAUDE_PLUGIN_ROOT → 最新インストールの順で、installed かつ launcher 付きだけを採る。
 
-    最新の claq-newest を囮にして、明示・環境変数の行が「最新を選んだだけ」で通らないようにする。
+    最新の claq-newest を囮にして、環境変数の行が「最新を選んだだけ」で通らないようにする。
     """
-    _make_installed_plugin(tmp_path, "claq-explicit", 1_000)
     _make_installed_plugin(tmp_path, "claq-env", 1_000)
     _make_installed_plugin(tmp_path, "claq-newest", 3_000)
     (tmp_path / ".grok" / "installed-plugins" / "claq-empty").mkdir()
@@ -214,29 +184,13 @@ def test_symlink_target_resolution_order(
 
     if env_root is not None:
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(locate(env_root)))
-    root_arg = locate(plugin_root) if plugin_root is not None else None
+    else:
+        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
 
-    result = mod.ensure_grok_plugin_root_symlink(plugin_root=root_arg, home=tmp_path, link_path=link)
+    result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
 
     assert result == locate(expected).resolve()
     assert link.resolve() == result
-
-
-@pytest.mark.parametrize("source", ["plugin_root", "env"])
-def test_candidate_resolve_oserror_falls_back_to_latest(
-    tmp_path: Path, link: Path, monkeypatch: pytest.MonkeyPatch, source: str
-) -> None:
-    """明示 plugin_root・CLAUDE_PLUGIN_ROOT の採用時 resolve が失敗したら installed-plugins 探索へ進む。"""
-    candidate = _make_installed_plugin(tmp_path, "claq-candidate", 1_000)
-    real = _make_installed_plugin(tmp_path, "claq-real", 2_000)
-    if source == "env":
-        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(candidate))
-    root_arg = candidate if source == "plugin_root" else None
-
-    with _failing("resolve", _from_second_call(candidate.name), OSError()):
-        result = mod.ensure_grok_plugin_root_symlink(plugin_root=root_arg, home=tmp_path, link_path=link)
-
-    assert result == real.resolve()
 
 
 def test_returns_none_without_installed(tmp_path: Path, link: Path) -> None:
@@ -286,41 +240,51 @@ def test_existing_link_state(
         assert link.is_dir() and not link.is_symlink()
 
 
+def test_vanished_candidate_returns_none(tmp_path: Path, link: Path) -> None:
+    """列挙の後に唯一の候補が消えていたら None を返す（stat 競合を入口まで貫通させない）。"""
+    target = _make_installed_plugin(tmp_path)
+    hits: list[Path] = []
+
+    with _vanishes_after_listing(lambda path: path == target, hits):
+        assert mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link) is None
+    assert hits
+
+
+def test_unresolvable_existing_symlink_is_replaced(tmp_path: Path, link: Path) -> None:
+    """解決できない既存の symlink（リンク先が無い・ループ）は張り替える。"""
+    target = _make_installed_plugin(tmp_path)
+    link.parent.mkdir(parents=True)
+    link.symlink_to(link.parent / "missing")
+
+    with _failing("resolve", lambda path: path == link, OSError()):
+        result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
+
+    assert result == target.resolve()
+    assert link.is_symlink()
+    assert link.resolve() == target.resolve()
+
+
 @pytest.mark.parametrize(
-    ("prepare", "method", "should_fail", "exc", "replaced"),
+    ("prepare", "method", "should_fail"),
     [
-        (None, "resolve", lambda path, link: path.name.startswith("claq-"), OSError(), False),
-        (None, "stat", lambda path, link: path.name.startswith("claq-"), FileNotFoundError(2, "gone"), False),
-        (None, "symlink_to", lambda path, link: True, OSError(), False),
-        (lambda link: link.symlink_to(link.parent / "missing"), "resolve", lambda path, link: path == link, OSError(), True),
-        (lambda link: link.mkdir(), "iterdir", lambda path, link: path == link, OSError(), False),
+        (None, "resolve", lambda path, link: path.name.startswith("claq-")),
+        (None, "symlink_to", lambda path, link: True),
+        (lambda link: link.mkdir(), "iterdir", lambda path, link: path == link),
     ],
-    ids=["found-resolve-fails", "candidate-vanishes", "symlink-to-fails", "unresolvable-symlink", "dir-iterdir-fails"],
+    ids=["found-resolve-fails", "symlink-to-fails", "dir-iterdir-fails"],
 )
-def test_os_errors_are_swallowed(
+def test_os_errors_are_propagated(
     tmp_path: Path,
     link: Path,
     prepare: Callable[[Path], object] | None,
     method: str,
     should_fail: Callable[[Path, Path], bool],
-    exc: OSError,
-    replaced: bool,
 ) -> None:
-    """途中の OSError は例外にせず None を返す。既存 symlink の resolve 失敗だけは張り替える。
-
-    candidate-vanishes は stat 競合が入口（grok.sh が呼ぶ ensure_grok_plugin_root_symlink）まで貫通しないことを見る。
-    """
-    target = _make_installed_plugin(tmp_path)
+    """解決・リンク作成の OSError は None にせず、そのまま伝える（grok.sh が原因を表示する）。"""
+    _make_installed_plugin(tmp_path)
     if prepare is not None:
         link.parent.mkdir(parents=True)
         prepare(link)
 
-    with _failing(method, lambda path: should_fail(path, link), exc):
-        result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
-
-    if replaced:
-        assert result == target.resolve()
-        assert link.is_symlink()
-        assert link.resolve() == target.resolve()
-    else:
-        assert result is None
+    with _failing(method, lambda path: should_fail(path, link), OSError("injected")), pytest.raises(OSError):
+        mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)

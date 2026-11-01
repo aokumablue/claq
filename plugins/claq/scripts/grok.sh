@@ -57,7 +57,11 @@ import sys
 
 from claq.lib.grok_plugin_root import ensure_grok_plugin_root_symlink
 
-result = ensure_grok_plugin_root_symlink()
+try:
+    result = ensure_grok_plugin_root_symlink()
+except OSError as err:
+    print(f"could not link ~/.grok/plugins/claq: {err}", file=sys.stderr)
+    sys.exit(1)
 if not result:
     print("could not link ~/.grok/plugins/claq", file=sys.stderr)
     sys.exit(1)

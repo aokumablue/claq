@@ -118,17 +118,18 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
 
 
 def actor_identity() -> str:
-    """監査ログ用の実行ユーザー識別子を返す（クロスプラットフォーム）。
+    """監査ログ用の実行ユーザー識別子を返す。
 
-    ``os.getuid()`` は Windows に無く、``mem promote`` が「active にしたのに監査ログを
-    書けず非 0 終了」という部分成功になりうるため ``getpass.getuser()`` を使う。
-    どこからも解決できない環境（Python 3.13+ は ``OSError``）では ``"unknown"`` を返す
-    — 監査ログ用の識別子が取れないことを理由に本処理を失敗させない。
+    POSIX は uid（``os.getuid()`` は失敗しない）。uid の無い Windows は ``getpass.getuser()``。
+    ``mem promote`` は DB を変える前にこれを呼ぶので、取れなければ状態を変えずに失敗する。
+
+    Raises:
+        OSError: Windows で利用者名を解決できない場合。
     """
-    try:
-        return getpass.getuser()
-    except (OSError, KeyError):
-        return "unknown"
+    getuid = getattr(os, "getuid", None)
+    if getuid is not None:
+        return f"uid={getuid()}"
+    return getpass.getuser()
 
 
 def get_datetime_string() -> str:

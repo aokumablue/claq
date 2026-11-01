@@ -373,15 +373,6 @@ class TestContext:
         with Database(tmp_path / "mem.db") as db:
             assert [repo.root_path for repo in db.list_repos()] == [str(workdir.resolve())]
 
-    def test_failure_is_swallowed_and_injects_nothing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """組み立てに失敗してもフックを壊さず注入ゼロに倒す。"""
-        # 注入できるカードを置く。パッチが外れて本物が走れば注入が出るので、空であることが失敗の握り潰しを示す。
-        _seed(tmp_path, key="g", title="global card")
-        stub = _always_raise("db broken")
-        monkeypatch.setattr(cmd_context, "_build_context", stub)
-        assert self._inject(monkeypatch, tmp_path) == ""
-        assert len(stub.calls) == 1
-
 
 class TestHandoff:
     """handoff コマンド（SessionEnd 引き継ぎ記録経路）。"""
@@ -457,14 +448,15 @@ class TestHandoff:
 
         assert self._sessions(tmp_path) == []
 
-    def test_failure_is_swallowed_and_keeps_exit_code_0(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """記録に失敗してもフックを壊さず終了コード 0 を保つ。"""
+    def test_failure_is_reported(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """記録に失敗したら exit 1 と stderr の原因で知らせる（--bg では bg ログに残る）。"""
         stub = _always_raise("db broken")
         monkeypatch.setattr(cmd_context, "_record_handoff", stub)
         payload = {"session_id": "s1", "handoff": "引き継ぎ"}
 
-        self._run(monkeypatch, tmp_path, payload)
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["handoff"], payload)
 
+        assert (stdout, stderr, exit_code) == ("", "コマンド handoff 失敗: db broken\n", 1)
         assert [call_args[1] for call_args, _ in stub.calls] == [payload]
         # パッチが外れて本物が走れば sessions に行が残る。
         assert self._sessions(tmp_path) == []

@@ -38,7 +38,6 @@ __all__ = [
 ]
 
 _FENCE = "---"
-_MAX_DEPTH = 32
 _FLOW_END = ",]}"
 _UNSUPPORTED_PREFIXES = ("&", "*", "!")
 _NULL_LITERALS = frozenset({"", "~", "null", "Null", "NULL"})
@@ -113,22 +112,20 @@ def split_frontmatter(content: str) -> str:
     raise UnterminatedFrontmatterError("frontmatter の終了 --- がありません")
 
 
-def parse_yaml(text: str, *, lenient: bool = False) -> object:
+def parse_yaml(text: str) -> object:
     """YAML のサブセットを解析して Python の値へ変換する。
 
     Args:
         text: 解析対象のテキスト（``\\n`` 区切りの行として解釈する）。
-        lenient: True のとき解釈できないエントリを読み飛ばして部分結果を返す。
-            このモードでは :class:`FrontmatterError` を一切送出しない。
 
     Returns:
         ``dict`` / ``list`` / ``str`` / ``int`` / ``float`` / ``bool`` / ``None`` のいずれか。
         内容が空なら ``None``。
 
     Raises:
-        FrontmatterError: ``lenient`` が False で構文を解釈できない場合。
+        FrontmatterError: 構文を解釈できない場合。
     """
-    return _Parser(text.split("\n"), lenient=lenient).parse()
+    return _Parser(text.split("\n")).parse()
 
 
 def _is_blank(line: str) -> bool:
@@ -140,16 +137,6 @@ def _is_blank(line: str) -> bool:
 def _indent_width(line: str) -> int:
     """行頭の空白とタブの合計文字数を返す（タブ検査はしない）。"""
     return len(line) - len(line.lstrip(" \t"))
-
-
-def _check_depth(depth: int) -> None:
-    """ネスト深さが上限を超えていないか検査する。
-
-    Raises:
-        FrontmatterError: 深さが上限を超えた場合。
-    """
-    if depth > _MAX_DEPTH:
-        raise FrontmatterError(f"ネストが深すぎます（上限 {_MAX_DEPTH}）")
 
 
 def _check_unsupported(text: str) -> None:
@@ -411,10 +398,9 @@ def _read_flow_key(text: str, index: int) -> tuple[str, int]:
 class _Parser:
     """行リストを先頭から消費して YAML サブセットを解析する再帰下降パーサ。"""
 
-    def __init__(self, lines: list[str], *, lenient: bool) -> None:
-        """解析対象の行リストと寛容モードの有無を保持する。"""
+    def __init__(self, lines: list[str]) -> None:
+        """解析対象の行リストを保持する。"""
         self.lines = lines
-        self.lenient = lenient
         self.pos = 0
 
     def parse(self) -> object:
@@ -422,14 +408,9 @@ class _Parser:
         self._skip_blank_lines()
         if self.pos >= len(self.lines):
             return None
-        try:
-            value = self._parse_node(self._indent_of(self.lines[self.pos]), 1)
-        except FrontmatterError:
-            if not self.lenient:
-                raise
-            return None
+        value = self._parse_node(self._indent_of(self.lines[self.pos]))
         self._skip_blank_lines()
-        if self.pos < len(self.lines) and not self.lenient:
+        if self.pos < len(self.lines):
             raise FrontmatterError("最上位ブロックより浅いインデントの行があります")
         return value
 
@@ -449,71 +430,44 @@ class _Parser:
             raise FrontmatterError("インデントにタブは使えません")
         return width
 
-    def _recover(self, start: int, indent: int) -> None:
-        """解析に失敗したエントリを読み飛ばし、次の同階層行まで進める。
-
-        必ず開始行の次から再開し、続くより深いインデントの行を捨てる。
-        """
-        self.pos = start + 1
-        while self.pos < len(self.lines):
-            line = self.lines[self.pos]
-            if line.strip() != "" and _indent_width(line) <= indent:
-                break
-            self.pos += 1
-
-    def _parse_node(self, indent: int, depth: int) -> object:
+    def _parse_node(self, indent: int) -> object:
         """指定インデントで始まるブロックノードを解析する。"""
-        _check_depth(depth)
         rest = self.lines[self.pos][indent:]
         if rest.rstrip() == "-" or rest.startswith("- "):
-            return self._parse_sequence(indent, depth)
+            return self._parse_sequence(indent)
         if rest.startswith("? ") or _find_key_separator(rest) is not None:
-            return self._parse_mapping(indent, depth)
+            return self._parse_mapping(indent)
         self.pos += 1
-        return self._parse_value(rest, indent - 1, depth)
+        return self._parse_value(rest, indent - 1)
 
-    def _block_entries(self, indent: int, depth: int, parse_entry: Callable[[int, int], object]) -> Iterator[object]:
+    def _block_entries(self, indent: int, parse_entry: Callable[[int], object]) -> Iterator[object]:
         """同一インデントに並ぶブロックのエントリを順に解析して返す。
 
-        寛容モードでは解釈できないエントリを読み飛ばす。
-
         Raises:
-            FrontmatterError: 厳格モードでエントリを解釈できない場合。
+            FrontmatterError: エントリを解釈できない場合。
         """
         while True:
             self._skip_blank_lines()
             if self.pos >= len(self.lines) or _indent_width(self.lines[self.pos]) < indent:
                 return
-            start = self.pos
-            try:
-                entry = parse_entry(indent, depth)
-            except FrontmatterError:
-                if not self.lenient:
-                    raise
-                self._recover(start, indent)
-                continue
-            yield entry
+            yield parse_entry(indent)
 
-    def _parse_mapping(self, indent: int, depth: int) -> dict[str, object]:
+    def _parse_mapping(self, indent: int) -> dict[str, object]:
         """同一インデントに並ぶ ``key: value`` を辞書として解析する。
 
         Raises:
-            FrontmatterError: 厳格モードでエントリを解釈できない、またはキーが重複した場合。
+            FrontmatterError: エントリを解釈できない、またはキーが重複した場合。
         """
         result: dict[str, object] = {}
-        for key, value in self._block_entries(indent, depth, self._parse_mapping_entry):
-            # 重複キーは lenient でも誤りにする。`lenient` は**解釈できない**
-            # エントリを読み飛ばすための緩和であって、矛盾した宣言を黙認する
-            # ためのものではない。先勝ちで黙認すると、検証器が `tools: Read` を
-            # 見る一方で後勝ちのホストは `tools: Bash` を見る、というパーサ差分に
-            # なる。宣言の意味が読み手ごとに変わる状態は、検証を通り抜ける経路
-            # そのものになる。
+        for key, value in self._block_entries(indent, self._parse_mapping_entry):
+            # 先勝ちで黙認すると、検証器が `tools: Read` を見る一方で後勝ちのホストは
+            # `tools: Bash` を見る、というパーサ差分になる。
             if key in result:
                 raise FrontmatterError(f"キー '{key}' が重複しています")
             result[key] = value
         return result
 
-    def _parse_mapping_entry(self, indent: int, depth: int) -> tuple[str, object]:
+    def _parse_mapping_entry(self, indent: int) -> tuple[str, object]:
         """マッピングの 1 エントリを解析して (キー, 値) を返す。
 
         Raises:
@@ -530,17 +484,17 @@ class _Parser:
             raise FrontmatterError("マッピングの行に ':' がありません")
         key = _parse_key(rest[:separator])
         self.pos += 1
-        return key, self._parse_value(rest[separator + 1 :], indent, depth)
+        return key, self._parse_value(rest[separator + 1 :], indent)
 
-    def _parse_sequence(self, indent: int, depth: int) -> list[object]:
+    def _parse_sequence(self, indent: int) -> list[object]:
         """同一インデントに並ぶ ``- `` エントリをリストとして解析する。
 
         Raises:
             FrontmatterError: 厳格モードでエントリを解釈できない場合。
         """
-        return list(self._block_entries(indent, depth, self._parse_sequence_entry))
+        return list(self._block_entries(indent, self._parse_sequence_entry))
 
-    def _parse_sequence_entry(self, indent: int, depth: int) -> object:
+    def _parse_sequence_entry(self, indent: int) -> object:
         """シーケンスの 1 エントリを解析して値を返す。
 
         ダッシュとその直後の空白を行リスト上で空白へ潰し、要素の内容が始まる桁を
@@ -556,14 +510,14 @@ class _Parser:
         rest = line[indent:]
         if rest.rstrip() == "-":
             self.pos += 1
-            return self._parse_block_value(indent, depth)
+            return self._parse_block_value(indent)
         if not rest.startswith("- "):
             raise FrontmatterError("シーケンス要素は '- ' で始まる必要があります")
         content = indent + len(rest) - len(rest[1:].lstrip(" "))
         self.lines[self.pos] = " " * content + line[content:]
-        return self._parse_node(content, depth + 1)
+        return self._parse_node(content)
 
-    def _parse_block_value(self, base_indent: int, depth: int) -> object:
+    def _parse_block_value(self, base_indent: int) -> object:
         """次行以降のより深いインデントをブロックノードとして解析する。
 
         より深い行が無ければ ``None`` を返す。
@@ -574,9 +528,9 @@ class _Parser:
         child = self._indent_of(self.lines[self.pos])
         if child <= base_indent:
             return None
-        return self._parse_node(child, depth + 1)
+        return self._parse_node(child)
 
-    def _parse_value(self, text: str, base_indent: int, depth: int) -> object:
+    def _parse_value(self, text: str, base_indent: int) -> object:
         """``key:`` の右側テキストから値を解析する。
 
         呼び出し時点で ``self.pos`` は次の行を指している前提。
@@ -584,7 +538,6 @@ class _Parser:
         Args:
             text: 値として解釈するテキスト。
             base_indent: 継続行がこれより深いインデントであることを要求する基準桁。
-            depth: 現在のネスト深さ。
 
         Returns:
             解析した値。
@@ -594,7 +547,7 @@ class _Parser:
         """
         rest = text.strip()
         if rest == "" or rest.startswith("#"):
-            return self._parse_block_value(base_indent, depth)
+            return self._parse_block_value(base_indent)
         if rest[0] in "|>":
             style, chomping = _parse_block_header(rest)
             return self._read_block_scalar(style, chomping, base_indent)
@@ -603,7 +556,7 @@ class _Parser:
             _ensure_no_trailing(rest, end)
             return value
         if rest[0] in "[{":
-            value, end = self._read_flow(rest, 0, depth + 1)
+            value, end = self._read_flow(rest, 0)
             _ensure_no_trailing(rest, end)
             return value
         return self._read_plain_scalar(rest, base_indent)
@@ -664,18 +617,17 @@ class _Parser:
             return body + "\n" * trailing
         return body
 
-    def _read_flow(self, text: str, start: int, depth: int) -> tuple[object, int]:
+    def _read_flow(self, text: str, start: int) -> tuple[object, int]:
         """フローコレクションを解析して (値, 閉じ括弧の次の位置) を返す。
 
         Raises:
-            FrontmatterError: 深さが上限を超えた、または構文が不正な場合。
+            FrontmatterError: 構文が不正な場合。
         """
-        _check_depth(depth)
         if text[start] == "[":
-            return self._read_flow_sequence(text, start, depth)
-        return self._read_flow_mapping(text, start, depth)
+            return self._read_flow_sequence(text, start)
+        return self._read_flow_mapping(text, start)
 
-    def _read_flow_sequence(self, text: str, start: int, depth: int) -> tuple[list[object], int]:
+    def _read_flow_sequence(self, text: str, start: int) -> tuple[list[object], int]:
         """``[a, b]`` 形式のフローシーケンスを解析する。
 
         Raises:
@@ -687,10 +639,10 @@ class _Parser:
             closed, index = _next_flow_entry(text, index, "]", "シーケンス", not items)
             if closed:
                 return items, index
-            value, index = self._read_flow_item(text, index, depth)
+            value, index = self._read_flow_item(text, index)
             items.append(value)
 
-    def _read_flow_mapping(self, text: str, start: int, depth: int) -> tuple[dict[str, object], int]:
+    def _read_flow_mapping(self, text: str, start: int) -> tuple[dict[str, object], int]:
         """``{k: v}`` 形式のフローマッピングを解析する。
 
         キーの重複はモードに関わらずエラーにする（寛容モードではエントリごと読み飛ばされる）。
@@ -708,12 +660,12 @@ class _Parser:
             index = _skip_spaces(text, index)
             if index >= len(text) or text[index] != ":":
                 raise FrontmatterError("フローマッピングのキーに ':' が続いていません")
-            value, index = self._read_flow_item(text, _skip_spaces(text, index + 1), depth)
+            value, index = self._read_flow_item(text, _skip_spaces(text, index + 1))
             if key in result:
                 raise FrontmatterError(f"キー '{key}' が重複しています")
             result[key] = value
 
-    def _read_flow_item(self, text: str, index: int, depth: int) -> tuple[object, int]:
+    def _read_flow_item(self, text: str, index: int) -> tuple[object, int]:
         """フローコレクションの要素を 1 つ読み取り (値, 次の位置) を返す。
 
         Raises:
@@ -725,7 +677,7 @@ class _Parser:
         if char in "'\"":
             value, end = _read_quoted(text, index)
         elif char in "[{":
-            value, end = self._read_flow(text, index, depth + 1)
+            value, end = self._read_flow(text, index)
         else:
             end = index
             while end < len(text) and text[end] not in _FLOW_END:

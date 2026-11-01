@@ -46,8 +46,7 @@ _WATCHDOG_SCRIPT = """
 import os, signal, subprocess, sys, time
 
 timeout, kill_after = float(sys.argv[1]), float(sys.argv[2])
-log_path = os.environ.get("CLAQ_BG_LOG_PATH")
-log_file = open(log_path, "ab") if log_path else subprocess.DEVNULL
+log_file = open(os.environ["CLAQ_BG_LOG_PATH"], "ab")
 has_process_groups = hasattr(os, "killpg")
 if has_process_groups:
     spawn_kwargs = {"start_new_session": True}
@@ -115,23 +114,19 @@ def detached_spawn_kwargs() -> dict[str, Any]:
     }
 
 
-def _detach_log_path() -> Path | None:
+def _detach_log_path() -> Path:
     """detach した子プロセスの stdout/stderr を追記するログファイルのパスを返す。
 
     DEVNULL に捨てると、起動受付成功と処理成功の区別が付かなくなる。日付ごとに
-    1 ファイルへ追記する。best-effort の diagnostics であり、ログディレクトリを
-    作れない場合も detach 自体は継続させる。
+    1 ファイルへ追記する。
 
     Returns:
-        `~/.claq/logs/bg-YYYY-MM-DD.log` の Path。作成失敗時は None。
+        `~/.claq/logs/bg-YYYY-MM-DD.log` の Path。
 
     Raises:
-        例外は発生しません。
+        OSError: ログディレクトリを作れない場合（detach の起動を失敗にする）。
     """
-    try:
-        log_dir = ensure_private_dir(get_claq_dir() / "logs")
-    except OSError:
-        return None
+    log_dir = ensure_private_dir(get_claq_dir() / "logs")
     return log_dir / f"bg-{datetime.now():%Y-%m-%d}.log"
 
 
@@ -169,7 +164,7 @@ def gc_detach_stdin_orphans() -> None:
             continue
 
 
-def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None = None) -> bool:
+def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None = None) -> None:
     """コマンドを detached（新セッション）で起動し stdin を一時ファイル経由で渡す。
 
     起動前に `gc_detach_stdin_orphans` で過去の孤児を掃除する。一時ファイルは
@@ -177,36 +172,28 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
     作らないよう同一 fd を seek(0) して子へ継承し、起動直後に unlink する。
 
     子は `_WATCHDOG_SCRIPT` でラップして DETACH_TIMEOUT_SECONDS で停止させる。
-    子の stdout/stderr は `CLAQ_BG_LOG_PATH` で渡したログへ追記させる（ログを
-    作れなければ DEVNULL）。戻り値は起動受付の成否であり、子の処理結果ではない。
+    子の stdout/stderr は `CLAQ_BG_LOG_PATH` で渡したログへ追記させる。戻ることは
+    起動受付の成功を表し、子の処理結果ではない。
 
     Args:
         cmd: subprocess に渡すコマンドリスト。
         raw_stdin: 子プロセスへ渡す stdin の内容。
         env: 子プロセスの環境変数。None なら親の環境を継承する。
 
-    Returns:
-        起動に成功した場合 True、OSError 時は False。
-
     Raises:
-        例外は発生しません。
+        OSError: 一時ファイル・ログディレクトリを作れない、または起動できない場合。
     """
     gc_detach_stdin_orphans()
-    try:
-        private_dir = ensure_private_dir(get_claq_dir())
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w+", encoding="utf-8", suffix=_DETACH_STDIN_SUFFIX, dir=private_dir, delete=False
-        )
-    except OSError:
-        return False
+    private_dir = ensure_private_dir(get_claq_dir())
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w+", encoding="utf-8", suffix=_DETACH_STDIN_SUFFIX, dir=private_dir, delete=False
+    )
     try:
         tmp.write(raw_stdin)
         tmp.flush()
         tmp.seek(0)
         child_env = dict(os.environ if env is None else env)
-        log_path = _detach_log_path()
-        if log_path is not None:
-            child_env["CLAQ_BG_LOG_PATH"] = str(log_path)
+        child_env["CLAQ_BG_LOG_PATH"] = str(_detach_log_path())
         subprocess.Popen(
             [
                 sys.executable,
@@ -222,9 +209,6 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
             env=child_env,
             **detached_spawn_kwargs(),
         )
-        return True
-    except OSError:
-        return False
     finally:
         tmp.close()
         with contextlib.suppress(OSError):

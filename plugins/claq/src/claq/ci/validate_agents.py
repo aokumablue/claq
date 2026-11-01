@@ -23,7 +23,7 @@ def _validate_agent_file(file_path: Path) -> bool:
         return True
     frontmatter = extract_frontmatter(content)
     if frontmatter is None:
-        emit_error(f"{file_path.name} - フロントマターがありません")
+        emit_error(f"{file_path.name} - フロントマターが無いか、解析できません")
         return True
     for key in ("name", "description"):
         if not frontmatter.get(key):
@@ -43,19 +43,18 @@ def _validate_agent_file(file_path: Path) -> bool:
     return False
 
 
-def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR, *, optional: bool = False) -> int:
+def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR) -> int:
     """エージェント Markdown ファイルを検証し、JS バリデータと同じメッセージを表示する。
 
     Args:
         agents_dir: 検証するエージェントディレクトリ。
-        optional: True なら対象パスが存在しない場合に検証をスキップして 0 を返す。
 
     Returns:
         終了コード（0 = 合格、1 = 不合格）。
     """
     agents_path = Path(agents_dir)
     if not agents_path.exists():
-        return report_missing("agents ディレクトリ", agents_path, optional)
+        return report_missing("agents ディレクトリ", agents_path)
     files = [entry for entry in agents_path.iterdir() if entry.is_file() and entry.name.endswith(".md")]
     # 全ファイルの誤りを出し切るため、短絡させずに検証する。
     if [file_path for file_path in files if _validate_agent_file(file_path)]:
@@ -67,7 +66,7 @@ def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR, *, optional: bo
 def main(argv: list[str] | None = None) -> int:
     """CLI のエントリポイント。"""
     args = parse_validator_args("Validate agent markdown files", argv, agents_dir=DEFAULT_AGENTS_DIR)
-    return validate_agents(args.agents_dir, optional=args.optional)
+    return validate_agents(args.agents_dir)
 
 
 if __name__ == "__main__":

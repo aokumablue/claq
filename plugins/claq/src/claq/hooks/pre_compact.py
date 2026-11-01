@@ -3,7 +3,7 @@
 トリガー: pre:compact
 入力: なし（圧縮イベントメタデータ）
 出力: 圧縮ログにエントリを追加
-終了: 0（常に成功）
+終了: 0。失敗は例外のまま launcher へ伝わり exit 1（PreCompact をブロックしない非ブロッキングのエラー）
 """
 
 from __future__ import annotations
@@ -21,19 +21,12 @@ def main() -> int:
     """コンパクション発生をログに記録する。
 
     Returns:
-        終了コード。失敗してもフックをブロックしないため常に 0。
-
-    Raises:
-        例外は発生しません。
+        終了コード 0。
     """
-    try:
-        sessions_dir = get_sessions_dir()
-        ensure_dir(sessions_dir)
-        append_file(sessions_dir / "compaction-log.txt", f"[{get_datetime_string()}] Context compaction triggered\n")
-        log("[PreCompact] State saved before compaction")
-    except Exception as err:  # noqa: BLE001 - フックはノンブロッキングのままにする必要がある
-        log(f"[PreCompact] Error: {err}")
-
+    sessions_dir = get_sessions_dir()
+    ensure_dir(sessions_dir)
+    append_file(sessions_dir / "compaction-log.txt", f"[{get_datetime_string()}] Context compaction triggered\n")
+    log("[PreCompact] State saved before compaction")
     return 0
 
 
