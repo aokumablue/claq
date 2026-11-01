@@ -10,12 +10,11 @@ import re
 import shlex
 
 # 1 コマンドに許すシェルトークン数の上限。
-# `block_no_verify` の走査はトークン数の二次で、上限が無いと stdin 上限の内側で
-# hooks.json の timeout（15 秒）を超える入力を作れる。host が kill した hook は
-# exit code を返さず silent fail-open になるため、超過は通さず BLOCKED で返す
-# （docs/adr/hook-failure-direction.md）。最悪の形（`git ` を 4,999 個）で block_no_verify の起動から
-# 終了まで 4.9 秒（Linux・Python 3.13 で実測）で、timeout に対し約 3 倍の余裕。正当なシェルコマンドが
-# この規模になることは実務上ない。
+# 保護フックの走査時間を入力の大きさで抑え、hooks.json の timeout（15 秒）の内側に収める。
+# host が kill した hook は exit code を返さず silent fail-open になるため、超過は通さず
+# BLOCKED で返す（docs/adr/hook-failure-direction.md）。上限内の最悪の形（`git` 4,997 個を `\` で
+# 2 方言にした `sh -c` を 3 つ束ねた 60KB）で、3 つの保護フックとも起動から終了まで 0.2 秒以下
+# （macOS・Python 3.14 で実測）。正当なシェルコマンドがこの規模になることは実務上ない。
 MAX_COMMAND_TOKENS = 5000
 
 # 1 コマンドに許すバイト数の上限。

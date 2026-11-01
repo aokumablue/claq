@@ -90,7 +90,6 @@ config 経由のフック無効化（config key は大小文字を区別せず�
 from __future__ import annotations
 
 import re
-from typing import NamedTuple
 
 from claq.hooks.hook_common import (
     emit_block_output,
@@ -211,30 +210,6 @@ _SENSITIVE_CONFIG_KEY_PREFIXES = (
     "includeif.",
     "alias.",
 )
-
-
-class GitInvocation(NamedTuple):
-    """git 起動トークン以降を解析した結果。
-
-    Attributes:
-        subcommand: 解決できたサブコマンド名。見つからなければ None。
-        flags: 検出したフラグ名のリスト（オプションの値トークンは含まない）。
-        subcommand_certain: サブコマンドの解決結果を信用してよいか。未知の
-            グローバルオプションが値を取る可能性で解決位置がずれ得る場合は
-            False になり、``-n`` 判定を fail-closed に倒す材料になります。
-        config_values: ``-c`` / ``--config-env`` に渡された値文字列
-            （``key=value`` 形式）のリスト。``core.hooksPath`` オーバーライド
-            検出に使います。
-        subcommand_args: サブコマンド確定後に現れた非オプショントークン
-            （値トークンとして消費されたものは含まない）。``git config
-            core.hooksPath <path>`` のような位置引数形式の検出に使う。
-    """
-
-    subcommand: str | None
-    flags: list[str]
-    subcommand_certain: bool
-    config_values: list[str]
-    subcommand_args: list[str]
 
 
 def is_git_invocation(token: str) -> bool:
@@ -359,67 +334,6 @@ def _consume_short_option(
     return consumed, unknown
 
 
-def parse_git_segment(segment: list[str]) -> GitInvocation:
-    """``git`` で始まるトークン列からサブコマンドとフラグ一覧を取り出す。
-
-    ``git`` の後ろに任意個現れるグローバルオプション（値を取るものを含む）を
-    読み飛ばし、最初の非オプション語をサブコマンドとみなします。オプションの
-    値トークンはフラグ一覧に含めません（``git commit -m "-n"`` のような
-    値をフラグと誤認しないため）。``--`` 以降は pathspec とみなし走査を
-    打ち切ります。
-
-    サブコマンド解決前に既知でないグローバルオプションが現れた場合、それが
-    値を取るかどうかを判定できずサブコマンド位置がずれるため
-    ``subcommand_certain=False`` を返します。``-c`` / ``--config-env`` に
-    渡された値は `GitInvocation.config_values` に集約します
-    （``core.hooksPath`` オーバーライド検出用）。サブコマンド
-    確定後に現れた非オプショントークンは `GitInvocation.subcommand_args`
-    に集約します（``git config core.hooksPath <path>`` の位置引数形式検出用）。
-
-    Args:
-        segment: 先頭要素が ``git`` 起動トークンであるトークンリスト。
-
-    Returns:
-        解析結果の `GitInvocation`。サブコマンドが見つからない場合
-        `GitInvocation.subcommand` は None です。
-
-    Raises:
-        例外は発生しません。
-    """
-    subcommand: str | None = None
-    flags: list[str] = []
-    config_values: list[str] = []
-    subcommand_args: list[str] = []
-    certain = True
-    index = 1
-    while index < len(segment):
-        token = segment[index]
-        index += 1
-        next_token = segment[index] if index < len(segment) else None
-        if token == "--":
-            break
-        if token.startswith("--"):
-            consumed, unknown = _consume_long_option(token, next_token, flags, config_values)
-        elif token.startswith("-") and len(token) > 1:
-            consumed, unknown = _consume_short_option(token, next_token, flags, config_values)
-        else:
-            consumed, unknown = 0, False
-            if subcommand is None:
-                subcommand = token
-            else:
-                subcommand_args.append(token)
-        index += consumed
-        if unknown and subcommand is None:
-            certain = False
-    return GitInvocation(
-        subcommand=subcommand,
-        flags=flags,
-        subcommand_certain=certain,
-        config_values=config_values,
-        subcommand_args=subcommand_args,
-    )
-
-
 def _is_no_verify_flag(flag: str) -> bool:
     """フラグが ``--no-verify``（git が受理する短縮形を含む）かを判定する。
 
@@ -483,8 +397,8 @@ _GIT_CONFIG_INJECTION_ENV_NAMES = frozenset(
 )
 
 
-def _is_literal_env_hooks_path_override(prefix_tokens: list[str]) -> bool:
-    """git 起動前の literal 環境変数代入に ``core.hooksPath`` オーバーライドがあるか判定する。
+class _EnvAssignmentScan:
+    """git 起動より前の literal 環境変数代入に ``core.hooksPath`` の差し替えがあるかを、左から 1 回で追う。
 
     **前置トークンを全部走査する。** 既知のラッパ（`sudo` / `env` 等）とそのオプション
     だけを読み飛ばす形にすると、``env -C /tmp GIT_CONFIG_GLOBAL=/tmp/e git commit`` の
@@ -496,27 +410,50 @@ def _is_literal_env_hooks_path_override(prefix_tokens: list[str]) -> bool:
     この誤検出は受容し、回避は代入を外すか別セグメントに分けることである。
 
     ``sh -c`` の内側へ再帰するときは、外側セグメントでシェル起動より前にある代入が環境として
-    内側の git へ引き継がれるため、呼び出し側が ``prefix_tokens`` の先頭へ連結して渡す。
+    内側の git へ引き継がれるため、呼び出し側が外側の前置を先に読ませる。
 
     ``GIT_CONFIG_KEY_<n>`` は key が機微なら ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_VALUE_<n>``
     との整合を問わず deny する（不完全・矛盾する triplet を安全とみなさない）。同名の
     代入が複数あれば後のものを採る。
-
-    Args:
-        prefix_tokens: セグメント内で git 起動トークンより前にあるトークン列。
-
-    Returns:
-        ``core.hooksPath`` を上書きしうる literal 代入があれば True。
-
-    Raises:
-        例外は発生しません。
     """
-    assignments = dict(match.groups() for token in prefix_tokens if (match := _ENV_ASSIGNMENT_RE.match(token)))
-    if _GIT_CONFIG_INJECTION_ENV_NAMES & assignments.keys():
-        return True
-    return any(
-        _GIT_CONFIG_KEY_INDEX_RE.match(name) and is_sensitive_config_key(value) for name, value in assignments.items()
-    )
+
+    def __init__(self, inherited_prefix: tuple[str, ...]) -> None:
+        """外側セグメントから引き継いだ前置を読んだ状態で始める。
+
+        Args:
+            inherited_prefix: 外側セグメントでシェル起動より前にあるトークン列（再帰先でのみ非空）。
+        """
+        self._injection = False
+        self._key_is_sensitive: dict[str, bool] = {}
+        self._sensitive_keys = 0
+        for token in inherited_prefix:
+            self.add(token)
+
+    def add(self, token: str) -> None:
+        """git 起動より前のトークンを 1 つ読む。
+
+        Args:
+            token: セグメント内のトークン。代入の形でなければ何もしない。
+        """
+        match = _ENV_ASSIGNMENT_RE.match(token)
+        if match is None:
+            return
+        name, value = match.groups()
+        if name in _GIT_CONFIG_INJECTION_ENV_NAMES:
+            self._injection = True
+        elif _GIT_CONFIG_KEY_INDEX_RE.match(name):
+            sensitive = is_sensitive_config_key(value)
+            self._sensitive_keys += sensitive - self._key_is_sensitive.get(name, False)
+            self._key_is_sensitive[name] = sensitive
+
+    def overrides_hooks_path(self) -> bool:
+        """ここまでに読んだ代入が ``core.hooksPath`` を上書きしうるかを返す。
+
+        Returns:
+            config の読み込み元を決める変数への代入、または機微な key を指す
+            ``GIT_CONFIG_KEY_<n>`` の代入（後勝ち）があれば True。
+        """
+        return self._injection or self._sensitive_keys > 0
 
 
 # `git config` の read-only であることが確定しているフラグ。
@@ -530,77 +467,135 @@ _GIT_CONFIG_NEW_READ_OPS = frozenset({"get", "list"})
 _GIT_CONFIG_NEW_WRITE_OPS = frozenset({"set", "unset", "add"})
 
 
-def _is_config_sensitive_key_mutation(invocation: GitInvocation) -> bool:
-    """``git config`` 呼び出しが機微な config key への書込み・削除操作かを判定する。
+class _GitScan:
+    """1 セグメントの各 git 起動を、起動トークン以降をセグメント末尾まで読んだ結果で判定する。
 
-    ``git config core.hooksPath <path>`` のような通常の subcommand 呼び出しを検査する。
-    読み取り専用と確定できる形（``--get`` 系、新構文の ``get``/``list``、値を伴わない
-    legacy query）だけを allow し、それ以外は deny する（誤検出 > 誤通過）。
+    起動トークン以降は次の規則で読む。``git`` の後ろに任意個現れるグローバルオプション
+    （値を取るものを含む）を読み飛ばし、最初の非オプション語をサブコマンド、それより後ろの
+    非オプション語を位置引数とする。オプションの値トークンはフラグに含めない
+    （``git commit -m "-n"`` の値をフラグと誤認しないため）。``--`` 以降は pathspec とみなして
+    読まない。サブコマンドより前に既知でないグローバルオプションが現れたら、それが値を取るか
+    判定できずサブコマンド位置がずれうるので、サブコマンドを確定できない扱いにする。
+    ``-c`` / ``--config-env`` の値は ``core.hooksPath`` 等の差し替えの検出に、位置引数は
+    ``git config core.hooksPath <path>`` の検出に使う。
 
-    Args:
-        invocation: git 起動トークン以降の解析結果。
-
-    Returns:
-        書込み・削除・曖昧な操作なら True。
-
-    Raises:
-        例外は発生しません。
+    起動位置ごとに末尾まで読み直すと ``git git git ...`` でトークン数の二次になり、
+    ``sh -c`` の束と 2 方言の掛け算で hook の timeout を超える（60KB の入力で 15.8 秒を実測。
+    timeout で kill された hook は host に許可として扱われる）。値として消費するトークン数は
+    そのトークンと次のトークンだけで決まり読み始めの位置によらないので、位置 j から同じ歩幅で
+    末尾まで読んだときの集計を右から左へ 1 回で作り、各起動はその次の位置の集計を引く。
     """
-    if invocation.subcommand != "config":
-        return False
 
-    args = invocation.subcommand_args
-    new_op: str | None = None
-    if args and args[0] in _GIT_CONFIG_NEW_READ_OPS | _GIT_CONFIG_NEW_WRITE_OPS:
-        new_op, args = args[0], args[1:]
+    def __init__(self, segment: list[str]) -> None:
+        """位置ごとの集計を右から左へ作る。
 
-    if not any(is_sensitive_config_key(arg) for arg in args):
-        return False
+        Args:
+            segment: シェル区切りで分けた 1 セグメントのトークン列。
+        """
+        self._segment = segment
+        end = len(segment)
+        # 末尾（位置 end）と ``--`` の位置は、そこから先を読まないので空の集計のまま。
+        size = end + 1
+        self._next = [end] * size
+        self._no_verify = [False] * size
+        self._short_n = [False] * size
+        self._sensitive_config_value = [False] * size
+        self._read_only_flag = [False] * size
+        self._write_flag = [False] * size
+        self._word: list[int | None] = [None] * size
+        self._unknown_before_word = [False] * size
+        self._sensitive_word = [False] * size
+        # 位置引数が 2 つ以上あるかだけを見るので、語の数は 2 で打ち切る。
+        self._words_up_to_two = [0] * size
+        for j in range(end - 1, -1, -1):
+            token = segment[j]
+            if token == "--":
+                continue
+            next_token = segment[j + 1] if j + 1 < end else None
+            flags: list[str] = []
+            config_values: list[str] = []
+            if token.startswith("--"):
+                consumed, unknown = _consume_long_option(token, next_token, flags, config_values)
+            elif token.startswith("-") and len(token) > 1:
+                consumed, unknown = _consume_short_option(token, next_token, flags, config_values)
+            else:
+                consumed, unknown = 0, False
+            # オプションは必ずフラグを 1 つ以上残すので、フラグが無ければ非オプション語。
+            is_word = not flags
+            k = min(j + 1 + consumed, end)
+            self._next[j] = k
+            self._no_verify[j] = self._no_verify[k] or any(_is_no_verify_flag(flag) for flag in flags)
+            self._short_n[j] = self._short_n[k] or _BYPASS_SHORT_FLAG in flags
+            self._sensitive_config_value[j] = self._sensitive_config_value[k] or any(
+                is_sensitive_config_key(value.split("=", 1)[0]) for value in config_values
+            )
+            self._read_only_flag[j] = self._read_only_flag[k] or any(
+                flag in _GIT_CONFIG_READ_ONLY_FLAGS for flag in flags
+            )
+            self._write_flag[j] = self._write_flag[k] or any(flag in _GIT_CONFIG_WRITE_FLAGS for flag in flags)
+            self._word[j] = j if is_word else self._word[k]
+            self._unknown_before_word[j] = not is_word and (unknown or self._unknown_before_word[k])
+            self._sensitive_word[j] = self._sensitive_word[k] or (is_word and is_sensitive_config_key(token))
+            self._words_up_to_two[j] = min(2, self._words_up_to_two[k] + is_word)
 
-    if new_op is not None:
-        return new_op in _GIT_CONFIG_NEW_WRITE_OPS
+    def is_bypass_at(self, index: int) -> bool:
+        """位置 ``index`` の git 起動がフックを迂回するかを判定する。
 
-    flags = invocation.flags
-    if any(flag in flags for flag in _GIT_CONFIG_READ_ONLY_FLAGS):
-        return False
-    if any(flag in flags for flag in _GIT_CONFIG_WRITE_FLAGS):
-        return True
+        Args:
+            index: git 起動トークンの位置。
 
-    # legacy syntax: `git config core.hooksPath` （値なし = query）は allow、
-    # `git config core.hooksPath <value>` （値あり = set）は deny。
-    return len(args) >= 2
+        Returns:
+            ``--no-verify``（サブコマンド不問）、``-c`` / ``--config-env`` での機微な key の
+            差し替え、``git config`` での機微な key の書込み、``git commit`` の ``-n``、
+            またはサブコマンドを確定できない状態での ``-n`` なら True。
+        """
+        start = index + 1
+        if self._no_verify[start] or self._sensitive_config_value[start]:
+            return True
+        word = self._word[start]
+        subcommand = self._segment[word] if word is not None else None
+        if word is not None and subcommand == "config" and self._is_sensitive_config_mutation(start, word):
+            return True
+        if not self._short_n[start]:
+            return False
+        return subcommand == "commit" or self._unknown_before_word[start]
 
+    def _is_sensitive_config_mutation(self, start: int, subcommand_index: int) -> bool:
+        """``git config`` 呼び出しが機微な config key への書込み・削除操作かを判定する。
 
-def _is_bypass_invocation(invocation: GitInvocation) -> bool:
-    """解析済み git 起動がフックバイパスかを判定する。
+        読み取り専用と確定できる形（``--get`` 系、新構文の ``get``/``list``、値を伴わない
+        legacy query）だけを allow し、それ以外は deny する（誤検出 > 誤通過）。
 
-    Args:
-        invocation: git 起動トークン以降の解析結果。
+        Args:
+            start: git 起動トークンの次の位置。
+            subcommand_index: サブコマンド ``config`` の位置。
 
-    Returns:
-        ``--no-verify``、``core.hooksPath`` オーバーライド（``-c``/
-        ``--config-env`` 経由、または ``git config`` の書込み操作経由）、
-        ``git commit`` の ``-n``、またはサブコマンド未確定時の ``-n`` なら
-        True。
-
-    Raises:
-        例外は発生しません。
-    """
-    if any(_is_no_verify_flag(flag) for flag in invocation.flags):
-        return True
-    if any(is_sensitive_config_key(value.split("=", 1)[0]) for value in invocation.config_values):
-        return True
-    if _is_config_sensitive_key_mutation(invocation):
-        return True
-    if _BYPASS_SHORT_FLAG not in invocation.flags:
-        return False
-    return invocation.subcommand == "commit" or not invocation.subcommand_certain
+        Returns:
+            書込み・削除・曖昧な操作なら True。
+        """
+        args_start = self._next[subcommand_index]
+        first = self._word[args_start]
+        new_op: str | None = None
+        if first is not None and self._segment[first] in _GIT_CONFIG_NEW_READ_OPS | _GIT_CONFIG_NEW_WRITE_OPS:
+            new_op = self._segment[first]
+            args_start = self._next[first]
+        if not self._sensitive_word[args_start]:
+            return False
+        if new_op is not None:
+            return new_op in _GIT_CONFIG_NEW_WRITE_OPS
+        if self._read_only_flag[start]:
+            return False
+        if self._write_flag[start]:
+            return True
+        # legacy syntax: `git config core.hooksPath` （値なし = query）は allow、
+        # `git config core.hooksPath <value>` （値あり = set）は deny。
+        return self._words_up_to_two[args_start] >= 2
 
 
 def has_bypass_flag(command: str, *, _recursed: bool = False, _inherited_prefix: tuple[str, ...] = ()) -> bool:
     """コマンド文字列に git フックバイパスフラグが含まれるかを判定する。
 
-    全トークンから git 起動トークンを探し、見つかった位置以降を `parse_git_segment` で
+    全トークンから git 起動トークンを探し、見つかった位置以降を `_GitScan` で
     解析する。既知シェルの ``-c`` に渡された文字列引数へは 1 段だけ再帰する。
 
     Args:
@@ -674,13 +669,15 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
     if not parsed_cleanly and _UNPARSED_RAW_BYPASS_RE.search(command):
         return True
     for segment in split_segments(tokens):
+        scan: _GitScan | None = None
+        env = _EnvAssignmentScan(_inherited_prefix)
         for index, token in enumerate(segment):
-            if not is_git_invocation(token):
-                continue
-            if _is_bypass_invocation(parse_git_segment(segment[index:])):
-                return True
-            if _is_literal_env_hooks_path_override([*_inherited_prefix, *segment[:index]]):
-                return True
+            if is_git_invocation(token):
+                if scan is None:
+                    scan = _GitScan(segment)
+                if scan.is_bypass_at(index) or env.overrides_hooks_path():
+                    return True
+            env.add(token)
         if _recursed:
             continue
         wrapper_command = extract_shell_wrapper_command(segment)
@@ -754,8 +751,7 @@ def main() -> int:
     # 先勝ちで 1 キーだけ見ると、複数のコンテナキーを持つ payload で無害な側だけを
     # 検査して素通りさせうるため、全キーを走査する。
     for command in iter_bash_commands(data):
-        # 走査は git トークン数の二次。上限超過を走らせると timeout で host に kill され
-        # silent fail-open になるため、検査しきれない入力は通さず止める。
+        # 検査予算（トークン数・バイト数）を超える入力は走査せず止める（`MAX_COMMAND_TOKENS` のコメント）。
         if command_exceeds_scan_budget(command):
             return emit_block_output(_TOKEN_BUDGET_MESSAGE)
         if has_bypass_flag(command):

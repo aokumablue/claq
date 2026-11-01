@@ -90,6 +90,8 @@ SessionStart の context・handoff、PreCompact などの保護フックでな�
 exit 1 で返し、原因を stderr へ出す。SessionStart は成功したときだけ stdout に JSON を出す。
 Claude Code は正しい JSON を出した hook を終了コードによらず成功として扱うため、失敗時に JSON を
 出すと通知が出ない。stdout が空で exit 1 なら、セッションは続き、stderr の 1 行目つきの通知が出る。
+Copilot CLI では、stdout が空で exit 1 の SessionStart はセッションを止めないが画面へは通知せず、
+`~/.copilot/logs` に ERROR と stderr が残るだけである。
 `claqProtectionDisabled` の印は保護フックが例外で落ちたときだけ出す（保護でない hook の失敗は
 保護の喪失ではない）。
 

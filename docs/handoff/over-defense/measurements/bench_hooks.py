@@ -16,6 +16,7 @@ cases = {
  "5000 tokens 'git'": bash(" ".join(["git"] * 4999)),
  "5000 tokens git commit chain": bash(" && ".join(["git commit -m x"] * 1250)[: 10**9]),
  "5000 tokens quoted": bash(" ".join(['"a b"'] * 4999)),
+ "sh -c x3 'git'x4997 + backslash": bash(" ; ".join(["sh -c '" + " ".join(["git"] * 4997) + " a\\b'"] * 3)),
  "64KiB single token": bash("x" * (64 * 1024 - 10)),
  "64KiB quoted token": bash('"' + "x" * (64 * 1024 - 12) + '"'),
 }

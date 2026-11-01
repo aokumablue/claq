@@ -7,12 +7,13 @@ import os
 import runpy
 import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from claq.hooks import block_no_verify, pre_compact
+from claq.hooks import block_no_verify, pre_compact, shell_tokens
 
 # ``--no-verify``。テストケース表の横幅を抑えるための別名。
 NV = "--no-verify"
@@ -359,34 +360,59 @@ def test_deep_nesting_does_not_fail_open(monkeypatch: pytest.MonkeyPatch, payloa
     assert block_no_verify.main() in expected_codes
 
 
-def test_parse_git_segment_returns_subcommand_and_flags() -> None:
-    """グローバルオプションを読み飛ばしてサブコマンドとフラグを返す。"""
-    invocation = block_no_verify.parse_git_segment(["git", "-C", "/tmp", "--no-pager", "commit", "-am", "msg", "--no-verify"])
-
-    assert invocation.subcommand == "commit"
-    assert invocation.flags == ["-C", "--no-pager", "-a", "-m", "--no-verify"]
-    assert invocation.subcommand_certain is True
+@pytest.mark.parametrize(
+    ("command", "blocked"),
+    [
+        # グローバルオプション（値を取る -C を含む）を読み飛ばしてサブコマンドを commit と解決する。
+        ("git -C /tmp --no-pager commit -am msg --no-verify", True),
+        ("git -C /tmp --no-pager commit -am msg -n", True),
+        ("git -C /tmp --no-pager push -n", False),
+        # -C の値は語ではないので、値の commit をサブコマンドと読まない。
+        ("git -C commit push -n", False),
+    ],
+)
+def test_has_bypass_flag_skips_global_options_to_find_subcommand(command: str, blocked: bool) -> None:
+    """グローバルオプションとその値を読み飛ばした最初の語をサブコマンドとして -n を判定する。"""
+    assert block_no_verify.has_bypass_flag(command) is blocked
 
 
 @pytest.mark.parametrize(
-    ("segment", "certain"),
+    ("command", "blocked"),
     [
         # 既知の boolean グローバルオプションはサブコマンド解決を乱さない。
-        (["git", "--no-pager", "log"], True),
-        (["git", "-p", "log"], True),
-        # 未知の long / short オプションは値を取るか不明なので解決を信用しない（クラスタ内の 1 文字でも未知なら不確定）。
-        (["git", "--future-option", "value", "commit"], False),
-        (["git", "-Z", "value", "commit"], False),
+        ("git --no-pager log -n 5", False),
+        ("git -p log -n 5", False),
+        # 未知の long / short オプションは値を取るか不明なので解決を信用せず、-n を止める（クラスタ内の 1 文字でも未知なら不確定）。
+        ("git --future-option value push -n", True),
+        ("git -Z value push -n", True),
         # サブコマンド解決後の未知オプションは解決結果に影響しない。
-        (["git", "commit", "--future-option", "value"], True),
-        (["git", "push", "-Z"], True),
+        ("git push --future-option value -n", False),
+        ("git push -Z -n", False),
         # 値が = で結合された未知オプションは次トークンを食わないので確定。
-        (["git", "--future-option=value", "commit"], True),
+        ("git --future-option=value push -n", False),
     ],
 )
-def test_parse_git_segment_subcommand_certainty(segment: list[str], certain: bool) -> None:
-    """未知グローバルオプションの有無でサブコマンド確度を切り替える。"""
-    assert block_no_verify.parse_git_segment(segment).subcommand_certain is certain
+def test_has_bypass_flag_blocks_short_n_when_subcommand_is_uncertain(command: str, blocked: bool) -> None:
+    """サブコマンドを確定できないときだけ commit 以外の -n も止める。"""
+    assert block_no_verify.has_bypass_flag(command) is blocked
+
+
+def test_has_bypass_flag_scans_bundled_worst_case_in_linear_time() -> None:
+    """上限内の最悪形を sh -c で束ね 2 方言にしても、hook の timeout（15 秒）より十分速く返る。
+
+    `git` を 4,997 個並べて `\\` で 2 方言にした `sh -c` を 3 つ束ねた 60KB の入力は、起動位置ごとに
+    末尾まで読み直す実装では 15.8 秒かかり timeout を超えた（kill された hook は許可として扱われる）。
+    """
+    inner = " ".join(["git"] * 4997) + " a\\b"
+    command = " ; ".join([f"sh -c '{inner}'"] * 3) + " ; git commit --no-verify -m x"
+    assert not shell_tokens.command_exceeds_scan_budget(command)
+
+    started = time.monotonic()
+    blocked = block_no_verify.has_bypass_flag(command)
+    elapsed = time.monotonic() - started
+
+    assert blocked is True
+    assert elapsed < 2.0, f"has_bypass_flag took {elapsed:.3f}s (二次オーダーへ回帰した疑い)"
 
 
 def test_pre_compact_main_appends_to_compaction_log(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
