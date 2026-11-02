@@ -135,7 +135,7 @@ ADR の再監査（e911735）:
 
 | 対象 | 実測（Linux・Python 3.13） | 判断 |
 |---|---|---|
-| `MAX_COMMAND_TOKENS = 5000`（`plugins/claq/src/claq/hooks/shell_tokens.py`） | 最悪形 `git ` × 4,999 で block_no_verify の起動から終了まで 4.9 秒（`has_bypass_flag` がトークン数の二次）。timeout 15 秒の約 3 倍 | コメントの「20 倍以上」は偽なので実測値に直した。値は据え置き（Windows は未測定） |
+| `MAX_COMMAND_TOKENS = 5000`（`plugins/claq/src/claq/hooks/shell_tokens.py`） | 最悪形 `git ` × 4,999 で block_no_verify の起動から終了まで 4.9 秒（`has_bypass_flag` がトークン数の二次）。timeout 15 秒の約 3 倍 | コメントの「20 倍以上」は偽なので実測値に直した。値は据え置き（Windows は未測定）（10 章で外した） |
 | `MAX_COMMAND_BYTES = 64 KiB` | 1 トークン 64 KiB で 0.2 秒 | 据え置き、実測をコメントに |
 | lint 兆候の走査上限 256 KiB | テキストは payload 由来で stdin の上限 1 MiB（超過は deny）が抑える。走査は線形で 1 MiB 25 ms・16 MiB 0.4 秒 | 重複なので削除 |
 | 全文の上限（`_FULL_TEXT_MAX_BYTES`、旧 `_LINT_SIGNAL_MAX_TEXT_BYTES`） | 置換前はディスクから読み stdin の上限が効かない。置換後は `replace_all` を重ねると倍々に伸びる | 維持し、名前と理由を直した |
@@ -225,7 +225,7 @@ ADR の再監査（e911735）:
 
 残課題・提案:
 
-- 複数のコンテナキー・入れ子の argv 配列（ホストが決める形で脅威モデルの外）は 1 回の呼び出しの合計を縛っていない（上限ありでも入れ子 45 個で 7.92 秒）。ホストがこの形を送るようになったら合計バイト数の上限が要る
+- **提案（採否は利用者）**: 1 回の呼び出しの合計バイト数の上限。複数のコンテナキー・入れ子の argv 配列は、各ホストがツール定義で引数をフックより前に検証するという前提（未確認）で脅威モデルの外に置いた。前提が崩れると、上限ありでも入れ子 45 個で 7.92 秒、上限なしで入れ子 14 個で 25.41 秒（pre_bash_commit_quality、macOS）
 - pre_bash_commit_quality の `git` の繰り返しはサイズの二次（64KiB で 1.86 秒）。閾値の内側なので直していない
 - Windows での実測は未実施
 - Copilot CLI で SessionStart の失敗を利用者へ見せる手段は無い（ログだけ）

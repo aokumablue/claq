@@ -77,6 +77,8 @@ bash_config_protection の再計算を使い回す修正（`scan_memo`）の後�
 
 ## 段階 3 の結果と結論
 
+計測スクリプトの「limit」の列は、上限を外す前のコミット（aca7210e まで）のコードで測った値。上限を外した後のコードでは nolimit と同じ値になる。
+
 予算の検査を全候補の走査より前に寄せた後、`token_limit_stage3.py` で作れる形を上限の有無で測った。
 
 - 上限なしの最悪は 1.86 秒（pre_bash_commit_quality、`["bash", "-lc", <git の繰り返し>]`、結合文字列が 64KiB の手前）。bash_config_protection は 1.23 秒、block_no_verify は 0.32 秒。閾値 5.4 秒を超える形は無かった
@@ -92,4 +94,6 @@ bash_config_protection の再計算を使い回す修正（`scan_memo`）の後�
 | 入れ子の argv 配列 `[["bash", "-lc", <4,995 トークン>]] × 45`（pre_bash_commit_quality） | 7.92 秒 | — |
 | 入れ子の argv 配列 `[["bash", "-lc", <64KiB>]] × 14`（pre_bash_commit_quality） | — | 25.41 秒 |
 
-3 つの保護フックの matcher は `Bash|bash|shell|run_terminal_command` で、引数の形は各ホストのツール定義が決める（Claude Code・Copilot CLI・Grok は文字列、Codex は文字列の配列）。モデルは入れ子の配列もコンテナキーも作れない。上限ありでも入れ子の配列は 7.92 秒かかり、トークン数の上限はこの形も縛っていなかった。ホストがこの形を送るようになったら、1 回の呼び出しの合計バイト数の上限が要る。
+**前提**: 3 つの保護フックの matcher は `Bash|bash|shell|run_terminal_command` で、引数の形は各ホストのツール定義が決める（Claude Code・Copilot CLI・Grok は文字列、Codex は文字列の配列）。各ホストがフックより前にツール定義で引数を検証し、モデルは入れ子の配列もコンテナキーも作れない、という前提に立つ。根拠は matcher とツール定義の型からの推論で、ホストごとの検証の有無（特に Copilot CLI の `toolArgs` に検証前の JSON 文字列が届くか）は確かめていない。この前提が崩れても上限を外す判断は変わらない（上限ありでも入れ子の配列は 7.92 秒かかり、トークン数の上限はこの形を縛っていなかった）。崩れた場合に要るのは、1 回の呼び出しの合計バイト数の上限である。
+
+補強: `sh -c` の中身が外側より長くならないことを、引用符・エスケープ・行継続・heredoc・単独サロゲートを混ぜたランダム入力 60 万件（中身を取り出せたのは 47,862 件）で確かめ、外側より長い中身は 0 件だった。
