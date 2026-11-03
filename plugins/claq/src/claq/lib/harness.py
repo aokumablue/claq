@@ -350,7 +350,7 @@ def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[st
 # - bash-input / bash-stdout / bash-stderr: Claude Code の `!` モードで実行した
 #   コマンドとその出力。出力はファイル・ネットワーク由来の外部文字列であり、
 #   依頼として引き継ぐと次セッションの `<claq-memory>` へ疑似ユーザー指示として注入される。
-_SCAFFOLD_TAGS = (
+SCAFFOLD_TAGS = (
     "local-command-caveat",
     "local-command-stdout",
     "local-command-stderr",
@@ -363,17 +363,12 @@ _SCAFFOLD_TAGS = (
 )
 
 # スラッシュコマンド起動の足場タグ。中身は依頼そのものなので捨てずに畳む。
-_COMMAND_TAGS = ("command-name", "command-message", "command-args")
-
-# 診断側（ci/scan_scaffold_drift.py）が「既知タグ」を組み立てるための公開名。
-# 値は上の定義から導出する。写経すると片方だけ更新されて誤報が出る。
-SCAFFOLD_TAGS = _SCAFFOLD_TAGS
-COMMAND_TAGS = _COMMAND_TAGS
+COMMAND_TAGS = ("command-name", "command-message", "command-args")
 
 # タグ名の直後に「名前の終わり」を要求する先読み。これが無いと、タグ**名**が
 # 足場名で始まるだけの別タグ（`<system-reminders>` や `<local-command-stdout-parser>`）
 # まで一致し、無関係な依頼をメッセージごと破棄してしまう。属性付きは通す。
-_TAG_NAME_END = r"(?=[\s/>])"
+TAG_NAME_END = r"(?=[\s/>])"
 
 # 孤立タグ検出専用の「名前の終わり」。除去側と違い**文字列の終端も名前の終わりと
 # みなす**。除去側の先読みは名前の後ろに 1 文字を要求するため、発話が足場タグ名で
@@ -394,7 +389,7 @@ _MAX_TAG_ATTR_CHARS = 512
 _TAG_ATTRS = rf"[^>]{{0,{_MAX_TAG_ATTR_CHARS}}}"
 
 
-def _tag_block_pattern(tag: str, *, capture: bool = False) -> re.Pattern[str]:
+def tag_block_pattern(tag: str, *, capture: bool = False) -> re.Pattern[str]:
     """``<tag ...>中身</tag>`` のブロックに一致するパターンを返す。
 
     中身は「同種の開始タグを含まない任意の文字列」に限る。単純な `.*?` だと、対を
@@ -405,15 +400,15 @@ def _tag_block_pattern(tag: str, *, capture: bool = False) -> re.Pattern[str]:
         tag: タグ名。
         capture: True なら前後の空白を除いた中身をグループ 1 として捕捉する。
     """
-    body = rf"(?:(?!<{tag}{_TAG_NAME_END})[\s\S])*?"
+    body = rf"(?:(?!<{tag}{TAG_NAME_END})[\s\S])*?"
     if capture:
         body = rf"\s*({body})\s*"
-    return re.compile(rf"<{tag}{_TAG_NAME_END}{_TAG_ATTRS}>{body}</{tag}\s*>", re.IGNORECASE)
+    return re.compile(rf"<{tag}{TAG_NAME_END}{_TAG_ATTRS}>{body}</{tag}\s*>", re.IGNORECASE)
 
 
 # タグごとに自分自身の開始タグを否定先読みする必要があるため、1 本の alternation に
 # まとめられずタグ単位のリストになる。
-_SCAFFOLD_BLOCK_PATTERNS = [_tag_block_pattern(tag) for tag in _SCAFFOLD_TAGS]
+_SCAFFOLD_BLOCK_PATTERNS = [tag_block_pattern(tag) for tag in SCAFFOLD_TAGS]
 
 # ペア除去後に残った足場タグ。ハーネスは足場タグを必ず対で書き、`_read_tail` の
 # 前方切り詰めで壊れる先頭 1 行は `_parse_entry` が不正 JSON として捨てるため、
@@ -425,20 +420,20 @@ _SCAFFOLD_BLOCK_PATTERNS = [_tag_block_pattern(tag) for tag in _SCAFFOLD_TAGS]
 # 超えるタグがブロック除去にも本検出にも一致せず素通りする。先読みも選択肢も固定幅
 # なので走査は入力長に対して線形。
 _SCAFFOLD_ORPHAN_PATTERN = re.compile(
-    r"</?(?:" + "|".join(_SCAFFOLD_TAGS) + r")" + _ORPHAN_NAME_END, re.IGNORECASE
+    r"</?(?:" + "|".join(SCAFFOLD_TAGS) + r")" + _ORPHAN_NAME_END, re.IGNORECASE
 )
 
 # スラッシュコマンド起動の足場。`<command-name>` と `<command-args>` の中身は
 # ユーザーが実際に入力した依頼そのものなので、捨てずに `/name args` へ畳む。
-_COMMAND_NAME_PATTERN = _tag_block_pattern("command-name", capture=True)
-_COMMAND_ARGS_PATTERN = _tag_block_pattern("command-args", capture=True)
+_COMMAND_NAME_PATTERN = tag_block_pattern("command-name", capture=True)
+_COMMAND_ARGS_PATTERN = tag_block_pattern("command-args", capture=True)
 _COMMAND_SCAFFOLD_PATTERN = re.compile(
-    r"</?(?:" + "|".join(_COMMAND_TAGS) + r")" + _TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE
+    r"</?(?:" + "|".join(COMMAND_TAGS) + r")" + TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE
 )
 # 畳み込みで中身ごと落とすブロック。`command-message` はコマンド名の再掲、
 # `command-args` は畳んだ文字列側へ取り込み済みのため元の位置には残さない。
-_COMMAND_MESSAGE_BLOCK_PATTERN = _tag_block_pattern("command-message")
-_COMMAND_ARGS_BLOCK_PATTERN = _tag_block_pattern("command-args")
+_COMMAND_MESSAGE_BLOCK_PATTERN = tag_block_pattern("command-message")
+_COMMAND_ARGS_BLOCK_PATTERN = tag_block_pattern("command-args")
 
 
 def _drop_scaffold_blocks(text: str) -> str | None:

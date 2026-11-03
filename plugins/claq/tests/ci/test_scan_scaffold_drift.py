@@ -224,7 +224,7 @@ class TestMain:
         assert scanner.main(["--root", str(tmp_path)]) == scanner.EXIT_DRIFT
         captured = capsys.readouterr().err
         assert "peer-broadcast" in captured
-        assert "_SCAFFOLD_TAGS" in captured
+        assert "SCAFFOLD_TAGS" in captured
 
     def test_default_roots_are_used_without_root_option(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

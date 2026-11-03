@@ -1,6 +1,6 @@
 """実 transcript を走査し、足場タグ denylist から漏れたタグを検出する診断。
 
-``lib/harness.py`` の ``_SCAFFOLD_TAGS`` は denylist であり、列挙漏れは「素通り」
+``lib/harness.py`` の ``SCAFFOLD_TAGS`` は denylist であり、列挙漏れは「素通り」
 として現れる。ホストが新しい足場タグを追加しても、テストも CI も緑のまま
 引き継ぎがノイズで埋まる（docs/adr/untrusted-input-prompt-boundary.md の残存リスク筆頭）。
 
@@ -257,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     for name, files in counts.most_common(_REPORT_LIMIT):
         print(f"  {name}: {files} ファイル", file=sys.stderr)
     print(
-        "足場なら lib/harness.py の _SCAFFOLD_TAGS へ、依頼本文に現れる良性タグなら"
+        "足場なら lib/harness.py の SCAFFOLD_TAGS へ、依頼本文に現れる良性タグなら"
         " ci/scan_scaffold_drift.py の BENIGN_TAGS へ追加してください。",
         file=sys.stderr,
     )
