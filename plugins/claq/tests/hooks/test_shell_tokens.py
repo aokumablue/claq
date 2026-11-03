@@ -35,6 +35,22 @@ class TestHeredocNormalization:
         assert shell_tokens.is_shell_wrapper_token(token) is expected
 
     @pytest.mark.parametrize(
+        ("segment", "expected"),
+        [
+            (["sh", "-c", "git commit"], "git commit"),
+            (["env", "A=1", "bash", "-lc", "x"], "x"),
+            (["sh", "sh", "-c", "x"], "x"),
+            (["sh", "x", "bash", "-c", "y"], "y"),
+            (["sh", "-c"], None),
+            (["sh", "x"], None),
+            (["git", "-c", "x"], None),
+        ],
+    )
+    def test_extract_shell_wrapper_command(self, segment: list[str], expected: str | None) -> None:
+        """最初のシェル起動トークン以降の最初の ``-c`` 系フラグの次トークンを返し、無ければ None。"""
+        assert shell_tokens.extract_shell_wrapper_command(segment) == expected
+
+    @pytest.mark.parametrize(
         ("line", "expected"),
         [
             ("cat <<EOF", [("EOF", False)]),

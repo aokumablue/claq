@@ -14,7 +14,7 @@ import shlex
 # 迫る。host が kill した hook は exit code を返さず silent fail-open になるため、超過は走査せず BLOCKED で
 # 返す（docs/adr/hook-failure-direction.md）。64KB の 1 トークンは起動から終了まで 0.2 秒（実測）。
 # この上限の内側では、エージェントが作れる形（単一のコマンド・argv 配列）で 3 つの保護フックとも
-# 起動から終了まで 1.9 秒以下（pre_bash_commit_quality の `git` の繰り返しが二次で最も遅い。macOS・Python 3.14 で実測）。
+# 起動から終了まで 1.1 秒以下（bash_config_protection の書込み先を変えた繰り返しが最も遅い。macOS・Python 3.14 で実測）。
 MAX_COMMAND_BYTES = 64 * 1024
 
 # コマンド全体をセグメントに割るシェル区切りトークン。区切り文字に密着した
@@ -82,12 +82,13 @@ def extract_shell_wrapper_command(segment: list[str]) -> str | None:
     Raises:
         例外は発生しません。
     """
-    for index, token in enumerate(segment):
-        if not is_shell_wrapper_token(token):
-            continue
-        for position in range(index + 1, len(segment)):
-            if _SHELL_COMMAND_FLAG_RE.fullmatch(segment[position]):
-                return segment[position + 1] if position + 1 < len(segment) else None
+    # 後ろのシェルトークンから見る範囲は最初のシェルトークンから見る範囲に含まれるので、最初の 1 つだけ見る。
+    start = next((i for i, token in enumerate(segment) if is_shell_wrapper_token(token)), None)
+    if start is None:
+        return None
+    for position in range(start + 1, len(segment)):
+        if _SHELL_COMMAND_FLAG_RE.fullmatch(segment[position]):
+            return segment[position + 1] if position + 1 < len(segment) else None
     return None
 
 

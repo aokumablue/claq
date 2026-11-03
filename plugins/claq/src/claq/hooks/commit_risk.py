@@ -54,10 +54,11 @@ def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
     Raises:
         例外は発生しません。
     """
-    for i, token in enumerate(segment):
-        if is_git_executable_token(token) and "commit" in segment[i + 1 :]:
-            return segment[segment.index("commit", i + 1) + 1 :]
-    return None
+    # 後ろの git トークンから見る範囲は最初の git トークンから見る範囲に含まれるので、最初の 1 つだけ見る。
+    start = next((i for i, token in enumerate(segment) if is_git_executable_token(token)), None)
+    if start is None or "commit" not in segment[start + 1 :]:
+        return None
+    return segment[segment.index("commit", start + 1) + 1 :]
 
 
 def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
