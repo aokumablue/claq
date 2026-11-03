@@ -121,21 +121,6 @@ def write_stderr(text: str) -> None:
     sys.stderr.write(text)
 
 
-def is_truthy(value: str | None) -> bool:
-    """文字列が真値を表すかどうかを判定します。
-
-    Args:
-        value: 判定対象の文字列です。
-
-    Returns:
-        '1', 'true', 'yes', 'on' の場合は True を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def basename(path: str) -> str:
     """パスからファイル名を取得します。
 
@@ -351,23 +336,7 @@ def emit_block_output(reason: str) -> int:
     return exit_code
 
 
-def emit_session_start_output(additional_context: str = "") -> str:
-    """SessionStart 用のフック出力 JSON 文字列を返す（stdout へは書かない）。
-
-    Args:
-        additional_context: コンテキストに注入する追加文字列。
-
-    Returns:
-        additionalContext（トップレベル）と hookSpecificOutput を同時に
-        含む合併 JSON 文字列。
-
-    Raises:
-        例外は発生しません。
-    """
-    return adapt_context_output("SessionStart", additional_context)
-
-
-def print_session_start_output(additional_context: str = "") -> None:
+def print_session_start_output(additional_context: str) -> None:
     """SessionStart 用のフック出力を stdout に書き出す。
 
     Args:
@@ -376,4 +345,4 @@ def print_session_start_output(additional_context: str = "") -> None:
     Raises:
         例外は発生しません。
     """
-    print(emit_session_start_output(additional_context))
+    print(adapt_context_output("SessionStart", additional_context))

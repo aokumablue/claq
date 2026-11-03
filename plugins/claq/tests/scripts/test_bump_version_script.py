@@ -112,6 +112,22 @@ def test_version_files_match_script_targets() -> None:
     assert set(_VERSION_FILES) == extracted
 
 
+def test_publish_version_files_match_script_targets() -> None:
+    """publish.sh の ``VERSION_FILES`` が version-up.sh の更新対象と完全一致すること。
+
+    publish.sh は版が全ファイルで揃っているかを検査する側で、手で写した一覧が version-up.sh と
+    ずれると、bump されないファイルを検査も更新もしないまま公開できる。
+    """
+    publish = (ROOT / "scripts" / "publish.sh").read_text(encoding="utf-8")
+    match = re.search(r"(?ms)^VERSION_FILES=\(\n(.*?)^\)", publish)
+    assert match is not None, "publish.sh の VERSION_FILES を抽出できない"
+    literals = re.findall(r'"([^"]+)"', match.group(1))
+    plugin_json = re.search(r'^PLUGIN_JSON="([^"]+)"', publish, re.MULTILINE)
+    assert plugin_json is not None, "publish.sh の PLUGIN_JSON を抽出できない"
+    files = {Path(plugin_json.group(1) if item == "${PLUGIN_JSON}" else item) for item in literals}
+    assert files == _extract_script_version_targets()
+
+
 def test_bump_version_updates_all_targets(repo: Path) -> None:
     """4箇所のバージョンを同時に更新できること。"""
     next_version = _next_patch(read_versions(repo)[0])

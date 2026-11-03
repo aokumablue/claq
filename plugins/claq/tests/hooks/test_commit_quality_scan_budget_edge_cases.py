@@ -22,9 +22,9 @@ _HUGE_LINE = "a" * (1024 * 1024)
 @pytest.mark.parametrize(
     "scan",
     [
-        lambda: commit_quality_scanner._scan_secret_issues("line one", ["line one"], deadline=0.0),
+        lambda: commit_quality_scanner._scan_secret_issues(["line one"], deadline=0.0),
         # 行数 1 でも予算確認が走ること（「行数」基準では素通りする）。
-        lambda: commit_quality_scanner._scan_secret_issues(_HUGE_LINE, [_HUGE_LINE], deadline=0.0),
+        lambda: commit_quality_scanner._scan_secret_issues([_HUGE_LINE], deadline=0.0),
         # lint scanner も同じ 1 本の予算に載っていること。
         lambda: commit_quality_scanner._scan_lint_issues([_HUGE_LINE], deadline=0.0),
     ],
@@ -92,7 +92,7 @@ class TestScanBudgetAccumulatorScope:
             return 0.0
 
         monkeypatch.setattr(commit_quality_scanner, "_monotonic", clock)
-        commit_quality_scanner._scan_secret_issues("\n".join(lines), lines, deadline=1_000.0)
+        commit_quality_scanner._scan_secret_issues(lines, deadline=1_000.0)
         return reads
 
     def test_large_input_samples_clock_repeatedly(self, monkeypatch: pytest.MonkeyPatch) -> None:

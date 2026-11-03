@@ -83,9 +83,6 @@ def _strip_markdown_prefix(line: str) -> str:
 def compact_line(text: str, max_length: int) -> str:
     """余分な言い回しと空白を削って短い一文に整える。"""
     value = _normalize_line(text)
-    if not value:
-        return ""
-
     if len(value) > max_length:
         return value[:max_length].rstrip() + "..."
 

@@ -42,6 +42,7 @@ _PARSED = [
     pytest.param("[a]\nk = v\n", [("a.k", "v")], id="entries-are-config-entry"),
     # --- 値 ---
     pytest.param("[a]\nk = v ; c\nj = w # c\n", [("a.k", "v"), ("a.j", "w")], id="inline-comments"),
+    pytest.param('[a]\nk = v # "x', [("a.k", "v")], id="comment-with-quote-at-eof"),
     pytest.param('[a]\nk = " v # ; "\n', [("a.k", " v # ; ")], id="quoted-value-keeps-comment-chars-and-spaces"),
     pytest.param("[a]\nk = a  b \t \n", [("a.k", "a  b")], id="internal-whitespace-kept-trailing-trimmed"),
     pytest.param('[a]\nk = "a\\n\\t\\b\\\\\\""\n', [("a.k", 'a\n\t\b\\"')], id="escapes"),

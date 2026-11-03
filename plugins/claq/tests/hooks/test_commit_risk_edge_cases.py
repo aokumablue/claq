@@ -26,6 +26,8 @@ _FEAT = ["-m", "feat: x"]
         pytest.param("git --super-prefix /x commit -am y", (True, ["-am", "y"]), id="unknown-global-option-dash-am"),
         pytest.param("echo hi && git commit -m x", (True, _MX), id="composite-command"),
         pytest.param("git status", (False, []), id="non-commit"),
+        pytest.param("git git commit -m x", (True, _MX), id="repeated-git-token"),
+        pytest.param("git git status", (False, []), id="repeated-git-token-without-commit"),
         pytest.param("git --version", (False, []), id="only-options-after-git"),
         # 解析できた引用文の `git commit` は実行命令ではない（`block_no_verify` と「commit とは何か」で食い違わない）。
         pytest.param("git status -m 'please run git commit later'", (False, []), id="quoted-text-parsed-cleanly"),

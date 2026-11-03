@@ -538,9 +538,7 @@ def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
     return issues
 
 
-def _scan_secret_issues(
-    content: str, lines: list[str], *, deadline: float, report_lines: bool = True
-) -> list[dict]:
+def _scan_secret_issues(lines: list[str], *, deadline: float, report_lines: bool = True) -> list[dict]:
     """ファイル内容からハードコードされたシークレットを検出します。
 
     `# nosec`・ファイルサイズに関わらず全体を走査します。呼び出し元から渡された
@@ -549,8 +547,6 @@ def _scan_secret_issues(
     ここで作らないのは、ファイル単位の予算になるためです。
 
     Args:
-        content: 検査対象のデコード済みファイル内容です（未使用ですが、
-            呼び出し側とのインターフェース共有のため引数として残します）。
         lines: 走査単位のリストです。テキストファイルでは改行で分割済みの行リスト、
             バイナリでは `_extract_printable_runs` の抽出結果です。
         deadline: 走査を打ち切る `_monotonic()` 基準の時刻です
@@ -592,10 +588,9 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
     ファイルだけ、シークレット検出は `should_scan_secrets` が True ならバイナリでも
     （印字可能文字列を抽出して）必ず実施します。
 
-    各段階は独立した例外ガードを持ち、想定外の例外は検査不能を示す `scan_error` issue に
-    します（読み取り・判定・secret は error、lint は warning）。黙って issue が消える
-    （＝検査したのに問題なしと区別が付かない）ことはありません。lint 側で予算が尽きた
-    場合は error を積んで secret scan を回さずに返します。
+    secret scan の想定外の例外は、検査不能を示す `scan_error`（error）の issue にします。
+    黙って issue が消える（＝検査したのに問題なしと区別が付かない）ことはありません。
+    lint 側で予算が尽きた場合は、同じ error を積んで secret scan を回さずに返します。
 
     `deadline` に既定値を持たせないのは、渡し忘れた呼び出し元がファイル単位予算へ静かに
     退行し、型・lint・テストのいずれでも検知できなくなるためです。
@@ -645,21 +640,19 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
         except SecretScanBudgetExceeded as err:
             # 予算超過だけは lint でも error。共有の予算が尽きている以上、secret scan を
             # 回してもホスト側 timeout を踏むだけなので、検査不能として返す。
-            issues.append(_scan_error_issue(file_path, "lint scan", err, severity="error"))
+            issues.append(_scan_error_issue(file_path, "lint scan", err))
             return issues
     if do_secrets:
         scan_lines = _extract_printable_runs(content) if is_binary else lines
         try:
-            issues.extend(
-                _scan_secret_issues(content, scan_lines, deadline=deadline, report_lines=not is_binary)
-            )
+            issues.extend(_scan_secret_issues(scan_lines, deadline=deadline, report_lines=not is_binary))
         except Exception as err:
-            issues.append(_scan_error_issue(file_path, "secret scan", err, severity="error"))
+            issues.append(_scan_error_issue(file_path, "secret scan", err))
 
     return issues
 
 
-def _scan_error_issue(file_path: str, stage: str, err: Exception, *, severity: str) -> dict:
+def _scan_error_issue(file_path: str, stage: str, err: Exception) -> dict:
     """scanner 内部例外を issue 化する。
 
     例外メッセージ自体（ファイル内容の断片を含みうる）は出力に含めず、
@@ -671,10 +664,9 @@ def _scan_error_issue(file_path: str, stage: str, err: Exception, *, severity: s
         file_path: 対象ファイルのパス。
         stage: 失敗した処理段階の説明（ログ用）。
         err: 捕捉した例外。
-        severity: ``"error"``（ブロック対象）または ``"warning"``。
 
     Returns:
-        issue 辞書。
+        severity が ``"error"``（ブロック対象）の issue 辞書。
 
     Raises:
         例外は発生しません。
@@ -686,5 +678,5 @@ def _scan_error_issue(file_path: str, stage: str, err: Exception, *, severity: s
         "type": "scan_error",
         "message": f"{shown_path}: {stage}に失敗したため検査できませんでした（{error_type}）",
         "line": 0,
-        "severity": severity,
+        "severity": "error",
     }

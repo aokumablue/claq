@@ -131,14 +131,12 @@ def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
     """
     if protected_path_segment(token) == _PLUGIN_HOOKS_JSON_SEGMENT:
         return _PLUGIN_HOOKS_JSON_DISPLAY
-    if not scope_certain and normalize_protected_name(basename(token)) == _HOOKS_JSON_NAME:
-        return _PLUGIN_HOOKS_JSON_DISPLAY
-    if (
-        not scope_certain
-        and normalize_protected_name(basename(token)) in _RUNTIME_ENTRYPOINT_NAMES
-        and running_plugin_root_is_guarded()
-    ):
-        return _RUNTIME_DIR_DISPLAY
+    if not scope_certain:
+        name = normalize_protected_name(basename(token))
+        if name == _HOOKS_JSON_NAME:
+            return _PLUGIN_HOOKS_JSON_DISPLAY
+        if name in _RUNTIME_ENTRYPOINT_NAMES and running_plugin_root_is_guarded():
+            return _RUNTIME_DIR_DISPLAY
     resolved = resolve_effective_target(token)
     candidates = [Path(token).parts] if resolved is None else [Path(token).parts, resolved.parts]
     for parts in candidates:

@@ -291,21 +291,6 @@ def repo_git_config_path(file_path: str) -> str | None:
     return _match_path_segments(file_path, _GIT_CONFIG_REPO_SEGMENTS, _GIT_CONFIG_REPO_SEGMENTS_FOLDED)
 
 
-def git_config_path(file_path: str) -> str | None:
-    """パスが内容次第で保護する git config（リポジトリ内・ホーム側）かを判定する。
-
-    Args:
-        file_path: 検査対象の生パス文字列。
-
-    Returns:
-        該当した保護 path の表示名。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
-    """
-    return repo_git_config_path(file_path) or global_git_config_path(file_path)
-
-
 def _effective_basename(file_path: str) -> str:
     """symlink を解決した実体 basename を返す。
 
@@ -371,12 +356,8 @@ def _editable_text(tool_name: str, container: Any) -> list[str] | None:
         例外は発生しません。
     """
     if tool_name == "apply_patch":
-        if isinstance(container, str):
-            return [container]
-        if isinstance(container, dict):
-            text = container.get("input")
-            return [text] if isinstance(text, str) else None
-        return None
+        text = container.get("input") if isinstance(container, dict) else container
+        return [text] if isinstance(text, str) else None
 
     if not isinstance(container, dict):
         return None
@@ -386,21 +367,17 @@ def _editable_text(tool_name: str, container: Any) -> list[str] | None:
         content = container.get("content")
         return [content] if isinstance(content, str) else None
 
-    if normalized == "multiedit":
-        edits = container.get("edits")
-        if not isinstance(edits, list):
-            return None
-        snippets = [
-            snippet
-            for edit in edits
-            if isinstance(edit, dict)
-            for key in ("old_string", "new_string")
-            if isinstance(snippet := edit.get(key), str)
-        ]
-        return snippets or None
-
-    # edit / search_replace 等はいずれも Edit 相当として扱う
-    snippets = [s for s in (container.get("old_string"), container.get("new_string")) if isinstance(s, str)]
+    # MultiEdit は edits[]、edit / search_replace 等はコンテナ自身を 1 つの Edit 相当として扱う。
+    edits = container.get("edits") if normalized == "multiedit" else [container]
+    if not isinstance(edits, list):
+        return None
+    snippets = [
+        snippet
+        for edit in edits
+        if isinstance(edit, dict)
+        for key in ("old_string", "new_string")
+        if isinstance(snippet := edit.get(key), str)
+    ]
     return snippets or None
 
 
@@ -919,7 +896,7 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
         protected_segment = protected_path_segment(file_path)
         if protected_segment is not None:
             return blocked_message_for_file(f"{protected_segment}/")
-        git_config = git_config_path(file_path)
+        git_config = repo_git_config_path(file_path) or global_git_config_path(file_path)
         if git_config is not None:
             reason = _git_config_block_reason(tool_name, container, file_path, git_config)
             if reason:

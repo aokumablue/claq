@@ -31,7 +31,7 @@
 
 精度の要求が段によって違う理由
     **消す側（ブロック除去）は精度が要る** — 誤検出はそのまま本文の消失に
-    なるため、タグ名の直後に名前の終わり（``_TAG_NAME_END``）を要求して
+    なるため、タグ名の直後に名前の終わり（``TAG_NAME_END``）を要求して
     ``<privateer>`` のような別タグを巻き込まない。**escape する側は精度が
     要らない** — 誤検出しても ``&lt;`` になるだけで情報は失われないため、
     名前の終わりを要求せず、境界マーカーの偽装に使えそうな ``<`` を広く倒す。
@@ -87,13 +87,13 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS
+from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, TAG_NAME_END, tag_block_pattern
 from claq.lib.slim_text import remove_filler_phrases
 from claq.mem.redaction import redact
 
 # 無害化対象タグ（大文字小文字区別なし）。正規表現へ literal として埋めるため、
 # 正規表現メタ文字を含まない名前だけを置く。
-_TAGS = (
+STRIPPED_TAGS = (
     "private",
     "mem-context",
     "claq-memory",
@@ -106,7 +106,6 @@ _TAGS = (
 # 別物で、後者のほうが広い。診断側が知りたいのは「中身ごと落としたブロック」の
 # 名前なのでこちらを渡す。escape の語彙へ名前を足しても診断側の既知集合は
 # `SCAFFOLD_TAGS` / `COMMAND_TAGS` 経由で揃うため、ここへ写す必要は無い。
-STRIPPED_TAGS = _TAGS
 
 # 入れ子ブロック除去の最大反復回数。否定先読みは同種の開始タグを跨がないため、
 # 入れ子は内側から 1 段ずつ落ちる。1 回の sub では外側の中身が残るため
@@ -117,27 +116,13 @@ STRIPPED_TAGS = _TAGS
 # 機能しない）。
 _MAX_NESTING_PASSES = 20
 
-# タグの属性部に許す最大文字数。`[^>]*` を無界にすると、`>` を 1 個も含まない
-# 入力（`"<private " * N`）で各開始位置が末尾まで走査して二次オーダーになる。
-# **この上限は複雑度のための装置であって、安全性の境界ではない。** 超過した
-# タグはブロック除去に一致しないが、後段のエスケープは属性を一切見ない固定幅
-# 先読みなので必ず無害化する（ブロック除去だけを関門にすると、属性
-# 512 文字超のタグが素通りする）。
-_MAX_TAG_ATTR_CHARS = 512
-_TAG_ATTRS = rf"[^>]{{0,{_MAX_TAG_ATTR_CHARS}}}"
-
-# タグ名の直後に「名前の終わり」を要求する先読み。これが無いと `[^>]*` が
-# 属性を許すつもりで、タグ**名**が対象名で始まるだけの別タグ（`<privateer>`）
-# まで一致し、無関係な本文をブロックごと消してしまう。
-_TAG_NAME_END = r"(?=[\s/>])"
-
 # 開始〜終了タグとその中身を除去するパターン。
 #
 # 中身は「同種の開始タグを含まない任意の文字列」に限る。裸の `.*?` だと、
 # 閉じタグを伴わない開始タグが並ぶ入力で各開始位置が末尾まで走査して
 # 二次オーダーになる（実測: `'<private>' * N` が N=4000 で 0.62 秒、
 # 8000 で 2.47 秒、16000 で 9.93 秒 — 入力 2 倍で 4 倍）。属性部の有界化
-# （`_TAG_ATTRS`）が塞ぐのは `>` を含まない入力だけで、この経路は別物。
+# （`harness.tag_block_pattern` の属性部の上限）が塞ぐのは `>` を含まない入力だけで、この経路は別物。
 # `strip_tags` は SessionStart の `mem context`（hooks.json の timeout 20 秒）が知識カードの
 # title/body に対して毎回呼ぶため、ここの複雑度はセッション開始の遅延になる。
 # あわせて、対を成さない開始タグから後続ブロックの閉じタグまで貫通して
@@ -153,31 +138,25 @@ _TAG_NAME_END = r"(?=[\s/>])"
 # 属性を一切見ないため属性付き閉じタグはそちらで完全に塞がっており、ペア除去まで広げる必要は無い。
 # 広げて得られるのは `<tag>X</tag foo>` の中身除去だけだが、その中身除去に依存する
 # シークレット再結合は `_erase_known_tags` の判定経路が別途担保する。
-_PAIR_PATTERNS = [
-    re.compile(
-        rf"<{tag}{_TAG_NAME_END}{_TAG_ATTRS}>"
-        rf"(?:(?!<{tag}[\s/>])[\s\S])*?"
-        rf"</{tag}\s*>",
-        re.IGNORECASE,
-    )
-    for tag in _TAGS
-]
+# 属性部の上限（512 文字）は複雑度のための装置で、安全性の境界ではない。超過したタグは
+# ここで除去されないが、後段のエスケープが属性を見ずに必ず無害化する。
+_PAIR_PATTERNS = [tag_block_pattern(tag) for tag in STRIPPED_TAGS]
 
 # 判定専用の「既知タグを除去する」パターン。属性は改行と `<` を跨がせない
 # （跨がせると判定用複製の側で本文を巻き込み、誤った fail closed を招く）。
 # escape 済みの表記（`&lt;private>`）も対象にする — 判定は `strip_tags` が
 # 返そうとしている**出力**に対して行うため、生の `<` はそもそも残っていない。
 _ERASE_PATTERN = re.compile(
-    r"(?:<|&lt;)/?(?:" + "|".join(_TAGS) + r")" + _TAG_NAME_END + r"[^<>\n]{0,1024}>",
+    r"(?:<|&lt;)/?(?:" + "|".join(STRIPPED_TAGS) + r")" + TAG_NAME_END + r"[^<>\n]{0,1024}>",
     re.IGNORECASE,
 )
 
-# escape 対象のタグ語彙。ペア除去（`_TAGS`）より広く、ハーネス足場タグと
+# escape 対象のタグ語彙。ペア除去（`STRIPPED_TAGS`）より広く、ハーネス足場タグと
 # スラッシュコマンド起動タグを含める。**`_PAIR_PATTERNS` は決してこの語彙へ
 # 広げない** — 中身を捨てる規則は `lib/harness` の管轄で、合流は docs/adr/untrusted-input-prompt-boundary.md が
 # 却下している。escape はどちらの用途でも中身を残すため衝突しない。
 # 値は各定義モジュールから導出する（写経すると片方だけ更新されて穴が開く）。
-_NEUTRALIZE_TAGS = (*_TAGS, *SCAFFOLD_TAGS, *COMMAND_TAGS)
+_NEUTRALIZE_TAGS = (*STRIPPED_TAGS, *SCAFFOLD_TAGS, *COMMAND_TAGS)
 
 # 既知タグ名（開始・終了の両方）の直前にある `<` を捉える先読み。属性も `>` も
 # 見ないため、属性の長さ・閉じ括弧の有無に関わらず必ず一致する。先読みは固定幅の

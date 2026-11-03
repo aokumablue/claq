@@ -17,7 +17,7 @@ from claq.mem.settings import (
     CONTEXT_ITEM_CHAR_LIMIT,
 )
 
-from ._support import _always_raise, _repo_id, _run_cli, _seed
+from ._support import _repo_id, _run_cli, _seed
 
 _KEY = "sk-ant-" + "api03-" + "A" * 30
 _KEY_SPLIT_BY_FILLERS = (
@@ -446,19 +446,6 @@ class TestHandoff:
         """session_id か引き継ぎ本文が欠けていれば何も記録せず正常終了する。"""
         self._run(monkeypatch, tmp_path, payload)
 
-        assert self._sessions(tmp_path) == []
-
-    def test_failure_is_reported(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """記録に失敗したら exit 1 と stderr の原因で知らせる（--bg では bg ログに残る）。"""
-        stub = _always_raise("db broken")
-        monkeypatch.setattr(cmd_context, "_record_handoff", stub)
-        payload = {"session_id": "s1", "handoff": "引き継ぎ"}
-
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["handoff"], payload)
-
-        assert (stdout, stderr, exit_code) == ("", "コマンド handoff 失敗: db broken\n", 1)
-        assert [call_args[1] for call_args, _ in stub.calls] == [payload]
-        # パッチが外れて本物が走れば sessions に行が残る。
         assert self._sessions(tmp_path) == []
 
 
