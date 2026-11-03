@@ -67,20 +67,3 @@ def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
     fields.update(overrides)
     with Database(tmp_path / "mem.db") as db:
         return db.upsert_knowledge(Knowledge(**fields))
-
-
-def _always_raise(message: str):
-    """呼び出されると必ず RuntimeError を送出するスタブを返す。
-
-    呼び出しごとの ``(args, kwargs)`` を ``stub.calls`` に記録する。パッチが対象へ届かず
-    本物が成功した場合は結果が変わらないテストが多いので、呼ばれたことを ``calls`` で固定する。
-    """
-    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def _stub(*args: object, **kwargs: object) -> None:
-        """呼び出しを記録して RuntimeError を送出する。"""
-        calls.append((args, kwargs))
-        raise RuntimeError(message)
-
-    _stub.calls = calls  # type: ignore[attr-defined]
-    return _stub

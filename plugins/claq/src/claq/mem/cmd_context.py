@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any
 
 from claq.hooks.detach import recent_bg_failure_notice
 from claq.lib.core_utils import get_plugin_root
@@ -226,12 +225,13 @@ def _shell_bootstrap_section() -> str:
     )
 
 
-def _build_context(settings: Settings, args: CommandArgs) -> str:
-    """注入する ``<claq-memory>`` ブロックを組み立てる。
+def _handle_context(settings: Settings, args: CommandArgs) -> str:
+    """context コマンド: SessionStart へ注入する ``<claq-memory>`` ブロックを組み立てる。
 
     共通知識・リポジトリ知識・前回の引き継ぎを、いずれも ``status='active'`` に
     限って集める（``pending`` は昇格レビュー前の下書きでノイズになる）。加えて
-    detach 起動の失敗通知と、Windows 向けの呼び出し方を節として足す。
+    detach 起動の失敗通知と、Windows 向けの呼び出し方を節として足す。失敗はそのまま
+    `cli.main` へ伝え、exit 1 と stderr で利用者に通知させる。
 
     Args:
         settings: mem 設定。
@@ -269,36 +269,26 @@ def _build_context(settings: Settings, args: CommandArgs) -> str:
     return f"<claq-memory>\n{body}\n</claq-memory>"
 
 
-def _handle_context(settings: Settings, args: CommandArgs) -> str:
-    """context コマンド: SessionStart へ蓄積済みの知識を注入する。
-
-    失敗はそのまま `cli.main` へ伝え、exit 1 と stderr で利用者に通知させる。
-
-    Args:
-        settings: mem 設定。
-        args: コマンド引数とフックの stdin JSON。
-
-    Returns:
-        注入する追加コンテキスト。
-    """
-    return _build_context(settings, args)
-
-
 # --- SessionEnd の引き継ぎ記録 ---
 
 
-def _record_handoff(settings: Settings, payload: dict[str, Any]) -> None:
-    """引き継ぎ本文を組み立てて ``sessions`` へ書き込む。
+def _handle_handoff(settings: Settings, args: CommandArgs) -> None:
+    """handoff コマンド: SessionEnd の引き継ぎ本文を組み立てて ``sessions`` へ書き込む。
 
     既存行があれば更新し、無ければ作る（SessionStart が走らなかったハーネスでも
     引き継ぎは残すべきため）。新設時の開始時刻は不明なので ``ended_at`` と同値に
     する。``session_id`` が無ければ何も書かない（``session_uid`` は NOT NULL
     UNIQUE で、空文字で埋めると全セッションが 1 行に衝突する）。
 
+    外部 I/O はトランスクリプト走査（``TRANSCRIPT_TIMEOUT_SEC``）とローカル SQLite
+    （既定 busy timeout 5 秒）のみで、いずれも上限時間を持つ。失敗は `cli.main` へ伝え、
+    stderr は ``--bg`` の bg ログに残る。
+
     Args:
         settings: mem 設定。
-        payload: SessionEnd フックが stdin へ渡した JSON。
+        args: コマンド引数と、SessionEnd フックが stdin へ渡した JSON。
     """
+    payload = args.stdin_data
     session_uid = _session_uid(payload)
     if not session_uid:
         return
@@ -314,17 +304,3 @@ def _record_handoff(settings: Settings, payload: dict[str, Any]) -> None:
         db.start_session(
             Session(session_uid=session_uid, repo_id=repo.id, handoff=handoff, started_at=now, ended_at=now)
         )
-
-
-def _handle_handoff(settings: Settings, args: CommandArgs) -> None:
-    """handoff コマンド: SessionEnd の引き継ぎを ``sessions`` へ記録する。
-
-    外部 I/O はトランスクリプト走査（``TRANSCRIPT_TIMEOUT_SEC``）とローカル SQLite
-    （既定 busy timeout 5 秒）のみで、いずれも上限時間を持つ。失敗は `cli.main` へ伝え、
-    stderr は ``--bg`` の bg ログに残る。
-
-    Args:
-        settings: mem 設定。
-        args: コマンド引数とフックの stdin JSON。
-    """
-    _record_handoff(settings, args.stdin_data)

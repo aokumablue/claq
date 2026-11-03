@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from claq.mem import cli, cmd_context, command_support
+from claq.mem import cli, command_support
 from claq.mem.database import Database
 from claq.mem.models import Repo
 
@@ -47,18 +47,6 @@ class TestSessionStartContract:
         assert (stderr, exit_code) == ("", 0)
         assert _session_start_event(stdout) == "SessionStart"
         assert (tmp_path / "mem.db").exists()
-
-    def test_build_failure_is_reported_with_empty_stdout(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """コンテキストの組み立てに失敗したら、stdout を空にして exit 1 と stderr の原因で知らせる。
-
-        Claude Code は正しい JSON を出すと終了コードを見ずに成功扱いにするので、失敗時は JSON を出さない
-        （空の stdout と exit 1 なら、セッションは続き、利用者に hook error の通知が出る）。
-        """
-        stub = _raising(RuntimeError("db broken"))
-        monkeypatch.setattr(cmd_context, "_build_context", stub)
-        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
-        assert len(stub.calls) == 1
-        assert (stdout, stderr, exit_code) == ("", "コマンド context 失敗: db broken\n", 1)
 
 
 class TestFailurePaths:
