@@ -596,7 +596,8 @@ def _detect_group_commits(group: tuple[str, ...]) -> list[tuple[str, list[str]]]
     （``["bash", "-lc", "git commit -m x"]`` の commit は要素側でしか見えない）。
 
     Args:
-        group: ``iter_bash_command_groups`` が返すグループです。
+        group: ``iter_bash_command_groups`` が返すグループの各候補から、heredoc のデータ本文を
+            落とした組です。
 
     Returns:
         検出した commit のリスト。
@@ -606,8 +607,7 @@ def _detect_group_commits(group: tuple[str, ...]) -> list[tuple[str, list[str]]]
     """
     has_joined = len(group) > 1
     detections: list[tuple[str, list[str]] | None] = []
-    for raw_command in group:
-        command = strip_data_heredoc_bodies(raw_command)
+    for command in group:
         try:
             detections.append(_detect_git_commit(command))
         except Exception as err:  # noqa: BLE001 - 1 候補の失敗で他を落とさない
@@ -651,11 +651,14 @@ def evaluate(raw_input: str) -> dict:
         # コンテナキーは 1 つも取りこぼさず走査し、commit を**全て**集める。先に判定できた
         # コンテナの結論を返すと、先頭が「通る commit」のときに後続キーの commit が
         # 検査されない。
-        groups = list(iter_bash_command_groups(input_data))
+        groups = [
+            tuple(strip_data_heredoc_bodies(command) for command in group)
+            for group in iter_bash_command_groups(input_data)
+        ]
         # 予算は全候補を走査する前に検査する。候補ごとに走査と交互に検査すると、上限内の要素を
         # 並べた argv 配列で要素の走査が積み上がり、上限を超える結合候補に着く前に timeout に
         # 近づく（4,999 トークンの要素 45 個で 7.45 秒）。
-        if any(command_exceeds_scan_budget(strip_data_heredoc_bodies(command)) for group in groups for command in group):
+        if any(command_exceeds_scan_budget(command) for group in groups for command in group):
             return _blocked(raw_input, _SCAN_BUDGET_MESSAGE)
         commits: list[tuple[str, list[str]]] = []
         for group in groups:
