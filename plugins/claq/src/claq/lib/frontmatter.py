@@ -7,7 +7,7 @@ YAML のサブセットを Python の値へ変換する :func:`parse_yaml` を�
 
 * ブロックマッピング（任意深さ・キーは常に ``str``）とブロックシーケンス
 * コンパクトマップ（``- k: v``）とネストシーケンス
-* フローコレクション ``[a, b]`` / ``{k: v}``（相互ネスト可・深さ上限 32）
+* フローコレクション ``[a, b]`` / ``{k: v}``（相互ネスト可。深さの上限は置かないので、極端に深い入力は ``RecursionError`` になる）
 * 単一引用符・二重引用符（``\\n`` ``\\t`` ``\\xHH`` ``\\uHHHH`` などのエスケープ）
 * ブロックスカラー ``|`` / ``>`` とチョンピング ``-`` / ``+``
 * プレーンスカラーの型解決（null / bool / int / float / str）と ``␣#`` コメント除去
@@ -490,7 +490,7 @@ class _Parser:
         """同一インデントに並ぶ ``- `` エントリをリストとして解析する。
 
         Raises:
-            FrontmatterError: 厳格モードでエントリを解釈できない場合。
+            FrontmatterError: エントリを解釈できない場合。
         """
         return list(self._block_entries(indent, self._parse_sequence_entry))
 
@@ -645,7 +645,7 @@ class _Parser:
     def _read_flow_mapping(self, text: str, start: int) -> tuple[dict[str, object], int]:
         """``{k: v}`` 形式のフローマッピングを解析する。
 
-        キーの重複はモードに関わらずエラーにする（寛容モードではエントリごと読み飛ばされる）。
+        キーが重複したらエラーにする。
 
         Raises:
             FrontmatterError: 閉じ括弧が無い、区切りが不正、またはキーが重複した場合。
