@@ -189,6 +189,9 @@ def test_conditional_protection(
         pytest.param("apply_patch", {"input": "*** patch ***"}, ["*** patch ***"], id="apply-patch-dict-with-input"),
         pytest.param("apply_patch", {"other": "x"}, None, id="apply-patch-dict-without-input"),
         pytest.param("apply_patch", 123, None, id="apply-patch-wrong-type"),
+        pytest.param("apply_patch", "raw", ["raw"], id="apply-patch-raw-string"),
+        pytest.param("MultiEdit", {"edits": "x"}, None, id="multiedit-edits-not-list"),
+        pytest.param("Edit", {"old_string": 1}, None, id="edit-snippets-not-str"),
         # Edit 系で container が dict でない（想定外の shape）場合は判定不能扱い。
         pytest.param("Edit", "raw string, not dict", None, id="edit-container-not-dict"),
     ],

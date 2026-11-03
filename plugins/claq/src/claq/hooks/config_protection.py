@@ -356,12 +356,8 @@ def _editable_text(tool_name: str, container: Any) -> list[str] | None:
         例外は発生しません。
     """
     if tool_name == "apply_patch":
-        if isinstance(container, str):
-            return [container]
-        if isinstance(container, dict):
-            text = container.get("input")
-            return [text] if isinstance(text, str) else None
-        return None
+        text = container.get("input") if isinstance(container, dict) else container
+        return [text] if isinstance(text, str) else None
 
     if not isinstance(container, dict):
         return None
@@ -371,21 +367,17 @@ def _editable_text(tool_name: str, container: Any) -> list[str] | None:
         content = container.get("content")
         return [content] if isinstance(content, str) else None
 
-    if normalized == "multiedit":
-        edits = container.get("edits")
-        if not isinstance(edits, list):
-            return None
-        snippets = [
-            snippet
-            for edit in edits
-            if isinstance(edit, dict)
-            for key in ("old_string", "new_string")
-            if isinstance(snippet := edit.get(key), str)
-        ]
-        return snippets or None
-
-    # edit / search_replace 等はいずれも Edit 相当として扱う
-    snippets = [s for s in (container.get("old_string"), container.get("new_string")) if isinstance(s, str)]
+    # MultiEdit は edits[]、edit / search_replace 等はコンテナ自身を 1 つの Edit 相当として扱う。
+    edits = container.get("edits") if normalized == "multiedit" else [container]
+    if not isinstance(edits, list):
+        return None
+    snippets = [
+        snippet
+        for edit in edits
+        if isinstance(edit, dict)
+        for key in ("old_string", "new_string")
+        if isinstance(snippet := edit.get(key), str)
+    ]
     return snippets or None
 
 
