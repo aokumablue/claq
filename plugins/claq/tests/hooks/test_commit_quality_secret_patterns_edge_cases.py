@@ -23,7 +23,7 @@ def _scan_line(line: str) -> list[tuple[str, int, str, str]]:
     """``line`` を前後の無害な行に挟んで走査し、(type, line, severity, message) の一覧を返す。"""
     lines = ["prefix", line, "suffix"]
     issues = commit_quality_scanner._scan_secret_issues(
-        "\n".join(lines), lines, deadline=commit_quality_scanner.new_secret_scan_deadline()
+        lines, deadline=commit_quality_scanner.new_secret_scan_deadline()
     )
     return [(issue["type"], issue["line"], issue["severity"], issue["message"]) for issue in issues]
 
