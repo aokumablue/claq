@@ -250,11 +250,6 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
     return patch_text if isinstance(patch_text, str) else tool_input
 
 
-def _has_patch_markers(patch_text: str) -> bool:
-    """テキストが構造化パッチのファイル操作マーカー行を 1 つ以上含むか判定する。"""
-    return any(line.startswith(marker) for line in patch_text.splitlines() for marker in _PATCH_FILE_MARKERS)
-
-
 def _concat_or_none(parts: Iterable[list[str] | None]) -> list[str] | None:
     """パス一覧を連結する。1 つでも判定不能（None）があれば None を返す。"""
     paths: list[str] = []
@@ -305,14 +300,16 @@ def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[st
     """
     patch_text = _extract_patch_text(tool_input)
     is_declared_patch_tool = tool_name == "apply_patch"
-    if isinstance(patch_text, str) and (is_declared_patch_tool or _has_patch_markers(patch_text)):
+    if isinstance(patch_text, str):
         paths = [
             line[len(marker) :].strip()
             for line in patch_text.splitlines()
             for marker in _PATCH_FILE_MARKERS
             if line.startswith(marker)
         ]
-        return paths or None
+        # マーカーが 1 つも無い本文は、apply_patch と明示されていなければパッチではなく通常の入力として読み進める。
+        if is_declared_patch_tool or paths:
+            return paths or None
 
     if isinstance(tool_input, list):
         paths = _concat_or_none(extract_file_paths(tool_name, item) for item in tool_input)
