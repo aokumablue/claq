@@ -291,21 +291,6 @@ def repo_git_config_path(file_path: str) -> str | None:
     return _match_path_segments(file_path, _GIT_CONFIG_REPO_SEGMENTS, _GIT_CONFIG_REPO_SEGMENTS_FOLDED)
 
 
-def git_config_path(file_path: str) -> str | None:
-    """パスが内容次第で保護する git config（リポジトリ内・ホーム側）かを判定する。
-
-    Args:
-        file_path: 検査対象の生パス文字列。
-
-    Returns:
-        該当した保護 path の表示名。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
-    """
-    return repo_git_config_path(file_path) or global_git_config_path(file_path)
-
-
 def _effective_basename(file_path: str) -> str:
     """symlink を解決した実体 basename を返す。
 
@@ -919,7 +904,7 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
         protected_segment = protected_path_segment(file_path)
         if protected_segment is not None:
             return blocked_message_for_file(f"{protected_segment}/")
-        git_config = git_config_path(file_path)
+        git_config = repo_git_config_path(file_path) or global_git_config_path(file_path)
         if git_config is not None:
             reason = _git_config_block_reason(tool_name, container, file_path, git_config)
             if reason:

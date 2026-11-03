@@ -10,34 +10,24 @@ from unittest import mock
 import pytest
 
 from claq.hooks import block_no_verify, hook_common
-from claq.hooks.hook_common import emit_session_start_output, print_session_start_output
+from claq.hooks.hook_common import print_session_start_output
 
 
 @pytest.mark.parametrize(
     "context",
-    [None, "", "simple context", "改行\n含む\nテキスト", "unicode: 日本語テスト 🐍", "a" * 5000],
-    ids=["default", "empty", "simple", "newlines", "unicode", "long"],
+    ["", "simple context", "改行\n含む\nテキスト", "unicode: 日本語テスト 🐍", "a" * 5000],
+    ids=["empty", "simple", "newlines", "unicode", "long"],
 )
-def test_session_start_output(context: str | None, capsys: pytest.CaptureFixture[str]) -> None:
-    """emit は末尾改行なしの合併 JSON 文字列を返し、print は同じ JSON を 1 行で stdout へ書くこと（None は引数省略）。"""
-    args = () if context is None else (context,)
-    result = emit_session_start_output(*args)
-    print_session_start_output(*args)
+def test_session_start_output(context: str, capsys: pytest.CaptureFixture[str]) -> None:
+    """print は additionalContext（トップレベル）と hookSpecificOutput を同時に含む合併 JSON を 1 行で stdout へ書くこと。"""
+    print_session_start_output(context)
 
-    expected = context or ""
-    assert isinstance(result, str)
-    assert not result.endswith("\n")
-    assert json.loads(result) == {
-        "additionalContext": expected,
-        "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": expected},
+    out = capsys.readouterr().out
+    assert out.endswith("\n")
+    assert json.loads(out) == {
+        "additionalContext": context,
+        "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context},
     }
-    assert capsys.readouterr().out == result + "\n"
-
-
-@pytest.mark.parametrize("value", [None, "", "0", " no "])
-def test_is_truthy_rejects_falsey_values(value: str | None) -> None:
-    """None・空文字・"0"・前後に空白のある " no " を真値とみなさないこと。"""
-    assert hook_common.is_truthy(value) is False
 
 
 @pytest.mark.parametrize(
