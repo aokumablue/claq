@@ -33,7 +33,7 @@ Skill ツールで `loop-dev` skill を起動し、plan→generate→evaluate �
 
 - `task` = 合意済み要件
 - `task_type` = `feature`
-- `converge_extra` = ステップ1 の成功条件から導く
+- `converge_extra` = ステップ1 の成功条件から導く。利用者に見える振る舞いが変わるなら「README など利用者向け文書も更新済み」を加える
 
 loop-dev の収束または停止の報告を受け取ったら次へ進む。
 
