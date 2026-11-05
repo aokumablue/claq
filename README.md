@@ -228,7 +228,7 @@ flowchart LR
   subgraph bugfix["⚙️ bugfix 内部（4ステップ）"]
     direction TB
     SG["grillme<br/>要件が曖昧なときだけ"]:::skill -.-> REQ
-    REQ["要件整理"] --> REPRO["再現テスト確立<br/>再現できなければ不足情報を示して停止"]
+    REQ["要件整理"] --> REPRO["再現テスト確立<br/>再現できなければ git bisect 等で絞り込み、なお不可なら不足情報を示して停止"]
     REPRO --> ST["loop-dev<br/>反復修正（最大2反復）"]:::skill
     ST --> AT["🧪 tdd-writer"]:::agent
     AT --> AR["✅ reviewer"]:::agent
