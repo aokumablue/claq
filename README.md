@@ -78,7 +78,7 @@ claude plugin install claq@claq
 
 ---
 
-## 🚀 Commands (9)
+## 🚀 Commands (10)
 
 各コマンドの詳細はリンク先 `.md` ファイル参照。
 
@@ -93,6 +93,7 @@ claude plugin install claq@claq
 | [`/skill-gen`](plugins/claq/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--knowledge]` | 入力収集→skill-make（生成・grader/comparator/bench-analyzer による eval・改善）→完了ゲート |
 | [`/instinct`](plugins/claq/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
 | [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→loop-dev 実装→検証。承認待ちは置かない。言語非依存 |
+| [`/package-upgrade`](plugins/claq/commands/package-upgrade.md) | 依存更新 | `[パッケージ名[@版] ...]` | 対象と目標版の確定→破壊的変更の洗い出し→loop-dev で更新と追従→報告。指定なしはマイナー・パッチのみ |
 
 ---
 
@@ -128,7 +129,7 @@ claude plugin install claq@claq
 
 ## 🧭 Workflows
 
-claq が「どの場面でどう動くか」を 5 ジャンル・18 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。すべての Commands / Skills はいずれかの図に登場します。
+claq が「どの場面でどう動くか」を 5 ジャンル・19 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。すべての Commands / Skills はいずれかの図に登場します。
 
 ### 凡例
 
@@ -156,7 +157,7 @@ claq が「どの場面でどう動くか」を 5 ジャンル・18 のワーク
 
 | ジャンル | 収録ワークフロー |
 |---|---|
-| [実装](#実装) | 新機能開発 / バグ修正 / フルリファクタリング / コード単純化のみ / デッドコード掃除 / クイック往復モード / テストコード自動生成 |
+| [実装](#実装) | 新機能開発 / バグ修正 / フルリファクタリング / コード単純化のみ / デッドコード掃除 / クイック往復モード / テストコード自動生成 / 依存更新 |
 | [品質・セキュリティ](#品質セキュリティ) | セキュリティ重視の実装 / 品質管理サイクル / ハーネス定期メンテ / リリース前実起動検証 |
 | [スキル・知識管理](#スキル知識管理) | スキル新規作成・改善 / 知識蓄積サイクル / ループ収束品質診断 / 反復ループの中断復旧 |
 | [新規生成](#新規生成) | MCP サーバ新規構築 / shadcn/ui サイト・ダッシュボード新規作成 |
@@ -227,7 +228,7 @@ flowchart LR
   subgraph bugfix["⚙️ bugfix 内部（4ステップ）"]
     direction TB
     SG["grillme<br/>要件が曖昧なときだけ"]:::skill -.-> REQ
-    REQ["要件整理"] --> REPRO["再現テスト確立<br/>再現できなければ不足情報を示して停止"]
+    REQ["要件整理"] --> REPRO["再現テスト確立<br/>再現できなければ git log / blame で絞り込み、なお不可なら不足情報を示して停止"]
     REPRO --> ST["loop-dev<br/>反復修正（最大2反復）"]:::skill
     ST --> AT["🧪 tdd-writer"]:::agent
     AT --> AR["✅ reviewer"]:::agent
@@ -402,6 +403,28 @@ flowchart TD
 
 ```bash
 /test-gen src/auth/login.py
+```
+
+### 依存更新
+
+```mermaid
+flowchart TD
+  classDef cmd    fill:#2563eb,stroke:#1e40af,color:#fff,rx:6
+  classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
+
+  A(["/package-upgrade [pkg@ver]"]):::cmd --> B["対象と目標版の確定<br/>指定なしはマイナー・パッチのみ"]
+  B --> C["破壊的変更の洗い出し<br/>CHANGELOG → 利用箇所の一覧"]
+  C --> D["loop-dev で更新と追従<br/>版の更新もループ内で行う"]:::skill
+  D --> E(["✅ 報告<br/>見送ったメジャー更新は Proposals"])
+```
+
+**トリガー**: 依存パッケージやランタイムの版上げ
+**期待効果**: 破壊的変更を利用箇所まで落としてから直すので、テストが通らない理由を探し回らずに済む
+
+**実行例**:
+
+```bash
+/package-upgrade requests@3
 ```
 
 ---
@@ -774,7 +797,7 @@ flowchart TB
   classDef store  fill:#374151,stroke:#1f2937,color:#fff,rx:4
 
   subgraph user["👤 User Layer"]
-    CMD["Commands (9)"]:::cmd
+    CMD["Commands (10)"]:::cmd
   end
 
   subgraph internal["⚙️ Internal Layer"]
