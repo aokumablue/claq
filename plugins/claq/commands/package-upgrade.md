@@ -22,9 +22,9 @@ command: /package-upgrade
 
 ## ステップ3: loop-dev で更新と追従
 
-版はここで上げる（先に上げると、更新で壊れたテストが loop-dev の baseline で既存 red として扱われ、収束判定から外れる）。Skill ツールで `loop-dev` skill を起動する。入力:
+版の更新は loop-dev の中で行う（先に上げない）。Skill ツールで `loop-dev` skill を起動する。入力:
 
-- `task` = 目標版への更新（マニフェスト・ロックファイル・インストール）と、一覧に沿った追従
+- `task` = 目標版への更新（マニフェスト・ロックファイル・インストール）と、一覧に沿った追従。RED は版上げ後に落ちる既存テスト
 - `approved_plan` = ステップ2 の一覧
 - `task_type` = `feature`
 - `converge_extra` = 「目標版がロックファイルに反映済み + 一覧の全項目が追従済みか未使用」

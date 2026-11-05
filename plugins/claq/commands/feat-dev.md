@@ -31,9 +31,9 @@ grillme を起動した場合はその結果を、省いた場合は依頼時点
 
 Skill ツールで `loop-dev` skill を起動し、plan→generate→evaluate を最大 2 反復で収束させる。入力:
 
-- `task` = 合意済み要件
+- `task` = 合意済み要件。利用者に見える振る舞いが変わるなら README など利用者向け文書の更新も含める
 - `task_type` = `feature`
-- `converge_extra` = ステップ1 の成功条件から導く。利用者に見える振る舞いが変わるなら「README など利用者向け文書も更新済み」を加える
+- `converge_extra` = ステップ1 の成功条件から導く
 
 loop-dev の収束または停止の報告を受け取ったら次へ進む。
 
