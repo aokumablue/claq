@@ -210,16 +210,24 @@ def normalize_tool_name(tool_name: str) -> str:
 _IDENTIFIABLE_TOOL_NAMES = frozenset(name.lower() for name in _TOOL_NAME_MAP.values())
 
 
-def is_unidentifiable_tool(tool_name: str) -> bool:
-    """ツール名が既知のどれとも一致しないかを判定する。
+def is_known_tool_outside(tool_name: str, scope: frozenset[str]) -> bool:
+    """ツール名が既知のツールで、かつ検査対象 *scope* の外にあるかを判定する。
 
     ツール名で検査対象を絞るフックは、名前を特定できない payload（空文字へ倒れた
     ``{"tool_name": 123}`` や未知の ``mcp__fs__write``）を「対象外」と読み替えては
     ならない。ツール名の照合はハーネスの matcher が既に済ませているため、「既知の
     対象外ツール」だけを skip し、特定できない名前は検査側へ倒す
     （docs/adr/shell-analysis-boundary.md: 誤検出 > 誤通過）。
+
+    Args:
+        tool_name: 正規化前の生ツール名。
+        scope: 検査対象とする正規化後のツール名（小文字）。
+
+    Returns:
+        skip してよい（既知かつ対象外の）ツールなら True。
     """
-    return normalize_tool_name(tool_name).lower() not in _IDENTIFIABLE_TOOL_NAMES
+    normalized = normalize_tool_name(tool_name).lower()
+    return normalized not in scope and normalized in _IDENTIFIABLE_TOOL_NAMES
 
 
 def _extract_patch_text(tool_input: dict | str | None) -> str | None:

@@ -13,10 +13,10 @@ from pathlib import Path
 import pytest
 
 from claq.ci import validate_hooks
-from claq.ci.ci_common import REPO_ROOT
+from claq.ci.ci_common import PLUGIN_ROOT
 from claq.ci.validate_hooks import REQUIRED_EVENTS, REQUIRED_HOOKS_VERSION
 
-REPO_HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.json"
+REPO_HOOKS_JSON = PLUGIN_ROOT / "hooks" / "hooks.json"
 
 # 必須イベント（PreToolUse / PreCompact / SessionStart / SessionEnd）を構造的に正しいダミーで埋めたもの。
 # validate_hooks は完成した hooks マニフェストを検証する契約なので、1 つのマッチャーだけを見たい
@@ -414,4 +414,4 @@ class TestRepoHooksJsonPowerShellParity:
 
     def test_windows_wrapper_file_exists(self) -> None:
         """`powershell` が起動する `runtime/claq-hook.cmd` が実在すること。"""
-        assert (REPO_ROOT / "runtime" / "claq-hook.cmd").is_file()
+        assert (PLUGIN_ROOT / "runtime" / "claq-hook.cmd").is_file()

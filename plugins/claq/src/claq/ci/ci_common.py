@@ -9,9 +9,10 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+from claq.lib.core_utils import get_plugin_root
 from claq.lib.frontmatter import FrontmatterError, parse_yaml, split_frontmatter
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+PLUGIN_ROOT = get_plugin_root()
 
 
 def emit_error(message: str) -> None:

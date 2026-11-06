@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from claq.ci.ci_common import (
-    REPO_ROOT,
+    PLUGIN_ROOT,
     emit_error,
     extract_frontmatter,
     parse_validator_args,
@@ -15,7 +15,7 @@ from claq.ci.ci_common import (
     report_missing,
 )
 
-DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
+DEFAULT_SKILLS_DIR = PLUGIN_ROOT / "skills"
 
 # SKILL.md の frontmatter に必須のフィールド。`name` が無いとホストが登録
 # できず、`description` が無いと「いつ呼ぶか」を判断できない。

@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from claq.ci.ci_common import (
-    REPO_ROOT,
+    PLUGIN_ROOT,
     emit_error,
     parse_validator_args,
     read_or_report,
@@ -15,10 +15,10 @@ from claq.ci.ci_common import (
     report_missing,
 )
 
-DEFAULT_ROOT_DIR = REPO_ROOT
-DEFAULT_COMMANDS_DIR = REPO_ROOT / "commands"
-DEFAULT_AGENTS_DIR = REPO_ROOT / "agents"
-DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
+DEFAULT_ROOT_DIR = PLUGIN_ROOT
+DEFAULT_COMMANDS_DIR = PLUGIN_ROOT / "commands"
+DEFAULT_AGENTS_DIR = PLUGIN_ROOT / "agents"
+DEFAULT_SKILLS_DIR = PLUGIN_ROOT / "skills"
 
 _RESERVED_SKILL_ROOTS = {"learned", "imported"}
 

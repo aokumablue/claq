@@ -103,9 +103,8 @@ from claq.hooks.stdin_io import (
 )
 from claq.lib.harness import (
     extract_raw_tool_name,
-    is_unidentifiable_tool,
+    is_known_tool_outside,
     iter_bash_commands,
-    normalize_tool_name,
 )
 
 # matcher（hooks.json）の綴りがズレても、本体側で対象外ツールを早期 return する多重防御。
@@ -765,9 +764,7 @@ def main() -> int:
     tool_name = extract_raw_tool_name(data)
     # 既知の「シェルではないツール」だけを skip する。ツール名を特定
     # できない payload を対象外へ倒すと保護が丸ごと無効になる。
-    if normalize_tool_name(tool_name).lower() not in _BASH_TOOL_NAMES and not is_unidentifiable_tool(
-        tool_name
-    ):
+    if is_known_tool_outside(tool_name, _BASH_TOOL_NAMES):
         return 0
 
     # コンテナキーは 1 つも取りこぼさず走査する。先勝ちで 1 キーだけ見ると、無害な側だけを

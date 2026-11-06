@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from claq.ci.ci_common import (
-    REPO_ROOT,
+    PLUGIN_ROOT,
     emit_error,
     is_non_empty_string,
     is_non_empty_string_array,
@@ -49,7 +49,7 @@ VALID_EVENTS = [
 VALID_HOOK_TYPES = ["command", "http", "prompt", "agent"]
 EVENTS_WITHOUT_MATCHER = {"UserPromptSubmit", "Notification", "Stop", "SubagentStop"}
 
-DEFAULT_HOOKS_FILE = REPO_ROOT / "hooks" / "hooks.json"
+DEFAULT_HOOKS_FILE = PLUGIN_ROOT / "hooks" / "hooks.json"
 
 
 def _type_and_timeout_errors(hook: dict, label: str) -> Iterator[str]:

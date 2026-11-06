@@ -46,7 +46,7 @@ from claq.lib.core_utils import get_plugin_root
 from claq.lib.harness import (
     extract_file_paths,
     extract_raw_tool_name,
-    is_unidentifiable_tool,
+    is_known_tool_outside,
     iter_tool_input_containers,
     normalize_tool_name,
 )
@@ -932,9 +932,7 @@ def _block_reason(data: dict[str, Any]) -> str | None:
     tool_name = extract_raw_tool_name(data)
     # 既知の「書き込みではないツール」だけを skip する。ツール名を特定
     # できない payload を対象外へ倒すと保護が丸ごと無効になる。
-    if normalize_tool_name(tool_name).lower() not in _WRITE_TOOL_NAMES and not is_unidentifiable_tool(
-        tool_name
-    ):
+    if is_known_tool_outside(tool_name, _WRITE_TOOL_NAMES):
         return None
     # 最初の理由で return する（先勝ち）のは意図した短絡。非 None の戻り値はすべて deny
     # なので、残りのコンテナを評価しても結論は変わらない。

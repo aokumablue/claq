@@ -41,10 +41,10 @@ from pathlib import Path
 
 import pytest
 
-from claq.ci.ci_common import REPO_ROOT
+from claq.ci.ci_common import PLUGIN_ROOT
 from claq.lib.harness import _TOOL_NAME_MAP, normalize_tool_name
 
-HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.json"
+HOOKS_JSON = PLUGIN_ROOT / "hooks" / "hooks.json"
 
 # 全ツールを表す特別値。正規表現として評価されないためアンカー化しない。
 WILDCARD_MATCHER = "*"

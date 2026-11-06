@@ -383,3 +383,11 @@ def test_background_child_writes_non_ascii_log_under_non_utf8_locale(tmp_path: P
 
     for log in sorted(log_dir.glob("bg-*.log")) if log_dir.is_dir() else []:
         assert "UnicodeEncodeError" not in log.read_text(encoding="utf-8", errors="replace")
+
+
+def test_protection_hooks_match_hooks_json_pre_tool_use_entries() -> None:
+    """`_PROTECTION_HOOKS` が hooks.json の PreToolUse エントリが起動するモジュールと一致すること。"""
+    hooks = json.loads((launcher.REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+    modules = {hook["command"].split()[-1] for entry in hooks["PreToolUse"] for hook in entry["hooks"]}
+
+    assert modules == launcher._PROTECTION_HOOKS

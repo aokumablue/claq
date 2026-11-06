@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from claq.ci.ci_common import (
-    REPO_ROOT,
+    PLUGIN_ROOT,
     emit_error,
     extract_frontmatter,
     parse_validator_args,
@@ -13,7 +13,7 @@ from claq.ci.ci_common import (
     report_missing,
 )
 
-DEFAULT_AGENTS_DIR = REPO_ROOT / "agents"
+DEFAULT_AGENTS_DIR = PLUGIN_ROOT / "agents"
 
 
 def _validate_agent_file(file_path: Path) -> bool:
