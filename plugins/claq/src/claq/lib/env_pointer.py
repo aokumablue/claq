@@ -42,7 +42,7 @@ _MAX_ANCESTOR_DEPTH = 2
 """writer が祖先 PID へポインタを書く最大段数。resolver の祖先 walk と同じ深さに揃える。"""
 
 _PS_TIMEOUT_SECONDS = 5
-"""祖先チェーン取得用 ``ps`` 呼び出しのハードタイムアウト。"""
+"""祖先チェーン取得の ``ps`` 呼び出し全段で共有する締め切り（秒）。"""
 
 _MAX_ROOT_AGE_SECONDS = 7 * 24 * 60 * 60
 """生存 PID のポインタでもこれより mtime が古ければ PID 再利用とみなし削除する。"""
@@ -62,7 +62,7 @@ _warned_this_process = False
 def ancestor_pointers_supported() -> bool:
     """祖先 PID ポインタ方式が成立する OS かを返す。
 
-    この方式は writer（``ps -eo pid=,ppid=,lstart=``）と resolver（POSIX sh +
+    この方式は writer（``ps -o ppid=,lstart= -p <pid>``）と resolver（POSIX sh +
     ``ps -o lstart=``）の両方に依存する。Windows には ``ps`` が無く、Git Bash の
     ``ps`` は ``-o`` 書式を持たないうえ MSYS の別 PID 空間を返すため照合できない。
     Windows では md の bootstrap 行の代わりに `runtime/claq-hook` を直接呼ぶ必要があり、
