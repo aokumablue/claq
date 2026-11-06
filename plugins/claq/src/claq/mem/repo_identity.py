@@ -235,7 +235,7 @@ def read_remote_url(root_path: str) -> str | None:
     return _run_git(root_path, "remote", "get-url", "origin")
 
 
-def detect_repo_identity(cwd: str | Path | None = None) -> RepoIdentity:
+def detect_repo_identity(cwd: str | Path | None) -> RepoIdentity:
     """*cwd* から identity_key / root_path / remote_url を確定する。
 
     remote が取得でき正規化にも成功した場合のみ remote 由来の identity_key を使う。

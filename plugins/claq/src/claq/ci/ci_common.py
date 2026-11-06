@@ -63,6 +63,13 @@ def parse_validator_args(description: str, argv: Sequence[str] | None, **path_de
     return parser.parse_args(argv)
 
 
+def list_markdown_files(directory: Path) -> list[Path]:
+    """ディレクトリ直下の Markdown ファイルを返す。ディレクトリが無ければ空リスト。"""
+    if not directory.exists():
+        return []
+    return [entry for entry in directory.iterdir() if entry.is_file() and entry.name.endswith(".md")]
+
+
 def read_json(file_path: str | Path, label: str) -> Any:
     """JSON を読み取り、パースエラーを ``label`` 付きの ValueError に正規化する。"""
     try:

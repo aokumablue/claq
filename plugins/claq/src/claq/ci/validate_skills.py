@@ -75,7 +75,7 @@ def _validate_skill_dir(directory: Path) -> bool:
     return report_errors(_frontmatter_field_errors(label, frontmatter))
 
 
-def validate_skills(skills_dir: str | Path = DEFAULT_SKILLS_DIR) -> int:
+def validate_skills(skills_dir: str | Path) -> int:
     """スキルディレクトリを検証する。
 
     誤りは 1 件ずつ stderr へ書き出し、全件合格なら検証したディレクトリ数を stdout へ表示する。

@@ -157,7 +157,7 @@ def _hooks_errors(hooks: dict[str, Any]) -> Iterator[str]:
         yield f"必須イベントが宣言されていません: {' '.join(missing_events)}"
 
 
-def validate_hooks(hooks_file: str | Path = DEFAULT_HOOKS_FILE) -> int:
+def validate_hooks(hooks_file: str | Path) -> int:
     """hooks.json を検証する。
 
     誤りは 1 件ずつ stderr へ書き出し、全件合格なら検証したマッチャー数を stdout へ表示する。

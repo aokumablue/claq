@@ -8,6 +8,7 @@ from claq.ci.ci_common import (
     PLUGIN_ROOT,
     emit_error,
     extract_frontmatter,
+    list_markdown_files,
     parse_validator_args,
     read_or_report,
     report_missing,
@@ -43,7 +44,7 @@ def _validate_agent_file(file_path: Path) -> bool:
     return False
 
 
-def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR) -> int:
+def validate_agents(agents_dir: str | Path) -> int:
     """エージェント Markdown ファイルを検証する。
 
     誤りは 1 件ずつ stderr へ書き出し、全件合格なら検証したファイル数を stdout へ表示する。
@@ -57,7 +58,7 @@ def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR) -> int:
     agents_path = Path(agents_dir)
     if not agents_path.exists():
         return report_missing("agents ディレクトリ", agents_path)
-    files = [entry for entry in agents_path.iterdir() if entry.is_file() and entry.name.endswith(".md")]
+    files = list_markdown_files(agents_path)
     # 全ファイルの誤りを出し切るため、短絡させずに検証する。
     failed = [file_path for file_path in files if _validate_agent_file(file_path)]
     if failed:

@@ -215,9 +215,9 @@ def test_quick_skills_stay_slash_only() -> None:
 
 def test_list_markdown_files(tmp_path: Path) -> None:
     """無いディレクトリは空リスト、ある場合は直下の .md だけを返すこと。"""
-    assert validate_commands._list_markdown_files(tmp_path / "missing") == []
+    assert validate_commands.list_markdown_files(tmp_path / "missing") == []
     _write_files(tmp_path, {"commands/keep.md": "ok\n", "commands/ignore.txt": "ignore\n"})
-    assert [path.name for path in validate_commands._list_markdown_files(tmp_path / "commands")] == ["keep.md"]
+    assert [path.name for path in validate_commands.list_markdown_files(tmp_path / "commands")] == ["keep.md"]
 
 
 @pytest.mark.parametrize(

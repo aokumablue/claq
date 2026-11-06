@@ -9,6 +9,7 @@ from pathlib import Path
 from claq.ci.ci_common import (
     PLUGIN_ROOT,
     emit_error,
+    list_markdown_files,
     parse_validator_args,
     read_or_report,
     report_errors,
@@ -21,13 +22,6 @@ DEFAULT_AGENTS_DIR = PLUGIN_ROOT / "agents"
 DEFAULT_SKILLS_DIR = PLUGIN_ROOT / "skills"
 
 _RESERVED_SKILL_ROOTS = {"learned", "imported"}
-
-
-def _list_markdown_files(directory: Path) -> list[Path]:
-    """ディレクトリ直下の Markdown ファイルを返す。ディレクトリが無ければ空リスト。"""
-    if not directory.exists():
-        return []
-    return [entry for entry in directory.iterdir() if entry.is_file() and entry.name.endswith(".md")]
 
 
 _KEBAB_NAME = r"[a-z0-9]+(?:-[a-z0-9]+)*"
@@ -109,10 +103,10 @@ def _validate_command_file(
 
 
 def validate_commands(
-    root_dir: str | Path = DEFAULT_ROOT_DIR,
-    commands_dir: str | Path = DEFAULT_COMMANDS_DIR,
-    agents_dir: str | Path = DEFAULT_AGENTS_DIR,
-    skills_dir: str | Path = DEFAULT_SKILLS_DIR,
+    root_dir: str | Path,
+    commands_dir: str | Path,
+    agents_dir: str | Path,
+    skills_dir: str | Path,
 ) -> int:
     """コマンド Markdown ファイルの相互参照を検証する。
 
@@ -134,9 +128,9 @@ def validate_commands(
     if not commands_path.exists():
         return report_missing("commands ディレクトリ", commands_path)
 
-    files = _list_markdown_files(commands_path)
+    files = list_markdown_files(commands_path)
     valid_commands = {path.stem for path in files}
-    valid_agents = {path.stem for path in _list_markdown_files(agents_path)}
+    valid_agents = {path.stem for path in list_markdown_files(agents_path)}
     valid_skills = {entry.name for entry in skills_path.iterdir() if entry.is_dir()} if skills_path.exists() else set()
 
     has_errors = False

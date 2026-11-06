@@ -70,7 +70,7 @@ def _stderr_handler() -> logging.Handler:
     return handler
 
 
-def setup(log_dir: Path, level: str = "info") -> None:
+def setup(log_dir: Path, level: str) -> None:
     """ロガーを初期化する。アプリケーション起動時に1度だけ呼ぶ。
 
     `_initialized` はハンドラの構築と追加が成功した後にだけ立てる。先に立てると、

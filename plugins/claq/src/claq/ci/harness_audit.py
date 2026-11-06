@@ -124,7 +124,7 @@ def _apply_arg(parsed: dict[str, Any], args: list[str], index: int) -> int:
     return index + 1
 
 
-def parse_args(argv: Sequence[str] | None = None) -> dict[str, Any]:
+def parse_args(argv: Sequence[str] | None) -> dict[str, Any]:
     """CLI 引数を解析する。
 
     位置引数は scope として、値を取るフラグは ``_VALUE_OPTIONS`` の変換を通して読む。
@@ -392,7 +392,7 @@ def _plugin_provider_hint(root_dir: Path) -> str:
     return f" このルートには plugin 提供元ディレクトリがあります: --root {paths}"
 
 
-def build_report(scope: str, root_dir: str | Path | None = None, target_mode: str | None = None) -> dict[str, Any]:
+def build_report(scope: str, root_dir: str | Path, target_mode: str | None = None) -> dict[str, Any]:
     """監査レポートを組み立てる。
 
     `target_mode` を明示した場合、自動判定（`detect_target_mode`）と不一致なら
@@ -401,14 +401,14 @@ def build_report(scope: str, root_dir: str | Path | None = None, target_mode: st
 
     Args:
         scope: 監査スコープ。
-        root_dir: 監査対象のルート。None なら cwd。
+        root_dir: 監査対象のルート。
         target_mode: ``"repo"`` / ``"consumer"`` を明示する場合に指定する。
             None なら自動判定に任せる。
 
     Raises:
         ValueError: 明示した target_mode が自動判定と食い違う場合。
     """
-    resolved_root = Path(root_dir or os.getcwd()).resolve()
+    resolved_root = Path(root_dir).resolve()
     detected_mode = detect_target_mode(resolved_root)
     if target_mode is not None and target_mode != detected_mode:
         raise ValueError(
