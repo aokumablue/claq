@@ -16,14 +16,13 @@ from claq.lib.env_pointer import ancestor_pointers_supported
 from claq.lib.harness import normalize_user_message
 from claq.mem.command_support import CommandArgs, _fit_budget, _session_uid
 from claq.mem.database import Database
-from claq.mem.handoff import build_handoff
+from claq.mem.handoff import build_handoff, truncate_handoff
 from claq.mem.knowledge_input import optional_str
 from claq.mem.models import Knowledge, Session, utc_now_iso
 from claq.mem.redaction import redact
 from claq.mem.repo_identity import resolve_repo
 from claq.mem.settings import (
     CONTEXT_GLOBAL_CHAR_BUDGET,
-    CONTEXT_HANDOFF_CHAR_BUDGET,
     CONTEXT_ITEM_CHAR_LIMIT,
     CONTEXT_REPO_CHAR_BUDGET,
     Settings,
@@ -159,10 +158,8 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     handoff = _neutralize_handoff_structure(strip_tags(keep_allowed_chars_for_injection(session.handoff).strip()))
     if not handoff:
         return ""
-    if len(handoff) > CONTEXT_HANDOFF_CHAR_BUDGET:
-        handoff = handoff[: CONTEXT_HANDOFF_CHAR_BUDGET - 1] + "…"
     stamp = datetime.fromisoformat(session.ended_at).strftime("%Y-%m-%d %H:%M")
-    return f"## 前回の続き ({stamp})\n{handoff}"
+    return f"## 前回の続き ({stamp})\n{truncate_handoff(handoff)}"
 
 
 # detach 失敗通知の 1 行化に使う。許可リスト処理が行区切りを LF に揃えた後の、LF の連なりを空白 1 つに畳む。

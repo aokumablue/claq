@@ -147,6 +147,18 @@ def _fixed_choice(payload: dict[str, Any], name: str, fixed_value: str) -> str:
     return fixed_value
 
 
+def _short_digest(text: str) -> str:
+    """key へ埋める決定的な短いハッシュを返す。
+
+    Args:
+        text: ハッシュ対象の文字列。
+
+    Returns:
+        SHA-1 の先頭 ``_KEY_HASH_LENGTH`` 桁。
+    """
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:_KEY_HASH_LENGTH]
+
+
 def slug_with_hash_fallback(redacted: str, prefix: str) -> str:
     """redact 済みテキストを slug 化し、ASCII が足りなければ決定的ハッシュへ倒す。
 
@@ -168,8 +180,7 @@ def slug_with_hash_fallback(redacted: str, prefix: str) -> str:
     """
     base = slugify(redacted) if _ASCII_ALNUM_RE.search(redacted) else ""
     if len(base) < _MIN_KEY_SLUG_LENGTH:
-        digest = hashlib.sha1(redacted.encode("utf-8")).hexdigest()[:_KEY_HASH_LENGTH]
-        return f"{prefix}-{digest}"
+        return f"{prefix}-{_short_digest(redacted)}"
     return base
 
 
@@ -215,8 +226,7 @@ def generate_key(raw_title: str, kind: str) -> str:
     base = slug_with_hash_fallback(redacted_title, kind)
     if redacted_title == raw_title:
         return base
-    collision_guard = hashlib.sha1(raw_title.encode("utf-8")).hexdigest()[:_KEY_HASH_LENGTH]
-    return f"{base}-{collision_guard}"
+    return f"{base}-{_short_digest(raw_title)}"
 
 
 @dataclass(frozen=True)
@@ -285,8 +295,8 @@ def _stripped_optional(value: Any) -> str | None:
 def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     """JSON ペイロードを検証済みの ``KnowledgeDraft`` へ変換する。
 
-    ``title`` / ``body`` / ``source_ref`` / ``domain`` / ``key`` は制御文字（C0・DEL）を除いてから、
-    DB へ書く前に ``redact_knowledge_text`` で既知プレフィックス系シークレットを
+    ``title`` / ``body`` / ``source_ref`` / ``domain`` / ``key`` は ``keep_allowed_chars`` で許可した文字だけを
+    残してから、DB へ書く前に ``redact_knowledge_text`` で既知プレフィックス系シークレットを
     マスクする（agent/外部入力由来の未検証データが SessionStart context
     へそのまま昇格するのを防ぐ）。key は **redact 後**の title から
     `generate_key` で生成する（redact 前の生 title から生成する

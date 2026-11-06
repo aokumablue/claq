@@ -33,7 +33,7 @@ class CommandArgs:
         positionals: オプション以外の位置引数。
         flags: 指定された真偽フラグ（``--global`` 等）。
         values: 値付きオプション（``--limit`` 等）の名前から値への写像。
-        stdin_data: stdin から読んだ JSON。dict でなければ空。
+        stdin_data: stdin から読んだ JSON object。stdin を読まないコマンドでは空。
     """
 
     positionals: tuple[str, ...] = ()

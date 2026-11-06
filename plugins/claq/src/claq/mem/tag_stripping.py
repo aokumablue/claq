@@ -93,6 +93,12 @@ from claq.mem.redaction import PLACEHOLDER, redact
 
 # 無害化対象タグ（大文字小文字区別なし）。正規表現へ literal として埋めるため、
 # 正規表現メタ文字を含まない名前だけを置く。
+#
+# 診断側（ci/scan_scaffold_drift.py）が「既知タグ」を組み立てるための公開名でもある。
+# これは**ブロック除去**の語彙であり、escape の語彙（`_NEUTRALIZE_TAGS`）とは
+# 別物で、後者のほうが広い。診断側が知りたいのは「中身ごと落としたブロック」の
+# 名前なのでこちらを渡す。escape の語彙へ名前を足しても診断側の既知集合は
+# `SCAFFOLD_TAGS` / `COMMAND_TAGS` 経由で揃うため、ここへ写す必要は無い。
 STRIPPED_TAGS = (
     "private",
     "mem-context",
@@ -100,12 +106,6 @@ STRIPPED_TAGS = (
     "system_instruction",
     "system-instruction",
 )
-
-# 診断側（ci/scan_scaffold_drift.py）が「既知タグ」を組み立てるための公開名。
-# これは**ブロック除去**の語彙であり、escape の語彙（`_NEUTRALIZE_TAGS`）とは
-# 別物で、後者のほうが広い。診断側が知りたいのは「中身ごと落としたブロック」の
-# 名前なのでこちらを渡す。escape の語彙へ名前を足しても診断側の既知集合は
-# `SCAFFOLD_TAGS` / `COMMAND_TAGS` 経由で揃うため、ここへ写す必要は無い。
 
 # 入れ子ブロック除去の最大反復回数。否定先読みは同種の開始タグを跨がないため、
 # 入れ子は内側から 1 段ずつ落ちる。1 回の sub では外側の中身が残るため
@@ -178,7 +178,7 @@ _NEUTRALIZED_LT = "&lt;"
 # `&` の置換先。実体参照の先頭としての機能だけを奪う。
 _NEUTRALIZED_AMP = "&amp;"
 
-# 3 行以上の空行を 2 行へ詰めるパターン。
+# 3 つ以上連続する改行。`_collapse_blank_lines` が 2 つへ詰める。
 _BLANK_LINES = re.compile(r"\n{3,}")
 
 _LT_LIKE = frozenset({"<", "\ufe64", "\uff1c"})
@@ -227,6 +227,25 @@ _MAX_CACHED_CODEPOINTS = 65536
 """判定結果を覚えるコードポイント数の上限。入力に全 Unicode が並んでも表が肥大しない。"""
 
 
+def _allowlist_verdict(ch: str) -> str | None:
+    """1 文字を許可リストで判定する。
+
+    Args:
+        ch: 判定する文字。
+
+    Returns:
+        残す文字（行区切りは ``\\n``）。落とすなら ``None``。
+    """
+    if ch in _LINE_BREAKS:
+        return "\n"
+    if ch in _ALWAYS_DROPPED:
+        return None
+    category = unicodedata.category(ch)
+    if ch in "\t\n" or category[0] in _KEPT_CATEGORY_INITIALS or category in _KEPT_CATEGORIES:
+        return ch
+    return None
+
+
 class _AllowlistTable(dict):
     """``str.translate`` に渡す許可リストの判定表。コードポイントごとの判定を覚える。
 
@@ -245,7 +264,7 @@ class _AllowlistTable(dict):
         self._max_entries = max_entries
 
     def __missing__(self, codepoint: int) -> str | None:
-        """未判定のコードポイントを許可リストで判定する。
+        """未判定のコードポイントを許可リストで判定し、上限まで結果を覚える。
 
         Args:
             codepoint: 判定する文字のコードポイント。
@@ -253,16 +272,7 @@ class _AllowlistTable(dict):
         Returns:
             残す文字（行区切りは ``\\n``）。落とすなら ``None``。
         """
-        ch = chr(codepoint)
-        category = unicodedata.category(ch)
-        if ch in _LINE_BREAKS:
-            verdict: str | None = "\n"
-        elif ch in _ALWAYS_DROPPED:
-            verdict = None
-        elif ch in "\t\n" or category[0] in _KEPT_CATEGORY_INITIALS or category in _KEPT_CATEGORIES:
-            verdict = ch
-        else:
-            verdict = None
+        verdict = _allowlist_verdict(chr(codepoint))
         if len(self) < self._max_entries:
             self[codepoint] = verdict
         return verdict
@@ -302,9 +312,9 @@ def drop_known_tag_blocks(text: str) -> str:
 
 
 def _collapse_blank_lines(text: str) -> str:
-    """3 行以上の空行を 2 行へ詰め、前後の空白を落とす。
+    """3 つ以上連続する改行を 2 つへ詰め（空行を 1 行に揃え）、前後の空白を落とす。
 
-    削除ではあるが、空行は 2 行残るため前後の文字が接着することはない
+    削除ではあるが、改行は 2 つ残るため前後の文字が接着することはない
     （タグの再鍛造経路にならない）。
 
     Args:
@@ -344,13 +354,8 @@ def _compat_open_positions(text: str) -> list[int]:
         folded = unicodedata.normalize("NFKC", ch)
         normalized.append(folded)
         owners.extend([index] * len(folded))
-    return sorted(
-        {
-            owners[match.start()]
-            for match in _CLAQ_MEMORY_OPEN.finditer("".join(normalized))
-            if text[owners[match.start()]] in _LT_LIKE
-        }
-    )
+    opens = {owners[match.start()] for match in _CLAQ_MEMORY_OPEN.finditer("".join(normalized))}
+    return sorted(position for position in opens if text[position] in _LT_LIKE)
 
 
 def _escape_compat_brackets(text: str) -> str:
@@ -439,7 +444,7 @@ def _hides_secret_behind_tags(text: str) -> bool:
     突き合わせる。
 
     消すタグが 1 つも無ければ両辺は同じ式になるため、``redact`` を走らせずに
-    False を返す。``redact`` は 16 本の正規表現を通す重い処理で、``strip_tags``
+    False を返す。``redact`` は全パターンの正規表現を通す重い処理で、``strip_tags``
     は SessionStart の同期フックが知識カードごとに呼ぶ。タグを含まない入力が
     大多数であり、そこへ 2 パス増やすと 1MB の入力で 1.2 秒（早期脱出後は
     0.03 秒）かかる。
@@ -562,9 +567,8 @@ def keep_allowed_chars_for_injection(text: str) -> str:
     cleaned = keep_allowed_chars(text)
     if cleaned == text:
         return cleaned
-    if keep_allowed_chars(redact(text)) == redact(cleaned):
-        return cleaned
-    return redact(cleaned)
+    redacted = redact(cleaned)
+    return cleaned if keep_allowed_chars(redact(text)) == redacted else redacted
 
 
 def strip_tags(text: str) -> str:
@@ -593,7 +597,7 @@ def strip_tags(text: str) -> str:
 
     Returns:
         既知タグ名の直前に生の ``<`` を含まないテキスト。前後の空白と
-        3 行以上の空行は詰める。細工を検出した場合は ``[REDACTED]``、または
+        3 つ以上連続する改行は詰める。細工を検出した場合は ``[REDACTED]``、または
         ``&`` と ``<`` を全て倒した本文。
     """
     if not text:

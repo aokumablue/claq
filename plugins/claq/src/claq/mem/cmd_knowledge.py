@@ -125,6 +125,28 @@ def _handle_learn(settings: Settings, args: CommandArgs) -> None:
     print(f"learned: {draft.key}")
 
 
+def _list_filters(args: CommandArgs) -> tuple[str, str | None]:
+    """``--status`` / ``--kind`` を検証して返す。
+
+    Args:
+        args: コマンド引数。
+
+    Returns:
+        status（既定は ``active``）と kind（未指定なら None）の組。
+
+    Raises:
+        CommandError: 列挙値が不正な場合。
+    """
+    try:
+        status = validate_choice("status", args.values.get("--status", "active"), STATUSES)
+        kind = args.values.get("--kind")
+        if kind is not None:
+            validate_choice("kind", kind, KINDS)
+    except KnowledgeInputError as e:
+        raise CommandError(str(e)) from e
+    return status, kind
+
+
 def _collect_list_rows(
     settings: Settings,
     args: CommandArgs,
@@ -151,13 +173,7 @@ def _collect_list_rows(
     Raises:
         CommandError: 列挙値・件数が不正な場合。
     """
-    try:
-        status = validate_choice("status", args.values.get("--status", "active"), STATUSES)
-        kind = args.values.get("--kind")
-        if kind is not None:
-            validate_choice("kind", kind, KINDS)
-    except KnowledgeInputError as e:
-        raise CommandError(str(e)) from e
+    status, kind = _list_filters(args)
     limit = _coerce_limit(args.values.get("--limit"), default_limit)
 
     rows: list[Knowledge] = []
