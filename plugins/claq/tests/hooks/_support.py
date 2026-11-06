@@ -278,7 +278,7 @@ _EXPECTED_CONDITIONALLY_PROTECTED_FILES = frozenset({
     "settings.local.json",
 })
 
-# `bash_config_protection._DIRECTORY_CHANGE_COMMANDS` の期待内容（層2）。
+# `hook_common.DIRECTORY_CHANGE_COMMANDS` の期待内容（層2）。
 _EXPECTED_DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 # `bash_config_protection._LEADING_SHELL_KEYWORDS` の期待内容（ディレクトリ移動の前に読み飛ばす語）。
 _EXPECTED_LEADING_SHELL_KEYWORDS = frozenset(
@@ -363,9 +363,6 @@ def _folded(names: frozenset[str]) -> frozenset[str]:
 _EXPECTED_VOCABULARIES: dict[str, Any] = {
     # --- bash_config_protection ---
     "bash_config_protection._BASH_TOOL_NAMES": frozenset({"bash"}),
-    "bash_config_protection._REDIRECT_OPERATORS": frozenset(
-        {">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"}
-    ),
     "bash_config_protection._LAST_ARG_WRITE_COMMANDS": frozenset(
         {"copy", "copy-item", "cp", "cpi", "install", "mi", "move", "move-item", "mv"}
     ),
@@ -378,7 +375,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "bash_config_protection._LN_COMMANDS": frozenset({"ln"}),
     "bash_config_protection._DD_COMMANDS": frozenset({"dd"}),
     "bash_config_protection._TOUCH_COMMANDS": _EXPECTED_TOUCH_COMMANDS,
-    "bash_config_protection._DIRECTORY_CHANGE_COMMANDS": _EXPECTED_DIRECTORY_CHANGE_COMMANDS,
     "bash_config_protection._LEADING_SHELL_KEYWORDS": _EXPECTED_LEADING_SHELL_KEYWORDS,
     "bash_config_protection._COMMAND_POSITION_WRAPPERS": frozenset(
         {
@@ -544,8 +540,12 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "shell_tokens._BODY_EXECUTING_BUILTINS": frozenset({".", "source", "eval"}),
     "shell_tokens._COMMENT_PRECEDING_CHARS": frozenset(" \t\n;|&()<>"),
     "shell_tokens._HEREDOC_CONTINUATION_SUFFIXES": ("\\", "|", "&"),
+    "shell_tokens.WRITE_REDIRECT_OPERATORS": frozenset(
+        {">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"}
+    ),
     # --- hook_common ---
     "hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES": frozenset({"ed", "red", "ex", "sponge"}),
+    "hook_common.DIRECTORY_CHANGE_COMMANDS": _EXPECTED_DIRECTORY_CHANGE_COMMANDS,
     # --- commit_risk ---
     "commit_risk._INDEX_MUTATING_GIT_SUBCOMMANDS": frozenset(
         {
@@ -586,9 +586,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
         }
     ),
     "commit_risk._INPLACE_EDIT_EXECUTABLES": frozenset({"perl", "sed"}),
-    "commit_risk._MUTATING_REDIRECT_OPERATORS": frozenset(
-        {">", ">>", "&>", "&>>", ">|", "<>", "1>", "2>", "1>>", "2>>", ">&"}
-    ),
 }
 
 # 完全一致で固定**しない**語彙と、その代わりに何が固定しているか。

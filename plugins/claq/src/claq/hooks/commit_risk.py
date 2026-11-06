@@ -16,7 +16,7 @@ from claq.hooks.hook_common import (
     is_inplace_edit_flag,
     normalize_executable_name,
 )
-from claq.hooks.shell_tokens import split_segments, tokenize, tokenize_with_status
+from claq.hooks.shell_tokens import WRITE_REDIRECT_OPERATORS, split_segments, tokenize, tokenize_with_status
 
 # PreToolUse フックは実行前の index/worktree しか観測できず、2 つ目以降の commit が
 # 何をコミットするかを原理的に検査できない。
@@ -138,8 +138,6 @@ _WORKTREE_MUTATING_EXECUTABLES = frozenset(
 # `-i` を伴うときだけ書き込みになるコマンド。フラグ無しでも書き込むコマンド（`ed` 等）を
 # ここへ置くとフラグ判定に落ちて allow になるため、`ALWAYS_MUTATING_EDIT_EXECUTABLES` に置く。
 _INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl"})
-# ``<>`` は読み書きオープンで、対象が無ければ作成する（作業ツリーの変更）。
-_MUTATING_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", "&>>", ">|", "<>", "1>", "2>", "1>>", "2>>", ">&"})
 # `>&` は直後が fd 番号（数字のみ）か `-` のとき、fd の複製・クローズでありファイルへ書かない。
 # それ以外（`>&file`）は `&>file` の別綴りで書き込み。`2>&1` も `2`・`>&`・`1` に割れる。
 _FD_DUP_OPERATOR = ">&"
@@ -184,7 +182,7 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
         例外は発生しません。
     """
     if any(
-        token in _MUTATING_REDIRECT_OPERATORS and not _is_fd_duplication(segment, i) for i, token in enumerate(segment)
+        token in WRITE_REDIRECT_OPERATORS and not _is_fd_duplication(segment, i) for i, token in enumerate(segment)
     ):
         return True
 

@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from claq.hooks import bash_config_protection, config_protection
+from claq.hooks import config_protection, hook_common
 from claq.hooks.hook_common import normalize_protected_name
 
 from ._support import (
@@ -497,14 +497,14 @@ _CONDITIONAL_SIGNALS = {
     [
         (config_protection.PROTECTED_FILES, _EXPECTED_PROTECTED_FILES),
         (config_protection.CONDITIONALLY_PROTECTED_FILES, _EXPECTED_CONDITIONALLY_PROTECTED_FILES),
-        (bash_config_protection._DIRECTORY_CHANGE_COMMANDS, _EXPECTED_DIRECTORY_CHANGE_COMMANDS),
+        (hook_common.DIRECTORY_CHANGE_COMMANDS, _EXPECTED_DIRECTORY_CHANGE_COMMANDS),
         (config_protection._LINT_SECTION_HEADERS, _EXPECTED_LINT_SECTION_HEADERS),
         (config_protection._LINT_KEYS, _EXPECTED_LINT_KEYS),
     ],
     ids=[
         "PROTECTED_FILES",
         "CONDITIONALLY_PROTECTED_FILES",
-        "_DIRECTORY_CHANGE_COMMANDS",
+        "DIRECTORY_CHANGE_COMMANDS",
         "_LINT_SECTION_HEADERS",
         "_LINT_KEYS",
     ],
@@ -570,7 +570,7 @@ def test_every_conditionally_protected_file_denies_only_lint_signals(
 def test_every_directory_change_command_forces_unconditional_deny(
     command: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`_DIRECTORY_CHANGE_COMMANDS` の全要素が repo スコープ判定を放棄させること（層1）。
+    """`DIRECTORY_CHANGE_COMMANDS` の全要素が repo スコープ判定を放棄させること（層1）。
 
     cwd を動かすと相対パス解決が実行時の位置とずれるため、保護対象 basename のヒットをそのまま deny する。
     repo 内のパスでは「repo 内だから deny」と区別できないので、cd 系が無ければ allow になる

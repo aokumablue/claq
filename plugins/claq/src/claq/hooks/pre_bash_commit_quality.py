@@ -41,7 +41,6 @@ import re
 import subprocess
 from pathlib import Path
 
-from claq.hooks.bash_config_protection import _DIRECTORY_CHANGE_COMMANDS
 from claq.hooks.commit_message import validate_commit_message
 from claq.hooks.commit_quality_scanner import (
     find_file_issues,
@@ -57,7 +56,7 @@ from claq.hooks.commit_risk import (
     _is_commit_all_flag,
     _is_git_commit_command,
 )
-from claq.hooks.hook_common import normalize_executable_name, resolve_repo_root
+from claq.hooks.hook_common import DIRECTORY_CHANGE_COMMANDS, normalize_executable_name, resolve_repo_root
 from claq.hooks.shell_tokens import (
     MAX_COMMAND_BYTES,
     command_dialect_variants,
@@ -197,7 +196,7 @@ def _commit_target_risk(command: str) -> str | None:
         commit_args = _find_git_commit_args_in_segment(segment)
         if commit_args is None:
             if any(
-                normalize_executable_name(token) in _DIRECTORY_CHANGE_COMMANDS or _points_git_elsewhere(token)
+                normalize_executable_name(token) in DIRECTORY_CHANGE_COMMANDS or _points_git_elsewhere(token)
                 for token in segment
             ):
                 return _COMMIT_TARGET_UNVERIFIABLE_MESSAGE

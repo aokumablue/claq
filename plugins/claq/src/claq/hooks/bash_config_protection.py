@@ -72,6 +72,7 @@ from claq.hooks.git_config_text import (
 )
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
+    DIRECTORY_CHANGE_COMMANDS,
     basename,
     emit_block_output,
     is_inplace_edit_flag,
@@ -85,6 +86,7 @@ from claq.hooks.hook_common import (
 from claq.hooks.host_guard_targets import find_host_guard_match, match_folded_path_window
 from claq.hooks.shell_tokens import (
     MAX_COMMAND_BYTES,
+    WRITE_REDIRECT_OPERATORS,
     command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
@@ -108,13 +110,6 @@ from claq.lib.harness import (
 
 # matcher（hooks.json）の綴りがズレても、本体側で対象外ツールを早期 return する多重防御。
 _BASH_TOOL_NAMES = frozenset({"bash"})
-
-# リダイレクト演算子。``1>``/``2>`` 等は数字が別トークンに分かれ ``>``/``>>`` に一致する
-# ため不要だが、意図の記録として明示している。``&>>`` は stdout+stderr の追記、``>&`` は
-# ``&>`` の別綴り（``>&file``）で、どちらも `tokenize` が 1 トークンにする。``>&2`` / ``2>&1`` の
-# ような fd 複製も同じ ``>&`` だが、後続が保護名でなければ書き込み先として一致せず allow になる。
-# ``<>`` は読み書きオープンで、対象が無ければ作成する（保護名の空ファイル作成と同じ効果）。
-_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"})
 
 # 末尾引数が書き込み先になるコマンド。Windows のシェルツールは PowerShell なので、
 # 別名だけでは拾えない長形式 cmdlet を併記する。
@@ -170,10 +165,6 @@ _DD_COMMANDS = frozenset({"dd"})
 # （``touch -r ruff.toml app.py``）の値も候補に混じるが、BSD / GNU / busybox で割れる
 # arity 表を持つより誤検出側を選ぶ。``New-Item`` は `_TEE_COMMANDS` 側にある。
 _TOUCH_COMMANDS = frozenset({"touch"})
-
-# カレントディレクトリを移動するコマンド。これらが現れたコマンドでは、cwd 基準の
-# 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
-_DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 
 # ディレクトリ移動の判定で、コマンド名より前に来うるシェルの予約語・グループ化と `builtin`。
 # ``{ cd x; …}`` / ``if cd x; then …`` / ``builtin cd x`` の ``cd`` を見落とすと、cwd 基準の解決を
@@ -447,7 +438,7 @@ def _redirect_targets(segment: list[str]) -> list[str]:
     return [
         segment[index + 1]
         for index, token in enumerate(segment)
-        if token in _REDIRECT_OPERATORS and index + 1 < len(segment)
+        if token in WRITE_REDIRECT_OPERATORS and index + 1 < len(segment)
     ]
 
 
@@ -502,7 +493,7 @@ def _changes_working_directory(segment: list[str]) -> bool:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        先頭の `_LEADING_SHELL_KEYWORDS` を除いた実行位置のコマンドが `_DIRECTORY_CHANGE_COMMANDS`
+        先頭の `_LEADING_SHELL_KEYWORDS` を除いた実行位置のコマンドが `DIRECTORY_CHANGE_COMMANDS`
         に属するなら True。
 
     Raises:
@@ -512,7 +503,7 @@ def _changes_working_directory(segment: list[str]) -> bool:
     while start < len(segment) and segment[start] in _LEADING_SHELL_KEYWORDS:
         start += 1
     index = _command_index(segment[start:])
-    return index is not None and normalize_executable_name(segment[start + index]) in _DIRECTORY_CHANGE_COMMANDS
+    return index is not None and normalize_executable_name(segment[start + index]) in DIRECTORY_CHANGE_COMMANDS
 
 
 def _within_repo_root(resolved: Path, repo_root: Path) -> bool:

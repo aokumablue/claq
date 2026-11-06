@@ -292,7 +292,7 @@ _VOCABULARY_WRITE_CASES = (
 _VOCABULARY_LAYER1_ELSEWHERE = {
     "bash_config_protection._BASH_TOOL_NAMES": "_HARNESS_CASES の copilot bash 危険 / 通常",
     "bash_config_protection._ALL_PROTECTED_BASENAMES": "test_every_protected_file_is_denied_on_bash_write",
-    "bash_config_protection._DIRECTORY_CHANGE_COMMANDS": "test_every_directory_change_command_forces_unconditional_deny",
+    "hook_common.DIRECTORY_CHANGE_COMMANDS": "test_every_directory_change_command_forces_unconditional_deny",
     "bash_config_protection._LEADING_SHELL_KEYWORDS": "test_directory_change_behind_shell_keywords_is_not_trusted (test_bash_config_protection_boundaries.py)",
     "bash_config_protection._HOME_LOG_PATH_SEGMENTS": "test_tilde_form_is_blocked / test_absolute_form_is_blocked / test_relative_after_cd_is_blocked (TestHomeLogDirectoryProtection)",
     "host_guard_targets._HOST_SETTINGS_PATH_SEGMENTS": "test_tilde_form_is_blocked の settings-redirect / settings-local-append (TestHostGuardFilesOutsideRepo)",
@@ -415,9 +415,9 @@ def test_every_write_path_vocabulary_element_changes_the_verdict(
     assert _run("config_protection", allow_payload, monkeypatch) == 0, qualified
 
 
-@pytest.mark.parametrize("operator", sorted(_EXPECTED_VOCABULARIES["bash_config_protection._REDIRECT_OPERATORS"]))
+@pytest.mark.parametrize("operator", sorted(_EXPECTED_VOCABULARIES["shell_tokens.WRITE_REDIRECT_OPERATORS"]))
 def test_every_redirect_operator_yields_a_write_target(operator: str) -> None:
-    """`_REDIRECT_OPERATORS` の全要素がリダイレクト先を返すこと（層1・単体）。
+    """`WRITE_REDIRECT_OPERATORS` の全要素が `bash_config_protection` でリダイレクト先を返すこと（層1・単体）。
 
     ここだけ end-to-end ではなく抽出関数を直接呼ぶ。``1>`` / ``2>`` /
     ``1>>`` / ``2>>`` は `tokenize` が数字を別トークンへ割るため ``>`` /
@@ -428,11 +428,11 @@ def test_every_redirect_operator_yields_a_write_target(operator: str) -> None:
     assert bash_config_protection._redirect_targets(["printf", "x", operator, "ruff.toml"]) == ["ruff.toml"]
 
 
-@pytest.mark.parametrize("operator", sorted(_EXPECTED_VOCABULARIES["commit_risk._MUTATING_REDIRECT_OPERATORS"]))
+@pytest.mark.parametrize("operator", sorted(_EXPECTED_VOCABULARIES["shell_tokens.WRITE_REDIRECT_OPERATORS"]))
 def test_every_mutating_redirect_operator_marks_the_segment(operator: str) -> None:
-    """`_MUTATING_REDIRECT_OPERATORS` の全要素が mutation 判定を立てること（層1・単体）。
+    """`WRITE_REDIRECT_OPERATORS` の全要素が `commit_risk` で mutation 判定を立てること（層1・単体）。
 
-    `_REDIRECT_OPERATORS` と同じ理由で単体呼び出しにする。演算子を含まない
+    前のテストと同じ理由で単体呼び出しにする。演算子を含まない
     同形のセグメントが False であることを対照に置き、判定が演算子由来だと示す。
     """
     assert commit_risk._segment_mutates_worktree_or_index(["printf", "x", operator, "app.py"])
@@ -491,8 +491,7 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
     `_VOCABULARY_LAYER1_ABSENT`（理由付きで持たない）へ明示する。
     """
     unit_covered = {
-        "bash_config_protection._REDIRECT_OPERATORS",
-        "commit_risk._MUTATING_REDIRECT_OPERATORS",
+        "shell_tokens.WRITE_REDIRECT_OPERATORS",
         "shell_tokens._HEREDOC_CONTINUATION_SUFFIXES",
         "commit_quality_scanner._LINTABLE_SUFFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",

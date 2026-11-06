@@ -228,6 +228,11 @@ def is_git_executable_token(token: str) -> bool:
 # 割れると、片方だけずれた語彙を持って静かなバイパスになる。
 ALWAYS_MUTATING_EDIT_EXECUTABLES = frozenset({"ed", "red", "ex", "sponge"})
 
+# カレントディレクトリを移動するコマンド。これらが現れたコマンドでは、cwd 基準の
+# 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
+# `bash_config_protection` と `pre_bash_commit_quality` が共有する。
+DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
+
 # sed の GNU 長形式 in-place フラグ。GNU getopt は曖昧でない長形式の短縮を受け付け、
 # ``sed --i`` も in-place になるため、この名前の非空プレフィックスを一致条件にする。
 _LONG_INPLACE_OPTION_NAME = "in-place"
