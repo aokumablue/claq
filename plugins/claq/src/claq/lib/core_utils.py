@@ -38,6 +38,27 @@ def get_home_dir() -> Path:
         raise OSError(f"ホームディレクトリを決められません: {exc}") from exc
 
 
+def read_tail_text(path: Path, max_bytes: int) -> str:
+    """ファイル末尾を上限バイトまで読み、UTF-8（不正バイトは置換）でデコードして返す。
+
+    先頭が文字や行の途中で切れうるので、呼び出し側は先頭の断片を捨てられる形で使うこと。
+
+    Args:
+        path: 読み取り対象のファイル。
+        max_bytes: 末尾から読む最大バイト数。
+
+    Returns:
+        デコード済みの末尾テキスト。
+
+    Raises:
+        OSError: ファイルを開けない・読めない場合（扱いは呼び出し側が決める）。
+    """
+    with path.open("rb") as stream:
+        stream.seek(0, 2)
+        stream.seek(max(0, stream.tell() - max_bytes))
+        return stream.read().decode("utf-8", errors="replace")
+
+
 def get_plugin_root() -> Path:
     """このプラグインのソースルート（``<root>/src/claq/lib`` の 3 つ上）を返す。
 

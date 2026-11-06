@@ -17,6 +17,7 @@ from claq.lib.core_utils import (
     get_home_dir,
     get_sessions_dir,
     log,
+    read_tail_text,
     strip_ansi,
 )
 
@@ -194,3 +195,22 @@ def test_log_writes_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:
     """stderr に 1 行書き込む。"""
     log("test message")
     assert capsys.readouterr().err == "test message\n"
+
+
+@pytest.mark.parametrize(
+    ("content", "max_bytes", "expected"),
+    [(b"hello\n", 4096, "hello\n"), (b"A" * 100 + b"TAIL", 4, "TAIL"), (b"\xe3\x81\x82x", 2, "\ufffdx")],
+    ids=["within-limit", "tail-only", "split-multibyte-replaced"],
+)
+def test_read_tail_text(tmp_path: Path, content: bytes, max_bytes: int, expected: str) -> None:
+    """上限以内なら全体、超えれば末尾の上限バイトだけを返し、途中で切れた文字は置換すること。"""
+    target = tmp_path / "f.log"
+    target.write_bytes(content)
+
+    assert read_tail_text(target, max_bytes) == expected
+
+
+def test_read_tail_text_propagates_oserror(tmp_path: Path) -> None:
+    """読めないファイルは OSError をそのまま呼び出し側へ伝えること。"""
+    with pytest.raises(OSError):
+        read_tail_text(tmp_path / "missing.log", 4096)

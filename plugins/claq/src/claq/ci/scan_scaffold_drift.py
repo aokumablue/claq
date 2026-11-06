@@ -49,6 +49,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
+from claq.lib.core_utils import read_tail_text
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, normalize_user_message
 from claq.mem.handoff import TRANSCRIPT_MAX_BYTES, is_trusted_transcript, trusted_transcript_roots
 from claq.mem.tag_stripping import STRIPPED_TAGS, drop_known_tag_blocks
@@ -212,10 +213,7 @@ def scan(paths: Iterable[Path]) -> Counter[str]:
     counts: Counter[str] = Counter()
     for path in paths:
         try:
-            with path.open("rb") as stream:
-                stream.seek(0, 2)
-                stream.seek(max(0, stream.tell() - TRANSCRIPT_MAX_BYTES))
-                raw = stream.read().decode("utf-8", errors="replace")
+            raw = read_tail_text(path, TRANSCRIPT_MAX_BYTES)
         except OSError:
             continue
         names: set[str] = set()

@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from claq.lib.core_utils import ensure_private_dir, get_claq_dir
+from claq.lib.core_utils import ensure_private_dir, get_claq_dir, read_tail_text
 
 # detach 起動した子の実行時間上限（秒）。detach 後の子はハーネスの timeout の
 # 管轄外なので、自前の watchdog で止める。正常系はローカル I/O 数秒で終わるため、
@@ -220,28 +220,6 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
 _BG_FAILURE_TAIL_MAX_BYTES = 4096
 
 
-def _read_tail_bytes(path: Path, max_bytes: int) -> str:
-    """ファイル末尾を上限バイトまで読む（seek-from-end）。
-
-    Args:
-        path: 読み取り対象のファイル。
-        max_bytes: 末尾から読む最大バイト数。
-
-    Returns:
-        デコード済みの末尾テキスト。読めなければ空文字列。
-
-    Raises:
-        例外は発生しません。
-    """
-    try:
-        with path.open("rb") as stream:
-            stream.seek(0, 2)
-            stream.seek(max(0, stream.tell() - max_bytes))
-            return stream.read().decode("utf-8", errors="replace")
-    except OSError:
-        return ""
-
-
 def recent_bg_failure_notice() -> str:
     """前回セッションの detach 起動（``--bg``）に失敗の痕跡があれば 1 行の通知を返す。
 
@@ -262,7 +240,10 @@ def recent_bg_failure_notice() -> str:
         path = log_dir / f"bg-{today - timedelta(days=offset):%Y-%m-%d}.log"
         if not path.is_file():
             continue
-        tail = _read_tail_bytes(path, _BG_FAILURE_TAIL_MAX_BYTES).strip()
+        try:
+            tail = read_tail_text(path, _BG_FAILURE_TAIL_MAX_BYTES).strip()
+        except OSError:
+            continue
         if tail:
             return f"前回のバックグラウンド起動でエラーの痕跡があります（{path.name}）: {tail.splitlines()[-1]}"
     return ""

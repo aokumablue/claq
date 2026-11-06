@@ -25,18 +25,19 @@ def _home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("CLAQ_HOME", raising=False)
 
 
-@pytest.mark.parametrize(
-    ("content", "max_bytes", "expected"),
-    [(b"hello\n", 4096, "hello\n"), (b"A" * 100 + b"TAIL", 4, "TAIL"), (None, 4096, "")],
-    ids=["within-limit", "tail-only", "missing-file"],
-)
-def test_read_tail_bytes(tmp_path: Path, content: bytes | None, max_bytes: int, expected: str) -> None:
-    """上限以内なら全体、超えれば末尾の上限バイトだけを返し、読めないファイルは空文字列になること。"""
-    target = tmp_path / "bg.log"
-    if content is not None:
-        target.write_bytes(content)
+def test_unreadable_bg_log_is_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """読めない bg ログは通知材料にせず読み飛ばすこと。"""
+    log_dir = tmp_path / ".claq" / "logs"
+    log_dir.mkdir(parents=True)
+    (log_dir / f"bg-{datetime.now():%Y-%m-%d}.log").write_text("boom\n", encoding="utf-8")
+    monkeypatch.setattr(detach, "read_tail_text", _raise_oserror)
 
-    assert detach._read_tail_bytes(target, max_bytes) == expected
+    assert detach.recent_bg_failure_notice() == ""
+
+
+def _raise_oserror(path: Path, max_bytes: int) -> str:
+    """読み取り失敗を模して OSError を送出する。"""
+    raise OSError("unreadable")
 
 
 @pytest.mark.parametrize(

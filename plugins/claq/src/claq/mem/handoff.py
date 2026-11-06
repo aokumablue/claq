@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from claq.lib.core_utils import get_home_dir, strip_ansi
+from claq.lib.core_utils import get_home_dir, read_tail_text, strip_ansi
 from claq.lib.harness import (
     extract_file_paths,
     extract_raw_tool_name,
@@ -229,7 +229,7 @@ def _summarize_transcript(transcript_path: str) -> str:
     path = Path(transcript_path)
     if not is_trusted_transcript(path):
         return ""
-    messages, files, tools = _scan(_read_tail(path), time.monotonic() + TRANSCRIPT_TIMEOUT_SEC)
+    messages, files, tools = _scan(read_tail_text(path, TRANSCRIPT_MAX_BYTES), time.monotonic() + TRANSCRIPT_TIMEOUT_SEC)
     return _compose(messages, files, tools)
 
 
@@ -265,24 +265,6 @@ def is_trusted_transcript(path: Path) -> bool:
     except OSError:
         return False
     return any(resolved.is_relative_to(root.resolve()) for root in trusted_transcript_roots())
-
-
-def _read_tail(path: Path) -> str:
-    """トランスクリプトの末尾を上限バイトまで読む。
-
-    先頭が途中で切れた行は JSON として壊れるが、走査側が解析不能行を
-    捨てるため問題にならない。
-
-    Args:
-        path: トランスクリプトの絶対パス。
-
-    Returns:
-        デコード済みの末尾テキスト。
-    """
-    with path.open("rb") as stream:
-        stream.seek(0, 2)
-        stream.seek(max(0, stream.tell() - TRANSCRIPT_MAX_BYTES))
-        return stream.read().decode("utf-8", errors="replace")
 
 
 def _scan(text: str, deadline: float) -> tuple[list[str], list[str], list[str]]:

@@ -415,7 +415,7 @@ def tag_block_pattern(tag: str, *, capture: bool = False) -> re.Pattern[str]:
 # まとめられずタグ単位のリストになる。
 _SCAFFOLD_BLOCK_PATTERNS = [tag_block_pattern(tag) for tag in SCAFFOLD_TAGS]
 
-# ペア除去後に残った足場タグ。ハーネスは足場タグを必ず対で書き、`_read_tail` の
+# ペア除去後に残った足場タグ。ハーネスは足場タグを必ず対で書き、`read_tail_text` の
 # 前方切り詰めで壊れる先頭 1 行は `_parse_entry` が不正 JSON として捨てるため、
 # この段階で片側だけ残っているタグは、足場の中身に閉じタグリテラルを混ぜてブロックを
 # 早期終端させた細工とみなす。断片を救う利得より、細工した文字列が「直近の依頼」として
