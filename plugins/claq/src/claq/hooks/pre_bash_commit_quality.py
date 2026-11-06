@@ -63,19 +63,19 @@ from claq.hooks.hook_common import (
     resolve_repo_root,
 )
 from claq.hooks.shell_tokens import (
-    MAX_COMMAND_BYTES,
     command_dialect_variants,
     command_exceeds_scan_budget,
+    scan_budget_message,
     split_segments,
     strip_data_heredoc_bodies,
     tokenize,
 )
 from claq.hooks.stdin_io import (
-    MAX_STDIN_BYTES,
     StdinUnavailableError,
     parse_json_object,
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
+    truncated_input_message,
 )
 from claq.lib.core_utils import log
 from claq.lib.harness import iter_bash_command_groups
@@ -122,19 +122,11 @@ _WORKTREE_FILES_UNAVAILABLE_MESSAGE = (
 )
 
 # 走査コストが hooks.json の timeout を超える入力（`shell_tokens.MAX_COMMAND_BYTES`）。
-_SCAN_BUDGET_MESSAGE = (
-    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_BYTES} bytes for pre:bash-commit-quality. "
-    "A command this large cannot be inspected within the hook timeout, and an un-inspected "
-    "commit must not be allowed. Split it into smaller commands."
-)
+_SCAN_BUDGET_MESSAGE = scan_budget_message("pre:bash-commit-quality", "commit")
 
 # stdin が MAX_STDIN_BYTES を超えて切り捨てられた場合。切り捨て後の JSON では
 # commit かどうかの判定自体が信用できないため fail-closed にする。
-_TRUNCATED_INPUT_MESSAGE = (
-    f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for pre:bash-commit-quality. "
-    "Refusing to evaluate a possibly-truncated payload for a git commit quality scan. "
-    "Retry with a smaller command."
-)
+_TRUNCATED_INPUT_MESSAGE = truncated_input_message("pre:bash-commit-quality", "payload for a git commit quality scan")
 
 
 # commit が、フックの走査した cwd の index とは別の index を記録しうる場合。

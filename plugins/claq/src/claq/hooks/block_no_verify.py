@@ -96,21 +96,21 @@ from claq.hooks.hook_common import (
     is_git_executable_token,
 )
 from claq.hooks.shell_tokens import (
-    MAX_COMMAND_BYTES,
     command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
     is_shell_wrapper_token,
+    scan_budget_message,
     split_segments,
     strip_data_heredoc_bodies,
     tokenize_with_status,
 )
 from claq.hooks.stdin_io import (
-    MAX_STDIN_BYTES,
     StdinUnavailableError,
     parse_json_object,
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
+    truncated_input_message,
 )
 from claq.lib.harness import INPUT_CONTAINER_KEYS, extract_tool_input, iter_bash_commands
 
@@ -669,17 +669,9 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
     return False
 
 
-_SCAN_BUDGET_MESSAGE = (
-    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_BYTES} bytes for pre:block-no-verify. "
-    "A command this large cannot be inspected within the hook timeout, and an un-inspected "
-    "command must not be allowed. Split it into smaller commands."
-)
+_SCAN_BUDGET_MESSAGE = scan_budget_message("pre:block-no-verify", "command")
 
-_TRUNCATED_INPUT_MESSAGE = (
-    f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for pre:block-no-verify. "
-    "Refusing to evaluate a possibly-truncated bash command for hook bypass flags. "
-    "Retry with a smaller command."
-)
+_TRUNCATED_INPUT_MESSAGE = truncated_input_message("pre:block-no-verify", "bash command for hook bypass flags")
 
 _UNPARSEABLE_INPUT_MESSAGE = (
     "[Hook] BLOCKED: could not parse hook input for pre:block-no-verify. "

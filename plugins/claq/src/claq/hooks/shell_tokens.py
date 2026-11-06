@@ -521,7 +521,28 @@ def command_exceeds_scan_budget(command: str) -> bool:
     return len(command.encode("utf-8", "surrogatepass")) > MAX_COMMAND_BYTES
 
 
-# `shlex` が解析できなかった入力で、空白分割の前に前後へ空白を入れる区切り演算子。
+def scan_budget_message(hook_name: str, subject: str) -> str:
+    """`command_exceeds_scan_budget` が True のときの deny 理由を組み立てる。
+
+    検査予算で止める保護 hook が同じ文面を使うための単一情報源。
+
+    Args:
+        hook_name: 呼び出し元 hook の識別名。
+        subject: 通してはならない対象の名詞（``command`` / ``commit``）。
+
+    Returns:
+        deny 理由の文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_BYTES} bytes for {hook_name}. "
+        "A command this large cannot be inspected within the hook timeout, and an un-inspected "
+        f"{subject} must not be allowed. Split it into smaller commands."
+    )
+
+
 # ファイルへ書き込むリダイレクト演算子。``1>``/``2>`` 等は数字が別トークンに分かれ ``>``/``>>``
 # に一致するため不要だが、意図の記録として明示している。``&>>`` は stdout+stderr の追記、``>&`` は
 # ``&>`` の別綴り（``>&file``）で、どちらも `tokenize` が 1 トークンにする。``>&2`` / ``2>&1`` の
@@ -531,6 +552,7 @@ def command_exceeds_scan_budget(command: str) -> bool:
 # 片方だけずれた語彙を持って静かなバイパスになる。
 WRITE_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"})
 
+# `shlex` が解析できなかった入力で、空白分割の前に前後へ空白を入れる区切り演算子。
 # 長い演算子を先に置いて最長一致にする。1 文字ずつ割ると ``>>ruff.toml`` が
 # ``> > ruff.toml`` になり、リダイレクト先の判定がずれて新しい迂回口になる。
 # ``1>`` / ``2>`` / ``1>>`` / ``2>>`` は語頭の fd 指定だけを 1 単位にする（``a2>x`` の ``a2``

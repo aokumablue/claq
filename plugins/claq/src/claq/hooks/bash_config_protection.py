@@ -85,21 +85,21 @@ from claq.hooks.hook_common import (
 )
 from claq.hooks.host_guard_targets import find_host_guard_match, match_folded_path_window
 from claq.hooks.shell_tokens import (
-    MAX_COMMAND_BYTES,
     WRITE_REDIRECT_OPERATORS,
     command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
+    scan_budget_message,
     split_segments,
     strip_data_heredoc_bodies,
     tokenize,
 )
 from claq.hooks.stdin_io import (
-    MAX_STDIN_BYTES,
     StdinUnavailableError,
     parse_json_object,
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
+    truncated_input_message,
 )
 from claq.lib.harness import (
     extract_raw_tool_name,
@@ -652,16 +652,10 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
     return None
 
 
-_SCAN_BUDGET_MESSAGE = (
-    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_BYTES} bytes for pre:bash-config-protection. "
-    "A command this large cannot be inspected within the hook timeout, and an un-inspected "
-    "command must not be allowed. Split it into smaller commands."
-)
+_SCAN_BUDGET_MESSAGE = scan_budget_message("pre:bash-config-protection", "command")
 
-_TRUNCATED_INPUT_MESSAGE = (
-    f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for pre:bash-config-protection. "
-    "Refusing to evaluate a possibly-truncated bash command for protected config writes. "
-    "Retry with a smaller command."
+_TRUNCATED_INPUT_MESSAGE = truncated_input_message(
+    "pre:bash-config-protection", "bash command for protected config writes"
 )
 
 _MALFORMED_INPUT_MESSAGE = (

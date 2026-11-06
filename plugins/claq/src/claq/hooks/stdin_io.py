@@ -239,6 +239,29 @@ def stdin_unreadable_message(hook_name: str, reason: object) -> str:
     )
 
 
+def truncated_input_message(hook_name: str, subject: str) -> str:
+    """stdin が `MAX_STDIN_BYTES` を超えて切り捨てられたときの deny 理由を組み立てます。
+
+    切り捨て後の JSON では判定自体が信用できないため、Bash 系の保護 hook は同じ文面で
+    fail-closed にします。
+
+    Args:
+        hook_name: 呼び出し元 hook の識別名。
+        subject: 評価を拒む対象と目的（例: ``bash command for hook bypass flags``）。
+
+    Returns:
+        deny 理由の文字列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (
+        f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for {hook_name}. "
+        f"Refusing to evaluate a possibly-truncated {subject}. "
+        "Retry with a smaller command."
+    )
+
+
 def parse_json_object(raw: str) -> dict[str, Any] | None:
     """JSON 文字列を辞書としてパースします。
 
