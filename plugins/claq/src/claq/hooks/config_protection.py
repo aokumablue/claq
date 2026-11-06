@@ -394,6 +394,61 @@ def _editable_text(tool_name: str, container: Any) -> list[str] | None:
     return snippets or None
 
 
+def _section_header(line: str) -> str | None:
+    """行がセクション見出しなら、前後の空白を除いた見出しを返す。
+
+    Args:
+        line: 1 行、または行の先頭から途中までの断片。
+
+    Returns:
+        ``[`` で始まり ``]`` で終わるなら見出し、それ以外は None。
+
+    Raises:
+        例外は発生しません。
+    """
+    stripped = line.strip()
+    return stripped if stripped.startswith("[") and stripped.endswith("]") else None
+
+
+@memoized_in_scan
+def _read_section_index(file_path: str) -> tuple[str, list[int], list[str | None]] | None:
+    """`file_path` をディスクから読み、行ごとの開始位置とその行より前の最後の見出しを返す。
+
+    断片ごとに読み直して行を数えると、MultiEdit の断片（編集件数の 2 倍）の数だけ全行を回り、上限内の
+    624 KB の payload で 22.9 秒かかって timeout（15 秒）を超えた（kill された hook は host に許可として
+    扱われる）。`scan_memo` の間は 1 回だけ読み、断片ごとの判定を二分探索にする。
+
+    Args:
+        file_path: 対象ファイルパス。
+
+    Returns:
+        (読んだ本文, 各行の開始位置, 各行より前で最後に現れた見出し)。読めない・見つからない場合は None。
+
+    Raises:
+        例外は発生しません。
+    """
+    try:
+        path = Path(file_path)
+        if not path.is_file():
+            return None
+        # 実ファイルはエージェント自身が任意サイズへ膨らませられ、無制限に読むと timeout で
+        # フックが殺され allow へ倒れる。見出しとキーは先頭付近に現れるので先頭だけで足りる。
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            text = handle.read(MAX_STDIN_BYTES)
+    except OSError:
+        return None
+    line_starts: list[int] = []
+    headers_before: list[str | None] = []
+    offset = 0
+    header: str | None = None
+    for line in text.splitlines(keepends=True):
+        line_starts.append(offset)
+        headers_before.append(header)
+        offset += len(line)
+        header = _section_header(line) or header
+    return text, line_starts, headers_before
+
+
 def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None:
     """`file_path` をディスクから読み、`snippet` が属するセクションが lint 系か判定する。
 
@@ -413,26 +468,21 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
     Raises:
         例外は発生しません。
     """
+    # 全 hook の起動に載せないよう、ここへ到達したときだけ読み込む。
+    from bisect import bisect_right
+
     if not snippet:
         return None
-    try:
-        path = Path(file_path)
-        if not path.is_file():
-            return None
-        # 実ファイルはエージェント自身が任意サイズへ膨らませられ、無制限に読むと timeout で
-        # フックが殺され allow へ倒れる。見出しとキーは先頭付近に現れるので先頭だけで足りる。
-        with path.open(encoding="utf-8", errors="replace") as handle:
-            text = handle.read(MAX_STDIN_BYTES)
-    except OSError:
+    section_index = _read_section_index(file_path)
+    if section_index is None:
         return None
+    text, line_starts, headers_before = section_index
     index = text.find(snippet)
     if index < 0:
         return None
-    header: str | None = None
-    for line in text[:index].splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            header = stripped
+    line = bisect_right(line_starts, index) - 1
+    # 断片の手前で切れた行も見る（``[tool.ruff] # x`` の ``# x`` は ``[tool.ruff]`` に属する）。
+    header = _section_header(text[line_starts[line] : index]) or headers_before[line]
     if header is None:
         return False
     return any(header.startswith(candidate) for candidate in _LINT_SECTION_HEADERS)

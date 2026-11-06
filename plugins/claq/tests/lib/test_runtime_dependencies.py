@@ -51,6 +51,7 @@ MIN_PYTHON = (3, 12)
 ALLOWED_TOP_LEVEL_MODULES = frozenset({
     "__future__",
     "argparse",
+    "bisect",
     "collections",
     "contextlib",
     "dataclasses",

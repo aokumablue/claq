@@ -186,13 +186,16 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
     ):
         return True
 
+    git_seen = False
     for i, token in enumerate(segment):
         if is_git_executable_token(token):
             # 「最初の非 `-` トークン」で決めると `git -C . add x` の値 `.` がサブコマンドと
             # 読まれて不発になるため全トークンを走査する。後続の書込み実行ファイルも
-            # 見るため早期 return しない。
-            if any(sub in _INDEX_MUTATING_GIT_SUBCOMMANDS for sub in segment[i + 1 :]):
+            # 見るため早期 return しない。後ろの git トークンから見る範囲は最初の git トークンから
+            # 見る範囲に含まれるので、最初の 1 つだけ見る（`git git ...` で二次にしない）。
+            if not git_seen and any(sub in _INDEX_MUTATING_GIT_SUBCOMMANDS for sub in segment[i + 1 :]):
                 return True
+            git_seen = True
             continue
 
         # 素の basename（大小区別・`.exe` 残し）で照合すると ``CP evil.py app.py`` や

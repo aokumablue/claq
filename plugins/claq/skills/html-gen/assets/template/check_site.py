@@ -1623,7 +1623,9 @@ def _validate_resting_state(css: str) -> list[str]:
     violations: list[str] = []
     if re.search(r"animation-fill-mode:\s*forwards", css) or re.search(r"animation:[^;}]*\bforwards\b", css):
         violations.append("animation の fill-mode に forwards がある（静止状態が不可視になる）")
-    outside = re.sub(r"@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\}\s*)*\}", "", css, flags=re.DOTALL)
+    # 内側のブロックの間の空白は `[^{}]*` だけが読む。末尾の `\s*` を繰り返しの内側へ戻すと空白の分け方が
+    # 段数の指数で増え、閉じていない `@keyframes` で検査が止まらなくなる。
+    outside = re.sub(r"@keyframes[^{]*\{(?:(?:[^{}]*\{[^{}]*\})+\s*)?\}", "", css, flags=re.DOTALL)
     if re.search(r"(?<![-\w])opacity:\s*0(?:\.0+)?\s*;", outside):
         violations.append("@keyframes の外に opacity: 0 がある（静止状態は必ず読める状態にする）")
     for selector, block in re.findall(r"([^{}]+)\{([^{}]*)\}", outside):
