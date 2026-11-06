@@ -33,6 +33,7 @@ from claq.hooks.hook_common import (
     normalize_protected_name,
     resolve_effective_target,
     resolve_repo_root,
+    scan_memo,
 )
 from claq.hooks.stdin_io import (
     MAX_STDIN_BYTES,
@@ -771,13 +772,15 @@ def _running_plugin_root() -> Path:
     return get_plugin_root()
 
 
+@memoized_in_scan
 def running_plugin_root_is_guarded() -> bool:
     """実行中の plugin root を保護するか（作業中リポジトリ内の開発用 checkout でないか）を判定する。
 
     claq 自身を開発する checkout（作業中リポジトリの内側にあり、ランタイムを追跡している）では
     `runtime/` と `src/claq/` の編集が本来の作業なので守らない。toplevel が決まらない（リポジトリ外・
     git 不在・タイムアウト）ときは除外しない。git を起動するので、
-    書込み先が保護ディレクトリに当たった後でだけ呼ぶ。
+    書込み先が保護ディレクトリに当たった後でだけ呼び、`scan_memo` の間は 1 回だけ判定する
+    （保護ディレクトリに当たる書込み先が多い入力で、git を書込み先の数だけ起動しない）。
 
     Returns:
         保護するなら True。
@@ -986,7 +989,8 @@ def main() -> int:
         # 判定できないため fail-closed にする。
         return emit_block_output(_UNPARSEABLE_INPUT_MESSAGE)
 
-    reason = _block_reason(data)
+    with scan_memo():
+        reason = _block_reason(data)
     if reason:
         return emit_block_output(reason)
     return 0

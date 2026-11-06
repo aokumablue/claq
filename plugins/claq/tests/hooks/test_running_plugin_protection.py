@@ -255,6 +255,23 @@ def test_git_is_consulted_only_after_a_positional_hit(
     assert (before_hit, len(calls) > 0) == (0, True)
 
 
+def test_git_index_is_consulted_once_per_bash_scan(_running_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """保護ディレクトリに当たる書込み先が複数あっても、1 回の Bash 判定で追跡判定（git）は 1 回だけ起動する。"""
+    calls: list[None] = []
+
+    def _record(_repo: Path, _root: Path) -> bool:
+        """呼び出しを記録し、開発用 checkout として保護を外す。"""
+        calls.append(None)
+        return True
+
+    monkeypatch.setattr(config_protection, "resolve_repo_root", lambda: _running_root.parents[1])
+    monkeypatch.setattr(config_protection, "_plugin_runtime_is_tracked", _record)
+    targets = " ".join(f"{_running_root}/src/claq/hooks/f{i}.py" for i in range(5))
+
+    assert _run("bash_config_protection", _bash(f"rm -f {targets}"), monkeypatch) == 0
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("display", ["runtime/", "src/claq/"])
 def test_bash_message_for_running_plugin_is_selected(display: str) -> None:
     """Bash 側は実行中のプラグインの表示名に、その保護理由の文言を選ぶ。"""

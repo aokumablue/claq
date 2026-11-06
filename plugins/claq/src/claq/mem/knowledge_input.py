@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any
 
 from claq.mem.models import Knowledge, utc_now_iso
@@ -263,21 +263,8 @@ class KnowledgeDraft:
             作成・更新時刻を現在時刻で埋めた Knowledge。
         """
         now = utc_now_iso()
-        return Knowledge(
-            key=self.key,
-            scope=self.scope,
-            kind=self.kind,
-            title=self.title,
-            source=self.source,
-            repo_id=repo_id,
-            body=self.body,
-            domain=self.domain,
-            confidence=self.confidence,
-            status=self.status,
-            source_ref=self.source_ref,
-            created_at=now,
-            updated_at=now,
-        )
+        draft = {field.name: getattr(self, field.name) for field in fields(self)}
+        return Knowledge(**draft, repo_id=repo_id, created_at=now, updated_at=now)
 
 
 def _stripped_optional(value: Any) -> str | None:
