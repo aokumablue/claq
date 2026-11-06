@@ -164,6 +164,27 @@ def _stderr_tail(process: subprocess.Popen) -> str:
     return process.stderr.read()[-2000:]
 
 
+def _assert_server_has_mcp(stderr_tail: str) -> None:
+    """サーバが mcp を import できずに死んだなら、そのことを名指しして落とす。
+
+    最頻の失敗は「サーバ側の python に mcp が入っていない」。この検査は自分では
+    mcp を import しないので**自分は起動でき**、死ぬのは spawn した子だけ。
+    素の件数だけ出すと原因が stderr の末尾に埋もれるため、先に名指しする。
+
+    Args:
+        stderr_tail: サーバの stderr の末尾。
+
+    Raises:
+        AssertionError: stderr が mcp の ModuleNotFoundError を示すとき。
+    """
+    if "ModuleNotFoundError" in stderr_tail and "mcp" in stderr_tail:
+        raise AssertionError(
+            f"サーバを起動した interpreter に mcp が入っていません: {sys.executable}\n"
+            f"venv の python で実行してください（例: .venv/bin/python3 smoke_check.py）。\n"
+            f"stderr:\n{stderr_tail}"
+        )
+
+
 def _exchange(requests: list[dict], env: dict[str, str] | None = None) -> dict[int, dict]:
     """サーバを起動してリクエスト列を送り、id をキーにした応答を返す。
 
@@ -206,15 +227,7 @@ def _exchange(requests: list[dict], env: dict[str, str] | None = None) -> dict[i
         _stop(process)
 
     stderr_tail = _stderr_tail(process)
-    # 最頻の失敗は「サーバ側の python に mcp が入っていない」。この検査は自分では
-    # mcp を import しないので**自分は起動でき**、死ぬのは spawn した子だけ。
-    # 素の件数だけ出すと原因が stderr の末尾に埋もれるため、先に名指しする。
-    if "ModuleNotFoundError" in stderr_tail and "mcp" in stderr_tail:
-        raise AssertionError(
-            f"サーバを起動した interpreter に mcp が入っていません: {sys.executable}\n"
-            f"venv の python で実行してください（例: .venv/bin/python3 smoke_check.py）。\n"
-            f"stderr:\n{stderr_tail}"
-        )
+    _assert_server_has_mcp(stderr_tail)
     assert got_all, f"応答が {len(responses)}/{len(requests)} 件しか返りませんでした。stderr:\n{stderr_tail}"
     return responses
 
@@ -247,6 +260,18 @@ def _call(request_id: int, tool: str, arguments: dict) -> dict:
     return _request(request_id, "tools/call", {"name": tool, "arguments": arguments})
 
 
+def _joined_text(blocks: Iterable[dict]) -> str:
+    """ブロックの text を空白でつないで返す。
+
+    Args:
+        blocks: `text` を持ちうるブロック。
+
+    Returns:
+        連結した文字列。
+    """
+    return " ".join(block.get("text", "") for block in blocks)
+
+
 def _text(result: dict) -> str:
     """結果の text ブロックを連結して返す。
 
@@ -256,7 +281,7 @@ def _text(result: dict) -> str:
     Returns:
         text ブロックの本文を空白でつないだ文字列。
     """
-    return " ".join(block.get("text", "") for block in result.get("content", []))
+    return _joined_text(result.get("content", []))
 
 
 def _require(setting: str) -> None:
@@ -272,6 +297,18 @@ def _require(setting: str) -> None:
     """
     if not getattr(cfg, setting):
         raise unittest.SkipTest(f"{setting} 未設定")
+
+
+def _tool_names(response: dict) -> list[str]:
+    """`tools/list` の応答から、公開中のツール名を順に取り出す。
+
+    Args:
+        response: `tools/list` の応答オブジェクト。
+
+    Returns:
+        ツール名の一覧。
+    """
+    return [tool["name"] for tool in response["result"]["tools"]]
 
 
 def _assert_published(tool: str, published: Iterable[str]) -> None:
@@ -410,7 +447,7 @@ def test_protocol_surface() -> None:
     tools = responses[2]["result"]
     assert tools["resultType"] == "complete", tools
     assert tools["tools"], "ツールが 1 つも公開されていません"
-    published = [tool["name"] for tool in tools["tools"]]
+    published = _tool_names(responses[2])
     _assert_published(cfg.HAPPY_TOOL, published)
     if cfg.INVALID_TOOL:
         _assert_published(cfg.INVALID_TOOL, published)
@@ -418,7 +455,7 @@ def test_protocol_surface() -> None:
     assert tools["ttlMs"] > 0, f"cache_hints が効いていません: ttlMs={tools['ttlMs']}"
     assert tools["cacheScope"] in {"public", "private"}, tools
     # 順序が揺れるとクライアントのキャッシュとプロンプトキャッシュが効かない
-    again = [tool["name"] for tool in responses[4]["result"]["tools"]]
+    again = _tool_names(responses[4])
     assert published == again, f"tools/list の順序が決定的ではありません: {published} / {again}"
 
     call = responses[3]["result"]
@@ -427,30 +464,42 @@ def test_protocol_surface() -> None:
     assert call["structuredContent"] == cfg.HAPPY_EXPECTED_STRUCTURED, call
 
 
+def _assert_tool_follows_design(tool: dict) -> None:
+    """1 つのツール定義が設計規則（名前・説明・スキーマ・注釈）に従うことを確かめる。
+
+    Args:
+        tool: `tools/list` が返すツール定義。
+
+    Raises:
+        AssertionError: 規則に外れるとき。
+    """
+    name = tool["name"]
+    assert TOOL_NAME_PATTERN.match(name), f"{name}: ツール名は英小文字・数字・_ だけで書く"
+    assert len(name) <= cfg.MAX_TOOL_NAME_LENGTH, f"{name}: ツール名が長すぎます"
+    description = tool.get("description") or ""
+    assert description.strip(), f"{name}: description が空です"
+    assert not DOCSTRING_SECTION_PATTERN.search(description), (
+        f"{name}: docstring がそのまま説明になっています。@mcp.tool(description=...) で書いてください"
+    )
+    assert isinstance(tool.get("outputSchema"), dict), f"{name}: outputSchema がありません（戻り値の型を書く）"
+    schema = tool["inputSchema"]
+    assert schema.get("additionalProperties") is False, f"{name}: inputSchema が閉じていません（guard 未登録）"
+    leaked = sorted(set(_walk_keys(schema)) & set(FORBIDDEN_INPUT_SCHEMA_KEYS))
+    assert not leaked, f"{name}: inputSchema に {leaked} が残っています（入れ子のモデル引数を平坦にする）"
+    annotations = tool.get("annotations") or {}
+    if cfg.READ_ONLY_SERVER:
+        assert annotations.get("readOnlyHint") is True, f"{name}: readOnlyHint=True を付けてください"
+    if annotations.get("readOnlyHint") is True:
+        misplaced = sorted({"idempotentHint", "destructiveHint"} & set(annotations))
+        assert not misplaced, f"{name}: {misplaced} は readOnlyHint=False のときだけ意味を持ちます"
+
+
 def test_tool_definitions_follow_design() -> None:
     """公開するツール定義が設計規則（名前・説明・スキーマ・注釈・数）に従うこと。"""
     tools = _exchange([_request(1, "tools/list")])[1]["result"]["tools"]
     assert len(tools) <= cfg.MAX_TOOLS, f"ツールが {len(tools)} 個あります（上限 {cfg.MAX_TOOLS}）。ツールセットに分けてください"
     for tool in tools:
-        name = tool["name"]
-        assert TOOL_NAME_PATTERN.match(name), f"{name}: ツール名は英小文字・数字・_ だけで書く"
-        assert len(name) <= cfg.MAX_TOOL_NAME_LENGTH, f"{name}: ツール名が長すぎます"
-        description = tool.get("description") or ""
-        assert description.strip(), f"{name}: description が空です"
-        assert not DOCSTRING_SECTION_PATTERN.search(description), (
-            f"{name}: docstring がそのまま説明になっています。@mcp.tool(description=...) で書いてください"
-        )
-        assert isinstance(tool.get("outputSchema"), dict), f"{name}: outputSchema がありません（戻り値の型を書く）"
-        schema = tool["inputSchema"]
-        assert schema.get("additionalProperties") is False, f"{name}: inputSchema が閉じていません（guard 未登録）"
-        leaked = sorted(set(_walk_keys(schema)) & set(FORBIDDEN_INPUT_SCHEMA_KEYS))
-        assert not leaked, f"{name}: inputSchema に {leaked} が残っています（入れ子のモデル引数を平坦にする）"
-        annotations = tool.get("annotations") or {}
-        if cfg.READ_ONLY_SERVER:
-            assert annotations.get("readOnlyHint") is True, f"{name}: readOnlyHint=True を付けてください"
-        if annotations.get("readOnlyHint") is True:
-            misplaced = sorted({"idempotentHint", "destructiveHint"} & set(annotations))
-            assert not misplaced, f"{name}: {misplaced} は readOnlyHint=False のときだけ意味を持ちます"
+        _assert_tool_follows_design(tool)
 
 
 def test_unknown_argument_is_rejected() -> None:
@@ -479,7 +528,7 @@ def test_tool_error_reaches_the_model() -> None:
     """
     _require("INVALID_TOOL")
     responses = _exchange([_request(1, "tools/list"), _call(2, cfg.INVALID_TOOL, cfg.INVALID_ARGS)])
-    _assert_published(cfg.INVALID_TOOL, {tool["name"] for tool in responses[1]["result"]["tools"]})
+    _assert_published(cfg.INVALID_TOOL, _tool_names(responses[1]))
 
     message = responses[2]
     assert "error" not in message, f"プロトコルエラーになっています: {message}"
@@ -508,7 +557,7 @@ def test_resource_is_served() -> None:
     _require("RESOURCE_URI")
     result = _exchange([_request(1, "resources/read", {"uri": cfg.RESOURCE_URI})])[1]["result"]
     assert result["resultType"] == "complete", result
-    text = " ".join(block.get("text", "") for block in result.get("contents", []))
+    text = _joined_text(result.get("contents", []))
     assert cfg.RESOURCE_EXPECTED_SUBSTRING in text, f"リソース本文が期待と違います: {text!r}"
     assert result["ttlMs"] > 0, f"resources/read の cache_hints が未設定です: ttlMs={result['ttlMs']}"
 
@@ -522,7 +571,7 @@ def test_prompt_is_served() -> None:
     _require("PROMPT_NAME")
     result = _exchange([_request(1, "prompts/get", {"name": cfg.PROMPT_NAME, "arguments": cfg.PROMPT_ARGS})])[1]["result"]
     assert result["resultType"] == "complete", result
-    text = " ".join(message.get("content", {}).get("text", "") for message in result.get("messages", []))
+    text = _joined_text(message.get("content", {}) for message in result.get("messages", []))
     assert cfg.PROMPT_EXPECTED_SUBSTRING in text, f"プロンプト本文が期待と違います: {text!r}"
 
 
@@ -540,7 +589,7 @@ def test_paging_round_trip() -> None:
     assert isinstance(cursor, str) and cursor, f"1 ページ目に next_cursor がありません: {page1}"
     assert len(_text(first)) <= cfg.MAX_RESULT_CHARS, "1 ページ目が予算を超えています"
 
-    tampered = cursor[:-2] + ("AA" if not cursor.endswith("AA") else "BB")
+    tampered = cursor[:-2] + ("BB" if cursor.endswith("AA") else "AA")
     responses = _exchange(
         [
             _call(1, cfg.PAGED_TOOL, {**cfg.PAGED_ARGS, "cursor": cursor}),
@@ -565,7 +614,7 @@ def test_unknown_field_gets_suggestion() -> None:
     """未知の項目パスが `isError` になり、近い候補が示されること。"""
     _require("FIELDS_TOOL")
     responses = _exchange([_request(1, "tools/list"), _call(2, cfg.FIELDS_TOOL, cfg.FIELDS_BAD_ARGS)])
-    _assert_published(cfg.FIELDS_TOOL, {tool["name"] for tool in responses[1]["result"]["tools"]})
+    _assert_published(cfg.FIELDS_TOOL, _tool_names(responses[1]))
     result = responses[2]["result"]
     assert result.get("isError") is True, result
     assert cfg.FIELDS_EXPECTED_SUGGESTION in _text(result), result

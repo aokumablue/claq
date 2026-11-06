@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence, Sized
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal
@@ -38,9 +38,9 @@ MAX_SEARCH_LIMIT = 50  # orders_search の limit の上限（ツールの説明�
 MAX_RESULT_CHARS = 20_000  # 1 回の結果の text の上限（smoke_config.MAX_RESULT_CHARS 以下）
 TOOL_DEADLINE_SECONDS = 10.0  # 1 回のツール呼び出しの締切（ホストのタイムアウトより短く）
 # 受信側のレート制限: 主体 × ツールごとに、TOOL_CALL_WINDOW_SECONDS 秒に TOOL_CALLS_PER_WINDOW 回まで通す。
+# smoke_check.py が 1 回の起動で送るツール呼び出しの数以上にする（下回ると smoke が上限で落ちる）。
 TOOL_CALLS_PER_WINDOW = 30
 TOOL_CALL_WINDOW_SECONDS = 60.0
-# TOOL_CALLS_PER_WINDOW は、smoke_check.py が 1 回の起動で送るツール呼び出しの数以上にする（下回ると smoke が上限で落ちる）。
 # cursor に封じる上流のページトークンの長さの上限と、cursor の長さの上限（cursor 引数の max_length）。
 # 発行と開封の両方で確かめる（PageCursor）。上流のトークンが長いなら両方を上げる
 # （ASCII でない文字は cursor の中で 6 文字以上に広がる）。
@@ -280,14 +280,38 @@ def _created_range(ordered_from: str | None, ordered_to: str | None) -> tuple[da
     return created_from, created_before
 
 
+def _is_none(value: object) -> bool:
+    """値が無い項目か（結果のモデルの `exclude_if` に渡す）。
+
+    Args:
+        value: 項目の値。
+
+    Returns:
+        None なら True。
+    """
+    return value is None
+
+
+def _is_empty(value: Sized) -> bool:
+    """空の一覧か（結果のモデルの `exclude_if` に渡す）。
+
+    Args:
+        value: 項目の値。
+
+    Returns:
+        空なら True。
+    """
+    return not value
+
+
 class Money(BaseModel):
     """金額。項目は主体に許された機微区分のものだけ（値が無ければ出さない）。"""
 
     # 出力のモデルは閉じない（加法的な変更に耐える）。並べていない項目も捨てずに返す
     model_config = ConfigDict(extra="allow")
 
-    amount: float | None = Field(default=None, exclude_if=lambda value: value is None, description="金額")
-    currency: str | None = Field(default=None, exclude_if=lambda value: value is None, description="通貨（ISO 4217）")
+    amount: float | None = Field(default=None, exclude_if=_is_none, description="金額")
+    currency: str | None = Field(default=None, exclude_if=_is_none, description="通貨（ISO 4217）")
 
 
 class CustomerSummary(BaseModel):
@@ -295,7 +319,7 @@ class CustomerSummary(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    label: str | None = Field(default=None, exclude_if=lambda value: value is None, description="顧客名")
+    label: str | None = Field(default=None, exclude_if=_is_none, description="顧客名")
 
 
 class OrderSummary(BaseModel):
@@ -311,22 +335,18 @@ class OrderSummary(BaseModel):
     order_id: str = Field(description="受注 ID")
     label: str | None = Field(
         default=None,
-        exclude_if=lambda value: value is None,
+        exclude_if=_is_none,
         description="人が読める識別。注文番号（注文日）の形（顧客名は customer.label）",
     )
     status: str | None = Field(
         default=None,
-        exclude_if=lambda value: value is None,
+        exclude_if=_is_none,
         description="open / paid / shipped / delivered / cancelled（今後増えうる）",
     )
-    ordered_at: str | None = Field(
-        default=None, exclude_if=lambda value: value is None, description="注文日時（ISO 8601、+09:00）"
-    )
-    total: Money | None = Field(default=None, exclude_if=lambda value: value is None, description="合計金額")
-    customer: CustomerSummary | None = Field(default=None, exclude_if=lambda value: value is None, description="顧客")
-    extra: dict[str, Any] | None = Field(
-        default=None, exclude_if=lambda value: value is None, description="fields で指定した項目。入れ子の構造を保つ"
-    )
+    ordered_at: str | None = Field(default=None, exclude_if=_is_none, description="注文日時（ISO 8601、+09:00）")
+    total: Money | None = Field(default=None, exclude_if=_is_none, description="合計金額")
+    customer: CustomerSummary | None = Field(default=None, exclude_if=_is_none, description="顧客")
+    extra: dict[str, Any] | None = Field(default=None, exclude_if=_is_none, description="fields で指定した項目。入れ子の構造を保つ")
 
 
 class OrderSearchResult(BaseModel):
@@ -334,24 +354,18 @@ class OrderSearchResult(BaseModel):
 
     items: list[OrderSummary]
     has_more: bool = Field(description="続きがあるか")
-    next_cursor: str | None = Field(
-        default=None,
-        exclude_if=lambda value: value is None,
-        description="続きを取るときに cursor へ渡す値",
-    )
+    next_cursor: str | None = Field(default=None, exclude_if=_is_none, description="続きを取るときに cursor へ渡す値")
     as_of: str = Field(description="取得時刻")
-    notes: list[str] = Field(default_factory=list, exclude_if=lambda value: not value, description="次の行動の提案")
+    notes: list[str] = Field(default_factory=list, exclude_if=_is_empty, description="次の行動の提案")
 
 
 class OrderDetailResult(BaseModel):
     """orders_get の結果。"""
 
     order: dict[str, Any] = Field(description="view と fields で選んだ項目。入れ子の構造を保つ")
-    partial: list[str] = Field(
-        default_factory=list, exclude_if=lambda value: not value, description="取得できなかった部分と理由"
-    )
+    partial: list[str] = Field(default_factory=list, exclude_if=_is_empty, description="取得できなかった部分と理由")
     as_of: str = Field(description="取得時刻")
-    notes: list[str] = Field(default_factory=list, exclude_if=lambda value: not value, description="次の行動の提案")
+    notes: list[str] = Field(default_factory=list, exclude_if=_is_empty, description="次の行動の提案")
 
 
 class FieldEntry(BaseModel):
@@ -412,6 +426,35 @@ def _detail_result(
     if any(key.endswith(MORE_SUFFIX) for key in document):
         notes = [*notes, f"配列は先頭 {ARRAY_LIMIT} 件です。総数は <名前>{MORE_SUFFIX} にあります。"]
     return OrderDetailResult(order=document, partial=partial, as_of=as_of, notes=notes)
+
+
+def _merged_order(
+    results: Mapping[str, Any], failures: Mapping[str, UpstreamError]
+) -> tuple[dict[str, Any], list[str]]:
+    """ファンアウトの結果を、正規ドメインモデルの受注と、取得できなかった部分にまとめる。
+
+    受注は不可欠で、配送は取れなくても受注だけで答える（partial に書く）。
+
+    Args:
+        results: 名前 → 上流の結果。
+        failures: 名前 → 上流の失敗。
+
+    Returns:
+        （受注、取得できなかった部分と理由）。
+
+    Raises:
+        UpstreamError: 受注を取れなかった、または受注の応答の形が不正なとき。
+    """
+    if "order" in failures:
+        raise failures["order"]
+    partial: list[str] = []
+    if "shipments" in failures:
+        logger.warning("upstream failure: %s", failures["shipments"])
+        partial.append(f"shipments: {model_message(failures['shipments'])}")
+    order = normalize_order(results["order"])
+    if "shipments" in results:
+        order["shipments"] = results["shipments"]
+    return order, partial
 
 
 def _result_chars(result: BaseModel) -> int:
@@ -697,15 +740,7 @@ async def orders_get(
         if any(path.startswith("shipments") for path in paths):
             calls["shipments"] = lambda: _shipments(order_id, deadline)
         results, failures = await fan_out(calls, timeout=TOOL_DEADLINE_SECONDS)
-        if "order" in failures:
-            raise failures["order"]
-        partial: list[str] = []
-        if "shipments" in failures:
-            logger.warning("upstream failure: %s", failures["shipments"])
-            partial.append(f"shipments: {model_message(failures['shipments'])}")
-        order = normalize_order(results["order"])
-        if "shipments" in results:
-            order["shipments"] = results["shipments"]
+        order, partial = _merged_order(results, failures)
         as_of = _now()
         result, _ = fit_view(
             lambda chosen, notes: _detail_result(order, chosen, partial=partial, as_of=as_of, notes=notes),

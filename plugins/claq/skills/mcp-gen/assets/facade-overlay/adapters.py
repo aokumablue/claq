@@ -241,12 +241,63 @@ def _created_at(raw: Any) -> datetime:
     try:
         created = datetime.fromisoformat(value.replace("Z", "+00:00"))
         # タイムゾーンの無い日時は、astimezone がホストの地方時とみなして黙ってずれるので通さない
-        in_jst = created.astimezone(JST) if created.tzinfo else None
+        if created.tzinfo is None:
+            raise _malformed(path)
+        return created.astimezone(JST)
     except (ValueError, OverflowError) as error:
         raise _malformed(path) from error
-    if in_jst is None:
-        raise _malformed(path)
-    return in_jst
+
+
+def _matches(
+    raw: dict[str, Any],
+    *,
+    text: str | None,
+    customer_ref: str | None,
+    status_codes: list[int] | None,
+    created_from: datetime | None,
+    created_before: datetime | None,
+) -> bool:
+    """上流の形の受注が、検索の条件を全て満たすか（None の条件は見ない）。
+
+    Args:
+        raw: 上流の形の受注。
+        text: 注文番号・顧客名の部分一致。
+        customer_ref: 顧客 ID。
+        status_codes: 状態の数値コード。
+        created_from: 作成日時の下限（この時刻を含む）。
+        created_before: 作成日時の上限（この時刻を含まない）。
+
+    Returns:
+        全ての条件に合えば True。
+    """
+    attributes = raw["data"]["attributes"]
+    return (
+        (customer_ref is None or attributes["customerRef"] == customer_ref)
+        and (status_codes is None or attributes["ordSts"] in status_codes)
+        and (created_from is None or _created_at(raw) >= created_from)
+        and (created_before is None or _created_at(raw) < created_before)
+        and (text is None or text in attributes["number"] or text in _CUSTOMERS[attributes["customerRef"]])
+    )
+
+
+def _page_offset(page: str | None) -> int:
+    """検索のページトークンを、読み始める位置にする。
+
+    page は cursor から戻した値で、既定の cursor は署名しないので利用者が書き換えられる。
+    この偽物が返す形（`o:` と件数）以外は条件の誤りとして拒否する（`o:-3` は末尾から行を返す）。
+
+    Args:
+        page: 前回の次のページトークン（最初のページなら None）。
+
+    Returns:
+        読み始める位置。
+
+    Raises:
+        UpstreamError: この偽物が返す形でないとき（400）。
+    """
+    if page is not None and not re.fullmatch(r"o:\d+", page):
+        raise UpstreamError(400, "orders search: bad page token")
+    return int((page or "o:0").removeprefix("o:"))
 
 
 class OrdersApi:
@@ -282,28 +333,22 @@ class OrdersApi:
         matched = [
             raw
             for raw in _ORDERS
-            if (customer_ref is None or raw["data"]["attributes"]["customerRef"] == customer_ref)
-            and (status_codes is None or raw["data"]["attributes"]["ordSts"] in status_codes)
-            and (created_from is None or _created_at(raw) >= created_from)
-            and (created_before is None or _created_at(raw) < created_before)
-            and (
-                text is None
-                or text in raw["data"]["attributes"]["number"]
-                or text in _CUSTOMERS[raw["data"]["attributes"]["customerRef"]]
+            if _matches(
+                raw,
+                text=text,
+                customer_ref=customer_ref,
+                status_codes=status_codes,
+                created_from=created_from,
+                created_before=created_before,
             )
         ]
         if sort == "total_desc":
             matched.sort(key=lambda raw: -raw["data"]["attributes"]["grandTotal"]["value"])
         else:
             matched.sort(key=_created_at, reverse=sort == "ordered_at_desc")
-        # page は cursor から戻した値で、既定の cursor は署名しないので利用者が書き換えられる。
-        # この偽物が返す形（`o:` と件数）以外は条件の誤りとして拒否する（`o:-3` は末尾から行を返す）
-        if page is not None and not re.fullmatch(r"o:\d+", page):
-            raise UpstreamError(400, "orders search: bad page token")
-        offset = int((page or "o:0").removeprefix("o:"))
-        page = matched[offset : offset + page_size]
-        has_next = offset + page_size < len(matched)
-        return page, (f"o:{offset + page_size}" if has_next else None)
+        offset = _page_offset(page)
+        next_offset = offset + page_size
+        return matched[offset:next_offset], (f"o:{next_offset}" if next_offset < len(matched) else None)
 
     async def get(self, order_id: str) -> dict[str, Any]:
         """受注を 1 件返す。
