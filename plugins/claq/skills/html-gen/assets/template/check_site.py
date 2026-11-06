@@ -23,10 +23,14 @@ import json
 import math
 import re
 import sys
+from collections.abc import Callable
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+
+# --- 契約の定数 --------------------------------------------------------------
+
 
 HEX_RE = re.compile(r"#[0-9A-Fa-f]{3,8}\b")
 #: 手書きファイルで禁じる色関数。`color-mix` と `var` だけが許される。
@@ -112,56 +116,9 @@ REQUIRED_STYLE_VARS = (
 )
 #: Tailwind のブレークポイント。全部を手書き CSS が扱っていること。
 REQUIRED_BREAKPOINTS = (768, 1024, 1280)
-#: 止まらない動き。自動で始まり 5 秒を超えて続く動きは、止める手段が無いと
-#: WCAG 2.2 SC 2.2.2 に反する。脈動する点は「リアルタイムで更新中」の合図にも読め、
-#: 静的なページでは誤りになる。styles.css と HTML に埋め込んだ CSS で同じ基準を使う。
-#: CSS のプロパティ名とキーワードは大小文字を区別せず、コロンの前に空白も置けるので、
-#: どの書き方でもブラウザは止まらない動きにする。
-#: 動きはカスタムプロパティ経由でも渡せる。tokens.json の ``source`` は Tailwind v4 のドキュメントを
-#: 出典に挙げており、その既定テーマの ``--animate-spin`` / ``--animate-ping`` /
-#: ``--animate-pulse`` / ``--animate-bounce`` は値に ``infinite`` を含む。これを写して
-#: ``animation: var(--animate-ping)`` で使うと、``animation`` の宣言には ``infinite`` が
-#: 現れず素通りするので、宣言側（``--*``）の値も見る。
-#: ``infinite`` はキーワードとして単独で現れたものだけを拾う。``infinite-scroll`` のように
-#: キーフレーム名の一部になっているものは、反復が有限でも語境界（``\b``）では一致してしまう。
-LOOPING_ANIMATION_RE = re.compile(
-    r"(?:animation(?:-iteration-count)?|--[\w-]+)\s*:[^;}]*(?<![\w-])infinite(?![\w-])", re.IGNORECASE
-)
-#: CSS の字句。文字列リテラルと引用符の無い ``url()`` は ``/*`` を含んでもコメントの開始ではない
-#: ので先に読み飛ばし、残る ``/* ... */`` だけをコメント（グループ 1）として拾う。コメントは
-#: ブラウザが読まないので動きとして数えない。閉じていないコメントは末尾まで続く。
-CSS_TOKEN_RE = re.compile(
-    r"\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|(?i:url)\(\s*[^)\"'\s][^)]*\)|(/\*.*?(?:\*/|\Z))", re.DOTALL
-)
-#: SVG の SMIL アニメーションの無限反復。HTML パーサは属性名を大小文字を問わず
-#: repeatCount / repeatDur へ直し、引用符の無い値も読む。値は大小文字を区別し、
-#: INDEFINITE は無効な値として捨てられて 1 回で止まるので、indefinite だけを拾う。
-#: 値の前後の空白を除いて読むブラウザ（Chrome は repeatDur、Firefox は repeatCount）
-#: では止まらないので、引用符の内側の空白も許す。
-LOOPING_SMIL_RE = re.compile(r"(?<![-\w])(?i:repeat(?:count|dur))\s*=\s*[\"']?\s*indefinite\b")
-#: HTML に埋め込まれた CSS（style 属性の値と <style> 要素の中身）。
-EMBEDDED_CSS_RE = re.compile(
-    r"(?<![-\w])style\s*=\s*(?:\"([^\"]*)\"|'([^']*)')|<style\b[^>]*>(.*?)</style>", re.IGNORECASE | re.DOTALL
-)
 
 
-def _has_looping_animation(css: str) -> bool:
-    """CSS に止まらない動き（``infinite``）があるかを返す。コメントの中は無視する。
-
-    文字列リテラルと ``url()`` の中の ``/*`` はコメントの開始ではないので、読み飛ばしてから
-    コメントだけを除く（そうしないと閉じ ``*/`` の無い ``/*`` 以降が丸ごと消えて見逃す）。
-
-    Args:
-        css: 検査対象の CSS 文字列
-
-    Returns:
-        コメントを除いた CSS に ``infinite`` の宣言があれば True
-    """
-    stripped = CSS_TOKEN_RE.sub(lambda match: " " if match.group(1) is not None else match.group(0), css)
-    return LOOPING_ANIMATION_RE.search(stripped) is not None
-
-
-# --- 色空間 -----------------------------------------------------------------
+# --- 色空間 ------------------------------------------------------------------
 
 
 def _norm_hex(value: str) -> str:
@@ -194,7 +151,7 @@ def _to_srgb(channel: float) -> float:
 def _linear_rgb(hex_color: str) -> tuple[float, float, float]:
     """hex を線形 RGB へ変換する。"""
     body = _norm_hex(hex_color)[1:]
-    return tuple(_to_linear(int(body[i : i + 2], 16) / 255.0) for i in (0, 2, 4))
+    return tuple(_to_linear(int(body[start : start + 2], 16) / 255.0) for start in (0, 2, 4))
 
 
 _WHITE = (0.95047, 1.0, 1.08883)
@@ -207,11 +164,11 @@ def hex_to_lab(hex_color: str) -> tuple[float, float, float]:
     y = 0.2126729 * red + 0.7151522 * green + 0.0721750 * blue
     z = 0.0193339 * red + 0.1191920 * green + 0.9503041 * blue
 
-    def f(value: float) -> float:
+    def compress(value: float) -> float:
         """Lab の非線形圧縮。"""
         return value ** (1 / 3) if value > 216 / 24389 else (24389 / 27 * value + 16) / 116
 
-    fx, fy, fz = (f(c / w) for c, w in zip((x, y, z), _WHITE, strict=True))
+    fx, fy, fz = (compress(axis / white) for axis, white in zip((x, y, z), _WHITE, strict=True))
     return 116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)
 
 
@@ -270,6 +227,11 @@ def format_oklch(lightness: float, chroma: float, hue: float) -> str:
     return f"oklch({lightness:g} {chroma:.4g} {hue:g})"
 
 
+def _clamp_unit(value: float) -> float:
+    """値を 0〜1 の範囲へ収める。"""
+    return min(1.0, max(0.0, value))
+
+
 def oklch_to_hex(value: str, backdrop: str | None = None) -> str:
     """`oklch()` を sRGB の hex にする。半透明なら backdrop へ合成する。
 
@@ -283,7 +245,7 @@ def oklch_to_hex(value: str, backdrop: str | None = None) -> str:
             raise ValueError(f"半透明色の合成先が無い: {value}")
         base = oklch_to_linear_rgb(*parse_oklch(backdrop)[:3])
         channels = tuple(alpha * top + (1 - alpha) * under for top, under in zip(channels, base, strict=True))
-    body = "".join(f"{round(min(1.0, max(0.0, _to_srgb(min(1.0, max(0.0, channel))))) * 255):02X}" for channel in channels)
+    body = "".join(f"{round(_clamp_unit(_to_srgb(_clamp_unit(channel))) * 255):02X}" for channel in channels)
     return f"#{body}"
 
 
@@ -385,12 +347,26 @@ def contrast_violations(tokens: dict[str, Any], base_id: str, theme: str) -> lis
     """1 ブロックの配色が可読性契約を満たすか検査する。"""
     label = f"{theme}/{base_id}"
     colors = resolved_hex(tokens, base_id, theme)
+    return [
+        *_contract_ratio_violations(label, colors),
+        *_decorative_role_violations(label, colors, tokens["decorative_roles"]),
+        *_series_distinction_violations(label, colors, tokens["series"]),
+    ]
+
+
+def _contract_ratio_violations(label: str, colors: dict[str, str]) -> list[str]:
+    """`CONTRAST_CONTRACT` の組が下限の比率を満たすかを検査する。"""
     violations: list[str] = []
     for foreground, background, minimum in CONTRAST_CONTRACT:
         ratio = contrast_ratio(colors[foreground], colors[background])
         if ratio < minimum:
             violations.append(f"{label} {foreground} と {background} のコントラストが {ratio:.2f}（下限 {minimum}）")
-    decorative = tokens["decorative_roles"]
+    return violations
+
+
+def _decorative_role_violations(label: str, colors: dict[str, str], decorative: dict[str, Any]) -> list[str]:
+    """境界線などの装飾の役割が下地と同化していないかを検査する。"""
+    violations: list[str] = []
     for name in decorative["vars"]:
         backdrop = "--sidebar" if name.startswith("sidebar") else "--background"
         ratio = contrast_ratio(colors[f"--{name}"], colors[backdrop])
@@ -398,10 +374,16 @@ def contrast_violations(tokens: dict[str, Any], base_id: str, theme: str) -> lis
             violations.append(
                 f"{label} --{name} が {backdrop} と同化している（{ratio:.2f}、下限 {decorative['min_ratio']}）"
             )
+    return violations
+
+
+def _series_distinction_violations(label: str, colors: dict[str, str], series_spec: dict[str, Any]) -> list[str]:
+    """系列色が互いに重複せず、見分けられるだけの色差を持つかを検査する。"""
+    violations: list[str] = []
     series = [colors[name] for name in CHART_VARS]
     if len(set(series)) != len(series):
         violations.append(f"{label} 系列色に重複がある")
-    minimum_distance = tokens["series"]["min_delta_e"]
+    minimum_distance = series_spec["min_delta_e"]
     for (left, first), (right, second) in itertools.combinations(enumerate(series, 1), 2):
         distance = delta_e(first, second)
         if distance < minimum_distance:
@@ -420,6 +402,19 @@ def render_tokens_css(tokens: dict[str, Any]) -> str:
         "/* 自動生成。正本は tokens.json。`python3 check_site.py --write-css .` で更新する。 */",
         "/* shadcn/ui のトークン: 配色 / タイポ / 角丸 / 影 / モーション */",
         "",
+        *_root_block_lines(tokens),
+        "",
+        ':root[data-theme="light"] { color-scheme: light; }',
+        ':root[data-theme="dark"] { color-scheme: dark; }',
+        "",
+        *_scheme_block_lines(tokens),
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _root_block_lines(tokens: dict[str, Any]) -> list[str]:
+    """テーマに依らない変数を並べた `:root` ブロックを返す。"""
+    return [
         ":root {",
         *_typography_lines(tokens),
         "",
@@ -440,22 +435,22 @@ def render_tokens_css(tokens: dict[str, Any]) -> str:
             for base_id in base_ids(tokens)
         ),
         "}",
-        "",
-        ':root[data-theme="light"] { color-scheme: light; }',
-        ':root[data-theme="dark"] { color-scheme: dark; }',
-        "",
     ]
+
+
+def _scheme_block_lines(tokens: dict[str, Any]) -> list[str]:
+    """ベースカラーとテーマの組ごとに、色変数のブロックを返す。"""
     names = color_var_names(tokens)
-    for base_id in base_ids(tokens):
-        for theme in THEMES:
-            resolved = scheme(tokens, base_id, theme)
-            lines += [
-                f':root[data-theme="{theme}"][data-base="{base_id}"] {{',
-                *(f"  {name}: {resolved[name]};" for name in names),
-                "}",
-                "",
-            ]
-    return "\n".join(lines).rstrip() + "\n"
+    lines: list[str] = []
+    for base_id, theme in itertools.product(base_ids(tokens), THEMES):
+        resolved = scheme(tokens, base_id, theme)
+        lines += [
+            f':root[data-theme="{theme}"][data-base="{base_id}"] {{',
+            *(f"  {name}: {resolved[name]};" for name in names),
+            "}",
+            "",
+        ]
+    return lines
 
 
 def _typography_lines(tokens: dict[str, Any]) -> list[str]:
@@ -499,10 +494,15 @@ def _motion_lines(tokens: dict[str, Any]) -> list[str]:
     ]
 
 
+def _var_stem(key: str) -> str:
+    """tokens.json のキーを CSS 変数名の語幹にする。単位の `_px` は値の側へ移すので外す。"""
+    return key.replace("_", "-").removesuffix("-px")
+
+
 def _state_lines(tokens: dict[str, Any]) -> list[str]:
     """ステート（ホバー濃度・リング幅）の変数を返す。"""
     return [
-        f'  --state-{name.replace("_", "-").removesuffix("-px")}: {value}{"px" if name.endswith("_px") else ""};'
+        f'  --state-{_var_stem(name)}: {value}{"px" if name.endswith("_px") else ""};'
         for name, value in tokens["state"].items()
     ]
 
@@ -510,7 +510,7 @@ def _state_lines(tokens: dict[str, Any]) -> list[str]:
 def _layout_lines(tokens: dict[str, Any]) -> list[str]:
     """レイアウト（ブレークポイント / ガター）変数を返す。"""
     return [
-        f'  --layout-{name.replace("_", "-").removesuffix("-px")}: {value}px;'
+        f"  --layout-{_var_stem(name)}: {value}px;"
         for name, value in tokens["layout"].items()
         if name != "source"
     ]
@@ -519,13 +519,17 @@ def _layout_lines(tokens: dict[str, Any]) -> list[str]:
 # --- HTML 解析 ---------------------------------------------------------------
 
 
+#: `_Dom` が集める開始タグの列。(タグ名, 属性) の並び。
+_Tags = list[tuple[str, dict[str, str]]]
+
+
 class _Dom(HTMLParser):
     """検査用にタグと属性を集める。"""
 
     def __init__(self) -> None:
         """パーサを初期化する。"""
         super().__init__()
-        self.tags: list[tuple[str, dict[str, str]]] = []
+        self.tags: _Tags = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         """開始タグを記録する。"""
@@ -539,10 +543,6 @@ _RAW_ATTR_RE = re.compile(
     r"[\t\n\f\r /]*([^\t\n\f\r />][^\t\n\f\r />=]*)"
     r"(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:\"([^\"]*)\"|'([^']*)'|([^\t\n\f\r >]*)))?"
 )
-#: URL パーサが位置を問わず捨てる文字（ASCII タブ・改行）。
-_URL_TAB_OR_NEWLINE_RE = re.compile(r"[\t\n\r]")
-#: URL パーサが先頭から捨てる文字（C0 制御文字と空白）。
-_URL_LEADING_JUNK = "".join(chr(code) for code in range(0x21))
 
 
 def _raw_start_tags(html: str) -> list[tuple[str, list[tuple[str, str]]]]:
@@ -569,19 +569,18 @@ def _raw_start_tags(html: str) -> list[tuple[str, list[tuple[str, str]]]]:
     return tags
 
 
-def _is_javascript_url(value: str) -> bool:
-    """URL パーサと同じ前処理をした値が javascript: スキームかを返す。
-
-    Args:
-        value: 実体参照を解いた属性値
-
-    Returns:
-        javascript: の URL なら True
-    """
-    return _URL_TAB_OR_NEWLINE_RE.sub("", value).lstrip(_URL_LEADING_JUNK).lower().startswith("javascript:")
+def _class_names(tag: str) -> list[str]:
+    """開始タグの文字列から class 名の一覧を取り出す。class が無ければ空。"""
+    found = re.search(r'class="([^"]*)"', tag)
+    return found.group(1).split() if found else []
 
 
-# --- 検査 --------------------------------------------------------------------
+def _has_class(attrs: dict[str, str], name: str) -> bool:
+    """`_Dom` が集めた属性の class に name があるかを返す。"""
+    return name in attrs.get("class", "").split()
+
+
+# --- 検査の入口 --------------------------------------------------------------
 
 
 def validate_site(site_dir: Path, tokens: dict[str, Any] | None = None) -> list[str]:
@@ -615,22 +614,48 @@ def _validate_fonts(site_dir: Path) -> list[str]:
     return []
 
 
+# --- 検査: HTML の構造 -------------------------------------------------------
+
+
 def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:
     """HTML の構造・アクセシビリティ・スクリプト混入の契約を検査する。"""
-    violations: list[str] = []
     parser = _Dom()
     parser.feed(html)
     tags = parser.tags
-    html_attrs = next((attrs for tag, attrs in tags if tag == "html"), {})
-    if not html_attrs.get("lang", "").strip():
+    root_attrs = next((attrs for tag, attrs in tags if tag == "html"), {})
+    page_kind = root_attrs.get("data-page-kind", "dashboard")
+    return [
+        *_validate_root_attrs(root_attrs, page_kind, tokens),
+        *_validate_page_skeleton(tags),
+        *_validate_theme_toggle(tags),
+        *_validate_stylesheets(tags),
+        *_validate_inline_motion(html),
+        *_validate_script_injection(html),
+        *_validate_nav_links(tags),
+        *_validate_lists(html, tags),
+        *(_validate_dashboard(html, tags) if page_kind == "dashboard" else ()),
+        *_validate_head_placement(tags),
+        *_weak_csp_directives(tags),
+    ]
+
+
+def _validate_root_attrs(root_attrs: dict[str, str], page_kind: str, tokens: dict[str, Any]) -> list[str]:
+    """``<html>`` の属性（言語・テーマ・ベースカラー・ページ種別）を検査する。"""
+    violations: list[str] = []
+    if not root_attrs.get("lang", "").strip():
         violations.append("html[lang] が無い")
-    if html_attrs.get("data-theme") not in THEMES:
+    if root_attrs.get("data-theme") not in THEMES:
         violations.append("html[data-theme=light|dark] が無い")
-    if html_attrs.get("data-base") not in base_ids(tokens):
+    if root_attrs.get("data-base") not in base_ids(tokens):
         violations.append("html[data-base] が tokens.json のベースカラー識別子ではない")
-    page_kind = html_attrs.get("data-page-kind", "dashboard")
     if page_kind not in PAGE_KINDS:
         violations.append("html[data-page-kind] は dashboard か content")
+    return violations
+
+
+def _validate_page_skeleton(tags: _Tags) -> list[str]:
+    """どのページにも要る骨格（viewport・スキップリンク・ランドマーク）を検査する。"""
+    violations: list[str] = []
     if not any(
         tag == "meta" and attrs.get("name") == "viewport" and "width=device-width" in attrs.get("content", "")
         for tag, attrs in tags
@@ -643,26 +668,10 @@ def _validate_html(html: str, tokens: dict[str, Any]) -> list[str]:
     for landmark in ("header", "main", "footer"):
         if not any(tag == landmark for tag, _ in tags):
             violations.append(f"<{landmark}> が無い")
-    violations.extend(_validate_theme_toggle(tags))
-    violations.extend(_validate_stylesheets(tags))
-    violations.extend(_validate_inline_motion(html))
-    violations.extend(_validate_script_injection(html))
-    violations.extend(_validate_nav_links(tags))
-    violations.extend(_validate_lists(html, tags))
-    if page_kind == "dashboard":
-        violations.extend(_validate_dashboard(html, tags))
-        violations.extend(_validate_chart_scroll_wrapper(html))
-    if not _script_runs_before_body(tags):
-        violations.append("app.js が <head> で読み込まれていない（ダーク選択時に白のちらつきが出る）")
-    if not _csp_meta_in_head(tags):
-        violations.append(
-            "Content-Security-Policy の meta が <head> に無い（<meta charset> の直後に置く。<body> 内ではブラウザが無視する）"
-        )
-    violations.extend(_weak_csp_directives(tags))
     return violations
 
 
-def _validate_theme_toggle(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
+def _validate_theme_toggle(tags: _Tags) -> list[str]:
     """ライト / ダークを選べるトグルの契約を検査する。"""
     violations: list[str] = []
     buttons = [attrs for tag, attrs in tags if tag == "button" and attrs.get("data-theme-value") in THEMES]
@@ -675,7 +684,7 @@ def _validate_theme_toggle(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
     return violations
 
 
-def _validate_stylesheets(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
+def _validate_stylesheets(tags: _Tags) -> list[str]:
     """tokens.css と styles.css がこの順で読み込まれているかを検査する。"""
     hrefs = [attrs.get("href", "") for tag, attrs in tags if tag == "link" and attrs.get("rel") == "stylesheet"]
     local = [href for href in hrefs if href in ("tokens.css", "styles.css")]
@@ -684,28 +693,192 @@ def _validate_stylesheets(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
     return []
 
 
-def _validate_inline_motion(html: str) -> list[str]:
-    """HTML に直接書いた止まらない動きを検査する。
+def _validate_nav_links(tags: _Tags) -> list[str]:
+    """サイドバーの項目が、文書内の実在する節へ飛ぶリンクであることを検査する。
 
-    styles.css の検査だけでは、SVG の ``<animate repeatCount="indefinite">`` や、
-    style 属性・``<style>`` 要素に書いた ``infinite`` が素通りする。どこに書いても
-    止まらない動きであることは変わらないので、styles.css と同じ基準で落とす。
-    埋め込み CSS は ``;`` で区切ってつなぎ、別の属性の語をまたいで拾わない。
+    ``<button>`` の項目や、飛び先の id が無いリンクは、押しても何も起きない。
 
     Args:
-        html: 検査対象の HTML 文字列
+        tags: 開始タグと属性の一覧
 
     Returns:
         違反メッセージの一覧
     """
-    embedded = [part for match in EMBEDDED_CSS_RE.finditer(html) for part in match.groups() if part]
-    if LOOPING_SMIL_RE.search(html) or any(_has_looping_animation(part) for part in embedded):
-        return ["index.html に止まらない動き（infinite / indefinite）がある（回数を有限にするか、動きを外す）"]
-    return []
+    ids = {attrs["id"] for _, attrs in tags if attrs.get("id")}
+    violations: list[str] = []
+    for tag, attrs in tags:
+        if not _has_class(attrs, "nav-item"):
+            continue
+        href = attrs.get("href", "")
+        if tag != "a" or not href.startswith("#"):
+            violations.append("ナビの項目 (.nav-item) が <a href=\"#id\"> ではない（押しても節へ移動しない）")
+        elif href[1:] not in ids:
+            violations.append(f"ナビの項目の飛び先 {href} が文書内に無い（id を付けた節が必要）")
+    return violations
 
 
+#: 一覧とみなさない表。ヒートマップは格子全体を読む図で、図の直下の表は図の値の控え。
+_NON_LIST_TABLE_CLASS = "heat"
+
+
+def _is_key_value_table(inner: str) -> bool:
+    """表が「行見出し + 値 1 列」の項目表（会社概要など）かを返す。
+
+    項目表は絞り込む対象の集合ではないので、一覧とみなさない。
+
+    Args:
+        inner: ``<table>`` の中身
+
+    Returns:
+        本体の全行が値のセルを 1 つ以下しか持たなければ True
+    """
+    rows = re.findall(r"<tr\b[^>]*>(.*?)</tr>", inner.split("<tbody", 1)[-1], re.DOTALL)
+    return bool(rows) and all(len(re.findall(r"<td\b", row)) <= 1 for row in rows)
+
+
+def _validate_lists(html: str, tags: _Tags) -> list[str]:
+    """一覧の表が検索・絞り込みを持ち、検索欄を手書きしていないことを検査する。
+
+    検索欄と絞り込みは app.js が ``table[data-list]`` から生成する。手書きの検索欄は
+    結線されず、押しても何も起きない部品になるので置かせない。
+
+    Args:
+        html: 検査対象の HTML 文字列
+        tags: 開始タグと属性の一覧
+
+    Returns:
+        違反メッセージの一覧
+    """
+    violations: list[str] = []
+    if any(
+        (tag == "input" and attrs.get("type") == "search") or attrs.get("role") == "search" for tag, attrs in tags
+    ):
+        violations.append("検索欄を手書きしている（一覧の検索は table[data-list] から app.js が生成する）")
+    figure_data = [
+        details.span() for details in re.finditer(r"<details\b[^>]*chart-data[^>]*>.*?</details>", html, re.DOTALL)
+    ]
+    for table in re.finditer(r"<table\b([^>]*)>(.*?)</table>", html, re.DOTALL):
+        attrs, inner = table.groups()
+        in_figure_data = any(start <= table.start() < end for start, end in figure_data)
+        if in_figure_data or _NON_LIST_TABLE_CLASS in _class_names(attrs) or _is_key_value_table(inner):
+            continue
+        if "data-list" not in attrs:
+            violations.append("表に data-list が無い（一覧には検索と主要項目の絞り込みを付ける）")
+        elif "<thead" not in inner or "<tbody" not in inner:
+            violations.append("table[data-list] に <thead> と <tbody> が要る（絞り込みの列を読み取れない）")
+    return violations
+
+
+# --- 検査: head の読み込み順と CSP -------------------------------------------
+
+
+def _validate_head_placement(tags: _Tags) -> list[str]:
+    """app.js と CSP の meta が ``<head>`` にあることを検査する。"""
+    violations: list[str] = []
+    if not _script_runs_before_body(tags):
+        violations.append("app.js が <head> で読み込まれていない（ダーク選択時に白のちらつきが出る）")
+    if not _csp_meta_in_head(tags):
+        violations.append(
+            "Content-Security-Policy の meta が <head> に無い（<meta charset> の直後に置く。<body> 内ではブラウザが無視する）"
+        )
+    return violations
+
+
+def _precedes_body(tags: _Tags, is_target: Callable[[str, dict[str, str]], bool]) -> bool:
+    """対象のタグが body より前（head 内）に現れるかを返す。
+
+    Args:
+        tags: 開始タグと属性の一覧
+        is_target: タグ名と属性から対象かを判定する関数
+
+    Returns:
+        body と対象のタグのうち、先に現れたのが対象なら True
+    """
+    return next((tag for tag, attrs in tags if tag == "body" or is_target(tag, attrs)), "body") != "body"
+
+
+def _script_runs_before_body(tags: _Tags) -> bool:
+    """app.js が body より前（head 内）で読み込まれているかを返す。"""
+    return _precedes_body(tags, lambda tag, attrs: tag == "script" and "app.js" in attrs.get("src", ""))
+
+
+def _is_csp_meta(tag: str, attrs: dict[str, str]) -> bool:
+    """Content-Security-Policy の meta かを返す。"""
+    return tag == "meta" and attrs.get("http-equiv", "").lower() == "content-security-policy"
+
+
+def _csp_meta_in_head(tags: _Tags) -> bool:
+    """Content-Security-Policy の meta が body より前（head 内）にあるかを返す。"""
+    return _precedes_body(tags, _is_csp_meta)
+
+
+#: CSP で値を固定する指令。スクリプトは app.js だけ、プラグインと <base> の差し替えは禁じる。
+_CSP_REQUIRED_SOURCES = {"script-src": {"'self'"}, "object-src": {"'none'"}, "base-uri": {"'none'"}}
+
+
+def _weak_csp_directives(tags: _Tags) -> list[str]:
+    """CSP の中身が弱められていないか（必須の指令の値と、外部オリジンの有無）を検査する。
+
+    Args:
+        tags: ``(タグ名, 属性)`` の開始タグ列
+
+    Returns:
+        違反メッセージの一覧（CSP の meta が無いときは空。欠落は別の検査が報告する）
+    """
+    content = next((attrs.get("content", "") for tag, attrs in tags if _is_csp_meta(tag, attrs)), None)
+    if content is None:
+        return []
+    directives = _parse_csp(content)
+    violations = [
+        f"Content-Security-Policy の {name} が {' '.join(sorted(expected))} 以外を許している（値をそれだけにする）"
+        for name, expected in _CSP_REQUIRED_SOURCES.items()
+        if directives.get(name) != expected
+    ]
+    # 外部オリジンを許すと、閲覧者の IP と閲覧ページが第三者へ送られ、file:// やオフラインでも崩れる
+    if _allows_external_origin(directives):
+        violations.append(
+            "Content-Security-Policy が外部のオリジンを許している（フォント・画像・スクリプトは同梱して 'self' から読む）"
+        )
+    return violations
+
+
+def _parse_csp(content: str) -> dict[str, set[str]]:
+    """CSP の content を {小文字の指令名: 値の集合} へ読む。"""
+    directives: dict[str, set[str]] = {}
+    for part in content.split(";"):
+        words = part.split()
+        if words:
+            directives[words[0].lower()] = set(words[1:])
+    return directives
+
+
+def _allows_external_origin(directives: dict[str, set[str]]) -> bool:
+    """``data:`` を除く値に、``*`` かスキームを持つ値があるかを返す。"""
+    sources = (source for values in directives.values() for source in values if source != "data:")
+    return any(source == "*" or ":" in source.strip("'") for source in sources)
+
+
+# --- 検査: スクリプトの混入 --------------------------------------------------
+
+
+#: URL パーサが位置を問わず捨てる文字（ASCII タブ・改行）。
+_URL_TAB_OR_NEWLINE_RE = re.compile(r"[\t\n\r]")
+#: URL パーサが先頭から捨てる文字（C0 制御文字と空白）。
+_URL_LEADING_JUNK = "".join(chr(code) for code in range(0x21))
 #: URL として解釈される属性。javascript: の判定はここに限る（``title="JavaScript: 入門"`` を落とさない）。
 _URL_ATTRIBUTES = frozenset({"href", "src", "action", "formaction", "xlink:href", "data", "poster", "srcdoc"})
+
+
+def _is_javascript_url(value: str) -> bool:
+    """URL パーサと同じ前処理をした値が javascript: スキームかを返す。
+
+    Args:
+        value: 実体参照を解いた属性値
+
+    Returns:
+        javascript: の URL なら True
+    """
+    return _URL_TAB_OR_NEWLINE_RE.sub("", value).lstrip(_URL_LEADING_JUNK).lower().startswith("javascript:")
 
 
 def _validate_script_injection(html: str) -> list[str]:
@@ -743,21 +916,112 @@ def _validate_script_injection(html: str) -> list[str]:
     return violations
 
 
-#: 直交軸チャート 1 枚に要求する目盛りラベルと目盛り線の最小本数。
-#: 2 本は範囲の両端を述べるだけで、間隔（1 目盛りがいくらか）を伝えない。
-#: 下限・上限・内側 1 本の 3 本で初めて尺度になる。一般的な推奨は 5〜12 本なので
-#: これは目標値ではなく床である。
-_MIN_AXIS_TICKS = 3
+# --- 検査: 止まらない動き ----------------------------------------------------
 
-#: 直交軸を持つと判定するマークの class。棒・折れ線・面・散布点・積み上げ区画は
-#: いずれも値を軸上の**位置**で符号化するため、軸が無ければ数値を読めない。
-#: `arc`（ドーナツ）は角度で符号化するので直交軸を持たず、`spark-*` は後述の
-#: 潰し判定で除外される。
-#:
-#: **種別を増やしたらここも増やす。** 増やさないと、新しい形だけが軸ゼロでも素通りする。
-#: `bar--h` は `class="bar` の前方一致で既に入る。ヒストグラムの `bin` は縦棒の
-#: 分類上限（`_MAX_VERTICAL_BARS`）に数えないよう、`bar` と別の名前にしてある。
-_CARTESIAN_MARK_CLASSES = ("bar", "bin", "series-line", "series-area", "point", "seg")
+
+#: 止まらない動き。自動で始まり 5 秒を超えて続く動きは、止める手段が無いと
+#: WCAG 2.2 SC 2.2.2 に反する。脈動する点は「リアルタイムで更新中」の合図にも読め、
+#: 静的なページでは誤りになる。styles.css と HTML に埋め込んだ CSS で同じ基準を使う。
+#: CSS のプロパティ名とキーワードは大小文字を区別せず、コロンの前に空白も置けるので、
+#: どの書き方でもブラウザは止まらない動きにする。
+#: 動きはカスタムプロパティ経由でも渡せる。tokens.json の ``source`` は Tailwind v4 のドキュメントを
+#: 出典に挙げており、その既定テーマの ``--animate-spin`` / ``--animate-ping`` /
+#: ``--animate-pulse`` / ``--animate-bounce`` は値に ``infinite`` を含む。これを写して
+#: ``animation: var(--animate-ping)`` で使うと、``animation`` の宣言には ``infinite`` が
+#: 現れず素通りするので、宣言側（``--*``）の値も見る。
+#: ``infinite`` はキーワードとして単独で現れたものだけを拾う。``infinite-scroll`` のように
+#: キーフレーム名の一部になっているものは、反復が有限でも語境界（``\b``）では一致してしまう。
+LOOPING_ANIMATION_RE = re.compile(
+    r"(?:animation(?:-iteration-count)?|--[\w-]+)\s*:[^;}]*(?<![\w-])infinite(?![\w-])", re.IGNORECASE
+)
+#: CSS の字句。文字列リテラルと引用符の無い ``url()`` は ``/*`` を含んでもコメントの開始ではない
+#: ので先に読み飛ばし、残る ``/* ... */`` だけをコメント（グループ 1）として拾う。コメントは
+#: ブラウザが読まないので動きとして数えない。閉じていないコメントは末尾まで続く。
+CSS_TOKEN_RE = re.compile(
+    r"\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|(?i:url)\(\s*[^)\"'\s][^)]*\)|(/\*.*?(?:\*/|\Z))", re.DOTALL
+)
+#: SVG の SMIL アニメーションの無限反復。HTML パーサは属性名を大小文字を問わず
+#: repeatCount / repeatDur へ直し、引用符の無い値も読む。値は大小文字を区別し、
+#: INDEFINITE は無効な値として捨てられて 1 回で止まるので、indefinite だけを拾う。
+#: 値の前後の空白を除いて読むブラウザ（Chrome は repeatDur、Firefox は repeatCount）
+#: では止まらないので、引用符の内側の空白も許す。
+LOOPING_SMIL_RE = re.compile(r"(?<![-\w])(?i:repeat(?:count|dur))\s*=\s*[\"']?\s*indefinite\b")
+#: HTML に埋め込まれた CSS（style 属性の値と <style> 要素の中身）。
+EMBEDDED_CSS_RE = re.compile(
+    r"(?<![-\w])style\s*=\s*(?:\"([^\"]*)\"|'([^']*)')|<style\b[^>]*>(.*?)</style>", re.IGNORECASE | re.DOTALL
+)
+
+
+def _has_looping_animation(css: str) -> bool:
+    """CSS に止まらない動き（``infinite``）があるかを返す。コメントの中は無視する。
+
+    文字列リテラルと ``url()`` の中の ``/*`` はコメントの開始ではないので、読み飛ばしてから
+    コメントだけを除く（そうしないと閉じ ``*/`` の無い ``/*`` 以降が丸ごと消えて見逃す）。
+
+    Args:
+        css: 検査対象の CSS 文字列
+
+    Returns:
+        コメントを除いた CSS に ``infinite`` の宣言があれば True
+    """
+    stripped = CSS_TOKEN_RE.sub(lambda match: " " if match.group(1) is not None else match.group(0), css)
+    return LOOPING_ANIMATION_RE.search(stripped) is not None
+
+
+def _validate_inline_motion(html: str) -> list[str]:
+    """HTML に直接書いた止まらない動きを検査する。
+
+    styles.css の検査だけでは、SVG の ``<animate repeatCount="indefinite">`` や、
+    style 属性・``<style>`` 要素に書いた ``infinite`` が素通りする。どこに書いても
+    止まらない動きであることは変わらないので、styles.css と同じ基準で落とす。
+    埋め込み CSS は ``;`` で区切ってつなぎ、別の属性の語をまたいで拾わない。
+
+    Args:
+        html: 検査対象の HTML 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    embedded = [part for match in EMBEDDED_CSS_RE.finditer(html) for part in match.groups() if part]
+    if LOOPING_SMIL_RE.search(html) or any(_has_looping_animation(part) for part in embedded):
+        return ["index.html に止まらない動き（infinite / indefinite）がある（回数を有限にするか、動きを外す）"]
+    return []
+
+
+# --- 検査: ダッシュボードとチャート ------------------------------------------
+
+
+def _validate_dashboard(html: str, tags: _Tags) -> list[str]:
+    """ダッシュボードのデータ表現契約を検査する。"""
+    return [
+        *_validate_data_presence(html, tags),
+        *_validate_chart_axes(html),
+        *_validate_stretched_svg_text(html),
+        *_validate_chart_text(html),
+        *_validate_chart_form(html),
+        *_validate_tick_steps(html),
+        *_validate_time_point_hits(html),
+        *_validate_chart_scroll_wrapper(html),
+    ]
+
+
+def _validate_data_presence(html: str, tags: _Tags) -> list[str]:
+    """指標・チャート・代替テキスト・表が揃っていることを検査する。"""
+    violations: list[str] = []
+    if not any(_has_class(attrs, "metric") or attrs.get("data-metric") == "true" for _, attrs in tags):
+        violations.append("主要指標（.metric または data-metric）が無い")
+    svgs = [attrs for tag, attrs in tags if tag == "svg"]
+    if not svgs:
+        violations.append("チャート SVG が無い")
+    elif not any(attrs.get("role") == "img" for attrs in svgs):
+        violations.append("svg[role=img] が無い（代替テキスト契約）")
+    if "<desc" not in html:
+        violations.append("SVG に <desc> が無い（図の要点を文字でも出す）")
+    if 'data-origin="0"' not in html and "data-origin='0'" not in html:
+        violations.append("棒グラフの原点 0（data-origin=0）が無い")
+    if "<table" not in html:
+        violations.append("表が無い（図を読めない利用者への同等手段）")
+    return violations
 
 
 def _iter_svg_blocks(html: str) -> list[str]:
@@ -774,6 +1038,40 @@ def _iter_svg_blocks(html: str) -> list[str]:
     return re.findall(r"<svg\b.*?</svg>", html, re.DOTALL)
 
 
+def _each_svg(html: str, check: Callable[[int, str], list[str]]) -> list[str]:
+    """SVG を 1 枚ずつ検査し、違反をまとめて返す。
+
+    Args:
+        html: 検査対象の HTML 文字列
+        check: 何枚目か（1 始まり）と ``<svg>`` 1 枚分の文字列を受け取り、違反を返す関数
+
+    Returns:
+        違反メッセージの一覧
+    """
+    return [violation for index, svg in enumerate(_iter_svg_blocks(html), start=1) for violation in check(index, svg)]
+
+
+def _is_stretched_svg(svg: str) -> bool:
+    """viewBox を縦横独立に引き伸ばす潰し描画の SVG かを返す。"""
+    return 'preserveAspectRatio="none"' in svg
+
+
+#: 直交軸チャート 1 枚に要求する目盛りラベルと目盛り線の最小本数。
+#: 2 本は範囲の両端を述べるだけで、間隔（1 目盛りがいくらか）を伝えない。
+#: 下限・上限・内側 1 本の 3 本で初めて尺度になる。一般的な推奨は 5〜12 本なので
+#: これは目標値ではなく床である。
+_MIN_AXIS_TICKS = 3
+#: 直交軸を持つと判定するマークの class。棒・折れ線・面・散布点・積み上げ区画は
+#: いずれも値を軸上の**位置**で符号化するため、軸が無ければ数値を読めない。
+#: `arc`（ドーナツ）は角度で符号化するので直交軸を持たず、`spark-*` は後述の
+#: 潰し判定で除外される。
+#:
+#: **種別を増やしたらここも増やす。** 増やさないと、新しい形だけが軸ゼロでも素通りする。
+#: `bar--h` は `class="bar` の前方一致で既に入る。ヒストグラムの `bin` は縦棒の
+#: 分類上限（`_MAX_VERTICAL_BARS`）に数えないよう、`bar` と別の名前にしてある。
+_CARTESIAN_MARK_CLASSES = ("bar", "bin", "series-line", "series-area", "point", "seg")
+
+
 def _is_cartesian_chart(svg: str) -> bool:
     """その SVG が直交軸で値を符号化しているかを返す。
 
@@ -785,9 +1083,9 @@ def _is_cartesian_chart(svg: str) -> bool:
         svg: ``<svg>`` 1 枚分の文字列
 
     Returns:
-        棒・折れ線・面のいずれかを含み、かつ潰し描画でなければ True
+        `_CARTESIAN_MARK_CLASSES` のマークを含み、かつ潰し描画でなければ True
     """
-    if 'preserveAspectRatio="none"' in svg:
+    if _is_stretched_svg(svg):
         return False
     return any(f'class="{name}' in svg for name in _CARTESIAN_MARK_CLASSES)
 
@@ -804,107 +1102,48 @@ def _validate_chart_axes(html: str) -> list[str]:
     Returns:
         違反メッセージの一覧
     """
+    return _each_svg(html, _axis_tick_violations)
+
+
+def _axis_tick_violations(index: int, svg: str) -> list[str]:
+    """直交軸チャート 1 枚の目盛りラベルと目盛り線の本数を検査する。"""
+    if not _is_cartesian_chart(svg):
+        return []
     violations: list[str] = []
-    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        if not _is_cartesian_chart(svg):
-            continue
-        ticks = svg.count('class="axis-text')
-        grids = svg.count('class="grid-line')
-        if ticks < _MIN_AXIS_TICKS:
-            violations.append(
-                f"{index} 枚目の直交軸チャートの目盛りラベルが {ticks} 個"
-                f"（{_MIN_AXIS_TICKS} 個以上。軸の数値が無いと図から値を読めない）"
-            )
-        if grids < _MIN_AXIS_TICKS:
-            violations.append(
-                f"{index} 枚目の直交軸チャートの目盛り線が {grids} 本"
-                f"（{_MIN_AXIS_TICKS} 本以上。値の尺度が無いと大小しか分からない）"
-            )
+    ticks = svg.count('class="axis-text')
+    grids = svg.count('class="grid-line')
+    if ticks < _MIN_AXIS_TICKS:
+        violations.append(
+            f"{index} 枚目の直交軸チャートの目盛りラベルが {ticks} 個"
+            f"（{_MIN_AXIS_TICKS} 個以上。軸の数値が無いと図から値を読めない）"
+        )
+    if grids < _MIN_AXIS_TICKS:
+        violations.append(
+            f"{index} 枚目の直交軸チャートの目盛り線が {grids} 本"
+            f"（{_MIN_AXIS_TICKS} 本以上。値の尺度が無いと大小しか分からない）"
+        )
     return violations
 
 
-#: ドーナツに載せてよい分類の上限。角度と面積の比較は長さの比較より精度が落ちる
-#: ため、3〜5 分類で差が大きいときにだけ成立する。6 以上は積み上げ横棒へ倒す。
-_MAX_DONUT_SEGMENTS = 5
+def _validate_stretched_svg_text(html: str) -> list[str]:
+    """潰し描画の SVG に文字を置いていないことを検査する。
 
-#: 縦棒に載せてよい分類の上限。これを超えるとラベルを回転させるか省略すること
-#: になり、どちらも読む速度を落とす。横棒（降順）へ倒す。
-_MAX_VERTICAL_BARS = 7
-
-
-#: SVG 内の目盛り文字が画面上で満たすべき最小サイズ（px）。手書き CSS の
-#: `font-size` には 12px 未満を禁じる検査が既にあるが、SVG の文字は viewBox の
-#: 倍率で一緒に縮むため、宣言が 12px でも描画は 12px を割りうる。
-_MIN_RENDERED_AXIS_PX = 12.0
-
-#: 同じく、最小幅で描かれたときの上限（px）。viewBox を狭く書くと、宣言が 15px でも
-#: 描画は本文やカード見出しより大きくなる（広い画面では app.js が 13px で頭打ちにするが、
-#: JS 無効・印刷では上限が効かない）。
-_MAX_RENDERED_AXIS_PX = 18.0
-
-
-def _css_length(css: str, selector: str, prop: str) -> float | None:
-    """セレクタ 1 個の宣言から px 長さを取り出す。見つからなければ None。"""
-    block = re.search(rf"(?<![-\w]){re.escape(selector)}\s*\{{(.*?)\}}", css, re.DOTALL)
-    if not block:
-        return None
-    found = re.search(rf"{prop}:\s*([\d.]+)px", block.group(1))
-    return float(found.group(1)) if found else None
-
-
-def _validate_axis_text_scale(html: str, css: str) -> list[str]:
-    """目盛り文字が**描画されたとき**に 12px を割らないことを検査する。
-
-    SVG の文字は viewBox 座標で書かれるので、SVG が幅 W で描かれるとき実効
-    サイズは `宣言サイズ × W / viewBox幅` になる。W の下限は CSS の
-    `min-inline-size` で静的に決まるため、最悪ケースをここで計算できる。
-    CSS の宣言だけを見る `_validate_styles` の 12px 検査では、この縮みを捉えられない。
+    ``preserveAspectRatio="none"`` は viewBox を縦横独立に引き伸ばすため、
+    中の ``<text>`` も一緒に歪む（MDN: 縦横比を保たない指定は文字を引き伸ばす）。
+    スパークラインのように文字を持たない図でだけ使ってよい指定であり、軸ラベルを
+    持つチャートに使うと目盛りが読めない形に潰れる。
 
     Args:
         html: 検査対象の HTML 文字列
-        css: 手書き CSS の文字列
 
     Returns:
         違反メッセージの一覧
     """
-    declared = _css_length(css, ".axis-text", "font-size")
-    if declared is None:
-        return [".axis-text の font-size が読み取れない（目盛り文字の実効サイズを保証できない）"]
-    violations: list[str] = []
-    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        if "axis-text" not in svg:
-            continue
-        box = re.search(r'viewBox="0 0 ([\d.]+) [\d.]+"', svg)
-        classes = re.search(r'class="([^"]*)"', svg)
-        if not box or not classes:
-            continue
-        modifiers = [f".{name}" for name in classes.group(1).split() if name.startswith("chart--")]
-        floor = next(
-            (value for value in (_css_length(css, name, "min-inline-size") for name in modifiers) if value),
-            _css_length(css, ".chart", "min-inline-size"),
-        )
-        if not floor:
-            continue
-        rendered = declared * floor / float(box.group(1))
-        if rendered < _MIN_RENDERED_AXIS_PX:
-            violations.append(
-                f"{index} 枚目の目盛り文字が最小幅で {rendered:.1f}px に縮む"
-                f"（{_MIN_RENDERED_AXIS_PX:.0f}px 以上。viewBox 幅 {box.group(1)} に対し"
-                f"最小描画幅 {floor:.0f}px。font-size を上げるか viewBox を狭める）"
-            )
-        elif rendered > _MAX_RENDERED_AXIS_PX:
-            violations.append(
-                f"{index} 枚目の目盛り文字が最小幅で {rendered:.1f}px に伸びる"
-                f"（{_MAX_RENDERED_AXIS_PX:.0f}px 以下。viewBox 幅 {box.group(1)} に対し"
-                f"最小描画幅 {floor:.0f}px。viewBox を広げて座標を取り直す）"
-            )
-    return violations
-
-
-def _class_names(tag: str) -> list[str]:
-    """開始タグの文字列から class 名の一覧を取り出す。class が無ければ空。"""
-    found = re.search(r'class="([^"]*)"', tag)
-    return found.group(1).split() if found else []
+    return [
+        f"{index} 枚目の SVG が preserveAspectRatio=\"none\" のまま <text> を持つ（縦横独立に伸びるため文字が歪む）"
+        for index, svg in enumerate(_iter_svg_blocks(html), start=1)
+        if _is_stretched_svg(svg) and "<text" in svg
+    ]
 
 
 def _validate_chart_text(html: str) -> list[str]:
@@ -924,106 +1163,44 @@ def _validate_chart_text(html: str) -> list[str]:
     Returns:
         違反メッセージの一覧
     """
+    return _each_svg(html, _chart_text_violations)
+
+
+def _chart_text_violations(index: int, svg: str) -> list[str]:
+    """SVG 1 枚の文字の置き方を検査する。``<text>`` が無ければ対象外。"""
+    texts = re.findall(r"<text\b[^>]*>", svg)
+    if not texts:
+        return []
     violations: list[str] = []
-    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        texts = re.findall(r"<text\b[^>]*>", svg)
-        if not texts:
-            continue
-        if "chart" not in _class_names(re.match(r"<svg\b[^>]*>", svg).group(0)):
-            violations.append(
-                f"{index} 枚目の SVG が <text> を持つのに class=\"chart\" が無い"
-                "（文字の頭打ちが掛からず、広い画面で伸びる）"
-            )
-        if re.search(r"font-size\s*[=:]", svg):
-            violations.append(f"{index} 枚目の SVG が font-size を個別に指定している（軸文字の大きさが揃わない）")
-        if any("axis-text" not in _class_names(tag) for tag in texts):
-            violations.append(f"{index} 枚目の SVG の <text> が axis-text を持たない（軸文字の大きさが揃わない）")
+    if "chart" not in _class_names(re.match(r"<svg\b[^>]*>", svg).group(0)):
+        violations.append(
+            f"{index} 枚目の SVG が <text> を持つのに class=\"chart\" が無い"
+            "（文字の頭打ちが掛からず、広い画面で伸びる）"
+        )
+    if re.search(r"font-size\s*[=:]", svg):
+        violations.append(f"{index} 枚目の SVG が font-size を個別に指定している（軸文字の大きさが揃わない）")
+    if any("axis-text" not in _class_names(tag) for tag in texts):
+        violations.append(f"{index} 枚目の SVG の <text> が axis-text を持たない（軸文字の大きさが揃わない）")
     return violations
 
 
-def _validate_nav_links(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
-    """サイドバーの項目が、文書内の実在する節へ飛ぶリンクであることを検査する。
-
-    ``<button>`` の項目や、飛び先の id が無いリンクは、押しても何も起きない。
-
-    Args:
-        tags: 開始タグと属性の一覧
-
-    Returns:
-        違反メッセージの一覧
-    """
-    ids = {attrs["id"] for _, attrs in tags if attrs.get("id")}
-    violations: list[str] = []
-    for tag, attrs in tags:
-        if "nav-item" not in attrs.get("class", "").split():
-            continue
-        href = attrs.get("href", "")
-        if tag != "a" or not href.startswith("#"):
-            violations.append("ナビの項目 (.nav-item) が <a href=\"#id\"> ではない（押しても節へ移動しない）")
-        elif href[1:] not in ids:
-            violations.append(f"ナビの項目の飛び先 {href} が文書内に無い（id を付けた節が必要）")
-    return violations
+#: ドーナツに載せてよい分類の上限。角度と面積の比較は長さの比較より精度が落ちる
+#: ため、3〜5 分類で差が大きいときにだけ成立する。6 以上は積み上げ横棒へ倒す。
+_MAX_DONUT_SEGMENTS = 5
+#: 縦棒に載せてよい分類の上限。これを超えるとラベルを回転させるか省略すること
+#: になり、どちらも読む速度を落とす。横棒（降順）へ倒す。
+_MAX_VERTICAL_BARS = 7
 
 
-#: 一覧とみなさない表。ヒートマップは格子全体を読む図で、図の直下の表は図の値の控え。
-_NON_LIST_TABLE_CLASS = "heat"
+def _validate_chart_form(html: str) -> list[str]:
+    """グラフ種別の選定規則のうち、数えれば決まるものを検査する。
 
+    種別の選定は本来データの意味に依るので全部は機械化できない。ここで見るのは
+    **データを見なくても数えるだけで違反と分かる 3 つ**に限る。この 3 つは
+    `SKILL.md` のグラフ種別の表で最も破られやすい行でもある。
 
-def _is_key_value_table(inner: str) -> bool:
-    """表が「行見出し + 値 1 列」の項目表（会社概要など）かを返す。
-
-    項目表は絞り込む対象の集合ではないので、一覧とみなさない。
-
-    Args:
-        inner: ``<table>`` の中身
-
-    Returns:
-        本体の全行が値のセルを 1 つ以下しか持たなければ True
-    """
-    rows = re.findall(r"<tr\b[^>]*>(.*?)</tr>", inner.split("<tbody", 1)[-1], re.DOTALL)
-    return bool(rows) and all(len(re.findall(r"<td\b", row)) <= 1 for row in rows)
-
-
-def _validate_lists(html: str, tags: list[tuple[str, dict[str, str]]]) -> list[str]:
-    """一覧の表が検索・絞り込みを持ち、検索欄を手書きしていないことを検査する。
-
-    検索欄と絞り込みは app.js が ``table[data-list]`` から生成する。手書きの検索欄は
-    結線されず、押しても何も起きない部品になるので置かせない。
-
-    Args:
-        html: 検査対象の HTML 文字列
-        tags: 開始タグと属性の一覧
-
-    Returns:
-        違反メッセージの一覧
-    """
-    violations: list[str] = []
-    if any(
-        (tag == "input" and attrs.get("type") == "search") or attrs.get("role") == "search" for tag, attrs in tags
-    ):
-        violations.append("検索欄を手書きしている（一覧の検索は table[data-list] から app.js が生成する）")
-    figure_data = [m.span() for m in re.finditer(r"<details\b[^>]*chart-data[^>]*>.*?</details>", html, re.DOTALL)]
-    for match in re.finditer(r"<table\b([^>]*)>(.*?)</table>", html, re.DOTALL):
-        attrs = match.group(1)
-        if any(start <= match.start() < end for start, end in figure_data):
-            continue
-        if _NON_LIST_TABLE_CLASS in _class_names(attrs):
-            continue
-        if _is_key_value_table(match.group(2)):
-            continue
-        if "data-list" not in attrs:
-            violations.append("表に data-list が無い（一覧には検索と主要項目の絞り込みを付ける）")
-        elif "<thead" not in match.group(2) or "<tbody" not in match.group(2):
-            violations.append("table[data-list] に <thead> と <tbody> が要る（絞り込みの列を読み取れない）")
-    return violations
-
-
-def _validate_chart_scroll_wrapper(html: str) -> list[str]:
-    """最小幅を持つチャートが横スクロール用の器に入っていることを検査する。
-
-    `.chart` は `min-inline-size` で潰れを防いでいる。この下限がカード幅を超えた
-    とき、器が無いと SVG がページごと横へはみ出す。器があれば、はみ出しはカードの
-    中の横スクロールに閉じる。
+    意味に依る行（時系列を折れ線にするか縦棒にするか等）は散文の側が持つ。
+    ここで無理に推測すると、正しいチャートを誤って落とす。
 
     Args:
         html: 検査対象の HTML 文字列
@@ -1031,11 +1208,47 @@ def _validate_chart_scroll_wrapper(html: str) -> list[str]:
     Returns:
         違反メッセージの一覧
     """
-    return [
-        f'<svg class="{match.group(2)}"> が .chart-scroll の中に無い（最小幅がカードを超えるとページごと横へはみ出す）'
-        for match in re.finditer(r'(.{0,80})<svg class="(chart[^"]*)"', html, re.DOTALL)
-        if "chart--donut" not in match.group(2) and "chart-scroll" not in match.group(1)
-    ]
+    return _each_svg(html, _chart_form_violations)
+
+
+def _chart_form_violations(index: int, svg: str) -> list[str]:
+    """SVG 1 枚のドーナツの分類数と棒の本数を検査する。"""
+    violations: list[str] = []
+    arcs = svg.count('class="arc')
+    if arcs > _MAX_DONUT_SEGMENTS:
+        violations.append(
+            f"{index} 枚目のドーナツが {arcs} 分類"
+            f"（{_MAX_DONUT_SEGMENTS} 以下。超えるなら 100% 積み上げ横棒にする）"
+        )
+    bars = re.findall(r'<rect class="bar[^>]*>', svg)
+    if len(bars) == 1:
+        violations.append(f"{index} 枚目が棒 1 本のグラフ（値が 1 つなら指標カードにする）")
+    vertical = [bar for bar in bars if _is_vertical_bar(bar)]
+    if len(vertical) > _MAX_VERTICAL_BARS:
+        violations.append(
+            f"{index} 枚目の縦棒が {len(vertical)} 分類"
+            f"（{_MAX_VERTICAL_BARS} 以下。超えるならラベルが読める横棒にする）"
+        )
+    return violations
+
+
+def _is_vertical_bar(rect: str) -> bool:
+    """``<rect class="bar">`` が縦棒かを返す。
+
+    向きは class 名ではなく寸法で判定する。縦棒は高さが幅より大きく、横棒は
+    その逆になる。class 名で判定すると、命名を変えただけで検査が素通りする。
+
+    Args:
+        rect: ``<rect class="bar" ...>`` 1 個分の文字列
+
+    Returns:
+        高さが幅より大きければ True。どちらかが読めなければ False
+    """
+    width = re.search(r'\bwidth="([\d.]+)"', rect)
+    height = re.search(r'\bheight="([\d.]+)"', rect)
+    if not width or not height:
+        return False
+    return float(height.group(1)) > float(width.group(1))
 
 
 #: 目盛りの刻みとして許す仮数。1・2・5 に 10 の冪を掛けた値だけが「読める」刻みで、
@@ -1078,128 +1291,42 @@ def _validate_tick_steps(html: str) -> list[str]:
     Returns:
         違反メッセージの一覧
     """
-    violations: list[str] = []
-    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        axes: dict[str, list[float]] = {}
-        for attrs, label in re.findall(r'<text class="axis-text"([^>]*)>([^<]+)</text>', svg):
-            if re.fullmatch(r"[\d,]+", label):
-                anchor = re.search(r'text-anchor="([a-z]+)"', attrs)
-                axes.setdefault(anchor.group(1) if anchor else "start", []).append(float(label.replace(",", "")))
-        for values in axes.values():
-            if len(values) < 2:
-                continue
-            steps = {round(upper - lower, 6) for lower, upper in itertools.pairwise(sorted(values))}
-            if len(steps) > 1:
-                violations.append(f"{index} 枚目の目盛りが等間隔でない（刻み {sorted(steps)}）")
-                continue
-            step = steps.pop()
-            if not _is_nice_step(step):
-                violations.append(
-                    f"{index} 枚目の目盛りの刻みが {step:g}"
-                    "（1・2・5 の倍数にする。最大値を本数で割った端数は読み手が使えない）"
-                )
-    return violations
+    return _each_svg(html, _tick_step_violations)
 
 
-def _validate_chart_form(html: str) -> list[str]:
-    """グラフ種別の選定規則のうち、数えれば決まるものを検査する。
-
-    種別の選定は本来データの意味に依るので全部は機械化できない。ここで見るのは
-    **データを見なくても数えるだけで違反と分かる 3 つ**に限る。この 3 つは
-    `SKILL.md` のグラフ種別の表で最も破られやすい行でもある。
-
-    意味に依る行（時系列を折れ線にするか縦棒にするか等）は散文の側が持つ。
-    ここで無理に推測すると、正しいチャートを誤って落とす。
-
-    Args:
-        html: 検査対象の HTML 文字列
-
-    Returns:
-        違反メッセージの一覧
-    """
-    violations: list[str] = []
-    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        arcs = svg.count('class="arc')
-        if arcs > _MAX_DONUT_SEGMENTS:
-            violations.append(
-                f"{index} 枚目のドーナツが {arcs} 分類"
-                f"（{_MAX_DONUT_SEGMENTS} 以下。超えるなら 100% 積み上げ横棒にする）"
-            )
-        bars = re.findall(r'<rect class="bar[^>]*>', svg)
-        if len(bars) == 1:
-            violations.append(f"{index} 枚目が棒 1 本のグラフ（値が 1 つなら指標カードにする）")
-        vertical = [bar for bar in bars if _is_vertical_bar(bar)]
-        if len(vertical) > _MAX_VERTICAL_BARS:
-            violations.append(
-                f"{index} 枚目の縦棒が {len(vertical)} 分類"
-                f"（{_MAX_VERTICAL_BARS} 以下。超えるならラベルが読める横棒にする）"
-            )
-    return violations
-
-
-def _is_vertical_bar(rect: str) -> bool:
-    """``<rect class="bar">`` が縦棒かを返す。
-
-    向きは class 名ではなく寸法で判定する。縦棒は高さが幅より大きく、横棒は
-    その逆になる。class 名で判定すると、命名を変えただけで検査が素通りする。
-
-    Args:
-        rect: ``<rect class="bar" ...>`` 1 個分の文字列
-
-    Returns:
-        高さが幅より大きければ True。どちらかが読めなければ False
-    """
-    width = re.search(r'\bwidth="([\d.]+)"', rect)
-    height = re.search(r'\bheight="([\d.]+)"', rect)
-    if not width or not height:
-        return False
-    return float(height.group(1)) > float(width.group(1))
-
-
-def _validate_stretched_svg_text(html: str) -> list[str]:
-    """潰し描画の SVG に文字を置いていないことを検査する。
-
-    ``preserveAspectRatio="none"`` は viewBox を縦横独立に引き伸ばすため、
-    中の ``<text>`` も一緒に歪む（MDN: 縦横比を保たない指定は文字を引き伸ばす）。
-    スパークラインのように文字を持たない図でだけ使ってよい指定であり、軸ラベルを
-    持つチャートに使うと目盛りが読めない形に潰れる。
-
-    Args:
-        html: 検査対象の HTML 文字列
-
-    Returns:
-        違反メッセージの一覧
-    """
+def _tick_step_violations(index: int, svg: str) -> list[str]:
+    """SVG 1 枚の値の目盛りを軸ごとに検査する。"""
     return [
-        f"{index} 枚目の SVG が preserveAspectRatio=\"none\" のまま <text> を持つ（縦横独立に伸びるため文字が歪む）"
-        for index, svg in enumerate(_iter_svg_blocks(html), start=1)
-        if 'preserveAspectRatio="none"' in svg and "<text" in svg
+        violation
+        for values in _numeric_ticks_by_anchor(svg).values()
+        for violation in _axis_step_violations(index, values)
     ]
 
 
-def _validate_dashboard(html: str, tags: list[tuple[str, dict[str, str]]]) -> list[str]:
-    """ダッシュボードのデータ表現契約を検査する。"""
-    violations: list[str] = []
-    if not any("metric" in attrs.get("class", "").split() or attrs.get("data-metric") == "true" for _, attrs in tags):
-        violations.append("主要指標（.metric または data-metric）が無い")
-    svgs = [attrs for tag, attrs in tags if tag == "svg"]
-    if not svgs:
-        violations.append("チャート SVG が無い")
-    elif not any(attrs.get("role") == "img" for attrs in svgs):
-        violations.append("svg[role=img] が無い（代替テキスト契約）")
-    if "<desc" not in html:
-        violations.append("SVG に <desc> が無い（図の要点を文字でも出す）")
-    if 'data-origin="0"' not in html and "data-origin='0'" not in html:
-        violations.append("棒グラフの原点 0（data-origin=0）が無い")
-    if "<table" not in html:
-        violations.append("表が無い（図を読めない利用者への同等手段）")
-    violations.extend(_validate_chart_axes(html))
-    violations.extend(_validate_stretched_svg_text(html))
-    violations.extend(_validate_chart_text(html))
-    violations.extend(_validate_chart_form(html))
-    violations.extend(_validate_tick_steps(html))
-    violations.extend(_validate_time_point_hits(html))
-    return violations
+def _numeric_ticks_by_anchor(svg: str) -> dict[str, list[float]]:
+    """数字だけの目盛りラベルを、揃えの値（省略時は start）ごとに集める。"""
+    axes: dict[str, list[float]] = {}
+    for attrs, label in re.findall(r'<text class="axis-text"([^>]*)>([^<]+)</text>', svg):
+        if re.fullmatch(r"[\d,]+", label):
+            anchor = re.search(r'text-anchor="([a-z]+)"', attrs)
+            axes.setdefault(anchor.group(1) if anchor else "start", []).append(float(label.replace(",", "")))
+    return axes
+
+
+def _axis_step_violations(index: int, values: list[float]) -> list[str]:
+    """軸 1 本の目盛りが等間隔で、1・2・5 の刻みかを検査する。2 本未満なら刻みが無いので対象外。"""
+    if len(values) < 2:
+        return []
+    steps = {round(upper - lower, 6) for lower, upper in itertools.pairwise(sorted(values))}
+    if len(steps) > 1:
+        return [f"{index} 枚目の目盛りが等間隔でない（刻み {sorted(steps)}）"]
+    step = steps.pop()
+    if _is_nice_step(step):
+        return []
+    return [
+        f"{index} 枚目の目盛りの刻みが {step:g}"
+        "（1・2・5 の倍数にする。最大値を本数で割った端数は読み手が使えない）"
+    ]
 
 
 #: 折れ線の d のコマンドと、その後に続く引数。Z（閉じ）は時点を置かないので拾わない。
@@ -1277,131 +1404,198 @@ def _validate_time_point_hits(html: str) -> list[str]:
     Returns:
         違反メッセージの一覧
     """
-    violations: list[str] = []
-    for index, svg in enumerate(_iter_svg_blocks(html), start=1):
-        if 'preserveAspectRatio="none"' in svg or _SCATTER_ROOT_RE.match(svg):
-            continue
-        counts = _series_line_points(svg)
-        if not counts:
-            continue
-        points = max(counts)
-        hits = len(re.findall(r'class="hover-hit\b', svg))
-        if hits < points:
-            violations.append(
-                f"{index} 枚目の時系列の当たり判定（.hover-hit）が {hits} 個で、線の時点 {points} 個に届かない"
-                "（点を間引くと値に届かない時点が残る。全時点に .hover-col を置く）"
-            )
-    return violations
+    return _each_svg(html, _time_point_hit_violations)
 
 
-def _script_runs_before_body(tags: list[tuple[str, dict[str, str]]]) -> bool:
-    """app.js が body より前（head 内）で読み込まれているかを返す。"""
-    # body と app.js の script のうち、先に現れたほうで決まる
-    first = next(
-        (tag for tag, attrs in tags if tag == "body" or (tag == "script" and "app.js" in attrs.get("src", ""))), None
-    )
-    return first == "script"
+def _time_point_hit_violations(index: int, svg: str) -> list[str]:
+    """SVG 1 枚の当たり判定が、時点の最も多い系列に届くかを検査する。"""
+    if _is_stretched_svg(svg) or _SCATTER_ROOT_RE.match(svg):
+        return []
+    counts = _series_line_points(svg)
+    if not counts:
+        return []
+    points = max(counts)
+    hits = len(re.findall(r'class="hover-hit\b', svg))
+    if hits >= points:
+        return []
+    return [
+        f"{index} 枚目の時系列の当たり判定（.hover-hit）が {hits} 個で、線の時点 {points} 個に届かない"
+        "（点を間引くと値に届かない時点が残る。全時点に .hover-col を置く）"
+    ]
 
 
-#: CSP で値を固定する指令。スクリプトは app.js だけ、プラグインと <base> の差し替えは禁じる。
-_CSP_REQUIRED_SOURCES = {"script-src": {"'self'"}, "object-src": {"'none'"}, "base-uri": {"'none'"}}
+def _validate_chart_scroll_wrapper(html: str) -> list[str]:
+    """最小幅を持つチャートが横スクロール用の器に入っていることを検査する。
 
-
-def _weak_csp_directives(tags: list[tuple[str, dict[str, str]]]) -> list[str]:
-    """CSP の中身が弱められていないか（必須の指令の値と、外部オリジンの有無）を検査する。
+    `.chart` は `min-inline-size` で潰れを防いでいる。この下限がカード幅を超えた
+    とき、器が無いと SVG がページごと横へはみ出す。器があれば、はみ出しはカードの
+    中の横スクロールに閉じる。
 
     Args:
-        tags: ``(タグ名, 属性)`` の開始タグ列
+        html: 検査対象の HTML 文字列
 
     Returns:
-        違反メッセージの一覧（CSP の meta が無いときは空。欠落は別の検査が報告する）
+        違反メッセージの一覧
     """
-    content = next(
-        (
-            attrs.get("content", "")
-            for tag, attrs in tags
-            if tag == "meta" and attrs.get("http-equiv", "").lower() == "content-security-policy"
-        ),
-        None,
+    return [
+        f'<svg class="{match.group(2)}"> が .chart-scroll の中に無い（最小幅がカードを超えるとページごと横へはみ出す）'
+        for match in re.finditer(r'(.{0,80})<svg class="(chart[^"]*)"', html, re.DOTALL)
+        if "chart--donut" not in match.group(2) and "chart-scroll" not in match.group(1)
+    ]
+
+
+#: SVG 内の目盛り文字が画面上で満たすべき最小サイズ（px）。手書き CSS の
+#: `font-size` には 12px 未満を禁じる検査が既にあるが、SVG の文字は viewBox の
+#: 倍率で一緒に縮むため、宣言が 12px でも描画は 12px を割りうる。
+_MIN_RENDERED_AXIS_PX = 12.0
+#: 同じく、最小幅で描かれたときの上限（px）。viewBox を狭く書くと、宣言が 15px でも
+#: 描画は本文やカード見出しより大きくなる（広い画面では app.js が 13px で頭打ちにするが、
+#: JS 無効・印刷では上限が効かない）。
+_MAX_RENDERED_AXIS_PX = 18.0
+
+
+def _css_length(css: str, selector: str, prop: str) -> float | None:
+    """セレクタ 1 個の宣言から px 長さを取り出す。見つからなければ None。"""
+    block = re.search(rf"(?<![-\w]){re.escape(selector)}\s*\{{(.*?)\}}", css, re.DOTALL)
+    if not block:
+        return None
+    found = re.search(rf"{prop}:\s*([\d.]+)px", block.group(1))
+    return float(found.group(1)) if found else None
+
+
+def _validate_axis_text_scale(html: str, css: str) -> list[str]:
+    """目盛り文字が**描画されたとき**に 12px を割らず、18px を超えないことを検査する。
+
+    SVG の文字は viewBox 座標で書かれるので、SVG が幅 W で描かれるとき実効
+    サイズは `宣言サイズ × W / viewBox幅` になる。W の下限は CSS の
+    `min-inline-size` で静的に決まるため、最悪ケースをここで計算できる。
+    CSS の宣言だけを見る `_validate_font_size_floor` では、この縮みを捉えられない。
+
+    Args:
+        html: 検査対象の HTML 文字列
+        css: 手書き CSS の文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    declared = _css_length(css, ".axis-text", "font-size")
+    if declared is None:
+        return [".axis-text の font-size が読み取れない（目盛り文字の実効サイズを保証できない）"]
+    return _each_svg(html, lambda index, svg: _axis_text_scale_violations(index, svg, css, declared))
+
+
+def _min_render_width(css: str, class_value: str) -> float | None:
+    """SVG の最小描画幅（px）を返す。``chart--*`` の宣言があれば ``.chart`` より優先する。
+
+    Args:
+        css: 手書き CSS の文字列
+        class_value: SVG の class 属性の値
+
+    Returns:
+        ``min-inline-size`` の px 値。どこにも宣言が無ければ None
+    """
+    modifiers = [f".{name}" for name in class_value.split() if name.startswith("chart--")]
+    return next(
+        (value for value in (_css_length(css, name, "min-inline-size") for name in modifiers) if value),
+        _css_length(css, ".chart", "min-inline-size"),
     )
-    if content is None:
+
+
+def _axis_text_scale_violations(index: int, svg: str, css: str, declared: float) -> list[str]:
+    """SVG 1 枚の目盛り文字の実効サイズを検査する。倍率を計算できない図は対象外。"""
+    if "axis-text" not in svg:
         return []
-    directives = {}
-    for part in content.split(";"):
-        words = part.split()
-        if words:
-            directives[words[0].lower()] = set(words[1:])
-    violations = [
-        f"Content-Security-Policy の {name} が {' '.join(sorted(expected))} 以外を許している（値をそれだけにする）"
-        for name, expected in _CSP_REQUIRED_SOURCES.items()
-        if directives.get(name) != expected
-    ]
-    # 外部オリジンを許すと、閲覧者の IP と閲覧ページが第三者へ送られ、file:// やオフラインでも崩れる
-    if any(source == "*" or ":" in source.strip("'") for sources in directives.values() for source in sources if source != "data:"):
-        violations.append(
-            "Content-Security-Policy が外部のオリジンを許している（フォント・画像・スクリプトは同梱して 'self' から読む）"
-        )
-    return violations
+    box = re.search(r'viewBox="0 0 ([\d.]+) [\d.]+"', svg)
+    classes = re.search(r'class="([^"]*)"', svg)
+    if not box or not classes:
+        return []
+    floor = _min_render_width(css, classes.group(1))
+    if not floor:
+        return []
+    view_width = box.group(1)
+    rendered = declared * floor / float(view_width)
+    if rendered < _MIN_RENDERED_AXIS_PX:
+        return [
+            f"{index} 枚目の目盛り文字が最小幅で {rendered:.1f}px に縮む"
+            f"（{_MIN_RENDERED_AXIS_PX:.0f}px 以上。viewBox 幅 {view_width} に対し"
+            f"最小描画幅 {floor:.0f}px。font-size を上げるか viewBox を狭める）"
+        ]
+    if rendered > _MAX_RENDERED_AXIS_PX:
+        return [
+            f"{index} 枚目の目盛り文字が最小幅で {rendered:.1f}px に伸びる"
+            f"（{_MAX_RENDERED_AXIS_PX:.0f}px 以下。viewBox 幅 {view_width} に対し"
+            f"最小描画幅 {floor:.0f}px。viewBox を広げて座標を取り直す）"
+        ]
+    return []
 
 
-def _csp_meta_in_head(tags: list[tuple[str, dict[str, str]]]) -> bool:
-    """Content-Security-Policy の meta が body より前（head 内）にあるかを返す。"""
-    # body と CSP の meta のうち、先に現れたほうで決まる
-    first = next(
-        (
-            tag
-            for tag, attrs in tags
-            if tag == "body" or (tag == "meta" and attrs.get("http-equiv", "").lower() == "content-security-policy")
-        ),
-        None,
-    )
-    return first == "meta"
+# --- 検査: 手書きの CSS ------------------------------------------------------
 
 
-def _validate_generated_css(css: str, tokens: dict[str, Any]) -> list[str]:
-    """tokens.css が tokens.json からの生成結果と一致するかを検査する。"""
-    violations: list[str] = []
-    if css != render_tokens_css(tokens):
-        violations.append("tokens.css が tokens.json からの生成結果と一致しない（--write-css で再生成する）")
-    return violations + [
-        violation
-        for base_id in base_ids(tokens)
-        for theme in THEMES
-        for violation in contrast_violations(tokens, base_id, theme)
-    ]
+#: 手書き CSS に現れなければならない語と、無いときの違反メッセージ。
+_REQUIRED_CSS_FEATURES = (
+    ("minmax(", "styles.css に伸縮するグリッド（minmax）が無い"),
+    ("clamp(", "styles.css に流体タイポ（clamp）が無い"),
+    (":focus-visible", "styles.css に :focus-visible のリングが無い（キーボード操作が見えない）"),
+)
+#: ``max-width`` の値がこれ未満だと、広い画面を使い切れない上限とみなす。
+_WIDE_SCREEN_PX = 1600
 
 
 def _validate_styles(css: str) -> list[str]:
     """手書き CSS のレスポンシブ・モーション・トークン利用契約を検査する。"""
-    violations = [f"styles.css が {name} を使っていない" for name in REQUIRED_STYLE_VARS if f"var({name}" not in css]
-    violations += [
-        f"styles.css に {width}px のブレークポイントが無い" for width in REQUIRED_BREAKPOINTS if f"{width}px" not in css
+    return [
+        *_validate_required_css(css),
+        *_validate_text_color_mix(css),
+        *_validate_font_size_floor(css),
+        *_validate_looping_animation(css),
+        *_validate_reduced_motion(css),
+        *_validate_resting_state(css),
+        *_validate_fluid_width(css),
+        *_validate_fluid_height(css),
+        *_validate_chart_chrome(css),
     ]
-    violations += [
-        message
-        for needle, message in (
-            ("minmax(", "styles.css に伸縮するグリッド（minmax）が無い"),
-            ("clamp(", "styles.css に流体タイポ（clamp）が無い"),
-            (":focus-visible", "styles.css に :focus-visible のリングが無い（キーボード操作が見えない）"),
-        )
-        if needle not in css
+
+
+def _validate_required_css(css: str) -> list[str]:
+    """役割変数・ブレークポイント・必須の機能が手書き CSS に揃っていることを検査する。"""
+    return [
+        *(f"styles.css が {name} を使っていない" for name in REQUIRED_STYLE_VARS if f"var({name}" not in css),
+        *(f"styles.css に {width}px のブレークポイントが無い" for width in REQUIRED_BREAKPOINTS if f"{width}px" not in css),
+        *(message for needle, message in _REQUIRED_CSS_FEATURES if needle not in css),
     ]
-    # 文字色を透明との混合で作ると、ライトでは背景へ寄って可読性契約を割る。
-    # 面や枠の混合は問題ないので、`color:` だけを見る。
-    violations += [
+
+
+def _validate_text_color_mix(css: str) -> list[str]:
+    """文字色を透明との ``color-mix`` で作っていないことを検査する。
+
+    文字色を透明との混合で作ると、ライトでは背景へ寄って可読性契約を割る。
+    面や枠の混合は問題ないので、``color:`` だけを見る。
+
+    Args:
+        css: 検査対象の CSS 文字列
+
+    Returns:
+        違反メッセージの一覧
+    """
+    return [
         f"文字色を透明との color-mix で作っている: `{match.group(0)[:52]}...`（役割変数を直接使う）"
         for match in re.finditer(r"(?<![-\w])color:\s*color-mix\([^;}]*\btransparent\b", css)
     ]
+
+
+def _validate_font_size_floor(css: str) -> list[str]:
+    """12px 未満の ``font-size`` が無いことを検査する。"""
     if re.search(r"font-size:\s*(?:[0-9]|1[0-1])px", css):
-        violations.append("12px 未満の font-size がある")
+        return ["12px 未満の font-size がある"]
+    return []
+
+
+def _validate_looping_animation(css: str) -> list[str]:
+    """手書き CSS に止まらない動きが無いことを検査する。"""
     if _has_looping_animation(css):
-        violations.append("styles.css に止まらない動き（infinite）がある（回数を有限にするか、動きを外す）")
-    violations.extend(_validate_reduced_motion(css))
-    violations.extend(_validate_resting_state(css))
-    violations.extend(_validate_fluid_width(css))
-    violations.extend(_validate_fluid_height(css))
-    violations.extend(_validate_chart_chrome(css))
-    return violations
+        return ["styles.css に止まらない動き（infinite）がある（回数を有限にするか、動きを外す）"]
+    return []
 
 
 def _validate_reduced_motion(css: str) -> list[str]:
@@ -1453,7 +1647,7 @@ def _validate_fluid_width(css: str) -> list[str]:
     ] + [
         f"max-width {match.group(1)}px が広い画面を捨てている"
         for match in re.finditer(r"(?<![(\w])max-width:\s*(\d{3,})px", css)
-        if int(match.group(1)) < 1600
+        if int(match.group(1)) < _WIDE_SCREEN_PX
     ]
 
 
@@ -1506,21 +1700,40 @@ def _validate_chart_chrome(css: str) -> list[str]:
     return violations
 
 
+# --- 検査: 生成物・スクリプト・手書きの色 ------------------------------------
+
+
+def _validate_generated_css(css: str, tokens: dict[str, Any]) -> list[str]:
+    """tokens.css が tokens.json からの生成結果と一致するかを検査する。"""
+    violations: list[str] = []
+    if css != render_tokens_css(tokens):
+        violations.append("tokens.css が tokens.json からの生成結果と一致しない（--write-css で再生成する）")
+    for base_id, theme in itertools.product(base_ids(tokens), THEMES):
+        violations.extend(contrast_violations(tokens, base_id, theme))
+    return violations
+
+
+#: app.js が扱うべき事柄。(表示名, いずれか 1 つ現れればよい語) の並び。
+_REQUIRED_JS_TERMS = (
+    ("data-theme", ("dataset.theme", "data-theme")),
+    ("localStorage", ("localStorage",)),
+    ("aria-pressed", ("aria-pressed",)),
+    ("data-base", ("dataset.base", "data-base")),
+    ("prefers-reduced-motion", ("prefers-reduced-motion",)),
+    ("DOM 構築前の実行順", ("defer", "DOMContentLoaded")),
+    ("一覧の検索・絞り込み", ("data-list",)),
+)
+
+
 def _validate_js(script: str) -> list[str]:
     """アプリスクリプトの契約を検査する。"""
     if not script.strip():
         return ["app.js が空"]
-    #: (表示名, いずれか 1 つ現れればよい語) の並び。
-    any_of = (
-        ("data-theme", ("dataset.theme", "data-theme")),
-        ("localStorage", ("localStorage",)),
-        ("aria-pressed", ("aria-pressed",)),
-        ("data-base", ("dataset.base", "data-base")),
-        ("prefers-reduced-motion", ("prefers-reduced-motion",)),
-        ("DOM 構築前の実行順", ("defer", "DOMContentLoaded")),
-        ("一覧の検索・絞り込み", ("data-list",)),
-    )
-    violations = [f"app.js が {label} を扱っていない" for label, needles in any_of if not any(n in script for n in needles)]
+    violations = [
+        f"app.js が {label} を扱っていない"
+        for label, terms in _REQUIRED_JS_TERMS
+        if not any(term in script for term in terms)
+    ]
     if "light" not in script or "dark" not in script:
         violations.append("app.js が light/dark を扱っていない")
     return violations
@@ -1566,8 +1779,8 @@ def main(argv: list[str] | None = None) -> int:
     if not violations:
         print("PASS")
         return 0
-    for item in violations:
-        print(f"FAIL: {item}")
+    for violation in violations:
+        print(f"FAIL: {violation}")
     print(f"{len(violations)} violation(s)")
     return 1
 
