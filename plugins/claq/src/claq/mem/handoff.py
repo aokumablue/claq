@@ -33,7 +33,7 @@ from claq.lib.harness import (
 )
 from claq.lib.slim_text import compact_line
 from claq.mem.logger import get as _get_logger
-from claq.mem.redaction import redact
+from claq.mem.redaction import PLACEHOLDER, redact
 from claq.mem.settings import CONTEXT_HANDOFF_CHAR_BUDGET
 from claq.mem.tag_stripping import keep_allowed_chars, strip_tags
 
@@ -76,9 +76,6 @@ _USER_MESSAGE_COUNT = 3
 
 _USER_MESSAGE_CHAR_LIMIT = 200
 """ユーザー依頼 1 件を圧縮する上限文字数。"""
-
-_REDACTION_MARKER = "[REDACTED]"
-"""``redact`` が挿入するマスク文字列。``strip_tags`` の fail closed 判定にも使う。"""
 
 _TRUNCATION_MARKER = "..."
 """``compact_line`` が上限で切ったときに付ける末尾。重複畳み込みの除外判定に使う。"""
@@ -162,7 +159,7 @@ def _sanitize_freeform(text: str) -> str:
         見つかった場合は空文字列。
     """
     stripped = _neutralize(text)
-    if stripped == _REDACTION_MARKER:
+    if stripped == PLACEHOLDER:
         log.warning("タグで分断されたシークレットを検出しました: 引き継ぎ本文を破棄します")
         return ""
     return redact(stripped)

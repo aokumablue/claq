@@ -89,7 +89,7 @@ import unicodedata
 
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, TAG_NAME_END, tag_block_pattern
 from claq.lib.slim_text import remove_filler_phrases
-from claq.mem.redaction import redact
+from claq.mem.redaction import PLACEHOLDER, redact
 
 # 無害化対象タグ（大文字小文字区別なし）。正規表現へ literal として埋めるため、
 # 正規表現メタ文字を含まない名前だけを置く。
@@ -177,12 +177,6 @@ _NEUTRALIZED_LT = "&lt;"
 
 # `&` の置換先。実体参照の先頭としての機能だけを奪う。
 _NEUTRALIZED_AMP = "&amp;"
-
-# 検査が細工を検出したときに返す本文。`redaction._PLACEHOLDER` と同じ文字列だが、
-# 依存の向きを増やさないためここで持つ（`mem/handoff.py` も同じ理由で自前に持つ）。
-# 空文字列にはしない — 呼び出し側の `redact` を通しても `[REDACTED]` が残ることが、
-# 「秘密が入っていたが倒した」という事実を下流へ伝える唯一の手段になる。
-_REDACTION_MARKER = "[REDACTED]"
 
 # 3 行以上の空行を 2 行へ詰めるパターン。
 _BLANK_LINES = re.compile(r"\n{3,}")
@@ -608,7 +602,9 @@ def strip_tags(text: str) -> str:
     dropped = drop_known_tag_blocks(text)
     neutralized = _collapse_blank_lines(_neutralize(dropped))
     if _hides_secret_behind_tags(neutralized):
-        return _REDACTION_MARKER
+        # 空文字列にはしない — 呼び出し側の `redact` を通しても `[REDACTED]` が残ることが、
+        # 「秘密が入っていたが倒した」という事実を下流へ伝える唯一の手段になる。
+        return PLACEHOLDER
     if _forges_tag_after_deletion(neutralized):
         return _collapse_blank_lines(_escape_every_bracket(dropped))
     return neutralized

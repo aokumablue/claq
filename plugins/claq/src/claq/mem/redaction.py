@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import re
 
-_PLACEHOLDER = "[REDACTED]"
+PLACEHOLDER = "[REDACTED]"
+"""マスク箇所へ挿入する文字列。``tag_stripping`` と ``handoff`` も細工検出時の本文・判定に使う。"""
 
 # (name, pattern) の順序付きリスト。上から順にマッチを置換する。
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -125,7 +126,7 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 def _apply(patterns: list[tuple[str, re.Pattern[str]]], text: str) -> str:
     """*patterns* を上から順に適用し、一致を [REDACTED] に置換して返す。"""
     for _, pattern in patterns:
-        text = pattern.sub(_PLACEHOLDER, text)
+        text = pattern.sub(PLACEHOLDER, text)
     return text
 
 
