@@ -92,6 +92,60 @@ def extract_shell_wrapper_command(segment: list[str]) -> str | None:
     return None
 
 
+class _QuoteState:
+    """シェルのクォートと ``\\`` エスケープの状態を 1 文字ずつ進める。
+
+    コメント除去・行継続の連結・改行の置換・heredoc 演算子の検出は、どれも同じ規則で
+    「クォート内か」を決める。規則が走査ごとにずれると、片方の走査だけがクォートを読み違えて
+    保護フックの判定が割れるため、遷移をここ 1 か所に持つ。
+
+    Attributes:
+        quote: 未閉鎖のクォート文字。クォート外なら None。
+        escaped: 直前の文字が ``\\`` エスケープで、次の文字がその対象になるなら True。
+    """
+
+    __slots__ = ("escaped", "quote")
+
+    def __init__(self, quote: str | None = None) -> None:
+        """状態を作る。
+
+        Args:
+            quote: 開始時点の未閉鎖クォート文字。無ければ None。
+        """
+        self.quote = quote
+        self.escaped = False
+
+    def advance(self, char: str) -> bool:
+        """1 文字読んで状態を進め、その文字がシェルの構文として働くかを返す。
+
+        単一クォート内の ``\\`` はエスケープにならない。
+
+        Args:
+            char: 次の 1 文字。
+
+        Returns:
+            クォート外の、エスケープされていない文字なら True。``\\`` とクォート文字自体は
+            状態を変えるだけなので False。
+
+        Raises:
+            例外は発生しません。
+        """
+        if self.escaped:
+            self.escaped = False
+            return False
+        if char == "\\" and self.quote != "'":
+            self.escaped = True
+            return False
+        if self.quote is not None:
+            if char == self.quote:
+                self.quote = None
+            return False
+        if char in ("'", '"'):
+            self.quote = char
+            return False
+        return True
+
+
 def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], str | None]:
     """heredoc 演算子になりうる ``<`` の位置と、行末のクォート状態を返す。
 
@@ -118,36 +172,16 @@ def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], st
         例外は発生しません。
     """
     offsets: list[int] = []
-    escaped = False
-    in_comment = False
+    state = _QuoteState(quote)
     previous = "\n"
     for index, char in enumerate(line):
-        if in_comment:
-            continue
-        if escaped:
-            escaped = False
-            previous = char
-            continue
-        if char == "\\" and quote != "'":
-            escaped = True
-            previous = char
-            continue
-        if quote is not None:
-            if char == quote:
-                quote = None
-            previous = char
-            continue
-        if char in ("'", '"'):
-            quote = char
-            previous = char
-            continue
-        if char == "#" and previous in _COMMENT_PRECEDING_CHARS:
-            in_comment = True
-            continue
-        if char == "<":
-            offsets.append(index)
+        if state.advance(char):
+            if char == "#" and previous in _COMMENT_PRECEDING_CHARS:
+                break
+            if char == "<":
+                offsets.append(index)
         previous = char
-    return offsets, quote
+    return offsets, state.quote
 
 
 def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, bool]], str | None]:
@@ -315,40 +349,16 @@ def _strip_line_comments(command: str) -> str:
         return command
 
     result: list[str] = []
-    quote: str | None = None
-    escaped = False
+    state = _QuoteState()
     in_comment = False
     previous = "\n"
     for char in command:
         if in_comment:
             # コメント中。区切りとして働く行末の改行だけを残す。
-            if char == "\n":
-                in_comment = False
-                result.append(char)
-                previous = char
-            continue
-        if escaped:
-            result.append(char)
-            escaped = False
-            previous = char
-            continue
-        if char == "\\" and quote != "'":
-            result.append(char)
-            escaped = True
-            previous = char
-            continue
-        if quote is not None:
-            if char == quote:
-                quote = None
-            result.append(char)
-            previous = char
-            continue
-        if char in ("'", '"'):
-            quote = char
-            result.append(char)
-            previous = char
-            continue
-        if char == "#" and previous in _COMMENT_PRECEDING_CHARS:
+            if char != "\n":
+                continue
+            in_comment = False
+        elif state.advance(char) and char == "#" and previous in _COMMENT_PRECEDING_CHARS:
             in_comment = True
             continue
         result.append(char)
@@ -381,24 +391,14 @@ def _strip_line_continuations(command: str) -> str:
         return command
 
     result: list[str] = []
-    quote: str | None = None
-    index = 0
-    length = len(command)
-    while index < length:
-        char = command[index]
-        if char == "\\" and quote != "'" and index + 1 < length:
-            following = command[index + 1]
-            if following != "\n":
-                result += (char, following)
-            index += 2
-            continue
-        if quote is not None:
-            if char == quote:
-                quote = None
-        elif char in ("'", '"'):
-            quote = char
-        result.append(char)
-        index += 1
+    state = _QuoteState()
+    for char in command:
+        if state.escaped and char == "\n":
+            # 行継続。直前に積んだ ``\\`` ごと落とす。
+            result.pop()
+        else:
+            result.append(char)
+        state.advance(char)
     return "".join(result)
 
 
@@ -421,28 +421,10 @@ def _replace_unquoted_newlines(command: str) -> str:
     if "\n" not in command:
         return command
 
+    state = _QuoteState()
     result = []
-    quote = None
-    escaped = False
     for char in command:
-        if escaped:
-            result.append(char)
-            escaped = False
-            continue
-        if char == "\\" and quote != "'":
-            result.append(char)
-            escaped = True
-            continue
-        if quote is not None:
-            if char == quote:
-                quote = None
-            result.append(char)
-            continue
-        if char in ("'", '"'):
-            quote = char
-            result.append(char)
-            continue
-        result.append(";" if char == "\n" else char)
+        result.append(";" if state.advance(char) and char == "\n" else char)
     return "".join(result)
 
 

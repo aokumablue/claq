@@ -114,8 +114,26 @@ def detached_spawn_kwargs() -> dict[str, Any]:
     }
 
 
+def _bg_log_path(day: datetime) -> Path:
+    """``day`` の日付の bg ログ（`~/.claq/logs/bg-YYYY-MM-DD.log`）の Path を返す。
+
+    書き手の `_detach_log_path` と読み手の `recent_bg_failure_notice` が同じ名前を引くための
+    単一情報源。名前がずれると、失敗の痕跡が残っていても通知されなくなる。
+
+    Args:
+        day: ログの日付。
+
+    Returns:
+        ログファイルの Path（存在は確かめない）。
+
+    Raises:
+        OSError: ホームディレクトリを決められない場合（``get_claq_dir`` 由来）。
+    """
+    return get_claq_dir() / "logs" / f"bg-{day:%Y-%m-%d}.log"
+
+
 def _detach_log_path() -> Path:
-    """detach した子プロセスの stdout/stderr を追記するログファイルのパスを返す。
+    """detach した子プロセスの stdout/stderr を追記する、当日のログファイルのパスを返す。
 
     DEVNULL に捨てると、起動受付成功と処理成功の区別が付かなくなる。日付ごとに
     1 ファイルへ追記する。
@@ -126,16 +144,17 @@ def _detach_log_path() -> Path:
     Raises:
         OSError: ログディレクトリを作れない場合（detach の起動を失敗にする）。
     """
-    log_dir = ensure_private_dir(get_claq_dir() / "logs")
-    return log_dir / f"bg-{datetime.now():%Y-%m-%d}.log"
+    log_path = _bg_log_path(datetime.now())
+    ensure_private_dir(log_path.parent)
+    return log_path
 
 
+# detach 用 stdin 一時ファイルの拡張子。
 _DETACH_STDIN_SUFFIX = ".stdin"
-"""detach 用 stdin 一時ファイルの拡張子。"""
 
+# この秒数より古い ``*.stdin`` 孤児だけを回収する（実行中の detach を奪わない）。
+# detach の実行上限は DETACH_TIMEOUT_SECONDS（600 秒）なので、1 時間は十分な余裕。
 _DETACH_STDIN_GRACE_SECONDS = 60 * 60
-"""この秒数より古い ``*.stdin`` 孤児だけを回収する（実行中の detach を奪わない）。
-detach の実行上限は DETACH_TIMEOUT_SECONDS（600 秒）なので、1 時間は十分な余裕。"""
 
 
 def gc_detach_stdin_orphans() -> None:
@@ -185,13 +204,13 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
     """
     gc_detach_stdin_orphans()
     private_dir = ensure_private_dir(get_claq_dir())
-    tmp = tempfile.NamedTemporaryFile(
+    stdin_file = tempfile.NamedTemporaryFile(
         mode="w+", encoding="utf-8", suffix=_DETACH_STDIN_SUFFIX, dir=private_dir, delete=False
     )
     try:
-        tmp.write(raw_stdin)
-        tmp.flush()
-        tmp.seek(0)
+        stdin_file.write(raw_stdin)
+        stdin_file.flush()
+        stdin_file.seek(0)
         child_env = dict(os.environ if env is None else env)
         child_env["CLAQ_BG_LOG_PATH"] = str(_detach_log_path())
         subprocess.Popen(
@@ -203,16 +222,16 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
                 str(_DETACH_KILL_AFTER_SECONDS),
                 *cmd,
             ],
-            stdin=tmp,
+            stdin=stdin_file,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=child_env,
             **detached_spawn_kwargs(),
         )
     finally:
-        tmp.close()
+        stdin_file.close()
         with contextlib.suppress(OSError):
-            os.unlink(tmp.name)
+            os.unlink(stdin_file.name)
 
 
 # 前回セッション detach 失敗通知の 1 ファイルあたり読み取り上限バイト数。
@@ -232,12 +251,12 @@ def recent_bg_failure_notice() -> str:
         失敗の痕跡があれば人間可読の 1 行。無ければ空文字列。
 
     Raises:
-        例外は発生しません。
+        OSError: ホームディレクトリを決められない場合（``get_claq_dir`` 由来）。ログの読み取り失敗は
+            そのファイルを飛ばすだけで送出しない。
     """
-    log_dir = get_claq_dir() / "logs"
     today = datetime.now()
     for offset in (0, 1):
-        path = log_dir / f"bg-{today - timedelta(days=offset):%Y-%m-%d}.log"
+        path = _bg_log_path(today - timedelta(days=offset))
         if not path.is_file():
             continue
         try:

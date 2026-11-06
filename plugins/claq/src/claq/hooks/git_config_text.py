@@ -223,6 +223,35 @@ def _parse_value(text: str, pos: int) -> tuple[str, int]:
     return "".join(value), pos
 
 
+def _parse_entry(text: str, pos: int, prefix: str) -> tuple[ConfigEntry, int]:
+    """key の先頭から 1 エントリ（key と、``=`` があれば値）を読む。
+
+    Args:
+        text: 解析対象の本文。
+        pos: key の先頭の位置。
+        prefix: 直前の見出しが決めた key の前置（`_parse_header` の戻り値）。
+
+    Returns:
+        読んだエントリと、続きを読む位置。
+
+    Raises:
+        GitConfigParseError: key の後ろに ``=`` でも行末でもない文字が続く、または値を解析できない。
+    """
+    length = len(text)
+    start = pos
+    while pos < length and _is_key_char(text[pos]):
+        pos += 1
+    key = prefix + text[start:pos].lower()
+    while pos < length and text[pos] in _BLANKS:
+        pos += 1
+    if pos < length and text[pos] == "=":
+        value, pos = _parse_value(text, pos + 1)
+        return ConfigEntry(key, value), pos
+    if pos >= length or text[pos] == "\n":
+        return ConfigEntry(key, None), pos
+    raise GitConfigParseError(f"unexpected character after key: {text[pos]!r}")
+
+
 def parse_git_config(text: str) -> list[ConfigEntry]:
     """git config の本文を (完全修飾 key, 値) の列に解析する。
 
@@ -255,19 +284,8 @@ def parse_git_config(text: str) -> list[ConfigEntry]:
         elif char.isascii() and char.isalpha():
             if prefix is None:
                 raise GitConfigParseError("key before any section header")
-            start = pos
-            while pos < length and _is_key_char(text[pos]):
-                pos += 1
-            key = prefix + text[start:pos].lower()
-            while pos < length and text[pos] in _BLANKS:
-                pos += 1
-            if pos < length and text[pos] == "=":
-                value, pos = _parse_value(text, pos + 1)
-                entries.append(ConfigEntry(key, value))
-            elif pos >= length or text[pos] == "\n":
-                entries.append(ConfigEntry(key, None))
-            else:
-                raise GitConfigParseError(f"unexpected character after key: {text[pos]!r}")
+            entry, pos = _parse_entry(text, pos, prefix)
+            entries.append(entry)
         else:
             raise GitConfigParseError(f"unrecognized line starting with {char!r}")
     return entries
@@ -346,6 +364,21 @@ def _global_git_config_candidates() -> tuple[tuple[Path, str], ...]:
     return ((home / GLOBAL_GITCONFIG_NAME, GLOBAL_GITCONFIG_DISPLAY_NAME), (xdg_path, xdg_name))
 
 
+def _comparable_parts(path: Path) -> tuple[str, ...]:
+    """path の各要素を `normalize_protected_name` で畳み、実体どうしを比べられる形にする。
+
+    Args:
+        path: 解決済みの実体 path。
+
+    Returns:
+        畳んだ要素の列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return tuple(normalize_protected_name(part) for part in path.parts)
+
+
 @memoized_in_scan
 def global_git_config_path(file_path: str) -> str | None:
     """パスがホーム側の git config（``~/.gitconfig`` / XDG）かを判定する。
@@ -366,10 +399,10 @@ def global_git_config_path(file_path: str) -> str | None:
     resolved = resolve_effective_target(file_path)
     if resolved is None:
         return None
-    target = tuple(normalize_protected_name(part) for part in resolved.parts)
+    target = _comparable_parts(resolved)
     for path, display_name in _global_git_config_candidates():
         real = resolve_effective_target(str(path))
-        if real is not None and tuple(normalize_protected_name(part) for part in real.parts) == target:
+        if real is not None and _comparable_parts(real) == target:
             return display_name
     return None
 
@@ -458,16 +491,19 @@ def git_config_text_after(tool_name: str, container: Any, before: str, max_chars
     edits = container.get("edits") if normalized == "multiedit" else [container]
     if not isinstance(edits, list) or not 0 < len(edits) <= _MAX_EDITS:
         return None
-    fragments: list[str] = []
+    if not all(isinstance(edit, dict) and isinstance(edit.get("new_string"), str) for edit in edits):
+        return None
+    if not before:
+        return "\n".join(edit["new_string"] for edit in edits)
     text: str | None = before
     for edit in edits:
-        if not isinstance(edit, dict) or not isinstance(new := edit.get("new_string"), str):
+        text = _apply_edit(
+            text,
+            edit.get("old_string"),
+            edit["new_string"],
+            replace_all=edit.get("replace_all") is True,
+            max_chars=max_chars,
+        )
+        if text is None:
             return None
-        fragments.append(new)
-        if before:
-            text = _apply_edit(
-                text or "", edit.get("old_string"), new, replace_all=edit.get("replace_all") is True, max_chars=max_chars
-            )
-            if text is None:
-                return None
-    return text if before else "\n".join(fragments)
+    return text

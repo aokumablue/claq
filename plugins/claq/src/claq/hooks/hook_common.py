@@ -1,6 +1,7 @@
 """claq フック実装の共通ユーティリティ。
 
-出力書き込み、保護対象の判定の共有関数を提供する。シェルコマンドの解析は ``shell_tokens`` が持つ。
+フック出力の書き込み、実行名・保護対象名の正規化と判定、1 回の判定の中だけのメモ化、
+リポジトリルートの解決を兄弟フックで共有する。シェルコマンドの解析は ``shell_tokens``、
 stdin の読み取りは ``stdin_io`` が持つ。
 """
 
@@ -347,6 +348,7 @@ def print_session_start_output(additional_context: str) -> None:
         additional_context: コンテキストに注入する追加文字列。
 
     Raises:
-        例外は発生しません。
+        OSError: パイプが閉じている場合（BrokenPipeError を含む）。
+        UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
     """
     print(adapt_context_output("SessionStart", additional_context))

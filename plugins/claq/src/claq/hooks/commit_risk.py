@@ -255,6 +255,7 @@ def _is_commit_all_flag(commit_args: list[str]) -> bool:
         例外は発生しません。
     """
     return any(
-        tok == "--all" or (tok.startswith("-") and not tok.startswith("--") and "=" not in tok and "a" in tok[1:])
-        for tok in commit_args
+        token == "--all"
+        or (token.startswith("-") and not token.startswith("--") and "=" not in token and "a" in token[1:])
+        for token in commit_args
     )

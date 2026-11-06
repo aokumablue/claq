@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """コミット対象ファイルの内容を取得し、品質・シークレット問題を検出します。
 
 `pre_bash_commit_quality` フックのスキャナ層です。ファイル内容の取得（INDEX /
@@ -39,7 +38,7 @@ from claq.mem.tag_stripping import keep_allowed_chars, strip_tags
 # 丸ごと押し出せる。
 _UNTRUSTED_EXCERPT_MAX_CHARS = 200
 
-_BINARY_SNIFF_SIZE = 8192  # 8KB
+_BINARY_SNIFF_SIZE = 8 * 1024
 
 # バイナリ判定された内容から抽出する印字可能文字列の最短長。`strings(1)` と
 # 同じ発想で、制御文字（NUL を含む）で区切られた連続を擬似的な行として扱う。
@@ -244,12 +243,12 @@ def _extract_printable_runs(content: str) -> list[str]:
     以上の連続を返します。真のバイナリ（画像等）は secret パターンに一致する印字可能
     文字列を通常含まないため、一律ブロックにはなりません。
 
-    Args:
-        content: バイナリ判定されたデコード済み文字列です。
-
     改行（LF / CR）は連続の途中に残るので、さらに行ごとに分ける。BOM 付き UTF-16 の
     復号本文のように複数行が 1 本の連続になると、行頭アンカーの付いたパターン
     （YAML 形の認証情報）が 2 行目以降で一致しなくなるため。
+
+    Args:
+        content: バイナリ判定されたデコード済み文字列です。
 
     Returns:
         抽出した印字可能文字列（行単位）のリストを返します。
@@ -474,6 +473,24 @@ def sanitize_untrusted_path(path: str) -> str:
     return _fold_line_breaks(strip_tags(keep_allowed_chars(path)))
 
 
+def _issue(kind: str, message: str, *, line: int, severity: str) -> dict:
+    """検出結果 1 件を表す辞書を作る。
+
+    Args:
+        kind: 問題種別です。
+        message: 問題の説明です。
+        line: 行番号です。行に対応しない問題は 0 です。
+        severity: 重大度（``error`` / ``warning`` / ``info``）です。
+
+    Returns:
+        type / message / line / severity を持つ辞書を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    return {"type": kind, "message": message, "line": line, "severity": severity}
+
+
 def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
     """ファイル内容からログ出力呼び出し / デバッガ文 / Issue 参照なし TODO を検出します。
 
@@ -501,39 +518,19 @@ def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
             continue
 
         if "console.log" in line and not line.strip().startswith(("//", "*")):  # nosec
-            issues.append(
-                {
-                    "type": "console.log",  # nosec
-                    "message": f"console.log found at line {line_num}",  # nosec
-                    "line": line_num,
-                    "severity": "warning",
-                }
-            )
+            message = f"console.log found at line {line_num}"  # nosec
+            issues.append(_issue("console.log", message, line=line_num, severity="warning"))  # nosec
 
         if re.search(r"\bdebugger\b", line) and not line.strip().startswith("//"):
-            issues.append(
-                {
-                    "type": "debugger",  # nosec
-                    "message": f"debugger statement at line {line_num}",  # nosec
-                    "line": line_num,
-                    "severity": "error",
-                }
-            )
+            message = f"debugger statement at line {line_num}"  # nosec
+            issues.append(_issue("debugger", message, line=line_num, severity="error"))  # nosec
 
         todo_match = re.search(r"(?://|#)\s*(TODO|FIXME):?\s*(.+)", line)
         if todo_match and not re.search(r"#\d+|issue", todo_match.group(2), re.IGNORECASE):
-            issues.append(
-                {
-                    "type": "todo",
-                    # 行内容は不信データで、deny 時にモデルのコンテキストへ入るため無害化する。
-                    "message": (
-                        f"TODO/FIXME without issue reference at line {line_num}: "
-                        f'"{_sanitize_untrusted_excerpt(todo_match.group(2))}"'
-                    ),
-                    "line": line_num,
-                    "severity": "info",
-                }
-            )
+            # 行内容は不信データで、deny 時にモデルのコンテキストへ入るため無害化する。
+            excerpt = _sanitize_untrusted_excerpt(todo_match.group(2))
+            message = f'TODO/FIXME without issue reference at line {line_num}: "{excerpt}"'
+            issues.append(_issue("todo", message, line=line_num, severity="info"))
 
     return issues
 
@@ -568,16 +565,35 @@ def _scan_secret_issues(lines: list[str], *, deadline: float, report_lines: bool
         for pattern, name in _SECRET_PATTERNS:
             budget.check(len(line), f"line {index + 1}")
             if re.search(pattern, line, re.IGNORECASE):
-                issues.append(
-                    {
-                        "type": "secret",
-                        "message": f"Potential {name} exposed {location}",
-                        "line": line_num,
-                        "severity": "error",
-                    }
-                )
+                issues.append(_issue("secret", f"Potential {name} exposed {location}", line=line_num, severity="error"))
 
     return issues
+
+
+def _scan_error_issue(file_path: str, stage: str, err: Exception) -> dict:
+    """scanner 内部例外を issue 化する。
+
+    例外メッセージ自体（ファイル内容の断片を含みうる）は出力に含めず、
+    型名だけを記録する（秘密情報の二次漏洩を避けるため）。
+
+    パスは攻撃者が選べるため、出力へ載せる前に `sanitize_untrusted_path` を通す。
+
+    Args:
+        file_path: 対象ファイルのパス。
+        stage: 失敗した処理段階の説明（ログ用）。
+        err: 捕捉した例外。
+
+    Returns:
+        severity が ``"error"``（ブロック対象）の issue 辞書。
+
+    Raises:
+        例外は発生しません。
+    """
+    error_type = type(err).__name__
+    shown_path = sanitize_untrusted_path(file_path)
+    log(f"[Hook] scan_error: {shown_path} の{stage}に失敗しました（{error_type}）")
+    message = f"{shown_path}: {stage}に失敗したため検査できませんでした（{error_type}）"
+    return _issue("scan_error", message, line=0, severity="error")
 
 
 def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline: float) -> list[dict]:
@@ -616,23 +632,15 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
         # 無検査のままコミットが通る。scan_error（error）としてブロック対象にする。
         shown_path = sanitize_untrusted_path(file_path)
         log(f"[Hook] scan_error: {shown_path} の内容取得に失敗しました（読み取り不能または取得拒否）")
-        return [
-            {
-                "type": "scan_error",
-                "message": f"{shown_path}: 内容を取得できなかったため検査できませんでした",
-                "line": 0,
-                "severity": "error",
-            }
-        ]
+        return [_issue("scan_error", f"{shown_path}: 内容を取得できなかったため検査できませんでした", line=0, severity="error")]
 
     is_binary = _is_binary_content(content)
     do_lint = should_lint_file(file_path) and not is_binary
     do_secrets = should_scan_secrets(file_path)
+    if not do_lint and not do_secrets:
+        return []
 
     issues: list[dict] = []
-    if not do_lint and not do_secrets:
-        return issues
-
     lines = content.split("\n")
     if do_lint:
         try:
@@ -650,33 +658,3 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
             issues.append(_scan_error_issue(file_path, "secret scan", err))
 
     return issues
-
-
-def _scan_error_issue(file_path: str, stage: str, err: Exception) -> dict:
-    """scanner 内部例外を issue 化する。
-
-    例外メッセージ自体（ファイル内容の断片を含みうる）は出力に含めず、
-    型名だけを記録する（秘密情報の二次漏洩を避けるため）。
-
-    パスは攻撃者が選べるため、出力へ載せる前に `sanitize_untrusted_path` を通す。
-
-    Args:
-        file_path: 対象ファイルのパス。
-        stage: 失敗した処理段階の説明（ログ用）。
-        err: 捕捉した例外。
-
-    Returns:
-        severity が ``"error"``（ブロック対象）の issue 辞書。
-
-    Raises:
-        例外は発生しません。
-    """
-    error_type = type(err).__name__
-    shown_path = sanitize_untrusted_path(file_path)
-    log(f"[Hook] scan_error: {shown_path} の{stage}に失敗しました（{error_type}）")
-    return {
-        "type": "scan_error",
-        "message": f"{shown_path}: {stage}に失敗したため検査できませんでした（{error_type}）",
-        "line": 0,
-        "severity": "error",
-    }

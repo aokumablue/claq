@@ -282,7 +282,7 @@ def parse_json_object(raw: str) -> dict[str, Any] | None:
     if not raw or not raw.strip():
         return None
     try:
-        data = json.loads(raw)
+        parsed = json.loads(raw)
     except JSON_PARSE_FAILURES:
         return None
-    return data if isinstance(data, dict) else None
+    return parsed if isinstance(parsed, dict) else None

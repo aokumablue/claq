@@ -12,6 +12,7 @@ import re
 _CONVENTIONAL_COMMIT = re.compile(
     r"^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?:\s*.+"
 )
+_MAX_SUBJECT_CHARS = 72
 
 
 def _message_issue(kind: str, message: str, suggestion: str) -> dict:
@@ -53,12 +54,12 @@ def _commit_message_issues(message: str) -> list[dict]:
                 'Use format: type(scope): description (e.g., "feat(auth): add login flow")',
             )
         )
-    if len(message) > 72:
+    if len(message) > _MAX_SUBJECT_CHARS:
         issues.append(
             _message_issue(
                 "length",
-                f"Commit message too long ({len(message)} chars, max 72)",
-                "Keep the first line under 72 characters",
+                f"Commit message too long ({len(message)} chars, max {_MAX_SUBJECT_CHARS})",
+                f"Keep the first line under {_MAX_SUBJECT_CHARS} characters",
             )
         )
     if conventional and re.match(r"^[A-Z]", message.split(":", 1)[1].strip()):
