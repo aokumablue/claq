@@ -117,7 +117,10 @@ def _hook_entry_errors(hook: Any, label: str) -> Iterator[str]:
     # `powershell` が無診断で捨てられ、Windows だけ静かに動かない。
     if "powershell" in hook:
         yield f"{label} では 'powershell' は command フックでのみサポートされています"
-    yield from (_http_hook_errors if hook_type == "http" else _prompt_hook_errors)(hook, label)
+    if hook_type == "http":
+        yield from _http_hook_errors(hook, label)
+    else:
+        yield from _prompt_hook_errors(hook, label)
 
 
 def _matcher_errors(event_type: str, index: int, matcher: Any) -> Iterator[str]:
@@ -155,7 +158,9 @@ def _hooks_errors(hooks: dict[str, Any]) -> Iterator[str]:
 
 
 def validate_hooks(hooks_file: str | Path = DEFAULT_HOOKS_FILE) -> int:
-    """hooks.json を検証し、JS バリデータと同じメッセージを表示する。
+    """hooks.json を検証する。
+
+    誤りは 1 件ずつ stderr へ書き出し、全件合格なら検証したマッチャー数を stdout へ表示する。
 
     Args:
         hooks_file: 検証する hooks.json のパス。
@@ -168,19 +173,19 @@ def validate_hooks(hooks_file: str | Path = DEFAULT_HOOKS_FILE) -> int:
         # 他の validator の「skills ディレクトリが…」と違い、ファイル名の後に空白を置いた文面になる。
         return report_missing("hooks.json ", hooks_path)
     try:
-        data = read_json(hooks_path, "hooks.json")
+        document = read_json(hooks_path, "hooks.json")
     except ValueError as error:
         emit_error(str(error))
         return 1
-    if not isinstance(data, dict):
+    if not isinstance(document, dict):
         emit_error("hooks.json はオブジェクトである必要があります")
         return 1
     # bool（True == 1）と float（1.0 == 1）を通さないため型を厳密に見る。
-    version = data.get("version")
+    version = document.get("version")
     if type(version) is not int or version != REQUIRED_HOOKS_VERSION:
         emit_error(f"hooks.json の 'version' は {REQUIRED_HOOKS_VERSION} である必要があります")
         return 1
-    hooks = data.get("hooks")
+    hooks = document.get("hooks")
     if not isinstance(hooks, dict):
         emit_error("hooks.json の 'hooks' はイベント名をキーとするオブジェクトである必要があります")
         return 1

@@ -104,12 +104,10 @@ def extract_raw_tool_name(payload: dict[str, Any]) -> str:
     非空の ``tool_name`` を優先し、無ければ非空の ``toolName`` を使う。
     空文字・非文字列は無効として次候補へ倒す。どちらも無効なら空文字。
     """
-    tool_name = payload.get("tool_name")
-    if isinstance(tool_name, str) and tool_name:
-        return tool_name
-    camel_name = payload.get("toolName")
-    if isinstance(camel_name, str) and camel_name:
-        return camel_name
+    for key in ("tool_name", "toolName"):
+        tool_name = payload.get(key)
+        if isinstance(tool_name, str) and tool_name:
+            return tool_name
     return ""
 
 

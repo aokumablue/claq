@@ -54,7 +54,7 @@ def read_tail_text(path: Path, max_bytes: int) -> str:
         OSError: ファイルを開けない・読めない場合（扱いは呼び出し側が決める）。
     """
     with path.open("rb") as stream:
-        stream.seek(0, 2)
+        stream.seek(0, os.SEEK_END)
         stream.seek(max(0, stream.tell() - max_bytes))
         return stream.read().decode("utf-8", errors="replace")
 

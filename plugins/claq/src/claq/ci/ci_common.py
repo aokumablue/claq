@@ -89,7 +89,7 @@ def extract_frontmatter(content: str) -> dict[str, object] | None:
         mapping でない場合は None（validators はこれを不合格として報告する）。
     """
     try:
-        data = parse_yaml(split_frontmatter(content))
+        parsed = parse_yaml(split_frontmatter(content))
     except FrontmatterError:
         return None
-    return data if isinstance(data, dict) else None
+    return parsed if isinstance(parsed, dict) else None

@@ -30,7 +30,10 @@ def _list_markdown_files(directory: Path) -> list[Path]:
     return [entry for entry in directory.iterdir() if entry.is_file() and entry.name.endswith(".md")]
 
 
-_COMMAND_REFERENCE_PATTERN = re.compile(r"`/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\s[^`]*)?`")
+_KEBAB_NAME = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+"""コマンド・エージェント・スキルの名前（小文字英数字のハイフン区切り）に一致する正規表現の断片。"""
+
+_COMMAND_REFERENCE_PATTERN = re.compile(rf"`/({_KEBAB_NAME})(?:\s[^`]*)?`")
 """バッククォートで囲まれたコマンド参照。名前の後に引数が続く形も捕捉する。
 
 閉じバッククォートが名前の直後に来る形だけを見ると、引数付きの参照
@@ -41,11 +44,18 @@ _COMMAND_REFERENCE_PATTERN = re.compile(r"`/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\s[^`]*
 ``/command`` 参照はどのバリデータも検証しない。
 """
 
+_CREATES_LINE_PATTERN = re.compile(r"creates:|would create:", re.IGNORECASE)
+_AGENT_REFERENCE_PATTERN = re.compile(rf"agents/({_KEBAB_NAME})\.md")
+_SKILL_REFERENCE_PATTERN = re.compile(rf"skills/({_KEBAB_NAME})/")
+_WORKFLOW_PATTERN = re.compile(rf"^((?:{_KEBAB_NAME})(?:\s*->\s*{_KEBAB_NAME})+)$", re.MULTILINE)
+_WORKFLOW_ARROW_PATTERN = re.compile(r"\s*->\s*")
+_CODE_FENCE_PATTERN = re.compile(r"```[\s\S]*?```")
+
 
 def _command_reference_errors(file_name: str, content: str, valid_commands: set[str]) -> Iterator[str]:
     """存在しない ``/command`` 参照の誤りを返す（``creates:`` 行は対象外）。"""
     for line in content.splitlines():
-        if re.search(r"creates:|would create:", line, re.I):
+        if _CREATES_LINE_PATTERN.search(line):
             continue
         for match in _COMMAND_REFERENCE_PATTERN.finditer(line):
             if match.group(1) not in valid_commands:
@@ -54,7 +64,7 @@ def _command_reference_errors(file_name: str, content: str, valid_commands: set[
 
 def _agent_reference_errors(file_name: str, content: str, valid_agents: set[str]) -> Iterator[str]:
     """存在しない ``agents/<name>.md`` 参照の誤りを返す。"""
-    for ref_name in re.findall(r"agents/([a-z0-9]+(?:-[a-z0-9]+)*)\.md", content):
+    for ref_name in _AGENT_REFERENCE_PATTERN.findall(content):
         if ref_name not in valid_agents:
             yield f"{file_name} - 存在しないエージェント agents/{ref_name}.md を参照しています"
 
@@ -62,7 +72,7 @@ def _agent_reference_errors(file_name: str, content: str, valid_agents: set[str]
 def _warn_skill_references(file_name: str, content: str, valid_skills: set[str]) -> int:
     """ローカルに無い ``skills/<name>/`` 参照を stdout へ警告し、件数を返す。"""
     warn_count = 0
-    for ref_name in re.findall(r"skills/([a-z0-9]+(?:-[a-z0-9]+)*)/", content):
+    for ref_name in _SKILL_REFERENCE_PATTERN.findall(content):
         if ref_name in _RESERVED_SKILL_ROOTS or ref_name in valid_skills:
             continue
         print(f"警告: {file_name} - skills/{ref_name}/ ディレクトリを参照しています（ローカルに見つかりません）")
@@ -72,12 +82,8 @@ def _warn_skill_references(file_name: str, content: str, valid_skills: set[str])
 
 def _workflow_reference_errors(file_name: str, content: str, valid_agents: set[str]) -> Iterator[str]:
     """``a -> b -> c`` 形式のワークフローに現れる、存在しないエージェントの誤りを返す。"""
-    for match in re.finditer(
-        r"^((?:[a-z0-9]+(?:-[a-z0-9]+)*)(?:\s*->\s*[a-z0-9]+(?:-[a-z0-9]+)*)+)$",
-        content,
-        re.M,
-    ):
-        for agent in re.split(r"\s*->\s*", match.group(1)):
+    for match in _WORKFLOW_PATTERN.finditer(content):
+        for agent in _WORKFLOW_ARROW_PATTERN.split(match.group(1)):
             if agent not in valid_agents:
                 yield f'{file_name} - ワークフローが存在しないエージェント "{agent}" を参照しています'
 
@@ -94,7 +100,7 @@ def _validate_command_file(
         emit_error(f"{name} - コマンドファイルが空です")
         return True, 0
 
-    body = re.sub(r"```[\s\S]*?```", "", content)
+    body = _CODE_FENCE_PATTERN.sub("", content)
     has_errors = report_errors(_command_reference_errors(name, body, valid_commands))
     has_errors |= report_errors(_agent_reference_errors(name, body, valid_agents))
     warn_count = _warn_skill_references(name, body, valid_skills)
@@ -108,7 +114,10 @@ def validate_commands(
     agents_dir: str | Path = DEFAULT_AGENTS_DIR,
     skills_dir: str | Path = DEFAULT_SKILLS_DIR,
 ) -> int:
-    """コマンド Markdown ファイルを検証し、JS バリデータと同じメッセージを表示する。
+    """コマンド Markdown ファイルの相互参照を検証する。
+
+    誤りは 1 件ずつ stderr へ、ローカルに無い skills 参照の警告は stdout へ書き出し、
+    全件合格なら検証したファイル数（警告があればその件数も）を stdout へ表示する。
 
     Args:
         root_dir: 相対指定の各ディレクトリを解決する基準。
