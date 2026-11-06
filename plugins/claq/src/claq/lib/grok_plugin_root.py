@@ -28,12 +28,12 @@ def is_grok_installed_plugin_root(path: Path | str) -> bool:
     """パスが Grok の公式インストール先（installed-plugins/claq-* 配下）か判定する。"""
     parts = Path(path).resolve().parts
     try:
-        grok_idx = parts.index(".grok")
+        grok_index = parts.index(".grok")
     except ValueError:
         return False
-    if grok_idx + 2 >= len(parts) or parts[grok_idx + 1] != "installed-plugins":
+    if grok_index + 2 >= len(parts) or parts[grok_index + 1] != "installed-plugins":
         return False
-    return parts[grok_idx + 2].startswith("claq-")
+    return parts[grok_index + 2].startswith("claq-")
 
 
 def _has_launcher(root: Path) -> bool:

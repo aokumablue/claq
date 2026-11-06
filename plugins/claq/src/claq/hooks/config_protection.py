@@ -60,6 +60,22 @@ _WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
 # 文言を「パッチ」に限定しない。
 _UNDECIDABLE_TARGET_MESSAGE = "BLOCKED: Could not determine target files from tool input."
 
+
+def _folded_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
+    """パス要素列の各要素を大小無視で畳む。
+
+    Args:
+        parts: 畳むパス要素列。
+
+    Returns:
+        畳んだ要素列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return tuple(normalize_protected_name(part) for part in parts)
+
+
 # frozenset で持つ。判定に使うのは下の `*_FOLDED`（import 時に 1 回だけ畳んだ複製）で、
 # 実行時にこちらへ追加しても保護は増えない。その食い違いを黙って通さないよう、
 # 変更を AttributeError で落ちる形にしておく。
@@ -117,9 +133,7 @@ _PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), ("hooks", "hooks.json"))
 # 大小無視で比較するための畳み済み複製。`.GIT/HOOKS` は APFS / NTFS では
 # `.git/hooks` そのものを指すため、素の比較では保護 path が素通りする。
 # 表示名には畳む前の綴りを使うので、両者を対で持つ。
-_PROTECTED_PATH_SEGMENTS_FOLDED = tuple(
-    tuple(normalize_protected_name(part) for part in segments) for segments in _PROTECTED_PATH_SEGMENTS
-)
+_PROTECTED_PATH_SEGMENTS_FOLDED = tuple(_folded_parts(segments) for segments in _PROTECTED_PATH_SEGMENTS)
 
 # 内容次第で保護する git config のパス。remote / branch / user の通常編集が正当にあるため
 # 無条件では塞がず、置換後の全文を解析して ``core.hooksPath`` / ``include`` / ``alias`` のように
@@ -134,9 +148,7 @@ _GIT_CONFIG_REPO_SEGMENTS = (
     (".git", "worktrees", "*", "config"),
     (".git", "worktrees", "*", "config.worktree"),
 )
-_GIT_CONFIG_REPO_SEGMENTS_FOLDED = tuple(
-    tuple(normalize_protected_name(part) for part in segments) for segments in _GIT_CONFIG_REPO_SEGMENTS
-)
+_GIT_CONFIG_REPO_SEGMENTS_FOLDED = tuple(_folded_parts(segments) for segments in _GIT_CONFIG_REPO_SEGMENTS)
 
 # git config として扱う保護 path の表示名の全体（ホーム側を含む）。ブロック文言を選ぶ鍵として公開する。
 GIT_CONFIG_DISPLAY_NAMES = frozenset(
@@ -245,7 +257,7 @@ def _match_path_segments(
     """
     resolved = resolve_effective_target(file_path)
     parts = resolved.parts if resolved is not None else Path(file_path).parts
-    folded_parts = tuple(normalize_protected_name(part) for part in parts)
+    folded_parts = _folded_parts(parts)
     for segments, folded_segments in zip(candidates, folded_candidates, strict=True):
         width = len(segments)
         for index in range(len(folded_parts) - width + 1):
@@ -630,9 +642,9 @@ def _settings_block_reason(tool_name: str, container: Any, file_path: str, file_
             return _settings_unverifiable_message(file_name)
         before_obj = _parse_settings_object(before) or {}
         # 直列化して比べる。dict の == は true と 1、1 と 1.0 を同じとみなし、型の書換えを見逃す。
-        if json.dumps(_settings_guarded_view(before_obj), sort_keys=True) != json.dumps(
-            _settings_guarded_view(after_obj), sort_keys=True
-        ):
+        before_view = json.dumps(_settings_guarded_view(before_obj), sort_keys=True)
+        after_view = json.dumps(_settings_guarded_view(after_obj), sort_keys=True)
+        if before_view != after_view:
             return _settings_blocked_message(file_name)
     except RecursionError:
         return _settings_unverifiable_message(file_name)
@@ -664,9 +676,8 @@ def _conditional_block_reason(tool_name: str, container: Any, file_path: str, fi
     if snippets is None:
         return _unverifiable_conditional_message(file_name)
 
-    if any(_resolve_lint_section_from_disk(file_path, snippet) is True for snippet in snippets) or (
-        _text_has_protected_signal("\n".join(snippets), file_name)
-    ):
+    in_lint_section = any(_resolve_lint_section_from_disk(file_path, snippet) is True for snippet in snippets)
+    if in_lint_section or _text_has_protected_signal("\n".join(snippets), file_name):
         return _conditional_blocked_message(file_name)
     return None
 
@@ -747,21 +758,6 @@ def _git_config_block_reason(tool_name: str, container: Any, file_path: str, dis
     return None
 
 
-def _folded_parts(path: Path) -> tuple[str, ...]:
-    """パスの各要素を大小無視で畳む。
-
-    Args:
-        path: 畳むパス。
-
-    Returns:
-        畳んだ要素列。
-
-    Raises:
-        例外は発生しません。
-    """
-    return tuple(normalize_protected_name(part) for part in path.parts)
-
-
 @memoized_in_scan
 def _running_plugin_root() -> Path:
     """実行中の plugin root を返す（`scan_memo` の間は 1 回だけ解決する）。
@@ -792,8 +788,8 @@ def running_plugin_root_is_guarded() -> bool:
     if repo_root is None:
         return True
     plugin_root = _running_plugin_root()
-    repo_parts = _folded_parts(repo_root.resolve())
-    if _folded_parts(plugin_root)[: len(repo_parts)] != repo_parts:
+    repo_parts = _folded_parts(repo_root.resolve().parts)
+    if _folded_parts(plugin_root.parts)[: len(repo_parts)] != repo_parts:
         return True
     # ホームや ~/.claude を git で管理していると、キャッシュの plugin root も toplevel の内側に入る。
     # 内側にあるだけでなく、そのリポジトリがランタイムを追跡しているときだけ開発用 checkout とみなす。
@@ -842,9 +838,9 @@ def running_plugin_guarded_dir(resolved: Path, *, include_ancestors: bool) -> st
     Raises:
         例外は発生しません。
     """
-    target = _folded_parts(resolved)
+    target = _folded_parts(resolved.parts)
     for segments in _RUNNING_PLUGIN_GUARDED_DIRS:
-        guarded = _folded_parts(_running_plugin_root().joinpath(*segments))
+        guarded = _folded_parts(_running_plugin_root().joinpath(*segments).parts)
         if target[: len(guarded)] == guarded or (include_ancestors and guarded[: len(target)] == target):
             return "/".join(segments) + "/" if running_plugin_root_is_guarded() else None
     return None
@@ -870,6 +866,48 @@ def _running_plugin_blocked_message(display_name: str) -> str:
     )
 
 
+def _block_reason_for_file(tool_name: str, container: Any, file_path: str) -> str | None:
+    """書込み先の 1 ファイルが保護対象ならブロック理由を返す。
+
+    実行中の plugin root の保護ディレクトリ、保護 path、git config、basename の順に見る。
+    git config は内容に問題が無ければ、続く basename の判定へ進む。
+
+    Args:
+        tool_name: 正規化前の生ツール名。
+        container: extract_tool_input 相当の 1 コンテナ値。
+        file_path: 対象ファイルパス。
+
+    Returns:
+        ブロック理由。保護対象でなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    # 実体パスを解決できない file_path は位置で照合できないので、下の名前の判定に任せる。
+    resolved = resolve_effective_target(file_path)
+    if resolved is not None:
+        running_dir = running_plugin_guarded_dir(resolved, include_ancestors=False)
+        if running_dir is not None:
+            return blocked_message_for_file(running_dir)
+    protected_segment = protected_path_segment(file_path)
+    if protected_segment is not None:
+        return blocked_message_for_file(f"{protected_segment}/")
+    git_config = repo_git_config_path(file_path) or global_git_config_path(file_path)
+    if git_config is not None:
+        reason = _git_config_block_reason(tool_name, container, file_path, git_config)
+        if reason:
+            return reason
+    file_name = _effective_basename(file_path)
+    # 判定は畳んだ名前、メッセージは観測した綴り（利用者が書いた通りの名前が
+    # 出ないと、なぜ止まったのかが読み取れなくなる）。
+    folded_name = normalize_protected_name(file_name)
+    if folded_name in PROTECTED_FILES_FOLDED:
+        return blocked_message_for_file(file_name)
+    if folded_name in CONDITIONALLY_PROTECTED_FILES_FOLDED:
+        return _conditional_block_reason(tool_name, container, file_path, file_name)
+    return None
+
+
 def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
     """1 つの入力コンテナが保護対象ならブロック理由を返す。
 
@@ -890,38 +928,17 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
     if file_paths is None:
         return _UNDECIDABLE_TARGET_MESSAGE
     for file_path in file_paths:
-        # 実体パスを解決できない file_path は位置で照合できないので、下の名前の判定に任せる。
-        resolved = resolve_effective_target(file_path)
-        if resolved is not None:
-            running_dir = running_plugin_guarded_dir(resolved, include_ancestors=False)
-            if running_dir is not None:
-                return blocked_message_for_file(running_dir)
-        protected_segment = protected_path_segment(file_path)
-        if protected_segment is not None:
-            return blocked_message_for_file(f"{protected_segment}/")
-        git_config = repo_git_config_path(file_path) or global_git_config_path(file_path)
-        if git_config is not None:
-            reason = _git_config_block_reason(tool_name, container, file_path, git_config)
-            if reason:
-                return reason
-        file_name = _effective_basename(file_path)
-        # 判定は畳んだ名前、メッセージは観測した綴り（利用者が書いた通りの名前が
-        # 出ないと、なぜ止まったのかが読み取れなくなる）。
-        folded_name = normalize_protected_name(file_name)
-        if folded_name in PROTECTED_FILES_FOLDED:
-            return blocked_message_for_file(file_name)
-        if folded_name in CONDITIONALLY_PROTECTED_FILES_FOLDED:
-            reason = _conditional_block_reason(tool_name, container, file_path, file_name)
-            if reason:
-                return reason
+        reason = _block_reason_for_file(tool_name, container, file_path)
+        if reason:
+            return reason
     return None
 
 
-def _block_reason(data: dict[str, Any]) -> str | None:
+def _block_reason(payload: dict[str, Any]) -> str | None:
     """書込み系入力が保護対象ならブロック理由を返す。
 
     Args:
-        data: フック stdin の dict。
+        payload: フック stdin の dict。
 
     Returns:
         ブロック理由。対象外・保護対象なしなら None。
@@ -929,14 +946,14 @@ def _block_reason(data: dict[str, Any]) -> str | None:
     Raises:
         例外は発生しません。
     """
-    tool_name = extract_raw_tool_name(data)
+    tool_name = extract_raw_tool_name(payload)
     # 既知の「書き込みではないツール」だけを skip する。ツール名を特定
     # できない payload を対象外へ倒すと保護が丸ごと無効になる。
     if is_known_tool_outside(tool_name, _WRITE_TOOL_NAMES):
         return None
     # 最初の理由で return する（先勝ち）のは意図した短絡。非 None の戻り値はすべて deny
     # なので、残りのコンテナを評価しても結論は変わらない。
-    for container in iter_tool_input_containers(data):
+    for container in iter_tool_input_containers(payload):
         reason = _block_reason_for_container(tool_name, container)
         if reason:
             return reason
@@ -980,15 +997,15 @@ def main() -> int:
         # 未接続など呼び出し自体が想定外の経路。ここは非ブロッキング。
         return 0
 
-    data = parse_json_object(raw)
-    if data is None:
+    payload = parse_json_object(raw)
+    if payload is None:
         # matcher により書込み系ツール呼び出しであることは確定している。
         # 非空 stdin が JSON として読めない場合、保護対象ファイルかどうかを
         # 判定できないため fail-closed にする。
         return emit_block_output(_UNPARSEABLE_INPUT_MESSAGE)
 
     with scan_memo():
-        reason = _block_reason(data)
+        reason = _block_reason(payload)
     if reason:
         return emit_block_output(reason)
     return 0

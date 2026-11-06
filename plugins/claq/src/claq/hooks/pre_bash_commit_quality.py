@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-"""
-コミット前にステージ済みファイルの品質を確認します。
+"""コミット前にステージ済みファイルの品質を確認します。
 
 pre:bash で `git commit` を検出したときだけ、lint や簡易静的チェックを実行します。
 問題が見つかった場合はコミットを止め、それ以外は入力をそのまま通過させます。
@@ -128,7 +126,6 @@ _SCAN_BUDGET_MESSAGE = scan_budget_message("pre:bash-commit-quality", "commit")
 # commit かどうかの判定自体が信用できないため fail-closed にする。
 _TRUNCATED_INPUT_MESSAGE = truncated_input_message("pre:bash-commit-quality", "payload for a git commit quality scan")
 
-
 # commit が、フックの走査した cwd の index とは別の index を記録しうる場合。
 # 実行時状態（cd 後の cwd・環境変数・git の設定）は追跡せず deny する。
 _COMMIT_TARGET_UNVERIFIABLE_MESSAGE = (
@@ -222,9 +219,9 @@ def _git_name_only(git_args: list[str]) -> list[str] | None:
     `UnicodeDecodeError` が except を貫通してフックが落ち、commit が無検査で通る。
     置換されたファイル名の 1 件はスキャンから外れるが、残りは検査される。
 
-    `check=False` なので `CalledProcessError` は送出されない。`OSError` は
-    `PermissionError` 等で git を起動できない場合も捕まえるため、`TimeoutExpired`
-    は `OSError` の部分集合ではないため個別に受ける。
+    `check=False` なので `CalledProcessError` は送出されない。`OSError` で `PermissionError`
+    等の git を起動できない場合も捕まえる。`TimeoutExpired` は `OSError` の部分集合ではないため
+    個別に受ける。
 
     Args:
         git_args: subprocess に渡す git コマンド列。
@@ -241,7 +238,7 @@ def _git_name_only(git_args: list[str]) -> list[str] | None:
         return None
     if result.returncode != 0:
         return None
-    return [f for f in result.stdout.strip().split("\n") if f]
+    return [path for path in result.stdout.strip().split("\n") if path]
 
 
 def get_staged_files() -> list[str] | None:
@@ -338,7 +335,7 @@ def _scan_targets(files: list[str]) -> list[str]:
     Raises:
         例外は発生しません。
     """
-    return [f for f in files if should_lint_file(f) or should_scan_secrets(f)]
+    return [path for path in files if should_lint_file(path) or should_scan_secrets(path)]
 
 
 def _partition_commit_all_files(
@@ -408,37 +405,30 @@ def _count_file_issues(
     return sum(counts.values()), counts["error"], counts["warning"], counts["info"]
 
 
-def _apply_commit_message_issues(
-    command: str,
-    total_issues: int,
-    warning_count: int,
-) -> tuple[int, int]:
-    """コミットメッセージの問題を検証し、ログへ出してカウントに加算します。
+def _log_commit_message_issues(command: str) -> int:
+    """コミットメッセージの問題を検証してログへ出し、その件数を返します。
 
     Args:
         command: `git commit` コマンド文字列です。
-        total_issues: 現在の問題総数です。
-        warning_count: 現在の警告数です。
 
     Returns:
-        (total_issues, warning_count) の更新後タプルを返します。
+        メッセージの問題の件数を返します。すべて警告として数える件数です。
 
     Raises:
         例外は発生しません。
     """
     message_validation = validate_commit_message(command)
     if not (message_validation and message_validation["issues"]):
-        return total_issues, warning_count
+        return 0
 
+    issues = message_validation["issues"]
     log("\nCommit Message Issues:")
-    for issue in message_validation["issues"]:
+    for issue in issues:
         log(f"  WARNING {issue['message']}")
         if issue.get("suggestion"):
             log(f"     TIP {issue['suggestion']}")
-        total_issues += 1
-        warning_count += 1
 
-    return total_issues, warning_count
+    return len(issues)
 
 
 def _finalize_result(
@@ -555,9 +545,11 @@ def _evaluate_confirmed_commit(command: str, commit_args: list[str]) -> str | No
             a + b for a, b in zip(index_counts, worktree_counts, strict=True)
         )
 
-        total_issues, warning_count = _apply_commit_message_issues(command, total_issues, warning_count)
+        message_warnings = _log_commit_message_issues(command)
 
-        return _finalize_result(total_issues, error_count, warning_count, info_count)
+        return _finalize_result(
+            total_issues + message_warnings, error_count, warning_count + message_warnings, info_count
+        )
 
     except Exception as err:
         log(f"[Hook] Error: {err}")
@@ -601,6 +593,30 @@ def _detect_group_commits(group: tuple[str, ...]) -> list[tuple[str, list[str]]]
     return elements
 
 
+def _malformed_input_reason(raw_input: str) -> str | None:
+    """JSON として読めなかった入力のブロック理由を返します。
+
+    matcher は Bash 全体なので、読めないというだけでは deny しない。生文字列上に `git commit` が
+    見える場合だけ、malformed JSON を理由に検査を迂回させないため deny する。
+
+    Args:
+        raw_input: JSON object として読めなかった生の入力文字列です。
+
+    Returns:
+        生文字列上に `git commit` が見えれば `_MALFORMED_COMMIT_MESSAGE`、それ以外は None。
+
+    Raises:
+        例外は発生しません。
+    """
+    if not raw_input.strip():
+        return None
+    if re.search(r"\bgit\s+commit\b", raw_input):
+        log("[Hook] ERROR: malformed JSON input, but raw command text matches `git commit`.")
+        return _MALFORMED_COMMIT_MESSAGE
+    log("[Hook] WARNING: could not parse hook input as JSON; not a git commit, passing through.")
+    return None
+
+
 def evaluate(raw_input: str) -> str | None:
     """入力を評価し、ブロック理由を返します。
 
@@ -619,31 +635,23 @@ def evaluate(raw_input: str) -> str | None:
         例外は発生しません。
     """
     try:
-        input_data = parse_json_object(raw_input)
-        if input_data is None:
-            if not raw_input.strip():
-                return None
-            if re.search(r"\bgit\s+commit\b", raw_input):
-                log("[Hook] ERROR: malformed JSON input, but raw command text matches `git commit`.")
-                return _MALFORMED_COMMIT_MESSAGE
-            log("[Hook] WARNING: could not parse hook input as JSON; not a git commit, passing through.")
-            return None
+        payload = parse_json_object(raw_input)
+        if payload is None:
+            return _malformed_input_reason(raw_input)
 
         # コンテナキーは 1 つも取りこぼさず走査し、commit を**全て**集める。先に判定できた
         # コンテナの結論を返すと、先頭が「通る commit」のときに後続キーの commit が
         # 検査されない。
         groups = [
             tuple(strip_data_heredoc_bodies(command) for command in group)
-            for group in iter_bash_command_groups(input_data)
+            for group in iter_bash_command_groups(payload)
         ]
         # 予算は全候補を走査する前に検査する。候補ごとに走査と交互に検査すると、上限内の要素を
         # 並べた argv 配列で要素の走査が積み上がり、上限を超える結合候補に着く前に timeout に
         # 近づく（4,999 トークンの要素 45 個で 7.45 秒）。
         if any(command_exceeds_scan_budget(command) for group in groups for command in group):
             return _SCAN_BUDGET_MESSAGE
-        commits: list[tuple[str, list[str]]] = []
-        for group in groups:
-            commits.extend(_detect_group_commits(group))
+        commits = [commit for group in groups for commit in _detect_group_commits(group)]
 
         if not commits:
             return None

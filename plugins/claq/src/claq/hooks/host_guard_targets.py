@@ -94,6 +94,7 @@ def _guarded_locations() -> list[tuple[Path, str]]:
     Raises:
         例外は発生しません。
     """
+    # ホームの決定や ``~user`` の展開自体も失敗しうるので、組み立てを遅らせて下の try で 1 か所ずつ受ける。
     candidates = [(lambda: get_plugin_root() / "hooks" / _HOOKS_JSON_NAME, _PLUGIN_HOOKS_JSON_DISPLAY)]
     configured = os.environ.get("CLAUDE_CONFIG_DIR")
     config_dirs = [lambda: get_home_dir() / ".claude"]
@@ -101,7 +102,7 @@ def _guarded_locations() -> list[tuple[Path, str]]:
         config_dirs.append(lambda: Path(configured).expanduser())
     for config_dir in config_dirs:
         for directory, name in _HOST_SETTINGS_PATH_SEGMENTS:
-            candidates.append((lambda d=config_dir, n=name: d() / n, f"{directory}/{name}"))
+            candidates.append((lambda config_dir=config_dir, name=name: config_dir() / name, f"{directory}/{name}"))
     locations: list[tuple[Path, str]] = []
     for build, display in candidates:
         # 解決できない置き場（`~user` の未知ユーザー・symlink の循環）は省く。貫通させると上の理由で判定ごと失われる。
