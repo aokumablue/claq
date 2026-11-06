@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from .audit_log import AuditLog
-from .cursor import _decode, _encode, _is_int, accepts_position
+from .cursor import _PAGE_TOKEN_TOO_LONG, _decode, _encode, _is_int, accepts_position
 from .errors import CursorError, FacadeError
 
 _VERSION = 1
@@ -31,10 +31,6 @@ _MIN_SECRET_BYTES = 32
 # MAC の入力の先頭に置く領域名（同じ鍵で作る、他の用途の MAC と取り違えないため）
 _MAC_DOMAIN = "facade.cursor"
 _EXPIRED = "この cursor は有効期限が切れています。cursor を外して、同じ条件で検索し直してください。"
-_PAGE_TOKEN_TOO_LONG = (
-    "上流のページトークンが長すぎるため、続きの cursor を発行できません。"
-    "サーバの運用者に MAX_PAGE_TOKEN_CHARS と MAX_CURSOR_CHARS の見直しを依頼してください。"
-)
 
 
 def _read_payload(body: str) -> dict[str, Any] | None:
