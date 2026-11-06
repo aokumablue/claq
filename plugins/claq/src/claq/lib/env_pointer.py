@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 
 from claq.lib.constants import BASE_DIR_NAME
+from claq.lib.core_utils import make_private_dirs
 from claq.lib.subprocess_utils import run_text
 
 _ROOTS_DIRNAME = "roots"
@@ -117,25 +118,6 @@ def _state_home() -> Path:
     if raw:
         return Path(raw).expanduser()
     return Path.home()
-
-
-def _ensure_private_dir(path: Path) -> Path:
-    """ディレクトリを根から順に 0700 で作成し、0700 に締めて返す。
-
-    ``core_utils.ensure_private_dir`` は ``get_claq_dir()``（``CLAQ_HOME`` 対応）基準で
-    判定するため、``$HOME`` 固定の本モジュールでは流用できない。
-
-    作成と ``chmod`` を分けると、その窓の間に他 OS ユーザーが ``opendir`` で得た fd は
-    後続の ``chmod`` で失効しない。``mkdir(mode=..., parents=True)`` は親に mode を
-    適用しないため、祖先を 1 段ずつ作る。``chmod`` は既に 0755 で存在する場合の是正用。
-
-    Raises:
-        OSError: 作成・chmod に失敗した場合。
-    """
-    for target in (*reversed(path.parents), path):
-        target.mkdir(mode=0o700, exist_ok=True)
-    path.chmod(0o700)
-    return path
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -307,8 +289,10 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
     if "\n" in root_text or "\r" in root_text or "\x00" in root_text:
         raise OSError(f"plugin root contains a newline or NUL byte: {root_text!r}")
 
-    claq_dir = _ensure_private_dir(_state_home() / BASE_DIR_NAME)
-    roots_dir = _ensure_private_dir(claq_dir / _ROOTS_DIRNAME)
+    # `ensure_private_dir` は `get_claq_dir()`（`CLAQ_HOME` を見る）を締め直すため、
+    # `$HOME` 固定の本モジュールでは使わない。
+    claq_dir = make_private_dirs(_state_home() / BASE_DIR_NAME)
+    roots_dir = make_private_dirs(claq_dir / _ROOTS_DIRNAME)
 
     # 祖先ポインタ方式が成立しない OS（Windows）では `ps` を呼ばない。全 hook 起動ごとの
     # 無駄な spawn になるうえ、MSYS/Cygwin 由来の `ps.exe` が PATH にあると別 PID 空間の

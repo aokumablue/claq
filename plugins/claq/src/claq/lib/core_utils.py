@@ -97,8 +97,8 @@ def ensure_dir(dir_path: str | Path) -> Path:
     return path
 
 
-def ensure_private_dir(dir_path: str | Path) -> Path:
-    """ディレクトリを作成し、パーミッションを 0700 に絞る。
+def make_private_dirs(dir_path: str | Path) -> Path:
+    """ディレクトリを欠けている祖先ごと作成し、パーミッションを 0700 に絞る。
 
     **作成そのものを、欠けている祖先ごと根から順に 0700 で行う**。作成と ``chmod`` を
     分けると、その間 ``~/.claq`` は umask 既定（通常 0755）で他 OS ユーザーから
@@ -110,8 +110,7 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
     ``chmod`` は既に 0755 のディレクトリとして存在する対象を締め直す是正用。
     ``dir_path`` が通常ファイルなど非ディレクトリなら、``chmod`` に進む前に
     ``FileExistsError`` で止まる（ファイルの mode を 0700 に変えない）。
-    作成競合は ``mkdir(exist_ok=True)`` が吸収するため、ここでは握らない。``dir_path`` が
-    ``get_claq_dir()`` 配下なら ``~/.claq`` 自身も 0700 にする。
+    作成競合は ``mkdir(exist_ok=True)`` が吸収するため、ここでは握らない。
 
     Windows では ``chmod`` が読み取り専用属性しか動かさず、DACL は変わらない。
     ``%USERPROFILE%`` 配下は既定でそのユーザー（と SYSTEM / Administrators）だけに
@@ -129,6 +128,20 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
     for target in (*reversed(path.parents), path):
         target.mkdir(mode=0o700, exist_ok=True)
     path.chmod(0o700)
+    return path
+
+
+def ensure_private_dir(dir_path: str | Path) -> Path:
+    """`make_private_dirs` でディレクトリを 0700 で作成し、``~/.claq`` 配下なら ``~/.claq`` 自身も 0700 にする。
+
+    `make_private_dirs` は既存の祖先を締めないため、``dir_path`` が ``get_claq_dir()``
+    配下のときだけ ``~/.claq`` 自身を締め直す。
+
+    Raises:
+        FileExistsError: `make_private_dirs` と同じ。
+        OSError: 作成も chmod もできない場合。
+    """
+    path = make_private_dirs(dir_path)
     claq_dir = get_claq_dir()
     try:
         path.resolve().relative_to(claq_dir.resolve())

@@ -11,9 +11,6 @@ from typing import Any
 
 from claq.ci.harness_audit_repo_checks import get_repo_checks
 from claq.ci.harness_audit_utils import (
-    _has_any_file as _has_any_file,
-)
-from claq.ci.harness_audit_utils import (
     _has_gitlab_security_scanning,
     count_files,
     detect_target_mode,
@@ -25,10 +22,7 @@ from claq.ci.harness_audit_utils import (
     safe_parse_json,
     safe_read,
 )
-from claq.ci.harness_audit_utils import (
-    read_text as read_text,
-)
-from claq.lib.git_hosting import SERVICE_LABELS, detect_git_hosting_service
+from claq.lib.git_hosting import GITHUB, GITLAB, SERVICE_LABELS, detect_git_hosting_service
 
 # origin からホスティングを判定できないときの表示名。
 _UNKNOWN_HOSTING_LABEL = "Git hosting（origin から判定できず）"
@@ -151,14 +145,14 @@ def _hosting_layout(root_dir: str | Path, hosting_service: str | None) -> tuple[
     ホスティングが不明なら、GitHub と GitLab のどちらの置き場所でも満たしたとみなす。
     """
     if hosting_service is None:
-        github, gitlab = _hosting_layout(root_dir, "github"), _hosting_layout(root_dir, "gitlab")
+        github, gitlab = _hosting_layout(root_dir, GITHUB), _hosting_layout(root_dir, GITLAB)
         return (
             f"{github[0]} / {gitlab[0]}",
             f"{github[1]} / {gitlab[1]}",
             github[2] or gitlab[2],
             github[3] or gitlab[3],
         )
-    if hosting_service == "gitlab":
+    if hosting_service == GITLAB:
         return (
             ".gitlab-ci.yml",
             ".gitlab-ci.yml",

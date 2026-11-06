@@ -9,6 +9,7 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
+from claq.lib.constants import PLUGIN_NAME
 from claq.lib.core_utils import get_home_dir
 
 REPO_CORE_MARKERS = [
@@ -202,15 +203,14 @@ def _has_gitlab_security_scanning(root_dir: str | Path) -> bool:
 
 
 # consumer モードで「このプラグインが導入済みか」を見るときの探索先。
-_PLUGIN_NAME = "claq"
 # ホストごとの配置。Copilot CLI は `.copilot/installed-plugins/<plugin>/<plugin>/`
 # へ展開する。`.claude` だけを見ると、導入済みの Copilot 環境で
 # `consumer-plugin-install` が pass=false になり、既に満たされた助言を第 1 位に出す。
 _PLUGIN_JSON_RELATIVES = (
-    Path(".claude") / "plugins" / _PLUGIN_NAME / ".claude-plugin" / "plugin.json",
-    Path(".claude") / "plugins" / _PLUGIN_NAME / "plugin.json",
-    Path(".copilot") / "installed-plugins" / _PLUGIN_NAME / _PLUGIN_NAME / ".claude-plugin" / "plugin.json",
-    Path(".copilot") / "installed-plugins" / _PLUGIN_NAME / _PLUGIN_NAME / "plugin.json",
+    Path(".claude") / "plugins" / PLUGIN_NAME / ".claude-plugin" / "plugin.json",
+    Path(".claude") / "plugins" / PLUGIN_NAME / "plugin.json",
+    Path(".copilot") / "installed-plugins" / PLUGIN_NAME / PLUGIN_NAME / ".claude-plugin" / "plugin.json",
+    Path(".copilot") / "installed-plugins" / PLUGIN_NAME / PLUGIN_NAME / "plugin.json",
 )
 
 # マーケットプレイス経由で導入したときの実体配置。ホストは
@@ -218,8 +218,8 @@ _PLUGIN_JSON_RELATIVES = (
 # 平置きの `.claude/plugins/<plugin>/` だけを見ると正しく導入済みの環境を
 # 「未導入」と判定し、`top_actions` の第 1 位に既に満たされた助言が出る。
 _PLUGIN_CACHE_GLOBS = (
-    f".claude/plugins/cache/*/{_PLUGIN_NAME}/*/.claude-plugin/plugin.json",
-    f".copilot/installed-plugins/*/{_PLUGIN_NAME}/*/.claude-plugin/plugin.json",
+    f".claude/plugins/cache/*/{PLUGIN_NAME}/*/.claude-plugin/plugin.json",
+    f".copilot/installed-plugins/*/{PLUGIN_NAME}/*/.claude-plugin/plugin.json",
 )
 
 

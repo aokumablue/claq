@@ -19,10 +19,9 @@ import os
 from pathlib import Path
 
 
-def installed_plugins_dir(home: Path | None = None) -> Path:
-    """``~/.grok/installed-plugins`` のパスを返す（``home`` は None なら ``Path.home()``）。"""
-    base = home if home is not None else Path.home()
-    return base / ".grok" / "installed-plugins"
+def installed_plugins_dir(home: Path) -> Path:
+    """``home`` 配下の ``.grok/installed-plugins`` のパスを返す。"""
+    return home / ".grok" / "installed-plugins"
 
 
 def is_grok_installed_plugin_root(path: Path | str) -> bool:
@@ -58,14 +57,14 @@ def _mtime_or_none(path: Path) -> float | None:
         return None
 
 
-def find_latest_installed_claq(installed_dir: Path | None = None) -> Path | None:
+def find_latest_installed_claq(installed_dir: Path) -> Path | None:
     """``~/.grok/installed-plugins/claq-*`` のうち launcher.py を含む最新のディレクトリを返す。
 
     列挙と stat の間には隙間があり（TOCTOU）、Grok が同時に古い ``claq-<hash>`` を消すと
     ``FileNotFoundError`` が起きるので、消えた候補は除外する。
 
     Args:
-        installed_dir: 探索先。None なら ``~/.grok/installed-plugins``。
+        installed_dir: 探索先（``installed_plugins_dir`` の値）。
 
     Returns:
         最新ディレクトリ。無ければ None（全候補が消えていた場合も None）。
@@ -73,11 +72,10 @@ def find_latest_installed_claq(installed_dir: Path | None = None) -> Path | None
     Raises:
         OSError: 探索先を読めない場合。
     """
-    root = installed_dir if installed_dir is not None else installed_plugins_dir()
-    if not root.is_dir():
+    if not installed_dir.is_dir():
         return None
     candidates: list[tuple[float, Path]] = []
-    for path in root.iterdir():
+    for path in installed_dir.iterdir():
         if not (path.is_dir() and path.name.startswith("claq-") and _has_launcher(path)):
             continue
         mtime = _mtime_or_none(path)

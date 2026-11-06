@@ -167,7 +167,7 @@ class TestWriteEnvPointer:
     @pytest.mark.parametrize(
         ("target", "name", "reason"),
         [
-            pytest.param(mod, "_ensure_private_dir", "permission denied", id="private-dir-unwritable"),
+            pytest.param(mod, "make_private_dirs", "permission denied", id="private-dir-unwritable"),
             pytest.param(tempfile, "mkstemp", "mkstemp failed", id="mkstemp-oserror"),
         ],
     )

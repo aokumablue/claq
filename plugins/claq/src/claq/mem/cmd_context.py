@@ -14,7 +14,6 @@ from claq.hooks.detach import recent_bg_failure_notice
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.env_pointer import ancestor_pointers_supported
 from claq.lib.harness import normalize_user_message
-from claq.mem import logger as mem_logger
 from claq.mem.command_support import CommandArgs, _fit_budget, _session_uid
 from claq.mem.database import Database
 from claq.mem.handoff import build_handoff
@@ -30,9 +29,6 @@ from claq.mem.settings import (
     Settings,
 )
 from claq.mem.tag_stripping import keep_allowed_chars, keep_allowed_chars_for_injection, strip_tags
-
-log = mem_logger.get("CLI")
-
 
 # --- SessionStart への知識注入 ---
 
