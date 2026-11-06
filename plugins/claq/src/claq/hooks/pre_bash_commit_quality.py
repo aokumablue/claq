@@ -56,7 +56,12 @@ from claq.hooks.commit_risk import (
     _is_commit_all_flag,
     _is_git_commit_command,
 )
-from claq.hooks.hook_common import DIRECTORY_CHANGE_COMMANDS, normalize_executable_name, resolve_repo_root
+from claq.hooks.hook_common import (
+    DIRECTORY_CHANGE_COMMANDS,
+    emit_block_output,
+    normalize_executable_name,
+    resolve_repo_root,
+)
 from claq.hooks.shell_tokens import (
     MAX_COMMAND_BYTES,
     command_dialect_variants,
@@ -65,7 +70,13 @@ from claq.hooks.shell_tokens import (
     strip_data_heredoc_bodies,
     tokenize,
 )
-from claq.hooks.stdin_io import MAX_STDIN_BYTES, parse_json_object
+from claq.hooks.stdin_io import (
+    MAX_STDIN_BYTES,
+    StdinUnavailableError,
+    parse_json_object,
+    read_raw_stdin_with_truncation,
+    stdin_unreadable_message,
+)
 from claq.lib.core_utils import log
 from claq.lib.harness import iter_bash_command_groups
 from claq.lib.subprocess_utils import run_text
@@ -206,22 +217,6 @@ def _commit_target_risk(command: str) -> str | None:
             return _COMMIT_TARGET_UNVERIFIABLE_MESSAGE
         return None
     return None
-
-
-def _blocked(raw_input: str, reason: str) -> dict:
-    """commit をブロックする評価結果を作る。
-
-    Args:
-        raw_input: フックに渡された生の入力文字列です。
-        reason: ブロック理由です。
-
-    Returns:
-        exitCode=2 と reason を含む結果辞書。
-
-    Raises:
-        例外は発生しません。
-    """
-    return {"output": raw_input, "exitCode": 2, "reason": reason}
 
 
 def _git_name_only(git_args: list[str]) -> list[str] | None:
@@ -459,26 +454,24 @@ def _finalize_result(
     error_count: int,
     warning_count: int,
     info_count: int,
-    raw_input: str,
-) -> dict:
-    """問題集計結果をログに記録し、終了コードを含む結果辞書を返します。
+) -> str | None:
+    """問題集計結果をログに記録し、ブロック理由を返します。
 
     Args:
         total_issues: 検出された問題の総数です。
         error_count: エラー severity の問題数です。
         warning_count: 警告 severity の問題数です。
         info_count: info severity の問題数です。
-        raw_input: そのまま output に返す生の入力文字列です。
 
     Returns:
-        error_count > 0 なら exitCode=2 と reason、それ以外は exitCode=0 の辞書。
+        error_count > 0 ならブロック理由、それ以外は None。
 
     Raises:
         例外は発生しません。
     """
     if total_issues == 0:
         log("\n[Hook] PASS: All checks passed!")
-        return {"output": raw_input, "exitCode": 0}
+        return None
 
     log(
         f"\nSummary: {total_issues} issue(s) found "
@@ -486,11 +479,9 @@ def _finalize_result(
     )
     if error_count > 0:
         log("\n[Hook] ERROR: Commit blocked due to critical issues. Fix them before committing.")
-        return _blocked(
-            raw_input, f"[Hook] BLOCKED: {error_count} error(s) found in staged files. Fix them before committing."
-        )
+        return f"[Hook] BLOCKED: {error_count} error(s) found in staged files. Fix them before committing."
     log("\n[Hook] WARNING: Warnings found. Consider fixing them, but commit is allowed.")
-    return {"output": raw_input, "exitCode": 0}
+    return None
 
 
 def _collect_worktree_issues(worktree_targets: list[str], *, deadline: float) -> tuple[int, int, int, int] | None:
@@ -520,20 +511,19 @@ def _collect_worktree_issues(worktree_targets: list[str], *, deadline: float) ->
     return _count_file_issues(worktree_targets, repo_root=repo_root, deadline=deadline)
 
 
-def _evaluate_confirmed_commit(raw_input: str, command: str, commit_args: list[str]) -> dict:
-    """`git commit` と判定済みの入力を検査し、結果を返します。
+def _evaluate_confirmed_commit(command: str, commit_args: list[str]) -> str | None:
+    """`git commit` と判定済みの入力を検査し、ブロック理由を返します。
 
     commit であることは確定しているため、想定外の例外が起きても非ブロッキングへは
     倒さない。検査未完了のまま通すと「検査したが問題なし」と区別が付かず、品質・
     secret 検査を無言で迂回できてしまう。
 
     Args:
-        raw_input: フックに渡された生の入力文字列です。
         command: `git commit` を含む bash コマンド文字列です。
         commit_args: commit 呼び出しの引数トークン列です。
 
     Returns:
-        output と exitCode を含む辞書を返します。
+        ブロックする場合は理由、通す場合は None。
 
     Raises:
         例外は発生しません。
@@ -542,18 +532,18 @@ def _evaluate_confirmed_commit(raw_input: str, command: str, commit_args: list[s
         staged_files = get_staged_files()
         if staged_files is None:
             log("[Hook] ERROR: could not determine staged files (git itself failed or timed out).")
-            return _blocked(raw_input, _STAGED_FILES_UNAVAILABLE_MESSAGE)
+            return _STAGED_FILES_UNAVAILABLE_MESSAGE
 
         partitioned = _partition_commit_all_files(staged_files, commit_args)
         if partitioned is None:
             log("[Hook] ERROR: could not enumerate worktree changes for `git commit -a`.")
-            return _blocked(raw_input, _WORKTREE_FILES_UNAVAILABLE_MESSAGE)
+            return _WORKTREE_FILES_UNAVAILABLE_MESSAGE
 
         index_files, worktree_files = partitioned
         all_files = sorted(set(index_files) | set(worktree_files))
         if not all_files:
             log('[Hook] No staged files found. Use "git add" to stage files first.')
-            return {"output": raw_input, "exitCode": 0}
+            return None
 
         log(f"[Hook] Checking {len(all_files)} staged file(s)...")
 
@@ -568,19 +558,19 @@ def _evaluate_confirmed_commit(raw_input: str, command: str, commit_args: list[s
         worktree_counts = _collect_worktree_issues(worktree_targets, deadline=secret_scan_deadline)
         if worktree_counts is None:
             log("[Hook] ERROR: could not resolve repo root for `git commit -a` worktree scan.")
-            return _blocked(raw_input, _REPO_ROOT_UNAVAILABLE_MESSAGE)
+            return _REPO_ROOT_UNAVAILABLE_MESSAGE
         total_issues, error_count, warning_count, info_count = (
             a + b for a, b in zip(index_counts, worktree_counts, strict=True)
         )
 
         total_issues, warning_count = _apply_commit_message_issues(command, total_issues, warning_count)
 
-        return _finalize_result(total_issues, error_count, warning_count, info_count, raw_input)
+        return _finalize_result(total_issues, error_count, warning_count, info_count)
 
     except Exception as err:
         log(f"[Hook] Error: {err}")
         log("[Hook] BLOCKED: quality scan failed for a confirmed git commit; refusing an unverifiable commit.")
-        return _blocked(raw_input, _SCAN_FAILURE_MESSAGE)
+        return _SCAN_FAILURE_MESSAGE
 
 
 def _detect_group_commits(group: tuple[str, ...]) -> list[tuple[str, list[str]]]:
@@ -619,10 +609,10 @@ def _detect_group_commits(group: tuple[str, ...]) -> list[tuple[str, list[str]]]
     return elements
 
 
-def evaluate(raw_input: str) -> dict:
-    """入力を評価し、出力内容と終了コードを返します。
+def evaluate(raw_input: str) -> str | None:
+    """入力を評価し、ブロック理由を返します。
 
-    JSON が壊れている・commit と無関係な Bash 呼び出しは非ブロッキング（exitCode=0）。
+    JSON が壊れている・commit と無関係な Bash 呼び出しは非ブロッキング（None）。
     JSON が壊れていても raw 文字列上に `git commit` が見える場合は、malformed JSON を
     理由に検査を迂回させないため deny する。commit と確定した入力は
     `_evaluate_confirmed_commit` に委譲し、以降は fail-closed で扱う。
@@ -631,7 +621,7 @@ def evaluate(raw_input: str) -> dict:
         raw_input: フックに渡された生の入力文字列です。
 
     Returns:
-        output と exitCode を含む辞書を返します。
+        ブロックする場合は理由、通す場合は None。
 
     Raises:
         例外は発生しません。
@@ -640,12 +630,12 @@ def evaluate(raw_input: str) -> dict:
         input_data = parse_json_object(raw_input)
         if input_data is None:
             if not raw_input.strip():
-                return {"output": raw_input, "exitCode": 0}
+                return None
             if re.search(r"\bgit\s+commit\b", raw_input):
                 log("[Hook] ERROR: malformed JSON input, but raw command text matches `git commit`.")
-                return _blocked(raw_input, _MALFORMED_COMMIT_MESSAGE)
+                return _MALFORMED_COMMIT_MESSAGE
             log("[Hook] WARNING: could not parse hook input as JSON; not a git commit, passing through.")
-            return {"output": raw_input, "exitCode": 0}
+            return None
 
         # コンテナキーは 1 つも取りこぼさず走査し、commit を**全て**集める。先に判定できた
         # コンテナの結論を返すと、先頭が「通る commit」のときに後続キーの commit が
@@ -658,56 +648,39 @@ def evaluate(raw_input: str) -> dict:
         # 並べた argv 配列で要素の走査が積み上がり、上限を超える結合候補に着く前に timeout に
         # 近づく（4,999 トークンの要素 45 個で 7.45 秒）。
         if any(command_exceeds_scan_budget(command) for group in groups for command in group):
-            return _blocked(raw_input, _SCAN_BUDGET_MESSAGE)
+            return _SCAN_BUDGET_MESSAGE
         commits: list[tuple[str, list[str]]] = []
         for group in groups:
             commits.extend(_detect_group_commits(group))
 
         if not commits:
-            return {"output": raw_input, "exitCode": 0}
+            return None
 
         # 複数コンテナに commit が散っている場合、どれがどの順で実行されるかは実行前に
         # 確定できないため、1 コマンド内の複数 commit と同じく検査不能として deny する。
         if len(commits) > 1:
             log("[Hook] ERROR: commit content cannot be inspected before execution.")
-            return _blocked(raw_input, _MULTIPLE_COMMITS_MESSAGE)
+            return _MULTIPLE_COMMITS_MESSAGE
 
         command, commit_args = commits[0]
         compound_risk = _compound_commit_risk(command)
         if compound_risk is not None:
             log("[Hook] ERROR: commit content cannot be inspected before execution.")
-            return _blocked(raw_input, compound_risk)
+            return compound_risk
 
         target_risk = _commit_target_risk(command)
         if target_risk is not None:
             log("[Hook] ERROR: the commit may record an index other than the one scanned.")
-            return _blocked(raw_input, target_risk)
+            return target_risk
 
-        return _evaluate_confirmed_commit(raw_input, command, commit_args)
+        return _evaluate_confirmed_commit(command, commit_args)
 
     except Exception as err:
         # commit と確定する前の例外は非ブロッキング。確定後の例外は
         # _evaluate_confirmed_commit 側で fail-closed にする。
         log(f"[Hook] Error: {err}")
 
-    return {"output": raw_input, "exitCode": 0}
-
-
-def _emit_block(reason: str) -> int:
-    """ブロック出力を書き、出力層が失敗しても exit 2 を返す。
-
-    Args:
-        reason: ブロック理由です。
-
-    Returns:
-        常に 2。
-
-    Raises:
-        例外は発生しません。
-    """
-    from claq.hooks.hook_common import emit_block_output
-
-    return emit_block_output(reason)
+    return None
 
 
 def main() -> int:
@@ -727,27 +700,17 @@ def main() -> int:
     Raises:
         例外は発生しません。
     """
-    from claq.hooks.stdin_io import (
-        StdinUnavailableError,
-        read_raw_stdin_with_truncation,
-        stdin_unreadable_message,
-    )
-
     try:
         raw, truncated = read_raw_stdin_with_truncation()
     except StdinUnavailableError as exc:
-        return _emit_block(stdin_unreadable_message("pre:bash-commit-quality", exc))
+        return emit_block_output(stdin_unreadable_message("pre:bash-commit-quality", exc))
 
     if truncated:
-        return _emit_block(_TRUNCATED_INPUT_MESSAGE)
+        return emit_block_output(_TRUNCATED_INPUT_MESSAGE)
 
-    result = evaluate(raw)
-    if result["exitCode"] == 2:
-        return _emit_block(result["reason"])
-    return result["exitCode"]
+    reason = evaluate(raw)
+    return emit_block_output(reason) if reason is not None else 0
 
 
 if __name__ == "__main__":
-    import sys
-
-    sys.exit(main())
+    raise SystemExit(main())

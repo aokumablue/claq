@@ -212,25 +212,6 @@ _SENSITIVE_CONFIG_KEY_PREFIXES = (
 )
 
 
-def is_git_invocation(token: str) -> bool:
-    """トークンが git 実行ファイルの起動かどうかを判定する。
-
-    ``/usr/bin/git``・``git.exe``・``GIT`` を拾い、``gitk`` / ``GIT_DIR=.git`` / ``git/`` は
-    一致しない。正規化は兄弟フックと共有する ``hook_common.is_git_executable_token`` に
-    委譲する。
-
-    Args:
-        token: 検査対象のトークン。
-
-    Returns:
-        git 起動トークンなら True。
-
-    Raises:
-        例外は発生しません。
-    """
-    return is_git_executable_token(token)
-
-
 def _consume_short_cluster(token: str, flags: list[str]) -> tuple[int, bool, str | None]:
     """short オプションのクラスタを 1 文字ずつフラグへ展開する。
 
@@ -672,7 +653,7 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
         scan: _GitScan | None = None
         env = _EnvAssignmentScan(_inherited_prefix)
         for index, token in enumerate(segment):
-            if is_git_invocation(token):
+            if is_git_executable_token(token):
                 if scan is None:
                     scan = _GitScan(segment)
                 if scan.is_bypass_at(index) or env.overrides_hooks_path():

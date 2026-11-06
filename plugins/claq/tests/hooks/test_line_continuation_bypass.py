@@ -272,8 +272,8 @@ def test_pre_bash_commit_quality_evaluate_blocks_oversized_command_in_process(
 
     result = pre_bash_commit_quality.evaluate(payload)
 
-    assert result["exitCode"] == 2
-    assert "exceeds" in result["reason"]
+    assert result is not None
+    assert "exceeds" in result
 
 
 @pytest.mark.parametrize("failure", [BrokenPipeError("pipe"), OSError("closed"), ValueError("encode")])

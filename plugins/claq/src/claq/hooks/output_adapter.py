@@ -40,24 +40,22 @@ def adapt_context_output(event_name: str, additional_context: str) -> str:
     )
 
 
-def emit_block(reason: str) -> tuple[int, str, str]:
-    """ツール実行ブロックの出力を host 非依存の合併形式で組み立てる。
+def adapt_deny_output(reason: str) -> str:
+    """ツール実行ブロックの stdout 出力（Copilot CLI が読む permissionDecision JSON）を生成する。
 
-    exit code 2（Claude Code / Codex 系が読む fail-closed シグナル）と、
-    stdout の permissionDecision JSON（Copilot CLI が読む契約）を同時に返す。
+    exit code 2（Claude Code / Codex 系が読む fail-closed シグナル）と stderr の理由は
+    ``hook_common.emit_block_output`` が出す。
 
     Args:
         reason: ブロック理由（ユーザー / エージェントに提示される）。
 
     Returns:
-        (exit_code, stdout, stderr) のタプル。呼び出し側はこの 3 つを
-        そのまま出力・終了コードに使うこと。
+        permissionDecision=deny の JSON 文字列。
 
     Raises:
         例外は発生しません。
     """
-    payload = json.dumps(
+    return json.dumps(
         {"permissionDecision": "deny", "permissionDecisionReason": reason},
         ensure_ascii=False,
     )
-    return 2, payload, reason

@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from claq.hooks import bash_config_protection, block_no_verify, config_protection, hook_common, stdin_io
+from claq.hooks import bash_config_protection, block_no_verify, config_protection, hook_common
 from claq.hooks import commit_quality_scanner as commit_quality_scanner
 from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
 
@@ -217,11 +217,7 @@ def _run(hook: str, payload: dict[str, Any], monkeypatch: pytest.MonkeyPatch) ->
         return json.dumps(payload), False
 
     module = _HOOKS[hook]
-    # `pre_bash_commit_quality.main()` は `stdin_io` から関数内 import する
-    # ため、モジュール束縛の差し替えだけでは効かない。両方を差し替える。
-    monkeypatch.setattr(stdin_io, "read_raw_stdin_with_truncation", _read)
-    if hasattr(module, "read_raw_stdin_with_truncation"):
-        monkeypatch.setattr(module, "read_raw_stdin_with_truncation", _read)
+    monkeypatch.setattr(module, "read_raw_stdin_with_truncation", _read)
     return module.main()
 
 

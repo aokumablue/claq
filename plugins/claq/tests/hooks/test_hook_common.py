@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import block_no_verify, hook_common
+from claq.hooks import hook_common
 from claq.hooks.hook_common import print_session_start_output
 
 
@@ -74,9 +74,8 @@ def test_resolve_repo_root(monkeypatch: pytest.MonkeyPatch, outcome: object, exp
     ],
 )
 def test_git_executable_token(token: str, expected: bool) -> None:
-    """basename が git のトークンだけを git 起動とみなし、block_no_verify の判定も同じ共有正規化に揃うこと。"""
+    """basename が git のトークンだけを git 起動とみなすこと。"""
     assert hook_common.is_git_executable_token(token) is expected
-    assert block_no_verify.is_git_invocation(token) is expected
 
 
 @pytest.mark.parametrize(

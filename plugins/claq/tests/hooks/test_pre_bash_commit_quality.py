@@ -98,7 +98,7 @@ class TestMainStdinBoundary:
         expected_reason: str | None,
     ) -> None:
         """deny は exit 2 と理由入りの deny JSON・stderr を出し、commit でないコマンドは品質スキャンに入らず無出力の exit 0 で通すこと。"""
-        monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin_with_truncation", read)
+        monkeypatch.setattr(pbcq, "read_raw_stdin_with_truncation", read)
 
         rc = pbcq.main()
         captured = capsys.readouterr()
@@ -243,11 +243,11 @@ class TestCompoundCommitGuard:
         ids=["single-container", "harmless-first-key", "passing-commit-first-key"],
     )
     def test_evaluate_denies_across_every_container_key(self, payload: dict, expected_reason: str) -> None:
-        """evaluate() は全コンテナキーの `git commit` を検査し、deny 理由と exitCode 2 を返すこと。"""
+        """evaluate() は全コンテナキーの `git commit` を検査し、deny 理由を返すこと。"""
         result = pbcq.evaluate(json.dumps(payload))
 
-        assert result["exitCode"] == 2
-        assert result["reason"] == expected_reason
+        assert result is not None
+        assert result == expected_reason
 
     def test_evaluate_skips_container_whose_commit_detection_raises(
         self, monkeypatch: pytest.MonkeyPatch
@@ -269,7 +269,7 @@ class TestCompoundCommitGuard:
 
         result = pbcq.evaluate(raw)
 
-        assert result["exitCode"] == 0
+        assert result is None
         assert calls == ["boom", "echo ok"]
 
 
@@ -277,14 +277,13 @@ class TestArgvGroupCommitCounting:
     """argv 配列は 1 本のコマンドとして数え、要素と結合の二重計上で誤拒否しない。"""
 
     @staticmethod
-    def _run(command: object, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, list[str]]:
+    def _run(command: object, monkeypatch: pytest.MonkeyPatch) -> tuple[str | None, list[str]]:
         """品質スキャンを stub に差し替えて ``evaluate`` を実行し、スキャンに渡った command を返す。"""
         scanned: list[str] = []
 
-        def _stub(raw_input: str, command: str, commit_args: list[str]) -> dict:
+        def _stub(command: str, commit_args: list[str]) -> None:
             """スキャンに渡った command を記録し、問題なしで通す。"""
             scanned.append(command)
-            return {"output": raw_input, "exitCode": 0}
 
         monkeypatch.setattr(pbcq, "_evaluate_confirmed_commit", _stub)
         raw = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
@@ -336,8 +335,8 @@ class TestArgvGroupCommitCounting:
         """argv 配列の commit を 1 本ずつ数え、1 本なら品質スキャンへ渡し、複数なら deny すること。"""
         result, scanned = self._run(command, monkeypatch)
 
-        assert result["exitCode"] == expected_exit
-        assert result.get("reason") == expected_reason
+        assert (0 if result is None else 2) == expected_exit
+        assert result == expected_reason
         assert scanned == expected_scanned
 
     def test_oversized_element_in_argv_group_is_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -345,8 +344,8 @@ class TestArgvGroupCommitCounting:
         monkeypatch.setattr(pbcq, "command_exceeds_scan_budget", lambda command: command == "big")
         result, scanned = self._run(["git", "big"], monkeypatch)
 
-        assert result["exitCode"] == 2
-        assert result["reason"] == pbcq._SCAN_BUDGET_MESSAGE
+        assert result is not None
+        assert result == pbcq._SCAN_BUDGET_MESSAGE
         assert scanned == []
 
     def test_failing_candidate_in_argv_group_does_not_drop_the_others(
@@ -364,7 +363,7 @@ class TestArgvGroupCommitCounting:
         monkeypatch.setattr(pbcq, "_detect_git_commit", _flaky)
         result, scanned = self._run(["boom", "git commit -m a"], monkeypatch)
 
-        assert result["exitCode"] == 0
+        assert result is None
         assert scanned == ["git commit -m a"]
 
 
@@ -382,8 +381,8 @@ class TestWorktreeEnumerationFailClosed:
         monkeypatch.setattr(pbcq, "get_unstaged_modified_files", lambda: None)
         raw = json.dumps({"tool_input": {"command": "git commit -am x"}})
         result = pbcq.evaluate(raw)
-        assert result["exitCode"] == 2
-        assert result["reason"] == pbcq._WORKTREE_FILES_UNAVAILABLE_MESSAGE
+        assert result is not None
+        assert result == pbcq._WORKTREE_FILES_UNAVAILABLE_MESSAGE
 
 
 class TestStagedFileNameDecoding:
@@ -509,9 +508,9 @@ class TestCommitAgainstAnotherIndex:
         """別の index / 作業ツリーを commit しうる形は、cwd に staged が無くても deny する。"""
         result = pbcq.evaluate(json.dumps({"tool_input": {"command": command}}))
 
-        assert result["exitCode"] == 2
-        assert result["reason"] == pbcq._COMMIT_TARGET_UNVERIFIABLE_MESSAGE
-        assert "separate tool call" in result["reason"]
+        assert result is not None
+        assert result == pbcq._COMMIT_TARGET_UNVERIFIABLE_MESSAGE
+        assert "separate tool call" in result
 
     @pytest.mark.parametrize(
         "command",
@@ -529,7 +528,7 @@ class TestCommitAgainstAnotherIndex:
         """cwd の index を commit する形は従来どおり走査へ進む（ここでは staged 無しで exit 0）。"""
         result = pbcq.evaluate(json.dumps({"tool_input": {"command": command}}))
 
-        assert result["exitCode"] == 0
+        assert result is None
 
     @pytest.mark.parametrize(
         ("command", "expected"),

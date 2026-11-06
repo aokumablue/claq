@@ -85,8 +85,7 @@ def test_evaluate_counts_issues_by_severity(
 
     result = pre_bash_commit_quality.evaluate("payload")
 
-    verdict = {"exitCode": 0} if expected_reason is None else {"exitCode": 2, "reason": expected_reason}
-    assert result == {"output": "payload", **verdict}
+    assert result == expected_reason
     assert logs == ["[Hook] Checking 1 staged file(s)...", *expected_logs]
     assert validated == [_COMMIT]
 
@@ -156,8 +155,7 @@ def test_evaluate_verdict_by_input_and_failure(
     if patch is not None:
         monkeypatch.setattr(pre_bash_commit_quality, *patch)
 
-    verdict = {"exitCode": 0} if expected_reason is None else {"exitCode": 2, "reason": expected_reason}
-    assert pre_bash_commit_quality.evaluate(raw) == {"output": raw, **verdict}
+    assert pre_bash_commit_quality.evaluate(raw) == expected_reason
     assert logs == expected_logs
 
 

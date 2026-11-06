@@ -72,7 +72,7 @@ def test_evaluate_shares_one_secret_scan_budget(
     # 1 ファイルの時刻取得は lint / secret の 2 回。予算 10 秒は 1 件目の secret scan（累積 18 秒）で尽き、
     # 以降のファイルは lint scan が同じ 1 本の予算を見て即 scan_error になる。予算が複数本なら後続が通ってしまう。
     files = staged + (unstaged or [])
-    assert result["exitCode"] == 2
+    assert result is not None
     assert [path for path in files if any(path in m and "SecretScanBudgetExceeded" in m for m in logs)] == files
     assert validated == [command]
 
@@ -84,7 +84,7 @@ def test_evaluate_commit_amend_with_nothing_staged_is_a_noop(monkeypatch: pytest
     """
     logs = _stub_commit(monkeypatch, "git   commit  --amend --no-edit", [])
 
-    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+    assert pre_bash_commit_quality.evaluate("payload") is None
     assert any("No staged files found" in message for message in logs)
 
 
@@ -126,7 +126,7 @@ def test_evaluate_scans_the_files_the_commit_includes(
     seen = _record_scans(monkeypatch, [])
     validated = _spy_commit_message_validation(monkeypatch)
 
-    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+    assert pre_bash_commit_quality.evaluate("payload") is None
     assert seen == expected_seen
     assert validated == [command]
 
@@ -169,7 +169,7 @@ def test_evaluate_denies_after_scanning_staged_files(
 
     result = pre_bash_commit_quality.evaluate("payload")
 
-    assert result == {"output": "payload", "exitCode": 2, "reason": expected_reason}
+    assert result == expected_reason
     assert seen == [("src/staged.py", None)]
     assert any(expected_log in message for message in logs)
 
@@ -196,7 +196,7 @@ def test_evaluate_detects_secret_from_the_source_the_commit_reads(
         _git(repo, "add", "app.py")
         (repo / "app.py").write_text("value = 'clean'\n", encoding="utf-8")
 
-    assert _evaluate_in_repo(command, repo, monkeypatch)["exitCode"] == 2
+    assert _evaluate_in_repo(command, repo, monkeypatch) is not None
 
 
 def test_get_unstaged_modified_files_returns_success_output(monkeypatch: pytest.MonkeyPatch) -> None:

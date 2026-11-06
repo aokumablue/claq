@@ -13,7 +13,7 @@ import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from claq.hooks.output_adapter import adapt_context_output, emit_block
+from claq.hooks.output_adapter import adapt_context_output, adapt_deny_output
 from claq.lib.core_utils import get_home_dir
 
 # `scan_memo` の with の中でだけ使う、引数ごとの結果の置き場。with の外では None（毎回計算する）。
@@ -334,11 +334,10 @@ def emit_block_output(reason: str) -> int:
     Raises:
         例外は発生しません。
     """
-    exit_code, deny_out, reason_err = emit_block(reason)
     with contextlib.suppress(Exception):
-        write_stdout(deny_out)
-        write_stderr(reason_err + "\n")
-    return exit_code
+        write_stdout(adapt_deny_output(reason))
+        write_stderr(reason + "\n")
+    return 2
 
 
 def print_session_start_output(additional_context: str) -> None:
