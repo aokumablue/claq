@@ -5,13 +5,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TARGET_VERSION=""
+BUMP_PART=""
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/version-up.sh --version X.Y.Z
+Usage: bash scripts/version-up.sh (--version X.Y.Z | --bump major|minor|patch)
 
 Options:
   --version VERSION   New version to write to all version fields
+  --bump PART         Increment PART of the current version (lower parts reset to 0)
   --help              Show this help
 
 The repository version and the plugin version are kept identical.
@@ -28,6 +30,11 @@ while [[ $# -gt 0 ]]; do
     --version)
       [[ $# -ge 2 ]] || fail "--version requires a value"
       TARGET_VERSION="$2"
+      shift 2
+      ;;
+    --bump)
+      [[ $# -ge 2 ]] || fail "--bump requires a value"
+      BUMP_PART="$2"
       shift 2
       ;;
     --help|-h)
@@ -51,19 +58,28 @@ if [[ $# -gt 0 ]]; then
   fail "unexpected argument: $1"
 fi
 
-if [[ -z "${TARGET_VERSION}" ]]; then
-  fail "--version is required"
+if [[ -n "${TARGET_VERSION}" && -n "${BUMP_PART}" ]]; then
+  fail "--version and --bump are mutually exclusive"
 fi
 
-if [[ ! "${TARGET_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if [[ -z "${TARGET_VERSION}" && -z "${BUMP_PART}" ]]; then
+  fail "--version or --bump is required"
+fi
+
+if [[ -n "${TARGET_VERSION}" && ! "${TARGET_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   fail "invalid version format: ${TARGET_VERSION}"
 fi
+
+case "${BUMP_PART}" in
+  ""|major|minor|patch) ;;
+  *) fail "invalid bump part: ${BUMP_PART}" ;;
+esac
 
 if ! command -v python3 >/dev/null 2>&1; then
   fail "python3 is required"
 fi
 
-python3 - "${REPO_ROOT}" "${TARGET_VERSION}" <<'PY'
+python3 - "${REPO_ROOT}" "${TARGET_VERSION}" "${BUMP_PART}" <<'PY'
 from __future__ import annotations
 
 import json
@@ -79,6 +95,7 @@ def fail(message: str) -> None:
 
 repo_root = Path(sys.argv[1])
 target_version = sys.argv[2]
+bump_part = sys.argv[3]
 
 paths = {
     "pyproject": repo_root / "plugins" / "claq" / "pyproject.toml",
@@ -127,37 +144,39 @@ if any(version is None for version in current_versions):
 if len(set(current_versions)) != 1:
     fail("version mismatch before update")
 
+if bump_part:
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", pyproject_version):
+        fail(f"current version is not X.Y.Z: {pyproject_version}")
+    major, minor, patch = (int(part) for part in pyproject_version.split("."))
+    target_version = {
+        "major": f"{major + 1}.0.0",
+        "minor": f"{major}.{minor + 1}.0",
+        "patch": f"{major}.{minor}.{patch + 1}",
+    }[bump_part]
+
 if len(re.findall(r'(?m)^version = "([^"]+)"$', pyproject_text)) != 1:
     fail(f"failed to locate exactly one version field in {paths['pyproject']}")
 
-updated_pyproject_text, pyproject_count = re.subn(
+updated_pyproject_text = re.sub(
     r'(?m)^version = "([^"]+)"$',
     f'version = "{target_version}"',
     pyproject_text,
     count=1,
 )
-if pyproject_count != 1:
-    fail(f"failed to update {paths['pyproject']}")
 
 plugin_data["version"] = target_version
-if not isinstance(marketplace_plugins, list) or not marketplace_plugins:
-    fail(f"plugins[0] not found in {paths['marketplace']}")
-marketplace_first_plugin = marketplace_plugins[0]
-if not isinstance(marketplace_first_plugin, dict):
-    fail(f"plugins[0] is not an object in {paths['marketplace']}")
-marketplace_first_plugin["version"] = target_version
+# marketplace_version が None でないことを上で確かめたので、plugins[0] は dict。
+marketplace_plugins[0]["version"] = target_version
 
 if len(re.findall(r'(?m)^__version__ = "([^"]+)"$', version_py_text)) != 1:
     fail(f"failed to locate exactly one __version__ field in {paths['version_py']}")
 
-updated_version_py_text, version_py_count = re.subn(
+updated_version_py_text = re.sub(
     r'(?m)^__version__ = "([^"]+)"$',
     f'__version__ = "{target_version}"',
     version_py_text,
     count=1,
 )
-if version_py_count != 1:
-    fail(f"failed to update {paths['version_py']}")
 
 paths["pyproject"].write_text(updated_pyproject_text, encoding="utf-8")
 paths["plugin_json"].write_text(json.dumps(plugin_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

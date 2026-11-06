@@ -64,9 +64,10 @@ _VERSION_FILES = (
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """version-up.sh と 4 つの更新対象だけを複製した最小リポジトリ。"""
+    """version-up.sh・bump-*.sh と 4 つの更新対象だけを複製した最小リポジトリ。"""
     repo_root = tmp_path / "repo"
-    for rel in (Path("scripts/version-up.sh"), *_VERSION_FILES):
+    scripts = [Path("scripts/version-up.sh"), *(Path(f"scripts/bump-{part}.sh") for part in ("major", "minor", "patch"))]
+    for rel in (*scripts, *_VERSION_FILES):
         (repo_root / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, repo_root / rel)
     return repo_root
@@ -126,10 +127,13 @@ def test_bump_version_updates_all_targets(repo: Path) -> None:
 @pytest.mark.parametrize(
     ("suffix_args", "ok", "message"),
     [
-        (["--help"], True, "Usage: bash scripts/version-up.sh --version X.Y.Z"),
+        (["--help"], True, "Usage: bash scripts/version-up.sh (--version X.Y.Z | --bump major|minor|patch)"),
         (["--version", "{current}-beta"], False, "invalid version format"),
+        (["--bump", "build"], False, "invalid bump part: build"),
+        (["--bump", "patch", "--version", "9.9.9"], False, "--version and --bump are mutually exclusive"),
+        ([], False, "--version or --bump is required"),
     ],
-    ids=["help-prints-usage", "rejects-non-semver"],
+    ids=["help-prints-usage", "rejects-non-semver", "rejects-unknown-bump-part", "rejects-both-modes", "requires-a-mode"],
 )
 def test_bump_version_without_update(repo: Path, suffix_args: list[str], ok: bool, message: str) -> None:
     """--help は usage を stdout へ、セマンティックバージョン以外は拒否を stderr へ出し、どちらも版を変えないこと。"""
@@ -153,3 +157,20 @@ def test_bump_version_rejects_preexisting_version_drift(repo: Path) -> None:
     assert result.returncode != 0
     assert "version mismatch before update" in result.stderr
     assert read_versions(repo) == (current, "0.0.99", current, current)
+
+
+@pytest.mark.parametrize(
+    ("part", "expected"),
+    [("major", "{x}.0.0"), ("minor", "{major}.{y}.0"), ("patch", "{major}.{minor}.{z}")],
+)
+def test_bump_script_increments_the_named_part(repo: Path, part: str, expected: str) -> None:
+    """bump-<part>.sh は現在の版の該当部を 1 つ進め、下位を 0 に戻して 4 箇所を更新すること。"""
+    major, minor, patch = (int(n) for n in read_versions(repo)[0].split("."))
+    next_version = expected.format(major=major, minor=minor, x=major + 1, y=minor + 1, z=patch + 1)
+
+    result = subprocess.run(
+        ["bash", str(repo / "scripts" / f"bump-{part}.sh")], capture_output=True, check=False, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert read_versions(repo) == (next_version,) * 4
