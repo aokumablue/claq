@@ -344,7 +344,7 @@ class TestList:
     )
     def test_fit_budget(self, lines: list[str], expected: list[str]) -> None:
         """予算内なら全行そのまま、1 行目から予算超過なら告知行だけを返す。"""
-        assert command_support._fit_budget(lines, cmd_knowledge.LIST_CHAR_BUDGET) == expected
+        assert command_support.fit_budget(lines, cmd_knowledge.LIST_CHAR_BUDGET) == expected
 
 
 class TestQueryTerms:

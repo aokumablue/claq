@@ -20,7 +20,7 @@ from claq.hooks.shell_tokens import WRITE_REDIRECT_OPERATORS, split_segments, to
 
 # PreToolUse フックは実行前の index/worktree しか観測できず、2 つ目以降の commit が
 # 何をコミットするかを原理的に検査できない。
-_MULTIPLE_COMMITS_MESSAGE = (
+MULTIPLE_COMMITS_MESSAGE = (
     "[Hook] BLOCKED: this command contains more than one `git commit`. A "
     "PreToolUse hook can only inspect the index as it is before the command "
     "runs, so any commit after the first one cannot be scanned. Split them "
@@ -38,7 +38,7 @@ _MUTATION_BEFORE_COMMIT_MESSAGE = (
 )
 
 
-def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
+def find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
     """1 セグメント（シェル区切りを含まないトークン列）内の `git commit` 呼び出しを探します。
 
     `git` トークンの後は、既知/未知を問わずグローバルオプションとその値を区別せず
@@ -61,7 +61,7 @@ def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
     return segment[segment.index("commit", start + 1) + 1 :]
 
 
-def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
+def is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     """コマンド文字列が `git commit` 呼び出しかを判定し、commit 引数トークンを返します。
 
     トークン化してシェル区切りごとのセグメントに分け、セグメントごとに `git` →
@@ -85,7 +85,7 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
     """
     tokens, parsed_cleanly = tokenize_with_status(command)
     for segment in split_segments(tokens):
-        commit_args = _find_git_commit_args_in_segment(segment)
+        commit_args = find_git_commit_args_in_segment(segment)
         if commit_args is not None:
             return True, commit_args
 
@@ -206,7 +206,7 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
     return False
 
 
-def _compound_commit_risk(command: str) -> str | None:
+def compound_commit_risk(command: str) -> str | None:
     """1 回の Bash 呼び出しの中で commit 内容を検査できなくする構造を検出します。
 
     PreToolUse フックが観測できるのはコマンド実行前の index/worktree だけなので、
@@ -229,17 +229,17 @@ def _compound_commit_risk(command: str) -> str | None:
         例外は発生しません。
     """
     segments = split_segments(tokenize(command))
-    commit_indices = [i for i, segment in enumerate(segments) if _find_git_commit_args_in_segment(segment) is not None]
+    commit_indices = [i for i, segment in enumerate(segments) if find_git_commit_args_in_segment(segment) is not None]
     if not commit_indices:
         return None
     if len(commit_indices) > 1:
-        return _MULTIPLE_COMMITS_MESSAGE
+        return MULTIPLE_COMMITS_MESSAGE
     if any(_segment_mutates_worktree_or_index(segment) for segment in segments[: commit_indices[0]]):
         return _MUTATION_BEFORE_COMMIT_MESSAGE
     return None
 
 
-def _is_commit_all_flag(commit_args: list[str]) -> bool:
+def is_commit_all_flag(commit_args: list[str]) -> bool:
     """commit 引数トークンに `-a`/`--all`（結合短形式含む）が含まれるかを判定します。
 
     `-am` のような結合短形式は、`-` 始まり・`--` ではない・`=` を含まない短形式

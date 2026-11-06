@@ -10,7 +10,7 @@ from types import TracebackType
 
 from claq.lib.core_utils import ensure_private_dir
 from claq.mem.models import Knowledge, Repo, Session, utc_now_iso
-from claq.mem.schema import _SCHEMA_SQL
+from claq.mem.schema import SCHEMA_SQL
 
 
 class DatabaseError(Exception):
@@ -81,7 +81,7 @@ class Database:
         if stat.S_IMODE(path.stat().st_mode) != 0o600:
             path.chmod(0o600)
         self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(_SCHEMA_SQL)
+        self.conn.executescript(SCHEMA_SQL)
         self.conn.commit()
         for pragma in (
             "PRAGMA temp_store = MEMORY",
@@ -221,11 +221,11 @@ class Database:
 
         ``status`` は衝突時も ``excluded.status`` で上書きする。**これは意図的で
         あり、ここへ「既存 status を維持する」ガードを足してはならない** ——
-        ``cmd_knowledge._handle_forget`` が ``archived`` を書き込むのに本メソッドを使って
+        ``cmd_knowledge.handle_forget`` が ``archived`` を書き込むのに本メソッドを使って
         おり、維持ガードを入れると forget が黙って効かなくなる。
 
         「人間が promote した active カードを agent の再 learn が pending へ
-        戻す」問題は、本メソッドではなく ``cmd_knowledge._handle_learn`` で塞ぐ。
+        戻す」問題は、本メソッドではなく ``cmd_knowledge.handle_learn`` で塞ぐ。
         DB 層は汎用の upsert のままにし、誰の書込みを拒むかという判断は
         経路ごとに持たせる。
 

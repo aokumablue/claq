@@ -1,6 +1,6 @@
 """`pre_bash_commit_quality` 専用テスト（shell 区切り誤認 / fail-open 境界）。
 
-`_is_git_commit_command` 系テストのうち、shell 区切り文字の密着トークン化と
+`is_git_commit_command` 系テストのうち、shell 区切り文字の密着トークン化と
 stdin truncation / main() の fail-open・fail-closed 境界分割に関する分岐は
 本ファイルへ集約する。
 """
@@ -41,7 +41,7 @@ class TestShellSeparatorTokenization:
     )
     def test_is_git_commit_command_shell_separator_boundary(self, command: str, expected_is_commit: bool) -> None:
         """区切り文字で分けたセグメントの実行位置にある `git commit` だけを commit と判定すること。"""
-        is_commit, _args = commit_risk._is_git_commit_command(command)
+        is_commit, _args = commit_risk.is_git_commit_command(command)
         assert is_commit is expected_is_commit
 
     def test_block_no_verify_and_commit_quality_agree_on_quoted_text(self) -> None:
@@ -53,7 +53,7 @@ class TestShellSeparatorTokenization:
         """
         quoted = "copilot -p 'Explain why a git commit command may fail'"
 
-        assert commit_risk._is_git_commit_command(quoted)[0] is False
+        assert commit_risk.is_git_commit_command(quoted)[0] is False
         assert block_no_verify.has_bypass_flag(quoted) is False
 
 
@@ -118,8 +118,8 @@ class TestCompoundCommitGuard:
         ("command", "expected_message"),
         [
             # 複数 commit: 2 つ目がコミットする内容は実行前状態に現れない。
-            ("git commit --allow-empty -m first && git commit -am second", commit_risk._MULTIPLE_COMMITS_MESSAGE),
-            ("git commit -m a; git commit -m b", commit_risk._MULTIPLE_COMMITS_MESSAGE),
+            ("git commit --allow-empty -m first && git commit -am second", commit_risk.MULTIPLE_COMMITS_MESSAGE),
+            ("git commit -m a; git commit -m b", commit_risk.MULTIPLE_COMMITS_MESSAGE),
             # commit より前の index / worktree 変更。
             ("git add . && git commit -m x", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             (
@@ -164,7 +164,7 @@ class TestCompoundCommitGuard:
     )
     def test_uninspectable_compounds_are_denied(self, command: str, expected_message: str) -> None:
         """commit より前の変更・複数 commit を含む複合コマンドを、その理由で止めること。"""
-        assert commit_risk._compound_commit_risk(command) == expected_message
+        assert commit_risk.compound_commit_risk(command) == expected_message
 
     @pytest.mark.parametrize(
         "command",
@@ -197,7 +197,7 @@ class TestCompoundCommitGuard:
     )
     def test_inspectable_commands_pass(self, command: str) -> None:
         """commit 前が read-only・commit が単独・commit を含まないコマンドは本ガードで止めないこと。"""
-        assert commit_risk._compound_commit_risk(command) is None
+        assert commit_risk.compound_commit_risk(command) is None
 
     @pytest.mark.parametrize(
         "segment",
@@ -237,7 +237,7 @@ class TestCompoundCommitGuard:
                     "tool_input": {"command": "git commit -m ok"},
                     "tool_args": {"command": "git add . && git commit -m x"},
                 },
-                commit_risk._MULTIPLE_COMMITS_MESSAGE,
+                commit_risk.MULTIPLE_COMMITS_MESSAGE,
             ),
         ],
         ids=["single-container", "harmless-first-key", "passing-commit-first-key"],
@@ -262,7 +262,7 @@ class TestCompoundCommitGuard:
                 raise RuntimeError("tokenize exploded")
             return (False, [])
 
-        monkeypatch.setattr(pbcq, "_is_git_commit_command", _flaky)
+        monkeypatch.setattr(pbcq, "is_git_commit_command", _flaky)
         raw = json.dumps(
             {"tool_name": "Bash", "tool_input": {"command": "boom"}, "tool_args": {"command": "echo ok"}}
         )
@@ -305,11 +305,11 @@ class TestArgvGroupCommitCounting:
             (
                 [["git", "commit", "-m", "a"], ["git", "commit", "-m", "b"]],
                 2,
-                commit_risk._MULTIPLE_COMMITS_MESSAGE,
+                commit_risk.MULTIPLE_COMMITS_MESSAGE,
                 [],
             ),
             # コマンド文字列を並べた配列の複数 commit は要素をそのまま数えて deny する。
-            (["git commit -m a", "git commit -m b"], 2, commit_risk._MULTIPLE_COMMITS_MESSAGE, []),
+            (["git commit -m a", "git commit -m b"], 2, commit_risk.MULTIPLE_COMMITS_MESSAGE, []),
             # 結合側が検出しない配列でも、要素 1 件の commit は検査する。
             (["git commit -m a", "echo done"], 0, None, ["git commit -m a"]),
             # commit を含まない argv は検査せずに通す。

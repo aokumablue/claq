@@ -48,11 +48,11 @@ from claq.hooks.commit_quality_scanner import (
     should_scan_secrets,
 )
 from claq.hooks.commit_risk import (
-    _MULTIPLE_COMMITS_MESSAGE,
-    _compound_commit_risk,
-    _find_git_commit_args_in_segment,
-    _is_commit_all_flag,
-    _is_git_commit_command,
+    MULTIPLE_COMMITS_MESSAGE,
+    compound_commit_risk,
+    find_git_commit_args_in_segment,
+    is_commit_all_flag,
+    is_git_commit_command,
 )
 from claq.hooks.hook_common import (
     DIRECTORY_CHANGE_COMMANDS,
@@ -193,7 +193,7 @@ def _commit_target_risk(command: str) -> str | None:
         例外は発生しません。
     """
     for segment in split_segments(tokenize(command)):
-        commit_args = _find_git_commit_args_in_segment(segment)
+        commit_args = find_git_commit_args_in_segment(segment)
         if commit_args is None:
             if any(
                 normalize_executable_name(token) in DIRECTORY_CHANGE_COMMANDS or _points_git_elsewhere(token)
@@ -314,10 +314,10 @@ def _detect_git_commit(command: str) -> tuple[str, list[str]] | None:
         どちらの読み方でも commit でなければ None。
 
     Raises:
-        例外は発生しません（`_is_git_commit_command` の契約に従う）。
+        例外は発生しません（`is_git_commit_command` の契約に従う）。
     """
     for variant in command_dialect_variants(command):
-        is_commit, commit_args = _is_git_commit_command(variant)
+        is_commit, commit_args = is_git_commit_command(variant)
         if is_commit:
             return variant, commit_args
     return None
@@ -358,7 +358,7 @@ def _partition_commit_all_files(
     Raises:
         例外は発生しません。
     """
-    if not _is_commit_all_flag(commit_args):
+    if not is_commit_all_flag(commit_args):
         return list(staged_files), []
 
     unstaged = get_unstaged_modified_files()
@@ -660,10 +660,10 @@ def evaluate(raw_input: str) -> str | None:
         # 確定できないため、1 コマンド内の複数 commit と同じく検査不能として deny する。
         if len(commits) > 1:
             log("[Hook] ERROR: commit content cannot be inspected before execution.")
-            return _MULTIPLE_COMMITS_MESSAGE
+            return MULTIPLE_COMMITS_MESSAGE
 
         command, commit_args = commits[0]
-        compound_risk = _compound_commit_risk(command)
+        compound_risk = compound_commit_risk(command)
         if compound_risk is not None:
             log("[Hook] ERROR: commit content cannot be inspected before execution.")
             return compound_risk

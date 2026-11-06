@@ -21,7 +21,7 @@ from claq.mem.knowledge_input import (
     parse_knowledge_payload,
     validate_choice,
 )
-from claq.mem.schema import _SCHEMA_SQL
+from claq.mem.schema import SCHEMA_SQL
 
 # シークレット様のリテラルは連結で組み立てる（コミット品質フックの自己スキャンが
 # このファイル自体を secret として検出しないようにするため）。
@@ -426,7 +426,7 @@ def test_python_enum_matches_sql_check_clause(column: str, allowed: frozenset[st
     defaults = {"kind": "fact", "scope": "global", "status": "pending"}
     conn = sqlite3.connect(":memory:")
     try:
-        conn.executescript(_SCHEMA_SQL)
+        conn.executescript(SCHEMA_SQL)
         conn.execute(
             "INSERT INTO repos (id, identity_key, root_path, first_seen_at, last_seen_at)"
             " VALUES ('demo', 'demo-key', '/demo', 't0', 't0')"

@@ -196,7 +196,7 @@ _GITLAB_SECURITY_PATTERNS = (
 )
 
 
-def _has_gitlab_security_scanning(root_dir: str | Path) -> bool:
+def has_gitlab_security_scanning(root_dir: str | Path) -> bool:
     """GitLab CI に最低限のセキュリティスキャン設定があるかを確認する。"""
     content = safe_read(root_dir, ".gitlab-ci.yml")
     return any(re.search(pattern, content) for pattern in _GITLAB_SECURITY_PATTERNS)

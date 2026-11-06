@@ -54,7 +54,7 @@ _FEAT = ["-m", "feat: x"]
 )
 def test_is_git_commit_command(command: str, expected: tuple[bool, list[str]]) -> None:
     """セグメントの実行位置にある `git commit` だけを検出し、その commit の引数を返すこと。"""
-    assert commit_risk._is_git_commit_command(command) == expected
+    assert commit_risk.is_git_commit_command(command) == expected
 
 
 @pytest.mark.parametrize(
@@ -64,7 +64,7 @@ def test_is_git_commit_command(command: str, expected: tuple[bool, list[str]]) -
 )
 def test_is_commit_all_flag(commit_args: list[str], expected: bool) -> None:
     """-a / --all / -am のような結合短形式だけを -a 相当と判定すること。"""
-    assert commit_risk._is_commit_all_flag(commit_args) is expected
+    assert commit_risk.is_commit_all_flag(commit_args) is expected
 
 
 @pytest.mark.parametrize(
@@ -74,4 +74,4 @@ def test_is_commit_all_flag(commit_args: list[str], expected: bool) -> None:
 )
 def test_compound_commit_risk_sees_glued_operator_runs(command: str) -> None:
     """`shlex` が記号の連なりを 1 語にしても、commit 前の変更を見落とさない。"""
-    assert commit_risk._compound_commit_risk(command) == commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE
+    assert commit_risk.compound_commit_risk(command) == commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE

@@ -42,8 +42,8 @@ def test_safe_helpers_and_counting(tmp_path: Path) -> None:
     assert not harness_audit_utils._has_any_file(tmp_path, ["missing-a", "missing-b"])
 
     _write_files(tmp_path, {".gitlab-ci.yml": "dependency_scanning:\n  stage: test\n"})
-    assert harness_audit._has_gitlab_security_scanning(tmp_path)
-    assert not harness_audit._has_gitlab_security_scanning(tmp_path / "missing")
+    assert harness_audit.has_gitlab_security_scanning(tmp_path)
+    assert not harness_audit.has_gitlab_security_scanning(tmp_path / "missing")
 
 
 _FLAT = ".claude/plugins/claq/.claude-plugin/plugin.json"

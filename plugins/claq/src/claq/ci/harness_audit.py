@@ -11,12 +11,12 @@ from typing import Any, NamedTuple, NoReturn
 
 from claq.ci.harness_audit_repo_checks import get_repo_checks
 from claq.ci.harness_audit_utils import (
-    _has_gitlab_security_scanning,
     count_files,
     detect_target_mode,
     file_has_content,
     find_plugin_install,
     has_file_with_extension,
+    has_gitlab_security_scanning,
     has_python_tests,
     make_check,
     safe_parse_json,
@@ -178,7 +178,7 @@ def _hosting_layout(root_dir: str | Path, hosting_service: str | None) -> _Hosti
             ci_path=".gitlab-ci.yml",
             security_path=".gitlab-ci.yml",
             ci_pass=file_has_content(root_dir, ".gitlab-ci.yml"),
-            security_pass=file_has_content(root_dir, "SECURITY.md") or _has_gitlab_security_scanning(root_dir),
+            security_pass=file_has_content(root_dir, "SECURITY.md") or has_gitlab_security_scanning(root_dir),
         )
     return _HostingLayout(
         ci_path=".github/workflows/",

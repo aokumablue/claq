@@ -171,7 +171,7 @@ def _repo_scope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     # ディレクトリは git リポジトリではないため、素のままだと「staged を特定
     # できない」の fail-closed で全ケースが exit 2 になり、mutation ガードの
     # 判定軸がまったく効いていなくても表が緑になる。空 staged を与えて、
-    # `_compound_commit_risk` の結論だけが exit code に出る状態にする。
+    # `compound_commit_risk` の結論だけが exit code に出る状態にする。
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: [])
     return tmp_path
 

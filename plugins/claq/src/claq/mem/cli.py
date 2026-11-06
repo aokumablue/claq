@@ -37,16 +37,16 @@ from typing import Any, NamedTuple
 from claq.hooks.hook_common import print_session_start_output
 from claq.hooks.stdin_io import read_raw_stdin
 from claq.mem import logger as mem_logger
-from claq.mem.cmd_context import _handle_context, _handle_handoff
+from claq.mem.cmd_context import handle_context, handle_handoff
 from claq.mem.cmd_knowledge import (
-    _handle_forget,
-    _handle_learn,
-    _handle_list,
-    _handle_promote,
-    _handle_search,
-    _handle_show,
+    handle_forget,
+    handle_learn,
+    handle_list,
+    handle_promote,
+    handle_search,
+    handle_show,
 )
-from claq.mem.command_support import CommandArgs, CommandError, _CommandHandler
+from claq.mem.command_support import CommandArgs, CommandError, CommandHandler
 from claq.mem.database import Database
 from claq.mem.settings import Settings
 
@@ -366,16 +366,16 @@ def _remove_db_sidecars(db_path: Path) -> None:
         Path(f"{db_path}{suffix}").unlink(missing_ok=True)
 
 
-_COMMAND_HANDLERS: dict[str, _CommandHandler] = {
+_COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "init": _handle_init,
-    "context": _handle_context,
-    "handoff": _handle_handoff,
-    "learn": _handle_learn,
-    "list": _handle_list,
-    "search": _handle_search,
-    "show": _handle_show,
-    "promote": _handle_promote,
-    "forget": _handle_forget,
+    "context": handle_context,
+    "handoff": handle_handoff,
+    "learn": handle_learn,
+    "list": handle_list,
+    "search": handle_search,
+    "show": handle_show,
+    "promote": handle_promote,
+    "forget": handle_forget,
 }
 
 

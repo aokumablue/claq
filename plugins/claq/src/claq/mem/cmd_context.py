@@ -14,7 +14,7 @@ from claq.hooks.detach import recent_bg_failure_notice
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.env_pointer import ancestor_pointers_supported
 from claq.lib.harness import normalize_user_message
-from claq.mem.command_support import CommandArgs, _fit_budget, _session_uid
+from claq.mem.command_support import CommandArgs, fit_budget, session_uid_of
 from claq.mem.database import Database
 from claq.mem.handoff import build_handoff, truncate_handoff
 from claq.mem.knowledge_input import optional_str
@@ -135,7 +135,7 @@ def _knowledge_section(heading: str, rows: list[Knowledge], budget: int) -> str:
     if not rows:
         return ""
     ordered = sorted(rows, key=lambda row: (row.confidence, row.updated_at, row.id or 0), reverse=True)
-    return "\n".join([f"## {heading}", *_fit_budget([_format_injected_item(row) for row in ordered], budget)])
+    return "\n".join([f"## {heading}", *fit_budget([_format_injected_item(row) for row in ordered], budget)])
 
 
 def _handoff_section(db: Database, repo_id: str) -> str:
@@ -218,7 +218,7 @@ def _shell_bootstrap_section() -> str:
     )
 
 
-def _handle_context(settings: Settings, args: CommandArgs) -> str:
+def handle_context(settings: Settings, args: CommandArgs) -> str:
     """context コマンド: SessionStart へ注入する ``<claq-memory>`` ブロックを組み立てる。
 
     共通知識・リポジトリ知識・前回の引き継ぎを、いずれも ``status='active'`` に
@@ -238,7 +238,7 @@ def _handle_context(settings: Settings, args: CommandArgs) -> str:
         repo = resolve_repo(optional_str(payload.get("cwd")), db)
         # ここが sessions 行を作る唯一の場所で、SessionEnd の handoff はこの行を
         # 更新する。session_uid は NOT NULL UNIQUE なので空文字では作らない。
-        if session_uid := _session_uid(payload):
+        if session_uid := session_uid_of(payload):
             db.start_session(Session(session_uid=session_uid, repo_id=repo.id))
         sections = [
             _knowledge_section(
@@ -265,7 +265,7 @@ def _handle_context(settings: Settings, args: CommandArgs) -> str:
 # --- SessionEnd の引き継ぎ記録 ---
 
 
-def _handle_handoff(settings: Settings, args: CommandArgs) -> None:
+def handle_handoff(settings: Settings, args: CommandArgs) -> None:
     """handoff コマンド: SessionEnd の引き継ぎ本文を組み立てて ``sessions`` へ書き込む。
 
     既存行があれば更新し、無ければ作る（SessionStart が走らなかったハーネスでも
@@ -282,7 +282,7 @@ def _handle_handoff(settings: Settings, args: CommandArgs) -> None:
         args: コマンド引数と、SessionEnd フックが stdin へ渡した JSON。
     """
     payload = args.stdin_data
-    session_uid = _session_uid(payload)
+    session_uid = session_uid_of(payload)
     if not session_uid:
         return
     handoff = build_handoff(payload)

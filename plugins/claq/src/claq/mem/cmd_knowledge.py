@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 from claq.lib.core_utils import actor_identity
 from claq.mem import logger as mem_logger
-from claq.mem.command_support import CommandArgs, CommandError, _coerce_limit, _find_knowledge, _fit_budget
+from claq.mem.command_support import CommandArgs, CommandError, coerce_limit, find_knowledge, fit_budget
 from claq.mem.database import Database
 from claq.mem.knowledge_input import (
     KINDS,
@@ -90,7 +90,7 @@ _Ranker = Callable[[Knowledge], float]
 # --- 知識 CRUD ---
 
 
-def _handle_learn(settings: Settings, args: CommandArgs) -> None:
+def handle_learn(settings: Settings, args: CommandArgs) -> None:
     """learn コマンド: stdin の JSON から知識カードを 1 件登録する。
 
     出力は ``learned: <key>`` の 1 行のみ。``source``/``status`` は常に
@@ -174,7 +174,7 @@ def _collect_list_rows(
         CommandError: 列挙値・件数が不正な場合。
     """
     status, kind = _list_filters(args)
-    limit = _coerce_limit(args.values.get("--limit"), default_limit)
+    limit = coerce_limit(args.values.get("--limit"), default_limit)
 
     rows: list[Knowledge] = []
     with Database(settings.db_path) as db:
@@ -210,11 +210,11 @@ def _emit_rows(rows: list[Knowledge], args: CommandArgs, budget: int) -> None:
         payload = [{"key": row.key, "scope": row.scope, "kind": row.kind, "title": row.title} for row in rows]
         print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         return
-    for line in _fit_budget([f"- [{row.kind}] {row.title} ({row.key})" for row in rows], budget):
+    for line in fit_budget([f"- [{row.kind}] {row.title} ({row.key})" for row in rows], budget):
         print(line)
 
 
-def _handle_list(settings: Settings, args: CommandArgs) -> None:
+def handle_list(settings: Settings, args: CommandArgs) -> None:
     """list コマンド: 知識カードの一覧を ``- [kind] title (key)`` で 1 件 1 行に出す。
 
     Args:
@@ -311,7 +311,7 @@ def _score_knowledge(row: Knowledge, terms: tuple[str, ...], now: datetime) -> f
     return matched * _scaled_factor(row.confidence) * _recency_factor(row.updated_at, now)
 
 
-def _handle_search(settings: Settings, args: CommandArgs) -> None:
+def handle_search(settings: Settings, args: CommandArgs) -> None:
     """search コマンド: クエリに一致する知識カードを 1 件 1 行で出す。
 
     ``body`` はスコア計算にだけ使い、出力しない。本文は上位の key を ``show``
@@ -335,7 +335,7 @@ def _handle_search(settings: Settings, args: CommandArgs) -> None:
     _emit_rows(rows, args, SEARCH_CHAR_BUDGET)
 
 
-def _handle_show(settings: Settings, args: CommandArgs) -> None:
+def handle_show(settings: Settings, args: CommandArgs) -> None:
     """show コマンド: 知識カード 1 件を全項目表示する。``body`` を返す唯一の口。
 
     Args:
@@ -346,7 +346,7 @@ def _handle_show(settings: Settings, args: CommandArgs) -> None:
         CommandError: 該当が無い場合。
     """
     with Database(settings.db_path) as db:
-        found = _find_knowledge(db, args.positionals[0])
+        found = find_knowledge(db, args.positionals[0])
     for label, value in (
         ("key", found.key),
         ("scope", found.scope),
@@ -363,7 +363,7 @@ def _handle_show(settings: Settings, args: CommandArgs) -> None:
         print(f"{label}: {value}")
 
 
-def _handle_promote(settings: Settings, args: CommandArgs) -> None:
+def handle_promote(settings: Settings, args: CommandArgs) -> None:
     """promote コマンド: 知識カードの status を active にする。
 
     昇格は以後の全セッションへ自動注入される状態への遷移なので、誰が・いつ・
@@ -383,7 +383,7 @@ def _handle_promote(settings: Settings, args: CommandArgs) -> None:
     # 「active になったのに監査ログが残らず非 0 終了」という部分成功になる。
     actor = actor_identity()
     with Database(settings.db_path) as db:
-        found = _find_knowledge(db, key)
+        found = find_knowledge(db, key)
         db.set_knowledge_status(found.id, "active")
     log.info(
         "promote: key=%s scope=%s source=%s previous_status=%s actor=%s",
@@ -396,7 +396,7 @@ def _handle_promote(settings: Settings, args: CommandArgs) -> None:
     print(f"promoted: {key}")
 
 
-def _handle_forget(settings: Settings, args: CommandArgs) -> None:
+def handle_forget(settings: Settings, args: CommandArgs) -> None:
     """forget コマンド: 知識カードを archived にする。
 
     ``--superseded-by KEY`` を渡すと、その key の ``knowledge.id`` を
@@ -412,11 +412,11 @@ def _handle_forget(settings: Settings, args: CommandArgs) -> None:
     key = args.positionals[0]
     successor_key = args.values.get("--superseded-by")
     with Database(settings.db_path) as db:
-        found = _find_knowledge(db, key)
+        found = find_knowledge(db, key)
         found.status = "archived"
         found.updated_at = utc_now_iso()
         if successor_key is not None:
-            found.superseded_by = _find_knowledge(db, successor_key).id
+            found.superseded_by = find_knowledge(db, successor_key).id
         db.upsert_knowledge(found)
     suffix = f" (superseded by {successor_key})" if successor_key is not None else ""
     print(f"forgot: {key}{suffix}")
