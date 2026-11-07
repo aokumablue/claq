@@ -12,13 +12,11 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import commit_quality_scanner as commit_quality_scanner
-from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
+from claq.hooks import commit_quality_scanner, pre_bash_commit_quality
 
-from ._support import _scan_deadline
+from ._support import _SECRET_LINE, _scan_deadline
 
 _API_KEY_LINE = "api" + "_key" + ' = "abc123"'
-_SECRET_LINE = "api" + "_key" + ' = "hunter2secret"\n'
 _OVER_1MIB = "x" * (1024 * 1024 + 1)
 
 
@@ -139,10 +137,9 @@ def test_find_file_issues_reports_stage_exception_as_scan_error(
     monkeypatch: pytest.MonkeyPatch, target: str, error: Exception, content: str, expected: list[tuple[str, str]]
 ) -> None:
     """各段階の例外は issue を消さず、段階ごとの severity の scan_error（パスと例外型名入り）として報告されること。"""
-    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
     monkeypatch.setattr(commit_quality_scanner, target, mock.Mock(side_effect=error))
 
-    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=_scan_deadline())
+    issues = _issues("src/app.js", content, monkeypatch)
 
     assert [(issue["type"], issue["severity"]) for issue in issues] == expected
     scan_error = next(issue for issue in issues if issue["type"] == "scan_error")

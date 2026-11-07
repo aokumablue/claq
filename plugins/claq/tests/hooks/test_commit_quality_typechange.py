@@ -15,9 +15,7 @@ import pytest
 
 from claq.hooks import commit_quality_scanner, pre_bash_commit_quality
 
-from ._support import _evaluate_in_repo, _git, _init_git_repo
-
-_SECRET_LINE = "api" + "_key" + ' = "hunter2secret"\n'
+from ._support import _SECRET_LINE, _evaluate_in_repo, _git, _init_git_repo
 
 
 def _make_repo(tmp_path: Path) -> Path:

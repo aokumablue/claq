@@ -1,8 +1,7 @@
 """行継続（``\\`` + 改行）による保護フック一斉バイパスの回帰テスト。
 
-シェルは ``\\`` と改行の
-**両方**を消して行を連結するが、`_strip_line_comments` / `_replace_unquoted_newlines`
-はエスケープ済みの 1 文字をそのまま出力するため両方が残る。残ったまま
+シェルは ``\\`` と改行の**両方**を消して行を連結するが、`_strip_line_comments` /
+`_replace_unquoted_newlines` はエスケープ済みの 1 文字をそのまま出力するため両方が残る。残ったまま
 ``shlex(posix=True)`` へ渡すと、whitespace 状態の ``\\`` が escape 状態へ遷移して
 改行を**次トークンの先頭文字**として吸収する。結果、継続行が 0 桁目から始まる
 ときにその先頭語が丸ごと別トークンへ化け、Bash 系保護フック 4 種が同時に
@@ -19,10 +18,7 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 import time
-from pathlib import Path
 
 import pytest
 
@@ -46,7 +42,8 @@ from claq.hooks.shell_tokens import (
     tokenize,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from ._support import PLUGIN_ROOT, _bash, _run_module
+from ._support import _run as _run_in_process
 
 # 検査予算（バイト数）を大きく超えるコマンド。
 _OVERSIZED = "git " * (MAX_COMMAND_BYTES // 2) + "&& git commit --no-verify -m x"
@@ -69,16 +66,7 @@ _CASES = [
 
 def _run_hook(module: str, command: str) -> int:
     """フックを実プロセスで起動して Bash payload を流し、exit code を返す。"""
-    payload = {"tool_name": "Bash", "tool_input": {"command": command}}
-    return subprocess.run(
-        [sys.executable, "-m", f"claq.hooks.{module}"],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        timeout=60,
-        cwd=REPO_ROOT,
-        check=False,
-    ).returncode
+    return _run_module(f"claq.hooks.{module}", json.dumps(_bash(command)), cwd=PLUGIN_ROOT).returncode
 
 
 @pytest.mark.parametrize(("module", "command", "expected", "label"), _CASES, ids=[f"{case[0]}:{case[3]}" for case in _CASES])
@@ -253,11 +241,9 @@ def test_block_no_verify_main_blocks_oversized_command_in_process(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`block_no_verify.main` が予算超過を走査前に BLOCKED にすること（in-process）。"""
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git " * 8 + "commit --no-verify"}})
     monkeypatch.setattr(block_no_verify, "command_exceeds_scan_budget", lambda command: len(command.split()) > 3)
-    monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False))
 
-    assert block_no_verify.main() == 2
+    assert _run_in_process("block_no_verify", _bash("git " * 8 + "commit --no-verify"), monkeypatch) == 2
     assert "exceeds" in capsys.readouterr().err
 
 
@@ -268,7 +254,7 @@ def test_pre_bash_commit_quality_evaluate_blocks_oversized_command_in_process(
     monkeypatch.setattr(
         pre_bash_commit_quality, "command_exceeds_scan_budget", lambda command: len(command.split()) > 3
     )
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git commit -m 'fix: a b c d'"}})
+    payload = json.dumps(_bash("git commit -m 'fix: a b c d'"))
 
     result = pre_bash_commit_quality.evaluate(payload)
 

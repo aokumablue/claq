@@ -1,8 +1,9 @@
 """tests/hooks の複数のファイルが使う補助。
 
-- secret scan 予算の deadline 生成・コミットメッセージ検証のスパイ
+- secret scan 予算の deadline 生成・コミットメッセージ検証のスパイ・secret の見本行（`_SECRET_LINE`）
 - 実 git リポジトリでの commit 品質フック評価の土台（`_git` / `_init_git_repo` / `_evaluate_in_repo`）
-- 保護フックの `main()` をインプロセスで呼ぶ土台（`_HOOKS` / `_run` / payload 組み立て / `_repo_scope` / `_home_outside_repo`）
+- 保護フックの `main()` をインプロセスで呼ぶ土台（`_HOOKS` / `_run` / payload 組み立て（`_bash` / `_write` /
+  `_write_content` / `_edit`） / `_repo_scope` / `_home_outside_repo`）
 - 保護語彙の期待値表（`_EXPECTED_*`、`_EXPECTED_VOCABULARIES`、`_EXTERNALLY_PINNED_VOCABULARIES`）。
   保護ファイル名の全数検査（`test_protection_bypass_regressions.py`）と語彙集合の固定
   （`test_protection_vocabulary_declarations.py`）が同じ表を使うため、ここに 1 つだけ置く。
@@ -10,6 +11,8 @@
   `_run_launcher`、hooks.json の宣言列挙 `_iter_declared_commands`）。起動スモーク（`test_hook_cli_launch_smoke.py`）・
   PreToolUse 入力軸のゲート（`test_hook_cli_contract.py`）・stdin 停止の実プロセス検査
   （`test_stdin_unavailable_fail_closed.py`）が共有する。
+- `python -m` で hook を別プロセス起動する土台（`SRC_ROOT` / `_run_module`）。launcher を通らない起動は
+  自分で src を積まないため、この checkout の src を PYTHONPATH で名指す。
 """
 
 from __future__ import annotations
@@ -24,9 +27,17 @@ from typing import Any
 
 import pytest
 
-from claq.hooks import bash_config_protection, block_no_verify, config_protection, hook_common
-from claq.hooks import commit_quality_scanner as commit_quality_scanner
-from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
+from claq.hooks import (
+    bash_config_protection,
+    block_no_verify,
+    commit_quality_scanner,
+    config_protection,
+    hook_common,
+    pre_bash_commit_quality,
+)
+
+# 鍵の形の文字列は連結で組む。完成形を literal で書くと secret の自己走査に掛かる。
+_SECRET_LINE = "api" + "_key" + ' = "hunter2secret"\n'
 
 
 def _spy_commit_message_validation(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -145,6 +156,24 @@ def _write_content(file_path: str, content: str) -> dict[str, Any]:
         フック stdin へ渡す payload dict。
     """
     return {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": content}}
+
+
+def _edit(file_path: str, old_string: str, new_string: str, tool_name: str = "Edit") -> dict[str, Any]:
+    """Edit 系ツール呼び出しの payload を組み立てる。
+
+    Args:
+        file_path: `file_path` フィールドに載せる値。
+        old_string: 置換前の断片。
+        new_string: 置換後の断片。
+        tool_name: ツール名。
+
+    Returns:
+        フック stdin へ渡す payload dict。
+    """
+    return {
+        "tool_name": tool_name,
+        "tool_input": {"file_path": file_path, "old_string": old_string, "new_string": new_string},
+    }
 
 
 _NO_VERIFY = "git commit --no-verify -m x"
@@ -600,7 +629,8 @@ _EXTERNALLY_PINNED_VOCABULARIES: dict[str, str] = {
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-LAUNCHER = PLUGIN_ROOT / "src" / "claq" / "launcher.py"
+SRC_ROOT = PLUGIN_ROOT / "src"
+LAUNCHER = SRC_ROOT / "claq" / "launcher.py"
 HOOK_WRAPPER = PLUGIN_ROOT / "runtime" / "claq-hook"
 _ISOLATED_ENV_PREFIXES = ("CODEX_", "GROK_", "COPILOT_")
 _ISOLATED_ENV_KEYS = frozenset({
@@ -654,6 +684,41 @@ def _run_launcher(hook: str, payload: dict, tmp_home: Path) -> subprocess.Comple
         text=True,
         env=_launcher_env(tmp_home),
         timeout=30,
+        check=False,
+    )
+
+
+def _run_module(
+    module: str,
+    stdin_text: str,
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+    timeout: float = 60,
+) -> subprocess.CompletedProcess[str]:
+    """``python -m <module>`` を別プロセスで起動し、``stdin_text`` を実 stdin へ流す。
+
+    素の ``python -m`` は editable install 経由で別の checkout の src を読みうるので（worktree で走らせると
+    メインの checkout を検査してしまう）、この checkout の src を PYTHONPATH で名指す。
+
+    Args:
+        module: dotted module name（例: claq.hooks.block_no_verify）。
+        stdin_text: stdin へ流す文字列。
+        env: 子の環境変数。None なら現在の環境を継承する。どちらも PYTHONPATH だけ上書きする。
+        cwd: 子の作業ディレクトリ。None なら現在のディレクトリを継承する。
+        timeout: 打ち切りまでの秒数。
+
+    Returns:
+        CompletedProcess。
+    """
+    return subprocess.run(
+        [sys.executable, "-m", module],
+        input=stdin_text,
+        capture_output=True,
+        text=True,
+        env={**(os.environ if env is None else env), "PYTHONPATH": str(SRC_ROOT)},
+        cwd=cwd,
+        timeout=timeout,
         check=False,
     )
 

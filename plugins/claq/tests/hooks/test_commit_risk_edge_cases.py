@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from claq.hooks import commit_risk as commit_risk
+from claq.hooks import commit_risk
 
 _MX = ["-m", "x"]
 _FEAT = ["-m", "feat: x"]

@@ -53,7 +53,7 @@ def test_write_through_symlink(
     assert _run("config_protection", _write(file_path), monkeypatch) == expected
 
 
-def test_effective_basename_falls_back_when_resolve_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_effective_basename_falls_back_when_target_is_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
     """resolve_effective_target が None を返す場合、raw path の basename にフォールバックする。"""
     monkeypatch.setattr(config_protection, "resolve_effective_target", lambda _path: None)
 

@@ -5,13 +5,13 @@ from __future__ import annotations
 import itertools
 import subprocess
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
-from claq.hooks import commit_quality_scanner as commit_quality_scanner
-from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
+from claq.hooks import commit_quality_scanner, pre_bash_commit_quality
 
-from ._support import _evaluate_in_repo, _git, _init_git_repo, _spy_commit_message_validation
+from ._support import _SECRET_LINE, _evaluate_in_repo, _git, _init_git_repo, _spy_commit_message_validation
 
 _DASH_A = "git commit -am 'feat(core): add'"
 _PLAIN = "git commit -m 'feat(core): add'"
@@ -191,7 +191,7 @@ def test_evaluate_detects_secret_from_the_source_the_commit_reads(
 ) -> None:
     """実 git で、commit 種別が読む側（作業ツリーか INDEX か）に入れた secret を検出して止めること。"""
     repo = _init_git_repo(tmp_path / "repo", {"app.py": "value = 'clean'\n"})
-    (repo / "app.py").write_text("value = 'clean'\n" + "api" + "_key" + ' = "hunter2secret"\n', encoding="utf-8")
+    (repo / "app.py").write_text("value = 'clean'\n" + _SECRET_LINE, encoding="utf-8")
     if stage_then_clean_worktree:
         _git(repo, "add", "app.py")
         (repo / "app.py").write_text("value = 'clean'\n", encoding="utf-8")
@@ -244,9 +244,5 @@ def test_get_unstaged_modified_files_when_diff_fails(
 
 def test_get_unstaged_modified_files_returns_none_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
     """subprocess が OSError 系例外を投げた場合は None を返すこと（fail-closed）。"""
-    monkeypatch.setattr(
-        pre_bash_commit_quality.subprocess,
-        "run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("missing")),
-    )
+    monkeypatch.setattr(pre_bash_commit_quality.subprocess, "run", mock.Mock(side_effect=FileNotFoundError("missing")))
     assert pre_bash_commit_quality.get_unstaged_modified_files() is None

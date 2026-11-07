@@ -16,6 +16,8 @@ import pytest
 from claq.hooks import block_no_verify, commit_risk, stdin_io
 from claq.hooks import pre_bash_commit_quality as pbcq
 
+from ._support import _bash
+
 
 class TestShellSeparatorTokenization:
     """shell 区切り文字がトークンへ密着した非 commit コマンド・引用文中の語の誤検出防止。"""
@@ -286,8 +288,7 @@ class TestArgvGroupCommitCounting:
             scanned.append(command)
 
         monkeypatch.setattr(pbcq, "_evaluate_confirmed_commit", _stub)
-        raw = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
-        return pbcq.evaluate(raw), scanned
+        return pbcq.evaluate(json.dumps(_bash(command))), scanned
 
     @pytest.mark.parametrize(
         ("command", "expected_exit", "expected_reason", "expected_scanned"),

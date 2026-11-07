@@ -25,6 +25,11 @@ def _home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("CLAQ_HOME", raising=False)
 
 
+def _raise_oserror(*args: object, **kwargs: object) -> None:
+    """注入した OSError を送出する。"""
+    raise OSError("injected")
+
+
 def test_unreadable_bg_log_is_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """読めない bg ログは通知材料にせず読み飛ばすこと。"""
     log_dir = tmp_path / ".claq" / "logs"
@@ -33,11 +38,6 @@ def test_unreadable_bg_log_is_skipped(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr(detach, "read_tail_text", _raise_oserror)
 
     assert detach.recent_bg_failure_notice() == ""
-
-
-def _raise_oserror(path: Path, max_bytes: int) -> str:
-    """読み取り失敗を模して OSError を送出する。"""
-    raise OSError("unreadable")
 
 
 @pytest.mark.parametrize(
@@ -172,14 +172,10 @@ def test_detach_process_launches_watchdog(tmp_path: Path, popen_calls: list[dict
     log_path = child_env.pop("CLAQ_BG_LOG_PATH")
     assert child_env == (dict(os.environ) if env is None else env)
     assert Path(log_path).parent == tmp_path / ".claq" / "logs"
-    assert Path(log_path).name.startswith("bg-") and log_path.endswith(".log")
+    assert Path(log_path).name.startswith("bg-")
+    assert log_path.endswith(".log")
     # 起動直後に unlink 済みで、一時ファイルが残らないこと。
     assert list((tmp_path / ".claq").glob("*.stdin")) == []
-
-
-def _raise_oserror(*args: object, **kwargs: object) -> None:
-    """注入した OSError を送出する。"""
-    raise OSError("injected")
 
 
 @pytest.mark.parametrize(
@@ -278,7 +274,8 @@ def test_watchdog_kills_process_group(
     limit = time.monotonic() + 10.0
     while time.monotonic() < limit and not (pid_file.exists() and pid_file.read_text()):
         time.sleep(0.02)
-    assert pid_file.exists() and pid_file.read_text(), "孫プロセスが起動しなかった"
+    assert pid_file.exists(), "孫プロセスが起動しなかった"
+    assert pid_file.read_text(), "孫プロセスが起動しなかった"
     grandchild_pid = int(pid_file.read_text())
 
     if signal_watchdog:

@@ -11,9 +11,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
-from claq.hooks import commit_quality_scanner as commit_quality_scanner
+from claq.hooks import commit_quality_scanner
 
 # 改行の無い 1MB 級の 1 行。行数は 1 なので「行数」基準では走査開始前の 1 回しか予算確認が起きない。
 _HUGE_LINE = "a" * (1024 * 1024)
@@ -30,7 +32,7 @@ _HUGE_LINE = "a" * (1024 * 1024)
     ],
     ids=["secret-short-line", "secret-huge-line", "lint-huge-line"],
 )
-def test_scanner_raises_when_deadline_passed(monkeypatch: pytest.MonkeyPatch, scan) -> None:
+def test_scanner_raises_when_deadline_passed(monkeypatch: pytest.MonkeyPatch, scan: Callable[[], object]) -> None:
     """渡された deadline を過ぎていれば各 scanner が SecretScanBudgetExceeded を送出すること。"""
     monkeypatch.setattr(commit_quality_scanner, "_monotonic", lambda: 1_000.0)
 

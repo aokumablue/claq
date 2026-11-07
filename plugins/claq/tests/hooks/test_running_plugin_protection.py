@@ -18,7 +18,7 @@ import pytest
 
 from claq.hooks import bash_config_protection, config_protection
 
-from ._support import _EXPECTED_VOCABULARIES, _bash, _run, _write
+from ._support import _EXPECTED_VOCABULARIES, _bash, _edit, _run, _write
 from ._support import _repo_scope as _repo_scope
 
 
@@ -44,11 +44,6 @@ def _running_root(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.
     return root
 
 
-def _edit(file_path: str) -> dict[str, Any]:
-    """file_path への Edit ツール呼び出しの payload を組み立てる。"""
-    return {"tool_name": "Edit", "tool_input": {"file_path": file_path, "old_string": "a", "new_string": "b"}}
-
-
 @pytest.mark.parametrize(
     "relative", ["runtime/claq-hook", "runtime/claq-hook.cmd", "src/claq/launcher.py", "src/claq/hooks/x.py"]
 )
@@ -61,7 +56,10 @@ def test_write_and_edit_into_running_plugin_are_denied(
     """実行中の plugin root の ``runtime/`` と ``src/claq/`` 配下への Write と Edit を deny する。"""
     target = str(_running_root / relative)
 
-    codes = (_run("config_protection", _write(target), monkeypatch), _run("config_protection", _edit(target), monkeypatch))
+    codes = (
+        _run("config_protection", _write(target), monkeypatch),
+        _run("config_protection", _edit(target, "a", "b"), monkeypatch),
+    )
     err = capsys.readouterr().err
 
     assert (codes, err.count("running claq plugin")) == ((2, 2), 2)

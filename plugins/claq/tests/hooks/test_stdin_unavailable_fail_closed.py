@@ -51,7 +51,9 @@ def test_unreadable_stdin_is_denied(
 ) -> None:
     """読み取り不能な stdin は全保護 hook が exit 2 で拒否し、hook 名と理由を名指す deny JSON と stderr を出すこと。"""
     reason = stdin_unreadable_message(hook_name, "pipe read failed")
-    assert hook_name in reason and "pipe read failed" in reason and "BLOCKED" in reason
+    assert hook_name in reason
+    assert "pipe read failed" in reason
+    assert "BLOCKED" in reason
     monkeypatch.setattr(
         importlib.import_module(hook),
         "read_raw_stdin_with_truncation",
@@ -68,12 +70,9 @@ def test_unreadable_stdin_is_denied(
     )
 
 
-@pytest.mark.parametrize(("hook", "hook_name"), _PROTECTION_HOOKS, ids=_HOOK_IDS)
+@pytest.mark.parametrize("hook", [hook for hook, _ in _PROTECTION_HOOKS], ids=_HOOK_IDS)
 def test_absent_stdin_still_passes_through(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    hook: str,
-    hook_name: str,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], hook: str
 ) -> None:
     """payload が無い場合（tty 起動等）は全保護 hook が何も出さず exit 0 で素通りすること。
 

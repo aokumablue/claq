@@ -17,15 +17,7 @@ import pytest
 
 from claq.hooks import config_protection
 
-from ._support import _run, _write_content
-
-
-def _edit(file_path: str, old_string: str, new_string: str, tool_name: str = "Edit") -> dict[str, Any]:
-    """Edit 系ツールの payload を組み立てる。"""
-    return {
-        "tool_name": tool_name,
-        "tool_input": {"file_path": file_path, "old_string": old_string, "new_string": new_string},
-    }
+from ._support import _edit, _run, _write_content
 
 
 def _multi_edit(edits: list[dict[str, str]]) -> dict[str, Any]:

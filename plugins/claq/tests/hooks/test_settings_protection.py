@@ -19,8 +19,8 @@ import pytest
 
 from claq.hooks import config_protection
 
+from ._support import _edit, _run, _write_content
 from ._support import _repo_scope as _repo_scope
-from ._support import _run, _write_content
 
 _BLOCKED_TEXT = "can disable the protection hooks"
 _UNVERIFIABLE_TEXT = "could not be verified"
@@ -32,11 +32,6 @@ def _settings(tmp_path: Path, content: str) -> str:
     path.parent.mkdir(exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return str(path)
-
-
-def _edit(file_path: str, old: str, new: str) -> dict[str, Any]:
-    """Edit ツール呼び出しの payload を組み立てる。"""
-    return {"tool_name": "Edit", "tool_input": {"file_path": file_path, "old_string": old, "new_string": new}}
 
 
 def test_edit_disabling_plugin_inside_enabled_plugins_is_denied(

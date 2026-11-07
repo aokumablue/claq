@@ -9,8 +9,7 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import commit_quality_scanner as commit_quality_scanner
-from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
+from claq.hooks import commit_quality_scanner, pre_bash_commit_quality
 
 from ._support import _scan_deadline
 
