@@ -54,9 +54,9 @@ _FEAT = ["-m", "feat: x"]
         pytest.param("&& echo hi", (False, []), id="leading-separator-without-git"),
     ],
 )
-def test_is_git_commit_command(command: str, expected: tuple[bool, list[str]]) -> None:
+def test_parse_git_commit_command(command: str, expected: tuple[bool, list[str]]) -> None:
     """セグメントの実行位置にある `git commit` だけを検出し、その commit の引数を返すこと。"""
-    assert commit_risk.is_git_commit_command(command) == expected
+    assert commit_risk.parse_git_commit_command(command) == expected
 
 
 @pytest.mark.parametrize(

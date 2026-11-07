@@ -52,7 +52,7 @@ from claq.hooks.commit_risk import (
     compound_commit_risk,
     find_git_commit_args_in_segment,
     is_commit_all_flag,
-    is_git_commit_command,
+    parse_git_commit_command,
 )
 from claq.hooks.hook_common import (
     DIRECTORY_CHANGE_COMMANDS,
@@ -314,10 +314,10 @@ def _detect_git_commit(command: str) -> tuple[str, list[str]] | None:
         どちらの読み方でも commit でなければ None。
 
     Raises:
-        例外は発生しません（`is_git_commit_command` の契約に従う）。
+        例外は発生しません（`parse_git_commit_command` の契約に従う）。
     """
     for variant in command_dialect_variants(command):
-        is_commit, commit_args = is_git_commit_command(variant)
+        is_commit, commit_args = parse_git_commit_command(variant)
         if is_commit:
             return variant, commit_args
     return None

@@ -100,6 +100,9 @@ def ensure_dir(dir_path: str | Path) -> Path:
 def make_private_dirs(dir_path: str | Path) -> Path:
     """ディレクトリを欠けている祖先ごと作成し、パーミッションを 0700 に絞る。
 
+    ``~/.claq`` 配下は、``~/.claq`` 自身も締め直す `ensure_private_dir` を使う。これを直接呼ぶのは
+    ``CLAQ_HOME`` を見ずに ``$HOME`` 固定で置く `env_pointer` だけ。
+
     **作成そのものを、欠けている祖先ごと根から順に 0700 で行う**。作成と ``chmod`` を
     分けると、その間 ``~/.claq`` は umask 既定（通常 0755）で他 OS ユーザーから
     ``opendir`` でき、この窓の間に取得された fd は後続の ``chmod`` では失効しない。

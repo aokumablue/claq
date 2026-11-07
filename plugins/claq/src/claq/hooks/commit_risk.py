@@ -61,7 +61,7 @@ def find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
     return segment[segment.index("commit", start + 1) + 1 :]
 
 
-def is_git_commit_command(command: str) -> tuple[bool, list[str]]:
+def parse_git_commit_command(command: str) -> tuple[bool, list[str]]:
     """コマンド文字列が `git commit` 呼び出しかを判定し、commit 引数トークンを返します。
 
     トークン化してシェル区切りごとのセグメントに分け、セグメントごとに `git` →

@@ -194,7 +194,7 @@ class RepoIdentity:
     remote_url: str | None
 
 
-def find_repo_root(cwd: str | Path | None = None) -> str:
+def find_repo_root(cwd: str | Path | None) -> str:
     """*cwd* が属する git リポジトリ本体のルート絶対パスを返す。
 
     ``git rev-parse --path-format=absolute --git-common-dir`` を使うため、

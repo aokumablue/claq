@@ -29,6 +29,7 @@ from claq.hooks.git_config_text import (
 from claq.hooks.hook_common import (
     basename,
     emit_block_output,
+    fold_path_parts,
     memoized_in_scan,
     normalize_protected_name,
     resolve_effective_target,
@@ -59,21 +60,6 @@ _WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
 # 読めない場合だけでなく、`file_path` がパスとして解釈できない値の場合も来るため、
 # 文言を「パッチ」に限定しない。
 _UNDECIDABLE_TARGET_MESSAGE = "BLOCKED: Could not determine target files from tool input."
-
-
-def _folded_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
-    """パス要素列の各要素を大小無視で畳む。
-
-    Args:
-        parts: 畳むパス要素列。
-
-    Returns:
-        畳んだ要素列。
-
-    Raises:
-        例外は発生しません。
-    """
-    return tuple(normalize_protected_name(part) for part in parts)
 
 
 # frozenset で持つ。判定に使うのは下の `*_FOLDED`（import 時に 1 回だけ畳んだ複製）で、
@@ -133,7 +119,7 @@ _PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), ("hooks", "hooks.json"))
 # 大小無視で比較するための畳み済み複製。`.GIT/HOOKS` は APFS / NTFS では
 # `.git/hooks` そのものを指すため、素の比較では保護 path が素通りする。
 # 表示名には畳む前の綴りを使うので、両者を対で持つ。
-_PROTECTED_PATH_SEGMENTS_FOLDED = tuple(_folded_parts(segments) for segments in _PROTECTED_PATH_SEGMENTS)
+_PROTECTED_PATH_SEGMENTS_FOLDED = tuple(fold_path_parts(segments) for segments in _PROTECTED_PATH_SEGMENTS)
 
 # 内容次第で保護する git config のパス。remote / branch / user の通常編集が正当にあるため
 # 無条件では塞がず、置換後の全文を解析して ``core.hooksPath`` / ``include`` / ``alias`` のように
@@ -148,7 +134,7 @@ _GIT_CONFIG_REPO_SEGMENTS = (
     (".git", "worktrees", "*", "config"),
     (".git", "worktrees", "*", "config.worktree"),
 )
-_GIT_CONFIG_REPO_SEGMENTS_FOLDED = tuple(_folded_parts(segments) for segments in _GIT_CONFIG_REPO_SEGMENTS)
+_GIT_CONFIG_REPO_SEGMENTS_FOLDED = tuple(fold_path_parts(segments) for segments in _GIT_CONFIG_REPO_SEGMENTS)
 
 # git config として扱う保護 path の表示名の全体（ホーム側を含む）。ブロック文言を選ぶ鍵として公開する。
 GIT_CONFIG_DISPLAY_NAMES = frozenset(
@@ -257,7 +243,7 @@ def _match_path_segments(
     """
     resolved = resolve_effective_target(file_path)
     parts = resolved.parts if resolved is not None else Path(file_path).parts
-    folded_parts = _folded_parts(parts)
+    folded_parts = fold_path_parts(parts)
     for segments, folded_segments in zip(candidates, folded_candidates, strict=True):
         width = len(segments)
         for index in range(len(folded_parts) - width + 1):
@@ -838,8 +824,8 @@ def running_plugin_root_is_guarded() -> bool:
     if repo_root is None:
         return True
     plugin_root = _running_plugin_root()
-    repo_parts = _folded_parts(repo_root.resolve().parts)
-    if _folded_parts(plugin_root.parts)[: len(repo_parts)] != repo_parts:
+    repo_parts = fold_path_parts(repo_root.resolve().parts)
+    if fold_path_parts(plugin_root.parts)[: len(repo_parts)] != repo_parts:
         return True
     # ホームや ~/.claude を git で管理していると、キャッシュの plugin root も toplevel の内側に入る。
     # 内側にあるだけでなく、そのリポジトリがランタイムを追跡しているときだけ開発用 checkout とみなす。
@@ -888,9 +874,9 @@ def running_plugin_guarded_dir(resolved: Path, *, include_ancestors: bool) -> st
     Raises:
         例外は発生しません。
     """
-    target = _folded_parts(resolved.parts)
+    target = fold_path_parts(resolved.parts)
     for segments in _RUNNING_PLUGIN_GUARDED_DIRS:
-        guarded = _folded_parts(_running_plugin_root().joinpath(*segments).parts)
+        guarded = fold_path_parts(_running_plugin_root().joinpath(*segments).parts)
         if target[: len(guarded)] == guarded or (include_ancestors and guarded[: len(target)] == target):
             return "/".join(segments) + "/" if running_plugin_root_is_guarded() else None
     return None

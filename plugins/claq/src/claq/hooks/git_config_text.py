@@ -17,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from claq.hooks.hook_common import memoized_in_scan, normalize_protected_name, resolve_effective_target
+from claq.hooks.hook_common import fold_path_parts, memoized_in_scan, resolve_effective_target
 from claq.lib.core_utils import get_home_dir
 from claq.lib.harness import normalize_tool_name
 
@@ -364,21 +364,6 @@ def _global_git_config_candidates() -> tuple[tuple[Path, str], ...]:
     return ((home / GLOBAL_GITCONFIG_NAME, GLOBAL_GITCONFIG_DISPLAY_NAME), (xdg_path, xdg_name))
 
 
-def _comparable_parts(path: Path) -> tuple[str, ...]:
-    """path の各要素を `normalize_protected_name` で畳み、実体どうしを比べられる形にする。
-
-    Args:
-        path: 解決済みの実体 path。
-
-    Returns:
-        畳んだ要素の列。
-
-    Raises:
-        例外は発生しません。
-    """
-    return tuple(normalize_protected_name(part) for part in path.parts)
-
-
 @memoized_in_scan
 def global_git_config_path(file_path: str) -> str | None:
     """パスがホーム側の git config（``~/.gitconfig`` / XDG）かを判定する。
@@ -399,10 +384,10 @@ def global_git_config_path(file_path: str) -> str | None:
     resolved = resolve_effective_target(file_path)
     if resolved is None:
         return None
-    target = _comparable_parts(resolved)
+    target = fold_path_parts(resolved.parts)
     for path, display_name in _global_git_config_candidates():
         real = resolve_effective_target(str(path))
-        if real is not None and _comparable_parts(real) == target:
+        if real is not None and fold_path_parts(real.parts) == target:
             return display_name
     return None
 

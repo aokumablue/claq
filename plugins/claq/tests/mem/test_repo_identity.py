@@ -231,7 +231,7 @@ class TestFindRepoRoot:
         _git("worktree", "add", "-b", "feature", str(worktree), cwd=root)
         monkeypatch.chdir(nested)
         expected = os.path.realpath(root)
-        assert [find_repo_root(nested), find_repo_root(worktree), find_repo_root()] == [expected] * 3
+        assert [find_repo_root(nested), find_repo_root(worktree), find_repo_root(None)] == [expected] * 3
 
     def test_bare_repo_and_non_repo_resolve_to_themselves(self, tmp_path: Path) -> None:
         """bare リポジトリは git dir 自身を、git リポジトリでなければ cwd 自身の絶対パスを返す。"""

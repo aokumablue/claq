@@ -1,6 +1,6 @@
 """`pre_bash_commit_quality` 専用テスト（shell 区切り誤認 / fail-open 境界）。
 
-`is_git_commit_command` 系テストのうち、shell 区切り文字の密着トークン化と
+`parse_git_commit_command` 系テストのうち、shell 区切り文字の密着トークン化と
 stdin truncation / main() の fail-open・fail-closed 境界分割に関する分岐は
 本ファイルへ集約する。
 """
@@ -43,7 +43,7 @@ class TestShellSeparatorTokenization:
     )
     def test_is_git_commit_command_shell_separator_boundary(self, command: str, expected_is_commit: bool) -> None:
         """区切り文字で分けたセグメントの実行位置にある `git commit` だけを commit と判定すること。"""
-        is_commit, _args = commit_risk.is_git_commit_command(command)
+        is_commit, _args = commit_risk.parse_git_commit_command(command)
         assert is_commit is expected_is_commit
 
     def test_block_no_verify_and_commit_quality_agree_on_quoted_text(self) -> None:
@@ -55,7 +55,7 @@ class TestShellSeparatorTokenization:
         """
         quoted = "copilot -p 'Explain why a git commit command may fail'"
 
-        assert commit_risk.is_git_commit_command(quoted)[0] is False
+        assert commit_risk.parse_git_commit_command(quoted)[0] is False
         assert block_no_verify.has_bypass_flag(quoted) is False
 
 
@@ -264,7 +264,7 @@ class TestCompoundCommitGuard:
                 raise RuntimeError("tokenize exploded")
             return (False, [])
 
-        monkeypatch.setattr(pbcq, "is_git_commit_command", _flaky)
+        monkeypatch.setattr(pbcq, "parse_git_commit_command", _flaky)
         raw = json.dumps(
             {"tool_name": "Bash", "tool_input": {"command": "boom"}, "tool_args": {"command": "echo ok"}}
         )

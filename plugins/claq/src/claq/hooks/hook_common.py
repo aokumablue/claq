@@ -203,6 +203,21 @@ def normalize_protected_name(path: str) -> str:
     return name.rstrip(". \t").casefold()
 
 
+def fold_path_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
+    """パス要素列の各要素を `normalize_protected_name` で畳み、大小を無視して比べられる形にする。
+
+    Args:
+        parts: 畳むパス要素列。
+
+    Returns:
+        畳んだ要素列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return tuple(normalize_protected_name(part) for part in parts)
+
+
 def is_git_executable_token(token: str) -> bool:
     """トークンが git 実行ファイルを指すかを判定します。
 
