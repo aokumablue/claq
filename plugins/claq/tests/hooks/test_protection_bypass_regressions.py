@@ -815,6 +815,9 @@ def test_case_variant_of_the_repo_root_stays_inside_the_repo(_repo_scope: Path, 
         pytest.param(f"cat > note.md <<'EOF'\ngit commit {_NO_VERIFY}\nEOF\necho done", id="data-body-then-a-command"),
         pytest.param(f"cat > a <<'A'\none\nA\ncat > b <<'B'\ngit commit {_NO_VERIFY}\nB", id="two-data-bodies"),
         pytest.param(f"cat <<-EOF\n\tgit commit {_NO_VERIFY}\n\tEOF", id="tab-stripped-terminator"),
+        pytest.param(f"cat > a <<'A'\ngit commit {_NO_VERIFY}\nA\n. .venv/bin/activate", id="separate-source-statement"),
+        pytest.param(f"cat > a <<'A'\ngit commit {_NO_VERIFY}\nA\nbash scripts/test.sh", id="separate-shell-statement"),
+        pytest.param(f"cat <<'A' | tee out\ngit commit {_NO_VERIFY}\nA", id="data-piped-to-a-non-shell"),
     ],
 )
 def test_plain_data_heredocs_stay_removable(command: str, monkeypatch: pytest.MonkeyPatch) -> None:

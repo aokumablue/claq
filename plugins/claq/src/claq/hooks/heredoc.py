@@ -11,10 +11,11 @@ import re
 from claq.hooks.shell_tokens import (
     COMMENT_PRECEDING_CHARS,
     CONTINUED_WORD,
+    SHELL_SEPARATORS,
     QuoteState,
     command_dialect_variants,
     is_shell_wrapper_token,
-    split_segments,
+    strip_line_comments,
     tokenize,
     tokenize_with_status,
 )
@@ -38,9 +39,9 @@ _HEREDOC_OPERATOR_RE = re.compile(
 # heredoc 演算子の開始。`_HEREDOC_OPERATOR_RE` と同じ条件で、区切り語を読めたかは問わない。
 _HEREDOC_START_RE = re.compile(r"(?<!<)<<(?!<)")
 
-# 演算子行がこれらで終わる場合、本文の開始位置が次行とは限らない
-# （``cat <<'EOF' |`` 改行 ``bash``）。剥がさない側へ倒す。
-_HEREDOC_CONTINUATION_SUFFIXES = ("\\", "|", "&")
+# 演算子行がこれらで終わる場合、本文の開始位置が次行とは限らないか、本文の行き先が次行以降にある
+# （``cat <<'EOF' |`` 改行 ``bash``、``cat <<'EOF' | {`` 改行 ``bash; }``）。剥がさない側へ倒す。
+_HEREDOC_CONTINUATION_SUFFIXES = ("\\", "|", "&", "{", "(")
 
 
 def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], str | None]:
@@ -56,7 +57,7 @@ def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], st
     行末の ``\\`` が消費するのは改行自体なので、エスケープ状態は持ち越さない。ただし語の
     途中の行継続は語が次行へ続くので `CONTINUED_WORD` を渡す（次行の先頭の ``#`` は語の一部）。
 
-    `_strip_line_comments` を前段で単純適用する形は採れない。heredoc 本文中の
+    `strip_line_comments` を前段で単純適用する形は採れない。heredoc 本文中の
     ``#`` や閉じないアポストロフィまで巻き込んで壊すため。
 
     Args:
@@ -187,7 +188,7 @@ def _line_keeps_heredoc_bodies(line: str) -> bool:
     Raises:
         例外は発生しません。
     """
-    if line.rstrip().endswith(_HEREDOC_CONTINUATION_SUFFIXES):
+    if strip_line_comments(line).rstrip().endswith(_HEREDOC_CONTINUATION_SUFFIXES):
         return True
     return any(is_shell_wrapper_token(token) or token in _BODY_EXECUTING_BUILTINS for token in tokenize(line))
 
@@ -229,25 +230,36 @@ def _consume_heredoc_bodies(
     return index, kept
 
 
-def _executes_a_body(command: str) -> bool:
-    """本文を実行しうるシェルが、演算子行の外も含めてコマンドのどこかに残っているかを判定する。
+def _reaches_a_shell(command: str) -> bool:
+    """除去後のコマンドで、本文を受け取る位置に本文を実行しうるトークンがあるかを判定する。
 
-    演算子行だけを見ると ``(cat <<'EOF'`` + 本文 + ``) | bash`` や、改行を挟んだ ``bash \\`` + ``<<'EOF'`` の
-    本文を剥がす。
+    本文が届くのは heredoc 自身のコマンドとパイプの先だけで、改行で分かれた ``bash \\`` + ``<<'EOF'`` や
+    ``(cat <<'EOF'`` + 本文 + ``) | bash`` は演算子行だけを見ても分からない。後ろの独立した文
+    （``. .venv/bin/activate``）は本文を受け取らないので数えない。
 
     Args:
         command: 本文を除去した後のコマンド文字列。
 
     Returns:
-        シェル実行ファイルか、セグメント先頭の本文実行ビルトインがあれば True。
+        heredoc 演算子と同じセグメントかパイプの先に、シェルか本文実行ビルトインがあれば True。
 
     Raises:
         例外は発生しません。
     """
-    return any(
-        segment[0] in _BODY_EXECUTING_BUILTINS or any(is_shell_wrapper_token(token) for token in segment)
-        for segment in split_segments(tokenize(command))
-    )
+    receives_body = executes = False
+    previous = ""
+    # トークン化は ``<<`` を ``<`` 2 つに割るので、連続する ``<`` を演算子と読む。
+    for token in [*tokenize(command), ";"]:
+        if token in SHELL_SEPARATORS:
+            if receives_body and executes:
+                return True
+            receives_body, executes = token == "|", False
+        elif token == "<" == previous:
+            receives_body = True
+        elif is_shell_wrapper_token(token) or token in _BODY_EXECUTING_BUILTINS:
+            executes = True
+        previous = token
+    return False
 
 
 def strip_data_heredoc_bodies(command: str) -> str:
@@ -261,7 +273,8 @@ def strip_data_heredoc_bodies(command: str) -> str:
 
     1. 演算子行に本文を実行するトークンがある（``bash <<'EOF'`` /
        ``cat <<'EOF' | bash`` / ``. /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``）。
-       その行以降は一切剥がさず、除去後の全文にシェルが残るときも除去を取り消す
+       その行以降は一切剥がさない。除去後に本文を受け取る位置（演算子と同じセグメント・パイプの先）に
+       シェルが残るときも除去を取り消す
     2. 演算子行が継続演算子で終わる（本文開始が次行とは限らない）。その行以降は一切剥がさない
     3. 終端行が見つからない（未終端）
     4. ``<<`` がそもそも heredoc 演算子ではない（コメント内・クォート内・
@@ -307,7 +320,7 @@ def strip_data_heredoc_bodies(command: str) -> str:
         index, kept = consumed
         output.extend(kept)
     stripped = "\n".join(output)
-    return command if _executes_a_body(stripped) else stripped
+    return command if _reaches_a_shell(stripped) else stripped
 
 
 def _has_heredoc_operator(command: str) -> bool:
@@ -350,5 +363,5 @@ def command_readings(command: str) -> tuple[str, ...]:
     """
     readings = command_dialect_variants(command)
     if "\n" in command and (_has_heredoc_operator(command) or not tokenize_with_status(command)[1]):
-        return (*readings, *command.split("\n"))
+        return (*readings, *(reading for line in command.split("\n") for reading in command_dialect_variants(line)))
     return readings

@@ -561,11 +561,11 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "conditional_protection._SETTINGS_GUARDED_SUBTREES": ("hooks", "enabledPlugins", "disabledPlugins", "disableAllHooks"),
     "conditional_protection._SETTINGS_GUARDED_ENV_NAMES": ("CLAQ_PYTHON", "PATH", "PYTHONPATH", "PYTHONHOME"),
     # --- shell_tokens ---
-    "shell_tokens._SHELL_SEPARATORS": frozenset({"&&", "||", ";", "|", "&", "(", ")"}),
+    "shell_tokens.SHELL_SEPARATORS": frozenset({"&&", "||", ";", "|", "&", "(", ")"}),
     "shell_tokens.SHELL_WRAPPER_EXECUTABLES": frozenset({"sh", "bash", "zsh", "dash"}),
     "heredoc._BODY_EXECUTING_BUILTINS": frozenset({".", "source", "eval"}),
     "shell_tokens.COMMENT_PRECEDING_CHARS": frozenset(" \t\n;|&()<>"),
-    "heredoc._HEREDOC_CONTINUATION_SUFFIXES": ("\\", "|", "&"),
+    "heredoc._HEREDOC_CONTINUATION_SUFFIXES": ("\\", "|", "&", "{", "("),
     "shell_tokens.WRITE_REDIRECT_OPERATORS": frozenset(
         {">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"}
     ),

@@ -19,7 +19,7 @@ MAX_COMMAND_BYTES = 64 * 1024
 
 # コマンド全体をセグメントに割るシェル区切りトークン。区切り文字に密着した
 # トークン（``status;echo``）を全フックが同じ規則で割るため 1 箇所に持つ。
-_SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
+SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
 
 # ``sh -c`` 再帰と heredoc 本文判定で共有する既知シェル実行ファイル（`normalize_executable_name` で畳んで判定）。
 # 別集合を持つと「本文が実行されるか」の判定軸が 2 つに割れる。
@@ -207,7 +207,7 @@ class QuoteState:
         return True
 
 
-def _strip_line_comments(command: str) -> str:
+def strip_line_comments(command: str) -> str:
     """クォート外の ``#`` 行コメントを行末まで取り除く。
 
     ``shlex`` にコメント処理を任せると、改行を ``;`` へ正規化した後の文字列では
@@ -258,7 +258,7 @@ def _strip_line_continuations(command: str) -> str:
     + 改行 + ``--no-verify`` が素通りする）。単一クォート内では行継続は成立しない
     ので触らない。
 
-    `_strip_line_comments` の**後**に適用すること。前に置くと ``# foo \\`` + 改行 +
+    `strip_line_comments` の**後**に適用すること。前に置くと ``# foo \\`` + 改行 +
     ``git commit --no-verify`` が 1 行のコメントへ畳まれ、2 行目が消える（シェルは
     コメント中の ``\\`` を行継続として扱わない）。
 
@@ -498,10 +498,10 @@ def tokenize_with_status(command: str) -> tuple[list[str], bool]:
     Raises:
         例外は発生しません。
     """
-    normalized = _replace_unquoted_newlines(_strip_line_continuations(_strip_line_comments(command)))
+    normalized = _replace_unquoted_newlines(_strip_line_continuations(strip_line_comments(command)))
     lexer = shlex.shlex(normalized, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
-    # コメントは `_strip_line_comments` が落とし済み。既定の ``#`` のままだと、
+    # コメントは `strip_line_comments` が落とし済み。既定の ``#`` のままだと、
     # 改行を失った文字列で ``#`` 以降が入力末尾まで捨てられる。
     lexer.commenters = ""
     try:
@@ -527,7 +527,7 @@ def split_segments(tokens: list[str]) -> list[list[str]]:
     segments: list[list[str]] = []
     current: list[str] = []
     for token in tokens:
-        if token not in _SHELL_SEPARATORS:
+        if token not in SHELL_SEPARATORS:
             current.append(token)
             continue
         if current:
