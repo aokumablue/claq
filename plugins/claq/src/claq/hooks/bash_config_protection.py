@@ -47,8 +47,7 @@ import するのは、Write を deny する綴りと Bash を deny する綴り�
 
 非目標: `python -c`/`eval`/任意スクリプト経由の間接書き込み、`$(...)`・変数展開・
     パイプ越しの間接書き込み、シェルエイリアス・ラッパースクリプト経由の呼び出し。
-    うっかり書き換えの抑止であって敵対的回避への防壁ではない
-    （docs/adr/shell-analysis-boundary.md）。
+    うっかり書き換えの抑止であって敵対的回避への防壁ではない（docs/adr/shell-analysis-boundary.md）。
 """
 
 from __future__ import annotations
@@ -70,11 +69,13 @@ from claq.hooks.git_config_text import (
     GLOBAL_GITCONFIG_NAME,
     global_git_config_path,
 )
+from claq.hooks.heredoc import command_readings, strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     DIRECTORY_CHANGE_COMMANDS,
     basename,
     emit_block_output,
+    fold_path_parts,
     is_inplace_edit_flag,
     memoized_in_scan,
     normalize_protected_name,
@@ -85,13 +86,11 @@ from claq.hooks.hook_common import (
 from claq.hooks.host_guard_targets import find_host_guard_match, match_folded_path_window
 from claq.hooks.shell_tokens import (
     WRITE_REDIRECT_OPERATORS,
-    command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
     normalize_executable_name,
     scan_budget_message,
     split_segments,
-    strip_data_heredoc_bodies,
     tokenize,
 )
 from claq.hooks.stdin_io import (
@@ -511,16 +510,16 @@ def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
         repo_root: `resolve_repo_root` が返したリポジトリルート。
 
     Returns:
-        `repo_root` 配下にあれば True。配下外、または `repo_root` 自身の解決に失敗した
-        場合は False。
+        `repo_root` 配下にあれば True。配下外、または `repo_root` の解決に失敗したら False。
 
     Raises:
         例外は発生しません。
     """
     try:
-        return resolved.is_relative_to(repo_root.resolve())
+        root_parts = fold_path_parts(repo_root.resolve().parts)
     except (OSError, RuntimeError):
         return False
+    return fold_path_parts(resolved.parts)[: len(root_parts)] == root_parts
 
 
 def find_protected_write(command: str, *, _recursed: bool = False, _scope_certain: bool = True) -> str | None:
@@ -554,7 +553,7 @@ def find_protected_write(command: str, *, _recursed: bool = False, _scope_certai
     # heredoc のデータ本文は方言展開の前に 1 回だけ落とす（`block_no_verify` と同じ順序に
     # しないと、同じ入力でも hook によって解析対象が変わる）。
     stripped = strip_data_heredoc_bodies(command)
-    for variant in command_dialect_variants(stripped):
+    for variant in command_readings(stripped):
         found = _find_protected_write_in_dialect(variant, _recursed=_recursed, _scope_certain=_scope_certain)
         if found is not None:
             return found

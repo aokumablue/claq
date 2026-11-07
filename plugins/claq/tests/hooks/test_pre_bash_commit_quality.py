@@ -257,7 +257,7 @@ class TestCompoundCommitGuard:
         """1 コンテナの判定失敗で残りのコンテナを捨てない。"""
         calls: list[str] = []
 
-        def _flaky(command: str) -> tuple[bool, list[str]]:
+        def _flaky(command: str, *, shell_wrappers: bool = True) -> tuple[bool, list[str]]:
             """呼び出しを記録し、``boom`` だけ判定に失敗する。"""
             calls.append(command)
             if command == "boom":
@@ -355,7 +355,7 @@ class TestArgvGroupCommitCounting:
         """グループ内 1 候補の判定失敗で、残りの候補の commit 検出を捨てない。"""
         real = pbcq._detect_git_commit
 
-        def _flaky(command: str):
+        def _flaky(command: str, *, shell_wrappers: bool = True):
             """``boom`` だけ判定に失敗し、それ以外は本物の検出に任せる。"""
             if command == "boom":
                 raise RuntimeError("tokenize exploded")

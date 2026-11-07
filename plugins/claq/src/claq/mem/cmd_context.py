@@ -103,7 +103,7 @@ def _format_injected_item(row: Knowledge) -> str:
 
     既定は ``- [kind] title`` のみ。``body`` を足しても ``CONTEXT_ITEM_CHAR_LIMIT``
     文字に収まる場合だけ ``—`` で続け、長い body が節の予算を食い潰すのを防ぐ。
-    title / body は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。その前に
+    title / body は信頼境界タグを偽装できるため ``strip_tags_for_injection`` で無害化する。その前に
     ``keep_allowed_chars_for_injection`` で許可した文字だけを残す（後ろに置くと、不可視文字で
     分断したタグが除去で再結合して ``strip_tags`` をすり抜ける）。読み出し側は ``redact`` を
     掛けないため、除去で再結合した鍵だけは同関数が伏せる。
@@ -146,7 +146,7 @@ def _knowledge_section(heading: str, rows: list[Knowledge], budget: int) -> str:
 def _handoff_section(db: Database, repo_id: str) -> str:
     """直近セッションの引き継ぎを ``前回の続き`` 節へ組み立てる。
 
-    handoff 本文は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。その前に
+    handoff 本文は信頼境界タグを偽装できるため ``strip_tags_for_injection`` で無害化する。その前に
     ``keep_allowed_chars_for_injection`` で許可した文字だけを残す。行区切りは LF に揃って
     改行として残るので、``_neutralize_handoff_structure`` は全ての論理行を見られる。
 

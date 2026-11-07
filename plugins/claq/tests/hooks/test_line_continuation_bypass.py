@@ -30,6 +30,7 @@ from claq.hooks.commit_quality_scanner import (
     sanitize_untrusted_path,
 )
 from claq.hooks.commit_risk import _segment_mutates_worktree_or_index
+from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.pre_bash_commit_quality import _detect_git_commit
 from claq.hooks.shell_tokens import (
     MAX_COMMAND_BYTES,
@@ -38,7 +39,6 @@ from claq.hooks.shell_tokens import (
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
     split_segments,
-    strip_data_heredoc_bodies,
     tokenize,
 )
 

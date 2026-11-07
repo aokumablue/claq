@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     is_git_executable_token,
@@ -20,7 +21,6 @@ from claq.hooks.shell_tokens import (
     extract_shell_wrapper_command,
     normalize_executable_name,
     split_segments,
-    strip_data_heredoc_bodies,
     tokenize,
     tokenize_with_status,
 )
@@ -72,9 +72,10 @@ def with_shell_wrapper_segments(segments: list[list[str]]) -> list[list[str]]:
     """``sh -c`` の 1 段の内側のセグメントを、ラッパーのセグメントの直前に足します。
 
     内側は実行される順にラッパーの位置へ入る。ラッパー自身のリダイレクトと文字列引数は素の
-    ``git commit -m x >log`` の同一セグメントと同じ扱いで、内側の commit より前の操作ではない。足したセグメントはこれ以上開かない（2 段以上の
-    ``sh -c`` は非目標。docs/adr/shell-analysis-boundary.md）。内側の heredoc のデータ本文は
-    `block_no_verify` / `bash_config_protection` の再帰と同じく落とす。
+    ``git commit -m x >log`` の同一セグメントと同じ扱いで、内側の commit より前の操作ではない。
+    足したセグメントはこれ以上開かない（2 段以上の ``sh -c`` は非目標。
+    docs/adr/shell-analysis-boundary.md）。内側の heredoc のデータ本文は `block_no_verify` /
+    `bash_config_protection` の再帰と同じく落とす。
 
     Args:
         segments: `shell_tokens.split_segments` で得たセグメントのリストです。

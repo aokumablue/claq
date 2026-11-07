@@ -264,6 +264,8 @@ def test_commit_inside_a_shell_wrapper_is_scanned_like_a_plain_commit(
     [
         pytest.param("""bash -c "git commit -m 'fix core.worktree'" """, False, id="message-naming-the-config-key"),
         pytest.param("bash -c 'git commit -m x'", False, id="plain"),
+        pytest.param("git commit -m x && env -C /tmp bash -c 'ls'", False, id="wrapper-after-the-commit-without-a-commit"),
+        pytest.param("env -C /tmp bash -c 'ls'; git commit -m x", False, id="wrapper-before-the-commit-without-a-commit"),
         pytest.param("env -C ../other bash -c 'git commit -m x'", True, id="wrapper-prefix-moves-directory"),
         pytest.param("GIT_DIR=../other/.git bash -c 'git commit -m x'", True, id="wrapper-prefix-points-git-elsewhere"),
     ],
@@ -271,3 +273,12 @@ def test_commit_inside_a_shell_wrapper_is_scanned_like_a_plain_commit(
 def test_commit_target_risk_reads_the_prefix_of_a_shell_wrapper_only(command: str, denied: bool) -> None:
     """ラッパーの前置は commit の対象を変えるが、内側の commit の引数の文字列は変えない。"""
     assert (pre_bash_commit_quality._commit_target_risk(command) is not None) is denied
+
+
+def test_mutation_visible_only_in_the_windows_reading_is_denied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """commit 前の index 変更は、commit を検出した読みだけでなくどの読みでも数える。"""
+    repo = _init_git_repo(tmp_path / "repo", {"README.md": "x\n"})
+    command = "C:\\Git\\git.exe add x; git commit -m 'feat(core): add'"
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(pre_bash_commit_quality, "parse_json_object", lambda raw: {"tool_input": {"command": command}})
+    assert pre_bash_commit_quality.evaluate("payload") is not None

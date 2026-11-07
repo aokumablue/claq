@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 import claq.hooks
-from claq.hooks import bash_config_protection, commit_quality_scanner, commit_risk, shell_tokens
+from claq.hooks import bash_config_protection, commit_quality_scanner, commit_risk, heredoc, shell_tokens
 
 from ._support import (
     _EXPECTED_VOCABULARIES,
@@ -188,7 +188,7 @@ _VOCABULARY_DENY_ALLOW_CASES = (
     ("hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES", "bash_config_protection", "{item} ruff.toml", "{item} app.py"),
     ("shell_tokens.SHELL_WRAPPER_EXECUTABLES", "block_no_verify", "{item} -c '" + _NO_VERIFY + "'", "{item} -c 'git commit -m x'"),
     (
-        "shell_tokens._BODY_EXECUTING_BUILTINS",
+        "heredoc._BODY_EXECUTING_BUILTINS",
         "block_no_verify",
         "{item} /dev/stdin <<'EOF'\n" + _NO_VERIFY + "\nEOF",
         "cat /dev/stdin <<'EOF'\n" + _NO_VERIFY + "\nEOF",
@@ -236,7 +236,7 @@ _VOCABULARY_ALLOW_ONLY_CASES = (
     ("block_no_verify._GIT_CONFIG_READ_ONLY_FLAGS", "block_no_verify", "git config {item} core.hooksPath", "git config --add core.hooksPath x"),
     ("block_no_verify._GIT_CONFIG_NEW_READ_OPS", "block_no_verify", "git config {item} core.hooksPath", "git config set core.hooksPath x"),
     # 行コメントの開始条件。直前文字が語彙に無ければ `#` は語の一部なので deny。
-    ("shell_tokens._COMMENT_PRECEDING_CHARS", "block_no_verify", "echo ok{item}# " + _NO_VERIFY, "echo okX# " + _NO_VERIFY),
+    ("shell_tokens.COMMENT_PRECEDING_CHARS", "block_no_verify", "echo ok{item}# " + _NO_VERIFY, "echo okX# " + _NO_VERIFY),
 )
 
 # 層1（Write 系 payload）: (語彙の完全修飾名, deny payload の組み立て, allow payload)。
@@ -439,7 +439,7 @@ def test_every_mutating_redirect_operator_marks_the_segment(operator: str) -> No
     assert not commit_risk._segment_mutates_worktree_or_index(["printf", "x", "app.py"])
 
 
-@pytest.mark.parametrize("suffix", _EXPECTED_VOCABULARIES["shell_tokens._HEREDOC_CONTINUATION_SUFFIXES"])
+@pytest.mark.parametrize("suffix", _EXPECTED_VOCABULARIES["heredoc._HEREDOC_CONTINUATION_SUFFIXES"])
 def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     """`_HEREDOC_CONTINUATION_SUFFIXES` の全要素が本文の剥がしを止めること（層1・単体）。
 
@@ -454,8 +454,8 @@ def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     body = _NO_VERIFY
     kept = f"cat <<'EOF' {suffix}\n{body}\nEOF"
     stripped = f"cat <<'EOF'\n{body}\nEOF"
-    assert shell_tokens.strip_data_heredoc_bodies(kept) == kept
-    assert shell_tokens.strip_data_heredoc_bodies(stripped) != stripped
+    assert heredoc.strip_data_heredoc_bodies(kept) == kept
+    assert heredoc.strip_data_heredoc_bodies(stripped) != stripped
 
 
 @pytest.mark.parametrize("suffix", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._LINTABLE_SUFFIXES"]))
@@ -492,7 +492,7 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
     """
     unit_covered = {
         "shell_tokens.WRITE_REDIRECT_OPERATORS",
-        "shell_tokens._HEREDOC_CONTINUATION_SUFFIXES",
+        "heredoc._HEREDOC_CONTINUATION_SUFFIXES",
         "commit_quality_scanner._LINTABLE_SUFFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",
         "commit_quality_scanner._MINIFIED_SUFFIXES",

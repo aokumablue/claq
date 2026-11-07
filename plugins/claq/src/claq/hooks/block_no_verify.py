@@ -91,18 +91,17 @@ from __future__ import annotations
 
 import re
 
+from claq.hooks.heredoc import command_readings, strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     emit_block_output,
     is_git_executable_token,
 )
 from claq.hooks.shell_tokens import (
-    command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
     is_shell_wrapper_token,
     scan_budget_message,
     split_segments,
-    strip_data_heredoc_bodies,
     tokenize_with_status,
 )
 from claq.hooks.stdin_io import (
@@ -592,7 +591,7 @@ def has_bypass_flag(command: str, *, _recursed: bool = False, _inherited_prefix:
     command = strip_data_heredoc_bodies(command)
     return any(
         _has_bypass_flag_in_dialect(variant, _recursed=_recursed, _inherited_prefix=_inherited_prefix)
-        for variant in command_dialect_variants(command)
+        for variant in command_readings(command)
     )
 
 

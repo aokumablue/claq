@@ -563,9 +563,9 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     # --- shell_tokens ---
     "shell_tokens._SHELL_SEPARATORS": frozenset({"&&", "||", ";", "|", "&", "(", ")"}),
     "shell_tokens.SHELL_WRAPPER_EXECUTABLES": frozenset({"sh", "bash", "zsh", "dash"}),
-    "shell_tokens._BODY_EXECUTING_BUILTINS": frozenset({".", "source", "eval"}),
-    "shell_tokens._COMMENT_PRECEDING_CHARS": frozenset(" \t\n;|&()<>"),
-    "shell_tokens._HEREDOC_CONTINUATION_SUFFIXES": ("\\", "|", "&"),
+    "heredoc._BODY_EXECUTING_BUILTINS": frozenset({".", "source", "eval"}),
+    "shell_tokens.COMMENT_PRECEDING_CHARS": frozenset(" \t\n;|&()<>"),
+    "heredoc._HEREDOC_CONTINUATION_SUFFIXES": ("\\", "|", "&"),
     "shell_tokens.WRITE_REDIRECT_OPERATORS": frozenset(
         {">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"}
     ),

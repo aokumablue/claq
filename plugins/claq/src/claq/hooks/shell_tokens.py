@@ -1,4 +1,4 @@
-"""シェルコマンド文字列の解析（トークン化・区切り・heredoc・ラッパー抽出・走査上限）。
+"""シェルコマンド文字列の解析（トークン化・区切り・ラッパー抽出・走査上限）。
 
 保護フックが共有する、シェル文字列の解析と実行トークン名の正規化だけを持つ葉モジュール。
 出力や保護対象の判定は ``hook_common`` が持ち、このモジュールは ``hook_common`` を import しない。
@@ -25,39 +25,19 @@ _SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
 # 別集合を持つと「本文が実行されるか」の判定軸が 2 つに割れる。
 SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash"})
 
-# 実行ファイルではないが、渡されたテキストを現在のシェルで実行するビルトイン。
-# ``. /dev/stdin <<'EOF'`` 等の本文はコマンドとして実行されるため、データとして
-# 剥がすと誤通過になる（docs/adr/shell-analysis-boundary.md の除去しない条件 1）。
-_BODY_EXECUTING_BUILTINS = frozenset({".", "source", "eval"})
 
 # ``#`` を行コメントの開始として扱ってよい直前の文字。POSIX シェルは語の先頭に
 # ある ``#`` だけをコメント開始とみなす（``echo a#b`` の ``#`` は語の一部）。
-# 構文として働いたときだけ語を区切る（``echo \;#x`` の ``;`` は語の一部）ので、`_QuoteState` が見る。
-_COMMENT_PRECEDING_CHARS = frozenset(" \t\n;|&()<>")
+# 構文として働いたときだけ語を区切る（``echo \;#x`` の ``;`` は語の一部）ので、`QuoteState` が見る。
+COMMENT_PRECEDING_CHARS = frozenset(" \t\n;|&()<>")
 
 # ``-c`` を含む結合短フラグ（``bash -lc 'cmd'``）。単独の ``-c`` だけを見ると
 # ``bash -lc`` でラッパー再帰が不発になり、保護フックが素通りする。
 _SHELL_COMMAND_FLAG_RE = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 
-# heredoc 演算子。``<<<``（herestring）を heredoc と読まないよう、前後に ``<`` が
-# 無いことを要求する（lookahead だけだと ``<<<EOF`` が offset 1 で再マッチする）。
-# 区切り語の直後は語の終わりに限る。``<<E"O"F`` の区切り語はシェルでは ``EOF`` で、途中の ``E`` までを
-# 読むと本文の後ろの実行行まで剥がすため、読み切れない区切り語は heredoc と扱わない。
-_HEREDOC_OPERATOR_RE = re.compile(
-    r"(?<!<)<<(?!<)(-?)[ \t]*"
-    r"(?:'(?P<squote>[^']*)'|\"(?P<dquote>[^\"]*)\"|\\?(?P<bare>[A-Za-z_][A-Za-z0-9_.-]*))"
-    r"(?=[ \t;|&()<>]|$)"
-)
-
-# heredoc 演算子の開始。`_HEREDOC_OPERATOR_RE` と同じ条件で、区切り語を読めたかは問わない。
-_HEREDOC_START_RE = re.compile(r"(?<!<)<<(?!<)")
 
 # 物理行の行末で、語の途中のまま行継続した状態。クォートの鎖に載せて次の非本文行へ渡す。
-_CONTINUED_WORD = "\\"
-
-# 演算子行がこれらで終わる場合、本文の開始位置が次行とは限らない
-# （``cat <<'EOF' |`` 改行 ``bash``）。剥がさない側へ倒す。
-_HEREDOC_CONTINUATION_SUFFIXES = ("\\", "|", "&")
+CONTINUED_WORD = "\\"
 
 
 def basename_any_separator(path: str) -> str:
@@ -116,10 +96,33 @@ def is_shell_wrapper_token(token: str) -> bool:
     return normalize_executable_name(token) in SHELL_WRAPPER_EXECUTABLES
 
 
+def _first_shell_operand(arguments: list[str]) -> str | None:
+    """シェルの引数列から、オプションを読み飛ばして最初の非オプション引数を返す。
+
+    シェルは ``-c`` の直後ではなく、オプションの後の最初の引数を実行する（``bash -c -x 'cmd'``）。
+
+    Args:
+        arguments: ``-c`` より後ろのトークン列。
+
+    Returns:
+        実行される文字列。無ければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    remaining = iter(arguments)
+    for token in remaining:
+        if token == "--":
+            return next(remaining, None)
+        if not token.startswith(("-", "+")):
+            return token
+    return None
+
+
 def extract_shell_wrapper_command(segment: list[str]) -> str | None:
     """セグメント内の既知シェル ``-c`` 呼び出しから、ラップされた文字列コマンドを取り出す。
 
-    既知シェルのトークンに続く ``-c`` を含む短フラグを探し、その次のトークンを返す。
+    既知シェルのトークンに続く ``-c`` を含む短フラグを探し、その後の最初の非オプション引数を返す。
     `block_no_verify`・`bash_config_protection`・`commit_risk` が共有する。片方だけがラッパー再帰を
     持つと、同じコマンドが片方のフックだけを素通りする。再帰の段数は呼び出し側が
     決める（docs/adr/shell-analysis-boundary.md: 2 段以上のネストは非目標）。
@@ -139,11 +142,11 @@ def extract_shell_wrapper_command(segment: list[str]) -> str | None:
         return None
     for position in range(start + 1, len(segment)):
         if _SHELL_COMMAND_FLAG_RE.fullmatch(segment[position]):
-            return segment[position + 1] if position + 1 < len(segment) else None
+            return _first_shell_operand(segment[position + 1 :])
     return None
 
 
-class _QuoteState:
+class QuoteState:
     """シェルのクォートと ``\\`` エスケープの状態を 1 文字ずつ進める。
 
     コメント除去・行継続の連結・改行の置換・heredoc 演算子の検出は、どれも同じ規則で
@@ -164,9 +167,9 @@ class _QuoteState:
         """状態を作る。
 
         Args:
-            quote: 開始時点の未閉鎖クォート文字か `_CONTINUED_WORD`。無ければ None。
+            quote: 開始時点の未閉鎖クォート文字か `CONTINUED_WORD`。無ければ None。
         """
-        self.quote = None if quote == _CONTINUED_WORD else quote
+        self.quote = None if quote == CONTINUED_WORD else quote
         self.escaped = False
         self.at_word_start = quote is None
 
@@ -200,248 +203,8 @@ class _QuoteState:
             self.quote = char
             self.at_word_start = False
             return False
-        self.at_word_start = char in _COMMENT_PRECEDING_CHARS
+        self.at_word_start = char in COMMENT_PRECEDING_CHARS
         return True
-
-
-def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], str | None]:
-    """heredoc 演算子になりうる ``<`` の位置と、行末のクォート状態を返す。
-
-    コメント内・クォート内・``\\`` エスケープ後の ``<`` は heredoc を開始しない。
-    これらを演算子として採ると、実際には実行される後続行が「本文」として捨てられ、
-    保護フックが素通りする。
-
-    クォート状態は行をまたぐため、呼び出し元が**非本文行だけ**を鎖のように繋いで
-    渡す。本文行・終端行はシェルの語彙ではないので、本文中の ``#`` や閉じない
-    アポストロフィ（``don't``）で以降の解析を壊さないよう状態を更新しない。
-    行末の ``\\`` が消費するのは改行自体なので、エスケープ状態は持ち越さない。ただし語の
-    途中の行継続は語が次行へ続くので `_CONTINUED_WORD` を渡す（次行の先頭の ``#`` は語の一部）。
-
-    `_strip_line_comments` を前段で単純適用する形は採れない。heredoc 本文中の
-    ``#`` や閉じないアポストロフィまで巻き込んで壊すため。
-
-    Args:
-        line: 走査対象の 1 物理行（非本文行）。
-        quote: 直前の非本文行から持ち越した未閉鎖クォート文字か `_CONTINUED_WORD`。無ければ None。
-
-    Returns:
-        (演算子候補となる ``<`` の位置リスト, 行末時点の未閉鎖クォート文字か `_CONTINUED_WORD`)。
-
-    Raises:
-        例外は発生しません。
-    """
-    offsets: list[int] = []
-    state = _QuoteState(quote)
-    for index, char in enumerate(line):
-        at_word_start = state.at_word_start
-        if state.advance(char):
-            if char == "#" and at_word_start:
-                break
-            if char == "<":
-                offsets.append(index)
-    if state.escaped and state.quote is None and not state.at_word_start:
-        return offsets, _CONTINUED_WORD
-    return offsets, state.quote
-
-
-def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, bool]], str | None]:
-    """行に現れる heredoc の区切り語を出現順に返し、行末のクォート状態も返す。
-
-    照合は `_operator_start_offsets` が返した位置からのみ行う。照合は非重複にする
-    （直前の照合範囲内の候補を飛ばす）。位置ごとに独立して照合すると、クォート内の
-    ``<<`` を跨いだ重複照合が新たな区切り語を生み、本文を余計に剥がして誤通過側へ
-    倒れうるため。
-
-    Args:
-        line: 走査対象の 1 物理行（非本文行）。
-        quote: 直前の非本文行から持ち越した未閉鎖クォート文字か `_CONTINUED_WORD`。無ければ None。
-
-    Returns:
-        ((区切り語, タブ剥がし可（``<<-``）) のリスト, 行末時点の未閉鎖クォート文字か `_CONTINUED_WORD`)。
-
-    Raises:
-        例外は発生しません。
-    """
-    offsets, next_quote = _operator_start_offsets(line, quote)
-    delimiters = []
-    consumed_to = 0
-    for offset in offsets:
-        if offset < consumed_to:
-            continue
-        match = _HEREDOC_OPERATOR_RE.match(line, offset)
-        if match is None:
-            continue
-        # ``<<''`` の空文字列区切りを落とさないため or 連結にしない。
-        word = next(value for value in match.group("squote", "dquote", "bare") if value is not None)
-        delimiters.append((word, match.group(1) == "-"))
-        consumed_to = match.end()
-    return delimiters, next_quote
-
-
-def _unescaped_reading_comment_start(line: str, quote: str | None) -> int:
-    """``\\`` をエスケープにしない読み（PowerShell）で、コメントが始まる位置を返す。
-
-    POSIX 読みで語の途中の ``#``（``\\ #``）も、この読みでは区切り文字の直後なのでコメントになる。
-    クォート内の ``#`` はどちらの読みでもコメントではない。
-
-    Args:
-        line: 走査対象の 1 物理行（非本文行）。
-        quote: 直前の非本文行から持ち越した未閉鎖クォート文字か `_CONTINUED_WORD`。無ければ None。
-
-    Returns:
-        コメントの開始位置。無ければ行の長さ。
-
-    Raises:
-        例外は発生しません。
-    """
-    open_quote = None if quote == _CONTINUED_WORD else quote
-    previous = ""
-    for index, char in enumerate(line):
-        if open_quote is not None:
-            open_quote = None if char == open_quote else open_quote
-        elif char in ("'", '"'):
-            open_quote = char
-        elif char == "#" and previous in _COMMENT_PRECEDING_CHARS:
-            return index
-        previous = char
-    return len(line)
-
-
-def _line_has_unreadable_heredoc(line: str, quote: str | None) -> bool:
-    """行の ``<<`` に、本文の範囲を静的に確定できないものがあるかを判定する。
-
-    区切り語を語の終わりまで読めない演算子と、方言によってコメントの中になる演算子が当たる。
-    どちらも本文の範囲が分からない。演算子ではないと読み進めると、本物の本文に書かれた ``<<`` を
-    演算子と読み直し、本物の終端の後ろの実行行まで剥がす。
-
-    Args:
-        line: 走査対象の 1 物理行（非本文行）。
-        quote: 直前の非本文行から持ち越した未閉鎖クォート文字か `_CONTINUED_WORD`。無ければ None。
-
-    Returns:
-        確定できない ``<<`` があれば True。
-
-    Raises:
-        例外は発生しません。
-    """
-    offsets, _ = _operator_start_offsets(line, quote)
-    comment_start = _unescaped_reading_comment_start(line, quote)
-    return any(
-        _HEREDOC_START_RE.match(line, offset) is not None
-        and (offset > comment_start or _HEREDOC_OPERATOR_RE.match(line, offset) is None)
-        for offset in offsets
-    )
-
-
-def _line_keeps_heredoc_bodies(line: str) -> bool:
-    """演算子行を見て、本文を剥がさずに残すべきかを判定する。
-
-    本文が実行されうる形（シェル起動・本文を実行するビルトイン・パイプや継続で
-    次行へ繋がる形）はすべて残す側へ倒す。
-
-    Args:
-        line: heredoc 演算子を含む物理行。
-
-    Returns:
-        本文を残すなら True、剥がしてよいなら False。
-
-    Raises:
-        例外は発生しません。
-    """
-    if line.rstrip().endswith(_HEREDOC_CONTINUATION_SUFFIXES):
-        return True
-    return any(is_shell_wrapper_token(token) or token in _BODY_EXECUTING_BUILTINS for token in tokenize(line))
-
-
-def _consume_heredoc_bodies(
-    lines: list[str], start: int, delimiters: list[tuple[str, bool]]
-) -> tuple[int, list[str]] | None:
-    """区切り語の本文を読み飛ばし、終端行だけを残して返す。
-
-    本文の走査中に ``<<`` を再検出しない。``<<'OUTER'`` の本文に ``<<'INNER'`` が
-    現れる形で走査が同期ずれを起こすのを防ぐ。
-
-    Args:
-        lines: コマンド全体の物理行リスト。
-        start: 本文開始行の index。
-        delimiters: 演算子行が宣言した (区切り語, タブ剥がし可) のリスト。
-
-    Returns:
-        (再開する index, 出力に残す行のリスト)。1 つでも終端行が見つからな
-        ければ None（未終端として呼び出し側が剥がすのをやめる）。
-
-    Raises:
-        例外は発生しません。
-    """
-    index = start
-    kept = []
-    for word, strip_tabs in delimiters:
-        while index < len(lines):
-            candidate = lines[index]
-            index += 1
-            if (candidate.lstrip("\t") if strip_tabs else candidate) == word:
-                kept.append(candidate)
-                break
-        else:
-            return None
-    return index, kept
-
-
-def strip_data_heredoc_bodies(command: str) -> str:
-    """heredoc の**データ**本文をコマンド文字列から取り除く。
-
-    heredoc 本文はコマンドの語彙に入らないため、そのままトークン化すると散文が
-    実行命令として読まれ、フックの禁止事項を名指しする説明文書自体が書けなくなる。
-    本文範囲は演算子・区切り語・終端行だけで決まる環境非依存の構文なので、本文が
-    データだと**静的に確定できる場合だけ**剥がす。次のいずれかに当たれば剥がさず
-    検出側を維持する（docs/adr/shell-analysis-boundary.md）:
-
-    1. 演算子行に本文を実行するトークンがある（``bash <<'EOF'`` /
-       ``cat <<'EOF' | bash`` / ``. /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``）
-    2. 演算子行が継続演算子で終わる（本文開始が次行とは限らない）
-    3. 終端行が見つからない（未終端）
-    4. ``<<`` がそもそも heredoc 演算子ではない（コメント内・クォート内・
-       ``\\`` エスケープ後）。後続行は実行されるコマンドなので剥がすと素通りする。
-    5. 本文の範囲を確定できない ``<<`` がある（`_line_has_unreadable_heredoc`）。その行以降は
-       一切剥がさない。
-
-    終端行を残すため冪等（``f(f(x)) == f(x)``）。
-
-    Args:
-        command: 元のコマンド文字列。
-
-    Returns:
-        データ本文を除去した文字列。剥がせないと判断した場合は入力そのまま。
-
-    Raises:
-        例外は発生しません。
-    """
-    if "<<" not in command:
-        return command
-
-    lines = command.split("\n")
-    output = []
-    index = 0
-    # 非本文行だけを繋いだクォート状態。本文行・終端行では更新しない。
-    quote: str | None = None
-    while index < len(lines):
-        line = lines[index]
-        output.append(line)
-        index += 1
-        if "<<" in line and _line_has_unreadable_heredoc(line, quote):
-            output.extend(lines[index:])
-            return "\n".join(output)
-        delimiters, quote = _heredoc_delimiters(line, quote)
-        if not delimiters or _line_keeps_heredoc_bodies(line):
-            continue
-        consumed = _consume_heredoc_bodies(lines, index, delimiters)
-        if consumed is None:
-            # 未終端。以降は判断材料が無いのでそのまま残す。
-            output.extend(lines[index:])
-            return "\n".join(output)
-        index, kept = consumed
-        output.extend(kept)
-    return "\n".join(output)
 
 
 def _strip_line_comments(command: str) -> str:
@@ -469,7 +232,7 @@ def _strip_line_comments(command: str) -> str:
         return command
 
     result: list[str] = []
-    state = _QuoteState()
+    state = QuoteState()
     in_comment = False
     for char in command:
         if in_comment:
@@ -512,7 +275,7 @@ def _strip_line_continuations(command: str) -> str:
         return command
 
     result: list[str] = []
-    state = _QuoteState()
+    state = QuoteState()
     for char in command:
         if state.escaped and char == "\n":
             # 行継続。直前に積んだ ``\\`` ごと落とす。
@@ -542,7 +305,7 @@ def _replace_unquoted_newlines(command: str) -> str:
     if "\n" not in command:
         return command
 
-    state = _QuoteState()
+    state = QuoteState()
     result = []
     for char in command:
         result.append(";" if state.advance(char) and char == "\n" else char)
@@ -555,7 +318,7 @@ _WINDOWS_SEPARATOR_BACKSLASH_RE = re.compile(r"\\(?=[^\s/])")
 # Windows 読みで除去するバックスラッシュ（直後が空白）。エスケープを持たない
 # PowerShell / cmd では ``rm my\\ ruff.toml`` は 2 引数で ``ruff.toml`` が実際に
 # 削除されるため、検出側へ倒す。``/`` へ置換しないのは実在しない ``my/`` を作らないため。
-_WINDOWS_ESCAPED_SPACE_RE = re.compile(r"\\(?=[ \t])")
+_WINDOWS_ESCAPED_SPACE_RE = re.compile(r"\\(?=\s)")
 
 
 def command_dialect_variants(command: str) -> tuple[str, ...]:

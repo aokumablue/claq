@@ -16,6 +16,7 @@ block / allow 一覧が担う。
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -735,6 +736,33 @@ def test_heredoc_after_a_hash_inside_a_word_keeps_its_data_body_out_of_the_scan(
         # POSIX 読みでは語の途中でも、PowerShell 読みでは ``#`` 以降がコメントで次行が実行される。
         pytest.param("cat \\ #<<EOF\n{run}\nEOF", id="comment-in-the-windows-reading"),
         pytest.param("cat \\ #<<EOF\ncat <<B\nEOF\n{run}\nB", id="comment-in-the-windows-reading-with-inner-operator"),
+        # PowerShell 読みでは ``\\`` が継続にならず、2 行目はコメントで次行が実行される。
+        pytest.param("cat a\\\n#<<EOF\n{run}\nEOF", id="line-start-comment-in-the-windows-reading"),
+        # 区切り語に ``\`` が入ると、シェルの区切り語と読み違えるか、残した終端行が次行と連結する。
+        pytest.param('cat <<"E\\\\F"\nE\\F\n{run}\nE\\\\F', id="backslash-in-double-quoted-delimiter"),
+        pytest.param("cat <<'E\\'\nE\\\n{run}", id="backslash-in-single-quoted-delimiter"),
+        # 残した終端行の引用符が、後ろの実行行を引用へ飲み込む。
+        pytest.param("cat <<\"a'b\"\na'b\n{run}\n: \\'", id="quote-in-the-kept-terminator"),
+        # 本文を実行する形の行は読み飛ばさないので、その本文の ``<<`` を演算子と読み直さない。
+        pytest.param("bash <<'X'\ncat <<'Y'\nX\n{run}\nY", id="operator-inside-an-executed-body"),
+        pytest.param("cat <<'X' |\ncat <<'Y'\nX\n{run}\nY", id="operator-inside-a-piped-body"),
+        # 本文を実行するシェルが演算子行の外にある。
+        pytest.param("bash \\\n<<'EOF'\n{run}\nEOF", id="shell-on-the-continued-line"),
+        pytest.param("bash -s \"a\nb\" <<'EOF'\n{run}\nEOF", id="shell-before-a-quoted-newline"),
+        pytest.param("cat <<'EOF' | # c\n{run}\nEOF\nbash", id="pipe-followed-by-a-comment"),
+        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) | bash", id="pipe-outside-a-subshell"),
+        pytest.param("cat <<'EOF' | {\n{run}\nEOF\nbash; }", id="pipe-into-a-group"),
+        # 算術の ``<<`` は heredoc ではない。
+        pytest.param("(( 1 << true ))\n{run}\ntrue", id="arithmetic-command"),
+        pytest.param("echo $((1<<x))\n{run}\nx", id="arithmetic-expansion"),
+        # クォートが行をまたぐ演算子行は、本文の開始位置を確定できない。
+        pytest.param('cat <<x "a\n"; {run}\nx', id="quote-opened-on-the-operator-line"),
+        pytest.param("echo 'a\nb'; bash <<EOF #'\n{run}\nEOF", id="quote-closed-on-the-operator-line"),
+        # 未クォートの区切り語の本文は ``\`` + 改行で連結する。
+        pytest.param("cat <<EOF\nE\\\nOF\n{run}\nEOF", id="continuation-forms-the-terminator"),
+        # 読めない heredoc の本文に残った引用符が、後ろの実行行を引用へ飲み込む。
+        pytest.param("cat <<E\"O\"F\ndon't\nEOF\n{run}", id="apostrophe-in-a-kept-body"),
+        pytest.param("cat <<E\"O\"F\n'\nEOF\n{run}\n: \\'", id="quote-pair-around-the-executed-line"),
     ],
 )
 class TestHeredocScanKeepsExecutedLines:
@@ -755,3 +783,60 @@ def test_quoted_hash_before_a_heredoc_does_not_keep_the_data_body(monkeypatch: p
     """クォート内の ``#`` はどの読みでもコメントではないので、続く heredoc の本文は剥がす。"""
     command = f"""echo "see #1"; cat <<'EOF'\ngit commit {_NO_VERIFY} -m y\nEOF"""
     assert _run("block_no_verify", _bash(command), monkeypatch) == 0
+
+
+@pytest.mark.parametrize("wrapper", ["bash -c -- ", "bash -c -x ", "bash -c -x -- "])
+class TestOptionsAfterTheCommandFlag:
+    """``-c`` の後ろのオプションを読み飛ばし、最初の非オプション引数を実行文字列と読む。"""
+
+    def test_no_verify_inside_is_denied(self, wrapper: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``--no-verify`` を見逃さない。"""
+        assert _run("block_no_verify", _bash(f"{wrapper}'git commit {_NO_VERIFY} -m y'"), monkeypatch) == 2
+
+    def test_protected_write_inside_is_denied(self, wrapper: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """保護対象への書込みを見逃さない。"""
+        assert _run("bash_config_protection", _bash(f"{wrapper}'printf y > ruff.toml'"), monkeypatch) == 2
+
+
+def test_unparsable_command_reads_a_newline_as_a_separator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """解析不能な入力でも、改行の後ろの語は実行位置にある。"""
+    assert _run("bash_config_protection", _bash("echo $'\\''\nrm ruff.toml"), monkeypatch) == 2
+
+
+def test_case_variant_of_the_repo_root_stays_inside_the_repo(_repo_scope: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """repo 判定は綴りの大小を畳む（APFS / NTFS では ``../CLAQ`` が repo 自身に着地する）。"""
+    command = f"rm ../{_repo_scope.name.upper()}/ruff.toml"
+    assert _run("bash_config_protection", _bash(command), monkeypatch) == 2
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(f"cat > note.md <<'EOF'\ngit commit {_NO_VERIFY}\nEOF\necho done", id="data-body-then-a-command"),
+        pytest.param(f"cat > a <<'A'\none\nA\ncat > b <<'B'\ngit commit {_NO_VERIFY}\nB", id="two-data-bodies"),
+        pytest.param(f"cat <<-EOF\n\tgit commit {_NO_VERIFY}\n\tEOF", id="tab-stripped-terminator"),
+    ],
+)
+def test_plain_data_heredocs_stay_removable(command: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """確定できる data heredoc は今までどおり除去する（上の表の陰性対照）。"""
+    assert _run("block_no_verify", _bash(command), monkeypatch) == 0
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        pytest.param("""git commit -m "$(cat <<'EOF'\nfix: x\n\n{text}\nEOF\n)\"""", id="commit-message"),
+        pytest.param("""gh pr create --body "$(cat <<'EOF'\n## Summary\n{text}\nEOF\n)\"""", id="pr-body"),
+    ],
+)
+class TestQuotedHeredocBodyStaysData:
+    """引用の中の ``<<`` の本文は語として読まない（物理行ごとの読みの陰性対照）。"""
+
+    def test_no_verify_in_the_text_is_allowed(self, template: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """本文で ``--no-verify`` を名指しできる。"""
+        command = template.replace("{text}", f"- git commit {_NO_VERIFY} を検出する")
+        assert _run("block_no_verify", _bash(command), monkeypatch) == 0
+
+    def test_protected_write_in_the_text_is_allowed(self, template: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """本文で保護対象への操作を名指しできる。"""
+        assert _run("bash_config_protection", _bash(template.replace("{text}", "rm ruff.toml を止める")), monkeypatch) == 0
