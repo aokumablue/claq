@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -595,6 +596,7 @@ def test_md_max_score_matches_real_audit() -> None:
         text=True,
         timeout=120,
         check=False,
+        env={**os.environ, "PYTHONPATH": str(_ROOT / "src")},
     )
     assert result.stdout.strip(), f"監査が JSON を出力しなかった（exit={result.returncode}）: {result.stderr.strip()}"
     real = json.loads(result.stdout)["max_score"]
