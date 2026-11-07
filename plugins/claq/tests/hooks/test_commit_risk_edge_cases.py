@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from claq.hooks import commit_risk
@@ -75,3 +77,26 @@ def test_is_commit_all_flag(commit_args: list[str], expected: bool) -> None:
 def test_compound_commit_risk_sees_glued_operator_runs(command: str) -> None:
     """`shlex` が記号の連なりを 1 語にしても、commit 前の変更を見落とさない。"""
     assert commit_risk.compound_commit_risk(command) == commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE
+
+
+@pytest.mark.parametrize(
+    ("segment", "expected"),
+    [
+        pytest.param(["git", "git", "add", "x"], True, id="repeated-git-before-subcommand"),
+        pytest.param(["git", "-C", ".", "add", "x"], True, id="global-option-before-subcommand"),
+        pytest.param(["git", "status", "git", "add"], True, id="subcommand-after-second-git"),
+        pytest.param(["git", "git", "status"], False, id="repeated-git-without-mutation"),
+    ],
+)
+def test_segment_mutates_worktree_or_index_reads_everything_after_the_first_git(
+    segment: list[str], expected: bool
+) -> None:
+    """最初の git より後ろのどこかに index を変えるサブコマンドがあれば、変更しうると判定する。"""
+    assert commit_risk._segment_mutates_worktree_or_index(segment) is expected
+
+
+def test_segment_scan_stays_linear_in_git_tokens() -> None:
+    """git トークンごとに後ろ全体を読み直さないこと（16,000 語で 1.5 秒かかる二次オーダーへ戻さない）。"""
+    started = time.perf_counter()
+    assert commit_risk._segment_mutates_worktree_or_index(["git"] * 32_000) is False
+    assert time.perf_counter() - started < 1.0

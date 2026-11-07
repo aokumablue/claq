@@ -9,6 +9,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -311,6 +312,10 @@ def test_appended_css_violation_is_reported(tmp_path: Path, snippet: str, needle
         # [data-animate] の下の both は、JS が画面内でだけ起動するので通す
         pytest.param('\n[data-animate="in"] .x { animation: rise 300ms both; }\n', id="scoped-both"),
         pytest.param("\n@keyframes slide {\n  from {\n    opacity: 0;\n  }\n}\n", id="opacity-zero-in-keyframes"),
+        pytest.param(
+            "\n@keyframes slide {\n  from { opacity: 0; }\n  \n  to { opacity: 1; }\n}\n",
+            id="blank-line-between-keyframe-blocks",
+        ),
         pytest.param("\n.live { animation-iteration-count: 2; }\n", id="finite-iteration"),
         pytest.param("\n:root { --pulse-count: 1; }\n", id="finite-custom-property"),
         # 偽陽性: キーフレーム名が infinite を含むだけの有限の動き。コメント内は動きにならない（閉じていなければ末尾まで）
@@ -470,3 +475,11 @@ def test_cli_runs_as_a_subprocess(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert "PASS" in result.stdout
+
+
+def test_unclosed_keyframes_do_not_stall_the_check() -> None:
+    """閉じていない @keyframes で検査が止まらないこと（段数の指数で遅くなる形へ戻さない。10 段で 11 秒超だった）。"""
+    css = "@keyframes a {\n" + "  from { opacity: 1; }\n  \n" * 10
+    started = time.perf_counter()
+    check_site._validate_resting_state(css)
+    assert time.perf_counter() - started < 1.0

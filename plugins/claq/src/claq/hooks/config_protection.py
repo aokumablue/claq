@@ -468,9 +468,6 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
     Raises:
         例外は発生しません。
     """
-    # 全 hook の起動に載せないよう、ここへ到達したときだけ読み込む。
-    from bisect import bisect_right
-
     if not snippet:
         return None
     section_index = _read_section_index(file_path)
@@ -480,6 +477,9 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
     index = text.find(snippet)
     if index < 0:
         return None
+    # 全 hook の起動に載せないよう（import で約 0.3 ms）、ここへ到達したときだけ読み込む。
+    from bisect import bisect_right
+
     line = bisect_right(line_starts, index) - 1
     # 断片の手前で切れた行も見る（``[tool.ruff] # x`` の ``# x`` は ``[tool.ruff]`` に属する）。
     header = _section_header(text[line_starts[line] : index]) or headers_before[line]

@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from claq.hooks import config_protection
+from claq.hooks.hook_common import scan_memo
 
 from ._support import _edit, _run, _write_content
 
@@ -244,6 +245,43 @@ def test_resolve_lint_section_snippet_before_any_header_is_not_lint(tmp_path: Pa
     target = tmp_path / "setup.cfg"
     target.write_text("# leading comment\ntop_level_marker\n[flake8]\nmax-line-length = 100\n", encoding="utf-8")
     assert config_protection._resolve_lint_section_from_disk(str(target), "top_level_marker") is False
+
+
+def test_resolve_lint_section_reads_a_header_cut_off_by_the_snippet(tmp_path: Path) -> None:
+    """断片が見出しと同じ行にあるとき、断片より前だけを見出しとして読む（``[tool.ruff] # x`` の ``# x``）。"""
+    target = tmp_path / "pyproject.toml"
+    target.write_text("[project]\n[tool.ruff] # note\nname = 1\n", encoding="utf-8")
+    assert config_protection._resolve_lint_section_from_disk(str(target), "# note") is True
+    # 行全体は見出しの形をしていないので、次の行は前の見出しに属する。
+    assert config_protection._resolve_lint_section_from_disk(str(target), "name") is False
+
+
+@pytest.mark.parametrize("line_end", ["\n", "\r\n", "\x0c"], ids=["lf", "crlf", "form-feed"])
+def test_resolve_lint_section_finds_the_last_header_for_every_line_end(tmp_path: Path, line_end: str) -> None:
+    """行区切りの種類によらず、断片はその行より前で最後の見出しに属する。"""
+    target = tmp_path / "pyproject.toml"
+    target.write_bytes(line_end.join(["[project]", "name = 1", "[tool.ruff]", "select = 1", ""]).encode())
+    assert config_protection._resolve_lint_section_from_disk(str(target), "name") is False
+    assert config_protection._resolve_lint_section_from_disk(str(target), "select") is True
+
+
+def test_resolve_lint_section_reads_the_file_once_per_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """1 回の判定の中で断片ごとに読み直さない（MultiEdit の断片数だけ読むと timeout を超える）。"""
+    target = tmp_path / "pyproject.toml"
+    target.write_text("[project]\nname = 1\n[tool.ruff]\nselect = 1\n", encoding="utf-8")
+    original_open = Path.open
+    opened: list[Path] = []
+
+    def counting_open(self: Path, *args: Any, **kwargs: Any) -> Any:
+        """開いたパスを記録してから元の open へ渡す。"""
+        opened.append(self)
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counting_open)
+    with scan_memo():
+        verdicts = [config_protection._resolve_lint_section_from_disk(str(target), s) for s in ("name", "select")]
+    assert verdicts == [False, True]
+    assert opened == [target]
 
 
 class TestLintKeyPatternIsLinear:
