@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from claq.hooks import config_protection, hook_common
+from claq.hooks import conditional_protection, config_protection, hook_common
 from claq.hooks.hook_common import normalize_protected_name
 
 from ._support import (
@@ -498,8 +498,8 @@ _CONDITIONAL_SIGNALS = {
         (config_protection.PROTECTED_FILES, _EXPECTED_PROTECTED_FILES),
         (config_protection.CONDITIONALLY_PROTECTED_FILES, _EXPECTED_CONDITIONALLY_PROTECTED_FILES),
         (hook_common.DIRECTORY_CHANGE_COMMANDS, _EXPECTED_DIRECTORY_CHANGE_COMMANDS),
-        (config_protection._LINT_SECTION_HEADERS, _EXPECTED_LINT_SECTION_HEADERS),
-        (config_protection._LINT_KEYS, _EXPECTED_LINT_KEYS),
+        (conditional_protection._LINT_SECTION_HEADERS, _EXPECTED_LINT_SECTION_HEADERS),
+        (conditional_protection._LINT_KEYS, _EXPECTED_LINT_KEYS),
     ],
     ids=[
         "PROTECTED_FILES",

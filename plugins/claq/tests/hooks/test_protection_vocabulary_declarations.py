@@ -1,7 +1,7 @@
 """保護フックの語彙集合の固定と、個別の迂回回帰。
 
-保護フックの語彙集合（`config_protection` / `bash_config_protection` / `block_no_verify` /
-`commit_risk` / `shell_tokens` / `commit_quality_scanner` ほか）を層2（完全一致）と層1（全要素を
+保護フックの語彙集合（`config_protection` / `conditional_protection` / `bash_config_protection` /
+`block_no_verify` / `commit_risk` / `shell_tokens` / `commit_quality_scanner` ほか）を層2（完全一致）と層1（全要素を
 フックへ流して判定を実測）で固定し、`claq.hooks` 配下の語彙集合の台帳が漏れなく宣言されていることを
 検査する。期待値表（`_EXPECTED_VOCABULARIES` と `_EXTERNALLY_PINNED_VOCABULARIES`）は
 `_support.py` に置き、保護ファイル名の全数検査（`test_protection_bypass_regressions.py`）と共有する。
@@ -247,12 +247,12 @@ _VOCABULARY_WRITE_CASES = (
         {"tool_name": "Read", "tool_input": {"file_path": "ruff.toml"}},
     ),
     (
-        "config_protection._PACKAGE_JSON_LINT_KEYS",
+        "conditional_protection._PACKAGE_JSON_LINT_KEYS",
         lambda item: _write_content("package.json", '{"' + item + '": {}}'),
         _write_content("package.json", '{"name": "x"}'),
     ),
     (
-        "config_protection._TOX_COMMAND_KEYS",
+        "conditional_protection._TOX_COMMAND_KEYS",
         lambda item: _write_content("tox.ini", f"{item} = pytest\n"),
         _write_content("tox.ini", "[tox]\nenvlist = py312\n"),
     ),
@@ -274,12 +274,12 @@ _VOCABULARY_WRITE_CASES = (
         _write_content("docs/config", "[core]\n\thooksPath = /dev/null\n"),
     ),
     (
-        "config_protection._SETTINGS_GUARDED_SUBTREES",
+        "conditional_protection._SETTINGS_GUARDED_SUBTREES",
         lambda item: _write_content(".claude/settings.json", '{"' + item + '": {}}'),
         _write_content(".claude/settings.json", '{"model": "x"}'),
     ),
     (
-        "config_protection._SETTINGS_GUARDED_ENV_NAMES",
+        "conditional_protection._SETTINGS_GUARDED_ENV_NAMES",
         lambda item: _write_content(".claude/settings.json", '{"env": {"' + item + '": "/tmp/x"}}'),
         _write_content(".claude/settings.json", '{"env": {"DEBUG": "1"}}'),
     ),
@@ -301,8 +301,8 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
     "config_protection.PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
     "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
     "config_protection._PROTECTED_PATH_SEGMENTS_FOLDED": "_BLOCKED_CASES の保護 path の大文字（Bash）",
-    "config_protection._LINT_SECTION_HEADERS": "test_every_lint_section_header_is_detected",
-    "config_protection._LINT_KEYS": "test_every_lint_key_is_detected",
+    "conditional_protection._LINT_SECTION_HEADERS": "test_every_lint_section_header_is_detected",
+    "conditional_protection._LINT_KEYS": "test_every_lint_key_is_detected",
     "config_protection._RUNNING_PLUGIN_GUARDED_DIRS": "test_every_running_plugin_guarded_dir_is_denied_on_write_and_bash (test_running_plugin_protection)",
     "host_guard_targets._RUNTIME_ENTRYPOINT_NAMES": "test_every_runtime_entrypoint_name_is_denied_after_cd (test_running_plugin_protection)",
 }

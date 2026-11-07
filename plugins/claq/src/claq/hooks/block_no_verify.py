@@ -202,7 +202,7 @@ _HOOKS_PATH_CONFIG_KEY = "core.hookspath"
 #   **値**の中にあるためフラグ走査に掛からない。展開結果を解釈する術が無い以上、
 #   alias の定義そのものを deny する（誤検出 > 誤通過）。
 #
-# `is_sensitive_config_key` は `git config` / ``-c`` の key だけでなく、`config_protection` が
+# `is_sensitive_config_key` は `git config` / ``-c`` の key だけでなく、`conditional_protection` が
 # config ファイルの本文を解析して得た key の判定にも使う（key 集合を 1 本にするため）。
 _SENSITIVE_CONFIG_KEY_PREFIXES = (
     _HOOKS_PATH_CONFIG_KEY,
@@ -334,7 +334,7 @@ def _is_no_verify_flag(flag: str) -> bool:
 def is_sensitive_config_key(key: str) -> bool:
     """config key がフック実行を左右しうるものかを判定する。
 
-    `config_protection` が config ファイルの本文から得た完全修飾 key（``section.sub.key``）にも
+    `conditional_protection` が config ファイルの本文から得た完全修飾 key（``section.sub.key``）にも
     使うため公開名にしている。
 
     Args:

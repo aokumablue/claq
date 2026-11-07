@@ -1,6 +1,6 @@
 """git config の本文を最小限に解析し、フック実行を左右する key の変更を判定する。
 
-`config_protection` が ``.git/config`` や ``~/.gitconfig`` への Edit/Write の「置換前の全文」と
+`conditional_protection` が ``.git/config`` や ``~/.gitconfig`` への Edit/Write の「置換前の全文」と
 「置換後の全文」を比べるために使う葉モジュール。key の危険判定は呼び出し側が関数で渡すため、
 他のフックモジュールを import しない。ホーム側の git config の判定と、Edit/Write を適用した
 後の全文の組み立ても、この葉に置く。

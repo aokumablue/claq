@@ -310,7 +310,7 @@ _EXPECTED_LEADING_SHELL_KEYWORDS = frozenset(
     {"{", "(", "!", "if", "then", "elif", "else", "while", "until", "do", "builtin"}
 )
 
-# `config_protection._LINT_SECTION_HEADERS` の期待内容（層2）。順序も含めて固定する
+# `conditional_protection._LINT_SECTION_HEADERS` の期待内容（層2）。順序も含めて固定する
 # （前方一致で判定するため、要素の順序は結果に影響しないが定義の差分を見やすくする）。
 _EXPECTED_LINT_SECTION_HEADERS = (
     "[tool.ruff",
@@ -322,7 +322,7 @@ _EXPECTED_LINT_SECTION_HEADERS = (
     "[testenv",
 )
 
-# `config_protection._LINT_KEYS` の期待内容（層2）。
+# `conditional_protection._LINT_KEYS` の期待内容（層2）。
 _EXPECTED_LINT_KEYS = ("ignore", "select", "per-file-ignores", "exclude", "fail_under", "addopts")
 
 
@@ -532,10 +532,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": _folded(
         _EXPECTED_CONDITIONALLY_PROTECTED_FILES
     ),
-    # ホスト設定（settings.json / settings.local.json）で置換前後の全文を比べる部分木と env のキー。
-    # env のキーは大小無視で照合する（Windows の環境変数名は大小を区別しない）。
-    "config_protection._SETTINGS_GUARDED_SUBTREES": ("hooks", "enabledPlugins", "disabledPlugins", "disableAllHooks"),
-    "config_protection._SETTINGS_GUARDED_ENV_NAMES": ("CLAQ_PYTHON", "PATH", "PYTHONPATH", "PYTHONHOME"),
     "config_protection._RUNNING_PLUGIN_GUARDED_DIRS": _EXPECTED_RUNNING_PLUGIN_GUARDED_DIRS,
     # 派生: 上の表示名（`blocked_message_for_file` が文言を選ぶ鍵）。
     "config_protection.RUNNING_PLUGIN_DISPLAY_NAMES": frozenset(
@@ -555,10 +551,15 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "config_protection.GIT_CONFIG_DISPLAY_NAMES": frozenset("/".join(segments) for segments in _EXPECTED_GIT_CONFIG_REPO_SEGMENTS)
     | _EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES,
     "git_config_text.GLOBAL_GIT_CONFIG_DISPLAY_NAMES": _EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES,
-    "config_protection._LINT_SECTION_HEADERS": _EXPECTED_LINT_SECTION_HEADERS,
-    "config_protection._LINT_KEYS": _EXPECTED_LINT_KEYS,
-    "config_protection._PACKAGE_JSON_LINT_KEYS": ("eslintConfig", "prettier"),
-    "config_protection._TOX_COMMAND_KEYS": ("commands", "commands_pre", "commands_post"),
+    # --- conditional_protection ---
+    "conditional_protection._LINT_SECTION_HEADERS": _EXPECTED_LINT_SECTION_HEADERS,
+    "conditional_protection._LINT_KEYS": _EXPECTED_LINT_KEYS,
+    "conditional_protection._PACKAGE_JSON_LINT_KEYS": ("eslintConfig", "prettier"),
+    "conditional_protection._TOX_COMMAND_KEYS": ("commands", "commands_pre", "commands_post"),
+    # ホスト設定（settings.json / settings.local.json）で置換前後の全文を比べる部分木と env のキー。
+    # env のキーは大小無視で照合する（Windows の環境変数名は大小を区別しない）。
+    "conditional_protection._SETTINGS_GUARDED_SUBTREES": ("hooks", "enabledPlugins", "disabledPlugins", "disableAllHooks"),
+    "conditional_protection._SETTINGS_GUARDED_ENV_NAMES": ("CLAQ_PYTHON", "PATH", "PYTHONPATH", "PYTHONHOME"),
     # --- shell_tokens ---
     "shell_tokens._SHELL_SEPARATORS": frozenset({"&&", "||", ";", "|", "&", "(", ")"}),
     "shell_tokens.SHELL_WRAPPER_EXECUTABLES": frozenset({"sh", "bash", "zsh", "dash"}),

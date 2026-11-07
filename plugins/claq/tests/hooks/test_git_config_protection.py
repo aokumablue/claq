@@ -12,7 +12,7 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import bash_config_protection, block_no_verify, config_protection
+from claq.hooks import bash_config_protection, block_no_verify, conditional_protection, config_protection
 
 from ._support import _bash
 from ._support import _run as _run_hook
@@ -23,7 +23,7 @@ _ALIAS_CONFIG = "[core]\n\tbare = false\n[alias]\n\tci = commit\n" + _REMOTE_SEC
 _TWO_ALIASES = "[alias]\n\ta = x\n\tb = x\n"
 _USER = "[user]\n\tname = x\n"
 # 走査上限（_FULL_TEXT_MAX_BYTES）を超える長さの本文。
-_OVER_CAP = "# pad\n" * (config_protection._FULL_TEXT_MAX_BYTES // 6 + 10)
+_OVER_CAP = "# pad\n" * (conditional_protection._FULL_TEXT_MAX_BYTES // 6 + 10)
 
 
 @pytest.fixture(autouse=True)

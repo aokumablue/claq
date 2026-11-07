@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from claq.hooks import config_protection
+from claq.hooks import conditional_protection
 
 from ._support import _edit, _run, _write_content
 from ._support import _repo_scope as _repo_scope
@@ -133,7 +133,7 @@ def test_recursion_error_while_comparing_is_denied(
         """深すぎる入れ子を模す。"""
         raise RecursionError
 
-    monkeypatch.setattr(config_protection, "_parse_settings_object", _too_deep)
+    monkeypatch.setattr(conditional_protection, "_parse_settings_object", _too_deep)
 
     code = _run("config_protection", _write_content(path, '{"model": "b"}'), monkeypatch)
 

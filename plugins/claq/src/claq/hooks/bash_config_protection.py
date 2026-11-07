@@ -178,7 +178,6 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILE
 # `config_protection` の保護 path（Edit/Write にも効く）へは足さず本モジュールに閉じる。
 _HOME_LOG_PATH_SEGMENTS = ((".claq", "logs"),)
 
-
 # 未展開のまま ``~/.gitconfig`` 等を指せる、書込み先トークン先頭の ``$HOME`` / ``$XDG_CONFIG_HOME``（``{}`` 付き可）。
 _HOME_VARIABLE_PREFIX_RE = re.compile(r"^\$(?:\{HOME\}|HOME)(?=/|$)")
 _XDG_VARIABLE_PREFIX_RE = re.compile(r"^\$(?:\{XDG_CONFIG_HOME\}|XDG_CONFIG_HOME)(?=/|$)")
@@ -205,8 +204,7 @@ def _expand_config_home_variables(token: str) -> str:
 
 @memoized_in_scan
 def _find_home_log_directory_match(token: str) -> str | None:
-    """トークンが ``~/.claq/logs/`` のディレクトリ構造に一致するか、その
-    ディレクトリ自身を指すかを判定する。
+    """トークンが ``~/.claq/logs/`` のディレクトリ構造に一致するか、そのディレクトリ自身を指すかを判定する。
 
     symlink を解決し、畳んだ名前（`normalize_protected_name`）で構造的に一致を見る。
     ``~/.claq/logs/`` はどのリポジトリでも同じ固定位置を指すため、呼び出し側は
