@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-import runpy
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
 from claq.ci import validate_agents, validate_commands, validate_skills
 from claq.ci.ci_common import extract_frontmatter
 
-from ._support import _write_files
+from ._support import _exit_code_as_main, _write_files
 
 
 def _raise_oserror_on_read(monkeypatch: pytest.MonkeyPatch, broken_file: Path) -> None:
     """指定パスの Path.read_text だけ OSError にする。"""
     original_read_text = Path.read_text
 
-    def fake_read_text(self: Path, *args, **kwargs):  # noqa: ANN001
+    def fake_read_text(self: Path, *args: object, **kwargs: object) -> str:
         """broken_file だけ読み取りに失敗させる。"""
         if self == broken_file:
             raise OSError("boom")
@@ -293,7 +293,7 @@ def test_validate_commands_reports_errors_and_io_failures(
     assert "存在しないコマンド /missing" in stderr
     assert "存在しないコマンド /does-not-exist" in stderr
     assert "存在しないエージェント agents/missing.md" in stderr
-    assert "存在しないエージェント \"missing\"" in stderr
+    assert '存在しないエージェント "missing"' in stderr
 
 
 def test_validate_commands_resolves_relative_dirs_via_root_dir(
@@ -323,7 +323,7 @@ def test_main_and_module_entrypoint_succeed(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
-    module: object,
+    module: ModuleType,
     dirs: tuple[str, ...],
     noun: str,
 ) -> None:
@@ -342,6 +342,4 @@ def test_main_and_module_entrypoint_succeed(
     assert f"1 個の{noun}を検証しました" in capsys.readouterr().out
 
     monkeypatch.setattr(sys, "argv", [module.__name__, *argv])
-    with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module(module.__name__, run_name="__main__")
-    assert excinfo.value.code == 0
+    assert _exit_code_as_main(module.__name__) == 0

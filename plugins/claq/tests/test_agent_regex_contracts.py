@@ -2,7 +2,7 @@
 
 ``agents/reviewer.md`` の signature → argv の adapter 表は、プロンプト文書に書かれて
 いるだけで誰も実行しないため、書き間違えても気付けない。定義本文から表を抽出して
-期待する形を確かめる。
+期待する形を確かめる。skill-gen / skill-make が git 履歴をデータとして扱う規則も同じ形で確かめる。
 """
 
 from __future__ import annotations
@@ -81,9 +81,9 @@ def _section(relative_path: str, heading: str) -> str:
 def test_git_history_handed_to_skill_make_is_bounded_as_data(
     relative_path: str, heading: str, phrases: tuple[str, ...]
 ) -> None:
-    """skill-gen が git 履歴（第三者が書ける件名・パス）を境界付きで skill-make へ渡し、skill-make がそれを入力安全の対象にすること。
+    """skill-gen が git 履歴を境界付きで skill-make へ渡し、skill-make がそれを入力安全の対象にすること。
 
-    `collect_skill_create_inputs` の出力をそのまま渡すと、コミット件名に埋め込んだ
+    git 履歴の件名・パスは第三者が書ける。`collect_skill_create_inputs` の出力をそのまま渡すと、コミット件名に埋め込んだ
     指示が生成される SKILL.md の方針へ混ざる。毎回生成するランダム ID 付きの
     開始・終了タグで囲み、囲いを偽装するタグを除き、データであって指示ではないと示す。
     """

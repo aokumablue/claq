@@ -48,30 +48,38 @@ def test_topic_files_have_common_principles_and_a_decision_section() -> None:
 def test_topic_files_are_self_contained() -> None:
     """各トピックファイルの本文が、他のトピックファイル名へ言及しないこと。
 
-    整理の過程でトピックを分割・統合するたびに他ファイルへの言及が追従を要ることになり、
-    今回のような整理でまさにそれが古びた。1 ファイルで完結させ、追従対象を無くす。
+    トピックを分割・統合するたびに他ファイルへの言及が追従を要し、追従を忘れた言及から古びる。
+    1 ファイルで完結させ、追従対象を無くす。
     """
-    names = {p.name for p in _topic_files()}
-    violations: list[str] = []
-    for path in _topic_files():
-        text = path.read_text(encoding="utf-8")
-        for other in names - {path.name}:
-            if other in text:
-                violations.append(f"{path.name}: 他トピック `{other}` へ言及している")
+    topics = {path: path.read_text(encoding="utf-8") for path in _topic_files()}
+    violations = [
+        f"{path.name}: 他トピック `{other.name}` へ言及している"
+        for path, text in topics.items()
+        for other in topics
+        if other != path and other.name in text
+    ]
     assert violations == [], "トピック間参照が残っている:\n" + "\n".join(violations)
+
+
+def _serial_id_hits(path: Path) -> list[str]:
+    """採番 ID を含む行を「相対パス:行番号: 本文」の形で返す（UTF-8 で読めないファイルは対象外）。"""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except UnicodeDecodeError:
+        return []
+    return [
+        f"{path.relative_to(_REPO_ROOT)}:{number}: {line.strip()}"
+        for number, line in enumerate(lines, 1)
+        if _SERIAL_RE.search(line)
+    ]
 
 
 def test_repo_does_not_use_adr_serial_ids() -> None:
     """採番 ID をリポジトリへ残さないこと。参照はトピックファイル名で行う。"""
-    hits: list[str] = []
-    for path in _REPO_ROOT.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in _SCAN_SUFFIXES or _SKIP_DIR_NAMES.intersection(path.parts):
-            continue
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except UnicodeDecodeError:
-            continue
-        for i, line in enumerate(lines, 1):
-            if _SERIAL_RE.search(line):
-                hits.append(f"{path.relative_to(_REPO_ROOT)}:{i}: {line.strip()}")
+    hits = [
+        hit
+        for path in _REPO_ROOT.rglob("*")
+        if path.is_file() and path.suffix.lower() in _SCAN_SUFFIXES and not _SKIP_DIR_NAMES.intersection(path.parts)
+        for hit in _serial_id_hits(path)
+    ]
     assert hits == [], "採番 ID が残っている:\n" + "\n".join(hits)

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-import claq.ci.harness_audit as harness_audit
+from claq.ci import harness_audit
 from claq.ci.harness_audit_repo_checks import get_repo_checks
 
 from ._support import _isolate_home as _isolate_home
@@ -29,7 +29,7 @@ _TEST_PY = "def test_x(): pass\n"
 _SPEC_JS = "it('x', () => {});\n"
 
 
-def _repo_check(root_dir: Path, check_id: str) -> dict:
+def _repo_check(root_dir: Path, check_id: str) -> dict[str, object]:
     """repo モードのチェック 1 件を返す。"""
     return next(check for check in get_repo_checks(root_dir) if check["id"] == check_id)
 
@@ -40,7 +40,7 @@ def _consumer_check_pass(root_dir: Path, check_id: str) -> bool:
     return next(check for check in report["checks"] if check["id"] == check_id)["pass"]
 
 
-def _entry(command: str) -> dict:
+def _entry(command: str) -> dict[str, object]:
     """hooks.json のイベント配下に置く、コマンド 1 件の matcher エントリを返す。"""
     return {"hooks": [{"type": "command", "command": command}]}
 
@@ -93,7 +93,10 @@ def test_context_always_on_budget(tmp_path: Path, frontmatter: str, expected: bo
         ("[tool.other]\nfail_under = 100\n", False),
         ("[tool.coverage.report\nfail_under = 100\n", False),
     ],
-    ids=["effective", "float", "gate-disabled", "commented-out", "bool-is-not-threshold", "other-section", "broken-toml"],
+    ids=[
+        "effective", "float", "gate-disabled", "commented-out",
+        "bool-is-not-threshold", "other-section", "broken-toml",
+    ],
 )
 def test_eval_tests_presence_requires_effective_coverage_gate(tmp_path: Path, body: str, expected: bool) -> None:
     """`eval-tests-presence`（2pts）はカバレッジ閾値の有効値を要求する。
@@ -118,7 +121,9 @@ def test_eval_tests_presence_requires_effective_coverage_gate(tmp_path: Path, bo
     ],
     ids=["real-guard", "beforesubmitprompt-alone", "noop-command", "unrelated-module", "empty", "not-pre-execution"],
 )
-def test_security_prompt_hook_requires_real_guard_module(tmp_path: Path, hooks: dict, expected: bool) -> None:
+def test_security_prompt_hook_requires_real_guard_module(
+    tmp_path: Path, hooks: dict[str, object], expected: bool
+) -> None:
     """`security-prompt-hook`（2pts）は実ガードモジュールの起動を要求する。
 
     エントリの有無だけを見ると、何もしない ``command: "true"`` でも満点になる。

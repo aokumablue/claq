@@ -8,6 +8,7 @@ Windows 実機では .cmd を実行できないため、POSIX 版 runtime/claq-h
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -38,13 +39,10 @@ def test_launcher_diagnostics_never_embed_a_path_in_json() -> None:
     ごと落としてある（片側だけ塞がない）。
     """
     posix_json = [line for line in _POSIX_TEXT.splitlines() if _PROTECTION_DISABLED_KEY in line]
-    windows_json = [
-        line
-        for line in _CMD_TEXT.splitlines()
-        if _PROTECTION_DISABLED_KEY in line and not line.strip().lower().startswith("rem")
-    ]
+    windows_json = [line for line in _LINES if _PROTECTION_DISABLED_KEY in line]
 
-    assert posix_json and windows_json
+    assert posix_json
+    assert windows_json
     # 検査するのは変数**展開**であって、候補名としての文字列ではない（`"candidates": [...]` は固定文字列）。
     for line in posix_json:
         assert "$_claq_launcher" not in line
@@ -192,13 +190,15 @@ def test_windows_wrapper_quotes_every_path_expansion() -> None:
     cmd はパーセント展開の後に行を再パースするので、裸の展開はインストールパスに `&` があると
     コマンド実行になる（Windows のアカウント名は `&` を許す）。
     """
-    for line in _LINES:
-        for var in ("%CLAQ_LAUNCHER%", "%CLAQ_PYTHON%", "%CLAQ_PY%", "%CLAQ_ROOT%"):
-            start = line.find(var)
-            while start != -1:
-                # 直前までの `"` が奇数個なら、その展開は引用符の内側にある。
-                assert line.count('"', 0, start) % 2 == 1, f"引用符の外で展開している: {line}"
-                start = line.find(var, start + 1)
+    unquoted = [
+        line
+        for line in _LINES
+        for var in ("%CLAQ_LAUNCHER%", "%CLAQ_PYTHON%", "%CLAQ_PY%", "%CLAQ_ROOT%")
+        for match in re.finditer(f"(?={var})", line)
+        # 直前までの `"` が奇数個なら、その展開は引用符の内側にある。
+        if line.count('"', 0, match.start()) % 2 == 0
+    ]
+    assert unquoted == [], f"引用符の外で展開している: {unquoted}"
 
 
 def test_windows_wrapper_probes_each_candidate_with_its_exec_arguments() -> None:

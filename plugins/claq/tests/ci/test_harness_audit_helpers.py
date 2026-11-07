@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pytest
 
-import claq.ci.harness_audit as harness_audit
-import claq.ci.harness_audit_utils as harness_audit_utils
+from claq.ci import harness_audit, harness_audit_utils
 from claq.ci.harness_audit_repo_checks import (
     _event_has_matching_command,
     _hook_command_argv,
@@ -126,7 +125,10 @@ def test_has_python_tests_skips_unreadable_directories(tmp_path: Path) -> None:
         # 先頭の --bg（非 Claude ハーネス向け detach フラグ）は実体でないため除去する
         ("claq-hook --bg a b", ("a", "b")),
     ],
-    ids=["bad-quote", "no-args", "python-launcher", "other-wrapper", "bare-wrapper", "wrapper-path", "windows-cmd", "bg"],
+    ids=[
+        "bad-quote", "no-args", "python-launcher", "other-wrapper",
+        "bare-wrapper", "wrapper-path", "windows-cmd", "bg",
+    ],
 )
 def test_hook_command_argv(command: str, expected: tuple[str, ...] | None) -> None:
     """wrapper 起動のコマンドだけから起動後の引数列を取り出し、それ以外は None を返す。"""
