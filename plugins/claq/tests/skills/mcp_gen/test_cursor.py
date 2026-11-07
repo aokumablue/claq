@@ -37,7 +37,7 @@ class TestCursor:
         codec = facade.signed_cursor.CursorCodec(_SECRET)
         binding = {"scope": "orders_search", "principal": "alice@example.com", "fingerprint": "f0" * 16}
         token = codec.issue(**binding, position={"page": "o:3"})
-        payload = json.loads(facade.cursor._decode(token.partition(".")[0]))
+        payload = json.loads(facade.cursor.decode(token.partition(".")[0]))
         assert set(payload) == {"v", "pos", "exp"}
         assert payload["pos"] == {"page": "o:3"}
         for value in binding.values():
@@ -89,7 +89,7 @@ class TestCursor:
     def test_rejects_signed_but_malformed_payload(self, facade: types.SimpleNamespace, payload: bytes) -> None:
         """署名は合うが読めない・版が違う・形が違う payload も、例外を漏らさず同じ文面で拒否する。"""
         codec = facade.signed_cursor.CursorCodec(_SECRET)
-        body = facade.cursor._encode(payload)
+        body = facade.cursor.encode(payload)
         token = f"{body}.{codec._sign(body, **_BINDING)}"
         with pytest.raises(facade.errors.CursorError) as rejected:
             codec.open(token, **_BINDING)
@@ -228,7 +228,7 @@ def _unsigned(facade: types.SimpleNamespace, *, scope: str = "orders_search", ma
 
 def _sealed(facade: types.SimpleNamespace, cursors: Any, payload: Any) -> str:
     """任意の本体に、正しい照合値を付けた cursor を作る（照合値は合うが中身の形が違う cursor の検査用）。"""
-    body = facade.cursor._encode(json.dumps(payload).encode("utf-8"))
+    body = facade.cursor.encode(json.dumps(payload).encode("utf-8"))
     return f"{body}.{cursors._check(body, _FP)}"
 
 
