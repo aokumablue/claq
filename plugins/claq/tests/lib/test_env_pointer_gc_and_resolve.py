@@ -21,7 +21,7 @@ import pytest
 from claq.lib import env_pointer as mod
 from claq.lib.constants import BASE_DIR_NAME
 
-from ._support import _ENV_TEMPLATE, _make_plugin_root
+from ._support import _ENV_TEMPLATE, _make_plugin_root, _raise
 from ._support import _isolate_home as _isolate_home
 
 _PAST_GRACE = mod._DEAD_PID_GRACE_SECONDS + 60
@@ -42,11 +42,6 @@ def _dead_pid() -> int:
     proc = subprocess.Popen(["true"])
     proc.wait()
     return proc.pid
-
-
-def _raise_oserror(*_args: object, **_kwargs: object) -> None:
-    """常に OSError を送出する差し替え関数。"""
-    raise OSError("boom")
 
 
 class TestPidIsAlive:
@@ -130,7 +125,7 @@ class TestGcRoots:
         entry.write_text("/x\n", encoding="utf-8")
         _age(entry, _PAST_GRACE)
         monkeypatch.setattr(mod, "_pid_is_alive", lambda _pid: False)
-        monkeypatch.setattr(Path, "unlink", _raise_oserror)
+        monkeypatch.setattr(Path, "unlink", _raise(OSError("boom")))
 
         mod._gc_roots(roots_dir)
 
@@ -154,8 +149,11 @@ class TestGcRoots:
         stale = claq_dir / f"{mod._ENV_TMP_PREFIX}stalexxx"
         stale.write_text("orphan\n", encoding="utf-8")
         _age(stale, _PAST_GRACE)
-        kept = {claq_dir / mod._ENV_FILENAME: "keep-env\n", claq_dir / "mem.db": "keep-db\n"}
-        kept[claq_dir / "unrelated.txt"] = "keep-other\n"
+        kept = {
+            claq_dir / mod._ENV_FILENAME: "keep-env\n",
+            claq_dir / "mem.db": "keep-db\n",
+            claq_dir / "unrelated.txt": "keep-other\n",
+        }
         for path, text in kept.items():
             path.write_text(text, encoding="utf-8")
             _age(path, _PAST_GRACE)
@@ -182,9 +180,10 @@ class TestGcRoots:
                 raise OSError("boom")
             return real_stat(self, *args, **kwargs)
 
-        monkeypatch.setattr(Path, "stat", _boom_stat)
-        mod._gc_stale_temp_files(claq_dir, time.time())
-        monkeypatch.undo()
+        with monkeypatch.context() as patched:
+            patched.setattr(Path, "stat", _boom_stat)
+            mod._gc_stale_temp_files(claq_dir, time.time())
+
         assert entry.exists()
 
 
@@ -250,7 +249,7 @@ class TestGcThrottle:
     ) -> None:
         """stamp を書けなければ GC を走らせずに失敗を伝える（呼び出し元が 1 回警告する）。"""
         claq_dir, roots_dir, legacy, _tmp = gc_dirs
-        monkeypatch.setattr(Path, "touch", _raise_oserror)
+        monkeypatch.setattr(Path, "touch", _raise(OSError("boom")))
 
         with pytest.raises(OSError):
             mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())
@@ -268,19 +267,15 @@ def _run_env_sh(home: Path, *, script: str = _SOURCE_AND_RUN) -> subprocess.Comp
     )
 
 
-def _lstart_for(pid: int) -> str:
-    """``pid`` の現在の起動時刻を ``LC_ALL=C`` で取得する。
-
-    writer 実装（``_resolve_ancestor_chain``）と同じロケール固定・
-    非正規化ポリシーで取得する。存在しない PID には空文字列を返す。
-    """
-    result = subprocess.run(
-        ["ps", "-o", "lstart=", "-p", str(pid)],
-        capture_output=True,
-        text=True,
-        env={**os.environ, "LC_ALL": "C"},
-    )
+def _ps_lstart(pid: int, env: dict[str, str]) -> str:
+    """``env`` のもとで ``ps -o lstart=`` が返す ``pid`` の起動時刻を返す（存在しない PID には空文字列）。"""
+    result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, env=env)
     return result.stdout.rstrip("\n")
+
+
+def _lstart_for(pid: int) -> str:
+    """``pid`` の現在の起動時刻を ``LC_ALL=C`` で取得する（writer 実装と同じロケール固定・非正規化）。"""
+    return _ps_lstart(pid, {**os.environ, "LC_ALL": "C"})
 
 
 def _write_pointer(roots_dir: Path, pid: int, root: Path) -> None:
@@ -397,10 +392,7 @@ class TestEnvShRealExecution:
         """
         ja_env = {**os.environ, "LANG": "ja_JP.UTF-8"}
         ja_env.pop("LC_ALL", None)
-        ja_lstart = subprocess.run(
-            ["ps", "-o", "lstart=", "-p", str(os.getpid())], capture_output=True, text=True, env=ja_env
-        ).stdout.rstrip("\n")
-        if _lstart_for(os.getpid()) == ja_lstart:
+        if _lstart_for(os.getpid()) == _ps_lstart(os.getpid(), ja_env):
             pytest.skip("ja_JP.UTF-8 locale not available on this host; ps -o lstart= is locale-invariant here")
 
         monkeypatch.setenv("LANG", "ja_JP.UTF-8")

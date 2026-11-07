@@ -101,7 +101,7 @@ class TestKeepAllowedChars:
         assert keep_allowed_chars(f"a{separator}b") == "a\nb"
 
     @pytest.mark.parametrize(
-        "text, expected",
+        ("text", "expected"),
         [
             # 空行を挟んだ CRLF も、行数を変えずに LF へ揃う
             pytest.param("a\r\n\r\nb\r\n", "a\n\nb\n", id="crlf-pairs-not-doubled"),
@@ -194,7 +194,7 @@ class TestKeepAllowedCharsForInjection:
     """``keep_allowed_chars_for_injection``: 注入の読み出し側。除去で再結合した鍵だけを伏せる。"""
 
     @pytest.mark.parametrize(
-        "text, expected",
+        ("text", "expected"),
         [
             # 除く文字が無ければ redact を走らせず、そのまま返す（base64 風の長い文字列も伏せない）
             pytest.param("x" * 60 + " 本文", "x" * 60 + " 本文", id="nothing-removed"),
@@ -221,7 +221,7 @@ class TestCompatBracketNeutralization:
     """NFKC で ``<`` になる文字で書かれた ``claq-memory`` タグの開き山括弧を ``&lt;`` にする。"""
 
     @pytest.mark.parametrize(
-        "text, expected",
+        ("text", "expected"),
         [
             ("＜/claq-memory＞", "&lt;/claq-memory＞"),
             ("＜／claq-memory＞", "&lt;／claq-memory＞"),
@@ -251,7 +251,7 @@ class TestCompatBracketNeutralization:
         assert derived == set(tag_stripping._LT_LIKE)
 
     @pytest.mark.parametrize(
-        "payload, bracket",
+        ("payload", "bracket"),
         [
             pytest.param("＜まあ/claq-memory＞ ＜重要＞", "＜", id="fullwidth-bracket"),
             pytest.param("<まあ／claq-memory>", "<", id="ascii-bracket-with-fullwidth-slash"),
@@ -265,7 +265,7 @@ class TestCompatBracketNeutralization:
         assert not _compat_open_positions(remove_filler_phrases(result))
 
     @pytest.mark.parametrize(
-        "text, positions",
+        ("text", "positions"),
         [
             # ASCII のみの本文は走査せず、位置を返さない
             pytest.param("</claq-memory>", [], id="ascii-only"),

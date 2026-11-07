@@ -25,16 +25,11 @@ from claq.mem.repo_identity import (
     slugify,
 )
 
+from ._support import _raising
+from ._support import db as db
+
 # 鍵の形の文字列はコミット品質フックが止めるため実行時に組み立てる。
 _GITHUB_PAT = "ghp_" + "abcdefghijklmnopqrstuvwxyz012345"
-
-
-@pytest.fixture
-def db(tmp_path: Path) -> Database:
-    """テスト用の空 DB を開いて返す。"""
-    database = Database(tmp_path / "mem.db")
-    yield database
-    database.close()
 
 
 def _git(*args: str, cwd: Path) -> None:
@@ -57,19 +52,6 @@ def _make_repo(root: Path, remote: str | None = None) -> Path:
     if remote is not None:
         _git("remote", "add", "origin", remote, cwd=root)
     return root
-
-
-def _raising(exc: BaseException) -> Callable[..., object]:
-    """呼ばれると *exc* を送出する run_text の差し替えを返す。"""
-
-    def _run(cmd: list[str], **kwargs: object) -> object:
-        """*exc* を送出する。"""
-        raise exc
-
-    return _run
-
-
-_TIMEOUT = subprocess.TimeoutExpired("git", repo_identity.GIT_TIMEOUT_SECONDS)
 
 
 class TestNormalizeRemoteUrl:
@@ -221,7 +203,7 @@ class TestRunGit:
         "run_text",
         [
             _raising(FileNotFoundError("git")),
-            lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="  \n", stderr=""),
+            lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, 0, stdout="  \n", stderr=""),
             None,
         ],
         ids=["git-missing", "empty-stdout", "nonzero-exit-outside-repo"],
@@ -264,7 +246,8 @@ class TestFindRepoRoot:
     def test_timeout_is_propagated(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """git がタイムアウトしたら、絶対パスで続けずにそのまま伝える（同じリポジトリの識別が揺れないように）。"""
         git_dir = _make_repo(tmp_path / "main") / ".git"
-        monkeypatch.setattr(repo_identity, "run_text", _raising(_TIMEOUT))
+        timeout = subprocess.TimeoutExpired("git", repo_identity.GIT_TIMEOUT_SECONDS)
+        monkeypatch.setattr(repo_identity, "run_text", _raising(timeout))
         with pytest.raises(subprocess.TimeoutExpired):
             find_repo_root(git_dir)
 

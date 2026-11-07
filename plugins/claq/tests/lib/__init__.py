@@ -1,5 +1,5 @@
-"""claq.lib モジュールに対するテスト。
+"""claq.lib と launcher のテスト。
 
-ユーティリティ関数、セッション管理、フック基盤、
-スキル進化トラッキングを対象とする。
+共通ユーティリティ、env ポインタ、frontmatter、git hosting、Grok の plugin root、
+ハーネス差の吸収、ランタイム依存の静的ガードを対象とする。
 """

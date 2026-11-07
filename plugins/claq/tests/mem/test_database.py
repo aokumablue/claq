@@ -12,15 +12,9 @@ import pytest
 from claq.mem.database import Database, DatabaseError
 from claq.mem.models import Knowledge, Repo, Session, utc_now_iso
 
+from ._support import db as db
+
 _TS = "2026-01-01T00:00:00+00:00"
-
-
-@pytest.fixture
-def db(tmp_path: Path) -> Database:
-    """テスト用の空 DB を開いて返す。"""
-    database = Database(tmp_path / "mem.db")
-    yield database
-    database.close()
 
 
 def _repo(repo_id: str = "claq-dev", identity_key: str = "git@github.com:x/claq.git") -> Repo:

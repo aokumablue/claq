@@ -13,12 +13,6 @@ import pytest
 from claq.lib import grok_plugin_root as mod
 
 
-@pytest.fixture(autouse=True)
-def _no_env_plugin_root(monkeypatch: pytest.MonkeyPatch) -> None:
-    """実環境の CLAUDE_PLUGIN_ROOT が installed-plugins を指していると探索前に解決されるので外す。"""
-    monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
-
-
 @pytest.fixture
 def link(tmp_path: Path) -> Path:
     """既定位置 ``~/.grok/plugins/claq`` に当たるリンクのパス。"""
@@ -32,9 +26,14 @@ def _write(path: Path, text: str = "#\n") -> Path:
     return path
 
 
+def _installed_dir(home: Path) -> Path:
+    """``home/.grok/installed-plugins`` を返す。"""
+    return home / ".grok" / "installed-plugins"
+
+
 def _make_installed_plugin(home: Path, name: str = "claq-abc123", mtime: float | None = None) -> Path:
     """``home/.grok/installed-plugins/<name>`` に launcher 付きツリーを作り、``mtime`` があれば設定する。"""
-    root = home / ".grok" / "installed-plugins" / name
+    root = _installed_dir(home) / name
     _write(root / "src" / "claq" / "launcher.py")
     if mtime is not None:
         os.utime(root, (mtime, mtime))
@@ -119,7 +118,7 @@ class TestFindLatestInstalledClaq:
             for name in ("claq-a", "claq-b")
         }
 
-        assert mod.find_latest_installed_claq(tmp_path / ".grok" / "installed-plugins") == roots[newer_name]
+        assert mod.find_latest_installed_claq(_installed_dir(tmp_path)) == roots[newer_name]
 
     def test_ignores_non_candidates(self, tmp_path: Path) -> None:
         """launcher の無い claq-*・claq- 以外の名前のディレクトリ・ファイルは、それぞれ単独の条件で除外される。"""
@@ -148,7 +147,7 @@ class TestFindLatestInstalledClaq:
 
         hits: list[Path] = []
         with _vanishes_after_listing(lambda path: path == vanished, hits):
-            assert mod.find_latest_installed_claq(tmp_path / ".grok" / "installed-plugins") == survivor
+            assert mod.find_latest_installed_claq(_installed_dir(tmp_path)) == survivor
         assert hits
 
     def test_all_candidates_vanished_returns_none(self, tmp_path: Path) -> None:
@@ -157,7 +156,7 @@ class TestFindLatestInstalledClaq:
 
         hits: list[Path] = []
         with _vanishes_after_listing(lambda path: path == only, hits):
-            assert mod.find_latest_installed_claq(tmp_path / ".grok" / "installed-plugins") is None
+            assert mod.find_latest_installed_claq(_installed_dir(tmp_path)) is None
         assert hits
 
 
@@ -175,17 +174,15 @@ def test_symlink_target_resolution_order(
     """
     _make_installed_plugin(tmp_path, "claq-env", 1_000)
     _make_installed_plugin(tmp_path, "claq-newest", 3_000)
-    (tmp_path / ".grok" / "installed-plugins" / "claq-empty").mkdir()
+    (_installed_dir(tmp_path) / "claq-empty").mkdir()
     dev = _write(tmp_path / "dev" / "plugins" / "claq" / "src" / "claq" / "launcher.py").parents[2]
 
     def locate(name: str) -> Path:
         """行の名前を dev ツリーまたは installed-plugins 配下のパスへ変換する。"""
-        return dev if name == "dev" else tmp_path / ".grok" / "installed-plugins" / name
+        return dev if name == "dev" else _installed_dir(tmp_path) / name
 
     if env_root is not None:
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(locate(env_root)))
-    else:
-        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
 
     result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
 
@@ -213,10 +210,10 @@ def test_home_omitted_uses_path_home(tmp_path: Path, link: Path, monkeypatch: py
         (None, True),
         (lambda link, target: link.symlink_to(target, target_is_directory=True), True),
         (lambda link, target: link.symlink_to(target.parent, target_is_directory=True), True),
-        (lambda link, target: link.mkdir(), True),
-        (lambda link, target: _write(link, "not a dir"), True),
-        (lambda link, target: _write(link / "readme", "x"), False),
-        (lambda link, target: _write(link / "src" / "claq" / "launcher.py"), False),
+        (lambda link, _target: link.mkdir(), True),
+        (lambda link, _target: _write(link, "not a dir"), True),
+        (lambda link, _target: _write(link / "readme", "x"), False),
+        (lambda link, _target: _write(link / "src" / "claq" / "launcher.py"), False),
     ],
     ids=["absent", "already-linked", "wrong-symlink", "empty-dir", "regular-file", "nonempty-dir", "launcher-tree"],
 )
@@ -237,7 +234,8 @@ def test_existing_link_state(
         assert link.resolve() == target.resolve()
     else:
         assert result is None
-        assert link.is_dir() and not link.is_symlink()
+        assert link.is_dir()
+        assert not link.is_symlink()
 
 
 def test_vanished_candidate_returns_none(tmp_path: Path, link: Path) -> None:
@@ -267,8 +265,8 @@ def test_unresolvable_existing_symlink_is_replaced(tmp_path: Path, link: Path) -
 @pytest.mark.parametrize(
     ("prepare", "method", "should_fail"),
     [
-        (None, "resolve", lambda path, link: path.name.startswith("claq-")),
-        (None, "symlink_to", lambda path, link: True),
+        (None, "resolve", lambda path, _link: path.name.startswith("claq-")),
+        (None, "symlink_to", lambda _path, _link: True),
         (lambda link: link.mkdir(), "iterdir", lambda path, link: path == link),
     ],
     ids=["found-resolve-fails", "symlink-to-fails", "dir-iterdir-fails"],

@@ -13,7 +13,6 @@ import json
 import os
 import tempfile
 import threading
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -21,7 +20,7 @@ import pytest
 from claq.lib import env_pointer as mod
 from claq.lib.constants import BASE_DIR_NAME
 
-from ._support import _ENV_TEMPLATE, _make_plugin_root
+from ._support import _ENV_TEMPLATE, _make_plugin_root, _raise
 from ._support import _isolate_home as _isolate_home
 
 
@@ -31,19 +30,14 @@ def _reset_warned(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod, "_warned_this_process", False)
 
 
-def _raise(exc: BaseException) -> Callable[..., None]:
-    """呼ばれたら ``exc`` を送出する差し替え関数を返す。"""
-
-    def _boom(*_args: object, **_kwargs: object) -> None:
-        """差し替え先で ``exc`` を送出する。"""
-        raise exc
-
-    return _boom
-
-
 def _pointer_file(home: Path) -> Path:
     """直接 PPID のポインタファイルの場所を返す。"""
     return home / BASE_DIR_NAME / "roots" / str(os.getppid())
+
+
+def _pid_entries(roots_dir: Path) -> set[str]:
+    """``roots/`` のうち PID 名のエントリ名を返す。"""
+    return {path.name for path in roots_dir.iterdir() if path.name.isdigit()}
 
 
 def _single_warning(err: str) -> dict[str, object]:
@@ -89,7 +83,7 @@ class TestWriteEnvPointer:
 
         claq_dir = _isolate_home / BASE_DIR_NAME
         assert called == []
-        assert [p.name for p in (claq_dir / "roots").iterdir() if p.name.isdigit()] == []
+        assert _pid_entries(claq_dir / "roots") == set()
         assert (claq_dir / "env.sh").is_file()
 
     def test_writes_ancestor_chain_not_just_direct_ppid(self, tmp_path: Path, _isolate_home: Path) -> None:
@@ -102,8 +96,7 @@ class TestWriteEnvPointer:
         """
         mod.write_env_pointer(_make_plugin_root(tmp_path / "plugin"))
 
-        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
-        written = {p.name for p in roots_dir.iterdir() if p.name.isdigit()}
+        written = _pid_entries(_isolate_home / BASE_DIR_NAME / "roots")
         assert str(os.getppid()) in written
         assert len(written) <= mod._MAX_ANCESTOR_DEPTH
 
@@ -127,7 +120,7 @@ class TestWriteEnvPointer:
         roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
         assert mod._MAX_ANCESTOR_DEPTH == 2
         assert depths == [mod._MAX_ANCESTOR_DEPTH]
-        assert {p.name for p in roots_dir.iterdir() if p.name.isdigit()} == {"4242", "4243"}
+        assert _pid_entries(roots_dir) == {"4242", "4243"}
         for pid, lstart in chain:
             assert (roots_dir / str(pid)).read_text(encoding="utf-8") == f"{plugin_root}\n{lstart}\n"
 
@@ -248,7 +241,7 @@ class TestStateHome:
     def test_falls_back_to_path_home_when_unset(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """HOME 未設定なら Path.home() を使う。"""
         monkeypatch.delenv("HOME", raising=False)
-        monkeypatch.setattr(mod.Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.setattr(mod.Path, "home", classmethod(lambda _cls: tmp_path))
         assert mod._state_home() == tmp_path
 
     def test_write_warns_when_home_unresolvable(

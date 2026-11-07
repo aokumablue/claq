@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from contextlib import closing
 from itertools import pairwise
 
 import pytest
@@ -424,14 +425,11 @@ def test_python_enum_matches_sql_check_clause(column: str, allowed: frozenset[st
     Python の集合と完全一致することを表として固定する。
     """
     defaults = {"kind": "fact", "scope": "global", "status": "pending"}
-    conn = sqlite3.connect(":memory:")
-    try:
+    with closing(sqlite3.connect(":memory:")) as conn:
         conn.executescript(SCHEMA_SQL)
         conn.execute(
             "INSERT INTO repos (id, identity_key, root_path, first_seen_at, last_seen_at)"
             " VALUES ('demo', 'demo-key', '/demo', 't0', 't0')"
         )
         db_accepted = {value for value in allowed | rejected if _insert_accepted(conn, **{**defaults, column: value})}
-    finally:
-        conn.close()
     assert db_accepted == allowed

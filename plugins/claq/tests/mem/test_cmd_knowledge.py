@@ -16,6 +16,16 @@ from ._support import _repo_id, _run_cli, _seed
 
 # learn の自己承認拒否テストが共有する、それ自体は正当な payload。
 _OBSERVED = {"scope": "global", "kind": "fact", "title": "observed"}
+_LIST = ["list"]
+_SEARCH = ["search", "alpha"]
+
+
+def _stored(tmp_path: Path, key: str, repo_id: str | None = None) -> Knowledge:
+    """保存済みのカードを key で引く（無ければその場で失敗させる）。"""
+    with Database(tmp_path / "mem.db") as db:
+        found = db.get_knowledge_by_key(key, repo_id)
+    assert found is not None
+    return found
 
 
 class TestLearn:
@@ -53,9 +63,7 @@ class TestLearn:
         stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], payload)
         assert (stdout, exit_code) == ("learned: pipefail\n", 0)
 
-        with Database(tmp_path / "mem.db") as db:
-            found = db.get_knowledge_by_key("pipefail")
-        assert found is not None
+        found = _stored(tmp_path, "pipefail")
         assert (found.scope, found.repo_id, found.domain, found.status) == ("global", None, "testing", "pending")
         assert (found.confidence, found.source, found.source_ref) == (0.9, "agent", "CLAUDE.md")
 
@@ -170,9 +178,7 @@ class TestPromotedCardIsImmutableToLearn:
         assert "既に active" in stderr
         assert "別の key で作り直さないでください" in stderr
         repo_id = _repo_id(tmp_path) if payload["scope"] == "repo" else None
-        with Database(tmp_path / "mem.db") as db:
-            found = db.get_knowledge_by_key("h3-card", repo_id)
-        assert found is not None
+        found = _stored(tmp_path, "h3-card", repo_id)
         assert (found.status, found.title, found.body) == ("active", "元のタイトル", "人間が承認した本文")
         listed, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["list"])
         assert exit_code == 0
@@ -198,9 +204,7 @@ class TestPromotedCardIsImmutableToLearn:
         stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], updated)
 
         assert (stdout, exit_code) == ("learned: h3-card\n", 0)
-        with Database(tmp_path / "mem.db") as db:
-            found = db.get_knowledge_by_key("h3-card")
-        assert found is not None
+        found = _stored(tmp_path, "h3-card")
         assert (found.title, found.status) == ("更新後タイトル", "pending")
 
     def test_same_key_in_other_scope_is_unaffected(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -215,10 +219,6 @@ class TestPromotedCardIsImmutableToLearn:
         stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], repo_payload)
 
         assert (stdout, exit_code) == ("learned: h3-card\n", 0)
-
-
-_LIST = ["list"]
-_SEARCH = ["search", "alpha"]
 
 
 class TestListAndSearch:
@@ -581,9 +581,7 @@ class TestPromote:
 
         stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["promote", "draft"])
         assert (stdout, exit_code) == ("promoted: draft\n", 0)
-        with Database(tmp_path / "mem.db") as db:
-            found = db.get_knowledge_by_key("draft")
-        assert found is not None and found.status == "active"
+        assert _stored(tmp_path, "draft").status == "active"
 
 
 class TestForget:
@@ -595,9 +593,7 @@ class TestForget:
 
         stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["forget", "old"])
         assert (stdout, exit_code) == ("forgot: old\n", 0)
-        with Database(tmp_path / "mem.db") as db:
-            found = db.get_knowledge_by_key("old")
-        assert found is not None
+        found = _stored(tmp_path, "old")
         assert (found.status, found.superseded_by) == ("archived", None)
 
     def test_records_successor(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -607,9 +603,7 @@ class TestForget:
 
         stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["forget", "old", "--superseded-by", "new"])
         assert (stdout, exit_code) == ("forgot: old (superseded by new)\n", 0)
-        with Database(tmp_path / "mem.db") as db:
-            found = db.get_knowledge_by_key("old")
-        assert found is not None
+        found = _stored(tmp_path, "old")
         assert (found.status, found.superseded_by) == ("archived", successor.id)
 
     def test_unknown_successor_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -619,6 +613,4 @@ class TestForget:
         _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["forget", "old", "--superseded-by", "ghost"])
         assert exit_code == 1
         assert "知識が見つかりません: ghost" in stderr
-        with Database(tmp_path / "mem.db") as db:
-            found = db.get_knowledge_by_key("old")
-        assert found is not None and found.status == "active"
+        assert _stored(tmp_path, "old").status == "active"

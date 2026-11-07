@@ -12,6 +12,8 @@ import pytest
 from claq.lib import git_hosting
 from claq.lib.git_hosting import _remote_host, detect_git_hosting_service
 
+from ._support import _raise
+
 
 @pytest.mark.parametrize(
     ("url", "expected"),
@@ -59,25 +61,15 @@ def test_detect_git_hosting_service_infers_from_remote_host(
 ) -> None:
     """`git remote get-url origin` の出力のホスト部から hosting service を推測する（推測できなければ None）。"""
     monkeypatch.setattr(
-        git_hosting, "run_text", lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, returncode, stdout, "")
+        git_hosting, "run_text", lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, returncode, stdout, "")
     )
 
     assert detect_git_hosting_service() == expected
 
 
-def _raiser(error: Exception) -> object:
-    """呼ばれたら ``error`` を送出する run_text の代わりを返す。"""
-
-    def raiser(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        """``error`` を送出する。"""
-        raise error
-
-    return raiser
-
-
 def test_detect_git_hosting_service_without_git_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     """git が無ければ不明（None）を返す。"""
-    monkeypatch.setattr(git_hosting, "run_text", _raiser(FileNotFoundError("git")))
+    monkeypatch.setattr(git_hosting, "run_text", _raise(FileNotFoundError("git")))
     assert detect_git_hosting_service() is None
 
 
@@ -86,7 +78,7 @@ def test_detect_git_hosting_service_propagates_other_failures(
     monkeypatch: pytest.MonkeyPatch, error: Exception
 ) -> None:
     """起動できない（git 不在以外）・時間切れは、既定値で続けずにそのまま伝える。"""
-    monkeypatch.setattr(git_hosting, "run_text", _raiser(error))
+    monkeypatch.setattr(git_hosting, "run_text", _raise(error))
     with pytest.raises(type(error)):
         detect_git_hosting_service()
 

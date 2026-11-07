@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 
 import claq.launcher as launcher
+from claq.mem.database import Database
+from claq.mem.models import Knowledge, utc_now_iso
 
 LAUNCHER_PATH = Path(launcher.__file__).resolve()
 
@@ -49,6 +51,19 @@ def _non_utf8_env(home: Path) -> dict[str, str]:
         {"HOME": str(home), "CLAQ_DATA_PATH": str(home), "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
     )
     return env
+
+
+def _run_launcher(home: Path, *args: str, stdin: str) -> subprocess.CompletedProcess[str]:
+    """非 UTF-8 ロケールの実プロセスとして launcher を起動する。"""
+    return subprocess.run(
+        [sys.executable, str(LAUNCHER_PATH), *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=_non_utf8_env(home),
+        timeout=60,
+        check=False,
+    )
 
 
 @pytest.mark.parametrize(
@@ -323,9 +338,6 @@ class TestForceUtf8Streams:
 
 def test_non_ascii_output_survives_a_non_utf8_locale(tmp_path: Path) -> None:
     """UTF-8 でないロケールでも、非 ASCII を含む注入が壊れず exit 0 で返ること（本プロセスの stdout は UTF-8 なので実プロセスで見る）。"""
-    from claq.mem.database import Database
-    from claq.mem.models import Knowledge, utc_now_iso
-
     with Database(tmp_path / "mem.db") as db:
         db.upsert_knowledge(
             Knowledge(
@@ -341,14 +353,8 @@ def test_non_ascii_output_survives_a_non_utf8_locale(tmp_path: Path) -> None:
             )
         )
 
-    result = subprocess.run(
-        [sys.executable, str(LAUNCHER_PATH), "claq.mem.cli", "context"],
-        input=json.dumps({"session_id": "s", "source": "startup"}),
-        capture_output=True,
-        text=True,
-        env=_non_utf8_env(tmp_path),
-        timeout=60,
-        check=False,
+    result = _run_launcher(
+        tmp_path, "claq.mem.cli", "context", stdin=json.dumps({"session_id": "s", "source": "startup"})
     )
 
     assert result.returncode == 0, result.stderr
@@ -361,27 +367,19 @@ def test_background_child_writes_non_ascii_log_under_non_utf8_locale(tmp_path: P
     `--bg` 経路は実プロセスでしか再現しない。壊れた handoff payload を渡して
     子に警告を書かせ、bg ログに UnicodeEncodeError が出ないことを見る。
     """
-    result = subprocess.run(
-        [sys.executable, str(LAUNCHER_PATH), "--bg", "claq.mem.cli", "handoff"],
-        input='{"handoff": "日本語の引き継ぎ ✓"}',
-        capture_output=True,
-        text=True,
-        env=_non_utf8_env(tmp_path),
-        timeout=60,
-        check=False,
-    )
+    result = _run_launcher(tmp_path, "--bg", "claq.mem.cli", "handoff", stdin='{"handoff": "日本語の引き継ぎ ✓"}')
     assert result.returncode == 0, result.stderr
 
     # ログが出ないのが正常系なので、短い猶予だけ待って判定する。
     deadline = time.monotonic() + 5
     log_dir = tmp_path / ".claq" / "logs"
     while time.monotonic() < deadline:
-        logs = sorted(log_dir.glob("bg-*.log")) if log_dir.is_dir() else []
+        logs = sorted(log_dir.glob("bg-*.log"))
         if logs and logs[-1].stat().st_size:
             break
         time.sleep(0.1)
 
-    for log in sorted(log_dir.glob("bg-*.log")) if log_dir.is_dir() else []:
+    for log in log_dir.glob("bg-*.log"):
         assert "UnicodeEncodeError" not in log.read_text(encoding="utf-8", errors="replace")
 
 
