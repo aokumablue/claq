@@ -84,8 +84,8 @@ def _operator_start_offsets(line: str, quote: str | None) -> tuple[list[int], st
     return offsets, state.quote
 
 
-def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, bool]], str | None]:
-    """行に現れる heredoc の区切り語を出現順に返し、行末のクォート状態も返す。
+def _heredoc_matches(line: str, quote: str | None) -> tuple[list[re.Match[str]], str | None]:
+    """行に現れる heredoc 演算子の一致を出現順に返し、行末のクォート状態も返す。
 
     照合は `_operator_start_offsets` が返した位置からのみ行う。照合は非重複にする
     （直前の照合範囲内の候補を飛ばす）。位置ごとに独立して照合すると、クォート内の
@@ -97,13 +97,13 @@ def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, b
         quote: 直前の非本文行から持ち越した未閉鎖クォート文字か `CONTINUED_WORD`。無ければ None。
 
     Returns:
-        ((区切り語, タブ剥がし可（``<<-``）) のリスト, 行末時点の未閉鎖クォート文字か `CONTINUED_WORD`)。
+        (演算子の一致のリスト, 行末時点の未閉鎖クォート文字か `CONTINUED_WORD`)。
 
     Raises:
         例外は発生しません。
     """
     offsets, next_quote = _operator_start_offsets(line, quote)
-    delimiters = []
+    matches = []
     consumed_to = 0
     for offset in offsets:
         if offset < consumed_to:
@@ -111,11 +111,52 @@ def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, b
         match = _HEREDOC_OPERATOR_RE.match(line, offset)
         if match is None:
             continue
-        # ``<<''`` の空文字列区切りを落とさないため or 連結にしない。
-        word = next(value for value in match.group("squote", "dquote", "bare") if value is not None)
-        delimiters.append((word, match.group(1) == "-"))
+        matches.append(match)
         consumed_to = match.end()
-    return delimiters, next_quote
+    return matches, next_quote
+
+
+def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, bool]], str | None]:
+    """行に現れる heredoc の区切り語を出現順に返し、行末のクォート状態も返す。
+
+    Args:
+        line: 走査対象の 1 物理行（非本文行）。
+        quote: 直前の非本文行から持ち越した未閉鎖クォート文字か `CONTINUED_WORD`。無ければ None。
+
+    Returns:
+        ((区切り語, タブ剥がし可（``<<-``）) のリスト, 行末時点の未閉鎖クォート文字か `CONTINUED_WORD`)。
+
+    Raises:
+        例外は発生しません。
+    """
+    matches, next_quote = _heredoc_matches(line, quote)
+    # ``<<''`` の空文字列区切りを落とさないため or 連結にしない。
+    return [
+        (next(value for value in match.group("squote", "dquote", "bare") if value is not None), match.group(1) == "-")
+        for match in matches
+    ], next_quote
+
+
+def _has_unquoted_delimiter(line: str, quote: str | None) -> bool:
+    """行の heredoc 区切り語に、クォートも ``\\`` 前置も無いものがあるかを判定する。
+
+    シェルは区切り語のどこかにクォートか ``\\`` があれば本文を展開せず、``\\`` + 改行の連結もしない
+    （``<<\\EOF`` もこちら）。何も付かない区切り語の本文だけが連結される。
+
+    Args:
+        line: 走査対象の 1 物理行（非本文行）。
+        quote: 直前の非本文行から持ち越した未閉鎖クォート文字か `CONTINUED_WORD`。無ければ None。
+
+    Returns:
+        クォートも ``\\`` 前置も無い区切り語があれば True。
+
+    Raises:
+        例外は発生しません。
+    """
+    matches, _ = _heredoc_matches(line, quote)
+    return any(
+        match.group("bare") is not None and match.string[match.start("bare") - 1] != "\\" for match in matches
+    )
 
 
 def _unescaped_reading_comment_start(line: str, quote: str | None) -> int:
@@ -193,6 +234,21 @@ def _line_keeps_heredoc_bodies(line: str) -> bool:
     return any(is_shell_wrapper_token(token) or token in _BODY_EXECUTING_BUILTINS for token in tokenize(line))
 
 
+def _ends_with_continuation(line: str) -> bool:
+    """行末が行継続（奇数個の ``\\``）かを判定する。偶数個は ``\\`` 自身のエスケープで継続ではない。
+
+    Args:
+        line: 1 物理行。
+
+    Returns:
+        行末が ``\\`` + 改行の継続なら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    return (len(line) - len(line.rstrip("\\"))) % 2 == 1
+
+
 def _consume_heredoc_bodies(
     lines: list[str], start: int, delimiters: list[tuple[str, bool]], *, joins_continued_lines: bool
 ) -> tuple[int, list[str]] | None:
@@ -205,25 +261,31 @@ def _consume_heredoc_bodies(
         lines: コマンド全体の物理行リスト。
         start: 本文開始行の index。
         delimiters: 演算子行が宣言した (区切り語, タブ剥がし可) のリスト。
-        joins_continued_lines: 未クォートの区切り語があり、本文の ``\\`` + 改行が連結するなら True。
+        joins_continued_lines: 何も付かない区切り語があり、本文の ``\\`` + 改行が連結するなら True。
+            シェルは連結してから終端を探すので、連結した行を区切り語と照合する。
 
     Returns:
-        (再開する index, 出力に残す行のリスト)。1 つでも終端行が見つからない、または連結する本文に
-        行継続がある（シェルは連結してから終端を探す）なら None（呼び出し側が剥がすのをやめる）。
+        (再開する index, 出力に残す行のリスト)。1 つでも終端行が見つからない、または ``<<-`` の本文で
+        連結が起きる（タブ剥がしと連結の順序を静的に確定しない）なら None（呼び出し側が剥がすのをやめる）。
+        終端が連結した行なら、その物理行をすべて残す。
 
     Raises:
         例外は発生しません。
     """
     index = start
-    kept = []
+    kept: list[str] = []
     for word, strip_tabs in delimiters:
         while index < len(lines):
+            first = index
             candidate = lines[index]
             index += 1
-            if joins_continued_lines and candidate.endswith("\\"):
-                return None
+            while joins_continued_lines and _ends_with_continuation(candidate) and index < len(lines):
+                if strip_tabs:
+                    return None
+                candidate = candidate[:-1] + lines[index]
+                index += 1
             if (candidate.lstrip("\t") if strip_tabs else candidate) == word:
-                kept.append(candidate)
+                kept.extend(lines[first:index])
                 break
         else:
             return None
@@ -275,12 +337,16 @@ def strip_data_heredoc_bodies(command: str) -> str:
        ``cat <<'EOF' | bash`` / ``. /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``）。
        その行以降は一切剥がさない。除去後に本文を受け取る位置（演算子と同じセグメント・パイプの先）に
        シェルが残るときも除去を取り消す
-    2. 演算子行が継続演算子で終わる（本文開始が次行とは限らない）。その行以降は一切剥がさない
+    2. 演算子行が継続演算子（``\\`` ``|`` ``&``）か開いたグループ（``{`` ``(``）で終わる。行末コメントは
+       除いて見る（本文開始が次行とは限らないか、本文の行き先が次行以降にある）。その行以降は一切剥がさない
     3. 終端行が見つからない（未終端）
     4. ``<<`` がそもそも heredoc 演算子ではない（コメント内・クォート内・
        ``\\`` エスケープ後）。後続行は実行されるコマンドなので剥がすと素通りする。
     5. 本文の範囲を確定できない ``<<`` がある（`_line_has_unreadable_heredoc`）、演算子行の行頭か
-       行末でクォートが開いている、未クォートの本文が行継続で終わる。その行以降は一切剥がさない。
+       行末でクォートが開いている。その行以降は一切剥がさない。
+
+    何も付かない区切り語の本文は ``\\`` + 改行を連結してから終端を探す（シェルと同じ）。連結した行が
+    区切り語なら、そこまでが本文になる。
 
     終端行を残すため冪等（``f(f(x)) == f(x)``）。
 
@@ -310,11 +376,12 @@ def strip_data_heredoc_bodies(command: str) -> str:
         delimiters, next_quote = _heredoc_delimiters(line, quote)
         if delimiters and (quote is not None or next_quote is not None or _line_keeps_heredoc_bodies(line)):
             return "\n".join(output + lines[index:])
-        quote = next_quote
+        previous_quote, quote = quote, next_quote
         if not delimiters:
             continue
-        unquoted = any(match.group("bare") for match in _HEREDOC_OPERATOR_RE.finditer(line))
-        consumed = _consume_heredoc_bodies(lines, index, delimiters, joins_continued_lines=unquoted)
+        consumed = _consume_heredoc_bodies(
+            lines, index, delimiters, joins_continued_lines=_has_unquoted_delimiter(line, previous_quote)
+        )
         if consumed is None:
             return "\n".join(output + lines[index:])
         index, kept = consumed

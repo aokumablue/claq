@@ -653,7 +653,7 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
     """1 つのシェル方言の読み方で `has_bypass_flag` の判定を行う。
 
     Args:
-        command: `command_dialect_variants` が返した 1 通りの読み方。
+        command: `command_readings` が返した 1 通りの読み方。
         _recursed: ラッパー再帰済みかどうか。
         _inherited_prefix: 外側セグメントから引き継いだ前置トークン列（再帰先でのみ非空）。
 

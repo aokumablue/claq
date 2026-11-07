@@ -450,3 +450,30 @@ def test_many_heredoc_operators_on_one_line_stay_linear() -> None:
     started = time.perf_counter()
     heredoc.strip_data_heredoc_bodies(line)
     assert time.perf_counter() - started < 1.0
+
+
+@pytest.mark.parametrize(
+    ("label", "command", "expected"),
+    [
+        (
+            "連結した行が区切り語なら、そこまでが本文（物理行はすべて残す）",
+            "cat <<EOF\nE\\\nOF\nrm x\nEOF",
+            "cat <<EOF\nE\\\nOF\nrm x\nEOF",
+        ),
+        ("連結しても区切り語にならない行は本文", "cat <<EOF\nfoo \\\nbar\nEOF\nrm x", "cat <<EOF\nEOF\nrm x"),
+        ("エスケープ済みの ``\\\\`` は連結ではない", "cat <<EOF\nfoo \\\\\nEOF\nrm x", "cat <<EOF\nEOF\nrm x"),
+        ("クォート付きの区切り語は連結しない", "cat <<'EOF'\nfoo \\\nEOF\nrm x", "cat <<'EOF'\nEOF\nrm x"),
+        ("``\\`` 前置の区切り語は連結しない", "cat <<\\EOF\nfoo \\\nEOF\nrm x", "cat <<\\EOF\nEOF\nrm x"),
+        ("連結した終端が見つからなければ剥がさない", "cat <<EOF\nfoo \\", "cat <<EOF\nfoo \\"),
+        (
+            "``<<-`` の本文で連結が起きたら剥がさない",
+            "cat <<-EOF\n\tfoo \\\n\tEOF\nrm x",
+            "cat <<-EOF\n\tfoo \\\n\tEOF\nrm x",
+        ),
+    ],
+)
+def test_unquoted_heredoc_body_is_joined_before_the_terminator_is_matched(
+    label: str, command: str, expected: str
+) -> None:
+    """何も付かない区切り語の本文は、シェルと同じく ``\\`` + 改行を連結してから終端を探す。"""
+    assert heredoc.strip_data_heredoc_bodies(command) == expected, label

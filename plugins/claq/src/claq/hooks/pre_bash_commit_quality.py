@@ -329,7 +329,7 @@ def get_unstaged_modified_files() -> list[str] | None:
 
 
 def _detect_git_commit(command: str, *, shell_wrappers: bool = True) -> tuple[str, list[str]] | None:
-    """2 つのシェル方言の読み方で `git commit` 起動を探す。
+    """`command_readings` の各読み方で `git commit` 起動を探す。
 
     POSIX 読みだけだと ``C:\\Git\\bin\\git.exe commit -m x`` が ``C:Gitbingit.exe`` に
     潰れ、`block_no_verify` では検出されるのに品質ゲートだけ素通りする

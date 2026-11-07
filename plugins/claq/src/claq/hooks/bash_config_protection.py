@@ -613,7 +613,7 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool, _scope_ce
     """1 つのシェル方言の読み方で保護対象書き込みを探す。
 
     Args:
-        command: `command_dialect_variants` が返した 1 通りの読み方
+        command: `command_readings` が返した 1 通りの読み方
             （heredoc のデータ本文は呼び出し元で除去済み）。
         _recursed: ラッパー再帰済みかどうか。
         _scope_certain: 外側のコマンドが cwd 基準の解決を信用できるなら True。

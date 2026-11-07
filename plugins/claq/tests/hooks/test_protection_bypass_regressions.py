@@ -818,6 +818,16 @@ def test_case_variant_of_the_repo_root_stays_inside_the_repo(_repo_scope: Path, 
         pytest.param(f"cat > a <<'A'\ngit commit {_NO_VERIFY}\nA\n. .venv/bin/activate", id="separate-source-statement"),
         pytest.param(f"cat > a <<'A'\ngit commit {_NO_VERIFY}\nA\nbash scripts/test.sh", id="separate-shell-statement"),
         pytest.param(f"cat <<'A' | tee out\ngit commit {_NO_VERIFY}\nA", id="data-piped-to-a-non-shell"),
+        # ``\`` 前置の区切り語はクォート扱いで、本文の ``\`` + 改行は連結しない。
+        pytest.param(
+            f"cat > a.md <<\\EOF\ngit commit {_NO_VERIFY}\nrm ruff.toml \\\nEOF",
+            id="backslash-prefixed-delimiter",
+        ),
+        # 何も付かない区切り語の本文は連結してから終端を探す。連結した行が区切り語でなければ本文のまま。
+        pytest.param(
+            f"cat > Dockerfile <<EOF\nRUN apt-get update && \\\n    apt-get install -y git\nRUN git commit {_NO_VERIFY} -m x\nEOF",
+            id="continued-lines-inside-an-unquoted-body",
+        ),
     ],
 )
 def test_plain_data_heredocs_stay_removable(command: str, monkeypatch: pytest.MonkeyPatch) -> None:
