@@ -483,3 +483,8 @@ def test_unclosed_keyframes_do_not_stall_the_check() -> None:
     started = time.perf_counter()
     check_site._validate_resting_state(css)
     assert time.perf_counter() - started < 1.0
+
+
+def test_block_without_a_selector_is_reported_instead_of_crashing() -> None:
+    """セレクタが空白だけのブロックでも検査が落ちず、違反として報告する。"""
+    assert ["(セレクタなし)" in violation for violation in check_site._validate_resting_state("\n{ animation: a 1s both; }")] == [True]

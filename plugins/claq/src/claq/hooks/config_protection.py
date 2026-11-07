@@ -849,7 +849,6 @@ def _plugin_runtime_is_tracked(repo_root: Path, plugin_root: Path) -> bool:
         result = subprocess.run(
             ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", str(plugin_root / "runtime" / "claq-hook")],
             capture_output=True,
-            text=True,
             timeout=5,
             check=False,
         )

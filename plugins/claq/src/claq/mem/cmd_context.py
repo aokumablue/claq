@@ -27,7 +27,12 @@ from claq.mem.settings import (
     CONTEXT_REPO_CHAR_BUDGET,
     Settings,
 )
-from claq.mem.tag_stripping import keep_allowed_chars, keep_allowed_chars_for_injection, strip_tags
+from claq.mem.tag_stripping import (
+    keep_allowed_chars,
+    keep_allowed_chars_for_injection,
+    strip_tags,
+    strip_tags_for_injection,
+)
 
 # --- SessionStart への知識注入 ---
 
@@ -111,8 +116,8 @@ def _format_injected_item(row: Knowledge) -> str:
     """
     # 入口で畳んでいても、既に DB にある行や将来の別経路を信用しない。返り値が
     # 「改行を含まない 1 行」であることは、この関数が自分で保証する。
-    head = f"- [{row.kind}] {_one_line(strip_tags(keep_allowed_chars_for_injection(row.title)))}"
-    body = _one_line(strip_tags(keep_allowed_chars_for_injection(row.body).strip()))
+    head = f"- [{row.kind}] {_one_line(strip_tags_for_injection(keep_allowed_chars_for_injection(row.title)))}"
+    body = _one_line(strip_tags_for_injection(keep_allowed_chars_for_injection(row.body).strip()))
     if not body:
         return head
     combined = f"{head} — {body}"
@@ -155,7 +160,7 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     session = db.get_latest_session(repo_id)
     if session is None:
         return ""
-    handoff = _neutralize_handoff_structure(strip_tags(keep_allowed_chars_for_injection(session.handoff).strip()))
+    handoff = _neutralize_handoff_structure(strip_tags_for_injection(keep_allowed_chars_for_injection(session.handoff).strip()))
     if not handoff:
         return ""
     stamp = datetime.fromisoformat(session.ended_at).strftime("%Y-%m-%d %H:%M")

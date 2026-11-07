@@ -1632,8 +1632,9 @@ def _validate_resting_state(css: str) -> list[str]:
         if "[data-animate" in selector:
             continue
         if re.search(r"animation(?:-fill-mode)?:[^;}]*\b(?:both|backwards)\b", block):
+            lines = selector.strip().splitlines()
             violations.append(
-                f"`{selector.strip().splitlines()[-1].strip()}` の animation が "
+                f"`{lines[-1].strip() if lines else '(セレクタなし)'}` の animation が "
                 "[data-animate] の外で both/backwards を使っている"
                 "（背面タブで from の状態に貼り付く）"
             )

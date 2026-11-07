@@ -35,8 +35,10 @@ commit より前の ``cd`` / ``pushd`` 等）は
 
 from __future__ import annotations
 
+import functools
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from claq.hooks.commit_message import validate_commit_message
@@ -53,16 +55,19 @@ from claq.hooks.commit_risk import (
     find_git_commit_args_in_segment,
     is_commit_all_flag,
     parse_git_commit_command,
+    with_shell_wrapper_segments,
 )
 from claq.hooks.hook_common import (
     DIRECTORY_CHANGE_COMMANDS,
     emit_block_output,
-    normalize_executable_name,
     resolve_repo_root,
 )
 from claq.hooks.shell_tokens import (
     command_dialect_variants,
     command_exceeds_scan_budget,
+    extract_shell_wrapper_command,
+    is_shell_wrapper_token,
+    normalize_executable_name,
     scan_budget_message,
     split_segments,
     strip_data_heredoc_bodies,
@@ -173,6 +178,28 @@ def _points_git_elsewhere(token: str) -> bool:
     return bool(_REPOSITORY_ENV_RE.match(token)) or _CORE_WORKTREE_KEY in token.casefold()
 
 
+def _shell_wrapper_moves_repository(segment: list[str]) -> bool:
+    """``sh -c`` のセグメントが、シェル起動より前で別の作業ディレクトリ・リポジトリを指すかを判定する。
+
+    ``env -C ../other bash -c 'git commit -m x'`` の ``-C`` や ``GIT_DIR=x bash -c ...`` の代入は内側の
+    git の対象を変える。``sh -c`` でないセグメントの ``-C`` は git と無関係（``grep -C 3``）なので見ない。
+    `with_shell_wrapper_segments` は内側を先に並べるので、外側はここで commit より先に見る。
+
+    Args:
+        segment: 1 セグメント分のトークン列。
+
+    Returns:
+        該当すれば True を返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    if extract_shell_wrapper_command(segment) is None:
+        return False
+    shell = next(index for index, token in enumerate(segment) if is_shell_wrapper_token(token))
+    return any(_REPOSITORY_OPTION_RE.match(token) or _points_git_elsewhere(token) for token in segment[:shell])
+
+
 def _commit_target_risk(command: str) -> str | None:
     """commit がフックの走査した index と別の index を記録しうるなら deny 理由を返す。
 
@@ -181,7 +208,8 @@ def _commit_target_risk(command: str) -> str | None:
     環境変数・``core.worktree`` が現れたら deny する。実行位置で照合すると ``{ cd x; …; }`` /
     ``if cd x; then …`` / ``builtin cd x`` の ``cd`` を見落とすため、`commit_risk` の変更判定と
     同じく誤検出側の全トークン走査にする（``echo cd`` も deny する）。commit より後ろの
-    セグメントは、その commit の対象を変えないため見ない。
+    セグメントは、その commit の対象を変えないため見ない。``sh -c`` の 1 段の内側のセグメントも
+    commit の検出と同じ範囲で読む。
 
     Args:
         command: `git commit` を含む bash コマンド文字列（heredoc 本文は除去済み）です。
@@ -192,7 +220,10 @@ def _commit_target_risk(command: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    for segment in split_segments(tokenize(command)):
+    segments = split_segments(tokenize(command))
+    if any(_shell_wrapper_moves_repository(segment) for segment in segments):
+        return _COMMIT_TARGET_UNVERIFIABLE_MESSAGE
+    for segment in with_shell_wrapper_segments(segments):
         commit_args = find_git_commit_args_in_segment(segment)
         if commit_args is None:
             if any(
@@ -299,7 +330,9 @@ def get_unstaged_modified_files() -> list[str] | None:
     return [] if _head_exists() is False else None
 
 
-def _detect_git_commit(command: str) -> tuple[str, list[str]] | None:
+def _first_commit_reading(
+    command: str, parse: Callable[[str], tuple[bool, list[str]]]
+) -> tuple[str, list[str]] | None:
     """2 つのシェル方言の読み方で `git commit` 起動を探す。
 
     POSIX 読みだけだと ``C:\\Git\\bin\\git.exe commit -m x`` が ``C:Gitbingit.exe`` に
@@ -308,6 +341,7 @@ def _detect_git_commit(command: str) -> tuple[str, list[str]] | None:
 
     Args:
         command: 検査対象のコマンド文字列（heredoc 本文は除去済み）。
+        parse: 1 つの読み方を判定する関数（`parse_git_commit_command` の形）。
 
     Returns:
         commit を検出した読み方と、その commit 引数のタプル。
@@ -317,10 +351,25 @@ def _detect_git_commit(command: str) -> tuple[str, list[str]] | None:
         例外は発生しません（`parse_git_commit_command` の契約に従う）。
     """
     for variant in command_dialect_variants(command):
-        is_commit, commit_args = parse_git_commit_command(variant)
+        is_commit, commit_args = parse(variant)
         if is_commit:
             return variant, commit_args
     return None
+
+
+def _detect_git_commit(command: str) -> tuple[str, list[str]] | None:
+    """コマンド文字列 1 つから、``sh -c`` の 1 段の内側まで読んで `git commit` 起動を探す。
+
+    Args:
+        command: 検査対象のコマンド文字列（heredoc 本文は除去済み）。
+
+    Returns:
+        commit を検出した読み方と、その commit 引数のタプル。無ければ None。
+
+    Raises:
+        例外は発生しません（`parse_git_commit_command` の契約に従う）。
+    """
+    return _first_commit_reading(command, parse_git_commit_command)
 
 
 def _scan_targets(files: list[str]) -> list[str]:
@@ -567,6 +616,8 @@ def _detect_group_commits(group: tuple[str, ...]) -> list[tuple[str, list[str]]]
     （``["git commit -m a", "git commit -m b"]`` のようなコマンド文字列の配列）なら別々の
     commit なので要素をそのまま数える。結合候補が検出しない場合も要素をそのまま数える
     （``["bash", "-lc", "git commit -m x"]`` の commit は要素側でしか見えない）。
+    結合候補だけは ``sh -c`` の内側を読まない。``shlex.join`` が足した引用を経た内側の commit
+    引数はメッセージの検証に使えず、同じ commit は要素側が元の文字列のまま検出する。
 
     Args:
         group: ``iter_bash_command_groups`` が返すグループの各候補から、heredoc のデータ本文を
@@ -579,10 +630,12 @@ def _detect_group_commits(group: tuple[str, ...]) -> list[tuple[str, list[str]]]
         例外は発生しません（候補ごとの判定失敗は記録して読み飛ばす）。
     """
     has_joined = len(group) > 1
+    parse_outer_only = functools.partial(parse_git_commit_command, shell_wrappers=False)
     detections: list[tuple[str, list[str]] | None] = []
-    for command in group:
+    for index, command in enumerate(group):
+        is_joined = has_joined and index == len(group) - 1
         try:
-            detections.append(_detect_git_commit(command))
+            detections.append(_first_commit_reading(command, parse_outer_only) if is_joined else _detect_git_commit(command))
         except Exception as err:  # noqa: BLE001 - 1 候補の失敗で他を落とさない
             log(f"[Hook] Error: {err}")
             detections.append(None)
@@ -651,7 +704,14 @@ def evaluate(raw_input: str) -> str | None:
         # 近づく（4,999 トークンの要素 45 個で 7.45 秒）。
         if any(command_exceeds_scan_budget(command) for group in groups for command in group):
             return _SCAN_BUDGET_MESSAGE
-        commits = [commit for group in groups for commit in _detect_group_commits(group)]
+        commits: list[tuple[str, list[str]]] = []
+        # argv の要素で検出した commit の外側（``env GIT_DIR=x`` 等）は結合候補にしか見えない。
+        joined_commands: list[str] = []
+        for group in groups:
+            detected = _detect_group_commits(group)
+            commits.extend(detected)
+            if detected and len(group) > 1:
+                joined_commands.append(group[-1])
 
         if not commits:
             return None
@@ -668,7 +728,7 @@ def evaluate(raw_input: str) -> str | None:
             log("[Hook] ERROR: commit content cannot be inspected before execution.")
             return compound_risk
 
-        target_risk = _commit_target_risk(command)
+        target_risk = next(filter(None, map(_commit_target_risk, (command, *joined_commands))), None)
         if target_risk is not None:
             log("[Hook] ERROR: the commit may record an index other than the one scanned.")
             return target_risk

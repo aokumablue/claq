@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import hook_common
+from claq.hooks import hook_common, shell_tokens
 from claq.hooks.hook_common import print_session_start_output
 
 
@@ -96,7 +96,7 @@ def test_git_executable_token(token: str, expected: bool) -> None:
 )
 def test_normalize_executable_name(token: str, expected: str) -> None:
     """実行トークンを basename・大小無視・`.exe` 除去へ畳むこと（兄弟フックの実行名照合が同じ規則からずれない）。"""
-    assert hook_common.normalize_executable_name(token) == expected
+    assert shell_tokens.normalize_executable_name(token) == expected
 
 
 @pytest.mark.parametrize(

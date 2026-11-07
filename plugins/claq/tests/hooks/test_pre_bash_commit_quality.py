@@ -503,6 +503,13 @@ class TestCommitAgainstAnotherIndex:
             "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.worktree GIT_CONFIG_VALUE_0=../other git commit -am x",
             "GIT_CONFIG_PARAMETERS=x git commit -am x",
             "git config core.worktree ../other && git commit -am x",
+            # `sh -c` の 1 段の内側も commit の検出と同じ範囲で読む。
+            "bash -c 'cd ../other && git commit -m x'",
+            "bash -c 'git -C ../other commit -m x'",
+            "bash -c 'GIT_INDEX_FILE=/tmp/i git commit -m x'",
+            "env -C ../other bash -c 'git commit -m x'",
+            "env --chdir=../other bash -c 'git commit -m x'",
+            "sudo -D ../other bash -c 'git commit -m x'",
         ],
     )
     def test_commit_against_another_index_is_denied(self, command: str) -> None:
@@ -523,6 +530,11 @@ class TestCommitAgainstAnotherIndex:
             "git commit -m 'cd into GIT_DIR=x'",
             # commit より後ろの `cd` はその commit の対象を変えない。
             "git commit -m x && cd ..",
+            "bash -c 'git commit -m x && cd ..'",
+            # `sh -c` でないセグメントの `-C` は git の対象と無関係。
+            "grep -C 3 x y; bash -c 'git commit -m x'",
+            # シェル起動より後ろの `-C` はシェルの引数で、作業ディレクトリを変えない。
+            "bash -C -c 'git commit -m x'",
         ],
     )
     def test_commit_against_cwd_index_is_scanned(self, command: str) -> None:
@@ -530,6 +542,17 @@ class TestCommitAgainstAnotherIndex:
         result = pbcq.evaluate(json.dumps({"tool_input": {"command": command}}))
 
         assert result is None
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["env", "GIT_INDEX_FILE=/tmp/i", "bash", "-c", "git commit -m x"],
+            ["env", "-C", "../other", "bash", "-c", "git commit -m x"],
+        ],
+    )
+    def test_argv_wrapper_pointing_at_another_index_is_denied(self, argv: list[str]) -> None:
+        """argv の要素で検出した commit も、外側の指定を結合候補で見て deny する。"""
+        assert pbcq.evaluate(json.dumps({"tool_input": {"command": argv}})) == pbcq._COMMIT_TARGET_UNVERIFIABLE_MESSAGE
 
     @pytest.mark.parametrize(
         ("command", "expected"),

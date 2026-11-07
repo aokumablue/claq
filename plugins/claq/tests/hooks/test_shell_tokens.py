@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from claq.hooks import shell_tokens
@@ -441,3 +443,10 @@ class TestUnquotedNewlineNormalization:
         """
         assert shell_tokens.tokenize(command) == expected, label
 
+
+def test_many_heredoc_operators_on_one_line_stay_linear() -> None:
+    """読めるか判定を演算子ごとに行頭から探さない（検査予算いっぱいの 1 行で 2.4 秒かかった）。"""
+    line = ("<<a " * (shell_tokens.MAX_COMMAND_BYTES // 4))[: shell_tokens.MAX_COMMAND_BYTES]
+    started = time.perf_counter()
+    shell_tokens.strip_data_heredoc_bodies(line)
+    assert time.perf_counter() - started < 1.0

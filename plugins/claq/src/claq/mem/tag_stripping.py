@@ -142,21 +142,22 @@ _MAX_NESTING_PASSES = 20
 # ここで除去されないが、後段のエスケープが属性を見ずに必ず無害化する。
 _PAIR_PATTERNS = [tag_block_pattern(tag) for tag in STRIPPED_TAGS]
 
-# 判定専用の「既知タグを除去する」パターン。属性は改行と `<` を跨がせない
-# （跨がせると判定用複製の側で本文を巻き込み、誤った fail closed を招く）。
-# escape 済みの表記（`&lt;private>`）も対象にする — 判定は `strip_tags` が
-# 返そうとしている**出力**に対して行うため、生の `<` はそもそも残っていない。
-_ERASE_PATTERN = re.compile(
-    r"(?:<|&lt;)/?(?:" + "|".join(STRIPPED_TAGS) + r")" + TAG_NAME_END + r"[^<>\n]{0,1024}>",
-    re.IGNORECASE,
-)
-
 # escape 対象のタグ語彙。ペア除去（`STRIPPED_TAGS`）より広く、ハーネス足場タグと
 # スラッシュコマンド起動タグを含める。**`_PAIR_PATTERNS` は決してこの語彙へ
 # 広げない** — 中身を捨てる規則は `lib/harness` の管轄で、合流は docs/adr/untrusted-input-prompt-boundary.md が
 # 却下している。escape はどちらの用途でも中身を残すため衝突しない。
 # 値は各定義モジュールから導出する（写経すると片方だけ更新されて穴が開く）。
 _NEUTRALIZE_TAGS = (*STRIPPED_TAGS, *SCAFFOLD_TAGS, *COMMAND_TAGS)
+
+# 判定専用の「既知タグを除去する」パターン。属性は改行と `<` を跨がせない
+# （跨がせると判定用複製の側で本文を巻き込み、誤った fail closed を招く）。
+# escape 済みの表記（`&lt;private>`）も対象にする — 判定は `strip_tags` が
+# 返そうとしている**出力**に対して行うため、生の `<` はそもそも残っていない。
+# 語彙は escape と同じにする。足場タグで分断した鍵も escape されたまま出力へ残る。
+_ERASE_PATTERN = re.compile(
+    r"(?:<|&lt;)/?(?:" + "|".join(_NEUTRALIZE_TAGS) + r")" + TAG_NAME_END + r"[^<>\n]{0,1024}>",
+    re.IGNORECASE,
+)
 
 # 既知タグ名（開始・終了の両方）の直前にある `<` を捉える先読み。属性も `>` も
 # 見ないため、属性の長さ・閉じ括弧の有無に関わらず必ず一致する。先読みは固定幅の
@@ -569,6 +570,27 @@ def keep_allowed_chars_for_injection(text: str) -> str:
         return cleaned
     redacted = redact(cleaned)
     return cleaned if keep_allowed_chars(redact(text)) == redacted else redacted
+
+
+def strip_tags_for_injection(text: str) -> str:
+    """読み出し側の `strip_tags`。ブロックの除去で再結合した鍵も伏せる。
+
+    `strip_tags` は再結合した鍵をマスクせず呼び出し側へ返す契約で、書込み側は後段の ``redact`` が
+    拾う。読み出し側は ``redact`` を掛けないので、`keep_allowed_chars_for_injection` と同じく除去と
+    ``redact`` が可換でないときだけ ``redact`` する。ブロックを 1 つも消さない本文は再結合しないので
+    ``redact`` を走らせない。
+
+    Args:
+        text: 注入する本文。
+
+    Returns:
+        無害化した本文。再結合した鍵があれば伏せた本文。
+    """
+    stripped = strip_tags(text)
+    if drop_known_tag_blocks(text) == text:
+        return stripped
+    redacted = redact(stripped)
+    return stripped if strip_tags(redact(text)) == redacted else redacted
 
 
 def strip_tags(text: str) -> str:

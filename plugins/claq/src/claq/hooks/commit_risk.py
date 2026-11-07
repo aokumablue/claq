@@ -14,9 +14,16 @@ from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     is_git_executable_token,
     is_inplace_edit_flag,
-    normalize_executable_name,
 )
-from claq.hooks.shell_tokens import WRITE_REDIRECT_OPERATORS, split_segments, tokenize, tokenize_with_status
+from claq.hooks.shell_tokens import (
+    WRITE_REDIRECT_OPERATORS,
+    extract_shell_wrapper_command,
+    normalize_executable_name,
+    split_segments,
+    strip_data_heredoc_bodies,
+    tokenize,
+    tokenize_with_status,
+)
 
 # PreToolUse フックは実行前の index/worktree しか観測できず、2 つ目以降の commit が
 # 何をコミットするかを原理的に検査できない。
@@ -61,12 +68,39 @@ def find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
     return segment[segment.index("commit", start + 1) + 1 :]
 
 
-def parse_git_commit_command(command: str) -> tuple[bool, list[str]]:
+def with_shell_wrapper_segments(segments: list[list[str]]) -> list[list[str]]:
+    """``sh -c`` の 1 段の内側のセグメントを、ラッパーのセグメントの直前に足します。
+
+    内側は実行される順にラッパーの位置へ入る。ラッパー自身のリダイレクトと文字列引数は素の
+    ``git commit -m x >log`` の同一セグメントと同じ扱いで、内側の commit より前の操作ではない。足したセグメントはこれ以上開かない（2 段以上の
+    ``sh -c`` は非目標。docs/adr/shell-analysis-boundary.md）。内側の heredoc のデータ本文は
+    `block_no_verify` / `bash_config_protection` の再帰と同じく落とす。
+
+    Args:
+        segments: `shell_tokens.split_segments` で得たセグメントのリストです。
+
+    Returns:
+        内側のセグメントを足したセグメントのリストを返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    expanded: list[list[str]] = []
+    for segment in segments:
+        wrapped = extract_shell_wrapper_command(segment)
+        if wrapped is not None:
+            expanded.extend(split_segments(tokenize(strip_data_heredoc_bodies(wrapped))))
+        expanded.append(segment)
+    return expanded
+
+
+def parse_git_commit_command(command: str, *, shell_wrappers: bool = True) -> tuple[bool, list[str]]:
     """コマンド文字列が `git commit` 呼び出しかを判定し、commit 引数トークンを返します。
 
     トークン化してシェル区切りごとのセグメントに分け、セグメントごとに `git` →
     グローバルオプション → `commit` の並びを探す。セグメント分割により
     ``git status;echo commit`` のような非 commit コマンドを commit と判定しない。
+    ``sh -c`` の 1 段の内側も読む（`block_no_verify` と同じ範囲）。
 
     トークン化がクォート不整合で空白分割へフォールバックした場合**だけ**、生文字列の
     正規表現で最終判定する（解析できない入力に対するフェイルセーフ）。解析できた入力に
@@ -75,6 +109,7 @@ def parse_git_commit_command(command: str) -> tuple[bool, list[str]]:
 
     Args:
         command: 検査対象のコマンド文字列です。
+        shell_wrappers: ``sh -c`` の 1 段の内側も読むなら True。
 
     Returns:
         (is_commit, commit_args) のタプル。is_commit が False の場合、
@@ -84,7 +119,8 @@ def parse_git_commit_command(command: str) -> tuple[bool, list[str]]:
         例外は発生しません。
     """
     tokens, parsed_cleanly = tokenize_with_status(command)
-    for segment in split_segments(tokens):
+    segments = split_segments(tokens)
+    for segment in with_shell_wrapper_segments(segments) if shell_wrappers else segments:
         commit_args = find_git_commit_args_in_segment(segment)
         if commit_args is not None:
             return True, commit_args
@@ -221,6 +257,7 @@ def compound_commit_risk(command: str) -> str | None:
 
     ``git add . && git commit -m x`` というイディオムも塞ぐ。通すと「品質フックが
     commit 内容を検査している」という契約が成立せず、誤った安心感になるため。
+    ``sh -c`` の 1 段の内側のセグメントも同じ順序で数える。
 
     Args:
         command: 検査対象のコマンド文字列です。
@@ -231,7 +268,7 @@ def compound_commit_risk(command: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    segments = split_segments(tokenize(command))
+    segments = with_shell_wrapper_segments(split_segments(tokenize(command)))
     commit_indices = [i for i, segment in enumerate(segments) if find_git_commit_args_in_segment(segment) is not None]
     if not commit_indices:
         return None

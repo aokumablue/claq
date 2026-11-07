@@ -599,3 +599,159 @@ def test_non_lint_section_or_key_is_allowed(word: str, monkeypatch: pytest.Monke
     """lint 語彙でない見出し・キーは条件付き保護を発火させないこと（層1 の陰性対照）。"""
     body = f"{word}\nx = 1\n" if word.startswith("[") else f"{word} = 1\n"
     assert _run("config_protection", _write_content("pyproject.toml", body), monkeypatch) == 0
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        # 語の途中の ``#`` はコメントではない。エスケープされた文字は語の一部で、語の区切りにならない。
+        pytest.param("echo \\ #x; ", id="escaped-space-before-hash"),
+        pytest.param("echo \\;#x; ", id="escaped-semicolon-before-hash"),
+        pytest.param("echo a\\\n#b; ", id="line-continuation-before-hash"),
+    ],
+)
+class TestHashInsideAWordIsNotAComment:
+    """語の途中の ``#`` をコメントと読むと、以降の実行される部分が検査から消える。"""
+
+    def test_no_verify_after_it_is_denied(self, prefix: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``--no-verify`` を見逃さない。"""
+        assert _run("block_no_verify", _bash(f"{prefix}git commit {_NO_VERIFY} -m y"), monkeypatch) == 2
+
+    def test_protected_write_after_it_is_denied(self, prefix: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """保護対象への書込みを見逃さない。"""
+        assert _run("bash_config_protection", _bash(f"{prefix}printf y > ruff.toml"), monkeypatch) == 2
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(f"echo ok # git commit {_NO_VERIFY}", id="comment-after-space"),
+        pytest.param(f"echo ok;# git commit {_NO_VERIFY}", id="comment-after-separator"),
+        pytest.param(f"# git commit {_NO_VERIFY}\necho ok", id="comment-line-then-command"),
+        pytest.param(f"# one\n# git commit {_NO_VERIFY}\necho ok", id="consecutive-comment-lines"),
+    ],
+)
+def test_real_comments_stay_out_of_the_scan(command: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """語の先頭の ``#`` は今までどおりコメントとして読む（上の表の陰性対照）。"""
+    assert _run("block_no_verify", _bash(command), monkeypatch) == 0
+
+
+@pytest.mark.parametrize("shell", ["BASH", "Bash", "bash.exe", "BASH.EXE", "/bin/SH"])
+class TestShellNameIsNormalizedLikeOtherExecutables:
+    """APFS / NTFS の大小無視と Windows の ``.exe`` を、``sh -c`` の 1 段の検出でも畳む。"""
+
+    def test_no_verify_inside_is_denied(self, shell: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``--no-verify`` を見逃さない。"""
+        assert _run("block_no_verify", _bash(f"{shell} -c 'git commit {_NO_VERIFY} -m y'"), monkeypatch) == 2
+
+    def test_protected_write_inside_is_denied(self, shell: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """保護対象への書込みを見逃さない。"""
+        assert _run("bash_config_protection", _bash(f"{shell} -c 'printf y > ruff.toml'"), monkeypatch) == 2
+
+    def test_heredoc_body_it_runs_is_kept(self, shell: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """本文を実行するシェルの heredoc は本文を剥がさない。"""
+        command = f"{shell} <<'EOF'\ngit commit {_NO_VERIFY} -m y\nEOF"
+        assert _run("block_no_verify", _bash(command), monkeypatch) == 2
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        pytest.param('<<E"O"F', id="double-quoted-middle"),
+        pytest.param("<<E'O'F", id="single-quoted-middle"),
+        pytest.param("<<'E'OF", id="quoted-head"),
+        pytest.param('<<"EO"F', id="double-quoted-head"),
+        pytest.param("<<E\\OF", id="escaped-middle"),
+    ],
+)
+def test_heredoc_with_a_delimiter_it_cannot_read_keeps_the_body(operator: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """区切り語の読み違いで、本文の後ろの実行行まで剥がさない（シェルの区切り語は ``EOF``）。"""
+    command = f"cat {operator}\nEOF\ngit commit {_NO_VERIFY} -m y\nE"
+    assert _run("block_no_verify", _bash(command), monkeypatch) == 2
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        pytest.param("<<EOF>out.txt", id="redirect-right-after-delimiter"),
+        pytest.param("<<EOF;", id="separator-right-after-delimiter"),
+        pytest.param("<<'EOF' >out.txt", id="quoted-then-space"),
+    ],
+)
+def test_heredoc_data_body_with_a_readable_delimiter_is_removed(operator: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """語の終わりまで読めた区切り語の本文は今までどおりデータとして剥がす（上の表の陰性対照）。"""
+    command = f"cat {operator}\ngit commit {_NO_VERIFY} -m y\nEOF"
+    assert _run("block_no_verify", _bash(command), monkeypatch) == 0
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("cd sub && bash -c 'printf x > ../ruff.toml'", id="cd-before-the-wrapper"),
+        pytest.param("cd sub; sh -c 'rm ../ruff.toml'", id="separator-between"),
+        pytest.param("bash -c 'cd sub && printf x > ../ruff.toml'", id="cd-inside-the-wrapper"),
+    ],
+)
+def test_cd_outside_the_wrapper_also_voids_the_repo_scope_inside(command: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``cd`` を含むコマンドは ``sh -c`` の内側でも repo スコープ判定を信用しない。"""
+    assert _run("bash_config_protection", _bash("bash -c 'printf x > ../ruff.toml'"), monkeypatch) == 0
+    assert _run("bash_config_protection", _bash(command), monkeypatch) == 2
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        pytest.param('echo ""#x; ', id="empty-quotes-before-hash"),
+        pytest.param("echo 'a'#x; ", id="closing-quote-before-hash"),
+    ],
+)
+def test_hash_right_after_a_quote_is_not_a_comment(prefix: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """クォートも語の一部なので、直後の ``#`` はコメントを始めない。"""
+    assert _run("block_no_verify", _bash(f"{prefix}git commit {_NO_VERIFY} -m y"), monkeypatch) == 2
+
+
+def test_hash_at_a_word_start_after_a_line_continuation_is_a_comment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """行継続は改行ごと消えるので、語の先頭のままの ``#`` はコメントになる（語の途中の表の陰性対照）。"""
+    assert _run("block_no_verify", _bash(f"echo \\\n# git commit {_NO_VERIFY}"), monkeypatch) == 0
+
+
+def test_heredoc_after_a_hash_inside_a_word_keeps_its_data_body_out_of_the_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """heredoc 演算子の走査もコメント除去と同じ語の先頭で読む（語の途中の ``#`` の後ろの ``<<`` は演算子）。"""
+    command = f"echo 'a'#b; cat <<'EOF'\ngit commit {_NO_VERIFY} -m y\nEOF"
+    assert _run("block_no_verify", _bash(command), monkeypatch) == 0
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        # 閉じクォートの直後の ``#`` は語の一部。コメントと読むと行の残りのクォートを読み落とす。
+        pytest.param("echo 'a\nb'#x '\ncat <<EOF '\n{run}\nEOF", id="single-quote-closed-on-a-later-line"),
+        pytest.param("echo \"a\nb\"#'\ncat <<EOF\n'; {run}\nEOF", id="double-quote-closed-on-a-later-line"),
+        # 語の途中の行継続の次行の ``#`` も語の一部。
+        pytest.param("echo a\\\n#'\ncat <<EOF\n'; {run}\nEOF", id="line-continuation-inside-a-word"),
+        # 読めない区切り語の本物の本文を、演算子として読み直さない。
+        pytest.param('cat <<E"O"F\ncat <<B\nEOF\n{run}\nB', id="operator-inside-the-real-body"),
+        pytest.param('cat <<E"O"F <<A\ncat <<B\nEOF\nA\n{run}\nB', id="unreadable-next-to-a-readable-delimiter"),
+        # POSIX 読みでは語の途中でも、PowerShell 読みでは ``#`` 以降がコメントで次行が実行される。
+        pytest.param("cat \\ #<<EOF\n{run}\nEOF", id="comment-in-the-windows-reading"),
+        pytest.param("cat \\ #<<EOF\ncat <<B\nEOF\n{run}\nB", id="comment-in-the-windows-reading-with-inner-operator"),
+    ],
+)
+class TestHeredocScanKeepsExecutedLines:
+    """heredoc の範囲を読み違えて、実行される行を本文として剥がさない。"""
+
+    def test_no_verify_is_denied(self, template: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``--no-verify`` を見逃さない。"""
+        command = template.replace("{run}", f"git commit {_NO_VERIFY} -m y")
+        assert _run("block_no_verify", _bash(command), monkeypatch) == 2
+
+    def test_protected_write_is_denied(self, template: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """保護対象への書込みを見逃さない。"""
+        command = template.replace("{run}", "printf y > ruff.toml")
+        assert _run("bash_config_protection", _bash(command), monkeypatch) == 2
+
+
+def test_quoted_hash_before_a_heredoc_does_not_keep_the_data_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    """クォート内の ``#`` はどの読みでもコメントではないので、続く heredoc の本文は剥がす。"""
+    command = f"""echo "see #1"; cat <<'EOF'\ngit commit {_NO_VERIFY} -m y\nEOF"""
+    assert _run("block_no_verify", _bash(command), monkeypatch) == 0
