@@ -16,6 +16,11 @@ _CURSOR_REJECTED = "この cursor は使えません。cursor を外して、同
 _BINDING = {"scope": "orders_search", "principal": "alice", "fingerprint": "q1"}
 
 
+def _flipped(token: str) -> str:
+    """token の末尾の 1 文字を別の文字に書き換える。"""
+    return token[:-1] + ("A" if token[-1] != "A" else "B")
+
+
 class TestCursor:
     """署名付きの自己完結カーソル。"""
 
@@ -61,8 +66,7 @@ class TestCursor:
         codec = facade.signed_cursor.CursorCodec(_SECRET)
         token = codec.issue(**_BINDING, position={})
         other = facade.signed_cursor.CursorCodec(b"t" * 32).issue(**_BINDING, position={})
-        flipped = token[:-1] + ("A" if token[-1] != "A" else "B")
-        for bad in (other, flipped, "no-dot", ".sig", "body.", token + "あ", "あ" + token, token.replace(".", "。")):
+        for bad in (other, _flipped(token), "no-dot", ".sig", "body.", token + "あ", "あ" + token, token.replace(".", "。")):
             with pytest.raises(facade.errors.CursorError) as rejected:
                 codec.open(bad, **_BINDING)
             assert str(rejected.value) == _CURSOR_REJECTED, bad
@@ -127,15 +131,25 @@ class TestCursor:
 _PAGE_BINDING = {"principal": "alice", "fingerprint": "q1"}
 
 
-def _page_cursor(facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture, *, scope: str = "orders_search", max_cursor_chars: int = 2000) -> tuple[Any, Any]:
+def _page_cursor(
+    facade: types.SimpleNamespace,
+    caplog: pytest.LogCaptureFixture,
+    *,
+    scope: str = "orders_search",
+    max_cursor_chars: int = 2000,
+) -> tuple[Any, Any]:
     """見本と同じ上限（ページトークン 512 文字、既定の cursor 2000 文字）の SignedPageCursor と、その監査ログを作る。"""
     audit = _audit_log(facade, caplog, "test-page-cursor")
     codec = facade.signed_cursor.CursorCodec(_SECRET)
-    cursors = facade.signed_cursor.SignedPageCursor(codec, scope=scope, audit=audit, max_page_token_chars=512, max_cursor_chars=max_cursor_chars)
+    cursors = facade.signed_cursor.SignedPageCursor(
+        codec, scope=scope, audit=audit, max_page_token_chars=512, max_cursor_chars=max_cursor_chars
+    )
     return cursors, audit
 
 
-def _assert_rejected_and_audited(facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture, cursors: Any, audit: Any, token: str) -> None:
+def _assert_rejected_and_audited(
+    facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture, cursors: Any, audit: Any, token: str
+) -> None:
     """orders_search の SignedPageCursor が token を理由を区別しない文面で拒否し、拒否を WARNING で 1 行だけ監査ログに残す。"""
     with pytest.raises(facade.errors.CursorError, match="使えません"):
         cursors.open(token, **_PAGE_BINDING)
@@ -189,7 +203,7 @@ class TestSignedPageCursor:
         """改ざんした cursor は拒否し、拒否を監査ログに残す。"""
         cursors, audit = _page_cursor(facade, caplog)
         token = cursors.issue({"page": "o:3", "skip": 0}, **_PAGE_BINDING)
-        _assert_rejected_and_audited(facade, caplog, cursors, audit, token[:-1] + ("A" if token[-1] != "A" else "B"))
+        _assert_rejected_and_audited(facade, caplog, cursors, audit, _flipped(token))
 
     def test_open_over_cursor_limit_rejected(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
         """cursor の長さの上限を超えるものは、署名が合っても拒否する（発行側と同じ上限）。"""

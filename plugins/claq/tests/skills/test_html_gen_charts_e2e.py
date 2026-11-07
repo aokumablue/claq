@@ -10,7 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from ._support import _SKILL_DIR, BASES, CSS, E2E_JS, HTML, JS, TOKENS, _copy_site, _edit, check_site
+from ._support import _SKILL_DIR, BASES, BLOCKS, CSS, E2E_JS, HTML, JS, TOKENS, _copy_site, _edit, check_site
+
+
+def _chart_svg(marker: str) -> str:
+    """テンプレートの SVG のうち、marker を含む最初の 1 つを返す。"""
+    return next(svg for svg in check_site._iter_svg_blocks(HTML) if marker in svg)
+
 
 # --- E2E ---------------------------------------------------------------------
 
@@ -67,13 +73,11 @@ def test_e2e_rendered_chart_marks_stay_visible_in_both_themes() -> None:
     """テンプレートが実際に使う系列色が、置かれる面の上で見える。"""
     used = {name for name in check_site.CHART_VARS if f"var({name})" in HTML}
     assert used, "テンプレートが系列色を使っていない"
-    for base_id in BASES:
-        for theme in check_site.THEMES:
-            colors = check_site.resolved_hex(TOKENS, base_id, theme)
-            for name in used:
-                for surface in ("--card", "--background"):
-                    ratio = check_site.contrast_ratio(colors[name], colors[surface])
-                    assert ratio >= 3.0, f"{theme}/{base_id} {name} on {surface}: {ratio:.2f}"
+    for base_id, theme in BLOCKS:
+        colors = check_site.resolved_hex(TOKENS, base_id, theme)
+        for name, surface in itertools.product(used, ("--card", "--background")):
+            ratio = check_site.contrast_ratio(colors[name], colors[surface])
+            assert ratio >= 3.0, f"{theme}/{base_id} {name} on {surface}: {ratio:.2f}"
 
 
 def test_e2e_animation_never_hides_content_permanently() -> None:
@@ -108,20 +112,21 @@ def test_e2e_chart_values_are_also_in_a_table_below_the_chart() -> None:
     """値が <title> にしか無い図の直下に、同じ値を同じ順に並べた数値表がある（<title> はホバー・タップでしか出ず、role="img" の子は支援技術に出ない）。"""
     number = r"[+-]?\d[\d.,]*%?"
     for chart, mark in (('aria-labelledby="mrr-t', "hover-hit"), ('aria-labelledby="ch-t', "bar")):
-        svg = next(block for block in check_site._iter_svg_blocks(HTML) if chart in block)
+        svg = _chart_svg(chart)
         card = HTML.split(svg, 1)[1].split("</section>", 1)[0]
         table = re.search(r'<details class="chart-data">.*?</details>', card, re.DOTALL)
         assert table, chart
         titles = re.findall(rf'<rect class="{mark}"[^>]*><title>([^<]*)</title>', svg)
         rows = re.findall(r"<tr><th scope=\"row\">(.*?)</tr>", table.group(0))
-        assert titles and len(rows) == len(titles), chart
+        assert titles, chart
+        assert len(rows) == len(titles), chart
         for title, row in zip(titles, rows, strict=True):
             assert re.findall(number, unescape(title)) == re.findall(number, re.sub(r"<[^>]+>", " ", row)), title
 
 
 def test_e2e_every_time_point_can_be_read_on_hover_or_tap() -> None:
     """時系列の当たり判定が月ラベルと同じ順に 12 個並び、左端 52 から右端 700 までを隙間なく覆う（点を偶数月だけに置いて奇数月に届かなかった。浮き札の挙動はブラウザで確かめ、ここは JS の結線だけを見る）。"""
-    mrr = next(svg for svg in check_site._iter_svg_blocks(HTML) if 'aria-labelledby="mrr-t' in svg)
+    mrr = _chart_svg('aria-labelledby="mrr-t')
     months = re.findall(r'text-anchor="middle">(\d+月)</text>', mrr)
     hits = re.findall(r'<rect class="hover-hit" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"[^>]*><title>(\d+月)&#10;', mrr)
     assert len(months) == 12
@@ -251,7 +256,7 @@ def test_e2e_side_aligned_axis_text_is_centered_on_its_line() -> None:
     """横に寄せる軸文字は、印刷と JS 無効でも効く @media の外の dominant-baseline: central で中心を y に合わせ、目盛りの y は目盛り線と同じ値にする（ベースラインを +5 で置き、頭打ちで 2.4〜3.3px ずれていた）。"""
     assert re.search(r'^\.axis-text:not\(\[text-anchor="middle"\]\) \{\s*dominant-baseline: central;\s*\}', CSS, re.MULTILINE)
     for chart in ("mrr-t", "ch-t"):
-        svg = next(svg for svg in check_site._iter_svg_blocks(HTML) if f'aria-labelledby="{chart}' in svg)
+        svg = _chart_svg(f'aria-labelledby="{chart}')
         grids = {float(y) for y in re.findall(r'<line class="grid-line" x1="[\d.]+" y1="([\d.]+)"', svg)}
         ticks = [float(y) for y in re.findall(r'<text class="axis-text" x="[\d.]+" y="([\d.]+)" text-anchor="end"', svg)]
         assert len(ticks) >= check_site._MIN_AXIS_TICKS, chart
@@ -260,15 +265,18 @@ def test_e2e_side_aligned_axis_text_is_centered_on_its_line() -> None:
 
 def test_e2e_metric_direction_and_sentiment_are_separate() -> None:
     """バッジの色は良し悪し、アイコンは増減の向きで、両者を混ぜない。"""
-    assert ".badge--good {" in CSS and ".badge--bad {" in CSS
-    assert "badge--up" not in CSS and "badge--down" not in CSS
+    assert ".badge--good {" in CSS
+    assert ".badge--bad {" in CSS
+    assert "badge--up" not in CSS
+    assert "badge--down" not in CSS
     # 下向き矢印に good が付く指標（解約率）が実在する＝反転していない証拠。
     assert any('d="M12 5v13"' in chunk.split("</span>", 1)[0] for chunk in HTML.split('class="badge badge--good"')[1:])
 
 
 def test_e2e_sidebar_collapses_on_narrow_screens() -> None:
     """狭い画面ではサイドバーをオフキャンバスにして開閉できる。"""
-    assert 'data-sidebar="open"' in HTML and 'data-sidebar="close"' in HTML
+    assert 'data-sidebar="open"' in HTML
+    assert 'data-sidebar="close"' in HTML
     assert 'aria-controls="sidebar"' in HTML
     assert '.sidebar[data-open="true"] {' in CSS
     assert "@media (min-width: 768px)" in CSS
@@ -282,8 +290,10 @@ def test_skill_and_design_docs_describe_shadcn() -> None:
     """SKILL.md と design.md が shadcn/ui の語彙で書かれている。"""
     skill = (_SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
     design = (_SKILL_DIR / "references" / "design.md").read_text(encoding="utf-8")
-    assert "shadcn/ui" in skill and "Material Design" not in skill
-    assert "shadcn/ui" in design and "Material Design" not in design
+    assert "shadcn/ui" in skill
+    assert "Material Design" not in skill
+    assert "shadcn/ui" in design
+    assert "Material Design" not in design
     assert "data-base" in skill
     for base_id in BASES:
         assert base_id in skill

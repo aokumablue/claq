@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import ast
+import itertools
 from pathlib import Path
 
 import pytest
 
 from ._support import _OVERLAY, _PLUGIN_ROOT, _SKILL_DIR, _TEMPLATE, _config, _is_invisible
-
-_OVERLAY_SERVER = ast.parse((_OVERLAY / "server.py").read_text(encoding="utf-8"))
 
 
 def _parse(path: Path) -> ast.Module:
@@ -17,28 +16,35 @@ def _parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"))
 
 
+_OVERLAY_SERVER = _parse(_OVERLAY / "server.py")
+
+
 def _constants(tree: ast.Module) -> dict[str, object]:
     """モジュールの最上位で、大文字の名前にリテラルを代入した定数を集める。"""
     return {
         node.targets[0].id: ast.literal_eval(node.value)
         for node in tree.body
-        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and node.targets[0].id.isupper()
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id.isupper()
         and isinstance(node.value, ast.Constant)
     }
 
 
+def _is_tool_decorator(decorator: ast.expr) -> bool:
+    """decorator が `@mcp.tool` か `@mcp.tool(...)` の形か。"""
+    target = decorator.func if isinstance(decorator, ast.Call) else decorator
+    return isinstance(target, ast.Attribute) and target.attr == "tool"
+
+
 def _tool_functions(server: Path) -> set[str]:
     """server.py で `@mcp.tool(...)` を付けた（ツールとして公開される）関数名を集める。"""
-    tree = ast.parse(server.read_text(encoding="utf-8"))
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            continue
-        for decorator in node.decorator_list:
-            target = decorator.func if isinstance(decorator, ast.Call) else decorator
-            if isinstance(target, ast.Attribute) and target.attr == "tool":
-                names.add(node.name)
-    return names
+    return {
+        node.name
+        for node in ast.walk(_parse(server))
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and any(_is_tool_decorator(decorator) for decorator in node.decorator_list)
+    }
 
 
 @pytest.mark.parametrize("skeleton", [_TEMPLATE, _OVERLAY])
@@ -79,19 +85,32 @@ def test_overlay_budget_fits_smoke_limit() -> None:
 def _overlay_function(name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
     """重ね合わせの server.py から、名前の一致する関数（ツール関数と、その本体を持つ補助関数）の構文木を取り出す。"""
     return next(
-        node for node in ast.walk(_OVERLAY_SERVER) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == name
+        node
+        for node in ast.walk(_OVERLAY_SERVER)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == name
     )
 
 
 def _keyword_sources(node: ast.AST, keyword: str) -> list[str]:
     """node の中の呼び出しで、名前付き引数 keyword に渡した式のソースを出現順に集める。"""
-    return [ast.unparse(item.value) for call in ast.walk(node) if isinstance(call, ast.Call) for item in call.keywords if item.arg == keyword]
+    return [
+        ast.unparse(item.value)
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        for item in call.keywords
+        if item.arg == keyword
+    ]
+
+
+def _calls(tree: ast.AST, function: str) -> list[ast.Call]:
+    """tree の中の、呼び出す式のソースが function の呼び出しを出現順に集める。"""
+    return [node for node in ast.walk(tree) if isinstance(node, ast.Call) and ast.unparse(node.func) == function]
 
 
 def test_overlay_cursor_limits_share_constants() -> None:
     """重ね合わせの server.py は、cursor 引数の max_length と PageCursor の上限に、同じ定数を渡す（開けない cursor を発行しない）。"""
     cursor_argument = next(argument for argument in _overlay_function("orders_search").args.args if argument.arg == "cursor")
-    page_cursors = [node for node in ast.walk(_OVERLAY_SERVER) if isinstance(node, ast.Call) and ast.unparse(node.func) == "PageCursor"]
+    page_cursors = _calls(_OVERLAY_SERVER, "PageCursor")
     assert (
         _keyword_sources(cursor_argument.annotation, "max_length"),
         [_keyword_sources(call, "max_cursor_chars") for call in page_cursors],
@@ -119,9 +138,8 @@ def test_overlay_search_leaves_paging_to_facade() -> None:
     ツール関数 → 本体 → 一覧の整形 → fit_page、の呼び出しの鎖を固定する（途中が切れると fit_page が呼ばれなくなる）。
     """
     chain = ("orders_search", "_search_orders", "_page_result", "fit_page")
-    for caller, callee in zip(chain, chain[1:], strict=False):
-        calls = {ast.unparse(node.func) for node in ast.walk(_overlay_function(caller)) if isinstance(node, ast.Call)}
-        assert callee in calls, f"{caller} が {callee} を呼んでいない"
+    for caller, callee in itertools.pairwise(chain):
+        assert _calls(_overlay_function(caller), callee), f"{caller} が {callee} を呼んでいない"
     assert "fit_items" not in (_OVERLAY / "server.py").read_text(encoding="utf-8")
 
 
@@ -147,11 +165,6 @@ def _keyword_only(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[set
     """関数のキーワード専用引数の（全ての名前、既定値の無い名前）を返す。"""
     names = [argument.arg for argument in function.args.kwonlyargs]
     return set(names), {name for name, default in zip(names, function.args.kw_defaults, strict=True) if default is None}
-
-
-def _calls(tree: ast.AST, function: str) -> list[ast.Call]:
-    """tree の中の、呼び出す式のソースが function の呼び出しを出現順に集める。"""
-    return [node for node in ast.walk(tree) if isinstance(node, ast.Call) and ast.unparse(node.func) == function]
 
 
 def _smoke_calls_per_exchange() -> int:

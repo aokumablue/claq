@@ -9,7 +9,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from ._support import _FACADE_MODULES, _OVERLAY, _PROTECTION, _TEMPLATE, _config, _load, _load_smoke_check
+from ._support import _FACADE_MODULES, _OVERLAY, _PROTECTION, _TEMPLATE, _config, _load, _load_smoke_check, _no_bytecode
 
 
 @pytest.fixture
@@ -39,17 +39,10 @@ def facade() -> Iterator[types.SimpleNamespace]:
     )
     assert spec is not None and spec.loader is not None
     package = importlib.util.module_from_spec(spec)
-    original = sys.dont_write_bytecode
-    sys.dont_write_bytecode = True
     sys.modules["mcp_gen_facade"] = package
-    try:
+    with _no_bytecode():
         spec.loader.exec_module(package)
-        modules = {
-            name: importlib.import_module(f"mcp_gen_facade.{name}")
-            for name in _FACADE_MODULES
-        }
-    finally:
-        sys.dont_write_bytecode = original
+        modules = {name: importlib.import_module(f"mcp_gen_facade.{name}") for name in _FACADE_MODULES}
     yield types.SimpleNamespace(**modules)
     for name in [key for key in sys.modules if key == "mcp_gen_facade" or key.startswith("mcp_gen_facade.")]:
         del sys.modules[name]

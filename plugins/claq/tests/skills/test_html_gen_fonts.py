@@ -68,6 +68,12 @@ def _first_family(stack: str) -> str:
     return stack.split(",")[0].strip().strip('"')
 
 
+def _token_families() -> tuple[str, str]:
+    """tokens.json の sans / mono の先頭候補を返す。"""
+    typography = TOKENS["typography"]
+    return _first_family(typography["sans_family"]), _first_family(typography["mono_family"])
+
+
 def test_font_face_sources_match_shipped_fonts() -> None:
     """@font-face が読むファイルは同梱した woff2 とちょうど一致する。"""
     assert set(_faces().values()) == {path.name for path in _FONTS.glob("*.woff2")}
@@ -75,15 +81,12 @@ def test_font_face_sources_match_shipped_fonts() -> None:
 
 def test_font_face_families_are_token_first_candidates() -> None:
     """@font-face の family は tokens.json の sans / mono の先頭候補（その次が OS の書体）。"""
-    typography = TOKENS["typography"]
-    assert set(_faces()) == {_first_family(typography["sans_family"]), _first_family(typography["mono_family"])}
+    assert set(_faces()) == set(_token_families())
 
 
 def test_font_face_pairs_family_with_its_file() -> None:
     """各 family は自分の可変フォントを読む（Geist Mono が Geist の字形を読むような取り違えが無い）。"""
-    typography = TOKENS["typography"]
-    families = (_first_family(typography["sans_family"]), _first_family(typography["mono_family"]))
-    assert _faces() == {family: family.replace(" ", "") + "-Variable.woff2" for family in families}
+    assert _faces() == {family: family.replace(" ", "") + "-Variable.woff2" for family in _token_families()}
 
 
 def test_font_face_blocks_declare_variable_woff2_swap() -> None:

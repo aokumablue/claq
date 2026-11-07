@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import logging
 import sys
 import types
 import unicodedata
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -40,17 +42,24 @@ _MINIMAL_SETTINGS: dict[str, Any] = {"HAPPY_TOOL": "t", "HAPPY_ARGS": {}, "HAPPY
 _AUDIT_SECRET = b"k" * 32
 
 
+@contextlib.contextmanager
+def _no_bytecode() -> Iterator[None]:
+    """この中の読み込みでは `.pyc` を書かない。"""
+    original = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        yield
+    finally:
+        sys.dont_write_bytecode = original
+
+
 def _load(name: str, path: Path) -> types.ModuleType:
     """ファイル path をモジュール name として読み込む（`.pyc` を書かない）。"""
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    original = sys.dont_write_bytecode
-    sys.dont_write_bytecode = True
-    try:
+    with _no_bytecode():
         spec.loader.exec_module(module)
-    finally:
-        sys.dont_write_bytecode = original
     return module
 
 
@@ -98,6 +107,19 @@ class _Clock:
     def __call__(self) -> float:
         """現在時刻を返す。"""
         return self.now
+
+
+def _scripted(outcomes: list[Any]) -> Any:
+    """用意した順に、例外なら投げ、それ以外なら返す上流の呼び出しを作る（上流のメソッドとしても呼べるよう引数を受ける）。"""
+
+    async def operation(**arguments: Any) -> Any:
+        """次の結果を返すか投げる。"""
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return operation
 
 
 def _audit_log(facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture, name: str) -> Any:
