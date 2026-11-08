@@ -303,11 +303,26 @@ _COMMAND_POSITION_KEYWORDS = frozenset({"{", "then", "do", "else", "elif", "!"})
 _STATEMENT_SEPARATORS = frozenset({";", "&&", "||", "&"})
 
 
+def _is_command_position(previous: str) -> bool:
+    """直前のトークンを見て、次のトークンがコマンド位置にあるかを判定する。
+
+    Args:
+        previous: 直前のトークン。先頭なら ``;`` を渡す。
+
+    Returns:
+        区切りか `_COMMAND_POSITION_KEYWORDS` の直後なら True。
+
+    Raises:
+        例外は発生しません。
+    """
+    return previous in SHELL_SEPARATORS or previous in _COMMAND_POSITION_KEYWORDS
+
+
 def _top_level_statements(tokens: list[str]) -> list[list[str]]:
     """トークン列を、グループ・サブシェル・複合コマンドの外側にある文ごとに分ける。
 
-    heredoc の本文が届きうるのは、heredoc と同じトップレベルの文の中だけ。``|`` の直後の ``;``（改行）と
-    ``&``（``|&``）はパイプラインの続きとして扱う。深さが負になるか最後に 0 へ戻らないなら、文の境界を
+    heredoc の本文が届きうるのは、heredoc と同じトップレベルの文の中だけ。``|`` の直後に続く ``;``（改行。
+    空行・コメント行で何個でも続く）と ``&``（``|&``）はパイプラインの続きとして扱う。深さが負になるか最後に 0 へ戻らないなら、文の境界を
     確定できないのでコマンド全体を 1 文とする。
 
     Args:
@@ -323,7 +338,7 @@ def _top_level_statements(tokens: list[str]) -> list[list[str]]:
     depth = 0
     previous = ";"
     for token in tokens:
-        at_command_position = previous in SHELL_SEPARATORS or previous in _COMMAND_POSITION_KEYWORDS
+        at_command_position = _is_command_position(previous)
         if token == "(" or (at_command_position and token in _GROUP_OPENERS):
             depth += 1
         elif token == ")" or (at_command_position and token in _GROUP_CLOSERS):
@@ -334,7 +349,7 @@ def _top_level_statements(tokens: list[str]) -> list[list[str]]:
             statements.append([])
         else:
             statements[-1].append(token)
-        previous = token
+        previous = "|" if previous == "|" and token in (";", "&") else token
     return statements if depth == 0 else [tokens]
 
 
@@ -342,8 +357,9 @@ def _statement_feeds_interpreter(lines: list[str], terminators: set[int]) -> boo
     """heredoc を含むトップレベルの文に、本文を実行しうるトークンがあるかを判定する。
 
     本文はその文の中のどのコマンドへも、パイプ・グループ・複合コマンドの stdin・``exec`` を経て届きうる。
-    文の中の位置は問わず、シェル・本文実行ビルトイン・``exec`` が 1 つでもあれば除去しない。終端行は
-    区切り語でシェルの構文ではないので、トークン化の前に空行へ置き換える。
+    シェルと本文実行ビルトインは文の中の位置を問わない（``sudo bash``・``env sh``・``xargs sh`` を含める）。
+    ``exec`` はビルトインでラッパから起動できないので、コマンド位置だけを数える（``docker exec`` は数えない）。
+    終端行は区切り語でシェルの構文ではないので、トークン化の前に空行へ置き換える。
 
     Args:
         lines: 本文を除去した後の物理行。
@@ -359,8 +375,10 @@ def _statement_feeds_interpreter(lines: list[str], terminators: set[int]) -> boo
     for statement in _top_level_statements(tokenize(text)):
         has_heredoc = any(token == "<" == following for token, following in zip(statement, statement[1:], strict=False))
         if has_heredoc and any(
-            is_shell_wrapper_token(token) or token in _BODY_EXECUTING_BUILTINS or token == "exec"
-            for token in statement
+            is_shell_wrapper_token(token)
+            or token in _BODY_EXECUTING_BUILTINS
+            or (token == "exec" and _is_command_position(previous))
+            for previous, token in zip([";", *statement], statement, strict=False)
         ):
             return True
     return False

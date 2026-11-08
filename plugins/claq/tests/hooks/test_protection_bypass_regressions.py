@@ -763,6 +763,11 @@ def test_heredoc_after_a_hash_inside_a_word_keeps_its_data_body_out_of_the_scan(
         # 読めない heredoc の本文に残った引用符が、後ろの実行行を引用へ飲み込む。
         pytest.param("cat <<E\"O\"F\ndon't\nEOF\n{run}", id="apostrophe-in-a-kept-body"),
         pytest.param("cat <<E\"O\"F\n'\nEOF\n{run}\n: \\'", id="quote-pair-around-the-executed-line"),
+        # ``|`` の後ろの空行・コメント行はパイプラインを切らない。
+        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) |\n\nbash", id="pipe-then-a-blank-line"),
+        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) |\n# c\nbash", id="pipe-then-a-comment-line"),
+        pytest.param("( (cat <<'EOF'\n{run}\nEOF\n) ) | bash", id="nested-subshells"),
+        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) | env sh", id="pipe-into-a-wrapped-shell"),
         # heredoc と同じトップレベルの文にあるシェル・本文実行ビルトイン・``exec`` は、パイプ・グループ・
         # 複合コマンドの stdin・プロセス置換を経て本文を受け取りうる。
         pytest.param("(cat <<'EOF'\n{run}\nEOF\n) |\nbash", id='pipe-newline'),
@@ -843,6 +848,8 @@ def test_case_variant_of_the_repo_root_stays_inside_the_repo(_repo_scope: Path, 
         pytest.param("cat > note.md <<'EOF'\n{text}\nEOF\necho $SHELL | grep -q zsh && echo ok", id="separate-pipeline-and-list"),
         pytest.param("(cd sub && cat > f <<'EOF'\n{text}\nEOF\n) && bash run.sh", id="subshell-then-a-separate-shell"),
         pytest.param("diff <(cat <<'EOF'\n{text}\nEOF\n) b.txt", id="process-substitution-into-a-non-shell"),
+        # 引数の ``exec`` はビルトインの ``exec`` ではない。
+        pytest.param("docker exec -i db psql <<'SQL'\n{text}\nSQL", id="exec-as-an-argument"),
         # 後ろの別の文の複数行クォートは、行全体の読みで引用として読める。
         pytest.param("cat > a.md <<'EOF'\nmemo\nEOF\ngh pr create --title t --body \"## Summary\n{text}\"", id="multiline-pr-body-after"),
         pytest.param("cat > a.md <<'EOF'\nmemo\nEOF\ngit commit -m \"fix: x\n\n- {text}\"", id="multiline-commit-message-after"),
