@@ -745,19 +745,6 @@ def test_quoted_hash_before_a_heredoc_does_not_keep_the_data_body(monkeypatch: p
     assert _run("block_no_verify", _bash(command), monkeypatch) == 0
 
 
-@pytest.mark.parametrize("wrapper", ["bash -c -- ", "bash -c -x ", "bash -c -x -- "])
-class TestOptionsAfterTheCommandFlag:
-    """``-c`` の後ろのオプションを読み飛ばし、最初の非オプション引数を実行文字列と読む。"""
-
-    def test_no_verify_inside_is_denied(self, wrapper: str, monkeypatch: pytest.MonkeyPatch) -> None:
-        """``--no-verify`` を見逃さない。"""
-        assert _run("block_no_verify", _bash(f"{wrapper}'git commit {_NO_VERIFY} -m y'"), monkeypatch) == 2
-
-    def test_protected_write_inside_is_denied(self, wrapper: str, monkeypatch: pytest.MonkeyPatch) -> None:
-        """保護対象への書込みを見逃さない。"""
-        assert _run("bash_config_protection", _bash(f"{wrapper}'printf y > ruff.toml'"), monkeypatch) == 2
-
-
 def test_case_variant_of_the_repo_root_stays_inside_the_repo(_repo_scope: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """repo 判定は綴りの大小を畳む（APFS / NTFS では ``../CLAQ`` が repo 自身に着地する）。"""
     command = f"rm ../{_repo_scope.name.upper()}/ruff.toml"

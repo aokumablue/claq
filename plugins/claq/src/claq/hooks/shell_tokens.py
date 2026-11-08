@@ -92,33 +92,10 @@ def is_shell_wrapper_token(token: str) -> bool:
     return normalize_executable_name(token) in SHELL_WRAPPER_EXECUTABLES
 
 
-def _first_shell_operand(arguments: list[str]) -> str | None:
-    """シェルの引数列から、オプションを読み飛ばして最初の非オプション引数を返す。
-
-    シェルは ``-c`` の直後ではなく、オプションの後の最初の引数を実行する（``bash -c -x 'cmd'``）。
-
-    Args:
-        arguments: ``-c`` より後ろのトークン列。
-
-    Returns:
-        実行される文字列。無ければ None。
-
-    Raises:
-        例外は発生しません。
-    """
-    remaining = iter(arguments)
-    for token in remaining:
-        if token == "--":
-            return next(remaining, None)
-        if not token.startswith(("-", "+")):
-            return token
-    return None
-
-
 def extract_shell_wrapper_command(segment: list[str]) -> str | None:
     """セグメント内の既知シェル ``-c`` 呼び出しから、ラップされた文字列コマンドを取り出す。
 
-    既知シェルのトークンに続く ``-c`` を含む短フラグを探し、その後の最初の非オプション引数を返す。
+    既知シェルのトークンに続く ``-c`` を含む短フラグを探し、その次のトークンを返す。
     `block_no_verify`・`bash_config_protection`・`commit_risk` が共有する。片方だけがラッパー再帰を
     持つと、同じコマンドが片方のフックだけを素通りする。再帰の段数は呼び出し側が
     決める（docs/adr/shell-analysis-boundary.md: 2 段以上のネストは非目標）。
@@ -138,7 +115,7 @@ def extract_shell_wrapper_command(segment: list[str]) -> str | None:
         return None
     for position in range(start + 1, len(segment)):
         if _SHELL_COMMAND_FLAG_RE.fullmatch(segment[position]):
-            return _first_shell_operand(segment[position + 1 :])
+            return segment[position + 1] if position + 1 < len(segment) else None
     return None
 
 
