@@ -27,12 +27,7 @@ from claq.mem.settings import (
     CONTEXT_REPO_CHAR_BUDGET,
     Settings,
 )
-from claq.mem.tag_stripping import (
-    keep_allowed_chars,
-    keep_allowed_chars_for_injection,
-    strip_tags,
-    strip_tags_for_injection,
-)
+from claq.mem.tag_stripping import keep_allowed_chars, keep_allowed_chars_for_injection, strip_tags
 
 # --- SessionStart への知識注入 ---
 
@@ -103,7 +98,7 @@ def _format_injected_item(row: Knowledge) -> str:
 
     既定は ``- [kind] title`` のみ。``body`` を足しても ``CONTEXT_ITEM_CHAR_LIMIT``
     文字に収まる場合だけ ``—`` で続け、長い body が節の予算を食い潰すのを防ぐ。
-    title / body は信頼境界タグを偽装できるため ``strip_tags_for_injection`` で無害化する。その前に
+    title / body は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。その前に
     ``keep_allowed_chars_for_injection`` で許可した文字だけを残す（後ろに置くと、不可視文字で
     分断したタグが除去で再結合して ``strip_tags`` をすり抜ける）。読み出し側は ``redact`` を
     掛けないため、除去で再結合した鍵だけは同関数が伏せる。
@@ -116,8 +111,8 @@ def _format_injected_item(row: Knowledge) -> str:
     """
     # 入口で畳んでいても、既に DB にある行や将来の別経路を信用しない。返り値が
     # 「改行を含まない 1 行」であることは、この関数が自分で保証する。
-    head = f"- [{row.kind}] {_one_line(strip_tags_for_injection(keep_allowed_chars_for_injection(row.title)))}"
-    body = _one_line(strip_tags_for_injection(keep_allowed_chars_for_injection(row.body).strip()))
+    head = f"- [{row.kind}] {_one_line(strip_tags(keep_allowed_chars_for_injection(row.title)))}"
+    body = _one_line(strip_tags(keep_allowed_chars_for_injection(row.body).strip()))
     if not body:
         return head
     combined = f"{head} — {body}"
@@ -146,7 +141,7 @@ def _knowledge_section(heading: str, rows: list[Knowledge], budget: int) -> str:
 def _handoff_section(db: Database, repo_id: str) -> str:
     """直近セッションの引き継ぎを ``前回の続き`` 節へ組み立てる。
 
-    handoff 本文は信頼境界タグを偽装できるため ``strip_tags_for_injection`` で無害化する。その前に
+    handoff 本文は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。その前に
     ``keep_allowed_chars_for_injection`` で許可した文字だけを残す。行区切りは LF に揃って
     改行として残るので、``_neutralize_handoff_structure`` は全ての論理行を見られる。
 
@@ -160,7 +155,7 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     session = db.get_latest_session(repo_id)
     if session is None:
         return ""
-    handoff = _neutralize_handoff_structure(strip_tags_for_injection(keep_allowed_chars_for_injection(session.handoff).strip()))
+    handoff = _neutralize_handoff_structure(strip_tags(keep_allowed_chars_for_injection(session.handoff).strip()))
     if not handoff:
         return ""
     stamp = datetime.fromisoformat(session.ended_at).strftime("%Y-%m-%d %H:%M")

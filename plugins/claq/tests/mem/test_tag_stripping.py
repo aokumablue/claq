@@ -8,8 +8,7 @@ import time
 import pytest
 
 from claq.lib.slim_text import compact_line
-from claq.mem.redaction import PLACEHOLDER
-from claq.mem.tag_stripping import _MAX_NESTING_PASSES, _erase_known_tags, strip_tags, strip_tags_for_injection
+from claq.mem.tag_stripping import _MAX_NESTING_PASSES, _erase_known_tags, strip_tags
 
 _CLOSE_SWALLOW_PROSE_LINES = "注入テキストは <private> で開き、</private で閉じ忘れると危険。\n参考: docs/notes -> 対策済み。"
 _CLOSE_SWALLOW_PROSE_SAME_LINE = "<private> を開いたまま </private と書くと危険 -> 直せ"
@@ -188,7 +187,6 @@ class TestEraseKnownTags:
             ("sk-ant-<private>zz</private>api03-x", "sk-ant-zzapi03-x"),
             ("sk-ant-<private>zz</private foo>api03-x", "sk-ant-zzapi03-x"),
             ("sk-ant-<private " + "B" * 600 + ">api03-x", "sk-ant-api03-x"),
-            ("sk-ant-&lt;system-reminder>api03-x", "sk-ant-api03-x"),
             ("タグの無い本文", "タグの無い本文"),
             # 属性部が改行を跨がない。跨がせると判定側だけが本文を消して無関係な文字列が接着し、
             # 「秘密が隠されている」と誤判定＝正当な引き継ぎの誤破棄になる
@@ -200,7 +198,6 @@ class TestEraseKnownTags:
             "paired",
             "attributed-close",
             "long-attribute",
-            "escaped-scaffold-tag",
             "no-tags",
             "attribute-does-not-cross-newline",
         ],
@@ -233,9 +230,8 @@ class TestTagSplitSecretFailsClosed:
             "</private>",
             "<private " + "z" * 513 + ">zz</private>",
             "<claq-memory>zz</claq-memory foo>",
-            "<system-reminder>",
         ],
-        ids=["orphan-open", "orphan-close", "paired-over-attribute-limit", "attributed-close-pair", "orphan-scaffold-tag"],
+        ids=["orphan-open", "orphan-close", "paired-over-attribute-limit", "attributed-close-pair"],
     )
     def test_secret_split_by_a_tag_is_replaced_wholesale(self, splitter: str) -> None:
         """分断された鍵は断片も残さず本文ごと倒す。
@@ -443,27 +439,3 @@ class TestNestingPassCap:
 
         assert "<private>" not in result
         assert "</private>" not in result
-
-
-@pytest.mark.parametrize(
-    "block",
-    [
-        pytest.param("<private>zz</private>", id="block-with-content"),
-        pytest.param("<private></private>", id="empty-block"),
-        pytest.param("<system-reminder>zz</system-reminder>", id="other-known-block"),
-    ],
-)
-def test_key_rejoined_by_dropping_a_block_does_not_reach_the_injection(block: str) -> None:
-    """読み出し側へブロックの除去で再結合した鍵を返さない（読み出し側は ``redact`` を掛けない）。"""
-    assert strip_tags_for_injection("sk-ant-" + block + "api03-" + "aB3" * 14) == PLACEHOLDER
-
-
-def test_secret_inside_a_dropped_block_leaves_the_rest_of_the_text() -> None:
-    """ブロックの中に閉じた秘密は、ブロックごと消えるので本文を巻き込まない（上の陰性対照）。"""
-    assert strip_tags_for_injection("before <private>sk-ant-" + "api03-" + "aB3" * 14 + "</private> after") == "before  after"
-
-
-@pytest.mark.parametrize("text", ["plain text", "<private>note</private> rest", "a &lt;b"])
-def test_injection_text_without_a_rejoined_key_matches_strip_tags(text: str) -> None:
-    """再結合した鍵が無ければ `strip_tags` と同じ結果になる。"""
-    assert strip_tags_for_injection(text) == strip_tags(text)

@@ -670,20 +670,6 @@ def test_heredoc_data_body_with_a_readable_delimiter_is_removed(operator: str, m
 
 
 @pytest.mark.parametrize(
-    "command",
-    [
-        pytest.param("cd sub && bash -c 'printf x > ../ruff.toml'", id="cd-before-the-wrapper"),
-        pytest.param("cd sub; sh -c 'rm ../ruff.toml'", id="separator-between"),
-        pytest.param("bash -c 'cd sub && printf x > ../ruff.toml'", id="cd-inside-the-wrapper"),
-    ],
-)
-def test_cd_outside_the_wrapper_also_voids_the_repo_scope_inside(command: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``cd`` を含むコマンドは ``sh -c`` の内側でも repo スコープ判定を信用しない。"""
-    assert _run("bash_config_protection", _bash("bash -c 'printf x > ../ruff.toml'"), monkeypatch) == 0
-    assert _run("bash_config_protection", _bash(command), monkeypatch) == 2
-
-
-@pytest.mark.parametrize(
     "prefix",
     [
         pytest.param('echo ""#x; ', id="empty-quotes-before-hash"),

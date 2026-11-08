@@ -248,33 +248,6 @@ def test_get_unstaged_modified_files_returns_none_on_oserror(monkeypatch: pytest
     assert pre_bash_commit_quality.get_unstaged_modified_files() is None
 
 
-@pytest.mark.parametrize("wrapper", ["bash -c", "sh -c", "BASH -lc"])
-def test_commit_inside_a_shell_wrapper_is_scanned_like_a_plain_commit(
-    wrapper: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``sh -c`` の 1 段の内側の commit も secret 走査を受ける（``block_no_verify`` と同じ範囲を読む）。"""
-    repo = _init_git_repo(tmp_path / "repo", {"README.md": "x\n"})
-    (repo / "secret.py").write_text(_SECRET_LINE, encoding="utf-8")
-    _git(repo, "add", "secret.py")
-    assert _evaluate_in_repo(f"""{wrapper} "git commit -m 'feat(core): add'" """, repo, monkeypatch) is not None
-
-
-@pytest.mark.parametrize(
-    ("command", "denied"),
-    [
-        pytest.param("""bash -c "git commit -m 'fix core.worktree'" """, False, id="message-naming-the-config-key"),
-        pytest.param("bash -c 'git commit -m x'", False, id="plain"),
-        pytest.param("git commit -m x && env -C /tmp bash -c 'ls'", False, id="wrapper-after-the-commit-without-a-commit"),
-        pytest.param("env -C /tmp bash -c 'ls'; git commit -m x", False, id="wrapper-before-the-commit-without-a-commit"),
-        pytest.param("env -C ../other bash -c 'git commit -m x'", True, id="wrapper-prefix-moves-directory"),
-        pytest.param("GIT_DIR=../other/.git bash -c 'git commit -m x'", True, id="wrapper-prefix-points-git-elsewhere"),
-    ],
-)
-def test_commit_target_risk_reads_the_prefix_of_a_shell_wrapper_only(command: str, denied: bool) -> None:
-    """ラッパーの前置は commit の対象を変えるが、内側の commit の引数の文字列は変えない。"""
-    assert (pre_bash_commit_quality._commit_target_risk(command) is not None) is denied
-
-
 def test_mutation_visible_only_in_the_windows_reading_is_denied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """commit 前の index 変更は、commit を検出した読みだけでなくどの読みでも数える。"""
     repo = _init_git_repo(tmp_path / "repo", {"README.md": "x\n"})
