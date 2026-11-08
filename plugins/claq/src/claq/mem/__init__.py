@@ -3,4 +3,4 @@
 バージョン文字列は ``scripts/version-up.sh`` が書き換える。
 """
 
-__version__ = "0.16.0"
+__version__ = "0.16.1"
