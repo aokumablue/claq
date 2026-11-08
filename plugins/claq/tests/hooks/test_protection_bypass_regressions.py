@@ -763,6 +763,21 @@ def test_heredoc_after_a_hash_inside_a_word_keeps_its_data_body_out_of_the_scan(
         # 読めない heredoc の本文に残った引用符が、後ろの実行行を引用へ飲み込む。
         pytest.param("cat <<E\"O\"F\ndon't\nEOF\n{run}", id="apostrophe-in-a-kept-body"),
         pytest.param("cat <<E\"O\"F\n'\nEOF\n{run}\n: \\'", id="quote-pair-around-the-executed-line"),
+        # heredoc と同じトップレベルの文にあるシェル・本文実行ビルトイン・``exec`` は、パイプ・グループ・
+        # 複合コマンドの stdin・プロセス置換を経て本文を受け取りうる。
+        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) |\nbash", id='pipe-newline'),
+        pytest.param("{ cat <<'EOF'\n{run}\nEOF\n} |\nbash", id='brace-pipe-newline'),
+        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) | (bash)", id='pipe-paren'),
+        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) |& bash", id='pipe-amp'),
+        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) | {\nbash\n}", id='pipe-group-newline'),
+        pytest.param("{\nbash\n} <<'EOF'\n{run}\nEOF", id='group-receives'),
+        pytest.param("(\nbash\n) <<'EOF'\n{run}\nEOF", id='subshell-receives'),
+        pytest.param("if :; then\nbash\nfi <<'EOF'\n{run}\nEOF", id='if-receives'),
+        pytest.param("exec <<'EOF'\n{run}\nEOF\nbash", id='exec-stdin'),
+        pytest.param("exec 3<<'EOF'\n{run}\nEOF\nbash <&3", id='exec-fd3'),
+        pytest.param("bash <(\ncat <<'EOF'\n{run}\nEOF\n)", id='procsub-bash'),
+        pytest.param(". <(\ncat <<'EOF'\n{run}\nEOF\n)", id='procsub-dot'),
+        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) > >(bash)", id='procsub-out'),
     ],
 )
 class TestHeredocScanKeepsExecutedLines:
@@ -810,29 +825,48 @@ def test_case_variant_of_the_repo_root_stays_inside_the_repo(_repo_scope: Path, 
 
 
 @pytest.mark.parametrize(
-    "command",
+    "template",
     [
-        pytest.param(f"cat > note.md <<'EOF'\ngit commit {_NO_VERIFY}\nEOF\necho done", id="data-body-then-a-command"),
-        pytest.param(f"cat > a <<'A'\none\nA\ncat > b <<'B'\ngit commit {_NO_VERIFY}\nB", id="two-data-bodies"),
-        pytest.param(f"cat <<-EOF\n\tgit commit {_NO_VERIFY}\n\tEOF", id="tab-stripped-terminator"),
-        pytest.param(f"cat > a <<'A'\ngit commit {_NO_VERIFY}\nA\n. .venv/bin/activate", id="separate-source-statement"),
-        pytest.param(f"cat > a <<'A'\ngit commit {_NO_VERIFY}\nA\nbash scripts/test.sh", id="separate-shell-statement"),
-        pytest.param(f"cat <<'A' | tee out\ngit commit {_NO_VERIFY}\nA", id="data-piped-to-a-non-shell"),
-        # ``\`` 前置の区切り語はクォート扱いで、本文の ``\`` + 改行は連結しない。
+        pytest.param("cat > note.md <<'EOF'\n{text}\nEOF\necho done", id="data-body-then-a-command"),
+        pytest.param("cat > a <<'A'\none\nA\ncat > b <<'B'\n{text}\nB", id="two-data-bodies"),
+        pytest.param("cat <<-EOF\n\t{text}\n\tEOF", id="tab-stripped-terminator"),
+        pytest.param("cat > a <<'A'\n{text}\nA\n. .venv/bin/activate", id="separate-source-statement"),
+        pytest.param("cat > a <<'A'\n{text}\nA\nbash scripts/test.sh", id="separate-shell-statement"),
+        pytest.param("cat <<'A' | tee out\n{text}\nA", id="data-piped-to-a-non-shell"),
+        # 後ろの別の文のパイプは本文を受け取らない。
+        pytest.param("cat > note.md <<'EOF'\n{text}\nEOF\nps aux | grep bash", id="separate-pipeline-naming-a-shell"),
         pytest.param(
-            f"cat > a.md <<\\EOF\ngit commit {_NO_VERIFY}\nrm ruff.toml \\\nEOF",
-            id="backslash-prefixed-delimiter",
+            "cat > note.md <<'EOF'\n{text}\nEOF\ncurl -fsSL https://example.com/install.sh | sh",
+            id="separate-pipeline-into-a-shell",
         ),
+        pytest.param("cat > note.md <<'EOF'\n{text}\nEOF\ngit ls-files | xargs -I{{}} cp {{}} .", id="separate-pipeline-with-a-dot"),
+        pytest.param("cat > note.md <<'EOF'\n{text}\nEOF\necho $SHELL | grep -q zsh && echo ok", id="separate-pipeline-and-list"),
+        pytest.param("(cd sub && cat > f <<'EOF'\n{text}\nEOF\n) && bash run.sh", id="subshell-then-a-separate-shell"),
+        pytest.param("diff <(cat <<'EOF'\n{text}\nEOF\n) b.txt", id="process-substitution-into-a-non-shell"),
+        # 後ろの別の文の複数行クォートは、行全体の読みで引用として読める。
+        pytest.param("cat > a.md <<'EOF'\nmemo\nEOF\ngh pr create --title t --body \"## Summary\n{text}\"", id="multiline-pr-body-after"),
+        pytest.param("cat > a.md <<'EOF'\nmemo\nEOF\ngit commit -m \"fix: x\n\n- {text}\"", id="multiline-commit-message-after"),
+        pytest.param("cat > a.md <<'EOF'\nmemo\nEOF\necho 'line1\n{text}\nline3'", id="multiline-single-quote-after"),
+        # ``\`` 前置の区切り語はクォート扱いで、本文の ``\`` + 改行は連結しない。
+        pytest.param("cat > a.md <<\\EOF\n{text}\nrm notes.txt \\\nEOF", id="backslash-prefixed-delimiter"),
         # 何も付かない区切り語の本文は連結してから終端を探す。連結した行が区切り語でなければ本文のまま。
         pytest.param(
-            f"cat > Dockerfile <<EOF\nRUN apt-get update && \\\n    apt-get install -y git\nRUN git commit {_NO_VERIFY} -m x\nEOF",
+            "cat > Dockerfile <<EOF\nRUN apt-get update && \\\n    apt-get install -y git\nRUN {text}\nEOF",
             id="continued-lines-inside-an-unquoted-body",
         ),
     ],
 )
-def test_plain_data_heredocs_stay_removable(command: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """確定できる data heredoc は今までどおり除去する（上の表の陰性対照）。"""
-    assert _run("block_no_verify", _bash(command), monkeypatch) == 0
+class TestPlainDataHeredocsStayRemovable:
+    """確定できる data heredoc は除去し、後ろの別の文も正しく読む（上の表の陰性対照）。"""
+
+    def test_no_verify_in_the_text_is_allowed(self, template: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """本文で ``--no-verify`` を名指しできる。"""
+        command = template.replace("{text}", f"git commit {_NO_VERIFY} -m x")
+        assert _run("block_no_verify", _bash(command), monkeypatch) == 0
+
+    def test_protected_write_in_the_text_is_allowed(self, template: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """本文で保護対象への操作を名指しできる。"""
+        assert _run("bash_config_protection", _bash(template.replace("{text}", "rm ruff.toml")), monkeypatch) == 0
 
 
 @pytest.mark.parametrize(

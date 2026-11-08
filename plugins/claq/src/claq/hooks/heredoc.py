@@ -292,36 +292,122 @@ def _consume_heredoc_bodies(
     return index, kept
 
 
-def _reaches_a_shell(command: str) -> bool:
-    """除去後のコマンドで、本文を受け取る位置に本文を実行しうるトークンがあるかを判定する。
+# 文の内側へ深さを 1 段下げる予約語（コマンド位置のときだけ）と、戻す予約語。
+_GROUP_OPENERS = frozenset({"{", "if", "case", "for", "while", "until", "select"})
+_GROUP_CLOSERS = frozenset({"}", "fi", "esac", "done"})
 
-    本文が届くのは heredoc 自身のコマンドとパイプの先だけで、改行で分かれた ``bash \\`` + ``<<'EOF'`` や
-    ``(cat <<'EOF'`` + 本文 + ``) | bash`` は演算子行だけを見ても分からない。後ろの独立した文
-    （``. .venv/bin/activate``）は本文を受け取らないので数えない。
+# 区切り（`SHELL_SEPARATORS`）のほかに、直後のトークンをコマンド位置にする予約語。
+_COMMAND_POSITION_KEYWORDS = frozenset({"{", "then", "do", "else", "elif", "!"})
+
+# 深さ 0 で文を分ける区切り。``|`` はパイプラインを繋ぐので含めない。
+_STATEMENT_SEPARATORS = frozenset({";", "&&", "||", "&"})
+
+
+def _top_level_statements(tokens: list[str]) -> list[list[str]]:
+    """トークン列を、グループ・サブシェル・複合コマンドの外側にある文ごとに分ける。
+
+    heredoc の本文が届きうるのは、heredoc と同じトップレベルの文の中だけ。``|`` の直後の ``;``（改行）と
+    ``&``（``|&``）はパイプラインの続きとして扱う。深さが負になるか最後に 0 へ戻らないなら、文の境界を
+    確定できないのでコマンド全体を 1 文とする。
 
     Args:
-        command: 本文を除去した後のコマンド文字列。
+        tokens: `tokenize` が返したトークン列。
 
     Returns:
-        heredoc 演算子と同じセグメントかパイプの先に、シェルか本文実行ビルトインがあれば True。
+        文ごとのトークンリスト。
 
     Raises:
         例外は発生しません。
     """
-    receives_body = executes = False
-    previous = ""
-    # トークン化は ``<<`` を ``<`` 2 つに割るので、連続する ``<`` を演算子と読む。
-    for token in [*tokenize(command), ";"]:
-        if token in SHELL_SEPARATORS:
-            if receives_body and executes:
-                return True
-            receives_body, executes = token == "|", False
-        elif token == "<" == previous:
-            receives_body = True
-        elif is_shell_wrapper_token(token) or token in _BODY_EXECUTING_BUILTINS:
-            executes = True
+    statements: list[list[str]] = [[]]
+    depth = 0
+    previous = ";"
+    for token in tokens:
+        at_command_position = previous in SHELL_SEPARATORS or previous in _COMMAND_POSITION_KEYWORDS
+        if token == "(" or (at_command_position and token in _GROUP_OPENERS):
+            depth += 1
+        elif token == ")" or (at_command_position and token in _GROUP_CLOSERS):
+            depth -= 1
+            if depth < 0:
+                return [tokens]
+        if depth == 0 and token in _STATEMENT_SEPARATORS and previous != "|":
+            statements.append([])
+        else:
+            statements[-1].append(token)
         previous = token
+    return statements if depth == 0 else [tokens]
+
+
+def _statement_feeds_interpreter(lines: list[str], terminators: set[int]) -> bool:
+    """heredoc を含むトップレベルの文に、本文を実行しうるトークンがあるかを判定する。
+
+    本文はその文の中のどのコマンドへも、パイプ・グループ・複合コマンドの stdin・``exec`` を経て届きうる。
+    文の中の位置は問わず、シェル・本文実行ビルトイン・``exec`` が 1 つでもあれば除去しない。終端行は
+    区切り語でシェルの構文ではないので、トークン化の前に空行へ置き換える。
+
+    Args:
+        lines: 本文を除去した後の物理行。
+        terminators: ``lines`` のうち残した終端行の index。
+
+    Returns:
+        本文を実行しうる文があれば True。
+
+    Raises:
+        例外は発生しません。
+    """
+    text = "\n".join("" if index in terminators else line for index, line in enumerate(lines))
+    for statement in _top_level_statements(tokenize(text)):
+        has_heredoc = any(token == "<" == following for token, following in zip(statement, statement[1:], strict=False))
+        if has_heredoc and any(
+            is_shell_wrapper_token(token) or token in _BODY_EXECUTING_BUILTINS or token == "exec"
+            for token in statement
+        ):
+            return True
     return False
+
+
+def _walk_heredoc_bodies(command: str) -> tuple[list[str], set[int], int | None]:
+    """物理行を走査し、データ本文を除いた行・残した終端行・除去を打ち切った位置を返す。
+
+    条件 1（演算子行）・2・3・4・5 は `strip_data_heredoc_bodies` を参照。
+
+    Args:
+        command: 元のコマンド文字列。
+
+    Returns:
+        (出力する物理行, 出力のうち残した終端行の index, 除去を打ち切った出力上の行 index か None)。
+        打ち切った行以降は入力のまま出力に入る。
+
+    Raises:
+        例外は発生しません。
+    """
+    lines = command.split("\n")
+    output: list[str] = []
+    terminators: set[int] = set()
+    index = 0
+    # 非本文行だけを繋いだクォート状態。本文行・終端行では更新しない。
+    quote: str | None = None
+    while index < len(lines):
+        line = lines[index]
+        output.append(line)
+        index += 1
+        if "<<" in line and _line_has_unreadable_heredoc(line, quote):
+            return output + lines[index:], terminators, len(output) - 1
+        delimiters, next_quote = _heredoc_delimiters(line, quote)
+        if delimiters and (quote is not None or next_quote is not None or _line_keeps_heredoc_bodies(line)):
+            return output + lines[index:], terminators, len(output) - 1
+        previous_quote, quote = quote, next_quote
+        if not delimiters:
+            continue
+        consumed = _consume_heredoc_bodies(
+            lines, index, delimiters, joins_continued_lines=_has_unquoted_delimiter(line, previous_quote)
+        )
+        if consumed is None:
+            return output + lines[index:], terminators, len(output) - 1
+        index, kept = consumed
+        terminators.update(range(len(output), len(output) + len(kept)))
+        output.extend(kept)
+    return output, terminators, None
 
 
 def strip_data_heredoc_bodies(command: str) -> str:
@@ -333,10 +419,10 @@ def strip_data_heredoc_bodies(command: str) -> str:
     データだと**静的に確定できる場合だけ**剥がす。次のいずれかに当たれば剥がさず
     検出側を維持する（docs/adr/shell-analysis-boundary.md）:
 
-    1. 演算子行に本文を実行するトークンがある（``bash <<'EOF'`` /
-       ``cat <<'EOF' | bash`` / ``. /dev/stdin <<'EOF'`` / ``eval "$(cat <<'EOF'``）。
-       その行以降は一切剥がさない。除去後に本文を受け取る位置（演算子と同じセグメント・パイプの先）に
-       シェルが残るときも除去を取り消す
+    1. 本文を実行しうるトークンが本文の届く範囲にある。演算子行にシェルか本文実行ビルトインがあれば
+       その行以降は一切剥がさない（``bash <<'EOF'`` / ``cat <<'EOF' | bash`` / ``. /dev/stdin <<'EOF'``）。
+       除去後に heredoc を含むトップレベルの文にシェル・本文実行ビルトイン・``exec`` があれば
+       除去を取り消す（`_statement_feeds_interpreter`）
     2. 演算子行が継続演算子（``\\`` ``|`` ``&``）か開いたグループ（``{`` ``(``）で終わる。行末コメントは
        除いて見る（本文開始が次行とは限らないか、本文の行き先が次行以降にある）。その行以降は一切剥がさない
     3. 終端行が見つからない（未終端）
@@ -361,33 +447,8 @@ def strip_data_heredoc_bodies(command: str) -> str:
     """
     if "<<" not in command:
         return command
-
-    lines = command.split("\n")
-    output = []
-    index = 0
-    # 非本文行だけを繋いだクォート状態。本文行・終端行では更新しない。
-    quote: str | None = None
-    while index < len(lines):
-        line = lines[index]
-        output.append(line)
-        index += 1
-        if "<<" in line and _line_has_unreadable_heredoc(line, quote):
-            return "\n".join(output + lines[index:])
-        delimiters, next_quote = _heredoc_delimiters(line, quote)
-        if delimiters and (quote is not None or next_quote is not None or _line_keeps_heredoc_bodies(line)):
-            return "\n".join(output + lines[index:])
-        previous_quote, quote = quote, next_quote
-        if not delimiters:
-            continue
-        consumed = _consume_heredoc_bodies(
-            lines, index, delimiters, joins_continued_lines=_has_unquoted_delimiter(line, previous_quote)
-        )
-        if consumed is None:
-            return "\n".join(output + lines[index:])
-        index, kept = consumed
-        output.extend(kept)
-    stripped = "\n".join(output)
-    return command if _reaches_a_shell(stripped) else stripped
+    lines, terminators, _ = _walk_heredoc_bodies(command)
+    return command if _statement_feeds_interpreter(lines, terminators) else "\n".join(lines)
 
 
 def _has_heredoc_operator(command: str) -> bool:
@@ -412,12 +473,40 @@ def _has_heredoc_operator(command: str) -> bool:
     return False
 
 
+def _line_reading_start(command: str) -> int | None:
+    """物理行ごとの読みを足し始める行 index を返す。足さないなら None。
+
+    行全体の読みで実行行が見えなくなるのは、``shlex`` がシェルと違う範囲を引用と読むときだけ。
+    当たるのは、解析できない入力（先頭から）、本文を残した範囲（除去を打ち切った行か、除去を取り消した
+    コマンドの先頭から）、引用符か ``\\`` を含む終端行（``<<"a'b"`` の終端行。その行から）。除去できた本文の
+    後ろの、別の文の複数行クォート（PR 本文・コミットメッセージ）は行全体の読みで正しく読める。
+
+    Args:
+        command: データ本文を除去した後のコマンド文字列。
+
+    Returns:
+        物理行の読みを足し始める行 index か None。
+
+    Raises:
+        例外は発生しません。
+    """
+    if not tokenize_with_status(command)[1]:
+        return 0
+    if not _has_heredoc_operator(command):
+        return None
+    lines, terminators, kept_from = _walk_heredoc_bodies(command)
+    if _statement_feeds_interpreter(lines, terminators):
+        return 0
+    quoted_terminators = [index for index in terminators if any(char in lines[index] for char in "'\"\\")]
+    return min([*quoted_terminators, *([] if kept_from is None else [kept_from])], default=None)
+
+
 def command_readings(command: str) -> tuple[str, ...]:
     """保護フックが検査する読み方を返す。方言ごとの読みに、必要なら物理行ごとの読みを足す。
 
     残した本文・終端行の引用符（``don't``）は、シェルでは本文の中でも ``shlex`` では引用の開始になり、
     後ろの実行行を飲み込む。解析できない入力では改行が区切りにならない。どちらも行全体の読みでは
-    実行行が見えない。
+    実行行が見えないので、`_line_reading_start` の行から後ろを 1 行ずつも読む。
 
     Args:
         command: データ本文を除去した後のコマンド文字列。
@@ -429,6 +518,9 @@ def command_readings(command: str) -> tuple[str, ...]:
         例外は発生しません。
     """
     readings = command_dialect_variants(command)
-    if "\n" in command and (_has_heredoc_operator(command) or not tokenize_with_status(command)[1]):
-        return (*readings, *(reading for line in command.split("\n") for reading in command_dialect_variants(line)))
-    return readings
+    if "\n" not in command:
+        return readings
+    start = _line_reading_start(command)
+    if start is None:
+        return readings
+    return (*readings, *(reading for line in command.split("\n")[start:] for reading in command_dialect_variants(line)))
